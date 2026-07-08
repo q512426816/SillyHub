@@ -59,6 +59,8 @@ import { getBackend } from './adapters/index.js';
 import type { ProtocolAdapter } from './adapters/protocol-adapter.js';
 import { buildSpawnEnv } from './spawn-env.js';
 import { resolveWindowsCmdShim } from './cmd-shim.js';
+// 2026-07-08 修复：spawn 前把同步的平台 skills 拷到 workDir/.claude/skills/。
+import { linkSkillsToWorkdir } from './skill-manager.js';
 import {
   createTerminalObserver,
   NOOP_TERMINAL_OBSERVER,
@@ -452,6 +454,15 @@ export class TaskRunner {
         console.warn('task_runner: spec_bundle_pull_failed', leaseId, e);
       }
 
+
+      // 步骤 2.7（2026-07-08 修复）：spawn 前把同步的平台 skills 拷到 workDir/.claude/skills/。
+      // syncSkills 同步到 ~/.sillyhub/daemon/skills/，但 claude 只读 <cwd>/.claude/skills/
+      // ——不接线则 batch 会话看不到 sillyspec/custom skills。失败仅 warn（skill 缺失不阻塞 spawn）。
+      try {
+        await linkSkillsToWorkdir(workDir);
+      } catch (e) {
+        console.warn('task_runner: link_skills_failed', leaseId, e);
+      }
 
       // 步骤 3：spawn env 构造（task-09 接入 buildSpawnEnv）
       // 三层合并：tool_config.env > claude token（credentials.json + process.env 兜底）

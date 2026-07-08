@@ -390,3 +390,67 @@ export async function pathExists(p: string): Promise<boolean> {
     return false;
   }
 }
+
+// ── linkSkillsToWorkdir：把同步的平台 skills 接到 claude 工作目录 ─────────────
+// 2026-07-08 修复：syncSkills 把 skills 放 ~/.sillyhub/daemon/skills/，但 claude
+// 只读 <cwd>/.claude/skills/ + ~/.claude/skills/，从没接线 → 交互式/batch 会话
+// 看不到 sillyspec/custom skills。spawn 前调本函数把同步的 skills 拷到工作目录。
+// 用 copy（跨平台安全，Windows symlink 需开发者模式）；幂等覆盖（同步版本新则更新）。
+
+/**
+ * 把 `~/.sillyhub/daemon/skills/` 下同步好的平台 skills 拷到 `<workdir>/.claude/skills/`，
+ * 让 claude（cwd=workdir）能加载。spawn 前调用（交互式 + batch）。
+ *
+ * - 源：skillsDir() 下每个 skill 目录（排除 manifest.json / .tmp-extract / 隐藏项）
+ * - 目标：<workdir>/.claude/skills/<name>，覆盖（daemon 同步为权威源）
+ * - workdir 不可写/源空 → 静默跳过（不阻塞 spawn）
+ * - 失败仅 warn（skill 缺失不应让会话挂掉）
+ */
+export async function linkSkillsToWorkdir(
+  workdir: string,
+  logger?: SkillManagerLogger,
+): Promise<{ linked: number; skipped: boolean }>;
+export async function linkSkillsToWorkdir(
+  workdir: string,
+  logger: SkillManagerLogger,
+): Promise<{ linked: number; skipped: boolean }>;
+export async function linkSkillsToWorkdir(
+  workdir: string,
+  logger?: SkillManagerLogger,
+): Promise<{ linked: number; skipped: boolean }> {
+  const log = logger ?? (() => undefined);
+  if (!workdir) {
+    log('debug', 'link_skills_no_workdir');
+    return { linked: 0, skipped: true };
+  }
+  const srcDir = skillsDir();
+  let entries: import('node:fs').Dirent[];
+  try {
+    entries = await readdir(srcDir, { withFileTypes: true });
+  } catch {
+    // 源目录不存在（syncSkills 从未跑）→ 静默跳过
+    log('debug', 'link_skills_src_missing', { src: srcDir });
+    return { linked: 0, skipped: true };
+  }
+  const targetBase = join(workdir, '.claude', 'skills');
+  await mkdir(targetBase, { recursive: true }).catch(() => undefined);
+  let linked = 0;
+  for (const entry of entries) {
+    // 仅拷 skill 目录（排除 manifest.json / .tmp-extract / 隐藏）
+    if (!entry.isDirectory()) continue;
+    if (entry.name === '.tmp-extract' || entry.name.startsWith('.')) continue;
+    const src = join(srcDir, entry.name);
+    const dest = join(targetBase, entry.name);
+    try {
+      // 清旧再拷（保证删除的文件不残留 + 内容更新）
+      await rm(dest, { recursive: true, force: true }).catch(() => undefined);
+      await mkdir(dest, { recursive: true });
+      linked += await copyDirBestEffort(src, dest, log);
+    } catch (e) {
+      log('warn', 'link_skill_failed', { skill: entry.name, error: String(e) });
+    }
+  }
+  log('info', 'link_skills_to_workdir_done', { workdir, files: linked });
+  return { linked, skipped: linked === 0 };
+}
+

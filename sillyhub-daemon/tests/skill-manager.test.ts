@@ -23,6 +23,7 @@ import {
   extractSkillsBundle,
   syncSkills,
   syncWorkspaceSkills,
+  linkSkillsToWorkdir,
   pathExists,
 } from '../src/skill-manager.js';
 
@@ -280,5 +281,62 @@ describe('skill-manager: syncWorkspaceSkills', () => {
     await syncWorkspaceSkills(specDir, worktreeDir);
     expect(await pathExists(join(worktreeDir, '.claude', 'skills', 'workspace', 'b', 'index.ts'))).toBe(false);
     expect(await pathExists(join(worktreeDir, '.claude', 'skills', 'workspace', 'a', 'index.ts'))).toBe(true);
+  });
+});
+
+// ── linkSkillsToWorkdir（2026-07-08 修复：spawn 前接线 skills 到 cwd/.claude/skills/）──
+
+describe('skill-manager: linkSkillsToWorkdir', () => {
+  let tmpHome: string;
+  let origHome: string | undefined;
+
+  beforeEach(async () => {
+    tmpHome = await mkdtemp(join(tmpdir(), 'link-skills-home-'));
+    origHome = process.env.HOME;
+    process.env.HOME = tmpHome;
+    process.env.USERPROFILE = tmpHome;
+  });
+  afterEach(async () => {
+    if (origHome !== undefined) process.env.HOME = origHome;
+    await rm(tmpHome, { recursive: true, force: true });
+  });
+
+  it('skills 同步目录有 skill → 拷到 workdir/.claude/skills/', async () => {
+    // 准备 ~/.sillyhub/daemon/skills/my-skill/SKILL.md
+    const skillsRoot = join(tmpHome, '.sillyhub', 'daemon', 'skills');
+    await mkdir(join(skillsRoot, 'my-skill'), { recursive: true });
+    await writeFile(join(skillsRoot, 'my-skill', 'SKILL.md'), '# my-skill');
+    await writeFile(join(skillsRoot, 'manifest.json'), '{"version":"v1"}');
+
+    const workdir = await mkdtemp(join(tmpdir(), 'link-wt-'));
+    const r = await linkSkillsToWorkdir(workdir);
+    expect(r.linked).toBeGreaterThan(0);
+    expect(await readFile(join(workdir, '.claude', 'skills', 'my-skill', 'SKILL.md'), 'utf-8')).toBe('# my-skill');
+    // manifest.json 不拷（非目录）
+    expect(await pathExists(join(workdir, '.claude', 'skills', 'manifest.json'))).toBe(false);
+  });
+
+  it('源目录不存在 → skipped=true 不抛', async () => {
+    const workdir = await mkdtemp(join(tmpdir(), 'link-wt-'));
+    const r = await linkSkillsToWorkdir(workdir);
+    expect(r.skipped).toBe(true);
+  });
+
+  it('workdir 空 → skipped=true 不抛', async () => {
+    const r = await linkSkillsToWorkdir('');
+    expect(r.skipped).toBe(true);
+  });
+
+  it('.tmp-extract 被排除（不拷临时解压目录）', async () => {
+    const skillsRoot = join(tmpHome, '.sillyhub', 'daemon', 'skills');
+    await mkdir(join(skillsRoot, '.tmp-extract', 'junk'), { recursive: true });
+    await writeFile(join(skillsRoot, '.tmp-extract', 'junk', 'f'), 'x');
+    await mkdir(join(skillsRoot, 'real-skill'), { recursive: true });
+    await writeFile(join(skillsRoot, 'real-skill', 'SKILL.md'), 'real');
+
+    const workdir = await mkdtemp(join(tmpdir(), 'link-wt-'));
+    await linkSkillsToWorkdir(workdir);
+    expect(await pathExists(join(workdir, '.claude', 'skills', '.tmp-extract'))).toBe(false);
+    expect(await pathExists(join(workdir, '.claude', 'skills', 'real-skill', 'SKILL.md'))).toBe(true);
   });
 });

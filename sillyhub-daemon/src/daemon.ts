@@ -67,7 +67,7 @@ import { buildSpawnEnv } from './spawn-env.js';
 // 2026-06-24 preflight：启动前预检 sillyspec 版本 + daemon 自更新（失败不阻断启动）。
 import { runPreflight } from './preflight.js';
 // 2026-07-07-daemon-skill-execution task-03：skill-manager，启动同步平台 sillyspec skills。
-import { syncSkills } from './skill-manager.js';
+import { syncSkills, linkSkillsToWorkdir } from './skill-manager.js';
 // daemon 自身构建标识（release=git SHA），register 时上报供服务端判定是否需推送自更新。
 import { BUILD_ID } from './build-id.js';
 // 2026-06-24-daemon-network-resilience task-10/12：网络层重试编排（submit 重试 + 终态轻量重试）。
@@ -2755,6 +2755,17 @@ export class Daemon {
         cwd,
         error: (e as Error)?.message ?? String(e),
       });
+    }
+
+    // 2026-07-08 修复：spawn 前把同步的平台 skills 拷到 cwd/.claude/skills/，让 claude
+    // 能加载 sillyspec/custom skills（syncSkills 同步到 ~/.sillyhub/daemon/skills/，
+    // claude 只读 <cwd>/.claude/skills/——不接线则交互式会话看不到技能）。失败仅 warn。
+    try {
+      await linkSkillsToWorkdir(cwd, (level, msg, data) => {
+        this._logger[level](msg, data);
+      });
+    } catch (e) {
+      this._logger.warn('interactive_link_skills_failed', { lease_id: leaseId, error: String(e) });
     }
 
     // gap-8（interactive 凭证 parity）：与 batch 一致用 buildSpawnEnv 构造子进程 env，
