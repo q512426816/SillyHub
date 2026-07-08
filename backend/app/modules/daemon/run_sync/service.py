@@ -791,6 +791,41 @@ class RunSyncService:
             agent_run.exit_code = 1
             agent_run.error_code = "interactive_unknown_status"
 
+        # task-05（D-003@v1）修正：interactive run 走 close_interactive_run（非
+        # complete_lease，因 interactive lease agent_run_id=NULL per D-005），stage
+        # 回写在此接线。从 agent_run.status 推导 changes.stages.last_dispatch.status
+        # （running→completed/failed），不读 sillyspec.db，独立路径。try/except 容错。
+        if agent_run.change_id is not None:
+            try:
+                from app.modules.change.model import Change
+
+                change = await self._session.get(Change, agent_run.change_id)
+                if change is not None:
+                    stages = dict(change.stages or {})
+                    last_dispatch = stages.get("last_dispatch")
+                    if isinstance(last_dispatch, dict) and last_dispatch:
+                        stage_status = "completed" if agent_run.status == "completed" else "failed"
+                        last_dispatch["status"] = stage_status
+                        change.stages = stages
+                        self._session.add(change)
+                        log.info(
+                            "stage_status_synced_from_run",
+                            change_id=str(change.id),
+                            run_id=str(agent_run.id),
+                            status=stage_status,
+                        )
+                    else:
+                        log.warning(
+                            "sync_stage_status_from_run_no_last_dispatch",
+                            change_id=str(change.id),
+                        )
+            except Exception as exc:
+                log.warning(
+                    "sync_stage_status_from_run_failed",
+                    run_id=str(agent_run.id),
+                    error=str(exc),
+                )
+
         agent_run.finished_at = now
         # SDKResultSuccess 透传：usage / cost / duration（None 不覆盖 AgentRun 原值，
         # daemon 老版本不传这些字段时保持兼容）。对应 AgentRun.{total_cost_usd,
