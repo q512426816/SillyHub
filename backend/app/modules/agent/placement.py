@@ -307,9 +307,9 @@ class RunPlacementService:
             text(
                 """
                 INSERT INTO agent_sessions
-                    (id, user_id, runtime_id, lease_id, provider, status, created_at)
+                    (id, user_id, runtime_id, lease_id, provider, status, turn_count, created_at)
                 VALUES
-                    (:sid, :user_id, :runtime_id, :lease_id, :provider, 'pending', :now)
+                    (:sid, :user_id, :runtime_id, :lease_id, :provider, 'pending', 0, :now)
                 """
             ),
             {

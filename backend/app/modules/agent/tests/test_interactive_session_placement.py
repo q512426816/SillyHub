@@ -218,20 +218,27 @@ class TestNotifyInteractiveDispatch:
         assert ok is False
 
 
-# ── FR-09 batch regression gatekeeper ────────────────────────────────────────
+# ── dispatch_to_daemon lease 守护（bfaa9256 起 stage 改 interactive） ────────
 
 
-class TestBatchDispatchUnchanged:
-    """AC-14 / FR-09: batch dispatch_to_daemon behaviour is untouched."""
+class TestDispatchToDaemonBindsRun:
+    """dispatch_to_daemon 创建的 interactive lease 必须绑定 agent_run_id（非 NULL）。
+
+    bfaa9256 起 dispatch_to_daemon 的 lease kind 从 batch 改为 interactive（让
+    daemon 走 SessionManager 实时转发）。它与 prepare_interactive_dispatch 的对话
+    lease 同为 kind='interactive'，区别在 agent_run_id：dispatch_to_daemon 非 NULL
+    （stage dispatch 绑定 run，close_interactive_run 据此定位 + stage 回写），
+    prepare_interactive_dispatch 为 NULL（D-005@v1，首 turn run_id 仅存 metadata）。
+    """
 
     @pytest.mark.asyncio
-    async def test_batch_lease_still_binds_agent_run_id(self, db_session: AsyncSession) -> None:
+    async def test_dispatch_to_daemon_interactive_lease_binds_run(
+        self, db_session: AsyncSession
+    ) -> None:
         uid = await _create_user(db_session)
         await _create_runtime(db_session, uid)
-        # batch dispatch needs an AgentRun row + worktree lease? It only writes
-        # the lease row referencing agent_run_id; the FK is SET NULL on delete
-        # so a dangling id is tolerated at insert time under SQLite (no FK
-        # enforcement by default). Insert a run to keep it realistic.
+        # dispatch_to_daemon 只写 lease 行引用 agent_run_id；FK 在 delete 时 SET NULL，
+        # SQLite 默认不强制 FK，插入悬空 id 也可容忍。插入 run 保持真实。
         run = AgentRun(id=uuid.uuid4(), agent_type="claude_code", status="pending")
         db_session.add(run)
         await db_session.commit()
@@ -251,12 +258,10 @@ class TestBatchDispatchUnchanged:
             )
         assert lease_id is not None
         lease = await db_session.get(DaemonTaskLease, lease_id)
-        # batch contract — the OPPOSITE of interactive
-        assert lease.kind == "batch"
-        assert lease.agent_run_id == run.id  # batch binds the FK
-        # batch lease has NO lease_expires_at set by dispatch_to_daemon either
-        # (TTL is applied at claim), so this field alone is not the
-        # distinguisher — kind + agent_run_id are.
+        # dispatch_to_daemon 产 interactive lease（bfaa9256 起），与 prepare 同 kind，
+        # 但 agent_run_id 非 NULL —— 这是 stage lease 区别于对话 lease 的关键。
+        assert lease.kind == "interactive"
+        assert lease.agent_run_id == run.id  # stage dispatch 绑定 FK
 
     @pytest.mark.asyncio
     async def test_expire_leases_skips_interactive_lease(self, db_session: AsyncSession) -> None:

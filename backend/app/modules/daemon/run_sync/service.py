@@ -805,7 +805,14 @@ class RunSyncService:
                     last_dispatch = stages.get("last_dispatch")
                     if isinstance(last_dispatch, dict) and last_dispatch:
                         stage_status = "completed" if agent_run.status == "completed" else "failed"
-                        last_dispatch["status"] = stage_status
+                        # dict() copy 避免 SQLAlchemy JSON in-place mutation 不持久化
+                        # （对齐 lease/service.py:_sync_stage_status_from_run 的模式）。
+                        # 原地改 last_dispatch["status"] 会令旧 change.stages 同步被改
+                        # （浅拷贝共享嵌套引用），change.stages = stages 时新旧值相等
+                        # → SQLAlchemy 不标记 dirty → 回写不入库（stage 永远卡 running）。
+                        new_last_dispatch = dict(last_dispatch)
+                        new_last_dispatch["status"] = stage_status
+                        stages["last_dispatch"] = new_last_dispatch
                         change.stages = stages
                         self._session.add(change)
                         log.info(
