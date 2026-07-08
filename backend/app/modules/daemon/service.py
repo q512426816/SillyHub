@@ -257,6 +257,80 @@ class DaemonService:
             is_platform_admin=is_platform_admin,
         )
 
+    # ── Machine-level operations (delegate to RuntimeService, machine-runtime-hierarchy) ──
+    # 机器级聚合 / 别名 mutation / 归属校验，面向 DaemonInstance 一级资源（design §5.1/§5.2）。
+    # 对齐 list_instances(210)/list_runtimes_page(218)/update_runtime(242) 薄委托模式。
+
+    async def list_machines(
+        self,
+        *,
+        actor_user_id: uuid.UUID,
+        is_platform_admin: bool,
+        q: str | None,
+        status: str | None,
+        provider: str | None,
+        user_id: uuid.UUID | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[
+        list[tuple[DaemonInstance, User | None]],
+        dict[uuid.UUID, list[DaemonRuntime]],
+        int,
+    ]:
+        """机器级分页/筛选聚合查询 facade（design §5.1 / FR-1）。
+
+        返回 ``(rows, runtimes_by_instance, total)``：rows 为本页 ``(instance, owner)``
+        ORM 行；runtimes_by_instance 为一次性 IN 查询分组的 ``{instance_id: [runtime]}``；
+        total 为过滤后机器总数。router/task-03 负责 _runtime_read 组装 DaemonMachineRead。
+        """
+        return await self._rt.list_machines(
+            actor_user_id=actor_user_id,
+            is_platform_admin=is_platform_admin,
+            q=q,
+            status=status,
+            provider=provider,
+            user_id=user_id,
+            limit=limit,
+            offset=offset,
+        )
+
+    async def update_machine_alias(
+        self,
+        instance_id: uuid.UUID,
+        actor_user_id: uuid.UUID,
+        *,
+        display_alias: str | None,
+        display_alias_set: bool,
+        is_platform_admin: bool = False,
+    ) -> DaemonInstance:
+        """PATCH /machines/{id} 别名 facade（design §5.2 / D-001 / FR-2）。
+
+        直写 ``daemon_instance.display_alias``（0-runtime 机器亦可改）。委托
+        RuntimeService.update_machine_alias，返回 DaemonInstance（router 再聚合）。
+        """
+        return await self._rt.update_machine_alias(
+            instance_id,
+            actor_user_id,
+            display_alias=display_alias,
+            display_alias_set=display_alias_set,
+            is_platform_admin=is_platform_admin,
+        )
+
+    async def _get_owned_instance(
+        self,
+        instance_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        is_platform_admin: bool = False,
+    ) -> DaemonInstance:
+        """取归属 daemon_instance facade（design §5.2 / self-update 端点复用）。
+
+        委托 RuntimeService._get_owned_instance，越权/不存在 → DaemonRuntimeNotFound (404)。
+        """
+        return await self._rt._get_owned_instance(
+            instance_id, user_id, is_platform_admin=is_platform_admin
+        )
+
     async def update_allowed_roots(
         self,
         runtime_id: uuid.UUID,

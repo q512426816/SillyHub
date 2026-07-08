@@ -6,7 +6,7 @@
 schema_version: 1
 project: SillyHub
 source_commit: ba87eec
-generated_at: 2026-06-25 13:30:00
+generated_at: 2026-07-08 11:40:00
 generator: sillyspec-scan
 
 modules:
@@ -106,10 +106,12 @@ modules:
     aliases: [daemon-runtime, daemon-session]
     entrypoints:
       - APIRouter prefix=/daemon (注册/心跳/session 端点)
+      - APIRouter prefix=/daemon (GET/PATCH/POST /api/daemon/machines 机器级聚合读+别名+self-update，2026-07-07-daemon-machine-runtime-hierarchy)
       - sillyhub-daemon CLI (cli.ts: createProgram/start/stop/status/logs)
       - Daemon class (sillyhub-daemon/src/daemon.ts)
     main_symbols:
       - daemon.service.DaemonService
+      - daemon.runtime.service.RuntimeService.list_machines/update_machine_alias/_get_owned_instance (机器级聚合读+写，2026-07-07-daemon-machine-runtime-hierarchy)
       - daemon.lease_service (LeaseService)
       - daemon.permission_service
       - daemon.session.service.DaemonSessionService
@@ -581,7 +583,7 @@ modules:
       - components/app-shell.tsx
       - components/top-bar.tsx
       - components/agent-run-panel / mission-console / agent-log-viewer
-      - components/daemon/*
+      - components/daemon/* (含 machine-card/runtime-card 机器级两级手风琴视图，2026-07-07-daemon-machine-runtime-hierarchy)
       - components/workspace-* / ppm-*
       - components/permission-approval-dialog
       - components/antd-providers.tsx
@@ -605,6 +607,7 @@ modules:
       - lib/api.ts (fetch 封装)
       - lib/{agent,auth,daemon,runtime,changes,workflow,tasks,workspaces,ppm/*,...}.ts
       - lib/agent-stream / use-agent-run-stream
+      - lib/use-daemon-machines (useDaemonMachines hook 机器级列表+会话 15s 轮询，2026-07-07-daemon-machine-runtime-hierarchy)
       - lib/format-token / status-labels / utils
     depends_on: []
     used_by: [frontend_app, frontend_components, frontend_stores]

@@ -7,7 +7,10 @@
  * 规则：凡影响查询结果的变量都进 key。daemon runtimes 的完整过滤/分页 params
  * 进 key，params 变化即产生新查询（react-query 自动停旧启新，最新胜出）。
  */
-import type { DaemonRuntimeListParams } from "@/lib/daemon";
+import type {
+  DaemonMachineListParams,
+  DaemonRuntimeListParams,
+} from "@/lib/daemon";
 
 export const queryKeys = {
   agentRuns: {
@@ -18,6 +21,13 @@ export const queryKeys = {
     all: ["daemonRuntimes"] as const,
     list: (params: DaemonRuntimeListParams) =>
       ["daemonRuntimes", "list", params] as const,
+  },
+  // 2026-07-07-daemon-machine-runtime-hierarchy task-05：machine 级列表缓存 key。
+  // 与 daemonRuntimes 同构（params 进 key，过滤/分页变化即新查询）。
+  daemonMachines: {
+    all: ["daemonMachines"] as const,
+    list: (params: DaemonMachineListParams) =>
+      ["daemonMachines", "list", params] as const,
   },
   // 2026-07-04-daemon-version-management task-09：daemon 分发元数据
   //（最新版本号 + build_id），runtimes 页用于卡片版本徽标比对。

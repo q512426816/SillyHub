@@ -230,6 +230,64 @@ class DaemonInstanceRead(BaseModel):
     providers: list[DaemonInstanceProviderItem] = Field(default_factory=list)
 
 
+# ── Daemon machines（machine→runtime 两级）─────────────────────────────────
+# 2026-07-07-daemon-machine-runtime-hierarchy task-01：entity-binding 已把机器级
+# 字段（hostname/os/arch/version/build_id/allowed_roots/status/last_heartbeat_at/
+# display_alias）上提到 daemon_instances（design §4），本组 DTO 直接读 instance 行
+# + 嵌套其下 runtimes，作为机器级聚合读视图（GET /api/daemon/machines 响应 +
+# PATCH /api/daemon/machines/{id} 请求体）。组装逻辑见 task-02/03，本卡只定义契约。
+
+
+class DaemonMachineRead(BaseModel):
+    """机器级聚合读视图 DTO（design §5.1 / task-01）。
+
+    一行 = 一台 daemon 机器（daemon_instances），机器级字段直接读 instance 行；
+    其下 runtimes 嵌套该机器全部 daemon_runtimes（含各自 capabilities/allowed_roots）。
+    派生 runtime_count / online_runtime_count 由 service 层组装时填入。
+    """
+
+    id: uuid.UUID
+    hostname: str
+    display_alias: str | None = None
+    os: str | None = None
+    arch: str | None = None
+    status: str
+    last_heartbeat_at: datetime | None
+    # daemon 语义版本，来自 daemon_instance.version（不是 provider/agent CLI 版本）。
+    version: str | None = None
+    # daemon 构建 SHA，来自 daemon_instance.build_id（区别于 version 的语义版本）。
+    build_id: str | None = None
+    created_at: datetime
+    owner: OwnerRead | None = None  # JOIN users（admin 全局视图带出负责人）
+    runtime_count: int  # 该 instance 下 runtime 总数
+    online_runtime_count: int  # status=='online' 的 runtime 数
+    runtimes: list[DaemonRuntimeRead] = Field(default_factory=list)  # 该机器全部 runtime
+
+    model_config = {"from_attributes": True}
+
+
+class DaemonMachineUpdate(BaseModel):
+    """Request body for PATCH /api/daemon/machines/{instance_id}（design §5.2 / D-001）。
+
+    ``display_alias`` 省略 = 不变；显式 ``null``/空白 = 清空（与 runtime 级
+    ``DaemonRuntimeUpdate`` 语义一致）。
+    """
+
+    display_alias: str | None = Field(default=None, max_length=200)
+
+
+class DaemonMachineListResponse(BaseModel):
+    """Response body for GET /api/daemon/machines（design §5.1 / FR-1）。
+
+    机器级分页（默认 20/页，D-007），机器卡永不跨页断裂。
+    """
+
+    items: list[DaemonMachineRead]
+    total: int
+    limit: int
+    offset: int
+
+
 # ── Heartbeat ───────────────────────────────────────────────────────────────
 
 

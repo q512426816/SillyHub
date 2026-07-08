@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Literal
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import case, exists, func, or_, select, update
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -835,6 +835,184 @@ class RuntimeService:
                 details={"runtime_id": str(runtime_id)},
             )
         return runtime
+
+    # ── Machine-level aggregation（2026-07-07-daemon-machine-runtime-hierarchy）──
+    # entity-binding 已把机器级字段上提到 daemon_instances（design §4），以下三个
+    # 方法面向 **机器（DaemonInstance）** 一级资源做聚合 / 归属校验 / 别名 mutation。
+    # service 层返 ORM 行 + runtimes dict（router/task-03 负责 _runtime_read 组装 DTO，
+    # 对齐 list_runtimes_page「service 返 ORM 行、router 转 DTO」模式，零重复拼装）。
+
+    async def list_machines(
+        self,
+        *,
+        actor_user_id: uuid.UUID,
+        is_platform_admin: bool,
+        q: str | None,
+        status: str | None,
+        provider: str | None,
+        user_id: uuid.UUID | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[
+        list[tuple[DaemonInstance, User | None]],
+        dict[uuid.UUID, list[DaemonRuntime]],
+        int,
+    ]:
+        """机器级分页/筛选聚合查询（design §5.1 / FR-1 / D-002 / D-003 / D-004）。
+
+        - 先调 ``cleanup_stale_runtimes``（与 ``/runtimes/page`` 一致，保证 stale 已
+          收敛——机器在线态权威来源是 ``daemon_instance.status``，D-002）。
+        - 权限：admin 看全部（admin 传 ``user_id`` 则按 owner 精确过滤）；普通用户
+          固定 ``instance.user_id == actor_user_id``（请求 ``user_id`` 忽略），对齐
+          ``list_runtimes_page`` 的 ``is_platform_admin`` 分支（service.py:498-502）。
+        - WHERE：``q``（max 200）ILIKE ``%q%`` 命中 hostname/display_alias + EXISTS
+          子查询（该机器任一 runtime 的 provider ILIKE）；``status`` 精确匹配
+          ``instance.status``；``provider`` EXISTS 子查询（含该 provider 的机器）。
+        - ORDER BY：online 优先（case status=='online' → 0）→ last_heartbeat_at DESC。
+        - 二次查询（N+1 规避，constraints）：本页 instance_ids → 一次性
+          ``select(DaemonRuntime).where(daemon_instance_id IN ids).order_by(provider)``，
+          Python 按 instance_id 分组成 dict；0-runtime 机器该键缺失，router 用
+          ``.get(id, [])`` 兜底（D-003）。
+        - 不内联用量（D-004：用量走 ``/runtimes/usage``，前端按 instance 分组聚合）。
+
+        返回 ``(rows, runtimes_by_instance, total)``：``rows`` 为本页
+        ``(instance, owner)`` 列表；``runtimes_by_instance`` 为
+        ``{instance_id: [DaemonRuntime,...]}``；``total`` 为过滤后机器总数。
+        """
+        # 与 /runtimes/page 一致：进入先收敛 stale（design §5.1 step 4 / D-002）。
+        await self.cleanup_stale_runtimes()
+
+        # ── WHERE 构造（权限 + q + status + provider）─────────────────────────
+        filters: list = []
+        if is_platform_admin:
+            if user_id is not None:
+                filters.append(col(DaemonInstance.user_id) == user_id)
+        else:
+            filters.append(col(DaemonInstance.user_id) == actor_user_id)
+
+        q_norm = (q or "").strip()
+        if q_norm:
+            pattern = f"%{q_norm}%"
+            # q 命中该机器任一 runtime 的 provider（EXISTS 子查询，命中
+            # idx_daemon_runtimes_instance 索引，design §10）。
+            provider_q = exists().where(
+                col(DaemonRuntime.daemon_instance_id) == DaemonInstance.id,
+                col(DaemonRuntime.provider).ilike(pattern),
+            )
+            filters.append(
+                or_(
+                    col(DaemonInstance.hostname).ilike(pattern),
+                    col(DaemonInstance.display_alias).ilike(pattern),
+                    provider_q,
+                )
+            )
+        if status:
+            filters.append(col(DaemonInstance.status) == status)
+        if provider:
+            # 含某 provider 的机器（EXISTS 子查询）。
+            filters.append(
+                exists().where(
+                    col(DaemonRuntime.daemon_instance_id) == DaemonInstance.id,
+                    col(DaemonRuntime.provider) == provider,
+                )
+            )
+
+        # ── total（同样 WHERE，独立 count 查询）────────────────────────────────
+        total_stmt = select(func.count()).select_from(DaemonInstance)
+        if filters:
+            total_stmt = total_stmt.where(*filters)
+        total = int((await self._session.scalar(total_stmt)) or 0)
+
+        # ── 主查询：JOIN users + WHERE/ORDER/LIMIT/OFFSET ─────────────────────
+        # online 优先（case 0）→ last_heartbeat_at DESC（design §5.1 排序上提到 SQL）。
+        order_expr = case(
+            (col(DaemonInstance.status) == "online", 0),
+            else_=1,
+        )
+        rows_stmt = (
+            select(DaemonInstance, User)
+            .outerjoin(User, DaemonInstance.user_id == User.id)
+            .order_by(order_expr, col(DaemonInstance.last_heartbeat_at).desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        if filters:
+            rows_stmt = rows_stmt.where(*filters)
+        raw_rows = list((await self._session.execute(rows_stmt)).all())
+        # 解包 Row → tuple（与 list_runtimes_page:534 同款，对齐返回类型注解）。
+        rows = [(instance, owner) for instance, owner in raw_rows]
+
+        # ── 二次查询（N+1 规避）：本页 runtimes 一次性 IN 查询 ─────────────────
+        instance_ids = [inst.id for inst, _owner in rows]
+        runtimes_by_instance: dict[uuid.UUID, list[DaemonRuntime]] = {}
+        if instance_ids:
+            rt_rows = (
+                (
+                    await self._session.execute(
+                        select(DaemonRuntime)
+                        .where(col(DaemonRuntime.daemon_instance_id).in_(instance_ids))
+                        .order_by(col(DaemonRuntime.provider))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for rt in rt_rows:
+                if rt.daemon_instance_id is not None:
+                    runtimes_by_instance.setdefault(rt.daemon_instance_id, []).append(rt)
+
+        return rows, runtimes_by_instance, total
+
+    async def _get_owned_instance(
+        self,
+        instance_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        is_platform_admin: bool = False,
+    ) -> DaemonInstance:
+        """取归属 daemon_instance（复刻 ``_get_owned_runtime`` 模式，design §5.2）。
+
+        - 不存在 → ``DaemonRuntimeNotFound`` (404，资源不泄漏)；
+        - 普通用户且 ``instance.user_id != user_id`` → 同样 404（对齐 runtime 侧：
+          越权一律以 404 形态拒绝，不区分「不存在」与「无权」，避免存在性泄漏）；
+        - admin 全局通过。
+        """
+        instance = await self._session.get(DaemonInstance, instance_id)
+        if instance is None or (not is_platform_admin and instance.user_id != user_id):
+            raise DaemonRuntimeNotFound(
+                f"Daemon instance '{instance_id}' not found.",
+                details={"daemon_instance_id": str(instance_id)},
+            )
+        return instance
+
+    async def update_machine_alias(
+        self,
+        instance_id: uuid.UUID,
+        actor_user_id: uuid.UUID,
+        *,
+        display_alias: str | None,
+        display_alias_set: bool,
+        is_platform_admin: bool = False,
+    ) -> DaemonInstance:
+        """直写 ``daemon_instance.display_alias``（design §5.2 / D-001 / FR-2）。
+
+        - 经 ``_get_owned_instance`` 取归属实例（越权 403 / 不存在 404）；
+        - ``display_alias_set=False`` 不变；显式 ``null``/空白归一 ``None``
+          （``strip()`` 后为空 → None，对齐 ``update_runtime`` 语义，service.py:560）；
+        - 直写 instance（0-runtime 机器亦可改，不借道 runtime）；bump ``updated_at``；
+        - 不写 runtime（调用方再聚合为 ``DaemonMachineRead``，task-03 router 负责）。
+        """
+        instance = await self._get_owned_instance(
+            instance_id, actor_user_id, is_platform_admin=is_platform_admin
+        )
+        if display_alias_set:
+            normalized = display_alias.strip() if display_alias else None
+            instance.display_alias = normalized or None
+            instance.updated_at = datetime.now(UTC)
+            self._session.add(instance)
+            await self._session.commit()
+            await self._session.refresh(instance)
+        return instance
 
     @staticmethod
     def _is_recent_heartbeat(value: datetime | None, max_age_seconds: int) -> bool:

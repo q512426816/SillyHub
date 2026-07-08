@@ -1,6 +1,5 @@
 "use client";
 
-import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
@@ -9,18 +8,13 @@ import {
   Ban,
   Check,
   CheckCircle2,
-  CircleDashed,
   Copy,
-  Cpu,
   FolderOpen,
-  MessageSquare,
   Plus,
-  Power,
   RefreshCw,
   Server,
   Terminal,
   Trash2,
-  Wifi,
   WifiOff,
   Wrench,
   type LucideIcon,
@@ -28,13 +22,15 @@ import {
 
 import {
   isActiveSession,
-  shortId,
 } from "@/components/daemon/runtime-session-helpers";
 import { RuntimeSessionDialog } from "@/components/daemon/runtime-session-dialog";
-import { RuntimeUsageLineChart } from "@/components/charts"; // task-13 桶导出(dynamic ssr:false),非原始组件
-import { Badge } from "@/components/ui/badge";
+// task-09：MachineCard 两级手风琴（machine + 内嵌 RuntimeCard 网格）。
+// RuntimeCard 不再在 page 内联渲染，仅由 MachineCard 展开体透传 props 调用。
+import { MachineCard } from "@/components/daemon/machine-card";
+import {
+  formatRelativeTime,
+} from "@/components/daemon/runtime-card-helpers";
 import { Button } from "@/components/ui/button";
-import Link from "next/link";
 import { ApiError } from "@/lib/api";
 import {
   browseFolder,
@@ -44,21 +40,21 @@ import {
   getAgentSession,
   getDaemonVersion,
   getRuntimesUsage,
-  isVersionBelow,
   listDir,
-  MIN_VERSIONS,
   PROVIDER_META,
-  triggerDaemonSelfUpdate,
-  updateDaemonRuntime,
+  triggerMachineSelfUpdate,
+  updateDaemonMachine,
   updateRuntimeAllowedRoots,
   type AgentSessionRead,
-  type DaemonRuntimeListParams,
+  type DaemonMachineListParams,
+  type DaemonMachineRead,
   type DaemonRuntimeRead,
   type DaemonVersionInfo,
   type RuntimeUsageItem,
   type RuntimeUsageWindow,
 } from "@/lib/daemon";
-import { useDaemonRuntimes } from "@/lib/use-daemon-runtimes";
+// task-09：数据源从 useDaemonRuntimes 切到 useDaemonMachines（机器级，D-005 完全替换平铺）。
+import { useDaemonMachines } from "@/lib/use-daemon-machines";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
@@ -71,326 +67,14 @@ import { useNotify } from "@/lib/errors";
 // task-07 / D-003@v1：平台管理员人员搜索复用既有 admin 用户列表。
 import { listUsers, type UserRead } from "@/lib/admin";
 
-type BadgeVariant = "default" | "success" | "outline" | "warning" | "destructive";
-type StatusMeta = {
-  label: string;
-  badge: BadgeVariant;
-  dot: string;
-  iconBg: string;
-  icon: LucideIcon;
-};
-
-const PROVIDER_TONES: Record<string, { dot: string; badge: string; panel: string }> = {
-  claude: {
-    dot: "bg-violet-500",
-    badge: "border-violet-200 bg-violet-50 text-violet-700",
-    panel: "bg-violet-50 text-violet-700",
-  },
-  codex: {
-    dot: "bg-emerald-500",
-    badge: "border-emerald-200 bg-emerald-50 text-emerald-700",
-    panel: "bg-emerald-50 text-emerald-700",
-  },
-  copilot: {
-    dot: "bg-sky-500",
-    badge: "border-sky-200 bg-sky-50 text-sky-700",
-    panel: "bg-sky-50 text-sky-700",
-  },
-  opencode: {
-    dot: "bg-teal-500",
-    badge: "border-teal-200 bg-teal-50 text-teal-700",
-    panel: "bg-teal-50 text-teal-700",
-  },
-  openclaw: {
-    dot: "bg-orange-500",
-    badge: "border-orange-200 bg-orange-50 text-orange-700",
-    panel: "bg-orange-50 text-orange-700",
-  },
-  hermes: {
-    dot: "bg-indigo-500",
-    badge: "border-indigo-200 bg-indigo-50 text-indigo-700",
-    panel: "bg-indigo-50 text-indigo-700",
-  },
-  gemini: {
-    dot: "bg-cyan-500",
-    badge: "border-cyan-200 bg-cyan-50 text-cyan-700",
-    panel: "bg-cyan-50 text-cyan-700",
-  },
-  pi: {
-    dot: "bg-pink-500",
-    badge: "border-pink-200 bg-pink-50 text-pink-700",
-    panel: "bg-pink-50 text-pink-700",
-  },
-  cursor: {
-    dot: "bg-amber-500",
-    badge: "border-amber-200 bg-amber-50 text-amber-700",
-    panel: "bg-amber-50 text-amber-700",
-  },
-  kimi: {
-    dot: "bg-red-500",
-    badge: "border-red-200 bg-red-50 text-red-700",
-    panel: "bg-red-50 text-red-700",
-  },
-  kiro: {
-    dot: "bg-lime-500",
-    badge: "border-lime-200 bg-lime-50 text-lime-700",
-    panel: "bg-lime-50 text-lime-700",
-  },
-  antigravity: {
-    dot: "bg-slate-500",
-    badge: "border-slate-200 bg-slate-50 text-slate-700",
-    panel: "bg-slate-50 text-slate-700",
-  },
-};
-
-function getStatusMeta(status: string | null): StatusMeta {
-  switch (status) {
-    case "online":
-      return {
-        label: "在线",
-        badge: "success",
-        dot: "bg-emerald-500",
-        iconBg: "bg-emerald-50 text-emerald-700",
-        icon: Wifi,
-      };
-    case "maintenance":
-      return {
-        label: "维护中",
-        badge: "warning",
-        dot: "bg-amber-500",
-        iconBg: "bg-amber-50 text-amber-700",
-        icon: Wrench,
-      };
-    case "offline":
-      return {
-        label: "离线",
-        badge: "outline",
-        dot: "bg-slate-400",
-        iconBg: "bg-slate-100 text-slate-600",
-        icon: WifiOff,
-      };
-    case "disabled":
-      return {
-        label: "禁用",
-        badge: "destructive",
-        dot: "bg-rose-500",
-        iconBg: "bg-rose-50 text-rose-700",
-        icon: Ban,
-      };
-    default:
-      return {
-        label: status ?? "未知",
-        badge: "outline",
-        dot: "bg-slate-400",
-        iconBg: "bg-slate-100 text-slate-600",
-        icon: CircleDashed,
-      };
-  }
-}
-
-function getProviderLabel(provider: string | null): string {
-  if (!provider) return "未知";
-  return PROVIDER_META[provider]?.label ?? provider;
-}
-
-function getProviderTone(provider: string | null) {
-  return provider ? PROVIDER_TONES[provider] : undefined;
-}
-
-function getAgents(runtime: DaemonRuntimeRead): string[] {
-  const agents = runtime.capabilities?.agents;
-  return Array.isArray(agents) ? agents.filter((agent): agent is string => typeof agent === "string") : [];
-}
-
-function getCapabilityChips(runtime: DaemonRuntimeRead): string[] {
-  const capabilities = runtime.capabilities ?? {};
-  const agents = getAgents(runtime);
-  if (agents.length > 0) return agents.map((agent) => `代理: ${agent}`);
-
-  const chips: string[] = [];
-  if (runtime.provider) chips.push(`代理: ${getProviderLabel(runtime.provider)}`);
-  if (typeof capabilities.protocol === "string" && capabilities.protocol) {
-    chips.push(`协议: ${capabilities.protocol}`);
-  }
-  return chips;
-}
-
-function getProtocol(runtime: DaemonRuntimeRead): string {
-  const protocol = runtime.capabilities?.protocol;
-  return typeof protocol === "string" && protocol ? protocol : "-";
-}
-
-function isKnownBadVersion(runtime: DaemonRuntimeRead, version: string): boolean {
-  if (version.toLowerCase() === "unknown") return true;
-  const binPath = runtime.capabilities?.bin_path;
-  if (typeof binPath !== "string") return false;
-  return binPath.toLowerCase().endsWith("node.exe") && version === "24.15.0";
-}
-
-function getDisplayVersion(runtime: DaemonRuntimeRead): string | null {
-  const version = runtime.version || runtime.capabilities?.version;
-  if (typeof version !== "string" || !version.trim()) return null;
-  if (isKnownBadVersion(runtime, version.trim())) return null;
-  return version.trim();
-}
-
-function formatRelativeTime(iso: string | null): string {
-  if (!iso) return "无心跳";
-  const timestamp = new Date(iso).getTime();
-  if (Number.isNaN(timestamp)) return "时间无效";
-  const diff = Date.now() - timestamp;
-  if (diff < 30_000) return "刚刚";
-  if (diff < 60_000) return `${Math.floor(diff / 1000)} 秒前`;
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
-  return `${Math.floor(diff / 86_400_000)} 天前`;
-}
-
-// ===== task-14 / FR-01 / FR-04：用量统计格式化 helper（文件内私有，照搬 formatRelativeTime 的位置风格） =====
-
-/** token 数值 k/M 格式化（FR-01）。< 1000 原值；>= 1e6 用 M；>= 1e3 用 k。 */
-function formatTokens(n: number): string {
-  if (!Number.isFinite(n) || n === 0) return "0";
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
-}
-
-/** 费用 USD 格式化（FR-01）。$xx.xx，0 显示 $0.00。 */
-function formatCost(n: number): string {
-  return `$${(Number.isFinite(n) ? n : 0).toFixed(2)}`;
-}
-
-/** 缓存合并显示（D-001@v1）：read + creation，> 0 时 formatTokens，否则「—」（codex / 无 cache 数据）。 */
-function formatCache(item: RuntimeUsageItem | undefined): string {
-  if (!item) return "—";
-  const sum = item.summary.cache_read_tokens + item.summary.cache_creation_tokens;
-  return sum > 0 ? formatTokens(sum) : "—";
-}
-
-/** 时间窗中文 label（FR-04，CLAUDE.md 规则 11 中文 UI）。 */
+/** 时间窗中文 label（FR-04，CLAUDE.md 规则 11 中文 UI）。
+ *  task-09：其余 RuntimeCard/MachineCard 专属 helper（getStatusMeta / getProviderLabel /
+ *  formatRelativeTime 等）已迁出到 @/components/daemon/runtime-card-helpers。 */
 const WINDOW_LABELS: Record<RuntimeUsageWindow, string> = {
   "1d": "当日",
   "7d": "7 天",
   "30d": "30 天",
 };
-
-function ProviderBadge({ provider }: { provider: string | null }) {
-  const tone = getProviderTone(provider);
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded border px-2 py-0.5 text-[11px] font-medium",
-        tone?.badge ?? "border-slate-200 bg-slate-50 text-slate-600",
-      )}
-    >
-      <span className={cn("h-1.5 w-1.5 rounded-full", tone?.dot ?? "bg-slate-400")} />
-      {getProviderLabel(provider)}
-    </span>
-  );
-}
-
-function AgentsList({ agents, compact = false }: { agents: string[]; compact?: boolean }) {
-  if (agents.length === 0) {
-    return <span className="text-xs text-muted-foreground">未上报能力</span>;
-  }
-
-  const visible = compact ? agents.slice(0, 4) : agents;
-  const overflow = agents.length - visible.length;
-
-  return (
-    <span className="inline-flex flex-wrap gap-1.5">
-      {visible.map((agent) => (
-        <span
-          key={agent}
-          className="rounded border border-border/70 bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-        >
-          {agent}
-        </span>
-      ))}
-      {overflow > 0 && (
-        <span className="rounded border border-border/70 bg-card px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-          +{overflow}
-        </span>
-      )}
-    </span>
-  );
-}
-
-function VersionCell({ provider, version }: { provider: string | null; version: string | null }) {
-  if (!version) return <span className="text-muted-foreground">未上报</span>;
-
-  const minVersion = provider ? MIN_VERSIONS[provider] : undefined;
-  const showWarning = minVersion ? isVersionBelow(version, minVersion) : false;
-
-  return (
-    <span className="inline-flex min-w-0 items-center gap-1.5">
-      <span className="truncate font-mono">{version}</span>
-      {showWarning && (
-        <span
-          title={`版本低于最低要求 ${minVersion}`}
-          className="inline-flex h-4 w-4 items-center justify-center rounded bg-amber-50 text-amber-700"
-        >
-          <AlertTriangle className="h-3 w-3" />
-        </span>
-      )}
-    </span>
-  );
-}
-
-/**
- * 2026-07-04-daemon-version-management task-09：daemon 进程版本徽标。
- *
- * 比对逻辑（design §版本徽标）：
- *   - build_id 为 null/undefined（daemon 旧版未上报）→ 「未知」灰
- *   - build_id === "dev"（本地开发 daemon）→ 「dev」灰
- *   - latest 非空非 unknown 且 build_id === latest.latest_build_id → 「最新」绿
- *   - 两者都有效且不等 → 「可升级」橙
- *
- * latest 可能未拉到（getDaemonVersion 失败/未登录）或为 "unknown"
- *（install.sh fallback），此时无法判定「最新」/「可升级」，统一降级为「未知」灰。
- */
-type DaemonVersionBadgeState = {
-  label: string;
-  variant: BadgeVariant;
-};
-
-function getDaemonVersionBadgeState(
-  buildId: string | null | undefined,
-  latest: DaemonVersionInfo | undefined,
-): DaemonVersionBadgeState {
-  if (!buildId) {
-    return { label: "未知", variant: "outline" };
-  }
-  if (buildId === "dev") {
-    return { label: "dev", variant: "outline" };
-  }
-  const latestBuildId = latest?.latest_build_id;
-  if (
-    latestBuildId &&
-    latestBuildId !== "unknown" &&
-    latest?.latest_version &&
-    latest.latest_version !== "unknown"
-  ) {
-    if (buildId === latestBuildId) {
-      return { label: "最新", variant: "success" };
-    }
-    return { label: "可升级", variant: "warning" };
-  }
-  // latest 未拉到 / unknown：无法判定，保守显示「未知」。
-  return { label: "未知", variant: "outline" };
-}
-
-function DaemonVersionBadge({
-  buildId,
-  latest,
-}: {
-  buildId: string | null | undefined;
-  latest: DaemonVersionInfo | undefined;
-}) {
-  const state = getDaemonVersionBadgeState(buildId, latest);
-  return <Badge variant={state.variant}>{state.label}</Badge>;
-}
 
 function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
   const accessToken = useSession((s) => s.accessToken);
@@ -578,340 +262,6 @@ function formatRefreshTime(date: Date): string {
   });
 }
 
-function RuntimeMeta({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="min-w-0">
-      <p className="text-[11px] font-medium uppercase text-muted-foreground">{label}</p>
-      <div className="mt-1 truncate text-xs font-medium text-foreground">{children}</div>
-    </div>
-  );
-}
-
-/**
- * UsageStat —— 用量数字小格子（task-14 / FR-01）。
- * 类 RuntimeMeta 但更紧凑(4 列网格内):label 10px + value 14px 加粗 + truncate 防溢出。
- * 借鉴 SummaryCard 的 label/value 排版风格。
- */
-function UsageStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <p className="text-[10px] font-medium uppercase text-muted-foreground">{label}</p>
-      <p className="mt-0.5 truncate text-sm font-semibold text-foreground">{value}</p>
-    </div>
-  );
-}
-
-function RuntimeCard({
-  runtime,
-  actioning,
-  sessionStats,
-  usage,
-  usageWindow,
-  usageLoading,
-  latestVersion,
-  upgrading,
-  onToggleEnabled,
-  onOpenSession,
-  onDelete,
-  onEditAlias,
-  onEditAllowedRoots,
-  onUpgrade,
-  isPlatformAdmin,
-}: {
-  runtime: DaemonRuntimeRead;
-  actioning: boolean;
-  sessionStats: { total: number; active: number };
-  usage?: RuntimeUsageItem;
-  usageWindow: RuntimeUsageWindow;
-  usageLoading?: boolean;
-  latestVersion?: DaemonVersionInfo;
-  upgrading?: boolean;
-  onToggleEnabled: (runtime: DaemonRuntimeRead) => Promise<void>;
-  onOpenSession: (runtime: DaemonRuntimeRead) => void;
-  // task-06：签名从 Promise<void> 改 void —— modal.confirm 同步触发，删除在 onOk 异步回调里。
-  onDelete: (runtime: DaemonRuntimeRead) => void;
-  // task-07 / FR-03：别名编辑入口（由 RuntimesPage 弹 modal 编辑，避免卡片内状态膨胀）。
-  onEditAlias: (runtime: DaemonRuntimeRead) => void;
-  // task-06 / FR-04 / D-006@v1：可写目录（allowed_roots 沙箱）编辑入口，仅 admin 可见。
-  onEditAllowedRoots: (runtime: DaemonRuntimeRead) => void;
-  // 2026-07-04-daemon-version-management task-09：daemon 进程升级（self-update 端点）。
-  onUpgrade: (runtime: DaemonRuntimeRead) => void;
-  // task-06 / FR-04：是否平台管理员（控制「可写目录」编辑按钮显隐）。
-  isPlatformAdmin: boolean;
-}) {
-  const status = getStatusMeta(runtime.status);
-  const StatusIcon = status.icon;
-  const capabilityChips = getCapabilityChips(runtime);
-  const heartbeat = formatRelativeTime(runtime.last_heartbeat_at);
-  const displayVersion = getDisplayVersion(runtime);
-  const protocol = getProtocol(runtime);
-  const isDisabled = runtime.status === "disabled";
-  const ActionIcon = isDisabled ? Power : Ban;
-  const binPath =
-    typeof runtime.capabilities?.bin_path === "string" && runtime.capabilities.bin_path
-      ? runtime.capabilities.bin_path
-      : null;
-  const envLabel = [runtime.os, runtime.arch].filter(Boolean).join(" · ") || null;
-  const createdLabel = formatRelativeTime(runtime.created_at);
-  const canOpenSession =
-    runtime.status === "online" &&
-    (runtime.provider === "claude" || runtime.provider === "codex");
-
-  // task-14 / FR-01：用量区数字（summary 缺失 → 「—」，费用恒 $xx.xx）。
-  const summary = usage?.summary;
-  const inputLabel = summary ? formatTokens(summary.input_tokens) : "—";
-  const outputLabel = summary ? formatTokens(summary.output_tokens) : "—";
-  const cacheLabel = formatCache(usage);
-  const costLabel = summary ? formatCost(summary.total_cost_usd) : "$0.00";
-
-  return (
-    <article className="overflow-hidden rounded-md border bg-card transition-colors hover:border-primary/30">
-      <header className="flex items-start justify-between gap-3 border-b bg-muted/20 px-4 py-3">
-        <div className="flex min-w-0 items-start gap-3">
-          <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-md", status.iconBg)}>
-            <StatusIcon className="h-4 w-4" />
-          </span>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <ProviderBadge provider={runtime.provider} />
-              <Badge variant={status.badge}>{status.label}</Badge>
-            </div>
-            <h3 className="mt-2 truncate font-mono text-sm font-semibold">
-              {runtime.display_alias ?? runtime.name ?? "未命名运行时"}
-            </h3>
-            <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
-              {shortId(runtime.id)} · 注册 {createdLabel}
-            </p>
-            {runtime.display_alias && runtime.name ? (
-              <p className="truncate text-[10px] text-muted-foreground">原名：{runtime.name}</p>
-            ) : null}
-            {runtime.owner ? (
-              <p className="truncate text-[10px] text-muted-foreground">
-                负责人：{runtime.owner.display_name ?? runtime.owner.email ?? "未记录"}
-              </p>
-            ) : null}
-          </div>
-        </div>
-        <span className={cn("mt-1 h-2.5 w-2.5 shrink-0 rounded-full", status.dot)} />
-      </header>
-
-      <div className="grid grid-cols-2 gap-4 px-4 py-3">
-        <RuntimeMeta label="运行环境">
-          {envLabel ? (
-            <span className="inline-flex items-center gap-1.5">
-              <Cpu className="h-3 w-3 shrink-0 text-muted-foreground" />
-              {envLabel}
-            </span>
-          ) : (
-            <span className="text-muted-foreground">未上报</span>
-          )}
-        </RuntimeMeta>
-        <RuntimeMeta label="心跳">{heartbeat}</RuntimeMeta>
-        <RuntimeMeta label="版本">
-          {displayVersion ? (
-            <VersionCell provider={runtime.provider} version={displayVersion} />
-          ) : (
-            <span className="text-muted-foreground">待识别</span>
-          )}
-        </RuntimeMeta>
-        <RuntimeMeta label="协议">{protocol}</RuntimeMeta>
-        {/* 2026-07-04-daemon-version-management task-09：daemon 进程版本（区别于 version=provider CLI 版本）。
-            显示语义版本号 + build_id 短码（前 7 位）+ 版本徽标（最新/可升级/未知/dev）。 */}
-        <RuntimeMeta label="Daemon 版本">
-          <span className="inline-flex items-center gap-1.5">
-            <span className="truncate font-mono">
-              {runtime.daemon_version ?? "未知"}
-            </span>
-            {runtime.daemon_build_id ? (
-              <span className="font-mono text-[10px] text-muted-foreground">
-                #{runtime.daemon_build_id.slice(0, 7)}
-              </span>
-            ) : null}
-            <DaemonVersionBadge
-              buildId={runtime.daemon_build_id}
-              latest={latestVersion}
-            />
-          </span>
-        </RuntimeMeta>
-        {binPath && (
-          <RuntimeMeta label="可执行路径">
-            <span className="inline-flex min-w-0 items-center gap-1.5">
-              <Terminal className="h-3 w-3 shrink-0 text-muted-foreground" />
-              <span className="truncate font-mono">{binPath}</span>
-            </span>
-          </RuntimeMeta>
-        )}
-        <RuntimeMeta label="会话">
-          <span className="inline-flex items-center gap-1">
-            {sessionStats.total}
-            {sessionStats.active > 0 && (
-              <span className="text-emerald-600">（{sessionStats.active} 活跃）</span>
-            )}
-          </span>
-        </RuntimeMeta>
-      </div>
-
-      {/*
-        task-14 / FR-01 / FR-04：用量区（4 数字 + sparkline）。
-        - 数字:输入 / 输出 / 缓存(合并 read+creation,D-001@v1 无数据显示「—」) / 费用(USD)。
-        - sparkline:task-13 桶导出的 RuntimeUsageLineChart,传该 runtime 的 daily 序列(输入/输出双线)。
-        - usage=undefined(新 runtime / 窗口内无 run / 拉取失败)→ 数字全「—」、费用 $0.00、sparkline「暂无数据」。
-      */}
-      <div className="border-t px-4 py-3">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-[11px] font-medium uppercase text-muted-foreground">
-            用量统计（{WINDOW_LABELS[usageWindow]}）
-          </p>
-          <span className="text-[11px] text-muted-foreground">
-            {usageLoading ? "加载中" : ""}
-          </span>
-        </div>
-        <div className="mt-2 grid grid-cols-4 gap-2">
-          <UsageStat label="输入" value={inputLabel} />
-          <UsageStat label="输出" value={outputLabel} />
-          <UsageStat label="缓存" value={cacheLabel} />
-          <UsageStat label="费用" value={costLabel} />
-        </div>
-        <div className="mt-2">
-          <RuntimeUsageLineChart
-            points={usage?.daily ?? []}
-            loading={usageLoading}
-          />
-        </div>
-      </div>
-
-      <div className="border-t px-4 py-3">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-[11px] font-medium uppercase text-muted-foreground">运行能力</p>
-          <span className="text-[11px] text-muted-foreground">{capabilityChips.length}</span>
-        </div>
-        <div className="mt-2">
-          <AgentsList agents={capabilityChips} compact />
-        </div>
-      </div>
-
-      {/* task-06 / FR-04 / D-006@v1：可写目录（allowed_roots 沙箱）展示。
-          daemon 在此白名单内才能 list_dir / 创建 workspace（D-002@v1 越界 403）。
-          空 → 「未配置（任意目录可访问）」；非空 → 逐行 Tag 列出根路径。 */}
-      <div className="border-t px-4 py-3">
-        <p className="text-[11px] font-medium uppercase text-muted-foreground">
-          可写目录（读取不受限）
-        </p>
-        <div className="mt-2">
-          {(runtime.allowed_roots ?? []).length > 0 ? (
-            <span className="inline-flex flex-wrap gap-1.5">
-              {(runtime.allowed_roots ?? []).map((root, idx) => (
-                <span
-                  key={`${root}-${idx}`}
-                  className="inline-flex min-w-0 items-center gap-1 rounded border border-border/70 bg-muted/50 px-2 py-0.5 font-mono text-[11px] font-medium text-muted-foreground"
-                  title={root}
-                >
-                  <Terminal className="h-3 w-3 shrink-0" />
-                  <span className="truncate">{root}</span>
-                </span>
-              ))}
-            </span>
-          ) : (
-            <span className="text-[11px] text-muted-foreground">
-              未配置（任意目录可写）
-            </span>
-          )}
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-end gap-2 border-t px-4 py-3">
-        <Button
-          size="sm"
-          variant="outline"
-          className="gap-1.5"
-          onClick={() => onEditAlias(runtime)}
-          title="编辑展示别名"
-        >
-          别名
-        </Button>
-        {/* task-06 / FR-04 / D-006@v1：仅平台管理员可配置 daemon 可写目录沙箱。 */}
-        {isPlatformAdmin ? (
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-1.5"
-            onClick={() => onEditAllowedRoots(runtime)}
-            title="配置该运行时可写的目录沙箱（读取不受限）"
-          >
-            可写目录
-          </Button>
-        ) : null}
-        {/* 2026-07-04-daemon-version-management task-09：升级 daemon 到最新版（self-update）。
-            离线 runtime 禁用（后端 WS 下发不达）；upgrading 态 loading 防重复点。 */}
-        <Button
-          size="sm"
-          variant="outline"
-          className="gap-1.5"
-          disabled={runtime.status !== "online" || upgrading}
-          onClick={() => onUpgrade(runtime)}
-          title={
-            runtime.status !== "online"
-              ? "离线，无法升级"
-              : "下发 daemon 自更新指令，重启后版本将自动更新"
-          }
-        >
-          {upgrading ? (
-            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <RefreshCw className="h-3.5 w-3.5" />
-          )}
-          {upgrading ? "下发中" : "升级到最新版"}
-        </Button>
-        {/* task-21：审计日志入口，所有可访问 runtime 的用户可见（平台用户功能）。
-            跳转 /runtimes/{id}/audit（task-20 路由）。与「可写目录」同级，风格一致。 */}
-        <Link
-          href={`/runtimes/${runtime.id}/audit`}
-          className="inline-flex h-7 items-center justify-center gap-1.5 rounded-md border border-input bg-background px-2 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
-          title="查看该运行时的审计日志"
-        >
-          审计日志
-        </Link>
-        {canOpenSession && (
-          <Button
-            size="sm"
-            className="gap-1.5"
-            onClick={() => onOpenSession(runtime)}
-            title="打开该运行时的会话窗口"
-          >
-            <MessageSquare className="h-3.5 w-3.5" />
-            会话
-          </Button>
-        )}
-        <Button
-          size="sm"
-          variant={isDisabled ? "outline" : "destructive"}
-          className="gap-1.5"
-          disabled={actioning}
-          onClick={() => void onToggleEnabled(runtime)}
-          title={isDisabled ? "启用此智能体运行时" : "禁用此智能体运行时"}
-        >
-          {actioning ? (
-            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <ActionIcon className="h-3.5 w-3.5" />
-          )}
-          {actioning ? "处理中" : isDisabled ? "启用" : "禁用"}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
-          disabled={actioning}
-          onClick={() => onDelete(runtime)}
-          title="移除此运行时记录（连带清除其下会话与任务记录）"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-          移除
-        </Button>
-      </div>
-    </article>
-  );
-}
 
 function LoadingState() {
   return (
@@ -934,9 +284,9 @@ function EmptyState() {
         <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted text-muted-foreground">
           <Server className="h-5 w-5" />
         </div>
-        <h2 className="mt-4 text-base font-semibold">尚未注册任何守护进程运行时</h2>
+        <h2 className="mt-4 text-base font-semibold">尚未注册任何守护进程</h2>
         <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-          启动本地守护进程后，平台会在这里显示提供方、版本、心跳和可用代理。runtime 上线后，进入 workspace 详情页可在「默认 Agent」下拉里选择本次启动的提供方。
+          启动本地守护进程后，平台会在这里以「机器」为单位展示每台主机及其承载的运行时（提供方、版本、心跳和可用代理）。runtime 上线后，进入 workspace 详情页可在「默认 Agent」下拉里选择本次启动的提供方。
         </p>
       </div>
       <div className="rounded-md border bg-card p-4">
@@ -972,21 +322,23 @@ function EmptyState() {
 }
 
 export default function RuntimesPage() {
-  // task-10（react-query-migration）：items/total/sessions 由 useDaemonRuntimes 管。
+  // task-09：items/total/sessions 由 useDaemonMachines 管（机器级，D-005 完全替换平铺）。
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const isPlatformAdmin = useSession((s) => s.user?.is_platform_admin === true);
-  const PAGE_SIZE = 12;
+  // D-007：机器级分页，默认 20/页。
+  const PAGE_SIZE = 20;
   const [query, setQuery] = useState("");
-  const [typeFilter, setTypeFilter] = useState<string>("");
+  const [providerFilter, setProviderFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [ownerUserId, setOwnerUserId] = useState<string | null>(null);
   const [userOptions, setUserOptions] = useState<UserRead[]>([]);
   const [page, setPage] = useState(0);
-  const [aliasEditing, setAliasEditing] = useState<DaemonRuntimeRead | null>(null);
+  // task-09：别名编辑改机器级（aliasEditing 类型 DaemonMachineRead）。
+  const [aliasEditing, setAliasEditing] = useState<DaemonMachineRead | null>(null);
   const [aliasValue, setAliasValue] = useState("");
   const [aliasSaving, setAliasSaving] = useState(false);
-  // task-06 / FR-04 / D-006@v1：可写目录（allowed_roots 沙箱）编辑态。
+  // task-06 / FR-04 / D-006@v1：可写目录（allowed_roots 沙箱）编辑态（仍 runtime 级）。
   // rootsEditing：当前编辑的 runtime（null=关闭）；rootsValue：路径数组（每行一个）。
   const [rootsEditing, setRootsEditing] = useState<DaemonRuntimeRead | null>(null);
   const [rootsValue, setRootsValue] = useState<string[]>([]);
@@ -1001,7 +353,7 @@ export default function RuntimesPage() {
   const [browseManualPath, setBrowseManualPath] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [runtimeActionId, setRuntimeActionId] = useState<string | null>(null);
-  // 2026-07-04-daemon-version-management task-09：daemon 升级中标记（卡片按钮 loading）。
+  // task-09：daemon 升级中标记（机器卡按钮 loading，按 instance.id 记）。
   const [upgradeActionId, setUpgradeActionId] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
   // task-04 / D-001：单例弹窗 runtime（null=关闭）。切换 runtime 即替换 dialogRuntime，
@@ -1009,9 +361,11 @@ export default function RuntimesPage() {
   const [dialogRuntime, setDialogRuntime] = useState<DaemonRuntimeRead | null>(null);
   // task-04 / D-003：URL ?session= 恢复点，仅 URL 恢复时传入弹窗默认态 attach。
   const [initialSessionId, setInitialSessionId] = useState<string | null>(null);
+  // task-09：展开态记忆（Set<machine.id>），切页/刷新不丢。
+  const [expandedMachineIds, setExpandedMachineIds] = useState<Set<string>>(() => new Set());
 
   // task-14 / FR-04 / D-004@v1：用量统计页面级状态。
-  // usageWindow:时间窗(默认 7d);usageByRuntime:按 runtime_id 聚合的用量 Map(照搬 sessionStatsByRuntime 模式)。
+  // usageWindow:时间窗(默认 7d);usageByRuntime:按 runtime_id 聚合的用量 Map。
   // 非实时刷新(D-004@v1):仅进页面 + 切窗时调 getRuntimesUsage,不订阅 SSE、不轮询。
   const [usageWindow, setUsageWindow] = useState<RuntimeUsageWindow>("7d");
   const [usageByRuntime, setUsageByRuntime] = useState<Map<string, RuntimeUsageItem>>(new Map());
@@ -1020,7 +374,6 @@ export default function RuntimesPage() {
 
   // task-06 / FR-03 / D-003@v1 / D-007@v1：notify（操作类 toast，封装 errMessage）
   // 与 modal（antd Modal.confirm 二次确认，走 <AntApp> 主题实例）。
-  // 仅删除流程消费；reload/handleToggleRuntime 仍用顶部 inline 红条（design §5）。
   const notify = useNotify();
   const { modal } = App.useApp();
 
@@ -1046,24 +399,24 @@ export default function RuntimesPage() {
     clearSessionParam();
   }, [clearSessionParam]);
 
-  // task-10：listParams 作为 queryKey 一部分；useMemo 稳定引用。
-  const listParams = useMemo<DaemonRuntimeListParams>(
+  // task-09：机器级 listParams（q/status/provider/user_id/limit/offset），queryKey 经
+  // hook 内部走 daemonMachines.list。
+  const listParams = useMemo<DaemonMachineListParams>(
     () => ({
       q: query.trim() || undefined,
-      type: typeFilter || undefined,
       status: statusFilter || undefined,
+      provider: providerFilter || undefined,
       user_id: isPlatformAdmin ? ownerUserId ?? undefined : undefined,
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
     }),
-    [query, typeFilter, statusFilter, ownerUserId, page, isPlatformAdmin],
+    [query, statusFilter, providerFilter, ownerUserId, page, isPlatformAdmin],
   );
-  const { items, total, sessions, isLoading, error: listError, refetch } = useDaemonRuntimes(listParams);
+  const { items: machines, total, sessions, isLoading, error: listError, refetch } = useDaemonMachines(listParams);
 
   // 2026-07-04-daemon-version-management task-09：页面级拉 daemon 分发元数据
-  //（最新版本号 + build_id），传给每个 RuntimeCard 做版本徽标比对。
-  // staleTime 5min：版本不会频繁变；onSuccess 时不强制刷新 runtimes（心跳 15s 轮询
-  // 自带刷新，升级后看心跳回的新版本即可）。
+  //（最新版本号 + build_id），传给每个 MachineCard → RuntimeCard 做版本徽标比对。
+  // staleTime 5min：版本不会频繁变；心跳 15s 轮询自带刷新。
   const { data: latestVersion } = useQuery<DaemonVersionInfo>({
     queryKey: queryKeys.daemonVersion.all,
     queryFn: getDaemonVersion,
@@ -1079,22 +432,30 @@ export default function RuntimesPage() {
   useEffect(() => {
     setLastRefreshedAt(new Date());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items?.length, total, sessions?.length]);
+  }, [machines?.length, total, sessions?.length]);
 
-  type RuntimesCache = { items: DaemonRuntimeRead[]; total: number; sessions: AgentSessionRead[] };
-  const patchItems = useCallback(
-    (updater: (prev: DaemonRuntimeRead[]) => DaemonRuntimeRead[]) => {
-      queryClient.setQueryData<RuntimesCache>(queryKeys.daemonRuntimes.list(listParams), (old) => ({
-        items: updater(old?.items ?? []),
-        total: old?.total ?? 0,
-        sessions: old?.sessions ?? [],
-      }));
+  // task-09：machines cache 形状（嵌套 runtimes + sessions），供 patchItems/patchRuntimeInMachines 用。
+  type MachinesCache = { items: DaemonMachineRead[]; total: number; sessions: AgentSessionRead[] };
+
+  /** 嵌套定位 runtime 并就地更新（runtime 级 handler 复用，patch machines cache 内层 runtime）。
+   *  不变 machine 及其下其它 runtime（浅拷其它 runtime，保留嵌套引用稳定性）。 */
+  const patchRuntimeInMachines = useCallback(
+    (updater: (rt: DaemonRuntimeRead) => DaemonRuntimeRead, runtimeId: string) => {
+      queryClient.setQueryData<MachinesCache>(queryKeys.daemonMachines.list(listParams), (old) => {
+        if (!old) return old;
+        const items = old.items.map((m) => {
+          if (!m.runtimes.some((r) => r.id === runtimeId)) return m;
+          return { ...m, runtimes: m.runtimes.map((r) => (r.id === runtimeId ? updater(r) : r)) };
+        });
+        return { ...old, items };
+      });
     },
     [queryClient, listParams],
   );
+
   const patchSessions = useCallback(
     (updater: (prev: AgentSessionRead[]) => AgentSessionRead[]) => {
-      queryClient.setQueryData<RuntimesCache>(queryKeys.daemonRuntimes.list(listParams), (old) => ({
+      queryClient.setQueryData<MachinesCache>(queryKeys.daemonMachines.list(listParams), (old) => ({
         items: old?.items ?? [],
         total: old?.total ?? 0,
         sessions: updater(old?.sessions ?? []),
@@ -1130,28 +491,26 @@ export default function RuntimesPage() {
       const updated = runtime.status === "disabled"
         ? await enableDaemonRuntime(runtime.id)
         : await disableDaemonRuntime(runtime.id);
-      patchItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      patchRuntimeInMachines((r) => (r.id === updated.id ? updated : r), updated.id);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "运行时状态操作失败");
     } finally {
       setRuntimeActionId(null);
     }
-  }, [patchItems]);
+  }, [patchRuntimeInMachines]);
 
-  // 2026-07-04-daemon-version-management task-09：下发 daemon self-update 指令。
-  // 离线 runtime 由卡片按钮 disabled 兜底，这里再保险跳过；成功 toast 提示重启后生效，
-  // 失败 toast 显示后端中文（504 daemon 离线 / WS 发送失败）。
-  // 不强制轮询：心跳 15s 自带刷新，daemon 重启 re-register 后卡片自然显示新版本。
+  // task-09：升级 daemon 改调机器级端点 triggerMachineSelfUpdate(instance.id)，按
+  // instance 路由 WS，不再借道 runtime_id。invalidateQueries daemonMachines.all。
   const handleUpgrade = useCallback(
-    async (runtime: DaemonRuntimeRead) => {
-      if (runtime.status !== "online") return;
-      setUpgradeActionId(runtime.id);
+    async (machine: DaemonMachineRead) => {
+      if (machine.status !== "online") return;
+      setUpgradeActionId(machine.id);
       try {
-        await triggerDaemonSelfUpdate(runtime.id);
+        await triggerMachineSelfUpdate(machine.id);
         notify.success("升级指令已下发，daemon 重启后版本将自动更新");
-        // 软刷新 runtimes + version：daemon 重启需要数秒，这里只触发 invalidate，
+        // 软刷新 machines + version：daemon 重启需要数秒，这里只触发 invalidate，
         // 实际新版本要等心跳/re-register（15s 轮询自然看到）。
-        void queryClient.invalidateQueries({ queryKey: queryKeys.daemonRuntimes.all });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.daemonMachines.all });
       } catch (err) {
         notify.error(err, "下发升级指令失败");
       } finally {
@@ -1163,15 +522,13 @@ export default function RuntimesPage() {
 
   // ql-012 / task-06 / FR-03 / D-003@v1 / D-007@v1：移除运行时（物理删除，级联清会话/lease）。
   // 二次确认改 antd Modal.confirm（走主题 + destructive 红按钮），替代浏览器原生 window.confirm。
-  // 失败走 notify.error toast（409 后端中文 / network 中文兜底），成功补 notify.success（D-003@v1 范例）。
-  // 顶部 inline error state 仅 reload/toggle 用，删除流程不再触碰 setError（design §5：操作类 toast）。
+  // 失败走 notify.error toast（409 后端中文 / network 中文兜底），成功补 notify.success。
+  // runtime 级端点复用 deleteDaemonRuntime，patch 改在 machines cache 内嵌套移除该 runtime。
   const handleDeleteRuntime = useCallback(
     (runtime: DaemonRuntimeRead) => {
       modal.confirm({
         title: "移除运行时",
-        content: `确定移除运行时「${
-          runtime.name ?? getProviderLabel(runtime.provider)
-        }」？将同时清除该运行时下的会话与任务记录，且不可恢复。daemon 下次心跳会重新注册。`,
+        content: `确定移除运行时「${runtime.name ?? runtime.provider}」？将同时清除该运行时下的会话与任务记录，且不可恢复。daemon 下次心跳会重新注册。`,
         okText: "移除",
         okType: "danger",
         cancelText: "取消",
@@ -1179,7 +536,24 @@ export default function RuntimesPage() {
           setRuntimeActionId(runtime.id);
           try {
             await deleteDaemonRuntime(runtime.id);
-            patchItems((prev) => prev.filter((item) => item.id !== runtime.id));
+            // 嵌套移除 runtime + 重算 runtime_count/online_runtime_count（保守降 1/视状态）。
+            queryClient.setQueryData<MachinesCache>(queryKeys.daemonMachines.list(listParams), (old) => {
+              if (!old) return old;
+              const items = old.items.map((m) => {
+                if (!m.runtimes.some((r) => r.id === runtime.id)) return m;
+                const remaining = m.runtimes.filter((r) => r.id !== runtime.id);
+                return {
+                  ...m,
+                  runtime_count: Math.max(0, m.runtime_count - 1),
+                  online_runtime_count: Math.max(
+                    0,
+                    m.online_runtime_count - (runtime.status === "online" ? 1 : 0),
+                  ),
+                  runtimes: remaining,
+                };
+              });
+              return { ...old, items };
+            });
             patchSessions((prev) => prev.filter((s) => s.runtime_id !== runtime.id));
             if (dialogRuntime?.id === runtime.id) setDialogRuntime(null);
             notify.success("运行时已移除");
@@ -1191,10 +565,10 @@ export default function RuntimesPage() {
         },
       });
     },
-    [dialogRuntime?.id, modal, notify, patchItems, patchSessions],
+    [dialogRuntime?.id, listParams, modal, notify, patchSessions, queryClient],
   );
 
-  // task-04 / D-001：卡片「会话」→ 打开单例弹窗。不再 scrollIntoView（无底部常驻会话区）。
+  // task-04 / D-001：卡片「会话」→ 打开单例弹窗。
   const handleOpenSession = useCallback((runtime: DaemonRuntimeRead) => {
     setInitialSessionId(null);
     setDialogRuntime(runtime);
@@ -1209,20 +583,34 @@ export default function RuntimesPage() {
     [],
   );
 
-  // task-07 / FR-03：别名编辑（modal 弹层，由 RuntimeCard onEditAlias 触发）。
-  const handleOpenAlias = useCallback((runtime: DaemonRuntimeRead) => {
-    setAliasEditing(runtime);
-    setAliasValue(runtime.display_alias ?? "");
+  // task-09：切换机器展开态（add/delete expandedMachineIds）。
+  const handleToggleExpand = useCallback((machineId: string) => {
+    setExpandedMachineIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(machineId)) next.delete(machineId);
+      else next.add(machineId);
+      return next;
+    });
+  }, []);
+
+  // task-09：机器级别名编辑（modal 弹层，由 MachineCard onEditAlias 触发）。
+  const handleOpenAlias = useCallback((machine: DaemonMachineRead) => {
+    setAliasEditing(machine);
+    setAliasValue(machine.display_alias ?? "");
   }, []);
 
   const handleSaveAlias = useCallback(async () => {
     if (!aliasEditing) return;
     setAliasSaving(true);
     try {
-      const updated = await updateDaemonRuntime(aliasEditing.id, {
+      const updated = await updateDaemonMachine(aliasEditing.id, {
         display_alias: aliasValue.trim() || null,
       });
-      patchItems((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+      // patch machines cache：替换该 machine（保留其下 runtimes 嵌套引用，用 updated 整体替换）。
+      queryClient.setQueryData<MachinesCache>(queryKeys.daemonMachines.list(listParams), (old) => {
+        if (!old) return old;
+        return { ...old, items: old.items.map((m) => (m.id === updated.id ? updated : m)) };
+      });
       notify.success("别名已更新");
       setAliasEditing(null);
     } catch (err) {
@@ -1230,11 +618,10 @@ export default function RuntimesPage() {
     } finally {
       setAliasSaving(false);
     }
-  }, [aliasEditing, aliasValue, notify, patchItems]);
+  }, [aliasEditing, aliasValue, listParams, notify, queryClient]);
 
-  // task-06 / FR-04 / D-006@v1：可写目录（allowed_roots 沙箱）编辑。
+  // task-06 / FR-04 / D-006@v1：可写目录（allowed_roots 沙箱）编辑（runtime 级，端点不变）。
   // 复用 display_alias 模式：page 顶层 state + antd Modal + useNotify。
-  // 保存时去重 + 去空白（空行视为删除），调 updateRuntimeAllowedRoots + 刷新列表。
   const handleOpenAllowedRoots = useCallback((runtime: DaemonRuntimeRead) => {
     setRootsEditing(runtime);
     setRootsValue([...(runtime.allowed_roots ?? [])]);
@@ -1242,8 +629,6 @@ export default function RuntimesPage() {
 
   // ── 树形目录浏览器 ────────────────────────────────────────────────────────
   // ql-20260706-006：用 antd Tree 实现类似 Windows 资源管理器的目录树。
-  // 初始化时会自动探测常用盘符（C:\, D:\, E:\, F:\ 等），展开节点时调 daemon
-  // listDir 异步加载子目录，点击目录节点即可选中路径。
 
   /** 递归更新树数据（antd Tree loadData 模式需要）。 */
   const updateTreeData = useCallback((list: DataNode[], key: React.Key, children: DataNode[]): DataNode[] =>
@@ -1354,7 +739,7 @@ export default function RuntimesPage() {
     setRootsSaving(true);
     try {
       const updated = await updateRuntimeAllowedRoots(rootsEditing.id, cleaned);
-      patchItems((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+      patchRuntimeInMachines((r) => (r.id === updated.id ? updated : r), updated.id);
       notify.success("可写目录已更新");
       setRootsEditing(null);
     } catch (err) {
@@ -1362,7 +747,7 @@ export default function RuntimesPage() {
     } finally {
       setRootsSaving(false);
     }
-  }, [rootsEditing, rootsValue, notify, patchItems]);
+  }, [rootsEditing, rootsValue, notify, patchRuntimeInMachines]);
 
   // task-07 / D-003@v1：平台管理员人员搜索选项；失败降级为空（控件由 isPlatformAdmin 控制显隐）。
   useEffect(() => {
@@ -1380,8 +765,6 @@ export default function RuntimesPage() {
     };
   }, [isPlatformAdmin]);
 
-  // task-10：首载 + 15s 轮询 useEffect 已删（useDaemonRuntimes mount-fetch + refetchInterval:15000 接管）。
-
   // task-14 / FR-04 / D-004@v1：拉取所有 runtime 的用量(进页面 + 切窗时触发,非实时)。
   // cancelled 守卫防竞态(快速切窗时旧请求 resolve 跳过 set,只采最新窗)。
   // 失败降级:usageByRuntime 清空(卡片显示空用量,不崩)、setUsageError 供顶部提示。
@@ -1392,7 +775,7 @@ export default function RuntimesPage() {
     getRuntimesUsage(window)
       .then((resp) => {
         if (cancelled) return;
-        // 按 runtime_id 聚合成 Map(照搬 sessionStatsByRuntime ~885-895 的模式)。
+        // 按 runtime_id 聚合成 Map。
         const map = new Map<string, RuntimeUsageItem>();
         for (const item of resp.runtimes) map.set(item.runtime_id, item);
         setUsageByRuntime(map);
@@ -1414,15 +797,21 @@ export default function RuntimesPage() {
     return reloadUsage(usageWindow);
   }, [usageWindow, reloadUsage]);
 
+  // task-09：所有 runtime 扁平化（跨机器），供 ?session 恢复 + RuntimeSessionDialog runtimes 用。
+  const allRuntimes = useMemo(
+    () => machines.flatMap((m) => m.runtimes),
+    [machines],
+  );
+
   // task-04 / FR-06 / D-003：mount 读 ?session=<id> → 查 status，活跃 → 开对应 runtime
   // 弹窗（initialSessionId 接弹窗默认态 attach）；ended/failed/不存在/已删 → 清 param
-  // 降级不开。urlRestoreDoneRef 保证只执行一次（避免 items/sessions 重载重复触发）。
-  // page 不直接 attach，attach 由 RuntimeSessionDialog D-002 默认态接管。
+  // 降级不开。urlRestoreDoneRef 保证只执行一次。
+  // task-09：matched 从 machines.flatMap(m=>m.runtimes) 查找，命中则展开所属 machine。
   useEffect(() => {
     if (urlRestoreDoneRef.current) return;
     const sessionId = searchParams.get("session");
     if (!sessionId) return;
-    // 等 items 加载完成（首屏 loading 期内不处理 URL 恢复）
+    // 等 machines 加载完成（首屏 loading 期内不处理 URL 恢复）
     if (isLoading) return;
     urlRestoreDoneRef.current = true;
     void (async () => {
@@ -1436,9 +825,19 @@ export default function RuntimesPage() {
         }
       }
       if (session && isActiveSession(session)) {
-        const matched = items.find((r) => r.id === session!.runtime_id) ?? null;
+        const matched = allRuntimes.find((r) => r.id === session!.runtime_id) ?? null;
         if (matched) {
-          // 活跃 + runtime 在列 → 开弹窗，initialSessionId 接弹窗默认态 attach
+          // task-09：找到所属 machine 并展开，再开弹窗。
+          const ownerMachine = machines.find((m) =>
+            m.runtimes.some((r) => r.id === matched.id),
+          );
+          if (ownerMachine) {
+            setExpandedMachineIds((prev) => {
+              const next = new Set(prev);
+              next.add(ownerMachine.id);
+              return next;
+            });
+          }
           setInitialSessionId(session.id);
           setDialogRuntime(matched);
         } else {
@@ -1450,35 +849,21 @@ export default function RuntimesPage() {
         clearSessionParam();
       }
     })();
-  }, [searchParams, items, sessions, isLoading, clearSessionParam]);
+  }, [searchParams, allRuntimes, machines, sessions, isLoading, clearSessionParam]);
 
-  const displayItems = useMemo(() => {
-    const statusRank: Record<string, number> = {
-      online: 0,
-      maintenance: 1,
-      disabled: 2,
-      offline: 3,
-    };
-    return [...(items ?? [])].sort((a, b) => {
-      const aRank = statusRank[a.status ?? ""] ?? 3;
-      const bRank = statusRank[b.status ?? ""] ?? 3;
-      if (aRank !== bRank) return aRank - bRank;
-      const aHeartbeat = a.last_heartbeat_at ? new Date(a.last_heartbeat_at).getTime() : 0;
-      const bHeartbeat = b.last_heartbeat_at ? new Date(b.last_heartbeat_at).getTime() : 0;
-      if (aHeartbeat !== bHeartbeat) return bHeartbeat - aHeartbeat;
-      return getProviderLabel(a.provider).localeCompare(getProviderLabel(b.provider), "zh-CN");
-    });
-  }, [items]);
-
+  // task-09：机器级 stats（按 machine.status 统计；providers 从 runtimes flatMap 收集；
+  // latestHeartbeat 取 machine.last_heartbeat_at 最新）。
   const stats = useMemo(() => {
-    const list = items ?? [];
-    const online = list.filter((runtime) => runtime.status === "online").length;
-    const maintenance = list.filter((runtime) => runtime.status === "maintenance").length;
-    const disabled = list.filter((runtime) => runtime.status === "disabled").length;
-    const offline = list.filter((runtime) => runtime.status === "offline").length;
-    const providers = new Set(list.map((runtime) => runtime.provider).filter(Boolean));
+    const list = machines ?? [];
+    const online = list.filter((m) => m.status === "online").length;
+    const maintenance = list.filter((m) => m.status === "maintenance").length;
+    const disabled = list.filter((m) => m.status === "disabled").length;
+    const offline = list.filter((m) => m.status === "offline").length;
+    const providers = new Set(
+      list.flatMap((m) => m.runtimes.map((r) => r.provider).filter(Boolean)),
+    );
     const latestHeartbeat = list
-      .map((runtime) => runtime.last_heartbeat_at)
+      .map((m) => m.last_heartbeat_at)
       .filter((value): value is string => Boolean(value))
       .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
 
@@ -1491,9 +876,9 @@ export default function RuntimesPage() {
       providers: providers.size,
       latestHeartbeat: latestHeartbeat ? formatRelativeTime(latestHeartbeat) : "无心跳",
     };
-  }, [items]);
+  }, [machines]);
 
-  // ql-012：按 runtime_id 聚合会话数（卡片展示）。
+  // ql-012：按 runtime_id 聚合会话数（卡片展示），传入 MachineCard。
   const sessionStatsByRuntime = useMemo(() => {
     const map = new Map<string, { total: number; active: number }>();
     for (const s of sessions) {
@@ -1513,7 +898,7 @@ export default function RuntimesPage() {
           <p className="text-[11px] font-semibold uppercase text-muted-foreground">系统</p>
           <h1 className="mt-1">守护进程运行时</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            本地代理运行时、心跳状态和快速会话控制台。
+            以机器为单位展示守护进程主机及其承载的运行时、心跳状态和快速会话控制台。
           </p>
         </div>
         <div className="flex w-full flex-col gap-2 lg:max-w-xl">
@@ -1533,9 +918,9 @@ export default function RuntimesPage() {
         <LoadingState />
       ) : (
         <>
-          {items.length > 0 && (
+          {machines.length > 0 && (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-              <SummaryCard label="总数" value={String(stats.total)} icon={Server} meta={`${stats.providers} 个提供方`} />
+              <SummaryCard label="机器总数" value={String(stats.total)} icon={Server} meta={`${stats.providers} 个提供方`} />
               <SummaryCard label="在线" value={String(stats.online)} icon={CheckCircle2} tone="online" meta={stats.latestHeartbeat} />
               <SummaryCard label="维护中" value={String(stats.maintenance)} icon={Wrench} tone="warning" />
               <SummaryCard label="禁用" value={String(stats.disabled)} icon={Ban} tone="disabled" />
@@ -1544,7 +929,7 @@ export default function RuntimesPage() {
           )}
 
           <div className="space-y-5">
-            {items.length === 0 ? (
+            {machines.length === 0 ? (
               <EmptyState />
             ) : (
               <section className="min-w-0 space-y-3">
@@ -1552,9 +937,9 @@ export default function RuntimesPage() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <Activity className="h-4 w-4 text-muted-foreground" />
-                      <h2 className="text-sm font-semibold">运行时列表</h2>
+                      <h2 className="text-sm font-semibold">机器列表</h2>
                       <span className="text-[11px] text-muted-foreground">
-                        {stats.online} 个在线 / {stats.total} 条记录
+                        {stats.online} 台在线 / {stats.total} 台机器
                       </span>
                     </div>
                     <p className="mt-0.5 text-[11px] text-muted-foreground">
@@ -1564,7 +949,6 @@ export default function RuntimesPage() {
                   {/*
                     task-14 / FR-04：时间窗切换器(3 tab)。切窗触发页面级 usageWindow 变化 →
                     useEffect 重发 getRuntimesUsage(新窗) → 所有卡片用量区同步刷新。
-                    active 态 variant="default" / inactive variant="outline",照搬项目现有 tab 风格。
                   */}
                   <div className="flex items-center gap-1.5">
                     <div className="flex items-center gap-1 rounded-md border bg-card p-0.5">
@@ -1575,8 +959,6 @@ export default function RuntimesPage() {
                           variant={usageWindow === w ? "default" : "outline"}
                           className="h-7 px-2.5 text-xs"
                           onClick={() => setUsageWindow(w)}
-                          // aria-label 优先于可见文本「当日/7天/30天」作为 accessible name,
-                          // 供 findByRole({ name: /切换用量统计时间窗为.../ }) 定位 + 屏幕阅读器朗读完整语义(FR-04 可访问性)。
                           aria-label={`切换用量统计时间窗为${WINDOW_LABELS[w]}`}
                           title={`切换用量统计时间窗为${WINDOW_LABELS[w]}`}
                         >
@@ -1601,22 +983,22 @@ export default function RuntimesPage() {
                     用量统计加载失败：{usageError}（卡片用量区显示空）
                   </p>
                 )}
-                {/* task-07 / FR-04 / FR-05：服务端筛选条 + 平台管理员人员搜索 */}
+                {/* task-09：机器级筛选条（搜索 hostname/display_alias/provider + 状态 + 提供方 + 人员）。 */}
                 <div className="flex flex-wrap items-center gap-2">
                   <input
                     aria-label="搜索资源"
-                    placeholder="搜索别名/名称/提供方"
+                    placeholder="搜索主机名/别名/提供方"
                     value={query}
                     onChange={(e) => updateFilter(setQuery)(e.target.value)}
                     className="h-8 min-w-[12rem] flex-1 rounded border bg-card px-2 text-xs"
                   />
                   <select
-                    aria-label="筛选类型"
-                    value={typeFilter}
-                    onChange={(e) => updateFilter(setTypeFilter)(e.target.value)}
+                    aria-label="筛选提供方"
+                    value={providerFilter}
+                    onChange={(e) => updateFilter(setProviderFilter)(e.target.value)}
                     className="h-8 rounded border bg-card px-2 text-xs"
                   >
-                    <option value="">全部类型</option>
+                    <option value="">全部提供方</option>
                     {Object.entries(PROVIDER_META).map(([key, meta]) => (
                       <option key={key} value={key}>
                         {meta.label}
@@ -1653,34 +1035,44 @@ export default function RuntimesPage() {
                 </div>
                 <div
                   data-testid="runtime-list-scroll"
-                  className="pr-1"
+                  className="space-y-3 pr-1"
                 >
-                  <div className="grid gap-4 xl:grid-cols-2">
-                    {displayItems.map((runtime) => (
-                      <RuntimeCard
-                        key={runtime.id}
-                        runtime={runtime}
-                        actioning={runtimeActionId === runtime.id}
-                        sessionStats={sessionStatsByRuntime.get(runtime.id) ?? { total: 0, active: 0 }}
-                        usage={usageByRuntime.get(runtime.id)}
-                        usageWindow={usageWindow}
-                        usageLoading={usageLoading}
-                        latestVersion={latestVersion}
-                        upgrading={upgradeActionId === runtime.id}
-                        onToggleEnabled={handleToggleRuntime}
-                        onOpenSession={handleOpenSession}
-                        onDelete={handleDeleteRuntime}
-                        onEditAlias={handleOpenAlias}
-                        onEditAllowedRoots={handleOpenAllowedRoots}
-                        onUpgrade={handleUpgrade}
-                        isPlatformAdmin={isPlatformAdmin}
-                      />
-                    ))}
-                  </div>
-                  {/* task-07 / FR-04：服务端分页器 */}
+                  {machines.map((machine) => (
+                    <MachineCard
+                      key={machine.id}
+                      machine={machine}
+                      expanded={expandedMachineIds.has(machine.id)}
+                      onToggleExpand={() => handleToggleExpand(machine.id)}
+                      usageByRuntime={usageByRuntime}
+                      usageWindow={usageWindow}
+                      usageLoading={usageLoading}
+                      latestVersion={latestVersion}
+                      upgrading={upgradeActionId === machine.id}
+                      actioning={
+                        // 该机器下任一 runtime 正在操作 → 全机器卡 RuntimeCard 都 loading（保守粗粒度）。
+                        machine.runtimes.some((r) => runtimeActionId === r.id)
+                      }
+                      sessions={sessions}
+                      isPlatformAdmin={isPlatformAdmin}
+                      onEditAlias={handleOpenAlias}
+                      onUpgrade={handleUpgrade}
+                      onRuntimeToggle={handleToggleRuntime}
+                      onRuntimeOpenSession={handleOpenSession}
+                      onRuntimeDelete={handleDeleteRuntime}
+                      onRuntimeEditAlias={(rt) => {
+                        // task-09：runtime 卡内无别名按钮（别名上提机器），保留契约兜底。
+                        // runtime 别名即 display_alias 仍是 runtime 字段，但 UI 已上提机器卡。
+                        // 这里转译为：找到所属 machine 触发机器别名 modal。
+                        const owner = machines.find((m) => m.runtimes.some((r) => r.id === rt.id));
+                        if (owner) handleOpenAlias(owner);
+                      }}
+                      onRuntimeEditRoots={handleOpenAllowedRoots}
+                    />
+                  ))}
+                  {/* task-07 / FR-04：机器级分页器（D-007，PAGE_SIZE=20）。 */}
                   <div className="flex items-center justify-between gap-2 pt-1">
                     <span className="text-[11px] text-muted-foreground">
-                      共 {total} 条 · 第 {page + 1} 页
+                      共 {total} 台机器 · 第 {page + 1} 页
                     </span>
                     <div className="flex items-center gap-1.5">
                       <Button
@@ -1715,11 +1107,11 @@ export default function RuntimesPage() {
         runtime={dialogRuntime}
         open={dialogRuntime !== null}
         onClose={handleCloseDialog}
-        runtimes={items ?? []}
+        runtimes={allRuntimes}
         initialSessionId={initialSessionId ?? undefined}
       />
 
-      {/* task-07 / FR-03：别名编辑 modal（RuntimeCard onEditAlias 触发） */}
+      {/* task-09：机器别名编辑 modal（MachineCard onEditAlias 触发，改调 updateDaemonMachine）。 */}
       <Modal
         title="编辑展示别名"
         open={aliasEditing !== null}
@@ -1734,17 +1126,17 @@ export default function RuntimesPage() {
         <Input
           value={aliasValue}
           onChange={(e) => setAliasValue(e.target.value)}
-          placeholder="留空清除别名，回退原始名称"
+          placeholder="留空清除别名，回退原始主机名"
           maxLength={200}
           onPressEnter={handleSaveAlias}
           aria-label="别名输入"
         />
-        {aliasEditing?.name ? (
-          <p className="mt-2 text-xs text-muted-foreground">原始名称：{aliasEditing.name}</p>
+        {aliasEditing?.hostname ? (
+          <p className="mt-2 text-xs text-muted-foreground">原始主机名：{aliasEditing.hostname}</p>
         ) : null}
       </Modal>
 
-      {/* task-06 / FR-04 / D-006@v1：可写目录（allowed_roots 沙箱）编辑 modal。
+      {/* task-06 / FR-04 / D-006@v1：可写目录（allowed_roots 沙箱）编辑 modal（runtime 级，端点不变）。
           每个路径一行 Input + 删除按钮 + 底部添加按钮。
           daemon 仅允许在此白名单内 list_dir / 创建 workspace（D-002@v1 越界 403）。
           清空全部路径 = 回退任意目录可访问（提示已说明）。 */}

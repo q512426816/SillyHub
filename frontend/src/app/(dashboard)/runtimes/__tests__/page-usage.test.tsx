@@ -53,10 +53,11 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: nav.replace, push: vi.fn(), refresh: vi.fn() }),
 }));
 
-// ── mocks:照搬 page.test.tsx,补 getRuntimesUsage ────────────────────────────
+// ── mocks:task-09 改 mock listDaemonMachines（runtime 包进 machine.runtimes） ──
 
 const daemon = vi.hoisted(() => ({
   listDaemonRuntimes: vi.fn(),
+  listDaemonMachines: vi.fn(),
   listAgentSessions: vi.fn(),
   deleteAgentSession: vi.fn(),
   deleteDaemonRuntime: vi.fn(),
@@ -72,17 +73,10 @@ vi.mock("@/lib/daemon", async () => {
   return {
     ...actual,
     listDaemonRuntimes: daemon.listDaemonRuntimes,
-    // task-07：page 列表数据源改 listDaemonRuntimesPage；包装 mock 无需改 mockResolvedValue。
-    listDaemonRuntimesPage: vi.fn(async (params?: { limit?: number; offset?: number }) => {
-      const items = await daemon.listDaemonRuntimes();
-      return {
-        items,
-        total: items.length,
-        limit: params?.limit ?? 12,
-        offset: params?.offset ?? 0,
-      };
-    }),
-    updateDaemonRuntime: vi.fn(),
+    // task-09：page 列表数据源改 listDaemonMachines；测试 mock 在 beforeEach 里
+    // 用 wrapMachines 把 runtime 数组包进单个 machine 响应。
+    listDaemonMachines: daemon.listDaemonMachines,
+    updateDaemonMachine: vi.fn(),
     listAgentSessions: daemon.listAgentSessions,
     deleteAgentSession: daemon.deleteAgentSession,
     deleteDaemonRuntime: daemon.deleteDaemonRuntime,
@@ -121,6 +115,33 @@ function makeRuntime(overrides: Record<string, unknown> = {}) {
     created_at: "2026-06-24T09:00:00Z",
     updated_at: "2026-06-24T10:00:00Z",
     ...overrides,
+  };
+}
+
+/** task-09：把 runtime 数组包成单个 machine 响应（machine.id="m-1"，status=online）。 */
+function wrapMachines(runtimes: ReturnType<typeof makeRuntime>[]) {
+  return {
+    items: [
+      {
+        id: "m-1",
+        hostname: "host-1",
+        display_alias: null,
+        os: "linux",
+        arch: "x64",
+        status: "online",
+        last_heartbeat_at: "2026-06-24T10:00:00Z",
+        version: "1.4.2",
+        build_id: "a1b2c3d9e8f7",
+        created_at: "2026-06-24T09:00:00Z",
+        owner: null,
+        runtime_count: runtimes.length,
+        online_runtime_count: runtimes.filter((r) => r.status === "online").length,
+        runtimes,
+      },
+    ],
+    total: 1,
+    limit: 20,
+    offset: 0,
   };
 }
 
@@ -165,6 +186,8 @@ beforeEach(() => {
   nav.searchParams = new URLSearchParams();
   nav.replace = vi.fn();
   daemon.listDaemonRuntimes.mockResolvedValue([]);
+  // task-09：默认空 machine 列表（具体用例各自 mockResolvedValue）。
+  daemon.listDaemonMachines.mockResolvedValue(wrapMachines([]));
   daemon.listAgentSessions.mockResolvedValue({ items: [], total: 0, limit: 20, offset: 0 });
   daemon.deleteAgentSession.mockResolvedValue(undefined);
   daemon.deleteDaemonRuntime.mockResolvedValue(undefined);
@@ -208,8 +231,19 @@ async function renderAndWaitForUsage() {
   return utils;
 }
 
-/** 定位指定 runtime 卡片的用量区(用 article + h3 name 缩小作用域,避免多卡片串扰)。 */
+/** task-09：展开第一个 machine 卡（runtime 用量区默认折叠在 MachineCard 展开体内，
+ *  screen 级断言用量区文本前需先展开）。 */
+function expandFirstMachine() {
+  const headers = screen.getAllByRole("button");
+  const header = headers.find((el) => el.getAttribute("aria-expanded") === "false");
+  if (header) fireEvent.click(header);
+}
+
+/** 定位指定 runtime 卡片的用量区(task-09：runtime 卡默认折叠在 MachineCard 内，
+ *  这里先点 machine 折叠头展开，再按 name 找 article 定位用量区)。 */
 async function findUsageSectionByName(name: string) {
+  // 展开第一个 machine 卡（点击 aria-expanded=false 的折叠头）。
+  expandFirstMachine();
   const heading = await screen.findByText(name);
   // h3 在 header,向上找 article,再向下找用量统计区
   const article = heading.closest("article");
@@ -221,7 +255,7 @@ async function findUsageSectionByName(name: string) {
 
 describe("task-14 / FR-01: 卡片用量区 4 数字(AC-01)", () => {
   it("显示输入/输出/缓存/费用 4 数字(token k/M 格式化 + $USD)", async () => {
-    daemon.listDaemonRuntimes.mockResolvedValue([makeRuntime({ id: "rt-a", name: "MyClaude" })]);
+    daemon.listDaemonMachines.mockResolvedValue(wrapMachines([makeRuntime({ id: "rt-a", name: "MyClaude" })]));
     daemon.getRuntimesUsage.mockResolvedValue(
       usageResponse("7d", [
         makeUsageItem("rt-a", {
@@ -244,7 +278,7 @@ describe("task-14 / FR-01: 卡片用量区 4 数字(AC-01)", () => {
   });
 
   it("token k/M 格式化边界:< 1000 原值 / >= 1000 → k / >= 1e6 → M", async () => {
-    daemon.listDaemonRuntimes.mockResolvedValue([makeRuntime({ id: "rt-b", name: "EdgeClaude" })]);
+    daemon.listDaemonMachines.mockResolvedValue(wrapMachines([makeRuntime({ id: "rt-b", name: "EdgeClaude" })]));
     daemon.getRuntimesUsage.mockResolvedValue(
       usageResponse("7d", [
         makeUsageItem("rt-b", {
@@ -268,7 +302,7 @@ describe("task-14 / FR-01: 卡片用量区 4 数字(AC-01)", () => {
   });
 
   it("usage=undefined(新 runtime / 拉取失败)→ 数字全「—」、费用 $0.00", async () => {
-    daemon.listDaemonRuntimes.mockResolvedValue([makeRuntime({ id: "rt-new", name: "Fresh" })]);
+    daemon.listDaemonMachines.mockResolvedValue(wrapMachines([makeRuntime({ id: "rt-new", name: "Fresh" })]));
     // getRuntimesUsage 返回空(不含 rt-new)→ usage=undefined
     daemon.getRuntimesUsage.mockResolvedValue(usageResponse("7d", []));
 
@@ -291,7 +325,7 @@ describe("task-14 / FR-04: 时间窗切换(AC-02)", () => {
   it("点「当日」tab → getRuntimesUsage 以 '1d' 再调一次(切窗重拉)", async () => {
     // 注:必须 mock 至少 1 个 runtime,否则 listDaemonRuntimes=[] → 页面渲染 EmptyState,
     // 时间窗切换器(section 内)不渲染,findByRole 找不到「切换用量统计时间窗为当日」按钮。
-    daemon.listDaemonRuntimes.mockResolvedValue([makeRuntime({ id: "rt-switch", name: "SwitchClaude" })]);
+    daemon.listDaemonMachines.mockResolvedValue(wrapMachines([makeRuntime({ id: "rt-switch", name: "SwitchClaude" })]));
     daemon.getRuntimesUsage.mockResolvedValue(usageResponse("7d", []));
     await renderAndWaitForUsage();
     expect(daemon.getRuntimesUsage).toHaveBeenCalledWith("7d");
@@ -306,7 +340,7 @@ describe("task-14 / FR-04: 时间窗切换(AC-02)", () => {
   });
 
   it("切窗后卡片数字同步刷新(getRuntimesUsage 新返回值反映在 DOM)", async () => {
-    daemon.listDaemonRuntimes.mockResolvedValue([makeRuntime({ id: "rt-c", name: "SyncClaude" })]);
+    daemon.listDaemonMachines.mockResolvedValue(wrapMachines([makeRuntime({ id: "rt-c", name: "SyncClaude" })]));
     // 初始 7d:输入 1000(1.0k)
     daemon.getRuntimesUsage.mockResolvedValueOnce(
       usageResponse("7d", [
@@ -335,12 +369,14 @@ describe("task-14 / FR-04: 时间窗切换(AC-02)", () => {
   });
 
   it("时间窗标题随窗变化(用量统计(7 天) → 用量统计(当日))", async () => {
-    daemon.listDaemonRuntimes.mockResolvedValue([makeRuntime({ id: "rt-d", name: "LabelClaude" })]);
+    daemon.listDaemonMachines.mockResolvedValue(wrapMachines([makeRuntime({ id: "rt-d", name: "LabelClaude" })]));
     daemon.getRuntimesUsage.mockResolvedValue(
       usageResponse("7d", [makeUsageItem("rt-d", { input_tokens: 100 })]),
     );
 
     await renderAndWaitForUsage();
+    // task-09：runtime 用量区默认折叠，先展开 machine 卡。
+    expandFirstMachine();
     expect(screen.getAllByText(/用量统计（7 天）/).length).toBeGreaterThan(0);
 
     const todayBtn = await screen.findByRole("button", { name: /切换用量统计时间窗为当日/ });
@@ -354,9 +390,9 @@ describe("task-14 / FR-04: 时间窗切换(AC-02)", () => {
 
 describe("task-14 / D-001@v1: codex 无 cache 显示「—」(AC-05)", () => {
   it("codex 系 cache_read/creation 均 0 → 缓存项显示「—」(非 0)", async () => {
-    daemon.listDaemonRuntimes.mockResolvedValue([
-      makeRuntime({ id: "rt-codex", name: "CodexAgent", provider: "codex" }),
-    ]);
+    daemon.listDaemonMachines.mockResolvedValue(
+      wrapMachines([makeRuntime({ id: "rt-codex", name: "CodexAgent", provider: "codex" })]),
+    );
     daemon.getRuntimesUsage.mockResolvedValue(
       usageResponse("7d", [
         makeUsageItem("rt-codex", {
@@ -389,9 +425,9 @@ describe("task-14 / D-001@v1: codex 无 cache 显示「—」(AC-05)", () => {
   });
 
   it("claude 系有 cache → 缓存项显示合并值(read+creation)", async () => {
-    daemon.listDaemonRuntimes.mockResolvedValue([
-      makeRuntime({ id: "rt-claude", name: "ClaudeAgent", provider: "claude" }),
-    ]);
+    daemon.listDaemonMachines.mockResolvedValue(
+      wrapMachines([makeRuntime({ id: "rt-claude", name: "ClaudeAgent", provider: "claude" })]),
+    );
     daemon.getRuntimesUsage.mockResolvedValue(
       usageResponse("7d", [
         makeUsageItem("rt-claude", {
@@ -413,15 +449,21 @@ describe("task-14 / D-001@v1: codex 无 cache 显示「—」(AC-05)", () => {
 
 describe("task-14 / FR-04: loading 态(AC-07 子项)", () => {
   it("getRuntimesUsage pending → 卡片显示「加载中」", async () => {
-    daemon.listDaemonRuntimes.mockResolvedValue([makeRuntime({ id: "rt-l", name: "LoadClaude" })]);
+    daemon.listDaemonMachines.mockResolvedValue(wrapMachines([makeRuntime({ id: "rt-l", name: "LoadClaude" })]));
     // pending:永不 resolve(测试内不 advance)
     daemon.getRuntimesUsage.mockImplementation(
       () => new Promise<RuntimeUsageResponse>(() => {}),
     );
 
     await renderPage(<RuntimesPage />);
-    // 等 listDaemonRuntimes resolve + getRuntimesUsage 被调(loading=true)
+    // 等 listDaemonMachines resolve + getRuntimesUsage 被调(loading=true)
     await waitFor(() => expect(daemon.getRuntimesUsage).toHaveBeenCalled());
+    // task-09：runtime 用量区默认折叠，先展开 machine 卡才能看到「加载中」。
+    await waitFor(() => {
+      // 等机器列表渲染完成（machine header 出现）。
+      expect(screen.getAllByRole("button").length).toBeGreaterThan(0);
+    });
+    expandFirstMachine();
     // 用量区显示「加载中」(usageLoading=true)
     await waitFor(() => {
       expect(screen.getAllByText("加载中").length).toBeGreaterThan(0);

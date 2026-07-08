@@ -69,6 +69,99 @@ export async function listDaemonInstances(): Promise<DaemonInstanceRead[]> {
   return apiFetch<DaemonInstanceRead[]>("/api/daemon/instances");
 }
 
+// ── Daemon machines（machine→runtime 两级）──
+// 2026-07-07-daemon-machine-runtime-hierarchy task-05：machine 作为一级资源，
+// 字段对齐 design §5.1 / 后端 task-01 DTO（蛇形），与 runtime 级类型并列。
+
+/**
+ * machine（守护进程实例）视图 DTO，对齐 design §5.1 DaemonMachineRead。
+ * owner 复用既有 OwnerRead，runtimes 复用既有 DaemonRuntimeRead（含各自
+ * capabilities/allowed_roots）。runtime_count / online_runtime_count 由后端派生。
+ */
+export interface DaemonMachineRead {
+  id: string;
+  hostname: string;
+  display_alias: string | null;
+  os: string | null;
+  arch: string | null;
+  status: string; // online/offline/maintenance/disabled
+  last_heartbeat_at: string | null;
+  /** daemon 语义版本（区别于 runtime.version 的 provider CLI 版本）。 */
+  version: string | null;
+  /** daemon 构建 SHA。 */
+  build_id: string | null;
+  created_at: string;
+  owner?: OwnerRead | null;
+  /** 该 instance 下 runtime 总数。 */
+  runtime_count: number;
+  /** status=='online' 的 runtime 数。 */
+  online_runtime_count: number;
+  /** 该机器全部 runtime。0-runtime 机器为 []。 */
+  runtimes: DaemonRuntimeRead[];
+}
+
+/** GET /api/daemon/machines 查询参数（design §5.1）。 */
+export interface DaemonMachineListParams {
+  q?: string;
+  status?: string;
+  provider?: string;
+  user_id?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/** GET /api/daemon/machines 响应体（机器级分页）。 */
+export interface DaemonMachineListResponse {
+  items: DaemonMachineRead[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** PATCH /api/daemon/machines/{id} 请求体（省略=不变，显式 null/空白=清空）。 */
+export interface DaemonMachineUpdate {
+  display_alias?: string | null;
+}
+
+/**
+ * GET /api/daemon/machines — machine 级分页列表（admin 全局 / 普通用户仅自己）。
+ * 仿 listDaemonRuntimesPage 的 query 写法。
+ */
+export async function listDaemonMachines(
+  params?: DaemonMachineListParams,
+): Promise<DaemonMachineListResponse> {
+  return apiFetch<DaemonMachineListResponse>("/api/daemon/machines", {
+    query: params as Record<string, string | number | undefined> | undefined,
+  });
+}
+
+/**
+ * PATCH /api/daemon/machines/{instance_id} — 直写机器别名（0-runtime 机器也能改）。
+ * 返回重新聚合的 DaemonMachineRead。仿 updateDaemonRuntime。
+ */
+export async function updateDaemonMachine(
+  instanceId: string,
+  input: DaemonMachineUpdate,
+): Promise<DaemonMachineRead> {
+  return apiFetch<DaemonMachineRead>(
+    `/api/daemon/machines/${encodeURIComponent(instanceId)}`,
+    { method: "PATCH", json: input },
+  );
+}
+
+/**
+ * POST /api/daemon/machines/{instance_id}/self-update — 按 instance 路由 daemon 升级。
+ * 不再借道 runtime_id（design §5.3）。返回 {sent, latest_version}，仿 triggerDaemonSelfUpdate。
+ */
+export async function triggerMachineSelfUpdate(
+  instanceId: string,
+): Promise<{ sent: boolean; latest_version: string }> {
+  return apiFetch(
+    `/api/daemon/machines/${encodeURIComponent(instanceId)}/self-update`,
+    { method: "POST" },
+  );
+}
+
 // task-06 / FR-04 / D-006@v1：平台管理员全局分页视图。旧 listDaemonRuntimes()
 // 仍请求 /api/daemon/runtimes 返回数组（FR-06 兼容）。
 export interface DaemonRuntimeListParams {

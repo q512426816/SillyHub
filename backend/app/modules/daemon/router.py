@@ -30,6 +30,7 @@ from app.core.logging import get_logger
 from app.modules.agent.schema import AgentRunLogEntry
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
+from app.modules.daemon.model import DaemonInstance, DaemonRuntime
 from app.modules.daemon.permission_service import (
     DaemonPermissionService,
     PermissionResponseRead,
@@ -47,6 +48,9 @@ from app.modules.daemon.schema import (
     AgentSessionRead,
     DaemonInstanceProviderItem,
     DaemonInstanceRead,
+    DaemonMachineListResponse,
+    DaemonMachineRead,
+    DaemonMachineUpdate,
     DaemonRegisterRequest,
     DaemonRegisterResponse,
     DaemonRegisterRuntimeItem,
@@ -455,6 +459,45 @@ def _runtime_read(
     return read.model_copy(update=update)
 
 
+def _build_machine_read(
+    instance: DaemonInstance,
+    owner: User | None,
+    runtimes: list[DaemonRuntime],
+) -> DaemonMachineRead:
+    """把 (instance, owner, runtimes) ORM 组装成 DaemonMachineRead（design §5.1）。
+
+    纯组装函数（不做 SQL）：GET /machines 与 PATCH /machines/{id} 共用。runtime 卡
+    复用 _runtime_read 填充 owner/instance；machine 卡再聚合 runtime_count /
+    online_runtime_count（design §4.1 机器级聚合字段）。0-runtime 机器传 ``[]`` 正常。
+    """
+    runtime_reads = [_runtime_read(r, owner, instance) for r in runtimes]
+    # 直接构造（不走 model_validate(instance)）：runtime_count/online_runtime_count
+    # 是派生字段（design §5.1），daemon_instance ORM 无此二属性，model_validate 会在
+    # model_copy 填值前抛 ValidationError（task-04 测试捕获）。显式传全部字段。
+    return DaemonMachineRead(
+        id=instance.id,
+        hostname=instance.hostname,
+        display_alias=instance.display_alias,
+        os=instance.os,
+        arch=instance.arch,
+        status=instance.status,
+        last_heartbeat_at=instance.last_heartbeat_at,
+        version=instance.version,
+        build_id=instance.build_id,
+        created_at=instance.created_at,
+        owner=OwnerRead(
+            user_id=owner.id,
+            email=owner.email,
+            display_name=owner.display_name,
+        )
+        if owner is not None
+        else None,
+        runtime_count=len(runtimes),
+        online_runtime_count=sum(1 for r in runtimes if r.status == "online"),
+        runtimes=runtime_reads,
+    )
+
+
 # ── Runtime admin global list (task-04 / FR-01/04 / D-005@v1) ────────────────
 # 固定路径 /runtimes/page 必须声明在动态 /runtimes/{runtime_id} 之前，否则
 # "page" 会被 {runtime_id} 捕获再 UUID parse 失败 → 422（与 /runtimes/usage 同款约束）。
@@ -626,6 +669,126 @@ async def trigger_daemon_self_update(
         raise DaemonRuntimeOffline(
             "Runtime is offline or WS send failed.",
             details={"runtime_id": str(runtime_id)},
+        )
+    return {"sent": True, "latest_version": latest}
+
+
+# ── Machine-level endpoints (2026-07-07-daemon-machine-runtime-hierarchy task-03) ──
+# design §5.1/§5.2/§5.3：机器级聚合视图与 mutation，全部 RuntimeAdminUser 权限
+# + 机器归属校验（D-001）。/machines 为独立固定前缀，不与 /runtimes/{runtime_id}
+# 动态段冲突（design §5.1）。
+
+
+@router.get(
+    "/machines",
+    response_model=DaemonMachineListResponse,
+)
+async def list_machines(
+    session: SessionDep,
+    user: RuntimeAdminUser,
+    q: str | None = Query(default=None, max_length=200),
+    status: str | None = Query(default=None, max_length=20),
+    provider: str | None = Query(default=None, max_length=50),
+    user_id: uuid.UUID | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> DaemonMachineListResponse:
+    """平台管理员分页查看全部 owner 的 daemon 机器（design §5.1 / FR-1）。
+
+    普通账号仅见自己的机器（service 层强制 ``actor == user_id``，请求 ``user_id`` 被忽略）。
+    ``list_machines`` 内部已先 ``cleanup_stale_runtimes`` 收敛 stale 状态，router 不重复调。
+    """
+    svc = DaemonService(session)
+    rows, runtimes_by_instance, total = await svc.list_machines(
+        actor_user_id=user.id,
+        is_platform_admin=user.is_platform_admin,
+        q=q,
+        status=status,
+        provider=provider,
+        user_id=user_id,
+        limit=limit,
+        offset=offset,
+    )
+    items = [
+        _build_machine_read(inst, owner, runtimes_by_instance.get(inst.id, []))
+        for inst, owner in rows
+    ]
+    return DaemonMachineListResponse(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.patch(
+    "/machines/{instance_id}",
+    response_model=DaemonMachineRead,
+)
+async def update_machine(
+    instance_id: uuid.UUID,
+    data: DaemonMachineUpdate,
+    session: SessionDep,
+    user: RuntimeAdminUser,
+) -> DaemonMachineRead:
+    """PATCH machine display_alias（design §5.2 / D-001 / FR-2）。
+
+    省略 display_alias = 不变；显式 null/空白 = 清空（与 runtime 级 PATCH 语义一致）。
+    0-runtime 机器亦可改（直写 daemon_instances）。归属校验/404 由 service
+    ``_get_owned_instance`` 完成（越权 403 / 不存在 404）。
+    """
+    from sqlmodel import col as _col
+
+    from app.modules.daemon.model import DaemonRuntime
+
+    svc = DaemonService(session)
+    instance = await svc.update_machine_alias(
+        instance_id,
+        user.id,
+        display_alias=data.display_alias,
+        display_alias_set="display_alias" in data.model_fields_set,
+        is_platform_admin=user.is_platform_admin,
+    )
+    # update_machine_alias 只返回 instance，机器卡需重新聚合 owner+runtimes。
+    owner = await session.get(User, instance.user_id)
+    runtimes = list(
+        (
+            await session.execute(
+                select(DaemonRuntime)
+                .where(_col(DaemonRuntime.daemon_instance_id) == instance.id)
+                .order_by(_col(DaemonRuntime.provider))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return _build_machine_read(instance, owner, runtimes)
+
+
+@router.post(
+    "/machines/{instance_id}/self-update",
+)
+async def trigger_machine_self_update(
+    instance_id: uuid.UUID,
+    session: SessionDep,
+    user: RuntimeAdminUser,
+) -> dict[str, str | bool]:
+    """推送 daemon 自更新指令到指定机器（admin，design §5.3 / FR-3）。
+
+    机器级直接以 ``instance_id`` 作 ``daemon_id`` 路由 WS（ws_hub 第一参数即
+    daemon_id，task-06），复用既有 ``daemon:self_update`` 消息，不引入新事件 type
+    （design §14）。先 ``_get_owned_instance`` 做归属校验（403/404），离线或 WS 发送
+    失败 → 504 ``DaemonRuntimeOffline``（与 runtime 级 self-update 同款）。
+    """
+    svc = DaemonService(session)
+    await svc._get_owned_instance(instance_id, user.id, is_platform_admin=user.is_platform_admin)
+
+    from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+    latest = get_daemon_latest_version()
+    hub = get_daemon_ws_hub()
+    sent = await hub.send_self_update(instance_id, version=latest)
+    if not sent:
+        from app.modules.daemon.runtime.service import DaemonRuntimeOffline
+
+        raise DaemonRuntimeOffline(
+            "Machine is offline or WS send failed.",
+            details={"daemon_instance_id": str(instance_id)},
         )
     return {"sent": True, "latest_version": latest}
 

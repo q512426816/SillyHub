@@ -1,0 +1,544 @@
+<!-- author: WhaleFall -->
+<!-- created_at: 2026-07-07T15:12:00 -->
+<!-- prototype: 守护进程运行时页 Machine→Runtime 两级重构 · 三方案对比 mockup（含用量统计） -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>守护进程运行时 · Machine→Runtime 两级重构 · 三方案对比</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --blue-50:#eff6ff;--blue-100:#dbeafe;--blue-600:#2563eb;--blue-700:#1d4ed8;
+    --cyan-500:#06b6d4;--cyan-50:#ecfeff;
+    --emerald-50:#ecfdf5;--emerald-500:#10b981;--emerald-600:#059669;--emerald-700:#047857;
+    --amber-50:#fffbeb;--amber-500:#f59e0b;--amber-600:#d97706;--amber-700:#b45309;
+    --red-50:#fef2f2;--red-500:#ef4444;--red-600:#dc2626;--red-700:#b91c1c;
+    --violet-50:#f5f3ff;--violet-500:#8b5cf6;--violet-700:#6d28d9;
+    --slate-50:#f8fafc;--slate-100:#f1f5f9;--slate-200:#e2e8f0;--slate-300:#cbd5e1;
+    --slate-400:#94a3b8;--slate-500:#64748b;--slate-600:#475569;--slate-700:#334155;--slate-800:#1e293b;--slate-900:#0f172a;
+    --r-sm:6px;--r-md:8px;--r-lg:12px;--r-xl:16px;
+    --sh-sm:0 1px 2px 0 rgb(15 23 42/.05);
+    --sh-md:0 4px 6px -1px rgb(15 23 42/.07),0 2px 4px -2px rgb(15 23 42/.05);
+    --sh-lg:0 10px 15px -3px rgb(15 23 42/.08),0 4px 6px -4px rgb(15 23 42/.05);
+    --font:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--slate-100);color:var(--slate-800);font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .doc-wrap{max-width:1320px;margin:0 auto;padding:24px}
+  .doc-head{background:#fff;border:1px solid var(--slate-200);border-radius:var(--r-lg);padding:18px 22px;margin-bottom:20px;box-shadow:var(--sh-sm)}
+  .doc-head h1{font-size:20px;font-weight:700;color:var(--slate-900);letter-spacing:-.01em}
+  .doc-head p{font-size:13px;color:var(--slate-500);margin-top:4px}
+  .doc-head .legend{display:flex;gap:14px;margin-top:12px;flex-wrap:wrap;font-size:12px;color:var(--slate-600)}
+  .doc-head .legend b{color:var(--slate-800)}
+  .doc-head .upd{margin-top:8px;font-size:11.5px;color:var(--emerald-700);background:var(--emerald-50);border:1px solid #a7f3d0;border-radius:var(--r-sm);padding:5px 10px;display:inline-block}
+
+  .scheme{background:#fff;border:1px solid var(--slate-200);border-radius:var(--r-xl);overflow:hidden;margin-bottom:26px;box-shadow:var(--sh-md)}
+  .scheme-tag{display:flex;align-items:center;gap:12px;padding:16px 22px;border-bottom:1px solid var(--slate-200);background:linear-gradient(90deg,var(--blue-50),#fff)}
+  .scheme-tag .tag-no{width:30px;height:30px;border-radius:var(--r-md);background:var(--blue-600);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0}
+  .scheme-tag h2{font-size:16px;font-weight:700;color:var(--slate-900)}
+  .scheme-tag .sub{font-size:12px;color:var(--slate-500);margin-top:1px}
+  .scheme-tag .rec{margin-left:auto;background:var(--emerald-500);color:#fff;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;letter-spacing:.04em}
+  .scheme-procon{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--slate-200);border-bottom:1px solid var(--slate-200)}
+  .scheme-procon .col{background:#fff;padding:12px 22px}
+  .scheme-procon h4{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+  .scheme-procon .pros h4{color:var(--emerald-700)}
+  .scheme-procon .cons h4{color:var(--red-700)}
+  .scheme-procon ul{list-style:none;font-size:12.5px;color:var(--slate-600)}
+  .scheme-procon li{padding:2px 0 2px 16px;position:relative}
+  .scheme-procon .pros li::before{content:"✓";position:absolute;left:0;color:var(--emerald-600);font-weight:700}
+  .scheme-procon .cons li::before{content:"✗";position:absolute;left:0;color:var(--red-500);font-weight:700}
+
+  .app{display:flex;min-height:680px;background:var(--slate-50);border-top:1px solid var(--slate-200)}
+  .sidebar{width:220px;background:#fff;border-right:1px solid var(--slate-200);padding:16px 12px;display:flex;flex-direction:column;flex-shrink:0}
+  .brand{display:flex;align-items:center;gap:10px;padding:6px 8px 16px}
+  .brand-logo{width:30px;height:30px;border-radius:var(--r-md);background:linear-gradient(135deg,var(--blue-600),var(--cyan-500));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:14px}
+  .brand-name{font-weight:700;font-size:14px;color:var(--slate-900)}
+  .nav-group-title{font-size:11px;font-weight:600;color:var(--slate-400);text-transform:uppercase;letter-spacing:.06em;padding:14px 10px 6px}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:var(--r-md);color:var(--slate-600);font-size:13px;font-weight:500;cursor:pointer;position:relative}
+  .nav-item:hover{background:var(--slate-100);color:var(--slate-900)}
+  .nav-item.active{background:var(--blue-50);color:var(--blue-700);font-weight:600}
+  .nav-item.active::before{content:"";position:absolute;left:-12px;top:7px;bottom:7px;width:3px;border-radius:2px;background:var(--blue-600)}
+  .nav-item svg{width:17px;height:17px;flex-shrink:0}
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .topbar{height:52px;background:#fff;border-bottom:1px solid var(--slate-200);display:flex;align-items:center;gap:14px;padding:0 20px;flex-shrink:0}
+  .crumb{font-size:13px;color:var(--slate-500)}
+  .crumb b{color:var(--slate-800);font-weight:600}
+  .crumb .sep{margin:0 6px;color:var(--slate-300)}
+  .content{padding:20px 22px;overflow:auto;flex:1}
+
+  .page-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;gap:16px}
+  .page-head .eyebrow{font-size:11px;font-weight:600;color:var(--slate-400);text-transform:uppercase;letter-spacing:.06em}
+  .page-head h1{font-size:21px;font-weight:700;color:var(--slate-900);letter-spacing:-.01em;margin-top:2px}
+  .page-head p{font-size:12.5px;color:var(--slate-500);margin-top:2px}
+  .head-actions{display:flex;gap:8px;align-items:center}
+  .install-pill{display:flex;align-items:center;gap:8px;border:1px dashed var(--slate-300);background:var(--slate-50);border-radius:var(--r-md);padding:7px 11px;font-size:11.5px;color:var(--slate-600)}
+  .install-pill code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--slate-700)}
+
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:var(--r-md);font-size:12.5px;font-weight:600;cursor:pointer;border:1px solid transparent;transition:all .15s;font-family:var(--font);white-space:nowrap}
+  .btn svg{width:14px;height:14px}
+  .btn-primary{background:var(--blue-600);color:#fff}
+  .btn-outline{background:#fff;color:var(--slate-700);border-color:var(--slate-300)}
+  .btn-outline:hover{background:var(--slate-50)}
+  .btn-ghost{background:transparent;color:var(--slate-600);border-color:var(--slate-300)}
+  .btn-tiny{padding:4px 9px;font-size:11.5px;border-radius:var(--r-sm)}
+  .btn-danger{background:#fff;color:var(--red-600);border-color:var(--slate-300)}
+
+  .summary-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px}
+  .sum-card{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--slate-200);border-radius:var(--r-md);padding:12px 14px;background:#fff}
+  .sum-card.online{border-color:var(--emerald-500);background:var(--emerald-50)}
+  .sum-card.offline{border-color:var(--slate-300);background:var(--slate-50)}
+  .sum-card .lbl{font-size:10.5px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:.05em}
+  .sum-card .val{font-size:22px;font-weight:700;color:var(--slate-900);margin-top:3px;line-height:1}
+  .sum-card .meta{font-size:10.5px;color:var(--slate-500);margin-top:3px}
+  .sum-card svg{width:18px;height:18px;opacity:.7}
+
+  .filterbar{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+  .input,.select{height:32px;border:1px solid var(--slate-300);border-radius:var(--r-md);padding:0 10px;font-size:12.5px;color:var(--slate-800);background:#fff;font-family:var(--font);display:flex;align-items:center;gap:6px}
+  .input{min-width:200px;color:var(--slate-400)}
+  .select{min-width:110px;justify-content:space-between}
+  .select svg{width:13px;height:13px;color:var(--slate-400)}
+  .spacer{flex:1}
+  .win-tabs{display:flex;gap:2px;border:1px solid var(--slate-300);border-radius:var(--r-md);padding:2px;background:#fff}
+  .win-tabs .tab{padding:4px 10px;font-size:11.5px;font-weight:600;border-radius:var(--r-sm);cursor:pointer;color:var(--slate-500)}
+  .win-tabs .tab.active{background:var(--blue-600);color:#fff}
+
+  .badge{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600}
+  .badge .dot{width:6px;height:6px;border-radius:50%}
+  .badge.emerald{background:var(--emerald-50);color:var(--emerald-700)} .badge.emerald .dot{background:var(--emerald-600)}
+  .badge.amber{background:var(--amber-50);color:var(--amber-700)} .badge.amber .dot{background:var(--amber-500)}
+  .badge.slate{background:var(--slate-100);color:var(--slate-600)} .badge.slate .dot{background:var(--slate-400)}
+  .pbadge{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:var(--r-sm);font-size:11px;font-weight:600;border:1px solid}
+  .pbadge.claude{background:var(--violet-50);color:var(--violet-700);border-color:#ddd6fe}
+  .pbadge.codex{background:var(--emerald-50);color:var(--emerald-700);border-color:#a7f3d0}
+  .pbadge.gemini{background:var(--cyan-50);color:#0e7490;border-color:#a5f3fc}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+
+  /* ===== 机器卡（方案A） ===== */
+  .machine-card{border:1px solid var(--slate-200);border-radius:var(--r-lg);background:#fff;margin-bottom:14px;overflow:hidden;box-shadow:var(--sh-sm)}
+  .machine-head{display:flex;align-items:center;gap:14px;padding:14px 18px;cursor:pointer}
+  .machine-head:hover{background:var(--slate-50)}
+  .machine-icon{width:42px;height:42px;border-radius:var(--r-md);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .machine-icon.online{background:var(--emerald-50);color:var(--emerald-700)}
+  .machine-icon.offline{background:var(--slate-100);color:var(--slate-500)}
+  .machine-icon svg{width:21px;height:21px}
+  .machine-title{min-width:0;flex:1}
+  .machine-title .row1{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .machine-title .name{font-size:15px;font-weight:700;color:var(--slate-900)}
+  .machine-title .alias{font-size:11.5px;color:var(--slate-500)}
+  .machine-title .row2{display:flex;align-items:center;gap:14px;margin-top:5px;font-size:11.5px;color:var(--slate-500);flex-wrap:wrap}
+  .machine-title .row2 .item{display:inline-flex;align-items:center;gap:4px}
+  .machine-title .row2 svg{width:12px;height:12px}
+  .machine-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
+  .rt-count{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--slate-700);background:var(--slate-100);padding:3px 9px;border-radius:999px}
+  .rt-count .online-num{color:var(--emerald-700)}
+  .machine-cost{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--blue-700);background:var(--blue-50);padding:3px 9px;border-radius:999px;border:1px solid var(--blue-100)}
+  .chevron{width:18px;height:18px;color:var(--slate-400);transition:transform .2s}
+  .machine-card.open .chevron{transform:rotate(90deg)}
+  .machine-body{border-top:1px solid var(--slate-100);background:var(--slate-50);padding:16px 18px}
+  .rt-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+
+  /* ===== runtime 卡（三方案共用） ===== */
+  .rt-card{border:1px solid var(--slate-200);border-radius:var(--r-md);background:#fff;overflow:hidden}
+  .rt-card .rh{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--slate-100)}
+  .rt-card .rh .rt-name{font-size:13px;font-weight:700;color:var(--slate-900);font-family:ui-monospace,Menlo,monospace;margin-left:auto}
+  .rt-meta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:10px 12px 6px;font-size:11px}
+  .rt-meta .mlbl{color:var(--slate-400);font-weight:600;text-transform:uppercase;font-size:9.5px;letter-spacing:.04em}
+  .rt-meta .mval{color:var(--slate-700);font-weight:600;margin-top:2px;font-size:11.5px}
+
+  /* ★ 用量统计区（补全） ★ */
+  .rt-usage{padding:8px 12px 10px;border-top:1px solid var(--slate-100);background:var(--slate-50)}
+  .rt-usage .uh{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  .rt-usage .uh .ulbl{font-size:10px;font-weight:700;color:var(--slate-500);text-transform:uppercase;letter-spacing:.05em}
+  .rt-usage .uh .stag{font-size:9.5px;color:var(--slate-400)}
+  .usage-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:6px}
+  .usage-grid .ustat .ul{font-size:9px;font-weight:600;color:var(--slate-400);text-transform:uppercase;letter-spacing:.03em}
+  .usage-grid .ustat .uv{font-size:13px;font-weight:700;color:var(--slate-900);margin-top:1px;font-variant-numeric:tabular-nums}
+  .usage-grid .ustat .uv.muted{color:var(--slate-400);font-weight:600}
+  .usage-grid .ustat .uv.cost{color:var(--blue-700)}
+  .spark{display:block;width:100%;height:30px}
+
+  .rt-roots{padding:7px 12px;border-top:1px solid var(--slate-100);font-size:10.5px;color:var(--slate-500);background:#fff}
+  .rt-roots .chip{display:inline-flex;align-items:center;gap:3px;border:1px solid var(--slate-200);background:var(--slate-50);padding:2px 6px;border-radius:var(--r-sm);font-family:ui-monospace,Menlo,monospace;font-size:10px;margin-right:4px}
+  .rt-actions{display:flex;gap:5px;flex-wrap:wrap;padding:8px 12px;border-top:1px solid var(--slate-100)}
+
+  /* ===== 方案B 主从 ===== */
+  .master-detail{display:grid;grid-template-columns:300px 1fr;gap:14px;min-height:520px}
+  .master-list{border:1px solid var(--slate-200);border-radius:var(--r-lg);background:#fff;overflow:hidden}
+  .master-list .mh{padding:12px 14px;border-bottom:1px solid var(--slate-200);font-size:12px;font-weight:700;color:var(--slate-700);text-transform:uppercase;letter-spacing:.05em;display:flex;justify-content:space-between;align-items:center}
+  .master-item{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--slate-100);cursor:pointer;position:relative}
+  .master-item:hover{background:var(--slate-50)}
+  .master-item.active{background:var(--blue-50)}
+  .master-item.active::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--blue-600)}
+  .master-item .mi-icon{width:32px;height:32px;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .master-item .mi-icon.online{background:var(--emerald-50);color:var(--emerald-700)}
+  .master-item .mi-icon.offline{background:var(--slate-100);color:var(--slate-500)}
+  .master-item .mi-icon svg{width:16px;height:16px}
+  .master-item .mi-info{min-width:0;flex:1}
+  .master-item .mi-name{font-size:13px;font-weight:600;color:var(--slate-900);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .master-item .mi-sub{font-size:11px;color:var(--slate-500);margin-top:1px}
+  .detail-pane{border:1px solid var(--slate-200);border-radius:var(--r-lg);background:#fff;padding:16px;overflow:auto}
+  .detail-head{display:flex;align-items:center;gap:10px;padding-bottom:12px;border-bottom:1px solid var(--slate-100);margin-bottom:14px;flex-wrap:wrap}
+  .detail-head .dh-name{font-size:16px;font-weight:700;color:var(--slate-900)}
+  .narrow-warn{font-size:11px;color:var(--amber-700);background:var(--amber-50);border:1px solid #fde68a;border-radius:var(--r-sm);padding:6px 10px;margin-top:10px}
+
+  /* ===== 方案C 网格 ===== */
+  .machine-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .mg-card{border:1px solid var(--slate-200);border-radius:var(--r-lg);background:#fff;padding:16px;cursor:pointer;transition:all .15s;box-shadow:var(--sh-sm)}
+  .mg-card:hover{border-color:var(--blue-600);box-shadow:var(--sh-md);transform:translateY(-1px)}
+  .mg-card .mg-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .mg-card .mg-icon{width:38px;height:38px;border-radius:var(--r-md);display:flex;align-items:center;justify-content:center}
+  .mg-card .mg-icon.online{background:var(--emerald-50);color:var(--emerald-700)}
+  .mg-card .mg-icon.offline{background:var(--slate-100);color:var(--slate-500)}
+  .mg-card .mg-icon svg{width:19px;height:19px}
+  .mg-card .mg-name{font-size:15px;font-weight:700;color:var(--slate-900);margin-bottom:2px}
+  .mg-card .mg-host{font-size:11px;color:var(--slate-500);font-family:ui-monospace,Menlo,monospace}
+  .mg-card .mg-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:12px 0;padding:10px 0;border-top:1px solid var(--slate-100);border-bottom:1px solid var(--slate-100)}
+  .mg-card .mg-stat .slbl{font-size:9.5px;color:var(--slate-400);font-weight:600;text-transform:uppercase}
+  .mg-card .mg-stat .sval{font-size:14px;font-weight:700;color:var(--slate-900);margin-top:2px}
+  .mg-card .mg-stat .sval.cost{color:var(--blue-700)}
+  .mg-card .mg-providers{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px;min-height:22px}
+  .mg-card .mg-footer{display:flex;align-items:center;justify-content:space-between}
+  .route-arrow{text-align:center;margin:18px 0;color:var(--slate-400);font-size:13px}
+  .route-arrow .arrow{display:inline-block;font-size:22px;color:var(--blue-600);margin:0 8px;vertical-align:middle}
+  .route-arrow .url{font-family:ui-monospace,Menlo,monospace;background:var(--slate-100);padding:3px 9px;border-radius:var(--r-sm);font-size:12px;color:var(--slate-700)}
+</style>
+</head>
+<body>
+<div class="doc-wrap">
+  <div class="doc-head">
+    <h1>守护进程运行时 · Machine → Runtime 两级重构</h1>
+    <p>同一份示例数据（3 台机器），三个交互形态方案对比。点选后进入设计阶段。</p>
+    <div class="legend">
+      <span><b>机器卡</b> = 一台 Daemon 主机（daemon_instances）</span>
+      <span><b>Runtime 卡</b> = 该机器下的一种 provider</span>
+      <span><b>用量统计</b> = 输入/输出/缓存/费用 + 趋势折线（7天/当日/30天可切）</span>
+    </div>
+    <div class="upd">✓ 已补全用量统计区（每张 runtime 卡 4 数字 + sparkline，机器级聚合费用上提到机器头/网格卡）</div>
+  </div>
+
+  <!-- ════════════ 方案 A ════════════ -->
+  <div class="scheme">
+    <div class="scheme-tag">
+      <div class="tag-no">A</div>
+      <div><h2>手风琴折叠</h2><div class="sub">单页 · 机器卡默认折叠 · 展开内嵌 runtime 卡（含用量统计）· 一次往返拿全两级数据</div></div>
+      <div class="rec">推荐</div>
+    </div>
+    <div class="scheme-procon">
+      <div class="col pros"><h4>优势</h4><ul>
+        <li>最贴合您原话「展开机器后展示其 runtime」</li>
+        <li>GET /machines 一次返回 machine+嵌套 runtimes，展开零延迟</li>
+        <li>用量数据随 runtime 一起返回，无需二次请求</li>
+        <li>与现有单栏卡片样式一致，改动骨架最小</li>
+      </ul></div>
+      <div class="col cons"><h4>劣势</h4><ul>
+        <li>单次响应体较大（每机器含全部 runtime + 用量）</li>
+        <li>多台同时展开时页面变长（机器级分页已缓解）</li>
+      </ul></div>
+    </div>
+    <div class="app">
+      <div class="sidebar">
+        <div class="brand"><div class="brand-logo">S</div><div class="brand-name">SillyHub</div></div>
+        <div class="nav-group-title">主平台</div>
+        <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>工作区</div>
+        <div class="nav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg>守护进程运行时</div>
+        <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82"/></svg>设置</div>
+      </div>
+      <div class="main">
+        <div class="topbar"><div class="crumb">系统 <span class="sep">/</span> <b>守护进程运行时</b></div></div>
+        <div class="content">
+          <div class="page-head">
+            <div><div class="eyebrow">系统</div><h1>守护进程运行时</h1><p>按 Daemon 主机聚合 · 一台机器包含多个 provider 运行时</p></div>
+            <div class="head-actions"><div class="install-pill"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg><code>sillyhub-daemon start --server …</code></div></div>
+          </div>
+
+          <div class="summary-grid">
+            <div class="sum-card"><div><div class="lbl">机器总数</div><div class="val">3</div><div class="meta">2 个提供方</div></div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg></div>
+            <div class="sum-card online"><div><div class="lbl">在线</div><div class="val">2</div><div class="meta">心跳 3 秒前</div></div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"/></svg></div>
+            <div class="sum-card"><div><div class="lbl">维护中</div><div class="val">0</div></div></div>
+            <div class="sum-card"><div><div class="lbl">禁用</div><div class="val">0</div></div></div>
+            <div class="sum-card offline"><div><div class="lbl">离线</div><div class="val">1</div></div></div>
+          </div>
+
+          <div class="filterbar">
+            <div class="input"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>搜索主机名/别名/runtime…</div>
+            <div class="select">全部状态 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></div>
+            <div class="select">全部提供方 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></div>
+            <div class="select">全部人员 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></div>
+            <div class="spacer"></div>
+            <div class="win-tabs"><div class="tab active">7 天</div><div class="tab">当日</div><div class="tab">30 天</div></div>
+            <button class="btn btn-outline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>刷新</button>
+          </div>
+
+          <!-- 机器 1：展开 -->
+          <div class="machine-card open">
+            <div class="machine-head">
+              <div class="machine-icon online"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
+              <div class="machine-title">
+                <div class="row1"><span class="name">我的开发机</span><span class="alias">DESKTOP-WHALE</span><span class="badge emerald"><span class="dot"></span>在线</span></div>
+                <div class="row2">
+                  <span class="item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>Windows · x86_64</span>
+                  <span class="item">心跳 3 秒前</span>
+                  <span class="item">daemon v1.4.2 <span class="mono">#a3f9c1</span></span>
+                  <span class="item">负责人：张三</span>
+                </div>
+              </div>
+              <div class="machine-actions">
+                <span class="machine-cost">7天费用 $15.60</span>
+                <span class="rt-count"><span class="online-num">2</span>/3 runtime</span>
+                <button class="btn btn-outline btn-tiny">别名</button>
+                <button class="btn btn-outline btn-tiny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>升级 daemon</button>
+                <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+              </div>
+            </div>
+            <div class="machine-body">
+              <div class="rt-grid">
+                <!-- runtime: claude -->
+                <div class="rt-card">
+                  <div class="rh"><span class="pbadge claude">Claude</span><span class="badge emerald"><span class="dot"></span>在线</span><span class="rt-name">claude-code</span></div>
+                  <div class="rt-meta"><div><div class="mlbl">版本</div><div class="mval mono">1.0.82</div></div><div><div class="mlbl">会话</div><div class="mval">3（1 活跃）</div></div><div><div class="mlbl">协议</div><div class="mval mono">stream-http</div></div></div>
+                  <div class="rt-usage">
+                    <div class="uh"><span class="ulbl">用量统计（7 天）</span><span class="stag">claude-sonnet-4</span></div>
+                    <div class="usage-grid">
+                      <div class="ustat"><div class="ul">输入</div><div class="uv">428k</div></div>
+                      <div class="ustat"><div class="ul">输出</div><div class="uv">96k</div></div>
+                      <div class="ustat"><div class="ul">缓存</div><div class="uv">1.2M</div></div>
+                      <div class="ustat"><div class="ul">费用</div><div class="uv cost">$12.40</div></div>
+                    </div>
+                    <svg class="spark" viewBox="0 0 200 30" preserveAspectRatio="none"><defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2563eb" stop-opacity=".25"/><stop offset="1" stop-color="#2563eb" stop-opacity="0"/></linearGradient></defs><path d="M0,24 L20,20 L40,22 L60,15 L80,17 L100,10 L120,12 L140,6 L160,9 L180,4 L200,7 L200,30 L0,30 Z" fill="url(#g1)"/><path d="M0,24 L20,20 L40,22 L60,15 L80,17 L100,10 L120,12 L140,6 L160,9 L180,4 L200,7" fill="none" stroke="#2563eb" stroke-width="1.5"/><path d="M0,27 L20,26 L40,26 L60,24 L80,25 L100,22 L120,23 L140,20 L160,21 L180,18 L200,19" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="2,2"/></svg>
+                  </div>
+                  <div class="rt-roots">可写目录：<span class="chip">F:/WorkNew/SillyHub</span><span class="chip">~/sillyhub</span></div>
+                  <div class="rt-actions"><button class="btn btn-ghost btn-tiny">可写目录</button><button class="btn btn-ghost btn-tiny">审计日志</button><button class="btn btn-primary btn-tiny">会话</button><button class="btn btn-ghost btn-tiny">禁用</button><button class="btn btn-danger btn-tiny">移除</button></div>
+                </div>
+                <!-- runtime: codex -->
+                <div class="rt-card">
+                  <div class="rh"><span class="pbadge codex">Codex</span><span class="badge emerald"><span class="dot"></span>在线</span><span class="rt-name">codex-cli</span></div>
+                  <div class="rt-meta"><div><div class="mlbl">版本</div><div class="mval mono">0.45.1</div></div><div><div class="mlbl">会话</div><div class="mval">1</div></div><div><div class="mlbl">协议</div><div class="mval mono"> Responses</div></div></div>
+                  <div class="rt-usage">
+                    <div class="uh"><span class="ulbl">用量统计（7 天）</span><span class="stag">gpt-5</span></div>
+                    <div class="usage-grid">
+                      <div class="ustat"><div class="ul">输入</div><div class="uv">82k</div></div>
+                      <div class="ustat"><div class="ul">输出</div><div class="uv">31k</div></div>
+                      <div class="ustat"><div class="ul">缓存</div><div class="uv muted">—</div></div>
+                      <div class="ustat"><div class="ul">费用</div><div class="uv cost">$3.20</div></div>
+                    </div>
+                    <svg class="spark" viewBox="0 0 200 30" preserveAspectRatio="none"><path d="M0,22 L20,24 L40,18 L60,20 L80,14 L100,16 L120,11 L140,13 L160,8 L180,10 L200,6 L200,30 L0,30 Z" fill="#10b98122"/><path d="M0,22 L20,24 L40,18 L60,20 L80,14 L100,16 L120,11 L140,13 L160,8 L180,10 L200,6" fill="none" stroke="#059669" stroke-width="1.5"/></svg>
+                  </div>
+                  <div class="rt-roots">可写目录：<span class="chip">F:/WorkNew/SillyHub</span></div>
+                  <div class="rt-actions"><button class="btn btn-ghost btn-tiny">可写目录</button><button class="btn btn-ghost btn-tiny">审计日志</button><button class="btn btn-primary btn-tiny">会话</button><button class="btn btn-ghost btn-tiny">禁用</button><button class="btn btn-danger btn-tiny">移除</button></div>
+                </div>
+                <!-- runtime: gemini offline -->
+                <div class="rt-card">
+                  <div class="rh"><span class="pbadge gemini">Gemini</span><span class="badge slate"><span class="dot"></span>离线</span><span class="rt-name">gemini-cli</span></div>
+                  <div class="rt-meta"><div><div class="mlbl">版本</div><div class="mval mono">0.1.0</div></div><div><div class="mlbl">会话</div><div class="mval">0</div></div><div><div class="mlbl">协议</div><div class="mval mono">stream</div></div></div>
+                  <div class="rt-usage">
+                    <div class="uh"><span class="ulbl">用量统计（7 天）</span><span class="stag">暂无数据</span></div>
+                    <div class="usage-grid">
+                      <div class="ustat"><div class="ul">输入</div><div class="uv muted">—</div></div>
+                      <div class="ustat"><div class="ul">输出</div><div class="uv muted">—</div></div>
+                      <div class="ustat"><div class="ul">缓存</div><div class="uv muted">—</div></div>
+                      <div class="ustat"><div class="ul">费用</div><div class="uv cost">$0.00</div></div>
+                    </div>
+                    <svg class="spark" viewBox="0 0 200 30" preserveAspectRatio="none"><line x1="0" y1="15" x2="200" y2="15" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3,3"/><text x="100" y="12" text-anchor="middle" font-size="7" fill="#94a3b8">暂无数据</text></svg>
+                  </div>
+                  <div class="rt-roots">可写目录：<span style="color:var(--slate-400)">未配置（任意目录可写）</span></div>
+                  <div class="rt-actions"><button class="btn btn-ghost btn-tiny">可写目录</button><button class="btn btn-ghost btn-tiny">审计日志</button><button class="btn btn-ghost btn-tiny" disabled style="opacity:.5">会话</button><button class="btn btn-ghost btn-tiny">启用</button><button class="btn btn-danger btn-tiny">移除</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 机器 2：折叠 -->
+          <div class="machine-card">
+            <div class="machine-head">
+              <div class="machine-icon online"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
+              <div class="machine-title">
+                <div class="row1"><span class="name">Mac Mini 测试机</span><span class="alias">MAC-MINI</span><span class="badge emerald"><span class="dot"></span>在线</span></div>
+                <div class="row2"><span class="item">macOS · arm64</span><span class="item">心跳 2 秒前</span><span class="item">daemon v1.4.2</span></div>
+              </div>
+              <div class="machine-actions"><span class="machine-cost">7天费用 $7.80</span><span class="rt-count"><span class="online-num">2</span>/2 runtime</span><button class="btn btn-outline btn-tiny">别名</button><button class="btn btn-outline btn-tiny">升级 daemon</button><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+            </div>
+          </div>
+
+          <!-- 机器 3：离线 -->
+          <div class="machine-card">
+            <div class="machine-head">
+              <div class="machine-icon offline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
+              <div class="machine-title">
+                <div class="row1"><span class="name">Linux 构建盒</span><span class="alias">LINUX-BOX</span><span class="badge slate"><span class="dot"></span>离线</span></div>
+                <div class="row2"><span class="item">Ubuntu · x86_64</span><span class="item">心跳 5 分钟前</span><span class="item">daemon v1.3.0 <span class="badge amber" style="margin-left:4px"><span class="dot"></span>可升级</span></span></div>
+              </div>
+              <div class="machine-actions"><span class="machine-cost" style="background:var(--slate-100);color:var(--slate-500);border-color:var(--slate-200)">7天费用 $0.00</span><span class="rt-count"><span class="online-num">0</span>/1 runtime</span><button class="btn btn-outline btn-tiny">别名</button><button class="btn btn-outline btn-tiny" disabled style="opacity:.5">升级 daemon</button><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+            </div>
+          </div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:12px;color:var(--slate-500)">
+            <span>共 3 台机器 · 第 1 页</span>
+            <div style="display:flex;gap:6px"><button class="btn btn-outline btn-tiny" disabled style="opacity:.5">上一页</button><button class="btn btn-outline btn-tiny">下一页</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════ 方案 B ════════════ -->
+  <div class="scheme">
+    <div class="scheme-tag">
+      <div class="tag-no">B</div>
+      <div><h2>主从双栏</h2><div class="sub">左栏机器列表 · 右栏选中机器的 runtime 卡（含用量统计）· 双栏独立滚动</div></div>
+    </div>
+    <div class="scheme-procon">
+      <div class="col pros"><h4>优势</h4><ul><li>两侧独立滚动，机器多时左栏列表高效</li><li>选中即看 runtime，切换机器不丢右栏上下文</li></ul></div>
+      <div class="col cons"><h4>劣势</h4><ul><li>破坏现有单栏 PageContainer+卡片网格样式一致性</li><li>窄屏/移动端双栏崩溃，需额外响应式</li><li>runtime 卡含用量统计后右栏偏挤</li><li>改动现有页骨架最大</li></ul></div>
+    </div>
+    <div class="app">
+      <div class="sidebar">
+        <div class="brand"><div class="brand-logo">S</div><div class="brand-name">SillyHub</div></div>
+        <div class="nav-group-title">主平台</div>
+        <div class="nav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg>守护进程运行时</div>
+      </div>
+      <div class="main">
+        <div class="topbar"><div class="crumb">系统 <span class="sep">/</span> <b>守护进程运行时</b></div></div>
+        <div class="content">
+          <div class="page-head"><div><div class="eyebrow">系统</div><h1>守护进程运行时</h1><p>左栏选机器 · 右栏看该机器 runtime（含量价）</p></div></div>
+          <div class="master-detail">
+            <div class="master-list">
+              <div class="mh">机器列表 <span style="color:var(--slate-400);font-weight:500;text-transform:none">3 台</span></div>
+              <div class="master-item active">
+                <div class="mi-icon online"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/></svg></div>
+                <div class="mi-info"><div class="mi-name">我的开发机</div><div class="mi-sub">DESKTOP-WHALE · 3 runtime · $15.60</div></div>
+                <span class="badge emerald" style="padding:2px 7px"><span class="dot"></span></span>
+              </div>
+              <div class="master-item">
+                <div class="mi-icon online"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/></svg></div>
+                <div class="mi-info"><div class="mi-name">Mac Mini 测试机</div><div class="mi-sub">MAC-MINI · 2 runtime · $7.80</div></div>
+                <span class="badge emerald" style="padding:2px 7px"><span class="dot"></span></span>
+              </div>
+              <div class="master-item">
+                <div class="mi-icon offline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/></svg></div>
+                <div class="mi-info"><div class="mi-name">Linux 构建盒</div><div class="mi-sub">LINUX-BOX · 1 runtime · $0.00</div></div>
+                <span class="badge slate" style="padding:2px 7px"><span class="dot"></span></span>
+              </div>
+            </div>
+            <div class="detail-pane">
+              <div class="detail-head">
+                <div class="machine-icon online" style="width:36px;height:36px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/></svg></div>
+                <div style="flex:1;min-width:0"><div class="dh-name">我的开发机 <span style="font-size:12px;color:var(--slate-500);font-family:ui-monospace,monospace">DESKTOP-WHALE</span></div><div style="font-size:11.5px;color:var(--slate-500);margin-top:2px">Windows · x86_64 · 心跳 3 秒前 · daemon v1.4.2</div></div>
+                <span class="machine-cost">7天 $15.60</span>
+                <span class="badge emerald"><span class="dot"></span>在线</span>
+                <button class="btn btn-outline btn-tiny">别名</button>
+                <button class="btn btn-outline btn-tiny">升级 daemon</button>
+              </div>
+              <div class="rt-grid">
+                <div class="rt-card">
+                  <div class="rh"><span class="pbadge claude">Claude</span><span class="badge emerald"><span class="dot"></span>在线</span><span class="rt-name">claude-code</span></div>
+                  <div class="rt-meta"><div><div class="mlbl">版本</div><div class="mval mono">1.0.82</div></div><div><div class="mlbl">会话</div><div class="mval">3</div></div><div><div class="mlbl">协议</div><div class="mval mono">stream-http</div></div></div>
+                  <div class="rt-usage">
+                    <div class="uh"><span class="ulbl">用量统计（7 天）</span><span class="stag">claude-sonnet-4</span></div>
+                    <div class="usage-grid"><div class="ustat"><div class="ul">输入</div><div class="uv">428k</div></div><div class="ustat"><div class="ul">输出</div><div class="uv">96k</div></div><div class="ustat"><div class="ul">缓存</div><div class="uv">1.2M</div></div><div class="ustat"><div class="ul">费用</div><div class="uv cost">$12.40</div></div></div>
+                    <svg class="spark" viewBox="0 0 200 30" preserveAspectRatio="none"><path d="M0,24 L20,20 L40,22 L60,15 L80,17 L100,10 L120,12 L140,6 L160,9 L180,4 L200,7 L200,30 L0,30 Z" fill="#2563eb22"/><path d="M0,24 L20,20 L40,22 L60,15 L80,17 L100,10 L120,12 L140,6 L160,9 L180,4 L200,7" fill="none" stroke="#2563eb" stroke-width="1.5"/></svg>
+                  </div>
+                  <div class="rt-roots">可写目录：<span class="chip">F:/WorkNew/SillyHub</span></div>
+                  <div class="rt-actions"><button class="btn btn-primary btn-tiny">会话</button><button class="btn btn-ghost btn-tiny">可写目录</button><button class="btn btn-ghost btn-tiny">审计</button><button class="btn btn-danger btn-tiny">移除</button></div>
+                </div>
+                <div class="rt-card">
+                  <div class="rh"><span class="pbadge codex">Codex</span><span class="badge emerald"><span class="dot"></span>在线</span><span class="rt-name">codex-cli</span></div>
+                  <div class="rt-meta"><div><div class="mlbl">版本</div><div class="mval mono">0.45.1</div></div><div><div class="mlbl">会话</div><div class="mval">1</div></div><div><div class="mlbl">协议</div><div class="mval mono"> Responses</div></div></div>
+                  <div class="rt-usage">
+                    <div class="uh"><span class="ulbl">用量统计（7 天）</span><span class="stag">gpt-5</span></div>
+                    <div class="usage-grid"><div class="ustat"><div class="ul">输入</div><div class="uv">82k</div></div><div class="ustat"><div class="ul">输出</div><div class="uv">31k</div></div><div class="ustat"><div class="ul">缓存</div><div class="uv muted">—</div></div><div class="ustat"><div class="ul">费用</div><div class="uv cost">$3.20</div></div></div>
+                    <svg class="spark" viewBox="0 0 200 30" preserveAspectRatio="none"><path d="M0,22 L20,24 L40,18 L60,20 L80,14 L100,16 L120,11 L140,13 L160,8 L180,10 L200,6 L200,30 L0,30 Z" fill="#10b98122"/><path d="M0,22 L20,24 L40,18 L60,20 L80,14 L100,16 L120,11 L140,13 L160,8 L180,10 L200,6" fill="none" stroke="#059669" stroke-width="1.5"/></svg>
+                  </div>
+                  <div class="rt-actions"><button class="btn btn-primary btn-tiny">会话</button><button class="btn btn-ghost btn-tiny">可写目录</button><button class="btn btn-danger btn-tiny">移除</button></div>
+                </div>
+              </div>
+              <div class="narrow-warn">⚠ 双栏在 ≤1024px 窄屏会挤；移动端需降级为上下堆叠，与现有 dashboard 单栏卡片风格不一致。</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════ 方案 C ════════════ -->
+  <div class="scheme">
+    <div class="scheme-tag">
+      <div class="tag-no">C</div>
+      <div><h2>机器网格 + 子路由详情</h2><div class="sub">/runtimes 首页=机器网格（轻量·含聚合费用）· 点机器卡跳 /runtimes/{machineId} 看 runtime（含量价明细）</div></div>
+    </div>
+    <div class="scheme-procon">
+      <div class="col pros"><h4>优势</h4><ul><li>两级完全解耦，各自分页/筛选干净</li><li>首屏极快（机器级轻量，不含 runtime 详情）</li><li>URL 可分享单台机器</li></ul></div>
+      <div class="col cons"><h4>劣势</h4><ul><li>看跨机器 runtime 要来回跳转，丢失总览感</li><li>跨机器筛选（「所有 online codex」）变难</li><li>需新增子路由 + 测试，工作量最大</li></ul></div>
+    </div>
+    <div class="app">
+      <div class="sidebar">
+        <div class="brand"><div class="brand-logo">S</div><div class="brand-name">SillyHub</div></div>
+        <div class="nav-group-title">主平台</div>
+        <div class="nav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg>守护进程运行时</div>
+      </div>
+      <div class="main">
+        <div class="topbar"><div class="crumb">系统 <span class="sep">/</span> <b>守护进程运行时</b></div></div>
+        <div class="content">
+          <div class="page-head"><div><div class="eyebrow">系统</div><h1>守护进程运行时</h1><p>机器总览（含聚合费用）· 点详情进入该机器的 runtime 明细</p></div></div>
+          <div class="machine-grid">
+            <div class="mg-card">
+              <div class="mg-top"><div class="mg-icon online"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/></svg></div><span class="badge emerald"><span class="dot"></span>在线</span></div>
+              <div class="mg-name">我的开发机</div><div class="mg-host">DESKTOP-WHALE</div>
+              <div class="mg-stats"><div class="mg-stat"><div class="slbl">RUNTIME</div><div class="sval">3（2 在线）</div></div><div class="mg-stat"><div class="slbl">心跳</div><div class="sval" style="font-size:13px">3 秒前</div></div><div class="mg-stat"><div class="slbl">7天费用</div><div class="sval cost">$15.60</div></div></div>
+              <div class="mg-providers"><span class="pbadge claude">Claude</span><span class="pbadge codex">Codex</span><span class="pbadge gemini">Gemini</span></div>
+              <div class="mg-footer"><span style="font-size:11px;color:var(--slate-500)">Win · x86_64</span><button class="btn btn-primary btn-tiny">详情 →</button></div>
+            </div>
+            <div class="mg-card">
+              <div class="mg-top"><div class="mg-icon online"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/></svg></div><span class="badge emerald"><span class="dot"></span>在线</span></div>
+              <div class="mg-name">Mac Mini 测试机</div><div class="mg-host">MAC-MINI</div>
+              <div class="mg-stats"><div class="mg-stat"><div class="slbl">RUNTIME</div><div class="sval">2（2 在线）</div></div><div class="mg-stat"><div class="slbl">心跳</div><div class="sval" style="font-size:13px">2 秒前</div></div><div class="mg-stat"><div class="slbl">7天费用</div><div class="sval cost">$7.80</div></div></div>
+              <div class="mg-providers"><span class="pbadge claude">Claude</span><span class="pbadge codex">Codex</span></div>
+              <div class="mg-footer"><span style="font-size:11px;color:var(--slate-500)">macOS · arm64</span><button class="btn btn-primary btn-tiny">详情 →</button></div>
+            </div>
+            <div class="mg-card">
+              <div class="mg-top"><div class="mg-icon offline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/></svg></div><span class="badge slate"><span class="dot"></span>离线</span></div>
+              <div class="mg-name">Linux 构建盒</div><div class="mg-host">LINUX-BOX</div>
+              <div class="mg-stats"><div class="mg-stat"><div class="slbl">RUNTIME</div><div class="sval">1（0 在线）</div></div><div class="mg-stat"><div class="slbl">心跳</div><div class="sval" style="font-size:13px">5 分钟前</div></div><div class="mg-stat"><div class="slbl">7天费用</div><div class="sval cost">$0.00</div></div></div>
+              <div class="mg-providers"><span class="pbadge gemini">Gemini</span></div>
+              <div class="mg-footer"><span style="font-size:11px;color:var(--slate-500)">Ubuntu · x86_64</span><button class="btn btn-primary btn-tiny">详情 →</button></div>
+            </div>
+          </div>
+
+          <div class="route-arrow">点「详情」<span class="arrow">↓</span> 跳转子路由 <span class="url">/runtimes/DESKTOP-WHALE</span></div>
+
+          <div style="border:1px dashed var(--blue-600);border-radius:var(--r-lg);padding:16px;background:var(--blue-50)">
+            <div style="font-size:12px;font-weight:700;color:var(--blue-700);margin-bottom:12px;text-transform:uppercase;letter-spacing:.05em">子路由 /runtimes/{machineId} · 该机器的 runtime 卡（含用量统计明细 + 独立分页/筛选）</div>
+            <div class="rt-grid" style="background:#fff;padding:14px;border-radius:var(--r-md);border:1px solid var(--slate-200)">
+              <div class="rt-card">
+                <div class="rh"><span class="pbadge claude">Claude</span><span class="badge emerald"><span class="dot"></span>在线</span><span class="rt-name">claude-code</span></div>
+                <div class="rt-meta"><div><div class="mlbl">版本</div><div class="mval mono">1.0.82</div></div><div><div class="mlbl">会话</div><div class="mval">3</div></div><div><div class="mlbl">协议</div><div class="mval mono">stream-http</div></div></div>
+                <div class="rt-usage">
+                  <div class="uh"><span class="ulbl">用量统计（7 天）</span><span class="stag">claude-sonnet-4</span></div>
+                  <div class="usage-grid"><div class="ustat"><div class="ul">输入</div><div class="uv">428k</div></div><div class="ustat"><div class="ul">输出</div><div class="uv">96k</div></div><div class="ustat"><div class="ul">缓存</div><div class="uv">1.2M</div></div><div class="ustat"><div class="ul">费用</div><div class="uv cost">$12.40</div></div></div>
+                  <svg class="spark" viewBox="0 0 200 30" preserveAspectRatio="none"><defs><linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2563eb" stop-opacity=".25"/><stop offset="1" stop-color="#2563eb" stop-opacity="0"/></linearGradient></defs><path d="M0,24 L20,20 L40,22 L60,15 L80,17 L100,10 L120,12 L140,6 L160,9 L180,4 L200,7 L200,30 L0,30 Z" fill="url(#g2)"/><path d="M0,24 L20,20 L40,22 L60,15 L80,17 L100,10 L120,12 L140,6 L160,9 L180,4 L200,7" fill="none" stroke="#2563eb" stroke-width="1.5"/></svg>
+                </div>
+                <div class="rt-roots">可写目录：<span class="chip">F:/WorkNew/SillyHub</span></div>
+                <div class="rt-actions"><button class="btn btn-primary btn-tiny">会话</button><button class="btn btn-ghost btn-tiny">可写目录</button><button class="btn btn-ghost btn-tiny">审计</button><button class="btn btn-danger btn-tiny">移除</button></div>
+              </div>
+              <div class="rt-card">
+                <div class="rh"><span class="pbadge codex">Codex</span><span class="badge emerald"><span class="dot"></span>在线</span><span class="rt-name">codex-cli</span></div>
+                <div class="rt-meta"><div><div class="mlbl">版本</div><div class="mval mono">0.45.1</div></div><div><div class="mlbl">会话</div><div class="mval">1</div></div><div><div class="mlbl">协议</div><div class="mval mono"> Responses</div></div></div>
+                <div class="rt-usage">
+                  <div class="uh"><span class="ulbl">用量统计（7 天）</span><span class="stag">gpt-5</span></div>
+                  <div class="usage-grid"><div class="ustat"><div class="ul">输入</div><div class="uv">82k</div></div><div class="ustat"><div class="ul">输出</div><div class="uv">31k</div></div><div class="ustat"><div class="ul">缓存</div><div class="uv muted">—</div></div><div class="ustat"><div class="ul">费用</div><div class="uv cost">$3.20</div></div></div>
+                  <svg class="spark" viewBox="0 0 200 30" preserveAspectRatio="none"><path d="M0,22 L20,24 L40,18 L60,20 L80,14 L100,16 L120,11 L140,13 L160,8 L180,10 L200,6 L200,30 L0,30 Z" fill="#10b98122"/><path d="M0,22 L20,24 L40,18 L60,20 L80,14 L100,16 L120,11 L140,13 L160,8 L180,10 L200,6" fill="none" stroke="#059669" stroke-width="1.5"/></svg>
+                </div>
+                <div class="rt-actions"><button class="btn btn-primary btn-tiny">会话</button><button class="btn btn-ghost btn-tiny">可写目录</button><button class="btn btn-danger btn-tiny">移除</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
