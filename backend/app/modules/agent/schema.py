@@ -37,6 +37,9 @@ class ExecutionContextResponse(BaseModel):
         ...,
         description="render_bundle_to_claude_md 输出，daemon 写入 {workDir}/.claude/CLAUDE.md",
     )
+    # 2026-07-08：stage/scan run 返回 kind='interactive'，让 daemon 走 SessionManager
+    # （实时转发），不走 batch task-runner（adapter 对 claude 2.1.193 解析不全）。
+    kind: str | None = Field(default=None, description="lease 类型：interactive=走 SessionManager")
     prompt: str | None = None
     provider: str | None = None
     model: str | None = None

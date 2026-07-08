@@ -276,6 +276,9 @@ async def get_execution_context(
     return ExecutionContextResponse(
         agent_run_id=str(run.id),
         claude_md=claude_md,
+        # 2026-07-08：stage/scan 返回 kind=interactive，让 daemon 走 SessionManager
+        # （实时日志转发），不走 batch task-runner（adapter 对 claude 2.1.193 格式解析不全）。
+        kind="interactive" if run_type in ("stage", "scan") else None,
         prompt=lease_meta.get("prompt"),
         # ql-20260618-009：AgentRun 是 source of truth；lease_meta 仅在 AgentRun
         # 字段为空时兜底（旧测试场景），避免 transport 覆盖快照。
