@@ -276,7 +276,27 @@ class RunPlacementService:
         if "run_id" not in metadata:
             metadata["run_id"] = str(agent_run_id)
 
-        # 创建 AgentSession（UI 会话列表需要）
+        await self._session.execute(
+            text(
+                """
+                INSERT INTO daemon_task_leases
+                    (id, agent_run_id, runtime_id, status, kind, metadata, created_at, updated_at)
+                VALUES
+                    (:id, :agent_run_id, :runtime_id, 'pending', 'interactive', :metadata, :now, :now)
+                """
+            ),
+            {
+                # SQLAlchemy ``Uuid`` 在 SQLite 以 CHAR(32) hex 存储；用 .hex
+                # 绑定参数（无连字符），PostgreSQL Uuid 列同样接受该形式。
+                "id": lease_id.hex,
+                "agent_run_id": agent_run_id.hex,
+                "runtime_id": runtime_id.hex,
+                "metadata": json.dumps(metadata) if metadata else None,
+                "now": now,
+            },
+        )
+
+        # AgentSession 必须在 lease INSERT 之后（FK lease_id → daemon_task_leases.id）
         await self._session.execute(
             text(
                 """
@@ -299,26 +319,6 @@ class RunPlacementService:
         await self._session.execute(
             text("UPDATE agent_runs SET agent_session_id = :sid WHERE id = :rid"),
             {"sid": str(interactive_session_id), "rid": agent_run_id.hex},
-        )
-
-        await self._session.execute(
-            text(
-                """
-                INSERT INTO daemon_task_leases
-                    (id, agent_run_id, runtime_id, status, kind, metadata, created_at, updated_at)
-                VALUES
-                    (:id, :agent_run_id, :runtime_id, 'pending', 'interactive', :metadata, :now, :now)
-                """
-            ),
-            {
-                # SQLAlchemy ``Uuid`` 在 SQLite 以 CHAR(32) hex 存储；用 .hex
-                # 绑定参数（无连字符），PostgreSQL Uuid 列同样接受该形式。
-                "id": lease_id.hex,
-                "agent_run_id": agent_run_id.hex,
-                "runtime_id": runtime_id.hex,
-                "metadata": json.dumps(metadata) if metadata else None,
-                "now": now,
-            },
         )
         await self._session.commit()
 
