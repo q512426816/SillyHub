@@ -265,6 +265,12 @@ class RunPlacementService:
             metadata["workspace_name"] = workspace_name
         if workspace_slug:
             metadata["workspace_slug"] = workspace_slug
+        # 2026-07-08 D-001：所有 stage 统一 scan 模式（manual_approval=True +
+        # ask_user_only=True）。AskUserQuestion 走 dialog 人审，其余工具 allow-through，
+        # 消除 5min 超时。stage 走 dispatch_to_daemon（非 prepare_interactive_dispatch），
+        # 此处补设（task-01 修正：原改 prepare_interactive_dispatch 但 stage 不走那）。
+        metadata["manual_approval"] = True
+        metadata["ask_user_only"] = True
 
         # 2026-07-08：interactive lease 必须带 session_id + run_id（daemon
         # _startInteractiveSession 缺这两个字段会 interactive_missing_fields 早返回）。
