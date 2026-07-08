@@ -364,3 +364,14 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 需求：/runtimes 页 runtime 卡 sparkline 统计 7d 用量，但 daily 只返有 run 的桶（无数据桶不返），折线只显零星几点，不像连续 7 天趋势。
 现状：backend _bucket_unit 7d=小时桶，_build_daily_sql GROUP BY bucket 只返有 run 的桶（无 generate_series 补全）；前端 RuntimeUsageLineChart 直接用 daily，缺桶不补 0。
 方案：前端补全——runtime-card-helpers 加 buildSparkSeries(daily, window)：7d/30d 降采样到日桶（UTC date sum 同日）+ 补全最近 N 天（缺失天 0）；1d 保持。RuntimeCard 用它喂 sparkline。不动 backend。
+结果：已完成 + 已提交（fdfd63b7）。buildSparkSeries 3 新用例 + runtime-card.test 适配。tsc 零错。frontend rebuild 部署。该 commit 同含 browse-folder -NonInteractive→-Sta + tooltip 时间格式化（后证明 -Sta 未根治弹窗，见 ql-20260708-002）。
+
+## ql-20260708-002-9f3a | 2026-07-08 16:36:00 | browse-folder 点浏览不弹窗（FolderBrowserDialog 卡死）→ 改 Shell.BrowseForFolder
+状态：进行中
+关联变更：（无）
+文件：sillyhub-daemon/src/daemon.ts
+需求：/runtimes 页配置可写目录点「浏览」不弹系统对话框，前端报 500（POST /api/daemon/runtimes/{id}/browse-folder）。
+根因：daemon 端 browse_folder RPC 用 System.Windows.Forms.FolderBrowserDialog.ShowDialog。该 API 在 PowerShell 子进程（node exec 启动）里缺 WinForms 消息循环，ShowDialog 卡死不弹窗（实测 12s/20s 超时被杀 exit=124）→ daemon exec 等 180s → backend DaemonRpcTimeout 504（后端日志确认 08:15:59 rpc timed out + late reply）→ next.js proxy 30s 超时转 500。上次 commit fdfd63b7 把 -NonInteractive 改 -Sta 未根治（-Sta 本就是 powershell 默认，ShowDialog 仍卡）。多屏适配的 $dummy.Show()/Hide() 非根因（简化版无 dummy 同样卡）。Shell.Application.BrowseForFolder（COM SHBrowseForFolder）实测 exit=0 正常弹窗 + 用户取消返 null。
+方案：browse_folder handler PowerShell 脚本整体替换为 Shell.BrowseForFolder 版——去 System.Windows.Forms/Drawing Add-Type + $dummy 多屏适配，改 New-Object -ComObject Shell.Application + BrowseForFolder(0, 描述, 0x0040, $root)。initial_path 作 RootFolder（Test-Path 校验存在才传；空则从"此电脑"开始）。exec -Sta -EncodedCommand timeout 180s windowsHide:false 不变；cancelled→空 path 逻辑不变；stdout.trim() 取 $folder.Self.Path（CLIXML 走 stderr 不污染 stdout，已验证）。
+改动：仅 daemon.ts browse_folder handler（line 2107-2169），PowerShell 脚本段替换 + 注释更新。backend/frontend 无改动。
+结果：tsc --noEmit 零错 + tsc build 成功（dist/daemon.js 含 BrowseForFolder×4）。daemon kill PID1584 + 清 locks + 重启 PID24760（per-daemon WS + session recovered + 心跳 allowed_roots_synced_per_runtime 正常）。待用户 UI 点浏览确认弹窗 + 选路径回填。
