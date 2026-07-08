@@ -791,10 +791,12 @@ export class SessionManager {
     // onUserDialog，让 scan 真阻塞等人审（chat=false 不注入 AskUserQuestion 人审，
     // 但见下方 allowed_roots 写拦截：注入 provider 后 chat 也注入 canUseTool 做写校验）。
     // 行为与改造前逐行等价（FR-10）+ allowed_roots 写拦截增量（2026-06-29）。
-    // 2026-07-08：bypassPermissions 绕过 daemon 自身权限审批（permission-resolver
-    // canUseTool），避免 5min 超时拒绝 + 审批弹窗用户看不到。CLI --permission-mode
-    // bypassPermissions 只绕过 CLI 侧，daemon 侧独立拦截。
-    driverOpts.permissionMode = 'bypassPermissions';
+    // 显式 permissionMode=default（2026-06-30 修 bug：SDK permissionMode 缺失时
+    // 可能沿用 session resume 的旧状态，绕过 canUseTool → 写守卫失效）。
+    // 2026-07-08 D-002：撤回 635c0d4a 的 bypassPermissions。canUseTool 注入是无条件
+    // 的（writeGuardEnabled 即注入），bypassPermissions 下 SDK 仍调 canUseTool，
+    // 未生效且语义混淆。5min 超时真实根因是 ask_user_only=false（task-01 修）。
+    driverOpts.permissionMode = 'default';
     const approvalReady =
       spec.enableApproval &&
       !!this._permissionResolverFactory &&

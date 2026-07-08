@@ -36,7 +36,7 @@
  * @module daemon
  */
 
-import { arch, homedir, hostname, platform } from 'node:os';
+import { arch, homedir, hostname, platform, tmpdir } from 'node:os';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { exec } from 'node:child_process';
@@ -146,6 +146,23 @@ function createLogger(level: LogLevel): Logger {
 }
 
 // ── 可中断 sleep（AbortSignal 替代 asyncio.CancelledError，R7）───────────────
+
+/**
+ * sillyspec 临时路径放行常量（FR-003，与 permission-rules.ts 的
+ * SILLYSPEC_TEMP_PATTERNS 同步）。PolicyCache 注入点（register 响应 + 心跳
+ * _syncAllowedRoots/_syncPolicyCache）把这些路径并入 allowedRoots，让
+ * PolicyEngine isPathUnderAnyRoot 放行 sillyspec 写 c:\dev\null / 系统 temp。
+ *
+ * 注：.sillyspec/.runtime 位于 ~/.sillyhub 下，已在 homedir 兜底白名单内，不重复加。
+ * 跨平台：Windows C:/dev/null + os.tmpdir()；POSIX /dev/null + os.tmpdir()。
+ * 写死 3 类路径，不接受外部输入（R-02 写安全兜底，越界写仍 deny，task-08 守护）。
+ */
+const SILLYSPEC_TEMP_ROOTS: string[] = [
+  'C:\\dev\\null',
+  'C:/dev/null',
+  '/dev/null',
+  tmpdir(),
+];
 
 /** abortableSleep 抛出的异常类型（标识 stop 信号）。 */
 class AbortError extends Error {
@@ -950,6 +967,9 @@ export class Daemon {
             .map((p) => p.replace(/^~(?=$|[/\\])/, homedir()));
           const union = new Set<string>(expanded);
           union.add(homedir());
+          // FR-003：sillyspec 临时路径放行（c:\dev\null / /dev/null / tmpdir），
+          // 与 permission-rules.ts CLI allow 同步（双重放行，R-01 写安全兜底）。
+          for (const temp of SILLYSPEC_TEMP_ROOTS) union.add(temp);
           this._policyCache.set(runtimeId, normalizeAllowedRoots([...union]));
         }
       }
@@ -1841,6 +1861,8 @@ export class Daemon {
           .map((p) => p.replace(/^~(?=$|[/\\])/, homedir()));
         const union = new Set<string>(expanded);
         union.add(homedir());
+        // FR-003：sillyspec 临时路径放行（与 register 注入点同步）。
+        for (const temp of SILLYSPEC_TEMP_ROOTS) union.add(temp);
         const normalized = normalizeAllowedRoots([...union]);
         const existing = this._policyCache.get(runtimeId)?.allowedRoots;
         if (JSON.stringify(existing) !== JSON.stringify(normalized)) {
@@ -1878,8 +1900,13 @@ export class Daemon {
    */
   private _syncPolicyCache(roots: string[]): void {
     if (!this._policyCache) return;
+    // FR-003：sillyspec 临时路径放行（与 register/心跳 per-runtime 注入点同步）。
+    // roots 已 normalize，临时路径并入后再 normalize 一次去重归一。
+    const union = new Set<string>(roots);
+    for (const temp of SILLYSPEC_TEMP_ROOTS) union.add(temp);
+    const normalized = normalizeAllowedRoots([...union]);
     for (const runtimeId of this._registeredRuntimes.values()) {
-      if (runtimeId) this._policyCache.set(runtimeId, roots);
+      if (runtimeId) this._policyCache.set(runtimeId, normalized);
     }
   }
 

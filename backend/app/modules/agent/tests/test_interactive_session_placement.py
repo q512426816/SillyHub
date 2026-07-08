@@ -104,7 +104,8 @@ class TestPrepareInteractiveDispatch:
         assert meta["run_id"] == str(run_id)
         assert meta["prompt"] == "hi"
         assert meta["provider"] == "claude"
-        assert meta["manual_approval"] is False
+        assert meta["manual_approval"] is True
+        assert meta["ask_user_only"] is True
 
     @pytest.mark.asyncio
     async def test_model_field_stored_in_metadata(self, db_session: AsyncSession) -> None:

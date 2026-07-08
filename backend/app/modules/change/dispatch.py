@@ -104,7 +104,7 @@ STAGE_AGENT_CONFIG: dict[str, StageAgentConfig] = {
         enabled=True,
         prompt_template="verify.md",
         phase="Verify",
-        requires_worktree=True,
+        requires_worktree=False,  # D-004: daemon-client 不用 worktree，配合 host-fs-delegate 定位 spec_root
         read_only=False,
         description="Write verify-result.md and run verification checks.",
     ),
