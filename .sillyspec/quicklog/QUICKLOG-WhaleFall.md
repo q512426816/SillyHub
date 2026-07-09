@@ -375,3 +375,9 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 方案：browse_folder handler PowerShell 脚本整体替换为 Shell.BrowseForFolder 版——去 System.Windows.Forms/Drawing Add-Type + $dummy 多屏适配，改 New-Object -ComObject Shell.Application + BrowseForFolder(0, 描述, 0x0040, $root)。initial_path 作 RootFolder（Test-Path 校验存在才传；空则从"此电脑"开始）。exec -Sta -EncodedCommand timeout 180s windowsHide:false 不变；cancelled→空 path 逻辑不变；stdout.trim() 取 $folder.Self.Path（CLIXML 走 stderr 不污染 stdout，已验证）。
 改动：仅 daemon.ts browse_folder handler（line 2107-2169），PowerShell 脚本段替换 + 注释更新。backend/frontend 无改动。
 结果：tsc --noEmit 零错 + tsc build 成功（dist/daemon.js 含 BrowseForFolder×4）。daemon kill PID1584 + 清 locks + 重启 PID24760（per-daemon WS + session recovered + 心跳 allowed_roots_synced_per_runtime 正常）。待用户 UI 点浏览确认弹窗 + 选路径回填。
+
+## ql-20260709-001-7e3a | 2026-07-09 16:35:00 | RemoteFolderPicker 打开定位当前输入框路径 + 修目录树双滚动条
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/daemon/remote-folder-picker.tsx, frontend/src/app/(dashboard)/runtimes/page.tsx
+结果：tsc exit 0。打开时定位输入框当前路径（listRoots 后探 listDir 校验选中 initialPath，失败降级首根）；目录树外层 div 去 overflow-auto+maxHeight，由 Tree height={300} 虚拟滚动承担，修双滚动条。

@@ -1120,6 +1120,7 @@ export default function RuntimesPage() {
       {rootsEditing ? (
         <RemoteFolderPicker
           runtimeId={rootsEditing.id}
+          initialPath={pickerRowIdx !== null ? rootsValue[pickerRowIdx] ?? "" : ""}
           open={pickerRowIdx !== null}
           onClose={() => setPickerRowIdx(null)}
           onPick={(p) => {

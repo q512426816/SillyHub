@@ -5,7 +5,7 @@ created_at: 2026-06-01T12:00:00
 
 # frontend_components
 > 最后更新：2026-06-23
-> 最近变更：ql-20260624-001-a3b7（PpmResourceTable 局部 DEFAULT_PAGE_SIZE 10→20,修复 projects/customers/project-stakeholders 实际查 10 条）
+> 最近变更：ql-20260709-001-7e3a（RemoteFolderPicker 加 initialPath 打开定位输入框路径 + 修目录树双滚动条）
 > 模块路径：frontend/src/components/**
 
 ## 职责
