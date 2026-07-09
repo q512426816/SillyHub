@@ -44,6 +44,8 @@ export interface RemoteFolderPickerProps {
   title?: string;
   /** 确认按钮文案，默认「选择此目录」。 */
   confirmText?: string;
+  /** 打开时定位的初始路径（调用方传当前输入框值，非空则打开时回填地址栏 + 探 listDir 校验选中）。 */
+  initialPath?: string;
 }
 
 /** 递归更新树数据（antd Tree loadData 模式需要）。 */
@@ -75,6 +77,7 @@ export function RemoteFolderPicker({
   onPick,
   title = "选择目录",
   confirmText = "选择此目录",
+  initialPath,
 }: RemoteFolderPickerProps) {
   const [treeData, setTreeData] = useState<DataNode[]>([]);
   const [selectedPath, setSelectedPath] = useState<string>("");
@@ -82,6 +85,8 @@ export function RemoteFolderPicker({
   const [error, setError] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
   const [jumping, setJumping] = useState<boolean>(false);
+  // 目录树高度：动态响应视口 70vh（减去地址栏/错误/已选/Modal header-footer ≈ 180px），最小 200。
+  const [treeHeight, setTreeHeight] = useState<number>(400);
 
   /** 重置全部内部状态（关闭或切换 runtimeId 时调用）。 */
   const resetState = useCallback(() => {
@@ -120,9 +125,22 @@ export function RemoteFolderPicker({
           icon: <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />,
         }));
         setTreeData(nodes);
-        // 默认选中第一个根，方便直接确认。
-        if (nodes.length > 0 && nodes[0]) {
-          const first = nodes[0].key as string;
+        const first = nodes.length > 0 && nodes[0] ? (nodes[0].key as string) : "";
+        const initPath = initialPath?.trim() ?? "";
+        if (initPath) {
+          // 调用方传入初始路径（当前输入框值）→ 地址栏回填 + 探 listDir 校验选中该路径。
+          setManualPath(initPath);
+          try {
+            await listDir(runtimeId, initPath);
+            if (cancelled) return;
+            setSelectedPath(initPath);
+          } catch {
+            // 初始路径不存在/不可达 → 降级默认首根，不阻断（用户可手改路径重跳转）。
+            if (cancelled) return;
+            setSelectedPath(first);
+          }
+        } else if (first) {
+          // 无初始路径 → 默认选中第一个根，方便直接确认。
           setSelectedPath(first);
           setManualPath(first);
         }
@@ -139,6 +157,15 @@ export function RemoteFolderPicker({
       cancelled = true;
     };
   }, [open, runtimeId, resetState]);
+
+  /** 目录树高度响应视口 70vh（resize 重算，保证弹窗最大占页面 70%）。 */
+  useEffect(() => {
+    const calc = () =>
+      setTreeHeight(Math.max(200, Math.floor(window.innerHeight * 0.7) - 180));
+    calc();
+    window.addEventListener("resize", calc);
+    return () => window.removeEventListener("resize", calc);
+  }, []);
 
   /** Tree loadData：展开节点时异步加载子目录（只取 type==="dir"）。 */
   const onLoadData: TreeProps["loadData"] = useCallback(
@@ -255,7 +282,7 @@ export function RemoteFolderPicker({
             : "没有可枚举的根目录。"}
         </div>
       ) : (
-        <div className="overflow-auto rounded border" style={{ maxHeight: 300 }}>
+        <div className="rounded border">
           <Tree
             treeData={treeData}
             loadData={onLoadData}
@@ -263,7 +290,7 @@ export function RemoteFolderPicker({
             selectedKeys={selectedPath ? [selectedPath] : []}
             showIcon
             blockNode
-            height={300}
+            height={treeHeight}
           />
         </div>
       )}
