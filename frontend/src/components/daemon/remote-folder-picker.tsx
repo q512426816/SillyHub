@@ -85,6 +85,8 @@ export function RemoteFolderPicker({
   const [error, setError] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
   const [jumping, setJumping] = useState<boolean>(false);
+  // 目录树高度：动态响应视口 70vh（减去地址栏/错误/已选/Modal header-footer ≈ 180px），最小 200。
+  const [treeHeight, setTreeHeight] = useState<number>(400);
 
   /** 重置全部内部状态（关闭或切换 runtimeId 时调用）。 */
   const resetState = useCallback(() => {
@@ -155,6 +157,15 @@ export function RemoteFolderPicker({
       cancelled = true;
     };
   }, [open, runtimeId, resetState]);
+
+  /** 目录树高度响应视口 70vh（resize 重算，保证弹窗最大占页面 70%）。 */
+  useEffect(() => {
+    const calc = () =>
+      setTreeHeight(Math.max(200, Math.floor(window.innerHeight * 0.7) - 180));
+    calc();
+    window.addEventListener("resize", calc);
+    return () => window.removeEventListener("resize", calc);
+  }, []);
 
   /** Tree loadData：展开节点时异步加载子目录（只取 type==="dir"）。 */
   const onLoadData: TreeProps["loadData"] = useCallback(
@@ -279,7 +290,7 @@ export function RemoteFolderPicker({
             selectedKeys={selectedPath ? [selectedPath] : []}
             showIcon
             blockNode
-            height={300}
+            height={treeHeight}
           />
         </div>
       )}

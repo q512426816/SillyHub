@@ -5,7 +5,7 @@ created_at: 2026-06-01T12:00:00
 
 # frontend_components
 > 最后更新：2026-06-23
-> 最近变更：ql-20260709-001-7e3a（RemoteFolderPicker 加 initialPath 打开定位输入框路径 + 修目录树双滚动条）
+> 最近变更：ql-20260709-002-b5c8（RemoteFolderPicker 弹窗目录树高度响应视口 70vh）
 > 模块路径：frontend/src/components/**
 
 ## 职责

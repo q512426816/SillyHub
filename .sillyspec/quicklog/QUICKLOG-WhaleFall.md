@@ -381,3 +381,9 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 关联变更：（无）
 文件：frontend/src/components/daemon/remote-folder-picker.tsx, frontend/src/app/(dashboard)/runtimes/page.tsx
 结果：tsc exit 0。打开时定位输入框当前路径（listRoots 后探 listDir 校验选中 initialPath，失败降级首根）；目录树外层 div 去 overflow-auto+maxHeight，由 Tree height={300} 虚拟滚动承担，修双滚动条。
+
+## ql-20260709-002-b5c8 | 2026-07-09 16:55:00 | RemoteFolderPicker 弹窗最大高度占页面 70%（Tree height 动态响应 70vh）
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/daemon/remote-folder-picker.tsx
+结果：tsc exit 0。加 treeHeight state + resize useEffect，Tree height 动态响应视口 70vh（减去地址栏/已选/header-footer ≈ 180px，最小 200），弹窗最大占页面 70%。
