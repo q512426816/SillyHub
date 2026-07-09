@@ -100,7 +100,8 @@ function statusBadgeLabel(entry: Pick<SwitcherEntry, "bound" | "online">): {
  * WorkspaceSwitcher —— 顶栏工作区切换器。
  *
  * 三态：
- *   1. 平台页引导态（workspaceId === null）：显示「选择工作区」灰底，点击跳 /workspaces。
+ *   1. 平台页引导态（workspaceId === null 且 current 为空，即从未选过）：显示「选择工作区」灰底，点击跳 /workspaces。
+ *      若 current 有值（跳平台页前选过 ws），保留显示 current（会话级，不因跳平台页清空）。
  *   2. 已选工作区：按钮显示当前 ws 名 + daemon 徽标，下拉切同模块。
  *   3. 下拉内：列可切换工作区，未绑定项点击触发绑定弹窗（D-003）。
  *
@@ -187,17 +188,20 @@ export function WorkspaceSwitcher(): JSX.Element {
     return workspaceId ?? "";
   })();
 
-  // daemon 当前状态徽标（按钮态）：daemonOnline 来自 task-04 聚合；未绑定→warn
+  // daemon 当前状态徽标（按钮态）：优先 workspaceId（工作区页），平台页退化用
+  // current.id（保留显示选中 ws 的 daemon 状态，不因跳平台页丢失）。
   const currentBadge = (() => {
-    const status = workspaceId ? statusMap[workspaceId] : null;
+    const effectiveId = workspaceId ?? current?.id ?? null;
+    const status = effectiveId ? statusMap[effectiveId] : null;
     const bound = (status?.daemon_id ?? null) != null;
     return statusBadgeLabel({ bound, online: status?.online ?? false });
   })();
 
   const [bindingTargetId, setBindingTargetId] = useState<string | null>(null);
 
-  // ── 平台页引导态（workspaceId === null，admin/ppm 等无 wsId 页面） ──
-  if (!workspaceId) {
+  // ── 平台页引导态（workspaceId === null 且无 current：从未选过工作区） ──
+  // 若 current 有值（跳平台页前选过 ws），保留显示 current，不因跳平台页清空。
+  if (!workspaceId && !current) {
     return (
       <button
         type="button"
@@ -256,7 +260,7 @@ export function WorkspaceSwitcher(): JSX.Element {
             <div className="px-3 py-2 text-sm text-slate-400">暂无可切换工作区</div>
           ) : (
             entries.map((entry) => {
-              const isCurrent = entry.id === workspaceId;
+              const isCurrent = entry.id === (workspaceId ?? current?.id);
               const badge = statusBadgeLabel(entry);
               return (
                 <DropdownMenuItem

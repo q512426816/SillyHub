@@ -157,20 +157,27 @@ function setupCtx(overrides: {
   workspaceId?: string | null;
   currentName?: string;
   daemonOnline?: boolean;
+  /** 显式覆盖 current（模拟平台页 workspaceId=null 但 current 保留的修复场景）。
+   *  undefined → 按 wsId 推导（wsId 非空有 current，null 无）。 */
+  current?: { id: string; name: string; daemon_id: string | null; daemon_online: boolean } | null;
 }) {
   // 注意：workspaceId 可显式传 null（平台页），用 nullish 但区分 undefined
   const wsId =
     overrides.workspaceId === undefined ? "ws-a" : overrides.workspaceId;
+  const current =
+    overrides.current !== undefined
+      ? overrides.current
+      : wsId
+        ? {
+            id: wsId,
+            name: overrides.currentName ?? "",
+            daemon_id: overrides.daemonOnline ? "d-a" : null,
+            daemon_online: overrides.daemonOnline ?? true,
+          }
+        : null;
   mockUseWorkspaceContext.mockReturnValue({
     workspaceId: wsId,
-    current: wsId
-      ? {
-          id: wsId,
-          name: overrides.currentName ?? "",
-          daemon_id: overrides.daemonOnline ? "d-a" : null,
-          daemon_online: overrides.daemonOnline ?? true,
-        }
-      : null,
+    current,
     daemonOnline: overrides.daemonOnline ?? true,
     switchWorkspace: mockSwitchWorkspace,
   });
@@ -389,6 +396,22 @@ describe("WorkspaceSwitcher", () => {
     await clickItem("后端 API");
 
     expect(mockSwitchWorkspace).toHaveBeenCalledWith("ws-b");
+  });
+
+  it("平台页（workspaceId=null）current 有值时保留显示 current，不显引导态（修复跳平台页清空）", async () => {
+    setupCtx({
+      workspaceId: null,
+      current: { id: "ws-a", name: "前端中台", daemon_id: "d-a", daemon_online: true },
+    });
+    setupStatus({ "ws-a": { daemon_id: "d-a", online: true } });
+    mockedList.mockResolvedValue({ items: [], total: 0 });
+    mockedBindings.mockResolvedValue([]);
+
+    withQueryClient(<WorkspaceSwitcher />);
+
+    // 保留显示 current.name，不走"选择工作区"引导态
+    expect(screen.getByText("前端中台")).toBeInTheDocument();
+    expect(screen.queryByText("选择工作区")).not.toBeInTheDocument();
   });
 
   it("平台页（workspaceId=null）显示「选择工作区」引导态，不阻断", async () => {
