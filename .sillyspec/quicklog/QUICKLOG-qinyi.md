@@ -182,6 +182,46 @@ created_at: 2026-07-05 16:33:00
 测试：4 直测通过（allowed_roots 3 + init 1）；daemon+workspace 模块 633 passed 零回归。未重跑全量（改动局部 + 上次全量 2381 项确认仅此 2 失败均已修 + grep 确认无其他测试依赖 instance.updated_at version 派生 / interactive init kind）。
 关联 [[component-readonly-split-change]] 预存 init 债 + [[scan-stage-interactive-dispatch]]。
 
+## ql-20260709-001-7e3a | 2026-07-09 10:36:28 | tool_result 命令输出被硬截断 3000 字符致 scan/构建/测试日志尾部丢失（interactive+batch 双路径 + 前端兜底）
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/daemon/run_sync/service.py, sillyhub-daemon/src/task-runner.ts, frontend/src/components/agent-log/tool-renderers.tsx, sillyhub-daemon/tests/task-runner.test.ts, backend/app/modules/daemon/tests/test_extract_sdk_attribution.py
+依据：用户报 scan(Bash 工具) 实时日志标"输出 (59 行)"但实际只显示到"4. 对比 `C:\U"就断、后面全丢。scan 走 interactive，daemon 透传完整 raw SDK message 不截断，截断点在落库侧：① backend run_sync/service.py:1356 `_extract_sdk_messages` tool_result 分支 `f"[TOOL_RESULT] {text[:3000]}"`；② daemon task-runner.ts:1894 batch 路径 `rawContent.slice(0, 3000)`。旁证 task-runner.ts:1928 result summary 已在 ql-20260626-001 放宽到 50000，但普通命令输出(1894)和 interactive(service.py:1356)仍 3000——之前只修一半。sillyspec scan 59 行含大量长路径行，3000 字符只够前几行，尾部 50+ 行永久丢失。
+修法（用户拍板上限 100000 字符 ≈ 2000 行）：① backend interactive 截断 3000→TOOL_RESULT_MAX_CHARS=100000 + 超长追加 `\n...(输出过长，已截断，共 N 字符)` + docstring 注释同步；② daemon batch 同 100000 常量 TOOL_RESULT_PREVIEW_MAX + 标注（两端对齐）；③ 前端 BashToolPreview 加 TOOL_RESULT_DISPLAY_MAX=100000 展示兜底（displayResult 截断+标注，标题行数与正文同源，复制按钮保留完整原文，双保险防 OOM）；④ daemon 截断断言 3000→100000；⑤ backend 新增 2 截断用例。thinking 的 [:2000] 不动（中间推理保留现状）。
+测试：backend pytest test_extract_sdk_attribution + test_run_sync_cache_parse 21 passed（含新增 2）零回归；frontend vitest agent-log 63 passed（normalize 37 + tool-kind-meta 7 + agent-log-viewer 19）零回归；daemon vitest task-runner 62 passed（改的截断断言过），另 3 failed（submitMessages 次数：空 stdout / 坏行跳过）经 git stash 验证为预存债（clean baseline 仍 3 failed/62 passed，与本次 tool_result 截断改动无关）。
+遗留：① 端到端部署验证（backend rebuild + daemon bundle + 重启 daemon，重跑 scan 看 59 行是否完整回流前端）；② daemon task-runner.test.ts 的 3 个预存 submitMessages 失败建议单独 quick 修（与本次正交）；③ 历史 agent_run_logs 已被 3000 截断的旧数据无法恢复（只影响新 run）。
+坑：诊断时"输出(N行)"标题与残缺内容不一致易误判前端 bug，实际截断在后端落库（daemon 透传不截）；interactive(backend)+batch(daemon) 两截断点要一起改否则只修一半；预存测试失败用 git stash 对照 clean baseline 是最快判债手段。关联 [[agent-log-display-fix-change]]（D-008 normalize 治重复/折叠，本次治截断丢失，同一日志回显链路）。
+
+## ql-20260709-002-1b8c | 2026-07-09 11:02:00 | 日志回显链路其余截断点放宽（A 类 8 处源码：命令行/思考/run输出/前端预览，B 类防刷屏保留）
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/src/task-runner.ts, backend/app/modules/daemon/run_sync/service.py, frontend/src/components/agent-log/tool-renderers.tsx, sillyhub-daemon/tests/task-runner.test.ts, backend/app/modules/daemon/tests/test_wave5_integration.py
+依据：用户看 ql-001 改动上下文发现 task-runner.ts 还有 MAX_OUTPUT=10000/MAX_ERROR=5000 等一堆字符限制，担心同样砍输出。全面 grep 三端日志链路截断点，分三类：A 类（日志回显、影响体验，该放宽）、B 类（防刷屏/防 OOM，改大反而坏事，保留）、C 类（git/文件读取等无关，不动）。用户拍板 A 类全放宽。
+修法（A 类 8 处源码点 + 测试同步）：daemon task-runner.ts MAX_OUTPUT 1万→5万(run最终输出 output_redacted)、thinking preview 2000→2万、[TOOL_USE] 命令行 slice 2000→2万 + 2 docstring；backend service.py thinking [:2000]→[:2万]、[TOOL_USE] stdout_content [:2000]→[:2万]、result_summary 兜底 [:4000]→[:5万] + docstring；前端 tool-renderers.tsx Write content 预览 slice(5千)→(5万)、Agent prompt 预览 slice(3千)→(2万)。发现并补了 daemon thinking 漏改（task-runner.ts:1782，ql-001 只改了 backend:1247）。B 类保留：MAX_STDERR_FORWARD=50行(stderr风暴防淹没)、ECHO_MAX_LEN=2千(单行echo防刷屏)、stderr/SYSTEM/LOG/APPROVAL 单行 5千/2千、prompt[:5000]+MAX_USER_INPUT_CHARS=4000(用户输入上限防粘贴巨量)。
+测试：backend 59 passed(test_wave5_integration+extract+run_sync，含改的 thinking 断言) + frontend 63 passed(agent-log 全套) + daemon 62 passed(MAX_OUTPUT/thinking/TOOL_USE/tool_result 4 处改的断言全过)，daemon 3 预存 submitMessages 失败与 ql-001 完全一致(379/734 已知债，stash 验证过)。
+遗留：① 端到端部署验证(同 ql-001，rebuild backend+daemon bundle+重启)；② daemon 3 预存 submitMessages 债(同 ql-001，建议单独 quick 修)；③ git status 发现 change-file-tree.tsx/.test.tsx 两个非本次改动的脏文件(linter/其他进程留)，已确认不属本次、未暂存。
+坑：grep 截断点要三端全覆盖(thinking 漏改 daemon 1782 是改完 backend 才发现，说明先列清单再动手)；预存测试失败跨 quick 一致(stash 验证一次即可，不必每轮重验)；quick 期间 linter 可能动无关文件(change-file-tree)，step3 git add 只挑本次文件避免误纳入。关联 [[agent-log-display-fix-change]] + ql-20260709-001（同一日志回显链路截断治理系列）。
+
+## ql-20260709-003-a2f5 | 2026-07-09 11:17:00 | thinking 被 [SYSTEM:thinking_tokens] 穿插截断成碎片 + thinking_tokens 默认不显示（前端 normalize 治）
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/agent-log/normalize.ts, frontend/src/components/agent-log/__tests__/normalize.test.ts
+依据：用户报实时日志里 thinking 思路被多条 [SYSTEM:thinking_tokens] 穿插切成多节碎片(显示效果差，应该一起显示)，且 thinking_tokens(token 估算)意义不大不该显示。根因: interactive 路径 session-manager.ts:2466 主动产 [SYSTEM:thinking_tokens] 发 backend(batch 路径 stream-json adapter :851 早 return null 丢弃, 两路径不一致); 前端 normalize 主循环遇非 thinking-only stdout 行(含 thinking_tokens)即重置 lastThinkingIdx(:504), 把 thinking 合并指针打断 → thinking 被切成多块。D-002@v2 之前是"保留折叠显示", 用户反馈推翻为"默认不显示"。
+修法(前端 normalize.ts 最小风险, 不动 daemon 契约): stdout 分支识别 `[SYSTEM:thinking_tokens]` 开头行 → hidden + continue(不重置 lastThinkingIdx), 让 thinking 跨越它连续合并成一段; 普通 [SYSTEM:status] 等仍打断(不影响 normalize.test.ts:111)。同步更新 normalizeLogsImpl 注释(D-002@v2 折叠→ql-003 隐藏)。加 normalize.test.ts 新测试: thinking_tokens 穿插时 thinking 合并 + 自身 hidden。
+测试：frontend 64 passed(normalize 38 含新增 1 + tool-kind-meta 7 + agent-log-viewer 19)零回归。
+遗留：① 端到端部署验证(前端 rebuild, 重跑 scan 看 thinking 是否连续一段 + 无 thinking_tokens 行); ② 源头 session-manager.ts:2466 interactive 仍产 thinking_tokens(本次前端 hidden 治标, 用户默认看不到但 DB/WS 仍传输), 可选后续源头停产出对齐 batch; ③ 历史 agent_run_logs 里已落库的 thinking_tokens 旧数据前端现已隐藏(只影响展示不影响数据)。
+坑：normalize 的 thinking 合并靠 lastThinkingIdx 连续性, 任何"穿插"行(SYSTEM/ASSISTANT/TOOL)都会打断——治"碎片"要么源头不产穿插行, 要么前端让穿插行透明(hidden+不重置); D-002@v2 折叠显示是过度保留(用户不需要 token 估算), 用户反馈是最佳决策来源。关联 ql-20260709-001/002 + [[agent-log-display-fix-change]]（日志回显链路治理系列）。
+
+## ql-20260709-004-f0a1 | 2026-07-09 11:14:00 | 变更详情页变更文件区：html 渲染预览 + 交互反转（默认预览/点编辑才编辑，纯文本统一默认只读源码）
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/change-file-tree.tsx, frontend/src/components/__tests__/change-file-tree.test.tsx
+依据：用户反馈 /workspaces/[id]/changes/[cid] 的"变更文件"区——后端 _TEXT_SUFFIXES(service.py:211) 已含 .html/.htm 故 is_text=true 能编辑源码，但缺渲染预览；且要内容区默认展示预览、点编辑才进文本编辑。AskUserQuestion 确认纯文本(.yaml/.json/.py 等)也统一默认预览(=只读源码)。
+修法：① 抽 FilePreview 组件按类型渲染——.md→MarkdownPreview、.html/.htm→iframe srcDoc sandbox(allow-scripts allow-popups，不设 allow-same-origin→iframe 唯一源，脚本能跑但读不到父页面 cookie/storage/DOM，安全)、其他纯文本→只读 <pre> 源码；② 新增 mode state(preview|edit) 默认 preview，handleSelect 每次选文件重置 preview；③ 工具条 preview 模式只显「编辑」按钮，edit 模式显「预览/放弃修改/保存」；④ 模式切换保留 content+dirty 不丢改动，预览用最新 content 渲染(含未保存改动)；⑤ 删除旧 textarea 下方折叠预览面板。
+测试：change-file-tree.test.tsx 重写 6 用例（默认预览+点编辑保存 / pending 徽标 / html iframe sandbox+srcdoc 断言 / 纯文本只读源码+点编辑 / 编辑↔预览切换保留改动 / 文件树渲染），6 passed。
+遗留：端到端部署验证（rebuild frontend 镜像后人工确认 iframe 真实渲染，jsdom 不实际渲染网页）。
+坑：多并行 quick 会话共享 .runtime/sillyspec.db 的 quick 阶段状态（quick-guard.json 不存在），本会话启动时继承了 ql-002(日志截断)会话遗留的 step1，致本改动未建独立 ql 且被 ql-002 遗留③误判为"无关脏文件"；手动补建 ql-004 认领。
+
 
 
 

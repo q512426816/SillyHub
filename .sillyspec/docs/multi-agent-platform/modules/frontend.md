@@ -48,4 +48,12 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 - 2026-06-26-daemon-client-spec-sync-fix | daemon-client changes proxy-create 入口（带 runtime_id）+ daemon 离线禁用引导（FR-08/09）。
 - ql-20260702-002-4ee9 | agent 控制台 pending run 可见性修复：pending 并入活跃面板（排队中琥珀徽标+角标），原 runningRuns/completedRuns 两派生流都过滤 pending 但"总运行"=runs.length 计入致数字与列表不一致。
 
+- ql-20260709-001-7e3a | BashToolPreview 加 100000 字符展示兜底（displayResult 截断+标注，标题行数与正文同源，复制按钮保留完整原文，防超大命令输出 OOM；后端/daemon 已截断的双保险）。改 tool-renderers.tsx。
+
+- ql-20260709-002-1b8c | Write content 预览 5千→5万 + Agent prompt 预览 3千→2万（tool-renderers.tsx），A 类日志截断放宽。
+
+- ql-20260709-003-a2f5 | normalize.ts [SYSTEM:thinking_tokens] 行默认 hidden + 不打断 thinking 合并（修 thinking 被 token 估算行穿插切成碎片；推翻 D-002@v2 折叠显示决策）。
+
+- ql-20260709-004-f0a1 | 变更详情页「变更文件」区增强：① html/.htm 文件渲染预览（iframe srcDoc + sandbox=allow-scripts allow-popups，不设 allow-same-origin 隔离唯一源，安全）；② 内容区交互反转——默认预览、点「编辑」才进文本编辑（.md→Markdown / .html→iframe / 纯文本→只读源码，统一默认预览）；模式切换保留未保存改动。改 change-file-tree.tsx（抽 FilePreview + mode 状态）。
+
 <!-- MANUAL_NOTES_END -->
