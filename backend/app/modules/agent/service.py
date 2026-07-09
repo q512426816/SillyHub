@@ -1448,7 +1448,7 @@ class AgentService:
         # 让 daemon SessionManager 注入 canUseTool——AskUserQuestion 真阻塞等人审。
         from datetime import UTC, datetime
 
-        from app.modules.agent.model import AgentRunLog, AgentSession
+        from app.modules.agent.model import AgentSession
         from app.modules.daemon.protocol import DAEMON_MSG_SESSION_INJECT
         from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
@@ -1561,15 +1561,10 @@ class AgentService:
         # Do NOT assign it to run.lease_id — that column's FK points to
         # worktree_leases, so a daemon lease id here raises ForeignKeyViolation
         # on commit, failing dispatch and leaving the run stuck pending.
-        # 首 turn 落 user_input log（让历史回看看到首 prompt，与 create_session 一致）。
-        self._session.add(
-            AgentRunLog(
-                run_id=run.id,
-                channel="user_input",
-                content_redacted=(bundle.step_prompt or "")[:5000],
-                timestamp=now,
-            )
-        )
+        # 2026-07-09-agent-log-display-fix：删除此处重复的 user_input 写入。
+        # create_session（daemon/session/service.py:397-410）已落首 prompt 的
+        # channel=user_input log，这里再写导致 interactive run（如 8cab695d）
+        # 的 user_input ×2 重复显示。保留 commit（run 绑定 session 仍需提交）。
         await self._session.commit()
         await self._session.refresh(run)
 

@@ -377,6 +377,24 @@ function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
   // 改为 viewer 折叠渲染（信息完整性优先）。所有日志保留进 normalize，classifyLog
   // 归 system/thinking 语义类，viewer 渲染为折叠摘要行可展开。
   const result: ProcessedLog[] = logs.map((log) => ({ log, hidden: false }));
+
+  // 2026-07-09-agent-log-display-fix：interactive 路径消息级重复去重（治标）。
+  // backend create_session + dispatch 两处写首 user_input（daemon/session/service.py:397
+  // + agent/service.py:1564）+ assistant 双路径，导致同 channel+content 完全相同的
+  // 消息重复落库（如 8cab695d interactive run）。这里按 (channel, content) 去重
+  // （后条 hidden），不影响合法 delta 合并（delta 内容不同不命中）。
+  // tool_use/tool_call 双写（不同 channel）靠下方 classifyLog [TOOL_USE]→tool_call + 配对。
+  const dedupSeen = new Set<string>();
+  for (const p of result) {
+    if (p.hidden) continue;
+    const key = `${p.log.channel}|${asString(p.log.content_redacted)}`;
+    if (dedupSeen.has(key)) {
+      p.hidden = true;
+    } else {
+      dedupSeen.add(key);
+    }
+  }
+
   let lastToolSourceIdx = -1;
   // ql-20260617-011：连续 [THINKING]-only stdout 合并到首条（SSE 追加效果）
   let lastThinkingIdx = -1;
