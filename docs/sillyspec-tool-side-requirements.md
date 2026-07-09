@@ -22,6 +22,8 @@ brainstorm / quick）的平台参数注入、stage 完成回调、changes 回流
 
 ## 【P0 · 必修】init.js 无差别删除 `.sillyspec/` 的资产保护
 
+> ✅ **已解决**（sillyspec v3.22.x，2026-07 核实）：`src/init.js:148-183`（`doInstall`）已实现真实资产检测（`changes/` 非空 || `projects/` 非空 || `sillyspec.db` 存在）+ 拒绝整删 + `cleanupRuntimeResidue`（白名单保留 `worktrees/`、`sillyspec.db` 等权威状态，只清 `.runtime/` 缓存子项 + `local.yaml` + `codebase/`）。回归测试：`test/runtime-cleanup-keeps-worktree.test.mjs`（28 断言）+ `test/spec-dir.test.mjs`（38 断言）全绿。下方原方案保留作历史记录。
+
 ### 问题
 
 `src/init.js:111-117`：当 `init --spec-dir <外部>` 且源码项目已存在 `.sillyspec/` 时，
