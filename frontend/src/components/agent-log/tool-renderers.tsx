@@ -18,6 +18,14 @@ import type { ToolCallEntry } from "./types";
 
 import { COMMAND_COLLAPSE_CHARS, COMMAND_COLLAPSE_LINES } from "./normalize";
 
+/**
+ * ql-20260709-001：tool_result 命令输出展示兜底上限（字符）。
+ * 后端（backend run_sync/service.py）与 daemon（task-runner.ts）已把落库截断
+ * 从 3000 放宽到 100000；前端这层是双保险——万一上游漏截断（或旧数据），
+ * 超 10 万字符的 pre 只渲染前 10 万 + 截断提示，避免巨型 DOM 卡顿 / OOM。
+ */
+const TOOL_RESULT_DISPLAY_MAX = 100_000;
+
 /* ------------------------------------------------------------------ */
 /*  Shared sub-components                                              */
 /* ------------------------------------------------------------------ */
@@ -193,7 +201,7 @@ function WriteToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps)
       <CollapsibleSection title={`内容预览 (${lineCount} 行)`}>
         <div className="relative">
           <pre className={CODE_CLS}>
-            {content.length > 5000 ? content.slice(0, 5000) + "\n... (截断)" : content}
+            {content.length > 50000 ? content.slice(0, 50000) + "\n... (截断)" : content}
           </pre>
           <div className="mt-1">
             <CopyButton text={content} label="复制内容" />
@@ -242,7 +250,7 @@ function AgentToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps)
         <CollapsibleSection title={`Prompt (${prompt.length} 字符)`}>
           <div className="relative">
             <pre className={CODE_CLS}>
-              {prompt.length > 3000 ? prompt.slice(0, 3000) + "\n... (截断)" : prompt}
+              {prompt.length > 20000 ? prompt.slice(0, 20000) + "\n... (截断)" : prompt}
             </pre>
             <div className="mt-1">
               <CopyButton text={prompt} label="复制 Prompt" />
@@ -271,7 +279,15 @@ function BashToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps) 
   const title =
     desc || (cmd ? firstLine.slice(0, 80) + (firstLine.length > 80 ? "..." : "") : entry.tool);
 
-  const resultLines = (mergedResult ?? "").split("\n");
+  // ql-20260709-001：展示兜底——超 TOOL_RESULT_DISPLAY_MAX 只渲染前 N + 截断提示，
+  // 标题行数与正文同源（都基于 displayResult）。复制按钮仍保留完整原文。
+  const rawResult = mergedResult ?? "";
+  const overDisplay = rawResult.length > TOOL_RESULT_DISPLAY_MAX;
+  const displayResult = overDisplay
+    ? rawResult.slice(0, TOOL_RESULT_DISPLAY_MAX) +
+      `\n...(输出过长，已截断，共 ${rawResult.length} 字符)`
+    : rawResult;
+  const resultLines = displayResult.split("\n");
   const hasResult = resultLines.some((l) => l.trim());
 
   return (
@@ -310,9 +326,9 @@ function BashToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps) 
       )}
       {hasResult && (
         <CollapsibleSection title={`输出 (${resultLines.length} 行)`} defaultOpen={resultLines.length <= 10}>
-          <pre className={CODE_CLS}>{mergedResult}</pre>
+          <pre className={CODE_CLS}>{displayResult}</pre>
           <div className="mt-1">
-            <CopyButton text={mergedResult ?? ""} label="复制输出" />
+            <CopyButton text={rawResult} label="复制输出" />
           </div>
         </CollapsibleSection>
       )}

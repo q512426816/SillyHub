@@ -36,6 +36,14 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 
+# ql-20260709-001：tool_result 命令输出截断上限（原 3000 → 100000）。
+# 3000 字符会砍掉 scan / 构建 / 测试命令输出的关键尾部（含大量长路径行，
+# 如 sillyspec scan 一次输出 59 行），用户在前端只能看到前几行、后面全丢。
+# 100000（约 2000 行）覆盖绝大多数命令输出；超长追加中文标注保留原始长度
+# 信息。daemon task-runner.ts 的 batch 路径同步对齐（原同样 3000 截断）。
+TOOL_RESULT_MAX_CHARS = 100_000
+
+
 # ── QueuePool 修复 3：submit_messages 的发布意图 + 延迟 publish ────────────────
 # Redis publish 从 RunSyncService.submit_messages 迁出到 router（DB session 已
 # commit、连接归还后再发），避免 Redis 卡死永久占用 DB 连接池 slot（线上
@@ -862,7 +870,7 @@ class RunSyncService:
             try:
                 agent_run.output_redacted = redact_output(result_summary)
             except Exception:
-                agent_run.output_redacted = result_summary[:4000]
+                agent_run.output_redacted = result_summary[:50000]
 
         self._session.add(agent_run)
         await self._session.commit()
@@ -1165,11 +1173,11 @@ def _extract_sdk_messages(msg: dict) -> list[dict]:
 
       assistant.content:
         - ``text``       → 1× ``[ASSISTANT] <text>`` (stdout)
-        - ``thinking``   → 1× ``[THINKING] <text[:2000]>`` (stdout)
+        - ``thinking``   → 1× ``[THINKING] <text[:20000]>`` (stdout)
         - ``tool_use``   → 2×: ``[TOOL_USE] <name>: <args>`` (stdout)
                            + ``{tool,args,timestamp,status,success}`` (tool_call)
       user.content:
-        - ``tool_result`` → 1× ``[TOOL_RESULT] <content[:3000]>`` (stdout)
+        - ``tool_result`` → 1× ``[TOOL_RESULT] <content[:100000]>`` (stdout，超长追加截断标注)
 
     usage / session_id（真实 SDK 形态在 ``message.usage``，daemon 也可能透传到顶层）
     只注入到产出的*第一条* flat record，避免同一 SDK message 的多个 sibling block
@@ -1236,7 +1244,7 @@ def _extract_sdk_messages(msg: dict) -> list[dict]:
         elif btype == "thinking":
             text = str(b.get("thinking", b.get("text", "")) or "")
             if text:
-                preview = text[:2000] + ("..." if len(text) > 2000 else "")
+                preview = text[:20000] + ("..." if len(text) > 20000 else "")
                 out.append(
                     stamp(
                         {
@@ -1273,7 +1281,7 @@ def _extract_sdk_messages(msg: dict) -> list[dict]:
                     args_line = json.dumps(input_obj)
                 except (TypeError, ValueError):
                     args_line = ""
-            stdout_content = f"[TOOL_USE] {name}: {args_line}"[:2000]
+            stdout_content = f"[TOOL_USE] {name}: {args_line}"[:20000]
             out.append(
                 stamp(
                     {
@@ -1351,9 +1359,18 @@ def _extract_sdk_messages(msg: dict) -> list[dict]:
             raw_tuid = b.get("tool_use_id")
             result_tool_use_id = raw_tuid if isinstance(raw_tuid, str) and raw_tuid else ""
             if text:
+                # ql-20260709-001：放宽截断上限（3000→TOOL_RESULT_MAX_CHARS），
+                # 超长追加中文标注，保留"已截断 + 原始长度"信息供前端展示。
+                if len(text) > TOOL_RESULT_MAX_CHARS:
+                    body = (
+                        text[:TOOL_RESULT_MAX_CHARS]
+                        + f"\n...(输出过长，已截断，共 {len(text)} 字符)"
+                    )
+                else:
+                    body = text
                 rec: dict = {
                     "event_type": "tool_result",
-                    "content": f"[TOOL_RESULT] {text[:3000]}",
+                    "content": f"[TOOL_RESULT] {body}",
                     "channel": "stdout",
                 }
                 if result_tool_use_id:

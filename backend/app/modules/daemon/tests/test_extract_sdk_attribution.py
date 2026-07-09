@@ -14,7 +14,10 @@
 
 from __future__ import annotations
 
-from app.modules.daemon.run_sync.service import _extract_sdk_messages
+from app.modules.daemon.run_sync.service import (
+    TOOL_RESULT_MAX_CHARS,
+    _extract_sdk_messages,
+)
 
 
 def _assistant_msg(
@@ -131,3 +134,38 @@ def test_usage_still_first_record_only_while_attribution_every_record() -> None:
         assert r["parent_tool_use_id"] == "toolu_mix"
         assert r["subagent_type"] == "Explore"
         assert r["depth"] == 2
+
+
+def _user_tool_result_msg(text: str, *, tool_use_id: str = "toolu_1") -> dict:
+    """构造 user message（含单个 tool_result block）喂给 ``_extract_sdk_messages``。"""
+    return {
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": tool_use_id, "content": text}],
+        },
+    }
+
+
+def test_tool_result_long_output_truncated_with_annotation() -> None:
+    """ql-20260709-001：tool_result 超 TOOL_RESULT_MAX_CHARS 截断 + 中文标注。
+
+    回归 sillyspec scan 59 行输出被原 3000 上限砍尾的 bug——放宽到 100000 后，
+    超长输出截断并追加标注保留原始长度信息。
+    """
+    long_text = "x" * (TOOL_RESULT_MAX_CHARS + 500)
+    records = _extract_sdk_messages(_user_tool_result_msg(long_text, tool_use_id="toolu_long"))
+    assert len(records) == 1
+    annotation = f"\n...(输出过长，已截断，共 {len(long_text)} 字符)"
+    assert records[0]["content"] == "[TOOL_RESULT] " + "x" * TOOL_RESULT_MAX_CHARS + annotation
+    # tool_use_id 透传（ql-20260706-002 tool_kind 配对回查用）
+    assert records[0]["tool_use_id"] == "toolu_long"
+
+
+def test_tool_result_short_output_not_truncated() -> None:
+    """短输出（< TOOL_RESULT_MAX_CHARS）原样保留、不加标注。"""
+    records = _extract_sdk_messages(
+        _user_tool_result_msg("scan 完成，共 59 行", tool_use_id="toolu_short")
+    )
+    assert len(records) == 1
+    assert records[0]["content"] == "[TOOL_RESULT] scan 完成，共 59 行"

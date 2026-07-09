@@ -135,6 +135,31 @@ describe("normalizeLogs：连续 [THINKING] 合并 (ql-20260617-011)", () => {
     expect(result[4]?.hidden).toBe(true);
   });
 
+  it("ql-20260709-003 [SYSTEM:thinking_tokens] 不打断 thinking 合并且自身 hidden", () => {
+    // 用户反馈：thinking_tokens 穿插把 thinking 切成碎片 + 占位无意义。
+    // 修复：thinking_tokens 行 hidden + 不重置 lastThinkingIdx，thinking 跨越它连续合并。
+    const logs: AgentRunLogEntry[] = [
+      makeLog("stdout", "[THINKING] 块1a", "l1"),
+      makeLog("stdout", "[THINKING] 块1b", "l2"),
+      makeLog("stdout", "[SYSTEM:thinking_tokens] 502", "l3"),
+      makeLog("stdout", "[SYSTEM:thinking_tokens] 524", "l4"),
+      makeLog("stdout", "[THINKING] 块2a", "l5"),
+    ];
+
+    const result = normalizeLogs(logs);
+
+    // l1 是合并块首条，mergedThinkingContent = 块1a+块1b+块2a（跨越 thinking_tokens）
+    expect(result[0]?.hidden).toBe(false);
+    expect(result[0]?.mergedThinkingContent).toBe("块1a块1b块2a");
+    // l2 合并到 l1
+    expect(result[1]?.hidden).toBe(true);
+    // l3/l4 thinking_tokens 诊断行 hidden（默认不显示）
+    expect(result[2]?.hidden).toBe(true);
+    expect(result[3]?.hidden).toBe(true);
+    // l5 块2a 合并到 l1（跨越 thinking_tokens，不被打断）
+    expect(result[4]?.hidden).toBe(true);
+  });
+
   it("tool_call 断开连续性", () => {
     const logs: AgentRunLogEntry[] = [
       makeLog("stdout", "[THINKING] 工具前思考", "l1"),
