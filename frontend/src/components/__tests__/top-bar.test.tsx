@@ -4,11 +4,31 @@
  * resolvePlatformSwitch 为纯函数，覆盖平台判断（/ppm 前缀）与文案/跳转目标；
  * 不依赖 radix DropdownMenu 的渲染时机，稳定可测。DropdownMenuItem 的点击路由
  * 跳转由其自身集成（next/navigation useRouter）保证，此处聚焦核心判断逻辑。
+ *
+ * task-09（2026-07-09-workspace-prioritization / FR-04 / AC-3）：
+ *   新增一个渲染测试，确认顶栏左侧（面包屑之前）挂载了 WorkspaceSwitcher。
+ *   直接 mock 掉 @/components/workspace-switcher，避免拖入 task-08 的 context /
+ *   react-query / store 依赖（这些在 task-08 自身测试里覆盖，本任务只验接入）。
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
 
-import { resolvePlatformSwitch } from "@/components/top-bar";
+// task-09：mock workspace-switcher，渲染时打一个稳定标记，断言接入即可。
+// vi.mock 会被 vitest 提升到文件顶部（早于被测模块 import）。
+vi.mock("@/components/workspace-switcher", () => ({
+  WorkspaceSwitcher: () => (
+    <div data-testid="workspace-switcher-mock">switcher</div>
+  ),
+}));
+
+// next/navigation 在 jsdom 下需 mock，避免引入真实路由依赖。
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/workspaces",
+  useRouter: () => ({ push: () => {} }),
+}));
+
+import { resolvePlatformSwitch, TopBar } from "@/components/top-bar";
 
 describe("resolvePlatformSwitch", () => {
   it("SillyHub（非 /ppm 路径）→ 提示「切换到项目管理平台」，目标 /ppm", () => {
@@ -43,5 +63,38 @@ describe("resolvePlatformSwitch", () => {
       label: "切换到 SillyHub",
       href: "/workspaces",
     });
+  });
+});
+
+/**
+ * task-09：TopBar 渲染测试。
+ *
+ * 验证顶栏左侧（面包屑之前）挂载了 WorkspaceSwitcher（FR-04 / AC-3）。
+ */
+describe("TopBar 渲染", () => {
+  it("顶栏左侧渲染 WorkspaceSwitcher（面包屑之前）", () => {
+    const { container } = render(
+      <TopBar displayName="管理员" onLogout={() => {}} />,
+    );
+
+    const switcher = screen.getByTestId("workspace-switcher-mock");
+    expect(switcher).toBeTruthy();
+
+    // 切换器位于 header 内、面包屑 nav 之前（DOM 顺序校验）
+    const header = container.querySelector("header");
+    expect(header).toBeTruthy();
+    const nav = container.querySelector("header > nav");
+    expect(nav).toBeTruthy();
+    expect(header!.contains(switcher)).toBe(true);
+
+    // switcher 可能被包在分隔容器 div 内，向上找到 header 的直接子节点，
+    // 断言它在 nav 之前（顶栏左侧锚点位置）。
+    const children = Array.from(header!.children);
+    const navIdx = children.indexOf(nav!);
+    const switcherAncestor = children.find((c) => c.contains(switcher));
+    expect(switcherAncestor).toBeTruthy();
+    const switcherIdx = children.indexOf(switcherAncestor!);
+    expect(switcherIdx).toBeGreaterThanOrEqual(0);
+    expect(switcherIdx).toBeLessThan(navIdx);
   });
 });

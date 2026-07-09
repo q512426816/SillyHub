@@ -15,6 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 
 /**
  * 面包屑段名映射：pathname split 后的段值 → 中文标签。
@@ -88,6 +89,11 @@ export function TopBar({ displayName, onLogout }: TopBarProps) {
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-slate-200 bg-white px-4 shadow-sm">
+      {/* task-09：工作区切换器（当前 ws 名 + daemon 徽标），顶栏最左侧锚点 */}
+      <div className="flex shrink-0 items-center pr-2">
+        <WorkspaceSwitcher />
+      </div>
+
       {/* 面包屑 */}
       <nav className="flex min-w-0 flex-1 items-center gap-1 text-sm">
         {crumbs.map((label, idx) => {

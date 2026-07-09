@@ -7,8 +7,8 @@
 //   - owner=null 不崩；owner.display_name 优先作为负责人显示名；
 //   - 详情/关系为带 href 的链接，复用 buttonVariants 统一按钮风格。
 
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 
 import { WorkspaceCard } from "@/components/workspace-card";
 import type { Workspace } from "@/lib/workspaces";
@@ -187,5 +187,96 @@ describe("WorkspaceCard 结构 (ql-20260702)", () => {
     expect(screen.getByText("dev-host")).toBeInTheDocument();
     // 两个 provider 徽标都渲染。
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
+  });
+});
+
+// task-07（2026-07-09-workspace-prioritization）：列表页改造为选择器后，
+// 卡片新增 daemon 状态徽标（三态，对齐原型画面①）+ 整卡 onActivate 分流。
+describe("WorkspaceCard daemon 徽标 + 整卡点击 (task-07)", () => {
+  it("daemonStatus=online：渲染绿色「守护在线」徽标", () => {
+    render(
+      <WorkspaceCard
+        workspace={mkWorkspace({ id: "ws-on" })}
+        daemonStatus="online"
+        onChanged={() => {}}
+        onEditAlias={() => {}}
+      />,
+    );
+    expect(screen.getByText("守护在线")).toBeInTheDocument();
+    expect(screen.queryByText("未绑定")).not.toBeInTheDocument();
+  });
+
+  it("daemonStatus=offline：渲染红色「守护离线」徽标", () => {
+    render(
+      <WorkspaceCard
+        workspace={mkWorkspace({ id: "ws-off" })}
+        daemonStatus="offline"
+        onChanged={() => {}}
+        onEditAlias={() => {}}
+      />,
+    );
+    expect(screen.getByText("守护离线")).toBeInTheDocument();
+  });
+
+  it("daemonStatus=unbound：渲染黄色「未绑定」徽标 + 配置提示行", () => {
+    render(
+      <WorkspaceCard
+        workspace={mkWorkspace({ id: "ws-unbound" })}
+        daemonStatus="unbound"
+        onChanged={() => {}}
+        onEditAlias={() => {}}
+      />,
+    );
+    expect(screen.getByText("未绑定")).toBeInTheDocument();
+    // 未绑定提示行（原型画面①），引导点击配置
+    expect(screen.getByText(/需先配置守护进程/)).toBeInTheDocument();
+  });
+
+  it("不传 daemonStatus：不渲染 daemon 徽标（兼容旧调用方）", () => {
+    render(
+      <WorkspaceCard
+        workspace={mkWorkspace({ id: "ws-none" })}
+        onChanged={() => {}}
+        onEditAlias={() => {}}
+      />,
+    );
+    expect(screen.queryByText("守护在线")).not.toBeInTheDocument();
+    expect(screen.queryByText("守护离线")).not.toBeInTheDocument();
+    expect(screen.queryByText("未绑定")).not.toBeInTheDocument();
+  });
+
+  it("传 onActivate：卡片整张可点击 → 点击卡片体触发 onActivate", () => {
+    const onActivate = vi.fn();
+    render(
+      <WorkspaceCard
+        workspace={mkWorkspace({ id: "ws-act" })}
+        daemonStatus="unbound"
+        onChanged={() => {}}
+        onEditAlias={() => {}}
+        onActivate={onActivate}
+      />,
+    );
+    // 点击卡片 header（卡片体内，非 footer）→ 触发 onActivate
+    fireEvent.click(screen.getByRole("heading", { level: 3 }));
+    expect(onActivate).toHaveBeenCalledTimes(1);
+  });
+
+  it("footer 按钮（详情/别名）点击不误触 onActivate（stopPropagation）", () => {
+    const onActivate = vi.fn();
+    render(
+      <WorkspaceCard
+        workspace={mkWorkspace({ id: "ws-stop" })}
+        daemonStatus="online"
+        onChanged={() => {}}
+        onEditAlias={() => {}}
+        onActivate={onActivate}
+      />,
+    );
+    // 点击 footer 内的「详情」链接 → 不触发卡片 onActivate
+    fireEvent.click(screen.getByRole("link", { name: "详情" }));
+    expect(onActivate).not.toHaveBeenCalled();
+    // 点击 footer 内「别名」按钮 → 同样不触发
+    fireEvent.click(screen.getByRole("button", { name: "别名" }));
+    expect(onActivate).not.toHaveBeenCalled();
   });
 });

@@ -50,6 +50,10 @@ import {
 import { useSession } from "@/stores/session";
 import { ensureFreshAccessToken, decodeJwtExp } from "@/lib/token-refresh";
 import { visibleMenusBySection } from "@/lib/permission";
+// task-10：复用 task-04 的 useWorkspaceContext（URL 派生真相源 + 旁路写 store 缓存）。
+// workspaceId 仍由内部 URL 正则 ^/workspaces/([^/]+) 解析（与原本地实现逐字一致），
+// 进入工作区时经 hook 内 effect 写 workspace store 缓存（FR-01），app-shell 自身渲染无感。
+import { useWorkspaceContext } from "@/lib/use-workspace-context";
 
 /**
  * 菜单图标映射表：key 用 menu.href 的标识段。
@@ -101,18 +105,15 @@ function resolveMenuIcon(menu: MenuPermissionGroup): LucideIcon {
   return MENU_ICON_MAP[menu.href] ?? FallbackIcon;
 }
 
-function useWorkspaceId(): string | null {
-  const pathname = usePathname();
-  const match = pathname.match(/^\/workspaces\/([^/]+)/);
-  return match?.[1] ?? null;
-}
-
 const COLLAPSED_KEY = "sidebar-collapsed";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const workspaceId = useWorkspaceId();
+  // task-10：workspaceId 改由 useWorkspaceContext 提供（task-04）。
+  // 变量名/类型（string | null）不变，下游 resolveHref/isActive/renderNavLink 全部无感。
+  // 进入工作区时 hook 内 effect 顺带写 workspace store 缓存（FR-01），app-shell 不直接操作 store。
+  const { workspaceId } = useWorkspaceContext();
   const { user, accessToken, refreshToken, clear } = useSession();
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {

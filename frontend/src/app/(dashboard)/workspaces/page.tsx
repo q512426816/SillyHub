@@ -1,12 +1,16 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { Input, Modal } from "antd";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { PageContainer, PageHeader } from "@/components/layout";
-import { WorkspaceCard } from "@/components/workspace-card";
+import { WorkspaceCard, type DaemonBadgeStatus } from "@/components/workspace-card";
 import { WorkspaceScanDialog } from "@/components/workspace-scan-dialog";
+// task-07 / CB-1：未绑定工作区点击弹窗（task-06 产物，容器化 AccessGuide）。
+import { WorkspaceBindingDialog } from "@/components/workspace-binding-dialog";
 import { ApiError } from "@/lib/api";
 import {
   listDaemonInstances,
@@ -21,13 +25,17 @@ import {
   type Workspace,
 } from "@/lib/workspaces";
 import { fetchMyBindings } from "@/lib/workspace-binding";
+// task-07 / FR-06 / R-02：daemon 在线状态聚合（task-03 产物），单数据源供徽标消费。
+import { useDaemonStatusMap } from "@/lib/workspace-daemon-status";
 import { useNotify } from "@/lib/errors";
 import { useSession } from "@/stores/session";
+import { cn } from "@/lib/utils";
 
 // task-08 / FR-04：服务端分页页大小。
 const PAGE_SIZE = 12;
 
 export default function WorkspacesPage() {
+  const router = useRouter();
   const [items, setItems] = useState<Workspace[] | null>(null);
   const [runtimesById, setRuntimesById] = useState<Map<string, DaemonRuntimeRead>>(
     () => new Map(),
@@ -42,6 +50,8 @@ export default function WorkspacesPage() {
   );
   const [error, setError] = useState<string | null>(null);
   const [showDialog, setShowDialog] = useState(false);
+  // task-07 / CB-1：被点击的未绑定工作区，驱动 WorkspaceBindingDialog（task-06）。
+  const [bindingTarget, setBindingTarget] = useState<Workspace | null>(null);
   // task-08 / FR-04 / FR-05 / D-003@v1：筛选分页 + 平台管理员人员搜索 + 别名编辑。
   const isPlatformAdmin = useSession((s) => s.user?.is_platform_admin === true);
   const [query, setQuery] = useState("");
@@ -55,6 +65,10 @@ export default function WorkspacesPage() {
   const [aliasValue, setAliasValue] = useState("");
   const [aliasSaving, setAliasSaving] = useState(false);
   const notify = useNotify();
+
+  // task-07 / FR-06 / R-02：daemon 在线状态聚合（task-03 单数据源），
+  // statusMap[ws_id] → {daemon_id, online, status}。徽标据此映射三态。
+  const { statusMap } = useDaemonStatusMap();
 
   const reload = useCallback(async () => {
     setError(null);
@@ -151,17 +165,65 @@ export default function WorkspacesPage() {
     }
   }, [aliasEditing, aliasValue, notify, reload]);
 
+  // task-07 / FR-06 / R-02：workspace → daemon 徽标三态映射。
+  // statusMap 由 useDaemonStatusMap 聚合（task-03），daemon_id=null 或缺失→未绑定。
+  const daemonStatusOf = useCallback(
+    (wsId: string): DaemonBadgeStatus => {
+      const entry = statusMap[wsId];
+      if (!entry || entry.daemon_id === null) return "unbound";
+      return entry.online ? "online" : "offline";
+    },
+    [statusMap],
+  );
+
+  // task-07 / CB-1：卡片整张点击分流。已绑定（daemon_id 非空）→ 进详情；
+  // 未绑定（daemon_id null）→ 弹 WorkspaceBindingDialog（task-06）。daemon 离线
+  // 仅显示状态不阻断进入（D-005），故只按 daemon_id 是否存在判定，与 online 无关。
+  const handleActivate = useCallback(
+    (w: Workspace) => {
+      const entry = statusMap[w.id];
+      const bound = !!entry?.daemon_id;
+      if (bound) {
+        router.push(`/workspaces/${w.id}`);
+      } else {
+        setBindingTarget(w);
+      }
+    },
+    [statusMap, router],
+  );
+
   return (
     <PageContainer>
       <PageHeader
-        title="工作区"
-        subtitle="管理已注册的项目工作区"
+        title="选择工作区"
+        subtitle="选择一个工作区开始，或在右上角进入平台后台"
         actions={
-          !showDialog && (
-            <Button size="sm" onClick={() => setShowDialog(true)}>
-              + 添加工作区
-            </Button>
-          )
+          <>
+            {/* task-07 / D-001：后台旁路入口，任何人可不选工作区直接进（守卫 task-05 白名单放行） */}
+            <Link
+              href="/admin"
+              className={cn(
+                buttonVariants({ variant: "ghost", size: "sm" }),
+                "text-muted-foreground",
+              )}
+            >
+              平台管理
+            </Link>
+            <Link
+              href="/settings"
+              className={cn(
+                buttonVariants({ variant: "ghost", size: "sm" }),
+                "text-muted-foreground",
+              )}
+            >
+              系统设置
+            </Link>
+            {!showDialog && (
+              <Button size="sm" onClick={() => setShowDialog(true)}>
+                + 添加工作区
+              </Button>
+            )}
+          </>
         }
       />
 
@@ -230,8 +292,18 @@ export default function WorkspacesPage() {
       {items === null ? (
         <p className="py-8 text-center text-xs text-muted-foreground">加载中…</p>
       ) : items.length === 0 ? (
-        <div className="rounded-md border border-dashed py-12 text-center text-xs text-muted-foreground">
-          还没有工作区。点击右上角&ldquo;添加工作区&rdquo;绑定一个项目仓库。
+        // task-07 / D-004 / AC-3：空状态创建引导（虚线框 + 主色「创建工作区」按钮）。
+        <div className="flex flex-col items-center gap-2 rounded-md border border-dashed py-14 text-center">
+          <div className="text-4xl" aria-hidden>
+            📂
+          </div>
+          <p className="text-sm text-foreground">你还没有任何工作区</p>
+          <p className="text-xs text-muted-foreground">
+            创建一个工作区开始使用平台，绑定项目仓库后即可进入。
+          </p>
+          <Button size="sm" onClick={() => setShowDialog(true)} className="mt-1">
+            ＋ 创建工作区
+          </Button>
         </div>
       ) : (
         <>
@@ -250,8 +322,10 @@ export default function WorkspacesPage() {
                     w.daemon_runtime_id ? runtimesById.get(w.daemon_runtime_id) : null
                   }
                   boundDaemon={boundDaemon}
+                  daemonStatus={daemonStatusOf(w.id)}
                   onChanged={reload}
                   onEditAlias={handleOpenAlias}
+                  onActivate={() => handleActivate(w)}
                 />
               );
             })}
@@ -309,6 +383,18 @@ export default function WorkspacesPage() {
           <p className="mt-2 text-xs text-muted-foreground">原始名称：{aliasEditing.name}</p>
         ) : null}
       </Modal>
+
+      {/* task-07 / CB-1：未绑定工作区点击 → 弹 daemon 绑定弹窗（task-06 容器化 AccessGuide）。
+          绑定成功 onBound → 关窗 + reload 刷新徽标状态（AC-5 / D-003）。 */}
+      <WorkspaceBindingDialog
+        workspaceId={bindingTarget?.id ?? ""}
+        open={bindingTarget !== null}
+        onBound={() => {
+          setBindingTarget(null);
+          void reload();
+        }}
+        onClose={() => setBindingTarget(null)}
+      />
     </PageContainer>
   );
 }
