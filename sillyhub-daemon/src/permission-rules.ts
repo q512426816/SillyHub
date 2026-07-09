@@ -11,10 +11,27 @@
  * @module permission-rules
  */
 
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 
 /** 受限的写入工具（CC 文件修改类工具）。 */
 const WRITE_TOOLS = ['Write', 'Edit'] as const;
+
+/**
+ * sillyspec 临时路径放行（FR-003）。sillyspec CLI 执行时写 c:\dev\null（Windows
+ * null 设备占位）、系统 temp、.sillyspec/.runtime 下临时文件，不在
+ * config.allowed_roots 白名单内。CC permission allow 覆盖 deny 通配，此处显式放行。
+ * 跨平台：Windows C:/dev/null + os.tmpdir()；Linux/macOS /dev/null + os.tmpdir()；
+ * 统一正斜杠（expandRoot 仅处理白名单 root，临时路径在此独立规范化）。
+ * 注：.sillyspec/.runtime 位于 ~/.sillyhub 下，已在 homedir 兜底白名单内，不重复加。
+ */
+const SILLYSPEC_TEMP_PATTERNS: string[] = [
+  // Windows null 设备占位（sillyspec 写 c:\dev\null 触发 deny）
+  'C:/dev/null',
+  // POSIX null 设备
+  '/dev/null',
+  // 系统临时目录（os.tmpdir()，跨平台；反斜杠转正斜杠）
+  tmpdir().replace(/\\/g, '/'),
+];
 
 /**
  * 展开 `~` 为 homedir，规范化路径（统一正斜杠）。
@@ -47,6 +64,14 @@ export function buildWritePermissionRules(allowedRoots: string[]): {
     for (const tool of WRITE_TOOLS) {
       allow.push(`${tool}(${root}/**)`);
       allow.push(`${tool}(${root})`);
+    }
+  }
+  // FR-003：sillyspec 临时路径放行（allow 覆盖 deny 通配）。只放行已知 3 类路径，
+  // 不扩大通配；越界写（如 D:/evil/**）仍被 deny Write(**) 拦截（task-08 守护）。
+  for (const temp of SILLYSPEC_TEMP_PATTERNS) {
+    for (const tool of WRITE_TOOLS) {
+      allow.push(`${tool}(${temp}/**)`);
+      allow.push(`${tool}(${temp})`);
     }
   }
   const deny: string[] = WRITE_TOOLS.map((t) => `${t}(**)`);

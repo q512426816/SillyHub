@@ -265,6 +265,12 @@ class RunPlacementService:
             metadata["workspace_name"] = workspace_name
         if workspace_slug:
             metadata["workspace_slug"] = workspace_slug
+        # 2026-07-08 D-001：所有 stage 统一 scan 模式（manual_approval=True +
+        # ask_user_only=True）。AskUserQuestion 走 dialog 人审，其余工具 allow-through，
+        # 消除 5min 超时。stage 走 dispatch_to_daemon（非 prepare_interactive_dispatch），
+        # 此处补设（task-01 修正：原改 prepare_interactive_dispatch 但 stage 不走那）。
+        metadata["manual_approval"] = True
+        metadata["ask_user_only"] = True
 
         # 2026-07-08：interactive lease 必须带 session_id + run_id（daemon
         # _startInteractiveSession 缺这两个字段会 interactive_missing_fields 早返回）。
@@ -301,9 +307,9 @@ class RunPlacementService:
             text(
                 """
                 INSERT INTO agent_sessions
-                    (id, user_id, runtime_id, lease_id, provider, status, created_at)
+                    (id, user_id, runtime_id, lease_id, provider, status, turn_count, created_at)
                 VALUES
-                    (:sid, :user_id, :runtime_id, :lease_id, :provider, 'pending', :now)
+                    (:sid, :user_id, :runtime_id, :lease_id, :provider, 'pending', 0, :now)
                 """
             ),
             {
@@ -393,6 +399,11 @@ class RunPlacementService:
           manual_approval) are stored in lease ``metadata`` so the daemon
           claim payload can drive an independent first turn.
 
+        Note: since 2026-07-08 D-001, ``manual_approval`` / ``ask_user_only``
+        in ``metadata`` are forced to ``True`` (scan mode) regardless of the
+        caller-provided arguments; the parameters are kept for signature
+        compatibility only.
+
         Adds + flushes only; does NOT commit and does NOT send any WS message.
         The caller (``DaemonService.create_session``) owns the single commit
         that fixes the session↔lease↔run triple, then calls
@@ -436,8 +447,12 @@ class RunPlacementService:
         }
         if model:
             metadata["model"] = model
-        metadata["manual_approval"] = bool(manual_approval)
-        metadata["ask_user_only"] = bool(ask_user_only)
+        # 2026-07-08 D-001：所有 stage 统一 scan 模式（manual_approval=True +
+        # ask_user_only=True）。AskUserQuestion 走 dialog 人审（入口保留），其余工具
+        # allow-through，消除 5min 超时（根因 1）。入参 manual_approval/ask_user_only
+        # 保留签名兼容但不再生效。
+        metadata["manual_approval"] = True
+        metadata["ask_user_only"] = True
 
         # Raw SQL mirrors dispatch_to_daemon so we can set kind/agent_run_id=NULL
         # without touching the batch ORM insert path. NULL lease_expires_at is

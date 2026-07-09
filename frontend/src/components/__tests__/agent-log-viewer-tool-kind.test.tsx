@@ -42,10 +42,10 @@ function makeRawLog(
 }
 
 // tool_call content 是 JSON；tool_kind 走顶层字段（task-07 normalize 透传 log.tool_kind）。
-function toolCallLog(id: string, tool: string, toolKind: string | null): AgentRunLogEntry {
+function toolCallLog(id: string, tool: string, toolKind: string | null, args: Record<string, unknown> = {}): AgentRunLogEntry {
   return makeRawLog(
     "tool_call",
-    JSON.stringify({ tool, args: {} }),
+    JSON.stringify({ tool, args }),
     id,
     "2026-07-05T10:00:00.000Z",
     { tool_kind: toolKind },
@@ -223,9 +223,9 @@ describe("ql-20260705-002: 其他桶逻辑（C1+C2）", () => {
 describe("ql-20260705-004: 筛选标签 count（C6）", () => {
   it("第二层按钮显示对应桶的 count（aria-hidden span）", () => {
     const logs: AgentRunLogEntry[] = [
-      toolCallLog("tc1", "Bash", "bash"),
-      toolCallLog("tc2", "Bash", "bash"),
-      toolCallLog("tc3", "Read", "read"),
+      toolCallLog("tc1", "Bash", "bash", { command: "ls" }),
+      toolCallLog("tc2", "Bash", "bash", { command: "pwd" }),
+      toolCallLog("tc3", "Read", "read", { path: "/x" }),
     ];
     renderViewer(logs);
     // getByRole name 仍匹配 label（count span aria-hidden 不计入 accessible name）

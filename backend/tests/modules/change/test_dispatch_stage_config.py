@@ -68,8 +68,8 @@ def test_execute_requires_worktree():
 
 
 def test_verify_requires_worktree():
-    """verify stage must require worktree."""
-    assert STAGE_AGENT_CONFIG[StageEnum.VERIFY.value].requires_worktree is True
+    """verify stage does NOT require worktree (D-004: daemon-client + host-fs-delegate 定位 spec_root)."""
+    assert STAGE_AGENT_CONFIG[StageEnum.VERIFY.value].requires_worktree is False
 
 
 def test_brainstorm_requires_worktree():

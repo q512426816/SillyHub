@@ -943,7 +943,7 @@ describe('output/error 截断（_truncate）', () => {
     const fakeChild = createFakeChild();
     mockSpawnReturn(fakeChild);
     // adapter 把每行产 text，累积超 10000
-    const longText = 'x'.repeat(20_000);
+    const longText = 'x'.repeat(60_000);
     const adapter = defaultMockAdapter({
       parse: vi.fn((): AgentEvent[] | null => [{ type: 'text', content: longText }]),
     });
@@ -956,7 +956,7 @@ describe('output/error 截断（_truncate）', () => {
     const result = await p;
 
     expect(result.status).toBe('completed');
-    expect(result.output.length).toBe(10_000);
+    expect(result.output.length).toBe(50_000);
   });
 
   it('error 超 5000 字符 → 截断到 5000', async () => {
@@ -1048,7 +1048,7 @@ describe('_eventToMessages（对齐老 _format_conversation_log）', () => {
 
   it('text + thinking=true → 1 条 [THINKING] preview (2000 截断)', () => {
     const { runner } = setupRunner({});
-    const long = 'x'.repeat(2500);
+    const long = 'x'.repeat(25000);
     const msgs = callEventToMessages(runner, {
       type: 'text',
       content: long,
@@ -1056,7 +1056,7 @@ describe('_eventToMessages（对齐老 _format_conversation_log）', () => {
     });
     expect(msgs).toHaveLength(1);
     expect(msgs![0]!.channel).toBe('stdout');
-    expect(msgs![0]!.content).toMatch(/^\[THINKING] x{2000}\.\.\.$/);
+    expect(msgs![0]!.content).toMatch(/^\[THINKING] x{20000}\.\.\.$/);
   });
 
   it('tool_use + input.command → 2 条 (stdout + tool_call JSON)', () => {
@@ -1185,7 +1185,7 @@ describe('_eventToMessages（对齐老 _format_conversation_log）', () => {
   it('task-13 tool_use 携带 id 时 stdout 文本仍为 [TOOL_USE] Name: <args>（不超长）', () => {
     // 边界8：id 只进 tool_call JSON，不污染 stdout 文本，slice(0,2000) 仍对原文本生效
     const { runner } = setupRunner({});
-    const longCmd = 'x'.repeat(2100);
+    const longCmd = 'x'.repeat(21000);
     const msgs = callEventToMessages(runner, {
       type: 'tool_use',
       content: '',
@@ -1196,20 +1196,23 @@ describe('_eventToMessages（对齐老 _format_conversation_log）', () => {
       },
     });
     // stdout content 长度受 2000 截断
-    expect((msgs![0]!.content as string).length).toBe(2000);
+    expect((msgs![0]!.content as string).length).toBe(20000);
     expect((msgs![0]!.content as string).startsWith('[TOOL_USE] Bash: ')).toBe(true);
   });
 
-  it('tool_result → 1 条 [TOOL_RESULT] preview (3000 截断)', () => {
+  it('tool_result → 1 条 [TOOL_RESULT] preview (100000 截断 + 标注)', () => {
     const { runner } = setupRunner({});
-    const long = 'y'.repeat(3500);
+    const long = 'y'.repeat(110000);
     const msgs = callEventToMessages(runner, {
       type: 'tool_result',
       content: long,
     });
     expect(msgs).toHaveLength(1);
     expect(msgs![0]!.channel).toBe('stdout');
-    expect(msgs![0]!.content).toBe(`[TOOL_RESULT] ${'y'.repeat(3000)}`);
+    // ql-20260709-001：放宽 3000→100000，超长追加中文截断标注
+    expect(msgs![0]!.content).toBe(
+      `[TOOL_RESULT] ${'y'.repeat(100000)}\n...(输出过长，已截断，共 110000 字符)`,
+    );
   });
 
   it('error → 1 条 [LEVEL] content (stderr)', () => {

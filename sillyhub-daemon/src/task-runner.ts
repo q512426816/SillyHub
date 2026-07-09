@@ -93,10 +93,17 @@ import type {
 
 // ── 常量（对齐 Python task_runner.py）────────────────────────────────────────
 
-/** 累积输出最大字符数（对齐 Python _MAX_OUTPUT = 10000）。 */
-const MAX_OUTPUT = 10_000;
+/** 累积输出最大字符数（run 最终 output_redacted；ql-20260709-002 放宽 1万→5万）。 */
+const MAX_OUTPUT = 50_000;
 /** 错误信息最大字符数（对齐 Python _MAX_ERROR = 5000）。 */
 const MAX_ERROR = 5_000;
+/**
+ * tool_result 预览最大字符数（ql-20260709-001：原 3000 → 100000）。
+ * 对齐 backend run_sync/service.py TOOL_RESULT_MAX_CHARS。3000 会砍掉
+ * scan / 构建 / 测试命令输出的关键尾部，100000（约 2000 行）覆盖绝大多数输出；
+ * 超长追加中文标注。与 task-runner.ts:1928 已放宽的 result summary（50000）同向。
+ */
+const TOOL_RESULT_PREVIEW_MAX = 100_000;
 /** ql-20260706-009：stderr 实时 forward 到 backend 的行数上限（防风暴）。 */
 const MAX_STDERR_FORWARD = 50;
 /** 超时 kill 优雅升级：SIGTERM 后 2 秒仍存活则 SIGKILL（对齐 Python stream_json.py:115）。 */
@@ -1695,10 +1702,10 @@ export class TaskRunner {
    *
    * 1 个 event → 0/1/2 条 message：
    *   - text + status=running → 1 条 [SYSTEM:init] session started (stdout)
-   *   - text + thinking       → 1 条 [THINKING] <preview 2000> (stdout)
+   *   - text + thinking       → 1 条 [THINKING] <preview 20000> (stdout)
    *   - text + 其他            → 1 条 [ASSISTANT] <content> (stdout)
    *   - tool_use              → 2 条：[TOOL_USE] Name: cmd (stdout) + JSON (tool_call)
-   *   - tool_result           → 1 条 [TOOL_RESULT] <preview 3000> (stdout)
+   *   - tool_result           → 1 条 [TOOL_RESULT] <preview 100000> (stdout)
    *   - error                 → 1 条 [LEVEL] <content> (stderr)
    *   - complete              → 1 条 [RESULT:success] <text> duration=Xms turns=N (stdout)
    *
@@ -1773,8 +1780,8 @@ export class TaskRunner {
         let line: string;
         if (thinking) {
           const preview =
-            rawContent.length > 2000
-              ? rawContent.slice(0, 2000) + '...'
+            rawContent.length > 20000
+              ? rawContent.slice(0, 20000) + '...'
               : rawContent;
           line = `[THINKING] ${preview}`;
         } else {
@@ -1840,7 +1847,7 @@ export class TaskRunner {
             argsLine = '';
           }
         }
-        const stdoutContent = `[TOOL_USE] ${name}: ${argsLine}`.slice(0, 2000);
+        const stdoutContent = `[TOOL_USE] ${name}: ${argsLine}`.slice(0, 20000);
         messages.push({
           event_type: ev.type,
           content: stdoutContent,
@@ -1890,8 +1897,13 @@ export class TaskRunner {
         break;
       }
       case 'tool_result': {
+        // ql-20260709-001：放宽截断（3000→TOOL_RESULT_PREVIEW_MAX），超长追加
+        // 中文标注，与 backend run_sync/service.py interactive 路径一致。
         const preview =
-          rawContent.length > 3000 ? rawContent.slice(0, 3000) : rawContent;
+          rawContent.length > TOOL_RESULT_PREVIEW_MAX
+            ? rawContent.slice(0, TOOL_RESULT_PREVIEW_MAX) +
+              `\n...(输出过长，已截断，共 ${rawContent.length} 字符)`
+            : rawContent;
         messages.push({
           event_type: ev.type,
           content: `[TOOL_RESULT] ${preview}`,

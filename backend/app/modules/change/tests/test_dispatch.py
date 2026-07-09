@@ -63,12 +63,17 @@ class TestStageAgentConfig:
             assert get_config_for_stage(stage) is None
 
     def test_write_stages_require_worktree(self):
-        write_stages = ["execute", "verify", "brainstorm", "plan", "archive"]
+        # D-004: verify 不再要求 worktree（daemon-client + host-fs-delegate 定位 spec_root）
+        write_stages = ["execute", "brainstorm", "plan", "archive"]
         for stage in write_stages:
             config = get_config_for_stage(stage)
             assert config is not None
             assert config.requires_worktree is True
             assert config.read_only is False
+        verify_config = get_config_for_stage("verify")
+        assert verify_config is not None
+        assert verify_config.requires_worktree is False
+        assert verify_config.read_only is False
 
 
 # ── Unit tests: load_prompt_template ──────────────────────────────────────

@@ -135,6 +135,31 @@ describe("normalizeLogs：连续 [THINKING] 合并 (ql-20260617-011)", () => {
     expect(result[4]?.hidden).toBe(true);
   });
 
+  it("ql-20260709-003 [SYSTEM:thinking_tokens] 不打断 thinking 合并且自身 hidden", () => {
+    // 用户反馈：thinking_tokens 穿插把 thinking 切成碎片 + 占位无意义。
+    // 修复：thinking_tokens 行 hidden + 不重置 lastThinkingIdx，thinking 跨越它连续合并。
+    const logs: AgentRunLogEntry[] = [
+      makeLog("stdout", "[THINKING] 块1a", "l1"),
+      makeLog("stdout", "[THINKING] 块1b", "l2"),
+      makeLog("stdout", "[SYSTEM:thinking_tokens] 502", "l3"),
+      makeLog("stdout", "[SYSTEM:thinking_tokens] 524", "l4"),
+      makeLog("stdout", "[THINKING] 块2a", "l5"),
+    ];
+
+    const result = normalizeLogs(logs);
+
+    // l1 是合并块首条，mergedThinkingContent = 块1a+块1b+块2a（跨越 thinking_tokens）
+    expect(result[0]?.hidden).toBe(false);
+    expect(result[0]?.mergedThinkingContent).toBe("块1a块1b块2a");
+    // l2 合并到 l1
+    expect(result[1]?.hidden).toBe(true);
+    // l3/l4 thinking_tokens 诊断行 hidden（默认不显示）
+    expect(result[2]?.hidden).toBe(true);
+    expect(result[3]?.hidden).toBe(true);
+    // l5 块2a 合并到 l1（跨越 thinking_tokens，不被打断）
+    expect(result[4]?.hidden).toBe(true);
+  });
+
   it("tool_call 断开连续性", () => {
     const logs: AgentRunLogEntry[] = [
       makeLog("stdout", "[THINKING] 工具前思考", "l1"),
@@ -489,5 +514,38 @@ describe("task-14: thinking 跨断点去重（normalize 集成）", () => {
     expect(visibleThinking.length).toBe(2);
     expect(result[0]?.mergedThinkingContent).toBe("段1a");
     expect(result[2]?.mergedThinkingContent).toBe("段2a");
+  });
+});
+
+describe("tool_result 按 parent_tool_use_id 精确配对 (2026-07-09-agent-log-display-fix / D-007)", () => {
+  it("stdout [TOOL_RESULT] + parent_tool_use_id 命中 → 合并进 tool_call 卡片并 hidden", () => {
+    const logs: AgentRunLogEntry[] = [
+      makeLog(
+        "tool_call",
+        JSON.stringify({ tool: "Bash", tool_use_id: "call_001", args: { command: "ls" } }),
+        "tc1",
+      ),
+      {
+        ...makeLog("stdout", "[TOOL_RESULT] file1.txt\nfile2.txt", "tr1"),
+        parent_tool_use_id: "call_001",
+      },
+    ];
+    const result = normalizeLogs(logs);
+    // tool_call 卡片（tc1）接收 mergedToolResult
+    expect(result[0]?.mergedToolResult).toBeTruthy();
+    // result 行（tr1）hidden（已合并进卡片）
+    const tr = result.find((p) => p.log.id === "tr1");
+    expect(tr?.hidden).toBe(true);
+  });
+
+  it("parent_tool_use_id 缺失 → 退化到 lastToolSourceIdx 启发式（兼容旧日志）", () => {
+    const logs: AgentRunLogEntry[] = [
+      makeLog("tool_call", JSON.stringify({ tool: "Bash", args: { command: "ls" } }), "tc1"),
+      makeLog("stdout", "[TOOL_RESULT] output", "tr1"),
+    ];
+    const result = normalizeLogs(logs);
+    const tr = result.find((p) => p.log.id === "tr1");
+    // 无 id 但紧邻 tool_call → 退化合并（现有行为不变）
+    expect(tr?.hidden).toBe(true);
   });
 });

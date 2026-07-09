@@ -330,6 +330,62 @@ class TestGap3CloseInteractiveRun:
         assert run.finished_at is not None
 
     @pytest.mark.asyncio
+    async def test_stage_run_writeback_last_dispatch_status_on_close(
+        self, db_session, mocked_redis
+    ) -> None:
+        """c6bd04a1：stage run（change_id 非空）close 时回写 changes.stages.last_dispatch.status。
+
+        verify 等 stage dispatch 的 agent_run 带 change_id（经 dispatch_to_daemon）。
+        d8b1124c 原把 stage 回写接在 complete_lease，但 stage 完成走 close_interactive_run
+        （interactive lease），c6bd04a1 在此补接。本用例钉死 close 路径的回写不回归，
+        并覆盖 c6bd04a1 当初零测试的盲区（commit 信息里「agent_run_id=NULL」的判断也错误：
+        stage lease 经 dispatch_to_daemon，agent_run_id 非 NULL）。
+        """
+        from app.modules.change.model import Change
+
+        lease_id, run_id, token = await _seed_active_interactive_session(db_session)
+        change = Change(
+            id=uuid.uuid4(),
+            workspace_id=uuid.uuid4(),
+            change_key=f"close-stage-{uuid.uuid4().hex[:6]}",
+            title="close stage writeback",
+            status="in-progress",
+            location="active",
+            path=".sillyspec/changes/close-stage",
+            current_stage="verify",
+            stages={
+                "last_dispatch": {
+                    "stage": "verify",
+                    "user_id": str(uuid.uuid4()),
+                    "at": "2026-07-09T10:00:00Z",
+                    "config": {},
+                    "run_id": str(run_id),
+                    "status": "running",
+                }
+            },
+        )
+        db_session.add(change)
+        # 给 _seed 建的 run 挂 change_id（stage dispatch 特征；对话 run 原为 None）
+        run_row = await db_session.get(AgentRun, run_id)
+        run_row.change_id = change.id
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        await svc.close_interactive_run(
+            lease_id,
+            run_id,
+            token,
+            status="success",
+            is_error=False,
+            subtype="success",
+        )
+
+        # 重读 change：规避 identity map 缓存 + JSON in-place mutation 坑
+        await db_session.commit()
+        refreshed = await db_session.get(Change, change.id, populate_existing=True)
+        assert refreshed.stages["last_dispatch"]["status"] == "completed"
+
+    @pytest.mark.asyncio
     async def test_error_during_execution_marks_failed_interrupted(
         self, db_session, mocked_redis
     ) -> None:

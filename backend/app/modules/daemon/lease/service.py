@@ -404,6 +404,22 @@ class LeaseService:
 
                 self._session.add(agent_run)
 
+                # task-05（D-003@v1）：从 agent_run.status 推导 stage 状态回写
+                # changes.stages.last_dispatch.status（running→completed/failed）。
+                # 独立路径——不读 sillyspec.db、不调 dispatch_svc.sync_stage_status
+                # （后者归 2026-06-28-daemon-client-spec-sync-strategy，依赖 spec 同步）。
+                # 与下方 _trigger_stage_completion_callback（auto_dispatch 下一阶段）并存，
+                # 互不替代。try/except 失败只 warn 不阻塞 lease 完成（容错风格一致）。
+                try:
+                    await self._sync_stage_status_from_run(agent_run)
+                except Exception as exc:
+                    log.warning(
+                        "sync_stage_status_from_run_failed",
+                        lease_id=str(lease_id),
+                        agent_run_id=str(agent_run.id),
+                        error=str(exc),
+                    )
+
         # task-07（workspace-config-flow D-010）：init lease complete 时回写 member
         # binding 的 init_synced_*。upsert_my_binding 注释明说这两个字段只由此路径写，
         # 但本路径之前漏实现 → 前端"接入初始化状态"永远显示未初始化。
@@ -619,6 +635,75 @@ class LeaseService:
             result_status=result.get("status"),
         )
         return lease
+
+    async def _sync_stage_status_from_run(self, agent_run: AgentRun) -> None:
+        """task-05（D-003@v1）：从 agent_run.status 推导 stage 状态回写。
+
+        独立路径：直接读 backend ``changes.stages`` JSON 并推进
+        ``last_dispatch.status``（running→completed/failed），**不读 sillyspec.db**、
+        **不调** ``dispatch_svc.sync_stage_status``（后者依赖 spec 同步，归
+        2026-06-28-daemon-client-spec-sync-strategy）。仅推进展示用 status，
+        sillyspec.db 真实状态归 spec-sync-fix 不在此修（R-03）。
+
+        - 仅 stage dispatch（``agent_run.change_id is not None``）执行；scan 跳过。
+        - status 映射：completed→completed，failed/killed→failed，cancelled→failed，
+          其他（running/pending，lease 已 complete 理论不出现）→ warn 不回写。
+        - ``last_dispatch`` 不存在时 warn 跳过（不造空键误导前端）。
+        - 不单独 commit，复用 ``complete_lease`` 末尾的 commit（调用点在 commit 前）。
+        """
+        if agent_run.change_id is None:
+            return  # scan run，无 stage 回写
+
+        status_map = {
+            "completed": "completed",
+            "failed": "failed",
+            "killed": "failed",
+            "cancelled": "failed",
+        }
+        new_status = status_map.get(agent_run.status)
+        if new_status is None:
+            log.warning(
+                "sync_stage_status_from_run_skip_unexpected_status",
+                agent_run_id=str(agent_run.id),
+                change_id=str(agent_run.change_id),
+                run_status=agent_run.status,
+            )
+            return
+
+        from app.modules.change.model import Change
+
+        change = await self._session.get(Change, agent_run.change_id)
+        if change is None:
+            log.warning(
+                "sync_stage_status_from_run_no_change",
+                agent_run_id=str(agent_run.id),
+                change_id=str(agent_run.change_id),
+            )
+            return
+
+        # dict() copy 避免 SQLAlchemy JSON in-place mutation 不持久化（对齐
+        # change/dispatch.py:606 模式）。
+        stages = dict(change.stages or {})
+        last_dispatch = stages.get("last_dispatch")
+        if not isinstance(last_dispatch, dict) or not last_dispatch:
+            log.warning(
+                "sync_stage_status_from_run_no_last_dispatch",
+                agent_run_id=str(agent_run.id),
+                change_id=str(agent_run.change_id),
+            )
+            return
+
+        new_last_dispatch = dict(last_dispatch)
+        new_last_dispatch["status"] = new_status
+        stages["last_dispatch"] = new_last_dispatch
+        change.stages = stages
+        self._session.add(change)
+        log.info(
+            "stage_status_synced_from_run",
+            change_id=str(agent_run.change_id),
+            run_id=str(agent_run.id),
+            status=new_status,
+        )
 
     async def get_lease(self, lease_id: uuid.UUID) -> DaemonTaskLease | None:
         """Get a task lease by ID."""

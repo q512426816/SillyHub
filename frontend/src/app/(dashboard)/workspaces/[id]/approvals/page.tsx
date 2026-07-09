@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ import {
 } from "@/lib/approvals";
 import { SessionPermissionPanel } from "@/components/permissions/session-permission-panel";
 import { listWorkspaceAgentSessions } from "@/lib/agent";
+import { listWorkspaceDialogs } from "@/lib/daemon";
 
 /* ------------------------------------------------------------------ */
 /*  Props & constants                                                 */
@@ -26,6 +28,16 @@ import { listWorkspaceAgentSessions } from "@/lib/agent";
 interface Props {
   params: { id: string };
 }
+
+/**
+ * 2026-07-09-ask-user-question-approval task-06：workspace 维度 pending AskUserQuestion
+ * 对话查询的 react-query key（design §4.3 数据兜底）。无参数查询（key 仅 workspaceId），
+ * refetchInterval 固定 10s（FR-5：dialog 不超时永久等待，刷新不丢）。
+ */
+const DIALOGS_QUERY_KEY = (workspaceId: string) =>
+  ["approvals", "dialogs", workspaceId] as const;
+/** 兜底轮询间隔（ms）。design §4.3：≈10s 周期刷新，SSE 实时增量的数据库兜底。 */
+const DIALOGS_REFETCH_MS = 10_000;
 
 const RISK_COLORS: Record<
   RiskLevel,
@@ -87,23 +99,37 @@ export default function ApprovalsPage({ params }: Props) {
   const [history, setHistory] = useState<ApprovalHistoryEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  // scan 真阻塞：workspace 维度 active scan sessions（供实时审批聚合面板订阅）。
-  const [scanSessions, setScanSessions] = useState<string[]>([]);
+  // task-06：聚合范围扩到 scan + chat（活跃 interactive session 全量，去掉 "scan" filter）。
+  const [activeSessionIds, setActiveSessionIds] = useState<string[]>([]);
+
+  /**
+   * task-06：workspace 维度 pending AskUserQuestion 对话查询兜底（design §4.3 / FR-5）。
+   * 初始加载 + 10s 周期刷新，作为 SSE 实时增量的数据库兜底（刷新不丢）。查询结果含
+   * 完整来源上下文（workspace_name/session_type/run_summary/created_at），传给
+   * SessionPermissionPanel 与 SSE 合并（C4：查询覆盖 SSE 占位）。
+   */
+  const dialogsQuery = useQuery({
+    queryKey: DIALOGS_QUERY_KEY(workspaceId),
+    queryFn: () => listWorkspaceDialogs(workspaceId),
+    refetchInterval: DIALOGS_REFETCH_MS,
+  });
+  const pendingFallback = dialogsQuery.data ?? [];
 
   /* ---- data loading ---- */
 
   const reload = useCallback(async () => {
     setError(null);
     try {
-      const [pendingList, historyList, scanList] = await Promise.all([
+      const [pendingList, historyList, sessionList] = await Promise.all([
         listPendingApprovals(workspaceId),
         listApprovalHistory(workspaceId),
-        // scan 真阻塞：active scan sessions（失败不阻塞工具网关审批列表）。
-        listWorkspaceAgentSessions(workspaceId, "scan").catch(() => []),
+        // task-06：去 mode filter，扩到 scan + chat 全部活跃 interactive session
+        //（普通对话 session 也订阅 SSE，design §4.3 断点①）。失败不阻塞工具网关审批列表。
+        listWorkspaceAgentSessions(workspaceId).catch(() => []),
       ]);
       setPending(pendingList);
       setHistory(historyList);
-      setScanSessions(scanList.map((s) => s.id));
+      setActiveSessionIds(sessionList.map((s) => s.id));
     } catch (err) {
       setPending([]);
       setHistory([]);
@@ -174,8 +200,11 @@ export default function ApprovalsPage({ params }: Props) {
         }
       />
 
-      {/* ---- scan 真阻塞：会话级实时审批聚合（改造点 F）---- */}
-      <SessionPermissionPanel sessionIds={scanSessions} />
+      {/* ---- task-06：会话级实时审批聚合（scan + chat，SSE 实时 + 查询兜底 FR-5）---- */}
+      <SessionPermissionPanel
+        sessionIds={activeSessionIds}
+        pendingFallback={pendingFallback}
+      />
 
       {/* ---- error banner ---- */}
       {error && (

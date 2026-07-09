@@ -136,11 +136,12 @@ describe("task-16: AgentRunPanel token 徽标展示 (FR-11)", () => {
         title="t"
       />,
     );
-    // 徽标 DOM 里出现 "0"（徽标渲染 ↓ 0 | ↑ 0，相邻 Text node 不影响包含判断）
+    // input/output/cacheRead=0 → "0"（与 null 区分，相邻 Text node 不影响包含判断）。
+    // cacheCreation=0 → "—"（2026-07-09-agent-log-display-fix D-004@v2 B 分支：
+    // Claude cache_creation 疑不返回，0 视为未返回，显示"—"而非误导性"0"）。
     const badge = await screen.findByTestId("token-usage-badge");
     expect(badge.textContent).toContain("0");
-    // 不出现 "—" 占位（与 null 场景区分）
-    expect(screen.queryByText(/—/)).not.toBeInTheDocument();
+    expect(badge.textContent).toContain("—");
   });
 
   it("runId=null 时不渲染徽标（不调 getAgentRun）", () => {

@@ -345,6 +345,9 @@ export function classifyLog(
   }
   const text = content ?? "";
   if (text.includes("[TOOL_RESULT]")) return "tool_result";
+  // 2026-07-09-agent-log-display-fix / FR-10：[TOOL_USE] stdout 行归 tool_call
+  // （历史降级——新 daemon 不再发 stdout [TOOL_USE]，旧日志兼容）
+  if (text.startsWith("[TOOL_USE]")) return "tool_call";
   if (text.startsWith("[THINKING]")) return "thinking";
   if (text.startsWith("[ASSISTANT]")) return "assistant";
   if (text.startsWith("[SYSTEM")) return "system";
@@ -370,13 +373,29 @@ export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
 }
 
 function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
-  // ql-20260620：过滤 daemon 已知的低价值高频 system 日志（旧 daemon 仍会推送）。
-  const NOISE_PREFIXES = ["[SYSTEM:thinking_tokens]"];
-  const filtered = logs.filter((log) => {
-    const c = asString(log.content_redacted);
-    return !NOISE_PREFIXES.some((p) => c.startsWith(p));
-  });
-  const result: ProcessedLog[] = filtered.map((log) => ({ log, hidden: false }));
+  // 2026-07-09-agent-log-display-fix / D-002@v2 原保留 [SYSTEM:thinking_tokens] 折叠显示；
+  // ql-20260709-003 推翻为默认隐藏（用户反馈 token 估算意义不大、且穿插把 thinking 切碎）。
+  // thinking_tokens 行在下方 stdout 分支 hidden + continue，且不重置 thinking 合并指针，
+  // 让被它穿插的 thinking 连续合并成一段。其余日志照常进 normalize 分类渲染。
+  const result: ProcessedLog[] = logs.map((log) => ({ log, hidden: false }));
+
+  // 2026-07-09-agent-log-display-fix：interactive 路径消息级重复去重（治标）。
+  // backend create_session + dispatch 两处写首 user_input（daemon/session/service.py:397
+  // + agent/service.py:1564）+ assistant 双路径，导致同 channel+content 完全相同的
+  // 消息重复落库（如 8cab695d interactive run）。这里按 (channel, content) 去重
+  // （后条 hidden），不影响合法 delta 合并（delta 内容不同不命中）。
+  // tool_use/tool_call 双写（不同 channel）靠下方 classifyLog [TOOL_USE]→tool_call + 配对。
+  const dedupSeen = new Set<string>();
+  for (const p of result) {
+    if (p.hidden) continue;
+    const key = `${p.log.channel}|${asString(p.log.content_redacted)}`;
+    if (dedupSeen.has(key)) {
+      p.hidden = true;
+    } else {
+      dedupSeen.add(key);
+    }
+  }
+
   let lastToolSourceIdx = -1;
   // ql-20260617-011：连续 [THINKING]-only stdout 合并到首条（SSE 追加效果）
   let lastThinkingIdx = -1;
@@ -457,6 +476,15 @@ function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
     const lines = content.split("\n");
     const nonEmpty = lines.filter((l) => l.trim());
     if (nonEmpty.length === 0) continue;
+
+    // ql-20260709-003：[SYSTEM:thinking_tokens] 诊断行默认隐藏，且不打断 thinking
+    // 连续合并。用户反馈：token 估算意义不大，且穿插在 thinking 之间把思考切成碎片
+    // （本循环遇非 thinking-only 行会重置 lastThinkingIdx）。这里 hidden + continue
+    // （不重置指针），让 thinking 跨越它连续合并成一段。普通 [SYSTEM:xxx] 仍会打断。
+    if (/^\s*\[SYSTEM:thinking_tokens\]/.test(content)) {
+      current.hidden = true;
+      continue;
+    }
 
     // ql-20260617-011：连续 [THINKING]-only stdout 合并到上一条（追加显示）
     // daemon 每个 thinking_delta 推一条 log，前端不合并会成独立卡片刷屏。
@@ -596,9 +624,19 @@ function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
     // ── [TOOL_RESULT] handling (no TOOL_USE) ──
     if (!hasToolUse && hasToolResult) {
       const body = extractToolResultBody(content);
-
-      if (lastToolSourceIdx >= 0) {
-        // Merge into previous tool source
+      // task-05 / D-007：优先按 parent_tool_use_id 精确配对（新日志 daemon 带 id）
+      const resultToolUseId = current.log.parent_tool_use_id ?? undefined;
+      let matchedIdx = -1;
+      if (resultToolUseId) {
+        const candidate = toolUseIdIndex.get(resultToolUseId);
+        if (candidate !== undefined) matchedIdx = candidate;
+      }
+      if (matchedIdx >= 0 && result[matchedIdx]) {
+        // 精确配对命中：合并到对应 tool_call 卡片
+        mergeToolResult(result[matchedIdx]!, body, current.log);
+        current.hidden = true;
+      } else if (lastToolSourceIdx >= 0) {
+        // 退化：合并到最近 tool source（旧日志/id 缺失）
         const tc = result[lastToolSourceIdx];
         if (tc) mergeToolResult(tc, body, current.log);
         current.hidden = true;
@@ -607,7 +645,6 @@ function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
         if (body) {
           current.parsedToolResult = body;
         }
-        // Don't hide — rendered as ToolResultCard
       }
     }
   }

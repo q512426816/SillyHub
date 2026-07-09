@@ -636,6 +636,26 @@ export interface SessionPermissionRequest {
    * 的 schema 还原也是 daemon 职责，前端只产出同构的 answers 数组。
    */
   dialog_payload?: Record<string, unknown>;
+  /**
+   * 2026-07-09-ask-user-question-approval task-05（design §4.4 C4）来源上下文：
+   * 查询路（listWorkspaceDialogs）齐全，SSE 路（parseSessionPermissionEvent）
+   * 缺省 undefined→前端占位「加载中」，由下一次查询刷新（≤10s）回填。
+   *
+   * workspace_name 由 task-06 page 侧用已知 workspaceId 本地补，
+   * session_type / run_summary 走查询回填。
+   */
+  /** 工作区名（查询路齐全；SSE 缺省，task-06 page 本地补全）。 */
+  workspace_name?: string;
+  /** scan / chat / stage（design D-003，backend 推导）。SSE 路缺省。 */
+  session_type?: "scan" | "chat" | "stage";
+  /** 任务 prompt 派生的上下文一句话（design D-003，可空→前端占位）。SSE 路缺省。 */
+  run_summary?: string | null;
+  /**
+   * 请求创建时间（来源上下文条的「时间」字段，task-08）。
+   * 查询路（listWorkspaceDialogs）由 WorkspaceDialogRead.created_at 填充；
+   * SSE 路缺省→DialogContextBar 显示「刚刚」占位。
+   */
+  created_at?: string;
 }
 
 /**
@@ -747,6 +767,24 @@ export async function fetchPendingDialogs(
 ): Promise<SessionPermissionRequest[]> {
   return apiFetch<SessionPermissionRequest[]>(
     `/api/daemon/sessions/${encodeURIComponent(sessionId)}/dialogs`,
+  );
+}
+
+/**
+ * GET /api/workspaces/{id}/dialogs — workspace 维度 pending AskUserQuestion
+ * 对话查询（task-03 端点，design §4.1）。返回 SessionPermissionRequest[]，
+ * 含来源上下文（workspace_name/session_type/run_summary），作为 SSE 实时增量
+ * 的数据库兜底（刷新不丢，design FR-5）。父组件按 request_id 与 SSE 合并，
+ * 查询回填字段覆盖 SSE 占位（design §4.4 C4）。
+ *
+ * 响应类型用 SessionPermissionRequest[]（task-03 的 WorkspaceDialogRead 字段
+ * 是其超集，结构兼容；与 SSE 同构便于父组件直接合并，无需 DTO 映射）。
+ */
+export async function listWorkspaceDialogs(
+  workspaceId: string,
+): Promise<SessionPermissionRequest[]> {
+  return apiFetch<SessionPermissionRequest[]>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/dialogs`,
   );
 }
 

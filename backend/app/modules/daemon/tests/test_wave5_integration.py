@@ -373,7 +373,7 @@ class TestSubmitMessagesSync:
     @pytest.mark.asyncio
     async def test_submit_messages_sdk_thinking_block(self, db_session: AsyncSession) -> None:
         """ql-006：assistant message 的 thinking block 必须落成 [THINKING] 日志，
-        不再被丢弃。超 2000 字截断并加 '...' 后缀（对齐 task-runner L1043-1048）。"""
+        不再被丢弃。超 20000 字截断并加 '...' 后缀（ql-20260709-002 放宽，对齐 task-runner）。"""
         user_id = await _create_user(db_session)
         rt = await _create_runtime(db_session, user_id)
         agent_run = await _create_agent_run(db_session, status="running")
@@ -389,7 +389,7 @@ class TestSubmitMessagesSync:
         db_session.add(lease)
         await db_session.commit()
 
-        long_text = "x" * 2500
+        long_text = "x" * 25000
         svc = DaemonService(db_session)
         count = await svc.submit_messages(
             lease.id,
@@ -412,8 +412,8 @@ class TestSubmitMessagesSync:
         lg = (await db_session.execute(stmt)).scalars().first()
         assert lg is not None
         assert lg.channel == "stdout"
-        # [THINKING] (9) + 2000 个 x + "..." (3) = 2012
-        assert lg.content_redacted == "[THINKING] " + ("x" * 2000) + "..."
+        # [THINKING] (9) + 20000 个 x + "..." (3) = 20012
+        assert lg.content_redacted == "[THINKING] " + ("x" * 20000) + "..."
 
     @pytest.mark.asyncio
     async def test_submit_messages_sdk_tool_use_block(self, db_session: AsyncSession) -> None:

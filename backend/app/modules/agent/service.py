@@ -788,12 +788,18 @@ class AgentService:
         workspace_id: uuid.UUID,
         *,
         mode: str | None = None,
+        limit: int = 50,
     ) -> list[AgentSession]:
         """scan 真阻塞（改造点 E）：workspace 维度的 active AgentSession 列表。
 
         join AgentSession → AgentRun → AgentRunWorkspace 过滤 workspace；status 限 active
         系列（pending/active/running/reconnecting）；可选按 ``config['mode']`` 过滤
         （scan）。供前端 approvals 审批中心页聚合 scan 歧义决策（订阅各 session SSE）。
+
+        NFR-1 / R-1 / C10（task-10 性能上限）：固定按 ``created_at`` 倒序取 top N
+        （默认 50），避免大 workspace 全量 session JOIN 后再逐 session 开 SSE。limit 在
+        service 层固定（不透传 router），返回类型不变——前端 SessionPermissionPanel 另
+        有 SSE 连接数硬上限兜底，超出靠 ``GET /workspaces/{id}/dialogs`` refetch 兜底。
         """
         stmt = (
             select(AgentSession)
@@ -803,6 +809,8 @@ class AgentService:
                 AgentRunWorkspace.workspace_id == workspace_id,
                 AgentSession.status.in_(["pending", "active", "running", "reconnecting"]),
             )
+            .order_by(AgentSession.created_at.desc())
+            .limit(limit)
         )
         sessions = list((await self._session.execute(stmt)).scalars().all())
         if mode:
@@ -1448,7 +1456,7 @@ class AgentService:
         # 让 daemon SessionManager 注入 canUseTool——AskUserQuestion 真阻塞等人审。
         from datetime import UTC, datetime
 
-        from app.modules.agent.model import AgentRunLog, AgentSession
+        from app.modules.agent.model import AgentSession
         from app.modules.daemon.protocol import DAEMON_MSG_SESSION_INJECT
         from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
@@ -1561,15 +1569,10 @@ class AgentService:
         # Do NOT assign it to run.lease_id — that column's FK points to
         # worktree_leases, so a daemon lease id here raises ForeignKeyViolation
         # on commit, failing dispatch and leaving the run stuck pending.
-        # 首 turn 落 user_input log（让历史回看看到首 prompt，与 create_session 一致）。
-        self._session.add(
-            AgentRunLog(
-                run_id=run.id,
-                channel="user_input",
-                content_redacted=(bundle.step_prompt or "")[:5000],
-                timestamp=now,
-            )
-        )
+        # 2026-07-09-agent-log-display-fix：删除此处重复的 user_input 写入。
+        # create_session（daemon/session/service.py:397-410）已落首 prompt 的
+        # channel=user_input log，这里再写导致 interactive run（如 8cab695d）
+        # 的 user_input ×2 重复显示。保留 commit（run 绑定 session 仍需提交）。
         await self._session.commit()
         await self._session.refresh(run)
 

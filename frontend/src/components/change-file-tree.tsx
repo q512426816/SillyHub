@@ -39,6 +39,43 @@ function FileIcon() {
   return <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>;
 }
 
+// 是否可渲染预览的 HTML 文件（后端 _TEXT_SUFFIXES 已含 .html/.htm，此处对齐大小写无关）
+function isPreviewableHtml(path: string): boolean {
+  const lower = path.toLowerCase();
+  return lower.endsWith(".html") || lower.endsWith(".htm");
+}
+
+// 内容区「预览」模式渲染：按文件类型分别渲染（.md→Markdown / .html→iframe / 其他纯文本→只读源码）
+function FilePreview({ path, name, content }: { path: string; name: string; content: string }) {
+  if (path.endsWith(".md")) {
+    return (
+      <div className="flex-1 overflow-auto rounded-md bg-muted/40 p-3 text-sm">
+        <MarkdownPreview source={content} />
+      </div>
+    );
+  }
+  if (isPreviewableHtml(path)) {
+    return (
+      <div className="flex-1 overflow-hidden rounded-md border border-border bg-white">
+        <iframe
+          title={`${name} 渲染预览`}
+          srcDoc={content}
+          // sandbox 不设 allow-same-origin：iframe 被当作唯一源，
+          // 脚本可跑（交互原型可见）但无法访问父页面 cookie/storage/DOM，安全隔离。
+          sandbox="allow-scripts allow-popups"
+          className="h-[60vh] w-full border-0 bg-white"
+        />
+      </div>
+    );
+  }
+  // 其他纯文本：只读源码预览（点「编辑」才可改）
+  return (
+    <pre className="flex-1 overflow-auto rounded-md border border-input bg-background p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
+      {content || "（空文件）"}
+    </pre>
+  );
+}
+
 function TreeView({
   nodes,
   pendingPaths,
@@ -140,6 +177,8 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
   const [selected, setSelected] = useState<ChangeFileEntry | null>(null);
   const [content, setContent] = useState<string>("");
   const [dirty, setDirty] = useState(false);
+  // 内容区模式：默认预览，点「编辑」才进入文本编辑（交互反转）
+  const [mode, setMode] = useState<"preview" | "edit">("preview");
   const [loading, setLoading] = useState(true);
   const [loadingDoc, setLoadingDoc] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -216,6 +255,7 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
     setSelected(doc);
     setDirty(false);
     setSaveStatus("idle");
+    setMode("preview");
     if (!doc.is_text) {
       setContent("");
       return;
@@ -325,39 +365,46 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
                       {statusLabel[saveStatus].text}
                     </span>
                   )}
-                  <Button size="sm" onClick={() => void handleSave()} disabled={!dirty || saveStatus === "saving"}>
-                    {saveStatus === "saving" ? "保存中…" : "保存"}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      setContent(content);
-                      setDirty(false);
-                      setSaveStatus("idle");
-                    }}
-                    disabled={!dirty}
-                  >
-                    放弃修改
-                  </Button>
+                  {mode === "preview" ? (
+                    <Button size="sm" onClick={() => setMode("edit")}>
+                      编辑
+                    </Button>
+                  ) : (
+                    <>
+                      <Button size="sm" variant="outline" onClick={() => setMode("preview")}>
+                        预览
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setContent(content);
+                          setDirty(false);
+                          setSaveStatus("idle");
+                        }}
+                        disabled={!dirty}
+                      >
+                        放弃修改
+                      </Button>
+                      <Button size="sm" onClick={() => void handleSave()} disabled={!dirty || saveStatus === "saving"}>
+                        {saveStatus === "saving" ? "保存中…" : "保存"}
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
-              <textarea
-                className="min-h-[300px] flex-1 rounded-md border border-input bg-background p-2 font-mono text-xs leading-relaxed focus:border-ring focus:outline-none"
-                value={content}
-                onChange={(e) => {
-                  setContent(e.target.value);
-                  setDirty(true);
-                  setSaveStatus("idle");
-                }}
-              />
-              {selected.path.endsWith(".md") && !dirty && content && (
-                <details className="text-xs">
-                  <summary className="cursor-pointer text-muted-foreground">预览</summary>
-                  <div className="mt-1 rounded-md bg-muted/40 p-2">
-                    <MarkdownPreview source={content} />
-                  </div>
-                </details>
+              {mode === "preview" ? (
+                <FilePreview path={selected.path} name={selected.name} content={content} />
+              ) : (
+                <textarea
+                  className="min-h-[300px] flex-1 rounded-md border border-input bg-background p-2 font-mono text-xs leading-relaxed focus:border-ring focus:outline-none"
+                  value={content}
+                  onChange={(e) => {
+                    setContent(e.target.value);
+                    setDirty(true);
+                    setSaveStatus("idle");
+                  }}
+                />
               )}
             </div>
           )}

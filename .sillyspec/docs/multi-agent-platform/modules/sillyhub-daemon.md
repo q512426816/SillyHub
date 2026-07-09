@@ -48,4 +48,8 @@ created_at: 2026-06-24T01:16:42
 - ql-20260703-001-643f | agent-detector normalizeProvider（claude_code/claude-code→claude，其余原样）+ daemon _startInteractiveSession:2338 / reopen:2144 归一化（替换粗暴三元 === 'codex'?'codex':'claude'，防 opencode/cursor/openclaw 误归 claude）+ :2355 early-return 加 notifyRunResult 回传标 run failed（治本：provider 错配/CLI 缺失时不再 lease 永远 claimed/run 永远 pending 无声卡死，主动回传 backend 标 failed）。
 - ql-20260705-004-5e2f | ws-client.ts 加 WS keepalive（30s ping + 10s pong 超时 terminate）：修 import get_spec_bundle RPC 撞 docker NAT idle 断连窗口报 HTTP_504_DAEMON_RUNTIME_OFFLINE mid-rpc（npm ws 库默认不发 ping，Python→TS 移植漏配）+ 顺手修 4 个 daemon_local_id URL query 测试断言（daemon-entity-binding 遗留债）。
 
+- ql-20260709-001-7e3a | tool_result 命令输出截断 3000→100000（task-runner.ts `_eventToMessages` tool_result 分支，新增常量 TOOL_RESULT_PREVIEW_MAX）+ 超长追加中文标注，与 backend interactive 路径对齐（batch 路径，原 1928 result summary 已 50000、本次补普通命令输出的 3000 漏改）。
+
+- ql-20260709-002-1b8c | MAX_OUTPUT 1万→5万(run最终输出) + thinking 2000→2万 + [TOOL_USE] 命令行 2000→2万（task-runner.ts），A 类日志截断放宽（B 类 MAX_STDERR_FORWARD/ECHO_MAX_LEN 防刷屏保留）。
+
 <!-- MANUAL_NOTES_END -->
