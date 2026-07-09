@@ -27,6 +27,8 @@ class AgentSessionRead(BaseModel):
     created_at: datetime
     last_active_at: datetime | None
     ended_at: datetime | None
+    change_id: uuid.UUID | None
+    workspace_id: uuid.UUID | None
 
     model_config = {"from_attributes": True}
 
@@ -36,6 +38,40 @@ class AgentSessionListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+# ── Change-scoped session list (2026-07-09-change-detail-session task-09 / D-005@v1) ─
+# DTO for GET /api/workspaces/{wid}/changes/{cid}/sessions. Cross-member visible
+# (D-005@v1): rows are scoped by change_id only, no user_id filter. Title is a
+# clean user_input excerpt (X-04) extracted from the earliest AgentRunLog with
+# channel="user_input" across the session's runs.
+
+
+class ChangeSessionAuthor(BaseModel):
+    """变更会话列表项的作者信息（D-005@v1 跨成员可见）。"""
+
+    user_id: uuid.UUID
+    display_name: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class AgentSessionListItem(BaseModel):
+    """变更级会话列表项（GET /workspaces/{wid}/changes/{cid}/sessions）。
+
+    跨成员可见（D-005@v1），标题取自该会话最早一条 channel=user_input 的
+    AgentRunLog 摘要（前 30 字，X-04 干净来源）。
+    """
+
+    id: uuid.UUID
+    provider: str
+    status: str
+    turn_count: int
+    author: ChangeSessionAuthor
+    last_active_at: datetime | None
+    title: str | None
+
+    model_config = {"from_attributes": True}
 
 
 class SessionReopenResponse(BaseModel):

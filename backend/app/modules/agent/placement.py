@@ -385,6 +385,8 @@ class RunPlacementService:
         model: str | None,
         manual_approval: bool = False,
         ask_user_only: bool = False,
+        workspace_id: uuid.UUID | None = None,
+        cwd: str | None = None,
     ) -> "RunPlacementService.InteractiveDispatch":
         """Create the long-lived interactive lease for a new session.
 
@@ -410,8 +412,12 @@ class RunPlacementService:
         ``notify_interactive_dispatch``.
 
         Raises ``NoOnlineDaemonError`` when no online runtime is available for
-        the user (server-local routing; ``workspace_id`` not supported for
-        interactive sessions in this wave).
+        the user (server-local routing). Since 2026-07-09-change-detail-session
+        (D-003@v1), change-scoped interactive sessions may pass
+        ``workspace_id`` + ``cwd``; they are written into lease ``metadata`` so
+        ``lease/context.build_claim_payload`` can resolve spec_root / root_path
+        for the daemon. Ordinary quick-chat sessions leave both ``None`` and
+        behave exactly as before.
         """
         runtime = await self._get_online_runtime(user_id, provider=provider)
         if runtime is None:
@@ -453,6 +459,14 @@ class RunPlacementService:
         # 保留签名兼容但不再生效。
         metadata["manual_approval"] = True
         metadata["ask_user_only"] = True
+        # 2026-07-09-change-detail-session / D-003@v1（R-02 接线）：变更会话透传
+        # workspace_id + cwd 到 lease metadata，让 lease/context.build_claim_payload
+        # 的 ws_id 分支（context.py:118）命中，解析 spec_root/root_path 给 daemon。
+        # 普通 quick-chat 不写 → ws_id=None → 与现状一致（零回归，边界 E4）。
+        if workspace_id is not None:
+            metadata["workspace_id"] = str(workspace_id)
+        if cwd:
+            metadata["cwd"] = cwd
 
         # Raw SQL mirrors dispatch_to_daemon so we can set kind/agent_run_id=NULL
         # without touching the batch ORM insert path. NULL lease_expires_at is

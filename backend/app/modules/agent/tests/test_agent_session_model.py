@@ -19,12 +19,14 @@ def test_agent_session_tablename() -> None:
     assert AgentSession.__tablename__ == "agent_sessions"
 
 
-def test_agent_session_has_all_13_fields() -> None:
+def test_agent_session_has_all_15_fields() -> None:
     expected = {
         "id",
         "user_id",
         "runtime_id",
         "lease_id",
+        "change_id",
+        "workspace_id",
         "provider",
         "status",
         "agent_session_id",
@@ -39,7 +41,7 @@ def test_agent_session_has_all_13_fields() -> None:
     assert actual == expected, (
         f"AgentSession field mismatch. missing={expected - actual}, extra={actual - expected}"
     )
-    assert len(AgentSession.model_fields) == 13
+    assert len(AgentSession.model_fields) == 15
 
 
 def test_agent_session_defaults() -> None:
@@ -119,6 +121,7 @@ def test_agent_session_indexes_present() -> None:
         "ix_agent_sessions_runtime_id",
         "ix_agent_sessions_status",
         "ix_agent_sessions_lease_id",
+        "ix_agent_sessions_change_id",
     ):
         assert name in index_names, f"missing index {name}"
 

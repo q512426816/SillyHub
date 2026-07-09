@@ -802,6 +802,10 @@ export interface SessionCreateRequest {
   model?: string | null;
   manual_approval?: boolean;
   ask_user_only?: boolean;
+  /** 2026-07-09-change-detail-session：变更会话绑定（D-001）。可选，runtimes 页不传。 */
+  change_id?: string;
+  /** 工作空间绑定（冗余，便于过滤/cwd 解析，D-003）。可选。 */
+  workspace_id?: string;
 }
 
 export interface SessionCreateResponse {
@@ -842,6 +846,8 @@ export async function createSession(
   if (input.ask_user_only !== undefined) {
     body.ask_user_only = input.ask_user_only;
   }
+  if (input.change_id !== undefined) body.change_id = input.change_id;
+  if (input.workspace_id !== undefined) body.workspace_id = input.workspace_id;
   return apiFetch<SessionCreateResponse>("/api/daemon/sessions", {
     method: "POST",
     json: body,
@@ -1152,6 +1158,42 @@ export async function listAgentSessions(
   if (options?.offset !== undefined) query.offset = options.offset;
   if (options?.status) query.status = options.status;
   return apiFetch<AgentSessionListResponse>("/api/daemon/sessions", { query });
+}
+
+/* ---------- Change-level session list (task-11 / FR-04 / D-005@v1) ----------
+ *
+ * 2026-07-09-change-detail-session：变更详情页按 change_id 聚合会话列表，
+ * 跨成员可见（D-005@v1），调用后端 task-09 端点。
+ */
+
+/** 变更级会话列表项作者（D-005@v1 跨成员可见）。 */
+export interface ChangeSessionAuthor {
+  user_id: string;
+  display_name: string | null;
+}
+
+/** GET /workspaces/{wid}/changes/{cid}/sessions 列表项（对齐后端 AgentSessionListItem）。 */
+export interface AgentSessionListItem {
+  id: string;
+  provider: string;
+  status: string;
+  turn_count: number;
+  author: ChangeSessionAuthor;
+  last_active_at: string | null;
+  title: string | null;
+}
+
+/**
+ * GET /api/workspaces/{wid}/changes/{cid}/sessions — 变更级会话列表（跨成员，D-005@v1）。
+ * 2026-07-09-change-detail-session task-11 / FR-04。
+ */
+export async function listChangeSessions(
+  workspaceId: string,
+  changeId: string,
+): Promise<AgentSessionListItem[]> {
+  return apiFetch<AgentSessionListItem[]>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/changes/${encodeURIComponent(changeId)}/sessions`,
+  );
 }
 
 /** DELETE /api/daemon/sessions/{id} — 删除已结束的会话记录。 */

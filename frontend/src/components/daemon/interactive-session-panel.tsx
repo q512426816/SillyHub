@@ -134,6 +134,10 @@ export interface InteractiveSessionPanelProps {
    * 父级据此清除 URL `?session=` param。
    */
   onSessionReset?: () => void;
+  /** 2026-07-09-change-detail-session：变更会话绑定透传（D-001）。可选，runtimes 页不传。 */
+  changeId?: string;
+  /** 工作空间绑定透传（D-003）。可选。 */
+  workspaceId?: string;
 }
 
 export function InteractiveSessionPanel({
@@ -146,6 +150,8 @@ export function InteractiveSessionPanel({
   initialTurns,
   onSessionCreated,
   onSessionReset,
+  changeId,
+  workspaceId,
 }: InteractiveSessionPanelProps) {
   const [provider, setProvider] = useState(defaultProvider);
   const [input, setInput] = useState("");
@@ -430,6 +436,8 @@ export function InteractiveSessionPanel({
           model,
           manual_approval: true,
           ask_user_only: true,
+          ...(changeId ? { change_id: changeId } : {}),
+          ...(workspaceId ? { workspace_id: workspaceId } : {}),
         });
         // 用返回 run id 替换 pending 占位 + 启动唯一 SSE
         setView((prev) => ({

@@ -636,6 +636,8 @@ class DaemonService:
         model: str | None = None,
         manual_approval: bool = False,
         ask_user_only: bool = False,
+        change_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
     ) -> SessionDispatchResult:
         return await self._sess.create_session(
             user_id,
@@ -644,6 +646,8 @@ class DaemonService:
             model=model,
             manual_approval=manual_approval,
             ask_user_only=ask_user_only,
+            change_id=change_id,
+            workspace_id=workspace_id,
         )
 
     async def inject_session(

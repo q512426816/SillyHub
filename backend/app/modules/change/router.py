@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.core.auth_deps import require_permission
 from app.core.db import get_session
+from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.change.schema import (
@@ -48,6 +51,7 @@ from app.modules.change.schema import (
     TransitionResponse,
 )
 from app.modules.change.service import ChangeService
+from app.modules.daemon.schema import AgentSessionListItem, ChangeSessionAuthor
 
 router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["change"])
 
@@ -183,6 +187,91 @@ async def list_change_files(
         change_id=change_id,
         items=[ChangeFileEntry(**it) for it in items],
     )
+
+
+@router.get(
+    "/changes/{change_id}/sessions",
+    response_model=list[AgentSessionListItem],
+)
+async def list_change_sessions(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+) -> list[AgentSessionListItem]:
+    """列出某变更下的全部会话（2026-07-09-change-detail-session task-09）。
+
+    跨成员可见（D-005@v1，不加 user_id 过滤），鉴权复用 CHANGE_READ（X-03）。
+    标题取该会话最早一条 channel=user_input 的 AgentRunLog 摘要（前 30 字，X-04）。
+    按 last_active_at desc 排序（Python 排序规避 PG/SQLite 方言差异）。
+    """
+    # 1. AgentSession where change_id=change_id（跨成员）。用 col(AgentSession.change_id)
+    #    显式限定列名，避免与函数参数 change_id 同名遮蔽。
+    sessions = (
+        (
+            await session.execute(
+                select(AgentSession).where(col(AgentSession.change_id) == change_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not sessions:
+        return []
+
+    session_ids = [s.id for s in sessions]
+    user_ids = {s.user_id for s in sessions}
+
+    # 2. 批量取作者展示名（避免 N+1）。
+    users = (await session.execute(select(User).where(col(User.id).in_(user_ids)))).scalars().all()
+    user_name_map: dict[uuid.UUID, str | None] = {u.id: u.display_name for u in users}
+
+    # 3. 批量取每个 session 的首条 user_input 标题：JOIN AgentRun 过滤
+    #    agent_session_id IN (...) + AgentRunLog.channel='user_input'，按
+    #    (agent_session_id, AgentRunLog.timestamp asc) 取首条。Python 侧 group + 取最早。
+    title_stmt = (
+        select(
+            AgentRun.agent_session_id.label("session_id"),
+            AgentRunLog.timestamp.label("ts"),
+            AgentRunLog.content_redacted.label("content"),
+        )
+        .join(AgentRunLog, AgentRunLog.run_id == AgentRun.id)
+        .where(
+            col(AgentRun.agent_session_id).in_(session_ids),
+            col(AgentRunLog.channel) == "user_input",
+        )
+    )
+    title_rows = (await session.execute(title_stmt)).all()
+    first_input_by_session: dict[uuid.UUID, datetime] = {}
+    content_by_session: dict[uuid.UUID, str] = {}
+    for row in title_rows:
+        sid = row.session_id
+        ts = row.ts
+        prev = first_input_by_session.get(sid)
+        if prev is None or ts < prev:
+            first_input_by_session[sid] = ts
+            content_by_session[sid] = row.content or ""
+
+    # 4. 组装 + 按 last_active_at desc 排序。
+    items = [
+        AgentSessionListItem(
+            id=s.id,
+            provider=s.provider,
+            status=s.status,
+            turn_count=s.turn_count,
+            author=ChangeSessionAuthor(
+                user_id=s.user_id, display_name=user_name_map.get(s.user_id)
+            ),
+            last_active_at=s.last_active_at,
+            title=(content_by_session.get(s.id, "") or "")[:30] or None,
+        )
+        for s in sessions
+    ]
+    items.sort(
+        key=lambda x: x.last_active_at or datetime.min,
+        reverse=True,
+    )
+    return items
 
 
 @router.get(

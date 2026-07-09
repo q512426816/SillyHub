@@ -1505,6 +1505,8 @@ class SessionCreateRequest(BaseModel):
     model: str | None = Field(default=None, max_length=128)
     manual_approval: bool = False
     ask_user_only: bool = False
+    change_id: uuid.UUID | None = None
+    workspace_id: uuid.UUID | None = None
 
 
 class SessionCreateResponse(BaseModel):
@@ -1691,6 +1693,8 @@ async def create_session(
         model=data.model,
         manual_approval=data.manual_approval,
         ask_user_only=data.ask_user_only,
+        change_id=data.change_id,
+        workspace_id=data.workspace_id,
     )
     s = result.agent_session
     return SessionCreateResponse(

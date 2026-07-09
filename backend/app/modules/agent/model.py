@@ -386,6 +386,7 @@ class AgentSession(BaseModel, table=True):
         Index("ix_agent_sessions_runtime_id", "runtime_id"),
         Index("ix_agent_sessions_status", "status"),
         Index("ix_agent_sessions_lease_id", "lease_id"),
+        Index("ix_agent_sessions_change_id", "change_id"),
     )
 
     id: uuid.UUID = Field(
@@ -412,6 +413,27 @@ class AgentSession(BaseModel, table=True):
         sa_column=Column(
             Uuid(as_uuid=True),
             ForeignKey("daemon_task_leases.id", ondelete="CASCADE"),
+            nullable=True,
+        ),
+    )
+    # 2026-07-09-change-detail-session / D-001@v1: change-bound interactive
+    # session. nullable keeps existing runtime-level sessions regression-free;
+    # change deletion clears the FK (no cascade delete of session rows).
+    change_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("changes.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    # Redundant workspace binding for change-scoped session listing & cwd
+    # resolution (D-003@v1).
+    workspace_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id", ondelete="SET NULL"),
             nullable=True,
         ),
     )

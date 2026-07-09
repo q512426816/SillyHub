@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AgentProviderSelect } from "@/components/AgentProviderSelect";
 import { ChangeFileTree } from "@/components/change-file-tree";
+import { ChangeSessionSection } from "@/components/changes/change-session-section";
 import {
   PageContainer,
   PageHeader,
@@ -752,6 +753,17 @@ export default function ChangeDetailPage({ params }: Props) {
           {successMsg}
         </div>
       )}
+
+      {/* ── 会话（变更级问答/调试，2026-07-09-change-detail-session / FR-05）── */}
+      <section className="rounded-md border bg-card">
+        <div className="flex items-center justify-between border-b px-3 py-2">
+          <h2 className="text-xs font-medium">会话</h2>
+          <span className="text-[11px] text-muted-foreground">在该变更上下文中提问 / 调试</span>
+        </div>
+        <div className="p-3">
+          <ChangeSessionSection workspaceId={workspaceId} changeId={changeId} />
+        </div>
+      </section>
 
       <section className="rounded-md border bg-card">
         <div className="flex items-center justify-between border-b px-3 py-2">

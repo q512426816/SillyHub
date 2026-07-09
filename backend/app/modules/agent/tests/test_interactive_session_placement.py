@@ -167,6 +167,48 @@ class TestPrepareInteractiveDispatch:
         lease_after = await db_session.get(DaemonTaskLease, dispatch.lease_id)
         assert lease_after is None
 
+    @pytest.mark.asyncio
+    async def test_prepare_interactive_dispatch_passes_workspace_and_cwd(
+        self, db_session: AsyncSession
+    ) -> None:
+        """2026-07-09-change-detail-session task-05 / D-003@v1：变更会话 dispatch
+        的 lease metadata 必须含 workspace_id + cwd，让 context.build_claim_payload
+        的 ws_id 分支命中解析 spec_root/root_path；未传时与现状一致（零回归）。"""
+        uid = await _create_user(db_session)
+        await _create_runtime(db_session, uid)
+        ws_id = uuid.uuid4()
+        placement = RunPlacementService(db_session)
+
+        # 1) 传 workspace_id + cwd → metadata 必含两者
+        dispatch = await placement.prepare_interactive_dispatch(
+            agent_session_id=uuid.uuid4(),
+            agent_run_id=uuid.uuid4(),
+            user_id=uid,
+            provider="claude",
+            prompt="hi",
+            model=None,
+            workspace_id=ws_id,
+            cwd="/tmp/proj",
+        )
+        lease = await db_session.get(DaemonTaskLease, dispatch.lease_id)
+        meta = lease.metadata_ or {}
+        assert meta["workspace_id"] == str(ws_id)
+        assert meta["cwd"] == "/tmp/proj"
+
+        # 2) 不传 workspace_id/cwd → metadata 不得含 workspace_id 键（零回归）
+        dispatch2 = await placement.prepare_interactive_dispatch(
+            agent_session_id=uuid.uuid4(),
+            agent_run_id=uuid.uuid4(),
+            user_id=uid,
+            provider="claude",
+            prompt="hi",
+            model=None,
+        )
+        lease2 = await db_session.get(DaemonTaskLease, dispatch2.lease_id)
+        meta2 = lease2.metadata_ or {}
+        assert "workspace_id" not in meta2
+        assert "cwd" not in meta2
+
 
 # ── notify_interactive_dispatch ──────────────────────────────────────────────
 

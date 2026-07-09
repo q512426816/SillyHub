@@ -325,6 +325,8 @@ class SessionService:
         model: str | None = None,
         manual_approval: bool = False,
         ask_user_only: bool = False,
+        change_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
     ) -> SessionDispatchResult:
         """Create an interactive session + first-turn run + interactive lease.
 
@@ -340,6 +342,17 @@ class SessionService:
             )
 
         from app.modules.agent.placement import RunPlacementService
+
+        # 2026-07-09-change-detail-session / D-003@v1：变更会话 cwd=workspace 本地
+        # 项目根。复用 Workspace.root_path（workspace/model.py:63），未传 workspace_id
+        # 时 cwd=None 走原逻辑（边界 E4，零回归）。
+        cwd: str | None = None
+        if workspace_id is not None:
+            from app.modules.workspace.model import Workspace
+
+            _ws = await self._session.get(Workspace, workspace_id)
+            if _ws is not None:
+                cwd = _ws.root_path
 
         now = datetime.now(UTC)
         # Copy config so the request dict is never mutated (boundary #16).
@@ -358,6 +371,9 @@ class SessionService:
                 config=config,
                 turn_count=0,
                 created_at=now,
+                change_id=change_id,
+                workspace_id=workspace_id,
+                cwd=cwd,
             )
             self._session.add(session)
             await self._session.flush()
@@ -370,9 +386,22 @@ class SessionService:
                 status="pending",
                 spec_strategy="interactive",
                 agent_session_id=session.id,
+                change_id=change_id,
             )
             self._session.add(run)
             await self._session.flush()
+
+            # 2026-07-09-change-detail-session / D-004@v1（X-02/X-04）：变更会话首轮
+            # 注入【变更上下文】前导。dispatch prompt = 前导+用户消息，经 lease
+            # metadata 的 prompt 字段透传到 daemon _startInteractiveSession 构造
+            # 首条 user 消息。AgentRunLog(user_input) 与 SESSION_INJECT 的 prompt
+            # 仍写干净用户消息（列表标题 / 回放 / 展示干净）。零 daemon 改动。
+            from app.modules.daemon.session.context import (
+                build_change_context_preamble,
+            )
+
+            preamble = await build_change_context_preamble(self._session, change_id)
+            dispatch_prompt = f"{preamble}\n\n---\n\n{prompt}" if preamble else prompt
 
             placement = RunPlacementService(self._session)
             dispatch = await placement.prepare_interactive_dispatch(
@@ -380,10 +409,12 @@ class SessionService:
                 agent_run_id=run.id,
                 user_id=user_id,
                 provider=provider,
-                prompt=prompt,
+                prompt=dispatch_prompt,
                 model=model,
                 manual_approval=manual_approval,
                 ask_user_only=ask_user_only,
+                workspace_id=workspace_id,
+                cwd=cwd,
             )
 
             # Backfill the triple binding fields + activate the session.
