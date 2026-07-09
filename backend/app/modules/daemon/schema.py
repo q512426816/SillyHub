@@ -455,6 +455,12 @@ class ListDirResponse(BaseModel):
     entries: list[DirEntry]
 
 
+class ListRootsResponse(BaseModel):
+    """POST /runtimes/{runtime_id}/list-roots 响应：daemon 主机磁盘根锚点列表。"""
+
+    roots: list[str]
+
+
 # ── Runtime usage stats (FR-03 / D-002@v1) ─────────────────────────────────
 # GET /api/daemon/runtimes/usage?window=1d|7d|30d 的响应 schema。
 # ts 粒度由 service 层 date_trunc 决定:1d→hour 桶(24 点),7d/30d→day 桶(D-002@v1)。

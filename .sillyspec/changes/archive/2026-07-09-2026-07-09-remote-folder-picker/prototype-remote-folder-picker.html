@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>RemoteFolderPicker 原型 — 2026-07-09-remote-folder-picker</title>
+<!--
+  author: WhaleFall
+  created_at: 2026-07-09T09:10:00
+  原型用途：可视化确认 RemoteFolderPicker 组件的布局/交互/跨平台根/错误降级。
+  样式参考：archive/frontend-style-system（明亮蓝 #2563eb + slate + 圆角12 + 柔和阴影 + Inter）。
+  数据为 mock，仅演示交互流程，非真实 daemon 返回。
+-->
+<style>
+  :root{
+    --primary:#2563eb; --primary-d:#1d4ed8; --cyan:#06b6d4; --emerald:#10b981;
+    --success:#10b981; --warning:#f59e0b; --error:#ef4444;
+    --bg:#f8fafc; --card:#ffffff; --border:#e2e8f0; --muted:#64748b; --fg:#0f172a;
+    --r-sm:6px; --r-md:8px; --r-lg:12px; --r-xl:16px;
+    --sh-sm:0 1px 2px rgba(15,23,42,.06); --sh-md:0 4px 12px rgba(15,23,42,.08); --sh-lg:0 12px 32px rgba(15,23,42,.16);
+    --font:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,'Microsoft YaHei',sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font);font-size:14px;line-height:1.6}
+  .wrap{max-width:920px;margin:0 auto;padding:32px 20px 80px}
+  h1{font-size:22px;margin:0 0 4px}
+  .sub{color:var(--muted);margin:0 0 24px;font-size:13px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-sm);padding:20px;margin-bottom:20px}
+  .card h2{font-size:15px;margin:0 0 12px;display:flex;align-items:center;gap:8px}
+  .tag{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px}
+  .tag.new{background:#dbeafe;color:#1d4ed8}
+  .tag.del{background:#fee2e2;color:#b91c1c}
+  .tag.keep{background:#dcfce7;color:#15803d}
+
+  /* 数据流图 */
+  .flow{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.7;background:#0f172a;color:#e2e8f0;border-radius:var(--r-md);padding:16px;overflow:auto;white-space:pre}
+  .flow .k{color:#7dd3fc}.flow .s{color:#86efac}.flow .m{color:#fcd34d}.flow .dim{color:#64748b}
+
+  /* runtime 配置页 mock */
+  .root-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .root-row input{flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:13px}
+  .root-row input:focus{outline:2px solid #bfdbfe;border-color:var(--primary)}
+
+  button{font-family:inherit;font-size:13px;border-radius:var(--r-md);cursor:pointer;border:1px solid transparent;transition:.15s}
+  .btn{background:var(--primary);color:#fff;padding:7px 14px;font-weight:500}
+  .btn:hover{background:var(--primary-d)}
+  .btn-o{background:#fff;color:var(--fg);border-color:var(--border);padding:6px 12px}
+  .btn-o:hover{background:#f1f5f9}
+  .btn-sm{padding:5px 10px;font-size:12px}
+  .btn[disabled]{opacity:.5;cursor:not-allowed}
+
+  .ctrl{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0 4px}
+  .seg{display:inline-flex;border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden}
+  .seg button{background:#fff;color:var(--muted);padding:6px 12px;border:none;border-radius:0}
+  .seg button.on{background:var(--primary);color:#fff}
+  .switch{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+
+  /* Modal */
+  .mask{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:flex-start;justify-content:center;padding:60px 20px;z-index:50}
+  .mask.open{display:flex}
+  .modal{background:var(--card);width:560px;max-width:100%;border-radius:var(--r-xl);box-shadow:var(--sh-lg);overflow:hidden;animation:pop .18s ease}
+  @keyframes pop{from{transform:translateY(8px) scale(.98);opacity:0}to{transform:none;opacity:1}}
+  .modal header{padding:14px 18px;border-bottom:1px solid var(--border);font-weight:600;font-size:15px}
+  .modal .body{padding:16px 18px}
+  .modal footer{padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px}
+
+  .addr{display:flex;gap:8px;margin-bottom:10px}
+  .addr input{flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-md);font-family:ui-monospace,monospace;font-size:12.5px}
+  .addr input:focus{outline:2px solid #bfdbfe;border-color:var(--primary)}
+
+  .err{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:var(--r-md);padding:7px 10px;font-size:12px;margin-bottom:10px;display:none}
+  .err.show{display:block}
+
+  .tree{border:1px solid var(--border);border-radius:var(--r-md);height:280px;overflow:auto;background:#fcfdff}
+  .node{padding:4px 8px;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;border-radius:var(--r-sm);user-select:none}
+  .node:hover{background:#eff6ff}
+  .node.sel{background:#dbeafe;color:#1d4ed8;font-weight:500}
+  .node .ic{width:16px;text-align:center;color:var(--muted);font-size:11px}
+  .node .fname{font-family:ui-monospace,monospace;font-size:12.5px}
+  .node.child{padding-left:30px}
+  .node.child2{padding-left:50px}
+  .spin{color:var(--muted);font-size:12px;padding:4px 30px}
+
+  .picked{margin-top:10px;background:#f1f5f9;border-radius:var(--r-md);padding:7px 10px;font-size:12px;display:flex;align-items:center;gap:8px}
+  .picked code{font-family:ui-monospace,monospace;color:var(--primary-d);font-weight:600;word-break:break-all}
+  .picked .empty{color:var(--muted);font-style:normal}
+
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:14px}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .dot{width:10px;height:10px;border-radius:3px;display:inline-block}
+  .note{font-size:12px;color:var(--muted);margin-top:8px}
+  hr{border:none;border-top:1px dashed var(--border);margin:16px 0}
+  .muted{color:var(--muted)}
+  code.inl{background:#f1f5f9;padding:1px 6px;border-radius:4px;font-family:ui-monospace,monospace;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>RemoteFolderPicker · 原型</h1>
+  <p class="sub">变更 <code class="inl">2026-07-09-remote-folder-picker</code> · 基于 Daemon 的远程目录浏览器（替换 browse_folder 系统弹窗）</p>
+
+  <!-- 数据流 -->
+  <div class="card">
+    <h2>📐 数据流 <span class="tag new">list_roots 新增</span> <span class="tag keep">list_dir 复用</span> <span class="tag keep">PUT allowed-roots → policy_update 复用</span></h2>
+<div class="flow"><span class="m">RemoteFolderPicker</span>(runtimeId)
+  ├─ 打开   <span class="k">listRoots</span>(rid) → POST /list-roots  → daemon <span class="s">list_roots</span>
+  │           Win → { roots: ["C:\\","D:\\","E:\\"] }
+  │           Unix→ { roots: ["/"] }
+  ├─ 展开   <span class="k">listDir</span>(rid, path) → POST /list-dir → daemon <span class="s">list_dir</span>  <span class="dim">(已有，返 entries[{name,type}]，只取 dir)</span>
+  ├─ 手输   跳转前探 <span class="k">listDir</span> 校验 → not_found 则提示「路径不存在或非目录」
+  └─ 确认   onChange(path) → 调用方 <span class="k">PUT</span> /allowed-roots → WS <span class="s">policy_update</span> → daemon 即时生效
+
+<span class="dim">❌ 已移除：browse_folder（daemon 弹 PowerShell Shell.BrowseForFolder，远程 daemon 时 Web 用户看不到）</span></div>
+    <div class="legend">
+      <span><span class="dot" style="background:#2563eb"></span>新增</span>
+      <span><span class="dot" style="background:#10b981"></span>复用已有</span>
+      <span><span class="dot" style="background:#ef4444"></span>移除</span>
+    </div>
+  </div>
+
+  <!-- Runtime 配置页 mock -->
+  <div class="card">
+    <h2>🖥️ Runtime 配置页（接入点）</h2>
+    <p class="note">每个可写目录行旁的「浏览」按钮打开 RemoteFolderPicker。组件自治，调用方只传 <code class="inl">runtimeId</code> + 受控 <code class="inl">value/onChange</code>。</p>
+
+    <div class="ctrl">
+      <span class="switch">模拟 daemon 平台（决定 list_roots 返回）：</span>
+      <div class="seg" id="platSeg">
+        <button data-p="win" class="on">Windows</button>
+        <button data-p="unix">Linux / macOS</button>
+      </div>
+      <label class="switch"><input type="checkbox" id="offlineChk" /> daemon 离线（演示错误降级）</label>
+    </div>
+
+    <div style="margin-top:14px">
+      <div class="root-row">
+        <input value="C:\\Users\\whale\\.sillyhub" id="root0" />
+        <button class="btn-o btn-sm" onclick="openPicker(0)">浏览</button>
+        <button class="btn-o btn-sm" onclick="delRow(0)">删除</button>
+      </div>
+      <div class="root-row">
+        <input value="D:\\WorkNew\\SillyHub" id="root1" />
+        <button class="btn-o btn-sm" onclick="openPicker(1)">浏览</button>
+        <button class="btn-o btn-sm" onclick="delRow(1)">删除</button>
+      </div>
+      <button class="btn-o btn-sm" style="margin-top:6px" onclick="addRow()">＋ 添加路径</button>
+    </div>
+    <p class="note">保存 → <code class="inl">PUT /runtimes/&#123;id&#125;/allowed-roots</code> → WS <code class="inl">policy_update</code>（在线秒级生效；离线下次心跳兜底）。</p>
+  </div>
+
+  <!-- 组件关键状态 -->
+  <div class="card">
+    <h2>🧩 RemoteFolderPicker 组件 · 关键状态</h2>
+    <div class="legend" style="margin-top:0">
+      <span><span class="dot" style="background:#2563eb"></span>懒加载展开（antd Tree loadData）</span>
+      <span><span class="dot" style="background:#f59e0b"></span>地址栏手输 + 跳转校验</span>
+      <span><span class="dot" style="background:#10b981"></span>已选路径回显</span>
+      <span><span class="dot" style="background:#ef4444"></span>错误降级不崩溃</span>
+    </div>
+    <p class="note">点击上方任意「浏览」按钮体验完整交互。切换平台看 <code class="inl">list_roots</code> 根锚点差异；勾选「daemon 离线」看错误降级。</p>
+  </div>
+</div>
+
+<!-- Modal: RemoteFolderPicker -->
+<div class="mask" id="mask">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="选择目录">
+    <header>选择目录</header>
+    <div class="body">
+      <div class="addr">
+        <input id="addrInput" placeholder="输入路径直接跳转，如 D:\ 或 /home/whale" />
+        <button class="btn-o btn-sm" onclick="jumpTo()">跳转</button>
+      </div>
+      <div class="err" id="errBar"></div>
+      <div class="tree" id="tree"></div>
+      <div class="picked" id="picked"><span class="empty">在目录树中选择一个文件夹，或在上方输入路径后点「跳转」</span></div>
+    </div>
+    <footer>
+      <span class="muted" id="platLabel" style="font-size:12px"></span>
+      <span>
+        <button class="btn-o" onclick="closePicker()">取消</button>
+        <button class="btn" id="confirmBtn" onclick="confirmPick()" disabled>选择此目录</button>
+      </span>
+    </footer>
+  </div>
+</div>
+
+<script>
+// ---- mock 目录数据（演示懒加载，非真实）----
+const WIN = ["C:\\","D:\\","E:\\"];
+const UNIX = ["/"];
+const CHILDREN = {
+  "C:\\":["Users","Windows","Program Files","Temp"],
+  "C:\\Users":["whale","Public","Default"],
+  "C:\\Users\\whale":[".sillyhub","Documents","projects","Downloads"],
+  "D:\\":["WorkNew","Data","Backup"],
+  "D:\\WorkNew":["SillyHub","other-proj"],
+  "E:\\":["Archive"],
+  "/":["home","etc","var","opt","usr","tmp"],
+  "/home":["whale","shared"],
+  "/home/whale":[".sillyhub","projects","logs"],
+  "/opt":["app","data"],
+};
+let plat = "win";
+let offline = false;
+let activeRow = 0;
+let selected = "";
+
+const $ = id => document.getElementById(id);
+
+function roots(){ return plat==="win" ? WIN.slice() : UNIX.slice(); }
+function sep(){ return plat==="win" ? "\\" : "/"; }
+// 拼接：根已带尾部分隔符则直接加 name
+function join(parent, name){
+  return parent.endsWith("\\")||parent.endsWith("/") ? parent+name : parent+sep()+name;
+}
+function isRoot(p){ return p==="C:\\"||p==="D:\\"||p==="E:\\"||p==="/"; }
+
+function openPicker(idx){
+  activeRow = idx; selected = "";
+  $("picked").innerHTML = "<span class='empty'>在目录树中选择一个文件夹，或在上方输入路径后点「跳转」</span>";
+  $("confirmBtn").disabled = true;
+  $("addrInput").value = "";
+  $("mask").classList.add("open");
+  renderTree();
+}
+function closePicker(){ $("mask").classList.remove("open"); }
+
+function showErr(msg){ const e=$("errBar"); e.textContent=msg; e.classList.add("show"); }
+function clearErr(){ const e=$("errBar"); e.textContent=""; e.classList.remove("show"); }
+
+function renderTree(){
+  $("platLabel").textContent = plat==="win" ? "Daemon: Windows · list_roots → 盘符" : "Daemon: Linux/macOS · list_roots → /";
+  const tree = $("tree");
+  if(offline){ tree.innerHTML=""; showErr("守护进程离线或响应超时，无法浏览目录。请检查 daemon 是否在线后重试。"); return; }
+  clearErr();
+  tree.innerHTML = "";
+  for(const r of roots()){
+    tree.appendChild(makeNode(r, r, 0));
+  }
+}
+
+function makeNode(path, label, depth){
+  const node = document.createElement("div");
+  node.className = "node" + (depth>0? " child"+(depth>1?2:""):"");
+  if(selected===path) node.classList.add("sel");
+  const ic = document.createElement("span"); ic.className="ic"; ic.textContent="▸";
+  const fn = document.createElement("span"); fn.className="fname"; fn.textContent=label;
+  node.appendChild(ic); node.appendChild(fn);
+
+  // 选中
+  node.addEventListener("click", (ev)=>{
+    ev.stopPropagation();
+    if(selected!==path){ selected=path; renderSel(); renderTree(); }
+  });
+  // 展开（懒加载）
+  let loaded=false;
+  ic.addEventListener("click",(ev)=>{
+    ev.stopPropagation();
+    const open = ic.textContent==="▾";
+    if(!open && !loaded){
+      ic.textContent="⏳";
+      // 模拟懒加载延迟（真实=listDir RPC 往返）
+      setTimeout(()=>{
+        const kids = CHILDREN[path]||[];
+        loaded=true;
+        ic.textContent="▾";
+        // 在该节点后插入子节点
+        const frag=document.createDocumentFragment();
+        for(const k of kids){
+          frag.appendChild(makeNode(join(path,k), k, depth+1));
+        }
+        node.after(frag);
+      },280);
+    }else{
+      ic.textContent = open? "▸":"▾";
+      toggleSiblings(node, open?"hide":"show");
+    }
+  });
+  return node;
+}
+function toggleSiblings(node, mode){
+  let s=node.nextElementSibling, depthCls=parseInt(node.dataset.d||"0");
+  while(s && s.classList.contains("node") && (s.classList.contains("child")||s.classList.contains("child2"))){
+    if(mode==="hide") s.style.display="none"; else s.style.display="";
+    s=s.nextElementSibling;
+  }
+}
+
+function renderSel(){
+  const p=$("picked");
+  if(selected){
+    p.innerHTML = "<span class='muted'>已选路径：</span><code>"+escapeHtml(selected)+"</code>";
+    $("confirmBtn").disabled=false;
+    $("addrInput").value=selected;
+  }else{
+    p.innerHTML = "<span class='empty'>在目录树中选择一个文件夹，或在上方输入路径后点「跳转」</span>";
+    $("confirmBtn").disabled=true;
+  }
+}
+
+// 地址栏跳转：模拟前端调 listDir 校验存在+是目录
+function jumpTo(){
+  const p = $("addrInput").value.trim();
+  if(!p) return;
+  if(offline){ showErr("守护进程离线或响应超时，无法浏览目录。"); return; }
+  clearErr();
+  // mock 校验：已知路径白名单
+  const known = new Set([...WIN,...UNIX, ...Object.keys(CHILDREN),
+    ...["C:\\Users\\whale\\.sillyhub","D:\\WorkNew\\SillyHub","/home/whale/.sillyhub"]]);
+  if(!known.has(p) && !p.match(/^[A-Z]:\\.*$/) && !p.startsWith("/")){
+    showErr("路径不存在或不是目录："+p); return;
+  }
+  selected=p; renderSel();
+  // 标记选中（简化：只在已渲染根里找）
+  document.querySelectorAll(".node.sel").forEach(n=>n.classList.remove("sel"));
+}
+
+function confirmPick(){
+  if(!selected) return;
+  const inp = $("root"+activeRow);
+  if(inp){ inp.value = selected; }
+  closePicker();
+}
+
+// runtime 行管理
+function addRow(){
+  const rows=document.querySelectorAll(".root-row");
+  const i=rows.length;
+  const div=document.createElement("div"); div.className="root-row";
+  div.innerHTML=`<input value="" id="root${i}" placeholder="例如 ~/.sillyhub 或 /home/whale/work" />
+    <button class="btn-o btn-sm" onclick="openPicker(${i})">浏览</button>
+    <button class="btn-o btn-sm" onclick="delRow(${i})">删除</button>`;
+  rows[rows.length-1].after(div);
+}
+function delRow(i){ const inp=$("root"+i); if(inp) inp.value=""; }
+
+// 平台 / 离线切换
+document.querySelectorAll("#platSeg button").forEach(b=>{
+  b.addEventListener("click",()=>{
+    document.querySelectorAll("#platSeg button").forEach(x=>x.classList.remove("on"));
+    b.classList.add("on"); plat=b.dataset.p;
+    if($("mask").classList.contains("open")) renderTree();
+  });
+});
+$("offlineChk").addEventListener("change",e=>{ offline=e.target.checked; if($("mask").classList.contains("open")) renderTree(); });
+
+function escapeHtml(s){return s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+// ESC 关闭
+document.addEventListener("keydown",e=>{ if(e.key==="Escape") closePicker(); });
+$("mask").addEventListener("click",e=>{ if(e.target.id==="mask") closePicker(); });
+</script>
+</body>
+</html>

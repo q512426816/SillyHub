@@ -36,10 +36,9 @@
  * @module daemon
  */
 
-import { arch, homedir, hostname, platform } from 'node:os';
+import { arch, homedir, hostname, platform, tmpdir } from 'node:os';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { exec } from 'node:child_process';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { type DaemonConfig, normalizeAllowedRoots } from './config.js';
 import { MSG } from './protocol.js';
@@ -58,8 +57,9 @@ import type {
 import { AgentDetector, normalizeProvider } from './agent-detector.js';
 import type { DetectedAgent } from './agent-detector.js';
 import { HubClient, extractCause } from './hub-client.js';
-import { WsClient, RpcError } from './ws-client.js';
+import { WsClient } from './ws-client.js';
 import { listDir } from './file-rpc.js';
+import { listRoots } from './roots-rpc.js';
 // task-03（2026-07-06-daemon-host-fs-delegate）：host_fs.* WS handler 业务层。
 // backend 经 HostFsDelegate + ws_rpc 调本 handler 在宿主执行 stat/git_apply/...（FR-02）。
 import { HostFsHandler } from './host-fs-handler.js';
@@ -146,6 +146,23 @@ function createLogger(level: LogLevel): Logger {
 }
 
 // ── 可中断 sleep（AbortSignal 替代 asyncio.CancelledError，R7）───────────────
+
+/**
+ * sillyspec 临时路径放行常量（FR-003，与 permission-rules.ts 的
+ * SILLYSPEC_TEMP_PATTERNS 同步）。PolicyCache 注入点（register 响应 + 心跳
+ * _syncAllowedRoots/_syncPolicyCache）把这些路径并入 allowedRoots，让
+ * PolicyEngine isPathUnderAnyRoot 放行 sillyspec 写 c:\dev\null / 系统 temp。
+ *
+ * 注：.sillyspec/.runtime 位于 ~/.sillyhub 下，已在 homedir 兜底白名单内，不重复加。
+ * 跨平台：Windows C:/dev/null + os.tmpdir()；POSIX /dev/null + os.tmpdir()。
+ * 写死 3 类路径，不接受外部输入（R-02 写安全兜底，越界写仍 deny，task-08 守护）。
+ */
+const SILLYSPEC_TEMP_ROOTS: string[] = [
+  'C:\\dev\\null',
+  'C:/dev/null',
+  '/dev/null',
+  tmpdir(),
+];
 
 /** abortableSleep 抛出的异常类型（标识 stop 信号）。 */
 class AbortError extends Error {
@@ -950,6 +967,9 @@ export class Daemon {
             .map((p) => p.replace(/^~(?=$|[/\\])/, homedir()));
           const union = new Set<string>(expanded);
           union.add(homedir());
+          // FR-003：sillyspec 临时路径放行（c:\dev\null / /dev/null / tmpdir），
+          // 与 permission-rules.ts CLI allow 同步（双重放行，R-01 写安全兜底）。
+          for (const temp of SILLYSPEC_TEMP_ROOTS) union.add(temp);
           this._policyCache.set(runtimeId, normalizeAllowedRoots([...union]));
         }
       }
@@ -1841,6 +1861,8 @@ export class Daemon {
           .map((p) => p.replace(/^~(?=$|[/\\])/, homedir()));
         const union = new Set<string>(expanded);
         union.add(homedir());
+        // FR-003：sillyspec 临时路径放行（与 register 注入点同步）。
+        for (const temp of SILLYSPEC_TEMP_ROOTS) union.add(temp);
         const normalized = normalizeAllowedRoots([...union]);
         const existing = this._policyCache.get(runtimeId)?.allowedRoots;
         if (JSON.stringify(existing) !== JSON.stringify(normalized)) {
@@ -1878,8 +1900,13 @@ export class Daemon {
    */
   private _syncPolicyCache(roots: string[]): void {
     if (!this._policyCache) return;
+    // FR-003：sillyspec 临时路径放行（与 register/心跳 per-runtime 注入点同步）。
+    // roots 已 normalize，临时路径并入后再 normalize 一次去重归一。
+    const union = new Set<string>(roots);
+    for (const temp of SILLYSPEC_TEMP_ROOTS) union.add(temp);
+    const normalized = normalizeAllowedRoots([...union]);
     for (const runtimeId of this._registeredRuntimes.values()) {
-      if (runtimeId) this._policyCache.set(runtimeId, roots);
+      if (runtimeId) this._policyCache.set(runtimeId, normalized);
     }
   }
 
@@ -2104,57 +2131,9 @@ export class Daemon {
       // 这里直接传空白名单，让 file-rpc.listDir 跳过权限校验（只做存在+目录检查）。
       return listDir(path, null, '', []);
     });
-    // ql-20260708-002：弹系统原生文件夹选择对话框。改用 Shell.Application.BrowseForFolder
-    //（COM SHBrowseForFolder），不再用 System.Windows.Forms.FolderBrowserDialog。
-    // 根因：FolderBrowserDialog.ShowDialog 在 PowerShell 子进程（exec 启动）里缺消息循环，
-    // ShowDialog 卡死不弹窗 → daemon exec 等 180s → backend DaemonRpcTimeout 504 → next
-    // proxy 30s 500。BrowseForFolder 走 COM 不依赖 WinForms 消息循环，正常弹窗 + 返回。
-    // initial_path 作为 RootFolder（定位到该目录；空则从"此电脑"开始）。仅 Windows。
-    // 用 -EncodedCommand（UTF-16LE base64）避免引号转义 + 原生支持中文描述/路径。
-    ws.registerRpcHandler('browse_folder', async (params) => {
-      if (platform() !== 'win32') {
-        throw new RpcError('unsupported', 'browse_folder only supported on Windows');
-      }
-      // ql-20260707-003：若前端传入 initialPath（当前输入框已有值），对话框默认定位到该目录。
-      // 展开 ~ → homedir；PS 单引号转义（' → ''）后嵌入脚本，Test-Path 校验存在才作 RootFolder。
-      const initialRaw =
-        typeof (params as { initial_path?: unknown } | undefined)?.initial_path === 'string'
-          ? (params as { initial_path?: string }).initial_path!.trim()
-          : '';
-      const initialAbs = initialRaw ? initialRaw.replace(/^~(?=$|[/\\])/, homedir()) : '';
-      const psSafe = initialAbs.replace(/'/g, "''");
-      const psScript =
-        '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n' +
-        "$initial = '" + psSafe + "'\n" +
-        "$root = ''\n" +
-        'if ($initial -and (Test-Path -LiteralPath $initial -PathType Container)) {\n' +
-        '  $root = $initial\n' +
-        '}\n' +
-        '$shell = New-Object -ComObject Shell.Application\n' +
-        "$folder = $shell.BrowseForFolder(0, '选择要添加为可写目录的文件夹', 0x0040, $root)\n" +
-        'if ($folder -ne $null) {\n' +
-        '  [Console]::Out.WriteLine($folder.Self.Path)\n' +
-        '}\n';
-      const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
-      return new Promise<{ path: string }>((resolve, reject) => {
-        exec(`powershell -NoProfile -Sta -EncodedCommand ${encoded}`, {
-          encoding: 'utf8',
-          timeout: 180000,
-          windowsHide: false,
-        }, (err, stdout) => {
-          if (err) {
-            reject(new RpcError('internal', `browse_folder failed: ${err.message}`));
-            return;
-          }
-          const selected = stdout.trim();
-          if (!selected) {
-            reject(new RpcError('cancelled', 'user cancelled folder selection'));
-            return;
-          }
-          resolve({ path: selected });
-        });
-      });
-    });
+    // 2026-07-09-remote-folder-picker task-02：list_roots RPC 供前端文件夹选择器拿磁盘根（FR-1），
+    // 浏览自由同 list_dir（ql-20260706-006），不受 allowed_roots 限制。
+    ws.registerRpcHandler('list_roots', async () => listRoots());
   }
 
   /**

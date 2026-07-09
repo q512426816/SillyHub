@@ -73,6 +73,7 @@ from app.modules.daemon.schema import (
     LeaseSyncResponse,
     ListDirRequest,
     ListDirResponse,
+    ListRootsResponse,
     OwnerRead,
     RuntimeUsageListResponse,
     RuntimeUsageWindow,
@@ -1394,68 +1395,65 @@ async def list_dir(
     return ListDirResponse(entries=entries)
 
 
-# ql-20260706-006：系统原生文件夹选择对话框（daemon 调 PowerShell FolderBrowserDialog）。
-class BrowseFolderResponse(BaseModel):
-    """daemon 弹系统对话框后返回的选中路径（用户取消则 path 为空串）。"""
-
-    path: str
-
-
-class BrowseFolderRequest(BaseModel):
-    """ql-20260707-003：可选 initial_path——对话框默认定位到该目录（当前输入框已有值）。"""
-
-    initial_path: str | None = None
-
-
 @router.post(
-    "/runtimes/{runtime_id}/browse-folder",
-    response_model=BrowseFolderResponse,
+    "/runtimes/{runtime_id}/list-roots",
+    response_model=ListRootsResponse,
 )
-async def browse_folder(
+async def list_roots(
     runtime_id: uuid.UUID,
-    data: BrowseFolderRequest,
     session: SessionDep,
     user: Annotated[User, Depends(get_current_principal)],
-) -> BrowseFolderResponse:
-    """弹系统原生文件夹选择对话框（daemon 端 PowerShell FolderBrowserDialog）。
+) -> ListRootsResponse:
+    """Forward a list_roots request to the bound daemon over WS RPC.
 
-    daemon 是用户机器上的本地进程，可直接调系统对话框。选中的完整路径经 WS RPC
-    回传。用户取消（daemon_code=cancelled）→ path 空串。
+    task-04 · FR-2 / D-002 ownership（runtime 必须属于当前用户）/ D-007 读=owner（非 admin）。
+    daemon 返回该主机磁盘根锚点列表（用于前端文件夹选择锚点定位）。
+    backend 仅负责 ownership 校验 + RPC/HTTP 状态映射，不解析路径。
     """
     svc = DaemonService(session)
+    # Ownership check: runtime not owned by current user → 404.
     runtime = await svc._get_owned_runtime(runtime_id, user.id)
 
+    # Lazy import（与 list_dir / placement.py / agent.service.py 一致）：
+    # ws_hub 单例访问器按测试逐个 patch，模块顶部 import 会绑定陈旧/mock 引用。
     from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
     hub = get_daemon_ws_hub()
+    # task-06: ws_hub 按 daemon_instance_id 路由；runtime_id → daemon_id。
+    # 迁移窗口 runtime.daemon_instance_id IS NULL → 回退 runtime_id（兼容旧数据）。
     daemon_id = runtime.daemon_instance_id or runtime_id
     try:
-        # ql-20260707-002：用户选文件夹可能要几十秒~几分钟，远超默认 RPC 10s 超时。
-        # 传 180s 对齐 daemon 端 PowerShell exec timeout。
-        # ql-20260707-003：传 initialPath 让对话框默认定位到当前输入框已有目录。
-        rpc_params: dict[str, Any] = {}
-        if data.initial_path:
-            rpc_params["initial_path"] = data.initial_path
-        result = await hub.send_rpc(daemon_id, "browse_folder", rpc_params, timeout=180.0)
+        result = await hub.send_rpc(daemon_id, "list_roots", {})
     except DaemonRuntimeOffline as exc:
         raise DaemonRpcGatewayError(
             f"daemon runtime '{runtime_id}' offline.",
-            details={"runtime_id": str(runtime_id), "reason": "offline_or_send_failed"},
+            details={
+                "runtime_id": str(runtime_id),
+                "reason": "offline_or_send_failed",
+            },
         ) from exc
     except DaemonRpcTimeout as exc:
         raise DaemonRpcGatewayError(
-            "daemon browse_folder rpc timed out.",
+            "daemon list_roots rpc timed out.",
             details={
                 "runtime_id": str(runtime_id),
                 "rpc_id": exc.details.get("rpc_id") if exc.details else None,
+                "timeout_seconds": exc.details.get("timeout_seconds") if exc.details else None,
             },
         ) from exc
     except DaemonRpcRemoteError as exc:
-        # cancelled（用户关闭对话框）→ 返回空 path（非错误，前端静默）。
-        if exc.code == "cancelled":
-            return BrowseFolderResponse(path="")
+        # daemon business error — map forbidden → 403 (FR-04), others → 502.
+        if exc.code == "forbidden":
+            raise DaemonRpcForbiddenError(
+                "daemon refused list_roots.",
+                details={
+                    "runtime_id": str(runtime_id),
+                    "daemon_code": exc.code,
+                    "daemon_message": exc.message,
+                },
+            ) from exc
         raise DaemonRpcRemoteGatewayError(
-            f"daemon browse_folder failed: {exc.code}.",
+            f"daemon list_roots failed: {exc.code}.",
             details={
                 "runtime_id": str(runtime_id),
                 "daemon_code": exc.code,
@@ -1463,8 +1461,8 @@ async def browse_folder(
             },
         ) from exc
 
-    path = result.get("path", "") if isinstance(result, dict) else ""
-    return BrowseFolderResponse(path=path)
+    roots = result.get("roots", []) if isinstance(result, dict) else []
+    return ListRootsResponse(roots=roots)
 
 
 # ── Interactive session endpoints (task-05, FR-01/02/04/05) ─────────────────

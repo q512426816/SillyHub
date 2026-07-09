@@ -22,7 +22,7 @@ SillyHub 前端的 Next.js 14 App Router 页面路由层。定义所有页面与
 - 布局：`layout.tsx`（RootLayout，Server Component，lang=zh-CN + 全局 CSS + AntdProviders + metadata）→ `(dashboard)/layout.tsx`（Client Component，认证守卫 + AppShell）
 - 页面动态路由：`[id]` / `[cid]` / `[tid]` / `[iid]`
 - 依赖：`frontend_components`（AppShell 等）、`frontend_lib`（取数）、`frontend_stores`（useSession）
-- 跨组件协作：每页组合 lib 取数 + components 渲染；runtimes 卡片管理 daemon 会话；ppm 作为独立入口 redirect 到 /ppm/projects
+- 跨组件协作：每页组合 lib 取数 + components 渲染；runtimes 卡片管理 daemon 会话；runtimes 可写目录「浏览」用 `RemoteFolderPicker`（list_roots+list_dir 懒加载目录树，替代旧 browseFolder 系统弹窗，2026-07-09-remote-folder-picker）；ppm 作为独立入口 redirect 到 /ppm/projects
 
 ## 关键逻辑
 认证守卫（`(dashboard)/layout.tsx`）：

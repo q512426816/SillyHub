@@ -252,21 +252,21 @@ export async function listDir(
 }
 
 /**
- * ql-20260706-006：弹系统原生文件夹选择对话框（daemon 调 PowerShell FolderBrowserDialog）。
- * 用户选中返回完整路径；取消（daemon cancelled）返回空串。
- * ql-20260707-003：initialPath 可选，对话框默认定位到该目录（当前输入框已有值）。
+ * task-07 / FR-2：经 backend 转发的 daemon list_roots RPC（task-04 端点）。
+ * 返回 daemon 主机可枚举的根锚点：Windows 盘符（如 C:\）或 Unix 根（/）。
+ * RemoteFolderPicker 打开时调用，作为目录树的初始根节点。
  */
-export async function browseFolder(
+export interface ListRootsResponse {
+  roots: string[];
+}
+
+export async function listRoots(
   runtimeId: string,
-  initialPath?: string,
-): Promise<string> {
-  const body: Record<string, string> = {};
-  if (initialPath && initialPath.trim()) body.initial_path = initialPath.trim();
-  const resp = await apiFetch<{ path: string }>(
-    `/api/daemon/runtimes/${runtimeId}/browse-folder`,
-    { method: "POST", json: body },
+): Promise<ListRootsResponse> {
+  return apiFetch<ListRootsResponse>(
+    `/api/daemon/runtimes/${runtimeId}/list-roots`,
+    { method: "POST", json: {} },
   );
-  return resp.path;
 }
 
 export async function getDaemonRuntime(
