@@ -140,6 +140,64 @@ class SessionDialogRead:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class WorkspaceDialogRead:
+    """工作区级 dialog 查询 DTO（GET /api/workspaces/{id}/dialogs）。
+
+    在 ``SessionDialogRead`` 全部字段基础上，额外承载 4 个来源上下文字段（D-002 /
+    D-003），全部 Optional、default=None——这些字段由 task-02 的
+    ``list_pending_dialogs_for_workspace`` 经三表 JOIN + lease/log 反查填充，
+    任一上下文取不到时返回 None（前端占位「会话进行中」），DTO 本身只承载不推导。
+    """
+
+    # ── 既有 SessionDialogRead 字段 ──
+    id: uuid.UUID
+    session_id: uuid.UUID
+    run_id: uuid.UUID
+    request_id: str
+    tool_name: str
+    dialog_kind: str | None
+    dialog_payload: dict | None
+    status: str
+    answer: dict | None
+    created_at: datetime
+    answered_at: datetime | None
+    # ── D-002/D-003 来源上下文字段（全可选，可空）──
+    workspace_id: uuid.UUID | None = None
+    workspace_name: str | None = None
+    session_type: str | None = None  # scan / chat / stage（D-003）
+    run_summary: str | None = None  # 任务 prompt 派生，可空（D-003）
+
+    @classmethod
+    def from_model(
+        cls,
+        row: SessionDialogRequest,
+        *,
+        workspace_id: uuid.UUID | None = None,
+        workspace_name: str | None = None,
+        session_type: str | None = None,
+        run_summary: str | None = None,
+    ) -> "WorkspaceDialogRead":
+        """从持久化行构造 DTO；4 个上下文字段 keyword-only、默认 None。"""
+        return cls(
+            id=row.id,
+            session_id=row.session_id,
+            run_id=row.run_id,
+            request_id=row.request_id,
+            tool_name=row.tool_name,
+            dialog_kind=row.dialog_kind,
+            dialog_payload=row.dialog_payload,
+            status=row.status or "pending",
+            answer=row.answer,
+            created_at=row.created_at,
+            answered_at=row.answered_at,
+            workspace_id=workspace_id,
+            workspace_name=workspace_name,
+            session_type=session_type,
+            run_summary=run_summary,
+        )
+
+
 # ── Service ──────────────────────────────────────────────────────────────────
 
 # Module-level shared timer registry: per-request DaemonPermissionService instances
@@ -433,6 +491,139 @@ class DaemonPermissionService:
             .all()
         )
         return [SessionDialogRead.from_model(r) for r in rows]
+
+    # ── Workspace-level read: GET /api/workspaces/{id}/dialogs（task-02 / D-001 只读）──
+
+    async def list_pending_dialogs_for_workspace(
+        self,
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> list[WorkspaceDialogRead]:
+        """聚合 workspace 下所有 session 的 pending ``SessionDialogRequest``（只读）。
+
+        供审批中心 ``/approvals`` 的 ``GET /api/workspaces/{id}/dialogs`` 端点兜底
+        + 刷新不丢（design §4.1 / FR-5）。JOIN 路径逐字参照
+        ``agent.service.list_workspace_active_sessions``（service.py:798-806）：
+
+            SessionDialogRequest
+              → AgentRun          (on AgentRun.id == SessionDialogRequest.run_id)
+              → AgentRunWorkspace (on AgentRunWorkspace.agent_run_id == AgentRun.id)
+            where AgentRunWorkspace.workspace_id == workspace_id
+              and SessionDialogRequest.status == "pending"
+
+        来源上下文（D-002 / D-003，全可空）：
+          - ``session_type``：``AgentRun.change_id`` 非空→``stage``；
+            ``AgentSession.config["mode"]=="scan"`` 且 change_id 空→``scan``；其余→``chat``。
+          - ``run_summary``：scan/stage 取 ``DaemonTaskLease.metadata_["prompt"]``；
+            chat 取首条 ``channel=="user"`` 的 ``AgentRunLog.content_redacted``
+            （``LIMIT 1 ORDER BY timestamp DESC``）；取不到→None。
+          - ``workspace_name``：经 workspace_id 查 ``Workspace.name``。
+
+        纯读路径（D-001）：无 commit / 无写库 / 无 SSE publish。workspace 成员校验由
+        router 层 ``require_permission(TASK_READ)`` 完成；``user_id`` 仅留接口位以备日志/审计。
+        空 workspace（无 pending dialog）返回 ``[]``。
+        """
+        from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
+        from app.modules.daemon.model import DaemonTaskLease
+        from app.modules.workspace.model import AgentRunWorkspace, Workspace
+
+        session = self._svc._session
+
+        # ── 主 JOIN：pending dialog + AgentRun（带 change_id / lease_id / session 引用）──
+        stmt = (
+            select(SessionDialogRequest, AgentRun)
+            .join(AgentRun, AgentRun.id == SessionDialogRequest.run_id)
+            .join(AgentRunWorkspace, AgentRunWorkspace.agent_run_id == AgentRun.id)
+            .where(
+                AgentRunWorkspace.workspace_id == workspace_id,
+                SessionDialogRequest.status == "pending",
+            )
+            .order_by(SessionDialogRequest.created_at)
+        )
+        joined = (await session.execute(stmt)).all()
+        if not joined:
+            return []
+
+        # ── workspace_name（单查询，整批共享）──
+        ws = await session.get(Workspace, workspace_id)
+        workspace_name = ws.name if ws is not None else None
+
+        # ── 收集 run_id → AgentRun，按需批量反查 AgentSession（取 config.mode）──
+        runs_by_id: dict[uuid.UUID, AgentRun] = {}
+        for _, run in joined:
+            runs_by_id.setdefault(run.id, run)
+        session_ids = {r.agent_session_id for r in runs_by_id.values() if r.agent_session_id}
+        session_cfg_mode: dict[uuid.UUID, str | None] = {}
+        if session_ids:
+            sess_rows = (
+                await session.execute(
+                    select(AgentSession.id, AgentSession.config).where(
+                        AgentSession.id.in_(session_ids)
+                    )
+                )
+            ).all()
+            for sid, cfg in sess_rows:
+                session_cfg_mode[sid] = (cfg or {}).get("mode")
+
+        # ── scan/stage run 的 lease.metadata.prompt（按 lease_id 批量取）──
+        lease_ids = {r.lease_id for r in runs_by_id.values() if r.lease_id is not None}
+        lease_prompt: dict[uuid.UUID, str | None] = {}
+        if lease_ids:
+            lease_rows = (
+                await session.execute(
+                    select(DaemonTaskLease.id, DaemonTaskLease.metadata_).where(
+                        DaemonTaskLease.id.in_(lease_ids)
+                    )
+                )
+            ).all()
+            for lid, meta in lease_rows:
+                lease_prompt[lid] = (meta or {}).get("prompt") if isinstance(meta, dict) else None
+
+        results: list[WorkspaceDialogRead] = []
+        for row, run in joined:
+            # session_type 推导（D-003，C3 修正）
+            is_stage = run.change_id is not None
+            mode = (
+                session_cfg_mode.get(run.agent_session_id)
+                if run.agent_session_id is not None
+                else None
+            )
+            if is_stage:
+                session_type = "stage"
+            elif mode == "scan":
+                session_type = "scan"
+            else:
+                session_type = "chat"
+
+            # run_summary 推导（D-003，C2 修正）
+            if session_type in ("scan", "stage"):
+                run_summary = lease_prompt.get(run.lease_id) if run.lease_id is not None else None
+            else:
+                # chat：取首条 channel=="user" 的 AgentRunLog.content_redacted。
+                # 列名是 content_redacted + timestamp（非 content / created_at），方言无关。
+                log_row = (
+                    await session.execute(
+                        select(AgentRunLog.content_redacted)
+                        .where(
+                            AgentRunLog.run_id == run.id,
+                            AgentRunLog.channel == "user",
+                        )
+                        .order_by(AgentRunLog.timestamp.desc())
+                        .limit(1)
+                    )
+                ).first()
+                run_summary = log_row[0] if log_row is not None else None
+
+            results.append(
+                WorkspaceDialogRead.from_model(
+                    row,
+                    workspace_id=workspace_id,
+                    workspace_name=workspace_name,
+                    session_type=session_type,
+                    run_summary=run_summary,
+                )
+            )
+        return results
 
     # ── REST downlink: POST .../permissions/{request_id}/response ────────────
 

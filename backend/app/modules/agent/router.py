@@ -44,6 +44,8 @@ from app.modules.agent.service import AgentService, submit_run_input
 from app.modules.auth.model import User, UserWorkspaceRole
 from app.modules.auth.permissions import Permission
 from app.modules.daemon.model import DaemonTaskLease
+from app.modules.daemon.permission_service import WorkspaceDialogRead
+from app.modules.daemon.router import PermissionServiceDep
 from app.modules.workspace.model import AgentRunWorkspace, Workspace
 from app.modules.workspace.service import resolve_root_path_for_daemon
 
@@ -529,6 +531,27 @@ async def list_workspace_agent_sessions(
         }
         for s in sessions
     ]
+
+
+@router.get(
+    "/workspaces/{workspace_id}/dialogs",
+    response_model=list[WorkspaceDialogRead],
+)
+async def list_workspace_dialogs(
+    workspace_id: uuid.UUID,
+    user: Annotated[User, Depends(require_permission(Permission.TASK_READ))],
+    perm_svc: PermissionServiceDep,
+) -> list[WorkspaceDialogRead]:
+    """工作区级 pending 对话查询（design §4.1 / FR-5 审批中心兜底）。
+
+    URL 落地 ``/api/workspaces/{workspace_id}/dialogs``（agent router 默认 /api 前缀，
+    不挂 daemon router——其 prefix=/daemon 会变形 URL）。成员校验由
+    ``require_permission(TASK_READ)`` 从路径参数 ``{workspace_id}`` 完成（非成员 403）；
+    实现委托 ``DaemonPermissionService.list_pending_dialogs_for_workspace``（跨模块读，
+    permission_service 已有先例 import AgentSession）。只读，不触碰 PERMISSION_REQUEST
+    写链路（D-001）。
+    """
+    return await perm_svc.list_pending_dialogs_for_workspace(workspace_id, user.id)
 
 
 @router.get(

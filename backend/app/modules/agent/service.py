@@ -788,12 +788,18 @@ class AgentService:
         workspace_id: uuid.UUID,
         *,
         mode: str | None = None,
+        limit: int = 50,
     ) -> list[AgentSession]:
         """scan 真阻塞（改造点 E）：workspace 维度的 active AgentSession 列表。
 
         join AgentSession → AgentRun → AgentRunWorkspace 过滤 workspace；status 限 active
         系列（pending/active/running/reconnecting）；可选按 ``config['mode']`` 过滤
         （scan）。供前端 approvals 审批中心页聚合 scan 歧义决策（订阅各 session SSE）。
+
+        NFR-1 / R-1 / C10（task-10 性能上限）：固定按 ``created_at`` 倒序取 top N
+        （默认 50），避免大 workspace 全量 session JOIN 后再逐 session 开 SSE。limit 在
+        service 层固定（不透传 router），返回类型不变——前端 SessionPermissionPanel 另
+        有 SSE 连接数硬上限兜底，超出靠 ``GET /workspaces/{id}/dialogs`` refetch 兜底。
         """
         stmt = (
             select(AgentSession)
@@ -803,6 +809,8 @@ class AgentService:
                 AgentRunWorkspace.workspace_id == workspace_id,
                 AgentSession.status.in_(["pending", "active", "running", "reconnecting"]),
             )
+            .order_by(AgentSession.created_at.desc())
+            .limit(limit)
         )
         sessions = list((await self._session.execute(stmt)).scalars().all())
         if mode:
