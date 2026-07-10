@@ -111,9 +111,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   // task-10：workspaceId 改由 useWorkspaceContext 提供（task-04）。
-  // 变量名/类型（string | null）不变，下游 resolveHref/isActive/renderNavLink 全部无感。
-  // 进入工作区时 hook 内 effect 顺带写 workspace store 缓存（FR-01），app-shell 不直接操作 store。
-  const { workspaceId } = useWorkspaceContext();
+  // 进入工作区时 hook 内 effect 顺带写 workspace store 缓存（FR-01）。
+  // 也取 current（store 缓存）：平台页/列表页（workspaceId=null）若切换器选过工作区，
+  // 菜单用 current.id 兜底链接（修复"选了工作区菜单仍灰显"，与 switcher 修复同理）。
+  const { workspaceId, current } = useWorkspaceContext();
   const { user, accessToken, refreshToken, clear } = useSession();
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
@@ -189,11 +190,15 @@ export function AppShell({ children }: { children: ReactNode }) {
     return user.displayName || user.email;
   }, [user]);
 
+  // 有效工作区 id：优先 workspaceId（URL 当前工作区页），平台页/列表页退化用
+  // current.id（store 缓存），让菜单在平台页也能点进当前工作区模块。
+  const effectiveWorkspaceId = workspaceId ?? current?.id ?? null;
+
   const resolveHref = (menu: MenuPermissionGroup) =>
     menu.absolute
       ? menu.href
-      : workspaceId
-        ? `/workspaces/${workspaceId}/${menu.href}`
+      : effectiveWorkspaceId
+        ? `/workspaces/${effectiveWorkspaceId}/${menu.href}`
         : "/workspaces";
 
   const isActive = (menu: MenuPermissionGroup) => {
@@ -231,7 +236,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   };
 
   const renderNavLink = (menu: MenuPermissionGroup) => {
-    const hasWorkspace = !!workspaceId || menu.absolute;
+    const hasWorkspace = !!workspaceId || !!current || menu.absolute;
     const active = isActive(menu);
     const href = resolveHref(menu);
     const Icon = resolveMenuIcon(menu);
