@@ -387,3 +387,9 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 关联变更：（无）
 文件：frontend/src/components/daemon/remote-folder-picker.tsx
 结果：tsc exit 0。加 treeHeight state + resize useEffect，Tree height 动态响应视口 70vh（减去地址栏/已选/header-footer ≈ 180px，最小 200），弹窗最大占页面 70%。
+
+## ql-20260710-002-56f0 | 2026-07-10 10:03:37 | 回退 ql-20260710-001-202d（runtimes 页 daemon 安装命令端口推导修复，用户要求撤销）
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/runtimes/page.tsx, .sillyspec/docs/frontend/modules/app-pages.md
+操作：git revert 5481b858 → b40735fb（反向 commit，不改写已推送的共享历史）。page.tsx 恢复写死 :3001→:8001 端口推导（变更前原状）；app-pages 模块文档的变更索引条目 + 注意事项补充同步移除。frontend rebuild 还原部署。原 ql-20260710-001-202d 条目随 revert 一并移除，本条目为回退操作留痕。
