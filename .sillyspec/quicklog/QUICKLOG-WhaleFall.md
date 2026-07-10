@@ -393,3 +393,12 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 关联变更：（无）
 文件：frontend/src/app/(dashboard)/runtimes/page.tsx, .sillyspec/docs/frontend/modules/app-pages.md
 操作：git revert 5481b858 → b40735fb（反向 commit，不改写已推送的共享历史）。page.tsx 恢复写死 :3001→:8001 端口推导（变更前原状）；app-pages 模块文档的变更索引条目 + 注意事项补充同步移除。frontend rebuild 还原部署。原 ql-20260710-001-202d 条目随 revert 一并移除，本条目为回退操作留痕。
+
+## ql-20260710-003-34ec | 2026-07-10 10:42:17 | daemon install.sh 检测不到非 C 盘 node（cmd.exe /c 被 MSYS 路径转换破坏 + 盘符转换只处理 C:）
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/scripts/install.sh
+需求：用户本机（node 装在 E:\Software\nodejs）跑 `curl <SERVER>/daemon/install.sh | bash` 报"未检测到 node，安装中止"。
+根因（4 重，全在 git-bash 分支）：①1c 兜底 `cmd.exe /c "where node"` 的 `/c` 被 MSYS 路径转换成 `C:/`，cmd.exe 收到 `C:/ "where node"` 不执行 where、反打印 Windows 欢迎横幅→取横幅文本非路径→`[[ -f ]]` 失败；②即便 where 能跑，1c 盘符转换 `sed 's|\\|/|g'` 在 MSYS 下本身报 `unterminated 's'`（`|` 分隔符+`\\` 冲突），且只转 `C:/c:` 不转其他盘符；③用户从 cmd pipe 启动的 bash 会话 PATH 不含 node（1a `command -v` 失败），1c where 又被 MSYS 搞坏→1a/1b/1c 全失败；④ensure_path 的 `echo %PATH%`/setx 同样 `cmd.exe /c` 被 MSYS 破坏（PATH 写入也坏）。
+方案：①1c where 改 `MSYS_NO_PATHCONV=1 cmd.exe /c`；②盘符转换弃 sed，改 `tr '\134' '/'`（八进制反斜杠）+ bash `${d,,}` 小写盘符（通用任意盘符，跨平台无 sed 转义坑）；③新增 1d PowerShell 注册表 PATH(User+Machine) 兜底（读注册表不依赖当前 shell PATH，覆盖新开终端 PATH 未刷新/nvm 切换/当前 shell PATH 缺失等场景，Linux/macOS 无 PS 自动跳过）；④ensure_path 两处 `cmd.exe /c` 加 `MSYS_NO_PATHCONV=1`。WSL 分支（`/mnt/c/...` 完整路径）非 MSYS 不动。
+结果：`bash -n` SYNTAX_OK；分段验证——1c 完整链路（where→tr→bash 小写→-f）= `/e/Software/nodejs/node.exe` -f YES v24.14.1；1d 注册表查询（正常 PATH）= `E:\Software\nodejs\node.exe` 正确；grep 确认 3 处 git-bash 分支 `cmd.exe /c` 全加 `MSYS_NO_PATHCONV`，WSL 分支未动。待 backend rebuild 部署 + 端到端（curl 新 install.sh 实跑 check_node）验证。

@@ -117,18 +117,60 @@ check_node() {
     local win_node=""
     # Git Bash：cmd.exe 在 PATH
     if command -v cmd.exe >/dev/null 2>&1; then
-      win_node="$(cmd.exe /c "where node" 2>/dev/null | tr -d '\r' | head -n1 || true)"
+      # MSYS_NO_PATHCONV=1：防止 git-bash 把 /c 转换成 C:/（否则 cmd.exe 收到
+      # C:/ "where node"，where 根本不执行，反而打印 Windows 欢迎横幅）。
+      win_node="$(MSYS_NO_PATHCONV=1 cmd.exe /c "where node" 2>/dev/null | tr -d '\r' | head -n1 || true)"
     fi
     # WSL：cmd.exe 不在 PATH，用完整路径
     if [[ -z "$win_node" ]] && [[ -f "/mnt/c/Windows/System32/cmd.exe" ]]; then
       win_node="$("/mnt/c/Windows/System32/cmd.exe" /c "where node" 2>/dev/null | tr -d '\r' | head -n1 || true)"
     fi
     if [[ -n "$win_node" ]]; then
-      # C:\nvm4w\nodejs\node.exe → /c/nvm4w/nodejs/node.exe
-      win_node="$(echo "$win_node" | sed 's|\\|/|g; s|^C:|/c|; s|^c:|/c|')"
+      # C:\nvm4w\nodejs\node.exe → /c/nvm4w/nodejs/node.exe（任意盘符，小写）
+      # 用 tr 八进制 \134 替换反斜杠（sed 's|\\|/|g' 在 MSYS 下报 unterminated 's'），
+      # bash ${d,,} 小写盘符（原 sed 只转 C:/c:，非 C 盘 node 检测不到）。
+      win_node="$(printf '%s' "$win_node" | tr '\134' '/')"
+      local drive="${win_node:0:1}"; drive="${drive,,}"
+      win_node="/${drive}${win_node:2}"
       if [[ -f "$win_node" ]]; then
         NODE_BIN="$win_node"
         info "找到 node（cmd where）: $NODE_BIN"
+      fi
+    fi
+  fi
+
+  # 1d. PowerShell 查注册表 PATH（User+Machine）兜底
+  # 当当前 shell/cmd 的 PATH 不含 node（1a command -v 和 1c where 都查不到），
+  # 但系统注册表配了 node 时，从这里救（覆盖新开终端 PATH 未刷新、nvm 切换等场景）。
+  # 读注册表不依赖当前进程 PATH，是 Windows 上最权威的 node 查找方式。
+  # Linux/macOS 无 PowerShell，ps_cmd 为空自动跳过。
+  if [[ -z "$NODE_BIN" ]]; then
+    local ps_cmd=""
+    if command -v powershell.exe >/dev/null 2>&1; then
+      ps_cmd="powershell.exe"
+    elif [[ -f "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe" ]]; then
+      ps_cmd="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+    elif [[ -f "/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe" ]]; then
+      ps_cmd="/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+    fi
+    if [[ -n "$ps_cmd" ]]; then
+      local reg_node
+      reg_node="$(MSYS_NO_PATHCONV=1 "$ps_cmd" -NoProfile -Command '
+$ErrorActionPreference="SilentlyContinue"
+$found=$null
+foreach($base in @([Environment]::GetEnvironmentVariable("PATH","User"),[Environment]::GetEnvironmentVariable("PATH","Machine"))){
+  foreach($p in $base -split ";"){ if($p -and (Test-Path -LiteralPath(join-path $p "node.exe"))){ $found=join-path $p "node.exe"; break } }
+  if($found){break}
+}
+$found' 2>/dev/null | tr -d '\r' | head -n1 || true)"
+      if [[ -n "$reg_node" ]]; then
+        reg_node="$(printf '%s' "$reg_node" | tr '\134' '/')"
+        local reg_drive="${reg_node:0:1}"; reg_drive="${reg_drive,,}"
+        reg_node="/${reg_drive}${reg_node:2}"
+        if [[ -f "$reg_node" ]]; then
+          NODE_BIN="$reg_node"
+          info "找到 node（注册表 PATH）: $NODE_BIN"
+        fi
       fi
     fi
   fi
@@ -348,10 +390,10 @@ ensure_path() {
     if [[ -n "$win_bin_for_path" ]]; then
       # 用 cmd.exe setx 永久写入用户 PATH（幂等：先检查是否已含）
       if command -v cmd.exe >/dev/null 2>&1; then
-        cmd.exe /c "echo %PATH%" 2>/dev/null | tr -d '\r' | grep -qiF "$win_bin_for_path" || {
+        MSYS_NO_PATHCONV=1 cmd.exe /c "echo %PATH%" 2>/dev/null | tr -d '\r' | grep -qiF "$win_bin_for_path" || {
           info "将 $win_bin_for_path 加入 Windows 用户 PATH"
           # setx 设置用户环境变量（新开 cmd/PowerShell 生效）
-          cmd.exe /c "setx PATH \"%PATH%;${win_bin_for_path}\"" >/dev/null 2>&1 || warn "setx PATH 失败（可能权限不足），请手动添加"
+          MSYS_NO_PATHCONV=1 cmd.exe /c "setx PATH \"%PATH%;${win_bin_for_path}\"" >/dev/null 2>&1 || warn "setx PATH 失败（可能权限不足），请手动添加"
           ok "Windows PATH 已更新（新开终端生效）"
         }
       elif [[ -f "/mnt/c/Windows/System32/cmd.exe" ]]; then
