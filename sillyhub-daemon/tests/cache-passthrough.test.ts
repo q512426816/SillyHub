@@ -30,6 +30,14 @@ vi.mock('../src/adapters/index.js', () => ({
   getBackend: vi.fn((_provider: string) => mockAdapter),
 }));
 
+// ql-20260710 预存债修复：task-runner.ts:468（2026-07-08）spawn 前调真实
+// linkSkillsToWorkdir，本机 ~/.sillyhub/daemon/skills/ 有 20+ skill 目录会真 copy 文件，
+// 把 spawn 拖到 setImmediate 之后很久 → fake child exit 事件丢失 → runPromise 永等 → 30s
+// 超时。mock 掉与 stats-passthrough/daemon-parity 等 14 个同款测试一致。
+vi.mock('../src/skill-manager.js', () => ({
+  linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })),
+}));
+
 import { spawn } from 'node:child_process';
 import { getBackend } from '../src/adapters/index.js';
 import {

@@ -21,6 +21,14 @@
 // ws TASK_AVAILABLE → claimLease → _executeTask → _startInteractiveSession。
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+
+// ql-20260710 预存债：daemon.ts:2747 _startInteractiveSession 调真实 linkSkillsToWorkdir + mkdir，
+// 拖慢 create 调用到 ~44ms > sleep(30) 边界致 TC1/TC3/TC3b flaky。mock 掉与 cache-passthrough
+// 等集成测试一致。
+vi.mock('../src/skill-manager.js', () => ({
+  linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })),
+}));
+
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -68,6 +76,7 @@ function createMockClient() {
     leaseHeartbeat: vi.fn(async () => ({})),
     completeLease: vi.fn(async () => ({})),
     getPendingLeases: vi.fn(async () => []),
+    getPendingChangeWrites: vi.fn(async () => []), // ql-20260710：_pollLoop 调，缺失抛 not a function（catch 成 debug 噪音）
     getExecutionContext: vi.fn(async () => ({ agent_run_id: 'run-default', claude_md: '' })),
     notifyRunResult: vi.fn(async () => ({})),
     submitMessages: vi.fn(async () => ({})),
@@ -256,7 +265,10 @@ describe('task-06: daemon Codex interactive 接入', () => {
       runId: 'run-c1',
       provider: 'codex',
     });
-    await sleep(30);
+    // ql-20260710：固定 sleep(30) 改轮询等 create 被调（create 真实 ~44ms，sleep(30) 边界 flaky）
+    for (let i = 0; i < 200 && (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls.length === 0; i++) {
+      await sleep(10);
+    }
 
     expect(sessionManager.create).toHaveBeenCalledTimes(1);
     const createInput = sessionManager.create.mock.calls[0]![0] as {
@@ -316,7 +328,10 @@ describe('task-06: daemon Codex interactive 接入', () => {
       runId: 'run-c3',
       provider: 'claude',
     });
-    await sleep(30);
+    // ql-20260710：固定 sleep(30) 改轮询等 create 被调（create 真实 ~44ms，sleep(30) 边界 flaky）
+    for (let i = 0; i < 200 && (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls.length === 0; i++) {
+      await sleep(10);
+    }
 
     expect(sessionManager.create).toHaveBeenCalledTimes(1);
     const createInput = sessionManager.create.mock.calls[0]![0] as {
@@ -345,7 +360,10 @@ describe('task-06: daemon Codex interactive 接入', () => {
       runId: 'run-c3b',
       // provider 缺省
     });
-    await sleep(30);
+    // ql-20260710：固定 sleep(30) 改轮询等 create 被调（create 真实 ~44ms，sleep(30) 边界 flaky）
+    for (let i = 0; i < 200 && (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls.length === 0; i++) {
+      await sleep(10);
+    }
 
     expect(sessionManager.create).toHaveBeenCalledTimes(1);
     const createInput = sessionManager.create.mock.calls[0]![0] as {

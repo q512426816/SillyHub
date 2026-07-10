@@ -2274,11 +2274,15 @@ export class SessionManager {
           if (startUsage && typeof startUsage['input_tokens'] === 'number') {
             buf.sessionInputTokens += startUsage['input_tokens'] as number;
           }
+          // ql-20260710-001：cache_*_input_tokens 是**会话级累计快照**（非 per-call
+          // 增量），改 replace 语义（对齐 batch stream-json.ts:552/1143-1148）。原 +=
+          // 会被下方 message_delta 的 delta 再叠加一次 → 翻倍（见
+          // session-manager-usage-cache.test.ts）。
           if (startUsage && typeof startUsage['cache_read_input_tokens'] === 'number') {
-            buf.sessionCacheReadTokens += startUsage['cache_read_input_tokens'] as number;
+            buf.sessionCacheReadTokens = startUsage['cache_read_input_tokens'] as number;
           }
           if (startUsage && typeof startUsage['cache_creation_input_tokens'] === 'number') {
-            buf.sessionCacheCreationTokens += startUsage['cache_creation_input_tokens'] as number;
+            buf.sessionCacheCreationTokens = startUsage['cache_creation_input_tokens'] as number;
           }
           // 新 API call 开始，重置 per-call output tracker
           buf.lastCallOutputTokens = 0;
@@ -2326,19 +2330,16 @@ export class SessionManager {
           buf.sessionOutputTokens += outDelta;
           buf.lastCallOutputTokens = callOut;
 
-          // cache_read delta (message_delta may update cache_read cumulative for this call)
-          const callCacheRead = typeof u['cache_read_input_tokens'] === 'number'
-            ? (u['cache_read_input_tokens'] as number) : 0;
-          const cacheReadDelta = Math.max(0, callCacheRead - buf.lastCallCacheReadTokens);
-          buf.sessionCacheReadTokens += cacheReadDelta;
-          buf.lastCallCacheReadTokens = callCacheRead;
-
-          // cache_creation delta
-          const callCacheCreate = typeof u['cache_creation_input_tokens'] === 'number'
-            ? (u['cache_creation_input_tokens'] as number) : 0;
-          const cacheCreateDelta = Math.max(0, callCacheCreate - buf.lastCallCacheCreationTokens);
-          buf.sessionCacheCreationTokens += cacheCreateDelta;
-          buf.lastCallCacheCreationTokens = callCacheCreate;
+          // ql-20260710-001：cache 两维 replace（会话级累计快照，取最新 cumulative 值覆盖），
+          // 不再 delta 累加——message_start 已 replace 设值，此处再 delta 会翻倍。仅当
+          // message_delta 携带该字段时覆盖；缺失则保留 message_start 的值不变。对齐
+          // batch stream-json.ts:552（message_delta replace 而非 += delta）。
+          if (typeof u['cache_read_input_tokens'] === 'number') {
+            buf.sessionCacheReadTokens = u['cache_read_input_tokens'] as number;
+          }
+          if (typeof u['cache_creation_input_tokens'] === 'number') {
+            buf.sessionCacheCreationTokens = u['cache_creation_input_tokens'] as number;
+          }
 
           // pendingUsage 用 session 级累积值
           buf.pendingUsage = {

@@ -242,8 +242,10 @@ describe('A-09: 事件转发 submitMessages 精确参数（对齐 Python test_ev
     fakeChild._emitExit(0);
     await p;
 
-    expect(client.submitMessages).toHaveBeenCalledTimes(1);
-    const callArgs = (client.submitMessages as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    // ql-20260710 预存债：task-runner.ts:474（08371b15）spawn 前 user_input prompt 日志多 1 次，
+    // calls[0]=user_input，text 事件在 calls[1]。
+    expect(client.submitMessages).toHaveBeenCalledTimes(2);
+    const callArgs = (client.submitMessages as ReturnType<typeof vi.fn>).mock.calls[1]!;
     // submitMessages(leaseId, claimToken, agentRunId, messages)
     expect(callArgs[0]).toBe('lease-evt');
     expect(callArgs[1]).toBe('tok-evt');

@@ -308,8 +308,9 @@ describe('A1 daemon-parity: submit_messages payload 与 SERVER _event_to_message
     fakeChild._emitExit(0);
     await p;
 
-    expect(submitMessages).toHaveBeenCalledTimes(1);
-    const call = submitMessages.mock.calls[0]!;
+    // ql-20260710：user_input prompt 日志占 calls[0]（task-runner.ts:474），assistant text 在 calls[1]
+    expect(submitMessages).toHaveBeenCalledTimes(2);
+    const call = submitMessages.mock.calls[1]!;
     // 签名：(leaseId, claimToken, agentRunId, messages)
     expect(call[0]).toBe('lease-parity');
     expect(call[1]).toBe('tok-parity');
@@ -335,8 +336,9 @@ describe('A1 daemon-parity: submit_messages payload 与 SERVER _event_to_message
     fakeChild._emitExit(0);
     await p;
 
-    expect(submitMessages).toHaveBeenCalledTimes(1);
-    const messages = submitMessages.mock.calls[0]![3] as Record<string, unknown>[];
+    // ql-20260710：user_input 占 calls[0]，tool_use 在 calls[1]
+    expect(submitMessages).toHaveBeenCalledTimes(2);
+    const messages = submitMessages.mock.calls[1]![3] as Record<string, unknown>[];
     // tool_use 1 event → 2 messages（[TOOL_USE] stdout + tool_call JSON）
     expect(messages.length).toBe(2);
     // 第一条：stdout 文本 [TOOL_USE] Bash: ls -la，携带 call_id（业务字段注入首条）
@@ -367,10 +369,10 @@ describe('A1 daemon-parity: submit_messages payload 与 SERVER _event_to_message
     fakeChild._emitExit(0);
     await p;
 
-    // 两次 submitMessages：tool_use 行 + tool_result 行（各一行触发一次）
-    expect(submitMessages).toHaveBeenCalledTimes(2);
-    const toolUseMsgs = submitMessages.mock.calls[0]![3] as Record<string, unknown>[];
-    const toolResultMsgs = submitMessages.mock.calls[1]![3] as Record<string, unknown>[];
+    // ql-20260710：user_input（calls[0]）+ tool_use（calls[1]）+ tool_result（calls[2]）= 3 次
+    expect(submitMessages).toHaveBeenCalledTimes(3);
+    const toolUseMsgs = submitMessages.mock.calls[1]![3] as Record<string, unknown>[];
+    const toolResultMsgs = submitMessages.mock.calls[2]![3] as Record<string, unknown>[];
 
     // tool_use 第一条 message（stdout 文本）携带 call_id
     expect(toolUseMsgs[0]).toHaveProperty('event_type', 'tool_use');
@@ -399,8 +401,10 @@ describe('A1 daemon-parity: submit_messages payload 与 SERVER _event_to_message
     fakeChild._emitExit(0);
     const result = await p;
 
-    // result 行不产 submitMessages（parityParse 对 result 返回 null）
-    expect(submitMessages).not.toHaveBeenCalled();
+    // ql-20260710：result 行不产事件，但 user_input prompt 日志仍发 1 次
+    expect(submitMessages).toHaveBeenCalledTimes(1);
+    const _resultMsgs = submitMessages.mock.calls[0]![3] as Record<string, unknown>[];
+    expect(_resultMsgs[0]!['event_type']).toBe('user_input');
     // session_id 由 _extractSessionId 提取（task-runner.ts:866）
     expect(result.sessionId).toBe('sess_abc123');
   });
@@ -417,9 +421,9 @@ describe('A1 daemon-parity: submit_messages payload 与 SERVER _event_to_message
     fakeChild._emitExit(0);
     await p;
 
-    // 单行多 block → 一次 submitMessages，messages 数组含 3 条（text 1 + tool_use 2）
-    expect(submitMessages).toHaveBeenCalledTimes(1);
-    const messages = submitMessages.mock.calls[0]![3] as Record<string, unknown>[];
+    // ql-20260710：user_input 占 calls[0]，多 block 在 calls[1]，messages 数组含 3 条（text 1 + tool_use 2）
+    expect(submitMessages).toHaveBeenCalledTimes(2);
+    const messages = submitMessages.mock.calls[1]![3] as Record<string, unknown>[];
     expect(messages.length).toBe(3);
     // 第一条：text 事件 → [ASSISTANT] 前缀
     expect(messages[0]).toHaveProperty('event_type', 'text');
@@ -473,7 +477,9 @@ describe('A1 daemon-parity: submit_messages payload 与 SERVER _event_to_message
     mockSpawnReturn(fakeChild);
     const submitMessages = vi
       .fn()
-      // 第 1 次拒绝（模拟 publish 失败），第 2 次成功
+      // ql-20260710：user_input 占第 1 次，让前两次都拒绝（user_input + 第一行 assistant），
+      // 第三次（第二行 assistant）成功，验证单次失败不中断整体
+      .mockRejectedValueOnce(new Error('redis down'))
       .mockRejectedValueOnce(new Error('redis down'))
       .mockResolvedValueOnce({ status: 'ok' });
     const client = makeMockClient({ submitMessages });
@@ -498,8 +504,8 @@ describe('A1 daemon-parity: submit_messages payload 与 SERVER _event_to_message
     fakeChild._emitExit(0);
     const result = await p;
 
-    // 第 1 次 submit 失败被 warn 吞掉，第 2 次仍执行 → 任务终态 completed
-    expect(submitMessages).toHaveBeenCalledTimes(2);
+    // ql-20260710：user_input + 2 行 assistant = 3 次；前两次失败被 warn 吞，第三次成功 → completed
+    expect(submitMessages).toHaveBeenCalledTimes(3);
     expect(result.status).toBe('completed');
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('event_forward_failed'),
@@ -522,8 +528,10 @@ describe('A1 daemon-parity: submit_messages payload 与 SERVER _event_to_message
     fakeChild._emitExit(0);
     const result = await p;
 
-    // 空 content 被丢弃 → messages 数组空 → 不调 submitMessages
-    expect(submitMessages).not.toHaveBeenCalled();
+    // ql-20260710：空 content 被丢弃无 text 事件，但 user_input prompt 日志仍发 1 次
+    expect(submitMessages).toHaveBeenCalledTimes(1);
+    const _emptyMsgs = submitMessages.mock.calls[0]![3] as Record<string, unknown>[];
+    expect(_emptyMsgs[0]!['event_type']).toBe('user_input');
     expect(result.status).toBe('completed');
   });
 });

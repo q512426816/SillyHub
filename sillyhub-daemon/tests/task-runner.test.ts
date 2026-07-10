@@ -339,7 +339,10 @@ describe('AC-02：R-04 stdout 背压（readline 逐行不积压）', () => {
     const submitCalls: string[] = [];
     const client = makeMockClient({
       submitMessages: vi.fn(async (_l: string, _t: string, _r: string, msgs: Record<string, unknown>[]) => {
-        submitCalls.push(msgs[0]!.content as string);
+        // ql-20260710：跳过 user_input prompt 日志（task-runner.ts:474），只收集 text 事件
+        if ((msgs[0]!['event_type'] as string) !== 'user_input') {
+          submitCalls.push(msgs[0]!.content as string);
+        }
         // 模拟 submit 慢（验证背压：慢 submit 不导致后续行积压错序）
         await new Promise((r) => setTimeout(r, 5));
       }),
@@ -350,6 +353,16 @@ describe('AC-02：R-04 stdout 背压（readline 逐行不积压）', () => {
     const lease = makeLease({ prompt: 'go' });
     const p = runner.runLease(lease);
     await waitForSpawn();
+    // ql-20260710 死锁根因修复：case 8 慢 submit（setTimeout 5ms）经 task-runner.ts:479
+    // user_input await 阻塞 spawn（user_input 在 spawn 前）。waitForSpawn 用 setImmediate
+    // 轮询（fake-child.ts:129），比 user_input 的 setTimeout macrotask 快——1000 次在 <5ms
+    // 内跑完时 spawn 还没调（user_input 仍 await）→ waitForSpawn 超时返回 → emitExit 时
+    // :1083 exit listener 没注册 → emit('exit') 触发 0 listener → 之后 spawn + :1083 注册
+    // 但 emit 已过 → :1244 await child.once('exit') 永等（exit 是过去事件）→ 30s 超时。
+    // 修：emitExit 前轮询等 :1083 exit listener 真注册（user_input settle + spawn 完成）。
+    for (let i = 0; i < 200 && fakeChild.listenerCount('exit') === 0; i++) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
     fakeChild._emitLines(['line-0', 'line-1', 'line-2', 'line-3', 'line-4']);
     fakeChild._emitExit(0);
     await p;
@@ -376,7 +389,10 @@ describe('AC-02：R-04 stdout 背压（readline 逐行不积压）', () => {
 
     expect(result.status).toBe('completed');
     expect(result.success).toBe(true);
-    expect(client.submitMessages).not.toHaveBeenCalled();
+    // ql-20260710 预存债：user_input prompt 日志仍发 1 次（空 stdout 无 text 事件转发）
+    expect(client.submitMessages).toHaveBeenCalledTimes(1);
+    const _emptyMsgs = (client.submitMessages as ReturnType<typeof vi.fn>).mock.calls[0]![3] as Record<string, unknown>[];
+    expect(_emptyMsgs[0]!['event_type']).toBe('user_input');
     expect(result.output).toBe('');
   });
 });
@@ -731,7 +747,7 @@ describe('错误传播（顶层 try/catch 映射 failed）', () => {
     const result = await p;
 
     expect(result.status).toBe('completed'); // 不被坏行影响
-    expect(client.submitMessages).toHaveBeenCalledTimes(1); // 仅 good
+    expect(client.submitMessages).toHaveBeenCalledTimes(2); // user_input + good（ql-20260710 user_input 日志）
   });
 
   it('submitMessages 失败不中断（对齐 Python test_submit_messages_failure_does_not_crash）', async () => {

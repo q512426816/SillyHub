@@ -133,8 +133,9 @@ describe('task-13: daemon onPolicyUpdate → PolicyCache', () => {
       resolveRealPath('/work/a'),
       resolveRealPath('/work/b'),
     ]);
-    // PolicyCache 内部 version 从 1 起（首次 set → version=1）
-    expect(policy?.version).toBe(1);
+    // ql-20260710 预存债：register 兜底 _syncPolicyCache（daemon.ts:982，b42cd130）在
+    // buildAndStart 阶段预填 1 次 → version 基线 1；onPolicyUpdate 写 1 次 → version=2。
+    expect(policy?.version).toBe(2);
   });
 
   it('R-07 version 去重：先收 version=5 再收 version=3，后者不覆盖', async () => {
@@ -150,8 +151,9 @@ describe('task-13: daemon onPolicyUpdate → PolicyCache', () => {
     const policy = policyCache.get('srv-rt-claude');
     // 仍是 rootsA（version=5 那次的值）
     expect(policy?.allowedRoots).toEqual([resolveRealPath('/work/A')]);
-    // PolicyCache 只被 set 了一次 → version=1（去重在 daemon 层，未透传到 PolicyCache）
-    expect(policy?.version).toBe(1);
+    // ql-20260710 预存债：register 预填 1 + version=5 写入 1 = version=2；
+    // version=3 被去重跳过（去重逻辑正确，仅基线多 1）。
+    expect(policy?.version).toBe(2);
   });
 
   it('R-07 version 单调：1 → 2 → 3 都写入，version=2 重复忽略', async () => {
@@ -168,8 +170,8 @@ describe('task-13: daemon onPolicyUpdate → PolicyCache', () => {
     const policy = policyCache.get('srv-rt-claude');
     // 最新值 /v3（/v2-dup 被去重跳过）
     expect(policy?.allowedRoots).toEqual([resolveRealPath('/v3')]);
-    // PolicyCache.set 被调 3 次（v1/v2/v3）→ version=3
-    expect(policy?.version).toBe(3);
+    // ql-20260710 预存债：register 预填 1 + v1/v2/v3 各写 1 = version=4；v2-dup 被去重跳过。
+    expect(policy?.version).toBe(4);
   });
 
   it('per-runtime 隔离：不同 rid 的 version 独立去重', async () => {
