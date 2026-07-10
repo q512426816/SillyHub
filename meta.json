@@ -1,0 +1,11 @@
+{
+  "name_zh": "worktree 元数据",
+  "changeName": "2026-07-10-remove-server-local-workspace-mode",
+  "branch": "sillyspec/2026-07-10-remove-server-local-workspace-mode",
+  "baseBranch": "main",
+  "baseHash": "f94e12606458f85762cb28fab5b232f71cebf8fa",
+  "worktreePath": "C:\\Users\\qinyi\\IdeaProjects\\multi-agent-platform\\.sillyspec\\.runtime\\worktrees\\2026-07-10-remove-server-local-workspace-mode",
+  "mode": "worktree",
+  "createdAt": "2026-07-10T16:19:32.126Z",
+  "provisioning": true
+}
