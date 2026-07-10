@@ -357,6 +357,14 @@ export type DispatchResult = {
   run_id?: string | null;
   started_at?: string | null;
   finished_at?: string | null;
+  /** P3 driver gate pilot：gate 客观核验态（pending/running/decided/failed，nullable brownfield） */
+  gate_status?: string | null;
+  /** P3 driver gate pilot：gate 结果（{exit_code, errors, raw_envelope}，nullable） */
+  gate_result?: {
+    exit_code: number;
+    errors: string[];
+    raw_envelope: Record<string, unknown>;
+  } | null;
 } | null;
 
 /** Agent 状态响应 */

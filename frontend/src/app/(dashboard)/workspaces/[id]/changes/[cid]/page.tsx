@@ -716,31 +716,33 @@ export default function ChangeDetailPage({ params }: Props) {
           >
               <div className="flex items-center gap-2">
                 <h2 className="text-xs font-medium">智能体执行日志</h2>
-                {/* task-12 / design §5.7：gate_status 徽标（SSE gate_status_changed 实时更新）。
-                    gate_status pending/running→客观核验中；decided+无 errors→已通过；
-                    decided+errors / failed→核验失败（附 errors_summary 摘要）。 */}
-                {gateStatus?.gate_status && (
-                  <Badge
-                    variant={
-                      gateStatus.gate_status === "decided" && !gateStatus.errors_summary
-                        ? "success"
-                        : gateStatus.gate_status === "failed" || !!gateStatus.errors_summary
-                          ? "destructive"
-                          : "outline"
-                    }
-                    className={
-                      gateStatus.gate_status === "pending" || gateStatus.gate_status === "running"
-                        ? "animate-pulse"
-                        : ""
-                    }
-                  >
-                    {gateStatus.gate_status === "decided" && !gateStatus.errors_summary
-                      ? "✓ 已通过"
-                      : gateStatus.gate_status === "failed" || !!gateStatus.errors_summary
-                        ? "✗ 核验失败"
-                        : "客观核验中…"}
-                  </Badge>
-                )}
+                {/* task-12 / design §5.7：gate_status 徽标。数据源合并——SSE gate_status_changed
+                    （实时优先）回退 agentStatus.last_dispatch.gate_status（初始/刷新，gate 已
+                    decided 不再发 SSE 时兜底）。pending/running→客观核验中；decided+无 errors→
+                    已通过；decided+errors / failed→核验失败（附 errors 摘要）。 */}
+                {(() => {
+                  const gs =
+                    gateStatus?.gate_status ??
+                    agentStatus?.last_dispatch?.gate_status ??
+                    null;
+                  if (!gs) return null;
+                  const errs =
+                    gateStatus?.errors_summary ??
+                    (agentStatus?.last_dispatch?.gate_result?.errors?.length
+                      ? String(agentStatus.last_dispatch.gate_result.errors).slice(0, 500)
+                      : null);
+                  const isRunning = gs === "pending" || gs === "running";
+                  const isPassed = gs === "decided" && !errs;
+                  const isFailed = gs === "failed" || (gs === "decided" && !!errs);
+                  return (
+                    <Badge
+                      variant={isPassed ? "success" : isFailed ? "destructive" : "outline"}
+                      className={isRunning ? "animate-pulse" : ""}
+                    >
+                      {isPassed ? "✓ 已通过" : isFailed ? "✗ 核验失败" : "客观核验中…"}
+                    </Badge>
+                  );
+                })()}
                 <span className="text-[11px] text-muted-foreground">
                   {agentStatus?.last_dispatch?.status ? ` · ${agentStatus.last_dispatch.status}` : ""}
                 </span>
