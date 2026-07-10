@@ -37,6 +37,14 @@ async def test_auto_dispatch_creates_next_run():
     )
 
     mock_session = AsyncMock(spec=AsyncSession)
+    # task-08 回归适配：auto_dispatch_next_step 现在调 _read_latest_gate_result
+    # （session.execute().scalars().first()）。mock 链返回 None（无 completed run →
+    # gate_result None → 非 verify stage fallback 声明态，不阻断原 stops 逻辑）。
+    mock_session.execute = AsyncMock(
+        return_value=MagicMock(
+            scalars=MagicMock(return_value=MagicMock(first=MagicMock(return_value=None)))
+        )
+    )
     mock_change = MagicMock()
     mock_change.stages = {}
     mock_change.human_gate = "none"
@@ -79,6 +87,14 @@ async def test_auto_dispatch_stops_on_stage_completed():
     )
 
     mock_session = AsyncMock(spec=AsyncSession)
+    # task-08 回归适配：auto_dispatch_next_step 现在调 _read_latest_gate_result
+    # （session.execute().scalars().first()）。mock 链返回 None（无 completed run →
+    # gate_result None → 非 verify stage fallback 声明态，不阻断原 stops 逻辑）。
+    mock_session.execute = AsyncMock(
+        return_value=MagicMock(
+            scalars=MagicMock(return_value=MagicMock(first=MagicMock(return_value=None)))
+        )
+    )
     mock_change = MagicMock()
     mock_change.stages = {}
     mock_change.human_gate = "none"

@@ -8,6 +8,7 @@ table.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from dataclasses import dataclass
@@ -16,15 +17,21 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.core.db import get_session_factory
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.modules.agent.model import AgentRun, AgentRunLog
 from app.modules.agent.tool_kind import classify_tool_kind
+from app.modules.change import dispatch as _change_dispatch
+from app.modules.change.dispatch import (
+    SillySpecStageDispatchService,
+    _run_gate_via_delegate,
+)
 from app.modules.daemon.lease.service import DaemonAgentRunNotFound
 from app.modules.daemon.model import DaemonTaskLease
 from app.modules.daemon.session.service import TERMINAL_TURN_STATUSES
@@ -195,6 +202,9 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
 class RunSyncService:
     """AgentRun 状态同步子 service。构造接 AsyncSession。"""
 
+    # 后台任务引用集 — 防止 asyncio.Task 被 GC 回收
+    _background_tasks: set[asyncio.Task] = set()
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         # 跨子域辅助：W4 早于 W5(session)/W6(lease)，_get_lease_and_verify_token
@@ -202,6 +212,42 @@ class RunSyncService:
         # 引用反向委托（design §7.2），task-05/06 落位后 facade 保留委托，本引用
         # 继续工作（委托到对应子 service），不耦合 Wave 顺序。
         self._facade: DaemonService | None = None
+
+    # ------------------------------------------------------------------
+    # Background task lifecycle helpers（H4 / R5，逐字对齐 agent/service.py:347-386）
+    # task-05（gate enqueue）/ task-07（gate 任务派发）将复用本能力；
+    # 本 task 仅提取 helper，不接通调用点、不实现 gate 业务。
+    # ------------------------------------------------------------------
+
+    def _fire_background_task(
+        self,
+        coro,
+        *,
+        workspace_id: uuid.UUID | None = None,
+        run_id: uuid.UUID | None = None,
+    ) -> asyncio.Task:
+        """Create a background task and hold a strong reference to prevent GC."""
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._on_background_task_done)
+        log.info(
+            "background_task_fired",
+            task_id=id(task),
+            workspace_id=str(workspace_id),
+            run_id=str(run_id),
+        )
+        return task
+
+    @staticmethod
+    def _on_background_task_done(task: asyncio.Task) -> None:
+        """Remove task from the tracking set and surface exceptions."""
+        RunSyncService._background_tasks.discard(task)
+        try:
+            exc = task.exception()
+        except (asyncio.InvalidStateError, asyncio.CancelledError):
+            return
+        if exc is not None:
+            log.exception("background_task_failed", task_id=id(task), exc_info=exc)
 
     # ── public ────────────────────────────────────────────────────────────
 
@@ -842,6 +888,13 @@ class RunSyncService:
                 )
 
         agent_run.finished_at = now
+        # task-05 / M2（design §5.1 / §170）：verify 等 stage dispatch（change_id
+        # 非空）成功完成时，gate_status='pending' 随终态一起 commit 落库（与
+        # status/finished_at 同一 commit，gate 任务读到一致快照）。change_id=None
+        # 的对话 turn 或 failed run 不进入 gate 流程（守门）。gate 决策由 task-07
+        # 后台任务 cas running→decided/failed 推进。
+        if agent_run.change_id is not None and agent_run.status == "completed":
+            agent_run.gate_status = "pending"
         # SDKResultSuccess 透传：usage / cost / duration（None 不覆盖 AgentRun 原值，
         # daemon 老版本不传这些字段时保持兼容）。对应 AgentRun.{total_cost_usd,
         # num_turns,duration_ms,duration_api_ms,input_tokens,output_tokens}，
@@ -875,6 +928,28 @@ class RunSyncService:
         self._session.add(agent_run)
         await self._session.commit()
         await self._session.refresh(agent_run)
+
+        # task-05 / design §5.1：commit 后 enqueue gate 决策后台任务并立即返回 HTTP
+        # （<30s，daemon notifyRunResult 不重试）。仅 change_id 非空 + completed 场景
+        # enqueue（gate 只核验完成的 verify turn；对话 turn/failed 不进 gate）。不 await
+        # gate 任务 —— _fire_background_task（task-03 / H4）创建 asyncio.Task 持强引用
+        # 防静默 GC，enqueue 失败异常由 add_done_callback 兜底，不影响已 commit 终态行。
+        # workspace_id 从 Change.workspace_id 推导（对齐 _trigger_stage_completion_callback
+        # :1029 的稳定来源；AgentSession.workspace_id 亦可选，但 Change 更直接且 stage
+        # run 必有 change）。task-07（Wave 3）替换 _run_gate_decision_task stub 实现真实
+        # gate 决策（H1 独立 session + R3 cas + 跑 gate + 存 result + H2 内联 sync/auto_dispatch）。
+        if agent_run.change_id is not None and agent_run.status == "completed":
+            gate_workspace_id = await self._resolve_gate_workspace_id(agent_run)
+            if gate_workspace_id is not None:
+                self._fire_background_task(
+                    self._run_gate_decision_task(
+                        agent_run_id=agent_run.id,
+                        workspace_id=gate_workspace_id,
+                        change_id=agent_run.change_id,
+                    ),
+                    workspace_id=gate_workspace_id,
+                    run_id=agent_run.id,
+                )
 
         # Publish terminal event so SSE stream (task-06) emits turn_completed.
         try:
@@ -933,6 +1008,312 @@ class RunSyncService:
             subtype=subtype,
         )
         return agent_run
+
+    # ── Driver Gate enqueue helpers（task-05 / design §5.1） ─────────────────
+
+    async def _resolve_gate_workspace_id(self, agent_run: AgentRun) -> uuid.UUID | None:
+        """推导 gate 任务所需 workspace_id（task-05）。
+
+        稳定来源优先级（design §5.1）：
+          1. Change.workspace_id —— stage run 必有 change，且与
+             _trigger_stage_completion_callback:1029 同一来源，一致。
+          2. AgentSession.workspace_id（D-003@v1 change-scoped binding）兜底。
+        失败返回 None（caller 已守门 change_id 非空，此处只兜底查不到的极端），
+        不抛 —— gate enqueue 不得影响已 commit 的终态行（H4 守门）。
+        """
+        from app.modules.change.model import Change
+
+        try:
+            change = await self._session.get(Change, agent_run.change_id)
+            if change is not None:
+                return change.workspace_id
+        except Exception as exc:
+            log.warning(
+                "gate_resolve_workspace_change_failed",
+                run_id=str(agent_run.id),
+                change_id=str(agent_run.change_id),
+                error=str(exc),
+            )
+
+        if agent_run.agent_session_id is not None:
+            from app.modules.agent.model import AgentSession
+
+            try:
+                session = await self._session.get(AgentSession, agent_run.agent_session_id)
+                if session is not None:
+                    return session.workspace_id
+            except Exception as exc:
+                log.warning(
+                    "gate_resolve_workspace_session_failed",
+                    run_id=str(agent_run.id),
+                    session_id=str(agent_run.agent_session_id),
+                    error=str(exc),
+                )
+        return None
+
+    async def _run_gate_decision_task(
+        self,
+        *,
+        agent_run_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+    ) -> None:
+        """Gate 决策后台任务（task-07，design §5.2 / §7 / §7.5）。
+
+        Wave 2 task-05 仅接通 close_interactive_run 的 enqueue 调用点；本方法为
+        task-07 的真实逻辑：在独立 session（H1）里 cas 抢占 gate_status pending→running
+        （R3 防双发）→ 跑 sillyspec gate verify（task-06 _run_gate_via_delegate →
+        task-01 HostFsDelegate.run_command）→ 存 gate_result + decided → 内联推进
+        stage（H2 sync_stage_status + auto_dispatch_next_step，用 gate_session，**不调**
+        _trigger_stage_completion_callback）→ 异常 fail-loud（failed + exit 2）。
+
+        四条硬约束（design §10 R5-R7）：
+          - **H1**：``async with get_session_factory()() as gate_session`` 独立 session。
+            RunSyncService.__init__ 只接注入 session 无 session_factory 字段，后台任务
+            生命周期独立于 HTTP 请求 session（R6）。全程禁用 ``self._session``。
+          - **R3**：``UPDATE ... WHERE gate_status='pending'`` 原子 cas，
+            ``result.rowcount == 0`` 直接 return（防 reconcile + 原任务 double-enqueue，
+            R10）。生产 PG 原子可靠；SQLite 测试用真 UPDATE 验 rowcount（R9）。
+          - **H2**：``SillySpecStageDispatchService(gate_session)`` 构造让内联调用用
+            gate_session；绝不调 ``_trigger_stage_completion_callback``（它写死
+            ``self._session``，gate 任务没有它，R7）。
+          - **H4**：由 task-05 close_interactive_run 经 ``_fire_background_task`` enqueue
+            （强引用 ``_background_tasks`` set 防 GC + ``add_done_callback`` 取异常防静默）。
+
+        失败语义（design §7 异常分支）：任何异常 → ``gate_status='failed'`` +
+        ``gate_result={'exit_code': 2, 'errors': [str(exc)], 'raw_envelope': {}}`` + commit
+        （fail-loud 不降级，不吞异常）。auto_dispatch_next_step 据 gate_result.exit_code
+        决策（0 推进 / 1 打回 / 2 卡住，design §5.4）。
+        """
+        from app.modules.change.model import Change
+        from app.modules.workspace.model import Workspace
+
+        # H1：独立 session（get_session_factory），禁用 self._session。后台任务生命
+        # 周期独立于 HTTP 请求；conftest._redirect_session_factory 让测试同引擎。
+        session_factory = get_session_factory()
+        async with session_factory() as gate_session:
+            try:
+                # R3：cas gate_status pending→running（原子防 double-enqueue）。
+                # rowcount==0 表示已被抢（reconcile + 原任务并发 / 已 decided/failed），
+                # 直接 return 不跑 gate（design §7.5 生命周期契约表 + R10）。
+                cas_stmt = (
+                    update(AgentRun)
+                    .where(
+                        AgentRun.id == agent_run_id,
+                        AgentRun.gate_status == "pending",
+                    )
+                    .values(gate_status="running")
+                )
+                cas_result = await gate_session.execute(cas_stmt)
+                await gate_session.commit()
+                if cas_result.rowcount == 0:
+                    log.info(
+                        "gate_decision_task_cas_miss",
+                        agent_run_id=str(agent_run_id),
+                    )
+                    return
+
+                # 取 workspace / change（gate 命令需 change.name + spec_root + workspace 对象）。
+                workspace = await gate_session.get(Workspace, workspace_id)
+                if workspace is None:
+                    raise RuntimeError(f"workspace not found: {workspace_id}")
+                change = await gate_session.get(Change, change_id)
+                if change is None:
+                    raise RuntimeError(f"change not found: {change_id}")
+                change_name = change.change_key
+                spec_root = await self._resolve_gate_spec_root(gate_session, workspace, change)
+                if not spec_root:
+                    raise RuntimeError(f"gate spec_root unresolvable for change {change_id}")
+
+                # task-06 _run_gate_via_delegate（走 task-01 HostFsDelegate.run_command
+                # 在 daemon 跑 sillyspec gate verify，27s+），已含 _read_gate_result 解析
+                # 返回 {exit_code, errors, raw_envelope}。
+                gate_result = await _run_gate_via_delegate(
+                    gate_session,
+                    workspace,
+                    change_name,
+                    spec_root,
+                    stage="verify",
+                )
+
+                # 存 gate_result + decided；flag_modified 防 SQLAlchemy JSON in-place
+                # mutation 不标记 dirty（对齐 lease.service._sync_stage_status_from_run
+                # 的模式，gate_result 是 dict 原地改不入库——这里整体替换则自然 dirty）。
+                run_row = await gate_session.get(AgentRun, agent_run_id)
+                if run_row is None:
+                    raise RuntimeError(f"agent_run disappeared during gate task: {agent_run_id}")
+                run_row.gate_result = gate_result
+                run_row.gate_status = "decided"
+                flag_modified(run_row, "gate_result")
+                await gate_session.commit()
+
+                # H2：内联 sync_stage_status + auto_dispatch_next_step，用同一 gate_session。
+                # 构造 SillySpecStageDispatchService(gate_session) 让内部分流也用 gate_session；
+                # sync_stage_status 首参显式传 gate_session（参数列表要求 session，design §7）。
+                # **不调 _trigger_stage_completion_callback**（它写死 self._session，R7）。
+                dispatch_svc = SillySpecStageDispatchService(gate_session)
+                sync_result = await dispatch_svc.sync_stage_status(
+                    gate_session,
+                    change_id,
+                    agent_run_id,
+                )
+                # user_id：对齐 _trigger_stage_completion_callback 的回退策略
+                # （change.owner_id → 零 UUID）。
+                user_id = change.owner_id or uuid.UUID(int=0)
+                # auto_dispatch_next_step 经模块属性引用（``_change_dispatch.``）调用，
+                # 让单测 patch ``app.modules.change.dispatch.auto_dispatch_next_step``
+                # 生效（模块级 ``from`` 导入会固化原函数引用，patch dispatch 模块属性
+                # 不影响已绑定的本地名）。design §5.4：据 gate_result.exit_code 决策。
+                await _change_dispatch.auto_dispatch_next_step(
+                    session=gate_session,
+                    workspace_id=workspace_id,
+                    change_id=change_id,
+                    user_id=user_id,
+                    sync_result=sync_result,
+                )
+                await gate_session.commit()
+
+                # task-11 / design §5.7：gate_result 已 commit + gate_status=decided 落库后，
+                # 发 gate_status_changed SSE 通知前端更新徽标（复用 agent_run:{id} channel，
+                # 对齐 close_interactive_run 的 try/except 容错模式）。
+                await self._publish_gate_status_changed(run_row, gate_result)
+
+                log.info(
+                    "gate_decision_task_done",
+                    agent_run_id=str(agent_run_id),
+                    change_id=str(change_id),
+                    gate_exit_code=gate_result.get("exit_code"),
+                )
+            except Exception as exc:
+                # design §7 异常分支：fail-loud——gate_status=failed + exit 2 +
+                # errors 含异常信息（不吞异常、不降级为 read_verify_result）。
+                # rollback 撤销 cas running 及任何未提交改动，重新置 failed + gate_result。
+                await gate_session.rollback()
+                failed_gate_result = {
+                    "exit_code": 2,
+                    "errors": [str(exc)],
+                    "raw_envelope": {},
+                }
+                try:
+                    run_row = await gate_session.get(AgentRun, agent_run_id)
+                    if run_row is not None:
+                        run_row.gate_result = failed_gate_result
+                        run_row.gate_status = "failed"
+                        flag_modified(run_row, "gate_result")
+                        await gate_session.commit()
+                        # task-11 / design §5.7：failed 分支 gate_status=failed + gate_result
+                        # commit 成功后发 gate_status_changed SSE（复用 agent_run:{id}
+                        # channel，对齐 close 的 try/except 容错）。此处 run_row 确定
+                        # 非 None 且已 commit，failed_gate_result 含 errors=[str(exc)]。
+                        await self._publish_gate_status_changed(run_row, failed_gate_result)
+                except Exception as commit_exc:
+                    log.exception(
+                        "gate_decision_task_failed_commit_error",
+                        agent_run_id=str(agent_run_id),
+                        error=str(commit_exc),
+                    )
+                log.exception(
+                    "gate_decision_task_failed",
+                    agent_run_id=str(agent_run_id),
+                    change_id=str(change_id),
+                    error=str(exc),
+                    exc_info=exc,
+                )
+
+    async def _publish_gate_status_changed(
+        self,
+        agent_run: AgentRun,
+        gate_result: dict | None,
+    ) -> None:
+        """发 Redis ``gate_status_changed`` SSE 事件（task-11 / design §5.7）。
+
+        gate 后台任务 27s+ 完成（decided/failed）后，前端需更新 gate_status 徽标
+        （"客观核验中"→"已通过"/"失败"）。close 的 SSE 只发 ``turn_completed``（agent
+        完成），gate 完成无 SSE → 徽标卡住。本方法补这一条事件，**复用现有
+        ``agent_run:{id}`` channel**（task-12 前端按 event 字段分流，不新建 channel）。
+
+        对齐 ``close_interactive_run:955-975`` 的 try/except 容错模式：Redis 抖动只
+        warning，不影响已 commit 的 gate_result（gate_result 已落库，SSE 漏发不回滚）。
+
+        ``errors_summary`` 取 ``gate_result.errors`` 的 ``str()[:500]``（截断防超大
+        payload）；errors 为空 / None 时 ``errors_summary=None``。
+        """
+        try:
+            redis = get_redis()
+            errors = (gate_result or {}).get("errors") if isinstance(gate_result, dict) else None
+            errors_summary = (str(errors)[:500]) if errors else None  # 截断防超大 payload
+            await redis.publish(
+                f"agent_run:{agent_run.id}",
+                json.dumps(
+                    {
+                        "event": "gate_status_changed",
+                        "agent_run_id": str(agent_run.id),
+                        "gate_status": agent_run.gate_status,
+                        "errors_summary": errors_summary,
+                    },
+                    default=str,
+                ),
+            )
+        except Exception:
+            log.warning(
+                "gate_status_changed_redis_publish_failed",
+                agent_run_id=str(agent_run.id),
+                gate_status=agent_run.gate_status,
+            )
+
+    async def _resolve_gate_spec_root(
+        self,
+        gate_session: AsyncSession,
+        workspace: "object",
+        change: "object",
+    ) -> str | None:
+        """解析 gate 命令的 daemon 侧 spec 根目录（cwd，task-07）。
+
+        gate 命令 ``sillyspec gate verify --change <name> --json`` 的 cwd 必须是
+        daemon 能找到 ``.sillyspec`` 的目录。按 SpecWorkspace.strategy 分流（对齐
+        dispatch.py ``_resolve_db_path`` / ``_resolve_db_rel_candidates`` 的解析模式）：
+
+          - **platform-managed / repo-mirrored**：``spec_ws.spec_root`` 本身即扁平
+            ``.sillyspec`` 内容根（docs/changes/.runtime 直接在其下），cwd 用
+            ``spec_ws.spec_root``。
+          - **repo-native / 无 SpecWorkspace 行**：workspace.root_path（daemon 在源
+            项目根跑 sillyspec，自动找 ``<root>/.sillyspec``）。
+
+        失败返回 None（caller 抛 RuntimeError 置 gate_status=failed，fail-loud）。
+        """
+        from sqlmodel import col as _col
+
+        from app.core.spec_paths import SpecPathResolver
+
+        try:
+            from app.modules.spec_workspace.model import SpecWorkspace
+
+            stmt = select(SpecWorkspace).where(
+                _col(SpecWorkspace.workspace_id) == change.workspace_id
+            )
+            spec_ws = (await gate_session.execute(stmt)).scalars().first()
+            if spec_ws is not None and spec_ws.strategy != "repo-native" and spec_ws.spec_root:
+                # platform-managed：spec_root 本身即扁平根（SpecPathResolver
+                # platform_managed=True 的 _spec_root() == self.root）；repo-mirrored
+                # 同理（spec_root 为 daemon 同步的扁平快照根）。两者均直接用 spec_root。
+                resolver = SpecPathResolver(
+                    spec_ws.spec_root,
+                    platform_managed=True,
+                )
+                return str(resolver._spec_root())
+        except Exception as exc:
+            log.warning(
+                "gate_resolve_spec_root_spec_ws_failed",
+                workspace_id=str(getattr(change, "workspace_id", None)),
+                error=str(exc),
+            )
+
+        root_path = getattr(workspace, "root_path", None)
+        if not root_path:
+            return None
+        # repo-native / server-local：cwd 用 workspace.root_path（sillyspec 找
+        # <root>/.sillyspec）。返回根路径即可，gate 自己解析 .sillyspec。
+        return str(root_path)
 
     # ── private helpers（随主方法归位，design §6 / §10 R6） ───────────────
 

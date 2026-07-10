@@ -1,10 +1,10 @@
 /**
- * `host_fs.*` RPC handler —— daemon 端宿主文件系统操作委托（task-03 / FR-02）。
+ * `host_fs.*` RPC handler —— daemon 端宿主文件系统操作委托（task-03 / FR-02 + task-02 P3 run_command）。
  *
  * 实现 design §5.2 的 daemon 侧 host_fs handler：接收 backend 经 per-daemon WS
  * （DaemonWsHub.send_rpc）转发的 `host_fs.<method>` 请求，在宿主（Windows / Linux / macOS）
  * 执行 stat / read_file / list_dir / git_apply / git_rev_parse / pollution_archive /
- * read_package_json / read_local_yaml 八方法，返回结构化结果。
+ * read_package_json / read_local_yaml / run_command 九方法，返回结构化结果。
  *
  * **职责定位**：
  *   - 本模块是 host_fs 业务层，由 daemon.ts 包装成 RpcHandler 注册到 WsClient
@@ -102,6 +102,38 @@ export interface PollutionArchiveResult {
 export type ReadDictResult = Record<string, unknown> | null;
 
 /**
+ * run_command 返回结构（task-02 / design §7 + backend HostFsDelegate.run_command 契约，
+ * 三端字段级对齐）。
+ *
+ *   - `exit_code`：子进程 exit code（0=成功 / 124=超时 / 126=命令被白名单拒绝 / 命令自身退出码）。
+ *   - `stdout` / `stderr`：子进程标准输出/错误（utf8 字符串）。
+ *   - `duration_ms`：从方法入口到 callback 回来的墙钟耗时（Date.now 差值）。
+ *
+ * **不抛**：白名单拒绝、超时、子进程非 0 退出都结构化回传（让 backend 记审计/决策，
+ * 与 git_apply D-008 不抛语义一致）。cwd 越界是安全守卫，仍抛 forbidden（RpcError）。
+ */
+export interface RunCommandResult {
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+  duration_ms: number;
+}
+
+/** run_command 入参（对齐 design §7 / task-01 backend HostFsDelegate.run_command 契约）。 */
+export interface RunCommandParams {
+  /** 可执行命令（白名单只允 `sillyspec`）。 */
+  command: string;
+  /** 命令参数（白名单约束为 gate 模板形状）。 */
+  args: string[];
+  /** 工作目录（先过 assertWithinAllowedRoots 防穿越）。 */
+  cwd: string;
+  /** execFile 超时（ms，透传调用方值，不写死；超时 → exit_code 124）。 */
+  timeout: number;
+  /** 环境变量覆盖（合并到 process.env 之上，不清空 PATH）；null/空走默认环境。 */
+  env: Record<string, string> | null;
+}
+
+/**
  * HostFsHandler 构造参数：daemon 实体级 allowed_roots（与 list_dir RPC handler 同源，
  * 取自 DaemonConfig.allowed_roots）。每方法调 assertWithinAllowedRoots 时透传。
  */
@@ -112,7 +144,7 @@ export interface HostFsHandlerOptions {
 // ── toRpcError（本地实现，逻辑与 file-rpc.ts:196-209 等价）─────────────────────
 //
 // spike-01 / task-03 蓝图说复用 file-rpc.ts:toRpcError，但该函数在 file-rpc.ts 是
-// 模块私有（未 export，仅服务 listDir）。本模块为 host_fs 八方法的 fs 错误兜底，
+// 模块私有（未 export，仅服务 listDir）。本模块为 host_fs 九方法的 fs 错误兜底，
 // 复制一份等价映射（fs errno → RpcError code），保持 file-rpc.ts 单一职责不被破坏。
 // 映射规则与 file-rpc.ts:196-209 / listDir 错误码语义字符级对齐，确保跨模块一致。
 
@@ -138,6 +170,79 @@ function toRpcError(e: unknown, where: string): RpcError {
   }
   const msg = e instanceof Error ? e.message : String(e);
   return new RpcError('internal', `${where}: ${msg}`);
+}
+
+// ── run_command 命令白名单（task-02 / R3 / AC-8）─────────────────────────────
+//
+// 现有 8 方法靠 assertWithinAllowedRoots（路径白名单）防穿越；run_command 要在宿主
+// 跑命令，需命令白名单（design §5.3「命令白名单安全层」新抽象）。判定规则与 task-01
+// backend 侧 delegate.py:_enforce_command_whitelist **字符级对齐**（同一 gate 模板
+// 复制两份，双端必须一致否则 backend 放行的 args daemon 侧被拒 → gate 永远跑不了）：
+//
+//   只允 command === 'sillyspec' 且 args 头部精确匹配
+//     `['gate', 'verify', '--change', <changeName>, '--json']`（changeName 任意非空，
+//     字符集不约束——gate 任务已对 change_id 做来源校验，白名单只守结构，与 backend
+//     delegate.py:792 `or not head[3]` 一致），尾部可追加白名单 flag（当前仅 `--stage`，
+//     必须成对 flag+value，value 字符集不约束，与 backend delegate.py:799-815 一致）。
+//
+// execFile 非 shell（host-fs-handler 内调用）是第二道防线：即便白名单漏放，也无法
+// 经 shell 拼接注入（命令与参数分立传递）。backend 层是第一道防线（RPC 前拦截）。
+
+/** gate verify 模板头部固定前缀长度（= `["gate","verify","--change",<name>,"--json"]`）。 */
+const GATE_VERIFY_PREFIX_LEN = 5;
+
+/**
+ * gate verify 尾部允许的 flag 白名单（design §5.3：stage 枚举等已知 flag）。
+ * 新增 gate 模板参数需在此登记，否则 run_command 拒绝（R3 防任意命令注入）。
+ * 与 backend delegate.py:684 `_GATE_VERIFY_TAIL_FLAG_WHITELIST` 字符级对齐。
+ */
+const GATE_VERIFY_TAIL_FLAG_WHITELIST: ReadonlySet<string> = new Set(['--stage']);
+
+/**
+ * 判定 run_command 请求是否命中 gate 模板白名单（task-02 / R3 / AC-8）。
+ *
+ * **与 task-01 backend delegate.py:_enforce_command_whitelist 字符级对齐**：
+ *   - command 必须严格等于 `'sillyspec'`（不允许带路径，防 `../evil/sillyspec`）。
+ *   - args 长度 >= 5（前缀 5 + 尾部成对 flag+value）。
+ *   - 头部 5 元素精确匹配：`['gate', 'verify', '--change', <非空 changeName>, '--json']`
+ *     （changeName 任意非空字符串，字符集不约束，与 backend `or not head[3]` 一致）。
+ *   - 尾部 args 成对消费：每个 flag 必须在 GATE_VERIFY_TAIL_FLAG_WHITELIST 内且必须
+ *     带值（flag + value 成对，无值则拒），value 字符集不约束（与 backend delegate.py:799-815 一致）。
+ *
+ * 非命中（rm / ls / sillyspec derive / 乱序 flag / 未知 flag / 缺值 flag）→ false，
+ * 由 runCommand 返回 exit_code 126（不执行，结构化回传）。
+ */
+export function isGateCommand(command: string, args: string[]): boolean {
+  if (command !== 'sillyspec') return false;
+  if (!Array.isArray(args)) return false;
+  if (args.length < GATE_VERIFY_PREFIX_LEN) return false;
+
+  // 头部结构精确匹配：args[0..2] + args[4] 固定 token，args[3] 为任意非空 changeName
+  //（与 backend delegate.py:787-793 一致——changeName 只守非空，不约束字符集）。
+  if (
+    args[0] !== 'gate' ||
+    args[1] !== 'verify' ||
+    args[2] !== '--change' ||
+    args[4] !== '--json' ||
+    !args[3]
+  ) {
+    return false;
+  }
+
+  // 尾部 flag 必须在白名单内且成对 flag+value（与 backend delegate.py:800-815 一致）。
+  const tail = args.slice(GATE_VERIFY_PREFIX_LEN);
+  let i = 0;
+  while (i < tail.length) {
+    const flag = tail[i];
+    if (typeof flag !== 'string' || !GATE_VERIFY_TAIL_FLAG_WHITELIST.has(flag)) {
+      return false;
+    }
+    // 白名单 flag 需带值（--stage <value>）——成对消费，无值则拒。
+    if (i + 1 >= tail.length) return false;
+    // value（tail[i+1]）字符集不约束（与 backend 一致，gate 任务负责值校验）。
+    i += 2;
+  }
+  return true;
 }
 
 // ── execFile 封装 + git 命令统一执行器 ────────────────────────────────────────
@@ -271,12 +376,12 @@ async function runGitRevParse(
   return { commit: first.commit, error: first.error ?? 'not_git_repo' };
 }
 
-// ── HostFsHandler：八方法宿主实现 ─────────────────────────────────────────────
+// ── HostFsHandler：九方法宿主实现 ─────────────────────────────────────────────
 
 /**
- * daemon 侧 host_fs handler 业务层（task-03）。
+ * daemon 侧 host_fs handler 业务层（task-03 八方法 + task-02 P3 run_command 第九方法）。
  *
- * 八方法 1:1 对齐 design §5.1 / backend HostFsDelegate 签名（跨任务契约锁死）。
+ * 九方法 1:1 对齐 design §5.1 / §5.3 / backend HostFsDelegate 签名（跨任务契约锁死）。
  * 由 daemon.ts:_registerHostFsRpcHandler 包装成 RpcHandler 注册到 WsClient。
  */
 export class HostFsHandler {
@@ -597,5 +702,125 @@ export class HostFsHandler {
     } catch (e) {
       throw toRpcError(e, 'host_fs.read_local_yaml.parse');
     }
+  }
+
+  // ── run_command（task-02 / design §5.3+§7 / R3 命令白名单 + AC-8）──────────
+
+  /**
+   * `run_command({ command, args, cwd, timeout, env }) → { exit_code, stdout, stderr, duration_ms }`。
+   *
+   * P3 driver gate pilot 第 9 方法：在宿主跑 `sillyspec gate verify --change <name> --json
+   * [--stage <stage>]`，由 backend HostFsDelegate.run_command（task-01）经 send_rpc 转发
+   * 到本 handler（design §5.3 / §7）。
+   *
+   * **命令白名单（R3 / AC-8）**：调用前先过 `isGateCommand(command, args)`，只允 sillyspec
+   * gate 模板。非白名单**不执行**，返回 `{ exit_code: 126, stdout: '', stderr: 'command not
+   * allowed: <command>', duration_ms: <极小> }`（不抛，结构化回传让 backend 记审计；与
+   * git_apply D-008 不抛语义一致）。
+   *
+   * **execFile 非 shell**（防注入，与 runCmd:169 同模式）：command + args 直接传 execFile，
+   * 不经 shell 拼接。timeout 用入参 params.timeout（**不写死 12min，透传调用方值**）；
+   * cwd 先过 `assertWithinAllowedRoots`（穿越防护，与现有 8 方法一致）。
+   *
+   * **超时杀子进程**：execFile timeout 触发后 Node 自动 SIGTERM 子进程（不留孤儿），
+   * callback 的 err 带 `signal === 'SIGTERM'` / `killed === true`。超时返回
+   * `{ exit_code: 124, stdout, stderr: '<timeout after Nms>', duration_ms }`（不抛）。
+   *
+   * **env 注入**：env 非空时合并到 `process.env` 之上（仅追加/覆盖入参键，不清空 PATH）；
+   * 空/null 走默认环境。
+   *
+   * **duration_ms**：方法入口 `Date.now()` 计时，返回时算差值。
+   */
+  async runCommand(params: RunCommandParams): Promise<RunCommandResult> {
+    const startedAt = Date.now();
+
+    // 1. 命令白名单守卫（R3 / AC-8）—— 非白名单不执行，结构化回传 exit 126。
+    if (!isGateCommand(params.command, params.args)) {
+      return {
+        exit_code: 126,
+        stdout: '',
+        stderr: `command not allowed: ${params.command}`,
+        duration_ms: Date.now() - startedAt,
+      };
+    }
+
+    // 2. cwd 穿越守卫（与现有 8 方法一致，assertWithinAllowedRoots 抛 forbidden RpcError）。
+    assertWithinAllowedRoots(params.cwd, this._allowedRoots);
+    const cwd = pathResolve(params.cwd);
+
+    // 3. 合并 env（非空时叠加到 process.env 之上，不清空 PATH）。
+    const env =
+      params.env && Object.keys(params.env).length > 0
+        ? { ...process.env, ...params.env }
+        : process.env;
+
+    // 4. execFile（非 shell，timeout 透传）。不复用 runCmd：runCmd 把超时混入 ok:false 无法
+    //    区分 exit_code 124，run_command 需独立从 err 上读 signal/killed 判超时。
+    const result = await new Promise<{
+      exitCode: number;
+      stdout: string;
+      stderr: string;
+      timedOut: boolean;
+    }>((resolve) => {
+      execFile(
+        params.command,
+        params.args,
+        {
+          cwd,
+          env: env as NodeJS.ProcessEnv,
+          timeout: params.timeout > 0 ? params.timeout : undefined,
+          maxBuffer: 10 * 1024 * 1024,
+        },
+        (err, stdout, stderr) => {
+          const out = Buffer.isBuffer(stdout)
+            ? stdout.toString('utf8')
+            : stdout ?? '';
+          const errOut = Buffer.isBuffer(stderr)
+            ? stderr.toString('utf8')
+            : stderr ?? '';
+          // execFile 超时：Node 自动 SIGTERM，err.signal === 'SIGTERM' / err.killed === true。
+          const timedOut =
+            err !== null &&
+            typeof err === 'object' &&
+            (('signal' in err && (err as { signal?: string }).signal === 'SIGTERM') ||
+              ('killed' in err && (err as { killed?: boolean }).killed === true));
+          if (timedOut) {
+            resolve({ exitCode: 124, stdout: out, stderr: errOut, timedOut: true });
+            return;
+          }
+          if (err !== null) {
+            // 非 0 退出（err.code 或 err.exitCode 是数字）；读不到时兜底 1。
+            const code =
+              typeof err === 'object' && err !== null
+                ? (('code' in err && typeof (err as { code?: unknown }).code === 'number'
+                    ? (err as { code?: number }).code
+                    : undefined) ??
+                  ('exitCode' in err && typeof (err as { exitCode?: unknown }).exitCode === 'number'
+                    ? (err as { exitCode?: number }).exitCode
+                    : undefined))
+                : undefined;
+            resolve({
+              exitCode: typeof code === 'number' ? code : 1,
+              stdout: out,
+              stderr: errOut,
+              timedOut: false,
+            });
+            return;
+          }
+          resolve({ exitCode: 0, stdout: out, stderr: errOut, timedOut: false });
+        },
+      );
+    });
+
+    const stderrFinal = result.timedOut
+      ? `${result.stderr}<timeout after ${params.timeout}ms>`.trim()
+      : result.stderr;
+
+    return {
+      exit_code: result.exitCode,
+      stdout: result.stdout,
+      stderr: stderrFinal,
+      duration_ms: Date.now() - startedAt,
+    };
   }
 }

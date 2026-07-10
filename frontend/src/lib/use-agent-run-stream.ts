@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AgentRunStreamClient,
+  type GateStatusEvent,
   type StreamStatus,
 } from "./agent-stream";
 import {
@@ -64,6 +65,8 @@ export interface UseAgentRunStreamResult {
   loading: boolean; // prefetch 历史 / 建立连接中（Grill X-004，喂给 AgentLogViewer.loading）
   error: string | null;
   perms: SessionPermissionRequest[];
+  /** task-12：gate_status 实时态（SSE gate_status_changed 更新，null=未收到/无 gate） */
+  gateStatus: GateStatusEvent | null;
   /** 本地移除 perm（卡片 onResolved 与 SSE permission_resolved 均调，D-003） */
   dismissPerm: (requestId: string) => void;
   input: AgentRunInputStream;
@@ -83,6 +86,8 @@ export function useAgentRunStream(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [perms, setPerms] = useState<SessionPermissionRequest[]>([]);
+  // task-12 / design §5.7：gate_status 实时态（SSE gate_status_changed 更新）。
+  const [gateStatus, setGateStatus] = useState<GateStatusEvent | null>(null);
 
   // pending_input 控件状态（FR-05，hook 持有，panel 负责字段映射）
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
@@ -148,6 +153,7 @@ export function useAgentRunStream(
     setLoading(false);
     setError(null);
     setPerms([]);
+    setGateStatus(null);
     setInputValues({});
     setSubmittingInputs({});
     setInputErrors({});
@@ -231,6 +237,12 @@ export function useAgentRunStream(
     client.onPermissionResolved((resolved) => {
       if (cancelled) return;
       dismissPerm(resolved.request_id);
+    });
+
+    // (e2) task-12 / design §5.7：gate_status_changed → 更新 gateStatus（前端徽标刷新）
+    client.onGateStatusChanged((evt) => {
+      if (cancelled) return;
+      setGateStatus(evt);
     });
 
     // (e) done：终态 status + 通知父 + disconnect
@@ -332,6 +344,7 @@ export function useAgentRunStream(
     loading,
     error,
     perms,
+    gateStatus,
     dismissPerm,
     input,
     clear,

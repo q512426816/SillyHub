@@ -115,6 +115,7 @@ function mockHook(
     loading: false,
     error: null,
     perms: [],
+    gateStatus: null,
     dismissPerm: vi.fn(),
     input: makeInput(),
     clear: vi.fn(),

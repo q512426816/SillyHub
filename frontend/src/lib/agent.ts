@@ -41,6 +41,14 @@ export interface AgentRun {
   source_commit: string | null;
   is_resume: boolean | null;
   resumed_from_step: number | null;
+  // task-12 / P3 driver gate pilot：gate 客观核验态与结果（后端 task-04 加列，nullable，
+  // brownfield 老 run 无值。gate_status: pending/running/decided/failed）
+  gate_status: string | null;
+  gate_result: {
+    exit_code: number;
+    errors: string[];
+    raw_envelope: Record<string, unknown>;
+  } | null;
 }
 
 export type AgentRunLogChannel =

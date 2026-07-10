@@ -7,6 +7,7 @@ defining how the agent should be invoked.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
@@ -142,6 +143,98 @@ def _reset_chain_count(stages: dict) -> dict:
     return stages
 
 
+async def _read_latest_gate_result(
+    session: AsyncSession,
+    change_id: uuid.UUID,
+) -> tuple[dict | None, uuid.UUID | None]:
+    """取本 change 最近一条 completed AgentRun 的 gate_result（task-08）。
+
+    design §5.4：gate 三态决策依据是 stage 完成 agent 的 gate 产物。task-07 的
+    ``_run_gate_decision_task`` 已把 gate 结果写入触发 stage 完成的那条 AgentRun
+    （``gate_status='decided'`` + ``gate_result={exit_code, errors, raw_envelope}``）。
+    本函数取本 change 最近一条 ``status='completed'`` 的 AgentRun（按 created_at
+    降序），读其 ``gate_result``。
+
+    Args:
+        session: 数据库会话。
+        change_id: 变更 ID。
+
+    Returns:
+        ``(gate_result, run_id)``。``gate_result is None`` 表示最近完成 run 未跑
+        gate / 异常未落 gate_result（brownfield）；``run_id`` 供打回点审计。
+    """
+    stmt = (
+        select(AgentRun)
+        .where(
+            col(AgentRun.change_id) == change_id,
+            col(AgentRun.status) == "completed",
+        )
+        .order_by(col(AgentRun.created_at).desc())
+        .limit(1)
+    )
+    run = (await session.execute(stmt)).scalars().first()
+    if run is None:
+        return None, None
+    return run.gate_result, run.id
+
+
+# gate_retry_count 累加上限（design §10 R12 死循环防护）。exit 1 连续打回达此值
+# 后升级 exit 2 卡住报警人工，不再 dispatch 同 stage 重跑（避免无限循环）。
+_GATE_RETRY_LIMIT: int = 3
+
+# gate_last_errors 截断阈值（防 change.stages JSON 超大）。
+_GATE_ERROR_MAX_CHARS: int = 500  # 单条 error 截断长度
+_GATE_ERROR_MAX_COUNT: int = 10  # errors 总条数上限
+
+
+def _truncate_gate_errors(errors: Any) -> list[str]:
+    """截断 gate errors 防 change.stages JSON 超大（task-09）。
+
+    每条 error ``str()`` 强转后截断到 :data:`_GATE_ERROR_MAX_CHARS` 字符，总条数
+    截到前 :data:`_GATE_ERROR_MAX_COUNT` 条。errors 非 list 时降级为空列表
+    （不抛，exit 1 路径 errors 来源是 gate_result JSON，类型异常走兜底）。
+    """
+    if not isinstance(errors, list):
+        return []
+    truncated: list[str] = []
+    for raw in errors[:_GATE_ERROR_MAX_COUNT]:
+        text = str(raw)
+        if len(text) > _GATE_ERROR_MAX_CHARS:
+            text = text[:_GATE_ERROR_MAX_CHARS]
+        truncated.append(text)
+    return truncated
+
+
+async def _record_gate_kickback(
+    session: AsyncSession,
+    change: Change,
+    *,
+    stage: str,
+    gate_result: dict,
+    gate_run_id: uuid.UUID | None,
+    user_id: uuid.UUID,
+) -> None:
+    """记录 gate exit 1 打回点（task-08），供 task-09 接 gate_retry_count。
+
+    design §5.4 exit 1 语义：不 complete_stage，dispatch 同 stage 重跑，feedback
+    注入 gate_result.errors。本函数把本次打回结构化落 ``change.stages.last_gate_kickback``
+    （stage + errors + gate_run_id + at + user_id），task-09 在此结构上累加
+    ``gate_retry_count`` 并在 >=3 时升级 exit 2。**task-08 不实现 retry_count 字段**，
+    只留可识别的打回点。
+    """
+    stages = dict(change.stages or {})
+    stages["last_gate_kickback"] = {
+        "stage": stage,
+        "errors": list(gate_result.get("errors", []) or []),
+        "gate_run_id": str(gate_run_id) if gate_run_id else None,
+        "at": datetime.now(UTC).isoformat(),
+        "user_id": str(user_id),
+    }
+    change.stages = stages
+    session.add(change)
+    await session.commit()
+
+
 async def auto_dispatch_next_step(
     session: AsyncSession,
     workspace_id: uuid.UUID,
@@ -216,10 +309,146 @@ async def auto_dispatch_next_step(
                 error=str(exc),
             )
 
-        # Resolve verify result from verify-result.md if applicable
-        stage_result = None
-        if sync_result.current_stage == "verify":
-            stage_result = await read_verify_result(session, change_id)
+        # ── task-08（P3 driver-gate-pilot）：gate 三态决策（design §5.4）──
+        # stage 完成前读本 change 最近一条 completed AgentRun 的 gate_result。
+        # verify stage **强制 gate**（无 flag）：gate_result None → 阻断 fail-loud
+        # （不 fallback read_verify_result）。非 verify stage + None → fallback
+        # 声明态（design §9 brownfield 兼容，零回归）。
+        gate_result, gate_run_id = await _read_latest_gate_result(session, change_id)
+        current_stage = sync_result.current_stage
+        is_verify = current_stage == "verify"
+
+        if gate_result is not None:
+            gate_exit_code = gate_result.get("exit_code")
+            gate_errors = gate_result.get("errors", []) or []
+
+            # exit 1 → 打回：不 complete_stage，dispatch 同 stage 重跑，
+            # feedback=errors 注入（留打回点供 task-09 接 gate_retry_count）。
+            if gate_exit_code == 1:
+                change = await session.get(Change, change_id)
+                if change is None:
+                    return {"dispatched": False, "reason": "change_not_found"}
+                await _record_gate_kickback(
+                    session,
+                    change,
+                    stage=current_stage,
+                    gate_result=gate_result,
+                    gate_run_id=gate_run_id,
+                    user_id=user_id,
+                )
+                # task-09：exit 1 打回点接 gate_retry_count（+1，>=3 升级 exit 2
+                # 卡住报警人工，R12 死循环防护）+ gate_last_errors（本轮 errors
+                # 截断摘要，跨 run 持久供新 run / 前端读）。dict copy 逐字对齐
+                # :198/:769 模式防 SQLAlchemy JSON 列原地改不标记 dirty（记忆坑）。
+                change = await session.get(Change, change_id)
+                if change is None:
+                    return {"dispatched": False, "reason": "change_not_found"}
+                stages = dict(change.stages or {})
+                last_dispatch = dict(stages.get("last_dispatch", {}))
+                count = int(last_dispatch.get("gate_retry_count", 0)) + 1
+                last_dispatch["gate_retry_count"] = count
+                last_dispatch["gate_last_errors"] = _truncate_gate_errors(
+                    gate_result.get("errors", [])
+                )
+                stages["last_dispatch"] = last_dispatch
+                change.stages = stages
+                session.add(change)
+                await session.commit()
+
+                # R12：count >= 3 → 升级 exit 2，不 dispatch 同 stage（卡住报警人工）。
+                # retry_count + last_errors 已落库，此处只返回 gate_blocked 终态。
+                if count >= _GATE_RETRY_LIMIT:
+                    log.warning(
+                        "auto_dispatch_gate_retry_exceeded",
+                        change_id=str(change_id),
+                        stage=current_stage,
+                        gate_retry_count=count,
+                        limit=_GATE_RETRY_LIMIT,
+                        gate_run_id=str(gate_run_id) if gate_run_id else None,
+                        errors=gate_errors,
+                    )
+                    return {
+                        "dispatched": False,
+                        "reason": "gate_blocked",
+                        "stage": current_stage,
+                        "errors": list(gate_errors),
+                        "gate_retry_exceeded": True,
+                    }
+
+                # 同 stage 重跑（feedback 经 last_gate_kickback.errors 流转，
+                # task-13 前端注入；这里只 dispatch 同 stage）。
+                dispatch_result = await dispatch(
+                    session=session,
+                    workspace_id=workspace_id,
+                    change_id=change_id,
+                    target_stage=current_stage,
+                    user_id=user_id,
+                )
+                dispatch_result["reason"] = "gate_kickback"
+                log.info(
+                    "auto_dispatch_gate_kickback",
+                    change_id=str(change_id),
+                    stage=current_stage,
+                    gate_run_id=str(gate_run_id) if gate_run_id else None,
+                    errors=gate_errors,
+                )
+                return dispatch_result
+
+            # exit 2 → 卡住：不推进、不 dispatch，fail-loud 报警（design §9）。
+            if gate_exit_code == 2:
+                log.warning(
+                    "auto_dispatch_gate_blocked",
+                    change_id=str(change_id),
+                    stage=current_stage,
+                    gate_run_id=str(gate_run_id) if gate_run_id else None,
+                    errors=gate_errors,
+                )
+                return {
+                    "dispatched": False,
+                    "reason": "gate_blocked",
+                    "stage": current_stage,
+                    "errors": list(gate_errors),
+                }
+
+            # exit 0 → 推进：照常 complete_stage + dispatch 下一 stage（保留现逻辑）。
+            # 异常 exit_code（非 0/1/2）按 fail-loud exit 2 处理（防御）。
+            if gate_exit_code != 0:
+                log.warning(
+                    "auto_dispatch_gate_unknown_exit_code",
+                    change_id=str(change_id),
+                    stage=current_stage,
+                    gate_exit_code=gate_exit_code,
+                )
+                return {
+                    "dispatched": False,
+                    "reason": "gate_blocked",
+                    "stage": current_stage,
+                    "errors": [f"gate exit_code 异常: {gate_exit_code!r}"],
+                }
+            # exit 0 落到下面原推进逻辑（stage_result 据 stage 决定）。
+        elif is_verify:
+            # verify stage 强制 gate：gate_result None（未跑 / 异常 / sillyspec 未发版）
+            # → 阻断 fail-loud（design §9，**不 fallback verify-result.md**）。
+            log.warning(
+                "auto_dispatch_gate_blocked_no_result",
+                change_id=str(change_id),
+                stage=current_stage,
+            )
+            return {
+                "dispatched": False,
+                "reason": "gate_blocked",
+                "stage": current_stage,
+                "errors": ["verify stage 缺 gate_result（未跑 gate / 异常 / sillyspec 未发版）"],
+            }
+        # 非 verify stage + gate_result None → fallback 声明态（零回归），落到下面原逻辑。
+
+        # Resolve verify result: task-08 强制 gate —— verify stage 的 result 由
+        # gate_result 决定（exit 0 → "passed"），不再读 verify-result.md。
+        # read_verify_result 调用点已替换为 gate 决策（函数体保留供回退）。
+        stage_result: str | None = None
+        if is_verify and gate_result is not None:
+            # exit 0 已在上面判定通过，verify result = passed（落 complete_stage.result）
+            stage_result = "passed"
 
         # AD-01: Use complete_stage to set current_stage + human_gate
         complete_result = await cs.complete_stage(
@@ -798,6 +1027,200 @@ async def read_verify_result(
     return "passed"
 
 
+# ───────────────────────────────────────────────────────────────────────────
+# P3 driver-gate-pilot：gate 执行与结果解析（task-06）
+#
+# design §5.6（Z1 启动探测）/ §7（接口）/ §9（fail-loud）。
+# `_run_gate_via_delegate` 构造 ``sillyspec gate verify`` 命令经
+# HostFsDelegate.run_command 在 daemon 侧执行（backend 容器够不到源代码 /
+# agent 产物，design §5.3 gate-constraint-①），`_read_gate_result` 解析 gate
+# JSON 输出为 ``{exit_code, errors, raw_envelope}``。供 task-07 的
+# `_run_gate_decision_task` 调用（run_sync/service.py）。
+# ───────────────────────────────────────────────────────────────────────────
+
+# gate RPC 超时（design §7：12min = 720s；gate 跑 27s+，留足余量）。
+_GATE_RPC_TIMEOUT_SECONDS: float = 720.0
+
+# Z1 子命令缺失信号（design §5.6）。sillyspec 基于 oclif（``No such command``）
+# 或 commander 风格（``unknown command``）；``gate is not a sillyspec command``
+# 覆盖旧版无 gate 子命令的兜底报错。stderr 命中任一即判定 Z1 分支。
+_GATE_SUBCOMMAND_MISSING_HINTS: tuple[str, ...] = (
+    "unknown command",
+    "no such command",
+    "is not a sillyspec command",
+    "not a sillyspec command",
+)
+
+
+def _new_host_fs_delegate(session: AsyncSession) -> Any:
+    """Lazy-construct a HostFsDelegate bound to the process ws_hub.
+
+    工厂函数（非 SillySpecStageDispatchService 方法），供 ``_run_gate_via_delegate``
+    在模块级 async 函数中使用——参照 ``SillySpecStageDispatchService._get_host_fs_delegate``
+    （:823）的构造方式（HostFsDelegate + HostFsWsRpc + 进程级 ws_hub）。lazy import
+    避免顶层循环（host_fs 依赖 daemon.service 异常）。
+
+    抽成独立工厂便于 task-06 单测注入 mock（隔离真实 WS RPC），并供 task-07
+    gate 任务复用。失败抛 :class:`HostFsDelegateUnavailable` 由 caller
+    （``_run_gate_via_delegate``）catch 转 exit 2 fail-loud。
+    """
+    from app.modules.daemon.host_fs import HostFsDelegate, HostFsWsRpc
+    from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+    hub = get_daemon_ws_hub()
+    return HostFsDelegate(session, ws_hub=hub, ws_rpc=HostFsWsRpc(hub))
+
+
+def _read_gate_result(raw_stdout: str) -> dict[str, Any]:
+    """解析 ``sillyspec gate verify --json`` 的 stdout 为结果 dict。
+
+    纯函数（design §7）：``ok=True``→exit 0；``ok=False``→exit 1；JSON 解析
+    失败 / ``ok`` 字段缺失或类型异常 → exit 2（防御）。``raw_envelope`` 保留
+    完整 envelope dict（落 ``AgentRun.gate_result`` 审计，design §2/§8）。
+
+    Args:
+        raw_stdout: gate 命令的 stdout 原文（期望 JSON envelope）。
+
+    Returns:
+        ``{"exit_code": int, "errors": list[str], "raw_envelope": dict}``。
+    """
+    try:
+        envelope = json.loads(raw_stdout)
+    except (json.JSONDecodeError, TypeError):
+        return {
+            "exit_code": 2,
+            "errors": ["gate JSON 解析失败: stdout 非合法 JSON"],
+            "raw_envelope": {},
+        }
+    if not isinstance(envelope, dict):
+        return {
+            "exit_code": 2,
+            "errors": [f"gate JSON 解析失败: 期望对象，得到 {type(envelope).__name__}"],
+            "raw_envelope": {},
+        }
+
+    ok_value = envelope.get("ok")
+    if ok_value is True:
+        exit_code = 0
+    elif ok_value is False:
+        exit_code = 1
+    else:
+        # ok 字段缺失 / 类型异常（非 bool）→ exit 2（防御）。
+        return {
+            "exit_code": 2,
+            "errors": [f"gate JSON 解析失败: ok 字段缺失或类型异常 (得到 {ok_value!r})"],
+            "raw_envelope": envelope,
+        }
+
+    errors = envelope.get("errors", []) or []
+    if not isinstance(errors, list):
+        errors = [str(errors)]
+
+    return {
+        "exit_code": exit_code,
+        "errors": [str(e) for e in errors],
+        "raw_envelope": envelope,
+    }
+
+
+async def _run_gate_via_delegate(
+    session: AsyncSession,
+    workspace: Any,
+    change_name: str,
+    spec_root: str,
+    stage: str = "verify",
+) -> dict[str, Any]:
+    """经 HostFsDelegate.run_command 在 daemon 侧执行 ``sillyspec gate``。
+
+    design §5.3 / §7：gate 必须 daemon 跑（容器够不到源代码），走 task-01 的
+    ``HostFsDelegate.run_command``（带命令白名单 R3 安全层）。本函数负责：
+    构造命令 → 调 run_command → 分析 stdout/stderr/exit_code → 返回
+    ``{exit_code, errors, raw_envelope}``（task-07 据此存 gate_result + 决策）。
+
+    **Z1 合并探测（Reverse Sync）**：TaskCard 原写「先用 run_command(["gate",
+    "--help"]) 探测子命令存在性」，但 task-01 白名单
+    ``_enforce_command_whitelist`` 只允许头部 ``["gate","verify","--change",
+    <name>,"--json"]``——``["gate","--help"]`` 不匹配会被白名单 raise。
+    故 Z1 合并到正式 gate 执行的结果分析（不破坏白名单契约，仍达 design §5.6
+    「子命令缺失 fail-loud exit 2」意图）：
+
+      1. stdout 合法 JSON envelope → ``_read_gate_result`` 解析（exit 0/1）。
+      2. stdout 非法/空 + stderr 命中 :data:`_GATE_SUBCOMMAND_MISSING_HINTS`
+         → Z1 分支：exit 2 + errors=["sillyspec gate 子命令缺失，需 npm publish
+         发版"]（诊断非 fallback，绝不退回 read_verify_result，design §5.6/§9）。
+      3. stdout 非法（无子命令缺失信号）→ exit 2 + errors=["gate JSON 解析失败"]。
+      4. RPC 异常（HostFsDelegateError/DaemonRpcTimeout/DaemonRuntimeOffline 等）
+         → catch 返回 exit 2 + errors=["gate 执行异常: <详情>"]（fail-loud，
+         交 task-07 置 gate_status=failed）。
+
+    Args:
+        session: async DB session（HostFsDelegate 路由 daemon_id 用）。
+        workspace: 目标工作区（取 path_source + id 路由 RPC）。
+        change_name: 变更名（sillyspec change 目录名，非 change_id）。
+        spec_root: daemon 侧 spec 根目录（cwd，run_command 执行路径）。
+        stage: gate stage，当前 ``"verify"``（design §5.4 gate 当前仅 verify，
+            参数化前瞻 P4 execute——注意 task-01 白名单当前只锁 verify）。
+
+    Returns:
+        ``{"exit_code": int, "errors": list[str], "raw_envelope": dict}``。
+    """
+    args = ["gate", stage, "--change", change_name, "--json"]
+    try:
+        delegate = _new_host_fs_delegate(session)
+        result = await delegate.run_command(
+            workspace=workspace,
+            command="sillyspec",
+            args=args,
+            cwd=spec_root,
+            timeout=_GATE_RPC_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:
+        # RPC 异常 / ws_rpc 未接线 / daemon 离线 / 超时 → fail-loud exit 2
+        # （design §5.3/§7，不抛崩 gate 任务，交 task-07 catch 置 failed）。
+        log.warning(
+            "gate_run_via_delegate_exception",
+            change_name=change_name,
+            stage=stage,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return {
+            "exit_code": 2,
+            "errors": [f"gate 执行异常: {exc}"],
+            "raw_envelope": {},
+        }
+
+    stdout = str(result.get("stdout", "") or "")
+    stderr = str(result.get("stderr", "") or "")
+    exit_code_proc = result.get("exit_code")
+
+    # 正常路径：stdout 是合法 JSON envelope → _read_gate_result 解析。
+    parsed = _read_gate_result(stdout)
+    if parsed["raw_envelope"]:
+        return parsed
+
+    # stdout 非法/空（_read_gate_result 返回 raw_envelope={} 的 exit 2）→
+    # 区分 Z1（子命令缺失）vs 其他解析失败。
+    stderr_lower = stderr.lower()
+    if any(hint in stderr_lower for hint in _GATE_SUBCOMMAND_MISSING_HINTS):
+        return {
+            "exit_code": 2,
+            "errors": ["sillyspec gate 子命令缺失，需 npm publish 发版"],
+            "raw_envelope": {},
+        }
+
+    log.warning(
+        "gate_run_via_delegate_unparseable_stdout",
+        change_name=change_name,
+        stage=stage,
+        exit_code_proc=exit_code_proc,
+        stdout_preview=stdout[:200],
+        stderr_preview=stderr_lower[:200],
+    )
+    # 其他解析失败：_read_gate_result 已生成 errors，exit 2 透传。
+    return parsed
+
+
 class SillySpecStageDispatchService:
     """Unified dispatch entry: create AgentRun + compose agent instructions.
 
@@ -838,6 +1261,78 @@ class SillySpecStageDispatchService:
                 ws_rpc=HostFsWsRpc(hub),
             )
         return self._host_fs_delegate
+
+    async def reconcile_pending_gate_decisions(self, session: AsyncSession) -> dict[str, int]:
+        """task-10 / design §5.5：重启兜底——扫孤儿 gate 任务重置 pending + 重 enqueue。
+
+        backend 重启时 in-flight gate 任务（gate_status pending/running）变孤儿
+        （R1）。扫 status='completed' + change_id NOT NULL + gate_status IN
+        (pending,running) 的 agent_runs，全部重置 gate_status='pending'（running
+        孤儿必须重置才能被 task-07 R3 cas pending→running 抢），逐个
+        ``_fire_background_task(_run_gate_decision_task)`` 重 enqueue。孤儿无超时
+        阈值（design §5.5——pending 是过渡态，fire 即 cas 成 running）。double-fire
+        （reconcile + 残留原任务）由 R3 cas 原子兜底（R10）。挂 main.py lifespan
+        startup（M3，非 per-dispatch，区别 reconcile_stale_runs :587）。
+        """
+        # lazy import 避循环（run_sync.service 依赖本模块的
+        # _run_gate_via_delegate / SillySpecStageDispatchService，顶层 import 会循环）。
+        from app.modules.daemon.run_sync.service import RunSyncService
+
+        stmt = select(AgentRun).where(
+            AgentRun.status == "completed",
+            col(AgentRun.change_id).is_not(None),
+            col(AgentRun.gate_status).in_(("pending", "running")),
+        )
+        orphans = list((await session.execute(stmt)).scalars().all())
+
+        if not orphans:
+            return {"orphan_count": 0, "reset_to_pending": 0, "reenqueue": 0}
+
+        # 全部重置 pending（running 孤儿必须重置才能被 cas 抢）。
+        for run in orphans:
+            run.gate_status = "pending"
+        await session.commit()
+
+        # 逐个重 enqueue（workspace_id 从 Change.workspace_id 推导，对齐 task-05/07
+        # _resolve_gate_workspace_id 的稳定来源）。
+        run_sync = RunSyncService(session)
+        enqueued = 0
+        for run in orphans:
+            change_id = run.change_id
+            if change_id is None:
+                continue
+            change = await session.get(Change, change_id)
+            workspace_id = change.workspace_id if change else None
+            if workspace_id is None:
+                log.warning(
+                    "gate_reconcile_skip_no_workspace",
+                    agent_run_id=str(run.id),
+                    change_id=str(change_id),
+                )
+                continue
+            run_sync._fire_background_task(
+                run_sync._run_gate_decision_task(
+                    agent_run_id=run.id,
+                    workspace_id=workspace_id,
+                    change_id=change_id,
+                ),
+                workspace_id=workspace_id,
+                run_id=run.id,
+            )
+            enqueued += 1
+
+        count = len(orphans)
+        log.warning(
+            "gate_reconcile_reenqueued",
+            orphan_count=count,
+            reset_to_pending=count,
+            reenqueue=enqueued,
+        )
+        return {
+            "orphan_count": count,
+            "reset_to_pending": count,
+            "reenqueue": enqueued,
+        }
 
     async def dispatch_next_step(
         self,

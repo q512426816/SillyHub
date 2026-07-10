@@ -41,17 +41,20 @@ interface FakeClient {
   onDone: ReturnType<typeof vi.fn>;
   onPermissionRequest: ReturnType<typeof vi.fn>;
   onPermissionResolved: ReturnType<typeof vi.fn>;
+  onGateStatusChanged: ReturnType<typeof vi.fn>;
   __emitMessage: (e: unknown) => void;
   __emitStatus: (s: unknown) => void;
   __emitDone: (d: unknown) => void;
   __emitPermissionRequest: (r: unknown) => void;
   __emitPermissionResolved: (r: unknown) => void;
+  __emitGateStatus: (e: unknown) => void;
   __registered: {
     message: Cb<unknown>[];
     status: Cb<unknown>[];
     done: Cb<unknown>[];
     permReq: Cb<unknown>[];
     permRes: Cb<unknown>[];
+    gate: Cb<unknown>[];
   };
 }
 
@@ -95,6 +98,7 @@ function makeFakeClient(): FakeClient {
     done: [],
     permReq: [],
     permRes: [],
+    gate: [],
   };
   const instance: FakeClient = {
     connect: vi.fn(async () => {}),
@@ -129,6 +133,12 @@ function makeFakeClient(): FakeClient {
         registered.permRes = registered.permRes.filter((c) => c !== cb);
       };
     }),
+    onGateStatusChanged: vi.fn((cb: Cb<unknown>) => {
+      registered.gate.push(cb);
+      return () => {
+        registered.gate = registered.gate.filter((c) => c !== cb);
+      };
+    }),
     __registered: registered,
     __emitMessage: (e: unknown) => {
       for (const cb of [...registered.message]) cb(e);
@@ -144,6 +154,9 @@ function makeFakeClient(): FakeClient {
     },
     __emitPermissionResolved: (r: unknown) => {
       for (const cb of [...registered.permRes]) cb(r);
+    },
+    __emitGateStatus: (e: unknown) => {
+      for (const cb of [...registered.gate]) cb(e);
     },
   };
   return instance;
@@ -404,6 +417,40 @@ describe("useAgentRunStream — permission (FR-04)", () => {
     expect(result.current.perms).toHaveLength(1);
     expect(result.current.perms[0]!.request_id).toBe("req-1");
     expect(result.current.perms[0]!.tool_name).toBe("Bash");
+  });
+
+  it("TC-02g gate_status_changed → gateStatus 更新（task-12 / design §5.7）", async () => {
+    installFetchMock(() => jsonResponse({ id: "run-1", session_id: null }));
+
+    const { result } = renderHook(
+      ({ workspaceId, runId, isActive }) =>
+        useAgentRunStream(workspaceId, runId, { isActive }),
+      {
+        initialProps: {
+          workspaceId: "ws-1",
+          runId: "run-1",
+          isActive: true,
+        },
+      },
+    );
+
+    await waitFor(() => expect(currentFake).not.toBeNull());
+
+    // 初始 gateStatus=null（未收到 gate 事件）
+    expect(result.current.gateStatus).toBeNull();
+
+    act(() => {
+      currentFake!.__emitGateStatus({
+        event: "gate_status_changed",
+        agent_run_id: "run-1",
+        gate_status: "decided",
+        errors_summary: null,
+      });
+    });
+
+    expect(result.current.gateStatus).not.toBeNull();
+    expect(result.current.gateStatus?.gate_status).toBe("decided");
+    expect(result.current.gateStatus?.errors_summary).toBeNull();
   });
 
   it("TC-03 permission_request 同 request_id 去重", async () => {

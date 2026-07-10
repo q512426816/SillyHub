@@ -14,6 +14,18 @@ export interface StreamDoneData {
   exit_code?: number | null;
 }
 
+/**
+ * task-12 / design §5.7：gate_status_changed SSE 事件（gate 决策后台任务完成时
+ * backend publish 到 agent_run:{id} channel）。复用同 channel，按 event 字段分流。
+ * errors_summary 截断 500 字符（gate_result.errors str()[:500]），None 时 null。
+ */
+export interface GateStatusEvent {
+  event: "gate_status_changed";
+  agent_run_id: string;
+  gate_status: string;
+  errors_summary: string | null;
+}
+
 export class AgentRunStreamClient {
   private workspaceId: string;
   private runId: string;
@@ -37,6 +49,9 @@ export class AgentRunStreamClient {
   private permissionResolvedCallbacks: Array<
     (resolved: SessionPermissionResolved) => void
   > = [];
+  // task-12：gate_status_changed 专用回调（无 timestamp，进 _emitMessage 会被丢弃，
+  // 对齐 permission 的专用回调模式 agent-stream.ts:106-117）。
+  private gateStatusCallbacks: Array<(evt: GateStatusEvent) => void> = [];
 
   constructor(workspaceId: string, runId: string) {
     this.workspaceId = workspaceId;
@@ -112,6 +127,18 @@ export class AgentRunStreamClient {
             const resolved = permEvt as SessionPermissionResolved;
             this.permissionResolvedCallbacks.forEach((cb) => cb(resolved));
           }
+          if (this.status === "connecting") this._setStatus("connected");
+          return;
+        }
+        // task-12 / design §5.7：gate_status_changed 专用解析→专用回调（无 timestamp，
+        // 进 _emitMessage 会被丢弃，对齐 permission 模式）。
+        if (
+          typeof data === "object" &&
+          data !== null &&
+          (data as { event?: string }).event === "gate_status_changed"
+        ) {
+          const gateEvt = data as GateStatusEvent;
+          this.gateStatusCallbacks.forEach((cb) => cb(gateEvt));
           if (this.status === "connecting") this._setStatus("connected");
           return;
         }
@@ -197,6 +224,21 @@ export class AgentRunStreamClient {
     this.permissionResolvedCallbacks.push(cb);
     return () => {
       this.permissionResolvedCallbacks = this.permissionResolvedCallbacks.filter(
+        (c) => c !== cb,
+      );
+    };
+  }
+
+  /**
+   * task-12 / design §5.7：注册 gate_status_changed 事件回调。
+   * gate 决策后台任务完成（decided/failed）时 backend publish 到 agent_run:{id}
+   * channel，父组件据此更新 gate_status 徽标（客观核验中→已通过/失败）。
+   * 返回取消订阅函数。
+   */
+  onGateStatusChanged(cb: (evt: GateStatusEvent) => void): () => void {
+    this.gateStatusCallbacks.push(cb);
+    return () => {
+      this.gateStatusCallbacks = this.gateStatusCallbacks.filter(
         (c) => c !== cb,
       );
     };

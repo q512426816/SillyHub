@@ -79,6 +79,19 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                     log.warning("agent.stale_runs_cleaned_on_startup", count=stale_count)
             except Exception:
                 log.exception("agent.stale_run_cleanup_failed")
+            # task-10 / design §5.5 / M3：重启兜底——扫孤儿 gate 任务重置 pending +
+            # 重 enqueue（挂 lifespan startup，非 per-dispatch）。异常不阻断启动
+            # （对齐上方 cleanup_stale_runs 的 try/except log.exception 模式）。
+            try:
+                from app.modules.change.dispatch import SillySpecStageDispatchService
+
+                gate_result = await SillySpecStageDispatchService(
+                    session
+                ).reconcile_pending_gate_decisions(session)
+                if gate_result["orphan_count"]:
+                    log.warning("gate.reconcile_reenqueued", **gate_result)
+            except Exception:
+                log.exception("gate.reconcile_failed")
         yield
     finally:
         log.info("app.shutdown")

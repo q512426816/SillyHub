@@ -231,6 +231,20 @@ class AgentRun(BaseModel, table=True):
         default=None,
         sa_column=Column(String(50), nullable=True),
     )  # success, failed_post_check, completed_with_warnings
+    # ── Driver Gate (P3 pilot) ── gate 客观核验结果与状态（design §8 / task-04）
+    # gate_status 由 task-05 close 写 pending、task-07 cas running→decided/failed、
+    # task-10 reconcile 启动时把孤儿 pending/running 重置 pending。gate_result 由
+    # task-06 _read_gate_result 产出（{exit_code, errors, raw_envelope}），model 层
+    # 只定义容器不约束内部 schema。两列 nullable 默认 None —— 老 agent_run 行兼容
+    # （design §9 brownfield），task-08 非 verify stage fallback 当前声明态。
+    gate_status: str | None = Field(
+        default=None,
+        sa_column=Column(String(20), nullable=True),
+    )  # pending / running / decided / failed
+    gate_result: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )  # { exit_code: int, errors: list[str], raw_envelope: dict }
     source_commit: str | None = Field(
         default=None,
         sa_column=Column(String(64), nullable=True),

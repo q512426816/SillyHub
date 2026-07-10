@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { AgentModelInput } from "@/components/AgentModelInput";
 import { AgentRunPanel } from "@/components/agent-run-panel";
+import type { GateStatusEvent } from "@/lib/agent-stream";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AgentProviderSelect } from "@/components/AgentProviderSelect";
@@ -167,6 +168,7 @@ export default function ChangeDetailPage({ params }: Props) {
   // 阶段流转 / 手动派发使用的 agent provider 覆盖（FR-02，2026-06-14-agent-runtime-selection）
   const [stageProvider, setStageProvider] = useState<string | null>(null);
   const [stageModel, setStageModel] = useState<string | null>(null);
+  const [gateStatus, setGateStatus] = useState<GateStatusEvent | null>(null);
   const [gateComment, setGateComment] = useState("");
 
   // ── Agent Log Stream state ──────────────────────────────────────────
@@ -712,12 +714,37 @@ export default function ChangeDetailPage({ params }: Props) {
             className="flex w-full items-center justify-between border-b px-3 py-2 text-left"
             onClick={() => setLogsExpanded(!logsExpanded)}
           >
-            <div className="flex items-center gap-2">
-              <h2 className="text-xs font-medium">智能体执行日志</h2>
-              <span className="text-[11px] text-muted-foreground">
-                {agentStatus?.last_dispatch?.status ? ` · ${agentStatus.last_dispatch.status}` : ""}
-              </span>
-            </div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xs font-medium">智能体执行日志</h2>
+                {/* task-12 / design §5.7：gate_status 徽标（SSE gate_status_changed 实时更新）。
+                    gate_status pending/running→客观核验中；decided+无 errors→已通过；
+                    decided+errors / failed→核验失败（附 errors_summary 摘要）。 */}
+                {gateStatus?.gate_status && (
+                  <Badge
+                    variant={
+                      gateStatus.gate_status === "decided" && !gateStatus.errors_summary
+                        ? "success"
+                        : gateStatus.gate_status === "failed" || !!gateStatus.errors_summary
+                          ? "destructive"
+                          : "outline"
+                    }
+                    className={
+                      gateStatus.gate_status === "pending" || gateStatus.gate_status === "running"
+                        ? "animate-pulse"
+                        : ""
+                    }
+                  >
+                    {gateStatus.gate_status === "decided" && !gateStatus.errors_summary
+                      ? "✓ 已通过"
+                      : gateStatus.gate_status === "failed" || !!gateStatus.errors_summary
+                        ? "✗ 核验失败"
+                        : "客观核验中…"}
+                  </Badge>
+                )}
+                <span className="text-[11px] text-muted-foreground">
+                  {agentStatus?.last_dispatch?.status ? ` · ${agentStatus.last_dispatch.status}` : ""}
+                </span>
+              </div>
             <span className="text-[11px] text-muted-foreground">
               {logsExpanded ? "▾ 收起" : "▸ 展开"}
             </span>
@@ -736,6 +763,7 @@ export default function ChangeDetailPage({ params }: Props) {
                   </span>
                 }
                 onDone={handleChangesRunDone}
+                onGateStatusChanged={setGateStatus}
               />
             </div>
           )}

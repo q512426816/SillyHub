@@ -1,6 +1,6 @@
 """HostFsDelegate implementation — see ``__init__.py`` for module overview.
 
-Eight methods, each branches on ``workspace.path_source``:
+Nine methods, each branches on ``workspace.path_source``:
 
 * server-local: local-container implementation migrated byte-for-byte from the
   scattered originals (``agent/service.py`` stat, ``daemon/patch/service.py``
@@ -12,14 +12,25 @@ Eight methods, each branches on ``workspace.path_source``:
 
 Method names / parameters / return types are locked to design §5.1 — DO NOT
 rename, add, or drop parameters (W2 task-06~08 + W3 task-09~13 consumers +
-the cross-task contract table depend on them verbatim).
+the cross-task contract table depend on them verbatim). **Exception**:
+:meth:`HostFsDelegate.run_command` (9th method) is explicitly authorised by
+change 2026-07-10-p3-driver-gate-pilot design §5.3 to break the §5.1 lock —
+the P3 driver-gate pilot needs the backend to run ``sillyspec gate verify``
+on the daemon side (where the source code / agent artefacts live, design §1
+gate-constraint-①). ``run_command`` carries its own command whitelist safety
+layer (R3) and goes fail-loud via :meth:`_via_rpc` (NOT
+:meth:`_via_rpc_or_degrade`) — gate failure must surface, not degrade.
 
 Cross-task contract:
     expects_from task-02:
         - contract: HostFsWsRpc
           needs: [send_rpc]
     Only ``send_rpc`` is consumed here; the real transport (request/response
-    matching, timeout, reconnect) is task-02's responsibility.
+    matching, timeout, reconnect) is task-02's responsibility. ``send_rpc``
+    carries an optional ``timeout`` kwarg (M5, run_command forwards the gate
+    12-min budget); existing 8 methods leave ``timeout=None`` to keep the
+    default 30s transport budget and stay compatible with mocks whose
+    ``send_rpc`` signature has no ``timeout`` parameter.
 """
 
 from __future__ import annotations
@@ -112,6 +123,15 @@ class _WsRpcLike(Protocol):
 
     Only ``send_rpc`` is consumed here; ``rpc_id`` is task-02.provides for
     correlation and is not invoked from this module.
+
+    ``timeout`` (M5, P3-driver-gate-pilot design §5.3) is an optional per-call
+    transport budget. ``run_command`` forwards the gate 12-min ceiling; the
+    other 8 methods leave it ``None`` so the default 30s transport budget
+    applies. To stay backwards-compatible with existing mocks (whose
+    ``send_rpc`` signature predates this kwarg), :meth:`_via_rpc` only forwards
+    ``timeout`` when it is not ``None`` — so a ``send_rpc`` without the
+    ``timeout`` parameter still satisfies the 8-method call path. task-02's
+    real :class:`HostFsWsRpc` MUST accept ``timeout`` to serve ``run_command``.
     """
 
     async def send_rpc(
@@ -121,6 +141,7 @@ class _WsRpcLike(Protocol):
         workspace_id: str,
         daemon_id: str,
         args: dict[str, Any],
+        timeout: float | None = None,
     ) -> dict[str, Any]:  # pragma: no cover — protocol body
         ...
 
@@ -136,8 +157,10 @@ class HostFsDelegate:
     runs locally (server-local) or forwards over the daemon WS RPC
     (daemon-client).
 
-    The eight public methods are the cross-task contract surface — see design
-    §5.1. Renaming or re-parameterising them breaks W2/W3 consumers.
+    The nine public methods are the cross-task contract surface — see design
+    §5.1 (8 read/write methods) + design §5.3 (``run_command``, the 9th,
+    authorised P3-driver-gate-pilot break of the §5.1 lock). Renaming or
+    re-parameterising them breaks W2/W3 consumers.
     """
 
     # D-006 degraded return for git_apply when the RPC channel is unavailable
@@ -652,6 +675,146 @@ class HostFsDelegate:
         return data if isinstance(data, dict) else None
 
     # ------------------------------------------------------------------
+    # run_command（第 9 方法 — design §5.3 授权破 §5.1 锁死契约）
+    # ------------------------------------------------------------------
+
+    #: 允许在 ``args`` 头部之后追加的 flag 集合（design §5.3：stage 枚举 +
+    #: changeName 之外的已知 flag）。新增 gate 模板参数需在此白名单登记，
+    #: 否则 run_command 拒绝执行——防任意命令注入（R3）。
+    _GATE_VERIFY_TAIL_FLAG_WHITELIST: frozenset[str] = frozenset({"--stage"})
+
+    #: gate verify 模板头部（command 之后）的固定长度前缀：
+    #: ``["gate", "verify", "--change", <changeName>, "--json"]``。changeName
+    #: 占位允许任意非空字符串（gate 任务已对 change_id 做来源校验），但
+    #: 模板结构必须精确匹配——少 flag / 换子命令 / 缺 --json 都拒。
+    _GATE_VERIFY_PREFIX_LEN = 5
+
+    async def run_command(
+        self,
+        workspace: Workspace,
+        *,
+        command: str,
+        args: list[str],
+        cwd: str,
+        timeout: float,
+        env: dict[str, str] | None = None,
+    ) -> dict:
+        """Run a whitelisted command on the daemon side, returning
+        ``{exit_code, stdout, stderr, duration_ms}``.
+
+        仅供 P3 driver-gate pilot（design §5.3）——gate 决策任务在 daemon
+        侧跑 ``sillyspec gate verify --change <name> --json`` 客观核验 stage
+        能否标记完成（exit 0 推进 / 1 打回 / 2 卡住报警）。破 §5.1 锁死契约，
+        但带命令白名单安全层（R3）拒任意命令注入。
+
+        **命令白名单（入口第一步校验）**：``command`` 必须为 ``"sillyspec"``，
+        ``args`` 头部必须匹配
+        ``["gate", "verify", "--change", <changeName>, "--json"]``，且尾部追加
+        的 flag 必须在 :attr:`_GATE_VERIFY_TAIL_FLAG_WHITELIST` 内（当前仅
+        ``--stage``）。违例 raise :class:`HostFsDelegateError`。
+
+        server-local: raise :class:`HostFsDelegateError`——gate 必须 daemon
+        跑（容器够不到源代码 / agent 产物，design §5.3 gate-constraint-①）。
+        daemon-client: 走 :meth:`_via_rpc`（**非** :meth:`_via_rpc_or_degrade`
+        ——gate fail-loud，RPC 异常直接抛给 gate 任务，task-07 catch 后置
+        ``gate_status=failed + exit 2``），``timeout`` 透传给
+        ``rpc.send_rpc(timeout=timeout)``（M5，gate 12-min 预算）。
+
+        Args:
+            workspace: 目标工作区（取 ``path_source`` 分流 + ``id`` 路由 RPC）。
+            command: 可执行名，当前白名单仅 ``"sillyspec"``。
+            args: 命令参数序列，头部须匹配 gate verify 模板。
+            cwd: 工作目录（daemon 侧执行路径，= workspace root）。
+            timeout: 单次命令超时秒数（gate 传 720=12min）。
+            env: 可选环境变量注入（如 SILLYSPEC_DEBUG）。
+
+        Returns:
+            ``{exit_code, stdout, stderr, duration_ms}`` —— daemon handler
+            （task-02 / host-fs-handler.ts:run_command）原样产出，本方法透传。
+        """
+        self._enforce_command_whitelist(command=command, args=args)
+
+        if not is_daemon_client_path_source(workspace.path_source):
+            raise HostFsDelegateError(
+                "run_command requires daemon-client path source "
+                "(gate must run where source code lives — the backend "
+                "container cannot reach the host source tree)",
+                details={
+                    "command": command,
+                    "workspace_id": str(getattr(workspace, "id", "")),
+                    "path_source": workspace.path_source,
+                },
+            )
+
+        return await self._via_rpc(
+            method="run_command",
+            workspace=workspace,
+            args={
+                "command": command,
+                "args": list(args),
+                "cwd": cwd,
+                "timeout": timeout,
+                "env": env,
+            },
+            timeout=timeout,
+        )
+
+    def _enforce_command_whitelist(self, *, command: str, args: list[str]) -> None:
+        """Gate-verify command whitelist（R3 安全层）。
+
+        只允许 ``sillyspec gate verify --change <changeName> --json``（尾部
+        可追加 :attr:`_GATE_VERIFY_TAIL_FLAG_WHITELIST` 内的 flag）。任何其他
+        command / 子命令 / flag 组合 raise :class:`HostFsDelegateError`——这是
+        run_command 拒任意命令注入的唯一防线（execFile 在 daemon handler，
+        本层先于 RPC 拦截）。
+        """
+        if command != "sillyspec":
+            raise HostFsDelegateError(
+                "command not whitelisted (only 'sillyspec' gate verify allowed)",
+                details={"command": command, "args": args},
+            )
+
+        if len(args) < self._GATE_VERIFY_PREFIX_LEN:
+            raise HostFsDelegateError(
+                "args too short for gate verify template "
+                "(expected prefix [gate, verify, --change, <name>, --json])",
+                details={"command": command, "args": args},
+            )
+
+        # 头部结构精确匹配：args[0..2] + args[4] 必须为固定 token，args[3] 为
+        # 任意非空 changeName（gate 任务负责来源校验，白名单只守结构）。
+        head = args[: self._GATE_VERIFY_PREFIX_LEN]
+        if (
+            head[0] != "gate"
+            or head[1] != "verify"
+            or head[2] != "--change"
+            or head[4] != "--json"
+            or not head[3]
+        ):
+            raise HostFsDelegateError(
+                "args do not match gate verify template [gate, verify, --change, <name>, --json]",
+                details={"command": command, "args": args},
+            )
+
+        # 尾部 flag 必须在白名单内（当前仅 --stage，且需带值，故成对消费）。
+        tail = args[self._GATE_VERIFY_PREFIX_LEN :]
+        i = 0
+        while i < len(tail):
+            flag = tail[i]
+            if flag not in self._GATE_VERIFY_TAIL_FLAG_WHITELIST:
+                raise HostFsDelegateError(
+                    f"args tail flag not whitelisted: {flag}",
+                    details={"command": command, "args": args, "flag": flag},
+                )
+            # 白名单 flag 需带值（--stage <value>）——成对消费，无值则拒。
+            if i + 1 >= len(tail):
+                raise HostFsDelegateError(
+                    f"args tail flag missing value: {flag}",
+                    details={"command": command, "args": args, "flag": flag},
+                )
+            i += 2
+
+    # ------------------------------------------------------------------
     # RPC dispatch (daemon-client branch)
     # ------------------------------------------------------------------
     async def _via_rpc(
@@ -660,6 +823,7 @@ class HostFsDelegate:
         method: str,
         workspace: Workspace,
         args: dict[str, Any],
+        timeout: float | None = None,
     ) -> dict:
         """Forward a host_fs.* call over the daemon WS RPC.
 
@@ -676,6 +840,12 @@ class HostFsDelegate:
         对新 workspace（此列恒 NULL）更是早早抛错。resolver 覆盖新链路
         （member binding 的 ``daemon_id``）+ legacy 回退（runtime→instance join），
         两路都 None 即 genuinely unbound，raise 让 caller surface。
+
+        ``timeout`` (M5, P3-driver-gate-pilot design §5.3)：可选的 per-call 传输
+        预算。``run_command`` 转发 gate 12-min 上限；其他 8 方法保持 ``None``
+        走默认 30s。关键：``timeout`` 为 ``None`` 时**不**透传给
+        ``rpc.send_rpc``——这保证现有 8 方法 + 早期 mock（``send_rpc`` 签名无
+        ``timeout`` 参数）零回归；非 ``None`` 时才 ``rpc.send_rpc(..., timeout=)``。
         """
         rpc = self._ws_rpc
         if rpc is None:
@@ -696,11 +866,21 @@ class HostFsDelegate:
                     "workspace_id": str(getattr(workspace, "id", "")),
                 },
             )
+        # M5 向下兼容：timeout=None 时**不**传给 send_rpc——现有 8 方法 +
+        # 早期 mock（send_rpc 无 timeout 参数）零回归；非 None 才透传。
+        if timeout is None:
+            return await rpc.send_rpc(
+                method=method,
+                workspace_id=str(workspace.id),
+                daemon_id=str(daemon_id),
+                args=args,
+            )
         return await rpc.send_rpc(
             method=method,
             workspace_id=str(workspace.id),
             daemon_id=str(daemon_id),
             args=args,
+            timeout=timeout,
         )
 
     async def _via_rpc_or_degrade(

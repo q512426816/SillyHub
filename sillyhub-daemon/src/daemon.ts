@@ -2159,12 +2159,18 @@ export class Daemon {
   }
 
   /**
-   * task-03（2026-07-06-daemon-host-fs-delegate / FR-02）：注册 host_fs.* 八方法 RPC handler。
+   * task-03（2026-07-06-daemon-host-fs-delegate / FR-02）+ task-02（P3 driver gate pilot）：
+   * 注册 host_fs.* 九方法 RPC handler。
    *
    * backend complete_lease 收尾的 3 个宿主操作（apply_patch / post_scan / stage_callback）
    * 经 HostFsDelegate（task-01）+ ws_rpc（task-02）调本 handler，在宿主（Windows）执行
    * stat / read_file / list_dir / git_apply / git_rev_parse / pollution_archive /
    * read_package_json / read_local_yaml。
+   *
+   * task-02（P3 driver gate pilot）：加第 9 方法 run_command，接 backend HostFsDelegate.run_command
+   * 经 send_rpc（M5 带 timeout）转发的 gate 核验请求，在宿主跑 `sillyspec gate verify --change
+   * <name> --json [--stage <stage>]`（命令白名单 R3 + AC-8 拒非 gate 命令），返回
+   * `{exit_code, stdout, stderr, duration_ms}`（design §5.3 / §7）。
    *
    * 方法名带 `host_fs.` 前缀（与 design §7 method 字段对齐，避免与 list_dir /
    * get_spec_bundle 命名空间冲突）。handler 收 `params`（ws-client.ts:_dispatchRpc 已归一化
@@ -2182,7 +2188,7 @@ export class Daemon {
     }
     const handler = new HostFsHandler({ allowed_roots: this._config.allowed_roots });
 
-    // 八方法各注册一次（method 带 host_fs. 前缀）。handler 抛 RpcError 由 _dispatchRpc
+    // 九方法各注册一次（method 带 host_fs. 前缀）。handler 抛 RpcError 由 _dispatchRpc
     // 原样回填 code；抛普通 Error 映射 internal（ws-client.ts:512-519）。
     ws.registerRpcHandler('host_fs.stat', async (params) => {
       const path = typeof params.path === 'string' ? params.path : '';
@@ -2232,6 +2238,27 @@ export class Daemon {
     ws.registerRpcHandler('host_fs.read_local_yaml', async (params) => {
       const root = typeof params.root === 'string' ? params.root : '';
       return handler.readLocalYaml({ root });
+    });
+    // task-02（P3 driver gate pilot / design §5.3+§7）：第 9 方法 run_command。
+    // 参数清洗（command/args/cwd/timeout/env 类型守卫）后调 handler.runCommand，
+    // 白名单在 handler 内判定（R3/AC-8 拒非 gate 命令 → exit_code 126 结构化回传不抛）。
+    // timeout 默认 12min（对齐 M5，与 backend HostFsDelegate.run_command 传值一致）；
+    // 透传调用方值（params.timeout 合法 >0 时用之，不写死）。
+    ws.registerRpcHandler('host_fs.run_command', async (params) => {
+      const command = typeof params.command === 'string' ? params.command : '';
+      const args = Array.isArray(params.args)
+        ? params.args.filter((a) => typeof a === 'string')
+        : [];
+      const cwd = typeof params.cwd === 'string' ? params.cwd : '';
+      const timeout =
+        typeof params.timeout === 'number' && params.timeout > 0
+          ? params.timeout
+          : 12 * 60 * 1000;
+      const env =
+        params.env && typeof params.env === 'object' && !Array.isArray(params.env)
+          ? (params.env as Record<string, string>)
+          : null;
+      return handler.runCommand({ command, args, cwd, timeout, env });
     });
   }
 

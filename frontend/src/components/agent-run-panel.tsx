@@ -10,6 +10,7 @@ import { getAgentRun } from "@/lib/agent";
 import { formatTokenCount } from "@/lib/format-token";
 import { useAgentRunStream } from "@/lib/use-agent-run-stream";
 import type { AgentRunInputStream } from "@/lib/use-agent-run-stream";
+import type { GateStatusEvent } from "@/lib/agent-stream";
 
 // ────────────────────────────────────────────────────────────────────────────
 // AgentRunPanel — AgentRunStream 的统一面板组件
@@ -64,6 +65,11 @@ export interface AgentRunPanelProps {
   onDone?: (status: string) => void;
   /** 关闭面板回调；传入后 panel 自动在 actions 区追加关闭按钮 */
   onClose?: () => void;
+  /**
+   * task-12 / design §5.7：gate_status 变化通知父组件（透传 hook gateStatus）。
+   * SSE gate_status_changed 触发，父组件据此更新 verify stage gate 徽标。
+   */
+  onGateStatusChanged?: (gateStatus: GateStatusEvent | null) => void;
 }
 
 /**
@@ -144,6 +150,7 @@ export function AgentRunPanel({
   isLive,
   onDone,
   onClose,
+  onGateStatusChanged,
 }: AgentRunPanelProps) {
   // ──────────────────────────────────────────────────────────────────────────
   // task-16 / FR-11：run 累计 input/output token 状态 + 5s 轮询刷新。
@@ -181,7 +188,15 @@ export function AgentRunPanel({
     [onDone],
   );
 
-  const { logs, loading, error, perms, dismissPerm, input } = useAgentRunStream(
+  const {
+    logs,
+    loading,
+    error,
+    perms,
+    dismissPerm,
+    input,
+    gateStatus,
+  } = useAgentRunStream(
     workspaceId,
     runId,
     {
@@ -189,6 +204,12 @@ export function AgentRunPanel({
       onDone: handleDone,
     },
   );
+
+  // task-12 / design §5.7：透传 gateStatus 到父组件（SSE gate_status_changed →
+  // 父 page.tsx 更新 verify stage gate 徽标）。gateStatus=null 亦透传（初始化/清除）。
+  React.useEffect(() => {
+    onGateStatusChanged?.(gateStatus);
+  }, [gateStatus, onGateStatusChanged]);
 
   React.useEffect(() => {
     if (!runId) {
