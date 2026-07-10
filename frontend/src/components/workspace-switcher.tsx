@@ -152,7 +152,7 @@ export function WorkspaceSwitcher(): JSX.Element {
     if (!ws) return; // 列表还没拉到，等下一轮
     setCurrent({
       ...current,
-      name: ws.name,
+      name: ws.display_alias ?? ws.name, // 优先别名，无别名才用原名
       root_path: ws.root_path ?? current.root_path ?? null,
     });
   }, [workspaceId, current, workspaceById, setCurrent]);
@@ -168,7 +168,7 @@ export function WorkspaceSwitcher(): JSX.Element {
       const status = statusMap[ws.id];
       return {
         id: ws.id,
-        name: ws.name,
+        name: ws.display_alias ?? ws.name, // 优先别名，无别名才用原名
         daemonId,
         // statusMap 由 task-03 按 workspace_id 索引提供 online；无条目 → false
         online: status?.online ?? false,
@@ -177,15 +177,15 @@ export function WorkspaceSwitcher(): JSX.Element {
     });
   }, [listQuery.data, statusMap]);
 
-  // 当前工作区名（按钮显示）：优先 store current.name；空则从列表查；
-  // 仍空则退化用 id（保证按钮始终有可读文本）。
+  // 当前工作区名（按钮显示）：优先 store current.name（fillCurrentName 已写 alias ?? name）；
+  // 空则从列表查（优先别名）；仍空则退化用 id（保证按钮始终有可读文本）。
   const currentName = (() => {
     if (current?.name) return current.name;
-    if (workspaceId) {
-      const ws = workspaceById.get(workspaceId);
-      if (ws?.name) return ws.name;
+    if (workspaceId ?? current?.id) {
+      const ws = workspaceById.get(workspaceId ?? current!.id);
+      if (ws) return ws.display_alias ?? ws.name;
     }
-    return workspaceId ?? "";
+    return workspaceId ?? current?.id ?? "";
   })();
 
   // daemon 当前状态徽标（按钮态）：优先 workspaceId（工作区页），平台页退化用
