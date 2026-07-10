@@ -31,7 +31,7 @@ import {
   formatRelativeTime,
 } from "@/components/daemon/runtime-card-helpers";
 import { Button } from "@/components/ui/button";
-import { ApiError } from "@/lib/api";
+import { ApiError, getDirectApiBaseUrl } from "@/lib/api";
 import {
   deleteDaemonRuntime,
   disableDaemonRuntime,
@@ -100,9 +100,9 @@ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
   // 渲染所需：apiKey（优先）或 accessToken（fallback）
   if (!apiKey && !accessToken) return null;
 
-  const frontendUrl =
-    typeof window !== "undefined" ? window.location.origin : "http://localhost:3001";
-  const serverUrl = frontendUrl.replace(/:3001$/, ":8001");
+  // daemon 直连后端（不走前端代理）；读 build 时注入的 NEXT_PUBLIC_API_BASE_URL，
+  // 与 docker 部署端口（默认 8000）一致，不再写死 :3001→:8001 映射。
+  const serverUrl = getDirectApiBaseUrl();
   // 优先用长期 API Key；fallback 到浏览器短期 access_token（TTL 15min，不适合长期运行）。
   const useApiKey = !!apiKey;
   const placeholderCred = useApiKey ? (apiKey as string) : "<access_token>";
@@ -156,8 +156,9 @@ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
  * 显示一键安装命令 `curl -fsSL <server>/daemon/install.sh | bash`，由 nginx 托管
  * 的 install.sh 执行（下载 ncc 单文件 bundle + 写 wrapper + 加 PATH）。
  *
- * serverUrl 从 window.location.origin 推导（:3001 前端 → :8001 后端/nginx），
- * 不硬编码 IP。用 mounted state 避免服务端/客户端 hydration 不一致。
+ * serverUrl 取 daemon 直连后端地址（getDirectApiBaseUrl，build 时注入
+ * NEXT_PUBLIC_API_BASE_URL，默认 docker 部署端口 8000）。用 mounted state
+ * 避免服务端/客户端 hydration 不一致。
  */
 function InstallDaemonBlock() {
   const [open, setOpen] = useState(false);
@@ -165,9 +166,9 @@ function InstallDaemonBlock() {
   const [serverUrl, setServerUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    const frontendUrl = window.location.origin;
-    // 前端 :3001 → 后端/nginx :8001，与 CopyDaemonCommand 的 serverUrl 推导一致。
-    setServerUrl(frontendUrl.replace(/:3001$/, ":8001"));
+    // daemon 直连后端（不走前端代理）；读 build 时注入的 NEXT_PUBLIC_API_BASE_URL，
+    // 与 docker 部署端口（默认 8000）一致，不再写死 :3001→:8001 映射。
+    setServerUrl(getDirectApiBaseUrl());
   }, []);
 
   const cmd = serverUrl
