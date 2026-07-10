@@ -574,3 +574,44 @@ class TestZeroRegression:
                 cwd=ws.root_path,
                 timeout=720.0,
             )
+
+
+# ── task-06 gate-cwd-specdir-fix：--spec-dir 白名单注入拒（R3）────────────────
+class TestGateSpecDirWhitelist:
+    """--spec-dir flag 白名单（task-06）：拒路径遍历注入 + 缺值。"""
+
+    @pytest.mark.asyncio
+    async def test_spec_dir_path_traversal_rejected(self) -> None:
+        """--spec-dir 值含 ``..`` 路径遍历 → raise HostFsDelegateError（R3 防注入）。"""
+        delegate = HostFsDelegate(
+            session=None,
+            ws_rpc=_MockWsRpcTimeout(),
+            daemon_id_resolver=_fake_daemon_id_resolver,
+        )
+        ws = _make_daemon_client_workspace()
+        with pytest.raises(HostFsDelegateError):
+            await delegate.run_command(
+                workspace=ws,
+                command="sillyspec",
+                args=_gate_args("demo", extra=["--spec-dir", "../../../etc/passwd"]),
+                cwd="/code/root",
+                timeout=30,
+            )
+
+    @pytest.mark.asyncio
+    async def test_spec_dir_empty_value_rejected(self) -> None:
+        """--spec-dir 缺值（尾部无 value）→ raise HostFsDelegateError（成对消费校验）。"""
+        delegate = HostFsDelegate(
+            session=None,
+            ws_rpc=_MockWsRpcTimeout(),
+            daemon_id_resolver=_fake_daemon_id_resolver,
+        )
+        ws = _make_daemon_client_workspace()
+        with pytest.raises(HostFsDelegateError):
+            await delegate.run_command(
+                workspace=ws,
+                command="sillyspec",
+                args=_gate_args("demo", extra=["--spec-dir"]),
+                cwd="/code/root",
+                timeout=30,
+            )

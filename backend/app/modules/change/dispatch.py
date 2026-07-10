@@ -1127,7 +1127,8 @@ async def _run_gate_via_delegate(
     session: AsyncSession,
     workspace: Any,
     change_name: str,
-    spec_root: str,
+    code_root: str,
+    spec_dir: str | None,
     stage: str = "verify",
 ) -> dict[str, Any]:
     """经 HostFsDelegate.run_command 在 daemon 侧执行 ``sillyspec gate``。
@@ -1157,7 +1158,9 @@ async def _run_gate_via_delegate(
         session: async DB session（HostFsDelegate 路由 daemon_id 用）。
         workspace: 目标工作区（取 path_source + id 路由 RPC）。
         change_name: 变更名（sillyspec change 目录名，非 change_id）。
-        spec_root: daemon 侧 spec 根目录（cwd，run_command 执行路径）。
+        code_root: 项目代码根（gate cwd，跑测试，有 backend/frontend 代码）。
+        spec_dir: spec 根目录（gate specBase via ``--spec-dir``，读 local.yaml/spec
+            产物）；None 时不加 --spec-dir（gate specBase 走默认 resolveSpecDir(code_root)）。
         stage: gate stage，当前 ``"verify"``（design §5.4 gate 当前仅 verify，
             参数化前瞻 P4 execute——注意 task-01 白名单当前只锁 verify）。
 
@@ -1165,13 +1168,18 @@ async def _run_gate_via_delegate(
         ``{"exit_code": int, "errors": list[str], "raw_envelope": dict}``。
     """
     args = ["gate", stage, "--change", change_name, "--json"]
+    if spec_dir:
+        # task-02 gate-cwd-specdir-fix：spec_dir via --spec-dir（sillyspec :161
+        # 全局解析 + :323 透传 runGate.specBase），让 gate 在 code_root 跑测试
+        # 的同时从 spec_dir 读 local.yaml/spec 产物（坑 3 cwd/specBase 分离）。
+        args += ["--spec-dir", spec_dir]
     try:
         delegate = _new_host_fs_delegate(session)
         result = await delegate.run_command(
             workspace=workspace,
             command="sillyspec",
             args=args,
-            cwd=spec_root,
+            cwd=code_root,
             timeout=_GATE_RPC_TIMEOUT_SECONDS,
         )
     except Exception as exc:

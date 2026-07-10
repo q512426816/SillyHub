@@ -170,7 +170,8 @@ async def test_run_gate_via_delegate_ok_true(monkeypatch: pytest.MonkeyPatch) ->
         session=session,
         workspace=workspace,
         change_name="demo-change",
-        spec_root="/spec/root",
+        code_root="/code/root",
+        spec_dir="/spec/dir",
     )
     assert result["exit_code"] == 0
     assert result["errors"] == []
@@ -179,8 +180,16 @@ async def test_run_gate_via_delegate_ok_true(monkeypatch: pytest.MonkeyPatch) ->
     delegate.run_command.assert_awaited_once()
     call_kwargs = delegate.run_command.call_args.kwargs
     assert call_kwargs["command"] == "sillyspec"
-    assert call_kwargs["args"] == ["gate", "verify", "--change", "demo-change", "--json"]
-    assert call_kwargs["cwd"] == "/spec/root"
+    assert call_kwargs["args"] == [
+        "gate",
+        "verify",
+        "--change",
+        "demo-change",
+        "--json",
+        "--spec-dir",
+        "/spec/dir",
+    ]
+    assert call_kwargs["cwd"] == "/code/root"
     assert call_kwargs["timeout"] == _GATE_RPC_TIMEOUT_SECONDS
 
 
@@ -197,7 +206,8 @@ async def test_run_gate_via_delegate_ok_false(monkeypatch: pytest.MonkeyPatch) -
         session=MagicMock(),
         workspace=_make_workspace(),
         change_name="demo",
-        spec_root="/spec/root",
+        code_root="/code/root",
+        spec_dir="/spec/dir",
     )
     assert result["exit_code"] == 1
     assert result["errors"] == ["verify-test 失败"]
@@ -225,7 +235,8 @@ async def test_run_gate_via_delegate_z1_subcommand_missing(
         session=MagicMock(),
         workspace=_make_workspace(),
         change_name="demo",
-        spec_root="/spec/root",
+        code_root="/code/root",
+        spec_dir="/spec/dir",
     )
     assert result["exit_code"] == 2
     assert any("gate 子命令缺失" in e for e in result["errors"])
@@ -250,7 +261,8 @@ async def test_run_gate_via_delegate_z1_subcommand_missing_no_such_command(
         session=MagicMock(),
         workspace=_make_workspace(),
         change_name="demo",
-        spec_root="/spec/root",
+        code_root="/code/root",
+        spec_dir="/spec/dir",
     )
     assert result["exit_code"] == 2
     assert any("gate 子命令缺失" in e for e in result["errors"])
@@ -274,7 +286,8 @@ async def test_run_gate_via_delegate_json_parse_failure_no_subcmd_signal(
         session=MagicMock(),
         workspace=_make_workspace(),
         change_name="demo",
-        spec_root="/spec/root",
+        code_root="/code/root",
+        spec_dir="/spec/dir",
     )
     assert result["exit_code"] == 2
     assert any("JSON 解析失败" in e for e in result["errors"])
@@ -300,7 +313,8 @@ async def test_run_gate_via_delegate_rpc_exception_returns_exit_two(
         session=MagicMock(),
         workspace=_make_workspace(),
         change_name="demo",
-        spec_root="/spec/root",
+        code_root="/code/root",
+        spec_dir="/spec/dir",
     )
     assert result["exit_code"] == 2
     assert any("gate 执行异常" in e for e in result["errors"])
@@ -326,7 +340,8 @@ async def test_run_gate_via_delegate_stage_parameterized(
         session=MagicMock(),
         workspace=_make_workspace(),
         change_name="demo",
-        spec_root="/spec/root",
+        code_root="/code/root",
+        spec_dir="/spec/dir",
         stage="verify",
     )
     call_args = delegate.run_command.call_args.kwargs["args"]

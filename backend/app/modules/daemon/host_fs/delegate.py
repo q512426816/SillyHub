@@ -681,7 +681,8 @@ class HostFsDelegate:
     #: 允许在 ``args`` 头部之后追加的 flag 集合（design §5.3：stage 枚举 +
     #: changeName 之外的已知 flag）。新增 gate 模板参数需在此白名单登记，
     #: 否则 run_command 拒绝执行——防任意命令注入（R3）。
-    _GATE_VERIFY_TAIL_FLAG_WHITELIST: frozenset[str] = frozenset({"--stage"})
+    #: ``--spec-dir``（task-03 gate-cwd-specdir-fix）：值校验防路径遍历（见 while 循环）。
+    _GATE_VERIFY_TAIL_FLAG_WHITELIST: frozenset[str] = frozenset({"--stage", "--spec-dir"})
 
     #: gate verify 模板头部（command 之后）的固定长度前缀：
     #: ``["gate", "verify", "--change", <changeName>, "--json"]``。changeName
@@ -806,12 +807,24 @@ class HostFsDelegate:
                     f"args tail flag not whitelisted: {flag}",
                     details={"command": command, "args": args, "flag": flag},
                 )
-            # 白名单 flag 需带值（--stage <value>）——成对消费，无值则拒。
+            # 白名单 flag 需带值（--stage/--spec-dir <value>）——成对消费，无值则拒。
             if i + 1 >= len(tail):
                 raise HostFsDelegateError(
                     f"args tail flag missing value: {flag}",
                     details={"command": command, "args": args, "flag": flag},
                 )
+            # --spec-dir 值校验（task-03 R3 防注入）：路径遍历防护——非空 + 不含 ".."。
+            # backend 构造 args 时 spec_dir 受控（_resolve_gate_spec_root 返回的
+            # SpecWorkspace.spec_root），本层兜底防恶意路径（../../etc/passwd）；
+            # daemon handler assertWithinAllowedRoots 不覆盖 spec_dir（spec_dir 是
+            # sillyspec 的 specBase 读 local.yaml，独立于 workspace 代码根）。
+            if flag == "--spec-dir":
+                value = tail[i + 1]
+                if not value or ".." in value:
+                    raise HostFsDelegateError(
+                        f"--spec-dir value invalid (empty or path traversal): {value!r}",
+                        details={"command": command, "args": args, "flag": flag, "value": value},
+                    )
             i += 2
 
     # ------------------------------------------------------------------

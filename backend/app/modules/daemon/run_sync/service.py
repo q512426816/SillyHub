@@ -1121,9 +1121,11 @@ class RunSyncService:
                 if change is None:
                     raise RuntimeError(f"change not found: {change_id}")
                 change_name = change.change_key
-                spec_root = await self._resolve_gate_spec_root(gate_session, workspace, change)
-                if not spec_root:
-                    raise RuntimeError(f"gate spec_root unresolvable for change {change_id}")
+                code_root, spec_dir = await self._resolve_gate_spec_root(
+                    gate_session, workspace, change
+                )
+                if not code_root:
+                    raise RuntimeError(f"gate code_root unresolvable for change {change_id}")
 
                 # task-06 _run_gate_via_delegate（走 task-01 HostFsDelegate.run_command
                 # 在 daemon 跑 sillyspec gate verify，27s+），已含 _read_gate_result 解析
@@ -1132,7 +1134,8 @@ class RunSyncService:
                     gate_session,
                     workspace,
                     change_name,
-                    spec_root,
+                    code_root,
+                    spec_dir,
                     stage="verify",
                 )
 
@@ -1266,24 +1269,34 @@ class RunSyncService:
         gate_session: AsyncSession,
         workspace: "object",
         change: "object",
-    ) -> str | None:
-        """解析 gate 命令的 daemon 侧 spec 根目录（cwd，task-07）。
+    ) -> tuple[str | None, str | None]:
+        """解析 gate 的 ``(code_root, spec_dir)``（task-01 gate-cwd-specdir-fix）。
 
-        gate 命令 ``sillyspec gate verify --change <name> --json`` 的 cwd 必须是
-        daemon 能找到 ``.sillyspec`` 的目录。按 SpecWorkspace.strategy 分流（对齐
-        dispatch.py ``_resolve_db_path`` / ``_resolve_db_rel_candidates`` 的解析模式）：
+        返回二元组，分离 gate 的 cwd（跑测试）与 specBase（读 local.yaml/spec 产物）：
 
-          - **platform-managed / repo-mirrored**：``spec_ws.spec_root`` 本身即扁平
-            ``.sillyspec`` 内容根（docs/changes/.runtime 直接在其下），cwd 用
-            ``spec_ws.spec_root``。
-          - **repo-native / 无 SpecWorkspace 行**：workspace.root_path（daemon 在源
-            项目根跑 sillyspec，自动找 ``<root>/.sillyspec``）。
+        - **code_root**：gate 跑测试的 cwd（项目代码根，有 backend/frontend 代码）。
+        - **spec_dir**：gate 读 local.yaml/spec 产物的 specBase（via ``--spec-dir``）。
 
-        失败返回 None（caller 抛 RuntimeError 置 gate_status=failed，fail-loud）。
+        daemon-client platform-managed/repo-mirrored：``code_root=workspace.root_path``
+        + ``spec_dir=SpecWorkspace.spec_root``（平台 specDir）。
+        repo-native/无 SpecWorkspace：``code_root=workspace.root_path`` + ``spec_dir=None``
+        （gate specBase 走默认 ``resolveSpecDir(code_root)=code_root/.sillyspec``）。
+        ``workspace.root_path`` 缺失返回 ``(None, None)``（caller 抛 RuntimeError 置
+        gate_status=failed，fail-loud）。
+
+        之前（P3 task-07）返回单个 ``spec_root`` 一肩挑两担（cwd 既跑测试又读
+        local.yaml），daemon-client 平台模式下 cwd=specDir 跑不了测试 / cwd=代码根
+        找不到 local.yaml（坑 3）。本变更分离，配合 sillyspec runGate cwd/specBase
+        分离（machine-interface.js:107 + index.js:323 接线）。
         """
         from sqlmodel import col as _col
 
         from app.core.spec_paths import SpecPathResolver
+
+        code_root = getattr(workspace, "root_path", None)
+        if not code_root:
+            return None, None
+        code_root = str(code_root)
 
         try:
             from app.modules.spec_workspace.model import SpecWorkspace
@@ -1295,12 +1308,13 @@ class RunSyncService:
             if spec_ws is not None and spec_ws.strategy != "repo-native" and spec_ws.spec_root:
                 # platform-managed：spec_root 本身即扁平根（SpecPathResolver
                 # platform_managed=True 的 _spec_root() == self.root）；repo-mirrored
-                # 同理（spec_root 为 daemon 同步的扁平快照根）。两者均直接用 spec_root。
+                # 同理（spec_root 为 daemon 同步的扁平快照根）。spec_dir 用它，
+                # code_root 仍用 workspace.root_path（项目代码根，跑测试）。
                 resolver = SpecPathResolver(
                     spec_ws.spec_root,
                     platform_managed=True,
                 )
-                return str(resolver._spec_root())
+                return code_root, str(resolver._spec_root())
         except Exception as exc:
             log.warning(
                 "gate_resolve_spec_root_spec_ws_failed",
@@ -1308,12 +1322,9 @@ class RunSyncService:
                 error=str(exc),
             )
 
-        root_path = getattr(workspace, "root_path", None)
-        if not root_path:
-            return None
-        # repo-native / server-local：cwd 用 workspace.root_path（sillyspec 找
-        # <root>/.sillyspec）。返回根路径即可，gate 自己解析 .sillyspec。
-        return str(root_path)
+        # repo-native / 无 SpecWorkspace：spec_dir=None（gate specBase 走默认
+        # resolveSpecDir(code_root)=code_root/.sillyspec，local 模式兼容）。
+        return code_root, None
 
     # ── private helpers（随主方法归位，design §6 / §10 R6） ───────────────
 
