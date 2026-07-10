@@ -78,9 +78,23 @@ frontend-typecheck:
 frontend-build:
 	cd frontend && pnpm build
 
-test: backend-test frontend-test
+daemon-install:
+	cd sillyhub-daemon && pnpm install
 
-lint: backend-lint frontend-lint
+daemon-test:
+	cd sillyhub-daemon && pnpm test
+
+daemon-typecheck:
+	cd sillyhub-daemon && pnpm typecheck
+
+daemon-build:
+	cd sillyhub-daemon && pnpm build
+
+test: backend-test frontend-test daemon-test
+
+lint: backend-lint frontend-lint daemon-typecheck
+
+build: frontend-build daemon-build
 
 up:
 	docker compose -f deploy/docker-compose.yml up --build
