@@ -387,12 +387,3 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 关联变更：（无）
 文件：frontend/src/components/daemon/remote-folder-picker.tsx
 结果：tsc exit 0。加 treeHeight state + resize useEffect，Tree height 动态响应视口 70vh（减去地址栏/已选/header-footer ≈ 180px，最小 200），弹窗最大占页面 70%。
-
-## ql-20260710-001-202d | 2026-07-10 09:23:34 | 修复 runtimes 页 daemon 安装命令端口推导 bug（写死 :3001→:8001，实际 docker 部署 3000→8000 致 curl /daemon/install.sh 打前端 404）
-状态：已完成
-关联变更：（无）
-文件：frontend/src/app/(dashboard)/runtimes/page.tsx
-根因：CopyDaemonCommand(line 103-105) + InstallDaemonBlock(line 167-171) 用 frontendUrl.replace(/:3001$/, ":8001") 推导 daemon serverUrl，只对 dev(3001→8001) 生效；docker 部署实际前端 3000、后端 8000，replace 不匹配 → serverUrl 保持前端 origin 3000 → 用户从页面复制的安装命令 curl <3000>/daemon/install.sh 打到前端 Next.js → 404（实测 3000→404、8000→200）。daemon 安装端点 /daemon/install.sh 只挂在后端 dist_router.py（无 /api 前缀），前端不认识。
-方案：两处改用现成 lib/api.ts:40 getDirectApiBaseUrl()——浏览器端读 build 时注入的 NEXT_PUBLIC_API_BASE_URL（docker 默认 http://localhost:8000，去尾斜杠），无 env 时 fallback getApiBaseUrl()。与 SSE 等直连后端场景同一数据源，单一真实来源，不再猜端口映射。InstallDaemonBlock 保留 useEffect+mounted 模式避免 hydration mismatch。
-改动：page.tsx 4 处——import 加 getDirectApiBaseUrl；CopyDaemonCommand 删 frontendUrl+replace 改 const serverUrl = getDirectApiBaseUrl()；InstallDaemonBlock 文档注释更新 + useEffect 改 setServerUrl(getDirectApiBaseUrl())。
-验证：grep 确认 :3001/:8001 仅剩说明性注释、frontendUrl 变量零残留；tsc --noEmit exit 0。待 frontend rebuild 部署后真机确认复制的命令端口=8000。

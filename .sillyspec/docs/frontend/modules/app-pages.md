@@ -33,7 +33,6 @@ created_at: 2026-06-24T01:02:00
 ## 注意事项
 - 登录态鉴权由 `(dashboard)` 布局统一兜底，单页不重复实现。
 - RuntimesPage 文件较长（600+ 行），含若干内联子组件（Key 复制、ServerUrl 设置等），改动时注意区分主页面与内联组件。
-- RuntimesPage 内联的 CopyDaemonCommand / InstallDaemonBlock 的 daemon serverUrl 统一取 `getDirectApiBaseUrl()`（读 build 时注入的 NEXT_PUBLIC_API_BASE_URL，docker 默认 :8000），不再写死端口映射；daemon 安装/启动命令据此拼装。
 - ApiKeysPage 的 key 明文只在创建瞬间返回，列表不回显，UI 需提示一次性。
 - `/runtimes`、`/workspaces` 页面：服务端分页（limit/offset）+ 筛选条（q/type/status）+ 平台管理员人员搜索（`useSession().is_platform_admin` 控制显隐，复用 `listUsers`，失败降级隐藏控件）+ 别名编辑（display_alias trim/null）+ URL 参数恢复（2026-06-25-admin-global-daemon-workspace-management，D-003/D-004）。
 
@@ -42,6 +41,5 @@ created_at: 2026-06-24T01:02:00
 
 ## 变更索引
 - ql-20260624-004-c8a2 | 优化 /settings/api-keys 页面：统一 PageHeader、SectionCard、StatusBadge、EmptyState，增加统计概览并整理表格操作区。
-- ql-20260710-001-202d | 修复 /runtimes 页 daemon 安装/启动命令端口推导：CopyDaemonCommand + InstallDaemonBlock 改用 `getDirectApiBaseUrl()`（读 NEXT_PUBLIC_API_BASE_URL，docker 默认 :8000），不再写死 :3001→:8001 映射（原逻辑致生产部署 3000/8000 下复制出的命令打前端 404）。
 
 <!-- MANUAL_NOTES_END -->
