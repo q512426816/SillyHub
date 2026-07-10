@@ -217,6 +217,25 @@ async function clickItem(label: string | RegExp) {
 }
 
 describe("WorkspaceSwitcher", () => {
+  it("工作区名优先别名（display_alias），无别名才用原名", async () => {
+    // current.name 空 → fillCurrentName 用列表补，应取 display_alias ?? name
+    setupCtx({ currentName: "", daemonOnline: true });
+    setupStatus({ "ws-a": { daemon_id: "d-a", online: true } });
+    mockedList.mockResolvedValue({
+      items: [mkWorkspace({ id: "ws-a", name: "原名", display_alias: "我的别名" })],
+      total: 1,
+    });
+    mockedBindings.mockResolvedValue([
+      mkBinding({ workspace_id: "ws-a", daemon_id: "d-a" }),
+    ]);
+
+    withQueryClient(<WorkspaceSwitcher />);
+
+    // 优先显示 display_alias，不是原名
+    expect(await screen.findByText("我的别名")).toBeInTheDocument();
+    expect(screen.queryByText("原名")).not.toBeInTheDocument();
+  });
+
   it("显示当前工作区名 + 在线 daemon 徽标（current.name 已有时直接用）", async () => {
     setupCtx({ currentName: "前端中台", daemonOnline: true });
     setupStatus({ "ws-a": { daemon_id: "d-a", online: true } });
