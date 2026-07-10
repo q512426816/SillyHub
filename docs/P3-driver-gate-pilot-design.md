@@ -2,7 +2,7 @@
 author: qinyi
 created_at: 2026-07-10T15:00:00+08:00
 updated_at: 2026-07-10T13:00:06+08:00
-status: draft v6（实现层修正版，待 review）
+status: implemented（SillyHub 已实现 2026-07；sillyspec 侧 gate hardening commit 4bd12fb）
 revision_note: |
   v1 错→v2 双路径→v3 单路径 daemon→v4 HostFsDelegate 同步→v5 异步化（close 快速 commit + 后台 gate 任务 + reconcile）。
 
@@ -17,7 +17,15 @@ revision_note: |
   ⑦ M4 补 auto_dispatch:197 改动伪代码；⑧ M5 send_rpc 协议加 timeout。
 ---
 
-# P3 Driver Gate Pilot — 设计草案
+# P3 Driver Gate Pilot — 设计/实现记录
+
+> ✅ **已实现**（2026-07）：SillyHub 侧完成 driver gate pilot。本文档是 v1→v6 设计演进记录，实际实现以 SillyHub 代码为准。
+>
+> **sillyspec 工具侧配套改进**（commit `4bd12fb`，来自 P3 联调反馈）：
+> ① `TEST_TIMEOUT_MS` 环境变量可配（`SILLYSPEC_TEST_TIMEOUT_MS`，默认 10min）——大项目（backend pytest 12min）默认不够时 daemon 调用方设环境变量放宽；
+> ② gate verify-test `skipped` 警告强化（显眼提示"gate 未核验测试，driver 不应据 exit 0 判定测试通过，integration-critical 变更应降级 FAIL"）——防 skipped 默默放行。
+>
+> **已知 follow-up**（gate 真跑前置，未在本轮 sillyspec 侧解）：local.yaml 轻量生成（与 scan 解耦）/ test_strategy:module 支持（verify-postcheck 读，monorepo 跑变更模块子集）/ daemon-client gate cwd 解析（specDir vs 代码根）。
 
 > 目标：agent 完成→平台推进间插入 SillySpec `gate` 客观核验，把"agent 自述完成就推进"升级为"平台客观核验通过才推进"。
 
