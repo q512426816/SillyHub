@@ -9,9 +9,11 @@
  *   新增一个渲染测试，确认顶栏左侧（面包屑之前）挂载了 WorkspaceSwitcher。
  *   直接 mock 掉 @/components/workspace-switcher，避免拖入 task-08 的 context /
  *   react-query / store 依赖（这些在 task-08 自身测试里覆盖，本任务只验接入）。
+ *
+ * ql-20260711-002-5b2c：pathname mock 改可变 hoisted ref，补 /ppm 下不渲染 WorkspaceSwitcher 用例。
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 // task-09：mock workspace-switcher，渲染时打一个稳定标记，断言接入即可。
@@ -23,8 +25,12 @@ vi.mock("@/components/workspace-switcher", () => ({
 }));
 
 // next/navigation 在 jsdom 下需 mock，避免引入真实路由依赖。
+// ql-20260711-002：pathname 改可变 hoisted ref，便于测 /ppm 下不渲染 WorkspaceSwitcher。
+const { pathnameRef } = vi.hoisted(() => ({
+  pathnameRef: { current: "/workspaces" },
+}));
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/workspaces",
+  usePathname: () => pathnameRef.current,
   useRouter: () => ({ push: () => {} }),
 }));
 
@@ -70,8 +76,13 @@ describe("resolvePlatformSwitch", () => {
  * task-09：TopBar 渲染测试。
  *
  * 验证顶栏左侧（面包屑之前）挂载了 WorkspaceSwitcher（FR-04 / AC-3）。
+ * ql-20260711-002-5b2c：补充 /ppm 下不渲染 WorkspaceSwitcher 的回归守护。
  */
 describe("TopBar 渲染", () => {
+  afterEach(() => {
+    pathnameRef.current = "/workspaces";
+  });
+
   it("顶栏左侧渲染 WorkspaceSwitcher（面包屑之前）", () => {
     const { container } = render(
       <TopBar displayName="管理员" onLogout={() => {}} />,
@@ -96,5 +107,24 @@ describe("TopBar 渲染", () => {
     const switcherIdx = children.indexOf(switcherAncestor!);
     expect(switcherIdx).toBeGreaterThanOrEqual(0);
     expect(switcherIdx).toBeLessThan(navIdx);
+  });
+
+  /**
+   * ql-20260711-002-5b2c：/ppm 下顶栏不渲染 WorkspaceSwitcher。
+   *
+   * PPM 模块不依赖工作区（页面/API 全走 /api/ppm/...、导航全 absolute），
+   * 顶栏「选择工作区」引导态在 /ppm 下会误导用户以为必须先选工作区。
+   * 验证 /ppm 及其子路径下 mock 的 WorkspaceSwitcher 不挂载。
+   */
+  it("/ppm 路径下不渲染 WorkspaceSwitcher", () => {
+    pathnameRef.current = "/ppm";
+    render(<TopBar displayName="管理员" onLogout={() => {}} />);
+    expect(screen.queryByTestId("workspace-switcher-mock")).toBeNull();
+  });
+
+  it("/ppm 子路径下也不渲染 WorkspaceSwitcher", () => {
+    pathnameRef.current = "/ppm/projects";
+    render(<TopBar displayName="管理员" onLogout={() => {}} />);
+    expect(screen.queryByTestId("workspace-switcher-mock")).toBeNull();
   });
 });
