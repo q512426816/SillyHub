@@ -1,15 +1,15 @@
-"""只读 workspace skills / .mcp.json 查看 service（task-06，变更 2026-07-07-skills-mcp-management-ui）。
+"""只读 workspace skills / .mcp.json 查看 service。
 
-D-006@V1：经 SpecPathResolver 定位 specDir，**只读**列出 workspace specDir/skills/
-下的自定义 skill 名 + 各 skill 文件清单；读 specDir/.mcp.json（env secret 脱敏）。
+backend 容器内**直读** ``spec_ws.spec_root``（容器路径 ``/data/spec-workspaces/{ws}``，
+经 docker bind mount 映射宿主 ``C:/data/spec-workspaces``，backend 自己可读）。
 
-NFR-05：backend 容器不可达宿主 specDir，统一经 HostFsDelegate RPC
-（list_dir / read_file / stat）读（2026-07-10-remove-server-local-workspace-mode
-后 daemon-client 为唯一路径来源，不再有 server-local 平铺分支）。
+**不经 HostFsDelegate RPC**（记忆 ``runtime-read-broken-daemon-client``：spec_root 是
+backend 容器路径，RPC 打到 daemon 宿主会读不到——daemon 宿主无该路径）。
+2026-07-11 spec sync 修复（ql-20260711-001）：skills_view 回归 backend 本地直读。
 
 参考：
 - daemon skill-manager.ts：workspace 自定义 skills 源 = ``specDir/skills/``
-- settings/router.py 的 ``_redact_mcp_env``（D-008 env secret 遮蔽，复用）
+- settings/router.py 的 ``_redact_mcp_env``（env secret 遮蔽，复用）
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from app.modules.workspace.service import WorkspaceService
 
 
 class SkillFileEntry(BaseModel):
-    """单个 workspace 自定义 skill 的只读视图（design §7）。"""
+    """单个 workspace 自定义 skill 的只读视图。"""
 
     name: str
     files: list[str] = Field(default_factory=list)
@@ -45,47 +45,30 @@ class SkillsViewResponse(BaseModel):
 class McpConfigViewResponse(BaseModel):
     """``GET /api/workspaces/{id}/mcp-config`` 响应（env secret 已脱敏）。
 
-    无 ``.mcp.json`` 或解析失败时返回空 ``{mcpServers: {}}``，不抛错（task-06 验收 D）。
+    无 ``.mcp.json`` 或解析失败时返回空 ``{mcpServers: {}}``，不抛错。
     """
 
     mcpServers: dict = Field(default_factory=dict)  # noqa: N815 - wire 格式与 MCP 标准 key 一致
 
 
 class SkillsViewService:
-    """只读 workspace skills / .mcp.json 查看器。
+    """只读 workspace skills / .mcp.json 查看器（backend 本地直读 spec_root）。
 
-    路径解析与 :class:`RuntimeService` 对齐（task-16 fix 后 daemon-client 唯一）：
-
-    - **root 选择**：强制用 ``spec_ws.spec_root``（宿主侧路径，daemon sync 产物）。
-      无 spec_ws → None（caller 返回空视图）。
-    - **mode 选择**：``platform_managed=True``（扁平布局，daemon spec-sync 产物无
-      ``.sillyspec`` 包裹）。
+    ``spec_ws.spec_root`` 是 backend 容器路径（bind mount 映射宿主），backend 自己
+    可直读。spec_root 不存在 / 无 skills 子目录 → 返回空视图（caller 友好）。
     """
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    # ── 路径解析（镜像 RuntimeService._resolver_for，task-16 fix）──────────────
-
     @staticmethod
     def _resolver_for(
         workspace: Workspace, spec_ws: SpecWorkspace | None
     ) -> SpecPathResolver | None:
-        """构造正确 root + mode 的 resolver（与 :class:`RuntimeService._resolver_for` 同逻辑）。
-
-        daemon-client 唯一路径（2026-07-10-remove-server-local-workspace-mode）：
-
-        - **root**：``spec_ws.spec_root``（服务器/宿主侧可读路径）。无 spec_ws / 空
-          spec_root → 返回 None，caller 返回空视图。
-        - **mode**：``platform_managed=True``（扁平，daemon spec-sync 产物无
-          ``.sillyspec`` 包裹）。
-        """
+        """构造 resolver（root = spec_ws.spec_root，mode = platform_managed 扁平）。"""
         if spec_ws and spec_ws.spec_root:
-            root = spec_ws.spec_root
-        else:
-            return None
-
-        return SpecPathResolver(root, platform_managed=True)
+            return SpecPathResolver(spec_ws.spec_root, platform_managed=True)
+        return None
 
     async def _get_base(self, workspace_id: uuid.UUID) -> tuple[Workspace, SpecWorkspace | None]:
         """取 workspace + 关联 spec_ws（无 spec_ws 返 None，不抛）。"""
@@ -94,29 +77,13 @@ class SkillsViewService:
         spec_ws = (await self._session.execute(stmt)).scalars().first()
         return ws, spec_ws
 
-    # ── HostFsDelegate 构造（RPC 读 list_dir/read_file/stat）─────────────────
-
-    @staticmethod
-    def _make_host_fs_delegate(session: AsyncSession):
-        """构造 HostFsDelegate（经 RPC list_dir/read_file/stat 原语读 daemon 宿主 specDir）。
-
-        lazy 构造 + 复用进程级 ws_hub 单例；workspace 源码物理位于绑定 daemon 宿主，
-        backend 容器不可达，统一走 RPC。
-        """
-        from app.modules.daemon.host_fs import HostFsDelegate, HostFsWsRpc
-        from app.modules.daemon.ws_hub import get_daemon_ws_hub
-
-        hub = get_daemon_ws_hub()
-        return HostFsDelegate(session, hub, HostFsWsRpc(hub))
-
-    # ── 公开 API ─────────────────────────────────────────────────────────────
+    # ── 公开 API（backend 本地直读 spec_root，不经 RPC）─────────────────────────
 
     async def list_skills(self, workspace_id: uuid.UUID) -> SkillsViewResponse:
-        """列 specDir/skills/ 下自定义 skill 名 + 各 skill 文件清单（只读，经 RPC）。
+        """列 specDir/skills/ 下自定义 skill 名 + 各 skill 文件清单（只读，本地直读）。
 
-        specDir 不存在 / 无 skills/ 子目录 → 返回空列表（task-06 验收 D）。
-        每个 skill 子目录递归列文件（relpath 相对 ``skills/<name>/``），仅含文件，
-        不递归子目录的 skill 结构（v1 平铺文件清单足够 UI 展示）。
+        specDir 不存在 / 无 skills/ 子目录 → 返回空列表。每个 skill 子目录递归列
+        文件（relpath 相对 ``skills/<name>/``），仅含文件，不递归子目录的 skill 结构。
         """
         ws, spec_ws = await self._get_base(workspace_id)
         resolver = self._resolver_for(ws, spec_ws)
@@ -124,28 +91,26 @@ class SkillsViewService:
             return SkillsViewResponse(skills=[])
 
         skills_dir = resolver._spec_root() / "skills"
-
-        delegate = self._make_host_fs_delegate(self._session)
-        # 经 RPC list_dir（backend 容器不可达宿主 specDir）。
-        names = await delegate.list_dir(ws, str(skills_dir))
+        if not skills_dir.is_dir():
+            return SkillsViewResponse(skills=[])
 
         skills: list[SkillFileEntry] = []
-        for name in names:
-            skill_path = skills_dir / name
-            # 仅列目录型 skill（SKILL.md-centric，与 daemon skill-manager 同语义）。
-            st = await delegate.stat(ws, str(skill_path))
-            if not st.get("exists") or not st.get("is_dir"):
-                continue
-            files = await self._list_files_rpc(delegate, ws, skill_path)
-            skills.append(SkillFileEntry(name=name, files=files))
+        try:
+            for entry in sorted(skills_dir.iterdir()):
+                if not entry.is_dir():
+                    continue
+                files = self._list_files_local(entry)
+                skills.append(SkillFileEntry(name=entry.name, files=files))
+        except (OSError, PermissionError):
+            return SkillsViewResponse(skills=[])
 
         return SkillsViewResponse(skills=skills)
 
     async def get_mcp_config(self, workspace_id: uuid.UUID) -> McpConfigViewResponse:
-        """读 specDir/.mcp.json（只读，env secret 脱敏，经 RPC）。
+        """读 specDir/.mcp.json（只读，env secret 脱敏，本地直读）。
 
-        无文件 / 解析失败 → 返回空 ``{mcpServers: {}}``，不抛错（task-06 验收 D）。
-        env secret 脱敏复用 settings/router 的 ``_redact_mcp_env``（D-008）。
+        无文件 / 解析失败 → 返回空 ``{mcpServers: {}}``，不抛错。
+        env secret 脱敏复用 settings/router 的 ``_redact_mcp_env``。
         """
         ws, spec_ws = await self._get_base(workspace_id)
         resolver = self._resolver_for(ws, spec_ws)
@@ -153,14 +118,11 @@ class SkillsViewService:
             return McpConfigViewResponse(mcpServers={})
 
         mcp_path = resolver._spec_root() / ".mcp.json"
-
-        delegate = self._make_host_fs_delegate(self._session)
-        st = await delegate.stat(ws, str(mcp_path))
-        if not st.get("exists") or st.get("is_dir"):
+        if not mcp_path.is_file():
             return McpConfigViewResponse(mcpServers={})
         try:
-            raw = await delegate.read_file(ws, str(mcp_path))
-        except Exception:
+            raw = mcp_path.read_text(encoding="utf-8")
+        except (OSError, PermissionError):
             return McpConfigViewResponse(mcpServers={})
 
         try:
@@ -177,28 +139,23 @@ class SkillsViewService:
 
         return McpConfigViewResponse(mcpServers=_redact_mcp_env(mcp_servers))
 
-    # ── 文件清单 helper（RPC）──────────────────────────────────────────────
+    # ── 文件清单 helper（本地）──────────────────────────────────────────────
 
-    async def _list_files_rpc(self, delegate, ws: Workspace, skill_dir: Path) -> list[str]:
-        """经 HostFsDelegate list_dir + stat 平铺列文件 relpath。
+    @staticmethod
+    def _list_files_local(skill_dir: Path) -> list[str]:
+        """本地平铺列文件 relpath（顶层文件 + 一层子目录内文件）。
 
-        v1 平铺（顶层文件 + 一层子目录内文件）—— 覆盖典型 SKILL.md + helper scripts 布局。
-        深度结构留后续按需扩展。
+        v1 平铺——覆盖典型 SKILL.md + helper scripts 布局。深度结构留后续按需扩展。
         """
         files: list[str] = []
-        names = await delegate.list_dir(ws, str(skill_dir))
-        for name in names:
-            child_path = skill_dir / name
-            st = await delegate.stat(ws, str(child_path))
-            if not st.get("exists"):
-                continue
-            if st.get("is_dir"):
-                sub_names = await delegate.list_dir(ws, str(child_path))
-                for sub in sub_names:
-                    sub_path = child_path / sub
-                    sub_st = await delegate.stat(ws, str(sub_path))
-                    if sub_st.get("exists") and not sub_st.get("is_dir"):
-                        files.append(f"{name}/{sub}")
-            else:
-                files.append(name)
+        try:
+            for child in sorted(skill_dir.iterdir()):
+                if child.is_dir():
+                    for sub in sorted(child.iterdir()):
+                        if sub.is_file():
+                            files.append(f"{child.name}/{sub.name}")
+                else:
+                    files.append(child.name)
+        except (OSError, PermissionError):
+            pass
         return files

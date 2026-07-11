@@ -136,14 +136,19 @@ class Settings(BaseSettings):
     )
 
     # ── Spec transport (global switch, NOT persisted to DB — D-001@v1) ────────
-    # D-002@v1: 全局环境变量 SPEC_TRANSPORT=shared|tar，默认 shared 向后兼容同机部署。
-    # shared: 同机 bind mount，prompt 用宿主路径，不 pull 不回传（D-004 现状）。
-    # tar:    异机，backend 独占真理源，daemon pull 缓存 + lease 终态整树回传。
+    # D-002@v2: 默认改为 tar（2026-07-11 ql-20260711-001 spec sync 修复）。
+    # server-local 移除后 daemon-client 为唯一路径来源，shared 同机 bind mount 直读
+    # 语义失效（daemon 宿主无 backend 容器路径，skills_view/lease shared 透传容器
+    # spec_root 给 daemon 必读失败）。tar 模式 daemon pull 到 ~/.sillyhub/daemon/specs/{ws}
+    # 本地缓存，是 daemon-client 唯一正确路径。
+    # shared: 同机 bind mount（legacy，daemon-client 下无合法消费者，死代码语义）。
+    # tar:    异机/同机，backend 独占真理源，daemon pull 缓存 + lease 终态整树回传。
     spec_transport: Literal["shared", "tar"] = Field(
-        default="shared",
-        description="Global spec transport mode. 'shared' = same-host bind mount (legacy, "
-        "zero-change); 'tar' = cross-host, backend is source of truth with daemon pull+sync. "
-        "Read from SPEC_TRANSPORT env. Orthogonal to SpecWorkspace.strategy, NOT persisted (D-001).",
+        default="tar",
+        description="Global spec transport mode. 'tar' = backend is source of truth, daemon "
+        "pulls+syncs (daemon-client default since 2026-07-11). 'shared' = legacy same-host "
+        "bind mount (no valid consumer after server-local removal). Read from SPEC_TRANSPORT "
+        "env. Orthogonal to SpecWorkspace.strategy, NOT persisted (D-001).",
     )
 
     @field_validator("spec_data_root", mode="before")

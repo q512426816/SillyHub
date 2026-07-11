@@ -1,12 +1,15 @@
-"""task-06 单测：workspace skills / .mcp.json 只读查看端点（变更 2026-07-07-skills-mcp-management-ui）。
+"""workspace skills / .mcp.json 只读查看端点单测。
+
+2026-07-11 ql-20260711-001（spec sync 修复）：skills_view 回归 backend 容器内
+**本地直读** ``spec_ws.spec_root``（容器路径，bind mount 映射宿主），不经
+HostFsDelegate RPC（RPC 打 daemon 宿主读容器路径会失败）。下列测试用 tmp_path
+建实际 specDir/skills/ + .mcp.json，端点直读本地 Path。
 
 覆盖：
-- server-local 路径：真 tmp_path 建 specDir/skills/ + .mcp.json，端点直读容器 Path。
-- daemon-client 路径：monkey-patch ``SkillsViewService._make_host_fs_delegate`` 返 fake
-  delegate，验证 list_dir / read_file / stat 调用结构与返回脱敏。
-- membership 校验：非成员普通用户 → 403。
-- 无 skills/ 或 .mcp.json → 空返回不报错。
-- .mcp.json env token/key/secret/password 类字段遮蔽（D-008）。
+- 本地直读 list_skills（多 skill + 子目录文件）
+- 本地直读 get_mcp_config（env token/secret 脱敏 D-008）
+- 无 .mcp.json → 空返回不报错
+- membership 校验：非成员普通用户 → 403；WORKSPACE_READ 成员可访问
 
 workspace 行直接插入（绕开 scan），spec_ws 行直接插入定位 specDir。
 """
@@ -16,7 +19,6 @@ from __future__ import annotations
 import json
 import uuid
 from pathlib import Path
-from typing import Any
 
 import pytest
 from httpx import AsyncClient
@@ -28,7 +30,6 @@ from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
 from app.modules.auth.permissions import Permission
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.workspace.model import Workspace
-from app.modules.workspace.skills_view_service import SkillsViewService
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -110,7 +111,7 @@ async def _create_spec_workspace(
     *,
     workspace_id: uuid.UUID,
     spec_root: str,
-    strategy: str = "repo-native",
+    strategy: str = "platform-managed",
 ) -> SpecWorkspace:
     spec_ws = SpecWorkspace(
         id=uuid.uuid4(),
@@ -125,117 +126,46 @@ async def _create_spec_workspace(
     return spec_ws
 
 
-class _FakeHostFsDelegate:
-    """伪 HostFsDelegate：按预置 ``fs`` 字典（path → 类型/内容）应答。
-
-    模拟 daemon-client 经 RPC 读宿主 specDir：list_dir / stat / read_file 全部
-    从内存 fs 取，避免依赖真实 WS 通道。path 用绝对路径字符串键。
-    """
-
-    def __init__(self, fs: dict[str, Any]) -> None:
-        # fs: {abs_path: {"type": "dir"|"file", "content"?: str, "children"?: [names]}}
-        # 或简化：{abs_path: "dir" | file_content_str}
-        self._fs = fs
-        self.calls: list[tuple[str, str]] = []
-
-    def _norm(self, p: str) -> str:
-        return str(Path(p))
-
-    async def list_dir(self, workspace, path: str) -> list[str]:
-        self.calls.append(("list_dir", path))
-        entry = self._fs.get(self._norm(path))
-        if isinstance(entry, dict) and entry.get("type") == "dir":
-            return sorted(entry.get("children", []))
-        return []
-
-    async def stat(self, workspace, path: str) -> dict:
-        self.calls.append(("stat", path))
-        entry = self._fs.get(self._norm(path))
-        if entry is None:
-            return {"exists": False, "is_dir": False, "size": 0}
-        if isinstance(entry, dict) and entry.get("type") == "dir":
-            return {"exists": True, "is_dir": True, "size": 0}
-        content = entry if isinstance(entry, str) else ""
-        return {"exists": True, "is_dir": False, "size": len(content.encode("utf-8"))}
-
-    async def read_file(self, workspace, path: str) -> str:
-        self.calls.append(("read_file", path))
-        entry = self._fs.get(self._norm(path))
-        if isinstance(entry, str):
-            return entry
-        return ""
-
-
-# ── daemon-client 路径（HostFsDelegate RPC 读）──────────────────────────────
-#
-# 2026-07-10-remove-server-local-workspace-mode：server-local 直读分支已删，
-# 所有 workspace 统一经 HostFsDelegate RPC 读。下列测试用 _FakeHostFsDelegate
-# 内存 fs 模拟 daemon 宿主 specDir，覆盖 list_skills / get_mcp_config / 空目录 /
-# 非法 JSON / env 脱敏 全部场景（原 server-local 组已删，能力等价覆盖）。
+# ── 本地直读 spec_root（backend 容器路径，不经 RPC）─────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_list_skills_daemon_client_via_host_fs_delegate(
-    client: AsyncClient, db_session: AsyncSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+async def test_list_skills_local_read(
+    client: AsyncClient, db_session: AsyncSession, tmp_path: Path
 ) -> None:
-    """daemon-client：经 HostFsDelegate list_dir/stat RPC 读 specDir/skills/。"""
+    """backend 本地直读 spec_root/skills/：多 skill + 子目录文件。"""
     admin = await _create_user(db_session, is_platform_admin=True)
-    spec_root = str(tmp_path / "spec")
+    spec_root = tmp_path / "spec"
+    skills_dir = spec_root / "skills"
+    (skills_dir / "alpha").mkdir(parents=True)
+    (skills_dir / "alpha" / "SKILL.md").write_text("# alpha", encoding="utf-8")
+    (skills_dir / "beta").mkdir(parents=True)
+    (skills_dir / "beta" / "SKILL.md").write_text("# beta", encoding="utf-8")
+    (skills_dir / "beta" / "lib").mkdir()
+    (skills_dir / "beta" / "lib" / "util.py").write_text("pass", encoding="utf-8")
 
-    fs: dict[str, Any] = {
-        str(Path(spec_root)): {"type": "dir", "children": ["skills"]},
-        str(Path(spec_root) / "skills"): {
-            "type": "dir",
-            "children": ["alpha", "beta"],
-        },
-        str(Path(spec_root) / "skills" / "alpha"): {
-            "type": "dir",
-            "children": ["SKILL.md"],
-        },
-        str(Path(spec_root) / "skills" / "alpha" / "SKILL.md"): "# alpha",
-        str(Path(spec_root) / "skills" / "beta"): {
-            "type": "dir",
-            "children": ["SKILL.md", "lib"],
-        },
-        str(Path(spec_root) / "skills" / "beta" / "SKILL.md"): "# beta",
-        str(Path(spec_root) / "skills" / "beta" / "lib"): {
-            "type": "dir",
-            "children": ["util.py"],
-        },
-        str(Path(spec_root) / "skills" / "beta" / "lib" / "util.py"): "pass",
-    }
-    fake = _FakeHostFsDelegate(fs)
-    monkeypatch.setattr(
-        SkillsViewService, "_make_host_fs_delegate", staticmethod(lambda session: fake)
-    )
-
-    ws = await _create_workspace(db_session, created_by=admin.id, root_path=spec_root)
+    ws = await _create_workspace(db_session, created_by=admin.id, root_path=str(spec_root))
     await _create_spec_workspace(
-        db_session, workspace_id=ws.id, spec_root=spec_root, strategy="platform-managed"
+        db_session, workspace_id=ws.id, spec_root=str(spec_root), strategy="platform-managed"
     )
 
     resp = await client.get(f"/api/workspaces/{ws.id}/skills", headers=_headers(_token_for(admin)))
     assert resp.status_code == 200, resp.text
-    body = resp.json()
-    by_name = {s["name"]: s["files"] for s in body["skills"]}
+    by_name = {s["name"]: s["files"] for s in resp.json()["skills"]}
     assert set(by_name.keys()) == {"alpha", "beta"}
     assert by_name["alpha"] == ["SKILL.md"]
     assert "SKILL.md" in by_name["beta"]
     assert "lib/util.py" in by_name["beta"]
 
-    # 确认走了 RPC（list_dir 被调），而非容器 Path 直读。
-    methods = {call[0] for call in fake.calls}
-    assert "list_dir" in methods
-    assert "stat" in methods
-
 
 @pytest.mark.asyncio
-async def test_get_mcp_config_daemon_client_via_host_fs_delegate(
-    client: AsyncClient, db_session: AsyncSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+async def test_get_mcp_config_local_read(
+    client: AsyncClient, db_session: AsyncSession, tmp_path: Path
 ) -> None:
-    """daemon-client：经 HostFsDelegate stat/read_file RPC 读 .mcp.json，env 脱敏。"""
+    """本地直读 .mcp.json + env secret 脱敏（D-008 password 类）。"""
     admin = await _create_user(db_session, is_platform_admin=True)
-    spec_root = str(tmp_path / "spec")
+    spec_root = tmp_path / "spec"
+    spec_root.mkdir()
     mcp = {
         "mcpServers": {
             "db": {
@@ -244,18 +174,11 @@ async def test_get_mcp_config_daemon_client_via_host_fs_delegate(
             }
         }
     }
-    fs: dict[str, Any] = {
-        str(Path(spec_root)): {"type": "dir", "children": [".mcp.json"]},
-        str(Path(spec_root) / ".mcp.json"): json.dumps(mcp),
-    }
-    fake = _FakeHostFsDelegate(fs)
-    monkeypatch.setattr(
-        SkillsViewService, "_make_host_fs_delegate", staticmethod(lambda session: fake)
-    )
+    (spec_root / ".mcp.json").write_text(json.dumps(mcp), encoding="utf-8")
 
-    ws = await _create_workspace(db_session, created_by=admin.id, root_path=spec_root)
+    ws = await _create_workspace(db_session, created_by=admin.id, root_path=str(spec_root))
     await _create_spec_workspace(
-        db_session, workspace_id=ws.id, spec_root=spec_root, strategy="platform-managed"
+        db_session, workspace_id=ws.id, spec_root=str(spec_root), strategy="platform-managed"
     )
 
     resp = await client.get(
@@ -266,28 +189,19 @@ async def test_get_mcp_config_daemon_client_via_host_fs_delegate(
     assert env["DATABASE_PASSWORD"] == "<set>"  # password 类脱敏
     assert env["POOL"] == "10"
 
-    methods = [call[0] for call in fake.calls]
-    assert "read_file" in methods
-
 
 @pytest.mark.asyncio
-async def test_get_mcp_config_daemon_client_no_file_empty(
-    client: AsyncClient, db_session: AsyncSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+async def test_get_mcp_config_no_file_empty(
+    client: AsyncClient, db_session: AsyncSession, tmp_path: Path
 ) -> None:
-    """daemon-client：stat 返不存在 → 空不报错。"""
+    """spec_root 存在但无 .mcp.json → 空返回不报错。"""
     admin = await _create_user(db_session, is_platform_admin=True)
-    spec_root = str(tmp_path / "spec")
-    fs: dict[str, Any] = {
-        str(Path(spec_root)): {"type": "dir", "children": []},
-    }
-    fake = _FakeHostFsDelegate(fs)
-    monkeypatch.setattr(
-        SkillsViewService, "_make_host_fs_delegate", staticmethod(lambda session: fake)
-    )
+    spec_root = tmp_path / "spec"
+    spec_root.mkdir()
 
-    ws = await _create_workspace(db_session, created_by=admin.id, root_path=spec_root)
+    ws = await _create_workspace(db_session, created_by=admin.id, root_path=str(spec_root))
     await _create_spec_workspace(
-        db_session, workspace_id=ws.id, spec_root=spec_root, strategy="platform-managed"
+        db_session, workspace_id=ws.id, spec_root=str(spec_root), strategy="platform-managed"
     )
 
     resp = await client.get(
@@ -308,15 +222,15 @@ async def test_non_member_gets_403(
     owner = await _create_user(db_session, email="owner@example.com")
     other = await _create_user(db_session, email="other@example.com")
 
-    repo_root = tmp_path / "repo"
-    (repo_root / ".sillyspec" / "skills").mkdir(parents=True)
+    spec_root = tmp_path / "spec"
+    (spec_root / "skills").mkdir(parents=True)
 
-    ws = await _create_workspace(db_session, created_by=owner.id, root_path=str(repo_root))
+    ws = await _create_workspace(db_session, created_by=owner.id, root_path=str(spec_root))
     await _create_spec_workspace(
         db_session,
         workspace_id=ws.id,
-        spec_root=str(repo_root / ".sillyspec"),
-        strategy="repo-native",
+        spec_root=str(spec_root),
+        strategy="platform-managed",
     )
 
     # other 既非 platform admin 也无该 workspace 的 role → membership 校验挡下。
@@ -334,59 +248,23 @@ async def test_non_member_gets_403(
 async def test_member_with_workspace_read_can_access(
     client: AsyncClient, db_session: AsyncSession, tmp_path: Path
 ) -> None:
-    """有 WORKSPACE_READ role 的成员可访问（membership 通过）。
-
-    2026-07-10-remove-server-local-workspace-mode: skills_view 永远经
-    HostFsDelegate RPC 读（daemon-client 单一模式）。本测试聚焦权限校验，
-    故 mock delegate 直读本地 spec_root（已建 fixtures），避免依赖真 daemon。
-    """
+    """有 WORKSPACE_READ role 的成员可访问（membership 通过，本地直读 spec_root）。"""
     owner = await _create_user(db_session, email="owner2@example.com")
     member = await _create_user(db_session, email="member2@example.com")
 
-    repo_root = tmp_path / "repo"
-    (repo_root / ".sillyspec" / "skills" / "team-skill").mkdir(parents=True)
-    (repo_root / ".sillyspec" / "skills" / "team-skill" / "SKILL.md").write_text(
-        "# team", encoding="utf-8"
-    )
+    spec_root = tmp_path / "spec"
+    (spec_root / "skills" / "team-skill").mkdir(parents=True)
+    (spec_root / "skills" / "team-skill" / "SKILL.md").write_text("# team", encoding="utf-8")
 
-    ws = await _create_workspace(db_session, created_by=owner.id, root_path=str(repo_root))
-    spec_root = str(repo_root / ".sillyspec")
+    ws = await _create_workspace(db_session, created_by=owner.id, root_path=str(spec_root))
     await _create_spec_workspace(
         db_session,
         workspace_id=ws.id,
-        spec_root=spec_root,
-        strategy="repo-native",
+        spec_root=str(spec_root),
+        strategy="platform-managed",
     )
     await _grant_workspace_read(db_session, user_id=member.id, workspace_id=ws.id)
 
-    # mock delegate：list_dir/read_file/stat 直读本地 spec_root（权限是本测试焦点）
-    from pathlib import Path
-    from unittest.mock import patch
-
-    class _LocalDelegate:
-        async def list_dir(self, workspace, path: str):
-            full = Path(spec_root) / path
-            if not full.is_dir():
-                return []
-            return sorted(p.name for p in full.iterdir())
-
-        async def read_file(self, workspace, path: str) -> str:
-            return (Path(spec_root) / path).read_text(encoding="utf-8")
-
-        async def stat(self, workspace, path: str) -> dict:
-            full = Path(spec_root) / path
-            return {
-                "exists": full.exists(),
-                "is_dir": full.is_dir(),
-                "size": full.stat().st_size if full.exists() else 0,
-            }
-
-    with patch(
-        "app.modules.workspace.skills_view_service.SkillsViewService._make_host_fs_delegate",
-        return_value=_LocalDelegate(),
-    ):
-        resp = await client.get(
-            f"/api/workspaces/{ws.id}/skills", headers=_headers(_token_for(member))
-        )
+    resp = await client.get(f"/api/workspaces/{ws.id}/skills", headers=_headers(_token_for(member)))
     assert resp.status_code == 200, resp.text
     assert {s["name"] for s in resp.json()["skills"]} == {"team-skill"}
