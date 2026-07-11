@@ -92,11 +92,12 @@ export function WorkspaceDaemonSwitcher({
       setSwitchingId(di.id);
       setError(null);
       try {
+        // path_source 固定 daemon-client（member 级 spec 策略，server-local 模式已移除）。
         await upsertMyBinding(workspaceId, {
           daemon_id: di.id,
-          root_path: currentBinding?.root_path ?? null,
-          path_source: currentBinding?.path_source ?? null,
-        } as any);
+          root_path: currentBinding?.root_path ?? "",
+          path_source: "daemon-client",
+        });
         setOpen(false);
         onChanged?.();
       } catch (e) {

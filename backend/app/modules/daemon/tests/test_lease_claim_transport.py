@@ -265,18 +265,19 @@ class TestBuildClaimPayloadTransport:
         assert "spec_root" not in payload
 
     @pytest.mark.asyncio
-    async def test_c6_workspace_path_source_daemon_client_overrides_global(
+    async def test_c6_global_transport_takes_priority_regardless_of_workspace(
         self,
         db_session: AsyncSession,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """C6（方案 A）：workspace.path_source='daemon-client' 锁死 tar，覆盖全局 settings.spec_transport。
+        """C6（task-09 D-007）：单一 daemon-client 后 transport 永远走全局
+        settings.spec_transport，不再按 workspace.path_source per-workspace 锁定。
 
-        即便 _patch_transport('shared')，build_claim_payload 查到真实 Workspace 行
-        path_source='daemon-client' → transport_for_path_source → 'tar'。
-        守护 per-workspace 决策优先于全局兜底（C1-C5 无 Workspace 行全走兜底，本用例补真实行）。
+        原 C6/C7（方案 A per-workspace path_source 覆盖全局）已随
+        transport_for_path_source 删除而废弃。本用例守护新契约：即便存在真实
+        Workspace 行（lease_meta.workspace_id 解析成功），transport 仍 = 全局值。
         """
-        # 全局 shared，但 workspace.path_source='daemon-client' 应覆盖为 tar
+        # 全局 shared → 即便有真实 Workspace 行，transport 仍 = shared
         _patch_transport(monkeypatch, "shared")
         user_id = await _create_user(db_session)
         rt: DaemonRuntime = await _create_runtime(db_session, user_id)
@@ -286,8 +287,6 @@ class TestBuildClaimPayloadTransport:
             slug=f"client-ws-{uuid.uuid4().hex[:8]}",
             root_path="/tmp/client-project",
             status="active",
-            path_source="daemon-client",
-            daemon_runtime_id=rt.id,
         )
         db_session.add(ws)
         await db_session.commit()
@@ -307,25 +306,22 @@ class TestBuildClaimPayloadTransport:
 
         payload = await build_claim_payload(db_session, lease)
 
-        # path_source='daemon-client' → tar（覆盖全局 shared）
-        assert payload["transport"] == "tar"
-        assert payload["transportMode"] == "tar"
-        # tar 分支透传 workspaceId（与 C1 同款）
-        assert payload["workspaceId"] == str(ws.id)
-        assert payload["workspace_id"] == str(ws.id)
-        # tar 分支不透传 specRoot（边界 E6）
-        assert "specRoot" not in payload
+        # transport 跟随全局 settings.spec_transport（不再被 path_source 覆盖）
+        assert payload["transport"] == "shared"
+        assert payload["transportMode"] == "shared"
+        # shared 分支透传 specRoot（与 C2 同款）
+        assert payload["specRoot"] == "/data/spec-workspaces/c6"
 
     @pytest.mark.asyncio
-    async def test_c7_workspace_path_source_server_local_overrides_global(
+    async def test_c7_global_tar_transport_not_overridden_by_workspace(
         self,
         db_session: AsyncSession,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """C7（方案 A）：workspace.path_source='server-local' 锁死 shared，覆盖全局 tar。
+        """C7（task-09 D-007）：全局 tar 时即便有真实 Workspace 行，transport 仍 = tar。
 
-        _patch_transport('tar')，但 workspace.path_source='server-local' → transport='shared'。
-        守护 server-local 锁死 shared（即便全局 tar）+ shared 分支透传 specRoot（C2 同款）。
+        原 C7（server-local path_source 锁 shared 覆盖全局 tar）已废弃。
+        守护新契约：全局 tar → tar，与 workspace 存在与否无关。
         """
         _patch_transport(monkeypatch, "tar")
         user_id = await _create_user(db_session)
@@ -336,7 +332,6 @@ class TestBuildClaimPayloadTransport:
             slug=f"server-ws-{uuid.uuid4().hex[:8]}",
             root_path="/tmp/server-project",
             status="active",
-            path_source="server-local",
         )
         db_session.add(ws)
         await db_session.commit()
@@ -356,13 +351,14 @@ class TestBuildClaimPayloadTransport:
 
         payload = await build_claim_payload(db_session, lease)
 
-        # path_source='server-local' → shared（覆盖全局 tar）
-        assert payload["transport"] == "shared"
-        assert payload["transportMode"] == "shared"
-        # shared 分支透传 specRoot（与 C2 同款）
-        assert payload["specRoot"] == "/data/spec-workspaces/c7"
-        # shared 分支不透传 workspaceId（D-004 守护）
-        assert "workspaceId" not in payload
+        # transport 跟随全局 tar（不再被 path_source 覆盖）
+        assert payload["transport"] == "tar"
+        assert payload["transportMode"] == "tar"
+        # tar 分支透传 workspaceId（与 C1 同款）
+        assert payload["workspaceId"] == str(ws.id)
+        assert payload["workspace_id"] == str(ws.id)
+        # tar 分支不透传 specRoot（边界 E6）
+        assert "specRoot" not in payload
 
 
 class TestBuildClaimPayloadProviderNormalization:

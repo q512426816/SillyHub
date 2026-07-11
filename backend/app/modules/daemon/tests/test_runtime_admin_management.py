@@ -163,17 +163,14 @@ async def _create_workspace_row(
     *,
     created_by: uuid.UUID,
     name: str = "bound-ws",
-    daemon_runtime_id: uuid.UUID | None = None,
 ) -> Workspace:
     ws = Workspace(
         id=uuid.uuid4(),
         name=name,
         slug=f"slug-{uuid.uuid4().hex[:8]}",
         root_path=f"/tmp/{uuid.uuid4().hex[:8]}",
-        path_source="server-local",
         status="active",
         created_by=created_by,
-        daemon_runtime_id=daemon_runtime_id,
     )
     session.add(ws)
     await session.commit()

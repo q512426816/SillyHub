@@ -138,8 +138,6 @@ beforeEach(() => {
     name: "测试工作区",
     slug: "test-ws",
     root_path: "/home/test/project",
-    path_source: "daemon-client",
-    daemon_runtime_id: null, // daemon-entity-binding 后新工作区恒 NULL（绑定存 member binding 行）
     default_agent: "claude",
     default_model: null,
     status: "active",
@@ -208,13 +206,13 @@ describe("agent page — provider override (task-12 / D-005)", () => {
     // 点击启动
     fireEvent.click(screen.getByRole("button", { name: /启动扫描/ }));
     await waitFor(() => {
+      // 2026-07-10：scanGenerate 签名收敛为 (rootPath, provider, model, specStrategy, daemonId)
+      // —— pathSource/daemonRuntimeId 入参已删，平台唯一 daemon-client。
       expect(mockScanGenerate).toHaveBeenCalledWith(
         "/home/test/project",
         "codex", // 选中值为 codex，不是 default_agent claude
         null,
-        "daemon-client",
-        null, // daemonRuntimeId：legacy 字段，新链路不传
-        undefined,
+        undefined, // specStrategy：agent 页不传（undefined）
         "daemon-1", // daemonId 取自 myBinding.daemon_id（daemon-entity-binding 稳定绑定键）
       );
     });

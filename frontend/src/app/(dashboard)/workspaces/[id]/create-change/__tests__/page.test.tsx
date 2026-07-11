@@ -57,8 +57,6 @@ function mkWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     name: "Demo",
     slug: "demo",
     root_path: "C:/demo",
-    path_source: "server-local",
-    daemon_runtime_id: null,
     status: "active",
     component_key: null,
     type: null,
@@ -106,7 +104,7 @@ function fillDescription(text: string) {
   });
 }
 
-describe("CreateChangePage daemon-client proxy create", () => {
+describe("CreateChangePage proxy-create（2026-07-10 平台统一 daemon-client）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listComponents.mockResolvedValue({ items: [], total: 0 });
@@ -115,15 +113,11 @@ describe("CreateChangePage daemon-client proxy create", () => {
     mocks.proxyCreateChange.mockResolvedValue(mkCreateResponse());
   });
 
-  it("daemon-client 工作区走 proxy-create 且不传 runtime_id（D-002@v1）", async () => {
+  it("走 proxy-create 且不传 runtime_id（D-002@v1）", async () => {
     // D-002@v1（2026-07-05-daemon-client-change-binding-fix）：runtime_id 不再由前端传，
     // 后端从 binding + workspace.default_agent 现算。前端不再校验 daemon 在线状态。
-    mocks.getWorkspace.mockResolvedValue(
-      mkWorkspace({
-        path_source: "daemon-client",
-        daemon_runtime_id: null,
-      }),
-    );
+    // 2026-07-10：平台统一 daemon-client 语义后所有工作区都走 proxy-create。
+    mocks.getWorkspace.mockResolvedValue(mkWorkspace());
 
     renderPage();
     fillDescription("支持 daemon 代写");
@@ -145,12 +139,7 @@ describe("CreateChangePage daemon-client proxy create", () => {
 
   it("proxy-create 返回 DAEMON_CLIENT_NO_SESSION 时显示中文引导", async () => {
     // daemon 在线状态由后端心跳校验；离线时返回 DAEMON_CLIENT_NO_SESSION，前端渲染引导。
-    mocks.getWorkspace.mockResolvedValue(
-      mkWorkspace({
-        path_source: "daemon-client",
-        daemon_runtime_id: null,
-      }),
-    );
+    mocks.getWorkspace.mockResolvedValue(mkWorkspace());
     mocks.proxyCreateChange.mockRejectedValue(
       new ApiError(400, {
         code: "DAEMON_CLIENT_NO_SESSION",
@@ -175,30 +164,5 @@ describe("CreateChangePage daemon-client proxy create", () => {
       ).toBeInTheDocument(),
     );
     expect(mocks.createChange).not.toHaveBeenCalled();
-  });
-
-  it("server-local 工作区保持原 createChange 行为", async () => {
-    mocks.getWorkspace.mockResolvedValue(
-      mkWorkspace({ path_source: "server-local", daemon_runtime_id: null }),
-    );
-
-    renderPage();
-    fillDescription("服务端本地创建");
-    const submit = screen.getByRole("button", { name: "提交需求" });
-    await waitFor(() => expect(submit).toBeEnabled());
-
-    fireEvent.click(submit);
-
-    await waitFor(() =>
-      expect(mocks.createChange).toHaveBeenCalledWith(
-        "ws-1",
-        expect.objectContaining({
-          title: "服务端本地创建",
-          description: "服务端本地创建",
-        }),
-      ),
-    );
-    expect(mocks.proxyCreateChange).not.toHaveBeenCalled();
-    expect(mocks.routerPush).toHaveBeenCalledWith("/workspaces/ws-1/changes/ch-1");
   });
 });

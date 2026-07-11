@@ -131,6 +131,10 @@ async def _seed_workspace(
     daemon_runtime_id: uuid.UUID | None,
     with_member_binding: bool,
 ) -> None:
+    # 2026-07-10-remove-server-local-workspace-mode: Workspace.path_source /
+    # daemon_runtime_id 列已删（D-005/D-006），daemon 路由唯一经 member binding
+    # 的 daemon_id。``daemon_runtime_id`` 参数保留仅为签名兼容，不再写入行。
+    del daemon_runtime_id  # legacy parameter, no longer a column
     from app.modules.workspace.model import Workspace
 
     session.add(
@@ -139,8 +143,6 @@ async def _seed_workspace(
             name="router-ws",
             slug="router-ws",
             root_path="/host/source",
-            path_source="daemon-client",
-            daemon_runtime_id=daemon_runtime_id,
             status="active",
             created_by=USER_ID,
         )
@@ -249,29 +251,8 @@ async def test_new_link_member_binding_routes_to_instance_id(session: AsyncSessi
     assert params["workspace_id"] == str(WORKSPACE_ID)
 
 
-async def test_legacy_runtime_id_routes_to_instance_id(session: AsyncSession) -> None:
-    """Legacy workspace (daemon_runtime_id set, no member binding).
-
-    Resolver Step 2 (daemon_runtime_id → daemon_runtimes.daemon_instance_id)
-    → INSTANCE_ID. Critically, RUNTIME_ID ≠ INSTANCE_ID, so a regression that
-    routes on the raw daemon_runtime_id would try RUNTIME_ID (no socket) and
-    degrade — the scripted result would NOT come back.
-    """
-    from app.modules.workspace.model import Workspace
-
-    await _seed_user(session)
-    await _seed_daemon(session)
-    await _seed_workspace(daemon_runtime_id=RUNTIME_ID, with_member_binding=False, session=session)
-
-    workspace = await session.get(Workspace, WORKSPACE_ID)
-    scripted = {"exists": True, "is_dir": False, "size": 256}
-    out, _ = await _drive_stat(session, workspace, scripted)
-
-    assert out == scripted  # would be {"exists": False, ...} (degraded) under the bug
-
-
 async def test_unbound_workspace_raises(session: AsyncSession) -> None:
-    """No member binding AND no daemon_runtime_id → genuinely unbound → raises."""
+    """No member binding → genuinely unbound → raises."""
     from app.modules.daemon.host_fs import (
         HostFsDelegate,
         HostFsDelegateUnavailable,

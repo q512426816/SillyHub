@@ -48,8 +48,6 @@ export async function scanGenerate(
   rootPath: string,
   provider?: string | null,
   model?: string | null,
-  pathSource?: "server-local" | "daemon-client",
-  daemonRuntimeId?: string | null,
   specStrategy?: SpecStrategy,
   daemonId?: string | null,
 ): Promise<ScanGenerateResponse> {
@@ -59,11 +57,9 @@ export async function scanGenerate(
       root_path: rootPath,
       ...(provider ? { provider } : {}),
       ...(model ? { model } : {}),
-      ...(pathSource ? { path_source: pathSource } : {}),
-      // daemon-entity-binding 后优先传 daemon_id（稳定绑定键）；daemon_runtime_id
-      // 保留为 legacy 兼容，二者 backend schema 层 daemon-client 至少一个非空。
+      // daemon-entity-binding 后稳定绑定键是 daemon_id（平台统一
+      // daemon-client 语义，runtime 维度已下沉到 per-member binding）。
       ...(daemonId ? { daemon_id: daemonId } : {}),
-      ...(daemonRuntimeId ? { daemon_runtime_id: daemonRuntimeId } : {}),
       ...(specStrategy ? { spec_strategy: specStrategy } : {}),
     },
   });
@@ -99,16 +95,12 @@ export interface CreateWorkspaceInput {
   root_path: string;
   slug?: string;
   spec_strategy?: string;
-  // task-10：daemon-client 路径来源（默认 server-local）
-  path_source?: "server-local" | "daemon-client";
   /**
    * 守护进程实体 ID（FK daemon_instances）。daemon-entity-binding task-10/11 补遗：
-   * 「添加工作区」对话框 daemon 维度入口传此字段，不再传 daemon_runtime_id。
-   * backend WorkspaceService.create 据此建 workspace_member_runtimes 成员绑定行。
+   * 「添加工作区」对话框 daemon 维度入口传此字段。backend WorkspaceService.create
+   * 据此建 workspace_member_runtimes 成员绑定行。
    */
   daemon_id?: string | null;
-  /** @deprecated daemon-entity-binding 后退化为 fallback；新链路一律用 daemon_id。 */
-  daemon_runtime_id?: string | null;
 }
 
 export async function createWorkspace(input: CreateWorkspaceInput): Promise<Workspace> {
@@ -132,12 +124,6 @@ export interface UpdateWorkspaceInput {
   build_command?: string | null;
   test_command?: string | null;
   status?: WorkspaceStatus;
-  // ql-20260619-006：daemon-client workspace 改绑目标 daemon。backend
-  // WorkspaceUpdate 已支持（schema.py WorkspaceUpdate.daemon_runtime_id +
-  // service.update exclude_unset+setattr 通用循环），前端此前未暴露该字段，
-  // 导致详情页无法切换绑定 daemon（绑定 daemon 离线时扫描/派发直接失败）。
-  // 传 string UUID；仅 daemon-client workspace 生效。
-  daemon_runtime_id?: string | null;
 }
 
 export async function updateWorkspace(

@@ -105,8 +105,6 @@ function mkWorkspace(o: Partial<Workspace> & { id: string }): Workspace {
     display_alias: o.display_alias ?? null,
     slug: o.slug ?? o.id,
     root_path: o.root_path ?? "/tmp",
-    path_source: o.path_source ?? "server-local",
-    daemon_runtime_id: o.daemon_runtime_id ?? null,
     status: o.status ?? "active",
     component_key: o.component_key ?? null,
     type: o.type ?? null,

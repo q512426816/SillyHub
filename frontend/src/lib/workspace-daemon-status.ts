@@ -2,8 +2,8 @@
  * workspace-daemon-status — daemon 在线状态批量聚合（R-02 落地）。
  *
  * 2026-07-09-workspace-prioritization task-03 / FR-06 / R-02 / CB-4：
- * `MemberBindingView`（lib/workspace-binding.ts）只携带 daemon_id / root_path /
- * path_source，**无 online 字段**——无法单接口拿全。需客户端做
+ * `MemberBindingView`（lib/workspace-binding.ts）只携带 daemon_id / root_path，
+ * **无 online 字段**——无法单接口拿全。需客户端做
  * 「binding 列表（按 workspace_id 索引）→ daemon 实例列表（带 status）」映射，
  * 得出每个 workspace 绑定的 daemon 是否在线，供切换器（task-08）/ 列表页徽标
  * （task-07）/ context hook（task-04）统一消费（单数据源，不重复请求）。

@@ -40,8 +40,8 @@ export default function WorkspacesPage() {
   const [runtimesById, setRuntimesById] = useState<Map<string, DaemonRuntimeRead>>(
     () => new Map(),
   );
-  // 遗留 1（daemon-entity-binding）：按 daemon 实体展示。新工作区 daemon_runtime_id=NULL，
-  // 绑定在 member binding 行；instancesById 提供 daemon 实体，bindingsByWs 提供 workspace→daemon_id。
+  // 遗留 1（daemon-entity-binding）：按 daemon 实体展示。新工作区 runtime 绑定
+  // 在 member binding 行；instancesById 提供 daemon 实体，bindingsByWs 提供 workspace→daemon_id。
   const [instancesById, setInstancesById] = useState<Map<string, DaemonInstanceRead>>(
     () => new Map(),
   );
@@ -257,7 +257,6 @@ export default function WorkspacesPage() {
             className="h-8 rounded border bg-card px-2 text-xs"
           >
             <option value="">全部类型</option>
-            <option value="server-local">本机路径</option>
             <option value="daemon-client">Daemon 客户端</option>
           </select>
           <select
@@ -309,7 +308,7 @@ export default function WorkspacesPage() {
         <>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {items.map((w) => {
-              // 遗留 1：优先按 daemon 实体展示（新工作区 daemon_runtime_id=NULL）。
+              // 遗留 1：优先按 daemon 实体展示（runtime 绑定下沉到 member binding）。
               const bindingDaemonId = bindingsByWs.get(w.id)?.daemon_id;
               const boundDaemon = bindingDaemonId
                 ? instancesById.get(bindingDaemonId) ?? null
@@ -318,9 +317,11 @@ export default function WorkspacesPage() {
                 <WorkspaceCard
                   key={w.id}
                   workspace={w}
-                  boundRuntime={
-                    w.daemon_runtime_id ? runtimesById.get(w.daemon_runtime_id) : null
-                  }
+                  /* task-11 / 2026-07-10-remove-server-local-workspace-mode：
+                   * 平台统一 daemon-client 语义后，WorkspaceCard 的 runtime 维度
+                   * 已下沉到 per-member binding，此处透 null 安全（prop 是否由
+                   * task-10 组件群移除待协调）。 */
+                  boundRuntime={null}
                   boundDaemon={boundDaemon}
                   daemonStatus={daemonStatusOf(w.id)}
                   onChanged={reload}

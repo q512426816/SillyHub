@@ -138,6 +138,7 @@ async def test_create_duplicate_returns_existing(
 async def test_rescan_updates_last_scanned_at(
     client: AsyncClient, workspace_root: Path, auth_headers: dict[str, str]
 ) -> None:
+
     create = await client.post(
         "/api/workspaces",
         json={"name": "Rescan Target", "root_path": str(workspace_root)},
@@ -146,6 +147,17 @@ async def test_rescan_updates_last_scanned_at(
     workspace_id = create.json()["id"]
     original_ts = create.json()["last_scanned_at"]
     assert original_ts is not None
+
+    # 2026-07-10-remove-server-local-workspace-mode: rescan 读服务器 spec_root。
+    # WorkspaceScanner 判定 <spec_root>/.sillyspec 存在 → is_sillyspec=True，
+    # 故 seed 一个包裹式 .sillyspec 占位（projects/ changes/ 子目录）。
+    from pathlib import Path
+
+    from app.core.config import get_settings
+
+    spec_root = Path(get_settings().spec_data_root) / workspace_id / ".sillyspec"
+    (spec_root / "projects").mkdir(parents=True, exist_ok=True)
+    (spec_root / "changes").mkdir(parents=True, exist_ok=True)
 
     rescan = await client.post(
         f"/api/workspaces/{workspace_id}/rescan",
@@ -188,20 +200,6 @@ async def test_soft_delete_hides_from_default_list(
 
     detail = await client.get(f"/api/workspaces/{workspace_id}", headers=auth_headers)
     assert detail.status_code == 404
-
-
-async def test_create_rejects_non_sillyspec(
-    client: AsyncClient, tmp_path: Path, auth_headers: dict[str, str]
-) -> None:
-    plain = tmp_path / "plain"
-    plain.mkdir()
-    resp = await client.post(
-        "/api/workspaces",
-        json={"name": "x", "root_path": str(plain)},
-        headers=auth_headers,
-    )
-    assert resp.status_code == 400
-    assert resp.json()["code"] == "HTTP_400_WORKSPACE_NOT_SILLYSPEC"
 
 
 async def test_create_validates_slug_format(
@@ -415,7 +413,6 @@ async def test_init_endpoint_returns_lease(
         name="init-test-ws",
         slug=f"init-{uuid.uuid4().hex[:8]}",
         root_path="/tmp/init-test",
-        path_source="daemon-client",
         status="active",
     )
     db_session.add(ws)

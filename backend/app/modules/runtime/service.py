@@ -60,44 +60,22 @@ class RuntimeService:
 
     @staticmethod
     def _resolver_for(workspace, spec_ws) -> SpecPathResolver | None:
-        """构造正确 root + mode 的 resolver（D-005@v1, task-16 fix: daemon-client 兜底）。
+        """构造正确 root + mode 的 resolver。
 
-        root 与 mode 是**正交**的两个维度：
+        2026-07-10-remove-server-local-workspace-mode（D-005 / D-007）：
+        ``workspaces.path_source`` 列已删除，所有 workspace 恒为 daemon-client
+        （源码物理位于 daemon 宿主）。root 强制走 ``spec_ws.spec_root``（服务器
+        可读路径，如 ``/data/spec-workspaces/<id>/``），mode 恒为
+        ``platform_managed=True``（扁平布局，daemon spec-sync 产物无
+        ``.sillyspec`` 包裹，``.runtime/`` 直接在其下）。
 
-        - **root 选择**：
-          1. **daemon-client**（``path_source == "daemon-client"``）→ 强制走
-             ``spec_ws.spec_root``（服务器可读路径，如 ``/data/spec-workspaces/<id>/``），
-             忽略 ``strategy``。修复：daemon-client + ``repo-native`` 组合下
-             ``strategy != "repo-native"`` 不成立，root 本会落到 ``workspace.root_path``
-             （Windows 宿主路径，后端容器访问不到）。
-          2. 其余（server-local 平台镜像等）：``spec_ws.strategy != "repo-native"``
-             （即 platform-managed）→ ``spec_ws.spec_root``。
-          3. 其余（repo-native / 无 spec_ws）→ ``workspace.root_path``。
-        - **mode 选择**：daemon-client → ``platform_managed=True``（扁平，daemon spec-sync
-          产物无 ``.sillyspec`` 包裹，``.runtime/`` 直接在其下）；其余 → False（包裹
-          ``.sillyspec/.runtime/``，既有写入约定）。
+        无 spec_ws 或 spec_root 时返回 None（调用方降级为「无运行时数据」）。
         """
-        from app.modules.workspace.service import is_daemon_client_path_source
-
-        is_daemon_client = is_daemon_client_path_source(workspace.path_source)
-
-        if is_daemon_client:
-            # task-16: daemon-client workspace 无视 strategy，强制用 spec_root
-            # （服务器可访问路径），避免 fallback 到 workspace.root_path（宿主机路径）。
-            if spec_ws and spec_ws.spec_root:
-                root = spec_ws.spec_root
-            else:
-                return None
-        elif spec_ws and spec_ws.strategy != "repo-native":
+        if spec_ws and spec_ws.spec_root:
             root = spec_ws.spec_root
-        elif workspace.root_path:
-            root = workspace.root_path
         else:
             return None
-        return SpecPathResolver(
-            root,
-            platform_managed=is_daemon_client,
-        )
+        return SpecPathResolver(root, platform_managed=True)
 
     def _resolve_runtime_dir(self, workspace_id: uuid.UUID, workspace, spec_ws) -> Path | None:
         resolver = self._resolver_for(workspace, spec_ws)

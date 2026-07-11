@@ -2,28 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import type { DaemonRuntimeRead } from "@/lib/daemon";
 import {
+  daemonRuntimeStatusVariant,
   formatDaemonRuntimeSummary,
-  isDaemonClientWorkspace,
-  workspacePathSourceLabel,
-  workspaceRootPathLabel,
 } from "@/lib/workspace-path";
 
+// task-11 / 2026-07-10-remove-server-local-workspace-mode：原 path-source 二元
+// 映射三个 helper（isDaemonClientWorkspace/workspacePathSourceLabel/workspaceRootPathLabel）
+// 随平台统一 daemon-client 语义移除，仅保留 runtime 展示工具函数的测试。
+
 describe("workspace-path helpers", () => {
-  it("labels path sources", () => {
-    expect(workspacePathSourceLabel("daemon-client")).toBe("本机守护进程路径");
-    expect(workspacePathSourceLabel("server-local")).toBe("服务器本地路径");
-  });
-
-  it("labels root path field", () => {
-    expect(workspaceRootPathLabel("daemon-client")).toBe("客户端路径");
-    expect(workspaceRootPathLabel("server-local")).toBe("root_path");
-  });
-
-  it("detects daemon-client workspace", () => {
-    expect(isDaemonClientWorkspace({ path_source: "daemon-client" })).toBe(true);
-    expect(isDaemonClientWorkspace({ path_source: "server-local" })).toBe(false);
-  });
-
   it("formats daemon runtime summary", () => {
     const runtime: DaemonRuntimeRead = {
       id: "68c63051-fe2a-49ec-9678-85259f15700e",
@@ -41,5 +28,15 @@ describe("workspace-path helpers", () => {
     };
     expect(formatDaemonRuntimeSummary(runtime)).toBe("cursor v1.2.3（在线）");
     expect(formatDaemonRuntimeSummary(null)).toBe("未找到绑定运行时");
+  });
+
+  it("maps runtime status to badge variant", () => {
+    const online = { status: "online" } as DaemonRuntimeRead;
+    const offline = { status: "offline" } as DaemonRuntimeRead;
+    const maintenance = { status: "maintenance" } as DaemonRuntimeRead;
+    expect(daemonRuntimeStatusVariant(online)).toBe("success");
+    expect(daemonRuntimeStatusVariant(offline)).toBe("destructive");
+    expect(daemonRuntimeStatusVariant(maintenance)).toBe("outline");
+    expect(daemonRuntimeStatusVariant(null)).toBe("destructive");
   });
 });

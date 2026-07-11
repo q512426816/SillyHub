@@ -110,7 +110,6 @@ class TestLeasePayloadLatestSpecVersion:
                 name="t10-ws",
                 slug="t10-ws",
                 root_path="/repos/t10",
-                path_source="server-local",
                 status="active",
             )
         )
@@ -196,7 +195,6 @@ class TestLeasePayloadLatestSpecVersion:
                 name="t10-tar-ws",
                 slug="t10-tar-ws",
                 root_path="/repos/t10-tar",
-                path_source="daemon-client",  # 锁死 tar（覆盖全局 patch）
                 status="active",
             )
         )
@@ -249,7 +247,6 @@ class TestLeasePayloadLatestSpecVersion:
                 name="t10-batch-ws",
                 slug="t10-batch-ws",
                 root_path="/repos/t10-batch",
-                path_source="server-local",
                 status="active",
             )
         )

@@ -323,8 +323,8 @@ export default function AgentPage({ params }: Props) {
   /* ---- 启动扫描 ---- */
   const handleDispatch = useCallback(async () => {
     if (!workspaceData?.root_path) return;
-    // daemon-entity-binding 后稳定绑定键是 myBinding.daemon_id；workspace.daemon_runtime_id
-    // 对新工作区恒 NULL（绑定下沉到 per-member binding 行）。未绑定直接提示，避免 backend 422。
+    // daemon-entity-binding 后稳定绑定键是 myBinding.daemon_id（runtime 维度已
+    // 下沉到 per-member binding 行）。未绑定直接提示，避免 backend 422。
     const daemonId = myBinding?.daemon_id ?? null;
     if (!daemonId) {
       setDispatchError("未绑定守护进程，无法启动扫描。请先在「我的接入」完成绑定。");
@@ -333,12 +333,13 @@ export default function AgentPage({ params }: Props) {
     setDispatching(true);
     setDispatchError(null);
     try {
+      // task-11 / 2026-07-10-remove-server-local-workspace-mode：scanGenerate
+      // 签名收敛（pathSource/daemonRuntimeId 入参已删，平台唯一 daemon-client），
+      // 调用收敛为 (rootPath, provider, model, specStrategy=undefined, daemonId)。
       await scanGenerate(
         workspaceData.root_path,
         selectedProvider, // 单次覆盖（D-005），不写回 workspace.default_agent
         selectedModel || null,
-        "daemon-client",
-        null,
         undefined,
         daemonId,
       );
@@ -594,7 +595,7 @@ export default function AgentPage({ params }: Props) {
               该守护进程未启用 {PROVIDER_META[selectedProvider]?.label ?? selectedProvider}
             </p>
           )}
-          {!myBinding?.daemon_id && workspaceData?.path_source === "daemon-client" && (
+          {!myBinding?.daemon_id && (
             <p className="mt-2 text-xs text-amber-600">
               请先在工作区设置中绑定守护进程
             </p>

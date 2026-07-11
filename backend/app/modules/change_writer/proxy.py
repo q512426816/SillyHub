@@ -1,10 +1,10 @@
-"""change_writer proxy — daemon-client 变更代写 (D-004@v1 / FR-08 / FR-09).
+"""change_writer proxy — 变更代写 (D-004@v1 / FR-08 / FR-09).
 
-daemon-client workspace 没有 backend 可达的文件系统（``root_path`` 在绑定 daemon
-宿主），无法像 server-local 那样直接 ``write_text``。本模块经 lease-polling 代写
-队列把变更包内容下发给绑定 daemon：
+经 lease-polling 代写队列把变更包内容下发给绑定 daemon（daemon-client 架构：
+workspace 绑定到远程 daemon 宿主，backend 无可达文件系统）：
 
-1. 校验 runtime（workspace.daemon_runtime_id == runtime_id 且 status='online'）。
+1. 校验 runtime（per-member binding 解析 + status='online'，task-08 清：
+   legacy 单值 runtime 列已删，写回始终现算）。
 2. 复用 ``markdown_builder`` + ``ChangeWriterService._ensure_frontmatter`` 构造
    MASTER/proposal/request 文本（**不重复 frontmatter 逻辑**）。
 3. 建 ``DaemonChangeWrite`` 行（status='pending'），files 用扁平 ``changes/<key>/``
@@ -86,7 +86,7 @@ def _build_files(
     对齐 platform-managed 布局 D-005@v1）。frontmatter 复用
     ``ChangeWriterService._ensure_frontmatter``，不重复逻辑。
 
-    每项额外带 ``doc_type``（与 server-local change 落库的 doc_type 对齐：master/
+    每项额外带 ``doc_type``（与 change 落库的 doc_type 对齐：master/
     proposal/request），落库时直接取用，避免从文件名 stem 反推大小写问题。
     """
     files: list[dict] = []
@@ -283,7 +283,7 @@ async def proxy_create_change(
 
     for f in files:
         # files 项的 path 形如 'changes/<key>/MASTER.md'；doc_type 在 _build_files
-        # 内显式标注（与 server-local 落库的 master/proposal/request 对齐）。
+        # 内显式标注（与落库的 master/proposal/request 对齐）。
         doc_type = f["doc_type"]
         doc = ChangeDocument(
             id=uuid.uuid4(),

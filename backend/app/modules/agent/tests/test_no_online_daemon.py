@@ -21,7 +21,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.modules.agent.placement import (
-    _DECIDE_FALLBACK_SENTINEL,
     ExecutionBackend,
     NoOnlineDaemonError,
     RunPlacementService,
@@ -34,19 +33,24 @@ from app.modules.worktree.model import WorktreeLease
 
 
 @pytest.mark.asyncio
-async def test_decide_backend_raises_no_online_daemon_when_no_runtime():
-    """No online daemon runtime -> NoOnlineDaemonError (no SERVER fallback)."""
+async def test_decide_backend_raises_no_online_daemon_when_no_binding():
+    """无 per-member binding -> NoOnlineDaemonError（无 SERVER 回退）。
+
+    D-007@2026-07-10：server-local 列删除后所有 workspace 永远 daemon-client，
+    `_resolve_decide_runtime` 无 binding 行直接抛，不再回退 user 级 runtime 兜底。
+    """
     session = AsyncMock()
     svc = RunPlacementService(session)
     with patch.object(
-        RunPlacementService, "_resolve_decide_runtime", return_value=_DECIDE_FALLBACK_SENTINEL
+        RunPlacementService,
+        "_resolve_decide_runtime",
+        side_effect=NoOnlineDaemonError(workspace_id=uuid.uuid4(), user_id=uuid.uuid4()),
     ):
-        with patch.object(RunPlacementService, "_has_online_runtime", return_value=False):
-            with pytest.raises(NoOnlineDaemonError) as ei:
-                await svc.decide_backend(
-                    workspace_id=uuid.uuid4(),
-                    user_id=uuid.uuid4(),
-                )
+        with pytest.raises(NoOnlineDaemonError) as ei:
+            await svc.decide_backend(
+                workspace_id=uuid.uuid4(),
+                user_id=uuid.uuid4(),
+            )
     assert ei.value.user_id is not None
 
 
@@ -55,31 +59,34 @@ async def test_decide_backend_preferred_server_raises():
     """preferred_backend='server' is rejected (SERVER path removed)."""
     session = AsyncMock()
     svc = RunPlacementService(session)
+    # _resolve_decide_runtime 不会被调用（preferred=server 在其之前就抛）。
     with patch.object(
-        RunPlacementService, "_resolve_decide_runtime", return_value=_DECIDE_FALLBACK_SENTINEL
+        RunPlacementService,
+        "_resolve_decide_runtime",
+        return_value={"id": uuid.uuid4()},
     ):
-        with patch.object(RunPlacementService, "_has_online_runtime", return_value=True):
-            with pytest.raises(NoOnlineDaemonError):
-                await svc.decide_backend(
-                    workspace_id=uuid.uuid4(),
-                    user_id=uuid.uuid4(),
-                    preferred_backend="server",
-                )
+        with pytest.raises(NoOnlineDaemonError):
+            await svc.decide_backend(
+                workspace_id=uuid.uuid4(),
+                user_id=uuid.uuid4(),
+                preferred_backend="server",
+            )
 
 
 @pytest.mark.asyncio
 async def test_decide_backend_returns_daemon_when_online():
-    """Online runtime present -> ExecutionBackend.DAEMON."""
+    """已绑定且 daemon 在线 -> ExecutionBackend.DAEMON。"""
     session = AsyncMock()
     svc = RunPlacementService(session)
     with patch.object(
-        RunPlacementService, "_resolve_decide_runtime", return_value=_DECIDE_FALLBACK_SENTINEL
+        RunPlacementService,
+        "_resolve_decide_runtime",
+        return_value={"id": uuid.uuid4()},
     ):
-        with patch.object(RunPlacementService, "_has_online_runtime", return_value=True):
-            backend = await svc.decide_backend(
-                workspace_id=uuid.uuid4(),
-                user_id=uuid.uuid4(),
-            )
+        backend = await svc.decide_backend(
+            workspace_id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+        )
     assert backend is ExecutionBackend.DAEMON
 
 

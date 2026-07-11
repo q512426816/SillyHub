@@ -1156,7 +1156,7 @@ async def _run_gate_via_delegate(
 
     Args:
         session: async DB session（HostFsDelegate 路由 daemon_id 用）。
-        workspace: 目标工作区（取 path_source + id 路由 RPC）。
+        workspace: 目标工作区（按 id 路由 RPC 到绑定 daemon）。
         change_name: 变更名（sillyspec change 目录名，非 change_id）。
         code_root: 项目代码根（gate cwd，跑测试，有 backend/frontend 代码）。
         spec_dir: spec 根目录（gate specBase via ``--spec-dir``，读 local.yaml/spec
@@ -1252,11 +1252,12 @@ class SillySpecStageDispatchService:
         self._host_fs_delegate: Any = None
 
     def _get_host_fs_delegate(self) -> Any:
-        """Lazy-construct HostFsDelegate for daemon-client stage sync.
+        """Lazy-construct HostFsDelegate for stage sync.
 
-        仅 daemon-client path_source 调用（sync_stage_status 分流），构造时
-        绑定进程级 ws_hub + HostFsWsRpc。失败抛 HostFsDelegateUnavailable 由
-        caller 兜底降级 StageSyncResult(synced=False)（D-006）。
+        sync_stage_status 调用（task-08 删多路径分流后 stage sync 唯一
+        路径），构造时绑定进程级 ws_hub + HostFsWsRpc。失败抛
+        HostFsDelegateUnavailable 由 caller 兜底降级
+        StageSyncResult(synced=False)（D-006）。
         """
         if self._host_fs_delegate is None:
             from app.modules.daemon.host_fs import HostFsDelegate, HostFsWsRpc
@@ -1524,22 +1525,22 @@ class SillySpecStageDispatchService:
         session: AsyncSession,
         change_id: uuid.UUID,
         run_id: uuid.UUID,
-        *,
-        path_source: str | None = None,
     ) -> StageSyncResult:
         """AgentRun 完成后从 sillyspec.db 同步阶段/步骤状态到 Hub。
 
         读取 sillyspec.db 的 changes + stages + steps 表，投影到
         Change.current_stage 和 Change.stages JSON。
 
+        task-08：工作区路径来源分流已删（FR-2），唯一路径经
+        ``_sync_stage_status_daemon_client`` → HostFsDelegate RPC 读 sillyspec.db
+        （daemon-client 架构下 sillyspec.db 永远在客户端宿主，D-004 / D-009）。
+        ``_resolve_db_path`` / ``_resolve_db_path_fallback`` 保留——被
+        ``_resolve_db_rel_candidates``（daemon-client 分支内部）间接复用。
+
         Args:
             session: SQLAlchemy async session。
             change_id: 目标变更的 UUID。
             run_id: 刚完成的 AgentRun 的 UUID（用于审计追踪）。
-            path_source: task-08 透传的工作区路径来源。``"daemon-client"`` 走
-                HostFsDelegate RPC 读 sillyspec.db（D-004 / D-009），其他 /
-                None 走原 server-local ``sqlite3.connect`` 本地容器分支
-                （NFR-02 零回归）。
 
         Returns:
             StageSyncResult 包含同步状态和步骤信息。
@@ -1550,197 +1551,14 @@ class SillySpecStageDispatchService:
             ChangeNotFound: 当 change_id 在 Hub DB 中不存在时。
         """
         from app.core.errors import ChangeNotFound
-        from app.modules.workspace.service import is_daemon_client_path_source
 
         # Step 1: Load Change
         change = await session.get(Change, change_id)
         if change is None:
             raise ChangeNotFound(f"Change '{change_id}' not found.")
 
-        # task-08：按 path_source 分流（D-004）。daemon-client 走 HostFsDelegate
-        # RPC 读 sillyspec.db；server-local 走原 sqlite3 直读本地容器分支。
-        if is_daemon_client_path_source(path_source):
-            return await self._sync_stage_status_daemon_client(session, change, change_id, run_id)
-
-        # Step 2: Resolve sillyspec.db path — try all candidates
-        db_path = await self._resolve_db_path(session, change)
-        fallback_db_path = await self._resolve_db_path_fallback(session, change)
-        if db_path is None or not db_path.is_file():
-            if fallback_db_path and fallback_db_path.is_file():
-                db_path = fallback_db_path
-            else:
-                log.warning(
-                    "sync_stage_status.db_not_found",
-                    change_id=str(change_id),
-                    db_path=str(db_path) if db_path else None,
-                )
-                return StageSyncResult(
-                    synced=False,
-                    change_id=change_id,
-                    run_id=run_id,
-                    error="sillyspec.db not found",
-                )
-
-        # Step 3: Read sillyspec.db
-        conn: sqlite3.Connection | None = None
-        try:
-            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-            conn.row_factory = sqlite3.Row
-        except sqlite3.Error as exc:
-            log.info(
-                "sync_stage_status.db_connect_failed",
-                change_id=str(change_id),
-                error=str(exc),
-            )
-            return StageSyncResult(
-                synced=False,
-                change_id=change_id,
-                run_id=run_id,
-                error=f"db_connect_failed: {exc}",
-            )
-
-        try:
-            # Step 3a: Find change record by change_key
-            row = conn.execute(
-                "SELECT current_stage, status FROM changes WHERE name = ?",
-                (change.change_key,),
-            ).fetchone()
-
-            if (
-                row is None
-                and fallback_db_path
-                and fallback_db_path.is_file()
-                and db_path != fallback_db_path
-            ):
-                # Try fallback db (workspace root_path)
-                conn.close()
-                log.info(
-                    "sync_stage_status.trying_fallback_db",
-                    change_key=change.change_key,
-                    fallback=str(fallback_db_path),
-                )
-                try:
-                    conn = sqlite3.connect(f"file:{fallback_db_path}?mode=ro", uri=True)
-                    conn.row_factory = sqlite3.Row
-                    row = conn.execute(
-                        "SELECT current_stage, status FROM changes WHERE name = ?",
-                        (change.change_key,),
-                    ).fetchone()
-                except sqlite3.Error:
-                    row = None
-
-            if row is None:
-                log.warning(
-                    "sync_stage_status.change_not_in_db",
-                    change_key=change.change_key,
-                    change_id=str(change_id),
-                )
-                if conn:
-                    conn.close()
-                return StageSyncResult(
-                    synced=False,
-                    change_id=change_id,
-                    run_id=run_id,
-                    error="change_key not found in sillyspec.db",
-                )
-
-            db_current_stage = row["current_stage"]
-
-            # Step 3b: Find the current stage record
-            stage_row = conn.execute(
-                "SELECT id, status, completed_at FROM stages "
-                "WHERE change_id = (SELECT id FROM changes WHERE name = ?) "
-                "AND stage = ?",
-                (change.change_key, db_current_stage),
-            ).fetchone()
-
-            stage_completed = False
-            steps_completed: list[str] = []
-            steps_pending: list[str] = []
-            current_step: str | None = None
-
-            if stage_row is not None:
-                stage_completed = stage_row["status"] == "completed"
-
-                # Step 3c: Find all steps for this stage
-                step_rows = conn.execute(
-                    "SELECT name, status FROM steps WHERE stage_id = ? ORDER BY ordering",
-                    (stage_row["id"],),
-                ).fetchall()
-
-                for step in step_rows:
-                    if step["status"] == "completed":
-                        steps_completed.append(step["name"])
-                    else:
-                        steps_pending.append(step["name"])
-
-                # Step 3d: Determine current_step (first non-completed)
-                has_pending = len(steps_pending) > 0
-                if has_pending:
-                    current_step = steps_pending[0]
-            else:
-                # Stage record doesn't exist yet
-                has_pending = True
-                current_step = None
-
-        except sqlite3.Error as exc:
-            log.info(
-                "sync_stage_status.db_read_failed",
-                change_id=str(change_id),
-                error=str(exc),
-            )
-            if conn:
-                conn.close()
-            return StageSyncResult(
-                synced=False,
-                change_id=change_id,
-                run_id=run_id,
-                error=f"db_read_failed: {exc}",
-            )
-        finally:
-            if conn:
-                conn.close()
-
-        # Step 4: Sync current_stage to Change record (directly follows sillyspec.db)
-        if change.current_stage != db_current_stage:
-            log.info(
-                "sync_stage_status.stage_updated",
-                change_id=str(change_id),
-                old=change.current_stage,
-                new=db_current_stage,
-            )
-            change.current_stage = db_current_stage
-
-        # Step 5: Sync step status to Change.stages JSON
-        stages_json = change.stages or {}
-        stage_key = db_current_stage
-        stages_json[stage_key] = {
-            "status": "completed" if stage_completed else "in_progress",
-            "steps": {
-                "completed": steps_completed,
-                "pending": steps_pending,
-            },
-            "current_step": current_step,
-            "synced_at": datetime.now(UTC).isoformat(),
-            "synced_from_run": str(run_id),
-        }
-        change.stages = stages_json
-        change.updated_at = datetime.now(UTC)
-        session.add(change)
-        await session.commit()
-
-        # Step 6: Build and return StageSyncResult
-        return StageSyncResult(
-            synced=True,
-            change_id=change_id,
-            run_id=run_id,
-            current_stage=db_current_stage,
-            current_step=current_step,
-            stage_completed=stage_completed,
-            has_pending_step=len(steps_pending) > 0,
-            steps_completed=steps_completed,
-            steps_pending=steps_pending,
-        )
+        # task-08：工作区路径来源分流已删（FR-2），唯一路径走 daemon-client RPC。
+        return await self._sync_stage_status_daemon_client(session, change, change_id, run_id)
 
     async def _resolve_db_path(
         self,
@@ -1980,7 +1798,7 @@ class SillySpecStageDispatchService:
                 except OSError:
                     pass
 
-        # 投影到 Change（与 server-local 一致）
+        # 投影到 Change
         if change.current_stage != db_current_stage:
             log.info(
                 "sync_stage_status.stage_updated",

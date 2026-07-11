@@ -1,0 +1,23 @@
+{
+  "name_zh": "worktree 元数据",
+  "changeName": "2026-07-10-remove-server-local-workspace-mode",
+  "branch": "sillyspec/2026-07-10-remove-server-local-workspace-mode",
+  "baseBranch": "main",
+  "baseHash": "f94e12606458f85762cb28fab5b232f71cebf8fa",
+  "actualBaseHash": "95eb5a97cb6a04fa6866d6cbdff0c82500b4e67a",
+  "createdAt": "2026-07-10T16:19:34.865Z",
+  "worktreePath": "C:\\Users\\qinyi\\IdeaProjects\\multi-agent-platform\\.sillyspec\\.runtime\\worktrees\\2026-07-10-remove-server-local-workspace-mode",
+  "mode": "worktree",
+  "baselineFiles": [
+    "docs/sillyspec/local.yaml-gate-pitfalls.md",
+    "docs/sillyspec/finished/local.yaml-gate-pitfalls.md"
+  ],
+  "baselineCommit": "95eb5a97cb6a04fa6866d6cbdff0c82500b4e67a",
+  "baselineHash": "d6f499a41687d65b",
+  "syncStatus": "ok",
+  "depsStatus": "n/a",
+  "depsMethod": null,
+  "depsSource": null,
+  "depsLockHash": "1ba6e57607589bbe",
+  "depsCheckedAt": "2026-07-10T16:19:34.837Z"
+}

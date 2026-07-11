@@ -20,18 +20,16 @@ def _copy_fixtures(src: Path, tmp_path: Path, name: str = "ws") -> Path:
 
 @pytest.fixture()
 async def workspace_with_tasks(client, tmp_path: Path, auth_headers: dict[str, str]) -> dict:
-    """Create a workspace with components, a change, and task fixtures."""
+    """Create a workspace with components, a change, and task fixtures.
+
+    2026-07-10-remove-server-local-workspace-mode: backend 读不到 client
+    root_path，fixture 必须落到服务器 spec_root（扁平布局）才能 reparse。
+    """
+    from conftest import seed_spec_root
+
     root = _copy_fixtures(COMPONENT_FIXTURES, tmp_path)
 
-    # Add change fixtures (dirs_exist_ok because .sillyspec/changes/ already exists)
-    sillyspec_changes = root / ".sillyspec" / "changes"
-    shutil.copytree(CHANGE_FIXTURES, sillyspec_changes, dirs_exist_ok=True)
-
-    # Add tasks under demo-feature change
-    demo_feature = sillyspec_changes / "2026-05-25-demo-feature"
-    shutil.copytree(TASK_FIXTURES / "tasks", demo_feature / "tasks")
-
-    # Create workspace
+    # Create workspace first
     ws_resp = await client.post(
         "/api/workspaces",
         json={"name": "task-test", "root_path": str(root)},
@@ -39,6 +37,16 @@ async def workspace_with_tasks(client, tmp_path: Path, auth_headers: dict[str, s
     )
     assert ws_resp.status_code == 201, ws_resp.text
     ws_id = ws_resp.json()["id"]
+
+    # COMPONENT_FIXTURES（包裹式）展平到 spec_root
+    spec_root = seed_spec_root(ws_id, COMPONENT_FIXTURES)
+    # CHANGE_FIXTURES 覆盖到 spec_root/changes/
+    changes_root = Path(spec_root) / "changes"
+    changes_root.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(CHANGE_FIXTURES, changes_root, dirs_exist_ok=True)
+    # Add tasks under demo-feature change
+    demo_feature = changes_root / "2026-05-25-demo-feature"
+    shutil.copytree(TASK_FIXTURES / "tasks", demo_feature / "tasks", dirs_exist_ok=True)
 
     # Reparse changes to populate DB
     await client.post(

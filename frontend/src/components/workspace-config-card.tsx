@@ -24,11 +24,6 @@ import {
 } from "@/lib/spec-workspaces";
 import { scanGenerate, type Workspace } from "@/lib/workspaces";
 import {
-  isDaemonClientWorkspace,
-  workspacePathSourceLabel,
-  type WorkspacePathSource,
-} from "@/lib/workspace-path";
-import {
   fetchMyBinding,
   type MemberBindingView,
 } from "@/lib/workspace-binding";
@@ -135,8 +130,6 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
     ? `${specWs.spec_root}/runtime`
     : null;
   const cacheRoot = `~/.sillyhub/daemon/specs/${workspaceId}`;
-  const daemonClient = isDaemonClientWorkspace(workspace);
-  const isServerLocal = workspace.path_source === "server-local";
 
   /* ---- 编辑表单展开 state ---- */
   const [editing, setEditing] = useState(false);
@@ -279,8 +272,6 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
   /* ---- Scan handler（task-14 / D-006@v1 + D-003@V2 owner 门禁）---- */
   async function handleScan(): Promise<void> {
     // daemon-entity-binding 后稳定绑定键是 myBinding.daemon_id（守护进程实体）。
-    // workspace.daemon_runtime_id 对新工作区恒为 NULL（绑定下沉到 per-member binding
-    // 行，见 workspace-card.tsx:27 / workspace-path-fields.tsx:28 / api-types.ts:346 注释）；
     // myBinding.runtime_id 也不稳定（runtime 动态注册，常为 null）。扫描必须改用
     // daemon_id 派发，否则点击静默 return 无反应。backend scan-generate schema 同步接 daemon_id。
     const daemonId = myBinding?.daemon_id ?? null;
@@ -305,8 +296,6 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
         workspace.root_path,
         workspace.default_agent ?? null,
         workspace.default_model ?? null,
-        "daemon-client",
-        null,
         specWs?.strategy,
         daemonId,
       );
@@ -401,23 +390,21 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
       >
         {initing ? "初始化进行中…" : "初始化"}
       </Button>
-      {daemonClient && (
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void handleScan()}
-          disabled={
-            !isOwner || !!activeScanRunId || scanning || importing || initing
-          }
-          title={!isOwner ? "仅 owner 可扫描" : undefined}
-        >
-          {scanning
-            ? "派发中…"
-            : activeScanRunId
-              ? "扫描运行中…"
-              : "扫描"}
-        </Button>
-      )}
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => void handleScan()}
+        disabled={
+          !isOwner || !!activeScanRunId || scanning || importing || initing
+        }
+        title={!isOwner ? "仅 owner 可扫描" : undefined}
+      >
+        {scanning
+          ? "派发中…"
+          : activeScanRunId
+            ? "扫描运行中…"
+            : "扫描"}
+      </Button>
       {initSyncedAt && componentCount > 0 && (
         <Button
           size="sm"
@@ -462,18 +449,8 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
     </div>
   ) : undefined;
 
-  /* ---- 「我的接入」组绑定守护进程 dd（task-02 + task-05 server-local 分支）---- */
+  /* ---- 「我的接入」组绑定守护进程 dd（task-02 + task-05）---- */
   const renderBoundDaemonDd = (): JSX.Element => {
-    if (isServerLocal) {
-      return (
-        <span
-          data-testid="server-local-no-daemon"
-          className="text-muted-foreground"
-        >
-          服务器本地工作区，无需守护进程
-        </span>
-      );
-    }
     if (!boundDaemon) {
       return <span className="text-muted-foreground">未绑定守护进程</span>;
     }
@@ -505,7 +482,7 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
     );
   };
 
-  /* ---- 「我的接入」组（task-02 + task-04 编辑 + task-05 未绑定/server-local）---- */
+  /* ---- 「我的接入」组（task-02 + task-04 编辑 + task-05 未绑定）---- */
   const renderMyAccessGroup = (): JSX.Element => {
     // 未绑定：WorkspaceAccessGuide 首次模式（task-05）
     if (!myBinding) {
@@ -519,7 +496,6 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
       );
     }
 
-    const pathSource = myBinding.path_source as WorkspacePathSource;
     return (
       <div className="space-y-3">
         <div className="flex items-center justify-end">
@@ -540,13 +516,6 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
           <dt className="text-muted-foreground">我的本地项目路径</dt>
           <dd className="truncate font-mono" title={myBinding.root_path}>
             {myBinding.root_path}
-          </dd>
-
-          <dt className="text-muted-foreground">路径来源</dt>
-          <dd>
-            <Badge variant={daemonClient ? "default" : "outline"}>
-              {workspacePathSourceLabel(pathSource)}
-            </Badge>
           </dd>
 
           <dt className="text-muted-foreground">接入初始化状态</dt>
@@ -581,7 +550,6 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
             initial={{
               daemon_id: myBinding.daemon_id ?? null,
               root_path: myBinding.root_path,
-              path_source: myBinding.path_source,
             }}
           />
         )}
@@ -614,19 +582,17 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
           </>
         )}
 
-        {!isServerLocal && (
-          <>
-            <dt className="text-muted-foreground" title={CACHE_ROOT_TOOLTIP}>
-              守护进程本地缓存
-            </dt>
-            <dd
-              className="truncate font-mono"
-              title={`${cacheRoot}\n${CACHE_ROOT_TOOLTIP}`}
-            >
-              {cacheRoot}
-            </dd>
-          </>
-        )}
+        <>
+          <dt className="text-muted-foreground" title={CACHE_ROOT_TOOLTIP}>
+            守护进程本地缓存
+          </dt>
+          <dd
+            className="truncate font-mono"
+            title={`${cacheRoot}\n${CACHE_ROOT_TOOLTIP}`}
+          >
+            {cacheRoot}
+          </dd>
+        </>
 
         <dt className="text-muted-foreground">同步状态</dt>
         <dd>

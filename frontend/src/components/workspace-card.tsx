@@ -38,8 +38,7 @@ interface Props {
   boundRuntime?: DaemonRuntimeRead | null;
   /**
    * 遗留 1（daemon-entity-binding）：按 daemon 实体展示绑定。
-   * 新工作区 ``workspace.daemon_runtime_id`` 为 NULL（绑定存 member binding 行），
-   * 列表卡片优先用 daemon 实体渲染守护进程信息。
+   * 绑定存 member binding 行，列表卡片优先用 daemon 实体渲染守护进程信息。
    */
   boundDaemon?: DaemonInstanceRead | null;
   /**

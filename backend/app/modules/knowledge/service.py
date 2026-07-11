@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.knowledge.parser import KnowledgeParser, ParsedEntry
 from app.modules.knowledge.schema import KnowledgeEntry, KnowledgeList, QuicklogEntry, QuicklogList
-from app.modules.workspace.service import WorkspaceService, is_daemon_client_path_source
+from app.modules.workspace.service import WorkspaceService
 
 
 class KnowledgeService:
@@ -29,20 +29,19 @@ class KnowledgeService:
     async def _spec_content_root(self, workspace) -> Path:
         """解析 `.sillyspec` 内容根（parser 在其下找 knowledge/、quicklog/）。
 
-        判据用 ``path_source == "daemon-client"``（与 workspace.service 一致）：
-        只有 daemon-client 的 root_path 在客户端机不可达，需读 platform-managed
-        spec_root（扁平，knowledge/ 直接在其下）。server-local / repo-native 读
-        ``root_path / ".sillyspec"``（仓库自有 .sillyspec，R6）。
+        task-09（2026-07-10-remove-server-local-workspace-mode）：单一 daemon-client
+        后所有 workspace 均走 platform-managed spec_root（扁平布局，knowledge/ 直接在
+        spec_root 下）。先尝试读 SpecWorkspaceService.spec_root，失败兜底
+        ``Path(root_path) / ".sillyspec"``（spec_workspace 无数据时零回归）。
         """
-        if is_daemon_client_path_source(workspace.path_source):
-            try:
-                from app.modules.spec_workspace.service import SpecWorkspaceService
+        try:
+            from app.modules.spec_workspace.service import SpecWorkspaceService
 
-                spec_ws = await SpecWorkspaceService(self._session).get(workspace.id)
-                if spec_ws.spec_root:
-                    return Path(spec_ws.spec_root)
-            except Exception:
-                pass
+            spec_ws = await SpecWorkspaceService(self._session).get(workspace.id)
+            if spec_ws.spec_root:
+                return Path(spec_ws.spec_root)
+        except Exception:
+            pass
         return Path(workspace.root_path) / ".sillyspec"
 
     async def list_knowledge(self, workspace_id: uuid.UUID) -> KnowledgeList:

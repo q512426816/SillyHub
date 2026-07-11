@@ -173,8 +173,6 @@ function mkWorkspace(id: string, overrides: Record<string, unknown> = {}) {
     display_alias: null,
     slug: id,
     root_path: `/srv/${id}`,
-    path_source: "daemon-client",
-    daemon_runtime_id: null,
     status: "active",
     component_key: null,
     type: null,

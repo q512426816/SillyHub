@@ -22,8 +22,6 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import yaml
-
 from app.core.logging import get_logger
 
 if TYPE_CHECKING:
@@ -148,135 +146,6 @@ def _check_log_patterns(output: str) -> list[ValidationError]:
     return errors
 
 
-def _get_source_commit(source_root: Path) -> tuple[str | None, str | None]:
-    """Get source commit using git -C to avoid cwd dependency.
-
-    Returns:
-        (commit_hash, error_message)
-    """
-    import subprocess
-
-    def _try_rev_parse() -> tuple[str | None, str | None]:
-        try:
-            proc = subprocess.run(
-                ["git", "-C", str(source_root), "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
-            )
-            if proc.returncode == 0:
-                commit = proc.stdout.strip()
-                if commit:
-                    return commit, None
-            return None, "not_git_repo"
-        except subprocess.TimeoutExpired:
-            return None, "git_timeout"
-        except FileNotFoundError:
-            return None, "git_not_found"
-        except Exception as exc:
-            return None, str(exc)
-
-    commit, error = _try_rev_parse()
-    if commit:
-        return commit, None
-
-    # Fallback: add safe.directory and retry (handles dubious ownership)
-    if error and "dubious" in (
-        subprocess.run(
-            ["git", "-C", str(source_root), "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        ).stderr.lower()
-        if not commit
-        else ""
-    ):
-        subprocess.run(
-            ["git", "config", "--global", "--add", "safe.directory", str(source_root)],
-            capture_output=True,
-            check=False,
-            timeout=5,
-        )
-        commit2, _error2 = _try_rev_parse()
-        if commit2:
-            return commit2, None
-
-    return commit, error
-
-
-def _archive_and_clean_pollution(
-    source_root: Path,
-    runtime_root: Path,
-    scan_run_id: str,
-) -> dict[str, Any]:
-    """Move source_root/.sillyspec/ to runtime_root/pollution/{scan_run_id}/.
-
-    Returns a dict with keys: archived (bool), archive_path (str|None), file_count (int).
-    """
-    import shutil
-
-    source_sillyspec = source_root / ".sillyspec"
-    if not source_sillyspec.exists():
-        return {"archived": False, "archive_path": None, "file_count": 0}
-
-    files = list(source_sillyspec.rglob("*"))
-    file_count = sum(1 for f in files if f.is_file())
-    if file_count == 0:
-        return {"archived": False, "archive_path": None, "file_count": 0}
-
-    archive_dir = runtime_root / "pollution" / scan_run_id
-    archive_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-        shutil.move(str(source_sillyspec), str(archive_dir / ".sillyspec"))
-        return {
-            "archived": True,
-            "archive_path": str(archive_dir / ".sillyspec"),
-            "file_count": file_count,
-        }
-    except Exception as exc:
-        return {
-            "archived": False,
-            "archive_path": None,
-            "file_count": file_count,
-            "error": str(exc),
-        }
-
-
-def _check_source_pollution(source_root: Path, spec_root: Path) -> list[ValidationError]:
-    """Check if docs were written to source_root instead of spec_root.
-
-    Args:
-        source_root: Original project directory (read-only target).
-        spec_root: Platform-managed spec output directory.
-
-    Returns:
-        List of validation errors for pollution found.
-    """
-    errors = []
-    source_docs = source_root / ".sillyspec" / "docs"
-
-    if source_docs.exists() and any(source_docs.iterdir()):
-        # Found docs in source_root - this is a violation
-        rel_path = source_docs.relative_to(source_root)
-        errors.append(
-            ValidationError(
-                code="source_root_pollution",
-                severity="error",
-                message="Agent wrote docs to source_root instead of spec_root",
-                details={
-                    "pollution_path": str(rel_path),
-                    "expected_path": str(spec_root / ".sillyspec" / "docs"),
-                    "hint": "Clean source docs or rerun with strict spec-root mode",
-                },
-            )
-        )
-
-    return errors
-
-
 def _check_output_paths(spec_root: Path) -> list[ValidationError]:
     """Verify expected files exist under spec_root.
 
@@ -381,105 +250,6 @@ def _check_manifest_exists(runtime_root: Path) -> list[ValidationError]:
     return errors
 
 
-def _check_local_config(source_root: Path) -> list[ValidationError]:
-    """Validate local.yaml configuration against project scripts.
-
-    If local.yaml exists with commands (npm run build/test/lint), verify
-    the corresponding scripts exist in package.json.
-
-    Args:
-        source_root: Original project directory.
-
-    Returns:
-        List of validation warnings for config issues.
-    """
-    warnings: list[ValidationError] = []
-    local_yaml = source_root / ".sillyspec" / "local.yaml"
-
-    if not local_yaml.exists():
-        return warnings
-
-    try:
-        content = local_yaml.read_text(encoding="utf-8")
-        config = yaml.safe_load(content)
-    except (OSError, yaml.YAMLError):
-        warnings.append(
-            ValidationError(
-                code="local_config_unreadable",
-                severity="warning",
-                message="local.yaml exists but cannot be parsed",
-                details={"path": str(local_yaml)},
-            )
-        )
-        return warnings
-
-    if not isinstance(config, dict):
-        return warnings
-
-    # Check for npm/yarn/pnpm commands
-    commands_to_check = []
-    for key, value in config.items():
-        if isinstance(value, str):
-            if any(cmd in value for cmd in ["npm run", "yarn", "pnpm run"]):
-                commands_to_check.append((key, value))
-        elif isinstance(value, dict) and "commands" in value:
-            cmds = value["commands"]
-            if isinstance(cmds, list):
-                for cmd in cmds:
-                    if isinstance(cmd, str) and any(
-                        c in cmd for c in ["npm run", "yarn", "pnpm run"]
-                    ):
-                        commands_to_check.append((key, cmd))
-
-    if not commands_to_check:
-        return warnings
-
-    # Try to read package.json to verify scripts
-    package_json = source_root / "package.json"
-    available_scripts = {}
-
-    if package_json.exists():
-        try:
-            pkg_content = package_json.read_text(encoding="utf-8")
-            pkg_data = json.loads(pkg_content)
-            if isinstance(pkg_data, dict):
-                available_scripts = pkg_data.get("scripts", {})
-        except (OSError, json.JSONDecodeError):
-            pass
-
-    # Verify each command
-    for key, cmd in commands_to_check:
-        # Extract script name from "npm run <script>" or "yarn <script>"
-        script_name = None
-        for pattern in [
-            r"npm run (\S+)",
-            r"yarn (\S+)",
-            r"pnpm run (\S+)",
-            r"pnpm (\S+)",
-        ]:
-            match = re.search(pattern, cmd)
-            if match:
-                script_name = match.group(1)
-                break
-
-        if script_name and script_name not in available_scripts:
-            warnings.append(
-                ValidationError(
-                    code="local_config_invalid",
-                    severity="warning",
-                    message=f"local.yaml references missing script: {script_name}",
-                    details={
-                        "key": key,
-                        "command": cmd,
-                        "script_name": script_name,
-                        "available_scripts": list(available_scripts.keys()),
-                    },
-                )
-            )
-
-    return warnings
-
-
 class PostScanValidator:
     """Platform-side post-scan validation service."""
 
@@ -491,7 +261,6 @@ class PostScanValidator:
         scan_run_id: str,
         *,
         delegate: HostFsDelegate | None = None,
-        path_source: str = "server-local",
         workspace: Workspace | None = None,
     ) -> None:
         """Initialize validator with scan context.
@@ -501,24 +270,17 @@ class PostScanValidator:
             spec_root: Platform-managed spec output directory.
             runtime_root: Platform runtime directory for manifests.
             scan_run_id: The scan run ID for validation.
-            delegate: Optional :class:`HostFsDelegate`. When *path_source* is
-                ``"daemon-client"`` the validator delegates git rev-parse /
-                pollution archive / package.json reads to the bound daemon via
-                this delegate (D-009 方案 B — daemon exposes primitives only;
-                pollution判定 / 状态机 / ERROR_PATTERNS 留 backend)。
-                ``None`` preserves the legacy server-local subprocess/shutil
-                path (NFR-02 零回归)。
-            path_source: ``"server-local"`` (default) 走原生 subprocess/shutil；
-                ``"daemon-client"`` 走 delegate RPC。
-            workspace: workspace 实体，daemon-client 分支 delegate.* 需要
-                它做 path_source 分流。server-local 可为 None。
+            delegate: :class:`HostFsDelegate`。validator 委托 git rev-parse /
+                pollution archive / package.json reads 到绑定 daemon（D-009 方案 B —
+                daemon exposes primitives only；pollution 判定 / 状态机 / ERROR_PATTERNS
+                留 backend）。
+            workspace: workspace 实体，delegate.* RPC 需要。
         """
         self.source_root = Path(source_root)
         self.spec_root = Path(spec_root)
         self.runtime_root = Path(runtime_root)
         self.scan_run_id = scan_run_id
         self.delegate = delegate
-        self.path_source = path_source
         self.workspace = workspace
 
     async def validate(
@@ -535,112 +297,12 @@ class PostScanValidator:
         Returns:
             PostScanValidationResult with final status and all issues.
 
-        ``validate`` 改 async（task-07）：daemon-client 分支经 HostFsDelegate
-        RPC 取 commit / 污染归档 / package.json，server-local 分支用
-        ``asyncio.to_thread`` 包原同步函数避免阻塞事件循环（NFR-02 零回归：
-        server-local 字节级不变）。
+        D-007@2026-07-10（remove-server-local-workspace-mode）：单一 daemon-client
+        模式，validate 永远走 ``_validate_daemon_client``（原 server-local
+        subprocess/shutil 路径已删）。HostFsDelegate 经 RPC 取 commit / 污染归档 /
+        package.json，校验逻辑（ERROR_PATTERNS / 状态机）仍留 backend 编排。
         """
-        if self._is_daemon_client():
-            return await self._validate_daemon_client(agent_output, agent_exit_code)
-        return await asyncio.to_thread(self._validate_server_local, agent_output, agent_exit_code)
-
-    def _is_daemon_client(self) -> bool:
-        return (
-            self.path_source == "daemon-client"
-            and self.delegate is not None
-            and self.workspace is not None
-        )
-
-    def _validate_server_local(
-        self,
-        agent_output: str,
-        agent_exit_code: int,
-    ) -> PostScanValidationResult:
-        """server-local 原生实现（subprocess/shutil，零回归基准）。"""
-        errors: list[ValidationError] = []
-        warnings: list[ValidationError] = []
-        metadata: dict = {}
-
-        # 1. Check for error patterns in output
-        log_errors = _check_log_patterns(agent_output)
-        errors.extend(log_errors)
-
-        # 2. Get source_commit (must use git -C)
-        # ql-20260617-014：非 git 仓库（rootPath 模式 / 项目尚未 git init）是合法状态，
-        # source_commit 失败降级 warning，不阻断扫描成功。mirror clone 模式下 git 失败
-        # 会更早在 prepareWorkspace 阶段抛错，能到这里说明 agent 实际跑完了。
-        commit, commit_error = _get_source_commit(self.source_root)
-        if commit_error:
-            warnings.append(
-                ValidationError(
-                    code="source_commit_unavailable",
-                    severity="warning",
-                    message=f"source_commit unavailable: {commit_error}",
-                    details={"source_root": str(self.source_root), "error": commit_error},
-                )
-            )
-        metadata["source_commit"] = commit
-        metadata["source_commit_error"] = commit_error
-
-        # 3. Check for pollution in source_root
-        pollution_errors = _check_source_pollution(self.source_root, self.spec_root)
-        errors.extend(pollution_errors)
-
-        # 3.5 Archive and clean source_root pollution
-        if any(e.code == "source_root_pollution" for e in pollution_errors):
-            cleanup = _archive_and_clean_pollution(
-                self.source_root, self.runtime_root, self.scan_run_id
-            )
-            metadata["pollution_cleanup"] = cleanup
-            if cleanup.get("archived"):
-                warnings.append(
-                    ValidationError(
-                        code="pollution_archived",
-                        severity="warning",
-                        message=f"Moved {cleanup['file_count']} polluted files to {cleanup['archive_path']}",
-                        details=cleanup,
-                    )
-                )
-
-        # 4. Verify output paths
-        path_errors = _check_output_paths(self.spec_root)
-        errors.extend(path_errors)
-
-        # 5. Check manifest existence
-        manifest_warnings = _check_manifest_exists(self.runtime_root)
-        warnings.extend(manifest_warnings)
-
-        # 6. Check local.yaml configuration
-        local_warnings = _check_local_config(self.source_root)
-        warnings.extend(local_warnings)
-
-        # 6. Determine final status
-        status = self._determine_status(
-            agent_exit_code=agent_exit_code,
-            errors=errors,
-            warnings=warnings,
-        )
-
-        metadata["validated_at"] = datetime.now(UTC).isoformat()
-        metadata["scan_run_id"] = self.scan_run_id
-
-        result = PostScanValidationResult(
-            status=status,
-            errors=errors,
-            warnings=warnings,
-            metadata=metadata,
-        )
-
-        log.info(
-            "post_scan_validation_complete",
-            scan_run_id=self.scan_run_id,
-            status=status.value,
-            error_count=len(errors),
-            warning_count=len(warnings),
-            source_commit=commit,
-        )
-
-        return result
+        return await self._validate_daemon_client(agent_output, agent_exit_code)
 
     def _determine_status(
         self,
@@ -704,11 +366,11 @@ class PostScanValidator:
         backend 拿到降级值后按「校验跳过 / warning」处理，不阻塞 lease。
 
         注：daemon-client 模式下 source_root 在客户端机器，backend 无法直查
-        污染（_check_source_pollution 探本地 source_root/.sillyspec/docs 恒
-        False），污染检测的真实落点由 daemon 侧 pollution_archive 原语决定
-        （archive 行为已隐含污染存在性判定）。
+        本地污染（探本地 source_root/.sillyspec/docs 恒 False），污染检测的真实
+        落点由 daemon 侧 pollution_archive 原语决定（archive 行为已隐含污染
+        存在性判定）。
         """
-        assert self.delegate is not None  # _is_daemon_client 已保证
+        assert self.delegate is not None  # validate() 单一入口已保证
         assert self.workspace is not None
 
         errors: list[ValidationError] = []
@@ -731,7 +393,6 @@ class PostScanValidator:
                     details={
                         "source_root": str(self.source_root),
                         "error": commit_error,
-                        "path_source": "daemon-client",
                     },
                 )
             )
@@ -784,7 +445,6 @@ class PostScanValidator:
 
         metadata["validated_at"] = datetime.now(UTC).isoformat()
         metadata["scan_run_id"] = self.scan_run_id
-        metadata["path_source"] = "daemon-client"
 
         result = PostScanValidationResult(
             status=status,
@@ -800,7 +460,6 @@ class PostScanValidator:
             error_count=len(errors),
             warning_count=len(warnings),
             source_commit=commit,
-            path_source="daemon-client",
         )
 
         return result
@@ -810,7 +469,7 @@ class PostScanValidator:
 
         package.json scripts 经 delegate.read_package_json 原语取回，校验
         逻辑（commands_to_check / script_name 提取 / missing script warning）
-        与 server-local ``_check_local_config`` 字节级一致，仅数据源换 RPC。
+        留 backend 编排，仅数据源换 RPC。
         local.yaml 本身经 delegate.read_local_yaml 原语取回。
         """
         assert self.delegate is not None

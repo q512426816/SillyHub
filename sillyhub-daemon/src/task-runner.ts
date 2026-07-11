@@ -162,7 +162,7 @@ export interface RunnerHubClient {
   ): Promise<unknown>;
   /**
    * task-09 / D-006@v1：拉取 workspace spec bundle（tar 流）。
-   * 可选方法 —— server-local / 旧 mock client 未实现时，runLease 自动跳过 spec pull。
+   * 可选方法 —— 旧 mock client 未实现时，runLease 自动跳过 spec pull（server-local 模式已于 2026-07-10-remove-server-local-workspace-mode 移除，wsId 永远非空）。
    * 实际实现见 HubClient.getSpecBundle。
    */
   getSpecBundle?(wsId: string): Promise<Buffer>;
@@ -415,7 +415,7 @@ export class TaskRunner {
       // 步骤 1.5：spec-sync utility pull（task-05 改调，逻辑等价原 batch 私有 pull 实现）。
       // wsId/existingSpecRoot 从 ctx 鸭子类型读取（task-07 未合并前的兼容，types.ts 本任务不改）。
       // 仅当 execution-context 透传了 workspace_id 且 spec_root 为空（daemon-client 留空）
-      // 时触发。server-local（无 workspaceId / specRoot 已有值）→ pullSpecBundle 返回 null。
+      // 时触发。quick-chat / 共享 session 等无 workspace 场景（无 workspaceId / specRoot 已有值）→ pullSpecBundle 返回 null（server-local 模式已于 2026-07-10 移除，wsId 永远非空）。
       // pull 失败（bundle 404 / 网络错）不致命（FR-05「按需」语义）：agent 仍按 workDir
       // 自身的 .sillyspec 执行，对齐 design §5 E-01。
       //
@@ -423,7 +423,7 @@ export class TaskRunner {
       // `.runtime/spec-version.json.spec_version`（D-001@v1）。一致 → 跳过 pull（specRoot 直接指向本地
       // 缓存目录，agent 读已有内容）；不一致 / 本地无版本记录 → pullSpecBundle 刷新，
       // 成功后 bumpLocalSpecVersion 回写新版本。lease 未透传 latest_spec_version（旧
-      // backend / server-local）→ 保持旧行为（pullSpecBundle 内 existingSpecRoot 等既有逻辑）。
+      // backend）→ 保持旧行为（pullSpecBundle 内 existingSpecRoot 等既有逻辑）。
       let specRoot: string | null = null;
       try {
         const wsId = (ctx as { workspaceId?: string }).workspaceId;
@@ -452,7 +452,7 @@ export class TaskRunner {
             { existingSpecRoot },
           );
           // pull 成功（specDir 非空）+ lease 带了 latest_spec_version → 回写本地版本保鲜。
-          // 仅 daemon-client（wsId 非空）路径有意义；server-local pullSpecBundle 返回 null 跳过。
+          // wsId 现永远非空（2026-07-10-remove-server-local-workspace-mode 移除 server-local，唯一路径恒为 daemon-client）；quick-chat / 无 workspace 场景 pullSpecBundle 返回 null 跳过。
           if (specRoot && wsId && leaseSpecVersion !== undefined) {
             await bumpLocalSpecVersion(resolveSpecDir(wsId), leaseSpecVersion);
           }

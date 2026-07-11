@@ -24,7 +24,6 @@ from sqlmodel import col
 from app.core.config import get_settings
 from app.core.errors import (
     AppError,
-    PermissionDenied,
     WorkspaceNotFound,
     WorkspaceNotSillyspec,
     WorkspacePathDuplicate,
@@ -36,7 +35,6 @@ from app.core.errors import (
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentRun
 from app.modules.auth.model import Role, User, UserWorkspaceRole
-from app.modules.scan_docs.model import ScanDocument
 from app.modules.workspace.model import (
     AgentRunWorkspace,
     Workspace,
@@ -71,44 +69,20 @@ def _rewrite_path(root_path: str) -> str:
     return root_path
 
 
-def is_daemon_client_path_source(path_source: str | None) -> bool:
-    """True when root_path lives on a bound daemon machine (backend cannot stat it)."""
-    return path_source == "daemon-client"
-
-
-def resolve_root_path_for_server(
-    root_path: str,
-    path_source: str | None = "server-local",
-) -> str | None:
-    """Map root_path to a path the backend process can access.
-
-    Returns ``None`` for daemon-client workspaces — callers must skip server-side
-    filesystem checks and dispatch to the bound daemon instead.
-    """
-    if is_daemon_client_path_source(path_source):
-        return None
-    return _rewrite_path(root_path)
-
-
-def resolve_root_path_for_daemon(
-    root_path: str,
-    path_source: str | None = "server-local",
-) -> str:
+def resolve_root_path_for_daemon(root_path: str) -> str:
     """Map root_path to a path the daemon process can access on its host.
 
-    与 ``resolve_root_path_for_server``（host→container，给 backend 容器内用）
-    成对，本函数做**逆运算** container→host，供 backend 下发 root_path 给 daemon 时
-    改写（lease claim payload / execution-context / scan --dir）。
-
-    - ``daemon-client``：root_path 本就在 daemon 机器（宿主机路径），原样返回。
-    - ``server-local`` / 其他：若 root_path 以 ``container_path_prefix`` 开头，替换为
-      ``host_path_prefix``；否则原样返回。
-    - 未配置前缀（裸机部署，容器=宿主机）时原样返回（向后兼容）。
+    backend 下发 root_path 给 daemon 时（lease claim payload / execution-context /
+    scan --dir）做 container→host 改写：若 root_path 以 ``container_path_prefix``
+    开头，替换为 ``host_path_prefix``；否则原样返回。未配置前缀（裸机部署，
+    容器=宿主机）时原样返回（向后兼容）。
 
     路径规范化（``\\``→``/``、前缀末尾 ``/``）沿用 ``_rewrite_path`` 的跨平台处理。
+
+    2026-07-10-remove-server-local-workspace-mode：唯一路径恒为 daemon-client
+    （workspace 源码物理位于 daemon 宿主），不再按 path_source 分流，函数退化为
+    纯 container→host 改写。
     """
-    if is_daemon_client_path_source(path_source):
-        return root_path
     settings = get_settings()
     host_prefix = settings.host_path_prefix
     container_prefix = settings.container_path_prefix
@@ -177,51 +151,18 @@ class WorkspaceService:
             log.info("workspace.activated_from_create", workspace_id=str(existing.id))
             return existing
 
-        # ── FR-06 / D-003@v1：daemon-client 分支（backend 读不到客户端 root_path）──
-        if self._is_daemon_client_payload(payload):
-            # task-10/11 补遗：daemon_id 维度创建——早校验归属（daemon 属 created_by），
-            # 避免做了一堆 spec_workspace/owner 副作用后才在 member binding 处失败。
-            # 仅 daemon_id 提供 + created_by 非 None 时校验；legacy（仅 runtime_id）跳过。
-            if payload.daemon_id is not None and created_by is not None:
-                await self._guard_daemon_owned_by_user(payload.daemon_id, created_by)
-            workspace = Workspace(
-                id=uuid.uuid4(),
-                name=payload.name,
-                slug=slug,
-                root_path=payload.root_path,
-                status="active",
-                path_source="daemon-client",
-                daemon_runtime_id=payload.daemon_runtime_id,
-                component_key=payload.component_key,
-                type=payload.type,
-                role=payload.role,
-                repo_url=payload.repo_url,
-                default_branch=payload.default_branch,
-                default_agent=payload.default_agent,
-                default_model=payload.default_model,
-                tech_stack=payload.tech_stack,
-                build_command=payload.build_command,
-                test_command=payload.test_command,
-                source_yaml_path=payload.source_yaml_path,
-                created_by=created_by,
-                created_at=now,
-                updated_at=now,
-                last_scanned_at=now,
-            )
-            self._session.add(workspace)
-            try:
-                await self._session.flush()
-            except IntegrityError as exc:
-                await self._session.rollback()
-                self._translate_integrity_error(exc, slug=slug, root_path=payload.root_path)
-                raise  # _translate_integrity_error always raises; this is unreachable
-            # 空 SpecWorkspace 占位，strategy 由用户选择（2026-06-28 起支持三值，默认 platform-managed）
-            await self._ensure_empty_spec_workspace(workspace.id, strategy=payload.spec_strategy)
-            # 创建人自动添加为 owner
-            await self._ensure_creator_as_owner(workspace.id, user_id=created_by)
-            # task-10/11 补遗：daemon_id 维度下，创建即建成员绑定行（workspace+user+daemon+path）。
-            # 复用 upsert_my_binding（含归属校验 + 幂等 upsert + commit）。仅 daemon_id 提供 + created_by
-            # 非 None 时；workspace 行已 flush，FK 不会悬空。
+        # task-02 AC-04b：同 root_path 的 soft-deleted workspace 存在时复活原行
+        # （保主键，避免下游 FK 断链）。slug 冲突时自动加后缀。
+        resurrected = await self._resurrect_soft_deleted(
+            root_path=payload.root_path,
+            payload=payload,
+            slug=slug,
+            created_by=created_by,
+            now=now,
+        )
+        if resurrected is not None:
+            await self._ensure_empty_spec_workspace(resurrected.id, strategy=payload.spec_strategy)
+            await self._ensure_creator_as_owner(resurrected.id, user_id=created_by)
             if payload.daemon_id is not None and created_by is not None:
                 from app.modules.workspace.member_runtimes.service import (
                     upsert_my_binding,
@@ -229,43 +170,23 @@ class WorkspaceService:
 
                 await upsert_my_binding(
                     self._session,
-                    workspace.id,
+                    resurrected.id,
                     created_by,
                     daemon_id=payload.daemon_id,
                     root_path=payload.root_path,
                     path_source="daemon-client",
                 )
             await self._session.commit()
-            await self._session.refresh(workspace)
-            log.info(
-                "workspace.created.daemon_client",
-                workspace_id=str(workspace.id),
-                daemon_id=str(payload.daemon_id) if payload.daemon_id else None,
-                daemon_runtime_id=str(workspace.daemon_runtime_id),
-            )
-            return workspace
+            await self._session.refresh(resurrected)
+            log.info("workspace.resurrected", workspace_id=str(resurrected.id))
+            return resurrected
 
-        # For new workspaces, scan local path for .sillyspec
-        scan = self.scan(payload.root_path)
-        if not scan.is_sillyspec:
-            raise WorkspaceNotSillyspec(
-                "Provided root_path is not a SillySpec workspace.",
-                details={"root_path": payload.root_path, "warnings": scan.warnings},
-            )
-
-        # Soft-deleted rows keep the same root_path, so before inserting a
-        # fresh row we look for a tombstone we can resurrect. This is the
-        # natural user expectation: "I removed it, now I want it back".
-        revived = await self._resurrect_soft_deleted(
-            root_path=payload.root_path,
-            payload=payload,
-            slug=slug,
-            created_by=created_by,
-            now=now,
-        )
-        if revived is not None:
-            return revived
-
+        # ── FR-06 / D-003@v1：daemon-client 唯一路径（backend 读不到客户端 root_path）──
+        # task-10/11 补遗：daemon_id 维度创建——早校验归属（daemon 属 created_by），
+        # 避免做了一堆 spec_workspace/owner 副作用后才在 member binding 处失败。
+        # 仅 daemon_id 提供 + created_by 非 None 时校验；legacy（仅 runtime_id）跳过。
+        if payload.daemon_id is not None and created_by is not None:
+            await self._guard_daemon_owned_by_user(payload.daemon_id, created_by)
         workspace = Workspace(
             id=uuid.uuid4(),
             name=payload.name,
@@ -288,28 +209,39 @@ class WorkspaceService:
             updated_at=now,
             last_scanned_at=now,
         )
-
         self._session.add(workspace)
         try:
             await self._session.flush()
         except IntegrityError as exc:
             await self._session.rollback()
-            self._translate_integrity_error(exc, slug=slug, root_path=scan.root_path)
+            self._translate_integrity_error(exc, slug=slug, root_path=payload.root_path)
             raise  # _translate_integrity_error always raises; this is unreachable
-
-        # Create SpecWorkspace with repo-native strategy
-        await self._ensure_spec_workspace(workspace.id, scan.sillyspec_path)
-
+        # 空 SpecWorkspace 占位，strategy 由用户选择（2026-06-28 起支持三值，默认 platform-managed）
+        await self._ensure_empty_spec_workspace(workspace.id, strategy=payload.spec_strategy)
         # 创建人自动添加为 owner
         await self._ensure_creator_as_owner(workspace.id, user_id=created_by)
+        # task-10/11 补遗：daemon_id 维度下，创建即建成员绑定行（workspace+user+daemon+path）。
+        # 复用 upsert_my_binding（含归属校验 + 幂等 upsert + commit）。仅 daemon_id 提供 + created_by
+        # 非 None 时；workspace 行已 flush，FK 不会悬空。
+        if payload.daemon_id is not None and created_by is not None:
+            from app.modules.workspace.member_runtimes.service import (
+                upsert_my_binding,
+            )
 
+            await upsert_my_binding(
+                self._session,
+                workspace.id,
+                created_by,
+                daemon_id=payload.daemon_id,
+                root_path=payload.root_path,
+                path_source="daemon-client",
+            )
         await self._session.commit()
         await self._session.refresh(workspace)
         log.info(
-            "workspace.created",
+            "workspace.created.daemon_client",
             workspace_id=str(workspace.id),
-            slug=workspace.slug,
-            root_path=workspace.root_path,
+            daemon_id=str(payload.daemon_id) if payload.daemon_id else None,
         )
         return workspace
 
@@ -366,16 +298,10 @@ class WorkspaceService:
             self._translate_integrity_error(exc, slug=slug, root_path=root_path)
             raise
 
-        # Ensure SpecWorkspace exists for resurrected workspace
-        # FR-06 / D-003@v1：daemon-client 跳过本地 copytree（backend 读不到客户端路径）
-        if self._is_daemon_client_payload(payload):
-            result.path_source = "daemon-client"
-            result.daemon_runtime_id = payload.daemon_runtime_id
-            await self._ensure_empty_spec_workspace(result.id, strategy=payload.spec_strategy)
-        else:
-            scan = self.scan(root_path)
-            if scan.is_sillyspec:
-                await self._ensure_spec_workspace(result.id, scan.sillyspec_path)
+        # Ensure SpecWorkspace exists for resurrected workspace.
+        # daemon-client 唯一路径：backend 读不到客户端路径，跳过本地 copytree，
+        # 只建空 platform-managed 占位（spec_strategy 由调用方 payload 透传）。
+        await self._ensure_empty_spec_workspace(result.id, strategy=payload.spec_strategy)
 
         await self._session.commit()
         await self._session.refresh(result)
@@ -425,7 +351,8 @@ class WorkspaceService:
         - ``allowed_workspace_ids == []``: 普通账号无可读 workspace，直接返回空。
         - ``user_id``: 精确匹配 created_by（仅平台管理员传入；普通账号不传）。
         - ``q``: 大小写不敏感匹配 display_alias/name/slug/root_path/component_key。
-        - ``workspace_type``: 精确匹配 type；值为 server-local/daemon-client 时也匹配 path_source。
+        - ``workspace_type``: 精确匹配 type（server-local/daemon-client 等 path_source
+          值已不再分流，传入时静默忽略——前端选项已删，R-06）。
         - ``status``: 精确匹配 status。
         """
         if allowed_workspace_ids is not None and len(allowed_workspace_ids) == 0:
@@ -451,10 +378,9 @@ class WorkspaceService:
                 )
             )
         if workspace_type:
-            if workspace_type in ("server-local", "daemon-client"):
-                filters.append(col(Workspace.path_source) == workspace_type)
-            else:
-                filters.append(col(Workspace.type) == workspace_type)
+            # path_source 分流已删（2026-07-10-remove-server-local-workspace-mode），
+            # 一律按 type 列过滤；前端旧值（server-local/daemon-client）静默忽略无命中。
+            filters.append(col(Workspace.type) == workspace_type)
         if status:
             filters.append(col(Workspace.status) == status)
 
@@ -489,28 +415,19 @@ class WorkspaceService:
     async def rescan(self, workspace_id: uuid.UUID) -> tuple[Workspace, ScanResult]:
         workspace = await self.get(workspace_id)
 
-        # For platform-managed workspaces, scan from spec_root instead of root_path
+        # daemon-client 唯一路径：源码在 daemon 宿主，backend 读不到 root_path；
+        # 永远从 platform-managed spec_root 重扫（spec 来自 task-09 sync 回灌）。
         from app.modules.spec_workspace.service import SpecWorkspaceService
 
         try:
             spec_ws_svc = SpecWorkspaceService(self._session)
             spec_ws = await spec_ws_svc.get(workspace.id)
-            if workspace.path_source == "daemon-client":
-                # Client root_path is not on the backend host; rescan platform spec only.
-                scan_path = spec_ws.spec_root
-            else:
-                scan_path = (
-                    spec_ws.spec_root
-                    if spec_ws.strategy == "platform-managed"
-                    else workspace.root_path
-                )
+            scan_path = spec_ws.spec_root
         except Exception:
-            if workspace.path_source == "daemon-client":
-                raise WorkspaceNotSillyspec(
-                    "daemon-client workspace has no platform spec to rescan.",
-                    details={"workspace_id": str(workspace.id)},
-                ) from None
-            scan_path = workspace.root_path
+            raise WorkspaceNotSillyspec(
+                "workspace has no platform spec to rescan.",
+                details={"workspace_id": str(workspace.id)},
+            ) from None
 
         scan = self.scan(scan_path)
         workspace.last_scanned_at = datetime.now(UTC)
@@ -697,179 +614,30 @@ class WorkspaceService:
         agent_service: "AgentService",
         provider: str | None = None,
         model: str | None = None,
-        force: bool = False,
-    ) -> tuple[uuid.UUID, uuid.UUID]:
-        """Create workspace + spec_workspace and trigger scan agent.
-
-        Args:
-            root_path: Absolute path to the user's project directory.
-            user_id: User who initiated the scan request.
-            agent_service: AgentService instance (injected by caller).
-            force: When True, skip the "already scanned" guard and re-scan
-                   even if scan_documents exist for this workspace.
-
-        Returns:
-            (workspace_id, agent_run_id) tuple.
-
-        Raises:
-            WorkspacePathNotFound: root_path does not exist.
-            WorkspacePathNotDir: root_path is not a directory.
-            WorkspacePermissionDenied: Insufficient path permissions.
-            PermissionDenied: Actor is not a workspace owner (403).
-            AppError(409): Workspace already has scan documents and force=False.
-        """
-        # 1. Validate root_path
-        resolved = _rewrite_path(root_path)
-        path = Path(resolved)
-        self._guard_path(path)
-
-        # 2. Idempotency: check if active workspace already exists for this root_path
-        workspace = await self._find_active_by_root_path(root_path)
-
-        # ── Gate: owner check (D-003@V2) + count check (D-004) ──
-        if workspace is not None:
-            # 2a. Owner validation: only workspace_owner may initiate a scan.
-            #     Skip this check when the workspace has no members at all
-            #     (pre-membership phase — anyone who discovers the workspace
-            #     can scan it). Once at least one UserWorkspaceRole row exists,
-            #     the caller MUST hold workspace_owner.
-            member_count_stmt = (
-                select(func.count())
-                .select_from(UserWorkspaceRole)
-                .where(UserWorkspaceRole.workspace_id == workspace.id)
-            )
-            member_count = int((await self._session.scalar(member_count_stmt)) or 0)
-            if member_count > 0:
-                owner_stmt = (
-                    select(UserWorkspaceRole)
-                    .join(Role, Role.id == UserWorkspaceRole.role_id)
-                    .where(UserWorkspaceRole.workspace_id == workspace.id)
-                    .where(UserWorkspaceRole.user_id == user_id)
-                    .where(Role.key == "workspace_owner")
-                    .limit(1)
-                )
-                owner_row = (await self._session.execute(owner_stmt)).scalars().first()
-                if owner_row is None:
-                    raise PermissionDenied("仅 owner 可扫描")
-
-            # 2b. Scan-document guard: if the workspace already has scan
-            #     documents and the caller did not pass force=True, refuse.
-            count_stmt = (
-                select(func.count())
-                .select_from(ScanDocument)
-                .where(ScanDocument.workspace_id == workspace.id)
-                .where(ScanDocument.exists.is_(True))
-            )
-            doc_count = int((await self._session.scalar(count_stmt)) or 0)
-            if doc_count > 0 and not force:
-                raise AppError(
-                    "该工作区已有扫描结果，如需重扫请确认",
-                    code="workspace_already_scanned",
-                    http_status=409,
-                    details={
-                        "workspace_id": str(workspace.id),
-                        "scan_document_count": doc_count,
-                    },
-                )
-
-        if workspace is None:
-            # 3. Create Workspace record
-            name = Path(root_path).name
-            slug = slugify(name)
-
-            # 2b. Check slug uniqueness, append suffix if taken
-            existing_slug = await self._find_active_by_slug(slug)
-            if existing_slug is not None:
-                suffix = uuid.uuid4().hex[:8]
-                slug = f"{slugify(name)[:90]}-{suffix}"
-
-            now = datetime.now(UTC)
-            workspace = Workspace(
-                id=uuid.uuid4(),
-                name=name,
-                slug=slug,
-                root_path=root_path,
-                status="pending",
-                created_by=user_id,
-                created_at=now,
-                updated_at=now,
-                last_scanned_at=now,
-            )
-            self._session.add(workspace)
-            await self._session.flush()  # obtain workspace.id
-
-            # 4. Create SpecWorkspace record
-            from app.modules.spec_workspace.schema import SpecWorkspaceCreate
-            from app.modules.spec_workspace.service import SpecWorkspaceService
-
-            spec_ws_svc = SpecWorkspaceService(self._session)
-            await spec_ws_svc.create(
-                workspace_id=workspace.id,
-                payload=SpecWorkspaceCreate(
-                    strategy="platform-managed",
-                ),
-            )
-            # scan-generate：创建人自动添加为 owner
-            await self._ensure_creator_as_owner(workspace.id, user_id=user_id)
-            await self._session.flush()  # 确保 member 行写入
-
-        # 5a. Idempotency: reuse in-progress scan run if one exists
-        existing_run = await self._find_active_scan_run(workspace.id)
-        if existing_run is not None:
-            log.info(
-                "workspace.scan_generate.idempotent_hit",
-                workspace_id=str(workspace.id),
-                agent_run_id=str(existing_run.id),
-                status=existing_run.status,
-            )
-            return (workspace.id, existing_run.id)
-
-        # 5. Get spec_root from SpecWorkspace
-        from app.modules.spec_workspace.service import SpecWorkspaceService
-
-        spec_ws_svc = SpecWorkspaceService(self._session)
-        spec_ws = await spec_ws_svc.get(workspace.id)
-        spec_root = spec_ws.spec_root
-
-        # 6. Trigger agent scan dispatch
-        agent_run = await agent_service.start_scan_dispatch(
-            workspace_id=workspace.id,
-            user_id=user_id,
-            root_path=root_path,
-            spec_root=spec_root,
-            provider=provider,
-            model=model,
-        )
-
-        # 7. Return
-        log.info(
-            "workspace.scan_generated",
-            workspace_id=str(workspace.id),
-            agent_run_id=str(agent_run.id),
-            root_path=root_path,
-        )
-        return (workspace.id, agent_run.id)
-
-    async def scan_generate_daemon_client(
-        self,
-        *,
-        root_path: str,
-        user_id: uuid.UUID,
-        agent_service: "AgentService",
-        provider: str | None = None,
-        model: str | None = None,
         spec_strategy: str = "platform-managed",
         daemon_id: uuid.UUID | None = None,
-        daemon_runtime_id: uuid.UUID | None = None,
     ) -> tuple[uuid.UUID, uuid.UUID]:
-        """daemon-client scan-generate：创建 pending workspace + 派 scan lease 给绑定 daemon。
+        """创建 pending workspace + 派 scan lease 给绑定 daemon（daemon-client 唯一入口）。
 
         FR-06 / D-003@v1：backend 读不到客户端 root_path，跳过 _guard_path 本地校验；
-        daemon-entity-binding 后绑定键为 daemon_id（per-member binding 行），daemon_runtime_id
-        降级为 legacy 兼容（二者 schema 层保证至少一个非空，daemon_id 优先）。新建 workspace
+        daemon-entity-binding 后绑定键为 daemon_id（per-member binding 行）。新建 workspace
         时若给 daemon_id，复用 upsert_my_binding 建成员绑定行，使 start_scan_dispatch 的
         MemberBindingResolver 能解析到 daemon。scan 产出由 daemon 端 sillyspec scan 生成 →
         task-09 postSpecSync 回传 → backend spec_root 覆盖（真理源在服务器）。
+
+        2026-07-10-remove-server-local-workspace-mode：原 ``scan_generate``（server-local
+        本地扫描版）已删，本方法由 ``scan_generate_daemon_client`` 改名而来作为唯一入口。
+
+        Args:
+            root_path: Absolute path to the user's project directory（在 daemon 宿主上）。
+            user_id: User who initiated the scan request.
+            agent_service: AgentService instance (injected by caller).
+            daemon_id: 守护进程实体 id（稳定绑定键，建议必传——为 None 时不建 member
+                binding 行，dispatch 解析 daemon 会失败）。
+            spec_strategy: spec 同步策略（默认 platform-managed）。
+
+        Returns:
+            (workspace_id, agent_run_id) tuple.
         """
         # daemon_id 优先：早校验归属（与 create 流程一致，防跨用户劫持）。
         if daemon_id is not None:
@@ -889,8 +657,6 @@ class WorkspaceService:
                 slug=slug,
                 root_path=root_path,
                 status="pending",
-                path_source="daemon-client",
-                daemon_runtime_id=daemon_runtime_id,
                 created_by=user_id,
                 created_at=now,
                 updated_at=now,
@@ -899,7 +665,7 @@ class WorkspaceService:
             self._session.add(workspace)
             await self._session.flush()
             await self._ensure_empty_spec_workspace(workspace.id, strategy=spec_strategy)
-            # daemon-client scan-generate：创建人自动添加为 owner
+            # scan-generate：创建人自动添加为 owner
             await self._ensure_creator_as_owner(workspace.id, user_id=user_id)
             # daemon_id 维度：建成员绑定行（workspace+user+daemon+path），对齐 create 流程，
             # 使后续 start_scan_dispatch 经 MemberBindingResolver 解析到该 daemon。
@@ -941,19 +707,8 @@ class WorkspaceService:
             workspace_id=str(workspace.id),
             agent_run_id=str(agent_run.id),
             daemon_id=str(daemon_id) if daemon_id else None,
-            daemon_runtime_id=str(daemon_runtime_id) if daemon_runtime_id else None,
         )
         return (workspace.id, agent_run.id)
-
-    @staticmethod
-    def _is_daemon_client_payload(payload: object) -> bool:
-        """判断创建/扫描请求是否为 daemon-client 路径来源（FR-06 / D-003@v1）。
-
-        task-01 schema validator 已保证 path_source='daemon-client' 时
-        daemon_id 或 daemon_runtime_id 至少一个非空（task-10/11 补遗：daemon_id 优先），
-        此处只读字段不做二次校验。
-        """
-        return getattr(payload, "path_source", "server-local") == "daemon-client"
 
     async def _guard_daemon_owned_by_user(self, daemon_id: uuid.UUID, user_id: uuid.UUID) -> None:
         """守护进程归属校验（task-10/11 补遗，D-004 / FR）。
@@ -1108,14 +863,9 @@ class WorkspaceService:
         workspace.updated_at = datetime.now(UTC)
         workspace.last_scanned_at = datetime.now(UTC)
 
-        # Scan and copy .sillyspec to platform storage
-        # FR-06 / D-003@v1：daemon-client 跳过本地扫描（backend 读不到客户端路径）
-        if workspace.path_source == "daemon-client":
-            await self._ensure_empty_spec_workspace(workspace.id)
-        else:
-            scan = self.scan(workspace.root_path)
-            if scan.is_sillyspec:
-                await self._ensure_spec_workspace(workspace.id, scan.sillyspec_path)
+        # daemon-client 唯一路径：backend 读不到客户端 root_path，永远走空 spec 占位
+        # （spec 来自 task-09 sync 回灌 / 后续 scan lease 产出）。
+        await self._ensure_empty_spec_workspace(workspace.id)
 
         await self._session.commit()
         await self._session.refresh(workspace)
@@ -1153,11 +903,8 @@ class WorkspaceService:
                     return
         except Exception:
             pass
-        # No spec_workspace or no .sillyspec on platform — try local scan (server-local only)
-        if workspace.path_source != "daemon-client":
-            scan = self.scan(workspace.root_path)
-            if scan.is_sillyspec:
-                await self._ensure_spec_workspace(workspace.id, scan.sillyspec_path)
+        # daemon-client 唯一路径：无平台 spec / .sillyspec 时不再回退本地扫描
+        # （backend 读不到客户端路径，由 task-09 sync 或后续 scan lease 产出）。
 
     async def _ensure_spec_workspace(
         self,

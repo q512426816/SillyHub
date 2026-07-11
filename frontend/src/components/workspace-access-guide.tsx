@@ -11,7 +11,6 @@ import {
   type DaemonInstanceRead,
 } from "@/lib/daemon";
 import { errMessage } from "@/lib/errors";
-import { workspacePathSourceLabel } from "@/lib/workspace-path";
 import {
   upsertMyBinding,
   type MemberBindingUpsertRequest,
@@ -24,7 +23,6 @@ import {
 export interface AccessGuideInitial {
   daemon_id: string | null;
   root_path: string;
-  path_source: string;
 }
 
 interface Props {
@@ -77,9 +75,6 @@ export function WorkspaceAccessGuide({
 }: Props) {
   const [daemonId, setDaemonId] = useState(initial?.daemon_id ?? "");
   const [rootPath, setRootPath] = useState(initial?.root_path ?? "");
-  const [pathSource, setPathSource] = useState<"server-local" | "daemon-client">(
-    (initial?.path_source as "server-local" | "daemon-client") ?? "daemon-client",
-  );
   const editing = !!initial;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -110,10 +105,12 @@ export function WorkspaceAccessGuide({
     setSaving(true);
     setError(null);
     try {
+      // path_source 是 member 级 spec 同步策略字段（后端 MemberBindingUpsertRequest 保留，
+      // 非 workspace 路径来源）。2026-07-10 移除 server-local 模式后固定为 "daemon-client"。
       const req: MemberBindingUpsertRequest = {
         daemon_id: daemonId || null,
         root_path: rootPath,
-        path_source: pathSource,
+        path_source: "daemon-client",
       };
       await upsertMyBinding(workspaceId, req);
       onConfigured();
@@ -146,7 +143,7 @@ export function WorkspaceAccessGuide({
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1" data-testid="daemon-field">
           <label htmlFor="daemon" className="text-xs font-medium">
             绑定守护进程
@@ -190,26 +187,6 @@ export function WorkspaceAccessGuide({
             onChange={(e) => setRootPath(e.target.value)}
             className="text-xs"
           />
-        </div>
-        <div className="space-y-1">
-          <label htmlFor="pathSource" className="text-xs font-medium">
-            路径来源
-          </label>
-          <select
-            id="pathSource"
-            value={pathSource}
-            onChange={(e) =>
-              setPathSource(e.target.value as "server-local" | "daemon-client")
-            }
-            className="w-full rounded border border-border bg-background px-2 py-1.5 text-xs"
-          >
-            <option value="daemon-client">
-              {workspacePathSourceLabel("daemon-client")}
-            </option>
-            <option value="server-local">
-              {workspacePathSourceLabel("server-local")}
-            </option>
-          </select>
         </div>
       </div>
 

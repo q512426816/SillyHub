@@ -214,10 +214,6 @@ async def test_bootstrap_preflight_invoked_for_daemon_client_workspace(
         db_session,
         tmp_path,
     )
-    workspace.path_source = "daemon-client"
-    workspace.daemon_runtime_id = uuid.uuid4()
-    db_session.add(workspace)
-    await db_session.commit()
 
     run = AgentRun(
         id=uuid.uuid4(),
@@ -299,10 +295,11 @@ class _PreflightFakeDelegate:
 
 
 def _dc_workspace():
-    """A minimal daemon-client workspace stand-in (only path_source read by preflight)."""
+    """A minimal daemon-client workspace stand-in (preflight only consumes it as
+    an opaque handle passed to the delegate)."""
 
     class _Ws:
-        path_source = "daemon-client"
+        pass
 
     return _Ws()
 
@@ -312,7 +309,7 @@ async def test_preflight_daemon_client_missing_dir() -> None:
     """daemon-client + delegate stat 返不存在 → 错误串含 'does not exist'。"""
     delegate = _PreflightFakeDelegate(stat_map={}, dir_map={})
     err = await bootstrap_module.preflight_workspace_code_root(
-        _dc_workspace(), "/client/missing", delegate, path_source="daemon-client"
+        _dc_workspace(), "/client/missing", delegate
     )
     assert err is not None
     assert "does not exist" in err
@@ -326,9 +323,7 @@ async def test_preflight_daemon_client_empty_dir() -> None:
         stat_map={root: {"exists": True, "is_dir": True, "size": 0}},
         dir_map={root: [".sillyspec", "README.md"]},
     )
-    err = await bootstrap_module.preflight_workspace_code_root(
-        _dc_workspace(), root, delegate, path_source="daemon-client"
-    )
+    err = await bootstrap_module.preflight_workspace_code_root(_dc_workspace(), root, delegate)
     assert err is not None
     assert "is empty" in err
 
@@ -341,9 +336,7 @@ async def test_preflight_daemon_client_no_signature() -> None:
         stat_map={root: {"exists": True, "is_dir": True, "size": 0}},
         dir_map={root: ["random.txt", "notes.md"]},
     )
-    err = await bootstrap_module.preflight_workspace_code_root(
-        _dc_workspace(), root, delegate, path_source="daemon-client"
-    )
+    err = await bootstrap_module.preflight_workspace_code_root(_dc_workspace(), root, delegate)
     assert err is not None
     assert "no recognizable project signature" in err
 
@@ -356,32 +349,5 @@ async def test_preflight_daemon_client_valid_signature() -> None:
         stat_map={root: {"exists": True, "is_dir": True, "size": 0}},
         dir_map={root: ["package.json", "src"]},
     )
-    err = await bootstrap_module.preflight_workspace_code_root(
-        _dc_workspace(), root, delegate, path_source="daemon-client"
-    )
-    assert err is None
-
-
-@pytest.mark.asyncio
-async def test_preflight_server_local_uses_delegate_local_branch(tmp_path) -> None:
-    """server-local + 真实容器目录（delegate 本地分支）→ 行为零回归。
-
-    覆盖 server-local 路径经 resolve_root_path_for_server 落到容器内真实路径，delegate
-    stat/list_dir 本地分支读真实 fs，校验通过。
-    """
-    root = tmp_path / "server-local-proj"
-    (root / "backend").mkdir(parents=True)
-    (root / "backend" / "pyproject.toml").write_text("# proj")
-
-    from app.modules.daemon.host_fs import HostFsDelegate
-
-    delegate = HostFsDelegate(session=None)  # server-local 分支不依赖 session/ws_rpc
-
-    class _Ws:
-        path_source = "server-local"
-
-    err = await bootstrap_module.preflight_workspace_code_root(
-        _Ws(), str(root), delegate, path_source="server-local"
-    )
-    # 嵌套签名命中（backend/pyproject.toml）→ 原早退语义返 None
+    err = await bootstrap_module.preflight_workspace_code_root(_dc_workspace(), root, delegate)
     assert err is None

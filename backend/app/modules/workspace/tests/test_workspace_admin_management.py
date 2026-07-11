@@ -116,7 +116,6 @@ async def _create_workspace_row(
     name: str = "ws",
     slug: str | None = None,
     status: str = "active",
-    path_source: str = "server-local",
     ws_type: str | None = None,
 ) -> Workspace:
     ws = Workspace(
@@ -124,7 +123,6 @@ async def _create_workspace_row(
         name=name,
         slug=slug or f"slug-{uuid.uuid4().hex[:8]}",
         root_path=f"/tmp/{uuid.uuid4().hex[:8]}",
-        path_source=path_source,
         status=status,
         type=ws_type,
         created_by=created_by,
@@ -251,13 +249,6 @@ async def test_list_filter_q_type_status_limit_offset(
     await _create_workspace_row(
         db_session, created_by=user_a.id, name="beta-ws", ws_type="api", status="active"
     )
-    await _create_workspace_row(
-        db_session,
-        created_by=user_a.id,
-        name="gamma-ws",
-        path_source="daemon-client",
-        status="active",
-    )
 
     # q case-insensitive
     resp = await client.get("/api/workspaces?q=ALPHA", headers=_headers(_token_for(admin)))
@@ -265,13 +256,13 @@ async def test_list_filter_q_type_status_limit_offset(
     assert body["total"] == 1
     assert body["items"][0]["name"] == "Alpha-WS"
 
-    # type=daemon-client matches path_source
+    # type=daemon-client 是已删除的 path_source 值（task-01 删 workspace.path_source），
+    # list_with_owner 不再按 path_source 分流；前端旧值传入时静默忽略，无命中（R-06）。
     resp = await client.get(
         "/api/workspaces?type=daemon-client", headers=_headers(_token_for(admin))
     )
     body = resp.json()
-    assert body["total"] == 1
-    assert body["items"][0]["name"] == "gamma-ws"
+    assert body["total"] == 0
 
     # type=web matches Workspace.type
     resp = await client.get("/api/workspaces?type=web", headers=_headers(_token_for(admin)))
@@ -279,10 +270,10 @@ async def test_list_filter_q_type_status_limit_offset(
     assert body["total"] == 1
     assert body["items"][0]["name"] == "Alpha-WS"
 
-    # limit/offset: 3 matches, page size 1 offset 1
+    # limit/offset: 2 matches, page size 1 offset 1
     resp = await client.get("/api/workspaces?limit=1&offset=1", headers=_headers(_token_for(admin)))
     body = resp.json()
-    assert body["total"] >= 3
+    assert body["total"] >= 2
     assert len(body["items"]) == 1
 
     # status filter

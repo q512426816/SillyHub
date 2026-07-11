@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import WorkspacePathNotFound
 from app.modules.agent.model import AgentRun
 from app.modules.agent.service import AgentService
 from app.modules.workspace.model import AgentRunWorkspace, Workspace
@@ -49,23 +48,6 @@ async def test_scan_generate_creates_workspace_and_spec(
     assert ws_id is not None
     assert run_id == fake_run.id
     mock_agent_service.start_scan_dispatch.assert_awaited_once()
-
-
-# ---------------------------------------------------------------------------
-# root_path does not exist
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_scan_generate_path_not_found(db_session: AsyncSession, mock_agent_service):
-    """Raise WorkspacePathNotFound when root_path does not exist."""
-    svc = WorkspaceService(db_session)
-    with pytest.raises(WorkspacePathNotFound):
-        await svc.scan_generate(
-            root_path="/nonexistent/path",
-            user_id=uuid.uuid4(),
-            agent_service=mock_agent_service,
-        )
 
 
 # ---------------------------------------------------------------------------

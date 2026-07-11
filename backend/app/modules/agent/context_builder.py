@@ -325,80 +325,30 @@ async def build_stage_bundle(
 # ---------------------------------------------------------------------------
 
 
-def transport_for_path_source(path_source: str | None) -> str:
-    """收敛 ``path_source → transport`` 映射（方案 A：per-workspace transport 决策）。
+def resolve_prompt_spec_root(ws_id: str, settings: Settings) -> str:
+    """返回塞进 prompt 的 ``--spec-root`` 路径（单一 daemon-client 路径）。
 
-    - ``path_source == "daemon-client"`` → 返回 ``"tar"``（异机，spec 经 daemon
-      本地约定路径 ``~/.sillyhub/daemon/specs/{ws}``）。
-    - 其他非空值（如 ``"server-local"``）→ 返回 ``"shared"``（锁死，忽略全局
-      ``SPEC_TRANSPORT``——server-local 同机 bind mount 共享，永远走 shared）。
-
-    注意：``path_source is None``（未携带 / 字段空）**不在此 helper 处理**——调用方
-    （``resolve_prompt_spec_root`` / ``build_claim_payload``）负责把 ``None`` 回退
-    到全局 ``settings.spec_transport`` 兜底（向后兼容旧数据 / 旧调用方）。
-
-    Args:
-        path_source: workspace 的 ``path_source`` 字段值（``"daemon-client"`` /
-            ``"server-local"`` / ``None``）。
-
-    Returns:
-        ``"tar"`` 或 ``"shared"``。
-    """
-    if path_source == "daemon-client":
-        return "tar"
-    return "shared"
-
-
-def resolve_prompt_spec_root(
-    ws_id: str,
-    settings: Settings,
-    *,
-    path_source: str | None = None,
-) -> str:
-    """按 ``path_source``（或全局兜底）决定的 transport，返回塞进 prompt 的 ``--spec-root`` 路径。
-
-    方案 A（per-workspace transport 决策）：transport 不再只看全局
-    ``settings.spec_transport``，而是先按 workspace 的 ``path_source`` 锁定：
-
-    - ``path_source == "daemon-client"`` → ``transport="tar"``（异机，返回 daemon
-      本地约定路径 ``~/.sillyhub/daemon/specs/{ws_id}``，与 daemon
-      ``spec-sync.resolveSpecDir(wsId)`` 输出一致；tilde 由 daemon 侧展开）。
-    - ``path_source`` 显式非空（如 ``"server-local"``）→ ``transport="shared"``
-      （锁死，返回宿主路径 ``{settings.spec_data_host_dir}/{ws_id}``）。
-    - ``path_source is None``（未携带 / 字段空）→ 回退全局 ``settings.spec_transport``
-      （向后兼容兜底默认）。
+    D-007@2026-07-10（remove-server-local-workspace-mode）：``path_source`` 列删除后，
+    所有 workspace 永远走 daemon-client 路径，transport 决策不再按 ``path_source`` 分。
+    本函数恒返回 daemon 本地约定路径 ``~/.sillyhub/daemon/specs/{ws_id}``，
+    与 daemon 侧 ``spec-sync.resolveSpecDir(wsId)`` 输出逐字符一致；tilde ``~`` 字面量
+    由 daemon 侧展开，backend 只拼字符串（不展开）。
 
     **只影响 prompt 文本**，不影响 ``bundle.spec_root`` /
     ``platform_metadata.spec_root``（后者始终为 backend 入参容器路径，见 D-006 双轨）。
 
-    非法 transport 值（非 'shared'/'tar'）：回退 shared 分支（保守默认，避免 prompt
-    拼出非法路径导致 sillyspec 写盘失败；记 warn 日志）。
-
     Args:
         ws_id: workspace ID 字符串（调用方应先 ``str(workspace_id)``）。
-        settings: 全局 Settings 实例（``get_settings()``），读取 ``spec_data_host_dir``
-            与兜底 ``spec_transport``。
-        path_source: workspace 的 ``path_source`` 字段值。``None`` → 全局兜底。
+        settings: 全局 Settings 实例（``get_settings()``）。保留入参仅为最小化调用方
+            改动；单一 daemon-client 模式下 prompt 路径不再读 settings 字段
+            （``spec_transport`` / ``spec_data_host_dir`` 不再参与 prompt 决策）。
 
     Returns:
-        塞入 prompt 的 ``--spec-root`` 路径字符串。**不展开 tilde**（tar 分支返回
-        字面量 ``~``，展开在 daemon 侧）。
+        塞入 prompt 的 ``--spec-root`` 路径字符串 ``~/.sillyhub/daemon/specs/{ws_id}``。
+        **不展开 tilde**（字面量 ``~``，展开在 daemon 侧）。
     """
-    if path_source is None:
-        # 未携带 path_source（字段空 / 旧调用方）→ 全局 SPEC_TRANSPORT 兜底默认。
-        transport = settings.spec_transport
-    else:
-        # 显式 path_source 锁定 transport（server-local→shared, daemon-client→tar），
-        # 忽略全局 SPEC_TRANSPORT。
-        transport = transport_for_path_source(path_source)
-    if transport == "tar":
-        return f"~/.sillyhub/daemon/specs/{ws_id}"
-    if transport != "shared":
-        log.warning(
-            "prompt_spec_root_unknown_transport_fallback_shared",
-            transport=transport,
-        )
-    return f"{settings.spec_data_host_dir}/{ws_id}"
+    _ = settings  # 单一 daemon-client 模式：prompt 路径恒定，settings 仅保签名兼容
+    return f"~/.sillyhub/daemon/specs/{ws_id}"
 
 
 async def build_scan_bundle(
@@ -409,7 +359,6 @@ async def build_scan_bundle(
     *,
     run_id: uuid.UUID,
     runtime_root: str | None = None,
-    path_source: str | None = None,
 ) -> AgentSpecBundle:
     """构建 scan 模式的 AgentSpecBundle，不依赖 change_id。
 
@@ -423,10 +372,6 @@ async def build_scan_bundle(
         root_path: 用户项目根目录路径（只读）。
         run_id: AgentRun 记录 ID，用于 --scan-run-id 参数。
         runtime_root: 平台运行时目录路径。默认从 spec_root 推导。
-        path_source: workspace 的 ``path_source`` 字段值（方案 A）。决定塞入 prompt 的
-            ``--spec-root`` 路径（经 ``resolve_prompt_spec_root``）：
-            ``"daemon-client"`` → daemon 本地 tar 路径；显式非空 → 宿主 shared 路径；
-            ``None``（默认）→ 全局 ``settings.spec_transport`` 兜底（向后兼容）。
 
     Returns:
         scan 模式的 AgentSpecBundle，stage="scan"。
@@ -436,8 +381,9 @@ async def build_scan_bundle(
     """
     # task-04（daemon-root-path-translation）：root_path 改写成宿主机路径。
     # scan 命令（--dir）/allowed_paths/platform_metadata 给 daemon，需宿主机路径；
-    # daemon-client 原样透传，裸机未配前缀原样返回。spec_root/runtime_root 仍容器路径。
-    root_path = resolve_root_path_for_daemon(root_path, path_source)
+    # 单一 daemon-client 模式（D-007@2026-07-10）：resolve_root_path_for_daemon 已改单参
+    # （task-03），daemon-client 原样透传，裸机未配前缀原样返回。spec_root/runtime_root 仍容器路径。
+    root_path = resolve_root_path_for_daemon(root_path)
     # Step 1 — 校验 Workspace 存在性
     workspace = await session.get(Workspace, workspace_id)
     if workspace is None:
@@ -450,21 +396,13 @@ async def build_scan_bundle(
     # Step 2 — 构建 scan 执行指令（分步交互式，含平台参数）
     ws_id = str(workspace_id)
     run_id_str = str(run_id)
-    # 方案 B（D-001@v1 调整）：prompt 用宿主路径（SPEC_DATA_HOST_DIR/{ws}），
-    # daemon 零客户端配置（不依赖 SPEC_ROOT_MAP）。spec_root/runtime_root
-    # 参数（容器路径 /data/{ws}）保留供 backend 内部访问（post-check/scan_sync
-    # 在容器内跑，bind mount 保证 host 与容器是同一物理目录）。
-    # task-02（2026-06-23-spec-transport-tar-sync）：按 transport 分支决定塞入
-    # prompt 的路径（design §5.0 表 + §7.1 helper）。shared（D-004 向后兼容）逐字符
-    # 同原拼接；tar（D-003/D-007 异机）用 daemon 本地约定路径 ~/.sillyhub/daemon/specs/{ws}。
-    # 注意：host_spec_root 仅用于 prompt 文本（daemon 机器跑 sillyspec 时访问的路径），
-    # bundle.spec_root / platform_metadata.spec_root 仍用入参容器路径（D-006 双轨）。
+    # task-02（2026-06-23-spec-transport-tar-sync）→ D-007@2026-07-10：单一 daemon-client 模式
+    # 后 prompt 路径恒定（daemon 本地约定路径 ~/.sillyhub/daemon/specs/{ws}），不再按
+    # path_source 分支。host_spec_root 仅用于 prompt 文本（daemon 机器跑 sillyspec 时访问
+    # 的路径），bundle.spec_root / platform_metadata.spec_root 仍用入参容器路径（D-006 双轨）。
+    # tilde ``~`` 字面量不展开（daemon 侧 spec-sync.resolveSpecDir(wsId) 展开）。
     settings = get_settings()
-    # 方案 A（path_source per-workspace transport 决策）：path_source 优先——
-    # daemon-client→tar（daemon 本地路径）、显式 server-local→shared（锁死）；
-    # path_source=None（旧调用方 / 未携带）时 resolve_prompt_spec_root 回退全局
-    # settings.spec_transport（向后兼容）。task-02 helper 复用不变（§7.1）。
-    host_spec_root = resolve_prompt_spec_root(ws_id, settings, path_source=path_source)
+    host_spec_root = resolve_prompt_spec_root(ws_id, settings)
     host_runtime_root = f"{host_spec_root}/runtime"
     # 完整命令行（单行，避免 LLM 忽略续行）
     # --dir 指向源码目录（root_path），sillyspec 用它定位项目代码

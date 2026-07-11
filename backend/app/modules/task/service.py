@@ -142,8 +142,24 @@ class TaskService:
         change_id: uuid.UUID,
     ) -> tuple[dict[str, int], TaskParserResult]:
         change = await self._change_service.get(workspace_id, change_id)
-        workspace = await self._workspace_service.get(workspace_id)
-        sillyspec_root = Path(workspace.root_path)
+        # 2026-07-10-remove-server-local-workspace-mode: backend 读不到 client
+        # root_path（daemon-client 唯一模式），task parser 必须从服务器 spec_root
+        # （SpecWorkspace.spec_root，扁平布局）解析 tasks/。无 spec_ws → 无文件可读。
+        from app.modules.spec_workspace.model import SpecWorkspace
+
+        spec_ws = (
+            (
+                await self._session.execute(
+                    select(SpecWorkspace).where(SpecWorkspace.workspace_id == workspace_id)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if spec_ws is None or not spec_ws.spec_root:
+            stats = {"parsed": 0, "created": 0, "updated": 0, "deleted": 0}
+            return stats, TaskParserResult()
+        sillyspec_root = Path(spec_ws.spec_root)
 
         result = self._parser.parse_tasks(sillyspec_root, change.path)
         stats = {"parsed": 0, "created": 0, "updated": 0, "deleted": 0}

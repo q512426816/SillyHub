@@ -173,7 +173,7 @@ class TestInitSyncedFields:
             user_id=user.id,
             runtime_id=None,
             root_path="/tmp/p",
-            path_source="server-local",
+            path_source="daemon-client",
         )
         db_session.add(row)
         await db_session.commit()
@@ -206,7 +206,7 @@ class TestInitSyncedFields:
             user_id=user.id,
             runtime_id=None,
             root_path="/tmp/p",
-            path_source="server-local",
+            path_source="daemon-client",
         )
         db_session.add(row)
         await db_session.commit()

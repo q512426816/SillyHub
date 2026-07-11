@@ -543,6 +543,93 @@ from app.core.spec_paths import SpecPathResolver
 from app.modules.change.dispatch import StageSyncResult
 
 
+class _LocalFakeDelegate:
+    """Fake HostFsDelegate that reads sillyspec.db from a local tmp dir.
+
+    2026-07-10-remove-server-local-workspace-mode: sync_stage_status 永远走
+    daemon-client RPC（delegate.stat/read_file）。测试把 db 建在本地 tmp，
+    用本 fake 让 delegate 读取——业务逻辑（changes/stages/steps 投影）不变。
+    """
+
+    def __init__(self, db_path: SyncPath) -> None:
+        self._db_path = SyncPath(db_path)
+
+    async def stat(self, workspace, path: str) -> dict:
+        # path 是相对 workspace.root_path 的 rel，但本 fake 只关心真实 db 文件
+        return {
+            "exists": self._db_path.is_file(),
+            "size": self._db_path.stat().st_size if self._db_path.is_file() else 0,
+        }
+
+    async def read_file(self, workspace, path: str) -> str:
+        return self._db_path.read_bytes().decode("latin-1")
+
+
+def _patch_sync_to_local_db(service, db_path: SyncPath):
+    """Context manager: patch SillySpecStageDispatchService so sync reads a
+    local sillyspec.db.
+
+    Patches ``_resolve_db_rel_candidates``（返回占位 rel）+ ``_get_host_fs_delegate``
+    （返回 _LocalFakeDelegate 读本地 db），让 sync_stage_status 在无真 daemon 的
+    单测里走完 daemon-client 业务逻辑。
+    """
+    return _patch_sync_with_delegate(service, _LocalFakeDelegate(db_path))
+
+
+def _patch_sync_with_delegate(service, delegate):
+    """Context manager: inject a custom fake delegate into sync_stage_status.
+
+    For boundary tests（db missing / corrupt / unreadable），callers build a
+    delegate whose ``stat`` / ``read_file`` exhibit the failure mode.
+    """
+    from contextlib import contextmanager
+    from unittest.mock import AsyncMock, patch
+
+    @contextmanager
+    def _cm():
+        patches = [
+            patch.object(
+                service,
+                "_resolve_db_rel_candidates",
+                new_callable=AsyncMock,
+                return_value=["sillyspec.db"],
+            ),
+            patch.object(service, "_get_host_fs_delegate", return_value=delegate),
+        ]
+        for p in patches:
+            p.start()
+        try:
+            yield
+        finally:
+            for p in patches:
+                p.stop()
+
+    return _cm()
+
+
+class _MissingDbDelegate:
+    """Fake delegate whose stat reports the db absent (db_not_found scenario)."""
+
+    async def stat(self, workspace, path: str) -> dict:
+        return {"exists": False, "size": 0}
+
+    async def read_file(self, workspace, path: str) -> str:
+        raise FileNotFoundError(path)
+
+
+class _CorruptDbDelegate:
+    """Fake delegate that returns non-db bytes (db_connect_failed scenario)."""
+
+    def __init__(self, content: str = "not a real db") -> None:
+        self._content = content
+
+    async def stat(self, workspace, path: str) -> dict:
+        return {"exists": True, "size": len(self._content)}
+
+    async def read_file(self, workspace, path: str) -> str:
+        return self._content
+
+
 def _create_sillyspec_db(
     tmp_path: SyncPath,
     change_key: str = "test-change",
@@ -632,8 +719,7 @@ async def test_sync_stage_status_normal_sync(db_session: AsyncSession) -> None:
         )
         service = SillySpecStageDispatchService(db_session)
         run_id = uuid.uuid4()
-        with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
-            mock_resolve.return_value = SpecPathResolver(tmp_dir).db_path()
+        with _patch_sync_to_local_db(service, SpecPathResolver(tmp_dir).db_path()):
             result = await service.sync_stage_status(db_session, change.id, run_id)
 
     assert result.synced is True
@@ -684,8 +770,7 @@ async def test_sync_stage_status_all_steps_completed(db_session: AsyncSession) -
         )
         service = SillySpecStageDispatchService(db_session)
         run_id = uuid.uuid4()
-        with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
-            mock_resolve.return_value = SpecPathResolver(tmp_dir).db_path()
+        with _patch_sync_to_local_db(service, SpecPathResolver(tmp_dir).db_path()):
             result = await service.sync_stage_status(db_session, change.id, run_id)
 
     assert result.synced is True
@@ -702,8 +787,7 @@ async def test_sync_stage_status_db_not_found(db_session: AsyncSession) -> None:
 
     service = SillySpecStageDispatchService(db_session)
     run_id = uuid.uuid4()
-    with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
-        mock_resolve.return_value = SyncPath("/nonexistent/sillyspec.db")
+    with _patch_sync_with_delegate(service, _MissingDbDelegate()):
         result = await service.sync_stage_status(db_session, change.id, run_id)
 
     assert result.synced is False
@@ -711,28 +795,23 @@ async def test_sync_stage_status_db_not_found(db_session: AsyncSession) -> None:
 
 
 async def test_sync_stage_status_db_connect_failed(db_session: AsyncSession) -> None:
-    """sillyspec.db 连接失败 — synced=False。"""
+    """sillyspec.db 内容损坏 — synced=False。
+
+    2026-07-10-remove-server-local-workspace-mode: daemon-client 路径下
+    delegate.read_file 先拿字节成功（latin-1 往返），写临时文件后 sqlite3
+    查询才发现「file is not a database」→ 归类 db_read_failed（旧 server-local
+    直连 sqlite 时是 db_connect_failed，路径不同语义相应调整）。
+    """
     workspace_id = await _create_workspace(db_session)
     change = await _create_change(db_session, workspace_id=workspace_id)
 
     service = SillySpecStageDispatchService(db_session)
     run_id = uuid.uuid4()
-
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        # Create a dummy file so is_file() returns True
-        dummy_db = SyncPath(tmp_dir) / "sillyspec.db"
-        dummy_db.write_text("not a real db")
-        with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
-            mock_resolve.return_value = dummy_db
-            with patch(
-                "app.modules.change.dispatch.sqlite3.connect", side_effect=sqlite3.Error("corrupt")
-            ):
-                result = await service.sync_stage_status(db_session, change.id, run_id)
+    with _patch_sync_with_delegate(service, _CorruptDbDelegate("not a real db")):
+        result = await service.sync_stage_status(db_session, change.id, run_id)
 
     assert result.synced is False
-    assert "db_connect_failed" in result.error
+    assert "db_read_failed" in result.error
 
 
 async def test_sync_stage_status_db_read_failed(db_session: AsyncSession) -> None:
@@ -753,8 +832,7 @@ async def test_sync_stage_status_db_read_failed(db_session: AsyncSession) -> Non
 
         service = SillySpecStageDispatchService(db_session)
         run_id = uuid.uuid4()
-        with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
-            mock_resolve.return_value = db_path
+        with _patch_sync_to_local_db(service, db_path):
             result = await service.sync_stage_status(db_session, change.id, run_id)
 
     assert result.synced is False
@@ -773,8 +851,7 @@ async def test_sync_stage_status_change_key_not_in_db(db_session: AsyncSession) 
 
         service = SillySpecStageDispatchService(db_session)
         run_id = uuid.uuid4()
-        with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
-            mock_resolve.return_value = SpecPathResolver(tmp_dir).db_path()
+        with _patch_sync_to_local_db(service, SpecPathResolver(tmp_dir).db_path()):
             result = await service.sync_stage_status(db_session, change.id, run_id)
 
     assert result.synced is False
@@ -820,8 +897,7 @@ async def test_sync_stage_status_no_stage_record(db_session: AsyncSession) -> No
         )
         service = SillySpecStageDispatchService(db_session)
         run_id = uuid.uuid4()
-        with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
-            mock_resolve.return_value = SpecPathResolver(tmp_dir).db_path()
+        with _patch_sync_to_local_db(service, SpecPathResolver(tmp_dir).db_path()):
             result = await service.sync_stage_status(db_session, change.id, run_id)
 
     assert result.synced is True
@@ -863,8 +939,7 @@ async def test_sync_stage_status_empty_steps(db_session: AsyncSession) -> None:
         )
         service = SillySpecStageDispatchService(db_session)
         run_id = uuid.uuid4()
-        with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
-            mock_resolve.return_value = SpecPathResolver(tmp_dir).db_path()
+        with _patch_sync_to_local_db(service, SpecPathResolver(tmp_dir).db_path()):
             result = await service.sync_stage_status(db_session, change.id, run_id)
 
     assert result.synced is True
@@ -906,8 +981,7 @@ async def test_sync_stage_status_updates_change_stages_json(db_session: AsyncSes
         )
         service = SillySpecStageDispatchService(db_session)
         run_id = uuid.uuid4()
-        with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
-            mock_resolve.return_value = SpecPathResolver(tmp_dir).db_path()
+        with _patch_sync_to_local_db(service, SpecPathResolver(tmp_dir).db_path()):
             result = await service.sync_stage_status(db_session, change.id, run_id)
 
     assert result.synced is True
@@ -987,8 +1061,7 @@ async def test_dispatch_then_sync_partial_progress(db_session: AsyncSession) -> 
             ],
         )
         service = SillySpecStageDispatchService(db_session)
-        with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
-            mock_resolve.return_value = SpecPathResolver(tmp_dir).db_path()
+        with _patch_sync_to_local_db(service, SpecPathResolver(tmp_dir).db_path()):
             sync_result = await service.sync_stage_status(
                 db_session,
                 change.id,
@@ -1066,8 +1139,7 @@ async def test_dispatch_then_sync_all_completed(db_session: AsyncSession) -> Non
             ],
         )
         service = SillySpecStageDispatchService(db_session)
-        with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
-            mock_resolve.return_value = SpecPathResolver(tmp_dir).db_path()
+        with _patch_sync_to_local_db(service, SpecPathResolver(tmp_dir).db_path()):
             sync_result = await service.sync_stage_status(
                 db_session,
                 change.id,
@@ -1122,8 +1194,7 @@ async def test_dispatch_then_sync_no_db_stops_chain(db_session: AsyncSession) ->
 
     # Sync fails — db not found
     service = SillySpecStageDispatchService(db_session)
-    with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
-        mock_resolve.return_value = SyncPath("/nonexistent/sillyspec.db")
+    with _patch_sync_with_delegate(service, _MissingDbDelegate()):
         sync_result = await service.sync_stage_status(db_session, change.id, agent_run_id)
 
     assert sync_result.synced is False

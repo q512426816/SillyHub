@@ -9,7 +9,6 @@ import pytest
 
 from app.core.errors import (
     WorkspaceNotFound,
-    WorkspaceNotSillyspec,
     WorkspacePathNotDir,
     WorkspacePathNotFound,
     WorkspacePermissionDenied,
@@ -64,17 +63,6 @@ async def test_create_persists_workspace(db_session, tmp_path: Path) -> None:
     assert ws.slug == "my-workspace"
     assert ws.root_path == str(root.resolve())
     assert ws.last_scanned_at is not None
-
-
-async def test_create_fails_when_not_sillyspec(db_session, tmp_path: Path) -> None:
-    plain = tmp_path / "no-spec"
-    plain.mkdir()
-    service = WorkspaceService(db_session)
-    with pytest.raises(WorkspaceNotSillyspec):
-        await service.create(
-            WorkspaceCreate(name="x", root_path=str(plain)),
-            created_by=None,
-        )
 
 
 async def test_create_duplicate_root_path_returns_existing(db_session, tmp_path: Path) -> None:

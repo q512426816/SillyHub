@@ -55,7 +55,6 @@ async def _create_workspace(session: AsyncSession) -> Workspace:
         slug=f"stage-ws-{uuid.uuid4().hex[:6]}",
         root_path="/tmp/stage-test-workspace",
         status="active",
-        path_source="server-local",
     )
     session.add(ws)
     await session.commit()

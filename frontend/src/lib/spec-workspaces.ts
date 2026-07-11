@@ -195,10 +195,8 @@ export interface SyncManualResult {
 /**
  * POST /api/workspaces/{workspaceId}/spec-workspace/sync-manual
  *
- * 「同步到服务器」手动按钮入口。
- * - server-local：立即返 {"status": "done"}。
- * - daemon-client：建 kind=spec-sync 的 DaemonChangeWrite outbox 行，
- *   返 {"status": "pending", "task_id": "uuid"}。
+ * 「同步到服务器」手动按钮入口。建 kind=spec-sync 的 DaemonChangeWrite
+ * outbox 行，返 {"status": "pending", "task_id": "uuid"}。
  */
 export async function syncManual(
   workspaceId: string,

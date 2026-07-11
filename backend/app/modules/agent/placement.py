@@ -24,11 +24,6 @@ from app.core.logging import get_logger
 log = get_logger(__name__)
 
 
-# Sentinel used by ``_resolve_decide_runtime`` to mean "this workspace does
-# not need bound-runtime validation — fall back to user-level online check".
-_DECIDE_FALLBACK_SENTINEL: dict = {"__fallback__": True}
-
-
 # ---------------------------------------------------------------------------
 # Public types
 # ---------------------------------------------------------------------------
@@ -50,7 +45,7 @@ class NoOnlineDaemonError(Exception):
     - AgentRun.output_redacted = "未检测到在线 daemon，请启动 sillyhub-daemon 后重试"
 
     task-03 (change 2026-06-18-workspace-client-path): daemon-client workspace
-    绑定的 daemon 离线/不存在时，``runtime_id`` 携带目标 daemon_runtime_id，
+    绑定的 daemon 离线/不存在时，``runtime_id`` 携带目标运行时 id，
     默认 message 升级为「目标 daemon（{runtime_id}）离线，请启动...」，便于
     前端直接展示（D-001@v1 / FR-02 UX）。
     """
@@ -131,28 +126,19 @@ class RunPlacementService:
                     preferred_backend=preferred_backend,
                 )
 
-        # task-03 (FR-02 / D-001@v1): daemon-client workspace 强绑路由——
-        # 校验 workspace.daemon_runtime_id 是否在线且属于 user。避免「decide
+        # task-03 (FR-02 / D-001@v1)：daemon-client workspace 强绑路由——
+        # 校验 per-member binding 绑定的 daemon 是否在线且属于 user。避免「decide
         # 通过但 dispatch 抛错」的语义割裂（design §4.6 推荐方案）。
+        # D-007@2026-07-10（remove-server-local-workspace-mode）：server-local 列删除后
+        # 所有 workspace 永远 daemon-client，无 binding 行即未绑定，直接抛
+        # NoOnlineDaemonError（不再回退 user 级 _get_online_runtime 兜底）。
         bound_rt = await self._resolve_decide_runtime(workspace_id=workspace_id, user_id=user_id)
-        if bound_rt is _DECIDE_FALLBACK_SENTINEL:
-            # server-local workspace（或 workspace 不存在/无 path_source）：
-            # 维持现状 user 级在线判定（design §9 兼容）。
-            has_runtime = await self._has_online_runtime(user_id)
-            if has_runtime:
-                log.info(
-                    "placement_backend_auto",
-                    backend="daemon",
-                    has_online_runtime=True,
-                )
-                return ExecutionBackend.DAEMON
-            raise NoOnlineDaemonError(workspace_id=workspace_id, user_id=user_id)
 
         # daemon-client: bound_rt 已校验在线且属于 user。
         log.info(
             "placement_backend_daemon_client_bound",
             backend="daemon",
-            runtime_id=str(bound_rt["id"]),  # type: ignore[index]
+            runtime_id=str(bound_rt["id"]),
         )
         return ExecutionBackend.DAEMON
 
@@ -165,8 +151,9 @@ class RunPlacementService:
         agent_run_id: uuid.UUID,
         user_id: uuid.UUID,
         *,
-        # task-03 (2026-06-18-workspace-client-path): workspace 标识，daemon-client
-        # workspace 用 daemon_runtime_id 强绑路由；None 走 server-local 兼容路径。
+        # task-03 (2026-06-18-workspace-client-path) / D-007@2026-07-10：
+        # workspace 标识，所有 workspace 永远 daemon-client，按 per-member
+        # binding 强绑路由；None 走上层 decide_backend 抛 NoOnlineDaemonError。
         workspace_id: uuid.UUID | None = None,
         # 通用字段（design §7.2）
         provider: str | None = None,
@@ -710,13 +697,13 @@ class RunPlacementService:
     ) -> dict | None:
         """Resolve the runtime a dispatch should target.
 
-        Routing rules (change 2026-07-03-daemon-entity-binding task-08,
-        D-004/D-005/D-008):
+        Routing rules (D-007@2026-07-10 remove-server-local-workspace-mode，
+        server-local 列已删，所有 workspace 永远 daemon-client)：
 
-        - ``workspace_id is None``  → server-local compatibility path
-          (``_get_online_runtime(user_id, provider=...)``). Keeps existing
-          tests and callers working (design §9 / backward compat).
-        - Per-member binding (WorkspaceMemberRuntime) takes priority:
+        - ``workspace_id is None``：dispatch 缺 workspace 上下文，直接抛
+          ``NoOnlineDaemonError``（不再静默走 user 级 ``_get_online_runtime``
+          server-local 兼容路径；上层 ``decide_backend`` 已守此入口）。
+        - Per-member binding (WorkspaceMemberRuntime) 是唯一绑定真相源：
           if a row exists for ``(workspace_id, user_id)``, read its
           ``daemon_id`` (D-004):
             - ``daemon_id`` is None (pre-migration row) →
@@ -728,19 +715,16 @@ class RunPlacementService:
             - Match found → return that runtime.
             - No match → ``NoOnlineDaemonError`` with enabled-providers list
               (D-008, never auto-fallback to another provider).
-        - No binding row   → fall back to legacy ``Workspace.daemon_runtime_id``
-          global column (backward compatible, see task-02 deprecation).
-        - ``path_source != 'daemon-client'`` → server-local behavior unchanged.
+        - No binding row → ``NoOnlineDaemonError``（工作区未绑定守护进程，
+          daemon-client 单一模式下无全局列可回退）。
         """
-        # Branch 0: no workspace context → legacy server-local path.
+        # Branch 0: no workspace context → dispatch 缺绑定，直接抛错。
         if workspace_id is None:
-            return await self._get_online_runtime(user_id, provider=provider)
+            raise NoOnlineDaemonError(user_id=user_id)
 
-        # Branch 1: per-member binding (D-006, 2026-07-02-workspace-config-flow
-        # task-01). If a WorkspaceMemberRuntime row exists for this
-        # (workspace_id, user_id), use its runtime_id (must be online + owned
-        # by user). No binding row -> fall through to legacy Workspace global
-        # column (backward compatible).
+        # Per-member binding (D-006, 2026-07-02-workspace-config-flow task-01 +
+        # D-007 单一 daemon-client)：WorkspaceMemberRuntime 行是唯一绑定真相源。
+        # 无 binding 行 → NoOnlineDaemonError（不再回退 legacy Workspace 全局列）。
         from app.modules.workspace.member_runtimes.exceptions import (
             MemberBindingNotFound,
         )
@@ -753,7 +737,7 @@ class RunPlacementService:
                 self._session, workspace_id, user_id
             )
         except MemberBindingNotFound:
-            binding = None  # No binding row — fall through to legacy logic.
+            binding = None  # No binding row → raise below.
         except Exception as exc:
             log.warning(
                 "resolve_member_binding_unexpected_error",
@@ -761,164 +745,67 @@ class RunPlacementService:
                 user_id=str(user_id),
                 error=str(exc),
             )
-            binding = None  # Defensive fallback to legacy logic.
+            binding = None
 
-        if binding is not None:
-            # task-08: per-member binding now routes via daemon_id + default_agent.
-            daemon_id = binding.daemon_id
-            if daemon_id is None:
-                # 旧 binding 行尚未迁移 daemon_id—指引用户重绑（D-004 过渡期）。
-                raise NoOnlineDaemonError(
-                    workspace_id=workspace_id,
-                    user_id=user_id,
-                    message="未绑定守护进程，请重绑",
-                )
+        if binding is None:
+            raise NoOnlineDaemonError(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                message="工作区未绑定守护进程",
+            )
 
-            did = uuid.UUID(str(daemon_id)) if not isinstance(daemon_id, uuid.UUID) else daemon_id
+        # task-08: per-member binding now routes via daemon_id + default_agent.
+        daemon_id = binding.daemon_id
+        if daemon_id is None:
+            # 旧 binding 行尚未迁移 daemon_id—指引用户重绑（D-004 过渡期）。
+            raise NoOnlineDaemonError(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                message="未绑定守护进程，请重绑",
+            )
 
-            # Step 1: verify the daemon_instance is online + owned by user
-            daemon = await self._query_daemon_online_by_id(did, user_id)
-            if daemon is None:
-                raise NoOnlineDaemonError(
-                    workspace_id=workspace_id,
-                    user_id=user_id,
-                    message="绑定的守护进程离线或不存在，请启动后重试",
-                )
+        did = uuid.UUID(str(daemon_id)) if not isinstance(daemon_id, uuid.UUID) else daemon_id
 
-            # Step 2: resolve target provider — caller override or workspace.default_agent
-            target_provider = provider
-            if target_provider is None:
-                ws_data = (
-                    (
-                        await self._session.execute(
-                            text("SELECT default_agent FROM workspaces WHERE id = :id"),
-                            {"id": workspace_id.hex},
-                        )
+        # Step 1: verify the daemon_instance is online + owned by user
+        daemon = await self._query_daemon_online_by_id(did, user_id)
+        if daemon is None:
+            raise NoOnlineDaemonError(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                message="绑定的守护进程离线或不存在，请启动后重试",
+            )
+
+        # Step 2: resolve target provider — caller override or workspace.default_agent
+        target_provider = provider
+        if target_provider is None:
+            ws_data = (
+                (
+                    await self._session.execute(
+                        text("SELECT default_agent FROM workspaces WHERE id = :id"),
+                        {"id": workspace_id.hex},
                     )
-                    .mappings()
-                    .first()
                 )
-                target_provider = ws_data["default_agent"] if ws_data else None
-
-            # Step 3: find a runtime matching target_provider on this daemon
-            rt = await self._query_runtime_by_daemon_and_provider(did, target_provider)
-            if rt is not None:
-                return rt
-
-            # Step 4: D-008 — no auto-fallback, error with enabled providers list
-            enabled = await self._get_daemon_enabled_providers(did)
-            if target_provider:
-                msg = f"守护进程已启用 {enabled}，但未启用 default_agent '{target_provider}'"
-            else:
-                msg = f"守护进程已启用 {enabled}，但未设置 default_agent，请在工作区设置中配置"
-            raise NoOnlineDaemonError(
-                workspace_id=workspace_id,
-                user_id=user_id,
-                message=msg,
+                .mappings()
+                .first()
             )
+            target_provider = ws_data["default_agent"] if ws_data else None
 
-        # Fall through to legacy workspace global-column logic.
-        ws_row = (
-            (
-                await self._session.execute(
-                    text("SELECT path_source, daemon_runtime_id FROM workspaces WHERE id = :id"),
-                    {"id": workspace_id.hex},
-                )
-            )
-            .mappings()
-            .first()
+        # Step 3: find a runtime matching target_provider on this daemon
+        rt = await self._query_runtime_by_daemon_and_provider(did, target_provider)
+        if rt is not None:
+            return rt
+
+        # Step 4: D-008 — no auto-fallback, error with enabled providers list
+        enabled = await self._get_daemon_enabled_providers(did)
+        if target_provider:
+            msg = f"守护进程已启用 {enabled}，但未启用 default_agent '{target_provider}'"
+        else:
+            msg = f"守护进程已启用 {enabled}，但未设置 default_agent，请在工作区设置中配置"
+        raise NoOnlineDaemonError(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            message=msg,
         )
-
-        # Branch 1: workspace row missing → defensive fallback.
-        if ws_row is None:
-            log.warning(
-                "dispatch_workspace_not_found",
-                workspace_id=str(workspace_id),
-                user_id=str(user_id),
-            )
-            return await self._get_online_runtime(user_id, provider=provider)
-
-        path_source = ws_row["path_source"]
-        daemon_runtime_id = ws_row["daemon_runtime_id"]
-
-        # Branch 2: non daemon-client → unchanged server-local semantics.
-        if path_source != "daemon-client":
-            return await self._get_online_runtime(user_id, provider=provider)
-
-        # Branch 3: daemon-client without bound runtime → defensive error.
-        if not daemon_runtime_id:
-            raise NoOnlineDaemonError(
-                workspace_id=workspace_id,
-                user_id=user_id,
-                message="daemon-client workspace 未绑定 daemon_runtime_id（数据异常）",
-            )
-
-        rt_id = (
-            uuid.UUID(daemon_runtime_id)
-            if isinstance(daemon_runtime_id, str)
-            else daemon_runtime_id
-        )
-
-        # Branch 4: bound runtime — must be online and belong to user.
-        rt = await self._query_online_by_id(rt_id)
-        if rt is None:
-            # offline OR missing — unified "unavailable" semantics (D-001).
-            raise NoOnlineDaemonError(
-                workspace_id=workspace_id,
-                user_id=user_id,
-                runtime_id=rt_id,
-            )
-
-        rt_user_raw = rt.get("user_id")
-        rt_user_id = uuid.UUID(rt_user_raw) if isinstance(rt_user_raw, str) else rt_user_raw
-        if rt_user_id != user_id:
-            raise NoOnlineDaemonError(
-                workspace_id=workspace_id,
-                user_id=user_id,
-                runtime_id=rt_id,
-                message="目标 daemon 不属于当前用户，无法路由",
-            )
-
-        # provider mismatch: bound runtime wins, just warn (D-001 强绑优先).
-        if provider and rt.get("provider") and rt["provider"] != provider:
-            log.warning(
-                "dispatch_bound_runtime_provider_mismatch",
-                wanted=provider,
-                bound=rt["provider"],
-                runtime_id=str(rt_id),
-                workspace_id=str(workspace_id),
-            )
-        return rt
-
-    async def _query_online_by_id(self, runtime_id: uuid.UUID) -> dict | None:
-        """Return the online daemon runtime with the given id, or None.
-
-        Per D-001@v1 we unify "missing" and "offline" into ``None`` — both
-        surface as ``NoOnlineDaemonError(runtime_id=...)`` upstream. ``user_id``
-        is included so the caller can validate ownership (防越权借用他人 daemon).
-        """
-        try:
-            result = await self._session.execute(
-                text(
-                    """
-                    SELECT id, user_id, provider, status, daemon_instance_id
-                    FROM daemon_runtimes
-                    WHERE id = :rid
-                    """
-                ),
-                {"rid": runtime_id.hex},
-            )
-            row = result.mappings().first()
-            if not row or row.get("status") != "online":
-                return None
-            return dict(row)
-        except Exception as exc:
-            log.warning(
-                "placement_query_online_by_id_failed",
-                runtime_id=str(runtime_id),
-                error=str(exc),
-            )
-            return None
 
     # ------------------------------------------------------------------
     # Daemon-entity resolution helpers (task-08 / D-004 / D-005 / D-008)
@@ -971,24 +858,25 @@ class RunPlacementService:
         *,
         workspace_id: uuid.UUID,
         user_id: uuid.UUID,
-    ) -> dict | object:
+    ) -> dict:
         """Resolve runtime for ``decide_backend`` (task-08, daemon_id routing).
 
-        Returns:
-        - ``_DECIDE_FALLBACK_SENTINEL`` when the workspace does not require
-          bound-runtime validation (server-local / missing / unknown
-          path_source) — caller falls back to ``_has_online_runtime``.
-        - a runtime ``dict`` when the workspace has a per-member binding and
-          the bound daemon is online + has at least one online runtime.
-        - raises ``NoOnlineDaemonError`` when:
+        D-007@2026-07-10（remove-server-local-workspace-mode）：server-local 列删除后
+        所有 workspace 永远 daemon-client，无 binding 行即未绑定，直接抛
+        ``NoOnlineDaemonError``（不再回退 user 级全局运行时兜底 / legacy workspace
+        全局运行时列）。
+
+        Returns a runtime ``dict`` when the workspace has a per-member binding
+        and the bound daemon is online + has at least one online runtime.
+
+        Raises ``NoOnlineDaemonError`` when:
+            * 无 binding 行（workspace 未绑定守护进程）
             * binding.daemon_id is None (pre-migration) → "未绑定守护进程，请重绑"
             * daemon is offline / cross-user
             * daemon is online but has no online runtimes (all providers stale)
         """
-        # Branch 1: per-member binding (D-004, 2026-07-03-daemon-entity-binding
-        # task-08). If a WorkspaceMemberRuntime row exists, read its daemon_id
-        # (not runtime_id) for routing. daemon_id is None → pre-migration row.
-        # No binding row -> fall through to legacy Workspace.daemon_runtime_id.
+        # Per-member binding (D-004, 2026-07-03-daemon-entity-binding task-08 +
+        # D-007 单一 daemon-client)。WorkspaceMemberRuntime 行是唯一绑定真相源。
         from app.modules.workspace.member_runtimes.exceptions import (
             MemberBindingNotFound,
         )
@@ -1001,143 +889,60 @@ class RunPlacementService:
                 self._session, workspace_id, user_id
             )
         except MemberBindingNotFound:
-            binding = None  # No binding row — fall through to legacy logic.
+            binding = None  # No binding row → raise below.
         except Exception as exc:
             log.warning(
                 "resolve_member_binding_unexpected_error",
                 workspace_id=str(workspace_id),
-                user_id=str(user_id),
                 error=str(exc),
             )
-            binding = None  # Defensive fallback to legacy logic.
+            binding = None
 
-        if binding is not None:
-            # task-08: per-member binding now routes via daemon_id.
-            daemon_id = binding.daemon_id
-            if daemon_id is None:
-                # 旧 binding 行尚未迁移 daemon_id—指引用户重绑（D-004 过渡期）。
-                raise NoOnlineDaemonError(
-                    workspace_id=workspace_id,
-                    user_id=user_id,
-                    message="未绑定守护进程，请重绑",
-                )
-
-            did = uuid.UUID(str(daemon_id)) if not isinstance(daemon_id, uuid.UUID) else daemon_id
-
-            # Verify the daemon_instance is online + owned by user.
-            daemon = await self._query_daemon_online_by_id(did, user_id)
-            if daemon is None:
-                raise NoOnlineDaemonError(
-                    workspace_id=workspace_id,
-                    user_id=user_id,
-                    message="绑定的守护进程离线或不存在，请启动后重试",
-                )
-
-            # Pick any online runtime on the daemon to confirm the daemon is
-            # reachable (decide only validates reachability, not provider match;
-            # the specific provider is resolved by _resolve_dispatch_runtime).
-            rt = await self._query_runtime_by_daemon_and_provider(did, None)
-            if rt is not None:
-                return rt
-
-            # Daemon has no online runtimes at all — still raise (not D-008
-            # which is for provider mismatch; this is a more fundamental state).
-            enabled = await self._get_daemon_enabled_providers(did)
+        if binding is None:
             raise NoOnlineDaemonError(
                 workspace_id=workspace_id,
                 user_id=user_id,
-                message=(
-                    f"守护进程在线但无可用运行时（已启用 provider: {enabled}），"
-                    f"请确认 daemon 状态正常"
-                ),
+                message="工作区未绑定守护进程",
             )
 
-        # binding is None (no binding row) → fall through to legacy.
-
-        try:
-            ws_row = (
-                (
-                    await self._session.execute(
-                        text(
-                            "SELECT path_source, daemon_runtime_id FROM workspaces WHERE id = :id"
-                        ),
-                        {"id": workspace_id.hex},
-                    )
-                )
-                .mappings()
-                .first()
-            )
-        except Exception as exc:
-            log.warning(
-                "placement_decide_workspace_lookup_failed",
-                workspace_id=str(workspace_id),
-                error=str(exc),
-            )
-            return _DECIDE_FALLBACK_SENTINEL
-
-        if ws_row is None or ws_row["path_source"] != "daemon-client":
-            return _DECIDE_FALLBACK_SENTINEL
-
-        daemon_runtime_id = ws_row["daemon_runtime_id"]
-        if not daemon_runtime_id:
+        # task-08: per-member binding now routes via daemon_id.
+        daemon_id = binding.daemon_id
+        if daemon_id is None:
+            # 旧 binding 行尚未迁移 daemon_id—指引用户重绑（D-004 过渡期）。
             raise NoOnlineDaemonError(
                 workspace_id=workspace_id,
                 user_id=user_id,
-                message="daemon-client workspace 未绑定 daemon_runtime_id（数据异常）",
+                message="未绑定守护进程，请重绑",
             )
 
-        rt_id = (
-            uuid.UUID(daemon_runtime_id)
-            if isinstance(daemon_runtime_id, str)
-            else daemon_runtime_id
+        did = uuid.UUID(str(daemon_id)) if not isinstance(daemon_id, uuid.UUID) else daemon_id
+
+        # Verify the daemon_instance is online + owned by user.
+        daemon = await self._query_daemon_online_by_id(did, user_id)
+        if daemon is None:
+            raise NoOnlineDaemonError(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                message="绑定的守护进程离线或不存在，请启动后重试",
+            )
+
+        # Pick any online runtime on the daemon to confirm the daemon is
+        # reachable (decide only validates reachability, not provider match;
+        # the specific provider is resolved by _resolve_dispatch_runtime).
+        rt = await self._query_runtime_by_daemon_and_provider(did, None)
+        if rt is not None:
+            return rt
+
+        # Daemon has no online runtimes at all — still raise (not D-008
+        # which is for provider mismatch; this is a more fundamental state).
+        enabled = await self._get_daemon_enabled_providers(did)
+        raise NoOnlineDaemonError(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            message=(
+                f"守护进程在线但无可用运行时（已启用 provider: {enabled}），请确认 daemon 状态正常"
+            ),
         )
-        rt = await self._query_online_by_id(rt_id)
-        if rt is None:
-            raise NoOnlineDaemonError(
-                workspace_id=workspace_id,
-                user_id=user_id,
-                runtime_id=rt_id,
-            )
-        rt_user_raw = rt.get("user_id")
-        rt_user_id = uuid.UUID(rt_user_raw) if isinstance(rt_user_raw, str) else rt_user_raw
-        if rt_user_id != user_id:
-            raise NoOnlineDaemonError(
-                workspace_id=workspace_id,
-                user_id=user_id,
-                runtime_id=rt_id,
-                message="目标 daemon 不属于当前用户，无法路由",
-            )
-        return rt
-
-    async def _has_online_runtime(self, user_id: uuid.UUID) -> bool:
-        """Return True if the user has at least one online daemon runtime.
-
-        Returns False (i.e. no runtime available) if the ``daemon_runtimes``
-        table does not exist yet -- this happens when the daemon module
-        migrations have not been applied.
-        """
-        try:
-            result = await self._session.execute(
-                text(
-                    """
-                    SELECT COUNT(*) AS cnt
-                    FROM daemon_runtimes
-                    WHERE user_id = :user_id
-                      AND status = 'online'
-                    """
-                ),
-                {"user_id": user_id.hex},
-            )
-            row = result.mappings().first()
-            count = row["cnt"] if row else 0
-            return count > 0
-        except Exception as exc:
-            log.warning(
-                "placement_has_online_runtime_query_failed",
-                user_id=str(user_id),
-                error=str(exc),
-            )
-            return False
 
     async def _get_online_runtime(
         self,

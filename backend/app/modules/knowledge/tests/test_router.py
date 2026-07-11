@@ -21,10 +21,14 @@ def _copy_fixture(src: Path, tmp_path: Path, name: str = "ws") -> Path:
 
 
 @pytest.fixture()
-async def workspace_with_knowledge(client, tmp_path: Path, auth_headers: dict[str, str]) -> dict:
+async def workspace_with_knowledge(
+    client, db_session, tmp_path: Path, auth_headers: dict[str, str]
+) -> dict:
     root = _copy_fixture(COMPONENT_FIXTURES, tmp_path)
 
-    knowledge_dir = root / ".sillyspec" / "knowledge"
+    # task-09（2026-07-10-remove-server-local-workspace-mode）：扁平布局——knowledge/
+    # quicklog/ 直接在 spec_root 下（daemon-client 同步产出，无 .sillyspec 包裹）。
+    knowledge_dir = root / "knowledge"
     knowledge_dir.mkdir(parents=True, exist_ok=True)
     (knowledge_dir / "INDEX.md").write_text(
         "# Knowledge Index\n\n> Reference document.\n",
@@ -35,7 +39,7 @@ async def workspace_with_knowledge(client, tmp_path: Path, auth_headers: dict[st
         encoding="utf-8",
     )
 
-    quicklog_dir = root / ".sillyspec" / "quicklog"
+    quicklog_dir = root / "quicklog"
     quicklog_dir.mkdir(parents=True, exist_ok=True)
     (quicklog_dir / "2026-01-15.md").write_text(
         "# Quicklog 2026-01-15\n\n- Fixed bug X\n- Added feature Y\n",
@@ -48,7 +52,22 @@ async def workspace_with_knowledge(client, tmp_path: Path, auth_headers: dict[st
         headers=auth_headers,
     )
     assert ws_resp.status_code == 201, ws_resp.text
-    return {"ws_id": ws_resp.json()["id"]}
+    ws_id = ws_resp.json()["id"]
+
+    # task-09：HTTP 创建会 bootstrap spec_ws.spec_root = {spec_data_root}/{ws_id}（非
+    # root_path）。扁平布局下 parser 读 spec_ws.spec_root/knowledge/，故把 spec_root
+    # 重定向到固件写入的 root（测试隔离，不影响生产语义）。
+    from sqlmodel import select
+
+    spec_ws = (
+        await db_session.execute(
+            select(SpecWorkspace).where(SpecWorkspace.workspace_id == uuid.UUID(ws_id))
+        )
+    ).scalar_one()
+    spec_ws.spec_root = str(root)
+    await db_session.commit()
+
+    return {"ws_id": ws_id}
 
 
 async def test_list_knowledge(
@@ -209,7 +228,6 @@ async def test_daemon_client_knowledge_reads_platform_spec_root(
         name="daemon-client-knowledge",
         slug=f"daemon-client-knowledge-{uuid.uuid4().hex[:8]}",
         root_path=str(tmp_path / "client-machine-path"),
-        path_source="daemon-client",
         status="active",
     )
     db_session.add(ws)

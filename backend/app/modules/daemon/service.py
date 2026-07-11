@@ -104,7 +104,7 @@ class DaemonService:
         # task-06：HostFsDelegate 实例 lazy 构造（见 ``host_fs_delegate`` property）。
         # 不能在 __init__ 直接构造——host_fs 子包顶层 import 本模块的异常类
         # （delegate.py:39 / ws_rpc.py:41），模块级 import 会循环。lazy 构造 +
-        # 实例缓存避开循环，且只在 daemon-client path_source 首次触发时付代价。
+        # 实例缓存避开循环（task-09：单一 daemon-client 后 delegate 总被访问）。
         self._host_fs_delegate: "HostFsDelegate | None" = None
 
     @property
@@ -115,8 +115,8 @@ class DaemonService:
         ``self._facade.host_fs_delegate`` 访问。选 lazy property 而非构造注入，
         因 ``HostFsDelegate`` / ``HostFsWsRpc`` 顶层 import 本模块异常类（循环
         import 规避），且 ws_hub 是进程级单例（``get_daemon_ws_hub``），无需在
-        DaemonService 构造时持有——首次 daemon-client path_source 触发时一次性
-        构造并缓存，server-local 路径（默认）永不触发，零回归（NFR-02）。
+        DaemonService 构造时持有——首次访问时一次性构造并缓存（task-09 单一
+        daemon-client 后 patch / post_scan 均经此 delegate，NFR-02 零回归）。
         """
         if self._host_fs_delegate is None:
             # lazy import 避开 host_fs 子包对 daemon.service 异常类的循环依赖。
@@ -451,26 +451,20 @@ class DaemonService:
     async def _trigger_stage_completion_callback(
         self,
         agent_run_id: uuid.UUID,
-        path_source: str | None = None,
     ) -> None:
         # 委托到 RunSyncService（task-04 迁入 run_sync/service.py）。
         # 保留同名委托：complete_lease（lease 子域，task-06）通过 self._facade 调用。
-        # task-05：path_source 由 complete_lease 入口反查后透传，签名 default=None
-        # 向后兼容现有调用；回调体分流归 task-07。
-        return await self._run._trigger_stage_completion_callback(
-            agent_run_id, path_source=path_source
-        )
+        # task-09：单一 daemon-client 后 path_source 分流已删，无参透传。
+        return await self._run._trigger_stage_completion_callback(agent_run_id)
 
     async def _run_post_scan_validation(
         self,
         lease: DaemonTaskLease,
-        path_source: str | None = None,
     ) -> None:
         # 委托到 RunSyncService（task-04 迁入 run_sync/service.py）。
         # 保留同名委托：complete_lease（lease 子域，task-06）通过 self._facade 调用。
-        # task-05：path_source 由 complete_lease 入口反查后透传，签名 default=None
-        # 向后兼容现有调用；回调体分流归 task-08。
-        return await self._run._run_post_scan_validation(lease, path_source=path_source)
+        # task-09：单一 daemon-client 后 path_source 分流已删，无参透传。
+        return await self._run._run_post_scan_validation(lease)
 
     async def submit_messages(
         self,
@@ -787,7 +781,6 @@ class DaemonService:
         agent_run_id: UUID,
         patch_data: str,
         use_3way: bool = True,
-        path_source: str | None = None,
     ) -> None:
         """Apply a unified diff patch to the workspace associated with *agent_run_id*.
 
@@ -795,16 +788,14 @@ class DaemonService:
         （complete_lease 内部 + test_wave5_integration + agent test_execution_context mock）
         按私有名访问，facade 委托不破坏调用方。
 
-        task-05：path_source 由 complete_lease 入口反查后透传（签名 default=None
-        向后兼容）；task-06 patch/service.py 按 path_source 分流——daemon-client 走
-        HostFsDelegate.git_apply（WS RPC 委托 daemon 在宿主 apply），server-local 保留
-        容器内 git apply。
+        task-09（2026-07-10-remove-server-local-workspace-mode）：单一 daemon-client
+        后 path_source 分流已删；patch/service.py 内部统一经 HostFsDelegate 委托
+        daemon 在宿主 apply（task-08 / D-005），无容器内 git apply / 无 path_source 透传。
         """
         return await self._patch.apply_patch_to_worktree(
             agent_run_id=agent_run_id,
             patch_data=patch_data,
             use_3way=use_3way,
-            path_source=path_source,
         )
 
     async def _get_lease_and_verify_token(

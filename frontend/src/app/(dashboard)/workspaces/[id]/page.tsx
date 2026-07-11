@@ -11,8 +11,7 @@ import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { WorkspaceDaemonSwitcher } from "@/components/workspace-daemon-switcher";
 import { WorkspacePathFields } from "@/components/workspace-path-fields";
 import { ApiError } from "@/lib/api";
-import { getDaemonRuntime, listDaemonInstances, listDaemonRuntimes, PROVIDER_META, type DaemonInstanceRead, type DaemonRuntimeRead } from "@/lib/daemon";
-import { isDaemonClientWorkspace } from "@/lib/workspace-path";
+import { listDaemonInstances, listDaemonRuntimes, PROVIDER_META, type DaemonInstanceRead, type DaemonRuntimeRead } from "@/lib/daemon";
 import { listComponents } from "@/lib/components";
 import { listChanges } from "@/lib/changes";
 import {
@@ -99,12 +98,11 @@ export default function WorkspaceDetailPage({ params }: Props) {
       setWorkspace(ws);
       setDefaultAgent(ws.default_agent);
       setDefaultModel(ws.default_model);
-      if (ws.path_source === "daemon-client" && ws.daemon_runtime_id) {
-        const runtime = await getDaemonRuntime(ws.daemon_runtime_id).catch(() => null);
-        setBoundRuntime(runtime);
-      } else {
-        setBoundRuntime(null);
-      }
+      // task-11 / 2026-07-10-remove-server-local-workspace-mode：平台统一
+      // daemon-client 语义后，runtime 维度已下沉到 per-member binding，此处
+      // boundRuntime 恒 null；runtime 展示由 boundDaemon state 承担
+      // （WorkspacePathFields 的 daemon prop）。
+      setBoundRuntime(null);
       setSpecWs(sw);
       setComponentCount(comps.total ?? comps.items?.length ?? 0);
       setActiveChanges(active.total ?? active.items?.length ?? 0);
@@ -222,16 +220,15 @@ export default function WorkspaceDetailPage({ params }: Props) {
           <dt className="text-muted-foreground">最后扫描</dt>
           <dd>{formatTs(workspace.last_scanned_at)}</dd>
         </dl>
-        {/* ql-20260619-006：daemon-client workspace 改绑 daemon 入口 */}
-        {isDaemonClientWorkspace(workspace) && (
-          <div className="mt-3 border-t pt-2.5">
-            <WorkspaceDaemonSwitcher
-              workspaceId={workspaceId}
-              currentBinding={myBinding}
-              onChanged={() => void load()}
-            />
-          </div>
-        )}
+        {/* task-11 / 2026-07-10-remove-server-local-workspace-mode：所有工作区
+            均为 daemon-client 语义，WorkspaceDaemonSwitcher 无条件渲染。 */}
+        <div className="mt-3 border-t pt-2.5">
+          <WorkspaceDaemonSwitcher
+            workspaceId={workspaceId}
+            currentBinding={myBinding}
+            onChanged={() => void load()}
+          />
+        </div>
       </SectionCard>
 
       {/* Default Agent provider（FR-01/FR-02 / daemon-entity-binding task-11）*/}

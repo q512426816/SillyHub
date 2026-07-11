@@ -85,35 +85,37 @@ async def _create_platform_workspace(
     spec_root: str | None = "/data/spec-workspaces/ws",
     runtime_id: uuid.UUID | None = None,
     ws_root: str = _STAGE_WS_ROOT,
-    path_source: str | None = None,
+    user_id: uuid.UUID | None = None,
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
-    """构造 Workspace + SpecWorkspace + Change，返回 (workspace_id, change_id, user_id)。
+    """构造 Workspace + SpecWorkspace + Change + per-member binding，返回
+    (workspace_id, change_id, user_id)。
 
-    参考 test_e2e_stage_dispatch.py 的 Workspace/Change 构造模式 + daemon-client
-    workspace 绑定 runtime（让 _resolve_dispatch_runtime 找到在线 runtime）。
+    参考 test_e2e_stage_dispatch.py 的 Workspace/Change 构造模式。task-01 后
+    Workspace 无 path_source / daemon_runtime_id 列（单一 daemon-client 模式），
+    dispatch 经 ``MemberBindingResolver`` 解析 (workspace_id, user_id) → daemon_id。
+    本 helper 始终建一条在线绑定（DaemonInstance + online DaemonRuntime +
+    WorkspaceMemberRuntime），让 ``_resolve_dispatch_runtime`` 能命中。
+
+    ``user_id`` 可选：传入则复用已建 user（F1 路径，runtime 已绑该 user），
+    否则内部建新 user。``runtime_id`` 传入则链接已存在的 DaemonRuntime 到新
+    DaemonInstance（F1），否则建新 DaemonRuntime。
 
     ws_root 必须真实存在（resolve_work_dir 会 stat 校验），默认用模块级
     _STAGE_WS_ROOT（tempfile.mkdtemp 创建，read_only=True 不写无污染）。
     """
     from app.modules.change.model import Change
+    from app.modules.daemon.model import DaemonInstance
     from app.modules.spec_workspace.model import SpecWorkspace
+    from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
     from app.modules.workspace.model import Workspace
 
-    uid = await _create_user(session)
+    uid = user_id if user_id is not None else await _create_user(session)
     ws = Workspace(
         id=uuid.uuid4(),
         name=f"stage-ws-{uuid.uuid4().hex[:6]}",
         slug=f"stage-ws-{uuid.uuid4().hex[:6]}",
         root_path=ws_root,
         status="active",
-        # daemon-client: 强绑 runtime，让 _resolve_dispatch_runtime 直接命中（避免
-        # 走 _has_online_runtime 的 ws_hub 查询路径）。
-        daemon_runtime_id=runtime_id,
-        # 方案 A：transport 按 path_source 决策。显式传入优先；否则按 runtime_id 推导
-        # （绑 runtime → daemon-client，否则 server-local）。
-        path_source=path_source
-        if path_source is not None
-        else ("daemon-client" if runtime_id else "server-local"),
     )
     session.add(ws)
 
@@ -125,6 +127,47 @@ async def _create_platform_workspace(
                 strategy=strategy,
             )
         )
+
+    # per-member binding：DaemonInstance（online）+ online DaemonRuntime +
+    # WorkspaceMemberRuntime。dispatch 经 binding → daemon_id → runtime 解析。
+    daemon = DaemonInstance(
+        id=uuid.uuid4(),
+        user_id=uid,
+        hostname="stage-test-host",
+        server_url="http://localhost:8000",
+        status="online",
+    )
+    session.add(daemon)
+    if runtime_id is not None:
+        # F1 路径：runtime 已由 _create_runtime 创建，链接到 DaemonInstance 即可
+        # （不重复 INSERT，避免主键冲突）。_resolve_dispatch_runtime 经 binding
+        # daemon_id → query_runtime_by_daemon_and_provider 命中此 runtime。
+        existing_rt = await session.get(DaemonRuntime, runtime_id)
+        if existing_rt is not None:
+            existing_rt.daemon_instance_id = daemon.id
+            existing_rt.status = "online"
+            session.add(existing_rt)
+    else:
+        session.add(
+            DaemonRuntime(
+                id=uuid.uuid4(),
+                user_id=uid,
+                name="stage-daemon",
+                provider="claude",
+                status="online",
+                last_heartbeat_at=datetime.now(UTC),
+                daemon_instance_id=daemon.id,
+            )
+        )
+    session.add(
+        WorkspaceMemberRuntime(
+            workspace_id=ws.id,
+            user_id=uid,
+            daemon_id=daemon.id,
+            root_path=ws_root,
+            path_source="daemon-client",
+        )
+    )
 
     change = Change(
         id=uuid.uuid4(),
@@ -215,9 +258,7 @@ async def test_d1_tar_mode_platform_args_contains_daemon_local_path(
     resolve_prompt_spec_root per-workspace 决策覆盖全局的核心规则。
     """
     _patch_transport(monkeypatch, "shared")
-    ws_id, change_id, uid = await _create_platform_workspace(
-        db_session, path_source="daemon-client"
-    )
+    ws_id, change_id, uid = await _create_platform_workspace(db_session)
     dispatch_mock, captured = _capture_dispatch_prompt()
 
     with (
@@ -262,9 +303,7 @@ async def test_d2_tar_mode_platform_args_contains_runtime_and_workspace_id(
     path_source='daemon-client' 锁 tar（patch 'shared' 验证锁定覆盖全局）。
     """
     _patch_transport(monkeypatch, "shared")
-    ws_id, change_id, uid = await _create_platform_workspace(
-        db_session, path_source="daemon-client"
-    )
+    ws_id, change_id, uid = await _create_platform_workspace(db_session)
     dispatch_mock, captured = _capture_dispatch_prompt()
 
     with (
@@ -300,87 +339,6 @@ async def test_d2_tar_mode_platform_args_contains_runtime_and_workspace_id(
 
 
 @pytest.mark.asyncio
-async def test_d3_shared_mode_platform_args_contains_host_path(
-    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """D3（方案 A）：server-local workspace → platform_args 含宿主 shared 路径。
-
-    path_source='server-local' 锁 transport='shared'，忽略全局 SPEC_TRANSPORT（此处
-    patch 'tar' 验证锁定——server-local 即便全局 tar 也走 shared）。守护 server-local
-    锁死 shared、忽略全局的核心规则。
-    """
-    _patch_transport(monkeypatch, "tar")
-    ws_id, change_id, uid = await _create_platform_workspace(db_session, path_source="server-local")
-    dispatch_mock, captured = _capture_dispatch_prompt()
-
-    with (
-        patch.object(AgentService, "_mark_no_online_daemon", new=AsyncMock()),
-        patch(
-            "app.modules.agent.placement.RunPlacementService.dispatch_to_daemon",
-            new=dispatch_mock,
-        ),
-        patch(
-            "app.modules.agent.placement.RunPlacementService.decide_backend",
-            new=AsyncMock(),
-        ),
-    ):
-        service = AgentService(db_session)
-        await service.start_stage_dispatch(
-            workspace_id=ws_id,
-            change_id=change_id,
-            user_id=uid,
-            stage="brainstorm",
-            prompt_template="brainstorm.md",
-            requires_worktree=False,
-            read_only=True,
-        )
-
-    prompt = captured["prompt"]
-    assert f"--spec-root /data/spec-workspaces/{ws_id}" in prompt
-    # tar 路径不应出现（守护 shared 不被 tar 污染）
-    assert "~/.sillyhub/daemon/specs/" not in prompt
-
-
-@pytest.mark.asyncio
-async def test_d4_shared_mode_platform_args_contains_host_runtime(
-    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """D4（方案 A）：server-local workspace → platform_args 含宿主 shared runtime-root。
-
-    shared 分支 runtime-root = {host_spec_root}/runtime，宿主路径前缀。
-    path_source='server-local' 锁 shared（patch 'tar' 验证锁定覆盖全局）。
-    """
-    _patch_transport(monkeypatch, "tar")
-    ws_id, change_id, uid = await _create_platform_workspace(db_session, path_source="server-local")
-    dispatch_mock, captured = _capture_dispatch_prompt()
-
-    with (
-        patch.object(AgentService, "_mark_no_online_daemon", new=AsyncMock()),
-        patch(
-            "app.modules.agent.placement.RunPlacementService.dispatch_to_daemon",
-            new=dispatch_mock,
-        ),
-        patch(
-            "app.modules.agent.placement.RunPlacementService.decide_backend",
-            new=AsyncMock(),
-        ),
-    ):
-        service = AgentService(db_session)
-        await service.start_stage_dispatch(
-            workspace_id=ws_id,
-            change_id=change_id,
-            user_id=uid,
-            stage="brainstorm",
-            prompt_template="brainstorm.md",
-            requires_worktree=False,
-            read_only=True,
-        )
-
-    prompt = captured["prompt"]
-    assert f"--runtime-root /data/spec-workspaces/{ws_id}/runtime" in prompt
-
-
-@pytest.mark.asyncio
 async def test_d5_non_platform_managed_no_platform_args(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -402,6 +360,11 @@ async def test_d5_non_platform_managed_no_platform_args(
         patch(
             "app.modules.agent.placement.RunPlacementService.decide_backend",
             new=AsyncMock(),
+        ),
+        patch.object(
+            AgentService,
+            "_get_host_fs_delegate",
+            return_value=_make_pass_delegate(),
         ),
     ):
         service = AgentService(db_session)
@@ -447,6 +410,11 @@ async def test_d6_platform_managed_but_spec_root_empty_no_platform_args(
             "app.modules.agent.placement.RunPlacementService.decide_backend",
             new=AsyncMock(),
         ),
+        patch.object(
+            AgentService,
+            "_get_host_fs_delegate",
+            return_value=_make_pass_delegate(),
+        ),
     ):
         service = AgentService(db_session)
         await service.start_stage_dispatch(
@@ -461,89 +429,6 @@ async def test_d6_platform_managed_but_spec_root_empty_no_platform_args(
 
     prompt = captured["prompt"]
     assert "--spec-root" not in prompt
-
-
-@pytest.mark.asyncio
-async def test_d7_path_source_orthogonal_to_strategy(
-    db_session: AsyncSession,
-) -> None:
-    """D7（方案 A）：transport 由 workspace.path_source 决定，与 strategy 正交。
-
-    daemon-client workspace → tar 路径；server-local workspace → shared 路径。
-    守护 per-workspace 决策：切换 path_source 只改 prompt 路径前缀，不改 strategy
-    判定（两者都 platform-managed）。不再依赖全局 SPEC_TRANSPORT patch。
-    """
-    # 两个 workspace 需不同 root_path（workspaces.root_path UNIQUE）；都需真实存在
-    # （resolve_work_dir 会 stat 校验）。
-    tar_root = tempfile.mkdtemp(prefix="stage-ws-tar-")
-    shared_root = tempfile.mkdtemp(prefix="stage-ws-shared-")
-    # daemon-client workspace → tar 路径
-    tar_ws_id, tar_change_id, tar_uid = await _create_platform_workspace(
-        db_session, path_source="daemon-client", ws_root=tar_root
-    )
-    tar_mock, tar_captured = _capture_dispatch_prompt()
-    with (
-        patch.object(AgentService, "_mark_no_online_daemon", new=AsyncMock()),
-        patch(
-            "app.modules.agent.placement.RunPlacementService.dispatch_to_daemon",
-            new=tar_mock,
-        ),
-        patch(
-            "app.modules.agent.placement.RunPlacementService.decide_backend",
-            new=AsyncMock(),
-        ),
-        patch.object(
-            AgentService,
-            "_get_host_fs_delegate",
-            return_value=_make_pass_delegate(),
-        ),
-    ):
-        service = AgentService(db_session)
-        await service.start_stage_dispatch(
-            workspace_id=tar_ws_id,
-            change_id=tar_change_id,
-            user_id=tar_uid,
-            stage="brainstorm",
-            prompt_template="brainstorm.md",
-            requires_worktree=False,
-            read_only=True,
-        )
-    tar_prompt = tar_captured["prompt"]
-
-    # server-local workspace（不同 workspace + 不同 root）→ shared 路径
-    shared_ws_id, shared_change_id, shared_uid = await _create_platform_workspace(
-        db_session, path_source="server-local", ws_root=shared_root
-    )
-    shared_mock, shared_captured = _capture_dispatch_prompt()
-    with (
-        patch.object(AgentService, "_mark_no_online_daemon", new=AsyncMock()),
-        patch(
-            "app.modules.agent.placement.RunPlacementService.dispatch_to_daemon",
-            new=shared_mock,
-        ),
-        patch(
-            "app.modules.agent.placement.RunPlacementService.decide_backend",
-            new=AsyncMock(),
-        ),
-    ):
-        service = AgentService(db_session)
-        await service.start_stage_dispatch(
-            workspace_id=shared_ws_id,
-            change_id=shared_change_id,
-            user_id=shared_uid,
-            stage="plan",
-            prompt_template="execute.md",
-            requires_worktree=False,
-            read_only=True,
-        )
-    shared_prompt = shared_captured["prompt"]
-
-    # path_source 决定路径前缀（正交于 strategy）
-    assert f"~/.sillyhub/daemon/specs/{tar_ws_id}" in tar_prompt
-    assert f"/data/spec-workspaces/{shared_ws_id}" in shared_prompt
-    # 反向断言：tar 不含宿主路径，shared 不含 daemon 本地路径
-    assert "/data/spec-workspaces/" not in tar_prompt
-    assert "~/.sillyhub/" not in shared_prompt
 
 
 # ── F 组：stage lease kind=interactive 契约守护（bfaa9256 起设计方向防回归） ────
@@ -567,7 +452,9 @@ async def test_f1_start_stage_dispatch_produces_interactive_lease(
     _patch_transport(monkeypatch, "tar")
     uid = await _create_user(db_session)
     rt = await _create_runtime(db_session, uid)
-    ws_id, change_id, _ = await _create_platform_workspace(db_session, runtime_id=rt.id)
+    ws_id, change_id, _ = await _create_platform_workspace(
+        db_session, runtime_id=rt.id, user_id=uid
+    )
 
     # 不 mock dispatch_to_daemon —— 让真实 INSERT 发生。但 mock ws_hub 的
     # send_wakeup（dispatch_to_daemon:298 _send_ws_wakeup 会查 ws_hub），

@@ -77,8 +77,6 @@ async def _seed_completed_gate_run(
             name="ws-e2e",
             slug=f"ws-e2e-{uuid.uuid4().hex[:6]}",
             root_path=f"/host-projects/e2e-{uuid.uuid4().hex[:8]}",
-            path_source="daemon-client",
-            daemon_runtime_id=rt.id,
             status="active",
         )
     )

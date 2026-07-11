@@ -152,8 +152,9 @@ class ScanDocsService:
         # 平台 specRoot 有镜像数据就读（任意 strategy：platform-managed/repo-native/repo-mirrored）。
         # 旧逻辑只 platform-managed 读 spec_root，导致 repo-native/repo-mirrored 读 root_path
         # （daemon-client 客户端路径容器内不可达）→ DOCS_DIR_MISSING → 扫描文档不显示。
+        # task-09（2026-07-10-remove-server-local-workspace-mode）：单一 daemon-client 后
+        # platform_managed 恒 True（扁平布局），删 is_daemon_client_path_source 判定。
         sillyspec_root = Path(workspace.root_path)
-        platform_managed = False
         try:
             from app.modules.spec_workspace.service import SpecWorkspaceService
 
@@ -161,11 +162,6 @@ class ScanDocsService:
             spec_ws = await spec_ws_svc.get(workspace.id)
             if spec_ws.spec_root:
                 sillyspec_root = Path(spec_ws.spec_root)
-                # D-005@v1：mode 看 path_source（正交于 root）。daemon-client 同步产出扁平
-                # 布局（无 .sillyspec 包裹）；server-local 平台镜像仍包裹。
-                from app.modules.workspace.service import is_daemon_client_path_source
-
-                platform_managed = is_daemon_client_path_source(workspace.path_source)
         except Exception:
             pass
 
@@ -173,10 +169,10 @@ class ScanDocsService:
 
         if not workspace.component_key:
             # Parent workspace — parse the entire docs tree recursively
-            result = self._parser.parse_docs_tree(sillyspec_root, platform_managed=platform_managed)
+            result = self._parser.parse_docs_tree(sillyspec_root, platform_managed=True)
         else:
             result = self._parser.parse_component(
-                sillyspec_root, workspace.component_key, platform_managed=platform_managed
+                sillyspec_root, workspace.component_key, platform_managed=True
             )
         stats["parsed"] = len([d for d in result.docs if d.exists])
 

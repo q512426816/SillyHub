@@ -47,7 +47,6 @@ async def _create_workspace(session: AsyncSession, owner_id: uuid.UUID) -> Works
         name="test-ws",
         slug=f"ws-{uuid.uuid4().hex[:8]}",
         root_path="/tmp/test-ws",
-        path_source="daemon-client",
     )
     session.add(ws)
     await session.commit()

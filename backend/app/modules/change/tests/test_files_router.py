@@ -20,9 +20,11 @@ def _copy_fixtures(src: Path, tmp_path: Path, name: str = "ws") -> Path:
 
 @pytest.fixture()
 async def workspace_with_changes(client, tmp_path: Path, auth_headers: dict[str, str]) -> dict:
+    """2026-07-10-remove-server-local-workspace-mode: fixture 落到服务器 spec_root
+    （扁平布局），backend 才能读 change 文件树。"""
+    from conftest import seed_spec_root
+
     root = _copy_fixtures(COMPONENT_FIXTURES, tmp_path)
-    sillyspec_changes = root / ".sillyspec" / "changes"
-    shutil.copytree(CHANGE_FIXTURES, sillyspec_changes)
     ws_resp = await client.post(
         "/api/workspaces",
         json={"name": "files-test", "root_path": str(root)},
@@ -30,6 +32,14 @@ async def workspace_with_changes(client, tmp_path: Path, auth_headers: dict[str,
     )
     assert ws_resp.status_code == 201, ws_resp.text
     ws_id = ws_resp.json()["id"]
+    # COMPONENT_FIXTURES（包裹式）展平到 spec_root
+    spec_root = seed_spec_root(ws_id, COMPONENT_FIXTURES)
+    # CHANGE_FIXTURES 覆盖到 spec_root/changes/
+    changes_root = Path(spec_root) / "changes"
+    changes_root.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(CHANGE_FIXTURES, changes_root, dirs_exist_ok=True)
+    # 手动 reparse（auto-reparse 时 spec_root 空）
+    await client.post(f"/api/workspaces/{ws_id}/changes/reparse", headers=auth_headers)
     # 取第一个 change id
     list_resp = await client.get(f"/api/workspaces/{ws_id}/changes", headers=auth_headers)
     assert list_resp.status_code == 200
@@ -101,38 +111,6 @@ async def test_read_file_traversal_rejected(
         assert resp.status_code == 404, f"{evil} should be rejected"
 
 
-async def test_write_file_server_local(
-    client, workspace_with_changes: dict, auth_headers: dict[str, str]
-) -> None:
-    """server-local 分支：POST 返 done + 内容可经 API 回读（写到平台镜像）。"""
-    ws_id = workspace_with_changes["ws_id"]
-    change_id = workspace_with_changes["change_id"]
-    resp = await client.post(
-        f"/api/workspaces/{ws_id}/changes/{change_id}/files/content",
-        json={"path": "MASTER.md", "content": "# Edited\n\n新内容"},
-        headers=auth_headers,
-    )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["status"] == "done"  # server-local 同步返 done
-    assert body["task_id"] is None
-    # 列文件确认 MASTER.md 在树中
-    list_resp = await client.get(
-        f"/api/workspaces/{ws_id}/changes/{change_id}/files",
-        headers=auth_headers,
-    )
-    paths = [it["path"] for it in list_resp.json()["items"]]
-    assert "MASTER.md" in paths
-    # 经 API 回读验证内容已落盘到镜像
-    read_resp = await client.get(
-        f"/api/workspaces/{ws_id}/changes/{change_id}/files/content",
-        params={"path": "MASTER.md"},
-        headers=auth_headers,
-    )
-    assert read_resp.status_code == 200
-    assert "新内容" in (read_resp.json()["content"] or ""), read_resp.json()
-
-
 async def test_write_file_traversal_rejected(
     client, workspace_with_changes: dict, auth_headers: dict[str, str]
 ) -> None:
@@ -175,13 +153,24 @@ async def test_enqueue_edit_write_merges_same_path(
     from app.modules.auth.model import User
     from app.modules.change.model import Change
     from app.modules.change.service import ChangeService
-    from app.modules.daemon.model import DaemonChangeWrite, DaemonRuntime
+    from app.modules.daemon.model import DaemonChangeWrite, DaemonInstance, DaemonRuntime
+    from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
 
-    # 构造 user + daemon runtime + daemon-client workspace + change
+    # 构造 user + daemon_instance + runtime + daemon-client workspace + binding + change
     user = (await db_session.execute(select(User).limit(1))).scalar_one()
+    di = DaemonInstance(
+        id=uuid.uuid4(),
+        user_id=user.id,
+        hostname="dc-host",
+        server_url="http://localhost:8000",
+        status="online",
+    )
+    db_session.add(di)
+    await db_session.flush()
     runtime = DaemonRuntime(
         id=uuid.uuid4(),
         user_id=user.id,
+        daemon_instance_id=di.id,
         provider="claude",
         status="online",
     )
@@ -193,10 +182,19 @@ async def test_enqueue_edit_write_merges_same_path(
         name="dc-ws",
         slug="dc-ws",
         root_path=str(tmp_path),
-        path_source="daemon-client",
-        daemon_runtime_id=runtime.id,
     )
     db_session.add(ws)
+    await db_session.flush()
+    db_session.add(
+        WorkspaceMemberRuntime(
+            workspace_id=ws.id,
+            user_id=user.id,
+            daemon_id=di.id,
+            runtime_id=runtime.id,
+            root_path=str(tmp_path),
+            path_source="daemon-client",
+        )
+    )
     change = Change(
         id=uuid.uuid4(),
         workspace_id=ws.id,

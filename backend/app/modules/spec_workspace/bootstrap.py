@@ -424,7 +424,6 @@ async def _execute_bootstrap_agent_run(
                 workspace,
                 code_root,
                 _delegate,
-                path_source=workspace.path_source,
             )
             if preflight_error is not None:
                 run.status = "failed"
@@ -483,9 +482,6 @@ async def _execute_bootstrap_agent_run(
                 spec_root=spec_root,
                 root_path=code_root,
                 run_id=run.id,
-                # 方案 A：按 workspace.path_source 决策 transport——bootstrap scan 入口与
-                # start_scan_dispatch 路径保持一致。workspace 在上方 line ~239 已加载并校验非 None。
-                path_source=workspace.path_source,
             )
             scan_provider = resolved_provider or "claude_code"
             now = datetime.now(UTC)
@@ -657,32 +653,17 @@ async def preflight_workspace_code_root(
     workspace,
     code_root: str,
     delegate,
-    *,
-    path_source: str = "server-local",
 ) -> str | None:
     """Validate code_root before bootstrap dispatch via :class:`HostFsDelegate`.
 
-    task-13：原实现调 ``resolve_root_path_for_server`` 在 daemon-client 模式返 None
-    隐式跳过校验（靠 daemon 侧自检兜底）。改为显式经 HostFsDelegate —— daemon-client
-    走 WS RPC 在宿主侧校验、server-local 走 delegate 本地容器分支（D-004 行为不变）。
+    task-13：经 HostFsDelegate（daemon-client 走 WS RPC 在宿主侧校验）。
 
-    校验语义不变（目录存在 / 非空 / 项目签名探测 / git safe.directory）：仅数据来源
-    从 ``Path.exists / .is_dir / .iterdir`` 换成 ``delegate.stat / list_dir``。git
-    safe.directory subprocess 仅 server-local 容器有意义，daemon-client 路径不在
-    backend 触发（由 daemon handler 侧自管）。
+    校验语义（目录存在 / 非空 / 项目签名探测）：数据来源从 ``Path.exists / .is_dir
+    / .iterdir`` 换成 ``delegate.stat / list_dir``。
 
     Returns an error string if preflight fails, or ``None`` if OK.
     """
-    from app.modules.workspace.service import resolve_root_path_for_server
-
-    server_path = resolve_root_path_for_server(code_root, path_source)
-    if server_path is None:
-        # daemon-client：路径在宿主机，backend 无法 resolve 容器路径。原实现跳过校验，
-        # 但 task-13 要求显式经 delegate RPC 校验。delegate 内部按 path_source 分流，
-        # daemon-client 走 WS RPC（D-006 RPC 失败 delegate 返语义安全值不抛，preflight
-        # 落到 "does not exist" 错误串，与 server-local 不存在路径行为一致）。
-        server_path = code_root
-    return await _run_preflight(workspace, server_path, delegate)
+    return await _run_preflight(workspace, code_root, delegate)
 
 
 async def _run_preflight(workspace, code_root: str, delegate) -> str | None:
@@ -706,11 +687,11 @@ async def _run_preflight(workspace, code_root: str, delegate) -> str | None:
         return any(sig in names for sig in _PROJECT_SIGNATURES)
 
     if await _has_signature(code_root):
-        # 根目录直接命中签名 → 落到下方 git safe.directory 收尾（与原行为一致）。
+        # 根目录直接命中签名 → 合法项目。
         pass
     else:
         # 检查一级子目录：命中任一则视为合法项目（原实现此处直接 return None，
-        # 不触发 git safe.directory；task-13 保留此早退语义零回归）。
+        # task-13 保留此早退语义零回归）。
         nested_hit = False
         for name in entries:
             if name in _PLATFORM_ENTRIES:
@@ -728,23 +709,6 @@ async def _run_preflight(workspace, code_root: str, delegate) -> str | None:
                 f"Found: {names}"
             )
         return None
-
-    # Ensure git safe.directory for bind-mounted host directories（仅 server-local 容器
-    # 有意义；daemon-client 路径不在 backend 触发，由 daemon handler 侧自管）。
-    from app.modules.workspace.service import is_daemon_client_path_source
-
-    if not is_daemon_client_path_source(getattr(workspace, "path_source", None)):
-        import subprocess
-
-        try:
-            subprocess.run(
-                ["git", "config", "--global", "--add", "safe.directory", code_root],
-                capture_output=True,
-                check=False,
-                timeout=5,
-            )
-        except Exception:
-            pass
 
     return None
 

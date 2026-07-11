@@ -106,11 +106,8 @@ class MissionExecutionService:
         branch = ws.default_branch if ws else None
         # 2026-06-29：Worker lease 透传 root_path（resolve_root_path_for_daemon
         # 容器→宿主机改写），让 daemon prepareWorkspace 在项目根执行（非空 mirror）。
-        root_path = (
-            resolve_root_path_for_daemon(ws.root_path, ws.path_source)
-            if ws and ws.root_path
-            else None
-        )
+        # D-007@2026-07-10：resolve_root_path_for_daemon 单参（path_source 列删除）。
+        root_path = resolve_root_path_for_daemon(ws.root_path) if ws and ws.root_path else None
         # provider must be a daemon-known name ("claude"); fall back when the
         # workspace hasn't configured default_agent — otherwise daemon rejects
         # with "unsupported provider: claude_code" (it falls back to agent_type).

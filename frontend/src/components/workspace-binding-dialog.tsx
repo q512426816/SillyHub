@@ -6,7 +6,7 @@
  * daemon 绑定弹窗 —— 容器化包裹现有 `WorkspaceAccessGuide`（首次绑定模式）。
  *
  * **CB-2 强制**：本组件只做 Radix `Dialog` 壳，内部渲染 `WorkspaceAccessGuide`，
- * 不重写 daemon 下拉 / root_path / path_source 表单，也不直接调 `upsertMyBinding`。
+ * 不重写 daemon 下拉 / root_path 表单，也不直接调 `upsertMyBinding`。
  * 表单逻辑全部由 AccessGuide 维护，避免双份维护。
  *
  * **CB-1 分工**：本弹窗只管「首次绑定」（列表页/顶栏切换器点击未绑定项时弹出）；

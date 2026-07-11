@@ -1,14 +1,14 @@
 """Patch service — applies unified diff patches to agent run worktrees.
 
 Extracted from DaemonService (2026-06-22-daemon-service-split task-03).
-Behavior is byte-for-byte identical to the original DaemonService._apply_patch_to_worktree
-/ _run_git_apply methods.
+
+task-08：工作区路径来源分流已删（FR-2），patch apply 唯一路径经
+``_apply_via_host_fs_delegate`` → HostFsDelegate.git_apply（WS RPC 委托 daemon
+在宿主 apply，D-005）。原容器内 ``git apply`` 分支 + 同名 git 辅助方法已删。
 """
 
 from __future__ import annotations
 
-import asyncio
-from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -20,7 +20,6 @@ from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentRun  # noqa: F401  (对齐原 import 风格)
 from app.modules.workspace.model import AgentRunWorkspace, Workspace
-from app.modules.workspace.service import is_daemon_client_path_source
 
 if TYPE_CHECKING:
     from app.modules.daemon.service import DaemonService
@@ -59,31 +58,26 @@ class PatchService:
         agent_run_id: UUID,
         patch_data: str,
         use_3way: bool = True,
-        path_source: str | None = None,
     ) -> None:
         """Apply a unified diff patch to the workspace associated with *agent_run_id*.
 
-        task-06（FR-03 / D-002@V1）：按 *path_source* 分流。
+        task-08（FR-2 / D-005）：工作区路径来源分流已删，唯一路径经
+        ``_apply_via_host_fs_delegate`` 委托 daemon 在宿主 apply（WS RPC）。
+        无容器内 ``git apply`` / 无 ``Path(workspace.root_path)`` 容器访问
+        （NFR-03，解 design §1 第 5 bug FileNotFoundError 500）。
 
-        * ``daemon-client``：经 ``self._facade.host_fs_delegate.git_apply`` 委托
-          daemon 在宿主 apply（WS RPC，D-005）。无容器内 ``git apply`` / 无
-          ``Path(workspace.root_path)`` 容器访问（NFR-03，解 design §1 第 5 bug
-          FileNotFoundError 500）。``skipped=True``（D-008 patch_id 去重 / daemon
-          ``--check`` 预检命中）直接 return；``ok=False`` 抛 :class:`PatchConflictError`
-          （零回归 lease/service.py PatchConflictError 捕获路径）。RPC 失败已被
-          HostFsDelegate 兜底为 ``{ok:False, conflict_detail:'rpc unavailable'}``
-          （task-04 D-006），按冲突处理——lease 路径 warn 不抛。
-        * ``server-local``（default，含 None / 未知值）：保留原 ``git apply --check``
-          → ``git apply`` / ``--3way`` 容器内流程（D-004 零回归）。
+        - ``skipped=True``（D-008 patch_id 去重 / daemon ``--check`` 预检命中）
+          直接 return。
+        - ``ok=False`` 抛 :class:`PatchConflictError`（零回归 lease/service.py
+          PatchConflictError 捕获路径）。RPC 失败已被 HostFsDelegate 兜底为
+          ``{ok:False, conflict_detail:'rpc unavailable'}``（task-04 D-006），
+          按冲突处理——lease 路径 warn 不抛。
 
-        Steps (server-local 分支保留原注释):
-        1. Resolve the workspace root_path via the AgentRunWorkspace M:N table.
-        2. Run ``git apply --check`` to validate the patch.
-        3. If the check fails and *use_3way* is True, retry with ``--3way``.
-        4. If 3way also fails raise :class:`PatchConflictError`.
-        5. If the check succeeds, apply the patch normally.
+        Steps:
+        1. Resolve the workspace via the AgentRunWorkspace M:N table.
+        2. Delegate to ``_apply_via_host_fs_delegate`` (WS RPC git_apply).
         """
-        # 1. Resolve workspace root_path（M:N，task-05 §12 核实结论）
+        # 1. Resolve workspace（M:N，task-05 §12 核实结论）
         ws_stmt = (
             select(AgentRunWorkspace.workspace_id)
             .where(col(AgentRunWorkspace.agent_run_id) == agent_run_id)
@@ -103,77 +97,14 @@ class PatchService:
                 details={"workspace_id": str(ws_row[0])},
             )
 
-        # task-06 分流：daemon-client 走 HostFsDelegate（WS RPC 委托 daemon 在宿主 apply）。
-        if is_daemon_client_path_source(path_source):
-            await self._apply_via_host_fs_delegate(
-                workspace=workspace,
-                agent_run_id=agent_run_id,
-                patch_data=patch_data,
-                use_3way=use_3way,
-            )
-            return
-
-        # server-local 分支（D-004）：保留原容器内 git apply 流程，零改动。
-        workdir = Path(workspace.root_path)
-
-        # 2. git apply --check
-        check_ok, check_stderr = await self._run_git_apply(
-            workdir=workdir,
-            args=["git", "apply", "--check"],
+        # 2. task-08：工作区路径来源分流已删，永远走 HostFsDelegate（WS RPC 委托
+        # daemon 在宿主 apply）。
+        await self._apply_via_host_fs_delegate(
+            workspace=workspace,
+            agent_run_id=agent_run_id,
             patch_data=patch_data,
+            use_3way=use_3way,
         )
-
-        if check_ok:
-            # 5. Apply normally
-            apply_ok, apply_stderr = await self._run_git_apply(
-                workdir=workdir,
-                args=["git", "apply"],
-                patch_data=patch_data,
-            )
-            if not apply_ok:
-                raise PatchApplyError(
-                    f"git apply failed after successful check: {apply_stderr}",
-                    details={
-                        "agent_run_id": str(agent_run_id),
-                        "workspace_id": str(workspace.id),
-                        "stderr": apply_stderr,
-                    },
-                )
-            return
-
-        # Check failed
-        if not use_3way:
-            raise PatchApplyError(
-                f"Patch does not apply cleanly: {check_stderr}",
-                details={
-                    "agent_run_id": str(agent_run_id),
-                    "workspace_id": str(workspace.id),
-                    "stderr": check_stderr,
-                },
-            )
-
-        # 3. Try --3way
-        log.info(
-            "daemon_patch_check_failed_trying_3way",
-            agent_run_id=str(agent_run_id),
-            check_stderr=check_stderr,
-        )
-        merge_ok, merge_stderr = await self._run_git_apply(
-            workdir=workdir,
-            args=["git", "apply", "--3way"],
-            patch_data=patch_data,
-        )
-        if not merge_ok:
-            # 4. Conflict
-            raise PatchConflictError(
-                f"Patch conflict (3way merge failed): {merge_stderr}",
-                details={
-                    "agent_run_id": str(agent_run_id),
-                    "workspace_id": str(workspace.id),
-                    "check_stderr": check_stderr,
-                    "merge_stderr": merge_stderr,
-                },
-            )
 
     async def _apply_via_host_fs_delegate(
         self,
@@ -248,22 +179,3 @@ class PatchService:
             )
 
         # ok=True：apply 成功，正常 return（lease.service.py:477 写 daemon_patch_applied log）。
-
-    @staticmethod
-    async def _run_git_apply(
-        *,
-        workdir: Path,
-        args: list[str],
-        patch_data: str,
-    ) -> tuple[bool, str]:
-        """Run a ``git apply`` sub-command and return ``(ok, stderr)``."""
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            cwd=str(workdir),
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr_bytes = await proc.communicate(input=patch_data.encode())
-        stderr = stderr_bytes.decode(errors="replace").strip()
-        return proc.returncode == 0, stderr
