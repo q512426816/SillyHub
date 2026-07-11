@@ -487,6 +487,114 @@ class TestCancelLease:
         await db_session.refresh(ar)
         assert ar.status == "completed"
 
+    @pytest.mark.asyncio
+    async def test_cancel_interactive_lease_sends_session_interrupt(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ql-20260712-001（P0-1）：interactive lease cancel → WS 下发 SESSION_INTERRUPT。
+
+        interactive lease 不进 daemon 心跳循环，必须经 WS Hub 显式中断，否则 SDK
+        进程在 daemon 内存里继续烧 token 成僵尸（lease/AgentRun 在 DB 已 killed）。
+        """
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease_id, agent_run_id, _claim_token = await _create_run_with_session(
+            db_session,
+            rt.id,
+            user_id,
+            change_id=None,
+            spec_strategy="platform-managed",
+            agent_session_id=None,
+        )
+
+        # capture WS send（_send_interactive_cancel 内 lazy import 拿 patched 函数）
+        sent: list[tuple] = []
+        from app.modules.daemon import ws_hub as ws_hub_mod
+
+        class _FakeHub:
+            async def send_session_control(self, daemon_id, msg_type, payload):
+                sent.append((daemon_id, msg_type, payload))
+                return True
+
+        monkeypatch.setattr(ws_hub_mod, "get_daemon_ws_hub", lambda: _FakeHub())
+
+        svc = DaemonLeaseService(db_session)
+        await svc.cancel_lease(agent_run_id)
+
+        # WS 发了 SESSION_INTERRUPT，payload 带 session/lease/runtime
+        assert len(sent) == 1
+        _daemon_id, msg_type, payload = sent[0]
+        assert msg_type == "daemon:session_interrupt"
+        assert payload["lease_id"] == str(lease_id)
+        assert "session_id" in payload
+        assert "runtime_id" in payload
+        # lease 仍正常收尾（WS best-effort，DB 已 cancelled）
+        lease = await db_session.get(DaemonTaskLease, lease_id)
+        assert lease is not None
+        assert lease.status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_cancel_batch_lease_does_not_send_ws(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ql-20260712-001（P0-1）：batch lease cancel 不发 WS（靠 daemon 心跳感知 cancelled）。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run_id = uuid.uuid4()
+        ar = AgentRun(id=agent_run_id, agent_type="claude_code", status="running")
+        db_session.add(ar)
+        await db_session.commit()
+
+        svc = DaemonLeaseService(db_session)
+        lease = await svc.claim_task(rt.id, agent_run_id)  # 默认 kind="batch"
+
+        sent: list[tuple] = []
+        from app.modules.daemon import ws_hub as ws_hub_mod
+
+        class _FakeHub:
+            async def send_session_control(self, daemon_id, msg_type, payload):
+                sent.append((daemon_id, msg_type, payload))
+                return True
+
+        monkeypatch.setattr(ws_hub_mod, "get_daemon_ws_hub", lambda: _FakeHub())
+
+        await svc.cancel_lease(agent_run_id)
+
+        assert sent == []  # batch 不走 WS（靠心跳 SIGTERM）
+        await db_session.refresh(lease)
+        assert lease.status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_cancel_interactive_ws_failure_does_not_block(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ql-20260712-001（P0-1）：WS 异常 → 不阻塞 cancel（DB 仍 cancelled/killed）。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease_id, agent_run_id, _claim_token = await _create_run_with_session(
+            db_session,
+            rt.id,
+            user_id,
+            change_id=None,
+            spec_strategy="platform-managed",
+            agent_session_id=None,
+        )
+
+        from app.modules.daemon import ws_hub as ws_hub_mod
+
+        class _BoomHub:
+            async def send_session_control(self, daemon_id, msg_type, payload):
+                raise RuntimeError("daemon unreachable")
+
+        monkeypatch.setattr(ws_hub_mod, "get_daemon_ws_hub", lambda: _BoomHub())
+
+        svc = DaemonLeaseService(db_session)
+        await svc.cancel_lease(agent_run_id)  # best-effort，不抛
+
+        lease = await db_session.get(DaemonTaskLease, lease_id)
+        assert lease is not None
+        assert lease.status == "cancelled"
+
 
 class TestValidateClaimToken:
     """Tests for DaemonLeaseService.validate_claim_token."""

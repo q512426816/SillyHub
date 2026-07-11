@@ -336,8 +336,14 @@ class DaemonLeaseService:
         # 立即标记给用户即时反馈，daemon complete_lease(cancelled) 会被 priority 守卫拦下。
         await self._mark_agent_run_killed_if_pending(agent_run_id, now)
 
-        # WS 取消信号桩 — Wave 2 实现真正的 WS Hub 后替换
-        self._ws_cancel_stub(lease)
+        # ql-20260712-001（审计 P0-1）：interactive lease 必须显式 WS 下发
+        # SESSION_INTERRUPT，否则 daemon 端 interactive session 不进 lease 心跳
+        # 循环（daemon.ts:3234 直接 return），SDK 进程会在 daemon 内存里继续烧
+        # token 成僵尸——lease/AgentRun 在 DB 已 killed 但 daemon 侧 query 仍在跑。
+        # batch lease 靠 daemon heartbeat 轮询感知 cancelled → SIGTERM，无需 WS。
+        # best-effort：WS 失败不阻塞 cancel（DB 已收尾，与 end_session 容错一致）。
+        if lease.kind == "interactive":
+            await self._send_interactive_cancel(lease)
 
     async def _mark_agent_run_killed_if_pending(
         self,
@@ -432,20 +438,74 @@ class DaemonLeaseService:
 
         return lease
 
-    @staticmethod
-    def _ws_cancel_stub(lease: DaemonTaskLease) -> None:
-        """WS 取消信号桩。
+    async def _send_interactive_cancel(self, lease: DaemonTaskLease) -> None:
+        """向 daemon 下发 SESSION_INTERRUPT 中止 interactive lease 的当前 turn。
 
-        Wave 2 实现 WS Hub 后替换为真正的 WebSocket 取消信号发送。
-        当前仅记录日志。
+        daemon interactive 路径不轮询 lease status（不像 batch 跑心跳循环），cancel
+        必须经 WS Hub 显式下发，否则 SDK 进程在 daemon 内存里继续跑成僵尸——
+        lease/AgentRun 在 DB 已 killed 但 daemon 侧 query 仍在执行。复用
+        ``interrupt_session``（session/service.py:707-784）同款通道：runtime_id →
+        daemon_instance_id（``_resolve_daemon_id_for_runtime``）→ ``send_session_control``。
+
+        best-effort：任何失败只告警，不阻塞 ``cancel_lease`` 主流程（DB 收尾已完成，
+        daemon 侧靠 idle expire 兜底，与 ``end_session`` 容错策略一致）。
         """
-        log.info(
-            "ws_cancel_signal_stub",
-            lease_id=str(lease.id),
-            agent_run_id=str(lease.agent_run_id),
-            runtime_id=str(lease.runtime_id),
-            note="Wave 2: replace with actual WS cancel signal",
-        )
+        try:
+            if lease.runtime_id is None:
+                return
+            # lazy import：避免与 session.service / ws_hub 的顶层循环 import
+            from app.modules.agent.model import AgentSession
+            from app.modules.daemon.protocol import DAEMON_MSG_SESSION_INTERRUPT
+            from app.modules.daemon.session.service import _resolve_daemon_id_for_runtime
+            from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+            # interactive lease 1:1 AgentSession（session.lease_id 反查）
+            agent_session = (
+                (
+                    await self._session.execute(
+                        select(AgentSession).where(AgentSession.lease_id == lease.id)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if agent_session is None:
+                # session 已 end / 不存在 → 无可中断对象，daemon 侧自然收敛
+                return
+
+            daemon_id = await _resolve_daemon_id_for_runtime(self._session, lease.runtime_id)
+            if daemon_id is None:
+                log.warning(
+                    "interactive_cancel_daemon_offline",
+                    lease_id=str(lease.id),
+                    runtime_id=str(lease.runtime_id),
+                )
+                return
+
+            hub = get_daemon_ws_hub()
+            delivered = await hub.send_session_control(
+                daemon_id,
+                DAEMON_MSG_SESSION_INTERRUPT,
+                {
+                    "session_id": str(agent_session.id),
+                    "lease_id": str(lease.id),
+                    "runtime_id": str(lease.runtime_id),
+                },
+            )
+            log.info(
+                "interactive_cancel_signal_sent",
+                lease_id=str(lease.id),
+                session_id=str(agent_session.id),
+                daemon_id=str(daemon_id),
+                delivered=delivered,
+            )
+        except Exception as exc:
+            # best-effort：WS 异常不影响 cancel 主流程（DB 已 killed）
+            log.warning(
+                "interactive_cancel_signal_failed",
+                lease_id=str(lease.id),
+                error=str(exc),
+            )
 
     @staticmethod
     def _timedelta_seconds(seconds: int):

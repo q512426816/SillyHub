@@ -83,18 +83,36 @@ class MissionControlService:
     async def cancel(self, mission: AgentMission) -> int:
         """Cancel a Mission: mark ``cancelled_at`` + kill active child Runs.
 
+        委托 ``DaemonLeaseService.cancel_lease`` 收尾每个 active Worker，确保 daemon
+        真收到取消信号（batch 走心跳 SIGTERM、interactive 走 WS SESSION_INTERRUPT）。
+        ql-20260712-001（审计 P0-2）：旧实现只 flip ``AgentRun.status`` 不通知 daemon，
+        worker 继续跑成僵尸 lease。``cancel_lease`` 内部已含"标记 killed + lease
+        cancelled + 发信号"，对无 active lease 的 run 也走 ``_mark_agent_run_killed_if_pending``
+        兜底标记，故覆盖旧手动 status flip 的全部场景。
+
         Returns the number of Runs killed.
         """
+        # lazy import：agent.control → daemon.lease_service，避免顶层循环 import
+        from app.modules.daemon.lease_service import DaemonLeaseService
+
         mission.cancelled_at = datetime.now(UTC)
-        killed = 0
-        now = datetime.now(UTC)
-        for r in await self.worker_runs(mission.id):
-            if r.status in _ACTIVE:
-                r.status = "killed"
-                r.finished_at = now
-                r.exit_code = -1
-                killed += 1
         self._session.add(mission)
         await self._session.commit()
+
+        lease_svc = DaemonLeaseService(self._session)
+        killed = 0
+        for r in await self.worker_runs(mission.id):
+            if r.status not in _ACTIVE:
+                continue
+            try:
+                await lease_svc.cancel_lease(r.id)
+                killed += 1
+            except Exception as exc:
+                log.warning(
+                    "mission_cancel_worker_failed",
+                    mission_id=str(mission.id),
+                    run_id=str(r.id),
+                    error=str(exc),
+                )
         log.info("mission_cancelled", mission_id=str(mission.id), killed=killed)
         return killed

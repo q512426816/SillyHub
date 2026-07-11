@@ -106,6 +106,39 @@ async def test_cancel_kills_active_and_marks_mission(db_session: AsyncSession) -
     assert r3.status == "completed"  # untouched
 
 
+async def test_cancel_delegates_to_cancel_lease(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ql-20260712-001（P0-2）：cancel 对每个 active worker 委托 cancel_lease。
+
+    旧实现只 flip status 不通知 daemon（僵尸 lease）；新实现必须调 cancel_lease
+    让 daemon 真收到取消信号（batch 心跳 SIGTERM / interactive WS INTERRUPT）。
+    """
+    mission, _ = await _setup(db_session)
+    r1 = await _run(db_session, mission_id=mission.id, status="running")
+    r2 = await _run(db_session, mission_id=mission.id, status="pending")
+    r3 = await _run(db_session, mission_id=mission.id, status="completed")
+
+    from app.modules.daemon import lease_service as lease_svc_mod
+
+    called_run_ids: list[uuid.UUID] = []
+    original_cancel = lease_svc_mod.DaemonLeaseService.cancel_lease
+
+    async def spy_cancel(self, agent_run_id):
+        called_run_ids.append(agent_run_id)
+        return await original_cancel(self, agent_run_id)
+
+    monkeypatch.setattr(lease_svc_mod.DaemonLeaseService, "cancel_lease", spy_cancel)
+
+    svc = MissionControlService(db_session)
+    killed = await svc.cancel(mission)
+
+    assert killed == 2
+    # 对 r1（running）和 r2（pending）调了 cancel_lease；r3（completed）跳过
+    assert set(called_run_ids) == {r1.id, r2.id}
+    assert r3.id not in called_run_ids  # completed worker 不委托 cancel_lease
+
+
 async def test_can_dispatch_blocked_after_cancel(db_session: AsyncSession) -> None:
     mission, _ = await _setup(db_session)
     mission.cancelled_at = datetime.now(UTC)
