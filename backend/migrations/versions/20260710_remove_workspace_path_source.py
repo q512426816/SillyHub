@@ -1,6 +1,6 @@
-"""20260710_remove_workspace_path_source
+"""20260710_rm_path_source
 
-Revision ID: 20260710_remove_workspace_path_source
+Revision ID: 20260710_rm_path_source
 Revises: 7c77e09b84e1
 Create Date: 2026-07-11 00:05:00.000000
 
@@ -47,7 +47,7 @@ from typing import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20260710_remove_workspace_path_source"
+revision: str = "20260710_rm_path_source"
 down_revision: str | None = "7c77e09b84e1"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
