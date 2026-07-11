@@ -19,14 +19,20 @@ def _copy_fixtures(src: Path, tmp_path: Path, name: str = "ws") -> Path:
 
 @pytest.fixture()
 async def workspace_with_changes(client, tmp_path: Path, auth_headers: dict[str, str]) -> dict:
-    """Create a workspace with components and change fixtures."""
+    """Create a workspace with components and change fixtures.
+
+    2026-07-10-remove-server-local-workspace-mode: backend 读不到 client
+    root_path（daemon-client 唯一模式），fixture 文件必须落到服务器 spec_root
+    （``{spec_data_root}/{ws_id}/``，扁平布局），reparse 才能解析出 changes。
+    """
+    import shutil
+    from pathlib import Path
+
+    from app.core.config import get_settings
+    from conftest import seed_spec_root
+
     root = _copy_fixtures(COMPONENT_FIXTURES, tmp_path)
 
-    # Add change fixtures
-    sillyspec_changes = root / ".sillyspec" / "changes"
-    shutil.copytree(CHANGE_FIXTURES, sillyspec_changes)
-
-    # Create workspace
     ws_resp = await client.post(
         "/api/workspaces",
         json={"name": "change-test", "root_path": str(root)},
@@ -34,6 +40,19 @@ async def workspace_with_changes(client, tmp_path: Path, auth_headers: dict[str,
     )
     assert ws_resp.status_code == 201, ws_resp.text
     ws_id = ws_resp.json()["id"]
+
+    # COMPONENT_FIXTURES（包裹式 .sillyspec/）展平到 spec_root
+    seed_spec_root(ws_id, COMPONENT_FIXTURES)
+    # CHANGE_FIXTURES 是裸 changes 树，直接覆盖到 spec_root/changes/
+    spec_changes = Path(get_settings().spec_data_root) / ws_id / "changes"
+    spec_changes.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(CHANGE_FIXTURES, spec_changes, dirs_exist_ok=True)
+
+    # 手动 reparse（create 时 spec_root 空，auto-reparse 无产出）
+    await client.post(
+        f"/api/workspaces/{ws_id}/changes/reparse",
+        headers=auth_headers,
+    )
 
     return {"ws_id": ws_id}
 

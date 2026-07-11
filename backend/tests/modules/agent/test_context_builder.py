@@ -144,64 +144,20 @@ async def test_build_scan_bundle_no_referenced_workspaces(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("transport", ["shared", "tar"])
 @pytest.mark.asyncio
-async def test_build_scan_bundle_prompt_spec_root_by_transport(
-    mock_session, mock_workspace, sample_run_id, monkeypatch, transport
-):
-    """step_prompt 的 --spec-root 按 transport 分支：
-    shared → settings.spec_data_host_dir/{ws_id}；
-    tar    → ~/.sillyhub/daemon/specs/{ws_id}。
-
-    覆盖 D-006@v1：改测试不改代码（build_scan_bundle 双轨设计：prompt 用宿主路径，
-    bundle.spec_root/platform_metadata.spec_root 用入参容器路径）。
-
-    旧断言 `--spec-root /data/specs/ws-abc`（入参硬编码）过时——生产代码 prompt
-    不使用入参 spec_root，而是经 resolve_prompt_spec_root(transport, ws_id, settings)
-    推导宿主路径。ws_id 是真实 UUID（mock_workspace.id = uuid.uuid4()），硬编码
-    ws-abc 永远不匹配，旧断言必然失败。"""
-    mock_session.get = AsyncMock(return_value=mock_workspace)
-    ws_id = str(mock_workspace.id)
-
-    # mock settings：固定 spec_transport + spec_data_host_dir，消除环境依赖
-    _mock_settings(monkeypatch, transport=transport, spec_data_host_dir="/test/host/specs")
-
-    bundle = await build_scan_bundle(
-        session=mock_session,
-        workspace_id=mock_workspace.id,
-        spec_root="/data/specs/ws-abc",  # 入参（容器路径，仅 bundle 字段用）
-        root_path="/home/user/project",
-        run_id=sample_run_id,
-    )
-
-    if transport == "shared":
-        expected_spec_root = f"/test/host/specs/{ws_id}"
-    else:  # tar
-        expected_spec_root = f"~/.sillyhub/daemon/specs/{ws_id}"
-    assert f"--spec-root {expected_spec_root}" in bundle.step_prompt
-
-    # runtime_root 按 host_spec_root/runtime 推导（context_builder.py:518）
-    expected_runtime_root = f"{expected_spec_root}/runtime"
-    assert f"--runtime-root {expected_runtime_root}" in bundle.step_prompt
-
-    # D-006 双轨：bundle.spec_root / metadata.spec_root 仍用入参容器路径
-    assert bundle.spec_root == "/data/specs/ws-abc"
-    assert bundle.platform_metadata["spec_root"] == "/data/specs/ws-abc"
-
-
-@pytest.mark.asyncio
-async def test_build_scan_bundle_path_source_daemon_client_locks_tar(
+async def test_build_scan_bundle_step_prompt_uses_daemon_client_spec_root(
     mock_session, mock_workspace, sample_run_id, monkeypatch
 ):
-    """方案 A：path_source='daemon-client' 锁死 tar，忽略全局 SPEC_TRANSPORT。
+    """D-007@2026-07-10：单一 daemon-client 模式后 step_prompt 的 --spec-root 恒为
+    daemon 本地约定路径 ``~/.sillyhub/daemon/specs/{ws_id}``。
 
-    即便全局 settings.spec_transport='shared'，path_source='daemon-client' 优先 →
-    transport='tar' → prompt 含 daemon 本地路径 ~/.sillyhub/daemon/specs/{ws}。
-    守护 per-workspace 决策覆盖全局 SPEC_TRANSPORT 的核心规则。
+    ``resolve_prompt_spec_root`` 不再按 transport/path_source 分流（task-08/09 删）。
+    即便全局 settings.spec_transport 残留 'shared'，prompt 仍只含 daemon 路径，
+    宿主 ``spec_data_host_dir`` 路径不应出现。
     """
     mock_session.get = AsyncMock(return_value=mock_workspace)
     ws_id = str(mock_workspace.id)
-    # 全局设 shared，path_source='daemon-client' 应覆盖为 tar
+    # 全局 settings 残留 shared，但单一 daemon-client 模式应忽略它
     _mock_settings(monkeypatch, transport="shared", spec_data_host_dir="/test/host/specs")
 
     bundle = await build_scan_bundle(
@@ -210,42 +166,12 @@ async def test_build_scan_bundle_path_source_daemon_client_locks_tar(
         spec_root="/data/specs/ws-abc",
         root_path="/home/user/project",
         run_id=sample_run_id,
-        path_source="daemon-client",
     )
 
     expected_spec_root = f"~/.sillyhub/daemon/specs/{ws_id}"
     assert f"--spec-root {expected_spec_root}" in bundle.step_prompt
-    # 守护：shared 宿主路径不应出现（tar 锁死，未被全局 shared 污染）
+    # 守护：shared 宿主路径不应出现（daemon-client 单一路径未被污染）
     assert f"/test/host/specs/{ws_id}" not in bundle.step_prompt
-
-
-@pytest.mark.asyncio
-async def test_build_scan_bundle_path_source_server_local_locks_shared(
-    mock_session, mock_workspace, sample_run_id, monkeypatch
-):
-    """方案 A：path_source='server-local' 锁死 shared，忽略全局 SPEC_TRANSPORT。
-
-    即便全局 settings.spec_transport='tar'，path_source='server-local' 优先 →
-    transport='shared' → prompt 含宿主路径。守护 server-local 锁死 shared、忽略全局。
-    """
-    mock_session.get = AsyncMock(return_value=mock_workspace)
-    ws_id = str(mock_workspace.id)
-    # 全局设 tar，path_source='server-local' 应覆盖为 shared
-    _mock_settings(monkeypatch, transport="tar", spec_data_host_dir="/test/host/specs")
-
-    bundle = await build_scan_bundle(
-        session=mock_session,
-        workspace_id=mock_workspace.id,
-        spec_root="/data/specs/ws-abc",
-        root_path="/home/user/project",
-        run_id=sample_run_id,
-        path_source="server-local",
-    )
-
-    expected_spec_root = f"/test/host/specs/{ws_id}"
-    assert f"--spec-root {expected_spec_root}" in bundle.step_prompt
-    # 守护：tar daemon 本地路径不应出现（shared 锁死，未被全局 tar 污染）
-    assert f"~/.sillyhub/daemon/specs/{ws_id}" not in bundle.step_prompt
 
 
 @pytest.mark.asyncio
@@ -309,7 +235,9 @@ async def test_build_scan_bundle_prompt_contains_full_scan_command(
 
     prompt = bundle.step_prompt
     ws_id = str(mock_workspace.id)
-    host_spec_root = f"/test/host/specs/{ws_id}"
+    # D-007@2026-07-10：单一 daemon-client 模式后 prompt 的 --spec-root 恒为
+    # daemon 本地约定路径 ~/.sillyhub/daemon/specs/{ws}，与 settings.spec_transport 无关。
+    host_spec_root = f"~/.sillyhub/daemon/specs/{ws_id}"
     # task-08: 平台模式跳过 init —— 不应出现 init 命令行（仅提示性文本里提及 init）
     assert "sillyspec init --dir" not in prompt
     assert "第 1 步 — 初始化" not in prompt
@@ -521,15 +449,34 @@ async def test_build_scan_bundle_done_command_has_no_platform_params(
 
 
 def _run_preflight_local(code_root):
-    """task-13 后 _run_preflight 改 async+(workspace,code_root,delegate)，server-local 测试经本地 delegate 包装。"""
+    """task-13 后 _run_preflight 改 async+(workspace,code_root,delegate)，本地 preflight
+    测试用 mock delegate 包装真实本地文件系统（避免 HostFsDelegate 强制 ws_rpc 注入）。"""
     import asyncio
+    import os
+    from pathlib import Path
     from types import SimpleNamespace
+    from unittest.mock import AsyncMock
 
-    from app.modules.daemon.host_fs import HostFsDelegate
     from app.modules.spec_workspace.bootstrap import _run_preflight
 
-    workspace = SimpleNamespace(path_source="server-local")
-    delegate = HostFsDelegate(session=None, ws_hub=None)
+    # workspace 仅作 delegate RPC 载体（D-007 单一 daemon-client 后 path_source 字段已删）。
+    workspace = SimpleNamespace()
+
+    # 用本地文件系统模拟 delegate.stat / list_dir（preflight 纯本地校验，
+    # 不依赖 daemon RPC——生产代码经 delegate 委托，测试用真 stat/list_dir 兜底）。
+    delegate = SimpleNamespace()
+    delegate.stat = AsyncMock(
+        side_effect=lambda ws, path: {
+            "exists": Path(path).exists(),
+            "is_dir": Path(path).is_dir() if Path(path).exists() else False,
+            "size": Path(path).stat().st_size
+            if Path(path).exists() and Path(path).is_file()
+            else 0,
+        }
+    )
+    delegate.list_dir = AsyncMock(
+        side_effect=lambda ws, path: os.listdir(path) if Path(path).is_dir() else []
+    )
     return asyncio.run(_run_preflight(workspace, str(code_root), delegate))
 
 

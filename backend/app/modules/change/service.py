@@ -75,9 +75,9 @@ class ChangeService:
         """解析单个变更目录的绝对路径（task-01 / D-006@v1）。
 
         ``change.path`` 是 reparse 时存的相对 sillyspec_root 路径（已含 archive/
-        段与 .sillyspec 包裹层，对齐 parser rel_prefix），故直接 ``sillyspec_root
-        / change.path`` 即可，覆盖 active/archive × server-local/daemon-client
-        全组合。sillyspec_root 解析对齐 ``reparse``（service.py:696-708）。
+        段与扁平布局前缀，对齐 parser rel_prefix），故直接 ``sillyspec_root
+        / change.path`` 即可，覆盖 active/archive 全组合。sillyspec_root 解析
+        对齐 ``reparse``（service.py:696-708）。
         """
         sillyspec_root = Path(workspace.root_path)
         try:
@@ -302,18 +302,13 @@ class ChangeService:
     ) -> dict:
         """编辑保存（task-05 / FR-05/06 / D-001/002/006）。
 
-        path_source 分流：
-        - server-local：write_text 到 ``{root_path}/.sillyspec/changes/{key}/{path}``，
-          resync，返 ``{status:"done"}``。
-        - daemon-client：后端直写平台镜像（spike-01 验证可写）+ 建/合并同
-          change_key+path 的 pending DaemonChangeWrite 行（kind=edit，D-002 合并），
-          **不 await**（D-001 离线续传），resync，返 ``{status:"pending", task_id}``。
+        task-08：工作区路径来源分流已删（FR-2），唯一路径直写平台镜像 + 建/合并同
+        change_key+path 的 pending DaemonChangeWrite 行（kind=edit，D-002 合并），
+        **不 await**（D-001 离线续传），resync，返 ``{status:"pending", task_id}``。
+        runtime 由 ``_enqueue_edit_write`` 内部 ``resolve_runtime_for_writeback``
+        现算（D-001@v1），失败抛 ``DaemonClientNoActiveSession``。
 
         path resolve 必须落变更目录内（守卫，D-004）；content ≤ 1MB。
-
-        D-001@v1（2026-07-05-daemon-client-change-binding-fix）：补 ``user_id`` 参数，
-          daemon-client 分流入队时由 ``resolve_runtime_for_writeback`` 现算 runtime
-          （替代旧直读 ``workspace.daemon_runtime_id``，新链路该列 NULL）。
         """
         if len(content.encode("utf-8")) > MAX_CONTENT_BYTES:
             raise ChangeDocNotFound(
@@ -332,30 +327,26 @@ class ChangeService:
                 details={"path": rel_path},
             ) from None
 
-        from app.modules.workspace.service import is_daemon_client_path_source
-
-        # 写盘（server-local 直写目标 / daemon-client 直写镜像，spike-01 验证可写）
+        # 写盘（直写镜像，spike-01 验证可写）
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(content, encoding="utf-8")
 
-        # 同文件 pending 合并 + 离线续传 outbox（仅 daemon-client）
-        task_id: uuid.UUID | None = None
-        if is_daemon_client_path_source(workspace.path_source):
-            task_id = await self._enqueue_edit_write(
-                workspace=workspace,
-                change=change,
-                rel_path=rel_path,
-                content=content,
-                user_id=user_id,
-            )
+        # 同文件 pending 合并 + 离线续传 outbox
+        task_id = await self._enqueue_edit_write(
+            workspace=workspace,
+            change=change,
+            rel_path=rel_path,
+            content=content,
+            user_id=user_id,
+        )
 
-        # resync（镜像/目标已新鲜，POST 时即刷新，D-005）
+        # resync（镜像已新鲜，POST 时即刷新，D-005）
         try:
             await self._resync_change_docs(workspace_id, change.id)
         except Exception as exc:
             log.warning("change.write_file_resync_failed", change_id=str(change.id), error=str(exc))
 
-        return {"status": "pending" if task_id else "done", "task_id": task_id}
+        return {"status": "pending", "task_id": task_id}
 
     async def _enqueue_edit_write(
         self,
@@ -372,8 +363,8 @@ class ChangeService:
         daemon runChangeWrite 通用消费）。命中 pending 行则 UPDATE content（last-write-wins）。
 
         D-001@v1（2026-07-05-daemon-client-change-binding-fix）：runtime_id 改由
-        ``resolve_runtime_for_writeback`` 现算（替代旧直读 ``workspace.daemon_runtime_id``），
-        需 ``user_id`` 校验 daemon 归属。失败抛 ``DaemonClientNoActiveSession``。
+        ``resolve_runtime_for_writeback`` 现算（per-member binding 解析），需
+        ``user_id`` 校验 daemon 归属。失败抛 ``DaemonClientNoActiveSession``。
         """
         from app.modules.daemon.model import DaemonChangeWrite
         from app.modules.workspace.member_runtimes.resolver import (
@@ -958,12 +949,10 @@ class ChangeService:
                 error=str(exc),
             )
 
-        from app.modules.workspace.service import is_daemon_client_path_source
-
-        # daemon-client 同步产出扁平布局（无 .sillyspec 包裹），parser 需 platform_managed
-        # 才能读到 specRoot/changes/；server-local 仍包裹（.sillyspec/changes/）
-        platform_managed = is_daemon_client_path_source(workspace.path_source)
-        result = self._parser.parse_workspace(sillyspec_root, platform_managed=platform_managed)
+        # task-08：工作区路径来源分流已删（FR-2）。daemon-client 同步产出扁平布局
+        # （无 .sillyspec 包裹），parser 需 platform_managed=True 才能读到
+        # specRoot/changes/。
+        result = self._parser.parse_workspace(sillyspec_root, platform_managed=True)
         stats = {"parsed": 0, "created": 0, "updated": 0, "deleted": 0, "renamed": 0}
 
         # Fetch existing changes
@@ -1138,6 +1127,9 @@ class ChangeService:
         *,
         workspace_id: uuid.UUID,
     ) -> Change:
+        # ql-20260702-001：同步推断的 current_stage（fallback；dispatch 读
+        # sillyspec.db 时覆盖）。新建行也必须存，否则 manual_dispatch 读
+        # ``change.current_stage or "draft"`` 永远落到 draft（无 agent config）。
         return Change(
             id=uuid.uuid4(),
             workspace_id=workspace_id,
@@ -1148,6 +1140,7 @@ class ChangeService:
             path=parsed.path,
             affected_components=parsed.affected_components,
             change_type=parsed.change_type,
+            current_stage=parsed.current_stage,
             owner_id=None,
         )
 

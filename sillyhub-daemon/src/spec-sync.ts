@@ -90,7 +90,7 @@ export async function pullSpecBundle(
   wsId: string | undefined,
   opts: PullSpecBundleOptions = {},
 ): Promise<string | null> {
-  if (!wsId) return null; // server-local / 非 daemon-client
+  if (!wsId) return null; // 防御兜底：quick-chat / 共享 session 等无 workspace 场景（2026-07-10-remove-server-local-workspace-mode 后 wsId 永远非空，server-local 已移除）
   if (opts.existingSpecRoot) return null; // 防御：execution-context 已带
 
   // resolveSpecDir 先做 wsId 路径分隔符校验（§5 E-07），抛错即被调用方 catch。
@@ -709,7 +709,7 @@ export async function readLocalSpecVersion(specCacheRoot: string | undefined): P
  * 比对本地 spec_version 与 lease 下发的 latest_spec_version，决定是否刷新缓存（D-010）。
  *
  * 决策表：
- *   - leaseVersion 缺失（undefined/null）→ 返回 false（旧 lease / server-local 未透传
+ *   - leaseVersion 缺失（undefined/null）→ 返回 false（旧 lease 未透传
  *     latest_spec_version，保持旧行为：由调用点 existingSpecRoot 等既有逻辑决定是否 pull，
  *     不强制刷新，避免对未升级 backend 的回归）。
  *   - leaseVersion 存在但 localVersion 缺失（null：首次初始化前 / platform.json 未写）→

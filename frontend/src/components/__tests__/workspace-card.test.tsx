@@ -3,9 +3,9 @@
 // 覆盖工作区卡片 UI 优化点（变更 2026-07-02 quick）：
 //   - 别名优先作标题，原名同行补显；无别名回退 name 且不显示「原名」；
 //   - 创建于与最后扫描合并到同一行容器（不再各占一行）；
-//   - daemon-client 路径来源去重：卡片头 Badge 已移除，值只在卡片体出现 1 次；
 //   - owner=null 不崩；owner.display_name 优先作为负责人显示名；
 //   - 详情/关系为带 href 的链接，复用 buttonVariants 统一按钮风格。
+// 2026-07-10 remove-server-local-workspace-mode：删 path_source 去重 case（字段已从 Workspace 删除）。
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
@@ -20,8 +20,6 @@ function mkWorkspace(o: Partial<Workspace> & { id: string }): Workspace {
     display_alias: o.display_alias ?? null,
     slug: o.slug ?? "my-project",
     root_path: o.root_path ?? "/srv/my-project",
-    path_source: o.path_source ?? "server-local",
-    daemon_runtime_id: o.daemon_runtime_id ?? null,
     status: o.status ?? "active",
     component_key: o.component_key ?? null,
     type: o.type ?? null,
@@ -88,35 +86,6 @@ describe("WorkspaceCard 结构 (ql-20260702)", () => {
     expect(created.parentElement).toBe(scanned.parentElement);
   });
 
-  it("daemon-client：路径来源值只在卡片体出现一次（卡片头去重）", () => {
-    render(
-      <WorkspaceCard
-        workspace={mkWorkspace({
-          id: "ws-4",
-          path_source: "daemon-client",
-          daemon_runtime_id: "rt-1",
-        })}
-        boundRuntime={null}
-        onChanged={() => {}}
-        onEditAlias={() => {}}
-      />,
-    );
-    // 卡片头的路径来源 Badge 已移除 → 「本机守护进程路径」整卡只 1 处。
-    expect(screen.getAllByText("本机守护进程路径")).toHaveLength(1);
-    expect(screen.getAllByText("路径来源")).toHaveLength(1);
-  });
-
-  it("server-local：不渲染路径来源标签", () => {
-    render(
-      <WorkspaceCard
-        workspace={mkWorkspace({ id: "ws-5", path_source: "server-local" })}
-        onChanged={() => {}}
-        onEditAlias={() => {}}
-      />,
-    );
-    expect(screen.queryByText("路径来源")).toBeNull();
-  });
-
   it("owner=null 不崩，且不渲染负责人行", () => {
     render(
       <WorkspaceCard
@@ -167,8 +136,6 @@ describe("WorkspaceCard 结构 (ql-20260702)", () => {
       <WorkspaceCard
         workspace={mkWorkspace({
           id: "ws-9",
-          path_source: "daemon-client",
-          daemon_runtime_id: null,
         })}
         boundDaemon={{
           id: "inst-1",

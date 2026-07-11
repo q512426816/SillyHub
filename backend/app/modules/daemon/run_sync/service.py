@@ -1311,8 +1311,8 @@ class RunSyncService:
         root_path = getattr(workspace, "root_path", None)
         if not root_path:
             return None
-        # repo-native / server-local：cwd 用 workspace.root_path（sillyspec 找
-        # <root>/.sillyspec）。返回根路径即可，gate 自己解析 .sillyspec。
+        # 单一 daemon-client 模式（D-007@2026-07-10）：cwd 用 workspace.root_path
+        # （sillyspec 找 <root>/.sillyspec）。返回根路径即可，gate 自己解析 .sillyspec。
         return str(root_path)
 
     # ── private helpers（随主方法归位，design §6 / §10 R6） ───────────────
@@ -1320,12 +1320,12 @@ class RunSyncService:
     async def _trigger_stage_completion_callback(
         self,
         agent_run_id: uuid.UUID,
-        path_source: str | None = None,
     ) -> None:
         """A2: stage dispatch 的 AgentRun 完成后同步 sillyspec.db 并推进下一阶段。
 
-        task-05：path_source 由 complete_lease 入口反查后透传（default=None 向后
-        兼容）；回调体分流归 task-07，本方法实现体暂不动。
+        task-09（2026-07-10-remove-server-local-workspace-mode）：单一 daemon-client
+        后 path_source 形参已删，sync_stage_status 内部经 HostFsDelegate RPC 读
+        sillyspec.db（D-004 / D-009），无 path_source 分流。
 
         仅对 stage dispatch（change_id 非空、status=completed）生效；scan
         （change_id=None）由 spec sync + scan_docs.reparse 单独回流，不走这里。
@@ -1352,7 +1352,6 @@ class RunSyncService:
             self._session,
             agent_run.change_id,
             agent_run.id,
-            path_source=path_source,
         )
         if not sync_result.synced:
             log.info(
@@ -1381,12 +1380,12 @@ class RunSyncService:
     async def _run_post_scan_validation(
         self,
         lease: DaemonTaskLease,
-        path_source: str | None = None,
     ) -> None:
         """C: scan 完成后跑平台侧结构化校验（PostScanValidator）。
 
-        task-05：path_source 由 complete_lease 入口反查后透传（default=None 向后
-        兼容）；回调体分流归 task-08，本方法实现体暂不动。
+        task-09（2026-07-10-remove-server-local-workspace-mode）：单一 daemon-client
+        后 path_source 分流整段删除，delegate + workspace 无条件解析。path_source
+        形参同步清除（complete_lease 调用方 task-09 已改无参透传）。
 
         消费 sillyspec 平台模式产出的结构化回执：manifest.json / platform-scan.json
         / postcheck-result / 源码污染检测 / 7 份 scan 文档齐全性。仅对 scan run
@@ -1425,12 +1424,14 @@ class RunSyncService:
             )
             return
 
-        # task-07：daemon-client 分支经 HostFsDelegate RPC 走原语（D-009 方案 B）；
-        # server-local（含 path_source=None 兜底）走原生 subprocess/shutil 路径
-        # （NFR-02 零回归）。delegate 由 task-06 lazy property 注入。
+        # task-09（2026-07-10-remove-server-local-workspace-mode）：单一 daemon-client
+        # 后 path_source 分流整段删除（server-local 路径已废）。delegate + workspace
+        # 无条件解析（复用 task-05 的 lazy facade + _resolve_lease_workspace），异常仍
+        # 按 warning 降级到 delegate=None（NFR-02 零回归）。delegate 由 task-06 lazy
+        # property 注入。
         delegate = None
         workspace = None
-        if path_source == "daemon-client" and self._facade is not None:
+        if self._facade is not None:
             try:
                 delegate = self._facade.host_fs_delegate
                 workspace = await self._resolve_lease_workspace(lease)
@@ -1449,7 +1450,6 @@ class RunSyncService:
             runtime_root,
             str(agent_run.id),
             delegate=delegate,
-            path_source=path_source or "server-local",
             workspace=workspace,
         )
         result = await validator.validate(agent_run.output_redacted or "", agent_run.exit_code or 0)
@@ -1482,11 +1482,11 @@ class RunSyncService:
         )
 
     async def _resolve_lease_workspace(self, lease: DaemonTaskLease):
-        """反查 lease 关联 workspace（task-07 daemon-client 分支专用）。
+        """反查 lease 关联 workspace（task-09 单一 daemon-client 模式）。
 
         链路同 lease/service.py:_resolve_lease_workspace_path_source：经 M:N
         关联表 AgentRunWorkspace。失败返回 None（不抛，caller 已 try/except
-        兜底降级 server-local）。
+        兜底降级到 delegate=None，NFR-02 零回归）。
         """
         from sqlmodel import col
 

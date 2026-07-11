@@ -84,10 +84,10 @@ class SpecPathResolver:
     def __init__(self, workspace_root: str | Path, *, platform_managed: bool = False) -> None:
         """Resolve SillySpec paths relative to *workspace_root*.
 
-        ``platform_managed``（D-005@v1，daemon-client / 平台托管场景）为 True 时，
+        ``platform_managed``（D-005@v1，平台托管场景）为 True 时，
         ``workspace_root`` 本身就是 ``.sillyspec`` 内容根（扁平布局：``docs/``、
         ``changes/``、``.runtime/`` 直接在其下），所有路径方法省略 ``.sillyspec`` 段。
-        默认 False（repo-native / server-local：``<root>/.sillyspec/...`` 包裹语义），
+        默认 False（repo-native：``<root>/.sillyspec/...`` 包裹语义），
         向后兼容现有调用方。
         """
         self.root = Path(workspace_root)
@@ -101,7 +101,7 @@ class SpecPathResolver:
 
         鸭子类型：只要对象有 ``spec_root`` 与 ``strategy`` 属性即可，不硬依赖
         ``SpecWorkspace`` ORM 模型（避免 core → modules 反向 import）。
-        ``strategy == "platform-managed"`` → 扁平；其余（repo-native / server-local）
+        ``strategy == "platform-managed"`` → 扁平；其余（repo-native）
         → ``.sillyspec`` 包裹。
         """
         return cls(

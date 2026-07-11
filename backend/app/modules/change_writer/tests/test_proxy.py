@@ -22,12 +22,24 @@ def _auth(token: str) -> dict[str, str]:
 
 
 async def _setup_daemon_client_workspace(db_session, *, online: bool = True) -> dict:
-    """Create a daemon-client workspace + bound runtime + admin user + token."""
+    """Create a daemon-client workspace + bound runtime + admin user + token.
+
+    2026-07-10-remove-server-local-workspace-mode：Workspace 模型删了
+    ``daemon_runtime_id`` / ``path_source`` 列，绑定真相源改走
+    ``WorkspaceMemberRuntime.daemon_id`` → ``DaemonInstance``（D-005 / D-002）。
+    本 fixture 复用 task-07 落地的 ``make_daemon_client_workspace_with_binding``
+    构造新链路（DaemonInstance + per-member binding 行 + workspace.default_agent），
+    让 ``resolve_runtime_for_writeback`` 命中。
+
+    ``online=False`` 时 DaemonInstance + DaemonRuntime 都置 offline → resolver
+    在 daemon 实体阶段即返回 ``reason=daemon_offline``。
+    """
     from app.core.config import get_settings
     from app.core.security import create_access_token, password_hasher
     from app.modules.auth.model import User
-    from app.modules.daemon.model import DaemonRuntime
-    from app.modules.workspace.model import Workspace
+    from app.modules.workspace.member_runtimes.tests.helpers_writeback import (
+        make_daemon_client_workspace_with_binding,
+    )
 
     user_id = uuid.uuid4()
     user = User(
@@ -40,35 +52,13 @@ async def _setup_daemon_client_workspace(db_session, *, online: bool = True) -> 
     )
     db_session.add(user)
 
-    runtime_id = uuid.uuid4()
-    runtime = DaemonRuntime(
-        id=runtime_id,
+    binding_refs = await make_daemon_client_workspace_with_binding(
+        db_session,
         user_id=user_id,
-        name="test-daemon",
-        provider="claude",
-        status="online" if online else "offline",
-        last_heartbeat_at=datetime.now(UTC) if online else None,
+        default_agent="claude",
+        daemon_online=online,
+        runtime_online=online,
     )
-    db_session.add(runtime)
-
-    ws_id = uuid.uuid4()
-    ws = Workspace(
-        id=ws_id,
-        name="Daemon Client WS",
-        slug=f"daemon-ws-{ws_id.hex[:8]}",
-        root_path="/home/user/specs/test",
-        status="active",
-        component_key="backend",
-        repo_url="https://github.com/org/repo.git",
-        default_branch="main",
-        source_yaml_path="projects/backend.yaml",
-        path_source="daemon-client",
-        daemon_runtime_id=runtime_id,
-        created_by=user_id,
-        last_scanned_at=datetime.now(UTC),
-    )
-    db_session.add(ws)
-    await db_session.commit()
 
     settings = get_settings()
     token, _ = create_access_token(
@@ -78,9 +68,10 @@ async def _setup_daemon_client_workspace(db_session, *, online: bool = True) -> 
         settings=settings,
     )
     return {
-        "ws_id": ws_id,
+        "ws_id": binding_refs["ws_id"],
         "user_id": user_id,
-        "runtime_id": runtime_id,
+        "runtime_id": binding_refs["runtime_id"],
+        "daemon_id": binding_refs["daemon_id"],
         "token": token,
     }
 
@@ -234,28 +225,60 @@ async def test_proxy_create_change_runtime_stale_heartbeat_marks_offline(client,
 
 
 async def test_proxy_create_change_unbound_daemon_client_returns_400(client, db_session):
-    """daemon-client workspace 无 binding 且无 legacy daemon_runtime_id → 400 not_bound。
+    """daemon-client workspace 无 WorkspaceMemberRuntime binding 行 → 400 not_bound。
 
-    D-002@v1（2026-07-05-daemon-client-change-binding-fix）：runtime_id 不再由前端传，
-    后端经 resolve_runtime_for_writeback 解析。新链路下若既无 binding 又无 legacy
-    daemon_runtime_id，resolver 抛 DaemonClientNoActiveSession(reason=not_bound)。
+    D-002@v1 / 2026-07-10-remove-server-local-workspace-mode：Workspace 删了
+    ``daemon_runtime_id`` 列，绑定真相源改走 ``WorkspaceMemberRuntime.daemon_id``。
+    resolver 经 ``resolve_runtime_for_writeback`` 解析，无 binding 行即真未绑定，
+    抛 ``DaemonClientNoActiveSession(reason=not_bound)``（legacy
+    ``workspaces.daemon_runtime_id`` fallback 已删 D-005，不再回退）。
     替代旧 test_proxy_create_change_runtime_not_bound（测旧 runtime_id mismatch 语义，
     入参删 runtime_id 后场景不存在）。
     """
+    from app.core.config import get_settings
+    from app.core.security import create_access_token, password_hasher
+    from app.modules.auth.model import User
     from app.modules.workspace.model import Workspace
 
-    refs = await _setup_daemon_client_workspace(db_session, online=True)
-    # 清掉 legacy daemon_runtime_id，模拟新链路未绑定场景。
-    ws = await db_session.get(Workspace, refs["ws_id"])
-    assert ws is not None
-    ws.daemon_runtime_id = None
+    # 建一个**无** WorkspaceMemberRuntime 行的 workspace（只 user + workspace）。
+    user_id = uuid.uuid4()
+    user = User(
+        id=user_id,
+        email=f"unbound-{user_id.hex[:8]}@example.com",
+        password_hash=password_hasher.hash("Pass123!"),
+        display_name="Unbound",
+        status="active",
+        is_platform_admin=True,
+    )
+    db_session.add(user)
+
+    ws_id = uuid.uuid4()
+    ws = Workspace(
+        id=ws_id,
+        name="Unbound WS",
+        slug=f"unbound-{ws_id.hex[:8]}",
+        root_path=f"/home/user/proj-{ws_id.hex[:8]}",
+        status="active",
+        component_key="backend",
+        default_agent="claude",
+        created_by=user_id,
+        last_scanned_at=datetime.now(UTC),
+    )
     db_session.add(ws)
     await db_session.commit()
 
+    settings = get_settings()
+    token, _ = create_access_token(
+        user_id=user.id,
+        email=user.email,
+        is_admin=True,
+        settings=settings,
+    )
+
     resp = await client.post(
-        f"/api/workspaces/{refs['ws_id']}/changes/proxy-create",
+        f"/api/workspaces/{ws_id}/changes/proxy-create",
         json={"title": "Unbound"},
-        headers=_auth(refs["token"]),
+        headers=_auth(token),
     )
     assert resp.status_code == 400
     body = resp.json()

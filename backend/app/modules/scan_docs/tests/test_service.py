@@ -26,7 +26,6 @@ async def _create_workspace(
     *,
     root_path: str = "/tmp/test-ws",
     component_key: str | None = "silly",
-    path_source: str = "server-local",
 ) -> Workspace:
     ws = Workspace(
         id=uuid.uuid4(),
@@ -34,7 +33,6 @@ async def _create_workspace(
         slug=f"test-ws-{uuid.uuid4().hex[:8]}",
         root_path=root_path,
         component_key=component_key,
-        path_source=path_source,
         status="active",
     )
     session.add(ws)
@@ -309,7 +307,7 @@ class TestReparseCreatesDocs:
     async def test_creates_rows(self, db_session: AsyncSession, tmp_path: Path) -> None:
         # Set up filesystem fixture
         sillyspec_root = tmp_path / "spec"
-        scan_dir = sillyspec_root / ".sillyspec" / "docs" / "silly" / "scan"
+        scan_dir = sillyspec_root / "docs" / "silly" / "scan"
         scan_dir.mkdir(parents=True, exist_ok=True)
         (scan_dir / "ARCHITECTURE.md").write_text(
             "# Test Architecture\nContent here.", encoding="utf-8"
@@ -348,7 +346,6 @@ class TestReparseCreatesDocs:
             db_session,
             root_path=str(tmp_path / "client-unreachable"),
             component_key="silly",
-            path_source="daemon-client",
         )
         await _create_spec_workspace(db_session, ws, str(spec_root))
 
@@ -371,7 +368,7 @@ class TestReparseUpdatesDocs:
     async def test_updates_rows(self, db_session: AsyncSession, tmp_path: Path) -> None:
         # Set up filesystem fixture
         sillyspec_root = tmp_path / "spec"
-        scan_dir = sillyspec_root / ".sillyspec" / "docs" / "silly" / "scan"
+        scan_dir = sillyspec_root / "docs" / "silly" / "scan"
         scan_dir.mkdir(parents=True, exist_ok=True)
         (scan_dir / "ARCHITECTURE.md").write_text("# V1 Architecture\nOriginal.", encoding="utf-8")
 
@@ -405,7 +402,7 @@ class TestReparseIdempotent:
 
     async def test_idempotent(self, db_session: AsyncSession, tmp_path: Path) -> None:
         sillyspec_root = tmp_path / "spec"
-        scan_dir = sillyspec_root / ".sillyspec" / "docs" / "silly" / "scan"
+        scan_dir = sillyspec_root / "docs" / "silly" / "scan"
         scan_dir.mkdir(parents=True, exist_ok=True)
         (scan_dir / "ARCHITECTURE.md").write_text("# Stable Content\nUnchanged.", encoding="utf-8")
 
@@ -433,7 +430,7 @@ class TestReparseRemovesDeletedFiles:
 
     async def test_marks_not_existing(self, db_session: AsyncSession, tmp_path: Path) -> None:
         sillyspec_root = tmp_path / "spec"
-        scan_dir = sillyspec_root / ".sillyspec" / "docs" / "silly" / "scan"
+        scan_dir = sillyspec_root / "docs" / "silly" / "scan"
         scan_dir.mkdir(parents=True, exist_ok=True)
         arch_file = scan_dir / "ARCHITECTURE.md"
         arch_file.write_text("# Architecture\nContent.", encoding="utf-8")

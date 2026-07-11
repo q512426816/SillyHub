@@ -144,10 +144,11 @@ async def workspace_with_runtime(client, tmp_path: Path, auth_headers: dict[str,
     assert ws_resp.status_code == 201, ws_resp.text
     ws_id = ws_resp.json()["id"]
 
-    # Create sillyspec.db in platform storage
+    # Create sillyspec.db in platform storage（扁平布局：daemon-client 强制
+    # platform_managed=True，.runtime/ 直接位于 spec_root 下，无 .sillyspec 包裹）。
     # Use the same spec_data_root as configured in Settings
     settings = get_settings()
-    platform_runtime_dir = Path(settings.spec_data_root) / ws_id / ".sillyspec" / ".runtime"
+    platform_runtime_dir = Path(settings.spec_data_root) / ws_id / ".runtime"
     platform_runtime_dir.mkdir(parents=True, exist_ok=True)
     _create_test_db(platform_runtime_dir / "sillyspec.db")
 
@@ -238,7 +239,6 @@ async def test_daemon_client_reads_flat_platform_runtime_dir(db_session, tmp_pat
         name="daemon-client-runtime",
         slug=f"daemon-client-runtime-{uuid.uuid4().hex[:8]}",
         root_path=str(tmp_path / "client-machine-path"),
-        path_source="daemon-client",
         status="active",
     )
     db_session.add(ws)
@@ -276,7 +276,6 @@ async def test_daemon_client_repo_native_uses_spec_root(db_session, tmp_path: Pa
         slug=f"dc-repo-native-{uuid.uuid4().hex[:8]}",
         # root_path 设为不存在的路径，模拟 Windows 宿主路径不可访问
         root_path=str(tmp_path / "nonexistent-host-path"),
-        path_source="daemon-client",
         status="active",
     )
     db_session.add(ws)
@@ -298,32 +297,6 @@ async def test_daemon_client_repo_native_uses_spec_root(db_session, tmp_path: Pa
     assert progress is not None
     assert progress.current_change == "change-001"
     assert progress.project == "test-project"
-
-
-async def test_non_daemon_client_without_spec_root_uses_root_path(
-    db_session, tmp_path: Path
-) -> None:
-    """非 daemon-client + 无 spec_ws 时回退到 workspace.root_path（向后兼容）。"""
-    sillyspec_dir = tmp_path / "workspace-root" / ".sillyspec" / ".runtime"
-    _create_test_db(sillyspec_dir / "sillyspec.db")
-
-    ws = Workspace(
-        id=uuid.uuid4(),
-        name="local-ws",
-        slug=f"local-ws-{uuid.uuid4().hex[:8]}",
-        root_path=str(tmp_path / "workspace-root"),
-        path_source="server-local",
-        status="active",
-    )
-    db_session.add(ws)
-    await db_session.commit()
-    await db_session.refresh(ws)
-
-    # No SpecWorkspace row — simulate pre-scan state
-    progress = await RuntimeService(db_session).get_progress(ws.id)
-
-    assert progress is not None
-    assert progress.current_change == "change-001"
 
 
 # ---------------------------------------------------------------------------
@@ -365,7 +338,6 @@ async def _make_dc_workspace(db_session, spec_root: str):
         name="dc-host-fs",
         slug=f"dc-host-fs-{uuid.uuid4().hex[:8]}",
         root_path="/client/path",
-        path_source="daemon-client",
         status="active",
     )
     db_session.add(ws)

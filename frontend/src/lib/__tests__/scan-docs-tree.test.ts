@@ -39,7 +39,7 @@ describe("buildTree", () => {
     expect(flows.children[0]?.doc?.path).toBe("docs/SillyHub/flows/auth.md");
   });
 
-  it("包裹布局 .sillyspec/docs/<组件>/... 同样保留组件名层（server-local 场景）", () => {
+  it("包裹布局 .sillyspec/docs/<组件>/... 同样保留组件名层（.sillyspec 包裹场景）", () => {
     const tree = buildTree([
       makeDoc(".sillyspec/docs/SillyHub/scan/ARCHITECTURE.md", "ARCHITECTURE"),
     ]);

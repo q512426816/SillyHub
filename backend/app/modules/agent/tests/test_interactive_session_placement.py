@@ -61,6 +61,57 @@ async def _create_runtime(session: AsyncSession, user_id: uuid.UUID) -> DaemonRu
     return rt
 
 
+async def _bootstrap_workspace_binding(
+    session: AsyncSession, user_id: uuid.UUID, runtime_id: uuid.UUID
+) -> uuid.UUID:
+    """2026-07-10-remove-server-local-workspace-mode: dispatch_to_daemon 走
+    per-member binding 解析 runtime，必须建 daemon_instance + workspace + binding。
+    runtime 必须关联 daemon_instance_id 才能被 placement 按 daemon 查到。
+    返回 workspace_id。"""
+    from app.modules.daemon.model import DaemonInstance
+    from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+    from app.modules.workspace.model import Workspace
+
+    di = DaemonInstance(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        hostname=f"host-{uuid.uuid4().hex[:6]}",
+        server_url="http://localhost:8000",
+        status="online",
+        last_heartbeat_at=datetime.now(UTC),
+    )
+    session.add(di)
+    await session.flush()
+    # 把 runtime 关联到这个 daemon_instance（placement 按 daemon_instance_id 查 provider）
+    rt = await session.get(DaemonRuntime, runtime_id)
+    if rt is not None and rt.daemon_instance_id is None:
+        rt.daemon_instance_id = di.id
+        await session.flush()
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name=f"ws-{uuid.uuid4().hex[:6]}",
+        slug=f"slug-{uuid.uuid4().hex[:8]}",
+        root_path=f"/tmp/{uuid.uuid4().hex[:8]}",
+        default_agent="claude",
+        status="active",
+        created_by=user_id,
+    )
+    session.add(ws)
+    await session.flush()
+    session.add(
+        WorkspaceMemberRuntime(
+            workspace_id=ws.id,
+            user_id=user_id,
+            daemon_id=di.id,
+            runtime_id=runtime_id,
+            root_path="/tmp/binding",
+            path_source="daemon-client",
+        )
+    )
+    await session.commit()
+    return ws.id
+
+
 # ── prepare_interactive_dispatch ─────────────────────────────────────────────
 
 
@@ -278,7 +329,8 @@ class TestDispatchToDaemonBindsRun:
         self, db_session: AsyncSession
     ) -> None:
         uid = await _create_user(db_session)
-        await _create_runtime(db_session, uid)
+        rt = await _create_runtime(db_session, uid)
+        ws_id = await _bootstrap_workspace_binding(db_session, uid, rt.id)
         # dispatch_to_daemon 只写 lease 行引用 agent_run_id；FK 在 delete 时 SET NULL，
         # SQLite 默认不强制 FK，插入悬空 id 也可容忍。插入 run 保持真实。
         run = AgentRun(id=uuid.uuid4(), agent_type="claude_code", status="pending")
@@ -295,6 +347,7 @@ class TestDispatchToDaemonBindsRun:
             lease_id = await placement.dispatch_to_daemon(
                 agent_run_id=run.id,
                 user_id=uid,
+                workspace_id=ws_id,
                 provider="claude",
                 prompt="batch job",
             )

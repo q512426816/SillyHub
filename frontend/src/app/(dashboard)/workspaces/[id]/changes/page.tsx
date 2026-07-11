@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Input, Select, type TableProps } from "antd";
 
 import {
@@ -14,7 +14,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api";
-import { listDaemonRuntimes, type DaemonRuntimeRead } from "@/lib/daemon";
 import {
   listChanges,
   reparseChanges,
@@ -123,25 +122,16 @@ export default function ChangesPage({ params }: Props) {
   const [stats, setStats] = useState<ChangeReparseStats | null>(null);
   const [warnings, setWarnings] = useState<ChangeWarning[]>([]);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
-  const [runtimes, setRuntimes] = useState<DaemonRuntimeRead[]>([]);
-
-  const daemonRuntimeId = workspace?.daemon_runtime_id ?? null;
-  const boundRuntime = useMemo(() => {
-    if (!daemonRuntimeId) return null;
-    return runtimes.find((r) => r.id === daemonRuntimeId) ?? null;
-  }, [daemonRuntimeId, runtimes]);
-  const isDaemonClient = workspace?.path_source === "daemon-client";
-  const newChangeDisabledReason = isDaemonClient
-    ? !daemonRuntimeId || boundRuntime?.status !== "online"
-      ? "需要在线 daemon 才能在客户端工作区创建变更"
-      : null
-    : null;
 
   const load = useCallback(async () => {
     setLoading(true);
     setPageError(null);
     try {
-      const [resp, ws, runtimeList] = await Promise.all([
+      // task-11 / 2026-07-10-remove-server-local-workspace-mode：平台统一
+      // daemon-client 语义，前端不再校验 daemon 在线状态（runtime 由后端从
+      // member binding 现算，离线返 DAEMON_CLIENT_NO_SESSION）。故移除
+      // listDaemonRuntimes 拉取 + runtime/binding 四段派生。
+      const [resp, ws] = await Promise.all([
         listChanges(workspaceId, {
           location: tab,
           search: search || undefined,
@@ -150,12 +140,10 @@ export default function ChangesPage({ params }: Props) {
           pageSize,
         }),
         getWorkspace(workspaceId),
-        listDaemonRuntimes().catch(() => [] as DaemonRuntimeRead[]),
       ]);
       setItems(resp.items);
       setTotal(resp.total);
       setWorkspace(ws);
-      setRuntimes(runtimeList);
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "加载变更列表失败");
     } finally {
@@ -354,8 +342,7 @@ export default function ChangesPage({ params }: Props) {
           <Button
             size="sm"
             variant="outline"
-            disabled={loading || newChangeDisabledReason !== null}
-            title={newChangeDisabledReason ?? undefined}
+            disabled={loading}
             onClick={() =>
               router.push(`/workspaces/${workspaceId}/create-change`)
             }

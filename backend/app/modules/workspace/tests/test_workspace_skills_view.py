@@ -89,7 +89,6 @@ async def _create_workspace(
     session: AsyncSession,
     *,
     created_by: uuid.UUID,
-    path_source: str = "server-local",
     root_path: str = "/tmp/irrelevant",
 ) -> Workspace:
     ws = Workspace(
@@ -97,7 +96,6 @@ async def _create_workspace(
         name=f"ws-{uuid.uuid4().hex[:6]}",
         slug=f"slug-{uuid.uuid4().hex[:8]}",
         root_path=root_path,
-        path_source=path_source,
         status="active",
         created_by=created_by,
     )
@@ -168,148 +166,12 @@ class _FakeHostFsDelegate:
         return ""
 
 
-# ── server-local 路径（容器 Path 直读）──────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_list_skills_server_local(
-    client: AsyncClient, db_session: AsyncSession, tmp_path: Path
-) -> None:
-    """server-local repo-native：root_path/.sillyspec/skills/ 下 skill 名 + 文件清单直读。"""
-    admin = await _create_user(db_session, is_platform_admin=True)
-    repo_root = tmp_path / "repo"
-    spec_dir = repo_root / ".sillyspec"
-    (spec_dir / "skills" / "my-skill").mkdir(parents=True)
-    (spec_dir / "skills" / "my-skill" / "SKILL.md").write_text("# my skill", encoding="utf-8")
-    (spec_dir / "skills" / "my-skill" / "scripts").mkdir()
-    (spec_dir / "skills" / "my-skill" / "scripts" / "run.sh").write_text(
-        "echo hi", encoding="utf-8"
-    )
-    (spec_dir / "skills" / "other").mkdir()
-    (spec_dir / "skills" / "other" / "SKILL.md").write_text("# other", encoding="utf-8")
-
-    ws = await _create_workspace(db_session, created_by=admin.id, root_path=str(repo_root))
-    await _create_spec_workspace(
-        db_session, workspace_id=ws.id, spec_root=str(spec_dir), strategy="repo-native"
-    )
-
-    resp = await client.get(f"/api/workspaces/{ws.id}/skills", headers=_headers(_token_for(admin)))
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    names = {s["name"]: s["files"] for s in body["skills"]}
-    assert set(names.keys()) == {"my-skill", "other"}
-    assert "SKILL.md" in names["my-skill"]
-    assert "scripts/run.sh" in names["my-skill"]
-
-
-@pytest.mark.asyncio
-async def test_list_skills_empty_when_no_skills_dir(
-    client: AsyncClient, db_session: AsyncSession, tmp_path: Path
-) -> None:
-    """无 skills/ 子目录 → 空列表不报错（task-06 验收 D）。"""
-    admin = await _create_user(db_session, is_platform_admin=True)
-    repo_root = tmp_path / "repo"
-    (repo_root / ".sillyspec").mkdir(parents=True)
-
-    ws = await _create_workspace(db_session, created_by=admin.id, root_path=str(repo_root))
-    await _create_spec_workspace(
-        db_session,
-        workspace_id=ws.id,
-        spec_root=str(repo_root / ".sillyspec"),
-        strategy="repo-native",
-    )
-
-    resp = await client.get(f"/api/workspaces/{ws.id}/skills", headers=_headers(_token_for(admin)))
-    assert resp.status_code == 200, resp.text
-    assert resp.json() == {"skills": []}
-
-
-@pytest.mark.asyncio
-async def test_get_mcp_config_server_local(
-    client: AsyncClient, db_session: AsyncSession, tmp_path: Path
-) -> None:
-    """server-local repo-native：读 root_path/.sillyspec/.mcp.json，env token 类脱敏（D-008）。"""
-    admin = await _create_user(db_session, is_platform_admin=True)
-    repo_root = tmp_path / "repo"
-    spec_dir = repo_root / ".sillyspec"
-    spec_dir.mkdir(parents=True)
-    mcp = {
-        "mcpServers": {
-            "github": {
-                "command": "npx",
-                "args": ["-y", "@modelcontextprotocol/server-github"],
-                "env": {
-                    "GITHUB_TOKEN": "ghp_secret_value",
-                    "DEBUG": "true",
-                },
-            }
-        }
-    }
-    (spec_dir / ".mcp.json").write_text(json.dumps(mcp), encoding="utf-8")
-
-    ws = await _create_workspace(db_session, created_by=admin.id, root_path=str(repo_root))
-    await _create_spec_workspace(
-        db_session, workspace_id=ws.id, spec_root=str(spec_dir), strategy="repo-native"
-    )
-
-    resp = await client.get(
-        f"/api/workspaces/{ws.id}/mcp-config", headers=_headers(_token_for(admin))
-    )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    env = body["mcpServers"]["github"]["env"]
-    assert env["GITHUB_TOKEN"] == "<set>"  # 脱敏
-    assert env["DEBUG"] == "true"  # 非_secret 原值保留
-
-
-@pytest.mark.asyncio
-async def test_get_mcp_config_empty_when_no_file(
-    client: AsyncClient, db_session: AsyncSession, tmp_path: Path
-) -> None:
-    """无 .mcp.json → 空 mcpServers 不报错（task-06 验收 D）。"""
-    admin = await _create_user(db_session, is_platform_admin=True)
-    repo_root = tmp_path / "repo"
-    (repo_root / ".sillyspec").mkdir(parents=True)
-
-    ws = await _create_workspace(db_session, created_by=admin.id, root_path=str(repo_root))
-    await _create_spec_workspace(
-        db_session,
-        workspace_id=ws.id,
-        spec_root=str(repo_root / ".sillyspec"),
-        strategy="repo-native",
-    )
-
-    resp = await client.get(
-        f"/api/workspaces/{ws.id}/mcp-config", headers=_headers(_token_for(admin))
-    )
-    assert resp.status_code == 200, resp.text
-    assert resp.json() == {"mcpServers": {}}
-
-
-@pytest.mark.asyncio
-async def test_get_mcp_config_invalid_json_returns_empty(
-    client: AsyncClient, db_session: AsyncSession, tmp_path: Path
-) -> None:
-    """.mcp.json 解析失败 → 空 mcpServers 不抛错。"""
-    admin = await _create_user(db_session, is_platform_admin=True)
-    repo_root = tmp_path / "repo"
-    spec_dir = repo_root / ".sillyspec"
-    spec_dir.mkdir(parents=True)
-    (spec_dir / ".mcp.json").write_text("{ not valid json", encoding="utf-8")
-
-    ws = await _create_workspace(db_session, created_by=admin.id, root_path=str(repo_root))
-    await _create_spec_workspace(
-        db_session, workspace_id=ws.id, spec_root=str(spec_dir), strategy="repo-native"
-    )
-
-    resp = await client.get(
-        f"/api/workspaces/{ws.id}/mcp-config", headers=_headers(_token_for(admin))
-    )
-    assert resp.status_code == 200, resp.text
-    assert resp.json() == {"mcpServers": {}}
-
-
 # ── daemon-client 路径（HostFsDelegate RPC 读）──────────────────────────────
+#
+# 2026-07-10-remove-server-local-workspace-mode：server-local 直读分支已删，
+# 所有 workspace 统一经 HostFsDelegate RPC 读。下列测试用 _FakeHostFsDelegate
+# 内存 fs 模拟 daemon 宿主 specDir，覆盖 list_skills / get_mcp_config / 空目录 /
+# 非法 JSON / env 脱敏 全部场景（原 server-local 组已删，能力等价覆盖）。
 
 
 @pytest.mark.asyncio
@@ -347,9 +209,7 @@ async def test_list_skills_daemon_client_via_host_fs_delegate(
         SkillsViewService, "_make_host_fs_delegate", staticmethod(lambda session: fake)
     )
 
-    ws = await _create_workspace(
-        db_session, created_by=admin.id, path_source="daemon-client", root_path=spec_root
-    )
+    ws = await _create_workspace(db_session, created_by=admin.id, root_path=spec_root)
     await _create_spec_workspace(
         db_session, workspace_id=ws.id, spec_root=spec_root, strategy="platform-managed"
     )
@@ -393,9 +253,7 @@ async def test_get_mcp_config_daemon_client_via_host_fs_delegate(
         SkillsViewService, "_make_host_fs_delegate", staticmethod(lambda session: fake)
     )
 
-    ws = await _create_workspace(
-        db_session, created_by=admin.id, path_source="daemon-client", root_path=spec_root
-    )
+    ws = await _create_workspace(db_session, created_by=admin.id, root_path=spec_root)
     await _create_spec_workspace(
         db_session, workspace_id=ws.id, spec_root=spec_root, strategy="platform-managed"
     )
@@ -427,9 +285,7 @@ async def test_get_mcp_config_daemon_client_no_file_empty(
         SkillsViewService, "_make_host_fs_delegate", staticmethod(lambda session: fake)
     )
 
-    ws = await _create_workspace(
-        db_session, created_by=admin.id, path_source="daemon-client", root_path=spec_root
-    )
+    ws = await _create_workspace(db_session, created_by=admin.id, root_path=spec_root)
     await _create_spec_workspace(
         db_session, workspace_id=ws.id, spec_root=spec_root, strategy="platform-managed"
     )
@@ -478,7 +334,12 @@ async def test_non_member_gets_403(
 async def test_member_with_workspace_read_can_access(
     client: AsyncClient, db_session: AsyncSession, tmp_path: Path
 ) -> None:
-    """有 WORKSPACE_READ role 的成员可访问（membership 通过）。"""
+    """有 WORKSPACE_READ role 的成员可访问（membership 通过）。
+
+    2026-07-10-remove-server-local-workspace-mode: skills_view 永远经
+    HostFsDelegate RPC 读（daemon-client 单一模式）。本测试聚焦权限校验，
+    故 mock delegate 直读本地 spec_root（已建 fixtures），避免依赖真 daemon。
+    """
     owner = await _create_user(db_session, email="owner2@example.com")
     member = await _create_user(db_session, email="member2@example.com")
 
@@ -489,14 +350,43 @@ async def test_member_with_workspace_read_can_access(
     )
 
     ws = await _create_workspace(db_session, created_by=owner.id, root_path=str(repo_root))
+    spec_root = str(repo_root / ".sillyspec")
     await _create_spec_workspace(
         db_session,
         workspace_id=ws.id,
-        spec_root=str(repo_root / ".sillyspec"),
+        spec_root=spec_root,
         strategy="repo-native",
     )
     await _grant_workspace_read(db_session, user_id=member.id, workspace_id=ws.id)
 
-    resp = await client.get(f"/api/workspaces/{ws.id}/skills", headers=_headers(_token_for(member)))
+    # mock delegate：list_dir/read_file/stat 直读本地 spec_root（权限是本测试焦点）
+    from pathlib import Path
+    from unittest.mock import patch
+
+    class _LocalDelegate:
+        async def list_dir(self, workspace, path: str):
+            full = Path(spec_root) / path
+            if not full.is_dir():
+                return []
+            return sorted(p.name for p in full.iterdir())
+
+        async def read_file(self, workspace, path: str) -> str:
+            return (Path(spec_root) / path).read_text(encoding="utf-8")
+
+        async def stat(self, workspace, path: str) -> dict:
+            full = Path(spec_root) / path
+            return {
+                "exists": full.exists(),
+                "is_dir": full.is_dir(),
+                "size": full.stat().st_size if full.exists() else 0,
+            }
+
+    with patch(
+        "app.modules.workspace.skills_view_service.SkillsViewService._make_host_fs_delegate",
+        return_value=_LocalDelegate(),
+    ):
+        resp = await client.get(
+            f"/api/workspaces/{ws.id}/skills", headers=_headers(_token_for(member))
+        )
     assert resp.status_code == 200, resp.text
     assert {s["name"] for s in resp.json()["skills"]} == {"team-skill"}

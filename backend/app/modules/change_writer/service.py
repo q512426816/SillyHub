@@ -26,7 +26,7 @@ from app.modules.change_writer.markdown_builder import (
     build_master_md,
 )
 from app.modules.workspace.model import Workspace
-from app.modules.workspace.service import _rewrite_path, is_daemon_client_path_source
+from app.modules.workspace.service import _rewrite_path
 from app.modules.worktree.exec_env import ExecEnvBuilder
 from app.modules.worktree.model import WorktreeLease
 
@@ -58,16 +58,16 @@ class ChangeWriterService:
         """Create a change directory + MASTER.md + proposal.md inside the lease worktree or workspace root.
 
         分流（design §5.3 Phase 3 / D-001@v1 / D-002@v1）：
-        - ``lease_id is not None`` → server-local worktree 直写（原路径，零回归）。
-        - ``lease_id is None`` + daemon-client workspace → 委托 ``proxy_create_change``
-          经 lease-polling 代写队列下发 daemon。runtime 由 ``proxy_create_change`` 内部
+        - ``lease_id is not None`` → worktree lease 直写（execute agent worktree 路径）。
+        - ``lease_id is None`` → 委托 ``proxy_create_change`` 经 lease-polling 代写队列下发
+          daemon。runtime 由 ``proxy_create_change`` 内部
           ``resolve_runtime_for_writeback`` 现算（D-001@v1），失败抛
           ``DaemonClientNoActiveSession``（结构化 code 渲染 toast）。
-        - ``lease_id is None`` + server-local/repo-native → 原 ``_repo_dir_for_workspace``
-          直写路径不变。
 
-        D-002@v1（2026-07-05-daemon-client-change-binding-fix）：删 ``runtime_id``
-        入参——写回始终用 binding + workspace.default_agent 现算，不再由 caller 传。
+        task-08：工作区路径来源分流已删（FR-2），``lease_id is None`` 永远走
+        proxy 代写。D-002@v1（2026-07-05-daemon-client-change-binding-fix）：
+        删 ``runtime_id`` 入参——写回始终用 binding + workspace.default_agent
+        现算，不再由 caller 传。
         """
         # 门禁（D-004@V1 / FR-05）：未扫描 workspace 不允许新建变更。
         # scan 从变更流程移除后，brainstorm 需要项目地图（scan_docs），
@@ -96,30 +96,21 @@ class ChangeWriterService:
                 )
             repo_dir = ExecEnvBuilder().repo_dir(Path(lease.path))
         else:
-            # No lease — server-local 直写 or daemon-client 经 proxy 代写。
-            workspace = await self._session.get(Workspace, workspace_id)
-            if workspace is None or workspace.deleted_at is not None:
-                raise WorkspaceNotFound(
-                    "Workspace not found.",
-                    details={"workspace_id": str(workspace_id)},
-                )
-            if is_daemon_client_path_source(workspace.path_source):
-                # daemon-client：必须经 proxy 代写（runtime 现算 + lease-polling 下发）。
-                # runtime 解析失败由 proxy_create_change 内部抛 DaemonClientNoActiveSession
-                # （替代旧 _repo_dir_for_workspace 的裸抛 'requires an active lease'）。
-                from app.modules.change_writer.proxy import (
-                    proxy_create_change,
-                )
+            # No lease — task-08：工作区路径来源分流已删（FR-2），永远经 proxy 代写
+            # （runtime 现算 + lease-polling 下发）。runtime 解析失败由 proxy_create_change
+            # 内部抛 DaemonClientNoActiveSession。
+            from app.modules.change_writer.proxy import (
+                proxy_create_change,
+            )
 
-                return await proxy_create_change(
-                    self._session,
-                    workspace_id=workspace_id,
-                    user_id=user_id,
-                    title=title,
-                    description=description,
-                    change_type=change_type,
-                )
-            repo_dir = self._repo_dir_for_workspace(workspace)
+            return await proxy_create_change(
+                self._session,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                title=title,
+                description=description,
+                change_type=change_type,
+            )
 
         # Compute change_key from date + slugified title
         date_prefix = datetime.now(UTC).strftime("%Y-%m-%d")
@@ -381,12 +372,12 @@ class ChangeWriterService:
 
     @staticmethod
     def _repo_dir_for_workspace(workspace: Workspace) -> Path:
-        """Resolve server-local workspace root for direct file writes."""
-        if is_daemon_client_path_source(workspace.path_source):
-            raise ChangeWriteError(
-                "daemon-client workspace requires an active lease to write changes.",
-                details={"workspace_id": str(workspace.id)},
-            )
+        """Resolve workspace root for direct file writes (worktree lease 路径专用).
+
+        task-08：工作区路径来源守卫已删（FR-2）。``create_change`` 无 lease 时改走
+        proxy 代写，本方法仅 ``batch_generate_templates`` 的 worktree lease
+        路径调用（lease.path 之外的直写 fallback）。
+        """
         return Path(_rewrite_path(workspace.root_path))
 
     @staticmethod

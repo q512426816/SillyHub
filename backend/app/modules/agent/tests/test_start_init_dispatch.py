@@ -98,7 +98,6 @@ async def test_start_init_dispatch_creates_spec_workspace_and_lease(
         name="Init Test WS",
         slug=f"init-test-{uuid.uuid4().hex[:8]}",
         root_path="/repos/init-test",
-        path_source="daemon-client",
         status="active",
     )
     db_session.add(workspace)
@@ -178,7 +177,6 @@ async def test_start_init_dispatch_reuses_existing_spec_workspace(
         name="Init Test WS Existing",
         slug=f"init-existing-{uuid.uuid4().hex[:8]}",
         root_path="/repos/init-existing",
-        path_source="daemon-client",
         status="active",
     )
     db_session.add(workspace)
@@ -240,7 +238,6 @@ async def test_start_init_dispatch_raises_when_no_runtime(
         name="Init Test NoRuntime",
         slug=f"init-nort-{uuid.uuid4().hex[:8]}",
         root_path="/repos/init-nort",
-        path_source="daemon-client",
         status="active",
     )
     db_session.add(workspace)
@@ -285,7 +282,6 @@ async def test_start_init_dispatch_lease_has_correct_root_path_from_binding(
         name="Init Test PathSource",
         slug=f"init-path-{uuid.uuid4().hex[:8]}",
         root_path=workspace_root,  # global path (deprecated)
-        path_source="daemon-client",
         status="active",
     )
     db_session.add(workspace)

@@ -1,19 +1,8 @@
 import type { DaemonRuntimeRead } from "@/lib/daemon";
-import type { Workspace } from "@/lib/workspaces";
 
-export type WorkspacePathSource = Workspace["path_source"];
-
-export function isDaemonClientWorkspace(workspace: Pick<Workspace, "path_source">): boolean {
-  return workspace.path_source === "daemon-client";
-}
-
-export function workspacePathSourceLabel(pathSource: WorkspacePathSource): string {
-  return pathSource === "daemon-client" ? "本机守护进程路径" : "服务器本地路径";
-}
-
-export function workspaceRootPathLabel(pathSource: WorkspacePathSource): string {
-  return pathSource === "daemon-client" ? "客户端路径" : "root_path";
-}
+// task-11 / 2026-07-10-remove-server-local-workspace-mode：平台统一
+// daemon-client 语义后，原 path-source 二元映射四个导出（类型别名 + 三个判定
+// /文案函数）已无意义，同步移除，仅保留 runtime 展示工具函数。
 
 export function formatDaemonRuntimeSummary(
   runtime: DaemonRuntimeRead | null | undefined,

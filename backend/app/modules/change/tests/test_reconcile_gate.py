@@ -77,8 +77,6 @@ async def _seed_run(
             name="ws-rec",
             slug=f"ws-rec-{uuid.uuid4().hex[:6]}",
             root_path=f"/host-projects/rec-{uuid.uuid4().hex[:8]}",
-            path_source="daemon-client",
-            daemon_runtime_id=rt.id,
             status="active",
         )
     )

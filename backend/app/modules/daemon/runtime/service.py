@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Literal
 
-from sqlalchemy import case, exists, func, or_, select, update
+from sqlalchemy import case, exists, func, or_, select
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -16,7 +16,6 @@ from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime
-from app.modules.workspace.model import Workspace
 
 if TYPE_CHECKING:
     from app.modules.daemon.schema import RuntimeUsageRead
@@ -670,9 +669,9 @@ class RuntimeService:
         的 runtime_id 由派发/写回现算填入有真实值，RESTRICT 保护恢复有效。任一命中 →
         抛 ``DaemonRuntimeInUse`` (409)，避免 in-flight 工作 CASCADE 静默丢失。
 
-        软删 workspace（deleted_at IS NOT NULL）的 legacy ``daemon_runtime_id`` 仍
-        可能非空（旧数据），应用层 SET NULL 解绑（ql-20260625-002-7c3a）绕过 FK
-        RESTRICT；与 in-flight 检查正交（design §11 DaemonRuntime.delete）。
+        2026-07-10-remove-server-local-workspace-mode task-09：legacy
+        ``workspaces.daemon_runtime_id`` 列已 DROP（D-007 P0-4），原应用层 SET NULL
+        解绑段整段删除。in-flight RESTRICT 检查保留（daemon-entity-binding 正交逻辑）。
         """
         runtime = await self._get_owned_runtime(
             runtime_id, user_id, is_platform_admin=is_platform_admin
@@ -716,19 +715,11 @@ class RuntimeService:
                     "inflight_change_writes": len(inflight_writes),
                 },
             )
-        # 软删 workspace 仍引用本 runtime 时，应用层 SET NULL 解绑（绕过 FK RESTRICT）。
-        # 软删逻辑只置 deleted_at 不清 daemon_runtime_id，PG FK RESTRICT 不看 deleted_at
-        # 会拦截 DELETE；SQLite 测试库 FK 不严测不出，PG 生产暴露 500（dialect 差异）。
-        # 注：此清理仅服务于 legacy ``workspaces.daemon_runtime_id`` 列（新链路恒 NULL），
-        # 与上面 in-flight RESTRICT 检查正交（design §11 DaemonRuntime.delete）。
-        await self._session.execute(
-            update(Workspace)
-            .where(
-                col(Workspace.daemon_runtime_id) == runtime_id,
-                col(Workspace.deleted_at).is_not(None),
-            )
-            .values(daemon_runtime_id=None)
-        )
+        # 2026-07-10-remove-server-local-workspace-mode task-09：legacy
+        # ``workspaces.daemon_runtime_id`` 列已 DROP（D-007 P0-4），原应用层 SET NULL
+        # UPDATE 在列 DROP 后必触发 ``UndefinedColumn``（PG）/ ``OperationalError``
+        # （SQLite）→ 所有 daemon runtime 删除请求 500。整段删除，仅保留下面
+        # ``session.delete(runtime)`` + ``commit()``（CASCADE 自动清理 bound 行）。
         await self._session.delete(runtime)
         await self._session.commit()
 

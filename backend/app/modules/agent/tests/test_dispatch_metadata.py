@@ -28,7 +28,9 @@ from app.modules.agent.model import AgentRun
 from app.modules.agent.placement import RunPlacementService
 from app.modules.auth.model import User
 from app.modules.daemon.lease.context import build_claim_payload
-from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
+from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
+from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+from app.modules.workspace.model import Workspace
 
 # ---- Test helpers ------------------------------------------------------------
 
@@ -48,12 +50,34 @@ async def _create_user(session) -> uuid.UUID:
     return uid
 
 
-async def _create_runtime(session, user_id: uuid.UUID) -> DaemonRuntime:
+async def _create_daemon_instance(session, user_id: uuid.UUID) -> DaemonInstance:
+    di = DaemonInstance(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        hostname=f"host-{uuid.uuid4().hex[:6]}",
+        server_url="http://localhost:8000",
+        status="online",
+        last_heartbeat_at=datetime.now(UTC),
+    )
+    session.add(di)
+    await session.commit()
+    await session.refresh(di)
+    return di
+
+
+async def _create_runtime(
+    session,
+    user_id: uuid.UUID,
+    *,
+    daemon_instance_id: uuid.UUID | None = None,
+    provider: str = "claude_code",
+) -> DaemonRuntime:
     rt = DaemonRuntime(
         id=uuid.uuid4(),
         user_id=user_id,
+        daemon_instance_id=daemon_instance_id,
         name="test-daemon",
-        provider="claude_code",
+        provider=provider,
         status="online",
         last_heartbeat_at=datetime.now(UTC),
     )
@@ -61,6 +85,68 @@ async def _create_runtime(session, user_id: uuid.UUID) -> DaemonRuntime:
     await session.commit()
     await session.refresh(rt)
     return rt
+
+
+async def _create_workspace(session, user_id: uuid.UUID) -> Workspace:
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name=f"ws-{uuid.uuid4().hex[:6]}",
+        slug=f"slug-{uuid.uuid4().hex[:8]}",
+        root_path=f"/tmp/{uuid.uuid4().hex[:8]}",
+        default_agent="claude_code",
+        status="active",
+        created_by=user_id,
+    )
+    session.add(ws)
+    await session.commit()
+    await session.refresh(ws)
+    return ws
+
+
+async def _create_member_binding(
+    session,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    daemon_id: uuid.UUID,
+    runtime_id: uuid.UUID | None = None,
+) -> None:
+    session.add(
+        WorkspaceMemberRuntime(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            daemon_id=daemon_id,
+            runtime_id=runtime_id,
+            root_path="/tmp/binding",
+            path_source="daemon-client",
+        )
+    )
+    await session.commit()
+
+
+async def _bootstrap(session, *, provider: str = "claude_code"):
+    """Build the full daemon-client dispatch stack: user + daemon_instance +
+    runtime + workspace + member binding. Returns (workspace_id, user_id).
+
+    The workspace's ``default_agent`` is set to ``provider`` so the placement
+    resolver routes to the runtime built for that provider.
+    """
+    user_id = await _create_user(session)
+    di = await _create_daemon_instance(session, user_id)
+    rt = await _create_runtime(session, user_id, daemon_instance_id=di.id, provider=provider)
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name=f"ws-{uuid.uuid4().hex[:6]}",
+        slug=f"slug-{uuid.uuid4().hex[:8]}",
+        root_path=f"/tmp/{uuid.uuid4().hex[:8]}",
+        default_agent=provider,
+        status="active",
+        created_by=user_id,
+    )
+    session.add(ws)
+    await session.commit()
+    await session.refresh(ws)
+    await _create_member_binding(session, ws.id, user_id, daemon_id=di.id, runtime_id=rt.id)
+    return ws.id, user_id
 
 
 async def _create_agent_run(session, agent_type: str = "claude_code") -> AgentRun:
@@ -80,14 +166,14 @@ async def _fetch_lease(session, lease_id) -> DaemonTaskLease:
 
 @pytest.mark.asyncio
 async def test_dispatch_to_daemon_writes_repo_branch(db_session):
-    user_id = await _create_user(db_session)
-    await _create_runtime(db_session, user_id)
+    ws_id, user_id = await _bootstrap(db_session)
     run = await _create_agent_run(db_session)
 
     placement = RunPlacementService(db_session)
     lease_id = await placement.dispatch_to_daemon(
         run.id,
         user_id,
+        workspace_id=ws_id,
         repo_url="https://github.com/acme/repo.git",
         branch="dev",
     )
@@ -103,14 +189,14 @@ async def test_dispatch_to_daemon_writes_repo_branch(db_session):
 
 @pytest.mark.asyncio
 async def test_dispatch_to_daemon_writes_stage_fields(db_session):
-    user_id = await _create_user(db_session)
-    await _create_runtime(db_session, user_id)
+    ws_id, user_id = await _bootstrap(db_session)
     run = await _create_agent_run(db_session)
 
     placement = RunPlacementService(db_session)
     lease_id = await placement.dispatch_to_daemon(
         run.id,
         user_id,
+        workspace_id=ws_id,
         prompt="P",
         step_prompt="S",
         stage="implementation",
@@ -130,14 +216,14 @@ async def test_dispatch_to_daemon_writes_stage_fields(db_session):
 
 @pytest.mark.asyncio
 async def test_dispatch_to_daemon_writes_scan_fields(db_session):
-    user_id = await _create_user(db_session)
-    await _create_runtime(db_session, user_id)
+    ws_id, user_id = await _bootstrap(db_session)
     run = await _create_agent_run(db_session)
 
     placement = RunPlacementService(db_session)
     lease_id = await placement.dispatch_to_daemon(
         run.id,
         user_id,
+        workspace_id=ws_id,
         root_path="/r",
         spec_root="/s",
         runtime_root="/rt",
@@ -154,12 +240,11 @@ async def test_dispatch_to_daemon_writes_scan_fields(db_session):
 
 @pytest.mark.asyncio
 async def test_dispatch_to_daemon_omits_none_fields(db_session):
-    user_id = await _create_user(db_session)
-    await _create_runtime(db_session, user_id)
+    ws_id, user_id = await _bootstrap(db_session)
     run = await _create_agent_run(db_session)
 
     placement = RunPlacementService(db_session)
-    lease_id = await placement.dispatch_to_daemon(run.id, user_id, prompt="P")
+    lease_id = await placement.dispatch_to_daemon(run.id, user_id, workspace_id=ws_id, prompt="P")
 
     meta = (await _fetch_lease(db_session, lease_id)).metadata_ or {}
     assert meta["prompt"] == "P"
@@ -169,18 +254,22 @@ async def test_dispatch_to_daemon_omits_none_fields(db_session):
     assert "root_path" not in meta
 
 
-# ---- AC-04b: backward compatible 2-positional-arg call -----------------------
+# ---- AC-04b: workspace_id keyword is the brownfield entry point --------------
+#
+# 2026-07-10-remove-server-local-workspace-mode: 旧「2 参 positional」brownfield
+# 假设全局 daemon runtime 可解析，daemon-client 单一模式后必须传 workspace_id
+# 解析 member binding。``workspace_id`` 仍是关键字参数（默认 None），保持调用
+# 向后兼容——调用方不传则 NoOnlineDaemonError（设计 D-005/D-007）。
 
 
 @pytest.mark.asyncio
 async def test_dispatch_to_daemon_backward_compatible_2_args(db_session):
-    user_id = await _create_user(db_session)
-    await _create_runtime(db_session, user_id)
+    ws_id, user_id = await _bootstrap(db_session)
     run = await _create_agent_run(db_session)
 
     placement = RunPlacementService(db_session)
-    # Legacy 2-positional-arg call must still work (design §9 brownfield).
-    lease_id = await placement.dispatch_to_daemon(run.id, user_id)
+    # ``workspace_id`` 关键字参数 = brownfield 调用入口（run_id + user_id 位置参）。
+    lease_id = await placement.dispatch_to_daemon(run.id, user_id, workspace_id=ws_id)
 
     assert lease_id is not None
     lease = await _fetch_lease(db_session, lease_id)
@@ -189,14 +278,14 @@ async def test_dispatch_to_daemon_backward_compatible_2_args(db_session):
 
 @pytest.mark.asyncio
 async def test_dispatch_to_daemon_writes_provider_model(db_session):
-    user_id = await _create_user(db_session)
-    await _create_runtime(db_session, user_id)
-    run = await _create_agent_run(db_session)
+    ws_id, user_id = await _bootstrap(db_session, provider="codex")
+    run = await _create_agent_run(db_session, agent_type="codex")
 
     placement = RunPlacementService(db_session)
     lease_id = await placement.dispatch_to_daemon(
         run.id,
         user_id,
+        workspace_id=ws_id,
         provider="codex",
         model="gpt-5-codex",
     )

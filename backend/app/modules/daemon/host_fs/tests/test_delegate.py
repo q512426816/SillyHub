@@ -1,23 +1,26 @@
-"""Tests for HostFsDelegate — double-path × eight-method coverage.
+"""Tests for HostFsDelegate — daemon-client RPC dispatch.
 
-server-local branch: real local tempdir, asserts byte-for-byte behavior parity
-with the original scattered logic (NFR-02 zero-regression, D-004).
+Change ``2026-07-10-remove-server-local-workspace-mode`` dropped the legacy
+server-local branch (task-09): every method now forwards over the daemon WS
+RPC via :meth:`HostFsDelegate._via_rpc` / :meth:`HostFsDelegate._via_rpc_or_degrade`.
+The server-local local-FS test cases (real tempdir, asserts byte-for-byte
+behaviour parity with the original scattered logic, D-004) were deleted with
+the branch — the local behaviour no longer exists to assert against.
 
-daemon-client branch: mock ws_rpc (duck-typed, satisfies the structural
-protocol — only ``send_rpc`` consumed). Asserts the call structure (method
-name + workspace_id + daemon_id + args) rather than any real RPC result,
-since the transport is task-02's responsibility.
+What remains: daemon-client branch coverage. A mock ws_rpc (duck-typed,
+satisfies the structural protocol — only ``send_rpc`` consumed) asserts the
+call structure (method name + workspace_id + daemon_id + args) rather than any
+real RPC result, since the transport is task-02's responsibility. The
+real-resolver → ws_hub integration path is covered by
+``test_delegate_integration.py`` (no-mock钉死测试).
 """
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import pytest
-import yaml
 
 from app.modules.daemon.host_fs import (
     HostFsDelegate,
@@ -62,8 +65,9 @@ class _MockWsRpc:
 # the daemon_id_resolver so daemon-client call-structure assertions can verify
 # routing without a DB session — the real resolver → ws_hub integration path is
 # covered by test_delegate_integration.py (no-mock钉死测试). Note this is the
-# INSTANCE id, deliberately distinct from any daemon_runtime_id the workspace
-# fixture carries, so a regression that routes on runtime_id would fail loudly.
+# INSTANCE id, deliberately distinct from any historical daemon_runtime_id the
+# workspace fixture used to carry, so a regression that routes on runtime_id
+# would fail loudly.
 _INSTANCE_ID = uuid4()
 
 
@@ -75,16 +79,15 @@ async def _null_daemon_id_resolver(session: Any, workspace_id: Any) -> Any:
     return None
 
 
-def _make_workspace(
-    *,
-    path_source: str = "server-local",
-    root_path: str = "",
-    daemon_runtime_id: Any = None,
-) -> Workspace:
+def _make_workspace(*, root_path: str = "") -> Workspace:
     """Construct a Workspace instance for unit tests (no DB persistence).
 
     Uses the normal SQLModel constructor (the previous ``__new__`` shortcut
     skipped pydantic init and broke ``__getattr__`` resolution).
+
+    Note: ``path_source`` / ``daemon_runtime_id`` were removed from the
+    Workspace model in change ``2026-07-10-remove-server-local-workspace-mode``
+    task-01 — the delegate now keys purely on ``workspace.id`` for RPC routing.
     """
     ws_id = uuid4()
     return Workspace(
@@ -92,28 +95,13 @@ def _make_workspace(
         name=f"test-ws-{ws_id.hex[:8]}",
         slug=f"test-ws-{ws_id.hex[:8]}",
         root_path=root_path,
-        path_source=path_source,
-        daemon_runtime_id=daemon_runtime_id,
         status="active",
     )
 
 
 @pytest.fixture
-def server_local_workspace(tmp_path: Path) -> Workspace:
-    return _make_workspace(
-        path_source="server-local",
-        root_path=str(tmp_path),
-        daemon_runtime_id=None,
-    )
-
-
-@pytest.fixture
 def daemon_client_workspace() -> Workspace:
-    return _make_workspace(
-        path_source="daemon-client",
-        root_path="/host/path/that/backend/cannot/see",
-        daemon_runtime_id=uuid4(),
-    )
+    return _make_workspace(root_path="/host/path/that/backend/cannot/see")
 
 
 @pytest.fixture
@@ -139,22 +127,6 @@ def _make_delegate_with_rpc(
 
 
 class TestStat:
-    async def test_server_local_file(self, delegate_no_rpc, server_local_workspace, tmp_path):
-        f = tmp_path / "a.txt"
-        f.write_text("hello", encoding="utf-8")
-        result = await delegate_no_rpc.stat(server_local_workspace, str(f))
-        assert result == {"exists": True, "is_dir": False, "size": 5}
-
-    async def test_server_local_dir(self, delegate_no_rpc, server_local_workspace, tmp_path):
-        d = tmp_path / "sub"
-        d.mkdir()
-        result = await delegate_no_rpc.stat(server_local_workspace, str(d))
-        assert result == {"exists": True, "is_dir": True, "size": 0}
-
-    async def test_server_local_missing(self, delegate_no_rpc, server_local_workspace, tmp_path):
-        result = await delegate_no_rpc.stat(server_local_workspace, str(tmp_path / "nope.txt"))
-        assert result == {"exists": False, "is_dir": False, "size": 0}
-
     async def test_daemon_client_calls_send_rpc(self, daemon_client_workspace):
         delegate, rpc = _make_delegate_with_rpc(
             result={"exists": True, "is_dir": False, "size": 42}
@@ -166,10 +138,9 @@ class TestStat:
         assert call["method"] == "stat"
         assert call["workspace_id"] == str(daemon_client_workspace.id)
         # daemon_id 必须是解析出的 daemon_instances.id（WS 路由键），而非
-        # workspace.daemon_runtime_id（daemon_runtimes.id）——后者会导致 RPC 找不到
+        # 历史 workspace.daemon_runtime_id（daemon_runtimes.id）——后者会导致 RPC 找不到
         # 连接（钉死 runtime_id vs instance_id 回归，见 test_delegate_integration）。
         assert call["daemon_id"] == str(_INSTANCE_ID)
-        assert call["daemon_id"] != str(daemon_client_workspace.daemon_runtime_id)
         assert call["args"] == {"path": "/host/a.txt"}
 
     async def test_daemon_client_no_rpc_raises(self, daemon_client_workspace):
@@ -182,12 +153,6 @@ class TestStat:
 
 
 class TestReadFile:
-    async def test_server_local(self, delegate_no_rpc, server_local_workspace, tmp_path):
-        f = tmp_path / "x.txt"
-        f.write_text("contents", encoding="utf-8")
-        out = await delegate_no_rpc.read_file(server_local_workspace, str(f))
-        assert out == "contents"
-
     async def test_daemon_client_calls_send_rpc(self, daemon_client_workspace):
         delegate, rpc = _make_delegate_with_rpc(result={"content": "remote bytes"})
         out = await delegate.read_file(daemon_client_workspace, "/host/x.txt")
@@ -205,18 +170,6 @@ class TestReadFile:
 
 
 class TestListDir:
-    async def test_server_local(self, delegate_no_rpc, server_local_workspace, tmp_path):
-        (tmp_path / "b").mkdir()
-        (tmp_path / "a").write_text("x", encoding="utf-8")
-        out = await delegate_no_rpc.list_dir(server_local_workspace, str(tmp_path))
-        assert out == ["a", "b"]  # sorted
-
-    async def test_server_local_not_dir(self, delegate_no_rpc, server_local_workspace, tmp_path):
-        f = tmp_path / "file.txt"
-        f.write_text("x", encoding="utf-8")
-        out = await delegate_no_rpc.list_dir(server_local_workspace, str(f))
-        assert out == []
-
     async def test_daemon_client_calls_send_rpc(self, daemon_client_workspace):
         delegate, rpc = _make_delegate_with_rpc(result={"entries": ["a", "b", "c"]})
         out = await delegate.list_dir(daemon_client_workspace, "/host/dir")
@@ -228,75 +181,14 @@ class TestListDir:
 # ── 4. git_apply ────────────────────────────────────────────────────────────────────
 
 
-def _init_git_repo(root: Path) -> None:
-    """Create a real git repo with one committed file so patches can apply."""
-    import os
-    import subprocess
-
-    env = {
-        **os.environ,
-        "GIT_AUTHOR_NAME": "t",
-        "GIT_AUTHOR_EMAIL": "t@t",
-        "GIT_COMMITTER_NAME": "t",
-        "GIT_COMMITTER_EMAIL": "t@t",
-    }
-    subprocess.run(["git", "init"], cwd=str(root), check=True, capture_output=True, env=env)
-    subprocess.run(
-        ["git", "config", "user.email", "t@t"], cwd=str(root), check=True, capture_output=True
-    )
-    subprocess.run(
-        ["git", "config", "user.name", "t"], cwd=str(root), check=True, capture_output=True
-    )
-    (root / "file.txt").write_text("line1\n", encoding="utf-8")
-    subprocess.run(["git", "add", "file.txt"], cwd=str(root), check=True, capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-m", "init"], cwd=str(root), check=True, capture_output=True, env=env
-    )
-
-
 class TestGitApply:
-    async def test_server_local_applies_clean(
-        self, delegate_no_rpc, server_local_workspace, tmp_path
-    ):
-        _init_git_repo(tmp_path)
-        # Add a new file — clean apply, no conflict path.
-        patch = (
-            "diff --git a/new.txt b/new.txt\n"
-            "new file mode 100644\n"
-            "index 0000000..0123456\n"
-            "--- /dev/null\n"
-            "+++ b/new.txt\n"
-            "@@ -0,0 +1 @@\n"
-            "+added\n"
-        )
-        out = await delegate_no_rpc.git_apply(server_local_workspace, patch, use_3way=False)
-        assert out == {"ok": True, "conflict_detail": None}
-        assert (tmp_path / "new.txt").read_text(encoding="utf-8") == "added\n"
-
-    async def test_server_local_conflict(self, delegate_no_rpc, server_local_workspace, tmp_path):
-        _init_git_repo(tmp_path)
-        # Modify file.txt with a context line that does not exist → check fails,
-        # use_3way=False → structured failure (not raise).
-        patch = (
-            "diff --git a/file.txt b/file.txt\n"
-            "index e69de29..0123456 100644\n"
-            "--- a/file.txt\n"
-            "+++ b/file.txt\n"
-            "@@ -1 +1 @@\n"
-            "-this-line-does-not-exist\n"
-            "+replacement\n"
-        )
-        out = await delegate_no_rpc.git_apply(server_local_workspace, patch, use_3way=False)
-        assert out["ok"] is False
-        assert out["conflict_detail"]
-
     async def test_daemon_client_calls_send_rpc(self, daemon_client_workspace):
         delegate, rpc = _make_delegate_with_rpc(result={"ok": True, "conflict_detail": None})
         out = await delegate.git_apply(daemon_client_workspace, "PATCH", use_3way=True)
         assert out == {"ok": True, "conflict_detail": None}
         assert rpc.calls[0]["method"] == "git_apply"
         # args 必须含 workdir（= workspace.root_path，daemon handler 据此在宿主 git apply）
-        # —— 钉死 runtime_id-vs-instance_id + args 契约回归（e2e 2026-07-07 暴露）。
+        # —— 钉死 args 契约回归（e2e 2026-07-07 暴露）。
         assert rpc.calls[0]["args"] == {
             "workdir": daemon_client_workspace.root_path,
             "patch_data": "PATCH",
@@ -308,16 +200,6 @@ class TestGitApply:
 
 
 class TestGitRevParse:
-    async def test_server_local_git_repo(self, delegate_no_rpc, server_local_workspace, tmp_path):
-        _init_git_repo(tmp_path)
-        out = await delegate_no_rpc.git_rev_parse(server_local_workspace, "HEAD")
-        assert isinstance(out, str)
-        assert len(out) == 40  # SHA-1 hex
-
-    async def test_server_local_not_git(self, delegate_no_rpc, server_local_workspace, tmp_path):
-        out = await delegate_no_rpc.git_rev_parse(server_local_workspace, "HEAD")
-        assert out is None
-
     async def test_daemon_client_calls_send_rpc(self, daemon_client_workspace):
         delegate, rpc = _make_delegate_with_rpc(result={"commit": "abc123def456"})
         out = await delegate.git_rev_parse(daemon_client_workspace, "HEAD")
@@ -339,36 +221,6 @@ class TestGitRevParse:
 
 
 class TestPollutionArchive:
-    async def test_server_local_no_pollution(
-        self, delegate_no_rpc, server_local_workspace, tmp_path
-    ):
-        out = await delegate_no_rpc.pollution_archive(server_local_workspace, str(tmp_path))
-        assert out == {"archived": False, "detail": None}
-
-    async def test_server_local_archives_pollution(
-        self, delegate_no_rpc, server_local_workspace, tmp_path
-    ):
-        sillyspec = tmp_path / ".sillyspec"
-        sillyspec.mkdir()
-        (sillyspec / "docs").mkdir()
-        (sillyspec / "docs" / "x.md").write_text("polluted", encoding="utf-8")
-        out = await delegate_no_rpc.pollution_archive(server_local_workspace, str(tmp_path))
-        assert out["archived"] is True
-        assert out["detail"]["file_count"] == 1
-        # Source .sillyspec moved out
-        assert not sillyspec.exists()
-        # Archive exists with the moved tree
-        archives = list(tmp_path.glob(".pollution-archive-*"))
-        assert len(archives) == 1
-        assert (archives[0] / ".sillyspec" / "docs" / "x.md").exists()
-
-    async def test_server_local_empty_sillyspec_not_archived(
-        self, delegate_no_rpc, server_local_workspace, tmp_path
-    ):
-        (tmp_path / ".sillyspec").mkdir()
-        out = await delegate_no_rpc.pollution_archive(server_local_workspace, str(tmp_path))
-        assert out == {"archived": False, "detail": None}
-
     async def test_daemon_client_calls_send_rpc(self, daemon_client_workspace):
         delegate, rpc = _make_delegate_with_rpc(
             result={"archived": True, "detail": {"file_count": 3}}
@@ -383,21 +235,6 @@ class TestPollutionArchive:
 
 
 class TestReadPackageJson:
-    async def test_server_local_present(self, delegate_no_rpc, server_local_workspace, tmp_path):
-        pkg = {"name": "demo", "scripts": {"build": "tsc"}}
-        (tmp_path / "package.json").write_text(json.dumps(pkg), encoding="utf-8")
-        out = await delegate_no_rpc.read_package_json(server_local_workspace)
-        assert out == pkg
-
-    async def test_server_local_absent(self, delegate_no_rpc, server_local_workspace, tmp_path):
-        out = await delegate_no_rpc.read_package_json(server_local_workspace)
-        assert out is None
-
-    async def test_server_local_invalid(self, delegate_no_rpc, server_local_workspace, tmp_path):
-        (tmp_path / "package.json").write_text("{not json", encoding="utf-8")
-        out = await delegate_no_rpc.read_package_json(server_local_workspace)
-        assert out is None
-
     async def test_daemon_client_calls_send_rpc(self, daemon_client_workspace):
         delegate, rpc = _make_delegate_with_rpc(result={"data": {"name": "remote"}})
         out = await delegate.read_package_json(daemon_client_workspace)
@@ -410,25 +247,6 @@ class TestReadPackageJson:
 
 
 class TestReadLocalYaml:
-    async def test_server_local_present(self, delegate_no_rpc, server_local_workspace, tmp_path):
-        sillyspec = tmp_path / ".sillyspec"
-        sillyspec.mkdir()
-        config = {"build": "npm run build", "test": "npm test"}
-        (sillyspec / "local.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
-        out = await delegate_no_rpc.read_local_yaml(server_local_workspace)
-        assert out == config
-
-    async def test_server_local_absent(self, delegate_no_rpc, server_local_workspace, tmp_path):
-        out = await delegate_no_rpc.read_local_yaml(server_local_workspace)
-        assert out is None
-
-    async def test_server_local_invalid(self, delegate_no_rpc, server_local_workspace, tmp_path):
-        sillyspec = tmp_path / ".sillyspec"
-        sillyspec.mkdir()
-        (sillyspec / "local.yaml").write_text(": not: valid: yaml: [", encoding="utf-8")
-        out = await delegate_no_rpc.read_local_yaml(server_local_workspace)
-        assert out is None
-
     async def test_daemon_client_calls_send_rpc(self, daemon_client_workspace):
         delegate, rpc = _make_delegate_with_rpc(result={"data": {"build": "remote build"}})
         out = await delegate.read_local_yaml(daemon_client_workspace)
@@ -444,7 +262,7 @@ class TestDaemonIdResolution:
     async def test_daemon_client_null_daemon_id_raises(self):
         # resolver 返回 None（workspace 既无 member binding 又无 legacy runtime→instance
         # 解析结果）= genuinely unbound → _via_rpc 必须抛 HostFsDelegateUnavailable。
-        ws = _make_workspace(path_source="daemon-client", daemon_runtime_id=None)
+        ws = _make_workspace()
         delegate = HostFsDelegate(
             session=None,
             ws_hub=None,

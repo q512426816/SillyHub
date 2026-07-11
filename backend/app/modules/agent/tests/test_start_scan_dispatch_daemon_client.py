@@ -42,8 +42,6 @@ async def test_start_scan_dispatch_skips_root_path_check_for_daemon_client(
         slug=f"client-{uuid.uuid4().hex[:8]}",
         root_path=r"C:\Users\qinyi\IdeaProjects\happy",
         status="pending",
-        path_source="daemon-client",
-        daemon_runtime_id=uuid.uuid4(),
     )
     db_session.add(workspace)
     await db_session.commit()
@@ -99,8 +97,6 @@ async def test_start_scan_dispatch_daemon_client_rpc_failure_raises(
         slug=f"client-off-{uuid.uuid4().hex[:8]}",
         root_path=r"C:\Users\qinyi\IdeaProjects\happy",
         status="pending",
-        path_source="daemon-client",
-        daemon_runtime_id=uuid.uuid4(),
     )
     db_session.add(workspace)
     await db_session.commit()

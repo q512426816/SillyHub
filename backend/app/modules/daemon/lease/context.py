@@ -17,10 +17,9 @@ from sqlmodel import col
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.modules.agent.context_builder import transport_for_path_source
 from app.modules.agent.model import AgentRun
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
-from app.modules.workspace.model import AgentRunWorkspace, Workspace
+from app.modules.workspace.model import AgentRunWorkspace
 from app.modules.workspace.service import resolve_root_path_for_daemon
 
 log = get_logger(__name__)
@@ -123,18 +122,11 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
             except (ValueError, AttributeError, TypeError):
                 ws_id = None
 
-        # 方案 A（path_source per-workspace transport 决策）：transport 不再只看全局
-        # settings.spec_transport，而是按 workspace.path_source 锁定。ws_id 非 None 时查
-        # Workspace 行取 path_source（daemon-client→tar / 显式 server-local→shared 锁死，
-        # 忽略全局）；path_source=None（quick-chat 无 workspace / 查不到行 / 字段空）→ 回退
-        # 全局 settings.spec_transport（向后兼容兜底，守护现有 test_lease_claim_transport C1-C5：
-        # 它们不创建真实 Workspace 行，全走兜底分支）。
+        # task-09（2026-07-10-remove-server-local-workspace-mode）：单一 daemon-client
+        # 后 transport 永远走全局 settings.spec_transport（task-07 已删
+        # transport_for_path_source + path_source per-workspace 锁定逻辑）。守护现有
+        # test_lease_claim_transport C1-C5（不创建真实 Workspace 行，全走全局分支）。
         settings = get_settings()
-        path_source: str | None = None
-        if ws_id is not None:
-            ws_row = await session.get(Workspace, ws_id)
-            if ws_row is not None:
-                path_source = ws_row.path_source
 
         # task-10（2026-07-02-workspace-config-flow，D-010）：lease payload 统一带
         # latest_spec_version（服务器权威文档版本），供 daemon 保鲜比对——每次执行
@@ -160,14 +152,13 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
         payload["latest_spec_version"] = latest_spec_version
 
         # task-02（daemon-root-path-translation）：root_path container→host 改写，
-        # 让 daemon 收到宿主机路径做 cwd（daemon-client 原样透传，裸机原样返回）。
+        # 让 daemon 收到宿主机路径做 cwd（单一 daemon-client 下 resolve_root_path_for_daemon
+        # 原样透传，task-03 已改单参）。
         if payload.get("root_path"):
-            payload["root_path"] = resolve_root_path_for_daemon(payload["root_path"], path_source)
-        transport = (
-            settings.spec_transport
-            if path_source is None
-            else transport_for_path_source(path_source)
-        )
+            payload["root_path"] = resolve_root_path_for_daemon(payload["root_path"])
+        # task-09：单一 daemon-client 后 transport 走全局 settings.spec_transport
+        # （task-07 已删 transport_for_path_source per-workspace 锁定）。
+        transport = settings.spec_transport
         # transport 双写（camelCase + snake_case），对齐 specRoot/spec_root、rootPath/root_path
         # 惯例；daemon execPayload 归一化两端字段名都覆盖（边界 E5）。
         payload["transport"] = transport
@@ -223,7 +214,7 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
     # 不启 agent（无 agent_run_id），daemon 端 _runInitLease 读 payload 写
     # .sillyspec-platform.json + pull spec。从 lease metadata 构建最小 payload，跳过
     # batch agent_run_id 校验（init 无 AgentRun，否则 _raise_no_agent_run 422）。
-    # root_path 按 workspace.path_source 改写（daemon-client 原样 / server-local 容器→宿主）。
+    # task-09：root_path 经 resolve_root_path_for_daemon 单参改写（单一 daemon-client）。
     # daemon _runInitLease 读 workspaceId/rootPath(camelCase) + platform_config + latestSpecVersion。
     if lease_meta.get("mode") == "init":
         payload["mode"] = "init"
@@ -240,10 +231,8 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
             payload["workspace_id"] = str(_init_ws)
             payload["workspaceId"] = str(_init_ws)
         _init_root = lease_meta.get("root_path")
-        if _init_root and _init_ws is not None:
-            _ws_row = await session.get(Workspace, _init_ws)
-            if _ws_row is not None:
-                _init_root = resolve_root_path_for_daemon(_init_root, _ws_row.path_source)
+        if _init_root:
+            _init_root = resolve_root_path_for_daemon(_init_root)
         if _init_root:
             payload["rootPath"] = _init_root  # daemon _runInitLease 读 ctx.rootPath
             payload["root_path"] = _init_root
@@ -328,14 +317,10 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
         payload["workspaceSlug"] = lease_meta["workspace_slug"]
         payload["workspace_slug"] = lease_meta["workspace_slug"]
     # task-02（daemon-root-path-translation）：root_path container→host 改写。
-    # batch 分支按 workspace.path_source 决策（daemon-client 原样，server-local 改写）。
-    ws_path_source: str | None = None
-    if workspace_id:
-        ws_row_batch = await session.get(Workspace, workspace_id)
-        if ws_row_batch is not None:
-            ws_path_source = ws_row_batch.path_source
+    # task-09：单一 daemon-client 后 resolve_root_path_for_daemon 单参（原样透传），
+    # 删 ws_path_source 读取（不再按 path_source 分流）。
     if lease_meta.get("root_path"):
-        daemon_root_path = resolve_root_path_for_daemon(lease_meta["root_path"], ws_path_source)
+        daemon_root_path = resolve_root_path_for_daemon(lease_meta["root_path"])
         payload["rootPath"] = daemon_root_path
         payload["root_path"] = daemon_root_path
 

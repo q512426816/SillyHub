@@ -1,18 +1,15 @@
 """Tests for per-member binding routing in RunPlacementService (task-08).
 
-Covers change ``2026-07-03-daemon-entity-binding`` task-08:
-per-member binding (WorkspaceMemberRuntime) now routes via daemon_id
-(D-004) + workspace.default_agent / provider override (D-005),
-with D-008 error when the requested provider is not enabled on the daemon.
+Covers change ``2026-07-03-daemon-entity-binding`` task-08 (D-007 后更新)：
+per-member binding (WorkspaceMemberRuntime) 是唯一绑定真相源，经 daemon_id
+(D-004) + workspace.default_agent / provider override (D-005) 路由，provider
+未启用时抛 D-008。server-local / 全局列回退路径已随 D-007 删除。
 
 Scenarios:
 - T1: Member binding with daemon_id + default_agent matching an online runtime → dispatch uses that runtime.
 - T2: Member binding with daemon online but default_agent not enabled → NoOnlineDaemonError (D-008).
 - T3: Member binding with daemon_id belonging to another user → NoOnlineDaemonError.
-- T4: No member binding row → falls back to workspace global column.
-- T5: No member binding, workspace not daemon-client → server-local.
 - T6: decide_backend with member binding (daemon online) → DAEMON.
-- T7: decide_backend with no member binding → workspace global column.
 - T8: prepare_scan_interactive_dispatch uses member binding (daemon_id + provider).
 """
 
@@ -101,17 +98,15 @@ async def _create_workspace(
     session,
     *,
     user_id: uuid.UUID | None = None,
-    path_source: str = "server-local",
-    daemon_runtime_id: uuid.UUID | None = None,
     default_agent: str | None = None,
 ) -> Workspace:
+    """Build a workspace. D-007：path_source/daemon_runtime_id 列已删除，
+    绑定完全由 WorkspaceMemberRuntime 行承载。"""
     ws = Workspace(
         id=uuid.uuid4(),
         name=f"ws-{uuid.uuid4().hex[:6]}",
         slug=f"slug-{uuid.uuid4().hex[:8]}",
         root_path=f"/tmp/{uuid.uuid4().hex[:8]}",
-        path_source=path_source,
-        daemon_runtime_id=daemon_runtime_id,
         default_agent=default_agent,
         status="active",
         created_by=user_id,
@@ -174,7 +169,7 @@ async def test_t1_member_binding_routes_to_binding_runtime(db_session):
     user_id = await _create_user(db_session)
     di = await _create_daemon_instance(db_session, user_id)
     # Create a stray online runtime that should NOT be selected.
-    stray_rt = await _create_runtime(
+    _stray_rt = await _create_runtime(
         db_session, user_id, provider="claude_code", daemon_instance_id=di.id
     )
     # Create the runtime the binding points to.
@@ -184,8 +179,6 @@ async def test_t1_member_binding_routes_to_binding_runtime(db_session):
     ws = await _create_workspace(
         db_session,
         user_id=user_id,
-        path_source="daemon-client",
-        daemon_runtime_id=stray_rt.id,  # Global column — should be ignored.
         default_agent="codex",  # Tells dispatch to route to codex provider.
     )
     # Create per-member binding pointing to the daemon (not a specific runtime).
@@ -221,7 +214,6 @@ async def test_t2_member_binding_daemon_online_provider_missing_raises(db_sessio
     ws = await _create_workspace(
         db_session,
         user_id=user_id,
-        path_source="daemon-client",
         default_agent="claude_code",  # default_agent not enabled on the daemon.
     )
     await _create_member_binding(
@@ -253,7 +245,6 @@ async def test_t3_member_binding_cross_user_daemon_rejected(db_session):
     ws = await _create_workspace(
         db_session,
         user_id=user_id,
-        path_source="daemon-client",
         default_agent="claude_code",
     )
     await _create_member_binding(
@@ -270,54 +261,12 @@ async def test_t3_member_binding_cross_user_daemon_rejected(db_session):
     assert "离线或不存在" in ei.value.message
 
 
-# ---- T4: No member binding → falls back to workspace global column -----------
-
-
-@pytest.mark.asyncio
-async def test_t4_no_member_binding_falls_back_to_global_column(db_session):
-    """Without member binding, workspace.daemon_runtime_id is used."""
-    user_id = await _create_user(db_session)
-    _stray_rt = await _create_runtime(db_session, user_id, provider="claude_code")
-    bound_rt = await _create_runtime(db_session, user_id, provider="codex")
-    ws = await _create_workspace(
-        db_session,
-        user_id=user_id,
-        path_source="daemon-client",
-        daemon_runtime_id=bound_rt.id,
-    )
-    # Do NOT create a member binding row — should fall back to global column.
-    run = await _create_agent_run(db_session)
-
-    placement = RunPlacementService(db_session)
-    lease_id = await placement.dispatch_to_daemon(run.id, user_id, workspace_id=ws.id)
-
-    assert lease_id is not None
-    actual = await _lease_runtime_id(db_session, lease_id)
-    assert actual == bound_rt.id, f"Expected global column runtime {bound_rt.id}, got {actual}"
-
-
-# ---- T5: No member binding, workspace not daemon-client → server-local -------
-
-
-@pytest.mark.asyncio
-async def test_t5_no_binding_server_local_uses_online_runtime(db_session):
-    """Without member binding on server-local, user's online runtime is used."""
-    user_id = await _create_user(db_session)
-    online_rt = await _create_runtime(db_session, user_id)
-    ws = await _create_workspace(
-        db_session,
-        user_id=user_id,
-        path_source="server-local",
-    )
-    # No member binding — should use server-local path (_get_online_runtime).
-    run = await _create_agent_run(db_session)
-
-    placement = RunPlacementService(db_session)
-    lease_id = await placement.dispatch_to_daemon(run.id, user_id, workspace_id=ws.id)
-
-    assert lease_id is not None
-    actual = await _lease_runtime_id(db_session, lease_id)
-    assert actual == online_rt.id
+# ---- T4 / T5 / T7 已删除 (D-007) ---------------------------------------------
+# 旧 t4 (无 binding 回退 workspace.daemon_runtime_id 全局列) / t5 (server-local
+# 用 user 级在线 runtime) / t7 (decide_backend 无 binding 回退全局列) —— 全部依赖
+# server-local / 全局列兜底路径，这些路径在 2026-07-10-remove-server-local-
+# workspace-mode (D-007) 中已删除：所有 workspace 永远 daemon-client，无 binding
+# 行即未绑定，直接抛 NoOnlineDaemonError。
 
 
 # ---- T6: decide_backend with member binding (online) → DAEMON ---------------
@@ -332,7 +281,6 @@ async def test_t6_decide_backend_member_binding_online(db_session):
     ws = await _create_workspace(
         db_session,
         user_id=user_id,
-        path_source="daemon-client",
     )
     await _create_member_binding(
         db_session,
@@ -346,25 +294,9 @@ async def test_t6_decide_backend_member_binding_online(db_session):
     assert backend.value == "daemon"
 
 
-# ---- T7: decide_backend with no member binding → workspace global column -----
-
-
-@pytest.mark.asyncio
-async def test_t7_decide_backend_no_binding_falls_back_to_global(db_session):
-    """Without member binding, decide_backend uses global column."""
-    user_id = await _create_user(db_session)
-    target_rt = await _create_runtime(db_session, user_id, status="online")
-    ws = await _create_workspace(
-        db_session,
-        user_id=user_id,
-        path_source="daemon-client",
-        daemon_runtime_id=target_rt.id,
-    )
-    # No member binding row — should fall back to global column.
-
-    placement = RunPlacementService(db_session)
-    backend = await placement.decide_backend(workspace_id=ws.id, user_id=user_id)
-    assert backend.value == "daemon"
+# ---- T7 已删除 (D-007) -------------------------------------------------------
+# 旧 t7 (decide_backend 无 binding 回退全局列) —— 依赖全局列回退路径，
+# D-007 删除后无 binding 行即抛 NoOnlineDaemonError，case 语义不复存在。
 
 
 # ---- T8: prepare_scan_interactive_dispatch uses member binding ---------------
@@ -375,7 +307,8 @@ async def test_t8_scan_interactive_dispatch_uses_member_binding(db_session):
     """scan interactive dispatch routes via per-member binding (daemon_id)."""
     user_id = await _create_user(db_session)
     di = await _create_daemon_instance(db_session, user_id)
-    stray_rt = await _create_runtime(
+    # A stray runtime on the same daemon that should NOT be selected (provider mismatch).
+    _stray_rt = await _create_runtime(
         db_session, user_id, provider="claude_code", daemon_instance_id=di.id
     )
     target_rt = await _create_runtime(
@@ -384,8 +317,6 @@ async def test_t8_scan_interactive_dispatch_uses_member_binding(db_session):
     ws = await _create_workspace(
         db_session,
         user_id=user_id,
-        path_source="daemon-client",
-        daemon_runtime_id=stray_rt.id,
     )
     await _create_member_binding(
         db_session,

@@ -342,9 +342,9 @@ export interface paths {
          * List My Bindings Endpoint
          * @description Return the caller's member bindings across ALL workspaces.
          *
-         *     遗留 1（daemon-entity-binding）：工作区列表卡片按 daemon 实体展示绑定信息，
-         *     新工作区 ``workspace.daemon_runtime_id`` 为 NULL（绑定存 member binding 行）。
-         *     批量端点一次拉取当前用户全部 binding，前端按 workspace_id 索引，避免列表 N 次请求。
+         *     daemon-entity-binding：工作区列表卡片按 daemon 实体展示绑定信息，绑定一律存
+         *     member binding 行（workspace_member_runtimes）。批量端点一次拉取当前用户全部
+         *     binding，前端按 workspace_id 索引，避免列表 N 次请求。
          *
          *     鉴权仅需登录（``get_current_user``）—— 返回行天然限定为调用者本人，
          *     无需逐 workspace 校验 WORKSPACE_READ；未加入任何 workspace 的用户返回空列表。
@@ -404,7 +404,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/workspaces/{workspace_id}/relations": {
+    "/api/workspaces/{workspace_id}/components": {
         parameters: {
             query?: never;
             header?: never;
@@ -412,37 +412,66 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Relations
-         * @description List all outgoing + incoming relations for a workspace.
+         * List Components
+         * @description 列出项目组的只读组件（一级子项目，D-001@V1，变更 2026-07-06-component-readonly-split）。
+         *
+         *     组件不再是 workspaces 表的行——内部组件元数据从 ``projects/*.yaml`` 只读派生，
+         *     无 workspace 身份，写端点天然无法作用其上。
          */
-        get: operations["list_relations_api_workspaces__workspace_id__relations_get"];
+        get: operations["list_components_api_workspaces__workspace_id__components_get"];
         put?: never;
-        /**
-         * Create Relation
-         * @description Create a relation. source_id = workspace_id from path.
-         */
-        post: operations["create_relation_api_workspaces__workspace_id__relations_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/workspaces/relations/{relation_id}": {
+    "/api/workspaces/{workspace_id}/skills": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Workspace Skills
+         * @description 列出 workspace specDir/skills/ 下的自定义 skill 名 + 文件清单（只读）。
+         *
+         *     task-06 / FR-07 / D-006：经 SpecPathResolver 定位 specDir，只读列目录。
+         *     NFR-05：daemon-client 经 HostFsDelegate RPC 读；server-local 直接 Path 读。
+         *     membership 校验由 ``require_permission(WORKSPACE_READ)`` + ``{workspace_id}`` 路径参数
+         *     自动完成（非成员 403）。无 skills/ 子目录返回空列表不报错。
+         */
+        get: operations["list_workspace_skills_api_workspaces__workspace_id__skills_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/mcp-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
         /**
-         * Delete Relation
-         * @description Delete a relation by id.
+         * Get Workspace Mcp Config
+         * @description 读 workspace specDir/.mcp.json（只读，env secret 脱敏）。
+         *
+         *     task-06 / FR-08 / D-006：经 SpecPathResolver 定位 specDir，只读 ``.mcp.json``。
+         *     NFR-05：daemon-client 经 HostFsDelegate RPC 读；server-local 直接 Path 读。
+         *     env 中 token/key/secret/password 类字段遮蔽（D-008，复用 settings/router 的
+         *     ``_redact_mcp_env``）。无文件返回空 ``{mcpServers: {}}`` 不报错。
          */
-        delete: operations["delete_relation_api_workspaces_relations__relation_id__delete"];
+        get: operations["get_workspace_mcp_config_api_workspaces__workspace_id__mcp_config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -476,29 +505,9 @@ export interface paths {
         put?: never;
         /**
          * Generate Projects
-         * @description Generate projects/*.yaml from _module-map.yaml and reparse into child workspaces.
+         * @description Generate projects/*.yaml from _module-map.yaml (一级粒度，只产 yaml).
          */
         post: operations["generate_projects_api_workspaces__workspace_id__generate_projects_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/workspaces/{workspace_id}/reparse": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reparse Workspace
-         * @description Parse projects/*.yaml under a parent Workspace and sync children + relations.
-         */
-        post: operations["reparse_workspace_api_workspaces__workspace_id__reparse_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -860,6 +869,30 @@ export interface paths {
         };
         /** List Change Files */
         get: operations["list_change_files_api_workspaces__workspace_id__changes__change_id__files_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/changes/{change_id}/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Change Sessions
+         * @description 列出某变更下的全部会话（2026-07-09-change-detail-session task-09）。
+         *
+         *     跨成员可见（D-005@v1，不加 user_id 过滤），鉴权复用 CHANGE_READ（X-03）。
+         *     标题取该会话最早一条 channel=user_input 的 AgentRunLog 摘要（前 30 字，X-04）。
+         *     按 last_active_at desc 排序（Python 排序规避 PG/SQLite 方言差异）。
+         */
+        get: operations["list_change_sessions_api_workspaces__workspace_id__changes__change_id__sessions_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1509,6 +1542,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/dialogs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workspace Dialogs
+         * @description 工作区级 pending 对话查询（design §4.1 / FR-5 审批中心兜底）。
+         *
+         *     URL 落地 ``/api/workspaces/{workspace_id}/dialogs``（agent router 默认 /api 前缀，
+         *     不挂 daemon router——其 prefix=/daemon 会变形 URL）。成员校验由
+         *     ``require_permission(TASK_READ)`` 从路径参数 ``{workspace_id}`` 完成（非成员 403）；
+         *     实现委托 ``DaemonPermissionService.list_pending_dialogs_for_workspace``（跨模块读，
+         *     permission_service 已有先例 import AgentSession）。只读，不触碰 PERMISSION_REQUEST
+         *     写链路（D-001）。
+         */
+        get: operations["list_workspace_dialogs_api_workspaces__workspace_id__dialogs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/tasks/{task_id}/agent/runs": {
         parameters: {
             query?: never;
@@ -1992,6 +2052,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/machines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Machines
+         * @description 平台管理员分页查看全部 owner 的 daemon 机器（design §5.1 / FR-1）。
+         *
+         *     普通账号仅见自己的机器（service 层强制 ``actor == user_id``，请求 ``user_id`` 被忽略）。
+         *     ``list_machines`` 内部已先 ``cleanup_stale_runtimes`` 收敛 stale 状态，router 不重复调。
+         */
+        get: operations["list_machines_api_daemon_machines_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/machines/{instance_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Machine
+         * @description PATCH machine display_alias（design §5.2 / D-001 / FR-2）。
+         *
+         *     省略 display_alias = 不变；显式 null/空白 = 清空（与 runtime 级 PATCH 语义一致）。
+         *     0-runtime 机器亦可改（直写 daemon_instances）。归属校验/404 由 service
+         *     ``_get_owned_instance`` 完成（越权 403 / 不存在 404）。
+         */
+        patch: operations["update_machine_api_daemon_machines__instance_id__patch"];
+        trace?: never;
+    };
+    "/api/daemon/machines/{instance_id}/self-update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Machine Self Update
+         * @description 推送 daemon 自更新指令到指定机器（admin，design §5.3 / FR-3）。
+         *
+         *     机器级直接以 ``instance_id`` 作 ``daemon_id`` 路由 WS（ws_hub 第一参数即
+         *     daemon_id，task-06），复用既有 ``daemon:self_update`` 消息，不引入新事件 type
+         *     （design §14）。先 ``_get_owned_instance`` 做归属校验（403/404），离线或 WS 发送
+         *     失败 → 504 ``DaemonRuntimeOffline``（与 runtime 级 self-update 同款）。
+         */
+        post: operations["trigger_machine_self_update_api_daemon_machines__instance_id__self_update_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/runtimes/{runtime_id}/disable": {
         parameters: {
             query?: never;
@@ -2381,6 +2513,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/runtimes/{runtime_id}/list-roots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List Roots
+         * @description Forward a list_roots request to the bound daemon over WS RPC.
+         *
+         *     task-04 · FR-2 / D-002 ownership（runtime 必须属于当前用户）/ D-007 读=owner（非 admin）。
+         *     daemon 返回该主机磁盘根锚点列表（用于前端文件夹选择锚点定位）。
+         *     backend 仅负责 ownership 校验 + RPC/HTTP 状态映射，不解析路径。
+         */
+        post: operations["list_roots_api_daemon_runtimes__runtime_id__list_roots_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/permissions/{request_id}/response": {
         parameters: {
             query?: never;
@@ -2656,6 +2812,133 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/skills/latest/manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Skills Manifest
+         * @description Return sillyspec skills manifest (version + file list + sha256 per file).
+         *
+         *     daemon skill-manager 用来判定是否需重新拉取 bundle（版本漂移）。
+         *     合并代码库 ``sillyspec-*`` + DB ``CustomSkill``（task-03，每个 → ``<name>/SKILL.md``）。
+         *     源目录无 skills 时返回 404。
+         */
+        get: operations["get_skills_manifest_api_daemon_skills_latest_manifest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/skills/latest/bundle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Skills Bundle
+         * @description Return sillyspec-skills.tar.gz binary stream for daemon download.
+         *
+         *     bundle 含代码库 ``sillyspec-*`` skill 目录 + DB ``CustomSkill``，打包为 gzip tar。
+         *     无 skills 时返回 404。
+         */
+        get: operations["get_skills_bundle_api_daemon_skills_latest_bundle_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/mcp/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Daemon Mcp Config
+         * @description 返回平台默认 MCP 配置 + server 白名单（**原值不脱敏**，design D-004）。
+         *
+         *     daemon 启动 skill-manager / mcp-config 时拉取，用于：
+         *       * ``platform_default.mcpServers`` → 注入 claude 启动 ``env``（真实值，
+         *         secret 类 env key 不遮蔽，区别 admin GET D-008）；
+         *       * ``whitelist`` → 仅放行白名单内的 server。
+         *
+         *     无配置时返回空结构 ``{"platform_default": {"mcpServers": {}}, "whitelist": []}``，
+         *     不报错（daemon 按"无平台默认"处理）。
+         */
+        get: operations["get_daemon_mcp_config_api_daemon_mcp_config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/custom-skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Custom Skills
+         * @description 列出全部平台 CustomSkill（不含 content，含 content_preview）。
+         */
+        get: operations["list_custom_skills_api_custom_skills_get"];
+        put?: never;
+        /**
+         * Create Custom Skill
+         * @description 创建平台 CustomSkill（name 字符集/前缀/unique 校验在 service 层）。
+         */
+        post: operations["create_custom_skill_api_custom_skills_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/custom-skills/{skill_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Custom Skill
+         * @description 详情（含完整 content）。
+         */
+        get: operations["get_custom_skill_api_custom_skills__skill_id__get"];
+        /**
+         * Update Custom Skill
+         * @description 部分更新（name/description/content 任一可选）。
+         */
+        put: operations["update_custom_skill_api_custom_skills__skill_id__put"];
+        post?: never;
+        /**
+         * Delete Custom Skill
+         * @description 删除平台 CustomSkill。
+         */
+        delete: operations["delete_custom_skill_api_custom_skills__skill_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -5050,6 +5333,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/platform-settings/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Mcp Platform Config
+         * @description 读平台默认 MCP 配置，env secret 已遮蔽（admin 视图，D-008）。
+         */
+        get: operations["get_mcp_platform_config_api_platform_settings_mcp_get"];
+        /**
+         * Put Mcp Platform Config
+         * @description 写平台默认 MCP 配置（接收原值存储，不脱敏；D-008）。
+         */
+        put: operations["put_mcp_platform_config_api_platform_settings_mcp_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/platform-settings/mcp-whitelist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Mcp Whitelist
+         * @description 读 MCP server 白名单（server 名列表）。
+         */
+        get: operations["get_mcp_whitelist_api_platform_settings_mcp_whitelist_get"];
+        /**
+         * Put Mcp Whitelist
+         * @description 写 MCP server 白名单。请求体为顶层 JSON 数组（design §7 契约）。
+         */
+        put: operations["put_mcp_whitelist_api_platform_settings_mcp_whitelist_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/users": {
         parameters: {
             query?: never;
@@ -5585,12 +5916,8 @@ export interface paths {
          *     packing 阶段每 5s keepalive 防 Next.js proxy idle timeout。前端 importSpecWorkspace
          *     流式读 event-stream（不再返回 JSON）。
          *
-         *     daemon-entity-binding 补遗（ql-20260704-002）：daemon_id 存 per-member binding 行
-         *     （workspace.daemon_runtime_id 已退化为 NULL），import 必须经 MemberBindingResolver
-         *     解析 actor 的 binding 拿 daemon_id（对齐 sync-manual router.py:148-169），无 binding
-         *     行回退 workspace 全局 daemon_runtime_id（兼容 legacy / 未初始化成员）。否则
-         *     service.import_from_repo_sse 拿到 ws_daemon_id=None → daemon-client 分流失败 →
-         *     落 server path 分支 → "cannot resolve server path"。
+         *     daemon_id 存 per-member binding 行，import 必须经 MemberBindingResolver 解析 actor
+         *     的 binding 拿 daemon_id；无 binding 行 → 解析失败抛 DaemonClientNoActiveSession。
          */
         post: operations["import_spec_workspace_api_workspaces__workspace_id__spec_workspace_import_post"];
         delete?: never;
@@ -5610,19 +5937,16 @@ export interface paths {
         put?: never;
         /**
          * Sync Manual Spec Workspace
-         * @description 「同步到服务器」手动按钮（D-012 / task-13）：path_source 分流。
+         * @description 「同步到服务器」手动按钮（D-012 / task-13）：daemon-client outbox 分发。
          *
-         *     解析当前用户的 per-member binding（``MemberBindingResolver``）；未绑定回退读
-         *     workspace 全局 ``path_source``/``root_path``/``daemon_runtime_id``（向后兼容）。
+         *     解析当前用户的 per-member binding（``MemberBindingResolver``）；无 binding → 解析
+         *     失败抛 DaemonClientNoActiveSession（AppError HTTP 400，不再回退 legacy）。
          *
-         *     - **server-local**：root_path 在容器/宿主机可读 → 直接打包 .sillyspec → apply_sync
-         *       落盘 + reparse，立即返 ``{"status": "done"}``。
-         *     - **daemon-client**：root_path 在成员宿主机，backend 读不到 → runtime 由
-         *       ``resolve_runtime_for_writeback`` 现算（D-001@v1，2026-07-05-daemon-client-change-binding-fix）；
-         *       建 ``kind="spec-sync"`` 的 DaemonChangeWrite outbox 行（files 携带 workspace_id
-         *       元信息），返 ``{"status": "pending", "task_id": <uuid>}``。前端轮询
-         *       ``GET .../sync-manual/pending``。daemon-client 解析失败 → 400
-         *       ``DAEMON_CLIENT_NO_SESSION``（不再错走 server-local）。
+         *     唯一路径：root_path 在成员宿主机，backend 读不到 → runtime 由
+         *     ``resolve_runtime_for_writeback`` 现算（D-001@v1，2026-07-05-daemon-client-change-binding-fix）；
+         *     建 ``kind="spec-sync"`` 的 DaemonChangeWrite outbox 行（files 携带 workspace_id
+         *     元信息），返 ``{"status": "pending", "task_id": <uuid>}``。前端轮询
+         *     ``GET .../sync-manual/pending``。
          */
         post: operations["sync_manual_spec_workspace_api_workspaces__workspace_id__spec_workspace_sync_manual_post"];
         delete?: never;
@@ -5859,6 +6183,8 @@ export interface components {
             subagent_type?: string | null;
             /** Depth */
             depth?: number | null;
+            /** Tool Kind */
+            tool_kind?: string | null;
         };
         /** AgentRunResponse */
         AgentRunResponse: {
@@ -5939,6 +6265,31 @@ export interface components {
             /** Resumed From Step */
             resumed_from_step?: number | null;
         };
+        /**
+         * AgentSessionListItem
+         * @description 变更级会话列表项（GET /workspaces/{wid}/changes/{cid}/sessions）。
+         *
+         *     跨成员可见（D-005@v1），标题取自该会话最早一条 channel=user_input 的
+         *     AgentRunLog 摘要（前 30 字，X-04 干净来源）。
+         */
+        AgentSessionListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Provider */
+            provider: string;
+            /** Status */
+            status: string;
+            /** Turn Count */
+            turn_count: number;
+            author: components["schemas"]["ChangeSessionAuthor"];
+            /** Last Active At */
+            last_active_at: string | null;
+            /** Title */
+            title: string | null;
+        };
         /** AgentSessionListResponse */
         AgentSessionListResponse: {
             /** Items */
@@ -5982,6 +6333,10 @@ export interface components {
             last_active_at: string | null;
             /** Ended At */
             ended_at: string | null;
+            /** Change Id */
+            change_id: string | null;
+            /** Workspace Id */
+            workspace_id: string | null;
         };
         /** ApiKeyCreateRequest */
         ApiKeyCreateRequest: {
@@ -6125,7 +6480,7 @@ export interface components {
              */
             runtime_id: string;
             /** Claim Token */
-            claim_token: string;
+            claim_token?: string | null;
             /** Workspace Id */
             workspace_id?: string | null;
             /**
@@ -6413,11 +6768,6 @@ export interface components {
              * Format: uuid
              */
             workspace_id: string;
-            /**
-             * Workspace Ids
-             * @default []
-             */
-            workspace_ids: string[];
             /** Change Key */
             change_key: string;
             /** Title */
@@ -6504,6 +6854,19 @@ export interface components {
              */
             deleted: number;
         };
+        /**
+         * ChangeSessionAuthor
+         * @description 变更会话列表项的作者信息（D-005@v1 跨成员可见）。
+         */
+        ChangeSessionAuthor: {
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /** Display Name */
+            display_name?: string | null;
+        };
         /** ChangeSummary */
         ChangeSummary: {
             /**
@@ -6532,11 +6895,6 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
-            /**
-             * Workspace Ids
-             * @default []
-             */
-            workspace_ids: string[];
         };
         /** ChangeWarning */
         ChangeWarning: {
@@ -6705,6 +7063,141 @@ export interface components {
              */
             created_at: string;
         };
+        /**
+         * ComponentListResponse
+         * @description ``GET /workspaces/{id}/components`` 响应。
+         */
+        ComponentListResponse: {
+            /** Items */
+            items: components["schemas"]["ComponentRead"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * ComponentRead
+         * @description 单个只读组件的响应 DTO（对齐 design §7.1）。
+         */
+        ComponentRead: {
+            /** Component Key */
+            component_key: string;
+            /** Name */
+            name: string;
+            /** Path */
+            path?: string | null;
+            /** Type */
+            type?: string | null;
+            /** Role */
+            role?: string | null;
+            /** Tech Stack */
+            tech_stack?: string[];
+            /**
+             * Status
+             * @default active
+             */
+            status: string;
+        };
+        /**
+         * CustomSkillCreate
+         * @description 创建请求体。
+         */
+        CustomSkillCreate: {
+            /**
+             * Name
+             * @description skill 唯一标识，[a-z0-9-]{2,40}，禁 sillyspec- 前缀
+             */
+            name: string;
+            /**
+             * Description
+             * @description 一句话描述
+             */
+            description: string;
+            /**
+             * Content
+             * @description SKILL.md 正文（YAML frontmatter 由业务层组装）
+             */
+            content: string;
+        };
+        /**
+         * CustomSkillDetail
+         * @description 详情（含完整 content）。
+         */
+        CustomSkillDetail: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /**
+             * Content Preview
+             * @description content 前 120 字符，供列表展示
+             */
+            content_preview: string;
+            /** Created By */
+            created_by?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Content */
+            content: string;
+        };
+        /**
+         * CustomSkillRead
+         * @description 列表项（不含 content，含 preview）。
+         */
+        CustomSkillRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /**
+             * Content Preview
+             * @description content 前 120 字符，供列表展示
+             */
+            content_preview: string;
+            /** Created By */
+            created_by?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * CustomSkillUpdate
+         * @description 更新请求体（部分更新，所有字段可选）。
+         */
+        CustomSkillUpdate: {
+            /**
+             * Name
+             * @description 同 create 规则
+             */
+            name?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Content */
+            content?: string | null;
+        };
         /** CustomerMaintenanceCreate */
         CustomerMaintenanceCreate: {
             /** Create Name */
@@ -6809,8 +7302,8 @@ export interface components {
          * DaemonHeartbeatResponse
          * @description Per-daemon 心跳响应体。
          *
-         *     heartbeat_ack 经 WS 下发到 daemon 连接（task-06）；HTTP 响应只回 daemon 实体
-         *     级摘要。``allowed_roots`` 从 daemon_instances 读（已上提，design §4.2）。
+         *     2026-07-06-allowed-roots-per-runtime：返 per-runtime allowed_roots map
+         *     （runtimes: [{runtime_id, allowed_roots}]），daemon _syncAllowedRoots per-runtime 同步。
          */
         DaemonHeartbeatResponse: {
             /**
@@ -6820,8 +7313,21 @@ export interface components {
             daemon_instance_id: string;
             /** Status */
             status: string;
+            /** Runtimes */
+            runtimes?: components["schemas"]["DaemonHeartbeatRuntimePolicy"][];
+        };
+        /**
+         * DaemonHeartbeatRuntimePolicy
+         * @description 心跳响应内单个 runtime 的 per-runtime allowed_roots。
+         */
+        DaemonHeartbeatRuntimePolicy: {
+            /**
+             * Runtime Id
+             * Format: uuid
+             */
+            runtime_id: string;
             /** Allowed Roots */
-            allowed_roots?: string[];
+            allowed_roots: string[];
         };
         /**
          * DaemonInstanceProviderItem
@@ -6864,6 +7370,76 @@ export interface components {
             build_id?: string | null;
             /** Providers */
             providers?: components["schemas"]["DaemonInstanceProviderItem"][];
+        };
+        /**
+         * DaemonMachineListResponse
+         * @description Response body for GET /api/daemon/machines（design §5.1 / FR-1）。
+         *
+         *     机器级分页（默认 20/页，D-007），机器卡永不跨页断裂。
+         */
+        DaemonMachineListResponse: {
+            /** Items */
+            items: components["schemas"]["DaemonMachineRead"][];
+            /** Total */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+        };
+        /**
+         * DaemonMachineRead
+         * @description 机器级聚合读视图 DTO（design §5.1 / task-01）。
+         *
+         *     一行 = 一台 daemon 机器（daemon_instances），机器级字段直接读 instance 行；
+         *     其下 runtimes 嵌套该机器全部 daemon_runtimes（含各自 capabilities/allowed_roots）。
+         *     派生 runtime_count / online_runtime_count 由 service 层组装时填入。
+         */
+        DaemonMachineRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Hostname */
+            hostname: string;
+            /** Display Alias */
+            display_alias?: string | null;
+            /** Os */
+            os?: string | null;
+            /** Arch */
+            arch?: string | null;
+            /** Status */
+            status: string;
+            /** Last Heartbeat At */
+            last_heartbeat_at: string | null;
+            /** Version */
+            version?: string | null;
+            /** Build Id */
+            build_id?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            owner?: components["schemas"]["app__modules__daemon__schema__OwnerRead"] | null;
+            /** Runtime Count */
+            runtime_count: number;
+            /** Online Runtime Count */
+            online_runtime_count: number;
+            /** Runtimes */
+            runtimes?: components["schemas"]["DaemonRuntimeRead"][];
+        };
+        /**
+         * DaemonMachineUpdate
+         * @description Request body for PATCH /api/daemon/machines/{instance_id}（design §5.2 / D-001）。
+         *
+         *     ``display_alias`` 省略 = 不变；显式 ``null``/空白 = 清空（与 runtime 级
+         *     ``DaemonRuntimeUpdate`` 语义一致）。
+         */
+        DaemonMachineUpdate: {
+            /** Display Alias */
+            display_alias?: string | null;
         };
         /**
          * DaemonRegisterProviderItem
@@ -6946,6 +7522,8 @@ export interface components {
              * Format: uuid
              */
             runtime_id: string;
+            /** Allowed Roots */
+            allowed_roots?: string[];
         };
         /**
          * DaemonRuntimeAllowedRootsUpdate
@@ -7236,6 +7814,11 @@ export interface components {
              * @description render_bundle_to_claude_md 输出，daemon 写入 {workDir}/.claude/CLAUDE.md
              */
             claude_md: string;
+            /**
+             * Kind
+             * @description lease 类型：interactive=走 SessionManager
+             */
+            kind?: string | null;
             /** Prompt */
             prompt?: string | null;
             /** Provider */
@@ -7275,6 +7858,18 @@ export interface components {
              * @description 执行 spec 文档根目录提示。server-local 时透传 lease_meta 的 backend 机器路径（与 scan bundle 内一致）；daemon-client 时留空（None）——backend 路径对 daemon 不可达，daemon 自行经 bundle 端点拉到本地。grill X-001 修正。
              */
             spec_root?: string | null;
+            /**
+             * Stage Meta
+             * @description stage 投递元数据（StageDispatchMeta）。仅 stage 类型 run 携带；daemon 注入 STAGE_META 环境变量并据此构造 skill 调用 prompt。task/scan run 为 None。
+             */
+            stage_meta?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Stage Dispatch
+             * @description 是否 stage 投递（daemon 用它判定是否构造 skill 调用 prompt）。
+             */
+            stage_dispatch?: boolean | null;
         };
         /**
          * FeedbackRequest
@@ -7798,6 +8393,14 @@ export interface components {
             /** Entries */
             entries: components["schemas"]["DirEntry"][];
         };
+        /**
+         * ListRootsResponse
+         * @description POST /runtimes/{runtime_id}/list-roots 响应：daemon 主机磁盘根锚点列表。
+         */
+        ListRootsResponse: {
+            /** Roots */
+            roots: string[];
+        };
         /** LoginRequest */
         LoginRequest: {
             /** Account */
@@ -7822,6 +8425,42 @@ export interface components {
             path: string;
             /** Size */
             size: number;
+        };
+        /**
+         * McpConfigViewResponse
+         * @description ``GET /api/workspaces/{id}/mcp-config`` 响应（env secret 已脱敏）。
+         *
+         *     无 ``.mcp.json`` 或解析失败时返回空 ``{mcpServers: {}}``，不抛错（task-06 验收 D）。
+         */
+        McpConfigViewResponse: {
+            /** Mcpservers */
+            mcpServers?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * McpServerEntry
+         * @description 单个 MCP server 定义（仿 claude ``.mcp.json`` 结构）。
+         */
+        McpServerEntry: {
+            /** Command */
+            command: string;
+            /** Args */
+            args?: string[];
+            /** Env */
+            env?: {
+                [key: string]: string;
+            } | null;
+        };
+        /**
+         * McpServersSchema
+         * @description ``PUT /api/platform-settings/mcp`` 请求体。
+         */
+        McpServersSchema: {
+            /** Mcpservers */
+            mcpServers?: {
+                [key: string]: components["schemas"]["McpServerEntry"];
+            };
         };
         /** MeResponse */
         MeResponse: {
@@ -10275,58 +10914,6 @@ export interface components {
             /** Reason */
             reason: string;
         };
-        /**
-         * RelationCreate
-         * @description Request body for POST /api/workspaces/{id}/relations.
-         */
-        RelationCreate: {
-            /**
-             * Target Id
-             * Format: uuid
-             */
-            target_id: string;
-            /**
-             * Relation Type
-             * @enum {string}
-             */
-            relation_type: "depends_on" | "consumes_api_from" | "tests" | "publishes_to" | "documents";
-            /** Description */
-            description?: string | null;
-        };
-        /** RelationListResponse */
-        RelationListResponse: {
-            /** Outgoing */
-            outgoing: components["schemas"]["RelationRead"][];
-            /** Incoming */
-            incoming: components["schemas"]["RelationRead"][];
-        };
-        /** RelationRead */
-        RelationRead: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /**
-             * Source Id
-             * Format: uuid
-             */
-            source_id: string;
-            /**
-             * Target Id
-             * Format: uuid
-             */
-            target_id: string;
-            /** Relation Type */
-            relation_type: string;
-            /** Description */
-            description: string | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-        };
         /** ReleaseApprovalCreate */
         ReleaseApprovalCreate: {
             /** Verdict */
@@ -10869,14 +11456,8 @@ export interface components {
             provider?: string | null;
             /** Model */
             model?: string | null;
-            /**
-             * Path Source
-             * @default server-local
-             * @enum {string}
-             */
-            path_source: "server-local" | "daemon-client";
-            /** Daemon Runtime Id */
-            daemon_runtime_id?: string | null;
+            /** Daemon Id */
+            daemon_id?: string | null;
             /**
              * Spec Strategy
              * @default platform-managed
@@ -10950,6 +11531,10 @@ export interface components {
              * @default false
              */
             ask_user_only: boolean;
+            /** Change Id */
+            change_id?: string | null;
+            /** Workspace Id */
+            workspace_id?: string | null;
         };
         /** SessionCreateResponse */
         SessionCreateResponse: {
@@ -11149,6 +11734,24 @@ export interface components {
         SettingsUpdateResponse: {
             /** Updated */
             updated: string[];
+        };
+        /**
+         * SkillFileEntry
+         * @description 单个 workspace 自定义 skill 的只读视图（design §7）。
+         */
+        SkillFileEntry: {
+            /** Name */
+            name: string;
+            /** Files */
+            files?: string[];
+        };
+        /**
+         * SkillsViewResponse
+         * @description ``GET /api/workspaces/{id}/skills`` 响应。
+         */
+        SkillsViewResponse: {
+            /** Skills */
+            skills: components["schemas"]["SkillFileEntry"][];
         };
         /**
          * SpecBootstrapRunStartResponse
@@ -12140,7 +12743,7 @@ export interface components {
         };
         /**
          * TopologyEdge
-         * @description A directed edge in the topology graph.
+         * @description 拓扑图中的有向边（关系层已砍，保留类型以维持响应契约，恒不实例化）。
          */
         TopologyEdge: {
             /**
@@ -12165,7 +12768,7 @@ export interface components {
         };
         /**
          * TopologyNode
-         * @description A workspace node in the topology graph.
+         * @description 拓扑图中的工作区节点（项目组）。
          */
         TopologyNode: {
             /**
@@ -12182,7 +12785,7 @@ export interface components {
         };
         /**
          * TopologyResponse
-         * @description Full topology graph response.
+         * @description ``GET /workspaces/topology`` 响应（D-004@V1 后 edges 恒空）。
          */
         TopologyResponse: {
             /** Nodes */
@@ -12622,14 +13225,6 @@ export interface components {
             test_command?: string | null;
             /** Source Yaml Path */
             source_yaml_path?: string | null;
-            /**
-             * Path Source
-             * @default server-local
-             * @enum {string}
-             */
-            path_source: "server-local" | "daemon-client";
-            /** Daemon Runtime Id */
-            daemon_runtime_id?: string | null;
             /** Daemon Id */
             daemon_id?: string | null;
             /**
@@ -12638,6 +13233,63 @@ export interface components {
              * @enum {string}
              */
             spec_strategy: "platform-managed" | "repo-mirrored" | "repo-native";
+        };
+        /**
+         * WorkspaceDialogRead
+         * @description 工作区级 dialog 查询 DTO（GET /api/workspaces/{id}/dialogs）。
+         *
+         *     在 ``SessionDialogRead`` 全部字段基础上，额外承载 4 个来源上下文字段（D-002 /
+         *     D-003），全部 Optional、default=None——这些字段由 task-02 的
+         *     ``list_pending_dialogs_for_workspace`` 经三表 JOIN + lease/log 反查填充，
+         *     任一上下文取不到时返回 None（前端占位「会话进行中」），DTO 本身只承载不推导。
+         */
+        WorkspaceDialogRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Request Id */
+            request_id: string;
+            /** Tool Name */
+            tool_name: string;
+            /** Dialog Kind */
+            dialog_kind: string | null;
+            /** Dialog Payload */
+            dialog_payload: {
+                [key: string]: unknown;
+            } | null;
+            /** Status */
+            status: string;
+            /** Answer */
+            answer: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Answered At */
+            answered_at: string | null;
+            /** Workspace Id */
+            workspace_id?: string | null;
+            /** Workspace Name */
+            workspace_name?: string | null;
+            /** Session Type */
+            session_type?: string | null;
+            /** Run Summary */
+            run_summary?: string | null;
         };
         /** WorkspaceListResponse */
         WorkspaceListResponse: {
@@ -12747,13 +13399,6 @@ export interface components {
             last_scanned_at: string | null;
             /** Deleted At */
             deleted_at: string | null;
-            /**
-             * Path Source
-             * @enum {string}
-             */
-            path_source: "server-local" | "daemon-client";
-            /** Daemon Runtime Id */
-            daemon_runtime_id: string | null;
             owner?: components["schemas"]["app__modules__workspace__schema__OwnerRead"] | null;
         };
         /** WorkspaceRoleAssignment */
@@ -12828,10 +13473,6 @@ export interface components {
             source_yaml_path?: string | null;
             /** Status */
             status?: string | null;
-            /** Path Source */
-            path_source?: ("server-local" | "daemon-client") | null;
-            /** Daemon Runtime Id */
-            daemon_runtime_id?: string | null;
         };
         /** WorktreeAcquireRequest */
         WorktreeAcquireRequest: {
@@ -13760,7 +14401,7 @@ export interface operations {
             };
         };
     };
-    list_relations_api_workspaces__workspace_id__relations_get: {
+    list_components_api_workspaces__workspace_id__components_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -13777,7 +14418,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RelationListResponse"];
+                    "application/json": components["schemas"]["ComponentListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13791,47 +14432,12 @@ export interface operations {
             };
         };
     };
-    create_relation_api_workspaces__workspace_id__relations_post: {
+    list_workspace_skills_api_workspaces__workspace_id__skills_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 workspace_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RelationCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RelationRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_relation_api_workspaces_relations__relation_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                relation_id: string;
             };
             cookie?: never;
         };
@@ -13843,7 +14449,38 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RelationRead"];
+                    "application/json": components["schemas"]["SkillsViewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workspace_mcp_config_api_workspaces__workspace_id__mcp_config_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpConfigViewResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13889,39 +14526,6 @@ export interface operations {
         };
     };
     generate_projects_api_workspaces__workspace_id__generate_projects_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                workspace_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    reparse_workspace_api_workspaces__workspace_id__reparse_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -14604,6 +15208,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChangeFileList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_change_sessions_api_workspaces__workspace_id__changes__change_id__sessions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSessionListItem"][];
                 };
             };
             /** @description Validation Error */
@@ -15819,7 +16455,10 @@ export interface operations {
     };
     get_agent_run_logs_api_workspaces__workspace_id__agent_runs__run_id__logs_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 逗号分隔多选工具种类，仅筛 channel=tool_call 行；不传返回全部 */
+                tool_kind?: string | null;
+            };
             header?: never;
             path: {
                 workspace_id: string;
@@ -15903,6 +16542,37 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workspace_dialogs_api_workspaces__workspace_id__dialogs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceDialogRead"][];
                 };
             };
             /** @description Validation Error */
@@ -16718,6 +17388,110 @@ export interface operations {
             };
         };
     };
+    list_machines_api_daemon_machines_get: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                status?: string | null;
+                provider?: string | null;
+                user_id?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaemonMachineListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_machine_api_daemon_machines__instance_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DaemonMachineUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaemonMachineRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_machine_self_update_api_daemon_machines__instance_id__self_update_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string | boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     disable_runtime_api_daemon_runtimes__runtime_id__disable_post: {
         parameters: {
             query?: never;
@@ -17301,6 +18075,37 @@ export interface operations {
             };
         };
     };
+    list_roots_api_daemon_runtimes__runtime_id__list_roots_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runtime_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListRootsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     respond_session_permission_api_daemon_sessions__session_id__permissions__request_id__response_post: {
         parameters: {
             query?: never;
@@ -17711,6 +18516,218 @@ export interface operations {
                         [key: string]: unknown;
                     }[];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_skills_manifest_api_daemon_skills_latest_manifest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    get_skills_bundle_api_daemon_skills_latest_bundle_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_daemon_mcp_config_api_daemon_mcp_config_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    list_custom_skills_api_custom_skills_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomSkillRead"][];
+                };
+            };
+        };
+    };
+    create_custom_skill_api_custom_skills_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomSkillCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomSkillDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_custom_skill_api_custom_skills__skill_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomSkillDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_custom_skill_api_custom_skills__skill_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomSkillUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomSkillDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_custom_skill_api_custom_skills__skill_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -23326,6 +24343,116 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsUpdateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_mcp_platform_config_api_platform_settings_mcp_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    put_mcp_platform_config_api_platform_settings_mcp_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpServersSchema"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_mcp_whitelist_api_platform_settings_mcp_whitelist_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
+                };
+            };
+        };
+    };
+    put_mcp_whitelist_api_platform_settings_mcp_whitelist_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": string[];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
                 };
             };
             /** @description Validation Error */

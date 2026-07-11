@@ -110,8 +110,6 @@ async def _seed_gate_run(
         name="ws-gate-task",
         slug=f"ws-gate-task-{uuid.uuid4().hex[:6]}",
         root_path="/host-projects/demo",
-        path_source="daemon-client",
-        daemon_runtime_id=rt.id,
         status="active",
     )
     change_id = uuid.uuid4()

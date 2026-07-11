@@ -75,7 +75,6 @@ async def _make_workspace(session: AsyncSession, *, root_path: str) -> Workspace
         name="t-ws",
         slug=f"t-ws-{uuid.uuid4().hex[:8]}",
         root_path=root_path,
-        path_source="server-local",
         status="active",
     )
     session.add(ws)

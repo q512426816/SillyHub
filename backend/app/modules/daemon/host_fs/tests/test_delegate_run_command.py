@@ -113,21 +113,6 @@ def _make_daemon_client_workspace() -> Workspace:
         name=f"gate-ws-{ws_id.hex[:8]}",
         slug=f"gate-ws-{ws_id.hex[:8]}",
         root_path="/host/path/backend/cannot/see",
-        path_source="daemon-client",
-        daemon_runtime_id=uuid4(),
-        status="active",
-    )
-
-
-def _make_server_local_workspace(root_path: str = "/container/path") -> Workspace:
-    ws_id = uuid4()
-    return Workspace(
-        id=ws_id,
-        name=f"local-ws-{ws_id.hex[:8]}",
-        slug=f"local-ws-{ws_id.hex[:8]}",
-        root_path=root_path,
-        path_source="server-local",
-        daemon_runtime_id=None,
         status="active",
     )
 
@@ -442,43 +427,7 @@ class TestTimeoutPassthrough:
         assert rpc.calls[0]["timeout"] == 300.0
 
 
-# ── 4. server-local 分支 raise（gate 必须 daemon 跑）────────────────────────────
-
-
-class TestServerLocalRaises:
-    async def test_server_local_raises(self):
-        # server-local 容器够不到源代码 → raise HostFsDelegateError（design §5.3）
-        ws = _make_server_local_workspace()
-        delegate = HostFsDelegate(
-            session=None,
-            ws_hub=None,
-            ws_rpc=None,  # server-local 不需要 rpc
-        )
-        with pytest.raises(HostFsDelegateError) as exc:
-            await delegate.run_command(
-                ws,
-                command="sillyspec",
-                args=_gate_args("c1"),
-                cwd=ws.root_path,
-                timeout=720.0,
-            )
-        assert "daemon-client" in str(exc.value).lower() or "path source" in str(exc.value).lower()
-
-    async def test_server_local_raises_even_if_whitelist_passes(self):
-        # 白名单通过后 server-local 仍 raise（两层独立校验）
-        ws = _make_server_local_workspace()
-        delegate = HostFsDelegate(session=None, ws_hub=None, ws_rpc=None)
-        with pytest.raises(HostFsDelegateError):
-            await delegate.run_command(
-                ws,
-                command="sillyspec",
-                args=_gate_args("c1"),
-                cwd=ws.root_path,
-                timeout=720.0,
-            )
-
-
-# ── 5. fail-loud：run_command 不降级（区别 git_apply D-006）─────────────────────
+# ── 4. fail-loud：run_command 不降级（区别 git_apply D-006）─────────────────────
 
 
 class TestFailLoudNoDegrade:

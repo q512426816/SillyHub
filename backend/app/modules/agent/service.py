@@ -33,7 +33,6 @@ from app.modules.agent.placement import NoOnlineDaemonError, RunPlacementService
 from app.modules.agent.schema import AgentRunResponse, ToolFailureStats
 from app.modules.task.model import Task
 from app.modules.workspace.model import AgentRunWorkspace, TaskWorkspace, Workspace
-from app.modules.workspace.service import is_daemon_client_path_source
 from app.modules.worktree.model import WorktreeLease
 
 if TYPE_CHECKING:
@@ -244,21 +243,6 @@ def _join_root(root: str, *parts: str) -> str:
     return f"{root.rstrip('/')}/{suffix}"
 
 
-def _legacy_root_exists_check(workspace_root: str, path_source: str | None) -> bool:
-    """ql-006 之前的本地存在性兜底（仅无 delegate 注入时使用）。
-
-    task-09 把存在性校验内聚到 ``HostFsDelegate.stat``（path_source 分流：server-local
-    本地容器 / daemon-client WS RPC）。production caller 一律注入 delegate；本 helper
-    仅服务于未注入 delegate 的单测/向后兼容路径：server-local 时返回 ``not Path.exists``
-    （应 raise），daemon-client 永远返回 False（跳过本地 stat）。提取成函数让
-    ``resolve_work_dir`` 函数体内的字面 ``path_source != "daemon-client"`` 散落 if
-    消失——path_source 二分逻辑只在 delegate 内部存在（task-09 acceptance）。
-    """
-    if is_daemon_client_path_source(path_source):
-        return False
-    return not Path(workspace_root).exists()
-
-
 async def resolve_work_dir(
     *,
     workspace_root: str,
@@ -267,7 +251,6 @@ async def resolve_work_dir(
     lease: WorktreeLease | None,
     requires_worktree: bool,
     read_only: bool,
-    path_source: str | None = None,
     delegate: HostFsDelegate | None = None,
     workspace: Workspace | None = None,
 ) -> Path:
@@ -285,31 +268,29 @@ async def resolve_work_dir(
         lease: 已获取的 WorktreeLease，无 git identity 时为 None。
         requires_worktree: 阶段配置是否要求 worktree。
         read_only: 阶段是否只读。
-        path_source: workspace 路径来源（Workspace.path_source）。'daemon-client'
-            表示 root_path 在绑定 daemon 宿主上、backend 容器不可达；其他值
-            （None/'server-local'）保留校验。仅当 delegate 为 None 时被读取，用于
-            决定是否做本地 Path.exists() 兜底（向后兼容 ql-006 之前调用方）。
         delegate: HostFsDelegate 实例（task-09 注入）。提供时 workspace_root 存在性
-            校验经 ``await delegate.stat(workspace, workspace_root)``：path_source 分流
-            内聚到 delegate（server-local 本地容器 stat / daemon-client WS RPC 委托
-            daemon 在宿主 stat）。RPC 失败降级 {exists:False}（task-04 D-006）→ 此时
-            raise AgentRunError（与 daemon 断线 dispatch 失败一致）。
+            校验经 ``await delegate.stat(workspace, workspace_root)``：daemon-client
+            RPC 委托 daemon 在宿主 stat。RPC 失败降级 {exists:False}（task-04 D-006）
+            → 此时 raise AgentRunError（与 daemon 断线 dispatch 失败一致）。
         workspace: 触发 dispatch 的 Workspace 记录（task-09 注入）。delegate.stat 的
-            RPC 分支需要它取 daemon 绑定 + path_source。
+            RPC 分支需要它取 daemon 绑定。
 
     Returns:
         确定的工作目录 Path。
 
     Raises:
-        AgentRunError: workspace_root 路径不存在时（server-local 容器内不存在 / daemon-client
-            经 delegate RPC 确认不存在或 RPC 不可达降级为不存在）。
+        AgentRunError: workspace_root 路径不存在时（delegate RPC 确认不存在或
+            RPC 不可达降级为不存在）。
+
+    D-007@2026-07-10（remove-server-local-workspace-mode）：server-local 分流删除，
+    所有 workspace 永远 daemon-client，production caller 一律注入 delegate；
+    delegate=None 时跳过存在性校验（仅单测兜底，不再做本地 Path.exists()）。
     """
     ws_root = Path(workspace_root)
     # task-09（FR-04 / D-001@V1 / D-004@V1）：workspace_root 存在性校验经
-    # HostFsDelegate.stat——path_source 分流内聚到 delegate（server-local 本地容器
-    # stat / daemon-client WS RPC 委托 daemon 宿主 stat），backend 不再裸 Path.exists()
-    # 宿主路径。delegate 注入时 RPC 失败按 task-04 D-006 降级 {exists:False}，这里
-    # 据此 raise（等价 daemon 断线时 dispatch 校验缺位的失败语义）。
+    # HostFsDelegate.stat——daemon-client WS RPC 委托 daemon 宿主 stat，backend 不再
+    # 裸 Path.exists() 宿主路径。delegate 注入时 RPC 失败按 task-04 D-006 降级
+    # {exists:False}，这里据此 raise（等价 daemon 断线时 dispatch 校验缺位的失败语义）。
     if delegate is not None and workspace is not None:
         stat_result = await delegate.stat(workspace, workspace_root)
         if not stat_result.get("exists"):
@@ -317,14 +298,6 @@ async def resolve_work_dir(
                 f"Workspace root does not exist: {workspace_root}",
                 details={"workspace_root": workspace_root},
             )
-    elif _legacy_root_exists_check(workspace_root, path_source):
-        # 无 delegate 注入路径（向后兼容 ql-006 之前的纯本地 caller）：server-local
-        # 本地容器校验，daemon-client 跳过（root_path 在绑定 daemon 宿主上、backend
-        # 容器不可达）。production caller 一律注入 delegate，此分支仅用于单测兜底。
-        raise AgentRunError(
-            f"Workspace root does not exist: {workspace_root}",
-            details={"workspace_root": workspace_root},
-        )
 
     # 只读阶段 → workspace root（拼接 change.path）
     if read_only:
@@ -1049,7 +1022,6 @@ class AgentService:
 
         workspace = await self._get_workspace(workspace_id)
         workspace_root = workspace.root_path
-        path_source = workspace.path_source
 
         # -- 2. Resolve worktree or working directory -------------------------
 
@@ -1070,7 +1042,6 @@ class AgentService:
             lease=lease,
             requires_worktree=requires_worktree,
             read_only=read_only,
-            path_source=path_source,
             delegate=self._get_host_fs_delegate(),
             workspace=workspace,
         )
@@ -1096,8 +1067,7 @@ class AgentService:
         # -- 3. Build prompt --------------------------------------------------
         # 平台托管工作区：为 stage 命令注入平台参数（--spec-root 等），使
         # propose/plan/execute/... 进入平台模式、文档产物写 spec_root（对齐 scan
-        # bundle 的 build_scan_bundle）。server-local 工作区 platform_args 为空，
-        # stage 仍写本地 .sillyspec（行为不变）。
+        # bundle 的 build_scan_bundle）。
         platform_args = ""
         try:
             from app.modules.spec_workspace.service import SpecWorkspaceService
@@ -1108,26 +1078,15 @@ class AgentService:
                 # daemon 零客户端配置。spec_ws.spec_root（容器路径）保留供 backend 内部访问。
                 from app.core.config import get_settings
                 from app.modules.agent.context_builder import resolve_prompt_spec_root
-                from app.modules.workspace.model import Workspace
 
                 settings = get_settings()
-                # 方案 A（path_source per-workspace transport 决策）：按当前 workspace 的
-                # path_source 决定塞入 stage prompt 的 --spec-root 路径。daemon-client→tar
-                # （daemon 本地路径），显式 server-local→shared（锁死），None→全局兜底。
-                # 与 build_scan_bundle（context_builder.build_scan_bundle）复用同一 helper，保证
-                # scan 与 stage 链路路径一致（task-02）。
-                # 注意：host_spec_root 仅用于 prompt 文本（daemon 机器跑 sillyspec 时访问的路径）；
-                # spec_ws.spec_root（容器路径权威源）的读取不受影响，仅用于 platform-managed 策略
-                # 判断。stage 经 dispatch_to_daemon → batch lease（§0）；tar 模式下 daemon
-                # _startInteractiveSession pull + onSessionEnd sync 自动复用 Wave1（task-06），
-                # 本处无需任何 daemon 改动（D-007）。
-                # stage_ws 仅在此处读 path_source（identity map 缓存命中，下方 line ~1064 的
-                # workspace 查询复用同一缓存，无额外 DB 开销）。
-                stage_ws = await self._session.get(Workspace, workspace_id)
-                stage_path_source = stage_ws.path_source if stage_ws else None
-                host_spec_root = resolve_prompt_spec_root(
-                    str(workspace_id), settings, path_source=stage_path_source
-                )
+                # D-007@2026-07-10（remove-server-local-workspace-mode）：单一 daemon-client
+                # 模式，resolve_prompt_spec_root 恒返回 daemon 本地约定路径
+                # （~/.sillyhub/daemon/specs/{ws_id}），与 build_scan_bundle 复用同一 helper，
+                # 保证 scan 与 stage 链路路径一致（task-02）。注意：host_spec_root 仅用于
+                # prompt 文本（daemon 机器跑 sillyspec 时访问的路径）；spec_ws.spec_root
+                # （容器路径权威源）的读取不受影响，仅用于 platform-managed 策略判断。
+                host_spec_root = resolve_prompt_spec_root(str(workspace_id), settings)
                 host_runtime_root = f"{host_spec_root}/runtime"
                 platform_args = (
                     f" --spec-root {host_spec_root}"
@@ -1369,7 +1328,6 @@ class AgentService:
         from app.modules.workspace.model import Workspace
 
         workspace = await self._session.get(Workspace, workspace_id)
-        path_source = workspace.path_source if workspace else "server-local"
 
         # 解析 spec 同步策略（2026-06-28-daemon-client-spec-sync-strategy，D-001）：
         # 从 spec_workspaces 读 strategy，回退 platform-managed。透传到 lease payload
@@ -1396,36 +1354,26 @@ class AgentService:
             pass
 
         # -- 1. Validate root_path via HostFsDelegate (task-10 / FR-04 / D-001@V1) -
-        # task-10：入口校验经 HostFsDelegate，path_source 分流内聚到 delegate：
-        #   - server-local：delegate.stat 走本地容器 Path.exists()/.is_dir()（行为
-        #     等价 task-10 之前的 work_dir.exists()/.is_dir()，零回归 NFR-02）。
-        #   - daemon-client：delegate.stat 走 WS RPC 委托 daemon 宿主 stat。task-10
-        #     之前 daemon-client 整块校验被 ``if server_root is not None`` 静默跳过
-        #     （root_path 存在/资产保护都不查）；改 delegate 后 RPC 真正执行，
-        #     RPC 失败按 task-04 D-006 降级 {exists:False,is_dir:False}——此时 root_path
-        #     校验 raise（等价 daemon 断线 scan 不能 dispatch）。资产保护 RPC 失败
-        #     降级 list_dir=[]/stat.exists=False → _has_assets=False → 不阻塞 dispatch
-        #     （资产保护补丁由 sillyspec init.js 侧兜底，与 task-10 前 server-local
-        #     不可达时语义一致）。
-        # server_path 仅用于错误 details（保留原 details 结构，NFR-02）；不再用于 stat。
-        from app.modules.workspace.service import resolve_root_path_for_server
-
-        server_path = resolve_root_path_for_server(root_path, path_source)
+        # D-007@2026-07-10（remove-server-local-workspace-mode）：单一 daemon-client 模式，
+        # 入口校验经 HostFsDelegate.stat——WS RPC 委托 daemon 宿主 stat。RPC 失败按
+        # task-04 D-006 降级 {exists:False,is_dir:False}——此时 root_path 校验 raise
+        # （等价 daemon 断线 scan 不能 dispatch）。资产保护 RPC 失败降级
+        # list_dir=[]/stat.exists=False → _has_assets=False → 不阻塞 dispatch（资产保护
+        # 补丁由 sillyspec init.js 侧兜底）。
         delegate = self._get_host_fs_delegate()
         root_stat = await delegate.stat(workspace, root_path)
         if not root_stat.get("exists") or not root_stat.get("is_dir"):
             raise AgentRunError(
                 f"root_path does not exist or is not a directory: {root_path}",
-                details={"root_path": root_path, "server_path": server_path},
+                details={"root_path": root_path},
             )
 
         # 1b. 资产保护：源码项目若自身已被 SillySpec 管理（.sillyspec/ 含
         # changes/ 或 sillyspec.db），禁止发起平台 scan —— sillyspec init 在
         # 平台模式下会整体删除源码目录的 .sillyspec/，导致资产丢失（见
         # sillyspec/src/init.js:111-117 的 rmSync）。
-        # task-10：判定来源从本地 Path 换 delegate.list_dir + delegate.stat——daemon-client
-        # 时 RPC 真正命中（之前 server_root is None 整块跳过、资产保护缺位）。命中任一
-        # 即 _has_assets=True。RPC 失败降级（list_dir=[] / stat.exists=False）→
+        # task-10：判定来源从本地 Path 换 delegate.list_dir + delegate.stat——RPC 真正命中。
+        # 命中任一即 _has_assets=True。RPC 失败降级（list_dir=[] / stat.exists=False）→
         # _has_assets=False，不阻塞 dispatch（资产保护补丁由 init.js 兜底，符合原意）。
         sillyspec_dir_rel = ".sillyspec"
         changes_entries = await delegate.list_dir(
@@ -1438,9 +1386,8 @@ class AgentService:
             )
             _has_assets = bool(db_stat.get("exists"))
         if _has_assets:
-            # 错误 details 保留原 sillyspec_dir 字段（server-local 时是 rewrite 后的
-            # 宿主路径字符串；daemon-client 时是 root_path + /.sillyspec 字面拼接）。
-            sillyspec_dir_str = _join_root(server_path or root_path, sillyspec_dir_rel)
+            # 错误 details 保留原 sillyspec_dir 字段（root_path + /.sillyspec 字面拼接）。
+            sillyspec_dir_str = _join_root(root_path, sillyspec_dir_rel)
             raise AgentRunError(
                 f"目标项目已是 SillySpec 管理的项目（{sillyspec_dir_str} 含 changes/ 或 "
                 f"sillyspec.db）。对其发起平台 scan 会触发 sillyspec init 整体删除"
@@ -1469,9 +1416,6 @@ class AgentService:
             spec_root=spec_root,
             root_path=root_path,
             run_id=run_id,
-            # 方案 A：透传 workspace.path_source（line ~1273 已取），让 build_scan_bundle
-            # 按 per-workspace 决策 transport（daemon-client→tar / server-local→shared）。
-            path_source=path_source,
         )
         resolved_provider = provider or (workspace.default_agent if workspace else None)
         resolved_model = model or (workspace.default_model if workspace else None)
@@ -1808,12 +1752,12 @@ class AgentService:
             "claim_token": claim_token,
         }
 
-    async def _get_workspace_root(self, workspace_id: uuid.UUID) -> tuple[str, str]:
-        """Get (root_path, path_source) of a workspace.
+    async def _get_workspace_root(self, workspace_id: uuid.UUID) -> str:
+        """Get the root_path of a workspace.
 
-        path_source 决定 root_path 可达性语义（见 Workspace.path_source）：
-        'daemon-client' 时 root_path 在绑定 daemon 宿主上、backend 容器不可达，
-        调用方据此跳过本地 stat（resolve_work_dir）。
+        D-007@2026-07-10（remove-server-local-workspace-mode）：server-local 列删除后
+        返回单值 root_path（不再返回元组；daemon-client 单一模式下
+        root_path 可达性由 delegate.stat 判定）。
         """
         from app.modules.workspace.model import Workspace
 
@@ -1824,15 +1768,15 @@ class AgentService:
                 f"Workspace '{workspace_id}' not found.",
                 details={"workspace_id": str(workspace_id)},
             )
-        return workspace.root_path, workspace.path_source
+        return workspace.root_path
 
     async def _get_workspace(self, workspace_id: uuid.UUID) -> Workspace:
         """Load the Workspace row for dispatch.
 
         task-09 引入：返回完整 Workspace 对象（resolve_work_dir 的 delegate 分支
-        需要它取 daemon 绑定 + path_source）。原 ``_get_workspace_root`` 仅返回
-        (root_path, path_source) 元组——delegate.stat 的 RPC 分支还要读
-        ``workspace.daemon_runtime_id``，所以这里返回整行。
+        需要它取 daemon 绑定）。原 ``_get_workspace_root`` 仅返回 root_path
+        字符串——delegate.stat 的 RPC 分支还要读 workspace 绑定信息，所以
+        这里返回整行。
         """
         ws_stmt = select(Workspace).where(col(Workspace.id) == workspace_id)
         workspace = (await self._session.execute(ws_stmt)).scalars().first()
@@ -1847,7 +1791,7 @@ class AgentService:
         """Lazy-access the process-wide :class:`HostFsDelegate`.
 
         task-09 接线点：resolve_work_dir 需要 delegate 做 workspace_root 存在性
-        校验（path_source 分流内聚到 delegate）。delegate 实例由 DaemonService 的
+        校验（daemon-client 分流内聚到 delegate）。delegate 实例由 DaemonService 的
         ``host_fs_delegate`` lazy property 构造（task-06），内部一次性绑定 ws_hub
         单例 + HostFsWsRpc + 当前 session。AgentService 本身不持有 DaemonService，
         每次按需构造（DaemonService.__init__ 仅持 session，开销可忽略）。

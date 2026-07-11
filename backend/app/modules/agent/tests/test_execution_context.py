@@ -437,7 +437,7 @@ class TestCompleteLeaseDiffRedact:
 
         captured: dict = {}
 
-        async def _capture(self, *, agent_run_id, patch_data, use_3way=True, path_source=None):
+        async def _capture(self, *, agent_run_id, patch_data, use_3way=True):
             captured["patch_data"] = patch_data
 
         svc = DaemonService(db_session)

@@ -42,7 +42,6 @@ from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.patch.service import PatchApplyError, PatchConflictError
 from app.modules.daemon.runtime.service import DaemonRuntimeNotFound
 from app.modules.git_gateway.service import redact_output
-from app.modules.workspace.model import AgentRunWorkspace, Workspace
 
 if TYPE_CHECKING:
     from app.modules.daemon.service import DaemonService
@@ -290,14 +289,6 @@ class LeaseService:
         """
         lease = await self._get_lease_and_verify_token(lease_id, claim_token)
 
-        # task-05（FR-03 / D-006@v1）：入口一次性反查 workspace.path_source，
-        # 透传给 apply_patch / post_scan / stage_callback 三个收尾回调。
-        # §12 反查链路核实结论：agent_run 无 workspace_id 字段，真实链路走 M:N
-        # 关联表 AgentRunWorkspace（仿 patch/service.py:63-76），非 design 假设的
-        # agent_run.workspace_id。缺 binding / agent_run_id=None 时降级 "server-local"
-        # + warn 不抛（与 init_meta try/except 容错风格一致）。
-        _lease_workspace, path_source = await self._resolve_lease_workspace_path_source(lease)
-
         now = datetime.now(UTC)
         lease.status = "completed"
         lease.updated_at = now
@@ -494,14 +485,12 @@ class LeaseService:
             patch_data = json.dumps(patch) if isinstance(patch, dict) else str(patch)
             try:
                 # D-006@v1：跨子域（patch，task-03）经 facade 反向委托。
-                # task-05：透传 path_source（入口已反查 workspace.path_source），
-                # patch/service.py 按 path_source 分流（task-06 daemon-client 走
-                # HostFsDelegate.git_apply / server-local 走容器内 git apply）。
+                # task-09：单一 daemon-client 后 path_source 分流已删，apply_patch_to_worktree
+                # 内部统一经 HostFsDelegate 委托 daemon 在宿主 apply（task-08 / D-005）。
                 await self._facade._apply_patch_to_worktree(
                     agent_run_id=lease.agent_run_id,
                     patch_data=patch_data,
                     use_3way=True,
-                    path_source=path_source,
                 )
                 log.info(
                     "daemon_patch_applied",
@@ -537,10 +526,7 @@ class LeaseService:
         if lease.agent_run_id is not None:
             try:
                 # D-006@v1：跨子域（run_sync，task-04）经 facade 反向委托。
-                # task-05：透传 path_source（task-07 落回调体分流）。
-                await self._facade._trigger_stage_completion_callback(
-                    lease.agent_run_id, path_source=path_source
-                )
+                await self._facade._trigger_stage_completion_callback(lease.agent_run_id)
             except Exception as exc:
                 log.warning(
                     "complete_lease_stage_callback_failed",
@@ -556,8 +542,7 @@ class LeaseService:
         if lease.agent_run_id is not None:
             try:
                 # D-006@v1：跨子域（run_sync，task-04）经 facade 反向委托。
-                # task-05：透传 path_source（task-08 落回调体分流）。
-                await self._facade._run_post_scan_validation(lease, path_source=path_source)
+                await self._facade._run_post_scan_validation(lease)
             except Exception as exc:
                 log.warning(
                     "complete_lease_post_scan_validation_failed",
@@ -931,63 +916,3 @@ class LeaseService:
                 details={"lease_id": str(lease_id)},
             )
         return lease
-
-    async def _resolve_lease_workspace_path_source(
-        self,
-        lease: DaemonTaskLease,
-    ) -> tuple[Workspace | None, str]:
-        """反查 lease 关联 workspace 及其 path_source（task-05 / FR-03）。
-
-        §12 反查链路核实结论：agent_run 无 workspace_id 字段，真实链路走 M:N
-        关联表 ``AgentRunWorkspace``（仿 patch/service.py:63-76），非 design
-        假设的 ``agent_run.workspace_id``。
-
-        缺 binding / agent_run_id=None / workspace 不存在时降级为 ``"server-local"``
-        默认值并 warn 不抛——收尾回调路径不能因 path_source 反查失败而中断
-        （与 init_meta try/except 容错风格一致，NFR-02 server-local 零回归）。
-
-        Returns:
-            ``(workspace_or_none, path_source)``。``workspace_or_none`` 供
-            apply_patch / post_scan 回调体复用（避免再次反查）；当反查失败时
-            为 ``None``，``path_source`` 为 ``"server-local"``。
-        """
-        if lease.agent_run_id is None:
-            log.warning(
-                "lease_path_source_no_agent_run",
-                lease_id=str(lease.id),
-            )
-            return None, "server-local"
-
-        try:
-            ws_stmt = (
-                select(AgentRunWorkspace.workspace_id)
-                .where(col(AgentRunWorkspace.agent_run_id) == lease.agent_run_id)
-                .limit(1)
-            )
-            ws_row = (await self._session.execute(ws_stmt)).first()
-            if ws_row is None:
-                log.warning(
-                    "lease_path_source_no_binding",
-                    lease_id=str(lease.id),
-                    agent_run_id=str(lease.agent_run_id),
-                )
-                return None, "server-local"
-
-            workspace = await self._session.get(Workspace, ws_row[0])
-            if workspace is None:
-                log.warning(
-                    "lease_path_source_workspace_missing",
-                    lease_id=str(lease.id),
-                    workspace_id=str(ws_row[0]),
-                )
-                return None, "server-local"
-
-            return workspace, workspace.path_source or "server-local"
-        except Exception as exc:  # path_source 反查不应中断 lease
-            log.warning(
-                "lease_path_source_lookup_failed",
-                lease_id=str(lease.id),
-                agent_run_id=str(lease.agent_run_id),
-                error=str(exc),
-            )
-            return None, "server-local"

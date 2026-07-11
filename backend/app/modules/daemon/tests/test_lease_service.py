@@ -824,11 +824,13 @@ class TestDeleteRuntime:
     async def test_delete_runtime_allows_when_workspace_soft_deleted(
         self, db_session: AsyncSession
     ) -> None:
-        """软删 workspace 引用的 runtime：应用层 SET NULL 解绑后删除（ql-002-7c3a）。
+        """软删 workspace 引用的 runtime：直接删除（task-09 D-007 P0-4）。
 
-        软删逻辑不清 daemon_runtime_id，PG FK RESTRICT 不看 deleted_at 会拦截；
-        delete_runtime 对软删引用应用层 UPDATE SET NULL 绕过 FK。SQLite 测应用层
-        update 逻辑（不依赖 FK），断言解绑 + 删除。
+        原 ql-002-7c3a 应用层 SET NULL 解绑段已删除——legacy
+        ``workspaces.daemon_runtime_id`` 列在 D-007 中 DROP（task-01），新链路
+        binding 不再写该列，删除 runtime 不再触碰 workspaces 表。本测试守护新契约：
+        软删 workspace 存在时不阻塞 runtime 物理删除（CASCADE 清理 bound 行，
+        无需 SET NULL 解绑）。
         """
         user_id = await _create_user(db_session)
         svc = DaemonService(db_session)
@@ -841,19 +843,14 @@ class TestDeleteRuntime:
             name="soft-deleted-ws",
             slug=f"soft-ws-{rt.id.hex[:8]}",
             root_path="/tmp/soft",
-            path_source="daemon-client",
-            daemon_runtime_id=rt.id,
             deleted_at=datetime.now(UTC),
         )
         db_session.add(ws)
         await db_session.commit()
 
         await svc.delete_runtime(rt.id, user_id)
-        # runtime 已删
+        # runtime 已删（软删 workspace 不再阻塞，legacy daemon_runtime_id 列已 DROP）
         assert await svc.get_runtime(rt.id) is None
-        # 软删 workspace 的 daemon_runtime_id 被应用层 SET NULL 解绑（绕过 FK RESTRICT）
-        await db_session.refresh(ws)
-        assert ws.daemon_runtime_id is None
 
 
 class TestDaemonHeartbeat:

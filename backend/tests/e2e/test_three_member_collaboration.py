@@ -163,7 +163,7 @@ async def test_e2e_three_member_collaboration(tmp_path: Path, db_session) -> Non
         user_id=owner.id,
         runtime_id=None,
         root_path=str(ws_root),
-        path_source="server-local",
+        path_source="daemon-client",
         created_at=now,
         updated_at=now,
     )
@@ -409,7 +409,7 @@ async def test_e2e_three_member_collaboration(tmp_path: Path, db_session) -> Non
             user_id=owner.id,
             runtime_id=None,
             root_path=str(ws2_root),
-            path_source="server-local",
+            path_source="daemon-client",
             created_at=now2,
             updated_at=now2,
         )

@@ -8,11 +8,7 @@ import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import { listComponents, type Component } from "@/lib/components";
-import {
-  createChange,
-  proxyCreateChange,
-  type CreateChangeInput,
-} from "@/lib/changes";
+import { proxyCreateChange } from "@/lib/changes";
 import { getWorkspace, type Workspace } from "@/lib/workspaces";
 
 interface Props {
@@ -55,7 +51,6 @@ export default function CreateChangePage({ params }: Props) {
     };
   }, [workspaceId]);
 
-  const isDaemonClient = workspace?.path_source === "daemon-client";
   // D-002@v1：runtime 由后端从 binding + workspace.default_agent 现算，前端不再
   // 校验 daemon 在线状态（提交时由后端心跳校验，离线返 DAEMON_CLIENT_NO_SESSION）。
   const submitDisabled =
@@ -70,20 +65,13 @@ export default function CreateChangePage({ params }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const input: CreateChangeInput = {
+      // task-11 / 2026-07-10-remove-server-local-workspace-mode：
+      // 平台唯一 daemon-client 语义，永远走 proxy-create（不传 runtime_id，
+      // 后端从 member binding 现算 daemon）。affected_components 不经 proxy 透传。
+      const result = await proxyCreateChange(workspaceId, {
         title: description.trim().slice(0, 100),
         description: description.trim(),
-        affected_components:
-          selectedComponents.length > 0 ? selectedComponents : undefined,
-      };
-      // daemon-client 走 proxy-create（不传 runtime_id，后端从 binding 现算）。
-      const result = isDaemonClient
-        ? await proxyCreateChange(workspaceId, {
-            title: input.title,
-            description: input.description,
-            change_type: input.change_type,
-          })
-        : await createChange(workspaceId, input);
+      });
       router.push(`/workspaces/${workspaceId}/changes/${result.id}`);
     } catch (err) {
       if (err instanceof ApiError && err.code === "DAEMON_CLIENT_NO_SESSION") {

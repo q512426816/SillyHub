@@ -13,7 +13,6 @@ created_at: 2026-07-02
 from __future__ import annotations
 
 import uuid
-from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
@@ -31,9 +30,6 @@ from app.modules.workspace.model import Workspace
 
 async def _make_workspace(
     db_session,
-    *,
-    path_source: str = "server-local",
-    daemon_runtime_id: uuid.UUID | None = None,
 ) -> Workspace:
     ws = Workspace(
         id=uuid.uuid4(),
@@ -42,8 +38,6 @@ async def _make_workspace(
         root_path=f"/tmp/sync-manual-{uuid.uuid4().hex}",
         status="active",
         component_key="comp",
-        path_source=path_source,
-        daemon_runtime_id=daemon_runtime_id,
     )
     db_session.add(ws)
     await db_session.commit()
@@ -92,49 +86,6 @@ async def _make_member_binding(
 
 
 class TestSyncManual:
-    async def test_server_local_returns_done_directly(
-        self, db_session, client: AsyncClient, auth_headers, tmp_path
-    ) -> None:
-        """server-local：本机 .sillyspec → apply_sync 落盘返 done（不经 outbox）。"""
-        ws = await _make_workspace(db_session, path_source="server-local")
-        # 把 root_path 指向测试 tmp 目录（容器内可读），放一个 .sillyspec
-        local_dir = tmp_path / "src"
-        (local_dir / ".sillyspec" / "docs").mkdir(parents=True)
-        (local_dir / ".sillyspec" / "docs" / "A.md").write_text("# A", encoding="utf-8")
-        ws.root_path = str(local_dir)
-        db_session.add(ws)
-        await db_session.commit()
-        await _make_spec_workspace(db_session, ws, tmp_path / "spec-root")
-
-        # mock reparse（避免依赖真实 parser 基建）
-        with (
-            patch(
-                "app.modules.scan_docs.service.ScanDocsService.reparse",
-                new=AsyncMock(
-                    return_value=({"parsed": 0, "created": 0, "updated": 0, "deleted": 0}, None)
-                ),
-            ),
-            patch(
-                "app.modules.change.service.ChangeService.reparse",
-                new=AsyncMock(
-                    return_value=({"parsed": 0, "created": 0, "updated": 0, "deleted": 0}, None)
-                ),
-            ),
-        ):
-            resp = await client.post(
-                f"/api/workspaces/{ws.id}/spec-workspace/sync-manual",
-                headers=auth_headers,
-            )
-
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        assert body == {"status": "done"}
-
-        # 不应建 spec-sync outbox 行
-        stmt = select(DaemonChangeWrite).where(DaemonChangeWrite.workspace_id == ws.id)
-        rows = (await db_session.execute(stmt)).scalars().all()
-        assert len(rows) == 0
-
     async def test_daemon_client_creates_spec_sync_outbox_row(
         self, db_session, client: AsyncClient, auth_headers, tmp_path
     ) -> None:
@@ -197,7 +148,7 @@ class TestSyncManualPending:
     async def test_pending_lists_spec_sync_rows_only(
         self, db_session, client: AsyncClient, auth_headers, tmp_path
     ) -> None:
-        ws = await _make_workspace(db_session, path_source="daemon-client")
+        ws = await _make_workspace(db_session)
         await _make_spec_workspace(db_session, ws, tmp_path / "spec-root")
 
         rt = uuid.uuid4()

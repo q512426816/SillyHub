@@ -15,10 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_user, require_permission, require_permission_any
 from app.core.db import get_session
-from app.core.errors import PermissionDenied
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
-from app.modules.auth.rbac import allowed_workspace_ids, has_permission
+from app.modules.auth.rbac import allowed_workspace_ids
 from app.modules.workspace.component_catalog_service import (
     ComponentCatalogService,
     ComponentListResponse,
@@ -50,26 +49,6 @@ from app.modules.workspace.topology import TopologyBuilder, TopologyResponse
 router = APIRouter(prefix="/workspaces", tags=["workspace"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
-
-
-async def _require_server_local_workspace_admin(
-    session: AsyncSession,
-    user: User,
-) -> None:
-    """server-local 路径会读 backend 宿主机文件系统，需 workspace:admin。"""
-    if user.is_platform_admin:
-        return
-    ok = await has_permission(
-        session,
-        user=user,
-        permission=Permission.WORKSPACE_ADMIN,
-        workspace_id=None,
-    )
-    if not ok:
-        raise PermissionDenied(
-            "server-local workspace path requires workspace:admin permission.",
-            details={"required_permission": Permission.WORKSPACE_ADMIN.value},
-        )
 
 
 def _build_scan_response(result: ScanResult) -> ScanResponse:
@@ -110,7 +89,6 @@ async def scan_workspace(
     session: SessionDep,
     user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_WRITE))],
 ) -> ScanResponse:
-    await _require_server_local_workspace_admin(session, user)
     service = WorkspaceService(session)
     return _build_scan_response(service.scan(payload.root_path))
 
@@ -125,32 +103,16 @@ async def scan_generate(
 
     agent_service = AgentService(session)
     service = WorkspaceService(session)
-    # FR-06 / D-003@v1：daemon-client 分支（跳过本地 _guard_path，派 scan 给绑定 daemon）
-    if service._is_daemon_client_payload(payload):
-        # daemon-entity-binding 后 daemon_id 优先（稳定绑定键），daemon_runtime_id 降级 legacy
-        # 兼容；schema validator 保证 daemon-client 时二者至少一个非空。
-        assert payload.daemon_id is not None or payload.daemon_runtime_id is not None
-        workspace_id, agent_run_id = await service.scan_generate_daemon_client(
-            root_path=payload.root_path,
-            user_id=user.id,
-            agent_service=agent_service,
-            provider=payload.provider,
-            model=payload.model,
-            spec_strategy=payload.spec_strategy,
-            daemon_id=payload.daemon_id,
-            daemon_runtime_id=payload.daemon_runtime_id,
-        )
-        return ScanGenerateResponse(
-            workspace_id=workspace_id,
-            agent_run_id=agent_run_id,
-        )
-    await _require_server_local_workspace_admin(session, user)
+    # daemon-client 唯一入口（2026-07-10-remove-server-local-workspace-mode）：
+    # daemon_id 透传作为稳定绑定键，scan-generate 内部建 member binding 行。
     workspace_id, agent_run_id = await service.scan_generate(
         root_path=payload.root_path,
         user_id=user.id,
         agent_service=agent_service,
         provider=payload.provider,
         model=payload.model,
+        spec_strategy=payload.spec_strategy,
+        daemon_id=payload.daemon_id,
     )
     return ScanGenerateResponse(
         workspace_id=workspace_id,
@@ -168,8 +130,6 @@ async def create_workspace(
     session: SessionDep,
     user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_WRITE))],
 ) -> WorkspaceRead:
-    if payload.path_source != "daemon-client":
-        await _require_server_local_workspace_admin(session, user)
     service = WorkspaceService(session)
     workspace = await service.create(payload, created_by=user.id)
     return WorkspaceRead.model_validate(workspace)
@@ -202,9 +162,9 @@ async def list_my_bindings_endpoint(
 ) -> list[MemberBindingView]:
     """Return the caller's member bindings across ALL workspaces.
 
-    遗留 1（daemon-entity-binding）：工作区列表卡片按 daemon 实体展示绑定信息，
-    新工作区 ``workspace.daemon_runtime_id`` 为 NULL（绑定存 member binding 行）。
-    批量端点一次拉取当前用户全部 binding，前端按 workspace_id 索引，避免列表 N 次请求。
+    daemon-entity-binding：工作区列表卡片按 daemon 实体展示绑定信息，绑定一律存
+    member binding 行（workspace_member_runtimes）。批量端点一次拉取当前用户全部
+    binding，前端按 workspace_id 索引，避免列表 N 次请求。
 
     鉴权仅需登录（``get_current_user``）—— 返回行天然限定为调用者本人，
     无需逐 workspace 校验 WORKSPACE_READ；未加入任何 workspace 的用户返回空列表。

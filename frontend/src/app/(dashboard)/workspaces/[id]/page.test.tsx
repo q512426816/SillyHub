@@ -110,8 +110,6 @@ function makeWorkspace(strategy: "platform-managed" | "repo-mirrored" | "repo-na
     slug: "multi-agent-platform",
     root_path: "C:/proj",
     status: "active",
-    path_source: "daemon-client",
-    daemon_runtime_id: "rid-1",
     default_agent: null,
     default_model: null,
     owner: { user_id: "user-1", email: "owner@test.com", display_name: "Owner" },

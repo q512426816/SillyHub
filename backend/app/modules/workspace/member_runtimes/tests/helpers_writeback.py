@@ -71,8 +71,6 @@ async def make_daemon_client_workspace_with_binding(
         root_path=root_path or f"/home/user/proj-{ws_id.hex[:8]}",
         status="active",
         component_key="backend",
-        path_source="daemon-client",
-        daemon_runtime_id=None,
         default_agent=default_agent,
         created_by=user_id,
         last_scanned_at=last_scanned_at or datetime.now(UTC),

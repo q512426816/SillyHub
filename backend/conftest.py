@@ -225,4 +225,52 @@ async def _isolate_permission_timers() -> AsyncIterator[None]:
         task.cancel()
     if pending:
         await asyncio.gather(*pending, return_exceptions=True)
-    _permission_timers.clear()
+
+
+# ---------------------------------------------------------------------------
+# Shared test helper: seed server spec_root for daemon-client workspaces
+# ---------------------------------------------------------------------------
+
+
+def seed_spec_root(ws_id: str, *src_dirs) -> str:
+    """Copy fixture directories into the server-side ``spec_root`` for a workspace.
+
+    2026-07-10-remove-server-local-workspace-mode: backend cannot read the
+    client ``root_path`` (daemon-client single mode). Fixtures that previously
+    relied on backend reading ``root/.sillyspec/`` must instead seed the
+    server ``spec_root`` (``{spec_data_root}/{ws_id}/``), which is the only
+    path the backend can scan/reparse.
+
+    The layout is **flat** (``platform_managed=True``): ``changes/`` lives
+    directly under ``spec_root``, with no ``.sillyspec/`` wrapper. Each
+    ``src_dirs`` entry may be either:
+
+    - a directory containing a ``.sillyspec/`` folder (wrapped fixture) — its
+      ``.sillyspec/`` children are flattened into ``spec_root``;
+    - any other directory — copied verbatim under ``spec_root`` (e.g. a bare
+      ``changes/`` tree).
+
+    Returns the resolved ``spec_root`` path.
+    """
+    import shutil
+    from pathlib import Path
+
+    from app.core.config import get_settings
+
+    spec_root = Path(get_settings().spec_data_root) / ws_id
+    spec_root.mkdir(parents=True, exist_ok=True)
+    for src in src_dirs:
+        src = Path(src)
+        wrapped = src / ".sillyspec"
+        if wrapped.exists():
+            for child in wrapped.iterdir():
+                target = spec_root / child.name
+                if target.exists():
+                    shutil.rmtree(target)
+                shutil.copytree(child, target)
+        else:
+            target = spec_root / src.name
+            if target.exists():
+                shutil.rmtree(target)
+            shutil.copytree(src, target)
+    return str(spec_root)

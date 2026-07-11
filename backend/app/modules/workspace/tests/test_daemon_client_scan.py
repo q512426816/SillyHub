@@ -1,12 +1,10 @@
-"""task-08 — daemon-client workspace scan dispatch tests (FR-06 / D-003@v1).
+"""daemon-client workspace scan dispatch tests (FR-06 / D-003@v1).
 
-daemon-client workspace 的 root_path 在客户端机器上，backend 读不到。
-create 跳过本地 scan/copytree；scan-generate 派 scan lease 给绑定 daemon。
-
-Change 2026-07-03-daemon-entity-binding task-10/11 补遗：daemon-client create
-改走 daemon_id 维度（守护进程实体）。WorkspaceCreate.daemon_id 必填（与
-daemon_runtime_id 至少一个非空，daemon_id 优先），create 成员绑定行
-workspace_member_runtimes{workspace_id,user_id,daemon_id,root_path,path_source}。
+2026-07-10-remove-server-local-workspace-mode：daemon-client 收为唯一路径来源，
+workspace.path_source / daemon_runtime_id 字段已删（task-01）。create 永远走
+daemon-client（backend 读不到客户端路径）；scan-generate 派 scan lease 给绑定
+daemon。daemon_id（FK daemon_instances）是稳定绑定键，create / scan-generate
+据此建 workspace_member_runtimes 成员绑定行（D-004）。
 """
 
 from __future__ import annotations
@@ -15,7 +13,6 @@ import uuid
 from unittest.mock import AsyncMock
 
 import pytest
-from pydantic import ValidationError
 
 from app.modules.daemon.model import DaemonInstance
 from app.modules.workspace.member_runtimes.service import get_my_binding
@@ -25,19 +22,26 @@ from app.modules.workspace.service import WorkspaceService
 
 async def test_create_daemon_client_skips_local_scan(db_session) -> None:
     """daemon-client create 跳过本地 scan（root_path 不存在也不抛 WorkspacePathNotFound）。"""
-    runtime_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    daemon = DaemonInstance(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        hostname="host-1",
+        server_url="http://localhost:8000",
+        status="online",
+    )
+    db_session.add(daemon)
+    await db_session.flush()
+
     service = WorkspaceService(db_session)
     ws = await service.create(
         WorkspaceCreate(
             name="Client Project",
             root_path="/remote/client/path/that/does/not/exist",
-            path_source="daemon-client",
-            daemon_runtime_id=runtime_id,
+            daemon_id=daemon.id,
         ),
-        created_by=None,
+        created_by=user_id,
     )
-    assert ws.path_source == "daemon-client"
-    assert ws.daemon_runtime_id == runtime_id
     assert ws.status == "active"
 
 
@@ -45,59 +49,57 @@ async def test_create_daemon_client_creates_empty_spec_workspace(db_session) -> 
     """daemon-client create 建 platform-managed 空 SpecWorkspace 占位。"""
     from app.modules.spec_workspace.service import SpecWorkspaceService
 
+    user_id = uuid.uuid4()
+    daemon = DaemonInstance(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        hostname="host-2",
+        server_url="http://localhost:8000",
+        status="online",
+    )
+    db_session.add(daemon)
+    await db_session.flush()
+
     service = WorkspaceService(db_session)
     ws = await service.create(
         WorkspaceCreate(
             name="Client 2",
             root_path="/remote/x",
-            path_source="daemon-client",
-            daemon_runtime_id=uuid.uuid4(),
+            daemon_id=daemon.id,
         ),
-        created_by=None,
+        created_by=user_id,
     )
     spec_ws = await SpecWorkspaceService(db_session).get(ws.id)
     assert spec_ws.strategy == "platform-managed"
     assert spec_ws.spec_root  # 平台 spec_root 已生成
 
 
-async def test_is_daemon_client_payload_helper() -> None:
-    """_is_daemon_client_payload 按 path_source 判断。"""
-    assert (
-        WorkspaceService._is_daemon_client_payload(
-            WorkspaceCreate(
-                name="x",
-                root_path="/x",
-                path_source="daemon-client",
-                daemon_runtime_id=uuid.uuid4(),
-            )
-        )
-        is True
-    )
-    assert (
-        WorkspaceService._is_daemon_client_payload(WorkspaceCreate(name="x", root_path="/x"))
-        is False
-    )
-
-
-async def test_scan_generate_daemon_client_dispatches_scan(db_session) -> None:
-    """daemon-client scan-generate 创建 pending workspace + 派 scan lease 给绑定 daemon。"""
-    runtime_id = uuid.uuid4()
+async def test_scan_generate_dispatches_scan(db_session) -> None:
+    """scan_generate 创建 pending workspace + 派 scan lease 给绑定 daemon（唯一入口）。"""
     user_id = uuid.uuid4()
-    service = WorkspaceService(db_session)
+    daemon = DaemonInstance(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        hostname="host-scan-1",
+        server_url="http://localhost:8000",
+        status="online",
+    )
+    db_session.add(daemon)
+    await db_session.flush()
 
+    service = WorkspaceService(db_session)
     agent_service = AsyncMock()
     agent_run = AsyncMock()
     agent_run.id = uuid.uuid4()
     agent_service.start_scan_dispatch = AsyncMock(return_value=agent_run)
 
-    ws_id, run_id = await service.scan_generate_daemon_client(
+    ws_id, run_id = await service.scan_generate(
         root_path="/remote/client/proj",
         user_id=user_id,
-        daemon_runtime_id=runtime_id,
         agent_service=agent_service,
+        daemon_id=daemon.id,
     )
 
-    # 派了 scan lease（强绑路由由 task-03 在 dispatch_to_daemon 内实现）
     agent_service.start_scan_dispatch.assert_awaited_once()
     call_kwargs = agent_service.start_scan_dispatch.await_args.kwargs
     assert call_kwargs["workspace_id"] == ws_id
@@ -105,40 +107,27 @@ async def test_scan_generate_daemon_client_dispatches_scan(db_session) -> None:
     assert call_kwargs["user_id"] == user_id
     assert run_id == agent_run.id
 
-    # workspace 落库为 pending daemon-client
     ws = await service.get(ws_id)
-    assert ws.path_source == "daemon-client"
-    assert ws.daemon_runtime_id == runtime_id
     assert ws.status == "pending"
 
 
 # ---------------------------------------------------------------------------
-# daemon-entity-binding 补遗（task-10/11）：daemon-client create 走 daemon_id 维度
+# daemon-entity-binding（task-10/11）：daemon_id 是唯一绑定键
 # ---------------------------------------------------------------------------
 
 
-def test_workspace_create_daemon_id_replaces_runtime_id_for_daemon_client() -> None:
-    """WorkspaceCreate.path_source='daemon-client' 必填 daemon_id（不再要求 daemon_runtime_id）。
+def test_workspace_create_daemon_id_is_optional() -> None:
+    """WorkspaceCreate 不再有 path_source / daemon_runtime_id 字段（task-01 删）。
 
-    单传 daemon_id 应通过；同时传 daemon_runtime_id（legacy fallback）也通过；
-    daemon-client 且两者都缺时 ValidationError。
+    daemon_id 可选（不传时 create 不建 member binding 行，由后续 init / scan 补）。
     """
-    # 只传 daemon_id（新链路）：合法
-    payload = WorkspaceCreate(
-        name="x",
-        root_path="/x",
-        path_source="daemon-client",
-        daemon_id=uuid.uuid4(),
-    )
-    assert payload.daemon_id is not None
-    assert payload.daemon_runtime_id is None
+    # 不传 daemon_id：合法（仅落 workspace + 空 spec）
+    payload = WorkspaceCreate(name="x", root_path="/x")
+    assert payload.daemon_id is None
 
-    # server-local 无需任何 daemon 字段：合法
-    WorkspaceCreate(name="y", root_path="/y")
-
-    # daemon-client 且 daemon_id 与 daemon_runtime_id 都缺：非法
-    with pytest.raises(ValidationError):
-        WorkspaceCreate(name="z", root_path="/z", path_source="daemon-client")
+    # 传 daemon_id：合法
+    payload2 = WorkspaceCreate(name="y", root_path="/y", daemon_id=uuid.uuid4())
+    assert payload2.daemon_id is not None
 
 
 async def test_create_daemon_client_writes_member_binding_for_daemon_id(db_session) -> None:
@@ -175,14 +164,12 @@ async def test_create_daemon_client_writes_member_binding_for_daemon_id(db_sessi
         WorkspaceCreate(
             name="Daemon Project",
             root_path="/remote/daemon/proj",
-            path_source="daemon-client",
             daemon_id=daemon.id,
         ),
         created_by=user_id,
     )
 
-    # workspace 行落库；daemon_runtime_id 留空（global fallback 字段废弃）
-    assert ws.path_source == "daemon-client"
+    # workspace 行落库
     assert ws.status == "active"
 
     # 成员绑定行已建：daemon_id / root_path / path_source 写入；init_synced_* 未触发（None）
@@ -195,52 +182,58 @@ async def test_create_daemon_client_writes_member_binding_for_daemon_id(db_sessi
     assert binding.init_synced_spec_version is None
 
 
-async def test_create_daemon_client_without_daemon_id_skips_member_binding(
-    db_session,
-) -> None:
-    """仅传 daemon_runtime_id（legacy，无 daemon_id）的 daemon-client create：不建 member binding。
+async def test_create_without_daemon_id_skips_member_binding(db_session) -> None:
+    """不传 daemon_id 的 create：仅落 workspace + 空 spec，不建 member binding。
 
-    老链路（task-08 scan-generate 等内部）仍只传 daemon_runtime_id；为不引入回归，
-    service.create 在 daemon_id 缺失时不写 member binding（仅落 workspace + 空 spec）。
+    daemon_id 是 member binding 行的稳定绑定键；缺失时 service.create 跳过
+    upsert_my_binding（避免 FK 悬空），由后续 init / scan-generate 补建。
     """
     service = WorkspaceService(db_session)
     ws = await service.create(
-        WorkspaceCreate(
-            name="Legacy Daemon",
-            root_path="/remote/legacy",
-            path_source="daemon-client",
-            daemon_runtime_id=uuid.uuid4(),
-        ),
+        WorkspaceCreate(name="No Daemon", root_path="/remote/no-daemon"),
         created_by=None,
     )
-    assert ws.path_source == "daemon-client"
-    assert ws.daemon_runtime_id is not None
+    assert ws.status == "active"
 
 
 async def test_create_daemon_client_slug_conflict_raises_slug_duplicate(db_session) -> None:
-    """daemon-client create 撞同名 slug → WorkspaceSlugDuplicate(409) 而非裸 IntegrityError(500)。
+    """create 撞同名 slug → WorkspaceSlugDuplicate(409) 而非裸 IntegrityError(500)。
 
-    回归守护：service.create 的 daemon-client 分支 flush 必须包 try/except IntegrityError
-    翻译（与 server-local 分支 _translate_integrity_error 一致）。否则用户在 UI 用
-    daemon-client 模式建一个跟现有 active workspace 同 slug 的工作区，会收到 500
-    （撞 ux_workspaces_slug_active partial unique index）。
+    回归守护：service.create 的 flush 必须包 try/except IntegrityError 翻译。
     """
     from app.core.errors import WorkspaceSlugDuplicate
 
+    user_id = uuid.uuid4()
+    daemon1 = DaemonInstance(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        hostname="host-dup-1",
+        server_url="http://localhost:8000",
+        status="online",
+    )
+    daemon2 = DaemonInstance(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        hostname="host-dup-2",
+        server_url="http://localhost:8000",
+        status="online",
+    )
+    db_session.add_all([daemon1, daemon2])
+    await db_session.flush()
+
     service = WorkspaceService(db_session)
-    # 第一个 daemon-client workspace：占用 slug=dup-name
+    # 第一个 workspace：占用 slug=dup-name
     first = await service.create(
         WorkspaceCreate(
             name="Dup Name",
             root_path="/remote/first",
-            path_source="daemon-client",
-            daemon_runtime_id=uuid.uuid4(),
+            daemon_id=daemon1.id,
         ),
-        created_by=None,
+        created_by=user_id,
     )
     assert first.slug == "dup-name"
 
-    # 第二个 daemon-client workspace：同名 slug、不同 root_path（避开 _find_active_by_root_path 复用）
+    # 第二个 workspace：同名 slug、不同 root_path（避开 _find_active_by_root_path 复用）
     # 修复前：flush 抛裸 IntegrityError → router 上浮变 500
     # 修复后：_translate_integrity_error → WorkspaceSlugDuplicate（HTTP 409）
     with pytest.raises(WorkspaceSlugDuplicate):
@@ -248,14 +241,13 @@ async def test_create_daemon_client_slug_conflict_raises_slug_duplicate(db_sessi
             WorkspaceCreate(
                 name="Dup Name",
                 root_path="/remote/second",
-                path_source="daemon-client",
-                daemon_runtime_id=uuid.uuid4(),
+                daemon_id=daemon2.id,
             ),
-            created_by=None,
+            created_by=user_id,
         )
 
 
-async def test_create_daemon_client_rejects_daemon_owned_by_other_user(db_session) -> None:
+async def test_create_rejects_daemon_owned_by_other_user(db_session) -> None:
     """daemon_id 归属校验：daemon 属他人 → create 拒绝（防跨用户劫持）。
 
     与 upsert_my_binding 的 daemon_not_owned 一致（D-004 / FR）；service.create
@@ -301,7 +293,6 @@ async def test_create_daemon_client_rejects_daemon_owned_by_other_user(db_sessio
             WorkspaceCreate(
                 name="Hijack",
                 root_path="/remote/hijack",
-                path_source="daemon-client",
                 daemon_id=daemon.id,
             ),
             created_by=owner_id,
@@ -314,42 +305,19 @@ async def test_create_daemon_client_rejects_daemon_owned_by_other_user(db_sessio
 # ---------------------------------------------------------------------------
 
 
-def test_scan_generate_request_accepts_daemon_id_without_runtime_id() -> None:
-    """ScanGenerateRequest.path_source='daemon-client' 接受单传 daemon_id（新链路）。
-
-    daemon-entity-binding 后 daemon_id 是稳定绑定键，daemon_runtime_id 降级 legacy。
-    单传 daemon_id 合法；同时传 daemon_runtime_id（legacy）也合法；两者都缺非法；
-    server-local 无需任何 daemon 字段。
-    """
+def test_scan_generate_request_accepts_daemon_id() -> None:
+    """ScanGenerateRequest 接受 daemon_id（task-01 后无 path_source / daemon_runtime_id）。"""
     from app.modules.workspace.schema import ScanGenerateRequest
 
-    # 只传 daemon_id（新链路）：合法
-    payload = ScanGenerateRequest(
-        root_path="/x",
-        path_source="daemon-client",
-        daemon_id=uuid.uuid4(),
-    )
+    # 传 daemon_id：合法
+    payload = ScanGenerateRequest(root_path="/x", daemon_id=uuid.uuid4())
     assert payload.daemon_id is not None
-    assert payload.daemon_runtime_id is None
 
-    # 只传 daemon_runtime_id（legacy fallback）：合法
-    ScanGenerateRequest(
-        root_path="/x",
-        path_source="daemon-client",
-        daemon_runtime_id=uuid.uuid4(),
-    )
-
-    # server-local 无需 daemon 字段：合法
-    ScanGenerateRequest(root_path="/x")
-
-    # daemon-client 且 daemon_id 与 daemon_runtime_id 都缺：非法
-    with pytest.raises(ValidationError):
-        ScanGenerateRequest(root_path="/x", path_source="daemon-client")
+    # 不传 daemon_id：合法（scan-generate 内部不建 member binding）
+    ScanGenerateRequest(root_path="/y")
 
 
-async def test_scan_generate_daemon_client_with_daemon_id_writes_member_binding(
-    db_session,
-) -> None:
+async def test_scan_generate_with_daemon_id_writes_member_binding(db_session) -> None:
     """scan-generate 用 daemon_id 维度，落 pending workspace + 成员绑定行。
 
     覆盖 ql-20260705-003：daemon-entity-binding 后 scan-generate 新建 workspace 时，
@@ -384,7 +352,7 @@ async def test_scan_generate_daemon_client_with_daemon_id_writes_member_binding(
     agent_run.id = uuid.uuid4()
     agent_service.start_scan_dispatch = AsyncMock(return_value=agent_run)
 
-    ws_id, run_id = await service.scan_generate_daemon_client(
+    ws_id, run_id = await service.scan_generate(
         root_path="/remote/scan/proj",
         user_id=user_id,
         agent_service=agent_service,
@@ -397,7 +365,6 @@ async def test_scan_generate_daemon_client_with_daemon_id_writes_member_binding(
 
     # workspace pending + 成员绑定行带 daemon_id（dispatch 经此解析 daemon）
     ws = await service.get(ws_id)
-    assert ws.path_source == "daemon-client"
     assert ws.status == "pending"
     binding = await get_my_binding(db_session, ws_id, user_id)
     assert binding is not None
@@ -406,9 +373,7 @@ async def test_scan_generate_daemon_client_with_daemon_id_writes_member_binding(
     assert binding.path_source == "daemon-client"
 
 
-async def test_scan_generate_daemon_client_rejects_daemon_owned_by_other_user(
-    db_session,
-) -> None:
+async def test_scan_generate_rejects_daemon_owned_by_other_user(db_session) -> None:
     """scan-generate daemon_id 归属校验：daemon 属他人 → 拒绝（防跨用户劫持）。
 
     与 create 流程的 _guard_daemon_owned_by_user 守护一致；拒绝时不派 scan。
@@ -451,7 +416,7 @@ async def test_scan_generate_daemon_client_rejects_daemon_owned_by_other_user(
     agent_service = AsyncMock()
 
     with pytest.raises(AppError) as exc_info:
-        await service.scan_generate_daemon_client(
+        await service.scan_generate(
             root_path="/remote/hijack",
             user_id=owner_id,
             agent_service=agent_service,

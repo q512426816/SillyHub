@@ -21,7 +21,7 @@ interface Props {
  *
  * - 未绑定（unbound）：直接渲染首次绑定引导卡片（WorkspaceAccessGuide 首次模式）。
  * - 已绑定（bound）：不再 return null，而是渲染「编辑我的接入配置」入口按钮，
- *   点击展开 AccessGuide 编辑模式（回填当前 runtime_id / root_path / path_source）。
+ *   点击展开 AccessGuide 编辑模式（回填当前 daemon_id / root_path）。
  *   保存调 upsertMyBinding（task-05 / D-007），保存成功后收起并刷新 binding。
  *
  * Owner is auto-seeded (task-05) so the unbound branch only fires for new members.
@@ -57,7 +57,6 @@ export function WorkspaceBindingGuard({ workspaceId }: Props) {
     const initial: AccessGuideInitial = {
       daemon_id: binding.daemon_id ?? null,
       root_path: binding.root_path,
-      path_source: binding.path_source,
     };
     return (
       <WorkspaceAccessGuide

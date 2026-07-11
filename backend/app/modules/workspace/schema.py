@@ -7,10 +7,9 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 WorkspaceStatusLiteral = Literal["pending", "active", "archived", "deleted"]
-PathSourceLiteral = Literal["server-local", "daemon-client"]
 # spec 同步策略（2026-06-28-daemon-client-spec-sync-strategy，D-001/D-004）。
 # daemon-client workspace 创建时用户可选；决定源项目已有 .sillyspec 如何进入平台。
 SpecStrategyLiteral = Literal["platform-managed", "repo-mirrored", "repo-native"]
@@ -65,15 +64,8 @@ class ScanGenerateRequest(BaseModel):
     # Optional per-run model override; when None the dispatch layer falls
     # through to workspace.default_model.
     model: str | None = Field(default=None, max_length=128)
-    # path_source / daemon_runtime_id mirror WorkspaceCreate so the scan run
-    # can target a daemon-client path (task-08 dispatch consumes these).
-    # Added here in task-01 per plan.md execute-consistency convention.
-    path_source: PathSourceLiteral = "server-local"
-    daemon_runtime_id: uuid.UUID | None = None
     # daemon_id：守护进程实体（FK daemon_instances）——daemon-entity-binding 后的稳定
-    # 绑定键。daemon-client scan-generate 优先用此字段（新工作区 workspace.daemon_runtime_id
-    # 恒 NULL，绑定下沉到 per-member binding 行）。task-10/11 补遗对齐 WorkspaceCreate；
-    # daemon_runtime_id 保留为 legacy 兼容入口（仅老调用方）。
+    # 绑定键。task-10/11 补遗对齐 WorkspaceCreate。
     daemon_id: uuid.UUID | None = None
     # spec 同步策略（2026-06-28-daemon-client-spec-sync-strategy）。daemon-client
     # scan-generate 首次创建 workspace 时据此落 spec_workspaces.strategy。
@@ -83,21 +75,6 @@ class ScanGenerateRequest(BaseModel):
     @classmethod
     def _sanitize_root_path(cls, v: str) -> str:
         return _sanitize_path(v)
-
-    @model_validator(mode="after")
-    def _validate_daemon_binding(self) -> "ScanGenerateRequest":
-        # daemon-entity-binding 后绑定键是 daemon_id（per-member binding 行），
-        # daemon_runtime_id 退化为 legacy 兼容；二者至少一个非空即放行。
-        # 与 _is_daemon_client_payload 注释及 WorkspaceCreate 校验逻辑对齐。
-        if (
-            self.path_source == "daemon-client"
-            and self.daemon_id is None
-            and self.daemon_runtime_id is None
-        ):
-            raise ValueError(
-                "daemon_id or daemon_runtime_id is required when path_source='daemon-client'"
-            )
-        return self
 
 
 class ScanGenerateResponse(BaseModel):
@@ -132,14 +109,6 @@ class WorkspaceCreate(BaseModel):
     build_command: str | None = Field(default=None)
     test_command: str | None = Field(default=None)
     source_yaml_path: str | None = Field(default=None)
-    # path_source / daemon_runtime_id (FR-01 / D-004@v1,
-    # change 2026-06-18-workspace-client-path). server-local default keeps the
-    # existing create flow byte-identical.
-    path_source: PathSourceLiteral = "server-local"
-    # daemon_runtime_id：legacy 全局 daemon 绑定字段（FK daemon_runtimes）。daemon-entity-binding
-    # 后退化为 read-only fallback；新链路（创建对话框 / 详情页 switcher）一律走 daemon_id。
-    # 仍保留为 optional 兼容 scan-generate 等内部老调用方（仅传 runtime_id 场景）。
-    daemon_runtime_id: uuid.UUID | None = None
     # daemon_id：守护进程实体（FK daemon_instances）——2026-07-03-daemon-entity-binding
     # task-10/11 补遗的「添加工作区」对话框 daemon 维度入口。daemon-client create
     # 选此字段；service.create 据此建 workspace_member_runtimes 成员绑定行（D-004）。
@@ -165,21 +134,6 @@ class WorkspaceCreate(BaseModel):
                 "starting and ending with an alphanumeric character (1-100 chars)"
             )
         return v
-
-    @model_validator(mode="after")
-    def _validate_daemon_binding(self) -> "WorkspaceCreate":
-        # daemon-client 路径来源需绑定一个守护进程：daemon_id（新，实体维度）或
-        # daemon_runtime_id（legacy fallback）至少一个非空。task-10/11 补遗后 daemon_id 优先。
-        if (
-            self.path_source == "daemon-client"
-            and self.daemon_id is None
-            and self.daemon_runtime_id is None
-        ):
-            raise ValueError(
-                "daemon_id (or legacy daemon_runtime_id) is required when "
-                "path_source='daemon-client'"
-            )
-        return self
 
 
 class WorkspaceUpdate(BaseModel):
@@ -208,11 +162,6 @@ class WorkspaceUpdate(BaseModel):
     test_command: str | None = Field(default=None)
     source_yaml_path: str | None = Field(default=None)
     status: str | None = Field(default=None)
-    # path_source / daemon_runtime_id: path_source None (omitted) skips the
-    # daemon-client binding check — service uses exclude_unset=True. Only an
-    # explicit 'daemon-client' triggers the required-runtime-id rule.
-    path_source: PathSourceLiteral | None = None
-    daemon_runtime_id: uuid.UUID | None = None
 
     @field_validator("slug")
     @classmethod
@@ -225,14 +174,6 @@ class WorkspaceUpdate(BaseModel):
                 "starting and ending with an alphanumeric character (1-100 chars)"
             )
         return v
-
-    @model_validator(mode="after")
-    def _validate_daemon_binding(self) -> "WorkspaceUpdate":
-        if self.path_source is None:
-            return self
-        if self.path_source == "daemon-client" and self.daemon_runtime_id is None:
-            raise ValueError("daemon_runtime_id is required when path_source='daemon-client'")
-        return self
 
 
 class OwnerRead(BaseModel):
@@ -270,8 +211,6 @@ class WorkspaceRead(BaseModel):
     updated_at: datetime
     last_scanned_at: datetime | None
     deleted_at: datetime | None
-    path_source: PathSourceLiteral
-    daemon_runtime_id: uuid.UUID | None
     owner: OwnerRead | None = None
 
 

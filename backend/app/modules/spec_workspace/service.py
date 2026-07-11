@@ -62,10 +62,9 @@ class SpecWorkspaceService:
     # ── HostFsDelegate access ─────────────────────────────────────────────
     #
     # task-11：spec_workspace service 不持有 daemon facade，按需局部构造
-    # HostFsDelegate（server-local 分支用 stat/list_dir 原语；daemon-client 分支
-    # 仍走既有 get_spec_bundle 整树打包 RPC——task-01 八方法契约不含该方法，本 service
-    # 保留 daemon-client 的 hub.send_rpc 直调）。lazy + 复用进程级 ws_hub 单例，避免
-    # 每次调用重建 RPC 客户端。
+    # HostFsDelegate（daemon-client 单一路径：走 get_spec_bundle 整树打包 RPC，task-01
+    # 八方法契约不含该方法，本 service 保留 daemon-client 的 hub.send_rpc 直调）。
+    # lazy + 复用进程级 ws_hub 单例，避免每次调用重建 RPC 客户端。
     def _host_fs_delegate(self):
         from app.modules.daemon.host_fs import HostFsDelegate, HostFsWsRpc
         from app.modules.daemon.ws_hub import get_daemon_ws_hub
@@ -201,36 +200,21 @@ class SpecWorkspaceService:
         """Import spec files from the client ``.sillyspec`` directory into the
         platform-managed spec workspace.
 
-        2026-06-30：从 stub 变实现。daemon-client workspace 的 root_path 在宿主机，
-        backend 容器读不到 → 通过 daemon WS RPC ``get_spec_bundle`` 让 daemon 打包
-        rootPath/.sillyspec 整树为 tar（base64），backend apply_sync 写入 spec_root。
-
-        server-local workspace：root_path 已在容器内，直接读 .sillyspec 打包。
+        workspace 的 root_path 在成员宿主机，backend 容器读不到 → 通过 daemon WS RPC
+        ``get_spec_bundle`` 让 daemon 打包 rootPath/.sillyspec 整树为 tar（base64），
+        backend apply_sync 写入 spec_root。
 
         Args:
             workspace_id: workspace UUID。
-            daemon_id: daemon_instance UUID（daemon-client workspace 必填，路由 RPC）。
-            root_path: workspace root_path（容器路径或 daemon-client 宿主机路径）。
+            daemon_id: daemon_instance UUID（必填，路由 RPC；由调用方经 binding 解析）。
+            root_path: workspace root_path（daemon-client 宿主机路径）。
 
         Change 2026-07-03-daemon-entity-binding task-09: parameter ``runtime_id``
         replaced by ``daemon_id`` — ``hub.send_rpc`` now routes by daemon entity.
         """
         spec_ws = await self.get(workspace_id)
 
-        # 获取 workspace 行（拿 root_path / path_source / daemon_runtime_id）
-        from app.modules.workspace.model import Workspace
-
-        ws = await self._session.get(Workspace, workspace_id)
-        if ws is None:
-            raise SpecWorkspaceNotFound(
-                f"Workspace '{workspace_id}' not found for spec import.",
-            )
-        ws_root_path = root_path or ws.root_path or ""
-        ws_path_source = ws.path_source or "server-local"
-        # transitional fallback: use workspace's legacy daemon_runtime_id when
-        # no daemon_id was provided (migration period; runtime_id used as WS
-        # routing key, best-effort under daemon-entity-binding model).
-        ws_daemon_id = daemon_id or ws.daemon_runtime_id
+        ws_root_path = root_path or ""
 
         if not ws_root_path:
             raise AppError(
@@ -238,31 +222,22 @@ class SpecWorkspaceService:
                 code="SPEC_IMPORT_NO_ROOT_PATH",
                 http_status=400,
             )
-
-        # ── daemon-client：经 WS RPC 让 daemon 打包 → 回传 → apply_sync ──
-        if ws_path_source == "daemon-client" and ws_daemon_id:
-            tar_bytes = await self._fetch_spec_bundle_via_rpc(
-                ws_daemon_id, ws_root_path, ws_path_source
+        if daemon_id is None:
+            # daemon_id 必须由调用方经 binding 解析传入（router 层 MemberBindingResolver）；
+            # 无 binding → 路由层已抛 DaemonClientNoActiveSession，此处兜底防御。
+            raise AppError(
+                "No daemon_id resolved for workspace; cannot import .sillyspec.",
+                code="SPEC_IMPORT_NO_DAEMON_ID",
+                http_status=400,
             )
-            reparsed = await self.apply_sync(workspace_id, tar_bytes)
-            log.info(
-                "spec_workspace.import_from_repo",
-                spec_workspace_id=str(spec_ws.id),
-                workspace_id=str(workspace_id),
-                path_source=ws_path_source,
-                tar_bytes=len(tar_bytes),
-                reparsed=reparsed,
-            )
-            return spec_ws
 
-        # ── server-local：容器内打包 .sillyspec → apply_sync ──
-        tar_bytes = await self._pack_sillyspec_local(ws, ws_root_path, ws_path_source)
+        # daemon-client：经 WS RPC 让 daemon 打包 → 回传 → apply_sync
+        tar_bytes = await self._fetch_spec_bundle_via_rpc(daemon_id, ws_root_path)
         reparsed = await self.apply_sync(workspace_id, tar_bytes)
         log.info(
             "spec_workspace.import_from_repo",
             spec_workspace_id=str(spec_ws.id),
             workspace_id=str(workspace_id),
-            path_source=ws_path_source,
             tar_bytes=len(tar_bytes),
             reparsed=reparsed,
         )
@@ -289,58 +264,38 @@ class SpecWorkspaceService:
         def _evt(event: str, **data: object) -> str:
             return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
-        from app.modules.workspace.model import Workspace
-
         spec_ws = await self.get(workspace_id)
-        ws = await self._session.get(Workspace, workspace_id)
-        if ws is None:
-            yield _evt(
-                "error", code="HTTP_404_SPEC_WORKSPACE_NOT_FOUND", message="workspace not found"
-            )
-            return
-        ws_root_path = root_path or ws.root_path or ""
-        ws_path_source = ws.path_source or "server-local"
-        # transitional fallback: use workspace's legacy daemon_runtime_id when
-        # no daemon_id was provided (migration period; runtime_id used as WS
-        # routing key, best-effort under daemon-entity-binding model).
-        ws_daemon_id = daemon_id or ws.daemon_runtime_id
+        ws_root_path = root_path or ""
         if not ws_root_path:
             yield _evt("error", code="SPEC_IMPORT_NO_ROOT_PATH", message="no root_path")
             return
+        if daemon_id is None:
+            # daemon_id 必须由调用方经 binding 解析传入（router 层 MemberBindingResolver）；
+            # 无 binding → 路由层已抛 DaemonClientNoActiveSession，此处兜底防御。
+            yield _evt("error", code="SPEC_IMPORT_NO_DAEMON_ID", message="no daemon_id")
+            return
 
-        tar_bytes: bytes
-        if ws_path_source == "daemon-client" and ws_daemon_id:
-            yield _evt("packing", phase="packing")
-            rpc_task = asyncio.ensure_future(
-                self._fetch_spec_bundle_via_rpc(ws_daemon_id, ws_root_path, ws_path_source)
-            )
-            # 心跳：每 5s 未完成就 yield keepalive，防止 proxy idle timeout 断连。
-            while True:
-                done, _ = await asyncio.wait({rpc_task}, timeout=5.0)
-                if done:
-                    break
-                yield ": keepalive\n\n"
-            try:
-                tar_bytes = rpc_task.result()
-            except AppError as exc:
-                # helper 把 daemon-client RPC 全部错误封装为 AppError 子类（透传既有
-                # code/message：DaemonRuntimeOffline/DaemonRpcTimeout/DaemonRpcConflict
-                # 自带 504/504/409，DaemonRpcForbiddenError/DemonRpcRemoteGatewayError
-                # 自带 403/502，SPEC_IMPORT_EMPTY_BUNDLE 422，SPEC_IMPORT_RPC_FAILED 502）。
-                yield _evt("error", code=exc.code, message=exc.message)
-                return
-            except Exception as exc:
-                yield _evt("error", code="SPEC_IMPORT_RPC_FAILED", message=str(exc))
-                return
-            yield _evt("packed", phase="packed", tar_bytes=len(tar_bytes))
-        else:
-            yield _evt("packing", phase="packing")
-            try:
-                tar_bytes = await self._pack_sillyspec_local(ws, ws_root_path, ws_path_source)
-            except AppError as exc:
-                yield _evt("error", code=exc.code, message=exc.message)
-                return
-            yield _evt("packed", phase="packed", tar_bytes=len(tar_bytes))
+        yield _evt("packing", phase="packing")
+        rpc_task = asyncio.ensure_future(self._fetch_spec_bundle_via_rpc(daemon_id, ws_root_path))
+        # 心跳：每 5s 未完成就 yield keepalive，防止 proxy idle timeout 断连。
+        while True:
+            done, _ = await asyncio.wait({rpc_task}, timeout=5.0)
+            if done:
+                break
+            yield ": keepalive\n\n"
+        try:
+            tar_bytes = rpc_task.result()
+        except AppError as exc:
+            # helper 把 daemon-client RPC 全部错误封装为 AppError 子类（透传既有
+            # code/message：DaemonRuntimeOffline/DaemonRpcTimeout/DaemonRpcConflict
+            # 自带 504/504/409，DaemonRpcForbiddenError/DemonRpcRemoteGatewayError
+            # 自带 403/502，SPEC_IMPORT_EMPTY_BUNDLE 422，SPEC_IMPORT_RPC_FAILED 502）。
+            yield _evt("error", code=exc.code, message=exc.message)
+            return
+        except Exception as exc:
+            yield _evt("error", code="SPEC_IMPORT_RPC_FAILED", message=str(exc))
+            return
+        yield _evt("packed", phase="packed", tar_bytes=len(tar_bytes))
 
         # 落盘 + 两阶段 reparse（D-003 各自容错；_reparse_phase 失败已设 dirty 不抛）。
         # 三阶段都是慢操作（写 1545+ 文件入伙 + reparse docs/changes），SSE 流必须周期
@@ -388,21 +343,15 @@ class SpecWorkspaceService:
 
     # ── import helpers（task-11：分流内聚，import_from_repo 与 _sse 共用）─────
     #
-    # 两处 ``if ws_path_source == "daemon-client"`` 分流从 import_from_repo / _sse
-    # 提取到这两个 helper，消除重复控制流。daemon-client 仍走整树打包 RPC（task-01
-    # 八方法契约不含 get_spec_bundle，service.py 保留 hub.send_rpc 直调）；
-    # server-local 用 HostFsDelegate.stat/list_dir 做结构发现 + 容器内 Path 直读字节
-    # 打包（D-004：server-local 行为本就本地容器，delegate 三原语服务此分支的统一抽象，
-    # 但文件字节读取 delegate.read_file 返 str 仅适用 UTF-8 文本，二进制文件保持容器
-    # 直读以零回归——见 CONSTRAINT_GAP 上报）。
+    # import_from_repo / _sse 共用 daemon-client 整树打包 RPC（task-01 八方法契约不
+    # 含 get_spec_bundle，service.py 保留 hub.send_rpc 直调）。
 
     async def _fetch_spec_bundle_via_rpc(
         self,
         ws_daemon_id: uuid.UUID,
         ws_root_path: str,
-        ws_path_source: str,
     ) -> bytes:
-        """daemon-client 分支：hub.send_rpc(get_spec_bundle) → tar_bytes。
+        """daemon-client：hub.send_rpc(get_spec_bundle) → tar_bytes。
 
         错误码透传链与原 import_from_repo 一致（ql-20260701-001）：
         DaemonRuntimeOffline/DaemonRpcTimeout/DaemonRpcConflict 已是 AppError 子类直接
@@ -421,7 +370,7 @@ class SpecWorkspaceService:
         from app.modules.workspace.service import resolve_root_path_for_daemon
 
         hub = get_daemon_ws_hub()
-        daemon_root = resolve_root_path_for_daemon(ws_root_path, ws_path_source)
+        daemon_root = resolve_root_path_for_daemon(ws_root_path)
         try:
             result = await hub.send_rpc(
                 ws_daemon_id,
@@ -456,99 +405,14 @@ class SpecWorkspaceService:
             )
         return base64.b64decode(tar_b64)
 
-    async def _pack_sillyspec_local(
-        self,
-        ws,
-        ws_root_path: str,
-        ws_path_source: str,
-    ) -> bytes:
-        """server-local 分支：容器内打包 root/.sillyspec 整树（排除 .runtime）。
-
-        task-11：用 HostFsDelegate.stat/list_dir 做目录存在判断与递归结构发现（替代
-        ``spec_source.is_dir()`` / ``rglob``），文件字节读取仍用容器内 Path 直读
-        （delegate.read_file 返 str 不适用二进制；server-local 路径本就在容器内，D-004
-        行为不变）。``resolve_root_path_for_server`` 仍负责 host→container 路径改写。
-        """
-        from app.modules.workspace.service import resolve_root_path_for_server
-
-        server_path = resolve_root_path_for_server(ws_root_path, ws_path_source)
-        if server_path is None:
-            raise AppError(
-                "Cannot resolve server-local path for import.",
-                code="SPEC_IMPORT_PATH_UNRESOLVED",
-                http_status=400,
-            )
-        sillyspec_abs = f"{server_path.rstrip('/')}/.sillyspec"
-        delegate = self._host_fs_delegate()
-        spec_stat = await delegate.stat(ws, sillyspec_abs)
-        if not spec_stat.get("exists") or not spec_stat.get("is_dir"):
-            raise AppError(
-                f"No .sillyspec directory at {sillyspec_abs}",
-                code="SPEC_IMPORT_NO_SILLYSPEC_DIR",
-                http_status=404,
-            )
-        # 递归遍历 .sillyspec（用 delegate.list_dir + stat 替代 rglob），收集相对路径。
-        rel_files: list[str] = []
-        await self._walk_sillyspec_local(delegate, ws, sillyspec_abs, "", rel_files)
-        buf = io.BytesIO()
-        with tarfile.open(fileobj=buf, mode="w") as tar:
-            for rel in sorted(rel_files):
-                abs_path = Path(sillyspec_abs) / rel
-                tar.add(str(abs_path), arcname=rel, recursive=False)
-        return buf.getvalue()
-
-    @staticmethod
-    async def _walk_sillyspec_local(
-        delegate,
-        ws,
-        dir_abs: str,
-        rel_prefix: str,
-        out: list[str],
-    ) -> None:
-        """DFS 遍历 ``dir_abs``，把文件相对路径 append 到 ``out``。
-
-        跳过任何含 ``.runtime`` 段的子树（与原 ``rglob`` + ``.runtime`` 过滤等价）。
-        用 delegate.list_dir 列名 + delegate.stat 判 is_dir，server-local 走 delegate
-        本地分支（``Path.iterdir`` / ``Path.is_dir``）行为同原 ``rglob``。
-        """
-        entries = await delegate.list_dir(ws, dir_abs)
-        for name in entries:
-            rel = f"{rel_prefix}{name}" if not rel_prefix else f"{rel_prefix}/{name}"
-            if name == ".runtime":
-                continue
-            child_abs = f"{dir_abs.rstrip('/')}/{name}"
-            child_stat = await delegate.stat(ws, child_abs)
-            if child_stat.get("is_dir"):
-                await SpecWorkspaceService._walk_sillyspec_local(delegate, ws, child_abs, rel, out)
-            elif child_stat.get("exists"):
-                out.append(rel)
-
-    # ── Manual sync (D-012，task-13：path_source 分流) ──────────────────────
+    # ── Manual sync (D-012，task-13：daemon-client outbox 分发) ────────────
     #
-    # 「同步到服务器」手动按钮：把本地（或本机）spec 改动回灌到服务器权威 spec_root。
+    # 「同步到服务器」手动按钮：把成员宿主机的 spec 改动回灌到服务器权威 spec_root。
     # 复用 DaemonChangeWrite outbox（kind="spec-sync"）共享 change-detail-file-tree-editor
     # 基础设施，不另起表。
     #
-    # 分流：
-    #   - server-local：root_path 在容器/宿主机可读，直接打包 .sillyspec → apply_sync
-    #     落盘返 done（与 import_from_repo 等价但同步语义：把本机 spec 整树覆盖服务器）。
-    #   - daemon-client：root_path 在成员宿主机，backend 读不到 → 建 kind="spec-sync" 的
-    #     DaemonChangeWrite 行，daemon 拉到后调 postSpecSync 整树回灌（D-012）。
-
-    async def sync_manual_server_local(
-        self,
-        workspace_id: uuid.UUID,
-        *,
-        daemon_id: uuid.UUID | None = None,
-        root_path: str | None = None,
-    ) -> dict[str, str]:
-        """server-local 手动同步：本机 .sillyspec 打包 → apply_sync 落盘返 done。
-
-        复用 ``import_from_repo`` 的 server-local 分支（容器内打包 .sillyspec 整树 →
-        apply_sync 覆盖 spec_root + reparse）。返回 ``{"status": "done"}``。
-        """
-        await self.import_from_repo(workspace_id, daemon_id=daemon_id, root_path=root_path)
-        return {"status": "done"}
+    # 唯一路径：root_path 在成员宿主机，backend 读不到 → 建 kind="spec-sync" 的
+    # DaemonChangeWrite 行，daemon 拉到后调 postSpecSync 整树回灌（D-012）。
 
     async def sync_manual_get_pending(
         self,

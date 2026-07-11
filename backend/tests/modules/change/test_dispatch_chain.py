@@ -220,11 +220,16 @@ async def test_dispatch_complete_sync_auto_dispatch(
 
     # --- Step 3: Sync stage status from sillyspec.db ---
     service = SillySpecStageDispatchService(db_session)
-    sync_result = await service.sync_stage_status(
-        session=db_session,
-        change_id=change.id,
-        run_id=run1_id,
-    )
+    from app.core.spec_paths import SpecPathResolver
+    from tests.modules.change.test_dispatch import _patch_sync_to_local_db
+
+    db_path = SpecPathResolver(str(tmp_path)).db_path()
+    with _patch_sync_to_local_db(service, db_path):
+        sync_result = await service.sync_stage_status(
+            session=db_session,
+            change_id=change.id,
+            run_id=run1_id,
+        )
 
     # Verify sync result
     assert sync_result.synced is True
@@ -327,11 +332,16 @@ async def test_dispatch_complete_sync_stage_done_no_auto_dispatch(
     await db_session.commit()
 
     # Sync — stage fully completed
-    sync_result = await service.sync_stage_status(
-        session=db_session,
-        change_id=change.id,
-        run_id=run1_id,
-    )
+    from app.core.spec_paths import SpecPathResolver
+    from tests.modules.change.test_dispatch import _patch_sync_to_local_db
+
+    db_path = SpecPathResolver(str(tmp_path)).db_path()
+    with _patch_sync_to_local_db(service, db_path):
+        sync_result = await service.sync_stage_status(
+            session=db_session,
+            change_id=change.id,
+            run_id=run1_id,
+        )
 
     assert sync_result.synced is True
     assert sync_result.stage_completed is True
@@ -407,11 +417,14 @@ async def test_dispatch_complete_sync_no_db_stops_chain(
     await db_session.commit()
 
     # Sync fails — no sillyspec.db
-    sync_result = await service.sync_stage_status(
-        session=db_session,
-        change_id=change.id,
-        run_id=run1_id,
-    )
+    from tests.modules.change.test_dispatch import _MissingDbDelegate, _patch_sync_with_delegate
+
+    with _patch_sync_with_delegate(service, _MissingDbDelegate()):
+        sync_result = await service.sync_stage_status(
+            session=db_session,
+            change_id=change.id,
+            run_id=run1_id,
+        )
     assert sync_result.synced is False
     assert "not found" in sync_result.error
 

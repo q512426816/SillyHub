@@ -1,13 +1,15 @@
 // workspace-access-guide 组件单测。
 //
 // 2026-07-03-daemon-entity-binding（D-004/D-006）：下拉改 daemon 实体维度。
+// 2026-07-10-remove-server-local-workspace-mode：删「路径来源」下拉 case（server-local
+// 模式移除后 path_source 固定 "daemon-client"，组件不再暴露路径来源选择）。
 //
 // 覆盖：
 //   - 「绑定守护进程」下拉来自 listDaemonInstances()（守护进程实体），online 排前，
 //     option 文案含 hostname + provider 列表 + 中文状态；默认带「不绑定守护进程」空选项。
-//   - 「路径来源」下拉显示中文（本机守护进程路径 / 服务器本地路径）。
 //   - 守护进程列表为空 → 显示引导文案。
-//   - 填路径 + 选 daemon + 保存 → upsertMyBinding 正确入参（daemon_id）+ onConfigured 触发。
+//   - 填路径 + 选 daemon + 保存 → upsertMyBinding 正确入参（daemon_id + 固定 path_source=daemon-client）
+//     + onConfigured 触发。
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -78,17 +80,6 @@ describe("WorkspaceAccessGuide", () => {
     expect(options[2]!.textContent).toContain("离线");
   });
 
-  it("「路径来源」下拉显示中文", async () => {
-    mockedList.mockResolvedValue([]);
-    render(<WorkspaceAccessGuide workspaceId="ws-1" onConfigured={vi.fn()} />);
-    const select = await screen.findByLabelText("路径来源");
-    const texts = Array.from(select.querySelectorAll("option")).map(
-      (o) => o.textContent,
-    );
-    expect(texts).toContain("本机守护进程路径");
-    expect(texts).toContain("服务器本地路径");
-  });
-
   it("守护进程列表为空时显示引导文案", async () => {
     mockedList.mockResolvedValue([]);
     render(<WorkspaceAccessGuide workspaceId="ws-1" onConfigured={vi.fn()} />);
@@ -136,7 +127,7 @@ describe("WorkspaceAccessGuide", () => {
   });
 
   describe("编辑模式（initial 传入）", () => {
-    it("传入 initial 时回填当前 daemon_id / root_path / path_source，且展示编辑文案", async () => {
+    it("传入 initial 时回填当前 daemon_id / root_path，且展示编辑文案", async () => {
       const mbp = mkInstance({
         id: "inst-mbp",
         hostname: "MBP",
@@ -158,7 +149,6 @@ describe("WorkspaceAccessGuide", () => {
           initial={{
             daemon_id: "inst-mbp",
             root_path: "/Users/me/old-code",
-            path_source: "server-local",
           }}
         />,
       );
@@ -176,18 +166,13 @@ describe("WorkspaceAccessGuide", () => {
       expect(
         (screen.getByLabelText("本地项目路径") as HTMLInputElement).value,
       ).toBe("/Users/me/old-code");
-      // 路径来源回填到 server-local
-      const pathSourceSelect = screen.getByLabelText(
-        "路径来源",
-      ) as HTMLSelectElement;
-      expect(pathSourceSelect.value).toBe("server-local");
       // 编辑模式按钮文案
       expect(
         screen.getByRole("button", { name: "保存修改" }),
       ).toBeInTheDocument();
     });
 
-    it("编辑模式改 daemon / path_source / root_path 后保存 → upsertMyBinding 用新值入参并触发 onConfigured", async () => {
+    it("编辑模式改 daemon / root_path 后保存 → upsertMyBinding 用新值入参并触发 onConfigured", async () => {
       const mbp = mkInstance({
         id: "inst-mbp",
         hostname: "MBP",
@@ -209,7 +194,6 @@ describe("WorkspaceAccessGuide", () => {
           initial={{
             daemon_id: "inst-mbp",
             root_path: "/Users/me/old-code",
-            path_source: "server-local",
           }}
         />,
       );
@@ -223,10 +207,6 @@ describe("WorkspaceAccessGuide", () => {
       // 改路径
       fireEvent.change(screen.getByLabelText("本地项目路径"), {
         target: { value: "/Users/me/new-code" },
-      });
-      // 改路径来源到 daemon-client
-      fireEvent.change(screen.getByLabelText("路径来源"), {
-        target: { value: "daemon-client" },
       });
       // 点保存修改
       fireEvent.click(screen.getByText("保存修改"));

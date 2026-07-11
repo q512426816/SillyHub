@@ -36,6 +36,27 @@ from app.modules.workspace.model import Workspace
 
 
 async def _make_daemon_client_workspace(db_session) -> Workspace:
+    """Create a workspace + per-member binding for the platform admin.
+
+    task-13：task-01 删除 ``workspaces.daemon_runtime_id`` 后，import router 经
+    ``MemberBindingResolver`` 按 (workspace_id, user_id) 解析 daemon_id。这里同步
+    建 ``DaemonInstance`` + ``WorkspaceMemberRuntime`` 绑定 admin 用户，让 router
+    能拿到 daemon_id 走 RPC（daemon 运行时本身由 ``_patch_hub_send_rpc`` mock，
+    无需真实心跳）。
+    """
+    from sqlalchemy import select
+
+    from app.modules.auth.model import User
+    from app.modules.daemon.model import DaemonInstance
+    from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+
+    admin = (
+        (await db_session.execute(select(User).where(User.email == "admin@example.com")))
+        .scalars()
+        .first()
+    )
+    assert admin is not None
+
     ws = Workspace(
         id=uuid.uuid4(),
         name="import sse ws",
@@ -43,10 +64,26 @@ async def _make_daemon_client_workspace(db_session) -> Workspace:
         root_path=f"/tmp/import-sse-{uuid.uuid4().hex}",
         status="active",
         component_key="comp",
-        path_source="daemon-client",
-        daemon_runtime_id=uuid.uuid4(),
     )
     db_session.add(ws)
+    daemon = DaemonInstance(
+        id=uuid.uuid4(),
+        user_id=admin.id,
+        hostname="import-test-host",
+        server_url="http://localhost:8000",
+        status="online",
+    )
+    db_session.add(daemon)
+    await db_session.flush()
+    db_session.add(
+        WorkspaceMemberRuntime(
+            workspace_id=ws.id,
+            user_id=admin.id,
+            daemon_id=daemon.id,
+            root_path=ws.root_path,
+            path_source="daemon-client",
+        )
+    )
     await db_session.commit()
     await db_session.refresh(ws)
     return ws
@@ -230,7 +267,7 @@ class TestImportSse:
         )
         assert admin is not None
 
-        # 新链路 workspace：daemon_runtime_id=NULL，daemon_id 存 member binding 行
+        # 新链路 workspace：daemon_id 存 member binding 行
         ws = Workspace(
             id=uuid.uuid4(),
             name="binding ws",
@@ -238,8 +275,6 @@ class TestImportSse:
             root_path=f"/tmp/binding-{uuid.uuid4().hex}",
             status="active",
             component_key="comp",
-            path_source="daemon-client",
-            daemon_runtime_id=None,  # 关键：daemon-entity-binding 后新链路为 NULL
         )
         db_session.add(ws)
         daemon = DaemonInstance(

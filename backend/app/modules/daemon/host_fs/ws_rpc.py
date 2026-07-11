@@ -157,11 +157,13 @@ class HostFsWsRpc:
     ) -> dict[str, Any]:
         """Forward to :func:`send_host_fs_rpc`, coercing ids to ``uuid.UUID``.
 
-        task-01 passes ``str`` ids (``str(workspace.id)`` /
-        ``str(workspace.daemon_runtime_id)``); :func:`send_host_fs_rpc` types
-        them as ``uuid.UUID``. Coerce here so both str and UUID callers work —
-        the underlying ``ws_hub.send_rpc`` routes on the UUID value (its
-        internal pending-rpc map keys on the daemon_id object).
+        task-01 passes ``str`` ids (``str(workspace.id)`` / ``str(daemon_id)``)
+        where ``daemon_id`` is the daemon **instance** id resolved by
+        :func:`resolve_daemon_instance_for_workspace` (the WS routing key).
+        :func:`send_host_fs_rpc` types them as ``uuid.UUID``. Coerce here so
+        both str and UUID callers work — the underlying ``ws_hub.send_rpc``
+        routes on the UUID value (its internal pending-rpc map keys on the
+        daemon_id object).
         """
         return await send_host_fs_rpc(
             self._ws_hub,

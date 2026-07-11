@@ -1,9 +1,12 @@
 /**
  * task-15: lib/workspaces.ts scanGenerate spec_strategy 透传测（D-006@v1）。
  *
- * 覆盖 task-14 的 lib 层改动：scanGenerate 加 specStrategy 参数，请求体
- * 含 spec_strategy 透传给 POST /api/workspaces/scan-generate。按钮渲染/互斥
- * 的 page 层测试见 workspaces/[id]/page.test.tsx。
+ * 2026-07-10-remove-server-local-workspace-mode（task-11）：scanGenerate 签名
+ * 精简为 (rootPath, provider?, model?, specStrategy?, daemonId?) —— path_source
+ * 字段从请求体移除（平台统一 daemon-client），daemon_id 替代旧 daemon_runtime_id。
+ *
+ * 覆盖：请求体含 spec_strategy 透传给 POST /api/workspaces/scan-generate。
+ * 按钮渲染/互斥的 page 层测试见 workspaces/[id]/page.test.tsx。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -51,49 +54,52 @@ describe("scanGenerate spec_strategy 透传（task-14 / D-006@v1）", () => {
 
   const OK = { workspace_id: "ws-1", agent_run_id: "run-1" };
 
-  it("传 specStrategy 时请求体含 spec_strategy + daemon-client 字段", async () => {
+  it("传 specStrategy + daemonId 时请求体含 spec_strategy + daemon_id（无 path_source/daemon_runtime_id）", async () => {
     const h = mockFetch({ status: 200, body: OK });
     await scanGenerate(
       "C:/proj",
       null,
       null,
-      "daemon-client",
-      "rid-1",
       "repo-native",
+      "daemon-1",
     );
     expect(h.lastUrl()).toContain("/api/workspaces/scan-generate");
     const body = h.lastBody();
     expect(body).not.toBeNull();
     expect(body!.root_path).toBe("C:/proj");
-    expect(body!.path_source).toBe("daemon-client");
-    expect(body!.daemon_runtime_id).toBe("rid-1");
     expect(body!.spec_strategy).toBe("repo-native");
+    expect(body!.daemon_id).toBe("daemon-1");
+    // 2026-07-10：path_source / daemon_runtime_id 已从请求体移除。
+    expect(body!.path_source).toBeUndefined();
+    expect(body!.daemon_runtime_id).toBeUndefined();
   });
 
   it("不传 specStrategy 时请求体不含 spec_strategy", async () => {
     const h = mockFetch({ status: 200, body: OK });
-    await scanGenerate("C:/proj", null, null, "daemon-client", "rid-1");
+    await scanGenerate("C:/proj", null, null, undefined, "daemon-1");
     const body = h.lastBody();
     expect(body).not.toBeNull();
     expect(body!.spec_strategy).toBeUndefined();
+    expect(body!.daemon_id).toBe("daemon-1");
   });
 
   it("三策略值均可透传", async () => {
     const strategies = ["platform-managed", "repo-mirrored", "repo-native"] as const;
     for (const strat of strategies) {
       const h = mockFetch({ status: 200, body: OK });
-      await scanGenerate("C:/proj", null, null, "daemon-client", "rid-1", strat);
+      await scanGenerate("C:/proj", null, null, strat, "daemon-1");
       expect(h.lastBody()?.spec_strategy).toBe(strat);
     }
   });
 
-  it("server-local 调用不强制传 daemon 字段（向后兼容）", async () => {
+  it("仅 rootPath（无 daemon/spec）→ 请求体只含 root_path", async () => {
     const h = mockFetch({ status: 200, body: OK });
     await scanGenerate("C:/proj");
     const body = h.lastBody();
     expect(body).not.toBeNull();
     expect(body!.root_path).toBe("C:/proj");
-    expect(body!.path_source).toBeUndefined();
     expect(body!.spec_strategy).toBeUndefined();
+    expect(body!.daemon_id).toBeUndefined();
+    expect(body!.path_source).toBeUndefined();
   });
 });
