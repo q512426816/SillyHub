@@ -308,6 +308,18 @@ export interface LeaseCtx {
    * 缺省/未传 → daemon 按 platform-managed 兼容（D-004）。
    */
   specStrategy?: string;
+  /**
+   * ql-20260711（init lease 接线修复）：lease mode（init/scan/...）。
+   * backend build_claim_payload init 分支下发 mode='init'。task-runner.runLease 据此
+   * 走 _runInitLease（不 spawn agent，写 .sillyspec-platform.json + pullSpecBundle）。
+   * 历史 bug：daemon._runLeaseStateMachine ctx 构造从未透传 mode → leaseMode==='init'
+   * 不命中 → init lease 落入完整 agent spawn 但无 prompt → Claude 等待（从未 work）。
+   */
+  mode?: string;
+  /** ql-20260711：平台配置（init lease 下发，写 .sillyspec-platform.json）。 */
+  platformConfig?: Record<string, unknown>;
+  /** ql-20260711：最新 spec 版本（init lease 拉取基准，pullSpecBundle 用）。 */
+  latestSpecVersion?: number;
 }
 
 /**

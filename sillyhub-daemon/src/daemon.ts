@@ -3197,6 +3197,20 @@ export class Daemon {
       workspaceId:
         (rawExec.workspaceId as string | undefined) ??
         (rawExec.workspace_id as string | undefined),
+      // ql-20260711（init lease 接线）：mode + platform_config + latest_spec_version
+      // + spec_strategy 归一化透传（历史 bug：execPayload 构造遗漏 → ctx 没字段 →
+      // task-runner leaseMode==='init' 不命中 → _runInitLease 从不跑 → init lease
+      // 落入 agent spawn 无 prompt → Claude 等待）。
+      mode: rawExec.mode as string | undefined,
+      platformConfig:
+        (rawExec.platform_config as Record<string, unknown> | undefined) ??
+        (rawExec.platformConfig as Record<string, unknown> | undefined),
+      latestSpecVersion:
+        (rawExec.latest_spec_version as number | undefined) ??
+        (rawExec.latestSpecVersion as number | undefined),
+      specStrategy:
+        (rawExec.spec_strategy as string | undefined) ??
+        (rawExec.specStrategy as string | undefined),
       // gap-2：claim_token 归一化到 execPayload.claimToken。
       // 优先用 claim 阶段拿到的 claimToken（局部变量，来自 claimResp.claim_token）；
       // 兜底 rawExec.claim_token / rawExec.claimToken（理论上 claimResp 顶层就有，
@@ -3288,6 +3302,13 @@ export class Daemon {
       prompt: execPayload.prompt, // 不从 fetch 覆盖
       model: execCtx?.model ?? execPayload.model,
       timeout: execPayload.timeout,
+      // ql-20260711（init lease 接线）：mode/platformConfig/workspaceId/latestSpecVersion/
+      // specStrategy 透传 → task-runner leaseMode==='init' 命中 → _runInitLease 跑（不 spawn agent）。
+      mode: execPayload.mode,
+      platformConfig: execPayload.platformConfig,
+      workspaceId: execPayload.workspaceId,
+      latestSpecVersion: execPayload.latestSpecVersion,
+      specStrategy: execPayload.specStrategy,
     };
 
     const taskResult: TaskRunnerResult = await this._taskRunner!.runLease(ctx);
