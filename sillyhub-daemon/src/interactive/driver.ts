@@ -113,6 +113,43 @@ export interface InteractiveDriverStartOptions {
   askUserOnly?: boolean;
   /** 子进程 env（凭证/配置注入；仅内存，禁止持久化）。 */
   env?: NodeJS.ProcessEnv;
+  /**
+   * task-06（D-007@v2）：MCP server 配置表，spawn 主 agent 时注入让其 discover tool。
+   *
+   * 结构与 ``mcp-config.ts`` ``McpServerConfig`` 对齐（``{ command, args, env? }``），
+   * 且兼容 Claude SDK ``McpStdioServerConfig``（``{ type?:'stdio', command, args?, env? }``）
+   * —— Claude driver 透传到 SDK ``options.mcpServers``，codex driver 暂存（codex
+   * app-server MCP 注入留后续任务）。
+   *
+   * **主 agent 长生命周期**：主 agent = interactive lease（``lease_expires_at=NULL``，
+   * 永不过期），复用现有 SessionManager.create/restoreAndReconnect；driver consume
+   * 循环零改，仅 start 时注入 MCP 配置让主 agent discover 5 tool（dispatch_worker /
+   * get_worker_result / list_workers / converge_mission / report_progress）。
+   *
+   * SessionManager 经 ``mainAgentMcpConfigProvider`` 在 create/restore 时为标记为
+   * 主 agent 的 session 构造本字段（platform_default + workspace + daemon MCP server
+   * 合并后的最终配置）。普通会话（chat/scan/stage）不注入（undefined）。
+   *
+   * 键名 = server 名（如 ``sillyhub-daemon`` = DAEMON_MCP_SERVER_NAME），值 = 启动配置。
+   * 空对象 / undefined → driver 不传 mcpServers（SDK 走默认，无额外 tool）。
+   */
+  mcpServers?: Record<string, McpServerConfigForDriver>;
+}
+
+/**
+ * task-06：provider-neutral MCP server 启动配置（driver.ts 契约层，不依赖 SDK 类型）。
+ *
+ * 结构与 ``mcp-config.ts`` ``McpServerConfig`` + Claude SDK ``McpStdioServerConfig``
+ * 兼容：stdio 子进程启动（command + args + env）。driver 实现侧按需透传到 provider
+ * SDK（Claude SDK ``options.mcpServers`` / Codex app-server 协议）。
+ */
+export interface McpServerConfigForDriver {
+  /** 启动命令（如 ``'node'``）。 */
+  command: string;
+  /** 命令行参数（如 ``['dist/mcp-server.js']``）。 */
+  args?: string[];
+  /** 子进程 env（如 ``{ MCP_SERVER_BACKEND_URL, MCP_SERVER_DAEMON_TOKEN }``）。 */
+  env?: Record<string, string>;
 }
 
 /**

@@ -334,6 +334,18 @@ export class ClaudeSdkDriver implements InteractiveDriver {
     if (opts.resume !== undefined) {
       options.resume = opts.resume;
     }
+    // task-06（D-007@v2）：主 agent MCP server 注入。opts.mcpServers 由
+    // SessionManager 经 mainAgentMcpConfigProvider 构造（platform_default + workspace
+    // + daemon 内置 MCP server 合并后的最终配置），仅主 agent（role=orchestrator）
+    // session 非空。结构 { [name]: { command, args?, env? } } 与 SDK
+    // McpStdioServerConfig（sdk.d.ts:1092 { type?:'stdio', command, args?, env? }）
+    // 兼容——command/args/env 同名同义，type 可选故不传 SDK 也认 stdio。直接赋值让
+    // SDK spawn 各 MCP server 子进程，主 agent discover 5 tool（dispatch_worker /
+    // get_worker_result / list_workers / converge_mission / report_progress）。
+    // 普通会话 opts.mcpServers=undefined → 不写 options.mcpServers → SDK 走默认（零回归）。
+    if (opts.mcpServers !== undefined) {
+      options.mcpServers = opts.mcpServers;
+    }
 
     // ql-20260621-partial：开启 SDK 流式 partial 消息推送。SDK 会在每个
     // Anthropic streaming event（content_block_delta 等）到达时 emit

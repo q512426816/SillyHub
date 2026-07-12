@@ -2925,6 +2925,10 @@ export class Daemon {
         // scan 真阻塞：透传给 SessionManager.create 决定是否注入 canUseTool + 分流策略。
         manualApproval: execPayload.manualApproval,
         askUserOnly: execPayload.askUserOnly,
+        // task-06（D-007@v2）：lease stage 透传。主 agent run stage='orchestrator'，
+        // SessionManager isMainAgentSession 谓词据此判定 → 注入 daemon MCP server 5 tool。
+        // 普通会话 stage 未传/其他值 → 不注入（零回归）。
+        stage: execPayload.stage,
       });
       this._logger.info('interactive_session_started', {
         lease_id: leaseId,
@@ -3225,6 +3229,13 @@ export class Daemon {
         (rawExec.ask_user_only as boolean | undefined) ??
         (rawExec.askUserOnly as boolean | undefined) ??
         payload.askUserOnly,
+      // task-06（D-007@v2）：lease stage 标记透传。backend dispatch_to_daemon(stage=...)
+      // 写入 lease.metadata.stage；主 agent run stage='orchestrator'。daemon 侧
+      // _startInteractiveSession 透传到 CreateSessionInput.stage，SessionManager
+      // isMainAgentSession 谓词据此判定主 agent 注入 MCP tool。
+      stage:
+        (rawExec.stage as string | undefined) ??
+        payload.stage,
     };
 
     // task-04（D-002@v3）：kind 分流。在 fetch/startLease 之前——interactive 不走

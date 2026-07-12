@@ -320,6 +320,15 @@ export interface LeaseCtx {
   platformConfig?: Record<string, unknown>;
   /** ql-20260711：最新 spec 版本（init lease 拉取基准，pullSpecBundle 用）。 */
   latestSpecVersion?: number;
+  /**
+   * task-06（D-007@v2）：lease stage 标记。backend ``dispatch_to_daemon(stage=...)``
+   * 写入 lease.metadata.stage，主 agent run 用 ``stage='orchestrator'``（backend
+   * ``orchestrator.py:162``）。daemon 侧据此判定本 interactive session 是否 team
+   * 主 agent（注入 daemon MCP server 5 tool）。普通 scan/stage/chat session 不传或
+   * 传其他值 → 不注入（零回归）。归一化见 daemon ``_runLeaseStateMachine`` execPayload
+   * 构造 + ``_startInteractiveSession`` 透传到 ``CreateSessionInput.stage``。
+   */
+  stage?: string;
 }
 
 /**

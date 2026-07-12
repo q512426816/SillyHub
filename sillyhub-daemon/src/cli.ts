@@ -72,6 +72,17 @@ import { AuditSink } from './policy/audit-sink.js';
 import type { AuditBatchSender, AuditEvent } from './policy/audit-sink.js';
 import { PolicyEngine } from './policy/filesystem-policy.js';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+// task-06（D-007@v2）：主 agent MCP tool 注入。buildDaemonMcpServerConfig 构造
+// daemon 内置 MCP server 配置（command=node + args=[dist/mcp-server.js] + env），
+// mergeMcpConfigs 合并 platform_default + daemon MCP server。injectMcpConfig 写
+// 临时 .mcp.json 供 spawn --mcp-config；但 Claude SDK 经 options.mcpServers 直接
+// 注入（不走 --mcp-config 文件），故此处只用 buildDaemonMcpServerConfig + merge。
+import {
+  buildDaemonMcpServerConfig,
+  DAEMON_MCP_SERVER_NAME,
+  mergeMcpConfigs,
+} from './mcp-config.js';
+import type { McpServerConfigForDriver } from './interactive/driver.js';
 
 // ── 路径访问（可测试性：函数返回，task-22 vi.spyOn 可 mock）──────────────────
 
@@ -651,6 +662,59 @@ export async function startAction(opts: StartOptions): Promise<number> {
       // (provider) 对齐心跳 _syncAllowedRoots 按 _registeredRuntimes 存的 rid）。
       policyEngine,
       runtimeIdProvider: (provider: string) => daemon?.resolveRuntimeId(provider) ?? '',
+      // task-06（D-007@v2 / R-01）：主 agent（role=orchestrator）MCP tool 注入。
+      //
+      // isMainAgentSession：读 ctx.stage判定本 session 是否 team 主 agent
+      //（backend orchestrator.py:162 dispatch_to_daemon(stage='orchestrator') →
+      // lease.metadata.stage → daemon execPayload.stage → CreateSessionInput.stage →
+      // MainAgentMcpContext.stage）。普通 scan/stage/chat session stage 未传或非
+      // 'orchestrator' → 不注入（零回归）。
+      //
+      // mainAgentMcpConfigProvider：构造主 agent spawn 时要注入的 MCP server 配置表。
+      // 用 buildDaemonMcpServerConfig 构造 daemon 内置 MCP server（command=node +
+      // args=[dist/mcp-server.js] + env={MCP_SERVER_BACKEND_URL, MCP_SERVER_DAEMON_TOKEN}），
+      // 经 mergeMcpConfigs 与空 platform_default 合并（白名单自动加入 DAEMON_MCP_SERVER_NAME，
+      // 见 mcp-config.ts:188）。返回 ``{ [DAEMON_MCP_SERVER_NAME]: config }`` 单 server 表，
+      // SessionManager 透传到 driverOpts.mcpServers → ClaudeSdkDriver.start 写入
+      // SDK options.mcpServers → 主 agent discover 5 tool。
+      //
+      // **token 来源偏离（D-007@v2 偏离记录）**：task-05 mcp-server 注释提"user token
+      //（WORKSPACE_WRITE）"，但 daemon 在 cli.ts 构造时拿不到主 agent run 的 user token
+      //（lease/dispatch 时才有，且 lease metadata 不写 user token）。本任务用 daemon
+      // apiKey（config.api_key 优先，回落 config.token）—— backend mcp_tools 5 endpoint
+      // 当前要求 WORKSPACE_WRITE（user permission），需 backend 后续加 daemon service
+      // 路由或 apiKey→user 映射（留 follow-up，不在 task-06 范围）。链路接通优先，
+      // token 错误时 MCP server tool 调用返回结构化 http 403 错误（mcp-server.ts errorContent），
+      // 不 crash daemon。
+      isMainAgentSession: (ctx) => ctx.stage === 'orchestrator',
+      mainAgentMcpConfigProvider: (ctx) => {
+        // daemon apiKey（X-API-Key 长期凭证）优先；回落 Bearer token。
+        const mcpToken = config.api_key ?? config.token ?? '';
+        const daemonServer = buildDaemonMcpServerConfig(
+          config.server_url,
+          mcpToken,
+        );
+        // mergeMcpConfigs：空 platform_default + daemon server。daemon server 作为
+        // configs[0]（platform 位）自动入白名单（mcp-config.ts:188），无需额外配白名单。
+        const merged = mergeMcpConfigs([], {
+          mcpServers: { [DAEMON_MCP_SERVER_NAME]: daemonServer },
+        });
+        // 转为 driver 契约类型（McpServerConfig → McpServerConfigForDriver，结构兼容）。
+        const result: Record<string, McpServerConfigForDriver> = {};
+        for (const [name, cfg] of Object.entries(merged.config.mcpServers)) {
+          result[name] = {
+            command: cfg.command,
+            ...(cfg.args ? { args: cfg.args } : {}),
+            ...(cfg.env ? { env: cfg.env } : {}),
+          };
+        }
+        // provider/model 透传：ctx.model 含主 agent configured model（来自
+        // CreateSessionInput.model），driver 已在 _buildDriverOptions 单独透传 model
+        // 到 SDK options.model，此处 MCP 配置不需重复（MCP server 不读 model）。
+        // ctx 仅作日志/未来扩展用（如 codex 主 agent 需不同 server 配置）。
+        void ctx;
+        return Object.keys(result).length > 0 ? result : undefined;
+      },
     },
   );
   // gap-8（interactive 凭证 parity）：把同一 CredentialManager 传给 Daemon，让

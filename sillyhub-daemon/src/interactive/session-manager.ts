@@ -37,6 +37,7 @@ import type {
   InteractiveDriverCallbacks,
   InteractiveDriverHandle,
   InteractiveDriverResult,
+  McpServerConfigForDriver,
   UserTurnInput,
 } from './driver.js';
 import { InputQueue } from './input-queue.js';
@@ -165,6 +166,69 @@ export interface SessionManagerOptions {
    * 测试注入固定 runtimeId 字符串。policyEngine 未注入时此字段无意义（不读）。
    */
   runtimeIdProvider?: (provider: string) => string;
+  /**
+   * task-06（D-007@v2 / R-01）：是否主 agent（orchestrator）会话。
+   *
+   * daemon 生产路径注入谓词：根据会话上下文判定本 session 是否 team 主 agent
+   *（role=orchestrator）。主 agent = interactive lease（永不过期，
+   * ``lease_expires_at=NULL``，复用现有 lease 机制零新续期）+ MCP tool 注入
+   *（让主 agent discover 5 tool 反向调 backend 派 worker / 读产出 / 收敛）。
+   *
+   * 判定依据由 daemon 决定（如读 lease metadata.stage==='orchestrator' 或
+   * ``main_agent_config`` 标记）。未注入（undefined）→ 所有 session 都按普通
+   * 会话处理（不注入 daemon MCP server，零回归，向后兼容）。
+   *
+   * 与 ``mainAgentMcpConfigProvider`` 配对：仅当本谓词返回 true 时才调 provider
+   * 取 MCP 配置注入 ``driverOpts.mcpServers``。谓词在 create + restoreAndReconnect
+   * 都调用（主 agent session 重启后恢复仍需重新注入 MCP tool）。
+   */
+  isMainAgentSession?: (ctx: MainAgentMcpContext) => boolean;
+  /**
+   * task-06（D-007@v2）：主 agent MCP server 配置构造器。
+   *
+   * daemon 生产路径注入闭包：返回主 agent spawn 时要注入的 MCP server 配置表
+   *（已合并 platform_default + workspace + daemon 内置 MCP server）。调
+   * ``buildDaemonMcpServerConfig`` + ``mergeMcpConfigs`` 构造，token 用 daemon
+   * apiKey（映射到 WORKSPACE_WRITE 用户，详见 task-06 偏离记录）。
+   *
+   * 仅 ``isMainAgentSession`` 判定为主 agent 的 session 才调本 provider；普通会话
+   * 不调（不注入额外 MCP server，向后兼容）。返回 undefined / 空对象 → 不注入。
+   *
+   * provider 接收 ``MainAgentMcpContext``（sessionId / leaseId / provider / cwd /
+   * model）供闭包按需读（如 codex 主 agent 需要不同 server 配置，未来扩展）。
+   */
+  mainAgentMcpConfigProvider?: (
+    ctx: MainAgentMcpContext,
+  ) => Record<string, McpServerConfigForDriver> | undefined;
+}
+
+/**
+ * task-06：主 agent MCP 注入上下文（create + restoreAndReconnect 共用）。
+ *
+ * 字段从 ``CreateSessionInput``（create 路径）或 ``PersistedSessionRecord``
+ *（restore 路径）归一化提取——两者都含 sessionId/leaseId/provider/cwd，model 可选。
+ * daemon 注入的 ``isMainAgentSession`` / ``mainAgentMcpConfigProvider`` 据本上下文
+ * 判定 + 构造 MCP 配置，无需区分 create vs restore 来源。
+ */
+export interface MainAgentMcpContext {
+  /** agent_sessions.id（backend 实体）。 */
+  sessionId: string;
+  /** 长生命周期 interactive lease.id（主 agent lease 永不过期）。 */
+  leaseId: string;
+  /** provider（claude / codex）。 */
+  provider: 'claude' | 'codex';
+  /** 固定 cwd（resume 还原用）。 */
+  cwd: string;
+  /** 模型覆盖（可空，主 agent configured provider/model 透传）。 */
+  model?: string;
+  /**
+   * task-06：lease stage 标记（来自 lease.metadata.stage）。
+   *
+   * daemon 注入的 ``isMainAgentSession`` 谓词读本字段判定主 agent
+   *（``stage==='orchestrator'``）。create 路径从 ``CreateSessionInput.stage``、
+   * restore 路径从 ``PersistedSessionRecord.stage`` 归一化填入。
+   */
+  stage?: string;
 }
 
 /**
@@ -362,6 +426,27 @@ export class SessionManager {
   private readonly _runtimeIdProvider:
     | ((sessionId: string) => string)
     | undefined;
+  /**
+   * task-06（D-007@v2 / R-01）：主 agent 会话判定谓词。未注入 = 永远 false（普通会话，
+   * 不注入 daemon MCP server，向后兼容）。
+   *
+   * 签名用 ``MainAgentMcpContext``（create + restore 共用归一化上下文），与
+   * ``SessionManagerOptions.isMainAgentSession`` 对齐。create 路径从
+   * ``CreateSessionInput`` 归一化出 ctx 再调本谓词；restore 路径从
+   * ``PersistedSessionRecord`` 归一化出 ctx。
+   */
+  private readonly _isMainAgentSession:
+    | ((ctx: MainAgentMcpContext) => boolean)
+    | undefined;
+  /**
+   * task-06：主 agent MCP server 配置构造器。仅主 agent session 调用，返回合并后的
+   * MCP 配置表注入 driverOpts.mcpServers。未注入 = 不注入额外 MCP server。
+   */
+  private readonly _mainAgentMcpConfigProvider:
+    | ((
+        ctx: MainAgentMcpContext,
+      ) => Record<string, McpServerConfigForDriver> | undefined)
+    | undefined;
 
   /**
    * D-001@v1（task-02）：provider driver registry。`drivers.claude` / `drivers.codex`
@@ -440,6 +525,9 @@ export class SessionManager {
     // 隔离 + 统一中文 deny 文案 + audit）。null/undefined = fallback allowedRootsProvider。
     this._policyEngine = opts.policyEngine ?? null;
     this._runtimeIdProvider = opts.runtimeIdProvider;
+    // task-06（D-007@v2 / R-01）：主 agent MCP tool 注入。未注入 = 普通会话零回归。
+    this._isMainAgentSession = opts.isMainAgentSession;
+    this._mainAgentMcpConfigProvider = opts.mainAgentMcpConfigProvider;
   }
 
   /** task-08：manual_approval 当前是否启用（测试 / daemon 透传用）。 */
@@ -679,6 +767,8 @@ export class SessionManager {
       askUserOnly: effectiveAskUserOnly,
       driver, // D-001：写入归属 driver，供 interrupt/consume 路由。
       subagentDepth: new Map(), // task-02 / D-007@v1：子代理 depth 追踪。
+      // task-06：lease stage 持久化（snapshotPersistable 输出，恢复用）。
+      stage: input.stage,
     };
     this._store.set(input.sessionId, state);
 
@@ -692,6 +782,18 @@ export class SessionManager {
       let resolver: PermissionResolver | undefined;
       // _buildDriverOptions 内部按 enableApproval 注入 canUseTool/onUserDialog +
       // 建 resolver（scan 真阻塞，改造点 C/D）；create/restore 复用同一套注入逻辑。
+      // task-06：主 agent session 注入 MCP tool（让主 agent discover daemon MCP
+      // server 5 tool）。仅 isMainAgentSession 判定为主 agent 时调 provider 取配置；
+      // provider 未注入 / 返回 undefined → 不注入（普通会话零回归）。
+      //谓词/provider 签名用 MainAgentMcpContext（create + restore 共用），从 input 归一化。
+      const mainAgentMcp = this._resolveMainAgentMcp({
+        sessionId: input.sessionId,
+        leaseId: input.leaseId,
+        provider: input.provider,
+        cwd: input.cwd,
+        model: input.model,
+        stage: input.stage,
+      });
       const driverOpts = this._buildDriverOptions(state, {
         exePath,
         model: input.model,
@@ -699,6 +801,7 @@ export class SessionManager {
         env: input.env,
         enableApproval,
         effectiveAskUserOnly,
+        mcpServers: mainAgentMcp,
       });
       // 抽 helper 后 resolver 仍需在本作用域持有（create catch 清理用）。
       resolver = this._resolversBySession.get(input.sessionId);
@@ -736,6 +839,26 @@ export class SessionManager {
   }
 
   /**
+   * task-06（D-007@v2）：归一化 MainAgentMcpContext + 调谓词/provider 决定主 agent
+   * MCP server 配置。
+   *
+   * create 路径从 ``CreateSessionInput``、restore 路径从 ``PersistedSessionRecord``
+   * 各自抽出 sessionId/leaseId/provider/cwd/model 构造 ctx（两者都含这些字段），
+   * 再统一调 ``isMainAgentSession`` 判定 + ``mainAgentMcpConfigProvider`` 取配置。
+   *
+   * 返回 undefined 的三种情况（均不注入，普通会话零回归）：
+   *   1. 谓词未注入 / 返回 false（非主 agent session）；
+   *   2. provider 未注入；
+   *   3. provider 返回 undefined / 空对象。
+   */
+  private _resolveMainAgentMcp(ctx: MainAgentMcpContext):
+    | Record<string, McpServerConfigForDriver>
+    | undefined {
+    if (this._isMainAgentSession?.(ctx) !== true) return undefined;
+    return this._mainAgentMcpConfigProvider?.(ctx);
+  }
+
+  /**
    * task-02（R7/D-008）：构造 provider-neutral driver options。create 与
    * restoreAndReconnect 复用，保证 Claude canUseTool/onUserDialog 注入逻辑单一来源
    *（FR-10 不回退：行为与改造前逐行等价，仅从 create/restore 抽出到此 helper）。
@@ -747,9 +870,12 @@ export class SessionManager {
    *   2. enableApproval=true 且 resolverFactory/wsClient 就绪时：建独立 resolver +
    *      注入 canUseTool（_buildCanUseToolCallback，内部调 _requestPermission）+
    *      onUserDialog（supportedDialogKinds 非空时）。
+   *   3. task-06：spec.mcpServers 非空时透传到 driverOpts.mcpServers（主 agent
+   *      MCP tool 注入，让主 agent discover daemon MCP server 5 tool）。普通会话
+   *      spec.mcpServers 缺省 undefined → 不传 → driver 走默认（零回归）。
    *
    * @param state 当前 session（写 driver 归属、读 provider）
-   * @param spec exePath/model/allowedTools/env/enableApproval/effectiveAskUserOnly/resume
+   * @param spec exePath/model/allowedTools/env/enableApproval/effectiveAskUserOnly/resume/mcpServers
    */
   private _buildDriverOptions(
     state: SessionState,
@@ -761,6 +887,7 @@ export class SessionManager {
       enableApproval: boolean;
       effectiveAskUserOnly: boolean;
       resume?: string;
+      mcpServers?: Record<string, McpServerConfigForDriver>;
     },
   ): Record<string, unknown> {
     const driverOpts: Record<string, unknown> = {
@@ -785,6 +912,13 @@ export class SessionManager {
     }
     if (spec.resume !== undefined) {
       driverOpts.resume = spec.resume;
+    }
+    // task-06（D-007@v2）：主 agent MCP tool 注入。spec.mcpServers 由 create/
+    // restoreAndReconnect 按主 agent 判定 + provider 构造后传入；非空时透传到
+    // driverOpts.mcpServers，driver（Claude SDK）把它传给 SDK options.mcpServers
+    // 让主 agent discover daemon MCP server 5 tool。普通会话不传（undefined）。
+    if (spec.mcpServers !== undefined) {
+      driverOpts.mcpServers = spec.mcpServers;
     }
     // scan 真阻塞（per-session，generic-wibbling-whisper.md 改造点 C/D）：
     // enableApproval=true 时按 session 建独立 resolver + 注入远程人审 canUseTool +
@@ -1726,6 +1860,11 @@ export class SessionManager {
         rec.manualApproval = true;
         rec.askUserOnly = state.askUserOnly === true;
       }
+      // task-06（D-007@v2）：主 agent stage 持久化（恢复后重新注入 MCP tool）。
+      // 仅 stage 非空时写（普通 scan/stage/chat session 不写，恢复后不注入 MCP）。
+      if (state.stage) {
+        rec.stage = state.stage;
+      }
       out.push(rec);
     }
     return out;
@@ -1797,12 +1936,25 @@ export class SessionManager {
       askUserOnly: restoreAskUserOnly,
       driver, // D-001：写入归属 driver。
       subagentDepth: new Map(), // task-02 / D-007@v1：恢复后从空开始（depth 不持久化）。
+      // task-06：恢复主 agent stage（重新注入 MCP tool 用）。
+      stage: record.stage,
     };
     this._store.set(state.sessionId, state);
 
     try {
       // task-02（R7）：复用 _buildDriverOptions（含 canUseTool/onUserDialog 注入，
       // 与 create 对齐，FR-10 行为不变）。resume = agentSessionId（Codex thread id / Claude session_id）。
+      // task-06（D-007@v2）：主 agent session 恢复后仍需重新注入 MCP tool（让主 agent
+      // discover daemon MCP server 5 tool）。从 record 归一化 ctx 调同一 _resolveMainAgentMcp，
+      // 与 create 路径单一来源；普通会话返回 undefined 不注入（零回归）。
+      const mainAgentMcp = this._resolveMainAgentMcp({
+        sessionId: record.sessionId,
+        leaseId: record.leaseId,
+        provider: record.provider,
+        cwd: record.cwd,
+        model: record.model,
+        stage: record.stage,
+      });
       const driverOpts = this._buildDriverOptions(state, {
         exePath: exe,
         model: record.model,
@@ -1810,6 +1962,7 @@ export class SessionManager {
         enableApproval: restoreManualApproval,
         effectiveAskUserOnly: restoreAskUserOnly,
         resume: record.agentSessionId, // spike D3 跨进程 resume。
+        mcpServers: mainAgentMcp,
       });
       // task-02（D-001）：用归属 driver，按 provider 写句柄。
       const handleOrQuery = (await driver.start(

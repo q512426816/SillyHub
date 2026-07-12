@@ -129,6 +129,12 @@ export interface SessionState {
    * 写本字段，claude session 继续写 pathToClaudeCodeExecutable（R8）。
    */
   pathToAgentExecutable?: string;
+  /**
+   * task-06（D-007@v2）：lease stage 标记（来自 CreateSessionInput.stage）。
+   * snapshotPersistable 输出到 PersistedSessionRecord.stage；restoreAndReconnect
+   * 从 record.stage 恢复。主 agent（stage='orchestrator'）据此重新注入 MCP tool。
+   */
+  stage?: string;
 }
 
 /** CreateSessionInput（daemon._startInteractiveSession → SessionManager.create）。 */
@@ -175,6 +181,14 @@ export interface CreateSessionInput {
    * pathToClaudeCodeExecutable。
    */
   pathToAgentExecutable?: string;
+  /**
+   * task-06（D-007@v2）：lease stage 标记（来自 lease.metadata.stage）。
+   *
+   * daemon ``_startInteractiveSession`` 从 execPayload.stage 透传。SessionManager
+   * 注入的 ``isMainAgentSession`` 谓词读本字段判定是否主 agent（``stage==='orchestrator'``）
+   * → 主 agent 注入 daemon MCP server 5 tool。普通 scan/stage/chat 不传或其他值 → 不注入。
+   */
+  stage?: string;
 }
 
 /** inject 返回值（runId 由 backend 在 inject 时已创建）。 */
@@ -395,6 +409,15 @@ export interface PersistedSessionRecord {
    * 否则恢复 fallback 到 true 会把 chat 误当 scan）。
    */
   askUserOnly?: boolean;
+  /**
+   * task-06（D-007@v2）：lease stage 标记（主 agent 恢复用）。
+   *
+   * create 时从 ``CreateSessionInput.stage`` 写入 state.stage；snapshotPersistable
+   * 输出到 record.stage，让 restoreAndReconnect 跨 daemon 重启恢复主 agent 身份
+   *（``stage==='orchestrator'`` → 重新注入 daemon MCP server 5 tool）。普通 scan/
+   * stage/chat session 不写（undefined）→ 恢复后不注入 MCP（零回归）。
+   */
+  stage?: string;
 }
 
 /** sessions.json 文件结构。 */
