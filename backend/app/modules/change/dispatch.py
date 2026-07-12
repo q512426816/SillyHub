@@ -960,6 +960,139 @@ def merge_gate_results(worker_results: list[dict]) -> dict:
     }
 
 
+# GLM provider 名：``main_agent_config.provider`` 命中即视为用户显式选 GLM 模型
+# （D-004@v2，task-10）。GLM provider 的多 agent 编排仍走 v1 CoordinatorPlanner
+# 链路（GLM 非 agentic CLI，不能担当主 agent 真跑；spike-04 已证 GLM 只能纯文本
+# 拆解 delegation）。匹配大小写不敏感（"glm"/"GLM"/"Glm"）。
+_GLM_PROVIDER_MARKERS: tuple[str, ...] = ("glm",)
+
+# 主 agent run 派 lease 失败的 error_code（orchestrator.py:166）——task-10 fallback
+# 嗅探此标记判断"主 agent 不可用"。
+_MAIN_AGENT_UNAVAILABLE_CODES: frozenset[str] = frozenset({"no_online_daemon"})
+
+
+def _is_glm_selected(main_agent_config: dict[str, Any] | None) -> bool:
+    """判断用户是否显式选 GLM 模型作为主 agent（D-004@v2）。
+
+    ``main_agent_config.provider`` 命中 :data:`_GLM_PROVIDER_MARKERS`（大小写不敏感）
+    → True，应直接走 v1 GLM 链路（GLM 不能担当主 agent 真跑，仅作 Coordinator
+    纯文本拆解）。其他 provider（claude / codex / 等）→ False，走主 agent 链路。
+
+    Args:
+        main_agent_config: ``change.stages.team_main_agent_config`` 透传的配置 dict
+            （``{agent_type, provider, model}``），可为 None（默认 provider=claude）。
+
+    Returns:
+        True 表示应走 v1 GLM 链路。
+    """
+    cfg = main_agent_config or {}
+    provider = str(cfg.get("provider") or "").strip().lower()
+    return provider in _GLM_PROVIDER_MARKERS
+
+
+def _glm_available() -> bool:
+    """判断 GLM 环境是否配置可用（``GLMConfig.from_env`` 非 None）。
+
+    fallback 只在 GLM 可用时才退化（否则退化也跑不通，不如让主 agent 链路的
+    报错信息原样透出）。lazy import delegation 模块避免循环（delegation 不依赖
+    本模块，但保 lazy 与 _dispatch_execute_team 模式一致）。
+    """
+    from app.modules.agent.delegation import GLMConfig
+
+    return GLMConfig.from_env() is not None
+
+
+async def _run_glm_fallback_mission(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    user_id: uuid.UUID,
+    target_stage: str,
+    objective: str,
+    *,
+    reason: str,
+) -> dict[str, Any]:
+    """GLM fallback 退化路径（D-004@v2，task-10）。
+
+    调 v1 ``MissionService.start_mission(planner=CoordinatorPlanner(GLMConfig))``
+    链路——GLM Coordinator 纯文本拆解为 Worker delegations，落 pending Worker
+    Runs（v1 平铺无 DAG，Wave 2 行为）。保留 v1 链路不删，本函数是 task-10
+    唯一调用入口。
+
+    GLM 不可用（``GLMConfig.from_env() is None``）时返回 ``dispatched=False``，
+    不抛——让上层原样把根因暴露给用户（不再二次降级）。
+
+    Args:
+        session: 数据库会话。
+        workspace_id / change_id / user_id: 调度上下文。
+        target_stage: 目标 stage（execute/verify）。
+        objective: mission objective（与主 agent 链路一致）。
+        reason: fallback 触发原因（日志标注：``glm_selected`` / ``main_agent_unavailable``）。
+
+    Returns:
+        team dispatch 结果 dict（``{dispatched, mode, mission_id, stage, fallback}``）。
+        GLM 不可用时返回 ``{dispatched: False, reason: "glm_unavailable"}``。
+    """
+    from app.modules.agent.delegation import CoordinatorPlanner, GLMConfig
+    from app.modules.agent.mission import MissionService
+
+    glm_cfg = GLMConfig.from_env()
+    if glm_cfg is None:
+        log.warning(
+            "execute_team_glm_fallback_unavailable",
+            change_id=str(change_id),
+            reason=reason,
+        )
+        return {
+            "dispatched": False,
+            "reason": "glm_unavailable",
+            "stage": target_stage,
+            "fallback": reason,
+        }
+
+    mission_svc = MissionService(session, planner=CoordinatorPlanner(glm_cfg))
+    try:
+        mission, worker_runs = await mission_svc.start_mission(
+            workspace_id=workspace_id,
+            objective=objective,
+            created_by=user_id,
+            change_id=change_id,
+            constraints={"mode": "team", "stage": target_stage},
+            budget_usd=4.0,
+        )
+    except Exception as exc:
+        log.warning(
+            "execute_team_glm_fallback_failed",
+            change_id=str(change_id),
+            reason=reason,
+            error=str(exc),
+        )
+        return {
+            "dispatched": False,
+            "reason": f"glm_fallback_failed:{exc}",
+            "stage": target_stage,
+            "fallback": reason,
+        }
+
+    log.info(
+        "execute_team_glm_fallback_dispatched",
+        change_id=str(change_id),
+        mission_id=str(mission.id),
+        workers=len(worker_runs),
+        stage=target_stage,
+        fallback_reason=reason,
+    )
+    return {
+        "dispatched": True,
+        "mode": "team",
+        "fallback": "glm",
+        "fallback_reason": reason,
+        "mission_id": str(mission.id),
+        "workers": len(worker_runs),
+        "stage": target_stage,
+    }
+
+
 async def _dispatch_execute_team(
     session: AsyncSession,
     workspace_id: uuid.UUID,
@@ -967,14 +1100,23 @@ async def _dispatch_execute_team(
     user_id: uuid.UUID,
     target_stage: str = "execute",
 ) -> dict[str, Any]:
-    """Execute team 分流（D-004@v2，2026-07-12-team-main-agent-orchestration task-09）。
+    """Execute team 分流（D-004@v2，2026-07-12-team-main-agent-orchestration task-09/10）。
 
     Opt-in 入口（``change.stages.team_mode=True`` 时由 ``dispatch`` /
-    ``dispatch_next_step`` 调用）：mode=team 旁路 v1 GLM CoordinatorPlanner，
-    走 v2 主 agent ``OrchestratorService.team_mission_entry``——建 AgentMission
-    （含用户预设 worker_preset / main_agent_config）+ 主 agent AgentRun
-    （role=orchestrator）+ 派 daemon lease。主 agent 是真 agent（项目经理），
-    通过 MCP tool（task-05/06）动态派 worker / 读产出 / 收敛。
+    ``dispatch_next_step`` 调用）。
+
+    **task-10 GLM fallback 决策树**（D-004@v2）：
+
+    1. **用户显式选 GLM 模型**（``main_agent_config.provider == "glm"``）→
+       直接走 v1 GLM 链路（``_run_glm_fallback_mission`` reason=
+       ``glm_selected``）。GLM 不能担当主 agent 真跑（spike-04：GLM 非 agentic
+       CLI，仅能纯文本拆解 delegation）。
+    2. **主 agent 链路 + GLM 兜底**：调 ``OrchestratorService.team_mission_entry``
+       建主 agent run + 派 lease；若主 agent run 落 ``error_code`` ∈
+       :data:`_MAIN_AGENT_UNAVAILABLE_CODES`（无在线 daemon / 未绑定）且 GLM
+       可用 → 退化走 v1 GLM（reason=``main_agent_unavailable``）。主 agent
+       run 已建（pending 留 DB），GLM mission 并行建兜底执行。
+    3. **主 agent 可用 / GLM 不可用** → 走主 agent 链路（无 fallback）。
 
     worker_preset / main_agent_config 来源：``change.stages`` JSON 的
     ``team_worker_preset`` / ``team_main_agent_config``（前端 stage toggle 配好
@@ -983,9 +1125,8 @@ async def _dispatch_execute_team(
     verify stage team：worker 全终态后 ``converge_mission_for_completed_run``
     收敛，多 worker gate 经 :func:`merge_gate_results` 策略 A 合并（D-005@v1）。
 
-    GLM fallback 留 task-10：主 agent 不可用 / 用户选 GLM 模型时退化走 v1
-    ``MissionService.start_mission`` + CoordinatorPlanner。本任务不实现 fallback，
-    完全走主 agent。
+    v1 GLM 链路保留（``MissionService.start_mission`` / ``CoordinatorPlanner`` /
+    ``Finalizer`` 不删），fallback 时调用。
     """
     from app.modules.agent.orchestrator import OrchestratorService
 
@@ -1010,6 +1151,24 @@ async def _dispatch_execute_team(
             "读 worker 产出判断达成，全部完成后收敛合并 patch。"
         )
 
+    # task-10 分支 1：用户显式选 GLM → 直接走 v1 GLM 链路（不建主 agent run）。
+    if _is_glm_selected(main_agent_config):
+        log.info(
+            "execute_team_glm_selected",
+            change_id=str(change_id),
+            stage=stage,
+            provider=str((main_agent_config or {}).get("provider")),
+        )
+        return await _run_glm_fallback_mission(
+            session,
+            workspace_id,
+            change_id,
+            user_id,
+            stage,
+            objective,
+            reason="glm_selected",
+        )
+
     try:
         orchestrator = OrchestratorService(session)
         mission, main_run = await orchestrator.team_mission_entry(
@@ -1030,6 +1189,31 @@ async def _dispatch_execute_team(
         )
         return {"dispatched": False, "reason": f"execute_team_orchestrator_failed:{exc}"}
 
+    # task-10 分支 2：主 agent run 派 lease 失败（无在线 daemon）+ GLM 可用 →
+    # 退化 v1 GLM 兜底。主 agent run 已落 DB（pending + error_code=no_online_daemon），
+    # GLM mission 并行建兜底执行。无 GLM 时走主 agent 链路（reconcile 后续重派）。
+    main_unavailable = (
+        main_run.error_code is not None and main_run.error_code in _MAIN_AGENT_UNAVAILABLE_CODES
+    )
+    if main_unavailable and _glm_available():
+        log.info(
+            "execute_team_main_agent_unavailable_fallback_glm",
+            change_id=str(change_id),
+            mission_id=str(mission.id),
+            main_run_id=str(main_run.id),
+            error_code=main_run.error_code,
+            stage=stage,
+        )
+        return await _run_glm_fallback_mission(
+            session,
+            workspace_id,
+            change_id,
+            user_id,
+            stage,
+            objective,
+            reason="main_agent_unavailable",
+        )
+
     log.info(
         "execute_team_dispatched",
         change_id=str(change_id),
@@ -1037,6 +1221,8 @@ async def _dispatch_execute_team(
         main_run_id=str(main_run.id),
         worker_preset_len=len(worker_preset) if isinstance(worker_preset, list) else 0,
         stage=stage,
+        fallback_to_glm=False,
+        main_run_error_code=main_run.error_code,
     )
     return {
         "dispatched": True,
@@ -1441,7 +1627,8 @@ class SillySpecStageDispatchService:
         # Step 2.5（task-09 D-004@v2）：execute/verify team 分流。team_mode=True 时
         # 旁路 single AgentRun 路径，走主 agent OrchestratorService（与 dispatch()
         # 函数 :810 分流一致，覆盖 /execute 端点 → dispatch_next_step 入口）。
-        # brainstorm/plan 不 team（v1 D-002）。GLM fallback 留 task-10。
+        # brainstorm/plan 不 team（v1 D-002）。GLM fallback 在 _dispatch_execute_team
+        # 内实现（task-10：GLM 显式选 / 主 agent 不可用 → v1 链路）。
         if target_stage in ("execute", "verify"):
             stages_mode_peek = dict(change.stages or {})
             if stages_mode_peek.get("team_mode") is True:
