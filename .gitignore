@@ -14,6 +14,7 @@ out/
 **/.sillyspec/.runtime/
 .sillyspec/codebase/SCAN-RAW.md
 .sillyspec/local.yaml
+.sillyspec/knowledge/generated/
 .sillyspec-platform.json
 
 # Python
