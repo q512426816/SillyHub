@@ -34,6 +34,7 @@ from sqlmodel import col
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentArtifact, AgentRun
 from app.modules.agent.placement import RunPlacementService
+from app.modules.daemon.host_fs.delegate import HostFsDelegate
 from app.modules.workspace.model import Workspace
 from app.modules.workspace.service import resolve_root_path_for_daemon
 
@@ -63,14 +64,29 @@ def worker_tool_config(read_only: bool) -> dict[str, object]:
 
 
 def render_worker_prompt(run: AgentRun) -> str:
-    """Render a Worker's execution prompt from its delegation objective."""
+    """Render a Worker's execution prompt from its delegation objective.
+
+    task-04（2026-07-12-worker-worktree-isolation）：末尾追加 per-worker
+    worktree 协作约束（design §5.1 步骤4 + D-002@v1 + D-003@v1）——每个
+    worker 在自己的 git worktree 副本里产出可合并的 commit，验证与合并
+    留 converge 阶段主 agent 统一处理。
+    """
     role = run.role or "worker"
     objective = run.objective or "(未指定目标)"
     return (
         f"你是多 Agent 团队中的一个 Worker（角色：{role}）。\n"
         f"你的目标：{objective}\n\n"
         "完成目标后，输出一份结构化摘要（发现/结论/产出文件路径/风险），"
-        "供 Coordinator 收敛。不要输出与目标无关的内容。"
+        "供 Coordinator 收敛。不要输出与目标无关的内容。\n\n"
+        "【worktree 协作约束（必须遵守）】\n"
+        "1. 只写代码，不跑测试、不跑构建：你当前在自己的 git worktree 副本中，"
+        "副本没有 node_modules / .venv 等依赖，跑测试或构建必然失败；所有验证"
+        "（测试、lint、build）留给主 agent 合并（converge）后在工作区统一执行。\n"
+        '2. 完成后必须提交：写完代码务必执行 `git add -A && git commit -m "<简述>"`，'
+        "你的产出以 commit 形式存在，主 agent 会把你的分支 merge 回工作区——"
+        "没有 commit 就没有可合并的产物。\n"
+        "3. 按文件分工，不要越界：主 agent 派发任务时已指示你负责的文件/模块范围，"
+        "严格在该范围内修改，不要动其他 worker 负责的文件，以减少 converge 合并时的冲突。"
     )
 
 
@@ -81,9 +97,19 @@ class MissionExecutionService:
         self,
         session: AsyncSession,
         placement: RunPlacementService | None = None,
+        host_fs_delegate: HostFsDelegate | None = None,
     ) -> None:
         self._session = session
         self._placement = placement or RunPlacementService(session)
+        # task-03（2026-07-12-worker-worktree-isolation / D-001@v2 / D-005@v2）：
+        # per-worker worktree 隔离。注入时 dispatch_worker 为每个 worker 在
+        # ``ws.root_path/.worktrees/<run.id 短8>/`` 创建 git worktree 副本，把副本
+        # 作 root_path 传 dispatch_to_daemon（worker cwd=副本，并发写不互相覆盖）。
+        # None（默认）→ 保留原行为（root_path=ws.root_path，不建副本），single
+        # mode / 既有调用方零回归（design §9）。生产接线由调用方注入
+        # （router/mcp_tools，task-05）；本构造函数不 lazy 构造，因 HostFsDelegate
+        # 依赖进程级 ws_hub + ws_rpc（task-02），与 placement 的纯 session 构造不对称。
+        self._host_fs_delegate = host_fs_delegate
 
     async def dispatch_worker(
         self,
@@ -95,7 +121,9 @@ class MissionExecutionService:
     ) -> uuid.UUID | None:
         """Dispatch a pending mission Worker Run to a daemon.
 
-        Returns the daemon lease id (or None if the runtime went offline).
+        Returns the daemon lease id (or None if the runtime went offline, or
+        if a per-worker worktree could not be created — design §9 兼容策略：
+        worktree 创建失败标 run failed + return None，不抛，主 agent 决策补派）。
         Raises if the Run is not pending.
         """
         if run.status != "pending":
@@ -113,6 +141,55 @@ class MissionExecutionService:
         # with "unsupported provider: claude_code" (it falls back to agent_type).
         provider = (ws.default_agent if ws else None) or "claude"
         model = ws.default_model if ws else None
+
+        # task-03（D-001@v2 / D-005@v2）：per-worker worktree 隔离。
+        # worktree 放 workspace 内 ``.worktrees/<run.id 短8>/``（非父目录 sibling
+        # ——daemon ``allowed_roots`` 只含 ``ws.root_path``，父目录会被
+        # ``assertWithinAllowedRoots`` 拒绝，design §7 路径策略）。
+        # workspace 需在 ``.gitignore`` 排除 ``.worktrees/`` 防污染（运行时产物，
+        # 非 backend 代码，本变更不动 backend/.gitignore）。
+        if self._host_fs_delegate is not None and ws is not None and root_path:
+            run_id_short = str(run.id)[:8]
+            sibling_path = f"{root_path}/.worktrees/{run_id_short}"
+            worktree_branch = f"workers/{run_id_short}"
+            # X-001 空值兜底：ws.default_branch 可空（execution.py:122 同款语义），
+            # 空 → "HEAD"（工作区未提交改动不带入副本，design §7）。
+            base_ref = ws.default_branch or "HEAD"
+            wt_result = await self._host_fs_delegate.git_worktree_add(
+                ws,
+                sibling_path=sibling_path,
+                branch=worktree_branch,
+                base_ref=base_ref,
+            )
+            if not (isinstance(wt_result, dict) and wt_result.get("ok") is True):
+                # design §9：worktree 创建失败（daemon 离线 / RPC 失败 / git 错）
+                # → worker run 标 failed，主 agent 决策补派（worker_preset 内重
+                # dispatch 或收敛），不崩 mission。不抛，不调 dispatch_to_daemon
+                # （worker 没拿到独立副本 cwd 就不该派 lease）。
+                wt_error = wt_result.get("error") if isinstance(wt_result, dict) else "unknown"
+                log.warning(
+                    "mission_worker_worktree_add_failed",
+                    run_id=str(run.id),
+                    workspace_id=str(workspace_id),
+                    sibling_path=sibling_path,
+                    error=wt_error,
+                )
+                run.status = "failed"
+                self._session.add(run)
+                await self._session.commit()
+                return None
+            # 成功：副本路径作 root_path（worker cwd=副本）+ 填 worktree_branch
+            # （converge 时 finalizer 读取合并，design §5.1 步骤3）。
+            root_path = sibling_path
+            run.worktree_branch = worktree_branch
+            self._session.add(run)
+            await self._session.commit()
+            log.info(
+                "mission_worker_worktree_created",
+                run_id=str(run.id),
+                sibling_path=sibling_path,
+                branch=worktree_branch,
+            )
 
         lease_id = await self._placement.dispatch_to_daemon(
             run.id,

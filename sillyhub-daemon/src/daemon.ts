@@ -2209,6 +2209,36 @@ export class Daemon {
       const use_3way = params.use_3way === true;
       return handler.gitApply({ workdir, patch_data, use_3way });
     });
+    // task-02（2026-07-12-worker-worktree-isolation / design §7 + §7.5）：worktree 三方法。
+    // git_worktree_add：per-worker sibling 副本创建（dispatch_worker 事件），D-008 默认 identity。
+    ws.registerRpcHandler('host_fs.git_worktree_add', async (params) => {
+      const workdir = typeof params.workdir === 'string' ? params.workdir : '';
+      const sibling_path =
+        typeof params.sibling_path === 'string' ? params.sibling_path : '';
+      const branch = typeof params.branch === 'string' ? params.branch : '';
+      const base_ref =
+        typeof params.base_ref === 'string' ? params.base_ref : '';
+      return handler.gitWorktreeAdd({
+        workdir,
+        sibling_path,
+        branch,
+        base_ref,
+      });
+    });
+    // git_merge：converge 收敛合并 worker 分支（§7.5 第 4/5 行），冲突解析喂主 agent LLM。
+    ws.registerRpcHandler('host_fs.git_merge', async (params) => {
+      const workdir = typeof params.workdir === 'string' ? params.workdir : '';
+      const worker_branch =
+        typeof params.worker_branch === 'string' ? params.worker_branch : '';
+      return handler.gitMerge({ workdir, worker_branch });
+    });
+    // git_worktree_remove：合并后清理 worker 副本（§7.5 第 8 行 cleanup 事件）。
+    ws.registerRpcHandler('host_fs.git_worktree_remove', async (params) => {
+      const workdir = typeof params.workdir === 'string' ? params.workdir : '';
+      const sibling_path =
+        typeof params.sibling_path === 'string' ? params.sibling_path : '';
+      return handler.gitWorktreeRemove({ workdir, sibling_path });
+    });
     ws.registerRpcHandler('host_fs.git_rev_parse', async (params) => {
       const root = typeof params.root === 'string' ? params.root : '';
       // ref 默认 HEAD（对齐 backend _get_source_commit；delegate 传具体 ref 时用之）。

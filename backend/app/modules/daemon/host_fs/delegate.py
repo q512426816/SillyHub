@@ -350,6 +350,107 @@ class HostFsDelegate:
         return str(commit) if commit else None
 
     # ------------------------------------------------------------------
+    # git_worktree_add（change 2026-07-12-worker-worktree-isolation task-01）
+    # ------------------------------------------------------------------
+    async def git_worktree_add(
+        self,
+        workspace: Workspace,
+        *,
+        sibling_path: str,
+        branch: str,
+        base_ref: str,
+    ) -> dict:
+        """Add a git worktree at *sibling_path* on *branch* (based off *base_ref*).
+
+        daemon 侧跑 ``git -C <root> worktree add <sibling_path> -b <branch> <base_ref>``
+        （D-001@v1 per-worker sibling worktree；D-008@v1 daemon 给副本配默认 git
+        identity）。``dispatch_worker`` 用此为每个 worker 创建独立副本路径作
+        ``root_path`` 传 ``dispatch_to_daemon``。
+
+        daemon-client: forward ``host_fs.git_worktree_add`` over WS RPC（仿
+        :meth:`git_apply` 走 :meth:`_via_rpc_or_degrade`，D-006 warn-and-degrade
+        on transport failure）。返回 ``{ok, worktree_path, error}``；degraded
+        时 ``{ok: False, worktree_path: None, error: "rpc unavailable"}``。
+        """
+        return await self._via_rpc_or_degrade(
+            method="git_worktree_add",
+            workspace=workspace,
+            args={
+                "workdir": workspace.root_path,
+                "sibling_path": sibling_path,
+                "branch": branch,
+                "base_ref": base_ref,
+            },
+            degraded={"ok": False, "worktree_path": None, "error": "rpc unavailable"},
+        )
+
+    # ------------------------------------------------------------------
+    # git_merge（change 2026-07-12-worker-worktree-isolation task-01）
+    # ------------------------------------------------------------------
+    async def git_merge(
+        self,
+        workspace: Workspace,
+        *,
+        worker_branch: str,
+    ) -> dict:
+        """Merge *worker_branch* into workspace root 当前 HEAD.
+
+        daemon 侧跑 ``git -C <root> merge --no-ff <worker_branch>``（D-003@v1
+        方案A：worker commit + git merge）。``finalize_execute_mission`` 在
+        ``converge_mission`` 重入循环里逐个合并 worker 分支。``ok=False`` +
+        ``conflicts`` 非空 → 有冲突标记，finalizer 喂主 agent LLM 解冲突
+        （D-004@v1）后重入继续。
+
+        daemon-client: forward ``host_fs.git_merge`` over WS RPC（仿
+        :meth:`git_apply` 走 :meth:`_via_rpc_or_degrade`）。返回
+        ``{ok, conflicts, merged_files, error}``；degraded 时三字段均为空容器
+        （caller 视作失败但结构完整，不崩）。
+        """
+        return await self._via_rpc_or_degrade(
+            method="git_merge",
+            workspace=workspace,
+            args={
+                "workdir": workspace.root_path,
+                "worker_branch": worker_branch,
+            },
+            degraded={
+                "ok": False,
+                "conflicts": [],
+                "merged_files": [],
+                "error": "rpc unavailable",
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # git_worktree_remove（change 2026-07-12-worker-worktree-isolation task-01）
+    # ------------------------------------------------------------------
+    async def git_worktree_remove(
+        self,
+        workspace: Workspace,
+        *,
+        sibling_path: str,
+    ) -> dict:
+        """Remove the worktree at *sibling_path*.
+
+        daemon 侧跑 ``git -C <root> worktree remove --force <sibling_path>``
+        （D-006@v1 轻量路径，合并成功后清理 worker 副本；merge 失败回退时副本
+        保留供人工排查，见 design §9）。caller 负责仅在成功路径调用。
+
+        daemon-client: forward ``host_fs.git_worktree_remove`` over WS RPC（仿
+        :meth:`git_apply` 走 :meth:`_via_rpc_or_degrade`）。返回
+        ``{ok, error}``；degraded 时 ``{ok: False, error: "rpc unavailable"}``。
+        """
+        return await self._via_rpc_or_degrade(
+            method="git_worktree_remove",
+            workspace=workspace,
+            args={
+                "workdir": workspace.root_path,
+                "sibling_path": sibling_path,
+            },
+            degraded={"ok": False, "error": "rpc unavailable"},
+        )
+
+    # ------------------------------------------------------------------
     # pollution_archive
     # ------------------------------------------------------------------
     async def pollution_archive(

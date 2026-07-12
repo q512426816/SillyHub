@@ -101,10 +101,26 @@ class WorkerListResponse(BaseModel):
 
 
 class ConvergeResponse(BaseModel):
+    """``converge_mission`` tool 返回契约（task-06 改可重入，design §5.2 / §7.5）。
+
+    ``status`` 取值（task-06 起新增可重入三态，保留 task-04 既有收敛态）：
+    - ``conflict``：有合并冲突，已把 ``conflicts`` 返给主 agent；主 agent 自己用 SDK
+      Read/Write 解决后重入 ``converge_mission``（X-004，backend 不写文件）。
+    - ``merged``：全部 worker_branch 合并完成（本次或重入后），已触发 cleanup。
+    - ``failed_manual``：解冲突轮次超 R-07 上限，mission 标 needs_manual，副本保留。
+    - ``done``/``degraded``/``running``：既有语义（bootstrap 收敛 / 部分终态 / 进行中）。
+
+    ``conflicts`` 形如 ``[{file, marker_lines, branch}]``（FinalizerMergeResult 透传）。
+    ``attempt`` 为本次返的解冲突轮次（per mission 计数，存 ``AgentMission.constraints``）。
+    """
+
     mission_id: uuid.UUID
     status: str
     converged: bool
     artifact_id: uuid.UUID | None = None
+    merged_branches: list[str] = []
+    conflicts: list[dict] = []
+    attempt: int = 0
 
 
 class ProgressRequest(BaseModel):
@@ -133,6 +149,128 @@ async def _get_mission(
     if mission is None or mission.workspace_id != workspace_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "mission not found")
     return mission
+
+
+# R-07（design §10）：主 agent LLM 解冲突轮次上限。超限 → mission 标 needs_manual，
+# 副本保留供排查（X-003）。默认 3 轮（design §5.2 / §10 R-07）；可经 env
+# ``CONVERGE_MAX_CONFLICT_ATTEMPTS`` 覆盖。计数 per mission 存 ``AgentMission.constraints``
+# JSON 的 ``conflict_attempts`` 键（task-06 决策：复用既有 JSON 列，避免新 migration，
+# design §8「无新列」契约）。
+_MAX_CONFLICT_ATTEMPTS_DEFAULT = 3
+_CONFLICT_ATTEMPTS_KEY = "conflict_attempts"
+_NEEDS_MANUAL_KEY = "needs_manual"
+
+
+def _max_conflict_attempts() -> int:
+    """读 R-07 上限（默认 3，env 可覆盖）。抽函数便于单测边界。"""
+    import os
+
+    raw = os.environ.get("CONVERGE_MAX_CONFLICT_ATTEMPTS")
+    if raw is None:
+        return _MAX_CONFLICT_ATTEMPTS_DEFAULT
+    try:
+        n = int(raw)
+    except ValueError:
+        return _MAX_CONFLICT_ATTEMPTS_DEFAULT
+    return n if n > 0 else _MAX_CONFLICT_ATTEMPTS_DEFAULT
+
+
+def _read_conflict_attempts(mission: AgentMission) -> int:
+    """从 mission.constraints JSON 读当前解冲突轮次（默认 0）。
+
+    复用既有 ``constraints`` JSON 列存计数（design §8「无新列」契约 + task-06 决策：
+    避免为单一计数器加 nullable 列触发 migration 链断裂风险）。mission.constraints
+    可能被 mode=team 等语义占用，做防御式 dict merge。
+    """
+    raw = mission.constraints or {}
+    if not isinstance(raw, dict):
+        return 0
+    val = raw.get(_CONFLICT_ATTEMPTS_KEY)
+    if isinstance(val, bool):  # bool 是 int 子类，先挡（True!=1 语义）
+        return 0
+    if isinstance(val, int):
+        return val
+    return 0
+
+
+async def _bump_conflict_attempts(mission: AgentMission) -> int:
+    """mission 解冲突轮次 +1 并落库（返回自增后的值）。
+
+    单测里把本函数整个 mock 掉，避免依赖 session。生产落 ``AgentMission.constraints``
+    JSON（``merge_dict`` 防御式，保留既有键如 mode/budget）。
+    """
+    attempts = _read_conflict_attempts(mission) + 1
+    raw = mission.constraints or {}
+    new_constraints = {**(raw if isinstance(raw, dict) else {}), _CONFLICT_ATTEMPTS_KEY: attempts}
+    mission.constraints = new_constraints
+    return attempts
+
+
+async def _mark_mission_needs_manual(
+    session: AsyncSession, mission: AgentMission, reason: str
+) -> None:
+    """R-07 超限标 mission needs_manual（design §9 / §10 R-07）。
+
+    简化（task-06 决策）：不实际 ``git merge --abort``——主 agent SDK 在 workspace root
+    上解冲突的工作区状态 backend 不可控（cwd 在 daemon 侧），强行 abort 可能误清主 agent
+    已写的解决内容。改为标 needs_manual 让用户/主 agent 手动 ``git merge --abort`` /
+    继续；worker 副本保留供排查（X-003，区别于成功路径的立即清理）。reason 落
+    ``constraints.needs_manual`` 供前端/审计展示。
+    """
+    raw = mission.constraints or {}
+    new_constraints = {
+        **(raw if isinstance(raw, dict) else {}),
+        _NEEDS_MANUAL_KEY: {"reason": reason},
+    }
+    mission.constraints = new_constraints
+    await session.commit()
+    await session.refresh(mission)
+    log.warning(
+        "converge_mission_needs_manual",
+        mission_id=str(mission.id),
+        reason=reason,
+    )
+
+
+async def _finalize_merge_for_mission(
+    session: AsyncSession, mission_id: uuid.UUID
+) -> tuple[list[str], list[dict]]:
+    """读 mission 当前 merge 结果（merged_branches / pending_conflicts）。
+
+    task-05 ``converge_mission_for_completed_run`` 内部已调
+    ``FinalizerService.finalize_execute_mission`` 做逐个 git_merge，但其返回值只有
+    mission status（str），``FinalizerMergeResult`` 未透出到 converge_mission endpoint
+    （改其签名会断 orchestrator.py / lease/service.py / dispatch.py 多调用方 + 8 个测试，
+    超 allowed_paths）。故 endpoint 侧直接复用 ``FinalizerService`` 重跑
+    ``finalize_execute_mission`` 拿契约：已 merged 分支 git 视 already-up-to-date 返
+    ok=True（幂等），pending 冲突仍返 ok=False（主 agent 重入前已 git add 解决的内容
+    也在工作区，下次 merge --continue/重试 会合进去）。生产由 task-08 注入 host_fs_delegate。
+
+    单测整体 mock 本函数（返回 merged/conflict 混合），隔离 git_merge 依赖。
+    """
+    from app.modules.agent.finalizer import FinalizerService
+
+    finalizer = FinalizerService(session)
+    result = await finalizer.finalize_execute_mission(mission_id)
+    return result.merged_branches, result.pending_conflicts
+
+
+async def _cleanup_mission(session: AsyncSession, mission_id: uuid.UUID) -> None:
+    """合并成功后清 worker 副本（task-07 提供 ``finalizer.cleanup_mission``）。
+
+    expects_from task-07：全 merged 成功 → 逐个 git_worktree_remove 清各 worker 副本 +
+    采合并 diff 作 patch artifact。task-06 消费方只调一次，失败保留副本（X-003）。
+    单测整体 mock 本函数（隔离 task-07 实现）。task-08 集成接线 delegate。
+    """
+    from app.modules.agent.finalizer import FinalizerService
+
+    finalizer = FinalizerService(session)
+    cleanup = getattr(finalizer, "cleanup_mission", None)
+    if cleanup is None:
+        # task-07 未落地前兜底（expects_from 契约；集成期 task-08 接线后必有）
+        log.info("converge_mission_cleanup_not_yet_wired_skip", mission_id=str(mission_id))
+        return
+    await cleanup(mission_id)
 
 
 async def _get_main_run(session: AsyncSession, mission_id: uuid.UUID) -> AgentRun:
@@ -296,11 +434,27 @@ async def converge_mission(
     session: SessionDep,
     user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
 ) -> ConvergeResponse:
-    """主 agent 触发 mission 收敛（复用 FinalizerService + converge 链路）。
+    """主 agent 触发 mission 收敛（task-06 改可重入，design §5.2 / §7.5）。
 
-    调 ``converge_mission_for_completed_run``（finalizer.py:189）以主 agent run 为
-    锚点触发：回灌 artifacts → derive_status → 全终态时 Finalizer 合并。
-    GLM 未配置时走 concat 回退（Finalizer 永远收敛）。
+    可重入状态机（per mission，无新列——计数存 ``AgentMission.constraints`` JSON）：
+
+    1. 调 ``converge_mission_for_completed_run``（既有链路，保留 artifact 回灌 +
+       derive_status + bootstrap 路由语义；其内部已调 finalize_execute_mission）。
+    2. 复用 ``FinalizerService.finalize_execute_mission`` 拿 ``FinalizerMergeResult``
+       （merged_branches / pending_conflicts）——见 ``_finalize_merge_for_mission``
+       注释（为何不直接改 converge_mission_for_completed_run 返回值）。
+    3. ``pending_conflicts`` 非空 → 返 ``status=conflict`` + conflicts 给主 agent；
+       主 agent 自己 SDK Read/Write 解决（X-004，backend 不写文件）+ git add 后重入。
+    4. 重入：``finalize_execute_mission`` 重跑，已 merged 分支幂等（already-up-to-date），
+       主 agent 解决后的内容被下次 git 合进去；全 merged → ``status=merged`` +
+       调 ``_cleanup_mission``（task-07 cleanup_mission）清 worker 副本。
+    5. R-07：每次返 conflict 时计数 +1（``_bump_conflict_attempts``）；超限（默认 3）
+       → ``_mark_mission_needs_manual`` 标 ``needs_manual`` + 返
+       ``status=failed_manual``，副本保留供排查（X-003）。
+
+    简化（task-06 决策，见 ``_mark_mission_needs_manual``）：不实际 ``git merge --abort``——
+    workspace root 工作区状态在 daemon 侧，backend 不可控，强行 abort 可能误清主 agent 已
+    写的解决内容；改为标 needs_manual 让用户/主 agent 手动处理。
     """
     mission = await _get_mission(session, workspace_id, mission_id)
     main_run = await _get_main_run(session, mission.id)
@@ -310,29 +464,97 @@ async def converge_mission(
 
     cfg = GLMConfig.from_env()
     result_status = await converge_mission_for_completed_run(session, main_run.id, cfg)
-    converged = result_status in ("done", "degraded")
+    base_converged = result_status in ("done", "degraded")
 
-    # converge_mission_for_completed_run 内部已 commit（FinalizerService.commit），
-    # 但 status None（run 不属 mission，理论上不会，主 agent run 有 mission_id）时
-    # 无 commit；补一次 flush 保证后续读取一致。
+    # converge_mission_for_completed_run 内部已 commit；补 flush 保证后续读取一致。
     await session.flush()
-    artifact_id: uuid.UUID | None = None
-    if converged:
-        stmt = (
-            select(AgentArtifact)
-            .join(AgentRun, AgentArtifact.run_id == AgentRun.id)
-            .where(AgentRun.mission_id == mission.id)
-            .order_by(AgentArtifact.created_at.desc())
-            .limit(1)
+
+    # 读 merge 结果（merged_branches / pending_conflicts）。execute mission（有 patch /
+    # worktree_branch）走 conflict 状态机；bootstrap mission（无 patch）merge 结果为空
+    # → 走既有 done/degraded 收敛语义（artifact_id 取最新 summary）。
+    merged_branches, pending_conflicts = await _finalize_merge_for_mission(session, mission.id)
+
+    # --- bootstrap 路径（无 worker_branch 合并需求）→ 既有语义，不进 conflict 状态机 ---
+    if not merged_branches and not pending_conflicts:
+        artifact_id = await _latest_artifact_id(session, mission.id) if base_converged else None
+        return ConvergeResponse(
+            mission_id=mission.id,
+            status=result_status or "running",
+            converged=base_converged,
+            artifact_id=artifact_id,
+            merged_branches=[],
+            conflicts=[],
+            attempt=_read_conflict_attempts(mission),
         )
-        art = (await session.execute(stmt)).scalars().first()
-        artifact_id = art.id if art else None
+
+    # --- execute 路径（有 merge 需求）→ 可重入 conflict 状态机（design §5.2）---
+    if pending_conflicts:
+        # R-07：先判是否已超限（避免超限后仍 +1 漂移）。当前 attempts 是返 conflict 前
+        # 的累计值；超限指「即将超过上限」即 attempts+1 > max。
+        current_attempts = _read_conflict_attempts(mission)
+        if current_attempts + 1 > _max_conflict_attempts():
+            await _mark_mission_needs_manual(session, mission, reason="R-07 解冲突轮次超限")
+            return ConvergeResponse(
+                mission_id=mission.id,
+                status="failed_manual",
+                converged=False,
+                artifact_id=None,
+                merged_branches=merged_branches,
+                conflicts=pending_conflicts,
+                attempt=current_attempts,
+            )
+        # 未超限 → 计数 +1（落库）+ 返 conflict 给主 agent
+        new_attempt = await _bump_conflict_attempts(mission)
+        await session.commit()
+        await session.refresh(mission)
+        log.info(
+            "converge_mission_conflict_return",
+            mission_id=str(mission.id),
+            attempt=new_attempt,
+            conflict_count=len(pending_conflicts),
+        )
+        return ConvergeResponse(
+            mission_id=mission.id,
+            status="conflict",
+            converged=False,
+            artifact_id=None,
+            merged_branches=merged_branches,
+            conflicts=pending_conflicts,
+            attempt=new_attempt,
+        )
+
+    # --- 全 merged 成功（pending_conflicts 空 + 有 merged_branches）→ cleanup + merged ---
+    # 副本清理由 task-07 cleanup_mission 负责（expects_from 契约）；失败保留（X-003）。
+    await _cleanup_mission(session, mission.id)
+    artifact_id = await _latest_artifact_id(session, mission.id)
+    log.info(
+        "converge_mission_merged",
+        mission_id=str(mission.id),
+        merged_branches=len(merged_branches),
+        attempt=_read_conflict_attempts(mission),
+    )
     return ConvergeResponse(
         mission_id=mission.id,
-        status=result_status or "running",
-        converged=converged,
+        status="merged",
+        converged=True,
         artifact_id=artifact_id,
+        merged_branches=merged_branches,
+        conflicts=[],
+        attempt=_read_conflict_attempts(mission),
     )
+
+
+async def _latest_artifact_id(session: AsyncSession, mission_id: uuid.UUID) -> uuid.UUID | None:
+    """取 mission 下最新 AgentArtifact id（converge 后供前端跳转）。"""
+    stmt = (
+        select(AgentArtifact)
+        .join(AgentRun, AgentArtifact.run_id == AgentRun.id)
+        .where(AgentRun.mission_id == mission_id)
+        .order_by(AgentArtifact.created_at.desc())
+        .limit(1)
+    )
+    art = (await session.execute(stmt)).scalars().first()
+    return art.id if art else None
 
 
 @router.post(

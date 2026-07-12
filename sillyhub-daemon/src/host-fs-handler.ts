@@ -78,6 +78,66 @@ export interface GitApplyResult {
   skipped: boolean;
 }
 
+// ── task-02 worktree 三方法返回结构（design §7 RPC 表 + §7.5 契约表）──────────────
+
+/**
+ * 单个冲突文件描述（git_merge 解析 `git diff --name-only --diff-filter=U` 输出 +
+ * 读冲突标记行数 `<<<<<<< / ======= / >>>>>>>`，喂主 agent LLM 解决）。
+ */
+export interface MergeConflict {
+  /** 冲突文件相对路径（git diff --name-only 输出的相对路径，原样回传）。 */
+  file: string;
+  /** 文件内冲突标记行数（<<<<<<< / ======= / >>>>>>> 总行数，≥2 才算真冲突）。 */
+  marker_lines: number;
+}
+
+/**
+ * git_worktree_add 返回结构（design §7：`{ ok, worktree_path, error }`）。
+ *
+ *   - 成功：`{ ok:true, worktree_path: <sibling_path>, error: undefined }`。
+ *   - 失败（git exit 非 0）：`{ ok:false, worktree_path: undefined, error: <stderr> }`
+ *     （**不抛**，结构化回传让 backend 标 worker run failed，不崩 mission）。
+ */
+export interface GitWorktreeAddResult {
+  ok: boolean;
+  /** 成功时的副本绝对路径；失败时缺省。 */
+  worktree_path?: string;
+  /** 失败时的 git stderr 文案；成功时缺省。 */
+  error?: string;
+}
+
+/**
+ * git_merge 返回结构（design §7：`{ ok, conflicts, merged_files, error }`）。
+ *
+ *   - 成功：`{ ok:true, conflicts:[], merged_files?: [...] }`。
+ *   - 冲突（exit 1 + 冲突文件）：`{ ok:false, conflicts:[{file,marker_lines}], merged_files:[] }`。
+ *
+ * `merged_files` 字段对齐 design §7 返回结构；当前实现不解析（git merge --no-ff 成功
+ * 时 stdout 非结构化），缺省回空数组，留 backend consume 时降级用 conflicts 判定。
+ */
+export interface GitMergeResult {
+  ok: boolean;
+  /** 冲突文件列表（成功为 []，失败且无冲突识别也为 []）。 */
+  conflicts: MergeConflict[];
+  /** 成功合并的文件列表（当前实现回 []，留扩展）。 */
+  merged_files: string[];
+  /** 失败时的错误文案；成功时缺省。 */
+  error?: string;
+}
+
+/**
+ * git_worktree_remove 返回结构（design §7：`{ ok, error }`）。
+ *
+ *   - 成功：`{ ok:true }`。
+ *   - 失败：`{ ok:false, error: <stderr> }`（不抛，结构化回传；backend cleanup 路径
+ *     失败仅记 warning，不阻塞 mission 收尾，对齐 design §9 兼容策略）。
+ */
+export interface GitWorktreeRemoveResult {
+  ok: boolean;
+  /** 失败时的 git stderr 文案；成功时缺省。 */
+  error?: string;
+}
+
 /** git_rev_parse 返回结构：`{ commit, error }`（非 git 仓库 → commit=null + error 文案）。 */
 export interface GitRevParseResult {
   /** HEAD commit hash；非 git 仓库 / git 不可用时为 null。 */
@@ -519,6 +579,210 @@ export class HostFsHandler {
     // 3way 也失败：冲突详情合并 check + 3way stderr（对齐 backend PatchConflictError.details）。
     const merged = [check.stderr, threeWay.stderr].filter(Boolean).join('\n---\n');
     return { ok: false, conflict_detail: merged, skipped: false };
+  }
+
+  // ── git_worktree_add（task-02 / design §7 / D-008 默认 identity）─────────────
+
+  /**
+   * `git_worktree_add({ workdir, sibling_path, branch, base_ref }) → { ok, worktree_path, error }`。
+   *
+   * task-02（2026-07-12-worker-worktree-isolation）三方法之一：在 workspace root 之外
+   * 创建 sibling worktree 副本（per-worker 隔离，D-001@v1），跑：
+   *
+   *   `git -C <workdir> -c user.name=worker -c user.email=worker@sillyhub
+   *      worktree add <sibling_path> -b <branch> <base_ref>`
+   *
+   * **D-008 默认 identity（R-08）**：透传 `-c user.name=worker -c user.email=worker@sillyhub`
+   * 让 worker 在副本 `git commit` 时不依赖宿主机全局 git config（worker 进程无 identity 会
+   * commit 失败）。`-c` 是 per-invocation override，不污染宿主全局 / 副本 .git/config 之外
+   * 的状态（merge / remove 不重复传，因为 worker commit 已完成，副本 identity 已就位）。
+   *
+   * **base_ref 空兜底**（X-001）：`ws.default_branch` 为空时兜底 `HEAD`（execution.py:106
+   * 同款可空语义），避免 `git worktree add <path> -b <branch> `（空 ref 报错）。
+   *
+   * **不抛**：git exit 非 0 → `{ ok:false, error: <stderr> }`（结构化回传让 backend 标
+   * worker run failed，不崩 mission，对齐 design §9 兼容策略 + gitApply D-008 不抛语义）。
+   *
+   * **安全守卫**：workdir + sibling_path 都过 `assertWithinAllowedRoots`（防 sibling 写到
+   * 宿主敏感位置如 /etc/<runid>，与 gitApply :479 同款 forbidden 抛出）。
+   *
+   * **execFile 非 shell**（防注入，与 runCmd:268 同模式）：参数走 runCmd 的 args 数组，
+   * branch / base_ref 即便含 shell 元字符也无法注入（命令与参数分立传递）。
+   */
+  async gitWorktreeAdd(params: {
+    workdir: string;
+    sibling_path: string;
+    branch: string;
+    base_ref: string;
+  }): Promise<GitWorktreeAddResult> {
+    assertWithinAllowedRoots(params.workdir, this._allowedRoots);
+    assertWithinAllowedRoots(params.sibling_path, this._allowedRoots);
+    const workdir = pathResolve(params.workdir);
+    const siblingPath = pathResolve(params.sibling_path);
+    // base_ref 空 → 兜底 HEAD（X-001：ws.default_branch 可空）。
+    const baseRef =
+      params.base_ref && params.base_ref.length > 0 ? params.base_ref : 'HEAD';
+
+    const r = await runCmd(
+      'git',
+      [
+        '-C',
+        workdir,
+        '-c',
+        'user.name=worker',
+        '-c',
+        'user.email=worker@sillyhub',
+        'worktree',
+        'add',
+        siblingPath,
+        '-b',
+        params.branch,
+        baseRef,
+      ],
+      { timeout: GIT_TIMEOUT_MS },
+    );
+    if (r.ok) {
+      return { ok: true, worktree_path: siblingPath };
+    }
+    const error = r.stderr.trim() || r.stdout.trim() || 'git worktree add failed';
+    return { ok: false, error };
+  }
+
+  // ── git_merge（task-02 / design §7 / §7.5 converge 事件）────────────────────
+
+  /**
+   * `git_merge({ workdir, worker_branch }) → { ok, conflicts, merged_files, error }`。
+   *
+   * task-02 三方法之二：把 worker_branch 合并到 workspace root 当前 HEAD（converge 收敛，
+   * design §7.5 第 4 行），跑：
+   *
+   *   `git -C <workdir> merge --no-ff <worker_branch>`
+   *
+   * **解析冲突**（design §7.5 第 5 行 / R-02）：merge exit 1 时跑
+   * `git -C <workdir> diff --name-only --diff-filter=U` 拿冲突文件列表，逐个 readFile
+   * 数冲突标记行（`<<<<<<< / ======= / >>>>>>>`），回传 `conflicts:[{file, marker_lines}]`
+   * 让 backend converge_mission tool 喂主 agent LLM 自动解决（D-004@v1）。
+   *
+   * **不重复传 identity**（R-08 注释）：merge 用 worker 副本已配的 identity（git_worktree_add
+   * 已带 -c user.name/email 创建副本，commit 时 identity 已落到副本 .git/config 之外的
+   * per-invocation 上下文；merge --no-ff 产生 merge commit 需要 committer，但 worktree
+   * 副本从父仓库继承全局 config 或共享 .git/config，worker commit 时已就位）。
+   *
+   * **不抛**：merge 失败（含冲突）→ `{ ok:false, conflicts:[...], merged_files:[] }`；
+   * 读冲突文件失败（race / 已被外部清理）→ 跳过该文件 marker_lines 计数（不崩）。
+   *
+   * **marker_lines 计数语义**：`<<<<<<<`/`=======`/`>>>>>>>` 总行数。≥2 才算真冲突
+   * （单标记行通常意味着文件被外部篡改非真冲突，但仍计入让 caller 决策）。
+   */
+  async gitMerge(params: {
+    workdir: string;
+    worker_branch: string;
+  }): Promise<GitMergeResult> {
+    assertWithinAllowedRoots(params.workdir, this._allowedRoots);
+    const workdir = pathResolve(params.workdir);
+
+    const merge = await runCmd(
+      'git',
+      ['-C', workdir, 'merge', '--no-ff', params.worker_branch],
+      { timeout: GIT_TIMEOUT_MS },
+    );
+
+    if (merge.ok) {
+      // 成功路径：conflicts 空，merged_files 当前回空数组（stdout 非结构化，留 backend 降级）。
+      return { ok: true, conflicts: [], merged_files: [] };
+    }
+
+    // 失败：拉冲突文件列表（git diff --name-only --diff-filter=U）。
+    const conflictFiles = await this._listConflictFiles(workdir);
+    const conflicts: MergeConflict[] = [];
+    for (const file of conflictFiles) {
+      const abs = pathResolve(workdir, file);
+      const markerLines = await this._countConflictMarkers(abs).catch(() => 0);
+      conflicts.push({ file, marker_lines: markerLines });
+    }
+
+    const error =
+      merge.stderr.trim() || merge.stdout.trim() || 'git merge failed';
+    return { ok: false, conflicts, merged_files: [], error };
+  }
+
+  /**
+   * 跑 `git -C <workdir> diff --name-only --diff-filter=U` 拿冲突文件相对路径列表。
+   * 失败 / 空输出 → 空数组（不让冲突列举失败阻塞 merge 错误回传）。
+   */
+  private async _listConflictFiles(workdir: string): Promise<string[]> {
+    const r = await runCmd(
+      'git',
+      ['-C', workdir, 'diff', '--name-only', '--diff-filter=U'],
+      { timeout: GIT_TIMEOUT_MS },
+    );
+    if (!r.ok) return [];
+    return r.stdout
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+  }
+
+  /**
+   * 数文件内冲突标记行（`<<<<<<<`/`=======`/`>>>>>>>`）。读失败 → 0（让 caller 判定）。
+   */
+  private async _countConflictMarkers(absPath: string): Promise<number> {
+    let content: string;
+    try {
+      content = await readFile(absPath, 'utf8');
+    } catch {
+      return 0;
+    }
+    let count = 0;
+    for (const line of content.split('\n')) {
+      if (
+        line.startsWith('<<<<<<<') ||
+        line.startsWith('=======') ||
+        line.startsWith('>>>>>>>')
+      ) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  // ── git_worktree_remove（task-02 / design §7 / §7.5 cleanup 事件）────────────
+
+  /**
+   * `git_worktree_remove({ workdir, sibling_path }) → { ok, error }`。
+   *
+   * task-02 三方法之三：合并后清理 worker 副本（design §7.5 第 8 行），跑：
+   *
+   *   `git -C <workdir> worktree remove --force <sibling_path>`
+   *
+   * `--force`：副本可能有未提交改动（worker 异常退出残留），强删避免 `git worktree remove`
+   * 拒绝（design §5.1：合并成功路径立即清理，副本价值已被 merge 消化）。
+   *
+   * **不抛**：失败 → `{ ok:false, error: <stderr> }`（backend cleanup 路径失败仅记 warning，
+   * 不阻塞 mission 收尾，对齐 design §9 兼容策略；merge 失败回退时副本保留供人工排查）。
+   *
+   * **安全守卫**：workdir + sibling_path 都过 `assertWithinAllowedRoots`（防删宿主敏感目录）。
+   */
+  async gitWorktreeRemove(params: {
+    workdir: string;
+    sibling_path: string;
+  }): Promise<GitWorktreeRemoveResult> {
+    assertWithinAllowedRoots(params.workdir, this._allowedRoots);
+    assertWithinAllowedRoots(params.sibling_path, this._allowedRoots);
+    const workdir = pathResolve(params.workdir);
+    const siblingPath = pathResolve(params.sibling_path);
+
+    const r = await runCmd(
+      'git',
+      ['-C', workdir, 'worktree', 'remove', '--force', siblingPath],
+      { timeout: GIT_TIMEOUT_MS },
+    );
+    if (r.ok) {
+      return { ok: true };
+    }
+    const error =
+      r.stderr.trim() || r.stdout.trim() || 'git worktree remove failed';
+    return { ok: false, error };
   }
 
   // ── git_rev_parse ─────────────────────────────────────────────────────────
