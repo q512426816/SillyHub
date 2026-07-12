@@ -225,6 +225,19 @@ download_bundle() {
   mv "$BIN_DIR/$BUNDLE_NAME.tmp" "$BIN_DIR/$BUNDLE_NAME"
   chmod 0644 "$BIN_DIR/$BUNDLE_NAME"
   ok "下载完成 ($(du -h "$BIN_DIR/$BUNDLE_NAME" | cut -f1))"
+
+  # task-05/06（e2e 2026-07-12）：主 agent MCP server 子进程入口，与 sillyhub-daemon.js
+  # 同目录（buildDaemonMcpServerConfig 的 defaultMcpServerModulePath 据此定位）。缺失则
+  # team 主 agent 注入的 MCP server spawn 失败 → 5 tool 链路断。
+  local mcp_url="${SERVER_URL}/daemon/latest/mcp-server.js"
+  info "下载 mcp-server.js -> $BIN_DIR/mcp-server.js"
+  if curl -fSL "$mcp_url" -o "$BIN_DIR/mcp-server.js.tmp" 2>/dev/null; then
+    mv "$BIN_DIR/mcp-server.js.tmp" "$BIN_DIR/mcp-server.js"
+    chmod 0644 "$BIN_DIR/mcp-server.js"
+    ok "mcp-server.js 下载完成"
+  else
+    warn "mcp-server.js 下载失败（$mcp_url）——team 主 agent MCP 注入将不可用"
+  fi
 }
 
 # ── 4. 创建 wrapper ───────────────────────────────────────────────────────────

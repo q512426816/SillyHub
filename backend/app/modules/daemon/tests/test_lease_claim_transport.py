@@ -59,6 +59,41 @@ class TestBuildClaimPayloadTransport:
     """
 
     @pytest.mark.asyncio
+    async def test_interactive_stage_passthrough_for_main_agent(
+        self,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """task-09（team-main-agent-orchestration）：interactive lease metadata.stage
+        透传到 claim payload 顶层。
+
+        主 agent run stage='orchestrator' → daemon isMainAgentSession(ctx) 判定
+        → 注入 daemon 内置 MCP server 5 tool（dispatch_worker 等）。漏透传则
+        daemon execPayload.stage=undefined → ctx.stage=undefined → 不注入 → 主 agent
+        看不到 worker dispatch tool（e2e 2026-07-12 发现并修复，context.py interactive 分支）。
+        """
+        _patch_transport(monkeypatch, "shared")
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease = await _create_interactive_lease(
+            db_session,
+            rt.id,
+            metadata={
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(uuid.uuid4()),
+                "prompt": "hello",
+                "provider": "claude_code",
+                "claim_token": "tok",
+                "stage": "orchestrator",
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        # stage 透传到 payload 顶层（daemon rawExec.stage 读此字段，见 daemon.ts:3237）
+        assert payload["stage"] == "orchestrator"
+
+    @pytest.mark.asyncio
     async def test_c1_tar_mode_passes_workspace_id_and_transport(
         self,
         db_session: AsyncSession,

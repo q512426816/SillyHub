@@ -57,12 +57,14 @@ def _resolve_main_agent_config(
     }
 
 
-def render_orchestrator_prompt(mission: AgentMission) -> str:
-    """渲染主 agent 首轮 prompt（mission objective + worker_preset 提示）。
+def render_orchestrator_prompt(mission: AgentMission, orchestrator_run: AgentRun) -> str:
+    """渲染主 agent 首轮 prompt（关键标识 + objective + worker_preset + 工具用法）。
 
-    主 agent 是真 agent，首轮拿到 mission 目标 + 用户预设 worker 列表，自主决定
-    派哪些 worker / 何时收敛。MCP tool（task-05/06）让主 agent 通过反向 endpoint
-    派 worker / 读产出 / 收敛。
+    主 agent 是真 agent，首轮拿到 mission 目标 + 用户预设 worker 列表 + 关键标识
+    （workspace_id / mission_id / orchestrator run_id），自主决定派哪些 worker /
+    何时收敛。MCP tool（task-05/06）让主 agent 通过反向 endpoint 派 worker / 读产出 /
+    收敛；5 个 tool 的 inputSchema 都要 workspace_id + mission_id（report_progress
+    还要 run_id），主 agent 必须从 prompt 拿到这些 id（环境变量里没有，e2e 发现）。
     """
     preset_hint = ""
     if mission.worker_preset:
@@ -74,11 +76,19 @@ def render_orchestrator_prompt(mission: AgentMission) -> str:
         )
     return (
         f"你是多 Agent 团队的主 agent（项目经理，role=orchestrator）。\n"
+        f"关键标识（调用下方 MCP 工具时按需传入）：\n"
+        f"- workspace_id：`{mission.workspace_id}`\n"
+        f"- mission_id：`{mission.id}`\n"
+        f"- 主 agent run_id（report_progress 的 run_id 参数）：`{orchestrator_run.id}`\n"
         f"团队目标：{mission.objective}\n"
         f"{preset_hint}\n\n"
-        "你的职责：拆解目标 → 派 worker → 读 worker 产出 → 判断是否达成 → 收敛。"
-        "worker 完成后通过 get_worker_result 读其产出，全部达成后调 converge 收敛。"
-        "决策过程通过 report_progress 落日志。"
+        "你的职责：拆解目标 → 派 worker → 读 worker 产出 → 判断是否达成 → 收敛。\n"
+        "可用 MCP 工具（stdio 注入）：\n"
+        "- dispatch_worker(workspace_id, mission_id, objective, role?, ...)：派一个 worker\n"
+        "- get_worker_result(workspace_id, mission_id, worker_id)：读指定 worker 产出\n"
+        "- list_workers(workspace_id, mission_id)：列 mission 所有 worker 状态\n"
+        "- converge_mission(workspace_id, mission_id)：全部 worker 终态后收敛\n"
+        "- report_progress(workspace_id, mission_id, run_id, message, decision?)：落决策日志\n"
     )
 
 
@@ -162,7 +172,7 @@ class OrchestratorService:
                 workspace_id=workspace_id,
                 provider=cfg["provider"] or None,
                 model=cfg["model"] or None,
-                prompt=render_orchestrator_prompt(mission),
+                prompt=render_orchestrator_prompt(mission, main_run),
                 stage=_ORCHESTRATOR_ROLE,
                 read_only=False,
             )

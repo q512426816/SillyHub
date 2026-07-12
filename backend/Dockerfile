@@ -84,6 +84,10 @@ COPY --from=builder /build /app
 # Daemon distribution files (pre-built on host, injected via the additional
 # context "daemon"). Served by /daemon/install.sh and /daemon/latest/sillyhub-daemon.js.
 COPY --from=daemon build/bundle/sillyhub-daemon.js /app/daemon-dist/sillyhub-daemon.js
+# task-05/06（e2e 2026-07-12）：主 agent MCP server 子进程入口，必须与
+# sillyhub-daemon.js 同目录分发，否则远程 daemon 装完后 mcp-server.js 缺失
+# → node spawn 不存在的文件 → 主 agent MCP 永不启动 → team 链路断。
+COPY --from=daemon build/bundle/mcp-server.js /app/daemon-dist/mcp-server.js
 COPY --from=daemon scripts/install.sh /app/daemon-dist/install.sh
 
 # 2026-07-07-daemon-skill-execution task-07：sillyspec skills 进镜像（server-local 模式

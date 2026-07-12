@@ -100,6 +100,13 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
             payload["manual_approval"] = lease_meta["manual_approval"]
         if lease_meta.get("ask_user_only") is not None:
             payload["ask_user_only"] = lease_meta["ask_user_only"]
+        # task-09（team-main-agent-orchestration）：透传 lease metadata.stage。
+        # 主 agent run stage='orchestrator' → daemon isMainAgentSession(ctx) 判定
+        # → 注入 daemon 内置 MCP server 5 tool（dispatch_worker 等）。漏透传则
+        # daemon execPayload.stage=undefined → ctx.stage=undefined → 不注入 MCP
+        # → 主 agent 看不到 worker dispatch tool（e2e 2026-07-12 发现）。
+        if lease_meta.get("stage") is not None:
+            payload["stage"] = lease_meta["stage"]
         # ===== task-03（2026-06-23-spec-transport-tar-sync）：transport 分支 =====
         # D-007@v1：scan/stage 走 interactive lease，tar 模式 spec 同步在 interactive 路径
         # （daemon _startInteractiveSession pull + onSessionEnd sync）。backend 侧开关点：

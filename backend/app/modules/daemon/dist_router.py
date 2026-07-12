@@ -57,3 +57,17 @@ async def get_daemon_bundle() -> FileResponse:
     if not path.is_file():
         raise HTTPException(status_code=404, detail="daemon bundle not bundled in image")
     return FileResponse(path, media_type="application/javascript", filename="sillyhub-daemon.js")
+
+
+@router.get("/latest/mcp-server.js")
+async def get_mcp_server_bundle() -> FileResponse:
+    """Return the daemon MCP server single-file bundle (task-05/06, e2e 2026-07-12).
+
+    主 agent MCP server 子进程入口，install.sh 下载到与 sillyhub-daemon.js 同目录
+    （``buildDaemonMcpServerConfig`` 的 ``defaultMcpServerModulePath`` 据此定位）。
+    缺失则主 agent session 注入的 MCP server spawn 失败 → team 5 tool 链路断。
+    """
+    path = get_settings().daemon_dist_dir / "mcp-server.js"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="mcp-server bundle not bundled in image")
+    return FileResponse(path, media_type="application/javascript", filename="mcp-server.js")
