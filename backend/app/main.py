@@ -18,7 +18,6 @@ from app.core.redis import close_redis
 from app.core.telemetry import init_telemetry
 from app.modules.admin.router import router as admin_router
 from app.modules.agent.router import router as agent_router
-from app.modules.archive.router import router as archive_router
 from app.modules.auth.router import router as auth_router
 from app.modules.change import change_router
 from app.modules.change_writer.router import router as change_writer_router
@@ -479,7 +478,6 @@ def create_app() -> FastAPI:
     app.include_router(runtime_router, prefix="/api")
     app.include_router(tool_gateway_router, prefix="/api")
     app.include_router(policy_crud_router, prefix="/api")
-    app.include_router(archive_router, prefix="/api")
     app.include_router(settings_router, prefix="/api")
     app.include_router(admin_router, prefix="/api")
     app.include_router(spec_workspace_router, prefix="/api")

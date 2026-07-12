@@ -98,7 +98,7 @@ def test_get_config_for_brainstorm() -> None:
     assert config is not None
     assert config.enabled is True
     assert config.prompt_template == "brainstorm.md"
-    assert config.requires_worktree is True
+    assert config.requires_worktree is False  # D-002: daemon-client 不用 worktree
     assert config.read_only is False
 
 

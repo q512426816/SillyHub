@@ -45,7 +45,7 @@ class TestStageAgentConfig:
         assert config.enabled is True
         assert config.prompt_template == "brainstorm.md"
         assert config.phase == "Brainstorm"
-        assert config.requires_worktree is True
+        assert config.requires_worktree is False  # D-002: daemon-client 不用 worktree
         assert config.read_only is False
 
     def test_all_expected_stages_present(self):
@@ -68,7 +68,7 @@ class TestStageAgentConfig:
         for stage in write_stages:
             config = get_config_for_stage(stage)
             assert config is not None
-            assert config.requires_worktree is True
+            assert config.requires_worktree is False  # D-002: daemon-client 不用 worktree
             assert config.read_only is False
         verify_config = get_config_for_stage("verify")
         assert verify_config is not None
@@ -813,7 +813,7 @@ class TestProposeStageFullFlow:
         assert call_kwargs["stage"] == "plan"
         assert call_kwargs["prompt_template"] == "plan.md"
         assert call_kwargs["read_only"] is False
-        assert call_kwargs["requires_worktree"] is True
+        assert call_kwargs["requires_worktree"] is False  # D-002: daemon-client 不用 worktree
 
         # Step 2: Verify dispatch is blocked when active run exists
         active = AgentRun(

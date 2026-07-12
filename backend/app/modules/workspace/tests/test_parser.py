@@ -24,7 +24,7 @@ def _write_yaml(directory: Path, filename: str, content: str) -> Path:
 
 def test_normal_parse(tmp_path: Path) -> None:
     """Two valid YAML files with one relation -> 2 workspaces, 1 relation."""
-    projects = tmp_path / ".sillyspec" / "projects"
+    projects = tmp_path / "projects"
     _write_yaml(
         projects,
         "backend.yaml",
@@ -83,7 +83,7 @@ def test_normal_parse(tmp_path: Path) -> None:
     assert backend.tech_stack == ["python", "fastapi"]
     assert backend.build_command == "pip install -e ."
     assert backend.test_command == "pytest"
-    assert backend.source_yaml_path == ".sillyspec/projects/backend.yaml"
+    assert backend.source_yaml_path == "projects/backend.yaml"
     assert backend.status == "path_missing"  # backend/ dir doesn't exist
 
     rel = result.relations[0]
@@ -97,7 +97,7 @@ def test_normal_parse(tmp_path: Path) -> None:
 
 def test_missing_id_fallback_to_name(tmp_path: Path) -> None:
     """YAML without 'id' field falls back to 'name'."""
-    projects = tmp_path / ".sillyspec" / "projects"
+    projects = tmp_path / "projects"
     _write_yaml(
         projects,
         "my-component.yaml",
@@ -118,7 +118,7 @@ def test_missing_id_fallback_to_name(tmp_path: Path) -> None:
 
 def test_duplicate_id(tmp_path: Path) -> None:
     """Two YAML files with same id -> second skipped."""
-    projects = tmp_path / ".sillyspec" / "projects"
+    projects = tmp_path / "projects"
     _write_yaml(projects, "a.yaml", "id: same-id\nname: A\n")
     _write_yaml(projects, "b.yaml", "id: same-id\nname: B\n")
 
@@ -136,7 +136,7 @@ def test_duplicate_id(tmp_path: Path) -> None:
 
 def test_yaml_error(tmp_path: Path) -> None:
     """Malformed YAML -> error recorded, other files still parsed."""
-    projects = tmp_path / ".sillyspec" / "projects"
+    projects = tmp_path / "projects"
     _write_yaml(projects, "bad.yaml", "id: [\n  invalid\n")
     _write_yaml(projects, "good.yaml", "id: good\nname: Good\n")
 
@@ -152,7 +152,7 @@ def test_yaml_error(tmp_path: Path) -> None:
 
 def test_unknown_relation_target(tmp_path: Path) -> None:
     """Relation referencing non-existent target -> warning, relation dropped."""
-    projects = tmp_path / ".sillyspec" / "projects"
+    projects = tmp_path / "projects"
     _write_yaml(
         projects,
         "a.yaml",
@@ -171,7 +171,7 @@ def test_unknown_relation_target(tmp_path: Path) -> None:
 
 def test_self_relation(tmp_path: Path) -> None:
     """Relation where target == source -> warning, relation dropped."""
-    projects = tmp_path / ".sillyspec" / "projects"
+    projects = tmp_path / "projects"
     _write_yaml(
         projects,
         "a.yaml",
@@ -201,7 +201,7 @@ def test_missing_projects_dir(tmp_path: Path) -> None:
 
 def test_path_missing(tmp_path: Path) -> None:
     """parsed.path points to non-existent directory -> status='path_missing'."""
-    projects = tmp_path / ".sillyspec" / "projects"
+    projects = tmp_path / "projects"
     _write_yaml(
         projects,
         "a.yaml",
@@ -219,7 +219,7 @@ def test_path_missing(tmp_path: Path) -> None:
 
 def test_unknown_relation_type(tmp_path: Path) -> None:
     """Relation with invalid type -> warning, relation dropped."""
-    projects = tmp_path / ".sillyspec" / "projects"
+    projects = tmp_path / "projects"
     _write_yaml(projects, "a.yaml", "id: a\nname: A\n")
     _write_yaml(
         projects,
@@ -238,7 +238,7 @@ def test_unknown_relation_type(tmp_path: Path) -> None:
 
 def test_yaml_not_mapping(tmp_path: Path) -> None:
     """YAML that parses to a non-mapping -> error."""
-    projects = tmp_path / ".sillyspec" / "projects"
+    projects = tmp_path / "projects"
     _write_yaml(projects, "list.yaml", "- item1\n- item2\n")
 
     result = WorkspaceParser().parse(tmp_path)
@@ -248,7 +248,7 @@ def test_yaml_not_mapping(tmp_path: Path) -> None:
 
 def test_empty_projects_dir(tmp_path: Path) -> None:
     """Projects dir exists but is empty -> empty result."""
-    (tmp_path / ".sillyspec" / "projects").mkdir(parents=True)
+    (tmp_path / "projects").mkdir(parents=True)
 
     result = WorkspaceParser().parse(tmp_path)
 
@@ -286,7 +286,7 @@ def test_parsed_workspace_dataclass_fields() -> None:
 
 def test_invalid_relation_entry_not_dict(tmp_path: Path) -> None:
     """Relation entry that is not a dict -> warning."""
-    projects = tmp_path / ".sillyspec" / "projects"
+    projects = tmp_path / "projects"
     _write_yaml(
         projects,
         "a.yaml",
@@ -300,7 +300,7 @@ def test_invalid_relation_entry_not_dict(tmp_path: Path) -> None:
 
 def test_relation_missing_target_and_type(tmp_path: Path) -> None:
     """Relation with missing target or type -> warning."""
-    projects = tmp_path / ".sillyspec" / "projects"
+    projects = tmp_path / "projects"
     _write_yaml(projects, "a.yaml", "id: a\nname: A\n")
     _write_yaml(
         projects,

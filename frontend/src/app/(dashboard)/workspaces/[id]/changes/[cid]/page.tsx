@@ -159,7 +159,6 @@ export default function ChangeDetailPage({ params }: Props) {
   // ── Archive gate state (task-06) ───────────────────────────────────
   const [archiveGate, setArchiveGate] = useState<ArchiveGateResponse | null>(null);
   const [loadingArchiveGate, setLoadingArchiveGate] = useState(false);
-  const [archiving, setArchiving] = useState(false);
 
   // ── Agent Dispatch state ───────────────────────────────────────────
   const [agentStatus, setAgentStatus] = useState<DispatchResponse | null>(null);
@@ -389,21 +388,6 @@ export default function ChangeDetailPage({ params }: Props) {
       setPageError(err instanceof ApiError ? err.message : "触发智能体失败");
     } finally {
       setDispatching(false);
-    }
-  };
-
-  const handleArchive = async () => {
-    if (!change) return;
-    setArchiving(true);
-    setPageError(null);
-    try {
-      await handleTransition("archived");
-      setSuccessMsg("📦 变更已归档");
-      setTimeout(() => setSuccessMsg(null), 3000);
-    } catch (err) {
-      setPageError(err instanceof ApiError ? err.message : "归档失败");
-    } finally {
-      setArchiving(false);
     }
   };
 

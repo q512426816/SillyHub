@@ -153,7 +153,7 @@ def _check_output_paths(spec_root: Path) -> list[ValidationError]:
         List of validation errors for missing or misplaced files.
     """
     errors = []
-    expected_docs = spec_root / ".sillyspec" / "docs"
+    expected_docs = spec_root / "docs"  # D-005: 扁平根（无 .sillyspec 包裹）
 
     if not expected_docs.exists():
         errors.append(

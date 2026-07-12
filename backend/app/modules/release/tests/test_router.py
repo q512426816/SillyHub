@@ -7,7 +7,6 @@ from pathlib import Path
 
 from app.core.security import password_hasher
 from app.modules.auth.model import User
-from app.modules.change.model import Change
 from app.modules.workspace.model import Workspace
 
 
@@ -188,82 +187,3 @@ async def test_release_no_auth_401(client, db_session, tmp_path):
         json={"version": "v1.0.0"},
     )
     assert resp.status_code == 401
-
-
-# ── Archive ────────────────────────────────────────────────────
-
-
-async def test_archive_change(client, db_session, tmp_path):
-    refs = await _setup_workspace_and_user(db_session, tmp_path)
-
-    change_id = uuid.uuid4()
-    change_dir = tmp_path / "changes" / "local" / "test-archive"
-    change_dir.mkdir(parents=True)
-    (change_dir / "MASTER.md").write_text("# Change", encoding="utf-8")
-
-    change = Change(
-        id=change_id,
-        workspace_id=refs["ws_id"],
-        change_key="change-archive-001",
-        title="Archive Test",
-        status="done",
-        location="local",
-        path="changes/local/test-archive",
-    )
-    db_session.add(change)
-    await db_session.commit()
-
-    resp = await client.post(
-        f"/api/workspaces/{refs['ws_id']}/changes/{change_id}/archive",
-        headers=_auth(refs["token"]),
-    )
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "archived"
-
-
-async def test_archive_change_not_done(client, db_session, tmp_path):
-    refs = await _setup_workspace_and_user(db_session, tmp_path)
-
-    change_id = uuid.uuid4()
-    change = Change(
-        id=change_id,
-        workspace_id=refs["ws_id"],
-        change_key="change-not-done",
-        title="Not Done",
-        status="in_progress",
-        location="local",
-        path="changes/local/not-done",
-    )
-    db_session.add(change)
-    await db_session.commit()
-
-    resp = await client.post(
-        f"/api/workspaces/{refs['ws_id']}/changes/{change_id}/archive",
-        headers=_auth(refs["token"]),
-    )
-    assert resp.status_code == 409
-
-
-async def test_distill_knowledge(client, db_session, tmp_path):
-    refs = await _setup_workspace_and_user(db_session, tmp_path)
-
-    change_id = uuid.uuid4()
-    change = Change(
-        id=change_id,
-        workspace_id=refs["ws_id"],
-        change_key="change-distill-001",
-        title="Distill Test",
-        status="done",
-        location="local",
-        path="changes/local/distill-test",
-    )
-    db_session.add(change)
-    await db_session.commit()
-
-    resp = await client.post(
-        f"/api/workspaces/{refs['ws_id']}/changes/{change_id}/distill",
-        headers=_auth(refs["token"]),
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["change_key"] == "change-distill-001"

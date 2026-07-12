@@ -41,7 +41,9 @@ def test_plan_read_only_false():
 def test_archive_exists_and_requires_worktree():
     """archive stage must exist and require worktree."""
     assert StageEnum.ARCHIVE.value in STAGE_AGENT_CONFIG
-    assert STAGE_AGENT_CONFIG[StageEnum.ARCHIVE.value].requires_worktree is True
+    assert (
+        STAGE_AGENT_CONFIG[StageEnum.ARCHIVE.value].requires_worktree is False
+    )  # D-002: daemon-client 不用 worktree
 
 
 def test_all_stages_have_prompt_template():
@@ -63,8 +65,10 @@ def test_all_stages_have_description():
 
 
 def test_execute_requires_worktree():
-    """execute stage must require worktree."""
-    assert STAGE_AGENT_CONFIG[StageEnum.EXECUTE.value].requires_worktree is True
+    """execute stage requires_worktree is False (D-002: daemon-client 不用 worktree，dir 由 sillyspec 自建)."""
+    assert (
+        STAGE_AGENT_CONFIG[StageEnum.EXECUTE.value].requires_worktree is False
+    )  # D-002: daemon-client 不用 worktree
 
 
 def test_verify_requires_worktree():
@@ -73,10 +77,14 @@ def test_verify_requires_worktree():
 
 
 def test_brainstorm_requires_worktree():
-    """brainstorm stage must require worktree."""
-    assert STAGE_AGENT_CONFIG[StageEnum.BRAINSTORM.value].requires_worktree is True
+    """brainstorm stage requires_worktree is False (D-002: daemon-client 不用 worktree，dir 由 sillyspec 自建)."""
+    assert (
+        STAGE_AGENT_CONFIG[StageEnum.BRAINSTORM.value].requires_worktree is False
+    )  # D-002: daemon-client 不用 worktree
 
 
 def test_plan_requires_worktree():
-    """plan stage must require worktree."""
-    assert STAGE_AGENT_CONFIG[StageEnum.PLAN.value].requires_worktree is True
+    """plan stage requires_worktree is False (D-002: daemon-client 不用 worktree，dir 由 sillyspec 自建)."""
+    assert (
+        STAGE_AGENT_CONFIG[StageEnum.PLAN.value].requires_worktree is False
+    )  # D-002: daemon-client 不用 worktree

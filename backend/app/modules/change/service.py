@@ -1446,6 +1446,14 @@ class ChangeService:
         change.current_stage = new_stage
         change.updated_at = datetime.now(UTC)
 
+        # D-007: archive stage 完成 → 投影 sillyspec archived 态到 change.status。
+        # 删 archive_change 端点（task-01）后无人写 status，前端"已归档"筛选依赖此投影。
+        # change.path 由 sillyspec run archive 移动目录后经 reparse 同步。
+        if new_stage == "archived":
+            change.status = "archived"
+            change.location = "archive"
+            change.archived_at = datetime.now(UTC)
+
         stages = change.stages or {}
         stages["last_stage_completion"] = {
             "stage": stage,

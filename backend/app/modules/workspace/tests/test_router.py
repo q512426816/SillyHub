@@ -148,14 +148,13 @@ async def test_rescan_updates_last_scanned_at(
     original_ts = create.json()["last_scanned_at"]
     assert original_ts is not None
 
-    # 2026-07-10-remove-server-local-workspace-mode: rescan 读服务器 spec_root。
-    # WorkspaceScanner 判定 <spec_root>/.sillyspec 存在 → is_sillyspec=True，
-    # 故 seed 一个包裹式 .sillyspec 占位（projects/ changes/ 子目录）。
+    # D-005: rescan 读服务器 spec_root（扁平根，无 .sillyspec 包裹）。
+    # WorkspaceScanner 判定 spec_root 下 projects/ 或 changes/ 存在 → is_sillyspec=True。
     from pathlib import Path
 
     from app.core.config import get_settings
 
-    spec_root = Path(get_settings().spec_data_root) / workspace_id / ".sillyspec"
+    spec_root = Path(get_settings().spec_data_root) / workspace_id
     (spec_root / "projects").mkdir(parents=True, exist_ok=True)
     (spec_root / "changes").mkdir(parents=True, exist_ok=True)
 

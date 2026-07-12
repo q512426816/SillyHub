@@ -103,14 +103,14 @@ class ParseResult:
 
 
 class WorkspaceParser:
-    """Parses ``.sillyspec/projects/*.yaml`` under a workspace root."""
+    """Parses ``projects/*.yaml`` under a workspace root (D-005 扁平根)."""
 
-    def __init__(self, *, projects_subdir: str = ".sillyspec/projects") -> None:
+    def __init__(self, *, projects_subdir: str = "projects") -> None:
         """Configure the projects sub-directory path.
 
         Args:
             projects_subdir: Relative path to the projects directory
-                within the workspace root. Defaults to ``.sillyspec/projects``.
+                within the workspace root. Defaults to ``projects`` (D-005 扁平根).
         """
         self._subdir = projects_subdir
 

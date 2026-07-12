@@ -40,7 +40,7 @@ class TestSpecRootDocsValidation:
     def test_empty_docs_directory(self, tmp_path):
         """docs directory exists but empty => failed_post_check."""
         spec_root = tmp_path / "specs"
-        docs_dir = spec_root / ".sillyspec" / "docs"
+        docs_dir = spec_root / "docs"
         docs_dir.mkdir(parents=True)
 
         errors = _check_output_paths(spec_root)
@@ -50,7 +50,7 @@ class TestSpecRootDocsValidation:
     def test_missing_7_scan_documents(self, tmp_path):
         """Missing expected scan documents => failed_post_check."""
         spec_root = tmp_path / "specs"
-        scan_dir = spec_root / ".sillyspec" / "docs" / "myapp" / "scan"
+        scan_dir = spec_root / "docs" / "myapp" / "scan"
         scan_dir.mkdir(parents=True)
 
         # Only create 3 of 7 expected docs
@@ -70,7 +70,7 @@ class TestSpecRootDocsValidation:
     def test_all_7_scan_documents_present(self, tmp_path):
         """All 7 expected scan documents present => no errors."""
         spec_root = tmp_path / "specs"
-        scan_dir = spec_root / ".sillyspec" / "docs" / "myapp" / "scan"
+        scan_dir = spec_root / "docs" / "myapp" / "scan"
         scan_dir.mkdir(parents=True)
 
         # Create all 7 expected docs

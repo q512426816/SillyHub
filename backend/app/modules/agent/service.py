@@ -1056,14 +1056,6 @@ class AgentService:
                 work_dir=str(work_dir),
             )
 
-        # -- 2b. Ensure .sillyspec/changes/<key>/ exists in worktree -----------
-        if change.change_key and not read_only:
-            await self._ensure_change_dir_in_worktree(
-                work_dir=work_dir,
-                change_key=change.change_key,
-                workspace_root=workspace_root,
-            )
-
         # -- 3. Build prompt --------------------------------------------------
         # 平台托管工作区：为 stage 命令注入平台参数（--spec-root 等），使
         # propose/plan/execute/... 进入平台模式、文档产物写 spec_root（对齐 scan
@@ -1204,50 +1196,6 @@ class AgentService:
             NoOnlineDaemonError(workspace_id=workspace_id, user_id=user_id),
         )
         return run
-
-    async def _ensure_change_dir_in_worktree(
-        self,
-        work_dir: Path,
-        change_key: str,
-        workspace_root: str,
-    ) -> None:
-        """确保 worktree 内 .sillyspec/changes/<change_key>/ 目录存在。
-
-        如果目录不存在，从主 repo 复制。如果复制失败，记录 warning
-        并继续（agent 启动后可通过 sillyspec init 创建）。
-        """
-        change_dir = work_dir / ".sillyspec" / "changes" / change_key
-        if change_dir.exists():
-            return
-
-        log.info(
-            "ensuring_change_dir_in_worktree",
-            change_key=change_key,
-            work_dir=str(work_dir),
-        )
-
-        # 尝试从主 repo 复制
-        source_dir = Path(workspace_root) / ".sillyspec" / "changes" / change_key
-        if source_dir.exists():
-            try:
-                import shutil
-
-                change_dir.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copytree(str(source_dir), str(change_dir))
-                log.info("change_dir_copied_from_main_repo", dest=str(change_dir))
-            except Exception as exc:
-                log.warning(
-                    "change_dir_copy_failed",
-                    source=str(source_dir),
-                    dest=str(change_dir),
-                    error=str(exc),
-                )
-        else:
-            log.warning(
-                "change_dir_not_in_main_repo",
-                change_key=change_key,
-                source=str(source_dir),
-            )
 
     async def _try_acquire_lease(
         self,

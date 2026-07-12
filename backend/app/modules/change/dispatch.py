@@ -81,7 +81,7 @@ STAGE_AGENT_CONFIG: dict[str, StageAgentConfig] = {
         enabled=True,
         prompt_template="brainstorm.md",
         phase="Brainstorm",
-        requires_worktree=True,
+        requires_worktree=False,  # D-002: daemon-client 不用 worktree，change 目录由 sillyspec 各 stage 自建
         read_only=False,
         description="Write question lists and decision records to change directory.",
     ),
@@ -89,7 +89,7 @@ STAGE_AGENT_CONFIG: dict[str, StageAgentConfig] = {
         enabled=True,
         prompt_template="plan.md",
         phase="Plan",
-        requires_worktree=True,
+        requires_worktree=False,  # D-002: daemon-client 不用 worktree，change 目录由 sillyspec 各 stage 自建
         read_only=False,
         description="Write plan.md and task blueprints.",
     ),
@@ -97,7 +97,7 @@ STAGE_AGENT_CONFIG: dict[str, StageAgentConfig] = {
         enabled=True,
         prompt_template="execute.md",
         phase="Execute",
-        requires_worktree=True,
+        requires_worktree=False,  # D-002: daemon-client 不用 worktree，change 目录由 sillyspec 各 stage 自建
         read_only=False,
         description="Implement tasks; must use worktree.",
     ),
@@ -113,7 +113,7 @@ STAGE_AGENT_CONFIG: dict[str, StageAgentConfig] = {
         enabled=True,
         prompt_template="archive.md",
         phase="Archive",
-        requires_worktree=True,
+        requires_worktree=False,  # D-002: daemon-client 不用 worktree，change 目录由 sillyspec 各 stage 自建
         read_only=False,
         description="Write module-impact analysis and move change directory to archive.",
     ),

@@ -77,28 +77,30 @@ class WorkspaceScanner:
 
     def scan(self, root: Path) -> ScanResult:
         root = self._normalise(root)
-        sillyspec = root / ".sillyspec"
+        # D-005: daemon-client 平台托管模式，spec_root 是扁平内容根（无 .sillyspec 包裹）
+        sillyspec = root
         result = ScanResult(
             root_path=str(root),
             sillyspec_path=str(sillyspec),
             is_sillyspec=False,
         )
 
-        if not sillyspec.is_dir():
+        projects_dir = sillyspec / "projects"
+        changes_dir = sillyspec / "changes"
+        # 扁平根判定：projects 或 changes 任一存在即 sillyspec 工作区
+        if not (projects_dir.is_dir() or changes_dir.is_dir()):
             result.warnings.append(WARN_NO_SILLYSPEC)
             return result
 
         result.is_sillyspec = True
         struct = result.structure
 
-        projects_dir = sillyspec / "projects"
         struct.has_projects_dir = projects_dir.is_dir()
         if struct.has_projects_dir:
             struct.projects_count = _count_yaml(projects_dir)
         else:
             result.warnings.append(WARN_MISSING_PROJECTS_DIR)
 
-        changes_dir = sillyspec / "changes"
         struct.has_changes_dir = changes_dir.is_dir()
         if struct.has_changes_dir:
             change_dir = changes_dir / "change"
@@ -118,7 +120,7 @@ class WorkspaceScanner:
         struct.has_runtime_dir = (sillyspec / ".runtime").is_dir()
         struct.has_local_yaml = (sillyspec / "local.yaml").is_file()
 
-        # --- task-05: parser integration ---
+        # --- parser integration（task-06 扁平 projects_subdir）---
         from app.modules.workspace.parser import WorkspaceParser as _WP  # noqa: N814
 
         parse_result = _WP().parse(root)

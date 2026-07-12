@@ -69,7 +69,6 @@ class Permission(StrEnum):
     CHANGE_READ = "change:read"
     CHANGE_UPDATE = "change:update"
     CHANGE_APPROVE = "change:approve"
-    CHANGE_ARCHIVE = "change:archive"
 
     # ── Task ────────────────────────────────────────────────
     TASK_READ = "task:read"

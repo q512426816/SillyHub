@@ -38,8 +38,8 @@ def test_missing_sillyspec(tmp_path: Path) -> None:
 
 
 def test_missing_projects_dir(tmp_path: Path) -> None:
-    (tmp_path / ".sillyspec" / "changes" / "change").mkdir(parents=True)
-    (tmp_path / ".sillyspec" / "changes" / "archive").mkdir(parents=True)
+    (tmp_path / "changes" / "change").mkdir(parents=True)
+    (tmp_path / "changes" / "archive").mkdir(parents=True)
     result = WorkspaceScanner().scan(tmp_path)
     assert result.is_sillyspec is True
     assert WARN_MISSING_PROJECTS_DIR in result.warnings
@@ -47,7 +47,7 @@ def test_missing_projects_dir(tmp_path: Path) -> None:
 
 
 def test_counts_projects_and_changes(tmp_path: Path) -> None:
-    base = tmp_path / ".sillyspec"
+    base = tmp_path
     (base / "projects").mkdir(parents=True)
     (base / "changes" / "change").mkdir(parents=True)
     (base / "changes" / "archive").mkdir(parents=True)
@@ -71,9 +71,9 @@ def test_counts_projects_and_changes(tmp_path: Path) -> None:
 
 def test_handles_chinese_and_spaces(tmp_path: Path) -> None:
     nested = tmp_path / "中文 空格" / "repo"
-    (nested / ".sillyspec" / "projects").mkdir(parents=True)
-    (nested / ".sillyspec" / "changes" / "change").mkdir(parents=True)
-    (nested / ".sillyspec" / "changes" / "archive").mkdir(parents=True)
+    (nested / "projects").mkdir(parents=True)
+    (nested / "changes" / "change").mkdir(parents=True)
+    (nested / "changes" / "archive").mkdir(parents=True)
     result = WorkspaceScanner().scan(nested)
     assert result.is_sillyspec is True
 
@@ -83,7 +83,7 @@ def test_scan_is_fast_on_realistic_workspace(
     tmp_path: Path, project_count: int, change_count: int
 ) -> None:
     """AC-08: scanning a 10-component / 20-change workspace must take <200ms."""
-    base = tmp_path / ".sillyspec"
+    base = tmp_path
     (base / "projects").mkdir(parents=True)
     (base / "changes" / "change").mkdir(parents=True)
     (base / "changes" / "archive").mkdir(parents=True)
@@ -109,7 +109,7 @@ def test_scan_is_fast_on_realistic_workspace(
 
 
 def test_dotfiles_under_change_are_ignored(tmp_path: Path) -> None:
-    base = tmp_path / ".sillyspec"
+    base = tmp_path
     (base / "projects").mkdir(parents=True)
     (base / "changes" / "change").mkdir(parents=True)
     (base / "changes" / "archive").mkdir(parents=True)
@@ -133,7 +133,7 @@ def test_scan_result_parser_fields_default_empty() -> None:
 
 def test_scan_fills_parser_fields(tmp_path: Path) -> None:
     """scan() populates parsed_workspaces when projects/*.yaml exists (AC-02, AC-03)."""
-    base = tmp_path / ".sillyspec"
+    base = tmp_path
     (base / "projects").mkdir(parents=True)
     (base / "changes" / "change").mkdir(parents=True)
     (base / "changes" / "archive").mkdir(parents=True)
@@ -152,7 +152,7 @@ def test_scan_fills_parser_fields(tmp_path: Path) -> None:
 
 def test_scan_empty_projects_dir_parser_fields_empty(tmp_path: Path) -> None:
     """When projects/ dir exists but is empty, parsed_workspaces is []."""
-    base = tmp_path / ".sillyspec"
+    base = tmp_path
     (base / "projects").mkdir(parents=True)
     (base / "changes" / "change").mkdir(parents=True)
     (base / "changes" / "archive").mkdir(parents=True)
