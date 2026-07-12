@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -13,6 +14,8 @@ class MissionCreateRequest(BaseModel):
     change_id: uuid.UUID | None = None
     budget_usd: float | None = None
     constraints: dict | None = None
+    mode: Literal["single", "team"] | None = None
+    session_id: uuid.UUID | None = None
 
 
 class MissionArtifactResponse(BaseModel):

@@ -438,6 +438,7 @@ async def transition_change(
         user_id=_user.id,
         provider=body.provider,
         model=body.model,
+        team_mode=body.team_mode,
     )
     # Enrich the change data for the response
     enriched_change = await service.enrich_with_workspace_ids(result["change"])

@@ -167,6 +167,9 @@ export default function ChangeDetailPage({ params }: Props) {
   // 阶段流转 / 手动派发使用的 agent provider 覆盖（FR-02，2026-06-14-agent-runtime-selection）
   const [stageProvider, setStageProvider] = useState<string | null>(null);
   const [stageModel, setStageModel] = useState<string | null>(null);
+  // team-mode 开关（task-08，D-002/D-003）：execute 流转时是否用团队执行。
+  // 默认 false（单 worker 零回归）；true 时 transition/execute 链路透传 team_mode=true。
+  const [teamMode, setTeamMode] = useState(false);
   const [gateStatus, setGateStatus] = useState<GateStatusEvent | null>(null);
   const [gateComment, setGateComment] = useState("");
 
@@ -308,7 +311,7 @@ export default function ChangeDetailPage({ params }: Props) {
     setPageError(null);
     setSuccessMsg(null);
     try {
-      const result = await executeChange(workspaceId, change.change_key, stageProvider, stageModel);
+      const result = await executeChange(workspaceId, change.change_key, stageProvider, stageModel, teamMode);
       if (result.ok) {
         // Refresh change data after successful execution
         const updated = await getChange(workspaceId, changeId);
@@ -488,6 +491,7 @@ export default function ChangeDetailPage({ params }: Props) {
           undefined,
           stageProvider,
           stageModel,
+          teamMode,
         );
       }
       setGateComment("");
@@ -653,6 +657,33 @@ export default function ChangeDetailPage({ params }: Props) {
           className="w-[260px]"
         />
       </div>
+
+      {/* ── team-mode 开关（task-08，D-002）────────────────────── */}
+      {/* 仅在 execute 流转/执行场景渲染（plan 审核通过将进 execute / 已在 execute）。
+          紫色对齐 mission-console task-04（violet-500）。默认 false 零回归。 */}
+      {(change.pending_review === "plan_review" || change.current_stage === "execute") && (
+        <label className="flex items-center gap-2.5 rounded-md border border-violet-500/40 bg-violet-50 px-3 py-2 text-xs">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={teamMode}
+            onClick={() => setTeamMode(!teamMode)}
+            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+              teamMode ? "bg-violet-500" : "bg-muted"
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                teamMode ? "translate-x-4" : "translate-x-0.5"
+              }`}
+            />
+          </button>
+          <span className="font-medium text-violet-900">用团队执行</span>
+          <span className="text-muted-foreground">
+            （多 worker 并行写，Coordinator 拆解 + Finalizer 合并，需 GLM）
+          </span>
+        </label>
+      )}
 
       {/* ── SillySpec Step Progress ─────────────────────────────── */}
       <SillySpecStepProgress

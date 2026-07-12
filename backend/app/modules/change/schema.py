@@ -213,6 +213,10 @@ class TransitionRequest(BaseModel):
     model: str | None = Field(
         default=None, max_length=128, description="Optional agent model override"
     )
+    # execute 阶段是否用团队执行（D-002，默认 single 零回归）
+    team_mode: bool = Field(
+        default=False, description="execute 阶段是否用团队执行（D-002，默认 single 零回归）"
+    )
 
 
 class FeedbackRequest(BaseModel):

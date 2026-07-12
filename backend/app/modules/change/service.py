@@ -695,10 +695,15 @@ class ChangeService:
         user_id: uuid.UUID | None = None,
         provider: str | None = None,
         model: str | None = None,
+        team_mode: bool = False,
     ) -> dict:
         """Execute transition and optionally dispatch an agent for the target stage.
 
         Returns a dict with the change data and agent dispatch info.
+
+        When ``team_mode=True`` and the target stage is ``execute``, the change's
+        ``stages`` JSON is marked with ``team_mode=True`` so the dispatch layer
+        routes to the team execution path (D-002, dispatch.py:810-815).
         """
         change = await self.transition(
             workspace_id=workspace_id,
@@ -707,6 +712,18 @@ class ChangeService:
             user_role=user_role,
             reason=reason,
         )
+
+        # team_mode opt-in：写 change.stages.team_mode=True 触发 dispatch 分流（D-002）。
+        # 必须 dict copy 再赋值——SQLAlchemy JSON 列原地改不 dirty 不落库（反复踩过的坑，
+        # 参照 dispatch.py:835 同模式）。team_mode=False 不写键，保持 single 零回归。
+        # 必须显式 commit：dispatch 用独立 factory session 读 change（见下方 :725），
+        # 跨 session 看不到本 session 未提交的改动，不 commit 则 team_mode 不可见 → 分流失效。
+        if team_mode:
+            stages = dict(change.stages or {})
+            stages["team_mode"] = True
+            change.stages = stages
+            self._session.add(change)
+            await self._session.commit()
 
         # Attempt agent dispatch after commit (best-effort, non-blocking)
         dispatch_result: dict = {}

@@ -64,6 +64,8 @@ export type TransitionRequest = {
   /** 显式 agent provider（可选）；省略则后端用 workspace.default_agent */
   provider?: string | null;
   model?: string | null;
+  /** execute 阶段是否用团队执行（task-08，D-002；省略/False=单 worker 零回归） */
+  team_mode?: boolean;
 };
 
 /** 反馈提交请求参数 */
@@ -249,10 +251,13 @@ export function executeChange(
   changeKey: string,
   provider?: string | null,
   model?: string | null,
+  teamMode?: boolean,
 ) {
   const searchParams = new URLSearchParams();
   if (provider) searchParams.set("provider", provider);
   if (model) searchParams.set("model", model);
+  // team-mode（task-08，D-002）：true 时附加 query，后端 execute 链路按 team 拆 Worker
+  if (teamMode) searchParams.set("team_mode", "true");
   const qs = searchParams.toString();
   return apiFetch<{ ok: boolean; run_id: string }>(
     `/api/workspaces/${workspaceId}/changes/${changeKey}/execute${qs ? `?${qs}` : ""}`,
@@ -273,6 +278,7 @@ export function transitionChange(
   reason?: string,
   provider?: string | null,
   model?: string | null,
+  teamMode?: boolean,
 ) {
   const body: TransitionRequest = { target_stage: targetStage };
   if (reason !== undefined) {
@@ -285,6 +291,11 @@ export function transitionChange(
   }
   if (model) {
     body.model = model;
+  }
+  // team-mode（task-08，D-002）：true 时附加 body.team_mode=true
+  // （后端 TransitionRequest.team_mode default=False，省略=零回归）
+  if (teamMode) {
+    body.team_mode = true;
   }
   return apiFetch<TransitionResponse>(
     `/api/workspaces/${workspaceId}/changes/${changeId}/transition`,

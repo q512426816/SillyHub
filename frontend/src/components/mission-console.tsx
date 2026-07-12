@@ -276,9 +276,70 @@ function WorkerRow({
   );
 }
 
+function ModeCard({
+  selected,
+  onClick,
+  icon,
+  title,
+  desc,
+  meta,
+  accent,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  icon: string;
+  title: string;
+  desc: string;
+  meta: string;
+  accent: "emerald" | "violet";
+}) {
+  // 选中态配色照原型：single 绿系 / team 紫系（border + bg + radio 实心点）
+  const selectedBorder =
+    accent === "emerald" ? "border-emerald-500" : "border-violet-500";
+  const selectedBg =
+    accent === "emerald" ? "bg-emerald-50" : "bg-violet-50";
+  const radioBorder =
+    accent === "emerald" ? "border-emerald-600" : "border-violet-600";
+  const radioDot =
+    accent === "emerald" ? "bg-emerald-600" : "bg-violet-600";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={selected}
+      className={`relative cursor-pointer rounded-lg border-[1.5px] bg-white p-3.5 text-left transition-all hover:border-slate-400 ${
+        selected ? `${selectedBorder} ${selectedBg}` : "border-slate-200"
+      }`}
+    >
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="flex items-center gap-1.5 text-sm font-bold text-slate-900">
+          <span className="text-base">{icon}</span>
+          {title}
+        </span>
+        {/* radio 圈：选中时实心点（emerald/violet），未选中空圈 */}
+        <span
+          className={`relative h-[18px] w-[18px] rounded-full border-2 ${
+            selected ? radioBorder : "border-slate-300"
+          }`}
+        >
+          {selected && (
+            <span
+              className={`absolute inset-[3px] rounded-full ${radioDot}`}
+            />
+          )}
+        </span>
+      </div>
+      <p className="text-xs leading-relaxed text-slate-500">{desc}</p>
+      <p className="mt-1.5 text-[11px] text-slate-400">{meta}</p>
+    </button>
+  );
+}
+
 export function MissionConsole({ workspaceId }: { workspaceId: string }) {
   const [objective, setObjective] = useState("");
   const [budget, setBudget] = useState("");
+  const [mode, setMode] = useState<"single" | "team">("single");
   const [mission, setMission] = useState<Mission | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -316,11 +377,13 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
       const m = await createMission(workspaceId, {
         objective: objective.trim(),
         budget_usd: budgetNum !== null && budgetNum > 0 ? budgetNum : null,
+        mode,
       });
       setMission(m);
       writeMissionIdToUrl(m.id);
       setObjective("");
       setBudget("");
+      setMode("single");
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
@@ -356,6 +419,56 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
             value={objective}
             onChange={(e) => setObjective(e.target.value)}
           />
+
+          {/* 模式选择：single（绿）/ team（紫），照原型双卡片布局 */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-600">模式</label>
+            <div className="grid grid-cols-2 gap-3">
+              <ModeCard
+                selected={mode === "single"}
+                onClick={() => setMode("single")}
+                icon="👤"
+                title="single"
+                desc="单 agent 跑完全程。默认，零回归。"
+                meta="适用：小任务、问答、简单修改"
+                accent="emerald"
+              />
+              <ModeCard
+                selected={mode === "team"}
+                onClick={() => setMode("team")}
+                icon="👥"
+                title="team"
+                desc="Coordinator 拆 1-5 个 Worker 并行，Finalizer 合并。"
+                meta="适用：扫描、多模块、重构、核验"
+                accent="violet"
+              />
+            </div>
+          </div>
+
+          {/* team 预览：角色 chips + 预算提示（仅 team 选中时） */}
+          {mode === "team" && (
+            <div className="mt-3.5 rounded-md border border-dashed border-slate-300 bg-slate-50 p-3">
+              <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Team 预览 · Coordinator（GLM）将拆解为
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {Object.entries(ROLE_LABEL).map(([role, label]) => (
+                  <span
+                    key={role}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11.5px] font-semibold text-slate-700"
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
+                    {role} · {label}
+                  </span>
+                ))}
+              </div>
+              <div className="mt-2.5 rounded-r-sm border-l-[3px] border-amber-500 bg-amber-50 px-3 py-2 text-xs text-slate-700">
+                ⚠️ team 模式将拆分 1-5 个 worker 并行，多 worker 烧 token，建议设置预算上限。
+                Finalizer 单点合并避免并发写冲突。
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex flex-col gap-1">
               <label className="text-[11px] font-medium text-muted-foreground">
@@ -372,7 +485,7 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
               />
             </div>
             <Button onClick={onCreate} disabled={busy || !objective.trim()}>
-              {busy ? "规划中…" : "启动团队"}
+              {busy ? "规划中…" : mode === "team" ? "👥 启动团队" : "启动团队"}
             </Button>
           </div>
         </div>

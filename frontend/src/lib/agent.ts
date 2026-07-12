@@ -252,6 +252,8 @@ export interface CreateMissionInput {
   change_id?: string | null;
   budget_usd?: number | null;
   constraints?: Record<string, unknown> | null;
+  mode?: "single" | "team" | null;
+  session_id?: string | null;
 }
 
 /** Create a Mission: GLM plans Worker delegations, dispatched to a daemon. */

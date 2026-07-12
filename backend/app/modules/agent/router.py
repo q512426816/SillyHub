@@ -739,12 +739,20 @@ async def create_mission(
             "GLM endpoint not configured (ANTHROPIC_BASE_URL/AUTH_TOKEN)",
         )
     planner = CoordinatorPlanner(cfg)
+    # Wave 1 team-mode (2026-07-12-team-mode-platform-wide D-003/D-004)：
+    # 透传前端 mode/session_id 进 constraints 落库。R-A 只透传不调 route()，
+    # single 零回归靠"前端默认不传 mode"；R-B session_id 暂存 constraints 不绑模型。
+    constraints = dict(payload.constraints or {})
+    if getattr(payload, "mode", None) is not None:
+        constraints["mode"] = payload.mode
+    if getattr(payload, "session_id", None) is not None:
+        constraints["session_id"] = str(payload.session_id)
     mission, runs = await MissionService(session).start_mission(
         workspace_id=workspace_id,
         objective=payload.objective,
         created_by=user.id,
         change_id=payload.change_id,
-        constraints=payload.constraints,
+        constraints=constraints,
         budget_usd=payload.budget_usd,
         planner=planner,
     )
