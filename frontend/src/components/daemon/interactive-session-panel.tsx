@@ -29,6 +29,7 @@ import {
   RefreshCw,
   Send,
   Square,
+  Users,
 } from "lucide-react";
 
 import { AgentModelInput } from "@/components/AgentModelInput";
@@ -38,6 +39,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MarkdownText } from "@/components/ui/markdown-text";
 import { ApiError } from "@/lib/api";
+import { createMission } from "@/lib/agent";
 import {
   createSession,
   fetchPendingDialogs,
@@ -139,6 +141,12 @@ export interface InteractiveSessionPanelProps {
   changeId?: string;
   /** 工作空间绑定透传（D-003）。可选。 */
   workspaceId?: string;
+  /**
+   * task-08（FR-08 / D-001@v2）：「用团队分析」成功创建 mission 后上报 missionId。
+   * 父级可据此挂 TeamProgress 组件展示主 agent 决策 + worker 进度。
+   * mode=team + session_id 绑当前会话，主 agent 接管上下文。
+   */
+  onTeamMissionCreated?: (missionId: string) => void;
 }
 
 export function InteractiveSessionPanel({
@@ -153,10 +161,15 @@ export function InteractiveSessionPanel({
   onSessionReset,
   changeId,
   workspaceId,
+  onTeamMissionCreated,
 }: InteractiveSessionPanelProps) {
   const [provider, setProvider] = useState(defaultProvider);
   const [input, setInput] = useState("");
   const [view, setView] = useState<InteractiveSessionView>(INITIAL_VIEW);
+  // task-08：「用团队分析」按钮状态。teamAnalyzing=建 mission 进行中（按钮置灰）；
+  // teamMissionId=已为当前 session 建过 mission（按钮转「已建团队」只读态，避免重复建）。
+  const [teamAnalyzing, setTeamAnalyzing] = useState(false);
+  const [teamMissionId, setTeamMissionId] = useState<string | null>(null);
   // ql-20260621：AskUserQuestion / 普通 permission_request 待答卡片队列。
   // 仅渲染 dialog_kind 存在的（AskUserDialogCard）；普通工具审批卡在本面板不展示
   //（/runtimes 页的 PermissionApprovalsPanel 负责普通 allow/deny）。
@@ -172,6 +185,12 @@ export function InteractiveSessionPanel({
       setProvider(providers[0] ?? defaultProvider);
     }
   }, [providers, provider, defaultProvider]);
+
+  // task-08：session 切换 / 重置时清掉 teamMissionId（新会话可重新建 team）。
+  // idle（无 sessionId）也清，确保按钮回到「用团队分析」可点状态。
+  useEffect(() => {
+    setTeamMissionId(null);
+  }, [view.sessionId]);
 
   // SSE 连接由 sessionId 驱动：createSession 成功后建立唯一 SSE，贯穿整个会话。
   const establishStream = useCallback((sessionId: string) => {
@@ -636,6 +655,50 @@ export function InteractiveSessionPanel({
     );
   }, []);
 
+  // task-08（FR-08 / D-001@v2）：「用团队分析」— 模式 team + 绑定当前 session_id。
+  // 主 agent 作为 orchestrator 接管会话上下文，按预设 worker 列表派发分析。
+  // worker_preset 用通用分析模板（arch + verify 两角色），具体业务可后续在
+  // mission 详情页编辑（task-07 已支持 worker 列表编辑）。
+  const handleAnalyzeWithTeam = useCallback(async () => {
+    if (!view.sessionId) return;
+    if (!workspaceId) return;
+    if (teamAnalyzing || teamMissionId) return;
+    setTeamAnalyzing(true);
+    try {
+      const m = await createMission(workspaceId, {
+        objective: "团队分析当前会话上下文",
+        mode: "team",
+        session_id: view.sessionId,
+        // changeId 透传（变更会话入口时绑定 change 上下文）
+        ...(changeId ? { change_id: changeId } : {}),
+        // 通用分析 worker 预设模板（D-002@v2 用户预设）
+        worker_preset: [
+          {
+            agent_type: "claude_code",
+            model: "",
+            objective: "梳理会话上下文，输出问题与方案摘要",
+            role: "arch",
+          },
+          {
+            agent_type: "claude_code",
+            model: "",
+            objective: "核验方案可行性，标注风险与遗漏",
+            role: "verify",
+          },
+        ],
+      });
+      setTeamMissionId(m.id);
+      onTeamMissionCreated?.(m.id);
+    } catch (err) {
+      setView((prev) => ({
+        ...prev,
+        errorMsg: err instanceof ApiError ? err.message : "启动团队分析失败",
+      }));
+    } finally {
+      setTeamAnalyzing(false);
+    }
+  }, [view.sessionId, workspaceId, teamAnalyzing, teamMissionId, changeId, onTeamMissionCreated]);
+
   // 输入框 / 发送按钮状态
   const sendingDisabled =
     view.status === "creating" ||
@@ -679,6 +742,25 @@ export function InteractiveSessionPanel({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            {workspaceId && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleAnalyzeWithTeam}
+                disabled={
+                  !view.sessionId ||
+                  view.status === "ended" ||
+                  view.status === "failed" ||
+                  teamAnalyzing ||
+                  teamMissionId !== null
+                }
+                className="h-8 gap-1 px-3 text-xs"
+                title="用团队（主 agent + worker）分析当前会话上下文"
+              >
+                <Users className="h-3 w-3" />
+                {teamMissionId ? "已建团队" : teamAnalyzing ? "组建中…" : "用团队分析"}
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"

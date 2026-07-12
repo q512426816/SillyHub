@@ -247,6 +247,29 @@ export interface Mission {
   workers: MissionWorkerRun[];
 }
 
+/**
+ * team 模式下用户预设的 Worker（D-002@v2：用户预设，非主 agent 自动拆解）。
+ * schema 对齐 backend AgentMission.worker_preset（task-02）：
+ * 每条 `{agent_type, model, objective, role}`。
+ */
+export interface WorkerPresetItem {
+  agent_type: string;
+  model: string;
+  objective: string;
+  role: string;
+}
+
+/**
+ * team 模式下主 agent（orchestrator）配置（D-003@v2：自由组合 agent 类型 + provider + model）。
+ * schema 对齐 backend AgentMission.main_agent_config（task-02）：
+ * `{agent_type, provider, model}`。
+ */
+export interface MainAgentConfig {
+  agent_type: string;
+  provider: string;
+  model: string;
+}
+
 export interface CreateMissionInput {
   objective: string;
   change_id?: string | null;
@@ -254,6 +277,11 @@ export interface CreateMissionInput {
   constraints?: Record<string, unknown> | null;
   mode?: "single" | "team" | null;
   session_id?: string | null;
+  // task-07 / D-002@v2：team 模式用户预设 worker 列表（mode=team 时携带）。
+  // single 模式应传 null/undefined，后端按 mode 路由。
+  worker_preset?: WorkerPresetItem[] | null;
+  // task-07 / D-003@v2：team 模式主 agent 配置（mode=team 时携带）。
+  main_agent_config?: MainAgentConfig | null;
 }
 
 /** Create a Mission: GLM plans Worker delegations, dispatched to a daemon. */

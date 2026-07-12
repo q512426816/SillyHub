@@ -41,6 +41,11 @@ const sessionApi = vi.hoisted(() => ({
   getQuickChatResult: vi.fn(),
 }));
 
+// task-08（FR-08）：「用团队分析」按钮调 createMission(mode=team, session_id 绑定)
+const missionApi = vi.hoisted(() => ({
+  createMission: vi.fn(),
+}));
+
 vi.mock("@/lib/daemon", async () => {
   const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
   return {
@@ -55,6 +60,15 @@ vi.mock("@/lib/daemon", async () => {
     quickChat: sessionApi.quickChat,
     streamQuickChat: sessionApi.streamQuickChat,
     getQuickChatResult: sessionApi.getQuickChatResult,
+  };
+});
+
+// task-08：「用团队分析」走 createMission（@/lib/agent），mock 之
+vi.mock("@/lib/agent", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/agent")>("@/lib/agent");
+  return {
+    ...actual,
+    createMission: missionApi.createMission,
   };
 });
 
@@ -1217,5 +1231,107 @@ describe("InteractiveSessionPanel", () => {
       expect(screen.getByText("MCP 服务器请求确认")).toBeInTheDocument(),
     );
     expect(screen.getByText("mcp_elicitation")).toBeInTheDocument();
+  });
+
+  /* ---------- task-08（FR-08 / D-001@v2）：「用团队分析」按钮 ---------- */
+
+  it("task-08 无 workspaceId 时「用团队分析」按钮不渲染", async () => {
+    setupPanel(); // 默认不传 workspaceId
+    expect(screen.queryByTitle(/用团队/)).not.toBeInTheDocument();
+  });
+
+  it("task-08 有 workspaceId 但无 session 时按钮禁用", async () => {
+    setupPanel({ workspaceId: "ws-1" });
+    const btn = screen.getByTitle(/用团队/);
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("task-08 active session 点「用团队分析」→ createMission(mode=team, session_id)", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1",
+      run_id: "run-1",
+      lease_id: "l",
+      status: "active",
+      stream_url: "",
+    });
+    missionApi.createMission.mockResolvedValue({
+      id: "m-team-1",
+      workspace_id: "ws-1",
+      change_id: null,
+      objective: "团队分析当前会话上下文",
+      status: "planning",
+      budget_usd: null,
+      cost_so_far: 0,
+      constraints: null,
+      cancelled_at: null,
+      created_at: "t",
+      workers: [],
+    });
+    const onTeamMissionCreated = vi.fn();
+
+    setupPanel({
+      workspaceId: "ws-1",
+      onTeamMissionCreated,
+    });
+    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "hi" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
+
+    const teamBtn = await screen.findByTitle(/用团队/);
+    expect((teamBtn as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(teamBtn);
+
+    await waitFor(() => expect(missionApi.createMission).toHaveBeenCalledTimes(1));
+    const callArg = missionApi.createMission.mock.calls[0]![1];
+    expect(callArg).toEqual(
+      expect.objectContaining({
+        objective: "团队分析当前会话上下文",
+        mode: "team",
+        session_id: "sess-1",
+      }),
+    );
+    expect(callArg.worker_preset).toHaveLength(2);
+    expect(onTeamMissionCreated).toHaveBeenCalledWith("m-team-1");
+    // 按钮转「已建团队」+ 禁用
+    await waitFor(() =>
+      expect(screen.getByText("已建团队")).toBeInTheDocument(),
+    );
+  });
+
+  it("task-08 createMission 失败显示错误，按钮恢复可点", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1",
+      run_id: "run-1",
+      lease_id: "l",
+      status: "active",
+      stream_url: "",
+    });
+    const { ApiError } = await import("@/lib/api");
+    missionApi.createMission.mockRejectedValue(
+      new ApiError(500, {
+        code: "INTERNAL",
+        message: "建 mission 失败",
+        request_id: null,
+        details: null,
+      }),
+    );
+
+    setupPanel({ workspaceId: "ws-1" });
+    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "hi" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
+
+    const teamBtn = await screen.findByTitle(/用团队/);
+    fireEvent.click(teamBtn);
+    await waitFor(() =>
+      expect(screen.getByText(/建 mission 失败/)).toBeInTheDocument(),
+    );
+    expect(screen.getByText("用团队分析")).toBeInTheDocument();
   });
 });

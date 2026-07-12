@@ -12,9 +12,12 @@ import {
   getAgentRunLogs,
   getMission,
   type AgentRunLogEntry,
+  type CreateMissionInput,
+  type MainAgentConfig,
   type Mission,
   type MissionArtifact,
   type MissionWorkerRun,
+  type WorkerPresetItem,
 } from "@/lib/agent";
 
 const STATUS_BADGE: Record<string, string> = {
@@ -38,6 +41,44 @@ const ROLE_LABEL: Record<string, string> = {
   impl: "实现",
   verify: "验证",
 };
+
+// ── task-07 / D-002@v2 / D-003@v2：team 配置面板选项 ──
+// agent_type 与 provider 自由组合（GLM 不再特殊），照 design §3 / AC-5。
+const AGENT_TYPE_OPTIONS = [
+  { value: "claude_code", label: "Claude Code" },
+  { value: "codex", label: "Codex" },
+  { value: "cursor", label: "Cursor" },
+] as const;
+
+const PROVIDER_OPTIONS = [
+  { value: "claude", label: "Claude（Anthropic）" },
+  { value: "glm", label: "GLM（智谱）" },
+  { value: "gpt", label: "GPT（OpenAI）" },
+  { value: "deepseek", label: "DeepSeek" },
+] as const;
+
+// worker role 选项（对齐 ROLE_LABEL，用户预设用）
+const WORKER_ROLE_OPTIONS = [
+  { value: "arch", label: "架构分析" },
+  { value: "code_style", label: "代码规范" },
+  { value: "test", label: "测试" },
+  { value: "integration", label: "集成" },
+  { value: "risk", label: "风险" },
+  { value: "impl", label: "实现" },
+  { value: "verify", label: "验证" },
+] as const;
+
+// 默认主 agent 配置（claude_code + claude provider，强模型推荐，design R-05）
+const DEFAULT_MAIN_AGENT_CONFIG: MainAgentConfig = {
+  agent_type: "claude_code",
+  provider: "claude",
+  model: "claude-sonnet-4-6",
+};
+
+// 默认新增 worker 模板（用户预设，D-002@v2）
+function makeEmptyWorker(): WorkerPresetItem {
+  return { agent_type: "claude_code", model: "", objective: "", role: "impl" };
+}
 
 function readMissionIdFromUrl(): string | null {
   if (typeof window === "undefined") return null;
@@ -308,6 +349,7 @@ function ModeCard({
       type="button"
       onClick={onClick}
       aria-pressed={selected}
+      aria-label={`模式 ${title}`}
       className={`relative cursor-pointer rounded-lg border-[1.5px] bg-white p-3.5 text-left transition-all hover:border-slate-400 ${
         selected ? `${selectedBorder} ${selectedBg}` : "border-slate-200"
       }`}
@@ -336,10 +378,220 @@ function ModeCard({
   );
 }
 
+/**
+ * team 配置面板（task-07 / D-002@v2 / D-003@v2）。
+ * - 主 agent 配置：agent_type + provider + model（自由组合，GLM 不再特殊）
+ * - Worker 列表：每条 agent_type + model + objective + role，可增删（用户预设，非自动拆解）
+ * 样式照前端样式系统原型：field（label + 控件）、input/select 34px、紫系（violet）强调 team。
+ */
+function TeamConfigPanel({
+  mainAgent,
+  onMainAgentChange,
+  workers,
+  onWorkersChange,
+}: {
+  mainAgent: MainAgentConfig;
+  onMainAgentChange: (next: MainAgentConfig) => void;
+  workers: WorkerPresetItem[];
+  onWorkersChange: (next: WorkerPresetItem[]) => void;
+}) {
+  const updateWorker = (idx: number, patch: Partial<WorkerPresetItem>) => {
+    onWorkersChange(
+      workers.map((w, i) => (i === idx ? { ...w, ...patch } : w)),
+    );
+  };
+  const removeWorker = (idx: number) => {
+    onWorkersChange(workers.filter((_, i) => i !== idx));
+  };
+  const addWorker = () => {
+    onWorkersChange([...workers, makeEmptyWorker()]);
+  };
+
+  return (
+    <div className="mt-3.5 space-y-4 rounded-md border border-violet-200 bg-violet-50/40 p-3.5">
+      {/* 主 agent（orchestrator）配置 */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet-700">
+          <span>🧠</span> 主 Agent（Orchestrator）
+        </div>
+        <p className="text-[11px] text-slate-500">
+          主 agent 像项目经理：读 worker 实际产出后再决策下一步，全程动态指挥。
+        </p>
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] font-medium text-slate-600">
+              Agent 类型
+            </span>
+            <select
+              aria-label="主 agent 类型"
+              className="h-[34px] rounded-md border border-slate-300 bg-white px-2.5 text-[13px] text-slate-800"
+              value={mainAgent.agent_type}
+              onChange={(e) =>
+                onMainAgentChange({ ...mainAgent, agent_type: e.target.value })
+              }
+            >
+              {AGENT_TYPE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] font-medium text-slate-600">
+              Provider
+            </span>
+            <select
+              aria-label="主 agent provider"
+              className="h-[34px] rounded-md border border-slate-300 bg-white px-2.5 text-[13px] text-slate-800"
+              value={mainAgent.provider}
+              onChange={(e) =>
+                onMainAgentChange({ ...mainAgent, provider: e.target.value })
+              }
+            >
+              {PROVIDER_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] font-medium text-slate-600">模型</span>
+            <input
+              type="text"
+              aria-label="主 agent 模型"
+              placeholder="如 claude-sonnet-4-6"
+              className="h-[34px] rounded-md border border-slate-300 bg-white px-2.5 text-[13px] text-slate-800"
+              value={mainAgent.model}
+              onChange={(e) =>
+                onMainAgentChange({ ...mainAgent, model: e.target.value })
+              }
+            />
+          </label>
+        </div>
+      </div>
+
+      {/* Worker 列表（用户预设，D-002@v2） */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet-700">
+            <span>👥</span> Worker 列表（{workers.length}）
+          </div>
+          <button
+            type="button"
+            onClick={addWorker}
+            className="rounded-md border border-violet-300 bg-white px-2.5 py-1 text-xs font-semibold text-violet-700 hover:bg-violet-100"
+          >
+            + 添加 Worker
+          </button>
+        </div>
+        <p className="text-[11px] text-slate-500">
+          用户预设 worker 列表（非主 agent 自动拆解）。主 agent 按列表派发 + 动态调度（补/调整/收敛）。
+        </p>
+
+        {workers.length === 0 && (
+          <div className="rounded-md border border-dashed border-slate-300 bg-white px-3 py-3 text-center text-xs text-slate-400">
+            尚未添加 Worker。点击「添加 Worker」预设分工。
+          </div>
+        )}
+
+        <ul className="space-y-2">
+          {workers.map((w, idx) => (
+            <li
+              key={idx}
+              className="space-y-2 rounded-md border border-slate-200 bg-white p-2.5"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-slate-600">
+                  Worker #{idx + 1}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeWorker(idx)}
+                  aria-label={`删除 worker ${idx + 1}`}
+                  className="rounded border border-slate-300 px-2 py-0.5 text-xs text-red-600 hover:bg-red-50"
+                >
+                  删除
+                </button>
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-500">Agent 类型</span>
+                  <select
+                    aria-label={`worker ${idx + 1} agent 类型`}
+                    className="h-[32px] rounded-md border border-slate-300 bg-white px-2 text-[12.5px] text-slate-800"
+                    value={w.agent_type}
+                    onChange={(e) =>
+                      updateWorker(idx, { agent_type: e.target.value })
+                    }
+                  >
+                    {AGENT_TYPE_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-500">角色</span>
+                  <select
+                    aria-label={`worker ${idx + 1} 角色`}
+                    className="h-[32px] rounded-md border border-slate-300 bg-white px-2 text-[12.5px] text-slate-800"
+                    value={w.role}
+                    onChange={(e) => updateWorker(idx, { role: e.target.value })}
+                  >
+                    {WORKER_ROLE_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-500">模型</span>
+                  <input
+                    type="text"
+                    aria-label={`worker ${idx + 1} 模型`}
+                    placeholder="如 glm-4.6 / gpt-4o / deepseek-chat"
+                    className="h-[32px] rounded-md border border-slate-300 bg-white px-2 text-[12.5px] text-slate-800"
+                    value={w.model}
+                    onChange={(e) => updateWorker(idx, { model: e.target.value })}
+                  />
+                </label>
+              </div>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-slate-500">分工目标</span>
+                <input
+                  type="text"
+                  aria-label={`worker ${idx + 1} 分工目标`}
+                  placeholder="例：分析 backend/app/modules/agent/ 架构并输出摘要"
+                  className="h-[32px] rounded-md border border-slate-300 bg-white px-2 text-[12.5px] text-slate-800"
+                  value={w.objective}
+                  onChange={(e) =>
+                    updateWorker(idx, { objective: e.target.value })
+                  }
+                />
+              </label>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 export function MissionConsole({ workspaceId }: { workspaceId: string }) {
   const [objective, setObjective] = useState("");
   const [budget, setBudget] = useState("");
   const [mode, setMode] = useState<"single" | "team">("single");
+  // task-07：team 配置面板状态（仅 mode=team 时使用 / 提交）
+  const [mainAgentConfig, setMainAgentConfig] = useState<MainAgentConfig>(
+    DEFAULT_MAIN_AGENT_CONFIG,
+  );
+  const [workers, setWorkers] = useState<WorkerPresetItem[]>([
+    makeEmptyWorker(),
+  ]);
   const [mission, setMission] = useState<Mission | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -374,16 +626,26 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
     setError(null);
     try {
       const budgetNum = budget.trim() ? Number(budget) : null;
-      const m = await createMission(workspaceId, {
+      // task-07：mode=team 时携带 worker_preset + main_agent_config（D-002/D-003@v2）。
+      // single 模式传 null/undefined，后端按 mode 路由。
+      const payload: CreateMissionInput = {
         objective: objective.trim(),
         budget_usd: budgetNum !== null && budgetNum > 0 ? budgetNum : null,
         mode,
-      });
+      };
+      if (mode === "team") {
+        payload.main_agent_config = mainAgentConfig;
+        payload.worker_preset = workers;
+      }
+      const m = await createMission(workspaceId, payload);
       setMission(m);
       writeMissionIdToUrl(m.id);
       setObjective("");
       setBudget("");
       setMode("single");
+      // 重置 team 配置（下一次创建默认状态）
+      setMainAgentConfig(DEFAULT_MAIN_AGENT_CONFIG);
+      setWorkers([makeEmptyWorker()]);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
@@ -445,28 +707,20 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
             </div>
           </div>
 
-          {/* team 预览：角色 chips + 预算提示（仅 team 选中时） */}
+          {/* task-07：team 配置面板（主 agent + worker 列表，仅 team 选中时展开） */}
           {mode === "team" && (
-            <div className="mt-3.5 rounded-md border border-dashed border-slate-300 bg-slate-50 p-3">
-              <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                Team 预览 · Coordinator（GLM）将拆解为
+            <>
+              <TeamConfigPanel
+                mainAgent={mainAgentConfig}
+                onMainAgentChange={setMainAgentConfig}
+                workers={workers}
+                onWorkersChange={setWorkers}
+              />
+              <div className="rounded-r-sm border-l-[3px] border-amber-500 bg-amber-50 px-3 py-2 text-xs text-slate-700">
+                ⚠️ team 模式将拆分 {workers.length} 个 worker 并行，多 worker 烧 token，建议设置预算上限。
+                主 agent 合并 worker 产出，避免并发写冲突。
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                {Object.entries(ROLE_LABEL).map(([role, label]) => (
-                  <span
-                    key={role}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11.5px] font-semibold text-slate-700"
-                  >
-                    <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
-                    {role} · {label}
-                  </span>
-                ))}
-              </div>
-              <div className="mt-2.5 rounded-r-sm border-l-[3px] border-amber-500 bg-amber-50 px-3 py-2 text-xs text-slate-700">
-                ⚠️ team 模式将拆分 1-5 个 worker 并行，多 worker 烧 token，建议设置预算上限。
-                Finalizer 单点合并避免并发写冲突。
-              </div>
-            </div>
+            </>
           )}
 
           <div className="flex flex-wrap items-end gap-3">

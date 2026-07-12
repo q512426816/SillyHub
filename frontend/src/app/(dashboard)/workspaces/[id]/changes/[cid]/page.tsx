@@ -37,6 +37,8 @@ import {
   type ReviewEntry,
 } from "@/lib/changes";
 import { SillySpecStepProgress, type StepInfo } from "@/components/sillyspec-step-progress";
+import { StageTeamConfig, type StageWorkerPreset } from "@/components/stage-team-config";
+import { TeamProgress } from "@/components/team-progress";
 import { getTaskBoard, type TaskBoard } from "@/lib/tasks";
 
 interface Props {
@@ -167,9 +169,15 @@ export default function ChangeDetailPage({ params }: Props) {
   // 阶段流转 / 手动派发使用的 agent provider 覆盖（FR-02，2026-06-14-agent-runtime-selection）
   const [stageProvider, setStageProvider] = useState<string | null>(null);
   const [stageModel, setStageModel] = useState<string | null>(null);
-  // team-mode 开关（task-08，D-002/D-003）：execute 流转时是否用团队执行。
+  // team-mode 开关（task-08，D-002/D-003）：execute/verify 流转时是否用团队执行。
   // 默认 false（单 worker 零回归）；true 时 transition/execute 链路透传 team_mode=true。
   const [teamMode, setTeamMode] = useState(false);
+  // task-08：stage team worker 预设（mode=team 时携带，D-002@v2 用户预设）。
+  // stage 化默认（execute→impl，verify→verify）；透传给 backend 留 task-09 三入口接通。
+  const [stageWorkers, setStageWorkers] = useState<StageWorkerPreset[]>([]);
+  // task-08：stage team mission 创建后的 missionId（用于 TeamProgress 展示）。
+  // 流转触发 mission 后由 task-09 接通；本 task 仅渲染组件骨架。
+  const [stageTeamMissionId, setStageTeamMissionId] = useState<string | null>(null);
   const [gateStatus, setGateStatus] = useState<GateStatusEvent | null>(null);
   const [gateComment, setGateComment] = useState("");
 
@@ -659,30 +667,59 @@ export default function ChangeDetailPage({ params }: Props) {
       </div>
 
       {/* ── team-mode 开关（task-08，D-002）────────────────────── */}
-      {/* 仅在 execute 流转/执行场景渲染（plan 审核通过将进 execute / 已在 execute）。
-          紫色对齐 mission-console task-04（violet-500）。默认 false 零回归。 */}
-      {(change.pending_review === "plan_review" || change.current_stage === "execute") && (
-        <label className="flex items-center gap-2.5 rounded-md border border-violet-500/40 bg-violet-50 px-3 py-2 text-xs">
-          <button
-            type="button"
-            role="switch"
-            aria-checked={teamMode}
-            onClick={() => setTeamMode(!teamMode)}
-            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
-              teamMode ? "bg-violet-500" : "bg-muted"
-            }`}
-          >
-            <span
-              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                teamMode ? "translate-x-4" : "translate-x-0.5"
+      {/* execute + verify stage 可配 team（v1 D-002：brainstorm/plan 不 team）。
+          渲染时机：plan 审核通过将进 execute / 已在 execute / 已在 verify / human_test 待流转。
+          紫色对齐 mission-console task-07（violet-500）。默认 false 零回归。 */}
+      {(change.pending_review === "plan_review" ||
+        change.current_stage === "execute" ||
+        change.current_stage === "verify" ||
+        change.pending_review === "human_test") && (
+        <div className="space-y-2">
+          <label className="flex items-center gap-2.5 rounded-md border border-violet-500/40 bg-violet-50 px-3 py-2 text-xs">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={teamMode}
+              aria-label="用团队执行"
+              onClick={() => setTeamMode(!teamMode)}
+              className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                teamMode ? "bg-violet-500" : "bg-muted"
               }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                  teamMode ? "translate-x-4" : "translate-x-0.5"
+                }`}
+              />
+            </button>
+            <span className="font-medium text-violet-900">用团队{change.current_stage === "verify" ? "验证" : "执行"}</span>
+            <span className="text-muted-foreground">
+              （多 worker 并行{change.current_stage === "verify" ? "核验" : "写"}，主 agent 指挥 + 合并）
+            </span>
+          </label>
+
+          {/* team 开启时展开 stage worker 预设（task-08 / D-002@v2）。
+              stage 化：execute→impl workers，verify→verify workers。
+              具体透传给 backend 走 task-09 三入口接通。 */}
+          {teamMode && (
+            <StageTeamConfig
+              stage={change.current_stage === "verify" ? "verify" : "execute"}
+              workers={stageWorkers}
+              onWorkersChange={setStageWorkers}
+              provider={stageProvider ?? undefined}
+              model={stageModel ?? undefined}
             />
-          </button>
-          <span className="font-medium text-violet-900">用团队执行</span>
-          <span className="text-muted-foreground">
-            （多 worker 并行写，Coordinator 拆解 + Finalizer 合并，需 GLM）
-          </span>
-        </label>
+          )}
+        </div>
+      )}
+
+      {/* ── TeamProgress（task-08）：stage team mission 进度展示 ────── */}
+      {/* 流转触发 mission 后展示（missionId 来自 task-09 接通 / 暂留空态）。 */}
+      {teamMode && stageTeamMissionId && (
+        <TeamProgress
+          missionId={stageTeamMissionId}
+          workspaceId={workspaceId}
+        />
       )}
 
       {/* ── SillySpec Step Progress ─────────────────────────────── */}
