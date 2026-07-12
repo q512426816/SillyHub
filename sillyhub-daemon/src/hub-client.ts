@@ -918,6 +918,144 @@ export class HubClient {
       body,
     );
   }
+
+  // -- task-05 / D-007@v2：team 主 agent MCP 反向通道（daemon MCP server → backend）--
+  //
+  // 5 endpoint 挂在 agent router（/api 前缀，非 REST_PREFIX=/api/daemon），与
+  // getExecutionContext / getSpecBundle 同款用 /api 前缀。backend mcp_tools.py
+  // 5 endpoint 均要求 Permission.WORKSPACE_WRITE，鉴权走 _headers() 的 Bearer
+  // token（主 agent run 的 user token，非 daemon apiKey）—— backend
+  // require_permission(get_current_principal) 解析 Authorization Bearer。
+  //
+  // **无 X-Claim-Token**：与 notifyRunResult 不同，mcp_tools 5 endpoint 不接受
+  // lease 级 claim_token header（无 lease 概念，主 agent run 直接以 user token
+  // 鉴权）。TaskCard 提"X-Claim-Token 二级鉴权"是 change-write 范式误植，以
+  // backend mcp_tools.py 真实契约为准（D-007@v2 偏离记录）。
+
+  /**
+   * task-05：派一个 worker run（D-002@v2）。
+   *
+   * 端点：POST /api/workspaces/{ws}/missions/{mid}/dispatch_worker
+   * body（snake_case，对齐 backend ``DispatchWorkerRequest``）：
+   *   { objective, role?, agent_type?, model?, read_only? }
+   * 响应 201（``WorkerRunResponse``）：{ id, role, objective, status, agent_type,
+   *   lease_id?, error_code? }
+   *
+   * daemon 离线时 backend 仍返回 201 + ``error_code='no_online_daemon'``（run
+   * 建 pending），主 agent 可读 status 决定重派——故 2xx 即成功，error_code
+   * 透传到响应由调用方判读。
+   *
+   * undefined 可选字段不写入 body（对齐 notifyRunResult 守卫风格，避免覆盖
+   * backend 默认值）。
+   */
+  async dispatchWorker(
+    workspaceId: string,
+    missionId: string,
+    body: {
+      objective: string;
+      role?: string;
+      agent_type?: string;
+      model?: string;
+      read_only?: boolean;
+    },
+  ): Promise<Record<string, unknown>> {
+    const payload: Record<string, unknown> = { objective: body.objective };
+    if (body.role !== undefined) payload.role = body.role;
+    if (body.agent_type !== undefined) payload.agent_type = body.agent_type;
+    if (body.model !== undefined) payload.model = body.model;
+    if (body.read_only !== undefined) payload.read_only = body.read_only;
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/missions/${encodeURIComponent(missionId)}/dispatch_worker`,
+      payload,
+    );
+  }
+
+  /**
+   * task-05：读单个 worker 的结构化产出（AgentArtifact kind=patch/summary/...）。
+   *
+   * 端点：GET /api/workspaces/{ws}/missions/{mid}/workers/{wid}/result
+   * 响应（``WorkerResultResponse``）：{ worker_id, status, artifacts: [{kind,
+   *   content_ref, id}] }
+   */
+  async getWorkerResult(
+    workspaceId: string,
+    missionId: string,
+    workerId: string,
+  ): Promise<Record<string, unknown>> {
+    return this._request<Record<string, unknown>>(
+      'GET',
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/missions/${encodeURIComponent(missionId)}/workers/${encodeURIComponent(workerId)}/result`,
+    );
+  }
+
+  /**
+   * task-05：列 mission 下所有 worker runs 状态（含主 agent run）。
+   *
+   * 端点：GET /api/workspaces/{ws}/missions/{mid}/workers
+   * 响应（``WorkerListResponse``）：{ mission_id, workers: [{id, role?, status,
+   *   objective?, total_cost_usd?}] }
+   */
+  async listWorkers(
+    workspaceId: string,
+    missionId: string,
+  ): Promise<Record<string, unknown>> {
+    return this._request<Record<string, unknown>>(
+      'GET',
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/missions/${encodeURIComponent(missionId)}/workers`,
+    );
+  }
+
+  /**
+   * task-05：触发 mission 收敛（复用 FinalizerService + converge 链路）。
+   *
+   * 端点：POST /api/workspaces/{ws}/missions/{mid}/converge
+   * 响应（``ConvergeResponse``）：{ mission_id, status, converged, artifact_id? }
+   *
+   * 无 body（backend 以 mission 的主 agent run 为锚点触发收敛，参数全在路径）。
+   */
+  async convergeMission(
+    workspaceId: string,
+    missionId: string,
+  ): Promise<Record<string, unknown>> {
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/missions/${encodeURIComponent(missionId)}/converge`,
+    );
+  }
+
+  /**
+   * task-05：落主 agent 决策日志（AgentRunLog channel=tool_call, tool_kind=other）。
+   *
+   * 端点：POST /api/workspaces/{ws}/missions/{mid}/progress
+   * body（snake_case，对齐 backend ``ProgressRequest``）：
+   *   { run_id, message, decision? }
+   * 响应 201（``ProgressResponse``）：{ run_id, log_id }
+   *
+   * **run_id 必填**：backend ``ProgressRequest`` 要求 ``run_id``（主 agent run
+   * 的 AgentRun.id），非 task 描述草案的 ``note``。MCP tool handler 须从
+   * tool 参数接收 run_id 透传。``decision`` 拼到日志 content 前缀便于筛选。
+   */
+  async reportProgress(
+    workspaceId: string,
+    missionId: string,
+    body: {
+      run_id: string;
+      message: string;
+      decision?: string;
+    },
+  ): Promise<Record<string, unknown>> {
+    const payload: Record<string, unknown> = {
+      run_id: body.run_id,
+      message: body.message,
+    };
+    if (body.decision !== undefined) payload.decision = body.decision;
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/missions/${encodeURIComponent(missionId)}/progress`,
+      payload,
+    );
+  }
 }
 
 /** task-11：complete_change_write 请求体（snake_case 对齐 backend Pydantic）。 */

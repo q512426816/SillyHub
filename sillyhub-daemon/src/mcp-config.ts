@@ -12,7 +12,8 @@
 
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // ── 类型 ─────────────────────────────────────────────────────────────────────
 
@@ -234,4 +235,72 @@ export async function injectMcpConfig(
  */
 export function hasAnyMcpServers(...configs: McpConfig[]): boolean {
   return configs.some((c) => Object.keys(c.mcpServers).length > 0);
+}
+
+// ── task-05 / D-007@v2：daemon 内置 MCP server 配置工厂 ────────────────────────
+
+/**
+ * daemon 内置 MCP server 对外名称（与 ``src/mcp-server.ts`` ``DAEMON_MCP_SERVER_NAME``
+ * 对齐）。``mergeMcpConfigs`` 平台默认 server 自动入白名单（:188），故本 server
+ * 放进 platform_config 即隐式允许，无需额外改白名单逻辑。
+ */
+export const DAEMON_MCP_SERVER_NAME = 'sillyhub-daemon';
+
+/**
+ * 构造 daemon 内置 MCP server 的 ``McpServerConfig``（task-05）。
+ *
+ * 主 agent spawn 时，调用方把本配置并入 platform_default（``mergeMcpConfigs(wl,
+ * { mcpServers: { [DAEMON_MCP_SERVER_NAME]: buildDaemonMcpServerConfig(...) } },
+ * workspaceCfg)``），经 ``injectMcpConfig`` 写临时 ``.mcp.json`` 供 ``--mcp-config``。
+ *
+ * server 命令：``node <dist/mcp-server.js 绝对路径>``。
+ *   - daemon ``engines.node>=20``，Node 20 不支持原生 TS，必须用 tsc 编译产物
+ *     （spike-01 用 .ts 直跑仅限 Node v24+，生产不兼容）
+ *   - 编译产物路径用 ``import.meta.url`` 推导（本文件与 mcp-server.ts 同在 src/，
+ *     编译后同在 dist/，相对位置稳定），跨平台绝对路径
+ *
+ * env：
+ *   - ``MCP_SERVER_BACKEND_URL`` = 传入 backendUrl（daemon config 的 serverUrl）
+ *   - ``MCP_SERVER_DAEMON_TOKEN`` = 传入 token（主 agent run 的 user token，
+ *     WORKSPACE_WRITE 权限，非 daemon apiKey）
+ *
+ * **token 注入时机**：本函数只构造静态配置，token 由调用方在 spawn 主 agent 前
+ * 从 lease context 取 user token 传入。空 token 仍构造配置（server 启动后 tool
+ * 调用返回结构化错误，便于诊断）——与 mcp-server.ts ``runMcpServer`` 容错一致。
+ *
+ * @param backendUrl  backend 根 URL（如 http://localhost:8000）
+ * @param token       主 agent run 的 user token（Bearer）
+ * @param serverModulePath  可选，覆盖默认编译产物路径（测试用，避免依赖 dist/）
+ */
+export function buildDaemonMcpServerConfig(
+  backendUrl: string,
+  token: string,
+  serverModulePath?: string,
+): McpServerConfig {
+  const args = [serverModulePath ?? defaultMcpServerModulePath()];
+  const env: Record<string, string> = {
+    MCP_SERVER_BACKEND_URL: backendUrl.replace(/\/+$/, ''),
+    MCP_SERVER_DAEMON_TOKEN: token,
+  };
+  return {
+    command: 'node',
+    args,
+    env,
+  };
+}
+
+/**
+ * 推导 ``dist/mcp-server.js`` 绝对路径。
+ *
+ * 本文件编译后在 ``dist/mcp-config.js``，``mcp-server.ts`` 编译后在
+ * ``dist/mcp-server.js``（同目录）。用 ``import.meta.url`` 取本模块绝对路径，
+ * ``dirname`` 取目录，再拼 ``mcp-server.js``。file:// URL → path 用
+ * ``node:url`` ``fileURLToPath``。
+ *
+ * 跨平台：Windows 下 fileURLToPath 产出 ``C:\...\dist\mcp-config.js``，
+ * ``dirname`` 得 ``C:\...\dist``，``join`` 用平台 sep 拼 ``mcp-server.js``。
+ */
+function defaultMcpServerModulePath(): string {
+  const thisPath = fileURLToPath(import.meta.url);
+  return join(dirname(thisPath), 'mcp-server.js');
 }

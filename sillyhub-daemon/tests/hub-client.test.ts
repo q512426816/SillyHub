@@ -573,3 +573,198 @@ describe('HubClient — gap-3 notifyRunResult + gap-4 notifySessionEnd', () => {
   });
 });
 
+// ── task-05 / D-007@v2：team 主 agent MCP 反向通道 5 方法 ─────────────────────
+// backend mcp_tools.py 5 endpoint 挂 /api 前缀（agent router，非 REST_PREFIX=/api/daemon），
+// 鉴权走 Bearer token（user token，WORKSPACE_WRITE），无 X-Claim-Token。
+// 路径 / 方法 / body snake_case / 响应解析 / 非 2xx → HubHttpError 全覆盖。
+
+describe('HubClient — task-05 team 主 agent MCP 5 方法', () => {
+  beforeEach(() => vi.stubGlobal('fetch', mockFetchOk({ ok: true })));
+
+  // ── dispatchWorker ──────────────────────────────────────────────────────
+  it('dispatchWorker: POST /api/workspaces/{ws}/missions/{mid}/dispatch_worker + body {objective,role,...}', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockFetchOk({
+        id: 'run-abc',
+        role: 'coder',
+        objective: 'impl X',
+        status: 'pending',
+        agent_type: 'claude_code',
+        lease_id: 'lease-xyz',
+        error_code: null,
+      }, 201),
+    );
+    const c = new HubClient('http://x:8000', 'user-token');
+    const r = await c.dispatchWorker('ws-1', 'mis-1', {
+      objective: 'impl X',
+      role: 'coder',
+      agent_type: 'claude_code',
+    });
+    expect(lastCall!.url).toBe(
+      'http://x:8000/api/workspaces/ws-1/missions/mis-1/dispatch_worker',
+    );
+    expect(lastCall!.init.method).toBe('POST');
+    const headers = lastCall!.init.headers as Record<string, string>;
+    // user token 走 Bearer（非 X-API-Key）
+    expect(headers['Authorization']).toBe('Bearer user-token');
+    expect(headers['Content-Type']).toBe('application/json');
+    // 无 X-Claim-Token（backend mcp_tools 不接受 lease claim_token）
+    expect(headers['X-Claim-Token']).toBeUndefined();
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect(body).toEqual({
+      objective: 'impl X',
+      role: 'coder',
+      agent_type: 'claude_code',
+    });
+    expect(r).toMatchObject({ id: 'run-abc', status: 'pending' });
+  });
+
+  it('dispatchWorker: undefined 可选字段不写入 body（read_only 未传不发）', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.dispatchWorker('ws-1', 'mis-1', { objective: 'do' });
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect(body).toEqual({ objective: 'do' });
+    expect('role' in body).toBe(false);
+    expect('agent_type' in body).toBe(false);
+    expect('model' in body).toBe(false);
+    expect('read_only' in body).toBe(false);
+  });
+
+  it('dispatchWorker: url encode workspaceId/missionId（含特殊字符）', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.dispatchWorker('ws 1', 'mis/2', { objective: 'x' });
+    expect(lastCall!.url).toContain('/workspaces/ws%201/missions/mis%2F2/dispatch_worker');
+  });
+
+  // ── getWorkerResult ─────────────────────────────────────────────────────
+  it('getWorkerResult: GET /api/workspaces/{ws}/missions/{mid}/workers/{wid}/result（无 body）', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockFetchOk({
+        worker_id: 'w-1',
+        status: 'completed',
+        artifacts: [{ kind: 'patch', content_ref: 's3://...', id: 'art-1' }],
+      }),
+    );
+    const c = new HubClient('http://x:8000', 't');
+    const r = await c.getWorkerResult('ws-1', 'mis-1', 'w-1');
+    expect(lastCall!.url).toBe(
+      'http://x:8000/api/workspaces/ws-1/missions/mis-1/workers/w-1/result',
+    );
+    expect(lastCall!.init.method).toBe('GET');
+    expect(lastCall!.init.body).toBeUndefined();
+    expect(r).toMatchObject({ worker_id: 'w-1', status: 'completed' });
+  });
+
+  // ── listWorkers ─────────────────────────────────────────────────────────
+  it('listWorkers: GET /api/workspaces/{ws}/missions/{mid}/workers', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockFetchOk({
+        mission_id: 'mis-1',
+        workers: [
+          { id: 'w-1', role: 'worker', status: 'completed' },
+          { id: 'w-2', role: 'orchestrator', status: 'running' },
+        ],
+      }),
+    );
+    const c = new HubClient('http://x:8000', 't');
+    const r = await c.listWorkers('ws-1', 'mis-1');
+    expect(lastCall!.url).toBe(
+      'http://x:8000/api/workspaces/ws-1/missions/mis-1/workers',
+    );
+    expect(lastCall!.init.method).toBe('GET');
+    expect(lastCall!.init.body).toBeUndefined();
+    expect(r).toMatchObject({ mission_id: 'mis-1' });
+  });
+
+  // ── convergeMission ─────────────────────────────────────────────────────
+  it('convergeMission: POST /api/workspaces/{ws}/missions/{mid}/converge（无 body）', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockFetchOk({
+        mission_id: 'mis-1',
+        status: 'done',
+        converged: true,
+        artifact_id: 'art-9',
+      }),
+    );
+    const c = new HubClient('http://x:8000', 't');
+    const r = await c.convergeMission('ws-1', 'mis-1');
+    expect(lastCall!.url).toBe(
+      'http://x:8000/api/workspaces/ws-1/missions/mis-1/converge',
+    );
+    expect(lastCall!.init.method).toBe('POST');
+    expect(lastCall!.init.body).toBeUndefined();
+    expect(r).toMatchObject({ converged: true, artifact_id: 'art-9' });
+  });
+
+  // ── reportProgress ──────────────────────────────────────────────────────
+  it('reportProgress: POST /api/workspaces/{ws}/missions/{mid}/progress + body {run_id,message,decision?}', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockFetchOk({ run_id: 'run-1', log_id: 'log-9' }, 201),
+    );
+    const c = new HubClient('http://x:8000', 't');
+    const r = await c.reportProgress('ws-1', 'mis-1', {
+      run_id: 'run-1',
+      message: 'dispatched worker for feature X',
+      decision: 'dispatch',
+    });
+    expect(lastCall!.url).toBe(
+      'http://x:8000/api/workspaces/ws-1/missions/mis-1/progress',
+    );
+    expect(lastCall!.init.method).toBe('POST');
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect(body).toEqual({
+      run_id: 'run-1',
+      message: 'dispatched worker for feature X',
+      decision: 'dispatch',
+    });
+    expect(r).toEqual({ run_id: 'run-1', log_id: 'log-9' });
+  });
+
+  it('reportProgress: decision 省略时不写入 body', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.reportProgress('ws-1', 'mis-1', {
+      run_id: 'run-1',
+      message: 'plain note',
+    });
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect(body).toEqual({ run_id: 'run-1', message: 'plain note' });
+    expect('decision' in body).toBe(false);
+  });
+
+  // ── 错误处理：5 方法非 2xx → HubHttpError ────────────────────────────────
+  it('dispatchWorker: 403 权限不足 → HubHttpError（WORKSPACE_WRITE 未授权）', async () => {
+    vi.stubGlobal('fetch', mockFetchStatus(403, '{"detail":"workspace_write denied"}'));
+    const c = new HubClient('http://x:8000', 'bad');
+    await expect(
+      c.dispatchWorker('ws-1', 'mis-1', { objective: 'x' }),
+    ).rejects.toMatchObject({
+      name: 'HubHttpError',
+      status: 403,
+      method: 'POST',
+    });
+  });
+
+  it('getWorkerResult: 404 worker 不存在 → HubHttpError', async () => {
+    vi.stubGlobal('fetch', mockFetchStatus(404, 'worker run not found'));
+    const c = new HubClient('http://x:8000', 't');
+    await expect(
+      c.getWorkerResult('ws-1', 'mis-1', 'no-such'),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('dispatchWorker: 网络错误透传（fetch reject TypeError，不包装为 HubHttpError）', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('fetch failed');
+    });
+    const c = new HubClient('http://x:8000', 't');
+    await expect(
+      c.dispatchWorker('ws-1', 'mis-1', { objective: 'x' }),
+    ).rejects.toThrow(TypeError);
+  });
+});
+

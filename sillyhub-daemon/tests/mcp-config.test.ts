@@ -142,3 +142,69 @@ describe('mcp-config: loadPlatformMcpConfigFromBackend 回落', () => {
     expect(cfg.mcpServers).toBeDefined();
   });
 });
+
+// ── task-05 / D-007@v2：daemon 内置 MCP server 配置工厂 ──────────────────────
+import {
+  buildDaemonMcpServerConfig,
+  DAEMON_MCP_SERVER_NAME,
+} from '../src/mcp-config.js';
+
+describe('mcp-config: buildDaemonMcpServerConfig（task-05）', () => {
+  it('构造 {command=node, args=[mcp-server.js 路径], env={MCP_SERVER_*}}', () => {
+    const cfg = buildDaemonMcpServerConfig(
+      'http://localhost:8000',
+      'user-token-xyz',
+      '/fake/dist/mcp-server.js',
+    );
+    expect(cfg.command).toBe('node');
+    expect(cfg.args).toEqual(['/fake/dist/mcp-server.js']);
+    expect(cfg.env).toEqual({
+      MCP_SERVER_BACKEND_URL: 'http://localhost:8000',
+      MCP_SERVER_DAEMON_TOKEN: 'user-token-xyz',
+    });
+  });
+
+  it('backendUrl 去尾斜杠', () => {
+    const cfg = buildDaemonMcpServerConfig(
+      'http://localhost:8000///',
+      'tok',
+      '/x/mcp-server.js',
+    );
+    expect(cfg.env?.MCP_SERVER_BACKEND_URL).toBe('http://localhost:8000');
+  });
+
+  it('空 token 仍构造配置（server 启动后 tool 调用返回结构化错误）', () => {
+    const cfg = buildDaemonMcpServerConfig('http://x:8000', '', '/x/mcp-server.js');
+    expect(cfg.env?.MCP_SERVER_DAEMON_TOKEN).toBe('');
+    // 配置本身不报错（容错，便于诊断）
+    expect(cfg.command).toBe('node');
+  });
+
+  it('默认 args 路径指向 dist/mcp-server.js（与 mcp-config.js 同目录）', () => {
+    // 不传 serverModulePath → 用 import.meta.url 推导默认路径
+    const cfg = buildDaemonMcpServerConfig('http://x:8000', 'tok');
+    // 编译产物在 dist/，本测试编译后跑或 tsx 跑都应指向 mcp-server.js
+    expect(cfg.args[0]).toMatch(/mcp-server\.js$/);
+  });
+
+  it('DAEMON_MCP_SERVER_NAME = sillyhub-daemon', () => {
+    expect(DAEMON_MCP_SERVER_NAME).toBe('sillyhub-daemon');
+  });
+
+  it('daemon 内置 server 进 platform_default → mergeMcpConfigs 自动入白名单', () => {
+    // 模拟主 agent spawn 时合并：platform_config 含 daemon 内置 server
+    const platform: McpConfig = {
+      mcpServers: {
+        [DAEMON_MCP_SERVER_NAME]: buildDaemonMcpServerConfig(
+          'http://x:8000',
+          'tok',
+          '/dist/mcp-server.js',
+        ),
+      },
+    };
+    // 白名单为空（仅靠 platform_default 自动入白名单）
+    const result = mergeMcpConfigs([], platform);
+    expect(result.config.mcpServers[DAEMON_MCP_SERVER_NAME]).toBeDefined();
+    expect(result.rejected).toHaveLength(0);
+  });
+});
