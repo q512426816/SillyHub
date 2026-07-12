@@ -285,7 +285,15 @@ class AgentRun(BaseModel, table=True):
     role: str | None = Field(
         default=None,
         sa_column=Column(String(30), nullable=True),
-    )  # Worker role within a Mission (arch | impl | test | integration | ...)
+    )  # Role within a Mission: worker (arch | impl | test | integration | ...)
+    #   或 orchestrator（主 agent, 2026-07-12-team-main-agent-orchestration D-001@v2）
+    # 2026-07-12-team-main-agent-orchestration task-02 / D-005@v2: per-worker 独立
+    # worktree 分支名（git worktree add 临时分支）。orchestrator 不写；worker dispatch
+    # 时填，converge 合并后保留供审计。nullable 兼容老 run 行。
+    worktree_branch: str | None = Field(
+        default=None,
+        sa_column=Column(String(128), nullable=True),
+    )
     objective: str | None = Field(
         default=None,
         sa_column=Column(Text, nullable=True),
@@ -545,6 +553,20 @@ class AgentMission(BaseModel, table=True):
     budget_usd: float | None = Field(
         default=None,
         sa_column=Column(Float, nullable=True),
+    )
+    # 2026-07-12-team-main-agent-orchestration task-02 / D-002@v2: 用户预设 worker 列表。
+    # 每条 {agent_type: str, model: str, objective: str, role: str}。mode=team 时由 UI
+    # 传入，主 agent 按列表派 worker（不自动拆，D-002）。nullable 兼容老 mission（single 零回归）。
+    worker_preset: list[dict] | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+    # 2026-07-12-team-main-agent-orchestration task-02 / D-003@v2: 主 agent 配置
+    # {agent_type: str, provider: str, model: str}。mode=team 时主 agent AgentRun 用此配置
+    # 走 daemon lease。nullable 兼容老 mission（single 零回归）。
+    main_agent_config: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
     )
     created_by: uuid.UUID | None = Field(
         default=None,
