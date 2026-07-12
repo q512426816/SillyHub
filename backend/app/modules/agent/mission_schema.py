@@ -16,6 +16,14 @@ class MissionCreateRequest(BaseModel):
     constraints: dict | None = None
     mode: Literal["single", "team"] | None = None
     session_id: uuid.UUID | None = None
+    # 2026-07-12-team-main-agent-orchestration task-03 / D-002@v2：用户预设 worker 列表。
+    # 每条 {agent_type, model, objective, role}。mode=team 时主 agent 按列表派 worker
+    # （不自动拆，D-002）。mode=single 时忽略。nullable 兼容老调用（零回归）。
+    worker_preset: list[dict] | None = None
+    # 2026-07-12-team-main-agent-orchestration task-03 / D-003@v2：主 agent 配置
+    # {agent_type, provider, model}。mode=team 时主 agent AgentRun 用此配置走 daemon lease。
+    # nullable 兼容老调用（mode=single 零回归）。
+    main_agent_config: dict | None = None
 
 
 class MissionArtifactResponse(BaseModel):

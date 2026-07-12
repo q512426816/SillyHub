@@ -662,6 +662,7 @@ async def save_agent_run_checkpoint(
 from app.modules.agent.control import MissionControlService  # noqa: E402
 from app.modules.agent.delegation import CoordinatorPlanner, GLMConfig  # noqa: E402
 from app.modules.agent.execution import MissionExecutionService  # noqa: E402
+from app.modules.agent.mcp_tools import router as mcp_tools_router  # noqa: E402
 from app.modules.agent.mission import MissionService, derive_status  # noqa: E402
 from app.modules.agent.mission_schema import (  # noqa: E402
     MissionArtifactResponse,
@@ -670,6 +671,7 @@ from app.modules.agent.mission_schema import (  # noqa: E402
     MissionWorkerRunResponse,
 )
 from app.modules.agent.model import AgentArtifact, AgentMission  # noqa: E402
+from app.modules.agent.orchestrator import OrchestratorService  # noqa: E402
 
 # Roles that need write tools; everything else is treated read-only at dispatch.
 _WRITE_ROLES = frozenset({"impl"})
@@ -732,6 +734,32 @@ async def create_mission(
     user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
 ) -> MissionResponse:
     """Plan a Mission via GLM, create Worker Runs, dispatch them to a daemon."""
+    constraints = dict(payload.constraints or {})
+    if getattr(payload, "mode", None) is not None:
+        constraints["mode"] = payload.mode
+    if getattr(payload, "session_id", None) is not None:
+        constraints["session_id"] = str(payload.session_id)
+    # 2026-07-12-team-main-agent-orchestration task-03 / D-001@v2：mode=team 旁路
+    # GLM CoordinatorPlanner，走主 agent OrchestratorService。主 agent = 真 agent
+    # （daemon interactive lease + MCP tool），像项目经理读 worker 产出再决策。
+    # mode=single / None 走原 planner 链路（零回归，下方 start_mission 不动）。
+    if constraints.get("mode") == "team":
+        orchestrator = OrchestratorService(session)
+        mission, _main_run = await orchestrator.team_mission_entry(
+            workspace_id=workspace_id,
+            objective=payload.objective,
+            created_by=user.id,
+            change_id=payload.change_id,
+            constraints=constraints,
+            budget_usd=payload.budget_usd,
+            worker_preset=payload.worker_preset,
+            main_agent_config=payload.main_agent_config,
+        )
+        ctrl = MissionControlService(session)
+        fresh = await ctrl.worker_runs(mission.id)
+        cost = await ctrl.cost_so_far(mission.id)
+        arts = await _load_mission_artifacts(session, mission.id)
+        return _mission_to_response(mission, fresh, cost, arts)
     cfg = GLMConfig.from_env()
     if cfg is None:
         raise HTTPException(
@@ -739,14 +767,6 @@ async def create_mission(
             "GLM endpoint not configured (ANTHROPIC_BASE_URL/AUTH_TOKEN)",
         )
     planner = CoordinatorPlanner(cfg)
-    # Wave 1 team-mode (2026-07-12-team-mode-platform-wide D-003/D-004)：
-    # 透传前端 mode/session_id 进 constraints 落库。R-A 只透传不调 route()，
-    # single 零回归靠"前端默认不传 mode"；R-B session_id 暂存 constraints 不绑模型。
-    constraints = dict(payload.constraints or {})
-    if getattr(payload, "mode", None) is not None:
-        constraints["mode"] = payload.mode
-    if getattr(payload, "session_id", None) is not None:
-        constraints["session_id"] = str(payload.session_id)
     mission, runs = await MissionService(session).start_mission(
         workspace_id=workspace_id,
         objective=payload.objective,
@@ -823,3 +843,8 @@ async def cancel_mission(
     cost = await ctrl.cost_so_far(mission.id)
     arts = await _load_mission_artifacts(session, mission.id)
     return _mission_to_response(mission, runs, cost, arts)
+
+
+# Team 主 agent MCP endpoint（2026-07-12-team-main-agent-orchestration task-03 / D-007@v2）：
+# 嵌套 include，随 agent_router 一起挂到 /api 前缀。
+router.include_router(mcp_tools_router)
