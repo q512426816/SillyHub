@@ -213,9 +213,21 @@ class TransitionRequest(BaseModel):
     model: str | None = Field(
         default=None, max_length=128, description="Optional agent model override"
     )
-    # execute 阶段是否用团队执行（D-002，默认 single 零回归）
+    # execute/verify 阶段是否用团队执行（D-004@v2，默认 single 零回归）
     team_mode: bool = Field(
-        default=False, description="execute 阶段是否用团队执行（D-002，默认 single 零回归）"
+        default=False,
+        description="execute/verify 阶段是否用团队执行（D-004@v2，默认 single 零回归）",
+    )
+    # task-09（D-002@v2）：team_mode=True 时携带的用户预设 worker 列表。
+    # 每条 {agent_type, model, objective, role}。透传到 change.stages.team_worker_preset
+    # 供 _dispatch_execute_team → OrchestratorService.team_mission_entry 读取。nullable 零回归。
+    worker_preset: list[dict] | None = Field(
+        default=None, description="team_mode 用户预设 worker 列表（D-002@v2，可选）"
+    )
+    # task-09（D-003@v2）：team_mode=True 时主 agent 配置 {agent_type, provider, model}。
+    # 透传到 change.stages.team_main_agent_config。nullable 零回归。
+    main_agent_config: dict | None = Field(
+        default=None, description="team_mode 主 agent 配置（D-003@v2，可选）"
     )
 
 
@@ -287,6 +299,16 @@ class TransitionDispatchResponse(BaseModel):
     reason: str | None = Field(
         default=None,
         description="未 dispatch 的原因（dispatched=False 时有值）",
+    )
+    # task-09（D-004@v2）：team_mode dispatch 时返回 mission_id + mode="team"，
+    # 前端用 mission_id 驱动 TeamProgress 组件展示团队进度。single 路径两字段均 None。
+    mission_id: str | None = Field(
+        default=None,
+        description="team_mode dispatch 的 Mission ID（仅 mode=team 时有值）",
+    )
+    mode: str | None = Field(
+        default=None,
+        description="dispatch 模式（team / None=single）",
     )
 
 

@@ -7,8 +7,13 @@ daemon 侧 MCP server（task-05）转发 tool_call 到这些 endpoint。
 {mission_id}/`` 下，动作子路径（dispatch_worker / workers / converge / progress）与
 现有 ``/missions/{mission_id}/cancel``（router.py:811）平级但带 workspace 前缀。
 
-权限：统一 ``WORKSPACE_WRITE``（与 create_mission 一致）。主 agent run 的 daemon
-lease 携带 user token，daemon MCP server 转发时透传，backend 走同一权限校验。
+权限（task-09 P0 鉴权 gap 已闭合）：统一 ``WORKSPACE_WRITE``，经
+``require_permission`` → ``get_current_principal``（auth_deps.py:154）双路径鉴权——
+浏览器/直调走 JWT（``Authorization: Bearer``），daemon MCP server 走长期 API Key
+（``X-API-Key``，admin 签发绑 user）。daemon mcp-server.ts 把 apiKey 经
+``X-API-Key`` header 发（task-09 修，非 Bearer——apiKey 非 JWT，Bearer 路径只解
+JWT 会 401），backend 解析 apiKey → User → ``has_permission(WORKSPACE_WRITE)``
+按 workspace 成员关系校验。两条路径都落同一 User 对象，权限模型一致。
 """
 
 from __future__ import annotations

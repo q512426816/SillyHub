@@ -678,21 +678,27 @@ export async function startAction(opts: StartOptions): Promise<number> {
       // SessionManager 透传到 driverOpts.mcpServers → ClaudeSdkDriver.start 写入
       // SDK options.mcpServers → 主 agent discover 5 tool。
       //
-      // **token 来源偏离（D-007@v2 偏离记录）**：task-05 mcp-server 注释提"user token
-      //（WORKSPACE_WRITE）"，但 daemon 在 cli.ts 构造时拿不到主 agent run 的 user token
-      //（lease/dispatch 时才有，且 lease metadata 不写 user token）。本任务用 daemon
-      // apiKey（config.api_key 优先，回落 config.token）—— backend mcp_tools 5 endpoint
-      // 当前要求 WORKSPACE_WRITE（user permission），需 backend 后续加 daemon service
-      // 路由或 apiKey→user 映射（留 follow-up，不在 task-06 范围）。链路接通优先，
-      // token 错误时 MCP server tool 调用返回结构化 http 403 错误（mcp-server.ts errorContent），
-      // 不 crash daemon。
+      // **token 来源（task-09 P0 闭合）**：task-06 用 daemon apiKey（config.api_key
+      // 优先，回落 config.token）但旧实现经 MCP_SERVER_DAEMON_TOKEN 单 env 把 apiKey
+      // 当 Bearer 发——backend get_current_principal Bearer 路径只解 JWT，apiKey 非
+      // JWT → 401（task-06 留的端到端阻塞）。task-09 把 apiKey / token 分开透传
+      // （MCP_SERVER_DAEMON_API_KEY + MCP_SERVER_DAEMON_TOKEN），mcp-server.ts 优先
+      // X-API-Key 路径，backend get_current_principal 解析 apiKey → User →
+      // has_permission(WORKSPACE_WRITE)，5 endpoint 链路通。
       isMainAgentSession: (ctx) => ctx.stage === 'orchestrator',
       mainAgentMcpConfigProvider: (ctx) => {
-        // daemon apiKey（X-API-Key 长期凭证）优先；回落 Bearer token。
-        const mcpToken = config.api_key ?? config.token ?? '';
+        // task-09 P0 鉴权 gap 闭合：apiKey（X-API-Key）与 token（Bearer）分开透传。
+        // daemon apiKey 优先（config.api_key），回落 Bearer token（config.token）。
+        // mcp-config.ts buildDaemonMcpServerConfig 把 apiKey 写 MCP_SERVER_DAEMON_API_KEY，
+        // mcp-server.ts 优先 X-API-Key 路径——backend get_current_principal 解析 apiKey
+        // → User → has_permission(WORKSPACE_WRITE)。旧实现把 apiKey 当 Bearer 发致 401。
+        const mcpApiKey = config.api_key ?? '';
+        const mcpToken = config.token ?? '';
         const daemonServer = buildDaemonMcpServerConfig(
           config.server_url,
           mcpToken,
+          undefined,
+          mcpApiKey || undefined,
         );
         // mergeMcpConfigs：空 platform_default + daemon server。daemon server 作为
         // configs[0]（platform 位）自动入白名单（mcp-config.ts:188），无需额外配白名单。

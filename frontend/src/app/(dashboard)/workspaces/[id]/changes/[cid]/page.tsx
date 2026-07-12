@@ -176,7 +176,7 @@ export default function ChangeDetailPage({ params }: Props) {
   // stage 化默认（execute→impl，verify→verify）；透传给 backend 留 task-09 三入口接通。
   const [stageWorkers, setStageWorkers] = useState<StageWorkerPreset[]>([]);
   // task-08：stage team mission 创建后的 missionId（用于 TeamProgress 展示）。
-  // 流转触发 mission 后由 task-09 接通；本 task 仅渲染组件骨架。
+  // task-09 接通：transition team_mode dispatch 返回 mission_id 时 set，驱动 TeamProgress。
   const [stageTeamMissionId, setStageTeamMissionId] = useState<string | null>(null);
   const [gateStatus, setGateStatus] = useState<GateStatusEvent | null>(null);
   const [gateComment, setGateComment] = useState("");
@@ -225,6 +225,15 @@ export default function ChangeDetailPage({ params }: Props) {
     setTransitioning(true);
     setPageError(null);
     try {
+      // task-09：team_mode 透传 worker_preset + main_agent_config（D-002/D-003@v2）。
+      // main_agent_config 从 stage provider/model 派生（agent_type 跟随 workspace 默认，
+      // StageTeamConfig 主 agent 只读展示 provider/model）。worker_preset 仅 team 时携带。
+      const mainAgentConfig = teamMode
+        ? {
+            ...(stageProvider ? { provider: stageProvider } : {}),
+            ...(stageModel ? { model: stageModel } : {}),
+          }
+        : undefined;
       const result = await transitionChange(
         workspaceId,
         changeId,
@@ -232,6 +241,9 @@ export default function ChangeDetailPage({ params }: Props) {
         undefined,
         stageProvider,
         stageModel,
+        teamMode,
+        teamMode ? stageWorkers : undefined,
+        mainAgentConfig,
       );
       // Backend returns { change: {...}, agent_dispatch: {...} }
       const changeData = result.change;
@@ -245,6 +257,10 @@ export default function ChangeDetailPage({ params }: Props) {
       if (result.agent_dispatch?.dispatched) {
         setSuccessMsg(`🤖 智能体 已自动派发 (${result.agent_dispatch.stage ?? targetStage})`);
         setTimeout(() => setSuccessMsg(null), 4000);
+        // task-09：team_mode dispatch 返回 mission_id，驱动 TeamProgress 展示。
+        if (result.agent_dispatch.mission_id) {
+          setStageTeamMissionId(result.agent_dispatch.mission_id);
+        }
       } else if (result.agent_dispatch && !result.agent_dispatch.dispatched) {
         const reason = result.agent_dispatch.reason;
         if (reason === "active_run_exists") {
@@ -492,6 +508,13 @@ export default function ChangeDetailPage({ params }: Props) {
       } else if (action === "archive_confirm") {
         await archiveConfirm(workspaceId, changeId, gateComment || undefined);
       } else if (action === "transition_execute") {
+        // task-09：transition_execute 分支也透传 team worker_preset + main_agent_config。
+        const mainAgentConfig = teamMode
+          ? {
+              ...(stageProvider ? { provider: stageProvider } : {}),
+              ...(stageModel ? { model: stageModel } : {}),
+            }
+          : undefined;
         await transitionChange(
           workspaceId,
           changeId,
@@ -500,6 +523,8 @@ export default function ChangeDetailPage({ params }: Props) {
           stageProvider,
           stageModel,
           teamMode,
+          teamMode ? stageWorkers : undefined,
+          mainAgentConfig,
         );
       }
       setGateComment("");
@@ -714,7 +739,7 @@ export default function ChangeDetailPage({ params }: Props) {
       )}
 
       {/* ── TeamProgress（task-08）：stage team mission 进度展示 ────── */}
-      {/* 流转触发 mission 后展示（missionId 来自 task-09 接通 / 暂留空态）。 */}
+      {/* task-09 接通：transition team_mode dispatch 返回 mission_id 时展示。 */}
       {teamMode && stageTeamMissionId && (
         <TeamProgress
           missionId={stageTeamMissionId}

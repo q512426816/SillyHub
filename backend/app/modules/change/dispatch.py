@@ -802,17 +802,19 @@ async def dispatch(
     if config is None or not config.enabled:
         return {"dispatched": False, "reason": f"no_config_for_stage:{target_stage}"}
 
-    # Execute team 分流（2026-06-28-team-mainline-integration D-006@v1）：opt-in
-    # team mode（change.stages.team_mode=True）→ 创建 execute Mission（写类 Worker
-    # 并行 + Finalizer 收敛），而非单 AgentRun。默认 single（保护 change workflow，
-    # 零行为变化 D-001）。per-Worker worktree 隔离 = D-006 完整实现延后；v1 共享
-    # worktree（靠 task 分工避免冲突，标注待完整 worktree 隔离）。
-    if target_stage == "execute":
+    # Execute/verify team 分流（D-004@v2，2026-07-12-team-main-agent-orchestration
+    # task-09）：opt-in team mode（change.stages.team_mode=True）→ 走主 agent
+    # OrchestratorService（建 mission + 主 agent run + 派 lease），而非单 AgentRun。
+    # 默认 single（保护 change workflow，零行为变化 D-001 / FR-9）。
+    # brainstorm/plan stage 不 team（v1 D-002 沿用），只 execute/verify 支持。
+    if target_stage in ("execute", "verify"):
         change_for_mode = await session.get(Change, change_id)
         if change_for_mode is not None:
             stages_mode = dict(change_for_mode.stages or {})
             if stages_mode.get("team_mode") is True:
-                return await _dispatch_execute_team(session, workspace_id, change_id, user_id)
+                return await _dispatch_execute_team(
+                    session, workspace_id, change_id, user_id, target_stage
+                )
 
     # Reconcile stale/orphan Runs before the active-run gate
     await _cleanup_before_dispatch(session, change_id)
@@ -901,97 +903,148 @@ async def dispatch(
 # ---------------------------------------------------------------------------
 
 
+def merge_gate_results(worker_results: list[dict]) -> dict:
+    """合并多 verify worker 的 gate 结果为单一 gate 决策（策略 A，D-005@v1 复用）。
+
+    team verify 多 worker 并行核验，每条 worker 产出一个 gate 结果
+    (``{exit_code, errors, ...}``)，本函数按策略 A 合并为单一决策：
+
+    - **全 exit=0 → exit 0（通过）**：所有 worker 核验通过才推进 archive。
+    - **任一非 0 → 取最严重**：exit 2 优先于 exit 1（exit 2 = 卡住报警，
+      exit 1 = 打回返工）。errors 汇总所有非 0 worker 的 errors。
+    - 空 list → exit 0（无 worker 视为通过，零回归保护 single 路径）。
+
+    design §5.4 / D-005@v1：合并逻辑独立于 mission converge，verify team
+    调用本函数得单一 gate_result 落触发 stage 的 AgentRun.gate_result，
+    auto_dispatch_next_step 按三态决策（exit 0 推进 / 1 打回 / 2 卡住）。
+
+    Args:
+        worker_results: 每 worker 的 gate 结果 dict 列表（至少含 ``exit_code``）。
+
+    Returns:
+        ``{"exit_code": int, "errors": list[str], "worker_count": int}``。
+    """
+    if not worker_results:
+        return {"exit_code": 0, "errors": [], "worker_count": 0}
+
+    has_exit_2 = False
+    has_exit_1 = False
+    merged_errors: list[str] = []
+    for idx, wr in enumerate(worker_results):
+        if not isinstance(wr, dict):
+            continue
+        exit_code = wr.get("exit_code", 0)
+        if exit_code == 2:
+            has_exit_2 = True
+        elif exit_code != 0:
+            has_exit_1 = True
+        if exit_code != 0:
+            errs = wr.get("errors", []) or []
+            if isinstance(errs, list):
+                for e in errs:
+                    merged_errors.append(f"[worker {idx + 1}] {e}")
+            else:
+                merged_errors.append(f"[worker {idx + 1}] {errs}")
+
+    if has_exit_2:
+        final_exit = 2
+    elif has_exit_1:
+        final_exit = 1
+    else:
+        final_exit = 0
+
+    return {
+        "exit_code": final_exit,
+        "errors": merged_errors,
+        "worker_count": len(worker_results),
+    }
+
+
 async def _dispatch_execute_team(
     session: AsyncSession,
     workspace_id: uuid.UUID,
     change_id: uuid.UUID,
     user_id: uuid.UUID,
+    target_stage: str = "execute",
 ) -> dict[str, Any]:
-    """Execute team 分流（D-006@v1，2026-06-28-team-mainline-integration）。
+    """Execute team 分流（D-004@v2，2026-07-12-team-main-agent-orchestration task-09）。
 
-    Opt-in 入口（``change.stages.team_mode=True`` 时由 ``dispatch`` 调用）：创建
-    execute Mission —— Coordinator 拆 plan 为写类 Worker（impl）→ 并行 dispatch →
-    Finalizer 收敛 patch（``finalize_execute_mission``，人审 apply-back D-006）。
+    Opt-in 入口（``change.stages.team_mode=True`` 时由 ``dispatch`` /
+    ``dispatch_next_step`` 调用）：mode=team 旁路 v1 GLM CoordinatorPlanner，
+    走 v2 主 agent ``OrchestratorService.team_mission_entry``——建 AgentMission
+    （含用户预设 worker_preset / main_agent_config）+ 主 agent AgentRun
+    （role=orchestrator）+ 派 daemon lease。主 agent 是真 agent（项目经理），
+    通过 MCP tool（task-05/06）动态派 worker / 读产出 / 收敛。
 
-    per-Worker 独立 worktree 隔离 = D-006 完整实现延后；v1 共享 worktree，靠
-    Coordinator 拆 task 分工避免并发写冲突（proposal §9 完整隔离留后续）。
+    worker_preset / main_agent_config 来源：``change.stages`` JSON 的
+    ``team_worker_preset`` / ``team_main_agent_config``（前端 stage toggle 配好
+    后经 transition/execute 透传写入）。缺失时 None 兜底，主 agent 自主决策派工。
+
+    verify stage team：worker 全终态后 ``converge_mission_for_completed_run``
+    收敛，多 worker gate 经 :func:`merge_gate_results` 策略 A 合并（D-005@v1）。
+
+    GLM fallback 留 task-10：主 agent 不可用 / 用户选 GLM 模型时退化走 v1
+    ``MissionService.start_mission`` + CoordinatorPlanner。本任务不实现 fallback，
+    完全走主 agent。
     """
-    from app.modules.agent.control import MissionControlService
-    from app.modules.agent.delegation import (
-        CoordinatorPlanner,
-        DelegationError,
-        GLMConfig,
-    )
-    from app.modules.agent.execution import MissionExecutionService
-    from app.modules.agent.mission import MissionService
+    from app.modules.agent.orchestrator import OrchestratorService
 
-    cfg = GLMConfig.from_env()
-    if cfg is None:
-        return {"dispatched": False, "reason": "glm_not_configured_for_execute_team"}
-    planner = CoordinatorPlanner(cfg)
-    objective = (
-        f"执行变更 {change_id} 的 plan：按 task 并行实现代码，每个 Worker 负责一组 "
-        "task（impl 角色，写代码），产出 patch 供 Finalizer 合并、人审 apply-back。"
-    )
+    change = await session.get(Change, change_id)
+    if change is None:
+        return {"dispatched": False, "reason": "change_not_found"}
+    stages = dict(change.stages or {})
+    worker_preset = stages.get("team_worker_preset")
+    main_agent_config = stages.get("team_main_agent_config")
+    # objective stage 化：execute→按 plan 实现，verify→核验（与前端 StageTeamConfig
+    # STAGE_DEFAULT_OBJECTIVE 对齐）。target_stage 由 caller 传（dispatch /
+    # dispatch_next_step 知道目标 stage），默认 execute 兼容旧签名。
+    stage = target_stage or "execute"
+    if stage == "verify":
+        objective = (
+            f"核验变更 {change_id} 的实现：多 worker 并行核验是否符合 design 与 tasks，"
+            "产出 gate 结果（exit 0 通过 / 1 打回 / 2 卡住）供合并决策。"
+        )
+    else:
+        objective = (
+            f"执行变更 {change_id} 的 plan：按 task 拆解派 worker 并行实现代码，"
+            "读 worker 产出判断达成，全部完成后收敛合并 patch。"
+        )
+
     try:
-        mission, runs = await MissionService(session).start_mission(
+        orchestrator = OrchestratorService(session)
+        mission, main_run = await orchestrator.team_mission_entry(
             workspace_id=workspace_id,
             objective=objective,
             created_by=user_id,
             change_id=change_id,
-            planner=planner,
+            constraints={"mode": "team", "stage": stage},
             budget_usd=4.0,
+            worker_preset=worker_preset if isinstance(worker_preset, list) else None,
+            main_agent_config=(main_agent_config if isinstance(main_agent_config, dict) else None),
         )
-    except DelegationError as exc:
+    except Exception as exc:
         log.warning(
-            "execute_team_plan_failed",
+            "execute_team_orchestrator_failed",
             change_id=str(change_id),
             error=str(exc),
         )
-        return {"dispatched": False, "reason": f"execute_team_plan_failed:{exc}"}
+        return {"dispatched": False, "reason": f"execute_team_orchestrator_failed:{exc}"}
 
-    exec_svc = MissionExecutionService(session)
-    ctrl = MissionControlService(session)
-    now = datetime.now(UTC)
-    for run in runs:
-        allowed, reason = await ctrl.can_dispatch_worker(mission)
-        if not allowed:
-            run.status = "killed"
-            run.finished_at = now
-            run.exit_code = -1
-            log.info(
-                "execute_team_worker_rejected",
-                mission_id=str(mission.id),
-                run_id=str(run.id),
-                reason=reason,
-            )
-            continue
-        try:
-            await exec_svc.dispatch_worker(
-                run,
-                workspace_id=workspace_id,
-                user_id=user_id,
-                read_only=False,  # execute 写类 Worker
-            )
-        except Exception as exc:
-            log.warning(
-                "execute_team_dispatch_failed",
-                run_id=str(run.id),
-                error=str(exc),
-            )
-    await session.commit()
     log.info(
         "execute_team_dispatched",
         change_id=str(change_id),
         mission_id=str(mission.id),
-        workers=len(runs),
+        main_run_id=str(main_run.id),
+        worker_preset_len=len(worker_preset) if isinstance(worker_preset, list) else 0,
+        stage=stage,
     )
     return {
         "dispatched": True,
         "mode": "team",
         "mission_id": str(mission.id),
-        "workers": len(runs),
-        "stage": "execute",
+        "agent_run_id": str(main_run.id),
+        "workers": len(worker_preset) if isinstance(worker_preset, list) else 0,
+        "stage": stage,
     }
 
 
@@ -1384,6 +1437,17 @@ class SillySpecStageDispatchService:
         change = await session.get(Change, change_id)
         if change is None:
             raise ChangeNotFound(f"Change '{change_id}' not found.")
+
+        # Step 2.5（task-09 D-004@v2）：execute/verify team 分流。team_mode=True 时
+        # 旁路 single AgentRun 路径，走主 agent OrchestratorService（与 dispatch()
+        # 函数 :810 分流一致，覆盖 /execute 端点 → dispatch_next_step 入口）。
+        # brainstorm/plan 不 team（v1 D-002）。GLM fallback 留 task-10。
+        if target_stage in ("execute", "verify"):
+            stages_mode_peek = dict(change.stages or {})
+            if stages_mode_peek.get("team_mode") is True:
+                return await _dispatch_execute_team(
+                    session, workspace_id, change_id, user_id, target_stage
+                )
 
         # Step 3: Clean stale/orphan Runs + check active AgentRun (prevent
         # duplicate dispatch). _cleanup_before_dispatch reconciles stale running

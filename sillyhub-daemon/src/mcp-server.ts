@@ -10,7 +10,9 @@
  * 鉴权 / 非 2xx / snake_case body 全复用 hub-client 既有语义。
  *
  * 设计依据：
- *   - backend ``app/modules/agent/mcp_tools.py`` 5 endpoint 真实契约（task-03 建）
+ *   - backend ``app/modules/agent/mcp_tools.py`` 5 endpoint 真实契约（task-03 建，
+ *     task-09 P0 鉴权 gap 闭合：require_permission → get_current_principal 双路径
+ *     鉴权 JWT + X-API-Key）
  *   - ``hub-client.ts`` ``_request``（:274 非 2xx 抛 HubHttpError）+ ``_headers``
  *     （:252 Bearer token / X-API-Key 鉴权）
  *   - spike-01 README：tool schema 对齐 backend 真实契约（dispatch_worker 无
@@ -20,8 +22,11 @@
  * 运行：``node dist/mcp-server.js``（daemon engines.node>=20，需 tsc 编译）
  * env:
  *   MCP_SERVER_BACKEND_URL  backend 根 URL（如 http://localhost:8000）
- *   MCP_SERVER_DAEMON_TOKEN  Bearer token（透传主 agent run 的 user token，
- *     backend mcp_tools 走 WORKSPACE_WRITE 权限校验）
+ *   MCP_SERVER_DAEMON_API_KEY  长期 API Key（X-API-Key，task-09 P0：daemon apiKey
+ *     优先走此路径，backend get_current_principal 解析 apiKey → User。cli.ts:692
+ *     优先 config.api_key 写入此 env）
+ *   MCP_SERVER_DAEMON_TOKEN  Bearer token（回落；apiKey 缺失时用 daemon Bearer
+ *     token，backend mcp_tools 走 WORKSPACE_WRITE 权限校验）
  *
  * @module mcp-server
  */
@@ -42,15 +47,18 @@ export const DAEMON_MCP_SERVER_NAME = 'sillyhub-daemon';
 interface McpServerEnv {
   backendUrl: string;
   daemonToken: string;
+  daemonApiKey: string;
 }
 
 /**
  * 从 process.env 读 backend URL + token。空值返回空串（不抛错，server 仍启动，
- * tool 调用时返回结构化错误便于诊断）。
+ * tool 调用时返回结构化错误便于诊断）。task-09 P0：apiKey 优先（X-API-Key 路径，
+ * backend get_current_principal 解析 apiKey → User），token 回落（Bearer JWT）。
  */
 function readEnv(): McpServerEnv {
   return {
     backendUrl: (process.env.MCP_SERVER_BACKEND_URL ?? '').replace(/\/+$/, ''),
+    daemonApiKey: process.env.MCP_SERVER_DAEMON_API_KEY ?? '',
     daemonToken: process.env.MCP_SERVER_DAEMON_TOKEN ?? '',
   };
 }
@@ -321,10 +329,20 @@ export async function runMcpServer(): Promise<void> {
   if (!env.backendUrl) {
     console.error('[mcp-server] MCP_SERVER_BACKEND_URL not set; tool calls will fail');
   }
-  if (!env.daemonToken) {
-    console.error('[mcp-server] MCP_SERVER_DAEMON_TOKEN not set; tool calls will fail');
+  // task-09 P0 鉴权 gap 闭合：apiKey（X-API-Key）优先，token（Bearer）回落。
+  // apiKey 是 daemon 长期 admin 签发的 key，backend get_current_principal 解析
+  // apiKey → User → has_permission(WORKSPACE_WRITE)。旧实现把 apiKey 当 Bearer
+  // 发（string → HubClient Bearer），backend Bearer 路径只解 JWT，apiKey 非 JWT
+  // → 401，mcp_tools 5 endpoint 不可达（task-06 遗留端到端阻塞）。
+  if (!env.daemonApiKey && !env.daemonToken) {
+    console.error(
+      '[mcp-server] MCP_SERVER_DAEMON_API_KEY / MCP_SERVER_DAEMON_TOKEN not set; tool calls will fail',
+    );
   }
-  const client = new HubClient(env.backendUrl || 'http://localhost:8000', env.daemonToken);
+  const auth = env.daemonApiKey
+    ? { apiKey: env.daemonApiKey }
+    : { token: env.daemonToken };
+  const client = new HubClient(env.backendUrl || 'http://localhost:8000', auth);
   const { server } = createMcpServer(client);
   const transport = new StdioServerTransport();
   await server.connect(transport);

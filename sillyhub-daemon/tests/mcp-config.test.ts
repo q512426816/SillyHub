@@ -180,6 +180,26 @@ describe('mcp-config: buildDaemonMcpServerConfig（task-05）', () => {
     expect(cfg.command).toBe('node');
   });
 
+  it('task-09 P0：apiKey 透传到 MCP_SERVER_DAEMON_API_KEY（X-API-Key 路径）', () => {
+    // daemon apiKey（admin 签发长期 key）优先于 token，经 X-API-Key 发，
+    // backend get_current_principal 解析 apiKey → User（Bearer 路径只解 JWT 会 401）。
+    const cfg = buildDaemonMcpServerConfig(
+      'http://localhost:8000',
+      'fallback-token',
+      '/fake/dist/mcp-server.js',
+      'shk_live_daemon_key',
+    );
+    expect(cfg.env?.MCP_SERVER_DAEMON_API_KEY).toBe('shk_live_daemon_key');
+    // token 仍写入（回落），apiKey 缺失时 mcp-server.ts 用 token。
+    expect(cfg.env?.MCP_SERVER_DAEMON_TOKEN).toBe('fallback-token');
+  });
+
+  it('task-09 P0：apiKey 缺省时不写 MCP_SERVER_DAEMON_API_KEY（零回归）', () => {
+    const cfg = buildDaemonMcpServerConfig('http://x:8000', 'tok', '/x/mcp-server.js');
+    expect(cfg.env?.MCP_SERVER_DAEMON_API_KEY).toBeUndefined();
+    expect(cfg.env?.MCP_SERVER_DAEMON_TOKEN).toBe('tok');
+  });
+
   it('默认 args 路径指向 dist/mcp-server.js（与 mcp-config.js 同目录）', () => {
     // 不传 serverModulePath → 用 import.meta.url 推导默认路径
     const cfg = buildDaemonMcpServerConfig('http://x:8000', 'tok');

@@ -64,8 +64,13 @@ export type TransitionRequest = {
   /** 显式 agent provider（可选）；省略则后端用 workspace.default_agent */
   provider?: string | null;
   model?: string | null;
-  /** execute 阶段是否用团队执行（task-08，D-002；省略/False=单 worker 零回归） */
+  /** execute/verify 阶段是否用团队执行（task-08，D-004@v2；省略/False=单 worker 零回归） */
   team_mode?: boolean;
+  /** task-09（D-002@v2）：team_mode 用户预设 worker 列表，透传到 backend
+   *  change.stages.team_worker_preset 供主 agent OrchestratorService 读取。 */
+  worker_preset?: { agent_type: string; model: string; objective: string; role: string }[];
+  /** task-09（D-003@v2）：team_mode 主 agent 配置 {agent_type, provider, model}。 */
+  main_agent_config?: { agent_type?: string; provider?: string; model?: string };
 };
 
 /** 反馈提交请求参数 */
@@ -279,6 +284,8 @@ export function transitionChange(
   provider?: string | null,
   model?: string | null,
   teamMode?: boolean,
+  workerPreset?: TransitionRequest["worker_preset"],
+  mainAgentConfig?: TransitionRequest["main_agent_config"],
 ) {
   const body: TransitionRequest = { target_stage: targetStage };
   if (reason !== undefined) {
@@ -292,10 +299,19 @@ export function transitionChange(
   if (model) {
     body.model = model;
   }
-  // team-mode（task-08，D-002）：true 时附加 body.team_mode=true
+  // team-mode（task-08，D-004@v2）：true 时附加 body.team_mode=true
   // （后端 TransitionRequest.team_mode default=False，省略=零回归）
   if (teamMode) {
     body.team_mode = true;
+    // task-09（D-002/D-003@v2）：worker_preset / main_agent_config 透传。
+    // 后端 transition_with_dispatch 写 change.stages.team_worker_preset /
+    // team_main_agent_config，_dispatch_execute_team → OrchestratorService 读取。
+    if (workerPreset && workerPreset.length > 0) {
+      body.worker_preset = workerPreset;
+    }
+    if (mainAgentConfig) {
+      body.main_agent_config = mainAgentConfig;
+    }
   }
   return apiFetch<TransitionResponse>(
     `/api/workspaces/${workspaceId}/changes/${changeId}/transition`,
@@ -351,6 +367,10 @@ export type TransitionDispatchResponse = {
   stage: string | null;
   /** 未 dispatch 的原因（dispatched=false 时有值） */
   reason: string | null;
+  /** task-09（D-004@v2）：team_mode dispatch 的 Mission ID（仅 mode=team 时有值） */
+  mission_id: string | null;
+  /** task-09：dispatch 模式（team / null=single） */
+  mode: string | null;
 };
 
 /** POST /changes/{id}/transition 的返回类型（对应后端 TransitionResponse） */

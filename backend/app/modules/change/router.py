@@ -439,6 +439,8 @@ async def transition_change(
         provider=body.provider,
         model=body.model,
         team_mode=body.team_mode,
+        worker_preset=body.worker_preset,
+        main_agent_config=body.main_agent_config,
     )
     # Enrich the change data for the response
     enriched_change = await service.enrich_with_workspace_ids(result["change"])
@@ -452,6 +454,8 @@ async def transition_change(
             agent_run_id=raw_dispatch.get("agent_run_id"),
             stage=raw_dispatch.get("stage"),
             reason=None,
+            mission_id=raw_dispatch.get("mission_id"),
+            mode=raw_dispatch.get("mode"),
         )
 
     return TransitionResponse(

@@ -179,8 +179,16 @@ async def execute_change(
     user: CurrentUser,
     provider: str | None = Query(None),
     model: str | None = Query(None),
+    team_mode: bool = Query(False, description="execute 团队执行（D-004@v2，默认 single 零回归）"),
 ) -> dict:
-    """Trigger change execution — dispatch via unified stage dispatch service."""
+    """Trigger change execution — dispatch via unified stage dispatch service.
+
+    task-09（D-004@v2）：``team_mode=true`` 时把 ``team_mode=True`` 写入
+    ``change.stages`` 触发 ``dispatch_next_step`` Step 2.5 分流到主 agent
+    OrchestratorService。worker_preset / main_agent_config 从 ``change.stages``
+    已有字段读（前端 stage toggle 经 transition 写入；execute 端点不重复接收，
+    避免与 transition 入口的双写冲突）。single（team_mode=false 零回归）。
+    """
     from sqlalchemy import select
     from sqlmodel import col
 
@@ -196,6 +204,16 @@ async def execute_change(
     change = (await session.execute(stmt)).scalars().first()
     if change is None:
         raise AppError(f"Change '{change_key}' not found.", http_status=404)
+
+    # task-09：team_mode 写入 change.stages 触发 dispatch_next_step Step 2.5 分流。
+    # dict copy 防 SQLAlchemy JSON 原地改不 dirty（反复踩过的坑）。commit 保证
+    # dispatch_next_step（可能用独立 session）读到 team_mode。
+    if team_mode:
+        stages = dict(change.stages or {})
+        stages["team_mode"] = True
+        change.stages = stages
+        session.add(change)
+        await session.commit()
 
     # Dispatch via unified service
     service = SillySpecStageDispatchService(session)
@@ -218,6 +236,7 @@ async def execute_change(
 
     return {
         "ok": True,
-        "run_id": result["agent_run_id"],
+        "run_id": result.get("agent_run_id") or result.get("mission_id"),
         "stage": result.get("stage"),
+        "mode": result.get("mode"),
     }

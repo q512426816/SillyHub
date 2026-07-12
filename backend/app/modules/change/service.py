@@ -696,14 +696,19 @@ class ChangeService:
         provider: str | None = None,
         model: str | None = None,
         team_mode: bool = False,
+        worker_preset: list[dict] | None = None,
+        main_agent_config: dict | None = None,
     ) -> dict:
         """Execute transition and optionally dispatch an agent for the target stage.
 
         Returns a dict with the change data and agent dispatch info.
 
-        When ``team_mode=True`` and the target stage is ``execute``, the change's
-        ``stages`` JSON is marked with ``team_mode=True`` so the dispatch layer
-        routes to the team execution path (D-002, dispatch.py:810-815).
+        When ``team_mode=True`` and the target stage is ``execute``/``verify``, the
+        change's ``stages`` JSON is marked with ``team_mode=True`` so the dispatch
+        layer routes to the team execution path (D-004@v2, dispatch.py:810 /
+        dispatch_next_step Step 2.5)。``worker_preset`` / ``main_agent_config``
+        一并写入 ``stages.team_worker_preset`` / ``stages.team_main_agent_config``，
+        供 :func:`_dispatch_execute_team` 传给 ``OrchestratorService.team_mission_entry``。
         """
         change = await self.transition(
             workspace_id=workspace_id,
@@ -713,14 +718,20 @@ class ChangeService:
             reason=reason,
         )
 
-        # team_mode opt-in：写 change.stages.team_mode=True 触发 dispatch 分流（D-002）。
+        # team_mode opt-in：写 change.stages.team_mode=True 触发 dispatch 分流（D-004@v2）。
         # 必须 dict copy 再赋值——SQLAlchemy JSON 列原地改不 dirty 不落库（反复踩过的坑，
         # 参照 dispatch.py:835 同模式）。team_mode=False 不写键，保持 single 零回归。
         # 必须显式 commit：dispatch 用独立 factory session 读 change（见下方 :725），
         # 跨 session 看不到本 session 未提交的改动，不 commit 则 team_mode 不可见 → 分流失效。
+        # task-09：worker_preset / main_agent_config 一并落 stages（供
+        # _dispatch_execute_team → OrchestratorService.team_mission_entry 读取）。
         if team_mode:
             stages = dict(change.stages or {})
             stages["team_mode"] = True
+            if worker_preset is not None:
+                stages["team_worker_preset"] = worker_preset
+            if main_agent_config is not None:
+                stages["team_main_agent_config"] = main_agent_config
             change.stages = stages
             self._session.add(change)
             await self._session.commit()

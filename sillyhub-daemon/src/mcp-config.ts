@@ -261,27 +261,34 @@ export const DAEMON_MCP_SERVER_NAME = 'sillyhub-daemon';
  *
  * env：
  *   - ``MCP_SERVER_BACKEND_URL`` = 传入 backendUrl（daemon config 的 serverUrl）
- *   - ``MCP_SERVER_DAEMON_TOKEN`` = 传入 token（主 agent run 的 user token，
- *     WORKSPACE_WRITE 权限，非 daemon apiKey）
+ *   - ``MCP_SERVER_DAEMON_API_KEY`` = 传入 apiKey（task-09 P0：daemon 长期 apiKey，
+ *     X-API-Key 路径，backend get_current_principal 解析 apiKey → User。优先于 token）
+ *   - ``MCP_SERVER_DAEMON_TOKEN`` = 传入 token（回落；apiKey 缺失时 Bearer JWT）
  *
- * **token 注入时机**：本函数只构造静态配置，token 由调用方在 spawn 主 agent 前
- * 从 lease context 取 user token 传入。空 token 仍构造配置（server 启动后 tool
- * 调用返回结构化错误，便于诊断）——与 mcp-server.ts ``runMcpServer`` 容错一致。
+ * **token 注入时机**：本函数只构造静态配置，token/apiKey 由调用方在 spawn 主 agent
+ * 前从 daemon config 取传入。空值仍构造配置（server 启动后 tool 调用返回结构化错误，
+ * 便于诊断）——与 mcp-server.ts ``runMcpServer`` 容错一致。
  *
  * @param backendUrl  backend 根 URL（如 http://localhost:8000）
- * @param token       主 agent run 的 user token（Bearer）
+ * @param token       daemon Bearer token（回落，apiKey 缺失时用）
  * @param serverModulePath  可选，覆盖默认编译产物路径（测试用，避免依赖 dist/）
+ * @param apiKey      可选，daemon 长期 API Key（task-09 P0，优先于 token）
  */
 export function buildDaemonMcpServerConfig(
   backendUrl: string,
   token: string,
   serverModulePath?: string,
+  apiKey?: string,
 ): McpServerConfig {
   const args = [serverModulePath ?? defaultMcpServerModulePath()];
   const env: Record<string, string> = {
     MCP_SERVER_BACKEND_URL: backendUrl.replace(/\/+$/, ''),
     MCP_SERVER_DAEMON_TOKEN: token,
   };
+  // task-09 P0：apiKey 独立 env，mcp-server.ts 优先 X-API-Key 路径。
+  if (apiKey) {
+    env.MCP_SERVER_DAEMON_API_KEY = apiKey;
+  }
   return {
     command: 'node',
     args,
