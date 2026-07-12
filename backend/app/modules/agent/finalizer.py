@@ -223,11 +223,18 @@ async def converge_mission_for_completed_run(
 
     if status in ("done", "degraded"):
         finalizer = FinalizerService(session, glm_config)
-        await finalizer.finalize_bootstrap_mission(mission_id)
+        # task-04 D-005@v2：execute mission 有 patch artifact → finalize_execute_mission
+        # 采集 patch 列表供人审 apply-back（实际 git merge 留 task-04b per-worker worktree）；
+        # bootstrap mission（read-only summary only，无 patch）→ finalize_bootstrap_mission
+        # 合并 summary。finalize_execute_mission 返回空 = 无 patch = bootstrap 路径。
+        patches = await finalizer.finalize_execute_mission(mission_id)
+        if not patches:
+            await finalizer.finalize_bootstrap_mission(mission_id)
         log.info(
             "mission_converged",
             mission_id=str(mission_id),
             status=status,
             trigger_run_id=str(run_id),
+            patch_count=len(patches),
         )
     return status

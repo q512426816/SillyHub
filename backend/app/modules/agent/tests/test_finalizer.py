@@ -51,6 +51,7 @@ async def _make_worker(
     output: str | None = "Worker 结构化摘要",
     role: str = "arch",
     cost: float = 0.0,
+    diff_summary: str | None = None,
 ) -> AgentRun:
     r = AgentRun(
         mission_id=mission_id,
@@ -62,6 +63,7 @@ async def _make_worker(
         spec_strategy="oneshot",
         output_redacted=output,
         total_cost_usd=cost,
+        diff_summary=diff_summary,
     )
     session.add(r)
     await session.commit()
@@ -270,3 +272,102 @@ class TestCanDispatchWorker:
         allowed, reason = await ctrl.can_dispatch_worker(mission)
         assert not allowed
         assert reason == "max_workers_reached"
+
+
+# ── task-04 D-005@v2: patch 采集 + converge 路由 ─────────────────────────────
+
+
+class TestConvergePatchArtifacts:
+    """task-04：write worker diff_summary → patch artifact + execute mission converge 路由。
+
+    per-worker worktree 隔离 + git merge 留 task-04b；本任务只验证 patch 采集 +
+    converge 对 execute mission（有 patch）调 finalize_execute_mission、对 bootstrap
+    mission（无 patch）回退 finalize_bootstrap_mission。
+    """
+
+    @pytest.mark.asyncio
+    async def test_worker_diff_summary_collected_as_patch(self, db_session: AsyncSession) -> None:
+        """write worker 有 diff_summary → collect_completed_artifacts 额外采 kind=patch artifact。"""
+        mission = await _make_mission(db_session)
+        r1 = await _make_worker(
+            db_session,
+            mission.id,
+            output="impl 摘要",
+            role="impl",
+            diff_summary="diff --git a/foo.py b/foo.py\n+pass",
+        )
+
+        status = await converge_mission_for_completed_run(db_session, r1.id, None)
+
+        assert status == "done"
+        arts = (
+            (await db_session.execute(select(AgentArtifact).where(AgentArtifact.run_id == r1.id)))
+            .scalars()
+            .all()
+        )
+        kinds = {a.kind for a in arts}
+        assert "summary" in kinds
+        assert "patch" in kinds, "write worker 有 diff_summary 应采 patch artifact"
+        patch_art = next(a for a in arts if a.kind == "patch")
+        assert "diff --git" in (patch_art.content_ref or "")
+
+    @pytest.mark.asyncio
+    async def test_patch_mission_skips_bootstrap_finalize(self, db_session: AsyncSession) -> None:
+        """有 patch 的 mission → converge 调 finalize_execute_mission，不调 finalize_bootstrap_mission。
+
+        bootstrap finalize 会产含「合并摘要」的 summary artifact（_concat_merge 标记）。
+        execute mission（有 patch）不应产该合并产物——patch 列表供人审，不自动合并。
+        """
+        mission = await _make_mission(db_session)
+        r1 = await _make_worker(
+            db_session,
+            mission.id,
+            output="impl 摘要",
+            role="impl",
+            diff_summary="diff --git a/foo.py b/foo.py\n+pass",
+        )
+
+        status = await converge_mission_for_completed_run(db_session, r1.id, None)
+
+        assert status == "done"
+        all_arts = (
+            (
+                await db_session.execute(
+                    select(AgentArtifact)
+                    .join(AgentRun, AgentArtifact.run_id == AgentRun.id)
+                    .where(AgentRun.mission_id == mission.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        patches = [a for a in all_arts if a.kind == "patch"]
+        assert len(patches) == 1
+        merged = [a for a in all_arts if "合并摘要" in (a.content_ref or "")]
+        assert not merged, (
+            "execute mission（有 patch）不应调 finalize_bootstrap_mission 产合并 summary"
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_patch_mission_falls_back_to_bootstrap(self, db_session: AsyncSession) -> None:
+        """无 patch 的 mission（read-only worker）→ finalize_execute_mission 返回空 → 调 finalize_bootstrap_mission 合并 summary。"""
+        mission = await _make_mission(db_session)
+        r1 = await _make_worker(db_session, mission.id, output="架构摘要A", role="arch")
+        await _make_worker(db_session, mission.id, output="规范摘要B", role="code_style")
+
+        status = await converge_mission_for_completed_run(db_session, r1.id, None)
+
+        assert status == "done"
+        all_arts = (
+            (
+                await db_session.execute(
+                    select(AgentArtifact)
+                    .join(AgentRun, AgentArtifact.run_id == AgentRun.id)
+                    .where(AgentRun.mission_id == mission.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        merged = [a for a in all_arts if "合并摘要" in (a.content_ref or "")]
+        assert merged, "无 patch 的 read-only mission 应调 finalize_bootstrap_mission 合并 summary"

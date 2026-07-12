@@ -166,9 +166,14 @@ class MissionExecutionService:
         return artifact
 
     async def collect_completed_artifacts(self, mission_id: uuid.UUID) -> int:
-        """Lazily collect each completed Worker's output as a summary Artifact.
+        """Lazily collect each completed Worker's output as Artifacts.
 
-        Idempotent — Workers already having an Artifact are skipped. This is the
+        v1: summary only（``output_redacted`` → ``kind=summary``）。
+        task-04（D-005@v2）：write worker 有 ``diff_summary`` 时额外采
+        ``kind=patch`` artifact，供 Finalizer 合并 / 人审 apply-back。
+        per-worker worktree 隔离 + git merge 留 task-04b。
+
+        Idempotent — Workers already having any Artifact are skipped. This is the
         Artifact 回灌 hook (Wave 3 gap #1): workers produce structured output on
         the daemon; their final summary lands in ``AgentRun.output_redacted`` via
         the lease-complete callback, and this method persists it as an
@@ -194,6 +199,10 @@ class MissionExecutionService:
                 continue
             await self.collect_artifact(run, run.output_redacted or "(无产出)", kind="summary")
             collected += 1
+            # task-04 D-005@v2：write worker diff 采集为 patch artifact（供人审 apply-back）
+            if run.diff_summary:
+                await self.collect_artifact(run, run.diff_summary, kind="patch")
+                collected += 1
         if collected:
             log.info("mission_artifacts_reaped", mission_id=str(mission_id), n=collected)
         return collected
