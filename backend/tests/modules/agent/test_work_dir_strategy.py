@@ -11,12 +11,11 @@ daemon-client WS RPC 委托 daemon 宿主 stat）。下列测试覆盖：
 """
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agent.service import AgentRunError, AgentService, resolve_work_dir
+from app.modules.agent.service import AgentRunError, resolve_work_dir
 
 # ---------------------------------------------------------------------------
 # resolve_work_dir tests (no delegate — backwards-compatible ql-006 path)
@@ -239,89 +238,8 @@ async def test_resolve_work_dir_delegate_stat_not_exists_raises():
     assert exc_info.value.details == {"workspace_root": "/host/path/disconnected"}
 
 
-# ---------------------------------------------------------------------------
-# _ensure_change_dir_in_worktree tests
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_ensure_change_dir_copies_from_main_repo(tmp_path):
-    """worktree 内不存在 → 从主 repo 复制。"""
-    ws_root = tmp_path / "workspace"
-    ws_root.mkdir()
-
-    # 主 repo 中有 .sillyspec/changes/test-change/
-    source_dir = ws_root / ".sillyspec" / "changes" / "test-change"
-    source_dir.mkdir(parents=True)
-    (source_dir / "proposal.md").write_text("# Proposal")
-
-    # work_dir 是 worktree repo（无 .sillyspec/changes/test-change/）
-    work_dir = tmp_path / "worktree" / "repo"
-    work_dir.mkdir(parents=True)
-
-    mock_session = AsyncMock(spec=AsyncSession)
-    svc = AgentService(mock_session)
-
-    await svc._ensure_change_dir_in_worktree(
-        work_dir=work_dir,
-        change_key="test-change",
-        workspace_root=str(ws_root),
-    )
-
-    dest_dir = work_dir / ".sillyspec" / "changes" / "test-change"
-    assert dest_dir.exists()
-    assert (dest_dir / "proposal.md").read_text() == "# Proposal"
-
-
-@pytest.mark.asyncio
-async def test_ensure_change_dir_already_exists(tmp_path):
-    """目标目录已存在 → 不执行复制。"""
-    ws_root = tmp_path / "workspace"
-    ws_root.mkdir()
-
-    work_dir = tmp_path / "worktree" / "repo"
-    work_dir.mkdir(parents=True)
-    change_dir = work_dir / ".sillyspec" / "changes" / "test-change"
-    change_dir.mkdir(parents=True)
-    (change_dir / "existing.md").write_text("existing content")
-
-    mock_session = AsyncMock(spec=AsyncSession)
-    svc = AgentService(mock_session)
-
-    # Mock shutil.copytree to ensure it's NOT called
-    with patch("shutil.copytree") as mock_copy:
-        await svc._ensure_change_dir_in_worktree(
-            work_dir=work_dir,
-            change_key="test-change",
-            workspace_root=str(ws_root),
-        )
-        mock_copy.assert_not_called()
-
-    # Original content preserved
-    assert (change_dir / "existing.md").read_text() == "existing content"
-
-
-@pytest.mark.asyncio
-async def test_ensure_change_dir_main_repo_also_missing(tmp_path):
-    """主 repo 也没有该目录 → 不报错，仅记录 warning。"""
-    ws_root = tmp_path / "workspace"
-    ws_root.mkdir()
-
-    work_dir = tmp_path / "worktree" / "repo"
-    work_dir.mkdir(parents=True)
-
-    mock_session = AsyncMock(spec=AsyncSession)
-    svc = AgentService(mock_session)
-
-    # Should not raise
-    await svc._ensure_change_dir_in_worktree(
-        work_dir=work_dir,
-        change_key="nonexistent-change",
-        workspace_root=str(ws_root),
-    )
-
-    # Directory should NOT be created
-    assert not (work_dir / ".sillyspec" / "changes" / "nonexistent-change").exists()
+# (_ensure_change_dir_in_worktree 测试已随函数删除一并移除——daemon-client 架构下
+#  backend 不再越界操作 worktree change 目录，见 2026-07-11-daemon-client-container-overreach D-002)
 
 
 # ---------------------------------------------------------------------------

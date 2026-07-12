@@ -36,9 +36,9 @@ def test_permission_group_has_seven_members() -> None:
     assert set(members) == expected
 
 
-def test_permission_count_is_71() -> None:
-    """46 历史 + 25 PPM_* (含 problem:export,对齐 customer/plan/task) = 71."""
-    assert len(list(Permission)) == 71
+def test_permission_count_is_70() -> None:
+    """45 历史 + 25 PPM_* (含 problem:export,对齐 customer/plan/task) = 70（CHANGE_ARCHIVE 随 archive 模块删除）。"""
+    assert len(list(Permission)) == 70
 
 
 @pytest.mark.parametrize(
@@ -74,7 +74,6 @@ def test_permission_count_is_71() -> None:
         (Permission.WORKSPACE_ADMIN, PermissionGroup.WORKSPACE),
         # Change
         (Permission.CHANGE_CREATE, PermissionGroup.CHANGE),
-        (Permission.CHANGE_ARCHIVE, PermissionGroup.CHANGE),
         # Agent (task/code/tool/deploy)
         (Permission.TASK_READ, PermissionGroup.AGENT),
         (Permission.CODE_REVIEW, PermissionGroup.AGENT),

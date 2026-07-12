@@ -460,7 +460,7 @@ async def test_dispatch_next_step_records_last_dispatch(db_session: AsyncSession
     assert last_dispatch["stage"] == "brainstorm"
     assert last_dispatch["run_id"] is not None
     assert last_dispatch["config"]["phase"] == "Brainstorm"
-    assert last_dispatch["config"]["requires_worktree"] is True
+    assert last_dispatch["config"]["requires_worktree"] is False
 
 
 async def test_dispatch_next_step_creates_workspace_association(db_session: AsyncSession) -> None:

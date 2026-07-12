@@ -39,7 +39,7 @@ async def test_list_components_platform_managed_reads_yaml(tmp_path):
     spec_ws.strategy = "platform-managed"
     spec_ws.spec_root = str(tmp_path)
 
-    projects = tmp_path / ".sillyspec" / "projects"
+    projects = tmp_path / "projects"
     _write_project(
         projects,
         "backend.yaml",
@@ -92,7 +92,7 @@ async def test_list_components_excludes_project_group_self(tmp_path):
     spec_ws.strategy = "platform-managed"
     spec_ws.spec_root = str(tmp_path)
 
-    projects = tmp_path / ".sillyspec" / "projects"
+    projects = tmp_path / "projects"
     _write_project(
         projects,
         "backend.yaml",
@@ -135,7 +135,7 @@ async def test_list_components_server_local_fallback(tmp_path):
     """server-local 无 spec_ws：SpecWorkspaceService.get 抛错 → 回退 root_path 读 yaml。"""
     ws = _make_ws(tmp_path)
     # server-local：spec_workspace 不存在，get 抛异常
-    projects = tmp_path / ".sillyspec" / "projects"
+    projects = tmp_path / "projects"
     _write_project(
         projects,
         "daemon.yaml",
