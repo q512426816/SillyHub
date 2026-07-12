@@ -30,6 +30,10 @@ log = get_logger(__name__)
 # mission_id，role 仅作语义标记。
 _ORCHESTRATOR_ROLE = "orchestrator"
 
+# Worker Run 终态集合（mission.py:26 _FAILED + completed）。schedule_loop 三重收敛
+# 信号 1 用：所有 worker run（role != orchestrator）全终态 = 收敛条件之一。
+_WORKER_TERMINAL = ("completed", "failed", "killed")
+
 # 默认主 agent 配置（main_agent_config 缺省时兜底）。agent_type 必须是 daemon 已知
 # provider 名（"claude_code" 是 agent_type 不是 provider，placement.dispatch_to_daemon
 # 会把 provider 落到 lease metadata，daemon 按 provider 路由；缺失时 daemon 兜底）。
@@ -192,22 +196,161 @@ class OrchestratorService:
         )
         return mission, main_run
 
-    async def schedule_loop(self, mission_id: uuid.UUID) -> None:
-        """主 agent 调度循环骨架（D-001@v2 三重收敛）。
+    async def schedule_loop(self, mission_id: uuid.UUID) -> str | None:
+        """主 agent 调度循环兜底巡检（D-001@v2 三重收敛，task-11 完整实现）。
 
-        三重收敛信号（design §7）：
-        1. worker 全部终态（completed/failed/killed）→ 触发 converge。
-        2. 主 agent 自主判断目标达成（通过 MCP tool report_progress 表态）→ converge。
-        3. 预算 / 超时兜底（budget_usd 超支或 lease 长期不活跃）→ 强制 converge。
+        三重收敛信号（design §7，OR——任一触发即 converge）：
+        1. **worker 全部终态**（completed/failed/killed）→ converge。主 agent 可能
+           卡住没主动收敛（daemon 离线 / MCP tool 未调），backend 巡检兜底触发。
+        2. **主 agent 判断目标达成**：主 agent 通过 MCP tool ``converge_mission``
+           主动收敛（mcp_tools.py:293，task-05 建）。schedule_loop 不重复触发——
+           巡检主 agent run 终态时若 worker 已全终态，归并到信号 1 一起 converge。
+        3. **预算/超时硬截断**：``mission.budget_usd`` 触顶（cost_so_far >= budget）
+           → 强制 converge（标记 degraded，design §7 信号 3）。budget 拒新 worker
+           dispatch 已由 ``control.can_dispatch_worker`` 复用（D-008@v1，零重写），
+           本方法只补「已超支 → 强制收尾」兜底。
 
-        本任务仅留骨架 + TODO，完整状态机 / 重派 / 收敛触发留 task-11。主 agent
-        实际驱动靠 daemon 侧 MCP tool（task-05/06）反向调 backend endpoint，循环
-        主体在 daemon 端，backend 这里只做兜底巡检入口（task-11 接 reconcile）。
+        重要：``derive_status``（mission.py:29）把 mission 下**所有** AgentRun
+        （含主 agent run 自己）算进状态。主 agent run 通常 long-lived running，
+        若直接喂 derive_status 永远返回 ``running``——本方法只对 **worker runs**
+        （role != orchestrator）判收敛，再用 ``converge_mission_for_completed_run``
+        以主 agent run 为锚点触发（finalizer 内部仍按全 run derive，主 agent 此时
+        已 completed/被收敛路径标记终态，derive 一致）。
+
+        本方法是 backend **兜底巡检入口**——主 agent 实际驱动靠 daemon MCP tool
+        （task-05/06）反向调 backend endpoint，循环主体在 daemon 端。调用方
+        （reconcile / 定时任务，task-11 暂未接线，留 task-12/13）按节奏调本方法即可。
+
+        Returns:
+            收敛后的 mission status（``done``/``degraded``/...），或 None 表示本次
+            巡检未触发收敛（mission 仍在 running / planning / 已 cancelled）。
         """
-        # TODO(task-11): 实现三重收敛状态机
-        # - 查 mission 所有 worker runs 状态
-        # - 信号 1：worker 全终态 → FinalizerService.converge
-        # - 信号 2：主 agent run completed 且 mission 未收敛 → converge
-        # - 信号 3：预算超支 / 超时 → 强制 converge（标记 degraded）
-        log.info("orchestrator_schedule_loop_skeleton", mission_id=str(mission_id))
-        return None
+        mission = await self._session.get(AgentMission, mission_id)
+        if mission is None:
+            log.warning("orchestrator_schedule_loop_mission_missing", mission_id=str(mission_id))
+            return None
+        # cancelled mission 不再收敛（control.cancel 已终态化）。
+        if mission.cancelled_at is not None:
+            return None
+
+        # 延迟 import 避免与 control/mission/finalizer 的循环 import 风险（与
+        # finalizer.converge_mission_for_completed_run 同款）。
+        from app.modules.agent.control import MissionControlService
+        from app.modules.agent.finalizer import converge_mission_for_completed_run
+        from app.modules.agent.mission import derive_status
+
+        ctrl = MissionControlService(self._session)
+        all_runs = await ctrl.worker_runs(mission_id)
+        worker_runs = [r for r in all_runs if r.role != _ORCHESTRATOR_ROLE]
+
+        # 找主 agent run 作 converge 锚点（converge_mission_for_completed_run 需 run_id）。
+        # 主 agent run 不存在（mission 损坏 / single 模式误调）→ 无法走标准收敛锚点，
+        # 巡检跳过（single 零回归：single mission 本就不该走 schedule_loop）。
+        main_run = next((r for r in all_runs if r.role == _ORCHESTRATOR_ROLE), None)
+        if main_run is None:
+            log.info(
+                "orchestrator_schedule_loop_no_main_run",
+                mission_id=str(mission_id),
+                run_count=len(all_runs),
+            )
+            return None
+
+        # 信号 3（budget 硬截断）：cost_so_far >= budget_usd → 强制 converge（degraded）。
+        # budget_usd=None 视为无预算约束（不触发）。复用 control.cost_so_far，与
+        # can_dispatch_worker 同一数据源（避免双源不一致）。
+        forced_degraded = False
+        if mission.budget_usd is not None:
+            cost = await ctrl.cost_so_far(mission_id)
+            if cost >= mission.budget_usd:
+                forced_degraded = True
+                log.warning(
+                    "orchestrator_budget_exceeded_force_converge",
+                    mission_id=str(mission_id),
+                    cost=cost,
+                    budget_usd=mission.budget_usd,
+                )
+
+        # 信号 1（worker 全终态）：所有 worker run 都到终态。空 worker 集合（主 agent
+        # 还没派任何 worker）不算——否则 mission 刚建就空收敛。
+        all_workers_terminal = bool(worker_runs) and all(
+            r.status in _WORKER_TERMINAL for r in worker_runs
+        )
+
+        if not forced_degraded and not all_workers_terminal:
+            # 三重信号本次巡检均未达成，不收敛。budget「未触顶 + worker 未全终态」
+            # 是 mission 正常推进态，schedule_loop 静默返回（log debug 级）。
+            log.debug(
+                "orchestrator_schedule_loop_no_converge",
+                mission_id=str(mission_id),
+                worker_terminal=all_workers_terminal,
+                forced_degraded=forced_degraded,
+            )
+            return None
+
+        # 信号 2（主 agent 自主收敛）不在 schedule_loop 触发——主 agent 调 MCP
+        # ``converge_mission`` endpoint 直接走 converge_mission_for_completed_run。
+        # 这里信号 1 / 3 触发时，需让 mission 的 run 全终态，否则
+        # converge_mission_for_completed_run 内 derive_status（mission.py:29 把 mission
+        # 下所有 run 含主 agent / 活跃 worker 算进去）返回 running、Finalizer 不合并：
+        # - 主 agent run 还在 running → 标 completed（信号 1）/ failed（信号 3 强收）。
+        # - 信号 3 budget 触顶时仍有 running worker → 标 killed（预算已停，worker 烧钱
+        #   必须停，与 control.cancel 同语义但走巡检路径无 lease 上下文，纯标记终态；
+        #   不设 cancelled_at——cancel 是用户主动，budget 强收是治理兜底，derive 出
+        #   degraded 而非 cancelled）。
+        mutated = False
+        if forced_degraded:
+            for w in worker_runs:
+                if w.status not in _WORKER_TERMINAL:
+                    w.status = "killed"
+                    self._session.add(w)
+                    mutated = True
+        if main_run.status not in _WORKER_TERMINAL:
+            main_run.status = "completed" if all_workers_terminal else "failed"
+            self._session.add(main_run)
+            mutated = True
+        if mutated:
+            await self._session.commit()
+            await self._session.refresh(main_run)
+            log.info(
+                "orchestrator_force_terminal_runs",
+                mission_id=str(mission_id),
+                main_run_id=str(main_run.id),
+                main_new_status=main_run.status,
+                reason="budget_exceeded" if forced_degraded else "workers_terminal",
+            )
+
+        # 触发收敛：复用 complete_lease 末尾同款入口（D-007@v1 单锚点）。GLM 配置
+        # 由 converge_mission_for_completed_run 内部按 patch/summary 分流处理。
+        from app.modules.agent.delegation import GLMConfig
+
+        try:
+            result_status = await converge_mission_for_completed_run(
+                self._session, main_run.id, GLMConfig.from_env()
+            )
+        except Exception as exc:
+            # 与 complete_lease 容错一致（lease/service.py:609）：converge 失败不抛，
+            # 兜底巡检下次再来。derive_status 纯函数计算终态供调用方。
+            log.warning(
+                "orchestrator_schedule_loop_converge_failed",
+                mission_id=str(mission_id),
+                main_run_id=str(main_run.id),
+                error=str(exc),
+            )
+            runs_recheck = await ctrl.worker_runs(mission_id)
+            result_status = derive_status(runs_recheck, cancelled=False)
+
+        # forced_degraded 时无论 derive 算出什么（done/failed/degraded），都覆盖为
+        # degraded——表达「预算触顶强收」语义（design §7 信号 3 标 degraded）。budget
+        # 强收是治理兜底，derive 此刻可能因 worker 被 kill 而出 failed，但 mission
+        # 已正常收敛合并产物，用 degraded 表达「收尾但不圆满」比 failed 更准确。
+        if forced_degraded:
+            result_status = "degraded"
+
+        log.info(
+            "orchestrator_schedule_loop_converged",
+            mission_id=str(mission_id),
+            status=result_status,
+            forced_degraded=forced_degraded,
+            workers_terminal=all_workers_terminal,
+        )
+        return result_status

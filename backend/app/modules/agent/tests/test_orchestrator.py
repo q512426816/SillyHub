@@ -5,7 +5,11 @@
   run（role=orchestrator, mission_id 非空, agent_type/provider/model 从 main_agent_config）。
 - daemon 离线 / workspace 未绑定时捕获 NoOnlineDaemonError，run 标 pending +
   error_code=no_online_daemon，mission 仍建。
-- ``schedule_loop`` 骨架不抛错（完整逻辑 task-11）。
+- ``schedule_loop`` 三重收敛状态机（task-11 完整逻辑）：
+  - 信号 1（worker 全终态）→ converge，done/degraded。
+  - 信号 3（budget 触顶）→ 强制 converge，degraded。
+  - 三信号均未达 → 返回 None（mission 正常推进）。
+  - cancelled mission / 无主 agent run → 跳过。
 - 主 agent run 必须写 mission_id（否则 converge_mission_for_completed_run 在
   finalizer.py:206 run.mission_id is None 直接 return，mission 永不收敛）。
 """
@@ -164,13 +168,157 @@ class TestTeamMissionEntry:
         assert persisted.role == "orchestrator"
 
 
-class TestScheduleLoopSkeleton:
+class TestScheduleLoopConvergence:
+    """task-11：schedule_loop 三重收敛状态机（D-006@v2）。
+
+    信号 1（worker 全终态）/ 信号 3（budget 触顶）在 backend 兜底巡检触发；
+    信号 2（主 agent 自主收敛）走 MCP endpoint，不经 schedule_loop。
+    """
+
     @pytest.mark.asyncio
-    async def test_schedule_loop_returns_none(self, db_session: AsyncSession) -> None:
-        """schedule_loop 骨架不抛错（完整三重收敛逻辑 task-11 填充）。"""
+    async def test_no_workers_returns_none(self, db_session: AsyncSession) -> None:
+        """空 worker 集合（主 agent 还没派 worker）→ 不收敛（避免 mission 刚建空收）。"""
         ws_id = await _make_workspace(db_session)
         svc = OrchestratorService(db_session)
         mission, _ = await svc.team_mission_entry(
+            workspace_id=ws_id,
+            objective="团队目标",
+            created_by=uuid.uuid4(),
+            change_id=None,
+            constraints={"mode": "team"},
+            budget_usd=10.0,
+            worker_preset=None,
+            main_agent_config=None,
+        )
+        result = await svc.schedule_loop(mission.id)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_workers_not_terminal_returns_none(self, db_session: AsyncSession) -> None:
+        """worker 仍 running → 不收敛（mission 正常推进）。"""
+        ws_id = await _make_workspace(db_session)
+        svc = OrchestratorService(db_session)
+        mission, _ = await svc.team_mission_entry(
+            workspace_id=ws_id,
+            objective="团队目标",
+            created_by=uuid.uuid4(),
+            change_id=None,
+            constraints={"mode": "team"},
+            budget_usd=10.0,
+            worker_preset=None,
+            main_agent_config=None,
+        )
+        # 加一个 running worker（role != orchestrator）
+        worker = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            provider="claude",
+            status="running",
+            role="arch",
+            objective="扫描",
+            total_cost_usd=0.5,
+        )
+        db_session.add(worker)
+        await db_session.commit()
+
+        result = await svc.schedule_loop(mission.id)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_signal1_all_workers_terminal_converges_done(
+        self, db_session: AsyncSession
+    ) -> None:
+        """信号 1：所有 worker completed（含 summary 产出）→ converge，status=done。"""
+        ws_id = await _make_workspace(db_session)
+        svc = OrchestratorService(db_session)
+        mission, main_run = await svc.team_mission_entry(
+            workspace_id=ws_id,
+            objective="团队目标",
+            created_by=uuid.uuid4(),
+            change_id=None,
+            constraints={"mode": "team"},
+            budget_usd=10.0,
+            worker_preset=None,
+            main_agent_config=None,
+        )
+        # 两个 completed worker（带 output 让 Finalizer concat 合并产出 summary artifact）
+        for role in ("arch", "impl"):
+            r = AgentRun(
+                mission_id=mission.id,
+                agent_type="claude_code",
+                provider="claude",
+                status="completed",
+                role=role,
+                objective=f"{role} objective",
+                output_redacted=f"{role} 摘要",
+                total_cost_usd=0.3,
+            )
+            db_session.add(r)
+        await db_session.commit()
+
+        result = await svc.schedule_loop(mission.id)
+
+        # 全 completed worker + 无 patch → bootstrap 路径 → done
+        assert result == "done"
+        # 主 agent run 被强标 completed（原本 pending，巡检兜底收尾）
+        await db_session.refresh(main_run)
+        assert main_run.status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_signal3_budget_exceeded_force_converges_degraded(
+        self, db_session: AsyncSession
+    ) -> None:
+        """信号 3：cost_so_far >= budget_usd → 强制 converge，status=degraded。
+
+        worker 仍 running 但预算已触顶 → schedule_loop 强收（design §7 信号 3）。
+        """
+        ws_id = await _make_workspace(db_session)
+        svc = OrchestratorService(db_session)
+        mission, main_run = await svc.team_mission_entry(
+            workspace_id=ws_id,
+            objective="团队目标",
+            created_by=uuid.uuid4(),
+            change_id=None,
+            constraints={"mode": "team"},
+            budget_usd=1.0,  # 低预算
+            worker_preset=None,
+            main_agent_config=None,
+        )
+        # 一个 running worker，cost 已超预算
+        worker = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            provider="claude",
+            status="running",
+            role="arch",
+            objective="扫描",
+            total_cost_usd=1.5,  # >= 1.0 触顶
+            output_redacted="架构摘要",
+        )
+        db_session.add(worker)
+        await db_session.commit()
+
+        result = await svc.schedule_loop(mission.id)
+
+        # budget 触顶强收 → degraded（forced_degraded 覆盖 derive 结果）
+        assert result == "degraded"
+        # 主 agent run 被强标 failed（budget 强收语义，非正常完成）
+        await db_session.refresh(main_run)
+        assert main_run.status == "failed"
+        # 烧钱的 worker 被 kill（停损）
+        await db_session.refresh(worker)
+        assert worker.status == "killed"
+
+    @pytest.mark.asyncio
+    async def test_cancelled_mission_skipped(self, db_session: AsyncSession) -> None:
+        """cancelled mission → schedule_loop 跳过（control.cancel 已终态化，不重复收敛）。"""
+        from datetime import UTC, datetime
+
+        from app.modules.agent.model import AgentMission
+
+        ws_id = await _make_workspace(db_session)
+        svc = OrchestratorService(db_session)
+        mission, _main_run = await svc.team_mission_entry(
             workspace_id=ws_id,
             objective="团队目标",
             created_by=uuid.uuid4(),
@@ -180,5 +328,42 @@ class TestScheduleLoopSkeleton:
             worker_preset=None,
             main_agent_config=None,
         )
-        # 骨架只记日志返回 None，不抛
-        await svc.schedule_loop(mission.id)
+        # 标 cancelled
+        mission = await db_session.get(AgentMission, mission.id)
+        mission.cancelled_at = datetime.now(UTC)
+        db_session.add(mission)
+        await db_session.commit()
+
+        result = await svc.schedule_loop(mission.id)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_missing_main_run_returns_none(self, db_session: AsyncSession) -> None:
+        """主 agent run 不存在（mission 损坏 / single 误调）→ 无法走收敛锚点，跳过。"""
+        from app.modules.agent.model import AgentMission
+
+        ws_id = await _make_workspace(db_session)
+        # 直接建 mission（不经 team_mission_entry，无主 agent run）
+        mission = AgentMission(
+            workspace_id=ws_id,
+            objective="裸 mission",
+            budget_usd=10.0,
+        )
+        db_session.add(mission)
+        await db_session.commit()
+        # 加一个 completed worker（满足信号 1，但缺主 agent run 锚点）
+        worker = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            provider="claude",
+            status="completed",
+            role="arch",
+            objective="扫描",
+            output_redacted="摘要",
+        )
+        db_session.add(worker)
+        await db_session.commit()
+
+        svc = OrchestratorService(db_session)
+        result = await svc.schedule_loop(mission.id)
+        assert result is None
