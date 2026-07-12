@@ -34,6 +34,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { pathToFileURL } from 'node:url';
 import { HubClient, HubHttpError } from './hub-client.js';
 
 // ── 配置（env）─────────────────────────────────────────────────────────────
@@ -355,7 +356,15 @@ export async function runMcpServer(): Promise<void> {
 
 const isMain = (() => {
   try {
-    return import.meta.url === `file://${process.argv[1]}`;
+    // 跨平台主模块判断（CLAUDE.md 规则13 三平台兼容）。Windows 下 process.argv[1]
+    // 是反斜杠绝对路径（C:\...\mcp-server.js），字符串拼接 `file://${argv[1]}` 得
+    // 两斜杠 file://C:\...，与 import.meta.url 的三斜杠 file:///C:/... 不匹配 →
+    // isMain 恒 false → runMcpServer 不调 → MCP server 子进程不启动 → team 主 agent
+    // 5 tool 链路在 Windows 完全断（ql-20260712-002-mcpwin）。Linux/macOS 因 argv[1]
+    // 是 /abs 正斜杠，拼接恰成三斜杠，原写法侥幸匹配。pathToFileURL 规范化为标准
+    // file:// URL，跨平台稳定匹配。
+    if (!process.argv[1]) return false;
+    return import.meta.url === pathToFileURL(process.argv[1]).href;
   } catch {
     return false;
   }
