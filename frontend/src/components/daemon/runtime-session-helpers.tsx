@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MarkdownText } from "@/components/ui/markdown-text";
 import { InteractiveSessionPanel, type SessionTurnView } from "@/components/daemon/interactive-session-panel";
+import { sanitizeSessionLogContent } from "@/components/daemon/session-log-sanitize";
 import { type AgentRunLogEntry } from "@/lib/agent";
 import {
   PROVIDER_META,
@@ -583,6 +584,9 @@ export function resumeDisabledTitle(session: AgentSessionRead): string {
 /**
  * task-11 logsToTurns：把历史日志按 run_id 分组，转成 attach 面板预填的 SessionTurnView。
  * channel==="user" 的 log → prompt；其余 log → output（拼接，保留换行）。
+ *
+ * 2026-07-11-unify-runtime-session-dialog / FR-04: 对每条 content_redacted 先经
+ * sanitizeSessionLogContent 过滤，剥离 thinking/SYSTEM/AskUserQuestion 等原始标记。
  */
 export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
   const map = new Map<string, AgentRunLogEntry[]>();
@@ -597,9 +601,15 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
     turnIndex += 1;
     const prompts: string[] = [];
     const outputs: string[] = [];
+    // 2026-07-11-unify-runtime-session-dialog task-12: 去重（同内容只保留一次），
+    // 避免 attach 历史时后端 logs 含重复 user_input/agent log 致消息重复显示
+    //（防御性，覆盖 logs 内重复条目等多种根因）。
+    const seenText = new Set<string>();
     for (const entry of entries) {
-      const text = entry.content_redacted ?? "";
+      const text = sanitizeSessionLogContent(entry.content_redacted ?? "", entry.channel);
       if (!text) continue;
+      if (seenText.has(text)) continue;
+      seenText.add(text);
       if (entry.channel === "user_input") {
         prompts.push(text);
       } else {

@@ -210,7 +210,10 @@ async def list_change_sessions(
     sessions = (
         (
             await session.execute(
-                select(AgentSession).where(col(AgentSession.change_id) == change_id)
+                select(AgentSession).where(
+                    col(AgentSession.change_id) == change_id,
+                    col(AgentSession.deleted_at).is_(None),  # FR-07 软删过滤
+                )
             )
         )
         .scalars()

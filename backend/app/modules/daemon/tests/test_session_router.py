@@ -280,3 +280,80 @@ async def _first_runtime(session: AsyncSession, user_id: uuid.UUID) -> DaemonRun
         .all()
     )
     return rows[-1]
+
+
+# ── list title + soft-delete filter (2026-07-11-unify-runtime-session-dialog) ─
+
+
+class TestListSessionsTitleAndSoftDelete:
+    """FR-08 (list title=首条 user_input 摘要前 30 字) + FR-07 (软删过滤)。"""
+
+    @pytest.mark.asyncio
+    async def test_list_returns_title_and_excludes_soft_deleted(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
+        from app.modules.auth.model import User
+        from app.modules.daemon.service import DaemonService
+
+        admin = (
+            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
+            .scalars()
+            .first()
+        )
+        assert admin is not None
+        rt = await _create_runtime(db_session, admin.id)
+
+        # 带 user_input log 的 session（title 来源，FR-08）
+        sid = uuid.uuid4()
+        run = AgentRun(
+            id=uuid.uuid4(),
+            agent_type="claude_code",
+            provider="claude",
+            status="completed",
+            spec_strategy="interactive",
+            agent_session_id=sid,
+            started_at=datetime.now(UTC),
+        )
+        db_session.add_all(
+            [
+                AgentSession(
+                    id=sid, user_id=admin.id, runtime_id=rt.id, provider="claude", status="ended"
+                ),
+                run,
+                AgentRunLog(
+                    id=uuid.uuid4(),
+                    run_id=run.id,
+                    timestamp=datetime.now(UTC),
+                    channel="user_input",
+                    content_redacted="你好，现在几点了？",
+                ),
+            ]
+        )
+        # 另一 session 将被软删（应从 list 过滤，FR-07）
+        victim_id = uuid.uuid4()
+        db_session.add(
+            AgentSession(
+                id=victim_id,
+                user_id=admin.id,
+                runtime_id=rt.id,
+                provider="claude",
+                status="ended",
+            )
+        )
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        await svc.delete_agent_session(victim_id, admin.id)
+
+        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        items = resp.json()["items"]
+        ids = [i["id"] for i in items]
+        assert str(sid) in ids
+        assert str(victim_id) not in ids  # 软删过滤
+        kept = next(i for i in items if i["id"] == str(sid))
+        assert kept["title"] == "你好，现在几点了？"  # 首条 user_input 摘要前 30 字

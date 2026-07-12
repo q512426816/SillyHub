@@ -1639,6 +1639,8 @@ async def list_sessions(
     status: _SessionStatusQuery | None = Query(default=None),
 ) -> AgentSessionListResponse:
     """List the current user's AgentSessions (owner-scoped, stable paging)."""
+    from app.modules.agent.model import AgentRun, AgentRunLog
+
     svc = DaemonService(session)
     items, total = await svc.list_agent_sessions(
         user.id,
@@ -1646,8 +1648,36 @@ async def list_sessions(
         offset=offset,
         status_filter=status,
     )
+    reads = [AgentSessionRead.model_validate(item) for item in items]
+    # FR-08 / D-006: 复用 list_change_sessions 的首条 user_input 摘要逻辑（前 30 字）。
+    # 逻辑与 change/router.py:list_change_sessions 保持同步（R-7），未来可抽共享 helper。
+    if items:
+        session_ids = [item.id for item in items]
+        title_stmt = (
+            select(
+                AgentRun.agent_session_id.label("session_id"),
+                AgentRunLog.timestamp.label("ts"),
+                AgentRunLog.content_redacted.label("content"),
+            )
+            .join(AgentRunLog, AgentRunLog.run_id == AgentRun.id)
+            .where(
+                AgentRun.agent_session_id.in_(session_ids),
+                AgentRunLog.channel == "user_input",
+            )
+        )
+        title_rows = (await session.execute(title_stmt)).all()
+        first_ts: dict[uuid.UUID, datetime] = {}
+        content_by: dict[uuid.UUID, str] = {}
+        for row in title_rows:
+            sid = row.session_id
+            if sid not in first_ts or row.ts < first_ts[sid]:
+                first_ts[sid] = row.ts
+                content_by[sid] = row.content or ""
+        title_map = {sid: (content or "")[:30] or None for sid, content in content_by.items()}
+        for r in reads:
+            r.title = title_map.get(r.id)
     return AgentSessionListResponse(
-        items=[AgentSessionRead.model_validate(item) for item in items],
+        items=reads,
         total=total,
         limit=limit,
         offset=offset,
@@ -1671,7 +1701,27 @@ async def get_session_detail(
     """
     svc = DaemonService(session)
     agent_session = await svc.get_agent_session(session_id, user.id)
-    return AgentSessionRead.model_validate(agent_session)
+    read = AgentSessionRead.model_validate(agent_session)
+    # 查当前运行 run（attach 恢复 currentRunId，启用打断按钮；无运行 run 则 null）
+    from app.modules.agent.model import AgentRun
+
+    current_run = (
+        (
+            await session.execute(
+                select(AgentRun)
+                .where(
+                    AgentRun.agent_session_id == session_id,
+                    AgentRun.status.in_(["pending", "running", "interrupting"]),
+                )
+                .order_by(AgentRun.started_at.desc())
+                .limit(1)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    read.current_run_id = current_run.id if current_run else None
+    return read
 
 
 @router.post(

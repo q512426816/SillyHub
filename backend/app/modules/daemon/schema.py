@@ -29,6 +29,12 @@ class AgentSessionRead(BaseModel):
     ended_at: datetime | None
     change_id: uuid.UUID | None
     workspace_id: uuid.UUID | None
+    # 2026-07-11-unify-runtime-session-dialog / FR-08: 首条 user_input 摘要前 30 字，
+    # 由 router 层注入（非 ORM 字段）；FR-05 deleted_at 软删时间戳（ORM 直接映射）。
+    title: str | None = None
+    deleted_at: datetime | None = None
+    # 当前运行 run（attach 恢复 currentRunId，启用打断按钮；非 ORM 字段，router 注入）
+    current_run_id: uuid.UUID | None = None
 
     model_config = {"from_attributes": True}
 

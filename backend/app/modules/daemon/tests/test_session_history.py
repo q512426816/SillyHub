@@ -393,7 +393,7 @@ class TestSessionLogs:
 
 
 class TestDeleteSession:
-    async def test_delete_terminal_session_keeps_runs_and_nulls_reference(
+    async def test_delete_terminal_session_soft_deletes_and_keeps_reference(
         self,
         client: AsyncClient,
         auth_headers: dict[str, str],
@@ -417,11 +417,13 @@ class TestDeleteSession:
         )
 
         assert resp.status_code == 204, resp.text
+        # 2026-07-11-unify-runtime-session-dialog / D-003: 软删（行保留 + deleted_at 非空 + 外键不断）
         db_session.expire_all()
-        assert await db_session.get(AgentSession, agent_session_id) is None
+        soft_deleted = await db_session.get(AgentSession, agent_session_id)
+        assert soft_deleted is not None and soft_deleted.deleted_at is not None
         preserved_run = await db_session.get(AgentRun, run_id)
         assert preserved_run is not None
-        assert preserved_run.agent_session_id is None
+        assert preserved_run.agent_session_id == agent_session_id
 
     async def test_delete_active_session_now_succeeds_task03(
         self,
@@ -450,8 +452,10 @@ class TestDeleteSession:
         )
 
         assert resp.status_code == 204, resp.text
+        # 2026-07-11-unify-runtime-session-dialog / D-003: 软删（行保留 + deleted_at 非空）
         db_session.expire_all()
-        assert await db_session.get(AgentSession, agent_session_id) is None
+        soft_deleted = await db_session.get(AgentSession, agent_session_id)
+        assert soft_deleted is not None and soft_deleted.deleted_at is not None
 
     async def test_delete_cross_user_session_is_hidden(
         self,

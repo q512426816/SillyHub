@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import col
@@ -1298,7 +1298,10 @@ class SessionService:
         """
         from sqlalchemy import func
 
-        base_filters = [AgentSession.user_id == user_id]
+        base_filters = [
+            AgentSession.user_id == user_id,
+            AgentSession.deleted_at.is_(None),  # FR-07 软删过滤
+        ]
         if status_filter is not None:
             base_filters.append(AgentSession.status == status_filter)
 
@@ -1334,6 +1337,7 @@ class SessionService:
         stmt = select(AgentSession).where(
             AgentSession.id == session_id,
             AgentSession.user_id == user_id,
+            AgentSession.deleted_at.is_(None),  # FR-07 软删视为不存在→404
         )
         session = (await self._session.execute(stmt)).scalar_one_or_none()
         if session is None:
@@ -1515,17 +1519,16 @@ class SessionService:
         session_id: uuid.UUID,
         user_id: uuid.UUID,
     ) -> None:
-        """Delete an owned session while retaining its run history.
+        """Soft-delete an owned session while retaining its row + run history.
 
-        task-03 / FR-03 / D-003@v1: an active/pending/reconnecting session is no
-        longer rejected with 409 — the service first performs an internal end
-        reconciliation (best-effort SESSION_END WS + currentRun killed +
-        lease completed), mirroring :meth:`end_session`, then executes the
-        existing hard delete (sever ``agent_runs.agent_session_id`` foreign key
-        to preserve run/log history, then drop the session row). ended/failed
-        sessions are hard-deleted directly. Daemon-offline WS failure is a
-        warning only — the local end + delete still succeed so an offline daemon
-        can never strand a deletable active session.
+        2026-07-11-unify-runtime-session-dialog / FR-06 / D-003: 改为软删除。
+        active/pending/reconnecting 会话仍先做 best-effort end reconciliation
+        （WS SESSION_END + currentRun killed + lease completed，镜像
+        :meth:`end_session`），daemon 离线时该步失败仅 warning 不阻断；随后
+        ``UPDATE agent_sessions SET deleted_at=now()`` 标记软删。行保留供审计，
+        ``agent_runs.agent_session_id`` 外键**刻意不断**（run/log 历史仍可查），
+        list/get 端点通过 ``deleted_at IS NULL`` 过滤隐藏软删会话。ended/failed
+        会话直接 UPDATE 软删（不做 end reconciliation）。
         """
         agent_session = (
             await self._session.execute(
@@ -1557,12 +1560,12 @@ class SessionService:
                     exc_info=True,
                 )
 
-        await self._session.execute(
-            update(AgentRun)
-            .where(AgentRun.agent_session_id == session_id)
-            .values(agent_session_id=None)
-        )
-        await self._session.delete(agent_session)
+        # 2026-07-11-unify-runtime-session-dialog / D-003 / C-7: 软删除——UPDATE
+        # deleted_at（行保留供审计；刻意不断 agent_runs.agent_session_id 外键，
+        # run/log 历史仍可查；list/get 端点过滤 deleted_at IS NULL 隐藏）。
+        # 取代原硬删：删除了 update(AgentRun).set(agent_session_id=None) +
+        # session.delete(agent_session) 两步（C-7 / R-4）。
+        agent_session.deleted_at = datetime.now(UTC)
         await self._session.commit()
 
     async def _end_session_for_delete(self, session: AgentSession) -> None:

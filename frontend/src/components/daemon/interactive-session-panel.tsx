@@ -54,6 +54,7 @@ import {
   type SessionStreamEnvelope,
 } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
+import { sanitizeSessionLogContent } from "@/components/daemon/session-log-sanitize";
 
 type SessionUiStatus = "idle" | "creating" | "active" | "ending" | "ended" | "failed" | "reconnecting";
 type TurnUiStatus = "pending" | "running" | "interrupting" | "completed" | "failed" | "killed";
@@ -189,6 +190,10 @@ export function InteractiveSessionPanel({
           }), { setCurrentRun: env.run_id! }));
         },
         onLog: (env, _cursor) => {
+          // 2026-07-11-unify-runtime-session-dialog task-12: channel=user_input 是
+          // 用户消息（attach 时 initialTurns 已作 prompt），不追加到 agent output，
+          // 避免 attach 时 user_input 同时出现在 prompt 气泡和 output 气泡（重复）。
+          if (env.channel === "user_input") return;
           setView((prev) => {
             // log 以 log_id 去重
             return upsertTurn(prev, env, (turn) => {
@@ -313,7 +318,14 @@ export function InteractiveSessionPanel({
         if (cancelled) return;
         if (detail.status === "active") {
           stop();
-          setView((prev) => ({ ...prev, status: "active", errorMsg: null }));
+          // 恢复 currentRunId（attach 运行中会话时启用打断按钮；detail.current_run_id
+          // 由 get_session_detail 注入，无运行 run 则保持 null）
+          setView((prev) => ({
+            ...prev,
+            status: "active",
+            errorMsg: null,
+            currentRunId: detail.current_run_id ?? prev.currentRunId,
+          }));
         } else if (detail.status === "failed") {
           stop();
           setView((prev) => ({
@@ -321,6 +333,11 @@ export function InteractiveSessionPanel({
             status: "failed",
             errorMsg: "会话恢复失败，可能上下文已失效",
           }));
+        } else if (detail.status === "ended") {
+          // 2026-07-11-unify-runtime-session-dialog: ended 会话 attach（无 SDK session id
+          // 等无法 reopen 的老会话）→ 转只读 ended 态，显示 initialTurns 历史，不卡轮询。
+          stop();
+          setView((prev) => ({ ...prev, status: "ended", errorMsg: null }));
         }
         // reconnecting / ended / pending → 继续轮询（由超时兜底）
       } catch {
@@ -452,6 +469,12 @@ export function InteractiveSessionPanel({
               : t,
           ),
         }));
+        // 清旧 attach stream 残留（panel 未 remount 时 streamConnRef 可能仍指向旧 session
+        // 的 SSE，establishStream 防御会跳过建新流）+ 建新 session 的 SSE。
+        if (streamConnRef.current) {
+          streamConnRef.current.close();
+          streamConnRef.current = null;
+        }
         establishStream(resp.session_id);
         // ql-20260623（改动一）：上报 session_id 给父级写 URL（刷新恢复）
         onSessionCreated?.(resp.session_id);
@@ -891,25 +914,12 @@ function TurnStatusBadge({
   );
 }
 
-/** 把 log envelope 渲染成纯文本片段（保留 [SYSTEM]/[RESULT] 过滤）。 */
+/** 把 log envelope 渲染成纯文本片段。
+ *  2026-07-11-unify-runtime-session-dialog / FR-04 / D-004: 改调共享
+ *  sanitizeSessionLogContent，与 logsToTurns（attach 历史预填）共用同一过滤，
+ *  避免 thinking/SYSTEM/AskUserQuestion 等原始标记泄漏到正文。 */
 function renderLogContent(env: SessionStreamEnvelope): string {
-  const content = (env.content ?? "").trim();
-  if (!content) return "";
-  // 过滤 AskUserQuestion 相关的原始 JSON 日志：
-  // 这些内容已由 AskUserDialogCard 卡片展示，不应再以原始 tool_call/tool_result
-  // 形式混入聊天窗口。覆盖三类行：
-  //   [TOOL_USE] AskUserQuestion: {...}
-  //   🔧 {"tool": "AskUserQuestion", ...}      （含 "AskUserQuestion" 字样）
-  //   [TOOL_RESULT] User answered: {...}        （AskUserQuestion 的回答结果）
-  if (content.includes("AskUserQuestion")) return "";
-  if (/^\[TOOL_RESULT\]\s*User answered/.test(content)) return "";
-  // 过滤技术日志
-  if (/^\[(SYSTEM|RESULT)[^\]]*\]/.test(content)) return "";
-  const channel = env.channel;
-  if (channel === "stderr") return `⚠️ ${content}`;
-  if (channel === "tool_call") return `🔧 ${content}`;
-  // 剥前缀
-  return content.replace(/^\[(ASSISTANT|THINKING|LOG:\w+)\]\s?/, "");
+  return sanitizeSessionLogContent(env.content ?? "", env.channel);
 }
 
 interface UpsertOpts {

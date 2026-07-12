@@ -118,9 +118,9 @@ describe("ChangeSessionSection", () => {
     await waitFor(() =>
       expect(sessionApi.listChangeSessions).toHaveBeenCalledWith("ws-1", "change-1"),
     );
-    // 历史项渲染：标题 + 作者
+    // 历史项渲染：标题 + 作者（secondaryText 合并「作者 · 提供方」）
     expect(await screen.findByText("关于扫描结果的讨论")).toBeInTheDocument();
-    expect(screen.getByText("张三")).toBeInTheDocument();
+    expect(screen.getByText(/张三/)).toBeInTheDocument();
     // 无 title 项回退 shortId
     expect(screen.getByText(/李四/)).toBeInTheDocument();
   });

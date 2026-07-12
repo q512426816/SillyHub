@@ -401,6 +401,7 @@ class AgentSession(BaseModel, table=True):
         Index("ix_agent_sessions_status", "status"),
         Index("ix_agent_sessions_lease_id", "lease_id"),
         Index("ix_agent_sessions_change_id", "change_id"),
+        Index("ix_agent_sessions_deleted_at", "deleted_at"),
     )
 
     id: uuid.UUID = Field(
@@ -490,6 +491,13 @@ class AgentSession(BaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )  # written by service.end_session (task-05)
+    # 2026-07-11-unify-runtime-session-dialog / D-003: soft-delete timestamp.
+    # NULL = 可见行；非空 = 用户已删除（list/get 过滤隐藏，行保留供审计，
+    # agent_runs.agent_session_id 外键刻意不断，run/log 历史仍可查）。
+    deleted_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
 
 
 class AgentMission(BaseModel, table=True):

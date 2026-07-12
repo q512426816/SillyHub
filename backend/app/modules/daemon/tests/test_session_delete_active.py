@@ -1,12 +1,10 @@
-"""task-03: delete_agent_session 去 active 拒绝、active 先内部 end 再硬删.
+"""2026-07-11-unify-runtime-session-dialog: delete_agent_session 改软删.
 
-FR-03 / design §4.2、§6.2、§13；decisions D-003@v1。
-
-DELETE 一个 active/pending/reconnecting 会话不再 409 —— service 先做 end
-收口（best-effort SESSION_END WS + 当前非终态 run 标 killed/exit_code=-1 +
-lease 置 completed），再执行现有硬删（agent_runs.agent_session_id 断外键
-NULL + session.delete）。ended/failed 直接硬删。daemon 离线时 WS 只 warn，
-本地仍删成功。
+FR-05/06 / D-003。DELETE 一个 active/pending/reconnecting 会话：service 先
+做 end 收口（best-effort SESSION_END WS + 当前非终态 run 标 killed/exit_code
+=-1 + lease 置 completed），再 UPDATE deleted_at 软删（行保留、agent_runs
+外键不断、run/log 历史可查；list/get 过滤 deleted_at IS NULL 隐藏）。ended/
+failed 直接 UPDATE 软删。daemon 离线时 WS 只 warn，本地软删仍成功。
 """
 
 from __future__ import annotations
@@ -142,7 +140,7 @@ async def _make_interactive_session(
 
 class TestDeleteActiveSession:
     @pytest.mark.asyncio
-    async def test_delete_active_ends_then_hard_deletes(
+    async def test_delete_active_ends_then_soft_deletes(
         self, db_session, mocked_hub, mocked_redis
     ) -> None:
         uid = await _create_user(db_session)
@@ -156,7 +154,7 @@ class TestDeleteActiveSession:
             run_status="running",
         )
         session_id, run_id, lease_id = session.id, run.id, lease.id
-        # a log on the run — must be preserved (foreign key severed, row kept)
+        # a log on the run — must be preserved (row soft-deleted, FK intact)
         log_row = AgentRunLog(
             id=uuid.uuid4(),
             run_id=run.id,
@@ -171,13 +169,14 @@ class TestDeleteActiveSession:
         await svc.delete_agent_session(session_id, uid)
 
         db_session.expire_all()
-        assert await db_session.get(AgentSession, session_id) is None
+        deleted = await db_session.get(AgentSession, session_id)
+        assert deleted is not None and deleted.deleted_at is not None
 
-        # run kept, foreign key severed
+        # run kept, foreign key INTACT (soft-delete does not sever FK)
         kept_run = await db_session.get(AgentRun, run_id)
         assert kept_run is not None
-        assert kept_run.agent_session_id is None
-        # run was converged to killed before the hard delete severed the FK
+        assert kept_run.agent_session_id == session_id
+        # run was converged to killed before the soft delete (FK intact)
         assert kept_run.status == "killed"
         assert kept_run.finished_at is not None
         assert kept_run.exit_code == -1
@@ -243,9 +242,10 @@ class TestDeletePendingReconnecting:
         await svc.delete_agent_session(session_id, uid)
 
         db_session.expire_all()
-        assert await db_session.get(AgentSession, session_id) is None
+        deleted = await db_session.get(AgentSession, session_id)
+        assert deleted is not None and deleted.deleted_at is not None
         kept_run = await db_session.get(AgentRun, run_id)
-        assert kept_run is not None and kept_run.agent_session_id is None
+        assert kept_run is not None and kept_run.agent_session_id == session_id
         assert kept_run.status == "killed"
         kept_lease = await db_session.get(DaemonTaskLease, lease_id)
         assert kept_lease is not None and kept_lease.status == "completed"
@@ -277,11 +277,12 @@ class TestDeleteTerminalSession:
         await svc.delete_agent_session(session_id, uid)
 
         db_session.expire_all()
-        assert await db_session.get(AgentSession, session_id) is None
+        deleted = await db_session.get(AgentSession, session_id)
+        assert deleted is not None and deleted.deleted_at is not None
         # no SESSION_END WS sent on the terminal path
         assert mocked_hub.send_session_control.await_count == 0
         kept_run = await db_session.get(AgentRun, run_id)
-        assert kept_run is not None and kept_run.agent_session_id is None
+        assert kept_run is not None and kept_run.agent_session_id == session_id
         # run status untouched (already terminal)
         assert kept_run.status == "completed"
 
@@ -306,9 +307,10 @@ class TestDeleteOwnership:
         with pytest.raises(DaemonSessionNotFound):
             await svc.delete_agent_session(session_id, other)
 
-        # session still exists (delete aborted on ownership miss)
+        # session still exists and NOT soft-deleted (delete aborted on ownership miss)
         db_session.expire_all()
-        assert await db_session.get(AgentSession, session_id) is not None
+        kept = await db_session.get(AgentSession, session_id)
+        assert kept is not None and kept.deleted_at is None
 
 
 # ── daemon offline best-effort ───────────────────────────────────────────────
@@ -335,8 +337,44 @@ class TestDeleteActiveDaemonOffline:
             await svc.delete_agent_session(session_id, uid)
 
         db_session.expire_all()
-        assert await db_session.get(AgentSession, session_id) is None
+        deleted = await db_session.get(AgentSession, session_id)
+        assert deleted is not None and deleted.deleted_at is not None
         kept_run = await db_session.get(AgentRun, run_id)
         assert kept_run is not None and kept_run.status == "killed"
         kept_lease = await db_session.get(DaemonTaskLease, lease_id)
         assert kept_lease is not None and kept_lease.status == "completed"
+
+
+# ── soft-delete listing / read filtering (FR-07) ─────────────────────────────
+
+
+class TestSoftDeleteListingFilter:
+    """2026-07-11-unify-runtime-session-dialog / FR-07: 软删项从 list/get 隐藏。"""
+
+    @pytest.mark.asyncio
+    async def test_soft_deleted_hidden_from_list_and_get(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        from app.modules.daemon.service import DaemonSessionNotFound
+
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        keep, _lk, _lr = await _make_interactive_session(
+            db_session, uid=uid, runtime_id=rt.id, status="active", run_status="running"
+        )
+        victim, _vl, _vr = await _make_interactive_session(
+            db_session, uid=uid, runtime_id=rt.id, status="ended", run_status="completed"
+        )
+
+        svc = DaemonService(db_session)
+        await svc.delete_agent_session(victim.id, uid)
+
+        items, total = await svc.list_agent_sessions(uid, limit=20, offset=0)
+        ids = {s.id for s in items}
+        assert victim.id not in ids  # 软删过滤
+        assert keep.id in ids
+        assert total == 1
+
+        # get 对软删项 → 404（软删视为不存在）
+        with pytest.raises(DaemonSessionNotFound):
+            await svc.get_agent_session(victim.id, uid)

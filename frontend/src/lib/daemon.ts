@@ -1133,6 +1133,12 @@ export interface AgentSessionRead {
   created_at: string;
   last_active_at: string | null;
   ended_at: string | null;
+  /** FR-08: 首条 user_input 摘要前 30 字（router 注入，可空）。 */
+  title: string | null;
+  /** FR-05: 软删时间戳（正常列表不会返回软删项，防御性字段）。 */
+  deleted_at: string | null;
+  /** 当前运行 run（attach 恢复 currentRunId，启用打断按钮；无运行 run 则 null）。 */
+  current_run_id: string | null;
 }
 
 export interface AgentSessionListResponse {

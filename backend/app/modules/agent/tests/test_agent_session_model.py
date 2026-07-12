@@ -19,7 +19,7 @@ def test_agent_session_tablename() -> None:
     assert AgentSession.__tablename__ == "agent_sessions"
 
 
-def test_agent_session_has_all_15_fields() -> None:
+def test_agent_session_has_all_16_fields() -> None:
     expected = {
         "id",
         "user_id",
@@ -36,12 +36,13 @@ def test_agent_session_has_all_15_fields() -> None:
         "created_at",
         "last_active_at",
         "ended_at",
+        "deleted_at",  # 2026-07-11-unify-runtime-session-dialog / D-003 软删
     }
     actual = set(AgentSession.model_fields.keys())
     assert actual == expected, (
         f"AgentSession field mismatch. missing={expected - actual}, extra={actual - expected}"
     )
-    assert len(AgentSession.model_fields) == 15
+    assert len(AgentSession.model_fields) == 16
 
 
 def test_agent_session_defaults() -> None:

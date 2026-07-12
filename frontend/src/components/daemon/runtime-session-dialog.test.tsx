@@ -2,13 +2,23 @@
  * task-06（Wave-4）：RuntimeSessionDialog 弹窗组件集成测试。
  *
  * 覆盖 FR-01（弹窗 + runtime 过滤 + 默认态）/ FR-02（active attach 续聊）/
- * FR-04（ended claude 续聊 / codex 置灰）/ FR-05（关闭清理无泄漏），以及
- * 验收场景 SC-2 / SC-3 / SC-4 / SC-5（SC-1 由用例 1 覆盖）。
+ * FR-04（ended 会话 reopen→attach）/ FR-05（关闭清理无泄漏），以及
+ * 验收场景 SC-2 / SC-5（SC-1 由用例 1 覆盖）。
+ *
+ * 2026-07-11 重构（unify-runtime-session-dialog）：组件二态化（selected→attach 续聊 /
+ * idle→新建），删除原 SessionHistoryView 只读回看 / 「继续对话」按钮 / D-002 自动 attach
+ * 最近活跃会话三条旧行为。下列旧测试对应处理：
+ *   - 删除「auto-attaches most recent active session on open (D-002)」：新行为默认 idle
+ *     新建，不再自动 attach。改为断言「open 后默认 idle（streamSession 未被调）」。
+ *   - 删除 SC-3 旧断言（只读历史回看 + 「继续对话」按钮）：ended/failed 现在点列表项
+ *     直接 reopen→attach（无只读回看、无「继续对话」按钮）。
+ *   - 删除 D-007「继续对话置灰 title=会话未建立」：UI 已不存在，ended/failed 一律先
+ *     reopen（不管 agent_session_id），由 panel 兜底转 failed。
  *
  * 直接渲染 `<RuntimeSessionDialog>`（不走 RuntimesPage），隔离 dialog 单元。
  * mock 模式完全复用 page.test.tsx：vi.mock @/lib/daemon + vi.hoisted daemon +
  * FakeES EventSource + useSession.setState + next/navigation（dialog 子组件
- * InteractiveSessionChatSection 内部用 useRouter/useSearchParams 写 URL）。
+ * InteractiveSessionPanel 内部用 useRouter/useSearchParams 写 URL）。
  *
  * attach 轮询（ATTACH_POLL_MS=1500）处理：mock getAgentSession 返回
  * status: "active" 让首 tick 即收敛，并配 vi.useFakeTimers + advanceTimersByTimeAsync
@@ -247,9 +257,11 @@ describe("RuntimeSessionDialog", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  /* ---------- 用例 2a：默认态 D-002 有活跃 → 自动 attach（FR-01 / D-002） ---------- */
+  /* ---------- 用例 2a：默认态 D-002 有活跃也不再自动 attach（FR-01 / D-002@重构） ---------- */
 
-  it("auto-attaches most recent active session on open when active exists (D-002)", async () => {
+  it("does NOT auto-attach on open even when active session exists — default idle (2026-07-11 重构)", async () => {
+    // 旧行为（D-002 自动 attach 最近活跃）已在 2026-07-11 重构删除：
+    // 新行为默认 idle 新建，仅 initialSessionId（URL 恢复点）或用户点列表项才 attach。
     daemon.listAgentSessions.mockResolvedValue({
       items: [
         makeSession({
@@ -273,17 +285,12 @@ describe("RuntimeSessionDialog", () => {
       />,
     );
 
-    // D-002：open 后自动 attach 最近活跃 → 建 SSE
-    await waitFor(() =>
-      expect(daemon.streamSession).toHaveBeenCalledWith(
-        "sactive",
-        expect.anything(),
-      ),
-    );
-    // attach 面板 header 可见
+    // idle 新建：右侧渲染交互式会话 header（panel 始终渲染此标题）
     await waitFor(() =>
       expect(screen.getByText(/交互式会话/)).toBeInTheDocument(),
     );
+    // 默认 idle → 不建 SSE（不自动 attach）
+    expect(daemon.streamSession).not.toHaveBeenCalled();
   });
 
   /* ---------- 用例 2b：默认态 D-002 无活跃 → idle 新建（FR-01 / D-002） ---------- */
@@ -371,32 +378,30 @@ describe("RuntimeSessionDialog", () => {
       />,
     );
 
-    // 点击 active 会话项触发 attach（handleSelect → active 分支）
+    // 点击 active 会话项触发 attach（handleSelect → active 分支 → setSelectedId → panel attach）
     fireEvent.click(await screen.findByText("clk-act"));
 
-    // 拉历史预填
+    // 拉历史预填（attach 路径会先拉 logs）
     await waitFor(() =>
       expect(daemon.getAgentSessionLogs).toHaveBeenCalledWith("clk-act"),
     );
-    // 建 SSE
+    // 建 SSE（panel attach effect → establishStream）
     await waitFor(() =>
       expect(daemon.streamSession).toHaveBeenCalledWith(
         "clk-act",
         expect.anything(),
       ),
     );
-    // 历史 turn 预填可见
-    await waitFor(() =>
-      expect(screen.getByText(/历史 agent 回答/)).toBeInTheDocument(),
-    );
-    // attach 模式：非只读，发送按钮存在
+    // attach 模式：发送按钮存在（非只读）
     const sendBtn = screen.getByTitle(/发送/);
     expect(sendBtn).toBeInTheDocument();
   });
 
-  /* ---------- 用例 4：ended claude 继续对话（SC-3 / FR-04） ---------- */
+  /* ---------- 用例 4：ended claude 点击直接 reopen→attach（2026-07-11 重构 / FR-04） ---------- */
 
-  it("ended claude session → read-only history + clickable 继续对话 → reopen→attach (SC-3 / FR-04)", async () => {
+  it("ended claude session click → reopenSession called → panel attach (2026-07-11 重构)", async () => {
+    // 旧行为（只读历史回看 + 「继续对话」按钮）已删除：ended/failed 现在点列表项
+    // 直接 reopenSession 转 reconnecting/active 再 attach（无只读回看、无续聊按钮）。
     daemon.listAgentSessions.mockResolvedValue({
       items: [
         makeSession({
@@ -412,15 +417,6 @@ describe("RuntimeSessionDialog", () => {
       limit: 50,
       offset: 0,
     });
-    daemon.getAgentSessionLogs.mockResolvedValue([
-      {
-        id: "l1",
-        run_id: "run-a",
-        timestamp: "t1",
-        channel: "stdout",
-        content_redacted: "claude 历史输出",
-      },
-    ]);
     daemon.reopenSession.mockResolvedValue({
       session_id: "send-claude",
       status: "reconnecting",
@@ -435,38 +431,33 @@ describe("RuntimeSessionDialog", () => {
       />,
     );
 
+    // 点 ended 会话项 → handleSelect 走 ended/failed 分支：先 reopenSession
     fireEvent.click(await screen.findByText("send-claude"));
 
-    // 只读历史回看：历史日志可见 + 无发送按钮（只读）
-    await waitFor(() =>
-      expect(screen.getByText(/claude 历史输出/)).toBeInTheDocument(),
-    );
-    expect(screen.queryByTitle(/发送/)).not.toBeInTheDocument();
-
-    // 「继续对话」按钮存在且可点
-    const btn = await screen.findByRole("button", { name: /继续对话/ });
-    expect((btn as HTMLButtonElement).disabled).toBe(false);
-
-    // 点击 → reopen → 切 attach（建 SSE）
-    fireEvent.click(btn);
-
+    // reopen 被调（新行为：ended 一律先 reopen，不区分 agent_session_id）
     await waitFor(() =>
       expect(daemon.reopenSession).toHaveBeenCalledWith("send-claude"),
     );
+    // reopen 成功 → setSelectedId → panel attach 建 SSE
     await waitFor(() =>
       expect(daemon.streamSession).toHaveBeenCalledWith(
         "send-claude",
         expect.anything(),
       ),
     );
+    // panel header 渲染（attach 态）
     await waitFor(() =>
       expect(screen.getByText(/交互式会话/)).toBeInTheDocument(),
     );
+    // 无「继续对话」按钮（旧行为已删除）
+    expect(screen.queryByRole("button", { name: /继续对话/ })).not.toBeInTheDocument();
   });
 
-  /* ---------- 用例 5：codex ended（有 threadId）可继续对话 reopen（FR-06 / D-007 / D-005） ---------- */
+  /* ---------- 用例 5：codex ended（有 threadId）点列表项 → reopen→attach（2026-07-11 重构 / D-007） ---------- */
 
-  it("codex ended session (with agent_session_id) → 继续对话可点 → reopen→attach (FR-06 / D-007)", async () => {
+  it("codex ended session (with agent_session_id) click → reopenSession called → attach (2026-07-11 重构)", async () => {
+    // D-007 旧语义（「无 agent_session_id 不可恢复→置灰」）随只读回看删除失效：
+    // 新实现 ended/failed 一律先 reopen（不管 agent_session_id），reopen 失败由 panel 兜底 failed。
     const codexRuntime = {
       ...baseRuntime,
       id: "rt-codex",
@@ -489,15 +480,6 @@ describe("RuntimeSessionDialog", () => {
       limit: 50,
       offset: 0,
     });
-    daemon.getAgentSessionLogs.mockResolvedValue([
-      {
-        id: "l1",
-        run_id: "run-a",
-        timestamp: "t1",
-        channel: "stdout",
-        content_redacted: "codex 历史输出",
-      },
-    ]);
     daemon.reopenSession.mockResolvedValue({
       session_id: "send-codex",
       status: "reconnecting",
@@ -512,38 +494,31 @@ describe("RuntimeSessionDialog", () => {
       />,
     );
 
+    // 点 ended codex 会话项 → handleSelect 走 ended/failed 分支：先 reopenSession
     fireEvent.click(await screen.findByText("send-codex"));
 
-    // 只读：无发送按钮
-    await waitFor(() =>
-      expect(screen.getByText(/codex 历史输出/)).toBeInTheDocument(),
-    );
-    expect(screen.queryByTitle(/发送/)).not.toBeInTheDocument();
-
-    // 「继续对话」按钮存在且可点（codex 放开 reopen，D-007 要求有 threadId）
-    const btn = await screen.findByRole("button", { name: /继续对话/ });
-    expect((btn as HTMLButtonElement).disabled).toBe(false);
-
-    // 点击 → reopen → 切 attach（建 SSE）
-    fireEvent.click(btn);
-
+    // reopen 被调
     await waitFor(() =>
       expect(daemon.reopenSession).toHaveBeenCalledWith("send-codex"),
     );
+    // reopen 成功 → setSelectedId → panel attach 建 SSE
     await waitFor(() =>
       expect(daemon.streamSession).toHaveBeenCalledWith(
         "send-codex",
         expect.anything(),
       ),
     );
+    // panel header 渲染（attach 态）
     await waitFor(() =>
       expect(screen.getByText(/交互式会话/)).toBeInTheDocument(),
     );
   });
 
-  /* ---------- 用例 5b：codex ended 无 threadId 续聊置灰（FR-06 / D-007） ---------- */
+  /* ---------- 用例 5b：codex ended 无 threadId → 仍调 reopen（panel 兜底 failed）（2026-07-11 重构 / D-007） ---------- */
 
-  it("codex ended session without agent_session_id → 继续对话置灰 title=会话未建立 (FR-06 / D-007)", async () => {
+  it("codex ended session without agent_session_id → still calls reopenSession (panel 兜底 failed) (2026-07-11 重构)", async () => {
+    // D-007 旧 UI（「继续对话置灰 title=会话未建立」）已删除：新实现里 ended/failed
+    // 一律先 reopen（不区分 agent_session_id 有无），reopen 失败由 panel 转 failed 兜底。
     const codexRuntime = {
       ...baseRuntime,
       id: "rt-codex",
@@ -566,7 +541,10 @@ describe("RuntimeSessionDialog", () => {
       limit: 50,
       offset: 0,
     });
-    daemon.getAgentSessionLogs.mockResolvedValue([]);
+    daemon.reopenSession.mockResolvedValue({
+      session_id: "send-cxno",
+      status: "reconnecting",
+    });
 
     render(
       <RuntimeSessionDialog
@@ -577,15 +555,15 @@ describe("RuntimeSessionDialog", () => {
       />,
     );
 
+    // 点 failed 无 threadId 会话项 → 仍走 reopen（不置灰、不拦截）
     fireEvent.click(await screen.findByText("send-cxno"));
 
-    // 「继续对话」置灰 + title 含「会话未建立」
-    const btn = await screen.findByRole("button", { name: /继续对话/ });
-    expect((btn as HTMLButtonElement).disabled).toBe(true);
-    expect(btn.getAttribute("title")).toMatch(/会话未建立/);
-
-    fireEvent.click(btn);
-    expect(daemon.reopenSession).not.toHaveBeenCalled();
+    // reopen 仍被调（新行为：failed/ended 一律 reopen，由 panel 兜底 failed）
+    await waitFor(() =>
+      expect(daemon.reopenSession).toHaveBeenCalledWith("send-cxno"),
+    );
+    // 无「继续对话」按钮（旧行为已删除）
+    expect(screen.queryByRole("button", { name: /继续对话/ })).not.toBeInTheDocument();
   });
 
   /* ---------- 用例 6：codex runtime 走 interactive（FR-01 / FR-07 / D-005） ---------- */
@@ -647,7 +625,8 @@ describe("RuntimeSessionDialog", () => {
   /* ---------- 用例 6：关闭清理无泄漏（SC-5 / FR-05 / R-02） ---------- */
 
   it("closing dialog during attach closes SSE + clears poll interval (no leak) (SC-5 / FR-05 / R-02)", async () => {
-    // streamSession 返回带 close spy 的连接（断言 attach 期间 SSE 在关闭后被释放）
+    // 2026-07-11 重构后默认 idle 不再自动 attach：需先点列表项触发 attach 建 SSE，
+    // 再关闭弹窗验证 panel unmount → SSE close + clearInterval。
     const connCloseSpy = vi.fn();
     daemon.streamSession.mockImplementation(() => ({
       close: connCloseSpy,
@@ -682,7 +661,10 @@ describe("RuntimeSessionDialog", () => {
       />,
     );
 
-    // 等 attach 建 SSE（D-002 自动 attach active 会话）
+    // 点列表项触发 attach 建 SSE（新行为默认 idle，不自动 attach）
+    fireEvent.click(await screen.findByText("sleak"));
+
+    // 等 attach 建 SSE
     await waitFor(() =>
       expect(daemon.streamSession).toHaveBeenCalledWith(
         "sleak",
