@@ -145,3 +145,13 @@
 - 根因：runtime stage 的 apt 层平时缓存命中不需联网；当 base image `python:3.12-slim` 上游 digest 漂移（docker hub 重新推送同 tag），FROM 层变化使后续所有层缓存失效，apt-get update 需重新联网，而 deb.debian.org 在国内网络不可达——pip（tsinghua）/npm（npmmirror）都已配国内源，唯独 apt 漏配。
 - 修复（ql-20260713-001-9f3e）：backend/Dockerfile L66-76 在 apt-get update 前加 `find /etc/apt \( -name sources.list -o -name '*.sources' \) -exec sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' {} +`。trixie 用 DEB822 `/etc/apt/sources.list.d/debian.sources`，旧版用 `sources.list`，find 双覆盖；找不到文件时 `-exec` 不执行、退出码仍 0，无副作用。
 - 通用坑：Dockerfile 多阶段里 pip/npm 配了国内镜像但 apt 漏配是常见隐患——平时缓存命中掩盖了 apt 源不可达，一旦 base image digest 漂移或 `--no-cache` 就裸奔 build 失败。新项目 Dockerfile apt 层统一配国内源，与 pip/npm 对齐。
+
+## 2026-07-13 — install.sh WSL 下 1c/1d 盘符转换 bug（/e/ vs /mnt/e/）+ CMD `bash` 默认解析到 WSL
+
+> 来源：ql-20260713-003-b3d7。与 [[2026-06-30 — install.sh 改动需重建 backend 镜像才下发]] 同属 daemon install.sh 链路。
+
+- 现象：用户 node 在 `E:\Software\nvm`（nvm-windows，NVM_SYMLINK=E:\Software\nodejs → 版本目录），从 CMD 跑 `curl .../daemon/install.sh | bash` 报"未检测到 node，安装中止"。但 install.sh 1d PowerShell 注册表逻辑本身在本机直接跑能找到 `E:\Software\nodejs\node.exe`（注册表 PATH 有）。
+- 根因①（CMD `bash` 解析）：用户系统装了 WSL（Ubuntu），CMD 敲 `bash` 默认解析到 `C:\Windows\System32\bash.exe`（WSL），**不是** Git Bash——除非 Git Bash 的 `bash.exe` 在 PATH 更前。install.sh 在 WSL 跑（IS_WSL=1）。
+- 根因②（盘符转换 bug）：1c（cmd where）+ 1d（powershell 注册表）都成功拿到 Windows 路径 `E:\Software\nodejs\node.exe`，但盘符转换硬编码 `/${drive}${path:2}`（Git Bash 风格 `/e/`），WSL 下 `/e/` 不存在（应 `/mnt/e/`）→ `[[ -f /e/... ]]` 失败 → NODE_BIN 空。1a（WSL PATH 不含 Windows node）+ 1b（候选路径无 /mnt/e/）也失败，1c/1d 是唯一救命稻草却被盘符转换坑了。
+- 修复（ql-20260713-003-b3d7）：install.sh 抽 `win_to_unix_path` 函数，按 IS_WSL 决定前缀（WSL → `/mnt/<drive>/`，Git Bash → `/<drive>/`），1c/1d 改调它。验证：WSL 内层跑改后脚本 check_node = 找到 node（注册表 PATH）: `/mnt/e/Software/nodejs/node.exe` v24.14.1。
+- 通用坑：跨 Git Bash/WSL 的 shell 脚本，Windows 路径转 unix 路径必须区分两种映射（MSYS `/c/` vs WSL `/mnt/c/`），不能硬编码其中一种。WSL 默认 automount 所有 Windows 盘到 `/mnt/<drive>/`；Git Bash (MSYS) 挂到 `/<drive>/`。检测 IS_WSL（`/proc/sys/kernel/osrelease` 含 `microsoft`）后选对应前缀。写 Windows 安装脚本时**别假设 `bash` = Git Bash**——Win10/11 装了 WSL 后，CMD/PowerShell 里 `bash` 默认是 WSL 的 bash.exe。

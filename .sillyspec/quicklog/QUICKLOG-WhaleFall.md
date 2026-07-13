@@ -421,5 +421,15 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 方案：放弃脆弱的端口字符串替换——server-url 直接用 window.location.origin（客户端实际访问地址，本机/局域网自适应），前端 next.config rewrites 加 `/daemon/:path*` → `${apiBaseUrl}/daemon/:path*`（与 /api 同代理目标 INTERNAL_API_BASE_URL=http://backend:8000）。daemon 全程连前端地址，/api/* 与 /daemon/* 均经前端代理到 backend。bundle 2.29MB 静态 FileResponse 非长处理，无 knowledge 2026-07-01 的 proxy socket hang up 风险（该坑是 backend 业务处理慢 >20-30s 触发，静态文件立即返回）。
 结果：①next.config.mjs rewrites 加 /daemon/:path* → backend；②page.tsx 两处端口推导改用 window.location.origin——CopyDaemonCommand L103-106（删 frontendUrl 中间变量 + :3001→:8001 replace）+ InstallDaemonBlock useEffect L167-170，过时注释「由 nginx 托管」更新为 backend dist_router FileResponse；③本机 `pnpm -C frontend typecheck` 通过；④rebuild frontend（compose 联动重建 backend），两容器 Recreated+Started healthy；⑤验证——前端 3000 /daemon/install.sh = 475 行修复版（旧 404），/daemon/latest.json 正确，/daemon/latest/sillyhub-daemon.js 经 proxy 下载 2289711 字节 = 源文件字节（大文件无损，证实 knowledge 2026-07-01 socket hang up 坑对静态 FileResponse 不适用），mcp-server.js 可达；⑥端到端：从用户原始命令地址 3000 拉 install.sh + PATH 无 node 跑 check_node → 1d 注册表兜底成功检测 /e/Software/nodejs/node.exe v24.14.1。用户原始 404 命令（curl ...:3000/daemon/install.sh | bash）现已可用。
 
+## ql-20260713-003-b3d7 | 2026-07-13 16:37:50 | WSL 下 install.sh 1c/1d 盘符转换 bug——Windows 路径只转 /e/（Git Bash 风格），WSL（/mnt/e/）下 -f 失败 → CMD→bash(WSL) 跑报"未检测到 node"
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/scripts/install.sh（1c/1d 盘符转换抽 win_to_unix_path 函数，按 IS_WSL 决定 /mnt/drive/ vs /drive/）
+需求：用户 node 装在 E:\Software\nvm（nvm-windows，NVM_SYMLINK=E:\Software\nodejs → E:\Software\nvm\v24.14.1），从 CMD 跑 `curl .../daemon/install.sh | bash` 报"未检测到 node，安装中止"。
+根因：用户系统装了 WSL（Ubuntu+docker-desktop），CMD 敲 `bash` 解析到 WSL bash.exe（不是 Git Bash），install.sh 在 WSL 跑（IS_WSL=1）。1c（cmd.exe where node）+ 1d（powershell 注册表 PATH）都成功找到 Windows node `E:\Software\nodejs\node.exe`，但盘符转换硬编码 `/${drive}${path:2}`（Git Bash 风格 /e/），WSL 下访问 /e/ 不存在（应 /mnt/e/）→ `[[ -f /e/... ]]` 失败 → NODE_BIN 空 → 未检测到 node。诊断实证：WSL 下 /mnt/e/Software/nodejs/node.exe 存在（91MB），/mnt/c/ 下 cmd.exe+powershell.exe 可达；WSL bash 跑 check_node 完美复现"未检测到 node"。1a command -v node 也失败（WSL PATH 不含 Windows node），1b 候选无 /mnt/e/，故 1c/1d 是唯一救命稻草却被盘符转换坑了。
+方案：抽 `win_to_unix_path` 函数（反斜杠→正斜杠 + 小写盘符 + 按 IS_WSL 加 /mnt/ 前缀），1c（L132-134）+ 1d（L167-169）两处盘符转换改调它。Git Bash（IS_WSL=0）输出 /e/... 不变；WSL（IS_WSL=1）输出 /mnt/e/... 修复。
+结果：①install.sh 加 win_to_unix_path 函数 + 1c/1d 两处盘符转换改调它（注释同步更新）；②`bash -n` SYNTAX_OK；③Git Bash（IS_WSL=0）win_to_unix_path 输出 /e/（不变）+ check_node 1a 命中（没改坏）；④WSL 内层（IS_WSL=1）跑改后脚本 check_node = 找到 node（注册表 PATH）: **/mnt/e/Software/nodejs/node.exe**（原转 /e/ -f 失败，现转 /mnt/e/ -f 成功）；⑤rebuild backend 部署（Dockerfile COPY scripts/install.sh 层更新，daemon bundle 未重打——install.sh 是独立脚本不经 ncc），容器 healthy；⑥端到端：服务端 3000 install.sh 含 win_to_unix_path（grep 4 处），WSL 内层从 3000 curl 拉脚本 + check_node = 找到 /mnt/e/Software/nodejs/node.exe v24.14.1 满足要求。用户原始 CMD→bash(WSL) `curl 3000/daemon/install.sh | bash` 命令现已能通过 node 检测。
+
+
 
 

@@ -84,6 +84,20 @@ info "使用服务端地址: $SERVER_URL"
 # Windows（Git Bash）下 bash 的 PATH 可能不含 nvm4w / Program Files 的 node。
 # 无条件尝试常见 Windows 路径——在 Linux/macOS 上这些路径不存在，无副作用。
 NODE_BIN=""
+# Windows 路径 → unix 路径。WSL 用 /mnt/<drive>/，Git Bash 用 /<drive>/。
+# 输入 C:\Users\...（反斜杠），输出 /c/Users/...（Git Bash）或 /mnt/c/Users/...（WSL）。
+# ql-20260713-003：原 1c/1d 盘符转换硬编码 /<drive>/（Git Bash 风格），WSL 下
+# /e/ 不存在（应 /mnt/e/），-f 失败 → CMD→bash(WSL) 跑 install.sh 报"未检测到 node"。
+win_to_unix_path() {
+  local p="$1"
+  p="$(printf '%s' "$p" | tr '\134' '/')"   # 反斜杠 → 正斜杠
+  local drive="${p:0:1}"; drive="${drive,,}" # 小写盘符
+  p="/${drive}${p:2}"
+  if [[ "$IS_WSL" -eq 1 ]]; then
+    p="/mnt${p}"
+  fi
+  printf '%s' "$p"
+}
 check_node() {
   # 1a. 标准 PATH 查找
   if command -v node >/dev/null 2>&1; then
@@ -126,12 +140,9 @@ check_node() {
       win_node="$("/mnt/c/Windows/System32/cmd.exe" /c "where node" 2>/dev/null | tr -d '\r' | head -n1 || true)"
     fi
     if [[ -n "$win_node" ]]; then
-      # C:\nvm4w\nodejs\node.exe → /c/nvm4w/nodejs/node.exe（任意盘符，小写）
-      # 用 tr 八进制 \134 替换反斜杠（sed 's|\\|/|g' 在 MSYS 下报 unterminated 's'），
-      # bash ${d,,} 小写盘符（原 sed 只转 C:/c:，非 C 盘 node 检测不到）。
-      win_node="$(printf '%s' "$win_node" | tr '\134' '/')"
-      local drive="${win_node:0:1}"; drive="${drive,,}"
-      win_node="/${drive}${win_node:2}"
+      # C:\...\node.exe → /c/...（Git Bash）或 /mnt/c/...（WSL）。win_to_unix_path 按
+      # IS_WSL 决定前缀；原硬编码 /drive/（Git Bash 风格）在 WSL 下 -f 失败（ql-20260713-003）。
+      win_node="$(win_to_unix_path "$win_node")"
       if [[ -f "$win_node" ]]; then
         NODE_BIN="$win_node"
         info "找到 node（cmd where）: $NODE_BIN"
@@ -164,9 +175,7 @@ foreach($base in @([Environment]::GetEnvironmentVariable("PATH","User"),[Environ
 }
 $found' 2>/dev/null | tr -d '\r' | head -n1 || true)"
       if [[ -n "$reg_node" ]]; then
-        reg_node="$(printf '%s' "$reg_node" | tr '\134' '/')"
-        local reg_drive="${reg_node:0:1}"; reg_drive="${reg_drive,,}"
-        reg_node="/${reg_drive}${reg_node:2}"
+        reg_node="$(win_to_unix_path "$reg_node")"
         if [[ -f "$reg_node" ]]; then
           NODE_BIN="$reg_node"
           info "找到 node（注册表 PATH）: $NODE_BIN"
