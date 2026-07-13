@@ -1543,7 +1543,7 @@ function DetailDrawer({
   );
 
   // ── 提交 ────────────────────────────────────────────────────────────────
-  const submit = async () => {
+  const submit = async (autoSubmit?: boolean) => {
     setBusy(true);
     setErr(null);
     try {
@@ -1569,7 +1569,12 @@ function DetailDrawer({
           file_urls: (vals.file_urls as string[]) ?? [],
         };
         if (mode === "create") {
-          await createPsPlanNodeDetail({ plan_node_id: planNodeId, ...body });
+          // ql-20260713-010: 提交(autoSubmit=true)=创建为正式 done（不走审核）；保存=draft 草稿。
+          await createPsPlanNodeDetail(
+            autoSubmit
+              ? { plan_node_id: planNodeId, ...body, status: "done" }
+              : { plan_node_id: planNodeId, ...body },
+          );
         } else if (detail) {
           await updatePsPlanNodeDetail(detail.id, body);
         }
@@ -1698,11 +1703,29 @@ function DetailDrawer({
           <Button size="sm" variant="outline" onClick={onClose}>
             关闭
           </Button>
-          {showSubmit && (
+          {showSubmit && mode === "create" ? (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => void submit()}
+              >
+                {busy ? "提交中…" : submitText}
+              </Button>
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={() => void submit(true)}
+              >
+                {busy ? "提交中…" : "提交"}
+              </Button>
+            </>
+          ) : showSubmit ? (
             <Button size="sm" disabled={busy} onClick={() => void submit()}>
               {busy ? "提交中…" : submitText}
             </Button>
-          )}
+          ) : null}
         </div>
       }
     >

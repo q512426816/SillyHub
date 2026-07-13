@@ -95,3 +95,4 @@ dashboard 页面遵循统一模式：
 - ql-20260713-007-a93e | 修 ql-006 遗留：footer「提交」按钮收窄到 create（edit 用 PlanDetailActions 提交审核，不再重复）+ handleSubmit 流程动作成功后 reload+setDetailTick 刷新
 - ql-20260713-008-3d7c | 新建明细空表单提交校验（task_theme/审核人/审批人 required）+ onAddDetail 清 detail 修复审核人回显上次编辑明细 UUID（setDrawer 部分更新 detail 残留）
 - ql-20260713-009-6e1a | 全局关闭里程碑明细审批流程：去审核/审批人字段 + PlanDetailActions（列表行+footer）+ 提交审核按钮 + submit autoSubmit；明细 create 后保持 draft，不走 review/approve（后端状态机保留，前端不触发审批流转）
+- ql-20260713-010-5b2d | 里程碑明细新建恢复「提交」按钮：提交=创建为正式(done，不走审核)，保存=草稿(draft)。backend schema Create 加 status 字段（create 走 ORM 直接建，传 status=done 绕过 fsm）+ frontend type + footer + submit autoSubmit 传 done

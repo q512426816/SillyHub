@@ -449,6 +449,8 @@ export interface PsPlanNodeDetail {
 
 export interface PsPlanNodeDetailCreate {
   plan_node_id: string;
+  /** 提交=done（创建为正式，不走审核）；默认空=草稿 draft。ql-20260713-010 */
+  status?: string | null;
   detailed_stage?: string | null;
   task_theme?: string | null;
   task_description?: string | null;

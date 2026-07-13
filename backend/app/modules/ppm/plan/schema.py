@@ -280,7 +280,8 @@ class PsPlanNodeDetailBase(PydanticModel):
 
 
 class PsPlanNodeDetailCreate(PsPlanNodeDetailBase):
-    pass
+    # ql-20260713-010: 提交=done（创建为正式，不走审核）；默认 None→model draft。
+    status: str | None = None
 
 
 class PsPlanNodeDetailUpdate(PydanticModel):

@@ -483,6 +483,16 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 方案：前端去掉所有审批 UI：①列表明细行 PlanDetailActions(L1279) 去；②DetailDrawer footer PlanDetailActions(L1725 edit 流程动作) 去；③footer「提交」按钮(create 模式 L1756) 去，只留「保存」；④新建表单审核/审批人 grid div(L1898 审核+审批 Form.Item) 去；⑤submit autoSubmit(L1555 签名 + L1598 if save 推进审核) 去，恢复只 create/update。明细 create 后保持 draft（不走 review/approve）。后端状态机不改（保留，前端不触发审批流转）。
 结果：①列表明细行 PlanDetailActions(L1279) 去掉；②DetailDrawer footer 去掉 PlanDetailActions + 「提交」按钮，简化为「关闭」+ submitText 按钮（create=保存）；③新建表单审核/审批人 grid div 去掉；④submit 去 autoSubmit 签名 + savedId + if save 逻辑，恢复只 create/update；⑤`pnpm typecheck` 通过；⑥eslint 0 error（19 warning，+1 为去 PlanDetailActions 后 onSubmitDetail prop 暂留，无害）；⑦milestone-details 18 tests 过；⑧rebuild frontend ready。明细全局不再有审批入口（无审核/审批人字段、无提交审核/审核通过/变更按钮），create 后保持 draft。注：handleSubmit/审核信息块(L1941+ view 模式展示历史 audit 数据) 保留，不破坏已有明细查看。
 
+## ql-20260713-010-5b2d | 2026-07-13 23:18:11 | 里程碑明细新建恢复「提交」按钮——提交=创建为正式(done，不走审核)，保存=草稿(draft)
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/plan/schema.py（PsPlanNodeDetailCreate 加 status optional）+ frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（footer create 恢复「保存」+「提交」按钮 + submit autoSubmit 传 status=done）
+需求：ql-009 全局关闭审批后用户反馈"提交功能也没了"，用户选「保存+提交都要」——保存=草稿，提交=创建为正式（直接生效，不走审核）。
+根因：ql-009 去掉「提交」按钮（当时提交=提交审核 draft→review，审批流程一部分）。但用户要的"提交"=创建为正式（done），不是审核。后端 fsm draft→done 不允许（draft 只能→review），但 create 走 ORM 直接建（_Crud.create `**data`，L140 不走 fsm transition），故 create 时传 status=done 可直接创建为 done。
+方案：①后端 schema PsPlanNodeDetailCreate 加 status: str | None = None（默认 None→model default draft）；②前端 footer create 模式恢复「保存」+「提交」两按钮；③submit 加回 autoSubmit 参数，create 时传 status= autoSubmit ? "done" : None——提交=done（正式/已完成），保存=draft（草稿）。
+结果：①backend schema PsPlanNodeDetailCreate 加 status: str | None = None；②frontend ppm/types.ts PsPlanNodeDetailCreate 加 status?: string | null；③page.tsx footer create 模式恢复「保存」+「提交」两按钮（其他模式保持 submitText 单按钮）；④submit 加回 autoSubmit 参数，create 时 autoSubmit 传 status="done"（提交=正式），不传=draft（保存=草稿）；⑤backend ruff check 过 + frontend typecheck 过；⑥frontend milestone-details 18 tests + backend plan 41 tests 全过；⑦rebuild backend+frontend ready。新建明细「保存」=草稿、「提交」=创建为正式(done，不走审核)。
+
+
 
 
 
