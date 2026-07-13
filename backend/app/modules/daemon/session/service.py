@@ -46,6 +46,40 @@ ACTIVE_TURN_STATUSES = frozenset({"pending", "running", "pending_approval"})
 TERMINAL_TURN_STATUSES = frozenset({"completed", "failed", "killed", "cancelled"})
 
 
+def _apply_session_terminal_status(run: AgentRun, session: AgentSession) -> str | None:
+    """按 run 终态 + 任务类型计算 session 终态（D-002@v2 反向判定 + D-005 幂等）。
+
+    多轮对话（``spec_strategy == "interactive"`` 且 ``change_id is None``）保持
+    ``active``，等待下一个 AgentRun 接管；其余所有单轮任务（stage / scan /
+    mission worker / quick-chat / oneshot）按 ``run.status`` 收口：
+    ``completed → "ended"``，其余（failed/killed/...）→ ``"failed"``。
+
+    幂等（D-005）：session 已处于终态（``ended`` / ``failed``，即不在
+    :data:`ACTIVE_SESSION_STATUSES` 中）时直接返回 ``None``，由调用方判定是否跳过
+    落库，避免覆盖已被其它路径（如 cancel_lease）写入的终态。
+
+    Args:
+        run: 刚结束的 AgentRun（取 ``status`` / ``spec_strategy`` / ``change_id``）。
+        session: 该 run 所属的 AgentSession（取当前 ``status``）。
+
+    Returns:
+        计算出的新 session 状态（``"active"`` / ``"ended"`` / ``"failed"``），
+        或 ``None`` 表示 session 已终态、无需变更。
+
+    Note:
+        - 不访问 DB、不 commit、不修改传入对象；调用方负责落库。
+        - 对 ``run.status == "killed"`` 一律按非 completed 返 ``"failed"``，
+          故 task-04 的 cancel_lease 路径不复用本函数（需 session→``"cancelled"``
+          终态，见 D-003）。
+    """
+    if session.status not in ACTIVE_SESSION_STATUSES:
+        return None  # D-005 幂等：已 ended/failed，不覆盖
+    is_multi_turn = run.spec_strategy == "interactive" and run.change_id is None
+    if is_multi_turn:
+        return "active"  # 多轮对话保持 active，等下一个 AgentRun
+    return "ended" if run.status == "completed" else "failed"
+
+
 async def _resolve_daemon_id_for_runtime(
     db_session: AsyncSession,
     runtime_id: uuid.UUID,

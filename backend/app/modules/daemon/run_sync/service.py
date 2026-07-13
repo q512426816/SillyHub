@@ -34,7 +34,10 @@ from app.modules.change.dispatch import (
 )
 from app.modules.daemon.lease.service import DaemonAgentRunNotFound
 from app.modules.daemon.model import DaemonTaskLease
-from app.modules.daemon.session.service import TERMINAL_TURN_STATUSES
+from app.modules.daemon.session.service import (
+    TERMINAL_TURN_STATUSES,
+    _apply_session_terminal_status,
+)
 from app.modules.git_gateway.service import redact_output
 
 if TYPE_CHECKING:
@@ -926,6 +929,28 @@ class RunSyncService:
                 agent_run.output_redacted = result_summary[:50000]
 
         self._session.add(agent_run)
+
+        # task-03 / D-001 / D-009：run 终态回写 session 终态（同事务）。
+        # close_interactive_run 是 daemon 回灌 run 终态的唯一收口点，病灶 B：自然
+        # 覆盖批量路径（dispatch_to_daemon 创建的 pending session）的 pending/active
+        # session 必须在此收口，否则 session 永远停在 active（D-001）。
+        # D-009：必须新建 query（禁止复用 :1039 _resolve_gate_workspace_id 的 session
+        # query，它在 commit 之后调用，回写不进同一事务）；D-005 幂等由
+        # _apply_session_terminal_status 守卫（已 ended/failed 返 None）。
+        if agent_run.agent_session_id is not None:
+            from app.modules.agent.model import AgentSession
+
+            session = await self._session.get(AgentSession, agent_run.agent_session_id)
+            if session is not None:
+                new_status = _apply_session_terminal_status(agent_run, session)
+                if new_status is not None:
+                    session.status = new_status
+                    if new_status in ("ended", "failed"):
+                        session.ended_at = now
+                    else:
+                        session.last_active_at = now
+                    self._session.add(session)
+
         await self._session.commit()
         await self._session.refresh(agent_run)
 

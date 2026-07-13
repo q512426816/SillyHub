@@ -13,7 +13,7 @@ from sqlmodel import col
 
 from app.core.errors import AppError
 from app.core.logging import get_logger
-from app.modules.agent.model import AgentRun
+from app.modules.agent.model import AgentRun, AgentSession
 from app.modules.daemon.model import DaemonTaskLease
 
 if TYPE_CHECKING:
@@ -344,6 +344,25 @@ class DaemonLeaseService:
         # best-effort：WS 失败不阻塞 cancel（DB 已收尾，与 end_session 容错一致）。
         if lease.kind == "interactive":
             await self._send_interactive_cancel(lease)
+
+        # task-04 / D-003 / D-008：interactive lease 取消收口 1:1 绑定的 AgentSession。
+        # kill=正常终止（非 failed），辅助函数对 killed run 返 failed 不适用，故
+        # 直接 set session.status='ended'。门控 lease.kind=='interactive' 覆盖
+        # 对话/stage/scan/quick-chat（placement.py:264 起 lease kind 均为 interactive）。
+        # D-005 幂等守卫：仅 pending/active/reconnecting 才收口。
+        if lease.kind == "interactive":
+            agent_run = await self._session.get(AgentRun, agent_run_id)
+            if agent_run is not None and agent_run.agent_session_id is not None:
+                session = await self._session.get(AgentSession, agent_run.agent_session_id)
+                if session is not None and session.status in (
+                    "pending",
+                    "active",
+                    "reconnecting",
+                ):
+                    session.status = "ended"
+                    session.ended_at = now
+                    self._session.add(session)
+                    await self._session.commit()
 
     async def _mark_agent_run_killed_if_pending(
         self,

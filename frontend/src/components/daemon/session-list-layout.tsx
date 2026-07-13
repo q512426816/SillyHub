@@ -64,7 +64,7 @@ function isActiveBadge(status: string): boolean {
 /** 会话状态英文 → 中文展示（CLAUDE.md 规则 11 中文 UI）。 */
 const SESSION_STATUS_LABELS: Record<string, string> = {
   active: "进行中",
-  pending: "待处理",
+  pending: "启动中",
   reconnecting: "重连中",
   ended: "已结束",
   failed: "失败",
