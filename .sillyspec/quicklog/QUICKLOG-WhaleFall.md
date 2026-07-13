@@ -466,6 +466,16 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 方案：①footer「提交」按钮条件从 (create||edit) 收窄到 create——edit 模式用 PlanDetailActions 的「提交审核」（detail 存在时 PlanDetailActions 提供），create 模式（无 detail，PlanDetailActions 不显示）才加「提交」；②handleSubmit try 末尾（save/reject/change 三分支成功后）统一加 setDetailTick+1 + reload(psNodes)，刷新明细列表。
 结果：①footer 提交按钮条件收窄到 create——create 模式渲染「保存」+「提交」两按钮；edit/audit/approve/change/changeApprove 模式只渲染 submitText 按钮（edit 模式的「提交审核」由 PlanDetailActions 提供，不再与「提交」重复）；②handleSubmit try 末尾(save/reject/change 成功后)统一加 setDetailTick+1 + reload(psNodes)，流程动作成功后刷新明细列表；③`pnpm typecheck` 通过；④eslint 单文件 0 error（18 warning 全既有）；⑤rebuild frontend 部署 healthy。edit 模式不再有重复按钮，「提交审核」/「驳回」/「变更」成功后列表刷新。
 
+## ql-20260713-008-3d7c | 2026-07-13 22:30:14 | 新建明细空表单能提交（缺必填校验）+ 审核人回显上次编辑明细的 UUID（onAddDetail 没清 detail 残留）
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（onAddDetail 两处 setDrawer 加 detail:undefined；task_theme/审核人/审批人 Form.Item 加 required rules）
+需求：①新建里程碑明细什么都不填都能提交（无必填校验）；②新建时审核人字段回显了上次编辑明细的审核人 UUID（如 1b689e04），用户没选却被填。
+根因：①明细表单字段全无 rules（仅模块表单 module_name 有 required L1054），后端 create schema 全 optional（`| None = None`）不校验 → 空表单 validateFields 通过 → 提交；②onAddDetail 两处 setDrawer（L497-503/L519-525）只设 {open,mode:create,planNodeId,moduleId}，没清 detail——DetailDrawerState 部分更新 merge，detail 保持上次值（上次 edit 明细的 audit_user_id 残留）→ DetailDrawer detail=该明细 → initialValues audit_user_id=detail.audit_user_id → 回显上次审核人 UUID。
+方案：①onAddDetail 两处 setDrawer 加 detail:undefined（清残留，新建时 detail 强制空）；②task_theme/audit_user_id/approve_user_id 三个 Form.Item 加 rules=[{required:true}]（任务主题是明细核心，审核人/审批人是流程必需）。
+结果：①两处 onAddDetail（ModuleLevelTable L497 / DetailLevelTable L519）setDrawer 加 detail:undefined，新建时 detail 强制清空，initialValues 不再取残留明细的 audit_user_id；②task_theme/audit_user_id/approve_user_id 三个 Form.Item 加 rules=[{required:true}]，validateFields 校验必填，空表单提交被拦；③`pnpm typecheck` 通过；④eslint 单文件 0 error（18 warning 全既有）；⑤milestone-details 18 tests 全过；⑥rebuild frontend 部署 ready。新建明细空表单不能提交、审核人不再回显上次 UUID。
+
+
 
 
 

@@ -500,6 +500,7 @@ export default function MilestoneDetailsPage() {
                 mode: "create",
                 planNodeId: node.id,
                 moduleId,
+                detail: undefined,
               })
             }
             onOpenDetail={(d, mode) => openDetail(node.id, d, mode)}
@@ -522,6 +523,7 @@ export default function MilestoneDetailsPage() {
               mode: "create",
               planNodeId: node.id,
               moduleId: null,
+              detail: undefined,
             })
           }
           onOpenDetail={(d, mode) => openDetail(node.id, d, mode)}
@@ -1788,7 +1790,11 @@ function DetailDrawer({
             <Form.Item label="明细阶段" name="detailed_stage">
               <Input disabled={!baseEditable} placeholder="请输入明细阶段" />
             </Form.Item>
-            <Form.Item label="任务主题" name="task_theme">
+            <Form.Item
+              label="任务主题"
+              name="task_theme"
+              rules={[{ required: true, message: "请输入任务主题" }]}
+            >
               <Input disabled={!baseEditable} placeholder="请输入任务主题" />
             </Form.Item>
           </div>
@@ -1893,6 +1899,7 @@ function DetailDrawer({
             <Form.Item
               label="审核人"
               name="audit_user_id"
+              rules={[{ required: true, message: "请选择审核人" }]}
               tooltip={auditEditable ? undefined : "审核中状态由后端指派"}
             >
               {projectId ? (
@@ -1910,6 +1917,7 @@ function DetailDrawer({
             <Form.Item
               label="审批人"
               name="approve_user_id"
+              rules={[{ required: true, message: "请选择审批人" }]}
               tooltip={approveEditable ? undefined : "审批中状态由后端指派"}
             >
               {projectId ? (
