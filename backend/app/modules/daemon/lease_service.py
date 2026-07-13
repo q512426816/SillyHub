@@ -308,6 +308,23 @@ class DaemonLeaseService:
         )
         lease = (await self._session.execute(stmt)).scalars().first()
 
+        # task-04 fix（verify e2e 发现）：interactive lease 的 agent_run_id=NULL
+        # （D-005@v1 session↔lease 1:1，lease 绑 session 不绑 run），上面 by
+        # agent_run_id 查 lease 会查不到（lease None 早返回）。session 收口必须
+        # 独立于 lease，基于 run.agent_session_id（kill 的 run 都有 agent_session_id）。
+        # D-003 kill=正常终止→ended（非 failed）；D-005 幂等仅 pending/active/reconnecting 收口。
+        agent_run = await self._session.get(AgentRun, agent_run_id)
+        if agent_run is not None and agent_run.agent_session_id is not None:
+            session = await self._session.get(AgentSession, agent_run.agent_session_id)
+            if session is not None and session.status in (
+                "pending",
+                "active",
+                "reconnecting",
+            ):
+                session.status = "ended"
+                session.ended_at = now
+                self._session.add(session)
+
         if lease is None:
             log.warning(
                 "cancel_lease_no_active_lease",
@@ -315,13 +332,14 @@ class DaemonLeaseService:
             )
             # 即使没有 active lease，agent_run 若仍 pending/running 也要收尾
             await self._mark_agent_run_killed_if_pending(agent_run_id, now)
+            await self._session.commit()  # 提交 session 收口（lease None 也要落库）
             return
 
         prior_status = lease.status
         lease.status = "cancelled"
         lease.updated_at = now
         self._session.add(lease)
-        await self._session.commit()
+        await self._session.commit()  # session 收口（上面 add）随 lease cancelled 一起落库
 
         log.info(
             "lease_cancelled",
@@ -344,25 +362,8 @@ class DaemonLeaseService:
         # best-effort：WS 失败不阻塞 cancel（DB 已收尾，与 end_session 容错一致）。
         if lease.kind == "interactive":
             await self._send_interactive_cancel(lease)
-
-        # task-04 / D-003 / D-008：interactive lease 取消收口 1:1 绑定的 AgentSession。
-        # kill=正常终止（非 failed），辅助函数对 killed run 返 failed 不适用，故
-        # 直接 set session.status='ended'。门控 lease.kind=='interactive' 覆盖
-        # 对话/stage/scan/quick-chat（placement.py:264 起 lease kind 均为 interactive）。
-        # D-005 幂等守卫：仅 pending/active/reconnecting 才收口。
-        if lease.kind == "interactive":
-            agent_run = await self._session.get(AgentRun, agent_run_id)
-            if agent_run is not None and agent_run.agent_session_id is not None:
-                session = await self._session.get(AgentSession, agent_run.agent_session_id)
-                if session is not None and session.status in (
-                    "pending",
-                    "active",
-                    "reconnecting",
-                ):
-                    session.status = "ended"
-                    session.ended_at = now
-                    self._session.add(session)
-                    await self._session.commit()
+        # task-04 session 收口已提前到 lease 查询后（基于 run.agent_session_id，
+        # 独立于 lease，覆盖 interactive lease agent_run_id=NULL 的 lease None 场景）。
 
     async def _mark_agent_run_killed_if_pending(
         self,

@@ -369,3 +369,67 @@ class TestMissionCancelClosesWorkerSessions:
         assert sess2 is not None
         assert sess2.status == "ended"
         assert sess2.ended_at is not None
+
+
+class TestCancelLeaseRunIdNull:
+    """verify e2e 发现的 bug 回归守护（2026-07-14）：interactive lease 的
+    agent_run_id=NULL（D-005@v1 session↔lease 1:1，lease 绑 session 不绑 run），
+    cancel_lease by agent_run_id 查 lease 查不到（lease None 早返回）。session
+    收口必须独立于 lease，基于 run.agent_session_id。修复前 kill 后 session 卡
+    active（e2e 实测 session=active/run=killed），修复后 ended。
+    """
+
+    @pytest.mark.asyncio
+    async def test_cancel_lease_run_id_null_closes_session(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _patch_ws_hub(monkeypatch)
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        now = datetime.now(UTC)
+        sess_id = uuid.uuid4()
+        run_id = uuid.uuid4()
+        # interactive lease agent_run_id=None（真实 D-005@v1，区别于 _create_interactive_run 的 =run_id）
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=None,
+            status="claimed",
+            kind="interactive",
+            claimed_at=now,
+            lease_expires_at=None,
+            metadata_={"claim_token": "t", "session_id": str(sess_id)},
+            created_at=now,
+            updated_at=now,
+        )
+        agent_session = AgentSession(
+            id=sess_id,
+            user_id=uid,
+            provider="claude",
+            status="active",
+            config={},
+            turn_count=1,
+            runtime_id=rt.id,
+            lease_id=lease.id,
+            last_active_at=now,
+            created_at=now,
+        )
+        run = AgentRun(
+            id=run_id,
+            agent_type="claude_code",
+            provider="claude",
+            status="running",
+            spec_strategy="interactive",
+            agent_session_id=sess_id,
+        )
+        db_session.add_all([lease, agent_session, run])
+        await db_session.commit()
+
+        svc = DaemonLeaseService(db_session)
+        await svc.cancel_lease(run_id)
+
+        await db_session.refresh(agent_session)
+        await db_session.refresh(run)
+        assert run.status == "killed"
+        assert agent_session.status == "ended"  # 修复后收口（修复前卡 active）
+        assert agent_session.ended_at is not None

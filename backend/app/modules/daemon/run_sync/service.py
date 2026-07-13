@@ -41,6 +41,8 @@ from app.modules.daemon.session.service import (
 from app.modules.git_gateway.service import redact_output
 
 if TYPE_CHECKING:
+    from app.modules.agent.model import AgentMission
+    from app.modules.change.model import Change
     from app.modules.daemon.service import DaemonService
 
 log = get_logger(__name__)
@@ -1385,6 +1387,26 @@ class RunSyncService:
         if change is None:
             return
 
+        # team→change 生命周期修复（task-11 接线）：team-mission run（mission_id
+        # 非空 + change.stages.team_mode=True）走 team 生命周期——schedule_loop 收敛
+        # 兜底 + 收敛后桥接推进 stage。single stage run（mission_id=None）保持既有
+        # sillyspec.db sync 路径不变（零回归）。team 工作由 worker 经 MCP 完成，不落
+        # sillyspec.db step，故不能走 single 的 sync_stage_status（会读到
+        # stage_completed=False 把变更卡在 execute/verify）。
+        stages_peek = change.stages if isinstance(change.stages, dict) else {}
+        if agent_run.mission_id is not None and stages_peek.get("team_mode") is True:
+            try:
+                await self._handle_team_run_completion(agent_run, change)
+            except Exception as exc:
+                log.warning(
+                    "team_run_completion_handler_failed",
+                    agent_run_id=str(agent_run_id),
+                    change_id=str(agent_run.change_id),
+                    mission_id=str(agent_run.mission_id),
+                    error=str(exc),
+                )
+            return
+
         svc = SillySpecStageDispatchService(self._session)
         sync_result = await svc.sync_stage_status(
             self._session,
@@ -1413,6 +1435,136 @@ class RunSyncService:
             "stage_callback_done",
             agent_run_id=str(agent_run_id),
             change_id=str(agent_run.change_id),
+        )
+
+    async def _handle_team_run_completion(
+        self,
+        agent_run: AgentRun,
+        change: Change,
+    ) -> None:
+        """team-mission run（worker 或 orchestrator）完成后：触发 schedule_loop
+        收敛兜底（缺口 A）+ 收敛成功后桥接推进变更 stage（缺口 B）。
+
+        缺口 A：``OrchestratorService.schedule_loop`` 是 team mission 后端收敛兜底
+        （worker 全终态→收敛 / budget 触顶→强收），但 task-11 未接线、生产无调用方，
+        主 agent 不主动 converge 时 mission 永久挂起。本方法在每次 team run 完成
+        （worker / 主 agent）时调用它——schedule_loop 内部判条件，未达收敛返 None。
+
+        缺口 B：team 工作由 worker 经 MCP 完成，不写 sillyspec.db step，single 的
+        sync_stage_status 读到 stage_completed=False 不推进。收敛成功后本方法走
+        ``_advance_team_stage`` 推进（execute→verify，verify→archive）。
+
+        幂等：仅当 ``change.current_stage == team_stage`` 时推进；complete_stage 后
+        current_stage 已变，后续重复触发（多 worker 依次完成）自然跳过，不重复推进。
+        """
+        from app.modules.agent.model import AgentMission
+        from app.modules.agent.orchestrator import OrchestratorService
+
+        mission = await self._session.get(AgentMission, agent_run.mission_id)
+        if mission is None:
+            return
+
+        constraints = mission.constraints if isinstance(mission.constraints, dict) else {}
+        team_stage = constraints.get("stage") or "execute"
+
+        # 幂等护栏：change 已离开 team_stage（已被推进过 / 被其它路径改态）→ 跳过。
+        if change.current_stage != team_stage:
+            log.info(
+                "team_run_completion_skip_stage_advanced",
+                change_id=str(change.id),
+                team_stage=team_stage,
+                current_stage=change.current_stage,
+            )
+            return
+
+        # 缺口 A：触发后端收敛兜底。返回 None = 本次未收敛（仍有 worker 在跑 / 未触顶）。
+        orchestrator = OrchestratorService(self._session)
+        mission_status = await orchestrator.schedule_loop(mission.id)
+        if mission_status is None:
+            return
+
+        log.info(
+            "team_run_completion_converged_advancing",
+            change_id=str(change.id),
+            mission_id=str(mission.id),
+            team_stage=team_stage,
+            mission_status=mission_status,
+        )
+        await self._advance_team_stage(change, mission, team_stage)
+
+    async def _advance_team_stage(
+        self,
+        change: Change,
+        mission: AgentMission,
+        team_stage: str,
+    ) -> None:
+        """team mission 收敛后推进变更 stage（缺口 B）。
+
+        复用 single 模式的 ``auto_dispatch_next_step``：它做 reparse + 读 gate +
+        complete_stage + dispatch 下一 stage。team 模式只需把「该 stage 已完成」以
+        ``StageSyncResult(stage_completed=True)`` 喂给它——verify stage 额外把多
+        worker gate 经 ``merge_gate_results`` 合并后落主 agent run.gate_result，让
+        auto_dispatch 的 gate 三态决策（exit 0 推进 / 1 打回 / 2 卡住）生效。
+
+        ``auto_dispatch_next_step`` 内部对 current_stage 与 sync_result.current_stage
+        一致性有守卫（dispatch.py stage_diverged），故此处 current_stage 必须仍等于
+        team_stage（由 ``_handle_team_run_completion`` 幂等护栏保证）。
+        """
+        from app.modules.agent.control import MissionControlService
+        from app.modules.change.dispatch import (
+            StageSyncResult,
+            auto_dispatch_next_step,
+            merge_gate_results,
+        )
+
+        ctrl = MissionControlService(self._session)
+        all_runs = await ctrl.worker_runs(mission.id)
+        main_run = next((r for r in all_runs if r.role == "orchestrator"), None)
+
+        # verify stage：合并 worker gate_results 落主 agent run，让 gate 决策生效。
+        # execute stage 无 gate（workers 产 patch 不产 gate_result），主 run.gate_result
+        # 保持 None → auto_dispatch 非 verify + None 走声明态推进（dispatch.py:443）。
+        if team_stage == "verify":
+            worker_runs = [r for r in all_runs if r.role != "orchestrator"]
+            gate_results = [r.gate_result for r in worker_runs if isinstance(r.gate_result, dict)]
+            merged = merge_gate_results(gate_results)
+            if main_run is not None:
+                # dict() copy 防 SQLAlchemy JSON 列原地改不标记 dirty（对齐
+                # dispatch.py 模式）。gate_status=decided 表示已落决策（对齐 task-07）。
+                main_run.gate_result = dict(merged)
+                main_run.gate_status = "decided"
+                self._session.add(main_run)
+                await self._session.commit()
+                await self._session.refresh(main_run)
+                log.info(
+                    "team_verify_gate_merged",
+                    change_id=str(change.id),
+                    mission_id=str(mission.id),
+                    merged_exit=merged.get("exit_code"),
+                    worker_count=merged.get("worker_count"),
+                )
+
+        if main_run is None:
+            # 主 run 缺失（mission 损坏）：取 mission 任意 run 占位（run_id 仅审计用）。
+            # verify 缺主 run 时 gate_result 无处落 → auto_dispatch verify 强制 gate
+            # 阻断 fail-loud，暴露异常（dispatch.py:429），不静默推进。
+            main_run = all_runs[0] if all_runs else None
+
+        sync_result = StageSyncResult(
+            synced=True,
+            change_id=change.id,
+            run_id=main_run.id if main_run is not None else uuid.UUID(int=0),
+            current_stage=team_stage,
+            stage_completed=True,
+            has_pending_step=False,
+        )
+        user_id = change.owner_id or uuid.UUID(int=0)
+        await auto_dispatch_next_step(
+            session=self._session,
+            workspace_id=change.workspace_id,
+            change_id=change.id,
+            user_id=user_id,
+            sync_result=sync_result,
         )
 
     async def _run_post_scan_validation(
