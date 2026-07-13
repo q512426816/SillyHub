@@ -224,6 +224,7 @@ class SpecBootstrapService:
         )
         from app.modules.agent.execution import MissionExecutionService
         from app.modules.agent.mission import MissionService
+        from app.modules.daemon.host_fs import new_host_fs_delegate
 
         spec_ws = await self._get_spec_workspace(workspace_id)
         workspace = await self._session.get(Workspace, workspace_id)
@@ -264,7 +265,9 @@ class SpecBootstrapService:
 
         # Dispatch Worker Runs with governance gate (D-008). Bootstrap is
         # read-only → all Workers read_only=True (D-004@v2: v1 不强制工具).
-        exec_svc = MissionExecutionService(self._session)
+        exec_svc = MissionExecutionService(
+            self._session, host_fs_delegate=new_host_fs_delegate(self._session)
+        )
         ctrl = MissionControlService(self._session)
         now = datetime.now(UTC)
         for run in runs:

@@ -66,35 +66,54 @@ async def _seed_workspace_and_mission(
 class TestDispatchWorker:
     @pytest.mark.asyncio
     async def test_dispatch_creates_worker_run(self, client, db_session, auth_headers) -> None:
-        """POST dispatch_worker → 建 worker run（daemon 离线 → error_code=no_online_daemon）。"""
+        """POST dispatch_worker → 建 worker run（delegate 注入后无 binding → 503 fail-loud）。
+
+        ql-20260713-002 接通 delegate 注入链后，``MissionExecutionService`` 持有
+        ``HostFsDelegate``，``dispatch_worker`` 前置调 ``git_worktree_add``。workspace
+        无 bound daemon instance → ``HostFsDelegateUnavailable``（delegate wiring 错误
+        fail-loud，delegate.py:734 不 degrade）→ 503。旧契约（201 + no_online_daemon）
+        基于 delegate 未注入的隐含假设，已随链路接通过时。
+        """
         ws_id, mission_id, _ = await _seed_workspace_and_mission(db_session)
         resp = await client.post(
             f"/api/workspaces/{ws_id}/missions/{mission_id}/dispatch_worker",
             json={"objective": "扫描架构", "role": "arch", "read_only": True},
             headers=auth_headers,
         )
-        assert resp.status_code == 201, resp.text
+        assert resp.status_code == 503, resp.text
         data = resp.json()
-        assert data["role"] == "arch"
-        assert data["status"] == "pending"
-        assert data["objective"] == "扫描架构"
-        assert data["agent_type"] == "claude_code"
-        # 无 daemon binding → dispatch 抛 NoOnlineDaemonError 被捕获
-        assert data["error_code"] == "no_online_daemon"
+        assert data["code"] == "HOST_FS_DELEGATE_UNAVAILABLE"
+        assert data["details"]["method"] == "git_worktree_add"
 
     @pytest.mark.asyncio
     async def test_dispatch_missing_role_uses_default(
         self, client, db_session, auth_headers
     ) -> None:
-        """role 缺省 → 默认 worker。"""
+        """role 缺省 → 默认 worker（dispatch 在 worktree 前置失败前已建 run + 用默认 role）。
+
+        ql-20260713-002 后无 binding 走 503 fail-loud（见 test_dispatch_creates_worker_run），
+        本测改为校验前置建 run 时 role 兜底为 ``worker``：run 在 dispatch_worker 调
+        delegate 前已 commit，role 默认值经 503 响应前落库——直接查 DB 校验。
+        """
         ws_id, mission_id, _ = await _seed_workspace_and_mission(db_session)
         resp = await client.post(
             f"/api/workspaces/{ws_id}/missions/{mission_id}/dispatch_worker",
             json={"objective": "做事"},
             headers=auth_headers,
         )
-        assert resp.status_code == 201, resp.text
-        assert resp.json()["role"] == "worker"
+        # 无 binding → 503 fail-loud（delegate 注入后语义）
+        assert resp.status_code == 503, resp.text
+        # run 在 dispatch_worker 前置已建（mcp_tools.py:316-328 commit），role 兜底 worker
+        from sqlalchemy import select
+
+        stmt = (
+            select(AgentRun)
+            .where(AgentRun.mission_id == mission_id)
+            .order_by(AgentRun.created_at.desc())
+        )
+        run = (await db_session.execute(stmt)).scalars().first()
+        assert run is not None
+        assert run.role == "worker"
 
 
 class TestGetWorkerResult:

@@ -43,6 +43,7 @@ from app.modules.agent.schema import (
 from app.modules.agent.service import AgentService, submit_run_input
 from app.modules.auth.model import User, UserWorkspaceRole
 from app.modules.auth.permissions import Permission
+from app.modules.daemon.host_fs import new_host_fs_delegate
 from app.modules.daemon.model import DaemonTaskLease
 from app.modules.daemon.permission_service import WorkspaceDialogRead
 from app.modules.daemon.router import PermissionServiceDep
@@ -813,7 +814,7 @@ async def create_mission(
         budget_usd=payload.budget_usd,
         planner=planner,
     )
-    exec_svc = MissionExecutionService(session)
+    exec_svc = MissionExecutionService(session, host_fs_delegate=new_host_fs_delegate(session))
     ctrl = MissionControlService(session)
     now = datetime.now(UTC)
     for run in runs:

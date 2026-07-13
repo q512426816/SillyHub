@@ -35,6 +35,7 @@ from app.modules.agent.model import AgentArtifact, AgentMission, AgentRun, Agent
 from app.modules.agent.placement import NoOnlineDaemonError
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
+from app.modules.daemon.host_fs import new_host_fs_delegate
 
 log = get_logger(__name__)
 
@@ -250,7 +251,7 @@ async def _finalize_merge_for_mission(
     """
     from app.modules.agent.finalizer import FinalizerService
 
-    finalizer = FinalizerService(session)
+    finalizer = FinalizerService(session, host_fs_delegate=new_host_fs_delegate(session))
     result = await finalizer.finalize_execute_mission(mission_id)
     return result.merged_branches, result.pending_conflicts
 
@@ -264,7 +265,7 @@ async def _cleanup_mission(session: AsyncSession, mission_id: uuid.UUID) -> None
     """
     from app.modules.agent.finalizer import FinalizerService
 
-    finalizer = FinalizerService(session)
+    finalizer = FinalizerService(session, host_fs_delegate=new_host_fs_delegate(session))
     cleanup = getattr(finalizer, "cleanup_mission", None)
     if cleanup is None:
         # task-07 未落地前兜底（expects_from 契约；集成期 task-08 接线后必有）
@@ -349,7 +350,7 @@ async def dispatch_worker(
         )
         return WorkerRunResponse.model_validate(run)
 
-    exec_svc = MissionExecutionService(session)
+    exec_svc = MissionExecutionService(session, host_fs_delegate=new_host_fs_delegate(session))
     try:
         await exec_svc.dispatch_worker(
             run,

@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.modules.agent.delegation import GLMConfig
 from app.modules.agent.model import AgentArtifact, AgentMission, AgentRun
-from app.modules.daemon.host_fs.delegate import HostFsDelegate
+from app.modules.daemon.host_fs import HostFsDelegate, new_host_fs_delegate
 from app.modules.workspace.model import Workspace
 from app.modules.workspace.service import resolve_root_path_for_daemon
 
@@ -492,7 +492,7 @@ async def converge_mission_for_completed_run(
     from app.modules.agent.mission import derive_status
 
     mission_id = run.mission_id
-    exec_svc = MissionExecutionService(session)
+    exec_svc = MissionExecutionService(session, host_fs_delegate=new_host_fs_delegate(session))
     await exec_svc.collect_completed_artifacts(mission_id)
 
     ctrl = MissionControlService(session)
@@ -502,7 +502,9 @@ async def converge_mission_for_completed_run(
     status = derive_status(runs, cancelled=cancelled)
 
     if status in ("done", "degraded"):
-        finalizer = FinalizerService(session, glm_config)
+        finalizer = FinalizerService(
+            session, glm_config, host_fs_delegate=new_host_fs_delegate(session)
+        )
         # task-05（D-003@v1 / D-005@v2）：finalize_execute_mission 实际逐个 git_merge
         # 各 worker worktree_branch 到 workspace root，返回 FinalizerMergeResult
         # （merged_branches / pending_conflicts）。注意：本调用方未注入 host_fs_delegate
