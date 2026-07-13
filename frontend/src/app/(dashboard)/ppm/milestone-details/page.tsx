@@ -330,6 +330,9 @@ export default function MilestoneDetailsPage() {
         await changePlanNodeDetailProcess(detailId, changeBody);
         showToast(true, "已创建变更新版本");
       }
+      // ql-20260713-007:流程动作(save/reject/change)成功后刷新明细列表。
+      setDetailTick((t) => t + 1);
+      void reload();
     } catch (err) {
       // AC-8 并发审批乐观锁:后端 StateMachine 在状态已被他人推进时抛 422/
       // 状态不匹配(InvalidTransition)。识别到该类错误 → reload 列表拉最新状态
@@ -1738,30 +1741,29 @@ function DetailDrawer({
             <Button size="sm" variant="outline" onClick={onClose}>
               关闭
             </Button>
-            {showSubmit &&
-              (mode === "create" || mode === "edit" ? (
-                <>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() => void submit()}
-                  >
-                    {busy ? "提交中…" : submitText}
-                  </Button>
-                  <Button
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => void submit(true)}
-                  >
-                    {busy ? "提交中…" : "提交"}
-                  </Button>
-                </>
-              ) : (
-                <Button size="sm" disabled={busy} onClick={() => void submit()}>
+            {showSubmit && mode === "create" ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void submit()}
+                >
                   {busy ? "提交中…" : submitText}
                 </Button>
-              ))}
+                <Button
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => void submit(true)}
+                >
+                  {busy ? "提交中…" : "提交"}
+                </Button>
+              </>
+            ) : showSubmit ? (
+              <Button size="sm" disabled={busy} onClick={() => void submit()}>
+                {busy ? "提交中…" : submitText}
+              </Button>
+            ) : null}
           </div>
         </div>
       }

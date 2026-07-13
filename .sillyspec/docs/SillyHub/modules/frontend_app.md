@@ -92,3 +92,4 @@ dashboard 页面遵循统一模式：
 - ql-20260713-002-4c8a | runtimes 页 daemon 安装命令 server-url 改用 window.location.origin（去掉 :3001→:8001 硬编码端口替换）+ next.config rewrite 加 /daemon/:path* 代理到 backend，修复前端 3000 访问 /daemon/install.sh 404（部署端口不匹配 + /daemon 未代理双根因）
 - ql-20260713-005-c4a1 | ppm 里程碑明细 + 模块表单 plan_workload 提交转 String（后端 str，InputNumber 返回 number；原 `as string` 是 TS 断言不转换）+ 时间 DatePicker Form.Item 加 name/getValueProps/normalize 修复选择不回显（无 name 时 Form 不接管）
 - ql-20260713-006-2f8b | 里程碑明细新建 Drawer 加「提交」按钮（create/update + savePlanNodeDetailProcess 推进 draft→review）+ 提交/保存成功刷新明细列表（detailTick 子表 key 联动重 mount）
+- ql-20260713-007-a93e | 修 ql-006 遗留：footer「提交」按钮收窄到 create（edit 用 PlanDetailActions 提交审核，不再重复）+ handleSubmit 流程动作成功后 reload+setDetailTick 刷新

@@ -457,6 +457,16 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 方案：①DetailDrawer 加 submitForReview 函数（create→拿 id→savePlanNodeDetailProcess 推进 draft→review；edit→update→save），footer create/edit 模式在「保存」旁加「提交」按钮；②主组件加 detailTick state，onSaved 关抽屉 + setDetailTick+1 + reload(psNodes)；expandRender 子表 key={`${node.id}-${detailTick}`}，detailTick 变子表重 mount 触发 reload（模块+明细）。
 结果：①主组件加 detailTick state，onSaved(L670) 改为关抽屉 + setDetailTick+1 + reload(psNodes)；expandRender 两子表(ModuleLevelTable/DetailLevelTable)加 key={`${node.id}-${detailTick}`} + useCallback 依赖加 detailTick，detailTick 变→子表重 mount→reload(模块+明细)，解决三层各自 reload 主组件触达不到的难题；②DetailDrawer submit 加 autoSubmit 参数：create 拿 created.id/edit 用 detail.id，autoSubmit 时 savePlanNodeDetailProcess(id) 推进 draft→review（对照 PlanDetailActions draft「提交审核」=onSubmit(id,"save")）；footer create/edit 模式渲染「保存」(outline,submit()) + 「提交」(default,submit(true)) 两个按钮，其他模式保持原 submitText 按钮；③`pnpm typecheck` 通过；④eslint 单文件 0 error（18 warning 全既有）；⑤rebuild frontend 部署，两容器 healthy。UI 端到端（新建明细保存/提交 + 列表刷新）待用户浏览器验证。
 
+## ql-20260713-007-a93e | 2026-07-13 22:07:23 | 修 ql-006 遗留：edit 模式 footer「提交审核」(PlanDetailActions) 与「提交」(submit(true)) 重复 + 「提交审核」走 handleSubmit 不刷新列表
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（footer 提交按钮只 create 模式；handleSubmit 成功后 reload + setDetailTick）
+需求：保存后再编辑（edit 模式），footer 同时出现「提交审核」(PlanDetailActions) 和「提交」(ql-006 加的)，重复；点「提交审核」(PlanDetailActions→onSubmit→handleSubmit) 后页面列表不刷新。
+根因：①footer L1699-1715 PlanDetailActions 在 detail 存在 + mode!==create 时渲染（draft→「提交审核」+「变更」），ql-006 加的「提交」按钮(submit(true))条件是 create||edit，edit 模式两者都显示 → 重复（且都调 savePlanNodeDetailProcess 提交审核，功能重复）；②「提交审核」走 PlanDetailActions onSubmit→主组件 handleSubmit(L273)，handleSubmit 成功后只 showToast 不 reload（只在并发错误 reload L342），明细状态变了但列表不刷新。
+方案：①footer「提交」按钮条件从 (create||edit) 收窄到 create——edit 模式用 PlanDetailActions 的「提交审核」（detail 存在时 PlanDetailActions 提供），create 模式（无 detail，PlanDetailActions 不显示）才加「提交」；②handleSubmit try 末尾（save/reject/change 三分支成功后）统一加 setDetailTick+1 + reload(psNodes)，刷新明细列表。
+结果：①footer 提交按钮条件收窄到 create——create 模式渲染「保存」+「提交」两按钮；edit/audit/approve/change/changeApprove 模式只渲染 submitText 按钮（edit 模式的「提交审核」由 PlanDetailActions 提供，不再与「提交」重复）；②handleSubmit try 末尾(save/reject/change 成功后)统一加 setDetailTick+1 + reload(psNodes)，流程动作成功后刷新明细列表；③`pnpm typecheck` 通过；④eslint 单文件 0 error（18 warning 全既有）；⑤rebuild frontend 部署 healthy。edit 模式不再有重复按钮，「提交审核」/「驳回」/「变更」成功后列表刷新。
+
+
 
 
 
