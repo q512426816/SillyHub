@@ -439,6 +439,16 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 方案：WSL 分支用 `/mnt/c/Windows/System32/cmd.exe /c "echo %USERPROFILE%"` 拿真实 Windows 用户目录（当前 Windows 会话用户，最准；powershell $env:USERPROFILE 在 WSL root 下不展开不可用），转 /mnt/<drive>/... 拼 INSTALL_DIR。cmd.exe 不可用时 fallback $USER（极少触发）。
 结果：①install.sh WSL 分支 INSTALL_DIR 改用 cmd.exe echo %USERPROFILE% 拿真实 Windows 用户目录（C:\Users\12532），转 /mnt/c/Users/12532/.sillyhub/daemon；cmd.exe 不可用时 fallback $USER；②`bash -n` SYNTAX_OK；③诊断实证 cmd.exe echo %USERPROFILE%=C:\Users\12532（powershell $env:USERPROFILE 在 WSL root 下不展开）；④WSL 内层 bash -x 跑改后 install.sh → download_bundle 输出 "下载 sillyhub-daemon.js -> **/mnt/c/Users/12532/.sillyhub/daemon/bin/**..."，证明 INSTALL_DIR 正确指向 12532（原 root → Permission denied）+ mkdir 成功（进到下载步骤）；⑤rebuild backend 部署，服务端 3000 install.sh 含 USERPROFILE（grep 3 处）。mkdir Permission denied 已解决，install 流程推进到 download 阶段（download 用默认 8001 失败是 source 未传 server-url，用户实际传 3000 可下载）。
 
+## ql-20260713-005-c4a1 | 2026-07-13 21:10:57 | 里程碑明细新建报 plan_workload string_type + 计划开始/完成时间选择不回显
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（明细 + 模块表单 plan_workload 提交转 String；明细 + 模块时间 Form.Item 加 name + getValueProps/normalize）
+需求：里程碑明细新建提交报 `plan_workload` validation_error string_type（input 5）；计划开始/完成时间 DatePicker 选择后不回显。
+根因（双）：①plan_workload 类型——表单 InputNumber 返回 number，明细提交 L1560 `(vals.plan_workload as string) || null` 是 TS 类型断言（运行时仍 number），模块提交 L1009 `vals.plan_workload ?? null` 也是 number；后端 ppm/plan schema `plan_workload: str | None`（String(64)）→ Pydantic string_type 报错。②时间不回显——明细表单 L1789/1802 + 模块表单 L1053/1063 的 DatePicker Form.Item **无 name 属性**，Form 不接管这俩字段，DatePicker value={toDay(form.getFieldValue(...))} + onChange setFieldValue 手动绑，但 setFieldValue 更新 Form store 不触发无 name 的 Form.Item 重渲染 → DatePicker value 不刷新 → 选了不回显（对比 L2294/2308 第三个表单时间字段有 name，正常）。
+方案：①明细 L1560 + 模块 L1009 plan_workload 提交改 `vals.plan_workload != null && vals.plan_workload !== "" ? String(vals.plan_workload) : null`（运行时转 string）。②明细 + 模块时间 Form.Item 加 name（plan_begin_time/plan_complete_time）+ getValueProps（store string → DatePicker value dayjs）+ normalize（DatePicker dayjs → store string），Form 接管后回显；明细删 DatePicker 手动 onChange（联动改由已存在的 Form onValuesChange L1732 触发 recomputeComplete）。
+结果：①明细 L1560 + 模块 L1009 plan_workload 提交改 String() 转换；②明细 L1789/1802 + 模块 L1053/1063 时间 Form.Item 加 name(plan_begin_time/plan_complete_time) + getValueProps(string→dayjs value) + normalize(dayjs→string store)，删手动 value/onChange；Form 接管后时间回显 + 联动改由已存在的 onValuesChange(L1732) 触发 recomputeComplete；③`pnpm typecheck` 通过；④eslint 单文件 0 error（18 warning 全既有 unused/hooks-deps，非本次引入），recomputeComplete 仍被 onValuesChange 调用未变 unused；⑤rebuild frontend 部署（compose 联动 backend），两容器 healthy，前端 3000 可访问(200)。UI 端到端（时间回显 + 提交 plan_workload=string 不再报 string_type）待用户浏览器验证。
+
+
 
 
 

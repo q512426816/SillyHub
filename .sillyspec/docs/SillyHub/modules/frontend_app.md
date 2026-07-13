@@ -56,6 +56,7 @@ dashboard 页面遵循统一模式：
 - 前端样式系统统一：Design Token 主色 #2563EB + antd ConfigProvider + shadcn 视觉组件 + 共享布局
 - runtimes 快速对话改用 SSE 流式（EventSource 订阅）
 - runtimes 页 daemon 安装命令（CopyDaemonCommand 的 `sillyhub-daemon start --server` + InstallDaemonBlock 的 `curl install.sh`）server-url 用 `window.location.origin`，前端 `next.config.mjs` rewrite 代理 `/api/*` 与 `/daemon/*` 到 backend，daemon 全程连前端地址（ql-20260713-002：旧逻辑硬编码 `:3001→:8001` 端口替换，部署端口不匹配时命令里的 server-url 错、`/daemon/*` 又没代理 → 前端 404）
+- antd DatePicker 字段 store 存 string、控件需 dayjs：Form.Item 必须有 name + getValueProps（string→dayjs value）+ normalize（dayjs→string store），无 name 时 Form 不接管、setFieldValue 不触发重渲染 → 选择不回显；InputNumber 返回 number，提交后端 str 字段必须运行时 String() 转换（TS `as string` 只是断言不转换值）——ql-20260713-005 修 ppm 里程碑明细/模块表单这两类问题
 - workspaces/[id] 详情页含上一次 Bootstrap 运行结果摘要
 - 变更详情页文档实时刷新 + Gate 面板突出显示
 - agent 控制台日志区无 max-width 限制撑满主区
@@ -88,3 +89,4 @@ dashboard 页面遵循统一模式：
 ## 变更索引
 - ql-20260706-001-7b2e | runtimes/[id]/audit 审计页决策列(ALLOW/DENY)回显中文「放行/拒绝」(红绿 Tag)+ 原因列多行中文 reason 加 whitespace-pre-line 正常换行(原 span 把 daemon buildDenyReason 的 \n 多行长文压成一行)
 - ql-20260713-002-4c8a | runtimes 页 daemon 安装命令 server-url 改用 window.location.origin（去掉 :3001→:8001 硬编码端口替换）+ next.config rewrite 加 /daemon/:path* 代理到 backend，修复前端 3000 访问 /daemon/install.sh 404（部署端口不匹配 + /daemon 未代理双根因）
+- ql-20260713-005-c4a1 | ppm 里程碑明细 + 模块表单 plan_workload 提交转 String（后端 str，InputNumber 返回 number；原 `as string` 是 TS 断言不转换）+ 时间 DatePicker Form.Item 加 name/getValueProps/normalize 修复选择不回显（无 name 时 Form 不接管）

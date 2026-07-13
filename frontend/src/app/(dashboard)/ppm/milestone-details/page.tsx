@@ -1006,7 +1006,10 @@ function ModuleFormDrawer({
     const vals = await form.validateFields();
     onSave({
       module_name: vals.module_name || null,
-      plan_workload: vals.plan_workload ?? null,
+      plan_workload:
+        vals.plan_workload != null && vals.plan_workload !== ""
+          ? String(vals.plan_workload)
+          : null,
       plan_begin_time: vals.plan_begin_time || null,
       plan_complete_time: vals.plan_complete_time || null,
       duty_user_id: vals.duty_user_id || null,
@@ -1050,25 +1053,21 @@ function ModuleFormDrawer({
           />
         </Form.Item>
         <div className="grid grid-cols-2 gap-3">
-          <Form.Item label="计划开始时间">
-            <DatePicker
-              className="w-full"
-              format="YYYY-MM-DD"
-              value={toDay(form.getFieldValue("plan_begin_time"))}
-              onChange={(d) =>
-                form.setFieldValue("plan_begin_time", fromDate(d))
-              }
-            />
+          <Form.Item
+            label="计划开始时间"
+            name="plan_begin_time"
+            getValueProps={(v) => ({ value: toDay(v) })}
+            normalize={(d) => fromDate(d)}
+          >
+            <DatePicker className="w-full" format="YYYY-MM-DD" />
           </Form.Item>
-          <Form.Item label="计划完成时间">
-            <DatePicker
-              className="w-full"
-              format="YYYY-MM-DD"
-              value={toDay(form.getFieldValue("plan_complete_time"))}
-              onChange={(d) =>
-                form.setFieldValue("plan_complete_time", fromDate(d))
-              }
-            />
+          <Form.Item
+            label="计划完成时间"
+            name="plan_complete_time"
+            getValueProps={(v) => ({ value: toDay(v) })}
+            normalize={(d) => fromDate(d)}
+          >
+            <DatePicker className="w-full" format="YYYY-MM-DD" />
           </Form.Item>
         </div>
         <Form.Item label="责任人" name="duty_user_id">
@@ -1557,7 +1556,10 @@ function DetailDrawer({
           requirements: (vals.requirements as string) || null,
           role_name: (vals.role_name as string) || null,
           achievement: (vals.achievement as string) || null,
-          plan_workload: (vals.plan_workload as string) || null,
+          plan_workload:
+            vals.plan_workload != null && vals.plan_workload !== ""
+              ? String(vals.plan_workload)
+              : null,
           plan_begin_time: (vals.plan_begin_time as string) || null,
           plan_complete_time: (vals.plan_complete_time as string) || null,
           module_id: (vals.module_id as string) || null,
@@ -1786,28 +1788,28 @@ function DetailDrawer({
             </Form.Item>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Form.Item label="计划开始时间">
+            <Form.Item
+              label="计划开始时间"
+              name="plan_begin_time"
+              getValueProps={(v) => ({ value: toDay(v) })}
+              normalize={(d) => fromDate(d)}
+            >
               <DatePicker
                 disabled={!baseEditable}
                 className="w-full"
                 format="YYYY-MM-DD"
-                value={toDay(form.getFieldValue("plan_begin_time"))}
-                onChange={(d) => {
-                  const v = fromDate(d);
-                  form.setFieldValue("plan_begin_time", v);
-                  recomputeComplete(v);
-                }}
               />
             </Form.Item>
-            <Form.Item label="计划完成时间">
+            <Form.Item
+              label="计划完成时间"
+              name="plan_complete_time"
+              getValueProps={(v) => ({ value: toDay(v) })}
+              normalize={(d) => fromDate(d)}
+            >
               <DatePicker
                 disabled={!baseEditable}
                 className="w-full"
                 format="YYYY-MM-DD"
-                value={toDay(form.getFieldValue("plan_complete_time"))}
-                onChange={(d) =>
-                  form.setFieldValue("plan_complete_time", fromDate(d))
-                }
               />
             </Form.Item>
           </div>
