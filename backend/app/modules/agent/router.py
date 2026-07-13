@@ -722,6 +722,43 @@ async def _load_mission_artifacts(
     return out
 
 
+@router.get(
+    "/workspaces/{workspace_id}/missions",
+    response_model=list[MissionResponse],
+)
+async def list_missions(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.TASK_READ))],
+    limit: int = Query(20, ge=1),
+    offset: int = Query(0, ge=0),
+) -> list[MissionResponse]:
+    """列出 workspace 的 mission（按 created_at 倒序，分页）。
+
+    quick（mission 历史列表）：前端 Agent 团队页进页面时调，展示历史 mission
+    （状态徽标/目标/时间/worker 数），点击单条调 getMission 刷新详情。返回完整
+    MissionResponse（含 workers + cost + artifacts）以复用 _mission_to_response；
+    N+1 查询可接受（列表通常 <20，非高频轮询路径——活跃 mission 走 getMission 轮询）。
+    limit 默认 20，硬上限 50（min(limit,50) 防滥用，不报 422）。
+    """
+    stmt = (
+        select(AgentMission)
+        .where(AgentMission.workspace_id == workspace_id)
+        .order_by(AgentMission.created_at.desc())
+        .limit(min(limit, 50))
+        .offset(offset)
+    )
+    missions = (await session.execute(stmt)).scalars().all()
+    ctrl = MissionControlService(session)
+    out: list[MissionResponse] = []
+    for m in missions:
+        runs = await ctrl.worker_runs(m.id)
+        cost = await ctrl.cost_so_far(m.id)
+        arts = await _load_mission_artifacts(session, m.id)
+        out.append(_mission_to_response(m, runs, cost, arts))
+    return out
+
+
 @router.post(
     "/workspaces/{workspace_id}/missions",
     response_model=MissionResponse,

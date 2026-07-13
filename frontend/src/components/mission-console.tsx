@@ -11,6 +11,7 @@ import {
   createMission,
   getAgentRunLogs,
   getMission,
+  listMissions,
   type AgentRunLogEntry,
   type CreateMissionInput,
   type MainAgentConfig,
@@ -595,6 +596,7 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
   const [mission, setMission] = useState<Mission | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [history, setHistory] = useState<Mission[]>([]);
 
   useEffect(() => {
     const missionId = readMissionIdFromUrl();
@@ -605,6 +607,18 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // quick（mission 历史列表）：进页面加载该 workspace 的历史 mission，点击切换查看执行记录。
+  const refreshHistory = useCallback(async () => {
+    try {
+      setHistory(await listMissions(workspaceId, { limit: 20 }));
+    } catch {
+      /* swallow list errors */
+    }
+  }, [workspaceId]);
+  useEffect(() => {
+    refreshHistory();
+  }, [refreshHistory]);
 
   const refresh = useCallback(async (id: string) => {
     try {
@@ -640,6 +654,7 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
       const m = await createMission(workspaceId, payload);
       setMission(m);
       writeMissionIdToUrl(m.id);
+      refreshHistory();
       setObjective("");
       setBudget("");
       setMode("single");
@@ -671,6 +686,43 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
         描述任务目标，Coordinator 会拆解为 Worker 团队，并行派发到 daemon 执行、收敛产出。
         刷新页面会保留当前 Mission。
       </p>
+
+      {history.length > 0 && (
+        <details className="rounded border bg-gray-50 p-2" open>
+          <summary className="cursor-pointer text-sm font-medium text-slate-700">
+            历史 Mission（{history.length}）— 点击查看执行记录
+          </summary>
+          <ul className="mt-2 max-h-72 space-y-1 overflow-y-auto">
+            {history.map((m) => (
+              <li key={m.id}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMission(m);
+                    writeMissionIdToUrl(m.id);
+                  }}
+                  className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-gray-100 ${
+                    mission?.id === m.id ? "bg-blue-50 ring-1 ring-blue-200" : ""
+                  }`}
+                >
+                  <Badge
+                    className={STATUS_BADGE[m.status] ?? "bg-gray-100 text-gray-700"}
+                  >
+                    {m.status}
+                  </Badge>
+                  <span className="flex-1 truncate text-gray-800">
+                    {m.objective || "(无目标)"}
+                  </span>
+                  <span className="whitespace-nowrap text-xs text-gray-400">
+                    {new Date(m.created_at).toLocaleString()} · {m.workers.length}{" "}
+                    worker
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
 
       {!mission && (
         <div className="space-y-2">

@@ -80,19 +80,19 @@ def _patch_converge_dependencies(
     from app.modules.agent import delegation, finalizer
     from app.modules.agent import mcp_tools as mod
 
-    async def _fake_converge_for_completed_run(session, run_id, cfg):  # type: ignore[no-untyped-def]
+    async def _fake_converge_for_completed_run(session, run_id, cfg):
         return "done"
 
     merge_iter = iter(merge_results)
 
-    async def _fake_finalize_merge(session, mission_id):  # type: ignore[no-untyped-def]
+    async def _fake_finalize_merge(session, mission_id):
         try:
             return next(merge_iter)
         except StopIteration:
             # 重入次数超 merge_results 时返全 merged（成功终态）
             return (["workers/merged"], [])
 
-    async def _fake_cleanup(session, mission_id):  # type: ignore[no-untyped-def]
+    async def _fake_cleanup(session, mission_id):
         cleanup_calls.append(mission_id)
 
     # converge_mission_for_completed_run 在 endpoint 函数体内延迟 import（from finalizer
@@ -126,8 +126,7 @@ class TestConvergeReentrant:
             cleanup_calls=cleanup_calls,
         )
 
-        resp = await converge_mission(ws_id, mission_id, db_session, user=None)  # type: ignore[arg-type]
-
+        resp = await converge_mission(ws_id, mission_id, db_session, user=None)
         assert isinstance(resp, ConvergeResponse)
         assert resp.status == "merged"
         assert resp.converged is True
@@ -152,8 +151,7 @@ class TestConvergeReentrant:
             cleanup_calls=cleanup_calls,
         )
 
-        resp = await converge_mission(ws_id, mission_id, db_session, user=None)  # type: ignore[arg-type]
-
+        resp = await converge_mission(ws_id, mission_id, db_session, user=None)
         assert resp.status == "conflict"
         assert resp.converged is False
         assert resp.merged_branches == ["workers/bbb"]
@@ -192,13 +190,13 @@ class TestConvergeReentrant:
         )
 
         # 第一次调用：冲突
-        resp1 = await converge_mission(ws_id, mission_id, db_session, user=None)  # type: ignore[arg-type]
+        resp1 = await converge_mission(ws_id, mission_id, db_session, user=None)
         assert resp1.status == "conflict"
         assert resp1.attempt == 1
         assert cleanup_calls == []
 
         # 第二次调用：重入（主 agent 已 SDK 解决）
-        resp2 = await converge_mission(ws_id, mission_id, db_session, user=None)  # type: ignore[arg-type]
+        resp2 = await converge_mission(ws_id, mission_id, db_session, user=None)
         assert resp2.status == "merged"
         assert resp2.converged is True
         assert resp2.merged_branches == ["workers/aaa", "workers/bbb"]
@@ -237,8 +235,7 @@ class TestConvergeReentrant:
             cleanup_calls=cleanup_calls,
         )
 
-        resp = await converge_mission(ws_id, mission_id, db_session, user=None)  # type: ignore[arg-type]
-
+        resp = await converge_mission(ws_id, mission_id, db_session, user=None)
         assert resp.status == "failed_manual"
         assert resp.converged is False
         assert resp.attempt == 3, "超限时 attempt 反映当前累计值（不再 +1 漂移）"
@@ -284,8 +281,7 @@ class TestConvergeReentrant:
             cleanup_calls=cleanup_calls,
         )
 
-        resp = await converge_mission(ws_id, mission_id, db_session, user=None)  # type: ignore[arg-type]
-
+        resp = await converge_mission(ws_id, mission_id, db_session, user=None)
         # attempt=2 → +1=3，不超 3 → 仍 conflict
         assert resp.status == "conflict"
         assert resp.attempt == 3
@@ -308,8 +304,7 @@ class TestConvergeReentrant:
             cleanup_calls=cleanup_calls,
         )
 
-        resp = await converge_mission(ws_id, mission_id, db_session, user=None)  # type: ignore[arg-type]
-
+        resp = await converge_mission(ws_id, mission_id, db_session, user=None)
         assert resp.status == "done"
         assert resp.converged is True
         assert resp.merged_branches == []

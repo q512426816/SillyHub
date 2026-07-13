@@ -303,3 +303,18 @@ export function cancelMission(missionId: string) {
     method: "POST",
   });
 }
+
+/**
+ * List Missions in a workspace (created_at desc, paginated).
+ * quick（mission 历史列表）：Agent 团队页进页面加载历史，点击单条调 getMission 切换详情。
+ */
+export function listMissions(
+  workspaceId: string,
+  params?: { limit?: number; offset?: number },
+) {
+  const search = new URLSearchParams();
+  if (params?.limit !== undefined) search.set("limit", String(params.limit));
+  if (params?.offset !== undefined) search.set("offset", String(params.offset));
+  const qs = search.toString() ? `?${search.toString()}` : "";
+  return apiFetch<Mission[]>(`/api/workspaces/${workspaceId}/missions${qs}`);
+}
