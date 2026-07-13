@@ -170,6 +170,9 @@ export default function MilestoneDetailsPage() {
     open: false,
     mode: "view",
   });
+  // 明细提交/保存成功后刷新明细列表:detailTick 递增 → expandRender 子表 key 变 → 重 mount → reload(模块+明细)。
+  // 主组件 reload(psNodes) 只刷里程碑主表,明细在子表(三层各自 reload),需 key 联动强制子表重 mount。
+  const [detailTick, setDetailTick] = useState(0);
   // P0-7:里程碑主表(PsPlanNode)CRUD 抽屉状态。
   const [masterDrawer, setMasterDrawer] = useState<{
     open: boolean;
@@ -485,6 +488,7 @@ export default function MilestoneDetailsPage() {
       if (node.overall_stage === IMPLEMENT_STAGE) {
         return (
           <ModuleLevelTable
+            key={`${node.id}-${detailTick}`}
             planNodeId={node.id}
             projectId={projectId}
             onAddDetail={(moduleId) =>
@@ -506,6 +510,7 @@ export default function MilestoneDetailsPage() {
       }
       return (
         <DetailLevelTable
+          key={`${node.id}-${detailTick}`}
           planNodeId={node.id}
           moduleId={null}
           onAddDetail={() =>
@@ -525,7 +530,7 @@ export default function MilestoneDetailsPage() {
         />
       );
     },
-    [projectId, currentUserId, openDetail, detailedStageFilter, taskThemeFilter, readOnly],
+    [projectId, currentUserId, openDetail, detailedStageFilter, taskThemeFilter, readOnly, detailTick],
   );
 
   if (!planId) {
@@ -667,7 +672,11 @@ export default function MilestoneDetailsPage() {
           projectId={projectId}
           currentUserId={currentUserId}
           onClose={() => setDrawer({ open: false, mode: "view" })}
-          onSaved={() => setDrawer({ open: false, mode: "view" })}
+          onSaved={() => {
+            setDrawer({ open: false, mode: "view" });
+            setDetailTick((t) => t + 1);
+            void reload();
+          }}
           onSubmit={handleSubmit}
         />
       )}
@@ -1543,7 +1552,7 @@ function DetailDrawer({
   );
 
   // ── 提交 ────────────────────────────────────────────────────────────────
-  const submit = async () => {
+  const submit = async (autoSubmit?: boolean) => {
     setBusy(true);
     setErr(null);
     try {
@@ -1568,10 +1577,21 @@ function DetailDrawer({
           approve_user_id: (vals.approve_user_id as string) || null,
           file_urls: (vals.file_urls as string[]) ?? [],
         };
+        let savedId: string | undefined;
         if (mode === "create") {
-          await createPsPlanNodeDetail({ plan_node_id: planNodeId, ...body });
+          const created = await createPsPlanNodeDetail({
+            plan_node_id: planNodeId,
+            ...body,
+          });
+          savedId = created.id;
         } else if (detail) {
           await updatePsPlanNodeDetail(detail.id, body);
+          savedId = detail.id;
+        }
+        // 提交按钮(autoSubmit=true):创建/更新后推进 draft→review(提交审核)。
+        // 保存按钮(autoSubmit=undefined):仅创建/更新,留在草稿。
+        if (autoSubmit && savedId) {
+          await savePlanNodeDetailProcess(savedId);
         }
         onSaved();
         return;
@@ -1718,11 +1738,30 @@ function DetailDrawer({
             <Button size="sm" variant="outline" onClick={onClose}>
               关闭
             </Button>
-            {showSubmit && (
-              <Button size="sm" disabled={busy} onClick={() => void submit()}>
-                {busy ? "提交中…" : submitText}
-              </Button>
-            )}
+            {showSubmit &&
+              (mode === "create" || mode === "edit" ? (
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => void submit()}
+                  >
+                    {busy ? "提交中…" : submitText}
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => void submit(true)}
+                  >
+                    {busy ? "提交中…" : "提交"}
+                  </Button>
+                </>
+              ) : (
+                <Button size="sm" disabled={busy} onClick={() => void submit()}>
+                  {busy ? "提交中…" : submitText}
+                </Button>
+              ))}
           </div>
         </div>
       }

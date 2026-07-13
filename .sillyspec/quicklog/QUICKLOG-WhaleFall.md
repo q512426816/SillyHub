@@ -448,6 +448,16 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 方案：①明细 L1560 + 模块 L1009 plan_workload 提交改 `vals.plan_workload != null && vals.plan_workload !== "" ? String(vals.plan_workload) : null`（运行时转 string）。②明细 + 模块时间 Form.Item 加 name（plan_begin_time/plan_complete_time）+ getValueProps（store string → DatePicker value dayjs）+ normalize（DatePicker dayjs → store string），Form 接管后回显；明细删 DatePicker 手动 onChange（联动改由已存在的 Form onValuesChange L1732 触发 recomputeComplete）。
 结果：①明细 L1560 + 模块 L1009 plan_workload 提交改 String() 转换；②明细 L1789/1802 + 模块 L1053/1063 时间 Form.Item 加 name(plan_begin_time/plan_complete_time) + getValueProps(string→dayjs value) + normalize(dayjs→string store)，删手动 value/onChange；Form 接管后时间回显 + 联动改由已存在的 onValuesChange(L1732) 触发 recomputeComplete；③`pnpm typecheck` 通过；④eslint 单文件 0 error（18 warning 全既有 unused/hooks-deps，非本次引入），recomputeComplete 仍被 onValuesChange 调用未变 unused；⑤rebuild frontend 部署（compose 联动 backend），两容器 healthy，前端 3000 可访问(200)。UI 端到端（时间回显 + 提交 plan_workload=string 不再报 string_type）待用户浏览器验证。
 
+## ql-20260713-006-2f8b | 2026-07-13 21:37:55 | 里程碑明细新建 Drawer 加「提交」按钮（创建+提交审核）+ 提交/保存成功刷新明细列表
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（DetailDrawer 加提交按钮 + submitForReview；主组件 onSaved 加 detailTick 刷新 + expandRender 子表 key 联动重 mount）
+需求：①新建里程碑明细 Drawer 在「保存」（创建草稿）旁增加「提交」按钮（创建并提交审核，draft→review）；②提交或保存成功后明细列表刷新（用户确认要加「提交」按钮区分保存）。
+根因：①create 模式 footer 只有「保存」(submitText L1673 create→保存)，无「提交审核」入口——提交审核 = savePlanNodeDetailProcess `/process/save`（draft→review），对照 PlanDetailActions(ppm-status-actions.tsx L153-164) draft 状态「提交审核」按钮调 `onSubmit(id,"save")`；②DetailDrawer submit 成功调 onSaved(L1576)，主组件 onSaved(L670) 只 setDrawer 关抽屉不刷新——明细列表在里程碑展开行子表(ModuleLevelTable/DetailLevelTable)，三层各自 reload(useEffect [planNodeId])，主组件不触发子表刷新。
+方案：①DetailDrawer 加 submitForReview 函数（create→拿 id→savePlanNodeDetailProcess 推进 draft→review；edit→update→save），footer create/edit 模式在「保存」旁加「提交」按钮；②主组件加 detailTick state，onSaved 关抽屉 + setDetailTick+1 + reload(psNodes)；expandRender 子表 key={`${node.id}-${detailTick}`}，detailTick 变子表重 mount 触发 reload（模块+明细）。
+结果：①主组件加 detailTick state，onSaved(L670) 改为关抽屉 + setDetailTick+1 + reload(psNodes)；expandRender 两子表(ModuleLevelTable/DetailLevelTable)加 key={`${node.id}-${detailTick}`} + useCallback 依赖加 detailTick，detailTick 变→子表重 mount→reload(模块+明细)，解决三层各自 reload 主组件触达不到的难题；②DetailDrawer submit 加 autoSubmit 参数：create 拿 created.id/edit 用 detail.id，autoSubmit 时 savePlanNodeDetailProcess(id) 推进 draft→review（对照 PlanDetailActions draft「提交审核」=onSubmit(id,"save")）；footer create/edit 模式渲染「保存」(outline,submit()) + 「提交」(default,submit(true)) 两个按钮，其他模式保持原 submitText 按钮；③`pnpm typecheck` 通过；④eslint 单文件 0 error（18 warning 全既有）；⑤rebuild frontend 部署，两容器 healthy。UI 端到端（新建明细保存/提交 + 列表刷新）待用户浏览器验证。
+
+
 
 
 
