@@ -1276,20 +1276,6 @@ function DetailLevelTable({
                 编辑
               </Button>
             )}
-            <PlanDetailActions
-              detail={d}
-              currentUserId={currentUserId}
-              disabled={readOnly}
-              onSubmit={(id, action) => {
-                // change 动作:打开变更原因录入抽屉(对齐源 ChangeNodeDetailForm),
-                // 其余动作(save/reject)在抽屉内填意见后提交,此处直接走 prompt 兜底。
-                if (action === "change") {
-                  onOpenDetail(d, "change");
-                } else {
-                  void onSubmitDetail(id, action);
-                }
-              }}
-            />
             {d.status === "draft" && (
               <Button
                 size="sm"
@@ -1557,7 +1543,7 @@ function DetailDrawer({
   );
 
   // ── 提交 ────────────────────────────────────────────────────────────────
-  const submit = async (autoSubmit?: boolean) => {
+  const submit = async () => {
     setBusy(true);
     setErr(null);
     try {
@@ -1582,21 +1568,10 @@ function DetailDrawer({
           approve_user_id: (vals.approve_user_id as string) || null,
           file_urls: (vals.file_urls as string[]) ?? [],
         };
-        let savedId: string | undefined;
         if (mode === "create") {
-          const created = await createPsPlanNodeDetail({
-            plan_node_id: planNodeId,
-            ...body,
-          });
-          savedId = created.id;
+          await createPsPlanNodeDetail({ plan_node_id: planNodeId, ...body });
         } else if (detail) {
           await updatePsPlanNodeDetail(detail.id, body);
-          savedId = detail.id;
-        }
-        // 提交按钮(autoSubmit=true):创建/更新后推进 draft→review(提交审核)。
-        // 保存按钮(autoSubmit=undefined):仅创建/更新,留在草稿。
-        if (autoSubmit && savedId) {
-          await savePlanNodeDetailProcess(savedId);
         }
         onSaved();
         return;
@@ -1719,54 +1694,15 @@ function DetailDrawer({
         ) : null
       }
       footer={
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex flex-wrap gap-1">
-            {detail && mode !== "create" && (
-              <PlanDetailActions
-                detail={detail}
-                currentUserId={currentUserId}
-                disabled={busy}
-                onSubmit={(id, action) => {
-                  onClose();
-                  void onSubmit(
-                    id,
-                    action,
-                    action === "change"
-                      ? undefined
-                      : { handleInfo: undefined },
-                  );
-                }}
-              />
-            )}
-          </div>
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={onClose}>
-              关闭
+        <div className="flex items-center justify-end gap-2">
+          <Button size="sm" variant="outline" onClick={onClose}>
+            关闭
+          </Button>
+          {showSubmit && (
+            <Button size="sm" disabled={busy} onClick={() => void submit()}>
+              {busy ? "提交中…" : submitText}
             </Button>
-            {showSubmit && mode === "create" ? (
-              <>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() => void submit()}
-                >
-                  {busy ? "提交中…" : submitText}
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => void submit(true)}
-                >
-                  {busy ? "提交中…" : "提交"}
-                </Button>
-              </>
-            ) : showSubmit ? (
-              <Button size="sm" disabled={busy} onClick={() => void submit()}>
-                {busy ? "提交中…" : submitText}
-              </Button>
-            ) : null}
-          </div>
+          )}
         </div>
       }
     >
@@ -1892,44 +1828,6 @@ function DetailDrawer({
                 />
               ) : (
                 <Input disabled={!baseEditable} placeholder="执行人 ID" />
-              )}
-            </Form.Item>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Form.Item
-              label="审核人"
-              name="audit_user_id"
-              rules={[{ required: true, message: "请选择审核人" }]}
-              tooltip={auditEditable ? undefined : "审核中状态由后端指派"}
-            >
-              {projectId ? (
-                <PpmUserSelect
-                  res="projectMember"
-                  searchData={{ pm_project_id: projectId }}
-                  disabled={!baseEditable}
-                  allowClear
-                  placeholder="选择审核人"
-                />
-              ) : (
-                <Input disabled={!baseEditable} placeholder="审核人 ID" />
-              )}
-            </Form.Item>
-            <Form.Item
-              label="审批人"
-              name="approve_user_id"
-              rules={[{ required: true, message: "请选择审批人" }]}
-              tooltip={approveEditable ? undefined : "审批中状态由后端指派"}
-            >
-              {projectId ? (
-                <PpmUserSelect
-                  res="projectMember"
-                  searchData={{ pm_project_id: projectId }}
-                  disabled={!baseEditable}
-                  allowClear
-                  placeholder="选择审批人"
-                />
-              ) : (
-                <Input disabled={!baseEditable} placeholder="审批人 ID" />
               )}
             </Form.Item>
           </div>

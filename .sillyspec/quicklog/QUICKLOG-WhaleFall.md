@@ -475,6 +475,15 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 方案：①onAddDetail 两处 setDrawer 加 detail:undefined（清残留，新建时 detail 强制空）；②task_theme/audit_user_id/approve_user_id 三个 Form.Item 加 rules=[{required:true}]（任务主题是明细核心，审核人/审批人是流程必需）。
 结果：①两处 onAddDetail（ModuleLevelTable L497 / DetailLevelTable L519）setDrawer 加 detail:undefined，新建时 detail 强制清空，initialValues 不再取残留明细的 audit_user_id；②task_theme/audit_user_id/approve_user_id 三个 Form.Item 加 rules=[{required:true}]，validateFields 校验必填，空表单提交被拦；③`pnpm typecheck` 通过；④eslint 单文件 0 error（18 warning 全既有）；⑤milestone-details 18 tests 全过；⑥rebuild frontend 部署 ready。新建明细空表单不能提交、审核人不再回显上次 UUID。
 
+## ql-20260713-009-6e1a | 2026-07-13 22:54:09 | 全局关闭里程碑明细审批流程——去审核/审批人字段 + PlanDetailActions（列表行+footer）+ 提交审核按钮 + submit autoSubmit
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
+需求：里程碑明细暂时不需要审批流程——用户选「全局关闭审批」，新建/编辑/列表所有审核审批操作去掉。
+方案：前端去掉所有审批 UI：①列表明细行 PlanDetailActions(L1279) 去；②DetailDrawer footer PlanDetailActions(L1725 edit 流程动作) 去；③footer「提交」按钮(create 模式 L1756) 去，只留「保存」；④新建表单审核/审批人 grid div(L1898 审核+审批 Form.Item) 去；⑤submit autoSubmit(L1555 签名 + L1598 if save 推进审核) 去，恢复只 create/update。明细 create 后保持 draft（不走 review/approve）。后端状态机不改（保留，前端不触发审批流转）。
+结果：①列表明细行 PlanDetailActions(L1279) 去掉；②DetailDrawer footer 去掉 PlanDetailActions + 「提交」按钮，简化为「关闭」+ submitText 按钮（create=保存）；③新建表单审核/审批人 grid div 去掉；④submit 去 autoSubmit 签名 + savedId + if save 逻辑，恢复只 create/update；⑤`pnpm typecheck` 通过；⑥eslint 0 error（19 warning，+1 为去 PlanDetailActions 后 onSubmitDetail prop 暂留，无害）；⑦milestone-details 18 tests 过；⑧rebuild frontend ready。明细全局不再有审批入口（无审核/审批人字段、无提交审核/审核通过/变更按钮），create 后保持 draft。注：handleSubmit/审核信息块(L1941+ view 模式展示历史 audit 数据) 保留，不破坏已有明细查看。
+
+
 
 
 
