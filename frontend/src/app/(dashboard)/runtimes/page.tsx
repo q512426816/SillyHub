@@ -100,9 +100,11 @@ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
   // 渲染所需：apiKey（优先）或 accessToken（fallback）
   if (!apiKey && !accessToken) return null;
 
-  const frontendUrl =
+  // server-url 用客户端实际访问地址：前端经 rewrite 代理 /api/* 与 /daemon/* 到 backend，
+  // daemon 全程连前端地址即可。不做端口替换——避免硬编码 :3001→:8001 随部署端口变化失效
+  // （ql-20260713-002：3000/8000 部署正则匹配不到 → serverUrl 错 → /daemon 404）。
+  const serverUrl =
     typeof window !== "undefined" ? window.location.origin : "http://localhost:3001";
-  const serverUrl = frontendUrl.replace(/:3001$/, ":8001");
   // 优先用长期 API Key；fallback 到浏览器短期 access_token（TTL 15min，不适合长期运行）。
   const useApiKey = !!apiKey;
   const placeholderCred = useApiKey ? (apiKey as string) : "<access_token>";
@@ -153,11 +155,12 @@ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
 /**
  * InstallDaemonBlock —— 「首次安装 daemon」折叠区块。
  *
- * 显示一键安装命令 `curl -fsSL <server>/daemon/install.sh | bash`，由 nginx 托管
- * 的 install.sh 执行（下载 ncc 单文件 bundle + 写 wrapper + 加 PATH）。
+ * 显示一键安装命令 `curl -fsSL <server>/daemon/install.sh | bash`，由 backend
+ * dist_router 的 /daemon/install.sh 端点（FileResponse）下发，脚本执行时再从
+ * 同一 server 拉 latest.json + sillyhub-daemon.js 单文件 bundle。
  *
- * serverUrl 从 window.location.origin 推导（:3001 前端 → :8001 后端/nginx），
- * 不硬编码 IP。用 mounted state 避免服务端/客户端 hydration 不一致。
+ * serverUrl 用 window.location.origin（前端 rewrite 代理 /daemon/* 到 backend），
+ * 不硬编码 IP / 端口。用 mounted state 避免服务端/客户端 hydration 不一致。
  */
 function InstallDaemonBlock() {
   const [open, setOpen] = useState(false);
@@ -165,9 +168,9 @@ function InstallDaemonBlock() {
   const [serverUrl, setServerUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    const frontendUrl = window.location.origin;
-    // 前端 :3001 → 后端/nginx :8001，与 CopyDaemonCommand 的 serverUrl 推导一致。
-    setServerUrl(frontendUrl.replace(/:3001$/, ":8001"));
+    // server-url 用客户端实际访问地址（前端 rewrite 代理 /api + /daemon 到 backend），
+    // 与 CopyDaemonCommand 一致。不再做端口替换（ql-20260713-002）。
+    setServerUrl(window.location.origin);
   }, []);
 
   const cmd = serverUrl
