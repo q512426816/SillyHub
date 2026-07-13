@@ -136,3 +136,12 @@
 - 解法：派生字段在构造时显式传——全字段直构 `Model(field1=orm.x, ..., 派生字段=value)`；或给派生字段加 `default=0`（model_validate 用 default 不崩，model_copy 覆盖真实值，适合派生字段总有组装覆盖的场景）。
 - 对比 `_runtime_read`（router.py:433）用 model_validate + model_copy 不崩，因 DaemonRuntimeRead 所有字段在 ORM 都有或 optional；DaemonMachineRead 崩是因 runtime_count/online_runtime_count 必填且 ORM 无。
 - 通用坑：DTO 有"派生/聚合"必填字段（不在源 ORM 上）时，避开 model_validate(ORM) 两段式，用全字段直构或给派生字段 default。
+
+## 2026-07-13 — backend rebuild apt 连不上 deb.debian.org（base image digest 漂移致 apt 缓存失效裸奔）
+
+> 来源：ql-20260713-001-9f3e（install.sh 修复 ql-20260710-003 上线时触发）。与 [[2026-06-30 — install.sh 改动需重建 backend 镜像才下发]] 同属 daemon 分发链路。
+
+- 现象：`docker compose up --build` 重建 backend 在 `[runtime 3/14] RUN apt-get update` 报 `Could not connect to deb.debian.org`（Connection refused）→ `Unable to locate package curl/git` → 整个 build 失败。运行中的旧容器不受影响（仍 healthy）。
+- 根因：runtime stage 的 apt 层平时缓存命中不需联网；当 base image `python:3.12-slim` 上游 digest 漂移（docker hub 重新推送同 tag），FROM 层变化使后续所有层缓存失效，apt-get update 需重新联网，而 deb.debian.org 在国内网络不可达——pip（tsinghua）/npm（npmmirror）都已配国内源，唯独 apt 漏配。
+- 修复（ql-20260713-001-9f3e）：backend/Dockerfile L66-76 在 apt-get update 前加 `find /etc/apt \( -name sources.list -o -name '*.sources' \) -exec sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' {} +`。trixie 用 DEB822 `/etc/apt/sources.list.d/debian.sources`，旧版用 `sources.list`，find 双覆盖；找不到文件时 `-exec` 不执行、退出码仍 0，无副作用。
+- 通用坑：Dockerfile 多阶段里 pip/npm 配了国内镜像但 apt 漏配是常见隐患——平时缓存命中掩盖了 apt 源不可达，一旦 base image digest 漂移或 `--no-cache` 就裸奔 build 失败。新项目 Dockerfile apt 层统一配国内源，与 pip/npm 对齐。

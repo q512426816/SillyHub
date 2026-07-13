@@ -64,7 +64,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN groupadd --system app && useradd --system --gid app --home /app app
 
 # Install minimal runtime dependencies plus git for agent worktrees.
-RUN apt-get update -o Acquire::Retries=3 \
+# 2026-07-13（ql-20260713-001）：apt 换清华源——deb.debian.org 在国内网络下连不上
+# （Connection refused），导致 base image digest 漂移后 rebuild 时整个 runtime stage
+# 在 apt-get update 报废。与 pip（tsinghua）/npm（npmmirror）一致配国内源。
+# trixie 用 DEB822 /etc/apt/sources.list.d/debian.sources，旧版用 sources.list，
+# find 覆盖两种格式；找不到文件时 -exec 不执行，退出码仍为 0，无副作用。
+RUN find /etc/apt -type f \( -name 'sources.list' -o -name '*.sources' \) \
+      -exec sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' {} + \
+ && apt-get update -o Acquire::Retries=3 \
  && apt-get install -y --no-install-recommends --fix-missing curl ca-certificates git libstdc++6 \
  && rm -rf /var/lib/apt/lists/*
 
