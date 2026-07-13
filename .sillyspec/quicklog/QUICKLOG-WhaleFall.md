@@ -430,6 +430,16 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 方案：抽 `win_to_unix_path` 函数（反斜杠→正斜杠 + 小写盘符 + 按 IS_WSL 加 /mnt/ 前缀），1c（L132-134）+ 1d（L167-169）两处盘符转换改调它。Git Bash（IS_WSL=0）输出 /e/... 不变；WSL（IS_WSL=1）输出 /mnt/e/... 修复。
 结果：①install.sh 加 win_to_unix_path 函数 + 1c/1d 两处盘符转换改调它（注释同步更新）；②`bash -n` SYNTAX_OK；③Git Bash（IS_WSL=0）win_to_unix_path 输出 /e/（不变）+ check_node 1a 命中（没改坏）；④WSL 内层（IS_WSL=1）跑改后脚本 check_node = 找到 node（注册表 PATH）: **/mnt/e/Software/nodejs/node.exe**（原转 /e/ -f 失败，现转 /mnt/e/ -f 成功）；⑤rebuild backend 部署（Dockerfile COPY scripts/install.sh 层更新，daemon bundle 未重打——install.sh 是独立脚本不经 ncc），容器 healthy；⑥端到端：服务端 3000 install.sh 含 win_to_unix_path（grep 4 处），WSL 内层从 3000 curl 拉脚本 + check_node = 找到 /mnt/e/Software/nodejs/node.exe v24.14.1 满足要求。用户原始 CMD→bash(WSL) `curl 3000/daemon/install.sh | bash` 命令现已能通过 node 检测。
 
+## ql-20260713-004-7e2a | 2026-07-13 20:44:51 | WSL 下 install.sh INSTALL_DIR 用 WSL $USER(=root) 拼 /mnt/c/Users/root/ 不存在 → mkdir Permission denied；改用 cmd.exe %USERPROFILE% 拿真实 Windows 用户目录
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/scripts/install.sh（WSL 分支 INSTALL_DIR 改用 cmd.exe echo %USERPROFILE%，不再用 WSL $USER）
+需求：ql-003 修复 node 检测后，install.sh 过了 check_node + fetch_latest，但 download_bundle 的 `mkdir -p "$BIN_DIR"` 报 `mkdir: Permission denied`，安装中止。
+根因：install.sh WSL 分支（L36-43）`INSTALL_DIR="/mnt/c/Users/${USER}/.sillyhub/daemon"`，注释假设"WSL $USER = Windows 用户名"——错。WSL 的 $USER 是 Linux 用户名（用户 WSL 默认 root，whoami=root），≠ Windows 用户名（12532）。故 INSTALL_DIR=/mnt/c/Users/root/.sillyhub/daemon，/mnt/c/Users/root 不存在（Windows 用户目录是 12532），mkdir -p 在 C:\Users\ 下建 root/ 被 drvfs 拒（Permission denied）。诊断实证：WSL $USER=root、Windows cmd echo %USERPROFILE%=C:\Users\12532、/mnt/c/Users/ 下有 12532 无 root、mkdir /mnt/c/Users/root/... 复现 Permission denied。
+方案：WSL 分支用 `/mnt/c/Windows/System32/cmd.exe /c "echo %USERPROFILE%"` 拿真实 Windows 用户目录（当前 Windows 会话用户，最准；powershell $env:USERPROFILE 在 WSL root 下不展开不可用），转 /mnt/<drive>/... 拼 INSTALL_DIR。cmd.exe 不可用时 fallback $USER（极少触发）。
+结果：①install.sh WSL 分支 INSTALL_DIR 改用 cmd.exe echo %USERPROFILE% 拿真实 Windows 用户目录（C:\Users\12532），转 /mnt/c/Users/12532/.sillyhub/daemon；cmd.exe 不可用时 fallback $USER；②`bash -n` SYNTAX_OK；③诊断实证 cmd.exe echo %USERPROFILE%=C:\Users\12532（powershell $env:USERPROFILE 在 WSL root 下不展开）；④WSL 内层 bash -x 跑改后 install.sh → download_bundle 输出 "下载 sillyhub-daemon.js -> **/mnt/c/Users/12532/.sillyhub/daemon/bin/**..."，证明 INSTALL_DIR 正确指向 12532（原 root → Permission denied）+ mkdir 成功（进到下载步骤）；⑤rebuild backend 部署，服务端 3000 install.sh 含 USERPROFILE（grep 3 处）。mkdir Permission denied 已解决，install 流程推进到 download 阶段（download 用默认 8001 失败是 source 未传 server-url，用户实际传 3000 可下载）。
+
+
 
 
 

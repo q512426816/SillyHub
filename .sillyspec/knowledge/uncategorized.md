@@ -155,3 +155,12 @@
 - 根因②（盘符转换 bug）：1c（cmd where）+ 1d（powershell 注册表）都成功拿到 Windows 路径 `E:\Software\nodejs\node.exe`，但盘符转换硬编码 `/${drive}${path:2}`（Git Bash 风格 `/e/`），WSL 下 `/e/` 不存在（应 `/mnt/e/`）→ `[[ -f /e/... ]]` 失败 → NODE_BIN 空。1a（WSL PATH 不含 Windows node）+ 1b（候选路径无 /mnt/e/）也失败，1c/1d 是唯一救命稻草却被盘符转换坑了。
 - 修复（ql-20260713-003-b3d7）：install.sh 抽 `win_to_unix_path` 函数，按 IS_WSL 决定前缀（WSL → `/mnt/<drive>/`，Git Bash → `/<drive>/`），1c/1d 改调它。验证：WSL 内层跑改后脚本 check_node = 找到 node（注册表 PATH）: `/mnt/e/Software/nodejs/node.exe` v24.14.1。
 - 通用坑：跨 Git Bash/WSL 的 shell 脚本，Windows 路径转 unix 路径必须区分两种映射（MSYS `/c/` vs WSL `/mnt/c/`），不能硬编码其中一种。WSL 默认 automount 所有 Windows 盘到 `/mnt/<drive>/`；Git Bash (MSYS) 挂到 `/<drive>/`。检测 IS_WSL（`/proc/sys/kernel/osrelease` 含 `microsoft`）后选对应前缀。写 Windows 安装脚本时**别假设 `bash` = Git Bash**——Win10/11 装了 WSL 后，CMD/PowerShell 里 `bash` 默认是 WSL 的 bash.exe。
+
+## 2026-07-13 — install.sh WSL 下 $USER ≠ Windows 用户名（拼 /mnt/c/Users/<name> 目录坑）
+
+> 来源：ql-20260713-004-7e2a。继 [[2026-07-13 — install.sh WSL 下 1c/1d 盘符转换 bug（/e/ vs /mnt/e/）+ CMD `bash` 默认解析到 WSL]] 之后又一个 WSL 兼容坑。
+
+- 现象：install.sh 在 WSL 下 `mkdir -p "$INSTALL_DIR"` 报 `Permission denied`（node 检测 + fetch_latest 都过了，卡在 download_bundle 的 mkdir）。
+- 根因：WSL 的 `$USER` 是 **Linux 用户名**（默认常 root），≠ Windows 用户名。install.sh WSL 分支原用 `$USER` 拼 `/mnt/c/Users/${USER}/.sillyhub/daemon`，若 WSL $USER=root 则 `/mnt/c/Users/root/` 不存在（Windows 用户目录是 `<winname>`，如 12532），`mkdir -p` 在 `C:\Users\` 下建 `root/` 被 drvfs 拒。
+- 修复（ql-20260713-004）：WSL 下改用 `/mnt/c/Windows/System32/cmd.exe /c "echo %USERPROFILE%"` 拿真实 Windows 用户目录（`C:\Users\<winname>`），转 `/mnt/<drive>/...` 拼 INSTALL_DIR。**`powershell $env:USERPROFILE` 在 WSL root 下不展开**（`$env` 被 bash/interop 吃，返回空），`cmd.exe echo %USERPROFILE%` 可靠。
+- 通用坑：WSL 下要拿 Windows 用户目录/用户名，**别用 WSL 的 `$USER`/`$HOME`**（是 Linux 的，常 root），用 `cmd.exe /c "echo %USERPROFILE%"`/`%USERNAME%` 或读注册表。跨 Git Bash/WSL 的脚本里 `$USER` 语义不同：Git Bash `$USER`=Windows 用户名，WSL `$USER`=Linux 用户名——不能假设一致。

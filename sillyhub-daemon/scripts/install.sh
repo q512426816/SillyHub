@@ -34,10 +34,23 @@ if grep -qiE 'microsoft|Microsoft' /proc/sys/kernel/osrelease 2>/dev/null; then
 fi
 
 if [[ "$IS_WSL" -eq 1 ]]; then
-  # WSL：用 Windows 用户目录（/mnt/c/Users/<name>）
-  # WSL 的 $USER 默认就是 Windows 用户名，直接用，不调 cmd.exe
-  # （cmd.exe 在 pipe 环境下可能失败，且 set -e + pipefail 会静默退出脚本）
-  INSTALL_DIR="/mnt/c/Users/${USER}/.sillyhub/daemon"
+  # WSL：用 Windows 用户目录（/mnt/c/Users/<winname>）。WSL 的 $USER 是 Linux 用户名
+  # （常 root），≠ Windows 用户名——用它拼 /mnt/c/Users/<name> 会指向不存在的目录
+  # → mkdir Permission denied（ql-20260713-004）。用 cmd.exe echo %USERPROFILE% 拿真实
+  # Windows 用户目录（当前 Windows 会话用户，最准；powershell $env:USERPROFILE 在 WSL
+  # root 下不展开不可用）。cmd.exe 不可用时 fallback $USER（极少触发，可能不准）。
+  WIN_PROFILE=""
+  if [[ -f "/mnt/c/Windows/System32/cmd.exe" ]]; then
+    WIN_PROFILE="$(/mnt/c/Windows/System32/cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r' | head -n1 || true)"
+  fi
+  if [[ -n "$WIN_PROFILE" ]]; then
+    # C:\Users\12532 → /mnt/c/Users/12532
+    WIN_PROFILE="$(printf '%s' "$WIN_PROFILE" | tr '\134' '/')"
+    wdrive="${WIN_PROFILE:0:1}"; wdrive="${wdrive,,}"
+    INSTALL_DIR="/mnt/${wdrive}${WIN_PROFILE:2}/.sillyhub/daemon"
+  else
+    INSTALL_DIR="/mnt/c/Users/${USER}/.sillyhub/daemon"
+  fi
 else
   INSTALL_DIR="${HOME}/.sillyhub/daemon"
 fi
