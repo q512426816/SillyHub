@@ -285,11 +285,7 @@ class WorkbenchService:
             day = start_time.day
             daily_count[day] = daily_count.get(day, 0) + 1
             end_time = t.end_time
-            if (
-                end_time is not None
-                and _to_aware(end_time) < now_aware
-                and t.status != "已完成"
-            ):
+            if end_time is not None and _to_aware(end_time) < now_aware and t.status != "已完成":
                 daily_delayed.add(day)
 
         days: list[CalendarDay] = []

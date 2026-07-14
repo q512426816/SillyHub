@@ -224,11 +224,17 @@ async def test_summary_metrics_with_tasks(db_session):
     if in_month.month != now.month:  # 跨月兜底,确保 start_time 落在当月
         in_month = now.replace(day=1, hour=9, minute=0, second=0, microsecond=0) + timedelta(days=1)
     # 已完成 (end_time 未来,不延期)
-    await _seed_plan(db_session, user.id, status="已完成", start_time=in_month, end_time=now + timedelta(days=1))
+    await _seed_plan(
+        db_session, user.id, status="已完成", start_time=in_month, end_time=now + timedelta(days=1)
+    )
     # 进行中未延期
-    await _seed_plan(db_session, user.id, status="进行中", start_time=in_month, end_time=now + timedelta(days=1))
+    await _seed_plan(
+        db_session, user.id, status="进行中", start_time=in_month, end_time=now + timedelta(days=1)
+    )
     # 进行中已延期 (end_time<now,未完成)
-    await _seed_plan(db_session, user.id, status="进行中", start_time=in_month, end_time=now - timedelta(days=1))
+    await _seed_plan(
+        db_session, user.id, status="进行中", start_time=in_month, end_time=now - timedelta(days=1)
+    )
 
     svc = WorkbenchService(db_session)
     summary = await svc.get_summary(user, range="month")
@@ -482,6 +488,7 @@ async def test_calendar_load_level_buckets(db_session):
     # 用本月不同 day 分别造 1/3/5 条,留 day=10 为空 (0 条)
     # 先确认这些 day 在当月有效
     import calendar as _cal
+
     dim = _cal.monthrange(base.year, base.month)[1]
     day_normal = min(10, dim)
     day_mid = min(11, dim)
@@ -490,11 +497,15 @@ async def test_calendar_load_level_buckets(db_session):
     assert day_normal != day_mid != day_over != day_none
 
     for _ in range(1):
-        await _seed_plan(db_session, user.id, status="进行中", start_time=base.replace(day=day_normal))
+        await _seed_plan(
+            db_session, user.id, status="进行中", start_time=base.replace(day=day_normal)
+        )
     for _ in range(3):
         await _seed_plan(db_session, user.id, status="进行中", start_time=base.replace(day=day_mid))
     for _ in range(5):
-        await _seed_plan(db_session, user.id, status="进行中", start_time=base.replace(day=day_over))
+        await _seed_plan(
+            db_session, user.id, status="进行中", start_time=base.replace(day=day_over)
+        )
 
     svc = WorkbenchService(db_session)
     cal = await svc.get_calendar(user, ym)
