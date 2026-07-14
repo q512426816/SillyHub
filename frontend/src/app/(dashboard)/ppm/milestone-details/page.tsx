@@ -117,6 +117,8 @@ interface DetailDrawerState {
   planNodeId?: string;
   moduleId?: string | null;
   detail?: PsPlanNodeDetail;
+  /** 当前里程碑 overall_stage,用于判断「所属模块」是否展示(仅实施阶段)。 */
+  overallStage?: string | null;
 }
 
 /**
@@ -439,6 +441,7 @@ export default function MilestoneDetailsPage() {
                   mode: "create",
                   planNodeId: n.id,
                   moduleId: n.overall_stage === IMPLEMENT_STAGE ? null : null,
+                  overallStage: n.overall_stage,
                 })
               }
             >
@@ -473,12 +476,13 @@ export default function MilestoneDetailsPage() {
 
   /** 打开明细抽屉,mode 默认按 status 路由,可显式覆盖(change/view)。 */
   const openDetail = useCallback(
-    (nodeId: string, detail: PsPlanNodeDetail, mode?: DrawerMode) => {
+    (nodeId: string, detail: PsPlanNodeDetail, mode?: DrawerMode, overallStage?: string | null) => {
       setDrawer({
         open: true,
         mode: mode ?? modeForStatus(detail.status),
         planNodeId: nodeId,
         moduleId: detail.module_id ?? null,
+        overallStage,
         detail,
       });
     },
@@ -501,9 +505,10 @@ export default function MilestoneDetailsPage() {
                 planNodeId: node.id,
                 moduleId,
                 detail: undefined,
+                overallStage: node.overall_stage,
               })
             }
-            onOpenDetail={(d, mode) => openDetail(node.id, d, mode)}
+            onOpenDetail={(d, mode) => openDetail(node.id, d, mode, node.overall_stage)}
             onSubmitDetail={handleSubmit}
             currentUserId={currentUserId}
             detailedStageFilter={detailedStageFilter}
@@ -524,9 +529,10 @@ export default function MilestoneDetailsPage() {
               planNodeId: node.id,
               moduleId: null,
               detail: undefined,
+              overallStage: node.overall_stage,
             })
           }
-          onOpenDetail={(d, mode) => openDetail(node.id, d, mode)}
+          onOpenDetail={(d, mode) => openDetail(node.id, d, mode, node.overall_stage)}
           onSubmitDetail={handleSubmit}
           currentUserId={currentUserId}
           detailedStageFilter={detailedStageFilter}
@@ -673,6 +679,7 @@ export default function MilestoneDetailsPage() {
           mode={drawer.mode}
           planNodeId={drawer.planNodeId}
           moduleId={drawer.moduleId ?? null}
+          overallStage={drawer.overallStage}
           detail={drawer.detail}
           projectId={projectId}
           currentUserId={currentUserId}
@@ -1386,6 +1393,7 @@ function DetailDrawer({
   mode,
   planNodeId,
   moduleId,
+  overallStage,
   detail,
   projectId,
   currentUserId,
@@ -1396,6 +1404,8 @@ function DetailDrawer({
   mode: DrawerMode;
   planNodeId: string;
   moduleId: string | null;
+  /** 当前里程碑 overall_stage,仅实施阶段时展示「所属模块」字段。 */
+  overallStage?: string | null;
   detail?: PsPlanNodeDetail;
   projectId: string | null;
   currentUserId: string;
@@ -1746,7 +1756,11 @@ function DetailDrawer({
         {/* 开立信息块(对照源 AddNodeDetailForm / ViewNodeDetailForm 开立段) */}
         <FormSection title="开立信息">
           <div className="grid grid-cols-2 gap-3">
-            <Form.Item label="明细阶段" name="detailed_stage">
+            <Form.Item
+              label="明细阶段"
+              name="detailed_stage"
+              rules={[{ required: true, message: "请输入明细阶段" }]}
+            >
               <Input disabled={!baseEditable} placeholder="请输入明细阶段" />
             </Form.Item>
             <Form.Item
@@ -1757,7 +1771,11 @@ function DetailDrawer({
               <Input disabled={!baseEditable} placeholder="请输入任务主题" />
             </Form.Item>
           </div>
-          <Form.Item label="任务描述" name="task_description">
+          <Form.Item
+            label="任务描述"
+            name="task_description"
+            rules={[{ required: true, message: "请输入任务描述" }]}
+          >
             <Input.TextArea
               disabled={!baseEditable}
               rows={2}
@@ -1772,16 +1790,25 @@ function DetailDrawer({
             />
           </Form.Item>
           <div className="grid grid-cols-3 gap-3">
-            <Form.Item label="角色" name="role_name">
+            <Form.Item
+              label="角色"
+              name="role_name"
+              rules={[{ required: true, message: "请输入角色" }]}
+            >
               <Input disabled={!baseEditable} placeholder="角色" />
             </Form.Item>
-            <Form.Item label="成果" name="achievement">
+            <Form.Item
+              label="成果"
+              name="achievement"
+              rules={[{ required: true, message: "请输入成果" }]}
+            >
               <Input disabled={!baseEditable} placeholder="成果" />
             </Form.Item>
             <Form.Item
               label="计划工作量(工作日)"
               name="plan_workload"
               tooltip="填数字。修改后将按工作日自动推算计划完成时间。"
+              rules={[{ required: true, message: "请输入计划工作量" }]}
             >
               <InputNumber
                 disabled={!baseEditable}
@@ -1799,6 +1826,7 @@ function DetailDrawer({
               name="plan_begin_time"
               getValueProps={(v) => ({ value: toDay(v) })}
               normalize={(d) => fromDate(d)}
+              rules={[{ required: true, message: "请选择计划开始时间" }]}
             >
               <DatePicker
                 disabled={!baseEditable}
@@ -1811,6 +1839,7 @@ function DetailDrawer({
               name="plan_complete_time"
               getValueProps={(v) => ({ value: toDay(v) })}
               normalize={(d) => fromDate(d)}
+              rules={[{ required: true, message: "请选择计划完成时间" }]}
             >
               <DatePicker
                 disabled={!baseEditable}
@@ -1819,28 +1848,40 @@ function DetailDrawer({
               />
             </Form.Item>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div
+            className={
+              overallStage === IMPLEMENT_STAGE
+                ? "grid grid-cols-2 gap-3"
+                : "grid grid-cols-1 gap-3"
+            }
+          >
+            {overallStage === IMPLEMENT_STAGE && (
+              <Form.Item
+                label="所属模块"
+                name="module_id"
+                tooltip="实施阶段三级用,其他阶段可空;选项来自当前里程碑的模块列表"
+              >
+                <Select
+                  disabled={!baseEditable}
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="选择所属模块(可空)"
+                  notFoundContent={
+                    modules.length === 0 ? "该里程碑暂无模块" : undefined
+                  }
+                  options={modules.map((m) => ({
+                    value: m.id,
+                    label: m.module_name ?? m.id,
+                  }))}
+                />
+              </Form.Item>
+            )}
             <Form.Item
-              label="所属模块"
-              name="module_id"
-              tooltip="实施阶段三级用,其他阶段可空;选项来自当前里程碑的模块列表"
+              label="执行人"
+              name="execute_user_id"
+              rules={[{ required: true, message: "请选择执行人" }]}
             >
-              <Select
-                disabled={!baseEditable}
-                allowClear
-                showSearch
-                optionFilterProp="label"
-                placeholder="选择所属模块(可空)"
-                notFoundContent={
-                  modules.length === 0 ? "该里程碑暂无模块" : undefined
-                }
-                options={modules.map((m) => ({
-                  value: m.id,
-                  label: m.module_name ?? m.id,
-                }))}
-              />
-            </Form.Item>
-            <Form.Item label="执行人" name="execute_user_id">
               {projectId ? (
                 <PpmUserSelect
                   res="projectMember"
