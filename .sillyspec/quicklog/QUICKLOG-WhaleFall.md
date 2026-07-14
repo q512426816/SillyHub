@@ -50,3 +50,12 @@ created_at: 2026-07-14T09:20:24
 根因：①antd InputNumber className=w-full 不生效，需 style width;②addWorkingDaysMs 只跳周末，不跳法定假日也不处理调休补班（数据在 kanban-gantt-helpers，未共享给 workday）;③源算法语义是「start+N 工作日」且带 days-0.01 跨日副作用（+2 实际跨 3 天），与用户「开始日算第1天」(+2=+1天) 差 2 天。另：原算法有「每周固定5工作日」完整周优化，加节假日后不准。
 方案：①page.tsx 两处 plan_workload InputNumber 加 style={{width:'100%'}}；②workday.ts 内置 HOLIDAYS_2026/ADJUSTED_WORKDAYS_2026 + getDayStatus + isRestDay（休息=法定假日或周末，调休补班算工作），kanban-gantt-helpers re-export 保持 API；③addWorkingDaysMs 重写为「第 N 个工作日」语义（起点顺延休息日作第1天，再推进 N-1 个工作日），去掉 0.99 副作用 + 完整周优化 + 小数跨日，纯逐日跳 isRestDay。
 结果：①typecheck 过；②workday 15 测试（12 改新语义 + 3 节假日：中秋顺延/跨国庆/调休补班）全过；③kanban 18 测试过（getDayStatus re-export 行为不变）；④milestone 18 测试过；⑤eslint 0 error。注：problem 表单也用该 helper，完成日语义随之一致变化（无前端测试覆盖）。待 commit+push+rebuild frontend + 用户验证。
+
+## ql-20260714-007-b2e7 | 2026-07-14 15:51:09 | 修「新建里程碑」选计划开始/完成时间崩溃——DatePicker 受控写法与 Form.Item 冲突，对齐明细表单 getValueProps+normalize
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（PsPlanNodeDrawer 两个日期 Form.Item 改 getValueProps+normalize，删 DatePicker 手写 value/onChange）
+需求：新建里程碑选「计划开始时间/计划完成时间」报 client-side exception：TypeError: S(...).isValid is not a function。要求调整得和「新建里程碑明细」里一样。
+根因：主表单 DatePicker 同时用 <Form.Item name=...> 受控 + 手写 value={toDay(form.getFieldValue(...))}/onChange={form.setFieldValue(fromDate(d))}。Form.Item 有 name 时 antd 会用 cloneElement 把 form store 值（字符串）注入 DatePicker.value 覆盖手写 value，rc-picker 内部 value.isValid() 对字符串报 not a function。明细表单用 getValueProps(v=>({value:toDay(v)}))+normalize(d=>fromDate(d)) 做双向转换，store 存字符串、DatePicker 收 Dayjs，无此问题。
+方案：把主表单两个日期 Form.Item 改成与明细完全一致的 getValueProps+normalize 写法，删除 DatePicker 上的 value/onChange 手写 props，仅保留 className/format。
+结果：①typecheck 过；②lint 0 error（剩余 warning 全为既有、与本次无关的其他文件）；③milestone-details 18 测试过；④待 commit+push+rebuild frontend 部署 + 用户验证（新建里程碑选开始/完成时间不再崩溃）。

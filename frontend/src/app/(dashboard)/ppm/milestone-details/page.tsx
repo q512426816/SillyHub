@@ -2305,30 +2305,20 @@ function PsPlanNodeDrawer({
           <Form.Item
             label="计划开始时间"
             name="plan_begin_time"
+            getValueProps={(v) => ({ value: toDay(v) })}
+            normalize={(d) => fromDate(d)}
             rules={[{ required: true, message: "请选择计划开始时间" }]}
           >
-            <DatePicker
-              className="w-full"
-              format="YYYY-MM-DD"
-              value={toDay(form.getFieldValue("plan_begin_time"))}
-              onChange={(d) =>
-                form.setFieldValue("plan_begin_time", fromDate(d))
-              }
-            />
+            <DatePicker className="w-full" format="YYYY-MM-DD" />
           </Form.Item>
           <Form.Item
             label="计划完成时间"
             name="plan_complete_time"
+            getValueProps={(v) => ({ value: toDay(v) })}
+            normalize={(d) => fromDate(d)}
             rules={[{ required: true, message: "请选择计划完成时间" }]}
           >
-            <DatePicker
-              className="w-full"
-              format="YYYY-MM-DD"
-              value={toDay(form.getFieldValue("plan_complete_time"))}
-              onChange={(d) =>
-                form.setFieldValue("plan_complete_time", fromDate(d))
-              }
-            />
+            <DatePicker className="w-full" format="YYYY-MM-DD" />
           </Form.Item>
         </div>
       </Form>

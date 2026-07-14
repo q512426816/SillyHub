@@ -85,3 +85,4 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 ## 变更索引
 - ql-20260624-010-xxxx | 修复项目计划编辑/新建项目经理下拉多角色成员显示无数据（role_name ilike 模糊匹配）
 - ql-20260624-011-b8f2 | 项目计划选中项目后带出公司名 + 唯一项目经理自动带入（onProjectChange async 查 getProject+listProjectMembers）
+- ql-20260714-007-b2e7 | 修复「新建里程碑」选计划开始/完成时间崩溃（DatePicker 受控写法 value/onChange 与 Form.Item name 冲突→rc-picker isValid 报错），对齐明细表单 getValueProps+normalize
