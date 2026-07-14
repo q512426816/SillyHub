@@ -248,7 +248,7 @@ describe("TeamProgress", () => {
     fireEvent.click(screen.getByText("取消"));
 
     await waitFor(() =>
-      expect(missionApi.cancelMission).toHaveBeenCalledWith("m-1"),
+      expect(missionApi.cancelMission).toHaveBeenCalledWith("", "m-1"),
     );
   });
 

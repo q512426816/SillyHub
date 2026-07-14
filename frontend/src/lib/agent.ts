@@ -298,10 +298,11 @@ export function getMission(missionId: string) {
 }
 
 /** Cancel a Mission: marks cancelled_at + kills active worker Runs. */
-export function cancelMission(missionId: string) {
-  return apiFetch<Mission>(`/api/missions/${missionId}/cancel`, {
-    method: "POST",
-  });
+export function cancelMission(workspaceId: string, missionId: string) {
+  return apiFetch<Mission>(
+    `/api/workspaces/${workspaceId}/missions/${missionId}/cancel`,
+    { method: "POST" },
+  );
 }
 
 /**

@@ -110,7 +110,7 @@ export function TeamProgress({ missionId, workspaceId, compact, pollMs }: TeamPr
   const handleCancel = useCallback(async () => {
     if (!mission) return;
     try {
-      setMission(await cancelMission(mission.id));
+      setMission(await cancelMission(workspaceId ?? "", mission.id));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "取消团队任务失败");
     }
