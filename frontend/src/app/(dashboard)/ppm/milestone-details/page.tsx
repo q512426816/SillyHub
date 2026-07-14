@@ -1071,6 +1071,7 @@ function ModuleFormDrawer({
             precision={1}
             min={0}
             className="w-full"
+            style={{ width: "100%" }}
           />
         </Form.Item>
         <div className="grid grid-cols-2 gap-3">
@@ -1814,6 +1815,7 @@ function DetailDrawer({
                 precision={1}
                 min={0}
                 className="w-full"
+                style={{ width: "100%" }}
               />
             </Form.Item>
           </div>
