@@ -19,8 +19,9 @@
  * 决策:D-009@v1(角色 auth.Role,value=name)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Table, type TableProps, Tag } from "antd";
+import { Drawer, Modal, Table, type TableProps } from "antd";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SectionCard } from "@/components/layout";
 import { PpmUserSelect, type PpmSelectOption } from "@/components/ppm-user-select";
@@ -197,7 +198,7 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
           if (!text) {
             return <span className="text-xs text-muted-foreground">—</span>;
           }
-          // 多角色逗号拼接 → 拆成多个 Tag 展示。
+          // 多角色逗号拼接 → 拆成多个 Badge 展示(D-003:统一 token 色)。
           const parts = String(text)
             .split(",")
             .map((s) => s.trim())
@@ -205,9 +206,9 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
           return (
             <span className="flex flex-wrap gap-1">
               {parts.map((p, i) => (
-                <Tag key={`${p}-${i}`} color="blue">
+                <Badge key={`${p}-${i}`} variant="info">
                   {p}
-                </Tag>
+                </Badge>
               ))}
             </span>
           );
@@ -268,7 +269,7 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
         <div
           className={`mb-2 rounded border px-3 py-2 text-xs ${
             toast.ok
-              ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+              ? "border-success/30 bg-success/10 text-success"
               : "border-destructive/30 bg-red-50 text-destructive"
           }`}
         >
@@ -451,22 +452,29 @@ function MemberFormDrawer({
   const showProjectPicker = !lockedProjectId;
 
   return (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
-      <div className="fixed right-0 top-0 z-50 flex h-full w-[520px] flex-col border-l bg-background shadow-xl">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <h3 className="text-sm font-medium">
-            {mode === "create" ? "新增成员" : "编辑成员"}
-          </h3>
-          <button
-            onClick={onClose}
-            className="text-muted-foreground hover:text-foreground"
+    <Drawer
+      open
+      onClose={onClose}
+      title={mode === "create" ? "新增成员" : "编辑成员"}
+      width={520}
+      maskClosable={false}
+      destroyOnClose
+      footer={
+        <div className="flex items-center justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onClose}>
+            取消
+          </Button>
+          <Button
+            size="sm"
+            disabled={!canWrite || !formValid || saving}
+            onClick={() => void submit()}
           >
-            ✕
-          </button>
+            {saving ? "保存中…" : "保存"}
+          </Button>
         </div>
-
-        <div className="flex-1 space-y-3 overflow-y-auto p-4">
+      }
+    >
+      <div className="space-y-3">
           {showProjectPicker && (
             <div>
               <label className="text-[11px] text-muted-foreground">
@@ -535,22 +543,8 @@ function MemberFormDrawer({
           </div>
 
           {error && <p className="text-[11px] text-destructive">{error}</p>}
-        </div>
-
-        <div className="sticky bottom-0 flex items-center justify-end gap-2 border-t bg-background px-4 py-3">
-          <Button variant="outline" size="sm" onClick={onClose}>
-            取消
-          </Button>
-          <Button
-            size="sm"
-            disabled={!canWrite || !formValid || saving}
-            onClick={() => void submit()}
-          >
-            {saving ? "保存中…" : "保存"}
-          </Button>
-        </div>
       </div>
-    </>
+    </Drawer>
   );
 }
 
@@ -566,22 +560,21 @@ function DeleteMemberConfirm({
   onConfirm: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-      <div className="w-96 rounded-md border bg-background p-5 shadow-lg">
-        <h3 className="text-sm font-semibold">确认删除成员？</h3>
-        <p className="mt-2 text-xs text-muted-foreground">
-          将删除 <span className="font-mono">{label}</span>。该操作不可恢复。
-        </p>
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onCancel}>
-            取消
-          </Button>
-          <Button variant="destructive" size="sm" onClick={onConfirm}>
-            确认删除
-          </Button>
-        </div>
-      </div>
-    </div>
+    <Modal
+      open
+      title="确认删除成员？"
+      onCancel={onCancel}
+      onOk={onConfirm}
+      okText="确认删除"
+      cancelText="取消"
+      okButtonProps={{ danger: true }}
+      maskClosable={false}
+      destroyOnClose
+    >
+      <p className="mt-2 text-xs text-muted-foreground">
+        将删除 <span className="font-mono">{label}</span>。该操作不可恢复。
+      </p>
+    </Modal>
   );
 }
 

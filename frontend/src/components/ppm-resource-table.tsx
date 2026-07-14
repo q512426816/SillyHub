@@ -14,9 +14,10 @@
  * 复用样板:frontend/src/app/(dashboard)/admin/users/page.tsx
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Form, Input, Select, Tag, type TableProps } from "antd";
+import { Drawer, Form, Input, Modal, Select, Tag, type TableProps } from "antd";
 
 import { Button } from "@/components/ui/button";
+import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
 import {
   DataTable,
   PageContainer,
@@ -39,10 +40,16 @@ export interface PpmFieldOption {
   label: string;
   value: string;
   /**
-   * 列表 dict-tag 颜色(AntD Tag color,如 "blue"/"green"/"red"/"#f50")。
-   * 对照源 vue dict-tag,select 字段在表格列里渲染带颜色的 Tag。
+   * 列表 dict-tag 颜色(AntD Tag color,如 "blue"/"cyan"/"default")。
+   * "default" = 默认灰 Tag(渲染无 color 的 <Tag>);对照源 vue dict-tag。
+   * 优先级低于 statusKind。
    */
   color?: string;
+  /**
+   * 状态语义 kind(D-003):有则渲染 StatusBadge(带圆点 pill),优先级高于 color。
+   * 用于「状态」类字段(进行中/已完成/已暂停);「类型」类字段用 color。
+   */
+  statusKind?: StatusKind;
 }
 
 /**
@@ -430,7 +437,8 @@ export function PpmResourceTable<
             }
             return text;
           }
-          // select 渲染 dict-tag(带颜色);无 color 退化为纯文本
+          // select 渲染(D-003/D-004):statusKind→StatusBadge(带圆点 pill) >
+          // color="default"→默认灰 Tag > color→带色 Tag > 纯文本
           if (f.type === "select") {
             const opts = asyncOptions[f.name] ?? f.options ?? [];
             const hit = opts.find((o) => o.value === String(value ?? ""));
@@ -440,6 +448,12 @@ export function PpmResourceTable<
               }
               return String(value);
             }
+            if (hit.statusKind) {
+              return <StatusBadge kind={hit.statusKind}>{hit.label}</StatusBadge>;
+            }
+            if (hit.color === "default") {
+              return <Tag>{hit.label}</Tag>;
+            }
             if (hit.color) {
               return <Tag color={hit.color}>{hit.label}</Tag>;
             }
@@ -447,6 +461,12 @@ export function PpmResourceTable<
           }
           if (value === null || value === undefined || value === "") {
             return <span className="text-xs text-muted-foreground">—</span>;
+          }
+          // 项目名称列加粗(G3:不做双行合并,仅强调主名)
+          if (f.name === "project_name") {
+            return (
+              <span className="font-medium text-foreground">{String(value)}</span>
+            );
           }
           return String(value);
         },
@@ -516,7 +536,7 @@ export function PpmResourceTable<
         <div
           className={`rounded border px-3 py-2 text-xs ${
             toast.ok
-              ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+              ? "border-success/30 bg-success/10 text-success"
               : "border-destructive/30 bg-red-50 text-destructive"
           }`}
         >
@@ -539,24 +559,8 @@ export function PpmResourceTable<
       ) : (
         <>
           <SectionCard bodyPadding="p-2">
-            {/* 顶部按钮行:搜索/重置/(展开) | 分隔 | 导出/新增 */}
+            {/* 顶部按钮行(D-006):左=数据组(导出/新增) | 竖分隔 | 右=基础组(搜索/重置/展开,最右) */}
             <div className="mb-2 flex items-center justify-end gap-2">
-              <Button size="sm" onClick={() => handleSearchCommit()}>
-                搜索
-              </Button>
-              <Button size="sm" variant="outline" onClick={handleReset}>
-                重置
-              </Button>
-              {showExpandToggle && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setExpanded((v) => !v)}
-                >
-                  {expanded ? "收起" : "展开"}
-                </Button>
-              )}
-              <span className="mx-1 h-6 w-px bg-border" aria-hidden />
               {exportFn && (
                 <Button
                   size="sm"
@@ -575,6 +579,22 @@ export function PpmResourceTable<
               >
                 + 新增{entityLabel}
               </Button>
+              <span className="mx-1 h-6 w-px bg-border" aria-hidden />
+              <Button size="sm" onClick={() => handleSearchCommit()}>
+                搜索
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleReset}>
+                重置
+              </Button>
+              {showExpandToggle && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setExpanded((v) => !v)}
+                >
+                  {expanded ? "收起" : "展开"}
+                </Button>
+              )}
             </div>
 
             {searchFields.length > 0 && (
@@ -788,22 +808,29 @@ function PpmResourceDrawer<T extends { id: string }>({
   };
 
   return (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
-      <div className="fixed right-0 top-0 z-50 flex h-full w-[520px] flex-col border-l bg-background shadow-xl">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <h3 className="text-sm font-medium">
-            {mode === "create" ? `新增${entityLabel}` : `编辑${entityLabel}`}
-          </h3>
-          <button
-            onClick={onClose}
-            className="text-muted-foreground hover:text-foreground"
+    <Drawer
+      open
+      onClose={onClose}
+      title={mode === "create" ? `新增${entityLabel}` : `编辑${entityLabel}`}
+      width={520}
+      maskClosable={false}
+      destroyOnClose
+      footer={
+        <div className="flex items-center justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onClose}>
+            取消
+          </Button>
+          <Button
+            size="sm"
+            disabled={!canWrite || !formValid || saving}
+            onClick={() => void submit()}
           >
-            ✕
-          </button>
+            {saving ? "保存中…" : "保存"}
+          </Button>
         </div>
-
-        <div className="flex-1 space-y-3 overflow-y-auto p-4">
+      }
+    >
+      <div className="space-y-3">
           {visibleFields.map((f) => {
             const name = f.name as string;
             const value = form[name] ?? "";
@@ -873,22 +900,8 @@ function PpmResourceDrawer<T extends { id: string }>({
             );
           })}
           {error && <p className="text-[11px] text-destructive">{error}</p>}
-        </div>
-
-        <div className="sticky bottom-0 flex items-center justify-end gap-2 border-t bg-background px-4 py-3">
-          <Button variant="outline" size="sm" onClick={onClose}>
-            取消
-          </Button>
-          <Button
-            size="sm"
-            disabled={!canWrite || !formValid || saving}
-            onClick={() => void submit()}
-          >
-            {saving ? "保存中…" : "保存"}
-          </Button>
-        </div>
       </div>
-    </>
+    </Drawer>
   );
 }
 
@@ -904,21 +917,20 @@ function DeleteConfirm({
   onConfirm: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-      <div className="w-96 rounded-md border bg-background p-5 shadow-lg">
-        <h3 className="text-sm font-semibold">确认删除{entityLabel}？</h3>
-        <p className="mt-2 text-xs text-muted-foreground">
-          将删除 <span className="font-mono">{label}</span>。该操作不可恢复。
-        </p>
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onCancel}>
-            取消
-          </Button>
-          <Button variant="destructive" size="sm" onClick={onConfirm}>
-            确认删除
-          </Button>
-        </div>
-      </div>
-    </div>
+    <Modal
+      open
+      title={`确认删除${entityLabel}？`}
+      onCancel={onCancel}
+      onOk={onConfirm}
+      okText="确认删除"
+      cancelText="取消"
+      okButtonProps={{ danger: true }}
+      maskClosable={false}
+      destroyOnClose
+    >
+      <p className="mt-2 text-xs text-muted-foreground">
+        将删除 <span className="font-mono">{label}</span>。该操作不可恢复。
+      </p>
+    </Modal>
   );
 }

@@ -13,8 +13,10 @@
  * 参照源:vue views/ppm/projectmaintenance/index.vue
  */
 import { useState } from "react";
+import { Drawer } from "antd";
 
 import { Button } from "@/components/ui/button";
+import type { StatusKind } from "@/components/ui/status-badge";
 import { PpmProjectMembersTable } from "@/components/ppm-project-members-table";
 import { PpmResourceTable, type PpmFieldDef } from "@/components/ppm-resource-table";
 import {
@@ -32,15 +34,16 @@ import type {
 } from "@/lib/ppm/types";
 
 // 项目类型 / 状态枚举(参照源 vue 字典 pm_project_type / pm_project_status)
+// D-003/D-004:类型用 antd Tag 分类色(blue/cyan/default灰);状态用 StatusBadge 语义(statusKind)。
 const PROJECT_TYPE_OPTIONS = [
   { label: "研发项目", value: "research", color: "blue" },
   { label: "实施项目", value: "implementation", color: "cyan" },
-  { label: "运维项目", value: "maintenance", color: "geekblue" },
+  { label: "运维项目", value: "maintenance", color: "default" },
 ];
-const PROJECT_STATUS_OPTIONS = [
-  { label: "进行中", value: "ongoing", color: "processing" },
-  { label: "已完成", value: "completed", color: "success" },
-  { label: "已暂停", value: "paused", color: "warning" },
+const PROJECT_STATUS_OPTIONS: { label: string; value: string; statusKind: StatusKind }[] = [
+  { label: "进行中", value: "ongoing", statusKind: "info" },
+  { label: "已完成", value: "completed", statusKind: "success" },
+  { label: "已暂停", value: "paused", statusKind: "warning" },
 ];
 
 type Entity = ProjectMaintenance;
@@ -156,25 +159,16 @@ function ProjectMembersDrawer({
   onClose: () => void;
 }) {
   return (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
-      <div className="fixed right-0 top-0 z-50 flex h-full w-[760px] flex-col border-l bg-background shadow-xl">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <h3 className="text-sm font-medium">
-            成员管理 · {project.project_name ?? project.project_code}
-          </h3>
-          <button
-            onClick={onClose}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            ✕
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-4">
-          <PpmProjectMembersTable projectId={project.id} />
-        </div>
-      </div>
-    </>
+    <Drawer
+      open
+      onClose={onClose}
+      title={`成员管理 · ${project.project_name ?? project.project_code}`}
+      width={760}
+      maskClosable={false}
+      destroyOnClose
+    >
+      <PpmProjectMembersTable projectId={project.id} />
+    </Drawer>
   );
 }
 
