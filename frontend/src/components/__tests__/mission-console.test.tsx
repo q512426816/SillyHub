@@ -1,33 +1,34 @@
 // tests/components/__tests__/mission-console.test.tsx
-// task-07 / FR-2 / FR-6 / D-002@v2 / D-003@v2：team 配置面板单测。
+// task-10 重写（2026-07-14-missions-page-redesign）：对齐重设计后的组件。
 //
 // 依据：
-//   - tasks/task-07.md acceptance（team 面板可配主 agent 类型/模型 + 增删 worker 行；
-//     CreateMissionInput 携带 worker_preset/main_agent_config 调 create_mission）
-//   - design.md §3 主 agent + worker 自由组合（D-003@v2）
-//   - design.md §6 D-002@v2（worker 用户预设，非主 agent 自动拆解）
+//   - plan.md task-01/02/03/04/05/06/07/08/09/10 + design.md §4/5/6/7
+//   - decisions.md D-001~008@v1（固定 team / 高级默认折叠 / 总览卡+AI结论 / 藏黑话 / 折叠）
 //
 // 覆盖：
-//   - mode=single 默认：不展开 team 配置面板（零回归）
-//   - mode=team 选中：展开主 agent 配置 + worker 列表
-//   - worker 增删：添加 / 删除按钮改列表长度
-//   - submit(team)：createMission 收到 worker_preset + main_agent_config
-//   - submit(single)：createMission 不带 worker_preset/main_agent_config（零回归）
+//   - 固定 team：无 single/team 选择卡片；启动按钮文案「启动」
+//   - 高级默认折叠（details open=false）；展开后主控配置+分身列表可见，添加分身生效
+//   - submit 固定 mode="team" + main_agent_config(默认) + worker_preset(默认[])
+//   - 详情总览卡：中文状态（不露英文 status）+ 成败统计（排除主控）+ AI 最终结论(summary)
+//   - 分工目标默认折叠（全文不直接露出）
+//   - 藏黑话：UI 不出现 Coordinator/Worker/daemon 英文术语
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  cleanup,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
 import type { Mission } from "@/lib/agent";
 
-// ────────────────────────────────────────────────────────────────────────────
-// hoisted：createMission mock，捕获 payload 用于断言 worker_preset/main_agent_config。
-// ────────────────────────────────────────────────────────────────────────────
 const hoisted = vi.hoisted(() => {
   return {
     createMissionMock: vi.fn() as unknown as ReturnType<typeof vi.fn>,
   };
 });
 
-// mock @/lib/agent：只替换 createMission，其余保留 actual（类型等）
 vi.mock("@/lib/agent", async () => {
   const actual = await vi.importActual<typeof import("@/lib/agent")>("@/lib/agent");
   return {
@@ -36,7 +37,6 @@ vi.mock("@/lib/agent", async () => {
   };
 });
 
-// mock next/navigation（mission-console 不直接用，但间接依赖防告警）
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
   useRouter: () => ({ replace: () => {} }),
@@ -44,7 +44,6 @@ vi.mock("next/navigation", () => ({
 
 import { MissionConsole } from "@/components/mission-console";
 
-// 最小 Mission 返回值（createMission resolve 用）
 const FAKE_MISSION: Mission = {
   id: "miss-1",
   workspace_id: "ws-1",
@@ -59,67 +58,61 @@ const FAKE_MISSION: Mission = {
   workers: [],
 };
 
-function mockCreateResolve() {
-  hoisted.createMissionMock.mockResolvedValue(FAKE_MISSION);
+function mockCreateResolve(m: Mission = FAKE_MISSION) {
+  hoisted.createMissionMock.mockResolvedValue(m);
 }
 
-describe("MissionConsole team 配置面板（task-07）", () => {
+/** 工具：拿到「高级」details 的 open 状态。 */
+function advancedDetailsOpen(): boolean {
+  const summary = screen.queryByText(/高级：手动配分身/);
+  const details = summary?.closest("details") ?? null;
+  return details?.open ?? false;
+}
+
+describe("MissionConsole 重设计（2026-07-14-missions-page-redesign）", () => {
   beforeEach(() => {
     cleanup();
     hoisted.createMissionMock.mockReset();
     mockCreateResolve();
   });
 
-  it("mode=single 默认：不渲染 team 配置面板（主 agent / worker 列表不可见）", () => {
+  it("固定 team：无 single/team 选择卡片，启动按钮文案「启动」", () => {
     render(<MissionConsole workspaceId="ws-1" />);
-    expect(screen.queryByText(/主 Agent/i)).toBeNull();
-    expect(screen.queryByText(/Worker 列表/i)).toBeNull();
-    expect(screen.queryByLabelText("主 agent 类型")).toBeNull();
+    expect(screen.queryByRole("button", { name: "模式 team" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "模式 single" })).toBeNull();
+    expect(screen.getByRole("button", { name: "启动" })).toBeTruthy();
   });
 
-  it("mode=team 选中：展开主 agent 配置 + worker 列表（含默认 1 条 worker）", () => {
+  it("输入框 placeholder 为人话（无代码路径）", () => {
     render(<MissionConsole workspaceId="ws-1" />);
-    // 切到 team（ModeCard aria-label="模式 team"）
-    fireEvent.click(screen.getByRole("button", { name: "模式 team" }));
-    // team 面板渲染（用 label 锚点，避免多文本节点冲突）
-    expect(screen.getByLabelText("主 agent 类型")).toBeTruthy();
-    expect(screen.getByLabelText("主 agent provider")).toBeTruthy();
-    expect(screen.getByLabelText("主 agent 模型")).toBeTruthy();
-    // 默认 1 条 worker（label "worker 1 分工目标" 存在）
-    expect(screen.getByLabelText("worker 1 分工目标")).toBeTruthy();
+    const ta = screen.getByPlaceholderText(/描述你要 AI 团队做什么/);
+    expect(ta).toBeTruthy();
   });
 
-  it("worker 增删：添加按钮加 1 条，删除按钮减 1 条", () => {
+  it("高级默认折叠：details open=false", () => {
     render(<MissionConsole workspaceId="ws-1" />);
-    fireEvent.click(screen.getByRole("button", { name: "模式 team" }));
-    // 默认 1 条
-    expect(screen.getAllByLabelText(/分工目标/).length).toBe(1);
-    // 添加 → 2 条
-    fireEvent.click(screen.getByRole("button", { name: /添加 Worker/ }));
-    expect(screen.getAllByLabelText(/分工目标/).length).toBe(2);
-    // 删除第 1 条 → 剩 1 条（剩余 worker 重编号为 #1）
-    fireEvent.click(screen.getByLabelText("删除 worker 1"));
-    expect(screen.getAllByLabelText(/分工目标/).length).toBe(1);
+    expect(advancedDetailsOpen()).toBe(false);
   });
 
-  it("submit(team)：createMission payload 携带 mode=team + main_agent_config + worker_preset", async () => {
+  it("展开高级后：主控配置+分身列表可见，添加分身增加一行", () => {
     render(<MissionConsole workspaceId="ws-1" />);
-    // 填 objective
-    fireEvent.change(screen.getByPlaceholderText(/分析 backend/i), {
+    fireEvent.click(screen.getByText(/高级：手动配分身/));
+    expect(advancedDetailsOpen()).toBe(true);
+    expect(screen.getByLabelText("主控 AI 类型")).toBeTruthy();
+    expect(screen.getByLabelText("主控模型")).toBeTruthy();
+    // 初始 0 条分身（默认主控自动拆）
+    expect(screen.getByText(/分身列表（0）/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /添加分身/ }));
+    expect(screen.getByText(/分身列表（1）/)).toBeTruthy();
+    expect(screen.getByLabelText("分身 1 分工目标")).toBeTruthy();
+  });
+
+  it("submit：固定 mode=team + main_agent_config(默认) + worker_preset(默认空数组)", async () => {
+    render(<MissionConsole workspaceId="ws-1" />);
+    fireEvent.change(screen.getByPlaceholderText(/描述你要/), {
       target: { value: "扫描架构" },
     });
-    // 切 team
-    fireEvent.click(screen.getByRole("button", { name: "模式 team" }));
-    // 改主 agent 模型
-    fireEvent.change(screen.getByLabelText("主 agent 模型"), {
-      target: { value: "claude-opus-4-1" },
-    });
-    // 改默认 worker 的 objective
-    fireEvent.change(screen.getByLabelText("worker 1 分工目标"), {
-      target: { value: "分析架构" },
-    });
-    // 提交
-    fireEvent.click(screen.getByRole("button", { name: /启动团队/ }));
+    fireEvent.click(screen.getByRole("button", { name: "启动" }));
 
     await waitFor(() => {
       expect(hoisted.createMissionMock).toHaveBeenCalledTimes(1);
@@ -133,47 +126,24 @@ describe("MissionConsole team 配置面板（task-07）", () => {
     expect(p.main_agent_config).toEqual({
       agent_type: "claude_code",
       provider: "claude",
-      model: "claude-opus-4-1",
+      model: "claude-sonnet-4-6",
     });
     expect(Array.isArray(p.worker_preset)).toBe(true);
-    const preset = p.worker_preset as Array<{ objective: string }>;
-    expect(preset.length).toBe(1);
-    expect(preset[0]?.objective).toBe("分析架构");
+    expect((p.worker_preset as unknown[]).length).toBe(0);
   });
 
-  it("submit(single)：createMission payload 不带 worker_preset/main_agent_config（零回归）", async () => {
-    render(<MissionConsole workspaceId="ws-1" />);
-    fireEvent.change(screen.getByPlaceholderText(/分析 backend/i), {
-      target: { value: "简单问答" },
-    });
-    // 保持默认 single
-    fireEvent.click(screen.getByRole("button", { name: /启动团队/ }));
-
-    await waitFor(() => {
-      expect(hoisted.createMissionMock).toHaveBeenCalledTimes(1);
-    });
-    const [, payload] = hoisted.createMissionMock.mock.calls[0] as [
-      string,
-      unknown,
-    ];
-    const p = payload as Record<string, unknown>;
-    expect(p.mode).toBe("single");
-    expect(p.worker_preset).toBeUndefined();
-    expect(p.main_agent_config).toBeUndefined();
-  });
-
-  it("详情渲染：主 agent 与 worker 分开（主 agent 不混入 worker 列表）", async () => {
-    // 诊断 36b9b475：前端把主 agent（role=orchestrator）也当 worker 渲染，标题写死
-    // "Worker 日志"误导。修复后主 agent 单独区块，worker 列表只含真 worker。
-    const missionWithMain: Mission = {
+  it("详情总览卡：中文状态 + 成败统计(排除主控) + AI 最终结论", async () => {
+    const missionDegraded: Mission = {
       ...FAKE_MISSION,
-      status: "running",
+      status: "degraded",
+      cost_so_far: 0.4712,
+      budget_usd: null,
       workers: [
         {
           id: "main-1",
           role: "orchestrator",
-          objective: "主 agent 调度",
-          status: "running",
+          objective: "主控调度",
+          status: "completed",
           total_cost_usd: 0.1,
           started_at: null,
           finished_at: null,
@@ -181,9 +151,61 @@ describe("MissionConsole team 配置面板（task-07）", () => {
         },
         {
           id: "w-1",
-          role: "impl",
-          objective: "写实现",
-          status: "pending",
+          role: "arch",
+          objective: "架构分析（长指令原文示例）",
+          status: "completed",
+          total_cost_usd: 0.2,
+          started_at: null,
+          finished_at: null,
+          artifacts: [
+            {
+              id: "art-summary",
+              kind: "summary",
+              content_ref: "本次分析了会话上下文架构。",
+              created_at: "2026-07-12T00:00:00Z",
+            },
+          ],
+        },
+        {
+          id: "w-2",
+          role: "verify",
+          objective: "核查",
+          status: "failed",
+          total_cost_usd: 0.17,
+          started_at: null,
+          finished_at: null,
+          artifacts: [],
+        },
+      ],
+    };
+    mockCreateResolve(missionDegraded);
+    render(<MissionConsole workspaceId="ws-1" />);
+    fireEvent.change(screen.getByPlaceholderText(/描述你要/), {
+      target: { value: "x" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "启动" }));
+    await waitFor(() => {
+      expect(hoisted.createMissionMock).toHaveBeenCalledTimes(1);
+    });
+    // 中文状态（部分完成），英文 degraded 不露出
+    expect(screen.getByText("部分完成")).toBeTruthy();
+    expect(screen.queryByText("degraded")).toBeNull();
+    // 成败统计：2 个真分身（排除主控），成功 1
+    expect(screen.getByText(/2 个分身/)).toBeTruthy();
+    // AI 最终结论（summary artifact content_ref）
+    expect(screen.getByText("本次分析了会话上下文架构。")).toBeTruthy();
+  });
+
+  it("分工目标默认折叠：worker objective 全文不直接露出", async () => {
+    const m: Mission = {
+      ...FAKE_MISSION,
+      status: "running",
+      workers: [
+        {
+          id: "w-1",
+          role: "arch",
+          objective: "超长分工指令原文不应该默认露出",
+          status: "running",
           total_cost_usd: null,
           started_at: null,
           finished_at: null,
@@ -191,18 +213,81 @@ describe("MissionConsole team 配置面板（task-07）", () => {
         },
       ],
     };
-    hoisted.createMissionMock.mockResolvedValue(missionWithMain);
+    mockCreateResolve(m);
     render(<MissionConsole workspaceId="ws-1" />);
-    fireEvent.change(screen.getByPlaceholderText(/分析 backend/i), {
+    fireEvent.change(screen.getByPlaceholderText(/描述你要/), {
       target: { value: "x" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /启动团队/ }));
-    await waitFor(() => {
-      expect(hoisted.createMissionMock).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "启动" }));
+    await waitFor(() =>
+      expect(hoisted.createMissionMock).toHaveBeenCalledTimes(1),
+    );
+    // 折叠触发器可见
+    expect(screen.getByText(/分工目标（点开看完整）/)).toBeTruthy();
+    // 全文默认不露出（条件渲染，close 时不在 DOM）
+    expect(
+      screen.queryByText("超长分工指令原文不应该默认露出"),
+    ).toBeNull();
+  });
+
+  it("藏黑话：UI 不出现 Coordinator/Worker/daemon 英文术语", async () => {
+    const m: Mission = {
+      ...FAKE_MISSION,
+      status: "running",
+      workers: [
+        {
+          id: "w-1",
+          role: "arch",
+          objective: "x",
+          status: "running",
+          total_cost_usd: null,
+          started_at: null,
+          finished_at: null,
+          artifacts: [],
+        },
+      ],
+    };
+    mockCreateResolve(m);
+    render(<MissionConsole workspaceId="ws-1" />);
+    fireEvent.change(screen.getByPlaceholderText(/描述你要/), {
+      target: { value: "x" },
     });
-    // 主 agent 单独区块出现
-    expect(screen.getByText(/🧠\s*主 Agent/)).toBeTruthy();
-    // Worker 列表标题，只算真 worker（1 个，主 agent 不计入）
-    expect(screen.getByText(/Worker（1）/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "启动" }));
+    await waitFor(() =>
+      expect(hoisted.createMissionMock).toHaveBeenCalledTimes(1),
+    );
+    expect(screen.queryByText(/\bCoordinator\b/)).toBeNull();
+    expect(screen.queryByText(/\bWorker\b/)).toBeNull();
+    expect(screen.queryByText(/\bdaemon\b/i)).toBeNull();
+  });
+
+  it("分身中文角色：详情显示「架构分析」而非 [arch] 方括号代号", async () => {
+    const m: Mission = {
+      ...FAKE_MISSION,
+      status: "running",
+      workers: [
+        {
+          id: "w-1",
+          role: "arch",
+          objective: "x",
+          status: "running",
+          total_cost_usd: null,
+          started_at: null,
+          finished_at: null,
+          artifacts: [],
+        },
+      ],
+    };
+    mockCreateResolve(m);
+    render(<MissionConsole workspaceId="ws-1" />);
+    fireEvent.change(screen.getByPlaceholderText(/描述你要/), {
+      target: { value: "x" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "启动" }));
+    await waitFor(() =>
+      expect(hoisted.createMissionMock).toHaveBeenCalledTimes(1),
+    );
+    expect(screen.getAllByText("架构分析").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/\[arch\]/)).toBeNull();
   });
 });

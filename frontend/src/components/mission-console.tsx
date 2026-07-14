@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { AgentLogViewer } from "@/components/agent-log-viewer";
+import { MissionSummaryCard } from "@/components/mission-summary-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
@@ -21,6 +22,7 @@ import {
   type WorkerPresetItem,
 } from "@/lib/agent";
 
+/** 任务级状态徽标配色（STATUS_LABEL 控中文文案）。 */
 const STATUS_BADGE: Record<string, string> = {
   planning: "bg-gray-100 text-gray-700",
   running: "bg-blue-100 text-blue-700",
@@ -30,9 +32,28 @@ const STATUS_BADGE: Record<string, string> = {
   cancelled: "bg-gray-200 text-gray-500",
 };
 
+/** 任务级状态中文（D-005@v1，藏英文 status）。 */
+const STATUS_LABEL: Record<string, string> = {
+  planning: "规划中",
+  running: "运行中",
+  done: "已完成",
+  degraded: "部分完成",
+  failed: "失败",
+  cancelled: "已取消",
+};
+
+/** 分身（worker run）级状态中文。 */
+const WORKER_STATUS_LABEL: Record<string, string> = {
+  pending: "排队中",
+  running: "运行中",
+  completed: "已完成",
+  failed: "失败",
+  killed: "已终止",
+};
+
 const ACTIVE = new Set(["planning", "running", "degraded"]);
 
-/** Worker 角色中文标注（Coordinator 拆解出的分工，体现团队结构）。 */
+/** 分身角色中文标注（主控拆解出的分工）。 */
 const ROLE_LABEL: Record<string, string> = {
   arch: "架构分析",
   code_style: "代码规范",
@@ -41,11 +62,10 @@ const ROLE_LABEL: Record<string, string> = {
   risk: "风险",
   impl: "实现",
   verify: "验证",
-  orchestrator: "主 Agent",
+  orchestrator: "主控",
 };
 
-// ── task-07 / D-002@v2 / D-003@v2：team 配置面板选项 ──
-// agent_type 与 provider 自由组合（GLM 不再特殊），照 design §3 / AC-5。
+// team 配置面板选项（agent_type 与 provider 自由组合）。
 const AGENT_TYPE_OPTIONS = [
   { value: "claude_code", label: "Claude Code" },
   { value: "codex", label: "Codex" },
@@ -59,7 +79,6 @@ const PROVIDER_OPTIONS = [
   { value: "deepseek", label: "DeepSeek" },
 ] as const;
 
-// worker role 选项（对齐 ROLE_LABEL，用户预设用）
 const WORKER_ROLE_OPTIONS = [
   { value: "arch", label: "架构分析" },
   { value: "code_style", label: "代码规范" },
@@ -70,14 +89,14 @@ const WORKER_ROLE_OPTIONS = [
   { value: "verify", label: "验证" },
 ] as const;
 
-// 默认主 agent 配置（claude_code + claude provider，强模型推荐，design R-05）
+// 默认主控配置（claude_code + claude，强模型推荐）。
 const DEFAULT_MAIN_AGENT_CONFIG: MainAgentConfig = {
   agent_type: "claude_code",
   provider: "claude",
   model: "claude-sonnet-4-6",
 };
 
-// 默认新增 worker 模板（用户预设，D-002@v2）
+// 默认新增分身模板（高级手动预设用）。
 function makeEmptyWorker(): WorkerPresetItem {
   return { agent_type: "claude_code", model: "", objective: "", role: "impl" };
 }
@@ -94,56 +113,15 @@ function writeMissionIdToUrl(missionId: string) {
   window.history.replaceState(null, "", url);
 }
 
-function costBarColor(ratio: number): string {
-  if (ratio > 1.0) return "bg-red-500";
-  if (ratio >= 0.7) return "bg-yellow-500";
-  return "bg-green-500";
-}
-
-function CostBar({ cost, budget }: { cost: number; budget: number | null }) {
-  if (!budget || budget <= 0) {
-    return (
-      <div className="text-xs text-gray-500">
-        成本 ${cost.toFixed(4)}（未设预算）
-      </div>
-    );
-  }
-  const ratio = Math.min(cost / budget, 1.5);
-  const pct = Math.min(ratio * 100, 100);
-  const over = cost > budget;
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between text-xs text-gray-500">
-        <span>
-          成本 ${cost.toFixed(4)} / 预算 ${budget.toFixed(2)}
-        </span>
-        <span className={over ? "font-semibold text-red-600" : ""}>
-          {over ? "超预算" : `${Math.round((cost / budget) * 100)}%`}
-        </span>
-      </div>
-      <div className="h-2 w-full overflow-hidden rounded bg-gray-100">
-        <div
-          className={`h-full ${costBarColor(ratio)}`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
 /**
- * Coordinator 拆解面板：体现"Coordinator → Worker 团队"的拆解关系（不再是黑盒）。
- * - planning: 显示"Coordinator 正在拆解..."
- * - 有 workers: 显示 Coordinator summary（一句话理解）+ 拆解为 N 个 Worker + 角色分布
+ * 主控拆解面板：体现「主控 → 分身团队」的拆解关系。
+ * planning 显示「主控正在拆解…」；有分身显示主控的任务理解 + 角色分布。
  */
 function CoordinatorPanel({ mission }: { mission: Mission }) {
   const summary = mission.constraints?.coordinator_summary;
   const summaryText =
     typeof summary === "string" && summary.trim() ? summary.trim() : null;
-  // 只统计真 worker（排除主 agent role=orchestrator，主 agent 单独区块展示，
-  // 诊断 36b9b475：原把主 agent 算进 worker 计数/分布误导）
   const workers = mission.workers.filter((w) => w.role !== "orchestrator");
-  // 角色分布（体现 Coordinator 的分工决策）
   const roleCounts = new Map<string, number>();
   for (const w of workers) {
     const r = w.role ?? "worker";
@@ -154,12 +132,8 @@ function CoordinatorPanel({ mission }: { mission: Mission }) {
     return (
       <div className="rounded border border-blue-200 bg-blue-50 p-3 text-sm">
         <div className="flex items-center gap-2 font-medium text-blue-700">
-          <span className="animate-pulse">🧠</span> Coordinator 正在拆解任务为
-          Worker 团队…
+          <span className="animate-pulse">🧠</span> 主控正在拆解任务，规划分身分工…
         </div>
-        <p className="mt-1 text-xs text-blue-600">
-          调用 GLM 分析任务，规划 Worker 角色与分工，完成后并行派发到 daemon。
-        </p>
       </div>
     );
   }
@@ -167,9 +141,9 @@ function CoordinatorPanel({ mission }: { mission: Mission }) {
   return (
     <div className="rounded border border-gray-200 bg-gray-50 p-3 text-sm">
       <div className="flex items-center gap-2 font-medium">
-        🧠 Coordinator
+        🧠 主控
         <Badge variant="outline" className="text-xs">
-          已拆解为 {workers.length} 个 Worker
+          已拆解为 {workers.length} 个分身
         </Badge>
       </div>
       {summaryText && (
@@ -251,11 +225,11 @@ function WorkerLogPanel({
   return (
     <div className="border-t border-gray-200 pt-2">
       <AgentLogViewer
-        title={`${role === "orchestrator" ? "主 Agent 日志" : "Worker 日志"}（${runId.slice(0, 8)}）`}
+        title={role === "orchestrator" ? "主控日志" : "分身日志"}
         runId={runId}
         logs={logs}
         loading={loading}
-        emptyText="暂无日志（Worker 尚未产出，或仍在排队/执行中）"
+        emptyText="暂无日志（分身尚未产出，或仍在排队/执行中）"
         variant="embedded"
         compact
       />
@@ -271,6 +245,7 @@ function WorkerRow({
   workspaceId: string;
 }) {
   const [logOpen, setLogOpen] = useState(false);
+  const [objOpen, setObjOpen] = useState(false);
   const statusColor =
     worker.status === "failed"
       ? "text-red-600"
@@ -294,10 +269,11 @@ function WorkerRow({
               : "text-xs"
           }
         >
-          {role === "orchestrator" ? "主 Agent" : (ROLE_LABEL[role] ?? role)}
+          {role === "orchestrator" ? "主控" : (ROLE_LABEL[role] ?? role)}
         </Badge>
-        <span className="text-[11px] text-gray-400">[{role}]</span>
-        <span className={statusColor}>{worker.status}</span>
+        <span className={statusColor}>
+          {WORKER_STATUS_LABEL[worker.status] ?? worker.status}
+        </span>
         <button
           type="button"
           onClick={() => setLogOpen((v) => !v)}
@@ -307,10 +283,20 @@ function WorkerRow({
         </button>
       </div>
       {worker.objective && (
-        <p className="text-xs text-gray-600">
-          <span className="text-gray-400">分工目标：</span>
-          {worker.objective}
-        </p>
+        <div className="text-xs text-gray-600">
+          <button
+            type="button"
+            onClick={() => setObjOpen((v) => !v)}
+            className="text-gray-500 hover:text-gray-700"
+          >
+            {objOpen ? "▾ 收起分工目标" : "▸ 分工目标（点开看完整）"}
+          </button>
+          {objOpen && (
+            <p className="mt-1 whitespace-pre-wrap rounded bg-gray-50 p-2">
+              {worker.objective}
+            </p>
+          )}
+        </div>
       )}
       {worker.artifacts.length > 0 && (
         <div className="space-y-1">
@@ -331,72 +317,9 @@ function WorkerRow({
   );
 }
 
-function ModeCard({
-  selected,
-  onClick,
-  icon,
-  title,
-  desc,
-  meta,
-  accent,
-}: {
-  selected: boolean;
-  onClick: () => void;
-  icon: string;
-  title: string;
-  desc: string;
-  meta: string;
-  accent: "emerald" | "violet";
-}) {
-  // 选中态配色照原型：single 绿系 / team 紫系（border + bg + radio 实心点）
-  const selectedBorder =
-    accent === "emerald" ? "border-emerald-500" : "border-violet-500";
-  const selectedBg =
-    accent === "emerald" ? "bg-emerald-50" : "bg-violet-50";
-  const radioBorder =
-    accent === "emerald" ? "border-emerald-600" : "border-violet-600";
-  const radioDot =
-    accent === "emerald" ? "bg-emerald-600" : "bg-violet-600";
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={selected}
-      aria-label={`模式 ${title}`}
-      className={`relative cursor-pointer rounded-lg border-[1.5px] bg-white p-3.5 text-left transition-all hover:border-slate-400 ${
-        selected ? `${selectedBorder} ${selectedBg}` : "border-slate-200"
-      }`}
-    >
-      <div className="mb-1.5 flex items-center justify-between">
-        <span className="flex items-center gap-1.5 text-sm font-bold text-slate-900">
-          <span className="text-base">{icon}</span>
-          {title}
-        </span>
-        {/* radio 圈：选中时实心点（emerald/violet），未选中空圈 */}
-        <span
-          className={`relative h-[18px] w-[18px] rounded-full border-2 ${
-            selected ? radioBorder : "border-slate-300"
-          }`}
-        >
-          {selected && (
-            <span
-              className={`absolute inset-[3px] rounded-full ${radioDot}`}
-            />
-          )}
-        </span>
-      </div>
-      <p className="text-xs leading-relaxed text-slate-500">{desc}</p>
-      <p className="mt-1.5 text-[11px] text-slate-400">{meta}</p>
-    </button>
-  );
-}
-
 /**
- * team 配置面板（task-07 / D-002@v2 / D-003@v2）。
- * - 主 agent 配置：agent_type + provider + model（自由组合，GLM 不再特殊）
- * - Worker 列表：每条 agent_type + model + objective + role，可增删（用户预设，非自动拆解）
- * 样式照前端样式系统原型：field（label + 控件）、input/select 34px、紫系（violet）强调 team。
+ * 高级配置面板（task-04，D-002@v1）：默认折叠，用户想精细控制分身时展开。
+ * 主控配置 + 分身列表（留空 = 主控自动拆）。
  */
 function TeamConfigPanel({
   mainAgent,
@@ -422,22 +345,19 @@ function TeamConfigPanel({
   };
 
   return (
-    <div className="mt-3.5 space-y-4 rounded-md border border-violet-200 bg-violet-50/40 p-3.5">
-      {/* 主 agent（orchestrator）配置 */}
+    <div className="space-y-4 rounded-md border border-violet-200 bg-violet-50/40 p-3.5">
       <div className="space-y-2">
         <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet-700">
-          <span>🧠</span> 主 Agent（Orchestrator）
+          <span>🧠</span> 主控配置
         </div>
         <p className="text-[11px] text-slate-500">
-          主 agent 像项目经理：读 worker 实际产出后再决策下一步，全程动态指挥。
+          不填走默认（Claude · claude-sonnet-4-6）。主控像项目经理，读分身产出后再决策。
         </p>
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
           <label className="flex flex-col gap-1">
-            <span className="text-[11px] font-medium text-slate-600">
-              Agent 类型
-            </span>
+            <span className="text-[11px] font-medium text-slate-600">AI 类型</span>
             <select
-              aria-label="主 agent 类型"
+              aria-label="主控 AI 类型"
               className="h-[34px] rounded-md border border-slate-300 bg-white px-2.5 text-[13px] text-slate-800"
               value={mainAgent.agent_type}
               onChange={(e) =>
@@ -452,11 +372,9 @@ function TeamConfigPanel({
             </select>
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-[11px] font-medium text-slate-600">
-              Provider
-            </span>
+            <span className="text-[11px] font-medium text-slate-600">厂家</span>
             <select
-              aria-label="主 agent provider"
+              aria-label="主控厂家"
               className="h-[34px] rounded-md border border-slate-300 bg-white px-2.5 text-[13px] text-slate-800"
               value={mainAgent.provider}
               onChange={(e) =>
@@ -474,7 +392,7 @@ function TeamConfigPanel({
             <span className="text-[11px] font-medium text-slate-600">模型</span>
             <input
               type="text"
-              aria-label="主 agent 模型"
+              aria-label="主控模型"
               placeholder="如 claude-sonnet-4-6"
               className="h-[34px] rounded-md border border-slate-300 bg-white px-2.5 text-[13px] text-slate-800"
               value={mainAgent.model}
@@ -486,27 +404,26 @@ function TeamConfigPanel({
         </div>
       </div>
 
-      {/* Worker 列表（用户预设，D-002@v2） */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet-700">
-            <span>👥</span> Worker 列表（{workers.length}）
+            <span>👥</span> 分身列表（{workers.length}）
           </div>
           <button
             type="button"
             onClick={addWorker}
             className="rounded-md border border-violet-300 bg-white px-2.5 py-1 text-xs font-semibold text-violet-700 hover:bg-violet-100"
           >
-            + 添加 Worker
+            + 添加分身
           </button>
         </div>
         <p className="text-[11px] text-slate-500">
-          用户预设 worker 列表（非主 agent 自动拆解）。主 agent 按列表派发 + 动态调度（补/调整/收敛）。
+          留空 = 主控自动拆。手动预设后，主控按列表派发并动态调度。
         </p>
 
         {workers.length === 0 && (
           <div className="rounded-md border border-dashed border-slate-300 bg-white px-3 py-3 text-center text-xs text-slate-400">
-            尚未添加 Worker。点击「添加 Worker」预设分工。
+            尚未添加分身。留空即由主控自动拆解。
           </div>
         )}
 
@@ -518,12 +435,12 @@ function TeamConfigPanel({
             >
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-semibold text-slate-600">
-                  Worker #{idx + 1}
+                  分身 #{idx + 1}
                 </span>
                 <button
                   type="button"
                   onClick={() => removeWorker(idx)}
-                  aria-label={`删除 worker ${idx + 1}`}
+                  aria-label={`删除分身 ${idx + 1}`}
                   className="rounded border border-slate-300 px-2 py-0.5 text-xs text-red-600 hover:bg-red-50"
                 >
                   删除
@@ -531,9 +448,9 @@ function TeamConfigPanel({
               </div>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 <label className="flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-500">Agent 类型</span>
+                  <span className="text-[11px] text-slate-500">AI 类型</span>
                   <select
-                    aria-label={`worker ${idx + 1} agent 类型`}
+                    aria-label={`分身 ${idx + 1} AI 类型`}
                     className="h-[32px] rounded-md border border-slate-300 bg-white px-2 text-[12.5px] text-slate-800"
                     value={w.agent_type}
                     onChange={(e) =>
@@ -550,7 +467,7 @@ function TeamConfigPanel({
                 <label className="flex flex-col gap-1">
                   <span className="text-[11px] text-slate-500">角色</span>
                   <select
-                    aria-label={`worker ${idx + 1} 角色`}
+                    aria-label={`分身 ${idx + 1} 角色`}
                     className="h-[32px] rounded-md border border-slate-300 bg-white px-2 text-[12.5px] text-slate-800"
                     value={w.role}
                     onChange={(e) => updateWorker(idx, { role: e.target.value })}
@@ -566,7 +483,7 @@ function TeamConfigPanel({
                   <span className="text-[11px] text-slate-500">模型</span>
                   <input
                     type="text"
-                    aria-label={`worker ${idx + 1} 模型`}
+                    aria-label={`分身 ${idx + 1} 模型`}
                     placeholder="如 glm-4.6 / gpt-4o / deepseek-chat"
                     className="h-[32px] rounded-md border border-slate-300 bg-white px-2 text-[12.5px] text-slate-800"
                     value={w.model}
@@ -578,8 +495,8 @@ function TeamConfigPanel({
                 <span className="text-[11px] text-slate-500">分工目标</span>
                 <input
                   type="text"
-                  aria-label={`worker ${idx + 1} 分工目标`}
-                  placeholder="例：分析 backend/app/modules/agent/ 架构并输出摘要"
+                  aria-label={`分身 ${idx + 1} 分工目标`}
+                  placeholder="这个分身具体干什么"
                   className="h-[32px] rounded-md border border-slate-300 bg-white px-2 text-[12.5px] text-slate-800"
                   value={w.objective}
                   onChange={(e) =>
@@ -598,14 +515,11 @@ function TeamConfigPanel({
 export function MissionConsole({ workspaceId }: { workspaceId: string }) {
   const [objective, setObjective] = useState("");
   const [budget, setBudget] = useState("");
-  const [mode, setMode] = useState<"single" | "team">("single");
-  // task-07：team 配置面板状态（仅 mode=team 时使用 / 提交）
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [mainAgentConfig, setMainAgentConfig] = useState<MainAgentConfig>(
     DEFAULT_MAIN_AGENT_CONFIG,
   );
-  const [workers, setWorkers] = useState<WorkerPresetItem[]>([
-    makeEmptyWorker(),
-  ]);
+  const [workers, setWorkers] = useState<WorkerPresetItem[]>([]);
   const [mission, setMission] = useState<Mission | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -621,7 +535,6 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // quick（mission 历史列表）：进页面加载该 workspace 的历史 mission，点击切换查看执行记录。
   const refreshHistory = useCallback(async () => {
     try {
       setHistory(await listMissions(workspaceId, { limit: 20 }));
@@ -653,27 +566,24 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
     setError(null);
     try {
       const budgetNum = budget.trim() ? Number(budget) : null;
-      // task-07：mode=team 时携带 worker_preset + main_agent_config（D-002/D-003@v2）。
-      // single 模式传 null/undefined，后端按 mode 路由。
+      // 固定 team 模式（D-001@v1）：无条件传 mode="team" + 主控配置（默认值始终传，
+      // 即使用户不展开高级 G2）+ 分身预设（默认空数组 → 主控自动拆）。
       const payload: CreateMissionInput = {
         objective: objective.trim(),
         budget_usd: budgetNum !== null && budgetNum > 0 ? budgetNum : null,
-        mode,
+        mode: "team",
+        main_agent_config: mainAgentConfig,
+        worker_preset: workers,
       };
-      if (mode === "team") {
-        payload.main_agent_config = mainAgentConfig;
-        payload.worker_preset = workers;
-      }
       const m = await createMission(workspaceId, payload);
       setMission(m);
       writeMissionIdToUrl(m.id);
       refreshHistory();
       setObjective("");
       setBudget("");
-      setMode("single");
-      // 重置 team 配置（下一次创建默认状态）
+      setAdvancedOpen(false);
       setMainAgentConfig(DEFAULT_MAIN_AGENT_CONFIG);
-      setWorkers([makeEmptyWorker()]);
+      setWorkers([]);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
@@ -692,18 +602,11 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
 
   return (
     <section className="space-y-3 rounded-lg border p-4">
-      <h2 className="flex items-center gap-2 text-lg font-semibold">
-        🤝 Agent 团队（Mission）
-      </h2>
-      <p className="text-sm text-gray-500">
-        描述任务目标，Coordinator 会拆解为 Worker 团队，并行派发到 daemon 执行、收敛产出。
-        刷新页面会保留当前 Mission。
-      </p>
-
+      {/* 历史收进顶部按钮（默认收起，D-007@v1） */}
       {history.length > 0 && (
-        <details className="rounded border bg-gray-50 p-2" open>
+        <details className="rounded border bg-gray-50 p-2">
           <summary className="cursor-pointer text-sm font-medium text-slate-700">
-            历史 Mission（{history.length}）— 点击查看执行记录
+            历史（{history.length}）▾
           </summary>
           <ul className="mt-2 max-h-72 space-y-1 overflow-y-auto">
             {history.map((m) => (
@@ -714,6 +617,7 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
                     setMission(m);
                     writeMissionIdToUrl(m.id);
                   }}
+                  title={m.objective || "(无目标)"}
                   className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-gray-100 ${
                     mission?.id === m.id ? "bg-blue-50 ring-1 ring-blue-200" : ""
                   }`}
@@ -721,14 +625,14 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
                   <Badge
                     className={STATUS_BADGE[m.status] ?? "bg-gray-100 text-gray-700"}
                   >
-                    {m.status}
+                    {STATUS_LABEL[m.status] ?? m.status}
                   </Badge>
-                  <span className="flex-1 truncate text-gray-800">
+                  <span className="min-w-0 flex-1 truncate text-gray-800">
                     {m.objective || "(无目标)"}
                   </span>
                   <span className="whitespace-nowrap text-xs text-gray-400">
                     {new Date(m.created_at).toLocaleString()} · {m.workers.length}{" "}
-                    worker
+                    分身
                   </span>
                 </button>
               </li>
@@ -741,52 +645,33 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
         <div className="space-y-2">
           <textarea
             className="w-full rounded border p-2 text-sm"
-            rows={2}
-            placeholder="例：分析 backend/app/modules/agent/ 目录的架构，输出摘要"
+            rows={3}
+            placeholder={"描述你要 AI 团队做什么…\n例：把这几天的销售数据整理成周报，重点标出环比下降最多的三个产品"}
             value={objective}
             onChange={(e) => setObjective(e.target.value)}
           />
+          <p className="text-xs text-gray-500">
+            只写目标就行。派几个分身、各自分工由主控自动决定。
+          </p>
 
-          {/* 模式选择：single（绿）/ team（紫），照原型双卡片布局 */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-600">模式</label>
-            <div className="grid grid-cols-2 gap-3">
-              <ModeCard
-                selected={mode === "single"}
-                onClick={() => setMode("single")}
-                icon="👤"
-                title="single"
-                desc="单 agent 跑完全程。默认，零回归。"
-                meta="适用：小任务、问答、简单修改"
-                accent="emerald"
-              />
-              <ModeCard
-                selected={mode === "team"}
-                onClick={() => setMode("team")}
-                icon="👥"
-                title="team"
-                desc="Coordinator 拆 1-5 个 Worker 并行，Finalizer 合并。"
-                meta="适用：扫描、多模块、重构、核验"
-                accent="violet"
-              />
-            </div>
-          </div>
-
-          {/* task-07：team 配置面板（主 agent + worker 列表，仅 team 选中时展开） */}
-          {mode === "team" && (
-            <>
+          {/* 高级：手动配分身（默认折叠，D-002@v1） */}
+          <details
+            open={advancedOpen}
+            onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}
+            className="rounded border border-slate-200 bg-white p-2"
+          >
+            <summary className="cursor-pointer text-sm font-medium text-slate-600">
+              高级：手动配分身（默认不用动，想精细控制再展开）
+            </summary>
+            <div className="mt-2">
               <TeamConfigPanel
                 mainAgent={mainAgentConfig}
                 onMainAgentChange={setMainAgentConfig}
                 workers={workers}
                 onWorkersChange={setWorkers}
               />
-              <div className="rounded-r-sm border-l-[3px] border-amber-500 bg-amber-50 px-3 py-2 text-xs text-slate-700">
-                ⚠️ team 模式将拆分 {workers.length} 个 worker 并行，多 worker 烧 token，建议设置预算上限。
-                主 agent 合并 worker 产出，避免并发写冲突。
-              </div>
-            </>
-          )}
+            </div>
+          </details>
 
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex flex-col gap-1">
@@ -798,13 +683,13 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
                 min="0"
                 step="0.5"
                 className="w-44 rounded border p-2 text-sm"
-                placeholder="如 4.0（留空=不限）"
+                placeholder="留空 = 不限"
                 value={budget}
                 onChange={(e) => setBudget(e.target.value)}
               />
             </div>
             <Button onClick={onCreate} disabled={busy || !objective.trim()}>
-              {busy ? "规划中…" : mode === "team" ? "👥 启动团队" : "启动团队"}
+              {busy ? "启动中…" : "启动"}
             </Button>
           </div>
         </div>
@@ -814,36 +699,32 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
 
       {mission && (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge className={STATUS_BADGE[mission.status] ?? "bg-gray-100"}>
-              {mission.status}
-            </Badge>
-            {ACTIVE.has(mission.status) && (
+          <MissionSummaryCard mission={mission} />
+
+          {ACTIVE.has(mission.status) && (
+            <div>
               <Button variant="outline" size="sm" onClick={onCancel}>
-                取消
+                取消任务
               </Button>
-            )}
-          </div>
-          <CostBar cost={mission.cost_so_far} budget={mission.budget_usd} />
+            </div>
+          )}
+
           <p className="text-sm text-gray-700">{mission.objective}</p>
 
-          {/* Coordinator 拆解面板：体现拆解关系（不再是黑盒） */}
           <CoordinatorPanel mission={mission} />
 
-          {/* 主 agent（role=orchestrator）单独区块，worker 列表只含真 worker。
-              诊断 36b9b475：原把主 agent 也当 worker 渲染 + 写死"Worker 日志"标题误导。 */}
           {(() => {
             const mainAgent =
               mission.workers.find((w) => w.role === "orchestrator") ?? null;
             const workerRuns = mission.workers.filter(
-              (w) => w.role !== "orchestrator"
+              (w) => w.role !== "orchestrator",
             );
             return (
               <>
                 {mainAgent && (
                   <div className="rounded-md border border-violet-200 bg-violet-50/40 p-2">
                     <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet-700">
-                      🧠 主 Agent
+                      🧠 主控
                     </div>
                     <ul className="space-y-2">
                       <WorkerRow
@@ -856,11 +737,11 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
                 )}
                 <div>
                   <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                    👥 Worker（{workerRuns.length}）
+                    👥 分身（{workerRuns.length}）
                   </div>
                   {workerRuns.length === 0 ? (
                     <p className="rounded-md border border-dashed border-gray-200 bg-white px-3 py-2 text-xs text-gray-400">
-                      暂无 Worker。主 agent 接管后将按预设派发。
+                      暂无分身。主控接管后将自动派发。
                     </p>
                   ) : (
                     <ul className="space-y-2">
