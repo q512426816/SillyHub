@@ -11,13 +11,18 @@
  * fetchWorkbenchSummary → summary.todos 后下传(constraints:避免双重请求)。
  * todos 为空/null → EmptyState「暂无待办」不报错。
  *
- * type 徽标映射(TaskCard task-10.md implementation):
+ * 点击待办按来源跳转(D-增强):plan_task→/ppm/task-plans,problem_*→
+ * /ppm/problem-list,便于从工作台下钻到具体业务列表。
+ *
+ * type 徽标映射:
  *   source="plan_task"              → warning  「任务」
  *   source="problem_audit"/"change" → destructive 「缺陷」
  *   type 含「工时」                  → info      「工时」
  *   type 含「计划」                  → default   「计划」
  *   其余                            → outline   type 原文
  */
+import { useRouter } from "next/navigation";
+
 import { SectionCard } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -78,8 +83,19 @@ function todoBadge(todo: WorkbenchTodoItem): BadgeStyle {
 }
 
 export function TodoListPanel({ todos, loading }: TodoListPanelProps) {
+  const router = useRouter();
   const count = todos?.length ?? 0;
   const isEmpty = !loading && count === 0;
+
+  /** 按来源跳转:任务待办→任务计划页,问题待办→问题清单页。 */
+  const goTodo = (todo: WorkbenchTodoItem) => {
+    const src = todo.source ?? "";
+    if (src === "plan_task") {
+      router.push("/ppm/task-plans");
+    } else if (src.startsWith("problem")) {
+      router.push("/ppm/problem-list");
+    }
+  };
 
   return (
     <SectionCard
@@ -97,10 +113,18 @@ export function TodoListPanel({ todos, loading }: TodoListPanelProps) {
         <ul className="divide-y divide-border">
           {todos?.map((todo) => {
             const badge = todoBadge(todo);
+            const clickable =
+              todo.source === "plan_task" ||
+              (todo.source ?? "").startsWith("problem");
             return (
               <li
                 key={todo.id}
-                className="flex items-center gap-2 px-3 py-2"
+                className={`flex items-center gap-2 px-3 py-2 ${
+                  clickable
+                    ? "cursor-pointer hover:bg-muted/50"
+                    : "cursor-default"
+                }`}
+                onClick={() => clickable && goTodo(todo)}
               >
                 <Badge variant={badge.variant} className="shrink-0">
                   {badge.label}

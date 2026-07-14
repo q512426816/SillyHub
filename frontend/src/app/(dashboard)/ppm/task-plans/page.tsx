@@ -50,30 +50,27 @@ import {
   taskStatusTag,
   useToast,
 } from "../shared";
+import {
+  ExecuteTaskDialog,
+  type ExecuteTaskState,
+} from "../_components/execute-task-dialog";
 
 const { RangePicker } = DatePicker;
 
 type ViewMode = "all" | "personal";
 
+// PlanTask.status 存中文(未开始/进行中/已完成,见 ppm_plan_task 模型),
+// 筛选下拉值用中文以匹配后端 where status.in_(...)。
 const STATUS_CODE_OPTIONS = [
-  { label: "待执行", value: "10" },
-  { label: "执行中", value: "20" },
-  { label: "待验证", value: "30" },
-  { label: "已完成", value: "40" },
-  { label: "已关闭", value: "50" },
+  { label: "未开始", value: "未开始" },
+  { label: "进行中", value: "进行中" },
+  { label: "已完成", value: "已完成" },
 ];
 
 interface DrawerState {
   open: boolean;
   mode: "create" | "edit";
   task?: PlanTask;
-}
-
-interface ExecuteState {
-  task?: PlanTask;
-  executeInfo: string;
-  timeSpent: string;
-  submit: boolean;
 }
 
 // 查询条件外壳:垂直布局(标题在上,控件在下),对齐 project-plans 风格。
@@ -125,7 +122,8 @@ export default function TaskPlansPage() {
     open: false,
     mode: "create",
   });
-  const [execute, setExecute] = useState<ExecuteState | null>(null);
+  const [execute, setExecute] = useState<ExecuteTaskState | null>(null);
+  const [executeBusy, setExecuteBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<PlanTask | null>(null);
 
   useEffect(() => {
@@ -249,6 +247,7 @@ export default function TaskPlansPage() {
   const handleExecute = async () => {
     if (!execute?.task) return;
     const task = execute.task;
+    setExecuteBusy(true);
     try {
       const timeSpent = execute.timeSpent
         ? Number(execute.timeSpent)
@@ -267,6 +266,8 @@ export default function TaskPlansPage() {
       await load();
     } catch (err) {
       showToast(false, err instanceof ApiError ? err.message : "执行失败");
+    } finally {
+      setExecuteBusy(false);
     }
   };
 
@@ -358,8 +359,8 @@ export default function TaskPlansPage() {
       fixed: "right",
       render: (_v, t: PlanTask) => {
         const isOwner = currentUser?.id === t.user_id;
-        // 编辑:status=10 (未开始/未提交) + user_id 归属
-        const canEdit = t.status === "10" && isOwner;
+        // 编辑:status="未开始"(PlanTask 中文初始态) + user_id 归属
+        const canEdit = t.status === "未开始" && isOwner;
         // 删除:user_id 归属(对齐源 handleDelete checkUser)
         const canDelete = isOwner;
         return (
@@ -385,7 +386,7 @@ export default function TaskPlansPage() {
               title={
                 canEdit
                   ? undefined
-                  : t.status !== "10"
+                  : t.status !== "未开始"
                     ? "仅未开始状态可编辑"
                     : "仅负责人可编辑"
               }
@@ -601,11 +602,12 @@ export default function TaskPlansPage() {
       )}
 
       {execute && (
-        <ExecuteDialog
+        <ExecuteTaskDialog
           state={execute}
           onChange={setExecute}
           onConfirm={() => void handleExecute()}
           onCancel={() => setExecute(null)}
+          busy={executeBusy}
         />
       )}
 
@@ -844,85 +846,6 @@ function TaskDrawer({
           </Button>
           <Button size="sm" disabled={busy} onClick={() => void submit()}>
             {busy ? "保存中…" : "保存"}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ExecuteDialog({
-  state,
-  onChange,
-  onConfirm,
-  onCancel,
-}: {
-  state: ExecuteState;
-  onChange: (_s: ExecuteState) => void;
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const task = state.task!;
-  const confirm = async () => {
-    setBusy(true);
-    try {
-      await onConfirm();
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-      <div className="w-[480px] rounded-md border bg-background p-5 shadow-lg">
-        <h3 className="text-sm font-semibold">执行任务</h3>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {task.content ?? "（未填写）"}
-        </p>
-        <div className="mt-3 space-y-3">
-          <div>
-            <label className="text-[11px] text-muted-foreground">
-              本次耗时(人天)
-            </label>
-            <input
-              type="number"
-              min={0}
-              step={0.5}
-              value={state.timeSpent}
-              onChange={(e) =>
-                onChange({ ...state, timeSpent: e.target.value })
-              }
-              className={`mt-0.5 ${inputCls}`}
-            />
-          </div>
-          <div>
-            <label className="text-[11px] text-muted-foreground">
-              执行情况说明
-            </label>
-            <textarea
-              value={state.executeInfo}
-              onChange={(e) =>
-                onChange({ ...state, executeInfo: e.target.value })
-              }
-              rows={3}
-              className={`mt-0.5 w-full rounded border border-input bg-background px-2.5 py-1.5 text-sm focus:border-ring focus:outline-none`}
-            />
-          </div>
-          <label className="flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={state.submit}
-              onChange={(e) => onChange({ ...state, submit: e.target.checked })}
-            />
-            <span>提交到「待验证」（勾选则推进状态机）</span>
-          </label>
-        </div>
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onCancel}>
-            取消
-          </Button>
-          <Button size="sm" disabled={busy} onClick={() => void confirm()}>
-            {busy ? "提交中…" : "确认执行"}
           </Button>
         </div>
       </div>

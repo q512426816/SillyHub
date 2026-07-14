@@ -218,7 +218,7 @@ export default function WorkbenchPage() {
               onRetry={loadCalendar}
             />
           ) : (
-            <WorkCalendarPanel calendar={calendar.data} />
+            <WorkCalendarPanel calendar={calendar.data} tasks={tasks} />
           )}
 
           {/* 快捷入口(静态,无数据依赖) */}

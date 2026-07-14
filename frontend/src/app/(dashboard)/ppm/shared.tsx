@@ -48,7 +48,13 @@ export function today(): string {
   return `${y}-${m}-${day}`;
 }
 
-/** PlanTask 状态中文标签 + 颜色。 */
+/** PlanTask / TaskExecute 状态中文标签 + 颜色。
+ *
+ * 兼容两套状态语义:
+ * - PlanTask.status 存中文(未开始/进行中/已完成,见 ppm_plan_task 模型);
+ * - TaskExecute.status 存数字(10/20/30/90,见 service STATUS_*)。
+ * 中文 case 放在数字 case 之后,switch 精确匹配互斥,不影响数字用法。
+ */
 export function taskStatusTag(status: string): {
   text: string;
   color: string;
@@ -64,6 +70,13 @@ export function taskStatusTag(status: string): {
       return { text: "已完成", color: "success" };
     case "50":
       return { text: "已关闭", color: "default" };
+    // PlanTask 中文状态(ppm_plan_task.status)
+    case "未开始":
+      return { text: "未开始", color: "default" };
+    case "进行中":
+      return { text: "进行中", color: "processing" };
+    case "已完成":
+      return { text: "已完成", color: "success" };
     default:
       return { text: status || "未知", color: "default" };
   }

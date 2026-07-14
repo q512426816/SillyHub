@@ -1,39 +1,33 @@
 "use client";
 
 /**
- * WorkbenchTaskTable — 个人工作台任务操作表 (task-10 / FR-07 / D-005@v1)。
+ * WorkbenchTaskTable — 个人工作台任务操作表。
  *
- * 中栏「我的任务」:复用 personal-task-plan 接口数据(lib/ppm/task.ts) +
- * execute-plan 完成动作。**不重写任务接口(D-005@v1)**,数据由 task-08
- * page.tsx 调 listPersonalPlanTasks 装配后 props 下传,本组件只渲染 + 操作
- * (constraints:避免双重请求)。
+ * 中栏「我的任务」:复用 personal-task-plan 接口数据(lib/ppm/task.ts)。
+ * **不重写任务接口(D-005@v1)**,数据由 task-08 page.tsx 调 listPersonalPlanTasks
+ * 装配后 props 下传,本组件只渲染 + 操作。
  *
- * 列(参照原型 + task-plans/page.tsx:286 columns 范式,**不依赖 PlanTask
- * 不存在的 project_code/plan_type**,D-005@v1:project_name 兼作项目列,
- * module_name 近似平台/计划类型列):
+ * 列(参照原型 + task-plans/page.tsx columns 范式):
  *   序号 / 项目名(project_name) / 模块(module_name) / 任务内容(content) /
  *   状态(taskStatusTag) / 操作
  *
- * 「当日完成」二次确认用 ui/dialog(不自造遮罩),确认后调 executePlanTask
- * (submit=true 推进到待验证),成功 Toast + 触发 onChanged 重载;失败 Toast。
- * 已完成(status=40)/已关闭(status=50)禁用按钮。
+ * 「执行」按钮打开任务执行表单(共享 ExecuteTaskDialog),填写本次耗时 +
+ * 执行情况说明 + 是否提交到已完成,确认后调 executePlanTask。**不走一键直接
+ * 完成** —— 必须经执行表单留下执行记录(耗时/说明),对齐 task-plans 交互与
+ * 生产要求。已完成(status==="已完成")任务禁用按钮。
  */
 import { useState } from "react";
 import { Tag, type TableProps } from "antd";
 
 import { DataTable } from "@/components/layout";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { ApiError } from "@/lib/api";
 import { executePlanTask } from "@/lib/ppm/task";
 import type { PlanTask } from "@/lib/ppm/types";
+import {
+  ExecuteTaskDialog,
+  type ExecuteTaskState,
+} from "../../_components/execute-task-dialog";
 import { Toast, taskStatusTag, useToast } from "../../shared";
 
 export interface WorkbenchTaskTableProps {
@@ -50,25 +44,37 @@ export function WorkbenchTaskTable({
   loading,
   onChanged,
 }: WorkbenchTaskTableProps) {
-  // 二次确认目标 + 提交中态
-  const [confirmTask, setConfirmTask] = useState<PlanTask | null>(null);
+  // 执行表单目标 + 提交中态
+  const [execute, setExecute] = useState<ExecuteTaskState | null>(null);
   const [busy, setBusy] = useState(false);
   const { toast, showToast } = useToast();
 
-  const handleComplete = async () => {
-    if (!confirmTask) return;
+  const handleExecute = async () => {
+    if (!execute) return;
     setBusy(true);
     try {
-      // submit=true → 状态机推进到待验证(参照 task-plans/page.tsx:256 handleExecute)
+      const timeSpent = execute.timeSpent
+        ? Number(execute.timeSpent)
+        : undefined;
+      // 经执行表单提交:携带 execute_info + time_spent,submit 由用户勾选
+      // (参照 task-plans/page.tsx handleExecute)。
       await executePlanTask({
-        plan_task_id: confirmTask.id,
-        submit: true,
+        plan_task_id: execute.task.id,
+        submit: execute.submit,
+        execute_info: execute.executeInfo || undefined,
+        time_spent:
+          timeSpent !== undefined && !Number.isNaN(timeSpent)
+            ? timeSpent
+            : undefined,
       });
-      showToast(true, "任务已标记当日完成");
-      setConfirmTask(null);
+      showToast(
+        true,
+        execute.submit ? "任务已标记当日完成" : "执行进度已保存",
+      );
+      setExecute(null);
       onChanged();
     } catch (err) {
-      showToast(false, err instanceof ApiError ? err.message : "完成失败");
+      showToast(false, err instanceof ApiError ? err.message : "执行失败");
     } finally {
       setBusy(false);
     }
@@ -121,11 +127,18 @@ export function WorkbenchTaskTable({
         <Button
           size="sm"
           variant="default"
-          // 已完成(40)/已关闭(50)禁用
-          disabled={t.status === "40" || t.status === "50"}
-          onClick={() => setConfirmTask(t)}
+          // 已完成任务禁用(PlanTask.status 存中文:未开始/进行中/已完成)
+          disabled={t.status === "已完成"}
+          onClick={() =>
+            setExecute({
+              task: t,
+              executeInfo: "",
+              timeSpent: t.time_spent ? String(t.time_spent) : "",
+              submit: false,
+            })
+          }
         >
-          当日完成
+          执行
         </Button>
       ),
     },
@@ -144,38 +157,16 @@ export function WorkbenchTaskTable({
         emptyText="暂无任务"
       />
 
-      {/* 二次确认弹窗(ui/dialog,不自造遮罩) */}
-      <Dialog
-        open={confirmTask !== null}
-        onOpenChange={(o) => {
-          if (!o) setConfirmTask(null);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>确认完成当前任务？</DialogTitle>
-            <DialogDescription>
-              该操作会把任务标记为当日完成，将同步执行记录（execute-plan）。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setConfirmTask(null)}
-              disabled={busy}
-            >
-              取消
-            </Button>
-            <Button
-              variant="default"
-              disabled={busy}
-              onClick={() => void handleComplete()}
-            >
-              确认完成
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* 执行表单(共享 ExecuteTaskDialog,填耗时/说明/提交) */}
+      {execute && (
+        <ExecuteTaskDialog
+          state={execute}
+          onChange={setExecute}
+          onConfirm={() => void handleExecute()}
+          onCancel={() => setExecute(null)}
+          busy={busy}
+        />
+      )}
 
       <Toast toast={toast} />
     </>

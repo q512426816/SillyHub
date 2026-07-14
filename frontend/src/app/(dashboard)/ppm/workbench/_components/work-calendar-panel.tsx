@@ -6,6 +6,8 @@
  * 自研月历 grid(design §3 明确不引入第三方日历库,全仓无日历组件):
  *  - 7 列 grid + 星期表头(日~六)
  *  - 每日格双圆点:左点=当日任务负载 load_level,右点=延期预警 alert_level
+ *  - 点击某日 → 选中高亮 + 下方列出当日任务(D-增强,从 page 下传的 tasks
+ *    按 start_time 当日落点过滤)。无任务的日期也可点(显示空)。
  *
  * load_level 分档(design §7.3 按当日 start_time 任务数):
  *  - none(0):不渲染左点
@@ -18,21 +20,25 @@
  *  - normal:bg-emerald-500 绿
  *  - over:bg-red-500 红(延期预警)
  *
- * 颜色用 Tailwind 语义 class(emerald/amber/red)对齐 tokens.ts 状态色(success/warning/error),
- * 非原型内联 CSS。
- *
  * 数据 WorkbenchCalendar 由 page.tsx(task-08)装配后 props 下传,组件内不独立 fetch
- * (design §3 / task-11 constraints)。
+ * (design §3 / task-11 constraints);当日任务列表复用 page.tsx 已装配的 tasks。
  */
+import { useState } from "react";
+
 import { cn } from "@/lib/utils";
 import { SectionCard } from "@/components/layout";
+import type { PlanTask } from "@/lib/ppm/types";
 import type { CalendarDay, WorkbenchCalendar } from "@/lib/ppm/types";
+import { taskStatusTag } from "../../shared";
+import { Tag } from "antd";
 
 export interface WorkCalendarPanelProps {
   /** 当月日历数据,null/loading 时渲染空 grid 或骨架文案,不报错。 */
   calendar: WorkbenchCalendar | null;
   /** 加载态;true 时显示骨架文案「日历加载中」。 */
   loading?: boolean;
+  /** 个人任务列表(page.tsx 装配),用于点击某日时列出当日任务。 */
+  tasks?: PlanTask[] | null;
 }
 
 /** 星期表头(日~六)。 */
@@ -102,12 +108,19 @@ function alertDotClass(level: string | undefined): string {
   }
 }
 
-export function WorkCalendarPanel({ calendar, loading }: WorkCalendarPanelProps) {
+export function WorkCalendarPanel({
+  calendar,
+  loading,
+  tasks,
+}: WorkCalendarPanelProps) {
   const yearMonth = calendar?.year_month;
-  const cells = buildMonthGrid(
-    yearMonth,
-    calendar?.days ?? [],
-  );
+  const cells = buildMonthGrid(yearMonth, calendar?.days ?? []);
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+
+  // 当日任务:按 start_time 的日期部分(YYYY-MM-DD,对齐后端 UTC day)过滤
+  const dayTasks = selectedDay
+    ? (tasks ?? []).filter((t) => (t.start_time ?? "").slice(0, 10) === selectedDay)
+    : [];
 
   return (
     <SectionCard
@@ -136,10 +149,19 @@ export function WorkCalendarPanel({ calendar, loading }: WorkCalendarPanelProps)
               }
               const loadColor = loadDotClass(cell.info?.load_level);
               const alertColor = alertDotClass(cell.info?.alert_level);
+              const date = `${yearMonth}-${String(cell.day).padStart(2, "0")}`;
+              const selected = selectedDay === date;
               return (
-                <div
+                <button
+                  type="button"
                   key={`day-${cell.day}`}
-                  className="flex aspect-square flex-col rounded border border-slate-100 bg-card p-1"
+                  onClick={() => setSelectedDay(date)}
+                  className={cn(
+                    "flex aspect-square flex-col rounded border p-1 text-left transition-colors",
+                    selected
+                      ? "border-primary bg-accent"
+                      : "border-slate-100 bg-card hover:border-slate-300",
+                  )}
                 >
                   <span className="text-center text-xs">{cell.day}</span>
                   <div className="mt-auto flex items-center justify-center gap-0.5">
@@ -160,7 +182,7 @@ export function WorkCalendarPanel({ calendar, loading }: WorkCalendarPanelProps)
                       <span className="size-1.5" />
                     )}
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -176,6 +198,37 @@ export function WorkCalendarPanel({ calendar, loading }: WorkCalendarPanelProps)
               <span className="size-1.5 rounded-full bg-red-500" /> 过载/预警
             </span>
           </div>
+
+          {/* 当日任务列表(点击某日后展示) */}
+          {selectedDay && (
+            <div className="mt-3 border-t border-border pt-2">
+              <div className="mb-1 text-[11px] font-medium text-muted-foreground">
+                {selectedDay} 任务（{dayTasks.length}）
+              </div>
+              {dayTasks.length === 0 ? (
+                <div className="text-xs text-muted-foreground">当日无任务</div>
+              ) : (
+                <ul className="space-y-1">
+                  {dayTasks.map((t) => {
+                    const tag = taskStatusTag(t.status);
+                    return (
+                      <li key={t.id} className="flex items-center gap-2 text-xs">
+                        <Tag color={tag.color} className="shrink-0">
+                          {tag.text}
+                        </Tag>
+                        <span className="min-w-0 flex-1 truncate" title={t.content ?? ""}>
+                          {t.content ?? "—"}
+                        </span>
+                        <span className="shrink-0 text-muted-foreground">
+                          {t.project_name ?? ""}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          )}
         </>
       )}
     </SectionCard>
