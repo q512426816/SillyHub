@@ -56,6 +56,21 @@ created_at: 2026-07-14 12:10:00
 5. ESC / ✕ / 取消 关闭浮层
 6. CRUD / 搜索 / 导出 / 成员管理 功能流程
 
+## 范围扩展验证（task-08，verify 后推广至全 ppm 页面）
+
+verify 通过后，将样式规范推广至 `globals.css` + 10 个 ppm 页面（操作列居中 + ghost 按钮 + 去硬编码色 + 搜索按钮分组 + 主题色统一），规则与原 AC-01/AC-04 一致，无新浮层/枚举改动：
+
+| 项 | 结果 | 证据 |
+|---|---|---|
+| 硬编码色清理（`bg-blue-500`/`bg-amber-500`/`emerald-300`） | ✅ 通过 | project-plans 去内联 `bg-*`；ppm 范围 grep |
+| 操作列视觉统一（居中 + ghost + 危险红 className） | ✅ 通过 | 10 页面 `align:center` + `variant:ghost` + `text-red-600` |
+| 搜索按钮分组（D-006） | ✅ 通过 | kanban-search-bar 页面按钮左 / 基础组最右 |
+| 主题色统一 | ✅ 通过 | globals.css `--primary`/`--ring` `221 83% 53%` + `--radius` 0.5rem |
+| tsc + lint | ✅ 通过 | 退出码 0（推广文件零新增 warning） |
+| 浏览器实测（用户确认） | ✅ 通过 | 用户 2026-07-14 登录实测全 ppm 页面样式 + 交互通过 |
+
+> 用户实测通过，原 verify-result「未覆盖（需浏览器登录实测）」6 项视觉/交互全部确认；task-08 推广页面一并达标。
+
 ## 结论
 
 **PASS WITH NOTES**

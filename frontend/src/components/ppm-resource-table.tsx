@@ -477,8 +477,9 @@ export function PpmResourceTable<
       key: "__actions",
       fixed: "right",
       width: extraActions ? 220 : 140,
+      align: "center",
       render: (_v: unknown, row: T) => (
-        <div className="flex justify-end gap-1">
+        <div className="flex justify-center gap-1">
           {extraActions?.(row)}
           <Button
             size="sm"
@@ -490,7 +491,8 @@ export function PpmResourceTable<
           </Button>
           <Button
             size="sm"
-            variant="destructive"
+            variant="ghost"
+            className="text-red-600 hover:text-red-700"
             disabled={!canWrite}
             onClick={() => setConfirmDelete(row)}
           >
@@ -642,19 +644,20 @@ export function PpmResourceTable<
             )}
           </SectionCard>
 
-          <DataTable<T>
+          <div className={striped ? "ppm-striped-table" : ""}>
+            {striped && (
+              <style>{`
+.ppm-striped-table .ant-table-tbody tr.ant-table-row td{background:transparent}
+.ppm-striped-table .ant-table-tbody tr.ant-table-row:nth-child(even) td{background-color:hsl(var(--muted)/0.4)}`}</style>
+            )}
+            <DataTable<T>
             rowKey={(row: T) => getRowId(row)}
             columns={columns}
             dataSource={pagedRows}
             loading={loading}
             size="small"
             bordered
-            rowClassName={
-              striped
-                ? (_row: T, idx: number) =>
-                    idx % 2 === 1 ? "bg-muted/40" : ""
-                : undefined
-            }
+            rowClassName={striped ? () => "" : undefined}
             scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
             pagination={{
               current: page,
@@ -670,6 +673,7 @@ export function PpmResourceTable<
             }}
             emptyText={`暂无${entityLabel}`}
           />
+          </div>
         </>
       )}
 

@@ -106,6 +106,7 @@ export default function PpmProjectsPage() {
         title="项目维护"
         subtitle="项目主数据,被项目成员 / 干系人 / 计划 / 看板引用"
         entityLabel="项目"
+        striped
         exportFilename="project_maintenance.xlsx"
         fields={fields}
         searchFieldNames={[
@@ -121,7 +122,7 @@ export default function PpmProjectsPage() {
         extraActions={(row) => (
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             onClick={() => setMemberProject(row)}
           >
             成员管理

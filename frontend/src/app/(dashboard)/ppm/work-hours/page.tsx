@@ -314,20 +314,22 @@ export default function WorkHoursPage() {
     {
       title: "操作",
       key: "actions",
+      align: "center",
       width: 120,
       fixed: "right",
       render: (_v, r: WorkHour) => (
-        <div className="flex whitespace-nowrap gap-1">
+        <div className="flex whitespace-nowrap gap-1 justify-center">
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             onClick={() => setDrawer({ open: true, mode: "edit", item: r })}
           >
             编辑
           </Button>
           <Button
             size="sm"
-            variant="destructive"
+            variant="ghost"
+            className="text-red-600 hover:text-red-700"
             onClick={() => setConfirmDelete(r)}
           >
             删除
@@ -347,37 +349,23 @@ export default function WorkHoursPage() {
       <Toast toast={toast} />
 
       <SectionCard bodyPadding="p-2">
-        {/* 顶部按钮行:右对齐(搜索 | 重置 | 分隔 | 工时统计 | 导出 | 新建) */}
+        {/* 顶部按钮行(D-006):页面按钮(工时统计/导出/新建)左 | 基础组(搜索/重置)最右 */}
         <div className="mb-2 flex items-center justify-end gap-2">
+          <Button size="sm" variant="outline" onClick={() => { window.location.href = "/ppm/work-hour-statistics"; }}>
+            工时统计 →
+          </Button>
+          <Button size="sm" variant="outline" disabled={exporting} onClick={() => void handleExport()}>
+            {exporting ? "导出中…" : "导出"}
+          </Button>
+          <Button size="sm" onClick={() => setDrawer({ open: true, mode: "create" })}>
+            + 录入工时
+          </Button>
+          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
           <Button size="sm" onClick={commitSearch}>
             搜索
           </Button>
           <Button size="sm" variant="outline" onClick={resetFilters}>
             重置
-          </Button>
-          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              window.location.href = "/ppm/work-hour-statistics";
-            }}
-          >
-            工时统计 →
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={exporting}
-            onClick={() => void handleExport()}
-          >
-            {exporting ? "导出中…" : "导出"}
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => setDrawer({ open: true, mode: "create" })}
-          >
-            + 录入工时
           </Button>
         </div>
 
@@ -462,6 +450,7 @@ export default function WorkHoursPage() {
           loading={loading}
           size="small"
           bordered
+          rowClassName={(_row, idx) => (idx % 2 === 1 ? "bg-muted/40" : "")}
           scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
           pagination={{
             current: page,

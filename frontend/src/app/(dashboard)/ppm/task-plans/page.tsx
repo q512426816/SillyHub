@@ -353,6 +353,7 @@ export default function TaskPlansPage() {
     {
       title: "操作",
       key: "actions",
+      align: "center",
       width: 180,
       fixed: "right",
       render: (_v, t: PlanTask) => {
@@ -362,11 +363,10 @@ export default function TaskPlansPage() {
         // 删除:user_id 归属(对齐源 handleDelete checkUser)
         const canDelete = isOwner;
         return (
-          <div className="flex whitespace-nowrap gap-1">
+          <div className="flex whitespace-nowrap gap-1 justify-center">
             <Button
               size="sm"
-              variant="default"
-              className="bg-blue-500 text-white hover:bg-blue-600"
+              variant="ghost"
               onClick={() =>
                 setExecute({
                   task: t,
@@ -380,7 +380,7 @@ export default function TaskPlansPage() {
             </Button>
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
               disabled={!canEdit}
               title={
                 canEdit
@@ -395,7 +395,8 @@ export default function TaskPlansPage() {
             </Button>
             <Button
               size="sm"
-              variant="destructive"
+              variant="ghost"
+              className="text-red-600 hover:text-red-700"
               disabled={!canDelete}
               title={canDelete ? undefined : "仅负责人可删除"}
               onClick={() => setConfirmDelete(t)}
@@ -424,8 +425,20 @@ export default function TaskPlansPage() {
       )}
 
       <SectionCard bodyPadding="p-2">
-        {/* 顶部按钮行:右对齐(搜索 | 重置 | 分隔 | 导出 | 视图切换 | 新建) */}
+        {/* 顶部按钮行(D-006):数据组(导出/新建)左 | 基础组(搜索/重置/展开)最右 */}
         <div className="mb-2 flex items-center justify-end gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={exporting}
+            onClick={() => void handleExport()}
+          >
+            {exporting ? "导出中…" : "导出"}
+          </Button>
+          <Button size="sm" onClick={() => setDrawer({ open: true, mode: "create" })}>
+            + 新建任务
+          </Button>
+          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
           <Button size="sm" onClick={commitSearch}>
             搜索
           </Button>
@@ -438,18 +451,6 @@ export default function TaskPlansPage() {
             onClick={() => setExpanded((v) => !v)}
           >
             {expanded ? "收起" : "展开"}
-          </Button>
-          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={exporting}
-            onClick={() => void handleExport()}
-          >
-            {exporting ? "导出中…" : "导出"}
-          </Button>
-          <Button size="sm" onClick={() => setDrawer({ open: true, mode: "create" })}>
-            + 新建任务
           </Button>
         </div>
 
@@ -571,6 +572,7 @@ export default function TaskPlansPage() {
           loading={loading}
           size="small"
           bordered
+          rowClassName={(_row, idx) => (idx % 2 === 1 ? "bg-muted/40" : "")}
           scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
           pagination={{
             current: page,

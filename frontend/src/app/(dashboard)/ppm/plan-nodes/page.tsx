@@ -153,19 +153,21 @@ export default function PlanNodesPage() {
     {
       title: "操作",
       key: "actions",
+      align: "center",
       width: 140,
       render: (_v: unknown, n: PlanNode) => (
-        <div className="flex whitespace-nowrap gap-1">
+        <div className="flex justify-center whitespace-nowrap gap-1">
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             onClick={() => setDrawer({ open: true, mode: "edit", node: n })}
           >
             编辑
           </Button>
           <Button
             size="sm"
-            variant="destructive"
+            variant="ghost"
+            className="text-red-600 hover:text-red-700"
             onClick={() => void handleDeleteNode(n)}
           >
             删除
@@ -227,6 +229,7 @@ export default function PlanNodesPage() {
             bordered
             pagination={false}
             locale={{ emptyText: "暂无模板" }}
+            rowClassName={(_row: PlanNode, idx: number) => idx % 2 === 1 ? "bg-muted/40" : ""}
             scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
             expandable={{
               expandedRowRender: (node) => (
@@ -538,15 +541,17 @@ function ModulesSubTable({
     {
       title: "操作",
       key: "actions",
+      align: "center",
       width: 140,
       render: (_v: unknown, m: PlanNodeModule) => (
-        <div className="flex whitespace-nowrap gap-1">
-          <Button size="sm" variant="outline" onClick={() => setEditing(m)}>
+        <div className="flex justify-center whitespace-nowrap gap-1">
+          <Button size="sm" variant="ghost" onClick={() => setEditing(m)}>
             编辑
           </Button>
           <Button
             size="sm"
-            variant="destructive"
+            variant="ghost"
+            className="text-red-600 hover:text-red-700"
             onClick={() => void handleDelete(m.id)}
           >
             删除
@@ -572,6 +577,7 @@ function ModulesSubTable({
         dataSource={items}
         columns={columns}
         pagination={false}
+        rowClassName={(_row: PlanNodeModule, idx: number) => idx % 2 === 1 ? "bg-muted/40" : ""}
         locale={{ emptyText: "暂无模块" }}
         scroll={{ x: "max-content" }}
       />

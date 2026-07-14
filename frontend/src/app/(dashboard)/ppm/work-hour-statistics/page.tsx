@@ -313,20 +313,14 @@ export default function WorkHourStatisticsPage() {
       <Toast toast={toast} />
 
       <SectionCard bodyPadding="p-2">
-        {/* 顶部按钮行:右对齐(清除范围 | 分隔 | 返回工时录入) */}
+        {/* 顶部按钮行(D-006):页面按钮(返回工时录入)左 | 查询按钮(清除范围)最右 */}
         <div className="mb-2 flex items-center justify-end gap-2">
-          <Button size="sm" variant="outline" onClick={handleClearRange}>
-            清除范围
+          <Button size="sm" variant="outline" onClick={() => { window.location.href = "/ppm/work-hours"; }}>
+            ← 返回工时录入
           </Button>
           <span className="mx-1 h-6 w-px bg-border" aria-hidden />
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              window.location.href = "/ppm/work-hours";
-            }}
-          >
-            ← 返回工时录入
+          <Button size="sm" variant="outline" onClick={handleClearRange}>
+            清除范围
           </Button>
         </div>
 

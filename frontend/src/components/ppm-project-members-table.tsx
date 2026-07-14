@@ -221,18 +221,20 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
         key: "__actions",
         fixed: "right",
         width: 140,
+        align: "center",
         render: (_v, row) => (
-          <div className="flex whitespace-nowrap gap-1">
+          <div className="flex justify-center gap-1">
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
               onClick={() => setDrawer({ open: true, mode: "edit", row })}
             >
               编辑
             </Button>
             <Button
               size="sm"
-              variant="destructive"
+              variant="ghost"
+              className="text-red-600 hover:text-red-700"
               onClick={() => setConfirmDelete(row)}
             >
               删除

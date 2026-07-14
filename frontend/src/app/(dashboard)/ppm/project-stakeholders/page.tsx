@@ -78,6 +78,7 @@ export default function PpmProjectStakeholdersPage() {
       title="项目干系人"
       subtitle="项目干系人主数据"
       entityLabel="干系人"
+      striped
       fields={fields}
       searchFieldNames={[
         "pm_project_id" as FieldName,

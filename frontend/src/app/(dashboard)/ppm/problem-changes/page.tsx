@@ -224,15 +224,16 @@ export default function ProblemChangesPage() {
     {
       title: "操作",
       key: "actions",
+      align: "center",
       width: "max-content",
       fixed: "right",
       render: (_v: unknown, c: ProblemChange) => {
         const isHandler = matchAnyUser([c.now_handle_user], currentUserId);
         return (
-          <div className="flex whitespace-nowrap gap-1">
+          <div className="flex whitespace-nowrap gap-1 justify-center">
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
               onClick={() => setDrawer({ kind: "detail", change: c })}
             >
               详情
@@ -249,7 +250,8 @@ export default function ProblemChangesPage() {
                 </Button>
                 <Button
                   size="sm"
-                  variant="destructive"
+                  variant="ghost"
+                  className="text-red-600 hover:text-red-700"
                   disabled={!isHandler}
                   title={isHandler ? undefined : "仅当前处理人可删除"}
                   onClick={() => void handleDelete(c)}
@@ -272,15 +274,8 @@ export default function ProblemChangesPage() {
       />
 
       <SectionCard bodyPadding="p-2">
-        {/* 顶部按钮行:右对齐(搜索 | 重置 | 分隔 | 导出) */}
+        {/* 顶部按钮行(D-006):数据组(导出)左 | 基础组(搜索/重置)最右 */}
         <div className="mb-2 flex items-center justify-end gap-2">
-          <Button size="sm" onClick={commitKeyword}>
-            搜索
-          </Button>
-          <Button size="sm" variant="outline" onClick={resetFilters}>
-            重置
-          </Button>
-          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
           <Button
             size="sm"
             variant="outline"
@@ -288,6 +283,13 @@ export default function ProblemChangesPage() {
             onClick={() => void handleExport()}
           >
             {exporting ? "导出中…" : "导出"}
+          </Button>
+          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
+          <Button size="sm" onClick={commitKeyword}>
+            搜索
+          </Button>
+          <Button size="sm" variant="outline" onClick={resetFilters}>
+            重置
           </Button>
         </div>
 
@@ -353,6 +355,7 @@ export default function ProblemChangesPage() {
           loading={loading}
           size="small"
           bordered
+          rowClassName={(_row, idx) => (idx % 2 === 1 ? "bg-muted/40" : "")}
           scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
           pagination={{
             current,

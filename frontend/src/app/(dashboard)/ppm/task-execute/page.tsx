@@ -154,11 +154,11 @@ export default function TaskExecutePage() {
     {
       title: "操作",
       key: "actions",
-      align: "right",
+      align: "center",
       render: (_v, e: TaskExecute) => (
         <Button
           size="sm"
-          variant="outline"
+          variant="ghost"
           onClick={() => setExpandedId(expandedId === e.id ? null : e.id)}
         >
           {expandedId === e.id ? "收起" : "详情"}
@@ -236,6 +236,7 @@ export default function TaskExecutePage() {
             rowKey="id"
             columns={columns}
             dataSource={rows}
+            rowClassName={(_row, idx) => (idx % 2 === 1 ? "bg-muted/40" : "")}
             loading={loading}
             size="small"
             scroll={{ x: "max-content" }}

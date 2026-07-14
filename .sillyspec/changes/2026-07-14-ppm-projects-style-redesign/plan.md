@@ -14,6 +14,7 @@ created_at: 2026-07-14 10:58:30
 - `frontend/src/components/ppm-project-members-table.tsx`（共享组件②，影响 项目成员页 + 成员管理抽屉）
 - `frontend/src/app/(dashboard)/ppm/projects/page.tsx`
 - 无后端、无新依赖、无 schema/状态机变更
+- **范围扩展（verify 后，task-08）**：同套规则推广到 `globals.css` + 10 个 ppm 页面（kanban-search-bar / plan-nodes / problem-list / problem-changes / project-plans / project-stakeholders / task-execute / task-plans / work-hours / work-hour-statistics / milestone-details），详见 design.md §6.1
 
 ## Tasks
 
@@ -26,6 +27,7 @@ created_at: 2026-07-14 10:58:30
 - [x] task-05: `projects/page.tsx` 枚举改造 —— `PROJECT_STATUS_OPTIONS` 加 `statusKind`（进行中=info/已完成=success/已暂停=warning）、`PROJECT_TYPE_OPTIONS` 的 `color` 改 blue/cyan/default、`ProjectMembersDrawer` 手写→antd `Drawer`（`maskClosable={false}`）（覆盖：FR-01, FR-02, FR-03, D-003@v1, D-004@v1, D-006@v1）
 - [x] task-06: `tsc --noEmit` + `pnpm lint` 通过（覆盖：全局验收）
 - [x] task-07: grep 验证 ppm 范围无 `bg-black/30`/`✕` emoji/`emerald-300` 残留 + Docker rebuild 实测 5 页（项目/客户/干系人/项目成员/成员管理抽屉）功能不回归 + 浮层遮罩不关 + Drawer 嵌套层级（R-06）（覆盖：全局验收, R-02, R-06）
+- [x] task-08: **范围扩展（verify 后推广至全 ppm 页面）** —— `globals.css` 主题色统一（`--primary`/`--ring` 蓝 + `--radius` 0.5rem）；`kanban-search-bar` 搜索按钮分组（D-006）；`plan-nodes`/`problem-list`/`problem-changes`/`project-plans`/`project-stakeholders`/`task-execute`/`task-plans`/`work-hours`/`work-hour-statistics`/`milestone-details` 操作列居中 + ghost 按钮 + 去硬编码色（`bg-blue-500`/`bg-amber-500`）+ 危险操作红色 className（覆盖：AC-01/AC-04 推广，详见 design.md §6.1）
 
 ## 验收
 - AC-01: ppm 范围 grep 不到 `bg-black/30`、emoji `✕` 关闭按钮、`emerald-300` 硬编码色

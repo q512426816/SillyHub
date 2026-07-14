@@ -410,6 +410,7 @@ export default function ProjectPlansPage() {
     {
       title: "操作",
       key: "actions",
+      align: "center",
       fixed: "right",
       width: 240,
       render: (_v: unknown, p: PsProjectPlan) => {
@@ -418,26 +419,24 @@ export default function ProjectPlansPage() {
           !!currentUser?.is_platform_admin ||
           matchAnyUser([p.project_manager_id], currentUserId);
         return (
-          <div className="flex gap-1">
+          <div className="flex gap-1 justify-center">
             <Button
               size="sm"
-              variant="default"
-              className="bg-blue-500 text-white hover:bg-blue-600"
+              variant="ghost"
               onClick={() => setDetail({ open: true, planId: p.id })}
             >
               详情
             </Button>
             <Button
               size="sm"
-              variant="default"
-              className="bg-amber-500 text-white hover:bg-amber-600"
+              variant="ghost"
               onClick={() => goToMilestones(p.id)}
             >
               里程碑
             </Button>
             <Button
               size="sm"
-              variant="default"
+              variant="ghost"
               disabled={!isManager}
               title={isManager ? undefined : "仅项目经理可编辑"}
               onClick={() => setDrawer({ open: true, mode: "edit", plan: p })}
@@ -446,7 +445,8 @@ export default function ProjectPlansPage() {
             </Button>
             <Button
               size="sm"
-              variant="destructive"
+              variant="ghost"
+              className="text-red-600 hover:text-red-700"
               disabled={!isManager}
               title={isManager ? undefined : "仅项目经理可删除"}
               onClick={() => void handleDelete(p)}
@@ -468,25 +468,8 @@ export default function ProjectPlansPage() {
 
       {/* 顶部:主操作按钮行 + 搜索表单(换行时行间有间距) */}
       <SectionCard bodyPadding="p-2">
+        {/* 按钮分组(D-006):数据组(导出/新建)左 | 基础组(搜索/重置/展开)最右 */}
         <div className="mb-2 flex items-center justify-end gap-2">
-          <Button size="sm" onClick={() => handleSearch()}>
-            搜索
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => handleReset()}
-          >
-            重置
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setExpanded((v) => !v)}
-          >
-            {expanded ? "收起" : "展开"}
-          </Button>
-          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
           <Button
             size="sm"
             variant="outline"
@@ -495,11 +478,18 @@ export default function ProjectPlansPage() {
           >
             {exporting ? "导出中…" : "导出"}
           </Button>
-          <Button
-            size="sm"
-            onClick={() => setDrawer({ open: true, mode: "create" })}
-          >
+          <Button size="sm" onClick={() => setDrawer({ open: true, mode: "create" })}>
             + 新建项目计划
+          </Button>
+          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
+          <Button size="sm" onClick={() => handleSearch()}>
+            搜索
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => handleReset()}>
+            重置
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setExpanded((v) => !v)}>
+            {expanded ? "收起" : "展开"}
           </Button>
         </div>
         <Form<SearchForm>
@@ -621,6 +611,7 @@ export default function ProjectPlansPage() {
               rowKey="id"
               columns={columns}
               dataSource={filteredPlans}
+              rowClassName={(_row, idx) => (idx % 2 === 1 ? "bg-muted/40" : "")}
               loading={loading}
               size="small"
               bordered

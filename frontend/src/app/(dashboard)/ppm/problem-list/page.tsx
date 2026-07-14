@@ -314,7 +314,7 @@ export default function ProblemListPage() {
     {
       title: "操作",
       key: "actions",
-      align: "right",
+      align: "center",
       width: "max-content",
       fixed: "right",
       render: (_v: unknown, p: ProblemList) => {
@@ -329,7 +329,7 @@ export default function ProblemListPage() {
         const isDuty = matchAnyUser([p.duty_user_id], currentUserId);
         const isAuditor = matchAnyUser([p.audit_user_id], currentUserId);
         return (
-          <div className="flex whitespace-nowrap justify-end gap-1">
+          <div className="flex whitespace-nowrap gap-1 justify-center">
             {/* 审核:status=2 + now_handle_user(源 openAuditForm) */}
             {p.status === "2" && isNowHandler && (
               <Button size="sm" onClick={() => openDrawer("audit", p)}>
@@ -338,7 +338,7 @@ export default function ProblemListPage() {
             )}
             {/* 变更:status=3 + creator/duty(源 openChangeForm → 新建 ProblemChange) */}
             {p.status === "3" && (isCreator || isDuty) && (
-              <Button size="sm" variant="outline" onClick={() => openDrawer("change", p)}>
+              <Button size="sm" variant="ghost" onClick={() => openDrawer("change", p)}>
                 变更
               </Button>
             )}
@@ -352,7 +352,7 @@ export default function ProblemListPage() {
             {p.status === "3" && isDuty && !p.handle_info && (
               <Button
                 size="sm"
-                variant="outline"
+                variant="ghost"
                 onClick={() => openDrawer("start", p)}
               >
                 开始
@@ -374,12 +374,12 @@ export default function ProblemListPage() {
               </Button>
             )}
             {/* 详情:任意(源 openDetailForm) */}
-            <Button size="sm" variant="outline" onClick={() => openDrawer("detail", p)}>
+            <Button size="sm" variant="ghost" onClick={() => openDrawer("detail", p)}>
               详情
             </Button>
             {/* 删除:status=1 + creator(源 handleDelete) */}
             {p.status === "1" && isCreator && (
-              <Button size="sm" variant="destructive" onClick={() => void handleDelete(p)}>
+              <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-700" onClick={() => void handleDelete(p)}>
                 删除
               </Button>
             )}
@@ -397,8 +397,20 @@ export default function ProblemListPage() {
       />
 
       <SectionCard bodyPadding="p-2">
-        {/* 顶部按钮行:右对齐(查询 | 重置 | 分隔 | 导出 / 新建) */}
+        {/* 顶部按钮行(D-006):数据组(导出/新建)左 | 基础组(搜索/重置/展开)最右 */}
         <div className="mb-2 flex items-center justify-end gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={exporting}
+            onClick={() => void handleExport()}
+          >
+            {exporting ? "导出中…" : "导出"}
+          </Button>
+          <Button size="sm" onClick={() => openDrawer("create")}>
+            + 新建问题
+          </Button>
+          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
           <Button size="sm" onClick={commitKeyword}>
             搜索
           </Button>
@@ -411,18 +423,6 @@ export default function ProblemListPage() {
             onClick={() => setExpanded((v) => !v)}
           >
             {expanded ? "收起" : "展开"}
-          </Button>
-          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={exporting}
-            onClick={() => void handleExport()}
-          >
-            {exporting ? "导出中…" : "导出"}
-          </Button>
-          <Button size="sm" onClick={() => openDrawer("create")}>
-            + 新建问题
           </Button>
         </div>
 
@@ -530,6 +530,7 @@ export default function ProblemListPage() {
           loading={loading}
           size="small"
           bordered
+          rowClassName={(_row, idx) => (idx % 2 === 1 ? "bg-muted/40" : "")}
           scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
           pagination={{
             current,

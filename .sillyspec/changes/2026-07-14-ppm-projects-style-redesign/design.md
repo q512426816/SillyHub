@@ -64,6 +64,28 @@ scale: large
 
 > 无新增组件文件、无新增 npm 依赖、无后端改动。
 
+### 6.1 范围扩展（verify 后推广至全 ppm 页面，2026-07-14）
+
+verify 通过后，将上述样式规范规则从 projects 子域推广到全部 ppm 列表/表单页 + 全局主题色统一。**同套规则、无新设计决策**，仅作用面扩大（对应 task-08）：
+
+| 操作 | 文件路径 | 说明 |
+|---|---|---|
+| 修改 | `frontend/src/app/globals.css` | 主题色统一：`--primary`/`--ring` 改 `221 83% 53%`（蓝）；`--background` 饱和度 20%→40%；`--radius` 0.375rem→0.5rem |
+| 修改 | `frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-search-bar.tsx` | 搜索按钮分组（D-006）：页面按钮左 \|
+ 基础组最右 |
+| 修改 | `frontend/src/app/(dashboard)/ppm/plan-nodes/page.tsx` | 操作列居中 + ghost 按钮 |
+| 修改 | `frontend/src/app/(dashboard)/ppm/problem-list/page.tsx` | 操作列居中 + ghost 按钮 |
+| 修改 | `frontend/src/app/(dashboard)/ppm/problem-changes/page.tsx` | 操作列居中 + ghost 按钮 |
+| 修改 | `frontend/src/app/(dashboard)/ppm/project-plans/page.tsx` | 操作列居中 + ghost 按钮 + 去 `bg-blue-500`/`bg-amber-500` 硬编码色 |
+| 修改 | `frontend/src/app/(dashboard)/ppm/project-stakeholders/page.tsx` | 操作列居中 |
+| 修改 | `frontend/src/app/(dashboard)/ppm/task-execute/page.tsx` | 操作列居中 + ghost 按钮 |
+| 修改 | `frontend/src/app/(dashboard)/ppm/task-plans/page.tsx` | 操作列居中 + ghost 按钮 |
+| 修改 | `frontend/src/app/(dashboard)/ppm/work-hours/page.tsx` | 操作列居中 + ghost 按钮 + destructive→ghost + 红色 className |
+| 修改 | `frontend/src/app/(dashboard)/ppm/work-hour-statistics/page.tsx` | 操作列居中 + ghost 按钮 |
+| 修改 | `frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx` | 操作列居中 + ghost 按钮（注：本页 DatePicker 崩溃修复已于 ql-20260714-007-b2e7 单独提交，此处仅样式部分） |
+
+推广规则对应原验收：AC-01（去硬编码色 `bg-blue-500`/`bg-amber-500`/`emerald-300`）、AC-04（搜索按钮分组 D-006）、操作列视觉统一（居中 + ghost + 危险操作红色 className）。无新浮层、无新状态枚举。
+
 ## 7. 接口定义（关键签名变更）
 
 ```ts

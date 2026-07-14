@@ -426,13 +426,13 @@ export default function MilestoneDetailsPage() {
       {
         title: "操作",
         key: "actions",
-        align: "right",
+        align: "center",
         width: 280,
         render: (_v: unknown, n: PsPlanNode) => (
-          <div className="flex flex-wrap justify-end gap-1">
+          <div className="flex flex-wrap justify-center gap-1">
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
               disabled={readOnly}
               title={readOnly ? "只读模式(非项目经理)" : undefined}
               onClick={() =>
@@ -460,7 +460,8 @@ export default function MilestoneDetailsPage() {
             </Button>
             <Button
               size="sm"
-              variant="destructive"
+              variant="ghost"
+              className="text-red-600 hover:text-red-700"
               disabled={readOnly}
               title={readOnly ? "只读模式(非项目经理)" : undefined}
               onClick={() => void handleDeleteNode(n)}
@@ -865,13 +866,13 @@ function ModuleLevelTable({
       {
         title: "操作",
         key: "actions",
-        align: "right",
+        align: "center",
         width: 260,
         render: (_v: unknown, m: PlanNodeModule) => (
-          <div className="flex justify-end gap-1">
+          <div className="flex justify-center gap-1">
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
               disabled={readOnly}
               title={readOnly ? "只读模式(非项目经理)" : undefined}
               onClick={() => onAddDetail(m.id)}
@@ -880,7 +881,7 @@ function ModuleLevelTable({
             </Button>
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
               disabled={readOnly}
               title={readOnly ? "只读模式(非项目经理)" : undefined}
               onClick={() =>
@@ -891,7 +892,8 @@ function ModuleLevelTable({
             </Button>
             <Button
               size="sm"
-              variant="destructive"
+              variant="ghost"
+              className="text-red-600 hover:text-red-700"
               disabled={readOnly}
               title={readOnly ? "只读模式(非项目经理)" : undefined}
               onClick={() => void handleDeleteModule(m)}
@@ -1267,17 +1269,17 @@ function DetailLevelTable({
       {
         title: "操作",
         key: "actions",
-        align: "right",
+        align: "center",
         width: 280,
         render: (_v: unknown, d: PsPlanNodeDetail) => (
-          <div className="flex flex-wrap justify-end gap-1">
+          <div className="flex flex-wrap justify-center gap-1">
             <Button size="sm" variant="ghost" onClick={() => onOpenDetail(d)}>
               详情
             </Button>
             {(d.status === "draft" || d.status === "rejected") && (
               <Button
                 size="sm"
-                variant="outline"
+                variant="ghost"
                 onClick={() => onOpenDetail(d)}
               >
                 编辑
@@ -1285,7 +1287,8 @@ function DetailLevelTable({
             )}
             <Button
               size="sm"
-              variant="destructive"
+              variant="ghost"
+              className="text-red-600 hover:text-red-700"
               disabled={readOnly}
               title={readOnly ? "只读模式(非项目经理)" : undefined}
               onClick={() => void handleDelete(d)}
@@ -1329,6 +1332,8 @@ function DetailLevelTable({
           bordered
           pagination={false}
           scroll={{ x: "max-content" }}
+          className="overflow-visible"
+          rowClassName={(_row: PsPlanNodeDetail, idx: number) => idx % 2 === 1 ? "bg-muted/40" : ""}
           emptyText={moduleId ? "该模块暂无明细" : "暂无明细"}
         />
       )}
@@ -1346,8 +1351,12 @@ type FormVals = Record<string, string | number | null | undefined | string[]>;
 /** 把字符串/null 归一为 Dayjs(空值返回 null)。 */
 function toDay(v: string | null | undefined): Dayjs | null {
   if (!v) return null;
-  const d = dayjs(v);
-  return d.isValid() ? d : null;
+  try {
+    const d = dayjs(v);
+    return typeof d?.isValid === "function" && d.isValid() ? d : null;
+  } catch {
+    return null;
+  }
 }
 
 /** 查询条件外壳:垂直布局(标题在上,控件在下),对齐 project-plans 风格。 */
@@ -1368,7 +1377,9 @@ function Field({
 
 /** Dayjs → 'YYYY-MM-DD' 或 null。 */
 function fromDate(d: Dayjs | null): string | null {
-  return d ? d.format("YYYY-MM-DD") : null;
+  if (!d) return null;
+  if (typeof (d as unknown as Record<string, unknown>)?.format !== "function") return null;
+  return d.format("YYYY-MM-DD");
 }
 
 /**
@@ -2298,6 +2309,7 @@ function PsPlanNodeDrawer({
               precision={1}
               min={0}
               className="w-full"
+              style={{ width: "100%" }}
             />
           </Form.Item>
         </div>

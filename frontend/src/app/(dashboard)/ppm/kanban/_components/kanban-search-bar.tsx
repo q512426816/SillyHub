@@ -100,13 +100,13 @@ export function KanbanSearchBar({
 
   return (
     <div>
-      {/* 顶部按钮行:右对齐(重置 | 分隔 | 新建任务),对齐 project-plans */}
+      {/* 顶部按钮行(D-006):页面按钮(新建任务)左 | 基础组(重置)最右 */}
       <div className="mb-2 flex items-center justify-end gap-2">
-        <Button onClick={onReset}>重置</Button>
-        <span className="mx-1 h-6 w-px bg-border" aria-hidden />
         <Button type="primary" onClick={onCreateTask}>
           新建任务
         </Button>
+        <span className="mx-1 h-6 w-px bg-border" aria-hidden />
+        <Button onClick={onReset}>重置</Button>
       </div>
 
       {/* 查询条件:grid-cols-4 垂直 Field,任一变化即查 */}
