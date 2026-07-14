@@ -1,0 +1,270 @@
+  <!--
+author: WhaleFall
+created_at: 2026-07-14 18:12:00
+description: 里程碑明细·实施阶段 — 模块导入功能 HTML 原型（展示「计划类型」新列 + 导入弹窗三态交互）
+-->
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>原型 · 里程碑明细-实施阶段 — 模块导入</title>
+<style>
+  :root{
+    --blue-50:#eff6ff;--blue-100:#dbeafe;--blue-600:#2563eb;--blue-700:#1d4ed8;--blue-900:#1e3a8a;
+    --cyan-500:#06b6d4;
+    --emerald-50:#ecfdf5;--emerald-500:#10b981;--emerald-700:#047857;
+    --amber-50:#fffbeb;--amber-500:#f59e0b;--amber-700:#b45309;
+    --red-50:#fef2f2;--red-500:#ef4444;--red-600:#dc2626;--red-700:#b91c1c;
+    --slate-50:#f8fafc;--slate-100:#f1f5f9;--slate-200:#e2e8f0;--slate-300:#cbd5e1;
+    --slate-400:#94a3b8;--slate-500:#64748b;--slate-600:#475569;--slate-700:#334155;--slate-800:#1e293b;--slate-900:#0f172a;
+  }
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--slate-100);color:var(--slate-800);margin:0;padding:28px;font-size:14px;line-height:1.6}
+  .wrap{max-width:1040px;margin:0 auto}
+  .page-title{font-size:20px;font-weight:700;color:var(--slate-900)}
+  .sub{color:var(--slate-500);font-size:13px;margin-top:2px}
+  .hint{background:var(--blue-50);border:1px solid var(--blue-100);color:var(--blue-700);padding:10px 14px;border-radius:8px;font-size:13px;margin:14px 0}
+  .hint b{color:var(--blue-900)}
+  .toolbar{display:flex;gap:8px;align-items:center;margin:18px 0 12px}
+  .btn{padding:7px 15px;border-radius:8px;border:1px solid var(--slate-300);background:#fff;cursor:pointer;font-size:13px;color:var(--slate-700);transition:.15s}
+  .btn:hover{background:var(--slate-50);border-color:var(--slate-400)}
+  .btn-primary{background:var(--blue-600);color:#fff;border-color:var(--blue-600)}
+  .btn-primary:hover{background:var(--blue-700);border-color:var(--blue-700)}
+  .btn-danger{color:var(--red-600);border-color:var(--red-500)}
+  .toolbar .spacer{flex:1}
+  table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--slate-200);border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(15,23,42,.06)}
+  th{background:var(--slate-50);text-align:left;padding:11px 12px;font-weight:600;color:var(--slate-700);border-bottom:1px solid var(--slate-200);font-size:13px;white-space:nowrap}
+  td{padding:10px 12px;border-bottom:1px solid var(--slate-100);font-size:13px}
+  tbody tr:hover{background:var(--slate-50)}
+  tbody tr:last-child td{border-bottom:0}
+  .tag{padding:2px 9px;border-radius:6px;font-size:12px;font-weight:500;white-space:nowrap}
+  .tag-normal{background:var(--blue-50);color:var(--blue-700)}
+  .tag-temp{background:var(--amber-50);color:var(--amber-700)}
+  .tag-warn{background:var(--amber-50);color:var(--amber-700)}
+  .tag-err{background:var(--red-50);color:var(--red-600)}
+  .tag-ok{background:var(--emerald-50);color:var(--emerald-700)}
+  .badge-new{display:inline-block;background:var(--emerald-500);color:#fff;font-size:10px;padding:1px 6px;border-radius:4px;margin-left:6px;vertical-align:middle;font-weight:600}
+  .arrow{color:var(--slate-400);margin:0 4px}
+  /* 弹窗 */
+  .mask{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:flex-start;justify-content:center;z-index:50;padding:40px 16px}
+  .mask.show{display:flex}
+  .modal{background:#fff;border-radius:14px;width:100%;max-width:880px;max-height:calc(100vh - 80px);overflow:auto;box-shadow:0 20px 60px rgba(15,23,42,.3)}
+  .modal-head{position:sticky;top:0;background:#fff;padding:16px 22px;border-bottom:1px solid var(--slate-200);font-weight:600;font-size:15px;display:flex;justify-content:space-between;align-items:center;z-index:2}
+  .modal-head .x{cursor:pointer;color:var(--slate-400);font-size:18px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px}
+  .modal-head .x:hover{background:var(--slate-100);color:var(--slate-700)}
+  .modal-body{padding:22px}
+  .steps{display:flex;gap:0;margin-bottom:20px;font-size:12px}
+  .steps .s{flex:1;text-align:center;padding:8px 4px;color:var(--slate-400);border-top:2px solid var(--slate-200);position:relative}
+  .steps .s.active{color:var(--blue-700);border-top-color:var(--blue-600);font-weight:600}
+  .steps .s.done{color:var(--emerald-700);border-top-color:var(--emerald-500)}
+  .drop{border:2px dashed var(--slate-300);border-radius:12px;padding:48px 20px;text-align:center;color:var(--slate-500);background:var(--slate-50);cursor:pointer;transition:.15s}
+  .drop:hover{border-color:var(--blue-600);color:var(--blue-600);background:var(--blue-50)}
+  .drop .ico{font-size:40px;margin-bottom:8px}
+  .drop .b{color:var(--blue-600);font-weight:600}
+  .legend{display:flex;gap:18px;font-size:12px;color:var(--slate-500);margin-top:14px;flex-wrap:wrap}
+  .legend span{display:flex;align-items:center;gap:5px}
+  .dot{width:10px;height:10px;border-radius:3px;display:inline-block}
+  .sheet-box{border:1px solid var(--slate-200);border-radius:10px;padding:14px 16px;margin-bottom:16px}
+  .sheet-box .row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--slate-100)}
+  .sheet-box .row:last-child{border-bottom:0}
+  .sheet-box label{display:flex;align-items:center;gap:10px;cursor:pointer;flex:1;font-size:13px}
+  .sheet-box input[type=checkbox]{width:16px;height:16px;accent-color:var(--blue-600)}
+  .sheet-box .cnt{color:var(--slate-400);font-size:12px}
+  .mini-table{width:100%;border-collapse:collapse;font-size:12px}
+  .mini-table th{background:var(--slate-50);padding:8px;text-align:left;font-weight:600;color:var(--slate-600);border-bottom:1px solid var(--slate-200);white-space:nowrap}
+  .mini-table td{padding:8px;border-bottom:1px solid var(--slate-100)}
+  .mini-table tr.err-row td{background:var(--red-50)}
+  .mini-table tr:hover td{background:var(--slate-50)}
+  .mini-table tr.err-row:hover td{background:var(--red-50)}
+  .stats{display:flex;gap:14px;margin:8px 0 18px;flex-wrap:wrap}
+  .stat{flex:1;min-width:120px;background:var(--slate-50);border:1px solid var(--slate-200);border-radius:10px;padding:14px;text-align:center}
+  .stat .n{font-size:26px;font-weight:700;color:var(--blue-600);line-height:1.1}
+  .stat .l{font-size:12px;color:var(--slate-500);margin-top:4px}
+  .stat.warn .n{color:var(--amber-600)}
+  .stat.err .n{color:var(--red-600)}
+  .fail-list{background:var(--red-50);border:1px solid #fecaca;border-radius:8px;padding:12px 14px;font-size:12px;color:var(--red-700);margin-top:10px}
+  .foot{display:flex;justify-content:space-between;align-items:center;margin-top:20px;padding-top:16px;border-top:1px solid var(--slate-200)}
+  .foot .left{font-size:12px;color:var(--slate-500)}
+  .note{font-size:12px;color:var(--slate-500);margin-top:6px}
+  code{background:var(--slate-100);padding:1px 5px;border-radius:4px;font-size:12px;color:var(--slate-700)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="page-title">里程碑明细 · 实施阶段</div>
+  <div class="sub">里程碑：EHS 项目 · 实施阶段 №1 &nbsp;|&nbsp; 明细 · 模块 列表</div>
+
+  <div class="hint">
+    📌 原型演示两处变化：① 列表新增 <b>「计划类型」</b>列（正常计划 / 临时计划）；② 新增 <b>「导入模块」</b>按钮。
+    点击 <b>[📥 导入模块]</b> 体验完整流程：上传 → 预览（勾选 Sheet + 标错）→ 确认 → 结果报告。
+  </div>
+
+  <!-- 工具栏 -->
+  <div class="toolbar">
+    <button class="btn btn-primary">+ 新建模块</button>
+    <button class="btn" onclick="openImport()">📥 导入模块</button>
+    <div class="spacer"></div>
+    <button class="btn">刷新</button>
+  </div>
+
+  <!-- 模块列表（含新增「计划类型」列） -->
+  <table>
+    <thead>
+      <tr>
+        <th>模块名称</th>
+        <th>计划类型 <span class="badge-new">新</span></th>
+        <th>责任人</th>
+        <th>计划工作量(人天)</th>
+        <th>计划开始</th>
+        <th>计划结束</th>
+        <th>明细数</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>工艺纪律检查</td>
+        <td><span class="tag tag-normal">正常计划</span></td>
+        <td>孙虓</td>
+        <td>38</td>
+        <td>2026-05-11</td>
+        <td>2026-06-12</td>
+        <td>5</td>
+        <td><span style="color:var(--slate-400)">展开明细 · 编辑 · 删除</span></td>
+      </tr>
+      <tr>
+        <td>OA待办接口</td>
+        <td><span class="tag tag-normal">正常计划</span></td>
+        <td>魏泽华</td>
+        <td>5</td>
+        <td>2026-06-12</td>
+        <td>2026-06-26</td>
+        <td>2</td>
+        <td><span style="color:var(--slate-400)">展开明细 · 编辑 · 删除</span></td>
+      </tr>
+      <tr>
+        <td>供方FAI接口</td>
+        <td><span class="tag tag-normal">正常计划</span></td>
+        <td>魏泽华</td>
+        <td>5</td>
+        <td>2026-06-12</td>
+        <td>2026-06-26</td>
+        <td>2</td>
+        <td><span style="color:var(--slate-400)">展开明细 · 编辑 · 删除</span></td>
+      </tr>
+      <tr style="background:var(--amber-50)">
+        <td>运维工作 <span class="tag tag-temp" style="margin-left:4px">临时</span></td>
+        <td><span class="tag tag-temp">临时计划</span></td>
+        <td>张浩</td>
+        <td>8</td>
+        <td>2026-05-11</td>
+        <td>2026-07-09</td>
+        <td>4</td>
+        <td><span style="color:var(--slate-400)">展开明细 · 编辑 · 删除</span></td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="note">↑ 第 4 行「运维工作」来自「临时插单」Sheet，计划类型为「临时计划」。前 3 行来自「项目详细计划」Sheet。</div>
+
+</div>
+
+<!-- 导入弹窗 -->
+<div class="mask" id="mask">
+  <div class="modal">
+    <div class="modal-head">
+      <span>导入模块（实施阶段）</span>
+      <span class="x" onclick="closeImport()">✕</span>
+    </div>
+    <div class="modal-body" id="body"></div>
+  </div>
+</div>
+
+<script>
+  var mask=document.getElementById('mask'), body=document.getElementById('body');
+  var state=0; // 1=上传 2=预览 3=结果
+
+  function openImport(){ mask.classList.add('show'); state=1; render(); }
+  function closeImport(){ mask.classList.remove('show'); }
+  function stepsHtml(cur){
+    var s=['上传文件','预览解析','完成导入'];
+    return '<div class="steps">'+s.map(function(t,i){
+      var n=i+1, cls = n<cur?'done':(n===cur?'active':'');
+      var mark = n<cur?'✓ ':n+'. ';
+      return '<div class="s '+cls+'">'+mark+t+'</div>';
+    }).join('')+'</div>';
+  }
+
+  function render(){
+    if(state===1){
+      body.innerHTML =
+        stepsHtml(1) +
+        '<div class="drop" onclick="goPreview()">'+
+          '<div class="ico">📄</div>'+
+          '<div>点击或拖拽 Excel 文件到此</div>'+
+          '<div style="font-size:12px;margin-top:6px">支持 .xlsx，参考「项目详细开发计划」格式</div>'+
+          '<div class="b" style="margin-top:10px">选择文件（演示：直接点此进入预览）</div>'+
+        '</div>'+
+        '<div class="legend">'+
+          '<span><span class="dot" style="background:var(--blue-50)"></span>正常计划 Sheet</span>'+
+          '<span><span class="dot" style="background:var(--amber-50)"></span>临时插单 Sheet</span>'+
+          '<span><span class="dot" style="background:var(--red-50)"></span>责任人未匹配行（不导入）</span>'+
+        '</div>'+
+        '<div class="note">系统会识别两个 Sheet：「项目详细计划」(正常计划) 与「临时插单计划」(临时计划)。「周历表」自动忽略。</div>';
+    }
+    else if(state===2){
+      body.innerHTML =
+        stepsHtml(2) +
+        '<div style="font-weight:600;margin-bottom:8px">① 勾选要导入的 Sheet</div>'+
+        '<div class="sheet-box">'+
+          '<div class="row"><label><input type="checkbox" checked> 项目详细计划 <span class="cnt">（正常计划 · 20 行）</span></label></div>'+
+          '<div class="row"><label><input type="checkbox" checked> 临时插单计划 <span class="cnt">（临时计划 · 8 行）</span></label></div>'+
+          '<div class="row" style="opacity:.5"><label><input type="checkbox" disabled> 周历表 <span class="cnt">（非数据表，已忽略）</span></label></div>'+
+        '</div>'+
+        '<div style="font-weight:600;margin-bottom:8px">② 解析预览（字段已映射：任务分类→明细阶段，平台/子系统→模块名称）</div>'+
+        '<div style="overflow:auto;border:1px solid var(--slate-200);border-radius:8px">'+
+          '<table class="mini-table">'+
+            '<thead><tr><th>Sheet</th><th>平台/子系统<br>→模块</th><th>任务分类<br>→明细阶段</th><th>任务主题</th><th>工作量</th><th>责任人</th><th>开始</th><th>结束</th><th>状态</th></tr></thead>'+
+            '<tbody>'+
+              '<tr><td><span class="tag tag-normal">正常</span></td><td>职业健康</td><td>后端开发</td><td>职业健康岗前、离岗优化</td><td>1</td><td>张浩</td><td>05-11</td><td>05-11</td><td><span class="tag tag-ok">就绪</span></td></tr>'+
+              '<tr><td><span class="tag tag-normal">正常</span></td><td>危险作业及有限空间台账</td><td>后端开发</td><td>有限空间台账-后端开发</td><td>1</td><td>张浩</td><td>05-14</td><td>05-14</td><td><span class="tag tag-ok">就绪</span></td></tr>'+
+              '<tr><td><span class="tag tag-normal">正常</span></td><td>危险化学品</td><td>前端开发</td><td>化学品清单</td><td>4</td><td>张浩</td><td>05-21</td><td>05-25</td><td><span class="tag tag-ok">就绪</span></td></tr>'+
+              '<tr class="err-row"><td><span class="tag tag-normal">正常</span></td><td>相关方</td><td>后端开发</td><td>相关方转包发包</td><td>2</td><td>林国鑫</td><td>05-11</td><td>05-12</td><td><span class="tag tag-err">责任人未匹配</span></td></tr>'+
+              '<tr><td><span class="tag tag-temp">临时</span></td><td>EHS</td><td>—</td><td>运维工作</td><td>2</td><td>张浩</td><td>05-11</td><td>06-08</td><td><span class="tag tag-ok">就绪</span></td></tr>'+
+              '<tr><td><span class="tag tag-temp">临时</span></td><td>国祥</td><td>—</td><td>国祥运维</td><td>3</td><td>王鹏</td><td>05-11</td><td>06-08</td><td><span class="tag tag-ok">就绪</span></td></tr>'+
+            '</tbody>'+
+          '</table>'+
+        '</div>'+
+        '<div class="note" style="margin-top:8px">↑ 仅展示部分行。「相关方」行责任人「林国鑫」不在当前项目成员中 → 标红，<b>该行不导入</b>，可在结果里看到。多人责任人取首个，其余标出。</div>'+
+        '<div class="foot">'+
+          '<div class="left">将创建 <b>5</b> 个模块（其中 1 个同名合并）、<b>14</b> 条明细</div>'+
+          '<div><button class="btn" onclick="state=1;render()">上一步</button> <button class="btn btn-primary" onclick="goResult()">确认导入</button></div>'+
+        '</div>';
+    }
+    else if(state===3){
+      body.innerHTML =
+        stepsHtml(3) +
+        '<div style="color:var(--emerald-700);font-weight:600;margin-bottom:6px">✓ 导入完成</div>'+
+        '<div class="stats">'+
+          '<div class="stat"><div class="n">5</div><div class="l">新建/合并模块</div></div>'+
+          '<div class="stat"><div class="n">14</div><div class="l">新增明细</div></div>'+
+          '<div class="stat warn"><div class="n">6</div><div class="l">责任人未匹配跳过</div></div>'+
+        '</div>'+
+        '<div class="fail-list">'+
+          '<b>未导入行（责任人不在项目成员中）：</b><br>'+
+          '• 「相关方」模块 — 相关方转包发包（责任人：林国鑫）<br>'+
+          '• 「相关方」模块 — ERP合同信息（责任人：林国鑫）<br>'+
+          '… 共 6 行。请先在「项目成员」中添加对应人员，再重新导入这些行。'+
+        '</div>'+
+        '<div class="foot">'+
+          '<div class="left">明细状态默认为「草稿」，可在明细列表里逐条提交。</div>'+
+          '<div><button class="btn" onclick="closeImport()">关闭</button></div>'+
+        '</div>';
+    }
+  }
+  function goPreview(){ state=2; render(); }
+  function goResult(){ state=3; render(); }
+</script>
+</body>
+</html>
