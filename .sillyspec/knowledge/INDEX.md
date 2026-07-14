@@ -39,6 +39,7 @@
 - frontend|lockfile|antd|shadcn|双ui库 → [frontend 与 daemon 各自独立 lockfile + 双 UI 库并存](known-issues.md#-frontend-与-daemon-各自独立-lockfile--双-ui-库并存)
 - audit|audit_hooks|审计|auditlog|测试|生产 → [audit_hooks 只在测试 lifespan 注册](known-issues.md#-audit_hooks-只在测试-lifespan-注册生产审计要业务代码显式写-auditlog)
 - docker|postgres|pg|端口|映射|alembic|连不上 → [全 Docker 部署本地 PG 容器端口未映射 host](known-issues.md#-全-docker-部署本地-pg-容器端口未映射-hostrun-alembicpytest-连不上)
+- export-excel|路由顺序|422|uuid|路径参数|item_id|fastapi|ppm|导出|字面量 → [ppm export-excel 路由必须前置 item_id](known-issues.md#-ppm-导出-export-excel-路由必须前置于-item_id-路由)
 
 ## SillySpec Gotchas
 

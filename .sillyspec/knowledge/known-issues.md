@@ -63,3 +63,12 @@ frontend 已在 `src/lib/providers.tsx:10` 挂载 `QueryClientProvider`，`use-d
 - 现象：本项目全 Docker 部署（backend + postgres 同 compose 网络），`docker ps` 显示 postgres 容器 `5432/tcp` 但**无 `0.0.0.0:5432->5432` host 映射**；worktree backend 无 `.env`。后果：host 上 `uv run alembic upgrade` / 并发 pytest 连 `localhost:5432` 失败（拒绝连接）。
 - 影响：需 host 连 PG 的验证（alembic online 往返、PostgreSQL 并发证明等）本地受限，只能用 offline SQL + metadata 对比 / SQLite fixture 等效验证，online apply 待 CI/部署补。
 - 通用坑：全 Docker 部署项目，host 上跑需 DB 的命令前，先确认 PG 容器端口映射到 host；否则用 `docker exec` 进容器跑，或 SQLite fixture 等效验证 + 标注"PG 并发证明待 CI 补"。
+
+## 🟡 ppm 导出 export-excel 路由必须前置于 item_id 路由
+
+FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（或 `/simple-list` 等）若声明在 `/xxx/{item_id}` **之后**，`export-excel` 会被 `{item_id}` 路径参数吞掉当 UUID 解析，返回 `422 uuid_parsing`（不是 404）。
+
+- 已复现 3 次：problem（ql-020）、project（已有 test_router 守护）、plan（ql-20260714-001，里程碑明细 + 计划节点模板导出按钮双双 422）。
+- 规避：新增任何 `/export-excel`、`/simple-list` 等字面量子路径端点时，**必须注册在对应 `{item_id}` GET 路由之前**，并在文件内留 `⚠ 必须前置` 注释（参照 problem/plan router）。
+- 守护：加路由顺序回归测试，断言字面量路径返回 200 + 合法 xlsx（修复前为 422）。参照 `backend/app/modules/ppm/plan/tests/test_router.py`、`ppm/project/tests/test_router.py`。
+- 详见 `docs/backend/modules/ppm.md` 注意事项。

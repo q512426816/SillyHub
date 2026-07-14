@@ -143,6 +143,34 @@ async def create_plan_node(
     return PlanNodeResp.model_validate(obj)
 
 
+# P2-3:计划节点模板导出 (对照源 plannode/index.vue handleExport)
+# ⚠ 必须放在 /plan-node/{item_id} 之前注册,否则字面量路径 export-excel
+#   会被 {item_id} 路径参数拦截当 UUID 解析失败 (422)。同 problem ql-020。
+_PLAN_NODE_COLUMNS = [
+    ColumnDef(field="overall_stage", header="总体阶段", width=20),
+    ColumnDef(field="project_type", header="项目类型", width=20),
+    ColumnDef(field="no", header="序号", width=10),
+]
+
+
+@router.get("/plan-node/export-excel")
+async def export_plan_nodes(
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_EXPORT))],
+) -> Any:
+    """导出计划节点模板为 Excel。
+
+    X-002: openpyxl 是同步 CPU 库,会阻塞事件循环。此处先 async 读 DB,
+    再用 ``anyio.to_thread.run_sync`` 把 openpyxl 序列化丢到线程池。
+    """
+    rows = await PlanService(session).list_plan_nodes_for_export()
+    columns = _PLAN_NODE_COLUMNS
+    # openpyxl 序列化丢线程池,X-002
+    return await anyio.to_thread.run_sync(
+        lambda: _build_excel_response(columns, rows, "计划节点模板")
+    )
+
+
 @router.get("/plan-node/{item_id}", response_model=PlanNodeResp)
 async def get_plan_node(
     item_id: uuid.UUID,
@@ -487,6 +515,41 @@ async def create_detail(
     return PsPlanNodeDetailResp.model_validate(obj)
 
 
+# P2-3:里程碑明细导出 (对照源 psplannodedetail 列表)
+# ⚠ 必须放在 /plan-node-detail/{item_id} 之前注册,否则字面量路径
+#   export-excel 会被 {item_id} 路径参数拦截当 UUID 解析失败 (422)。
+#   同 problem ql-020 / project 路由前置约定。
+_PLAN_NODE_DETAIL_COLUMNS = [
+    ColumnDef(field="overall_stage", header="总体阶段", width=16),
+    ColumnDef(field="detailed_stage", header="明细阶段", width=16),
+    ColumnDef(field="task_theme", header="任务主题", width=28),
+    ColumnDef(field="plan_workload", header="计划工作量", width=12),
+    ColumnDef(field="plan_begin_time", header="计划开始", width=20),
+    ColumnDef(field="plan_complete_time", header="计划完成", width=20),
+    ColumnDef(field="role_name", header="角色", width=16),
+    ColumnDef(field="achievement", header="成果", width=28),
+    ColumnDef(field="status", header="状态", width=10),
+]
+
+
+@router.get("/plan-node-detail/export-excel")
+async def export_plan_node_details(
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_EXPORT))],
+) -> Any:
+    """导出里程碑明细为 Excel (P2-3, X-002)。
+
+    仅导出非 archived (当前有效版本) 的明细。
+    """
+    rows = await PlanService(session).list_plan_node_details_for_export()
+    columns = _PLAN_NODE_DETAIL_COLUMNS
+    return await anyio.to_thread.run_sync(
+        lambda: _build_excel_response(
+            columns, rows, "里程碑明细", filename="plan_node_details.xlsx"
+        )
+    )
+
+
 @router.get("/plan-node-detail/{item_id}", response_model=PsPlanNodeDetailResp)
 async def get_detail(
     item_id: uuid.UUID,
@@ -643,65 +706,8 @@ async def submit_detail(
 
 
 # ===========================================================================
-# 导出 (同步 def,X-002)
+# Excel 响应构造 (同步 def,X-002)
 # ===========================================================================
-
-
-_PLAN_NODE_COLUMNS = [
-    ColumnDef(field="overall_stage", header="总体阶段", width=20),
-    ColumnDef(field="project_type", header="项目类型", width=20),
-    ColumnDef(field="no", header="序号", width=10),
-]
-
-
-@router.get("/plan-node/export-excel")
-async def export_plan_nodes(
-    session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_EXPORT))],
-) -> Any:
-    """导出计划节点模板为 Excel。
-
-    X-002: openpyxl 是同步 CPU 库,会阻塞事件循环。此处先 async 读 DB,
-    再用 ``anyio.to_thread.run_sync`` 把 openpyxl 序列化丢到线程池。
-    """
-    rows = await PlanService(session).list_plan_nodes_for_export()
-    columns = _PLAN_NODE_COLUMNS
-    # openpyxl 序列化丢线程池,X-002
-    return await anyio.to_thread.run_sync(
-        lambda: _build_excel_response(columns, rows, "计划节点模板")
-    )
-
-
-# P2-3:里程碑明细导出 (对照源 psplannodedetail 列表)
-_PLAN_NODE_DETAIL_COLUMNS = [
-    ColumnDef(field="overall_stage", header="总体阶段", width=16),
-    ColumnDef(field="detailed_stage", header="明细阶段", width=16),
-    ColumnDef(field="task_theme", header="任务主题", width=28),
-    ColumnDef(field="plan_workload", header="计划工作量", width=12),
-    ColumnDef(field="plan_begin_time", header="计划开始", width=20),
-    ColumnDef(field="plan_complete_time", header="计划完成", width=20),
-    ColumnDef(field="role_name", header="角色", width=16),
-    ColumnDef(field="achievement", header="成果", width=28),
-    ColumnDef(field="status", header="状态", width=10),
-]
-
-
-@router.get("/plan-node-detail/export-excel")
-async def export_plan_node_details(
-    session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_EXPORT))],
-) -> Any:
-    """导出里程碑明细为 Excel (P2-3, X-002)。
-
-    仅导出非 archived (当前有效版本) 的明细。
-    """
-    rows = await PlanService(session).list_plan_node_details_for_export()
-    columns = _PLAN_NODE_DETAIL_COLUMNS
-    return await anyio.to_thread.run_sync(
-        lambda: _build_excel_response(
-            columns, rows, "里程碑明细", filename="plan_node_details.xlsx"
-        )
-    )
 
 
 def _build_excel_response(

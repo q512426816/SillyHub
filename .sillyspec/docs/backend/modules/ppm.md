@@ -38,7 +38,8 @@ StateMachine(current, TRANSITIONS, entity=...).transition(target)
 - 5 子域 router 自身不带 prefix，由 `app.main` 统一 `include_router(..., prefix="/api/ppm")` 挂载
 - common/fsm.py 是通用 `StateMachine[S]`（泛型），各子域定义自己的 TRANSITIONS（如 problem、plan-node-detail）
 - common/crud.py 的 `PageReq`/`Page[T]`/`apply_sort`/`apply_pagination` 是全 ppm 分页排序统一入口；列表默认 page_size=20
-- common/export.py 提供 excel 导出（openpyxl），project/task/problem 均有 `/export-excel` 端点
+- common/export.py 提供 excel 导出（openpyxl），5 子域（project/plan/task/problem/kanban）均有 `/export-excel` 端点
+- ⚠ **export-excel 路由顺序坑（已复现 3 次：problem ql-020、project、plan ql-20260714-001）**：FastAPI 按注册顺序匹配，字面量路径 `/xxx/export-excel` 必须声明在 `/xxx/{item_id}` **之前**，否则 `export-excel` 被 `{item_id}` 当 UUID 解析返回 422。新增导出端点务必前置注册 + 加路由顺序回归测试（参照 `ppm/project/tests/test_router.py`、`ppm/plan/tests/test_router.py`）
 - plan 子域有"模板表（PlanNodeDetailTpl/Module）"与"ps 执行表（PsProjectPlan/PsPlanNode/...）"两套，前者定义后者实例化
 - task 的 `execute_plan` 用 `_assert_transition` 校验状态迁移，非法抛 `IllegalStatusTransition`
 - 202607220900_alter_ppm_fk_to_uuid 迁移把 ppm 外键从 varchar 改 uuid，若依式 map_fk 失败会产生孤儿 FK（plan_node_id NULL）
@@ -47,3 +48,6 @@ StateMachine(current, TRANSITIONS, entity=...).transition(target)
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 <!-- MANUAL_NOTES_END -->
+
+## 变更索引
+- ql-20260714-001-8c02 | plan 子域 export-excel 路由顺序修复（前置 {item_id}）+ 回归测试
