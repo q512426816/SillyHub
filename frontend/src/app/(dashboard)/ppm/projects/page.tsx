@@ -35,15 +35,17 @@ import type {
 
 // 项目类型 / 状态枚举(参照源 vue 字典 pm_project_type / pm_project_status)
 // D-003/D-004:类型用 antd Tag 分类色(blue/cyan/default灰);状态用 StatusBadge 语义(statusKind)。
+// value = 源字典 dictValue(code 1/2/3),与 DB ppm_project_maintenance 存的 code 一致;
+// 顺序对应源字典:type 1=研发 / 2=实施 / 3=运维;status 1=进行中 / 2=已完成 / 3=已暂停。
 const PROJECT_TYPE_OPTIONS = [
-  { label: "研发项目", value: "research", color: "blue" },
-  { label: "实施项目", value: "implementation", color: "cyan" },
-  { label: "运维项目", value: "maintenance", color: "default" },
+  { label: "研发项目", value: "1", color: "blue" },
+  { label: "实施项目", value: "2", color: "cyan" },
+  { label: "运维项目", value: "3", color: "default" },
 ];
 const PROJECT_STATUS_OPTIONS: { label: string; value: string; statusKind: StatusKind }[] = [
-  { label: "进行中", value: "ongoing", statusKind: "info" },
-  { label: "已完成", value: "completed", statusKind: "success" },
-  { label: "已暂停", value: "paused", statusKind: "warning" },
+  { label: "进行中", value: "1", statusKind: "info" },
+  { label: "已完成", value: "2", statusKind: "success" },
+  { label: "已暂停", value: "3", statusKind: "warning" },
 ];
 
 type Entity = ProjectMaintenance;

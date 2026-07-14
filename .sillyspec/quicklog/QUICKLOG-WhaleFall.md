@@ -68,3 +68,12 @@ created_at: 2026-07-14T09:20:24
 根因：明细子表 DetailLevelTable 用了 DataTable 组件（data-table.tsx:32），其外层 `<div className={cn("overflow-hidden", className)}>` 的 overflow-hidden 把 antd Table 的表头/尾部（border/shadow/圆角）裁掉。模块子表用 PpmSubTable（无 overflow-hidden）不受影响。
 方案：给 DetailLevelTable 的 DataTable 传 className="overflow-visible"；cn 用 twMerge（tailwind-merge），overflow-visible 覆盖默认 overflow-hidden，只影响该子表，不动 DataTable 默认（其他用 DataTable 的地方仍 overflow-hidden）。
 结果：①typecheck 过；②milestone-details 18 测试过；③待 commit+push+rebuild frontend + 用户浏览器验证（明细子表表头/尾部不再被截断）。
+
+## ql-20260714-009-c3d1 | 2026-07-14 17:15:00 | 修 /ppm/projects 项目类型/状态列显示原始 code「1 2」——前端枚举 value 用语义串(research/ongoing)与 DB code(1/2)不匹配
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/projects/page.tsx（PROJECT_TYPE_OPTIONS/PROJECT_STATUS_OPTIONS 的 value 改成源字典 code 1/2/3）
+需求：用户反馈 /ppm/projects 页【项目类型】【项目状态】列显示「1 2」而非中文。
+根因：PpmResourceTable select 列渲染 opts.find(o=>o.value===String(value))，找不到匹配则回退 String(value) 显示原始值。DB ppm_project_maintenance 实际存源字典 code（type 1/2、status 1/2，仅 1 条测试数据 implementation/ongoing），但前端 PROJECT_TYPE_OPTIONS value=research/implementation/maintenance、PROJECT_STATUS_OPTIONS value=ongoing/completed/paused 与 code 不匹配 → 回退显示 code「1 2」。前端枚举注释「参照源 vue 字典 pm_project_type/pm_project_status」，枚举顺序即源字典 code 顺序（type 1=研发/2=实施/3=运维；status 1=进行中/2=已完成/3=已暂停），DB 数据分布(type=2 多/status=1 多)与此吻合。
+方案：两个枚举 value 改成源字典 code "1"/"2"/"3"，label/color/statusKind 不变 → find 匹配 code 渲染中文 Tag/StatusBadge。注：那条 implementation/ongoing 测试数据(前端旧 value 存的)将显示原始串，属测试数据可忽略（CLAUDE.md 规则11 允许重置）。
+结果：①typecheck 过；②lint 0 error；③grep 确认 research/ongoing 等旧 value 仅 projects/page.tsx 用（已改），其余 completed/maintenance 命中均 agent/daemon 等无关模块；④待 commit+push+rebuild frontend + 用户验证（类型/状态列显示中文 Tag/StatusBadge）。
