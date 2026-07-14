@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Annotated, Any
 
 import anyio
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_user, require_permission_any
@@ -31,6 +31,9 @@ from app.modules.ppm.common.crud import Page, PageReq
 from app.modules.ppm.common.export import ColumnDef, timestamped_filename
 from app.modules.ppm.plan.schema import (
     ChangeProcessReq,
+    ImportCommitReq,
+    ImportPreviewResp,
+    ImportResultResp,
     PlanNodeCreate,
     PlanNodeDetailCreate,
     PlanNodeDetailResp,
@@ -55,12 +58,16 @@ from app.modules.ppm.plan.schema import (
     PsProjectPlanUpdate,
     SubmitDetailReq,
 )
-from app.modules.ppm.plan.service import PlanService
+from app.modules.ppm.plan.service import PlanError, PlanService
 
 router = APIRouter(tags=["ppm-plan"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 UserDep = Annotated[User, Depends(get_current_user)]
+
+# 模块批量导入单文件上限 (10MB):防止恶意/误传大文件全量进内存导致 OOM
+# (P1#1 健壮性)。校验在 await file.read() 之后、调 service 之前。
+MAX_IMPORT_BYTES = 10 * 1024 * 1024
 
 
 def _req(
@@ -283,6 +290,51 @@ async def create_module(
 ) -> PlanNodeModuleResp:
     obj = await PlanService(session).create_module(body.model_dump())
     return PlanNodeModuleResp.model_validate(obj)
+
+
+# ---------- 模块批量导入 (两阶段:预览 → 提交, D-006@v1) ----------
+@router.post(
+    "/plan-node/{plan_node_id}/modules/import-preview",
+    response_model=ImportPreviewResp,
+)
+async def import_modules_preview(
+    plan_node_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+    pm_project_id: uuid.UUID = Query(...),
+    file: UploadFile = File(...),
+) -> ImportPreviewResp:
+    """模块导入预览 (task-07 / design §7.1)。
+
+    解析 Excel + 责任人反查,不入库;anyio.to_thread 包解析在 service 内完成
+    (X-002)。返回 ``ImportPreviewResp`` 供前端确认后再提交。
+
+    P1#1: 先校验文件大小 (<=10MB) 与类型 (.xlsx / spreadsheetml),
+    非法抛 413/415 (PlanError, ppm 域统一 AppError 翻译);非法 UUID 由
+    FastAPI 在路由层 422 拦截 (P1#2),service 永远收到合法 UUID。
+    """
+    file_bytes = await file.read()
+    _validate_upload(file, file_bytes)
+    return await PlanService(session).import_preview(
+        file_bytes, str(plan_node_id), str(pm_project_id)
+    )
+
+
+@router.post(
+    "/plan-node/{plan_node_id}/modules/import-commit",
+    response_model=ImportResultResp,
+)
+async def import_modules_commit(
+    plan_node_id: uuid.UUID,
+    body: ImportCommitReq,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+) -> ImportResultResp:
+    """模块导入提交 (task-07 / design §7.1)。
+
+    按 preview 返回的行原子入库;service 返回 ``ImportResultResp``,router 不二次包装。
+    """
+    return await PlanService(session).import_commit(body, str(plan_node_id))
 
 
 @router.put("/plan-node-module/{item_id}", response_model=PlanNodeModuleResp)
@@ -710,6 +762,27 @@ async def submit_detail(
 # ===========================================================================
 # Excel 响应构造 (同步 def,X-002)
 # ===========================================================================
+
+
+def _validate_upload(file: UploadFile, file_bytes: bytes) -> None:
+    """模块导入上传校验 (P1#1)。
+
+    - 大小超过 ``MAX_IMPORT_BYTES`` → PlanError (413)
+    - 扩展名非 ``.xlsx`` 且 content_type 不含 spreadsheetml/xlsx → PlanError (415)
+
+    用 ppm 域 ``PlanError`` 抛出 (per-instance ``http_status`` 覆盖),由
+    ``app.core.errors`` 的 ``AppError`` 处理器统一翻译为标准错误体。
+    """
+    if len(file_bytes) > MAX_IMPORT_BYTES:
+        raise PlanError(
+            f"导入文件过大({len(file_bytes)} bytes),上限 {MAX_IMPORT_BYTES} bytes",
+            http_status=413,
+        )
+    name = (file.filename or "").lower()
+    ctype = (file.content_type or "").lower()
+    is_xlsx = name.endswith(".xlsx") or "spreadsheetml" in ctype or "xlsx" in ctype
+    if not is_xlsx:
+        raise PlanError("仅支持 .xlsx 文件导入", http_status=415)
 
 
 def _build_excel_response(

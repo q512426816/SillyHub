@@ -20,7 +20,7 @@
  * 走统一 `apiFetch`(自动带 token + 401 刷新);导出走 `downloadExcel`。
  */
 import { apiFetch } from "@/lib/api";
-import { downloadExcel } from "./export";
+import { downloadExcel, uploadExcelWithAuth } from "./export";
 import type {
   PlanChangeProcessReq,
   PlanNode,
@@ -46,6 +46,9 @@ import type {
   PsProjectPlan,
   PsProjectPlanCreate,
   PsProjectPlanUpdate,
+  ImportPreviewResp,
+  ImportCommitReq,
+  ImportResultResp,
 } from "./types";
 
 function pageQuery(
@@ -178,6 +181,42 @@ export async function updatePlanNodeModule(
 
 export async function deletePlanNodeModule(moduleId: string): Promise<void> {
   await apiFetch(`/api/ppm/plan-node-module/${moduleId}`, { method: "DELETE" });
+}
+
+// task-08: 模块 Excel 导入 (design §7) — 预览走 FormData 上传,提交走 JSON。
+
+/**
+ * 上传 Excel 预览导入 (POST .../modules/import-preview, multipart)。
+ *
+ * 走 `uploadExcelWithAuth` (不复用强制 JSON 的 apiFetch);pm_project_id 走 query
+ * 传后端用于反查项目成员责任人 UUID。返回解析预览 (多 Sheet + 标错)。
+ */
+export async function importModulesPreview(
+  planNodeId: string,
+  projectId: string,
+  file: File,
+): Promise<ImportPreviewResp> {
+  const resp = await uploadExcelWithAuth(
+    `/api/ppm/plan-node/${planNodeId}/modules/import-preview?pm_project_id=${projectId}`,
+    file,
+  );
+  return (await resp.json()) as ImportPreviewResp;
+}
+
+/**
+ * 确认提交导入 (POST .../modules/import-commit, JSON body)。
+ *
+ * 走 `apiFetch` POST JSON;payload.sheets 为用户勾选确认导入的 valid 行
+ * (含 preview 已反查的 duty_user_id,无需 pm_project_id)。
+ */
+export async function importModulesCommit(
+  planNodeId: string,
+  payload: ImportCommitReq,
+): Promise<ImportResultResp> {
+  return apiFetch<ImportResultResp>(
+    `/api/ppm/plan-node/${planNodeId}/modules/import-commit`,
+    { method: "POST", json: payload },
+  );
 }
 
 // ===========================================================================

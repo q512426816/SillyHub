@@ -102,6 +102,7 @@ class PlanNodeModuleBase(PydanticModel):
     plan_begin_time: datetime | None = None
     plan_complete_time: datetime | None = None
     duty_user_id: uuid.UUID | None = None
+    plan_type: str | None = None
 
 
 class PlanNodeModuleCreate(PlanNodeModuleBase):
@@ -114,6 +115,7 @@ class PlanNodeModuleUpdate(PydanticModel):
     plan_begin_time: datetime | None = None
     plan_complete_time: datetime | None = None
     duty_user_id: uuid.UUID | None = None
+    plan_type: str | None = None
 
 
 class PlanNodeModuleResp(PlanNodeModuleBase):
@@ -419,8 +421,84 @@ class SubmitDetailReq(PydanticModel):
     detail: dict[str, object] = Field(default_factory=dict)
 
 
+# ===========================================================================
+# 导入相关 DTO (task-04) — 两阶段预览/提交
+# design §7.2;ImportCommitReq 不含 pm_project_id (Grill X-008,duty_user_id 随行回传)。
+# ===========================================================================
+
+
+class ImportPreviewRow(PydanticModel):
+    """单行预览结果 — Excel 一行对应一 DTO。
+
+    ``duty_matched``/``valid`` 标记责任人与必填校验结果;
+    ``error`` 不可导入原因 (责任人未匹配/必填缺失)。
+    """
+
+    sheet_name: str
+    plan_type: str  # "正常计划" / "临时计划"
+    module_name: str | None = None  # 平台/子系统 (已向下填充)
+    detailed_stage: str | None = None  # 任务分类
+    task_theme: str | None = None
+    task_description: str | None = None
+    plan_workload: str | None = None  # 原样字符串
+    duty_user_name: str | None = None  # Excel 原始责任人 (多人取首个,原文保留)
+    duty_user_id: uuid.UUID | None = None  # 反查到的 UUID;未匹配为 None
+    duty_matched: bool  # 是否匹配到项目成员
+    duty_unmatched_note: str | None = None  # 多人时未采用的姓名提示
+    plan_begin_time: datetime | None = None
+    plan_complete_time: datetime | None = None
+    valid: bool  # 是否可导入 (责任人未匹配/必填缺失→False)
+    error: str | None = None  # 不可导入原因
+
+
+class ImportPreviewSheet(PydanticModel):
+    """单 Sheet 预览结果。"""
+
+    name: str
+    plan_type: str
+    row_count: int
+    rows: list[ImportPreviewRow]
+
+
+class ImportPreviewResp(PydanticModel):
+    """预览响应 — 多 Sheet + 整体解析错误 (如找不到表头)。"""
+
+    sheets: list[ImportPreviewSheet]
+    parse_errors: list[str] = Field(default_factory=list)
+
+
+class ImportCommitSheet(PydanticModel):
+    """提交请求中的单 Sheet — 前端回传用户确认导入的行 (valid 行)。"""
+
+    name: str
+    plan_type: str
+    rows: list[ImportPreviewRow]
+
+
+class ImportCommitReq(PydanticModel):
+    """导入提交请求 — duty_user_id 已在 preview 反查并随行回传,无需 pm_project_id (Grill X-008)。"""
+
+    sheets: list[ImportCommitSheet]
+
+
+class ImportResultResp(PydanticModel):
+    """导入结果 — 计数 + 失败行描述。"""
+
+    created_modules: int
+    merged_modules: int  # 追加明细到已存在同名模块
+    created_details: int
+    skipped_rows: int  # valid=False 被排除
+    failed_rows: list[str] = Field(default_factory=list)  # 入库阶段失败的行描述
+
+
 __all__ = [
     "ChangeProcessReq",
+    "ImportCommitReq",
+    "ImportCommitSheet",
+    "ImportPreviewResp",
+    "ImportPreviewRow",
+    "ImportPreviewSheet",
+    "ImportResultResp",
     "PageQuery",
     "PlanNodeBase",
     "PlanNodeCreate",

@@ -4,7 +4,7 @@
  * `apiFetch` 会强制把响应体当 JSON 解析,不适合 .xlsx 二进制流响应,
  * 故导出端点走独立 fetch + 浏览器触发保存。
  */
-import { getApiBaseUrl } from "@/lib/api";
+import { getApiBaseUrl, safeUUID } from "@/lib/api";
 import { ensureFreshAccessToken } from "@/lib/token-refresh";
 import { useSession } from "@/stores/session";
 
@@ -110,4 +110,67 @@ export async function downloadExcel(
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(objUrl);
+}
+
+/**
+ * 用 FormData 上传 Excel 到指定端点 (task-08)。
+ *
+ * 为什么不复用 `apiFetch`:
+ * - `apiFetch` 强制 `accept: application/json` + `JSON.stringify(json)` body,
+ *   既不支持 FormData body,也不适合上传场景;
+ * - 上传需 `multipart/form-data`,且 **不设 Content-Type** — 由浏览器自动加
+ *   `boundary=...`,手动设会破坏 boundary 导致后端解析失败。
+ *
+ * token 刷新逻辑与 `downloadExcel` 一致:401 → `ensureFreshAccessToken()` 单飞刷新
+ * 重试一次,二次 401 清 session 跳 /login 并抛错。
+ *
+ * @param url 完整或相对路径(相对路径走 resolveUrl 同源/SSR 解析,与 downloadExcel 一致)
+ * @param file 用户选择的 .xlsx File 对象,以字段名 "file" append 进 FormData
+ * @returns 原始 Response,由调用方按需 `.json()` 解析(预览端点返回 JSON)
+ */
+export async function uploadExcelWithAuth(
+  url: string,
+  file: File,
+): Promise<Response> {
+  // 相对路径走与 downloadExcel 一致的 origin 解析(浏览器内走 next rewrite)。
+  const resolved =
+    url.startsWith("http") || typeof window === "undefined"
+      ? new URL(url, getApiBaseUrl()).toString()
+      : new URL(url, window.location.origin).toString();
+
+  const doFetch = async (token: string | null): Promise<Response> => {
+    // 不设 Content-Type — 让浏览器根据 FormData 自动加 multipart boundary。
+    const headers: Record<string, string> = {
+      accept: "application/json",
+      "x-request-id": safeUUID(),
+    };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const formData = new FormData();
+    formData.append("file", file);
+    return fetch(resolved, { method: "POST", headers, body: formData });
+  };
+
+  let { accessToken } = useSession.getState();
+  let resp = await doFetch(accessToken);
+
+  // 401 → refresh + retry once (downloadExcel / apiFetch 行为对齐)
+  if (resp.status === 401) {
+    const newToken = await ensureFreshAccessToken();
+    if (newToken) {
+      resp = await doFetch(newToken);
+    }
+    if (resp.status === 401) {
+      useSession.getState().clear();
+      if (typeof window !== "undefined") {
+        window.location.href = "/login";
+      }
+      throw new Error("上传失败:登录已过期,请重新登录");
+    }
+  }
+
+  if (!resp.ok) {
+    throw new Error(`上传失败:HTTP ${resp.status}`);
+  }
+
+  return resp;
 }

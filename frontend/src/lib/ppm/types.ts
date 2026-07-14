@@ -268,6 +268,8 @@ export interface PlanNodeModule {
   // 同 PlanNodeDetail.plan_node_id (D-fix@plan500)
   plan_node_id: string | null;
   module_name: string | null;
+  // 计划类型: "正常计划" / "临时计划" / null (design §6 + task-02; 旧数据为 NULL)
+  plan_type: string | null;
   plan_workload: string | null;
   plan_begin_time: string | null;
   plan_complete_time: string | null;
@@ -287,6 +289,8 @@ export interface PlanNodeModuleCreate {
 
 export interface PlanNodeModuleUpdate {
   module_name?: string | null;
+  // 计划类型(编辑保存不丢字段,design §12 自审)
+  plan_type?: string | null;
   plan_workload?: string | null;
   plan_begin_time?: string | null;
   plan_complete_time?: string | null;
@@ -561,6 +565,85 @@ export interface ProjectPlanThreeLevel extends PsProjectPlan {
   remaining_available_person_days: string | null;
   remaining_cost: string | null;
   nodes: PsPlanNodeWithDetail[];
+}
+
+// task-08: 模块 Excel 导入 DTO (design §7.2;字段对齐后端 plan/schema.py)
+//
+// 注意:所有字段名与后端 Pydantic snake_case 完全一致;
+// - datetime 字段后端序列化为 ISO 字符串 → 此处用 string;
+// - uuid.UUID 字段 → string;
+// - ImportCommitReq 不含 pm_project_id (duty_user_id 随行回传, design §7.2 / X-008)。
+
+/** 单行预览结果 — Excel 一行对应一 DTO。 */
+export interface ImportPreviewRow {
+  sheet_name: string;
+  /** "正常计划" / "临时计划" */
+  plan_type: string;
+  /** 平台/子系统 (已向下填充) */
+  module_name: string | null;
+  /** 任务分类 */
+  detailed_stage: string | null;
+  task_theme: string | null;
+  task_description: string | null;
+  /** 原样字符串 (后端不解析为数值) */
+  plan_workload: string | null;
+  /** Excel 原始责任人 (多人取首个,原文保留) */
+  duty_user_name: string | null;
+  /** 反查到的项目成员 UUID;未匹配为 null */
+  duty_user_id: string | null;
+  /** 是否匹配到项目成员 */
+  duty_matched: boolean;
+  /** 多人时未采用的姓名提示 */
+  duty_unmatched_note: string | null;
+  /** ISO 字符串 */
+  plan_begin_time: string | null;
+  plan_complete_time: string | null;
+  /** 是否可导入 (责任人未匹配/必填缺失 → false) */
+  valid: boolean;
+  /** 不可导入原因 */
+  error: string | null;
+}
+
+/** 单 Sheet 预览结果。 */
+export interface ImportPreviewSheet {
+  name: string;
+  plan_type: string;
+  row_count: number;
+  rows: ImportPreviewRow[];
+}
+
+/** 预览响应 — 多 Sheet + 整体解析错误 (如找不到表头)。 */
+export interface ImportPreviewResp {
+  sheets: ImportPreviewSheet[];
+  parse_errors: string[];
+}
+
+/** 提交请求中的单 Sheet — 前端回传用户确认导入的行 (valid 行)。 */
+export interface ImportCommitSheet {
+  name: string;
+  plan_type: string;
+  rows: ImportPreviewRow[];
+}
+
+/**
+ * 导入提交请求。
+ *
+ * duty_user_id 已在 preview 反查并随行回传,无需 pm_project_id (X-008)。
+ */
+export interface ImportCommitReq {
+  sheets: ImportCommitSheet[];
+}
+
+/** 导入结果 — 计数 + 失败行描述。 */
+export interface ImportResultResp {
+  created_modules: number;
+  /** 追加明细到已存在同名模块的次数 */
+  merged_modules: number;
+  created_details: number;
+  /** valid=false 被排除的行数 */
+  skipped_rows: number;
+  /** 入库阶段失败的行描述 */
+  failed_rows: string[];
 }
 
 // ===========================================================================
