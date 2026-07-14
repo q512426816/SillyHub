@@ -367,3 +367,39 @@ class TestScheduleLoopConvergence:
         svc = OrchestratorService(db_session)
         result = await svc.schedule_loop(mission.id)
         assert result is None
+
+
+class TestOrchestratorPromptConstraint:
+    """诊断 36b9b475：主 agent 派不出 worker 时自己下场写代码（越权），绕过
+    worktree 隔离与 converge 合并。render_orchestrator_prompt 必须含越权硬约束——
+    禁自写实现源码 / 写代码派 worker / worker 失败即收敛 / 仅 converge 冲突可 Edit。
+    prompt 是软约束（LLM 自主决策），测试只断言约束关键词声明存在。
+    """
+
+    @pytest.mark.asyncio
+    async def test_prompt_forbids_orchestrator_writing_implementation(
+        self, db_session: AsyncSession
+    ) -> None:
+        from app.modules.agent.model import AgentMission, AgentRun
+        from app.modules.agent.orchestrator import render_orchestrator_prompt
+
+        ws_id = await _make_workspace(db_session)
+        mission = AgentMission(workspace_id=ws_id, objective="团队目标")
+        db_session.add(mission)
+        await db_session.commit()
+        await db_session.refresh(mission)
+        run = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            status="pending",
+            role="orchestrator",
+        )
+        db_session.add(run)
+        await db_session.commit()
+        await db_session.refresh(run)
+
+        prompt = render_orchestrator_prompt(mission, run)
+        # 越权禁令关键词（软约束声明，存在即合规）
+        assert "禁止" in prompt, "prompt 必须含越权禁令段"
+        assert "dispatch_worker" in prompt
+        assert "converge_mission" in prompt

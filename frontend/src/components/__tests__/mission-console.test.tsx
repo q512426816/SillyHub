@@ -161,4 +161,48 @@ describe("MissionConsole team 配置面板（task-07）", () => {
     expect(p.worker_preset).toBeUndefined();
     expect(p.main_agent_config).toBeUndefined();
   });
+
+  it("详情渲染：主 agent 与 worker 分开（主 agent 不混入 worker 列表）", async () => {
+    // 诊断 36b9b475：前端把主 agent（role=orchestrator）也当 worker 渲染，标题写死
+    // "Worker 日志"误导。修复后主 agent 单独区块，worker 列表只含真 worker。
+    const missionWithMain: Mission = {
+      ...FAKE_MISSION,
+      status: "running",
+      workers: [
+        {
+          id: "main-1",
+          role: "orchestrator",
+          objective: "主 agent 调度",
+          status: "running",
+          total_cost_usd: 0.1,
+          started_at: null,
+          finished_at: null,
+          artifacts: [],
+        },
+        {
+          id: "w-1",
+          role: "impl",
+          objective: "写实现",
+          status: "pending",
+          total_cost_usd: null,
+          started_at: null,
+          finished_at: null,
+          artifacts: [],
+        },
+      ],
+    };
+    hoisted.createMissionMock.mockResolvedValue(missionWithMain);
+    render(<MissionConsole workspaceId="ws-1" />);
+    fireEvent.change(screen.getByPlaceholderText(/分析 backend/i), {
+      target: { value: "x" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /启动团队/ }));
+    await waitFor(() => {
+      expect(hoisted.createMissionMock).toHaveBeenCalledTimes(1);
+    });
+    // 主 agent 单独区块出现
+    expect(screen.getByText(/🧠\s*主 Agent/)).toBeTruthy();
+    // Worker 列表标题，只算真 worker（1 个，主 agent 不计入）
+    expect(screen.getByText(/Worker（1）/)).toBeTruthy();
+  });
 });

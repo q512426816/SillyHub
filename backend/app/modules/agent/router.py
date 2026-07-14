@@ -839,6 +839,14 @@ async def create_mission(
                 run, workspace_id=workspace_id, user_id=user.id, read_only=read_only
             )
         except Exception as exc:
+            # 诊断 36b9b475：原 except 吞异常不写 error_code，failed run 不可诊断。
+            # execution 内部已统一收敛 worktree/daemon 失败；此处仅兜底未预期异常，
+            # 同样写 error_code 杜绝静默 failed。
+            from app.modules.agent.execution import mark_worker_run_failed
+
+            await mark_worker_run_failed(
+                session, run, error_code="dispatch_exception", message=str(exc)
+            )
             log.warning("mission_worker_dispatch_failed", run_id=str(run.id), error=str(exc))
     await session.commit()  # 提交 killed / dispatch 状态
     fresh = await ctrl.worker_runs(mission.id)

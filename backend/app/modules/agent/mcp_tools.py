@@ -30,12 +30,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth_deps import require_permission
 from app.core.db import get_session
 from app.core.logging import get_logger
-from app.modules.agent.execution import MissionExecutionService
+from app.modules.agent.execution import MissionExecutionService, mark_worker_run_failed
 from app.modules.agent.model import AgentArtifact, AgentMission, AgentRun, AgentRunLog
-from app.modules.agent.placement import NoOnlineDaemonError
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.daemon.host_fs import new_host_fs_delegate
+from app.modules.daemon.host_fs.delegate import HostFsDelegateUnavailable
 
 log = get_logger(__name__)
 
@@ -358,18 +358,25 @@ async def dispatch_worker(
             user_id=user.id,
             read_only=payload.read_only,
         )
-    except NoOnlineDaemonError as exc:
-        run.status = "pending"
-        run.error_code = "no_online_daemon"
-        run.output_redacted = exc.message
-        session.add(run)
-        await session.commit()
-        await session.refresh(run)
+    except HostFsDelegateUnavailable:
+        # delegate wiring 错误（workspace 无 bound daemon）fail-loud 503
+        # （ql-20260713-002 契约，delegate.py:734 不 degrade）——不吞，主 agent 收到
+        # 503 知道是 binding 问题，区别于 worktree_create_failed/no_online_daemon
+        # （execution 内部已收敛为 run failed，可重试/收敛）。
+        raise
+    except Exception as exc:
+        # 诊断 36b9b475：execution 内部已统一收敛 worktree/daemon 失败（failed +
+        # error_code + finished_at），不再冒泡 NoOnlineDaemonError。此处仅兜底未预期
+        # 异常，同样写 error_code 杜绝静默 failed（原 NoOnlineDaemon 分支设 pending
+        # 语义错——pending 让 derive_status 永远 running、mission 永不收敛）。
+        await mark_worker_run_failed(
+            session, run, error_code="dispatch_exception", message=str(exc)
+        )
         log.warning(
-            "mcp_dispatch_worker_no_online_daemon",
+            "mcp_dispatch_worker_exception",
             mission_id=str(mission.id),
             run_id=str(run.id),
-            message=exc.message,
+            error=str(exc),
         )
     await session.commit()
     await session.refresh(run)
