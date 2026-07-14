@@ -1,30 +1,11 @@
 {
   "name_zh": "worktree 元数据",
-  "changeName": "2026-07-13-ppm-personal-workbench-prototype",
-  "branch": "sillyspec/2026-07-13-ppm-personal-workbench-prototype",
+  "changeName": "2026-07-14-missions-page-redesign",
+  "branch": "sillyspec/2026-07-14-missions-page-redesign",
   "baseBranch": "main",
   "baseHash": "dcdefa4c8959f33ba9bab0483136012fb24ddfa5",
-  "actualBaseHash": "f6f77579fa65af243128598363a516a678244540",
-  "createdAt": "2026-07-14T01:52:48.749Z",
-  "worktreePath": "C:\\Users\\qinyi\\IdeaProjects\\multi-agent-platform\\.sillyspec\\.runtime\\worktrees\\2026-07-13-ppm-personal-workbench-prototype",
+  "worktreePath": "C:\\Users\\qinyi\\IdeaProjects\\multi-agent-platform\\.sillyspec\\.runtime\\worktrees\\2026-07-14-missions-page-redesign",
   "mode": "worktree",
-  "baselineFiles": [
-    "backend/.sillyspec-platform-cleaned",
-    "backend/.sillyspec/local.yaml",
-    "docs/sillyspec/finished/brainstorm-lifecycle-contract-false-exempt.md",
-    "docs/sillyspec/finished/design-section-number-vs-plan-postcheck.md",
-    "docs/sillyspec/finished/node-esm-ismain-windows-file-url.md",
-    "docs/sillyspec/finished/quick-state-reset-platform-mode.md",
-    "missions-create-state.png",
-    "missions-detail-state.png"
-  ],
-  "baselineCommit": "f6f77579fa65af243128598363a516a678244540",
-  "baselineHash": "24c8ed8cd64054c7",
-  "syncStatus": "failed",
-  "syncError": "Command failed: git merge origin/main --ff-only\nhint: Diverging branches can't be fast-forwarded, you need to either:\nhint:\nhint: \tgit merge --no-ff\nhint:\nhint: or:\nhint:\nhint: \tgit rebase\nhint:\nhint: Disable this message with \"git config advice.diverging false\"\nfatal: Not possible to fast-forward, aborting.\n",
-  "depsStatus": "n/a",
-  "depsMethod": null,
-  "depsSource": null,
-  "depsLockHash": "1ba6e57607589bbe",
-  "depsCheckedAt": "2026-07-14T01:52:48.723Z"
+  "createdAt": "2026-07-14T02:50:38.568Z",
+  "provisioning": true
 }
