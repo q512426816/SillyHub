@@ -1283,17 +1283,15 @@ function DetailLevelTable({
                 编辑
               </Button>
             )}
-            {d.status === "draft" && (
-              <Button
-                size="sm"
-                variant="destructive"
-                disabled={readOnly}
-                title={readOnly ? "只读模式(非项目经理)" : undefined}
-                onClick={() => void handleDelete(d)}
-              >
-                删除
-              </Button>
-            )}
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={readOnly}
+              title={readOnly ? "只读模式(非项目经理)" : undefined}
+              onClick={() => void handleDelete(d)}
+            >
+              删除
+            </Button>
           </div>
         ),
       },
@@ -1859,14 +1857,15 @@ function DetailDrawer({
               <Form.Item
                 label="所属模块"
                 name="module_id"
-                tooltip="实施阶段三级用,其他阶段可空;选项来自当前里程碑的模块列表"
+                tooltip="实施阶段必填;选项来自当前里程碑的模块列表"
+                rules={[{ required: true, message: "请选择所属模块" }]}
               >
                 <Select
                   disabled={!baseEditable}
                   allowClear
                   showSearch
                   optionFilterProp="label"
-                  placeholder="选择所属模块(可空)"
+                  placeholder="请选择所属模块"
                   notFoundContent={
                     modules.length === 0 ? "该里程碑暂无模块" : undefined
                   }
