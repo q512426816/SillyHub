@@ -138,6 +138,11 @@ class PlanNodeModule(BaseModel, table=True):
     duty_user_id: uuid.UUID | None = Field(
         default=None, sa_column=Column(UuidCoercing, nullable=True)
     )
+    # 计划类型（正常计划/临时计划），业务层校验，非 DB 枚举
+    plan_type: str | None = Field(
+        default="正常计划",
+        sa_column=Column(String(32), nullable=True, default="正常计划"),
+    )
     created_at: datetime = Field(
         default_factory=_now, sa_column=Column(DateTime(timezone=True), nullable=False)
     )

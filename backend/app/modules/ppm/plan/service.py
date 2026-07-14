@@ -17,11 +17,13 @@
 
 from __future__ import annotations
 
+import re
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+import anyio
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,6 +42,7 @@ from app.modules.ppm.plan.fsm import (
     TRANSITIONS,
     PlanNodeDetailStatus,
 )
+from app.modules.ppm.plan.importer import ParsedRow, ParsedSheet, parse_workbook
 from app.modules.ppm.plan.model import (
     PlanNode,
     PlanNodeDetail,
@@ -50,12 +53,18 @@ from app.modules.ppm.plan.model import (
     PsProjectPlan,
 )
 from app.modules.ppm.plan.schema import (
+    ImportCommitReq,
+    ImportPreviewResp,
+    ImportPreviewRow,
+    ImportPreviewSheet,
+    ImportResultResp,
     PlanTaskSimple,
     ProjectPlanThreeLevelResp,
     PsPlanNodeDetailWithTasks,
     PsPlanNodeWithDetail,
     PsProjectPlanListReq,
 )
+from app.modules.ppm.project.model import PpmProjectMember
 from app.modules.ppm.task.model import PlanTask
 
 log = get_logger(__name__)
@@ -112,6 +121,18 @@ def _derive_remaining(budget: str | None, actual: str | None) -> str | None:
     if r == r.to_integral_value():
         return format(r.to_integral_value(), "f")
     return format(r, "f")
+
+
+def _date_to_datetime(value: date | None) -> datetime | None:
+    """把导入解析得到的 ``date`` 转成 ``datetime`` (当日 00:00:00, UTC)。
+
+    导入 DTO ``ImportPreviewRow.plan_begin_time`` / ``plan_complete_time`` 为
+    ``datetime | None`` (对齐 ORM ``DateTime(timezone=True)``);importer 产出
+    的是 ``date`` (R-08 Excel 日期),这里统一补全为带 UTC tz 的 datetime。
+    """
+    if value is None:
+        return None
+    return datetime.combine(value, time.min, tzinfo=UTC)
 
 
 # ===========================================================================
@@ -809,6 +830,274 @@ class PlanService:
             actor=actor_id,
         )
         return detail_obj
+
+    # ---------- 导入预览 (task-05) ----------
+    async def import_preview(
+        self, file_bytes: bytes, plan_node_id: str, pm_project_id: str
+    ) -> ImportPreviewResp:
+        """解析 Excel + 责任人反查 → 预览响应 (design §7.3 / D-002@v1)。
+
+        纯解析不入库:不写 DB、不复用 ``_Crud``。
+
+        - 大文件解析丢线程池 (X-002 / R-05):``parse_workbook`` 是同步 openpyxl,
+          用 ``anyio.to_thread.run_sync`` 包裹,不阻塞事件循环。
+        - 责任人反查走 ORM 全量 (Grill X-005):查 ``PpmProjectMember`` 全量
+          (where pm_project_id),建 ``{user_name: user_id}`` 反查表;user_name 为
+          空的成员不进表 (不可匹配)。
+        - 多人责任人取首个 (D-002 / R-09):顿号/逗号分隔取首个姓名精确匹配;
+          未采用姓名写 ``duty_unmatched_note``;未匹配 → ``valid=False``。
+        """
+        # 1. 线程池跑同步解析 (X-002,不阻塞事件循环)
+        sheets: list[ParsedSheet] = await anyio.to_thread.run_sync(parse_workbook, file_bytes)
+
+        # 2. ORM 全量查项目成员,建 {user_name: user_id} 反查表 (Grill X-005)
+        member_map = await self._build_member_name_map(pm_project_id)
+
+        # 3. 逐 Sheet 逐行转 ImportPreviewRow + 责任人反查
+        sheet_resps: list[ImportPreviewSheet] = []
+        for sheet in sheets:
+            row_resps = [self._to_preview_row(sheet, row, member_map) for row in sheet.rows]
+            sheet_resps.append(
+                ImportPreviewSheet(
+                    name=sheet.name,
+                    plan_type=sheet.plan_type,
+                    row_count=len(row_resps),
+                    rows=row_resps,
+                )
+            )
+
+        # 4. 组装响应 (parse_errors 暂空 — importer 已跳过非数据 Sheet)
+        return ImportPreviewResp(sheets=sheet_resps, parse_errors=[])
+
+    async def _build_member_name_map(self, pm_project_id: str) -> dict[str, uuid.UUID]:
+        """查某项目全部成员,建 ``{user_name: user_id}`` 反查表。
+
+        - 走 ORM 全量,不分页 (Grill X-005,避免 page_size 截断)
+        - ``user_name`` 为空的成员不进表 (不可匹配)
+        - 同名取最后写入者 (反查表 value 覆盖;R-03 同名重名预览层不阻断)
+        """
+        project_uuid = self._safe_uuid(pm_project_id)
+        if project_uuid is None:
+            return {}
+        stmt = select(PpmProjectMember.user_id, PpmProjectMember.user_name).where(
+            PpmProjectMember.pm_project_id == project_uuid
+        )
+        result = await self._session.execute(stmt)
+        out: dict[str, uuid.UUID] = {}
+        for uid, uname in result.all():
+            if not uname or not str(uname).strip():
+                continue  # user_name 为空不进表 (Grill X-005)
+            out[str(uname).strip()] = uid
+        return out
+
+    @staticmethod
+    def _to_preview_row(
+        sheet: ParsedSheet, row: ParsedRow, member_map: dict[str, uuid.UUID]
+    ) -> ImportPreviewRow:
+        """单 ParsedRow → ImportPreviewRow,含责任人反查 (D-002 / R-09)。
+
+        - 多人责任人按顿号/逗号分隔取**首个**姓名,trim 后精确匹配反查表
+        - 匹配 → ``duty_matched=True``、``duty_user_id`` 填值
+        - 未匹配 → ``duty_matched=False``、``valid=False``、
+          ``error="责任人未匹配: <姓名>"``
+        - 多人时未采用的姓名写 ``duty_unmatched_note``
+        - date → datetime (plan_begin/plan_complete);其余字段直传
+        """
+        duty_names: list[str] = []
+        if row.duty_user_name:
+            # 兼容顿号/逗号 (含全角顿号「、」与中英文逗号)。
+            raw_split = re.split(r"[、,，;；/]", row.duty_user_name)
+            duty_names = [s.strip() for s in raw_split if s and s.strip()]
+
+        first_name = duty_names[0] if duty_names else None
+        unmatched_note_names = duty_names[1:] if len(duty_names) > 1 else []
+
+        matched_id: uuid.UUID | None = None
+        matched = False
+        error: str | None = None
+        if first_name:
+            matched_id = member_map.get(first_name)
+            matched = matched_id is not None
+            if not matched:
+                error = f"责任人未匹配: {first_name}"
+
+        duty_unmatched_note = (
+            "未采用责任人: " + "、".join(unmatched_note_names) if unmatched_note_names else None
+        )
+
+        return ImportPreviewRow(
+            sheet_name=sheet.name,
+            plan_type=sheet.plan_type,
+            module_name=row.module_name,
+            detailed_stage=row.detailed_stage,
+            task_theme=row.task_theme,
+            task_description=row.task_description,
+            plan_workload=row.plan_workload,
+            duty_user_name=row.duty_user_name,
+            duty_user_id=matched_id,
+            duty_matched=matched,
+            duty_unmatched_note=duty_unmatched_note,
+            plan_begin_time=_date_to_datetime(row.plan_begin),
+            plan_complete_time=_date_to_datetime(row.plan_complete),
+            valid=matched or first_name is None,
+            error=error,
+        )
+
+    # ---------- 导入提交 (task-06 / D-008@v1) ----------
+    async def import_commit(self, req: ImportCommitReq, plan_node_id: str) -> ImportResultResp:
+        """原子入库 — 分组合并 + 模块汇总 + 明细逐行 status=draft (design §7.3 / D-008@v1)。
+
+        - ⚠ 不复用 ``_Crud.create`` / ``create_module`` / ``create_detail`` (其每次单独
+          commit 破坏原子性);改 ``session.add()`` 批量挂对象 + 末尾**单次** ``commit()``。
+        - 先按 ``module_name`` 分组(同 plan_node_id 内):查重命中 → 复用其 id 合并
+          (``merged_modules++``);未命中 → 新建 ``PlanNodeModule`` 并写整组汇总
+          (``created_modules++``)。合并模块不覆盖其汇总,仅追加明细。
+        - 模块汇总(可测试定义,design §7.3 C1-C2;仅新建模块写,汇总基于整组行):
+          * plan_begin_time = 组内非空 min;全空 → None
+          * plan_complete_time = 组内非空 max;全空 → None
+          * plan_workload = 组内工作量经 ``_to_decimal`` 求和(非数字/空→0)转 str;
+            全组无有效数字 → None
+          * duty_user_id = 组内首个非空 duty_user_id
+        - 每个 valid row 建 ``PsPlanNodeDetail`` (status 固定 ``draft``,不触发状态机);
+          ``valid=False`` 的 row 计 ``skipped_rows`` 不入库。
+        - 任一异常冒泡 → 不 commit → 整体回滚 (无脏数据,R-07)。
+        """
+        node_uuid = self._safe_uuid(plan_node_id)
+
+        # 1. 遍历所有 Sheet → 分组:仅 valid 行参与,module_name 为 key (None 归 "")
+        #    保留行顺序 (dict 自 Python3.7 保序),非 valid 行计 skipped。
+        groups: dict[str, list[ImportPreviewRow]] = {}
+        sheet_plan_type: dict[str, str] = {}
+        skipped_rows = 0
+        for sheet in req.sheets:
+            for row in sheet.rows:
+                if not row.valid:
+                    skipped_rows += 1
+                    continue
+                key = row.module_name if row.module_name is not None else ""
+                groups.setdefault(key, []).append(row)
+                sheet_plan_type.setdefault(key, sheet.plan_type)
+
+        # 2. 每组:查既有同名模块 → 合并 / 否则新建并写汇总
+        created_modules = 0
+        merged_modules = 0
+        created_details = 0
+        module_id_of: dict[str, uuid.UUID] = {}
+
+        for key, rows in groups.items():
+            existing_id = await self._find_existing_module(node_uuid, key)
+            if existing_id is not None:
+                # 命中同名模块 → 合并,复用其 id,不覆盖其汇总
+                module_id_of[key] = existing_id
+                merged_modules += 1
+            else:
+                new_module = self._build_module(
+                    node_uuid=node_uuid,
+                    module_name=key,
+                    plan_type=sheet_plan_type[key],
+                    rows=rows,
+                )
+                self._session.add(new_module)
+                module_id_of[key] = new_module.id
+                created_modules += 1
+
+            # 3. 逐行建明细 (status=draft,不触发状态机)
+            for row in rows:
+                detail = PsPlanNodeDetail(
+                    id=uuid.uuid4(),
+                    plan_node_id=node_uuid,
+                    module_id=module_id_of[key],
+                    detailed_stage=row.detailed_stage,
+                    task_theme=row.task_theme,
+                    task_description=row.task_description,
+                    plan_workload=row.plan_workload,
+                    plan_begin_time=row.plan_begin_time,
+                    plan_complete_time=row.plan_complete_time,
+                    execute_user_id=row.duty_user_id,
+                    status=PlanNodeDetailStatus.DRAFT.value,
+                    created_at=_now(),
+                    updated_at=_now(),
+                )
+                self._session.add(detail)
+                created_details += 1
+
+        # 4. 末尾单次 commit (D-008);异常冒泡不 commit 即整体回滚
+        await self._session.commit()
+
+        return ImportResultResp(
+            created_modules=created_modules,
+            merged_modules=merged_modules,
+            created_details=created_details,
+            skipped_rows=skipped_rows,
+            failed_rows=[],
+        )
+
+    async def _find_existing_module(
+        self, node_uuid: uuid.UUID | None, module_name: str
+    ) -> uuid.UUID | None:
+        """查同 plan_node_id + module_name 是否已有 PlanNodeModule (D-004 同名合并)。
+
+        module_name 为空串视为 None 模块名查询。返回命中模块的 id,未命中返回 None。
+        """
+        target = module_name if module_name != "" else None
+        stmt = select(PlanNodeModule.id).where(
+            PlanNodeModule.plan_node_id == node_uuid,
+            PlanNodeModule.module_name == target,
+        )
+        return await self._session.scalar(stmt)
+
+    @staticmethod
+    def _build_module(
+        *,
+        node_uuid: uuid.UUID | None,
+        module_name: str,
+        plan_type: str,
+        rows: list[ImportPreviewRow],
+    ) -> PlanNodeModule:
+        """新建 PlanNodeModule 并按整组行计算汇总 (design §7.3 C1-C2)。
+
+        - plan_begin_time = 组内非空 min;全空 → None
+        - plan_complete_time = 组内非空 max;全空 → None
+        - plan_workload = 组内经 ``_to_decimal`` 求和(非数字/空→0)转 str;
+          全组无有效数字 → None
+        - duty_user_id = 组内首个非空值
+        """
+        begins = [r.plan_begin_time for r in rows if r.plan_begin_time is not None]
+        completes = [r.plan_complete_time for r in rows if r.plan_complete_time is not None]
+
+        workload_sum: Decimal | None = None
+        has_numeric = False
+        total = Decimal(0)
+        for r in rows:
+            dec = _to_decimal(r.plan_workload)
+            if dec is not None:
+                has_numeric = True
+                total += dec
+        if has_numeric:
+            # 整数去尾零,否则保留 Decimal 精度 (与 _derive_remaining 规整一致)
+            if total == total.to_integral_value():
+                workload_sum = total.to_integral_value()
+            else:
+                workload_sum = total
+
+        first_duty: uuid.UUID | None = None
+        for r in rows:
+            if r.duty_user_id is not None:
+                first_duty = r.duty_user_id
+                break
+
+        return PlanNodeModule(
+            id=uuid.uuid4(),
+            plan_node_id=node_uuid,
+            module_name=(module_name if module_name != "" else None),
+            plan_workload=(str(workload_sum) if workload_sum is not None else None),
+            plan_begin_time=(min(begins) if begins else None),
+            plan_complete_time=(max(completes) if completes else None),
+            duty_user_id=first_duty,
+            plan_type=plan_type,
+            created_at=_now(),
+            updated_at=_now(),
+        )
 
     @staticmethod
     def _safe_uuid(value: str | uuid.UUID | None) -> uuid.UUID | None:

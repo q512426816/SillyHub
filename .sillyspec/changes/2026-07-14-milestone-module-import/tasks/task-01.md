@@ -28,7 +28,7 @@ context: |
 implementation: |
   - model.py：在 PlanNodeModule 类 duty_user_id 之后、created_at 之前新增 plan_type: str | None = Field(default="正常计划", sa_column=Column(String(32), nullable=True, default="正常计划"))，附注释「计划类型（正常计划/临时计划），业务层校验，非 DB 枚举」
   - schema.py：PlanNodeModuleBase 加 plan_type: str | None = None（紧随 duty_user_id）；Update 同步加 plan_type: str | None = None；Create/Resp 经继承自动获得
-  - 生成迁移文件 backend/migrations/versions/20260714_add_plan_type_to_plan_node_module.py：revision=20260714_plan_node_module_plan_type，down_revision=20260714_user_emp_no，upgrade() 用 op.add_column("ppm_plan_node_module", sa.Column("plan_type", sa.String(32), nullable=True))，downgrade() op.drop_column
+  - 生成迁移文件 backend/migrations/versions/20260714_add_plan_type_to_plan_node_module.py：revision=20260714_pnm_plan_type（≤32字符；原 20260714_plan_node_module_plan_type 超 alembic varchar(32) 限制，执行时已修正），down_revision=20260714_user_emp_no，upgrade() 用 op.add_column("ppm_plan_node_module", sa.Column("plan_type", sa.String(32), nullable=True))，downgrade() op.drop_column
   - 既有 create_module / create_detail / CRUD 不动（字段 nullable，不传即 None）
 acceptance: |
   - PlanNodeModule ORM 含 plan_type 字段，String(32) nullable default "正常计划"

@@ -10,30 +10,30 @@ plan_level: full
 > Wave 按拓扑严格分层（同 Wave 内任务互不依赖，可并行；execute 按依赖安全执行）。无 Spike（方案确定）。
 
 ## Wave 1（无依赖 — 数据模型基础）
-- [ ] task-01: 后端 `PlanNodeModule` 加 `plan_type` 字段 + alembic migration + schema(Base/Create/Update/Resp) 同步加字段（覆盖：FR-002, D-003）
-- [ ] task-02: 前端 `types.ts` 加 `plan_type`（含 `PlanNodeModuleUpdate`）+ `moduleColumns` 加「计划类型」列（覆盖：FR-002）
+- [x] task-01: 后端 `PlanNodeModule` 加 `plan_type` 字段 + alembic migration + schema(Base/Create/Update/Resp) 同步加字段（覆盖：FR-002, D-003）
+- [x] task-02: 前端 `types.ts` 加 `plan_type`（含 `PlanNodeModuleUpdate`）+ `moduleColumns` 加「计划类型」列（覆盖：FR-002）
 
 ## Wave 2（依赖 Wave 1）
-- [ ] task-03: 新增 `python-multipart` 依赖 + 新建 `importer.py`（识别数据 Sheet、按表头名定位列、合并单元格向下填充、Excel 日期序列号转换、两类 Sheet 列位差异处理）（覆盖：FR-003, D-007）
-- [ ] task-04: `schema.py` 新增导入 DTO（ImportPreviewRow/Sheet/Resp、ImportCommitReq/Sheet、ImportResultResp）（覆盖：FR-008）
+- [x] task-03: 新增 `python-multipart` 依赖 + 新建 `importer.py`（识别数据 Sheet、按表头名定位列、合并单元格向下填充、Excel 日期序列号转换、两类 Sheet 列位差异处理）（覆盖：FR-003, D-007）
+- [x] task-04: `schema.py` 新增导入 DTO（ImportPreviewRow/Sheet/Resp、ImportCommitReq/Sheet、ImportResultResp）（覆盖：FR-008）
 
 ## Wave 3（依赖 Wave 2）
-- [ ] task-05: `service.import_preview`（`anyio.to_thread` 包解析 + ORM 查 `ProjectMember` 全量反查 + 标记 `duty_matched`/`valid`）（覆盖：FR-004, D-002）
-- [ ] task-06: `service.import_commit`（分组、同名合并、模块汇总、明细 `status=draft`、`session.add()` + 末尾单次 `commit()` 原子提交，**不复用 `_Crud.create`**）（覆盖：FR-001, FR-006, FR-007, FR-009, FR-010, D-001, D-004, D-005, D-008）
-- [ ] task-10: 后端 `test_importer.py` 单测（依赖 task-03，可提前并行）（覆盖：FR-003）
+- [x] task-05: `service.import_preview`（`anyio.to_thread` 包解析 + ORM 查 `PpmProjectMember` 全量反查 + 标记 `duty_matched`/`valid`）（覆盖：FR-004, D-002）
+- [x] task-06: `service.import_commit`（分组、同名合并、模块汇总、明细 `status=draft`、`session.add()` + 末尾单次 `commit()` 原子提交，**不复用 `_Crud.create`**）（覆盖：FR-001, FR-006, FR-007, FR-009, FR-010, D-001, D-004, D-005, D-008）
+- [x] task-10: 后端 `test_importer.py` 单测（依赖 task-03，可提前并行）（覆盖：FR-003）
 
 ## Wave 4（依赖 Wave 3）
-- [ ] task-07: `router.py` 新增 `import-preview` / `import-commit` 两端点（显式 `response_model`，`PPM_PLAN_WRITE`）（覆盖：FR-008）
+- [x] task-07: `router.py` 新增 `import-preview` / `import-commit` 两端点（显式 `response_model`，`PPM_PLAN_WRITE`）（覆盖：FR-008）
 
 ## Wave 5（依赖 Wave 4）
-- [ ] task-08: 前端 `export.ts` 抽取 `uploadExcelWithAuth`（FormData + token 刷新）+ `plan.ts` 加 `importModulesPreview` / `importModulesCommit` 及 TS 类型（覆盖：FR-008）
-- [ ] task-11: 后端 `test_router.py` 导入端点集成测试（依赖 task-07）（覆盖：FR-001, FR-004, FR-006, FR-009, D-008）
+- [x] task-08: 前端 `export.ts` 抽取 `uploadExcelWithAuth`（FormData + token 刷新）+ `plan.ts` 加 `importModulesPreview` / `importModulesCommit` 及 TS 类型（覆盖：FR-008）
+- [x] task-11: 后端 `test_router.py` 导入端点集成测试（依赖 task-07）（覆盖：FR-001, FR-004, FR-006, FR-009, D-008）
 
 ## Wave 6（依赖 Wave 5）
-- [ ] task-09: 新增 `ImportModuleModal` 组件（上传/预览勾选+标错/结果态）+ `ModuleLevelTable` 顶部「导入模块」按钮（覆盖：FR-005, FR-008, D-003, D-006）
+- [x] task-09: 新增 `ImportModuleModal` 组件（上传/预览勾选+标错/结果态）+ `ModuleLevelTable` 顶部「导入模块」按钮（覆盖：FR-005, FR-008, D-003, D-006）
 
 ## Wave 7（依赖 Wave 6）
-- [ ] task-12: 前端导入流程测试（上传→预览→确认→结果，mock 后端）（覆盖：FR-008）
+- [x] task-12: 前端导入流程测试（上传→预览→确认→结果，mock 后端）（覆盖：FR-008）
 
 ## 任务总表
 
