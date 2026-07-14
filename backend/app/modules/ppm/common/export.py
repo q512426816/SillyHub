@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from io import BytesIO
 from typing import Any
 from urllib.parse import quote
@@ -153,10 +154,26 @@ def export_to_response(
     return excel_response(content, filename=filename)
 
 
+def timestamped_filename(label: str) -> str:
+    """生成「中文标签_YYYYMMDD_HHMMSS.xlsx」下载文件名。
+
+    ppm 各子域 ``/export-excel`` 端点统一用此函数,确保文件名风格一致
+    (中文短标签 + 精确到秒的时间戳),便于用户区分多次导出结果。
+
+    Args:
+        label: 中文短标签 (如 ``"里程碑明细"``、``"项目维护"``),作为文件名前缀。
+
+    Returns:
+        形如 ``里程碑明细_20260714_094030.xlsx`` 的文件名。
+    """
+    return f"{label}_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
+
+
 __all__ = [
     "ColumnDef",
     "Formatter",
     "excel_response",
     "export_to_response",
     "rows_to_workbook",
+    "timestamped_filename",
 ]

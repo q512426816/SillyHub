@@ -15,6 +15,7 @@ from app.modules.ppm.common.export import (
     excel_response,
     export_to_response,
     rows_to_workbook,
+    timestamped_filename,
 )
 
 
@@ -98,6 +99,25 @@ class TestExcelResponse:
             resp.headers["Content-Disposition"]
             == "attachment; filename=\"one.xlsx\"; filename*=UTF-8''one.xlsx"
         )
+
+
+class TestTimestampedFilename:
+    def test_format_label_and_timestamp(self) -> None:
+        from datetime import datetime as _dt
+
+        name = timestamped_filename("里程碑明细")
+        # 形如 里程碑明细_20260714_094030.xlsx
+        assert name.startswith("里程碑明细_")
+        assert name.endswith(".xlsx")
+        stem = name[len("里程碑明细_") : -len(".xlsx")]
+        # 中间段能按 YYYYMMDD_HHMMSS 解析,即时间戳格式合法
+        _dt.strptime(stem, "%Y%m%d_%H%M%S")
+
+    def test_label_variants(self) -> None:
+        # 各导出端点的中文 label 都应原样作为前缀
+        assert timestamped_filename("项目维护").startswith("项目维护_")
+        assert timestamped_filename("客户维护").startswith("客户维护_")
+        assert timestamped_filename("计划节点模板").startswith("计划节点模板_")
 
 
 if __name__ == "__main__":

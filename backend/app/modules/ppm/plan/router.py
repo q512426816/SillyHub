@@ -28,7 +28,7 @@ from app.core.db import get_session
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.ppm.common.crud import Page, PageReq
-from app.modules.ppm.common.export import ColumnDef
+from app.modules.ppm.common.export import ColumnDef, timestamped_filename
 from app.modules.ppm.plan.schema import (
     ChangeProcessReq,
     PlanNodeCreate,
@@ -167,7 +167,9 @@ async def export_plan_nodes(
     columns = _PLAN_NODE_COLUMNS
     # openpyxl 序列化丢线程池,X-002
     return await anyio.to_thread.run_sync(
-        lambda: _build_excel_response(columns, rows, "计划节点模板")
+        lambda: _build_excel_response(
+            columns, rows, "计划节点模板", filename=timestamped_filename("计划节点模板")
+        )
     )
 
 
@@ -366,7 +368,7 @@ async def export_project_plans(
     """导出项目计划为 Excel (P2-3, X-002)。"""
     rows = await PlanService(session).list_ps_project_plans_for_export()
     columns = _PROJECT_PLAN_COLUMNS
-    filename = f"项目计划_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
+    filename = timestamped_filename("项目计划")
     return await anyio.to_thread.run_sync(
         lambda: _build_excel_response(columns, rows, "项目计划", filename=filename)
     )
@@ -545,7 +547,7 @@ async def export_plan_node_details(
     columns = _PLAN_NODE_DETAIL_COLUMNS
     return await anyio.to_thread.run_sync(
         lambda: _build_excel_response(
-            columns, rows, "里程碑明细", filename="plan_node_details.xlsx"
+            columns, rows, "里程碑明细", filename=timestamped_filename("里程碑明细")
         )
     )
 

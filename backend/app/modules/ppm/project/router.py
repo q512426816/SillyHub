@@ -16,7 +16,6 @@ member/stakeholder 复用 PROJECT_* 权限 (design §7)。导出端点为同步 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
@@ -32,6 +31,7 @@ from app.modules.ppm.common.export import (
     ColumnDef,
     excel_response,
     rows_to_workbook,
+    timestamped_filename,
 )
 from app.modules.ppm.project import service as svc
 from app.modules.ppm.project.schema import (
@@ -229,7 +229,7 @@ async def export_project_maintenance(
     content = await anyio.to_thread.run_sync(
         lambda: _build_workbook_bytes(columns, rows, "项目维护")
     )
-    return _excel_stream(content, f"项目维护_{datetime.now():%Y%m%d_%H%M%S}.xlsx")
+    return _excel_stream(content, timestamped_filename("项目维护"))
 
 
 @router.get(
@@ -367,7 +367,7 @@ async def export_customer_maintenance(
     content = await anyio.to_thread.run_sync(
         lambda: _build_workbook_bytes(columns, rows, "客户维护")
     )
-    return _excel_stream(content, f"客户维护_{datetime.now():%Y%m%d_%H%M%S}.xlsx")
+    return _excel_stream(content, timestamped_filename("客户维护"))
 
 
 @router.get(
