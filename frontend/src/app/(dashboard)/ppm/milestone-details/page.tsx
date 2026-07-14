@@ -1193,7 +1193,6 @@ function DetailLevelTable({
   }, [details, detailedStageFilter, taskThemeFilter]);
 
   const handleDelete = async (d: PsPlanNodeDetail) => {
-    if (d.status !== "draft") return;
     if (!confirm("删除该里程碑明细?")) return;
     try {
       await deletePsPlanNodeDetail(d.id);
