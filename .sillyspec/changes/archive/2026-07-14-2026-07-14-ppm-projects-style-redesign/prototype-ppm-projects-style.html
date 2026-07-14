@@ -340,10 +340,28 @@
         ✕ 不引入新 npm 依赖 · customers 斑马纹保留
       </div>
     </div>
+    <div class="panel">
+      <h3>操作列按钮配色(居中对齐 + 色彩区分操作类型)</h3>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" style="border-color:var(--blue-600);color:var(--blue-700)">成员管理</button>
+          <span style="font-size:11px;color:var(--slate-500)">blue outline · <code>border-blue-600 text-blue-700 hover:bg-blue-50</code></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm">编辑</button>
+          <span style="font-size:11px;color:var(--slate-500)">ghost slate · <code>text-slate-600 hover:bg-slate-100</code></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" style="color:var(--red-600)">删除</button>
+          <span style="font-size:11px;color:var(--slate-500)">ghost red · <code>text-red-600 hover:bg-red-50</code></span>
+        </div>
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:var(--slate-500)">操作列内容用 <code>justify-center</code> 居中;列头 <code>align="center"</code>。管理=蓝(入口)、编辑=灰(常规)、删除=红(危险)。</div>
+    </div>
   </div>
 
   <div class="foot">
-    SillyHub · /ppm/projects 样式规范化 · 变更 2026-07-14-ppm-projects-style-redesign (v2)<br>
+    SillyHub · /ppm/projects 样式规范化 · 变更 2026-07-14-ppm-projects-style-redesign (v3)<br>
     D-001 范围5页+2组件 · D-002 浮层 antd Drawer/Modal · D-003 状态StatusBadge/类型Tag · D-004 色彩映射 · D-005 无新依赖 · D-006 遮罩不关+搜索布局不变
   </div>
 </div>
