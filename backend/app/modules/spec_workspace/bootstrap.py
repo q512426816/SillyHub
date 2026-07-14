@@ -291,6 +291,13 @@ class SpecBootstrapService:
                     read_only=True,
                 )
             except Exception as exc:
+                # 诊断 36b9b475：原 except 吞异常不写 error_code，failed run 不可诊断。
+                # execution 内部已统一收敛 worktree/daemon 失败；此处仅兜底未预期异常。
+                from app.modules.agent.execution import mark_worker_run_failed
+
+                await mark_worker_run_failed(
+                    self._session, run, error_code="dispatch_exception", message=str(exc)
+                )
                 log.warning(
                     "bootstrap_team_dispatch_failed",
                     run_id=str(run.id),

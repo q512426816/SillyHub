@@ -26,6 +26,7 @@ a forward-compatibility hint for when daemon ``--allowedTools`` support lands.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,12 +34,42 @@ from sqlmodel import col
 
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentArtifact, AgentRun
-from app.modules.agent.placement import RunPlacementService
+from app.modules.agent.placement import NoOnlineDaemonError, RunPlacementService
 from app.modules.daemon.host_fs.delegate import HostFsDelegate
 from app.modules.workspace.model import Workspace
 from app.modules.workspace.service import resolve_root_path_for_daemon
 
 log = get_logger(__name__)
+
+
+async def mark_worker_run_failed(
+    session: AsyncSession,
+    run: AgentRun,
+    *,
+    error_code: str,
+    message: str,
+) -> None:
+    """统一收敛 worker dispatch 失败（诊断 36b9b475：worker 1c6b126f failed 但
+    error_code / finished_at / output_redacted 全空，无法诊断 + mission 永不收敛）。
+
+    对齐 ``service.py:531 _mark_no_online_daemon`` 语义：status=failed + error_code
+    + output_redacted + finished_at。failed 是终态（``derive_status`` 算入收敛），
+    前端 / 日志可读 error_code 诊断原因。三处调用方（mcp_tools / router / bootstrap）
+    的 except 兜底也复用本函数，杜绝静默 failed。
+
+    error_code 取值：
+    - ``worktree_create_failed``：per-worker worktree 建不起来（daemon 离线 / RPC
+      失败 / git 错），worker 没拿到独立副本 cwd。
+    - ``no_online_daemon``：dispatch_to_daemon 抛 NoOnlineDaemonError 或返回 None
+      （runtime 派发瞬间离线的 race）。
+    - ``dispatch_exception``：调用方兜底未预期异常（execution 内部已处理上述两类）。
+    """
+    run.status = "failed"
+    run.error_code = error_code
+    run.output_redacted = message
+    run.finished_at = datetime.now(UTC)
+    session.add(run)
+    await session.commit()
 
 
 def worker_tool_config(read_only: bool) -> dict[str, object]:
@@ -166,6 +197,8 @@ class MissionExecutionService:
                 # → worker run 标 failed，主 agent 决策补派（worker_preset 内重
                 # dispatch 或收敛），不崩 mission。不抛，不调 dispatch_to_daemon
                 # （worker 没拿到独立副本 cwd 就不该派 lease）。
+                # 诊断 36b9b475：补全 error_code/finished_at/output_redacted（原只标
+                # failed 致 worker 1c6b126f 无原因不可诊断），统一走 mark_worker_run_failed。
                 wt_error = wt_result.get("error") if isinstance(wt_result, dict) else "unknown"
                 log.warning(
                     "mission_worker_worktree_add_failed",
@@ -174,9 +207,12 @@ class MissionExecutionService:
                     sibling_path=sibling_path,
                     error=wt_error,
                 )
-                run.status = "failed"
-                self._session.add(run)
-                await self._session.commit()
+                await mark_worker_run_failed(
+                    self._session,
+                    run,
+                    error_code="worktree_create_failed",
+                    message=f"per-worker worktree 创建失败：{wt_error}",
+                )
                 return None
             # 成功：副本路径作 root_path（worker cwd=副本）+ 填 worktree_branch
             # （converge 时 finalizer 读取合并，design §5.1 步骤3）。
@@ -191,28 +227,44 @@ class MissionExecutionService:
                 branch=worktree_branch,
             )
 
-        lease_id = await self._placement.dispatch_to_daemon(
-            run.id,
-            user_id,
-            workspace_id=workspace_id,
-            provider=provider,
-            model=model,
-            prompt=render_worker_prompt(run),
-            repo_url=repo_url,
-            branch=branch,
-            stage=run.role or "mission_worker",
-            read_only=read_only,
-            tool_config=worker_tool_config(read_only),
-            root_path=root_path,
-        )
-        if lease_id is not None:
-            log.info(
-                "mission_worker_dispatched",
-                run_id=str(run.id),
-                role=run.role,
-                lease_id=str(lease_id),
+        try:
+            lease_id = await self._placement.dispatch_to_daemon(
+                run.id,
+                user_id,
+                workspace_id=workspace_id,
+                provider=provider,
+                model=model,
+                prompt=render_worker_prompt(run),
+                repo_url=repo_url,
+                branch=branch,
+                stage=run.role or "mission_worker",
                 read_only=read_only,
+                tool_config=worker_tool_config(read_only),
+                root_path=root_path,
             )
+        except NoOnlineDaemonError as exc:
+            # 诊断 36b9b475：execution 内部统一收敛，不冒泡调用方（原冒泡致
+            # mcp_tools 设 pending / router / bootstrap 吞异常，failed 不可诊断）。
+            await mark_worker_run_failed(
+                self._session, run, error_code="no_online_daemon", message=exc.message
+            )
+            return None
+        if lease_id is None:
+            # race：runtime 在 resolve 后、claim 前离线（service.py:518 同款兜底）。
+            await mark_worker_run_failed(
+                self._session,
+                run,
+                error_code="no_online_daemon",
+                message="runtime 在派发瞬间离线，dispatch 返回 None",
+            )
+            return None
+        log.info(
+            "mission_worker_dispatched",
+            run_id=str(run.id),
+            role=run.role,
+            lease_id=str(lease_id),
+            read_only=read_only,
+        )
         return lease_id
 
     async def collect_artifact(

@@ -88,7 +88,17 @@ def render_orchestrator_prompt(mission: AgentMission, orchestrator_run: AgentRun
         "- get_worker_result(workspace_id, mission_id, worker_id)：读指定 worker 产出\n"
         "- list_workers(workspace_id, mission_id)：列 mission 所有 worker 状态\n"
         "- converge_mission(workspace_id, mission_id)：全部 worker 终态后收敛\n"
-        "- report_progress(workspace_id, mission_id, run_id, message, decision?)：落决策日志\n"
+        "- report_progress(workspace_id, mission_id, run_id, message, decision?)：落决策日志\n\n"
+        "【硬性约束 — 禁止越权下场（必须遵守，违反即任务失败）】\n"
+        "你是项目经理（orchestrator），不是实现者。严禁自己用 Edit/Write/Bash 修改任何实现源码"
+        "（backend / frontend / sillyhub-daemon 的业务代码、测试、配置、迁移脚本）。需要写代码 → "
+        "必须 dispatch_worker 派 worker 去写（worker 在独立工作间产出 commit，由 converge 合并）。\n"
+        "唯一例外：当 converge_mission 返回 status=conflict（合并冲突）时，才允许用 Edit 修改冲突"
+        "文件解决冲突，且只动冲突标记涉及的行。\n"
+        "若 list_workers 发现 worker 全部 failed（如 worktree_create_failed / no_online_daemon，"
+        "说明无在线 daemon 承接 worker）→ 不要自己下场写代码！先 report_progress 说明失败原因，"
+        "再调 converge_mission 结束 mission，把决策交还用户处理 daemon。\n"
+        "Read / Glob / Grep 与只读 Bash（git log / ls / grep 等查询命令）仅用于调研，允许。\n"
     )
 
 

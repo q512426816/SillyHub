@@ -188,6 +188,12 @@ async def test_dispatch_worker_marks_run_failed_when_worktree_add_fails(
     await db_session.refresh(run)
     assert run.status == "failed"
     assert run.worktree_branch is None
+    # 诊断 36b9b475：失败必须可观测——error_code + finished_at + output_redacted 全写，
+    # 杜绝 failed run 无原因（worker 1c6b126f 即此 bug：failed 但 error_code/finished_at 空）。
+    assert run.error_code == "worktree_create_failed"
+    assert run.finished_at is not None
+    assert run.output_redacted is not None
+    assert "rpc unavailable" in (run.output_redacted or "")
 
 
 # ---------------------------------------------------------------------------
@@ -227,3 +233,82 @@ async def test_dispatch_worker_without_delegate_keeps_legacy_root_path(
     # worktree_branch 不填
     await db_session.refresh(run)
     assert run.worktree_branch is None
+
+
+# ---------------------------------------------------------------------------
+# AC-05 daemon 离线（dispatch_to_daemon 抛 NoOnlineDaemonError）→ execution 内部
+# 统一收敛 failed + error_code=no_online_daemon + finished_at，不冒泡调用方
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dispatch_worker_marks_failed_when_daemon_offline(
+    db_session: AsyncSession,
+) -> None:
+    """dispatch_to_daemon 抛 NoOnlineDaemonError → execution 内部捕获统一收敛。
+
+    诊断 36b9b475：原 execution.dispatch_worker 不捕获 NoOnlineDaemonError，冒泡到
+    mcp_tools（设 pending 语义错）/ router / bootstrap（吞异常不写 error_code），导致
+    failed run 不可诊断 + mission 永不收敛。修复后 execution 内部对齐 service.py:531
+    ``_mark_no_online_daemon``（failed + error_code + finished_at + output）。
+    """
+    from app.modules.agent.placement import NoOnlineDaemonError
+
+    ws_id = await _make_workspace(db_session, root_path="/tmp/repo", default_branch="main")
+    mission = AgentMission(workspace_id=ws_id, objective="o")
+    db_session.add(mission)
+    await db_session.commit()
+    await db_session.refresh(mission)
+    run = await _make_worker(db_session, mission_id=mission.id)
+
+    fake_placement = MagicMock()
+    fake_placement.dispatch_to_daemon = AsyncMock(
+        side_effect=NoOnlineDaemonError(user_id=uuid.uuid4(), message="未检测到在线 daemon")
+    )
+    # 不注入 delegate：走兼容路径（root_path=ws.root_path），专注测 dispatch 失败收敛
+    svc = MissionExecutionService(db_session, placement=fake_placement)
+
+    lease_id = await svc.dispatch_worker(
+        run, workspace_id=ws_id, user_id=uuid.uuid4(), read_only=False
+    )
+
+    assert lease_id is None
+    await db_session.refresh(run)
+    assert run.status == "failed"
+    assert run.error_code == "no_online_daemon"
+    assert run.finished_at is not None
+    assert run.output_redacted is not None
+
+
+# ---------------------------------------------------------------------------
+# AC-06 dispatch_to_daemon 返回 None（runtime 派发瞬间离线的 race）→ failed
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dispatch_worker_marks_failed_when_dispatch_returns_none(
+    db_session: AsyncSession,
+) -> None:
+    """dispatch_to_daemon 返回 None（resolve 后、claim 前 runtime 离线的 race）→
+    failed + error_code=no_online_daemon，对齐 service.py:518 race 兜底。
+    """
+    ws_id = await _make_workspace(db_session, root_path="/tmp/repo", default_branch="main")
+    mission = AgentMission(workspace_id=ws_id, objective="o")
+    db_session.add(mission)
+    await db_session.commit()
+    await db_session.refresh(mission)
+    run = await _make_worker(db_session, mission_id=mission.id)
+
+    fake_placement = MagicMock()
+    fake_placement.dispatch_to_daemon = AsyncMock(return_value=None)
+    svc = MissionExecutionService(db_session, placement=fake_placement)
+
+    lease_id = await svc.dispatch_worker(
+        run, workspace_id=ws_id, user_id=uuid.uuid4(), read_only=False
+    )
+
+    assert lease_id is None
+    await db_session.refresh(run)
+    assert run.status == "failed"
+    assert run.error_code == "no_online_daemon"
+    assert run.finished_at is not None

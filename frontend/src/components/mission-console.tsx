@@ -41,6 +41,7 @@ const ROLE_LABEL: Record<string, string> = {
   risk: "风险",
   impl: "实现",
   verify: "验证",
+  orchestrator: "主 Agent",
 };
 
 // ── task-07 / D-002@v2 / D-003@v2：team 配置面板选项 ──
@@ -139,7 +140,9 @@ function CoordinatorPanel({ mission }: { mission: Mission }) {
   const summary = mission.constraints?.coordinator_summary;
   const summaryText =
     typeof summary === "string" && summary.trim() ? summary.trim() : null;
-  const workers = mission.workers;
+  // 只统计真 worker（排除主 agent role=orchestrator，主 agent 单独区块展示，
+  // 诊断 36b9b475：原把主 agent 算进 worker 计数/分布误导）
+  const workers = mission.workers.filter((w) => w.role !== "orchestrator");
   // 角色分布（体现 Coordinator 的分工决策）
   const roleCounts = new Map<string, number>();
   for (const w of workers) {
@@ -217,10 +220,12 @@ function ArtifactCard({ artifact }: { artifact: MissionArtifact }) {
 function WorkerLogPanel({
   workspaceId,
   runId,
+  role,
   active,
 }: {
   workspaceId: string;
   runId: string;
+  role: string;
   active: boolean;
 }) {
   const [logs, setLogs] = useState<AgentRunLogEntry[] | null>(null);
@@ -246,7 +251,7 @@ function WorkerLogPanel({
   return (
     <div className="border-t border-gray-200 pt-2">
       <AgentLogViewer
-        title={`Worker 日志（${runId.slice(0, 8)}）`}
+        title={`${role === "orchestrator" ? "主 Agent 日志" : "Worker 日志"}（${runId.slice(0, 8)}）`}
         runId={runId}
         logs={logs}
         loading={loading}
@@ -281,8 +286,15 @@ function WorkerRow({
   return (
     <li className="space-y-1 rounded border border-gray-200 p-2 text-sm">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline" className="text-xs">
-          {ROLE_LABEL[role] ?? role}
+        <Badge
+          variant="outline"
+          className={
+            role === "orchestrator"
+              ? "border-violet-400 text-violet-700 text-xs"
+              : "text-xs"
+          }
+        >
+          {role === "orchestrator" ? "主 Agent" : (ROLE_LABEL[role] ?? role)}
         </Badge>
         <span className="text-[11px] text-gray-400">[{role}]</span>
         <span className={statusColor}>{worker.status}</span>
@@ -311,6 +323,7 @@ function WorkerRow({
         <WorkerLogPanel
           workspaceId={workspaceId}
           runId={worker.id}
+          role={role}
           active={workerActive}
         />
       )}
@@ -817,11 +830,53 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
           {/* Coordinator 拆解面板：体现拆解关系（不再是黑盒） */}
           <CoordinatorPanel mission={mission} />
 
-          <ul className="space-y-2">
-            {mission.workers.map((w) => (
-              <WorkerRow key={w.id} worker={w} workspaceId={workspaceId} />
-            ))}
-          </ul>
+          {/* 主 agent（role=orchestrator）单独区块，worker 列表只含真 worker。
+              诊断 36b9b475：原把主 agent 也当 worker 渲染 + 写死"Worker 日志"标题误导。 */}
+          {(() => {
+            const mainAgent =
+              mission.workers.find((w) => w.role === "orchestrator") ?? null;
+            const workerRuns = mission.workers.filter(
+              (w) => w.role !== "orchestrator"
+            );
+            return (
+              <>
+                {mainAgent && (
+                  <div className="rounded-md border border-violet-200 bg-violet-50/40 p-2">
+                    <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet-700">
+                      🧠 主 Agent
+                    </div>
+                    <ul className="space-y-2">
+                      <WorkerRow
+                        key={mainAgent.id}
+                        worker={mainAgent}
+                        workspaceId={workspaceId}
+                      />
+                    </ul>
+                  </div>
+                )}
+                <div>
+                  <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                    👥 Worker（{workerRuns.length}）
+                  </div>
+                  {workerRuns.length === 0 ? (
+                    <p className="rounded-md border border-dashed border-gray-200 bg-white px-3 py-2 text-xs text-gray-400">
+                      暂无 Worker。主 agent 接管后将按预设派发。
+                    </p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {workerRuns.map((w) => (
+                        <WorkerRow
+                          key={w.id}
+                          worker={w}
+                          workspaceId={workspaceId}
+                        />
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </>
+            );
+          })()}
         </div>
       )}
     </section>
