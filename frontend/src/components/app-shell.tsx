@@ -84,6 +84,11 @@ const MENU_ICON_MAP: Record<string, LucideIcon> = {
   "/settings": Settings,
   "/workspaces": Home,
   // ppm（absolute href /ppm/*）
+  // 「个人工作台」作 PPM 菜单首项(task-08 / D-001@v1);图标 LayoutDashboard。
+  // 注:菜单条目本身(menuKey/label/href/permissions)在 lib/menu-permissions.ts
+  // MENU_PERMISSION_GROUPS 硬编码数组中,本文件仅管图标映射。菜单条目缺失为遗留,
+  // 需 menu-permissions.ts 配 ppm-workbench 项 + 后端权限项配合(留 task-13 e2e 或单独 menu 配置补)。
+  "/ppm/workbench": LayoutDashboard,
   "/ppm/projects": ClipboardList,
   "/ppm/customers": Users,
   "/ppm/project-members": Users,

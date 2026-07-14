@@ -33,6 +33,7 @@ from app.modules.ppm.plan.router import router as ppm_plan_router
 from app.modules.ppm.problem.router import router as ppm_problem_router
 from app.modules.ppm.project.router import router as ppm_project_router
 from app.modules.ppm.task.router import router as ppm_task_router
+from app.modules.ppm.workbench.router import router as ppm_workbench_router
 from app.modules.release.router import router as release_router
 from app.modules.runtime.router import router as runtime_router
 from app.modules.scan_docs.router import router as scan_docs_router
@@ -475,6 +476,7 @@ def create_app() -> FastAPI:
     app.include_router(ppm_task_router, prefix="/api/ppm")
     app.include_router(ppm_problem_router, prefix="/api/ppm")
     app.include_router(ppm_kanban_router, prefix="/api/ppm")
+    app.include_router(ppm_workbench_router, prefix="/api/ppm")
     app.include_router(runtime_router, prefix="/api")
     app.include_router(tool_gateway_router, prefix="/api")
     app.include_router(policy_crud_router, prefix="/api")

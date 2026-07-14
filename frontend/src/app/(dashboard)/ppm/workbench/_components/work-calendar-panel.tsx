@@ -1,0 +1,183 @@
+"use client";
+
+/**
+ * WorkCalendarPanel — 个人工作台双圆点月历 (task-11 / FR-08 / D-007@v1)。
+ *
+ * 自研月历 grid(design §3 明确不引入第三方日历库,全仓无日历组件):
+ *  - 7 列 grid + 星期表头(日~六)
+ *  - 每日格双圆点:左点=当日任务负载 load_level,右点=延期预警 alert_level
+ *
+ * load_level 分档(design §7.3 按当日 start_time 任务数):
+ *  - none(0):不渲染左点
+ *  - normal(1-2):bg-emerald-500 绿(正常)
+ *  - mid(3-4):bg-amber-500 黄(偏满)
+ *  - over(≥5):bg-red-500 红(过载)
+ *
+ * alert_level 分档(design §7.3:该日有 end_time<now AND status!=已完成 → over):
+ *  - none:不渲染右点
+ *  - normal:bg-emerald-500 绿
+ *  - over:bg-red-500 红(延期预警)
+ *
+ * 颜色用 Tailwind 语义 class(emerald/amber/red)对齐 tokens.ts 状态色(success/warning/error),
+ * 非原型内联 CSS。
+ *
+ * 数据 WorkbenchCalendar 由 page.tsx(task-08)装配后 props 下传,组件内不独立 fetch
+ * (design §3 / task-11 constraints)。
+ */
+import { cn } from "@/lib/utils";
+import { SectionCard } from "@/components/layout";
+import type { CalendarDay, WorkbenchCalendar } from "@/lib/ppm/types";
+
+export interface WorkCalendarPanelProps {
+  /** 当月日历数据,null/loading 时渲染空 grid 或骨架文案,不报错。 */
+  calendar: WorkbenchCalendar | null;
+  /** 加载态;true 时显示骨架文案「日历加载中」。 */
+  loading?: boolean;
+}
+
+/** 星期表头(日~六)。 */
+const WEEK_HEADERS = ["日", "一", "二", "三", "四", "五", "六"];
+
+/**
+ * 按 yearMonth(YYYY-MM)构建月历格子:1 号前按星期补前导空格 + 遍历当月每日。
+ * 每日从 days 按 date 匹配取 load_level/alert_level;无数据视为 none(不显点)。
+ *
+ * 返回数组:null=前导空格占位,{ day, dayInfo }=真实日期格。
+ */
+function buildMonthGrid(
+  yearMonth: string | undefined,
+  days: CalendarDay[],
+): Array<{ type: "blank" } | { type: "day"; day: number; info: CalendarDay | null }> {
+  if (!yearMonth) return [];
+  const [yearStr, monthStr] = yearMonth.split("-");
+  const year = Number(yearStr);
+  const month = Number(monthStr); // 1-12
+  if (!year || !month) return [];
+
+  const firstDayOfWeek = new Date(year, month - 1, 1).getDay(); // 0=周日
+  const daysInMonth = new Date(year, month, 0).getDate();
+
+  // 按 date 建索引,匹配格式兼容 YYYY-MM-DD / ISO 时间串。
+  const dayMap = new Map<string, CalendarDay>();
+  for (const d of days) {
+    if (!d?.date) continue;
+    const dd = d.date.slice(8, 10); // 取日号(兼容 YYYY-MM-DD 与 YYYY-MM-DDTHH:...)
+    dayMap.set(dd, d);
+  }
+
+  const cells: Array<
+    { type: "blank" } | { type: "day"; day: number; info: CalendarDay | null }
+  > = [];
+  for (let i = 0; i < firstDayOfWeek; i++) cells.push({ type: "blank" });
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dd = String(day).padStart(2, "0");
+    cells.push({ type: "day", day, info: dayMap.get(dd) ?? null });
+  }
+  return cells;
+}
+
+/** load_level → 左点颜色 class;none/兜底返回空串(不渲染)。 */
+function loadDotClass(level: string | undefined): string {
+  switch (level) {
+    case "normal":
+      return "bg-emerald-500";
+    case "mid":
+      return "bg-amber-500";
+    case "over":
+      return "bg-red-500";
+    default:
+      return ""; // none / 未知:不显点
+  }
+}
+
+/** alert_level → 右点颜色 class;none/兜底返回空串(不渲染)。 */
+function alertDotClass(level: string | undefined): string {
+  switch (level) {
+    case "normal":
+      return "bg-emerald-500";
+    case "over":
+      return "bg-red-500";
+    default:
+      return ""; // none / 未知:不显点
+  }
+}
+
+export function WorkCalendarPanel({ calendar, loading }: WorkCalendarPanelProps) {
+  const yearMonth = calendar?.year_month;
+  const cells = buildMonthGrid(
+    yearMonth,
+    calendar?.days ?? [],
+  );
+
+  return (
+    <SectionCard
+      title={`本月日历 ${yearMonth ?? ""}`.trim()}
+      bodyPadding="p-4"
+    >
+      {loading || !calendar ? (
+        <div className="py-8 text-center text-xs text-muted-foreground animate-pulse">
+          日历加载中…
+        </div>
+      ) : (
+        <>
+          {/* 星期表头 */}
+          <div className="grid grid-cols-7 gap-1 text-center text-xs text-muted-foreground">
+            {WEEK_HEADERS.map((w) => (
+              <div key={w} className="py-1">
+                {w}
+              </div>
+            ))}
+          </div>
+          {/* 日期 grid */}
+          <div className="grid grid-cols-7 gap-1">
+            {cells.map((cell, idx) => {
+              if (cell.type === "blank") {
+                return <div key={`blank-${idx}`} className="aspect-square" />;
+              }
+              const loadColor = loadDotClass(cell.info?.load_level);
+              const alertColor = alertDotClass(cell.info?.alert_level);
+              return (
+                <div
+                  key={`day-${cell.day}`}
+                  className="flex aspect-square flex-col rounded border border-slate-100 bg-card p-1"
+                >
+                  <span className="text-center text-xs">{cell.day}</span>
+                  <div className="mt-auto flex items-center justify-center gap-0.5">
+                    {loadColor ? (
+                      <span
+                        className={cn("size-1.5 rounded-full", loadColor)}
+                        aria-label={`负载:${cell.info?.load_level ?? "none"}`}
+                      />
+                    ) : (
+                      <span className="size-1.5" />
+                    )}
+                    {alertColor ? (
+                      <span
+                        className={cn("size-1.5 rounded-full", alertColor)}
+                        aria-label={`预警:${cell.info?.alert_level ?? "none"}`}
+                      />
+                    ) : (
+                      <span className="size-1.5" />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {/* 图例 */}
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+            <span className="flex items-center gap-1">
+              <span className="size-1.5 rounded-full bg-emerald-500" /> 正常
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="size-1.5 rounded-full bg-amber-500" /> 偏满
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="size-1.5 rounded-full bg-red-500" /> 过载/预警
+            </span>
+          </div>
+        </>
+      )}
+    </SectionCard>
+  );
+}

@@ -321,6 +321,17 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
   // 后端各 router 用 require_permission_any(PPM_*)，写/删操作在 router 内单独 require。
   {
     section: "ppm",
+    menuKey: "ppm-workbench",
+    menuLabel: "个人工作台",
+    icon: "\u{1F4CA}",
+    href: "/ppm/workbench",
+    absolute: true,
+    matchPattern: "/ppm/workbench",
+    // 复用 PPM_TASK_READ（D-009@v1，workbench 接口统一权限，不新建）。
+    permissions: [{ key: "ppm:task:read", name: "任务查看" }],
+  },
+  {
+    section: "ppm",
     menuKey: "ppm-projects",
     menuLabel: "项目",
     icon: "\u{1F4C1}",

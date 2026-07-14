@@ -1197,3 +1197,82 @@ export interface KanbanSubtask {
   sort_order: number;
   created_at: string;
 }
+
+// ===========================================================================
+// workbench 子域 (design §7.1~§7.3 — 个人工作台只读聚合 DTO)
+// ===========================================================================
+
+/**
+ * 当前登录人基本信息 (design §7.1 / GET /api/ppm/workbench/profile)。
+ *
+ * 字段全部后端 Pydantic 直出 snake_case:
+ * - display_name/employee_no/department_name/role_name 均可空
+ * - avatar_text 由后端取 display_name 首字生成,必填
+ */
+export interface WorkbenchProfile {
+  display_name: string | null;
+  employee_no: string | null;
+  department_name: string | null;
+  role_name: string | null;
+  avatar_text: string;
+}
+
+/**
+ * 个人工作台指标聚合 (design §7.2)。
+ *
+ * - task_count: 范围内任务总数(=分母);0 时 completion_rate/delay_rate 返回 0.0
+ * - completion_rate/delay_rate: 0~1 浮点(后端 float,前端按百分比展示)
+ * - work_hours: 范围内工时 SUM(task_execute.time_spent)
+ * - defect_count: 当前人名下全部未关闭缺陷数(不受 range 影响)
+ */
+export interface WorkbenchMetrics {
+  task_count: number;
+  completion_rate: number;
+  delay_rate: number;
+  work_hours: number;
+  defect_count: number;
+}
+
+/**
+ * 待办条目 (design §7.2 WorkbenchTodoItem)。
+ *
+ * - type: 任务/缺陷/工时/计划 等标签文案
+ * - source: plan_task / problem_audit / problem_change (来源域标识)
+ */
+export interface WorkbenchTodoItem {
+  id: string;
+  name: string;
+  type: string;
+  source: string;
+}
+
+/**
+ * 个人工作台汇总 (design §7.2 / GET /api/ppm/workbench/summary?range=month)。
+ *
+ * metrics + 派生待办列表(top N)。
+ */
+export interface WorkbenchSummary {
+  metrics: WorkbenchMetrics;
+  todos: WorkbenchTodoItem[];
+}
+
+/**
+ * 工作日历单日格 (design §7.3 CalendarDay)。
+ *
+ * - load_level/alert_level: "work" | "full" | "over" 分档(后端字符串,前端按色映射)
+ * - task_count: 当日以 start_time 落点的任务数(不展开跨日区间)
+ */
+export interface CalendarDay {
+  date: string;
+  load_level: string;
+  alert_level: string;
+  task_count: number;
+}
+
+/**
+ * 个人工作台日历 (design §7.3 / GET /api/ppm/workbench/calendar?year_month=2026-07)。
+ */
+export interface WorkbenchCalendar {
+  year_month: string;
+  days: CalendarDay[];
+}

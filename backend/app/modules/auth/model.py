@@ -48,6 +48,8 @@ class User(BaseModel, table=True):
     username: str | None = Field(default=None, sa_column=Column(String(100), nullable=True))
     password_hash: str = Field(sa_column=Column(String(255), nullable=False))
     display_name: str | None = Field(default=None, sa_column=Column(String(100), nullable=True))
+    # 工号(PPM 个人工作台 FR-02 / D-002@v1):nullable,不加唯一约束/索引,本任务不回填值。
+    employee_no: str | None = Field(default=None, sa_column=Column(String(50), nullable=True))
     status: str = Field(default="active", sa_column=Column(String(20), nullable=False))
     is_platform_admin: bool = Field(
         default=False,

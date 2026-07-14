@@ -1,23 +1,30 @@
 {
   "name_zh": "worktree 元数据",
-  "changeName": "2026-07-10-remove-server-local-workspace-mode",
-  "branch": "sillyspec/2026-07-10-remove-server-local-workspace-mode",
+  "changeName": "2026-07-13-ppm-personal-workbench-prototype",
+  "branch": "sillyspec/2026-07-13-ppm-personal-workbench-prototype",
   "baseBranch": "main",
-  "baseHash": "f94e12606458f85762cb28fab5b232f71cebf8fa",
-  "actualBaseHash": "95eb5a97cb6a04fa6866d6cbdff0c82500b4e67a",
-  "createdAt": "2026-07-10T16:19:34.865Z",
-  "worktreePath": "C:\\Users\\qinyi\\IdeaProjects\\multi-agent-platform\\.sillyspec\\.runtime\\worktrees\\2026-07-10-remove-server-local-workspace-mode",
+  "baseHash": "dcdefa4c8959f33ba9bab0483136012fb24ddfa5",
+  "actualBaseHash": "f6f77579fa65af243128598363a516a678244540",
+  "createdAt": "2026-07-14T01:52:48.749Z",
+  "worktreePath": "C:\\Users\\qinyi\\IdeaProjects\\multi-agent-platform\\.sillyspec\\.runtime\\worktrees\\2026-07-13-ppm-personal-workbench-prototype",
   "mode": "worktree",
   "baselineFiles": [
-    "docs/sillyspec/local.yaml-gate-pitfalls.md",
-    "docs/sillyspec/finished/local.yaml-gate-pitfalls.md"
+    "backend/.sillyspec-platform-cleaned",
+    "backend/.sillyspec/local.yaml",
+    "docs/sillyspec/finished/brainstorm-lifecycle-contract-false-exempt.md",
+    "docs/sillyspec/finished/design-section-number-vs-plan-postcheck.md",
+    "docs/sillyspec/finished/node-esm-ismain-windows-file-url.md",
+    "docs/sillyspec/finished/quick-state-reset-platform-mode.md",
+    "missions-create-state.png",
+    "missions-detail-state.png"
   ],
-  "baselineCommit": "95eb5a97cb6a04fa6866d6cbdff0c82500b4e67a",
-  "baselineHash": "d6f499a41687d65b",
-  "syncStatus": "ok",
+  "baselineCommit": "f6f77579fa65af243128598363a516a678244540",
+  "baselineHash": "24c8ed8cd64054c7",
+  "syncStatus": "failed",
+  "syncError": "Command failed: git merge origin/main --ff-only\nhint: Diverging branches can't be fast-forwarded, you need to either:\nhint:\nhint: \tgit merge --no-ff\nhint:\nhint: or:\nhint:\nhint: \tgit rebase\nhint:\nhint: Disable this message with \"git config advice.diverging false\"\nfatal: Not possible to fast-forward, aborting.\n",
   "depsStatus": "n/a",
   "depsMethod": null,
   "depsSource": null,
   "depsLockHash": "1ba6e57607589bbe",
-  "depsCheckedAt": "2026-07-10T16:19:34.837Z"
+  "depsCheckedAt": "2026-07-14T01:52:48.723Z"
 }

@@ -123,6 +123,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/daemon/latest/mcp-server.js": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Mcp Server Bundle
+         * @description Return the daemon MCP server single-file bundle (task-05/06, e2e 2026-07-12).
+         *
+         *     主 agent MCP server 子进程入口，install.sh 下载到与 sillyhub-daemon.js 同目录
+         *     （``buildDaemonMcpServerConfig`` 的 ``defaultMcpServerModulePath`` 据此定位）。
+         *     缺失则主 agent session 注入的 MCP server spawn 失败 → team 5 tool 链路断。
+         */
+        get: operations["get_mcp_server_bundle_daemon_latest_mcp_server_js_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon-chat": {
         parameters: {
             query?: never;
@@ -1657,7 +1681,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Missions
+         * @description 列出 workspace 的 mission（按 created_at 倒序，分页）。
+         *
+         *     quick（mission 历史列表）：前端 Agent 团队页进页面时调，展示历史 mission
+         *     （状态徽标/目标/时间/worker 数），点击单条调 getMission 刷新详情。返回完整
+         *     MissionResponse（含 workers + cost + artifacts）以复用 _mission_to_response；
+         *     N+1 查询可接受（列表通常 <20，非高频轮询路径——活跃 mission 走 getMission 轮询）。
+         *     limit 默认 20，硬上限 50（min(limit,50) 防滥用，不报 422）。
+         */
+        get: operations["list_missions_api_workspaces__workspace_id__missions_get"];
         put?: never;
         /**
          * Create Mission
@@ -1698,6 +1732,134 @@ export interface paths {
         put?: never;
         /** Cancel Mission */
         post: operations["cancel_mission_api_missions__mission_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/missions/{mission_id}/dispatch_worker": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dispatch Worker
+         * @description 主 agent 动态派一个 worker run（D-002@v2）。
+         *
+         *     建 AgentRun(role 从 payload 或 preset 对应条目, status=pending) + 调
+         *     ``MissionExecutionService.dispatch_worker`` 派 daemon lease。daemon 离线 /
+         *     未绑定时 lease 失败但 run 仍建（pending + error_code=no_online_daemon），
+         *     主 agent 可读 worker 状态决定重派。
+         */
+        post: operations["dispatch_worker_api_workspaces__workspace_id__missions__mission_id__dispatch_worker_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/missions/{mission_id}/workers/{worker_id}/result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Worker Result
+         * @description 读单个 worker 的结构化产出（AgentArtifact kind=patch/summary/...）。
+         */
+        get: operations["get_worker_result_api_workspaces__workspace_id__missions__mission_id__workers__worker_id__result_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/missions/{mission_id}/workers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workers
+         * @description 列 mission 下所有 worker runs 状态（含主 agent run）。
+         */
+        get: operations["list_workers_api_workspaces__workspace_id__missions__mission_id__workers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/missions/{mission_id}/converge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Converge Mission
+         * @description 主 agent 触发 mission 收敛（task-06 改可重入，design §5.2 / §7.5）。
+         *
+         *     可重入状态机（per mission，无新列——计数存 ``AgentMission.constraints`` JSON）：
+         *
+         *     1. 调 ``converge_mission_for_completed_run``（既有链路，保留 artifact 回灌 +
+         *        derive_status + bootstrap 路由语义；其内部已调 finalize_execute_mission）。
+         *     2. 复用 ``FinalizerService.finalize_execute_mission`` 拿 ``FinalizerMergeResult``
+         *        （merged_branches / pending_conflicts）——见 ``_finalize_merge_for_mission``
+         *        注释（为何不直接改 converge_mission_for_completed_run 返回值）。
+         *     3. ``pending_conflicts`` 非空 → 返 ``status=conflict`` + conflicts 给主 agent；
+         *        主 agent 自己 SDK Read/Write 解决（X-004，backend 不写文件）+ git add 后重入。
+         *     4. 重入：``finalize_execute_mission`` 重跑，已 merged 分支幂等（already-up-to-date），
+         *        主 agent 解决后的内容被下次 git 合进去；全 merged → ``status=merged`` +
+         *        调 ``_cleanup_mission``（task-07 cleanup_mission）清 worker 副本。
+         *     5. R-07：每次返 conflict 时计数 +1（``_bump_conflict_attempts``）；超限（默认 3）
+         *        → ``_mark_mission_needs_manual`` 标 ``needs_manual`` + 返
+         *        ``status=failed_manual``，副本保留供排查（X-003）。
+         *
+         *     简化（task-06 决策，见 ``_mark_mission_needs_manual``）：不实际 ``git merge --abort``——
+         *     workspace root 工作区状态在 daemon 侧，backend 不可控，强行 abort 可能误清主 agent 已
+         *     写的解决内容；改为标 needs_manual 让用户/主 agent 手动处理。
+         */
+        post: operations["converge_mission_api_workspaces__workspace_id__missions__mission_id__converge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/missions/{mission_id}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report Progress
+         * @description 落主 agent 决策日志（AgentRunLog channel=tool_call, tool_kind=other）。
+         *
+         *     主 agent 每次决策（派 worker / 判断达成 / 收敛）都调此 endpoint 落一条日志，
+         *     供前端展示决策链路 + 审计。``decision`` 字段拼到 content 前缀便于筛选。
+         */
+        post: operations["report_progress_api_workspaces__workspace_id__missions__mission_id__progress_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3156,6 +3318,12 @@ export interface paths {
         /**
          * Execute Change
          * @description Trigger change execution — dispatch via unified stage dispatch service.
+         *
+         *     task-09（D-004@v2）：``team_mode=true`` 时把 ``team_mode=True`` 写入
+         *     ``change.stages`` 触发 ``dispatch_next_step`` Step 2.5 分流到主 agent
+         *     OrchestratorService。worker_preset / main_agent_config 从 ``change.stages``
+         *     已有字段读（前端 stage toggle 经 transition 写入；execute 端点不重复接收，
+         *     避免与 transition 入口的双写冲突）。single（team_mode=false 零回归）。
          */
         post: operations["execute_change_api_workspaces__workspace_id__changes__change_key__execute_post"];
         delete?: never;
@@ -5062,6 +5230,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ppm/workbench/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workbench Profile
+         * @description 当前登录用户的个人工作台头部信息。
+         */
+        get: operations["get_workbench_profile_api_ppm_workbench_profile_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ppm/workbench/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workbench Summary
+         * @description 个人工作台聚合视图:指标卡片 + 待办列表。
+         */
+        get: operations["get_workbench_summary_api_ppm_workbench_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ppm/workbench/calendar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workbench Calendar
+         * @description 个人工作台月度日历负载。
+         */
+        get: operations["get_workbench_calendar_api_ppm_workbench_calendar_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/runtime": {
         parameters: {
             query?: never;
@@ -5279,40 +5507,6 @@ export interface paths {
         head?: never;
         /** Update Policy */
         patch: operations["update_policy_api_workspaces__workspace_id__tool_policies__policy_id__patch"];
-        trace?: never;
-    };
-    "/api/workspaces/{workspace_id}/changes/{change_id}/archive": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Archive Change */
-        post: operations["archive_change_api_workspaces__workspace_id__changes__change_id__archive_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/workspaces/{workspace_id}/changes/{change_id}/distill": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Distill Knowledge */
-        post: operations["distill_knowledge_api_workspaces__workspace_id__changes__change_id__distill_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/api/settings": {
@@ -6337,6 +6531,12 @@ export interface components {
             change_id: string | null;
             /** Workspace Id */
             workspace_id: string | null;
+            /** Title */
+            title?: string | null;
+            /** Deleted At */
+            deleted_at?: string | null;
+            /** Current Run Id */
+            current_run_id?: string | null;
         };
         /** ApiKeyCreateRequest */
         ApiKeyCreateRequest: {
@@ -6599,6 +6799,23 @@ export interface components {
         BatchGenerateResponse: {
             /** Generated */
             generated: string[];
+        };
+        /**
+         * CalendarDay
+         * @description 日历单日负载。
+         *
+         *     ``date`` 形如 ``YYYY-MM-DD``;``load_level`` / ``alert_level``
+         *     为前端展示用的分级文案(如 ``low`` / ``high``、``normal`` / ``alert``)。
+         */
+        CalendarDay: {
+            /** Date */
+            date: string;
+            /** Load Level */
+            load_level: string;
+            /** Alert Level */
+            alert_level: string;
+            /** Task Count */
+            task_count: number;
         };
         /** ChangeCreateRequest */
         ChangeCreateRequest: {
@@ -7095,6 +7312,50 @@ export interface components {
              * @default active
              */
             status: string;
+        };
+        /**
+         * ConvergeResponse
+         * @description ``converge_mission`` tool 返回契约（task-06 改可重入，design §5.2 / §7.5）。
+         *
+         *     ``status`` 取值（task-06 起新增可重入三态，保留 task-04 既有收敛态）：
+         *     - ``conflict``：有合并冲突，已把 ``conflicts`` 返给主 agent；主 agent 自己用 SDK
+         *       Read/Write 解决后重入 ``converge_mission``（X-004，backend 不写文件）。
+         *     - ``merged``：全部 worker_branch 合并完成（本次或重入后），已触发 cleanup。
+         *     - ``failed_manual``：解冲突轮次超 R-07 上限，mission 标 needs_manual，副本保留。
+         *     - ``done``/``degraded``/``running``：既有语义（bootstrap 收敛 / 部分终态 / 进行中）。
+         *
+         *     ``conflicts`` 形如 ``[{file, marker_lines, branch}]``（FinalizerMergeResult 透传）。
+         *     ``attempt`` 为本次返的解冲突轮次（per mission 计数，存 ``AgentMission.constraints``）。
+         */
+        ConvergeResponse: {
+            /**
+             * Mission Id
+             * Format: uuid
+             */
+            mission_id: string;
+            /** Status */
+            status: string;
+            /** Converged */
+            converged: boolean;
+            /** Artifact Id */
+            artifact_id?: string | null;
+            /**
+             * Merged Branches
+             * @default []
+             */
+            merged_branches: string[];
+            /**
+             * Conflicts
+             * @default []
+             */
+            conflicts: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Attempt
+             * @default 0
+             */
+            attempt: number;
         };
         /**
          * CustomSkillCreate
@@ -7727,6 +7988,28 @@ export interface components {
             dispatch_result?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /**
+         * DispatchWorkerRequest
+         * @description 主 agent 派 worker 的请求体（D-002@v2）。
+         *
+         *     字段对齐 worker_preset 单条结构（{agent_type, model, objective, role}），
+         *     主 agent 可在 mission 启动时的 preset 之外动态补派（如发现新子任务）。
+         */
+        DispatchWorkerRequest: {
+            /** Objective */
+            objective: string;
+            /** Role */
+            role?: string | null;
+            /** Agent Type */
+            agent_type?: string | null;
+            /** Model */
+            model?: string | null;
+            /**
+             * Read Only
+             * @default false
+             */
+            read_only: boolean;
         };
         /**
          * DocumentsSyncRequest
@@ -8430,7 +8713,7 @@ export interface components {
          * McpConfigViewResponse
          * @description ``GET /api/workspaces/{id}/mcp-config`` 响应（env secret 已脱敏）。
          *
-         *     无 ``.mcp.json`` 或解析失败时返回空 ``{mcpServers: {}}``，不抛错（task-06 验收 D）。
+         *     无 ``.mcp.json`` 或解析失败时返回空 ``{mcpServers: {}}``，不抛错。
          */
         McpConfigViewResponse: {
             /** Mcpservers */
@@ -8538,6 +8821,18 @@ export interface components {
             budget_usd?: number | null;
             /** Constraints */
             constraints?: {
+                [key: string]: unknown;
+            } | null;
+            /** Mode */
+            mode?: ("single" | "team") | null;
+            /** Session Id */
+            session_id?: string | null;
+            /** Worker Preset */
+            worker_preset?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Main Agent Config */
+            main_agent_config?: {
                 [key: string]: unknown;
             } | null;
         };
@@ -9013,7 +9308,7 @@ export interface components {
          * Permission
          * @enum {string}
          */
-        Permission: "platform:admin" | "platform:billing" | "platform:audit:read" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "component:read" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "incident:read" | "change:create" | "change:read" | "change:update" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "task:cancel" | "task:approve" | "code:read" | "code:write" | "code:review" | "code:merge" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "tool:shell_exec" | "tool:network" | "tool:database" | "tool:secret:read" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:project:write" | "ppm:project:delete" | "ppm:project:export" | "ppm:customer:read" | "ppm:customer:write" | "ppm:customer:delete" | "ppm:customer:export" | "ppm:plan:read" | "ppm:plan:write" | "ppm:plan:delete" | "ppm:plan:export" | "ppm:problem:read" | "ppm:problem:write" | "ppm:problem:delete" | "ppm:problem:export" | "ppm:task:read" | "ppm:task:write" | "ppm:task:delete" | "ppm:task:export" | "ppm:work-hour:read" | "ppm:work-hour:write" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:kanban:assign";
+        Permission: "platform:admin" | "platform:billing" | "platform:audit:read" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "component:read" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "incident:read" | "change:create" | "change:read" | "change:update" | "change:approve" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "task:cancel" | "task:approve" | "code:read" | "code:write" | "code:review" | "code:merge" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "tool:shell_exec" | "tool:network" | "tool:database" | "tool:secret:read" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:project:write" | "ppm:project:delete" | "ppm:project:export" | "ppm:customer:read" | "ppm:customer:write" | "ppm:customer:delete" | "ppm:customer:export" | "ppm:plan:read" | "ppm:plan:write" | "ppm:plan:delete" | "ppm:plan:export" | "ppm:problem:read" | "ppm:problem:write" | "ppm:problem:delete" | "ppm:problem:export" | "ppm:task:read" | "ppm:task:write" | "ppm:task:delete" | "ppm:task:export" | "ppm:work-hour:read" | "ppm:work-hour:write" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:kanban:assign";
         /**
          * PermissionResponseRead
          * @description REST response body for POST /sessions/{id}/permissions/{req}/response.
@@ -9942,6 +10237,34 @@ export interface components {
              */
             created_at: string;
         };
+        /**
+         * ProgressRequest
+         * @description 主 agent 决策日志（落 AgentRunLog channel=tool_call）。
+         */
+        ProgressRequest: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Message */
+            message: string;
+            /** Decision */
+            decision?: string | null;
+        };
+        /** ProgressResponse */
+        ProgressResponse: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Log Id
+             * Format: uuid
+             */
+            log_id: string;
+        };
         /** ProgressUpdate */
         ProgressUpdate: {
             /** Currentstage */
@@ -10380,6 +10703,8 @@ export interface components {
             attach_group_id?: string | null;
             /** File Urls */
             file_urls?: string[];
+            /** Status */
+            status?: string | null;
         };
         /** PsPlanNodeDetailProcessResp */
         PsPlanNodeDetailProcessResp: {
@@ -11737,7 +12062,7 @@ export interface components {
         };
         /**
          * SkillFileEntry
-         * @description 单个 workspace 自定义 skill 的只读视图（design §7）。
+         * @description 单个 workspace 自定义 skill 的只读视图。
          */
         SkillFileEntry: {
             /** Name */
@@ -12821,6 +13146,16 @@ export interface components {
              * @description 未 dispatch 的原因（dispatched=False 时有值）
              */
             reason?: string | null;
+            /**
+             * Mission Id
+             * @description team_mode dispatch 的 Mission ID（仅 mode=team 时有值）
+             */
+            mission_id?: string | null;
+            /**
+             * Mode
+             * @description dispatch 模式（team / None=single）
+             */
+            mode?: string | null;
         };
         /**
          * TransitionRequest
@@ -12847,6 +13182,26 @@ export interface components {
              * @description Optional agent model override
              */
             model?: string | null;
+            /**
+             * Team Mode
+             * @description execute/verify 阶段是否用团队执行（D-004@v2，默认 single 零回归）
+             * @default false
+             */
+            team_mode: boolean;
+            /**
+             * Worker Preset
+             * @description team_mode 用户预设 worker 列表（D-002@v2，可选）
+             */
+            worker_preset?: {
+                [key: string]: unknown;
+            }[] | null;
+            /**
+             * Main Agent Config
+             * @description team_mode 主 agent 配置（D-003@v2，可选）
+             */
+            main_agent_config?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * TransitionResponse
@@ -13185,6 +13540,143 @@ export interface components {
             description?: string | null;
             /** Type */
             type?: number | null;
+        };
+        /**
+         * WorkbenchCalendar
+         * @description 个人工作台月度日历。
+         */
+        WorkbenchCalendar: {
+            /** Year Month */
+            year_month: string;
+            /** Days */
+            days: components["schemas"]["CalendarDay"][];
+        };
+        /**
+         * WorkbenchMetrics
+         * @description 个人工作台指标卡片。
+         */
+        WorkbenchMetrics: {
+            /** Task Count */
+            task_count: number;
+            /** Completion Rate */
+            completion_rate: number;
+            /** Delay Rate */
+            delay_rate: number;
+            /** Work Hours */
+            work_hours: number;
+            /** Defect Count */
+            defect_count: number;
+        };
+        /**
+         * WorkbenchProfile
+         * @description 个人工作台头部用户信息。
+         *
+         *     ``avatar_text`` 为头像占位文案(取 display_name 首字),其余字段
+         *     允许 ``None`` (来源数据缺失时)。
+         */
+        WorkbenchProfile: {
+            /** Display Name */
+            display_name?: string | null;
+            /** Employee No */
+            employee_no?: string | null;
+            /** Department Name */
+            department_name?: string | null;
+            /** Role Name */
+            role_name?: string | null;
+            /** Avatar Text */
+            avatar_text: string;
+        };
+        /**
+         * WorkbenchSummary
+         * @description 个人工作台聚合视图:指标卡片 + 待办列表。
+         */
+        WorkbenchSummary: {
+            metrics: components["schemas"]["WorkbenchMetrics"];
+            /** Todos */
+            todos: components["schemas"]["WorkbenchTodoItem"][];
+        };
+        /**
+         * WorkbenchTodoItem
+         * @description 待办列表条目。
+         *
+         *     ``type`` 标识来源类型(如 task / problem / work-hour 审批等);
+         *     ``source`` 标识来源子系统标识(用于前端跳转回源)。
+         */
+        WorkbenchTodoItem: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Type */
+            type: string;
+            /** Source */
+            source: string;
+        };
+        /** WorkerListItem */
+        WorkerListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Role */
+            role?: string | null;
+            /** Status */
+            status: string;
+            /** Objective */
+            objective?: string | null;
+            /** Total Cost Usd */
+            total_cost_usd?: number | null;
+        };
+        /** WorkerListResponse */
+        WorkerListResponse: {
+            /**
+             * Mission Id
+             * Format: uuid
+             */
+            mission_id: string;
+            /** Workers */
+            workers: components["schemas"]["WorkerListItem"][];
+        };
+        /**
+         * WorkerResultResponse
+         * @description 单个 worker 的结构化产出（AgentArtifact kind=patch/summary/...）。
+         */
+        WorkerResultResponse: {
+            /**
+             * Worker Id
+             * Format: uuid
+             */
+            worker_id: string;
+            /** Status */
+            status: string;
+            /**
+             * Artifacts
+             * @default []
+             */
+            artifacts: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** WorkerRunResponse */
+        WorkerRunResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Role */
+            role?: string | null;
+            /** Objective */
+            objective?: string | null;
+            /** Status */
+            status: string;
+            /** Agent Type */
+            agent_type: string;
+            /** Lease Id */
+            lease_id?: string | null;
+            /** Error Code */
+            error_code?: string | null;
         };
         /**
          * WorkspaceCreate
@@ -13656,6 +14148,8 @@ export interface components {
             username: string | null;
             /** Display Name */
             display_name: string | null;
+            /** Employee No */
+            employee_no: string | null;
             /** Status */
             status: string;
             /** Is Platform Admin */
@@ -13880,6 +14374,26 @@ export interface operations {
         };
     };
     get_daemon_bundle_daemon_latest_sillyhub_daemon_js_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_mcp_server_bundle_daemon_latest_mcp_server_js_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -16758,6 +17272,40 @@ export interface operations {
             };
         };
     };
+    list_missions_api_workspaces__workspace_id__missions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_mission_api_workspaces__workspace_id__missions_post: {
         parameters: {
             query?: never;
@@ -16843,6 +17391,175 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MissionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dispatch_worker_api_workspaces__workspace_id__missions__mission_id__dispatch_worker_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DispatchWorkerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_worker_result_api_workspaces__workspace_id__missions__mission_id__workers__worker_id__result_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                mission_id: string;
+                worker_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerResultResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workers_api_workspaces__workspace_id__missions__mission_id__workers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    converge_mission_api_workspaces__workspace_id__missions__mission_id__converge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConvergeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_progress_api_workspaces__workspace_id__missions__mission_id__progress_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProgressRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProgressResponse"];
                 };
             };
             /** @description Validation Error */
@@ -19119,6 +19836,8 @@ export interface operations {
             query?: {
                 provider?: string | null;
                 model?: string | null;
+                /** @description execute 团队执行（D-004@v2，默认 single 零回归） */
+                team_mode?: boolean;
             };
             header?: never;
             path: {
@@ -23748,6 +24467,90 @@ export interface operations {
             };
         };
     };
+    get_workbench_profile_api_ppm_workbench_profile_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchProfile"];
+                };
+            };
+        };
+    };
+    get_workbench_summary_api_ppm_workbench_summary_get: {
+        parameters: {
+            query?: {
+                /** @description 统计区间标识 (如 month / week) */
+                range?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workbench_calendar_api_ppm_workbench_calendar_get: {
+        parameters: {
+            query: {
+                /** @description 目标月份,形如 YYYY-MM */
+                year_month: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchCalendar"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_runtime_progress_api_workspaces__workspace_id__runtime_get: {
         parameters: {
             query?: never;
@@ -24224,72 +25027,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ToolPolicyRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    archive_change_api_workspaces__workspace_id__changes__change_id__archive_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                workspace_id: string;
-                change_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ChangeRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    distill_knowledge_api_workspaces__workspace_id__changes__change_id__distill_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                workspace_id: string;
-                change_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
                 };
             };
             /** @description Validation Error */

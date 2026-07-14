@@ -35,6 +35,7 @@ class UserRead(BaseModel):
     email: str | None
     username: str | None
     display_name: str | None
+    employee_no: str | None
     status: str
     is_platform_admin: bool
     last_login_at: datetime | None
