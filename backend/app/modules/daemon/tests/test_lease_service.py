@@ -1297,12 +1297,23 @@ class TestBuildClaimPayloadInteractiveSpecRoot:
     - AC-02: lease_meta.spec_root 缺、workspace_id 存在 + SpecWorkspace.spec_root 存在 → 查 DB 回填
     - AC-03: lease_meta 既无 spec_root 也无 workspace_id → payload 不含 specRoot（向后兼容）
     - AC-04: batch lease payload 不含 specRoot（batch 分支未污染）
+
+    D-002@v2（commit 6e1d37fa, 2026-07-11）：全局默认 transport=tar，tar 分支不透传
+    specRoot（daemon pull）。AC-01/AC-02 守护的是 **shared 分支**的防御性透传 + DB 回填
+    逻辑（context.py shared 分支双写，代码仍在），故显式把 settings.spec_transport 钉到
+    shared 再测；AC-03/AC-04 在 tar 默认下同样成立（specRoot 本就 absent）。
     """
 
     @pytest.mark.asyncio
-    async def test_interactive_spec_root_from_meta(self, db_session: AsyncSession) -> None:
+    async def test_interactive_spec_root_from_meta(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """AC-01: lease_meta.spec_root 存在 → payload.specRoot = lease_meta.spec_root。"""
+        from app.core.config import get_settings
         from app.modules.daemon.lease.context import build_claim_payload
+
+        # 默认 tar 不透传 specRoot；钉到 shared 走防御性透传分支
+        monkeypatch.setattr(get_settings(), "spec_transport", "shared")
 
         user_id = await _create_user(db_session)
         rt = await _create_runtime(db_session, user_id)
@@ -1330,12 +1341,16 @@ class TestBuildClaimPayloadInteractiveSpecRoot:
 
     @pytest.mark.asyncio
     async def test_interactive_spec_root_from_workspace_lookup(
-        self, db_session: AsyncSession
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """AC-02: lease_meta 无 spec_root，含 workspace_id；SpecWorkspace.spec_root 回填。"""
+        from app.core.config import get_settings
         from app.modules.daemon.lease.context import build_claim_payload
         from app.modules.spec_workspace.model import SpecWorkspace
         from app.modules.workspace.model import Workspace
+
+        # 默认 tar 不透传 specRoot；钉到 shared 走 DB 回填分支
+        monkeypatch.setattr(get_settings(), "spec_transport", "shared")
 
         user_id = await _create_user(db_session)
         rt = await _create_runtime(db_session, user_id)

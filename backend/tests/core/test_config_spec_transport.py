@@ -1,7 +1,11 @@
 """Tests for ``Settings.spec_transport`` field (task-01).
 
 Covers FR-01, D-001@v1 (transport orthogonal to strategy, not persisted),
-D-002@v1 (global env SPEC_TRANSPORT=shared|tar, default shared, normalization).
+D-002@v2 (global env SPEC_TRANSPORT=shared|tar, default tar since 2026-07-11, normalization).
+
+D-002@v2（commit 6e1d37fa, 2026-07-11 ql-20260711-001）：server-local 移除后
+daemon-client 为唯一路径来源，shared 同机 bind mount 直读语义失效 → 默认改 tar。
+原 D-002@v1 默认 shared 向后兼容同机部署的语义已废。
 
 Cases mirror blueprint task-01 §TDD 用例 + §边界处理 1-7.
 """
@@ -25,12 +29,12 @@ def _make(**overrides: str) -> Settings:
 
 
 class TestSpecTransportDefault:
-    def test_default_is_shared(self) -> None:
+    def test_default_is_tar(self) -> None:
         s = _make()
-        assert s.spec_transport == "shared"
+        assert s.spec_transport == "tar"
 
-    def test_env_not_set_uses_shared(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # AC-2: 未设 SPEC_TRANSPORT env 时值为 shared，启动不报错
+    def test_env_not_set_uses_tar(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # AC-2: 未设 SPEC_TRANSPORT env 时值为 tar（D-002@v2 新默认），启动不报错
         monkeypatch.delenv("SPEC_TRANSPORT", raising=False)
         get_settings.cache_clear()
         try:
@@ -38,7 +42,7 @@ class TestSpecTransportDefault:
                 Settings(
                     database_url="postgresql+asyncpg://u:p@h:5432/d", secret_key="x" * 16
                 ).spec_transport
-                == "shared"
+                == "tar"
             )
         finally:
             get_settings.cache_clear()
