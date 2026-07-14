@@ -14,7 +14,18 @@
  * 复用样板:frontend/src/app/(dashboard)/admin/users/page.tsx
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Drawer, Form, Input, Modal, Select, Tag, type TableProps } from "antd";
+import {
+  DatePicker,
+  Drawer,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Select,
+  Tag,
+  type TableProps,
+} from "antd";
+import dayjs, { type Dayjs } from "dayjs";
 
 import { Button } from "@/components/ui/button";
 import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
@@ -195,13 +206,6 @@ export interface PpmPageResp<T> {
   page?: number;
   page_size?: number;
 }
-
-// 输入框样式走 shadcn 语义类(border-input/bg-background 基于 CSS 变量,
-// 对齐 D-006@v1 边界,task-09 §ppm-resource-table)。非硬编码 hex。
-const inputCls =
-  "h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none";
-const textareaCls =
-  "min-h-[72px] w-full rounded border border-input bg-background px-2.5 py-1.5 text-sm focus:border-ring focus:outline-none";
 
 const DEFAULT_PAGE_SIZE = 20;
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
@@ -742,31 +746,24 @@ function PpmResourceDrawer<T extends { id: string }>({
   onClose: () => void;
   onSubmit: (form: Partial<T>) => Promise<void>;
 }) {
-  // 表单值:Partial<T> 的扁平 Record
-  const [form, setForm] = useState<Record<string, unknown>>({});
+  const [formInst] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 初始值:edit 取 row,create 取 defaultValue。PpmResourceDrawer 由 drawer.open 条件渲染,
+  // 每次打开新 mount,Form 实例干净,setFieldsValue 填初值。
   useEffect(() => {
     const initial: Record<string, unknown> = {};
     for (const f of fields) {
-      if (mode === "edit" && row) {
-        initial[f.name as string] =
-          (row ? (row as Record<string, unknown>)[f.name as string] : undefined) ??
-          f.defaultValue ??
-          "";
-      } else {
-        initial[f.name as string] = f.defaultValue ?? "";
-      }
+      initial[f.name as string] =
+        mode === "edit" && row
+          ? ((row as Record<string, unknown>)[f.name as string] ?? f.defaultValue ?? null)
+          : (f.defaultValue ?? null);
     }
-    setForm(initial);
+    formInst.setFieldsValue(initial);
     setError(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, row]);
-
-  const setValue = (name: string, value: unknown) => {
-    setForm((prev) => ({ ...prev, [name]: value }));
-  };
+  }, [mode, row, formInst]);
 
   // 表单内显示的字段:默认全部,hideInForm=true 的字段(如创建人/时间)不在表单显示。
   const visibleFields = useMemo(
@@ -774,37 +771,16 @@ function PpmResourceDrawer<T extends { id: string }>({
     [fields],
   );
 
-  // 必填校验 + pattern 正则校验
-  const fieldErrors = useMemo<Record<string, string>>(() => {
-    const errs: Record<string, string> = {};
-    for (const f of visibleFields) {
-      const v = form[f.name as string];
-      if (f.required && (v === null || v === undefined || v === "")) {
-        errs[f.name as string] = `${f.label}为必填项`;
-        continue;
-      }
-      if (f.pattern && v !== null && v !== undefined && v !== "") {
-        const re =
-          f.pattern instanceof RegExp
-            ? f.pattern
-            : new RegExp(f.pattern);
-        if (!re.test(String(v))) {
-          errs[f.name as string] =
-            f.patternMessage ?? `${f.label}格式不正确`;
-        }
-      }
-    }
-    return errs;
-  }, [visibleFields, form]);
-  const formValid = Object.keys(fieldErrors).length === 0;
-
   const submit = async () => {
-    if (!formValid || !canWrite || saving) return;
+    if (!canWrite || saving) return;
     setSaving(true);
     setError(null);
     try {
-      await onSubmit(form as Partial<T>);
+      const values = await formInst.validateFields();
+      await onSubmit(values as Partial<T>);
     } catch (err) {
+      // antd Form 校验失败(err.errorFields)已由各 Form.Item 内联提示,不再写顶部 banner。
+      if (err && typeof err === "object" && "errorFields" in err) return;
       setError(err instanceof Error ? err.message : "保存失败");
     } finally {
       setSaving(false);
@@ -826,7 +802,7 @@ function PpmResourceDrawer<T extends { id: string }>({
           </Button>
           <Button
             size="sm"
-            disabled={!canWrite || !formValid || saving}
+            disabled={!canWrite || saving}
             onClick={() => void submit()}
           >
             {saving ? "保存中…" : "保存"}
@@ -834,77 +810,66 @@ function PpmResourceDrawer<T extends { id: string }>({
         </div>
       }
     >
-      <div className="space-y-3">
-          {visibleFields.map((f) => {
-            const name = f.name as string;
-            const value = form[name] ?? "";
-            const readOnly = mode === "edit" && f.readOnlyOnEdit;
-            const opts = asyncOptions[name] ?? f.options ?? [];
-            const errMsg = fieldErrors[name];
-            // date/datetime 表单用原生 input;后端存 ISO 字符串,取前 10 / 16 位。
-            const isDate = f.type === "date";
-            const isDateTime = f.type === "datetime";
-            const inputType = isDate
-              ? "date"
-              : isDateTime
-                ? "datetime-local"
-                : f.type === "number"
-                  ? "number"
-                  : "text";
-            return (
-              <div key={name}>
-                <label className="text-[11px] text-muted-foreground">
-                  {f.label}
-                  {f.required && <span className="ml-0.5 text-destructive">*</span>}
-                </label>
-                {f.type === "textarea" ? (
-                  <textarea
-                    value={String(value ?? "")}
-                    onChange={(e) => setValue(name, e.target.value || null)}
-                    disabled={!canWrite || readOnly}
-                    placeholder={f.placeholder}
-                    className={`mt-0.5 ${textareaCls}`}
-                  />
-                ) : f.type === "select" ? (
-                  <select
-                    value={String(value ?? "")}
-                    onChange={(e) => setValue(name, e.target.value || null)}
-                    disabled={!canWrite || readOnly}
-                    className={`mt-0.5 ${inputCls}`}
-                  >
-                    <option value="">{f.placeholder ?? `请选择${f.label}`}</option>
-                    {opts.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    type={inputType}
-                    value={isDate || isDateTime ? String(value ?? "").slice(0, isDateTime ? 16 : 10) : String(value ?? "")}
-                    onChange={(e) => {
-                      const v =
-                        f.type === "number"
-                          ? e.target.value === ""
-                            ? null
-                            : Number(e.target.value)
-                          : e.target.value || null;
-                      setValue(name, v);
-                    }}
-                    disabled={!canWrite || readOnly}
-                    placeholder={f.placeholder}
-                    className={`mt-0.5 ${inputCls}`}
-                  />
-                )}
-                {errMsg && (
-                  <p className="mt-0.5 text-[11px] text-destructive">{errMsg}</p>
-                )}
-              </div>
-            );
-          })}
-          {error && <p className="text-[11px] text-destructive">{error}</p>}
-      </div>
+      <Form form={formInst} layout="vertical" preserve={false}>
+        {visibleFields.map((f) => {
+          const name = f.name as string;
+          const opts = asyncOptions[name] ?? f.options ?? [];
+          const disabled = !canWrite || (mode === "edit" && f.readOnlyOnEdit);
+          const withTime = f.type === "datetime";
+          const isDateLike = f.type === "date" || f.type === "datetime";
+          const rules: Record<string, unknown>[] = [];
+          if (f.required) {
+            rules.push({ required: true, message: `${f.label}为必填项` });
+          }
+          if (f.pattern) {
+            const re = f.pattern instanceof RegExp ? f.pattern : new RegExp(f.pattern);
+            rules.push({ pattern: re, message: f.patternMessage ?? `${f.label}格式不正确` });
+          }
+          return (
+            <Form.Item
+              key={name}
+              name={name}
+              label={f.label}
+              rules={rules}
+              // date/datetime:store 存 ISO 字符串,控件用 dayjs,Form.Item 双向转换。
+              {...(isDateLike
+                ? {
+                    getValueProps: (v: unknown) => ({ value: v ? dayjs(String(v)) : null }),
+                    normalize: (d: Dayjs | null) =>
+                      d && typeof d.format === "function"
+                        ? d.format(withTime ? "YYYY-MM-DD HH:mm" : "YYYY-MM-DD")
+                        : null,
+                  }
+                : {})}
+            >
+              {f.type === "textarea" ? (
+                <Input.TextArea rows={2} disabled={disabled} placeholder={f.placeholder} />
+              ) : f.type === "select" ? (
+                <Select
+                  disabled={disabled}
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder={f.placeholder ?? `请选择${f.label}`}
+                  options={opts.map((o) => ({ label: o.label, value: o.value }))}
+                />
+              ) : f.type === "number" ? (
+                <InputNumber disabled={disabled} placeholder={f.placeholder} className="w-full" />
+              ) : isDateLike ? (
+                <DatePicker
+                  disabled={disabled}
+                  className="w-full"
+                  format={withTime ? "YYYY-MM-DD HH:mm" : "YYYY-MM-DD"}
+                  showTime={withTime}
+                />
+              ) : (
+                <Input disabled={disabled} placeholder={f.placeholder} />
+              )}
+            </Form.Item>
+          );
+        })}
+        {error && <p className="text-[11px] text-destructive">{error}</p>}
+      </Form>
     </Drawer>
   );
 }

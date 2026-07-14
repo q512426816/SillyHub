@@ -77,3 +77,12 @@ created_at: 2026-07-14T09:20:24
 根因：PpmResourceTable select 列渲染 opts.find(o=>o.value===String(value))，找不到匹配则回退 String(value) 显示原始值。DB ppm_project_maintenance 实际存源字典 code（type 1/2、status 1/2，仅 1 条测试数据 implementation/ongoing），但前端 PROJECT_TYPE_OPTIONS value=research/implementation/maintenance、PROJECT_STATUS_OPTIONS value=ongoing/completed/paused 与 code 不匹配 → 回退显示 code「1 2」。前端枚举注释「参照源 vue 字典 pm_project_type/pm_project_status」，枚举顺序即源字典 code 顺序（type 1=研发/2=实施/3=运维；status 1=进行中/2=已完成/3=已暂停），DB 数据分布(type=2 多/status=1 多)与此吻合。
 方案：两个枚举 value 改成源字典 code "1"/"2"/"3"，label/color/statusKind 不变 → find 匹配 code 渲染中文 Tag/StatusBadge。注：那条 implementation/ongoing 测试数据(前端旧 value 存的)将显示原始串，属测试数据可忽略（CLAUDE.md 规则11 允许重置）。
 结果：①typecheck 过；②lint 0 error；③grep 确认 research/ongoing 等旧 value 仅 projects/page.tsx 用（已改），其余 completed/maintenance 命中均 agent/daemon 等无关模块；④待 commit+push+rebuild frontend + 用户验证（类型/状态列显示中文 Tag/StatusBadge）。
+
+## ql-20260714-010-a4f2 | 2026-07-14 23:25:00 | PpmResourceDrawer 抽屉表单原生控件统一改 antd(Form/Form.Item/Input/Select/DatePicker/InputNumber/Input.TextArea)
+状态：进行中
+关联变更：（无）
+文件：frontend/src/components/ppm-resource-table.tsx（PpmResourceDrawer 表单层重写为 antd Form + import DatePicker/InputNumber/dayjs + 删原生 inputCls/textareaCls）
+需求：用户确认 /ppm/projects 编辑/新建抽屉表单控件统一换 antd（与搜索区一致）。
+根因：PpmResourceDrawer 抽屉外壳已 antd Drawer(ppm-projects-style-redesign task-02)，但表单内 input/select/textarea/label 仍是原生 HTML + tailwind（task-02 漏改表单层），与搜索区 antd Form 不统一，原生日期选择器/下拉样式差。泛型组件，项目/客户/干系人页复用。
+方案：表单层从「useState form + 手动 fieldErrors + 原生控件」重写为「Form.useForm + Form.Item rules(required/pattern 自动校验) + antd 控件」：text→Input、number→InputNumber、select→Select、textarea→Input.TextArea、date→DatePicker、datetime→DatePicker(showTime)；date/datetime 用 Form.Item getValueProps/normalize 做 dayjs↔ISO 双向转换；submit 改 validateFields→onSubmit；按钮 disabled 去 formValid；删 inputCls/textareaCls。props 不变。
+波折：首次改造完成后未及 commit，被并发会话 git merge milestone-module-import(a32f07c7) 丢弃工作区改动（quicklog/代码全回退），且 frontend/node_modules/.bin 被破坏致 pre-commit hook 的 next/tsc/vitest 命令找不到（pnpm install 重建 .bin 修复）。本次为重新应用改造。
