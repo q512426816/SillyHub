@@ -1001,8 +1001,22 @@ class PlanService:
                 module_id_of[key] = new_module.id
                 created_modules += 1
 
-            # 3. 逐行建明细 (必填字段齐全→done, 缺失→draft)
+            # 3. 逐行建明细 (必填字段齐全→done, 缺失→draft; 同模块下 task_theme+detailed_stage 重复则跳过)
+            existing_details = await self._session.execute(
+                select(PsPlanNodeDetail.task_theme, PsPlanNodeDetail.detailed_stage).where(
+                    PsPlanNodeDetail.module_id == module_id_of[key],
+                    PsPlanNodeDetail.status != PlanNodeDetailStatus.ARCHIVED.value,
+                )
+            )
+            existing_keys: set[tuple[str | None, str | None]] = {
+                (t, s) for t, s in existing_details.all()
+            }
+
             for row in rows:
+                dedup_key = (row.task_theme, row.detailed_stage)
+                if dedup_key in existing_keys:
+                    skipped_rows += 1
+                    continue
                 # 必填字段: 明细阶段/任务主题/任务描述/工作量/开始/结束/执行人
                 required_filled = all(
                     [
