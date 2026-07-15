@@ -78,9 +78,11 @@ UserService: 自保护（不能删自己）+ 最后管理员保护（_active_adm
 - 角色权限变更对已登录用户需刷新会话才生效
 - list_role_users 查角色下用户，供角色详情展示
 - 新建用户默认密码：`UserCreateRequest.password` 可选（`str | None`，显式传仍按 min_length=8 校验），缺省时 `UserService.create_user` 落库为模块常量 `DEFAULT_INITIAL_PASSWORD`（`SillyHub@123`）；admin / settings 两入口共用同一 schema，行为一致；前端 admin-user-drawer create 模式不再渲染密码输入框，改展示默认密码提示
+- 重置密码默认密码：管理员「重置密码」不传新密码时，`UserService.reset_password` 落库为模块常量 `DEFAULT_INITIAL_PASSWORD`（`SillyHub@123`，与新建用户一致），不再随机生成；前端 ResetPasswordDialog 重置成功后直接关闭弹窗 + toast 提示（默认场景展示固定默认密码 SillyHub@123）；保留「自定义密码」勾选（显式传 `new_password` 仍按 `min_length=8` 校验）；审计 details 字段 `auto_generated` → `used_default_password`（值 = `new_password is None`）
 
 ## 变更索引
 - ql-20260715-002-9c5b | /admin/users 新建用户去掉密码输入框，改后端固定默认初始密码 SillyHub@123（schema.password 改可选 + service 缺省兜底，admin/settings 两入口一致；前端抽屉去密码框加蓝色默认密码提示 + 测试随需求调整）
+- ql-20260715-008-66c5 | /admin/users 重置密码默认改用默认密码 SillyHub@123（非随机）+ 重置成功后关闭弹窗（后端 reset_password 默认 DEFAULT_INITIAL_PASSWORD 删 _generate_password；前端 ResetPasswordDialog 成功 onClose 关闭弹窗）
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->

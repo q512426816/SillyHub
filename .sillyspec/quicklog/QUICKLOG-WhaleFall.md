@@ -149,3 +149,12 @@ created_at: 2026-07-14T09:20:24
 根因：GroupTable 一级项目表 scroll 只有 {x:'max-content'} 无 y（ql-005 同步样式时漏了对齐 projects DataTable 的 y: calc(100vh-430px)）；G1 只给展开行成员子表(embedded)去了 y，一级表本应有 y。
 方案：GroupTable 一级项目表 scroll 加 y:'calc(100vh-430px)'（对齐 ppm-resource-table.tsx:665）。展开行成员子表(embedded)保持无 y（G1 设计，嵌套不适合 vh scroll）。
 结果：tsc --noEmit EXIT 0。待 commit + push + rebuild frontend + 用户验证（一级表自适应高度，超长时表头固定+ body 滚动）。
+
+## ql-20260715-008-66c5 | 2026-07-15 13:53:21 | /admin/users 重置密码默认改用默认密码 SillyHub@123（非随机）+ 重置成功后关闭弹窗
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/admin/users_service.py、frontend/src/app/(dashboard)/admin/users/page.tsx
+需求：用户要求 /admin/users 重置密码默认也用默认密码（SillyHub@123），且重置成功后关闭弹窗。
+根因：原 reset_password 不传密码时 _generate_password() 随机生成 12 位密码，前端弹窗停留展示明文（仅本次显示）；管理员易误以为默认密码 SillyHub@123（实际是随机串），被重置用户拿 SillyHub@123 登录会 401。
+方案：后端 reset_password 默认 _generate_password()→DEFAULT_INITIAL_PASSWORD（与 create_user 一致，单一真源），删 _generate_password + secrets/string import，审计字段 auto_generated→used_default_password；前端 ResetPasswordDialog 成功后 onClose 关闭弹窗 + toast（默认场景提示「已重置为默认密码 SillyHub@123」），默认提示行展示固定默认密码，复选框文案改「不勾选则使用默认密码」，删 result/copied/copy，onReset 类型 Promise<string>→Promise<void>，加 DEFAULT_INITIAL_PASSWORD 常量；保留「自定义密码」勾选（显式传仍按 min_length=8 校验）。
+结果：后端 ruff All checks passed + admin 路由测试 35 passed/3 xfailed；前端 lint 干净 + tsc --noEmit EXIT 0。待 commit + push + rebuild backend+frontend 部署 + 用户验证（重置密码后弹窗关闭，被重置用户用 SillyHub@123 可登录）。

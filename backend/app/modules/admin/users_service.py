@@ -20,8 +20,6 @@ every active session so the user is forced out immediately.
 from __future__ import annotations
 
 import json
-import secrets
-import string
 import uuid
 from datetime import UTC, datetime
 
@@ -693,11 +691,6 @@ class UserService:
 
     # ── Password reset ──────────────────────────────────────────────────
 
-    @staticmethod
-    def _generate_password(length: int = 12) -> str:
-        alphabet = string.ascii_letters + string.digits + "!@#$%&*"
-        return "".join(secrets.choice(alphabet) for _ in range(length))
-
     async def reset_password(
         self,
         target_id: uuid.UUID,
@@ -708,7 +701,9 @@ class UserService:
         if target is None or target.deleted_at is not None:
             raise HTTPException(status_code=404, detail="User not found")
 
-        plaintext = new_password or self._generate_password()
+        # 不显式传密码 → 统一用模块默认初始密码（与 create_user 一致），管理员
+        # 无需记忆/转交随机串；用户用默认密码登录后可自行修改（change-password）。
+        plaintext = new_password or DEFAULT_INITIAL_PASSWORD
 
         self._set_audit_context()
         target.password_hash = password_hasher.hash(plaintext)
@@ -720,7 +715,7 @@ class UserService:
         details = {
             "reset_by": str(self.actor_id),
             "force_change_on_next_login": force_change_on_next_login,
-            "auto_generated": new_password is None,
+            "used_default_password": new_password is None,
         }
         self.session.add(
             AuditLog(

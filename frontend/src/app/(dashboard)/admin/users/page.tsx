@@ -61,6 +61,10 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 const DEFAULT_PAGE_SIZE = 20;
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
+// 重置/新建用户的默认初始密码。须与后端
+// backend/app/modules/admin/users_service.py 的 DEFAULT_INITIAL_PASSWORD 保持一致。
+const DEFAULT_INITIAL_PASSWORD = "SillyHub@123";
+
 export default function AdminUsersPage() {
   const { user: currentUser } = useSession();
   const canWrite = !!currentUser?.is_platform_admin ||
@@ -528,12 +532,16 @@ export default function AdminUsersPage() {
           onClose={() => setResetTarget(null)}
           onReset={async (customPassword) => {
             try {
-              const resp = await resetUserPassword(
+              await resetUserPassword(
                 resetTarget.id,
                 customPassword ? { new_password: customPassword } : undefined,
               );
-              showToast(true, `新密码已生成（仅本次显示）`);
-              return resp.password;
+              showToast(
+                true,
+                customPassword
+                  ? "密码已重置"
+                  : `已重置为默认密码 ${DEFAULT_INITIAL_PASSWORD}`,
+              );
             } catch (err) {
               const msg = err instanceof ApiError ? err.message : "重置失败";
               showToast(false, msg);
@@ -595,22 +603,19 @@ function ResetPasswordDialog({
 }: {
   user: UserRead;
   onClose: () => void;
-  onReset: (_custom?: string) => Promise<string>;
+  onReset: (_custom?: string) => Promise<void>;
 }) {
   const [custom, setCustom] = useState("");
   const [useCustom, setUseCustom] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
 
   const submit = async () => {
     setBusy(true);
     setErr(null);
     try {
-      const pwd = await onReset(useCustom && custom.length >= 8 ? custom : undefined);
-      setResult(pwd);
-      setCopied(false);
+      await onReset(useCustom && custom.length >= 8 ? custom : undefined);
+      onClose();
     } catch {
       setErr("重置失败");
     } finally {
@@ -618,82 +623,58 @@ function ResetPasswordDialog({
     }
   };
 
-  const copy = async () => {
-    if (!result) return;
-    try {
-      await navigator.clipboard.writeText(result);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // ignore
-    }
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
       <div className="w-[440px] rounded-md border bg-background p-5 shadow-lg">
         <h3 className="text-sm font-semibold">重置 {userDisplay(user)} 的密码</h3>
-        {!result ? (
-          <div className="mt-3 space-y-3">
-            <label className="flex items-center gap-2 text-xs">
+        <div className="mt-3 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            将重置为默认密码{" "}
+            <code className="font-mono">{DEFAULT_INITIAL_PASSWORD}</code>
+          </p>
+          <label className="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={useCustom}
+              onChange={(e) => setUseCustom(e.target.checked)}
+              aria-label="自定义密码"
+            />
+            <span>自定义密码（不勾选则使用默认密码）</span>
+          </label>
+          {useCustom && (
+            <div>
+              <label className="text-[11px] text-muted-foreground">
+                新密码（至少 8 位）
+              </label>
               <input
-                type="checkbox"
-                checked={useCustom}
-                onChange={(e) => setUseCustom(e.target.checked)}
-                aria-label="自定义密码"
+                type="password"
+                value={custom}
+                onChange={(e) => setCustom(e.target.value)}
+                aria-label="新密码"
+                className={`mt-0.5 ${inputCls}`}
               />
-              <span>自定义密码（不勾选则自动生成）</span>
-            </label>
-            {useCustom && (
-              <div>
-                <label className="text-[11px] text-muted-foreground">
-                  新密码（至少 8 位）
-                </label>
-                <input
-                  type="password"
-                  value={custom}
-                  onChange={(e) => setCustom(e.target.value)}
-                  aria-label="新密码"
-                  className={`mt-0.5 ${inputCls}`}
-                />
-                {custom.length > 0 && custom.length < 8 && (
-                  <p className="mt-1 text-[10px] text-destructive">
-                    密码至少 8 位
-                  </p>
-                )}
-              </div>
-            )}
-            <p className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] text-amber-700">
-              重置密码后会撤销该用户的所有会话，强制重新登录。
-            </p>
-            {err && <p className="text-[11px] text-destructive">{err}</p>}
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={onClose}>取消</Button>
-              <Button
-                size="sm"
-                disabled={busy || (useCustom && custom.length < 8)}
-                onClick={() => void submit()}
-              >
-                {busy ? "重置中…" : "确认重置"}
-              </Button>
+              {custom.length > 0 && custom.length < 8 && (
+                <p className="mt-1 text-[10px] text-destructive">
+                  密码至少 8 位
+                </p>
+              )}
             </div>
+          )}
+          <p className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] text-amber-700">
+            重置密码后会撤销该用户的所有会话，强制重新登录。
+          </p>
+          {err && <p className="text-[11px] text-destructive">{err}</p>}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={onClose}>取消</Button>
+            <Button
+              size="sm"
+              disabled={busy || (useCustom && custom.length < 8)}
+              onClick={() => void submit()}
+            >
+              {busy ? "重置中…" : "确认重置"}
+            </Button>
           </div>
-        ) : (
-          <div className="mt-3 space-y-3">
-            <p className="text-xs text-muted-foreground">
-              新密码（仅本次显示，请立即交给用户）：
-            </p>
-            <div className="flex items-center gap-2 rounded border bg-muted/30 px-2 py-1.5">
-              <code className="flex-1 break-all font-mono text-sm">{result}</code>
-              <Button size="sm" variant="outline" onClick={() => void copy()}>
-                {copied ? "已复制" : "复制"}
-              </Button>
-            </div>
-            <div className="flex justify-end">
-              <Button size="sm" onClick={onClose}>关闭</Button>
-            </div>
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );
