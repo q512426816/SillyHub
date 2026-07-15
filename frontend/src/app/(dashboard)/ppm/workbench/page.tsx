@@ -6,7 +6,7 @@
  * 三栏聚合当前登录人数据,8 个子组件接入(task-09~11 已实现):
  *  - 左栏:ProfileSummaryCard(个人信息) + TodoListPanel(我的待办) + MessagePlaceholder(消息通知占位)
  *  - 中栏:PersonalMetricStrip(本月指标) + WorkbenchTaskTable(我的任务)
- *  - 右栏:WorkCalendarPanel(本月日历) + QuickEntryGrid(快捷入口) + RuleNotePanel(规则说明)
+ *  - 右栏:WorkCalendarPanel(本月日历) + QuickEntryGrid(快捷入口)
  *
  * 数据装配:沿用 apiFetch + useEffect(design §3 明确不引入 react-query);
  *          四块数据(profile/summary/calendar/tasks)各独立 try/catch + loading/error,
@@ -42,7 +42,6 @@ import { MessagePlaceholder } from "./_components/message-placeholder";
 import { PersonalMetricStrip } from "./_components/personal-metric-strip";
 import { ProfileSummaryCard } from "./_components/profile-summary-card";
 import { QuickEntryGrid } from "./_components/quick-entry-grid";
-import { RuleNotePanel } from "./_components/rule-note-panel";
 import { TodoListPanel } from "./_components/todo-list-panel";
 import { WorkCalendarPanel } from "./_components/work-calendar-panel";
 import { WorkbenchTaskTable } from "./_components/workbench-task-table";
@@ -261,9 +260,6 @@ export default function WorkbenchPage() {
 
           {/* 快捷入口(静态,无数据依赖) */}
           <QuickEntryGrid />
-
-          {/* 规则说明(静态文本) */}
-          <RuleNotePanel />
         </div>
       </div>
     </PageContainer>

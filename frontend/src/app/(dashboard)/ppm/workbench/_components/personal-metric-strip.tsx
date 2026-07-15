@@ -48,6 +48,8 @@ interface MetricItem {
   label: string;
   value: string;
   color: MetricColor;
+  /** 该指标口径说明,hover 时 title 显示(取代 RuleNotePanel 卡片)。 */
+  rule: string;
 }
 
 /** 颜色 → Tailwind 文本语义 class(参照 tokens.ts 色值)。 */
@@ -71,30 +73,35 @@ export function PersonalMetricStrip({
       label: `${prefix}任务量`,
       value: metrics ? `${metrics.task_count}条` : "—",
       color: "blue",
+      rule: "本月任务 start_time 区间统计的总条数",
     },
     {
       key: "completion_rate",
       label: `${prefix}完成率`,
       value: metrics ? `${Math.round(metrics.completion_rate * 100)}%` : "—",
       color: "green",
+      rule: "已完成任务数 / 任务总数;任务数为 0 时显示 0%",
     },
     {
       key: "delay_rate",
       label: `${prefix}延期率`,
       value: metrics ? `${Math.round(metrics.delay_rate * 100)}%` : "—",
       color: "amber",
+      rule: "已过期且未完成任务数 / 任务总数",
     },
     {
       key: "work_hours",
       label: `${prefix}工时统计`,
       value: metrics ? `${metrics.work_hours}天` : "—",
       color: "cyan",
+      rule: "任务执行实际耗时(task_execute.time_spent)总和",
     },
     {
       key: "defect_count",
       label: "缺陷数量",
       value: metrics ? `${metrics.defect_count}条` : "—",
       color: "red",
+      rule: "当前人名下全部未关闭缺陷数(不受范围影响)",
     },
   ];
 
@@ -125,7 +132,8 @@ export function PersonalMetricStrip({
         {items.map((m) => (
           <div
             key={m.key}
-            className="rounded-lg border border-slate-200 bg-card p-3"
+            title={m.rule}
+            className="cursor-help rounded-lg border border-slate-200 bg-card p-3"
           >
             <div className="text-xs text-muted-foreground">{m.label}</div>
             <div
