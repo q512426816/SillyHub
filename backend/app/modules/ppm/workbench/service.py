@@ -157,7 +157,8 @@ class WorkbenchService:
 
         return WorkbenchProfile(
             display_name=user.display_name,
-            employee_no=user.employee_no,
+            # 工号未录时用登录名(username)兜底覆盖,避免前端显示空
+            employee_no=user.employee_no or user.username,
             department_name=department_name,
             role_name=role_name,
             avatar_text=avatar_text,

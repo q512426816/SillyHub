@@ -21,6 +21,14 @@ import { Tag, type TableProps } from "antd";
 
 import { DataTable } from "@/components/layout";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ApiError } from "@/lib/api";
 import { executePlanTask } from "@/lib/ppm/task";
 import type { PlanTask } from "@/lib/ppm/types";
@@ -28,7 +36,7 @@ import {
   ExecuteTaskDialog,
   type ExecuteTaskState,
 } from "../../_components/execute-task-dialog";
-import { Toast, taskStatusTag, useToast } from "../../shared";
+import { Toast, fmtDate, taskStatusTag, useToast } from "../../shared";
 
 export interface WorkbenchTaskTableProps {
   /** 当前人任务列表(由 page.tsx 调 listPersonalPlanTasks 装配后下传)。 */
@@ -47,6 +55,8 @@ export function WorkbenchTaskTable({
   // 执行表单目标 + 提交中态
   const [execute, setExecute] = useState<ExecuteTaskState | null>(null);
   const [busy, setBusy] = useState(false);
+  // 详情 dialog 目标(只读)
+  const [detailTask, setDetailTask] = useState<PlanTask | null>(null);
   const { toast, showToast } = useToast();
 
   // 筛选(项目名称模糊 + 平台/模块精确,对齐原型任务操作表 toolbar)。实时过滤。
@@ -140,24 +150,29 @@ export function WorkbenchTaskTable({
     {
       title: "操作",
       key: "action",
-      width: 100,
+      width: 140,
       render: (_v: unknown, t: PlanTask) => (
-        <Button
-          size="sm"
-          variant="default"
-          // 已完成任务禁用(PlanTask.status 存中文:未开始/进行中/已完成)
-          disabled={t.status === "已完成"}
-          onClick={() =>
-            setExecute({
-              task: t,
-              executeInfo: "",
-              timeSpent: t.time_spent ? String(t.time_spent) : "",
-              submit: false,
-            })
-          }
-        >
-          执行
-        </Button>
+        <div className="flex justify-center gap-1">
+          <Button size="sm" variant="ghost" onClick={() => setDetailTask(t)}>
+            详情
+          </Button>
+          <Button
+            size="sm"
+            variant="default"
+            // 已完成任务禁用(PlanTask.status 存中文:未开始/进行中/已完成)
+            disabled={t.status === "已完成"}
+            onClick={() =>
+              setExecute({
+                task: t,
+                executeInfo: "",
+                timeSpent: t.time_spent ? String(t.time_spent) : "",
+                submit: false,
+              })
+            }
+          >
+            执行
+          </Button>
+        </div>
       ),
     },
   ];
@@ -221,6 +236,72 @@ export function WorkbenchTaskTable({
           onCancel={() => setExecute(null)}
           busy={busy}
         />
+      )}
+
+      {/* 详情 dialog(只读任务完整字段) */}
+      {detailTask && (
+        <Dialog
+          open
+          onOpenChange={(o) => {
+            if (!o) setDetailTask(null);
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>任务详情</DialogTitle>
+              <DialogDescription>
+                {detailTask.content ?? "（未填写）"}
+              </DialogDescription>
+            </DialogHeader>
+            <dl className="space-y-1.5 text-xs">
+              <div className="flex gap-2">
+                <dt className="w-20 shrink-0 text-muted-foreground">项目</dt>
+                <dd className="min-w-0 flex-1">
+                  {detailTask.project_name ?? "—"}
+                </dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="w-20 shrink-0 text-muted-foreground">模块</dt>
+                <dd>{detailTask.module_name ?? "—"}</dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="w-20 shrink-0 text-muted-foreground">状态</dt>
+                <dd>{taskStatusTag(detailTask.status).text}</dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="w-20 shrink-0 text-muted-foreground">开始时间</dt>
+                <dd>{fmtDate(detailTask.start_time)}</dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="w-20 shrink-0 text-muted-foreground">截止时间</dt>
+                <dd>{fmtDate(detailTask.end_time)}</dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="w-20 shrink-0 text-muted-foreground">计划工时</dt>
+                <dd>{detailTask.work_load ?? "—"}</dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="w-20 shrink-0 text-muted-foreground">配合人员</dt>
+                <dd>{detailTask.work_partner ?? "—"}</dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="w-20 shrink-0 text-muted-foreground">备注</dt>
+                <dd className="min-w-0 flex-1 break-all">
+                  {detailTask.remarks ?? "—"}
+                </dd>
+              </div>
+            </dl>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setDetailTask(null)}
+              >
+                关闭
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
 
       <Toast toast={toast} />

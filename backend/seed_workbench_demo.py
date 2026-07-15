@@ -81,7 +81,8 @@ async def main() -> None:
         if admin is None:
             raise SystemExit("admin user not found")
         admin.display_name = "李明哲"
-        admin.employee_no = "EMP-0001"
+        # employee_no 留空(None),验证 profile 工号兜底用登录名(username)覆盖
+        admin.employee_no = None
 
         # ---------------- 2. 建组织 + 关联 admin ----------------
         org = Organization(name="产品研发中心", code=ORG_CODE, status="active")

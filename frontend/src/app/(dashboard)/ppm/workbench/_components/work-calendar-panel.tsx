@@ -119,7 +119,12 @@ export function WorkCalendarPanel({
 }: WorkCalendarPanelProps) {
   const yearMonth = calendar?.year_month;
   const cells = buildMonthGrid(yearMonth, calendar?.days ?? []);
-  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  // 默认选中今天(进入工作台即显示当天任务,无需手动点)
+  const todayStr = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+  const [selectedDay, setSelectedDay] = useState<string | null>(todayStr);
 
   // 当日任务:按 start_time 的日期部分(YYYY-MM-DD,对齐后端 UTC day)过滤
   const dayTasks = selectedDay
