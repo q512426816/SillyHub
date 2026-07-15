@@ -2299,14 +2299,14 @@ function DetailDrawer({
             <Form.Item
               label="角色"
               name="role_name"
-              rules={[{ required: true, message: "请输入角色" }]}
+              rules={[{ required: false }]}
             >
               <Input disabled={!baseEditable} placeholder="角色" />
             </Form.Item>
             <Form.Item
               label="成果"
               name="achievement"
-              rules={[{ required: true, message: "请输入成果" }]}
+              rules={[{ required: false }]}
             >
               <Input disabled={!baseEditable} placeholder="成果" />
             </Form.Item>
