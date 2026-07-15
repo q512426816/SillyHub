@@ -219,3 +219,11 @@ created_at: 2026-07-14T09:20:24
 根因：①缺陷(problem_audit)分支原条件 duty_user_id==me 且 now_handle_user 含 me，过严——审批人非责任人(duty≠me)时被过滤；且现有演示数据问题的 now_handle 没填 admin（1 条填了不存在的用户 7a45641f、1 条空）。②ppm_problem_change 表 0 条，无审批数据。经确认缺陷口径改为「仅当前流转给我的」(now_handle 含 me，不限 duty)。
 方案：①service.py 问题待办分支 select(PpmProblemList) 去 duty where，Python 端 now_handle_user split 含我 + status≠"4"即显示（审批人非责任人也能看到）；defect_count 指标不动（仍 duty==me，语义=我负责的缺陷数，与待办口径区分）。②补 duty≠me 测试。③数据：UPDATE 问题1（now_handle 脏数据 7a45641f→admin）+ INSERT 测试变更（status=1，now_handle=admin）。
 结果：后端 workbench 25 passed（+1 新用例）；rebuild backend 后 admin 登录 GET /api/ppm/workbench/summary todos 三类齐全（problem_audit 缺陷1 + problem_change 审批1 + plan_task 任务3）。待 commit + 用户浏览器验证。
+
+## ql-20260715-015-7e9a | 2026-07-15 22:41:53 | PPM 工作台日历加月份切换（‹ YYYY年M月 ›）
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/workbench/page.tsx（加 calendarMonth state 默认当月 + loadCalendar 改用 calendarMonth 依赖 + handleCalendarMonthChange + 拆出 calendar 独立 useEffect 跟随月份 + WorkCalendarPanel 传 month/onMonthChange）+ frontend/src/app/(dashboard)/ppm/workbench/_components/work-calendar-panel.tsx（props 加 month/onMonthChange + import dayjs/useEffect/useMemo + todayStr 改 useMemo 稳定 + selectedDay useEffect 跟随月份重置 + SectionCard title 改「工作日历」+ body 顶部加 ‹/YYYY年M月/› 月份导航 + 日期格 date 构造 yearMonth→month 修 tsc TS2304）
+需求：用户要求工作台「本月日历」可以切换月份。
+方案：后端 get_calendar(year_month) 与 fetchWorkbenchCalendar(yearMonth) 此前已支持任意月,只缺前端切换 UI。page.tsx 加 calendarMonth state（默认当月 dayjs format YYYY-MM）,loadCalendar 依赖 calendarMonth,切换 setCalendarMonth → loadCalendar 重建 → 独立 useEffect 重拉该月（不随 profile/tasks 重跑）。WorkCalendarPanel 加月份导航行（‹ dayjs(month).subtract(1,month) | format(YYYY年M月) | add(1,month) ›）调 onMonthChange;selectedDay 用 useEffect 跟随 month 重置（今天在新月则选中今天,否则清空,避免跨月残留）;日期格 date 用 props month 构造（原 yearMonth 局部变量已移除,修 tsc 报错）。
+结果：tsc --noEmit exit 0;rebuild frontend 后 healthy,/api/health ok（commit_sha=e3ae33b9）。待 commit + 用户浏览器验证 ‹ › 切换。
