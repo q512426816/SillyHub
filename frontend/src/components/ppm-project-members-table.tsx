@@ -31,6 +31,7 @@ import {
   createProjectMember,
   deleteProjectMember,
   listProjectMembers,
+  listSimpleProjects,
   updateProjectMember,
 } from "@/lib/ppm";
 import type {
@@ -95,6 +96,8 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  // 平铺模式(!projectId):pm_project_id UUID → 项目名 映射(后端 ProjectMemberResp 只回 UUID,无 project_name)。
+  const [projectNameMap, setProjectNameMap] = useState<Record<string, string>>({});
 
   const [drawer, setDrawer] = useState<{
     open: boolean;
@@ -116,10 +119,22 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
       const params: ProjectMemberPageReq = projectId
         ? { pm_project_id: projectId }
         : {};
-      const result = await listProjectMembers(
-        Object.keys(params).length > 0 ? params : undefined,
-      );
+      // 平铺模式(!projectId)额外并行拉项目简单列表,建 id→project_name 映射
+      // (后端 ProjectMemberResp 只回 pm_project_id UUID,需前端映射出项目名展示)。
+      const [result, projects] = await Promise.all([
+        listProjectMembers(
+          Object.keys(params).length > 0 ? params : undefined,
+        ),
+        projectId ? null : listSimpleProjects(),
+      ]);
       setRows(result);
+      if (projects) {
+        const map: Record<string, string> = {};
+        for (const p of projects) {
+          map[p.id] = p.project_name || p.id;
+        }
+        setProjectNameMap(map);
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "加载失败");
     } finally {
@@ -215,6 +230,20 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
         },
       },
     ];
+    // 平铺模式(!projectId)首列补「所属项目」:后端 ProjectMemberResp 只回 pm_project_id UUID,
+    // 用 projectNameMap 映射成项目名,缺失回退 ID(与姓名列兜底风格一致)。
+    if (!projectId) {
+      cols.unshift({
+        title: "所属项目",
+        dataIndex: "pm_project_id",
+        key: "pm_project_id",
+        render: (v: unknown) => {
+          const id = String(v ?? "");
+          const name = projectNameMap[id] || id;
+          return name || <span className="text-xs text-muted-foreground">—</span>;
+        },
+      });
+    }
     if (canWrite) {
       cols.push({
         title: "操作",
@@ -244,7 +273,7 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
       });
     }
     return cols;
-  }, [canWrite]);
+  }, [canWrite, projectId, projectNameMap]);
 
   const total = rows.length;
   const pagedRows = useMemo(() => {

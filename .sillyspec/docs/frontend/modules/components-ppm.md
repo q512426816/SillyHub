@@ -18,7 +18,7 @@ PPM（项目管理）业务通用组件集合（`components/ppm-*.tsx`），被 
 - `PpmSubTable<T>`：可编辑子表（展开行模式），`PpmSubTableRow` / `PpmSubOption` / `PpmSubEditableColumn<T>`（`PpmSubEditType = text|number|select|textarea`，select 带 `options`）/ `PpmSubTableProps<T>`；`editable=true` + `columns` + `onChange` 启用编辑，否则只读。
 - `PpmProjectPlanDetail`：项目计划详情展示。
 - `PpmProjectPlanForm`：项目计划表单。
-- `PpmProjectMembersTable`：项目成员表。
+- `PpmProjectMembersTable`：项目成员表；平铺模式（未传 `projectId`）首列展示「所属项目」（`listSimpleProjects` 建 id→name 映射，缺失回退 ID），锁定 `projectId` 模式按项目过滤、不显示该列。
 - `PpmResourceTable`：资源表。
 - `PpmStatusActions`：状态操作按钮组；导出 `matchAnyUser`、`PLAN_DETAIL_STATUS_TEXT/COLOR`、`PROBLEM_STATUS_TEXT` 等状态文案/配色映射。
 - `PpmText`：文本展示（带格式化约定）。
@@ -45,3 +45,6 @@ PPM（项目管理）业务通用组件集合（`components/ppm-*.tsx`），被 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 <!-- MANUAL_NOTES_END -->
+
+## 变更索引
+- ql-20260715-001-7d2e | PpmProjectMembersTable 平铺模式补「所属项目」列（listSimpleProjects 建 id→name 映射，缺失回退 ID）

@@ -87,3 +87,12 @@ created_at: 2026-07-14T09:20:24
 方案：表单层从「useState form + 手动 fieldErrors + 原生控件」重写为「Form.useForm + Form.Item rules(required/pattern 自动校验) + antd 控件」：text→Input、number→InputNumber、select→Select、textarea→Input.TextArea、date→DatePicker、datetime→DatePicker(showTime)；date/datetime 用 Form.Item getValueProps/normalize 做 dayjs↔ISO 双向转换；submit 改 validateFields→onSubmit；按钮 disabled 去 formValid；删 inputCls/textareaCls。props 不变。
 波折：首次改造完成后未及 commit，被并发会话 git merge milestone-module-import(a32f07c7) 丢弃工作区改动（quicklog/代码全回退），且 frontend/node_modules/.bin 被破坏致 pre-commit hook 的 next/tsc/vitest 命令找不到（pnpm install 重建 .bin 修复）。本次为重新应用改造。
 结果：①typecheck 过；②lint 0 error；③全量 test 911 passed；④commit 7ffeb0a5（首次改造被并发 git merge a32f07c7 覆盖，重新应用后提交）；⑤rebuild frontend 部署 healthy（backend 同 recreate 仍 healthy）；⑥push 待网络恢复（github 间歇性连不上）；⑦quick step3 baseline 审计被并发遗留文件(milestone-module-import/verify-result.md)误判 block，CLI 无法 --done（quick-baseline-blocks-dirty-worktree 坑），按先例手动维护本条状态。
+
+## ql-20260715-001-7d2e | 2026-07-15 09:07:29 | /ppm/project-members 平铺表格补「所属项目」列——后端 ProjectMemberResp 只回 pm_project_id(UUID) 无项目名，前端用 listSimpleProjects 建 id→name 映射展示
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-project-members-table.tsx（import listSimpleProjects + state projectNameMap + load 平铺模式并行拉项目列表建映射 + columns unshift 首列「所属项目」+ useMemo 依赖加 projectId/projectNameMap）+ .sillyspec/docs/frontend/modules/components-ppm.md（PpmProjectMembersTable 契约补述 + 变更索引）
+需求：用户反馈 /ppm/project-members 平铺表格不显示所属项目，看不出成员归属哪个项目。
+根因：PpmProjectMembersTable 在 !projectId 全量平铺模式下表格列只有姓名/联系方式/部门/承担角色，无所属项目列；且后端 ProjectMemberResp 只回 pm_project_id(UUID) 无 project_name 字段，前端无项目名可直接展示。
+方案：纯前端——平铺模式（未传 projectId）load 时并行调 listSimpleProjects()（已有 /project-maintenance/simple-list 接口）建 pm_project_id→project_name 映射存 state；columns 在 !projectId 时 unshift 首列「所属项目」，render 取 projectNameMap[id]||id（缺失回退 UUID，与姓名列兜底风格一致）；锁定 projectId 模式（projects 页成员管理抽屉）按项目过滤，不显示该列。不动后端 schema。
+结果：①typecheck 过；②lint 0 error（剩余 warning 全既有其他文件）；③待 commit+push+rebuild frontend 部署 + 用户浏览器验证（平铺页首列显示项目名）。
