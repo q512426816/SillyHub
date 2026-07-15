@@ -24,8 +24,8 @@ plan_level: full
 - [x] task-07: 新增 `backend/app/modules/ppm/plan/tests/test_detail_task_link.py`，覆盖 FR-01~FR-07 全部 GWT 边界（建/导入批量/编辑同步/变更迁移/删除解关联/执行人空跳过/版本链查重/强一致回滚）（覆盖：FR-01~FR-07）
 
 ## Wave 4（收尾，依赖 Wave 3）
-- [ ] task-08: （可选 P2）`milestone-details/page.tsx` 提交成功 toast 加「已自动创建任务」文案（覆盖：体验优化）
-- [ ] task-09: 后端 curl 实测 create / save / import / update / change / delete 六路径联动 + grep 确认 import + 重建 backend Docker 部署验证（覆盖：部署验收）
+- [x] task-08: （可选 P2）`milestone-details/page.tsx` 提交成功 toast 加「已自动创建任务」文案（覆盖：体验优化）
+- [x] task-09: 后端 curl 实测 create / save / import / update / change / delete 六路径联动 + grep 确认 import + 重建 backend Docker 部署验证（覆盖：部署验收）
 
 ## 任务总表
 | 编号 | 任务 | Wave | 优先级 | 依赖 | 覆盖 FR/D | 说明 |
