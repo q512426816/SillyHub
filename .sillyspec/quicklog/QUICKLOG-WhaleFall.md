@@ -223,3 +223,10 @@ created_at: 2026-07-14T09:20:24
 需求：①PPM 默认首页从「项目列表」改「个人工作台」；②工作台快捷入口加「任务计划」按钮；③「我的待办」纳入审批任务。口径经用户确认：审批只做「问题变更 + 问题清单」，问题清单维持现状（所有在办），不含任务计划/里程碑明细（任务计划 PlanTask 本身无审批流，有审批流的是里程碑明细，用户明确不要）。
 方案：①page.tsx redirect 改 /ppm/workbench；②quick-entry-grid 加 Button router.push /ppm/task-plans；③_derive_todos 新增分支 select PpmProblemChange where status="1"（审核中 ProblemChangeStatus.AUDITING）且 now_handle_user 逗号分隔 split 含当前 user.id → WorkbenchTodoItem(source="problem_change", type="缺陷", name=pro_desc||project_name||"问题变更待审批")，与问题清单分支同构（Python 端 split，R-02 方言安全，无 SQL LIKE 子串风险）；前端 todoBadge 的 problem_change→destructive「缺陷」映射此前已存在占位无需改，仅 goTodo 加 problem_change→/ppm/problem-changes（problem_change 也以 problem 开头，故须先判 equals 再判 startsWith，否则误跳 problem-list）；WorkbenchTodoItem schema 四字段(id/name/type/source)无需改，无 DB 迁移（ppm_problem_change 表已存在）。
 结果：后端 workbench 测试 24 passed（原 21 + 新增 3：命中/now_handle_user 不含我/status≠"1" 过滤）、ruff All checks passed + 7 files already formatted、mypy Success no issues；前端 lint 0 error（19 warning 全既有，本次 3 文件无新告警）。待 commit + rebuild frontend+backend 部署 + 用户验证（进 /ppm 落地工作台、快捷入口「任务计划」跳转、有待审批问题变更时出现在我的待办且点击跳问题变更页）。
+
+## ql-20260715-016-5f2a | 2026-07-15 22:25:00 | 任务计划列表增加批量删除功能
+状态：已完成
+结果：task-plans/page.tsx 加 rowSelection 多选 + 批量删除按钮 + handleBatchDelete 循环 deletePlanTask + canDeleteTask 共用(负责人或超管)。tsc EXIT0 + eslint 0error。
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/task-plans/page.tsx
+需求：列表加多选(checkbox)+批量删除按钮，权限复用 canDelete(负责人或超管)，前端循环调 deletePlanTask。

@@ -125,6 +125,7 @@ export default function TaskPlansPage() {
   const [execute, setExecute] = useState<ExecuteTaskState | null>(null);
   const [executeBusy, setExecuteBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<PlanTask | null>(null);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
 
   useEffect(() => {
     void (async () => {
@@ -284,6 +285,40 @@ export default function TaskPlansPage() {
     }
   };
 
+  // 可删除:负责人本人 或 超级管理员 (单删/批量删共用, ql-20260715-015/016)
+  const canDeleteTask = (t: PlanTask) =>
+    currentUser?.id === t.user_id || !!currentUser?.is_platform_admin;
+
+  const handleBatchDelete = async () => {
+    if (selectedRowKeys.length === 0) return;
+    if (
+      !confirm(
+        `确认删除选中的 ${selectedRowKeys.length} 条任务计划？此操作不可恢复。`,
+      )
+    )
+      return;
+    let ok = 0;
+    let fail = 0;
+    for (const id of selectedRowKeys) {
+      try {
+        await deletePlanTask(id);
+        ok += 1;
+      } catch {
+        fail += 1;
+      }
+    }
+    setSelectedRowKeys([]);
+    await load();
+    if (fail === 0) showToast(true, `已删除 ${ok} 条任务计划`);
+    else showToast(false, `成功 ${ok} 条，失败 ${fail} 条`);
+  };
+
+  const rowSelection: TableProps<PlanTask>["rowSelection"] = {
+    selectedRowKeys,
+    onChange: (keys) => setSelectedRowKeys(keys.map(String)),
+    getCheckboxProps: (t: PlanTask) => ({ disabled: !canDeleteTask(t) }),
+  };
+
   const columns: TableProps<PlanTask>["columns"] = [
     {
       title: "任务内容",
@@ -361,8 +396,7 @@ export default function TaskPlansPage() {
         const isOwner = currentUser?.id === t.user_id;
         // 编辑:status="未开始"(PlanTask 中文初始态) + user_id 归属
         const canEdit = t.status === "未开始" && isOwner;
-        // 删除:负责人(isOwner) 或 超级管理员(is_platform_admin) (ql-20260715-015)
-        const canDelete = isOwner || !!currentUser?.is_platform_admin;
+        const canDelete = canDeleteTask(t);
         return (
           <div className="flex whitespace-nowrap gap-1 justify-center">
             <Button
@@ -428,6 +462,15 @@ export default function TaskPlansPage() {
       <SectionCard bodyPadding="p-2">
         {/* 顶部按钮行(D-006):数据组(导出/新建)左 | 基础组(搜索/重置/展开)最右 */}
         <div className="mb-2 flex items-center justify-end gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={selectedRowKeys.length === 0}
+            className="text-red-600 hover:text-red-700"
+            onClick={() => void handleBatchDelete()}
+          >
+            批量删除{selectedRowKeys.length > 0 ? `(${selectedRowKeys.length})` : ""}
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -568,6 +611,7 @@ export default function TaskPlansPage() {
       ) : (
         <Table<PlanTask>
           rowKey="id"
+          rowSelection={rowSelection}
           columns={columns}
           dataSource={rows}
           loading={loading}
