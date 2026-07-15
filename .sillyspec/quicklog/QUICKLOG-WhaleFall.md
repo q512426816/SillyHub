@@ -209,3 +209,10 @@ created_at: 2026-07-14T09:20:24
 关联变更：2026-07-15-milestone-detail-auto-task
 文件：backend/app/modules/ppm/plan/service.py（_to_preview_row 拆分 + import_preview flatMap）+ test_importer.py + test_detail_task_link.py
 需求：导入一行多责任人→拆N条（各一个责任人duty_user_id+联动建任务）；任一未匹配→整行1条标红valid=false不导入；work_load各=原值（不除人数）。
+
+## ql-20260715-015-3c8d | 2026-07-15 21:40:00 | 任务计划列表删除：超级管理员也可删除
+状态：已完成
+结果：task-plans/page.tsx canDelete = isOwner || !!currentUser?.is_platform_admin（负责人或超级管理员可删除）。tsc EXIT0。
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/task-plans/page.tsx（canDelete 加 isPlatformAdmin 判断）
+需求：删除按钮当前仅负责人(isOwner)可用，增加超级管理员(is_platform_admin)也可删除。
