@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { SectionCard } from "@/components/layout";
 import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api";
+import { fmtDateTime } from "@/lib/ppm/format";
 import {
   createProjectMember,
   pageProjectMemberSummary,
@@ -237,7 +238,7 @@ export function PpmProjectMembersGroupTable() {
         dataIndex: "updated_at",
         key: "updated_at",
         width: 170,
-        render: (v: unknown) => (v ? String(v).slice(0, 19) : "—"),
+        render: (v: unknown) => fmtDateTime(v as string | null),
       },
     ],
     [],

@@ -176,3 +176,12 @@ created_at: 2026-07-14T09:20:24
 根因：编辑成员"姓名"字段用 PpmUserSelect res="user"（ppm-project-members-table.tsx:563），首屏 listUsers({limit:20}) 只取前 20；已选 user_id 不在前 20 时，组件 mergedOptions（ppm-user-select.tsx:308-313）用 value(user_id) 兜底 label → 姓名显示 id。
 方案：后端 list_users 加 ids 参数（router Query list[uuid.UUID] + service `User.id.in_(ids)`），按 id 精确批量查绕过分页/关键字；前端 listUsers(UserListParams) 加 ids（apiFetch 数组编码 ?ids=a&ids=b）；ppm-user-select res=user 已选值缺失时用 listUsers({ids}) 批量查真实姓名回填 label（inflightIdsRef 防并发重复，搜索 reset 丢弃后允许重补）。
 结果：后端 ruff + admin 测试 36 passed（含新 test_list_users_filter_by_ids）/3 xfailed；前端 tsc EXIT 0。待 commit + rebuild backend+frontend 部署 + 用户验证（编辑成员姓名显示真实姓名非 id）。
+
+## ql-20260715-011-b118 | 2026-07-15 16:36:21 | /ppm/project-members 一级表"更新时间"列格式化（ISO slice → fmtDateTime 本地时区）
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-project-members-group-table.tsx
+需求：/ppm/project-members 更新时间列格式化。
+根因：group-table.tsx:240 "更新时间"列 render 用 `String(v).slice(0,19)`，显示原始 ISO（带 T、UTC 时间，如 2026-07-15T06:00:35），可读性差且时区未转换。
+方案：改用项目 `fmtDateTime(v)`（lib/ppm/format.ts，`YYYY-MM-DD HH:mm` 本地时区，空值返回 —），加 import。成员子表无此列，仅改一级表一处。
+结果：tsc --noEmit EXIT 0。待 commit + rebuild frontend 部署 + 用户验证（更新时间显示本地 2026-07-15 14:00 格式）。
