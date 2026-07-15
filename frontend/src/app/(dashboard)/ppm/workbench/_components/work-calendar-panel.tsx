@@ -82,29 +82,33 @@ function buildMonthGrid(
   return cells;
 }
 
-/** load_level → 左点颜色 class;none/兜底返回空串(不渲染)。 */
+/** load_level → 左点颜色(任务饱和,注意事项 2):
+ * none→灰(无计划) / leisure→黄(有空余) / full→绿(饱和) / over→红(过载)。 */
 function loadDotClass(level: string | undefined): string {
   switch (level) {
-    case "normal":
-      return "bg-emerald-500";
-    case "mid":
+    case "leisure":
       return "bg-amber-500";
+    case "full":
+      return "bg-emerald-500";
     case "over":
       return "bg-red-500";
     default:
-      return ""; // none / 未知:不显点
+      return "bg-slate-300"; // none / 未知:灰(无计划)
   }
 }
 
-/** alert_level → 右点颜色 class;none/兜底返回空串(不渲染)。 */
+/** alert_level → 右点颜色(任务进度,注意事项 2):
+ * none→灰(无进度) / normal→绿(正常) / late→黄(临期) / over→红(延期)。 */
 function alertDotClass(level: string | undefined): string {
   switch (level) {
     case "normal":
       return "bg-emerald-500";
+    case "late":
+      return "bg-amber-500";
     case "over":
       return "bg-red-500";
     default:
-      return ""; // none / 未知:不显点
+      return "bg-slate-300"; // none / 未知:灰(无进度)
   }
 }
 
@@ -186,17 +190,32 @@ export function WorkCalendarPanel({
               );
             })}
           </div>
-          {/* 图例 */}
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <span className="size-1.5 rounded-full bg-emerald-500" /> 正常
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="size-1.5 rounded-full bg-amber-500" /> 偏满
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="size-1.5 rounded-full bg-red-500" /> 过载/预警
-            </span>
+          {/* 图例:左点=任务饱和,右点=任务进度(注意事项 2) */}
+          <div className="mt-2 space-y-1 text-[10px] text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="text-muted-foreground/70">左·负载:</span>
+              <span className="flex items-center gap-1">
+                <span className="size-1.5 rounded-full bg-emerald-500" /> 饱和
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="size-1.5 rounded-full bg-amber-500" /> 有空余
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="size-1.5 rounded-full bg-red-500" /> 过载
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="text-muted-foreground/70">右·进度:</span>
+              <span className="flex items-center gap-1">
+                <span className="size-1.5 rounded-full bg-emerald-500" /> 正常
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="size-1.5 rounded-full bg-amber-500" /> 临期
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="size-1.5 rounded-full bg-red-500" /> 延期
+              </span>
+            </div>
           </div>
 
           {/* 当日任务列表(点击某日后展示) */}

@@ -73,8 +73,9 @@ async def _seed_plan(
     start_time: datetime | None = None,
     end_time: datetime | None = None,
     content: str | None = "写单测",
+    work_load: str | None = None,
 ) -> PlanTask:
-    """造一条 PlanTask (覆盖 未开始/进行中/已完成 三态)。"""
+    """造一条 PlanTask (覆盖 未开始/进行中/已完成 三态 + work_load 计划工时)。"""
     plan = PlanTask(
         user_id=user_id,
         user_name="张三",
@@ -84,6 +85,7 @@ async def _seed_plan(
         project_id=uuid.uuid4(),
         project_name="P1",
         content=content,
+        work_load=work_load,
     )
     db_session.add(plan)
     await db_session.commit()
@@ -480,39 +482,49 @@ async def test_calendar_cross_day_only_counts_start_day(db_session):
 
 @pytest.mark.asyncio
 async def test_calendar_load_level_buckets(db_session):
-    """load_level 分档:0→none / 1-2→normal / 3-4→mid / ≥5→over。"""
+    """load_level 按当日 work_load 工时(小时)累加分档(注意事项 2):
+    0→none / <8→leisure(有空余) / 8-10→full(饱和) / >10→over(过载)。"""
     user = await _seed_user(db_session)
     now = datetime.now(UTC)
     base = now.replace(hour=9, minute=0, second=0, microsecond=0)
     ym = f"{base.year:04d}-{base.month:02d}"
-    # 用本月不同 day 分别造 1/3/5 条,留 day=10 为空 (0 条)
-    # 先确认这些 day 在当月有效
     import calendar as _cal
 
     dim = _cal.monthrange(base.year, base.month)[1]
-    day_normal = min(10, dim)
-    day_mid = min(11, dim)
-    day_over = min(12, dim)
-    day_none = min(13, dim)
-    assert day_normal != day_mid != day_over != day_none
+    day_leisure = min(10, dim)  # 6h <8 → leisure
+    day_full = min(11, dim)  # 8h → full
+    day_over = min(12, dim)  # 12h >10 → over
+    day_none = min(13, dim)  # 无任务 → none
+    assert len({day_leisure, day_full, day_over, day_none}) == 4
 
-    for _ in range(1):
-        await _seed_plan(
-            db_session, user.id, status="进行中", start_time=base.replace(day=day_normal)
-        )
-    for _ in range(3):
-        await _seed_plan(db_session, user.id, status="进行中", start_time=base.replace(day=day_mid))
-    for _ in range(5):
-        await _seed_plan(
-            db_session, user.id, status="进行中", start_time=base.replace(day=day_over)
-        )
+    await _seed_plan(
+        db_session,
+        user.id,
+        status="进行中",
+        start_time=base.replace(day=day_leisure),
+        work_load="6h",
+    )
+    await _seed_plan(
+        db_session,
+        user.id,
+        status="进行中",
+        start_time=base.replace(day=day_full),
+        work_load="8h",
+    )
+    await _seed_plan(
+        db_session,
+        user.id,
+        status="进行中",
+        start_time=base.replace(day=day_over),
+        work_load="12h",
+    )
 
     svc = WorkbenchService(db_session)
     cal = await svc.get_calendar(user, ym)
     by_date = {d.date: d for d in cal.days}
 
-    assert by_date[f"{ym}-{day_normal:02d}"].load_level == "normal"
-    assert by_date[f"{ym}-{day_mid:02d}"].load_level == "mid"
+    assert by_date[f"{ym}-{day_leisure:02d}"].load_level == "leisure"
+    assert by_date[f"{ym}-{day_full:02d}"].load_level == "full"
     assert by_date[f"{ym}-{day_over:02d}"].load_level == "over"
     assert by_date[f"{ym}-{day_none:02d}"].load_level == "none"
 
@@ -563,6 +575,33 @@ async def test_calendar_alert_level_normal_when_completed(db_session):
     today_key = f"{ym}-{now.day:02d}"
 
     assert by_date[today_key].alert_level == "normal"
+
+
+@pytest.mark.asyncio
+async def test_calendar_alert_level_late(db_session):
+    """临期(注意事项 2):周期>3日,距截止前 2 天 → alert_level='late'。
+
+    start=now-3d, end=now+2d → 周期 5 天(>3), now 距 end 2 天 → 临期。
+    """
+    user = await _seed_user(db_session)
+    now = datetime.now(UTC)
+    start = now - timedelta(days=3)
+    end = now + timedelta(days=2)  # 周期 5 天, now 距 end 2 天 → 临期
+    await _seed_plan(
+        db_session,
+        user.id,
+        status="进行中",
+        start_time=start,
+        end_time=end,
+    )
+
+    svc = WorkbenchService(db_session)
+    ym = f"{start.year:04d}-{start.month:02d}"
+    cal = await svc.get_calendar(user, ym)
+    by_date = {d.date: d for d in cal.days}
+    start_key = f"{ym}-{start.day:02d}"
+
+    assert by_date[start_key].alert_level == "late"
 
 
 @pytest.mark.asyncio

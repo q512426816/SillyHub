@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import calendar as _calendar
+import re
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
@@ -40,6 +41,66 @@ def _to_aware(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=UTC)
     return dt
+
+
+# 日历 alert(任务进度)严重度排序:延期 > 临期 > 正常 > 无
+_ALERT_SEVERITY = {"none": 0, "normal": 1, "late": 2, "over": 3}
+
+
+def _parse_workload_hours(work_load: str | None) -> float:
+    """PlanTask.work_load(计划工时字符串,如 '8h'/'1d'/'0.5d'/'16')解析为小时。
+
+    1d=8h(工作日 8 小时)。无法解析返回 0.0。
+    """
+    if not work_load:
+        return 0.0
+    m = re.match(r"^\s*([\d.]+)\s*(h|d|小时|天)?\s*$", work_load.strip(), re.I)
+    if not m:
+        return 0.0
+    try:
+        val = float(m.group(1))
+    except ValueError:
+        return 0.0
+    unit = (m.group(2) or "").lower()
+    if unit in ("d", "天"):
+        return val * 8.0
+    return val  # h / 小时 / 无单位 → 按小时
+
+
+def _task_alert(task: PlanTask, now: datetime) -> str:
+    """单任务进度状态: normal(正常) / late(临期) / over(延期)。
+
+    已完成或无截止 → normal。延期: end_time<now 且未完成 → over。临期
+    (design 注意事项 2): 周期≤3日 → 截止前 1 天临期(含 1 日任务); 周期>3日
+    → 截止前 2 天临期。周期 = (end_time - start_time).days。
+    """
+    if task.status == "已完成":
+        return "normal"
+    end_time = task.end_time
+    if end_time is None:
+        return "normal"
+    end_aware = _to_aware(end_time)
+    if end_aware < now:
+        return "over"
+    start_time = task.start_time
+    if start_time is not None:
+        period_days = (end_aware - _to_aware(start_time)).days
+        threshold_days = 1 if period_days <= 3 else 2
+        if now >= end_aware - timedelta(days=threshold_days):
+            return "late"
+    return "normal"
+
+
+def _load_level_workload(hours: float) -> str:
+    """load_level(任务饱和)按当日工时分档(design 注意事项 2):
+    0→none(灰无计划) / <8→leisure(黄有空余) / 8-10→full(绿饱和) / >10→over(红过载)。"""
+    if hours <= 0:
+        return "none"
+    if hours < 8:
+        return "leisure"
+    if hours <= 10:
+        return "full"
+    return "over"
 
 
 class WorkbenchService:
@@ -251,9 +312,16 @@ class WorkbenchService:
     ) -> WorkbenchCalendar:
         """装配个人工作台月度日历负载。
 
-        ``year_month`` 形如 ``YYYY-MM``。只计 ``start_time`` 落在该月的
-        任务 (跨多日任务只计 start_time 当日,X-004 不虚高)。按当日任务
-        数 load 分档,按是否有延期任务 alert 分档。
+        ``year_month`` 形如 ``YYYY-MM``。只计 ``start_time`` 落在该月的任务
+        (跨多日任务只计 start_time 当日,X-004 不虚高)。
+
+        左点 load_level(任务饱和,注意事项 2):当日所有任务 work_load(计划工时)
+        解析为小时累加,按 _load_level_workload 分档
+        (none灰/<8 leisure黄/8-10 full绿/>10 over红)。
+
+        右点 alert_level(任务进度,注意事项 2):当日任务按 _task_alert 取最
+        严重状态(none灰无任务/normal绿/late黄临期/over红延期)。当日无任务 →
+        load/alert 均 none。
         """
         now = datetime.now(UTC)
         year, month = self._parse_year_month(year_month, now)
@@ -272,9 +340,10 @@ class WorkbenchService:
         )
         rows = (await self._session.execute(stmt)).scalars().all()
 
-        # 按 start_time 当日落点计数 + 延期标记
+        # 按 start_time 当日落点:计数 + 工时累加(load) + 进度最严重(alert)
         daily_count: dict[int, int] = {}
-        daily_delayed: set[int] = set()
+        daily_workload: dict[int, float] = {}
+        daily_alert: dict[int, str] = {}
         # SQLite DateTime(timezone=True) 存 naive (见 backend-test-sqlite-vs-pg),
         # 与 tz-aware ``now`` 直接比较会 TypeError;统一转 aware 比较。
         now_aware = _to_aware(now)
@@ -284,19 +353,26 @@ class WorkbenchService:
                 continue
             day = start_time.day
             daily_count[day] = daily_count.get(day, 0) + 1
-            end_time = t.end_time
-            if end_time is not None and _to_aware(end_time) < now_aware and t.status != "已完成":
-                daily_delayed.add(day)
+            daily_workload[day] = daily_workload.get(day, 0.0) + _parse_workload_hours(t.work_load)
+            alert = _task_alert(t, now_aware)
+            if _ALERT_SEVERITY[alert] > _ALERT_SEVERITY.get(daily_alert.get(day, "none"), 0):
+                daily_alert[day] = alert
 
         days: list[CalendarDay] = []
         for day in range(1, days_in_month + 1):
             count = daily_count.get(day, 0)
+            if count == 0:
+                load_level = "none"
+                alert_level = "none"
+            else:
+                load_level = _load_level_workload(daily_workload.get(day, 0.0))
+                alert_level = daily_alert.get(day, "normal")
             days.append(
                 CalendarDay(
                     date=f"{year_month}-{day:02d}",
                     task_count=count,
-                    load_level=self._load_level(count),
-                    alert_level="over" if day in daily_delayed else "normal",
+                    load_level=load_level,
+                    alert_level=alert_level,
                 )
             )
 
@@ -305,17 +381,6 @@ class WorkbenchService:
     # ------------------------------------------------------------------
     # helpers
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _load_level(count: int) -> str:
-        """load_level 分档 (X-003):0→none / 1-2→normal / 3-4→mid / ≥5→over。"""
-        if count <= 0:
-            return "none"
-        if count <= 2:
-            return "normal"
-        if count <= 4:
-            return "mid"
-        return "over"
 
     @staticmethod
     def _parse_year_month(year_month: str, now: datetime) -> tuple[int, int]:

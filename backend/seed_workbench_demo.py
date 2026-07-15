@@ -98,7 +98,7 @@ async def main() -> None:
         week_monday = datetime(monday.year, monday.month, monday.day, 9, 0, 0, tzinfo=UTC)
         thursday = week_monday + timedelta(days=3)  # 本周四
 
-        def mk_plan(status, start, end, proj, mod, tag):
+        def mk_plan(status, start, end, proj, mod, tag, work_load=None):
             return PlanTask(
                 user_id=ADMIN_ID,
                 user_name="李明哲",
@@ -108,11 +108,18 @@ async def main() -> None:
                 project_name=f"{TAG}{proj}",
                 module_name=mod,
                 content=f"{TAG}{tag}",
+                work_load=work_load,
             )
 
         plans = [
             mk_plan(
-                "已完成", _day(y, m, 10), _day(y, m, 9), "智能看板", "前端", "T1-已完成(本月10号)"
+                "已完成",
+                _day(y, m, 10),
+                _day(y, m, 9),
+                "智能看板",
+                "前端",
+                "T1-已完成(本月10号)",
+                work_load="4h",
             ),
             mk_plan(
                 "进行中",
@@ -121,6 +128,7 @@ async def main() -> None:
                 "智能看板",
                 "后端",
                 "T2-进行中未延期(本周一开,下周一截止)",
+                work_load="8h",
             ),
             mk_plan(
                 "进行中",
@@ -129,6 +137,7 @@ async def main() -> None:
                 "缺陷管理",
                 "后端",
                 "T3-进行中已延期(本月8号开,11号截止)",
+                work_load="12h",
             ),
             mk_plan(
                 "未开始",
@@ -137,6 +146,7 @@ async def main() -> None:
                 "个人工作台",
                 "前端",
                 "T4-未开始(本周四开)",
+                work_load="6h",
             ),
             mk_plan(
                 "已完成",
@@ -145,6 +155,7 @@ async def main() -> None:
                 "里程碑",
                 "产品",
                 "T5-已完成(上月,仅all口径)",
+                work_load="8h",
             ),
             mk_plan(
                 "进行中",
@@ -153,6 +164,7 @@ async def main() -> None:
                 "缺陷管理",
                 "前端",
                 "T6-进行中未延期(本月5号开,25号截止)",
+                work_load="8h",
             ),
         ]
         for p in plans:
