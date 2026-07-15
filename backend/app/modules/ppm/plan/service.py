@@ -1001,8 +1001,20 @@ class PlanService:
                 module_id_of[key] = new_module.id
                 created_modules += 1
 
-            # 3. 逐行建明细 (status=done,不触发状态机)
+            # 3. 逐行建明细 (必填字段齐全→done, 缺失→draft)
             for row in rows:
+                # 必填字段: 明细阶段/任务主题/任务描述/工作量/开始/结束/执行人
+                required_filled = all(
+                    [
+                        row.detailed_stage,
+                        row.task_theme,
+                        row.task_description,
+                        row.plan_workload,
+                        row.plan_begin_time,
+                        row.plan_complete_time,
+                        row.duty_user_id,
+                    ]
+                )
                 detail = PsPlanNodeDetail(
                     id=uuid.uuid4(),
                     plan_node_id=node_uuid,
@@ -1014,7 +1026,9 @@ class PlanService:
                     plan_begin_time=row.plan_begin_time,
                     plan_complete_time=row.plan_complete_time,
                     execute_user_id=row.duty_user_id,
-                    status=PlanNodeDetailStatus.DONE.value,
+                    status=PlanNodeDetailStatus.DONE.value
+                    if required_filled
+                    else PlanNodeDetailStatus.DRAFT.value,
                     created_at=_now(),
                     updated_at=_now(),
                 )
