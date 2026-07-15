@@ -313,6 +313,46 @@ export function PpmUserSelect(props: PpmUserSelectProps) {
     return dedupeOptions([...options, ...placeholders]);
   }, [options, valueArr]);
 
+  // 已选值缺失补全(res=user):已选 user_id 不在已加载 options(分页只取部分)时,
+  // 按 id 批量查真实姓名回填 label,避免"姓名"字段回退显示 id。
+  // inflightIdsRef 仅防同一 id 并发重复请求,请求结束后清出(允许搜索 reset
+  // 丢弃后重新补全)。
+  const inflightIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (res !== "user") return;
+    const known = new Set(options.map((o) => o.value));
+    const missing = valueArr.filter(
+      (v) => !known.has(v) && !inflightIdsRef.current.has(v),
+    );
+    if (missing.length === 0) return;
+    missing.forEach((v) => inflightIdsRef.current.add(v));
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { items } = await listUsers({
+          ids: missing,
+          limit: missing.length,
+        });
+        if (cancelled) return;
+        const found: PpmSelectOption[] = items.map((u) => ({
+          value: u.id,
+          label: u.display_name || u.email || u.username || u.id,
+          raw: u,
+        }));
+        if (found.length > 0) {
+          setOptions((prev) => dedupeOptions([...prev, ...found]));
+        }
+      } catch {
+        // 查询失败:保持现有占位(mergedOptions 用 value 兜底)。
+      } finally {
+        missing.forEach((v) => inflightIdsRef.current.delete(v));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [valueArr, options, res]);
+
   // 搜索:防抖 300ms(对齐源 dataFilter debounce 300)。
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleSearch = useCallback(

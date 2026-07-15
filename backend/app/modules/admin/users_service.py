@@ -97,8 +97,13 @@ class UserService:
         offset: int = 0,
         organization_id: uuid.UUID | None = None,
         include_children: bool = True,
+        ids: list[uuid.UUID] | None = None,
     ) -> tuple[list[User], int]:
         base = select(User).where(col(User.deleted_at).is_(None))
+        # 按 id 精确批量查（前端 PpmUserSelect 已选值回填用，绕过关键字/分页，
+        # 确保已选但不在当前页的用户能按 id 取回真实姓名）。
+        if ids:
+            base = base.where(col(User.id).in_(ids))
 
         if q:
             pattern = f"%{q}%"

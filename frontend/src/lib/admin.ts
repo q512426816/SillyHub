@@ -73,6 +73,8 @@ export interface UserListParams {
   offset?: number;
   organization_id?: string;
   include_children?: boolean;
+  /** 按 id 批量查（已选值回填，绕过关键字/分页）；编码为 ?ids=a&ids=b。 */
+  ids?: string[];
 }
 
 export interface UserSessionRead {
@@ -119,7 +121,10 @@ export async function listUsers(
   params?: UserListParams,
 ): Promise<UserListResponse> {
   return apiFetch<UserListResponse>("/api/admin/users", {
-    query: params as Record<string, string | number | boolean | undefined>,
+    query: params as Record<
+      string,
+      string | number | boolean | undefined | string[]
+    >,
   });
 }
 

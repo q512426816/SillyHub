@@ -57,6 +57,7 @@ UserService: 自保护（不能删自己）+ 最后管理员保护（_active_adm
 - admin 为 needs_review 模块，文档与实现需重点对照
 - 前端用户抽屉组织/角色多选 size 需匹配后端 le=100，用 allSettled 容错
 - 角色/组织管理加分页（默认 20/页），pageSizeOptions [10,20,50,100]
+- list_users 支持 ids 批量查（`?ids=a&ids=b`，`list[uuid.UUID]` Query → service `User.id.in_(ids)`，按 id 精确过滤绕过 q/分页）；前端 PpmUserSelect 已选 user_id 不在当前页时按 id 回填真实姓名，避免"姓名"字段显示 id
 - 组织树前端用 expandedKeys 受控全展开（defaultExpandAll 异步 treeData 不可靠）
 - 自保护：用户不能禁用/删除自己；最后管理员保护：不能删光活跃管理员
 - OrganizationService `_descendant_ids` 递归取子树，删除前校验非空
@@ -83,6 +84,7 @@ UserService: 自保护（不能删自己）+ 最后管理员保护（_active_adm
 ## 变更索引
 - ql-20260715-002-9c5b | /admin/users 新建用户去掉密码输入框，改后端固定默认初始密码 SillyHub@123（schema.password 改可选 + service 缺省兜底，admin/settings 两入口一致；前端抽屉去密码框加蓝色默认密码提示 + 测试随需求调整）
 - ql-20260715-008-66c5 | /admin/users 重置密码默认改用默认密码 SillyHub@123（非随机）+ 重置成功后关闭弹窗（后端 reset_password 默认 DEFAULT_INITIAL_PASSWORD 删 _generate_password；前端 ResetPasswordDialog 成功 onClose 关闭弹窗）
+- ql-20260715-010-bb2c | /admin/users list_users 加 ids 批量查（?ids=a&ids=b 按 user_id 精确过滤绕过分页）；前端 PpmUserSelect 已选值不在当前页时按 id 回填真实姓名，修复 /ppm/project-members 编辑成员姓名显示 id
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->

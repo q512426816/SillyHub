@@ -54,6 +54,7 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 - FastAPI 路由按注册顺序匹配：字面量路径（export-excel）必须排在 `{item_id}` 参数路由之前，否则 422
 - 导出 Excel 前端需解析 Content-Disposition RFC 5987 filename* 取服务端文件名
 - 列表页统一默认查 20 条，page_size 上限 200（后端 Query ge=1 le=200），前端调用需夹到 200
+- PpmUserSelect res=user 已选值回填：已选 user_id 不在已加载 options（分页只取部分）时，按 id 批量调 listUsers({ids}) 查真实姓名补 label，避免编辑成员"姓名"字段回退显示 id（依赖后端 list_users ids 参数）
 - 问题审批按项目角色查 project_member 找下一处理人，缺失则挂起 ProblemPendingAssignment
 - 工时统计支持 stat-by-user（柱图）/stat-by-project（饼图）双维度
 - 看板 reorder 持久化 kanban_order；DateNav 仅控展示列不参与任务拉取过滤（对齐源无日期过滤）
@@ -89,3 +90,4 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 - 2026-07-14-ppm-projects-style-redesign | /ppm/projects 样式规范化（状态 StatusBadge/类型 Tag/antd Drawer+Modal maskClosable=false/toast 语义化/搜索按钮分组）+ task-08 推广 10 个 ppm 页面操作列统一（居中+ghost+危险红）+ 去硬编码色（bg-blue-500/bg-amber-500/emerald-300）
 - ql-20260714-009-c3d1 | /ppm/projects 项目类型/状态列显示 code「1 2」修复：PROJECT_TYPE/STATUS_OPTIONS value 改源字典 code 1/2/3（原 research/ongoing 与 DB 实际 code 不匹配，PpmResourceTable select find 回退显示原始 code）
 - ql-20260714-010-a4f2 | PpmResourceDrawer 抽屉表单控件原生→antd 统一：Form.useForm + Form.Item rules + Input/Select/DatePicker/InputNumber/Input.TextArea（date/datetime getValueProps/normalize dayjs↔ISO），补 ppm-projects-style-redesign task-02 漏改的表单层
+- ql-20260715-010-bb2c | /ppm/project-members 编辑成员"姓名"显示 id 修复：PpmUserSelect res=user 已选 user_id 不在前 20 条时按 id 批量查真实姓名回填 label（后端 list_users 加 ids 参数配合）

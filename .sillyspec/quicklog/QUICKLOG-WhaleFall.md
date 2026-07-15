@@ -167,3 +167,12 @@ created_at: 2026-07-14T09:20:24
 根因：181245 email 为 NULL（migrated username-only 账号），登录密码 verify 通过后 _issue_token_pair→create_access_token→TokenPayload(email=None)，但 TokenPayload.email 强制 str，pydantic 校验 None 失败抛 ValidationError→500（异常栈 request_id 1e26888c）。180490 不复现因其 email=180490@migrated.local 非空。
 方案：security.py TokenPayload.email: str→str|None，create_access_token 的 email 参数同步 str|None；JWT payload email=None 编码为 null，decode 后 TokenPayload(email=None) 通过校验。安全性：decode_access_token 返回值在 auth_deps.get_current_user 与 db.py audit 只读 payload.sub，无人消费 email，改可选无连带影响。test_login_username.py 加 test_login_username_only_without_email（email=None 用户登录→200）回归测试。
 结果：登录测试 7 passed（含新用例）、auth 全模块 106 passed/2 xfailed、ruff All checks passed。待 commit + rebuild backend 部署 + 用户验证（181245 用 SillyHub@123 登录成功）。
+
+## ql-20260715-010-bb2c | 2026-07-15 16:24:20 | /ppm/project-members 编辑成员姓名显示 id 修复（list_users 加 ids 批量查 + PpmUserSelect 已选值回填查真实姓名）
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/admin/router.py、backend/app/modules/admin/users_service.py、backend/tests/modules/admin/test_users_router.py、frontend/src/lib/admin.ts、frontend/src/components/ppm-user-select.tsx
+需求：/ppm/project-members 编辑成员时调 /api/admin/users?limit=20&offset=0 数据不全，已选成员 user_id 不在前 20，姓名字段显示 id。
+根因：编辑成员"姓名"字段用 PpmUserSelect res="user"（ppm-project-members-table.tsx:563），首屏 listUsers({limit:20}) 只取前 20；已选 user_id 不在前 20 时，组件 mergedOptions（ppm-user-select.tsx:308-313）用 value(user_id) 兜底 label → 姓名显示 id。
+方案：后端 list_users 加 ids 参数（router Query list[uuid.UUID] + service `User.id.in_(ids)`），按 id 精确批量查绕过分页/关键字；前端 listUsers(UserListParams) 加 ids（apiFetch 数组编码 ?ids=a&ids=b）；ppm-user-select res=user 已选值缺失时用 listUsers({ids}) 批量查真实姓名回填 label（inflightIdsRef 防并发重复，搜索 reset 丢弃后允许重补）。
+结果：后端 ruff + admin 测试 36 passed（含新 test_list_users_filter_by_ids）/3 xfailed；前端 tsc EXIT 0。待 commit + rebuild backend+frontend 部署 + 用户验证（编辑成员姓名显示真实姓名非 id）。

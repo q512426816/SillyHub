@@ -1106,3 +1106,24 @@ async def test_list_users_filter_include_children_false(
     assert parent_user.email in emails
     # include_children=false → 下级(子)组织成员不显
     assert child_user.email not in emails
+
+
+async def test_list_users_filter_by_ids(client: AsyncClient, auth_headers, db_session):
+    """ql-010: ids 批量查——只返回指定 id 的用户(前端已选值回填,绕过分页/关键字)。"""
+    u_a = _make_user("ids-a@example.com", "idsa")
+    u_b = _make_user("ids-b@example.com", "idsb")
+    u_c = _make_user("ids-c@example.com", "idsc")
+    db_session.add_all([u_a, u_b, u_c])
+    await db_session.commit()
+    await db_session.refresh(u_a)
+    await db_session.refresh(u_c)
+
+    resp = await client.get(
+        "/api/admin/users",
+        params={"ids": [str(u_a.id), str(u_c.id)]},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    returned_ids = {it["id"] for it in resp.json()["items"]}
+    assert returned_ids == {str(u_a.id), str(u_c.id)}
+    assert str(u_b.id) not in returned_ids
