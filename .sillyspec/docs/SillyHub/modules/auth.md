@@ -37,11 +37,13 @@ _extract_api_key → ApiKeyService.authenticate(明文) → User
 - 权限分平台级与工作空间级两层，`collect_permissions_everywhere` 用于判断「任意 ws 内是否拥有某权限」。
 - RBAC 种子与管理员账号在应用启动时注入，调整权限点需同步更新 seed 与前端权限矩阵。
 - 登录仅认 username（D-001 纯登录名），email 不再作为登录账号识别；User.email 可空，非空仍全局唯一（D-003）。
+- access token 的 `email` 字段可选（`TokenPayload.email: str | None`）：username-only 账号 `User.email` 为 NULL 时 token 携带 `email=null`，签发/解码均不报错；decode 后无人消费 email（`get_current_user` / db audit 只读 `sub`），仅作识别用途。
 
 ## 变更索引
 - ql-20260627-001-a3f2 | API key 认证 last_used_at 时间节流（默认 60s），消除每请求 UPDATE 同一行致行锁串行化的生产性能雪崩。
 - 2026-06-27-p0-perf-optimization | `ApiKeyService.authenticate` 加 Redis 正/负缓存 + bcrypt 放 `asyncio.to_thread` 异步化（生产根因：cost12 同步阻塞单事件循环）+ `revoke` 按 key_prefix 清缓存；缓存降级保证 redis 不可用仍可认证。配置 `auth_api_key_cache_ttl`/`auth_api_key_negative_cache_ttl`。
 - 2026-07-15-change-password | 用户自助修改密码：`AuthService.change_password`（verify 旧密码→hash 新密码→execute-only 撤销其他会话→审计 `user.password_change`→末尾统一 commit，事务原子）+ `POST /api/auth/change-password`(204) + `ChangePasswordRequest` schema。闭环默认密码方案 SillyHub@123。
+- ql-20260715-009-5a20 | email=NULL 用户登录 500 修复（TokenPayload.email 强制 str→str|None，create_access_token email 参数同步；username-only 账号 email 为空时签发 JWT 不再崩；加 email=None 登录回归测试）
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->

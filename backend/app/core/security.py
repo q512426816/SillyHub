@@ -30,7 +30,9 @@ class TokenPayload(BaseModel):
     """Validated JWT body, returned by :func:`decode_access_token`."""
 
     sub: uuid.UUID
-    email: str
+    # email 可选：username-only 账号 email 为 NULL（D-001），token 仅携带；
+    # decode 后无人消费 email（auth_deps / db 只读 sub），故允许 None。
+    email: str | None
     is_admin: bool
     jti: uuid.UUID
     exp: int
@@ -85,7 +87,7 @@ def _utc_now() -> datetime:
 def create_access_token(
     *,
     user_id: uuid.UUID,
-    email: str,
+    email: str | None,
     is_admin: bool,
     settings: Settings,
     jti: uuid.UUID | None = None,

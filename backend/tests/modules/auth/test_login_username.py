@@ -108,3 +108,30 @@ async def test_login_disabled_user_blocked(client: AsyncClient, db_session):
     )
     assert resp.status_code == 401
     assert resp.json()["code"].endswith("AUTH_USER_LOGIN_DISABLED")
+
+
+@pytest.mark.asyncio
+async def test_login_username_only_without_email(client: AsyncClient, db_session):
+    """email=NULL 的 username-only 用户登录 → 200（回归 ql-009）。
+
+    2026-07-15：email 为空的用户登录签发 JWT 时，TokenPayload.email 强制 str
+    校验 None 失败曾致 500；改为 str | None 后应正常签发 access/refresh token。
+    """
+    settings = get_settings()
+    password_hasher.configure(settings.auth_bcrypt_rounds)
+    user = User(
+        email=None,
+        username="noemail",
+        password_hash=password_hasher.hash("Xx1!abcd"),
+        status="active",
+        login_enabled=True,
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    resp = await client.post(
+        "/api/auth/login",
+        json={"account": "noemail", "password": "Xx1!abcd"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert "access_token" in resp.json()
