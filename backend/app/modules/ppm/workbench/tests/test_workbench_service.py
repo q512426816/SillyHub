@@ -143,15 +143,17 @@ async def _seed_execute(
     *,
     execute_user_id: uuid.UUID,
     time_spent: float,
-    actual_start_time: datetime,
-    actual_end_time: datetime,
+    actual_start_time: datetime | None = None,
+    actual_end_time: datetime | None = None,
+    plan_task_id: uuid.UUID | None = None,
 ) -> TaskExecute:
-    """造一条 TaskExecute (work_hours 聚合源)。"""
+    """造一条 TaskExecute (work_hours 聚合源 / 日历过去实际平摊源 / 未来剩余已用源)。"""
     ex = TaskExecute(
         execute_user_id=execute_user_id,
         time_spent=time_spent,
         actual_start_time=actual_start_time,
         actual_end_time=actual_end_time,
+        plan_task_id=plan_task_id,
     )
     db_session.add(ex)
     await db_session.commit()
@@ -583,42 +585,47 @@ async def test_calendar_cross_day_only_counts_start_day(db_session):
 
 
 @pytest.mark.asyncio
-async def test_calendar_load_level_buckets(db_session):
-    """load_level 按当日 work_load 工时(小时)累加分档(注意事项 2):
-    0→none / <8→leisure(有空余) / 8-10→full(饱和) / >10→over(过载)。"""
+async def test_calendar_load_level_past_actual_buckets(db_session):
+    """过去日期 load_level 按实际工时(actual 平摊)分档(D-001~004):
+    单日 execute time_spent×8 小时 → 0→none / <8→leisure / 8-10→full / >10→over。
+
+    用"上月"(整个月 < today)造数,全走实际侧,稳定不依赖今天几号。"""
+    import calendar as _cal
+
     user = await _seed_user(db_session)
     now = datetime.now(UTC)
     base = now.replace(hour=9, minute=0, second=0, microsecond=0)
-    ym = f"{base.year:04d}-{base.month:02d}"
-    import calendar as _cal
-
-    dim = _cal.monthrange(base.year, base.month)[1]
-    day_leisure = min(10, dim)  # 6h <8 → leisure
-    day_full = min(11, dim)  # 8h → full
-    day_over = min(12, dim)  # 12h >10 → over
-    day_none = min(13, dim)  # 无任务 → none
+    # 上月末 → 上月年月(整月 < today 全走实际侧)
+    last_month_end = base.replace(day=1) - timedelta(days=1)
+    lm_year, lm_month = last_month_end.year, last_month_end.month
+    lm_dim = _cal.monthrange(lm_year, lm_month)[1]
+    ym = f"{lm_year:04d}-{lm_month:02d}"
+    day_leisure = min(10, lm_dim)  # 0.5 人天=4h → leisure
+    day_full = min(11, lm_dim)  # 1 人天=8h → full
+    day_over = min(12, lm_dim)  # 2 人天=16h → over
+    day_none = min(13, lm_dim)  # 无 actual → none
     assert len({day_leisure, day_full, day_over, day_none}) == 4
 
-    await _seed_plan(
+    await _seed_execute(
         db_session,
-        user.id,
-        status="进行中",
-        start_time=base.replace(day=day_leisure),
-        work_load="6h",
+        execute_user_id=user.id,
+        time_spent=0.5,
+        actual_start_time=datetime(lm_year, lm_month, day_leisure, tzinfo=UTC),
+        actual_end_time=datetime(lm_year, lm_month, day_leisure, tzinfo=UTC),
     )
-    await _seed_plan(
+    await _seed_execute(
         db_session,
-        user.id,
-        status="进行中",
-        start_time=base.replace(day=day_full),
-        work_load="8h",
+        execute_user_id=user.id,
+        time_spent=1.0,
+        actual_start_time=datetime(lm_year, lm_month, day_full, tzinfo=UTC),
+        actual_end_time=datetime(lm_year, lm_month, day_full, tzinfo=UTC),
     )
-    await _seed_plan(
+    await _seed_execute(
         db_session,
-        user.id,
-        status="进行中",
-        start_time=base.replace(day=day_over),
-        work_load="12h",
+        execute_user_id=user.id,
+        time_spent=2.0,
+        actual_start_time=datetime(lm_year, lm_month, day_over, tzinfo=UTC),
+        actual_end_time=datetime(lm_year, lm_month, day_over, tzinfo=UTC),
     )
 
     svc = WorkbenchService(db_session)
@@ -629,6 +636,184 @@ async def test_calendar_load_level_buckets(db_session):
     assert by_date[f"{ym}-{day_full:02d}"].load_level == "full"
     assert by_date[f"{ym}-{day_over:02d}"].load_level == "over"
     assert by_date[f"{ym}-{day_none:02d}"].load_level == "none"
+
+
+@pytest.mark.asyncio
+async def test_calendar_load_level_past_actual_spread(db_session):
+    """actual 区间跨多日 → time_spent 按区间天数平摊,跨月分母含全区间(D-005)。"""
+    user = await _seed_user(db_session)
+    now = datetime.now(UTC)
+    base = now.replace(hour=9, minute=0, second=0, microsecond=0)
+    last_month_end = base.replace(day=1) - timedelta(days=1)
+    lm_year, lm_month = last_month_end.year, last_month_end.month
+    ym = f"{lm_year:04d}-{lm_month:02d}"
+    start = datetime(lm_year, lm_month, 10, tzinfo=UTC)
+    end = datetime(lm_year, lm_month, 12, tzinfo=UTC)  # 区间 3 天(10/11/12)
+    await _seed_execute(
+        db_session,
+        execute_user_id=user.id,
+        time_spent=3.0,
+        actual_start_time=start,
+        actual_end_time=end,
+    )
+
+    svc = WorkbenchService(db_session)
+    cal = await svc.get_calendar(user, ym)
+    by_date = {d.date: d for d in cal.days}
+    # 每天 3×8/3 = 8h → full
+    assert by_date[f"{ym}-10"].load_level == "full"
+    assert by_date[f"{ym}-11"].load_level == "full"
+    assert by_date[f"{ym}-12"].load_level == "full"
+
+
+@pytest.mark.asyncio
+async def test_calendar_load_level_future_remaining(db_session):
+    """未来日期 load_level 按剩余负载(计划总量-已用)/剩余天数 分档(D-007)。
+
+    用户原例:计划 10 人天(1~20 号),今天落在区间第 10 天,已用 2 → 剩余 8÷11 天≈5.8h → leisure。
+    """
+    user = await _seed_user(db_session)
+    now = datetime.now(UTC)
+    base = now.replace(hour=9, minute=0, second=0, microsecond=0)
+    start = base - timedelta(days=9)
+    end = base + timedelta(days=10)  # 区间 (base-9)..(base+10) = 20 天
+    plan = await _seed_plan(
+        db_session,
+        user.id,
+        status="进行中",
+        start_time=start,
+        end_time=end,
+        work_load="10d",
+    )
+    # 已用 2 人天(关联该 plan,同时其 actual 落在过去 7 号不影响今天未来侧断言)
+    await _seed_execute(
+        db_session,
+        execute_user_id=user.id,
+        time_spent=2.0,
+        actual_start_time=start,
+        actual_end_time=start,
+        plan_task_id=plan.id,
+    )
+
+    svc = WorkbenchService(db_session)
+    ym = f"{base.year:04d}-{base.month:02d}"
+    cal = await svc.get_calendar(user, ym)
+    by_date = {d.date: d for d in cal.days}
+    # 剩余天数 = today..end = 11 天; 剩余 8 人天; 日均 8/11×8 ≈ 5.82h → leisure
+    today_key = f"{ym}-{base.day:02d}"
+    assert by_date[today_key].load_level == "leisure"
+
+
+@pytest.mark.asyncio
+async def test_calendar_load_level_future_remaining_over(db_session):
+    """未来剩余很高 → over:计划 10 人天压在 3 天,日均 ≈26.7h → over。"""
+    user = await _seed_user(db_session)
+    now = datetime.now(UTC)
+    base = now.replace(hour=9, minute=0, second=0, microsecond=0)
+    await _seed_plan(
+        db_session,
+        user.id,
+        status="进行中",
+        start_time=base,
+        end_time=base + timedelta(days=2),  # 区间 3 天
+        work_load="10d",
+    )
+    # 无 execute,已用 0 → 剩余 10 人天
+    svc = WorkbenchService(db_session)
+    ym = f"{base.year:04d}-{base.month:02d}"
+    cal = await svc.get_calendar(user, ym)
+    by_date = {d.date: d for d in cal.days}
+    today_key = f"{ym}-{base.day:02d}"
+    assert by_date[today_key].load_level == "over"
+
+
+@pytest.mark.asyncio
+async def test_calendar_load_level_future_used_ge_plan(db_session):
+    """已用 ≥ 计划总量 → 剩余 0,该任务不对未来天贡献(D-007)。"""
+    user = await _seed_user(db_session)
+    now = datetime.now(UTC)
+    base = now.replace(hour=9, minute=0, second=0, microsecond=0)
+    plan = await _seed_plan(
+        db_session,
+        user.id,
+        status="进行中",
+        start_time=base,
+        end_time=base + timedelta(days=10),
+        work_load="5d",
+    )
+    await _seed_execute(
+        db_session,
+        execute_user_id=user.id,
+        time_spent=6.0,
+        actual_start_time=base,
+        actual_end_time=base,
+        plan_task_id=plan.id,
+    )
+
+    svc = WorkbenchService(db_session)
+    ym = f"{base.year:04d}-{base.month:02d}"
+    cal = await svc.get_calendar(user, ym)
+    by_date = {d.date: d for d in cal.days}
+    today_key = f"{ym}-{base.day:02d}"
+    assert by_date[today_key].load_level == "none"
+
+
+@pytest.mark.asyncio
+async def test_calendar_load_level_future_no_end_skip(db_session):
+    """未完成任务无 end_time → 未来侧无法定剩余天数,跳过(R-05)→ none。"""
+    user = await _seed_user(db_session)
+    now = datetime.now(UTC)
+    base = now.replace(hour=9, minute=0, second=0, microsecond=0)
+    await _seed_plan(
+        db_session,
+        user.id,
+        status="进行中",
+        start_time=base,
+        end_time=None,
+        work_load="10d",
+    )
+
+    svc = WorkbenchService(db_session)
+    ym = f"{base.year:04d}-{base.month:02d}"
+    cal = await svc.get_calendar(user, ym)
+    by_date = {d.date: d for d in cal.days}
+    today_key = f"{ym}-{base.day:02d}"
+    assert by_date[today_key].load_level == "none"
+
+
+@pytest.mark.asyncio
+async def test_calendar_load_level_actual_missing_bounds(db_session):
+    """actual 区间缺失三档兜底(D-003):双端有→平摊;仅一端→落单日;都无→跳过。"""
+    user = await _seed_user(db_session)
+    now = datetime.now(UTC)
+    base = now.replace(hour=9, minute=0, second=0, microsecond=0)
+    last_month_end = base.replace(day=1) - timedelta(days=1)
+    lm_year, lm_month = last_month_end.year, last_month_end.month
+    ym = f"{lm_year:04d}-{lm_month:02d}"
+    d_start_only = 10  # 仅 start → 落单日 1 人天=8h → full
+    d_both = 11  # 双端同日 → 单日 1 人天=8h → full
+    d_none = 12  # 都无 → 跳过 → none
+    await _seed_execute(
+        db_session,
+        execute_user_id=user.id,
+        time_spent=1.0,
+        actual_start_time=datetime(lm_year, lm_month, d_start_only, tzinfo=UTC),
+    )
+    await _seed_execute(
+        db_session,
+        execute_user_id=user.id,
+        time_spent=1.0,
+        actual_start_time=datetime(lm_year, lm_month, d_both, tzinfo=UTC),
+        actual_end_time=datetime(lm_year, lm_month, d_both, tzinfo=UTC),
+    )
+    await _seed_execute(db_session, execute_user_id=user.id, time_spent=5.0)  # 都无
+
+    svc = WorkbenchService(db_session)
+    cal = await svc.get_calendar(user, ym)
+    by_date = {d.date: d for d in cal.days}
+    assert by_date[f"{ym}-{d_start_only:02d}"].load_level == "full"
+    assert by_date[f"{ym}-{d_both:02d}"].load_level == "full"
+    assert by_date[f"{ym}-{d_none:02d}"].load_level == "none"
 
 
 @pytest.mark.asyncio

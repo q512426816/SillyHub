@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import calendar as _calendar
 import re
-from datetime import UTC, datetime, timedelta
+import uuid
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -101,6 +102,88 @@ def _load_level_workload(hours: float) -> str:
     if hours <= 10:
         return "full"
     return "over"
+
+
+def _spread_actual_hours(
+    rows: list[TaskExecute],
+    year: int,
+    month: int,
+    today: date,
+) -> dict[int, float]:
+    """过去侧 (D-001~005):把 ``TaskExecute`` 实际工时 (``time_spent`` 人天) 平摊到
+    actual 区间内、落在 ``(year, month)`` 且日期 ``< today`` 的日历日。
+
+    返回 ``{day_of_month: hours}``。actual 区间缺失三档兜底 (D-003):双端有 →
+    ``[start, end]``;仅一端 → 落该端点单日;都无 → 跳过。``time_spent × 8`` 转小时、
+    ``None → 0`` (D-004);跨月时区间天数分母含全区间,只累加当月过去天 (D-005)。
+    """
+    daily: dict[int, float] = {}
+    for ex in rows:
+        start_dt = ex.actual_start_time
+        end_dt = ex.actual_end_time
+        if start_dt is not None and end_dt is not None:
+            start_date = _to_aware(start_dt).date()
+            end_date = _to_aware(end_dt).date()
+        elif start_dt is not None:
+            start_date = end_date = _to_aware(start_dt).date()
+        elif end_dt is not None:
+            start_date = end_date = _to_aware(end_dt).date()
+        else:
+            continue
+        if end_date < start_date:
+            continue
+        span_days = (end_date - start_date).days + 1
+        daily_hours = float(ex.time_spent or 0.0) * 8.0 / span_days
+        if daily_hours <= 0:
+            continue
+        cur = start_date
+        while cur <= end_date:
+            if cur.year == year and cur.month == month and cur < today:
+                daily[cur.day] = daily.get(cur.day, 0.0) + daily_hours
+            cur += timedelta(days=1)
+    return daily
+
+
+def _spread_remaining_hours(
+    plan_tasks: list[PlanTask],
+    spent_by_plan: dict[uuid.UUID, float],
+    year: int,
+    month: int,
+    today: date,
+) -> dict[int, float]:
+    """未来侧 (D-007):未完成任务的剩余负载 ``(计划总量 − 已用) / 剩余天数`` 摊到
+    当月 ``≥ today`` 的日历日。返回 ``{day_of_month: hours}``。
+
+    兜底:``work_load`` 空 → 跳过 (R-06);``end_time`` 为 None 或区间已过期
+    (``< today``) → 跳过 (R-05);已用 ≥ 计划 → 剩余 0 跳过 (D-007)。
+    剩余天数区间 = ``[max(today, start), end]``,日均 = ``剩余人天 × 8 / 剩余天数``。
+    """
+    daily: dict[int, float] = {}
+    for p in plan_tasks:
+        total_hours = _parse_workload_hours(p.work_load)
+        if total_hours <= 0:
+            continue
+        spent_days = float(spent_by_plan.get(p.id, 0.0) or 0.0)
+        remaining_days = total_hours / 8.0 - spent_days
+        if remaining_days <= 0:
+            continue
+        if p.end_time is None:
+            continue
+        end_date = _to_aware(p.end_time).date()
+        start_date = _to_aware(p.start_time).date() if p.start_time is not None else end_date
+        lower = max(today, start_date)
+        if end_date < lower:
+            continue
+        span = (end_date - lower).days + 1
+        per_day_hours = remaining_days * 8.0 / span
+        if per_day_hours <= 0:
+            continue
+        cur = lower
+        while cur <= end_date:
+            if cur.year == year and cur.month == month and cur >= today:
+                daily[cur.day] = daily.get(cur.day, 0.0) + per_day_hours
+            cur += timedelta(days=1)
+    return daily
 
 
 class WorkbenchService:
@@ -331,28 +414,34 @@ class WorkbenchService:
         user: User,
         year_month: str,
     ) -> WorkbenchCalendar:
-        """装配个人工作台月度日历负载。
+        """装配个人工作台月度日历 (左点负载按今天分界,D-001~007)。
 
-        ``year_month`` 形如 ``YYYY-MM``。只计 ``start_time`` 落在该月的任务
-        (跨多日任务只计 start_time 当日,X-004 不虚高)。
+        ``year_month`` 形如 ``YYYY-MM``。
 
-        左点 load_level(任务饱和,注意事项 2):当日所有任务 work_load(计划工时)
-        解析为小时累加,按 _load_level_workload 分档
-        (none灰/<8 leisure黄/8-10 full绿/>10 over红)。
+        左点 ``load_level`` (负载,以"今天"分界,今天归未来侧):
+          - 过去 (day < today): 实际工时 ``TaskExecute.time_spent`` 平摊到 actual
+            区间每天 (×8h 分档);无实际记录 → none。D-001~005。
+          - 今天及未来 (day ≥ today): 未完成任务的剩余负载 ``(计划总量 − 已用) /
+            剩余天数`` (×8h 分档);无 work_load/无 end_time/已用≥计划 → 不贡献。D-007。
 
-        右点 alert_level(任务进度,注意事项 2):当日任务按 _task_alert 取最
-        严重状态(none灰无任务/normal绿/late黄临期/over红延期)。当日无任务 →
-        load/alert 均 none。
+        右点 ``alert_level`` (进度): 维持现状,按当月 plan_task (start_time 落点) 取
+        最严重 ``_task_alert`` (over > late > normal);当日无 plan_task → none。零改动。
+
+        load 判定脱离 ``count == 0`` 短路 (Grill X-001):过去日期可能仅有实际执行、无
+        计划落点,count==0 不应吞掉实际工时。``task_count`` 字段仍按 plan_task 落点计数。
         """
         now = datetime.now(UTC)
+        now_aware = _to_aware(now)
+        today = now_aware.date()
         year, month = self._parse_year_month(year_month, now)
         days_in_month = _calendar.monthrange(year, month)[1]
 
         # 月起止:本地当月 1 日 00:00 ~ 下月 1 日 00:00 (带 tz)
         month_start = datetime(year, month, 1, tzinfo=UTC)
         next_month_start = datetime(year + (month // 12), (month % 12) + 1, 1, tzinfo=UTC)
+        today_start = datetime(today.year, today.month, today.day, tzinfo=UTC)
 
-        # 当月任务:start_time 落在 [month_start, next_month_start)
+        # 当月 plan_task(start_time 落在当月) → daily_count + 右点 alert (零改动)
         stmt = (
             select(PlanTask)
             .where(PlanTask.user_id == user.id)
@@ -361,33 +450,65 @@ class WorkbenchService:
         )
         rows = (await self._session.execute(stmt)).scalars().all()
 
-        # 按 start_time 当日落点:计数 + 工时累加(load) + 进度最严重(alert)
         daily_count: dict[int, int] = {}
-        daily_workload: dict[int, float] = {}
         daily_alert: dict[int, str] = {}
-        # SQLite DateTime(timezone=True) 存 naive (见 backend-test-sqlite-vs-pg),
-        # 与 tz-aware ``now`` 直接比较会 TypeError;统一转 aware 比较。
-        now_aware = _to_aware(now)
         for t in rows:
             start_time = t.start_time
             if start_time is None:
                 continue
             day = start_time.day
             daily_count[day] = daily_count.get(day, 0) + 1
-            daily_workload[day] = daily_workload.get(day, 0.0) + _parse_workload_hours(t.work_load)
             alert = _task_alert(t, now_aware)
             if _ALERT_SEVERITY[alert] > _ALERT_SEVERITY.get(daily_alert.get(day, "none"), 0):
                 daily_alert[day] = alert
 
+        # 过去侧:实际工时平摊 (D-001~005)。查当前用户全部 TaskExecute,helper 内过滤当月过去天。
+        actual_rows = (
+            (
+                await self._session.execute(
+                    select(TaskExecute).where(TaskExecute.execute_user_id == user.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        daily_actual = _spread_actual_hours(actual_rows, year, month, today)
+
+        # 未来侧:剩余负载 (D-007)。未完成且计划区间与当月未来可能相交的任务。
+        future_stmt = (
+            select(PlanTask)
+            .where(PlanTask.user_id == user.id)
+            .where(PlanTask.status != "已完成")
+            .where(PlanTask.start_time < next_month_start)
+            .where(PlanTask.end_time.is_not(None))
+            .where(PlanTask.end_time >= today_start)
+        )
+        future_plans = (await self._session.execute(future_stmt)).scalars().all()
+        spent_by_plan: dict[uuid.UUID, float] = {}
+        if future_plans:
+            plan_ids = [p.id for p in future_plans]
+            spent_rows = (
+                await self._session.execute(
+                    select(TaskExecute.plan_task_id, func.sum(TaskExecute.time_spent))
+                    .where(TaskExecute.plan_task_id.in_(plan_ids))
+                    .group_by(TaskExecute.plan_task_id)
+                )
+            ).all()
+            for pid, spent in spent_rows:
+                spent_by_plan[pid] = float(spent or 0.0)
+        daily_remaining = _spread_remaining_hours(future_plans, spent_by_plan, year, month, today)
+
         days: list[CalendarDay] = []
         for day in range(1, days_in_month + 1):
             count = daily_count.get(day, 0)
-            if count == 0:
-                load_level = "none"
-                alert_level = "none"
+            day_date = date(year, month, day)
+            # 左点 load:过去→实际,未来→剩余,脱离 count 短路 (X-001)
+            if day_date < today:
+                load_level = _load_level_workload(daily_actual.get(day, 0.0))
             else:
-                load_level = _load_level_workload(daily_workload.get(day, 0.0))
-                alert_level = daily_alert.get(day, "normal")
+                load_level = _load_level_workload(daily_remaining.get(day, 0.0))
+            # 右点 alert:保持现状 (count==0→none,否则取最严重)
+            alert_level = "none" if count == 0 else daily_alert.get(day, "normal")
             days.append(
                 CalendarDay(
                     date=f"{year_month}-{day:02d}",

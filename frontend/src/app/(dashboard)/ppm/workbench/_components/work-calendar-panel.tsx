@@ -242,6 +242,9 @@ export function WorkCalendarPanel({
                 <span className="size-1.5 rounded-full bg-red-500" /> 过载
               </span>
             </div>
+            <div className="text-muted-foreground/60">
+              左点：过去日期按实际工时 · 今天及以后按剩余负载
+            </div>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="text-muted-foreground/70">右·进度:</span>
               <span className="flex items-center gap-1">
