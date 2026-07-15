@@ -289,6 +289,58 @@ async def test_import_preview_parses_and_matches_duty(
     assert "责任人未匹配" in (unmatched_row["error"] or "")
 
 
+async def test_import_preview_splits_multi_duty_per_person(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+) -> None:
+    """多责任人拆分 (ql-20260715-014): 全匹配→每人一条; 任一未匹配→整行标红。"""
+    plan_node_id = uuid.uuid4()
+    pm_project_id = uuid.uuid4()
+    zhang = uuid.uuid4()
+    li = uuid.uuid4()
+    await _seed_project_member(
+        db_session, pm_project_id=pm_project_id, user_id=zhang, user_name="张三"
+    )
+    await _seed_project_member(
+        db_session, pm_project_id=pm_project_id, user_id=li, user_name="李四"
+    )
+
+    xlsx = _build_workbook(
+        rows=[
+            # 行1: 张三、李四 (全匹配) → 拆 2 条, 每人各 work_load=原值
+            ("平台A", "开发", "主题1", "描述", 5, "张三、李四", _SER_BEGIN, _SER_END),
+            # 行2: 张三、无名氏 (部分未匹配) → 整行 1 条标红不拆
+            ("平台A", "开发", "主题2", "描述", 3, "张三、无名氏", _SER_BEGIN, _SER_END),
+        ]
+    )
+
+    url = f"/api/ppm/plan-node/{plan_node_id}/modules/import-preview"
+    resp = await client.post(
+        url,
+        params={"pm_project_id": str(pm_project_id)},
+        files={"file": ("milestone.xlsx", BytesIO(xlsx), "xlsx")},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    sheet = resp.json()["sheets"][0]
+    # 行1拆2 + 行2整行1 = 3 条
+    assert sheet["row_count"] == 3
+    rows = sheet["rows"]
+
+    # 行1拆出两条: 各 valid=True, duty_user_id 各填 (张三/李四), work_load 各=5
+    split_rows = [r for r in rows if r["task_theme"] == "主题1"]
+    assert len(split_rows) == 2
+    assert {r["duty_user_id"] for r in split_rows} == {str(zhang), str(li)}
+    assert all(r["valid"] is True for r in split_rows)
+    assert all(r["plan_workload"] == "5" for r in split_rows)  # 各=原值, 不除人数
+
+    # 行2整行 1 条标红: valid=False, duty_user_id=None, error 含未匹配者
+    red_rows = [r for r in rows if r["task_theme"] == "主题2"]
+    assert len(red_rows) == 1
+    assert red_rows[0]["valid"] is False
+    assert red_rows[0]["duty_user_id"] is None
+    assert "无名氏" in (red_rows[0]["error"] or "")
+
+
 # ---------------------------------------------------------------------------
 # 用例② import-commit: 新建模块 + 明细 (D-001 / status=draft)
 # ---------------------------------------------------------------------------

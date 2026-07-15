@@ -874,8 +874,9 @@ class PlanService:
         - 责任人反查走 ORM 全量 (Grill X-005):查 ``PpmProjectMember`` 全量
           (where pm_project_id),建 ``{user_name: user_id}`` 反查表;user_name 为
           空的成员不进表 (不可匹配)。
-        - 多人责任人取首个 (D-002 / R-09):顿号/逗号分隔取首个姓名精确匹配;
-          未采用姓名写 ``duty_unmatched_note``;未匹配 → ``valid=False``。
+        - 多人责任人拆分 (ql-20260715-014):顿号/逗号分隔,全部匹配→每人一条
+          (duty_user_id 各填、work_load 各=原值);任一未匹配→整行 1 条标红
+          ``valid=False`` 不拆;空责任人→1 条标红。
         """
         # 1. 线程池跑同步解析 (X-002,不阻塞事件循环)
         sheets: list[ParsedSheet] = await anyio.to_thread.run_sync(parse_workbook, file_bytes)
@@ -886,7 +887,10 @@ class PlanService:
         # 3. 逐 Sheet 逐行转 ImportPreviewRow + 责任人反查
         sheet_resps: list[ImportPreviewSheet] = []
         for sheet in sheets:
-            row_resps = [self._to_preview_row(sheet, row, member_map) for row in sheet.rows]
+            row_resps: list[ImportPreviewRow] = []
+            for row in sheet.rows:
+                # 多责任人拆分:一行可能产出多条预览 (ql-20260715-014)
+                row_resps.extend(self._to_preview_rows(sheet, row, member_map))
             sheet_resps.append(
                 ImportPreviewSheet(
                     name=sheet.name,
@@ -921,17 +925,18 @@ class PlanService:
         return out
 
     @staticmethod
-    def _to_preview_row(
+    def _to_preview_rows(
         sheet: ParsedSheet, row: ParsedRow, member_map: dict[str, uuid.UUID]
-    ) -> ImportPreviewRow:
-        """单 ParsedRow → ImportPreviewRow,含责任人反查 (D-002 / R-09)。
+    ) -> list[ImportPreviewRow]:
+        """单 ParsedRow → 多条 ImportPreviewRow（多责任人拆分, ql-20260715-014）。
 
-        - 多人责任人按顿号/逗号分隔取**首个**姓名,trim 后精确匹配反查表
-        - 匹配 → ``duty_matched=True``、``duty_user_id`` 填值
-        - 未匹配 → ``duty_matched=False``、``valid=False``、
-          ``error="责任人未匹配: <姓名>"``
-        - 多人时未采用的姓名写 ``duty_unmatched_note``
-        - date → datetime (plan_begin/plan_complete);其余字段直传
+        - 多人责任人按顿号/逗号分隔
+        - **全部匹配** → 每人一条 (``duty_user_id`` 各填、``work_load`` 各=原值、
+          ``valid=True``)，其余字段共享原行值
+        - **任一未匹配** → 整行 1 条标红 (``valid=False``、``error`` 注明未匹配者、
+          ``duty_user_name`` 保留原文)，不拆分
+        - **空责任人** → 1 条标红 (``valid=False``、``error="责任人未填写"``)
+        - date → datetime (plan_begin/plan_complete)
         """
         duty_names: list[str] = []
         if row.duty_user_name:
@@ -939,23 +944,8 @@ class PlanService:
             raw_split = re.split(r"[、,，;；/]", row.duty_user_name)
             duty_names = [s.strip() for s in raw_split if s and s.strip()]
 
-        first_name = duty_names[0] if duty_names else None
-        unmatched_note_names = duty_names[1:] if len(duty_names) > 1 else []
-
-        matched_id: uuid.UUID | None = None
-        matched = False
-        error: str | None = None
-        if first_name:
-            matched_id = member_map.get(first_name)
-            matched = matched_id is not None
-            if not matched:
-                error = f"责任人未匹配: {first_name}"
-
-        duty_unmatched_note = (
-            "未采用责任人: " + "、".join(unmatched_note_names) if unmatched_note_names else None
-        )
-
-        return ImportPreviewRow(
+        # 拆分行共享的基础字段
+        base: dict[str, Any] = dict(
             sheet_name=sheet.name,
             plan_type=sheet.plan_type,
             module_name=row.module_name,
@@ -963,15 +953,57 @@ class PlanService:
             task_theme=row.task_theme,
             task_description=row.task_description,
             plan_workload=row.plan_workload,
-            duty_user_name=row.duty_user_name,
-            duty_user_id=matched_id,
-            duty_matched=matched,
-            duty_unmatched_note=duty_unmatched_note,
             plan_begin_time=_date_to_datetime(row.plan_begin),
             plan_complete_time=_date_to_datetime(row.plan_complete),
-            valid=matched or first_name is None,
-            error=error,
         )
+
+        # 空责任人 → 1 条标红
+        if not duty_names:
+            return [
+                ImportPreviewRow(
+                    duty_user_name=row.duty_user_name,
+                    duty_user_id=None,
+                    duty_matched=False,
+                    duty_unmatched_note=None,
+                    valid=False,
+                    error="责任人未填写",
+                    **base,
+                )
+            ]
+
+        # 全匹配判断
+        matched_pairs: list[tuple[str, uuid.UUID | None]] = [
+            (n, member_map.get(n)) for n in duty_names
+        ]
+        unmatched = [n for n, uid in matched_pairs if uid is None]
+
+        # 任一未匹配 → 整行 1 条标红 (不拆)
+        if unmatched:
+            return [
+                ImportPreviewRow(
+                    duty_user_name=row.duty_user_name,  # 原文 (多人)
+                    duty_user_id=None,
+                    duty_matched=False,
+                    duty_unmatched_note=None,
+                    valid=False,
+                    error=f"责任人未匹配: {'、'.join(unmatched)}",
+                    **base,
+                )
+            ]
+
+        # 全匹配 → 每人一条 (work_load 各=原值, 不除人数)
+        return [
+            ImportPreviewRow(
+                duty_user_name=name,
+                duty_user_id=uid,
+                duty_matched=True,
+                duty_unmatched_note=None,
+                valid=True,
+                error=None,
+                **base,
+            )
+            for name, uid in matched_pairs
+        ]
 
     # ---------- 导入提交 (task-06 / D-008@v1) ----------
     async def import_commit(self, req: ImportCommitReq, plan_node_id: str) -> ImportResultResp:
@@ -1272,11 +1304,7 @@ class PlanService:
         if uid is None:
             return None  # D-003:无执行人不建任务
 
-        stmt = (
-            select(PlanTask)
-            .where(PlanTask.ps_plan_node_detail_id == detail.id)
-            .limit(1)
-        )
+        stmt = select(PlanTask).where(PlanTask.ps_plan_node_detail_id == detail.id).limit(1)
         task = (await self._session.execute(stmt)).scalar_one_or_none()
 
         project_id, project_name = await self._resolve_project_context(detail.plan_node_id)
@@ -1331,11 +1359,7 @@ class PlanService:
         ``PlanTask.user_id`` 非空约束)。
         未命中 → 不新建,直接返回 (编辑不触发建任务,仅同步既有绑定)。
         """
-        stmt = (
-            select(PlanTask)
-            .where(PlanTask.ps_plan_node_detail_id == detail.id)
-            .limit(1)
-        )
+        stmt = select(PlanTask).where(PlanTask.ps_plan_node_detail_id == detail.id).limit(1)
         task = (await self._session.execute(stmt)).scalar_one_or_none()
         if task is None:
             return  # 未关联任务,编辑不新建

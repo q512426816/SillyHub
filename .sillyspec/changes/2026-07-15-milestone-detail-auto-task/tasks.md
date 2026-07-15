@@ -16,3 +16,5 @@ created_at: 2026-07-15 19:07:21
 - task-07：新增 `backend/app/modules/ppm/plan/tests/test_detail_task_link.py`，覆盖 FR-01~FR-07 全部 GWT 边界（建/导入批量/编辑同步/变更迁移/删除解关联/执行人空跳过/版本链查重/强一致回滚）
 - task-08：（可选）`milestone-details/page.tsx` 提交成功 toast 加「已自动创建任务」文案
 - task-09：后端 curl 实测 create/save/import/update/change/delete 六路径联动 + grep 确认 import + 重建 backend Docker 部署验证
+
+- [x] ql-20260715-014-7e3a 导入模块多责任人拆分多条（每人一条明细+任务）

@@ -202,3 +202,10 @@ created_at: 2026-07-14T09:20:24
 根因：`PpmProjectMembersTable.load` 调 `listProjectMembers`（= `pageProjectMembers().items`，不传 page/page_size、丢 total），一次性拉数据存 `rows`，前端 `rows.slice` 本地分页；pageSize 变更只改本地 slice 不走接口（后端默认 page_size 下数据也可能不全）。
 方案：load 改用 `pageProjectMembers({page, page_size, pm_project_id})` 服务端分页，`setRows(resp.items)` + `setTotal(resp.total)`；新增 `total` state；删本地 `pagedRows` slice（`dataSource` 直接用 `rows`=当前页）；`onChange` 时 pageSize 变化回到第 1 页避免越界。load 依赖加 `[page, pageSize]` 触发翻页/改页大小重新查询。
 结果：tsc EXIT 0、lint 干净（line 937 `error` unused 为既存，非本次）。待 commit + rebuild frontend 部署 + 用户验证（展开成员子表，切换每页条数走接口刷新当前页）。
+
+## ql-20260715-014-7e3a | 2026-07-15 21:14:46 | 导入模块多责任人拆分多条（每人一条明细+任务）
+状态：已完成
+结果：service._to_preview_row→_to_preview_rows(返回list:全匹配→N条各一责任人duty_user_id+work_load各原值;任一未匹配→整行1条标红不拆;空责任人→1条标红)+import_preview改flatMap。test_router加多责任人拆分测试。plan 77 passed+ruff/mypy过。
+关联变更：2026-07-15-milestone-detail-auto-task
+文件：backend/app/modules/ppm/plan/service.py（_to_preview_row 拆分 + import_preview flatMap）+ test_importer.py + test_detail_task_link.py
+需求：导入一行多责任人→拆N条（各一个责任人duty_user_id+联动建任务）；任一未匹配→整行1条标红valid=false不导入；work_load各=原值（不除人数）。
