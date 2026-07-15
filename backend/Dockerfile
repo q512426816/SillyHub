@@ -70,7 +70,7 @@ RUN groupadd --system app && useradd --system --gid app --home /app app
 # trixie 用 DEB822 /etc/apt/sources.list.d/debian.sources，旧版用 sources.list，
 # find 覆盖两种格式；找不到文件时 -exec 不执行，退出码仍为 0，无副作用。
 RUN find /etc/apt -type f \( -name 'sources.list' -o -name '*.sources' \) \
-      -exec sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' {} + \
+      -exec sed -i 's|deb.debian.org|mirrors.aliyun.com|g' {} + \
  && apt-get update -o Acquire::Retries=3 \
  && apt-get install -y --no-install-recommends --fix-missing curl ca-certificates git libstdc++6 \
  && rm -rf /var/lib/apt/lists/*
