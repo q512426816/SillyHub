@@ -131,3 +131,12 @@ created_at: 2026-07-14T09:20:24
 根因：报错文案是 service.py:93 的英文硬编码（防枚举统一报错，D-001 纯 username 登录后仍残留 email 字样）。注：用户用 180490+SillyHub@123 登录 401 的根因是 180490 为 2025-01-15 创建的老用户（默认密码方案 2026-07-15 才上线），密码非默认——与本次文案改动无关，老用户密码需单独批量重置。
 方案：service.py:93 AuthInvalidCredentials 消息「Invalid email or password.」→「用户名或密码错误。」（注释同步中文，保留防枚举：不区分用户不存在/密码错）。
 结果：纯文案改动；待 commit+push+rebuild backend 部署 + 用户验证（登录失败显示中文「用户名或密码错误」）。
+
+## ql-20260715-006-2c4d | 2026-07-15 13:33:28 | GroupTable 搜索区超 4 条件加展开收起（对齐 projects PpmResourceTable showExpandToggle）
+状态：已完成
+关联变更：2026-07-15-project-members-rebuild
+文件：frontend/src/components/ppm-project-members-group-table.tsx
+需求：用户反馈查询条件还是不统一——GroupTable 6 字段全显示，projects 超过 4 字段有展开收起。
+根因：ql-005 同步样式时漏了 projects PpmResourceTable 的 showExpandToggle 逻辑（visibleSearchFields collapsed 取前 4 + 展开按钮，ppm-resource-table.tsx:519/595-603）；GroupTable 6 字段直接全显。
+方案：GroupTable 加 searchExpanded state（默认 false）+ 后 2 字段（成员姓名·账号/角色）用 {searchExpanded &&} 条件渲染（前 4 总显）+ 按钮行搜索/重置后加展开/收起按钮（6>4 显示）。对齐 projects。
+结果：tsc --noEmit EXIT 0。待 commit + push + rebuild frontend + 用户验证（默认前 4 + 展开按钮，点展开显全部 6 + 收起）。

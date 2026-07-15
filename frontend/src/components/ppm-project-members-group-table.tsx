@@ -96,6 +96,8 @@ export function PpmProjectMembersGroupTable() {
 
   // 展开行 keys(受控,翻页时清空,接受重置——G6 默认行为可接受)。
   const [expandedRowKeys, setExpandedRowKeys] = useState<React.Key[]>([]);
+  // 搜索区展开/收起(对齐 projects PpmResourceTable: 字段>4 时默认 collapsed 显前 4 + 展开按钮)。
+  const [searchExpanded, setSearchExpanded] = useState(false);
   // 全局新增抽屉。
   const [globalAddOpen, setGlobalAddOpen] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
@@ -282,6 +284,14 @@ export function PpmProjectMembersGroupTable() {
               <Button size="sm" variant="outline" onClick={onReset}>
                 重置
               </Button>
+              {/* 展开收起(6 字段 > 4,对齐 projects showExpandToggle) */}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setSearchExpanded((v) => !v)}
+              >
+                {searchExpanded ? "收起" : "展开"}
+              </Button>
             </div>
 
             {/* 搜索区(6 维,grid-cols-4 对齐 projects) */}
@@ -351,35 +361,39 @@ export function PpmProjectMembersGroupTable() {
                   placeholder="负责人"
                 />
               </div>
-              <div>
-                <label className="text-[11px] text-muted-foreground">
-                  成员姓名 / 账号
-                </label>
-                <Input
-                  allowClear
-                  value={search.member_keyword}
-                  onChange={(e) =>
-                    setSearch((s) => ({
-                      ...s,
-                      member_keyword: e.target.value,
-                    }))
-                  }
-                  placeholder="成员姓名 / 账号"
-                />
-              </div>
-              <div>
-                <label className="text-[11px] text-muted-foreground">
-                  角色
-                </label>
-                <Input
-                  allowClear
-                  value={search.role_name}
-                  onChange={(e) =>
-                    setSearch((s) => ({ ...s, role_name: e.target.value }))
-                  }
-                  placeholder="承担角色"
-                />
-              </div>
+              {searchExpanded && (
+                <>
+                  <div>
+                    <label className="text-[11px] text-muted-foreground">
+                      成员姓名 / 账号
+                    </label>
+                    <Input
+                      allowClear
+                      value={search.member_keyword}
+                      onChange={(e) =>
+                        setSearch((s) => ({
+                          ...s,
+                          member_keyword: e.target.value,
+                        }))
+                      }
+                      placeholder="成员姓名 / 账号"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-muted-foreground">
+                      角色
+                    </label>
+                    <Input
+                      allowClear
+                      value={search.role_name}
+                      onChange={(e) =>
+                        setSearch((s) => ({ ...s, role_name: e.target.value }))
+                      }
+                      placeholder="承担角色"
+                    />
+                  </div>
+                </>
+              )}
             </div>
           </SectionCard>
 
