@@ -255,3 +255,11 @@ created_at: 2026-07-14T09:20:24
 根因：登录成功跳转走 login/page.tsx 的 PLATFORM_REDIRECT[platform]（L81 router.replace），ppm 硬编码 "/ppm/projects"（L28），不经过 /ppm/page.tsx 的 redirect。上次（ql-010-a3b7）只改了 /ppm/page.tsx 的 redirect 目标,漏了 login 这处硬编码跳转 → 登录直奔 /ppm/projects 绕过 redirect。
 方案：login/page.tsx PLATFORM_REDIRECT.ppm 改 "/ppm/workbench"（登录成功直接跳工作台）+ 注释同步。其他 /ppm/projects 引用（app-shell 图标映射、menu-permissions 菜单项 ppm-projects、top-bar.test 测试）不影响登录跳转,不动;切换平台走 /ppm 经 redirect 到 workbench 仍有效。
 结果：rebuild frontend 后 healthy,commit_sha=c5fcc6b04c32;grep .next 产物命中 ppm/workbench（login 常量已编译进镜像）。待 commit + 用户浏览器验证（选 ppm 登录→/ppm/workbench）。
+
+## ql-20260716-001-a2b3 | 2026-07-16 00:54:44 | PPM 任务计划执行弹窗加任务详情区(核心字段+备注/附件) + 问题清单「开始处置」弹窗补流程履历
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/_components/execute-task-dialog.tsx（import fmtDay/taskStatusTag + 新增 DetailItem/TaskDetail 只读详情区:项目/模块/计划时间/状态/负责人/配合人员/预估工时 + remarks 备注 + file_urls 附件链接,DialogHeader 后插入）+ frontend/src/app/(dashboard)/ppm/problem-list/_forms.tsx（ProblemStartForm 加 useProblemLogs + ProcessTimeline,对齐 audit/done/close 态,详情区下方补流程履历）
+需求：用户反馈任务计划/问题清单执行弹窗"只有执行输入框,不够"。经澄清:任务计划执行弹窗确实纯输入框无详情(要加详情区);问题清单用户点的是「开始处置」按钮(ProblemStartForm),该弹窗有详情但只有单输入框、无流程履历(补履历)。
+方案：①execute-task-dialog 加 TaskDetail 只读详情区(grid 布局,复用 taskStatusTag/fmtDay),核心 7 字段(项目/模块/计划时间/状态/负责人/配合人员/预估工时)+ remarks 备注 + file_urls 附件链接(仅有时显示),task 对象已由 state.task 透传无需改父;②ProblemStartForm 对齐 audit/done/close 加 useProblemLogs(problem.id) + ProcessTimeline logs/loading,详情区下方显示流程履历。两处均纯前端,弹窗已收到完整对象,无新接口/无后端改动。
+结果：tsc --noEmit exit 0;rebuild frontend 后 healthy,commit_sha=6ed43b5b。待 commit + 用户浏览器验证(任务计划执行弹窗显示详情;问题清单开始处置弹窗显示履历)。注:工作区另有遗留的 workbench/service.py 日历负载重构(会话开始就有的 intentional 改动,未 commit,致 test_calendar_load_level_buckets 失败),本次未动,单独说明。

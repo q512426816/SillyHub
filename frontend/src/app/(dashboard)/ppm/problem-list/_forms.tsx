@@ -584,6 +584,7 @@ export function ProblemStartForm({
 }: ProblemStartFormProps) {
   const [handleInfo, setHandleInfo] = useState(problem.handle_info ?? "");
   const [busy, setBusy] = useState(false);
+  const [logs, loadingLogs] = useProblemLogs(problem.id);
 
   const submit = async (completed: boolean) => {
     setBusy(true);
@@ -606,6 +607,7 @@ export function ProblemStartForm({
   return (
     <div>
       <ProblemDescriptions problem={problem} />
+      <ProcessTimeline logs={logs} loading={loadingLogs} />
       <Divider />
       <Form layout="vertical">
         <Form.Item label="开始/处置备注(对照源 startRemark)">
