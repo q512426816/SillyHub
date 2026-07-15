@@ -29,6 +29,7 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 缺失则挂起 ProblemPendingAssignment
 ```
 里程碑变更走 `parent_id` 版本链（旧版 archived、新版 draft），不走状态迁移。
+明细-任务联动：里程碑明细（PsPlanNodeDetail）变 done 时自动建一条 PlanTask 挂执行人名下（plan/service.py 6 helper `_ensure_task_for_detail` 等 + 5 触发点 create_detail/_transition/import_commit/update+delete_detail/change_process，强一致同事务）；编辑同步任务字段、变更迁移（版本链）、删除解关联（ps_plan_node_detail_id 置 null，任务保留）；导入一行多责任人拆分（全匹配→每人一条，任一未匹配→整行标红）。
 看板 matrix（`kanban-grouping`）：人员×日期矩阵，任务按 start_time~deadline 跨天连续落 cell（限 366 天）。
 导出：openpyxl 生成 xlsx，文件名时间戳格式 `{中文名}_YYYYMMDD_HHmmss.xlsx`。
 看板 service `_derive_priority`/`_derive_progress` 从状态派生优先级与进度；`_parse_hours`/`_parse_date_range` 解析工时与日期。
