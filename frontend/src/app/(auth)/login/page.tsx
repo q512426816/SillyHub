@@ -25,7 +25,7 @@ const PLATFORM_OPTIONS = [
 ];
 const PLATFORM_REDIRECT: Record<LoginPlatform, string> = {
   sillyhub: "/workspaces",
-  ppm: "/ppm/projects",
+  ppm: "/ppm/workbench",
 };
 
 export default function LoginPage() {
@@ -76,7 +76,7 @@ export default function LoginPage() {
         localStorage.removeItem(REMEMBER_KEY);
       }
 
-      // 按平台选择跳转(ppm→/ppm/projects,sillyhub→/workspaces),并持久平台选择
+      // 按平台选择跳转(ppm→/ppm/workbench,sillyhub→/workspaces),并持久平台选择
       localStorage.setItem(PLATFORM_KEY, platform);
       router.replace(PLATFORM_REDIRECT[platform]);
     } catch (err) {

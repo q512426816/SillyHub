@@ -246,3 +246,12 @@ created_at: 2026-07-14T09:20:24
 需求：用户要求工作台「本月日历」可以切换月份。
 方案：后端 get_calendar(year_month) 与 fetchWorkbenchCalendar(yearMonth) 此前已支持任意月,只缺前端切换 UI。page.tsx 加 calendarMonth state（默认当月 dayjs format YYYY-MM）,loadCalendar 依赖 calendarMonth,切换 setCalendarMonth → loadCalendar 重建 → 独立 useEffect 重拉该月（不随 profile/tasks 重跑）。WorkCalendarPanel 加月份导航行（‹ dayjs(month).subtract(1,month) | format(YYYY年M月) | add(1,month) ›）调 onMonthChange;selectedDay 用 useEffect 跟随 month 重置（今天在新月则选中今天,否则清空,避免跨月残留）;日期格 date 用 props month 构造（原 yearMonth 局部变量已移除,修 tsc 报错）。
 结果：tsc --noEmit exit 0;rebuild frontend 后 healthy,/api/health ok（commit_sha=e3ae33b9）。待 commit + 用户浏览器验证 ‹ › 切换。
+
+## ql-20260715-016-b3f1 | 2026-07-15 23:16:08 | 修复登录后仍跳 /ppm/projects——login PLATFORM_REDIRECT.ppm 改 /ppm/workbench（上次只改了 /ppm redirect 漏了登录硬编码）
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(auth)/login/page.tsx（PLATFORM_REDIRECT.ppm "/ppm/projects"→"/ppm/workbench" + L79 注释同步）
+需求：用户反馈选 ppm 平台登录后仍默认跳 /ppm/projects 而非 /ppm/workbench。
+根因：登录成功跳转走 login/page.tsx 的 PLATFORM_REDIRECT[platform]（L81 router.replace），ppm 硬编码 "/ppm/projects"（L28），不经过 /ppm/page.tsx 的 redirect。上次（ql-010-a3b7）只改了 /ppm/page.tsx 的 redirect 目标,漏了 login 这处硬编码跳转 → 登录直奔 /ppm/projects 绕过 redirect。
+方案：login/page.tsx PLATFORM_REDIRECT.ppm 改 "/ppm/workbench"（登录成功直接跳工作台）+ 注释同步。其他 /ppm/projects 引用（app-shell 图标映射、menu-permissions 菜单项 ppm-projects、top-bar.test 测试）不影响登录跳转,不动;切换平台走 /ppm 经 redirect 到 workbench 仍有效。
+结果：rebuild frontend 后 healthy,commit_sha=c5fcc6b04c32;grep .next 产物命中 ppm/workbench（login 常量已编译进镜像）。待 commit + 用户浏览器验证（选 ppm 登录→/ppm/workbench）。
