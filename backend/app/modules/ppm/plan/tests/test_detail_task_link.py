@@ -106,9 +106,7 @@ async def _count_tasks(session: AsyncSession) -> int:
     return len(rows)
 
 
-async def _get_task_by_detail(
-    session: AsyncSession, detail_id: uuid.UUID
-) -> PlanTask | None:
+async def _get_task_by_detail(session: AsyncSession, detail_id: uuid.UUID) -> PlanTask | None:
     stmt = select(PlanTask).where(PlanTask.ps_plan_node_detail_id == detail_id).limit(1)
     return (await session.execute(stmt)).scalar_one_or_none()
 
@@ -175,9 +173,7 @@ class TestFR01CreateDetailBuildsTask:
         assert task.project_id == plan.project_id
         assert task.project_name == "联动测试项目"
 
-    async def test_draft_detail_does_not_create_task(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_draft_detail_does_not_create_task(self, db_session: AsyncSession) -> None:
         """FR-01b:draft 明细不建任务。"""
         plan = await _seed_project_plan(db_session)
         node = await _seed_node(db_session, plan.id)
@@ -194,9 +190,7 @@ class TestFR01CreateDetailBuildsTask:
         )
         assert await _count_tasks(db_session) == 0
 
-    async def test_done_detail_without_executor_skips_task(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_done_detail_without_executor_skips_task(self, db_session: AsyncSession) -> None:
         """FR-01c / D-003:done 但 execute_user_id 为空 → 跳过不建任务。"""
         plan = await _seed_project_plan(db_session)
         node = await _seed_node(db_session, plan.id)
@@ -214,9 +208,7 @@ class TestFR01CreateDetailBuildsTask:
         assert detail.status == "done"
         assert await _count_tasks(db_session) == 0
 
-    async def test_save_process_to_done_creates_task(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_save_process_to_done_creates_task(self, db_session: AsyncSession) -> None:
         """FR-01d:draft 明细经 save_process 推进到 DONE → 建一条任务。
 
         触发点: _transition 在 target=done 时调 _ensure_task_for_detail。
@@ -338,9 +330,7 @@ class TestFR02ImportBatchBuild:
         assert result.created_details == 3
         # done 行 = 2 → 任务数 = 2 (draft 行不建)
         assert await _count_tasks(db_session) == 2
-        contents = {
-            t.content for t in (await db_session.execute(select(PlanTask))).scalars().all()
-        }
+        contents = {t.content for t in (await db_session.execute(select(PlanTask))).scalars().all()}
         assert contents == {"导入任务A", "导入任务B"}
 
 
@@ -353,9 +343,7 @@ class TestFR03EditSyncsTaskFields:
     """FR-03: update_detail 改 task_theme/workload/execute_user_id →
     同 task.id 字段已变, 但 status 不变 (仍是"未开始")。"""
 
-    async def test_update_detail_syncs_fields_keeps_status(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_update_detail_syncs_fields_keeps_status(self, db_session: AsyncSession) -> None:
         plan = await _seed_project_plan(db_session)
         node = await _seed_node(db_session, plan.id)
         m1 = await _seed_member(db_session, user_id=uuid.uuid4(), user_name="原执行人")
@@ -409,9 +397,7 @@ class TestFR04ChangeMigratesTask:
     """FR-04 / D-001: change_process 把任务的 ps_plan_node_detail_id
     从旧版本迁到新版本,PlanTask 仍 1 条。"""
 
-    async def test_change_process_migrates_task_binding(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_change_process_migrates_task_binding(self, db_session: AsyncSession) -> None:
         plan = await _seed_project_plan(db_session)
         node = await _seed_node(db_session, plan.id)
         member = await _seed_member(db_session, user_id=uuid.uuid4(), user_name="变更员")
@@ -458,9 +444,7 @@ class TestFR04ChangeMigratesTask:
 class TestFR05DeleteUnlinksTask:
     """FR-05 / D-004: delete_detail → 任务保留, ps_plan_node_detail_id=None。"""
 
-    async def test_delete_detail_unlinks_but_keeps_task(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_delete_detail_unlinks_but_keeps_task(self, db_session: AsyncSession) -> None:
         plan = await _seed_project_plan(db_session)
         node = await _seed_node(db_session, plan.id)
         member = await _seed_member(db_session, user_id=uuid.uuid4(), user_name="删除员")
@@ -525,9 +509,7 @@ class TestFR06RollbackOnTaskFailure:
         # 依赖在异常时 rollback) 负责。测试显式 rollback 模拟该边界后,明细与任务
         # 均不应落库 (强一致回滚, R-07)。
         await db_session.rollback()
-        details = (
-            (await db_session.execute(select(PsPlanNodeDetail))).scalars().all()
-        )
+        details = (await db_session.execute(select(PsPlanNodeDetail))).scalars().all()
         assert len(details) == 0
         # 任务也未建
         assert await _count_tasks(db_session) == 0
@@ -541,9 +523,7 @@ class TestFR06RollbackOnTaskFailure:
 class TestFR07HistoricalNoBackfill:
     """FR-07: 直接 ORM 建的 done 明细 (不经任何触发点) → 不被回填任务。"""
 
-    async def test_historical_done_detail_not_backfilled(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_historical_done_detail_not_backfilled(self, db_session: AsyncSession) -> None:
         plan = await _seed_project_plan(db_session)
         node = await _seed_node(db_session, plan.id)
         member = await _seed_member(db_session, user_id=uuid.uuid4(), user_name="历史员")
