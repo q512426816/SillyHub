@@ -1001,22 +1001,18 @@ class PlanService:
                 module_id_of[key] = new_module.id
                 created_modules += 1
 
-            # 3. 逐行建明细 (必填字段齐全→done, 缺失→draft; 同模块下 task_theme+detailed_stage 重复则跳过)
-            existing_details = await self._session.execute(
-                select(PsPlanNodeDetail.task_theme, PsPlanNodeDetail.detailed_stage).where(
+            # 3. 逐行建明细: 同模块下相同 task_theme+detailed_stage → 更新, 否则新建
+            existing_details_result = await self._session.execute(
+                select(PsPlanNodeDetail).where(
                     PsPlanNodeDetail.module_id == module_id_of[key],
                     PsPlanNodeDetail.status != PlanNodeDetailStatus.ARCHIVED.value,
                 )
             )
-            existing_keys: set[tuple[str | None, str | None]] = {
-                (t, s) for t, s in existing_details.all()
+            existing_map: dict[tuple[str | None, str | None], PsPlanNodeDetail] = {
+                (d.task_theme, d.detailed_stage): d for d in existing_details_result.scalars().all()
             }
 
             for row in rows:
-                dedup_key = (row.task_theme, row.detailed_stage)
-                if dedup_key in existing_keys:
-                    skipped_rows += 1
-                    continue
                 # 必填字段: 明细阶段/任务主题/任务描述/工作量/开始/结束/执行人
                 required_filled = all(
                     [
@@ -1029,25 +1025,40 @@ class PlanService:
                         row.duty_user_id,
                     ]
                 )
-                detail = PsPlanNodeDetail(
-                    id=uuid.uuid4(),
-                    plan_node_id=node_uuid,
-                    module_id=module_id_of[key],
-                    detailed_stage=row.detailed_stage,
-                    task_theme=row.task_theme,
-                    task_description=row.task_description,
-                    plan_workload=row.plan_workload,
-                    plan_begin_time=row.plan_begin_time,
-                    plan_complete_time=row.plan_complete_time,
-                    execute_user_id=row.duty_user_id,
-                    status=PlanNodeDetailStatus.DONE.value
+                dedup_key = (row.task_theme, row.detailed_stage)
+                new_status = (
+                    PlanNodeDetailStatus.DONE.value
                     if required_filled
-                    else PlanNodeDetailStatus.DRAFT.value,
-                    created_at=_now(),
-                    updated_at=_now(),
+                    else PlanNodeDetailStatus.DRAFT.value
                 )
-                self._session.add(detail)
-                created_details += 1
+                existing = existing_map.get(dedup_key)
+                if existing is not None:
+                    # 更新已有明细(覆盖描述/工作量/日期/执行人/状态)
+                    existing.task_description = row.task_description
+                    existing.plan_workload = row.plan_workload
+                    existing.plan_begin_time = row.plan_begin_time
+                    existing.plan_complete_time = row.plan_complete_time
+                    existing.execute_user_id = row.duty_user_id
+                    existing.status = new_status
+                    existing.updated_at = _now()
+                else:
+                    detail = PsPlanNodeDetail(
+                        id=uuid.uuid4(),
+                        plan_node_id=node_uuid,
+                        module_id=module_id_of[key],
+                        detailed_stage=row.detailed_stage,
+                        task_theme=row.task_theme,
+                        task_description=row.task_description,
+                        plan_workload=row.plan_workload,
+                        plan_begin_time=row.plan_begin_time,
+                        plan_complete_time=row.plan_complete_time,
+                        execute_user_id=row.duty_user_id,
+                        status=new_status,
+                        created_at=_now(),
+                        updated_at=_now(),
+                    )
+                    self._session.add(detail)
+                    created_details += 1
 
         # 4. 末尾单次 commit (D-008);异常冒泡不 commit 即整体回滚
         await self._session.commit()
