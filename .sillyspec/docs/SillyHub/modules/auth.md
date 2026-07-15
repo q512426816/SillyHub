@@ -41,6 +41,7 @@ _extract_api_key → ApiKeyService.authenticate(明文) → User
 ## 变更索引
 - ql-20260627-001-a3f2 | API key 认证 last_used_at 时间节流（默认 60s），消除每请求 UPDATE 同一行致行锁串行化的生产性能雪崩。
 - 2026-06-27-p0-perf-optimization | `ApiKeyService.authenticate` 加 Redis 正/负缓存 + bcrypt 放 `asyncio.to_thread` 异步化（生产根因：cost12 同步阻塞单事件循环）+ `revoke` 按 key_prefix 清缓存；缓存降级保证 redis 不可用仍可认证。配置 `auth_api_key_cache_ttl`/`auth_api_key_negative_cache_ttl`。
+- 2026-07-15-change-password | 用户自助修改密码：`AuthService.change_password`（verify 旧密码→hash 新密码→execute-only 撤销其他会话→审计 `user.password_change`→末尾统一 commit，事务原子）+ `POST /api/auth/change-password`(204) + `ChangePasswordRequest` schema。闭环默认密码方案 SillyHub@123。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
