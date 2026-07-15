@@ -1724,20 +1724,21 @@ function DetailLevelTable({
         key: "plan_workload",
         render: (v: string | null) => v ?? "—",
       },
-      {
-        title: "审核人",
-        dataIndex: "audit_user_name",
-        key: "audit_user_name",
-        render: (v: string | null, d: PsPlanNodeDetail) =>
-          v ?? (d.audit_user_id ? d.audit_user_id : "待指派"),
-      },
-      {
-        title: "审批人",
-        dataIndex: "approve_user_name",
-        key: "approve_user_name",
-        render: (v: string | null, d: PsPlanNodeDetail) =>
-          v ?? (d.approve_user_id ? d.approve_user_id : "待指派"),
-      },
+      // 审核/审批人列先隐藏（ql-20260715-003）
+      // {
+      //   title: "审核人",
+      //   dataIndex: "audit_user_name",
+      //   key: "audit_user_name",
+      //   render: (v: string | null, d: PsPlanNodeDetail) =>
+      //     v ?? (d.audit_user_id ? d.audit_user_id : "待指派"),
+      // },
+      // {
+      //   title: "审批人",
+      //   dataIndex: "approve_user_name",
+      //   key: "approve_user_name",
+      //   render: (v: string | null, d: PsPlanNodeDetail) =>
+      //     v ?? (d.approve_user_id ? d.approve_user_id : "待指派"),
+      // },
       {
         title: "状态",
         dataIndex: "status",

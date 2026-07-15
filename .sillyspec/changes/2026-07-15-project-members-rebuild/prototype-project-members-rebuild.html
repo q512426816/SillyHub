@@ -1,0 +1,332 @@
+<!--
+  prototype-project-members-rebuild.html
+  author: WhaleFall
+  created_at: 2026-07-15 10:27:20
+  变更: 2026-07-15-project-members-rebuild
+  说明: 项目成员页重构（项目 → 成员 两级表）线框图原型，供用户确认设计方向。
+        非精美 UI，重点展示布局结构 + 交互流程。点击项目行可展开/收起成员子表。
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>项目成员重构 · 线框原型</title>
+<style>
+  :root {
+    --line: #c9cdd4;
+    --line-soft: #e5e6eb;
+    --bg: #f7f8fa;
+    --bg-soft: #fafafa;
+    --ink: #1d2129;
+    --ink-2: #4e5969;
+    --ink-3: #86909c;
+    --accent: #165dff;
+    --tag-blue: #e8f3ff;
+    --tag-cyan: #e8fffb;
+    --tag-gray: #f2f3f5;
+    --ok: #00b42a;
+    --warn: #ff7d00;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    margin: 0;
+    padding: 24px;
+    font-size: 13px;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  .card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    margin-bottom: 16px;
+  }
+  /* 页头 */
+  .page-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .page-head h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  .page-head .sub { color: var(--ink-3); font-size: 12px; margin-top: 2px; }
+  /* 搜索区 */
+  .search {
+    padding: 14px 16px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px 14px;
+    border-bottom: 1px solid var(--line-soft);
+    background: var(--bg-soft);
+  }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 11px; color: var(--ink-3); }
+  .field .box {
+    border: 1px dashed var(--line);
+    background: #fff;
+    border-radius: 3px;
+    padding: 6px 8px;
+    color: var(--ink-3);
+    min-height: 30px;
+    display: flex;
+    align-items: center;
+  }
+  .search-actions {
+    grid-column: span 4;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 4px;
+  }
+  /* 按钮 */
+  .btn {
+    border: 1px solid var(--line);
+    background: #fff;
+    border-radius: 3px;
+    padding: 5px 14px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-primary:hover { color: #fff; opacity: .9; }
+  .btn-sm { padding: 3px 10px; font-size: 12px; }
+  .btn-ghost { border: none; background: transparent; color: var(--accent); padding: 3px 8px; cursor: pointer; }
+  .btn-danger { color: #f53f3f; }
+  /* 工具栏 */
+  .toolbar {
+    padding: 10px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .toolbar .count { color: var(--ink-3); font-size: 12px; }
+  /* 表格 */
+  table { width: 100%; border-collapse: collapse; }
+  th, td {
+    text-align: left;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: 12.5px;
+    vertical-align: middle;
+  }
+  th { background: var(--bg-soft); color: var(--ink-2); font-weight: 500; font-size: 12px; }
+  tr.project-row { cursor: pointer; }
+  tr.project-row:hover { background: #f7faff; }
+  .caret { display: inline-block; width: 14px; color: var(--ink-3); transition: transform .15s; }
+  .caret.open { transform: rotate(90deg); }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; }
+  .tag-blue { background: var(--tag-blue); color: var(--accent); }
+  .tag-cyan { background: var(--tag-cyan); color: #0fbf60; }
+  .tag-gray { background: var(--tag-gray); color: var(--ink-2); }
+  .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; background: var(--tag-gray); font-size: 11px; margin-right: 3px; }
+  .status-ok { color: var(--ok); }
+  .status-warn { color: var(--warn); }
+  .muted { color: var(--ink-3); }
+  /* 展开行 */
+  tr.sub-row td { padding: 0; background: var(--bg-soft); }
+  .sub-wrap { padding: 12px 16px 12px 40px; }
+  .sub-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .sub-head .title { font-size: 12px; color: var(--ink-2); }
+  .sub-table th { background: #fff; }
+  /* 分页 */
+  .pager { padding: 10px 16px; display: flex; justify-content: flex-end; align-items: center; gap: 6px; border-top: 1px solid var(--line-soft); }
+  .pager .page { border: 1px solid var(--line); padding: 3px 9px; border-radius: 3px; cursor: pointer; }
+  .pager .page.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  /* 说明区 */
+  .note { padding: 14px 16px; }
+  .note h2 { font-size: 14px; margin: 0 0 10px; }
+  .note ol { margin: 0; padding-left: 20px; color: var(--ink-2); line-height: 1.9; }
+  .note .key { color: var(--accent); font-weight: 500; }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 10px; font-size: 12px; color: var(--ink-3); }
+  .pill { font-family: ui-monospace, Menlo, Consolas, monospace; background: var(--tag-gray); padding: 1px 6px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 页面外壳 -->
+  <div class="card">
+    <div class="page-head">
+      <div>
+        <h1>项目成员</h1>
+        <div class="sub">项目 → 成员 两级结构 · 项目有哪些成员的视角</div>
+      </div>
+      <button class="btn btn-primary" onclick="alert('全局新增：打开抽屉，需选「所属项目」（跨项目）')">+ 添加项目成员</button>
+    </div>
+
+    <!-- 搜索区 -->
+    <div class="search">
+      <div class="field"><label>项目名称</label><div class="box">输入项目名</div></div>
+      <div class="field"><label>项目状态</label><div class="box">进行中 / 已完成 / 已暂停 ▾</div></div>
+      <div class="field"><label>项目类型</label><div class="box">研发 / 实施 / 运维 ▾</div></div>
+      <div class="field"><label>负责人</label><div class="box">项目经理姓名</div></div>
+      <div class="field"><label>成员姓名 / 账号</label><div class="box">姓名或登录账号</div></div>
+      <div class="field"><label>角色</label><div class="box">如 项目经理 / 开发</div></div>
+      <div class="field"><label>　</label><div class="box muted" style="border:none;background:transparent;">（预留扩展位）</div></div>
+      <div class="field"><label>　</label><div class="box muted" style="border:none;background:transparent;"></div></div>
+      <div class="search-actions">
+        <button class="btn">重置</button>
+        <button class="btn btn-primary">查询</button>
+      </div>
+    </div>
+
+    <!-- 工具栏 -->
+    <div class="toolbar">
+      <span class="count">共 2 个项目</span>
+      <span></span>
+    </div>
+
+    <!-- 一级：项目表 -->
+    <table>
+      <thead>
+        <tr>
+          <th style="width:30px;"></th>
+          <th>项目名称</th>
+          <th>项目编号</th>
+          <th>负责人</th>
+          <th>成员数</th>
+          <th>项目状态</th>
+          <th>项目类型</th>
+          <th>更新时间</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- 项目1（默认展开） -->
+        <tr class="project-row" onclick="toggleSub('sub1', this)">
+          <td><span class="caret open">▶</span></td>
+          <td>智慧园区平台</td>
+          <td>P2026-001</td>
+          <td>张三</td>
+          <td>3</td>
+          <td><span class="status-ok">● 进行中</span></td>
+          <td><span class="tag tag-blue">研发项目</span></td>
+          <td class="muted">2026-07-14 16:20</td>
+          <td><button class="btn-ghost" onclick="event.stopPropagation();alert('跳转/打开该项目成员管理')">成员管理</button></td>
+        </tr>
+        <tr class="sub-row" id="sub1">
+          <td colspan="9">
+            <div class="sub-wrap">
+              <div class="sub-head">
+                <span class="title">智慧园区平台 · 成员列表（懒加载，展开时按项目拉取）</span>
+                <button class="btn btn-sm" onclick="alert('项目内新增：项目已锁定，无需选项目')">+ 新增成员</button>
+              </div>
+              <table class="sub-table">
+                <thead>
+                  <tr>
+                    <th>姓名</th>
+                    <th>账号</th>
+                    <th>联系方式</th>
+                    <th>部门</th>
+                    <th>承担角色</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>张三</td>
+                    <td class="muted">zhangsan</td>
+                    <td>138****0001</td>
+                    <td>研发一部</td>
+                    <td><span class="badge">项目经理</span><span class="badge">架构师</span></td>
+                    <td><button class="btn-ghost btn-sm">编辑</button><button class="btn-ghost btn-sm btn-danger">删除</button></td>
+                  </tr>
+                  <tr>
+                    <td>李四</td>
+                    <td class="muted">lisi</td>
+                    <td>139****0002</td>
+                    <td>研发一部</td>
+                    <td><span class="badge">开发</span></td>
+                    <td><button class="btn-ghost btn-sm">编辑</button><button class="btn-ghost btn-sm btn-danger">删除</button></td>
+                  </tr>
+                  <tr>
+                    <td>王五</td>
+                    <td class="muted">wangwu</td>
+                    <td>137****0003</td>
+                    <td>研发二部</td>
+                    <td><span class="badge">测试</span></td>
+                    <td><button class="btn-ghost btn-sm">编辑</button><button class="btn-ghost btn-sm btn-danger">删除</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </td>
+        </tr>
+
+        <!-- 项目2（收起） -->
+        <tr class="project-row" onclick="toggleSub('sub2', this)">
+          <td><span class="caret">▶</span></td>
+          <td>运维支撑系统</td>
+          <td>P2026-002</td>
+          <td class="muted">—（无项目经理）</td>
+          <td>0</td>
+          <td><span class="status-warn">● 已暂停</span></td>
+          <td><span class="tag tag-cyan">实施项目</span></td>
+          <td class="muted">2026-07-10 09:05</td>
+          <td><button class="btn-ghost" onclick="event.stopPropagation();alert('成员管理')">成员管理</button></td>
+        </tr>
+        <tr class="sub-row" id="sub2" style="display:none;">
+          <td colspan="9">
+            <div class="sub-wrap">
+              <div class="sub-head">
+                <span class="title">运维支撑系统 · 成员列表</span>
+                <button class="btn btn-sm">+ 新增成员</button>
+              </div>
+              <div class="muted" style="padding:18px;text-align:center;">暂无成员</div>
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- 分页 -->
+    <div class="pager">
+      <span class="muted" style="margin-right:auto;font-size:12px;">每页 20 条</span>
+      <span class="page active">1</span>
+      <span class="page">2</span>
+      <span class="page">3</span>
+      <span class="page">›</span>
+    </div>
+  </div>
+
+  <!-- 交互流程说明 -->
+  <div class="card">
+    <div class="note">
+      <h2>交互流程 · 说明</h2>
+      <ol>
+        <li><span class="key">搜索</span>：填 6 个维度（项目名 / 状态 / 类型 / 负责人 / 成员姓名·账号 / 角色）→ 查询，刷新一级项目表（带筛选调后端聚合接口）。</li>
+        <li><span class="key">展开</span>：点项目行 ▶ 展开其成员子表（懒加载，仅展开时拉该项目成员）。</li>
+        <li><span class="key">全局新增</span>：页头「+ 添加项目成员」→ 抽屉需选「所属项目」（跨项目）。</li>
+        <li><span class="key">项目内新增</span>：展开后子表「+ 新增成员」→ 项目已锁定，无需再选。</li>
+        <li><span class="key">编辑/删除</span>：子表行内操作；增删后实时刷新成员数。</li>
+        <li><span class="key">负责人推算</span>：取该项目角色含「项目经理」的成员（多个取最早加入的）；无则显示「—」。</li>
+        <li><span class="key">账号列</span>：成员子表显示登录账号（后端 LEFT JOIN users 带 username）。</li>
+      </ol>
+      <div class="legend">
+        <span>数据来源：<span class="pill">GET /api/ppm/project-maintenance/member-summary</span>（一级聚合）</span>
+        <span>展开行：<span class="pill">GET /api/ppm/project-member?pm_project_id=…</span>（复用现有）</span>
+        <span>零 migration</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  function toggleSub(id, row) {
+    const sub = document.getElementById(id);
+    const caret = row.querySelector('.caret');
+    const open = sub.style.display !== 'none';
+    sub.style.display = open ? 'none' : '';
+    if (caret) caret.classList.toggle('open', !open);
+  }
+</script>
+</body>
+</html>

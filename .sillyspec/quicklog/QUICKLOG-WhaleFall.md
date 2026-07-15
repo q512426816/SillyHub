@@ -105,3 +105,11 @@ created_at: 2026-07-14T09:20:24
 根因：原 UserCreateRequest.password 必填（min_length=8）+ 前端 create 模式有密码输入框，管理员每建一个用户都要手设密码。需求是去掉输入、后端统一给默认密码。
 方案：① schema 层 password 改 str|None（default=None，显式传仍 min_length=8 校验）；② service 层 create_user 接收 None 时落库 DEFAULT_INITIAL_PASSWORD="SillyHub@123"，router 零改动（payload.password 可为 None，service 兜底），admin/settings 两入口共用同一 schema 行为一致（模块文档要求两处规则不发散）；③ 前端 admin-user-drawer create 模式去密码输入框+相关 state/校验/body 字段，换成蓝色提示展示默认密码 SillyHub@123；④ lib/admin.ts 接口 password 改可选。
 结果：①前端组件测试 17/17 通过；②后端 admin schema+router 测试 36 passed + 3 xfail(预先债务) + 1 failed(test_auth_user_read_email_optional：employee_no 必填导致的预先 test debt，本次未触碰 UserRead，无关)；③ruff format/check + mypy app(468 文件) + tsc 全通过；④admin.md 契约摘要+注意事项+变更索引已同步。
+
+## ql-20260715-003-e1f4 | 2026-07-15 13:05:00 | 里程碑明细列表隐藏「审核人」「审批人」两列
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（明细 detailColumns 注释掉 audit_user_name / approve_user_name 两个列定义，保留代码+注释标注 ql-id 便于后续恢复）
+需求：用户要求里程碑明细列表里的「审核人」「审批人」两列先隐藏。
+方案：直接注释掉 detailColumns 数组中 audit_user_name（审核人）与 approve_user_name（审批人）两个 column 对象，不动后端（audit_user_id/approve_user_id 字段保留，仅在列表不展示）；注释保留原定义+ql-id，后续要恢复取消注释即可。
+结果：tsc --noEmit EXIT 0；列表不再显示审核人/审批人两列；后端/数据未变。
