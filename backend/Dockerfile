@@ -96,6 +96,8 @@ COPY --from=daemon build/bundle/sillyhub-daemon.js /app/daemon-dist/sillyhub-dae
 # → node spawn 不存在的文件 → 主 agent MCP 永不启动 → team 链路断。
 COPY --from=daemon build/bundle/mcp-server.js /app/daemon-dist/mcp-server.js
 COPY --from=daemon scripts/install.sh /app/daemon-dist/install.sh
+# task-04（DG-02）：Windows PowerShell 安装脚本，偏好 CRLF 换行（与 install.sh 的 LF 相反）。
+COPY --from=daemon scripts/install.ps1 /app/daemon-dist/install.ps1
 
 # 2026-07-07-daemon-skill-execution task-07：sillyspec skills 进镜像（server-local 模式
 # 容器内 claude 自带 skills 调 /sillyspec-* 跑 stage 流程，不经 daemon skill-manager 同步）。
@@ -106,10 +108,14 @@ COPY --from=daemon scripts/install.sh /app/daemon-dist/install.sh
 # backend skills_bundle_dir config 默认 /app/sillyspec-skills 供 manifest/bundle 端点读。
 COPY --from=skills . /app/sillyspec-skills/
 
+# task-04（DG-02）：install.ps1 兜底转 CRLF——PowerShell 偏好 CRLF，与 install.sh 去 CR（LF）相反。
+# 源文件已 CRLF 则幂等无副作用；被 git 在镜像构建前转成 LF 则此处修复回来。注意不并入上面的
+# `sed 's/\r$//' install.sh`（那行明确只列 install.sh + entrypoint，bash 要 LF）。
 RUN mkdir -p /app/.cache /app/.config /app/.claude /tmp/.npm /data/spec-workspaces \
  && chown -R app:app /app /tmp/.npm /data/spec-workspaces \
  && sed -i 's/\r$//' /app/docker-entrypoint.sh /app/daemon-dist/install.sh \
  && chmod +x /app/docker-entrypoint.sh \
+ && sed -i 's/$/\r/' /app/daemon-dist/install.ps1 \
  && ln -sf /app/docker-entrypoint.sh /usr/local/bin/sillyhub-backend-entrypoint
 USER app
 

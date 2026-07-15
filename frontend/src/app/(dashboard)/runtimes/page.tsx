@@ -153,29 +153,49 @@ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
 }
 
 /**
+ * detectOs —— 按 navigator.userAgent 判定操作系统（task-06 / FR-01）。
+ *
+ * `/Win/i` 命中（Windows / Win32 / Win64 / Windows NT 等）→ "windows"，
+ * 其余（macOS / Linux / 其它 unix-like）→ "unix"。纯函数便于 task-07 单测。
+ */
+export function detectOs(ua: string): "windows" | "unix" {
+  return /Win/i.test(ua) ? "windows" : "unix";
+}
+
+/**
  * InstallDaemonBlock —— 「首次安装 daemon」折叠区块。
  *
- * 显示一键安装命令 `curl -fsSL <server>/daemon/install.sh | bash`，由 backend
- * dist_router 的 /daemon/install.sh 端点（FileResponse）下发，脚本执行时再从
- * 同一 server 拉 latest.json + sillyhub-daemon.js 单文件 bundle。
+ * task-06：按 OS 自动显示对应一键安装命令 + 手动切换（D-002）。
+ * - unix（macOS/Linux）：`curl -fsSL <server>/daemon/install.sh | bash`（逐字不变，FR-04）
+ * - windows：`irm <server>/daemon/install.ps1 | iex`（PowerShell，FR-02）
+ * 由 backend dist_router 的 /daemon/install.sh / /daemon/install.ps1 端点（FileResponse）
+ * 下发脚本，脚本执行时再从同一 server 拉 latest.json + sillyhub-daemon.js 单文件 bundle。
  *
  * serverUrl 用 window.location.origin（前端 rewrite 代理 /daemon/* 到 backend），
- * 不硬编码 IP / 端口。用 mounted state 避免服务端/客户端 hydration 不一致。
+ * 不硬编码 IP / 端口。用 mounted state 避免服务端/客户端 hydration 不一致（R-03）。
  */
-function InstallDaemonBlock() {
+export function InstallDaemonBlock() {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [serverUrl, setServerUrl] = useState<string | null>(null);
+  // task-06：OS 默认 unix（mounted 后由 navigator.userAgent 覆盖，防 hydration 不一致）。
+  const [os, setOs] = useState<"windows" | "unix">("unix");
 
   useEffect(() => {
     // server-url 用客户端实际访问地址（前端 rewrite 代理 /api + /daemon 到 backend），
     // 与 CopyDaemonCommand 一致。不再做端口替换（ql-20260713-002）。
+    // task-06：同时按 UA 探测 OS（mounted 后再读 navigator，避免 SSR 不一致）。
     setServerUrl(window.location.origin);
+    setOs(detectOs(navigator.userAgent));
   }, []);
 
-  const cmd = serverUrl
-    ? `curl -fsSL ${serverUrl}/daemon/install.sh | bash -s -- --server-url ${serverUrl}`
-    : "";
+  // task-06：命令按 OS 分支（serverUrl && os 就绪才有命令）。
+  const cmd =
+    serverUrl && os === "windows"
+      ? `irm ${serverUrl}/daemon/install.ps1 | iex`
+      : serverUrl && os === "unix"
+        ? `curl -fsSL ${serverUrl}/daemon/install.sh | bash -s -- --server-url ${serverUrl}`
+        : "";
 
   const handleCopy = async () => {
     if (!cmd) return;
@@ -198,24 +218,56 @@ function InstallDaemonBlock() {
         </span>
       </button>
       {open && (
-        <div className="flex min-w-0 items-center gap-2 border-t border-border/70 px-2.5 py-1.5">
-          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 shadow-sm">
-            <Terminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <code className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
-              {cmd || "curl -fsSL <server>/daemon/install.sh | bash"}
-            </code>
+        <div className="flex flex-col gap-2 border-t border-border/70 px-2.5 py-1.5">
+          {/* task-06 / D-002：OS 切换（覆盖自动检测）。两个 outline button，active 高亮。 */}
+          <div className="flex items-center gap-1.5">
+            {(["unix", "windows"] as const).map((candidate) => (
+              <Button
+                key={candidate}
+                size="sm"
+                variant="outline"
+                onClick={() => setOs(candidate)}
+                aria-pressed={os === candidate}
+                title={candidate === "windows" ? "显示 Windows 安装命令" : "显示 macOS / Linux 安装命令"}
+                className={cn(
+                  "h-7 gap-1 px-2.5 text-[11px] font-medium",
+                  os === candidate
+                    ? "bg-foreground text-background hover:bg-foreground hover:text-background"
+                    : "bg-background",
+                )}
+              >
+                {candidate === "windows" ? "Windows" : "macOS / Linux"}
+              </Button>
+            ))}
           </div>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 shrink-0 gap-1.5 px-2.5"
-            onClick={handleCopy}
-            disabled={!cmd}
-            title={copied ? "已复制" : "复制安装命令"}
-          >
-            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-            <span className="hidden sm:inline">{copied ? "已复制" : "复制"}</span>
-          </Button>
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 shadow-sm">
+              <Terminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <code className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+                {cmd ||
+                  (os === "windows"
+                    ? "irm <server>/daemon/install.ps1 | iex"
+                    : "curl -fsSL <server>/daemon/install.sh | bash")}
+              </code>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 shrink-0 gap-1.5 px-2.5"
+              onClick={handleCopy}
+              disabled={!cmd}
+              title={copied ? "已复制" : "复制安装命令"}
+            >
+              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              <span className="hidden sm:inline">{copied ? "已复制" : "复制"}</span>
+            </Button>
+          </div>
+          {/* task-06 / FR-02：Windows 命令需在 PowerShell/cmd 运行，提示用户打开 PowerShell 再粘贴。 */}
+          {os === "windows" && (
+            <p className="text-[10px] text-amber-600">
+              ⚠️ 在 PowerShell 或 cmd 中运行（开始菜单搜 PowerShell 打开后粘贴）。
+            </p>
+          )}
         </div>
       )}
     </div>
