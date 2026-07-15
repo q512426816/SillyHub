@@ -90,6 +90,8 @@ quote-style = "double"
 
 [dependency-groups]
 dev = [
+    "mypy>=1.11",
     "pre-commit>=4.6.0",
     "pymysql>=1.2.0",
+    "ruff>=0.6",
 ]

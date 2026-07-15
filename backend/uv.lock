@@ -828,8 +828,10 @@ dev = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "mypy" },
     { name = "pre-commit" },
     { name = "pymysql" },
+    { name = "ruff" },
 ]
 
 [package.metadata]
@@ -865,8 +867,10 @@ provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "mypy", specifier = ">=1.11" },
     { name = "pre-commit", specifier = ">=4.6.0" },
     { name = "pymysql", specifier = ">=1.2.0" },
+    { name = "ruff", specifier = ">=0.6" },
 ]
 
 [[package]]
