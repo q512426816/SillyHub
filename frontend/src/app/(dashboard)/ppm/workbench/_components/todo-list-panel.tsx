@@ -11,8 +11,8 @@
  * fetchWorkbenchSummary → summary.todos 后下传(constraints:避免双重请求)。
  * todos 为空/null → EmptyState「暂无待办」不报错。
  *
- * 点击待办按来源跳转(D-增强):plan_task→/ppm/task-plans,problem_*→
- * /ppm/problem-list,便于从工作台下钻到具体业务列表。
+ * 点击待办按来源跳转(D-增强):plan_task→/ppm/task-plans,problem_change→
+ * /ppm/problem-changes,其余 problem_*→/ppm/problem-list,便于从工作台下钻到具体业务列表。
  *
  * type 徽标映射:
  *   source="plan_task"              → warning  「任务」
@@ -87,11 +87,13 @@ export function TodoListPanel({ todos, loading }: TodoListPanelProps) {
   const count = todos?.length ?? 0;
   const isEmpty = !loading && count === 0;
 
-  /** 按来源跳转:任务待办→任务计划页,问题待办→问题清单页。 */
+  /** 按来源跳转:任务待办→任务计划页,问题变更→问题变更页,其余问题→问题清单页。 */
   const goTodo = (todo: WorkbenchTodoItem) => {
     const src = todo.source ?? "";
     if (src === "plan_task") {
       router.push("/ppm/task-plans");
+    } else if (src === "problem_change") {
+      router.push("/ppm/problem-changes");
     } else if (src.startsWith("problem")) {
       router.push("/ppm/problem-list");
     }

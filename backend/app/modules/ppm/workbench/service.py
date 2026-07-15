@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.admin.model import Organization, UserOrganization
 from app.modules.auth.model import User
 from app.modules.auth.rbac import list_user_workspace_roles
-from app.modules.ppm.problem.model import PpmProblemList
+from app.modules.ppm.problem.model import PpmProblemChange, PpmProblemList
 from app.modules.ppm.task.model import PlanTask, TaskExecute
 from app.modules.ppm.workbench.schema import (
     CalendarDay,
@@ -258,7 +258,8 @@ class WorkbenchService:
 
     async def _derive_todos(self, user: User) -> list[WorkbenchTodoItem]:
         """派生待办列表:① 问题在办 (now_handle_user split 匹配);
-        ② 任务待办 (非已完成的 PlanTask)。
+        ② 问题变更待审批 (status="1" 审核中 且 now_handle_user 含我);
+        ③ 任务待办 (非已完成的 PlanTask)。
         """
         todos: list[WorkbenchTodoItem] = []
         uid_str = str(user.id)
@@ -281,7 +282,25 @@ class WorkbenchService:
                 )
             )
 
-        # ② 任务待办:非已完成,按 start_time 升序 top N
+        # ② 问题变更待审批:status="1" 审核中 (ProblemChangeStatus.AUDITING,
+        # problem/fsm.py) 且 now_handle_user split 含我 (R-02 方言安全,
+        # 与问题清单分支同构)
+        change_stmt = select(PpmProblemChange).where(PpmProblemChange.status == "1")
+        change_rows = (await self._session.execute(change_stmt)).scalars().all()
+        for c in change_rows:
+            handle_users = (c.now_handle_user or "").split(",")
+            if uid_str not in handle_users:
+                continue
+            todos.append(
+                WorkbenchTodoItem(
+                    id=str(c.id),
+                    name=c.pro_desc or c.project_name or "问题变更待审批",
+                    type="缺陷",
+                    source="problem_change",
+                )
+            )
+
+        # ③ 任务待办:非已完成,按 start_time 升序 top N
         task_stmt = (
             select(PlanTask)
             .where(PlanTask.user_id == user.id)

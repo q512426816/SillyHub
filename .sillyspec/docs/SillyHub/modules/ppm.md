@@ -94,3 +94,4 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 - ql-20260715-011-b118 | /ppm/project-members 一级表"更新时间"列格式化：render `String(v).slice(0,19)`（原始 ISO/UTC，带 T）→ `fmtDateTime`（`YYYY-MM-DD HH:mm` 本地时区，空值 —）
 - ql-20260715-012-5110 | /ppm/projects「成员管理」改为跳转 /ppm/project-members（URL 带 project_name）：project-members page 读 param 传 initialProjectName，GroupTable 初始填搜索 project_name + 首次加载自动展开匹配项目子表（autoExpandedRef 仅一次）；删 projects 抽屉入口（ProjectMembersDrawer）
 - ql-20260715-013-9bc5 | 项目成员子表（PpmProjectMembersTable）改服务端分页：load 由 listProjectMembers（全量+本地 rows.slice）→ pageProjectMembers 传 page/page_size，rows=当前页、total 来自接口；pageSize 变更走接口刷新（onChange 回第 1 页防越界）
+- ql-20260715-010-a3b7 | PPM 工作台：默认首页 /ppm/projects→/ppm/workbench + 快捷入口加「任务计划」按钮（/ppm/task-plans）+ 我的待办新增「问题变更审批」分支（workbench/service.py _derive_todos 查 PpmProblemChange status="1"审核中且 now_handle_user 含我 → source=problem_change，前端 todo-list-panel goTodo 跳 /ppm/problem-changes；问题清单维持现状，不含任务计划/里程碑明细）
