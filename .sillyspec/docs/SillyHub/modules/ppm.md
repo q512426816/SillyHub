@@ -29,6 +29,7 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 缺失则挂起 ProblemPendingAssignment
 ```
 里程碑变更走 `parent_id` 版本链（旧版 archived、新版 draft），不走状态迁移。
+明细-任务联动：里程碑明细（PsPlanNodeDetail）变 done 时自动建一条 PlanTask 挂执行人名下（plan/service.py 6 helper `_ensure_task_for_detail` 等 + 5 触发点 create_detail/_transition/import_commit/update+delete_detail/change_process，强一致同事务）；编辑同步任务字段、变更迁移（版本链）、删除解关联（ps_plan_node_detail_id 置 null，任务保留）；导入一行多责任人拆分（全匹配→每人一条，任一未匹配→整行标红）。
 看板 matrix（`kanban-grouping`）：人员×日期矩阵，任务按 start_time~deadline 跨天连续落 cell（限 366 天）。
 导出：openpyxl 生成 xlsx，文件名时间戳格式 `{中文名}_YYYYMMDD_HHmmss.xlsx`。
 看板 service `_derive_priority`/`_derive_progress` 从状态派生优先级与进度；`_parse_hours`/`_parse_date_range` 解析工时与日期。
@@ -78,6 +79,8 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 - problem fsm 的 ProblemStatus 含挂起/关闭等扩展态
 - project_member.role_name 是多角色逗号拼接存储（D-009@v1，源 multiple-value-type="join"，如"开发经理,项目经理,前端开发人员"）；ProjectMemberService.page 按 role_name 过滤用 ilike 模糊匹配，避免精确匹配漏掉多角色拼接成员（曾致 /ppm/project-plans 编辑/新建项目经理下拉「无数据」）
 - ppm/project-maintenance/simple-list 只返回 {id, project_name}，不含 company_name；项目计划表单选项目后带公司名需另调 getProject(id)（ppm-project-plan-form.onProjectChange：Promise.all 查 getProject + listProjectMembers，公司名回填 + 唯一项目经理自动带入）
+- /ppm/project-members 为两级 expandable 表：一级项目行调 GET /project-maintenance/member-summary 聚合真分页（owner_name 推算 + member_count + 6 维筛选），展开行复用 PpmProjectMembersTable 的 embedded 紧凑模式（去 SectionCard 外壳 + 去 calc(100vh-430px) 的 vh scroll，避免视口滚动框嵌套 G1；onChanged 回调刷新 member_count）
+- 负责人列由 member_summary 推算：role_name ilike '%项目经理%' 取 created_at 最早者 user_name，无则 None（显「—」），不落库；派生列 owner_name/member_count 不进排序白名单（仅 updated_at/created_at/project_name/project_code 可排序，D-005）
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
@@ -94,4 +97,6 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 - ql-20260715-011-b118 | /ppm/project-members 一级表"更新时间"列格式化：render `String(v).slice(0,19)`（原始 ISO/UTC，带 T）→ `fmtDateTime`（`YYYY-MM-DD HH:mm` 本地时区，空值 —）
 - ql-20260715-012-5110 | /ppm/projects「成员管理」改为跳转 /ppm/project-members（URL 带 project_name）：project-members page 读 param 传 initialProjectName，GroupTable 初始填搜索 project_name + 首次加载自动展开匹配项目子表（autoExpandedRef 仅一次）；删 projects 抽屉入口（ProjectMembersDrawer）
 - ql-20260715-013-9bc5 | 项目成员子表（PpmProjectMembersTable）改服务端分页：load 由 listProjectMembers（全量+本地 rows.slice）→ pageProjectMembers 传 page/page_size，rows=当前页、total 来自接口；pageSize 变更走接口刷新（onChange 回第 1 页防越界）
+- 2026-07-15-project-members-rebuild | /ppm/project-members 重构为项目→成员两级可展开表：后端新增 GET /project-maintenance/member-summary 聚合接口（owner_name 负责人推算 role 含项目经理取 created_at 最早 + member_count + 6 维 EXISTS 筛选 + 排序白名单）+ 成员接口 LEFT JOIN users 补账号列 username；前端两级 expandable 表（展开行复用 PpmProjectMembersTable embedded 紧凑模式 + onChanged 刷新成员数）+ 页头全局/项目内两种新增入口；/ppm/projects 成员管理抽屉改跳转 project-members（ql-012）+ 成员子表服务端分页（ql-013）。归档总览（实现散于 ql-007/010~013）。
+- ql-20260715-014-7e3a | 导入模块多责任人拆分：service._to_preview_row→_to_preview_rows（一行多责任人全匹配→拆N条各一责任人 duty_user_id + work_load 各=原值；任一未匹配→整行1条标红 valid=false 不拆；空责任人→1条标红）+ import_preview 改 flatMap；联动建任务自动跟随
 - ql-20260715-010-a3b7 | PPM 工作台：默认首页 /ppm/projects→/ppm/workbench + 快捷入口加「任务计划」按钮（/ppm/task-plans）+ 我的待办新增「问题变更审批」分支（workbench/service.py _derive_todos 查 PpmProblemChange status="1"审核中且 now_handle_user 含我 → source=problem_change，前端 todo-list-panel goTodo 跳 /ppm/problem-changes；问题清单维持现状，不含任务计划/里程碑明细）

@@ -361,8 +361,8 @@ export default function TaskPlansPage() {
         const isOwner = currentUser?.id === t.user_id;
         // 编辑:status="未开始"(PlanTask 中文初始态) + user_id 归属
         const canEdit = t.status === "未开始" && isOwner;
-        // 删除:user_id 归属(对齐源 handleDelete checkUser)
-        const canDelete = isOwner;
+        // 删除:负责人(isOwner) 或 超级管理员(is_platform_admin) (ql-20260715-015)
+        const canDelete = isOwner || !!currentUser?.is_platform_admin;
         return (
           <div className="flex whitespace-nowrap gap-1 justify-center">
             <Button

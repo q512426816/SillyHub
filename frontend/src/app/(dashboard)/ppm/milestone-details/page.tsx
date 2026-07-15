@@ -333,7 +333,8 @@ export default function MilestoneDetailsPage() {
     try {
       if (action === "save") {
         await savePlanNodeDetailProcess(detailId, saveBody);
-        showToast(true, "已提交");
+        // task-08:save 提交(draft→done,明细变 done 后端自动建任务计划)→提示已自动建任务。
+        showToast(true, "已提交，已自动创建任务计划");
       } else if (action === "reject") {
         await rejectPlanNodeDetailProcess(detailId, rejectBody);
         showToast(true, "已驳回");
@@ -2077,6 +2078,10 @@ function DetailDrawer({
               ? { plan_node_id: planNodeId, ...body, status: "done" }
               : { plan_node_id: planNodeId, ...body },
           );
+          // task-08:autoSubmit=true=直接创建为 done,后端自动建任务计划,提示用户(仅 done 路径)。
+          if (autoSubmit) {
+            message.success("已提交，已自动创建任务计划");
+          }
           onSaved();
           return;
         }

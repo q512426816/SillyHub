@@ -24,7 +24,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import anyio
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -386,14 +386,38 @@ class PlanService:
         return await _Crud(self._session, PsPlanNodeDetail).get(item_id)
 
     async def create_detail(self, data: dict[str, Any]) -> PsPlanNodeDetail:
-        data.setdefault("status", PlanNodeDetailStatus.DRAFT.value)
-        return await _Crud(self._session, PsPlanNodeDetail).create(data)
+        # 重构为原子事务 (不走 _Crud.create 的单独 commit)，status=done 时
+        # 同事务触发 _ensure_task_for_detail 建任务 (FR-01, ql-里程碑明细自动建任务)。
+        status = data.setdefault("status", PlanNodeDetailStatus.DRAFT.value)
+        obj = PsPlanNodeDetail(id=uuid.uuid4(), **data)
+        obj.created_at = _now()
+        obj.updated_at = _now()
+        self._session.add(obj)
+        if status == PlanNodeDetailStatus.DONE.value:
+            await self._ensure_task_for_detail(obj)
+        await self._session.commit()
+        await self._session.refresh(obj)
+        return obj
 
     async def update_detail(self, item_id: uuid.UUID, data: dict[str, Any]) -> PsPlanNodeDetail:
-        return await _Crud(self._session, PsPlanNodeDetail).update(item_id, data)
+        # 重构为原子事务：更新明细字段 + 同事务同步关联任务字段 (FR-03, D-007)。
+        obj = await self.get_detail(item_id)
+        for k, v in data.items():
+            if v is not None:
+                setattr(obj, k, v)
+        obj.updated_at = _now()
+        await self._sync_task_fields(obj)
+        await self._session.commit()
+        await self._session.refresh(obj)
+        return obj
 
     async def delete_detail(self, item_id: uuid.UUID) -> None:
-        await _Crud(self._session, PsPlanNodeDetail).delete(item_id)
+        # 重构为原子事务：先解关联任务 (ps_plan_node_detail_id 置 null, 任务保留)
+        # 再删明细 (FR-05, D-004)。
+        obj = await self.get_detail(item_id)
+        await self._unlink_task(item_id)
+        await self._session.delete(obj)
+        await self._session.commit()
 
     # ---------- 版本链查询 ----------
     async def list_versions(self, item_id: uuid.UUID) -> list[PsPlanNodeDetail]:
@@ -580,6 +604,9 @@ class PlanService:
         elif target is PlanNodeDetailStatus.APPROVE:
             detail.approve_user_id = self._safe_uuid(next_user_id) or self._safe_uuid(actor_id)
             detail.approve_user_name = next_user_name or actor_name
+        # 明细推进到 DONE 时，同事务触发建/更新关联任务 (FR-01)
+        if target is PlanNodeDetailStatus.DONE:
+            await self._ensure_task_for_detail(detail)
         await self._session.commit()
         await self._session.refresh(detail)
         await self._write_process(
@@ -666,6 +693,9 @@ class PlanService:
             **copy_fields,
         )
         self._session.add(new)
+        # 把旧版本关联任务迁移到新版本 (ps_plan_node_detail_id: old→new)，保证
+        # 版本链上始终一条任务 (FR-04, D-001)。
+        await self._migrate_task_to_version(old.id, new.id)
         await self._session.commit()
         await self._session.refresh(new)
 
@@ -844,8 +874,9 @@ class PlanService:
         - 责任人反查走 ORM 全量 (Grill X-005):查 ``PpmProjectMember`` 全量
           (where pm_project_id),建 ``{user_name: user_id}`` 反查表;user_name 为
           空的成员不进表 (不可匹配)。
-        - 多人责任人取首个 (D-002 / R-09):顿号/逗号分隔取首个姓名精确匹配;
-          未采用姓名写 ``duty_unmatched_note``;未匹配 → ``valid=False``。
+        - 多人责任人拆分 (ql-20260715-014):顿号/逗号分隔,全部匹配→每人一条
+          (duty_user_id 各填、work_load 各=原值);任一未匹配→整行 1 条标红
+          ``valid=False`` 不拆;空责任人→1 条标红。
         """
         # 1. 线程池跑同步解析 (X-002,不阻塞事件循环)
         sheets: list[ParsedSheet] = await anyio.to_thread.run_sync(parse_workbook, file_bytes)
@@ -856,7 +887,10 @@ class PlanService:
         # 3. 逐 Sheet 逐行转 ImportPreviewRow + 责任人反查
         sheet_resps: list[ImportPreviewSheet] = []
         for sheet in sheets:
-            row_resps = [self._to_preview_row(sheet, row, member_map) for row in sheet.rows]
+            row_resps: list[ImportPreviewRow] = []
+            for row in sheet.rows:
+                # 多责任人拆分:一行可能产出多条预览 (ql-20260715-014)
+                row_resps.extend(self._to_preview_rows(sheet, row, member_map))
             sheet_resps.append(
                 ImportPreviewSheet(
                     name=sheet.name,
@@ -891,17 +925,18 @@ class PlanService:
         return out
 
     @staticmethod
-    def _to_preview_row(
+    def _to_preview_rows(
         sheet: ParsedSheet, row: ParsedRow, member_map: dict[str, uuid.UUID]
-    ) -> ImportPreviewRow:
-        """单 ParsedRow → ImportPreviewRow,含责任人反查 (D-002 / R-09)。
+    ) -> list[ImportPreviewRow]:
+        """单 ParsedRow → 多条 ImportPreviewRow（多责任人拆分, ql-20260715-014）。
 
-        - 多人责任人按顿号/逗号分隔取**首个**姓名,trim 后精确匹配反查表
-        - 匹配 → ``duty_matched=True``、``duty_user_id`` 填值
-        - 未匹配 → ``duty_matched=False``、``valid=False``、
-          ``error="责任人未匹配: <姓名>"``
-        - 多人时未采用的姓名写 ``duty_unmatched_note``
-        - date → datetime (plan_begin/plan_complete);其余字段直传
+        - 多人责任人按顿号/逗号分隔
+        - **全部匹配** → 每人一条 (``duty_user_id`` 各填、``work_load`` 各=原值、
+          ``valid=True``)，其余字段共享原行值
+        - **任一未匹配** → 整行 1 条标红 (``valid=False``、``error`` 注明未匹配者、
+          ``duty_user_name`` 保留原文)，不拆分
+        - **空责任人** → 1 条标红 (``valid=False``、``error="责任人未填写"``)
+        - date → datetime (plan_begin/plan_complete)
         """
         duty_names: list[str] = []
         if row.duty_user_name:
@@ -909,23 +944,8 @@ class PlanService:
             raw_split = re.split(r"[、,，;；/]", row.duty_user_name)
             duty_names = [s.strip() for s in raw_split if s and s.strip()]
 
-        first_name = duty_names[0] if duty_names else None
-        unmatched_note_names = duty_names[1:] if len(duty_names) > 1 else []
-
-        matched_id: uuid.UUID | None = None
-        matched = False
-        error: str | None = None
-        if first_name:
-            matched_id = member_map.get(first_name)
-            matched = matched_id is not None
-            if not matched:
-                error = f"责任人未匹配: {first_name}"
-
-        duty_unmatched_note = (
-            "未采用责任人: " + "、".join(unmatched_note_names) if unmatched_note_names else None
-        )
-
-        return ImportPreviewRow(
+        # 拆分行共享的基础字段
+        base: dict[str, Any] = dict(
             sheet_name=sheet.name,
             plan_type=sheet.plan_type,
             module_name=row.module_name,
@@ -933,15 +953,57 @@ class PlanService:
             task_theme=row.task_theme,
             task_description=row.task_description,
             plan_workload=row.plan_workload,
-            duty_user_name=row.duty_user_name,
-            duty_user_id=matched_id,
-            duty_matched=matched,
-            duty_unmatched_note=duty_unmatched_note,
             plan_begin_time=_date_to_datetime(row.plan_begin),
             plan_complete_time=_date_to_datetime(row.plan_complete),
-            valid=matched or first_name is None,
-            error=error,
         )
+
+        # 空责任人 → 1 条标红
+        if not duty_names:
+            return [
+                ImportPreviewRow(
+                    duty_user_name=row.duty_user_name,
+                    duty_user_id=None,
+                    duty_matched=False,
+                    duty_unmatched_note=None,
+                    valid=False,
+                    error="责任人未填写",
+                    **base,
+                )
+            ]
+
+        # 全匹配判断
+        matched_pairs: list[tuple[str, uuid.UUID | None]] = [
+            (n, member_map.get(n)) for n in duty_names
+        ]
+        unmatched = [n for n, uid in matched_pairs if uid is None]
+
+        # 任一未匹配 → 整行 1 条标红 (不拆)
+        if unmatched:
+            return [
+                ImportPreviewRow(
+                    duty_user_name=row.duty_user_name,  # 原文 (多人)
+                    duty_user_id=None,
+                    duty_matched=False,
+                    duty_unmatched_note=None,
+                    valid=False,
+                    error=f"责任人未匹配: {'、'.join(unmatched)}",
+                    **base,
+                )
+            ]
+
+        # 全匹配 → 每人一条 (work_load 各=原值, 不除人数)
+        return [
+            ImportPreviewRow(
+                duty_user_name=name,
+                duty_user_id=uid,
+                duty_matched=True,
+                duty_unmatched_note=None,
+                valid=True,
+                error=None,
+                **base,
+            )
+            for name, uid in matched_pairs
+        ]
 
     # ---------- 导入提交 (task-06 / D-008@v1) ----------
     async def import_commit(self, req: ImportCommitReq, plan_node_id: str) -> ImportResultResp:
@@ -983,6 +1045,7 @@ class PlanService:
         merged_modules = 0
         created_details = 0
         module_id_of: dict[str, uuid.UUID] = {}
+        done_details: list[PsPlanNodeDetail] = []
 
         for key, rows in groups.items():
             existing_id = await self._find_existing_module(node_uuid, key)
@@ -1034,8 +1097,13 @@ class PlanService:
                 )
                 self._session.add(detail)
                 created_details += 1
+                if detail.status == PlanNodeDetailStatus.DONE.value:
+                    done_details.append(detail)
 
         # 4. 末尾单次 commit (D-008);异常冒泡不 commit 即整体回滚
+        # done 明细批量建关联任务 (FR-02, D-005)；detail.id 为构造时 uuid，无需 flush
+        for d in done_details:
+            await self._ensure_task_for_detail(d)
         await self._session.commit()
 
         return ImportResultResp(
@@ -1170,6 +1238,174 @@ class PlanService:
         await self._session.commit()
         await self._session.refresh(proc)
         return proc
+
+    # ---------- 明细-任务联动 helper (task-01 / design §7) ----------
+    # 均复用 self._session,内部不 commit —— 由 create_detail/_transition/
+    # update_detail/change_process/delete_detail/import_commit 等调用方统一
+    # commit,保证明细操作与任务联动在同一事务内原子完成 (design §5.2)。
+    async def _lookup_user_name(self, user_id: uuid.UUID | None) -> str | None:
+        """反查 ``PpmProjectMember.user_name`` (项目成员冗余名,与 kanban 同口径)。
+
+        口径对齐 ``kanban/service.py`` —— 取项目成员表冗余的 ``user_name`` 而非
+        ``User.display_name``,保证任务页/看板姓名一致 (design §5.3 / D-002)。
+        缺失返回 None (``PlanTask.user_name`` nullable,合法)。
+
+        ``user_id`` 可能是 UUID 或字符串,用 ``_safe_uuid`` 规整。
+        """
+        uid = self._safe_uuid(user_id)
+        if uid is None:
+            return None
+        stmt = select(PpmProjectMember.user_name).where(PpmProjectMember.user_id == uid).limit(1)
+        row = (await self._session.execute(stmt)).first()
+        if row is None:
+            return None
+        return row[0]
+
+    async def _resolve_project_context(
+        self, plan_node_id: uuid.UUID | None
+    ) -> tuple[uuid.UUID | None, str | None]:
+        """回溯 ``plan_node → ps_project_plan``,取 ``(project_id, project_name)``。
+
+        链路: ``PsPlanNode.id == plan_node_id`` 取 ``ps_project_plan_id`` →
+        ``PsProjectPlan.id == ps_project_plan_id`` 取 ``project_id`` / ``project_name``。
+        ``plan_node_id`` 为空或任一步缺失返回 ``(None, None)`` (不抛异常)。
+        """
+        node_uuid = self._safe_uuid(plan_node_id)
+        if node_uuid is None:
+            return (None, None)
+        node_stmt = select(PsPlanNode.ps_project_plan_id).where(PsPlanNode.id == node_uuid)
+        ps_project_plan_id = await self._session.scalar(node_stmt)
+        if ps_project_plan_id is None:
+            return (None, None)
+        plan_stmt = select(PsProjectPlan.project_id, PsProjectPlan.project_name).where(
+            PsProjectPlan.id == ps_project_plan_id
+        )
+        plan_row = (await self._session.execute(plan_stmt)).first()
+        if plan_row is None:
+            return (None, None)
+        return (plan_row[0], plan_row[1])
+
+    async def _ensure_task_for_detail(self, detail: PsPlanNodeDetail) -> PlanTask | None:
+        """明细变 done 时建/更新关联任务 (版本链查重,D-003)。
+
+        - ``detail.execute_user_id`` 为空 → 返回 None,跳过不建 (D-003:
+          ``PlanTask.user_id`` 非空,无执行人的明细不产任务)
+        - 查 ``PlanTask where ps_plan_node_detail_id == detail.id``:
+          * 命中 → 更新映射字段 (``status`` / ``kanban_order`` **不改**,
+            保留任务自身推进)
+          * 未命中 → 新建 ``PlanTask`` (``status="未开始"``、
+            ``kanban_order`` = 该 user 现有 ``max(kanban_order)+1``,无记录则 1)
+        - 字段映射见 design §5.3;项目信息经 ``_resolve_project_context`` 回溯。
+
+        Returns:
+            关联的 :class:`PlanTask`,或 None (执行人为空时)。
+        """
+        uid = self._safe_uuid(detail.execute_user_id)
+        if uid is None:
+            return None  # D-003:无执行人不建任务
+
+        stmt = select(PlanTask).where(PlanTask.ps_plan_node_detail_id == detail.id).limit(1)
+        task = (await self._session.execute(stmt)).scalar_one_or_none()
+
+        project_id, project_name = await self._resolve_project_context(detail.plan_node_id)
+        user_name = await self._lookup_user_name(uid)
+
+        if task is not None:
+            # 命中 → 更新映射字段 (不改 status/kanban_order)
+            task.user_id = uid
+            task.user_name = user_name
+            task.content = detail.task_theme
+            task.start_time = detail.plan_begin_time
+            task.end_time = detail.plan_complete_time
+            task.work_load = detail.plan_workload
+            task.project_id = project_id
+            task.project_name = project_name
+            task.module_id = detail.module_id
+            task.updated_at = _now()
+            return task
+
+        # 未命中 → 新建 (kanban_order = 该 user 现有 max+1,无记录则 1)
+        max_stmt = select(func.max(PlanTask.kanban_order)).where(PlanTask.user_id == uid)
+        current_max = await self._session.scalar(max_stmt)
+        next_order = (current_max or 0) + 1
+
+        task = PlanTask(
+            id=uuid.uuid4(),
+            user_id=uid,
+            user_name=user_name,
+            status="未开始",
+            content=detail.task_theme,
+            start_time=detail.plan_begin_time,
+            end_time=detail.plan_complete_time,
+            work_load=detail.plan_workload,
+            ps_plan_node_detail_id=detail.id,
+            module_id=detail.module_id,
+            project_id=project_id,
+            project_name=project_name,
+            kanban_order=next_order,
+            created_at=_now(),
+            updated_at=_now(),
+        )
+        self._session.add(task)
+        return task
+
+    async def _sync_task_fields(self, detail: PsPlanNodeDetail) -> None:
+        """编辑明细后同步关联任务字段 (不改 ``task.status``,D-007)。
+
+        查 ``ps_plan_node_detail_id == detail.id`` 的任务,命中则更新
+        ``content``/``start_time``/``end_time``/``work_load``/``project_id``/
+        ``project_name``/``module_id``;``user_id``/``user_name`` 仅在明细
+        ``execute_user_id`` 非空时同步 (清空执行人时保留任务原执行人,避免违反
+        ``PlanTask.user_id`` 非空约束)。
+        未命中 → 不新建,直接返回 (编辑不触发建任务,仅同步既有绑定)。
+        """
+        stmt = select(PlanTask).where(PlanTask.ps_plan_node_detail_id == detail.id).limit(1)
+        task = (await self._session.execute(stmt)).scalar_one_or_none()
+        if task is None:
+            return  # 未关联任务,编辑不新建
+
+        uid = self._safe_uuid(detail.execute_user_id)
+        project_id, project_name = await self._resolve_project_context(detail.plan_node_id)
+        # 执行人被编辑清空时不同步 user_id/user_name: PlanTask.user_id 非空,
+        # 清空会违反约束致事务回滚;保留任务原执行人 (延伸 D-003「执行人为空不建任务」语义)。
+        if uid is not None:
+            task.user_id = uid
+            task.user_name = await self._lookup_user_name(uid)
+        task.content = detail.task_theme
+        task.start_time = detail.plan_begin_time
+        task.end_time = detail.plan_complete_time
+        task.work_load = detail.plan_workload
+        task.project_id = project_id
+        task.project_name = project_name
+        task.module_id = detail.module_id
+        task.updated_at = _now()
+
+    async def _migrate_task_to_version(
+        self, old_detail_id: uuid.UUID, new_detail_id: uuid.UUID
+    ) -> None:
+        """变更时把任务的 ``ps_plan_node_detail_id`` 从旧版本迁到新版本 (D-001)。
+
+        查 ``ps_plan_node_detail_id == old_detail_id`` 的任务,命中则置为
+        ``new_detail_id`` (任务行保留,仅迁移绑定),保证版本链上始终一条任务。
+        """
+        stmt = select(PlanTask).where(PlanTask.ps_plan_node_detail_id == old_detail_id).limit(1)
+        task = (await self._session.execute(stmt)).scalar_one_or_none()
+        if task is None:
+            return
+        task.ps_plan_node_detail_id = new_detail_id
+        task.updated_at = _now()
+
+    async def _unlink_task(self, detail_id: uuid.UUID) -> None:
+        """删明细时把关联任务 ``ps_plan_node_detail_id`` 置 null (任务保留,D-004)。
+
+        任务行不删 (保留历史/工时/看板记录),仅解除与明细的软绑定。
+        """
+        stmt = select(PlanTask).where(PlanTask.ps_plan_node_detail_id == detail_id).limit(1)
+        task = (await self._session.execute(stmt)).scalar_one_or_none()
+        if task is None:
+            return
+        task.ps_plan_node_detail_id = None
+        task.updated_at = _now()
 
 
 __all__ = ["PlanError", "PlanNotFound", "PlanService"]
