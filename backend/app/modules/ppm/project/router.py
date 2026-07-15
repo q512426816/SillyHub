@@ -46,6 +46,8 @@ from app.modules.ppm.project.schema import (
     ProjectMemberCreate,
     ProjectMemberPageReq,
     ProjectMemberResp,
+    ProjectMemberSummaryItem,
+    ProjectMemberSummaryPageReq,
     ProjectMemberUpdate,
     ProjectSimpleItem,
     ProjectStakeholderCreate,
@@ -230,6 +232,45 @@ async def export_project_maintenance(
         lambda: _build_workbook_bytes(columns, rows, "项目维护")
     )
     return _excel_stream(content, timestamped_filename("项目维护"))
+
+
+@router.get(
+    "/project-maintenance/member-summary",
+    response_model=Page[ProjectMemberSummaryItem],
+)
+async def page_project_member_summary(
+    session: SessionDep,
+    user: Annotated[User, _PROJECT_READ],
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    order_by: str | None = Query(None),
+    order: str = Query("desc"),
+    project_name: str | None = Query(None),
+    project_status: str | None = Query(None),
+    project_type: str | None = Query(None),
+    owner_name: str | None = Query(None),
+    member_keyword: str | None = Query(None),
+    role_name: str | None = Query(None),
+) -> Page[ProjectMemberSummaryItem]:
+    """项目成员聚合 (派生 owner_name/member_count + 多维筛选)。
+
+    必须声明在 ``/{entity_id}`` GET 之前 (路径优先级见 :134 注释),否则
+    ``member-summary`` 会被当 entity_id 解析为 UUID 失败 (422)。
+    """
+    req = ProjectMemberSummaryPageReq(
+        page=page,
+        page_size=page_size,
+        order_by=order_by,
+        order=order,
+        project_name=project_name,
+        project_status=project_status,
+        project_type=project_type,
+        owner_name=owner_name,
+        member_keyword=member_keyword,
+        role_name=role_name,
+    )
+    s = svc.ProjectMaintenanceService(session)
+    return await s.member_summary(req)
 
 
 @router.get(
@@ -474,8 +515,10 @@ async def page_project_member(
     )
     s = svc.ProjectMemberService(session)
     result = await s.page(req)
+    # service.page() 已 LEFT JOIN users 并构造 ProjectMemberResp(含 username),
+    # 此处无需再 model_validate,result.items 即为 Resp。
     return Page.build(
-        items=[ProjectMemberResp.model_validate(item) for item in result.items],
+        items=list(result.items),
         total=result.total,
         req=PageReq(page=page, page_size=page_size, order_by=order_by, order=order),
     )

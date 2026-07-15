@@ -2077,8 +2077,19 @@ function DetailDrawer({
               ? { plan_node_id: planNodeId, ...body, status: "done" }
               : { plan_node_id: planNodeId, ...body },
           );
-        } else if (detail) {
-          await updatePsPlanNodeDetail(detail.id, body);
+          onSaved();
+          return;
+        }
+        // edit(draft/rejected 草稿编辑):
+        //   保存(autoSubmit=undefined)= 仅 updatePsPlanNodeDetail 存草稿;
+        //   提交(autoSubmit=true)= 先保存编辑,再调 saveProcess 把 draft→review
+        //   走审核流程(对齐列表行内 PlanDetailActions「提交审核/重新提交」)。
+        if (!detail) return;
+        await updatePsPlanNodeDetail(detail.id, body);
+        if (autoSubmit) {
+          onClose();
+          await onSubmit(detail.id, "save");
+          return;
         }
         onSaved();
         return;
@@ -2184,6 +2195,13 @@ function DetailDrawer({
     return "";
   }, [mode]);
 
+  // 第二个按钮(autoSubmit=true)文案:create→「提交」(建为 done 不走审核);
+  // edit→「提交审核」(draft→review 走流程,对齐列表行内 PlanDetailActions 文案)。
+  const submitEditOrCreateText = useMemo(() => {
+    if (mode === "edit") return "提交审核";
+    return "提交";
+  }, [mode]);
+
   const showSubmit = mode !== "view";
 
   return (
@@ -2205,7 +2223,7 @@ function DetailDrawer({
           <Button size="sm" variant="outline" onClick={onClose}>
             关闭
           </Button>
-          {showSubmit && mode === "create" ? (
+          {showSubmit && (mode === "create" || mode === "edit") ? (
             <>
               <Button
                 size="sm"
@@ -2220,7 +2238,7 @@ function DetailDrawer({
                 disabled={busy}
                 onClick={() => void submit(true)}
               >
-                {busy ? "提交中…" : "提交"}
+                {busy ? "提交中…" : submitEditOrCreateText}
               </Button>
             </>
           ) : showSubmit ? (

@@ -57,9 +57,21 @@ export interface PpmProjectMembersTableProps {
   refreshKey?: unknown;
   /** 是否显示顶部工具栏(新增按钮 + 计数)。嵌入抽屉时可设 false。默认 true。 */
   showToolbar?: boolean;
+  /**
+   * 成员增删改成功后回调(task-07 / D-007)。
+   * 供两级表父组件刷新 member_count;不传则无副作用(现状兼容)。
+   */
+  onChanged?: () => void;
+  /**
+   * 嵌入式紧凑模式(task-07 / G1):跳过 SectionCard 外壳,Table scroll 只 {x:"max-content"}
+   * (去掉 calc(100vh-430px) 的 y,避免在展开区内产生视口高度滚动框)。
+   * 保留新增成员按钮(showToolbar && canWrite 时)。两级表展开行用此模式;
+   * 现有平铺页 / projects 抽屉不传,行为完全不变。
+   */
+  embedded?: boolean;
 }
 
-type MemberForm = {
+export type MemberForm = {
   id?: string;
   pm_project_id: string;
   user_id: string;
@@ -89,7 +101,7 @@ const readOnlyCls = `${inputCls} bg-muted text-muted-foreground`;
 // ── 组件 ──────────────────────────────────────────────────────────────────
 
 export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
-  const { projectId, canWrite = true, refreshKey, showToolbar = true } = props;
+  const { projectId, canWrite = true, refreshKey, showToolbar = true, onChanged, embedded } = props;
 
   const [rows, setRows] = useState<ProjectMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -175,8 +187,9 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
       }
       setDrawer({ open: false, mode: "create" });
       await load();
+      onChanged?.();
     },
-    [drawer.mode, drawer.row, load, showToast],
+    [drawer.mode, drawer.row, load, onChanged, showToast],
   );
 
   const handleConfirmDelete = useCallback(async () => {
@@ -187,10 +200,11 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
       await deleteProjectMember(target.id);
       showToast(true, `成员 ${target.user_name || target.user_id} 已删除`);
       await load();
+      onChanged?.();
     } catch (err) {
       showToast(false, err instanceof ApiError ? err.message : "删除失败");
     }
-  }, [confirmDelete, load, showToast]);
+  }, [confirmDelete, load, onChanged, showToast]);
 
   // ── 表格列 ──
   const columns: TableProps<ProjectMember>["columns"] = useMemo(() => {
@@ -201,6 +215,18 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
         key: "user_name",
         render: (v: unknown, row) =>
           v ? String(v) : <span className="text-xs text-muted-foreground">{row.user_id}</span>,
+      },
+      // 账号列(task-07 / D-004):登录账号 username,后端 LEFT JOIN users 补全,可空兜底「—」。
+      {
+        title: "账号",
+        dataIndex: "username",
+        key: "username",
+        render: (v: unknown) =>
+          v ? (
+            String(v)
+          ) : (
+            <span className="text-xs text-muted-foreground">—</span>
+          ),
       },
       { title: "联系方式", dataIndex: "phone", key: "phone" },
       { title: "部门", dataIndex: "depart_name", key: "depart_name" },
@@ -281,8 +307,9 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
     return rows.slice(start, start + pageSize);
   }, [rows, page, pageSize]);
 
-  // 页面模式(showToolbar=true):SectionCard + 顶部按钮右对齐 + Table bordered + scroll y。
+  // 页面模式(showToolbar=true 且非 embedded):SectionCard + 顶部按钮右对齐 + Table bordered + scroll y。
   // 抽屉模式(showToolbar=false):保留原 flex 布局,无 SectionCard 无 scroll y。
+  // 嵌入模式(embedded=true,G1):跳过 SectionCard,scroll 只 {x:"max-content"}(去掉 vh y),保留新增按钮。
   const body = (
     <>
       {showToolbar && canWrite && (
@@ -324,9 +351,11 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
           size="small"
           bordered={showToolbar}
           scroll={
-            showToolbar
-              ? { x: "max-content", y: "calc(100vh - 430px)" }
-              : { x: "max-content" }
+            embedded
+              ? { x: "max-content" }
+              : showToolbar
+                ? { x: "max-content", y: "calc(100vh - 430px)" }
+                : { x: "max-content" }
           }
           pagination={{
             current: page,
@@ -365,6 +394,10 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
     </>
   );
 
+  if (embedded) {
+    // G1:嵌入模式跳过 SectionCard 外壳,直接渲染 body(含新增按钮 + 紧凑表)。
+    return <div className="flex flex-col gap-3">{body}</div>;
+  }
   if (showToolbar) {
     return <SectionCard bodyPadding="p-2">{body}</SectionCard>;
   }
@@ -373,7 +406,7 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
 
 // ── 成员表单 Drawer ──────────────────────────────────────────────────────
 
-function MemberFormDrawer({
+export function MemberFormDrawer({
   mode,
   row,
   lockedProjectId,

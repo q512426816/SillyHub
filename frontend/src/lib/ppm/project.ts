@@ -24,6 +24,8 @@ import type {
   ProjectMember,
   ProjectMemberCreate,
   ProjectMemberPageReq,
+  ProjectMemberSummaryItem,
+  ProjectMemberSummaryPageReq,
   ProjectMemberUpdate,
   ProjectSimpleItem,
   ProjectStakeholder,
@@ -102,6 +104,19 @@ export async function exportProjects(
     "/api/ppm/project-maintenance/export-excel",
     params as Record<string, unknown> | undefined,
     "project_maintenance.xlsx",
+  );
+}
+
+/**
+ * 项目成员聚合分页 (design §7.4 / GET /api/ppm/project-maintenance/member-summary)。
+ * 一行 = 一个项目 + member_count;member_keyword/role_name 为子表筛选透传。
+ */
+export async function pageProjectMemberSummary(
+  params?: ProjectMemberSummaryPageReq,
+): Promise<PageResp<ProjectMemberSummaryItem>> {
+  return apiFetch<PageResp<ProjectMemberSummaryItem>>(
+    "/api/ppm/project-maintenance/member-summary",
+    { query: params as Record<string, string | number | undefined> | undefined },
   );
 }
 

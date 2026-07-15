@@ -187,6 +187,9 @@ class ProjectMemberResp(PydanticModel):
     role_id: str | None
     role_name: str | None
     depart_name: str | None
+    # 登录账号:由 service LEFT JOIN users 带出 (design §7.3),无对应用户则 None。
+    # 可选默认 None,现有消费方(projects 抽屉等)向后兼容。
+    username: str | None = None
     created_by: uuid.UUID | None
     updated_by: uuid.UUID | None
     created_at: datetime
@@ -203,6 +206,51 @@ class ProjectMemberPageReq(PydanticModel):
     # (不强校验 uuid 类型,避免 FastAPI 422 直接拒绝请求)。
     pm_project_id: str | uuid.UUID | None = None
     user_id: str | uuid.UUID | None = None
+    role_name: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# 项目成员聚合 (派生,非表实体) —— design §7.1
+# ---------------------------------------------------------------------------
+
+
+class ProjectMemberSummaryItem(PydanticModel):
+    """项目成员聚合行 (派生,非表实体)。
+
+    ``owner_name`` 由 service 推算:该项目 ``role_name ilike '%项目经理%'`` 的成员
+    取 ``created_at`` 最早;无则 None。``member_count`` 派生自该项目成员行数。
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_name: str | None
+    project_code: str
+    project_status: str | None
+    project_type: str | None
+    company_name: str | None
+    owner_name: str | None
+    member_count: int
+    updated_at: datetime
+
+
+class ProjectMemberSummaryPageReq(PydanticModel):
+    """项目成员聚合分页请求。
+
+    分页四件 (沿用 ProjectMemberPageReq 的 Field 约束) + 6 维筛选。
+    owner_name/member_keyword/role_name 在 service 层用 EXISTS 子查询匹配。
+    """
+
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=200)
+    order_by: str | None = Field(default=None)
+    order: str = Field(default="desc")
+
+    project_name: str | None = None
+    project_status: str | None = None
+    project_type: str | None = None
+    owner_name: str | None = None
+    member_keyword: str | None = None
     role_name: str | None = None
 
 
@@ -265,6 +313,8 @@ __all__ = [
     "ProjectMemberCreate",
     "ProjectMemberPageReq",
     "ProjectMemberResp",
+    "ProjectMemberSummaryItem",
+    "ProjectMemberSummaryPageReq",
     "ProjectMemberUpdate",
     "ProjectSimpleItem",
     "ProjectStakeholderCreate",

@@ -64,6 +64,7 @@ scale: large
 | 修改 | `backend/app/modules/ppm/project/schema.py` | 新增 `ProjectMemberSummaryItem`、`ProjectMemberSummaryPageReq`；`ProjectMemberResp` 加 `username: str \| None = None` |
 | 修改 | `backend/app/modules/ppm/project/service.py` | `ProjectMaintenanceService.member_summary(req)`（派生聚合 + 多维筛选）；`ProjectMemberService.page()` LEFT JOIN `User` 取 `username`；新增 `_MEMBER_SUMMARY_SORT_FIELDS` 白名单 |
 | 修改 | `backend/app/modules/ppm/project/router.py` | 新增 `GET /project-maintenance/member-summary`（声明在 `{entity_id}` GET 之前，见 router.py:134 注释的路径优先级约定） |
+| 新增 | `backend/app/modules/ppm/project/tests/test_member_summary.py` | 聚合接口分页/6 维筛选/负责人推算/member_count/成员接口 username 的 pytest（task-04） |
 | 修改 | `frontend/src/lib/ppm/types.ts` | 新增 `ProjectMemberSummaryItem`、`ProjectMemberSummaryPageReq`；`ProjectMember` 加 `username?: string \| null` |
 | 修改 | `frontend/src/lib/ppm/project.ts` | 新增 `pageProjectMemberSummary(params)` |
 | 修改 | `frontend/src/app/(dashboard)/ppm/project-members/page.tsx` | 改为渲染 `<PpmProjectMembersGroupTable />`（保留 PageContainer/PageHeader） |

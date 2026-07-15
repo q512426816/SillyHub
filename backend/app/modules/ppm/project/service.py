@@ -15,11 +15,12 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.modules.auth.model import User
 from app.modules.ppm.common.crud import (
     Page,
     PageReq,
@@ -42,6 +43,9 @@ from app.modules.ppm.project.schema import (
     ProjectMaintenanceUpdate,
     ProjectMemberCreate,
     ProjectMemberPageReq,
+    ProjectMemberResp,
+    ProjectMemberSummaryItem,
+    ProjectMemberSummaryPageReq,
     ProjectMemberUpdate,
     ProjectSimpleItem,
     ProjectStakeholderCreate,
@@ -136,6 +140,15 @@ _PROJECT_SORT_FIELDS: set[str] = {
     "project_name",
     "project_code",
     "project_status",
+}
+
+# 成员聚合排序白名单:派生列 owner_name/member_count 不进白名单 (D-005@v1,
+# 不做成员数排序);仅项目表自身业务字段。
+_MEMBER_SUMMARY_SORT_FIELDS: set[str] = {
+    "updated_at",
+    "created_at",
+    "project_name",
+    "project_code",
 }
 
 
@@ -234,6 +247,117 @@ class ProjectMaintenanceService:
         ).order_by(PpmProjectMaintenance.project_name.asc())
         result = await self._session.execute(stmt)
         return [ProjectSimpleItem(id=row.id, project_name=row.project_name) for row in result.all()]
+
+    async def member_summary(
+        self,
+        req: ProjectMemberSummaryPageReq,
+    ) -> Page[ProjectMemberSummaryItem]:
+        """项目成员聚合查询 (design §7.2)。
+
+        派生列:
+        - owner_name:该项目 role_name ilike '%项目经理%' 的成员,取 created_at
+          最早;无则 None (标量子查询)。
+        - member_count:该项目成员行数 (标量子查询)。
+
+        筛选:
+        - project_name/project_status/project_type 直接作用项目表;
+        - owner_name/member_keyword/role_name 用 EXISTS 子查询匹配项目下成员。
+        """
+        # 负责人姓名标量子查询 (多 PM 取 created_at 最早)
+        owner_subq = (
+            select(PpmProjectMember.user_name)
+            .where(
+                PpmProjectMember.pm_project_id == PpmProjectMaintenance.id,
+                PpmProjectMember.role_name.ilike("%项目经理%"),
+            )
+            .order_by(PpmProjectMember.created_at.asc())
+            .limit(1)
+            .scalar_subquery()
+        )
+        # 成员数标量子查询
+        count_subq = (
+            select(func.count())
+            .select_from(PpmProjectMember)
+            .where(PpmProjectMember.pm_project_id == PpmProjectMaintenance.id)
+            .scalar_subquery()
+        )
+        stmt = select(
+            PpmProjectMaintenance.id,
+            PpmProjectMaintenance.project_name,
+            PpmProjectMaintenance.project_code,
+            PpmProjectMaintenance.project_status,
+            PpmProjectMaintenance.project_type,
+            PpmProjectMaintenance.company_name,
+            owner_subq.label("owner_name"),
+            count_subq.label("member_count"),
+            PpmProjectMaintenance.updated_at,
+        )
+        # 项目表直接筛选 (沿用 _apply_filters 模式)
+        if req.project_name:
+            stmt = stmt.where(PpmProjectMaintenance.project_name.like(f"%{req.project_name}%"))
+        if req.project_status:
+            stmt = stmt.where(PpmProjectMaintenance.project_status == req.project_status)
+        if req.project_type:
+            stmt = stmt.where(PpmProjectMaintenance.project_type == req.project_type)
+        # EXISTS 筛选:owner_name (项目经理 + user_name 匹配)
+        if req.owner_name:
+            stmt = stmt.where(
+                exists(
+                    select(PpmProjectMember.id).where(
+                        PpmProjectMember.pm_project_id == PpmProjectMaintenance.id,
+                        PpmProjectMember.role_name.ilike("%项目经理%"),
+                        PpmProjectMember.user_name.like(f"%{req.owner_name}%"),
+                    )
+                )
+            )
+        # EXISTS 筛选:role_name (成员角色 ilike)
+        if req.role_name:
+            stmt = stmt.where(
+                exists(
+                    select(PpmProjectMember.id).where(
+                        PpmProjectMember.pm_project_id == PpmProjectMaintenance.id,
+                        PpmProjectMember.role_name.ilike(f"%{req.role_name}%"),
+                    )
+                )
+            )
+        # EXISTS 筛选:member_keyword (成员 user_name 或 users.username 匹配)
+        if req.member_keyword:
+            kw = f"%{req.member_keyword}%"
+            stmt = stmt.where(
+                exists(
+                    select(PpmProjectMember.id)
+                    .outerjoin(User, User.id == PpmProjectMember.user_id)
+                    .where(
+                        PpmProjectMember.pm_project_id == PpmProjectMaintenance.id,
+                        (PpmProjectMember.user_name.like(kw)) | (User.username.like(kw)),
+                    )
+                )
+            )
+        total = await count_total(self._session, stmt)
+        stmt = apply_sort(
+            stmt,
+            PpmProjectMaintenance,
+            req.order_by,
+            _MEMBER_SUMMARY_SORT_FIELDS,
+            req.order,
+        )
+        stmt = apply_pagination(stmt, _to_page_req(req))
+        result = await self._session.execute(stmt)
+        items = [
+            ProjectMemberSummaryItem(
+                id=row.id,
+                project_name=row.project_name,
+                project_code=row.project_code,
+                project_status=row.project_status,
+                project_type=row.project_type,
+                company_name=row.company_name,
+                owner_name=row.owner_name,  # 无 PM 时为 None
+                member_count=int(row.member_count or 0),
+                updated_at=row.updated_at,
+            )
+            for row in result.all()
+        ]
+        return Page.build(items=items, total=total, req=_to_page_req(req))
 
     async def _assert_code_available(self, project_code: str) -> None:
         stmt = (
@@ -441,8 +565,15 @@ class ProjectMemberService:
             raise PpmProjectMemberNotFound(f"项目成员 '{entity_id}' 不存在")
         return entity
 
-    async def page(self, req: ProjectMemberPageReq) -> Page[PpmProjectMember]:
-        stmt = select(PpmProjectMember)
+    async def page(self, req: ProjectMemberPageReq) -> Page[ProjectMemberResp]:
+        """分页查询,LEFT JOIN users 带出登录账号 username (design §7.3)。
+
+        service 层直接构造 ``ProjectMemberResp`` (含 username),router 无需再
+        model_validate。``User.username`` 可空,LEFT JOIN 无对应用户时为 None。
+        """
+        stmt = select(PpmProjectMember, User.username).outerjoin(
+            User, User.id == PpmProjectMember.user_id
+        )
         pm_project_id = _parse_uuid_optional(req.pm_project_id)
         if pm_project_id is not None:
             stmt = stmt.where(PpmProjectMember.pm_project_id == pm_project_id)
@@ -464,7 +595,26 @@ class ProjectMemberService:
         )
         stmt = apply_pagination(stmt, _to_page_req(req))
         result = await self._session.execute(stmt)
-        items = list(result.scalars().all())
+        items = [
+            ProjectMemberResp(
+                id=row.PpmProjectMember.id,
+                create_name=row.PpmProjectMember.create_name,
+                pm_project_id=row.PpmProjectMember.pm_project_id,
+                user_id=row.PpmProjectMember.user_id,
+                user_name=row.PpmProjectMember.user_name,
+                depart_id=row.PpmProjectMember.depart_id,
+                phone=row.PpmProjectMember.phone,
+                role_id=row.PpmProjectMember.role_id,
+                role_name=row.PpmProjectMember.role_name,
+                depart_name=row.PpmProjectMember.depart_name,
+                username=row.username,
+                created_by=row.PpmProjectMember.created_by,
+                updated_by=row.PpmProjectMember.updated_by,
+                created_at=row.PpmProjectMember.created_at,
+                updated_at=row.PpmProjectMember.updated_at,
+            )
+            for row in result.all()
+        ]
         return Page.build(items=items, total=total, req=_to_page_req(req))
 
     async def _assert_not_duplicate(

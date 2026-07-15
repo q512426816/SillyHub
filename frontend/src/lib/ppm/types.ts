@@ -82,6 +82,36 @@ export interface ProjectSimpleItem {
   project_name: string | null;
 }
 
+/**
+ * 项目成员聚合视图 (design §7.4 / GET /api/ppm/project-maintenance/member-summary)。
+ *
+ * 一行 = 一个项目,member_count 为该项目下成员数;字段对齐后端聚合 DTO。
+ */
+export interface ProjectMemberSummaryItem {
+  id: string;
+  project_name: string | null;
+  project_code: string;
+  project_status: string | null;
+  project_type: string | null;
+  company_name: string | null;
+  owner_name: string | null;
+  member_count: number;
+  updated_at: string;
+}
+
+/**
+ * 项目成员聚合分页查询参数 (design §7.4)。
+ * member_keyword/role_name 对应后端子表筛选透传。
+ */
+export interface ProjectMemberSummaryPageReq extends PageReq {
+  project_name?: string | null;
+  project_status?: string | null;
+  project_type?: string | null;
+  owner_name?: string | null;
+  member_keyword?: string | null;
+  role_name?: string | null;
+}
+
 export interface CustomerMaintenance {
   id: string;
   create_name: string | null;
@@ -126,6 +156,8 @@ export interface ProjectMember {
   pm_project_id: string;
   user_id: string;
   user_name: string | null;
+  /** 登录账号 (对齐后端聚合;子表账号列用,task-07)。 */
+  username?: string | null;
   depart_id: string | null;
   phone: string | null;
   role_id: string | null;

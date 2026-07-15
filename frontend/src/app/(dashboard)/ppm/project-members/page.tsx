@@ -1,13 +1,14 @@
 "use client";
 
 /**
- * 项目成员页面 /ppm/project-members — 对齐 project-plans 风格。
+ * 项目成员页面 /ppm/project-members — 两级展开表(项目→成员)。
  *
- * 平铺全量成员管理:角色 auth.Role 多选(D-009)+ 选用户联动回填部门/手机/姓名。
- * 实现下沉到 PpmProjectMembersTable 组件(与 projects 页面「成员管理」抽屉复用)。
+ * 一级项目表 + 展开行懒加载成员子表(复用 PpmProjectMembersTable embedded 模式)+
+ * 全局跨项目新增(复用 MemberFormDrawer)。实现下沉到 PpmProjectMembersGroupTable 组件。
+ * 依据:design.md §7.5;task-09 仅切换渲染组件,外壳(PageContainer/PageHeader)保留。
  */
 import { PageContainer, PageHeader } from "@/components/layout";
-import { PpmProjectMembersTable } from "@/components/ppm-project-members-table";
+import { PpmProjectMembersGroupTable } from "@/components/ppm-project-members-group-table";
 
 export default function PpmProjectMembersPage() {
   return (
@@ -16,7 +17,7 @@ export default function PpmProjectMembersPage() {
         title="项目成员"
         subtitle="项目成员主数据,被审批流 / 看板依赖"
       />
-      <PpmProjectMembersTable />
+      <PpmProjectMembersGroupTable />
     </PageContainer>
   );
 }
