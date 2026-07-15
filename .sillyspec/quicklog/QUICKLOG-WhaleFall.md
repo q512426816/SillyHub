@@ -140,3 +140,12 @@ created_at: 2026-07-14T09:20:24
 根因：ql-005 同步样式时漏了 projects PpmResourceTable 的 showExpandToggle 逻辑（visibleSearchFields collapsed 取前 4 + 展开按钮，ppm-resource-table.tsx:519/595-603）；GroupTable 6 字段直接全显。
 方案：GroupTable 加 searchExpanded state（默认 false）+ 后 2 字段（成员姓名·账号/角色）用 {searchExpanded &&} 条件渲染（前 4 总显）+ 按钮行搜索/重置后加展开/收起按钮（6>4 显示）。对齐 projects。
 结果：tsc --noEmit EXIT 0。待 commit + push + rebuild frontend + 用户验证（默认前 4 + 展开按钮，点展开显全部 6 + 收起）。
+
+## ql-20260715-007-3a5e | 2026-07-15 13:46:44 | GroupTable 一级表 scroll 加 y 自适应高度（对齐 projects PpmResourceTable DataTable calc(100vh-430px)）
+状态：已完成
+关联变更：2026-07-15-project-members-rebuild
+文件：frontend/src/components/ppm-project-members-group-table.tsx
+需求：用户反馈 table 没设置自适应高度，要对齐项目页。
+根因：GroupTable 一级项目表 scroll 只有 {x:'max-content'} 无 y（ql-005 同步样式时漏了对齐 projects DataTable 的 y: calc(100vh-430px)）；G1 只给展开行成员子表(embedded)去了 y，一级表本应有 y。
+方案：GroupTable 一级项目表 scroll 加 y:'calc(100vh-430px)'（对齐 ppm-resource-table.tsx:665）。展开行成员子表(embedded)保持无 y（G1 设计，嵌套不适合 vh scroll）。
+结果：tsc --noEmit EXIT 0。待 commit + push + rebuild frontend + 用户验证（一级表自适应高度，超长时表头固定+ body 滚动）。

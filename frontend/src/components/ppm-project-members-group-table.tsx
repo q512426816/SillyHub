@@ -409,7 +409,7 @@ export function PpmProjectMembersGroupTable() {
               loading={loading}
               size="small"
               bordered
-              scroll={{ x: "max-content" }}
+              scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
               expandable={{
                 expandedRowKeys,
                 onExpandedRowsChange: (keys) =>
