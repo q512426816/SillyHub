@@ -89,8 +89,8 @@ class AuthService:
         normalized = account.strip().lower()
         user = await self._lookup_active_user_by_username(normalized)
         if user is None or not password_hasher.verify(password, user.password_hash):
-            # Constant message: no email enumeration.
-            raise AuthInvalidCredentials("Invalid email or password.")
+            # 统一中文报错，不区分「用户不存在」与「密码错」防枚举（D-001 纯 username 登录）。
+            raise AuthInvalidCredentials("用户名或密码错误。")
 
         # Login permission gate (task-06 of 2026-06-16-admin-org-role-center).
         # Checked AFTER password verify so the error envelope matches
