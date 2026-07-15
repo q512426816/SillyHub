@@ -9,6 +9,9 @@
  * 页头「+ 添加项目成员」= 跨项目全局新增(复用 MemberFormDrawer,lockedProjectId=undefined
  * 显示项目选择)。
  *
+ * 样式对齐 /ppm/projects 的 PpmResourceTable(ql-20260715-005):SectionCard 卡片包裹 +
+ * 按钮行 D-006(数据组│竖分隔│基础组一行) + 搜索区 grid-cols-4 + striped 斑马纹表。
+ *
  * 设计依据:.sillyspec/changes/2026-07-15-project-members-rebuild/design.md §7.5;
  * 原型:prototype-project-members-rebuild.html(两级表布局);
  * 决策:D-002(成员展开行懒加载)/D-003/D-006(复用成员表)/D-007(onChanged 刷新 member_count)。
@@ -17,6 +20,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Input, Select, Table, type TableProps, Tag } from "antd";
 
 import { Button } from "@/components/ui/button";
+import { SectionCard } from "@/components/layout";
 import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api";
 import {
@@ -239,112 +243,6 @@ export function PpmProjectMembersGroupTable() {
 
   return (
     <div className="flex flex-col gap-3">
-      {/* 顶部:全局跨项目新增 */}
-      <div className="flex items-center justify-end gap-2">
-        <Button size="sm" onClick={() => setGlobalAddOpen(true)}>
-          + 添加项目成员
-        </Button>
-      </div>
-
-      {/* 搜索区(6 维) */}
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        <div>
-          <label className="text-[11px] text-muted-foreground">项目名称</label>
-          <Input
-            size="small"
-            allowClear
-            value={search.project_name}
-            onChange={(e) =>
-              setSearch((s) => ({ ...s, project_name: e.target.value }))
-            }
-            placeholder="项目名称"
-          />
-        </div>
-        <div>
-          <label className="text-[11px] text-muted-foreground">项目状态</label>
-          <Select
-            size="small"
-            allowClear
-            className="w-full"
-            value={search.project_status || undefined}
-            onChange={(v) =>
-              setSearch((s) => ({
-                ...s,
-                project_status: v ?? "",
-              }))
-            }
-            placeholder="项目状态"
-            options={PROJECT_STATUS_OPTIONS.map((o) => ({
-              label: o.label,
-              value: o.value,
-            }))}
-          />
-        </div>
-        <div>
-          <label className="text-[11px] text-muted-foreground">项目类型</label>
-          <Select
-            size="small"
-            allowClear
-            className="w-full"
-            value={search.project_type || undefined}
-            onChange={(v) =>
-              setSearch((s) => ({ ...s, project_type: v ?? "" }))
-            }
-            placeholder="项目类型"
-            options={PROJECT_TYPE_OPTIONS.map((o) => ({
-              label: o.label,
-              value: o.value,
-            }))}
-          />
-        </div>
-        <div>
-          <label className="text-[11px] text-muted-foreground">负责人</label>
-          <Input
-            size="small"
-            allowClear
-            value={search.owner_name}
-            onChange={(e) =>
-              setSearch((s) => ({ ...s, owner_name: e.target.value }))
-            }
-            placeholder="负责人"
-          />
-        </div>
-        <div>
-          <label className="text-[11px] text-muted-foreground">
-            成员姓名 / 账号
-          </label>
-          <Input
-            size="small"
-            allowClear
-            value={search.member_keyword}
-            onChange={(e) =>
-              setSearch((s) => ({ ...s, member_keyword: e.target.value }))
-            }
-            placeholder="成员姓名 / 账号"
-          />
-        </div>
-        <div>
-          <label className="text-[11px] text-muted-foreground">角色</label>
-          <Input
-            size="small"
-            allowClear
-            value={search.role_name}
-            onChange={(e) =>
-              setSearch((s) => ({ ...s, role_name: e.target.value }))
-            }
-            placeholder="承担角色"
-          />
-        </div>
-      </div>
-      <div className="flex items-center justify-end gap-2">
-        <Button size="sm" variant="outline" onClick={onReset}>
-          重置
-        </Button>
-        <Button size="sm" onClick={onSearch}>
-          查询
-        </Button>
-      </div>
-
       {toast && (
         <div
           className={`rounded border px-3 py-2 text-xs ${
@@ -370,42 +268,164 @@ export function PpmProjectMembersGroupTable() {
           </Button>
         </div>
       ) : (
-        <Table<ProjectMemberSummaryItem>
-          rowKey={(row) => row.id}
-          columns={columns}
-          dataSource={rows}
-          loading={loading}
-          size="small"
-          bordered
-          scroll={{ x: "max-content" }}
-          expandable={{
-            expandedRowKeys,
-            onExpandedRowsChange: (keys) =>
-              setExpandedRowKeys([...keys]),
-            // 展开行懒加载成员子表:embedded 紧凑模式(G1),onChanged=load 刷新 member_count。
-            expandedRowRender: (record) => (
-              <PpmProjectMembersTable
-                projectId={record.id}
-                embedded
-                onChanged={() => void load()}
-              />
-            ),
-          }}
-          pagination={{
-            current: page,
-            pageSize,
-            total,
-            showSizeChanger: true,
-            pageSizeOptions: [10, 20, 50, 100],
-            showTotal: (t) => `共 ${t} 个项目`,
-            onChange: (p, s) => {
-              setPage(p);
-              setPageSize(s);
-              setExpandedRowKeys([]);
-            },
-          }}
-          locale={{ emptyText: "暂无项目" }}
-        />
+        <>
+          <SectionCard bodyPadding="p-2">
+            {/* 顶部按钮行(D-006,对齐 projects):左=数据组(添加项目成员) │ 竖分隔 │ 右=基础组(搜索/重置) */}
+            <div className="mb-2 flex items-center justify-end gap-2">
+              <Button size="sm" onClick={() => setGlobalAddOpen(true)}>
+                + 添加项目成员
+              </Button>
+              <span className="mx-1 h-6 w-px bg-border" aria-hidden />
+              <Button size="sm" onClick={onSearch}>
+                搜索
+              </Button>
+              <Button size="sm" variant="outline" onClick={onReset}>
+                重置
+              </Button>
+            </div>
+
+            {/* 搜索区(6 维,grid-cols-4 对齐 projects) */}
+            <div className="grid w-full grid-cols-4 gap-3">
+              <div>
+                <label className="text-[11px] text-muted-foreground">
+                  项目名称
+                </label>
+                <Input
+                  allowClear
+                  value={search.project_name}
+                  onChange={(e) =>
+                    setSearch((s) => ({ ...s, project_name: e.target.value }))
+                  }
+                  placeholder="项目名称"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-muted-foreground">
+                  项目状态
+                </label>
+                <Select
+                  allowClear
+                  className="w-full"
+                  value={search.project_status || undefined}
+                  onChange={(v) =>
+                    setSearch((s) => ({
+                      ...s,
+                      project_status: v ?? "",
+                    }))
+                  }
+                  placeholder="项目状态"
+                  options={PROJECT_STATUS_OPTIONS.map((o) => ({
+                    label: o.label,
+                    value: o.value,
+                  }))}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-muted-foreground">
+                  项目类型
+                </label>
+                <Select
+                  allowClear
+                  className="w-full"
+                  value={search.project_type || undefined}
+                  onChange={(v) =>
+                    setSearch((s) => ({ ...s, project_type: v ?? "" }))
+                  }
+                  placeholder="项目类型"
+                  options={PROJECT_TYPE_OPTIONS.map((o) => ({
+                    label: o.label,
+                    value: o.value,
+                  }))}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-muted-foreground">
+                  负责人
+                </label>
+                <Input
+                  allowClear
+                  value={search.owner_name}
+                  onChange={(e) =>
+                    setSearch((s) => ({ ...s, owner_name: e.target.value }))
+                  }
+                  placeholder="负责人"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-muted-foreground">
+                  成员姓名 / 账号
+                </label>
+                <Input
+                  allowClear
+                  value={search.member_keyword}
+                  onChange={(e) =>
+                    setSearch((s) => ({
+                      ...s,
+                      member_keyword: e.target.value,
+                    }))
+                  }
+                  placeholder="成员姓名 / 账号"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-muted-foreground">
+                  角色
+                </label>
+                <Input
+                  allowClear
+                  value={search.role_name}
+                  onChange={(e) =>
+                    setSearch((s) => ({ ...s, role_name: e.target.value }))
+                  }
+                  placeholder="承担角色"
+                />
+              </div>
+            </div>
+          </SectionCard>
+
+          {/* striped 斑马纹表(对齐 projects) */}
+          <div className="ppm-striped-table">
+            <style>{`
+.ppm-striped-table .ant-table-tbody tr.ant-table-row td{background:transparent}
+.ppm-striped-table .ant-table-tbody tr.ant-table-row:nth-child(even) td{background-color:hsl(var(--muted)/0.4)}`}</style>
+            <Table<ProjectMemberSummaryItem>
+              rowKey={(row) => row.id}
+              columns={columns}
+              dataSource={rows}
+              loading={loading}
+              size="small"
+              bordered
+              scroll={{ x: "max-content" }}
+              expandable={{
+                expandedRowKeys,
+                onExpandedRowsChange: (keys) =>
+                  setExpandedRowKeys([...keys]),
+                // 展开行懒加载成员子表:embedded 紧凑模式(G1),onChanged=load 刷新 member_count。
+                expandedRowRender: (record) => (
+                  <PpmProjectMembersTable
+                    projectId={record.id}
+                    embedded
+                    onChanged={() => void load()}
+                  />
+                ),
+              }}
+              pagination={{
+                current: page,
+                pageSize,
+                total,
+                showSizeChanger: true,
+                pageSizeOptions: [10, 20, 50, 100],
+                showTotal: (t) => `共 ${t} 个项目`,
+                onChange: (p, s) => {
+                  setPage(p);
+                  setPageSize(s);
+                  setExpandedRowKeys([]);
+                },
+              }}
+              locale={{ emptyText: "暂无项目" }}
+            />
+          </div>
+        </>
       )}
 
       {/* 全局跨项目新增:lockedProjectId=undefined → 显示项目选择 */}

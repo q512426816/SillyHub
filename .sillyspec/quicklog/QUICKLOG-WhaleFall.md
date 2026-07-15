@@ -113,3 +113,21 @@ created_at: 2026-07-14T09:20:24
 需求：用户要求里程碑明细列表里的「审核人」「审批人」两列先隐藏。
 方案：直接注释掉 detailColumns 数组中 audit_user_name（审核人）与 approve_user_name（审批人）两个 column 对象，不动后端（audit_user_id/approve_user_id 字段保留，仅在列表不展示）；注释保留原定义+ql-id，后续要恢复取消注释即可。
 结果：tsc --noEmit EXIT 0；列表不再显示审核人/审批人两列；后端/数据未变。
+
+## ql-20260715-005-8f3a | 2026-07-15 13:06:51 | /ppm/project-members 样式同步 /ppm/projects——GroupTable 加 SectionCard 卡片包裹 + 按钮行 D-006(新增│分隔│搜索/重置一行) + 搜索区 grid-cols-4 + striped 斑马纹表
+状态：已完成
+关联变更：2026-07-15-project-members-rebuild
+文件：frontend/src/components/ppm-project-members-group-table.tsx
+需求：用户要求 /ppm/project-members 样式和 /ppm/projects 同步。
+根因：project-members 页的 GroupTable（project-members-rebuild 新建）样式与 projects 页 PpmResourceTable 不一致——GroupTable 裸 div 容器(无卡片)、顶部「添加」与底部「查询/重置」分散两行、搜索区 grid-cols-3、表格无斑马纹；projects 用 SectionCard 卡片 + 按钮行 D-006(数据组│竖分隔│基础组一行) + 搜索区 grid-cols-4 + ppm-striped-table 斑马纹。
+方案：GroupTable 单文件样式对齐 PpmResourceTable(ppm-resource-table.tsx:535-665)：①SectionCard bodyPadding=p-2 包裹搜索区(原裸 div)②按钮行合并 D-006(添加项目成员│mx-1 h-6 w-px bg-border 竖分隔│搜索/重置 一行)③搜索区 grid-cols-1/3→grid-cols-4④Input/Select 去 size=small 对齐默认⑤表格外包 ppm-striped-table div+<style> 斑马纹⑥toast 前置。功能不变。
+结果：tsc --noEmit EXIT 0。待 commit + push + rebuild frontend 部署 + 用户浏览器验证(project-members 视觉与 projects 一致:卡片/按钮一行/4列搜索/斑马纹)。
+
+## ql-20260715-006-3e8c | 2026-07-15 13:19:13 | 登录失败报错改中文（Invalid email or password → 用户名或密码错误）
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/auth/service.py（AuthService.login 用户名/密码校验失败抛 AuthInvalidCredentials 的 message：Invalid email or password → 用户名或密码错误）
+需求：用户反馈登录失败报错是英文「Invalid email or password」，要求改中文。
+根因：报错文案是 service.py:93 的英文硬编码（防枚举统一报错，D-001 纯 username 登录后仍残留 email 字样）。注：用户用 180490+SillyHub@123 登录 401 的根因是 180490 为 2025-01-15 创建的老用户（默认密码方案 2026-07-15 才上线），密码非默认——与本次文案改动无关，老用户密码需单独批量重置。
+方案：service.py:93 AuthInvalidCredentials 消息「Invalid email or password.」→「用户名或密码错误。」（注释同步中文，保留防枚举：不区分用户不存在/密码错）。
+结果：纯文案改动；待 commit+push+rebuild backend 部署 + 用户验证（登录失败显示中文「用户名或密码错误」）。
