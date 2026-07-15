@@ -23,7 +23,8 @@
  * 数据 WorkbenchCalendar 由 page.tsx(task-08)装配后 props 下传,组件内不独立 fetch
  * (design §3 / task-11 constraints);当日任务列表复用 page.tsx 已装配的 tasks。
  */
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import dayjs from "dayjs";
 
 import { cn } from "@/lib/utils";
 import { SectionCard } from "@/components/layout";
@@ -39,6 +40,10 @@ export interface WorkCalendarPanelProps {
   loading?: boolean;
   /** 个人任务列表(page.tsx 装配),用于点击某日时列出当日任务。 */
   tasks?: PlanTask[] | null;
+  /** 当前显示月份 YYYY-MM(可切换,page.tsx state 下传)。 */
+  month: string;
+  /** 切换月份回调(传新 YYYY-MM)。 */
+  onMonthChange: (month: string) => void;
 }
 
 /** 星期表头(日~六)。 */
@@ -116,15 +121,20 @@ export function WorkCalendarPanel({
   calendar,
   loading,
   tasks,
+  month,
+  onMonthChange,
 }: WorkCalendarPanelProps) {
-  const yearMonth = calendar?.year_month;
-  const cells = buildMonthGrid(yearMonth, calendar?.days ?? []);
-  // 默认选中今天(进入工作台即显示当天任务,无需手动点)
-  const todayStr = (() => {
+  const cells = buildMonthGrid(calendar?.year_month, calendar?.days ?? []);
+  // 今天(YYYY-MM-DD),用于默认选中;useMemo 稳定避免重渲染抖动。
+  const todayStr = useMemo(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  })();
+  }, []);
   const [selectedDay, setSelectedDay] = useState<string | null>(todayStr);
+  // 切换月份:今天在新月则选中今天,否则清空(避免跨月残留旧选中)。
+  useEffect(() => {
+    setSelectedDay(todayStr.startsWith(month) ? todayStr : null);
+  }, [month, todayStr]);
 
   // 当日任务:按 start_time 的日期部分(YYYY-MM-DD,对齐后端 UTC day)过滤
   const dayTasks = selectedDay
@@ -132,10 +142,33 @@ export function WorkCalendarPanel({
     : [];
 
   return (
-    <SectionCard
-      title={`本月日历 ${yearMonth ?? ""}`.trim()}
-      bodyPadding="p-4"
-    >
+    <SectionCard title="工作日历" bodyPadding="p-4">
+      {/* 月份导航:‹ 上月 | YYYY年M月 | 下月 › */}
+      <div className="mb-3 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() =>
+            onMonthChange(dayjs(month).subtract(1, "month").format("YYYY-MM"))
+          }
+          className="rounded px-2 py-0.5 text-base text-muted-foreground hover:bg-muted"
+          aria-label="上个月"
+        >
+          ‹
+        </button>
+        <span className="text-sm font-medium">
+          {dayjs(month).format("YYYY年M月")}
+        </span>
+        <button
+          type="button"
+          onClick={() =>
+            onMonthChange(dayjs(month).add(1, "month").format("YYYY-MM"))
+          }
+          className="rounded px-2 py-0.5 text-base text-muted-foreground hover:bg-muted"
+          aria-label="下个月"
+        >
+          ›
+        </button>
+      </div>
       {loading || !calendar ? (
         <div className="py-8 text-center text-xs text-muted-foreground animate-pulse">
           日历加载中…
@@ -158,7 +191,7 @@ export function WorkCalendarPanel({
               }
               const loadColor = loadDotClass(cell.info?.load_level);
               const alertColor = alertDotClass(cell.info?.alert_level);
-              const date = `${yearMonth}-${String(cell.day).padStart(2, "0")}`;
+              const date = `${month}-${String(cell.day).padStart(2, "0")}`;
               const selected = selectedDay === date;
               return (
                 <button

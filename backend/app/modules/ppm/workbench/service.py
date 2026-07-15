@@ -264,8 +264,9 @@ class WorkbenchService:
         todos: list[WorkbenchTodoItem] = []
         uid_str = str(user.id)
 
-        # ① 问题待办:Python 端 split now_handle_user 匹配 (R-02 方言安全)
-        problem_stmt = select(PpmProblemList).where(PpmProblemList.duty_user_id == user.id)
+        # ① 问题待办:当前处理人(now_handle_user)含我即显示,不限责任人 duty_user_id
+        # (duty 是责任人,审批人非责任人时也需看到待办;R-02 Python split 方言安全)
+        problem_stmt = select(PpmProblemList)
         problem_rows = (await self._session.execute(problem_stmt)).scalars().all()
         for p in problem_rows:
             if p.status == "4":

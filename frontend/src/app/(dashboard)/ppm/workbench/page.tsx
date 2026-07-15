@@ -98,6 +98,10 @@ export default function WorkbenchPage() {
   const [tasksLoading, setTasksLoading] = useState<boolean>(true);
   // 范围切换(本周/本月/全部):联动指标 summary + 任务表 start_time 过滤。
   const [range, setRange] = useState<Range>("month");
+  // 工作日历当前月份(可切换,默认当月):变 → loadCalendar 重建 → 重拉该月。
+  const [calendarMonth, setCalendarMonth] = useState<string>(() =>
+    dayjs().format("YYYY-MM"),
+  );
   // 任务表按 range 过滤后的可见集(项目/平台筛选由 WorkbenchTaskTable 内部处理)。
   const visibleTasks = useMemo(
     () => tasks.filter((t) => inTaskRange(t.start_time, range)),
@@ -135,8 +139,7 @@ export default function WorkbenchPage() {
   const loadCalendar = useCallback(async () => {
     setCalendar((s) => ({ ...s, loading: true, error: null }));
     try {
-      const yearMonth = dayjs().format("YYYY-MM");
-      const data = await fetchWorkbenchCalendar(yearMonth);
+      const data = await fetchWorkbenchCalendar(calendarMonth);
       setCalendar({ loading: false, error: null, data });
     } catch (err) {
       setCalendar({
@@ -145,6 +148,11 @@ export default function WorkbenchPage() {
         data: null,
       });
     }
+  }, [calendarMonth]);
+
+  // 日历月份切换(‹/›):setCalendarMonth 后 loadCalendar 依赖变化自动重拉新月。
+  const handleCalendarMonthChange = useCallback((month: string) => {
+    setCalendarMonth(month);
   }, []);
 
   const loadTasks = useCallback(async () => {
@@ -165,12 +173,16 @@ export default function WorkbenchPage() {
     }
   }, []);
 
-  // 首屏:profile/calendar/tasks 各独立装配(range 变不重跑这几块)。
+  // 首屏:profile/tasks 各独立装配(range 变不重跑这两块)。
   useEffect(() => {
     void loadProfile();
-    void loadCalendar();
     void loadTasks();
-  }, [loadProfile, loadCalendar, loadTasks]);
+  }, [loadProfile, loadTasks]);
+
+  // 日历跟随 calendarMonth:月份切换 → loadCalendar 重建 → 重拉该月(不影响 profile/tasks)。
+  useEffect(() => {
+    void loadCalendar();
+  }, [loadCalendar]);
 
   // summary 跟随 range:range 变 → loadSummary 重建 → 重查指标(数据源对齐)。
   useEffect(() => {
@@ -255,7 +267,12 @@ export default function WorkbenchPage() {
               onRetry={loadCalendar}
             />
           ) : (
-            <WorkCalendarPanel calendar={calendar.data} tasks={tasks} />
+            <WorkCalendarPanel
+              calendar={calendar.data}
+              tasks={tasks}
+              month={calendarMonth}
+              onMonthChange={handleCalendarMonthChange}
+            />
           )}
 
           {/* 快捷入口(静态,无数据依赖) */}
