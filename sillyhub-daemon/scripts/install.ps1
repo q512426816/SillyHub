@@ -31,6 +31,12 @@
 
 #Requires -Version 5.1
 
+# 强制 UTF-8 输出：PowerShell 默认按 OEM/GBK 输出，重定向（git-bash/CI 日志/管道捕获）
+# 时中文变乱码。设 UTF-8 + chcp 65001 让 Write-Host 中文在所有场景正常显示。
+$OutputEncoding = [System.Text.UTF8Encoding]::new()
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+try { chcp 65001 > $null } catch {}
+
 # ── SERVER_URL 推导（优先级从高到低）─────────────────────────────────────────
 #   a. $server 变量（用户在 iex 前赋值）
 #   b. $env:SILLYHUB_SERVER_URL

@@ -262,10 +262,10 @@ export function InstallDaemonBlock() {
               <span className="hidden sm:inline">{copied ? "已复制" : "复制"}</span>
             </Button>
           </div>
-          {/* task-06 / FR-02：Windows 命令需在 PowerShell/cmd 运行，提示用户打开 PowerShell 再粘贴。 */}
+          {/* task-06 / FR-02：irm/iex 是 PowerShell 专属 cmdlet，cmd.exe 不认识，提示用户打开 PowerShell 再粘贴。 */}
           {os === "windows" && (
             <p className="text-[10px] text-amber-600">
-              ⚠️ 在 PowerShell 或 cmd 中运行（开始菜单搜 PowerShell 打开后粘贴）。
+              ⚠️ 在 PowerShell 中运行（开始菜单搜 PowerShell 打开后粘贴）。
             </p>
           )}
         </div>
