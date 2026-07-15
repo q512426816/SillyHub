@@ -193,3 +193,12 @@ created_at: 2026-07-14T09:20:24
 需求：/ppm/projects 点成员管理不开抽屉，改为跳转 /ppm/project-members，带入项目名查询 + 自动展开子表。
 方案：projects 页"成员管理"按钮 `setMemberProject`(开抽屉) → `router.push('/ppm/project-members?project_name=<encodeURIComponent(project_name)>')`，删 ProjectMembersDrawer 组件 + Drawer/PpmProjectMembersTable import + memberProject state；project-members page 用 `useSearchParams` 读 project_name 传 `initialProjectName` 给 GroupTable；GroupTable 加 `initialProjectName` prop（初始 search.project_name 填充 + 首次 load 后 autoExpandedRef 展开匹配项目 expandedRowKeys，仅一次）。
 结果：tsc EXIT 0、lint 干净。待 commit + rebuild frontend 部署 + 用户验证（projects 点成员管理跳转 project-members，搜索框带入项目名 + 该项目子表自动展开）。
+
+## ql-20260715-013-9bc5 | 2026-07-15 17:02:21 | 项目成员子表改服务端分页（pageSize/page 变更走接口，不再一次全量+本地 slice）
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-project-members-table.tsx
+需求：项目成员子表实时查询，变更每页条数时走接口获取，而非一开始就获取所有。
+根因：`PpmProjectMembersTable.load` 调 `listProjectMembers`（= `pageProjectMembers().items`，不传 page/page_size、丢 total），一次性拉数据存 `rows`，前端 `rows.slice` 本地分页；pageSize 变更只改本地 slice 不走接口（后端默认 page_size 下数据也可能不全）。
+方案：load 改用 `pageProjectMembers({page, page_size, pm_project_id})` 服务端分页，`setRows(resp.items)` + `setTotal(resp.total)`；新增 `total` state；删本地 `pagedRows` slice（`dataSource` 直接用 `rows`=当前页）；`onChange` 时 pageSize 变化回到第 1 页避免越界。load 依赖加 `[page, pageSize]` 触发翻页/改页大小重新查询。
+结果：tsc EXIT 0、lint 干净（line 937 `error` unused 为既存，非本次）。待 commit + rebuild frontend 部署 + 用户验证（展开成员子表，切换每页条数走接口刷新当前页）。

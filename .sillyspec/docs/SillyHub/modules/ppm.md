@@ -93,3 +93,4 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 - ql-20260715-010-bb2c | /ppm/project-members 编辑成员"姓名"显示 id 修复：PpmUserSelect res=user 已选 user_id 不在前 20 条时按 id 批量查真实姓名回填 label（后端 list_users 加 ids 参数配合）
 - ql-20260715-011-b118 | /ppm/project-members 一级表"更新时间"列格式化：render `String(v).slice(0,19)`（原始 ISO/UTC，带 T）→ `fmtDateTime`（`YYYY-MM-DD HH:mm` 本地时区，空值 —）
 - ql-20260715-012-5110 | /ppm/projects「成员管理」改为跳转 /ppm/project-members（URL 带 project_name）：project-members page 读 param 传 initialProjectName，GroupTable 初始填搜索 project_name + 首次加载自动展开匹配项目子表（autoExpandedRef 仅一次）；删 projects 抽屉入口（ProjectMembersDrawer）
+- ql-20260715-013-9bc5 | 项目成员子表（PpmProjectMembersTable）改服务端分页：load 由 listProjectMembers（全量+本地 rows.slice）→ pageProjectMembers 传 page/page_size，rows=当前页、total 来自接口；pageSize 变更走接口刷新（onChange 回第 1 页防越界）

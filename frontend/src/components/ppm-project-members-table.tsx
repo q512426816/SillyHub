@@ -30,8 +30,8 @@ import type { UserRead } from "@/lib/admin";
 import {
   createProjectMember,
   deleteProjectMember,
-  listProjectMembers,
   listSimpleProjects,
+  pageProjectMembers,
   updateProjectMember,
 } from "@/lib/ppm";
 import type {
@@ -104,6 +104,7 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
   const { projectId, canWrite = true, refreshKey, showToolbar = true, onChanged, embedded } = props;
 
   const [rows, setRows] = useState<ProjectMember[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
@@ -128,18 +129,20 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
     setLoading(true);
     setError(null);
     try {
-      const params: ProjectMemberPageReq = projectId
-        ? { pm_project_id: projectId }
-        : {};
+      // 服务端分页:page/page_size 变化走接口取对应页,不再一次全量拉本地 slice。
+      const params: ProjectMemberPageReq = {
+        page,
+        page_size: pageSize,
+        ...(projectId ? { pm_project_id: projectId } : {}),
+      };
       // 平铺模式(!projectId)额外并行拉项目简单列表,建 id→project_name 映射
       // (后端 ProjectMemberResp 只回 pm_project_id UUID,需前端映射出项目名展示)。
-      const [result, projects] = await Promise.all([
-        listProjectMembers(
-          Object.keys(params).length > 0 ? params : undefined,
-        ),
+      const [resp, projects] = await Promise.all([
+        pageProjectMembers(params),
         projectId ? null : listSimpleProjects(),
       ]);
-      setRows(result);
+      setRows(resp.items);
+      setTotal(resp.total);
       if (projects) {
         const map: Record<string, string> = {};
         for (const p of projects) {
@@ -152,7 +155,7 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, page, pageSize]);
 
   useEffect(() => {
     void load();
@@ -301,11 +304,7 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
     return cols;
   }, [canWrite, projectId, projectNameMap]);
 
-  const total = rows.length;
-  const pagedRows = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return rows.slice(start, start + pageSize);
-  }, [rows, page, pageSize]);
+  // rows 已是服务端当前页数据(服务端分页,page/pageSize 变化走接口),无需本地 slice;total 来自分页响应。
 
   // 页面模式(showToolbar=true 且非 embedded):SectionCard + 顶部按钮右对齐 + Table bordered + scroll y。
   // 抽屉模式(showToolbar=false):保留原 flex 布局,无 SectionCard 无 scroll y。
@@ -346,7 +345,7 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
         <Table<ProjectMember>
           rowKey={(row) => row.id}
           columns={columns}
-          dataSource={pagedRows}
+          dataSource={rows}
           loading={loading}
           size="small"
           bordered={showToolbar}
@@ -365,8 +364,9 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
             pageSizeOptions: [10, 20, 50, 100],
             showTotal: (t) => `共 ${t} 条`,
             onChange: (p, s) => {
-              setPage(p);
               setPageSize(s);
+              // pageSize 变化回到第 1 页,避免当前页越界取空。
+              setPage(s !== pageSize ? 1 : p);
             },
           }}
           locale={{ emptyText: "暂无成员" }}
