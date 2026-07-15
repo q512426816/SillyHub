@@ -210,3 +210,12 @@ created_at: 2026-07-14T09:20:24
 需求：①PPM 默认首页从「项目列表」改「个人工作台」；②工作台快捷入口加「任务计划」按钮；③「我的待办」纳入审批任务。口径经用户确认：审批只做「问题变更 + 问题清单」，问题清单维持现状（所有在办），不含任务计划/里程碑明细（任务计划 PlanTask 本身无审批流，有审批流的是里程碑明细，用户明确不要）。
 方案：①page.tsx redirect 改 /ppm/workbench；②quick-entry-grid 加 Button router.push /ppm/task-plans；③_derive_todos 新增分支 select PpmProblemChange where status="1"（审核中 ProblemChangeStatus.AUDITING）且 now_handle_user 逗号分隔 split 含当前 user.id → WorkbenchTodoItem(source="problem_change", type="缺陷", name=pro_desc||project_name||"问题变更待审批")，与问题清单分支同构（Python 端 split，R-02 方言安全，无 SQL LIKE 子串风险）；前端 todoBadge 的 problem_change→destructive「缺陷」映射此前已存在占位无需改，仅 goTodo 加 problem_change→/ppm/problem-changes（problem_change 也以 problem 开头，故须先判 equals 再判 startsWith，否则误跳 problem-list）；WorkbenchTodoItem schema 四字段(id/name/type/source)无需改，无 DB 迁移（ppm_problem_change 表已存在）。
 结果：后端 workbench 测试 24 passed（原 21 + 新增 3：命中/now_handle_user 不含我/status≠"1" 过滤）、ruff All checks passed + 7 files already formatted、mypy Success no issues；前端 lint 0 error（19 warning 全既有，本次 3 文件无新告警）。待 commit + rebuild frontend+backend 部署 + 用户验证（进 /ppm 落地工作台、快捷入口「任务计划」跳转、有待审批问题变更时出现在我的待办且点击跳问题变更页）。
+
+## ql-20260715-014-c1d2 | 2026-07-15 21:56:06 | PPM 工作台待办「缺陷」口径修正：去 duty 限制改为仅看当前处理人（审批人非责任人也能看到）+ 造测试数据验证三类齐全
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/workbench/service.py（_derive_todos ①问题待办分支去 .where(duty_user_id==user.id)，改 select(PpmProblemList) 全表 + Python now_handle_user split 含我 + status≠4）+ backend/app/modules/ppm/workbench/tests/test_workbench_service.py（加 test_summary_todo_problem_handle_me_even_not_duty：duty≠me 但 now_handle 含 me → 进 todos）
+需求：用户反馈工作台「我的待办」只看到计划任务，看不到缺陷和审批数据。
+根因：①缺陷(problem_audit)分支原条件 duty_user_id==me 且 now_handle_user 含 me，过严——审批人非责任人(duty≠me)时被过滤；且现有演示数据问题的 now_handle 没填 admin（1 条填了不存在的用户 7a45641f、1 条空）。②ppm_problem_change 表 0 条，无审批数据。经确认缺陷口径改为「仅当前流转给我的」(now_handle 含 me，不限 duty)。
+方案：①service.py 问题待办分支 select(PpmProblemList) 去 duty where，Python 端 now_handle_user split 含我 + status≠"4"即显示（审批人非责任人也能看到）；defect_count 指标不动（仍 duty==me，语义=我负责的缺陷数，与待办口径区分）。②补 duty≠me 测试。③数据：UPDATE 问题1（now_handle 脏数据 7a45641f→admin）+ INSERT 测试变更（status=1，now_handle=admin）。
+结果：后端 workbench 25 passed（+1 新用例）；rebuild backend 后 admin 登录 GET /api/ppm/workbench/summary todos 三类齐全（problem_audit 缺陷1 + problem_change 审批1 + plan_task 任务3）。待 commit + 用户浏览器验证。

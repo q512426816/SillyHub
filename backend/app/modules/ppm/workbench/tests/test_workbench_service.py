@@ -334,6 +334,27 @@ async def test_summary_todo_problem_handle_user_no_match(db_session):
 
 
 @pytest.mark.asyncio
+async def test_summary_todo_problem_handle_me_even_not_duty(db_session):
+    """问题待办:当前处理人是我即显示,不限责任人(duty≠me 也进 todos)。"""
+    user = await _seed_user(db_session)
+    me_str = str(user.id)
+    other = uuid.uuid4()
+    await _seed_problem(
+        db_session,
+        duty_user_id=other,  # 责任人不是 me
+        status="2",
+        now_handle_user=me_str,  # 但当前处理人是 me
+        pro_desc="流转给我处理的问题",
+    )
+
+    svc = WorkbenchService(db_session)
+    summary = await svc.get_summary(user, range="month")
+    problem_todos = [t for t in summary.todos if t.source == "problem_audit"]
+
+    assert any(t.name == "流转给我处理的问题" for t in problem_todos)
+
+
+@pytest.mark.asyncio
 async def test_summary_todo_task_non_terminal(db_session):
     """非终态 PlanTask → 进任务待办 (source=plan_task)。"""
     user = await _seed_user(db_session)
