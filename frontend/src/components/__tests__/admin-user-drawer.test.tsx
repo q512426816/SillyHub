@@ -68,7 +68,7 @@ const baseProps = {
 };
 
 describe("AdminUserDrawer", () => {
-  it("create mode renders username + email + password + display_name fields", () => {
+  it("create mode renders username + email + display_name fields", () => {
     render(
       <AdminUserDrawer
         {...baseProps}
@@ -78,11 +78,23 @@ describe("AdminUserDrawer", () => {
     );
     expect(screen.getByLabelText("登录名")).toBeInTheDocument();
     expect(screen.getByLabelText("邮箱")).toBeInTheDocument();
-    expect(screen.getByText(/密码（至少 8 位）/)).toBeInTheDocument();
     expect(screen.getByText(/显示名（可选）/)).toBeInTheDocument();
   });
 
-  it("edit mode hides password field", () => {
+  it("create mode shows default password hint instead of password input", () => {
+    render(
+      <AdminUserDrawer
+        {...baseProps}
+        open
+        mode="create"
+      />,
+    );
+    // create 模式不再有密码输入框（初始密码由后端统一生成）
+    expect(screen.queryByLabelText("密码")).not.toBeInTheDocument();
+    expect(screen.getByText(/SillyHub@123/)).toBeInTheDocument();
+  });
+
+  it("edit mode shows no default password hint", () => {
     render(
       <AdminUserDrawer
         {...baseProps}
@@ -91,7 +103,7 @@ describe("AdminUserDrawer", () => {
         user={makeUser()}
       />,
     );
-    expect(screen.queryByText(/密码（至少 8 位）/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/SillyHub@123/)).not.toBeInTheDocument();
   });
 
   it("edit mode pre-fills fields from user", () => {
@@ -119,7 +131,7 @@ describe("AdminUserDrawer", () => {
     expect(orgCheckbox.checked).toBe(true);
   });
 
-  it("create submit is disabled when username missing or password too short", () => {
+  it("create submit is disabled when username missing", () => {
     render(
       <AdminUserDrawer
         {...baseProps}
@@ -144,16 +156,14 @@ describe("AdminUserDrawer", () => {
     fireEvent.change(screen.getByLabelText("登录名"), {
       target: { value: "bob" },
     });
-    fireEvent.change(screen.getByLabelText("密码"), {
-      target: { value: "Password1!" },
-    });
     const submitBtn = screen.getByText("保存") as HTMLButtonElement;
     await waitFor(() => expect(submitBtn.disabled).toBe(false));
     fireEvent.click(submitBtn);
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     const body = onSubmit.mock.calls[0]![0];
     expect(body.username).toBe("bob");
-    expect(body.password).toBe("Password1!");
+    // 默认密码方案：前端不再传 password
+    expect(body.password).toBeUndefined();
   });
 
   it("test_username_required_create: create mode disables submit when username empty or too short", async () => {
@@ -165,10 +175,7 @@ describe("AdminUserDrawer", () => {
       />,
     );
     const submitBtn = screen.getByText("保存") as HTMLButtonElement;
-    // 仅填合法 password，username 空 → 保存禁用
-    fireEvent.change(screen.getByLabelText("密码"), {
-      target: { value: "Password1!" },
-    });
+    // username 空 → 保存禁用
     expect(submitBtn.disabled).toBe(true);
     // username < 3 位 → 保存禁用
     fireEvent.change(screen.getByLabelText("登录名"), {
@@ -214,9 +221,6 @@ describe("AdminUserDrawer", () => {
     fireEvent.change(screen.getByLabelText("登录名"), {
       target: { value: "bob" },
     });
-    fireEvent.change(screen.getByLabelText("密码"), {
-      target: { value: "Password1!" },
-    });
     // email 留空
     const submitBtn = screen.getByText("保存") as HTMLButtonElement;
     await waitFor(() => expect(submitBtn.disabled).toBe(false));
@@ -238,9 +242,6 @@ describe("AdminUserDrawer", () => {
     );
     fireEvent.change(screen.getByLabelText("登录名"), {
       target: { value: "bob" },
-    });
-    fireEvent.change(screen.getByLabelText("密码"), {
-      target: { value: "Password1!" },
     });
     const submitBtn = screen.getByText("保存") as HTMLButtonElement;
     // ① email 留空 → 保存启用
@@ -271,9 +272,6 @@ describe("AdminUserDrawer", () => {
     );
     fireEvent.change(screen.getByLabelText("登录名"), {
       target: { value: "alice" },
-    });
-    fireEvent.change(screen.getByLabelText("密码"), {
-      target: { value: "Password1!" },
     });
     const submitBtn = screen.getByText("保存") as HTMLButtonElement;
     await waitFor(() => expect(submitBtn.disabled).toBe(false));

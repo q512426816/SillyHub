@@ -17,7 +17,7 @@ created_at: 2026-06-24T01:16:36
 - 后端路由：`APIRouter prefix=/admin tag=admin`
   - 角色：`GET/POST /roles`（`RoleRead`/`RoleCreateRequest`）、`GET/PATCH/DELETE /roles/{id}`（`RoleUpdateRequest`）、`POST /roles/{id}/disable|enable`、`GET /roles/{id}/users`（`RoleUserListResponse`）
   - 组织：`GET/POST /organizations`（`OrganizationRead`/`OrganizationCreateRequest`）、`GET/PATCH/DELETE /organizations/{id}`（`OrganizationDetail`/`OrganizationUpdateRequest`）、`POST /organizations/{id}/disable|enable`
-  - 用户：复用 `UserService`（与 settings 同源）；`UserCreateRequest`(username 必填 min3 / email Optional)、`UserUpdateRequest`(增 username/email 全 Optional 可编辑)、`UserRead`(email Optional)
+  - 用户：复用 `UserService`（与 settings 同源）；`UserCreateRequest`(username 必填 min3 / email Optional / password 可选：缺省走默认初始密码 `SillyHub@123`)、`UserUpdateRequest`(增 username/email 全 Optional 可编辑)、`UserRead`(email Optional)
 - 数据：`Organization`（树形 parent_id 自引用）、`UserOrganization`（M2N）、`UserRole`（M2N）、`Role`
 - 服务：`RoleService`（业务规则+审计）、`OrganizationService`（子树聚合）、`UserService`（自保护+最后管理员保护）
 - 前端：`(dashboard)/admin/*` 页面 + `admin-organization-tree.tsx`（组织树）/ `admin-role-permission-picker.tsx`（权限选择）/ `admin-user-drawer.tsx`（用户抽屉）+ `lib/admin.ts`
@@ -77,6 +77,10 @@ UserService: 自保护（不能删自己）+ 最后管理员保护（_active_adm
 - OrganizationService 禁用组织不级联禁用户
 - 角色权限变更对已登录用户需刷新会话才生效
 - list_role_users 查角色下用户，供角色详情展示
+- 新建用户默认密码：`UserCreateRequest.password` 可选（`str | None`，显式传仍按 min_length=8 校验），缺省时 `UserService.create_user` 落库为模块常量 `DEFAULT_INITIAL_PASSWORD`（`SillyHub@123`）；admin / settings 两入口共用同一 schema，行为一致；前端 admin-user-drawer create 模式不再渲染密码输入框，改展示默认密码提示
+
+## 变更索引
+- ql-20260715-002-9c5b | /admin/users 新建用户去掉密码输入框，改后端固定默认初始密码 SillyHub@123（schema.password 改可选 + service 缺省兜底，admin/settings 两入口一致；前端抽屉去密码框加蓝色默认密码提示 + 测试随需求调整）
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->

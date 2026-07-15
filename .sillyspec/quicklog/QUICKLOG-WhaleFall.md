@@ -96,3 +96,12 @@ created_at: 2026-07-14T09:20:24
 根因：PpmProjectMembersTable 在 !projectId 全量平铺模式下表格列只有姓名/联系方式/部门/承担角色，无所属项目列；且后端 ProjectMemberResp 只回 pm_project_id(UUID) 无 project_name 字段，前端无项目名可直接展示。
 方案：纯前端——平铺模式（未传 projectId）load 时并行调 listSimpleProjects()（已有 /project-maintenance/simple-list 接口）建 pm_project_id→project_name 映射存 state；columns 在 !projectId 时 unshift 首列「所属项目」，render 取 projectNameMap[id]||id（缺失回退 UUID，与姓名列兜底风格一致）；锁定 projectId 模式（projects 页成员管理抽屉）按项目过滤，不显示该列。不动后端 schema。
 结果：①typecheck 过；②lint 0 error（剩余 warning 全既有其他文件）；③待 commit+push+rebuild frontend 部署 + 用户浏览器验证（平铺页首列显示项目名）。
+
+## ql-20260715-002-9c5b | 2026-07-15 10:01:28 | /admin/users 新建用户去掉密码输入框，改后端固定默认密码 SillyHub@123
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/admin/schema.py（UserCreateRequest.password 改可选 str|None + docstring）+ backend/app/modules/admin/users_service.py（加模块常量 DEFAULT_INITIAL_PASSWORD + create_user password 改可选缺省兜底）+ frontend/src/components/admin-user-drawer.tsx（移除 create 密码输入框/password state/passwordValid/body.password + 加蓝色默认密码提示）+ frontend/src/lib/admin.ts（接口 password 改可选）+ frontend/src/components/__tests__/admin-user-drawer.test.tsx（6 用例随需求调整）
+需求：用户要求 /admin/users 新建用户时不要输入密码，系统给默认密码。经确认采用「固定默认密码 SillyHub@123」方案（统一初始值，管理员告知用户后登录，建议尽快修改）。
+根因：原 UserCreateRequest.password 必填（min_length=8）+ 前端 create 模式有密码输入框，管理员每建一个用户都要手设密码。需求是去掉输入、后端统一给默认密码。
+方案：① schema 层 password 改 str|None（default=None，显式传仍 min_length=8 校验）；② service 层 create_user 接收 None 时落库 DEFAULT_INITIAL_PASSWORD="SillyHub@123"，router 零改动（payload.password 可为 None，service 兜底），admin/settings 两入口共用同一 schema 行为一致（模块文档要求两处规则不发散）；③ 前端 admin-user-drawer create 模式去密码输入框+相关 state/校验/body 字段，换成蓝色提示展示默认密码 SillyHub@123；④ lib/admin.ts 接口 password 改可选。
+结果：①前端组件测试 17/17 通过；②后端 admin schema+router 测试 36 passed + 3 xfail(预先债务) + 1 failed(test_auth_user_read_email_optional：employee_no 必填导致的预先 test debt，本次未触碰 UserRead，无关)；③ruff format/check + mypy app(468 文件) + tsc 全通过；④admin.md 契约摘要+注意事项+变更索引已同步。

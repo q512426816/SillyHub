@@ -188,12 +188,17 @@ class RoleBrief(BaseModel):
 
 
 class UserCreateRequest(BaseModel):
-    """Body of ``POST /api/admin/users`` (and forwarded ``/api/users``)."""
+    """Body of ``POST /api/admin/users`` (and forwarded ``/api/users``).
+
+    ``password`` 可选：不传时由 ``UserService.create_user`` 落库为固定默认初始密码
+    （``DEFAULT_INITIAL_PASSWORD``），管理员无需在新建表单中输入密码。显式传入时
+    仍按 ``min_length=8`` 校验。
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     email: str | None = None
-    password: str = Field(min_length=8)
+    password: str | None = Field(default=None, min_length=8)
     username: str = Field(min_length=3)
     display_name: str | None = None
     is_platform_admin: bool = False

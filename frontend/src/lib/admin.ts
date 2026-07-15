@@ -44,7 +44,7 @@ export interface UserListResponse {
 export interface UserCreateRequest {
   username: string;
   email?: string | null;
-  password: string;
+  password?: string;
   display_name?: string;
   is_platform_admin?: boolean;
   login_enabled?: boolean;

@@ -43,6 +43,10 @@ from app.modules.workspace.model import Workspace
 
 log = get_logger(__name__)
 
+# 新建用户的默认初始密码：管理员在 /admin/users 新建时无需输入密码，
+# 落库时统一用该值。内部平台便利项，建议用户登录后尽快修改。
+DEFAULT_INITIAL_PASSWORD = "SillyHub@123"
+
 
 class UserService:
     """Stateless service; each request constructs a new instance."""
@@ -151,7 +155,7 @@ class UserService:
     async def create_user(
         self,
         *,
-        password: str,
+        password: str | None = None,
         username: str,
         email: str | None = None,
         display_name: str | None = None,
@@ -161,6 +165,9 @@ class UserService:
         role_ids: list[uuid.UUID] | None = None,
     ) -> User:
         self._set_audit_context()
+        # password 缺省 → 固定默认初始密码（管理员表单不再输入密码）
+        if password is None:
+            password = DEFAULT_INITIAL_PASSWORD
         pw_hash = password_hasher.hash(password)
         now = datetime.now(UTC)
         # username 必填且由用户明确指定,撞库应直接 409 报错让用户改,

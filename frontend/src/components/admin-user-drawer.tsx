@@ -50,7 +50,6 @@ export function AdminUserDrawer({
 }: AdminUserDrawerProps) {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const [loginEnabled, setLoginEnabled] = useState(true);
@@ -62,7 +61,6 @@ export function AdminUserDrawer({
   useEffect(() => {
     if (!open) return;
     setError(null);
-    setPassword("");
     if (mode === "edit" && user) {
       setUsername(user.username ?? "");
       setEmail(user.email ?? "");
@@ -87,8 +85,7 @@ export function AdminUserDrawer({
   const isSelf = !!user && user.id === currentUserId;
   const usernameValid = username.trim().length >= 3;
   const emailValid = email.trim() === "" || EMAIL_PATTERN.test(email);
-  const passwordValid = mode === "edit" || password.length >= 8;
-  const formValid = usernameValid && emailValid && passwordValid;
+  const formValid = usernameValid && emailValid;
 
   const toggleOrg = (id: string) => {
     setOrganizationIds((prev) =>
@@ -110,7 +107,6 @@ export function AdminUserDrawer({
         const body: UserCreateRequest = {
           username,
           email: email.trim() || null,
-          password,
           is_platform_admin: isPlatformAdmin,
           login_enabled: loginEnabled,
         };
@@ -203,26 +199,11 @@ export function AdminUserDrawer({
           </div>
 
           {mode === "create" && (
-            <div>
-              <label className="text-[11px] text-muted-foreground">
-                密码（至少 8 位）
-              </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={!canWrite}
-                aria-label="密码"
-                className={`mt-0.5 ${inputCls} ${
-                  !passwordValid && password ? "border-destructive" : ""
-                }`}
-              />
-              {!passwordValid && password && (
-                <p className="mt-1 text-[10px] text-destructive">
-                  密码至少 8 位
-                </p>
-              )}
-            </div>
+            <p className="rounded border border-blue-300 bg-blue-50 px-2 py-1.5 text-[10px] leading-relaxed text-blue-700">
+              初始密码为系统默认密码
+              <span className="mx-1 font-mono font-semibold">SillyHub@123</span>
+              ，无需手动设置。新建成功后请告知用户使用该密码登录，并尽快修改密码。
+            </p>
           )}
 
           <div>
