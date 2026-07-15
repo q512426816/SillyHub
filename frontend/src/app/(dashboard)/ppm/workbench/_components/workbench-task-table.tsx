@@ -16,7 +16,7 @@
  * 完成** —— 必须经执行表单留下执行记录(耗时/说明),对齐 task-plans 交互与
  * 生产要求。已完成(status==="已完成")任务禁用按钮。
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Tag, type TableProps } from "antd";
 
 import { DataTable } from "@/components/layout";
@@ -48,6 +48,24 @@ export function WorkbenchTaskTable({
   const [execute, setExecute] = useState<ExecuteTaskState | null>(null);
   const [busy, setBusy] = useState(false);
   const { toast, showToast } = useToast();
+
+  // 筛选(项目名称模糊 + 平台/模块精确,对齐原型任务操作表 toolbar)。实时过滤。
+  const [projectF, setProjectF] = useState("");
+  const [moduleF, setModuleF] = useState("");
+  const moduleOptions = useMemo(() => {
+    const set = new Set<string>();
+    tasks.forEach((t) => {
+      if (t.module_name) set.add(t.module_name);
+    });
+    return Array.from(set);
+  }, [tasks]);
+  const filtered = useMemo(() => {
+    return tasks.filter((t) => {
+      if (projectF && !(t.project_name ?? "").includes(projectF)) return false;
+      if (moduleF && t.module_name !== moduleF) return false;
+      return true;
+    });
+  }, [tasks, projectF, moduleF]);
 
   const handleExecute = async () => {
     if (!execute) return;
@@ -146,13 +164,50 @@ export function WorkbenchTaskTable({
 
   return (
     <>
+      {/* 筛选 toolbar(项目名称/平台模块/重置,对齐原型任务操作表) */}
+      <div className="mb-3 flex flex-wrap items-end gap-2">
+        <div className="flex flex-col gap-1">
+          <label className="text-[11px] text-muted-foreground">项目名称</label>
+          <input
+            value={projectF}
+            onChange={(e) => setProjectF(e.target.value)}
+            placeholder="输入项目名称"
+            className="h-8 w-44 rounded border border-input bg-background px-2 text-sm focus:border-ring focus:outline-none"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-[11px] text-muted-foreground">平台/模块</label>
+          <select
+            value={moduleF}
+            onChange={(e) => setModuleF(e.target.value)}
+            className="h-8 w-36 rounded border border-input bg-background px-2 text-sm focus:border-ring focus:outline-none"
+          >
+            <option value="">全部平台</option>
+            {moduleOptions.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            setProjectF("");
+            setModuleF("");
+          }}
+        >
+          重置
+        </Button>
+      </div>
       <DataTable<PlanTask>
         rowKey="id"
         size="small"
         bordered
         scroll={{ x: "max-content" }}
         columns={columns}
-        dataSource={tasks}
+        dataSource={filtered}
         loading={loading}
         emptyText="暂无任务"
       />

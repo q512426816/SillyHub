@@ -20,7 +20,7 @@
  * /ppm 默认落地仍 redirect /ppm/projects(D-001@v1:工作台作 /ppm/workbench
  * 独立入口,不抢 /ppm 默认落地),本文件不涉及该 redirect。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import dayjs from "dayjs";
 
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
@@ -50,6 +50,29 @@ import { WorkbenchTaskTable } from "./_components/workbench-task-table";
 /** 任务表默认分页大小(原型只看当页,不做翻页器)。 */
 const DEFAULT_PAGE_SIZE = 50;
 
+/** 指标/任务表范围:本周 / 本月 / 全部(对齐原型任务操作表 range 切换)。 */
+type Range = "week" | "month" | "all";
+
+/** start_time 是否落在 range 区间(对齐后端 summary range 口径)。
+ * week=本周一 00:00~下周一 00:00;month=当月;all=不限。 */
+function inTaskRange(
+  start: string | null | undefined,
+  range: Range,
+  now = dayjs(),
+): boolean {
+  if (range === "all") return true;
+  if (!start) return false;
+  const st = dayjs(start);
+  if (range === "month") {
+    return st.isSame(now, "month");
+  }
+  // week: dayjs day() 周日=0..周六=6,换算到本周一
+  const dow = now.day();
+  const monday = now.subtract((dow + 6) % 7, "day").startOf("day");
+  const nextMonday = monday.add(1, "week");
+  return (st.isSame(monday) || st.isAfter(monday)) && st.isBefore(nextMonday);
+}
+
 /** 单区块加载状态:独立 loading/error + 数据。各栏互不影响(design §9)。 */
 interface BlockState<T> {
   loading: boolean;
@@ -74,6 +97,13 @@ export default function WorkbenchPage() {
   // 任务表:走 personal-task-plan(后端按当前登录人过滤),独立 loading。
   const [tasks, setTasks] = useState<PlanTask[]>([]);
   const [tasksLoading, setTasksLoading] = useState<boolean>(true);
+  // 范围切换(本周/本月/全部):联动指标 summary + 任务表 start_time 过滤。
+  const [range, setRange] = useState<Range>("month");
+  // 任务表按 range 过滤后的可见集(项目/平台筛选由 WorkbenchTaskTable 内部处理)。
+  const visibleTasks = useMemo(
+    () => tasks.filter((t) => inTaskRange(t.start_time, range)),
+    [tasks, range],
+  );
 
   const loadProfile = useCallback(async () => {
     setProfile((s) => ({ ...s, loading: true, error: null }));
@@ -92,7 +122,7 @@ export default function WorkbenchPage() {
   const loadSummary = useCallback(async () => {
     setSummary((s) => ({ ...s, loading: true, error: null }));
     try {
-      const data = await fetchWorkbenchSummary("month");
+      const data = await fetchWorkbenchSummary(range);
       setSummary({ loading: false, error: null, data });
     } catch (err) {
       setSummary({
@@ -101,7 +131,7 @@ export default function WorkbenchPage() {
         data: null,
       });
     }
-  }, []);
+  }, [range]);
 
   const loadCalendar = useCallback(async () => {
     setCalendar((s) => ({ ...s, loading: true, error: null }));
@@ -136,13 +166,17 @@ export default function WorkbenchPage() {
     }
   }, []);
 
-  // 首屏:四块并行装配(各独立 catch,任一失败不阻断其它栏)。
+  // 首屏:profile/calendar/tasks 各独立装配(range 变不重跑这几块)。
   useEffect(() => {
     void loadProfile();
-    void loadSummary();
     void loadCalendar();
     void loadTasks();
-  }, [loadProfile, loadSummary, loadCalendar, loadTasks]);
+  }, [loadProfile, loadCalendar, loadTasks]);
+
+  // summary 跟随 range:range 变 → loadSummary 重建 → 重查指标(数据源对齐)。
+  useEffect(() => {
+    void loadSummary();
+  }, [loadSummary]);
 
   return (
     <PageContainer size="full">
@@ -194,13 +228,17 @@ export default function WorkbenchPage() {
               onRetry={loadSummary}
             />
           ) : (
-            <PersonalMetricStrip metrics={summary.data?.metrics ?? null} />
+            <PersonalMetricStrip
+              metrics={summary.data?.metrics ?? null}
+              range={range}
+              onRangeChange={setRange}
+            />
           )}
 
           {/* 我的任务(personal-task-plan,独立 fetch;操作完成回调 reloadTasks 只重载本表) */}
           <SectionCard title="我的任务" bodyPadding="p-4">
             <WorkbenchTaskTable
-              tasks={tasks}
+              tasks={visibleTasks}
               loading={tasksLoading}
               onChanged={loadTasks}
             />

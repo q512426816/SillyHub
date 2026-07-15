@@ -1,33 +1,43 @@
 "use client";
 
 /**
- * PersonalMetricStrip — 5 指标条 (task-09 / FR-03 / FR-04 / FR-05)。
+ * PersonalMetricStrip — 5 指标条 + 范围切换 (task-09 / FR-05)。
  *
- * 中栏顶部:5 个指标卡横排(本月任务量/完成率/延期率/工时/缺陷数)。
- * 复用 SectionCard(标题="本月指标");数值颜色用 Tailwind 语义 class
- * 参照 tokens.ts 色值(非原型内联 CSS),对齐原型 5 卡配色 blue/green/amber/cyan/red:
- *   - blue  → text-blue-600    (tokens.color.blue.600=#2563eb,原型 --blue)
- *   - green → text-emerald-600 (tokens.color.semantic.success=#10b981,原型 --green)
- *   - amber → text-amber-600   (tokens.color.semantic.warning=#f59e0b,原型 --amber)
- *   - cyan  → text-cyan-600    (tokens.color.cyan=#06b6d4,原型 --cyan)
- *   - red   → text-red-600     (tokens.color.semantic.error=#ef4444,原型 --red)
+ * 中栏顶部:范围切换(本周/本月/全部,对齐原型任务操作表 range)+ 5 指标卡横排
+ * (任务量/完成率/延期率/工时/缺陷数)。范围切换 → page 重查 summary(range),
+ * 指标数据源对齐(week/month/all 区间聚合)。
+ *
+ * 数值颜色用 Tailwind 语义 class 参照 tokens.ts 色值,对齐原型 5 卡配色
+ * blue/green/amber/cyan/red。缺陷数量不受 range 影响(FR-10,固定标签)。
  *
  * 格式(design §7.2):
- *   - task_count「N条」(int)
- *   - completion_rate「N%」(0~1 float → ×100 取整)
- *   - delay_rate「N%」(0~1 float → ×100 取整)
+ *   - task_count「N条」/ completion_rate「N%」/ delay_rate「N%」
  *   - work_hours「N天」(float 天,源 task_execute.time_spent)
- *   - defect_count「N条」(int,不受 range 影响)
+ *   - defect_count「N条」(不受 range)
  *
  * metrics=null(接口未就绪/loading)时全部显示「—」占位,不报错。
- * 组件为纯展示,数据由 task-08 page.tsx 装配后下传 props。
  */
 import { SectionCard } from "@/components/layout";
 import type { WorkbenchMetrics } from "@/lib/ppm/types";
 
+/** 指标范围(与 page.tsx Range 一致)。 */
+type Range = "week" | "month" | "all";
+
+const RANGE_LABEL: Record<Range, string> = {
+  week: "本周",
+  month: "本月",
+  all: "全部",
+};
+
+const RANGE_OPTIONS: Range[] = ["week", "month", "all"];
+
 export interface PersonalMetricStripProps {
-  /** 本月指标;null 时所有指标显示「—」占位。 */
+  /** 指标;null 时所有指标显示「—」占位。 */
   metrics: WorkbenchMetrics | null;
+  /** 当前范围。 */
+  range: Range;
+  /** 范围切换回调(page 重查 summary + 任务表过滤)。 */
+  onRangeChange: (_r: Range) => void;
 }
 
 /** 指标颜色语义键(对齐原型 5 卡配色)。 */
@@ -36,7 +46,6 @@ type MetricColor = "blue" | "green" | "amber" | "cyan" | "red";
 interface MetricItem {
   key: string;
   label: string;
-  /** 已格式化的展示值;metrics=null 时由调用方传「—」。 */
   value: string;
   color: MetricColor;
 }
@@ -50,29 +59,34 @@ const COLOR_CLASS: Record<MetricColor, string> = {
   red: "text-red-600",
 };
 
-export function PersonalMetricStrip({ metrics }: PersonalMetricStripProps) {
+export function PersonalMetricStrip({
+  metrics,
+  range,
+  onRangeChange,
+}: PersonalMetricStripProps) {
+  const prefix = RANGE_LABEL[range];
   const items: MetricItem[] = [
     {
       key: "task_count",
-      label: "本月任务量",
+      label: `${prefix}任务量`,
       value: metrics ? `${metrics.task_count}条` : "—",
       color: "blue",
     },
     {
       key: "completion_rate",
-      label: "本月完成率",
+      label: `${prefix}完成率`,
       value: metrics ? `${Math.round(metrics.completion_rate * 100)}%` : "—",
       color: "green",
     },
     {
       key: "delay_rate",
-      label: "本月延期率",
+      label: `${prefix}延期率`,
       value: metrics ? `${Math.round(metrics.delay_rate * 100)}%` : "—",
       color: "amber",
     },
     {
       key: "work_hours",
-      label: "本月工时统计",
+      label: `${prefix}工时统计`,
       value: metrics ? `${metrics.work_hours}天` : "—",
       color: "cyan",
     },
@@ -85,7 +99,28 @@ export function PersonalMetricStrip({ metrics }: PersonalMetricStripProps) {
   ];
 
   return (
-    <SectionCard title="本月指标" bodyPadding="p-4">
+    <SectionCard
+      title="指标"
+      extra={
+        <div className="flex items-center gap-1">
+          {RANGE_OPTIONS.map((r) => (
+            <button
+              key={r}
+              type="button"
+              onClick={() => onRangeChange(r)}
+              className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
+                range === r
+                  ? "bg-primary text-primary-foreground"
+                  : "border border-input bg-background hover:bg-accent"
+              }`}
+            >
+              {RANGE_LABEL[r]}
+            </button>
+          ))}
+        </div>
+      }
+      bodyPadding="p-4"
+    >
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {items.map((m) => (
           <div
