@@ -102,25 +102,24 @@ function loadDotClass(level: string | undefined): string {
   }
 }
 
-/** alert_level → 右点颜色(任务进度,注意事项 2):
- * none→灰(无进度) / normal→绿(正常) / late→黄(临期) / over→红(延期)。 */
+/** alert_level → 右点颜色(D-008 进度,后端 green/yellow/red):
+ * none→灰(无覆盖) / green→绿(正常) / yellow→黄(临期) / red→红(延期)。 */
 function alertDotClass(level: string | undefined): string {
   switch (level) {
-    case "normal":
+    case "green":
       return "bg-emerald-500";
-    case "late":
+    case "yellow":
       return "bg-amber-500";
-    case "over":
+    case "red":
       return "bg-red-500";
     default:
-      return "bg-slate-300"; // none / 未知:灰(无进度)
+      return "bg-slate-300"; // none / 未知:灰(无覆盖)
   }
 }
 
 export function WorkCalendarPanel({
   calendar,
   loading,
-  tasks,
   month,
   onMonthChange,
 }: WorkCalendarPanelProps) {
@@ -136,10 +135,10 @@ export function WorkCalendarPanel({
     setSelectedDay(todayStr.startsWith(month) ? todayStr : null);
   }, [month, todayStr]);
 
-  // 当日任务:按 start_time 的日期部分(YYYY-MM-DD,对齐后端 UTC day)过滤
-  const dayTasks = selectedDay
-    ? (tasks ?? []).filter((t) => (t.start_time ?? "").slice(0, 10) === selectedDay)
-    : [];
+  // 当日详情:从 calendar.days 取该天的 CalendarDay(含计划/缺陷/实际三类,D-009)
+  const selectedInfo = selectedDay
+    ? (calendar?.days ?? []).find((d) => d.date === selectedDay) ?? null
+    : null;
 
   return (
     <SectionCard title="工作日历" bodyPadding="p-4">
@@ -259,34 +258,102 @@ export function WorkCalendarPanel({
             </div>
           </div>
 
-          {/* 当日任务列表(点击某日后展示) */}
-          {selectedDay && (
-            <div className="mt-3 border-t border-border pt-2">
-              <div className="mb-1 text-[11px] font-medium text-muted-foreground">
-                {selectedDay} 任务（{dayTasks.length}）
+          {/* 当日详情(点击某日后展示):计划/缺陷/实际三类 (D-009) */}
+          {selectedDay && selectedInfo && (
+            <div className="mt-3 space-y-2 border-t border-border pt-2">
+              <div className="text-[11px] font-medium text-muted-foreground">
+                {selectedDay} 详情
               </div>
-              {dayTasks.length === 0 ? (
-                <div className="text-xs text-muted-foreground">当日无任务</div>
-              ) : (
-                <ul className="space-y-1">
-                  {dayTasks.map((t) => {
-                    const tag = taskStatusTag(t.status);
-                    return (
-                      <li key={t.id} className="flex items-center gap-2 text-xs">
-                        <Tag color={tag.color} className="shrink-0">
-                          {tag.text}
-                        </Tag>
-                        <span className="min-w-0 flex-1 truncate" title={t.content ?? ""}>
-                          {t.content ?? "—"}
+              {/* 计划任务 */}
+              <div>
+                <div className="mb-0.5 text-[10px] text-muted-foreground">
+                  计划任务（{selectedInfo.plan_items.length}）
+                </div>
+                {selectedInfo.plan_items.length === 0 ? (
+                  <div className="text-xs text-muted-foreground/70">无</div>
+                ) : (
+                  <ul className="space-y-0.5">
+                    {selectedInfo.plan_items.map((p) => {
+                      const tag = taskStatusTag(p.status ?? "");
+                      return (
+                        <li key={p.id} className="flex items-center gap-2 text-xs">
+                          <Tag color={tag.color} className="shrink-0">{tag.text}</Tag>
+                          <span className="min-w-0 flex-1 truncate" title={p.content ?? ""}>
+                            {p.content ?? "—"}
+                          </span>
+                          <span className="shrink-0 text-muted-foreground">
+                            {p.project_name ?? ""}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+              {/* 缺陷任务 */}
+              <div>
+                <div className="mb-0.5 text-[10px] text-muted-foreground">
+                  缺陷任务（{selectedInfo.problem_items.length}）
+                </div>
+                {selectedInfo.problem_items.length === 0 ? (
+                  <div className="text-xs text-muted-foreground/70">无</div>
+                ) : (
+                  <ul className="space-y-0.5">
+                    {selectedInfo.problem_items.map((p) => (
+                      <li key={p.id} className="flex items-center gap-2 text-xs">
+                        <span
+                          className={cn(
+                            "shrink-0 rounded px-1 text-[10px]",
+                            p.status === "4"
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-amber-100 text-amber-700",
+                          )}
+                        >
+                          {p.status === "4" ? "已关闭" : "未关闭"}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate" title={p.pro_desc ?? ""}>
+                          {p.pro_desc ?? "—"}
                         </span>
                         <span className="shrink-0 text-muted-foreground">
-                          {t.project_name ?? ""}
+                          {p.project_name ?? ""}
                         </span>
                       </li>
-                    );
-                  })}
-                </ul>
-              )}
+                    ))}
+                  </ul>
+                )}
+              </div>
+              {/* 实际执行 */}
+              <div>
+                <div className="mb-0.5 text-[10px] text-muted-foreground">
+                  实际执行（{selectedInfo.execute_items.length}）
+                </div>
+                {selectedInfo.execute_items.length === 0 ? (
+                  <div className="text-xs text-muted-foreground/70">无</div>
+                ) : (
+                  <ul className="space-y-0.5">
+                    {selectedInfo.execute_items.map((e) => (
+                      <li key={e.id} className="flex items-center gap-2 text-xs">
+                        <span
+                          className={cn(
+                            "shrink-0 rounded px-1 text-[10px]",
+                            e.status === "90"
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-blue-100 text-blue-700",
+                          )}
+                        >
+                          {e.status === "90" ? "已完成" : (e.status ?? "—")}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate" title={e.content ?? ""}>
+                          {e.content ?? "(无关联任务)"}
+                        </span>
+                        <span className="shrink-0 text-muted-foreground">
+                          {e.time_spent != null ? `${e.time_spent}人天` : ""}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
           )}
         </>

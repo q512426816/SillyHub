@@ -1377,11 +1377,42 @@ export interface WorkbenchSummary {
  * - load_level/alert_level: "work" | "full" | "over" 分档(后端字符串,前端按色映射)
  * - task_count: 当日以 start_time 落点的任务数(不展开跨日区间)
  */
+export interface CalendarPlanItem {
+  id: string;
+  content: string | null;
+  project_name: string | null;
+  status: string | null;
+  start_time: string | null;
+  end_time: string | null;
+}
+
+export interface CalendarProblemItem {
+  id: string;
+  pro_desc: string | null;
+  project_name: string | null;
+  status: string | null;
+}
+
+export interface CalendarExecuteItem {
+  id: string;
+  content: string | null;
+  status: string | null;
+  time_spent: number | null;
+}
+
 export interface CalendarDay {
   date: string;
+  /** 左点负载: none/leisure/full/over */
   load_level: string;
+  /** 右点进度: none/green/yellow/red */
   alert_level: string;
   task_count: number;
+  /** 当日覆盖的计划任务 (D-009) */
+  plan_items: CalendarPlanItem[];
+  /** 当日覆盖的缺陷 (D-009) */
+  problem_items: CalendarProblemItem[];
+  /** 当日 actual 覆盖的实际执行 (D-009,所有状态) */
+  execute_items: CalendarExecuteItem[];
 }
 
 /**

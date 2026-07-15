@@ -817,78 +817,197 @@ async def test_calendar_load_level_actual_missing_bounds(db_session):
 
 
 @pytest.mark.asyncio
-async def test_calendar_alert_level_over_for_delayed(db_session):
-    """当日有任务 end_time<now 且 status!='已完成' → alert_level='over'。"""
+async def test_calendar_alert_red_at_end_date_for_overdue(db_session):
+    """延期任务(end<today 未完成)→ 截止日 alert=red (D-008)。"""
     user = await _seed_user(db_session)
-    now = datetime.now(UTC)
-    # start_time 落在"今天"(保证 start_time.day == now.day,当日)
-    today = now.replace(hour=9, minute=0, second=0, microsecond=0)
-    await _seed_plan(
-        db_session,
-        user.id,
-        status="进行中",  # 非已完成
-        start_time=today,
-        end_time=now - timedelta(days=1),  # end_time<now → 延期
-    )
-
-    svc = WorkbenchService(db_session)
-    ym = f"{today.year:04d}-{today.month:02d}"
-    cal = await svc.get_calendar(user, ym)
-    by_date = {d.date: d for d in cal.days}
-    today_key = f"{ym}-{now.day:02d}"
-
-    assert by_date[today_key].task_count == 1
-    assert by_date[today_key].alert_level == "over"
-
-
-@pytest.mark.asyncio
-async def test_calendar_alert_level_normal_when_completed(db_session):
-    """已完成的延期任务不触发 alert (status='已完成' → normal)。"""
-    user = await _seed_user(db_session)
-    now = datetime.now(UTC)
-    today = now.replace(hour=9, minute=0, second=0, microsecond=0)
-    await _seed_plan(
-        db_session,
-        user.id,
-        status="已完成",
-        start_time=today,
-        end_time=now - timedelta(days=1),
-    )
-
-    svc = WorkbenchService(db_session)
-    ym = f"{today.year:04d}-{today.month:02d}"
-    cal = await svc.get_calendar(user, ym)
-    by_date = {d.date: d for d in cal.days}
-    today_key = f"{ym}-{now.day:02d}"
-
-    assert by_date[today_key].alert_level == "normal"
-
-
-@pytest.mark.asyncio
-async def test_calendar_alert_level_late(db_session):
-    """临期(注意事项 2):周期>3日,距截止前 2 天 → alert_level='late'。
-
-    start=now-3d, end=now+2d → 周期 5 天(>3), now 距 end 2 天 → 临期。
-    """
-    user = await _seed_user(db_session)
-    now = datetime.now(UTC)
-    start = now - timedelta(days=3)
-    end = now + timedelta(days=2)  # 周期 5 天, now 距 end 2 天 → 临期
+    now = datetime.now(UTC).replace(hour=9, minute=0, second=0, microsecond=0)
+    start = now - timedelta(days=5)
+    end = now - timedelta(days=2)  # 已过期(今天-2),未完成
     await _seed_plan(
         db_session,
         user.id,
         status="进行中",
         start_time=start,
         end_time=end,
+        content="过期任务",
     )
-
     svc = WorkbenchService(db_session)
     ym = f"{start.year:04d}-{start.month:02d}"
     cal = await svc.get_calendar(user, ym)
     by_date = {d.date: d for d in cal.days}
-    start_key = f"{ym}-{start.day:02d}"
+    end_key = f"{ym}-{end.day:02d}"
+    assert by_date[end_key].alert_level == "red"  # 截止日红
 
-    assert by_date[start_key].alert_level == "late"
+
+@pytest.mark.asyncio
+async def test_calendar_alert_yellow_today_for_overdue_risk(db_session):
+    """临期(剩余工时/剩余天数>8h/天,做不完)→ 今天 alert=yellow (D-008)。"""
+    user = await _seed_user(db_session)
+    now = datetime.now(UTC).replace(hour=9, minute=0, second=0, microsecond=0)
+    start = now - timedelta(days=2)
+    end = now + timedelta(days=2)  # 区间 5 天,覆盖今天
+    await _seed_plan(
+        db_session,
+        user.id,
+        status="进行中",
+        start_time=start,
+        end_time=end,
+        work_load="10d",
+    )
+    # 剩余天数=今天~end=3 天,剩余 10 人天,10/3×8≈26.7h>8h → 临期
+    svc = WorkbenchService(db_session)
+    ym = f"{now.year:04d}-{now.month:02d}"
+    cal = await svc.get_calendar(user, ym)
+    by_date = {d.date: d for d in cal.days}
+    today_key = f"{ym}-{now.day:02d}"
+    assert by_date[today_key].alert_level == "yellow"
+
+
+@pytest.mark.asyncio
+async def test_calendar_alert_green_past_covered(db_session):
+    """过去日期有任务覆盖(未延期)→ green (D-008)。"""
+    user = await _seed_user(db_session)
+    now = datetime.now(UTC).replace(hour=9, minute=0, second=0, microsecond=0)
+    start = now - timedelta(days=4)
+    end = now + timedelta(days=2)  # 跨过去/未来,未到截止
+    await _seed_plan(
+        db_session,
+        user.id,
+        status="进行中",
+        start_time=start,
+        end_time=end,
+        work_load="1d",
+    )
+    # work_load=1d,剩余 1 人天/3 天≈2.67h<8h → 正常(非临期)
+    svc = WorkbenchService(db_session)
+    ym = f"{start.year:04d}-{start.month:02d}"
+    cal = await svc.get_calendar(user, ym)
+    by_date = {d.date: d for d in cal.days}
+    past_day = now - timedelta(days=2)  # 过去覆盖天
+    past_key = f"{ym}-{past_day.day:02d}"
+    assert by_date[past_key].alert_level == "green"
+
+
+@pytest.mark.asyncio
+async def test_calendar_alert_green_future_covered(db_session):
+    """未来日期有任务覆盖 → green (D-008)。"""
+    user = await _seed_user(db_session)
+    now = datetime.now(UTC).replace(hour=9, minute=0, second=0, microsecond=0)
+    start = now + timedelta(days=1)
+    end = now + timedelta(days=5)  # 全在未来
+    await _seed_plan(
+        db_session,
+        user.id,
+        status="进行中",
+        start_time=start,
+        end_time=end,
+        work_load="1d",
+    )
+    svc = WorkbenchService(db_session)
+    ym = f"{end.year:04d}-{end.month:02d}"
+    cal = await svc.get_calendar(user, ym)
+    by_date = {d.date: d for d in cal.days}
+    future_day = now + timedelta(days=3)
+    future_key = f"{ym}-{future_day.day:02d}"
+    assert by_date[future_key].alert_level == "green"
+
+
+@pytest.mark.asyncio
+async def test_calendar_alert_completed_not_marked(db_session):
+    """已完成任务不贡献右点(覆盖天无其他任务则 none, D-008)。"""
+    user = await _seed_user(db_session)
+    now = datetime.now(UTC).replace(hour=9, minute=0, second=0, microsecond=0)
+    start = now + timedelta(days=1)
+    end = now + timedelta(days=5)
+    await _seed_plan(
+        db_session,
+        user.id,
+        status="已完成",
+        start_time=start,
+        end_time=end,
+        work_load="1d",
+    )
+    svc = WorkbenchService(db_session)
+    ym = f"{end.year:04d}-{end.month:02d}"
+    cal = await svc.get_calendar(user, ym)
+    by_date = {d.date: d for d in cal.days}
+    future_day = now + timedelta(days=3)
+    future_key = f"{ym}-{future_day.day:02d}"
+    assert by_date[future_key].alert_level == "none"
+
+
+@pytest.mark.asyncio
+async def test_calendar_alert_problem_overdue_red(db_session):
+    """缺陷参与右点:缺陷未关闭且 plan_end<today → 截止日 alert=red (D-008)。"""
+    user = await _seed_user(db_session)
+    now = datetime.now(UTC).replace(hour=9, minute=0, second=0, microsecond=0)
+    prob = PpmProblemList(
+        project_id=uuid.uuid4(),
+        project_name="P1",
+        pro_desc="过期缺陷",
+        duty_user_id=user.id,
+        status="2",  # 未关闭
+        plan_start_time=now - timedelta(days=5),
+        plan_end_time=now - timedelta(days=2),
+        work_load="1d",
+    )
+    db_session.add(prob)
+    await db_session.commit()
+    svc = WorkbenchService(db_session)
+    start = now - timedelta(days=5)
+    ym = f"{start.year:04d}-{start.month:02d}"
+    cal = await svc.get_calendar(user, ym)
+    by_date = {d.date: d for d in cal.days}
+    end = now - timedelta(days=2)
+    end_key = f"{ym}-{end.day:02d}"
+    assert by_date[end_key].alert_level == "red"
+
+
+@pytest.mark.asyncio
+async def test_calendar_detail_three_categories(db_session):
+    """点击某天详情显示计划/缺陷/实际三类 (D-009)。"""
+    user = await _seed_user(db_session)
+    now = datetime.now(UTC).replace(hour=9, minute=0, second=0, microsecond=0)
+    plan = await _seed_plan(
+        db_session,
+        user.id,
+        status="进行中",
+        start_time=now - timedelta(days=1),
+        end_time=now + timedelta(days=1),
+        content="计划任务A",
+    )
+    await _seed_execute(
+        db_session,
+        execute_user_id=user.id,
+        time_spent=1.0,
+        actual_start_time=now,
+        actual_end_time=now,
+        plan_task_id=plan.id,
+    )
+    prob = PpmProblemList(
+        project_id=uuid.uuid4(),
+        project_name="P1",
+        pro_desc="缺陷X",
+        duty_user_id=user.id,
+        status="2",
+        plan_start_time=now - timedelta(days=1),
+        plan_end_time=now + timedelta(days=1),
+    )
+    db_session.add(prob)
+    await db_session.commit()
+
+    svc = WorkbenchService(db_session)
+    ym = f"{now.year:04d}-{now.month:02d}"
+    cal = await svc.get_calendar(user, ym)
+    by_date = {d.date: d for d in cal.days}
+    today_key = f"{ym}-{now.day:02d}"
+    today = by_date[today_key]
+    assert len(today.plan_items) == 1
+    assert today.plan_items[0].content == "计划任务A"
+    assert len(today.problem_items) == 1
+    assert today.problem_items[0].pro_desc == "缺陷X"
+    assert len(today.execute_items) == 1
+    assert today.execute_items[0].content == "计划任务A"  # 关联 plan content
 
 
 @pytest.mark.asyncio

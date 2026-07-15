@@ -12,7 +12,7 @@ import re
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.admin.model import Organization, UserOrganization
@@ -22,6 +22,9 @@ from app.modules.ppm.problem.model import PpmProblemChange, PpmProblemList
 from app.modules.ppm.task.model import PlanTask, TaskExecute
 from app.modules.ppm.workbench.schema import (
     CalendarDay,
+    CalendarExecuteItem,
+    CalendarPlanItem,
+    CalendarProblemItem,
     WorkbenchCalendar,
     WorkbenchMetrics,
     WorkbenchProfile,
@@ -184,6 +187,77 @@ def _spread_remaining_hours(
                 daily[cur.day] = daily.get(cur.day, 0.0) + per_day_hours
             cur += timedelta(days=1)
     return daily
+
+
+# 右点进度严重度排序 (D-008): red(延期) > yellow(临期) > green(正常) > none
+_ALERT_SEVERITY_PROGRESS = {"none": 0, "green": 1, "yellow": 2, "red": 3}
+
+
+def _covers_date(start_dt: datetime | None, end_dt: datetime | None, day: date) -> bool:
+    """区间 [start, end] 是否含 day (三档兜底,与 actual/计划/缺陷区间覆盖同构)。
+
+    双端有 → ``s <= day <= e``;仅一端 → ``== 该端``;都无 → False。
+    """
+    s = _to_aware(start_dt).date() if start_dt is not None else None
+    e = _to_aware(end_dt).date() if end_dt is not None else None
+    if s is not None and e is not None:
+        return s <= day <= e
+    if s is not None:
+        return s == day
+    if e is not None:
+        return e == day
+    return False
+
+
+def _progress_alert(
+    start_dt: datetime | None,
+    end_dt: datetime | None,
+    is_completed: bool,
+    work_load: str | None,
+    spent_days: float,
+    day: date,
+    today: date,
+) -> str | None:
+    """单任务/缺陷对某天的右点进度贡献 (D-008): red / yellow / green / None。
+
+    - 已完成或无 end → None
+    - 延期 (end < today 未完成): ``day == 截止日`` → red;覆盖 → green
+    - 未到截止: ``day == today`` 且覆盖 → 临期判定 (剩余/剩余天数 > 8h/天 → yellow,
+      否则 green);非今天但覆盖 → green;不覆盖 → None
+    """
+    if is_completed or end_dt is None:
+        return None
+    end_date = _to_aware(end_dt).date()
+    start_date = _to_aware(start_dt).date() if start_dt is not None else end_date
+    covers = start_date <= day <= end_date
+    if end_date < today:
+        if day == end_date:
+            return "red"
+        return "green" if covers else None
+    if day == today:
+        if not covers:
+            return None
+        total_hours = _parse_workload_hours(work_load)
+        remaining_days = total_hours / 8.0 - float(spent_days or 0.0)
+        lower = today if start_date < today else start_date
+        if end_date >= lower:
+            span = (end_date - lower).days + 1
+            if span > 0 and remaining_days * 8.0 / span > 8.0:
+                return "yellow"
+        return "green"
+    return "green" if covers else None
+
+
+def _worst_alert(alerts: list[str | None]) -> str:
+    """取最严重的进度状态 (red > yellow > green > none)。"""
+    level = 0
+    result = "none"
+    for a in alerts:
+        sev = _ALERT_SEVERITY_PROGRESS.get(a or "none", 0)
+        if sev > level:
+            level = sev
+            result = a
+    return result
 
 
 class WorkbenchService:
@@ -414,56 +488,66 @@ class WorkbenchService:
         user: User,
         year_month: str,
     ) -> WorkbenchCalendar:
-        """装配个人工作台月度日历 (左点负载按今天分界,D-001~007)。
+        """装配个人工作台月度日历 (左点负载 D-001~007 + 右点进度 D-008 + 详情 D-009)。
 
         ``year_month`` 形如 ``YYYY-MM``。
 
-        左点 ``load_level`` (负载,以"今天"分界,今天归未来侧):
-          - 过去 (day < today): 实际工时 ``TaskExecute.time_spent`` 平摊到 actual
-            区间每天 (×8h 分档);无实际记录 → none。D-001~005。
-          - 今天及未来 (day ≥ today): 未完成任务的剩余负载 ``(计划总量 − 已用) /
-            剩余天数`` (×8h 分档);无 work_load/无 end_time/已用≥计划 → 不贡献。D-007。
+        左点 ``load_level`` (负载,以今天分界,今天归未来侧):
+          - 过去 (day < today): 实际工时平摊 (D-001~005)。
+          - 今天及未来 (day ≥ today): 未完成任务的剩余负载 (D-007)。
 
-        右点 ``alert_level`` (进度): 维持现状,按当月 plan_task (start_time 落点) 取
-        最严重 ``_task_alert`` (over > late > normal);当日无 plan_task → none。零改动。
+        右点 ``alert_level`` (进度 D-008): 计划任务 + 缺陷两类,按区间覆盖该天取最严重
+        (red > yellow > green > none)。延期任务截止日 → red;今天临期 → yellow;
+        过去/未来有覆盖 → green;无覆盖 → none。
 
-        load 判定脱离 ``count == 0`` 短路 (Grill X-001):过去日期可能仅有实际执行、无
-        计划落点,count==0 不应吞掉实际工时。``task_count`` 字段仍按 plan_task 落点计数。
+        详情 (D-009): ``plan_items`` / ``problem_items`` / ``execute_items`` 为当日
+        覆盖的三类摘要。
         """
         now = datetime.now(UTC)
-        now_aware = _to_aware(now)
-        today = now_aware.date()
+        today = _to_aware(now).date()
         year, month = self._parse_year_month(year_month, now)
         days_in_month = _calendar.monthrange(year, month)[1]
 
-        # 月起止:本地当月 1 日 00:00 ~ 下月 1 日 00:00 (带 tz)
         month_start = datetime(year, month, 1, tzinfo=UTC)
         next_month_start = datetime(year + (month // 12), (month % 12) + 1, 1, tzinfo=UTC)
-        today_start = datetime(today.year, today.month, today.day, tzinfo=UTC)
 
-        # 当月 plan_task(start_time 落在当月) → daily_count + 右点 alert (零改动)
-        stmt = (
-            select(PlanTask)
-            .where(PlanTask.user_id == user.id)
-            .where(PlanTask.start_time >= month_start)
-            .where(PlanTask.start_time < next_month_start)
+        # 计划任务:区间与当月相交 (user_id=me)
+        plans = (
+            (
+                await self._session.execute(
+                    select(PlanTask).where(
+                        PlanTask.user_id == user.id,
+                        PlanTask.start_time.is_not(None),
+                        PlanTask.start_time < next_month_start,
+                        or_(PlanTask.end_time.is_(None), PlanTask.end_time >= month_start),
+                    )
+                )
+            )
+            .scalars()
+            .all()
         )
-        rows = (await self._session.execute(stmt)).scalars().all()
 
-        daily_count: dict[int, int] = {}
-        daily_alert: dict[int, str] = {}
-        for t in rows:
-            start_time = t.start_time
-            if start_time is None:
-                continue
-            day = start_time.day
-            daily_count[day] = daily_count.get(day, 0) + 1
-            alert = _task_alert(t, now_aware)
-            if _ALERT_SEVERITY[alert] > _ALERT_SEVERITY.get(daily_alert.get(day, "none"), 0):
-                daily_alert[day] = alert
+        # 缺陷:区间与当月相交 (duty_user_id=me)
+        problems = (
+            (
+                await self._session.execute(
+                    select(PpmProblemList).where(
+                        PpmProblemList.duty_user_id == user.id,
+                        PpmProblemList.plan_start_time.is_not(None),
+                        PpmProblemList.plan_start_time < next_month_start,
+                        or_(
+                            PpmProblemList.plan_end_time.is_(None),
+                            PpmProblemList.plan_end_time >= month_start,
+                        ),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
 
-        # 过去侧:实际工时平摊 (D-001~005)。查当前用户全部 TaskExecute,helper 内过滤当月过去天。
-        actual_rows = (
+        # 实际执行 (execute_user_id=me)
+        executes = (
             (
                 await self._session.execute(
                     select(TaskExecute).where(TaskExecute.execute_user_id == user.id)
@@ -472,49 +556,127 @@ class WorkbenchService:
             .scalars()
             .all()
         )
-        daily_actual = _spread_actual_hours(actual_rows, year, month, today)
 
-        # 未来侧:剩余负载 (D-007)。未完成且计划区间与当月未来可能相交的任务。
-        future_stmt = (
-            select(PlanTask)
-            .where(PlanTask.user_id == user.id)
-            .where(PlanTask.status != "已完成")
-            .where(PlanTask.start_time < next_month_start)
-            .where(PlanTask.end_time.is_not(None))
-            .where(PlanTask.end_time >= today_start)
-        )
-        future_plans = (await self._session.execute(future_stmt)).scalars().all()
+        # 已用工时聚合 (by plan_task_id): 未来剩余负载 + 临期判定
         spent_by_plan: dict[uuid.UUID, float] = {}
-        if future_plans:
-            plan_ids = [p.id for p in future_plans]
-            spent_rows = (
+        for ex in executes:
+            if ex.plan_task_id is not None:
+                spent_by_plan[ex.plan_task_id] = spent_by_plan.get(ex.plan_task_id, 0.0) + float(
+                    ex.time_spent or 0.0
+                )
+
+        # 实际执行关联的计划任务名 (execute_items.content),单独查避免依赖 relationship
+        exec_plan_ids = {ex.plan_task_id for ex in executes if ex.plan_task_id is not None}
+        plan_content_map: dict[uuid.UUID, str | None] = {}
+        if exec_plan_ids:
+            pc_rows = (
                 await self._session.execute(
-                    select(TaskExecute.plan_task_id, func.sum(TaskExecute.time_spent))
-                    .where(TaskExecute.plan_task_id.in_(plan_ids))
-                    .group_by(TaskExecute.plan_task_id)
+                    select(PlanTask.id, PlanTask.content).where(PlanTask.id.in_(exec_plan_ids))
                 )
             ).all()
-            for pid, spent in spent_rows:
-                spent_by_plan[pid] = float(spent or 0.0)
+            plan_content_map = {pid: content for pid, content in pc_rows}
+
+        # 左点:过去 actual 平摊 (D-001~005)
+        daily_actual = _spread_actual_hours(executes, year, month, today)
+        # 左点:未来剩余负载 (D-007)。未完成 + end>=today 的 plans 子集
+        future_plans = [
+            p
+            for p in plans
+            if p.status != "已完成"
+            and p.end_time is not None
+            and _to_aware(p.end_time).date() >= today
+        ]
         daily_remaining = _spread_remaining_hours(future_plans, spent_by_plan, year, month, today)
 
         days: list[CalendarDay] = []
         for day in range(1, days_in_month + 1):
-            count = daily_count.get(day, 0)
             day_date = date(year, month, day)
-            # 左点 load:过去→实际,未来→剩余,脱离 count 短路 (X-001)
+
+            # task_count: plan start_time 当月落点计数 (现状口径保留)
+            count = 0
+            for p in plans:
+                if p.start_time is not None:
+                    ps = _to_aware(p.start_time)
+                    if ps.year == year and ps.month == month and ps.day == day:
+                        count += 1
+
+            # 左点 load:过去→实际,未来→剩余
             if day_date < today:
                 load_level = _load_level_workload(daily_actual.get(day, 0.0))
             else:
                 load_level = _load_level_workload(daily_remaining.get(day, 0.0))
-            # 右点 alert:保持现状 (count==0→none,否则取最严重)
-            alert_level = "none" if count == 0 else daily_alert.get(day, "normal")
+
+            # 右点 alert:计划 + 缺陷 _progress_alert 取最严重 (D-008)
+            alerts: list[str | None] = []
+            for p in plans:
+                alerts.append(
+                    _progress_alert(
+                        p.start_time,
+                        p.end_time,
+                        p.status == "已完成",
+                        p.work_load,
+                        spent_by_plan.get(p.id, 0.0),
+                        day_date,
+                        today,
+                    )
+                )
+            for prob in problems:
+                alerts.append(
+                    _progress_alert(
+                        prob.plan_start_time,
+                        prob.plan_end_time,
+                        prob.status == "4",
+                        prob.work_load,
+                        float(prob.time_spent or 0.0),
+                        day_date,
+                        today,
+                    )
+                )
+            alert_level = _worst_alert(alerts)
+
+            # 详情三类 (D-009)
+            plan_items = [
+                CalendarPlanItem(
+                    id=str(p.id),
+                    content=p.content,
+                    project_name=p.project_name,
+                    status=p.status,
+                    start_time=p.start_time,
+                    end_time=p.end_time,
+                )
+                for p in plans
+                if _covers_date(p.start_time, p.end_time, day_date)
+            ]
+            problem_items = [
+                CalendarProblemItem(
+                    id=str(prob.id),
+                    pro_desc=prob.pro_desc,
+                    project_name=prob.project_name,
+                    status=prob.status,
+                )
+                for prob in problems
+                if _covers_date(prob.plan_start_time, prob.plan_end_time, day_date)
+            ]
+            execute_items = [
+                CalendarExecuteItem(
+                    id=str(ex.id),
+                    content=plan_content_map.get(ex.plan_task_id) if ex.plan_task_id else None,
+                    status=ex.status,
+                    time_spent=ex.time_spent,
+                )
+                for ex in executes
+                if _covers_date(ex.actual_start_time, ex.actual_end_time, day_date)
+            ]
+
             days.append(
                 CalendarDay(
                     date=f"{year_month}-{day:02d}",
                     task_count=count,
                     load_level=load_level,
                     alert_level=alert_level,
+                    plan_items=plan_items,
+                    problem_items=problem_items,
+                    execute_items=execute_items,
                 )
             )
 

@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel as PydanticModel
 
 # ---------------------------------------------------------------------------
@@ -77,17 +79,51 @@ class WorkbenchSummary(PydanticModel):
 # ---------------------------------------------------------------------------
 
 
-class CalendarDay(PydanticModel):
-    """日历单日负载。
+class CalendarPlanItem(PydanticModel):
+    """日历当日计划任务摘要(区间覆盖该天的 PlanTask)。"""
 
-    ``date`` 形如 ``YYYY-MM-DD``;``load_level`` / ``alert_level``
-    为前端展示用的分级文案(如 ``low`` / ``high``、``normal`` / ``alert``)。
+    id: str
+    content: str | None = None
+    project_name: str | None = None
+    status: str | None = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+
+
+class CalendarProblemItem(PydanticModel):
+    """日历当日缺陷摘要(区间覆盖该天的 PpmProblemList)。"""
+
+    id: str
+    pro_desc: str | None = None
+    project_name: str | None = None
+    status: str | None = None
+
+
+class CalendarExecuteItem(PydanticModel):
+    """日历当日实际执行摘要(actual 覆盖该天的 TaskExecute,所有状态)。"""
+
+    id: str
+    content: str | None = None
+    status: str | None = None
+    time_spent: float | None = None
+
+
+class CalendarDay(PydanticModel):
+    """日历单日(左点负载/右点进度 + 当日三类详情)。
+
+    ``date`` 形如 ``YYYY-MM-DD``;``load_level`` (左点负载 none/leisure/full/over)
+    与 ``alert_level`` (右点进度 none/green/yellow/red) 为分级文案。
+    ``plan_items`` / ``problem_items`` / ``execute_items`` 为当日覆盖的三类摘要,
+    供前端点击该天时展开 (D-009)。
     """
 
     date: str
     load_level: str
     alert_level: str
     task_count: int
+    plan_items: list[CalendarPlanItem] = []
+    problem_items: list[CalendarProblemItem] = []
+    execute_items: list[CalendarExecuteItem] = []
 
 
 class WorkbenchCalendar(PydanticModel):
@@ -99,6 +135,9 @@ class WorkbenchCalendar(PydanticModel):
 
 __all__ = [
     "CalendarDay",
+    "CalendarExecuteItem",
+    "CalendarPlanItem",
+    "CalendarProblemItem",
     "WorkbenchCalendar",
     "WorkbenchMetrics",
     "WorkbenchProfile",
