@@ -10,18 +10,18 @@ plan_level: full
 无。本次为纯业务逻辑联动，技术方案确定（复用 `import_commit` 同事务批量范式 + ORM 直接操作 `PlanTask`），无新技术栈/未经验证集成，不设 Spike。
 
 ## Wave 1（基础，无依赖）
-- [ ] task-01: `plan/service.py` 新增联动 helper 方法集（`_ensure_task_for_detail` / `_sync_task_fields` / `_migrate_task_to_version` / `_unlink_task` / `_resolve_project_context` / `_lookup_user_name`，复用 `self._session`、不单独 commit）（覆盖：FR-01 基础设施, D-002@v1）
+- [x] task-01: `plan/service.py` 新增联动 helper 方法集（`_ensure_task_for_detail` / `_sync_task_fields` / `_migrate_task_to_version` / `_unlink_task` / `_resolve_project_context` / `_lookup_user_name`，复用 `self._session`、不单独 commit）（覆盖：FR-01 基础设施, D-002@v1）
 
 ## Wave 2（六触发点接入，依赖 Wave 1）
 > 同改 `plan/service.py`，execute 阶段内顺序执行（避免同文件并发冲突）。
-- [ ] task-02: `create_detail` 重构为原子事务（session.add + 统一 commit），`status=done` 时触发 `_ensure_task_for_detail`（覆盖：FR-01, D-003@v1）
-- [ ] task-03: `_transition`（save_process→DONE）在统一 commit 前接入 `_ensure_task_for_detail`（覆盖：FR-01）
-- [ ] task-04: `import_commit` 在末尾统一 commit 前对每个 done 明细批量建任务（覆盖：FR-02, D-005@v1）
-- [ ] task-05: `update_detail` 重构为原子事务 + 接入 `_sync_task_fields`；`delete_detail` 重构 + 接入 `_unlink_task`（覆盖：FR-03, FR-05, D-007@v1, D-004@v1）
-- [ ] task-06: `change_process` 在统一 commit 前接入 `_migrate_task_to_version`（覆盖：FR-04, D-001@v1）
+- [x] task-02: `create_detail` 重构为原子事务（session.add + 统一 commit），`status=done` 时触发 `_ensure_task_for_detail`（覆盖：FR-01, D-003@v1）
+- [x] task-03: `_transition`（save_process→DONE）在统一 commit 前接入 `_ensure_task_for_detail`（覆盖：FR-01）
+- [x] task-04: `import_commit` 在末尾统一 commit 前对每个 done 明细批量建任务（覆盖：FR-02, D-005@v1）
+- [x] task-05: `update_detail` 重构为原子事务 + 接入 `_sync_task_fields`；`delete_detail` 重构 + 接入 `_unlink_task`（覆盖：FR-03, FR-05, D-007@v1, D-004@v1）
+- [x] task-06: `change_process` 在统一 commit 前接入 `_migrate_task_to_version`（覆盖：FR-04, D-001@v1）
 
 ## Wave 3（测试，依赖 Wave 2）
-- [ ] task-07: 新增 `backend/app/modules/ppm/plan/tests/test_detail_task_link.py`，覆盖 FR-01~FR-07 全部 GWT 边界（建/导入批量/编辑同步/变更迁移/删除解关联/执行人空跳过/版本链查重/强一致回滚）（覆盖：FR-01~FR-07）
+- [x] task-07: 新增 `backend/app/modules/ppm/plan/tests/test_detail_task_link.py`，覆盖 FR-01~FR-07 全部 GWT 边界（建/导入批量/编辑同步/变更迁移/删除解关联/执行人空跳过/版本链查重/强一致回滚）（覆盖：FR-01~FR-07）
 
 ## Wave 4（收尾，依赖 Wave 3）
 - [ ] task-08: （可选 P2）`milestone-details/page.tsx` 提交成功 toast 加「已自动创建任务」文案（覆盖：体验优化）

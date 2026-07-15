@@ -339,7 +339,7 @@ async def test_import_commit_creates_module_and_details(
     client: AsyncClient, auth_headers: dict, db_session: AsyncSession
 ) -> None:
     """提交含新平台「平台A」的 valid 行 → created_modules=1、created_details 正确、
-    明细 module_id 关联模块、status="draft" (D-001 / design §7.3)。"""
+    明细 module_id 关联模块、status="done"（必填齐全→done，import_commit 现行逻辑）。"""
     plan_node_id = uuid.uuid4()
     duty_user_id = uuid.uuid4()
 
@@ -382,7 +382,7 @@ async def test_import_commit_creates_module_and_details(
     details = await _list_details_by_node(db_session, plan_node_id)
     assert len(details) == 1
     assert details[0].module_id == module_id  # 明细关联模块
-    assert details[0].status == "draft"  # D-001: status 固定 draft
+    assert details[0].status == "done"  # 必填齐全→done (import_commit 现行逻辑)
     assert details[0].execute_user_id == duty_user_id
 
 
