@@ -12,12 +12,10 @@
  * 依据:.sillyspec/changes/2026-06-21-ppm-frontend-alignment/tasks/task-03.md
  * 参照源:vue views/ppm/projectmaintenance/index.vue
  */
-import { useState } from "react";
-import { Drawer } from "antd";
+import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import type { StatusKind } from "@/components/ui/status-badge";
-import { PpmProjectMembersTable } from "@/components/ppm-project-members-table";
 import { PpmResourceTable, type PpmFieldDef } from "@/components/ppm-resource-table";
 import {
   createProject,
@@ -95,7 +93,7 @@ const fields: PpmFieldDef<Entity>[] = [
 ];
 
 export default function PpmProjectsPage() {
-  const [memberProject, setMemberProject] = useState<ProjectMaintenance | null>(null);
+  const router = useRouter();
 
   return (
     <>
@@ -125,7 +123,13 @@ export default function PpmProjectsPage() {
           <Button
             size="sm"
             variant="ghost"
-            onClick={() => setMemberProject(row)}
+            onClick={() =>
+              router.push(
+                `/ppm/project-members?project_name=${encodeURIComponent(
+                  row.project_name ?? "",
+                )}`,
+              )
+            }
           >
             成员管理
           </Button>
@@ -139,39 +143,7 @@ export default function PpmProjectsPage() {
         buildUpdateBody={(form) => stripForm(form) as unknown as ProjectMaintenanceUpdate}
         buildQuery={(form) => stripQuery(form) as unknown as ProjectMaintenancePageReq}
       />
-
-      {memberProject && (
-        <ProjectMembersDrawer
-          project={memberProject}
-          onClose={() => setMemberProject(null)}
-        />
-      )}
     </>
-  );
-}
-
-/**
- * 项目→成员管理 抽屉(对照源 ProjectMemberListForm)。
- * 内嵌 PpmProjectMembersTable,按 pm_project_id 过滤,新增自动绑定当前项目。
- */
-function ProjectMembersDrawer({
-  project,
-  onClose,
-}: {
-  project: ProjectMaintenance;
-  onClose: () => void;
-}) {
-  return (
-    <Drawer
-      open
-      onClose={onClose}
-      title={`成员管理 · ${project.project_name ?? project.project_code}`}
-      width={760}
-      maskClosable={false}
-      destroyOnClose
-    >
-      <PpmProjectMembersTable projectId={project.id} />
-    </Drawer>
   );
 }
 

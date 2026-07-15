@@ -16,7 +16,7 @@
  * 原型:prototype-project-members-rebuild.html(两级表布局);
  * 决策:D-002(成员展开行懒加载)/D-003/D-006(复用成员表)/D-007(onChanged 刷新 member_count)。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Input, Select, Table, type TableProps, Tag } from "antd";
 
 import { Button } from "@/components/ui/button";
@@ -85,13 +85,24 @@ const EMPTY_SEARCH: SearchForm = {
 
 // ── 组件 ──────────────────────────────────────────────────────────────────
 
-export function PpmProjectMembersGroupTable() {
+export function PpmProjectMembersGroupTable({
+  initialProjectName,
+}: {
+  /** 从 /ppm/projects「成员管理」跳入时带入的项目名(URL ?project_name=):初始填充搜索 + 首次加载后自动展开匹配项目。 */
+  initialProjectName?: string;
+}) {
   const [rows, setRows] = useState<ProjectMemberSummaryItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [search, setSearch] = useState<SearchForm>(EMPTY_SEARCH);
+  const [search, setSearch] = useState<SearchForm>(() =>
+    initialProjectName
+      ? { ...EMPTY_SEARCH, project_name: initialProjectName }
+      : EMPTY_SEARCH,
+  );
+  // 从 /ppm/projects「成员管理」跳入(URL 带 project_name):首次加载后自动展开匹配项目(仅一次)。
+  const autoExpandedRef = useRef(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
@@ -127,6 +138,15 @@ export function PpmProjectMembersGroupTable() {
       const resp = await pageProjectMemberSummary(params);
       setRows(resp.items);
       setTotal(resp.total);
+      // 从 /ppm/projects 跳入:首次带 project_name 查询后自动展开匹配项目(仅一次)。
+      if (
+        initialProjectName &&
+        !autoExpandedRef.current &&
+        resp.items.length > 0
+      ) {
+        setExpandedRowKeys(resp.items.map((r) => r.id));
+        autoExpandedRef.current = true;
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "加载失败");
     } finally {
