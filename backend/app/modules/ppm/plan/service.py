@@ -1001,7 +1001,7 @@ class PlanService:
                 module_id_of[key] = new_module.id
                 created_modules += 1
 
-            # 3. 逐行建明细 (status=draft,不触发状态机)
+            # 3. 逐行建明细 (status=done,不触发状态机)
             for row in rows:
                 detail = PsPlanNodeDetail(
                     id=uuid.uuid4(),
@@ -1014,7 +1014,7 @@ class PlanService:
                     plan_begin_time=row.plan_begin_time,
                     plan_complete_time=row.plan_complete_time,
                     execute_user_id=row.duty_user_id,
-                    status=PlanNodeDetailStatus.DRAFT.value,
+                    status=PlanNodeDetailStatus.DONE.value,
                     created_at=_now(),
                     updated_at=_now(),
                 )
