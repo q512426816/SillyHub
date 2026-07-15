@@ -23,6 +23,7 @@ from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.auth.rbac import collect_permissions_everywhere, list_user_workspace_roles
 from app.modules.auth.schema import (
+    ChangePasswordRequest,
     LoginRequest,
     MeResponse,
     RefreshRequest,
@@ -86,6 +87,21 @@ async def logout(
     """
     await AuthService(session, settings=settings).logout_session_by_refresh(
         refresh_token=payload.refresh_token
+    )
+
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    payload: ChangePasswordRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    session: SessionDep,
+    settings: SettingsDep,
+) -> None:
+    """用户自助修改密码：验证旧密码后更新，并撤销该用户其他设备的登录会话。"""
+    await AuthService(session, settings=settings).change_password(
+        user_id=user.id,
+        old_password=payload.old_password,
+        new_password=payload.new_password,
     )
 
 

@@ -116,6 +116,14 @@ describe("DashboardLayout 工作区守卫 — CB-3 顺序与白名单", () => {
     expect(nav.replace).not.toHaveBeenCalled();
   });
 
+  // task-08 / AC-09：/account（个人中心）已加入白名单，放行不被守卫拦截。
+  it("/account → 放行（白名单，task-08 个人中心入口）", async () => {
+    nav.pathname = "/account";
+    renderLayout();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(nav.replace).not.toHaveBeenCalled();
+  });
+
   it("/workspaces （列表/选择器页本身，无 wsId）→ 放行", async () => {
     nav.pathname = "/workspaces";
     renderLayout();

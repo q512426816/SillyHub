@@ -89,6 +89,26 @@
         }
       }
     },
+    "/daemon/install.ps1": {
+      "get": {
+        "tags": [
+          "daemon-distribution"
+        ],
+        "summary": "Get Install Ps1",
+        "description": "动态生成 PowerShell 安装脚本，内嵌 server_url（方案 A，DG-01/03）。\n\n读 ``daemon-dist/install.ps1`` 模板，把 ``{{SERVER_URL}}`` 占位替换为据请求头\n推导出的对外地址（scheme 经 X-Forwarded-Proto 还原、host 经白名单校验），\n返回 ``application/x-powershell``。镜像未打包则 404。",
+        "operationId": "get_install_ps1_daemon_install_ps1_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/daemon/latest.json": {
       "get": {
         "tags": [
@@ -1739,6 +1759,41 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/change-password": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Change Password",
+        "description": "用户自助修改密码：验证旧密码后更新，并撤销该用户其他设备的登录会话。",
+        "operationId": "change_password_api_auth_change_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordRequest"
               }
             }
           },
@@ -11923,6 +11978,28 @@
         }
       }
     },
+    "/api/ppm/plan-node/export-excel": {
+      "get": {
+        "tags": [
+          "ppm-plan"
+        ],
+        "summary": "Export Plan Nodes",
+        "description": "导出计划节点模板为 Excel。\n\nX-002: openpyxl 是同步 CPU 库,会阻塞事件循环。此处先 async 读 DB,\n再用 ``anyio.to_thread.run_sync`` 把 openpyxl 序列化丢到线程池。",
+        "operationId": "export_plan_nodes_api_ppm_plan_node_export_excel_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Export Plan Nodes Api Ppm Plan Node Export Excel Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/ppm/plan-node/{item_id}": {
       "get": {
         "tags": [
@@ -12295,6 +12372,124 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PlanNodeModuleResp"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ppm/plan-node/{plan_node_id}/modules/import-preview": {
+      "post": {
+        "tags": [
+          "ppm-plan"
+        ],
+        "summary": "Import Modules Preview",
+        "description": "模块导入预览 (task-07 / design §7.1)。\n\n解析 Excel + 责任人反查,不入库;anyio.to_thread 包解析在 service 内完成\n(X-002)。返回 ``ImportPreviewResp`` 供前端确认后再提交。\n\nP1#1: 先校验文件大小 (<=10MB) 与类型 (.xlsx / spreadsheetml),\n非法抛 413/415 (PlanError, ppm 域统一 AppError 翻译);非法 UUID 由\nFastAPI 在路由层 422 拦截 (P1#2),service 永远收到合法 UUID。",
+        "operationId": "import_modules_preview_api_ppm_plan_node__plan_node_id__modules_import_preview_post",
+        "parameters": [
+          {
+            "name": "plan_node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Plan Node Id"
+            }
+          },
+          {
+            "name": "pm_project_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Pm Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_modules_preview_api_ppm_plan_node__plan_node_id__modules_import_preview_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportPreviewResp"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ppm/plan-node/{plan_node_id}/modules/import-commit": {
+      "post": {
+        "tags": [
+          "ppm-plan"
+        ],
+        "summary": "Import Modules Commit",
+        "description": "模块导入提交 (task-07 / design §7.1)。\n\n按 preview 返回的行原子入库;service 返回 ``ImportResultResp``,router 不二次包装。",
+        "operationId": "import_modules_commit_api_ppm_plan_node__plan_node_id__modules_import_commit_post",
+        "parameters": [
+          {
+            "name": "plan_node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Plan Node Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportCommitReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResultResp"
                 }
               }
             }
@@ -13166,6 +13361,28 @@
         }
       }
     },
+    "/api/ppm/plan-node-detail/export-excel": {
+      "get": {
+        "tags": [
+          "ppm-plan"
+        ],
+        "summary": "Export Plan Node Details",
+        "description": "导出里程碑明细为 Excel (P2-3, X-002)。\n\n仅导出非 archived (当前有效版本) 的明细。",
+        "operationId": "export_plan_node_details_api_ppm_plan_node_detail_export_excel_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Export Plan Node Details Api Ppm Plan Node Detail Export Excel Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/ppm/plan-node-detail/{item_id}": {
       "get": {
         "tags": [
@@ -13594,50 +13811,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/ppm/plan-node/export-excel": {
-      "get": {
-        "tags": [
-          "ppm-plan"
-        ],
-        "summary": "Export Plan Nodes",
-        "description": "导出计划节点模板为 Excel。\n\nX-002: openpyxl 是同步 CPU 库,会阻塞事件循环。此处先 async 读 DB,\n再用 ``anyio.to_thread.run_sync`` 把 openpyxl 序列化丢到线程池。",
-        "operationId": "export_plan_nodes_api_ppm_plan_node_export_excel_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Response Export Plan Nodes Api Ppm Plan Node Export Excel Get"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/ppm/plan-node-detail/export-excel": {
-      "get": {
-        "tags": [
-          "ppm-plan"
-        ],
-        "summary": "Export Plan Node Details",
-        "description": "导出里程碑明细为 Excel (P2-3, X-002)。\n\n仅导出非 archived (当前有效版本) 的明细。",
-        "operationId": "export_plan_node_details_api_ppm_plan_node_detail_export_excel_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Response Export Plan Node Details Api Ppm Plan Node Detail Export Excel Get"
                 }
               }
             }
@@ -22752,6 +22925,20 @@
         ],
         "title": "BatchGenerateResponse"
       },
+      "Body_import_modules_preview_api_ppm_plan_node__plan_node_id__modules_import_preview_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_modules_preview_api_ppm_plan_node__plan_node_id__modules_import_preview_post"
+      },
       "CalendarDay": {
         "properties": {
           "date": {
@@ -23183,6 +23370,28 @@
         "type": "object",
         "title": "ChangeNextProcessReq",
         "description": "变更流 nextProcess — 推进到下一节点 (4 节点链)。"
+      },
+      "ChangePasswordRequest": {
+        "properties": {
+          "old_password": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Old Password"
+          },
+          "new_password": {
+            "type": "string",
+            "minLength": 8,
+            "title": "New Password"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "old_password",
+          "new_password"
+        ],
+        "title": "ChangePasswordRequest",
+        "description": "Body of ``POST /api/auth/change-password``（用户自助修改密码）。\n\n``old_password`` 必填（旧密码，verify 通过才允许改）；``new_password`` 至少 8 位\n（对齐 ``UserCreateRequest.password`` 的 min_length=8）。``confirm_password`` 仅前端\n校验，后端不收（``extra=\"forbid\"`` 拒绝多余字段）。"
       },
       "ChangeProcessReq": {
         "properties": {
@@ -26488,6 +26697,295 @@
         ],
         "title": "HumanTestRequest"
       },
+      "ImportCommitReq": {
+        "properties": {
+          "sheets": {
+            "items": {
+              "$ref": "#/components/schemas/ImportCommitSheet"
+            },
+            "type": "array",
+            "title": "Sheets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sheets"
+        ],
+        "title": "ImportCommitReq",
+        "description": "导入提交请求 — duty_user_id 已在 preview 反查并随行回传,无需 pm_project_id (Grill X-008)。"
+      },
+      "ImportCommitSheet": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "plan_type": {
+            "type": "string",
+            "title": "Plan Type"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ImportPreviewRow"
+            },
+            "type": "array",
+            "title": "Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "plan_type",
+          "rows"
+        ],
+        "title": "ImportCommitSheet",
+        "description": "提交请求中的单 Sheet — 前端回传用户确认导入的行 (valid 行)。"
+      },
+      "ImportPreviewResp": {
+        "properties": {
+          "sheets": {
+            "items": {
+              "$ref": "#/components/schemas/ImportPreviewSheet"
+            },
+            "type": "array",
+            "title": "Sheets"
+          },
+          "parse_errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Parse Errors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sheets"
+        ],
+        "title": "ImportPreviewResp",
+        "description": "预览响应 — 多 Sheet + 整体解析错误 (如找不到表头)。"
+      },
+      "ImportPreviewRow": {
+        "properties": {
+          "sheet_name": {
+            "type": "string",
+            "title": "Sheet Name"
+          },
+          "plan_type": {
+            "type": "string",
+            "title": "Plan Type"
+          },
+          "module_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Module Name"
+          },
+          "detailed_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detailed Stage"
+          },
+          "task_theme": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Theme"
+          },
+          "task_description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Description"
+          },
+          "plan_workload": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Workload"
+          },
+          "duty_user_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duty User Name"
+          },
+          "duty_user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duty User Id"
+          },
+          "duty_matched": {
+            "type": "boolean",
+            "title": "Duty Matched"
+          },
+          "duty_unmatched_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duty Unmatched Note"
+          },
+          "plan_begin_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Begin Time"
+          },
+          "plan_complete_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Complete Time"
+          },
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sheet_name",
+          "plan_type",
+          "duty_matched",
+          "valid"
+        ],
+        "title": "ImportPreviewRow",
+        "description": "单行预览结果 — Excel 一行对应一 DTO。\n\n``duty_matched``/``valid`` 标记责任人与必填校验结果;\n``error`` 不可导入原因 (责任人未匹配/必填缺失)。"
+      },
+      "ImportPreviewSheet": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "plan_type": {
+            "type": "string",
+            "title": "Plan Type"
+          },
+          "row_count": {
+            "type": "integer",
+            "title": "Row Count"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ImportPreviewRow"
+            },
+            "type": "array",
+            "title": "Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "plan_type",
+          "row_count",
+          "rows"
+        ],
+        "title": "ImportPreviewSheet",
+        "description": "单 Sheet 预览结果。"
+      },
+      "ImportResultResp": {
+        "properties": {
+          "created_modules": {
+            "type": "integer",
+            "title": "Created Modules"
+          },
+          "merged_modules": {
+            "type": "integer",
+            "title": "Merged Modules"
+          },
+          "created_details": {
+            "type": "integer",
+            "title": "Created Details"
+          },
+          "skipped_rows": {
+            "type": "integer",
+            "title": "Skipped Rows"
+          },
+          "failed_rows": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Failed Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created_modules",
+          "merged_modules",
+          "created_details",
+          "skipped_rows"
+        ],
+        "title": "ImportResultResp",
+        "description": "导入结果 — 计数 + 失败行描述。"
+      },
       "IncidentCreate": {
         "properties": {
           "title": {
@@ -29205,6 +29703,17 @@
               }
             ],
             "title": "Duty User Id"
+          },
+          "plan_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Type"
           }
         },
         "type": "object",
@@ -29281,6 +29790,17 @@
               }
             ],
             "title": "Duty User Id"
+          },
+          "plan_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Type"
           },
           "id": {
             "type": "string",
@@ -29365,6 +29885,17 @@
               }
             ],
             "title": "Duty User Id"
+          },
+          "plan_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Type"
           }
         },
         "type": "object",
@@ -41394,8 +41925,15 @@
             "title": "Email"
           },
           "password": {
-            "type": "string",
-            "minLength": 8,
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 8
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Password"
           },
           "username": {
@@ -41444,11 +41982,10 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "password",
           "username"
         ],
         "title": "UserCreateRequest",
-        "description": "Body of ``POST /api/admin/users`` (and forwarded ``/api/users``)."
+        "description": "Body of ``POST /api/admin/users`` (and forwarded ``/api/users``).\n\n``password`` 可选：不传时由 ``UserService.create_user`` 落库为固定默认初始密码\n（``DEFAULT_INITIAL_PASSWORD``），管理员无需在新建表单中输入密码。显式传入时\n仍按 ``min_length=8`` 校验。"
       },
       "UserInputEntry": {
         "properties": {

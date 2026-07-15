@@ -16,6 +16,7 @@ Refresh strategy (references/15 §3):
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -30,6 +31,7 @@ from app.core.errors import (
     AuthTokenInvalid,
     AuthUserInactive,
     AuthUserLoginDisabled,
+    PasswordIncorrect,
 )
 from app.core.logging import get_logger
 from app.core.security import (
@@ -43,6 +45,7 @@ from app.core.security import (
 from app.modules.auth.model import Session as SessionRow
 from app.modules.auth.model import User
 from app.modules.auth.schema import TokenPair
+from app.modules.workflow.model import AuditLog
 
 log = get_logger(__name__)
 
@@ -154,6 +157,47 @@ class AuthService:
             count=rowcount,
         )
         return rowcount
+
+    async def change_password(
+        self, *, user_id: uuid.UUID, old_password: str, new_password: str
+    ) -> None:
+        """用户自助修改密码：verify 旧密码 → hash 新密码 → 撤销全部 session → 审计 → 统一 commit。
+
+        撤销全部 session 用 execute-only UPDATE（不调 ``revoke_all_user_sessions``——其内部
+        commit 会提前提交 password 改动，破坏 password+session+audit 原子性，X-001）。当前
+        access_token 是无状态 JWT，``auth_access_ttl_minutes``（默认 30min）内仍有效=保留当前
+        会话；其他设备 refresh 失效=撤销其他。
+        """
+        user = await self._db.get(User, user_id)
+        if user is None or user.deleted_at is not None:
+            raise AuthUserInactive("User not found.")
+        if not password_hasher.verify(old_password, user.password_hash):
+            raise PasswordIncorrect("旧密码错误。")
+
+        user.password_hash = password_hasher.hash(new_password)
+        user.updated_at = _utc_now()
+        now = _utc_now()
+        await self._db.execute(
+            update(SessionRow)
+            .where(col(SessionRow.user_id) == user_id)
+            .where(col(SessionRow.revoked_at).is_(None))
+            .values(revoked_at=now)
+        )
+        await self._db.flush()
+        self._db.add(
+            AuditLog(
+                id=uuid.uuid4(),
+                workspace_id=None,
+                actor_id=user_id,
+                action="user.password_change",
+                resource_type="user",
+                resource_id=user_id,
+                details_json=json.dumps({"changed_self": True}, ensure_ascii=False),
+                timestamp=now,
+            )
+        )
+        await self._db.commit()
+        log.info("auth.password_change", user_id=str(user_id))
 
     # ── Helpers ───────────────────────────────────────────────────────────
 

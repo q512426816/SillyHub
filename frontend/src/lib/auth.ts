@@ -78,3 +78,17 @@ export async function logout(): Promise<void> {
     useSession.getState().clear();
   }
 }
+
+/**
+ * 用户自助修改密码：验证旧密码后更新，并撤销该用户其他设备的登录会话。
+ * 改密成功后当前 access_token 在有效期内仍可用，其他设备需重新登录。
+ */
+export async function changePassword(
+  oldPassword: string,
+  newPassword: string,
+): Promise<void> {
+  await apiFetch<void>("/api/auth/change-password", {
+    method: "POST",
+    json: { old_password: oldPassword, new_password: newPassword },
+  });
+}

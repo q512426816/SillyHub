@@ -18,6 +18,20 @@ class RefreshRequest(BaseModel):
     refresh_token: str = Field(min_length=1)
 
 
+class ChangePasswordRequest(BaseModel):
+    """Body of ``POST /api/auth/change-password``（用户自助修改密码）。
+
+    ``old_password`` 必填（旧密码，verify 通过才允许改）；``new_password`` 至少 8 位
+    （对齐 ``UserCreateRequest.password`` 的 min_length=8）。``confirm_password`` 仅前端
+    校验，后端不收（``extra="forbid"`` 拒绝多余字段）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    old_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=8)
+
+
 class TokenPair(BaseModel):
     """Issued on login + refresh."""
 

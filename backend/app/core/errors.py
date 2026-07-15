@@ -184,6 +184,13 @@ class AuthInvalidCredentials(AppError):
     http_status = status.HTTP_401_UNAUTHORIZED
 
 
+class PasswordIncorrect(AppError):
+    """用户自助修改密码时旧密码校验失败。"""
+
+    code = "HTTP_401_PASSWORD_INCORRECT"
+    http_status = status.HTTP_401_UNAUTHORIZED
+
+
 class AuthRefreshReused(AppError):
     """Old refresh token reused → reuse attack; all sessions get killed."""
 

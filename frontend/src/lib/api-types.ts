@@ -80,6 +80,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/daemon/install.ps1": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Install Ps1
+         * @description 动态生成 PowerShell 安装脚本，内嵌 server_url（方案 A，DG-01/03）。
+         *
+         *     读 ``daemon-dist/install.ps1`` 模板，把 ``{{SERVER_URL}}`` 占位替换为据请求头
+         *     推导出的对外地址（scheme 经 X-Forwarded-Proto 还原、host 经白名单校验），
+         *     返回 ``application/x-powershell``。镜像未打包则 404。
+         */
+        get: operations["get_install_ps1_daemon_install_ps1_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/daemon/latest.json": {
         parameters: {
             query?: never;
@@ -746,6 +770,26 @@ export interface paths {
          *     asking) and the refresh token (identifies the exact session to drop).
          */
         post: operations["logout_api_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/change-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change Password
+         * @description 用户自助修改密码：验证旧密码后更新，并撤销该用户其他设备的登录会话。
+         */
+        post: operations["change_password_api_auth_change_password_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3835,6 +3879,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ppm/plan-node/export-excel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Plan Nodes
+         * @description 导出计划节点模板为 Excel。
+         *
+         *     X-002: openpyxl 是同步 CPU 库,会阻塞事件循环。此处先 async 读 DB,
+         *     再用 ``anyio.to_thread.run_sync`` 把 openpyxl 序列化丢到线程池。
+         */
+        get: operations["export_plan_nodes_api_ppm_plan_node_export_excel_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ppm/plan-node/{item_id}": {
         parameters: {
             query?: never;
@@ -3934,6 +4001,55 @@ export interface paths {
         put?: never;
         /** Create Module */
         post: operations["create_module_api_ppm_plan_node_module_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ppm/plan-node/{plan_node_id}/modules/import-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Modules Preview
+         * @description 模块导入预览 (task-07 / design §7.1)。
+         *
+         *     解析 Excel + 责任人反查,不入库;anyio.to_thread 包解析在 service 内完成
+         *     (X-002)。返回 ``ImportPreviewResp`` 供前端确认后再提交。
+         *
+         *     P1#1: 先校验文件大小 (<=10MB) 与类型 (.xlsx / spreadsheetml),
+         *     非法抛 413/415 (PlanError, ppm 域统一 AppError 翻译);非法 UUID 由
+         *     FastAPI 在路由层 422 拦截 (P1#2),service 永远收到合法 UUID。
+         */
+        post: operations["import_modules_preview_api_ppm_plan_node__plan_node_id__modules_import_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ppm/plan-node/{plan_node_id}/modules/import-commit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Modules Commit
+         * @description 模块导入提交 (task-07 / design §7.1)。
+         *
+         *     按 preview 返回的行原子入库;service 返回 ``ImportResultResp``,router 不二次包装。
+         */
+        post: operations["import_modules_commit_api_ppm_plan_node__plan_node_id__modules_import_commit_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4125,6 +4241,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ppm/plan-node-detail/export-excel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Plan Node Details
+         * @description 导出里程碑明细为 Excel (P2-3, X-002)。
+         *
+         *     仅导出非 archived (当前有效版本) 的明细。
+         */
+        get: operations["export_plan_node_details_api_ppm_plan_node_detail_export_excel_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ppm/plan-node-detail/{item_id}": {
         parameters: {
             query?: never;
@@ -4251,51 +4389,6 @@ export interface paths {
          *     变更流或其他客户端使用 (task-02 合约产出,不删除以免破坏验收)。
          */
         post: operations["submit_detail_api_ppm_plan_node_detail__item_id__submit_detail_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/ppm/plan-node/export-excel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Export Plan Nodes
-         * @description 导出计划节点模板为 Excel。
-         *
-         *     X-002: openpyxl 是同步 CPU 库,会阻塞事件循环。此处先 async 读 DB,
-         *     再用 ``anyio.to_thread.run_sync`` 把 openpyxl 序列化丢到线程池。
-         */
-        get: operations["export_plan_nodes_api_ppm_plan_node_export_excel_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/ppm/plan-node-detail/export-excel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Export Plan Node Details
-         * @description 导出里程碑明细为 Excel (P2-3, X-002)。
-         *
-         *     仅导出非 archived (当前有效版本) 的明细。
-         */
-        get: operations["export_plan_node_details_api_ppm_plan_node_detail_export_excel_get"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6800,6 +6893,11 @@ export interface components {
             /** Generated */
             generated: string[];
         };
+        /** Body_import_modules_preview_api_ppm_plan_node__plan_node_id__modules_import_preview_post */
+        Body_import_modules_preview_api_ppm_plan_node__plan_node_id__modules_import_preview_post: {
+            /** File */
+            file: string;
+        };
         /**
          * CalendarDay
          * @description 日历单日负载。
@@ -6960,6 +7058,20 @@ export interface components {
         ChangeNextProcessReq: {
             /** Comment */
             comment?: string | null;
+        };
+        /**
+         * ChangePasswordRequest
+         * @description Body of ``POST /api/auth/change-password``（用户自助修改密码）。
+         *
+         *     ``old_password`` 必填（旧密码，verify 通过才允许改）；``new_password`` 至少 8 位
+         *     （对齐 ``UserCreateRequest.password`` 的 min_length=8）。``confirm_password`` 仅前端
+         *     校验，后端不收（``extra="forbid"`` 拒绝多余字段）。
+         */
+        ChangePasswordRequest: {
+            /** Old Password */
+            old_password: string;
+            /** New Password */
+            new_password: string;
         };
         /**
          * ChangeProcessReq
@@ -8359,6 +8471,105 @@ export interface components {
             /** Comment */
             comment?: string | null;
         };
+        /**
+         * ImportCommitReq
+         * @description 导入提交请求 — duty_user_id 已在 preview 反查并随行回传,无需 pm_project_id (Grill X-008)。
+         */
+        ImportCommitReq: {
+            /** Sheets */
+            sheets: components["schemas"]["ImportCommitSheet"][];
+        };
+        /**
+         * ImportCommitSheet
+         * @description 提交请求中的单 Sheet — 前端回传用户确认导入的行 (valid 行)。
+         */
+        ImportCommitSheet: {
+            /** Name */
+            name: string;
+            /** Plan Type */
+            plan_type: string;
+            /** Rows */
+            rows: components["schemas"]["ImportPreviewRow"][];
+        };
+        /**
+         * ImportPreviewResp
+         * @description 预览响应 — 多 Sheet + 整体解析错误 (如找不到表头)。
+         */
+        ImportPreviewResp: {
+            /** Sheets */
+            sheets: components["schemas"]["ImportPreviewSheet"][];
+            /** Parse Errors */
+            parse_errors?: string[];
+        };
+        /**
+         * ImportPreviewRow
+         * @description 单行预览结果 — Excel 一行对应一 DTO。
+         *
+         *     ``duty_matched``/``valid`` 标记责任人与必填校验结果;
+         *     ``error`` 不可导入原因 (责任人未匹配/必填缺失)。
+         */
+        ImportPreviewRow: {
+            /** Sheet Name */
+            sheet_name: string;
+            /** Plan Type */
+            plan_type: string;
+            /** Module Name */
+            module_name?: string | null;
+            /** Detailed Stage */
+            detailed_stage?: string | null;
+            /** Task Theme */
+            task_theme?: string | null;
+            /** Task Description */
+            task_description?: string | null;
+            /** Plan Workload */
+            plan_workload?: string | null;
+            /** Duty User Name */
+            duty_user_name?: string | null;
+            /** Duty User Id */
+            duty_user_id?: string | null;
+            /** Duty Matched */
+            duty_matched: boolean;
+            /** Duty Unmatched Note */
+            duty_unmatched_note?: string | null;
+            /** Plan Begin Time */
+            plan_begin_time?: string | null;
+            /** Plan Complete Time */
+            plan_complete_time?: string | null;
+            /** Valid */
+            valid: boolean;
+            /** Error */
+            error?: string | null;
+        };
+        /**
+         * ImportPreviewSheet
+         * @description 单 Sheet 预览结果。
+         */
+        ImportPreviewSheet: {
+            /** Name */
+            name: string;
+            /** Plan Type */
+            plan_type: string;
+            /** Row Count */
+            row_count: number;
+            /** Rows */
+            rows: components["schemas"]["ImportPreviewRow"][];
+        };
+        /**
+         * ImportResultResp
+         * @description 导入结果 — 计数 + 失败行描述。
+         */
+        ImportResultResp: {
+            /** Created Modules */
+            created_modules: number;
+            /** Merged Modules */
+            merged_modules: number;
+            /** Created Details */
+            created_details: number;
+            /** Skipped Rows */
+            skipped_rows: number;
+            /** Failed Rows */
+            failed_rows?: string[];
+        };
         /** IncidentCreate */
         IncidentCreate: {
             /** Title */
@@ -9442,6 +9653,8 @@ export interface components {
             plan_complete_time?: string | null;
             /** Duty User Id */
             duty_user_id?: string | null;
+            /** Plan Type */
+            plan_type?: string | null;
         };
         /** PlanNodeModuleResp */
         PlanNodeModuleResp: {
@@ -9457,6 +9670,8 @@ export interface components {
             plan_complete_time?: string | null;
             /** Duty User Id */
             duty_user_id?: string | null;
+            /** Plan Type */
+            plan_type?: string | null;
             /**
              * Id
              * Format: uuid
@@ -9485,6 +9700,8 @@ export interface components {
             plan_complete_time?: string | null;
             /** Duty User Id */
             duty_user_id?: string | null;
+            /** Plan Type */
+            plan_type?: string | null;
         };
         /** PlanNodeResp */
         PlanNodeResp: {
@@ -13277,12 +13494,16 @@ export interface components {
         /**
          * UserCreateRequest
          * @description Body of ``POST /api/admin/users`` (and forwarded ``/api/users``).
+         *
+         *     ``password`` 可选：不传时由 ``UserService.create_user`` 落库为固定默认初始密码
+         *     （``DEFAULT_INITIAL_PASSWORD``），管理员无需在新建表单中输入密码。显式传入时
+         *     仍按 ``min_length=8`` 校验。
          */
         UserCreateRequest: {
             /** Email */
             email?: string | null;
             /** Password */
-            password: string;
+            password?: string | null;
             /** Username */
             username: string;
             /** Display Name */
@@ -14332,6 +14553,26 @@ export interface operations {
         };
     };
     get_install_script_daemon_install_sh_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_install_ps1_daemon_install_ps1_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -15446,6 +15687,37 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["RefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    change_password_api_auth_change_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePasswordRequest"];
             };
         };
         responses: {
@@ -21349,6 +21621,26 @@ export interface operations {
             };
         };
     };
+    export_plan_nodes_api_ppm_plan_node_export_excel_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     get_plan_node_api_ppm_plan_node__item_id__get: {
         parameters: {
             query?: never;
@@ -21623,6 +21915,78 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlanNodeModuleResp"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_modules_preview_api_ppm_plan_node__plan_node_id__modules_import_preview_post: {
+        parameters: {
+            query: {
+                pm_project_id: string;
+            };
+            header?: never;
+            path: {
+                plan_node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_modules_preview_api_ppm_plan_node__plan_node_id__modules_import_preview_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportPreviewResp"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_modules_commit_api_ppm_plan_node__plan_node_id__modules_import_commit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportCommitReq"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportResultResp"];
                 };
             };
             /** @description Validation Error */
@@ -22145,6 +22509,26 @@ export interface operations {
             };
         };
     };
+    export_plan_node_details_api_ppm_plan_node_detail_export_excel_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     get_detail_api_ppm_plan_node_detail__item_id__get: {
         parameters: {
             query?: never;
@@ -22438,46 +22822,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    export_plan_nodes_api_ppm_plan_node_export_excel_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    export_plan_node_details_api_ppm_plan_node_detail_export_excel_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
                 };
             };
         };

@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { ArrowLeftRight, Bell, ChevronRight, LogOut, Search } from "lucide-react";
+import { ArrowLeftRight, Bell, ChevronRight, LogOut, Search, UserRound } from "lucide-react";
 
 import {
   Avatar,
@@ -162,7 +162,12 @@ export function TopBar({ displayName, onLogout }: TopBarProps) {
           <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuLabel className="truncate">{displayName}</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>个人设置</DropdownMenuItem>
+            {/* task-08 / FR-08 / AC-09：个人中心入口跳 /account，
+                沿用「切换平台」项的 router.push 模式。 */}
+            <DropdownMenuItem onClick={() => router.push("/account")}>
+              <UserRound className="mr-2 h-4 w-4" />
+              个人中心
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => router.push(switchHref)}>
               <ArrowLeftRight className="mr-2 h-4 w-4" />

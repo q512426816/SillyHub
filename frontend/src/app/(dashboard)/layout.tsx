@@ -10,7 +10,8 @@ import { useSession } from "@/stores/session";
 
 // task-05：工作区守卫白名单（平台级后台路由 + 选择器页本身）。
 // 设计依据 design §5 P2 + §9（白名单 = 现有平台级路由）。
-const WORKSPACE_WHITELIST = ["/workspaces", "/admin", "/settings", "/ppm", "/runtimes"];
+// task-08：加入 /account（个人中心，平台级、不依赖工作区）。
+const WORKSPACE_WHITELIST = ["/workspaces", "/admin", "/settings", "/ppm", "/runtimes", "/account"];
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
