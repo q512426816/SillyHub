@@ -3,8 +3,9 @@
 /**
  * QuickEntryGrid — 个人工作台快捷入口 (task-11 / FR-11)。
  *
- * 4 按钮 grid(参照原型):
+ * 5 按钮 grid(参照原型):
  *  - 问题清单 → /ppm/problem-list(已有路由,router.push 跳转)
+ *  - 任务计划 → /ppm/task-plans(已有路由,router.push 跳转)
  *  - 绩效考评 → Toast 提示「绩效考评功能暂未开放」(不跳转 D-007@v1 占位)
  *  - 知识库   → Toast 提示「知识库入口未配置」(平台 knowledge 路由为工作空间级
  *              /workspaces/[id]/knowledge,个人工作台无对应入口,落实后再接)
@@ -30,6 +31,12 @@ export function QuickEntryGrid() {
           onClick={() => router.push("/ppm/problem-list")}
         >
           问题清单
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => router.push("/ppm/task-plans")}
+        >
+          任务计划
         </Button>
         <Button
           variant="outline"

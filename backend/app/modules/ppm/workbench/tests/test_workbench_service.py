@@ -23,7 +23,7 @@ import pytest
 
 from app.modules.admin.model import Organization, UserOrganization
 from app.modules.auth.model import Role, User, UserWorkspaceRole
-from app.modules.ppm.problem.model import PpmProblemList
+from app.modules.ppm.problem.model import PpmProblemChange, PpmProblemList
 from app.modules.ppm.task.model import PlanTask, TaskExecute
 from app.modules.ppm.workbench.service import WorkbenchService
 
@@ -114,6 +114,28 @@ async def _seed_problem(
     await db_session.commit()
     await db_session.refresh(problem)
     return problem
+
+
+async def _seed_problem_change(
+    db_session,
+    *,
+    status: str = "1",
+    now_handle_user: str | None = None,
+    pro_desc: str | None = "变更描述",
+) -> PpmProblemChange:
+    """造一条 PpmProblemChange (问题变更,resource_id 必填 UUID)。"""
+    change = PpmProblemChange(
+        resource_id=uuid.uuid4(),
+        project_id=uuid.uuid4(),
+        project_name="项目A",
+        pro_desc=pro_desc,
+        status=status,
+        now_handle_user=now_handle_user,
+    )
+    db_session.add(change)
+    await db_session.commit()
+    await db_session.refresh(change)
+    return change
 
 
 async def _seed_execute(
@@ -352,6 +374,65 @@ async def test_summary_todo_split_not_substring_match(db_session):
     assert not any("他人问题" in (t.name or "") for t in problem_todos)
     # me_str 仅用于消除 unused 警告,确认匹配走的是精确 split
     assert me_str == str(me.id)
+
+
+@pytest.mark.asyncio
+async def test_summary_todo_problem_change_auditing_match(db_session):
+    """问题变更待审批:status='1' 审核中 且 now_handle_user 含 me → 进 todos (source=problem_change)。"""
+    user = await _seed_user(db_session)
+    me_str = str(user.id)
+    uid1 = uuid.uuid4()
+    await _seed_problem_change(
+        db_session,
+        status="1",
+        now_handle_user=f"{uid1},{me_str}",
+        pro_desc="变更A",
+    )
+
+    svc = WorkbenchService(db_session)
+    summary = await svc.get_summary(user, range="month")
+    change_todos = [t for t in summary.todos if t.source == "problem_change"]
+
+    assert len(change_todos) >= 1
+    assert any(t.name == "变更A" for t in change_todos)
+
+
+@pytest.mark.asyncio
+async def test_summary_todo_problem_change_handle_user_no_match(db_session):
+    """问题变更 now_handle_user 不含 me → 不进 todos。"""
+    user = await _seed_user(db_session)
+    other = uuid.uuid4()
+    await _seed_problem_change(
+        db_session,
+        status="1",
+        now_handle_user=str(other),
+        pro_desc="他人变更",
+    )
+
+    svc = WorkbenchService(db_session)
+    summary = await svc.get_summary(user, range="month")
+    change_todos = [t for t in summary.todos if t.source == "problem_change"]
+
+    assert not any("他人变更" in (t.name or "") for t in change_todos)
+
+
+@pytest.mark.asyncio
+async def test_summary_todo_problem_change_only_auditing_status(db_session):
+    """问题变更 status='2' 已完成 (即便 now_handle_user 含 me) → 不进待办 (只审核中='1' 才待审批)。"""
+    user = await _seed_user(db_session)
+    me_str = str(user.id)
+    await _seed_problem_change(
+        db_session,
+        status="2",  # 已完成
+        now_handle_user=me_str,
+        pro_desc="已完成变更",
+    )
+
+    svc = WorkbenchService(db_session)
+    summary = await svc.get_summary(user, range="month")
+    change_todos = [t for t in summary.todos if t.source == "problem_change"]
+
+    assert not any("已完成变更" in (t.name or "") for t in change_todos)
 
 
 # ===========================================================================
