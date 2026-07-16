@@ -311,3 +311,11 @@ created_at: 2026-07-14T09:20:24
 根因：DB 实测新建记录 project_name=None(历史数据有名称)。①前端表单无 project_name 的 Form.Item(「项目名称」字段实际绑定 project_id),onProjectChange setFieldValue 回填的 project_name 未可靠进入提交体;②后端 create_ps_project_plan 直接存 data 不兜底 → project_name 存 None;③列表 render v ?? p.id 在 project_name 为空时回退显示 id。
 方案：后端 create_ps_project_plan 兜底——project_name 为空(falsy)且 project_id 存在时,按 project_id 查 PpmProjectMaintenance.project_name 填充(单一可信源,不依赖前端提交)。显式传 project_name 不被覆盖;project_id 无效保持 None 不报错。仅改后端 service 一处 + import + 单测。
 结果：plan service 19 passed(含新增兜底用例);ruff format+check 通过(--fix 修 import 排序);mypy 通过。待 commit + rebuild backend 验证。
+
+## ql-20260716-007-d4e9 | 2026-07-16 10:35:00 | 回退 ql-003/005 的限宽 overflow 容器——2K 屏容器引入母表/模块多余滚动条，去掉容器只保留列宽压缩
+状态：已完成
+关联变更：2026-07-16-plan-node-subtable-style
+文件：frontend/src/app/(dashboard)/ppm/plan-nodes/page.tsx（DetailsSubTable/ModulesSubTable 去掉外层限宽 overflow-x 容器 div + 去掉 [&_.ant-table-wrapper]:min-w-0，恢复 PpmSubTable/Table 直接渲染；DETAIL_COLUMNS 列宽压缩 90/100/140/120/80/90/90 保留）
+根因：ql-003 加的限宽容器 maxWidth:calc(100vw-340px)+overflowX:auto 在 2K 屏（容器约 2220px）反而引入多余滚动条（母表+模块都出滚动条）。用户澄清：2K 屏子表内容（明细790/模块600）远小于可视宽度（约2200），装得下不需要滚动条，也不要明细强制滚动。限宽 overflow 容器是基于「子表该独立滚动」的错误假设。
+方案：去掉明细/模块外层限宽容器（+min-w-0），回到原始结构（子表直接 scroll.x:max-content），只保留 DETAIL_COLUMNS 列宽压缩。2K 屏子表 790 < 可视宽度 2200，母表 max-content=max(母表列,790)=790 < 视口不撑不滚，子表 fits 不滚。仅改 plan-nodes/page.tsx。
+结果：tsc --noEmit EXIT 0；仅改 plan-nodes/page.tsx（去限宽容器+min-w-0，列宽压缩保留）。待 commit + rebuild frontend 部署 + 用户浏览器验证（2K 屏展开模板行：母表/模块/明细均无多余横向滚动条）。

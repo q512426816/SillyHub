@@ -458,20 +458,15 @@ function DetailsSubTable({
         </div>
       </div>
       {err && <p className="mb-2 text-[11px] text-destructive">{err}</p>}
-      <div
-        className="[&_.ant-table-wrapper]:min-w-0"
-        style={{ maxWidth: "calc(100vw - 340px)", overflowX: "auto" }}
-      >
-        <PpmSubTable<DetailDraftRow>
-          editable
-          masterRows={draftRows}
-          columns={DETAIL_COLUMNS}
-          onChange={setDraftRows}
-          newRowFactory={newRowFactory}
-          canAddRemove
-          tableProps={{ loading }}
-        />
-      </div>
+      <PpmSubTable<DetailDraftRow>
+        editable
+        masterRows={draftRows}
+        columns={DETAIL_COLUMNS}
+        onChange={setDraftRows}
+        newRowFactory={newRowFactory}
+        canAddRemove
+        tableProps={{ loading }}
+      />
       <p className="mt-1 text-[11px] text-muted-foreground">
         整表行内编辑,修改后点击「保存」批量提交。
       </p>
@@ -575,19 +570,17 @@ function ModulesSubTable({
         </Button>
       </div>
       {err && <p className="mb-2 text-[11px] text-destructive">{err}</p>}
-      <div style={{ maxWidth: "calc(100vw - 340px)", overflowX: "auto" }}>
-        <Table<PlanNodeModule>
-          rowKey="id"
-          size="small"
-          loading={loading}
-          dataSource={items}
-          columns={columns}
-          pagination={false}
-          rowClassName={(_row: PlanNodeModule, idx: number) => idx % 2 === 1 ? "bg-muted/40" : ""}
-          locale={{ emptyText: "暂无模块" }}
-          scroll={{ x: "max-content" }}
-        />
-      </div>
+      <Table<PlanNodeModule>
+        rowKey="id"
+        size="small"
+        loading={loading}
+        dataSource={items}
+        columns={columns}
+        pagination={false}
+        rowClassName={(_row: PlanNodeModule, idx: number) => idx % 2 === 1 ? "bg-muted/40" : ""}
+        locale={{ emptyText: "暂无模块" }}
+        scroll={{ x: "max-content" }}
+      />
       {editing && (
         <ModuleFormDrawer
           planNodeId={node.id}
