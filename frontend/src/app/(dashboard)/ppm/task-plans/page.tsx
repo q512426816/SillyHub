@@ -547,6 +547,18 @@ export default function TaskPlansPage() {
       render: (v: string | null) => v ?? "—",
     },
     {
+      title: "已消耗(人天)",
+      dataIndex: "spent_time",
+      key: "spent_time",
+      width: 110,
+      render: (v: number | null | undefined) =>
+        v != null && v > 0 ? (
+          <span className="font-medium text-emerald-600">{v} 人天</span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        ),
+    },
+    {
       title: "操作",
       key: "actions",
       align: "center",
@@ -785,7 +797,17 @@ export default function TaskPlansPage() {
       {recordsTask && (
         <Modal
           open
-          title={`详情 — ${recordsTask.content ?? ""}`}
+          title={
+            <div className="flex items-center gap-2">
+              <span>详情</span>
+              <Tag color={taskStatusTag(recordsTask.status).color}>
+                {taskStatusTag(recordsTask.status).text}
+              </Tag>
+              <span className="text-sm font-normal text-muted-foreground">
+                {recordsTask.content ?? ""}
+              </span>
+            </div>
+          }
           onCancel={() => {
             setRecordsTask(null);
             setRecords([]);
@@ -794,75 +816,87 @@ export default function TaskPlansPage() {
           width={760}
         >
           {/* 任务信息 */}
-          <div className="mb-3 grid grid-cols-2 gap-x-4 gap-y-1 rounded-md border border-border bg-muted/30 p-3 text-xs">
-            <div><span className="text-muted-foreground">项目：</span>{recordsTask.project_name ?? "—"}</div>
-            <div><span className="text-muted-foreground">模块：</span>{recordsTask.module_name ?? "—"}</div>
-            <div><span className="text-muted-foreground">状态：</span>{recordsTask.status}</div>
-            <div><span className="text-muted-foreground">预估工时：</span>{recordsTask.work_load ?? "—"}</div>
-            <div className="col-span-2">
-              <span className="text-muted-foreground">计划时间：</span>
-              {recordsTask.start_time ? fmtDay(recordsTask.start_time) : "—"} ~{" "}
-              {recordsTask.end_time ? fmtDay(recordsTask.end_time) : "—"}
+          <div className="mb-4 rounded-lg border border-border bg-muted/30 p-4">
+            <div className="mb-3 text-xs font-semibold text-foreground/70">任务信息</div>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+              <div><span className="text-muted-foreground">项目：</span>{recordsTask.project_name ?? "—"}</div>
+              <div><span className="text-muted-foreground">模块：</span>{recordsTask.module_name ?? "—"}</div>
+              <div><span className="text-muted-foreground">预估工时：</span>{recordsTask.work_load ?? "—"}</div>
+              <div>
+                <span className="text-muted-foreground">已消耗：</span>
+                {recordsTask.spent_time != null && recordsTask.spent_time > 0 ? (
+                  <span className="font-medium text-emerald-600">{recordsTask.spent_time} 人天</span>
+                ) : (
+                  "—"
+                )}
+              </div>
+              <div className="col-span-2">
+                <span className="text-muted-foreground">计划时间：</span>
+                {recordsTask.start_time ? fmtDay(recordsTask.start_time) : "—"} ~{" "}
+                {recordsTask.end_time ? fmtDay(recordsTask.end_time) : "—"}
+              </div>
+              <div><span className="text-muted-foreground">负责人：</span>{recordsTask.user_name ?? "—"}</div>
+              <div><span className="text-muted-foreground">配合人员：</span>{recordsTask.work_partner ?? "—"}</div>
+              {recordsTask.remarks ? (
+                <div className="col-span-2"><span className="text-muted-foreground">备注：</span>{recordsTask.remarks}</div>
+              ) : null}
             </div>
-            <div><span className="text-muted-foreground">负责人：</span>{recordsTask.user_name ?? "—"}</div>
-            <div><span className="text-muted-foreground">配合：</span>{recordsTask.work_partner ?? "—"}</div>
-            {recordsTask.remarks ? (
-              <div className="col-span-2"><span className="text-muted-foreground">备注：</span>{recordsTask.remarks}</div>
-            ) : null}
           </div>
 
-          {/* 执行记录(时间精确到秒, 无结果列) */}
-          <div className="mb-1 text-xs font-medium text-muted-foreground">
+          {/* 执行记录(时间精确到秒) */}
+          <div className="mb-2 text-xs font-semibold text-foreground/70">
             执行记录（{records.length}）
           </div>
           {records.length === 0 ? (
-            <div className="py-3 text-center text-xs text-muted-foreground">暂无执行记录</div>
+            <div className="rounded-lg border border-dashed border-border py-6 text-center text-xs text-muted-foreground">
+              暂无执行记录
+            </div>
           ) : (
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-left text-muted-foreground">
-                  <th className="py-1 pr-2">开始时间</th>
-                  <th className="py-1 pr-2">结束时间</th>
-                  <th className="py-1 pr-2">耗时</th>
-                  <th className="py-1">说明</th>
-                </tr>
-              </thead>
-              <tbody>
-                {records.map((e) => (
-                  <tr key={e.id} className="border-t">
-                    <td className="py-1 pr-2">
-                      {e.actual_start_time
-                        ? dayjs(e.actual_start_time).format("YYYY-MM-DD HH:mm:ss")
-                        : "—"}
-                    </td>
-                    <td className="py-1 pr-2">
-                      {e.actual_end_time
-                        ? dayjs(e.actual_end_time).format("YYYY-MM-DD HH:mm:ss")
-                        : "—"}
-                    </td>
-                    <td className="py-1 pr-2">
-                      {e.time_spent != null ? `${e.time_spent}人天` : "—"}
-                    </td>
-                    <td className="py-1">{e.execute_info ?? "—"}</td>
+            <div className="overflow-hidden rounded-lg border border-border">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-muted/50 text-left text-muted-foreground">
+                    <th className="px-3 py-2 font-medium">开始时间</th>
+                    <th className="px-3 py-2 font-medium">结束时间</th>
+                    <th className="px-3 py-2 font-medium">耗时</th>
+                    <th className="px-3 py-2 font-medium">说明</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {records.map((e) => (
+                    <tr key={e.id} className="border-t border-border hover:bg-muted/30">
+                      <td className="px-3 py-2">
+                        {e.actual_start_time
+                          ? dayjs(e.actual_start_time).format("YYYY-MM-DD HH:mm:ss")
+                          : "—"}
+                      </td>
+                      <td className="px-3 py-2">
+                        {e.actual_end_time
+                          ? dayjs(e.actual_end_time).format("YYYY-MM-DD HH:mm:ss")
+                          : "—"}
+                      </td>
+                      <td className="px-3 py-2">{e.time_spent != null ? `${e.time_spent}人天` : "—"}</td>
+                      <td className="px-3 py-2">{e.execute_info ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
 
           {/* 执行表单(执行模式 + 进行中 + 有 in-flight 记录时展示) */}
           {detailMode === "execute" &&
             recordsTask.status === "进行中" &&
             detailInflightId && (
-            <div className="mt-3 space-y-2 border-t border-border pt-3">
-              <div className="text-xs font-medium text-muted-foreground">
+            <div className="mt-4 rounded-lg border border-border bg-card p-4">
+              <div className="mb-3 text-xs font-semibold text-foreground/70">
                 填报执行
                 {detailDays.length > 1
                   ? `（跨 ${detailDays.length} 天，已自动按天拆分，逐天填写耗时与说明）`
                   : ""}
               </div>
               {detailDays.map((d, idx) => (
-                <div key={d.date} className="space-y-1 rounded border border-border p-2">
+                <div key={d.date} className="mb-3 space-y-2 rounded-md border border-border bg-muted/20 p-3 last:mb-0">
                   <div className="text-[11px] font-medium">{d.date}</div>
                   <div className="flex gap-2">
                     <input

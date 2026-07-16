@@ -26,6 +26,7 @@ from typing import Annotated, Any
 
 import anyio
 from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_user, require_permission_any
@@ -53,6 +54,7 @@ from app.modules.ppm.problem.schema import (
 from app.modules.ppm.problem.service import (
     ProblemService,
 )
+from app.modules.ppm.task.model import TaskExecute
 
 router = APIRouter(tags=["ppm-problem"])
 
@@ -106,11 +108,24 @@ async def list_problems(
         find_time_end=find_time_end,
         duty_user_id=duty_user_id,
     )
-    return Page.build(
-        items=[ProblemListResp.model_validate(i) for i in page.items],
-        total=page.total,
-        req=req,
-    )
+    # 批量聚合已消耗工时(sum time_spent by problem_task_id, 避免前端 N+1)
+    prob_ids = [i.id for i in page.items]
+    spent_map: dict[uuid.UUID, float] = {}
+    if prob_ids:
+        rows = (
+            await session.execute(
+                select(TaskExecute.problem_task_id, func.sum(TaskExecute.time_spent))
+                .where(TaskExecute.problem_task_id.in_(prob_ids))
+                .group_by(TaskExecute.problem_task_id)
+            )
+        ).all()
+        spent_map = {pid: float(s or 0) for pid, s in rows if pid is not None}
+    items = []
+    for i in page.items:
+        resp = ProblemListResp.model_validate(i)
+        resp.spent_time = spent_map.get(i.id, 0.0)
+        items.append(resp)
+    return Page.build(items=items, total=page.total, req=req)
 
 
 # export-excel 必须前置于 /{item_id} 参数化路由,否则 FastAPI 按注册顺序

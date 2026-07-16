@@ -723,6 +723,8 @@ export interface ProblemList {
   check_time: string | null;
   created_at: string;
   updated_at: string;
+  /** 已消耗工时(人天, 后端聚合 sum TaskExecute.time_spent) */
+  spent_time?: number;
 }
 
 export interface ProblemListCreate {
@@ -965,6 +967,8 @@ export interface PlanTask {
   kanban_order: number;
   created_at: string;
   updated_at: string;
+  /** 已消耗工时(人天, 后端聚合 sum TaskExecute.time_spent) */
+  spent_time?: number;
 }
 
 export interface PlanTaskCreate {

@@ -118,6 +118,7 @@ class PlanTaskResponse(PydanticModel):
     kanban_order: int
     created_at: datetime
     updated_at: datetime
+    spent_time: float = 0.0  # 已消耗工时(人天, router 聚合 sum TaskExecute.time_spent)
 
     model_config = {"from_attributes": True}
 

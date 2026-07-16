@@ -288,6 +288,18 @@ export default function ProblemListPage() {
       render: (v: string | null) => v ?? "—",
     },
     {
+      title: "已消耗(人天)",
+      dataIndex: "spent_time",
+      key: "spent_time",
+      width: 110,
+      render: (v: number | null | undefined) =>
+        v != null && v > 0 ? (
+          <span style={{ color: "#16a34a", fontWeight: 500 }}>{v} 人天</span>
+        ) : (
+          <span style={{ color: "rgba(0,0,0,0.45)" }}>—</span>
+        ),
+    },
+    {
       title: "计划起止",
       key: "plan",
       width: 200,

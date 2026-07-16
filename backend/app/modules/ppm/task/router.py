@@ -15,6 +15,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_user, require_permission_any
@@ -23,6 +24,7 @@ from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.ppm.common.crud import Page
 from app.modules.ppm.common.export import ColumnDef, excel_response, rows_to_workbook
+from app.modules.ppm.task.model import TaskExecute
 from app.modules.ppm.task.schema import (
     ExecutePlanReq,
     PlanTaskBrief,
@@ -171,7 +173,29 @@ async def page_plan_task(
     )
     svc = PlanTaskService(session)
     result = await svc.page(req)
-    return _page_resp(result, PlanTaskResponse.model_validate)
+    # 批量聚合已消耗工时(sum time_spent by plan_task_id, 避免前端 N+1)
+    plan_ids = [t.id for t in result.items]
+    spent_map: dict[uuid.UUID, float] = {}
+    if plan_ids:
+        rows = (
+            await session.execute(
+                select(TaskExecute.plan_task_id, func.sum(TaskExecute.time_spent))
+                .where(TaskExecute.plan_task_id.in_(plan_ids))
+                .group_by(TaskExecute.plan_task_id)
+            )
+        ).all()
+        spent_map = {pid: float(s or 0) for pid, s in rows if pid is not None}
+    items = []
+    for t in result.items:
+        resp = PlanTaskResponse.model_validate(t)
+        resp.spent_time = spent_map.get(t.id, 0.0)
+        items.append(resp)
+    return Page(
+        items=items,
+        total=result.total,
+        page=result.page,
+        page_size=result.page_size,
+    )
 
 
 @router.put("/task-plan/execute", response_model=TaskExecuteResponse)
@@ -301,7 +325,29 @@ async def personal_plan_task_page(
     )
     svc = PlanTaskService(session)
     result = await svc.page(req)
-    return _page_resp(result, PlanTaskResponse.model_validate)
+    # 批量聚合已消耗工时(sum time_spent by plan_task_id, 避免前端 N+1)
+    plan_ids = [t.id for t in result.items]
+    spent_map: dict[uuid.UUID, float] = {}
+    if plan_ids:
+        rows = (
+            await session.execute(
+                select(TaskExecute.plan_task_id, func.sum(TaskExecute.time_spent))
+                .where(TaskExecute.plan_task_id.in_(plan_ids))
+                .group_by(TaskExecute.plan_task_id)
+            )
+        ).all()
+        spent_map = {pid: float(s or 0) for pid, s in rows if pid is not None}
+    items = []
+    for t in result.items:
+        resp = PlanTaskResponse.model_validate(t)
+        resp.spent_time = spent_map.get(t.id, 0.0)
+        items.append(resp)
+    return Page(
+        items=items,
+        total=result.total,
+        page=result.page,
+        page_size=result.page_size,
+    )
 
 
 @router.get("/personal-task-plan/list-by-date-range", response_model=list[PlanTaskResponse])
