@@ -163,6 +163,39 @@ async def test_project_page_filter_and_sort(db_session, operator):
     assert [i.project_code for i in res.items] == ["A1", "A2"]
 
 
+async def test_project_page_default_sort_created_at_desc(db_session, operator):
+    """不传 order_by 时默认按 created_at 降序(最新在前)。
+
+    依据:service.page order_by 为空时回退 created_at;req.order 默认 desc。
+    修复「项目维护列表无稳定排序,要求最新在前」。
+    """
+    from datetime import UTC, datetime
+
+    svc = ProjectMaintenanceService(db_session)
+    p_old = await svc.create(
+        ProjectMaintenanceCreate(project_code="D1", project_name="最早"), operator=operator
+    )
+    p_mid = await svc.create(
+        ProjectMaintenanceCreate(project_code="D2", project_name="中间"), operator=operator
+    )
+    p_new = await svc.create(
+        ProjectMaintenanceCreate(project_code="D3", project_name="最新"), operator=operator
+    )
+    # 显式拉开 created_at,避免同毫秒导致排序不稳定
+    p_old.created_at = datetime(2026, 1, 1, tzinfo=UTC)
+    p_mid.created_at = datetime(2026, 1, 2, tzinfo=UTC)
+    p_new.created_at = datetime(2026, 1, 3, tzinfo=UTC)
+    await db_session.commit()
+
+    # 不传 order_by → 默认 created_at desc → 最新(D3)在前
+    res = await svc.page(ProjectMaintenancePageReq())
+    assert [i.project_code for i in res.items] == ["D3", "D2", "D1"]
+
+    # 显式传 order_by 仍生效(不被默认覆盖)
+    res_asc = await svc.page(ProjectMaintenancePageReq(order_by="project_code", order="asc"))
+    assert [i.project_code for i in res_asc.items] == ["D1", "D2", "D3"]
+
+
 async def test_project_simple_list(db_session, operator):
     svc = ProjectMaintenanceService(db_session)
     await svc.create(

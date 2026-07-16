@@ -271,3 +271,11 @@ created_at: 2026-07-14T09:20:24
 根因：前端 projects/page.tsx 把 create_name 标 hideInForm:true（系统字段不进表单，design 约定），新建不传 create_name；后端 service.create 直接用 data.create_name(为 None)入库 → 创建人列空。
 方案：create_name 是创建人姓名(系统字段)，应由系统按当前登录用户自动带出。service.create 新增 operator_name 参数，data.create_name 为空时回退用 operator_name(user.display_name) 填充；显式传入时优先用传入值。仅修项目维护表(PpmProjectMaintenance)，customer/member/stakeholder 同模式问题本次未动。
 结果：project 模块 31 passed(含新增1)；ruff format+check 通过；mypy 通过。待 commit + rebuild backend Docker 验证。
+
+## ql-20260716-002-4c8e | 2026-07-16 09:14:54 | 项目维护列表默认按创建时间降序（最新在前）
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/project/service.py（page 方法 order_by 为空时默认 created_at，复用 req.order 默认 desc）+ backend/app/modules/ppm/project/tests/test_service.py（新增 test_project_page_default_sort_created_at_desc）
+根因：apply_sort 当 order_by 为空时不加任何排序(return 原 stmt)，返回 DB 自然顺序(不确定)；前端 PpmResourceTable 默认不传 order_by → 项目列表无稳定排序，不满足「最新在前」。
+方案：service.page 在 req.order_by 为空时回退 "created_at"(白名单 _PROJECT_SORT_FIELDS 已含 created_at)，复用 req.order 默认 desc → 最新在前；前端显式传 order_by 时仍优先前端选择(兼容列头排序)。仅改后端一处，前端不动。
+结果：project 模块 32 passed(含新增默认排序用例，断言默认 desc + 显式 order_by 不被覆盖)；ruff format+check 通过；mypy 通过。待 commit + rebuild backend 验证。

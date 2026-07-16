@@ -231,10 +231,12 @@ class ProjectMaintenanceService:
         stmt = select(PpmProjectMaintenance)
         stmt = self._apply_filters(stmt, req)
         total = await count_total(self._session, stmt)
+        # 默认按创建时间降序(最新在前);前端显式传 order_by 时尊重前端选择
+        order_by = req.order_by or "created_at"
         stmt = apply_sort(
             stmt,
             PpmProjectMaintenance,
-            req.order_by,
+            order_by,
             _PROJECT_SORT_FIELDS,
             req.order,
         )
