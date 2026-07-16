@@ -185,6 +185,82 @@ async def test_list_plan_node_details_for_export(db_session: AsyncSession) -> No
     assert all(r["status"] != "archived" for r in rows)
 
 
+class TestDetailsToResp:
+    """details_to_resp:派生 execute_user_name / module_name 填充(只读展示用)。
+
+    覆盖 ql-里程碑明细名称展示:只读视图下即便执行人已离场/模块已删,也按
+    execute_user_id / module_id 反查出名称,不再裸露 UUID。
+    """
+
+    async def test_fills_user_and_module_names(self, db_session: AsyncSession) -> None:
+        from app.modules.auth.model import User
+        from app.modules.ppm.plan.model import PlanNodeModule
+
+        svc = PlanService(db_session)
+        node_id = str(uuid.uuid4())
+
+        user = User(
+            id=uuid.uuid4(),
+            username="zhang",
+            display_name="张执行",
+            email="zhang@x.com",
+            password_hash="x",
+        )
+        module = PlanNodeModule(
+            id=uuid.uuid4(), plan_node_id=uuid.UUID(node_id), module_name="前端模块"
+        )
+        db_session.add(user)
+        db_session.add(module)
+        await db_session.commit()
+
+        detail = await svc.create_detail(
+            {
+                "plan_node_id": node_id,
+                "no": "1",
+                "task_theme": "明细A",
+                "plan_workload": "5",
+                "execute_user_id": str(user.id),
+                "module_id": str(module.id),
+            }
+        )
+        resps = await svc.details_to_resp([detail])
+        assert len(resps) == 1
+        assert resps[0].execute_user_name == "张执行"
+        assert resps[0].module_name == "前端模块"
+
+    async def test_missing_module_falls_back_to_id(self, db_session: AsyncSession) -> None:
+        """模块被删/跨里程碑:module_id 找不到对应模块 → 兜底展示原 ID。"""
+        from app.modules.auth.model import User
+
+        svc = PlanService(db_session)
+        user = User(id=uuid.uuid4(), username="li", display_name="李", password_hash="x")
+        db_session.add(user)
+        await db_session.commit()
+
+        orphan_module_id = str(uuid.uuid4())  # 不存在的模块
+        detail = await svc.create_detail(
+            {
+                "plan_node_id": str(uuid.uuid4()),
+                "no": "1",
+                "task_theme": "明细B",
+                "plan_workload": "1",
+                "execute_user_id": str(user.id),
+                "module_id": orphan_module_id,
+            }
+        )
+        resps = await svc.details_to_resp([detail])
+        assert resps[0].execute_user_name == "李"
+        assert resps[0].module_name == orphan_module_id
+
+    async def test_empty_ids_yield_none(self, db_session: AsyncSession) -> None:
+        """execute_user_id / module_id 均为空 → name 为 None(不报错)。"""
+        svc = PlanService(db_session)
+        detail = await _create_detail(svc)
+        resps = await svc.details_to_resp([detail])
+        assert resps[0].execute_user_name is None
+        assert resps[0].module_name is None
+
+
 class TestSaveProcess:
     async def test_full_flow(self, db_session: AsyncSession) -> None:
         svc = PlanService(db_session)

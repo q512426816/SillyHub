@@ -160,6 +160,25 @@ export async function listPlanNodeModules(
   return apiFetch<PlanNodeModule[]>(`/api/ppm/plan-node/${planNodeId}/modules`);
 }
 
+/** 模块下拉项 (按项目反查, problem 表单选模块用)。 */
+export interface ModuleSimpleItem {
+  id: string;
+  module_name: string | null;
+}
+
+/**
+ * 按项目列出其下所有模块 (problem 表单下拉用)。
+ * 反查 project → ps_project_plan → ps_plan_node → plan_node_module。
+ */
+export async function listModulesByProject(
+  projectId: string,
+): Promise<ModuleSimpleItem[]> {
+  return apiFetch<ModuleSimpleItem[]>(
+    "/api/ppm/plan-node-module/by-project",
+    { query: { project_id: projectId } },
+  );
+}
+
 export async function createPlanNodeModule(
   body: PlanNodeModuleCreate,
 ): Promise<PlanNodeModule> {

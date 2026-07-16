@@ -126,6 +126,18 @@ class PlanNodeModuleResp(PlanNodeModuleBase):
     model_config = {"from_attributes": True}
 
 
+class PlanNodeModuleSimpleItem(PydanticModel):
+    """模块下拉项 ({id, module_name}) — problem 表单按项目选模块用。
+
+    数据来自 ``list_modules_by_project`` (反查 plan_node_module)。
+    """
+
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    module_name: str | None = None
+
+
 # ===========================================================================
 # ps 计划簇 DTO
 # ===========================================================================
@@ -314,6 +326,11 @@ class PsPlanNodeDetailResp(PsPlanNodeDetailBase):
     audit_user_name: str | None = None
     approve_user_id: uuid.UUID | None = None
     approve_user_name: str | None = None
+    # 派生字段(不落库):PlanService 查询时按 execute_user_id / module_id 关联
+    # auth.users / plan_node_module 反查填充,供只读视图展示名称,避免下拉候选
+    # 匹配不到时(执行人已离场 / 模块已删或跨里程碑)裸露 UUID。
+    execute_user_name: str | None = None
+    module_name: str | None = None
     change_reason: str | None = None
     created_at: datetime
     updated_at: datetime

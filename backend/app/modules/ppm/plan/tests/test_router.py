@@ -26,7 +26,12 @@ from openpyxl import Workbook, load_workbook
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.ppm.plan.model import PlanNodeModule, PsPlanNodeDetail
+from app.modules.ppm.plan.model import (
+    PlanNodeModule,
+    PsPlanNode,
+    PsPlanNodeDetail,
+    PsProjectPlan,
+)
 from app.modules.ppm.plan.service import PlanService
 from app.modules.ppm.project.model import PpmProjectMember
 
@@ -679,6 +684,94 @@ async def test_import_commit_atomic_rollback_on_failure(
     assert await _count_modules_by_node(db_session, plan_node_id) == 0
     details = await _list_details_by_node(db_session, plan_node_id)
     assert len(details) == 0
+
+
+# ---------------------------------------------------------------------------
+# by-project 模块下拉 (problem 表单用, ql-20260716-002)
+# 反查链: project → ps_project_plan → ps_plan_node → plan_node_module
+# ---------------------------------------------------------------------------
+
+
+async def _seed_module_under_project(
+    db_session: AsyncSession,
+    *,
+    project_id: uuid.UUID,
+    module_name: str,
+) -> PlanNodeModule:
+    """造一条 project → ps_project_plan → ps_plan_node → plan_node_module 链。"""
+    plan = PsProjectPlan(project_id=project_id)
+    db_session.add(plan)
+    await db_session.commit()
+    await db_session.refresh(plan)
+    node = PsPlanNode(ps_project_plan_id=plan.id)
+    db_session.add(node)
+    await db_session.commit()
+    await db_session.refresh(node)
+    mod = PlanNodeModule(plan_node_id=node.id, module_name=module_name)
+    db_session.add(mod)
+    await db_session.commit()
+    await db_session.refresh(mod)
+    return mod
+
+
+async def test_list_modules_by_project_returns_modules(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+) -> None:
+    """按项目反查模块,返回 {id, module_name}。"""
+    project_id = uuid.uuid4()
+    mod = await _seed_module_under_project(db_session, project_id=project_id, module_name="模块A")
+
+    resp = await client.get(
+        "/api/ppm/plan-node-module/by-project",
+        params={"project_id": str(project_id)},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    items = resp.json()
+    assert len(items) == 1
+    assert items[0]["id"] == str(mod.id)
+    assert items[0]["module_name"] == "模块A"
+
+
+async def test_list_modules_by_project_isolates_by_project(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+) -> None:
+    """只返回该项目模块,不串其他项目。"""
+    proj_a = uuid.uuid4()
+    proj_b = uuid.uuid4()
+    await _seed_module_under_project(db_session, project_id=proj_a, module_name="A模块")
+    await _seed_module_under_project(db_session, project_id=proj_b, module_name="B模块")
+
+    resp = await client.get(
+        "/api/ppm/plan-node-module/by-project",
+        params={"project_id": str(proj_a)},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert [i["module_name"] for i in resp.json()] == ["A模块"]
+
+
+async def test_list_modules_by_project_invalid_id_returns_422(
+    client: AsyncClient, auth_headers: dict
+) -> None:
+    """非法 project_id 路由层 UUID 校验 → 422 (不到 service)。"""
+    resp = await client.get(
+        "/api/ppm/plan-node-module/by-project",
+        params={"project_id": "not-a-uuid"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
+
+
+async def test_list_modules_by_project_empty(client: AsyncClient, auth_headers: dict) -> None:
+    """项目下无模块 → 空列表。"""
+    resp = await client.get(
+        "/api/ppm/plan-node-module/by-project",
+        params={"project_id": str(uuid.uuid4())},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json() == []
 
 
 if __name__ == "__main__":

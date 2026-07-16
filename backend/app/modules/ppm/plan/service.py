@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.modules.auth.model import User
 from app.modules.ppm.common.crud import (
     Page,
     PageReq,
@@ -60,6 +61,7 @@ from app.modules.ppm.plan.schema import (
     ImportResultResp,
     PlanTaskSimple,
     ProjectPlanThreeLevelResp,
+    PsPlanNodeDetailResp,
     PsPlanNodeDetailWithTasks,
     PsPlanNodeWithDetail,
     PsProjectPlanListReq,
@@ -287,6 +289,24 @@ class PlanService:
         )
         return list((await self._session.execute(stmt)).scalars().all())
 
+    async def list_modules_by_project(self, project_id: uuid.UUID) -> list[PlanNodeModule]:
+        """按项目列出其下所有模块 (problem 表单下拉用)。
+
+        反查链: project → ppm_ps_project_plan.project_id →
+        ppm_ps_plan_node.ps_project_plan_id →
+        ppm_plan_node_module.plan_node_id。同一模块可能挂在多个里程碑下,
+        按 id 去重,按 module_name 升序 (None 排最后)。
+        """
+        stmt = (
+            select(PlanNodeModule)
+            .join(PsPlanNode, PsPlanNode.id == PlanNodeModule.plan_node_id)
+            .join(PsProjectPlan, PsProjectPlan.id == PsPlanNode.ps_project_plan_id)
+            .where(PsProjectPlan.project_id == project_id)
+            .distinct()
+            .order_by(PlanNodeModule.module_name.asc())
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
     async def create_module(self, data: dict[str, Any]) -> PlanNodeModule:
         return await _Crud(self._session, PlanNodeModule).create(data)
 
@@ -393,6 +413,69 @@ class PlanService:
 
     async def get_detail(self, item_id: uuid.UUID) -> PsPlanNodeDetail:
         return await _Crud(self._session, PsPlanNodeDetail).get(item_id)
+
+    async def _collect_detail_name_maps(
+        self, details: list[PsPlanNodeDetail]
+    ) -> tuple[dict[uuid.UUID, str], dict[uuid.UUID, str]]:
+        """批量查 execute_user_id→name / module_id→name 映射(派生,不落库)。
+
+        返回 (user_map, module_map)。name 经 auth.users / plan_node_module
+        批量 IN 查询,避免 N+1;User 取 display_name→email→username→id 兜底
+        (对齐前端 USER_ADAPTER 展示顺序)。
+        """
+        user_ids = {d.execute_user_id for d in details if d.execute_user_id}
+        module_ids = {d.module_id for d in details if d.module_id}
+
+        user_map: dict[uuid.UUID, str] = {}
+        if user_ids:
+            user_rows = (
+                await self._session.execute(
+                    select(User.id, User.display_name, User.email, User.username).where(
+                        User.id.in_(user_ids)
+                    )
+                )
+            ).all()
+            for r in user_rows:
+                user_map[r.id] = r.display_name or r.email or r.username or str(r.id)
+
+        module_map: dict[uuid.UUID, str] = {}
+        if module_ids:
+            module_rows = (
+                await self._session.execute(
+                    select(PlanNodeModule.id, PlanNodeModule.module_name).where(
+                        PlanNodeModule.id.in_(module_ids)
+                    )
+                )
+            ).all()
+            for r in module_rows:
+                module_map[r.id] = r.module_name or str(r.id)
+
+        return user_map, module_map
+
+    async def details_to_resp(self, details: list[PsPlanNodeDetail]) -> list[PsPlanNodeDetailResp]:
+        """ORM 明细 → ``PsPlanNodeDetailResp``,并填充派生 execute_user_name /
+        module_name(不落库)。
+
+        name 在 Resp 实例上 setattr(Resp 声明了这两个字段,合法),确保只读
+        视图展示名称而非裸 UUID——即便执行人已不在项目成员表、模块已被删除
+        或属于其它里程碑,仍可解析出名字(对齐 audit_user_name/approve_user_name
+        的展示语义)。注意:不可 setattr 到 ORM 实例(SQLModel/Pydantic v2 拒绝
+        未声明字段赋值),故必须在 model_validate 之后作用于 Resp。
+        """
+        user_map, module_map = await self._collect_detail_name_maps(details)
+        resps = [PsPlanNodeDetailResp.model_validate(d) for d in details]
+        for d, resp in zip(details, resps, strict=True):
+            # 有 id:优先反查名;记录被物理删除查不到时兜底原 ID(至少不空),
+            # 避免只读视图展示 None 造成「未填写」误解。无 id:None。
+            resp.execute_user_name = (
+                (user_map.get(d.execute_user_id) or str(d.execute_user_id))
+                if d.execute_user_id
+                else None
+            )
+            resp.module_name = (
+                module_map.get(d.module_id) or str(d.module_id) if d.module_id else None
+            )
+        return resps
 
     async def create_detail(self, data: dict[str, Any]) -> PsPlanNodeDetail:
         # 重构为原子事务 (不走 _Crud.create 的单独 commit)，status=done 时

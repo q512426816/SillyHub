@@ -45,12 +45,14 @@ import {
   createProblemChange,
   getProblem,
   getProblemChange,
+  listModulesByProject,
   listProblemChangeLogs,
   nextProcessProblemChange,
   rejectProcessProblemChange,
   updateProblemChange,
 } from "@/lib/ppm";
 import type {
+  ModuleSimpleItem,
   ProblemChange,
   ProblemChangeUpdate,
   ProblemList,
@@ -261,6 +263,26 @@ export function ChangeCreateForm({
   // 源问题(projectMember 联动 searchData 需要 project_id)
   const [sourceProblem, setSourceProblem] = useState<ProblemList | null>(null);
   const [projectId, setProjectId] = useState<string | undefined>(undefined);
+  // 关联模块下拉:按当前项目反查 (源问题回填 projectId 后联动)。
+  const [modules, setModules] = useState<ModuleSimpleItem[]>([]);
+
+  useEffect(() => {
+    if (!projectId) {
+      setModules([]);
+      return;
+    }
+    let cancelled = false;
+    listModulesByProject(projectId)
+      .then((list) => {
+        if (!cancelled) setModules(list);
+      })
+      .catch(() => {
+        if (!cancelled) setModules([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   // 新建变更时从源问题回填(对照源 ChangeForm.vue open(id) → getList(id))
   useEffect(() => {
@@ -329,7 +351,7 @@ export function ChangeCreateForm({
         plan_end_time: v.plan_end_time ? dayStrToApi(v.plan_end_time) : null,
         remarks: v.remarks ?? null,
         change_reason: v.change_reason ?? null,
-        work_load: v.work_load ?? null,
+        work_load: v.work_load != null ? String(v.work_load) : null,
       });
       notifyOk("已提交变更申请");
       onSuccess();
@@ -353,6 +375,8 @@ export function ChangeCreateForm({
         onValuesChange={(changed) => {
           if ("project_id" in changed) {
             setProjectId(changed.project_id ?? undefined);
+            // 切换项目清空关联模块(模块按项目拉,旧值在新项目下无效)
+            form.setFieldValue("module_id", undefined);
           }
         }}
       >
@@ -368,8 +392,19 @@ export function ChangeCreateForm({
           <Input placeholder="项目 ID(从源问题回填)" />
         </Form.Item>
 
-        <Form.Item label="关联模块 ID" name="module_id">
-          <Input placeholder="请输入模块 ID(可选)" />
+        <Form.Item label="关联模块" name="module_id">
+          <Select
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            disabled={!projectId}
+            placeholder={projectId ? "请选择模块(可选)" : "请先选择项目"}
+            notFoundContent={projectId ? "该项目暂无模块" : "请先选择项目"}
+            options={modules.map((m) => ({
+              value: m.id,
+              label: m.module_name ?? m.id,
+            }))}
+          />
         </Form.Item>
 
         <Form.Item label="模块名称" name="model_name">
@@ -556,7 +591,7 @@ export function ChangeEditForm({
         pro_type: v.pro_type ?? null,
         is_urgent: v.is_urgent ? "1" : "0",
         duty_user_id: v.duty_user_id ?? null,
-        work_load: v.work_load ?? null,
+        work_load: v.work_load != null ? String(v.work_load) : null,
         plan_start_time: v.plan_start_time ? dayStrToApi(v.plan_start_time) : null,
         plan_end_time: v.plan_end_time ? dayStrToApi(v.plan_end_time) : null,
         change_reason: v.change_reason ?? null,

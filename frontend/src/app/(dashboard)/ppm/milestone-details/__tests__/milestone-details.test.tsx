@@ -71,6 +71,8 @@ function mkDetail(
     audit_user_name: over.audit_user_name ?? null,
     approve_user_id: over.approve_user_id ?? null,
     approve_user_name: over.approve_user_name ?? null,
+    execute_user_name: over.execute_user_name ?? null,
+    module_name: over.module_name ?? null,
     change_reason: over.change_reason ?? null,
     created_at: over.created_at ?? "2026-01-01T00:00:00Z",
     updated_at: over.updated_at ?? "2026-01-01T00:00:00Z",

@@ -2401,20 +2401,29 @@ function DetailDrawer({
                 tooltip="实施阶段必填;选项来自当前里程碑的模块列表"
                 rules={[{ required: true, message: "请选择所属模块" }]}
               >
-                <Select
-                  disabled={!baseEditable}
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
-                  placeholder="请选择所属模块"
-                  notFoundContent={
-                    modules.length === 0 ? "该里程碑暂无模块" : undefined
-                  }
-                  options={modules.map((m) => ({
-                    value: m.id,
-                    label: m.module_name ?? m.id,
-                  }))}
-                />
+                {baseEditable ? (
+                  <Select
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder="请选择所属模块"
+                    notFoundContent={
+                      modules.length === 0 ? "该里程碑暂无模块" : undefined
+                    }
+                    options={modules.map((m) => ({
+                      value: m.id,
+                      label: m.module_name ?? m.id,
+                    }))}
+                  />
+                ) : (
+                  // 只读视图用文字展示:后端派生 module_name 优先(模块被删/跨里程碑也能解析),
+                  // 兜底当前里程碑模块列表,避免下拉匹配不到时裸露 UUID。
+                  <ModuleReadText
+                    value={detail?.module_id}
+                    name={detail?.module_name}
+                    modules={modules}
+                  />
+                )}
               </Form.Item>
             )}
             <Form.Item
@@ -2422,16 +2431,23 @@ function DetailDrawer({
               name="execute_user_id"
               rules={[{ required: true, message: "请选择执行人" }]}
             >
-              {projectId ? (
+              {!baseEditable ? (
+                // 只读视图用文字展示:后端派生 execute_user_name 优先,PpmText 再按
+                // user_id 反查全量用户兜底(执行人已离场也能解析),避免裸露 UUID。
+                <PpmText
+                  res="user"
+                  value={detail?.execute_user_id}
+                  name={detail?.execute_user_name}
+                />
+              ) : projectId ? (
                 <PpmUserSelect
                   res="projectMember"
                   searchData={{ pm_project_id: projectId }}
-                  disabled={!baseEditable}
                   allowClear
                   placeholder="选择执行人"
                 />
               ) : (
-                <Input disabled={!baseEditable} placeholder="执行人 ID" />
+                <Input placeholder="执行人 ID" />
               )}
             </Form.Item>
           </div>
@@ -2677,6 +2693,26 @@ function FormSection({
       {children}
     </div>
   );
+}
+
+/**
+ * 只读展示所属模块名(非编辑模式用)。
+ * 优先用后端派生的 module_name(模块被删/跨里程碑也能解析),
+ * 兜底当前里程碑模块列表反查,最后兜底原 ID,避免裸露 UUID。
+ */
+function ModuleReadText({
+  value,
+  name,
+  modules,
+}: {
+  value?: string | null;
+  name?: string | null;
+  modules: PlanNodeModule[];
+}) {
+  if (name) return <span>{name}</span>;
+  if (!value) return <span className="text-muted-foreground">—</span>;
+  const found = modules.find((m) => m.id === value)?.module_name;
+  return <span>{found ?? value}</span>;
 }
 
 // ---------------------------------------------------------------------------

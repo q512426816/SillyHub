@@ -45,11 +45,13 @@ import {
   closeTaskProblem,
   createProblem,
   doneTaskProblem,
+  listModulesByProject,
   listProblemLogs,
   nextProcessProblem,
   rejectProcessProblem,
   updateProblem,
 } from "@/lib/ppm";
+import type { ModuleSimpleItem } from "@/lib/ppm";
 import type {
   ProblemCloseTaskReq,
   ProblemDoneTaskReq,
@@ -225,6 +227,26 @@ export function ProblemCreateForm({
     problem?.file_urls ?? [],
   );
   const [planEndTouched, setPlanEndTouched] = useState(false);
+  // 关联模块下拉:按当前项目反查 (module_id 用,避免手输 UUID 触发 422)。
+  const [modules, setModules] = useState<ModuleSimpleItem[]>([]);
+
+  useEffect(() => {
+    if (!projectId) {
+      setModules([]);
+      return;
+    }
+    let cancelled = false;
+    listModulesByProject(projectId)
+      .then((list) => {
+        if (!cancelled) setModules(list);
+      })
+      .catch(() => {
+        if (!cancelled) setModules([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   // 工作日联动:planStartTime + workLoad → planEndTime (源 ListForm.vue)
   const initialValues = useMemo<ProblemCreateValues>(
@@ -307,7 +329,7 @@ export function ProblemCreateForm({
           : null,
         audit_user_id: v.audit_user_id ?? null,
         remarks: v.remarks ?? null,
-        work_load: v.work_load ?? null,
+        work_load: v.work_load != null ? String(v.work_load) : null,
         submit: submitNow,
       };
       if (isEdit && problem) {
@@ -366,7 +388,11 @@ export function ProblemCreateForm({
       layout="vertical"
       initialValues={initialValues}
       onValuesChange={(changed) => {
-        if ("project_id" in changed) setProjectId(changed.project_id ?? undefined);
+        if ("project_id" in changed) {
+          setProjectId(changed.project_id ?? undefined);
+          // 切换项目清空关联模块(模块按项目拉,旧值在新项目下无效)
+          form.setFieldValue("module_id", undefined);
+        }
         if ("work_type" in changed) {
           setWorkType(changed.work_type as string | undefined);
           // 切换工作类型清空责任人(对照源 @change="formData.dutyUserId = undefined")
@@ -386,11 +412,20 @@ export function ProblemCreateForm({
         />
       </Form.Item>
 
-      {projectId && (
-        <Form.Item label="关联模块名称" name="module_id">
-          <Input placeholder="请输入模块 ID(可选)" />
-        </Form.Item>
-      )}
+      <Form.Item label="关联模块" name="module_id">
+        <Select
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          disabled={!projectId}
+          placeholder={projectId ? "请选择模块(可选)" : "请先选择项目"}
+          notFoundContent={projectId ? "该项目暂无模块" : "请先选择项目"}
+          options={modules.map((m) => ({
+            value: m.id,
+            label: m.module_name ?? m.id,
+          }))}
+        />
+      </Form.Item>
 
       <Form.Item label="模块名称" name="model_name">
         <Input placeholder="请输入模块名称" />

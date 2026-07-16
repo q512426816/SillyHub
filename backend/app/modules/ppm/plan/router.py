@@ -40,6 +40,7 @@ from app.modules.ppm.plan.schema import (
     PlanNodeDetailUpdate,
     PlanNodeModuleCreate,
     PlanNodeModuleResp,
+    PlanNodeModuleSimpleItem,
     PlanNodeModuleUpdate,
     PlanNodeResp,
     PlanNodeUpdate,
@@ -276,6 +277,27 @@ async def list_modules(
 ) -> list[PlanNodeModuleResp]:
     rows = await PlanService(session).list_modules_by_node(plan_node_id)
     return [PlanNodeModuleResp.model_validate(r) for r in rows]
+
+
+@router.get(
+    "/plan-node-module/by-project",
+    response_model=list[PlanNodeModuleSimpleItem],
+)
+async def list_modules_by_project(
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
+    project_id: uuid.UUID = Query(..., description="项目 ID"),
+) -> list[PlanNodeModuleSimpleItem]:
+    """按项目列出其下所有模块 (problem 表单下拉用)。
+
+    反查 project → ps_project_plan → ps_plan_node → plan_node_module。
+    固定路径前置于 ``/plan-node-module/{item_id}`` 参数化路由,否则
+    FastAPI 按注册顺序把 ``by-project`` 当 item_id 解析为 UUID 失败返回 422
+    (同 export-excel / list-by-date-range 模式)。非法 project_id 由路由层
+    UUID 校验拦截为 422,service 永远收到合法 UUID。
+    """
+    rows = await PlanService(session).list_modules_by_project(project_id)
+    return [PlanNodeModuleSimpleItem.model_validate(r) for r in rows]
 
 
 @router.post(
@@ -552,7 +574,7 @@ async def list_details_by_node(
     user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
 ) -> list[PsPlanNodeDetailResp]:
     rows = await PlanService(session).list_details_by_node(plan_node_id)
-    return [PsPlanNodeDetailResp.model_validate(r) for r in rows]
+    return await PlanService(session).details_to_resp(rows)
 
 
 @router.post(
@@ -610,7 +632,8 @@ async def get_detail(
     session: SessionDep,
     user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
 ) -> PsPlanNodeDetailResp:
-    return PsPlanNodeDetailResp.model_validate(await PlanService(session).get_detail(item_id))
+    obj = await PlanService(session).get_detail(item_id)
+    return (await PlanService(session).details_to_resp([obj]))[0]
 
 
 @router.put("/plan-node-detail/{item_id}", response_model=PsPlanNodeDetailResp)
@@ -644,7 +667,7 @@ async def list_versions(
     user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
 ) -> list[PsPlanNodeDetailResp]:
     rows = await PlanService(session).list_versions(item_id)
-    return [PsPlanNodeDetailResp.model_validate(r) for r in rows]
+    return await PlanService(session).details_to_resp(rows)
 
 
 # ===========================================================================
