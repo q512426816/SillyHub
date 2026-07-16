@@ -131,6 +131,7 @@ export default function TaskPlansPage() {
   const [detailTimeSpent, setDetailTimeSpent] = useState("");
   const [detailExecInfo, setDetailExecInfo] = useState("");
   const [detailInflightId, setDetailInflightId] = useState<string | null>(null);
+  const [detailMode, setDetailMode] = useState<"detail" | "execute">("detail");
   const [executeBusy, setExecuteBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<PlanTask | null>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
@@ -256,7 +257,8 @@ export default function TaskPlansPage() {
     await load();
   };
 
-  const handleViewRecords = async (task: PlanTask) => {
+  const handleOpenDetail = async (task: PlanTask, mode: "detail" | "execute") => {
+    setDetailMode(mode);
     try {
       const page = await listTaskExecutes({
         plan_task_id: task.id,
@@ -266,7 +268,7 @@ export default function TaskPlansPage() {
       const items = page.items ?? [];
       setRecords(items);
       setRecordsTask(task);
-      // 进行中: 预填 in-flight 执行表单(status=30)
+      // 预填 in-flight 执行表单(status=30, execute 模式用)
       const inflight = items.find((e) => e.status === "30");
       if (inflight) {
         setDetailInflightId(inflight.id);
@@ -298,7 +300,8 @@ export default function TaskPlansPage() {
         time_spent: ts !== undefined && !Number.isNaN(ts) ? ts : undefined,
       });
       showToast(true, action === "complete" ? "任务已完成" : "执行已保存");
-      await handleViewRecords(recordsTask);
+      setRecordsTask(null); // 提交/完成直接关闭弹窗
+      setRecords([]);
       await load();
     } catch (err) {
       showToast(false, err instanceof ApiError ? err.message : "执行失败");
@@ -519,10 +522,19 @@ export default function TaskPlansPage() {
                 启动
               </Button>
             )}
+            {t.status === "进行中" && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void handleOpenDetail(t, "execute")}
+              >
+                执行
+              </Button>
+            )}
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => void handleViewRecords(t)}
+              onClick={() => void handleOpenDetail(t, "detail")}
             >
               详情
             </Button>
@@ -811,8 +823,10 @@ export default function TaskPlansPage() {
             </table>
           )}
 
-          {/* 执行表单(进行中, 有 in-flight 记录时展示) */}
-          {recordsTask.status === "进行中" && detailInflightId && (
+          {/* 执行表单(执行模式 + 进行中 + 有 in-flight 记录时展示) */}
+          {detailMode === "execute" &&
+            recordsTask.status === "进行中" &&
+            detailInflightId && (
             <div className="mt-3 space-y-2 border-t border-border pt-3">
               <div className="text-xs font-medium text-muted-foreground">填报执行</div>
               <div>
