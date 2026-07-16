@@ -306,55 +306,32 @@ class PlanService:
     async def _validate_detail_module(
         self, plan_node_id: uuid.UUID | None, module_id: uuid.UUID | None
     ) -> None:
-        """校验明细 module_id 归属一致性 (D-004 / R-03,design §5.1)。
+        """校验明细 module_id 归属 (v2: has_module 仅记录,不参与校验,design §13)。
 
-        规则:
-        - has_module=true :module_id 必填,且必须属于同一 plan_node 下的 PlanNodeModule
-        - has_module=false:module_id 必须为 null
+        v2 简化 (has_module 从「驱动展开」降为「纯记录」后):
+        - module_id 为 null: 一律放行 (UI 统一二层,明细挂 plan_node_id)。
+        - module_id 非 null: 必须属于同一 plan_node 下的 PlanNodeModule (防脏数据)。
 
         违例抛 ``PlanError`` (400)。
         """
+        if module_id is None:
+            return  # v2: UI 统一二层,module_id 一律允许为 null
         if plan_node_id is None:
-            # 无模板锚点:不允许挂模块 (module_id 无归属可校验)。
-            if module_id is not None:
-                raise PlanError(
-                    "明细未指定模板(plan_node_id),不能挂模块(module_id)",
-                    details={"module_id": str(module_id) if module_id else None},
-                )
-            return
-        node = await self._session.get(PlanNode, plan_node_id)
-        if node is None:
-            # 模板不存在 (历史/脏数据):挂了 module_id 视为无锚点违例,否则放过。
-            if module_id is not None:
-                raise PlanError(
-                    f"模板 '{plan_node_id}' 不存在,module_id 无有效归属锚点",
-                    details={"plan_node_id": str(plan_node_id), "module_id": str(module_id)},
-                )
-            return
-        if node.has_module:
-            if module_id is None:
-                raise PlanError(
-                    "有模块模板的明细必须指定 module_id",
-                    details={"plan_node_id": str(plan_node_id)},
-                )
-            belongs = await self._session.scalar(
-                select(PlanNodeModule.id).where(
-                    PlanNodeModule.id == module_id,
-                    PlanNodeModule.plan_node_id == plan_node_id,
-                )
-            )
-            if belongs is None:
-                raise PlanError(
-                    f"module_id '{module_id}' 不属于模板 '{plan_node_id}'",
-                    details={"module_id": str(module_id), "plan_node_id": str(plan_node_id)},
-                )
-        elif module_id is not None:
             raise PlanError(
-                "无模块模板的明细 module_id 必须为 null",
-                details={
-                    "plan_node_id": str(plan_node_id),
-                    "module_id": str(module_id),
-                },
+                "明细未指定模板(plan_node_id),不能挂模块(module_id)",
+                details={"module_id": str(module_id)},
+            )
+        # module_id 非 null: 校验归属 (防脏数据;has_module 不参与判定)
+        belongs = await self._session.scalar(
+            select(PlanNodeModule.id).where(
+                PlanNodeModule.id == module_id,
+                PlanNodeModule.plan_node_id == plan_node_id,
+            )
+        )
+        if belongs is None:
+            raise PlanError(
+                f"module_id '{module_id}' 不属于模板 '{plan_node_id}'",
+                details={"module_id": str(module_id), "plan_node_id": str(plan_node_id)},
             )
 
     # ---------- 模块 (子表,按 plan_node_id 列表) ----------

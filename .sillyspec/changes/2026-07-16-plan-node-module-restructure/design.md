@@ -64,20 +64,17 @@ scale: large
 ### 5.3 前端结构（plan-nodes 重写）
 
 - **母表**（antd Table）：编号 | 总阶段 | 项目类型 | **是否有模块**（Tag 是/否）| 操作。
-- **展开行条件渲染**：
-  - `has_module=false` → `<DetailsSubTable planNodeId={n.id} />`（明细挂 plan_node_id，二层）。
-  - `has_module=true` → `<ModulesSubTable planNodeId={n.id} />`（antd Table 列模块）；模块行 `expandRender` → `<DetailsSubTable moduleId={m.id} />`（明细挂 module_id，三层）。
+- **展开行**：统一渲染 `<DetailsSubTable planNodeId={n.id} />`（明细挂 plan_node_id，二层）。**has_module 仅作记录字段，不驱动展开结构**（需求变更 v2，见 §13）——无论是否有模块，计划节点模板页展开都只显示模板明细一个子表，模块子表不在该页显示。
 - **明细子表**：复用 `PpmSubTable` editable 模式（内部已 antd Form），`DETAIL_COLUMNS` 列宽压缩 + 固定 `scroll.x`（沿用 ql-008 教训），批量行内编辑 + 保存。
-- **NodeFormDrawer**（antd Form）：总阶段 / 项目类型（PpmDictSelect）/ 编号 + **是否有模块 Switch**（编辑态 disabled）。
-- **ModuleFormDrawer**（antd Form）：模块名 / 工时 / 开始 / 完成（DatePicker）/ 责任人（PpmUserSelect）。
+- **NodeFormDrawer**（antd Form）：总阶段 / 项目类型（PpmDictSelect）/ 编号 + **是否有模块 Switch**（编辑态 disabled，仅记录用）。
 
 ### 5.4 antd 化范围
 
 | 原控件 | 改为 |
 |---|---|
 | NodeFormDrawer 原生 `<input>` + `inputCls` | antd `Form` + `Input` / `InputNumber` + `Switch`（has_module）|
-| ModuleFormDrawer 原生 `<input>` | antd `Form` + `Input` + `DatePicker` |
-| 母表 / 模块表 | antd `Table`（已是，保持）|
+| ModuleFormDrawer 原生 `<input>` | ~~antd `Form` + `Input` + `DatePicker`~~（v2：模块子表从计划节点模板页移除，该抽屉已删）|
+| 母表 / 模块表 | antd `Table`（母表保持；v2 模块表从该页移除）|
 | 明细子表 | `PpmSubTable` editable（已 antd Form，保持）|
 
 ## 6. 文件变更清单
@@ -169,11 +166,11 @@ interface PlanNodeDetail { id; plan_node_id?; module_id?: string | null; detaile
 ## 11. 决策追踪
 
 - **D-001@v1**：`has_module` 新建时定，保存后不可改。→ §2/§5.1/§7，R-02。
-- **D-002@v1**：有模块时明细挂 `module_id`（三层），行内批量编辑。→ §5.1/§5.3。
+- **D-002@v1→v2**：~~有模块时明细挂 `module_id`（三层）~~。**v2 取消三层**：has_module 降为纯记录字段，计划节点模板页 UI 统一二层明细（见 §13）。module_id 字段保留作防御。
 - **D-003@v1**：明细子表复用 `PpmSubTable` editable（方案 A），不在本页新写行内编辑。→ §5.3，R-01。
-- **D-004@v1**：明细 `module_id` 归属一致性后端校验。→ §5.1/§10 R-03。
+- **D-004@v1→v2**：明细 `module_id` 归属后端校验。**v2 简化**：has_module 不再参与校验，仅保留 module_id 非 null 时属同 plan_node 的防御校验（见 §13）。
 
-无未解决决策。
+需求变更（v2）见 §13。
 
 ## 12. 自审
 
@@ -187,3 +184,23 @@ interface PlanNodeDetail { id; plan_node_id?; module_id?: string | null; detaile
 - ✅ 兼容策略（§9）：未升级客户端 default 行为不变、共用方零回归。
 - ✅ 风险识别（§10 R-01~R-05）。
 - N/A 生命周期契约表：不涉及 session/lease/agent_run/daemon/lifecycle/claim/heartbeat 关键词。
+
+## 13. 需求变更（v2，2026-07-16）
+
+> execute 完成后的需求调整。has_module 从「驱动展开结构」降级为「纯记录字段」。
+
+**变更内容**：
+1. 计划节点模板页（`plan-nodes`）展开行**统一只显示模板明细一个子表**（二层，明细挂 plan_node_id），不论 has_module 取值。模块子表从该页移除。
+2. `has_module` 字段**仅作记录**：新建模板时 Switch 可选，保存后不可改（D-001 保留），母表「是否有模块」列展示，但**不驱动 UI 展开结构、不参与明细归属校验**。
+
+**对应实现调整**：
+- 前端 `plan-nodes/page.tsx`：`PlanNodeChildren` 移除 has_module 条件渲染与 `ModulesSubTable`，统一渲染 `DetailsSubTable`（不传 moduleId）；`NodeFormDrawer` 的 has_module Switch 保留（记录）；母表列保留。`ModulesSubTable`/`ModuleFormDrawer` 从该页删除。
+- 后端 `service.py`：`_validate_detail_module` 简化——has_module 不参与，仅保留「module_id 非 null 时必须属同 plan_node」的防御性校验（避免脏数据），module_id=null 一律放行（UI 统一二层）。
+- 测试：更新归属校验用例（has_module=true/false 均允许 module_id=null；module_id 非 null 跨模板仍 400）。
+- migration / has_module 字段 / module_id 字段：**保留**（DDL 已落地，回退无意义；module_id 留作防御性归属约束的承载）。
+
+**保留不变**：
+- D-001（has_module 新建定不可改）、D-003（明细复用 PpmSubTable）、antd 化（NodeFormDrawer）。
+- PlanNodeModule 表、importer、ps 簇、PpmSubTable 组件、milestone-details 页零回归。
+
+**为何保留 has_module/module_id 字段**：has_module 作业务记录（区分模板是否按模块组织，供后续可能恢复三层或统计用）；module_id 字段留作防御性归属约束的承载，且 ps 簇早有同名字段，保持模型一致性。

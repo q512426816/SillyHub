@@ -52,3 +52,13 @@ created_at: 2026-07-16T11:32:00
 - rebuild frontend + backend Docker 部署；浏览器验收（二层/三层、antd 表单、归属校验、milestone-details 不回归）。
 - **前置**：先归档 `2026-07-16-plan-node-subtable-style` 变更（R-05）。
 - 覆盖：FR-005/FR-006
+
+## 需求变更 v2（2026-07-16，见 design §13）
+
+has_module 从「驱动展开」降级为「纯记录」。对应 task 调整：
+
+- **task-03**（service 校验）：`_validate_detail_module` 简化——has_module 不参与，仅保留 module_id 非 null 时属同 plan_node 的防御校验；module_id=null 一律放行。
+- **task-07**（plan-nodes 页）：展开行**统一只渲染 DetailsSubTable**（二层，挂 plan_node_id），不论 has_module；模块子表从该页移除。~~三层条件展开取消~~。
+- **task-08**（抽屉 antd 化）：NodeFormDrawer 保留（has_module Switch 记录用）；~~ModuleFormDrawer 从该页删除~~（模块子表移除）。
+- **task-05**（测试）：归属校验用例更新（has_module 不再驱动必填/禁用）。
+- task-01/02/04/06/09 不变（model/schema/router/migration/types/部署保留）。

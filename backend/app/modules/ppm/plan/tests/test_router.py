@@ -781,15 +781,21 @@ class TestHasModuleAndDetailQuery:
     async def test_create_detail_module_violation_returns_400(
         self, client: AsyncClient, auth_headers: dict, db_session: AsyncSession
     ) -> None:
-        """明细 module_id 归属违例 → 400 (D-004,PlanError 经 AppError handler 翻译)。"""
+        """v2:明细 module_id 非 null 但指向别的模板的模块 → 400 (防御性归属校验,design §13)。
+
+        has_module 仅记录不参与校验;唯一违例是 module_id 跨模板(防脏数据)。
+        """
         svc = PlanService(db_session)
-        node = await svc.create_plan_node({"overall_stage": "立项", "has_module": False})
-        module = await svc.create_module({"plan_node_id": str(node.id), "module_name": "前端"})
+        node = await svc.create_plan_node({"overall_stage": "立项", "has_module": True})
+        other = await svc.create_plan_node({"overall_stage": "设计", "has_module": True})
+        other_module = await svc.create_module(
+            {"plan_node_id": str(other.id), "module_name": "别模块"}
+        )
         resp = await client.post(
             "/api/ppm/plan-node-detail-tpl",
             json={
                 "plan_node_id": str(node.id),
-                "module_id": str(module.id),  # 无模块模板却挂 module → 违例
+                "module_id": str(other_module.id),  # 指向别的模板的模块 → 跨模板违例
                 "no": "1",
                 "task_theme": "违例",
             },

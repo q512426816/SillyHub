@@ -16,7 +16,6 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  DatePicker,
   Drawer,
   Form,
   Input,
@@ -27,7 +26,6 @@ import {
   Tag,
   message,
 } from "antd";
-import dayjs, { type Dayjs } from "dayjs";
 
 import { Button } from "@/components/ui/button";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
@@ -36,7 +34,6 @@ import {
   getPpmDictLabel,
   type PpmDictType,
 } from "@/components/ppm-dict-select";
-import { PpmUserSelect } from "@/components/ppm-user-select";
 import {
   PpmSubTable,
   type PpmSubEditableColumn,
@@ -44,24 +41,18 @@ import {
 } from "@/components/ppm-sub-table";
 import { ApiError } from "@/lib/api";
 import {
-  fmtDate,
   createPlanNode,
   createPlanNodeDetailTpl,
-  createPlanNodeModule,
   deletePlanNode,
   deletePlanNodeDetailTpl,
-  deletePlanNodeModule,
   listPlanNodeDetails,
-  listPlanNodeModules,
   listPlanNodes,
   updatePlanNode,
   updatePlanNodeDetailTpl,
-  updatePlanNodeModule,
   type PlanNode,
   type PlanNodeDetail,
   type PlanNodeDetailCreate,
   type PlanNodeDetailUpdate,
-  type PlanNodeModule,
 } from "@/lib/ppm";
 
 const PROJECT_TYPE_DICT: PpmDictType = "project_type";
@@ -286,15 +277,11 @@ function PlanNodeChildren({
   node: PlanNode;
   onChanged: () => void;
 }) {
+  // v2(2026-07-16):has_module 仅作记录,不驱动展开结构;
+  // 无论是否有模块,计划节点模板页展开统一只显示模板明细一个子表(二层,挂 plan_node_id)。
   return (
     <div className="bg-muted/20 p-3">
-      {node.has_module ? (
-        // 三层:模板 → 模块 → 明细 (明细挂 module_id,D-002)
-        <ModulesSubTable node={node} onChanged={onChanged} />
-      ) : (
-        // 二层:模板 → 明细 (明细挂 plan_node_id)
-        <DetailsSubTable node={node} onChanged={onChanged} />
-      )}
+      <DetailsSubTable node={node} onChanged={onChanged} />
     </div>
   );
 }
@@ -510,140 +497,8 @@ function DetailsSubTable({
   );
 }
 
-// ── 模块子表 (三层:模块行展开 → 该模块明细) ───────────────────────────────
-
-function ModulesSubTable({
-  node,
-  onChanged,
-}: {
-  node: PlanNode;
-  onChanged: () => void;
-}) {
-  const [items, setItems] = useState<PlanNodeModule[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
-  const [editing, setEditing] = useState<PlanNodeModule | "new" | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setErr(null);
-    try {
-      setItems(await listPlanNodeModules(node.id));
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "加载失败");
-    } finally {
-      setLoading(false);
-    }
-  }, [node.id]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const handleDelete = async (id: string) => {
-    if (!confirm("删除该模块?")) return;
-    try {
-      await deletePlanNodeModule(id);
-      await load();
-      onChanged();
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "删除失败");
-    }
-  };
-
-  const columns: TableProps<PlanNodeModule>["columns"] = [
-    { title: "模块名", dataIndex: "module_name", key: "module_name" },
-    {
-      title: "计划工时",
-      dataIndex: "plan_workload",
-      key: "plan_workload",
-      width: 110,
-      render: (v: string | null) => v ?? "—",
-    },
-    {
-      title: "计划开始",
-      dataIndex: "plan_begin_time",
-      key: "plan_begin_time",
-      width: 120,
-      render: (v: string | null) => fmtDate(v),
-    },
-    {
-      title: "计划完成",
-      dataIndex: "plan_complete_time",
-      key: "plan_complete_time",
-      width: 120,
-      render: (v: string | null) => fmtDate(v),
-    },
-    {
-      title: "操作",
-      key: "actions",
-      align: "center",
-      width: 140,
-      render: (_v: unknown, m: PlanNodeModule) => (
-        <div className="flex justify-center whitespace-nowrap gap-1">
-          <Button size="sm" variant="ghost" onClick={() => setEditing(m)}>
-            编辑
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-red-600 hover:text-red-700"
-            onClick={() => void handleDelete(m.id)}
-          >
-            删除
-          </Button>
-        </div>
-      ),
-    },
-  ];
-
-  return (
-    <div className="rounded border bg-card p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-sm font-medium">模块</h3>
-        <Button size="sm" onClick={() => setEditing("new")}>
-          + 新增
-        </Button>
-      </div>
-      {err && <p className="mb-2 text-[11px] text-destructive">{err}</p>}
-      <Table<PlanNodeModule>
-        rowKey="id"
-        size="small"
-        loading={loading}
-        dataSource={items}
-        columns={columns}
-        pagination={false}
-        rowClassName={(_row: PlanNodeModule, idx: number) =>
-          idx % 2 === 1 ? "bg-muted/40" : ""
-        }
-        locale={{ emptyText: "暂无模块" }}
-        scroll={{ x: 790 }}
-        // 三层:模块行展开 → 该模块下的明细 (挂 module_id,D-002)
-        expandable={{
-          expandedRowRender: (m) => (
-            <DetailsSubTable
-              node={node}
-              moduleId={m.id}
-              onChanged={onChanged}
-            />
-          ),
-        }}
-      />
-      {editing && (
-        <ModuleFormDrawer
-          planNodeId={node.id}
-          module={editing === "new" ? null : editing}
-          onClose={() => setEditing(null)}
-          onSaved={async () => {
-            setEditing(null);
-            await load();
-            onChanged();
-          }}
-        />
-      )}
-    </div>
-  );
-}
+// v2(2026-07-16):模块子表已从计划节点模板页移除(has_module 仅记录,展开统一只显示明细)。
+// 模块 CRUD 仍在 milestone-details 等页保留(PlanNodeModule 表/后端端点零回归)。
 
 // ---------------------------------------------------------------------------
 // 表单抽屉 (antd Form 化,task-08)
@@ -763,123 +618,6 @@ function NodeFormDrawer({
             disabled={mode === "edit"}
             checkedChildren="有"
             unCheckedChildren="无"
-          />
-        </Form.Item>
-      </Form>
-    </Drawer>
-  );
-}
-
-interface ModuleFormValues {
-  module_name?: string;
-  plan_workload?: string;
-  plan_begin_time?: Dayjs | null;
-  plan_complete_time?: Dayjs | null;
-  duty_user_id?: string | null;
-}
-
-function ModuleFormDrawer({
-  planNodeId,
-  module,
-  onClose,
-  onSaved,
-}: {
-  planNodeId: string;
-  module: PlanNodeModule | null;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [form] = Form.useForm<ModuleFormValues>();
-  const [messageApi, contextHolder] = message.useMessage();
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (module) {
-      form.setFieldsValue({
-        module_name: module.module_name ?? "",
-        plan_workload: module.plan_workload ?? "",
-        plan_begin_time: module.plan_begin_time ? dayjs(module.plan_begin_time) : null,
-        plan_complete_time: module.plan_complete_time
-          ? dayjs(module.plan_complete_time)
-          : null,
-        duty_user_id: module.duty_user_id,
-      });
-    } else {
-      form.resetFields();
-    }
-  }, [module, form]);
-
-  const submit = async () => {
-    let values: ModuleFormValues;
-    try {
-      values = await form.validateFields();
-    } catch {
-      return;
-    }
-    setBusy(true);
-    try {
-      // plan_workload 后端为 String (前端直传,不解析数值);日期 Dayjs→ISO。
-      const body = {
-        module_name: values.module_name || null,
-        plan_workload: values.plan_workload || null,
-        plan_begin_time: values.plan_begin_time
-          ? values.plan_begin_time.toISOString()
-          : null,
-        plan_complete_time: values.plan_complete_time
-          ? values.plan_complete_time.toISOString()
-          : null,
-        duty_user_id: values.duty_user_id || null,
-      };
-      if (module) {
-        await updatePlanNodeModule(module.id, body);
-      } else {
-        await createPlanNodeModule({ plan_node_id: planNodeId, ...body });
-      }
-      onSaved();
-    } catch (e) {
-      messageApi.error(e instanceof ApiError ? e.message : "保存失败");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Drawer
-      title={module ? "编辑模块" : "新增模块"}
-      open
-      onClose={onClose}
-      width={480}
-      destroyOnClose
-      maskClosable={false}
-      footer={
-        <div className="flex justify-end gap-2">
-          <Button size="sm" variant="outline" onClick={onClose}>
-            取消
-          </Button>
-          <Button size="sm" disabled={busy} onClick={() => void submit()}>
-            {busy ? "保存中…" : "保存"}
-          </Button>
-        </div>
-      }
-    >
-      {contextHolder}
-      <Form<ModuleFormValues> form={form} layout="vertical">
-        <Form.Item label="模块名" name="module_name">
-          <Input placeholder="请输入模块名" />
-        </Form.Item>
-        <Form.Item label="计划工时" name="plan_workload">
-          <Input placeholder="请输入计划工时" />
-        </Form.Item>
-        <Form.Item label="计划开始" name="plan_begin_time">
-          <DatePicker style={{ width: "100%" }} placeholder="选择计划开始" />
-        </Form.Item>
-        <Form.Item label="计划完成" name="plan_complete_time">
-          <DatePicker style={{ width: "100%" }} placeholder="选择计划完成" />
-        </Form.Item>
-        <Form.Item label="责任人" name="duty_user_id">
-          <PpmUserSelect
-            res="projectMember"
-            placeholder="请选择责任人"
           />
         </Form.Item>
       </Form>

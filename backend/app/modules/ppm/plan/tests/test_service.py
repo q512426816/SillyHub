@@ -140,29 +140,31 @@ class TestHasModuleAndDetailOwnership:
         )
         assert detail.module_id == module.id
 
-    async def test_detail_has_module_true_missing_module_id(self, db_session: AsyncSession) -> None:
-        """有模块模板:明细 module_id 必填,缺则 PlanError (400,R-03)。"""
+    async def test_detail_has_module_true_allows_null_module(
+        self, db_session: AsyncSession
+    ) -> None:
+        """v2:has_module 仅记录,不再要求明细必填 module_id —— True 模板 + null 通过。"""
         svc = PlanService(db_session)
         node = await svc.create_plan_node({"overall_stage": "立项", "has_module": True})
-        with pytest.raises(PlanError):
-            await svc.create_plan_node_detail(
-                {"plan_node_id": str(node.id), "no": "1", "task_theme": "明细"}
-            )
+        detail = await svc.create_plan_node_detail(
+            {"plan_node_id": str(node.id), "no": "1", "task_theme": "明细"}
+        )
+        assert detail.module_id is None
 
-    async def test_detail_has_module_false_with_module_id(self, db_session: AsyncSession) -> None:
-        """无模块模板:明细 module_id 必须为 null,传值则 PlanError (400,R-03)。"""
+    async def test_detail_has_module_false_allows_module_id(self, db_session: AsyncSession) -> None:
+        """v2:has_module 仅记录,不再禁止挂 module_id —— False 模板 + 属同模板 module_id 通过。"""
         svc = PlanService(db_session)
         node = await svc.create_plan_node({"overall_stage": "立项", "has_module": False})
         module = await svc.create_module({"plan_node_id": str(node.id), "module_name": "前端"})
-        with pytest.raises(PlanError):
-            await svc.create_plan_node_detail(
-                {
-                    "plan_node_id": str(node.id),
-                    "module_id": str(module.id),
-                    "no": "1",
-                    "task_theme": "明细",
-                }
-            )
+        detail = await svc.create_plan_node_detail(
+            {
+                "plan_node_id": str(node.id),
+                "module_id": str(module.id),
+                "no": "1",
+                "task_theme": "明细",
+            }
+        )
+        assert detail.module_id == module.id
 
     async def test_detail_module_id_not_belonging(self, db_session: AsyncSession) -> None:
         """明细 module_id 必须属于同模板:指向别的模板的模块 → PlanError (400,D-004)。"""
