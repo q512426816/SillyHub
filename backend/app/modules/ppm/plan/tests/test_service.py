@@ -112,6 +112,38 @@ class TestPsProjectPlan:
         await svc.delete_ps_plan_node(node.id)
         assert await svc.list_ps_plan_nodes_by_plan(str(plan.id)) == []
 
+    async def test_create_plan_fills_project_name_from_project(
+        self, db_session: AsyncSession
+    ) -> None:
+        """project_name 为空时按 project_id 关联取项目名(修复新建列表显示 id)。
+
+        依据:create_ps_project_plan 兜底;前端表单无 project_name 字段致提交为空。
+        """
+        from app.modules.ppm.project.model import PpmProjectMaintenance
+
+        svc = PlanService(db_session)
+        proj = PpmProjectMaintenance(
+            id=uuid.uuid4(), project_code="PP-FILL-006", project_name="关联项目名"
+        )
+        db_session.add(proj)
+        await db_session.commit()
+
+        # 不传 project_name → 兜底从关联项目取
+        plan = await svc.create_ps_project_plan({"project_id": str(proj.id), "status": "draft"})
+        assert plan.project_name == "关联项目名"
+
+        # 显式传 project_name 不被覆盖
+        plan2 = await svc.create_ps_project_plan(
+            {"project_id": str(proj.id), "project_name": "显式名", "status": "draft"}
+        )
+        assert plan2.project_name == "显式名"
+
+        # project_id 不对应真实项目 → 保持 None,不报错
+        plan3 = await svc.create_ps_project_plan(
+            {"project_id": str(uuid.uuid4()), "status": "draft"}
+        )
+        assert plan3.project_name is None
+
     async def test_export_rows(self, db_session: AsyncSession) -> None:
         """P2-3:ps_project_plan 导出行 dict。"""
         svc = PlanService(db_session)

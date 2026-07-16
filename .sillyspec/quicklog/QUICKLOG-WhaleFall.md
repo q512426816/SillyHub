@@ -302,3 +302,12 @@ created_at: 2026-07-14T09:20:24
 根因：模块子表直接 AntD Table，限宽容器约束 .ant-table-wrapper 宽→内容超出内部滚动有滚动条；明细子表经 PpmSubTable 的 flex flex-col gap-2 包裹，Table 作为 flex item min-width:auto=min-content(790px) 顶住不压缩，.ant-table-content 宽=790=table 内容不滚动。模块无此 flex 包裹故正常。
 方案：明细限宽容器加 tailwind arbitrary [&_.ant-table-wrapper]:min-w-0（即 .ant-table-wrapper min-width:0），让 flex item 表格可压缩到容器宽，.ant-table-content 宽=容器宽，table 790 超出则独立滚动条。scoped 到明细容器，不动 PpmSubTable 组件（D-001），模块子表无需改。
 结果：tsc --noEmit EXIT 0；仅改 plan-nodes/page.tsx 1 处 className。待 commit + rebuild frontend 部署 + 用户浏览器验证（明细子表独立横向滚动条出现，与模块子表一致）。
+
+## ql-20260716-006-9c4f | 2026-07-16 10:16:47 | /ppm/project-plans 新建项目计划后「项目名称」列显示 id 修复：后端 create 兜底按 project_id 关联取 project_name
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/plan/service.py（create_ps_project_plan project_name 为空时按 project_id 查 PpmProjectMaintenance.project_name 兜底 + import PpmProjectMaintenance）+ backend/app/modules/ppm/plan/tests/test_service.py（新增 test_create_plan_fills_project_name_from_project 三断言）
+需求：用户反馈 /ppm/project-plans 新建项目计划后,列表「项目名称」列显示 id。
+根因：DB 实测新建记录 project_name=None(历史数据有名称)。①前端表单无 project_name 的 Form.Item(「项目名称」字段实际绑定 project_id),onProjectChange setFieldValue 回填的 project_name 未可靠进入提交体;②后端 create_ps_project_plan 直接存 data 不兜底 → project_name 存 None;③列表 render v ?? p.id 在 project_name 为空时回退显示 id。
+方案：后端 create_ps_project_plan 兜底——project_name 为空(falsy)且 project_id 存在时,按 project_id 查 PpmProjectMaintenance.project_name 填充(单一可信源,不依赖前端提交)。显式传 project_name 不被覆盖;project_id 无效保持 None 不报错。仅改后端 service 一处 + import + 单测。
+结果：plan service 19 passed(含新增兜底用例);ruff format+check 通过(--fix 修 import 排序);mypy 通过。待 commit + rebuild backend 验证。

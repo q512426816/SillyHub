@@ -64,7 +64,7 @@ from app.modules.ppm.plan.schema import (
     PsPlanNodeWithDetail,
     PsProjectPlanListReq,
 )
-from app.modules.ppm.project.model import PpmProjectMember
+from app.modules.ppm.project.model import PpmProjectMaintenance, PpmProjectMember
 from app.modules.ppm.task.model import PlanTask
 
 log = get_logger(__name__)
@@ -335,6 +335,15 @@ class PlanService:
         )
 
     async def create_ps_project_plan(self, data: dict[str, Any]) -> PsProjectPlan:
+        # project_name 兜底:前端表单无 project_name 字段、onProjectChange 回填值
+        # 未可靠进入提交体(实测新建记录 project_name=None)。此处按 project_id
+        # 关联取项目名,作为单一可信源,避免列表回退显示 id。
+        if not data.get("project_name") and data.get("project_id"):
+            proj_id = self._safe_uuid(str(data["project_id"]))
+            if proj_id is not None:
+                proj = await self._session.get(PpmProjectMaintenance, proj_id)
+                if proj and proj.project_name:
+                    data["project_name"] = proj.project_name
         return await _Crud(self._session, PsProjectPlan).create(data)
 
     async def get_ps_project_plan(self, item_id: uuid.UUID) -> PsProjectPlan:
