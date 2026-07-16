@@ -285,3 +285,12 @@ created_at: 2026-07-14T09:20:24
 关联变更：2026-07-16-plan-node-subtable-style
 文件：frontend/src/app/(dashboard)/ppm/plan-nodes/page.tsx（PlanNodeChildren 内 DetailsSubTable/ModulesSubTable 表格根节点外层各加限宽 overflow-x 容器 calc(100vw-340px) + DETAIL_COLUMNS 7 列 width 压缩 90/100/140/120/80/90/90）
 结果：①tsc --noEmit EXIT 0；②pnpm lint 0 error（warning 全既有无关文件）；③vitest plan/milestone 3 文件 27 passed；④仅改 plan-nodes/page.tsx 3 处，PpmSubTable 通用组件/母表/后端均未动，零回归。待 commit + rebuild frontend 部署 + 用户浏览器实测 R-02（子表独立滚动隔离母表、列紧凑）。
+
+## ql-20260716-004-6d21 | 2026-07-16 09:49:19 | 里程碑明细·明细列表(DetailLevelTable)加「执行人」列
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（DetailLevelTable columns 加执行人列 PpmUserSelect 显示 execute_user_id + DetailLevelProps 加 projectId + 两处调用(532 非实施阶段/947 模块下)透传 projectId + moduleExpandRender deps 补 projectId）
+需求：用户要求里程碑明细页「明细列表」(模块展开后的明细行)显示执行人。
+根因：明细数据有 execute_user_id，但 DetailLevelTable 列表未显示执行人列；PsPlanNodeDetail 无 execute_user_name(后端 audit/approve_user_name 是持久化字段,执行人无对应)。模块(PlanNodeModule)只有 duty_user_id 责任人,无执行人——故加在明细行而非模块行(已与用户确认)。
+方案：DetailLevelTable columns 加「执行人」列,用 PpmUserSelect disabled 显示 execute_user_id(同模块责任人列模式,res=projectMember + searchData pm_project_id);DetailLevelProps 加 projectId + 两处调用透传 projectId;moduleExpandRender useCallback deps 补 projectId。仅改前端单文件,不动后端/通用组件。
+结果：tsc --noEmit EXIT 0;vitest milestone-details 24 passed;next lint 0 error(962 warning 已修,余 warning 全既有)。待 commit + rebuild frontend 部署 + 用户浏览器验证。

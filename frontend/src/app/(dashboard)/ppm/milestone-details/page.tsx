@@ -532,6 +532,7 @@ export default function MilestoneDetailsPage() {
         <DetailLevelTable
           key={`${node.id}-${detailTick}`}
           planNodeId={node.id}
+          projectId={projectId}
           moduleId={null}
           onAddDetail={() =>
             setDrawer({
@@ -946,6 +947,7 @@ function ModuleLevelTable({
     (m: PlanNodeModule) => (
       <DetailLevelTable
         planNodeId={planNodeId}
+        projectId={projectId}
         moduleId={m.id}
         moduleName={m.module_name}
         onAddDetail={() => onAddDetail(m.id)}
@@ -959,6 +961,7 @@ function ModuleLevelTable({
     ),
     [
       planNodeId,
+      projectId,
       onAddDetail,
       onOpenDetail,
       onSubmitDetail,
@@ -1623,6 +1626,8 @@ interface DetailLevelProps {
   taskThemeFilter?: string;
   /** 只读模式(非项目经理):禁用写入按钮。 */
   readOnly?: boolean;
+  /** 项目 ID(执行人 PpmUserSelect 按项目成员范围查询)。 */
+  projectId?: string | null;
 }
 
 function DetailLevelTable({
@@ -1636,6 +1641,7 @@ function DetailLevelTable({
   detailedStageFilter,
   taskThemeFilter,
   readOnly,
+  projectId,
 }: DetailLevelProps) {
   const [details, setDetails] = useState<PsPlanNodeDetail[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1725,6 +1731,27 @@ function DetailLevelTable({
         key: "plan_workload",
         render: (v: string | null) => v ?? "—",
       },
+      {
+        title: "执行人",
+        dataIndex: "execute_user_id",
+        key: "execute_user_id",
+        width: 160,
+        render: (v: string | null) =>
+          projectId ? (
+            <PpmUserSelect
+              res="projectMember"
+              searchData={{ pm_project_id: projectId }}
+              value={v}
+              disabled
+              allowClear={false}
+              placeholder="未指派"
+            />
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              {v ?? "未指派"}
+            </span>
+          ),
+      },
       // 审核/审批人列先隐藏（ql-20260715-003）
       // {
       //   title: "审核人",
@@ -1783,7 +1810,7 @@ function DetailLevelTable({
         ),
       },
     ],
-    [currentUserId, onOpenDetail, onSubmitDetail, readOnly],
+    [currentUserId, onOpenDetail, onSubmitDetail, readOnly, projectId],
   );
 
   return (
