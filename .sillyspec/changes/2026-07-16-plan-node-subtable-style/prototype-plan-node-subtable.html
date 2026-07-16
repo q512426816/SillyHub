@@ -1,0 +1,296 @@
+<!--
+author: WhaleFall
+created_at: 2026-07-16T09:10:00
+description: 计划节点模板子表样式优化原型 — 对比「现状」vs「方案A」
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>计划节点模板子表样式优化 · 原型</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-size: 13px; color: #374151; background: #f3f4f6;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  .sub { color: #6b7280; font-size: 12px; margin-bottom: 20px; }
+  .block { margin-bottom: 32px; }
+  .block-title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+  .badge-now { background: #fee2e2; color: #b91c1c; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+  .badge-fix { background: #dcfce7; color: #15803d; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+  .desc { color: #6b7280; font-size: 12px; margin-bottom: 10px; padding: 8px 12px; background: #fffbeb; border-left: 3px solid #f59e0b; border-radius: 4px; }
+
+  /* 模拟浏览器/屏幕视口（固定宽度好对比滚动条） */
+  .screen {
+    width: 1000px;
+    background: #fff;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  .screen-bar { background: #f9fafb; padding: 8px 14px; border-bottom: 1px solid #e5e7eb; font-size: 11px; color: #9ca3af; }
+
+  /* 页面头 */
+  .page-head { padding: 14px 16px 6px; }
+  .page-head .t { font-size: 16px; font-weight: 600; }
+  .page-head .s { font-size: 12px; color: #9ca3af; }
+
+  /* 卡片 */
+  .card { margin: 8px 16px 16px; border: 1px solid #e5e7eb; border-radius: 6px; background: #fff; }
+  .card-top { display: flex; justify-content: flex-end; padding: 8px; border-bottom: 1px solid #f0f0f0; }
+  .btn { font-size: 12px; padding: 4px 12px; border-radius: 4px; border: 1px solid #d1d5db; background: #fff; cursor: pointer; color: #374151; }
+  .btn-primary { background: #1677ff; border-color: #1677ff; color: #fff; }
+  .btn-sm { font-size: 12px; padding: 2px 8px; }
+  .btn-link { border: none; background: none; color: #1677ff; cursor: pointer; padding: 0 4px; font-size: 12px; }
+  .btn-link.red { color: #dc2626; }
+
+  /* 表格通用 */
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { border-bottom: 1px solid #f0f0f0; border-right: 1px solid #f0f0f0; padding: 6px 8px; text-align: left; vertical-align: middle; }
+  th { background: #fafafa; font-weight: 600; color: #374151; white-space: nowrap; }
+  td:last-child, th:last-child { border-right: none; }
+  tr.zebra td { background: #fafafa; }
+  .tag { display: inline-block; padding: 1px 8px; background: #f0f9ff; color: #1d4ed8; border: 1px solid #bae6fd; border-radius: 10px; font-size: 11px; }
+  .caret { color: #9ca3af; margin-right: 4px; }
+  .caret.open { color: #1677ff; }
+
+  /* —— 现状：母表被子表撑开（外层宽 1500px）—— */
+  .now-outer { overflow-x: auto; }
+  .now-inner { width: 1500px; }              /* 被子表撑到 1500px */
+  .expand-area { background: #f9fafb; padding: 10px 12px; }
+  .sub-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px; margin-bottom: 10px; }
+  .sub-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .sub-head .h { font-size: 13px; font-weight: 600; }
+  .hint { font-size: 11px; color: #9ca3af; margin-top: 6px; }
+
+  /* —— 方案A：母表正常 100%；子表独立限宽滚动容器 —— */
+  .fix-master { width: 100%; }
+  .fix-sub-scroll {
+    /* 子表独立滚动容器：绝对限宽，超出在此滚动 */
+    max-width: calc(100% - 0px);
+    width: 660px;
+    overflow-x: auto;
+    border: 1px dashed #93c5fd;        /* 蓝色虚线标出「独立滚动容器」边界 */
+    border-radius: 4px;
+    padding: 2px;
+    background: #fff;
+  }
+  .fix-sub-scroll .inner { width: 790px; }   /* 列宽总和，超出→容器内滚动 */
+
+  /* 列宽标记 */
+  .colw { display: inline-block; font-size: 10px; color: #9ca3af; margin-left: 4px; font-weight: 400; }
+
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 6px; font-size: 11px; color: #6b7280; }
+  .legend .sw { display: inline-block; width: 14px; height: 12px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
+  .sw-blue { background: #fff; border: 1px dashed #93c5fd; }
+  .sw-bar { background: linear-gradient(#fafafa,#fafafa); border: 1px solid #e5e7eb; }
+
+  .compare-tbl { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+  .compare-tbl th, .compare-tbl td { border: 1px solid #e5e7eb; padding: 6px 10px; text-align: left; }
+  .compare-tbl th { background: #f9fafb; }
+  .compare-tbl .num { font-family: ui-monospace, Menlo, monospace; color: #6b7280; }
+  .yes { color: #15803d; } .no { color: #b91c1c; }
+</style>
+</head>
+<body>
+
+<h1>计划节点模板 · 子表样式优化原型</h1>
+<div class="sub">变更：<code>2026-07-16-plan-node-subtable-style</code>　|　方案 A：子表限宽独立滚动 + 明细列宽压缩　|　固定 1000px 视口对比滚动条差异</div>
+
+<div class="legend">
+  <span><span class="sw sw-blue"></span>蓝色虚线 = 子表「独立滚动容器」边界（方案A新增）</span>
+  <span><span class="sw sw-bar"></span>底部滚动条位置示意</span>
+</div>
+
+<!-- ════════════════ 现状 ════════════════ -->
+<div class="block">
+  <div class="block-title">🔴 现状（问题复现） <span class="badge-now">母表被子表撑开</span></div>
+  <div class="desc">母表和子表都用「宽度按内容自适应」。明细子表 7 列合计约 920px，把母表横向区域撑到 1500px，于是<strong>母表底部出现一条很长的横向滚动条</strong>；子表本身反而不滚动（宽度被母表整体接管）。明细列也很宽，显得空旷不紧凑。</div>
+
+  <div class="screen">
+    <div class="screen-bar">🖥️ 模拟视口宽度 1000px → 内容被撑到 1500px，需横向拖动很远</div>
+    <div class="page-head">
+      <div class="t">计划节点模板</div>
+      <div class="s">模板 → 模板明细 → 执行模块（展开行查看明细与模块）</div>
+    </div>
+    <div class="card">
+      <div class="card-top"><button class="btn btn-primary btn-sm">+ 新建模板</button></div>
+      <!-- 外层滚动：撑到 1500px -->
+      <div class="now-outer">
+        <div class="now-inner">
+          <table>
+            <thead>
+              <tr><th style="width:70px">编号</th><th style="width:160px">总阶段</th><th style="width:140px">项目类型</th><th style="width:140px">操作</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>1</td>
+                <td><span class="caret open">▼</span>立项阶段</td>
+                <td><span class="tag">研发</span></td>
+                <td><button class="btn-link">编辑</button><button class="btn-link red">删除</button></td>
+              </tr>
+              <tr class="zebra"><td colspan="4" style="padding:0">
+                <div class="expand-area">
+                  <!-- 明细子表（现状：列很宽，无独立滚动，撑开母表） -->
+                  <div class="sub-card">
+                    <div class="sub-head"><span class="h">模板明细</span><button class="btn btn-primary btn-sm">保存</button></div>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th style="width:120px">详细阶段<span class="colw">120</span></th>
+                          <th style="width:120px">任务主题<span class="colw">120</span></th>
+                          <th style="width:180px">任务描述<span class="colw">180</span></th>
+                          <th style="width:160px">要求与注意事项<span class="colw">160</span></th>
+                          <th style="width:100px">角色名称<span class="colw">100</span></th>
+                          <th style="width:120px">成果<span class="colw">120</span></th>
+                          <th style="width:120px">总体阶段<span class="colw">120</span></th>
+                          <th style="width:80px">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr><td>需求调研</td><td>用户需求收集</td><td>收集各部门业务需求并整理成需求文档</td><td>需覆盖所有业务场景，避免遗漏</td><td>产品经理</td><td>需求规格说明书</td><td>立项阶段</td><td><button class="btn-link red">删除</button></td></tr>
+                        <tr class="zebra"><td>方案设计</td><td>技术选型</td><td>确定前后端技术栈与整体架构</td><td>兼顾团队熟悉度与可维护性</td><td>架构师</td><td>技术方案文档</td><td>立项阶段</td><td><button class="btn-link red">删除</button></td></tr>
+                      </tbody>
+                    </table>
+                    <div class="hint">列宽合计 ≈ 920px + 操作 80 = <strong>1000px</strong>，把母表撑到 1500px</div>
+                  </div>
+                  <!-- 模块子表 -->
+                  <div class="sub-card">
+                    <div class="sub-head"><span class="h">模块</span><button class="btn btn-primary btn-sm">+ 新增</button></div>
+                    <table>
+                      <thead><tr><th>模块名</th><th style="width:110px">计划工时</th><th style="width:120px">计划开始</th><th style="width:120px">计划完成</th><th style="width:140px">操作</th></tr></thead>
+                      <tbody>
+                        <tr><td>前端开发</td><td>15人日</td><td>2026-07-01</td><td>2026-07-15</td><td><button class="btn-link">编辑</button><button class="btn-link red">删除</button></td></tr>
+                        <tr class="zebra"><td>后端开发</td><td>20人日</td><td>2026-07-01</td><td>2026-07-20</td><td><button class="btn-link">编辑</button><button class="btn-link red">删除</button></td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </td></tr>
+              <tr><td>2</td><td><span class="caret">▶</span>实施阶段</td><td><span class="tag">实施</span></td><td><button class="btn-link">编辑</button><button class="btn-link red">删除</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <!-- 滚动条示意 -->
+      <div style="height:10px;background:linear-gradient(to right,#fafafa,#e5e7eb 30%,#fafafa 30%);border-top:1px solid #e5e7eb;"></div>
+      <div class="hint" style="padding:4px 12px 8px">⬆ 母表横向滚动条：很长（约 1500px 内容塞进 1000px 视口，需拖动 500px）</div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════ 方案A ════════════════ -->
+<div class="block">
+  <div class="block-title">🟢 方案 A（修复后） <span class="badge-fix">子表独立滚动 + 列宽压缩</span></div>
+  <div class="desc">给「明细」「模块」两个子表各套一层<strong>限宽横向滚动容器</strong>（蓝色虚线框，宽度 <code>calc(100vw - 340px)</code>）。子表内容超出时<strong>在自己容器底部出独立滚动条</strong>，不再传导给母表——母表横向滚动条恢复正常。同时明细 7 列整体压缩（920→710px），多数情况不再溢出。</div>
+
+  <div class="screen">
+    <div class="screen-bar">🖥️ 模拟视口宽度 1000px → 母表正常，子表在自己的容器内滚动</div>
+    <div class="page-head">
+      <div class="t">计划节点模板</div>
+      <div class="s">模板 → 模板明细 → 执行模块（展开行查看明细与模块）</div>
+    </div>
+    <div class="card">
+      <div class="card-top"><button class="btn btn-primary btn-sm">+ 新建模板</button></div>
+      <!-- 母表：正常 100%，不再被撑开 -->
+      <div class="fix-master">
+        <table>
+          <thead>
+            <tr><th style="width:70px">编号</th><th>总阶段</th><th style="width:140px">项目类型</th><th style="width:140px">操作</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td><span class="caret open">▼</span>立项阶段</td>
+              <td><span class="tag">研发</span></td>
+              <td><button class="btn-link">编辑</button><button class="btn-link red">删除</button></td>
+            </tr>
+            <tr class="zebra"><td colspan="4" style="padding:0">
+              <div class="expand-area">
+                <!-- 明细子表（方案A：独立滚动容器 + 紧凑列宽） -->
+                <div class="sub-card">
+                  <div class="sub-head"><span class="h">模板明细</span><button class="btn btn-primary btn-sm">保存</button></div>
+                  <div class="fix-sub-scroll">
+                    <div class="inner">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th style="width:90px">详细阶段<span class="colw">90</span></th>
+                            <th style="width:100px">任务主题<span class="colw">100</span></th>
+                            <th style="width:140px">任务描述<span class="colw">140</span></th>
+                            <th style="width:120px">要求与注意事项<span class="colw">120</span></th>
+                            <th style="width:80px">角色<span class="colw">80</span></th>
+                            <th style="width:90px">成果<span class="colw">90</span></th>
+                            <th style="width:90px">总体阶段<span class="colw">90</span></th>
+                            <th style="width:80px">操作</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr><td>需求调研</td><td>用户需求收集</td><td>收集各部门业务需求并整理成需求文档</td><td>需覆盖所有业务场景</td><td>产品经理</td><td>需求规格说明书</td><td>立项阶段</td><td><button class="btn-link red">删除</button></td></tr>
+                          <tr class="zebra"><td>方案设计</td><td>技术选型</td><td>确定前后端技术栈与整体架构</td><td>兼顾团队熟悉度</td><td>架构师</td><td>技术方案文档</td><td>立项阶段</td><td><button class="btn-link red">删除</button></td></tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                  <div class="hint">⬆ 蓝色虚线框 = 子表独立滚动容器（宽 660px）；列宽合计 710px + 操作 80 = <strong>790px</strong> &gt; 660px → 容器底部出独立滚动条</div>
+                </div>
+                <!-- 模块子表（方案A：同样套独立容器） -->
+                <div class="sub-card">
+                  <div class="sub-head"><span class="h">模块</span><button class="btn btn-primary btn-sm">+ 新增</button></div>
+                  <div class="fix-sub-scroll" style="width:560px">
+                    <div class="inner" style="width:600px">
+                      <table>
+                        <thead><tr><th>模块名</th><th style="width:90px">计划工时</th><th style="width:100px">计划开始</th><th style="width:100px">计划完成</th><th style="width:110px">操作</th></tr></thead>
+                        <tbody>
+                          <tr><td>前端开发</td><td>15人日</td><td>2026-07-01</td><td>2026-07-15</td><td><button class="btn-link">编辑</button><button class="btn-link red">删除</button></td></tr>
+                          <tr class="zebra"><td>后端开发</td><td>20人日</td><td>2026-07-01</td><td>2026-07-20</td><td><button class="btn-link">编辑</button><button class="btn-link red">删除</button></td></tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                  <div class="hint">模块子表同样独立滚动，与明细视觉一致</div>
+                </div>
+              </div>
+            </td></tr>
+            <tr><td>2</td><td><span class="caret">▶</span>实施阶段</td><td><span class="tag">实施</span></td><td><button class="btn-link">编辑</button><button class="btn-link red">删除</button></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="padding:4px 12px 8px">✅ 母表横向滚动条：正常（不再被撑长）；子表各自有独立滚动条</div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════ 列宽对比 ════════════════ -->
+<div class="block">
+  <div class="block-title">📊 明细子表列宽对比</div>
+  <table class="compare-tbl">
+    <thead><tr><th>列</th><th>现状 (px)</th><th>方案A (px)</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>详细阶段</td><td class="num">120</td><td class="num">90</td><td>短文本，收紧</td></tr>
+      <tr><td>任务主题</td><td class="num">120</td><td class="num">100</td><td>中等文本</td></tr>
+      <tr><td>任务描述（多行）</td><td class="num">180</td><td class="num">140</td><td>textarea，仍是最宽列</td></tr>
+      <tr><td>要求与注意事项</td><td class="num">160</td><td class="num">120</td><td>收紧</td></tr>
+      <tr><td>角色名称</td><td class="num">100</td><td class="num">80</td><td>短文本</td></tr>
+      <tr><td>成果</td><td class="num">120</td><td class="num">90</td><td>收紧</td></tr>
+      <tr><td>总体阶段</td><td class="num">120</td><td class="num">90</td><td>短文本</td></tr>
+      <tr><td>操作（删除）</td><td class="num">80</td><td class="num">80</td><td>不变</td></tr>
+      <tr style="font-weight:600"><td>合计</td><td class="num">1000</td><td class="num">790</td><td>压缩 21%，配合容器独立滚动</td></tr>
+    </tbody>
+  </table>
+  <div class="desc" style="margin-top:12px">
+    <strong>关键改动点（仅 plan-nodes/page.tsx 单文件）：</strong><br/>
+    ① <code>PlanNodeChildren</code> 内，明细/模块子表外层各加 <code>&lt;div style=&#123; maxWidth:'calc(100vw - 340px)', overflowX:'auto' &#125;&gt;</code><br/>
+    ② <code>DETAIL_COLUMNS</code> 7 列 width 按上表压缩<br/>
+    ③ 不动母表、不动 PpmSubTable 通用组件、不动后端 —— 零回归
+  </div>
+</div>
+
+</body>
+</html>

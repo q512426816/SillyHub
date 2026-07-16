@@ -279,3 +279,9 @@ created_at: 2026-07-14T09:20:24
 根因：apply_sort 当 order_by 为空时不加任何排序(return 原 stmt)，返回 DB 自然顺序(不确定)；前端 PpmResourceTable 默认不传 order_by → 项目列表无稳定排序，不满足「最新在前」。
 方案：service.page 在 req.order_by 为空时回退 "created_at"(白名单 _PROJECT_SORT_FIELDS 已含 created_at)，复用 req.order 默认 desc → 最新在前；前端显式传 order_by 时仍优先前端选择(兼容列头排序)。仅改后端一处，前端不动。
 结果：project 模块 32 passed(含新增默认排序用例，断言默认 desc + 显式 order_by 不被覆盖)；ruff format+check 通过；mypy 通过。待 commit + rebuild backend 验证。
+
+## ql-20260716-003-8b3e | 2026-07-16 09:42:00 | 计划节点模板子表样式优化——明细/模块子表套限宽 overflow-x 容器独立横向滚动（隔离母表）+ 明细 7 列列宽压缩（920→790）
+状态：已完成
+关联变更：2026-07-16-plan-node-subtable-style
+文件：frontend/src/app/(dashboard)/ppm/plan-nodes/page.tsx（PlanNodeChildren 内 DetailsSubTable/ModulesSubTable 表格根节点外层各加限宽 overflow-x 容器 calc(100vw-340px) + DETAIL_COLUMNS 7 列 width 压缩 90/100/140/120/80/90/90）
+结果：①tsc --noEmit EXIT 0；②pnpm lint 0 error（warning 全既有无关文件）；③vitest plan/milestone 3 文件 27 passed；④仅改 plan-nodes/page.tsx 3 处，PpmSubTable 通用组件/母表/后端均未动，零回归。待 commit + rebuild frontend 部署 + 用户浏览器实测 R-02（子表独立滚动隔离母表、列紧凑）。

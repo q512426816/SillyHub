@@ -293,19 +293,19 @@ interface DetailDraftRow extends PpmSubTableRow {
 /** 明细行内编辑列定义(对齐源 NodeDetailForm 字段顺序)。
  * 列宽总和控制在容器宽度内,避免 textarea 撑高/水平滚动导致布局错乱。 */
 const DETAIL_COLUMNS: PpmSubEditableColumn<DetailDraftRow>[] = [
-  { name: "detailed_stage", label: "详细阶段", width: 120, placeholder: "详细阶段" },
-  { name: "task_theme", label: "任务主题", width: 120, placeholder: "任务主题" },
+  { name: "detailed_stage", label: "详细阶段", width: 90, placeholder: "详细阶段" },
+  { name: "task_theme", label: "任务主题", width: 100, placeholder: "任务主题" },
   {
     name: "task_description",
     label: "任务描述",
     editType: "textarea",
-    width: 180,
+    width: 140,
     placeholder: "任务描述",
   },
-  { name: "requirements", label: "要求与注意事项", width: 160, placeholder: "要求与注意事项" },
-  { name: "role_name", label: "角色名称", width: 100, placeholder: "角色名称" },
-  { name: "achievement", label: "成果", width: 120, placeholder: "成果" },
-  { name: "overall_stage", label: "总体阶段", width: 120, placeholder: "总体阶段" },
+  { name: "requirements", label: "要求与注意事项", width: 120, placeholder: "要求与注意事项" },
+  { name: "role_name", label: "角色名称", width: 80, placeholder: "角色名称" },
+  { name: "achievement", label: "成果", width: 90, placeholder: "成果" },
+  { name: "overall_stage", label: "总体阶段", width: 90, placeholder: "总体阶段" },
 ];
 
 function DetailsSubTable({
@@ -458,15 +458,17 @@ function DetailsSubTable({
         </div>
       </div>
       {err && <p className="mb-2 text-[11px] text-destructive">{err}</p>}
-      <PpmSubTable<DetailDraftRow>
-        editable
-        masterRows={draftRows}
-        columns={DETAIL_COLUMNS}
-        onChange={setDraftRows}
-        newRowFactory={newRowFactory}
-        canAddRemove
-        tableProps={{ loading }}
-      />
+      <div style={{ maxWidth: "calc(100vw - 340px)", overflowX: "auto" }}>
+        <PpmSubTable<DetailDraftRow>
+          editable
+          masterRows={draftRows}
+          columns={DETAIL_COLUMNS}
+          onChange={setDraftRows}
+          newRowFactory={newRowFactory}
+          canAddRemove
+          tableProps={{ loading }}
+        />
+      </div>
       <p className="mt-1 text-[11px] text-muted-foreground">
         整表行内编辑,修改后点击「保存」批量提交。
       </p>
@@ -570,17 +572,19 @@ function ModulesSubTable({
         </Button>
       </div>
       {err && <p className="mb-2 text-[11px] text-destructive">{err}</p>}
-      <Table<PlanNodeModule>
-        rowKey="id"
-        size="small"
-        loading={loading}
-        dataSource={items}
-        columns={columns}
-        pagination={false}
-        rowClassName={(_row: PlanNodeModule, idx: number) => idx % 2 === 1 ? "bg-muted/40" : ""}
-        locale={{ emptyText: "暂无模块" }}
-        scroll={{ x: "max-content" }}
-      />
+      <div style={{ maxWidth: "calc(100vw - 340px)", overflowX: "auto" }}>
+        <Table<PlanNodeModule>
+          rowKey="id"
+          size="small"
+          loading={loading}
+          dataSource={items}
+          columns={columns}
+          pagination={false}
+          rowClassName={(_row: PlanNodeModule, idx: number) => idx % 2 === 1 ? "bg-muted/40" : ""}
+          locale={{ emptyText: "暂无模块" }}
+          scroll={{ x: "max-content" }}
+        />
+      </div>
       {editing && (
         <ModuleFormDrawer
           planNodeId={node.id}
