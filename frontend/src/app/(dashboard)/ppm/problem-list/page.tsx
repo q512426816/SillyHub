@@ -73,6 +73,7 @@ const IS_URGENT_OPTIONS = [
 export default function ProblemListPage() {
   const { user: currentUser } = useSession();
   const currentUserId = currentUser?.id ?? "";
+  const [view, setView] = useState<"mine" | "all">("mine");
 
   const [items, setItems] = useState<ProblemList[]>([]);
   const [total, setTotal] = useState(0);
@@ -127,6 +128,7 @@ export default function ProblemListPage() {
           is_urgent: isUrgentFilter || undefined,
           find_time_start: dateRange?.[0]?.startOf("day")?.toISOString(),
           find_time_end: dateRange?.[1]?.endOf("day")?.toISOString(),
+          duty_user_id: view === "mine" ? currentUserId : undefined,
           order_by: "created_at",
           order: "desc",
         });
@@ -149,6 +151,7 @@ export default function ProblemListPage() {
       proTypeFilter,
       isUrgentFilter,
       dateRange,
+      view,
     ],
   );
 
@@ -158,7 +161,7 @@ export default function ProblemListPage() {
   useEffect(() => {
     void load({ page: 1 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keyword, statusFilter, projectFilter, proTypeFilter, isUrgentFilter, dateRange, searchNonce]);
+  }, [keyword, statusFilter, projectFilter, proTypeFilter, isUrgentFilter, dateRange, searchNonce, view]);
 
   const handleExport = async () => {
     setExporting(true);
@@ -330,6 +333,8 @@ export default function ProblemListPage() {
         );
         const isDuty = matchAnyUser([p.duty_user_id], currentUserId);
         const isAuditor = matchAnyUser([p.audit_user_id], currentUserId);
+        // 处置操作: 仅管理员 + 责任人
+        const canOperate = isDuty || !!currentUser?.is_platform_admin;
         return (
           <div className="flex whitespace-nowrap gap-1 justify-center">
             {/* 审核:status=2 + now_handle_user(源 openAuditForm) */}
@@ -350,8 +355,8 @@ export default function ProblemListPage() {
                 编辑
               </Button>
             )}
-            {/* 开始处置:status=3 + duty(源 startTask) */}
-            {p.status === "3" && isDuty && !p.handle_info && (
+            {/* 开始处置:status=3 + 管理员/责任人(源 startTask) */}
+            {p.status === "3" && canOperate && !p.handle_info && (
               <Button
                 size="sm"
                 variant="ghost"
@@ -360,8 +365,8 @@ export default function ProblemListPage() {
                 开始
               </Button>
             )}
-            {/* 完成处置:status=3 + duty(源 doneTask) */}
-            {p.status === "3" && isDuty && !!p.handle_info && (
+            {/* 完成处置:status=3 + 管理员/责任人(源 doneTask) */}
+            {p.status === "3" && canOperate && !!p.handle_info && (
               <Button
                 size="sm"
                 onClick={() => openDrawer("done", p)}
@@ -430,6 +435,17 @@ export default function ProblemListPage() {
 
         {/* 查询条件:垂直 grid-cols-4(服务端过滤,Select/RangePicker 选中即查) */}
         <div className="grid w-full grid-cols-4 gap-3">
+          <Field label="归属">
+            <Select
+              value={view}
+              onChange={(v) => setView(v as "mine" | "all")}
+              options={[
+                { label: "我的", value: "mine" },
+                { label: "全部", value: "all" },
+              ]}
+              style={{ width: "100%" }}
+            />
+          </Field>
           <Field label="关键字">
             <Input
               allowClear

@@ -96,7 +96,7 @@ export default function TaskPlansPage() {
   const { user: currentUser } = useSession();
   const { toast, showToast } = useToast();
 
-  const [view, setView] = useState<ViewMode>("all");
+  const [view, setView] = useState<ViewMode>("personal");
   const [rows, setRows] = useState<PlanTask[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -508,6 +508,8 @@ export default function TaskPlansPage() {
       fixed: "right",
       render: (_v, t: PlanTask) => {
         const isOwner = currentUser?.id === t.user_id;
+        // 处置操作(启动/执行): 仅管理员 + 本人
+        const canOperate = isOwner || !!currentUser?.is_platform_admin;
         // 编辑:status="未开始"(PlanTask 中文初始态) + user_id 归属
         const canEdit = t.status === "未开始" && isOwner;
         const canDelete = canDeleteTask(t);
@@ -517,6 +519,8 @@ export default function TaskPlansPage() {
               <Button
                 size="sm"
                 variant="ghost"
+                disabled={!canOperate}
+                title={canOperate ? undefined : "仅管理员或负责人可操作"}
                 onClick={() => void handleStart(t)}
               >
                 启动
@@ -526,6 +530,8 @@ export default function TaskPlansPage() {
               <Button
                 size="sm"
                 variant="ghost"
+                disabled={!canOperate}
+                title={canOperate ? undefined : "仅管理员或负责人可操作"}
                 onClick={() => void handleOpenDetail(t, "execute")}
               >
                 执行

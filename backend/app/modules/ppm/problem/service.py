@@ -222,6 +222,7 @@ class ProblemService:
         is_urgent: str | None = None,
         find_time_start: datetime | None = None,
         find_time_end: datetime | None = None,
+        duty_user_id: uuid.UUID | None = None,
     ) -> Page[PpmProblemList]:
         """分页列表(支持服务端过滤)。有未关闭变更的行内存态标记 status=7 变更中。
 
@@ -258,6 +259,8 @@ class ProblemService:
             clauses.append(PpmProblemList.find_time >= find_time_start)
         if find_time_end:
             clauses.append(PpmProblemList.find_time <= find_time_end)
+        if duty_user_id:
+            clauses.append(PpmProblemList.duty_user_id == duty_user_id)
         page = await _Crud(self._session, PpmProblemList).list_paged(
             req=req,
             allowed_sort={"created_at", "find_time", "status"},

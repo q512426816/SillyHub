@@ -768,6 +768,8 @@ export interface ProblemListPageReq extends PageReq {
   /** find_time ISO 起止(闭区间) */
   find_time_start?: string;
   find_time_end?: string;
+  /** 责任人 id(我的任务过滤) */
+  duty_user_id?: string;
 }
 
 /** 问题变更查询参数(对齐后端 GET /problem-change Query)。 */

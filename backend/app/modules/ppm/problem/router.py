@@ -93,6 +93,7 @@ async def list_problems(
     is_urgent: str | None = Query(None, description="'1' 急 / '0' 否"),
     find_time_start: datetime | None = Query(None),
     find_time_end: datetime | None = Query(None),
+    duty_user_id: uuid.UUID | None = Query(None, description="责任人 id(我的任务)"),
 ) -> Page[ProblemListResp]:
     page = await ProblemService(session).list_problems(
         req,
@@ -103,6 +104,7 @@ async def list_problems(
         is_urgent=is_urgent,
         find_time_start=find_time_start,
         find_time_end=find_time_end,
+        duty_user_id=duty_user_id,
     )
     return Page.build(
         items=[ProblemListResp.model_validate(i) for i in page.items],
