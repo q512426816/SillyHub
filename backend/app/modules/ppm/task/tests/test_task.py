@@ -177,6 +177,57 @@ async def test_plan_task_page_filter_by_project_and_status(db_session):
     assert by_status.items[0].content == "b"
 
 
+async def test_plan_task_page_filter_by_module(db_session):
+    """page 支持 module_id 过滤(工作台"我的任务"模块筛选)。"""
+    user_id = uuid.uuid4()
+    mod_a = uuid.uuid4()
+    mod_b = uuid.uuid4()
+    svc = PlanTaskService(db_session)
+    await svc.create(PlanTaskCreate(user_id=user_id, module_id=mod_a, content="a1"))
+    await svc.create(PlanTaskCreate(user_id=user_id, module_id=mod_a, content="a2"))
+    await svc.create(PlanTaskCreate(user_id=user_id, module_id=mod_b, content="b1"))
+
+    page = await svc.page(PlanTaskPageReq(user_id=user_id, module_id=mod_a))
+    assert page.total == 2
+    assert all(t.module_id == mod_a for t in page.items)
+
+
+async def test_plan_task_page_enrich_module_name(db_session):
+    """page 补 module_name:表里 module_name 空(历史从未填)但 module_id 有值时,
+    按 module_id 反查 ppm_plan_node_module 内存补值;补值不入库(仅展示)。"""
+    from sqlalchemy import select as sa_select
+
+    from app.modules.ppm.plan.model import PlanNodeModule
+    from app.modules.ppm.task.model import PlanTask as PlanTaskModel
+
+    user_id = uuid.uuid4()
+    mod_id = uuid.uuid4()
+    db_session.add(PlanNodeModule(id=mod_id, module_name="需求分析"))
+    await db_session.commit()
+
+    svc = PlanTaskService(db_session)
+    await svc.create(PlanTaskCreate(user_id=user_id, module_id=mod_id, content="t1"))
+    await svc.create(PlanTaskCreate(user_id=user_id, content="t2"))
+
+    page = await svc.page(PlanTaskPageReq(user_id=user_id))
+    t1 = next(t for t in page.items if t.content == "t1")
+    t2 = next(t for t in page.items if t.content == "t2")
+    assert t1.module_name == "需求分析"  # 按 module_id 反查补出
+    assert t2.module_name is None  # 无 module_id 不补
+
+    # 内存补值未写库:直接读 DB 列仍全为 None
+    db_names = (
+        (
+            await db_session.execute(
+                sa_select(PlanTaskModel.module_name).where(PlanTaskModel.user_id == user_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert all(v is None for v in db_names)
+
+
 # ---------------------------------------------------------------------------
 # execute_plan 联动 + 状态机
 # ---------------------------------------------------------------------------

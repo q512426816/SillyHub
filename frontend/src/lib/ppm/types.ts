@@ -478,6 +478,9 @@ export interface PsPlanNodeDetail {
   audit_user_name: string | null;
   approve_user_id: string | null;
   approve_user_name: string | null;
+  // 派生字段(不落库):后端查询时关联反查填充,只读视图展示用。
+  execute_user_name: string | null;
+  module_name: string | null;
   change_reason: string | null;
   created_at: string;
   updated_at: string;
@@ -1027,6 +1030,7 @@ export interface PlanTaskUpdate {
 export interface PlanTaskPageReq extends PageReq {
   user_id?: string | null;
   project_id?: string | null;
+  module_id?: string | null;
   /** 状态(可多值)。后端 alias=status */
   status?: string[];
   month?: string | null;

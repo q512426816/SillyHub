@@ -12,7 +12,7 @@
  *  - 模块下拉 (options 从当前结果推导; 选项目→重查→options 自动更新=联动)
  *  - 状态下拉 (未开始/进行中/已完成)
  *  - 重置
- * 日期/项目/状态 → 后端查; 模块 → 前端过滤 (PlanTaskPageReq 无 module 字段)。
+ * 日期/项目/状态 → 后端查; 模块 → 后端按 module_id 查(前端兜底);module_name 由后端按 module_id 反查补值(表冗余字段历史空)。
  *
  * 「执行」按钮打开 ExecuteTaskDialog (填耗时/说明/提交), 已完成任务禁用。
  */
@@ -86,6 +86,7 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
         params.end_time = dateRange[1].format("YYYY-MM-DD");
       }
       if (projectId) params.project_id = projectId;
+      if (moduleF) params.module_id = moduleF;
       if (statusF) params.status = [statusF];
       const page = await listPersonalPlanTasks(params);
       setTasks(page.items ?? []);
@@ -99,20 +100,21 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
   useEffect(() => {
     void loadTasks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateRange, projectId, statusF]);
+  }, [dateRange, projectId, moduleF, statusF]);
 
-  // 模块下拉 options: 从当前结果推导(选项目后结果变 → options 联动)
+  // 模块下拉 options: 从当前结果推导 {id,name}(选项目→重查→options 联动)。
+  // module_name 由后端按 module_id 反查补值(表里冗余字段历史空);用 id 作 value 便于精确过滤。
   const moduleOptions = useMemo(() => {
-    const set = new Set<string>();
+    const map = new Map<string, string>();
     tasks.forEach((t) => {
-      if (t.module_name) set.add(t.module_name);
+      if (t.module_id && t.module_name) map.set(t.module_id, t.module_name);
     });
-    return Array.from(set);
+    return Array.from(map, ([id, name]) => ({ id, name }));
   }, [tasks]);
 
-  // 模块前端过滤(后端无 module 字段)
+  // 模块过滤兜底(moduleF 存 module_id;主过滤在后端 params.module_id)
   const filtered = useMemo(() => {
-    return tasks.filter((t) => !moduleF || t.module_name === moduleF);
+    return tasks.filter((t) => !moduleF || t.module_id === moduleF);
   }, [tasks, moduleF]);
 
   // 预设按钮
@@ -290,8 +292,8 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
           >
             <option value="">全部模块</option>
             {moduleOptions.map((m) => (
-              <option key={m} value={m}>
-                {m}
+              <option key={m.id} value={m.id}>
+                {m.name}
               </option>
             ))}
           </select>

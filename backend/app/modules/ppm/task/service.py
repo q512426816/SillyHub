@@ -21,6 +21,7 @@ from app.modules.ppm.common.crud import (
     apply_sort,
     count_total,
 )
+from app.modules.ppm.plan.model import PlanNodeModule
 from app.modules.ppm.task.model import PlanTask, TaskExecute, WorkHour
 from app.modules.ppm.task.schema import (
     ExecutePlanReq,
@@ -162,10 +163,13 @@ class PlanTaskService:
         stmt = select(PlanTask)
         user_id = _parse_uuid_optional(req.user_id)
         project_id = _parse_uuid_optional(req.project_id)
+        module_id = _parse_uuid_optional(req.module_id)
         if user_id is not None:
             stmt = stmt.where(PlanTask.user_id == user_id)
         if project_id is not None:
             stmt = stmt.where(PlanTask.project_id == project_id)
+        if module_id is not None:
+            stmt = stmt.where(PlanTask.module_id == module_id)
         if req.status:
             stmt = stmt.where(PlanTask.status.in_(req.status))
         if req.month is not None:
@@ -183,7 +187,31 @@ class PlanTaskService:
         stmt = apply_pagination(stmt, page_req)
         result = await self._session.execute(stmt)
         items = list(result.scalars().all())
+        await self._enrich_module_name(items)
         return Page[PlanTask].build(items=items, total=total, req=page_req)
+
+    async def _enrich_module_name(self, items: list[PlanTask]) -> None:
+        """补 module_name:``ppm_plan_task.module_name`` 冗余字段历史从未填
+        (迁移脚本/各创建入口均不写),但 ``module_id`` 多数有值。按 module_id
+        批量反查 ``ppm_plan_node_module.module_name`` 内存补值,**仅展示不入库**——
+        补值前 expunge 脱离 session,杜绝被后续 flush 误写。
+        """
+        needs = [t for t in items if t.module_id is not None and not t.module_name]
+        if not needs:
+            return
+        for t in needs:
+            self._session.expunge(t)
+        mod_ids = {t.module_id for t in needs}
+        rows = await self._session.execute(
+            select(PlanNodeModule.id, PlanNodeModule.module_name).where(
+                PlanNodeModule.id.in_(mod_ids)
+            )
+        )
+        name_map = {row.id: row.module_name for row in rows.all()}
+        for t in needs:
+            name = name_map.get(t.module_id)
+            if name:
+                t.module_name = name
 
     async def list_by_user_and_date_range(
         self,
