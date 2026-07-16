@@ -465,7 +465,7 @@ function DetailsSubTable({
         onChange={setDraftRows}
         newRowFactory={newRowFactory}
         canAddRemove
-        tableProps={{ loading }}
+        tableProps={{ loading, scroll: { x: 790 } }}
       />
       <p className="mt-1 text-[11px] text-muted-foreground">
         整表行内编辑,修改后点击「保存」批量提交。
@@ -579,7 +579,7 @@ function ModulesSubTable({
         pagination={false}
         rowClassName={(_row: PlanNodeModule, idx: number) => idx % 2 === 1 ? "bg-muted/40" : ""}
         locale={{ emptyText: "暂无模块" }}
-        scroll={{ x: "max-content" }}
+        scroll={{ x: 790 }}
       />
       {editing && (
         <ModuleFormDrawer

@@ -319,3 +319,11 @@ created_at: 2026-07-14T09:20:24
 根因：ql-003 加的限宽容器 maxWidth:calc(100vw-340px)+overflowX:auto 在 2K 屏（容器约 2220px）反而引入多余滚动条（母表+模块都出滚动条）。用户澄清：2K 屏子表内容（明细790/模块600）远小于可视宽度（约2200），装得下不需要滚动条，也不要明细强制滚动。限宽 overflow 容器是基于「子表该独立滚动」的错误假设。
 方案：去掉明细/模块外层限宽容器（+min-w-0），回到原始结构（子表直接 scroll.x:max-content），只保留 DETAIL_COLUMNS 列宽压缩。2K 屏子表 790 < 可视宽度 2200，母表 max-content=max(母表列,790)=790 < 视口不撑不滚，子表 fits 不滚。仅改 plan-nodes/page.tsx。
 结果：tsc --noEmit EXIT 0；仅改 plan-nodes/page.tsx（去限宽容器+min-w-0，列宽压缩保留）。待 commit + rebuild frontend 部署 + 用户浏览器验证（2K 屏展开模板行：母表/模块/明细均无多余横向滚动条）。
+
+## ql-20260716-008-e5f1 | 2026-07-16 10:55:00 | plan-nodes 子表 scroll.x 改固定宽度（明细790/模块790）替代 max-content——从根本上避免嵌套测量膨胀撑母表
+状态：已完成
+关联变更：2026-07-16-plan-node-subtable-style
+文件：frontend/src/app/(dashboard)/ppm/plan-nodes/page.tsx（明细 PpmSubTable tableProps 加 scroll:{x:790} 覆盖内部 max-content；模块 Table scroll x:max-content→790）
+根因：ql-007 回退容器后回到原始 max-content，但 antd 嵌套表格 max-content 测量可能膨胀撑母表（用户最初问题）。用户建议子表改固定宽度。
+方案：子表 scroll.x 用固定值（明细 790=列总710+操作80；模块 790，模块名列自适应剩余）。固定宽度下子表 table min-width 明确(790)，母表 max-content=max(母表列,790)=790 不膨胀。2K 屏 790<可视2200→母表不撑无滚动条，子表790=展开行宽 fits 不滚。窄屏子表按790独立滚不撑母表。仅改 plan-nodes/page.tsx，未改 PpmSubTable 通用组件。
+结果：tsc --noEmit EXIT 0；仅改 plan-nodes/page.tsx（明细/模块 scroll.x 固定 790）。待 commit + rebuild frontend 部署 + 用户浏览器验证（2K 屏展开模板行：母表/模块/明细均无多余滚动条，列紧凑）。
