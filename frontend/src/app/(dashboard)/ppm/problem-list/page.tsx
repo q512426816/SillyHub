@@ -127,6 +127,8 @@ export default function ProblemListPage() {
           is_urgent: isUrgentFilter || undefined,
           find_time_start: dateRange?.[0]?.startOf("day")?.toISOString(),
           find_time_end: dateRange?.[1]?.endOf("day")?.toISOString(),
+          order_by: "created_at",
+          order: "desc",
         });
         setItems(resp.items);
         setTotal(resp.total);

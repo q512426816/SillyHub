@@ -41,6 +41,8 @@ import { PpmFileUrls } from "@/components/ppm-file-urls";
 import { PpmUserSelect } from "@/components/ppm-user-select";
 import { ApiError } from "@/lib/api";
 import { errMessage } from "@/lib/errors";
+import { listTaskExecutes } from "@/lib/ppm/task";
+import type { TaskExecute } from "@/lib/ppm/types";
 import {
   closeTaskProblem,
   createProblem,
@@ -954,10 +956,77 @@ export function ProblemDetailForm({
   loadingLogs,
   onCancel,
 }: ProblemDetailFormProps) {
+  const [execRecords, setExecRecords] = useState<TaskExecute[]>([]);
+  const [loadingExecs, setLoadingExecs] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      setLoadingExecs(true);
+      try {
+        const page = await listTaskExecutes({
+          problem_task_id: problem.id,
+          page: 1,
+          page_size: 100,
+        });
+        if (!cancelled) setExecRecords(page.items ?? []);
+      } catch {
+        if (!cancelled) setExecRecords([]);
+      } finally {
+        if (!cancelled) setLoadingExecs(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [problem.id]);
+
   return (
     <div>
       <ProblemDescriptions problem={problem} />
       <ProcessTimeline logs={logs} loading={loadingLogs} />
+      {/* 处置执行记录(D-007 done_task 创建 TaskExecute, actual 单点 now) */}
+      <div style={{ marginTop: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 8 }}>
+          处置记录（{execRecords.length}）
+        </div>
+        {loadingExecs ? (
+          <div style={{ textAlign: "center", color: "#999", padding: 12 }}>加载中…</div>
+        ) : execRecords.length === 0 ? (
+          <div style={{ textAlign: "center", color: "#999", padding: 12 }}>暂无处置记录</div>
+        ) : (
+          <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ textAlign: "left", color: "#888" }}>
+                <th style={{ padding: "4px 8px" }}>开始时间</th>
+                <th style={{ padding: "4px 8px" }}>结束时间</th>
+                <th style={{ padding: "4px 8px" }}>耗时</th>
+                <th style={{ padding: "4px 8px" }}>说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              {execRecords.map((e) => (
+                <tr key={e.id} style={{ borderTop: "1px solid #f0f0f0" }}>
+                  <td style={{ padding: "4px 8px" }}>
+                    {e.actual_start_time
+                      ? dayjs(e.actual_start_time).format("YYYY-MM-DD HH:mm:ss")
+                      : "—"}
+                  </td>
+                  <td style={{ padding: "4px 8px" }}>
+                    {e.actual_end_time
+                      ? dayjs(e.actual_end_time).format("YYYY-MM-DD HH:mm:ss")
+                      : "—"}
+                  </td>
+                  <td style={{ padding: "4px 8px" }}>
+                    {e.time_spent != null ? `${e.time_spent}人天` : "—"}
+                  </td>
+                  <td style={{ padding: "4px 8px" }}>{e.execute_info ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
         <Button onClick={onCancel}>关闭</Button>
       </div>

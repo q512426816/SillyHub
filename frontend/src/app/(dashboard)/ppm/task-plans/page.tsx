@@ -128,6 +128,9 @@ export default function TaskPlansPage() {
   const [execute, setExecute] = useState<ExecuteTaskState | null>(null);
   const [recordsTask, setRecordsTask] = useState<PlanTask | null>(null);
   const [records, setRecords] = useState<TaskExecute[]>([]);
+  const [detailTimeSpent, setDetailTimeSpent] = useState("");
+  const [detailExecInfo, setDetailExecInfo] = useState("");
+  const [detailInflightId, setDetailInflightId] = useState<string | null>(null);
   const [executeBusy, setExecuteBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<PlanTask | null>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
@@ -175,6 +178,9 @@ export default function TaskPlansPage() {
       try {
         // personal 视图:user_id 由后端从 token 注入,前端不传
         const params = buildParams(p, ps, { includeUserId: view !== "personal" });
+        // 列表固定按创建时间倒序
+        (params as PlanTaskPageReq).order_by = "created_at";
+        (params as PlanTaskPageReq).order = "desc";
         const resp =
           view === "personal"
             ? await listPersonalPlanTasks(
@@ -257,24 +263,56 @@ export default function TaskPlansPage() {
         page: 1,
         page_size: 100,
       });
-      setRecords(page.items ?? []);
+      const items = page.items ?? [];
+      setRecords(items);
       setRecordsTask(task);
+      // 进行中: 预填 in-flight 执行表单(status=30)
+      const inflight = items.find((e) => e.status === "30");
+      if (inflight) {
+        setDetailInflightId(inflight.id);
+        setDetailTimeSpent(inflight.time_spent != null ? String(inflight.time_spent) : "");
+        setDetailExecInfo(inflight.execute_info ?? "");
+      } else {
+        setDetailInflightId(null);
+        setDetailTimeSpent("");
+        setDetailExecInfo("");
+      }
     } catch (err) {
       showToast(false, err instanceof ApiError ? err.message : "加载执行记录失败");
+    }
+  };
+
+  const handleDetailExecute = async (action: "submit" | "complete") => {
+    if (!recordsTask || !detailInflightId) {
+      showToast(false, "无进行中的执行记录");
+      return;
+    }
+    setExecuteBusy(true);
+    try {
+      const ts = detailTimeSpent ? Number(detailTimeSpent) : undefined;
+      await executePlanTask({
+        plan_task_id: recordsTask.id,
+        action,
+        task_execute_id: detailInflightId,
+        execute_info: detailExecInfo || undefined,
+        time_spent: ts !== undefined && !Number.isNaN(ts) ? ts : undefined,
+      });
+      showToast(true, action === "complete" ? "任务已完成" : "执行已保存");
+      await handleViewRecords(recordsTask);
+      await load();
+    } catch (err) {
+      showToast(false, err instanceof ApiError ? err.message : "执行失败");
+    } finally {
+      setExecuteBusy(false);
     }
   };
 
   const handleStart = async (task: PlanTask) => {
     setExecuteBusy(true);
     try {
-      const exc = await startPlanTask({ plan_task_id: task.id });
-      await load(); // 刷新列表显示"进行中"(start 已推进 plan 状态, D-002)
-      setExecute({
-        task,
-        executeInfo: "",
-        timeSpent: task.time_spent ? String(task.time_spent) : "",
-        taskExecuteId: exc.id,
-      });
+      await startPlanTask({ plan_task_id: task.id });
+      showToast(true, "任务已启动(进行中)");
+      await load();
     } catch (err) {
       showToast(false, err instanceof ApiError ? err.message : "启动失败");
     } finally {
@@ -481,46 +519,12 @@ export default function TaskPlansPage() {
                 启动
               </Button>
             )}
-            {t.status === "进行中" && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => void handleResume(t)}
-              >
-                执行
-              </Button>
-            )}
             <Button
               size="sm"
               variant="ghost"
               onClick={() => void handleViewRecords(t)}
             >
-              记录
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!canEdit}
-              title={
-                canEdit
-                  ? undefined
-                  : t.status !== "未开始"
-                    ? "仅未开始状态可编辑"
-                    : "仅负责人可编辑"
-              }
-              onClick={() => setDrawer({ open: true, mode: "edit", task: t })}
-            >
-              编辑
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="text-red-600 hover:text-red-700"
-              disabled={!canDelete}
-              title={canDelete ? undefined : "仅负责人可删除"}
-              onClick={() => setConfirmDelete(t)}
-            >
-              删除
+              详情
             </Button>
           </div>
         );
@@ -742,49 +746,109 @@ export default function TaskPlansPage() {
       {recordsTask && (
         <Modal
           open
-          title={`执行记录 — ${recordsTask.content ?? ""}`}
+          title={`详情 — ${recordsTask.content ?? ""}`}
           onCancel={() => {
             setRecordsTask(null);
             setRecords([]);
           }}
           footer={null}
-          width={720}
+          width={760}
         >
-          {records.length === 0 ? (
-            <div className="py-6 text-center text-sm text-muted-foreground">
-              暂无执行记录
+          {/* 任务信息 */}
+          <div className="mb-3 grid grid-cols-2 gap-x-4 gap-y-1 rounded-md border border-border bg-muted/30 p-3 text-xs">
+            <div><span className="text-muted-foreground">项目：</span>{recordsTask.project_name ?? "—"}</div>
+            <div><span className="text-muted-foreground">模块：</span>{recordsTask.module_name ?? "—"}</div>
+            <div><span className="text-muted-foreground">状态：</span>{recordsTask.status}</div>
+            <div><span className="text-muted-foreground">预估工时：</span>{recordsTask.work_load ?? "—"}</div>
+            <div className="col-span-2">
+              <span className="text-muted-foreground">计划时间：</span>
+              {recordsTask.start_time ? fmtDay(recordsTask.start_time) : "—"} ~{" "}
+              {recordsTask.end_time ? fmtDay(recordsTask.end_time) : "—"}
             </div>
+            <div><span className="text-muted-foreground">负责人：</span>{recordsTask.user_name ?? "—"}</div>
+            <div><span className="text-muted-foreground">配合：</span>{recordsTask.work_partner ?? "—"}</div>
+            {recordsTask.remarks ? (
+              <div className="col-span-2"><span className="text-muted-foreground">备注：</span>{recordsTask.remarks}</div>
+            ) : null}
+          </div>
+
+          {/* 执行记录(时间精确到秒, 无结果列) */}
+          <div className="mb-1 text-xs font-medium text-muted-foreground">
+            执行记录（{records.length}）
+          </div>
+          {records.length === 0 ? (
+            <div className="py-3 text-center text-xs text-muted-foreground">暂无执行记录</div>
           ) : (
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left text-muted-foreground">
-                  <th className="py-1 pr-2">开始</th>
-                  <th className="py-1 pr-2">结束</th>
+                  <th className="py-1 pr-2">开始时间</th>
+                  <th className="py-1 pr-2">结束时间</th>
                   <th className="py-1 pr-2">耗时</th>
-                  <th className="py-1 pr-2">说明</th>
-                  <th className="py-1">结果</th>
+                  <th className="py-1">说明</th>
                 </tr>
               </thead>
               <tbody>
                 {records.map((e) => (
                   <tr key={e.id} className="border-t">
                     <td className="py-1 pr-2">
-                      {e.actual_start_time ? fmtDay(e.actual_start_time) : "—"}
+                      {e.actual_start_time
+                        ? dayjs(e.actual_start_time).format("YYYY-MM-DD HH:mm:ss")
+                        : "—"}
                     </td>
                     <td className="py-1 pr-2">
-                      {e.actual_end_time ? fmtDay(e.actual_end_time) : "—"}
+                      {e.actual_end_time
+                        ? dayjs(e.actual_end_time).format("YYYY-MM-DD HH:mm:ss")
+                        : "—"}
                     </td>
                     <td className="py-1 pr-2">
                       {e.time_spent != null ? `${e.time_spent}人天` : "—"}
                     </td>
-                    <td className="py-1 pr-2">{e.execute_info ?? "—"}</td>
-                    <td className="py-1">
-                      {e.status === "90" ? "已记录" : e.status}
-                    </td>
+                    <td className="py-1">{e.execute_info ?? "—"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          )}
+
+          {/* 执行表单(进行中, 有 in-flight 记录时展示) */}
+          {recordsTask.status === "进行中" && detailInflightId && (
+            <div className="mt-3 space-y-2 border-t border-border pt-3">
+              <div className="text-xs font-medium text-muted-foreground">填报执行</div>
+              <div>
+                <label className="text-[11px] text-muted-foreground">本次耗时(人天)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={detailTimeSpent}
+                  onChange={(e) => setDetailTimeSpent(e.target.value)}
+                  className={`mt-0.5 ${inputCls}`}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-muted-foreground">执行情况说明</label>
+                <textarea
+                  rows={2}
+                  value={detailExecInfo}
+                  onChange={(e) => setDetailExecInfo(e.target.value)}
+                  className="mt-0.5 w-full rounded border border-input bg-background px-2.5 py-1.5 text-sm focus:border-ring focus:outline-none"
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={executeBusy}
+                  onClick={() => void handleDetailExecute("submit")}
+                >
+                  提交(回未开始)
+                </Button>
+                <Button size="sm" disabled={executeBusy} onClick={() => void handleDetailExecute("complete")}>
+                  完成
+                </Button>
+              </div>
+            </div>
           )}
         </Modal>
       )}
