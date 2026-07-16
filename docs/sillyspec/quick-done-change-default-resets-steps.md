@@ -35,3 +35,24 @@ quick skill 文档已明确警告：
 
 ## 期望修复
 步骤模板的「完成后执行」命令应改为不带 `--change`（或用 `--linked-changes`），与 skill 文档一致，避免把会导致重置的 flag 写进引导命令。
+
+## 2026-07-16 复测：CLI 行为已变，上述规避失效，根因深挖
+
+当前 CLI 版本模板已改为 `--change quick-<sessionId>`（不再是 `--change default`）。复测 ql-20260716-001-7f3a（ppm 项目维护创建人自动填充）发现**两条路都无法把 quick 会话推进到 3/3**：
+
+- **带 `--change quick-<id>`**：sessionId 稳定（不再串号），但 step3 的 `--done` 反复退回显示「✅ Step 2/3 完成」+ step3 prompt，进度卡死无法收尾。
+- **不带 `--change` / `--linked-changes none`**：每次 `--done` 都生成**全新** sessionId（如 quick-bff37301 / quick-8ae18a4a），从头「完成 step1 → 进 step2」，7/14 的 `--linked-changes none` 规避方案完全失效。
+
+### 根因（更深一层）
+quick **会话的 step 进度根本不落盘**：
+- `.sillyspec/.runtime/quick-sessions/<id>/` 只有 `guard.json`（baseline/allowedFiles），**无 step 进度文件**；
+- `sillyspec.db` 的 `steps` 表列是 `stage_id`→指向 `stages` 表，`stages` 表按 **change_id** 组织（正式变更流程），**不含独立 quick 会话**。
+- 因此 `sillyspec run quick`（短进程）每次都重新推算/生成会话，`--done` 的「完成」标记写不进任何持久存储，下一次 run 读不到 → 永远漂移。这是短进程 + 非 TTY fallback 模式下的根本性缺陷，与带不带 `--change` 无关。
+
+### 当前结论（绕过）
+quick 会话 step 标记在当前版本**无法可靠推进到 3/3**。实质交付以以下三件为准，不强求 CLI 会话「完成」：
+1. `QUICKLOG-<user>.md` 已记录 ql-ID + 状态「已完成」+ 根因/方案/结果；
+2. 相关代码 + 测试已通过（pytest/ruff/mypy）；
+3. 改动已 `git add` 暂存，交由统一提交。
+
+`.sillyspec/.runtime/quick-sessions/` 下会残留多个孤儿会话目录（每次失败 run 生成一个），不影响代码与文档，可定期清理。

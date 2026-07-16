@@ -263,3 +263,11 @@ created_at: 2026-07-14T09:20:24
 需求：用户反馈任务计划/问题清单执行弹窗"只有执行输入框,不够"。经澄清:任务计划执行弹窗确实纯输入框无详情(要加详情区);问题清单用户点的是「开始处置」按钮(ProblemStartForm),该弹窗有详情但只有单输入框、无流程履历(补履历)。
 方案：①execute-task-dialog 加 TaskDetail 只读详情区(grid 布局,复用 taskStatusTag/fmtDay),核心 7 字段(项目/模块/计划时间/状态/负责人/配合人员/预估工时)+ remarks 备注 + file_urls 附件链接(仅有时显示),task 对象已由 state.task 透传无需改父;②ProblemStartForm 对齐 audit/done/close 加 useProblemLogs(problem.id) + ProcessTimeline logs/loading,详情区下方显示流程履历。两处均纯前端,弹窗已收到完整对象,无新接口/无后端改动。
 结果：tsc --noEmit exit 0;rebuild frontend 后 healthy,commit_sha=6ed43b5b。待 commit + 用户浏览器验证(任务计划执行弹窗显示详情;问题清单开始处置弹窗显示履历)。注:工作区另有遗留的 workbench/service.py 日历负载重构(会话开始就有的 intentional 改动,未 commit,致 test_calendar_load_level_buckets 失败),本次未动,单独说明。
+
+## ql-20260716-001-7f3a | 2026-07-16 08:41:06 | 项目维护新建项目后创建人(create_name)为空，改为后端按当前登录用户自动填充
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/project/service.py（ProjectMaintenanceService.create 加 operator_name 参数，create_name=data.create_name or operator_name 回退填充）+ backend/app/modules/ppm/project/router.py（create_project_maintenance 传 operator_name=user.display_name）+ backend/app/modules/ppm/project/tests/test_service.py（新增 test_project_create_name_auto_fill_from_operator 三断言）
+根因：前端 projects/page.tsx 把 create_name 标 hideInForm:true（系统字段不进表单，design 约定），新建不传 create_name；后端 service.create 直接用 data.create_name(为 None)入库 → 创建人列空。
+方案：create_name 是创建人姓名(系统字段)，应由系统按当前登录用户自动带出。service.create 新增 operator_name 参数，data.create_name 为空时回退用 operator_name(user.display_name) 填充；显式传入时优先用传入值。仅修项目维护表(PpmProjectMaintenance)，customer/member/stakeholder 同模式问题本次未动。
+结果：project 模块 31 passed(含新增1)；ruff format+check 通过；mypy 通过。待 commit + rebuild backend Docker 验证。

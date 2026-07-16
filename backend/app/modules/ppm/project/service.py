@@ -163,12 +163,16 @@ class ProjectMaintenanceService:
         data: ProjectMaintenanceCreate,
         *,
         operator: uuid.UUID,
+        operator_name: str | None = None,
     ) -> PpmProjectMaintenance:
         # project_code 唯一约束预检 (更友好的 409,而非 IntegrityError 500)
         await self._assert_code_available(data.project_code)
+        # create_name 是系统字段(创建人姓名,design 约定不进表单由系统带出);
+        # 前端不传时按当前登录用户姓名(operator_name)自动填充,避免创建人列为空。
+        create_name = data.create_name or operator_name
         entity = PpmProjectMaintenance(
             id=uuid.uuid4(),
-            create_name=data.create_name,
+            create_name=create_name,
             company_name=data.company_name,
             project_name=data.project_name,
             project_code=data.project_code,

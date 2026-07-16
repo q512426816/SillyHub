@@ -101,7 +101,7 @@ async def create_project_maintenance(
     user: Annotated[User, _PROJECT_WRITE],
 ) -> ProjectMaintenanceResp:
     s = svc.ProjectMaintenanceService(session)
-    entity = await s.create(body, operator=user.id)
+    entity = await s.create(body, operator=user.id, operator_name=user.display_name)
     return ProjectMaintenanceResp.model_validate(entity)
 
 

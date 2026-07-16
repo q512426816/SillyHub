@@ -96,6 +96,45 @@ async def test_project_crud_and_unique_code(db_session, operator):
         await svc.get(created.id)
 
 
+async def test_project_create_name_auto_fill_from_operator(db_session, operator):
+    """create_name 是系统字段(前端表单不显示),不传时由 operator_name 自动填充。
+
+    依据:model.py create_name=创建人姓名(系统字段);design 约定不进表单;
+    router 传入当前登录用户 user.display_name。修复「新建项目后创建人列为空」。
+    """
+    svc = ProjectMaintenanceService(db_session)
+
+    # 不传 create_name,只给 operator_name → 自动填充
+    created = await svc.create(
+        ProjectMaintenanceCreate(
+            project_code="P-AUTO-001",
+            project_name="自动创建人项目",
+        ),
+        operator=operator,
+        operator_name="张三",
+    )
+    assert created.create_name == "张三"
+
+    # 显式传 create_name 时优先用传入值(不被 operator_name 覆盖)
+    created2 = await svc.create(
+        ProjectMaintenanceCreate(
+            project_code="P-AUTO-002",
+            project_name="显式创建人项目",
+            create_name="李四",
+        ),
+        operator=operator,
+        operator_name="张三",
+    )
+    assert created2.create_name == "李四"
+
+    # 两者都缺时仍为 None(不崩溃,兼容历史调用)
+    created3 = await svc.create(
+        ProjectMaintenanceCreate(project_code="P-AUTO-003", project_name="无创建人项目"),
+        operator=operator,
+    )
+    assert created3.create_name is None
+
+
 async def test_project_page_filter_and_sort(db_session, operator):
     svc = ProjectMaintenanceService(db_session)
     for code, name, status in [
