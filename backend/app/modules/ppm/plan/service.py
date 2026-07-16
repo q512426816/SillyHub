@@ -253,30 +253,109 @@ class PlanService:
         return await _Crud(self._session, PlanNode).get(item_id)
 
     async def update_plan_node(self, item_id: uuid.UUID, data: dict[str, Any]) -> PlanNode:
+        # has_module 不可改 (D-001@v1):即使客户端传入也强制忽略,避免归属混乱。
+        data.pop("has_module", None)
         return await _Crud(self._session, PlanNode).update(item_id, data)
 
     async def delete_plan_node(self, item_id: uuid.UUID) -> None:
         await _Crud(self._session, PlanNode).delete(item_id)
 
     # ---------- 模板明细 (子表,按 plan_node_id 列表) ----------
-    async def list_plan_node_details_by_node(self, plan_node_id: str) -> list[PlanNodeDetail]:
+    async def list_plan_node_details_by_node(
+        self, plan_node_id: str, module_id: str | None = None
+    ) -> list[PlanNodeDetail]:
+        """列出某模板下的明细 (design §5.2)。
+
+        - ``module_id`` 为 None → 返回该模板下全部明细 (无模块模板用此;
+          因无模块模板明细 module_id 全为 null,等价于返回 module_id 为 null 的)。
+        - ``module_id`` 指定 → 仅返回挂该模块的明细 (有模块模板按模块拉,D-002 三层)。
+        """
         stmt = (
             select(PlanNodeDetail)
             .where(PlanNodeDetail.plan_node_id == self._safe_uuid(plan_node_id))
             .order_by(PlanNodeDetail.no)
         )
+        if module_id is not None:
+            stmt = stmt.where(PlanNodeDetail.module_id == self._safe_uuid(module_id))
         return list((await self._session.execute(stmt)).scalars().all())
 
     async def create_plan_node_detail(self, data: dict[str, Any]) -> PlanNodeDetail:
+        # 归属校验 (D-004):module_id 必须与模板 has_module 一致。
+        await self._validate_detail_module(
+            self._safe_uuid(data.get("plan_node_id")),
+            self._safe_uuid(data.get("module_id")),
+        )
         return await _Crud(self._session, PlanNodeDetail).create(data)
 
     async def update_plan_node_detail(
         self, item_id: uuid.UUID, data: dict[str, Any]
     ) -> PlanNodeDetail:
+        # 归属校验 (D-004):plan_node_id 从现有明细读 (update body 无此字段),
+        # module_id 取「data 指定 (exclude_unset 语义) 否则保持现有」的最终值校验。
+        existing = await _Crud(self._session, PlanNodeDetail).get(item_id)
+        final_module_id = data.get("module_id", existing.module_id)
+        await self._validate_detail_module(
+            existing.plan_node_id,
+            self._safe_uuid(final_module_id),
+        )
         return await _Crud(self._session, PlanNodeDetail).update(item_id, data)
 
     async def delete_plan_node_detail(self, item_id: uuid.UUID) -> None:
         await _Crud(self._session, PlanNodeDetail).delete(item_id)
+
+    async def _validate_detail_module(
+        self, plan_node_id: uuid.UUID | None, module_id: uuid.UUID | None
+    ) -> None:
+        """校验明细 module_id 归属一致性 (D-004 / R-03,design §5.1)。
+
+        规则:
+        - has_module=true :module_id 必填,且必须属于同一 plan_node 下的 PlanNodeModule
+        - has_module=false:module_id 必须为 null
+
+        违例抛 ``PlanError`` (400)。
+        """
+        if plan_node_id is None:
+            # 无模板锚点:不允许挂模块 (module_id 无归属可校验)。
+            if module_id is not None:
+                raise PlanError(
+                    "明细未指定模板(plan_node_id),不能挂模块(module_id)",
+                    details={"module_id": str(module_id) if module_id else None},
+                )
+            return
+        node = await self._session.get(PlanNode, plan_node_id)
+        if node is None:
+            # 模板不存在 (历史/脏数据):挂了 module_id 视为无锚点违例,否则放过。
+            if module_id is not None:
+                raise PlanError(
+                    f"模板 '{plan_node_id}' 不存在,module_id 无有效归属锚点",
+                    details={"plan_node_id": str(plan_node_id), "module_id": str(module_id)},
+                )
+            return
+        if node.has_module:
+            if module_id is None:
+                raise PlanError(
+                    "有模块模板的明细必须指定 module_id",
+                    details={"plan_node_id": str(plan_node_id)},
+                )
+            belongs = await self._session.scalar(
+                select(PlanNodeModule.id).where(
+                    PlanNodeModule.id == module_id,
+                    PlanNodeModule.plan_node_id == plan_node_id,
+                )
+            )
+            if belongs is None:
+                raise PlanError(
+                    f"module_id '{module_id}' 不属于模板 '{plan_node_id}'",
+                    details={"module_id": str(module_id), "plan_node_id": str(plan_node_id)},
+                )
+        elif module_id is not None:
+            raise PlanError(
+                "无模块模板的明细 module_id 必须为 null",
+                details={
+                    "plan_node_id": str(plan_node_id),
+                    "module_id": str(module_id),
+                },
+            )
 
     # ---------- 模块 (子表,按 plan_node_id 列表) ----------
     async def list_modules_by_node(self, plan_node_id: str) -> list[PlanNodeModule]:

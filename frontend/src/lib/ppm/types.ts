@@ -240,6 +240,8 @@ export interface PlanNode {
   overall_stage: string;
   project_type: string | null;
   no: number | null;
+  /** 是否有模块子表 (新建时定,保存后不可改,D-001@v1)。 */
+  has_module: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -248,6 +250,8 @@ export interface PlanNodeCreate {
   overall_stage: string;
   project_type?: string | null;
   no?: number | null;
+  /** 是否有模块子表 (必填,新建时定,D-001@v1)。 */
+  has_module: boolean;
 }
 
 export interface PlanNodeUpdate {
@@ -260,6 +264,8 @@ export interface PlanNodeDetail {
   id: string;
   // 后端已放宽为 Optional (历史残留 Long ID 降级 NULL,见 schema.py D-fix@plan500)
   plan_node_id: string | null;
+  /** 所属模块 (有模块模板时挂模块,D-002@v1 三层);无模块模板为 null 挂 plan_node_id。 */
+  module_id: string | null;
   detailed_stage: string | null;
   no: string | null;
   task_theme: string | null;
@@ -274,6 +280,8 @@ export interface PlanNodeDetail {
 
 export interface PlanNodeDetailCreate {
   plan_node_id: string;
+  /** 所属模块 (有模块模板时挂模块,D-002@v1);无模块模板不传。 */
+  module_id?: string | null;
   detailed_stage?: string | null;
   no?: string | null;
   task_theme?: string | null;
@@ -293,6 +301,8 @@ export interface PlanNodeDetailUpdate {
   role_name?: string | null;
   achievement?: string | null;
   overall_stage?: string | null;
+  /** 所属模块 (可改归属,后端重校验 D-004);无模块模板须为 null。 */
+  module_id?: string | null;
 }
 
 export interface PlanNodeModule {

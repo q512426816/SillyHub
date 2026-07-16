@@ -37,10 +37,14 @@ class PlanNodeBase(PydanticModel):
     overall_stage: str
     project_type: str | None = None
     no: int | None = None
+    # 是否有模块子表 (default False;PlanNodeCreate 覆盖为必填,D-001@v1)。
+    has_module: bool = False
 
 
 class PlanNodeCreate(PlanNodeBase):
-    pass
+    # has_module 必填:新建时定,保存后不可改 (D-001@v1)。
+    # 覆盖 PlanNodeBase 默认值,省略时 422 拒绝。
+    has_module: bool
 
 
 class PlanNodeUpdate(PydanticModel):
@@ -61,6 +65,8 @@ class PlanNodeDetailBase(PydanticModel):
     # ALTER 迁移 (commit 2e9e76b) 把源残留 Long ID 降级为 NULL,
     # 故放宽为 Optional 以兼容历史数据 (D-fix@plan500)。
     plan_node_id: uuid.UUID | None = None
+    # 所属模块 (有模块模板时挂模块,D-002@v1 三层);无模块模板为 null 挂 plan_node_id。
+    module_id: uuid.UUID | None = None
     detailed_stage: str | None = None
     no: str | None = None
     task_theme: str | None = None
@@ -84,6 +90,8 @@ class PlanNodeDetailUpdate(PydanticModel):
     role_name: str | None = None
     achievement: str | None = None
     overall_stage: str | None = None
+    # 所属模块 (可更新归属,service 层重校验 D-004);无模块模板须为 null。
+    module_id: uuid.UUID | None = None
 
 
 class PlanNodeDetailResp(PlanNodeDetailBase):

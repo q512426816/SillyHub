@@ -25,3 +25,14 @@
 - **现象**：commit 时 hook 报 `frontend: lint / typecheck / test` 失败；实跑 `pnpm exec tsc` 报 `Command "tsc" not found`——`frontend/node_modules/.bin` 缺 tsc/eslint/vitest（.bin 损坏）。
 - **绕过**：`cd frontend && pnpm install` 重建 `.bin`（3 秒），hook 即恢复。与 quicklog `ql-20260714-010` 同一问题，复发。
 - **建议**：CI/ hook 触发前先校验 `.bin` 完整性，或 hook 脚本用 `node node_modules/typescript/bin/tsc` 等绝对路径，不依赖 `.bin`/PATH。
+
+## 坑 5：sillyspec 命令以 cwd 为项目根 — 在 `backend/` 子目录执行会误触发 backend 子项目流程（cwd 敏感，坑 2 的真根因）
+
+> 本次变更 `2026-07-16-plan-node-module-restructure` execute 确认。**坑 2 把同一现象误归因为「审批门控」，真根因是 cwd 敏感**（坑 2 时 backend cwd 下 `--done` 输出 `project: backend step 1/12` 不是「输出错乱」，而是真的切到了 backend 项目）。
+
+- **现象**：backend/ 子目录有独立 `backend/.sillyspec`（multi-agent-platform 子项目 spec）。当 bash working directory 停留在 `backend/`（因前面跑 `cd backend && pytest/ruff/mypy` 等子项目命令）时执行 `sillyspec run execute --done --change <SillyHub变更名>`，CLI 以 cwd 向上找 `.sillyspec` 命中 `backend/.sillyspec`，把 `--done` 应用到 **backend 项目的 execute 流程**（输出 `project: backend, step 2/12, 3 Wave`），而 **SillyHub 根项目的主流程进度完全不推进**（仍停在原 step）。`--change` 传的是 SillyHub 变更名，但 CLI 不报「变更不存在」，而是误匹配到 backend 项目的新 execute 流程。
+- **根因**：sillyspec 命令无显式 `--project`/`--spec-dir` 时以 cwd 为项目根向上探测 `.sillyspec`。仓库根（SillyHub）与 `backend/` 各有 `.sillyspec`，cwd 决定命中哪个。
+- **绕过**：**所有 sillyspec 命令必须在仓库根目录执行**（`cd F:/WorkNew/SillyHub && sillyspec ...`）。bash 工具 working directory 在多次 `cd backend` 后会留在 backend/——下一条 sillyspec 命令前务必显式 `cd` 回根目录，或每条 sillyspec 命令前缀 `cd <根> &&`。子项目命令（pytest/ruff/tsc/pnpm）跑完后立即 cd 回根，再跑 sillyspec。
+- **验证方法**：`sillyspec run execute --status` 输出的 `project:` 字段是判据——应为 `SillyHub`（根项目），若显示 `backend` 则 cwd 错了，进度会被误写到 backend 项目。
+- **建议工具修复**：sillyspec 命令明确要求 `--project` 或锁定 `.sillyspec` 位置（如取 git toplevel），不依赖 cwd 向上探测；或在 `--change` 指定的变更名在当前 spec-dir 不存在时报错而非静默匹配别的项目流程。
+
