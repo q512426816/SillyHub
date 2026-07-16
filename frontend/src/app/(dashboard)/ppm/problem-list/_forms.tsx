@@ -987,44 +987,69 @@ export function ProblemDetailForm({
       <ProcessTimeline logs={logs} loading={loadingLogs} />
       {/* 处置执行记录(D-007 done_task 创建 TaskExecute, actual 单点 now) */}
       <div style={{ marginTop: 16 }}>
-        <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 8 }}>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            marginBottom: 8,
+            color: "rgba(0,0,0,0.65)",
+          }}
+        >
           处置记录（{execRecords.length}）
         </div>
         {loadingExecs ? (
-          <div style={{ textAlign: "center", color: "#999", padding: 12 }}>加载中…</div>
+          <div style={{ textAlign: "center", color: "#999", padding: 16 }}>加载中…</div>
         ) : execRecords.length === 0 ? (
-          <div style={{ textAlign: "center", color: "#999", padding: 12 }}>暂无处置记录</div>
+          <div
+            style={{
+              textAlign: "center",
+              color: "#999",
+              padding: 24,
+              border: "1px dashed #e2e8f0",
+              borderRadius: 8,
+            }}
+          >
+            暂无处置记录
+          </div>
         ) : (
-          <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ textAlign: "left", color: "#888" }}>
-                <th style={{ padding: "4px 8px" }}>开始时间</th>
-                <th style={{ padding: "4px 8px" }}>结束时间</th>
-                <th style={{ padding: "4px 8px" }}>耗时</th>
-                <th style={{ padding: "4px 8px" }}>说明</th>
-              </tr>
-            </thead>
-            <tbody>
-              {execRecords.map((e) => (
-                <tr key={e.id} style={{ borderTop: "1px solid #f0f0f0" }}>
-                  <td style={{ padding: "4px 8px" }}>
-                    {e.actual_start_time
-                      ? dayjs(e.actual_start_time).format("YYYY-MM-DD HH:mm:ss")
-                      : "—"}
-                  </td>
-                  <td style={{ padding: "4px 8px" }}>
-                    {e.actual_end_time
-                      ? dayjs(e.actual_end_time).format("YYYY-MM-DD HH:mm:ss")
-                      : "—"}
-                  </td>
-                  <td style={{ padding: "4px 8px" }}>
-                    {e.time_spent != null ? `${e.time_spent}人天` : "—"}
-                  </td>
-                  <td style={{ padding: "4px 8px" }}>{e.execute_info ?? "—"}</td>
+          <div style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #e2e8f0" }}>
+            <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+              <thead>
+                <tr
+                  style={{
+                    background: "rgba(0,0,0,0.03)",
+                    textAlign: "left",
+                    color: "#64748b",
+                  }}
+                >
+                  <th style={{ padding: "8px 12px", fontWeight: 500 }}>开始时间</th>
+                  <th style={{ padding: "8px 12px", fontWeight: 500 }}>结束时间</th>
+                  <th style={{ padding: "8px 12px", fontWeight: 500 }}>耗时</th>
+                  <th style={{ padding: "8px 12px", fontWeight: 500 }}>说明</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {execRecords.map((e) => (
+                  <tr key={e.id} style={{ borderTop: "1px solid #f0f0f0" }}>
+                    <td style={{ padding: "8px 12px" }}>
+                      {e.actual_start_time
+                        ? dayjs(e.actual_start_time).format("YYYY-MM-DD HH:mm:ss")
+                        : "—"}
+                    </td>
+                    <td style={{ padding: "8px 12px" }}>
+                      {e.actual_end_time
+                        ? dayjs(e.actual_end_time).format("YYYY-MM-DD HH:mm:ss")
+                        : "—"}
+                    </td>
+                    <td style={{ padding: "8px 12px" }}>
+                      {e.time_spent != null ? `${e.time_spent}人天` : "—"}
+                    </td>
+                    <td style={{ padding: "8px 12px" }}>{e.execute_info ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>

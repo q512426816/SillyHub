@@ -488,9 +488,14 @@ export default function TaskPlansPage() {
       ellipsis: true,
       render: (v: string | null, t: PlanTask) => (
         <div className="flex flex-col">
-          <span className="text-sm">{v ?? "（未填写）"}</span>
+          <span className="truncate text-sm" title={v ?? ""}>
+            {v ?? "（未填写）"}
+          </span>
           {t.remarks && (
-            <span className="text-[10px] text-muted-foreground">
+            <span
+              className="truncate text-[10px] text-muted-foreground"
+              title={t.remarks}
+            >
               {t.remarks}
             </span>
           )}
@@ -604,12 +609,6 @@ export default function TaskPlansPage() {
       />
 
       <Toast toast={toast} />
-
-      {view === "personal" && currentUser && (
-        <div className="rounded border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-700">
-          当前为「我的任务」视图:仅显示 {currentUser.displayName || currentUser.email}
-        </div>
-      )}
 
       <SectionCard bodyPadding="p-2">
         {/* 顶部按钮行(D-006):数据组(导出/新建)左 | 基础组(搜索/重置/展开)最右 */}
@@ -898,7 +897,10 @@ export default function TaskPlansPage() {
               {detailDays.map((d, idx) => (
                 <div key={d.date} className="mb-3 space-y-2 rounded-md border border-border bg-muted/20 p-3 last:mb-0">
                   <div className="text-[11px] font-medium">{d.date}</div>
-                  <div className="flex gap-2">
+                  <div>
+                    <label className="mb-1 block text-[11px] text-muted-foreground">
+                      耗时(人天)
+                    </label>
                     <input
                       type="number"
                       min={0}
@@ -912,8 +914,13 @@ export default function TaskPlansPage() {
                           ),
                         )
                       }
-                      className={`w-32 ${inputCls}`}
+                      className={`w-40 ${inputCls}`}
                     />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-muted-foreground">
+                      执行情况说明
+                    </label>
                     <input
                       placeholder="执行情况说明"
                       value={d.execInfo}
@@ -924,7 +931,7 @@ export default function TaskPlansPage() {
                           ),
                         )
                       }
-                      className={`flex-1 ${inputCls}`}
+                      className={`w-full ${inputCls}`}
                     />
                   </div>
                 </div>
