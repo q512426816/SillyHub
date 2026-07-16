@@ -105,7 +105,7 @@ export default function TaskPlansPage() {
   const [error, setError] = useState<string | null>(null);
 
   // 筛选(全部走服务端 PlanTaskPageReq)
-  const [statusFilterList, setStatusFilterList] = useState<string[]>([]);
+  const [statusFilterList, setStatusFilterList] = useState<string[]>(["未开始", "进行中"]);
   const [monthFilter, setMonthFilter] = useState<string>("");
   const [projectFilter, setProjectFilter] = useState<string>("");
   const [userFilter, setUserFilter] = useState<string | null>(null);
