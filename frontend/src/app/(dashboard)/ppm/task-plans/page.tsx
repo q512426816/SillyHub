@@ -309,17 +309,22 @@ export default function TaskPlansPage() {
     try {
       // 跨天拆分提交(D-006): 首条收口 in-flight; 后续天 start+execute;
       // 中间天 submit 回未开始, 末天用 action(submit/complete)
+      // actual 时间用 UTC 固定时刻(本地 startOf/endOf 转 UTC 可能跨日, 后端跨天校验按 UTC date)
+      const inflightRec = records.find((e) => e.id === detailInflightId);
       let lastExcId = detailInflightId;
       for (let i = 0; i < detailDays.length; i++) {
         const d = detailDays[i];
         if (!d) continue;
         const isLast = i === detailDays.length - 1;
         const ts = d.timeSpent ? Number(d.timeSpent) : undefined;
+        const dayIso = `${d.date}T12:00:00Z`;
+        // 首条 execute 的 end 用 in-flight 的 start(同时刻, 确保 UTC date 一致); 后续天用 dayIso
+        const endIso = i === 0 ? inflightRec?.actual_start_time ?? dayIso : dayIso;
         if (i > 0) {
-          // 后续天: start 创建新 in-flight(记当天开始时间)
+          // 后续天: start 创建新 in-flight(记当天 UTC 中午)
           const newExc = await startPlanTask({
             plan_task_id: recordsTask.id,
-            actual_start_time: dayjs(d.date).startOf("day").toISOString(),
+            actual_start_time: dayIso,
           });
           lastExcId = newExc.id;
         }
@@ -329,7 +334,7 @@ export default function TaskPlansPage() {
           task_execute_id: lastExcId,
           execute_info: d.execInfo || undefined,
           time_spent: ts !== undefined && !Number.isNaN(ts) ? ts : undefined,
-          actual_end_time: dayjs(d.date).endOf("day").toISOString(),
+          actual_end_time: endIso,
         });
       }
       showToast(true, action === "complete" ? "任务已完成" : "执行已保存");
