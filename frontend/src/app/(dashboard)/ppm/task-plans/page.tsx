@@ -128,10 +128,12 @@ export default function TaskPlansPage() {
   const [execute, setExecute] = useState<ExecuteTaskState | null>(null);
   const [recordsTask, setRecordsTask] = useState<PlanTask | null>(null);
   const [records, setRecords] = useState<TaskExecute[]>([]);
-  const [detailTimeSpent, setDetailTimeSpent] = useState("");
-  const [detailExecInfo, setDetailExecInfo] = useState("");
   const [detailInflightId, setDetailInflightId] = useState<string | null>(null);
   const [detailMode, setDetailMode] = useState<"detail" | "execute">("detail");
+  // 跨天拆分(D-006): in-flight actual_start ~ today 按天拆, 每天一行(耗时/说明)
+  const [detailDays, setDetailDays] = useState<
+    { date: string; timeSpent: string; execInfo: string }[]
+  >([]);
   const [executeBusy, setExecuteBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<PlanTask | null>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
@@ -268,16 +270,30 @@ export default function TaskPlansPage() {
       const items = page.items ?? [];
       setRecords(items);
       setRecordsTask(task);
-      // 预填 in-flight 执行表单(status=30, execute 模式用)
+      // 预填 in-flight 执行表单(status=30) + 跨天拆分(actual_start~today 按天)
       const inflight = items.find((e) => e.status === "30");
-      if (inflight) {
+      if (inflight && inflight.actual_start_time) {
         setDetailInflightId(inflight.id);
-        setDetailTimeSpent(inflight.time_spent != null ? String(inflight.time_spent) : "");
-        setDetailExecInfo(inflight.execute_info ?? "");
+        const startDay = dayjs(inflight.actual_start_time).startOf("day");
+        const today = dayjs().startOf("day");
+        const days: { date: string; timeSpent: string; execInfo: string }[] = [];
+        let cur = startDay;
+        let i = 0;
+        while (cur.isBefore(today) || cur.isSame(today, "day")) {
+          days.push({
+            date: cur.format("YYYY-MM-DD"),
+            timeSpent:
+              i === 0 && inflight.time_spent != null ? String(inflight.time_spent) : "",
+            execInfo: i === 0 ? inflight.execute_info ?? "" : "",
+          });
+          cur = cur.add(1, "day");
+          i += 1;
+          if (i > 60) break; // 兜底防死循环
+        }
+        setDetailDays(days);
       } else {
         setDetailInflightId(null);
-        setDetailTimeSpent("");
-        setDetailExecInfo("");
+        setDetailDays([]);
       }
     } catch (err) {
       showToast(false, err instanceof ApiError ? err.message : "加载执行记录失败");
@@ -285,23 +301,41 @@ export default function TaskPlansPage() {
   };
 
   const handleDetailExecute = async (action: "submit" | "complete") => {
-    if (!recordsTask || !detailInflightId) {
+    if (!recordsTask || !detailInflightId || detailDays.length === 0) {
       showToast(false, "无进行中的执行记录");
       return;
     }
     setExecuteBusy(true);
     try {
-      const ts = detailTimeSpent ? Number(detailTimeSpent) : undefined;
-      await executePlanTask({
-        plan_task_id: recordsTask.id,
-        action,
-        task_execute_id: detailInflightId,
-        execute_info: detailExecInfo || undefined,
-        time_spent: ts !== undefined && !Number.isNaN(ts) ? ts : undefined,
-      });
+      // 跨天拆分提交(D-006): 首条收口 in-flight; 后续天 start+execute;
+      // 中间天 submit 回未开始, 末天用 action(submit/complete)
+      let lastExcId = detailInflightId;
+      for (let i = 0; i < detailDays.length; i++) {
+        const d = detailDays[i];
+        if (!d) continue;
+        const isLast = i === detailDays.length - 1;
+        const ts = d.timeSpent ? Number(d.timeSpent) : undefined;
+        if (i > 0) {
+          // 后续天: start 创建新 in-flight(记当天开始时间)
+          const newExc = await startPlanTask({
+            plan_task_id: recordsTask.id,
+            actual_start_time: dayjs(d.date).startOf("day").toISOString(),
+          });
+          lastExcId = newExc.id;
+        }
+        await executePlanTask({
+          plan_task_id: recordsTask.id,
+          action: isLast ? action : "submit",
+          task_execute_id: lastExcId,
+          execute_info: d.execInfo || undefined,
+          time_spent: ts !== undefined && !Number.isNaN(ts) ? ts : undefined,
+          actual_end_time: dayjs(d.date).endOf("day").toISOString(),
+        });
+      }
       showToast(true, action === "complete" ? "任务已完成" : "执行已保存");
       setRecordsTask(null); // 提交/完成直接关闭弹窗
       setRecords([]);
+      setDetailDays([]);
       await load();
     } catch (err) {
       showToast(false, err instanceof ApiError ? err.message : "执行失败");
@@ -515,25 +549,13 @@ export default function TaskPlansPage() {
         const canDelete = canDeleteTask(t);
         return (
           <div className="flex whitespace-nowrap gap-1 justify-center">
-            {t.status === "未开始" && (
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={!canOperate}
-                title={canOperate ? undefined : "仅管理员或负责人可操作"}
-                onClick={() => void handleStart(t)}
-              >
+            {t.status === "未开始" && canOperate && (
+              <Button size="sm" variant="ghost" onClick={() => void handleStart(t)}>
                 启动
               </Button>
             )}
-            {t.status === "进行中" && (
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={!canOperate}
-                title={canOperate ? undefined : "仅管理员或负责人可操作"}
-                onClick={() => void handleOpenDetail(t, "execute")}
-              >
+            {t.status === "进行中" && canOperate && (
+              <Button size="sm" variant="ghost" onClick={() => void handleOpenDetail(t, "execute")}>
                 执行
               </Button>
             )}
@@ -834,27 +856,46 @@ export default function TaskPlansPage() {
             recordsTask.status === "进行中" &&
             detailInflightId && (
             <div className="mt-3 space-y-2 border-t border-border pt-3">
-              <div className="text-xs font-medium text-muted-foreground">填报执行</div>
-              <div>
-                <label className="text-[11px] text-muted-foreground">本次耗时(人天)</label>
-                <input
-                  type="number"
-                  min={0}
-                  step={0.5}
-                  value={detailTimeSpent}
-                  onChange={(e) => setDetailTimeSpent(e.target.value)}
-                  className={`mt-0.5 ${inputCls}`}
-                />
+              <div className="text-xs font-medium text-muted-foreground">
+                填报执行
+                {detailDays.length > 1
+                  ? `（跨 ${detailDays.length} 天，已自动按天拆分，逐天填写耗时与说明）`
+                  : ""}
               </div>
-              <div>
-                <label className="text-[11px] text-muted-foreground">执行情况说明</label>
-                <textarea
-                  rows={2}
-                  value={detailExecInfo}
-                  onChange={(e) => setDetailExecInfo(e.target.value)}
-                  className="mt-0.5 w-full rounded border border-input bg-background px-2.5 py-1.5 text-sm focus:border-ring focus:outline-none"
-                />
-              </div>
+              {detailDays.map((d, idx) => (
+                <div key={d.date} className="space-y-1 rounded border border-border p-2">
+                  <div className="text-[11px] font-medium">{d.date}</div>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.5}
+                      placeholder="耗时(人天)"
+                      value={d.timeSpent}
+                      onChange={(e) =>
+                        setDetailDays((prev) =>
+                          prev.map((x, i) =>
+                            i === idx ? { ...x, timeSpent: e.target.value } : x,
+                          ),
+                        )
+                      }
+                      className={`w-32 ${inputCls}`}
+                    />
+                    <input
+                      placeholder="执行情况说明"
+                      value={d.execInfo}
+                      onChange={(e) =>
+                        setDetailDays((prev) =>
+                          prev.map((x, i) =>
+                            i === idx ? { ...x, execInfo: e.target.value } : x,
+                          ),
+                        )
+                      }
+                      className={`flex-1 ${inputCls}`}
+                    />
+                  </div>
+                </div>
+              ))}
               <div className="flex gap-2">
                 <Button
                   size="sm"
