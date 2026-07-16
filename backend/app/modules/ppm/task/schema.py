@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel as PydanticModel
-from pydantic import Field
+from pydantic import Field, model_validator
 
 # ---------------------------------------------------------------------------
 # PlanTask
@@ -148,8 +149,8 @@ class ExecutePlanReq(PydanticModel):
 
     Attributes:
         plan_task_id: 被执行的计划任务 ID。
-        submit: 是否标记完成 (True → 状态 90 已完成)。
-        task_execute_id: 已存在执行记录 ID 时为更新,否则新建。
+        action: 执行动作 "submit"(保存本次+任务回未开始,可再次填报) / "complete"(保存本次+任务已完成)。
+        task_execute_id: start 端点返回的 in-flight 执行记录 ID(execute 时必填,收口哪条)。
         execute_info / time_spent / actual_start_time / actual_end_time:
             本次执行信息。
         execute_user_id: 执行人。
@@ -157,8 +158,10 @@ class ExecutePlanReq(PydanticModel):
     """
 
     plan_task_id: uuid.UUID
-    submit: bool = False
-    task_execute_id: uuid.UUID | None = None
+    # D-003: 删 submit bool 改 action 枚举(不反向兼容:旧 submit=True=完成 vs 新 action="submit"=重置未开始,语义相反)
+    action: Literal["submit", "complete"]
+    # start 端点返回的 in-flight 执行记录 id(execute 时必填)
+    task_execute_id: uuid.UUID
     execute_info: str | None = None
     time_spent: float | None = None
     actual_start_time: datetime | None = None
@@ -166,6 +169,18 @@ class ExecutePlanReq(PydanticModel):
     execute_user_id: uuid.UUID | None = None
     start_remark: str | None = None
     end_remark: str | None = None
+
+
+class StartReq(PydanticModel):
+    """启动任务请求(未开始→进行中,创建 in-flight TaskExecute 记 actual_start_time)。
+
+    D-002: 多次填报每次"启动"产生一条 TaskExecute。返回的 id 用于 execute 的 task_execute_id。
+    actual_start_time 可选(跨天拆分补填时传指定日期,默认 now)。
+    """
+
+    plan_task_id: uuid.UUID
+    execute_user_id: uuid.UUID | None = None
+    actual_start_time: datetime | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +208,17 @@ class TaskExecuteCreate(PydanticModel):
     current_user_id: uuid.UUID | None = None
     status: str = "10"
 
+    @model_validator(mode="after")
+    def _no_crossday_create(self) -> "TaskExecuteCreate":
+        """D-004 跨天校验(看板 CRUD 路径): actual 起止均非空时必须同日。"""
+        if (
+            self.actual_start_time is not None
+            and self.actual_end_time is not None
+            and self.actual_start_time.date() != self.actual_end_time.date()
+        ):
+            raise ValueError("执行起止时间不可跨天，请拆成每天单独填报")
+        return self
+
 
 class TaskExecuteUpdate(PydanticModel):
     """更新任务执行记录 (全字段可选)。"""
@@ -213,6 +239,17 @@ class TaskExecuteUpdate(PydanticModel):
     check_flag: str | None = None
     current_user_id: uuid.UUID | None = None
     status: str | None = None
+
+    @model_validator(mode="after")
+    def _no_crossday_update(self) -> "TaskExecuteUpdate":
+        """D-004 跨天校验(看板 CRUD 路径): actual 起止均非空时必须同日。"""
+        if (
+            self.actual_start_time is not None
+            and self.actual_end_time is not None
+            and self.actual_start_time.date() != self.actual_end_time.date()
+        ):
+            raise ValueError("执行起止时间不可跨天，请拆成每天单独填报")
+        return self
 
 
 class TaskExecuteResponse(PydanticModel):
@@ -265,6 +302,7 @@ class TaskExecutePageReq(PydanticModel):
     page_size: int = Field(default=20, ge=1, le=200)
     # UUID 字段容错为 str,service 层 try-parse (前端可能传 "-" / 空串占位)
     plan_task_id: str | uuid.UUID | None = None
+    problem_task_id: str | uuid.UUID | None = None
     status: str | None = None
     execute_user_id: str | uuid.UUID | None = None
     order_by: str | None = None

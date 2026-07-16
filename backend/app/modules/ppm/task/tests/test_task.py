@@ -238,46 +238,52 @@ async def test_execute_plan_creates_execute_and_advances_status(db_session):
     plan_id = await _seed_plan(db_session, user_id)
     plan_svc = PlanTaskService(db_session)
 
-    # 第一次执行(非提交):创建 TaskExecute,状态 10 → 30 处置中
-    exc = await plan_svc.execute_plan(
-        ExecutePlanReq(
-            plan_task_id=plan_id,
-            execute_info="开始执行",
-            execute_user_id=user_id,
-            actual_start_time=datetime(2026, 6, 20, 10, tzinfo=UTC),
-        ),
-        current_user_id=user_id,
+    # start: 未开始→进行中, 创建 in-flight TaskExecute(actual_start_time)
+    exc = await plan_svc.start(
+        plan_id,
+        execute_user_id=user_id,
+        actual_start_time=datetime(2026, 6, 20, 10, tzinfo=UTC),
     )
     assert exc.status == STATUS_DOING
     assert exc.plan_task_id == plan_id
-    assert exc.execute_info == "开始执行"
-    # 计划状态推进为进行中
+    assert exc.actual_start_time is not None
     plan = await plan_svc.get(plan_id)
     assert plan.status == "进行中"
-    assert plan.actual_start_time is not None
 
-    # 第二次执行(submit=True):状态 30 → 90 已完成
+    # execute(complete): 收口 → status=90 + plan 已完成(D-005 强制回填 actual_end)
     exc2 = await plan_svc.execute_plan(
         ExecutePlanReq(
             plan_task_id=plan_id,
+            action="complete",
             task_execute_id=exc.id,
-            submit=True,
+            execute_info="完成",
+            time_spent=1.0,
             actual_end_time=datetime(2026, 6, 20, 17, tzinfo=UTC),
             end_remark="完成",
         ),
         current_user_id=user_id,
     )
     assert exc2.status == STATUS_END
+    assert exc2.execute_info == "完成"
+    assert exc2.time_spent == 1.0
+    assert exc2.actual_end_time is not None
     plan = await plan_svc.get(plan_id)
     assert plan.status == "已完成"
     assert plan.actual_end_time is not None
 
-    # 终态后再执行应抛 IllegalStatusTransition
+    # 终态 TaskExecute(90) 后再 execute 应抛 IllegalStatusTransition
     from app.modules.ppm.task.service import IllegalStatusTransition
 
     with pytest.raises(IllegalStatusTransition):
         await plan_svc.execute_plan(
-            ExecutePlanReq(plan_task_id=plan_id, task_execute_id=exc.id, submit=True),
+            ExecutePlanReq(
+                plan_task_id=plan_id,
+                action="complete",
+                task_execute_id=exc.id,
+                actual_end_time=datetime(
+                    2026, 6, 20, 18, tzinfo=UTC
+                ),  # 同日避免跨天, 让终态保护先触发
+            ),
             current_user_id=user_id,
         )
 
@@ -286,10 +292,7 @@ async def test_execute_plan_delete_cascades_execute(db_session):
     user_id = uuid.uuid4()
     plan_id = await _seed_plan(db_session, user_id)
     plan_svc = PlanTaskService(db_session)
-    exc = await plan_svc.execute_plan(
-        ExecutePlanReq(plan_task_id=plan_id, execute_user_id=user_id),
-        current_user_id=user_id,
-    )
+    exc = await plan_svc.start(plan_id, execute_user_id=user_id)
     await plan_svc.delete(plan_id)
     # 关联执行记录应被级联删除
     from sqlalchemy import select as sa_select
@@ -531,15 +534,28 @@ async def test_work_hour_stat_endpoints(client, auth_headers):
         )
         assert resp.status_code == 201, resp.text
         plan_id = resp.json()["id"]
+        # start: 未开始→进行中, 创建 in-flight TaskExecute
+        resp = await client.post(
+            "/api/ppm/task-plan/start",
+            json={
+                "plan_task_id": plan_id,
+                "execute_user_id": user_id,
+                "actual_start_time": "2026-06-01T09:00:00Z",
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        exec_id = resp.json()["id"]
+        # execute(complete): 收口 + 写 time_spent(D-005 强制回填 actual_end)
         resp = await client.put(
             "/api/ppm/task-plan/execute",
             json={
                 "plan_task_id": plan_id,
+                "action": "complete",
+                "task_execute_id": exec_id,
                 "execute_user_id": user_id,
                 "time_spent": hours,
-                "actual_start_time": "2026-06-01T09:00:00Z",
                 "actual_end_time": "2026-06-01T18:00:00Z",
-                "submit": True,
             },
             headers=auth_headers,
         )
@@ -626,27 +642,23 @@ async def test_execute_plan_http_endpoint(client, auth_headers):
     )
     plan_id = resp.json()["id"]
 
-    # 执行(非提交)
-    resp = await client.put(
-        "/api/ppm/task-plan/execute",
-        json={
-            "plan_task_id": plan_id,
-            "execute_info": "开始",
-            "execute_user_id": user_id,
-        },
+    # start: 未开始→进行中, 创建 in-flight TaskExecute
+    resp = await client.post(
+        "/api/ppm/task-plan/start",
+        json={"plan_task_id": plan_id, "execute_user_id": user_id},
         headers=auth_headers,
     )
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 201, resp.text
     exec_id = resp.json()["id"]
     assert resp.json()["status"] == STATUS_DOING
 
-    # 提交完成
+    # execute(complete): 收口 → 已完成
     resp = await client.put(
         "/api/ppm/task-plan/execute",
         json={
             "plan_task_id": plan_id,
+            "action": "complete",
             "task_execute_id": exec_id,
-            "submit": True,
             "end_remark": "done",
         },
         headers=auth_headers,

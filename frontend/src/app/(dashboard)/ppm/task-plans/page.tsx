@@ -30,6 +30,8 @@ import {
   exportPlanTasks,
   listPersonalPlanTasks,
   listPlanTasks,
+  listTaskExecutes,
+  startPlanTask,
   updatePlanTask,
 } from "@/lib/ppm/task";
 import { listSimpleProjects } from "@/lib/ppm/project";
@@ -245,9 +247,58 @@ export default function TaskPlansPage() {
     await load();
   };
 
-  const handleExecute = async () => {
+  const handleStart = async (task: PlanTask) => {
+    setExecuteBusy(true);
+    try {
+      const exc = await startPlanTask({ plan_task_id: task.id });
+      setExecute({
+        task,
+        executeInfo: "",
+        timeSpent: task.time_spent ? String(task.time_spent) : "",
+        taskExecuteId: exc.id,
+      });
+    } catch (err) {
+      showToast(false, err instanceof ApiError ? err.message : "启动失败");
+    } finally {
+      setExecuteBusy(false);
+    }
+  };
+
+  const handleResume = async (task: PlanTask) => {
+    setExecuteBusy(true);
+    try {
+      const page = await listTaskExecutes({
+        plan_task_id: task.id,
+        status: "30",
+        page: 1,
+        page_size: 1,
+      });
+      const inflight = page.items?.[0];
+      if (!inflight) {
+        showToast(false, "未找到进行中的执行记录");
+        return;
+      }
+      setExecute({
+        task,
+        executeInfo: inflight.execute_info ?? "",
+        timeSpent:
+          inflight.time_spent != null ? String(inflight.time_spent) : "",
+        taskExecuteId: inflight.id,
+      });
+    } catch (err) {
+      showToast(false, err instanceof ApiError ? err.message : "加载执行记录失败");
+    } finally {
+      setExecuteBusy(false);
+    }
+  };
+
+  const handleExecute = async (action: "submit" | "complete") => {
     if (!execute?.task) return;
     const task = execute.task;
+    if (!execute.taskExecuteId) {
+      showToast(false, "缺少执行记录 id, 请先启动任务");
+      return;
+    }
     setExecuteBusy(true);
     try {
       const timeSpent = execute.timeSpent
@@ -255,14 +306,18 @@ export default function TaskPlansPage() {
         : undefined;
       await executePlanTask({
         plan_task_id: task.id,
-        submit: execute.submit,
+        action,
+        task_execute_id: execute.taskExecuteId,
         execute_info: execute.executeInfo || undefined,
         time_spent:
           timeSpent !== undefined && !Number.isNaN(timeSpent)
             ? timeSpent
             : undefined,
       });
-      showToast(true, execute.submit ? "任务已提交(待验证)" : "执行进度已保存");
+      showToast(
+        true,
+        action === "complete" ? "任务已完成" : "执行已保存(可再次填报)",
+      );
       setExecute(null);
       await load();
     } catch (err) {
@@ -399,20 +454,24 @@ export default function TaskPlansPage() {
         const canDelete = canDeleteTask(t);
         return (
           <div className="flex whitespace-nowrap gap-1 justify-center">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() =>
-                setExecute({
-                  task: t,
-                  executeInfo: "",
-                  timeSpent: t.time_spent ? String(t.time_spent) : "",
-                  submit: false,
-                })
-              }
-            >
-              执行
-            </Button>
+            {t.status === "未开始" && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void handleStart(t)}
+              >
+                启动
+              </Button>
+            )}
+            {t.status === "进行中" && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void handleResume(t)}
+              >
+                执行
+              </Button>
+            )}
             <Button
               size="sm"
               variant="ghost"
@@ -649,7 +708,7 @@ export default function TaskPlansPage() {
         <ExecuteTaskDialog
           state={execute}
           onChange={setExecute}
-          onConfirm={() => void handleExecute()}
+          onConfirm={(action) => void handleExecute(action)}
           onCancel={() => setExecute(null)}
           busy={executeBusy}
         />

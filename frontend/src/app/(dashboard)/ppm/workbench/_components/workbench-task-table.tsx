@@ -31,7 +31,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ApiError } from "@/lib/api";
-import { executePlanTask, listPersonalPlanTasks } from "@/lib/ppm/task";
+import {
+  executePlanTask,
+  listPersonalPlanTasks,
+  listTaskExecutes,
+  startPlanTask,
+} from "@/lib/ppm/task";
 import { listSimpleProjects } from "@/lib/ppm/project";
 import type { PlanTask, PlanTaskPageReq, ProjectSimpleItem } from "@/lib/ppm/types";
 import {
@@ -147,21 +152,70 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
   const [detailTask, setDetailTask] = useState<PlanTask | null>(null);
   const { toast, showToast } = useToast();
 
-  const handleExecute = async () => {
+  const handleStart = async (task: PlanTask) => {
+    setBusy(true);
+    try {
+      const exc = await startPlanTask({ plan_task_id: task.id });
+      setExecute({
+        task,
+        executeInfo: "",
+        timeSpent: task.time_spent ? String(task.time_spent) : "",
+        taskExecuteId: exc.id,
+      });
+    } catch (err) {
+      showToast(false, err instanceof ApiError ? err.message : "启动失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleResume = async (task: PlanTask) => {
+    setBusy(true);
+    try {
+      const page = await listTaskExecutes({
+        plan_task_id: task.id,
+        status: "30",
+        page: 1,
+        page_size: 1,
+      });
+      const inflight = page.items?.[0];
+      if (!inflight) {
+        showToast(false, "未找到进行中的执行记录");
+        return;
+      }
+      setExecute({
+        task,
+        executeInfo: inflight.execute_info ?? "",
+        timeSpent: inflight.time_spent != null ? String(inflight.time_spent) : "",
+        taskExecuteId: inflight.id,
+      });
+    } catch (err) {
+      showToast(false, err instanceof ApiError ? err.message : "加载执行记录失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleExecute = async (action: "submit" | "complete") => {
     if (!execute) return;
+    if (!execute.taskExecuteId) {
+      showToast(false, "缺少执行记录 id, 请先启动任务");
+      return;
+    }
     setBusy(true);
     try {
       const timeSpent = execute.timeSpent ? Number(execute.timeSpent) : undefined;
       await executePlanTask({
         plan_task_id: execute.task.id,
-        submit: execute.submit,
+        action,
+        task_execute_id: execute.taskExecuteId,
         execute_info: execute.executeInfo || undefined,
         time_spent:
           timeSpent !== undefined && !Number.isNaN(timeSpent) ? timeSpent : undefined,
       });
       showToast(
         true,
-        execute.submit ? "任务已标记当日完成" : "执行进度已保存",
+        action === "complete" ? "任务已完成" : "执行已保存(可再次填报)",
       );
       setExecute(null);
       onChanged?.(); // 通知 page 刷 summary
@@ -221,21 +275,16 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
           <Button size="sm" variant="ghost" onClick={() => setDetailTask(t)}>
             详情
           </Button>
-          <Button
-            size="sm"
-            variant="default"
-            disabled={t.status === "已完成"}
-            onClick={() =>
-              setExecute({
-                task: t,
-                executeInfo: "",
-                timeSpent: t.time_spent ? String(t.time_spent) : "",
-                submit: false,
-              })
-            }
-          >
-            执行
-          </Button>
+          {t.status === "未开始" && (
+            <Button size="sm" variant="default" onClick={() => void handleStart(t)}>
+              启动
+            </Button>
+          )}
+          {t.status === "进行中" && (
+            <Button size="sm" variant="default" onClick={() => void handleResume(t)}>
+              执行
+            </Button>
+          )}
         </div>
       ),
     },
@@ -333,7 +382,7 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
         <ExecuteTaskDialog
           state={execute}
           onChange={setExecute}
-          onConfirm={() => void handleExecute()}
+          onConfirm={(action) => void handleExecute(action)}
           onCancel={() => setExecute(null)}
           busy={busy}
         />

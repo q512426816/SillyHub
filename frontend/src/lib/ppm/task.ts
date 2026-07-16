@@ -19,6 +19,7 @@ import type {
   PlanTaskCreate,
   PlanTaskPageReq,
   PlanTaskUpdate,
+  StartReq,
   TaskExecute,
   TaskExecuteCreate,
   TaskExecuteWithPlan,
@@ -91,6 +92,18 @@ export async function deletePlanTask(planTaskId: string): Promise<void> {
 export async function executePlanTask(body: ExecutePlanReq): Promise<TaskExecute> {
   return apiFetch<TaskExecute>("/api/ppm/task-plan/execute", {
     method: "PUT",
+    json: body,
+  });
+}
+
+/** 启动任务(未开始→进行中) — 创建 in-flight TaskExecute 记 actual_start_time。
+
+ * 返回的 id 作为后续 executePlanTask({action, task_execute_id}) 的 task_execute_id。
+ * D-002 多次填报: 每次 start 产生一条独立 TaskExecute。
+ */
+export async function startPlanTask(body: StartReq): Promise<TaskExecute> {
+  return apiFetch<TaskExecute>("/api/ppm/task-plan/start", {
+    method: "POST",
     json: body,
   });
 }

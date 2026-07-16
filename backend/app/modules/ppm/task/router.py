@@ -30,6 +30,7 @@ from app.modules.ppm.task.schema import (
     PlanTaskPageReq,
     PlanTaskResponse,
     PlanTaskUpdate,
+    StartReq,
     TaskExecuteCreate,
     TaskExecutePageReq,
     TaskExecuteResponse,
@@ -182,6 +183,30 @@ async def execute_plan_task(
     """执行计划:联动生成/更新 TaskExecute + 状态机推进。"""
     svc = PlanTaskService(session)
     exc = await svc.execute_plan(body, user.id)
+    return TaskExecuteResponse.model_validate(exc)
+
+
+@router.post(
+    "/task-plan/start",
+    response_model=TaskExecuteResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def start_plan_task(
+    body: StartReq,
+    session: SessionDep,
+    user: TaskWriteUser,
+) -> TaskExecuteResponse:
+    """启动任务(未开始→进行中): 创建 in-flight TaskExecute 记 actual_start_time。
+
+    返回的 ``id`` 作为后续 POST /task-plan/execute 的 ``task_execute_id``。
+    D-002 多次填报: 每次 start 产生一条独立 TaskExecute(1 plan : N execute)。
+    """
+    svc = PlanTaskService(session)
+    exc = await svc.start(
+        body.plan_task_id,
+        body.execute_user_id or user.id,
+        body.actual_start_time,
+    )
     return TaskExecuteResponse.model_validate(exc)
 
 
@@ -352,6 +377,7 @@ async def page_task_execute(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     plan_task_id: str | None = Query(None),
+    problem_task_id: str | None = Query(None),
     execute_status: str | None = Query(None, alias="status"),
     execute_user_id: str | None = Query(None),
     order_by: str | None = Query(None),
@@ -361,6 +387,7 @@ async def page_task_execute(
         page=page,
         page_size=page_size,
         plan_task_id=plan_task_id,
+        problem_task_id=problem_task_id,
         status=execute_status,
         execute_user_id=execute_user_id,
         order_by=order_by,

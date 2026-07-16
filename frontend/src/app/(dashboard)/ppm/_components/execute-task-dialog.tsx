@@ -31,7 +31,8 @@ export interface ExecuteTaskState {
   task: PlanTask;
   executeInfo: string;
   timeSpent: string;
-  submit: boolean;
+  /** start 端点返回的 in-flight 执行记录 id(execute 时必填) */
+  taskExecuteId?: string;
 }
 
 /** 详情只读项:label + value(空显示 —)。 */
@@ -101,7 +102,8 @@ export function ExecuteTaskDialog({
 }: {
   state: ExecuteTaskState;
   onChange: (_s: ExecuteTaskState) => void;
-  onConfirm: () => void;
+  /** action: submit(保存本次+任务回未开始, 可再次填报) / complete(保存本次+任务已完成) */
+  onConfirm: (action: "submit" | "complete") => void;
   onCancel: () => void;
   busy?: boolean;
 }) {
@@ -152,13 +154,10 @@ export function ExecuteTaskDialog({
               className="mt-0.5 w-full rounded border border-input bg-background px-2.5 py-1.5 text-sm focus:border-ring focus:outline-none"
             />
           </div>
-          <label className="flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={state.submit}
-              onChange={(e) => onChange({ ...state, submit: e.target.checked })}
-            />
-            <span>提交到「已完成」（勾选则推进状态机为已完成）</span>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>
+              注: 执行起止不可跨天, 跨天请分多次「启动 → 提交」填报(D-004)。
+            </span>
           </label>
         </div>
 
@@ -171,8 +170,17 @@ export function ExecuteTaskDialog({
           >
             取消
           </Button>
-          <Button size="sm" disabled={busy} onClick={onConfirm}>
-            {busy ? "提交中…" : "确认执行"}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            onClick={() => onConfirm("submit")}
+            title="保存本次执行记录, 任务回未开始(可再次填报)"
+          >
+            {busy ? "提交中…" : "提交"}
+          </Button>
+          <Button size="sm" disabled={busy} onClick={() => onConfirm("complete")}>
+            完成
           </Button>
         </DialogFooter>
       </DialogContent>

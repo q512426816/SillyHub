@@ -107,43 +107,32 @@ def _load_level_workload(hours: float) -> str:
     return "over"
 
 
-def _spread_actual_hours(
+def _sum_actual_hours(
     rows: list[TaskExecute],
     year: int,
     month: int,
     today: date,
 ) -> dict[int, float]:
-    """过去侧 (D-001~005):把 ``TaskExecute`` 实际工时 (``time_spent`` 人天) 平摊到
-    actual 区间内、落在 ``(year, month)`` 且日期 ``< today`` 的日历日。
+    """过去侧 (D-001 求和, 推翻 07-15 平摊): ``TaskExecute`` 实际工时
+    (``time_spent`` 人天) ``× 8`` 直接累加到 actual 区间覆盖、落在 ``(year, month)``
+    且 ``< today`` 的日历日(不平摊;跨多天记录覆盖日全计入)。
 
-    返回 ``{day_of_month: hours}``。actual 区间缺失三档兜底 (D-003):双端有 →
-    ``[start, end]``;仅一端 → 落该端点单日;都无 → 跳过。``time_spent × 8`` 转小时、
-    ``None → 0`` (D-004);跨月时区间天数分母含全区间,只累加当月过去天 (D-005)。
+    返回 ``{day_of_month: hours}``。``time_spent × 8`` 转小时、``None → 0`` 跳过;
+    区间覆盖复用 ``_covers_date`` 三档兜底(双端/单端/都无→跳过)。
+    历史 migration 跨天数据求和后可能虚高饱和(规则11, 用户确认接受)。
     """
     daily: dict[int, float] = {}
+    days_in_month = _calendar.monthrange(year, month)[1]
     for ex in rows:
-        start_dt = ex.actual_start_time
-        end_dt = ex.actual_end_time
-        if start_dt is not None and end_dt is not None:
-            start_date = _to_aware(start_dt).date()
-            end_date = _to_aware(end_dt).date()
-        elif start_dt is not None:
-            start_date = end_date = _to_aware(start_dt).date()
-        elif end_dt is not None:
-            start_date = end_date = _to_aware(end_dt).date()
-        else:
+        hours = float(ex.time_spent or 0.0) * 8.0
+        if hours <= 0:
             continue
-        if end_date < start_date:
-            continue
-        span_days = (end_date - start_date).days + 1
-        daily_hours = float(ex.time_spent or 0.0) * 8.0 / span_days
-        if daily_hours <= 0:
-            continue
-        cur = start_date
-        while cur <= end_date:
-            if cur.year == year and cur.month == month and cur < today:
-                daily[cur.day] = daily.get(cur.day, 0.0) + daily_hours
-            cur += timedelta(days=1)
+        for day in range(1, days_in_month + 1):
+            day_date = date(year, month, day)
+            if day_date < today and _covers_date(
+                ex.actual_start_time, ex.actual_end_time, day_date
+            ):
+                daily[day] = daily.get(day, 0.0) + hours
     return daily
 
 
@@ -580,7 +569,7 @@ class WorkbenchService:
             plan_content_map = {pid: content for pid, content in pc_rows}
 
         # 左点:过去 actual 平摊 (D-001~005)
-        daily_actual = _spread_actual_hours(executes, year, month, today)
+        daily_actual = _sum_actual_hours(executes, year, month, today)
         # 左点:未来剩余负载 (D-007)。未完成 + end>=today 的 plans 子集
         future_plans = [
             p

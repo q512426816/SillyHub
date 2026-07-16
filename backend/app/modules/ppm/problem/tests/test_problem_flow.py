@@ -382,6 +382,27 @@ class TestProcessAudit:
         assert p.status == ProblemStatus.WAIT_CHECK.value
         assert float(p.time_spent or 0) == 2.0  # 1.5 + 0.5
 
+        # D-007: done_task 额外创建 TaskExecute(problem_task_id 关联, actual 单点 now)
+        from sqlalchemy import select as sa_select
+
+        from app.modules.ppm.task.model import TaskExecute
+
+        execs = (
+            (
+                await db_session.execute(
+                    sa_select(TaskExecute).where(TaskExecute.problem_task_id == pid)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(execs) == 2  # 两次 done_task 各创建一条
+        assert all(e.status == "90" for e in execs)
+        # actual 单点(同日), execute_info=handle_info
+        assert all(e.actual_start_time is not None and e.actual_end_time is not None for e in execs)
+        assert any("排查中" in (e.execute_info or "") for e in execs)
+        assert any("已修复" in (e.execute_info or "") for e in execs)
+
 
 # ===========================================================================
 # fsm 纯函数

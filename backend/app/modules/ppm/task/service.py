@@ -234,55 +234,99 @@ class PlanTaskService:
     # executePlan 联动
     # ------------------------------------------------------------------
 
+    async def start(
+        self,
+        plan_task_id: uuid.UUID,
+        execute_user_id: uuid.UUID | None = None,
+        actual_start_time: datetime | None = None,
+    ) -> TaskExecute:
+        """启动任务(未开始→进行中): 创建一条 in-flight TaskExecute 并记录 actual_start_time。
+
+        D-002: 多次填报的每次"启动"产生一条独立 TaskExecute(1 plan : N execute)。
+        ``actual_start_time`` 可选(前端跨天拆分补填时传指定日期,默认 now)。
+        返回的 ``id`` 作为后续 execute(action=submit/complete) 的 ``task_execute_id``。
+        """
+        plan = await self.get(plan_task_id)
+        if plan.status != "未开始":
+            raise TaskError(
+                f"仅未开始状态可启动(current={plan.status})",
+                details={"plan_task_id": str(plan.id), "status": plan.status},
+            )
+        now = datetime.now(UTC)
+        start_time = actual_start_time or now
+        actor = execute_user_id or plan.user_id
+        exc = TaskExecute(
+            id=uuid.uuid4(),
+            plan_task_id=plan.id,
+            execute_user_id=actor,
+            actual_start_time=start_time,
+            status=STATUS_DOING,
+            current_user_id=actor,
+        )
+        self._session.add(exc)
+        plan.status = "进行中"
+        if plan.actual_start_time is None:
+            plan.actual_start_time = start_time
+        plan.updated_at = now
+        await self._session.commit()
+        await self._session.refresh(exc)
+        await self._session.refresh(plan)
+        log.info(
+            "plan_started",
+            plan_task_id=str(plan.id),
+            task_execute_id=str(exc.id),
+        )
+        return exc
+
     async def execute_plan(self, req: ExecutePlanReq, current_user_id: uuid.UUID) -> TaskExecute:
         """执行计划:单事务联动生成/更新 TaskExecute 并推进状态机。
 
-        状态语义 (对齐源 ``TaskPlanServiceImpl.executePlan``):
-        - ``submit=True`` → 状态 90 已完成 (执行结束)
-        - ``submit=False`` 且已有执行记录 → 状态 30 处置中
-        - ``submit=False`` 且无执行记录 → 状态 10 未提交 (新建,等待开始)
+        状态语义 (D-002/D-003, 删 submit 改 action):
+        - ``action="complete"`` → 收口 in-flight 记录 status=90 + plan 已完成
+        - ``action="submit"`` → 收口 in-flight 记录 status=90 + plan 重置未开始(可再次 start)
+
+        task_execute_id 必填(start 端点创建的 in-flight 记录)。
+        D-005 强制回填 actual_end_time(让新录入有 actual 区间, 日历求和才能显示);
+        D-004 service 内跨天校验(actual_start vs actual_end 同日, 否则 422)。
 
         Args:
-            req: 执行请求。
-            current_user_id: 当前登录用户 (默认 currentUserId)。
+            req: 执行请求(action + task_execute_id 必填)。
+            current_user_id: 当前登录用户。
 
         Returns:
-            生成/更新后的 :class:`TaskExecute`。
+            收口后的 :class:`TaskExecute`。
         """
         plan = await self.get(req.plan_task_id)
 
         now = datetime.now(UTC)
-        exc: TaskExecute
-        if req.task_execute_id is not None:
-            exc = await self._session.get(TaskExecute, req.task_execute_id)
-            if exc is None:
-                raise TaskExecuteNotFound(f"TaskExecute '{req.task_execute_id}' not found.")
-        else:
-            exc = TaskExecute(
-                id=uuid.uuid4(),
-                plan_task_id=plan.id,
-                status=STATUS_NOT_SUBMIT,
+        # task_execute_id 必填(start 端点创建的 in-flight 记录)
+        exc = await self._session.get(TaskExecute, req.task_execute_id)
+        if exc is None:
+            raise TaskExecuteNotFound(f"TaskExecute '{req.task_execute_id}' not found.")
+        if exc.plan_task_id != plan.id:
+            raise TaskError(
+                "task_execute_id 与 plan_task_id 不匹配",
+                details={
+                    "plan_task_id": str(plan.id),
+                    "task_execute_id": str(req.task_execute_id),
+                },
             )
-            self._session.add(exc)
 
-        # 推进状态机
-        if req.submit:
-            self._assert_transition(exc.status, STATUS_END)
-            exc.status = STATUS_END
-            plan.status = "已完成"
-            plan.actual_end_time = req.actual_end_time or now
-        else:
-            # 非提交:从初始态 → 处置中
-            if exc.status == STATUS_NOT_SUBMIT:
-                exc.status = STATUS_DOING
-            elif exc.status in (STATUS_DOING,):
-                pass  # 继续
-            else:
-                self._assert_transition(exc.status, STATUS_DOING)
-                exc.status = STATUS_DOING
-            plan.status = "进行中"
-            if plan.actual_start_time is None:
-                plan.actual_start_time = req.actual_start_time or now
+        # D-005: 强制回填 actual_end_time(不再只在 req 带时写; 让新录入有 actual 区间)
+        exc.actual_end_time = req.actual_end_time or now
+
+        # D-004: service 内跨天校验(start 写 actual_start, execute 写 actual_end, 跨两次请求)
+        if (
+            exc.actual_start_time is not None
+            and exc.actual_start_time.date() != exc.actual_end_time.date()
+        ):
+            raise TaskError(
+                "执行起止时间不可跨天，请拆成每天单独填报",
+                details={
+                    "actual_start_time": exc.actual_start_time.isoformat(),
+                    "actual_end_time": exc.actual_end_time.isoformat(),
+                },
+            )
 
         # 同步执行信息
         if req.execute_info is not None:
@@ -291,8 +335,6 @@ class PlanTaskService:
             exc.time_spent = req.time_spent
         if req.actual_start_time is not None:
             exc.actual_start_time = req.actual_start_time
-        if req.actual_end_time is not None:
-            exc.actual_end_time = req.actual_end_time
         if req.start_remark is not None:
             exc.start_remark = req.start_remark
         if req.end_remark is not None:
@@ -300,8 +342,19 @@ class PlanTaskService:
         if req.execute_user_id is not None:
             exc.execute_user_id = req.execute_user_id
         exc.current_user_id = req.execute_user_id or current_user_id
+
+        # 推进状态机: submit/complete 都收口当前 in-flight 记录为 status=90
+        self._assert_transition(exc.status, STATUS_END)
+        exc.status = STATUS_END
         exc.updated_at = now
         plan.updated_at = now
+
+        # D-003 action 分支: complete→已完成; submit→重置未开始(支持再次 start 多次填报)
+        if req.action == "complete":
+            plan.status = "已完成"
+            plan.actual_end_time = exc.actual_end_time
+        else:  # submit
+            plan.status = "未开始"
 
         await self._session.commit()
         await self._session.refresh(exc)
@@ -311,7 +364,7 @@ class PlanTaskService:
             plan_task_id=str(plan.id),
             task_execute_id=str(exc.id),
             status=exc.status,
-            submit=req.submit,
+            action=req.action,
         )
         return exc
 
@@ -370,9 +423,12 @@ class TaskExecuteService:
         page_req = _page_req_from(req.page, req.page_size, req.order_by, req.order)
         stmt = select(TaskExecute)
         plan_task_id = _parse_uuid_optional(req.plan_task_id)
+        problem_task_id = _parse_uuid_optional(req.problem_task_id)
         execute_user_id = _parse_uuid_optional(req.execute_user_id)
         if plan_task_id is not None:
             stmt = stmt.where(TaskExecute.plan_task_id == plan_task_id)
+        if problem_task_id is not None:
+            stmt = stmt.where(TaskExecute.problem_task_id == problem_task_id)
         if req.status is not None:
             stmt = stmt.where(TaskExecute.status == req.status)
         if execute_user_id is not None:

@@ -62,6 +62,7 @@ from app.modules.ppm.problem.model import (
     PpmProblemListProcessTask,
 )
 from app.modules.ppm.project.model import PpmProjectMember
+from app.modules.ppm.task.model import TaskExecute
 
 log = get_logger(__name__)
 
@@ -630,6 +631,25 @@ class ProblemService:
             base = float(problem.time_spent or 0)
             problem.time_spent = base + time_spent
         problem.updated_at = _now()
+        # D-007: 额外创建一条 TaskExecute(problem_task_id 关联, actual 单点 now)
+        # P0-1: 不取不存在的 real_start_time,用单点 now(同日, 跨天校验天然不触发)
+        try:
+            actor_uuid = uuid.UUID(actor_id)
+        except (ValueError, TypeError):
+            actor_uuid = None
+        done_now = _now()
+        self._session.add(
+            TaskExecute(
+                id=uuid.uuid4(),
+                problem_task_id=problem.id,
+                execute_user_id=actor_uuid,
+                actual_start_time=done_now,
+                actual_end_time=done_now,
+                time_spent=time_spent,
+                execute_info=handle_info,
+                status="90",
+            )
+        )
         await self._session.commit()
         await self._session.refresh(problem)
 

@@ -639,8 +639,9 @@ async def test_calendar_load_level_past_actual_buckets(db_session):
 
 
 @pytest.mark.asyncio
-async def test_calendar_load_level_past_actual_spread(db_session):
-    """actual 区间跨多日 → time_spent 按区间天数平摊,跨月分母含全区间(D-005)。"""
+async def test_calendar_load_level_past_actual_sum(db_session):
+    """过去侧 load_level 按 actual 覆盖日 time_spent×8 求和(D-001, 推翻平摊):
+    1人天覆盖 N 天 → 每天计入 8h → full(跨天记录覆盖日全计入, 虚高接受;平摊则 8/N<8→leisure)。"""
     user = await _seed_user(db_session)
     now = datetime.now(UTC)
     base = now.replace(hour=9, minute=0, second=0, microsecond=0)
@@ -648,11 +649,11 @@ async def test_calendar_load_level_past_actual_spread(db_session):
     lm_year, lm_month = last_month_end.year, last_month_end.month
     ym = f"{lm_year:04d}-{lm_month:02d}"
     start = datetime(lm_year, lm_month, 10, tzinfo=UTC)
-    end = datetime(lm_year, lm_month, 12, tzinfo=UTC)  # 区间 3 天(10/11/12)
+    end = datetime(lm_year, lm_month, 12, tzinfo=UTC)  # 跨 3 天(10/11/12)
     await _seed_execute(
         db_session,
         execute_user_id=user.id,
-        time_spent=3.0,
+        time_spent=1.0,  # 1人天(8h)
         actual_start_time=start,
         actual_end_time=end,
     )
@@ -660,10 +661,45 @@ async def test_calendar_load_level_past_actual_spread(db_session):
     svc = WorkbenchService(db_session)
     cal = await svc.get_calendar(user, ym)
     by_date = {d.date: d for d in cal.days}
-    # 每天 3×8/3 = 8h → full
+    # 求和: 1人天(8h)覆盖 10/11/12 → 每天 8h → full
     assert by_date[f"{ym}-10"].load_level == "full"
     assert by_date[f"{ym}-11"].load_level == "full"
     assert by_date[f"{ym}-12"].load_level == "full"
+
+
+@pytest.mark.asyncio
+async def test_calendar_past_sum_saturates_on_sameday_records(db_session):
+    """标黄 bug 修复验证: 同日多条执行记录 time_spent 求和 ≥8h → full(饱和)。
+
+    场景(180024): 1人天 + 0人天 = 8h → full(平摊口径下误判 leisure 标黄)。
+    """
+    user = await _seed_user(db_session)
+    now = datetime.now(UTC)
+    base = now.replace(hour=9, minute=0, second=0, microsecond=0)
+    last_month_end = base.replace(day=1) - timedelta(days=1)
+    lm_year, lm_month = last_month_end.year, last_month_end.month
+    ym = f"{lm_year:04d}-{lm_month:02d}"
+    day = datetime(lm_year, lm_month, 15, tzinfo=UTC)
+    # 同日两条: 1人天 + 0人天
+    await _seed_execute(
+        db_session,
+        execute_user_id=user.id,
+        time_spent=1.0,
+        actual_start_time=day,
+        actual_end_time=day,
+    )
+    await _seed_execute(
+        db_session,
+        execute_user_id=user.id,
+        time_spent=0.0,
+        actual_start_time=day,
+        actual_end_time=day,
+    )
+    svc = WorkbenchService(db_session)
+    cal = await svc.get_calendar(user, ym)
+    by_date = {d.date: d for d in cal.days}
+    # 求和: 1+0 人天 = 8h → full(饱和, 解决标黄)
+    assert by_date[f"{ym}-15"].load_level == "full"
 
 
 @pytest.mark.asyncio

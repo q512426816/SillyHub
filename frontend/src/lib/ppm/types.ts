@@ -1042,10 +1042,13 @@ export interface PlanTaskPageReq extends PageReq {
   work_partner?: string;
 }
 
+/** 执行计划请求(D-003: 删 submit 改 action 枚举, 不反向兼容)。 */
 export interface ExecutePlanReq {
   plan_task_id: string;
-  submit?: boolean;
-  task_execute_id?: string | null;
+  /** "submit"(保存本次+任务回未开始, 可再次填报) / "complete"(保存本次+任务已完成) */
+  action: "submit" | "complete";
+  /** start 端点返回的 in-flight 执行记录 id(execute 时必填) */
+  task_execute_id: string;
   execute_info?: string | null;
   time_spent?: number | null;
   actual_start_time?: string | null;
@@ -1053,6 +1056,14 @@ export interface ExecutePlanReq {
   execute_user_id?: string | null;
   start_remark?: string | null;
   end_remark?: string | null;
+}
+
+/** 启动任务请求(D-002: 未开始→进行中, 创建 in-flight TaskExecute 记 actual_start_time)。 */
+export interface StartReq {
+  plan_task_id: string;
+  execute_user_id?: string | null;
+  /** 跨天拆分补填时传指定日期, 默认 now */
+  actual_start_time?: string | null;
 }
 
 export interface TaskExecute {
@@ -1130,6 +1141,7 @@ export interface TaskExecuteUpdate {
 
 export interface TaskExecutePageReq extends PageReq {
   plan_task_id?: string | null;
+  problem_task_id?: string | null;
   /** 后端 alias=status */
   status?: string | null;
   execute_user_id?: string | null;
