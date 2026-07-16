@@ -474,6 +474,13 @@ export default function TaskPlansPage() {
 
   const columns: TableProps<PlanTask>["columns"] = [
     {
+      title: "序号",
+      key: "rowno",
+      width: 60,
+      fixed: "left",
+      render: (_v, _t: PlanTask, idx: number) => idx + 1,
+    },
+    {
       title: "任务内容",
       dataIndex: "content",
       key: "content",
@@ -598,22 +605,10 @@ export default function TaskPlansPage() {
           <Button
             size="sm"
             variant="outline"
-            disabled={selectedRowKeys.length === 0}
-            className="text-red-600 hover:text-red-700"
-            onClick={() => void handleBatchDelete()}
-          >
-            批量删除{selectedRowKeys.length > 0 ? `(${selectedRowKeys.length})` : ""}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
             disabled={exporting}
             onClick={() => void handleExport()}
           >
             {exporting ? "导出中…" : "导出"}
-          </Button>
-          <Button size="sm" onClick={() => setDrawer({ open: true, mode: "create" })}>
-            + 新建任务
           </Button>
           <span className="mx-1 h-6 w-px bg-border" aria-hidden />
           <Button size="sm" onClick={commitSearch}>
@@ -744,7 +739,6 @@ export default function TaskPlansPage() {
       ) : (
         <Table<PlanTask>
           rowKey="id"
-          rowSelection={rowSelection}
           columns={columns}
           dataSource={rows}
           loading={loading}
