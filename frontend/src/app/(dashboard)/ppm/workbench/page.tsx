@@ -259,19 +259,19 @@ export default function WorkbenchPage() {
         {/* ========== 右栏 stack ========== */}
         <div className="flex flex-col gap-4 lg:col-span-3">
           {/* 本月日历(calendar 独立 loading/error) */}
-          {calendar.loading || calendar.error ? (
+          {calendar.data ? (
+            <WorkCalendarPanel
+              calendar={calendar.data}
+              loading={calendar.loading}
+              month={calendarMonth}
+              onMonthChange={handleCalendarMonthChange}
+            />
+          ) : (
             <BlockCard
               title="工作日历"
               loading={calendar.loading}
               error={calendar.error}
               onRetry={loadCalendar}
-            />
-          ) : (
-            <WorkCalendarPanel
-              calendar={calendar.data}
-              tasks={tasks}
-              month={calendarMonth}
-              onMonthChange={handleCalendarMonthChange}
             />
           )}
 

@@ -84,6 +84,8 @@ function buildMonthGrid(
     const dd = String(day).padStart(2, "0");
     cells.push({ type: "day", day, info: dayMap.get(dd) ?? null });
   }
+  // 补尾部空格到 6 行 (42 格),固定 grid 高度,避免不同月份行数差异致切换跳动
+  while (cells.length < 42) cells.push({ type: "blank" });
   return cells;
 }
 
@@ -123,7 +125,7 @@ export function WorkCalendarPanel({
   month,
   onMonthChange,
 }: WorkCalendarPanelProps) {
-  const cells = buildMonthGrid(calendar?.year_month, calendar?.days ?? []);
+  const cells = buildMonthGrid(month, calendar?.days ?? []);
   // 今天(YYYY-MM-DD),用于默认选中;useMemo 稳定避免重渲染抖动。
   const todayStr = useMemo(() => {
     const d = new Date();
@@ -156,6 +158,11 @@ export function WorkCalendarPanel({
         </button>
         <span className="text-sm font-medium">
           {dayjs(month).format("YYYY年M月")}
+          {loading && calendar ? (
+            <span className="ml-2 text-[10px] font-normal text-muted-foreground animate-pulse">
+              加载中…
+            </span>
+          ) : null}
         </span>
         <button
           type="button"
@@ -168,7 +175,7 @@ export function WorkCalendarPanel({
           ›
         </button>
       </div>
-      {loading || !calendar ? (
+      {!calendar ? (
         <div className="py-8 text-center text-xs text-muted-foreground animate-pulse">
           日历加载中…
         </div>
