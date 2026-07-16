@@ -913,8 +913,8 @@ async def test_calendar_alert_green_future_covered(db_session):
 
 
 @pytest.mark.asyncio
-async def test_calendar_alert_completed_not_marked(db_session):
-    """已完成任务不贡献右点(覆盖天无其他任务则 none, D-008)。"""
+async def test_calendar_alert_completed_green(db_session):
+    """已完成任务覆盖该天 → green (不延期/不临期, D-008)。"""
     user = await _seed_user(db_session)
     now = datetime.now(UTC).replace(hour=9, minute=0, second=0, microsecond=0)
     start = now + timedelta(days=1)
@@ -933,7 +933,7 @@ async def test_calendar_alert_completed_not_marked(db_session):
     by_date = {d.date: d for d in cal.days}
     future_day = now + timedelta(days=3)
     future_key = f"{ym}-{future_day.day:02d}"
-    assert by_date[future_key].alert_level == "none"
+    assert by_date[future_key].alert_level == "green"
 
 
 @pytest.mark.asyncio

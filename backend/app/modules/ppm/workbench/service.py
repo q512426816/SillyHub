@@ -220,16 +220,19 @@ def _progress_alert(
 ) -> str | None:
     """单任务/缺陷对某天的右点进度贡献 (D-008): red / yellow / green / None。
 
-    - 已完成或无 end → None
+    - 无 end → None
+    - 已完成: 覆盖 → green (用户规则: 过去有任务覆盖就标绿,不论完成状态)
     - 延期 (end < today 未完成): ``day == 截止日`` → red;覆盖 → green
     - 未到截止: ``day == today`` 且覆盖 → 临期判定 (剩余/剩余天数 > 8h/天 → yellow,
       否则 green);非今天但覆盖 → green;不覆盖 → None
     """
-    if is_completed or end_dt is None:
+    if end_dt is None:
         return None
     end_date = _to_aware(end_dt).date()
     start_date = _to_aware(start_dt).date() if start_dt is not None else end_date
     covers = start_date <= day <= end_date
+    if is_completed:
+        return "green" if covers else None
     if end_date < today:
         if day == end_date:
             return "red"
