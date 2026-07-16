@@ -33,3 +33,4 @@ created_at: 2026-07-16T09:37:00
 ## quick 执行（ql-20260716-003-8b3e）
 
 - [x] ql-20260716-003-8b3e 实现子表限宽滚动容器 + 列宽压缩（design §5，对应 task-01/02/03）
+- [x] ql-20260716-005-c2a7 修 R-02：明细限宽容器加 `[&_.ant-table-wrapper]:min-w-0` 让 PpmSubTable flex 内表格可压缩出独立滚动条

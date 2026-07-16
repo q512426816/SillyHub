@@ -294,3 +294,11 @@ created_at: 2026-07-14T09:20:24
 根因：明细数据有 execute_user_id，但 DetailLevelTable 列表未显示执行人列；PsPlanNodeDetail 无 execute_user_name(后端 audit/approve_user_name 是持久化字段,执行人无对应)。模块(PlanNodeModule)只有 duty_user_id 责任人,无执行人——故加在明细行而非模块行(已与用户确认)。
 方案：DetailLevelTable columns 加「执行人」列,用 PpmUserSelect disabled 显示 execute_user_id(同模块责任人列模式,res=projectMember + searchData pm_project_id);DetailLevelProps 加 projectId + 两处调用透传 projectId;moduleExpandRender useCallback deps 补 projectId。仅改前端单文件,不动后端/通用组件。
 结果：tsc --noEmit EXIT 0;vitest milestone-details 24 passed;next lint 0 error(962 warning 已修,余 warning 全既有)。待 commit + rebuild frontend 部署 + 用户浏览器验证。
+
+## ql-20260716-005-c2a7 | 2026-07-16 10:10:00 | 修 ql-003 R-02 遗留：plan-nodes 明细子表（PpmSubTable flex wrapper 内 .ant-table-wrapper min-width:auto 顶住限宽容器）无独立横向滚动条——限宽容器加 min-w-0 让表格可压缩
+状态：已完成
+关联变更：2026-07-16-plan-node-subtable-style
+文件：frontend/src/app/(dashboard)/ppm/plan-nodes/page.tsx（DetailsSubTable 限宽容器 div 加 className=[&_.ant-table-wrapper]:min-w-0）
+根因：模块子表直接 AntD Table，限宽容器约束 .ant-table-wrapper 宽→内容超出内部滚动有滚动条；明细子表经 PpmSubTable 的 flex flex-col gap-2 包裹，Table 作为 flex item min-width:auto=min-content(790px) 顶住不压缩，.ant-table-content 宽=790=table 内容不滚动。模块无此 flex 包裹故正常。
+方案：明细限宽容器加 tailwind arbitrary [&_.ant-table-wrapper]:min-w-0（即 .ant-table-wrapper min-width:0），让 flex item 表格可压缩到容器宽，.ant-table-content 宽=容器宽，table 790 超出则独立滚动条。scoped 到明细容器，不动 PpmSubTable 组件（D-001），模块子表无需改。
+结果：tsc --noEmit EXIT 0；仅改 plan-nodes/page.tsx 1 处 className。待 commit + rebuild frontend 部署 + 用户浏览器验证（明细子表独立横向滚动条出现，与模块子表一致）。

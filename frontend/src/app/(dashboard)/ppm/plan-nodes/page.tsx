@@ -458,7 +458,10 @@ function DetailsSubTable({
         </div>
       </div>
       {err && <p className="mb-2 text-[11px] text-destructive">{err}</p>}
-      <div style={{ maxWidth: "calc(100vw - 340px)", overflowX: "auto" }}>
+      <div
+        className="[&_.ant-table-wrapper]:min-w-0"
+        style={{ maxWidth: "calc(100vw - 340px)", overflowX: "auto" }}
+      >
         <PpmSubTable<DetailDraftRow>
           editable
           masterRows={draftRows}
