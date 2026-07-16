@@ -20,6 +20,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   DatePicker,
   Input,
+  Modal,
   Select,
   Table,
   type TableProps,
@@ -41,10 +42,16 @@ import {
   PROBLEM_TYPE_TEXT,
 } from "@/components/ppm-status-actions";
 import { ApiError } from "@/lib/api";
-import { deleteProblem, exportProblems, listProblems } from "@/lib/ppm";
-import type { ProblemList } from "@/lib/ppm";
+import {
+  deleteProblem,
+  exportProblems,
+  listProblemLogs,
+  listProblems,
+} from "@/lib/ppm";
+import type { ProblemList, ProblemProcessLog } from "@/lib/ppm";
 import { useSession } from "@/stores/session";
 import { ProblemDrawer, type ProblemDrawerMode } from "./_problem-drawer";
+import { ProblemDetailForm } from "./_forms";
 
 const { RangePicker } = DatePicker;
 
@@ -96,6 +103,10 @@ export default function ProblemListPage() {
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
   const [proTypeFilter, setProTypeFilter] = useState<string>("");
   const [isUrgentFilter, setIsUrgentFilter] = useState<string>("");
+  // 详情弹窗(居中 Modal, 对齐 task-plans 风格)
+  const [detailProblem, setDetailProblem] = useState<ProblemList | null>(null);
+  const [detailLogs, setDetailLogs] = useState<ProblemProcessLog[]>([]);
+  const [loadingDetailLogs, setLoadingDetailLogs] = useState(false);
   const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(
     null,
   );
@@ -197,6 +208,20 @@ export default function ProblemListPage() {
     setDrawer({ open: true, mode, problem });
   };
 
+  // 详情居中弹窗(对齐 task-plans 风格), 异步加载流程履历
+  const openDetail = async (problem: ProblemList) => {
+    setDetailProblem(problem);
+    setLoadingDetailLogs(true);
+    try {
+      const logs = await listProblemLogs(problem.id);
+      setDetailLogs(logs);
+    } catch {
+      setDetailLogs([]);
+    } finally {
+      setLoadingDetailLogs(false);
+    }
+  };
+
   const handleDelete = async (p: ProblemList) => {
     if (p.status !== "1") return;
     if (!confirm("删除该问题清单?")) return;
@@ -209,6 +234,13 @@ export default function ProblemListPage() {
   };
 
   const columns: TableProps<ProblemList>["columns"] = [
+    {
+      title: "序号",
+      key: "rowno",
+      width: 60,
+      fixed: "left",
+      render: (_v, _t: ProblemList, idx: number) => idx + 1,
+    },
     {
       title: "责任人",
       dataIndex: "duty_user_name",
@@ -392,8 +424,8 @@ export default function ProblemListPage() {
                 验证并关闭
               </Button>
             )}
-            {/* 详情:任意(源 openDetailForm) */}
-            <Button size="sm" variant="ghost" onClick={() => openDrawer("detail", p)}>
+            {/* 详情:居中弹窗(对齐 task-plans 风格) */}
+            <Button size="sm" variant="ghost" onClick={() => void openDetail(p)}>
               详情
             </Button>
             {/* 删除:status=1 + creator(源 handleDelete) */}
@@ -585,6 +617,31 @@ export default function ProblemListPage() {
           void load();
         }}
       />
+
+      {/* 详情居中弹窗(D-007 处置记录 + 流程履历, 对齐 task-plans 风格) */}
+      {detailProblem && (
+        <Modal
+          open
+          title={
+            <div className="flex items-center gap-2">
+              <span>问题详情</span>
+              <Tag color={PROBLEM_STATUS_COLOR[detailProblem.status] ?? "default"}>
+                {PROBLEM_STATUS_TEXT[detailProblem.status] ?? detailProblem.status}
+              </Tag>
+            </div>
+          }
+          onCancel={() => setDetailProblem(null)}
+          footer={null}
+          width={720}
+        >
+          <ProblemDetailForm
+            problem={detailProblem}
+            logs={detailLogs}
+            loadingLogs={loadingDetailLogs}
+            onCancel={() => setDetailProblem(null)}
+          />
+        </Modal>
+      )}
     </PageContainer>
   );
 }
