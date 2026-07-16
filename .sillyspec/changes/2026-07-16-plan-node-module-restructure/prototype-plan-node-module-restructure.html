@@ -1,0 +1,236 @@
+<!--
+author: WhaleFall
+created_at: 2026-07-16T11:20:00
+description: 计划节点模板模块结构改造原型 — 二层(无模块)/三层(有模块) + antd 化 + 新建模板抽屉(是否有模块开关)
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>计划节点模板模块结构改造 · 原型</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 13px; color: #374151; background: #f3f4f6; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  .sub { color: #6b7280; font-size: 12px; margin-bottom: 16px; }
+  .block { margin-bottom: 28px; }
+  .block-title { font-size: 15px; font-weight: 600; margin-bottom: 8px; display:flex; align-items:center; gap:8px;}
+  .badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+  .b-no { background:#f3f4f6; color:#6b7280; }
+  .b-yes { background:#dbeafe; color:#1d4ed8; }
+  .desc { color: #6b7280; font-size: 12px; margin-bottom: 10px; padding: 8px 12px; background: #fffbeb; border-left: 3px solid #f59e0b; border-radius: 4px; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; }
+  .card-bar { background:#f9fafb; padding:8px 14px; border-bottom:1px solid #e5e7eb; font-size:11px; color:#9ca3af;}
+  .page-head { padding: 14px 16px 6px; }
+  .page-head .t { font-size: 16px; font-weight: 600; }
+  .page-head .s { font-size: 12px; color: #9ca3af; }
+  .card-top { display: flex; justify-content: flex-end; padding: 8px 12px; border-bottom: 1px solid #f0f0f0; }
+  .btn { font-size: 12px; padding: 4px 12px; border-radius: 4px; border: 1px solid #d1d5db; background: #fff; cursor: pointer; color: #374151; }
+  .btn-primary { background: #1677ff; border-color: #1677ff; color: #fff; }
+  .btn-link { border: none; background: none; color: #1677ff; cursor: pointer; padding: 0 4px; font-size: 12px; }
+  .btn-link.red { color: #dc2626; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { border-bottom: 1px solid #f0f0f0; border-right: 1px solid #f0f0f0; padding: 6px 8px; text-align: left; vertical-align: middle; }
+  th { background: #fafafa; font-weight: 600; white-space: nowrap; }
+  td:last-child, th:last-child { border-right: none; }
+  tr.zebra td { background: #fafafa; }
+  .caret { color: #9ca3af; margin-right: 4px; }
+  .caret.open { color: #1677ff; }
+  .tag-type { display:inline-block; padding:1px 8px; background:#f0f9ff; color:#1d4ed8; border:1px solid #bae6fd; border-radius:10px; font-size:11px; }
+  .expand-area { background: #f9fafb; padding: 10px 12px; }
+  .sub-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px; margin-bottom: 10px; }
+  .sub-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .sub-head .h { font-size: 13px; font-weight: 600; }
+  .level3-area { background:#fff; border:1px solid #e5e7eb; border-radius:6px; padding:10px; margin-top:8px; }
+  .lvl-tag { display:inline-block; font-size:10px; padding:1px 6px; border-radius:8px; margin-right:6px; vertical-align:middle;}
+  .lvl1 { background:#eff6ff; color:#1d40af; }
+  .lvl2 { background:#dcfce7; color:#15803d; }
+  .lvl3 { background:#fef3c7; color:#92400e; }
+  .arrow { color:#9ca3af; margin:0 4px; }
+  .input { height:28px; border:1px solid #d1d5db; border-radius:4px; padding:0 8px; font-size:12px; width:100%; background:#fff;}
+  .input-num { width:100px; }
+  .field { margin-bottom: 12px; }
+  .field label { display:block; font-size:12px; color:#374151; margin-bottom:4px; }
+  .field .req { color:#dc2626; margin-left:2px; }
+  .switch { display:inline-flex; align-items:center; gap:8px; }
+  .switch-track { width:36px; height:20px; border-radius:10px; background:#1677ff; position:relative; }
+  .switch-track.off { background:#d1d5db; }
+  .switch-knob { width:16px; height:16px; border-radius:50%; background:#fff; position:absolute; top:2px; right:2px; box-shadow:0 1px 2px rgba(0,0,0,.2);}
+  .switch-track.off .switch-knob { right:auto; left:2px; }
+  .drawer-wrap { display:flex; gap:16px; }
+  .drawer { flex:1; background:#fff; border:1px solid #e5e7eb; border-radius:6px; overflow:hidden; }
+  .drawer-head { padding:10px 14px; border-bottom:1px solid #e5e7eb; font-size:13px; font-weight:600; background:#fafafa;}
+  .drawer-body { padding:16px; }
+  .drawer-foot { padding:10px 14px; border-top:1px solid #e5e7eb; display:flex; justify-content:flex-end; gap:8px; background:#fff;}
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .legend { font-size:11px; color:#6b7280; margin-top:6px; }
+</style>
+</head>
+<body>
+
+<h1>计划节点模板 · 模块结构改造原型</h1>
+<div class="sub">变更 <code>2026-07-16-plan-node-module-restructure</code> · 方案 A · 新建模板选「是否有模块」→ 无模块二层 / 有模块三层 · 全页 antd 化</div>
+
+<div class="desc">
+  <strong>核心变化</strong>：① 新建模板时选「是否有模块子表」（保存后不可改）；② 有模块时，模板明细是<b>模块的子表</b>（模板→模块→明细 三层）；③ 无模块时维持现状（模板→明细 二层）；④ 页面所有原生输入控件改 antd。
+</div>
+
+<!-- ════════ 母表 + 两种展开 ════════ -->
+<div class="block">
+  <div class="block-title">📄 模板列表（母表）— 新增「是否有模块」列，展开后按是否有模块走不同层级</div>
+
+  <div class="card">
+    <div class="card-bar">🖥️ 母表：编号 / 总阶段 / 项目类型 / <b>是否有模块</b> / 操作</div>
+    <div class="page-head"><div class="t">计划节点模板</div><div class="s">模板 → （有模块：模块 → 明细）/（无模块：明细）</div></div>
+    <div class="card-top"><button class="btn btn-primary">+ 新建模板</button></div>
+    <table>
+      <thead>
+        <tr><th style="width:60px">编号</th><th>总阶段</th><th style="width:120px">项目类型</th><th style="width:110px">是否有模块</th><th style="width:130px">操作</th></tr>
+      </thead>
+      <tbody>
+        <!-- 行1：无模块 → 二层 -->
+        <tr>
+          <td>1</td>
+          <td><span class="caret open">▼</span>立项阶段</td>
+          <td><span class="tag-type">研发</span></td>
+          <td><span class="badge b-no">否</span></td>
+          <td><button class="btn-link">编辑</button><button class="btn-link red">删除</button></td>
+        </tr>
+        <tr class="zebra"><td colspan="5" style="padding:0">
+          <div class="expand-area">
+            <div class="sub-card">
+              <div class="sub-head"><span class="h"><span class="lvl-tag lvl2">二层</span>模板明细（挂模板 plan_node_id）</span><button class="btn btn-primary">保存</button></div>
+              <table>
+                <thead><tr><th style="width:90px">详细阶段</th><th style="width:100px">任务主题</th><th style="width:140px">任务描述</th><th style="width:120px">要求</th><th style="width:80px">角色</th><th style="width:90px">成果</th><th style="width:80px">操作</th></tr></thead>
+                <tbody>
+                  <tr><td>需求调研</td><td>用户需求收集</td><td>收集各部门业务需求</td><td>覆盖所有场景</td><td>产品经理</td><td>需求文档</td><td><button class="btn-link red">删除</button></td></tr>
+                  <tr class="zebra"><td>方案设计</td><td>技术选型</td><td>确定技术栈</td><td>兼顾维护性</td><td>架构师</td><td>方案文档</td><td><button class="btn-link red">删除</button></td></tr>
+                </tbody>
+              </table>
+              <div class="legend">无模块：展开模板行直接是明细子表（二层），明细挂在模板下，行内编辑 + 保存。</div>
+            </div>
+          </div>
+        </td></tr>
+
+        <!-- 行2：有模块 → 三层 -->
+        <tr>
+          <td>2</td>
+          <td><span class="caret open">▼</span>实施阶段</td>
+          <td><span class="tag-type">实施</span></td>
+          <td><span class="badge b-yes">是</span></td>
+          <td><button class="btn-link">编辑</button><button class="btn-link red">删除</button></td>
+        </tr>
+        <tr class="zebra"><td colspan="5" style="padding:0">
+          <div class="expand-area">
+            <!-- 第一层子表：模块 -->
+            <div class="sub-card">
+              <div class="sub-head"><span class="h"><span class="lvl-tag lvl2">模块子表</span>模块（antd Table）</span><button class="btn btn-primary">+ 新增模块</button></div>
+              <table>
+                <thead><tr><th>模块名</th><th style="width:100px">计划工时</th><th style="width:110px">计划开始</th><th style="width:110px">计划完成</th><th style="width:100px">责任人</th><th style="width:130px">操作</th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td><span class="caret open">▼</span>前端开发</td>
+                    <td>15人日</td><td>2026-07-01</td><td>2026-07-15</td><td>张三</td>
+                    <td><button class="btn-link">编辑</button><button class="btn-link red">删除</button></td>
+                  </tr>
+                  <tr class="zebra"><td colspan="6" style="padding:0">
+                    <!-- 第二层子表：模块下的明细（三层） -->
+                    <div class="level3-area">
+                      <div class="sub-head"><span class="h"><span class="lvl-tag lvl3">三层</span>模板明细（挂模块 module_id）</span><button class="btn btn-primary">保存</button></div>
+                      <table>
+                        <thead><tr><th style="width:90px">详细阶段</th><th style="width:100px">任务主题</th><th style="width:140px">任务描述</th><th style="width:120px">要求</th><th style="width:80px">角色</th><th style="width:90px">成果</th><th style="width:80px">操作</th></tr></thead>
+                        <tbody>
+                          <tr><td>页面开发</td><td>组件实现</td><td>按设计稿实现页面组件</td><td>响应式</td><td>前端</td><td>页面交付</td><td><button class="btn-link red">删除</button></td></tr>
+                          <tr class="zebra"><td>联调</td><td>接口对接</td><td>与后端接口联调</td><td>异常处理</td><td>前端</td><td>联调通过</td><td><button class="btn-link red">删除</button></td></tr>
+                        </tbody>
+                      </table>
+                      <div class="legend">有模块：模块行再展开 → 明细子表（三层），明细挂在<b>模块</b>下（module_id）。</div>
+                    </div>
+                  </td></tr>
+                  <tr><td><span class="caret">▶</span>后端开发</td><td>20人日</td><td>2026-07-01</td><td>2026-07-20</td><td>李四</td><td><button class="btn-link">编辑</button><button class="btn-link red">删除</button></td></tr>
+                </tbody>
+              </table>
+              <div class="legend">有模块：展开模板行先看到「模块子表」，每个模块可再展开看其下的明细（三层嵌套）。</div>
+            </div>
+          </div>
+        </td></tr>
+
+        <tr><td>3</td><td><span class="caret">▶</span>验收阶段</td><td><span class="tag-type">运维</span></td><td><span class="badge b-no">否</span></td><td><button class="btn-link">编辑</button><button class="btn-link red">删除</button></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="legend" style="margin-top:8px">
+    <span class="lvl-tag lvl1">一层</span>模板(母表) <span class="arrow">→</span>
+    <span class="lvl-tag lvl2">二层</span>明细(无模块) 或 模块(有模块) <span class="arrow">→</span>
+    <span class="lvl-tag lvl3">三层</span>明细(有模块时，明细挂模块)
+  </div>
+</div>
+
+<!-- ════════ 新建模板抽屉（antd Form + 是否有模块开关）════════ -->
+<div class="block">
+  <div class="block-title">🆕 新建模板抽屉（antd Form）— 含「是否有模块」开关（保存后不可改）</div>
+  <div class="desc">原生 input 改 antd Form / Input / InputNumber；加「是否有模块」Switch。开关决定后续展开是二层（否）还是三层（是）。<b>保存后该选项不可改</b>（编辑抽屉里 Switch 禁用）。</div>
+
+  <div class="drawer-wrap">
+    <!-- 抽屉A：无模块 -->
+    <div class="drawer">
+      <div class="drawer-head">新建模板（antd Drawer + Form）</div>
+      <div class="drawer-body">
+        <div class="field"><label>总阶段<span class="req">*</span></label><input class="input" placeholder="如：立项阶段" /></div>
+        <div class="grid2">
+          <div class="field"><label>项目类型</label><input class="input" placeholder="选择项目类型" /></div>
+          <div class="field"><label>编号</label><input class="input input-num" placeholder="1" /></div>
+        </div>
+        <div class="field">
+          <label>是否有模块子表<span class="req">*</span>（保存后不可改）</label>
+          <div class="switch">
+            <span class="switch-track off"><span class="switch-knob"></span></span>
+            <span style="font-size:12px;color:#6b7280">否 — 模板下直接挂明细（二层）</span>
+          </div>
+        </div>
+      </div>
+      <div class="drawer-foot"><button class="btn">取消</button><button class="btn btn-primary">保存</button></div>
+    </div>
+
+    <!-- 抽屉B：有模块 -->
+    <div class="drawer">
+      <div class="drawer-head">新建模板（antd Drawer + Form）</div>
+      <div class="drawer-body">
+        <div class="field"><label>总阶段<span class="req">*</span></label><input class="input" placeholder="如：实施阶段" value="实施阶段" /></div>
+        <div class="grid2">
+          <div class="field"><label>项目类型</label><input class="input" value="实施" /></div>
+          <div class="field"><label>编号</label><input class="input input-num" value="2" /></div>
+        </div>
+        <div class="field">
+          <label>是否有模块子表<span class="req">*</span>（保存后不可改）</label>
+          <div class="switch">
+            <span class="switch-track"><span class="switch-knob"></span></span>
+            <span style="font-size:12px;color:#1d4ed8;font-weight:600">是 — 模板→模块→明细（三层）</span>
+          </div>
+        </div>
+      </div>
+      <div class="drawer-foot"><button class="btn">取消</button><button class="btn btn-primary">保存</button></div>
+    </div>
+  </div>
+  <div class="legend" style="margin-top:8px">左：开关<b>否</b>（二层）。右：开关<b>是</b>（三层）。保存后进入编辑态时该 Switch 禁用（灰）。</div>
+</div>
+
+<!-- ════════ 改动要点 ════════ -->
+<div class="block">
+  <div class="block-title">📋 改动要点</div>
+  <table style="background:#fff">
+    <thead><tr><th style="width:120px">层</th><th>改动</th></tr></thead>
+    <tbody>
+      <tr><td><b>后端模型</b></td><td>PlanNode + <code>has_module:bool</code>（新建必填，不可改，默认 false）；PlanNodeDetail + <code>module_id:uuid|null</code>（有模块挂模块 / 无模块挂模板）；1 个 alembic migration 加两列</td></tr>
+      <tr class="zebra"><td><b>后端 API</b></td><td>schema（PlanNodeCreate 加 has_module、PlanNodeUpdate 不含；PlanNodeDetailBase/Create/Update/Resp 加 module_id）；<code>list_plan_node_details_by_node</code> 加可选 module_id 过滤；create/update 透传</td></tr>
+      <tr><td><b>前端类型</b></td><td>types.ts：PlanNode + has_module；PlanNodeDetail/Create/Update + module_id</td></tr>
+      <tr class="zebra"><td><b>前端页面</b></td><td>plan-nodes/page.tsx 重写：母表加「是否有模块」列；NodeFormDrawer/ModuleFormDrawer 原生 input 改 antd Form；展开行条件渲染（无模块→明细二层；有模块→模块子表→模块展开→明细三层）；明细复用 PpmSubTable editable（固定 scroll.x）</td></tr>
+      <tr><td><b>零回归</b></td><td>PlanNodeModule 模块表不改（与 milestone-details 共用）；importer 不建 PlanNodeDetail 故不受影响；现有数据 has_module 默认 false、module_id=null（项目未上线可重置）</td></tr>
+    </tbody>
+  </table>
+</div>
+
+</body>
+</html>
