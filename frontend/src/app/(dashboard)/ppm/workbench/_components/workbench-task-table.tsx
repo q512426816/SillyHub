@@ -156,6 +156,7 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
     setBusy(true);
     try {
       const exc = await startPlanTask({ plan_task_id: task.id });
+      await loadTasks(); // 刷新列表显示"进行中"(start 已推进 plan 状态, D-002)
       setExecute({
         task,
         executeInfo: "",

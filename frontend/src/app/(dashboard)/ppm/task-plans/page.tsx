@@ -13,7 +13,7 @@
  * 依赖:lib/ppm/task (API) + lib/ppm/project (项目下拉) + stores/session。
  */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { DatePicker, Input, Select, Table, type TableProps, Tag } from "antd";
+import { DatePicker, Input, Modal, Select, Table, type TableProps, Tag } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 
 import { Button } from "@/components/ui/button";
@@ -41,6 +41,7 @@ import type {
   PlanTaskPageReq,
   PlanTaskUpdate,
   ProjectSimpleItem,
+  TaskExecute,
 } from "@/lib/ppm/types";
 import { useSession } from "@/stores/session";
 import {
@@ -125,6 +126,8 @@ export default function TaskPlansPage() {
     mode: "create",
   });
   const [execute, setExecute] = useState<ExecuteTaskState | null>(null);
+  const [recordsTask, setRecordsTask] = useState<PlanTask | null>(null);
+  const [records, setRecords] = useState<TaskExecute[]>([]);
   const [executeBusy, setExecuteBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<PlanTask | null>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
@@ -247,10 +250,25 @@ export default function TaskPlansPage() {
     await load();
   };
 
+  const handleViewRecords = async (task: PlanTask) => {
+    try {
+      const page = await listTaskExecutes({
+        plan_task_id: task.id,
+        page: 1,
+        page_size: 100,
+      });
+      setRecords(page.items ?? []);
+      setRecordsTask(task);
+    } catch (err) {
+      showToast(false, err instanceof ApiError ? err.message : "加载执行记录失败");
+    }
+  };
+
   const handleStart = async (task: PlanTask) => {
     setExecuteBusy(true);
     try {
       const exc = await startPlanTask({ plan_task_id: task.id });
+      await load(); // 刷新列表显示"进行中"(start 已推进 plan 状态, D-002)
       setExecute({
         task,
         executeInfo: "",
@@ -472,6 +490,13 @@ export default function TaskPlansPage() {
                 执行
               </Button>
             )}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void handleViewRecords(t)}
+            >
+              记录
+            </Button>
             <Button
               size="sm"
               variant="ghost"
@@ -712,6 +737,56 @@ export default function TaskPlansPage() {
           onCancel={() => setExecute(null)}
           busy={executeBusy}
         />
+      )}
+
+      {recordsTask && (
+        <Modal
+          open
+          title={`执行记录 — ${recordsTask.content ?? ""}`}
+          onCancel={() => {
+            setRecordsTask(null);
+            setRecords([]);
+          }}
+          footer={null}
+          width={720}
+        >
+          {records.length === 0 ? (
+            <div className="py-6 text-center text-sm text-muted-foreground">
+              暂无执行记录
+            </div>
+          ) : (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-muted-foreground">
+                  <th className="py-1 pr-2">开始</th>
+                  <th className="py-1 pr-2">结束</th>
+                  <th className="py-1 pr-2">耗时</th>
+                  <th className="py-1 pr-2">说明</th>
+                  <th className="py-1">结果</th>
+                </tr>
+              </thead>
+              <tbody>
+                {records.map((e) => (
+                  <tr key={e.id} className="border-t">
+                    <td className="py-1 pr-2">
+                      {e.actual_start_time ? fmtDay(e.actual_start_time) : "—"}
+                    </td>
+                    <td className="py-1 pr-2">
+                      {e.actual_end_time ? fmtDay(e.actual_end_time) : "—"}
+                    </td>
+                    <td className="py-1 pr-2">
+                      {e.time_spent != null ? `${e.time_spent}人天` : "—"}
+                    </td>
+                    <td className="py-1 pr-2">{e.execute_info ?? "—"}</td>
+                    <td className="py-1">
+                      {e.status === "90" ? "已记录" : e.status}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Modal>
       )}
 
       {confirmDelete && (
