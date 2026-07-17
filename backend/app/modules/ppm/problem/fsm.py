@@ -4,6 +4,12 @@
 - ``ProblemStatus``  (status 字段,1-7):业务生命周期状态
 - ``ProblemNode``    (now_node 字段,10-40):流程当前审批节点
 
+⚠️ 当前生效行为 (2026-07-17 起): 问题新建 / 编辑"提交"**不走审批**,
+``submit_problem`` 直接把问题从 已保存(1) 推进到 处置中(3) 并分配给
+责任人 (``now_node=None``)。下方 4 节点审批链 (申请→开发经理→项目经理
+→部门经理) 仅保留给历史在审问题与审批表单 (``next_process``) 使用,
+新建问题不再经过。
+
 流转规则 (对照源 ``ProblemNode10/20/30/40`` + ``ProblemProcesssExecutor``,
 design §12 存疑项已逐条核对):
 
@@ -14,9 +20,9 @@ design §12 存疑项已逐条核对):
   - Node30 execute: 若 ``pro_type == bug`` 直接结束 (返回 None,跳过 40);
     否则找"部门经理"推进到 Node40,status=2 审核中
   - Node40 execute: 返回 None,结束节点,status=3 处置中
-- 责任人 doneTask (completed=true):status=6 待验证
-- 验证人 closeTask (checkResult=="1"):status=4 已关闭;否则打回责任人
-  status=3 处置中 (源 STATUS_DOING)
+- 责任人 doneTask (completed=true):status=4 已完成 (新流程跳过验证,直接终态)
+- (历史) 验证人 closeTask:status=6 待验证 → 4 已完成 / 打回 3 执行中;
+  新流程已废弃,close_task 留存休眠
 - 驳回 (rejectProcess,任一审核节点 20/30/40):status=5 已作废
   (源走 STATUS_SAVE;task-05.md 验收明确 reject→5,遵循 task 规范)
 - 有未关闭变更 (problem_change.status != "2"):status 内存态标记 7 变更中
@@ -37,11 +43,11 @@ class ProblemStatus(StrEnum):
     """问题清单业务状态 (status 字段,1-7)。对齐源 ``ProblemListDO`` 常量。"""
 
     SAVED = "1"  # 已保存
-    AUDITING = "2"  # 审核中
-    DOING = "3"  # 处置中
-    CLOSED = "4"  # 已关闭
+    AUDITING = "2"  # 审核中 (历史审批流,新流程不再经过)
+    DOING = "3"  # 执行中 (原"处置中";提交后直接进入,责任人处置中)
+    CLOSED = "4"  # 已完成 (原"已关闭";doneTask 完成后进入,终态)
     BACK = "5"  # 已作废
-    WAIT_CHECK = "6"  # 待验证
+    WAIT_CHECK = "6"  # 待验证 (新流程已废弃,close_task 留存休眠)
     CHANGING = "7"  # 变更中 (内存态,不持久化)
 
 
@@ -79,20 +85,21 @@ CHANGE_TYPE = "change"
 # status 状态机白名单
 # ===========================================================================
 # 业务状态合法迁移 (用于 service 层 assert_transition):
-# - 1 已保存 → 2 审核中 (提交申请,进 Node20)
-# - 2 审核中 → 3 处置中 (审批通过进处置) / 5 已作废 (驳回)
-# - 3 处置中 → 6 待验证 (doneTask completed) / 5 已作废
-# - 6 待验证 → 4 已关闭 (closeTask 通过) / 3 处置中 (打回责任人)
+# - 1 已保存 → 2 审核中 (老的 nextProcess,仅审批表单再用) /
+#               3 执行中 (新建/编辑"提交"直接生效,见 submit_problem)
+# - 2 审核中 → 3 执行中 (审批通过,历史) / 5 已作废 (驳回)
+# - 3 执行中 → 4 已完成 (doneTask 完工,新流程跳过验证直接终态) / 5 已作废
+# - 6 待验证 → 4 已完成 / 3 执行中 (close_task,新流程已废弃,留存休眠)
 # - 4 / 5 终态
 # - 7 变更中是内存态,不参与持久化迁移
 TRANSITIONS: TransitionMap[ProblemStatus] = {
-    ProblemStatus.SAVED: {ProblemStatus.AUDITING},
+    ProblemStatus.SAVED: {ProblemStatus.AUDITING, ProblemStatus.DOING},
     ProblemStatus.AUDITING: {
         ProblemStatus.DOING,
         ProblemStatus.BACK,
     },
     ProblemStatus.DOING: {
-        ProblemStatus.WAIT_CHECK,
+        ProblemStatus.CLOSED,
         ProblemStatus.BACK,
     },
     ProblemStatus.WAIT_CHECK: {

@@ -51,6 +51,7 @@ import {
   listProblemLogs,
   nextProcessProblem,
   rejectProcessProblem,
+  submitProblem,
   updateProblem,
 } from "@/lib/ppm";
 import type { ModuleSimpleItem } from "@/lib/ppm";
@@ -356,16 +357,16 @@ export function ProblemCreateForm({
           work_load: payload.work_load,
         };
         if (submitNow) {
-          // 先更新再推进(对照源 submitFormProcess(true)=nextProcess)
+          // 先更新再提交直接生效(2026-07-17 起:不走审批,提交即进处置中)
           await updateProblem(problem.id, upd);
-          await nextProcessProblem(problem.id);
+          await submitProblem(problem.id);
         } else {
           await updateProblem(problem.id, upd);
         }
-        notifyOk(submitNow ? "已保存并提交审核" : "已保存");
+        notifyOk(submitNow ? "已提交,直接生效" : "已保存");
       } else {
         await createProblem(payload);
-        notifyOk(submitNow ? "已创建并提交审核" : "已保存为草稿");
+        notifyOk(submitNow ? "已创建,直接生效" : "已保存为草稿");
       }
       onSuccess();
     } catch (err) {
@@ -782,7 +783,7 @@ export function ProblemDoneForm({
         completed,
       };
       await doneTaskProblem(problem.id, body);
-      notifyOk(completed ? "已完工,进入待验证" : submit ? "已报工" : "已保存");
+      notifyOk(completed ? "已完工,进入已完成" : submit ? "已报工" : "已保存");
       onSuccess();
     } catch (err) {
       message.error(errMessage(err, "提交失败"));

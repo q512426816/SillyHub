@@ -69,8 +69,8 @@ export const PLAN_DETAIL_STATUS_COLOR: Record<string, string> = {
 export const PROBLEM_STATUS_TEXT: Record<string, string> = {
   "1": "已保存",
   "2": "审核中",
-  "3": "处置中",
-  "4": "已关闭",
+  "3": "执行中",
+  "4": "已完成",
   "5": "已作废",
   "6": "待验证",
   "7": "变更中",

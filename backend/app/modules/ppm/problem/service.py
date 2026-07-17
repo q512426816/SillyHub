@@ -275,19 +275,31 @@ class ProblemService:
                 object.__setattr__(item, "_effective_status", ProblemStatus.CHANGING.value)
         return page
 
-    async def create_problem(self, data: dict[str, Any]) -> PpmProblemList:
+    async def create_problem(
+        self,
+        data: dict[str, Any],
+        *,
+        actor_id: str | None = None,
+        actor_name: str | None = None,
+    ) -> PpmProblemList:
         """创建问题清单。
 
-        ``submit=true`` 时立即推进到 Node20 审核中 (源 processNext 语义);
-        否则 status=1 已保存。submit 推进会触发找开发经理 fallback。
+        ``submit=true`` 时**直接生效**:跳过 4 节点审批流,由 ``submit_problem``
+        把问题从 已保存(1) 推进到 处置中(3) 并分配给责任人;否则 status=1
+        已保存 (草稿)。
+
+        actor 取自调用方 (router 用 _actor(user)),不再读取不存在的
+        ``PpmProblemList.created_by`` (该模型无此字段)。
         """
         submit = bool(data.pop("submit", False))
         data.setdefault("status", ProblemStatus.SAVED.value)
         data.setdefault("now_node", ProblemNode.APPLY.value)
         obj = await _Crud(self._session, PpmProblemList).create(data)
         if submit:
-            obj = await self.next_process(
-                obj.id, actor_id=str(obj.created_by or "system"), actor_name=None
+            obj = await self.submit_problem(
+                obj.id,
+                actor_id=str(actor_id or "system"),
+                actor_name=actor_name,
             )
         return obj
 
@@ -398,6 +410,80 @@ class ProblemService:
     # ------------------------------------------------------------------
     # 审批流:next / reject / done / close
     # ------------------------------------------------------------------
+
+    async def submit_problem(
+        self,
+        item_id: uuid.UUID,
+        *,
+        actor_id: str,
+        actor_name: str | None,
+        comment: str | None = None,
+    ) -> PpmProblemList:
+        """提交直接生效 —— 跳过 4 节点审批流,直接进入执行中 (status=3)。
+
+        业务决策 (2026-07-17):问题新建/编辑"提交"不再走审批 (申请→开发经理
+        →项目经理→部门经理),提交即生效,``now_node`` 置 None (审批结束),
+        ``now_handle_user`` 置为责任人,等待责任人处置 (doneTask)。
+
+        - 仅 已保存(1) / 审核中(2) 可提交 → 处置中(3)
+        - 无需项目角色成员查找 (区别于 ``next_process``),无 PENDING_ASSIGNMENT
+        - 写一条 ProcessLog + 替换在办任务为 end(处置)
+        """
+        problem = await self.get_problem(item_id)
+        cur_status = ProblemStatus(problem.status)
+        if cur_status not in (ProblemStatus.SAVED, ProblemStatus.AUDITING):
+            raise ProblemError(
+                f"当前状态 {problem.status} 不可提交",
+                details={"problem_id": str(problem.id), "status": problem.status},
+            )
+        assert_transition(
+            cur_status,
+            ProblemStatus.DOING,
+            TRANSITIONS,
+            entity="problem_list",
+            entity_id=problem.id,
+        )
+        # now_handle_user 是 String 列 (逗号列表),duty_user_id 是 UUID,str() 化。
+        next_handle_user = str(problem.duty_user_id) if problem.duty_user_id else None
+        next_handle_user_name = problem.duty_user_name
+        problem.status = ProblemStatus.DOING.value
+        problem.now_node = None  # 审批结束,直接进处置
+        problem.now_handle_user = next_handle_user
+        problem.now_handle_user_name = next_handle_user_name
+        problem.updated_at = _now()
+        await self._session.commit()
+        await self._session.refresh(problem)
+
+        # 在办任务:删旧插新 (end = 处置,挂责任人)
+        await self._replace_list_task(
+            business_id=problem.id,
+            node_key="end",
+            node_name="处置",
+            handle_user=next_handle_user,
+            handle_user_name=next_handle_user_name,
+        )
+
+        # 流程履历
+        handle_info = self._build_handle_info(
+            "submit", actor_name, "提交", "处置", next_handle_user_name
+        )
+        await self._write_list_log(
+            business_id=problem.id,
+            node_key="submit",
+            actor_id=actor_id,
+            actor_name=actor_name,
+            handle_info=handle_info,
+            next_user_id=next_handle_user,
+            next_user_name=next_handle_user_name,
+            comment=comment,
+        )
+
+        log.info(
+            "problem_submit_direct",
+            problem_id=str(problem.id),
+            actor=actor_id,
+        )
+        return problem
 
     async def next_process(
         self,
@@ -593,32 +679,31 @@ class ProblemService:
     ) -> PpmProblemList:
         """责任人完成处置。
 
-        - ``completed=true``:status=3→6 待验证,real_end_time=now,
-          now_handle_user 切换到验证人 (audit_user_id,需前端预设;否则置空)
-        - ``completed=false``:仅追加 handle_info,仍 status=3 处置中
+        - ``completed=true``:status=3 执行中 → 4 已完成 (终态),real_end_time=now,
+          now_handle_user 置空 (新流程跳过待验证,直接完工)
+        - ``completed=false``:仅追加 handle_info,仍 status=3 执行中
         - 累加 time_spent (源语义)
         """
         problem = await self.get_problem(item_id)
         if completed:
             assert_transition(
                 ProblemStatus(problem.status),
-                ProblemStatus.WAIT_CHECK,
+                ProblemStatus.CLOSED,
                 TRANSITIONS,
                 entity="problem_list",
                 entity_id=problem.id,
             )
-            problem.status = ProblemStatus.WAIT_CHECK.value
+            problem.status = ProblemStatus.CLOSED.value
             problem.real_end_time = _now()
-            # 待验证处理人 = 验证人 (audit_user_id);未预设则置空 (待指派)
-            # now_handle_user 是 String 列,audit_user_id 是 UUID,str() 化。
-            problem.now_handle_user = str(problem.audit_user_id) if problem.audit_user_id else None
-            problem.now_handle_user_name = problem.audit_user_name
-            target_node_name = "待验证"
+            # 已完成 = 终态,无下一处理人
+            problem.now_handle_user = None
+            problem.now_handle_user_name = None
+            target_node_name = "已完成"
         else:
-            target_node_name = "处置中"
+            target_node_name = "执行中"
             if problem.status != ProblemStatus.DOING.value:
                 raise ProblemError(
-                    "非处置中状态不可追加处置情况",
+                    "非执行中状态不可追加处置情况",
                     details={"problem_id": str(problem.id), "status": problem.status},
                 )
 
@@ -657,7 +742,7 @@ class ProblemService:
         await self._session.refresh(problem)
 
         # ProcessTask 更新
-        node_key = "wait_check" if completed else "doing"
+        node_key = "closed" if completed else "doing"
         await self._replace_list_task(
             business_id=problem.id,
             node_key=node_key,
@@ -1187,6 +1272,10 @@ class ProblemService:
     ) -> str:
         """构造 handle_info 文案 (对照源 makeHandleInfo 简化)。"""
         actor = actor_name or "系统"
+        if kind == "submit":
+            if next_user_name:
+                return f"{actor} 提交问题,直接生效进入处置;由:{next_user_name}负责处置。"
+            return f"{actor} 提交问题,直接生效进入处置 (待指派责任人)。"
         if kind == "next":
             if next_node_name and next_user_name:
                 return f"{actor} 处理「{current_node_name}」;下一步由:{next_user_name}进行「{next_node_name}」。"

@@ -6,7 +6,8 @@
 
 路径前缀 (对照源 Controller,见 design.md §7):
 - ``/problem-list``           问题清单 CRUD + 审批流端点
-- ``/problem-list/{id}/next``    nextProcess
+- ``/problem-list/{id}/submit`` submitProblem 提交直接生效 (跳过审批进处置中)
+- ``/problem-list/{id}/next``    nextProcess (历史审批推进,新建不再用)
 - ``/problem-list/{id}/reject``  rejectProcess
 - ``/problem-list/{id}/done``    doneTask
 - ``/problem-list/{id}/close``   closeTask
@@ -167,8 +168,10 @@ async def create_problem(
     svc = ProblemService(session)
     data = body.model_dump()
     # create_problem 内部按 submit 决定是否触发 next_process;
-    # next_process 用 problem.created_by 作 actor,此处无需传 actor。
-    obj = await svc.create_problem(data)
+    # actor 取当前登录用户 (PpmProblemList 无 created_by 字段,
+    # 必须由 router 显式传入,否则 next_process 拿不到发起人)。
+    actor_id, actor_name = _actor(user)
+    obj = await svc.create_problem(data, actor_id=actor_id, actor_name=actor_name)
     return ProblemListResp.model_validate(obj)
 
 
@@ -234,6 +237,24 @@ async def next_process(
 ) -> ProblemListResp:
     actor_id, actor_name = _actor(user)
     obj = await ProblemService(session).next_process(
+        item_id, actor_id=actor_id, actor_name=actor_name, comment=body.comment
+    )
+    return ProblemListResp.model_validate(obj)
+
+
+@router.post("/problem-list/{item_id}/submit", response_model=ProblemListResp)
+async def submit_problem(
+    item_id: uuid.UUID,
+    body: NextProcessReq,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_WRITE))],
+) -> ProblemListResp:
+    """提交直接生效 —— 跳过审批进入处置中 (新建/编辑"提交"统一入口)。
+
+    业务决策 (2026-07-17):问题不再走 4 节点审批,提交即生效流转给责任人。
+    """
+    actor_id, actor_name = _actor(user)
+    obj = await ProblemService(session).submit_problem(
         item_id, actor_id=actor_id, actor_name=actor_name, comment=body.comment
     )
     return ProblemListResp.model_validate(obj)

@@ -23,6 +23,7 @@ import {
   type PpmSelectOption,
 } from "@/components/ppm-user-select";
 import { ApiError } from "@/lib/api";
+import { isOverEstimate } from "@/lib/ppm/format";
 import {
   createPlanTask,
   deletePlanTask,
@@ -556,12 +557,17 @@ export default function TaskPlansPage() {
       dataIndex: "spent_time",
       key: "spent_time",
       width: 110,
-      render: (v: number | null | undefined) =>
-        v != null && v > 0 ? (
-          <span className="font-medium text-emerald-600">{v} 人天</span>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        ),
+      render: (v: number | null | undefined, t: PlanTask) => {
+        if (v == null || v <= 0) {
+          return <span className="text-muted-foreground">—</span>;
+        }
+        const over = isOverEstimate(v, t.work_load);
+        return (
+          <span className={over ? "font-medium text-red-600" : "font-medium text-emerald-600"}>
+            {v} 人天
+          </span>
+        );
+      },
     },
     {
       title: "操作",
@@ -824,7 +830,15 @@ export default function TaskPlansPage() {
               <div>
                 <span className="text-muted-foreground">已消耗：</span>
                 {recordsTask.spent_time != null && recordsTask.spent_time > 0 ? (
-                  <span className="font-medium text-emerald-600">{recordsTask.spent_time} 人天</span>
+                  <span
+                    className={
+                      isOverEstimate(recordsTask.spent_time, recordsTask.work_load)
+                        ? "font-medium text-red-600"
+                        : "font-medium text-emerald-600"
+                    }
+                  >
+                    {recordsTask.spent_time} 人天
+                  </span>
                 ) : (
                   "—"
                 )}

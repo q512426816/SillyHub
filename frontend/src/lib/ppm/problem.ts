@@ -115,6 +115,17 @@ export async function nextProcessProblem(
   });
 }
 
+/** submitProblem — 提交直接生效,跳过审批进入处置中 (新建/编辑"提交"统一入口)。 */
+export async function submitProblem(
+  problemId: string,
+  body?: ProblemNextProcessReq,
+): Promise<ProblemList> {
+  return apiFetch<ProblemList>(`/api/ppm/problem-list/${problemId}/submit`, {
+    method: "POST",
+    json: body ?? {},
+  });
+}
+
 /** rejectProcess — 驳回到已作废。 */
 export async function rejectProcessProblem(
   problemId: string,

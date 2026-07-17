@@ -39,3 +39,39 @@ export function fmtDateTime(
   const d = dayjs(v);
   return d.isValid() ? d.format("YYYY-MM-DD HH:mm") : fallback;
 }
+
+/**
+ * 把预估工时字符串(work_load)换算成人天数,用于与"已消耗(人天)"对比。
+ *
+ * ``work_load`` 是自由字符串,约定(与后端 ``_parse_workload_hours`` 一致,
+ * 1 人天 = 8 小时):
+ * - 纯数字 / 带 ``d`` / ``天`` → 视为人天,原值返回;
+ * - 带 ``h`` / ``小时`` → 视为小时,÷8 换算成人天;
+ * - 空 / 非数字(如 "一" / "约3") → 返回 ``null``,调用方据此跳过对比。
+ *
+ * 列头"工作量(人/天)"与"已消耗(人天)"均按人天展示,故对比在同一量纲。
+ */
+export function parseWorkLoadPersonDays(workLoad: string | null | undefined): number | null {
+  if (workLoad === null || workLoad === undefined) return null;
+  const m = workLoad.trim().match(/^([\d.]+)\s*(h|d|小时|天)?$/i);
+  if (!m) return null;
+  const val = Number(m[1]);
+  if (!Number.isFinite(val)) return null;
+  const unit = (m[2] ?? "").toLowerCase();
+  return unit === "h" || unit === "小时" ? val / 8 : val;
+}
+
+/**
+ * 已消耗人天是否超过预估工时(超预算 → 列表标红用)。
+ *
+ * 任一值为空 / 无法解析 / 已消耗 ≤ 0 → 返回 ``false``(不高亮,避免误报)。
+ */
+export function isOverEstimate(
+  spent: number | null | undefined,
+  workLoad: string | null | undefined,
+): boolean {
+  if (spent === null || spent === undefined || spent <= 0) return false;
+  const est = parseWorkLoadPersonDays(workLoad);
+  if (est === null) return false;
+  return spent > est;
+}

@@ -127,6 +127,58 @@ class TestCrud:
         with pytest.raises(ProblemNotFound):
             await svc.get_problem(p.id)
 
+    async def test_create_and_submit_direct_activate(self, db_session: AsyncSession) -> None:
+        """回归:create submit=true 不再走审批,直接进处置中(DOING)。
+
+        ``PpmProblemList`` 无 ``created_by`` 字段,旧实现读 ``obj.created_by``
+        抛 AttributeError (线上 POST /problem-list 500)。修复 + 业务调整后
+        create_problem(submit=true) 调 ``submit_problem`` 直接生效:status
+        从 已保存(1) 跳到 处置中(3),``now_node=None``,不经开发经理审批。
+        """
+        svc = ProblemService(db_session)
+        proj_id = await _make_project(db_session)
+        p = await svc.create_problem(
+            {
+                "project_id": proj_id,
+                "project_name": "项目甲",
+                "pro_desc": "创建即提交",
+                "pro_type": None,
+                "duty_user_id": _DUTY_USER_ID,
+                "duty_user_name": "钱责任",
+                "audit_user_id": _AUDIT_USER_ID,
+                "audit_user_name": "孙验证",
+                "submit": True,
+            },
+            actor_id=_ACTOR[0],
+            actor_name=_ACTOR[1],
+        )
+        assert p.status == ProblemStatus.DOING.value
+        assert p.now_node is None  # 审批结束,直接进处置
+        assert p.now_handle_user == _DUTY_USER_ID  # 流转给责任人
+
+    async def test_submit_problem_from_draft(self, db_session: AsyncSession) -> None:
+        """草稿(已保存)调用 submit_problem 直接生效进处置中,无需项目角色成员。"""
+        svc = ProblemService(db_session)
+        proj_id = await _make_project(db_session)
+        # 先建草稿 (submit=false → 已保存)
+        draft = await _make_problem(svc, proj_id)
+        assert draft.status == ProblemStatus.SAVED.value
+        # 提交直接生效
+        p = await svc.submit_problem(draft.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+        assert p.status == ProblemStatus.DOING.value
+        assert p.now_node is None
+        assert p.now_handle_user == _DUTY_USER_ID
+
+    async def test_submit_problem_rejects_terminal(self, db_session: AsyncSession) -> None:
+        """终态/处置中问题不可再次提交。"""
+        svc = ProblemService(db_session)
+        proj_id = await _make_project(db_session)
+        draft = await _make_problem(svc, proj_id)
+        await svc.submit_problem(draft.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+        # 已处置中,再提交应报错
+        with pytest.raises(ProblemError):
+            await svc.submit_problem(draft.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+
     async def test_list_paged_with_changing_flag(self, db_session: AsyncSession) -> None:
         svc = ProblemService(db_session)
         proj_id = await _make_project(db_session)
@@ -146,13 +198,13 @@ class TestCrud:
 
 
 # ===========================================================================
-# 审批流:全主流程 (非 bug:10→20→30→40→处置→待验证→关闭)
+# 审批流:全主流程 (非 bug:10→20→30→40→执行中→已完成)
 # ===========================================================================
 
 
 class TestFullFlow:
     async def test_non_bug_full_flow(self, db_session: AsyncSession) -> None:
-        """非 bug 全路径:申请→开发经理→项目经理→部门经理→处置中→待验证→已关闭。"""
+        """非 bug 全路径:申请→开发经理→项目经理→部门经理→执行中→已完成。"""
         svc = ProblemService(db_session)
         proj_id = await _make_project(db_session)
         p = await _make_problem(svc, proj_id, pro_type="requirement")
@@ -181,25 +233,13 @@ class TestFullFlow:
         # 处置人 = 责任人
         assert p.now_handle_user == _DUTY_USER_ID
 
-        # doneTask completed → 待验证
+        # doneTask completed → 已完成 (新流程跳过待验证,直接终态)
         p = await svc.done_task(
             pid, actor_id=_DUTY_USER_ID, actor_name="钱责任", handle_info="已修复", completed=True
         )
-        assert p.status == ProblemStatus.WAIT_CHECK.value
-        assert p.now_handle_user == _AUDIT_USER_ID  # 切到验证人
-        assert p.real_end_time is not None
-
-        # closeTask check_result=1 → 已关闭
-        p = await svc.close_task(
-            pid,
-            actor_id=_AUDIT_USER_ID,
-            actor_name="孙验证",
-            check_result="1",
-            check_info="验证通过",
-        )
         assert p.status == ProblemStatus.CLOSED.value
-        assert p.now_handle_user is None
-        assert p.check_time is not None
+        assert p.now_handle_user is None  # 终态无下一处理人
+        assert p.real_end_time is not None
 
     async def test_bug_skips_dept_manager(self, db_session: AsyncSession) -> None:
         """bug 类型:申请→开发经理→项目经理→直接结束 (跳过部门经理 40)。"""
@@ -237,19 +277,20 @@ class TestFullFlow:
         assert p.now_handle_user is None
 
     async def test_close_reject_back_to_duty(self, db_session: AsyncSession) -> None:
-        """closeTask check_result != 1 → 打回责任人,处置中。"""
+        """close_task 打回 (待验证→执行中) —— 新流程待验证不可达,直接验证 close_task 逻辑。
+
+        新流程 doneTask completed → 已完成(终态),不再经过待验证。这里手动把
+        状态置待验证,单独验证 close_task(check_result=0) 能打回执行中给责任人
+        (close_task 留存休眠,不被新流程触发,但逻辑仍需正确)。
+        """
         svc = ProblemService(db_session)
         proj_id = await _make_project(db_session)
         p = await _make_problem(svc, proj_id, pro_type="bug")
         pid = p.id
 
-        # bug 快速到处置中 (10→20→30→结束)
-        await svc.next_process(pid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
-        await svc.next_process(pid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
-        await svc.next_process(pid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
-        assert p.status == ProblemStatus.DOING.value
-        # doneTask → 待验证
-        await svc.done_task(pid, actor_id=_DUTY_USER_ID, actor_name="钱责任", completed=True)
+        # 手动置待验证 (模拟历史在审数据;新流程不会到达此状态)
+        p.status = ProblemStatus.WAIT_CHECK.value
+        await db_session.commit()
         # closeTask 打回 (check_result=0)
         p = await svc.close_task(
             pid, actor_id=_AUDIT_USER_ID, actor_name="孙验证", check_result="0", check_info="未修复"
@@ -379,7 +420,7 @@ class TestProcessAudit:
             time_spent=0.5,
             completed=True,
         )
-        assert p.status == ProblemStatus.WAIT_CHECK.value
+        assert p.status == ProblemStatus.CLOSED.value
         assert float(p.time_spent or 0) == 2.0  # 1.5 + 0.5
 
         # D-007: done_task 额外创建 TaskExecute(problem_task_id 关联, actual 单点 now)
@@ -482,16 +523,16 @@ class TestInvalidTransition:
             await svc.done_task(p.id, actor_id=_DUTY_USER_ID, actor_name="钱责任", completed=True)
 
     async def test_close_on_closed_rejected(self, db_session: AsyncSession) -> None:
-        """已关闭不可再 close。"""
+        """已完成(终态)不可再 close。"""
         svc = ProblemService(db_session)
         proj_id = await _make_project(db_session)
         p = await _make_problem(svc, proj_id, pro_type="bug")
         pid = p.id
         for _ in range(3):
             await svc.next_process(pid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+        # doneTask completed → 已完成 (终态,新流程跳过待验证)
         await svc.done_task(pid, actor_id=_DUTY_USER_ID, actor_name="钱责任", completed=True)
-        await svc.close_task(pid, actor_id=_AUDIT_USER_ID, actor_name="孙验证")
-        # 再次 close → 4 是终态,非法
+        # 已完成是终态,close_task 不可用
         with pytest.raises(InvalidTransition):
             await svc.close_task(pid, actor_id=_AUDIT_USER_ID, actor_name="孙验证")
 

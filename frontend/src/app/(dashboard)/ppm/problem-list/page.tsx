@@ -42,11 +42,13 @@ import {
   PROBLEM_TYPE_TEXT,
 } from "@/components/ppm-status-actions";
 import { ApiError } from "@/lib/api";
+import { isOverEstimate } from "@/lib/ppm/format";
 import {
   deleteProblem,
   exportProblems,
   listProblemLogs,
   listProblems,
+  submitProblem,
 } from "@/lib/ppm";
 import type { ProblemList, ProblemProcessLog } from "@/lib/ppm";
 import { useSession } from "@/stores/session";
@@ -233,6 +235,17 @@ export default function ProblemListPage() {
     }
   };
 
+  // 草稿提交直接生效 → 执行中 (2026-07-17:不走审批)
+  const handleSubmitDraft = async (p: ProblemList) => {
+    if (p.status !== "1") return;
+    try {
+      await submitProblem(p.id);
+      await load();
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : "提交失败");
+    }
+  };
+
   const columns: TableProps<ProblemList>["columns"] = [
     {
       title: "序号",
@@ -324,12 +337,17 @@ export default function ProblemListPage() {
       dataIndex: "spent_time",
       key: "spent_time",
       width: 110,
-      render: (v: number | null | undefined) =>
-        v != null && v > 0 ? (
-          <span style={{ color: "#16a34a", fontWeight: 500 }}>{v} 人天</span>
-        ) : (
-          <span style={{ color: "rgba(0,0,0,0.45)" }}>—</span>
-        ),
+      render: (v: number | null | undefined, p: ProblemList) => {
+        if (v == null || v <= 0) {
+          return <span style={{ color: "rgba(0,0,0,0.45)" }}>—</span>;
+        }
+        const over = isOverEstimate(v, p.work_load);
+        return (
+          <span style={{ color: over ? "#dc2626" : "#16a34a", fontWeight: 500 }}>
+            {v} 人天
+          </span>
+        );
+      },
     },
     {
       title: "计划起止",
@@ -367,69 +385,41 @@ export default function ProblemListPage() {
       width: "max-content",
       fixed: "right",
       render: (_v: unknown, p: ProblemList) => {
-        const isNowHandler = matchAnyUser(
-          [p.now_handle_user],
-          currentUserId,
-        );
-        const isCreator = matchAnyUser(
-          [(p as ProblemList & { creator_id?: string }).creator_id],
-          currentUserId,
-        );
         const isDuty = matchAnyUser([p.duty_user_id], currentUserId);
-        const isAuditor = matchAnyUser([p.audit_user_id], currentUserId);
-        // 处置操作: 仅管理员 + 责任人
+        // 操作权限:管理员 ‖ 责任人 (问题表无创建人字段,isCreator 恒假,故按此放行)
         const canOperate = isDuty || !!currentUser?.is_platform_admin;
         return (
           <div className="flex whitespace-nowrap gap-1 justify-center">
-            {/* 审核:status=2 + now_handle_user(源 openAuditForm) */}
-            {p.status === "2" && isNowHandler && (
-              <Button size="sm" onClick={() => openDrawer("audit", p)}>
-                审核
-              </Button>
-            )}
-            {/* 变更:status=3 + creator/duty(源 openChangeForm → 新建 ProblemChange) */}
-            {p.status === "3" && (isCreator || isDuty) && (
-              <Button size="sm" variant="ghost" onClick={() => openDrawer("change", p)}>
-                变更
-              </Button>
-            )}
-            {/* 编辑:status=1 + creator(源 openForm update) */}
-            {p.status === "1" && isCreator && (
+            {/* 编辑:status=1 已保存 (管理员/责任人) */}
+            {p.status === "1" && canOperate && (
               <Button size="sm" onClick={() => openDrawer("edit", p)}>
                 编辑
               </Button>
             )}
-            {/* 开始处置:status=3 + 管理员/责任人(源 startTask) */}
-            {p.status === "3" && canOperate && !p.handle_info && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => openDrawer("start", p)}
-              >
-                开始
+            {/* 提交:status=1 已保存 → 直接生效进执行中 */}
+            {p.status === "1" && canOperate && (
+              <Button size="sm" variant="ghost" onClick={() => void handleSubmitDraft(p)}>
+                提交
               </Button>
             )}
-            {/* 完成处置:status=3 + 管理员/责任人(源 doneTask) */}
-            {p.status === "3" && canOperate && !!p.handle_info && (
-              <Button
-                size="sm"
-                onClick={() => openDrawer("done", p)}
-              >
-                处置
+            {/* 变更:status=3 执行中 (管理员/责任人) */}
+            {p.status === "3" && canOperate && (
+              <Button size="sm" variant="ghost" onClick={() => openDrawer("change", p)}>
+                变更
               </Button>
             )}
-            {/* 验证关闭:status=6 + audit_user(源 closeTask) */}
-            {p.status === "6" && isAuditor && (
-              <Button size="sm" onClick={() => openDrawer("close", p)}>
-                验证并关闭
+            {/* 完成处置:status=3 执行中 → 已完成 (doneTask 完工,无需验证) */}
+            {p.status === "3" && canOperate && (
+              <Button size="sm" onClick={() => openDrawer("done", p)}>
+                完成
               </Button>
             )}
             {/* 详情:居中弹窗(对齐 task-plans 风格) */}
             <Button size="sm" variant="ghost" onClick={() => void openDetail(p)}>
               详情
             </Button>
-            {/* 删除:status=1 + creator(源 handleDelete) */}
-            {p.status === "1" && isCreator && (
+            {/* 删除:status=1 已保存 (管理员/责任人) */}
+            {p.status === "1" && canOperate && (
               <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-700" onClick={() => void handleDelete(p)}>
                 删除
               </Button>
