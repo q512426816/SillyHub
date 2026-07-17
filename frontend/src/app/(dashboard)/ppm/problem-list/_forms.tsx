@@ -766,12 +766,12 @@ export function ProblemDoneForm({
   const [busy, setBusy] = useState(false);
   const [logs, loadingLogs] = useProblemLogs(problem.id);
 
-  const submit = async (submit: boolean, completed: boolean) => {
-    if (submit && !handleInfo.trim()) {
+  const submit = async (completed: boolean) => {
+    if (!handleInfo.trim()) {
       message.warning("请输入处置情况");
       return;
     }
-    if (submit && (timeSpent == null || timeSpent < 0)) {
+    if (timeSpent == null || timeSpent < 0) {
       message.warning("请填写本次耗时");
       return;
     }
@@ -783,7 +783,7 @@ export function ProblemDoneForm({
         completed,
       };
       await doneTaskProblem(problem.id, body);
-      notifyOk(completed ? "已完工,进入已完成" : submit ? "已报工" : "已保存");
+      notifyOk(completed ? "已完工,进入已完成" : "已记录处置,可继续处置或点完成");
       onSuccess();
     } catch (err) {
       message.error(errMessage(err, "提交失败"));
@@ -825,25 +825,13 @@ export function ProblemDoneForm({
         </Form.Item>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <Button onClick={onCancel}>取消</Button>
-          <Button
-            loading={busy}
-            onClick={() => void submit(false, false)}
-          >
-            保存
+          {/* 提交=记录本次处置(可多次),任务留执行中;对齐任务计划「执行-提交」 */}
+          <Button loading={busy} onClick={() => void submit(false)}>
+            提交
           </Button>
-          <Button
-            type="default"
-            loading={busy}
-            onClick={() => void submit(true, false)}
-          >
-            报工
-          </Button>
-          <Button
-            type="primary"
-            loading={busy}
-            onClick={() => void submit(true, true)}
-          >
-            完工
+          {/* 完成=处置完毕,进入已完成(终态) */}
+          <Button type="primary" loading={busy} onClick={() => void submit(true)}>
+            完成
           </Button>
         </div>
       </Form>

@@ -53,7 +53,7 @@ const TITLE: Record<ProblemDrawerMode, string> = {
   edit: "编辑问题",
   start: "开始处置",
   audit: "审核",
-  done: "完成处置",
+  done: "处置",
   close: "验证并关闭",
   detail: "问题详情",
   change: "申请变更",

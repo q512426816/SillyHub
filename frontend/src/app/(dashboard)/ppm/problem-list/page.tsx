@@ -408,10 +408,10 @@ export default function ProblemListPage() {
                 变更
               </Button>
             )}
-            {/* 完成处置:status=3 执行中 → 已完成 (doneTask 完工,无需验证) */}
+            {/* 处置:status=3 执行中 → 可多次记录处置,完成后进已完成(对齐任务计划执行) */}
             {p.status === "3" && canOperate && (
               <Button size="sm" onClick={() => openDrawer("done", p)}>
-                完成
+                处置
               </Button>
             )}
             {/* 详情:居中弹窗(对齐 task-plans 风格) */}
