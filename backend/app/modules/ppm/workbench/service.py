@@ -12,7 +12,7 @@ import re
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.admin.model import Organization, UserOrganization
@@ -127,11 +127,11 @@ def _sum_actual_hours(
         hours = float(ex.time_spent or 0.0) * 8.0
         if hours <= 0:
             continue
-        for day in range(1, days_in_month + 1):
-            day_date = date(year, month, day)
-            if day_date < today and _covers_date(
-                ex.actual_start_time, ex.actual_end_time, day_date
-            ):
+        # 仅遍历该 execute 覆盖的当月日 (O(Σ覆盖天数), 替代逐天 _covers_date 的 O(executes×31))
+        for day in _covered_days_in_month(
+            ex.actual_start_time, ex.actual_end_time, year, month, days_in_month
+        ):
+            if date(year, month, day) < today:
                 daily[day] = daily.get(day, 0.0) + hours
     return daily
 
@@ -250,6 +250,63 @@ def _worst_alert(alerts: list[str | None]) -> str:
             level = sev
             result = a
     return result
+
+
+def _covered_days_in_month(
+    start_dt: datetime | None,
+    end_dt: datetime | None,
+    year: int,
+    month: int,
+    days_in_month: int,
+) -> list[int]:
+    """记录区间按 :func:`_covers_date` 三档逻辑,返回落在 ``(year, month)`` 的日序号列表。
+
+    双端 → ``[s, e]`` 与当月相交日;仅 start → ``[s]``(若在当月);仅 end → ``[e]``(若在当月);
+    都无 → ``[]``。用于按日预分桶详情 items,把主循环的逐天遍历全部记录(O(31×N))降为
+    按记录摊到其覆盖日(O(Σ覆盖天数))。与逐天调 ``_covers_date`` 完全等价。
+    """
+    s = _to_aware(start_dt).date() if start_dt is not None else None
+    e = _to_aware(end_dt).date() if end_dt is not None else None
+    month_first = date(year, month, 1)
+    month_last = date(year, month, days_in_month)
+    if s is not None and e is not None:
+        days: list[int] = []
+        d = max(s, month_first)
+        hi = min(e, month_last)
+        while d <= hi:
+            days.append(d.day)
+            d += timedelta(days=1)
+        return days
+    if s is not None:
+        return [s.day] if month_first <= s <= month_last else []
+    if e is not None:
+        return [e.day] if month_first <= e <= month_last else []
+    return []
+
+
+def _alert_days_in_month(
+    start_dt: datetime | None,
+    end_dt: datetime | None,
+    year: int,
+    month: int,
+    days_in_month: int,
+) -> list[int]:
+    """``_progress_alert`` 可能非 None 的当月日序号: 无 end → ``[]``;有 end → ``[start or end, end]``
+    与当月相交日。``_progress_alert`` 对今天/截止日的特殊判定(临期 yellow、延期 red)均落在此区间内,
+    故仅遍历这些天与逐天全量调用等价。"""
+    if end_dt is None:
+        return []
+    e = _to_aware(end_dt).date()
+    s = _to_aware(start_dt).date() if start_dt is not None else e
+    month_first = date(year, month, 1)
+    month_last = date(year, month, days_in_month)
+    days: list[int] = []
+    d = max(s, month_first)
+    hi = min(e, month_last)
+    while d <= hi:
+        days.append(d.day)
+        d += timedelta(days=1)
+    return days
 
 
 class WorkbenchService:
@@ -538,24 +595,48 @@ class WorkbenchService:
             .all()
         )
 
-        # 实际执行 (execute_user_id=me)
+        # 实际执行 (execute_user_id=me): 只拉与当月区间相交的记录 (CPU 优化, 少拉少循环)。
+        # ``_covers_date`` 三档"至少覆盖当月一天"反推为 SQL: 双端相交 / 单 start 在当月 / 单 end 在当月。
         executes = (
             (
                 await self._session.execute(
-                    select(TaskExecute).where(TaskExecute.execute_user_id == user.id)
+                    select(TaskExecute).where(
+                        TaskExecute.execute_user_id == user.id,
+                        or_(
+                            and_(
+                                TaskExecute.actual_start_time.is_not(None),
+                                TaskExecute.actual_start_time < next_month_start,
+                                or_(
+                                    TaskExecute.actual_end_time.is_(None),
+                                    TaskExecute.actual_end_time >= month_start,
+                                ),
+                            ),
+                            and_(
+                                TaskExecute.actual_start_time.is_(None),
+                                TaskExecute.actual_end_time.is_not(None),
+                                TaskExecute.actual_end_time >= month_start,
+                                TaskExecute.actual_end_time < next_month_start,
+                            ),
+                        ),
+                    )
                 )
             )
             .scalars()
             .all()
         )
 
-        # 已用工时聚合 (by plan_task_id): 未来剩余负载 + 临期判定
-        spent_by_plan: dict[uuid.UUID, float] = {}
-        for ex in executes:
-            if ex.plan_task_id is not None:
-                spent_by_plan[ex.plan_task_id] = spent_by_plan.get(ex.plan_task_id, 0.0) + float(
-                    ex.time_spent or 0.0
-                )
+        # 已用工时聚合 (by plan_task_id): 未来剩余负载 + 临期判定。须全量累计
+        # (不能只算当月, 否则剩余负载/临期失真), 故用单独聚合查询而非遍历当月 executes。
+        spent_rows = (
+            await self._session.execute(
+                select(TaskExecute.plan_task_id, func.sum(TaskExecute.time_spent))
+                .where(TaskExecute.execute_user_id == user.id)
+                .group_by(TaskExecute.plan_task_id)
+            )
+        ).all()
+        spent_by_plan: dict[uuid.UUID, float] = {
+            pid: float(total or 0.0) for pid, total in spent_rows if pid is not None
+        }
 
         # 实际执行关联的计划任务名 (execute_items.content),单独查避免依赖 relationship
         exec_plan_ids = {ex.plan_task_id for ex in executes if ex.plan_task_id is not None}
@@ -580,95 +661,113 @@ class WorkbenchService:
         ]
         daily_remaining = _spread_remaining_hours(future_plans, spent_by_plan, year, month, today)
 
-        days: list[CalendarDay] = []
-        for day in range(1, days_in_month + 1):
-            day_date = date(year, month, day)
+        # 预分桶 (O(Σ覆盖天数), 替代原逐天遍历全部记录的 O(31×N), 降单请求 CPU):
+        # 把"每天遍历所有记录"改成"每条记录摊到它覆盖的几天", 单 worker 并发时不再互相挤占。
+        # task_count: plan start_time 当月落点计数 (现状口径保留)
+        count_by_day: dict[int, int] = {}
+        for p in plans:
+            if p.start_time is not None:
+                ps = _to_aware(p.start_time)
+                if ps.year == year and ps.month == month:
+                    count_by_day[ps.day] = count_by_day.get(ps.day, 0) + 1
 
-            # task_count: plan start_time 当月落点计数 (现状口径保留)
-            count = 0
-            for p in plans:
-                if p.start_time is not None:
-                    ps = _to_aware(p.start_time)
-                    if ps.year == year and ps.month == month and ps.day == day:
-                        count += 1
+        # 右点 alert: 每条记录摊到其 _progress_alert 覆盖的当月日, 取最严重 (D-008)
+        alert_by_day: dict[int, str] = {}
 
-            # 左点 load:过去→实际,未来→剩余
-            if day_date < today:
-                load_level = _load_level_workload(daily_actual.get(day, 0.0))
-            else:
-                load_level = _load_level_workload(daily_remaining.get(day, 0.0))
+        def _bump_alert(day: int, a: str | None) -> None:
+            sev = _ALERT_SEVERITY_PROGRESS.get(a or "none", 0)
+            if sev > _ALERT_SEVERITY_PROGRESS.get(alert_by_day.get(day, "none"), 0):
+                alert_by_day[day] = a or "none"
 
-            # 右点 alert:计划 + 缺陷 _progress_alert 取最严重 (D-008)
-            alerts: list[str | None] = []
-            for p in plans:
-                alerts.append(
+        for p in plans:
+            for day in _alert_days_in_month(p.start_time, p.end_time, year, month, days_in_month):
+                _bump_alert(
+                    day,
                     _progress_alert(
                         p.start_time,
                         p.end_time,
                         p.status == "已完成",
                         p.work_load,
                         spent_by_plan.get(p.id, 0.0),
-                        day_date,
+                        date(year, month, day),
                         today,
-                    )
+                    ),
                 )
-            for prob in problems:
-                alerts.append(
+        for prob in problems:
+            for day in _alert_days_in_month(
+                prob.plan_start_time, prob.plan_end_time, year, month, days_in_month
+            ):
+                _bump_alert(
+                    day,
                     _progress_alert(
                         prob.plan_start_time,
                         prob.plan_end_time,
                         prob.status == "4",
                         prob.work_load,
                         float(prob.time_spent or 0.0),
-                        day_date,
+                        date(year, month, day),
                         today,
+                    ),
+                )
+
+        # 详情三类 (D-009): 按 _covers_date 覆盖日分桶
+        plan_items_by_day: dict[int, list[CalendarPlanItem]] = {}
+        for p in plans:
+            for day in _covered_days_in_month(p.start_time, p.end_time, year, month, days_in_month):
+                plan_items_by_day.setdefault(day, []).append(
+                    CalendarPlanItem(
+                        id=str(p.id),
+                        content=p.content,
+                        project_name=p.project_name,
+                        status=p.status,
+                        start_time=p.start_time,
+                        end_time=p.end_time,
                     )
                 )
-            alert_level = _worst_alert(alerts)
+        problem_items_by_day: dict[int, list[CalendarProblemItem]] = {}
+        for prob in problems:
+            for day in _covered_days_in_month(
+                prob.plan_start_time, prob.plan_end_time, year, month, days_in_month
+            ):
+                problem_items_by_day.setdefault(day, []).append(
+                    CalendarProblemItem(
+                        id=str(prob.id),
+                        pro_desc=prob.pro_desc,
+                        project_name=prob.project_name,
+                        status=prob.status,
+                    )
+                )
+        execute_items_by_day: dict[int, list[CalendarExecuteItem]] = {}
+        for ex in executes:
+            for day in _covered_days_in_month(
+                ex.actual_start_time, ex.actual_end_time, year, month, days_in_month
+            ):
+                execute_items_by_day.setdefault(day, []).append(
+                    CalendarExecuteItem(
+                        id=str(ex.id),
+                        content=plan_content_map.get(ex.plan_task_id) if ex.plan_task_id else None,
+                        status=ex.status,
+                        time_spent=ex.time_spent,
+                    )
+                )
 
-            # 详情三类 (D-009)
-            plan_items = [
-                CalendarPlanItem(
-                    id=str(p.id),
-                    content=p.content,
-                    project_name=p.project_name,
-                    status=p.status,
-                    start_time=p.start_time,
-                    end_time=p.end_time,
-                )
-                for p in plans
-                if _covers_date(p.start_time, p.end_time, day_date)
-            ]
-            problem_items = [
-                CalendarProblemItem(
-                    id=str(prob.id),
-                    pro_desc=prob.pro_desc,
-                    project_name=prob.project_name,
-                    status=prob.status,
-                )
-                for prob in problems
-                if _covers_date(prob.plan_start_time, prob.plan_end_time, day_date)
-            ]
-            execute_items = [
-                CalendarExecuteItem(
-                    id=str(ex.id),
-                    content=plan_content_map.get(ex.plan_task_id) if ex.plan_task_id else None,
-                    status=ex.status,
-                    time_spent=ex.time_spent,
-                )
-                for ex in executes
-                if _covers_date(ex.actual_start_time, ex.actual_end_time, day_date)
-            ]
-
+        days: list[CalendarDay] = []
+        for day in range(1, days_in_month + 1):
+            day_date = date(year, month, day)
+            # 左点 load:过去→实际,未来→剩余
+            if day_date < today:
+                load_level = _load_level_workload(daily_actual.get(day, 0.0))
+            else:
+                load_level = _load_level_workload(daily_remaining.get(day, 0.0))
             days.append(
                 CalendarDay(
                     date=f"{year_month}-{day:02d}",
-                    task_count=count,
+                    task_count=count_by_day.get(day, 0),
                     load_level=load_level,
-                    alert_level=alert_level,
-                    plan_items=plan_items,
-                    problem_items=problem_items,
-                    execute_items=execute_items,
+                    alert_level=alert_by_day.get(day, "none"),
+                    plan_items=plan_items_by_day.get(day, []),
+                    problem_items=problem_items_by_day.get(day, []),
+                    execute_items=execute_items_by_day.get(day, []),
                 )
             )
 
