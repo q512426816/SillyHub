@@ -21,3 +21,22 @@ if (!globalThis.localStorage) {
     },
   } as any;
 }
+
+// matchMedia polyfill: antd 响应式组件 (Modal/TreeSelect/Select 等) 在 jsdom 需要。
+if (!globalThis.matchMedia) {
+  Object.defineProperty(globalThis, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: (query: string) =>
+      ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      }) as MediaQueryList,
+  });
+}

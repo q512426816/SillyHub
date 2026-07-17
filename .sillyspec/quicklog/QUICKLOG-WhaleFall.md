@@ -363,3 +363,13 @@ created_at: 2026-07-14T09:20:24
 方案：写时同步——ProjectMaintenanceService.update 检测 project_name 变更时，同事务 update(PsProjectPlan).where(project_id==entity_id).values(project_name, updated_at) 刷新所有关联计划。单一写入点，所有读 project_name 的下游自动同步。import plan.model 无循环（plan.model 仅依赖 base/common）。
 波折：① 初版用 text SQL WHERE project_id 绕过 UuidCoercing 类型适配，sqlite/PG 不匹配致 UPDATE 0 行（DB 实测值未变），改用 SQLAlchemy update() statement 走 model 类型适配；② project/tests/conftest 未注册 plan model，sqlite 不建 ppm_ps_project_plan 表（连带 crud test 的 update 也 no such table），conftest 加 plan model import；③ expire_on_commit=False 致 session.get 返回 identity map 缓存旧值，测试改用 select column 直查 DB 验证实际值。
 结果：ruff format/check 过；mypy app（471 文件）无问题；pytest project 10 passed（含新增 test_project_rename_syncs_ps_project_plan_name）。仅改后端 project 模块，不动前端/plan service/types。待 commit + rebuild backend 部署 + 用户验证（项目改名 → 项目计划列表项目名实时更新）。
+
+## ql-20260717-005-b551 | 2026-07-17 16:27:56 | /admin/users 新建用户抽屉→antd Modal 弹窗 + 组织树选择 + 角色选择框 + 全 antd 表单
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/admin-user-drawer.tsx（整组件重写）+ frontend/src/test/setup.ts（matchMedia polyfill）+ frontend/src/components/__tests__/admin-user-drawer.test.tsx（17 用例适配 antd）
+需求：用户要求 /admin/users 新建用户抽屉改弹窗、全部 antd UI、组织选树结构选择框、角色改选择框。
+根因：原 AdminUserDrawer 用自实现 fixed Drawer + 大量原生 input/checkbox（登录名/邮箱/显示名/超管/登录/组织 checkbox 平铺/角色 checkbox 平铺），与项目 antd 表单体系（PpmResourceDrawer ql-010 等）不统一；组织是平铺 checkbox 无法体现层级。
+方案：整组件重写为 antd——Modal（替自实现 Drawer）+ Form.useForm layout=vertical；登录名/邮箱/显示名→Form.Item(rules required/min3/email)+Input+aria-label；超管/登录→Checkbox；组织 checkbox 平铺→TreeSelect 多选（buildOrgTreeData 用 OrganizationRead.parent_id 构造 treeData）；角色 checkbox 平铺→Select multiple；Form.useWatch 实时算 usernameValid/emailValid 驱动保存按钮 disabled（保留原"空字段禁用按钮"行为，submit 仍走 validateFields 双保险）。保留 create 默认密码提示 Alert + isSelf 警告 + create/edit body 构造逻辑 + 权限 disabled。OrganizationRead 已有 parent_id，无需改后端。
+波折：① antd Modal/TreeSelect/Select 在 jsdom 报 window.matchMedia 未定义（17 测试全炸），setup.ts 加 matchMedia polyfill；② antd Form.Item label 不建立 label[for]→input 关联致 getByLabelText 失效，给登录名/邮箱 Input 补 aria-label；③ 组织/角色 checkbox→TreeSelect/Select 后原 checkbox toggle/checked 测试失效（jsdom 测 TreeSelect 选中态难），改为"渲染 + 提交 body 验证预填/未选"。
+结果：typecheck EXIT 0；lint 0 error（warning 全既有 kanban.ts）；vitest admin-user-drawer 17 passed；全量 937 passed 零回归。纯前端，不动后端/接口/page.tsx（组件名/props 不变）。待 commit + rebuild frontend 部署 + 用户浏览器验证（新建/编辑用户弹窗 + 组织树多选 + 角色多选 + 全 antd 控件）。

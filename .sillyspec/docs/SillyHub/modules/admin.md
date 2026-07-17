@@ -85,6 +85,7 @@ UserService: 自保护（不能删自己）+ 最后管理员保护（_active_adm
 - ql-20260715-002-9c5b | /admin/users 新建用户去掉密码输入框，改后端固定默认初始密码 SillyHub@123（schema.password 改可选 + service 缺省兜底，admin/settings 两入口一致；前端抽屉去密码框加蓝色默认密码提示 + 测试随需求调整）
 - ql-20260715-008-66c5 | /admin/users 重置密码默认改用默认密码 SillyHub@123（非随机）+ 重置成功后关闭弹窗（后端 reset_password 默认 DEFAULT_INITIAL_PASSWORD 删 _generate_password；前端 ResetPasswordDialog 成功 onClose 关闭弹窗）
 - ql-20260715-010-bb2c | /admin/users list_users 加 ids 批量查（?ids=a&ids=b 按 user_id 精确过滤绕过分页）；前端 PpmUserSelect 已选值不在当前页时按 id 回填真实姓名，修复 /ppm/project-members 编辑成员姓名显示 id
+- ql-20260717-005-b551 | /admin/users 新建/编辑用户抽屉→antd Modal 弹窗 + 全 antd 表单：自实现 fixed Drawer→Modal；原生 input→Form.Item+Input（登录名 required/min3 + 邮箱 email 格式 + 显示名）；超管/登录 checkbox→antd Checkbox；组织 checkbox 平铺→TreeSelect 多选（buildOrgTreeData 用 OrganizationRead.parent_id 构树）；角色 checkbox 平铺→Select multiple；Form.useWatch 实时校验驱动保存按钮 disabled（保留原空字段禁用行为）；setup.ts 加 matchMedia polyfill（antd Modal/TreeSelect 在 jsdom 需要）；测试 17 用例适配 antd（组织 checkbox toggle→提交 body 验证预填/未选）；组件名/props 不变，零改 page.tsx
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->

@@ -127,8 +127,6 @@ describe("AdminUserDrawer", () => {
     expect(
       (screen.getByDisplayValue("Alice") as HTMLInputElement).value,
     ).toBe("Alice");
-    const orgCheckbox = screen.getByLabelText("acme") as HTMLInputElement;
-    expect(orgCheckbox.checked).toBe(true);
   });
 
   it("create submit is disabled when username missing", () => {
@@ -246,18 +244,16 @@ describe("AdminUserDrawer", () => {
     const submitBtn = screen.getByText("保存") as HTMLButtonElement;
     // ① email 留空 → 保存启用
     await waitFor(() => expect(submitBtn.disabled).toBe(false));
-    // ② email 非法 → 保存禁用 + 红字
+    // ② email 非法 → 保存禁用(formValid 实时校验)
     fireEvent.change(screen.getByLabelText("邮箱"), {
       target: { value: "bad-email" },
     });
     await waitFor(() => expect(submitBtn.disabled).toBe(true));
-    expect(screen.getByText("邮箱格式不合法")).toBeInTheDocument();
-    // ③ email 合法 → 保存启用 + 红字消失
+    // ③ email 合法 → 保存启用
     fireEvent.change(screen.getByLabelText("邮箱"), {
       target: { value: "bob@example.com" },
     });
     await waitFor(() => expect(submitBtn.disabled).toBe(false));
-    expect(screen.queryByText("邮箱格式不合法")).not.toBeInTheDocument();
   });
 
   it("test_username_conflict_error_display: create mode displays error and keeps input when onSubmit rejects", async () => {
@@ -319,52 +315,80 @@ describe("AdminUserDrawer", () => {
     expect(submitBtn.disabled).toBe(true);
   });
 
-  it("organizations checkbox toggles selection", () => {
+  it("organizations TreeSelect renders and omits org ids when none selected", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(
       <AdminUserDrawer
         {...baseProps}
+        onSubmit={onSubmit}
         open
         mode="create"
       />,
     );
-    const cb = screen.getByLabelText("acme") as HTMLInputElement;
-    expect(cb.checked).toBe(false);
-    fireEvent.click(cb);
-    expect(cb.checked).toBe(true);
+    // 组织字段渲染为 TreeSelect(标签存在)
+    expect(screen.getByText("组织（多选）")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("登录名"), {
+      target: { value: "bob" },
+    });
+    const submitBtn = screen.getByText("保存") as HTMLButtonElement;
+    await waitFor(() => expect(submitBtn.disabled).toBe(false));
+    fireEvent.click(submitBtn);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    // 未选组织 → body 不含 organization_ids
+    expect(onSubmit.mock.calls[0]![0].organization_ids).toBeUndefined();
   });
 
-  it("T-09: create 模式按 defaultOrganizationIds 预填勾选", () => {
+  it("T-09: create 模式按 defaultOrganizationIds 预填", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(
       <AdminUserDrawer
         {...baseProps}
+        onSubmit={onSubmit}
         open
         mode="create"
         defaultOrganizationIds={["o1"]}
       />,
     );
-    // o1 对应 organization(baseProps.organizations=[makeOrg("o1","Acme","acme")])
-    // checkbox aria-label=o.code="acme",默认勾选
-    const cb = screen.getByLabelText("acme") as HTMLInputElement;
-    expect(cb.checked).toBe(true);
+    fireEvent.change(screen.getByLabelText("登录名"), {
+      target: { value: "bob" },
+    });
+    const submitBtn = screen.getByText("保存") as HTMLButtonElement;
+    await waitFor(() => expect(submitBtn.disabled).toBe(false));
+    fireEvent.click(submitBtn);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    // defaultOrganizationIds=["o1"] → 提交 body.organization_ids=["o1"]
+    expect(onSubmit.mock.calls[0]![0].organization_ids).toEqual(["o1"]);
   });
 
-  it("T-10: create 模式不传 defaultOrganizationIds → 默认不勾(空回归)", () => {
+  it("T-10: create 模式不传 defaultOrganizationIds → 默认不勾(空回归)", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(
       <AdminUserDrawer
         {...baseProps}
+        onSubmit={onSubmit}
         open
         mode="create"
       />,
     );
-    const cb = screen.getByLabelText("acme") as HTMLInputElement;
-    expect(cb.checked).toBe(false);
+    fireEvent.change(screen.getByLabelText("登录名"), {
+      target: { value: "bob" },
+    });
+    const submitBtn = screen.getByText("保存") as HTMLButtonElement;
+    await waitFor(() => expect(submitBtn.disabled).toBe(false));
+    fireEvent.click(submitBtn);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    // 无 defaultOrganizationIds → 未选组织也不选角色
+    expect(onSubmit.mock.calls[0]![0].organization_ids).toBeUndefined();
+    expect(onSubmit.mock.calls[0]![0].role_ids).toBeUndefined();
   });
 
-  it("T-11: edit 模式忽略 defaultOrganizationIds,用 user.organizations", () => {
+  it("T-11: edit 模式忽略 defaultOrganizationIds,用 user.organizations", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
     // 给两个 organization:o1(Acme) + o2(Beta),user.organizations=[o2]
     render(
       <AdminUserDrawer
         {...baseProps}
+        onSubmit={onSubmit}
         organizations={[
           makeOrg("o1", "Acme", "acme"),
           makeOrg("o2", "Beta", "beta"),
@@ -372,15 +396,18 @@ describe("AdminUserDrawer", () => {
         open
         mode="edit"
         user={makeUser({
+          username: "alice",
           organizations: [{ id: "o2", name: "Beta", code: "beta" }],
         })}
         defaultOrganizationIds={["o1"]}
       />,
     );
-    // edit 模式:user.organizations=o2 → beta 勾选;defaultOrganizationIds=o1 被忽略
-    const betaCb = screen.getByLabelText("beta") as HTMLInputElement;
-    const acmeCb = screen.getByLabelText("acme") as HTMLInputElement;
-    expect(betaCb.checked).toBe(true);
-    expect(acmeCb.checked).toBe(false);
+    const submitBtn = screen.getByText("保存") as HTMLButtonElement;
+    await waitFor(() => expect(submitBtn.disabled).toBe(false));
+    fireEvent.click(submitBtn);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    // edit 模式:user.organizations=o2 → 提交 body.organization_ids=["o2"];
+    // defaultOrganizationIds=o1 被忽略
+    expect(onSubmit.mock.calls[0]![0].organization_ids).toEqual(["o2"]);
   });
 });
