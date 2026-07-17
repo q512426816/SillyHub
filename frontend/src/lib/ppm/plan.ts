@@ -121,8 +121,16 @@ export async function exportMilestoneDetails(): Promise<void> {
 
 export async function listPlanNodeDetails(
   planNodeId: string,
+  moduleId?: string,
 ): Promise<PlanNodeDetail[]> {
-  return apiFetch<PlanNodeDetail[]>(`/api/ppm/plan-node/${planNodeId}/details`);
+  // moduleId 指定时按模块过滤 (有模块模板三层按模块拉,D-002@v1);
+  // 不传则返回该模板全部明细 (无模块模板二层用,design §5.2)。
+  const query =
+    moduleId !== undefined ? { query: { module_id: moduleId } } : undefined;
+  return apiFetch<PlanNodeDetail[]>(
+    `/api/ppm/plan-node/${planNodeId}/details`,
+    query,
+  );
 }
 
 export async function createPlanNodeDetailTpl(

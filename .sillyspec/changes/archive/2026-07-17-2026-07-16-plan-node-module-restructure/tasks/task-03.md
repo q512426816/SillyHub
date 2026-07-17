@@ -8,7 +8,7 @@ priority: P0
 depends_on: [task-01, task-02]
 blocks: [task-04, task-05]
 requirement_ids: [FR-001, FR-004]
-decision_ids: [D-001@v1, D-004@v1]
+decision_ids: [D-001, D-004]
 allowed_paths:
   - backend/app/modules/ppm/plan/service.py
 goal: >

@@ -91,6 +91,181 @@ class TestSubTables:
         assert modules[0].module_name == "前端"
 
 
+class TestHasModuleAndDetailOwnership:
+    """has_module 标志 + 明细 module_id 归属校验 (plan-node-module-restructure / D-001/D-004)。
+
+    覆盖验收:
+    - has_module 新建默认 false、update 忽略 (不可改)
+    - 明细 module_id 归属校验正/反例 (has_module=true/false、跨模板、update 改归属)
+    - list_plan_node_details_by_node 按 module_id 过滤 (design §5.2)
+    """
+
+    async def test_create_plan_node_has_module_default_false(
+        self, db_session: AsyncSession
+    ) -> None:
+        """service 层建模板不传 has_module → ORM default False (兼容既有调用)。"""
+        svc = PlanService(db_session)
+        node = await svc.create_plan_node({"overall_stage": "立项", "no": 1})
+        assert node.has_module is False
+
+    async def test_update_plan_node_can_change_has_module(self, db_session: AsyncSession) -> None:
+        """v3: has_module 编辑时可改 (D-001 取消)。"""
+        svc = PlanService(db_session)
+        node = await svc.create_plan_node({"overall_stage": "立项", "has_module": False})
+        updated = await svc.update_plan_node(node.id, {"has_module": True, "overall_stage": "设计"})
+        assert updated.has_module is True  # 已改
+        assert updated.overall_stage == "设计"
+
+    async def test_detail_no_module_when_has_module_false(self, db_session: AsyncSession) -> None:
+        """无模块模板:明细 module_id=None 通过 (二层,design §5.1)。"""
+        svc = PlanService(db_session)
+        node = await svc.create_plan_node({"overall_stage": "立项", "has_module": False})
+        detail = await svc.create_plan_node_detail(
+            {"plan_node_id": str(node.id), "no": "1", "task_theme": "明细1"}
+        )
+        assert detail.module_id is None
+
+    async def test_detail_with_module_when_has_module_true(self, db_session: AsyncSession) -> None:
+        """有模块模板:明细 module_id 挂同模板下模块通过 (三层,D-002)。"""
+        svc = PlanService(db_session)
+        node = await svc.create_plan_node({"overall_stage": "立项", "has_module": True})
+        module = await svc.create_module({"plan_node_id": str(node.id), "module_name": "前端"})
+        detail = await svc.create_plan_node_detail(
+            {
+                "plan_node_id": str(node.id),
+                "module_id": str(module.id),
+                "no": "1",
+                "task_theme": "明细",
+            }
+        )
+        assert detail.module_id == module.id
+
+    async def test_detail_has_module_true_allows_null_module(
+        self, db_session: AsyncSession
+    ) -> None:
+        """v2:has_module 仅记录,不再要求明细必填 module_id —— True 模板 + null 通过。"""
+        svc = PlanService(db_session)
+        node = await svc.create_plan_node({"overall_stage": "立项", "has_module": True})
+        detail = await svc.create_plan_node_detail(
+            {"plan_node_id": str(node.id), "no": "1", "task_theme": "明细"}
+        )
+        assert detail.module_id is None
+
+    async def test_detail_has_module_false_allows_module_id(self, db_session: AsyncSession) -> None:
+        """v2:has_module 仅记录,不再禁止挂 module_id —— False 模板 + 属同模板 module_id 通过。"""
+        svc = PlanService(db_session)
+        node = await svc.create_plan_node({"overall_stage": "立项", "has_module": False})
+        module = await svc.create_module({"plan_node_id": str(node.id), "module_name": "前端"})
+        detail = await svc.create_plan_node_detail(
+            {
+                "plan_node_id": str(node.id),
+                "module_id": str(module.id),
+                "no": "1",
+                "task_theme": "明细",
+            }
+        )
+        assert detail.module_id == module.id
+
+    async def test_detail_module_id_not_belonging(self, db_session: AsyncSession) -> None:
+        """明细 module_id 必须属于同模板:指向别的模板的模块 → PlanError (400,D-004)。"""
+        svc = PlanService(db_session)
+        node = await svc.create_plan_node({"overall_stage": "立项", "has_module": True})
+        other = await svc.create_plan_node({"overall_stage": "设计", "has_module": True})
+        other_module = await svc.create_module(
+            {"plan_node_id": str(other.id), "module_name": "别模块"}
+        )
+        with pytest.raises(PlanError):
+            await svc.create_plan_node_detail(
+                {
+                    "plan_node_id": str(node.id),
+                    "module_id": str(other_module.id),
+                    "no": "1",
+                    "task_theme": "明细",
+                }
+            )
+
+    async def test_update_detail_changes_module_id(self, db_session: AsyncSession) -> None:
+        """update 明细改 module_id 到同模板另一模块 → 通过 (重校验 D-004)。"""
+        svc = PlanService(db_session)
+        node = await svc.create_plan_node({"overall_stage": "立项", "has_module": True})
+        m1 = await svc.create_module({"plan_node_id": str(node.id), "module_name": "前端"})
+        m2 = await svc.create_module({"plan_node_id": str(node.id), "module_name": "后端"})
+        detail = await svc.create_plan_node_detail(
+            {
+                "plan_node_id": str(node.id),
+                "module_id": str(m1.id),
+                "no": "1",
+                "task_theme": "明细",
+            }
+        )
+        updated = await svc.update_plan_node_detail(detail.id, {"module_id": str(m2.id)})
+        assert updated.module_id == m2.id
+
+    async def test_update_detail_module_id_to_foreign_rejected(
+        self, db_session: AsyncSession
+    ) -> None:
+        """update 明细 module_id 指向别的模板模块 → PlanError (400,D-004)。"""
+        svc = PlanService(db_session)
+        node = await svc.create_plan_node({"overall_stage": "立项", "has_module": True})
+        other = await svc.create_plan_node({"overall_stage": "设计", "has_module": True})
+        m1 = await svc.create_module({"plan_node_id": str(node.id), "module_name": "前端"})
+        other_module = await svc.create_module(
+            {"plan_node_id": str(other.id), "module_name": "别模块"}
+        )
+        detail = await svc.create_plan_node_detail(
+            {
+                "plan_node_id": str(node.id),
+                "module_id": str(m1.id),
+                "no": "1",
+                "task_theme": "明细",
+            }
+        )
+        with pytest.raises(PlanError):
+            await svc.update_plan_node_detail(detail.id, {"module_id": str(other_module.id)})
+
+    async def test_list_details_filter_by_module_id(self, db_session: AsyncSession) -> None:
+        """list_plan_node_details_by_node 加 module_id 过滤 (design §5.2 三层按模块拉)。"""
+        svc = PlanService(db_session)
+        node = await svc.create_plan_node({"overall_stage": "立项", "has_module": True})
+        m1 = await svc.create_module({"plan_node_id": str(node.id), "module_name": "前端"})
+        m2 = await svc.create_module({"plan_node_id": str(node.id), "module_name": "后端"})
+        await svc.create_plan_node_detail(
+            {
+                "plan_node_id": str(node.id),
+                "module_id": str(m1.id),
+                "no": "1",
+                "task_theme": "前1",
+            }
+        )
+        await svc.create_plan_node_detail(
+            {
+                "plan_node_id": str(node.id),
+                "module_id": str(m1.id),
+                "no": "2",
+                "task_theme": "前2",
+            }
+        )
+        await svc.create_plan_node_detail(
+            {
+                "plan_node_id": str(node.id),
+                "module_id": str(m2.id),
+                "no": "1",
+                "task_theme": "后1",
+            }
+        )
+        # 不过滤 → 全部 3 条
+        all_rows = await svc.list_plan_node_details_by_node(str(node.id))
+        assert len(all_rows) == 3
+        # 按 m1 过滤 → 2 条
+        m1_rows = await svc.list_plan_node_details_by_node(str(node.id), str(m1.id))
+        assert len(m1_rows) == 2
+        assert all(r.module_id == m1.id for r in m1_rows)
+        # 按 m2 过滤 → 1 条
+        m2_rows = await svc.list_plan_node_details_by_node(str(node.id), str(m2.id))
+        assert len(m2_rows) == 1
+        assert m2_rows[0].task_theme == "后1"
+
+
 class TestPsProjectPlan:
     async def test_crud(self, db_session: AsyncSession) -> None:
         svc = PlanService(db_session)

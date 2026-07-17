@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Column,
     DateTime,
     ForeignKey,
@@ -67,6 +68,12 @@ class PlanNode(BaseModel, table=True):
     project_type: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
     # 序号 (源 Integer)
     no: int | None = Field(default=None, sa_column=Column(Integer, nullable=True))
+    # 是否有模块子表 (新建时定,保存后不可改,D-001@v1)。
+    # 有模块 → 模板→模块→明细 (三层,明细挂 module_id);
+    # 无模块 → 模板→明细 (二层,明细挂 plan_node_id)。
+    has_module: bool = Field(
+        default=False, sa_column=Column(Boolean, nullable=False, default=False)
+    )
     created_at: datetime = Field(
         default_factory=_now, sa_column=Column(DateTime(timezone=True), nullable=False)
     )
@@ -82,7 +89,10 @@ class PlanNodeDetail(BaseModel, table=True):
     """
 
     __tablename__ = "ppm_plan_node_detail"
-    __table_args__ = (Index("ix_ppm_plan_node_detail_node", "plan_node_id", "no"),)
+    __table_args__ = (
+        Index("ix_ppm_plan_node_detail_node", "plan_node_id", "no"),
+        Index("ix_ppm_plan_node_detail_module", "module_id"),
+    )
 
     id: uuid.UUID = Field(
         default_factory=uuid.uuid4,
@@ -94,6 +104,10 @@ class PlanNodeDetail(BaseModel, table=True):
     plan_node_id: uuid.UUID | None = Field(
         default=None, sa_column=Column(UuidCoercing, nullable=True)
     )
+    # 所属模块 (有模块模板时挂 PlanNodeModule,D-002@v1 三层结构);
+    # 无模块模板时为 null,明细直接挂 plan_node_id (二层)。
+    # 不加 FK 约束,对齐本表既有 plan_node_id 无 FK 的风格 (design.md §8)。
+    module_id: uuid.UUID | None = Field(default=None, sa_column=Column(UuidCoercing, nullable=True))
     detailed_stage: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
     no: str | None = Field(default=None, sa_column=Column(String(32), nullable=True))
     task_theme: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))

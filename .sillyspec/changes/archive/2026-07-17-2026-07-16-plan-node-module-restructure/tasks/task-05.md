@@ -8,7 +8,7 @@ priority: P1
 depends_on: [task-01, task-02, task-03, task-04]
 blocks: []
 requirement_ids: [FR-001, FR-004, FR-006]
-decision_ids: [D-001@v1, D-004@v1]
+decision_ids: [D-001, D-004]
 allowed_paths:
   - backend/app/modules/ppm/plan/tests/test_service.py
   - backend/app/modules/ppm/plan/tests/test_router.py

@@ -8,6 +8,8 @@ created_at: 2026-07-16T11:32:00
 > 变更 `2026-07-16-plan-node-module-restructure` · scale: large · 实现路径：plan → execute → verify
 > 依据：`design.md` §5/§6/§7；分 2 个 Wave
 
+> ⚠️ **v2/v3/v4 需求迭代**（见 design §13 + 本文档末尾「需求变更 v2/v3」章节）：下方 task 描述为 v1（含三层 / ModuleFormDrawer / has_module 不可改 等**已被取代**的内容），实际实现以 v2/v3 章节为准——task-07 统一二层明细、task-08 仅 NodeFormDrawer、has_module 编辑可改、列表按编号正序。
+
 ## Wave 1 — 后端（数据模型 + API + 测试）
 
 ### task-01 模型 + migration
@@ -52,3 +54,23 @@ created_at: 2026-07-16T11:32:00
 - rebuild frontend + backend Docker 部署；浏览器验收（二层/三层、antd 表单、归属校验、milestone-details 不回归）。
 - **前置**：先归档 `2026-07-16-plan-node-subtable-style` 变更（R-05）。
 - 覆盖：FR-005/FR-006
+
+## 需求变更 v2（2026-07-16，见 design §13）
+
+has_module 从「驱动展开」降级为「纯记录」。对应 task 调整：
+
+- **task-03**（service 校验）：`_validate_detail_module` 简化——has_module 不参与，仅保留 module_id 非 null 时属同 plan_node 的防御校验；module_id=null 一律放行。
+- **task-07**（plan-nodes 页）：展开行**统一只渲染 DetailsSubTable**（二层，挂 plan_node_id），不论 has_module；模块子表从该页移除。~~三层条件展开取消~~。
+- **task-08**（抽屉 antd 化）：NodeFormDrawer 保留（has_module Switch 记录用）；~~ModuleFormDrawer 从该页删除~~（模块子表移除）。
+- **task-05**（测试）：归属校验用例更新（has_module 不再驱动必填/禁用）。
+- task-01/02/04/06/09 不变（model/schema/router/migration/types/部署保留）。
+
+## 需求变更 v3（2026-07-16，见 design §13）
+
+D-001 取消——has_module **编辑时可改**（不再新建定不可改）。对应 task 调整：
+
+- **task-02**（schema）：`PlanNodeUpdate` 加 `has_module` 字段（可选）。
+- **task-03**（service）：`update_plan_node` 移除「强制 pop has_module」逻辑，允许透传更新。
+- **task-08**（抽屉）：`NodeFormDrawer` 的 has_module Switch 移除 edit 态 `disabled`；`handleSaveNode` edit 模式传 has_module。
+- **task-05**（测试）：原 `test_update_plan_node_ignores_has_module`（service+router）改为「可改」。
+- 前端 types：`PlanNodeUpdate` 加 `has_module?: boolean | null`。
