@@ -253,8 +253,7 @@ class PlanService:
         return await _Crud(self._session, PlanNode).get(item_id)
 
     async def update_plan_node(self, item_id: uuid.UUID, data: dict[str, Any]) -> PlanNode:
-        # has_module 不可改 (D-001@v1):即使客户端传入也强制忽略,避免归属混乱。
-        data.pop("has_module", None)
+        # v3: has_module 编辑时可改 (D-001 取消),正常透传更新。
         return await _Crud(self._session, PlanNode).update(item_id, data)
 
     async def delete_plan_node(self, item_id: uuid.UUID) -> None:

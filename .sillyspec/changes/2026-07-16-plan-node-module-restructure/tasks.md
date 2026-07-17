@@ -62,3 +62,13 @@ has_module 从「驱动展开」降级为「纯记录」。对应 task 调整：
 - **task-08**（抽屉 antd 化）：NodeFormDrawer 保留（has_module Switch 记录用）；~~ModuleFormDrawer 从该页删除~~（模块子表移除）。
 - **task-05**（测试）：归属校验用例更新（has_module 不再驱动必填/禁用）。
 - task-01/02/04/06/09 不变（model/schema/router/migration/types/部署保留）。
+
+## 需求变更 v3（2026-07-16，见 design §13）
+
+D-001 取消——has_module **编辑时可改**（不再新建定不可改）。对应 task 调整：
+
+- **task-02**（schema）：`PlanNodeUpdate` 加 `has_module` 字段（可选）。
+- **task-03**（service）：`update_plan_node` 移除「强制 pop has_module」逻辑，允许透传更新。
+- **task-08**（抽屉）：`NodeFormDrawer` 的 has_module Switch 移除 edit 态 `disabled`；`handleSaveNode` edit 模式传 has_module。
+- **task-05**（测试）：原 `test_update_plan_node_ignores_has_module`（service+router）改为「可改」。
+- 前端 types：`PlanNodeUpdate` 加 `has_module?: boolean | null`。

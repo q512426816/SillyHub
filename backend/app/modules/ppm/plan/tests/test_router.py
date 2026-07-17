@@ -718,10 +718,10 @@ class TestHasModuleAndDetailQuery:
         assert resp.status_code == 201, resp.text
         assert resp.json()["has_module"] is True
 
-    async def test_update_plan_node_has_module_ignored(
+    async def test_update_plan_node_can_change_has_module(
         self, client: AsyncClient, auth_headers: dict
     ) -> None:
-        """PUT /plan-node/{id} 传 has_module → 200 但 has_module 不变 (service 忽略,D-001)。"""
+        """v3: PUT /plan-node/{id} 传 has_module → 200 且 has_module 更新 (D-001 取消)。"""
         create = await client.post(
             "/api/ppm/plan-node",
             json={"overall_stage": "立项", "no": 1, "has_module": False},
@@ -736,7 +736,7 @@ class TestHasModuleAndDetailQuery:
         )
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body["has_module"] is False  # 被忽略
+        assert body["has_module"] is True  # 已改
         assert body["overall_stage"] == "设计"
 
     async def test_list_details_filter_by_module_id(

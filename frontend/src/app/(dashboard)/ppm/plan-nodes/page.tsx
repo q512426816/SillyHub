@@ -107,10 +107,8 @@ export default function PlanNodesPage() {
       const created = await createPlanNode(form);
       showToast(true, `模板 ${created.overall_stage} 已创建`);
     } else if (drawer.node) {
-      // edit:has_module 不可改,PlanNodeUpdate 不含此字段 (后端亦强制忽略)
-      const { has_module: _ignored, ...updateBody } = form;
-      void _ignored;
-      await updatePlanNode(drawer.node.id, updateBody);
+      // v3: has_module 编辑时可改 (D-001 取消),正常透传
+      await updatePlanNode(drawer.node.id, form);
       showToast(true, "模板已更新");
     }
     setDrawer({ open: false, mode: "create" });
@@ -612,13 +610,9 @@ function NodeFormDrawer({
           label="是否有模块"
           name="has_module"
           valuePropName="checked"
-          tooltip="新建时确定,保存后不可修改。有模块→模板→模块→明细(三层);无模块→模板→明细(二层)"
+          tooltip="记录字段:标记模板是否按模块组织(当前展开统一显示明细,编辑可改)"
         >
-          <Switch
-            disabled={mode === "edit"}
-            checkedChildren="有"
-            unCheckedChildren="无"
-          />
+          <Switch checkedChildren="有" unCheckedChildren="无" />
         </Form.Item>
       </Form>
     </Drawer>

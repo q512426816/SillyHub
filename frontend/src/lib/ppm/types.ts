@@ -258,6 +258,8 @@ export interface PlanNodeUpdate {
   overall_stage?: string | null;
   project_type?: string | null;
   no?: number | null;
+  /** v3: 编辑时可改 (D-001 取消)。 */
+  has_module?: boolean | null;
 }
 
 export interface PlanNodeDetail {

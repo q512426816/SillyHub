@@ -108,12 +108,12 @@ class TestHasModuleAndDetailOwnership:
         node = await svc.create_plan_node({"overall_stage": "立项", "no": 1})
         assert node.has_module is False
 
-    async def test_update_plan_node_ignores_has_module(self, db_session: AsyncSession) -> None:
-        """has_module 不可改 (D-001):update 传 has_module 被强制忽略,仅改其他字段。"""
+    async def test_update_plan_node_can_change_has_module(self, db_session: AsyncSession) -> None:
+        """v3: has_module 编辑时可改 (D-001 取消)。"""
         svc = PlanService(db_session)
         node = await svc.create_plan_node({"overall_stage": "立项", "has_module": False})
         updated = await svc.update_plan_node(node.id, {"has_module": True, "overall_stage": "设计"})
-        assert updated.has_module is False  # 被忽略
+        assert updated.has_module is True  # 已改
         assert updated.overall_stage == "设计"
 
     async def test_detail_no_module_when_has_module_false(self, db_session: AsyncSession) -> None:

@@ -51,6 +51,8 @@ class PlanNodeUpdate(PydanticModel):
     overall_stage: str | None = None
     project_type: str | None = None
     no: int | None = None
+    # v3: has_module 编辑时可改 (D-001 取消);不传 (exclude_unset) 则不改。
+    has_module: bool | None = None
 
 
 class PlanNodeResp(PlanNodeBase):

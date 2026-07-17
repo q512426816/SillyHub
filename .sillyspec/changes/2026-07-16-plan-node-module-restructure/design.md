@@ -165,7 +165,7 @@ interface PlanNodeDetail { id; plan_node_id?; module_id?: string | null; detaile
 
 ## 11. 决策追踪
 
-- **D-001@v1**：`has_module` 新建时定，保存后不可改。→ §2/§5.1/§7，R-02。
+- **D-001@v1→v3**：~~`has_module` 新建时定，保存后不可改~~。**v3 取消**：has_module 编辑时可改（纯记录字段，随时可改，见 §13）。
 - **D-002@v1→v2**：~~有模块时明细挂 `module_id`（三层）~~。**v2 取消三层**：has_module 降为纯记录字段，计划节点模板页 UI 统一二层明细（见 §13）。module_id 字段保留作防御。
 - **D-003@v1**：明细子表复用 `PpmSubTable` editable（方案 A），不在本页新写行内编辑。→ §5.3，R-01。
 - **D-004@v1→v2**：明细 `module_id` 归属后端校验。**v2 简化**：has_module 不再参与校验，仅保留 module_id 非 null 时属同 plan_node 的防御校验（见 §13）。
@@ -204,3 +204,9 @@ interface PlanNodeDetail { id; plan_node_id?; module_id?: string | null; detaile
 - PlanNodeModule 表、importer、ps 簇、PpmSubTable 组件、milestone-details 页零回归。
 
 **为何保留 has_module/module_id 字段**：has_module 作业务记录（区分模板是否按模块组织，供后续可能恢复三层或统计用）；module_id 字段留作防御性归属约束的承载，且 ps 簇早有同名字段，保持模型一致性。
+
+**v3（2026-07-16，进一步）**：D-001 取消——has_module **编辑时可改**（不再「新建定不可改」）。
+- `PlanNodeUpdate` 加 `has_module` 字段（可选）；`service.update_plan_node` 移除「强制 pop/忽略 has_module」逻辑，允许透传更新。
+- 前端 `NodeFormDrawer` 的 has_module Switch 移除 edit 态 `disabled`；`handleSaveNode` edit 模式把 has_module 传给 update。
+- 测试：原 `test_update_plan_node_ignores_has_module`（service+router）改为「可改」（update 传 has_module=true 后 DB 反映 true）。
+- D-001 由「has_module 新建定不可改」**降级为无约束**（纯用户可选记录字段，随时可改）。
