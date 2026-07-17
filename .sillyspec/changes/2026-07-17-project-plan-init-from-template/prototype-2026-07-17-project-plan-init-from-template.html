@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>项目计划初始化从模板 - 原型</title>
+<style>
+body { font-family: monospace; padding: 20px; max-width: 920px; margin: auto; line-height: 1.7; color: #222; }
+h1 { border-bottom: 3px solid #555; padding-bottom: 6px; }
+h2 { border-bottom: 1px solid #aaa; margin-top: 28px; }
+.box { border: 1px solid #888; padding: 12px 14px; margin: 10px 0; border-radius: 5px; }
+.template { background: #f0f7ff; }
+.milestone { background: #f5fff0; }
+.detail { background: #fffbe6; margin-left: 24px; }
+.module { background: #ffe6f0; margin-left: 24px; }
+.empty { color: #999; margin-left: 24px; font-style: italic; }
+.arrow { text-align: center; font-size: 20px; margin: 4px 0; color: #555; }
+.tag { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 12px; color: white; }
+.has-mod { background: #52c41a; }
+.no-mod { background: #faad14; }
+table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+td, th { border: 1px solid #aaa; padding: 6px 8px; text-align: left; }
+th { background: #f5f5f5; }
+code { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; }
+.note { background: #fff7e6; border-left: 4px solid #faad14; padding: 8px 12px; margin: 10px 0; }
+</style>
+</head>
+<body>
+<h1>项目计划初始化从模板（原型）</h1>
+<p>变更 <code>2026-07-17-project-plan-init-from-template</code> · 方案 A（后端 service 自动）</p>
+
+<h2>1. 数据流：新建项目计划 → 按模板批量生成里程碑</h2>
+<div class="box template">
+<strong>计划节点模板（PlanNode，按 no 正序）</strong><br>
+模板① 立项阶段 <span class="tag no-mod">无模块</span><br>
+模板② 需求阶段 <span class="tag no-mod">无模块</span><br>
+模板③ 设计阶段 <span class="tag no-mod">无模块</span><br>
+模板④ 实施阶段 <span class="tag has-mod">有模块</span>
+</div>
+<div class="arrow">↓ <code>create_ps_project_plan</code> 同事务批量建</div>
+<div class="box milestone">
+<strong>项目计划 PsProjectPlan + 里程碑 PsPlanNode × 4</strong><br>
+里程碑① 立项 <span class="tag no-mod">has_module=false</span> template_plan_node_id=模板①
+<div class="detail">明细：复制模板① 的 PlanNodeDetail × N（<strong>status=draft</strong>, module_id=null）</div>
+里程碑② 需求 <span class="tag no-mod">false</span> + 明细草稿
+<div class="detail">明细：复制模板② 的明细（draft）</div>
+里程碑③ 设计 <span class="tag no-mod">false</span> + 明细草稿
+<div class="detail">明细：复制模板③ 的明细（draft）</div>
+里程碑④ 实施 <span class="tag has-mod">has_module=true</span> template_plan_node_id=模板④
+<div class="empty">（空，不建明细——等新建模块时复制）</div>
+</div>
+
+<div class="note">
+<strong>关键：</strong>has_module=无 → 里程碑 + 明细（草稿）；has_module=有 → 只建空里程碑。<br>
+所有自动创建的里程碑明细 <strong>status=draft（草稿）</strong>。
+</div>
+
+<h2>2. 实施阶段里程碑：新建模块 → 复制模板明细</h2>
+<div class="box milestone">里程碑④ 实施 <span class="tag has-mod">has_module=true</span>（空，来自模板④）</div>
+<div class="arrow">↓ 用户点"新建模块"（<code>create_module</code> 检测 template_plan_node_id → 模板④）</div>
+<div class="box module">
+<strong>新模块 PlanNodeModule（挂里程碑④）</strong> module_name=前端...<br>
+<div class="arrow">↓ 同事务复制模板④ 的全部 PlanNodeDetail</div>
+<div class="detail">明细：复制模板④ 明细 → PsPlanNodeDetail（<strong>status=draft</strong>, module_id=新模块.id）</div>
+</div>
+<div class="note">手动建的里程碑（template_plan_node_id=null）→ 新建模块为空，不复制。</div>
+
+<h2>3. 字段映射</h2>
+<table>
+<tr><th>模板 PlanNode</th><th>→ 里程碑 PsPlanNode</th></tr>
+<tr><td>overall_stage</td><td>overall_stage</td></tr>
+<tr><td>no</td><td>no</td></tr>
+<tr><td>id</td><td><strong>template_plan_node_id</strong>（新增字段）</td></tr>
+<tr><td>has_module</td><td><strong>has_module</strong>（新增冗余字段，模块层判断用）</td></tr>
+</table>
+<table>
+<tr><th>模板明细 PlanNodeDetail</th><th>→ 里程碑明细 PsPlanNodeDetail</th></tr>
+<tr><td>detailed_stage / task_theme / task_description / requirements / role_name / achievement / overall_stage / no</td><td>同名字段复制</td></tr>
+<tr><td>—</td><td>module_id：无模块=<code>null</code> / 新建模块=<code>新模块.id</code></td></tr>
+<tr><td>—</td><td><strong>status = draft（草稿）</strong></td></tr>
+</table>
+
+<h2>4. 前端 milestone-details 模块层</h2>
+<p>展示条件：<code>overall_stage === "实施阶段"</code> → 改为 <code>PsPlanNode.has_module === true</code></p>
+<ul>
+<li>has_module=true 的里程碑 → 三级（里程碑 → 模块 → 明细），有"新建模块"入口</li>
+<li>has_module=false 的里程碑 → 二级（里程碑 → 明细）</li>
+</ul>
+<p>项目计划创建流程<strong>零改动</strong>（后端自动建里程碑）。</p>
+
+<h2>5. 零回归</h2>
+<ul>
+<li>现有项目计划/里程碑不动（只对新建项目计划生效）</li>
+<li>模板表 PlanNode/PlanNodeDetail/PlanNodeModule 不动</li>
+<li>importer、ps 簇其他逻辑不动</li>
+<li>手动建的里程碑（template_plan_node_id=null）行为不变</li>
+</ul>
+</body>
+</html>

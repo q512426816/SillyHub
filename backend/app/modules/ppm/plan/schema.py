@@ -256,6 +256,10 @@ class PsPlanNodeBase(PydanticModel):
     plan_begin_time: datetime | None = None
     plan_complete_time: datetime | None = None
     duty_user_id: uuid.UUID | None = None
+    # 来源模板 (新建项目计划时从 PlanNode 生成写入;手动建为 null)
+    template_plan_node_id: uuid.UUID | None = None
+    # 是否有模块 (冗余自模板,milestone-details 模块层判断用,D-005@v1)
+    has_module: bool = False
 
 
 class PsPlanNodeCreate(PsPlanNodeBase):

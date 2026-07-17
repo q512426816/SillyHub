@@ -376,10 +376,10 @@ export default function MilestoneDetailsPage() {
         dataIndex: "overall_stage",
         key: "overall_stage",
         width: 140,
-        render: (v: string | null) => (
+        render: (v: string | null, record: PsPlanNode) => (
           <div className="flex items-center gap-2">
             <span>{v ?? "—"}</span>
-            {v === IMPLEMENT_STAGE && (
+            {record.has_module && (
               <Tag color="blue" className="text-[10px]">
                 三级
               </Tag>
@@ -503,7 +503,7 @@ export default function MilestoneDetailsPage() {
   // 展开行渲染:实施阶段→模块二级→明细三级;其他→明细二级
   const expandRender = useCallback(
     (node: PsPlanNode) => {
-      if (node.overall_stage === IMPLEMENT_STAGE) {
+      if (node.has_module) {
         return (
           <ModuleLevelTable
             key={`${node.id}-${detailTick}`}

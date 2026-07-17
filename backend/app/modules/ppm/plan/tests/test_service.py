@@ -600,5 +600,77 @@ class TestListDetailsExcludesArchived:
         assert old.id not in ids  # 旧版本归档后不再出现在有效明细列表
 
 
+class TestProjectPlanInitFromTemplate:
+    """新建项目计划按模板初始化里程碑 (task-03/04, design §5.2)。"""
+
+    async def test_create_plan_inits_milestones_from_all_templates(
+        self, db_session: AsyncSession
+    ) -> None:
+        """新建项目计划 → 每个模板一个里程碑;无模块含明细(draft),有模块空。"""
+        svc = PlanService(db_session)
+        tpl_no = await svc.create_plan_node({"overall_stage": "需求", "no": 1, "has_module": False})
+        await svc.create_plan_node_detail(
+            {"plan_node_id": str(tpl_no.id), "no": "1", "task_theme": "需求调研"}
+        )
+        tpl_mod = await svc.create_plan_node({"overall_stage": "实施", "no": 2, "has_module": True})
+        plan = await svc.create_ps_project_plan(
+            {"project_id": str(uuid.uuid4()), "status": "draft"}
+        )
+        nodes = await svc.list_ps_plan_nodes_by_plan(str(plan.id))
+        assert len(nodes) == 2  # 每个模板一个里程碑
+        node_no = next(n for n in nodes if n.template_plan_node_id == tpl_no.id)
+        assert node_no.has_module is False
+        details = await svc.list_details_by_node(str(node_no.id))
+        assert len(details) == 1
+        assert details[0].task_theme == "需求调研"
+        assert details[0].status == "draft"
+        assert details[0].module_id is None
+        node_mod = next(n for n in nodes if n.template_plan_node_id == tpl_mod.id)
+        assert node_mod.has_module is True
+        assert await svc.list_details_by_node(str(node_mod.id)) == []
+
+    async def test_milestone_no_str_from_template_int(self, db_session: AsyncSession) -> None:
+        """模板 no(int) → PsPlanNode.no(str) 显式转换。"""
+        svc = PlanService(db_session)
+        await svc.create_plan_node({"overall_stage": "立项", "no": 5, "has_module": False})
+        plan = await svc.create_ps_project_plan(
+            {"project_id": str(uuid.uuid4()), "status": "draft"}
+        )
+        nodes = await svc.list_ps_plan_nodes_by_plan(str(plan.id))
+        assert nodes[0].no == "5"  # str,不是 int
+
+    async def test_create_module_copies_template_details(self, db_session: AsyncSession) -> None:
+        """有模块里程碑新建模块 → 复制模板明细到新模块(draft)。"""
+        svc = PlanService(db_session)
+        tpl = await svc.create_plan_node({"overall_stage": "实施", "no": 1, "has_module": True})
+        await svc.create_plan_node_detail(
+            {"plan_node_id": str(tpl.id), "no": "1", "task_theme": "实施明细"}
+        )
+        plan = await svc.create_ps_project_plan(
+            {"project_id": str(uuid.uuid4()), "status": "draft"}
+        )
+        node = (await svc.list_ps_plan_nodes_by_plan(str(plan.id)))[0]
+        module = await svc.create_module({"plan_node_id": str(node.id), "module_name": "前端"})
+        details = await svc.list_details_by_node(str(node.id))
+        assert len(details) == 1  # 复制了模板明细
+        assert details[0].task_theme == "实施明细"
+        assert details[0].status == "draft"
+        assert details[0].module_id == module.id
+
+    async def test_create_module_manual_node_empty(self, db_session: AsyncSession) -> None:
+        """手动里程碑(template_plan_node_id=null)新建模块 → 空模块,不复制。"""
+        svc = PlanService(db_session)
+        plan = await svc.create_ps_project_plan(
+            {"project_id": str(uuid.uuid4()), "status": "draft"}
+        )
+        # 无模板 → 0 里程碑;手动建一个(template_plan_node_id=null)
+        node = await svc.create_ps_plan_node(
+            {"ps_project_plan_id": str(plan.id), "overall_stage": "手动", "no": "1"}
+        )
+        assert node.template_plan_node_id is None
+        await svc.create_module({"plan_node_id": str(node.id), "module_name": "手模块"})
+        assert await svc.list_details_by_node(str(node.id)) == []  # 不复制
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -363,7 +363,23 @@ class PlanService:
         return list((await self._session.execute(stmt)).scalars().all())
 
     async def create_module(self, data: dict[str, Any]) -> PlanNodeModule:
-        return await _Crud(self._session, PlanNodeModule).create(data)
+        # task-04:建模块 + 同事务复制模板明细到新模块 (design §5.2)
+        # 不复用 _Crud.create (单独 commit 破坏原子性),改 session.add + 末尾单 commit。
+        module = PlanNodeModule(id=uuid.uuid4(), **data)
+        module.created_at = _now()
+        module.updated_at = _now()
+        self._session.add(module)
+        # 反查挂的 PsPlanNode.template_plan_node_id → 复制模板明细 (draft)
+        node_id = self._safe_uuid(data.get("plan_node_id"))
+        if node_id is not None:
+            node = await self._session.get(PsPlanNode, node_id)
+            if node is not None and node.template_plan_node_id is not None:
+                await self._copy_template_details_to_node(
+                    node.template_plan_node_id, node, module_id=module.id
+                )
+        await self._session.commit()
+        await self._session.refresh(module)
+        return module
 
     async def update_module(self, item_id: uuid.UUID, data: dict[str, Any]) -> PlanNodeModule:
         return await _Crud(self._session, PlanNodeModule).update(item_id, data)
@@ -419,7 +435,88 @@ class PlanService:
                 proj = await self._session.get(PpmProjectMaintenance, proj_id)
                 if proj and proj.project_name:
                     data["project_name"] = proj.project_name
-        return await _Crud(self._session, PsProjectPlan).create(data)
+        # task-03:建主表 + 同事务按模板批量建里程碑 (design §5.2)
+        # 不复用 _Crud.create (单独 commit 破坏原子性),改 session.add + 末尾单 commit。
+        plan = PsProjectPlan(id=uuid.uuid4(), **data)
+        plan.created_at = _now()
+        plan.updated_at = _now()
+        self._session.add(plan)
+        await self._init_milestones_from_template(plan)
+        await self._session.commit()
+        await self._session.refresh(plan)
+        return plan
+
+    async def _init_milestones_from_template(self, plan: PsProjectPlan) -> None:
+        """按所有 PlanNode 模板批量建里程碑 (task-03, design §5.2)。
+
+        - has_module=false: 建里程碑 + 复制模板明细 (status=draft, module_id=null)
+        - has_module=true: 只建空里程碑 (明细等新建模块时复制, task-04)
+        - 无模板: 不建里程碑 (plan 照建, R-04)
+        模板 PlanNode.no(int) → PsPlanNode.no(str) 显式 str()。
+        """
+        templates = list(
+            (await self._session.execute(select(PlanNode).order_by(PlanNode.no.asc())))
+            .scalars()
+            .all()
+        )
+        for tpl in templates:
+            node = PsPlanNode(
+                id=uuid.uuid4(),
+                ps_project_plan_id=plan.id,
+                overall_stage=tpl.overall_stage,
+                no=str(tpl.no) if tpl.no is not None else None,
+                template_plan_node_id=tpl.id,
+                has_module=tpl.has_module,
+                status=PlanNodeDetailStatus.DRAFT.value,
+                created_at=_now(),
+                updated_at=_now(),
+            )
+            self._session.add(node)
+            if not tpl.has_module:
+                # has_module=false: 复制模板明细 (draft, module_id=null)
+                await self._copy_template_details_to_node(tpl.id, node, module_id=None)
+
+    async def _copy_template_details_to_node(
+        self,
+        template_plan_node_id: uuid.UUID,
+        node: PsPlanNode,
+        *,
+        module_id: uuid.UUID | None,
+    ) -> None:
+        """复制模板 PlanNodeDetail → PsPlanNodeDetail (挂 node, module_id, status=draft)。
+
+        task-03 (module_id=None) / task-04 (module_id=新模块) 共用。
+        """
+        details = list(
+            (
+                await self._session.execute(
+                    select(PlanNodeDetail).where(
+                        PlanNodeDetail.plan_node_id == template_plan_node_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for d in details:
+            self._session.add(
+                PsPlanNodeDetail(
+                    id=uuid.uuid4(),
+                    plan_node_id=node.id,
+                    module_id=module_id,
+                    detailed_stage=d.detailed_stage,
+                    task_theme=d.task_theme,
+                    task_description=d.task_description,
+                    requirements=d.requirements,
+                    role_name=d.role_name,
+                    achievement=d.achievement,
+                    overall_stage=d.overall_stage,
+                    no=d.no,
+                    status=PlanNodeDetailStatus.DRAFT.value,
+                    created_at=_now(),
+                    updated_at=_now(),
+                )
+            )
 
     async def get_ps_project_plan(self, item_id: uuid.UUID) -> PsProjectPlan:
         return await _Crud(self._session, PsProjectPlan).get(item_id)
