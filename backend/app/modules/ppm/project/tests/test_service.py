@@ -96,6 +96,50 @@ async def test_project_crud_and_unique_code(db_session, operator):
         await svc.get(created.id)
 
 
+async def test_project_rename_syncs_ps_project_plan_name(db_session, operator):
+    """项目改名 → 关联项目计划冗余 project_name 同步刷新 (ql-20260717-004)。
+
+    PsProjectPlan.project_name 是计划列表/详情/导出/任务联动的共同来源,
+    创建时从项目表复制快照;项目维护改名时须同事务刷新,否则下游显示旧名。
+    """
+    from app.modules.ppm.plan.model import PsProjectPlan
+
+    svc = ProjectMaintenanceService(db_session)
+    created = await svc.create(
+        ProjectMaintenanceCreate(
+            project_code="P-SYNC",
+            project_name="原名",
+            company_name="C",
+            project_status="进行中",
+            project_type="研发",
+        ),
+        operator=operator,
+    )
+    # 建一条关联项目计划 (project_name=旧快照)
+    plan = PsProjectPlan(project_id=created.id, project_name="原名")
+    db_session.add(plan)
+    await db_session.commit()
+    await db_session.refresh(plan)
+    plan_id = plan.id
+
+    # 改项目名
+    await svc.update(
+        created.id,
+        ProjectMaintenanceUpdate(project_name="新名"),
+        operator=operator,
+    )
+
+    # 验证 DB 实际值:select column 绕过 ORM identity map (expire_on_commit=False)
+    from sqlalchemy import select
+
+    name_in_db = (
+        await db_session.execute(
+            select(PsProjectPlan.project_name).where(PsProjectPlan.id == plan_id)
+        )
+    ).scalar_one()
+    assert name_in_db == "新名", f"DB project_name={name_in_db!r}"
+
+
 async def test_project_create_name_auto_fill_from_operator(db_session, operator):
     """create_name 是系统字段(前端表单不显示),不传时由 operator_name 自动填充。
 

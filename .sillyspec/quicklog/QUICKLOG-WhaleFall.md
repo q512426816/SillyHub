@@ -353,3 +353,13 @@ created_at: 2026-07-14T09:20:24
 根因：明细表单已有 task_description 字段（page.tsx:2313 Form.Item + types.ts:274 等 PsPlanNodeDetail.task_description），但 DetailLevelTable 列表只有明细阶段/任务主题/角色/计划工时/执行人/状态/操作，缺任务描述列。
 方案：DetailLevelTable columns 在「任务主题」列后插入「任务描述」列（dataIndex=task_description，width=220，ellipsis=true 防长文本撑高行 hover 看完整，render v??"—""）；useMemo deps 无需改（新列不依赖外部变量）。page.tsx 有 3 处「任务主题」列（masterColumns 主表 391/previewColumns 导入预览 1151/DetailLevelTable 明细 1717），用后跟列区分唯一定位（仅 DetailLevelTable 后跟「角色」列，另两处分别跟「责任人」「工作量」）。纯前端单文件，不动后端/接口/types。
 结果：tsc --noEmit EXIT 0；vitest milestone-details 24 passed（2 test files）零回归。待 commit + rebuild frontend 部署 + 用户浏览器验证（明细列表显示任务描述列，长文本省略号 hover 看完整）。
+
+## ql-20260717-004-01b2 | 2026-07-17 15:56:09 | 项目改名后项目计划列表项目名不更新（写时同步 ps_project_plan.project_name）
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/project/service.py（ProjectMaintenanceService.update 改名时 update(PsProjectPlan) 同步刷新）+ backend/app/modules/ppm/project/tests/conftest.py（加 plan model 注册建 ppm_ps_project_plan 表）+ backend/app/modules/ppm/project/tests/test_service.py（加 test_project_rename_syncs_ps_project_plan_name）
+需求：用户反馈项目维护改名后，项目计划列表的项目名称没跟着变。
+根因：ps_project_plan.project_name 是冗余快照（创建时从项目表复制，ql-20260716-006），项目改名不更新 → 计划列表/详情/导出/任务联动（_resolve_project_context 取 PsProjectPlan.project_name）全显示旧名。
+方案：写时同步——ProjectMaintenanceService.update 检测 project_name 变更时，同事务 update(PsProjectPlan).where(project_id==entity_id).values(project_name, updated_at) 刷新所有关联计划。单一写入点，所有读 project_name 的下游自动同步。import plan.model 无循环（plan.model 仅依赖 base/common）。
+波折：① 初版用 text SQL WHERE project_id 绕过 UuidCoercing 类型适配，sqlite/PG 不匹配致 UPDATE 0 行（DB 实测值未变），改用 SQLAlchemy update() statement 走 model 类型适配；② project/tests/conftest 未注册 plan model，sqlite 不建 ppm_ps_project_plan 表（连带 crud test 的 update 也 no such table），conftest 加 plan model import；③ expire_on_commit=False 致 session.get 返回 identity map 缓存旧值，测试改用 select column 直查 DB 验证实际值。
+结果：ruff format/check 过；mypy app（471 文件）无问题；pytest project 10 passed（含新增 test_project_rename_syncs_ps_project_plan_name）。仅改后端 project 模块，不动前端/plan service/types。待 commit + rebuild backend 部署 + 用户验证（项目改名 → 项目计划列表项目名实时更新）。
