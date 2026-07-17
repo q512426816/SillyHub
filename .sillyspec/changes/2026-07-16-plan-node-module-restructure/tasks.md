@@ -8,6 +8,8 @@ created_at: 2026-07-16T11:32:00
 > 变更 `2026-07-16-plan-node-module-restructure` · scale: large · 实现路径：plan → execute → verify
 > 依据：`design.md` §5/§6/§7；分 2 个 Wave
 
+> ⚠️ **v2/v3/v4 需求迭代**（见 design §13 + 本文档末尾「需求变更 v2/v3」章节）：下方 task 描述为 v1（含三层 / ModuleFormDrawer / has_module 不可改 等**已被取代**的内容），实际实现以 v2/v3 章节为准——task-07 统一二层明细、task-08 仅 NodeFormDrawer、has_module 编辑可改、列表按编号正序。
+
 ## Wave 1 — 后端（数据模型 + API + 测试）
 
 ### task-01 模型 + migration

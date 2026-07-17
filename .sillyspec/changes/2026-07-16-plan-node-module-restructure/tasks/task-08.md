@@ -8,7 +8,7 @@ priority: P1
 depends_on: [task-06]
 blocks: [task-09]
 requirement_ids: [FR-001, FR-005]
-decision_ids: [D-001@v1]
+decision_ids: [D-001]
 allowed_paths:
   - frontend/src/app/(dashboard)/ppm/plan-nodes/page.tsx
 goal: >

@@ -5,48 +5,79 @@ created_at: 2026-07-16T11:27:00
 
 # 决策台账 — 计划节点模板模块结构改造
 
-> 变更 `2026-07-16-plan-node-module-restructure` 决策台账，仅记录有实现/验收影响的决策。
+> 变更 `2026-07-16-plan-node-module-restructure` 决策台账。
+> v1 = brainstorm 初始决策；v2/v3 = execute 后需求迭代（见 design §13）。
+> **当前生效版本**：D-001@v3、D-002@v2、D-003@v1、D-004@v2。
 
-## D-001@v1
+## D-001@v1（superseded → v3）
+
 - **type**: boundary
-- **status**: accepted
+- **status**: superseded（v3 取消，见 D-001@v3）
 - **source**: 用户（brainstorm Step 6 AskUserQuestion）
 - **question**: 已创建的模板能否后来修改「是否有模块子表」？
-- **answer**: 新建时确定，保存后不可改。
-- **normalized_requirement**: `PlanNode.has_module` 在 `PlanNodeCreate` 必填；`PlanNodeUpdate` 不含 `has_module`；service.update_plan_node 强制忽略该字段。
-- **impacts**: schema（Create 必填、Update 不含）、service（update 忽略）、前端（编辑抽屉 Switch disabled）、R-02。覆盖 design §2/§5.1/§7。
-- **evidence**: 用户 AskUserQuestion 选「新建时定，之后不可改（推荐）」。
+- **answer**: ~~新建时确定，保存后不可改~~。
+- **normalized_requirement**: ~~PlanNodeUpdate 不含 has_module；service.update_plan_node 强制忽略~~。
+- **演进**: v3 取消「不可改」约束，has_module 编辑时可改。
+
+## D-001@v3（current）
+
+- **type**: boundary
+- **status**: accepted
+- **source**: 用户（2026-07-17 需求变更）
+- **question**: 已创建的模板能否后来修改「是否有模块子表」？
+- **answer**: 可以编辑修改（取消 v1 不可改约束）。
+- **normalized_requirement**: `PlanNodeUpdate` 含 `has_module`（可选）；`service.update_plan_node` 正常透传更新；前端 Switch 无 disabled（始终可改）。
+- **impacts**: schema（Update 含 has_module）、service（不 pop）、前端（Switch 可改）。
 - **priority**: P0
 
-## D-002@v1
+## D-002@v1（superseded → v2）
+
 - **type**: architecture
-- **status**: accepted
+- **status**: superseded（v2 取消三层，见 D-002@v2）
 - **source**: 用户（brainstorm Step 6 + 原始需求）
 - **question**: 有模块时模板明细的归属与编辑方式？
-- **answer**: 明细挂 `module_id`（模板→模块→明细 三层），用行内表格批量编辑。
-- **normalized_requirement**: `PlanNodeDetail` 加 `module_id`；有模块模板展开 → 模块子表 → 模块展开 → 明细子表（挂 module_id）；明细复用 PpmSubTable editable 行内编辑 + 批量保存。
-- **impacts**: model（PlanNodeDetail + module_id）、前端三层结构、design §5.1/§5.3。
-- **evidence**: 用户 AskUserQuestion 选「行内表格批量编辑（推荐）」+ 原始需求「明细应是模块的子表」。
+- **answer**: ~~明细挂 module_id（模板→模块→明细 三层）~~。
+- **normalized_requirement**: ~~三层展开 + 明细挂 module_id~~。
+- **演进**: v2 取消三层，has_module 降为纯记录，UI 统一二层。
+
+## D-002@v2（current）
+
+- **type**: architecture
+- **status**: accepted
+- **source**: 用户（2026-07-16 需求变更）
+- **question**: has_module 的作用与展开结构？
+- **answer**: has_module 降为纯记录字段，不驱动展开结构。计划节点模板页展开统一只显示模板明细一个子表（二层，挂 plan_node_id）。
+- **normalized_requirement**: `PlanNodeChildren` 统一渲染 `DetailsSubTable`（二层）；移除 `ModulesSubTable`/三层展开；has_module 仅作记录（母表列 + Switch）。module_id 字段保留作防御性归属约束承载（见 D-004@v2）。
+- **impacts**: 前端 page（统一二层）、后端校验简化（D-004@v2）。
 - **priority**: P0
 
-## D-003@v1
+## D-003@v1（current，保留）
+
 - **type**: approach
 - **status**: accepted
 - **source**: 用户（brainstorm Step 8 AskUserQuestion）
 - **question**: 明细行内编辑的实现路径？
 - **answer**: 方案 A——复用 `PpmSubTable` editable 组件（不在本页新写）。
-- **normalized_requirement**: 明细子表用 `PpmSubTable` editable 模式（内部已 antd Form），固定 `scroll.x`；不在 plan-nodes 页从零写行内编辑。
-- **impacts**: 前端实现（复用组件）、R-01（三层滚动）、design §5.3。淘汰方案 B（新写，代码量大）。
-- **evidence**: 用户 AskUserQuestion 选「方案 A：复用 PpmSubTable（推荐）」。
+- **normalized_requirement**: 明细子表用 `PpmSubTable` editable 模式（内部已 antd Form），固定 `scroll.x`。
+- **impacts**: 前端实现（复用组件）、design §5.3。
 - **priority**: P1
 
-## D-004@v1
+## D-004@v1（superseded → v2）
+
 - **type**: consistency
-- **status**: accepted
+- **status**: superseded（v2 简化，见 D-004@v2）
 - **source**: 架构分析（brainstorm Step 9）
 - **question**: 明细 `module_id` 归属一致性如何保证？
-- **answer**: 后端 service 层校验（has_module=true 时 module_id 必填且属于同 plan_node；has_module=false 时 module_id 必须为 null）。
-- **normalized_requirement**: `create_plan_node_detail` / `update_plan_node_detail` 校验 module_id 归属，违例抛 400。
-- **impacts**: service 校验逻辑、测试用例、R-03、design §5.1/§10。
-- **evidence**: design §5.1/§10 R-03（防数据不一致）。
+- **answer**: ~~has_module=true 时 module_id 必填且属同 plan_node；has_module=false 时必须为 null~~。
+- **演进**: v2 简化为防御性校验（has_module 不参与）。
+
+## D-004@v2（current）
+
+- **type**: consistency
+- **status**: accepted
+- **source**: 架构分析（v2 需求变更）
+- **question**: 明细 `module_id` 归属一致性如何保证？
+- **answer**: 防御性校验——has_module 不参与，module_id 非 null 时必须属于同 plan_node（防脏数据），module_id=null 一律放行。
+- **normalized_requirement**: `create_plan_node_detail` / `update_plan_node_detail` 校验 module_id 非 null 时归属同 plan_node，违例抛 400。
+- **impacts**: service 校验简化、测试用例、design §13。
 - **priority**: P1
