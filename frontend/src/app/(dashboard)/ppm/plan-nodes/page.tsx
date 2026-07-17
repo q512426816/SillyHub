@@ -79,7 +79,9 @@ export default function PlanNodesPage() {
     setLoading(true);
     setError(null);
     try {
-      setNodes(await listPlanNodes({ page: 1, page_size: 200 }));
+      setNodes(
+        await listPlanNodes({ page: 1, page_size: 200, order_by: "no", order: "asc" }),
+      );
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "加载失败");
     } finally {
