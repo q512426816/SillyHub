@@ -436,6 +436,10 @@ export interface PsPlanNode {
   plan_begin_time: string | null;
   plan_complete_time: string | null;
   duty_user_id: string | null;
+  /** 来源模板 (新建项目计划时从 PlanNode 生成写入;手动建为 null) */
+  template_plan_node_id: string | null;
+  /** 是否有模块 (冗余自模板,milestone-details 模块层判断用) */
+  has_module: boolean;
   created_at: string;
   updated_at: string;
 }

@@ -276,6 +276,14 @@ class PsPlanNode(BaseModel, table=True):
     duty_user_id: uuid.UUID | None = Field(
         default=None, sa_column=Column(UuidCoercing, nullable=True)
     )
+    # 来源模板 (新建项目计划时从 PlanNode 生成,追溯用;手动建为 null)
+    template_plan_node_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
+    # 是否有模块 (冗余自模板,milestone-details 模块层判断用,D-005@v1)
+    has_module: bool = Field(
+        default=False, sa_column=Column(Boolean, nullable=False, default=False)
+    )
     created_at: datetime = Field(
         default_factory=_now, sa_column=Column(DateTime(timezone=True), nullable=False)
     )
