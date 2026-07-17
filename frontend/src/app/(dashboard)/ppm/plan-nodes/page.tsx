@@ -1,27 +1,31 @@
 "use client";
 
 /**
- * 计划节点模板 (PlanNode) 页面 — 三层嵌套 (模板 → 明细 → 模块)。
+ * 计划节点模板 (PlanNode) 页面 — 按 has_module 条件展开二层/三层。
  *
  * 数据模型 (对齐源 dept_project_front plannode):
  *   PlanNode (模板) ─┬─ PlanNodeDetail (模板明细)
- *                    └─ PlanNodeModule (执行模块,plan_node_id 指向 PlanNode)
+ *                    └─ PlanNodeModule (执行模块)
  *
- * UI 结构 (AntD Table expand 嵌套):
- *   第 1 层 模板列表 — overall_stage / project_type / no,行内可编辑
- *   第 2 层 expand 模板行 → 明细子表 (整表行内编辑,PpmSubTable)
- *   第 3 层 expand 模板行 → 模块子表 (抽屉表单 + 责任人 PpmUserSelect)
+ * 展开结构 (plan-node-module-restructure / D-001/D-002@v1):
+ *   has_module=false → 模板 → 明细 (二层,明细挂 plan_node_id)
+ *   has_module=true  → 模板 → 模块 → 明细 (三层,明细挂 module_id)
  *
- * 模块在数据层挂在 PlanNode 下 (非 PlanNodeDetail),
- * 故"明细"和"模块"作为同一模板展开区内的两个并列子表呈现。
- *
- * 走 lib/ppm/plan.ts:listPlanNodes / listPlanNodeDetails /
- * listPlanNodeModules + CRUD。设计依据:tasks/task-06.md + 源
- * views/ppm/plannode/index.vue (主表 expand NodeDetailList) +
- * components/NodeDetailList.vue。
+ * 走 lib/ppm/plan.ts:listPlanNodes / listPlanNodeDetails(nodeId, moduleId?) /
+ * listPlanNodeModules + CRUD。设计依据:design.md §5.3 + tasks/task-06/07/08。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Table, type TableProps, Tag } from "antd";
+import {
+  Drawer,
+  Form,
+  Input,
+  InputNumber,
+  Switch,
+  Table,
+  type TableProps,
+  Tag,
+  message,
+} from "antd";
 
 import { Button } from "@/components/ui/button";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
@@ -30,7 +34,6 @@ import {
   getPpmDictLabel,
   type PpmDictType,
 } from "@/components/ppm-dict-select";
-import { PpmUserSelect } from "@/components/ppm-user-select";
 import {
   PpmSubTable,
   type PpmSubEditableColumn,
@@ -38,28 +41,19 @@ import {
 } from "@/components/ppm-sub-table";
 import { ApiError } from "@/lib/api";
 import {
-  fmtDate,
   createPlanNode,
   createPlanNodeDetailTpl,
-  createPlanNodeModule,
   deletePlanNode,
   deletePlanNodeDetailTpl,
-  deletePlanNodeModule,
   listPlanNodeDetails,
-  listPlanNodeModules,
   listPlanNodes,
   updatePlanNode,
   updatePlanNodeDetailTpl,
-  updatePlanNodeModule,
   type PlanNode,
   type PlanNodeDetail,
   type PlanNodeDetailCreate,
   type PlanNodeDetailUpdate,
-  type PlanNodeModule,
 } from "@/lib/ppm";
-
-const inputCls =
-  "h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none";
 
 const PROJECT_TYPE_DICT: PpmDictType = "project_type";
 
@@ -85,7 +79,9 @@ export default function PlanNodesPage() {
     setLoading(true);
     setError(null);
     try {
-      setNodes(await listPlanNodes({ page: 1, page_size: 200 }));
+      setNodes(
+        await listPlanNodes({ page: 1, page_size: 200, order_by: "no", order: "asc" }),
+      );
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "加载失败");
     } finally {
@@ -106,11 +102,14 @@ export default function PlanNodesPage() {
     overall_stage: string;
     project_type: string | null;
     no: number | null;
+    has_module: boolean;
   }) => {
     if (drawer.mode === "create") {
+      // create:has_module 必传 (PlanNodeCreate);新建时定,保存后不可改 (D-001)
       const created = await createPlanNode(form);
       showToast(true, `模板 ${created.overall_stage} 已创建`);
     } else if (drawer.node) {
+      // v3: has_module 编辑时可改 (D-001 取消),正常透传
       await updatePlanNode(drawer.node.id, form);
       showToast(true, "模板已更新");
     }
@@ -151,6 +150,15 @@ export default function PlanNodesPage() {
       },
     },
     {
+      title: "是否有模块",
+      dataIndex: "has_module",
+      key: "has_module",
+      width: 110,
+      align: "center",
+      render: (v: boolean) =>
+        v ? <Tag color="blue">有</Tag> : <Tag>无</Tag>,
+    },
+    {
       title: "操作",
       key: "actions",
       align: "center",
@@ -181,7 +189,7 @@ export default function PlanNodesPage() {
     <PageContainer size="full">
       <PageHeader
         title="计划节点模板"
-        subtitle="模板 → 模板明细 → 执行模块(展开行查看明细与模块)"
+        subtitle="新建时选择是否有模块:无模块→模板→明细(二层);有模块→模板→模块→明细(三层)"
       />
 
       {toast && (
@@ -229,7 +237,9 @@ export default function PlanNodesPage() {
             bordered
             pagination={false}
             locale={{ emptyText: "暂无模板" }}
-            rowClassName={(_row: PlanNode, idx: number) => idx % 2 === 1 ? "bg-muted/40" : ""}
+            rowClassName={(_row: PlanNode, idx: number) =>
+              idx % 2 === 1 ? "bg-muted/40" : ""
+            }
             scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
             expandable={{
               expandedRowRender: (node) => (
@@ -257,7 +267,7 @@ export default function PlanNodesPage() {
 }
 
 // ---------------------------------------------------------------------------
-// 模板展开区:明细子表 (第 2 层) + 模块子表 (第 3 层)
+// 模板展开区:按 has_module 条件渲染 (二层明细 / 三层模块)
 // ---------------------------------------------------------------------------
 
 function PlanNodeChildren({
@@ -267,10 +277,11 @@ function PlanNodeChildren({
   node: PlanNode;
   onChanged: () => void;
 }) {
+  // v2(2026-07-16):has_module 仅作记录,不驱动展开结构;
+  // 无论是否有模块,计划节点模板页展开统一只显示模板明细一个子表(二层,挂 plan_node_id)。
   return (
-    <div className="flex flex-col gap-4 bg-muted/20 p-3">
+    <div className="bg-muted/20 p-3">
       <DetailsSubTable node={node} onChanged={onChanged} />
-      <ModulesSubTable node={node} onChanged={onChanged} />
     </div>
   );
 }
@@ -281,6 +292,7 @@ function PlanNodeChildren({
 interface DetailDraftRow extends PpmSubTableRow {
   id: string; // 已存在=真实 id;新增=`new-${n}` 临时键
   plan_node_id?: string | null;
+  module_id?: string | null;
   detailed_stage: string | null;
   task_theme: string | null;
   task_description: string | null;
@@ -310,9 +322,12 @@ const DETAIL_COLUMNS: PpmSubEditableColumn<DetailDraftRow>[] = [
 
 function DetailsSubTable({
   node,
+  moduleId,
   onChanged,
 }: {
   node: PlanNode;
+  /** 三层模式:该明细所属模块 id (挂 module_id);二层模式:undefined (挂 plan_node_id)。 */
+  moduleId?: string;
   onChanged: () => void;
 }) {
   const [draftRows, setDraftRows] = useState<DetailDraftRow[]>([]);
@@ -326,10 +341,12 @@ function DetailsSubTable({
     setLoading(true);
     setErr(null);
     try {
-      const list: PlanNodeDetail[] = await listPlanNodeDetails(node.id);
+      // moduleId 指定 → 按模块过滤 (三层);不传 → 该模板全部明细 (二层)
+      const list: PlanNodeDetail[] = await listPlanNodeDetails(node.id, moduleId);
       const rows: DetailDraftRow[] = list.map((d) => ({
         id: d.id,
         plan_node_id: d.plan_node_id,
+        module_id: d.module_id,
         detailed_stage: d.detailed_stage,
         task_theme: d.task_theme,
         task_description: d.task_description,
@@ -346,7 +363,7 @@ function DetailsSubTable({
     } finally {
       setLoading(false);
     }
-  }, [node.id]);
+  }, [node.id, moduleId]);
 
   useEffect(() => {
     void load();
@@ -358,6 +375,8 @@ function DetailsSubTable({
     return {
       id: `new-${seq}-${Date.now()}`,
       plan_node_id: node.id,
+      // 三层挂 moduleId;二层为 null (归属由后端 plan_node_id 决定)
+      module_id: moduleId ?? null,
       detailed_stage: null,
       task_theme: null,
       task_description: null,
@@ -366,7 +385,7 @@ function DetailsSubTable({
       achievement: null,
       overall_stage: null,
     };
-  }, [node.id, newSeq]);
+  }, [node.id, moduleId, newSeq]);
 
   const isDirty = useMemo(() => {
     if (draftRows.length !== original.length) return true;
@@ -390,7 +409,7 @@ function DetailsSubTable({
 
       // 1) 删除:原列表里有,draft 里没有的
       const toDelete = original.filter((r) => !draftIds.has(r.id));
-      // 2) 更新:有真实 id 且字段有变
+      // 2) 更新:有真实 id 且字段有变 (行内编辑不改 module_id 归属)
       const toUpdate = draftRows.filter((r) => {
         if (r.id.startsWith("new-")) return false;
         const o = origMap.get(r.id);
@@ -420,6 +439,8 @@ function DetailsSubTable({
       for (const r of toCreate) {
         const body: PlanNodeDetailCreate = {
           plan_node_id: node.id,
+          // 三层挂 moduleId;二层为 null (design §5.1)
+          module_id: moduleId ?? null,
           detailed_stage: r.detailed_stage ?? null,
           task_theme: r.task_theme ?? null,
           task_description: r.task_description ?? null,
@@ -443,7 +464,9 @@ function DetailsSubTable({
   return (
     <div className="rounded border bg-card p-3">
       <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-sm font-medium">模板明细</h3>
+        <h3 className="text-sm font-medium">
+          {moduleId ? "模块明细" : "模板明细"}
+        </h3>
         <div className="flex items-center gap-2">
           {isDirty && (
             <span className="text-[11px] text-amber-600">有未保存修改</span>
@@ -474,132 +497,19 @@ function DetailsSubTable({
   );
 }
 
-// ── 模块子表:抽屉表单 + 责任人 PpmUserSelect ────────────────────────────────
+// v2(2026-07-16):模块子表已从计划节点模板页移除(has_module 仅记录,展开统一只显示明细)。
+// 模块 CRUD 仍在 milestone-details 等页保留(PlanNodeModule 表/后端端点零回归)。
 
-function ModulesSubTable({
-  node,
-  onChanged,
-}: {
-  node: PlanNode;
-  onChanged: () => void;
-}) {
-  const [items, setItems] = useState<PlanNodeModule[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
-  const [editing, setEditing] = useState<PlanNodeModule | "new" | null>(null);
+// ---------------------------------------------------------------------------
+// 表单抽屉 (antd Form 化,task-08)
+// ---------------------------------------------------------------------------
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setErr(null);
-    try {
-      setItems(await listPlanNodeModules(node.id));
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "加载失败");
-    } finally {
-      setLoading(false);
-    }
-  }, [node.id]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const handleDelete = async (id: string) => {
-    if (!confirm("删除该模块?")) return;
-    try {
-      await deletePlanNodeModule(id);
-      await load();
-      onChanged();
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "删除失败");
-    }
-  };
-
-  const columns: TableProps<PlanNodeModule>["columns"] = [
-    { title: "模块名", dataIndex: "module_name", key: "module_name" },
-    {
-      title: "计划工时",
-      dataIndex: "plan_workload",
-      key: "plan_workload",
-      width: 110,
-      render: (v: string | null) => v ?? "—",
-    },
-    {
-      title: "计划开始",
-      dataIndex: "plan_begin_time",
-      key: "plan_begin_time",
-      width: 120,
-      render: (v: string | null) => fmtDate(v),
-    },
-    {
-      title: "计划完成",
-      dataIndex: "plan_complete_time",
-      key: "plan_complete_time",
-      width: 120,
-      render: (v: string | null) => fmtDate(v),
-    },
-    {
-      title: "操作",
-      key: "actions",
-      align: "center",
-      width: 140,
-      render: (_v: unknown, m: PlanNodeModule) => (
-        <div className="flex justify-center whitespace-nowrap gap-1">
-          <Button size="sm" variant="ghost" onClick={() => setEditing(m)}>
-            编辑
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-red-600 hover:text-red-700"
-            onClick={() => void handleDelete(m.id)}
-          >
-            删除
-          </Button>
-        </div>
-      ),
-    },
-  ];
-
-  return (
-    <div className="rounded border bg-card p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-sm font-medium">模块</h3>
-        <Button size="sm" onClick={() => setEditing("new")}>
-          + 新增
-        </Button>
-      </div>
-      {err && <p className="mb-2 text-[11px] text-destructive">{err}</p>}
-      <Table<PlanNodeModule>
-        rowKey="id"
-        size="small"
-        loading={loading}
-        dataSource={items}
-        columns={columns}
-        pagination={false}
-        rowClassName={(_row: PlanNodeModule, idx: number) => idx % 2 === 1 ? "bg-muted/40" : ""}
-        locale={{ emptyText: "暂无模块" }}
-        scroll={{ x: 790 }}
-      />
-      {editing && (
-        <ModuleFormDrawer
-          planNodeId={node.id}
-          module={editing === "new" ? null : editing}
-          onClose={() => setEditing(null)}
-          onSaved={async () => {
-            setEditing(null);
-            await load();
-            onChanged();
-          }}
-        />
-      )}
-    </div>
-  );
+interface NodeFormValues {
+  overall_stage: string;
+  project_type?: string | null;
+  no?: number | null;
+  has_module: boolean;
 }
-
-// ---------------------------------------------------------------------------
-// 表单抽屉
-// ---------------------------------------------------------------------------
 
 function NodeFormDrawer({
   mode,
@@ -614,188 +524,99 @@ function NodeFormDrawer({
     overall_stage: string;
     project_type: string | null;
     no: number | null;
+    has_module: boolean;
   }) => void;
 }) {
-  const [overallStage, setOverallStage] = useState(node?.overall_stage ?? "");
-  const [projectType, setProjectType] = useState(node?.project_type ?? null);
-  const [no, setNo] = useState<string>(node?.no != null ? String(node.no) : "");
+  const [form] = Form.useForm<NodeFormValues>();
+  const [messageApi, contextHolder] = message.useMessage();
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
 
-  const submit = () => {
+  useEffect(() => {
+    if (mode === "edit" && node) {
+      form.setFieldsValue({
+        overall_stage: node.overall_stage,
+        project_type: node.project_type,
+        no: node.no,
+        has_module: node.has_module,
+      });
+    } else {
+      form.resetFields();
+      form.setFieldsValue({ has_module: false });
+    }
+  }, [mode, node, form]);
+
+  const submit = async () => {
+    let values: NodeFormValues;
+    try {
+      values = await form.validateFields();
+    } catch {
+      return; // 校验失败,Form.Item 自动显示错误
+    }
     setBusy(true);
-    setErr(null);
     try {
       onSubmit({
-        overall_stage: overallStage.trim(),
-        project_type: projectType ?? null,
-        no: no.trim() ? Number(no) : null,
+        overall_stage: values.overall_stage.trim(),
+        project_type: values.project_type ?? null,
+        no: values.no ?? null,
+        has_module: values.has_module,
       });
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "提交失败");
+      messageApi.error(e instanceof Error ? e.message : "提交失败");
       setBusy(false);
     }
   };
 
   return (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
-      <div className="fixed right-0 top-0 z-50 flex h-full w-[460px] flex-col border-l bg-background shadow-xl">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <h3 className="text-sm font-medium">
-            {mode === "create" ? "新建模板" : "编辑模板"}
-          </h3>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
-            ✕
-          </button>
-        </div>
-        <div className="flex-1 space-y-3 overflow-y-auto p-4">
-          <Field label="总阶段 *">
-            <input
-              value={overallStage}
-              onChange={(e) => setOverallStage(e.target.value)}
-              className={inputCls}
-            />
-          </Field>
-          <Field label="项目类型">
-            <PpmDictSelect
-              type={PROJECT_TYPE_DICT}
-              value={projectType}
-              onChange={(v) => setProjectType(typeof v === "string" ? v : null)}
-              placeholder="请选择项目类型"
-            />
-          </Field>
-          <Field label="编号">
-            <input
-              type="number"
-              value={no}
-              onChange={(e) => setNo(e.target.value)}
-              className={inputCls}
-            />
-          </Field>
-          {err && <p className="text-[11px] text-destructive">{err}</p>}
-        </div>
-        <div className="sticky bottom-0 flex justify-end gap-2 border-t bg-background px-4 py-3">
+    <Drawer
+      title={mode === "create" ? "新建模板" : "编辑模板"}
+      open
+      onClose={onClose}
+      width={460}
+      destroyOnClose
+      maskClosable={false}
+      footer={
+        <div className="flex justify-end gap-2">
           <Button size="sm" variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button
-            size="sm"
-            disabled={busy || !overallStage.trim()}
-            onClick={submit}
-          >
-            {busy ? "保存中…" : "保存"}
-          </Button>
-        </div>
-      </div>
-    </>
-  );
-}
-
-function ModuleFormDrawer({
-  planNodeId,
-  module,
-  onClose,
-  onSaved,
-}: {
-  planNodeId: string;
-  module: PlanNodeModule | null;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [moduleName, setModuleName] = useState(module?.module_name ?? "");
-  const [planWorkload, setPlanWorkload] = useState(module?.plan_workload ?? "");
-  const [planBegin, setPlanBegin] = useState(module?.plan_begin_time ?? "");
-  const [planComplete, setPlanComplete] = useState(
-    module?.plan_complete_time ?? "",
-  );
-  const [dutyUserId, setDutyUserId] = useState(module?.duty_user_id ?? null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  const submit = async () => {
-    setBusy(true);
-    setErr(null);
-    try {
-      const body = {
-        module_name: moduleName || null,
-        plan_workload: planWorkload || null,
-        plan_begin_time: planBegin || null,
-        plan_complete_time: planComplete || null,
-        duty_user_id: dutyUserId || null,
-      };
-      if (module) {
-        await updatePlanNodeModule(module.id, body);
-      } else {
-        await createPlanNodeModule({ plan_node_id: planNodeId, ...body });
-      }
-      onSaved();
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "保存失败");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
-      <div className="fixed right-0 top-0 z-50 flex h-full w-[480px] flex-col border-l bg-background shadow-xl">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <h3 className="text-sm font-medium">
-            {module ? "编辑模块" : "新增模块"}
-          </h3>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
-            ✕
-          </button>
-        </div>
-        <div className="flex-1 space-y-3 overflow-y-auto p-4">
-          <Field label="模块名">
-            <input value={moduleName} onChange={(e) => setModuleName(e.target.value)} className={inputCls} />
-          </Field>
-          <Field label="计划工时">
-            <input value={planWorkload} onChange={(e) => setPlanWorkload(e.target.value)} className={inputCls} />
-          </Field>
-          <Field label="计划开始">
-            <input value={planBegin} onChange={(e) => setPlanBegin(e.target.value)} placeholder="YYYY-MM-DD" className={inputCls} />
-          </Field>
-          <Field label="计划完成">
-            <input value={planComplete} onChange={(e) => setPlanComplete(e.target.value)} placeholder="YYYY-MM-DD" className={inputCls} />
-          </Field>
-          <Field label="责任人">
-            <PpmUserSelect
-              res="projectMember"
-              value={dutyUserId}
-              onChange={(v) =>
-                setDutyUserId(typeof v === "string" ? v : null)
-              }
-              placeholder="请选择责任人"
-            />
-          </Field>
-          {err && <p className="text-[11px] text-destructive">{err}</p>}
-        </div>
-        <div className="sticky bottom-0 flex justify-end gap-2 border-t bg-background px-4 py-3">
-          <Button size="sm" variant="outline" onClick={onClose}>取消</Button>
           <Button size="sm" disabled={busy} onClick={() => void submit()}>
             {busy ? "保存中…" : "保存"}
           </Button>
         </div>
-      </div>
-    </>
-  );
-}
-
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="text-[11px] text-muted-foreground">{label}</label>
-      <div className="mt-0.5">{children}</div>
-    </div>
+      }
+    >
+      {contextHolder}
+      <Form<NodeFormValues>
+        form={form}
+        layout="vertical"
+        requiredMark
+        initialValues={{ has_module: false }}
+      >
+        <Form.Item
+          label="总阶段"
+          name="overall_stage"
+          rules={[{ required: true, message: "请输入总阶段" }]}
+        >
+          <Input placeholder="请输入总阶段" />
+        </Form.Item>
+        <Form.Item label="项目类型" name="project_type">
+          <PpmDictSelect
+            type={PROJECT_TYPE_DICT}
+            placeholder="请选择项目类型"
+          />
+        </Form.Item>
+        <Form.Item label="编号" name="no">
+          <InputNumber style={{ width: "100%" }} placeholder="请输入编号" />
+        </Form.Item>
+        <Form.Item
+          label="是否有模块"
+          name="has_module"
+          valuePropName="checked"
+          tooltip="记录字段:标记模板是否按模块组织(当前展开统一显示明细,编辑可改)"
+        >
+          <Switch checkedChildren="有" unCheckedChildren="无" />
+        </Form.Item>
+      </Form>
+    </Drawer>
   );
 }

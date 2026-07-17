@@ -774,5 +774,128 @@ async def test_list_modules_by_project_empty(client: AsyncClient, auth_headers: 
     assert resp.json() == []
 
 
+# ===========================================================================
+# has_module 标志 + 明细查询 (plan-node-module-restructure / D-001/D-004)
+#
+# 被测端点:
+#   POST   /api/ppm/plan-node                 (PlanNodeCreate has_module 必填)
+#   PUT    /api/ppm/plan-node/{id}            (has_module 不可改,service 忽略)
+#   GET    /api/ppm/plan-node/{id}/details    (加可选 module_id query)
+#   POST   /api/ppm/plan-node-detail-tpl      (明细归属违例 → 400)
+# ===========================================================================
+
+
+class TestHasModuleAndDetailQuery:
+    """has_module + 明细查询 router 层 (plan-node-module-restructure)。"""
+
+    async def test_create_plan_node_has_module_required(
+        self, client: AsyncClient, auth_headers: dict
+    ) -> None:
+        """POST /plan-node 不传 has_module → 422 (PlanNodeCreate 必填,D-001)。"""
+        resp = await client.post(
+            "/api/ppm/plan-node",
+            json={"overall_stage": "立项", "no": 1},  # 缺 has_module
+            headers=auth_headers,
+        )
+        assert resp.status_code == 422, resp.text
+
+    async def test_create_plan_node_with_has_module(
+        self, client: AsyncClient, auth_headers: dict
+    ) -> None:
+        """POST /plan-node 传 has_module=true → 201,Resp 含 has_module。"""
+        resp = await client.post(
+            "/api/ppm/plan-node",
+            json={"overall_stage": "立项", "no": 1, "has_module": True},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["has_module"] is True
+
+    async def test_update_plan_node_can_change_has_module(
+        self, client: AsyncClient, auth_headers: dict
+    ) -> None:
+        """v3: PUT /plan-node/{id} 传 has_module → 200 且 has_module 更新 (D-001 取消)。"""
+        create = await client.post(
+            "/api/ppm/plan-node",
+            json={"overall_stage": "立项", "no": 1, "has_module": False},
+            headers=auth_headers,
+        )
+        assert create.status_code == 201
+        node_id = create.json()["id"]
+        resp = await client.put(
+            f"/api/ppm/plan-node/{node_id}",
+            json={"has_module": True, "overall_stage": "设计"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["has_module"] is True  # 已改
+        assert body["overall_stage"] == "设计"
+
+    async def test_list_details_filter_by_module_id(
+        self, client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+    ) -> None:
+        """GET /details?module_id=xxx 按模块过滤 (design §5.2 三层按模块拉)。"""
+        svc = PlanService(db_session)
+        node = await svc.create_plan_node({"overall_stage": "立项", "has_module": True})
+        m1 = await svc.create_module({"plan_node_id": str(node.id), "module_name": "前端"})
+        m2 = await svc.create_module({"plan_node_id": str(node.id), "module_name": "后端"})
+        await svc.create_plan_node_detail(
+            {
+                "plan_node_id": str(node.id),
+                "module_id": str(m1.id),
+                "no": "1",
+                "task_theme": "前",
+            }
+        )
+        await svc.create_plan_node_detail(
+            {
+                "plan_node_id": str(node.id),
+                "module_id": str(m2.id),
+                "no": "1",
+                "task_theme": "后",
+            }
+        )
+        # 不过滤 → 2 条
+        all_resp = await client.get(f"/api/ppm/plan-node/{node.id}/details", headers=auth_headers)
+        assert all_resp.status_code == 200
+        assert len(all_resp.json()) == 2
+        # 按 m1 过滤 → 1 条
+        m1_resp = await client.get(
+            f"/api/ppm/plan-node/{node.id}/details",
+            params={"module_id": str(m1.id)},
+            headers=auth_headers,
+        )
+        assert m1_resp.status_code == 200
+        rows = m1_resp.json()
+        assert len(rows) == 1
+        assert rows[0]["module_id"] == str(m1.id)
+
+    async def test_create_detail_module_violation_returns_400(
+        self, client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+    ) -> None:
+        """v2:明细 module_id 非 null 但指向别的模板的模块 → 400 (防御性归属校验,design §13)。
+
+        has_module 仅记录不参与校验;唯一违例是 module_id 跨模板(防脏数据)。
+        """
+        svc = PlanService(db_session)
+        node = await svc.create_plan_node({"overall_stage": "立项", "has_module": True})
+        other = await svc.create_plan_node({"overall_stage": "设计", "has_module": True})
+        other_module = await svc.create_module(
+            {"plan_node_id": str(other.id), "module_name": "别模块"}
+        )
+        resp = await client.post(
+            "/api/ppm/plan-node-detail-tpl",
+            json={
+                "plan_node_id": str(node.id),
+                "module_id": str(other_module.id),  # 指向别的模板的模块 → 跨模板违例
+                "no": "1",
+                "task_theme": "违例",
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 400, resp.text
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

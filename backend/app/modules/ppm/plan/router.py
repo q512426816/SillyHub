@@ -220,8 +220,14 @@ async def list_plan_node_details(
     plan_node_id: str,
     session: SessionDep,
     user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
+    module_id: str | None = Query(None),
 ) -> list[PlanNodeDetailResp]:
-    rows = await PlanService(session).list_plan_node_details_by_node(plan_node_id)
+    """列出模板明细 (design §5.2)。
+
+    - 不传 ``module_id`` → 返回该模板全部明细 (无模块模板二层用)。
+    - 传 ``module_id`` → 仅返回挂该模块的明细 (有模块模板三层按模块拉,D-002)。
+    """
+    rows = await PlanService(session).list_plan_node_details_by_node(plan_node_id, module_id)
     return [PlanNodeDetailResp.model_validate(r) for r in rows]
 
 
