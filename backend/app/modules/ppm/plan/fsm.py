@@ -43,7 +43,7 @@ class PlanNodeDetailStatus(StrEnum):
 # - done 不再迁移 (变更走新建版本,不改本记录状态)
 # - archived 是变更归档终态,不再迁移
 TRANSITIONS: TransitionMap[PlanNodeDetailStatus] = {
-    PlanNodeDetailStatus.DRAFT: {PlanNodeDetailStatus.REVIEW},
+    PlanNodeDetailStatus.DRAFT: {PlanNodeDetailStatus.REVIEW, PlanNodeDetailStatus.DONE},
     PlanNodeDetailStatus.REVIEW: {
         PlanNodeDetailStatus.APPROVE,
         PlanNodeDetailStatus.REJECTED,

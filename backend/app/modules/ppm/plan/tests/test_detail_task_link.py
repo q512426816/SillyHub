@@ -229,9 +229,8 @@ class TestFR01CreateDetailBuildsTask:
         )
         assert await _count_tasks(db_session) == 0
 
-        # draft → review → approve → done (3 次 save_process)
-        for _ in range(3):
-            await svc.save_process(detail.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+        # draft → done (1 次 save_process, 无审核流程)
+        await svc.save_process(detail.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
 
         assert (await svc.get_detail(detail.id)).status == "done"
         assert await _count_tasks(db_session) == 1

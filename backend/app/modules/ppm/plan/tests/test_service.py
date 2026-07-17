@@ -438,26 +438,25 @@ class TestDetailsToResp:
 
 class TestSaveProcess:
     async def test_full_flow(self, db_session: AsyncSession) -> None:
+        """quick 修复(无审核流程):draft save→done 一步到位。"""
         svc = PlanService(db_session)
         detail = await _create_detail(svc)
         assert detail.status == PlanNodeDetailStatus.DRAFT.value
 
         d = await svc.save_process(detail.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
-        assert d.status == PlanNodeDetailStatus.REVIEW.value
-        d = await svc.save_process(detail.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
-        assert d.status == PlanNodeDetailStatus.APPROVE.value
-        d = await svc.save_process(detail.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
-        assert d.status == PlanNodeDetailStatus.DONE.value
+        assert d.status == PlanNodeDetailStatus.DONE.value  # draft→done(无审核)
 
     async def test_done_no_next(self, db_session: AsyncSession) -> None:
+        """done 后再 save 抛 PlanError(无下一态)。"""
         svc = PlanService(db_session)
         detail = await _create_detail(svc)
-        for _ in range(3):
-            await svc.save_process(detail.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+        await svc.save_process(detail.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])  # draft→done
+        assert (await svc.get_detail(detail.id)).status == PlanNodeDetailStatus.DONE.value
         with pytest.raises(PlanError):
             await svc.save_process(detail.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
 
-    async def test_records_audit_approve_user(self, db_session: AsyncSession) -> None:
+    async def test_done_records_approve_user(self, db_session: AsyncSession) -> None:
+        """draft→done 记录 approve_user(完成人)。"""
         svc = PlanService(db_session)
         detail = await _create_detail(svc)
         await svc.save_process(
@@ -465,42 +464,45 @@ class TestSaveProcess:
             actor_id=_ACTOR[0],
             actor_name=_ACTOR[1],
             next_user_id=_AUDIT_USER_ID,
-            next_user_name="审核员",
+            next_user_name="完成人",
         )
         got = await svc.get_detail(detail.id)
-        assert got.audit_user_id == uuid.UUID(_AUDIT_USER_ID)
-        assert got.audit_user_name == "审核员"
+        assert got.status == PlanNodeDetailStatus.DONE.value
+        assert got.approve_user_id == uuid.UUID(_AUDIT_USER_ID)
+        assert got.approve_user_name == "完成人"
 
-    async def test_process_log_inserted_each_step(self, db_session: AsyncSession) -> None:
+    async def test_process_log_inserted(self, db_session: AsyncSession) -> None:
+        """draft→done 写一行履历。"""
         svc = PlanService(db_session)
         detail = await _create_detail(svc)
         await svc.save_process(detail.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
-        await svc.save_process(detail.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
         procs = await svc.list_processes(str(detail.id))
-        assert len(procs) == 2
+        assert len(procs) == 1
         assert all(p.business_type == PROCESS_BUSINESS_TYPE for p in procs)
-        # node_key 形如 "draft->review"
-        assert "->" in (procs[0].node_key or "")
+        assert "->" in (procs[0].node_key or "")  # "draft->done"
 
 
 class TestRejectProcess:
     async def test_review_reject(self, db_session: AsyncSession) -> None:
+        """review 明细可驳回(手动建 review;新流程 save draft→done 跳过 review)。"""
         svc = PlanService(db_session)
-        detail = await _create_detail(svc)
-        await svc.save_process(detail.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+        detail = await svc.create_detail(
+            {"plan_node_id": str(uuid.uuid4()), "no": "1", "task_theme": "d", "status": "review"}
+        )
         d = await svc.reject_process(
             detail.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1], handle_info="不通过"
         )
         assert d.status == PlanNodeDetailStatus.REJECTED.value
 
     async def test_reject_then_rework(self, db_session: AsyncSession) -> None:
+        """review→reject→rework(rejected→draft)。"""
         svc = PlanService(db_session)
-        detail = await _create_detail(svc)
-        await svc.save_process(detail.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+        detail = await svc.create_detail(
+            {"plan_node_id": str(uuid.uuid4()), "no": "1", "task_theme": "d", "status": "review"}
+        )
         await svc.reject_process(detail.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
         d = await svc.save_process(detail.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
-        # rejected -> draft
-        assert d.status == PlanNodeDetailStatus.DRAFT.value
+        assert d.status == PlanNodeDetailStatus.DRAFT.value  # rejected → draft
 
     async def test_illegal_reject_on_draft(self, db_session: AsyncSession) -> None:
         svc = PlanService(db_session)
@@ -521,8 +523,7 @@ class TestChangeProcess:
         svc = PlanService(db_session)
         old = await _create_detail(svc)
         # 推到完成
-        for _ in range(3):
-            await svc.save_process(old.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+        await svc.save_process(old.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
         assert (await svc.get_detail(old.id)).status == PlanNodeDetailStatus.DONE.value
 
         # 发起变更
@@ -553,12 +554,10 @@ class TestChangeProcess:
     async def test_version_chain(self, db_session: AsyncSession) -> None:
         svc = PlanService(db_session)
         old = await _create_detail(svc)
-        for _ in range(3):
-            await svc.save_process(old.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+        await svc.save_process(old.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
         v2 = await svc.change_process(old.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
         # 把 v2 也推完成,再变更一次 → v3
-        for _ in range(3):
-            await svc.save_process(v2.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+        await svc.save_process(v2.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
         v3 = await svc.change_process(v2.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
 
         chain = await svc.list_versions(v3.id)
@@ -571,8 +570,7 @@ class TestChangeProcess:
     async def test_change_logs_process(self, db_session: AsyncSession) -> None:
         svc = PlanService(db_session)
         old = await _create_detail(svc)
-        for _ in range(3):
-            await svc.save_process(old.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+        await svc.save_process(old.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
         new = await svc.change_process(
             old.id,
             actor_id=_ACTOR[0],
@@ -590,8 +588,7 @@ class TestListDetailsExcludesArchived:
         svc = PlanService(db_session)
         old = await _create_detail(svc)
         node_id = old.plan_node_id
-        for _ in range(3):
-            await svc.save_process(old.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+        await svc.save_process(old.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
         new = await svc.change_process(old.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
 
         rows = await svc.list_details_by_node(node_id)

@@ -30,11 +30,12 @@ class TestForwardFlow:
         # 终态无可达
         assert sm.next_states() == []
 
-    def test_draft_only_to_review(self) -> None:
+    def test_draft_can_go_review_or_done(self) -> None:
+        """quick 修复(无审核流程):draft 可直接 done(主路径)或 review(兼容旧审核)。"""
         sm = StateMachine(_S.DRAFT, TRANSITIONS)
-        assert sm.can_transition(_S.REVIEW)
-        assert not sm.can_transition(_S.APPROVE)
-        assert not sm.can_transition(_S.DONE)
+        assert sm.can_transition(_S.REVIEW)  # 兼容旧审核
+        assert sm.can_transition(_S.DONE)  # 新:直接完成(无审核)
+        assert not sm.can_transition(_S.APPROVE)  # draft 不能跳 approve
 
 
 class TestRejectAndRework:
@@ -81,7 +82,7 @@ class TestIllegalTransition:
     def test_illegal_transition_http_status(self) -> None:
         sm = StateMachine(_S.DRAFT, TRANSITIONS, entity="ps_plan_node_detail", entity_id="x")
         with pytest.raises(InvalidTransition) as exc:
-            sm.transition(_S.DONE)
+            sm.transition(_S.APPROVE)  # draft 不能跳 approve(须先 done/review)
         assert exc.value.http_status == 422
 
     def test_illegal_transition_keeps_state(self) -> None:

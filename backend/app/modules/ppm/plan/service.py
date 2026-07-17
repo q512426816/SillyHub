@@ -232,7 +232,7 @@ class PlanService:
     # (review/approve 都可驳回),主流程只取「往前走」那一条;
     # rejected 走返工回 draft (驳回后重新提交)。
     _FORWARD_NEXT: dict[PlanNodeDetailStatus, PlanNodeDetailStatus] = {
-        PlanNodeDetailStatus.DRAFT: PlanNodeDetailStatus.REVIEW,
+        PlanNodeDetailStatus.DRAFT: PlanNodeDetailStatus.DONE,
         PlanNodeDetailStatus.REVIEW: PlanNodeDetailStatus.APPROVE,
         PlanNodeDetailStatus.APPROVE: PlanNodeDetailStatus.DONE,
         PlanNodeDetailStatus.REJECTED: PlanNodeDetailStatus.DRAFT,
@@ -848,8 +848,10 @@ class PlanService:
         elif target is PlanNodeDetailStatus.APPROVE:
             detail.approve_user_id = self._safe_uuid(next_user_id) or self._safe_uuid(actor_id)
             detail.approve_user_name = next_user_name or actor_name
-        # 明细推进到 DONE 时，同事务触发建/更新关联任务 (FR-01)
+        # 明细推进到 DONE 时，记录完成人 + 同事务触发建/更新关联任务 (FR-01)
         if target is PlanNodeDetailStatus.DONE:
+            detail.approve_user_id = self._safe_uuid(next_user_id) or self._safe_uuid(actor_id)
+            detail.approve_user_name = next_user_name or actor_name
             await self._ensure_task_for_detail(detail)
         await self._session.commit()
         await self._session.refresh(detail)

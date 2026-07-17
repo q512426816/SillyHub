@@ -327,3 +327,11 @@ created_at: 2026-07-14T09:20:24
 根因：ql-007 回退容器后回到原始 max-content，但 antd 嵌套表格 max-content 测量可能膨胀撑母表（用户最初问题）。用户建议子表改固定宽度。
 方案：子表 scroll.x 用固定值（明细 790=列总710+操作80；模块 790，模块名列自适应剩余）。固定宽度下子表 table min-width 明确(790)，母表 max-content=max(母表列,790)=790 不膨胀。2K 屏 790<可视2200→母表不撑无滚动条，子表790=展开行宽 fits 不滚。窄屏子表按790独立滚不撑母表。仅改 plan-nodes/page.tsx，未改 PpmSubTable 通用组件。
 结果：tsc --noEmit EXIT 0；仅改 plan-nodes/page.tsx（明细/模块 scroll.x 固定 790）。待 commit + rebuild frontend 部署 + 用户浏览器验证（2K 屏展开模板行：母表/模块/明细均无多余滚动条，列紧凑）。
+
+## ql-20260717-001-f1a2 | 2026-07-17 12:30:00 | 里程碑明细编辑提交直接完成(无审核流程)+建任务计划
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/plan/fsm.py（DRAFT 白名单加 DONE）、backend/app/modules/ppm/plan/service.py（_FORWARD_NEXT[DRAFT]=DONE + _transition DONE 分支记完成人 approve_user）、backend/app/modules/ppm/plan/tests/test_fsm.py + test_service.py + test_detail_task_link.py（更新 13 测试反映 draft→done 新流程）
+根因：用户反馈编辑明细提交后状态"审核中"(review)而非"完成"(done)，且没建任务计划。根源同源：_FORWARD_NEXT[DRAFT]=REVIEW（draft→review 单步）+ fsm DRAFT 白名单无 DONE；_ensure_task_for_detail 只在 target=DONE 触发，故 review 不建任务。
+方案：_FORWARD_NEXT[DRAFT]=DONE（draft save→done 一步，跳过审核）+ fsm DRAFT 白名单加 DONE + _transition DONE 分支记 approve_user（完成人）。reject 测试改用手动 review 明细。
+结果：ruff/mypy 过；pytest plan 104 passed（13 测试更新，零回归）。
