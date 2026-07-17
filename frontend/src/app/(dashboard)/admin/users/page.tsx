@@ -285,6 +285,20 @@ export default function AdminUsersPage() {
       render: (v: string | null) => v ?? "—",
     },
     {
+      title: "组织",
+      key: "organizations",
+      render: (_v: unknown, u: UserRead) =>
+        u.organizations.length === 0 ? (
+          <span className="text-xs text-muted-foreground">—</span>
+        ) : (
+          <div className="flex flex-wrap gap-1">
+            {u.organizations.map((o) => (
+              <Tag key={o.id}>{o.name}</Tag>
+            ))}
+          </div>
+        ),
+    },
+    {
       title: "角色",
       key: "roles",
       render: (_v: unknown, u: UserRead) =>

@@ -373,3 +373,12 @@ created_at: 2026-07-14T09:20:24
 方案：整组件重写为 antd——Modal（替自实现 Drawer）+ Form.useForm layout=vertical；登录名/邮箱/显示名→Form.Item(rules required/min3/email)+Input+aria-label；超管/登录→Checkbox；组织 checkbox 平铺→TreeSelect 多选（buildOrgTreeData 用 OrganizationRead.parent_id 构造 treeData）；角色 checkbox 平铺→Select multiple；Form.useWatch 实时算 usernameValid/emailValid 驱动保存按钮 disabled（保留原"空字段禁用按钮"行为，submit 仍走 validateFields 双保险）。保留 create 默认密码提示 Alert + isSelf 警告 + create/edit body 构造逻辑 + 权限 disabled。OrganizationRead 已有 parent_id，无需改后端。
 波折：① antd Modal/TreeSelect/Select 在 jsdom 报 window.matchMedia 未定义（17 测试全炸），setup.ts 加 matchMedia polyfill；② antd Form.Item label 不建立 label[for]→input 关联致 getByLabelText 失效，给登录名/邮箱 Input 补 aria-label；③ 组织/角色 checkbox→TreeSelect/Select 后原 checkbox toggle/checked 测试失效（jsdom 测 TreeSelect 选中态难），改为"渲染 + 提交 body 验证预填/未选"。
 结果：typecheck EXIT 0；lint 0 error（warning 全既有 kanban.ts）；vitest admin-user-drawer 17 passed；全量 937 passed 零回归。纯前端，不动后端/接口/page.tsx（组件名/props 不变）。待 commit + rebuild frontend 部署 + 用户浏览器验证（新建/编辑用户弹窗 + 组织树多选 + 角色多选 + 全 antd 控件）。
+
+## ql-20260717-006-ec0f | 2026-07-17 16:50:00 | /admin/users 用户列表加「组织」列
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/admin/users/page.tsx（columns 加「组织」列）
+需求：用户要求用户列表显示组织列。
+根因：用户列表有「角色」列（Tag 列表 u.roles）但无「组织」列，看不出用户归属哪些组织。
+方案：columns 在「显示名」列后、「角色」列前加「组织」列，仿角色列渲染——u.organizations 为空显 —，非空 map Tag(o.name)；UserRead.organizations 已有（同 u.roles 源），无需改后端/接口/types。
+结果：typecheck EXIT 0；admin test 17 passed（列表无专门测试，drawer 测试不受影响）。纯前端单文件。待 commit + rebuild frontend 部署 + 用户验证（用户列表显示组织列）。
