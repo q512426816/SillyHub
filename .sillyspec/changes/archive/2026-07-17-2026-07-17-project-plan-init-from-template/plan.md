@@ -19,16 +19,16 @@ brainstorm `design.md` 方案 A（后端 service 自动）。详细设计/接口
 ## Wave & Tasks
 
 ### Wave 1 — 后端（model + schema + service + migration + 测试）
-- [ ] task-01: model + migration — `PsPlanNode` + `template_plan_node_id`（uuid|null）+ `has_module`（bool default false）；migration ALTER `ppm_ps_plan_node` ADD 两列。（覆盖 FR-005，D-005）
-- [ ] task-02: schema — `PsPlanNodeResp` / `PsPlanNodeWithDetail` 加 `template_plan_node_id` + `has_module`。（覆盖 FR-005，D-005）
-- [ ] task-03: service create_ps_project_plan 批量建里程碑 — 同事务查所有 PlanNode 模板（按 no asc）建 PsPlanNode（overall_stage/no 从模板复制，template_plan_node_id+has_module 写入）；has_module=无复制模板 PlanNodeDetail→PsPlanNodeDetail（module_id=null, status=draft）/ 有只建空里程碑。注意 PlanNode.no（int）→ PsPlanNode.no（str）显式 str()。（覆盖 FR-001/002/003，D-001/D-002/D-003）
-- [ ] task-04: service create_module 复制模板明细 — 反查 PsPlanNode.template_plan_node_id → 复制模板 PlanNodeDetail 到新模块（plan_node_id=里程碑.id, module_id=新模块.id, status=draft）；无模板（手动里程碑）则空模块。（覆盖 FR-004，D-004）
-- [ ] task-05: 后端测试 — create_ps_project_plan 批量建（无模块含明细草稿/有模块空）+ create_module 复制模板明细 + no int→str；ruff format/check + mypy + pytest 过。（覆盖 FR-001~004/007）
+- [x] task-01: model + migration — `PsPlanNode` + `template_plan_node_id`（uuid|null）+ `has_module`（bool default false）；migration ALTER `ppm_ps_plan_node` ADD 两列。（覆盖 FR-005，D-005）
+- [x] task-02: schema — `PsPlanNodeResp` / `PsPlanNodeWithDetail` 加 `template_plan_node_id` + `has_module`。（覆盖 FR-005，D-005）
+- [x] task-03: service create_ps_project_plan 批量建里程碑 — 同事务查所有 PlanNode 模板（按 no asc）建 PsPlanNode（overall_stage/no 从模板复制，template_plan_node_id+has_module 写入）；has_module=无复制模板 PlanNodeDetail→PsPlanNodeDetail（module_id=null, status=draft）/ 有只建空里程碑。注意 PlanNode.no（int）→ PsPlanNode.no（str）显式 str()。（覆盖 FR-001/002/003，D-001/D-002/D-003）
+- [x] task-04: service create_module 复制模板明细 — 反查 PsPlanNode.template_plan_node_id → 复制模板 PlanNodeDetail 到新模块（plan_node_id=里程碑.id, module_id=新模块.id, status=draft）；无模板（手动里程碑）则空模块。（覆盖 FR-004，D-004）
+- [x] task-05: 后端测试 — create_ps_project_plan 批量建（无模块含明细草稿/有模块空）+ create_module 复制模板明细 + no int→str；ruff format/check + mypy + pytest 过。（覆盖 FR-001~004/007）
 
 ### Wave 2 — 前端（types + milestone-details + 测试 + 部署）
-- [ ] task-06: types — `types.ts` PsPlanNode + `template_plan_node_id` + `has_module`。（覆盖 FR-005）
-- [ ] task-07: milestone-details 模块层条件 — `page.tsx` 模块层 `overall_stage==="实施阶段"` → `PsPlanNode.has_module===true`。（覆盖 FR-006，D-006）
-- [ ] task-08: 前端测试 + 部署 — vitest + tsc --noEmit + pnpm lint 过；rebuild backend+frontend Docker；浏览器验收（新建项目计划自动建里程碑 / 新建模块复制明细 / 模块层三级 vs 二级）。（覆盖 FR-006/007）
+- [x] task-06: types — `types.ts` PsPlanNode + `template_plan_node_id` + `has_module`。（覆盖 FR-005）
+- [x] task-07: milestone-details 模块层条件 — `page.tsx` 模块层 `overall_stage==="实施阶段"` → `PsPlanNode.has_module===true`。（覆盖 FR-006，D-006）
+- [x] task-08: 前端测试 + 部署 — vitest + tsc --noEmit + pnpm lint 过；rebuild backend+frontend Docker；浏览器验收（新建项目计划自动建里程碑 / 新建模块复制明细 / 模块层三级 vs 二级）。（覆盖 FR-006/007）
 
 ## 依赖关系
 - **Wave 2 依赖 Wave 1**：前端 types/milestone-details 依赖后端字段 + API。
