@@ -344,3 +344,12 @@ created_at: 2026-07-14T09:20:24
 根因：上午变更 project-plan-init-from-template 把前端模块层展示条件从 overall_stage==="实施阶段" 改成 PsPlanNode.has_module===true（D-006），migration `20260717_psn_tmpl_fields` 加 has_module 列时 R-02 定案**不回填**（当时理由"项目未上线可重置"），旧里程碑 has_module 全是默认 false → 前端 `if(node.has_module)` 不成立 → 不展开三级 → 模块+模块下明细全部隐藏。DB 实测：16 个旧"实施阶段"里程碑 has_module=false 但挂了 76 个模块/约 1488 条明细（最大一个 21 模块/368 明细），数据本身完好只是展示不出来；范围确认仅"实施阶段"挂模块。
 方案：直接 UPDATE 运行库（用户选直接 UPDATE 不走 migration）。SQL：`UPDATE ppm_ps_plan_node SET has_module=true, updated_at=now() WHERE overall_stage='实施阶段' AND has_module=false AND template_plan_node_id IS NULL AND id IN (SELECT plan_node_id FROM ppm_plan_node_module WHERE plan_node_id IS NOT NULL)`。条件限定：手动建（template_plan_node_id IS NULL，不含从模板新生成的 has_module=true 里程碑）且确实挂了模块（那个 module_cnt=0 的空里程碑 4fe81b2f 保持 false 二级展示正确）。
 结果：UPDATE 16 条；回填后实施阶段 has_module=true 共 18 个（挂 77 模块/1514 明细，全部恢复三级展示），has_module=false 仅剩 1 个（无模块无明细，正确二级）。无代码改动，前端刷新 /ppm/milestone-details 即生效，无需 rebuild Docker。注：本次仅修当前运行库，migration 文件未改（重置/新环境仍会复现，若后续要彻底解决需补一个回填 migration）。
+
+## ql-20260717-003-94b4 | 2026-07-17 14:59:38 | 里程碑明细列表加显示【任务描述】列
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（DetailLevelTable columns「任务主题」列后加「任务描述」列，dataIndex=task_description，width=220，ellipsis=true）
+需求：用户要求里程碑明细列表里也显示【任务描述】。
+根因：明细表单已有 task_description 字段（page.tsx:2313 Form.Item + types.ts:274 等 PsPlanNodeDetail.task_description），但 DetailLevelTable 列表只有明细阶段/任务主题/角色/计划工时/执行人/状态/操作，缺任务描述列。
+方案：DetailLevelTable columns 在「任务主题」列后插入「任务描述」列（dataIndex=task_description，width=220，ellipsis=true 防长文本撑高行 hover 看完整，render v??"—""）；useMemo deps 无需改（新列不依赖外部变量）。page.tsx 有 3 处「任务主题」列（masterColumns 主表 391/previewColumns 导入预览 1151/DetailLevelTable 明细 1717），用后跟列区分唯一定位（仅 DetailLevelTable 后跟「角色」列，另两处分别跟「责任人」「工作量」）。纯前端单文件，不动后端/接口/types。
+结果：tsc --noEmit EXIT 0；vitest milestone-details 24 passed（2 test files）零回归。待 commit + rebuild frontend 部署 + 用户浏览器验证（明细列表显示任务描述列，长文本省略号 hover 看完整）。

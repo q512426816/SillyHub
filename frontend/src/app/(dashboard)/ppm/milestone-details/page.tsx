@@ -1720,6 +1720,14 @@ function DetailLevelTable({
         render: (v: string | null) => v ?? "—",
       },
       {
+        title: "任务描述",
+        dataIndex: "task_description",
+        key: "task_description",
+        width: 220,
+        ellipsis: true,
+        render: (v: string | null) => v ?? "—",
+      },
+      {
         title: "角色",
         dataIndex: "role_name",
         key: "role_name",
