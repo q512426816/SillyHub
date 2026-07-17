@@ -335,3 +335,12 @@ created_at: 2026-07-14T09:20:24
 根因：用户反馈编辑明细提交后状态"审核中"(review)而非"完成"(done)，且没建任务计划。根源同源：_FORWARD_NEXT[DRAFT]=REVIEW（draft→review 单步）+ fsm DRAFT 白名单无 DONE；_ensure_task_for_detail 只在 target=DONE 触发，故 review 不建任务。
 方案：_FORWARD_NEXT[DRAFT]=DONE（draft save→done 一步，跳过审核）+ fsm DRAFT 白名单加 DONE + _transition DONE 分支记 approve_user（完成人）。reject 测试改用手动 review 明细。
 结果：ruff/mypy 过；pytest plan 104 passed（13 测试更新，零回归）。
+
+## ql-20260717-002-f864 | 2026-07-17 14:50:16 | 旧"实施阶段"里程碑三层结构丢失修复——回填 has_module=true（直接 UPDATE 数据库，无代码改动）
+状态：已完成
+关联变更：2026-07-17-project-plan-init-from-template（R-02 风险兑现修复）
+文件：（无代码改动；仅运行库 UPDATE ppm_ps_plan_node SET has_module=true）
+需求：用户反馈旧项目计划的"实施阶段"里程碑在 /ppm/milestone-details 页没有三层结构（里程碑→模块→明细）了，只剩二级。
+根因：上午变更 project-plan-init-from-template 把前端模块层展示条件从 overall_stage==="实施阶段" 改成 PsPlanNode.has_module===true（D-006），migration `20260717_psn_tmpl_fields` 加 has_module 列时 R-02 定案**不回填**（当时理由"项目未上线可重置"），旧里程碑 has_module 全是默认 false → 前端 `if(node.has_module)` 不成立 → 不展开三级 → 模块+模块下明细全部隐藏。DB 实测：16 个旧"实施阶段"里程碑 has_module=false 但挂了 76 个模块/约 1488 条明细（最大一个 21 模块/368 明细），数据本身完好只是展示不出来；范围确认仅"实施阶段"挂模块。
+方案：直接 UPDATE 运行库（用户选直接 UPDATE 不走 migration）。SQL：`UPDATE ppm_ps_plan_node SET has_module=true, updated_at=now() WHERE overall_stage='实施阶段' AND has_module=false AND template_plan_node_id IS NULL AND id IN (SELECT plan_node_id FROM ppm_plan_node_module WHERE plan_node_id IS NOT NULL)`。条件限定：手动建（template_plan_node_id IS NULL，不含从模板新生成的 has_module=true 里程碑）且确实挂了模块（那个 module_cnt=0 的空里程碑 4fe81b2f 保持 false 二级展示正确）。
+结果：UPDATE 16 条；回填后实施阶段 has_module=true 共 18 个（挂 77 模块/1514 明细，全部恢复三级展示），has_module=false 仅剩 1 个（无模块无明细，正确二级）。无代码改动，前端刷新 /ppm/milestone-details 即生效，无需 rebuild Docker。注：本次仅修当前运行库，migration 文件未改（重置/新环境仍会复现，若后续要彻底解决需补一个回填 migration）。
