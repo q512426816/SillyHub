@@ -58,12 +58,14 @@ def upgrade() -> None:
     )
 
     # 3. 数据初始化: 现有项目全挂「项目二部」(dept_103)
+    # bindparam 显式 type_=Uuid,避免 PG 把字符串参数当 VARCHAR 拒绝 uuid 列
+    # (DatatypeMismatchError);SQLite 端 Uuid 适配为字符串存储。
     op.execute(
         sa.text(
             "UPDATE ppm_project_maintenance "
             "SET organization_id = :org_id "
             "WHERE organization_id IS NULL"
-        ).bindparams(org_id=_PROJECT_TWO_DEPT_ID)
+        ).bindparams(sa.bindparam("org_id", value=_PROJECT_TWO_DEPT_ID, type_=sa.Uuid()))
     )
 
 
