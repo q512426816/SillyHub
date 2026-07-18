@@ -16,6 +16,7 @@ import uuid
 
 import pytest
 
+from app.modules.ppm.data_scope import DataScope
 from app.modules.ppm.project.schema import (
     CustomerMaintenanceCreate,
     CustomerMaintenancePageReq,
@@ -192,16 +193,19 @@ async def test_project_page_filter_and_sort(db_session, operator):
         )
 
     # 模糊 project_name
-    res = await svc.page(ProjectMaintenancePageReq(project_name="Alpha"))
+    res = await svc.page(ProjectMaintenancePageReq(project_name="Alpha"), DataScope(is_full=True))
     assert res.total == 2
 
     # 精确 status
-    res = await svc.page(ProjectMaintenancePageReq(project_status="进行中"))
+    res = await svc.page(
+        ProjectMaintenancePageReq(project_status="进行中"), DataScope(is_full=True)
+    )
     assert res.total == 2
 
     # code 模糊 + 排序
     res = await svc.page(
-        ProjectMaintenancePageReq(project_code="A", order_by="project_code", order="asc")
+        ProjectMaintenancePageReq(project_code="A", order_by="project_code", order="asc"),
+        DataScope(is_full=True),
     )
     assert res.total == 2
     assert [i.project_code for i in res.items] == ["A1", "A2"]
@@ -232,11 +236,13 @@ async def test_project_page_default_sort_created_at_desc(db_session, operator):
     await db_session.commit()
 
     # 不传 order_by → 默认 created_at desc → 最新(D3)在前
-    res = await svc.page(ProjectMaintenancePageReq())
+    res = await svc.page(ProjectMaintenancePageReq(), DataScope(is_full=True))
     assert [i.project_code for i in res.items] == ["D3", "D2", "D1"]
 
     # 显式传 order_by 仍生效(不被默认覆盖)
-    res_asc = await svc.page(ProjectMaintenancePageReq(order_by="project_code", order="asc"))
+    res_asc = await svc.page(
+        ProjectMaintenancePageReq(order_by="project_code", order="asc"), DataScope(is_full=True)
+    )
     assert [i.project_code for i in res_asc.items] == ["D1", "D2", "D3"]
 
 

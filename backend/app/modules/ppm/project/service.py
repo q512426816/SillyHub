@@ -28,6 +28,7 @@ from app.modules.ppm.common.crud import (
     apply_sort,
     count_total,
 )
+from app.modules.ppm.data_scope import DataScope, build_project_scope_clause
 from app.modules.ppm.plan.model import PsProjectPlan
 from app.modules.ppm.project.model import (
     PpmCustomerMaintenance,
@@ -240,9 +241,14 @@ class ProjectMaintenanceService:
     async def page(
         self,
         req: ProjectMaintenancePageReq,
+        scope: DataScope,
     ) -> Page[PpmProjectMaintenance]:
         stmt = select(PpmProjectMaintenance)
         stmt = self._apply_filters(stmt, req)
+        # 数据范围过滤 (2026-07-18-project-plan-data-scope D-006@v1)
+        project_scope = build_project_scope_clause(scope)
+        if project_scope is not None:
+            stmt = stmt.where(project_scope)
         total = await count_total(self._session, stmt)
         # 默认按创建时间降序(最新在前);前端显式传 order_by 时尊重前端选择
         order_by = req.order_by or "created_at"

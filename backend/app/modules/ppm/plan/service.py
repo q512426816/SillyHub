@@ -27,7 +27,7 @@ import anyio
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import AppError
+from app.core.errors import AppError, PermissionDenied
 from app.core.logging import get_logger
 from app.modules.auth.model import User
 from app.modules.ppm.common.crud import (
@@ -38,6 +38,7 @@ from app.modules.ppm.common.crud import (
     count_total,
 )
 from app.modules.ppm.common.fsm import StateMachine
+from app.modules.ppm.data_scope import DataScope, build_plan_scope_clause
 from app.modules.ppm.plan.fsm import (
     PROCESS_BUSINESS_TYPE,
     TRANSITIONS,
@@ -388,7 +389,9 @@ class PlanService:
         await _Crud(self._session, PlanNodeModule).delete(item_id)
 
     # ---------- ps 项目计划 CRUD ----------
-    async def list_ps_project_plans(self, req: PsProjectPlanListReq) -> Page[PsProjectPlan]:
+    async def list_ps_project_plans(
+        self, req: PsProjectPlanListReq, scope: DataScope
+    ) -> Page[PsProjectPlan]:
         # 过滤条件:字符串字段 ilike 模糊匹配,时间字段闭区间 [start, end_next_day)。
         # 前端传 YYYY-MM-DD → datetime 是 00:00:00;end 加 1 天用 < 比较保证含当日。
         where_clauses: list[Any] = []
@@ -419,6 +422,10 @@ class PlanService:
                 PsProjectPlan.project_plan_end_time
                 < req.project_plan_end_time_end + timedelta(days=1)
             )
+        # 数据范围过滤 (2026-07-18-project-plan-data-scope D-006@v1)
+        plan_scope = build_plan_scope_clause(scope)
+        if plan_scope is not None:
+            where_clauses.append(plan_scope)
         return await _Crud(self._session, PsProjectPlan).list_paged(
             req=req,
             allowed_sort={"created_at", "project_name", "status"},
@@ -680,7 +687,9 @@ class PlanService:
         return chain
 
     # ---------- 三联表查询 (task-03) ----------
-    async def get_project_plan_three_level(self, plan_id: uuid.UUID) -> ProjectPlanThreeLevelResp:
+    async def get_project_plan_three_level(
+        self, plan_id: uuid.UUID, scope: DataScope
+    ) -> ProjectPlanThreeLevelResp:
         """三联表查询 + 成本派生注入 (task-03 / D-014@v1)。
 
         4 层嵌套: ``PsProjectPlan → PsPlanNode → PsPlanNodeDetail → PlanTask``。
@@ -695,6 +704,19 @@ class PlanService:
             组装好的 :class:`ProjectPlanThreeLevelResp` (含派生 + 嵌套)
         """
         plan = await self.get_ps_project_plan(plan_id)
+
+        # 数据范围校验 (2026-07-18-project-plan-data-scope D-006@v1):越权 → 403
+        plan_scope = build_plan_scope_clause(scope)
+        if plan_scope is not None:
+            visible = (
+                await self._session.execute(
+                    select(func.count())
+                    .select_from(PsProjectPlan)
+                    .where(PsProjectPlan.id == plan_id, plan_scope)
+                )
+            ).scalar_one()
+            if not visible:
+                raise PermissionDenied("无权访问该项目计划")
 
         # 1. 批量取 nodes (按 ps_project_plan_id,字符串 FK)
         nodes = await self.list_ps_plan_nodes_by_plan(str(plan_id))
@@ -974,15 +996,19 @@ class PlanService:
             for r in rows
         ]
 
-    async def list_ps_project_plans_for_export(self) -> list[dict[str, Any]]:
-        """返回项目计划全量行 (dict),供 Excel 导出 (P2-3)。
+    async def list_ps_project_plans_for_export(self, scope: DataScope) -> list[dict[str, Any]]:
+        """返回项目计划行 (按当前用户范围过滤),供 Excel 导出 (P2-3)。
 
         对照源 projectplan/index.vue 导出列:项目名称 / 项目经理 /
         合同名称 / 合同金额 / 公司既定利润率 / 公司既定利润金额 /
         剩余可用人天 / 总成本 / 剩余成本 / 合同签订时间 / 项目开始时间 /
         预计验收时间。
         """
-        rows = (await self._session.execute(select(PsProjectPlan))).scalars().all()
+        stmt = select(PsProjectPlan)
+        plan_scope = build_plan_scope_clause(scope)
+        if plan_scope is not None:
+            stmt = stmt.where(plan_scope)
+        rows = (await self._session.execute(stmt)).scalars().all()
         return [
             {
                 "project_name": r.project_name,
