@@ -33,6 +33,7 @@ from app.modules.ppm.common.export import (
     rows_to_workbook,
     timestamped_filename,
 )
+from app.modules.ppm.data_scope import DataScope, get_ppm_data_scope
 from app.modules.ppm.project import service as svc
 from app.modules.ppm.project.schema import (
     CustomerMaintenanceCreate,
@@ -145,6 +146,7 @@ async def delete_project_maintenance(
 async def page_project_maintenance(
     session: SessionDep,
     user: Annotated[User, _PROJECT_READ],
+    scope: Annotated[DataScope, Depends(get_ppm_data_scope)],
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     order_by: str | None = Query(None),
@@ -165,7 +167,7 @@ async def page_project_maintenance(
         project_type=project_type,
     )
     s = svc.ProjectMaintenanceService(session)
-    result = await s.page(req)
+    result = await s.page(req, scope)
     return Page.build(
         items=[ProjectMaintenanceResp.model_validate(item) for item in result.items],
         total=result.total,
@@ -190,6 +192,7 @@ async def simple_list_project_maintenance(
 async def export_project_maintenance(
     session: SessionDep,
     user: Annotated[User, _PROJECT_EXPORT],
+    scope: Annotated[DataScope, Depends(get_ppm_data_scope)],
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     order_by: str | None = Query(None),
@@ -218,7 +221,7 @@ async def export_project_maintenance(
         project_type=project_type,
     )
     s = svc.ProjectMaintenanceService(session)
-    result = await s.page(req)
+    result = await s.page(req, scope)
     columns = [
         ColumnDef("project_code", "项目编号", width=20),
         ColumnDef("project_name", "项目名称", width=30),

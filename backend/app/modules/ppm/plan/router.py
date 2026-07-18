@@ -29,6 +29,7 @@ from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.ppm.common.crud import Page, PageReq
 from app.modules.ppm.common.export import ColumnDef, timestamped_filename
+from app.modules.ppm.data_scope import DataScope, get_ppm_data_scope
 from app.modules.ppm.plan.schema import (
     ChangeProcessReq,
     ImportCommitReq,
@@ -394,9 +395,10 @@ async def delete_module(
 async def list_ps_project_plans(
     session: SessionDep,
     user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
+    scope: Annotated[DataScope, Depends(get_ppm_data_scope)],
     req: ProjectPlanListReqDep,
 ) -> Page[PsProjectPlanResp]:
-    page = await PlanService(session).list_ps_project_plans(req)
+    page = await PlanService(session).list_ps_project_plans(req, scope)
     return Page[PsProjectPlanResp](
         items=[PsProjectPlanResp.model_validate(i) for i in page.items],
         total=page.total,
@@ -444,9 +446,10 @@ _PROJECT_PLAN_COLUMNS = [
 async def export_project_plans(
     session: SessionDep,
     user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_EXPORT))],
+    scope: Annotated[DataScope, Depends(get_ppm_data_scope)],
 ) -> Any:
     """导出项目计划为 Excel (P2-3, X-002)。"""
-    rows = await PlanService(session).list_ps_project_plans_for_export()
+    rows = await PlanService(session).list_ps_project_plans_for_export(scope)
     columns = _PROJECT_PLAN_COLUMNS
     filename = timestamped_filename("项目计划")
     return await anyio.to_thread.run_sync(
@@ -471,13 +474,14 @@ async def get_project_plan_three_level(
     plan_id: uuid.UUID,
     session: SessionDep,
     user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
+    scope: Annotated[DataScope, Depends(get_ppm_data_scope)],
 ) -> ProjectPlanThreeLevelResp:
     """三联表查询 (task-03) — plan → node → detail → task 四层嵌套 + 成本派生。
 
     service 层组装嵌套结构 + 注入 remaining_* 派生字段 (D-014@v1),
     单计划完整树,不分页。
     """
-    return await PlanService(session).get_project_plan_three_level(plan_id)
+    return await PlanService(session).get_project_plan_three_level(plan_id, scope)
 
 
 @router.put("/project-plan/{item_id}", response_model=PsProjectPlanResp)

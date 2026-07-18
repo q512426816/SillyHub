@@ -57,6 +57,10 @@ class PpmProjectMaintenance(BaseModel, table=True):
             "project_code",
             unique=True,
         ),
+        Index(
+            "ix_ppm_project_maintenance_org",
+            "organization_id",
+        ),
     )
 
     id: uuid.UUID = Field(
@@ -98,6 +102,16 @@ class PpmProjectMaintenance(BaseModel, table=True):
     project_maintenance_end_time: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    # 所属部门(组织) —— 数据权限范围过滤键 (2026-07-18-project-plan-data-scope D-007@v1)。
+    # 部门经理(DEPTBOSS) 按 UserOrganization 部门+子树过滤本字段。
+    organization_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("organizations.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
     )
     # audit —— 操作人 UUID (平台级,无 workspace,沿用项目 audit 约定)
     created_by: uuid.UUID | None = Field(
