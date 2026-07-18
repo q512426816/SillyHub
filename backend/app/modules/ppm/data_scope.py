@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from typing import Annotated, Any
 
 from fastapi import Depends
-from sqlalchemy import ColumnExpressionElement, false, or_, select
+from sqlalchemy import false, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_user
@@ -104,7 +104,7 @@ async def get_ppm_data_scope(
     return DataScope(is_full=False, dept_org_ids=dept_org_ids, pm_user_id=pm_user_id)
 
 
-def build_plan_scope_clause(scope: DataScope) -> ColumnExpressionElement[bool] | None:
+def build_plan_scope_clause(scope: DataScope) -> Any | None:
     """构造 ``PsProjectPlan`` 的数据范围 where 子句。
 
     - 返回 None:``is_full`` → 不加 where (看全部)。
@@ -132,7 +132,7 @@ def build_plan_scope_clause(scope: DataScope) -> ColumnExpressionElement[bool] |
     return or_(*clauses)
 
 
-def build_project_scope_clause(scope: DataScope) -> ColumnExpressionElement[bool] | None:
+def build_project_scope_clause(scope: DataScope) -> Any | None:
     """构造 ``PpmProjectMaintenance`` 的数据范围 where 子句 (语义同 build_plan_scope_clause)。
 
     项目经理分支:项目主表无 manager 字段,反查 ``PsProjectPlan.project_manager_id``

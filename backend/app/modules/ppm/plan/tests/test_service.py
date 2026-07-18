@@ -21,11 +21,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import InvalidTransition
 from app.modules.ppm.common.crud import PageReq
+from app.modules.ppm.data_scope import DataScope
 from app.modules.ppm.plan.fsm import PROCESS_BUSINESS_TYPE, PlanNodeDetailStatus
 from app.modules.ppm.plan.model import (
     PsPlanNodeDetail,
 )
 from app.modules.ppm.plan.service import PlanError, PlanNotFound, PlanService
+
+FULL_SCOPE = DataScope(is_full=True)
 
 # FK 字段已改为 uuid.UUID (migration 202607220900),测试用合法 UUID 字符串。
 _ACTOR = ("00000000-0000-0000-0000-000000000001", "张三")
@@ -329,7 +332,7 @@ class TestPsProjectPlan:
                 "contract_name": "合同X",
             }
         )
-        rows = await svc.list_ps_project_plans_for_export()
+        rows = await svc.list_ps_project_plans_for_export(FULL_SCOPE)
         assert any(r["project_name"] == "导出计划" for r in rows)
         assert any(r["contract_name"] == "合同X" for r in rows)
 
