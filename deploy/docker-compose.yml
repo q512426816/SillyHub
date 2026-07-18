@@ -35,6 +35,9 @@ services:
     mem_limit: 128m
 
   backend:
+    # 固定 tag：本地 build / 服务器 docker load / compose up 三者复用同一镜像名。
+    # 部署改用 save/load（见 deploy/scripts/build-and-save.sh + load-and-up.sh），服务器不再现场构建。
+    image: multi-agent-platform-backend:latest
     build:
       context: ../backend
       dockerfile: Dockerfile
@@ -106,6 +109,7 @@ services:
     mem_limit: 800m
 
   frontend:
+    image: multi-agent-platform-frontend:latest
     build:
       context: ../frontend
       dockerfile: Dockerfile

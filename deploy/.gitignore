@@ -1,1 +1,3 @@
 .sillyspec/.runtime/
+# 本地打包镜像产物（docker save），体积大不进 git
+images.tar.gz

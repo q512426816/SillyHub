@@ -3,3 +3,8 @@
 # 强制 PowerShell 安装脚本使用 CRLF 行尾，防止 git autocrlf 在 Windows 上将其转成 LF
 # （PowerShell 对 LF-only .ps1 在某些执行策略/解析场景下会出错）
 sillyhub-daemon/scripts/install.ps1 text eol=crlf
+
+# 强制所有 shell 脚本 LF 行尾——部署脚本（deploy/scripts/build-and-save.sh /
+# load-and-up.sh）要在 Linux 服务器执行，core.autocrlf=true 会在 Windows checkout
+# 时把 LF 转 CRLF，致服务器 bash\r 解析失败（bad interpreter）。
+*.sh text eol=lf
