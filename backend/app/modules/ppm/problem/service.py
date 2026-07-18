@@ -63,7 +63,7 @@ from app.modules.ppm.problem.model import (
     PpmProblemListProcessLog,
     PpmProblemListProcessTask,
 )
-from app.modules.ppm.project.model import PpmProjectMember
+from app.modules.ppm.project.model import PpmProjectMaintenance, PpmProjectMember
 from app.modules.ppm.task.model import TaskExecute
 
 log = get_logger(__name__)
@@ -302,6 +302,7 @@ class ProblemService:
         submit = bool(data.pop("submit", False))
         data.setdefault("status", ProblemStatus.SAVED.value)
         data.setdefault("now_node", ProblemNode.APPLY.value)
+        await self._backfill_names(data)
         obj = await _Crud(self._session, PpmProblemList).create(data)
         if submit:
             obj = await self.submit_problem(
@@ -395,7 +396,29 @@ class ProblemService:
 
     async def create_change(self, data: dict[str, Any]) -> PpmProblemChange:
         data.setdefault("status", ProblemChangeStatus.AUDITING.value)
+        await self._backfill_names(data)
         return await _Crud(self._session, PpmProblemChange).create(data)
+
+    async def _backfill_names(self, data: dict[str, Any]) -> None:
+        """创建/变更落库前补 project_name + duty_user_name（仅当为空时）。
+
+        前端 PpmUserSelect 的 onChange 只回传 id 不回传 label，提交 payload
+        的 project_name/duty_user_name 恒为 null，导致列表"项目"/"责任人"列
+        回退显示 UUID。此处按 id 反查补全；历史 migrate 数据带 name 不受
+        影响（仅空时补，不覆盖已传入值）。
+        """
+        if not data.get("project_name") and data.get("project_id"):
+            proj_id = _safe_uuid(data["project_id"])
+            if proj_id is not None:
+                proj = await self._session.get(PpmProjectMaintenance, proj_id)
+                if proj is not None:
+                    data["project_name"] = proj.project_name
+        if not data.get("duty_user_name") and data.get("duty_user_id"):
+            duty_id = _safe_uuid(data["duty_user_id"])
+            if duty_id is not None:
+                user = await self._session.get(User, duty_id)
+                if user is not None:
+                    data["duty_user_name"] = user.display_name
 
     async def get_change(self, item_id: uuid.UUID) -> PpmProblemChange:
         return await _Crud(self._session, PpmProblemChange).get(item_id)

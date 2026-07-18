@@ -408,10 +408,10 @@ export default function ProblemListPage() {
                 变更
               </Button>
             )}
-            {/* 处置:status=3 执行中 → 可多次记录处置,完成后进已完成(对齐任务计划执行) */}
+            {/* 提交:status=3 处置中 → 打开处置抽屉,可多次提交处置进展(每次记一段+耗时),点完成才进已完成;区别于草稿"提交"(一次性生效),此处"提交"=记录处置进展可重复 */}
             {p.status === "3" && canOperate && (
               <Button size="sm" onClick={() => openDrawer("done", p)}>
-                处置
+                提交
               </Button>
             )}
             {/* 详情:居中弹窗(对齐 task-plans 风格) */}

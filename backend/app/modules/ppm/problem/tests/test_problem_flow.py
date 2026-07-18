@@ -196,6 +196,120 @@ class TestCrud:
         fresh = await svc.get_problem(p.id)
         assert fresh.status == ProblemStatus.SAVED.value
 
+    async def test_create_problem_backfills_empty_names(self, db_session: AsyncSession) -> None:
+        """project_name/duty_user_name 为空 → 按 id 反查 ppm_project_maintenance/users 回填。
+
+        修复前端 PpmUserSelect 只回传 id 致 payload name=null、列表"项目"/
+        "责任人"列回退显示 UUID。
+        """
+        import uuid as _uuid
+
+        from app.modules.auth.model import User
+        from app.modules.ppm.project.model import PpmProjectMaintenance
+
+        proj_id = _uuid.uuid4()
+        db_session.add(
+            PpmProjectMaintenance(id=proj_id, project_code="P-BF1", project_name="回填项目甲")
+        )
+        duty_id = _uuid.uuid4()
+        db_session.add(
+            User(
+                id=duty_id,
+                username="duty_bf1",
+                display_name="责任李四",
+                password_hash="x",
+            )
+        )
+        await db_session.commit()
+
+        svc = ProblemService(db_session)
+        p = await svc.create_problem(
+            {
+                "project_id": proj_id,
+                "project_name": None,
+                "pro_desc": "回填测试",
+                "duty_user_id": duty_id,
+                "duty_user_name": None,
+            }
+        )
+        assert p.project_name == "回填项目甲"
+        assert p.duty_user_name == "责任李四"
+
+    async def test_create_problem_keeps_provided_names(self, db_session: AsyncSession) -> None:
+        """已传入的 project_name/duty_user_name 不被回填覆盖。"""
+        import uuid as _uuid
+
+        from app.modules.auth.model import User
+        from app.modules.ppm.project.model import PpmProjectMaintenance
+
+        proj_id = _uuid.uuid4()
+        db_session.add(
+            PpmProjectMaintenance(id=proj_id, project_code="P-BF2", project_name="DB里的项目名")
+        )
+        duty_id = _uuid.uuid4()
+        db_session.add(
+            User(
+                id=duty_id,
+                username="duty_bf2",
+                display_name="DB里的姓名",
+                password_hash="x",
+            )
+        )
+        await db_session.commit()
+
+        svc = ProblemService(db_session)
+        p = await svc.create_problem(
+            {
+                "project_id": proj_id,
+                "project_name": "自定义项目名",
+                "pro_desc": "不覆盖测试",
+                "duty_user_id": duty_id,
+                "duty_user_name": "自定义责任人",
+            }
+        )
+        assert p.project_name == "自定义项目名"
+        assert p.duty_user_name == "自定义责任人"
+
+    async def test_create_change_backfills_empty_names(self, db_session: AsyncSession) -> None:
+        """变更创建同样回填 project_name/duty_user_name。"""
+        import uuid as _uuid
+
+        from app.modules.auth.model import User
+        from app.modules.ppm.project.model import PpmProjectMaintenance
+
+        proj_id = _uuid.uuid4()
+        db_session.add(
+            PpmProjectMaintenance(id=proj_id, project_code="P-BFC", project_name="变更回填项目")
+        )
+        duty_id = _uuid.uuid4()
+        db_session.add(
+            User(
+                id=duty_id,
+                username="duty_bfc",
+                display_name="变更责任王五",
+                password_hash="x",
+            )
+        )
+        await db_session.commit()
+
+        svc = ProblemService(db_session)
+        source = await svc.create_problem(
+            {"project_id": proj_id, "pro_desc": "源问题", "duty_user_id": duty_id}
+        )
+        c = await svc.create_change(
+            {
+                "resource_id": str(source.id),
+                "project_id": proj_id,
+                "project_name": None,
+                "pro_desc": "变更内容",
+                "duty_user_id": duty_id,
+                "duty_user_name": None,
+                "change_reason": "测试",
+            }
+        )
+        assert c.project_name == "变更回填项目"
+        assert c.duty_user_name == "变更责任王五"
+
 
 # ===========================================================================
 # 审批流:全主流程 (非 bug:10→20→30→40→执行中→已完成)
