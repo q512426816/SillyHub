@@ -1,7 +1,7 @@
 """PpmProjectMaintenance +organization_id (project-plan-data-scope, D-007@v1).
 
 Revision ID: 20260718_project_org_id
-Revises: 20260716_pn_has_module
+Revises: 20260717_psn_tmpl_fields
 Create Date: 2026-07-18
 
 变更 2026-07-18-project-plan-data-scope / task-01。
@@ -30,7 +30,7 @@ _PROJECT_TWO_DEPT_ID = "9f968a5f-a9ef-55ae-9488-bdc20205d210"
 
 # revision identifiers, used by Alembic.
 revision = "20260718_project_org_id"
-down_revision = "20260716_pn_has_module"
+down_revision = "20260717_psn_tmpl_fields"
 branch_labels = None
 depends_on = None
 
