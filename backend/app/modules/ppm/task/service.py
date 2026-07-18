@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.modules.auth.model import User
 from app.modules.ppm.common.crud import (
     Page,
     PageReq,
@@ -21,6 +22,7 @@ from app.modules.ppm.common.crud import (
     apply_sort,
     count_total,
 )
+from app.modules.ppm.common.data_scope import task_scope_clause
 from app.modules.ppm.plan.model import PlanNodeModule
 from app.modules.ppm.task.model import PlanTask, TaskExecute, WorkHour
 from app.modules.ppm.task.schema import (
@@ -157,8 +159,12 @@ class PlanTaskService:
         await self._session.commit()
         log.info("plan_task_deleted", plan_task_id=str(plan_id))
 
-    async def page(self, req: PlanTaskPageReq) -> Page[PlanTask]:
-        """分页查询 (支持 user/project/status多值/month/year/起止区间/work_partner 过滤)。"""
+    async def page(self, req: PlanTaskPageReq, *, user: User | None = None) -> Page[PlanTask]:
+        """分页查询 (支持 user/project/status多值/month/year/起止区间/work_partner 过滤)。
+
+        ``user`` 非空时按角色注入数据范围过滤(超管全部/经理相关项目/其余自己负责,
+        见 :mod:`app.modules.ppm.common.data_scope`)。
+        """
         page_req = _page_req_from(req.page, req.page_size, req.order_by, req.order)
         stmt = select(PlanTask)
         user_id = _parse_uuid_optional(req.user_id)
@@ -182,6 +188,11 @@ class PlanTaskService:
             stmt = stmt.where(PlanTask.start_time <= req.end_time)
         if req.work_partner:
             stmt = stmt.where(PlanTask.work_partner.ilike(f"%{req.work_partner}%"))
+        # 数据范围过滤 (2026-07-18-ppm-data-scope D-007):user 非空时按角色收敛可见任务
+        if user is not None:
+            scope = await task_scope_clause(self._session, user)
+            if scope is not None:
+                stmt = stmt.where(scope)
         stmt = apply_sort(stmt, PlanTask, req.order_by, PLAN_SORT_FIELDS, req.order)
         total = await count_total(self._session, stmt)
         stmt = apply_pagination(stmt, page_req)

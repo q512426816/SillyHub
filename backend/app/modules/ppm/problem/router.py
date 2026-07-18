@@ -108,6 +108,7 @@ async def list_problems(
         find_time_start=find_time_start,
         find_time_end=find_time_end,
         duty_user_id=duty_user_id,
+        user=user,
     )
     # 批量聚合已消耗工时(sum time_spent by problem_task_id, 避免前端 N+1)
     prob_ids = [i.id for i in page.items]
@@ -147,7 +148,7 @@ async def export_problems(
     user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
 ) -> Any:
     """导出问题清单为 Excel (X-002)。"""
-    rows = await ProblemService(session).list_problems_for_export()
+    rows = await ProblemService(session).list_problems_for_export(user=user)
     columns = _PROBLEM_COLUMNS
     filename = f"问题清单_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
     return await anyio.to_thread.run_sync(

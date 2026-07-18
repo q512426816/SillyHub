@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.modules.auth.model import User
 from app.modules.ppm.common.crud import (
     Page,
     PageReq,
@@ -39,6 +40,7 @@ from app.modules.ppm.common.crud import (
     apply_sort,
     count_total,
 )
+from app.modules.ppm.common.data_scope import problem_scope_clause
 from app.modules.ppm.common.fsm import assert_transition
 from app.modules.ppm.problem.fsm import (
     CHANGE_TRANSITIONS,
@@ -223,6 +225,7 @@ class ProblemService:
         find_time_start: datetime | None = None,
         find_time_end: datetime | None = None,
         duty_user_id: uuid.UUID | None = None,
+        user: User | None = None,
     ) -> Page[PpmProblemList]:
         """分页列表(支持服务端过滤)。有未关闭变更的行内存态标记 status=7 变更中。
 
@@ -261,6 +264,11 @@ class ProblemService:
             clauses.append(PpmProblemList.find_time <= find_time_end)
         if duty_user_id:
             clauses.append(PpmProblemList.duty_user_id == duty_user_id)
+        # 数据范围过滤 (2026-07-18-ppm-data-scope D-007):user 非空时按角色收敛可见问题
+        if user is not None:
+            scope = await problem_scope_clause(self._session, user)
+            if scope is not None:
+                clauses.append(scope)
         page = await _Crud(self._session, PpmProblemList).list_paged(
             req=req,
             allowed_sort={"created_at", "find_time", "status"},
@@ -1080,9 +1088,17 @@ class ProblemService:
     # 导出
     # ------------------------------------------------------------------
 
-    async def list_problems_for_export(self) -> list[dict[str, Any]]:
-        """返回问题清单全量行 (dict),供 Excel 导出。"""
-        rows = (await self._session.execute(select(PpmProblemList))).scalars().all()
+    async def list_problems_for_export(self, *, user: User | None = None) -> list[dict[str, Any]]:
+        """返回问题清单全量行 (dict),供 Excel 导出。
+
+        ``user`` 非空时按角色注入数据范围过滤(防导出绕过,D-007)。
+        """
+        stmt = select(PpmProblemList)
+        if user is not None:
+            scope = await problem_scope_clause(self._session, user)
+            if scope is not None:
+                stmt = stmt.where(scope)
+        rows = (await self._session.execute(stmt)).scalars().all()
         return [
             {
                 "project_name": r.project_name,

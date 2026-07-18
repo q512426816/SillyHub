@@ -172,7 +172,7 @@ async def page_plan_task(
         order=order,
     )
     svc = PlanTaskService(session)
-    result = await svc.page(req)
+    result = await svc.page(req, user=user)
     # 批量聚合已消耗工时(sum time_spent by plan_task_id, 避免前端 N+1)
     plan_ids = [t.id for t in result.items]
     spent_map: dict[uuid.UUID, float] = {}
@@ -267,7 +267,7 @@ async def export_plan_task_excel(
         order=order,
     )
     svc = PlanTaskService(session)
-    result = await svc.page(req)
+    result = await svc.page(req, user=user)
     columns = [
         ColumnDef("user_name", "姓名", width=15),
         ColumnDef("project_name", "项目", width=20),
