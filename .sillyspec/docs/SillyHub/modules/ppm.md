@@ -113,3 +113,4 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 - ql-20260720-001-c4a1 | PpmResourceTable 编辑/新建抽屉改 antd Modal（<Drawer>→<Modal>，PpmResourceDrawer→PpmResourceModal，onClose→onCancel，保存按钮加 loading={saving}）+ 操作栏 shadcn Button 全量改 antd Button（编辑 type=link、删除 type=link danger、新增/搜索 type=primary、导出/重置/展开/重新加载 default，size=small）；影响项目/客户/成员/干系人 4 页新建+编辑；projects/page.tsx 成员管理按钮同步 antd
 - ql-20260720-002-8d3e | /ppm/projects 查询区按钮 size=small→默认 middle(修字体顶边框)：查询区 5 按钮(导出/新增/搜索/重置/展开)+Modal footer 2(取消/保存)+错误条重新加载 1(均有边框/实心)改默认 32px；操作列 link(编辑/删除)保持 small；DataTable size 不动
 - ql-20260720-003-2f1a | table 序号「#」列居中对齐：PpmResourceTable 序号列 coldef 加 align=center(表头「#」+数字单元格同居中)，影响所有 ppm 表
+- ql-20260720-004-b05c | 修 striped 表固定列横向滚动穿透：序号列(fixed left)+操作列(fixed right)coldef 加 onCell background=hsl(var(--card))(不透明，与 SectionCard 卡片底一致)覆盖 striped 透明背景；中间非固定列保留斑马纹

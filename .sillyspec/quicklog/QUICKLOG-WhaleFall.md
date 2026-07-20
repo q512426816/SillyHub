@@ -409,3 +409,12 @@ created_at: 2026-07-14T09:20:24
 根因：PpmResourceTable showIndex 时 push 的序号列 coldef 无 align 属性，antd Table 列默认左对齐；序号是窄列(56px)+单字符数字，左对齐看着偏左不整齐。
 方案：序号列 coldef 加 align: "center"(antd align 同时控制表头与单元格)，表头「#」+单元格数字同居中。影响所有 PpmResourceTable 实例(项目/客户/成员/干系人)。
 结果：tsc --noEmit EXIT 0。序号列加 align=center 后表头「#」+数字单元格同居中。纯前端单文件(通用组件,4 个 ppm 表同效果)。待 commit + push + rebuild frontend 部署 + 用户浏览器验证。
+
+## ql-20260720-004-b05c | 2026-07-20 10:07:58 | 修 striped 表固定列(序号/操作)横向滚动穿透：加不透明背景
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-resource-table.tsx
+需求：用户确认 /ppm/projects 横向滚动时，固定列(序号「#」fixed left + 操作 fixed right)背景透明，中间列内容穿透到固定列按钮下方。
+根因：striped CSS `.ant-table-row td{background:transparent}`(奇行)/`nth-child(even) td{background-color:hsl(var(--muted)/0.4)}`(偶行)用 td 选择器命中所有数据行单元格(含 fixed 列)，把固定列也设透明；固定列靠不透明背景遮挡滚动内容，透明后失去遮挡 → 穿透。偶行因半透明灰穿透略轻，奇行(全透明)最明显。
+方案：序号列 + 操作列 coldef 加 onCell 返回 style.background=hsl(var(--card))(SectionCard 用 bg-card，卡片底=--card，纯白/卡片色)，inline style 优先级高于 striped stylesheet 规则覆盖透明；中间非固定列保留斑马纹不动。两种主题(light/dark)自适应(--card 随主题变)。
+结果：tsc --noEmit EXIT 0。序号列(fixed left)+操作列(fixed right)加 onCell background=hsl(var(--card)) 后固定列不透明，横向滚动不再穿透；中间非固定列保留斑马纹。纯前端单文件(通用组件,4 个 ppm 表同效果)。待 commit + push + rebuild frontend 部署 + 用户浏览器验证(横向滚动操作列不再有内容穿透)。

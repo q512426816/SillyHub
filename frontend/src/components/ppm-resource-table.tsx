@@ -420,6 +420,7 @@ export function PpmResourceTable<
         width: 56,
         align: "center",
         fixed: "left",
+        onCell: () => ({ style: { background: "hsl(var(--card))" } }),
         render: (_v: unknown, _row: T, index?: number) =>
           (page - 1) * pageSize + (index ?? 0) + 1,
       });
@@ -482,6 +483,7 @@ export function PpmResourceTable<
       fixed: "right",
       width: extraActions ? 220 : 140,
       align: "center",
+      onCell: () => ({ style: { background: "hsl(var(--card))" } }),
       render: (_v: unknown, row: T) => (
         <div className="flex justify-center gap-1">
           {extraActions?.(row)}
