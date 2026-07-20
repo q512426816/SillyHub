@@ -504,6 +504,14 @@ export default function TaskPlansPage() {
       ),
     },
     {
+      title: "任务描述",
+      dataIndex: "task_description",
+      key: "task_description",
+      width: 220,
+      ellipsis: true,
+      render: (v: string | null) => v ?? "—",
+    },
+    {
       title: "项目",
       dataIndex: "project_name",
       key: "project_name",

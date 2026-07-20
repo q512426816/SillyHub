@@ -967,6 +967,7 @@ export interface PlanTask {
   module_id: string | null;
   module_name: string | null;
   content: string | null;
+  task_description: string | null;
   work_load: string | null;
   add_work: string | null;
   work_partner: string | null;

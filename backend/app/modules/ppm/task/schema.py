@@ -35,6 +35,7 @@ class PlanTaskCreate(PydanticModel):
     module_id: uuid.UUID | None = None
     module_name: str | None = None
     content: str | None = None
+    task_description: str | None = None
     work_load: str | None = None
     add_work: str | None = None
     work_partner: str | None = None
@@ -68,6 +69,7 @@ class PlanTaskUpdate(PydanticModel):
     module_id: uuid.UUID | None = None
     module_name: str | None = None
     content: str | None = None
+    task_description: str | None = None
     work_load: str | None = None
     add_work: str | None = None
     work_partner: str | None = None
@@ -102,6 +104,7 @@ class PlanTaskResponse(PydanticModel):
     module_id: uuid.UUID | None
     module_name: str | None
     content: str | None
+    task_description: str | None
     work_load: str | None
     add_work: str | None
     work_partner: str | None
