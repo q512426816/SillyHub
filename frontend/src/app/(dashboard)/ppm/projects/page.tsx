@@ -14,7 +14,7 @@
  */
 import { useRouter } from "next/navigation";
 
-import { Button } from "@/components/ui/button";
+import { Button } from "antd";
 import type { StatusKind } from "@/components/ui/status-badge";
 import { PpmResourceTable, type PpmFieldDef } from "@/components/ppm-resource-table";
 import {
@@ -121,8 +121,8 @@ export default function PpmProjectsPage() {
         }
         extraActions={(row) => (
           <Button
-            size="sm"
-            variant="ghost"
+            size="small"
+            type="link"
             onClick={() =>
               router.push(
                 `/ppm/project-members?project_name=${encodeURIComponent(

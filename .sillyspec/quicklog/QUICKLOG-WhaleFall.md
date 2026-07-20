@@ -382,3 +382,12 @@ created_at: 2026-07-14T09:20:24
 根因：用户列表有「角色」列（Tag 列表 u.roles）但无「组织」列，看不出用户归属哪些组织。
 方案：columns 在「显示名」列后、「角色」列前加「组织」列，仿角色列渲染——u.organizations 为空显 —，非空 map Tag(o.name)；UserRead.organizations 已有（同 u.roles 源），无需改后端/接口/types。
 结果：typecheck EXIT 0；admin test 17 passed（列表无专门测试，drawer 测试不受影响）。纯前端单文件。待 commit + rebuild frontend 部署 + 用户验证（用户列表显示组织列）。
+
+## ql-20260720-001-c4a1 | 2026-07-20 09:09:40 | /ppm/projects 编辑抽屉改 antd Modal 弹窗 + 审查页面 antd 统一性
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-resource-table.tsx（Drawer→Modal + shadcn Button→antd Button）；frontend/src/app/(dashboard)/ppm/projects/page.tsx（成员管理按钮→antd）
+需求：用户要求 /ppm/projects 的编辑从抽屉改为弹窗，并审查该页面是否都用 antd UI。
+现状审查：PpmResourceTable 内 Form/Input/Select/DatePicker/Table/Tag/Drawer/Modal 已全 antd；仅操作栏 Button 为 shadcn（+ StatusBadge、布局壳）。
+方案：用户确认改通用组件 PpmResourceTable 一处，4 个 ppm 页面统一切 Modal。PpmResourceDrawer→PpmResourceModal，<Drawer>→<Modal>（onClose→onCancel，保存按钮加 loading={saving}，文本统一"保存"）；所有 shadcn Button→antd Button（编辑/成员管理 type=link，删除 type=link danger，新增/搜索 type=primary，导出/重置/展开/重新加载 default，size=small）；antd import 加 Button 去 Drawer，删 shadcn Button import；projects/page.tsx 成员管理按钮同步 antd。
+结果：tsc --noEmit EXIT 0；eslint 两文件 0 error（15 warning 全既有类型签名未用参数）；grep 两文件无 shadcn Button/Drawer/size=sm/variant 残留。影响 4 个 ppm 页面新建+编辑全变 antd Modal，操作栏按钮全 antd。纯前端，不动后端/接口。

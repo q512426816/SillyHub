@@ -6,7 +6,7 @@
  * 给 ppm 4 个子域页面(项目维护 / 客户维护 / 项目成员 / 项目干系人)复用:
  *  - 顶部搜索栏(由 searchFields 配置驱动,Enter 触发)
  *  - AntD Table 列表 + 分页(后端直返 list[]，前端分页 + 排序)
- *  - 新增 / 编辑 Drawer Form(由 formFields 配置驱动)
+ *  - 新增 / 编辑 Modal Form(由 formFields 配置驱动)
  *  - 删除二次确认
  *  - 导出(可选,调 exportFn)
  *
@@ -15,8 +15,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  Button,
   DatePicker,
-  Drawer,
   Form,
   Input,
   InputNumber,
@@ -27,7 +27,6 @@ import {
 } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 
-import { Button } from "@/components/ui/button";
 import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
 import {
   DataTable,
@@ -486,17 +485,17 @@ export function PpmResourceTable<
         <div className="flex justify-center gap-1">
           {extraActions?.(row)}
           <Button
-            size="sm"
-            variant="ghost"
+            size="small"
+            type="link"
             disabled={!canWrite}
             onClick={() => setDrawer({ open: true, mode: "edit", row })}
           >
             编辑
           </Button>
           <Button
-            size="sm"
-            variant="ghost"
-            className="text-red-600 hover:text-red-700"
+            size="small"
+            type="link"
+            danger
             disabled={!canWrite}
             onClick={() => setConfirmDelete(row)}
           >
@@ -554,8 +553,7 @@ export function PpmResourceTable<
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {error}
           <Button
-            size="sm"
-            variant="outline"
+            size="small"
             className="ml-3"
             onClick={() => void load()}
           >
@@ -569,8 +567,7 @@ export function PpmResourceTable<
             <div className="mb-2 flex items-center justify-end gap-2">
               {exportFn && (
                 <Button
-                  size="sm"
-                  variant="outline"
+                  size="small"
                   disabled={exporting}
                   onClick={() => void handleExport()}
                   title={exportFilename}
@@ -579,23 +576,23 @@ export function PpmResourceTable<
                 </Button>
               )}
               <Button
-                size="sm"
+                size="small"
+                type="primary"
                 disabled={!canWrite}
                 onClick={() => setDrawer({ open: true, mode: "create" })}
               >
                 + 新增{entityLabel}
               </Button>
               <span className="mx-1 h-6 w-px bg-border" aria-hidden />
-              <Button size="sm" onClick={() => handleSearchCommit()}>
+              <Button size="small" type="primary" onClick={() => handleSearchCommit()}>
                 搜索
               </Button>
-              <Button size="sm" variant="outline" onClick={handleReset}>
+              <Button size="small" onClick={handleReset}>
                 重置
               </Button>
               {showExpandToggle && (
                 <Button
-                  size="sm"
-                  variant="outline"
+                  size="small"
                   onClick={() => setExpanded((v) => !v)}
                 >
                   {expanded ? "收起" : "展开"}
@@ -682,7 +679,7 @@ export function PpmResourceTable<
       )}
 
       {drawer.open && (
-        <PpmResourceDrawer<T>
+        <PpmResourceModal<T>
           mode={drawer.mode}
           row={drawer.row}
           fields={fields}
@@ -725,9 +722,9 @@ function Field({
   );
 }
 
-// ── Drawer 表单 ─────────────────────────────────────────────────────────
+// ── Modal 表单 ─────────────────────────────────────────────────────────
 
-function PpmResourceDrawer<T extends { id: string }>({
+function PpmResourceModal<T extends { id: string }>({
   mode,
   row,
   fields,
@@ -750,7 +747,7 @@ function PpmResourceDrawer<T extends { id: string }>({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 初始值:edit 取 row,create 取 defaultValue。PpmResourceDrawer 由 drawer.open 条件渲染,
+  // 初始值:edit 取 row,create 取 defaultValue。PpmResourceModal 由 drawer.open 条件渲染,
   // 每次打开新 mount,Form 实例干净,setFieldsValue 填初值。
   useEffect(() => {
     const initial: Record<string, unknown> = {};
@@ -788,24 +785,26 @@ function PpmResourceDrawer<T extends { id: string }>({
   };
 
   return (
-    <Drawer
+    <Modal
       open
-      onClose={onClose}
+      onCancel={onClose}
       title={mode === "create" ? `新增${entityLabel}` : `编辑${entityLabel}`}
       width={520}
       maskClosable={false}
       destroyOnClose
       footer={
         <div className="flex items-center justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onClose}>
+          <Button size="small" onClick={onClose}>
             取消
           </Button>
           <Button
-            size="sm"
-            disabled={!canWrite || saving}
+            size="small"
+            type="primary"
+            loading={saving}
+            disabled={!canWrite}
             onClick={() => void submit()}
           >
-            {saving ? "保存中…" : "保存"}
+            保存
           </Button>
         </div>
       }
@@ -870,7 +869,7 @@ function PpmResourceDrawer<T extends { id: string }>({
         })}
         {error && <p className="text-[11px] text-destructive">{error}</p>}
       </Form>
-    </Drawer>
+    </Modal>
   );
 }
 
