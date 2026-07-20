@@ -348,7 +348,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             const inPpm = pathname.startsWith("/ppm");
             return inPpm ? section === "ppm" : section !== "ppm";
           }).map((section) => {
-            const menus = visibleMenusBySection(user, section);
+            const menus = visibleMenusBySection(user, section).filter(
+              (m) => !m.navHidden,
+            );
             if (menus.length === 0) return null;
             return (
               <Fragment key={section}>

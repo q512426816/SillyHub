@@ -55,6 +55,11 @@ export interface MenuPermissionGroup {
    * AdminRolePermissionPicker 不渲染该 menu 卡片。canSeeMenu 仍按 permissions 判断。
    */
   pickerHidden?: boolean;
+  /**
+   * 侧边栏导航隐藏标记：二级页面（由其他页面跳转进入，非一级菜单）设 true，
+   * app-shell 侧边栏不渲染该菜单项。路由仍可访问、权限映射/active 匹配保留。
+   */
+  navHidden?: boolean;
 }
 
 export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
@@ -358,6 +363,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/ppm/project-members",
     absolute: true,
     matchPattern: "/ppm/project-members",
+    navHidden: true, // 二级页面:由 /ppm/projects「成员管理」跳转,不在侧边栏菜单显示
     // 成员管理复用 project:write（后端 project router 成员端点 require PPM_PROJECT_WRITE）
     permissions: [
       { key: "ppm:project:read", name: "项目查看" },
@@ -402,6 +408,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/ppm/milestone-details",
     absolute: true,
     matchPattern: "/ppm/milestone-details",
+    navHidden: true, // 二级页面:由 /ppm/project-plans「里程碑」按钮跳转,不在侧边栏菜单显示
     permissions: [{ key: "ppm:plan:read", name: "计划查看" }],
   },
   {
