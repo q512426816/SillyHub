@@ -33,7 +33,7 @@ import type {
   ProjectMemberSummaryPageReq,
 } from "@/lib/ppm";
 import {
-  MemberFormDrawer,
+  MemberFormModal,
   PpmProjectMembersTable,
   type MemberForm,
 } from "@/components/ppm-project-members-table";
@@ -458,7 +458,7 @@ export function PpmProjectMembersGroupTable({
 
       {/* 全局跨项目新增:lockedProjectId=undefined → 显示项目选择 */}
       {globalAddOpen && (
-        <MemberFormDrawer
+        <MemberFormModal
           mode="create"
           lockedProjectId={undefined}
           canWrite

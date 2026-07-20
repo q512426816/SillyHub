@@ -5,7 +5,7 @@ created_at: 2026-06-01T12:00:00
 
 # frontend_components
 > 最后更新：2026-06-23
-> 最近变更：ql-20260720-006-3a7d（/ppm/project-members group-table 按页面样式规范调整：Button antd 化 + 搜索 Field 布局对齐）
+> 最近变更：ql-20260720-012-f2a8（/ppm/project-members 成员子表按页面样式规范调整：Button antd 化 + Badge→Tag + MemberFormDrawer→Modal）
 > 模块路径：frontend/src/components/**
 
 ## 职责
@@ -119,3 +119,4 @@ AgentLogViewer（被 agent 控制台页、workspace 详情页共用）
 | 2026-06-23 | 2026-06-23-codex-interactive-session | /runtimes Codex 改回 interactive panel（`InteractiveSessionChatSection`），`QuickChatSessionSection` 降级为非 /runtimes Codex 主路径（全局能力保留，D-005@v1）；`canReopenSession` 支持 Codex（D-007@v1）；`AskUserDialogCard` 支持 Codex `request_user_input` / 可归一化 MCP elicitation 归一化 payload（D-008@v1/D-010@v1） |
 | 2026-07-20 | ql-20260720-005-e91c | StatusBadge 内部渲染由自写 tailwind 圆角药丸改 antd Badge(status+text),删 KIND_STYLES/SIZE_STYLES/DOT_SIZE_STYLES 色表;StatusKind→antd status 映射;API 不变,17 处调用点自动生效,外观从「圆角药丸+浅背景」变「小圆点+文字」 |
 | 2026-07-20 | ql-20260720-006-3a7d | /ppm/project-members 按页面样式规范调整：group-table.tsx Button shadcn→antd(重新加载/添加项目成员/搜索/重置/展开 5 处,去 size=sm 用默认 middle)+ 搜索区 6 Field 外层 flex w-full flex-col gap-1 + label→span text-xs leading-4 text-muted-foreground;page.tsx 已对齐(PageContainer/PageHeader)。暂不动 MemberFormDrawer→Modal(跨文件) |
+| 2026-07-20 | ql-20260720-012-f2a8 | /ppm/project-members 成员子表(展开后)按页面样式规范调整：ppm-project-members-table.tsx Button shadcn→antd(操作列编辑/删除 type=link size=small、新增 primary、重新加载 default、Modal footer)+ 承担角色 shadcn Badge→antd Tag(默认灰)+ MemberFormDrawer→MemberFormModal(Drawer→Modal,onClose→onCancel,footer 保存加 loading)+ 表单 label text-[11px]→span text-xs leading-4;group-table.tsx 调用点同步改名 |

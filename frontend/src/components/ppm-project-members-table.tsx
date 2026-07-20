@@ -19,10 +19,8 @@
  * 决策:D-009@v1(角色 auth.Role,value=name)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Drawer, Modal, Table, type TableProps } from "antd";
+import { Button, Modal, Table, Tag, type TableProps } from "antd";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { SectionCard } from "@/components/layout";
 import { PpmUserSelect, type PpmSelectOption } from "@/components/ppm-user-select";
 import { ApiError } from "@/lib/api";
@@ -250,9 +248,7 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
           return (
             <span className="flex flex-wrap gap-1">
               {parts.map((p, i) => (
-                <Badge key={`${p}-${i}`} variant="info">
-                  {p}
-                </Badge>
+                <Tag key={`${p}-${i}`}>{p}</Tag>
               ))}
             </span>
           );
@@ -283,16 +279,16 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
         render: (_v, row) => (
           <div className="flex justify-center gap-1">
             <Button
-              size="sm"
-              variant="ghost"
+              size="small"
+              type="link"
               onClick={() => setDrawer({ open: true, mode: "edit", row })}
             >
               编辑
             </Button>
             <Button
-              size="sm"
-              variant="ghost"
-              className="text-red-600 hover:text-red-700"
+              size="small"
+              type="link"
+              danger
               onClick={() => setConfirmDelete(row)}
             >
               删除
@@ -314,7 +310,7 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
       {showToolbar && canWrite && (
         <div className="mb-2 flex items-center justify-end gap-2">
           <Button
-            size="sm"
+            type="primary"
             onClick={() => setDrawer({ open: true, mode: "create" })}
           >
             + 新增成员
@@ -337,7 +333,7 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
       {error ? (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {error}
-          <Button size="sm" variant="outline" className="ml-3" onClick={() => void load()}>
+          <Button className="ml-3" onClick={() => void load()}>
             重新加载
           </Button>
         </div>
@@ -374,7 +370,7 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
       )}
 
       {drawer.open && (
-        <MemberFormDrawer
+        <MemberFormModal
           mode={drawer.mode}
           row={drawer.row}
           lockedProjectId={projectId}
@@ -406,7 +402,7 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
 
 // ── 成员表单 Drawer ──────────────────────────────────────────────────────
 
-export function MemberFormDrawer({
+export function MemberFormModal({
   mode,
   row,
   lockedProjectId,
@@ -516,24 +512,25 @@ export function MemberFormDrawer({
   const showProjectPicker = !lockedProjectId;
 
   return (
-    <Drawer
+    <Modal
       open
-      onClose={onClose}
+      onCancel={onClose}
       title={mode === "create" ? "新增成员" : "编辑成员"}
       width={520}
       maskClosable={false}
       destroyOnClose
       footer={
         <div className="flex items-center justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onClose}>
+          <Button onClick={onClose}>
             取消
           </Button>
           <Button
-            size="sm"
-            disabled={!canWrite || !formValid || saving}
+            type="primary"
+            loading={saving}
+            disabled={!canWrite || !formValid}
             onClick={() => void submit()}
           >
-            {saving ? "保存中…" : "保存"}
+            保存
           </Button>
         </div>
       }
@@ -541,9 +538,9 @@ export function MemberFormDrawer({
       <div className="space-y-3">
           {showProjectPicker && (
             <div>
-              <label className="text-[11px] text-muted-foreground">
+              <span className="text-xs leading-4 text-muted-foreground">
                 所属项目<span className="ml-0.5 text-destructive">*</span>
-              </label>
+              </span>
               <PpmUserSelect
                 res="project"
                 value={form.pm_project_id || null}
@@ -557,9 +554,9 @@ export function MemberFormDrawer({
           )}
 
           <div>
-            <label className="text-[11px] text-muted-foreground">
+            <span className="text-xs leading-4 text-muted-foreground">
               姓名<span className="ml-0.5 text-destructive">*</span>
-            </label>
+            </span>
             <PpmUserSelect
               res="user"
               value={userValue}
@@ -574,7 +571,7 @@ export function MemberFormDrawer({
 
           {/* 联动回填字段:只读展示(对照源逻辑,选用户后不可手填) */}
           <div>
-            <label className="text-[11px] text-muted-foreground">联系方式</label>
+            <span className="text-xs leading-4 text-muted-foreground">联系方式</span>
             <input
               value={form.phone}
               readOnly
@@ -583,7 +580,7 @@ export function MemberFormDrawer({
             />
           </div>
           <div>
-            <label className="text-[11px] text-muted-foreground">部门</label>
+            <span className="text-xs leading-4 text-muted-foreground">部门</span>
             <input
               value={form.depart_name}
               readOnly
@@ -593,9 +590,9 @@ export function MemberFormDrawer({
           </div>
 
           <div>
-            <label className="text-[11px] text-muted-foreground">
+            <span className="text-xs leading-4 text-muted-foreground">
               承担角色<span className="ml-0.5 text-destructive">*</span>
-            </label>
+            </span>
             <PpmUserSelect
               res="role"
               mode="multiple"
@@ -608,7 +605,7 @@ export function MemberFormDrawer({
 
           {error && <p className="text-[11px] text-destructive">{error}</p>}
       </div>
-    </Drawer>
+    </Modal>
   );
 }
 

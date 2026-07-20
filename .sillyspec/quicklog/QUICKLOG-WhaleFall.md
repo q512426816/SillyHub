@@ -491,3 +491,12 @@ created_at: 2026-07-14T09:20:24
 现状审查：page.tsx 已用 PageContainer/PageHeader(对齐);group-table.tsx 偏离:①import shadcn Button(重新加载/添加项目成员/搜索/重置/展开 5 处用 size=sm + variant) ②搜索区 6 个 Field 外层 div 无 flex col gap-1,label 用 label text-[11px](规范是 span text-xs leading-4 text-muted-foreground)。已对齐项:SectionCard bodyPadding p-2 / grid-cols-4 / striped 斑马纹 / StatusBadge 状态 / Tag color 类型 / 空值—。
 方案：group-table.tsx ①Button shadcn→antd(重新加载 default+ml-3、添加项目成员/搜索 primary、重置/展开 default,去掉 size=sm 用默认 middle);②6 个搜索 Field 外层 div 加 flex w-full flex-col gap-1,label 改 span text-xs leading-4 text-muted-foreground。暂不动:MemberFormDrawer→Modal(跨文件 ppm-project-members-table,单独处理)、DataTable 包装(overflow-hidden 可能影响 expandable 展开行,风险)。
 结果：tsc --noEmit EXIT 0;eslint 0 error(1 既有 useCallback missing dep warning,非本次);grep 无 shadcn Button/size=sm/variant/text-[11px]/label 残留。5 按钮 antd 化 + 6 搜索 Field 布局对齐规范。纯前端单文件。MemberFormDrawer→Modal 暂不动(跨文件,单独处理)。待 commit + push + rebuild frontend 部署 + 用户浏览器验证。
+
+## ql-20260720-012-f2a8 | 2026-07-20 15:00:54 | /ppm/project-members 成员子表按规范调整：Button antd 化 + Badge→Tag + MemberFormDrawer→Modal
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-project-members-table.tsx；frontend/src/components/ppm-project-members-group-table.tsx(调用点改名)
+需求：用户要求成员子表(展开后的成员列表)也按 FRONTEND_PAGE_STYLE.md 规范调整,且 MemberFormDrawer 改弹窗。
+现状审查：ppm-project-members-table.tsx 用 shadcn Button(操作列编辑/删除 + 新增成员 + 重新加载 + Drawer footer 取消/保存)+ shadcn Badge(承担角色多标签)+ MemberFormDrawer(Drawer)；表单 label text-[11px]。group-table.tsx 全局新增调 MemberFormDrawer。
+方案：①import antd 加 Button/Tag 去 Drawer,删 shadcn Badge/Button import ②操作列编辑 type=link、删除 type=link danger(size=small)③新增成员 primary、重新加载 default(默认 middle,去 size=sm)④承担角色 shadcn Badge→antd Tag(默认灰)⑤MemberFormDrawer→MemberFormModal(Drawer→Modal,onClose→onCancel,footer 取消 default+保存 primary loading,文本统一保存)⑥label text-[11px]→text-xs leading-4 text-muted-foreground ⑦group-table.tsx import+调用 MemberFormDrawer→MemberFormModal。保留:readOnly input(inputCls,只读展示非 shadcn)、PpmUserSelect(自定义组件)。
+结果：tsc --noEmit EXIT 0;eslint 0 error(2 既有 warning:group-table useCallback missing dep + members-table onSubmit 类型签名 form,非本次);grep 无 shadcn Button/Badge/Drawer/MemberFormDrawer/size=sm/variant 残留(606 错误段落 text-[11px] 保留-规范允许小注脚)。label label→span 分 3 批修齐闭标签。纯前端两文件。待 commit + push + rebuild frontend 部署 + 用户浏览器验证(成员子表操作列/新增按钮/弹窗对齐规范,Drawer→Modal)。
