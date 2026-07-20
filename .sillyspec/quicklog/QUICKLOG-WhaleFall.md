@@ -418,3 +418,12 @@ created_at: 2026-07-14T09:20:24
 根因：striped CSS `.ant-table-row td{background:transparent}`(奇行)/`nth-child(even) td{background-color:hsl(var(--muted)/0.4)}`(偶行)用 td 选择器命中所有数据行单元格(含 fixed 列)，把固定列也设透明；固定列靠不透明背景遮挡滚动内容，透明后失去遮挡 → 穿透。偶行因半透明灰穿透略轻，奇行(全透明)最明显。
 方案：序号列 + 操作列 coldef 加 onCell 返回 style.background=hsl(var(--card))(SectionCard 用 bg-card，卡片底=--card，纯白/卡片色)，inline style 优先级高于 striped stylesheet 规则覆盖透明；中间非固定列保留斑马纹不动。两种主题(light/dark)自适应(--card 随主题变)。
 结果：tsc --noEmit EXIT 0。序号列(fixed left)+操作列(fixed right)加 onCell background=hsl(var(--card)) 后固定列不透明，横向滚动不再穿透；中间非固定列保留斑马纹。纯前端单文件(通用组件,4 个 ppm 表同效果)。待 commit + push + rebuild frontend 部署 + 用户浏览器验证(横向滚动操作列不再有内容穿透)。
+
+## ql-20260720-005-e91c | 2026-07-20 10:26:03 | StatusBadge 组件内部改 antd Badge(全局 17 处状态标签统一切 antd)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ui/status-badge.tsx
+需求：用户要求把 StatusBadge(状态列圆点药丸标签)换成 antd Badge，全项目统一(17 处调用点)。
+根因：StatusBadge 是 D-005 自写的 shadcn 风格组件(tailwind 圆点药丸 + 浅色背景)，是 /ppm/projects 最后残留的非 antd UI 组件；用户要全 antd。
+方案：改 status-badge.tsx 的 StatusBadge 渲染：span 药丸 → antd Badge status+text；StatusKind → antd status 映射(info→processing/success→success/warning→warning/error→error/neutral→default)；API(kind/children/icon/size/className)不变，17 处调用点零改；size 用 text 字号 class 保留差异；删 KIND_STYLES/SIZE_STYLES/DOT_SIZE_STYLES(antd Badge 自带配色)。fromStatus 函数 + StatusKind 类型保留(调用点在用)。
+结果：tsc --noEmit EXIT 0；eslint status-badge.tsx 0 error；无 StatusBadge 相关测试(grep 无结果)。StatusBadge 内部改 antd Badge 后,17 处调用点 API 不变自动生效,外观从「圆角药丸+浅背景」变「小圆点+文字」。纯前端单文件。待 commit + push + rebuild frontend 部署 + 用户浏览器验证。
