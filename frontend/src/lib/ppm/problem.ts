@@ -1,16 +1,13 @@
 /**
  * PPM problem 子域 API client。
  *
- * 端点前缀 `/api/ppm`,对齐后端 problem/router.py:
- * - /problem-list               问题清单 CRUD
- * - /problem-list/{id}/next     nextProcess (推进到下一节点)
- * - /problem-list/{id}/reject   rejectProcess (驳回到已作废)
- * - /problem-list/{id}/done     doneTask (责任人完成处置)
- * - /problem-list/{id}/close    closeTask (验证人验证关闭)
- * - /problem-list/{id}/tasks    在办任务查询
- * - /problem-list/{id}/logs     流程履历查询
- * - /problem-change             问题变更 CRUD
- * - /problem-list/export-excel  导出 (X-002)
+ * 端点前缀 `/api/ppm`,对齐后端 problem/router.py (3 态简化, 对齐任务计划):
+ * - /problem-list                 问题清单 CRUD
+ * - /problem-list/{id}/start      start (新建→进行中, 建 in-flight TaskExecute)
+ * - /problem-list/{id}/execute    execute (收口: submit 回新建 / complete 已完成)
+ * - /problem-change               问题变更 CRUD (deprecated, D-005)
+ * - /problem-change/{id}/next|reject|tasks|logs  变更审批流 (deprecated)
+ * - /problem-list/export-excel    导出 (X-002)
  *
  * 走统一 `apiFetch`(自动带 token + 401 刷新);导出走 `downloadExcel`。
  */
@@ -23,18 +20,17 @@ import type {
   ProblemChangeCreate,
   ProblemChangeNextProcessReq,
   ProblemChangeRejectProcessReq,
+  ProblemChangePageReq,
   ProblemChangeUpdate,
-  ProblemCloseTaskReq,
-  ProblemDoneTaskReq,
+  ProblemExecuteReq,
   ProblemList,
   ProblemListCreate,
   ProblemListPageReq,
   ProblemListUpdate,
-  ProblemNextProcessReq,
   ProblemProcessLog,
   ProblemProcessTask,
-  ProblemChangePageReq,
-  ProblemRejectProcessReq,
+  ProblemStartReq,
+  TaskExecute,
 } from "./types";
 
 function pageQuery(
@@ -102,79 +98,38 @@ export async function deleteProblem(problemId: string): Promise<void> {
   await apiFetch(`/api/ppm/problem-list/${problemId}`, { method: "DELETE" });
 }
 
-// ---------- 审批流端点 ----------
+// ---------- 执行流端点 (3 态, 对齐任务计划) ----------
 
-/** nextProcess — 推进到下一节点。 */
-export async function nextProcessProblem(
+/**
+ * start — 启动问题 (新建 → 进行中): 建 in-flight TaskExecute, 记 actual_start_time。
+ * 返回的 id 作为后续 executeProblem 的 task_execute_id。多次执行每次「开始」产生
+ * 一条独立 TaskExecute (1 problem : N execute)。
+ */
+export async function startProblem(
   problemId: string,
-  body?: ProblemNextProcessReq,
-): Promise<ProblemList> {
-  return apiFetch<ProblemList>(`/api/ppm/problem-list/${problemId}/next`, {
+  body?: ProblemStartReq,
+): Promise<TaskExecute> {
+  return apiFetch<TaskExecute>(`/api/ppm/problem-list/${problemId}/start`, {
     method: "POST",
     json: body ?? {},
   });
 }
 
-/** submitProblem — 提交直接生效,跳过审批进入处置中 (新建/编辑"提交"统一入口)。 */
-export async function submitProblem(
+/**
+ * execute — 收口 in-flight TaskExecute 并推进状态机:
+ * - action="submit"   : 回「新建」(可再次 start, 支持重复执行)
+ * - action="complete" : 「已完成」(终态)
+ *
+ * task_execute_id 必填 (start 返回的 in-flight 记录)。跨天校验在后端 service。
+ */
+export async function executeProblem(
   problemId: string,
-  body?: ProblemNextProcessReq,
+  body: ProblemExecuteReq,
 ): Promise<ProblemList> {
-  return apiFetch<ProblemList>(`/api/ppm/problem-list/${problemId}/submit`, {
-    method: "POST",
-    json: body ?? {},
+  return apiFetch<ProblemList>(`/api/ppm/problem-list/${problemId}/execute`, {
+    method: "PUT",
+    json: body,
   });
-}
-
-/** rejectProcess — 驳回到已作废。 */
-export async function rejectProcessProblem(
-  problemId: string,
-  body?: ProblemRejectProcessReq,
-): Promise<ProblemList> {
-  return apiFetch<ProblemList>(`/api/ppm/problem-list/${problemId}/reject`, {
-    method: "POST",
-    json: body ?? {},
-  });
-}
-
-/** doneTask — 责任人完成处置。 */
-export async function doneTaskProblem(
-  problemId: string,
-  body?: ProblemDoneTaskReq,
-): Promise<ProblemList> {
-  return apiFetch<ProblemList>(`/api/ppm/problem-list/${problemId}/done`, {
-    method: "POST",
-    json: body ?? {},
-  });
-}
-
-/** closeTask — 验证人验证关闭。 */
-export async function closeTaskProblem(
-  problemId: string,
-  body?: ProblemCloseTaskReq,
-): Promise<ProblemList> {
-  return apiFetch<ProblemList>(`/api/ppm/problem-list/${problemId}/close`, {
-    method: "POST",
-    json: body ?? {},
-  });
-}
-
-/** 在办任务 — 查询该问题当前未完成的流程任务。 */
-export async function listProblemTasks(
-  problemId: string,
-): Promise<ProblemProcessTask[]> {
-  return apiFetch<ProblemProcessTask[]>(
-    `/api/ppm/problem-list/${problemId}/tasks`,
-  );
-}
-
-/** 流程履历 — 查询该问题的所有流转记录。 */
-export async function listProblemLogs(
-  problemId: string,
-): Promise<ProblemProcessLog[]> {
-  return apiFetch<ProblemProcessLog[]>(
-    `/api/ppm/problem-list/${problemId}/logs`,
-  );
 }
 
 export async function exportProblems(): Promise<void> {

@@ -1,39 +1,28 @@
 "use client";
 
 /**
- * 问题清单 6 态表单组件 (对照源 dept_project_front problemlist/*.vue)。
+ * 问题清单表单组件 (3 态简化, 2026-07-20 对齐任务计划)。
  *
- * 每个 Form 对应源一个 .vue,字段逐字段对齐 + disabled 策略逐态对齐:
+ * 审批/验证/驳回流删除后,只剩一个表单:
+ *   ProblemCreateForm — 新建 / 编辑 (status=新建|进行中)
  *
- *   组件               | 源                  | 入口状态                | 可编辑字段
- *   -------------------|---------------------|-------------------------|--------------------------------
- *   ProblemCreateForm  | ListForm.vue        | 新建/编辑(status=1)    | 全字段(责任人按 projectMember+role_name 联动)
- *   ProblemStartForm   | ListStartForm.vue   | status=3 处置中(开始)  | dutyUserId 确认 + handleInfo
- *   ProblemAuditForm   | ListAuditForm.vue   | status=2 审核中         | isBack + comment (前序全只读)
- *   ProblemDoneForm    | ListDoneForm.vue    | status=3 处置中(完成)  | timeSpent + handleInfo
- *   ProblemCloseForm   | ListCloseForm.vue   | status=6 待验证         | checkTime + checkResult + checkInfo
- *   ProblemDetailForm  | ListDetailForm.vue  | 任意状态(详情)         | 全字段只读 + 流程履历 Timeline
+ * 执行 (开始/执行/跨天填报) 不在此处,走公共弹窗 problem-detail-modal
+ * (与任务计划 task-detail-modal 一致)。
  *
  * 复用:PpmUserSelect / PpmFileUrls / addWorkingDaysDate / problem.ts API。
  *
- * 设计依据:.sillyspec/changes/2026-06-21-ppm-frontend-alignment/design.md §7
+ * 设计依据:.sillyspec/changes/2026-07-20-problem-list-align-task-plan/design.md
  */
 import { useEffect, useMemo, useState } from "react";
 import {
   Button,
   DatePicker,
-  Descriptions,
-  Divider,
   Form,
   Input,
   InputNumber,
-  Radio,
-  Select,
-  Spin,
-  Switch,
-  Timeline,
-  Typography,
   message,
+  Select,
+  Switch,
 } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 
@@ -41,32 +30,20 @@ import { PpmFileUrls } from "@/components/ppm-file-urls";
 import { PpmUserSelect } from "@/components/ppm-user-select";
 import { ApiError } from "@/lib/api";
 import { errMessage } from "@/lib/errors";
-import { listTaskExecutes } from "@/lib/ppm/task";
-import type { TaskExecute } from "@/lib/ppm/types";
 import {
-  closeTaskProblem,
   createProblem,
-  doneTaskProblem,
   listModulesByProject,
-  listProblemLogs,
-  nextProcessProblem,
-  rejectProcessProblem,
-  submitProblem,
   updateProblem,
 } from "@/lib/ppm";
-import type { ModuleSimpleItem } from "@/lib/ppm";
 import type {
-  ProblemCloseTaskReq,
-  ProblemDoneTaskReq,
+  ModuleSimpleItem,
   ProblemList,
   ProblemListCreate,
   ProblemListUpdate,
-  ProblemProcessLog,
 } from "@/lib/ppm";
 import { addWorkingDaysDate } from "@/lib/ppm/workday";
 
 const { TextArea } = Input;
-const { Text } = Typography;
 
 // ── 字典(对齐源 ListForm.vue options) ─────────────────────────────────────
 
@@ -92,11 +69,6 @@ function workTypeToRoleName(workType: string | null | undefined): string | null 
   return workType;
 }
 
-const TYPE_LABEL: Record<string, string> = {
-  bug: "系统BUG",
-  change: "变更",
-};
-
 const WORK_TYPE_LABEL: Record<string, string> = {
   前端: "前端工作",
   后端: "后端工作",
@@ -104,13 +76,6 @@ const WORK_TYPE_LABEL: Record<string, string> = {
 };
 
 // ── 共享 helpers ───────────────────────────────────────────────────────────
-
-/** dayjs 转表单字符串(YYYY-MM-DD),null/异常返回 ""。 */
-function toDayStr(v: unknown): string {
-  if (v == null || v === "") return "";
-  const d = dayjs(typeof v === "string" || typeof v === "number" || v instanceof Date ? v : NaN);
-  return d.isValid() ? d.format("YYYY-MM-DD") : "";
-}
 
 /** 表单字符串 → 后端 nullable ISO 串(YYYY-MM-DD);空串 → null。 */
 function dayStrToApi(v: string | null | undefined): string | null {
@@ -122,88 +87,34 @@ function notifyOk(text: string) {
   message.success(text);
 }
 
-// ── 流程履历 Timeline(对照源 el-timeline processList) ───────────────────────
-
-/**
- * 审批/处置/关闭/详情各态表单复用的流程履历 Timeline。
- * logs 由父组件从 listProblemLogs 异步拉取。
- */
-function ProcessTimeline({
-  logs,
-  loading,
-}: {
-  logs: ProblemProcessLog[];
-  loading: boolean;
-}) {
-  return (
-    <>
-      <Divider>流程履历</Divider>
-      {loading ? (
-        <Spin />
-      ) : logs.length === 0 ? (
-        <Text type="secondary">暂无流程履历</Text>
-      ) : (
-        <Timeline
-          items={logs.map((log) => ({
-            children: (
-              <div>
-                <div>{log.handle_info || log.node_key || "流转"}</div>
-                <div
-                  style={{ fontSize: 12, color: "rgba(0,0,0,0.45)" }}
-                >
-                  {log.handle_user_name ?? log.handle_user_id ?? "—"} ·{" "}
-                  {log.created_at
-                    ? dayjs(log.created_at).format("YYYY-MM-DD HH:mm:ss")
-                    : "—"}
-                </div>
-                {log.comment && (
-                  <div style={{ fontSize: 12 }}>备注:{log.comment}</div>
-                )}
-              </div>
-            ),
-          }))}
-        />
-      )}
-    </>
-  );
-}
-
-/**
- * 在表单组件内 lazy 加载流程履历(listProblemLogs)。
- * 返回 [logs, loading]。
- */
-function useProblemLogs(
-  problemId: string | undefined,
-): [ProblemProcessLog[], boolean] {
-  const [logs, setLogs] = useState<ProblemProcessLog[]>([]);
-  const [loading, setLoading] = useState(false);
-  useEffect(() => {
-    if (!problemId) return;
-    let cancelled = false;
-    setLoading(true);
-    listProblemLogs(problemId)
-      .then((data) => {
-        if (!cancelled) setLogs(data);
-      })
-      .catch(() => {
-        if (!cancelled) setLogs([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [problemId]);
-  return [logs, loading];
-}
-
 // ===========================================================================
-// 1. ProblemCreateForm — ListForm.vue (新建/编辑)
+// ProblemCreateForm — ListForm.vue (新建/编辑)
 // ===========================================================================
+
+interface ProblemCreateValues {
+  project_id?: string;
+  module_id?: string;
+  model_name?: string;
+  func_name?: string;
+  pro_desc?: string;
+  pro_answer?: string;
+  func_name_unused?: string;
+  pro_type?: string;
+  is_urgent?: boolean;
+  find_by?: string;
+  find_time?: Dayjs;
+  work_type?: string;
+  duty_user_id?: string;
+  work_load?: string;
+  plan_start_time?: Dayjs;
+  plan_end_time?: Dayjs;
+  audit_user_id?: string;
+  remarks?: string;
+}
 
 export interface ProblemCreateFormProps {
-  problem?: ProblemList; // undefined=新建,否则 status=1 编辑
+  /** undefined=新建,否则编辑 (新建/进行中态均可编辑, D-003)。 */
+  problem?: ProblemList;
   onSuccess: () => void;
   onCancel: () => void;
 }
@@ -222,9 +133,6 @@ export function ProblemCreateForm({
   );
   const [workType, setWorkType] = useState<string | undefined>(
     problem?.work_type ?? undefined,
-  );
-  const [dutyUserId, setDutyUserId] = useState<string | undefined>(
-    problem?.duty_user_id ?? undefined,
   );
   const [fileUrls, setFileUrls] = useState<string[]>(
     problem?.file_urls ?? [],
@@ -304,7 +212,8 @@ export function ProblemCreateForm({
     }
   }, [planStart, workLoad, planEndTouched, form]);
 
-  const submit = async (submitNow: boolean) => {
+  // 3 态简化:新建即落「新建」态,无 submit/审批;编辑直接 update。
+  const submit = async () => {
     try {
       const v = await form.validateFields();
       setBusy(true);
@@ -333,7 +242,6 @@ export function ProblemCreateForm({
         audit_user_id: v.audit_user_id ?? null,
         remarks: v.remarks ?? null,
         work_load: v.work_load != null ? String(v.work_load) : null,
-        submit: submitNow,
       };
       if (isEdit && problem) {
         const upd: ProblemListUpdate = {
@@ -356,17 +264,11 @@ export function ProblemCreateForm({
           remarks: payload.remarks,
           work_load: payload.work_load,
         };
-        if (submitNow) {
-          // 先更新再提交直接生效(2026-07-17 起:不走审批,提交即进处置中)
-          await updateProblem(problem.id, upd);
-          await submitProblem(problem.id);
-        } else {
-          await updateProblem(problem.id, upd);
-        }
-        notifyOk(submitNow ? "已提交,直接生效" : "已保存");
+        await updateProblem(problem.id, upd);
+        notifyOk("已保存");
       } else {
         await createProblem(payload);
-        notifyOk(submitNow ? "已创建,直接生效" : "已保存为草稿");
+        notifyOk("已创建");
       }
       onSuccess();
     } catch (err) {
@@ -510,7 +412,6 @@ export function ProblemCreateForm({
               ? `请选择 ${WORK_TYPE_LABEL[workType] ?? workType} 人员`
               : "请先选择项目与工作类型"
           }
-          onChange={(v) => setDutyUserId((v as string | null) ?? undefined)}
         />
       </Form.Item>
 
@@ -569,555 +470,10 @@ export function ProblemCreateForm({
         }}
       >
         <Button onClick={onCancel}>取消</Button>
-        <Button type="primary" loading={busy} onClick={() => void submit(false)}>
+        <Button type="primary" loading={busy} onClick={() => void submit()}>
           保存
-        </Button>
-        <Button
-          type="primary"
-          loading={busy}
-          onClick={() => void submit(true)}
-        >
-          {isEdit ? "保存并提交" : "创建并提交"}
         </Button>
       </div>
     </Form>
-  );
-}
-
-interface ProblemCreateValues {
-  project_id?: string;
-  module_id?: string;
-  model_name?: string;
-  func_name?: string;
-  pro_desc?: string;
-  pro_answer?: string;
-  func_name_unused?: string;
-  pro_type?: string;
-  is_urgent?: boolean;
-  find_by?: string;
-  find_time?: Dayjs;
-  work_type?: string;
-  duty_user_id?: string;
-  work_load?: string;
-  plan_start_time?: Dayjs;
-  plan_end_time?: Dayjs;
-  audit_user_id?: string;
-  remarks?: string;
-}
-
-// ===========================================================================
-// 2. ProblemStartForm — ListStartForm.vue (开始处置,status=3)
-// ===========================================================================
-
-export interface ProblemStartFormProps {
-  problem: ProblemList;
-  onSuccess: () => void;
-  onCancel: () => void;
-}
-
-export function ProblemStartForm({
-  problem,
-  onSuccess,
-  onCancel,
-}: ProblemStartFormProps) {
-  const [handleInfo, setHandleInfo] = useState(problem.handle_info ?? "");
-  const [busy, setBusy] = useState(false);
-  const [logs, loadingLogs] = useProblemLogs(problem.id);
-
-  const submit = async (completed: boolean) => {
-    setBusy(true);
-    try {
-      const body: ProblemDoneTaskReq = {
-        handle_info: handleInfo || null,
-        completed,
-        time_spent: null,
-      };
-      await doneTaskProblem(problem.id, body);
-      notifyOk(completed ? "已开始处置" : "已保存处置说明");
-      onSuccess();
-    } catch (err) {
-      message.error(errMessage(err, "提交失败"));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div>
-      <ProblemDescriptions problem={problem} />
-      <ProcessTimeline logs={logs} loading={loadingLogs} />
-      <Divider />
-      <Form layout="vertical">
-        <Form.Item label="开始/处置备注(对照源 startRemark)">
-          <TextArea
-            rows={4}
-            value={handleInfo}
-            onChange={(e) => setHandleInfo(e.target.value)}
-            placeholder="请输入处置说明"
-          />
-        </Form.Item>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <Button onClick={onCancel}>取消</Button>
-          <Button
-            type="primary"
-            loading={busy}
-            onClick={() => void submit(true)}
-          >
-            开始处置
-          </Button>
-        </div>
-      </Form>
-    </div>
-  );
-}
-
-// ===========================================================================
-// 3. ProblemAuditForm — ListAuditForm.vue (审核,status=2)
-// ===========================================================================
-
-export interface ProblemAuditFormProps {
-  problem: ProblemList;
-  onSuccess: () => void;
-  onCancel: () => void;
-}
-
-export function ProblemAuditForm({
-  problem,
-  onSuccess,
-  onCancel,
-}: ProblemAuditFormProps) {
-  const [isBack, setIsBack] = useState<"0" | "1">("0");
-  const [comment, setComment] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [logs, loadingLogs] = useProblemLogs(problem.id);
-
-  const submit = async () => {
-    if (isBack === "1" && !comment.trim()) {
-      message.warning("驳回意见不能为空");
-      return;
-    }
-    setBusy(true);
-    try {
-      if (isBack === "0") {
-        await nextProcessProblem(problem.id, {
-          comment: comment.trim() || null,
-        });
-        notifyOk("已推进到下一节点");
-      } else {
-        await rejectProcessProblem(problem.id, { comment: comment.trim() });
-        notifyOk("已驳回");
-      }
-      onSuccess();
-    } catch (err) {
-      message.error(errMessage(err, "提交失败"));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div>
-      <ProblemDescriptions problem={problem} />
-      <ProcessTimeline logs={logs} loading={loadingLogs} />
-      <Divider>审核</Divider>
-      <Form layout="vertical">
-        <Form.Item label="是否驳回(对照源 isBack)">
-          <Radio.Group
-            value={isBack}
-            onChange={(e) => setIsBack(e.target.value as "0" | "1")}
-          >
-            <Radio value="0">否(通过)</Radio>
-            <Radio value="1">是(驳回)</Radio>
-          </Radio.Group>
-        </Form.Item>
-        <Form.Item label="审核意见/备注(对照源 comment)">
-          <TextArea
-            rows={4}
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-            placeholder="请输入审核意见(驳回时必填)"
-          />
-        </Form.Item>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <Button onClick={onCancel}>取消</Button>
-          <Button type="primary" loading={busy} onClick={() => void submit()}>
-            提交
-          </Button>
-        </div>
-      </Form>
-    </div>
-  );
-}
-
-// ===========================================================================
-// 4. ProblemDoneForm — ListDoneForm.vue (完成处置,status=3)
-// ===========================================================================
-
-export function ProblemDoneForm({
-  problem,
-  onSuccess,
-  onCancel,
-}: ProblemStartFormProps) {
-  const [handleInfo, setHandleInfo] = useState(problem.handle_info ?? "");
-  const [timeSpent, setTimeSpent] = useState<number | null>(
-    problem.time_spent ?? null,
-  );
-  const [attachUrls, setAttachUrls] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [logs, loadingLogs] = useProblemLogs(problem.id);
-
-  const submit = async (completed: boolean) => {
-    if (!handleInfo.trim()) {
-      message.warning("请输入处置情况");
-      return;
-    }
-    if (timeSpent == null || timeSpent < 0) {
-      message.warning("请填写本次耗时");
-      return;
-    }
-    setBusy(true);
-    try {
-      const body: ProblemDoneTaskReq = {
-        handle_info: handleInfo || null,
-        time_spent: timeSpent,
-        completed,
-      };
-      await doneTaskProblem(problem.id, body);
-      notifyOk(completed ? "已完工,进入已完成" : "已记录处置,可继续处置或点完成");
-      onSuccess();
-    } catch (err) {
-      message.error(errMessage(err, "提交失败"));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div>
-      <ProblemDescriptions problem={problem} />
-      <ProcessTimeline logs={logs} loading={loadingLogs} />
-      <Divider>处置</Divider>
-      <Form layout="vertical">
-        <Form.Item label="本次耗时(对照源 timeSpent)">
-          <InputNumber
-            value={timeSpent}
-            onChange={(v) => setTimeSpent(v == null ? null : Number(v))}
-            precision={1}
-            step={0.5}
-            min={0}
-            addonAfter="人天"
-            style={{ width: "100%" }}
-          />
-        </Form.Item>
-        <Form.Item label="处置情况(对照源 handleInfo)">
-          <TextArea
-            rows={4}
-            value={handleInfo}
-            onChange={(e) => setHandleInfo(e.target.value)}
-            placeholder="请输入处置情况"
-          />
-        </Form.Item>
-        <Form.Item
-          label="处置附件(对照源 attachGroupId)"
-          extra="当前后端 DoneTask 未持久化附件,仅本次会话保留"
-        >
-          <PpmFileUrls value={attachUrls} onChange={setAttachUrls} />
-        </Form.Item>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <Button onClick={onCancel}>取消</Button>
-          {/* 提交=记录本次处置(可多次),任务留执行中;对齐任务计划「执行-提交」 */}
-          <Button loading={busy} onClick={() => void submit(false)}>
-            提交
-          </Button>
-          {/* 完成=处置完毕,进入已完成(终态) */}
-          <Button type="primary" loading={busy} onClick={() => void submit(true)}>
-            完成
-          </Button>
-        </div>
-      </Form>
-    </div>
-  );
-}
-
-// ===========================================================================
-// 5. ProblemCloseForm — ListCloseForm.vue (验证关闭,status=6)
-// ===========================================================================
-
-export interface ProblemCloseFormProps {
-  problem: ProblemList;
-  onSuccess: () => void;
-  onCancel: () => void;
-}
-
-export function ProblemCloseForm({
-  problem,
-  onSuccess,
-  onCancel,
-}: ProblemCloseFormProps) {
-  const [checkTime, setCheckTime] = useState<Dayjs>(dayjs());
-  const [checkResult, setCheckResult] = useState<"1" | "0">("1");
-  const [checkInfo, setCheckInfo] = useState("通过");
-  const [busy, setBusy] = useState(false);
-  const [logs, loadingLogs] = useProblemLogs(problem.id);
-
-  const submit = async () => {
-    if (!checkInfo.trim()) {
-      message.warning("请输入验证说明");
-      return;
-    }
-    setBusy(true);
-    try {
-      // 注:后端 CloseTaskReq 当前不接收 check_time;前端保留 UI 供后续接入。
-      void checkTime;
-      const body: ProblemCloseTaskReq = {
-        check_info: checkInfo,
-        check_result: checkResult,
-      };
-      await closeTaskProblem(problem.id, body);
-      notifyOk(checkResult === "1" ? "已验证通过并关闭" : "已打回处置");
-      onSuccess();
-    } catch (err) {
-      message.error(errMessage(err, "提交失败"));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div>
-      <ProblemDescriptions problem={problem} />
-      <ProcessTimeline logs={logs} loading={loadingLogs} />
-      <Divider>验证关闭</Divider>
-      <Form layout="vertical">
-        <Form.Item
-          label="验证时间(对照源 checkTime)"
-          extra="当前后端 CloseTask 未持久化验证时间,仅本次会话保留"
-        >
-          <DatePicker
-            showTime
-            value={checkTime}
-            onChange={(v) => v && setCheckTime(v)}
-            style={{ width: "100%" }}
-          />
-        </Form.Item>
-        <Form.Item label="验证结果(对照源 checkResult)">
-          <Radio.Group
-            value={checkResult}
-            onChange={(e) => setCheckResult(e.target.value as "1" | "0")}
-          >
-            <Radio value="1">通过(关闭)</Radio>
-            <Radio value="0">不通过(打回处置)</Radio>
-          </Radio.Group>
-        </Form.Item>
-        <Form.Item label="验证说明(对照源 checkInfo)">
-          <TextArea
-            rows={4}
-            value={checkInfo}
-            onChange={(e) => setCheckInfo(e.target.value)}
-            placeholder="请输入验证说明"
-          />
-        </Form.Item>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <Button onClick={onCancel}>取消</Button>
-          <Button type="primary" loading={busy} onClick={() => void submit()}>
-            确定
-          </Button>
-        </div>
-      </Form>
-    </div>
-  );
-}
-
-// ===========================================================================
-// 6. ProblemDetailForm — ListDetailForm.vue (详情 + 流程履历)
-// ===========================================================================
-
-export interface ProblemDetailFormProps {
-  problem: ProblemList;
-  logs: ProblemProcessLog[];
-  loadingLogs: boolean;
-  onCancel: () => void;
-}
-
-export function ProblemDetailForm({
-  problem,
-  logs,
-  loadingLogs,
-  onCancel,
-}: ProblemDetailFormProps) {
-  const [execRecords, setExecRecords] = useState<TaskExecute[]>([]);
-  const [loadingExecs, setLoadingExecs] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      setLoadingExecs(true);
-      try {
-        const page = await listTaskExecutes({
-          problem_task_id: problem.id,
-          page: 1,
-          page_size: 100,
-        });
-        if (!cancelled) setExecRecords(page.items ?? []);
-      } catch {
-        if (!cancelled) setExecRecords([]);
-      } finally {
-        if (!cancelled) setLoadingExecs(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [problem.id]);
-
-  return (
-    <div>
-      <ProblemDescriptions problem={problem} />
-      <ProcessTimeline logs={logs} loading={loadingLogs} />
-      {/* 处置执行记录(D-007 done_task 创建 TaskExecute, actual 单点 now) */}
-      <div style={{ marginTop: 16 }}>
-        <div
-          style={{
-            fontSize: 13,
-            fontWeight: 600,
-            marginBottom: 8,
-            color: "rgba(0,0,0,0.65)",
-          }}
-        >
-          处置记录（{execRecords.length}）
-        </div>
-        {loadingExecs ? (
-          <div style={{ textAlign: "center", color: "#999", padding: 16 }}>加载中…</div>
-        ) : execRecords.length === 0 ? (
-          <div
-            style={{
-              textAlign: "center",
-              color: "#999",
-              padding: 24,
-              border: "1px dashed #e2e8f0",
-              borderRadius: 8,
-            }}
-          >
-            暂无处置记录
-          </div>
-        ) : (
-          <div style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #e2e8f0" }}>
-            <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
-              <thead>
-                <tr
-                  style={{
-                    background: "rgba(0,0,0,0.03)",
-                    textAlign: "left",
-                    color: "#64748b",
-                  }}
-                >
-                  <th style={{ padding: "8px 12px", fontWeight: 500 }}>开始时间</th>
-                  <th style={{ padding: "8px 12px", fontWeight: 500 }}>结束时间</th>
-                  <th style={{ padding: "8px 12px", fontWeight: 500 }}>耗时</th>
-                  <th style={{ padding: "8px 12px", fontWeight: 500 }}>说明</th>
-                </tr>
-              </thead>
-              <tbody>
-                {execRecords.map((e) => (
-                  <tr key={e.id} style={{ borderTop: "1px solid #f0f0f0" }}>
-                    <td style={{ padding: "8px 12px" }}>
-                      {e.actual_start_time
-                        ? dayjs(e.actual_start_time).format("YYYY-MM-DD HH:mm:ss")
-                        : "—"}
-                    </td>
-                    <td style={{ padding: "8px 12px" }}>
-                      {e.actual_end_time
-                        ? dayjs(e.actual_end_time).format("YYYY-MM-DD HH:mm:ss")
-                        : "—"}
-                    </td>
-                    <td style={{ padding: "8px 12px" }}>
-                      {e.time_spent != null ? `${e.time_spent}人天` : "—"}
-                    </td>
-                    <td style={{ padding: "8px 12px" }}>{e.execute_info ?? "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-        <Button onClick={onCancel}>关闭</Button>
-      </div>
-    </div>
-  );
-}
-
-// ===========================================================================
-// 共用:只读信息区(对照源 el-descriptions「问题信息」)
-// ===========================================================================
-
-function ProblemDescriptions({ problem }: { problem: ProblemList }) {
-  return (
-    <Descriptions
-      title="问题信息"
-      column={1}
-      bordered
-      size="small"
-      labelStyle={{ width: 140 }}
-    >
-      <Descriptions.Item label="项目">
-        {problem.project_name ?? problem.project_id}
-      </Descriptions.Item>
-      <Descriptions.Item label="模块">
-        {problem.model_name ?? problem.module_id ?? "—"}
-      </Descriptions.Item>
-      <Descriptions.Item label="问题描述">
-        {problem.pro_desc ?? "—"}
-      </Descriptions.Item>
-      <Descriptions.Item label="功能名称">
-        {problem.func_name ?? "—"}
-      </Descriptions.Item>
-      <Descriptions.Item label="问题类型">
-        {problem.pro_type ? TYPE_LABEL[problem.pro_type] ?? problem.pro_type : "—"}
-      </Descriptions.Item>
-      <Descriptions.Item label="是否紧急">
-        {problem.is_urgent === "1" || problem.is_urgent === "是" ? "是" : "否"}
-      </Descriptions.Item>
-      <Descriptions.Item label="发现人/提出人">
-        {problem.find_by ?? "—"}
-      </Descriptions.Item>
-      <Descriptions.Item label="发现日期">
-        {toDayStr(problem.find_time) || "—"}
-      </Descriptions.Item>
-      <Descriptions.Item label="工作类型">
-        {problem.work_type
-          ? WORK_TYPE_LABEL[problem.work_type] ?? problem.work_type
-          : "—"}
-      </Descriptions.Item>
-      <Descriptions.Item label="责任人">
-        {problem.duty_user_name ?? problem.duty_user_id ?? "待指派"}
-      </Descriptions.Item>
-      <Descriptions.Item label="计划时间">
-        {toDayStr(problem.plan_start_time) || "?"} ~{" "}
-        {toDayStr(problem.plan_end_time) || "?"}
-      </Descriptions.Item>
-      <Descriptions.Item label="问题附件">
-        {problem.file_urls && problem.file_urls.length > 0 ? (
-          <PpmFileUrls value={problem.file_urls} disabled />
-        ) : (
-          <Text type="secondary">无</Text>
-        )}
-      </Descriptions.Item>
-      <Descriptions.Item label="工作量(人/天)">
-        {problem.work_load ?? "—"}
-      </Descriptions.Item>
-      <Descriptions.Item label="总耗时(人/天)">
-        {problem.time_spent ?? "—"}
-      </Descriptions.Item>
-      <Descriptions.Item label="处置情况">
-        {problem.handle_info ?? "—"}
-      </Descriptions.Item>
-      {problem.check_info && (
-        <Descriptions.Item label="验证说明">
-          {problem.check_info}
-        </Descriptions.Item>
-      )}
-    </Descriptions>
   );
 }

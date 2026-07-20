@@ -1,26 +1,23 @@
 "use client";
 
 /**
- * 问题清单 (ProblemList) 列表页 — 对齐源 dept_project_front problemlist/index.vue。
+ * 问题清单 (ProblemList) 列表页 — 3 态执行模式, 对齐任务计划 (2026-07-20)。
  *
- * 6 态表单分发(对照源 6 个 .vue):
- *  - status=1 已保存:creator → 编辑(ListForm)/ 删除 / 提交审核
- *  - status=2 审核中:now_handle_user → 审核(ListAuditForm)
- *  - status=3 处置中:duty_user → 开始(ListStartForm)/ 完成处置(ListDoneForm)/ 变更
- *  - status=6 待验证:audit_user → 验证关闭(ListCloseForm)
- *  - status=4/5 终态
- *  - 任意:详情(ListDetailForm)
+ * 状态机简化为 3 态 (新建/进行中/已完成), 删除审批/验证/驳回流:
+ *  - 新建   : 编辑 / 开始 (start → 进行中, 建 in-flight TaskExecute) / 详情 / 删除
+ *  - 进行中 : 编辑 / 执行 (打开 problem-detail-modal execute 模式, 跨天填报,
+ *             提交回新建可重复 / 完成进已完成) / 详情 / 删除
+ *  - 已完成 : 详情 / 删除
  *
- * 列表字段 + 操作按钮显隐规则逐条对齐源 index.vue 操作列 v-if。
- * 查询条件全部走后端 GET /problem-list (服务端过滤 + 分页)。
+ * 执行记录 + 跨天填报走公共弹窗 ProblemDetailModal (D-006 方案 B),
+ * 与任务计划 task-detail-modal 行为一致。
  *
- * 设计依据:.sillyspec/changes/2026-06-21-ppm-frontend-alignment/design.md §7
+ * 设计依据:.sillyspec/changes/2026-07-20-problem-list-align-task-plan/design.md
  */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   DatePicker,
   Input,
-  Modal,
   Select,
   Table,
   type TableProps,
@@ -35,8 +32,8 @@ import {
   SectionCard,
 } from "@/components/layout";
 import { PpmUserSelect } from "@/components/ppm-user-select";
-import { matchAnyUser } from "@/components/ppm-status-actions";
 import {
+  matchAnyUser,
   PROBLEM_STATUS_COLOR,
   PROBLEM_STATUS_TEXT,
   PROBLEM_TYPE_TEXT,
@@ -46,25 +43,23 @@ import { isOverEstimate } from "@/lib/ppm/format";
 import {
   deleteProblem,
   exportProblems,
-  listProblemLogs,
   listProblems,
-  submitProblem,
+  startProblem,
 } from "@/lib/ppm";
-import type { ProblemList, ProblemProcessLog } from "@/lib/ppm";
+import type { ProblemList } from "@/lib/ppm";
 import { useSession } from "@/stores/session";
 import { ProblemDrawer, type ProblemDrawerMode } from "./_problem-drawer";
-import { ProblemDetailForm } from "./_forms";
+import {
+  ProblemDetailModal,
+  type ProblemDetailMode,
+} from "../_components/problem-detail-modal";
 
 const { RangePicker } = DatePicker;
 
 const STATUS_OPTIONS = [
-  { label: PROBLEM_STATUS_TEXT["1"] ?? "已保存", value: "1" },
-  { label: PROBLEM_STATUS_TEXT["2"] ?? "审核中", value: "2" },
-  { label: PROBLEM_STATUS_TEXT["3"] ?? "处置中", value: "3" },
-  { label: PROBLEM_STATUS_TEXT["6"] ?? "待验证", value: "6" },
-  { label: PROBLEM_STATUS_TEXT["4"] ?? "已关闭", value: "4" },
-  { label: PROBLEM_STATUS_TEXT["5"] ?? "已作废", value: "5" },
-  { label: PROBLEM_STATUS_TEXT["7"] ?? "变更中", value: "7" },
+  { label: PROBLEM_STATUS_TEXT["新建"] ?? "新建", value: "新建" },
+  { label: PROBLEM_STATUS_TEXT["进行中"] ?? "进行中", value: "进行中" },
+  { label: PROBLEM_STATUS_TEXT["已完成"] ?? "已完成", value: "已完成" },
 ];
 
 const PRO_TYPE_OPTIONS = [
@@ -97,18 +92,15 @@ export default function ProblemListPage() {
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [statusFilter, setStatusFilter] = useState<string[]>([
-    "1",
-    "2",
-    "3",
-    "6",
+    "新建",
+    "进行中",
   ]);
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
   const [proTypeFilter, setProTypeFilter] = useState<string>("");
   const [isUrgentFilter, setIsUrgentFilter] = useState<string>("");
-  // 详情弹窗(居中 Modal, 对齐 task-plans 风格)
-  const [detailProblem, setDetailProblem] = useState<ProblemList | null>(null);
-  const [detailLogs, setDetailLogs] = useState<ProblemProcessLog[]>([]);
-  const [loadingDetailLogs, setLoadingDetailLogs] = useState(false);
+  // 详情/执行公共弹窗 (对齐任务计划)
+  const [modalProblem, setModalProblem] = useState<ProblemList | null>(null);
+  const [modalMode, setModalMode] = useState<ProblemDetailMode>("detail");
   const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(
     null,
   );
@@ -190,7 +182,7 @@ export default function ProblemListPage() {
   const resetFilters = () => {
     setKeywordInput("");
     setKeyword("");
-    setStatusFilter(["1", "2", "3", "6"]);
+    setStatusFilter(["新建", "进行中"]);
     setProjectFilter(null);
     setProTypeFilter("");
     setIsUrgentFilter("");
@@ -210,39 +202,37 @@ export default function ProblemListPage() {
     setDrawer({ open: true, mode, problem });
   };
 
-  // 详情居中弹窗(对齐 task-plans 风格), 异步加载流程履历
-  const openDetail = async (problem: ProblemList) => {
-    setDetailProblem(problem);
-    setLoadingDetailLogs(true);
+  // 详情弹窗 (只读)
+  const openDetail = (problem: ProblemList) => {
+    setModalProblem(problem);
+    setModalMode("detail");
+  };
+
+  // 执行弹窗 (进行中 → 跨天填报)
+  const openExecute = (problem: ProblemList) => {
+    setModalProblem(problem);
+    setModalMode("execute");
+  };
+
+  // 开始: 新建 → 进行中 (建 in-flight TaskExecute), 对齐任务计划「启动」
+  const handleStart = async (p: ProblemList) => {
+    if (p.status !== "新建") return;
     try {
-      const logs = await listProblemLogs(problem.id);
-      setDetailLogs(logs);
-    } catch {
-      setDetailLogs([]);
-    } finally {
-      setLoadingDetailLogs(false);
+      await startProblem(p.id);
+      await load();
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : "开始失败");
     }
   };
 
+  // 删除: 任意状态 (本人/管理员, D-004)
   const handleDelete = async (p: ProblemList) => {
-    if (p.status !== "1") return;
     if (!confirm("删除该问题清单?")) return;
     try {
       await deleteProblem(p.id);
       await load();
     } catch (err) {
       alert(err instanceof ApiError ? err.message : "删除失败");
-    }
-  };
-
-  // 草稿提交直接生效 → 执行中 (2026-07-17:不走审批)
-  const handleSubmitDraft = async (p: ProblemList) => {
-    if (p.status !== "1") return;
-    try {
-      await submitProblem(p.id);
-      await load();
-    } catch (err) {
-      alert(err instanceof ApiError ? err.message : "提交失败");
     }
   };
 
@@ -357,26 +347,15 @@ export default function ProblemListPage() {
         `${p.plan_start_time?.slice(0, 10) ?? "?"} ~ ${p.plan_end_time?.slice(0, 10) ?? "?"}`,
     },
     {
-      title: "当前处理人",
-      dataIndex: "now_handle_user_name",
-      key: "now_handle_user_name",
-      width: 120,
-      render: (v: string | null, p: ProblemList) =>
-        v ?? (p.now_handle_user ? p.now_handle_user : "待指派"),
-    },
-    {
       title: "状态",
       key: "status",
       width: 100,
       fixed: "right",
-      render: (_v: unknown, p: ProblemList) => {
-        const display = p.effective_status === "7" ? "7" : p.status;
-        return (
-          <Tag color={PROBLEM_STATUS_COLOR[display] ?? "default"}>
-            {PROBLEM_STATUS_TEXT[display] ?? display}
-          </Tag>
-        );
-      },
+      render: (_v: unknown, p: ProblemList) => (
+        <Tag color={PROBLEM_STATUS_COLOR[p.status] ?? "default"}>
+          {PROBLEM_STATUS_TEXT[p.status] ?? p.status}
+        </Tag>
+      ),
     },
     {
       title: "操作",
@@ -390,37 +369,36 @@ export default function ProblemListPage() {
         const canOperate = isDuty || !!currentUser?.is_platform_admin;
         return (
           <div className="flex whitespace-nowrap gap-1 justify-center">
-            {/* 编辑:status=1 已保存 (管理员/责任人) */}
-            {p.status === "1" && canOperate && (
-              <Button size="sm" onClick={() => openDrawer("edit", p)}>
+            {/* 编辑: 新建 / 进行中 (D-003 进行中保留编辑入口, 与执行分离) */}
+            {(p.status === "新建" || p.status === "进行中") && canOperate && (
+              <Button size="sm" variant="ghost" onClick={() => openDrawer("edit", p)}>
                 编辑
               </Button>
             )}
-            {/* 提交:status=1 已保存 → 直接生效进执行中 */}
-            {p.status === "1" && canOperate && (
-              <Button size="sm" variant="ghost" onClick={() => void handleSubmitDraft(p)}>
-                提交
+            {/* 开始: 新建 → 进行中 (建 in-flight TaskExecute) */}
+            {p.status === "新建" && canOperate && (
+              <Button size="sm" onClick={() => void handleStart(p)}>
+                开始
               </Button>
             )}
-            {/* 变更:status=3 执行中 (管理员/责任人) */}
-            {p.status === "3" && canOperate && (
-              <Button size="sm" variant="ghost" onClick={() => openDrawer("change", p)}>
-                变更
+            {/* 执行: 进行中 → 打开 execute 弹窗 (跨天填报, 提交回新建/完成) */}
+            {p.status === "进行中" && canOperate && (
+              <Button size="sm" onClick={() => openExecute(p)}>
+                执行
               </Button>
             )}
-            {/* 提交:status=3 处置中 → 打开处置抽屉,可多次提交处置进展(每次记一段+耗时),点完成才进已完成;区别于草稿"提交"(一次性生效),此处"提交"=记录处置进展可重复 */}
-            {p.status === "3" && canOperate && (
-              <Button size="sm" onClick={() => openDrawer("done", p)}>
-                提交
-              </Button>
-            )}
-            {/* 详情:居中弹窗(对齐 task-plans 风格) */}
-            <Button size="sm" variant="ghost" onClick={() => void openDetail(p)}>
+            {/* 详情: 任意状态 (打开 detail 弹窗只读) */}
+            <Button size="sm" variant="ghost" onClick={() => openDetail(p)}>
               详情
             </Button>
-            {/* 删除:status=1 已保存 (管理员/责任人) */}
-            {p.status === "1" && canOperate && (
-              <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-700" onClick={() => void handleDelete(p)}>
+            {/* 删除: 任意状态 (本人/管理员, D-004) */}
+            {canOperate && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-red-600 hover:text-red-700"
+                onClick={() => void handleDelete(p)}
+              >
                 删除
               </Button>
             )}
@@ -434,7 +412,7 @@ export default function ProblemListPage() {
     <PageContainer size="full">
       <PageHeader
         title="问题清单"
-        subtitle="问题审批流:已保存→审核中→处置中→待验证→已关闭;bug 跳过部门经理"
+        subtitle="新建 → 开始 → 执行(可重复) → 完成, 与任务计划一致"
       />
 
       <SectionCard bodyPadding="p-2">
@@ -608,30 +586,13 @@ export default function ProblemListPage() {
         }}
       />
 
-      {/* 详情居中弹窗(D-007 处置记录 + 流程履历, 对齐 task-plans 风格) */}
-      {detailProblem && (
-        <Modal
-          open
-          title={
-            <div className="flex items-center gap-2">
-              <span>问题详情</span>
-              <Tag color={PROBLEM_STATUS_COLOR[detailProblem.status] ?? "default"}>
-                {PROBLEM_STATUS_TEXT[detailProblem.status] ?? detailProblem.status}
-              </Tag>
-            </div>
-          }
-          onCancel={() => setDetailProblem(null)}
-          footer={null}
-          width={720}
-        >
-          <ProblemDetailForm
-            problem={detailProblem}
-            logs={detailLogs}
-            loadingLogs={loadingDetailLogs}
-            onCancel={() => setDetailProblem(null)}
-          />
-        </Modal>
-      )}
+      {/* 详情/执行公共弹窗 (对齐任务计划 task-detail-modal) */}
+      <ProblemDetailModal
+        problem={modalProblem}
+        mode={modalMode}
+        onClose={() => setModalProblem(null)}
+        onChanged={() => void load()}
+      />
     </PageContainer>
   );
 }

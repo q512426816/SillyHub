@@ -9,16 +9,12 @@
  * 设计依据:
  * - 里程碑明细状态机:backend/app/modules/ppm/plan/fsm.py
  *   draft → review → approve → done + rejected + archived(变更归档)
- * - 问题审批流:backend/app/modules/ppm/problem/fsm.py
- *   status 1-7 + nowNode 10-40;nextProcess/rejectProcess/doneTask/closeTask
+ * - 问题清单:3 态简化 (新建/进行中/已完成, 2026-07-20 对齐任务计划)。
+ *   操作按钮 (开始/执行/详情/删除) 直接在 problem-list/page.tsx 内联,
+ *   不再需要 ProblemActions 组件 (已删除)。
  *
  * 按钮显隐规则严格对齐源 Vue:
- * - problemlist/index.vue:checkUser(nowHandleUser.split(',')) / checkUser([creator])
- *   / checkUser([dutyUserId]) / checkUser([auditUserId])
  * - 状态字典硬编码中文 (参照源 statusObj)。
- *
- * 「驳回/挂起」(X-003 fallback):若项目无对应角色成员,后端在 now_handle_user
- * 返回 null 时,审批/处置按钮 disabled 并提示「待指派」。
  */
 import { Button } from "@/components/ui/button";
 
@@ -65,33 +61,17 @@ export const PLAN_DETAIL_STATUS_COLOR: Record<string, string> = {
   archived: "default",
 };
 
-/** 问题清单状态 → 中文 (ProblemStatus 1-7)。 */
+/** 问题清单状态 → 中文 (ProblemStatus 3 态, 2026-07-20 简化对齐任务计划)。 */
 export const PROBLEM_STATUS_TEXT: Record<string, string> = {
-  "1": "已保存",
-  "2": "审核中",
-  "3": "执行中",
-  "4": "已完成",
-  "5": "已作废",
-  "6": "待验证",
-  "7": "变更中",
+  新建: "新建",
+  进行中: "进行中",
+  已完成: "已完成",
 };
 
 export const PROBLEM_STATUS_COLOR: Record<string, string> = {
-  "1": "default",
-  "2": "processing",
-  "3": "warning",
-  "4": "success",
-  "5": "error",
-  "6": "blue",
-  "7": "gold",
-};
-
-/** 问题审批流节点 → 中文 (ProblemNode 10-40)。 */
-export const PROBLEM_NODE_TEXT: Record<number, string> = {
-  10: "申请",
-  20: "开发经理审批",
-  30: "项目经理审批",
-  40: "部门经理审批",
+  新建: "default",
+  进行中: "processing",
+  已完成: "success",
 };
 
 export const PROBLEM_TYPE_TEXT: Record<string, string> = {
@@ -233,165 +213,6 @@ export function PlanDetailActions({
         onClick={() => onSubmit(detail.id, "change")}
       >
         变更
-      </Button>,
-    );
-  }
-
-  if (buttons.length === 0) {
-    return null;
-  }
-  return <div className="flex flex-wrap justify-end gap-1">{buttons}</div>;
-}
-
-// ===========================================================================
-// 问题清单操作按钮
-// ===========================================================================
-
-export interface ProblemActionsProps {
-  problem: {
-    id: string;
-    status: string;
-    effective_status: string | null;
-    now_node: number | null;
-    now_handle_user: string | null;
-    duty_user_id: string | null;
-    audit_user_id: string | null;
-    /** 创建人 ID (源 creator 字段)。后端 effective_status=7 时有未关闭变更。 */
-    creator_id?: string | null;
-  };
-  currentUserId: string;
-  disabled?: boolean;
-  onAction: (
-    problemId: string,
-    action: "next" | "reject" | "done" | "close",
-  ) => void;
-}
-
-/**
- * 问题清单审批流操作按钮 (对照源 problemlist/index.vue 操作列):
- *
- * - status=1 已保存 (Node10 申请):creator 可 nextProcess 提交进审核。
- * - status=2 审核中 (Node20/30/40):当前处理人(now_handle_user) 可
- *   nextProcess(推进)/ rejectProcess(作废)。
- * - status=3 处置中:当前处理人(now_handle_user,fsm.py 在该状态即责任人)
- *   doneTask(completed=true → 待验证)。对照源 Vue doneTask 按钮的
- *   `checkUser([dutyUserId])` 语义,我方后端把 status=3 处理人收口到
- *   now_handle_user,故用 matchAnyUser([now_handle_user]) 判定命中。
- * - status=6 待验证:验证人(audit_user) closeTask(check_result="1" 关闭 / 否则打回)。
- * - status=4/5:终态无操作。
- * - effective_status=7 变更中:展示「变更中」标记,主操作仍按 status 走。
- *
- * now_handle_user 为 null 时(X-003 fallback)禁用审批/处置按钮并提示待指派。
- */
-export function ProblemActions({
-  problem,
-  currentUserId,
-  disabled,
-  onAction,
-}: ProblemActionsProps) {
-  const status = problem.status;
-  const isNowHandler = matchAnyUser(
-    [problem.now_handle_user],
-    currentUserId,
-  );
-  const isCreator = matchAnyUser([problem.creator_id], currentUserId);
-  const isDuty = matchAnyUser([problem.duty_user_id], currentUserId);
-  const isAuditor = matchAnyUser([problem.audit_user_id], currentUserId);
-  const globalDisabled = !!disabled;
-  const noAssignee = !problem.now_handle_user;
-
-  const buttons: React.ReactNode[] = [];
-
-  if (status === "1") {
-    // 已保存 — creator 提交审核 (nextProcess:Node10 → Node20)
-    buttons.push(
-      <Button
-        key="next"
-        size="sm"
-        variant="default"
-        disabled={globalDisabled || !isCreator}
-        title={isCreator ? undefined : "仅创建人可提交"}
-        onClick={() => onAction(problem.id, "next")}
-      >
-        提交审核
-      </Button>,
-    );
-  } else if (status === "2") {
-    // 审核中 — now_handle_user 推进/驳回
-    buttons.push(
-      <Button
-        key="next"
-        size="sm"
-        variant="default"
-        disabled={globalDisabled || !isNowHandler}
-        title={
-          noAssignee
-            ? "待指派处理人"
-            : isNowHandler
-              ? undefined
-              : "非当前处理人"
-        }
-        onClick={() => onAction(problem.id, "next")}
-      >
-        审核通过
-      </Button>,
-      <Button
-        key="reject"
-        size="sm"
-        variant="destructive"
-        disabled={globalDisabled || !isNowHandler}
-        title={
-          noAssignee
-            ? "待指派处理人"
-            : isNowHandler
-              ? undefined
-              : "非当前处理人"
-        }
-        onClick={() => onAction(problem.id, "reject")}
-      >
-        驳回
-      </Button>,
-    );
-  } else if (status === "3") {
-    // 处置中 — 命中 now_handle_user 即可处置(对照源 Vue doneTask 按钮的
-    // checkUser([dutyUserId]) 语义;fsm.py 把 status=3 处理人收口到
-    // now_handle_user)。now_handle_user 缺失(X-003)时,若 duty_user_id
-    // 命中当前用户则作为兜底放行,否则禁用并提示待指派。
-    const canHandle = isNowHandler || (!problem.now_handle_user && isDuty);
-    buttons.push(
-      <Button
-        key="done"
-        size="sm"
-        variant="default"
-        disabled={globalDisabled || !canHandle}
-        title={canHandle ? undefined : "仅当前处理人可处置"}
-        onClick={() => onAction(problem.id, "done")}
-      >
-        处置
-      </Button>,
-    );
-  } else if (status === "6") {
-    // 待验证 — 验证人验证关闭 (closeTask)
-    buttons.push(
-      <Button
-        key="close"
-        size="sm"
-        variant="default"
-        disabled={globalDisabled || !isAuditor}
-        title={isAuditor ? undefined : "仅验证人可关闭"}
-        onClick={() => onAction(problem.id, "close")}
-      >
-        验证关闭
-      </Button>,
-      <Button
-        key="reject"
-        size="sm"
-        variant="outline"
-        disabled={globalDisabled || !isAuditor}
-        title={isAuditor ? undefined : "仅验证人可打回"}
-        onClick={() => onAction(problem.id, "reject")}
-      >
-        打回处置
       </Button>,
     );
   }

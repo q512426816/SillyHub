@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel as PydanticModel
 from pydantic import Field, field_validator
@@ -47,8 +48,7 @@ class ProblemListBase(PydanticModel):
 
 
 class ProblemListCreate(ProblemListBase):
-    # 新建时是否立即提交 (submit=true 则创建后自动进 Node20 审核中)
-    submit: bool = False
+    pass
 
 
 class ProblemListUpdate(PydanticModel):
@@ -76,7 +76,7 @@ class ProblemListUpdate(PydanticModel):
 class ProblemListResp(ProblemListBase):
     id: uuid.UUID
     status: str
-    # 展示用有效状态 (内存态:有未关闭变更时为 7 变更中,否则同 status)
+    # 展示用有效状态 (3 态简化后恒等于 status；保留字段兼容前端)
     effective_status: str | None = None
     time_spent: float | None = None
     now_node: int | None = None
@@ -201,41 +201,36 @@ class ProcessLogResp(PydanticModel):
 
 
 # ===========================================================================
-# 流程动作请求
+# 问题清单执行流请求 (3 态，对齐任务计划)
 # ===========================================================================
 
 
-class NextProcessReq(PydanticModel):
-    """nextProcess — 推进到下一节点。"""
+class ProblemStartReq(PydanticModel):
+    """start — 启动问题 (新建 → 进行中)，建 in-flight TaskExecute。
 
-    comment: str | None = None
-
-
-class RejectProcessReq(PydanticModel):
-    """rejectProcess — 驳回到已作废。"""
-
-    comment: str | None = None
-
-
-class DoneTaskReq(PydanticModel):
-    """doneTask — 责任人完成处置。
-
-    ``completed=true`` 推进到待验证;``false`` 仅追加处置情况 (仍处置中)。
+    ``actual_start_time`` 可选 (前端跨天拆分补填时传指定日期，默认 now)。
+    problem_id 取自路径，execute_user_id 取自登录用户。
     """
 
-    handle_info: str | None = None
+    actual_start_time: datetime | None = None
+
+
+class ProblemExecuteReq(PydanticModel):
+    """execute — 收口 in-flight TaskExecute 并推进 3 态状态机。
+
+    - ``action="submit"``   : 回「新建」(可再次 start，重复执行)
+    - ``action="complete"`` : 「已完成」(终态)
+
+    ``task_execute_id`` 必填 (start 返回的 in-flight 记录)。跨天校验在 service。
+    """
+
+    task_execute_id: uuid.UUID
+    action: Literal["submit", "complete"]
+    execute_info: str | None = None
     time_spent: float | None = None
-    completed: bool = True
-
-
-class CloseTaskReq(PydanticModel):
-    """closeTask — 验证人验证关闭。
-
-    ``check_result == "1"`` 通过→已关闭;否则打回责任人→处置中。
-    """
-
-    check_info: str | None = None
-    check_result: str = "1"
+    actual_start_time: datetime | None = None
+    actual_end_time: datetime | None = None
+    execute_user_id: uuid.UUID | None = None
 
 
 # ===========================================================================
@@ -258,18 +253,16 @@ class ChangeRejectProcessReq(PydanticModel):
 __all__ = [
     "ChangeNextProcessReq",
     "ChangeRejectProcessReq",
-    "CloseTaskReq",
-    "DoneTaskReq",
-    "NextProcessReq",
     "ProblemChangeBase",
     "ProblemChangeCreate",
     "ProblemChangeResp",
     "ProblemChangeUpdate",
+    "ProblemExecuteReq",
     "ProblemListBase",
     "ProblemListCreate",
     "ProblemListResp",
     "ProblemListUpdate",
+    "ProblemStartReq",
     "ProcessLogResp",
     "ProcessTaskResp",
-    "RejectProcessReq",
 ]

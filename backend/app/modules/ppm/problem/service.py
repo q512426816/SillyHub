@@ -2,23 +2,21 @@
 
 职责:
 - 问题清单 CRUD (PpmProblemList)
-- 问题变更 CRUD (PpmProblemChange)
-- 4 节点审批流驱动:
-  - ``next_process``  : 推进到下一节点 (按当前 now_node + 项目角色查
-    ppm_project_member 找下一处理人;bug 跳过部门经理 40)
-  - ``reject_process`` : 驳回 → status=5 已作废
-  - ``done_task``     : 责任人完成处置 (completed=true → 6 待验证)
-  - ``close_task``    : 验证人验证 (check_result=1 → 4 已关闭 / 否则打回责任人)
-- 每次流转同事务:写 ProcessLog + 删旧 ProcessTask/插新 ProcessTask
-  + audit_log (BaseModel 自动审计,额外 log)
-- 找下一处理人缺失 fallback (X-003):项目无该角色成员 → 流程挂起 +
-  返回待指派提示 (不崩溃)
-- 列表 page:有未关闭变更时内存态标记 status=7 变更中
+- 问题变更 CRUD (PpmProblemChange) — deprecated 模块 (D-005)，前端入口已停用
+- 问题清单 3 态执行流 (2026-07-20 简化，对齐任务计划)：
+  - ``start_problem``   : 新建 → 进行中，建 in-flight TaskExecute(status=DOING)
+  - ``execute_problem`` : 收口 in-flight TaskExecute(status=END)；
+                          action=submit → 回新建 (可重复执行)，
+                          action=complete → 已完成 (终态)
+  - 跨天校验 (actual_start.date != actual_end.date → 422，前端拆逐天)
+- 问题变更审批流 (``next_change`` / ``reject_change``) 保留 deprecated 调用
+  (ProblemChangeStatus / CHANGE_NODE_NEXT / compute_change_next_node)。
 
 平台级,无 workspace 过滤 (D-001@v1)。
 
-设计依据:``tasks/task-05.md`` + ``design.md`` §8 + 源
-``ProblemNode10-40`` / ``ProblemProcesssExecutor`` / ``ProblemListServiceImpl``。
+设计依据:change 2026-07-20-problem-list-align-task-plan design.md §5/§8 +
+decisions.md D-001~D-006 + ``tasks/task-03.md``；镜像
+``app/modules/ppm/task/service.py`` start/execute_plan 两段式。
 """
 
 from __future__ import annotations
@@ -46,13 +44,10 @@ from app.modules.ppm.problem.fsm import (
     CHANGE_TRANSITIONS,
     NODE_NAMES,
     NODE_TO_ROLE,
-    TRANSITIONS,
     ProblemChangeStatus,
     ProblemNode,
     ProblemStatus,
     compute_change_next_node,
-    compute_next_node,
-    is_audit_node,
     is_change_audit_node,
 )
 from app.modules.ppm.problem.model import (
@@ -67,6 +62,12 @@ from app.modules.ppm.project.model import PpmProjectMaintenance, PpmProjectMembe
 from app.modules.ppm.task.model import TaskExecute
 
 log = get_logger(__name__)
+
+
+# TaskExecute 生命周期状态码 (镜像 ``app/modules/ppm/task/service.py`` STATUS_*，
+# 问题清单 start/execute 复用同一张 ppm_task_execute 表，problem_task_id 关联)。
+STATUS_DOING = "30"  # 处置中 (start 建的 in-flight 记录)
+STATUS_END = "90"  # 已完成 (execute 收口)
 
 
 # ===========================================================================
@@ -227,7 +228,7 @@ class ProblemService:
         duty_user_id: uuid.UUID | None = None,
         user: User | None = None,
     ) -> Page[PpmProblemList]:
-        """分页列表(支持服务端过滤)。有未关闭变更的行内存态标记 status=7 变更中。
+        """分页列表(支持服务端过滤)。3 态简化后 effective_status = status。
 
         过滤参数(全部可选,AND 组合):
         - keyword:模糊匹配 project_name/model_name/pro_desc/func_name/duty_user_name/find_by
@@ -269,48 +270,24 @@ class ProblemService:
             scope = await problem_scope_clause(self._session, user)
             if scope is not None:
                 clauses.append(scope)
-        page = await _Crud(self._session, PpmProblemList).list_paged(
+        return await _Crud(self._session, PpmProblemList).list_paged(
             req=req,
             allowed_sort={"created_at", "find_time", "status"},
             where_clauses=clauses or None,
         )
-        # 变更中标记 (内存态):查所有有未关闭变更的 resource_id 集合,
-        # 命中的行用 object.__setattr__ 设置 _effective_status="7" (非持久化,
-        # 不污染 status 持久化字段,通过 effective_status property 暴露)。
-        changing_ids = await self._changing_resource_ids()
-        for item in page.items:
-            if str(item.id) in changing_ids:
-                object.__setattr__(item, "_effective_status", ProblemStatus.CHANGING.value)
-        return page
 
     async def create_problem(
         self,
         data: dict[str, Any],
-        *,
-        actor_id: str | None = None,
-        actor_name: str | None = None,
     ) -> PpmProblemList:
-        """创建问题清单。
+        """创建问题清单 (3 态简化，新建即「新建」态)。
 
-        ``submit=true`` 时**直接生效**:跳过 4 节点审批流,由 ``submit_problem``
-        把问题从 已保存(1) 推进到 处置中(3) 并分配给责任人;否则 status=1
-        已保存 (草稿)。
-
-        actor 取自调用方 (router 用 _actor(user)),不再读取不存在的
-        ``PpmProblemList.created_by`` (该模型无此字段)。
+        对齐任务计划：新建 = 「新建」态，由后续 ``start_problem`` 推进到「进行中」。
+        不再有 submit/审批分支 (2026-07-20 简化)。
         """
-        submit = bool(data.pop("submit", False))
-        data.setdefault("status", ProblemStatus.SAVED.value)
-        data.setdefault("now_node", ProblemNode.APPLY.value)
+        data.setdefault("status", ProblemStatus.NEW.value)
         await self._backfill_names(data)
-        obj = await _Crud(self._session, PpmProblemList).create(data)
-        if submit:
-            obj = await self.submit_problem(
-                obj.id,
-                actor_id=str(actor_id or "system"),
-                actor_name=actor_name,
-            )
-        return obj
+        return await _Crud(self._session, PpmProblemList).create(data)
 
     async def list_problems_by_date_range(
         self,
@@ -322,7 +299,6 @@ class ProblemService:
         - 反向区间 (start > end) 内部自动 swap,不报错
         - find_time 为空的问题不返回 (无发现时间,不纳入区间统计)
         - 按 find_time 倒序返回
-        - 有未关闭变更的行内存态标记 effective_status=7 变更中 (同 list_problems)
 
         设计依据:tasks/task-06.md §实现要求 2 + §边界处理 1/2/7。
         """
@@ -334,13 +310,7 @@ class ProblemService:
             .where(PpmProblemList.find_time <= hi)
             .order_by(PpmProblemList.find_time.desc())
         )
-        items = list((await self._session.execute(stmt)).scalars().all())
-        # 变更中标记 (内存态):与 list_problems 一致
-        changing_ids = await self._changing_resource_ids()
-        for item in items:
-            if str(item.id) in changing_ids:
-                object.__setattr__(item, "_effective_status", ProblemStatus.CHANGING.value)
-        return items
+        return list((await self._session.execute(stmt)).scalars().all())
 
     async def get_problem(self, item_id: uuid.UUID) -> PpmProblemList:
         return await _Crud(self._session, PpmProblemList).get(item_id)
@@ -439,439 +409,177 @@ class ProblemService:
         return list((await self._session.execute(stmt)).scalars().all())
 
     # ------------------------------------------------------------------
-    # 审批流:next / reject / done / close
+    # 问题清单执行流 (3 态，对齐任务计划)
     # ------------------------------------------------------------------
 
-    async def submit_problem(
+    async def start_problem(
         self,
-        item_id: uuid.UUID,
+        problem_id: uuid.UUID,
         *,
-        actor_id: str,
-        actor_name: str | None,
-        comment: str | None = None,
-    ) -> PpmProblemList:
-        """提交直接生效 —— 跳过 4 节点审批流,直接进入执行中 (status=3)。
+        execute_user_id: uuid.UUID | None = None,
+        actual_start_time: datetime | None = None,
+    ) -> TaskExecute:
+        """启动问题 (新建 → 进行中)：建一条 in-flight TaskExecute 并记录 actual_start_time。
 
-        业务决策 (2026-07-17):问题新建/编辑"提交"不再走审批 (申请→开发经理
-        →项目经理→部门经理),提交即生效,``now_node`` 置 None (审批结束),
-        ``now_handle_user`` 置为责任人,等待责任人处置 (doneTask)。
+        对齐 ``task/service.py`` start：多次执行每次「开始」产生一条独立
+        TaskExecute (1 problem : N execute)，``actual_start_time`` 可选
+        (前端跨天拆分补填时传指定日期，默认 now)。返回的 ``id`` 作为后续
+        ``execute_problem`` 的 ``task_execute_id``。
 
-        - 仅 已保存(1) / 审核中(2) 可提交 → 处置中(3)
-        - 无需项目角色成员查找 (区别于 ``next_process``),无 PENDING_ASSIGNMENT
-        - 写一条 ProcessLog + 替换在办任务为 end(处置)
+        - 仅「新建」态可开始 (进行中已有 in-flight 记录，不可重复开始)
+        - problem_task_id 关联 (与 plan_task_id 互斥，见 TaskExecute 模型)
         """
-        problem = await self.get_problem(item_id)
-        cur_status = ProblemStatus(problem.status)
-        if cur_status not in (ProblemStatus.SAVED, ProblemStatus.AUDITING):
+        problem = await self.get_problem(problem_id)
+        if problem.status != ProblemStatus.NEW.value:
             raise ProblemError(
-                f"当前状态 {problem.status} 不可提交",
+                f"仅「新建」状态可开始 (current={problem.status})",
                 details={"problem_id": str(problem.id), "status": problem.status},
             )
-        assert_transition(
-            cur_status,
-            ProblemStatus.DOING,
-            TRANSITIONS,
-            entity="problem_list",
-            entity_id=problem.id,
+        now = _now()
+        start_time = actual_start_time or now
+        exc = TaskExecute(
+            id=uuid.uuid4(),
+            problem_task_id=problem.id,
+            execute_user_id=execute_user_id,
+            actual_start_time=start_time,
+            status=STATUS_DOING,
+            current_user_id=execute_user_id,
         )
-        # now_handle_user 是 String 列 (逗号列表),duty_user_id 是 UUID,str() 化。
-        next_handle_user = str(problem.duty_user_id) if problem.duty_user_id else None
-        next_handle_user_name = problem.duty_user_name
+        self._session.add(exc)
         problem.status = ProblemStatus.DOING.value
-        problem.now_node = None  # 审批结束,直接进处置
-        problem.now_handle_user = next_handle_user
-        problem.now_handle_user_name = next_handle_user_name
-        problem.updated_at = _now()
+        if problem.plan_start_time is None:
+            problem.plan_start_time = start_time
+        problem.updated_at = now
         await self._session.commit()
+        await self._session.refresh(exc)
         await self._session.refresh(problem)
-
-        # 在办任务:删旧插新 (end = 处置,挂责任人)
-        await self._replace_list_task(
-            business_id=problem.id,
-            node_key="end",
-            node_name="处置",
-            handle_user=next_handle_user,
-            handle_user_name=next_handle_user_name,
-        )
-
-        # 流程履历
-        handle_info = self._build_handle_info(
-            "submit", actor_name, "提交", "处置", next_handle_user_name
-        )
-        await self._write_list_log(
-            business_id=problem.id,
-            node_key="submit",
-            actor_id=actor_id,
-            actor_name=actor_name,
-            handle_info=handle_info,
-            next_user_id=next_handle_user,
-            next_user_name=next_handle_user_name,
-            comment=comment,
-        )
-
         log.info(
-            "problem_submit_direct",
+            "problem_started",
             problem_id=str(problem.id),
-            actor=actor_id,
+            task_execute_id=str(exc.id),
         )
-        return problem
+        return exc
 
-    async def next_process(
+    async def execute_problem(
         self,
-        item_id: uuid.UUID,
+        problem_id: uuid.UUID,
         *,
-        actor_id: str,
-        actor_name: str | None,
-        comment: str | None = None,
+        task_execute_id: uuid.UUID,
+        action: str,
+        execute_info: str | None = None,
+        time_spent: float | None = None,
+        actual_start_time: datetime | None = None,
+        actual_end_time: datetime | None = None,
+        execute_user_id: uuid.UUID | None = None,
     ) -> PpmProblemList:
-        """推进到下一节点 (申请→开发经理→项目经理→[非bug部门经理]→结束)。
+        """执行问题：单事务收口 in-flight TaskExecute 并推进 3 态状态机。
 
-        - 当前 Node10/20/30/40 各自定义下一节点 (bug 在 30 直接结束)
-        - 下一节点对应角色查 ppm_project_member 找处理人
-        - 找不到处理人 (X-003):流程仍推进到下一节点 (now_node 更新),
-          但 now_handle_user 置空,标记挂起待指派,返回 ProblemPendingAssignment
-          提示 (不抛 4xx,业务上算成功推进)
-        - 下一节点为 None (结束):status=3 处置中,now_handle_user=责任人
+        对齐 ``task/service.py`` execute_plan：
+        - ``action="complete"`` → 收口 in-flight 记录 status=END + problem「已完成」(终态)
+        - ``action="submit"`` → 收口 in-flight 记录 status=END + problem 回「新建」
+          (可再次 start，支持重复执行)
 
-        每次推进:写 ProcessLog + 删旧 ProcessTask + 插新 ProcessTask。
+        ``task_execute_id`` 必填 (start_problem 创建的 in-flight 记录)。
+        跨天校验 (actual_start.date != actual_end.date → 422，前端拆逐天)。
+        累加 problem.time_spent + 追加 problem.handle_info (源语义)。
+
+        Returns:
+            收口后的 :class:`PpmProblemList` (前端刷新问题新状态)。
         """
-        problem = await self.get_problem(item_id)
-        current_node = problem.now_node or ProblemNode.APPLY.value
-        next_node = compute_next_node(current_node, problem.pro_type)
-        current_node_name = NODE_NAMES.get(current_node, str(current_node))
-
-        if next_node is None:
-            # 结束节点 → 处置中,流转给责任人
-            assert_transition(
-                ProblemStatus(problem.status),
-                ProblemStatus.DOING,
-                TRANSITIONS,
-                entity="problem_list",
-                entity_id=problem.id,
+        problem = await self.get_problem(problem_id)
+        if problem.status != ProblemStatus.DOING.value:
+            raise ProblemError(
+                f"仅「进行中」状态可执行 (current={problem.status})",
+                details={"problem_id": str(problem.id), "status": problem.status},
             )
-            # now_handle_user 字段是 String (逗号列表),duty_user_id 已是 UUID,
-            # 赋值前 str() 化以匹配 String 列的 bind processor。
-            next_handle_user = str(problem.duty_user_id) if problem.duty_user_id else None
-            next_handle_user_name = problem.duty_user_name
-            next_node_name = "处置"
-            problem.status = ProblemStatus.DOING.value
-            problem.now_node = None  # 审批结束
-        else:
-            # 审核节点 → 找该角色成员。
-            # 注意:审核节点之间 (10→20→30→40) status 保持 AUDITING (2→2 是
-            # 保持而非迁移),只在首次 1→2 进入审核时校验迁移合法性;后续审核
-            # 节点推进 status 不变,仅 now_node 变化,不重复 assert。
-            if problem.status == ProblemStatus.SAVED.value:
-                assert_transition(
-                    ProblemStatus(problem.status),
-                    ProblemStatus.AUDITING,
-                    TRANSITIONS,
-                    entity="problem_list",
-                    entity_id=problem.id,
-                )
-            elif problem.status != ProblemStatus.AUDITING.value:
-                # 非已保存/审核中状态不可推进审批流
-                raise ProblemError(
-                    f"当前状态 {problem.status} 不可推进审批流",
-                    details={"problem_id": str(problem.id), "status": problem.status},
-                )
-            role = NODE_TO_ROLE.get(next_node)
-            members = await self._find_role_members(problem.project_id, role or "")
-            next_handle_user = ",".join(str(m.user_id) for m in members) or None
-            next_handle_user_name = ",".join(filter(None, (m.user_name for m in members))) or None
-            next_node_name = NODE_NAMES.get(next_node, str(next_node))
-            problem.status = ProblemStatus.AUDITING.value
-            problem.now_node = next_node
-
-        problem.now_handle_user = next_handle_user
-        problem.now_handle_user_name = next_handle_user_name
-        problem.updated_at = _now()
-        await self._session.commit()
-        await self._session.refresh(problem)
-
-        # ProcessTask:删旧插新
-        await self._replace_list_task(
-            business_id=problem.id,
-            node_key=str(next_node) if next_node is not None else "end",
-            node_name=next_node_name,
-            handle_user=next_handle_user,
-            handle_user_name=next_handle_user_name,
-        )
-
-        # ProcessLog
-        handle_info = self._build_handle_info(
-            "next", actor_name, current_node_name, next_node_name, next_handle_user_name
-        )
-        await self._write_list_log(
-            business_id=problem.id,
-            node_key=str(current_node),
-            actor_id=actor_id,
-            actor_name=actor_name,
-            handle_info=handle_info,
-            next_user_id=next_handle_user,
-            next_user_name=next_handle_user_name,
-            comment=comment,
-        )
-
-        log.info(
-            "problem_next_process",
-            problem_id=str(problem.id),
-            from_node=current_node,
-            to_node=next_node,
-            status=problem.status,
-            actor=actor_id,
-        )
-
-        # X-003 fallback:推进成功但缺处理人 → 标记待指派
-        if next_node is not None and not next_handle_user:
-            raise ProblemPendingAssignment(
-                f"项目缺少「{NODE_TO_ROLE.get(next_node, '')}」,流程已推进到"
-                f"{next_node_name}节点,待指派处理人",
+        now = _now()
+        exc = await self._session.get(TaskExecute, task_execute_id)
+        if exc is None:
+            raise ProblemError(
+                f"TaskExecute '{task_execute_id}' 不存在",
+                details={"task_execute_id": str(task_execute_id)},
+            )
+        if exc.problem_task_id != problem.id:
+            raise ProblemError(
+                "task_execute_id 与 problem_id 不匹配",
                 details={
                     "problem_id": str(problem.id),
-                    "pending_node": next_node,
-                    "pending_role": NODE_TO_ROLE.get(next_node),
+                    "task_execute_id": str(task_execute_id),
                 },
             )
-        return problem
+        # 强制回填 actual_end_time (让新录入有 actual 区间，日历求和才能显示)
+        exc.actual_end_time = actual_end_time or now
 
-    async def reject_process(
-        self,
-        item_id: uuid.UUID,
-        *,
-        actor_id: str,
-        actor_name: str | None,
-        comment: str | None = None,
-    ) -> PpmProblemList:
-        """驳回 → status=5 已作废。
-
-        仅审核节点 (20/30/40) 可驳回。源 reject 会回退到 STATUS_SAVE,
-        但 task-05.md 验收明确 reject→5 已作废,遵循 task 规范。
-        """
-        problem = await self.get_problem(item_id)
-        current_node = problem.now_node or ProblemNode.APPLY.value
-        if not is_audit_node(current_node):
+        # 跨天校验 (start 写 actual_start, execute 写 actual_end, 跨两次请求)
+        if (
+            exc.actual_start_time is not None
+            and exc.actual_start_time.date() != exc.actual_end_time.date()
+        ):
             raise ProblemError(
-                f"当前节点 {current_node} 不可驳回 (仅审核节点 20/30/40 可驳回)",
-                details={"problem_id": str(problem.id), "current_node": current_node},
+                "执行起止时间不可跨天，请拆成每天单独填报",
+                details={
+                    "actual_start_time": exc.actual_start_time.isoformat(),
+                    "actual_end_time": exc.actual_end_time.isoformat(),
+                },
             )
-        assert_transition(
-            ProblemStatus(problem.status),
-            ProblemStatus.BACK,
-            TRANSITIONS,
-            entity="problem_list",
-            entity_id=problem.id,
-        )
-        current_node_name = NODE_NAMES.get(current_node, str(current_node))
-        problem.status = ProblemStatus.BACK.value
-        problem.now_node = None
-        problem.now_handle_user = None
-        problem.now_handle_user_name = None
-        problem.updated_at = _now()
-        await self._session.commit()
-        await self._session.refresh(problem)
 
-        # 删所有在办任务 (驳回无下一步任务)
-        await self._session.execute(
-            delete(PpmProblemListProcessTask).where(
-                PpmProblemListProcessTask.business_id == problem.id
-            )
-        )
-        await self._session.commit()
+        # 同步执行信息
+        if execute_info is not None:
+            exc.execute_info = execute_info
+        if time_spent is not None:
+            exc.time_spent = time_spent
+        if actual_start_time is not None:
+            exc.actual_start_time = actual_start_time
+        if execute_user_id is not None:
+            exc.execute_user_id = execute_user_id
+            exc.current_user_id = execute_user_id
 
-        handle_info = self._build_handle_info("reject", actor_name, current_node_name, None, None)
-        await self._write_list_log(
-            business_id=problem.id,
-            node_key=str(current_node),
-            actor_id=actor_id,
-            actor_name=actor_name,
-            handle_info=handle_info,
-            next_user_id=None,
-            next_user_name=None,
-            comment=comment,
-        )
-        log.info(
-            "problem_reject_process",
-            problem_id=str(problem.id),
-            from_node=current_node,
-            actor=actor_id,
-        )
-        return problem
+        # 收口 in-flight 记录 (终态 END 不可重复收口)
+        self._assert_execute_transition(exc.status)
+        exc.status = STATUS_END
+        exc.updated_at = now
 
-    async def done_task(
-        self,
-        item_id: uuid.UUID,
-        *,
-        actor_id: str,
-        actor_name: str | None,
-        handle_info: str | None = None,
-        time_spent: float | None = None,
-        completed: bool = True,
-    ) -> PpmProblemList:
-        """责任人完成处置。
-
-        - ``completed=true``:status=3 执行中 → 4 已完成 (终态),real_end_time=now,
-          now_handle_user 置空 (新流程跳过待验证,直接完工)
-        - ``completed=false``:仅追加 handle_info,仍 status=3 执行中
-        - 累加 time_spent (源语义)
-        """
-        problem = await self.get_problem(item_id)
-        if completed:
-            assert_transition(
-                ProblemStatus(problem.status),
-                ProblemStatus.CLOSED,
-                TRANSITIONS,
-                entity="problem_list",
-                entity_id=problem.id,
-            )
+        # action 分支：complete→已完成；submit→回新建 (支持再次 start 重复执行)
+        if action == "complete":
             problem.status = ProblemStatus.CLOSED.value
-            problem.real_end_time = _now()
-            # 已完成 = 终态,无下一处理人
+            problem.real_end_time = exc.actual_end_time
             problem.now_handle_user = None
             problem.now_handle_user_name = None
-            target_node_name = "已完成"
-        else:
-            target_node_name = "执行中"
-            if problem.status != ProblemStatus.DOING.value:
-                raise ProblemError(
-                    "非执行中状态不可追加处置情况",
-                    details={"problem_id": str(problem.id), "status": problem.status},
-                )
+        else:  # submit
+            problem.status = ProblemStatus.NEW.value
 
-        # 追加处置情况 (源在 handle_info 前缀时间戳)
-        if handle_info:
-            stamp = _now().strftime("%Y-%m-%d %H:%M:%S")
-            prefix = f"【{stamp}】{handle_info}"
-            problem.handle_info = (
-                f"{prefix}\n{problem.handle_info}" if problem.handle_info else prefix
-            )
-        # 累加 time_spent
+        # 累加 time_spent + 追加 handle_info (源语义)
         if time_spent is not None:
             base = float(problem.time_spent or 0)
             problem.time_spent = base + time_spent
-        problem.updated_at = _now()
-        # D-007: 额外创建一条 TaskExecute(problem_task_id 关联, actual 单点 now)
-        # P0-1: 不取不存在的 real_start_time,用单点 now(同日, 跨天校验天然不触发)
-        try:
-            actor_uuid = uuid.UUID(actor_id)
-        except (ValueError, TypeError):
-            actor_uuid = None
-        done_now = _now()
-        self._session.add(
-            TaskExecute(
-                id=uuid.uuid4(),
-                problem_task_id=problem.id,
-                execute_user_id=actor_uuid,
-                actual_start_time=done_now,
-                actual_end_time=done_now,
-                time_spent=time_spent,
-                execute_info=handle_info,
-                status="90",
+        if execute_info:
+            stamp = now.strftime("%Y-%m-%d %H:%M:%S")
+            prefix = f"【{stamp}】{execute_info}"
+            problem.handle_info = (
+                f"{prefix}\n{problem.handle_info}" if problem.handle_info else prefix
             )
-        )
-        await self._session.commit()
-        await self._session.refresh(problem)
-
-        # ProcessTask 更新
-        node_key = "closed" if completed else "doing"
-        await self._replace_list_task(
-            business_id=problem.id,
-            node_key=node_key,
-            node_name=target_node_name,
-            handle_user=problem.now_handle_user,
-            handle_user_name=problem.now_handle_user_name,
-        )
-
-        await self._write_list_log(
-            business_id=problem.id,
-            node_key=node_key,
-            actor_id=actor_id,
-            actor_name=actor_name,
-            handle_info=problem.handle_info,
-            next_user_id=problem.now_handle_user,
-            next_user_name=problem.now_handle_user_name,
-            comment=handle_info,
-        )
-        log.info(
-            "problem_done_task",
-            problem_id=str(problem.id),
-            completed=completed,
-            actor=actor_id,
-        )
-        return problem
-
-    async def close_task(
-        self,
-        item_id: uuid.UUID,
-        *,
-        actor_id: str,
-        actor_name: str | None,
-        check_info: str | None = None,
-        check_result: str = "1",
-    ) -> PpmProblemList:
-        """验证人验证关闭。
-
-        - ``check_result == "1"``:通过 → status=6→4 已关闭,
-          now_handle_user 清空,audit_time/check_time/check_info 落库
-        - 否则:打回 → status=6→3 处置中,now_handle_user 切回责任人
-        """
-        problem = await self.get_problem(item_id)
-        target = ProblemStatus.CLOSED if check_result == "1" else ProblemStatus.DOING
-        assert_transition(
-            ProblemStatus(problem.status),
-            target,
-            TRANSITIONS,
-            entity="problem_list",
-            entity_id=problem.id,
-        )
-        now = _now()
-        problem.status = target.value
-        problem.check_result = check_result
-        problem.check_info = check_info
-        problem.check_time = now
-        problem.audit_time = now
-        problem.audit_user_id = actor_id
-        problem.audit_user_name = actor_name
-        if target is ProblemStatus.CLOSED:
-            problem.now_handle_user = None
-            problem.now_handle_user_name = None
-            node_key = "closed"
-            node_name = "已关闭"
-        else:
-            # 打回责任人
-            problem.now_handle_user = str(problem.duty_user_id) if problem.duty_user_id else None
-            problem.now_handle_user_name = problem.duty_user_name
-            node_key = "doing"
-            node_name = "处置中"
         problem.updated_at = now
-        await self._session.commit()
-        await self._session.refresh(problem)
 
-        await self._replace_list_task(
-            business_id=problem.id,
-            node_key=node_key,
-            node_name=node_name,
-            handle_user=problem.now_handle_user,
-            handle_user_name=problem.now_handle_user_name,
-        )
-        await self._write_list_log(
-            business_id=problem.id,
-            node_key=node_key,
-            actor_id=actor_id,
-            actor_name=actor_name,
-            handle_info=check_info,
-            next_user_id=problem.now_handle_user,
-            next_user_name=problem.now_handle_user_name,
-            comment=check_info,
-        )
+        await self._session.commit()
+        await self._session.refresh(exc)
+        await self._session.refresh(problem)
         log.info(
-            "problem_close_task",
+            "problem_executed",
             problem_id=str(problem.id),
-            check_result=check_result,
-            status=problem.status,
-            actor=actor_id,
+            task_execute_id=str(exc.id),
+            status=exc.status,
+            action=action,
         )
         return problem
+
+    @staticmethod
+    def _assert_execute_transition(current: str) -> None:
+        """校验 TaskExecute 状态迁移合法性 (终态 END 不可再迁移)。"""
+        if current == STATUS_END:
+            raise ProblemError(
+                f"TaskExecute 已收口 (status={current})，不可重复执行",
+                details={"current": current},
+            )
 
     # ------------------------------------------------------------------
     # 流程查询
@@ -1176,72 +884,6 @@ class ProblemService:
         # 统一 str() 后比较。
         pid_str = str(project_id)
         return [m for m in all_members if str(m.pm_project_id) == pid_str]
-
-    async def _changing_resource_ids(self) -> set[str]:
-        """有未关闭变更 (status != 2) 的 problem_list.id 集合 (字符串化)。"""
-        stmt = select(PpmProblemChange.resource_id).where(
-            PpmProblemChange.status != ProblemChangeStatus.CLOSED.value
-        )
-        rows = (await self._session.execute(stmt)).scalars().all()
-        return {str(r) for r in rows}
-
-    async def _replace_list_task(
-        self,
-        *,
-        business_id: uuid.UUID,
-        node_key: str,
-        node_name: str,
-        handle_user: str | None,
-        handle_user_name: str | None,
-    ) -> None:
-        """删旧在办任务 + 插新在办任务 (原子)。"""
-        await self._session.execute(
-            delete(PpmProblemListProcessTask).where(
-                PpmProblemListProcessTask.business_id == business_id
-            )
-        )
-        task = PpmProblemListProcessTask(
-            id=uuid.uuid4(),
-            business_id=business_id,
-            node_key=node_key,
-            node_name=node_name,
-            now_handle_user=handle_user,
-            now_handle_user_name=handle_user_name,
-            created_at=_now(),
-            updated_at=_now(),
-        )
-        self._session.add(task)
-        await self._session.commit()
-
-    async def _write_list_log(
-        self,
-        *,
-        business_id: uuid.UUID,
-        node_key: str,
-        actor_id: str,
-        actor_name: str | None,
-        handle_info: str | None,
-        next_user_id: str | None,
-        next_user_name: str | None,
-        comment: str | None = None,
-    ) -> PpmProblemListProcessLog:
-        proc = PpmProblemListProcessLog(
-            id=uuid.uuid4(),
-            business_id=business_id,
-            node_key=node_key,
-            handle_user_id=_safe_uuid(actor_id),
-            handle_user_name=actor_name,
-            handle_date=_now(),
-            handle_info=handle_info,
-            next_user_id=_safe_uuid(next_user_id) if next_user_id else None,
-            next_user_name=next_user_name,
-            comment=comment,
-            created_at=_now(),
-        )
-        self._session.add(proc)
-        await self._session.commit()
-        await self._session.refresh(proc)
-        return proc
 
     async def _replace_change_task(
         self,

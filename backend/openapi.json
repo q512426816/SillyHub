@@ -10834,6 +10834,185 @@
         }
       }
     },
+    "/api/ppm/project-maintenance/member-summary": {
+      "get": {
+        "tags": [
+          "ppm-project"
+        ],
+        "summary": "Page Project Member Summary",
+        "description": "项目成员聚合 (派生 owner_name/member_count + 多维筛选)。\n\n必须声明在 ``/{entity_id}`` GET 之前 (路径优先级见 :134 注释),否则\n``member-summary`` 会被当 entity_id 解析为 UUID 失败 (422)。",
+        "operationId": "page_project_member_summary_api_ppm_project_maintenance_member_summary_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
+            }
+          },
+          {
+            "name": "order_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order By"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "desc",
+              "title": "Order"
+            }
+          },
+          {
+            "name": "project_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Name"
+            }
+          },
+          {
+            "name": "project_status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Status"
+            }
+          },
+          {
+            "name": "project_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Type"
+            }
+          },
+          {
+            "name": "owner_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Name"
+            }
+          },
+          {
+            "name": "member_keyword",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Member Keyword"
+            }
+          },
+          {
+            "name": "role_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Role Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ProjectMemberSummaryItem_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/ppm/customer-maintenance": {
       "post": {
         "tags": [
@@ -12134,6 +12313,7 @@
           "ppm-plan"
         ],
         "summary": "List Plan Node Details",
+        "description": "列出模板明细 (design §5.2)。\n\n- 不传 ``module_id`` → 返回该模板全部明细 (无模块模板二层用)。\n- 传 ``module_id`` → 仅返回挂该模块的明细 (有模块模板三层按模块拉,D-002)。",
         "operationId": "list_plan_node_details_api_ppm_plan_node__plan_node_id__details_get",
         "parameters": [
           {
@@ -12143,6 +12323,22 @@
             "schema": {
               "type": "string",
               "title": "Plan Node Id"
+            }
+          },
+          {
+            "name": "module_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module Id"
             }
           }
         ],
@@ -12331,6 +12527,56 @@
                     "$ref": "#/components/schemas/PlanNodeModuleResp"
                   },
                   "title": "Response List Modules Api Ppm Plan Node  Plan Node Id  Modules Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ppm/plan-node-module/by-project": {
+      "get": {
+        "tags": [
+          "ppm-plan"
+        ],
+        "summary": "List Modules By Project",
+        "description": "按项目列出其下所有模块 (problem 表单下拉用)。\n\n反查 project → ps_project_plan → ps_plan_node → plan_node_module。\n固定路径前置于 ``/plan-node-module/{item_id}`` 参数化路由,否则\nFastAPI 按注册顺序把 ``by-project`` 当 item_id 解析为 UUID 失败返回 422\n(同 export-excel / list-by-date-range 模式)。非法 project_id 由路由层\nUUID 校验拦截为 422,service 永远收到合法 UUID。",
+        "operationId": "list_modules_by_project_api_ppm_plan_node_module_by_project_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "项目 ID",
+              "title": "Project Id"
+            },
+            "description": "项目 ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlanNodeModuleSimpleItem"
+                  },
+                  "title": "Response List Modules By Project Api Ppm Plan Node Module By Project Get"
                 }
               }
             }
@@ -14061,6 +14307,22 @@
             }
           },
           {
+            "name": "module_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module Id"
+            }
+          },
+          {
             "name": "status",
             "in": "query",
             "required": false,
@@ -14240,6 +14502,48 @@
         },
         "responses": {
           "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskExecuteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ppm/task-plan/start": {
+      "post": {
+        "tags": [
+          "ppm-task"
+        ],
+        "summary": "Start Plan Task",
+        "description": "启动任务(未开始→进行中): 创建 in-flight TaskExecute 记 actual_start_time。\n\n返回的 ``id`` 作为后续 POST /task-plan/execute 的 ``task_execute_id``。\nD-002 多次填报: 每次 start 产生一条独立 TaskExecute(1 plan : N execute)。",
+        "operationId": "start_plan_task_api_ppm_task_plan_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -14501,6 +14805,22 @@
                 }
               ],
               "title": "Project Id"
+            }
+          },
+          {
+            "name": "module_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module Id"
             }
           },
           {
@@ -14943,6 +15263,22 @@
                 }
               ],
               "title": "Plan Task Id"
+            }
+          },
+          {
+            "name": "problem_task_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Problem Task Id"
             }
           },
           {
@@ -15976,6 +16312,25 @@
             }
           },
           {
+            "name": "duty_user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "责任人 id(我的任务)",
+              "title": "Duty User Id"
+            },
+            "description": "责任人 id(我的任务)"
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -16300,13 +16655,14 @@
         }
       }
     },
-    "/api/ppm/problem-list/{item_id}/next": {
+    "/api/ppm/problem-list/{item_id}/start": {
       "post": {
         "tags": [
           "ppm-problem"
         ],
-        "summary": "Next Process",
-        "operationId": "next_process_api_ppm_problem_list__item_id__next_post",
+        "summary": "Start Problem",
+        "description": "启动问题 (新建 → 进行中)：建 in-flight TaskExecute，返回其 id 供 execute 用。\n\n返回的 ``id`` 作为后续 PUT /problem-list/{id}/execute 的 ``task_execute_id``。\n多次执行每次「开始」产生一条独立 TaskExecute (1 problem : N execute)。",
+        "operationId": "start_problem_api_ppm_problem_list__item_id__start_post",
         "parameters": [
           {
             "name": "item_id",
@@ -16324,18 +16680,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/NextProcessReq"
+                "$ref": "#/components/schemas/ProblemStartReq"
               }
             }
           }
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemListResp"
+                  "$ref": "#/components/schemas/TaskExecuteResponse"
                 }
               }
             }
@@ -16353,13 +16709,14 @@
         }
       }
     },
-    "/api/ppm/problem-list/{item_id}/reject": {
-      "post": {
+    "/api/ppm/problem-list/{item_id}/execute": {
+      "put": {
         "tags": [
           "ppm-problem"
         ],
-        "summary": "Reject Process",
-        "operationId": "reject_process_api_ppm_problem_list__item_id__reject_post",
+        "summary": "Execute Problem",
+        "description": "执行问题：收口 in-flight TaskExecute 并推进状态机。\n\n- action=complete → 已完成 (终态)\n- action=submit → 回新建 (可再次 start，重复执行)",
+        "operationId": "execute_problem_api_ppm_problem_list__item_id__execute_put",
         "parameters": [
           {
             "name": "item_id",
@@ -16377,7 +16734,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RejectProcessReq"
+                "$ref": "#/components/schemas/ProblemExecuteReq"
               }
             }
           }
@@ -16389,206 +16746,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemListResp"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/ppm/problem-list/{item_id}/done": {
-      "post": {
-        "tags": [
-          "ppm-problem"
-        ],
-        "summary": "Done Task",
-        "operationId": "done_task_api_ppm_problem_list__item_id__done_post",
-        "parameters": [
-          {
-            "name": "item_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Item Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DoneTaskReq"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemListResp"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/ppm/problem-list/{item_id}/close": {
-      "post": {
-        "tags": [
-          "ppm-problem"
-        ],
-        "summary": "Close Task",
-        "operationId": "close_task_api_ppm_problem_list__item_id__close_post",
-        "parameters": [
-          {
-            "name": "item_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Item Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CloseTaskReq"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemListResp"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/ppm/problem-list/{item_id}/tasks": {
-      "get": {
-        "tags": [
-          "ppm-problem"
-        ],
-        "summary": "List Tasks",
-        "operationId": "list_tasks_api_ppm_problem_list__item_id__tasks_get",
-        "parameters": [
-          {
-            "name": "item_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Item Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ProcessTaskResp"
-                  },
-                  "title": "Response List Tasks Api Ppm Problem List  Item Id  Tasks Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/ppm/problem-list/{item_id}/logs": {
-      "get": {
-        "tags": [
-          "ppm-problem"
-        ],
-        "summary": "List Logs",
-        "operationId": "list_logs_api_ppm_problem_list__item_id__logs_get",
-        "parameters": [
-          {
-            "name": "item_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Item Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ProcessLogResp"
-                  },
-                  "title": "Response List Logs Api Ppm Problem List  Item Id  Logs Get"
                 }
               }
             }
@@ -20334,6 +20491,26 @@
               "default": true,
               "title": "Include Children"
             }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ids"
+            }
           }
         ],
         "responses": {
@@ -22956,6 +23133,30 @@
           "task_count": {
             "type": "integer",
             "title": "Task Count"
+          },
+          "plan_items": {
+            "items": {
+              "$ref": "#/components/schemas/CalendarPlanItem"
+            },
+            "type": "array",
+            "title": "Plan Items",
+            "default": []
+          },
+          "problem_items": {
+            "items": {
+              "$ref": "#/components/schemas/CalendarProblemItem"
+            },
+            "type": "array",
+            "title": "Problem Items",
+            "default": []
+          },
+          "execute_items": {
+            "items": {
+              "$ref": "#/components/schemas/CalendarExecuteItem"
+            },
+            "type": "array",
+            "title": "Execute Items",
+            "default": []
           }
         },
         "type": "object",
@@ -22966,7 +23167,172 @@
           "task_count"
         ],
         "title": "CalendarDay",
-        "description": "日历单日负载。\n\n``date`` 形如 ``YYYY-MM-DD``;``load_level`` / ``alert_level``\n为前端展示用的分级文案(如 ``low`` / ``high``、``normal`` / ``alert``)。"
+        "description": "日历单日(左点负载/右点进度 + 当日三类详情)。\n\n``date`` 形如 ``YYYY-MM-DD``;``load_level`` (左点负载 none/leisure/full/over)\n与 ``alert_level`` (右点进度 none/green/yellow/red) 为分级文案。\n``plan_items`` / ``problem_items`` / ``execute_items`` 为当日覆盖的三类摘要,\n供前端点击该天时展开 (D-009)。"
+      },
+      "CalendarExecuteItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "time_spent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Spent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "CalendarExecuteItem",
+        "description": "日历当日实际执行摘要(actual 覆盖该天的 TaskExecute,所有状态)。"
+      },
+      "CalendarPlanItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "project_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Name"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "start_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Time"
+          },
+          "end_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "CalendarPlanItem",
+        "description": "日历当日计划任务摘要(区间覆盖该天的 PlanTask)。"
+      },
+      "CalendarProblemItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "pro_desc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pro Desc"
+          },
+          "project_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Name"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "CalendarProblemItem",
+        "description": "日历当日缺陷摘要(区间覆盖该天的 PpmProblemList)。"
       },
       "ChangeCreateRequest": {
         "properties": {
@@ -24032,29 +24398,6 @@
         ],
         "title": "CheckpointSaveResponse",
         "description": "Response body after saving a checkpoint."
-      },
-      "CloseTaskReq": {
-        "properties": {
-          "check_info": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Check Info"
-          },
-          "check_result": {
-            "type": "string",
-            "title": "Check Result",
-            "default": "1"
-          }
-        },
-        "type": "object",
-        "title": "CloseTaskReq",
-        "description": "closeTask — 验证人验证关闭。\n\n``check_result == \"1\"`` 通过→已关闭;否则打回责任人→处置中。"
       },
       "CommentCreateReq": {
         "properties": {
@@ -25835,40 +26178,6 @@
         ],
         "title": "DocumentsSyncResponse"
       },
-      "DoneTaskReq": {
-        "properties": {
-          "handle_info": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Handle Info"
-          },
-          "time_spent": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Time Spent"
-          },
-          "completed": {
-            "type": "boolean",
-            "title": "Completed",
-            "default": true
-          }
-        },
-        "type": "object",
-        "title": "DoneTaskReq",
-        "description": "doneTask — 责任人完成处置。\n\n``completed=true`` 推进到待验证;``false`` 仅追加处置情况 (仍处置中)。"
-      },
       "ExecutePlanReq": {
         "properties": {
           "plan_task_id": {
@@ -25876,21 +26185,17 @@
             "format": "uuid",
             "title": "Plan Task Id"
           },
-          "submit": {
-            "type": "boolean",
-            "title": "Submit",
-            "default": false
+          "action": {
+            "type": "string",
+            "enum": [
+              "submit",
+              "complete"
+            ],
+            "title": "Action"
           },
           "task_execute_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
+            "format": "uuid",
             "title": "Task Execute Id"
           },
           "execute_info": {
@@ -25976,10 +26281,12 @@
         },
         "type": "object",
         "required": [
-          "plan_task_id"
+          "plan_task_id",
+          "action",
+          "task_execute_id"
         ],
         "title": "ExecutePlanReq",
-        "description": "执行计划请求 (联动生成/更新 TaskExecute)。\n\nAttributes:\n    plan_task_id: 被执行的计划任务 ID。\n    submit: 是否标记完成 (True → 状态 90 已完成)。\n    task_execute_id: 已存在执行记录 ID 时为更新,否则新建。\n    execute_info / time_spent / actual_start_time / actual_end_time:\n        本次执行信息。\n    execute_user_id: 执行人。\n    start_remark / end_remark: 开始/结束备注。"
+        "description": "执行计划请求 (联动生成/更新 TaskExecute)。\n\nAttributes:\n    plan_task_id: 被执行的计划任务 ID。\n    action: 执行动作 \"submit\"(保存本次+任务回未开始,可再次填报) / \"complete\"(保存本次+任务已完成)。\n    task_execute_id: start 端点返回的 in-flight 执行记录 ID(execute 时必填,收口哪条)。\n    execute_info / time_spent / actual_start_time / actual_end_time:\n        本次执行信息。\n    execute_user_id: 执行人。\n    start_remark / end_remark: 开始/结束备注。"
       },
       "ExecutionContextResponse": {
         "properties": {
@@ -28382,24 +28689,6 @@
         ],
         "title": "MissionWorkerRunResponse"
       },
-      "NextProcessReq": {
-        "properties": {
-          "comment": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Comment"
-          }
-        },
-        "type": "object",
-        "title": "NextProcessReq",
-        "description": "nextProcess — 推进到下一节点。"
-      },
       "OkResponse": {
         "properties": {
           "ok": {
@@ -28957,6 +29246,34 @@
         "type": "object",
         "title": "Page[ProjectMemberResp]"
       },
+      "Page_ProjectMemberSummaryItem_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectMemberSummaryItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "default": 1
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size",
+            "default": 20
+          }
+        },
+        "type": "object",
+        "title": "Page[ProjectMemberSummaryItem]"
+      },
       "Page_ProjectStakeholderResp_": {
         "properties": {
           "items": {
@@ -29298,11 +29615,16 @@
               }
             ],
             "title": "No"
+          },
+          "has_module": {
+            "type": "boolean",
+            "title": "Has Module"
           }
         },
         "type": "object",
         "required": [
-          "overall_stage"
+          "overall_stage",
+          "has_module"
         ],
         "title": "PlanNodeCreate"
       },
@@ -29319,6 +29641,18 @@
               }
             ],
             "title": "Plan Node Id"
+          },
+          "module_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Module Id"
           },
           "detailed_stage": {
             "anyOf": [
@@ -29425,6 +29759,18 @@
               }
             ],
             "title": "Plan Node Id"
+          },
+          "module_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Module Id"
           },
           "detailed_stage": {
             "anyOf": [
@@ -29627,6 +29973,18 @@
               }
             ],
             "title": "Overall Stage"
+          },
+          "module_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Module Id"
           }
         },
         "type": "object",
@@ -29826,6 +30184,32 @@
         ],
         "title": "PlanNodeModuleResp"
       },
+      "PlanNodeModuleSimpleItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "module_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Module Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "PlanNodeModuleSimpleItem",
+        "description": "模块下拉项 ({id, module_name}) — problem 表单按项目选模块用。\n\n数据来自 ``list_modules_by_project`` (反查 plan_node_module)。"
+      },
       "PlanNodeModuleUpdate": {
         "properties": {
           "module_name": {
@@ -29929,6 +30313,11 @@
             ],
             "title": "No"
           },
+          "has_module": {
+            "type": "boolean",
+            "title": "Has Module",
+            "default": false
+          },
           "id": {
             "type": "string",
             "format": "uuid",
@@ -29988,6 +30377,17 @@
               }
             ],
             "title": "No"
+          },
+          "has_module": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Module"
           }
         },
         "type": "object",
@@ -30677,6 +31077,11 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "spent_time": {
+            "type": "number",
+            "title": "Spent Time",
+            "default": 0.0
           }
         },
         "type": "object",
@@ -31954,6 +32359,88 @@
         "type": "object",
         "title": "ProblemChangeUpdate"
       },
+      "ProblemExecuteReq": {
+        "properties": {
+          "task_execute_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Task Execute Id"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "submit",
+              "complete"
+            ],
+            "title": "Action"
+          },
+          "execute_info": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execute Info"
+          },
+          "time_spent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Spent"
+          },
+          "actual_start_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Start Time"
+          },
+          "actual_end_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual End Time"
+          },
+          "execute_user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execute User Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_execute_id",
+          "action"
+        ],
+        "title": "ProblemExecuteReq",
+        "description": "execute — 收口 in-flight TaskExecute 并推进 3 态状态机。\n\n- ``action=\"submit\"``   : 回「新建」(可再次 start，重复执行)\n- ``action=\"complete\"`` : 「已完成」(终态)\n\n``task_execute_id`` 必填 (start 返回的 in-flight 记录)。跨天校验在 service。"
+      },
       "ProblemListCreate": {
         "properties": {
           "project_id": {
@@ -32217,11 +32704,6 @@
               }
             ],
             "title": "Work Load"
-          },
-          "submit": {
-            "type": "boolean",
-            "title": "Submit",
-            "default": false
           }
         },
         "type": "object",
@@ -32612,6 +33094,11 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "spent_time": {
+            "type": "number",
+            "title": "Spent Time",
+            "default": 0.0
           }
         },
         "type": "object",
@@ -32846,6 +33333,25 @@
         },
         "type": "object",
         "title": "ProblemListUpdate"
+      },
+      "ProblemStartReq": {
+        "properties": {
+          "actual_start_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Start Time"
+          }
+        },
+        "type": "object",
+        "title": "ProblemStartReq",
+        "description": "start — 启动问题 (新建 → 进行中)，建 in-flight TaskExecute。\n\n``actual_start_time`` 可选 (前端跨天拆分补填时传指定日期，默认 now)。\nproblem_id 取自路径，execute_user_id 取自登录用户。"
       },
       "ProcessActionReq": {
         "properties": {
@@ -33700,6 +34206,17 @@
             ],
             "title": "Depart Name"
           },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          },
           "created_by": {
             "anyOf": [
               {
@@ -33753,6 +34270,97 @@
           "updated_at"
         ],
         "title": "ProjectMemberResp"
+      },
+      "ProjectMemberSummaryItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "project_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Name"
+          },
+          "project_code": {
+            "type": "string",
+            "title": "Project Code"
+          },
+          "project_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Status"
+          },
+          "project_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Type"
+          },
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "owner_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Name"
+          },
+          "member_count": {
+            "type": "integer",
+            "title": "Member Count"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "project_name",
+          "project_code",
+          "project_status",
+          "project_type",
+          "company_name",
+          "owner_name",
+          "member_count",
+          "updated_at"
+        ],
+        "title": "ProjectMemberSummaryItem",
+        "description": "项目成员聚合行 (派生,非表实体)。\n\n``owner_name`` 由 service 推算:该项目 ``role_name ilike '%项目经理%'`` 的成员\n取 ``created_at`` 最早;无则 None。``member_count`` 派生自该项目成员行数。"
       },
       "ProjectMemberUpdate": {
         "properties": {
@@ -34525,6 +35133,23 @@
               }
             ],
             "title": "Duty User Id"
+          },
+          "template_plan_node_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Plan Node Id"
+          },
+          "has_module": {
+            "type": "boolean",
+            "title": "Has Module",
+            "default": false
           }
         },
         "type": "object",
@@ -35132,6 +35757,28 @@
             ],
             "title": "Approve User Name"
           },
+          "execute_user_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execute User Name"
+          },
+          "module_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Module Name"
+          },
           "change_reason": {
             "anyOf": [
               {
@@ -35635,6 +36282,28 @@
             ],
             "title": "Approve User Name"
           },
+          "execute_user_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execute User Name"
+          },
+          "module_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Module Name"
+          },
           "change_reason": {
             "anyOf": [
               {
@@ -35765,6 +36434,23 @@
               }
             ],
             "title": "Duty User Id"
+          },
+          "template_plan_node_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Plan Node Id"
+          },
+          "has_module": {
+            "type": "boolean",
+            "title": "Has Module",
+            "default": false
           },
           "id": {
             "type": "string",
@@ -35979,6 +36665,23 @@
               }
             ],
             "title": "Duty User Id"
+          },
+          "template_plan_node_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Plan Node Id"
+          },
+          "has_module": {
+            "type": "boolean",
+            "title": "Has Module",
+            "default": false
           },
           "id": {
             "type": "string",
@@ -36921,24 +37624,6 @@
           "refresh_token"
         ],
         "title": "RefreshRequest"
-      },
-      "RejectProcessReq": {
-        "properties": {
-          "comment": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Comment"
-          }
-        },
-        "type": "object",
-        "title": "RejectProcessReq",
-        "description": "rejectProcess — 驳回到已作废。"
       },
       "RejectRequest": {
         "properties": {
@@ -39333,6 +40018,45 @@
         ],
         "title": "StageStep",
         "description": "A single step within a stage."
+      },
+      "StartReq": {
+        "properties": {
+          "plan_task_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Plan Task Id"
+          },
+          "execute_user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execute User Id"
+          },
+          "actual_start_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Start Time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan_task_id"
+        ],
+        "title": "StartReq",
+        "description": "启动任务请求(未开始→进行中,创建 in-flight TaskExecute 记 actual_start_time)。\n\nD-002: 多次填报每次\"启动\"产生一条 TaskExecute。返回的 id 用于 execute 的 task_execute_id。\nactual_start_time 可选(跨天拆分补填时传指定日期,默认 now)。"
       },
       "SubmitDetailReq": {
         "properties": {

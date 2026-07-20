@@ -764,11 +764,9 @@ export interface ProblemListCreate {
   remarks?: string | null;
   is_delay_plan?: string | null;
   work_load?: string | null;
-  /** 验证人 ID (对照源 ListForm.vue auditUserId;后端 fsm 推进时据此指派)。 */
+  /** 验证人 ID (对照源 ListForm.vue auditUserId;变更流 deprecated 保留)。 */
   audit_user_id?: string | null;
   audit_user_name?: string | null;
-  /** submit=true 则创建后自动进 Node20 审核中 */
-  submit?: boolean;
 }
 
 /** 问题清单查询参数(对齐后端 GET /problem-list Query)。 */
@@ -918,12 +916,21 @@ export interface ProblemProcessLog {
   created_at: string;
 }
 
-export interface ProblemNextProcessReq {
-  comment?: string | null;
+export interface ProblemStartReq {
+  /** 跨天拆分补填时传指定日期, 默认 now;problem_id 取自路径, execute_user_id 取自登录用户 */
+  actual_start_time?: string | null;
 }
 
-export interface ProblemRejectProcessReq {
-  comment?: string | null;
+export interface ProblemExecuteReq {
+  /** start 返回的 in-flight 执行记录 id (必填, 收口哪条) */
+  task_execute_id: string;
+  /** "submit"(回新建, 可再次开始重复执行) / "complete"(已完成, 终态) */
+  action: "submit" | "complete";
+  execute_info?: string | null;
+  time_spent?: number | null;
+  actual_start_time?: string | null;
+  actual_end_time?: string | null;
+  execute_user_id?: string | null;
 }
 
 export interface ProblemChangeNextProcessReq {
@@ -932,19 +939,6 @@ export interface ProblemChangeNextProcessReq {
 
 export interface ProblemChangeRejectProcessReq {
   comment?: string | null;
-}
-
-export interface ProblemDoneTaskReq {
-  handle_info?: string | null;
-  time_spent?: number | null;
-  /** true 推进到待验证;false 仅追加处置情况 */
-  completed?: boolean;
-}
-
-export interface ProblemCloseTaskReq {
-  check_info?: string | null;
-  /** "1" 通过 → 已关闭;否则打回责任人 → 处置中 */
-  check_result?: string;
 }
 
 // ===========================================================================

@@ -1,44 +1,22 @@
 "use client";
 
 /**
- * 问题清单 Drawer 分发器 — 按 mode 渲染对应 6 态表单 + 变更创建。
+ * 问题清单 Drawer 分发器 — 3 态简化后只承载 新建/编辑 (2026-07-20)。
  *
- * mode 对照源 6 个 .vue + 变更表单:
- *  - create / edit   → ProblemCreateForm   (ListForm.vue)
- *  - start           → ProblemStartForm    (ListStartForm.vue,status=3)
- *  - audit           → ProblemAuditForm    (ListAuditForm.vue,status=2)
- *  - done            → ProblemDoneForm     (ListDoneForm.vue,status=3)
- *  - close           → ProblemCloseForm    (ListCloseForm.vue,status=6)
- *  - detail          → ProblemDetailForm   (ListDetailForm.vue,任意)
- *  - change          → ChangeCreateForm    (problemchange/ChangeForm.vue,从源问题回填)
+ * 审批/处置/验证/变更等 6 态入口已删除:
+ *  - 详情/执行 → 走公共弹窗 ProblemDetailModal (page.tsx 直接控制)
+ *  - 开始       → page.tsx handleStart 调 startProblem API
+ *  - 变更       → 变更流 deprecated (D-005), 前端入口移除
+ *
+ * 设计依据:.sillyspec/changes/2026-07-20-problem-list-align-task-plan/design.md
  */
-import { useEffect, useState } from "react";
 import { Drawer } from "antd";
 
-import {
-  PROBLEM_STATUS_TEXT,
-} from "@/components/ppm-status-actions";
-import { listProblemLogs } from "@/lib/ppm";
-import type { ProblemList, ProblemProcessLog } from "@/lib/ppm";
-import { ChangeCreateForm } from "../problem-changes/_forms";
-import {
-  ProblemAuditForm,
-  ProblemCloseForm,
-  ProblemCreateForm,
-  ProblemDetailForm,
-  ProblemDoneForm,
-  ProblemStartForm,
-} from "./_forms";
+import { PROBLEM_STATUS_TEXT } from "@/components/ppm-status-actions";
+import type { ProblemList } from "@/lib/ppm";
+import { ProblemCreateForm } from "./_forms";
 
-export type ProblemDrawerMode =
-  | "create"
-  | "edit"
-  | "start"
-  | "audit"
-  | "done"
-  | "close"
-  | "detail"
-  | "change";
+export type ProblemDrawerMode = "create" | "edit";
 
 export interface ProblemDrawerProps {
   open: boolean;
@@ -51,12 +29,6 @@ export interface ProblemDrawerProps {
 const TITLE: Record<ProblemDrawerMode, string> = {
   create: "新建问题",
   edit: "编辑问题",
-  start: "开始处置",
-  audit: "审核",
-  done: "处置",
-  close: "验证并关闭",
-  detail: "问题详情",
-  change: "申请变更",
 };
 
 export function ProblemDrawer({
@@ -66,29 +38,6 @@ export function ProblemDrawer({
   onClose,
   onSaved,
 }: ProblemDrawerProps) {
-  // detail 模式额外加载流程履历
-  const [logs, setLogs] = useState<ProblemProcessLog[]>([]);
-  const [loadingLogs, setLoadingLogs] = useState(false);
-
-  useEffect(() => {
-    if (!open || mode !== "detail" || !problem) return;
-    let cancelled = false;
-    setLoadingLogs(true);
-    listProblemLogs(problem.id)
-      .then((data) => {
-        if (!cancelled) setLogs(data);
-      })
-      .catch(() => {
-        if (!cancelled) setLogs([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingLogs(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, mode, problem]);
-
   return (
     <Drawer
       open={open}
@@ -113,62 +62,11 @@ export function ProblemDrawer({
       destroyOnClose
       maskClosable={false}
     >
-      {mode === "create" && (
-        <ProblemCreateForm
-          onSuccess={onSaved}
-          onCancel={onClose}
-        />
-      )}
-      {mode === "edit" && problem && (
-        <ProblemCreateForm
-          problem={problem}
-          onSuccess={onSaved}
-          onCancel={onClose}
-        />
-      )}
-      {mode === "start" && problem && (
-        <ProblemStartForm
-          problem={problem}
-          onSuccess={onSaved}
-          onCancel={onClose}
-        />
-      )}
-      {mode === "audit" && problem && (
-        <ProblemAuditForm
-          problem={problem}
-          onSuccess={onSaved}
-          onCancel={onClose}
-        />
-      )}
-      {mode === "done" && problem && (
-        <ProblemDoneForm
-          problem={problem}
-          onSuccess={onSaved}
-          onCancel={onClose}
-        />
-      )}
-      {mode === "close" && problem && (
-        <ProblemCloseForm
-          problem={problem}
-          onSuccess={onSaved}
-          onCancel={onClose}
-        />
-      )}
-      {mode === "detail" && problem && (
-        <ProblemDetailForm
-          problem={problem}
-          logs={logs}
-          loadingLogs={loadingLogs}
-          onCancel={onClose}
-        />
-      )}
-      {mode === "change" && problem && (
-        <ChangeCreateForm
-          sourceProblemId={String(problem.id)}
-          onSuccess={onSaved}
-          onCancel={onClose}
-        />
-      )}
+      <ProblemCreateForm
+        problem={mode === "edit" ? problem : undefined}
+        onSuccess={onSaved}
+        onCancel={onClose}
+      />
     </Drawer>
   );
 }

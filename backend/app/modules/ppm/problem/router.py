@@ -4,17 +4,13 @@
 (W6 task-08 集成,本文件不注册到 main.py)。权限走
 ``require_permission_any(PPM_PROBLEM_*)``。
 
-路径前缀 (对照源 Controller,见 design.md §7):
-- ``/problem-list``           问题清单 CRUD + 审批流端点
-- ``/problem-list/{id}/submit`` submitProblem 提交直接生效 (跳过审批进处置中)
-- ``/problem-list/{id}/next``    nextProcess (历史审批推进,新建不再用)
-- ``/problem-list/{id}/reject``  rejectProcess
-- ``/problem-list/{id}/done``    doneTask
-- ``/problem-list/{id}/close``   closeTask
-- ``/problem-list/{id}/tasks``   在办任务查询
-- ``/problem-list/{id}/logs``    流程履历查询
-- ``/problem-change``         问题变更 CRUD
-- ``/problem-list/export-excel`` 导出 (X-002)
+路径前缀 (3 态简化，对齐任务计划，见 design.md §7):
+- ``/problem-list``                 问题清单 CRUD + 执行流端点
+- ``/problem-list/{id}/start``      start (新建→进行中，建 in-flight TaskExecute)
+- ``/problem-list/{id}/execute``    execute (收口 in-flight：submit 回新建 / complete 已完成)
+- ``/problem-change``               问题变更 CRUD (deprecated，D-005)
+- ``/problem-change/{id}/next|reject|tasks|logs``  变更审批流 (deprecated)
+- ``/problem-list/export-excel``    导出 (X-002)
 
 固定路径端点前置于参数化路由 (避免 /export-excel 被 /{item_id} 吞)。
 """
@@ -39,23 +35,22 @@ from app.modules.ppm.common.export import ColumnDef
 from app.modules.ppm.problem.schema import (
     ChangeNextProcessReq,
     ChangeRejectProcessReq,
-    CloseTaskReq,
-    DoneTaskReq,
-    NextProcessReq,
     ProblemChangeCreate,
     ProblemChangeResp,
     ProblemChangeUpdate,
+    ProblemExecuteReq,
     ProblemListCreate,
     ProblemListResp,
     ProblemListUpdate,
+    ProblemStartReq,
     ProcessLogResp,
     ProcessTaskResp,
-    RejectProcessReq,
 )
 from app.modules.ppm.problem.service import (
     ProblemService,
 )
 from app.modules.ppm.task.model import TaskExecute
+from app.modules.ppm.task.schema import TaskExecuteResponse
 
 router = APIRouter(tags=["ppm-problem"])
 
@@ -168,11 +163,7 @@ async def create_problem(
 ) -> ProblemListResp:
     svc = ProblemService(session)
     data = body.model_dump()
-    # create_problem 内部按 submit 决定是否触发 next_process;
-    # actor 取当前登录用户 (PpmProblemList 无 created_by 字段,
-    # 必须由 router 显式传入,否则 next_process 拿不到发起人)。
-    actor_id, actor_name = _actor(user)
-    obj = await svc.create_problem(data, actor_id=actor_id, actor_name=actor_name)
+    obj = await svc.create_problem(data)
     return ProblemListResp.model_validate(obj)
 
 
@@ -225,111 +216,57 @@ async def delete_problem(
 
 
 # ===========================================================================
-# 审批流端点 (固定路径前置于参数化,本组路径都已带 /problem-list/{id}/... 无冲突)
+# 问题清单执行流端点 (3 态，对齐任务计划)
 # ===========================================================================
 
 
-@router.post("/problem-list/{item_id}/next", response_model=ProblemListResp)
-async def next_process(
+@router.post(
+    "/problem-list/{item_id}/start",
+    response_model=TaskExecuteResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def start_problem(
     item_id: uuid.UUID,
-    body: NextProcessReq,
+    body: ProblemStartReq,
     session: SessionDep,
     user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_WRITE))],
-) -> ProblemListResp:
-    actor_id, actor_name = _actor(user)
-    obj = await ProblemService(session).next_process(
-        item_id, actor_id=actor_id, actor_name=actor_name, comment=body.comment
-    )
-    return ProblemListResp.model_validate(obj)
+) -> TaskExecuteResponse:
+    """启动问题 (新建 → 进行中)：建 in-flight TaskExecute，返回其 id 供 execute 用。
 
-
-@router.post("/problem-list/{item_id}/submit", response_model=ProblemListResp)
-async def submit_problem(
-    item_id: uuid.UUID,
-    body: NextProcessReq,
-    session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_WRITE))],
-) -> ProblemListResp:
-    """提交直接生效 —— 跳过审批进入处置中 (新建/编辑"提交"统一入口)。
-
-    业务决策 (2026-07-17):问题不再走 4 节点审批,提交即生效流转给责任人。
+    返回的 ``id`` 作为后续 PUT /problem-list/{id}/execute 的 ``task_execute_id``。
+    多次执行每次「开始」产生一条独立 TaskExecute (1 problem : N execute)。
     """
-    actor_id, actor_name = _actor(user)
-    obj = await ProblemService(session).submit_problem(
-        item_id, actor_id=actor_id, actor_name=actor_name, comment=body.comment
-    )
-    return ProblemListResp.model_validate(obj)
-
-
-@router.post("/problem-list/{item_id}/reject", response_model=ProblemListResp)
-async def reject_process(
-    item_id: uuid.UUID,
-    body: RejectProcessReq,
-    session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_WRITE))],
-) -> ProblemListResp:
-    actor_id, actor_name = _actor(user)
-    obj = await ProblemService(session).reject_process(
-        item_id, actor_id=actor_id, actor_name=actor_name, comment=body.comment
-    )
-    return ProblemListResp.model_validate(obj)
-
-
-@router.post("/problem-list/{item_id}/done", response_model=ProblemListResp)
-async def done_task(
-    item_id: uuid.UUID,
-    body: DoneTaskReq,
-    session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_WRITE))],
-) -> ProblemListResp:
-    actor_id, actor_name = _actor(user)
-    obj = await ProblemService(session).done_task(
+    exc = await ProblemService(session).start_problem(
         item_id,
-        actor_id=actor_id,
-        actor_name=actor_name,
-        handle_info=body.handle_info,
+        execute_user_id=user.id,
+        actual_start_time=body.actual_start_time,
+    )
+    return TaskExecuteResponse.model_validate(exc)
+
+
+@router.put("/problem-list/{item_id}/execute", response_model=ProblemListResp)
+async def execute_problem(
+    item_id: uuid.UUID,
+    body: ProblemExecuteReq,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_WRITE))],
+) -> ProblemListResp:
+    """执行问题：收口 in-flight TaskExecute 并推进状态机。
+
+    - action=complete → 已完成 (终态)
+    - action=submit → 回新建 (可再次 start，重复执行)
+    """
+    problem = await ProblemService(session).execute_problem(
+        item_id,
+        task_execute_id=body.task_execute_id,
+        action=body.action,
+        execute_info=body.execute_info,
         time_spent=body.time_spent,
-        completed=body.completed,
+        actual_start_time=body.actual_start_time,
+        actual_end_time=body.actual_end_time,
+        execute_user_id=body.execute_user_id or user.id,
     )
-    return ProblemListResp.model_validate(obj)
-
-
-@router.post("/problem-list/{item_id}/close", response_model=ProblemListResp)
-async def close_task(
-    item_id: uuid.UUID,
-    body: CloseTaskReq,
-    session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_WRITE))],
-) -> ProblemListResp:
-    actor_id, actor_name = _actor(user)
-    obj = await ProblemService(session).close_task(
-        item_id,
-        actor_id=actor_id,
-        actor_name=actor_name,
-        check_info=body.check_info,
-        check_result=body.check_result,
-    )
-    return ProblemListResp.model_validate(obj)
-
-
-@router.get("/problem-list/{item_id}/tasks", response_model=list[ProcessTaskResp])
-async def list_tasks(
-    item_id: uuid.UUID,
-    session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
-) -> list[ProcessTaskResp]:
-    rows = await ProblemService(session).list_list_tasks(str(item_id))
-    return [ProcessTaskResp.model_validate(r) for r in rows]
-
-
-@router.get("/problem-list/{item_id}/logs", response_model=list[ProcessLogResp])
-async def list_logs(
-    item_id: uuid.UUID,
-    session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
-) -> list[ProcessLogResp]:
-    rows = await ProblemService(session).list_list_logs(str(item_id))
-    return [ProcessLogResp.model_validate(r) for r in rows]
+    return ProblemListResp.model_validate(problem)
 
 
 # ===========================================================================

@@ -5,7 +5,7 @@
 - find_time 为空的 problem 不返回
 - 反向区间 (start > end) service 自动 swap
 - 区间无数据返回 []
-- 有未关闭变更的 problem 内存态 effective_status=7
+- 3 态简化后 effective_status 恒等于 status (不再有「变更中」内存态覆盖)
 - 端点路由顺序:list-by-date-range 不被 /{item_id} 吞 (返回 200 非 422)
 
 设计依据:tasks/task-06.md §实现要求 / §边界处理 / §验收标准 AC-01~06。
@@ -138,8 +138,8 @@ class TestListByDateRangeService:
         items = await svc.list_problems_by_date_range(start, end)
         assert [i.pro_desc for i in items] == ["晚", "中", "早"]
 
-    async def test_changing_flag_marked(self, db_session: AsyncSession) -> None:
-        """有未关闭变更的 problem 内存态 effective_status=7 变更中。"""
+    async def test_no_changing_override_after_3state(self, db_session: AsyncSession) -> None:
+        """3 态简化后:有未关闭变更不再内存态覆盖,effective_status == status。"""
         svc = ProblemService(db_session)
         proj_id = await _make_project(db_session)
         t = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
@@ -153,9 +153,9 @@ class TestListByDateRangeService:
         end = datetime(2026, 6, 20, tzinfo=UTC)
         items = await svc.list_problems_by_date_range(start, end)
         assert len(items) == 1
-        # effective_status 内存态被标记为 7 变更中,持久化 status 不变
-        assert items[0].effective_status == ProblemStatus.CHANGING.value
-        assert items[0].status == ProblemStatus.SAVED.value
+        # 3 态简化:不再有「变更中」内存态覆盖,effective_status 恒等于 status (新建)
+        assert items[0].effective_status == ProblemStatus.NEW.value
+        assert items[0].status == ProblemStatus.NEW.value
 
 
 # ===========================================================================

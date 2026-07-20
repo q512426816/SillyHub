@@ -11,9 +11,10 @@
 字符串语义 (运行时绑定,源 ID 不迁移)。附件统一 ``file_urls`` JSON
 数组 (D-007@v1,弃源 fileUrl1-9 九个字段)。
 
-关键约定 (task-05.md + design.md §8):
-- ``ppm_problem_list.status`` 取值 1-7 (见 fsm.ProblemStatus)
-- ``now_node`` 流程当前节点 (10/20/30/40,见 fsm.ProblemNode)
+关键约定 (task-05.md + design.md §8 + 2026-07-20 3 态简化):
+- ``ppm_problem_list.status`` 取值中文 3 态「新建/进行中/已完成」(见 fsm.ProblemStatus)
+- ``now_node`` 流程当前节点 (10/20/30/40,见 fsm.ProblemNode；主流审批链已废弃,
+  仅变更流 CHANGE_NODE_NEXT 依赖，值留空)
 - ``ppm_problem_change.resource_id`` 关联源 ``ppm_problem_list.id``
 
 设计依据:``tasks/task-05.md`` + ``design.md`` §8。
@@ -113,11 +114,10 @@ class PpmProblemList(BaseModel, table=True):
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
     remarks: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
-    # 状态 1-7 (见 fsm.ProblemStatus):1 已保存 / 2 审核中 / 3 处置中 /
-    # 4 已关闭 / 5 已作废 / 6 待验证 / 7 变更中 (内存态)
+    # 状态 3 态中文 (见 fsm.ProblemStatus):新建 / 进行中 / 已完成
     status: str = Field(
-        default="1",
-        sa_column=Column(String(8), nullable=False, default="1"),
+        default="新建",
+        sa_column=Column(String(30), nullable=False, default="新建"),
     )
     is_delay_plan: str | None = Field(default=None, sa_column=Column(String(8), nullable=True))
     work_load: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
@@ -147,13 +147,13 @@ class PpmProblemList(BaseModel, table=True):
     )
 
 
-# ── 非持久化:列表展示用的有效状态 (内存态) ──────────────────
-# 有未关闭变更时,service 在 list_problems 中用 object.__setattr__ 把
-# ``_effective_status`` 置为 "7" 变更中,但 ``status`` 持久化字段不变。
-# property 不参与 ORM 映射。
+# ── 非持久化:列表展示用的有效状态 ──────────────────
+# 3 态简化 (2026-07-20) 后，effective_status 恒等于持久化 status
+# (不再有「变更中」内存态覆盖；变更流前端入口已停用，D-005)。
+# property 保留以兼容 schema/前端字段读取，但不参与 ORM 映射。
 def _problem_effective_status(self: PpmProblemList) -> str:
-    """展示用有效状态:有覆盖则取它,否则取持久化 status。"""
-    return getattr(self, "_effective_status", None) or self.status
+    """展示用有效状态 (3 态简化后恒等于 status)。"""
+    return self.status
 
 
 PpmProblemList.effective_status = property(_problem_effective_status)
