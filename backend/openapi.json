@@ -29492,7 +29492,16 @@
           "ppm:task:read",
           "ppm:work-hour:read",
           "ppm:work-hour:stat",
-          "ppm:kanban:view"
+          "ppm:kanban:view",
+          "ppm:workbench:view",
+          "ppm:project-member:read",
+          "ppm:project-stakeholder:read",
+          "ppm:project-plan:read",
+          "ppm:plan-node:read",
+          "ppm:milestone-detail:read",
+          "ppm:problem-list:read",
+          "ppm:problem-change:read",
+          "ppm:task-plan:read"
         ],
         "title": "Permission"
       },
@@ -32595,6 +32604,18 @@
             ],
             "title": "Work Type"
           },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
           "duty_user_id": {
             "anyOf": [
               {
@@ -32866,6 +32887,18 @@
             ],
             "title": "Work Type"
           },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
           "duty_user_id": {
             "anyOf": [
               {
@@ -33116,6 +33149,16 @@
             "type": "number",
             "title": "Spent Time",
             "default": 0.0
+          },
+          "can_edit": {
+            "type": "boolean",
+            "title": "Can Edit",
+            "default": false
+          },
+          "can_delete": {
+            "type": "boolean",
+            "title": "Can Delete",
+            "default": false
           }
         },
         "type": "object",

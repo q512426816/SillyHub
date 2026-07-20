@@ -126,6 +126,28 @@ class Permission(StrEnum):
     # 看板(ppm:task:kanban:view)
     PPM_KANBAN_VIEW = "ppm:kanban:view"
 
+    # ── 菜单专属权限（change 2026-07-20-ppm-menu-unique-keys：14 菜单各独立 key）────
+    # 以下 9 个为细分菜单专属 key。上方 PPM_PLAN_READ/PPM_PROBLEM_READ/PPM_TASK_READ 3 个
+    # 旧共享 key 已不被菜单直接引用（悬空保留不删，D-002）。
+    # 工作台(个人工作台)
+    PPM_WORKBENCH_VIEW = "ppm:workbench:view"
+    # 项目成员(pm:project-member:read)
+    PPM_PROJECT_MEMBER_READ = "ppm:project-member:read"
+    # 干系人(pm:project-stakeholder:read)
+    PPM_PROJECT_STAKEHOLDER_READ = "ppm:project-stakeholder:read"
+    # 项目计划(ps:project-plan:read)
+    PPM_PROJECT_PLAN_READ = "ppm:project-plan:read"
+    # 计划节点(ps:plan-node:read)
+    PPM_PLAN_NODE_READ = "ppm:plan-node:read"
+    # 里程碑明细(ps:milestone-detail:read)
+    PPM_MILESTONE_DETAIL_READ = "ppm:milestone-detail:read"
+    # 问题清单(problem:list:read)
+    PPM_PROBLEM_LIST_READ = "ppm:problem-list:read"
+    # 问题变更(problem:change:read)
+    PPM_PROBLEM_CHANGE_READ = "ppm:problem-change:read"
+    # 任务计划(task:plan:read)
+    PPM_TASK_PLAN_READ = "ppm:task-plan:read"
+
     @property
     def group(self) -> PermissionGroup:
         """Resolve the logical group for UI rendering.

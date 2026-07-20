@@ -332,8 +332,8 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/ppm/workbench",
     absolute: true,
     matchPattern: "/ppm/workbench",
-    // 复用 PPM_TASK_READ（D-009@v1，workbench 接口统一权限，不新建）。
-    permissions: [{ key: "ppm:task:read", name: "任务查看" }],
+    // 菜单专属 key（change 2026-07-20-ppm-menu-unique-keys，14 菜单各独立 key）。
+    permissions: [{ key: "ppm:workbench:view", name: "工作台查看" }],
   },
   {
     section: "ppm",
@@ -364,8 +364,8 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     absolute: true,
     matchPattern: "/ppm/project-members",
     navHidden: true, // 二级页面:由 /ppm/projects「成员管理」跳转,不在侧边栏菜单显示
-    // 成员管理菜单显隐由 project:read 控制（后端去权限校验后仅认证即可访问，change 2026-07-20-ppm-permission-simplify）
-    permissions: [{ key: "ppm:project:read", name: "项目查看" }],
+    // 菜单专属 key（change 2026-07-20-ppm-menu-unique-keys）。
+    permissions: [{ key: "ppm:project-member:read", name: "项目成员查看" }],
   },
   {
     section: "ppm",
@@ -375,7 +375,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/ppm/project-stakeholders",
     absolute: true,
     matchPattern: "/ppm/project-stakeholders",
-    permissions: [{ key: "ppm:project:read", name: "项目查看" }],
+    permissions: [{ key: "ppm:project-stakeholder:read", name: "干系人查看" }],
   },
   {
     section: "ppm",
@@ -385,7 +385,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/ppm/project-plans",
     absolute: true,
     matchPattern: "/ppm/project-plans",
-    permissions: [{ key: "ppm:plan:read", name: "计划查看" }],
+    permissions: [{ key: "ppm:project-plan:read", name: "项目计划查看" }],
   },
   {
     section: "ppm",
@@ -395,7 +395,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/ppm/plan-nodes",
     absolute: true,
     matchPattern: "/ppm/plan-nodes",
-    permissions: [{ key: "ppm:plan:read", name: "计划查看" }],
+    permissions: [{ key: "ppm:plan-node:read", name: "计划节点查看" }],
   },
   {
     section: "ppm",
@@ -406,7 +406,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     absolute: true,
     matchPattern: "/ppm/milestone-details",
     navHidden: true, // 二级页面:由 /ppm/project-plans「里程碑」按钮跳转,不在侧边栏菜单显示
-    permissions: [{ key: "ppm:plan:read", name: "计划查看" }],
+    permissions: [{ key: "ppm:milestone-detail:read", name: "里程碑明细查看" }],
   },
   {
     section: "ppm",
@@ -416,7 +416,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/ppm/problem-list",
     absolute: true,
     matchPattern: "/ppm/problem-list",
-    permissions: [{ key: "ppm:problem:read", name: "问题查看" }],
+    permissions: [{ key: "ppm:problem-list:read", name: "问题清单查看" }],
   },
   {
     section: "ppm",
@@ -426,7 +426,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/ppm/problem-changes",
     absolute: true,
     matchPattern: "/ppm/problem-changes",
-    permissions: [{ key: "ppm:problem:read", name: "问题查看" }],
+    permissions: [{ key: "ppm:problem-change:read", name: "问题变更查看" }],
   },
   {
     section: "ppm",
@@ -436,7 +436,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/ppm/task-plans",
     absolute: true,
     matchPattern: "/ppm/task-plans",
-    permissions: [{ key: "ppm:task:read", name: "任务查看" }],
+    permissions: [{ key: "ppm:task-plan:read", name: "任务计划查看" }],
   },
   {
     section: "ppm",

@@ -40,12 +40,32 @@ EXPECTED_PPM_PERMISSIONS: dict[str, str] = {
     "PPM_WORKHOUR_STAT": "ppm:work-hour:stat",
     # 看板(ppm:task:kanban:view)
     "PPM_KANBAN_VIEW": "ppm:kanban:view",
+    # ── 菜单专属权限（change 2026-07-20-ppm-menu-unique-keys：14 菜单各独立 key）──
+    # 上方 plan/problem/task:read 3 个旧共享 key 悬空保留（D-002），以下 9 个为细分菜单专属。
+    # 工作台
+    "PPM_WORKBENCH_VIEW": "ppm:workbench:view",
+    # 项目成员
+    "PPM_PROJECT_MEMBER_READ": "ppm:project-member:read",
+    # 干系人
+    "PPM_PROJECT_STAKEHOLDER_READ": "ppm:project-stakeholder:read",
+    # 项目计划
+    "PPM_PROJECT_PLAN_READ": "ppm:project-plan:read",
+    # 计划节点
+    "PPM_PLAN_NODE_READ": "ppm:plan-node:read",
+    # 里程碑明细
+    "PPM_MILESTONE_DETAIL_READ": "ppm:milestone-detail:read",
+    # 问题清单
+    "PPM_PROBLEM_LIST_READ": "ppm:problem-list:read",
+    # 问题变更
+    "PPM_PROBLEM_CHANGE_READ": "ppm:problem-change:read",
+    # 任务计划
+    "PPM_TASK_PLAN_READ": "ppm:task-plan:read",
 }
 
 
-def test_ppm_permission_member_count_is_8() -> None:
-    """task-04 design §6 精简后共 8 个 PPM_* 菜单/读成员。"""
-    assert len(EXPECTED_PPM_PERMISSIONS) == 8
+def test_ppm_permission_member_count_is_17() -> None:
+    """change 2026-07-20-ppm-menu-unique-keys 扩容后共 17 个 PPM_* 成员（14 菜单 key + 3 悬空旧 key）。"""
+    assert len(EXPECTED_PPM_PERMISSIONS) == 17
 
 
 @pytest.mark.parametrize("name,value", list(EXPECTED_PPM_PERMISSIONS.items()))

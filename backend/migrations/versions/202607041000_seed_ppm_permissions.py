@@ -55,6 +55,26 @@ PPM_PERMISSIONS: list[str] = [
     "ppm:work-hour:stat",
     # 看板
     "ppm:kanban:view",
+    # ── 菜单专属权限（change 2026-07-20-ppm-menu-unique-keys：14 菜单各独立 key）──
+    # 上方 plan/problem/task:read 3 个旧共享 key 已悬空（无菜单直接引用，保留不删 D-002）。
+    # 工作台
+    "ppm:workbench:view",
+    # 项目成员
+    "ppm:project-member:read",
+    # 干系人
+    "ppm:project-stakeholder:read",
+    # 项目计划
+    "ppm:project-plan:read",
+    # 计划节点
+    "ppm:plan-node:read",
+    # 里程碑明细
+    "ppm:milestone-detail:read",
+    # 问题清单
+    "ppm:problem-list:read",
+    # 问题变更
+    "ppm:problem-change:read",
+    # 任务计划
+    "ppm:task-plan:read",
 ]
 
 

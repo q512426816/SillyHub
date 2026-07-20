@@ -79,7 +79,7 @@ const BACKEND_PERMISSION_KEYS = [
   "organization:write",
   "role:read",
   "role:write",
-  // PPM 项目与问题管理 (8, change 2026-07-20-ppm-permission-simplify task-04 精简)
+  // PPM 项目与问题管理 (17, change 2026-07-20-ppm-menu-unique-keys 扩容：8 旧 + 9 菜单专属)
   "ppm:project:read",
   "ppm:customer:read",
   "ppm:plan:read",
@@ -88,6 +88,16 @@ const BACKEND_PERMISSION_KEYS = [
   "ppm:work-hour:read",
   "ppm:work-hour:stat",
   "ppm:kanban:view",
+  // ── 菜单专属权限（14 菜单各独立 key；plan/problem/task:read 3 旧 key 悬空保留）──
+  "ppm:workbench:view",
+  "ppm:project-member:read",
+  "ppm:project-stakeholder:read",
+  "ppm:project-plan:read",
+  "ppm:plan-node:read",
+  "ppm:milestone-detail:read",
+  "ppm:problem-list:read",
+  "ppm:problem-change:read",
+  "ppm:task-plan:read",
 ] as const;
 
 /** 34 个 menuKey 期望集合（FR-02 19 条 + Agent 团队 1 + PPM 14 条） */
@@ -195,12 +205,12 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 54", () => {
+  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 63", () => {
     const valid = new Set<string>(BACKEND_PERMISSION_KEYS);
     // 镜像常量自身的完整性护栏：若被误删/重复，立即失败
-    // 46 (非 PPM) + 8 (PPM 菜单/读) = 54（task-04 删 16 个 PPM 动作权限）
-    expect(BACKEND_PERMISSION_KEYS.length).toBe(54);
-    expect(valid.size).toBe(54);
+    // 46 (非 PPM) + 17 (PPM 菜单/读，change 2026-07-20-ppm-menu-unique-keys 扩容) = 63
+    expect(BACKEND_PERMISSION_KEYS.length).toBe(63);
+    expect(valid.size).toBe(63);
 
     MENU_PERMISSION_GROUPS.forEach((g) => {
       g.permissions.forEach((p) => {
@@ -346,12 +356,12 @@ describe("用户列明菜单的 permissions 精确匹配", () => {
     expect(keysOf("ppm-projects")).toEqual(["ppm:project:read"]);
   });
 
-  it("ppm-milestone-details = ppm:plan:read", () => {
-    expect(keysOf("ppm-milestone-details")).toEqual(["ppm:plan:read"]);
+  it("ppm-milestone-details = ppm:milestone-detail:read", () => {
+    expect(keysOf("ppm-milestone-details")).toEqual(["ppm:milestone-detail:read"]);
   });
 
-  it("ppm-problem-list = ppm:problem:read", () => {
-    expect(keysOf("ppm-problem-list")).toEqual(["ppm:problem:read"]);
+  it("ppm-problem-list = ppm:problem-list:read", () => {
+    expect(keysOf("ppm-problem-list")).toEqual(["ppm:problem-list:read"]);
   });
 
   it("ppm-kanban = ppm:kanban:view", () => {
@@ -362,8 +372,32 @@ describe("用户列明菜单的 permissions 精确匹配", () => {
     expect(keysOf("ppm-work-hour-statistics")).toEqual(["ppm:work-hour:stat"]);
   });
 
-  it("ppm-project-members = ppm:project:read（task-03 删悬空 write）", () => {
-    expect(keysOf("ppm-project-members")).toEqual(["ppm:project:read"]);
+  it("ppm-project-members = ppm:project-member:read（change 2026-07-20-ppm-menu-unique-keys 菜单专属 key）", () => {
+    expect(keysOf("ppm-project-members")).toEqual(["ppm:project-member:read"]);
+  });
+
+  it("ppm-workbench = ppm:workbench:view", () => {
+    expect(keysOf("ppm-workbench")).toEqual(["ppm:workbench:view"]);
+  });
+
+  it("ppm-project-stakeholders = ppm:project-stakeholder:read", () => {
+    expect(keysOf("ppm-project-stakeholders")).toEqual(["ppm:project-stakeholder:read"]);
+  });
+
+  it("ppm-project-plans = ppm:project-plan:read", () => {
+    expect(keysOf("ppm-project-plans")).toEqual(["ppm:project-plan:read"]);
+  });
+
+  it("ppm-plan-nodes = ppm:plan-node:read", () => {
+    expect(keysOf("ppm-plan-nodes")).toEqual(["ppm:plan-node:read"]);
+  });
+
+  it("ppm-problem-changes = ppm:problem-change:read", () => {
+    expect(keysOf("ppm-problem-changes")).toEqual(["ppm:problem-change:read"]);
+  });
+
+  it("ppm-task-plans = ppm:task-plan:read", () => {
+    expect(keysOf("ppm-task-plans")).toEqual(["ppm:task-plan:read"]);
   });
 });
 
