@@ -553,7 +553,6 @@ export function PpmResourceTable<
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {error}
           <Button
-            size="small"
             className="ml-3"
             onClick={() => void load()}
           >
@@ -567,7 +566,6 @@ export function PpmResourceTable<
             <div className="mb-2 flex items-center justify-end gap-2">
               {exportFn && (
                 <Button
-                  size="small"
                   disabled={exporting}
                   onClick={() => void handleExport()}
                   title={exportFilename}
@@ -576,7 +574,6 @@ export function PpmResourceTable<
                 </Button>
               )}
               <Button
-                size="small"
                 type="primary"
                 disabled={!canWrite}
                 onClick={() => setDrawer({ open: true, mode: "create" })}
@@ -584,17 +581,14 @@ export function PpmResourceTable<
                 + 新增{entityLabel}
               </Button>
               <span className="mx-1 h-6 w-px bg-border" aria-hidden />
-              <Button size="small" type="primary" onClick={() => handleSearchCommit()}>
+              <Button type="primary" onClick={() => handleSearchCommit()}>
                 搜索
               </Button>
-              <Button size="small" onClick={handleReset}>
+              <Button onClick={handleReset}>
                 重置
               </Button>
               {showExpandToggle && (
-                <Button
-                  size="small"
-                  onClick={() => setExpanded((v) => !v)}
-                >
+                <Button onClick={() => setExpanded((v) => !v)}>
                   {expanded ? "收起" : "展开"}
                 </Button>
               )}
@@ -794,11 +788,10 @@ function PpmResourceModal<T extends { id: string }>({
       destroyOnClose
       footer={
         <div className="flex items-center justify-end gap-2">
-          <Button size="small" onClick={onClose}>
+          <Button onClick={onClose}>
             取消
           </Button>
           <Button
-            size="small"
             type="primary"
             loading={saving}
             disabled={!canWrite}

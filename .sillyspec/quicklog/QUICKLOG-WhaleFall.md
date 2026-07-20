@@ -391,3 +391,12 @@ created_at: 2026-07-14T09:20:24
 现状审查：PpmResourceTable 内 Form/Input/Select/DatePicker/Table/Tag/Drawer/Modal 已全 antd；仅操作栏 Button 为 shadcn（+ StatusBadge、布局壳）。
 方案：用户确认改通用组件 PpmResourceTable 一处，4 个 ppm 页面统一切 Modal。PpmResourceDrawer→PpmResourceModal，<Drawer>→<Modal>（onClose→onCancel，保存按钮加 loading={saving}，文本统一"保存"）；所有 shadcn Button→antd Button（编辑/成员管理 type=link，删除 type=link danger，新增/搜索 type=primary，导出/重置/展开/重新加载 default，size=small）；antd import 加 Button 去 Drawer，删 shadcn Button import；projects/page.tsx 成员管理按钮同步 antd。
 结果：tsc --noEmit EXIT 0；eslint 两文件 0 error（15 warning 全既有类型签名未用参数）；grep 两文件无 shadcn Button/Drawer/size=sm/variant 残留。影响 4 个 ppm 页面新建+编辑全变 antd Modal，操作栏按钮全 antd。纯前端，不动后端/接口。
+
+## ql-20260720-002-8d3e | 2026-07-20 09:42:14 | /ppm/projects 查询区按钮 size 调整(antd small→默认 middle，修字体顶边框)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-resource-table.tsx
+需求：用户反馈查询条件上面那排按钮(导出/新增/搜索/重置/展开)字体太大、快顶到按钮边框，比例奇怪。
+根因：antd Button size="small" 控件高度 24px + 字体 14px，上下 padding 太小致字顶边框(上一条 ql-20260720-001 把 shadcn Button 换成 antd 时统一用了 small)。
+方案：查询区 5 按钮(导出/新增/搜索/重置/展开) + Modal footer 2 按钮(取消/保存) + 错误条重新加载 1 按钮(均有边框/实心) size="small"→默认 middle(32px，字体 14px 不顶边)；操作列 link 按钮(编辑/删除)保持 small(无边框不顶边，表格行内紧凑)；DataTable 的 size="small" 是表格属性不动。
+结果：tsc --noEmit EXIT 0；grep 残留 size=small 仅操作列 2 link + DataTable 1 表格(预期)。查询区/Modal 按钮改默认 middle 后字体不再顶边框，与下方查询字段高度协调。纯前端单文件。待 commit + push + rebuild frontend 部署 + 用户浏览器验证。
