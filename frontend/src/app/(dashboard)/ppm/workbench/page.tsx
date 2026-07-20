@@ -126,9 +126,9 @@ export default function WorkbenchPage() {
     <PageContainer size="full">
       <PageHeader title="个人工作台" subtitle="我的任务 / 本月指标 / 工作日历" />
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-10">
         {/* ========== 左栏 stack ========== */}
-        <div className="flex flex-col gap-4 lg:col-span-3">
+        <div className="flex flex-col gap-5 lg:col-span-2">
           {profile.loading || profile.error ? (
             <BlockCard
               title="个人信息"
@@ -155,7 +155,7 @@ export default function WorkbenchPage() {
         </div>
 
         {/* ========== 中栏 stack ========== */}
-        <div className="flex flex-col gap-4 lg:col-span-6">
+        <div className="flex flex-col gap-5 lg:col-span-6">
           {summary.loading || summary.error ? (
             <BlockCard
               title="本月指标"
@@ -174,7 +174,7 @@ export default function WorkbenchPage() {
         </div>
 
         {/* ========== 右栏 stack ========== */}
-        <div className="flex flex-col gap-4 lg:col-span-3">
+        <div className="flex flex-col gap-5 lg:col-span-2">
           {calendar.data ? (
             <WorkCalendarPanel
               calendar={calendar.data}

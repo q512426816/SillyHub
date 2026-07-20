@@ -14,36 +14,24 @@
  *  - 重置
  * 日期/项目/状态 → 后端查; 模块 → 后端按 module_id 查(前端兜底);module_name 由后端按 module_id 反查补值(表冗余字段历史空)。
  *
- * 「执行」按钮打开 ExecuteTaskDialog (填耗时/说明/提交), 已完成任务禁用。
+ * 「详情/执行」打开 TaskDetailModal(与任务计划页同款,含任务信息+执行记录+跨天填报);
+ * 「启动」只切状态(D-002,对齐任务计划页),不弹执行填写窗。
  */
 import { useEffect, useMemo, useState } from "react";
 import dayjs, { type Dayjs } from "dayjs";
-import { DatePicker, Tag, type TableProps } from "antd";
+import { DatePicker, Select, Tag, type TableProps } from "antd";
 
 import { DataTable } from "@/components/layout";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { ApiError } from "@/lib/api";
-import {
-  executePlanTask,
-  listPersonalPlanTasks,
-  listTaskExecutes,
-  startPlanTask,
-} from "@/lib/ppm/task";
+import { listPersonalPlanTasks, startPlanTask } from "@/lib/ppm/task";
 import { listSimpleProjects } from "@/lib/ppm/project";
 import type { PlanTask, PlanTaskPageReq, ProjectSimpleItem } from "@/lib/ppm/types";
 import {
-  ExecuteTaskDialog,
-  type ExecuteTaskState,
-} from "../../_components/execute-task-dialog";
-import { Toast, fmtDate, taskStatusTag, useToast } from "../../shared";
+  TaskDetailModal,
+  type TaskDetailMode,
+} from "../../_components/task-detail-modal";
+import { Toast, taskStatusTag, useToast } from "../../shared";
 
 export interface WorkbenchTaskTableProps {
   /** 执行/提交后回调(page 刷 summary 等)。 */
@@ -64,10 +52,14 @@ const STATUS_OPTIONS = ["未开始", "进行中", "已完成"] as const;
 
 export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
   // 查询条件: 日期范围 / 项目(后端) + 模块(前端) + 状态(后端)
-  const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(null);
+  // 默认本月 + 未开始/进行中(进行中任务最需本人关注)
+  const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(() => [
+    dayjs().startOf("month"),
+    dayjs().endOf("month"),
+  ]);
   const [projectId, setProjectId] = useState<string | undefined>(undefined);
   const [moduleF, setModuleF] = useState<string>("");
-  const [statusF, setStatusF] = useState<string | undefined>(undefined);
+  const [statusF, setStatusF] = useState<string[]>(["未开始", "进行中"]);
 
   // 项目下拉数据(listSimpleProjects 一次性拉)
   const [projects, setProjects] = useState<ProjectSimpleItem[]>([]);
@@ -92,7 +84,7 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
       }
       if (projectId) params.project_id = projectId;
       if (moduleF) params.module_id = moduleF;
-      if (statusF) params.status = [statusF];
+      if (statusF.length > 0) params.status = statusF;
       const page = await listPersonalPlanTasks(params);
       setTasks(page.items ?? []);
     } catch {
@@ -122,8 +114,14 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
     return tasks.filter((t) => !moduleF || t.module_id === moduleF);
   }, [tasks, moduleF]);
 
+  // 预设按钮高亮: 日期范围与预设区间一致时标记对应预设(自定义/清空后取消高亮)
+  const [activePreset, setActivePreset] = useState<"week" | "month" | "all" | null>(
+    "month",
+  );
+
   // 预设按钮
   const applyPreset = (preset: "week" | "month" | "all") => {
+    setActivePreset(preset);
     if (preset === "week") {
       setDateRange(thisWeekRange());
     } else if (preset === "month") {
@@ -140,91 +138,27 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
   };
 
   const reset = () => {
-    setDateRange(null);
+    setDateRange([dayjs().startOf("month"), dayjs().endOf("month")]);
     setProjectId(undefined);
     setModuleF("");
-    setStatusF(undefined);
+    setStatusF(["未开始", "进行中"]);
+    setActivePreset("month");
   };
 
-  // 执行表单/详情
-  const [execute, setExecute] = useState<ExecuteTaskState | null>(null);
-  const [busy, setBusy] = useState(false);
+  // 详情/执行弹窗(抽自任务计划页的 TaskDetailModal)
   const [detailTask, setDetailTask] = useState<PlanTask | null>(null);
+  const [detailMode, setDetailMode] = useState<TaskDetailMode>("detail");
   const { toast, showToast } = useToast();
 
+  // 启动只切状态(D-002, 对齐任务计划页): startPlanTask→刷本表+回调 page 刷 summary+toast, 不弹执行窗
   const handleStart = async (task: PlanTask) => {
-    setBusy(true);
     try {
-      const exc = await startPlanTask({ plan_task_id: task.id });
-      await loadTasks(); // 刷新列表显示"进行中"(start 已推进 plan 状态, D-002)
-      setExecute({
-        task,
-        executeInfo: "",
-        timeSpent: task.time_spent ? String(task.time_spent) : "",
-        taskExecuteId: exc.id,
-      });
+      await startPlanTask({ plan_task_id: task.id });
+      showToast(true, "任务已启动，点「执行」填报进展");
+      onChanged?.(); // 通知 page 刷 summary
+      await loadTasks(); // 刷新列表显示"进行中"
     } catch (err) {
       showToast(false, err instanceof ApiError ? err.message : "启动失败");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleResume = async (task: PlanTask) => {
-    setBusy(true);
-    try {
-      const page = await listTaskExecutes({
-        plan_task_id: task.id,
-        status: "30",
-        page: 1,
-        page_size: 1,
-      });
-      const inflight = page.items?.[0];
-      if (!inflight) {
-        showToast(false, "未找到进行中的执行记录");
-        return;
-      }
-      setExecute({
-        task,
-        executeInfo: inflight.execute_info ?? "",
-        timeSpent: inflight.time_spent != null ? String(inflight.time_spent) : "",
-        taskExecuteId: inflight.id,
-      });
-    } catch (err) {
-      showToast(false, err instanceof ApiError ? err.message : "加载执行记录失败");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleExecute = async (action: "submit" | "complete") => {
-    if (!execute) return;
-    if (!execute.taskExecuteId) {
-      showToast(false, "缺少执行记录 id, 请先启动任务");
-      return;
-    }
-    setBusy(true);
-    try {
-      const timeSpent = execute.timeSpent ? Number(execute.timeSpent) : undefined;
-      await executePlanTask({
-        plan_task_id: execute.task.id,
-        action,
-        task_execute_id: execute.taskExecuteId,
-        execute_info: execute.executeInfo || undefined,
-        time_spent:
-          timeSpent !== undefined && !Number.isNaN(timeSpent) ? timeSpent : undefined,
-      });
-      showToast(
-        true,
-        action === "complete" ? "任务已完成" : "执行已保存(可再次填报)",
-      );
-      setExecute(null);
-      onChanged?.(); // 通知 page 刷 summary
-      void loadTasks(); // 重载本表
-    } catch (err) {
-      showToast(false, err instanceof ApiError ? err.message : "执行失败");
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -270,19 +204,34 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
     {
       title: "操作",
       key: "action",
-      width: 140,
+      align: "center",
+      width: 180,
       render: (_v: unknown, t: PlanTask) => (
-        <div className="flex justify-center gap-1">
-          <Button size="sm" variant="ghost" onClick={() => setDetailTask(t)}>
+        <div className="flex whitespace-nowrap gap-1 justify-center">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setDetailTask(t);
+              setDetailMode("detail");
+            }}
+          >
             详情
           </Button>
           {t.status === "未开始" && (
-            <Button size="sm" variant="default" onClick={() => void handleStart(t)}>
+            <Button size="sm" variant="ghost" onClick={() => void handleStart(t)}>
               启动
             </Button>
           )}
           {t.status === "进行中" && (
-            <Button size="sm" variant="default" onClick={() => void handleResume(t)}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setDetailTask(t);
+                setDetailMode("execute");
+              }}
+            >
               执行
             </Button>
           )}
@@ -292,28 +241,46 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
   ];
 
   const inputCls =
-    "h-8 rounded border border-input bg-background px-2 text-sm focus:border-ring focus:outline-none";
+    "h-8 rounded-md border border-input bg-background px-2 text-sm focus:border-ring focus:outline-none";
 
   return (
     <>
       {/* 筛选 toolbar: 预设 + 日期范围 + 项目 + 模块 + 状态 + 重置 */}
-      <div className="mb-3 flex flex-wrap items-end gap-2">
-        <div className="flex items-center gap-1">
-          <Button size="sm" variant="outline" onClick={() => applyPreset("week")}>
-            本周
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => applyPreset("month")}>
-            本月
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => applyPreset("all")}>
-            全部
-          </Button>
+      <div className="mb-3 flex flex-wrap items-end gap-x-3 gap-y-2 rounded-xl border border-border/60 bg-muted/40 p-3">
+        <div className="flex flex-col gap-1">
+          <label className="text-[11px] text-muted-foreground">快捷范围</label>
+          <div className="flex items-center gap-1">
+            <Button
+              size="sm"
+              variant={activePreset === "week" ? "default" : "outline"}
+              onClick={() => applyPreset("week")}
+            >
+              本周
+            </Button>
+            <Button
+              size="sm"
+              variant={activePreset === "month" ? "default" : "outline"}
+              onClick={() => applyPreset("month")}
+            >
+              本月
+            </Button>
+            <Button
+              size="sm"
+              variant={activePreset === "all" ? "default" : "outline"}
+              onClick={() => applyPreset("all")}
+            >
+              全部
+            </Button>
+          </div>
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-[11px] text-muted-foreground">日期范围</label>
           <DatePicker.RangePicker
             value={dateRange}
-            onChange={(vals) => setDateRange(vals as [Dayjs, Dayjs] | null)}
+            onChange={(vals) => {
+              setDateRange(vals as [Dayjs, Dayjs] | null);
+              setActivePreset(null); // 手动改日期 → 取消预设高亮
+            }}
             size="small"
             allowClear
           />
@@ -350,18 +317,16 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-[11px] text-muted-foreground">状态</label>
-          <select
-            value={statusF ?? ""}
-            onChange={(e) => setStatusF(e.target.value || undefined)}
-            className={`${inputCls} w-28`}
-          >
-            <option value="">全部状态</option>
-            {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
+          <Select
+            mode="multiple"
+            value={statusF}
+            onChange={(v: string[]) => setStatusF(v)}
+            size="small"
+            allowClear
+            placeholder="全部状态"
+            style={{ minWidth: 160 }}
+            options={STATUS_OPTIONS.map((s) => ({ label: s, value: s }))}
+          />
         </div>
         <Button size="sm" variant="outline" onClick={reset}>
           重置
@@ -371,89 +336,23 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
         rowKey="id"
         size="small"
         bordered
-        scroll={{ x: "max-content" }}
+        tableLayout="fixed"
         columns={columns}
         dataSource={filtered}
         loading={loading}
         emptyText="暂无任务"
       />
 
-      {/* 执行表单(共享 ExecuteTaskDialog,填耗时/说明/提交) */}
-      {execute && (
-        <ExecuteTaskDialog
-          state={execute}
-          onChange={setExecute}
-          onConfirm={(action) => void handleExecute(action)}
-          onCancel={() => setExecute(null)}
-          busy={busy}
-        />
-      )}
-
-      {/* 详情 dialog(只读任务完整字段) */}
-      {detailTask && (
-        <Dialog
-          open
-          onOpenChange={(o) => {
-            if (!o) setDetailTask(null);
-          }}
-        >
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>任务详情</DialogTitle>
-              <DialogDescription>
-                {detailTask.content ?? "（未填写）"}
-              </DialogDescription>
-            </DialogHeader>
-            <dl className="space-y-1.5 text-xs">
-              <div className="flex gap-2">
-                <dt className="w-20 shrink-0 text-muted-foreground">项目</dt>
-                <dd className="min-w-0 flex-1">
-                  {detailTask.project_name ?? "—"}
-                </dd>
-              </div>
-              <div className="flex gap-2">
-                <dt className="w-20 shrink-0 text-muted-foreground">模块</dt>
-                <dd>{detailTask.module_name ?? "—"}</dd>
-              </div>
-              <div className="flex gap-2">
-                <dt className="w-20 shrink-0 text-muted-foreground">状态</dt>
-                <dd>{taskStatusTag(detailTask.status).text}</dd>
-              </div>
-              <div className="flex gap-2">
-                <dt className="w-20 shrink-0 text-muted-foreground">开始时间</dt>
-                <dd>{fmtDate(detailTask.start_time)}</dd>
-              </div>
-              <div className="flex gap-2">
-                <dt className="w-20 shrink-0 text-muted-foreground">截止时间</dt>
-                <dd>{fmtDate(detailTask.end_time)}</dd>
-              </div>
-              <div className="flex gap-2">
-                <dt className="w-20 shrink-0 text-muted-foreground">计划工时</dt>
-                <dd>{detailTask.work_load ?? "—"}</dd>
-              </div>
-              <div className="flex gap-2">
-                <dt className="w-20 shrink-0 text-muted-foreground">配合人员</dt>
-                <dd>{detailTask.work_partner ?? "—"}</dd>
-              </div>
-              <div className="flex gap-2">
-                <dt className="w-20 shrink-0 text-muted-foreground">备注</dt>
-                <dd className="min-w-0 break-all">
-                  {detailTask.remarks ?? "—"}
-                </dd>
-              </div>
-            </dl>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setDetailTask(null)}
-              >
-                关闭
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
+      {/* 任务详情/执行弹窗(抽自任务计划页的 TaskDetailModal, 2026-07-20-workbench-task-modal-align) */}
+      <TaskDetailModal
+        task={detailTask}
+        mode={detailMode}
+        onClose={() => setDetailTask(null)}
+        onChanged={() => {
+          onChanged?.();
+          void loadTasks();
+        }}
+      />
 
       <Toast toast={toast} />
     </>

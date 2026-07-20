@@ -25,6 +25,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import dayjs from "dayjs";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { SectionCard } from "@/components/layout";
@@ -151,10 +152,10 @@ export function WorkCalendarPanel({
           onClick={() =>
             onMonthChange(dayjs(month).subtract(1, "month").format("YYYY-MM"))
           }
-          className="rounded px-2 py-0.5 text-base text-muted-foreground hover:bg-muted"
+          className="flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           aria-label="上个月"
         >
-          ‹
+          <ChevronLeft className="size-4" />
         </button>
         <span className="text-sm font-medium">
           {dayjs(month).format("YYYY年M月")}
@@ -169,10 +170,10 @@ export function WorkCalendarPanel({
           onClick={() =>
             onMonthChange(dayjs(month).add(1, "month").format("YYYY-MM"))
           }
-          className="rounded px-2 py-0.5 text-base text-muted-foreground hover:bg-muted"
+          className="flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           aria-label="下个月"
         >
-          ›
+          <ChevronRight className="size-4" />
         </button>
       </div>
       {!calendar ? (
@@ -199,19 +200,27 @@ export function WorkCalendarPanel({
               const alertColor = alertDotClass(cell.info?.alert_level);
               const date = `${month}-${String(cell.day).padStart(2, "0")}`;
               const selected = selectedDay === date;
+              const isToday = date === todayStr;
               return (
                 <button
                   type="button"
                   key={`day-${cell.day}`}
                   onClick={() => setSelectedDay(date)}
                   className={cn(
-                    "flex aspect-square flex-col rounded border p-1 text-left transition-colors",
+                    "flex aspect-square flex-col rounded-lg border p-1 text-left transition-colors",
                     selected
-                      ? "border-primary bg-accent"
-                      : "border-slate-100 bg-card hover:border-slate-300",
+                      ? "border-primary bg-accent shadow-sm"
+                      : "border-transparent bg-card hover:border-slate-200 hover:bg-muted/50",
                   )}
                 >
-                  <span className="text-center text-xs">{cell.day}</span>
+                  <span
+                    className={cn(
+                      "mx-auto flex size-5 items-center justify-center rounded-full text-xs",
+                      isToday && "bg-primary font-semibold text-primary-foreground",
+                    )}
+                  >
+                    {cell.day}
+                  </span>
                   <div className="mt-auto flex items-center justify-center gap-0.5">
                     {loadColor ? (
                       <span
@@ -279,18 +288,28 @@ export function WorkCalendarPanel({
                 {selectedInfo.plan_items.length === 0 ? (
                   <div className="text-xs text-muted-foreground/70">无</div>
                 ) : (
-                  <ul className="space-y-0.5">
+                  <ul className="space-y-1">
                     {selectedInfo.plan_items.map((p) => {
                       const tag = taskStatusTag(p.status ?? "");
                       return (
-                        <li key={p.id} className="flex items-center gap-2 text-xs">
-                          <Tag color={tag.color} className="shrink-0">{tag.text}</Tag>
-                          <span className="min-w-0 flex-1 truncate" title={p.content ?? ""}>
-                            {p.content ?? "—"}
-                          </span>
-                          <span className="shrink-0 text-muted-foreground">
-                            {p.project_name ?? ""}
-                          </span>
+                        <li key={p.id} className="text-xs">
+                          <div className="flex items-center gap-2">
+                            <Tag color={tag.color} className="shrink-0">{tag.text}</Tag>
+                            <span
+                              className="min-w-0 flex-1 truncate"
+                              title={p.content ?? ""}
+                            >
+                              {p.content ?? "—"}
+                            </span>
+                          </div>
+                          {p.project_name ? (
+                            <div
+                              className="mt-0.5 truncate pl-1 text-[10px] text-muted-foreground"
+                              title={p.project_name}
+                            >
+                              {p.project_name}
+                            </div>
+                          ) : null}
                         </li>
                       );
                     })}
@@ -305,25 +324,35 @@ export function WorkCalendarPanel({
                 {selectedInfo.problem_items.length === 0 ? (
                   <div className="text-xs text-muted-foreground/70">无</div>
                 ) : (
-                  <ul className="space-y-0.5">
+                  <ul className="space-y-1">
                     {selectedInfo.problem_items.map((p) => (
-                      <li key={p.id} className="flex items-center gap-2 text-xs">
-                        <span
-                          className={cn(
-                            "shrink-0 rounded px-1 text-[10px]",
-                            p.status === "4"
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "bg-amber-100 text-amber-700",
-                          )}
-                        >
-                          {p.status === "4" ? "已关闭" : "未关闭"}
-                        </span>
-                        <span className="min-w-0 flex-1 truncate" title={p.pro_desc ?? ""}>
-                          {p.pro_desc ?? "—"}
-                        </span>
-                        <span className="shrink-0 text-muted-foreground">
-                          {p.project_name ?? ""}
-                        </span>
+                      <li key={p.id} className="text-xs">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={cn(
+                              "shrink-0 rounded-md px-1.5 py-px text-[10px] font-medium",
+                              p.status === "4"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-amber-100 text-amber-700",
+                            )}
+                          >
+                            {p.status === "4" ? "已关闭" : "未关闭"}
+                          </span>
+                          <span
+                            className="min-w-0 flex-1 truncate"
+                            title={p.pro_desc ?? ""}
+                          >
+                            {p.pro_desc ?? "—"}
+                          </span>
+                        </div>
+                        {p.project_name ? (
+                          <div
+                            className="mt-0.5 truncate pl-1 text-[10px] text-muted-foreground"
+                            title={p.project_name}
+                          >
+                            {p.project_name}
+                          </div>
+                        ) : null}
                       </li>
                     ))}
                   </ul>
@@ -337,25 +366,32 @@ export function WorkCalendarPanel({
                 {selectedInfo.execute_items.length === 0 ? (
                   <div className="text-xs text-muted-foreground/70">无</div>
                 ) : (
-                  <ul className="space-y-0.5">
+                  <ul className="space-y-1">
                     {selectedInfo.execute_items.map((e) => (
-                      <li key={e.id} className="flex items-center gap-2 text-xs">
-                        <span
-                          className={cn(
-                            "shrink-0 rounded px-1 text-[10px]",
-                            e.status === "90"
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "bg-blue-100 text-blue-700",
-                          )}
-                        >
-                          {e.status === "90" ? "已完成" : (e.status ?? "—")}
-                        </span>
-                        <span className="min-w-0 flex-1 truncate" title={e.content ?? ""}>
-                          {e.content ?? "(无关联任务)"}
-                        </span>
-                        <span className="shrink-0 text-muted-foreground">
-                          {e.time_spent != null ? `${e.time_spent}人天` : ""}
-                        </span>
+                      <li key={e.id} className="text-xs">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={cn(
+                              "shrink-0 rounded-md px-1.5 py-px text-[10px] font-medium",
+                              e.status === "90"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-blue-100 text-blue-700",
+                            )}
+                          >
+                            {e.status === "90" ? "已完成" : (e.status ?? "—")}
+                          </span>
+                          <span
+                            className="min-w-0 flex-1 truncate"
+                            title={e.content ?? ""}
+                          >
+                            {e.content ?? "(无关联任务)"}
+                          </span>
+                          {e.time_spent != null ? (
+                            <span className="shrink-0 text-muted-foreground">
+                              {e.time_spent}人天
+                            </span>
+                          ) : null}
+                        </div>
                       </li>
                     ))}
                   </ul>

@@ -7,6 +7,8 @@
  * (design §3 非目标)。复用 EmptyState,props 支持自定义 title/description,
  * 绩效考评占位时复用本组件传不同 title/文案即可。
  */
+import { Bell } from "lucide-react";
+
 import { EmptyState } from "@/components/ui/empty-state";
 import { SectionCard } from "@/components/layout";
 
@@ -26,7 +28,11 @@ export function MessagePlaceholder({
 }: MessagePlaceholderProps) {
   return (
     <SectionCard title={title} bodyPadding="p-4">
-      <EmptyState title={emptyTitle} description={description} />
+      <EmptyState
+        icon={<Bell className="size-5" />}
+        title={emptyTitle}
+        description={description}
+      />
     </SectionCard>
   );
 }

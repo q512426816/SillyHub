@@ -13,7 +13,7 @@
  * 依赖:lib/ppm/task (API) + lib/ppm/project (项目下拉) + stores/session。
  */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { DatePicker, Input, Modal, Select, Table, type TableProps, Tag } from "antd";
+import { DatePicker, Input, Select, Table, type TableProps, Tag } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 
 import { Button } from "@/components/ui/button";
@@ -27,11 +27,9 @@ import { isOverEstimate } from "@/lib/ppm/format";
 import {
   createPlanTask,
   deletePlanTask,
-  executePlanTask,
   exportPlanTasks,
   listPersonalPlanTasks,
   listPlanTasks,
-  listTaskExecutes,
   startPlanTask,
   updatePlanTask,
 } from "@/lib/ppm/task";
@@ -42,7 +40,6 @@ import type {
   PlanTaskPageReq,
   PlanTaskUpdate,
   ProjectSimpleItem,
-  TaskExecute,
 } from "@/lib/ppm/types";
 import { useSession } from "@/stores/session";
 import {
@@ -54,10 +51,7 @@ import {
   taskStatusTag,
   useToast,
 } from "../shared";
-import {
-  ExecuteTaskDialog,
-  type ExecuteTaskState,
-} from "../_components/execute-task-dialog";
+import { TaskDetailModal } from "../_components/task-detail-modal";
 
 const { RangePicker } = DatePicker;
 
@@ -126,15 +120,8 @@ export default function TaskPlansPage() {
     open: false,
     mode: "create",
   });
-  const [execute, setExecute] = useState<ExecuteTaskState | null>(null);
-  const [recordsTask, setRecordsTask] = useState<PlanTask | null>(null);
-  const [records, setRecords] = useState<TaskExecute[]>([]);
-  const [detailInflightId, setDetailInflightId] = useState<string | null>(null);
+  const [detailTask, setDetailTask] = useState<PlanTask | null>(null);
   const [detailMode, setDetailMode] = useState<"detail" | "execute">("detail");
-  // 跨天拆分(D-006): in-flight actual_start ~ today 按天拆, 每天一行(耗时/说明)
-  const [detailDays, setDetailDays] = useState<
-    { date: string; timeSpent: string; execInfo: string }[]
-  >([]);
   const [executeBusy, setExecuteBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<PlanTask | null>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
@@ -260,96 +247,6 @@ export default function TaskPlansPage() {
     await load();
   };
 
-  const handleOpenDetail = async (task: PlanTask, mode: "detail" | "execute") => {
-    setDetailMode(mode);
-    try {
-      const page = await listTaskExecutes({
-        plan_task_id: task.id,
-        page: 1,
-        page_size: 100,
-      });
-      const items = page.items ?? [];
-      setRecords(items);
-      setRecordsTask(task);
-      // 预填 in-flight 执行表单(status=30) + 跨天拆分(actual_start~today 按天)
-      const inflight = items.find((e) => e.status === "30");
-      if (inflight && inflight.actual_start_time) {
-        setDetailInflightId(inflight.id);
-        const startDay = dayjs(inflight.actual_start_time).startOf("day");
-        const today = dayjs().startOf("day");
-        const days: { date: string; timeSpent: string; execInfo: string }[] = [];
-        let cur = startDay;
-        let i = 0;
-        while (cur.isBefore(today) || cur.isSame(today, "day")) {
-          days.push({
-            date: cur.format("YYYY-MM-DD"),
-            timeSpent:
-              i === 0 && inflight.time_spent != null ? String(inflight.time_spent) : "",
-            execInfo: i === 0 ? inflight.execute_info ?? "" : "",
-          });
-          cur = cur.add(1, "day");
-          i += 1;
-          if (i > 60) break; // 兜底防死循环
-        }
-        setDetailDays(days);
-      } else {
-        setDetailInflightId(null);
-        setDetailDays([]);
-      }
-    } catch (err) {
-      showToast(false, err instanceof ApiError ? err.message : "加载执行记录失败");
-    }
-  };
-
-  const handleDetailExecute = async (action: "submit" | "complete") => {
-    if (!recordsTask || !detailInflightId || detailDays.length === 0) {
-      showToast(false, "无进行中的执行记录");
-      return;
-    }
-    setExecuteBusy(true);
-    try {
-      // 跨天拆分提交(D-006): 首条收口 in-flight; 后续天 start+execute;
-      // 中间天 submit 回未开始, 末天用 action(submit/complete)
-      // actual 时间用 UTC 固定时刻(本地 startOf/endOf 转 UTC 可能跨日, 后端跨天校验按 UTC date)
-      const inflightRec = records.find((e) => e.id === detailInflightId);
-      let lastExcId = detailInflightId;
-      for (let i = 0; i < detailDays.length; i++) {
-        const d = detailDays[i];
-        if (!d) continue;
-        const isLast = i === detailDays.length - 1;
-        const ts = d.timeSpent ? Number(d.timeSpent) : undefined;
-        const dayIso = `${d.date}T12:00:00Z`;
-        // 首条 execute 的 end 用 in-flight 的 start(同时刻, 确保 UTC date 一致); 后续天用 dayIso
-        const endIso = i === 0 ? inflightRec?.actual_start_time ?? dayIso : dayIso;
-        if (i > 0) {
-          // 后续天: start 创建新 in-flight(记当天 UTC 中午)
-          const newExc = await startPlanTask({
-            plan_task_id: recordsTask.id,
-            actual_start_time: dayIso,
-          });
-          lastExcId = newExc.id;
-        }
-        await executePlanTask({
-          plan_task_id: recordsTask.id,
-          action: isLast ? action : "submit",
-          task_execute_id: lastExcId,
-          execute_info: d.execInfo || undefined,
-          time_spent: ts !== undefined && !Number.isNaN(ts) ? ts : undefined,
-          actual_end_time: endIso,
-        });
-      }
-      showToast(true, action === "complete" ? "任务已完成" : "执行已保存");
-      setRecordsTask(null); // 提交/完成直接关闭弹窗
-      setRecords([]);
-      setDetailDays([]);
-      await load();
-    } catch (err) {
-      showToast(false, err instanceof ApiError ? err.message : "执行失败");
-    } finally {
-      setExecuteBusy(false);
-    }
-  };
-
   const handleStart = async (task: PlanTask) => {
     setExecuteBusy(true);
     try {
@@ -358,69 +255,6 @@ export default function TaskPlansPage() {
       await load();
     } catch (err) {
       showToast(false, err instanceof ApiError ? err.message : "启动失败");
-    } finally {
-      setExecuteBusy(false);
-    }
-  };
-
-  const handleResume = async (task: PlanTask) => {
-    setExecuteBusy(true);
-    try {
-      const page = await listTaskExecutes({
-        plan_task_id: task.id,
-        status: "30",
-        page: 1,
-        page_size: 1,
-      });
-      const inflight = page.items?.[0];
-      if (!inflight) {
-        showToast(false, "未找到进行中的执行记录");
-        return;
-      }
-      setExecute({
-        task,
-        executeInfo: inflight.execute_info ?? "",
-        timeSpent:
-          inflight.time_spent != null ? String(inflight.time_spent) : "",
-        taskExecuteId: inflight.id,
-      });
-    } catch (err) {
-      showToast(false, err instanceof ApiError ? err.message : "加载执行记录失败");
-    } finally {
-      setExecuteBusy(false);
-    }
-  };
-
-  const handleExecute = async (action: "submit" | "complete") => {
-    if (!execute?.task) return;
-    const task = execute.task;
-    if (!execute.taskExecuteId) {
-      showToast(false, "缺少执行记录 id, 请先启动任务");
-      return;
-    }
-    setExecuteBusy(true);
-    try {
-      const timeSpent = execute.timeSpent
-        ? Number(execute.timeSpent)
-        : undefined;
-      await executePlanTask({
-        plan_task_id: task.id,
-        action,
-        task_execute_id: execute.taskExecuteId,
-        execute_info: execute.executeInfo || undefined,
-        time_spent:
-          timeSpent !== undefined && !Number.isNaN(timeSpent)
-            ? timeSpent
-            : undefined,
-      });
-      showToast(
-        true,
-        action === "complete" ? "任务已完成" : "执行已保存(可再次填报)",
-      );
-      setExecute(null);
-      await load();
-    } catch (err) {
-      showToast(false, err instanceof ApiError ? err.message : "执行失败");
     } finally {
       setExecuteBusy(false);
     }
@@ -590,14 +424,24 @@ export default function TaskPlansPage() {
               </Button>
             )}
             {t.status === "进行中" && canOperate && (
-              <Button size="sm" variant="ghost" onClick={() => void handleOpenDetail(t, "execute")}>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setDetailTask(t);
+                  setDetailMode("execute");
+                }}
+              >
                 执行
               </Button>
             )}
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => void handleOpenDetail(t, "detail")}
+              onClick={() => {
+                setDetailTask(t);
+                setDetailMode("detail");
+              }}
             >
               详情
             </Button>
@@ -789,183 +633,13 @@ export default function TaskPlansPage() {
         />
       )}
 
-      {execute && (
-        <ExecuteTaskDialog
-          state={execute}
-          onChange={setExecute}
-          onConfirm={(action) => void handleExecute(action)}
-          onCancel={() => setExecute(null)}
-          busy={executeBusy}
+      {detailTask && (
+        <TaskDetailModal
+          task={detailTask}
+          mode={detailMode}
+          onClose={() => setDetailTask(null)}
+          onChanged={() => void load()}
         />
-      )}
-
-      {recordsTask && (
-        <Modal
-          open
-          title={
-            <div className="flex items-center gap-2">
-              <span>详情</span>
-              <Tag color={taskStatusTag(recordsTask.status).color}>
-                {taskStatusTag(recordsTask.status).text}
-              </Tag>
-              <span className="text-sm font-normal text-muted-foreground">
-                {recordsTask.content ?? ""}
-              </span>
-            </div>
-          }
-          onCancel={() => {
-            setRecordsTask(null);
-            setRecords([]);
-          }}
-          footer={null}
-          width={760}
-        >
-          {/* 任务信息 */}
-          <div className="mb-4 rounded-lg border border-border bg-muted/30 p-4">
-            <div className="mb-3 text-xs font-semibold text-foreground/70">任务信息</div>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-              <div><span className="text-muted-foreground">项目：</span>{recordsTask.project_name ?? "—"}</div>
-              <div><span className="text-muted-foreground">模块：</span>{recordsTask.module_name ?? "—"}</div>
-              <div><span className="text-muted-foreground">预估工时：</span>{recordsTask.work_load ?? "—"}</div>
-              <div>
-                <span className="text-muted-foreground">已消耗：</span>
-                {recordsTask.spent_time != null && recordsTask.spent_time > 0 ? (
-                  <span
-                    className={
-                      isOverEstimate(recordsTask.spent_time, recordsTask.work_load)
-                        ? "font-medium text-red-600"
-                        : "font-medium text-emerald-600"
-                    }
-                  >
-                    {recordsTask.spent_time} 人天
-                  </span>
-                ) : (
-                  "—"
-                )}
-              </div>
-              <div className="col-span-2">
-                <span className="text-muted-foreground">计划时间：</span>
-                {recordsTask.start_time ? fmtDay(recordsTask.start_time) : "—"} ~{" "}
-                {recordsTask.end_time ? fmtDay(recordsTask.end_time) : "—"}
-              </div>
-              <div><span className="text-muted-foreground">负责人：</span>{recordsTask.user_name ?? "—"}</div>
-              <div><span className="text-muted-foreground">配合人员：</span>{recordsTask.work_partner ?? "—"}</div>
-              {recordsTask.remarks ? (
-                <div className="col-span-2"><span className="text-muted-foreground">备注：</span>{recordsTask.remarks}</div>
-              ) : null}
-            </div>
-          </div>
-
-          {/* 执行记录(时间精确到秒) */}
-          <div className="mb-2 text-xs font-semibold text-foreground/70">
-            执行记录（{records.length}）
-          </div>
-          {records.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-border py-6 text-center text-xs text-muted-foreground">
-              暂无执行记录
-            </div>
-          ) : (
-            <div className="overflow-hidden rounded-lg border border-border">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-muted/50 text-left text-muted-foreground">
-                    <th className="px-3 py-2 font-medium">开始时间</th>
-                    <th className="px-3 py-2 font-medium">结束时间</th>
-                    <th className="px-3 py-2 font-medium">耗时</th>
-                    <th className="px-3 py-2 font-medium">说明</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {records.map((e) => (
-                    <tr key={e.id} className="border-t border-border hover:bg-muted/30">
-                      <td className="px-3 py-2">
-                        {e.actual_start_time
-                          ? dayjs(e.actual_start_time).format("YYYY-MM-DD HH:mm:ss")
-                          : "—"}
-                      </td>
-                      <td className="px-3 py-2">
-                        {e.actual_end_time
-                          ? dayjs(e.actual_end_time).format("YYYY-MM-DD HH:mm:ss")
-                          : "—"}
-                      </td>
-                      <td className="px-3 py-2">{e.time_spent != null ? `${e.time_spent}人天` : "—"}</td>
-                      <td className="px-3 py-2">{e.execute_info ?? "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* 执行表单(执行模式 + 进行中 + 有 in-flight 记录时展示) */}
-          {detailMode === "execute" &&
-            recordsTask.status === "进行中" &&
-            detailInflightId && (
-            <div className="mt-4 rounded-lg border border-border bg-card p-4">
-              <div className="mb-3 text-xs font-semibold text-foreground/70">
-                填报执行
-                {detailDays.length > 1
-                  ? `（跨 ${detailDays.length} 天，已自动按天拆分，逐天填写耗时与说明）`
-                  : ""}
-              </div>
-              {detailDays.map((d, idx) => (
-                <div key={d.date} className="mb-3 space-y-2 rounded-md border border-border bg-muted/20 p-3 last:mb-0">
-                  <div className="text-[11px] font-medium">{d.date}</div>
-                  <div>
-                    <label className="mb-1 block text-[11px] text-muted-foreground">
-                      耗时(人天)
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.5}
-                      placeholder="耗时(人天)"
-                      value={d.timeSpent}
-                      onChange={(e) =>
-                        setDetailDays((prev) =>
-                          prev.map((x, i) =>
-                            i === idx ? { ...x, timeSpent: e.target.value } : x,
-                          ),
-                        )
-                      }
-                      className={`w-40 ${inputCls}`}
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-[11px] text-muted-foreground">
-                      执行情况说明
-                    </label>
-                    <input
-                      placeholder="执行情况说明"
-                      value={d.execInfo}
-                      onChange={(e) =>
-                        setDetailDays((prev) =>
-                          prev.map((x, i) =>
-                            i === idx ? { ...x, execInfo: e.target.value } : x,
-                          ),
-                        )
-                      }
-                      className={`w-full ${inputCls}`}
-                    />
-                  </div>
-                </div>
-              ))}
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={executeBusy}
-                  onClick={() => void handleDetailExecute("submit")}
-                >
-                  提交(回未开始)
-                </Button>
-                <Button size="sm" disabled={executeBusy} onClick={() => void handleDetailExecute("complete")}>
-                  完成
-                </Button>
-              </div>
-            </div>
-          )}
-        </Modal>
       )}
 
       {confirmDelete && (

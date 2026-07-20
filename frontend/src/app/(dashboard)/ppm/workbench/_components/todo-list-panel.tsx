@@ -22,6 +22,7 @@
  *   其余                            → outline   type 原文
  */
 import { useRouter } from "next/navigation";
+import { ChevronRight } from "lucide-react";
 
 import { SectionCard } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
@@ -103,9 +104,9 @@ export function TodoListPanel({ todos, loading }: TodoListPanelProps) {
     <SectionCard
       title="我的待办"
       extra={
-        <span className="text-xs tabular-nums text-muted-foreground">
+        <Badge variant="info" className="tabular-nums">
           {count}
-        </span>
+        </Badge>
       }
       bodyPadding="p-0"
     >
@@ -121,9 +122,9 @@ export function TodoListPanel({ todos, loading }: TodoListPanelProps) {
             return (
               <li
                 key={todo.id}
-                className={`flex items-center gap-2 px-3 py-2 ${
+                className={`flex items-center gap-2 px-4 py-2.5 ${
                   clickable
-                    ? "cursor-pointer hover:bg-muted/50"
+                    ? "group cursor-pointer transition-colors hover:bg-muted/50"
                     : "cursor-default"
                 }`}
                 onClick={() => clickable && goTodo(todo)}
@@ -137,6 +138,9 @@ export function TodoListPanel({ todos, loading }: TodoListPanelProps) {
                 >
                   {todo.name}
                 </span>
+                {clickable ? (
+                  <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/40 transition group-hover:translate-x-0.5 group-hover:text-muted-foreground" />
+                ) : null}
               </li>
             );
           })}
