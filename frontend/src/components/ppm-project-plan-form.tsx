@@ -47,16 +47,16 @@
  */
 import { useEffect, useMemo, useRef } from "react";
 import {
+  Button,
   DatePicker,
-  Drawer,
   Form,
   Input,
   InputNumber,
   message,
+  Modal,
 } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 
-import { Button } from "@/components/ui/button";
 import { PpmUserSelect, type PpmSelectOption } from "@/components/ppm-user-select";
 import { ApiError } from "@/lib/api";
 import {
@@ -263,18 +263,19 @@ export function PpmProjectPlanForm({
   };
 
   return (
-    <Drawer
+    <Modal
       title={mode === "create" ? "新建项目计划" : "编辑项目计划"}
       open={open}
-      onClose={onClose}
+      onCancel={onClose}
       width={920}
+      maskClosable={false}
       destroyOnClose
       footer={
         <div className="flex justify-end gap-2">
-          <Button size="sm" variant="outline" onClick={onClose}>
+          <Button onClick={onClose}>
             取消
           </Button>
-          <Button size="sm" onClick={() => void handleSubmit()}>
+          <Button type="primary" onClick={() => void handleSubmit()}>
             确定
           </Button>
         </div>
@@ -495,7 +496,7 @@ export function PpmProjectPlanForm({
           </Form.Item>
         </FormSection>
       </Form>
-    </Drawer>
+    </Modal>
   );
 }
 

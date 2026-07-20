@@ -509,3 +509,12 @@ created_at: 2026-07-14T09:20:24
 现状审查：page.tsx 已对齐:PageContainer/PageHeader/SectionCard/DataTable/grid-cols-4 Field(text-xs leading-4)/展开收起/搜索回车/分页/striped/表格 small bordered scroll。偏离:①shadcn Button(工具栏 导出/新建/搜索/重置/展开 5 处 + 操作列 里程碑/编辑/删除 3 处 + 重新加载) ②删除用原生 confirm()(规范要 antd Modal) ③toast 成功色 border-emerald-300 bg-emerald-50 text-emerald-700(硬编码,规范要 success token)。
 方案：page.tsx ①import Button shadcn→antd + import App ②工具栏 导出/重置/展开 default、新建/搜索 primary(默认 middle,去 size=sm) ③操作列 里程碑/编辑 type=link、删除 type=link danger(size=small) ④重新加载 default ⑤删除 confirm()→App.useApp().modal.confirm(okButtonProps danger,经 AntApp 注入,对齐 runtimes 模式) ⑥toast 成功色 emerald→border-success/30 bg-success/10 text-success。暂不动:PpmProjectPlanForm/PpmProjectPlanDetail 组件样式(跨文件,单独评估)。
 结果：tsc --noEmit EXIT 0;eslint 0 error(1 既有类型签名 p 未用 warning);grep 无 shadcn Button/size=sm/variant/emerald/原生 confirm 残留(modal.confirm 为新代码)。纯前端单文件。待 commit + push + rebuild frontend 部署 + 用户浏览器验证(操作列/工具栏按钮 antd、删除弹 Modal 确认、toast 成功色统一)。
+
+## ql-20260720-014-b3d5 | 2026-07-20 15:35:46 | /ppm/project-plans 新建/编辑表单 PpmProjectPlanForm Drawer→Modal
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-project-plan-form.tsx
+需求：用户要求 /ppm/project-plans 的新建/编辑表单(PpmProjectPlanForm,页内 state 叫 drawer)从抽屉改为弹窗。
+现状审查：PpmProjectPlanForm 用 antd Drawer(width=920,17 字段大表单,destroyOnClose,footer 取消/确定 shadcn Button)。form 逻辑(Form.validateFields/countMoney/countUser/onProjectChange/onManagerChange)成熟。
+方案：ppm-project-plan-form.tsx ①import antd 去 Drawer 加 Modal + Button antd 化 ②Drawer→Modal(宽度 920 保留-17 字段大表单网格布局;onClose→onCancel;footer 取消 default+保存 primary;补 maskClosable=false 对齐规范);PpmProjectPlanForm 组件名/props 不变,page.tsx 调用零改。表单逻辑完全不动,仅容器抽屉→弹窗。
+结果：tsc --noEmit EXIT 0;eslint 0 error 0 warning;grep 无 Drawer/shadcn Button/size=sm/variant 残留。纯前端单文件。待 commit + push + rebuild frontend 部署 + 用户浏览器验证(新建/编辑项目计划弹居中弹窗,920px 大表单)。
