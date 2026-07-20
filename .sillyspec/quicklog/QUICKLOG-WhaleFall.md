@@ -482,3 +482,12 @@ created_at: 2026-07-14T09:20:24
 根因：审批信息块(approve/change/changeApprove/view 模式 + approve_user_id 条件渲染)展示审批人/是否驳回/审批意见;当前流程 draft→done 无审核(ql-20260717-001),approve 模式不触达,审批信息块冗余。
 方案：删审批信息块整段 FormSection JSX(approve_user_id/approve_back_flag/approve_opinion 展示与编辑);同步删 approveEditable 定义(仅该块用,删后避免未用 warning)。审核信息块保留不动。approve 模式 submit 逻辑(initialValues approve_back_flag='0' 默认同意 + submit 取 vals)保留,不破坏;数据字段 approve_user_id 仍在 initialValues/submit body,仅 UI 隐藏。
 结果：tsc --noEmit EXIT 0;eslint 0 error(19 warning 全既有类型签名未用参数,非本次);vitest milestone-details 24 passed 零回归。纯前端单文件。待 commit + push + rebuild frontend 部署 + 用户验证(明细详情抽屉无「审批信息」区,审核信息仍展示)。
+
+## ql-20260720-006-3a7d | 2026-07-20 14:29:30 | /ppm/project-members 按前端样式规范调整：Button antd 化 + 搜索 Field 布局对齐
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-project-members-group-table.tsx
+需求：用户要求按 FRONTEND_PAGE_STYLE.md 规范调整 /ppm/project-members 样式。
+现状审查：page.tsx 已用 PageContainer/PageHeader(对齐);group-table.tsx 偏离:①import shadcn Button(重新加载/添加项目成员/搜索/重置/展开 5 处用 size=sm + variant) ②搜索区 6 个 Field 外层 div 无 flex col gap-1,label 用 label text-[11px](规范是 span text-xs leading-4 text-muted-foreground)。已对齐项:SectionCard bodyPadding p-2 / grid-cols-4 / striped 斑马纹 / StatusBadge 状态 / Tag color 类型 / 空值—。
+方案：group-table.tsx ①Button shadcn→antd(重新加载 default+ml-3、添加项目成员/搜索 primary、重置/展开 default,去掉 size=sm 用默认 middle);②6 个搜索 Field 外层 div 加 flex w-full flex-col gap-1,label 改 span text-xs leading-4 text-muted-foreground。暂不动:MemberFormDrawer→Modal(跨文件 ppm-project-members-table,单独处理)、DataTable 包装(overflow-hidden 可能影响 expandable 展开行,风险)。
+结果：tsc --noEmit EXIT 0;eslint 0 error(1 既有 useCallback missing dep warning,非本次);grep 无 shadcn Button/size=sm/variant/text-[11px]/label 残留。5 按钮 antd 化 + 6 搜索 Field 布局对齐规范。纯前端单文件。MemberFormDrawer→Modal 暂不动(跨文件,单独处理)。待 commit + push + rebuild frontend 部署 + 用户浏览器验证。

@@ -17,9 +17,8 @@
  * 决策:D-002(成员展开行懒加载)/D-003/D-006(复用成员表)/D-007(onChanged 刷新 member_count)。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Input, Select, Table, type TableProps, Tag } from "antd";
+import { Button, Input, Select, Table, type TableProps, Tag } from "antd";
 
-import { Button } from "@/components/ui/button";
 import { SectionCard } from "@/components/layout";
 import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api";
@@ -282,8 +281,6 @@ export function PpmProjectMembersGroupTable({
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {error}
           <Button
-            size="sm"
-            variant="outline"
             className="ml-3"
             onClick={() => void load()}
           >
@@ -295,32 +292,28 @@ export function PpmProjectMembersGroupTable({
           <SectionCard bodyPadding="p-2">
             {/* 顶部按钮行(D-006,对齐 projects):左=数据组(添加项目成员) │ 竖分隔 │ 右=基础组(搜索/重置) */}
             <div className="mb-2 flex items-center justify-end gap-2">
-              <Button size="sm" onClick={() => setGlobalAddOpen(true)}>
+              <Button type="primary" onClick={() => setGlobalAddOpen(true)}>
                 + 添加项目成员
               </Button>
               <span className="mx-1 h-6 w-px bg-border" aria-hidden />
-              <Button size="sm" onClick={onSearch}>
+              <Button type="primary" onClick={onSearch}>
                 搜索
               </Button>
-              <Button size="sm" variant="outline" onClick={onReset}>
+              <Button onClick={onReset}>
                 重置
               </Button>
               {/* 展开收起(6 字段 > 4,对齐 projects showExpandToggle) */}
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setSearchExpanded((v) => !v)}
-              >
+              <Button onClick={() => setSearchExpanded((v) => !v)}>
                 {searchExpanded ? "收起" : "展开"}
               </Button>
             </div>
 
             {/* 搜索区(6 维,grid-cols-4 对齐 projects) */}
             <div className="grid w-full grid-cols-4 gap-3">
-              <div>
-                <label className="text-[11px] text-muted-foreground">
+              <div className="flex w-full flex-col gap-1">
+                <span className="text-xs leading-4 text-muted-foreground">
                   项目名称
-                </label>
+                </span>
                 <Input
                   allowClear
                   value={search.project_name}
@@ -330,10 +323,10 @@ export function PpmProjectMembersGroupTable({
                   placeholder="项目名称"
                 />
               </div>
-              <div>
-                <label className="text-[11px] text-muted-foreground">
+              <div className="flex w-full flex-col gap-1">
+                <span className="text-xs leading-4 text-muted-foreground">
                   项目状态
-                </label>
+                </span>
                 <Select
                   allowClear
                   className="w-full"
@@ -351,10 +344,10 @@ export function PpmProjectMembersGroupTable({
                   }))}
                 />
               </div>
-              <div>
-                <label className="text-[11px] text-muted-foreground">
+              <div className="flex w-full flex-col gap-1">
+                <span className="text-xs leading-4 text-muted-foreground">
                   项目类型
-                </label>
+                </span>
                 <Select
                   allowClear
                   className="w-full"
@@ -369,10 +362,10 @@ export function PpmProjectMembersGroupTable({
                   }))}
                 />
               </div>
-              <div>
-                <label className="text-[11px] text-muted-foreground">
+              <div className="flex w-full flex-col gap-1">
+                <span className="text-xs leading-4 text-muted-foreground">
                   负责人
-                </label>
+                </span>
                 <Input
                   allowClear
                   value={search.owner_name}
@@ -384,10 +377,10 @@ export function PpmProjectMembersGroupTable({
               </div>
               {searchExpanded && (
                 <>
-                  <div>
-                    <label className="text-[11px] text-muted-foreground">
+                  <div className="flex w-full flex-col gap-1">
+                    <span className="text-xs leading-4 text-muted-foreground">
                       成员姓名 / 账号
-                    </label>
+                    </span>
                     <Input
                       allowClear
                       value={search.member_keyword}
@@ -400,10 +393,10 @@ export function PpmProjectMembersGroupTable({
                       placeholder="成员姓名 / 账号"
                     />
                   </div>
-                  <div>
-                    <label className="text-[11px] text-muted-foreground">
+                  <div className="flex w-full flex-col gap-1">
+                    <span className="text-xs leading-4 text-muted-foreground">
                       角色
-                    </label>
+                    </span>
                     <Input
                       allowClear
                       value={search.role_name}
