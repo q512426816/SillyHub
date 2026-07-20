@@ -22,8 +22,9 @@
 15. 发现 SillySpec 工具缺陷或改进点，记录到项目根目录 `docs/sillyspec/`（活跃坑，待工具修复）；已处理好的（工具已修复 / 确认绕过方案 / 确认不会再踩）再移到 `docs/sillyspec/finished/`。
 16. 用户不太懂代码，尽量使用正常人员能看懂的描述。 
 17. 前端样式统一参考：
-  * `.sillyspec/changes/archive/2026-06-21-2026-06-21-frontend-style-system/prototype-frontend-style-system.html`
-  * `.sillyspec/changes/archive/2026-06-21-2026-06-21-frontend-style-system/design.md`
+  * `.sillyspec/changes/archive/2026-06-21-2026-06-21-frontend-style-system/prototype-frontend-style-system.html`（设计系统总纲·原型）
+  * `.sillyspec/changes/archive/2026-06-21-2026-06-21-frontend-style-system/design.md`（设计系统总纲·设计决策）
+  * `.sillyspec/docs/SillyHub/scan/FRONTEND_PAGE_STYLE.md`（页面级实现规范，改其它页面照这个）
 
 ## 完成汇报格式
 
