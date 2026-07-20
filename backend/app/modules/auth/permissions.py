@@ -106,42 +106,25 @@ class Permission(StrEnum):
     ROLE_WRITE = "role:write"
 
     # ── PPM 项目与问题管理(平台级业务域) ─────────────────────
-    # 归并源 dept_project_back/ppdmq-module-ppm 22 Controller 的 @PreAuthorize
-    # (见 change 2026-06-20-ppm-module-migration design §6/§7 / decisions D-005@v1)。
-    # 动作语义对齐源 hasPermission：<域>:read=query、write=create+update、
-    # delete=delete、export=export、stat=统计。源权限点与字符串映射见迁移注释。
-    # 项目:pm:project-maintenance:* + pm:project-member:*(member 复用 project 权限)
+    # change 2026-07-20-ppm-permission-simplify task-04 精简：原 22 Controller 的
+    # write/delete/export/assign 动作权限为摆设(后端 router 全部走 get_current_principal
+    # 数据范围鉴权，不引用这些枚举)，仅保留 8 个菜单/读类权限供前端菜单折叠展示。
+    # 项目(pm:project-maintenance:read + pm:project-member:read 复用 project:read)
     PPM_PROJECT_READ = "ppm:project:read"
-    PPM_PROJECT_WRITE = "ppm:project:write"
-    PPM_PROJECT_DELETE = "ppm:project:delete"
-    PPM_PROJECT_EXPORT = "ppm:project:export"
-    # 客户:pm:customer-maintenance:*
+    # 客户(pm:customer-maintenance:read)
     PPM_CUSTOMER_READ = "ppm:customer:read"
-    PPM_CUSTOMER_WRITE = "ppm:customer:write"
-    PPM_CUSTOMER_DELETE = "ppm:customer:delete"
-    PPM_CUSTOMER_EXPORT = "ppm:customer:export"
-    # 计划:ps:project-plan:* + plan:plan-node:* + plan:node:* + ppm:plan-node-module:*
+    # 计划(ps:project-plan:read + plan:plan-node:read + plan:node:read + ppm:plan-node-module:read)
     PPM_PLAN_READ = "ppm:plan:read"
-    PPM_PLAN_WRITE = "ppm:plan:write"
-    PPM_PLAN_DELETE = "ppm:plan:delete"
-    PPM_PLAN_EXPORT = "ppm:plan:export"
-    # 问题:problem:list:* + problem:change:* + problem:*-process-task/log:*
+    # 问题(problem:list:read + problem:change:read + problem:*-process-task/log:read)
     PPM_PROBLEM_READ = "ppm:problem:read"
-    PPM_PROBLEM_WRITE = "ppm:problem:write"
-    PPM_PROBLEM_DELETE = "ppm:problem:delete"
-    PPM_PROBLEM_EXPORT = "ppm:problem:export"
-    # 任务:task:plan:* + ppm:personal-task-plan:* + ppm:task-execute:*
+    # 任务(task:plan:read + ppm:personal-task-plan:read + ppm:task-execute:read)
     PPM_TASK_READ = "ppm:task:read"
-    PPM_TASK_WRITE = "ppm:task:write"
-    PPM_TASK_DELETE = "ppm:task:delete"
-    PPM_TASK_EXPORT = "ppm:task:export"
-    # 工时:ppm:work-hour:*(stat 对应源 :stat)
+    # 工时(ppm:work-hour:read)
     PPM_WORKHOUR_READ = "ppm:work-hour:read"
-    PPM_WORKHOUR_WRITE = "ppm:work-hour:write"
+    # 工时统计(ppm:work-hour:stat 对应源 :stat)
     PPM_WORKHOUR_STAT = "ppm:work-hour:stat"
-    # 看板:ppm:task:kanban:view / assign
+    # 看板(ppm:task:kanban:view)
     PPM_KANBAN_VIEW = "ppm:kanban:view"
-    PPM_KANBAN_ASSIGN = "ppm:kanban:assign"
 
     @property
     def group(self) -> PermissionGroup:

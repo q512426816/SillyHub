@@ -1,6 +1,7 @@
 """task 子域 API 端点 —— 平台级,统一前缀 ``/api/ppm``。
 
-权限:``PPM_TASK_*`` / ``PPM_WORKHOUR_*`` (``require_permission_any``,平台级)。
+权限:统一 ``Depends(get_current_principal)`` 仅认证不授权 (登录用户或合法
+API key 的 daemon 即可调用,平台级)。
 固定路径 (``/personal-task-plan``、``/task-execute``、``/work-hour``) 前置于
 参数化路径 (``/task-plan/{id}``) 以避免 FastAPI 路由歧义。
 
@@ -18,10 +19,9 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth_deps import get_current_user, require_permission_any
+from app.core.auth_deps import get_current_principal, get_current_user
 from app.core.db import get_session
 from app.modules.auth.model import User
-from app.modules.auth.permissions import Permission
 from app.modules.ppm.common.crud import Page
 from app.modules.ppm.common.export import ColumnDef, excel_response, rows_to_workbook
 from app.modules.ppm.task.model import TaskExecute
@@ -57,13 +57,7 @@ router = APIRouter(tags=["ppm-task"])
 # 依赖类型别名 (Annotated 风格,避免 Annotated + default 混用冲突)
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
-TaskWriteUser = Annotated[User, Depends(require_permission_any(Permission.PPM_TASK_WRITE))]
-TaskDeleteUser = Annotated[User, Depends(require_permission_any(Permission.PPM_TASK_DELETE))]
-TaskReadUser = Annotated[User, Depends(require_permission_any(Permission.PPM_TASK_READ))]
-TaskExportUser = Annotated[User, Depends(require_permission_any(Permission.PPM_TASK_EXPORT))]
-WorkHourWriteUser = Annotated[User, Depends(require_permission_any(Permission.PPM_WORKHOUR_WRITE))]
-WorkHourReadUser = Annotated[User, Depends(require_permission_any(Permission.PPM_WORKHOUR_READ))]
-WorkHourStatUser = Annotated[User, Depends(require_permission_any(Permission.PPM_WORKHOUR_STAT))]
+AuthUser = Annotated[User, Depends(get_current_principal)]
 
 
 def _build_workbook_bytes(
@@ -98,7 +92,7 @@ def _page_resp(result, item_mapper) -> Page:
 async def create_plan_task(
     body: PlanTaskCreate,
     session: SessionDep,
-    user: TaskWriteUser,
+    user: AuthUser,
 ) -> PlanTaskResponse:
     svc = PlanTaskService(session)
     plan = await svc.create(body)
@@ -110,7 +104,7 @@ async def update_plan_task(
     body: PlanTaskUpdate,
     plan_id: uuid.UUID = Query(..., description="任务计划 ID"),
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(require_permission_any(Permission.PPM_TASK_WRITE)),
+    user: User = Depends(get_current_principal),
 ) -> PlanTaskResponse:
     svc = PlanTaskService(session)
     plan = await svc.update(plan_id, body)
@@ -132,7 +126,7 @@ async def get_plan_task(
 async def delete_plan_task(
     plan_id: uuid.UUID = Query(..., description="任务计划 ID"),
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(require_permission_any(Permission.PPM_TASK_DELETE)),
+    user: User = Depends(get_current_principal),
 ) -> None:
     svc = PlanTaskService(session)
     await svc.delete(plan_id)
@@ -141,7 +135,7 @@ async def delete_plan_task(
 @router.get("/task-plan/page", response_model=Page[PlanTaskResponse])
 async def page_plan_task(
     session: SessionDep,
-    user: TaskReadUser,
+    user: AuthUser,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     user_id: str | None = Query(None),
@@ -202,7 +196,7 @@ async def page_plan_task(
 async def execute_plan_task(
     body: ExecutePlanReq,
     session: SessionDep,
-    user: TaskWriteUser,
+    user: AuthUser,
 ) -> TaskExecuteResponse:
     """执行计划:联动生成/更新 TaskExecute + 状态机推进。"""
     svc = PlanTaskService(session)
@@ -218,7 +212,7 @@ async def execute_plan_task(
 async def start_plan_task(
     body: StartReq,
     session: SessionDep,
-    user: TaskWriteUser,
+    user: AuthUser,
 ) -> TaskExecuteResponse:
     """启动任务(未开始→进行中): 创建 in-flight TaskExecute 记 actual_start_time。
 
@@ -237,7 +231,7 @@ async def start_plan_task(
 @router.get("/task-plan/export-excel")
 async def export_plan_task_excel(
     session: SessionDep,
-    user: TaskExportUser,
+    user: AuthUser,
     user_id: str | None = Query(None),
     project_id: str | None = Query(None),
     plan_status: list[str] | None = Query(None, alias="status", description="状态(可多值)"),
@@ -376,7 +370,7 @@ async def personal_plan_task_by_date_range(
 async def create_task_execute(
     body: TaskExecuteCreate,
     session: SessionDep,
-    user: TaskWriteUser,
+    user: AuthUser,
 ) -> TaskExecuteResponse:
     svc = TaskExecuteService(session)
     exc = await svc.create(body)
@@ -388,7 +382,7 @@ async def update_task_execute(
     body: TaskExecuteUpdate,
     execute_id: uuid.UUID = Query(..., description="任务执行 ID"),
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(require_permission_any(Permission.PPM_TASK_WRITE)),
+    user: User = Depends(get_current_principal),
 ) -> TaskExecuteResponse:
     svc = TaskExecuteService(session)
     exc = await svc.update(execute_id, body)
@@ -410,7 +404,7 @@ async def get_task_execute(
 async def delete_task_execute(
     execute_id: uuid.UUID = Query(..., description="任务执行 ID"),
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(require_permission_any(Permission.PPM_TASK_DELETE)),
+    user: User = Depends(get_current_principal),
 ) -> None:
     svc = TaskExecuteService(session)
     await svc.delete(execute_id)
@@ -419,7 +413,7 @@ async def delete_task_execute(
 @router.get("/task-execute/page", response_model=Page[TaskExecuteResponse])
 async def page_task_execute(
     session: SessionDep,
-    user: TaskReadUser,
+    user: AuthUser,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     plan_task_id: str | None = Query(None),
@@ -498,7 +492,7 @@ async def task_execute_with_plan_by_date_range(
 async def create_work_hour(
     body: WorkHourCreate,
     session: SessionDep,
-    user: WorkHourWriteUser,
+    user: AuthUser,
 ) -> WorkHourResponse:
     svc = WorkHourService(session)
     wh = await svc.create(body)
@@ -510,7 +504,7 @@ async def update_work_hour(
     body: WorkHourUpdate,
     work_hour_id: uuid.UUID = Query(..., description="工时 ID"),
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(require_permission_any(Permission.PPM_WORKHOUR_WRITE)),
+    user: User = Depends(get_current_principal),
 ) -> WorkHourResponse:
     svc = WorkHourService(session)
     wh = await svc.update(work_hour_id, body)
@@ -532,7 +526,7 @@ async def get_work_hour(
 async def delete_work_hour(
     work_hour_id: uuid.UUID = Query(..., description="工时 ID"),
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(require_permission_any(Permission.PPM_WORKHOUR_READ)),
+    user: User = Depends(get_current_principal),
 ) -> None:
     svc = WorkHourService(session)
     await svc.delete(work_hour_id)
@@ -541,7 +535,7 @@ async def delete_work_hour(
 @router.get("/work-hour/page", response_model=Page[WorkHourResponse])
 async def page_work_hour(
     session: SessionDep,
-    user: WorkHourReadUser,
+    user: AuthUser,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     filter_user_id: str | None = Query(None, alias="user_id"),
@@ -571,7 +565,7 @@ async def page_work_hour(
 @router.get("/work-hour/stat-by-user", response_model=WorkHourStatResponse)
 async def stat_work_hour_by_user(
     session: SessionDep,
-    user: WorkHourStatUser,
+    user: AuthUser,
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
     filter_user_id: str | None = Query(None, alias="user_id"),
@@ -592,7 +586,7 @@ async def stat_work_hour_by_user(
 @router.get("/work-hour/stat-by-project", response_model=WorkHourStatResponse)
 async def stat_work_hour_by_project(
     session: SessionDep,
-    user: WorkHourStatUser,
+    user: AuthUser,
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
     filter_project_id: str | None = Query(None, alias="project_id"),
@@ -613,7 +607,7 @@ async def stat_work_hour_by_project(
 @router.get("/work-hour/export-excel")
 async def export_work_hour_excel(
     session: SessionDep,
-    user: WorkHourReadUser,
+    user: AuthUser,
     filter_user_id: str | None = Query(None, alias="user_id"),
     filter_project_id: str | None = Query(None, alias="project_id"),
     work_date_start: date | None = Query(None),

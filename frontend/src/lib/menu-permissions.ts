@@ -364,11 +364,8 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     absolute: true,
     matchPattern: "/ppm/project-members",
     navHidden: true, // 二级页面:由 /ppm/projects「成员管理」跳转,不在侧边栏菜单显示
-    // 成员管理复用 project:write（后端 project router 成员端点 require PPM_PROJECT_WRITE）
-    permissions: [
-      { key: "ppm:project:read", name: "项目查看" },
-      { key: "ppm:project:write", name: "项目编辑" },
-    ],
+    // 成员管理菜单显隐由 project:read 控制（后端去权限校验后仅认证即可访问，change 2026-07-20-ppm-permission-simplify）
+    permissions: [{ key: "ppm:project:read", name: "项目查看" }],
   },
   {
     section: "ppm",

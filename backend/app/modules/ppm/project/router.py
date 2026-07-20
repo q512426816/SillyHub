@@ -6,9 +6,9 @@
 - /project-member
 - /project-stakeholder
 
-鉴权:统一 ``require_permission_any(Permission.PPM_PROJECT_*)``。
-member/stakeholder 复用 PROJECT_* 权限 (design §7)。导出端点为同步 ``def``
-以避开 openpyxl 阻塞事件循环 (X-002)。
+鉴权:统一 ``Depends(get_current_principal)`` 仅认证不授权 (登录用户或合法
+API key 的 daemon 即可调用)。member/stakeholder 复用同一认证依赖 (design §7)。
+导出端点为同步 ``def`` 以避开 openpyxl 阻塞事件循环 (X-002)。
 
 设计依据:``design.md`` §7/§13 X-002,task-03.md。
 """
@@ -22,10 +22,9 @@ from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth_deps import require_permission_any
+from app.core.auth_deps import get_current_principal
 from app.core.db import get_session
 from app.modules.auth.model import User
-from app.modules.auth.permissions import Permission
 from app.modules.ppm.common.crud import Page, PageReq
 from app.modules.ppm.common.export import (
     ColumnDef,
@@ -60,16 +59,7 @@ from app.modules.ppm.project.schema import (
 router = APIRouter(tags=["ppm-project"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
-
-# 读权限 (member/stakeholder 复用)
-_PROJECT_READ = Depends(require_permission_any(Permission.PPM_PROJECT_READ))
-_PROJECT_WRITE = Depends(require_permission_any(Permission.PPM_PROJECT_WRITE))
-_PROJECT_DELETE = Depends(require_permission_any(Permission.PPM_PROJECT_DELETE))
-_PROJECT_EXPORT = Depends(require_permission_any(Permission.PPM_PROJECT_EXPORT))
-_CUSTOMER_READ = Depends(require_permission_any(Permission.PPM_CUSTOMER_READ))
-_CUSTOMER_WRITE = Depends(require_permission_any(Permission.PPM_CUSTOMER_WRITE))
-_CUSTOMER_DELETE = Depends(require_permission_any(Permission.PPM_CUSTOMER_DELETE))
-_CUSTOMER_EXPORT = Depends(require_permission_any(Permission.PPM_CUSTOMER_EXPORT))
+AuthUser = Annotated[User, Depends(get_current_principal)]
 
 
 def _build_workbook_bytes(
@@ -99,7 +89,7 @@ def _excel_stream(content: bytes, filename: str) -> StreamingResponse:
 async def create_project_maintenance(
     body: ProjectMaintenanceCreate,
     session: SessionDep,
-    user: Annotated[User, _PROJECT_WRITE],
+    user: AuthUser,
 ) -> ProjectMaintenanceResp:
     s = svc.ProjectMaintenanceService(session)
     entity = await s.create(body, operator=user.id, operator_name=user.display_name)
@@ -114,7 +104,7 @@ async def update_project_maintenance(
     entity_id: uuid.UUID,
     body: ProjectMaintenanceUpdate,
     session: SessionDep,
-    user: Annotated[User, _PROJECT_WRITE],
+    user: AuthUser,
 ) -> ProjectMaintenanceResp:
     s = svc.ProjectMaintenanceService(session)
     entity = await s.update(entity_id, body, operator=user.id)
@@ -128,7 +118,7 @@ async def update_project_maintenance(
 async def delete_project_maintenance(
     entity_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, _PROJECT_DELETE],
+    user: AuthUser,
 ) -> None:
     s = svc.ProjectMaintenanceService(session)
     await s.delete(entity_id)
@@ -145,7 +135,7 @@ async def delete_project_maintenance(
 )
 async def page_project_maintenance(
     session: SessionDep,
-    user: Annotated[User, _PROJECT_READ],
+    user: AuthUser,
     scope: Annotated[DataScope, Depends(get_ppm_data_scope)],
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
@@ -181,7 +171,7 @@ async def page_project_maintenance(
 )
 async def simple_list_project_maintenance(
     session: SessionDep,
-    user: Annotated[User, _PROJECT_READ],
+    user: AuthUser,
 ) -> list[ProjectSimpleItem]:
     """项目下拉 (仅 id + project_name)。"""
     s = svc.ProjectMaintenanceService(session)
@@ -191,7 +181,7 @@ async def simple_list_project_maintenance(
 @router.get("/project-maintenance/export-excel")
 async def export_project_maintenance(
     session: SessionDep,
-    user: Annotated[User, _PROJECT_EXPORT],
+    user: AuthUser,
     scope: Annotated[DataScope, Depends(get_ppm_data_scope)],
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
@@ -243,7 +233,7 @@ async def export_project_maintenance(
 )
 async def page_project_member_summary(
     session: SessionDep,
-    user: Annotated[User, _PROJECT_READ],
+    user: AuthUser,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     order_by: str | None = Query(None),
@@ -283,7 +273,7 @@ async def page_project_member_summary(
 async def get_project_maintenance(
     entity_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, _PROJECT_READ],
+    user: AuthUser,
 ) -> ProjectMaintenanceResp:
     s = svc.ProjectMaintenanceService(session)
     entity = await s.get(entity_id)
@@ -303,7 +293,7 @@ async def get_project_maintenance(
 async def create_customer_maintenance(
     body: CustomerMaintenanceCreate,
     session: SessionDep,
-    user: Annotated[User, _CUSTOMER_WRITE],
+    user: AuthUser,
 ) -> CustomerMaintenanceResp:
     s = svc.CustomerMaintenanceService(session)
     entity = await s.create(body, operator=user.id)
@@ -318,7 +308,7 @@ async def update_customer_maintenance(
     entity_id: uuid.UUID,
     body: CustomerMaintenanceUpdate,
     session: SessionDep,
-    user: Annotated[User, _CUSTOMER_WRITE],
+    user: AuthUser,
 ) -> CustomerMaintenanceResp:
     s = svc.CustomerMaintenanceService(session)
     entity = await s.update(entity_id, body, operator=user.id)
@@ -332,7 +322,7 @@ async def update_customer_maintenance(
 async def delete_customer_maintenance(
     entity_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, _CUSTOMER_DELETE],
+    user: AuthUser,
 ) -> None:
     s = svc.CustomerMaintenanceService(session)
     await s.delete(entity_id)
@@ -347,7 +337,7 @@ async def delete_customer_maintenance(
 )
 async def page_customer_maintenance(
     session: SessionDep,
-    user: Annotated[User, _CUSTOMER_READ],
+    user: AuthUser,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     order_by: str | None = Query(None),
@@ -377,7 +367,7 @@ async def page_customer_maintenance(
 @router.get("/customer-maintenance/export-excel")
 async def export_customer_maintenance(
     session: SessionDep,
-    user: Annotated[User, _CUSTOMER_EXPORT],
+    user: AuthUser,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     order_by: str | None = Query(None),
@@ -421,7 +411,7 @@ async def export_customer_maintenance(
 async def get_customer_maintenance(
     entity_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, _CUSTOMER_READ],
+    user: AuthUser,
 ) -> CustomerMaintenanceResp:
     s = svc.CustomerMaintenanceService(session)
     entity = await s.get(entity_id)
@@ -441,7 +431,7 @@ async def get_customer_maintenance(
 async def create_project_member(
     body: ProjectMemberCreate,
     session: SessionDep,
-    user: Annotated[User, _PROJECT_WRITE],
+    user: AuthUser,
 ) -> ProjectMemberResp:
     s = svc.ProjectMemberService(session)
     entity = await s.create(body, operator=user.id)
@@ -456,7 +446,7 @@ async def update_project_member(
     entity_id: uuid.UUID,
     body: ProjectMemberUpdate,
     session: SessionDep,
-    user: Annotated[User, _PROJECT_WRITE],
+    user: AuthUser,
 ) -> ProjectMemberResp:
     s = svc.ProjectMemberService(session)
     entity = await s.update(entity_id, body, operator=user.id)
@@ -470,7 +460,7 @@ async def update_project_member(
 async def delete_project_member(
     entity_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, _PROJECT_DELETE],
+    user: AuthUser,
 ) -> None:
     s = svc.ProjectMemberService(session)
     await s.delete(entity_id)
@@ -483,7 +473,7 @@ async def delete_project_member(
 async def get_project_member(
     entity_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, _PROJECT_READ],
+    user: AuthUser,
 ) -> ProjectMemberResp:
     s = svc.ProjectMemberService(session)
     entity = await s.get(entity_id)
@@ -496,7 +486,7 @@ async def get_project_member(
 )
 async def page_project_member(
     session: SessionDep,
-    user: Annotated[User, _PROJECT_READ],
+    user: AuthUser,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     order_by: str | None = Query(None),
@@ -540,7 +530,7 @@ async def page_project_member(
 async def create_project_stakeholder(
     body: ProjectStakeholderCreate,
     session: SessionDep,
-    user: Annotated[User, _PROJECT_WRITE],
+    user: AuthUser,
 ) -> ProjectStakeholderResp:
     s = svc.ProjectStakeholderService(session)
     entity = await s.create(body, operator=user.id)
@@ -555,7 +545,7 @@ async def update_project_stakeholder(
     entity_id: uuid.UUID,
     body: ProjectStakeholderUpdate,
     session: SessionDep,
-    user: Annotated[User, _PROJECT_WRITE],
+    user: AuthUser,
 ) -> ProjectStakeholderResp:
     s = svc.ProjectStakeholderService(session)
     entity = await s.update(entity_id, body, operator=user.id)
@@ -569,7 +559,7 @@ async def update_project_stakeholder(
 async def delete_project_stakeholder(
     entity_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, _PROJECT_DELETE],
+    user: AuthUser,
 ) -> None:
     s = svc.ProjectStakeholderService(session)
     await s.delete(entity_id)
@@ -582,7 +572,7 @@ async def delete_project_stakeholder(
 async def get_project_stakeholder(
     entity_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, _PROJECT_READ],
+    user: AuthUser,
 ) -> ProjectStakeholderResp:
     s = svc.ProjectStakeholderService(session)
     entity = await s.get(entity_id)
@@ -595,7 +585,7 @@ async def get_project_stakeholder(
 )
 async def page_project_stakeholder(
     session: SessionDep,
-    user: Annotated[User, _PROJECT_READ],
+    user: AuthUser,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     order_by: str | None = Query(None),

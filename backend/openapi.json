@@ -29486,30 +29486,13 @@
           "role:read",
           "role:write",
           "ppm:project:read",
-          "ppm:project:write",
-          "ppm:project:delete",
-          "ppm:project:export",
           "ppm:customer:read",
-          "ppm:customer:write",
-          "ppm:customer:delete",
-          "ppm:customer:export",
           "ppm:plan:read",
-          "ppm:plan:write",
-          "ppm:plan:delete",
-          "ppm:plan:export",
           "ppm:problem:read",
-          "ppm:problem:write",
-          "ppm:problem:delete",
-          "ppm:problem:export",
           "ppm:task:read",
-          "ppm:task:write",
-          "ppm:task:delete",
-          "ppm:task:export",
           "ppm:work-hour:read",
-          "ppm:work-hour:write",
           "ppm:work-hour:stat",
-          "ppm:kanban:view",
-          "ppm:kanban:assign"
+          "ppm:kanban:view"
         ],
         "title": "Permission"
       },
@@ -30615,6 +30598,17 @@
             ],
             "title": "Content"
           },
+          "task_description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Description"
+          },
           "work_load": {
             "anyOf": [
               {
@@ -30922,6 +30916,17 @@
             ],
             "title": "Content"
           },
+          "task_description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Description"
+          },
           "work_load": {
             "anyOf": [
               {
@@ -31101,6 +31106,7 @@
           "module_id",
           "module_name",
           "content",
+          "task_description",
           "work_load",
           "add_work",
           "work_partner",
@@ -31375,6 +31381,17 @@
               }
             ],
             "title": "Content"
+          },
+          "task_description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Description"
           },
           "work_load": {
             "anyOf": [

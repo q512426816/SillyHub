@@ -4,23 +4,17 @@ Revision ID: 202607041000
 Revises: 202607040900
 Create Date: 2026-07-04 10:00:00.000000
 
-为 platform_admin 角色补种全部 PPM_* 权限(change
+为 platform_admin 角色补种 PPM 菜单权限(change
 2026-06-20-ppm-module-migration task-02 / design §6/§7)。
+
+变更 2026-07-20-ppm-permission-simplify task-02 将权限清单从 25 项精简为
+8 个菜单权限(只读/统计/看板查看)，移除全部操作类权限(write/delete/export/
+assign)。新环境从头 seed 仅 8 个菜单权限；已部署环境的 17 条操作权限由
+``20260720_drop_ppm_operation_permissions.py`` 单独清理。
 
 权限字符串与 ``app/modules/auth/permissions.py`` 的 ``Permission`` 枚举
 保持一致(迁移故意不复用 app.*，保证可离线生成 SQL，见
-``202605280900_create_auth_and_rbac.py`` 注释)。源 @PreAuthorize 归并:
-
-  ppm:project:*      ← pm:project-maintenance:* + pm:project-member:*
-  ppm:customer:*     ← pm:customer-maintenance:*
-  ppm:plan:*         ← ps:project-plan:* + plan:plan-node:* + plan:node:*
-                       + ppm:plan-node-module:*
-  ppm:problem:*      ← problem:list:* + problem:change:*
-                       + problem:*-process-task/log:*
-  ppm:task:*         ← task:plan:* + ppm:personal-task-plan:*
-                       + ppm:task-execute:*
-  ppm:work-hour:*    ← ppm:work-hour:* (stat 对应源 :stat)
-  ppm:kanban:*       ← ppm:task:kanban:view / assign
+``202605280900_create_auth_and_rbac.py`` 注释)。
 
 downgrade 对称删除所有以 ``ppm:`` 开头的 role_permissions 行，不影响
 platform_admin 已有的其它权限绑定。
@@ -41,39 +35,26 @@ depends_on: str | Sequence[str] | None = None
 
 # PPM_* 权限字符串(与 Permission 枚举 PPM_* 成员一一对应)。迁移内硬编码，
 # 不 import app.* —— 见模块 docstring 说明。
+#
+# 变更 2026-07-20-ppm-permission-simplify task-02：精简为 8 个菜单权限
+# (只读访问 + 工时统计 + 看板查看)，移除全部操作类权限(write/delete/export
+# /assign)。操作权限的清理见 20260720_drop_ppm_operation_permissions.py。
 PPM_PERMISSIONS: list[str] = [
     # 项目
     "ppm:project:read",
-    "ppm:project:write",
-    "ppm:project:delete",
-    "ppm:project:export",
     # 客户
     "ppm:customer:read",
-    "ppm:customer:write",
-    "ppm:customer:delete",
-    "ppm:customer:export",
     # 计划
     "ppm:plan:read",
-    "ppm:plan:write",
-    "ppm:plan:delete",
-    "ppm:plan:export",
     # 问题
     "ppm:problem:read",
-    "ppm:problem:write",
-    "ppm:problem:delete",
-    "ppm:problem:export",
     # 任务
     "ppm:task:read",
-    "ppm:task:write",
-    "ppm:task:delete",
-    "ppm:task:export",
     # 工时
     "ppm:work-hour:read",
-    "ppm:work-hour:write",
     "ppm:work-hour:stat",
     # 看板
     "ppm:kanban:view",
-    "ppm:kanban:assign",
 ]
 
 

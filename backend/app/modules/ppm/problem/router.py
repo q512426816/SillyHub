@@ -2,7 +2,7 @@
 
 平台级,无 workspace 前缀;由 ``app.main`` 以 ``prefix="/api/ppm"`` 挂载
 (W6 task-08 集成,本文件不注册到 main.py)。权限走
-``require_permission_any(PPM_PROBLEM_*)``。
+``Depends(get_current_principal)`` 仅认证不授权。
 
 路径前缀 (3 态简化，对齐任务计划，见 design.md §7):
 - ``/problem-list``                 问题清单 CRUD + 执行流端点
@@ -26,10 +26,9 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth_deps import get_current_user, require_permission_any
+from app.core.auth_deps import get_current_principal
 from app.core.db import get_session
 from app.modules.auth.model import User
-from app.modules.auth.permissions import Permission
 from app.modules.ppm.common.crud import Page, PageReq
 from app.modules.ppm.common.export import ColumnDef
 from app.modules.ppm.problem.schema import (
@@ -55,7 +54,7 @@ from app.modules.ppm.task.schema import TaskExecuteResponse
 router = APIRouter(tags=["ppm-problem"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
-UserDep = Annotated[User, Depends(get_current_user)]
+AuthUser = Annotated[User, Depends(get_current_principal)]
 
 
 def _req(
@@ -82,7 +81,7 @@ def _actor(user: User) -> tuple[str, str | None]:
 @router.get("/problem-list", response_model=Page[ProblemListResp])
 async def list_problems(
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
+    user: AuthUser,
     req: PageReqDep,
     keyword: str | None = Query(None, description="项目/模块/描述/功能/责任人/发现人 模糊匹配"),
     status: list[str] | None = Query(None, description="状态(可多值)"),
@@ -140,7 +139,7 @@ _PROBLEM_COLUMNS = [
 @router.get("/problem-list/export-excel")
 async def export_problems(
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
+    user: AuthUser,
 ) -> Any:
     """导出问题清单为 Excel (X-002)。"""
     rows = await ProblemService(session).list_problems_for_export(user=user)
@@ -159,7 +158,7 @@ async def export_problems(
 async def create_problem(
     body: ProblemListCreate,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_WRITE))],
+    user: AuthUser,
 ) -> ProblemListResp:
     svc = ProblemService(session)
     data = body.model_dump()
@@ -173,7 +172,7 @@ async def create_problem(
 )
 async def list_problems_by_date_range(
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
+    user: AuthUser,
     start_date: datetime = Query(..., description="区间起始 ISO datetime"),
     end_date: datetime = Query(..., description="区间结束 ISO datetime"),
 ) -> list[ProblemListResp]:
@@ -190,7 +189,7 @@ async def list_problems_by_date_range(
 async def get_problem(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
+    user: AuthUser,
 ) -> ProblemListResp:
     return ProblemListResp.model_validate(await ProblemService(session).get_problem(item_id))
 
@@ -200,7 +199,7 @@ async def update_problem(
     item_id: uuid.UUID,
     body: ProblemListUpdate,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_WRITE))],
+    user: AuthUser,
 ) -> ProblemListResp:
     obj = await ProblemService(session).update_problem(item_id, body.model_dump(exclude_unset=True))
     return ProblemListResp.model_validate(obj)
@@ -210,7 +209,7 @@ async def update_problem(
 async def delete_problem(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_DELETE))],
+    user: AuthUser,
 ) -> None:
     await ProblemService(session).delete_problem(item_id)
 
@@ -229,7 +228,7 @@ async def start_problem(
     item_id: uuid.UUID,
     body: ProblemStartReq,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_WRITE))],
+    user: AuthUser,
 ) -> TaskExecuteResponse:
     """启动问题 (新建 → 进行中)：建 in-flight TaskExecute，返回其 id 供 execute 用。
 
@@ -249,7 +248,7 @@ async def execute_problem(
     item_id: uuid.UUID,
     body: ProblemExecuteReq,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_WRITE))],
+    user: AuthUser,
 ) -> ProblemListResp:
     """执行问题：收口 in-flight TaskExecute 并推进状态机。
 
@@ -277,7 +276,7 @@ async def execute_problem(
 @router.get("/problem-change", response_model=Page[ProblemChangeResp])
 async def list_changes(
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
+    user: AuthUser,
     req: PageReqDep,
     keyword: str | None = Query(None, description="项目/模块/变更内容/变更原因 模糊匹配"),
     status: list[str] | None = Query(None, description="状态(可多值)"),
@@ -313,7 +312,7 @@ _PROBLEM_CHANGE_COLUMNS = [
 @router.get("/problem-change/export-excel")
 async def export_problem_changes(
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
+    user: AuthUser,
 ) -> Any:
     """导出问题变更为 Excel (P2-3, X-002)。"""
     rows = await ProblemService(session).list_changes_for_export()
@@ -332,7 +331,7 @@ async def export_problem_changes(
 async def create_change(
     body: ProblemChangeCreate,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_WRITE))],
+    user: AuthUser,
 ) -> ProblemChangeResp:
     obj = await ProblemService(session).create_change(body.model_dump())
     return ProblemChangeResp.model_validate(obj)
@@ -342,7 +341,7 @@ async def create_change(
 async def get_change(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
+    user: AuthUser,
 ) -> ProblemChangeResp:
     return ProblemChangeResp.model_validate(await ProblemService(session).get_change(item_id))
 
@@ -352,7 +351,7 @@ async def update_change(
     item_id: uuid.UUID,
     body: ProblemChangeUpdate,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_WRITE))],
+    user: AuthUser,
 ) -> ProblemChangeResp:
     obj = await ProblemService(session).update_change(item_id, body.model_dump(exclude_unset=True))
     return ProblemChangeResp.model_validate(obj)
@@ -362,7 +361,7 @@ async def update_change(
 async def delete_change(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_DELETE))],
+    user: AuthUser,
 ) -> None:
     await ProblemService(session).delete_change(item_id)
 
@@ -377,7 +376,7 @@ async def next_change(
     item_id: uuid.UUID,
     body: ChangeNextProcessReq,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_WRITE))],
+    user: AuthUser,
 ) -> ProblemChangeResp:
     actor_id, actor_name = _actor(user)
     obj = await ProblemService(session).next_change(
@@ -391,7 +390,7 @@ async def reject_change(
     item_id: uuid.UUID,
     body: ChangeRejectProcessReq,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_WRITE))],
+    user: AuthUser,
 ) -> ProblemChangeResp:
     actor_id, actor_name = _actor(user)
     obj = await ProblemService(session).reject_change(
@@ -404,7 +403,7 @@ async def reject_change(
 async def list_change_tasks(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
+    user: AuthUser,
 ) -> list[ProcessTaskResp]:
     rows = await ProblemService(session).list_change_tasks(str(item_id))
     return [ProcessTaskResp.model_validate(r) for r in rows]
@@ -414,7 +413,7 @@ async def list_change_tasks(
 async def list_change_logs(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
+    user: AuthUser,
 ) -> list[ProcessLogResp]:
     rows = await ProblemService(session).list_change_logs(str(item_id))
     return [ProcessLogResp.model_validate(r) for r in rows]

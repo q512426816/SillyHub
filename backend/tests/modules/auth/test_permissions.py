@@ -36,9 +36,9 @@ def test_permission_group_has_seven_members() -> None:
     assert set(members) == expected
 
 
-def test_permission_count_is_70() -> None:
-    """45 历史 + 25 PPM_* (含 problem:export,对齐 customer/plan/task) = 70（CHANGE_ARCHIVE 随 archive 模块删除）。"""
-    assert len(list(Permission)) == 70
+def test_permission_count_is_53() -> None:
+    """45 历史 + 8 PPM_* 菜单/读 = 53（change 2026-07-20-ppm-permission-simplify task-04 删 17 个 write/delete/export/assign 摆设动作权限）。"""
+    assert len(list(Permission)) == 53
 
 
 @pytest.mark.parametrize(

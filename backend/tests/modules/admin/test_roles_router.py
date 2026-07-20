@@ -172,31 +172,6 @@ async def test_update_role_replaces_permissions(client: AsyncClient, auth_header
 
 
 @pytest.mark.asyncio
-async def test_update_role_accepts_ppm_problem_export(client: AsyncClient, auth_headers):
-    """Regression: PATCH with ``ppm:problem:export`` must NOT 422.
-
-    Bug: role 编辑器回传已绑定的 ``ppm:problem:export``(迁移
-    problem:change-process-log:export 归并而来),但 ``Permission`` 枚举
-    曾缺失 PPM_PROBLEM_EXPORT,校验失败返回 422。修复后该权限合法。
-    """
-    create = await client.post(
-        "/api/admin/roles",
-        json={"key": "problem_owner", "name": "Problem Owner"},
-        headers=auth_headers,
-    )
-    assert create.status_code == 201
-    role_id = create.json()["id"]
-
-    resp = await client.patch(
-        f"/api/admin/roles/{role_id}",
-        json={"permission_keys": [Permission.PPM_PROBLEM_EXPORT.value]},
-        headers=auth_headers,
-    )
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["permissions"] == [Permission.PPM_PROBLEM_EXPORT.value]
-
-
-@pytest.mark.asyncio
 async def test_disable_system_role_rejected(
     client: AsyncClient, auth_headers, system_role: Role, db_session
 ):

@@ -7,8 +7,8 @@
 - PUT    /kanban/task/reorder  拖拽排序
 - GET    /kanban/search/users  搜人
 
-权限:view 端点 ``PPM_KANBAN_VIEW``;assign/reorder 用 ``PPM_KANBAN_ASSIGN``
-(``require_permission_any``,平台级)。
+权限:统一 ``Depends(get_current_principal)`` 仅认证不授权 (登录用户或合法
+API key 的 daemon 即可调用,平台级)。
 
 注:本 router **不自带 prefix**;由 ``app.main`` 统一以 ``prefix="/api/ppm"``
 挂载 (task-08 统一注册)。本地 TestClient 测试自挂。
@@ -22,10 +22,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth_deps import require_permission_any
+from app.core.auth_deps import get_current_principal
 from app.core.db import get_session
 from app.modules.auth.model import User
-from app.modules.auth.permissions import Permission
 from app.modules.ppm.kanban.schema import (
     CommentCreateReq,
     CommentVO,
@@ -46,8 +45,7 @@ router = APIRouter(tags=["ppm-kanban"])
 
 # 依赖类型别名 (Annotated 风格,与 task 子域一致)
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
-KanbanViewUser = Annotated[User, Depends(require_permission_any(Permission.PPM_KANBAN_VIEW))]
-KanbanAssignUser = Annotated[User, Depends(require_permission_any(Permission.PPM_KANBAN_ASSIGN))]
+AuthUser = Annotated[User, Depends(get_current_principal)]
 
 
 def _parse_user_ids(raw: list[str] | None) -> list[uuid.UUID] | None:
@@ -57,7 +55,7 @@ def _parse_user_ids(raw: list[str] | None) -> list[uuid.UUID] | None:
 @router.get("/kanban/users", response_model=list[UserColumnVO] | list[OrgGroup])
 async def get_user_columns(
     session: SessionDep,
-    _user: KanbanViewUser,
+    _user: AuthUser,
     user_ids: list[str] | None = Query(None, description="人员范围 (多次传参)"),
     status: str | None = Query(None),
     project_id: str | None = Query(None),
@@ -83,7 +81,7 @@ async def get_user_columns(
 @router.get("/kanban/tasks", response_model=list[TaskCardVO])
 async def get_task_cards(
     session: SessionDep,
-    _user: KanbanViewUser,
+    _user: AuthUser,
     user_ids: list[str] | None = Query(None),
     status: str | None = Query(None),
     project_id: str | None = Query(None),
@@ -108,7 +106,7 @@ async def get_task_cards(
 async def assign_task(
     body: TaskAssignReq,
     session: SessionDep,
-    _user: KanbanAssignUser,
+    _user: AuthUser,
 ) -> bool:
     """分配任务给人员 (更新 PlanTask.user_id/user_name/kanban_order)。"""
     svc = PpdKanbanService(session)
@@ -120,7 +118,7 @@ async def assign_task(
 async def reorder_tasks(
     body: TaskReorderReq,
     session: SessionDep,
-    _user: KanbanAssignUser,
+    _user: AuthUser,
 ) -> bool:
     """拖拽排序:按 body.task_ids 顺序批量写 kanban_order。"""
     svc = PpdKanbanService(session)
@@ -131,7 +129,7 @@ async def reorder_tasks(
 @router.get("/kanban/search/users", response_model=list[UserColumnVO])
 async def search_users(
     session: SessionDep,
-    _user: KanbanViewUser,
+    _user: AuthUser,
     keyword: str = Query(..., description="搜索关键词 (user_name 模糊)"),
 ) -> list[UserColumnVO]:
     """搜人 (按 project_member.user_name 模糊匹配)。"""
@@ -168,7 +166,7 @@ def _to_card(t: PlanTask) -> TaskCardVO:
 async def create_task(
     body: TaskCreateReq,
     session: SessionDep,
-    _user: KanbanAssignUser,
+    _user: AuthUser,
 ) -> TaskCardVO:
     """新建看板任务(PlanTask)。kanban_order 自动取该 user 列尾 +1。"""
     svc = PpdKanbanService(session)
@@ -180,7 +178,7 @@ async def create_task(
 async def update_task(
     body: TaskUpdateReq,
     session: SessionDep,
-    _user: KanbanAssignUser,
+    _user: AuthUser,
 ) -> TaskCardVO:
     """更新 task(content/status/work_load/end_time/file_urls 等非空字段)。"""
     svc = PpdKanbanService(session)
@@ -191,7 +189,7 @@ async def update_task(
 @router.delete("/kanban/task", status_code=204)
 async def delete_task(
     session: SessionDep,
-    _user: KanbanAssignUser,
+    _user: AuthUser,
     task_id: uuid.UUID = Query(..., description="任务 ID"),
 ) -> None:
     """删除 task,级联删其 comment + subtask。"""
@@ -203,7 +201,7 @@ async def delete_task(
 async def list_comments(
     task_id: uuid.UUID,
     session: SessionDep,
-    _user: KanbanViewUser,
+    _user: AuthUser,
 ) -> list[CommentVO]:
     """列任务评论(按 created_at 升序)。"""
     svc = PpdKanbanService(session)
@@ -216,7 +214,7 @@ async def add_comment(
     task_id: uuid.UUID,
     body: CommentCreateReq,
     session: SessionDep,
-    _user: KanbanViewUser,
+    _user: AuthUser,
 ) -> CommentVO:
     """新增评论。空内容 → 422;task 不存在 → 404。"""
     svc = PpdKanbanService(session)
@@ -228,7 +226,7 @@ async def add_comment(
 async def list_subtasks(
     task_id: uuid.UUID,
     session: SessionDep,
-    _user: KanbanViewUser,
+    _user: AuthUser,
 ) -> list[SubtaskVO]:
     """列任务子任务(按 sort_order 升序)。"""
     svc = PpdKanbanService(session)
@@ -241,7 +239,7 @@ async def toggle_subtask(
     task_id: uuid.UUID,
     subtask_id: uuid.UUID,
     session: SessionDep,
-    _user: KanbanViewUser,
+    _user: AuthUser,
 ) -> SubtaskVO:
     """翻转子任务 done 标志;subtask 不存在 / task_id 不匹配 → 404。"""
     svc = PpdKanbanService(session)

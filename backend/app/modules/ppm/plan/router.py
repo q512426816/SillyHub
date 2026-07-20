@@ -1,7 +1,7 @@
 """plan 子域 router。
 
 平台级,无 workspace 前缀;由 ``app.main`` 以 ``prefix="/api/ppm"`` 挂载
-(W6 task-08 集成)。权限走 ``require_permission_any(PPM_PLAN_*)``。
+(W6 task-08 集成)。权限走 ``Depends(get_current_principal)`` 仅认证不授权。
 
 路径前缀 (对照源 Controller,见 design.md §7)：
 - ``/plan-node``          计划节点模板 CRUD + 子表明细
@@ -23,10 +23,9 @@ import anyio
 from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth_deps import get_current_user, require_permission_any
+from app.core.auth_deps import get_current_principal
 from app.core.db import get_session
 from app.modules.auth.model import User
-from app.modules.auth.permissions import Permission
 from app.modules.ppm.common.crud import Page, PageReq
 from app.modules.ppm.common.export import ColumnDef, timestamped_filename
 from app.modules.ppm.data_scope import DataScope, get_ppm_data_scope
@@ -65,7 +64,7 @@ from app.modules.ppm.plan.service import PlanError, PlanService
 router = APIRouter(tags=["ppm-plan"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
-UserDep = Annotated[User, Depends(get_current_user)]
+AuthUser = Annotated[User, Depends(get_current_principal)]
 
 # 模块批量导入单文件上限 (10MB):防止恶意/误传大文件全量进内存导致 OOM
 # (P1#1 健壮性)。校验在 await file.read() 之后、调 service 之前。
@@ -131,7 +130,7 @@ def _actor(user: User) -> tuple[str, str | None]:
 @router.get("/plan-node", response_model=list[PlanNodeResp])
 async def list_plan_nodes(
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
+    user: AuthUser,
     req: PageReqDep,
 ) -> list[PlanNodeResp]:
     page = await PlanService(session).list_plan_nodes(req)
@@ -146,7 +145,7 @@ async def list_plan_nodes(
 async def create_plan_node(
     body: PlanNodeCreate,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+    user: AuthUser,
 ) -> PlanNodeResp:
     obj = await PlanService(session).create_plan_node(body.model_dump())
     return PlanNodeResp.model_validate(obj)
@@ -165,7 +164,7 @@ _PLAN_NODE_COLUMNS = [
 @router.get("/plan-node/export-excel")
 async def export_plan_nodes(
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_EXPORT))],
+    user: AuthUser,
 ) -> Any:
     """导出计划节点模板为 Excel。
 
@@ -186,7 +185,7 @@ async def export_plan_nodes(
 async def get_plan_node(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
+    user: AuthUser,
 ) -> PlanNodeResp:
     obj = await PlanService(session).get_plan_node(item_id)
     return PlanNodeResp.model_validate(obj)
@@ -197,7 +196,7 @@ async def update_plan_node(
     item_id: uuid.UUID,
     body: PlanNodeUpdate,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+    user: AuthUser,
 ) -> PlanNodeResp:
     obj = await PlanService(session).update_plan_node(item_id, body.model_dump(exclude_unset=True))
     return PlanNodeResp.model_validate(obj)
@@ -207,7 +206,7 @@ async def update_plan_node(
 async def delete_plan_node(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_DELETE))],
+    user: AuthUser,
 ) -> None:
     await PlanService(session).delete_plan_node(item_id)
 
@@ -220,7 +219,7 @@ async def delete_plan_node(
 async def list_plan_node_details(
     plan_node_id: str,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
+    user: AuthUser,
     module_id: str | None = Query(None),
 ) -> list[PlanNodeDetailResp]:
     """列出模板明细 (design §5.2)。
@@ -240,7 +239,7 @@ async def list_plan_node_details(
 async def create_plan_node_detail_tpl(
     body: PlanNodeDetailCreate,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+    user: AuthUser,
 ) -> PlanNodeDetailResp:
     obj = await PlanService(session).create_plan_node_detail(body.model_dump())
     return PlanNodeDetailResp.model_validate(obj)
@@ -251,7 +250,7 @@ async def update_plan_node_detail_tpl(
     item_id: uuid.UUID,
     body: PlanNodeDetailUpdate,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+    user: AuthUser,
 ) -> PlanNodeDetailResp:
     obj = await PlanService(session).update_plan_node_detail(
         item_id, body.model_dump(exclude_unset=True)
@@ -263,7 +262,7 @@ async def update_plan_node_detail_tpl(
 async def delete_plan_node_detail_tpl(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_DELETE))],
+    user: AuthUser,
 ) -> None:
     await PlanService(session).delete_plan_node_detail(item_id)
 
@@ -280,7 +279,7 @@ async def delete_plan_node_detail_tpl(
 async def list_modules(
     plan_node_id: str,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
+    user: AuthUser,
 ) -> list[PlanNodeModuleResp]:
     rows = await PlanService(session).list_modules_by_node(plan_node_id)
     return [PlanNodeModuleResp.model_validate(r) for r in rows]
@@ -292,7 +291,7 @@ async def list_modules(
 )
 async def list_modules_by_project(
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
+    user: AuthUser,
     project_id: uuid.UUID = Query(..., description="项目 ID"),
 ) -> list[PlanNodeModuleSimpleItem]:
     """按项目列出其下所有模块 (problem 表单下拉用)。
@@ -315,7 +314,7 @@ async def list_modules_by_project(
 async def create_module(
     body: PlanNodeModuleCreate,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+    user: AuthUser,
 ) -> PlanNodeModuleResp:
     obj = await PlanService(session).create_module(body.model_dump())
     return PlanNodeModuleResp.model_validate(obj)
@@ -329,7 +328,7 @@ async def create_module(
 async def import_modules_preview(
     plan_node_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+    user: AuthUser,
     pm_project_id: uuid.UUID = Query(...),
     file: UploadFile = File(...),
 ) -> ImportPreviewResp:
@@ -357,7 +356,7 @@ async def import_modules_commit(
     plan_node_id: uuid.UUID,
     body: ImportCommitReq,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+    user: AuthUser,
 ) -> ImportResultResp:
     """模块导入提交 (task-07 / design §7.1)。
 
@@ -371,7 +370,7 @@ async def update_module(
     item_id: uuid.UUID,
     body: PlanNodeModuleUpdate,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+    user: AuthUser,
 ) -> PlanNodeModuleResp:
     obj = await PlanService(session).update_module(item_id, body.model_dump(exclude_unset=True))
     return PlanNodeModuleResp.model_validate(obj)
@@ -381,7 +380,7 @@ async def update_module(
 async def delete_module(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_DELETE))],
+    user: AuthUser,
 ) -> None:
     await PlanService(session).delete_module(item_id)
 
@@ -394,7 +393,7 @@ async def delete_module(
 @router.get("/project-plan", response_model=Page[PsProjectPlanResp])
 async def list_ps_project_plans(
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
+    user: AuthUser,
     scope: Annotated[DataScope, Depends(get_ppm_data_scope)],
     req: ProjectPlanListReqDep,
 ) -> Page[PsProjectPlanResp]:
@@ -415,7 +414,7 @@ async def list_ps_project_plans(
 async def create_ps_project_plan(
     body: PsProjectPlanCreate,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+    user: AuthUser,
 ) -> PsProjectPlanResp:
     data = body.model_dump()
     data["create_name"] = data.get("create_name") or user.display_name
@@ -445,7 +444,7 @@ _PROJECT_PLAN_COLUMNS = [
 @router.get("/project-plan/export-excel")
 async def export_project_plans(
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_EXPORT))],
+    user: AuthUser,
     scope: Annotated[DataScope, Depends(get_ppm_data_scope)],
 ) -> Any:
     """导出项目计划为 Excel (P2-3, X-002)。"""
@@ -461,7 +460,7 @@ async def export_project_plans(
 async def get_ps_project_plan(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
+    user: AuthUser,
 ) -> PsProjectPlanResp:
     return PsProjectPlanResp.model_validate(await PlanService(session).get_ps_project_plan(item_id))
 
@@ -473,7 +472,7 @@ async def get_ps_project_plan(
 async def get_project_plan_three_level(
     plan_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
+    user: AuthUser,
     scope: Annotated[DataScope, Depends(get_ppm_data_scope)],
 ) -> ProjectPlanThreeLevelResp:
     """三联表查询 (task-03) — plan → node → detail → task 四层嵌套 + 成本派生。
@@ -489,7 +488,7 @@ async def update_ps_project_plan(
     item_id: uuid.UUID,
     body: PsProjectPlanUpdate,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+    user: AuthUser,
 ) -> PsProjectPlanResp:
     obj = await PlanService(session).update_ps_project_plan(
         item_id, body.model_dump(exclude_unset=True)
@@ -501,7 +500,7 @@ async def update_ps_project_plan(
 async def delete_ps_project_plan(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_DELETE))],
+    user: AuthUser,
 ) -> None:
     await PlanService(session).delete_ps_project_plan(item_id)
 
@@ -518,7 +517,7 @@ async def delete_ps_project_plan(
 async def list_ps_plan_nodes(
     ps_project_plan_id: str,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
+    user: AuthUser,
 ) -> list[PsPlanNodeResp]:
     rows = await PlanService(session).list_ps_plan_nodes_by_plan(ps_project_plan_id)
     return [PsPlanNodeResp.model_validate(r) for r in rows]
@@ -532,7 +531,7 @@ async def list_ps_plan_nodes(
 async def create_ps_plan_node(
     body: PsPlanNodeCreate,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+    user: AuthUser,
 ) -> PsPlanNodeResp:
     obj = await PlanService(session).create_ps_plan_node(body.model_dump())
     return PsPlanNodeResp.model_validate(obj)
@@ -542,7 +541,7 @@ async def create_ps_plan_node(
 async def get_ps_plan_node(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
+    user: AuthUser,
 ) -> PsPlanNodeResp:
     return PsPlanNodeResp.model_validate(await PlanService(session).get_ps_plan_node(item_id))
 
@@ -552,7 +551,7 @@ async def update_ps_plan_node(
     item_id: uuid.UUID,
     body: PsPlanNodeUpdate,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+    user: AuthUser,
 ) -> PsPlanNodeResp:
     obj = await PlanService(session).update_ps_plan_node(
         item_id, body.model_dump(exclude_unset=True)
@@ -564,7 +563,7 @@ async def update_ps_plan_node(
 async def delete_ps_plan_node(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_DELETE))],
+    user: AuthUser,
 ) -> None:
     await PlanService(session).delete_ps_plan_node(item_id)
 
@@ -581,7 +580,7 @@ async def delete_ps_plan_node(
 async def list_details_by_node(
     plan_node_id: str,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
+    user: AuthUser,
 ) -> list[PsPlanNodeDetailResp]:
     rows = await PlanService(session).list_details_by_node(plan_node_id)
     return await PlanService(session).details_to_resp(rows)
@@ -595,7 +594,7 @@ async def list_details_by_node(
 async def create_detail(
     body: PsPlanNodeDetailCreate,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+    user: AuthUser,
 ) -> PsPlanNodeDetailResp:
     obj = await PlanService(session).create_detail(body.model_dump())
     return PsPlanNodeDetailResp.model_validate(obj)
@@ -621,7 +620,7 @@ _PLAN_NODE_DETAIL_COLUMNS = [
 @router.get("/plan-node-detail/export-excel")
 async def export_plan_node_details(
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_EXPORT))],
+    user: AuthUser,
 ) -> Any:
     """导出里程碑明细为 Excel (P2-3, X-002)。
 
@@ -640,7 +639,7 @@ async def export_plan_node_details(
 async def get_detail(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
+    user: AuthUser,
 ) -> PsPlanNodeDetailResp:
     obj = await PlanService(session).get_detail(item_id)
     return (await PlanService(session).details_to_resp([obj]))[0]
@@ -651,7 +650,7 @@ async def update_detail(
     item_id: uuid.UUID,
     body: PsPlanNodeDetailUpdate,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+    user: AuthUser,
 ) -> PsPlanNodeDetailResp:
     obj = await PlanService(session).update_detail(item_id, body.model_dump(exclude_unset=True))
     return PsPlanNodeDetailResp.model_validate(obj)
@@ -661,7 +660,7 @@ async def update_detail(
 async def delete_detail(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_DELETE))],
+    user: AuthUser,
 ) -> None:
     await PlanService(session).delete_detail(item_id)
 
@@ -674,7 +673,7 @@ async def delete_detail(
 async def list_versions(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
+    user: AuthUser,
 ) -> list[PsPlanNodeDetailResp]:
     rows = await PlanService(session).list_versions(item_id)
     return await PlanService(session).details_to_resp(rows)
@@ -693,7 +692,7 @@ async def save_process(
     item_id: uuid.UUID,
     body: ProcessActionReq,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+    user: AuthUser,
 ) -> PsPlanNodeDetailResp:
     actor_id, actor_name = _actor(user)
     obj = await PlanService(session).save_process(
@@ -715,7 +714,7 @@ async def reject_process(
     item_id: uuid.UUID,
     body: ProcessActionReq,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+    user: AuthUser,
 ) -> PsPlanNodeDetailResp:
     actor_id, actor_name = _actor(user)
     obj = await PlanService(session).reject_process(
@@ -736,7 +735,7 @@ async def change_process(
     item_id: uuid.UUID,
     body: ChangeProcessReq,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+    user: AuthUser,
 ) -> PsPlanNodeDetailResp:
     actor_id, actor_name = _actor(user)
     obj = await PlanService(session).change_process(
@@ -756,7 +755,7 @@ async def change_process(
 async def list_processes(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
+    user: AuthUser,
 ) -> list[PsPlanNodeDetailProcessResp]:
     rows = await PlanService(session).list_processes(str(item_id))
     return [PsPlanNodeDetailProcessResp.model_validate(r) for r in rows]
@@ -770,7 +769,7 @@ async def submit_detail(
     item_id: uuid.UUID,
     body: SubmitDetailReq,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+    user: AuthUser,
 ) -> PsPlanNodeDetailResp:
     """提交明细 detail JSON (白名单字段 merge 落库)。
 

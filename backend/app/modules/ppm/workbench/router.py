@@ -1,7 +1,7 @@
 """workbench 子域 API 端点 —— 平台级,统一前缀 ``/api/ppm``。
 
-权限:统一 ``PPM_TASK_READ`` (``require_permission_any``,平台级,D-009@v1
-复用现有权限,不新建)。
+权限:统一 ``Depends(get_current_principal)`` 仅认证不授权 (登录用户或合法
+API key 的 daemon 即可调用,平台级)。
 
 仅暴露骨架端点 (GET /workbench/profile|summary|calendar),handler
 实例化 :class:`WorkbenchService` 调对应方法;service 方法体留空
@@ -15,9 +15,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth_deps import get_session, require_permission_any
+from app.core.auth_deps import get_current_principal, get_session
 from app.modules.auth.model import User
-from app.modules.auth.permissions import Permission
 from app.modules.ppm.workbench.schema import (
     WorkbenchCalendar,
     WorkbenchProfile,
@@ -30,14 +29,13 @@ router = APIRouter(tags=["ppm-workbench"])
 
 # 依赖类型别名 (Annotated 风格,对齐 task/router.py L55-63)
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
-# 统一权限 PPM_TASK_READ (D-009@v1)
-WorkbenchReadUser = Annotated[User, Depends(require_permission_any(Permission.PPM_TASK_READ))]
+AuthUser = Annotated[User, Depends(get_current_principal)]
 
 
 @router.get("/workbench/profile", response_model=WorkbenchProfile)
 async def get_workbench_profile(
     session: SessionDep,
-    user: WorkbenchReadUser,
+    user: AuthUser,
 ) -> WorkbenchProfile:
     """当前登录用户的个人工作台头部信息。"""
     svc = WorkbenchService(session)
@@ -47,7 +45,7 @@ async def get_workbench_profile(
 @router.get("/workbench/summary", response_model=WorkbenchSummary)
 async def get_workbench_summary(
     session: SessionDep,
-    user: WorkbenchReadUser,
+    user: AuthUser,
     range: str = Query("month", description="统计区间标识 (如 month / week)"),
 ) -> WorkbenchSummary:
     """个人工作台聚合视图:指标卡片 + 待办列表。"""
@@ -58,7 +56,7 @@ async def get_workbench_summary(
 @router.get("/workbench/calendar", response_model=WorkbenchCalendar)
 async def get_workbench_calendar(
     session: SessionDep,
-    user: WorkbenchReadUser,
+    user: AuthUser,
     year_month: str = Query(..., description="目标月份,形如 YYYY-MM"),
 ) -> WorkbenchCalendar:
     """个人工作台月度日历负载。"""

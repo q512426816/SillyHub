@@ -19,9 +19,9 @@ import { MENU_PERMISSION_GROUPS } from "../menu-permissions";
  * - Deploy (3)
  * - Tool (4)
  * - Admin (7)
- * - PPM (24, change 2026-06-20-ppm-module-migration task-02)
+ * - PPM (8, change 2026-07-20-ppm-permission-simplify task-04 精简：删 16 个 write/delete/export/assign 摆设动作)
  *
- * 合计 7 + 4 + 6 + 5 + 6 + 4 + 3 + 4 + 7 + 24 = 70。
+ * 合计 7 + 4 + 6 + 5 + 6 + 4 + 3 + 4 + 7 + 8 = 54。
  */
 const BACKEND_PERMISSION_KEYS = [
   // Platform (7, ql-004 新增 3 个管理子菜单 admin + ql-005 新增 git_identity:admin)
@@ -79,31 +79,15 @@ const BACKEND_PERMISSION_KEYS = [
   "organization:write",
   "role:read",
   "role:write",
-  // PPM 项目与问题管理 (24, change 2026-06-20-ppm-module-migration task-02)
+  // PPM 项目与问题管理 (8, change 2026-07-20-ppm-permission-simplify task-04 精简)
   "ppm:project:read",
-  "ppm:project:write",
-  "ppm:project:delete",
-  "ppm:project:export",
   "ppm:customer:read",
-  "ppm:customer:write",
-  "ppm:customer:delete",
-  "ppm:customer:export",
   "ppm:plan:read",
-  "ppm:plan:write",
-  "ppm:plan:delete",
-  "ppm:plan:export",
   "ppm:problem:read",
-  "ppm:problem:write",
-  "ppm:problem:delete",
   "ppm:task:read",
-  "ppm:task:write",
-  "ppm:task:delete",
-  "ppm:task:export",
   "ppm:work-hour:read",
-  "ppm:work-hour:write",
   "ppm:work-hour:stat",
   "ppm:kanban:view",
-  "ppm:kanban:assign",
 ] as const;
 
 /** 34 个 menuKey 期望集合（FR-02 19 条 + Agent 团队 1 + PPM 14 条） */
@@ -211,12 +195,12 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 70", () => {
+  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 54", () => {
     const valid = new Set<string>(BACKEND_PERMISSION_KEYS);
     // 镜像常量自身的完整性护栏：若被误删/重复，立即失败
-    // 46 (原) + 24 (PPM_*) = 70
-    expect(BACKEND_PERMISSION_KEYS.length).toBe(70);
-    expect(valid.size).toBe(70);
+    // 46 (非 PPM) + 8 (PPM 菜单/读) = 54（task-04 删 16 个 PPM 动作权限）
+    expect(BACKEND_PERMISSION_KEYS.length).toBe(54);
+    expect(valid.size).toBe(54);
 
     MENU_PERMISSION_GROUPS.forEach((g) => {
       g.permissions.forEach((p) => {
@@ -378,10 +362,8 @@ describe("用户列明菜单的 permissions 精确匹配", () => {
     expect(keysOf("ppm-work-hour-statistics")).toEqual(["ppm:work-hour:stat"]);
   });
 
-  it("ppm-project-members = ppm:project:read + ppm:project:write", () => {
-    expect(keysOf("ppm-project-members")).toEqual(
-      ["ppm:project:read", "ppm:project:write"].sort(),
-    );
+  it("ppm-project-members = ppm:project:read（task-03 删悬空 write）", () => {
+    expect(keysOf("ppm-project-members")).toEqual(["ppm:project:read"]);
   });
 });
 

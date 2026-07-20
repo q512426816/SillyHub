@@ -1,12 +1,14 @@
 """PPM_* 权限枚举 + platform_admin 种子回归测试。
 
-覆盖 change ``2026-06-20-ppm-module-migration`` task-02 验收:
-- PPM_* 枚举全部存在且值以 ``ppm:`` 前缀
+覆盖 change ``2026-07-20-ppm-permission-simplify`` task-04 验收
+(承 ``2026-06-20-ppm-module-migration`` task-02 之后精简):
+- PPM_* 菜单枚举全部存在且值以 ``ppm:`` 前缀
 - 所有 PPM_* 归入 PermissionGroup.PPM
-- platform_admin 角色种子后拥有全部 PPM_* 权限
+- platform_admin 角色种子后拥有全部 PPM_* 菜单权限
 - 非系统角色不含 PPM_*(回归)
 
-源 @PreAuthorize 归并见 design §6/§7，迁移 ``202607041000_seed_ppm_permissions``。
+原 22 Controller 的 write/delete/export/assign 动作权限为摆设(router 改走
+get_current_principal 数据范围鉴权)，本 task 删除 17 个动作成员仅留 8 个菜单/读权限。
 """
 
 from __future__ import annotations
@@ -19,48 +21,31 @@ from app.modules.auth.model import Role, RolePermission
 from app.modules.auth.permissions import Permission, PermissionGroup
 from app.modules.auth.service import seed_platform_admin_role
 
-# task-02 design §6 指定的 25 个 PPM_* 成员(problem 补 export 与
-# customer/plan/task 对齐,见 references/16-rbac.md §2 / migrate_from_ruoyi
-# problem:change-process-log:export → ppm:problem:export 归并)
+# task-04 design §6 指定的 8 个 PPM_* 菜单/读成员(精简后：删除 17 个
+# write/delete/export/assign 摆设动作权限，只保留前端菜单折叠所需的 read/stat/view)
 EXPECTED_PPM_PERMISSIONS: dict[str, str] = {
-    # 项目(pm:project-maintenance:* + pm:project-member:*)
+    # 项目(pm:project-maintenance:read + pm:project-member:read 复用 project:read)
     "PPM_PROJECT_READ": "ppm:project:read",
-    "PPM_PROJECT_WRITE": "ppm:project:write",
-    "PPM_PROJECT_DELETE": "ppm:project:delete",
-    "PPM_PROJECT_EXPORT": "ppm:project:export",
-    # 客户(pm:customer-maintenance:*)
+    # 客户(pm:customer-maintenance:read)
     "PPM_CUSTOMER_READ": "ppm:customer:read",
-    "PPM_CUSTOMER_WRITE": "ppm:customer:write",
-    "PPM_CUSTOMER_DELETE": "ppm:customer:delete",
-    "PPM_CUSTOMER_EXPORT": "ppm:customer:export",
-    # 计划(ps:project-plan:* + plan:plan-node:* + plan:node:*)
+    # 计划(ps:project-plan:read + plan:plan-node:read + plan:node:read)
     "PPM_PLAN_READ": "ppm:plan:read",
-    "PPM_PLAN_WRITE": "ppm:plan:write",
-    "PPM_PLAN_DELETE": "ppm:plan:delete",
-    "PPM_PLAN_EXPORT": "ppm:plan:export",
-    # 问题(problem:list:* + problem:change:* + problem:*-process-*)
+    # 问题(problem:list:read + problem:change:read + problem:*-process-*)
     "PPM_PROBLEM_READ": "ppm:problem:read",
-    "PPM_PROBLEM_WRITE": "ppm:problem:write",
-    "PPM_PROBLEM_DELETE": "ppm:problem:delete",
-    "PPM_PROBLEM_EXPORT": "ppm:problem:export",
-    # 任务(task:plan:* + ppm:personal-task-plan:* + ppm:task-execute:*)
+    # 任务(task:plan:read + ppm:personal-task-plan:read + ppm:task-execute:read)
     "PPM_TASK_READ": "ppm:task:read",
-    "PPM_TASK_WRITE": "ppm:task:write",
-    "PPM_TASK_DELETE": "ppm:task:delete",
-    "PPM_TASK_EXPORT": "ppm:task:export",
-    # 工时(ppm:work-hour:*)
+    # 工时(ppm:work-hour:read)
     "PPM_WORKHOUR_READ": "ppm:work-hour:read",
-    "PPM_WORKHOUR_WRITE": "ppm:work-hour:write",
+    # 工时统计(ppm:work-hour:stat)
     "PPM_WORKHOUR_STAT": "ppm:work-hour:stat",
-    # 看板(ppm:task:kanban:view / assign)
+    # 看板(ppm:task:kanban:view)
     "PPM_KANBAN_VIEW": "ppm:kanban:view",
-    "PPM_KANBAN_ASSIGN": "ppm:kanban:assign",
 }
 
 
-def test_ppm_permission_member_count_is_25() -> None:
-    """task-02 design §6 共 25 个 PPM_* 成员(problem 含 export)。"""
-    assert len(EXPECTED_PPM_PERMISSIONS) == 25
+def test_ppm_permission_member_count_is_8() -> None:
+    """task-04 design §6 精简后共 8 个 PPM_* 菜单/读成员。"""
+    assert len(EXPECTED_PPM_PERMISSIONS) == 8
 
 
 @pytest.mark.parametrize("name,value", list(EXPECTED_PPM_PERMISSIONS.items()))
