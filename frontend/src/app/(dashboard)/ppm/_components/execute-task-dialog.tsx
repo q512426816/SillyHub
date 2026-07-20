@@ -62,6 +62,10 @@ function TaskDetail({ task }: { task: PlanTask }) {
   return (
     <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
       <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+        <div className="col-span-2"><DetailItem label="任务内容" value={task.content} /></div>
+        {task.task_description ? (
+          <div className="col-span-2"><DetailItem label="任务描述" value={task.task_description} /></div>
+        ) : null}
         <DetailItem label="项目" value={task.project_name} />
         <DetailItem label="模块" value={task.module_name} />
         <DetailItem label="计划时间" value={planRange} />

@@ -446,3 +446,12 @@ created_at: 2026-07-14T09:20:24
 方案：①PlanTask 加 task_description(Text,对齐明细);②migration 加列(down_revision=20260718_project_org_id,已 alembic heads 确认);③service 三处(detail 变 done 建任务命中/新建分支 + 编辑同步)都带 task.task_description=detail.task_description;④schema Create/Update/Response 暴露(task service update 用 exclude_unset 不传不动,任务计划编辑不会误清空);⑤前端 PlanTask 类型加字段 + task-plans「任务内容」后加「任务描述」列;⑥测试 FR-01 全字段断言 + FR-03 专门测编辑同步 task_description。
 结果：ruff All checks passed;pytest plan 114 + task 26 + detail_task_link 11(含新 2 例)全过零回归;tsc EXIT 0;eslint 0 error。待 commit + push + rebuild backend+frontend Docker(后端启动跑 migration 加列)+ 用户验证(明细填任务描述→提交建任务→任务计划列表显示任务描述列;改明细任务描述→任务计划同步)。
 波折：宿主机无 python,后端测试用 docker run --rm --user root -v backend:/app 临时容器 + pip --target /opt/venv purelib 装 pytest/pytest-asyncio/httpx/aiosqlite(dev 依赖不在 runtime 镜像) + /opt/venv/bin/python -m pytest 跑(uv venv 无 pip,不能 -m pip)。
+
+## ql-20260720-008-c4e1 | 2026-07-20 12:25:00 | 任务计划详情(列表「详情」Modal + 执行弹窗 TaskDetail)补任务内容/任务描述
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/task-plans/page.tsx（详情 Modal 任务信息 grid 开头加任务内容/任务描述 col-span-2）+ frontend/src/app/(dashboard)/ppm/_components/execute-task-dialog.tsx（TaskDetail grid 开头加 DetailItem 任务内容/任务描述 col-span-2）
+需求：任务计划的详情里也要展示任务内容、任务描述。
+根因：列表「详情」Modal 任务信息区(项目/模块/工时/时间/负责人/配合/备注)与执行弹窗 TaskDetail(项目/模块/计划时间/状态/负责人/配合/工时/备注)都缺任务内容(content)、任务描述(task_description);标题区虽有 content 但信息区没有,task_description 两处都没。
+方案：两处信息 grid 开头加任务内容(整行 col-span-2,无条件空显 —)+任务描述(整行 col-span-2,空不显示,同 remarks 条件模式)。task-plans Modal 用行内 span:label 模式;execute-task-dialog 用 DetailItem 包外层 div col-span-2 控制跨度。PlanTask 类型已有两字段(ql-007),纯前端展示。
+结果：tsc --noEmit EXIT 0;eslint 0 error(6 warning 全既有未用变量,非本次)。纯前端两文件。待 commit + push + rebuild frontend 部署 + 用户验证(任务计划点「详情」/「执行」弹窗信息区显示任务内容+任务描述)。
