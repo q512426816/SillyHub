@@ -418,6 +418,7 @@ export function PpmResourceTable<
         title: "#",
         key: "__index",
         width: 56,
+        align: "center",
         fixed: "left",
         render: (_v: unknown, _row: T, index?: number) =>
           (page - 1) * pageSize + (index ?? 0) + 1,

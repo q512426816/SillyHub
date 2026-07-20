@@ -400,3 +400,12 @@ created_at: 2026-07-14T09:20:24
 根因：antd Button size="small" 控件高度 24px + 字体 14px，上下 padding 太小致字顶边框(上一条 ql-20260720-001 把 shadcn Button 换成 antd 时统一用了 small)。
 方案：查询区 5 按钮(导出/新增/搜索/重置/展开) + Modal footer 2 按钮(取消/保存) + 错误条重新加载 1 按钮(均有边框/实心) size="small"→默认 middle(32px，字体 14px 不顶边)；操作列 link 按钮(编辑/删除)保持 small(无边框不顶边，表格行内紧凑)；DataTable 的 size="small" 是表格属性不动。
 结果：tsc --noEmit EXIT 0；grep 残留 size=small 仅操作列 2 link + DataTable 1 表格(预期)。查询区/Modal 按钮改默认 middle 后字体不再顶边框，与下方查询字段高度协调。纯前端单文件。待 commit + push + rebuild frontend 部署 + 用户浏览器验证。
+
+## ql-20260720-003-2f1a | 2026-07-20 09:52:33 | table 序号「#」列居中对齐
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-resource-table.tsx
+需求：用户要求 /ppm/projects 表格序号「#」列居中对齐。
+根因：PpmResourceTable showIndex 时 push 的序号列 coldef 无 align 属性，antd Table 列默认左对齐；序号是窄列(56px)+单字符数字，左对齐看着偏左不整齐。
+方案：序号列 coldef 加 align: "center"(antd align 同时控制表头与单元格)，表头「#」+单元格数字同居中。影响所有 PpmResourceTable 实例(项目/客户/成员/干系人)。
+结果：tsc --noEmit EXIT 0。序号列加 align=center 后表头「#」+数字单元格同居中。纯前端单文件(通用组件,4 个 ppm 表同效果)。待 commit + push + rebuild frontend 部署 + 用户浏览器验证。
