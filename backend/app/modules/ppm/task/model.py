@@ -22,6 +22,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
     Uuid,
 )
 from sqlmodel import Field
@@ -82,6 +83,8 @@ class PlanTask(BaseModel, table=True):
     module_name: str | None = Field(default=None, sa_column=Column(String(200), nullable=True))
     # 业务字段
     content: str | None = Field(default=None, sa_column=Column(String(2000), nullable=True))
+    # 任务描述 (明细 task_description 同步, Text 长文本)
+    task_description: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     work_load: str | None = Field(default=None, sa_column=Column(String(50), nullable=True))
     add_work: str | None = Field(default=None, sa_column=Column(String(50), nullable=True))
     work_partner: str | None = Field(default=None, sa_column=Column(String(200), nullable=True))

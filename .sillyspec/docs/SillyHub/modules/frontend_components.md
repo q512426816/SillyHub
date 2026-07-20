@@ -5,7 +5,7 @@ created_at: 2026-06-01T12:00:00
 
 # frontend_components
 > 最后更新：2026-06-23
-> 最近变更：ql-20260709-002-b5c8（RemoteFolderPicker 弹窗目录树高度响应视口 70vh）
+> 最近变更：ql-20260720-005-e91c（StatusBadge 内部渲染改 antd Badge，17 处状态标签统一切 antd）
 > 模块路径：frontend/src/components/**
 
 ## 职责
@@ -117,3 +117,4 @@ AgentLogViewer（被 agent 控制台页、workspace 详情页共用）
 | 2026-06-21 | ql-20260621-004-c4a1 | AntdProviders 全局补 dayjs locale zh-cn：antd v5 DatePicker 日历表头星期/月份/边界取自 dayjs 全局 locale，仅 ConfigProvider locale={zhCN} 不够（只管 antd 自有文案），需 dayjs.locale('zh-cn') 双保险，否则日历显示英文星期 |
 | 2026-06-23 | codex-runtime-conversation-fix | /runtimes Codex 会话从 Claude interactive SessionManager 分流到 quick-chat SSE，避免触发 daemon UnsupportedProviderError；Claude Code 会话保持 interactive 路径（**临时降级，已被 2026-06-23-codex-interactive-session 覆盖**） |
 | 2026-06-23 | 2026-06-23-codex-interactive-session | /runtimes Codex 改回 interactive panel（`InteractiveSessionChatSection`），`QuickChatSessionSection` 降级为非 /runtimes Codex 主路径（全局能力保留，D-005@v1）；`canReopenSession` 支持 Codex（D-007@v1）；`AskUserDialogCard` 支持 Codex `request_user_input` / 可归一化 MCP elicitation 归一化 payload（D-008@v1/D-010@v1） |
+| 2026-07-20 | ql-20260720-005-e91c | StatusBadge 内部渲染由自写 tailwind 圆角药丸改 antd Badge(status+text),删 KIND_STYLES/SIZE_STYLES/DOT_SIZE_STYLES 色表;StatusKind→antd status 映射;API 不变,17 处调用点自动生效,外观从「圆角药丸+浅背景」变「小圆点+文字」 |

@@ -382,3 +382,85 @@ created_at: 2026-07-14T09:20:24
 根因：用户列表有「角色」列（Tag 列表 u.roles）但无「组织」列，看不出用户归属哪些组织。
 方案：columns 在「显示名」列后、「角色」列前加「组织」列，仿角色列渲染——u.organizations 为空显 —，非空 map Tag(o.name)；UserRead.organizations 已有（同 u.roles 源），无需改后端/接口/types。
 结果：typecheck EXIT 0；admin test 17 passed（列表无专门测试，drawer 测试不受影响）。纯前端单文件。待 commit + rebuild frontend 部署 + 用户验证（用户列表显示组织列）。
+
+## ql-20260720-001-c4a1 | 2026-07-20 09:09:40 | /ppm/projects 编辑抽屉改 antd Modal 弹窗 + 审查页面 antd 统一性
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-resource-table.tsx（Drawer→Modal + shadcn Button→antd Button）；frontend/src/app/(dashboard)/ppm/projects/page.tsx（成员管理按钮→antd）
+需求：用户要求 /ppm/projects 的编辑从抽屉改为弹窗，并审查该页面是否都用 antd UI。
+现状审查：PpmResourceTable 内 Form/Input/Select/DatePicker/Table/Tag/Drawer/Modal 已全 antd；仅操作栏 Button 为 shadcn（+ StatusBadge、布局壳）。
+方案：用户确认改通用组件 PpmResourceTable 一处，4 个 ppm 页面统一切 Modal。PpmResourceDrawer→PpmResourceModal，<Drawer>→<Modal>（onClose→onCancel，保存按钮加 loading={saving}，文本统一"保存"）；所有 shadcn Button→antd Button（编辑/成员管理 type=link，删除 type=link danger，新增/搜索 type=primary，导出/重置/展开/重新加载 default，size=small）；antd import 加 Button 去 Drawer，删 shadcn Button import；projects/page.tsx 成员管理按钮同步 antd。
+结果：tsc --noEmit EXIT 0；eslint 两文件 0 error（15 warning 全既有类型签名未用参数）；grep 两文件无 shadcn Button/Drawer/size=sm/variant 残留。影响 4 个 ppm 页面新建+编辑全变 antd Modal，操作栏按钮全 antd。纯前端，不动后端/接口。
+
+## ql-20260720-002-8d3e | 2026-07-20 09:42:14 | /ppm/projects 查询区按钮 size 调整(antd small→默认 middle，修字体顶边框)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-resource-table.tsx
+需求：用户反馈查询条件上面那排按钮(导出/新增/搜索/重置/展开)字体太大、快顶到按钮边框，比例奇怪。
+根因：antd Button size="small" 控件高度 24px + 字体 14px，上下 padding 太小致字顶边框(上一条 ql-20260720-001 把 shadcn Button 换成 antd 时统一用了 small)。
+方案：查询区 5 按钮(导出/新增/搜索/重置/展开) + Modal footer 2 按钮(取消/保存) + 错误条重新加载 1 按钮(均有边框/实心) size="small"→默认 middle(32px，字体 14px 不顶边)；操作列 link 按钮(编辑/删除)保持 small(无边框不顶边，表格行内紧凑)；DataTable 的 size="small" 是表格属性不动。
+结果：tsc --noEmit EXIT 0；grep 残留 size=small 仅操作列 2 link + DataTable 1 表格(预期)。查询区/Modal 按钮改默认 middle 后字体不再顶边框，与下方查询字段高度协调。纯前端单文件。待 commit + push + rebuild frontend 部署 + 用户浏览器验证。
+
+## ql-20260720-003-2f1a | 2026-07-20 09:52:33 | table 序号「#」列居中对齐
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-resource-table.tsx
+需求：用户要求 /ppm/projects 表格序号「#」列居中对齐。
+根因：PpmResourceTable showIndex 时 push 的序号列 coldef 无 align 属性，antd Table 列默认左对齐；序号是窄列(56px)+单字符数字，左对齐看着偏左不整齐。
+方案：序号列 coldef 加 align: "center"(antd align 同时控制表头与单元格)，表头「#」+单元格数字同居中。影响所有 PpmResourceTable 实例(项目/客户/成员/干系人)。
+结果：tsc --noEmit EXIT 0。序号列加 align=center 后表头「#」+数字单元格同居中。纯前端单文件(通用组件,4 个 ppm 表同效果)。待 commit + push + rebuild frontend 部署 + 用户浏览器验证。
+
+## ql-20260720-004-b05c | 2026-07-20 10:07:58 | 修 striped 表固定列(序号/操作)横向滚动穿透：加不透明背景
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-resource-table.tsx
+需求：用户确认 /ppm/projects 横向滚动时，固定列(序号「#」fixed left + 操作 fixed right)背景透明，中间列内容穿透到固定列按钮下方。
+根因：striped CSS `.ant-table-row td{background:transparent}`(奇行)/`nth-child(even) td{background-color:hsl(var(--muted)/0.4)}`(偶行)用 td 选择器命中所有数据行单元格(含 fixed 列)，把固定列也设透明；固定列靠不透明背景遮挡滚动内容，透明后失去遮挡 → 穿透。偶行因半透明灰穿透略轻，奇行(全透明)最明显。
+方案：序号列 + 操作列 coldef 加 onCell 返回 style.background=hsl(var(--card))(SectionCard 用 bg-card，卡片底=--card，纯白/卡片色)，inline style 优先级高于 striped stylesheet 规则覆盖透明；中间非固定列保留斑马纹不动。两种主题(light/dark)自适应(--card 随主题变)。
+结果：tsc --noEmit EXIT 0。序号列(fixed left)+操作列(fixed right)加 onCell background=hsl(var(--card)) 后固定列不透明，横向滚动不再穿透；中间非固定列保留斑马纹。纯前端单文件(通用组件,4 个 ppm 表同效果)。待 commit + push + rebuild frontend 部署 + 用户浏览器验证(横向滚动操作列不再有内容穿透)。
+
+## ql-20260720-005-e91c | 2026-07-20 10:26:03 | StatusBadge 组件内部改 antd Badge(全局 17 处状态标签统一切 antd)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ui/status-badge.tsx
+需求：用户要求把 StatusBadge(状态列圆点药丸标签)换成 antd Badge，全项目统一(17 处调用点)。
+根因：StatusBadge 是 D-005 自写的 shadcn 风格组件(tailwind 圆点药丸 + 浅色背景)，是 /ppm/projects 最后残留的非 antd UI 组件；用户要全 antd。
+方案：改 status-badge.tsx 的 StatusBadge 渲染：span 药丸 → antd Badge status+text；StatusKind → antd status 映射(info→processing/success→success/warning→warning/error→error/neutral→default)；API(kind/children/icon/size/className)不变，17 处调用点零改；size 用 text 字号 class 保留差异；删 KIND_STYLES/SIZE_STYLES/DOT_SIZE_STYLES(antd Badge 自带配色)。fromStatus 函数 + StatusKind 类型保留(调用点在用)。
+结果：tsc --noEmit EXIT 0；eslint status-badge.tsx 0 error；无 StatusBadge 相关测试(grep 无结果)。StatusBadge 内部改 antd Badge 后,17 处调用点 API 不变自动生效,外观从「圆角药丸+浅背景」变「小圆点+文字」。纯前端单文件。待 commit + push + rebuild frontend 部署 + 用户浏览器验证。
+
+## ql-20260720-006-a7e3 | 2026-07-20 11:25:00 | 里程碑明细 done 状态增加「变更」按钮（编辑信息+同步任务计划，不改状态）
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
+需求：里程碑明细页，已完成(done)状态的明细操作列增加「变更」按钮(本质是编辑功能,改名"变更")；变更抽屉只保留「提交」按钮、去掉「保存」；提交后同步更新对应的任务计划信息,但不改变任务计划的状态。
+根因：done 是终态,原 modeForStatus(done)=view 只读无编辑入口；现有 edit 模式 footer 有「保存+提交」两按钮,且提交(autoSubmit)走 saveProcess 触发状态机推进(draft→done),对已 done 明细不适用；需独立 mode 区分"信息变更"(不改状态)与"版本变更"(change 模式生成新版本)。
+方案：新增 DrawerMode="changeInfo"——①操作列 done 加「变更」按钮(onOpenDetail(d,"changeInfo"),readOnly 禁用)；②baseEditable 含 changeInfo(开立信息块可编辑)；③提取 baseBody(create/edit/changeInfo 共用开立信息字段集合)；④submit 加 changeInfo 分支:仅调 updatePsPlanNodeDetail(detail.id,baseBody),不调 saveProcess、不生成新版本、不改明细 status,后端 update_detail→_sync_task_fields 自动同步关联任务(content/workload/time/user/module,FR-03/D-007,不改 task.status)；⑤title="变更明细"、submitText="提交"；⑥footer 逻辑天然支持(showSubmit && 非 create/edit → 单「提交」按钮)。modeForStatus 不动(done 默认仍 view,"变更"是显式覆盖 mode 打开)。
+结果：tsc --noEmit EXIT 0；vitest milestone-details 24 passed(2 test files)零回归；eslint page.tsx 0 error(19 warning 全既有类型签名未用参数,非本次引入)。纯前端单文件,后端 update_detail 早已实现任务同步(FR-03 测试覆盖)。待 commit + push + rebuild frontend 部署 + 用户浏览器验证(done 明细点「变更」→抽屉仅「提交」→改字段提交→任务计划对应字段同步、状态不变)。
+
+## ql-20260720-007-b9d2 | 2026-07-20 11:45:00 | 任务计划建/改同步明细 task_description + 任务计划列表展示任务描述列
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/task/model.py（PlanTask 加 task_description Text 列）+ backend/app/modules/ppm/task/schema.py（PlanTaskCreate/Update/Response 加字段）+ backend/app/modules/ppm/plan/service.py（_ensure_task_for_detail 命中/新建两分支 + _sync_task_fields 三处同步 task_description）+ backend/migrations/versions/20260720_add_plan_task_task_description.py（加列,down_revision=20260718_project_org_id）+ backend/app/modules/ppm/plan/tests/test_detail_task_link.py（FR-01 全字段映射断言 + FR-03 新 test_update_detail_syncs_task_description）+ frontend/src/lib/ppm/types.ts（PlanTask 加 task_description）+ frontend/src/app/(dashboard)/ppm/task-plans/page.tsx（「任务内容」列后加「任务描述」列 width220 ellipsis）
+需求：里程碑明细提交(建任务)/修改(同步任务)时,明细的 task_description 要带到任务计划并展示。
+根因：PlanTask 无 task_description 字段(只有 content=task_theme),_ensure_task_for_detail 建任务 + _sync_task_fields 同步都未带 task_description,任务计划列表也无该列。
+方案：①PlanTask 加 task_description(Text,对齐明细);②migration 加列(down_revision=20260718_project_org_id,已 alembic heads 确认);③service 三处(detail 变 done 建任务命中/新建分支 + 编辑同步)都带 task.task_description=detail.task_description;④schema Create/Update/Response 暴露(task service update 用 exclude_unset 不传不动,任务计划编辑不会误清空);⑤前端 PlanTask 类型加字段 + task-plans「任务内容」后加「任务描述」列;⑥测试 FR-01 全字段断言 + FR-03 专门测编辑同步 task_description。
+结果：ruff All checks passed;pytest plan 114 + task 26 + detail_task_link 11(含新 2 例)全过零回归;tsc EXIT 0;eslint 0 error。待 commit + push + rebuild backend+frontend Docker(后端启动跑 migration 加列)+ 用户验证(明细填任务描述→提交建任务→任务计划列表显示任务描述列;改明细任务描述→任务计划同步)。
+波折：宿主机无 python,后端测试用 docker run --rm --user root -v backend:/app 临时容器 + pip --target /opt/venv purelib 装 pytest/pytest-asyncio/httpx/aiosqlite(dev 依赖不在 runtime 镜像) + /opt/venv/bin/python -m pytest 跑(uv venv 无 pip,不能 -m pip)。
+
+## ql-20260720-008-c4e1 | 2026-07-20 12:25:00 | 任务计划详情(列表「详情」Modal + 执行弹窗 TaskDetail)补任务内容/任务描述
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/task-plans/page.tsx（详情 Modal 任务信息 grid 开头加任务内容/任务描述 col-span-2）+ frontend/src/app/(dashboard)/ppm/_components/execute-task-dialog.tsx（TaskDetail grid 开头加 DetailItem 任务内容/任务描述 col-span-2）
+需求：任务计划的详情里也要展示任务内容、任务描述。
+根因：列表「详情」Modal 任务信息区(项目/模块/工时/时间/负责人/配合/备注)与执行弹窗 TaskDetail(项目/模块/计划时间/状态/负责人/配合/工时/备注)都缺任务内容(content)、任务描述(task_description);标题区虽有 content 但信息区没有,task_description 两处都没。
+方案：两处信息 grid 开头加任务内容(整行 col-span-2,无条件空显 —)+任务描述(整行 col-span-2,空不显示,同 remarks 条件模式)。task-plans Modal 用行内 span:label 模式;execute-task-dialog 用 DetailItem 包外层 div col-span-2 控制跨度。PlanTask 类型已有两字段(ql-007),纯前端展示。
+结果：tsc --noEmit EXIT 0;eslint 0 error(6 warning 全既有未用变量,非本次)。纯前端两文件。待 commit + push + rebuild frontend 部署 + 用户验证(任务计划点「详情」/「执行」弹窗信息区显示任务内容+任务描述)。
+
+## ql-20260720-009-d5f2 | 2026-07-20 13:15:00 | /ppm/project-plans 操作列去掉「详情」按钮
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx（操作列 render 删「详情」Button）
+需求：用户要求 /ppm/project-plans 操作列去掉「详情」按钮。
+根因：操作列原有 详情/里程碑/编辑/删除 4 按钮,「详情」与项目名称列点击打开详情(行 319-324 setDetail)重复,操作列冗余。
+方案：删操作列「详情」Button(行 423-429),剩 里程碑/编辑/删除 3 按钮;detail state + Detail Modal 保留——项目名称点击仍是详情入口,非死代码。
+结果：tsc --noEmit EXIT 0;eslint 0 error(1 既有 warning)。纯前端单文件。待 commit + push + rebuild frontend 部署 + 用户验证(操作列无详情按钮,点项目名仍可打开详情)。

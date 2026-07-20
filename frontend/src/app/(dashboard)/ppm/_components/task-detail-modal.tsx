@@ -209,6 +209,10 @@ export function TaskDetailModal({
       <div className="mb-4 rounded-lg border border-border bg-muted/30 p-4">
         <div className="mb-3 text-xs font-semibold text-foreground/70">任务信息</div>
         <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+          <div className="col-span-2"><span className="text-muted-foreground">任务内容：</span>{task.content ?? "—"}</div>
+          {task.task_description ? (
+            <div className="col-span-2"><span className="text-muted-foreground">任务描述：</span>{task.task_description}</div>
+          ) : null}
           <div><span className="text-muted-foreground">项目：</span>{task.project_name ?? "—"}</div>
           <div><span className="text-muted-foreground">模块：</span>{task.module_name ?? "—"}</div>
           <div><span className="text-muted-foreground">预估工时：</span>{task.work_load ?? "—"}</div>

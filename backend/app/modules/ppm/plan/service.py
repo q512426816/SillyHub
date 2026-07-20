@@ -1587,6 +1587,7 @@ class PlanService:
             task.user_id = uid
             task.user_name = user_name
             task.content = detail.task_theme
+            task.task_description = detail.task_description
             task.start_time = detail.plan_begin_time
             task.end_time = detail.plan_complete_time
             task.work_load = detail.plan_workload
@@ -1607,6 +1608,7 @@ class PlanService:
             user_name=user_name,
             status="未开始",
             content=detail.task_theme,
+            task_description=detail.task_description,
             start_time=detail.plan_begin_time,
             end_time=detail.plan_complete_time,
             work_load=detail.plan_workload,
@@ -1644,6 +1646,7 @@ class PlanService:
             task.user_id = uid
             task.user_name = await self._lookup_user_name(uid)
         task.content = detail.task_theme
+        task.task_description = detail.task_description
         task.start_time = detail.plan_begin_time
         task.end_time = detail.plan_complete_time
         task.work_load = detail.plan_workload

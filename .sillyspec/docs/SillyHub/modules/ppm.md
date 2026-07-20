@@ -64,6 +64,7 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 - 列表页查询条件变化不自动查，走 searchNonce 兜底（React 18 batch 保证 setState+setSearchNonce 同帧合并触发 1 次重查）
 - 选择型查询条件 onChange 即查，文本型（Input/RangePicker）走回车/按钮提交
 - 导出按钮对齐：搜索 primary + 重置 outline + 分隔 + 导出 outline + 新建 primary
+- PpmResourceTable 新建/编辑表单用 antd Modal（PpmResourceModal，destroyOnClose + footer 自定义取消/保存按钮），操作栏按钮全 antd Button（编辑/成员管理 type=link、删除 type=link danger、新增/搜索 type=primary、导出/重置/展开/重新加载 default，size=small）；2026-07-20 由 Drawer 改 Modal（ql-20260720-001）
 - 操作列 fixed=right + whitespace-nowrap，width 用具体数字（max-content 在 fixed+scroll.x 下不可靠）
 - 表格 scroll y 用 calc(100vh-430px) 按视窗自适应，Table.Summary fixed=bottom 吸底
 - FastAPI 路由按注册顺序匹配，export-excel 字面量必须排在 {item_id} 前
@@ -109,3 +110,11 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 - ql-20260717-001-f1a2 | 里程碑明细编辑提交直接完成(无审核流程)+建任务计划：_FORWARD_NEXT[DRAFT]=DONE(draft save→done 跳过审核)+fsm DRAFT 白名单加 DONE+_transition DONE 分支记完成人(approve_user)。修复编辑明细提交后状态"审核中"应"完成"+没建任务计划(两 bug 同源:review 状态不触发 _ensure_task_for_detail)
 - ql-20260717-003-94b4 | 里程碑明细·明细列表(DetailLevelTable)加「任务描述」列：明细已有 task_description 字段(表单 page.tsx:2313 + types PsPlanNodeDetail),列表缺该列;columns「任务主题」后加任务描述列(dataIndex=task_description,width=220,ellipsis=true 防长文本撑高行);page.tsx 3 处「任务主题」列用后跟列区分唯一定位(仅 DetailLevelTable 后跟「角色」,master/preview 分别跟「责任人」「工作量」);纯前端单文件,不动后端/接口/types
 - ql-20260717-004-01b2 | 项目改名后项目计划列表项目名不更新：ps_project_plan.project_name 是冗余快照(创建从项目表复制 ql-20260716-006)改名不同步→计划列表/详情/导出/任务联动(_resolve_project_context 取 PsProjectPlan.project_name)全显旧名;写时同步——ProjectMaintenanceService.update 检测 project_name 变更时同事务 update(PsProjectPlan).where(project_id==entity_id).values(project_name,updated_at) 刷新所有关联计划,单一写入点所有读点自动跟上(import plan.model 无循环);波折:① text SQL WHERE 绕过 UuidCoercing 致 UPDATE 0 行→改 update() statement 走 model 类型适配;② project/tests/conftest 加 plan model 注册建 sqlite ppm_ps_project_plan 表;③ expire_on_commit=False 测试用 select column 直查 DB 验实际值
+- ql-20260720-001-c4a1 | PpmResourceTable 编辑/新建抽屉改 antd Modal（<Drawer>→<Modal>，PpmResourceDrawer→PpmResourceModal，onClose→onCancel，保存按钮加 loading={saving}）+ 操作栏 shadcn Button 全量改 antd Button（编辑 type=link、删除 type=link danger、新增/搜索 type=primary、导出/重置/展开/重新加载 default，size=small）；影响项目/客户/成员/干系人 4 页新建+编辑；projects/page.tsx 成员管理按钮同步 antd
+- ql-20260720-002-8d3e | /ppm/projects 查询区按钮 size=small→默认 middle(修字体顶边框)：查询区 5 按钮(导出/新增/搜索/重置/展开)+Modal footer 2(取消/保存)+错误条重新加载 1(均有边框/实心)改默认 32px；操作列 link(编辑/删除)保持 small；DataTable size 不动
+- ql-20260720-003-2f1a | table 序号「#」列居中对齐：PpmResourceTable 序号列 coldef 加 align=center(表头「#」+数字单元格同居中)，影响所有 ppm 表
+- ql-20260720-004-b05c | 修 striped 表固定列横向滚动穿透：序号列(fixed left)+操作列(fixed right)coldef 加 onCell background=hsl(var(--card))(不透明，与 SectionCard 卡片底一致)覆盖 striped 透明背景；中间非固定列保留斑马纹
+- ql-20260720-006-a7e3 | 里程碑明细已完成(done)操作列加「变更」按钮：新增 changeInfo 抽屉模式(开立信息可编辑,footer 仅「提交」无「保存」),提交调 updatePsPlanNodeDetail→后端 _sync_task_fields 同步任务计划字段(content/workload/time/user/module),不改明细 status/不生成新版本/不改任务 status(FR-03/D-007);DetailLevelTable done 加按钮(readOnly 禁用)+baseEditable/submitText/title 配套;纯前端单文件
+- ql-20260720-007-b9d2 | 任务计划同步明细 task_description：PlanTask 加 task_description(Text)列+migration+plan/service 三处(_ensure 命中/新建+_sync)同步 task_description+schema 暴露(task update exclude_unset 不误清)+前端 PlanTask 类型加字段+task-plans 加「任务描述」列；明细提交建任务/编辑同步都带任务描述
+- ql-20260720-008-c4e1 | 任务计划详情补任务内容/任务描述：列表「详情」Modal 任务信息 grid + 执行弹窗 TaskDetail grid 开头各加任务内容(整行 col-span-2)+任务描述(整行,空不显示);PlanTask 类型已有两字段(ql-007),纯前端展示
+- ql-20260720-009-d5f2 | /ppm/project-plans 操作列去「详情」按钮(与项目名称点击打开详情重复);detail Modal 保留(项目名点击仍入口)

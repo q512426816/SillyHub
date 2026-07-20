@@ -146,6 +146,7 @@ class TestFR01CreateDetailBuildsTask:
                 "plan_node_id": node.id,
                 "no": "1",
                 "task_theme": "需求调研",
+                "task_description": "调研客户需求与流程细节",
                 "plan_workload": "8",
                 "plan_begin_time": begin,
                 "plan_complete_time": end,
@@ -162,6 +163,8 @@ class TestFR01CreateDetailBuildsTask:
         assert task.user_id == member.user_id
         assert task.user_name == "李四"  # _lookup_user_name 姓名反查
         assert task.content == "需求调研"
+        # ql-20260720-007: task_description 同步到任务
+        assert task.task_description == "调研客户需求与流程细节"
         # SQLite 存 datetime 不保 tzinfo (读回为 naive),比较去掉 tzinfo
         assert task.start_time == begin.replace(tzinfo=None)
         assert task.end_time == end.replace(tzinfo=None)
@@ -385,6 +388,33 @@ class TestFR03EditSyncsTaskFields:
         assert task_after.status == "未开始"
         # 仅一条任务
         assert await _count_tasks(db_session) == 1
+
+    async def test_update_detail_syncs_task_description(self, db_session: AsyncSession) -> None:
+        """ql-20260720-007: update_detail 改 task_description → 关联任务 task_description 同步。"""
+        plan = await _seed_project_plan(db_session)
+        node = await _seed_node(db_session, plan.id)
+        member = await _seed_member(db_session, user_id=uuid.uuid4(), user_name="描述员")
+
+        svc = PlanService(db_session)
+        detail = await svc.create_detail(
+            {
+                "plan_node_id": node.id,
+                "no": "1",
+                "task_theme": "原标题",
+                "task_description": "原始描述",
+                "execute_user_id": member.user_id,
+                "status": "done",
+            }
+        )
+        task = await _get_task_by_detail(db_session, detail.id)
+        assert task is not None
+        assert task.task_description == "原始描述"
+
+        await svc.update_detail(detail.id, {"task_description": "更新后的描述"})
+
+        task_after = await _get_task_by_detail(db_session, detail.id)
+        assert task_after is not None
+        assert task_after.task_description == "更新后的描述"
 
 
 # ===========================================================================

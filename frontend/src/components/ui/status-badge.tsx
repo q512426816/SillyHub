@@ -1,27 +1,20 @@
 /**
  * StatusBadge —— 统一状态语义入口(D-005)。
  *
+ * 2026-07-20(ql-20260720-005):内部渲染由自写 tailwind 圆角药丸改为 antd Badge,
+ * 全项目状态标签统一切 antd(17 处调用点 API 不变)。外观从「圆角药丸 + 浅色背景」
+ * 变为 antd Badge 标准的「小圆点 + 文字」。
+ *
  * 设计依据:
  * - 蓝图 .sillyspec/changes/2026-06-21-frontend-style-system/tasks/task-06.md
- * - D-005:antd Tag 场景(ppm 业务) + shadcn Badge 场景(通用 UI) 共用同一套
- *   状态色语义,调用方拿 `kind` 即决定色,不再各自维护 STATUS_COLOR map。
+ * - D-005:调用方拿 kind 即决定色,组件内部映射到 antd Badge status。
  *
- * 色值来源:
- * - 本组件消费 task-05 注入的语义色,以 Tailwind 命名色档位形式表达「主色 + 深色」
- *   双色调(圆点主色 + 文字深色)。Tailwind 命名色 blue/emerald/amber/red/slate 为
- *   调色板默认 key,非硬编码任意值(hex/rgb/Tailwind 任意值语法一律禁止,见 AC-02)。
- * - 语义来源(改色改 globals.css 的 hsl var + tailwind.config 调色板,不改本文件):
- *     info    → tokens.semantic.info    (Tailwind blue-600/700)
- *     success → tokens.semantic.success (Tailwind emerald-600/700)
- *     warning → tokens.semantic.warning (Tailwind amber-500/700)
- *     error   → tokens.semantic.error   (Tailwind red-600/700)
- *     neutral → tokens.color.neutral    (Tailwind slate-500/600)
- *   改色统一改 globals.css 的 `--info / --success / --warning / --error / --color-neutral`
- *   与 tailwind.config 的调色板,本文件不改色值。
+ * StatusKind → antd Badge status 映射(antd 配色自带):
+ *   info → processing(蓝,带脉冲,契合「进行中」) / success → success(绿) /
+ *   warning → warning(黄) / error → error(红) / neutral → default(灰)
  */
 import * as React from "react";
-
-import { cn } from "@/lib/utils";
+import { Badge } from "antd";
 
 export type StatusKind = "info" | "success" | "warning" | "error" | "neutral";
 
@@ -32,59 +25,32 @@ export interface StatusBadgeProps {
   children: React.ReactNode;
   /** 可选图标,渲染在圆点之后、文字之前;不传则省略。 */
   icon?: React.ReactNode;
-  /** 尺寸:sm 紧凑(默认)、md 标准。 */
+  /** 尺寸:sm 紧凑(默认,text-xs)、md 标准(text-sm)。 */
   size?: "sm" | "md";
   className?: string;
 }
 
-/**
- * kind → 圆点主色 / 文字深色 / 背景(极浅)/ 背景边框(略深,圆点用)映射表。
- * 全部走 Tailwind 命名色档位(blue/emerald/amber/red/slate),不硬编码 hex/rgb/任意值。
- */
-const KIND_STYLES: Record<
+/** StatusKind → antd Badge status 映射(antd 配色自带,不再维护 tailwind 色表)。 */
+const KIND_TO_ANTD_STATUS: Record<
   StatusKind,
-  { dot: string; text: string; bg: string }
+  "success" | "processing" | "default" | "error" | "warning"
 > = {
-  info: {
-    dot: "bg-blue-600",
-    text: "text-blue-700",
-    bg: "bg-blue-50",
-  },
-  success: {
-    dot: "bg-emerald-600",
-    text: "text-emerald-700",
-    bg: "bg-emerald-50",
-  },
-  warning: {
-    dot: "bg-amber-500",
-    text: "text-amber-700",
-    bg: "bg-amber-50",
-  },
-  error: {
-    dot: "bg-red-600",
-    text: "text-red-700",
-    bg: "bg-red-50",
-  },
-  neutral: {
-    dot: "bg-slate-500",
-    text: "text-slate-600",
-    bg: "bg-slate-100",
-  },
+  info: "processing",
+  success: "success",
+  warning: "warning",
+  error: "error",
+  neutral: "default",
 };
 
-const SIZE_STYLES: Record<NonNullable<StatusBadgeProps["size"]>, string> = {
-  sm: "px-2 py-0.5 text-xs",
-  md: "px-2.5 py-1 text-sm",
-};
-
-const DOT_SIZE_STYLES: Record<NonNullable<StatusBadgeProps["size"]>, string> = {
-  sm: "h-1.5 w-1.5",
-  md: "h-2 w-2",
+const SIZE_TEXT_CLASS: Record<NonNullable<StatusBadgeProps["size"]>, string> = {
+  sm: "text-xs",
+  md: "text-sm",
 };
 
 /**
- * 状态徽标:圆点(语义主色) + 可选 icon + 文字(语义深色),圆角 full。
- * 圆角 full 与 Badge 的直角 `rounded` 形态区分,语义不同。
+ * 状态徽标:antd Badge(status 圆点 + text 文字)。
+ * 2026-07-20(ql-20260720-005)由自写 tailwind 圆角药丸改为 antd Badge,
+ * 外观变为「小圆点 + 文字」(无背景药丸)。
  */
 export function StatusBadge({
   kind,
@@ -93,24 +59,17 @@ export function StatusBadge({
   size = "sm",
   className,
 }: StatusBadgeProps) {
-  const styles = KIND_STYLES[kind];
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full font-medium leading-none",
-        SIZE_STYLES[size],
-        styles.bg,
-        styles.text,
-        className,
-      )}
-    >
-      <span
-        aria-hidden="true"
-        className={cn("inline-block rounded-full", DOT_SIZE_STYLES[size], styles.dot)}
-      />
-      {icon}
-      <span>{children}</span>
-    </span>
+    <Badge
+      className={className}
+      status={KIND_TO_ANTD_STATUS[kind]}
+      text={
+        <span className={SIZE_TEXT_CLASS[size]}>
+          {icon}
+          {children}
+        </span>
+      }
+    />
   );
 }
 
