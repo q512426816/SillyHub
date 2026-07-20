@@ -423,13 +423,6 @@ export default function ProjectPlansPage() {
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => setDetail({ open: true, planId: p.id })}
-            >
-              详情
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
               onClick={() => goToMilestones(p.id)}
             >
               里程碑

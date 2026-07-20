@@ -455,3 +455,12 @@ created_at: 2026-07-14T09:20:24
 根因：列表「详情」Modal 任务信息区(项目/模块/工时/时间/负责人/配合/备注)与执行弹窗 TaskDetail(项目/模块/计划时间/状态/负责人/配合/工时/备注)都缺任务内容(content)、任务描述(task_description);标题区虽有 content 但信息区没有,task_description 两处都没。
 方案：两处信息 grid 开头加任务内容(整行 col-span-2,无条件空显 —)+任务描述(整行 col-span-2,空不显示,同 remarks 条件模式)。task-plans Modal 用行内 span:label 模式;execute-task-dialog 用 DetailItem 包外层 div col-span-2 控制跨度。PlanTask 类型已有两字段(ql-007),纯前端展示。
 结果：tsc --noEmit EXIT 0;eslint 0 error(6 warning 全既有未用变量,非本次)。纯前端两文件。待 commit + push + rebuild frontend 部署 + 用户验证(任务计划点「详情」/「执行」弹窗信息区显示任务内容+任务描述)。
+
+## ql-20260720-009-d5f2 | 2026-07-20 13:15:00 | /ppm/project-plans 操作列去掉「详情」按钮
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx（操作列 render 删「详情」Button）
+需求：用户要求 /ppm/project-plans 操作列去掉「详情」按钮。
+根因：操作列原有 详情/里程碑/编辑/删除 4 按钮,「详情」与项目名称列点击打开详情(行 319-324 setDetail)重复,操作列冗余。
+方案：删操作列「详情」Button(行 423-429),剩 里程碑/编辑/删除 3 按钮;detail state + Detail Modal 保留——项目名称点击仍是详情入口,非死代码。
+结果：tsc --noEmit EXIT 0;eslint 0 error(1 既有 warning)。纯前端单文件。待 commit + push + rebuild frontend 部署 + 用户验证(操作列无详情按钮,点项目名仍可打开详情)。

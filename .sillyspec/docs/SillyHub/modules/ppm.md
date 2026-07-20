@@ -117,3 +117,4 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 - ql-20260720-006-a7e3 | 里程碑明细已完成(done)操作列加「变更」按钮：新增 changeInfo 抽屉模式(开立信息可编辑,footer 仅「提交」无「保存」),提交调 updatePsPlanNodeDetail→后端 _sync_task_fields 同步任务计划字段(content/workload/time/user/module),不改明细 status/不生成新版本/不改任务 status(FR-03/D-007);DetailLevelTable done 加按钮(readOnly 禁用)+baseEditable/submitText/title 配套;纯前端单文件
 - ql-20260720-007-b9d2 | 任务计划同步明细 task_description：PlanTask 加 task_description(Text)列+migration+plan/service 三处(_ensure 命中/新建+_sync)同步 task_description+schema 暴露(task update exclude_unset 不误清)+前端 PlanTask 类型加字段+task-plans 加「任务描述」列；明细提交建任务/编辑同步都带任务描述
 - ql-20260720-008-c4e1 | 任务计划详情补任务内容/任务描述：列表「详情」Modal 任务信息 grid + 执行弹窗 TaskDetail grid 开头各加任务内容(整行 col-span-2)+任务描述(整行,空不显示);PlanTask 类型已有两字段(ql-007),纯前端展示
+- ql-20260720-009-d5f2 | /ppm/project-plans 操作列去「详情」按钮(与项目名称点击打开详情重复);detail Modal 保留(项目名点击仍入口)
