@@ -464,3 +464,12 @@ created_at: 2026-07-14T09:20:24
 根因：操作列原有 详情/里程碑/编辑/删除 4 按钮,「详情」与项目名称列点击打开详情(行 319-324 setDetail)重复,操作列冗余。
 方案：删操作列「详情」Button(行 423-429),剩 里程碑/编辑/删除 3 按钮;detail state + Detail Modal 保留——项目名称点击仍是详情入口,非死代码。
 结果：tsc --noEmit EXIT 0;eslint 0 error(1 既有 warning)。纯前端单文件。待 commit + push + rebuild frontend 部署 + 用户验证(操作列无详情按钮,点项目名仍可打开详情)。
+
+## ql-20260720-010-e3a1 | 2026-07-20 13:30:00 | /ppm/project-members + /ppm/milestone-details 从侧边栏菜单隐藏(二级页面,保留路由/权限)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/lib/menu-permissions.ts（MenuPermissionGroup 加 navHidden 字段 + ppm-project-members/ppm-milestone-details 设 true）+ frontend/src/components/app-shell.tsx（visibleMenusBySection 后 filter navHidden）
+需求：用户要求 /ppm/project-members、/ppm/milestone-details 不在菜单显示(算二级页面)。
+根因：两页面已改为跳转进入(project-members 由 /ppm/projects「成员管理」跳转 ql-20260715-012;milestone-details 由 /ppm/project-plans「里程碑」按钮跳转),但仍挂在侧边栏 ppm 菜单,与二级页面定位冲突。MenuItem 类型只有 pickerHidden(仅 picker 隐藏,侧边栏仍显示),缺侧边栏隐藏标记。
+方案：MenuPermissionGroup 加 navHidden?:boolean(语义=二级页面侧边栏不渲染,路由/权限/active 保留);ppm-project-members + ppm-milestone-details 设 navHidden:true;app-shell 侧边栏 visibleMenusBySection(user,section).filter(m=>!m.navHidden)。canSeeMenu/visibleMenusBySection 函数本身不动(navHidden 仅 app-shell 渲染过滤,不影响其他调用方)。
+结果：tsc --noEmit EXIT 0;eslint 0 error;vitest menu-permissions 29 passed 零回归。纯前端两文件。待 commit + push + rebuild frontend 部署 + 用户验证(侧边栏 ppm 菜单无「项目成员」「里程碑明细」;两页面经跳转仍可进入)。
