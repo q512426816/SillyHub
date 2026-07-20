@@ -108,3 +108,37 @@ async def problem_scope_clause(session: AsyncSession, user: User):
     clauses.append(PpmProblemList.audit_user_id == user.id)
     clauses.append(wrapped.like(uid_csv))
     return or_(*clauses)
+
+
+async def can_operate_problem(session: AsyncSession, user: User, problem: PpmProblemList) -> bool:
+    """编辑/删除放行判断(2026-07-20 权限改造)。
+
+    满足其一即放行:
+    - 超级管理员(``is_platform_admin`` 或 ``super_admin`` 角色)
+    - 创建人(``problem.created_by == user.id``)
+    - 本问题所属项目的经理(部门/项目/开发/业务经理,``manager_project_ids`` 含
+      ``problem.project_id``)
+    - 责任人(``problem.duty_user_id == user.id``,保留旧逻辑)
+
+    复用 :func:`is_super_admin` / :func:`manager_project_ids`。前端按钮显示
+    (``can_edit``/``can_delete``)与后端写操作鉴权共用本函数,避免两端分叉。
+    """
+    if await is_super_admin(session, user):
+        return True
+    manager_pids = await manager_project_ids(session, user)
+    return problem_operable(problem, user.id, manager_pids)
+
+
+def problem_operable(
+    problem: PpmProblemList, user_id: uuid.UUID, manager_pids: set[uuid.UUID]
+) -> bool:
+    """单条放行判断(纯函数,超管已在调用方排除;供单/批量共用避免逻辑分叉)。
+
+    创建人 ‖ 责任人 ‖ 本问题所属项目的经理(``manager_pids`` 含 ``project_id``),
+    满足其一即放行。调用方需先判超管(超管恒 True,无需查经理项目集)。
+    """
+    return (
+        (problem.created_by is not None and problem.created_by == user_id)
+        or (problem.duty_user_id is not None and problem.duty_user_id == user_id)
+        or (bool(manager_pids) and problem.project_id in manager_pids)
+    )

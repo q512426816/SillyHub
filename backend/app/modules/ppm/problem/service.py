@@ -38,7 +38,13 @@ from app.modules.ppm.common.crud import (
     apply_sort,
     count_total,
 )
-from app.modules.ppm.common.data_scope import problem_scope_clause
+from app.modules.ppm.common.data_scope import (
+    can_operate_problem,
+    is_super_admin,
+    manager_project_ids,
+    problem_operable,
+    problem_scope_clause,
+)
 from app.modules.ppm.common.fsm import assert_transition
 from app.modules.ppm.problem.fsm import (
     CHANGE_TRANSITIONS,
@@ -87,6 +93,13 @@ class ProblemNotFound(AppError):
 
     code = "HTTP_404_PPM_PROBLEM_NOT_FOUND"
     http_status = 404
+
+
+class ProblemForbidden(AppError):
+    """problem 子域无权操作 (403) — 编辑/删除越权(非创建人/非本项目经理/非责任人/非超管)。"""
+
+    code = "HTTP_403_PPM_PROBLEM_FORBIDDEN"
+    http_status = 403
 
 
 class ProblemPendingAssignment(ProblemError):
@@ -279,13 +292,19 @@ class ProblemService:
     async def create_problem(
         self,
         data: dict[str, Any],
+        *,
+        created_by: uuid.UUID | None = None,
     ) -> PpmProblemList:
         """创建问题清单 (3 态简化，新建即「新建」态)。
 
         对齐任务计划：新建 = 「新建」态，由后续 ``start_problem`` 推进到「进行中」。
         不再有 submit/审批分支 (2026-07-20 简化)。
+
+        ``created_by`` 写入创建人 (2026-07-20 权限改造),作为编辑/删除放行依据。
         """
         data.setdefault("status", ProblemStatus.NEW.value)
+        if created_by is not None:
+            data.setdefault("created_by", created_by)
         await self._backfill_names(data)
         return await _Crud(self._session, PpmProblemList).create(data)
 
@@ -315,11 +334,40 @@ class ProblemService:
     async def get_problem(self, item_id: uuid.UUID) -> PpmProblemList:
         return await _Crud(self._session, PpmProblemList).get(item_id)
 
-    async def update_problem(self, item_id: uuid.UUID, data: dict[str, Any]) -> PpmProblemList:
+    async def update_problem(
+        self, item_id: uuid.UUID, data: dict[str, Any], *, user: User
+    ) -> PpmProblemList:
+        obj = await self.get_problem(item_id)
+        await self._assert_can_operate(obj, user)
         return await _Crud(self._session, PpmProblemList).update(item_id, data)
 
-    async def delete_problem(self, item_id: uuid.UUID) -> None:
+    async def delete_problem(self, item_id: uuid.UUID, *, user: User) -> None:
+        obj = await self.get_problem(item_id)
+        await self._assert_can_operate(obj, user)
         await _Crud(self._session, PpmProblemList).delete(item_id)
+
+    async def _assert_can_operate(self, problem: PpmProblemList, user: User) -> None:
+        """越权 → ProblemForbidden (403)。放行条件见 ``can_operate_problem``。"""
+        if not await can_operate_problem(self._session, user, problem):
+            raise ProblemForbidden(
+                "无权操作该问题(仅创建人/本项目经理/责任人/超管可编辑删除)",
+                details={"problem_id": str(problem.id)},
+            )
+
+    async def compute_can_operate(
+        self, problems: list[PpmProblemList], user: User
+    ) -> dict[uuid.UUID, bool]:
+        """批量计算各问题的编辑/删除放行 (超管‖创建人‖本项目经理‖责任人)。
+
+        供列表/详情响应填充 ``can_edit``/``can_delete``。批量:超管/经理项目集
+        各查一次后逐条本地判断,避免逐条 await 的 N+1。
+        """
+        if not problems:
+            return {}
+        if await is_super_admin(self._session, user):
+            return {p.id: True for p in problems}
+        manager_pids = await manager_project_ids(self._session, user)
+        return {p.id: problem_operable(p, user.id, manager_pids) for p in problems}
 
     # ------------------------------------------------------------------
     # 问题变更 CRUD
@@ -970,6 +1018,7 @@ class ProblemService:
 
 __all__ = [
     "ProblemError",
+    "ProblemForbidden",
     "ProblemNotFound",
     "ProblemPendingAssignment",
     "ProblemService",

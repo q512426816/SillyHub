@@ -34,6 +34,8 @@ class ProblemListBase(PydanticModel):
     find_time: datetime | None = None
     pro_answer: str | None = None
     work_type: str | None = None
+    # 创建人 (编辑/删除权限判断依据; 历史数据 None)
+    created_by: uuid.UUID | None = None
     duty_user_id: uuid.UUID | None = None
     duty_user_name: str | None = None
     plan_start_time: datetime | None = None
@@ -91,6 +93,11 @@ class ProblemListResp(ProblemListBase):
     spent_time: float = (
         0.0  # 已消耗工时(人天, router 聚合 sum TaskExecute.time_spent by problem_task_id)
     )
+    # 操作权限(后端按角色集中判断, 前端只读):
+    # can_edit/can_delete = 超管 ‖ 创建人 ‖ 本项目经理 ‖ 责任人(满足其一)
+    # 由 router 调 service.compute_can_operate 填充, 非 ORM 映射。
+    can_edit: bool = False
+    can_delete: bool = False
 
     model_config = {"from_attributes": True}
 

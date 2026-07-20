@@ -92,6 +92,10 @@ class PpmProblemList(BaseModel, table=True):
     )
     pro_answer: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     work_type: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
+    # 创建人 (编辑/删除权限判断依据; 新建时由 service 写入当前用户, 历史数据 NULL)
+    created_by: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
     duty_user_id: uuid.UUID | None = Field(
         default=None, sa_column=Column(UuidCoercing, nullable=True)
     )

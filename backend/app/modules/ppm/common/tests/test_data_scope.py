@@ -18,11 +18,12 @@ from app.modules.auth.model import Role, User
 from app.modules.ppm.common.crud import PageReq
 from app.modules.ppm.common.data_scope import (
     MANAGER_ROLE_NAMES,
+    can_operate_problem,
     is_super_admin,
     manager_project_ids,
 )
 from app.modules.ppm.problem.model import PpmProblemList
-from app.modules.ppm.problem.service import ProblemService
+from app.modules.ppm.problem.service import ProblemForbidden, ProblemService
 from app.modules.ppm.project.model import PpmProjectMaintenance, PpmProjectMember
 from app.modules.ppm.task.model import PlanTask
 from app.modules.ppm.task.schema import PlanTaskPageReq
@@ -98,12 +99,14 @@ async def _problem(
     duty: uuid.UUID | None = None,
     audit: uuid.UUID | None = None,
     now_handle: str | None = None,
+    created_by: uuid.UUID | None = None,
 ) -> PpmProblemList:
     p = PpmProblemList(
         project_id=project_id,
         duty_user_id=duty,
         audit_user_id=audit,
         now_handle_user=now_handle,
+        created_by=created_by,
     )
     db.add(p)
     await db.commit()
@@ -335,3 +338,163 @@ async def test_task_export_respects_scope_via_page(db: AsyncSession) -> None:
     normal_total = (await svc.page(PlanTaskPageReq(page=1, page_size=200), user=normal)).total
     assert admin_total == 2
     assert normal_total == 1
+
+
+# ---------------------------------------------------------------------------
+# 编辑/删除放行判断 can_operate_problem (2026-07-20 权限改造)
+# 放行 = 超管 ‖ 创建人 ‖ 本项目经理 ‖ 责任人 (满足其一)
+# ---------------------------------------------------------------------------
+
+
+async def test_can_operate_super_admin(db: AsyncSession) -> None:
+    """超管对任意问题放行 (platform_admin 与 super_admin 角色两种)。"""
+    other = await _user(db, name="other")
+    proj = await _project(db)
+    p = await _problem(db, proj.id, duty=other.id, created_by=other.id)
+
+    admin = await _user(db, is_admin=True, name="admin")
+    assert await can_operate_problem(db, admin, p) is True
+
+    role_admin = await _user(db, name="role_admin")
+    await _grant_role(db, role_admin, "super_admin", "超级管理员")
+    assert await can_operate_problem(db, role_admin, p) is True
+
+
+async def test_can_operate_creator(db: AsyncSession) -> None:
+    """创建人放行 (普通用户,无经理角色,非责任人)。"""
+    creator = await _user(db, name="creator")
+    other = await _user(db, name="other")
+    proj = await _project(db)
+    p = await _problem(db, proj.id, duty=other.id, created_by=creator.id)
+    assert await can_operate_problem(db, creator, p) is True
+
+
+async def test_can_operate_manager(db: AsyncSession) -> None:
+    """本项目经理放行 (非创建人/非责任人)。"""
+    pm = await _user(db, name="pm")
+    other = await _user(db, name="other")
+    proj = await _project(db)
+    await _member(db, proj, pm, "项目经理")
+    p = await _problem(db, proj.id, duty=other.id, created_by=other.id)
+    assert await can_operate_problem(db, pm, p) is True
+
+
+async def test_can_operate_duty_user(db: AsyncSession) -> None:
+    """责任人放行 (保留旧逻辑,非创建人/非经理)。"""
+    duty = await _user(db, name="duty")
+    other = await _user(db, name="other")
+    proj = await _project(db)
+    p = await _problem(db, proj.id, duty=duty.id, created_by=other.id)
+    assert await can_operate_problem(db, duty, p) is True
+
+
+async def test_can_operate_denied_for_outsider(db: AsyncSession) -> None:
+    """普通他人拒绝 (非创建人/非责任人/非本项目经理/非超管)。"""
+    outsider = await _user(db, name="outsider")
+    other = await _user(db, name="other")
+    proj = await _project(db)
+    p = await _problem(db, proj.id, duty=other.id, created_by=other.id)
+    assert await can_operate_problem(db, outsider, p) is False
+
+
+async def test_can_operate_null_created_by_blocks_creator_path(db: AsyncSession) -> None:
+    """历史问题 created_by=NULL:仅超管/本项目经理/责任人可放行,普通他人拒绝。"""
+    duty = await _user(db, name="duty")
+    outsider = await _user(db, name="outsider")
+    proj = await _project(db)
+    p = await _problem(db, proj.id, duty=duty.id, created_by=None)
+    assert await can_operate_problem(db, duty, p) is True
+    assert await can_operate_problem(db, outsider, p) is False
+
+
+# ---------------------------------------------------------------------------
+# 写 created_by + 编辑/删除鉴权 (service 层,2026-07-20 权限改造)
+# ---------------------------------------------------------------------------
+
+
+async def test_create_problem_writes_created_by(db: AsyncSession) -> None:
+    """service 层 create_problem 写入 created_by。"""
+    creator = await _user(db, name="creator")
+    proj = await _project(db)
+    svc = ProblemService(db)
+    p = await svc.create_problem({"project_id": proj.id, "pro_desc": "x"}, created_by=creator.id)
+    assert p.created_by == creator.id
+
+
+async def test_create_problem_without_created_by_is_null(db: AsyncSession) -> None:
+    """未传 created_by → NULL (历史/无来源)。"""
+    proj = await _project(db)
+    svc = ProblemService(db)
+    p = await svc.create_problem({"project_id": proj.id, "pro_desc": "x"})
+    assert p.created_by is None
+
+
+async def test_update_delete_allowed_for_creator(db: AsyncSession) -> None:
+    """创建人可编辑/删除。"""
+    creator = await _user(db, name="creator")
+    proj = await _project(db)
+    p = await _problem(db, proj.id, created_by=creator.id)
+    svc = ProblemService(db)
+    updated = await svc.update_problem(p.id, {"pro_desc": "改"}, user=creator)
+    assert updated.pro_desc == "改"
+    await svc.delete_problem(p.id, user=creator)
+
+
+async def test_update_delete_allowed_for_manager(db: AsyncSession) -> None:
+    """本项目经理可编辑/删除 (非创建人/非责任人)。"""
+    pm = await _user(db, name="pm")
+    other = await _user(db, name="other")
+    proj = await _project(db)
+    await _member(db, proj, pm, "开发经理")
+    p = await _problem(db, proj.id, duty=other.id, created_by=other.id)
+    svc = ProblemService(db)
+    await svc.update_problem(p.id, {"pro_desc": "改"}, user=pm)
+    await svc.delete_problem(p.id, user=pm)
+
+
+async def test_update_delete_denied_for_outsider(db: AsyncSession) -> None:
+    """普通他人编辑/删除 → ProblemForbidden (403)。"""
+    outsider = await _user(db, name="outsider")
+    other = await _user(db, name="other")
+    proj = await _project(db)
+    p = await _problem(db, proj.id, duty=other.id, created_by=other.id)
+    svc = ProblemService(db)
+    with pytest.raises(ProblemForbidden):
+        await svc.update_problem(p.id, {"pro_desc": "改"}, user=outsider)
+    with pytest.raises(ProblemForbidden):
+        await svc.delete_problem(p.id, user=outsider)
+
+
+async def test_compute_can_operate_batch(db: AsyncSession) -> None:
+    """批量放行判断:逐条命中创建人/经理/责任人/他人。"""
+    creator = await _user(db, name="creator")
+    pm = await _user(db, name="pm")
+    duty = await _user(db, name="duty")
+    other = await _user(db, name="other")
+    outsider = await _user(db, name="outsider")  # 与所有问题无关的他人
+    proj = await _project(db)
+    await _member(db, proj, pm, "项目经理")
+
+    p_creator = await _problem(db, proj.id, created_by=creator.id)
+    p_manager = await _problem(db, proj.id, duty=other.id, created_by=other.id)
+    p_duty = await _problem(db, proj.id, duty=duty.id, created_by=other.id)
+    p_other = await _problem(db, proj.id, duty=other.id, created_by=other.id)
+
+    svc = ProblemService(db)
+    creator_map = await svc.compute_can_operate([p_creator], creator)
+    assert creator_map[p_creator.id] is True
+    pm_map = await svc.compute_can_operate([p_manager], pm)
+    assert pm_map[p_manager.id] is True
+    duty_map = await svc.compute_can_operate([p_duty], duty)
+    assert duty_map[p_duty.id] is True
+
+    outsider_map = await svc.compute_can_operate([p_creator, p_manager, p_duty, p_other], outsider)
+    assert outsider_map[p_creator.id] is False
+    assert outsider_map[p_manager.id] is False
+    assert outsider_map[p_duty.id] is False
+    assert outsider_map[p_other.id] is False
+
+    admin = await _user(db, is_admin=True, name="admin")
+    admin_map = await svc.compute_can_operate([p_creator, p_other], admin)
+    assert admin_map[p_creator.id] is True
+    assert admin_map[p_other.id] is True

@@ -716,6 +716,8 @@ export interface ProblemList {
   find_time: string | null;
   pro_answer: string | null;
   work_type: string | null;
+  /** 创建人 ID (编辑/删除权限判断依据之一; 历史数据 null) */
+  created_by: string | null;
   duty_user_id: string | null;
   duty_user_name: string | null;
   plan_start_time: string | null;
@@ -741,6 +743,10 @@ export interface ProblemList {
   updated_at: string;
   /** 已消耗工时(人天, 后端聚合 sum TaskExecute.time_spent) */
   spent_time?: number;
+  /** 后端集中判断的编辑放行 (超管‖创建人‖本项目经理‖责任人), 前端只读 */
+  can_edit?: boolean;
+  /** 后端集中判断的删除放行 (同 can_edit) */
+  can_delete?: boolean;
 }
 
 export interface ProblemListCreate {

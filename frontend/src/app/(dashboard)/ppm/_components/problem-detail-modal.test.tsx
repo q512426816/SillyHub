@@ -209,6 +209,7 @@ function mkProblem(over: Partial<ProblemList> & { id: string }): ProblemList {
     find_time: over.find_time ?? null,
     pro_answer: over.pro_answer ?? null,
     work_type: over.work_type ?? null,
+    created_by: over.created_by ?? null,
     duty_user_id: over.duty_user_id ?? null,
     duty_user_name: over.duty_user_name ?? null,
     plan_start_time: over.plan_start_time ?? null,

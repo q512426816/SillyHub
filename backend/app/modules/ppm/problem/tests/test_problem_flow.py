@@ -118,6 +118,10 @@ async def _make_problem(
 
 class TestCrud:
     async def test_create_get_update_delete(self, db_session: AsyncSession) -> None:
+        import uuid as _uuid
+
+        from app.modules.auth.model import User
+
         svc = ProblemService(db_session)
         proj_id = await _make_project(db_session)
         p = await _make_problem(svc, proj_id)
@@ -126,10 +130,21 @@ class TestCrud:
         got = await svc.get_problem(p.id)
         assert got.id == p.id
 
-        updated = await svc.update_problem(p.id, {"pro_desc": "修改描述"})
+        # update/delete 需放行用户 (2026-07-20 权限改造); 超管恒放行
+        admin = User(
+            id=_uuid.uuid4(),
+            username=f"adm_crud_{_uuid.uuid4().hex[:6]}",
+            display_name="管理员",
+            password_hash="x",
+            is_platform_admin=True,
+        )
+        db_session.add(admin)
+        await db_session.commit()
+
+        updated = await svc.update_problem(p.id, {"pro_desc": "修改描述"}, user=admin)
         assert updated.pro_desc == "修改描述"
 
-        await svc.delete_problem(p.id)
+        await svc.delete_problem(p.id, user=admin)
         with pytest.raises(ProblemNotFound):
             await svc.get_problem(p.id)
 

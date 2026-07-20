@@ -365,12 +365,15 @@ export default function ProblemListPage() {
       fixed: "right",
       render: (_v: unknown, p: ProblemList) => {
         const isDuty = matchAnyUser([p.duty_user_id], currentUserId);
-        // 操作权限:管理员 ‖ 责任人 (问题表无创建人字段,isCreator 恒假,故按此放行)
+        // 开始/执行: 责任人 ‖ 超管 (沿用; "干活"入口需是处置人,与编辑/删除的"管理"区分开)
         const canOperate = isDuty || !!currentUser?.is_platform_admin;
+        // 编辑/删除: 后端集中判断 (超管 ‖ 创建人 ‖ 本项目经理 ‖ 责任人), 前端只读 can_edit/can_delete
+        const canEdit = p.can_edit ?? false;
+        const canDelete = p.can_delete ?? false;
         return (
           <div className="flex whitespace-nowrap gap-1 justify-center">
             {/* 编辑: 新建 / 进行中 (D-003 进行中保留编辑入口, 与执行分离) */}
-            {(p.status === "新建" || p.status === "进行中") && canOperate && (
+            {(p.status === "新建" || p.status === "进行中") && canEdit && (
               <Button size="sm" variant="ghost" onClick={() => openDrawer("edit", p)}>
                 编辑
               </Button>
@@ -391,8 +394,8 @@ export default function ProblemListPage() {
             <Button size="sm" variant="ghost" onClick={() => openDetail(p)}>
               详情
             </Button>
-            {/* 删除: 任意状态 (本人/管理员, D-004) */}
-            {canOperate && (
+            {/* 删除: 任意状态 (后端 can_delete 判断) */}
+            {canDelete && (
               <Button
                 size="sm"
                 variant="ghost"

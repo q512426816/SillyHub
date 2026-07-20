@@ -116,10 +116,15 @@ async def list_problems(
             )
         ).all()
         spent_map = {pid: float(s or 0) for pid, s in rows if pid is not None}
+    # 批量计算编辑/删除放行 (2026-07-20 权限改造), 前端按钮只读 can_edit/can_delete
+    svc = ProblemService(session)
+    can_map = await svc.compute_can_operate(page.items, user)
     items = []
     for i in page.items:
         resp = ProblemListResp.model_validate(i)
         resp.spent_time = spent_map.get(i.id, 0.0)
+        resp.can_edit = can_map.get(i.id, False)
+        resp.can_delete = can_map.get(i.id, False)
         items.append(resp)
     return Page.build(items=items, total=page.total, req=req)
 
@@ -162,7 +167,7 @@ async def create_problem(
 ) -> ProblemListResp:
     svc = ProblemService(session)
     data = body.model_dump()
-    obj = await svc.create_problem(data)
+    obj = await svc.create_problem(data, created_by=user.id)
     return ProblemListResp.model_validate(obj)
 
 
@@ -191,7 +196,13 @@ async def get_problem(
     session: SessionDep,
     user: AuthUser,
 ) -> ProblemListResp:
-    return ProblemListResp.model_validate(await ProblemService(session).get_problem(item_id))
+    svc = ProblemService(session)
+    obj = await svc.get_problem(item_id)
+    resp = ProblemListResp.model_validate(obj)
+    can_map = await svc.compute_can_operate([obj], user)
+    resp.can_edit = can_map.get(obj.id, False)
+    resp.can_delete = can_map.get(obj.id, False)
+    return resp
 
 
 @router.put("/problem-list/{item_id}", response_model=ProblemListResp)
@@ -201,7 +212,9 @@ async def update_problem(
     session: SessionDep,
     user: AuthUser,
 ) -> ProblemListResp:
-    obj = await ProblemService(session).update_problem(item_id, body.model_dump(exclude_unset=True))
+    obj = await ProblemService(session).update_problem(
+        item_id, body.model_dump(exclude_unset=True), user=user
+    )
     return ProblemListResp.model_validate(obj)
 
 
@@ -211,7 +224,7 @@ async def delete_problem(
     session: SessionDep,
     user: AuthUser,
 ) -> None:
-    await ProblemService(session).delete_problem(item_id)
+    await ProblemService(session).delete_problem(item_id, user=user)
 
 
 # ===========================================================================
