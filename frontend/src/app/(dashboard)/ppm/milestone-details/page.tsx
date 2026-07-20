@@ -2004,11 +2004,7 @@ function DetailDrawer({
     mode === "audit" &&
     !!detail?.audit_user_id &&
     matchAnyUser([detail.audit_user_id], currentUserId);
-  // 审批意见块可编辑:approve 模式 + 当前用户是审批人。
-  const approveEditable =
-    mode === "approve" &&
-    !!detail?.approve_user_id &&
-    matchAnyUser([detail.approve_user_id], currentUserId);
+  // ql-20260720-011: 审批信息块已去掉, approveEditable 同步移除。
   // P0-8:变更审批意见块可编辑:changeApprove 模式 + 当前用户是审批人
   // (对照源 ChangeApproveNodeDetailForm:status=change_pending 时由审批人
   // 填 changeApproveBackFlag/changeApproveOpinion)。
@@ -2540,48 +2536,8 @@ function DetailDrawer({
             </FormSection>
           )}
 
-        {/* 审批信息块 */}
-        {(mode === "approve" ||
-          mode === "change" ||
-          mode === "changeApprove" ||
-          mode === "view") &&
-          detail?.approve_user_id && (
-            <FormSection title="审批信息">
-              <div className="grid grid-cols-2 gap-3">
-                <Form.Item label="审批人">
-                  <PpmText
-                    res="user"
-                    value={detail.approve_user_id}
-                    name={detail.approve_user_name}
-                  />
-                </Form.Item>
-                <Form.Item label="是否驳回" name="approve_back_flag">
-                  <Select
-                    disabled={!approveEditable}
-                    options={[
-                      { value: "0", label: "否" },
-                      { value: "1", label: "是" },
-                    ]}
-                  />
-                </Form.Item>
-              </div>
-              <Form.Item
-                label="审批意见"
-                name="approve_opinion"
-                rules={
-                  approveEditable
-                    ? [{ required: true, message: "请输入审批意见" }]
-                    : undefined
-                }
-              >
-                <Input.TextArea
-                  disabled={!approveEditable}
-                  rows={2}
-                  placeholder="请输入意见"
-                />
-              </Form.Item>
-            </FormSection>
-          )}
+        {/* ql-20260720-011: 审批信息块已去掉(当前 draft→done 无审核流程, approve 模式不触达;
+            审批人/意见 UI 隐藏; approve_user_id 等数据字段保留供 submit 默认值)。 */}
 
         {/* 变更原因块 */}
         {mode === "change" && (

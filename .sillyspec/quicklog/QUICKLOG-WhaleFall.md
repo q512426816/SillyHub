@@ -473,3 +473,12 @@ created_at: 2026-07-14T09:20:24
 根因：两页面已改为跳转进入(project-members 由 /ppm/projects「成员管理」跳转 ql-20260715-012;milestone-details 由 /ppm/project-plans「里程碑」按钮跳转),但仍挂在侧边栏 ppm 菜单,与二级页面定位冲突。MenuItem 类型只有 pickerHidden(仅 picker 隐藏,侧边栏仍显示),缺侧边栏隐藏标记。
 方案：MenuPermissionGroup 加 navHidden?:boolean(语义=二级页面侧边栏不渲染,路由/权限/active 保留);ppm-project-members + ppm-milestone-details 设 navHidden:true;app-shell 侧边栏 visibleMenusBySection(user,section).filter(m=>!m.navHidden)。canSeeMenu/visibleMenusBySection 函数本身不动(navHidden 仅 app-shell 渲染过滤,不影响其他调用方)。
 结果：tsc --noEmit EXIT 0;eslint 0 error;vitest menu-permissions 29 passed 零回归。纯前端两文件。待 commit + push + rebuild frontend 部署 + 用户验证(侧边栏 ppm 菜单无「项目成员」「里程碑明细」;两页面经跳转仍可进入)。
+
+## ql-20260720-011-f1b8 | 2026-07-20 13:48:00 | 里程碑明细详情抽屉去掉「审批信息」块
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（DetailDrawer 删审批信息块 FormSection JSX + approveEditable 定义）
+需求：用户要求里程碑明细·明细详情里的「审批信息」先去掉。
+根因：审批信息块(approve/change/changeApprove/view 模式 + approve_user_id 条件渲染)展示审批人/是否驳回/审批意见;当前流程 draft→done 无审核(ql-20260717-001),approve 模式不触达,审批信息块冗余。
+方案：删审批信息块整段 FormSection JSX(approve_user_id/approve_back_flag/approve_opinion 展示与编辑);同步删 approveEditable 定义(仅该块用,删后避免未用 warning)。审核信息块保留不动。approve 模式 submit 逻辑(initialValues approve_back_flag='0' 默认同意 + submit 取 vals)保留,不破坏;数据字段 approve_user_id 仍在 initialValues/submit body,仅 UI 隐藏。
+结果：tsc --noEmit EXIT 0;eslint 0 error(19 warning 全既有类型签名未用参数,非本次);vitest milestone-details 24 passed 零回归。纯前端单文件。待 commit + push + rebuild frontend 部署 + 用户验证(明细详情抽屉无「审批信息」区,审核信息仍展示)。
