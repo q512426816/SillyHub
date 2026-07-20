@@ -9,15 +9,14 @@
  *  - 预设按钮 本周/本月/全部 → 设置日期范围(本周=周一~周日, 本月=1~月末, 全部=置空)
  *  - 日期范围 RangePicker (自定义, 预设按钮控制其值)
  *  - 项目下拉 (listSimpleProjects, value=project_id)
- *  - 模块下拉 (options 从当前结果推导; 选项目→重查→options 自动更新=联动)
  *  - 状态下拉 (未开始/进行中/已完成)
  *  - 重置
- * 日期/项目/状态 → 后端查; 模块 → 后端按 module_id 查(前端兜底);module_name 由后端按 module_id 反查补值(表冗余字段历史空)。
+ *  日期/项目/状态 → 后端查; module_name 由后端按 module_id 反查补值(表冗余字段历史空, 模块列仅展示不参与筛选)。
  *
  * 「详情/执行」打开 TaskDetailModal(与任务计划页同款,含任务信息+执行记录+跨天填报);
  * 「启动」只切状态(D-002,对齐任务计划页),不弹执行填写窗。
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import dayjs, { type Dayjs } from "dayjs";
 import { DatePicker, Select, Tag, type TableProps } from "antd";
 
@@ -51,14 +50,13 @@ function thisWeekRange(): [Dayjs, Dayjs] {
 const STATUS_OPTIONS = ["未开始", "进行中", "已完成"] as const;
 
 export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
-  // 查询条件: 日期范围 / 项目(后端) + 模块(前端) + 状态(后端)
+  // 查询条件: 日期范围 / 项目(后端) / 状态(后端)
   // 默认本月 + 未开始/进行中(进行中任务最需本人关注)
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(() => [
     dayjs().startOf("month"),
     dayjs().endOf("month"),
   ]);
   const [projectId, setProjectId] = useState<string | undefined>(undefined);
-  const [moduleF, setModuleF] = useState<string>("");
   const [statusF, setStatusF] = useState<string[]>(["未开始", "进行中"]);
 
   // 项目下拉数据(listSimpleProjects 一次性拉)
@@ -83,7 +81,6 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
         params.end_time = dateRange[1].format("YYYY-MM-DD");
       }
       if (projectId) params.project_id = projectId;
-      if (moduleF) params.module_id = moduleF;
       if (statusF.length > 0) params.status = statusF;
       const page = await listPersonalPlanTasks(params);
       setTasks(page.items ?? []);
@@ -97,22 +94,7 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
   useEffect(() => {
     void loadTasks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateRange, projectId, moduleF, statusF]);
-
-  // 模块下拉 options: 从当前结果推导 {id,name}(选项目→重查→options 联动)。
-  // module_name 由后端按 module_id 反查补值(表里冗余字段历史空);用 id 作 value 便于精确过滤。
-  const moduleOptions = useMemo(() => {
-    const map = new Map<string, string>();
-    tasks.forEach((t) => {
-      if (t.module_id && t.module_name) map.set(t.module_id, t.module_name);
-    });
-    return Array.from(map, ([id, name]) => ({ id, name }));
-  }, [tasks]);
-
-  // 模块过滤兜底(moduleF 存 module_id;主过滤在后端 params.module_id)
-  const filtered = useMemo(() => {
-    return tasks.filter((t) => !moduleF || t.module_id === moduleF);
-  }, [tasks, moduleF]);
+  }, [dateRange, projectId, statusF]);
 
   // 预设按钮高亮: 日期范围与预设区间一致时标记对应预设(自定义/清空后取消高亮)
   const [activePreset, setActivePreset] = useState<"week" | "month" | "all" | null>(
@@ -131,16 +113,9 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
     }
   };
 
-  // 选项目 → 清旧模块(联动, 旧模块可能不在新项目结果)
-  const changeProject = (pid: string) => {
-    setProjectId(pid || undefined);
-    setModuleF("");
-  };
-
   const reset = () => {
     setDateRange([dayjs().startOf("month"), dayjs().endOf("month")]);
     setProjectId(undefined);
-    setModuleF("");
     setStatusF(["未开始", "进行中"]);
     setActivePreset("month");
   };
@@ -245,7 +220,7 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
 
   return (
     <>
-      {/* 筛选 toolbar: 预设 + 日期范围 + 项目 + 模块 + 状态 + 重置 */}
+      {/* 筛选 toolbar: 预设 + 日期范围 + 项目 + 状态 + 重置 */}
       <div className="mb-3 flex flex-wrap items-end gap-x-3 gap-y-2 rounded-xl border border-border/60 bg-muted/40 p-3">
         <div className="flex flex-col gap-1">
           <label className="text-[11px] text-muted-foreground">快捷范围</label>
@@ -289,28 +264,13 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
           <label className="text-[11px] text-muted-foreground">项目</label>
           <select
             value={projectId ?? ""}
-            onChange={(e) => changeProject(e.target.value)}
+            onChange={(e) => setProjectId(e.target.value || undefined)}
             className={`${inputCls} w-40`}
           >
             <option value="">全部项目</option>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.project_name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] text-muted-foreground">模块</label>
-          <select
-            value={moduleF}
-            onChange={(e) => setModuleF(e.target.value)}
-            className={`${inputCls} w-36`}
-          >
-            <option value="">全部模块</option>
-            {moduleOptions.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
               </option>
             ))}
           </select>
@@ -338,7 +298,7 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
         bordered
         tableLayout="fixed"
         columns={columns}
-        dataSource={filtered}
+        dataSource={tasks}
         loading={loading}
         emptyText="暂无任务"
       />
