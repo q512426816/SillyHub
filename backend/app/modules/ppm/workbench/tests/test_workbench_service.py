@@ -542,6 +542,47 @@ async def test_summary_work_hours_aggregation(db_session):
     assert summary.metrics.work_hours == pytest.approx(4.0)
 
 
+@pytest.mark.asyncio
+async def test_summary_work_hours_includes_in_progress_and_cross_month(db_session):
+    """ql-20260720-004: work_hours 按 actual_start_time 区间过滤,不再要求 actual_end_time 也在区间。
+
+    进行中(actual_end_time=None)与跨月(actual_end_time 在下月)的执行记录,只要
+    actual_start_time 落在区间就计入——修复此前 actual_end_time<end 把这两类漏算的 bug。
+    """
+    now = datetime.now(UTC)
+    user = await _seed_user(db_session)
+    month_start = now.replace(day=1, hour=10, minute=0, second=0, microsecond=0)
+
+    # 本月开始、未结束(进行中,actual_end_time=None) —— 应计入
+    in_progress_start = month_start + timedelta(days=2)
+    if in_progress_start.month != now.month:
+        in_progress_start = month_start
+    await _seed_execute(
+        db_session,
+        execute_user_id=user.id,
+        time_spent=3.0,
+        actual_start_time=in_progress_start,
+        actual_end_time=None,
+    )
+
+    # 本月开始、下月结束(跨月) —— 应计入
+    cross_start = month_start + timedelta(days=3)
+    if cross_start.month != now.month:
+        cross_start = month_start
+    next_month_end = cross_start.replace(day=28) + timedelta(days=10)
+    await _seed_execute(
+        db_session,
+        execute_user_id=user.id,
+        time_spent=4.0,
+        actual_start_time=cross_start,
+        actual_end_time=next_month_end,
+    )
+
+    svc = WorkbenchService(db_session)
+    summary = await svc.get_summary(user, range="month")
+    assert summary.metrics.work_hours == pytest.approx(7.0)
+
+
 # ===========================================================================
 # calendar
 # ===========================================================================

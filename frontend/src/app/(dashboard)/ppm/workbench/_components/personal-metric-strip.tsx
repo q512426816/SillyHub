@@ -3,8 +3,10 @@
 /**
  * PersonalMetricStrip — 指标卡 (5 指标横排)。
  *
- * 指标固定按「本月」统计 (range 切换【本周/本月/全部】已移至「我的任务」查询区,
- * 见 ql-005 / design §3.1)。metrics=null(未就绪/loading)时显示「—」占位。
+ * ql-20260720-004: 指标支持「本周/本月/全部」范围切换(默认全部),label 前缀随 range
+ * 动态(本周/本月/无前缀);完成率/延期率在分母 task_count=0 时显示「—」不显示 0%
+ * (避免本月无新任务的老员工看到误导性 0%)。range 由父组件 page.tsx 受控持有,
+ * 切换时重载 summary。
  */
 import {
   Bug,
@@ -18,9 +20,23 @@ import { SectionCard } from "@/components/layout";
 import { cn } from "@/lib/utils";
 import type { WorkbenchMetrics } from "@/lib/ppm/types";
 
+/** 指标统计范围(对齐后端 GET /workbench/summary?range=)。 */
+export type MetricRange = "week" | "month" | "all";
+
+/** 范围切换分段选项。 */
+const RANGE_OPTIONS: { value: MetricRange; label: string }[] = [
+  { value: "week", label: "本周" },
+  { value: "month", label: "本月" },
+  { value: "all", label: "全部" },
+];
+
 export interface PersonalMetricStripProps {
   /** 指标;null 时所有指标显示「—」占位。 */
   metrics: WorkbenchMetrics | null;
+  /** 当前范围(受控,父组件持有)。 */
+  range: MetricRange;
+  /** 切换范围回调。 */
+  onRangeChange: (range: MetricRange) => void;
 }
 
 /** 指标颜色语义键(对齐原型 5 卡配色)。 */
@@ -45,38 +61,83 @@ const COLOR_CLASS: Record<MetricColor, { text: string; tile: string }> = {
   red: { text: "text-red-600", tile: "bg-red-50 text-red-600" },
 };
 
-export function PersonalMetricStrip({ metrics }: PersonalMetricStripProps) {
+/** 范围分段切换器(本周/本月/全部)。 */
+function RangeSwitch({
+  range,
+  onChange,
+}: {
+  range: MetricRange;
+  onChange: (r: MetricRange) => void;
+}) {
+  return (
+    <div className="inline-flex items-center rounded-lg border border-border bg-muted/40 p-0.5">
+      {RANGE_OPTIONS.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => onChange(opt.value)}
+          className={cn(
+            "rounded-md px-2.5 py-1 text-xs transition",
+            range === opt.value
+              ? "bg-background font-medium text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function PersonalMetricStrip({
+  metrics,
+  range,
+  onRangeChange,
+}: PersonalMetricStripProps) {
+  // label 前缀:本周/本月;全部 → 无前缀
+  const prefix = range === "week" ? "本周" : range === "month" ? "本月" : "";
+  const rangeWord = prefix || "全部";
+  const scopeHint =
+    range === "week" ? "本周一起" : range === "month" ? "当月1日起" : "不限时间";
+
   const items: MetricItem[] = [
     {
       key: "task_count",
-      label: "本月任务量",
+      label: `${prefix}任务量`,
       value: metrics ? `${metrics.task_count}条` : "—",
       color: "blue",
-      rule: "本月任务 start_time 区间统计的总条数",
+      rule: `${rangeWord}开始的任务总数(${scopeHint},按 start_time 归属)`,
       icon: ClipboardList,
     },
     {
       key: "completion_rate",
-      label: "本月完成率",
-      value: metrics ? `${Math.round(metrics.completion_rate * 100)}%` : "—",
+      label: `${prefix}完成率`,
+      value:
+        !metrics || metrics.task_count === 0
+          ? "—"
+          : `${Math.round(metrics.completion_rate * 100)}%`,
       color: "green",
-      rule: "已完成任务数 / 任务总数;任务数为 0 时显示 0%",
+      rule: `${rangeWord}已完成任务数 / ${rangeWord}任务总数;任务数为 0 时显示 —`,
       icon: TrendingUp,
     },
     {
       key: "delay_rate",
-      label: "本月延期率",
-      value: metrics ? `${Math.round(metrics.delay_rate * 100)}%` : "—",
+      label: `${prefix}延期率`,
+      value:
+        !metrics || metrics.task_count === 0
+          ? "—"
+          : `${Math.round(metrics.delay_rate * 100)}%`,
       color: "amber",
-      rule: "已过期且未完成任务数 / 任务总数",
+      rule: `${rangeWord}已过期且未完成任务数 / ${rangeWord}任务总数`,
       icon: Hourglass,
     },
     {
       key: "work_hours",
-      label: "本月工时统计",
+      label: `${prefix}工时统计`,
       value: metrics ? `${metrics.work_hours}天` : "—",
       color: "cyan",
-      rule: "任务执行实际耗时(task_execute.time_spent)总和",
+      rule: `${rangeWord}执行记录耗时(task_execute.time_spent,人天)总和`,
       icon: Clock3,
     },
     {
@@ -90,7 +151,11 @@ export function PersonalMetricStrip({ metrics }: PersonalMetricStripProps) {
   ];
 
   return (
-    <SectionCard title="指标" bodyPadding="p-4">
+    <SectionCard
+      title="指标"
+      extra={<RangeSwitch range={range} onChange={onRangeChange} />}
+      bodyPadding="p-4"
+    >
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {items.map((m) => {
           const Icon = m.icon;

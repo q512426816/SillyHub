@@ -31,7 +31,7 @@ import type {
 } from "@/lib/ppm/types";
 
 import { MessagePlaceholder } from "./_components/message-placeholder";
-import { PersonalMetricStrip } from "./_components/personal-metric-strip";
+import { PersonalMetricStrip, type MetricRange } from "./_components/personal-metric-strip";
 import { ProfileSummaryCard } from "./_components/profile-summary-card";
 import { QuickEntryGrid } from "./_components/quick-entry-grid";
 import { TodoListPanel } from "./_components/todo-list-panel";
@@ -56,6 +56,8 @@ export default function WorkbenchPage() {
   const [summary, setSummary] = useState<BlockState<WorkbenchSummary>>(
     initialBlock(),
   );
+  // 指标统计范围(默认全部,ql-20260720-004):本周/本月/全部,切换重载 summary。
+  const [summaryRange, setSummaryRange] = useState<MetricRange>("all");
   const [calendar, setCalendar] = useState<BlockState<WorkbenchCalendar>>(
     initialBlock(),
   );
@@ -78,11 +80,11 @@ export default function WorkbenchPage() {
     }
   }, []);
 
-  // 指标固定「本月」(range 切换已移至任务查询区, ql-005)
+  // 指标范围切换(ql-20260720-004):range 变更重载 summary
   const loadSummary = useCallback(async () => {
     setSummary((s) => ({ ...s, loading: true, error: null }));
     try {
-      const data = await fetchWorkbenchSummary("month");
+      const data = await fetchWorkbenchSummary(summaryRange);
       setSummary({ loading: false, error: null, data });
     } catch (err) {
       setSummary({
@@ -91,7 +93,7 @@ export default function WorkbenchPage() {
         data: null,
       });
     }
-  }, []);
+  }, [summaryRange]);
 
   const loadCalendar = useCallback(async () => {
     setCalendar((s) => ({ ...s, loading: true, error: null }));
@@ -164,7 +166,11 @@ export default function WorkbenchPage() {
               onRetry={loadSummary}
             />
           ) : (
-            <PersonalMetricStrip metrics={summary.data?.metrics ?? null} />
+            <PersonalMetricStrip
+              metrics={summary.data?.metrics ?? null}
+              range={summaryRange}
+              onRangeChange={setSummaryRange}
+            />
           )}
 
           {/* 我的任务: 自包含 fetch + 筛选(ql-005); 执行后回调刷 summary */}

@@ -427,13 +427,15 @@ class WorkbenchService:
         delay_rate = delayed / task_count if task_count else 0.0
 
         # work_hours:SUM(task_execute.time_spent) where execute_user_id=me,
-        # 区间按 actual_start_time/actual_end_time 过滤 (对齐 stat_by_user 口径)
+        # 区间只按 actual_start_time 过滤(ql-20260720-004):去掉 actual_end_time<end,
+        # 进行中(actual_end_time=NULL)与跨月(actual_end_time 在下月)的执行记录不再漏算,
+        # 与日历侧 _sum_actual_hours 区间相交口径对齐。
         hours_stmt = select(func.sum(TaskExecute.time_spent)).where(
             TaskExecute.execute_user_id == user.id
         )
         if start is not None and end is not None:
             hours_stmt = hours_stmt.where(TaskExecute.actual_start_time >= start).where(
-                TaskExecute.actual_end_time < end
+                TaskExecute.actual_start_time < end
             )
         work_hours_raw = await self._session.scalar(hours_stmt)
         work_hours = float(work_hours_raw) if work_hours_raw is not None else 0.0
