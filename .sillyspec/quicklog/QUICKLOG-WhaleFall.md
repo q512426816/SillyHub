@@ -500,3 +500,12 @@ created_at: 2026-07-14T09:20:24
 现状审查：ppm-project-members-table.tsx 用 shadcn Button(操作列编辑/删除 + 新增成员 + 重新加载 + Drawer footer 取消/保存)+ shadcn Badge(承担角色多标签)+ MemberFormDrawer(Drawer)；表单 label text-[11px]。group-table.tsx 全局新增调 MemberFormDrawer。
 方案：①import antd 加 Button/Tag 去 Drawer,删 shadcn Badge/Button import ②操作列编辑 type=link、删除 type=link danger(size=small)③新增成员 primary、重新加载 default(默认 middle,去 size=sm)④承担角色 shadcn Badge→antd Tag(默认灰)⑤MemberFormDrawer→MemberFormModal(Drawer→Modal,onClose→onCancel,footer 取消 default+保存 primary loading,文本统一保存)⑥label text-[11px]→text-xs leading-4 text-muted-foreground ⑦group-table.tsx import+调用 MemberFormDrawer→MemberFormModal。保留:readOnly input(inputCls,只读展示非 shadcn)、PpmUserSelect(自定义组件)。
 结果：tsc --noEmit EXIT 0;eslint 0 error(2 既有 warning:group-table useCallback missing dep + members-table onSubmit 类型签名 form,非本次);grep 无 shadcn Button/Badge/Drawer/MemberFormDrawer/size=sm/variant 残留(606 错误段落 text-[11px] 保留-规范允许小注脚)。label label→span 分 3 批修齐闭标签。纯前端两文件。待 commit + push + rebuild frontend 部署 + 用户浏览器验证(成员子表操作列/新增按钮/弹窗对齐规范,Drawer→Modal)。
+
+## ql-20260720-013-c7e9 | 2026-07-20 15:22:09 | /ppm/project-plans 按前端样式规范调整：Button antd 化 + 删除 confirm→Modal + toast 成功色 token
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx
+需求：用户要求按 FRONTEND_PAGE_STYLE.md 规范调整 /ppm/project-plans 样式。
+现状审查：page.tsx 已对齐:PageContainer/PageHeader/SectionCard/DataTable/grid-cols-4 Field(text-xs leading-4)/展开收起/搜索回车/分页/striped/表格 small bordered scroll。偏离:①shadcn Button(工具栏 导出/新建/搜索/重置/展开 5 处 + 操作列 里程碑/编辑/删除 3 处 + 重新加载) ②删除用原生 confirm()(规范要 antd Modal) ③toast 成功色 border-emerald-300 bg-emerald-50 text-emerald-700(硬编码,规范要 success token)。
+方案：page.tsx ①import Button shadcn→antd + import App ②工具栏 导出/重置/展开 default、新建/搜索 primary(默认 middle,去 size=sm) ③操作列 里程碑/编辑 type=link、删除 type=link danger(size=small) ④重新加载 default ⑤删除 confirm()→App.useApp().modal.confirm(okButtonProps danger,经 AntApp 注入,对齐 runtimes 模式) ⑥toast 成功色 emerald→border-success/30 bg-success/10 text-success。暂不动:PpmProjectPlanForm/PpmProjectPlanDetail 组件样式(跨文件,单独评估)。
+结果：tsc --noEmit EXIT 0;eslint 0 error(1 既有类型签名 p 未用 warning);grep 无 shadcn Button/size=sm/variant/emerald/原生 confirm 残留(modal.confirm 为新代码)。纯前端单文件。待 commit + push + rebuild frontend 部署 + 用户浏览器验证(操作列/工具栏按钮 antd、删除弹 Modal 确认、toast 成功色统一)。

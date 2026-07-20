@@ -120,3 +120,4 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 - ql-20260720-009-d5f2 | /ppm/project-plans 操作列去「详情」按钮(与项目名称点击打开详情重复);detail Modal 保留(项目名点击仍入口)
 - ql-20260720-010-e3a1 | /ppm/project-members + /ppm/milestone-details 侧边栏菜单隐藏(二级页面)：MenuPermissionGroup 加 navHidden 字段+两菜单项设 true+app-shell 渲染 filter;路由/权限/active 保留,经跳转(/ppm/projects 成员管理、/ppm/project-plans 里程碑)仍可进入
 - ql-20260720-011-f1b8 | 里程碑明细详情抽屉去掉「审批信息」块：DetailDrawer 删审批信息 FormSection(approve_user_id/是否驳回/审批意见)+approveEditable 定义;审核信息块保留;approve 模式 submit 默认值保留不破坏;当前 draft→done 无审核流程 approve 模式不触达
+- ql-20260720-013-c7e9 | /ppm/project-plans 按页面样式规范调整：Button shadcn→antd(工具栏 导出/重置/展开 default、新建/搜索 primary;操作列 里程碑/编辑 type=link、删除 type=link danger;重新加载 default)+ 删除原生 confirm()→App.useApp().modal.confirm(okButtonProps danger)+ toast 成功色 emerald 硬编码→success token;page.tsx 已对齐(自定义左树+右表布局,PageContainer/SectionCard/DataTable/grid Field)

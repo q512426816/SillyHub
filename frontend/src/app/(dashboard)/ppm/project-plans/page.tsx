@@ -13,6 +13,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
+  App,
+  Button,
   DatePicker,
   Form,
   Input,
@@ -23,7 +25,6 @@ import {
 } from "antd";
 import type { Dayjs } from "dayjs";
 
-import { Button } from "@/components/ui/button";
 import {
   DataTable,
   PageContainer,
@@ -101,6 +102,7 @@ function Field({
 
 export default function ProjectPlansPage() {
   const router = useRouter();
+  const { modal } = App.useApp();
   const { user: currentUser } = useSession();
   const currentUserId = currentUser?.id ?? "";
   const [plans, setPlans] = useState<PsProjectPlan[]>([]);
@@ -212,15 +214,25 @@ export default function ProjectPlansPage() {
     }
   };
 
-  const handleDelete = async (p: PsProjectPlan) => {
-    if (!confirm(`删除项目计划「${p.project_name ?? p.id}」?`)) return;
-    try {
-      await deleteProjectPlan(p.id);
-      showToast(true, "已删除");
-      await load();
-    } catch (err) {
-      showToast(false, err instanceof ApiError ? err.message : "删除失败");
-    }
+  const handleDelete = (p: PsProjectPlan) => {
+    // D-006:antd Modal.confirm 二次确认(经 AntApp 主题实例,对齐 runtimes),替代浏览器原生 confirm。
+    modal.confirm({
+      title: `删除项目计划「${p.project_name ?? p.id}」?`,
+      content: "该操作不可恢复。",
+      okText: "确认删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      maskClosable: false,
+      onOk: async () => {
+        try {
+          await deleteProjectPlan(p.id);
+          showToast(true, "已删除");
+          await load();
+        } catch (err) {
+          showToast(false, err instanceof ApiError ? err.message : "删除失败");
+        }
+      },
+    });
   };
 
   const handleExport = async () => {
@@ -421,15 +433,15 @@ export default function ProjectPlansPage() {
         return (
           <div className="flex gap-1 justify-center">
             <Button
-              size="sm"
-              variant="ghost"
+              size="small"
+              type="link"
               onClick={() => goToMilestones(p.id)}
             >
               里程碑
             </Button>
             <Button
-              size="sm"
-              variant="ghost"
+              size="small"
+              type="link"
               disabled={!isManager}
               title={isManager ? undefined : "仅项目经理可编辑"}
               onClick={() => setDrawer({ open: true, mode: "edit", plan: p })}
@@ -437,12 +449,12 @@ export default function ProjectPlansPage() {
               编辑
             </Button>
             <Button
-              size="sm"
-              variant="ghost"
-              className="text-red-600 hover:text-red-700"
+              size="small"
+              type="link"
+              danger
               disabled={!isManager}
               title={isManager ? undefined : "仅项目经理可删除"}
-              onClick={() => void handleDelete(p)}
+              onClick={() => handleDelete(p)}
             >
               删除
             </Button>
@@ -464,24 +476,22 @@ export default function ProjectPlansPage() {
         {/* 按钮分组(D-006):数据组(导出/新建)左 | 基础组(搜索/重置/展开)最右 */}
         <div className="mb-2 flex items-center justify-end gap-2">
           <Button
-            size="sm"
-            variant="outline"
             disabled={exporting}
             onClick={() => void handleExport()}
           >
             {exporting ? "导出中…" : "导出"}
           </Button>
-          <Button size="sm" onClick={() => setDrawer({ open: true, mode: "create" })}>
+          <Button type="primary" onClick={() => setDrawer({ open: true, mode: "create" })}>
             + 新建项目计划
           </Button>
           <span className="mx-1 h-6 w-px bg-border" aria-hidden />
-          <Button size="sm" onClick={() => handleSearch()}>
+          <Button type="primary" onClick={() => handleSearch()}>
             搜索
           </Button>
-          <Button size="sm" variant="outline" onClick={() => handleReset()}>
+          <Button onClick={() => handleReset()}>
             重置
           </Button>
-          <Button size="sm" variant="outline" onClick={() => setExpanded((v) => !v)}>
+          <Button onClick={() => setExpanded((v) => !v)}>
             {expanded ? "收起" : "展开"}
           </Button>
         </div>
@@ -558,7 +568,7 @@ export default function ProjectPlansPage() {
         <div
           className={`rounded border px-3 py-2 text-xs ${
             toast.ok
-              ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+              ? "border-success/30 bg-success/10 text-success"
               : "border-destructive/30 bg-red-50 text-destructive"
           }`}
         >
@@ -591,8 +601,6 @@ export default function ProjectPlansPage() {
             <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
               {error}
               <Button
-                size="sm"
-                variant="outline"
                 className="ml-3"
                 onClick={() => void load()}
               >
