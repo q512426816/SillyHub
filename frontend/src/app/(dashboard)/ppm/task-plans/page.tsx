@@ -23,6 +23,7 @@ import {
   type PpmSelectOption,
 } from "@/components/ppm-user-select";
 import { ApiError } from "@/lib/api";
+import { useNotify } from "@/lib/errors";
 import { isOverEstimate } from "@/lib/ppm/format";
 import {
   createPlanTask,
@@ -45,11 +46,9 @@ import { useSession } from "@/stores/session";
 import {
   DEFAULT_PAGE_SIZE,
   PAGE_SIZE_OPTIONS,
-  Toast,
   fmtDay,
   inputCls,
   taskStatusTag,
-  useToast,
 } from "../shared";
 import { TaskDetailModal } from "../_components/task-detail-modal";
 
@@ -89,7 +88,7 @@ function Field({
 
 export default function TaskPlansPage() {
   const { user: currentUser } = useSession();
-  const { toast, showToast } = useToast();
+  const notify = useNotify();
 
   const [view, setView] = useState<ViewMode>("personal");
   const [rows, setRows] = useState<PlanTask[]>([]);
@@ -132,7 +131,7 @@ export default function TaskPlansPage() {
         const list = await listSimpleProjects();
         setProjects(list ?? []);
       } catch (e) {
-        showToast(false, e instanceof Error ? e.message : "加载项目列表失败");
+        notify.error(e, "加载项目列表失败");
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -229,7 +228,7 @@ export default function TaskPlansPage() {
       const params = buildParams(1, 1000, { includeUserId: view !== "personal" });
       await exportPlanTasks(params);
     } catch (err) {
-      showToast(false, err instanceof ApiError ? err.message : "导出失败");
+      notify.error(err, "导出失败");
     } finally {
       setExporting(false);
     }
@@ -238,10 +237,10 @@ export default function TaskPlansPage() {
   const handleSave = async (body: PlanTaskCreate | PlanTaskUpdate) => {
     if (drawer.mode === "create") {
       await createPlanTask(body as PlanTaskCreate);
-      showToast(true, "任务计划已创建");
+      notify.success("任务计划已创建");
     } else if (drawer.task) {
       await updatePlanTask(drawer.task.id, body as PlanTaskUpdate);
-      showToast(true, "任务计划已更新");
+      notify.success("任务计划已更新");
     }
     setDrawer({ open: false, mode: "create" });
     await load();
@@ -251,10 +250,10 @@ export default function TaskPlansPage() {
     setExecuteBusy(true);
     try {
       await startPlanTask({ plan_task_id: task.id });
-      showToast(true, "任务已启动(进行中)");
+      notify.success("任务已启动(进行中)");
       await load();
     } catch (err) {
-      showToast(false, err instanceof ApiError ? err.message : "启动失败");
+      notify.error(err, "启动失败");
     } finally {
       setExecuteBusy(false);
     }
@@ -266,10 +265,10 @@ export default function TaskPlansPage() {
     setConfirmDelete(null);
     try {
       await deletePlanTask(target.id);
-      showToast(true, "任务计划已删除");
+      notify.success("任务计划已删除");
       await load();
     } catch (err) {
-      showToast(false, err instanceof ApiError ? err.message : "删除失败");
+      notify.error(err, "删除失败");
     }
   };
 
@@ -297,8 +296,8 @@ export default function TaskPlansPage() {
     }
     setSelectedRowKeys([]);
     await load();
-    if (fail === 0) showToast(true, `已删除 ${ok} 条任务计划`);
-    else showToast(false, `成功 ${ok} 条，失败 ${fail} 条`);
+    if (fail === 0) notify.success(`已删除 ${ok} 条任务计划`);
+    else notify.error(new Error(`成功 ${ok} 条，失败 ${fail} 条`));
   };
 
   const rowSelection: TableProps<PlanTask>["rowSelection"] = {
@@ -457,8 +456,6 @@ export default function TaskPlansPage() {
         title="任务计划"
         subtitle="任务计划制定 / 执行推进 / 工时预估"
       />
-
-      <Toast toast={toast} />
 
       <SectionCard bodyPadding="p-2">
         {/* 顶部按钮行(D-006):数据组(导出/新建)左 | 基础组(搜索/重置/展开)最右 */}
