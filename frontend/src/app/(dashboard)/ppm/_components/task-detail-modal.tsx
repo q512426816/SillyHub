@@ -128,6 +128,21 @@ export function TaskDetailModal({
       showToast(false, "无进行中的执行记录");
       return;
     }
+    // 必填校验：跨天填报每天的「耗时」+「执行情况」都必填（2026-07-20 用户要求）
+    for (let i = 0; i < detailDays.length; i++) {
+      const d = detailDays[i];
+      if (!d) continue;
+      const dayLabel = detailDays.length > 1 ? `第 ${i + 1} 天（${d.date}）` : d.date;
+      const ts = Number(d.timeSpent);
+      if (!(d.timeSpent ?? "").trim() || Number.isNaN(ts)) {
+        showToast(false, `${dayLabel} 的耗时未填写`);
+        return;
+      }
+      if (!(d.execInfo ?? "").trim()) {
+        showToast(false, `${dayLabel} 的执行情况未填写`);
+        return;
+      }
+    }
     setBusy(true);
     try {
       const inflightRec = records.find((e) => e.id === inflightId);
@@ -281,7 +296,7 @@ export function TaskDetailModal({
               <div className="text-[11px] font-medium">{d.date}</div>
               <div>
                 <label className="mb-1 block text-[11px] text-muted-foreground">
-                  耗时(人天)
+                  耗时(人天) <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="number"
@@ -301,7 +316,7 @@ export function TaskDetailModal({
               </div>
               <div>
                 <label className="mb-1 block text-[11px] text-muted-foreground">
-                  执行情况说明
+                  执行情况说明 <span className="text-red-500">*</span>
                 </label>
                 <input
                   placeholder="执行情况说明"
