@@ -110,7 +110,7 @@ import { useSession } from "@/stores/session";
 /** 实施阶段标识(对齐源 overallStage === '实施阶段' 判定)。 */
 const IMPLEMENT_STAGE = "实施阶段";
 
-/** 抽屉形态(对照源 6 Vue 表单 + P0-8 变更审批)。 */
+/** 抽屉形态(对照源 6 Vue 表单 + P0-8 变更审批 + ql-20260720-006 信息变更)。 */
 type DrawerMode =
   | "create" // 草稿新增(AddNodeDetailForm)
   | "edit" // 草稿编辑(NodeDetailForm,draft/rejected 返工)
@@ -118,6 +118,7 @@ type DrawerMode =
   | "approve" // 审批中(ApproveNodeDetailForm)
   | "change" // 变更原因录入(ChangeNodeDetailForm)
   | "changeApprove" // 变更审批(ChangeApproveNodeDetailForm,status=change_pending)
+  | "changeInfo" // 已完成明细信息变更(不改状态,update_detail 同步任务计划字段)
   | "view"; // 只读(ViewNodeDetailForm,done/archived)
 
 interface DetailDrawerState {
@@ -1804,6 +1805,21 @@ function DetailLevelTable({
                 编辑
               </Button>
             )}
+            {/* ql-20260720-006:已完成明细信息变更(非版本变更)。
+                打开 changeInfo 抽屉:开立信息可编辑,footer 仅「提交」无「保存」,
+                提交调 updatePsPlanNodeDetail → 后端 _sync_task_fields 同步任务计划字段,
+                不改明细/任务状态。 */}
+            {d.status === "done" && (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={readOnly}
+                title={readOnly ? "只读模式(非项目经理)" : undefined}
+                onClick={() => onOpenDetail(d, "changeInfo")}
+              >
+                变更
+              </Button>
+            )}
             <Button
               size="sm"
               variant="ghost"
@@ -1981,8 +1997,8 @@ function DetailDrawer({
   const [versions, setVersions] = useState<PsPlanNodeDetail[]>([]);
 
   // ── 模式语义(对照源) ────────────────────────────────────────────────────
-  // 开立信息块只读性:仅 create/edit 可编辑(草稿新增/编辑 + rejected 返工)。
-  const baseEditable = mode === "create" || mode === "edit";
+  // 开立信息块只读性:仅 create/edit/changeInfo 可编辑(草稿新增/编辑 + rejected 返工 + 已完成信息变更)。
+  const baseEditable = mode === "create" || mode === "edit" || mode === "changeInfo";
   // 审核意见块可编辑:audit 模式 + 当前用户是审核人。
   const auditEditable =
     mode === "audit" &&
@@ -2086,26 +2102,29 @@ function DetailDrawer({
     setErr(null);
     try {
       const vals = await form.validateFields();
+      // ql-20260720-006: 开立信息字段集合(create/edit/changeInfo 共用)。
+      const baseBody = {
+        detailed_stage: (vals.detailed_stage as string) || null,
+        task_theme: (vals.task_theme as string) || null,
+        task_description: (vals.task_description as string) || null,
+        requirements: (vals.requirements as string) || null,
+        role_name: (vals.role_name as string) || null,
+        achievement: (vals.achievement as string) || null,
+        plan_workload:
+          vals.plan_workload != null && vals.plan_workload !== ""
+            ? String(vals.plan_workload)
+            : null,
+        plan_begin_time: (vals.plan_begin_time as string) || null,
+        plan_complete_time: (vals.plan_complete_time as string) || null,
+        module_id: (vals.module_id as string) || null,
+        execute_user_id: (vals.execute_user_id as string) || null,
+        audit_user_id: (vals.audit_user_id as string) || null,
+        approve_user_id: (vals.approve_user_id as string) || null,
+        file_urls: (vals.file_urls as string[]) ?? [],
+      };
+
       if (mode === "create" || mode === "edit") {
-        const body = {
-          detailed_stage: (vals.detailed_stage as string) || null,
-          task_theme: (vals.task_theme as string) || null,
-          task_description: (vals.task_description as string) || null,
-          requirements: (vals.requirements as string) || null,
-          role_name: (vals.role_name as string) || null,
-          achievement: (vals.achievement as string) || null,
-          plan_workload:
-            vals.plan_workload != null && vals.plan_workload !== ""
-              ? String(vals.plan_workload)
-              : null,
-          plan_begin_time: (vals.plan_begin_time as string) || null,
-          plan_complete_time: (vals.plan_complete_time as string) || null,
-          module_id: (vals.module_id as string) || null,
-          execute_user_id: (vals.execute_user_id as string) || null,
-          audit_user_id: (vals.audit_user_id as string) || null,
-          approve_user_id: (vals.approve_user_id as string) || null,
-          file_urls: (vals.file_urls as string[]) ?? [],
-        };
+        const body = baseBody;
         if (mode === "create") {
           // ql-20260713-010: 提交(autoSubmit=true)=创建为正式 done（不走审核）；保存=draft 草稿。
           await createPsPlanNodeDetail(
@@ -2135,6 +2154,16 @@ function DetailDrawer({
       }
 
       if (!detail) return;
+
+      // ql-20260720-006: 已完成明细信息变更——仅 updatePsPlanNodeDetail,
+      // 后端 _sync_task_fields 同步关联任务字段(content/workload/time/user/module 等),
+      // 不改明细 status、不生成新版本、不改任务 status(FR-03/D-007)。
+      if (mode === "changeInfo") {
+        await updatePsPlanNodeDetail(detail.id, baseBody);
+        message.success("已变更，任务计划已同步更新");
+        onSaved();
+        return;
+      }
 
       if (mode === "audit") {
         const backFlag = (vals.audit_back_flag as string) ?? "0";
@@ -2220,6 +2249,8 @@ function DetailDrawer({
         return "计划变更";
       case "changeApprove":
         return "变更审批";
+      case "changeInfo":
+        return "变更明细";
       default:
         return `明细详情${detail ? ` · ${PLAN_DETAIL_STATUS_TEXT[detail.status] ?? detail.status}` : ""}`;
     }
@@ -2231,6 +2262,7 @@ function DetailDrawer({
     if (mode === "audit" || mode === "approve") return "提交";
     if (mode === "change") return "提交变更";
     if (mode === "changeApprove") return "提交审批";
+    if (mode === "changeInfo") return "提交";
     return "";
   }, [mode]);
 

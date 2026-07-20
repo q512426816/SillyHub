@@ -114,3 +114,4 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 - ql-20260720-002-8d3e | /ppm/projects 查询区按钮 size=small→默认 middle(修字体顶边框)：查询区 5 按钮(导出/新增/搜索/重置/展开)+Modal footer 2(取消/保存)+错误条重新加载 1(均有边框/实心)改默认 32px；操作列 link(编辑/删除)保持 small；DataTable size 不动
 - ql-20260720-003-2f1a | table 序号「#」列居中对齐：PpmResourceTable 序号列 coldef 加 align=center(表头「#」+数字单元格同居中)，影响所有 ppm 表
 - ql-20260720-004-b05c | 修 striped 表固定列横向滚动穿透：序号列(fixed left)+操作列(fixed right)coldef 加 onCell background=hsl(var(--card))(不透明，与 SectionCard 卡片底一致)覆盖 striped 透明背景；中间非固定列保留斑马纹
+- ql-20260720-006-a7e3 | 里程碑明细已完成(done)操作列加「变更」按钮：新增 changeInfo 抽屉模式(开立信息可编辑,footer 仅「提交」无「保存」),提交调 updatePsPlanNodeDetail→后端 _sync_task_fields 同步任务计划字段(content/workload/time/user/module),不改明细 status/不生成新版本/不改任务 status(FR-03/D-007);DetailLevelTable done 加按钮(readOnly 禁用)+baseEditable/submitText/title 配套;纯前端单文件

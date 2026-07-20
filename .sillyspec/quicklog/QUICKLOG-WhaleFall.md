@@ -427,3 +427,12 @@ created_at: 2026-07-14T09:20:24
 根因：StatusBadge 是 D-005 自写的 shadcn 风格组件(tailwind 圆点药丸 + 浅色背景)，是 /ppm/projects 最后残留的非 antd UI 组件；用户要全 antd。
 方案：改 status-badge.tsx 的 StatusBadge 渲染：span 药丸 → antd Badge status+text；StatusKind → antd status 映射(info→processing/success→success/warning→warning/error→error/neutral→default)；API(kind/children/icon/size/className)不变，17 处调用点零改；size 用 text 字号 class 保留差异；删 KIND_STYLES/SIZE_STYLES/DOT_SIZE_STYLES(antd Badge 自带配色)。fromStatus 函数 + StatusKind 类型保留(调用点在用)。
 结果：tsc --noEmit EXIT 0；eslint status-badge.tsx 0 error；无 StatusBadge 相关测试(grep 无结果)。StatusBadge 内部改 antd Badge 后,17 处调用点 API 不变自动生效,外观从「圆角药丸+浅背景」变「小圆点+文字」。纯前端单文件。待 commit + push + rebuild frontend 部署 + 用户浏览器验证。
+
+## ql-20260720-006-a7e3 | 2026-07-20 11:25:00 | 里程碑明细 done 状态增加「变更」按钮（编辑信息+同步任务计划，不改状态）
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
+需求：里程碑明细页，已完成(done)状态的明细操作列增加「变更」按钮(本质是编辑功能,改名"变更")；变更抽屉只保留「提交」按钮、去掉「保存」；提交后同步更新对应的任务计划信息,但不改变任务计划的状态。
+根因：done 是终态,原 modeForStatus(done)=view 只读无编辑入口；现有 edit 模式 footer 有「保存+提交」两按钮,且提交(autoSubmit)走 saveProcess 触发状态机推进(draft→done),对已 done 明细不适用；需独立 mode 区分"信息变更"(不改状态)与"版本变更"(change 模式生成新版本)。
+方案：新增 DrawerMode="changeInfo"——①操作列 done 加「变更」按钮(onOpenDetail(d,"changeInfo"),readOnly 禁用)；②baseEditable 含 changeInfo(开立信息块可编辑)；③提取 baseBody(create/edit/changeInfo 共用开立信息字段集合)；④submit 加 changeInfo 分支:仅调 updatePsPlanNodeDetail(detail.id,baseBody),不调 saveProcess、不生成新版本、不改明细 status,后端 update_detail→_sync_task_fields 自动同步关联任务(content/workload/time/user/module,FR-03/D-007,不改 task.status)；⑤title="变更明细"、submitText="提交"；⑥footer 逻辑天然支持(showSubmit && 非 create/edit → 单「提交」按钮)。modeForStatus 不动(done 默认仍 view,"变更"是显式覆盖 mode 打开)。
+结果：tsc --noEmit EXIT 0；vitest milestone-details 24 passed(2 test files)零回归；eslint page.tsx 0 error(19 warning 全既有类型签名未用参数,非本次引入)。纯前端单文件,后端 update_detail 早已实现任务同步(FR-03 测试覆盖)。待 commit + push + rebuild frontend 部署 + 用户浏览器验证(done 明细点「变更」→抽屉仅「提交」→改字段提交→任务计划对应字段同步、状态不变)。
