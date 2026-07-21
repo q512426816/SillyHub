@@ -20,6 +20,7 @@ import { mkdir, readFile, rename, rm, writeFile, readdir, copyFile, stat } from 
 import { join, dirname, relative, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { gunzipSync } from 'node:zlib';
+import { parseJsonFromResponse } from './hub-client.js';
 
 // ── 常量 ──────────────────────────────────────────────────────────────────────
 
@@ -110,7 +111,7 @@ export async function fetchRemoteManifest(
       logger?.('warn', 'skill_manifest_fetch_failed', { url, status: resp.status });
       return null;
     }
-    return (await resp.json()) as SkillsManifest;
+    return await parseJsonFromResponse<SkillsManifest>(resp);
   } catch (e) {
     logger?.('warn', 'skill_manifest_unreachable', { url, error: String(e) });
     return null;

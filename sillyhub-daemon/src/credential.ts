@@ -22,6 +22,13 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
+// ── 工具函数 ──────────────────────────────────────────────────────────────────
+
+/** 去除字符串开头的 BOM（﻿）。 */
+function stripBOM(s: string): string {
+  return s.charCodeAt(0) === 0xfeff ? s.slice(1) : s;
+}
+
 /**
  * 默认凭证文件路径：~/.sillyhub/daemon/credentials.json。
  * 对照 Python `DEFAULT_CREDENTIALS_PATH`（L22）：`Path.home() / '.sillyhub/daemon/credentials.json'`。
@@ -85,7 +92,7 @@ export class CredentialManager {
   private _load(): void {
     if (fs.existsSync(this._path)) {
       const raw = fs.readFileSync(this._path, 'utf-8');
-      this._credentials = JSON.parse(raw) as Record<string, string>;
+      this._credentials = JSON.parse(stripBOM(raw)) as Record<string, string>;
       console.debug(`credentials_loaded count=${Object.keys(this._credentials).length}`);
     } else {
       console.info(`credentials_file_not_found path=${this._path}`);

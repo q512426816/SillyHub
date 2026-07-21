@@ -440,11 +440,13 @@ class WorkbenchService:
         work_hours_raw = await self._session.scalar(hours_stmt)
         work_hours = float(work_hours_raw) if work_hours_raw is not None else 0.0
 
-        # defect_count:当前人名下未关闭缺陷 (status!='4'),不受 range 影响
+        # defect_count:当前人名下未完成缺陷 (status!='已完成'),不受 range 影响。
+        # 3 态简化后 status 为中文 (新建/进行中/已完成,见 problem.fsm.ProblemStatus),
+        # 已完成=终态不计 (ql-20260721-002 修复:原 'status!="4"' 为旧数字码,3 态后永真致已完成也被统计)。
         defect_stmt = (
             select(PpmProblemList)
             .where(PpmProblemList.duty_user_id == user.id)
-            .where(PpmProblemList.status != "4")
+            .where(PpmProblemList.status != "已完成")
         )
         defect_count = await self._session.scalar(
             select(func.count()).select_from(defect_stmt.subquery())
@@ -477,7 +479,7 @@ class WorkbenchService:
         problem_stmt = select(PpmProblemList)
         problem_rows = (await self._session.execute(problem_stmt)).scalars().all()
         for p in problem_rows:
-            if p.status == "4":
+            if p.status == "已完成":
                 continue
             handle_users = (p.now_handle_user or "").split(",")
             if uid_str not in handle_users:
@@ -704,7 +706,7 @@ class WorkbenchService:
                     _progress_alert(
                         prob.plan_start_time,
                         prob.plan_end_time,
-                        prob.status == "4",
+                        prob.status == "已完成",
                         prob.work_load,
                         float(prob.time_spent or 0.0),
                         date(year, month, day),

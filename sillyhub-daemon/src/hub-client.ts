@@ -177,6 +177,23 @@ export function extractCause(err: unknown): CauseInfo {
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
+ * JSON.parse 的 BOM-safe 包装。
+ *
+ * Node 原生 fetch 的 resp.json() 底层调 JSON.parse，但 JSON.parse 不跳过
+ * BOM 字节（U+FEFF）。当上游后端（如 FastAPI）返回带 BOM 的 JSON 时，
+ * resp.json() 抛 "Unexpected token '﻿'"。
+ *
+ * 本函数先读到文本，strip 掉 BOM 再 parse，兼容带/不带 BOM 的响应。
+ */
+export async function parseJsonFromResponse<T>(resp: Response): Promise<T> {
+  const text = await resp.text();
+  // U+FEFF 可能以 ﻿（JS 字符串）或 \xEF\xBB\xBF（UTF-8 字节序列解码后）出现。
+  // ES2019 的 String.prototype.trimStart 只去 whitespace 不包括 BOM，显式 strip。
+  const cleaned = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  return JSON.parse(cleaned) as T;
+}
+
+/**
  * Auth credentials for daemon → server requests.
  *
  * Either ``token`` (browser-style Bearer JWT, short-lived) or ``apiKey``
@@ -289,7 +306,7 @@ export class HubClient {
       const bodyText = await resp.text();
       throw new HubHttpError(resp.status, bodyText, url, method);
     }
-    return (await resp.json()) as T;
+    return await parseJsonFromResponse<T>(resp);
   }
 
   // -- Runtime 生命周期（FR-03 / FR-07）--
@@ -591,7 +608,7 @@ export class HubClient {
       const bodyText = await resp.text();
       throw new HubHttpError(resp.status, bodyText, url, 'POST');
     }
-    return (await resp.json()) as Record<string, unknown>;
+    return await parseJsonFromResponse<Record<string, unknown>>(resp);
   }
 
   /**
@@ -823,7 +840,7 @@ export class HubClient {
       const bodyText = await resp.text();
       throw new HubHttpError(resp.status, bodyText, url, 'POST');
     }
-    return (await resp.json()) as { ok: boolean; reparsed: number };
+    return await parseJsonFromResponse<{ ok: boolean; reparsed: number }>(resp);
   }
 
   // -- task-11 / FR-08 / D-004@v1：daemon-client change-write 轻量回执通道 ---------

@@ -32,6 +32,7 @@ import { mkdir, writeFile, rename } from 'node:fs/promises';
 import type { DaemonConfig } from './config.js';
 import { BUILD_ID } from './build-id.js';
 import { parseSemver, type SemVerTuple } from './version.js';
+import { parseJsonFromResponse } from './hub-client.js';
 
 // ── 类型（日志回调签名）─────────────────────────────────────────────────────
 
@@ -177,11 +178,32 @@ export async function runDaemonSelfUpdate(
     return;
   }
 
+  // 紧急运维开关：SKIP_DAEMON_SELF_UPDATE=1 完全跳过 daemon 自更新
+  //（sillyspec 检查仍跑）。用于锁版本 / 服务器分发 manifest 过期导致循环降级时。
+  if (process.env.SKIP_DAEMON_SELF_UPDATE === '1') {
+    logger('info', 'daemon_self_update_skip_env');
+    return;
+  }
+
   const latest = await fetchLatest(config, logger);
   if (latest === null) return; // 拉取失败已记 warn
 
   if (latest.version === buildId) {
     logger('debug', 'daemon_up_to_date', { version: buildId });
+    return;
+  }
+
+  // 防降级保护：version 格式 `<gitsha8>-<YYYYMMDDHHMMSS>`，解析时间戳部分比较。
+  // 本地构建时间 >= 服务器分发时间 → 本地更新或同等，跳过（避免本地开发/新版
+  // 被服务器旧分发无脑降级覆盖，形成"启动→降级→exit→重启→再降级"死循环）。
+  // 解析失败（格式异常）回退原行为（不等就更新），保持对非标准 version 的兼容。
+  const localTs = extractBuildTimestamp(buildId);
+  const remoteTs = extractBuildTimestamp(latest.version);
+  if (localTs && remoteTs && localTs >= remoteTs) {
+    logger('info', 'daemon_self_update_skip_local_newer', {
+      current: buildId,
+      latest: latest.version,
+    });
     return;
   }
 
@@ -235,7 +257,7 @@ async function fetchLatest(
 
   let body: unknown;
   try {
-    body = await resp.json();
+    body = await parseJsonFromResponse(resp);
   } catch (e) {
     logger('warn', 'daemon_latest_parse_failed', { url, error: fmtErr(e) });
     return null;
@@ -393,4 +415,18 @@ function isTupleOlder(a: SemVerTuple, b: SemVerTuple): boolean {
 function fmtErr(e: unknown): string {
   if (e instanceof Error) return e.message;
   return String(e);
+}
+
+/**
+ * 从 daemon 构建 version 串提取时间戳（YYYYMMDDHHMMSS，14 位数字字符串）。
+ *
+ * version 格式 `<gitsha8>-<YYYYMMDDHHMMSS>`（如 `66ac0478-20260720160736`），
+ * 取最后一个 `-` 后的部分，校验为 14 位数字才返回，否则 null（格式异常，调用方
+ * 回退原行为）。
+ */
+function extractBuildTimestamp(version: string): string | null {
+  const idx = version.lastIndexOf('-');
+  if (idx < 0 || idx === version.length - 1) return null;
+  const ts = version.slice(idx + 1);
+  return /^\d{14}$/.test(ts) ? ts : null;
 }

@@ -14,6 +14,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseJsonFromResponse } from './hub-client.js';
 
 // ── 类型 ─────────────────────────────────────────────────────────────────────
 
@@ -82,9 +83,9 @@ export async function fetchPlatformMcpConfig(
       logger?.('warn', 'mcp_config_fetch_failed', { url, status: resp.status });
       return null;
     }
-    const body = (await resp.json()) as {
+    const body = await parseJsonFromResponse<{
       platform_default?: { mcpServers?: Record<string, unknown> };
-    };
+    }>(resp);
     const mcpServers = (body.platform_default?.mcpServers ?? {}) as Record<string, McpServerConfig>;
     return { mcpServers };
   } catch (e) {

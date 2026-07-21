@@ -56,8 +56,8 @@ export default function WorkbenchPage() {
   const [summary, setSummary] = useState<BlockState<WorkbenchSummary>>(
     initialBlock(),
   );
-  // 指标统计范围(默认全部,ql-20260720-004):本周/本月/全部,切换重载 summary。
-  const [summaryRange, setSummaryRange] = useState<MetricRange>("all");
+  // 指标统计范围(默认本月,ql-20260721-002):本周/本月/全部,切换重载 summary。
+  const [summaryRange, setSummaryRange] = useState<MetricRange>("month");
   const [calendar, setCalendar] = useState<BlockState<WorkbenchCalendar>>(
     initialBlock(),
   );

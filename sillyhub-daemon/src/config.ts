@@ -28,6 +28,16 @@ import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 
+// ── 工具函数 ──────────────────────────────────────────────────────────────────
+
+/**
+ * 去除字符串开头的 BOM（﻿）。
+ * JSON.parse 不跳过 BOM，需要先 strip 再 parse。
+ */
+function stripBOM(s: string): string {
+  return s.charCodeAt(0) === 0xfeff ? s.slice(1) : s;
+}
+
 // ── 路径常量（对齐 Python config.py:15-16）──────────────────────────────────
 
 /**
@@ -427,7 +437,7 @@ export async function loadConfig(
   ) {
     try {
       const legacyRaw = await readFile(DEFAULT_CONFIG_PATH, 'utf-8');
-      const legacy = JSON.parse(legacyRaw) as Partial<DaemonConfig>;
+      const legacy = JSON.parse(stripBOM(legacyRaw)) as Partial<DaemonConfig>;
       // 仅迁移 runtime_id（daemon_local_id 身份）。其余字段让默认值 + 后续合并兜底，
       // 避免 legacy 的 server_url/token 等污染新 per-server（不同后端身份应隔离）。
       if (legacy.runtime_id) {
@@ -445,7 +455,7 @@ export async function loadConfig(
   if (existsSync(path)) {
     const raw = await readFile(path, 'utf-8');
     // JSON 损坏/空文件时 JSON.parse 抛 SyntaxError，原样冒泡到调用方。
-    const saved = JSON.parse(raw) as Partial<DaemonConfig>;
+    const saved = JSON.parse(stripBOM(raw)) as Partial<DaemonConfig>;
     // 浅合并：仅覆盖 saved 中存在的键，保留 data 中已有默认。
     // 等价 Python `self._data.update(saved)`。
     Object.assign(data, saved);

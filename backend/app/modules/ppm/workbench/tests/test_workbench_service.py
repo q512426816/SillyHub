@@ -465,10 +465,10 @@ async def test_summary_todo_problem_change_only_auditing_status(db_session):
 
 @pytest.mark.asyncio
 async def test_summary_defect_count_not_closed(db_session):
-    """duty_user_id=me:status='4'(已关闭)不计 + status='2'(未关闭)计 → defect_count=1。"""
+    """duty_user_id=me:status='已完成'不计 + status='进行中'计 → defect_count=1。"""
     user = await _seed_user(db_session)
-    await _seed_problem(db_session, duty_user_id=user.id, status="4")  # 已关闭,不计
-    await _seed_problem(db_session, duty_user_id=user.id, status="2")  # 未关闭,计
+    await _seed_problem(db_session, duty_user_id=user.id, status="已完成")  # 已完成,不计
+    await _seed_problem(db_session, duty_user_id=user.id, status="进行中")  # 未完成,计
 
     svc = WorkbenchService(db_session)
     summary = await svc.get_summary(user, range="month")
@@ -479,8 +479,8 @@ async def test_summary_defect_count_not_closed(db_session):
 async def test_summary_defect_count_range_invariant(db_session):
     """defect_count 不受 range 影响:week/month/all 恒等。"""
     user = await _seed_user(db_session)
-    await _seed_problem(db_session, duty_user_id=user.id, status="1")
-    await _seed_problem(db_session, duty_user_id=user.id, status="3")
+    await _seed_problem(db_session, duty_user_id=user.id, status="新建")
+    await _seed_problem(db_session, duty_user_id=user.id, status="进行中")
 
     svc = WorkbenchService(db_session)
     week = await svc.get_summary(user, range="week")

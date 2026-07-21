@@ -311,7 +311,6 @@ export default function TaskPlansPage() {
       title: "序号",
       key: "rowno",
       width: 60,
-      fixed: "left",
       render: (_v, _t: PlanTask, idx: number) => idx + 1,
     },
     {
@@ -341,6 +340,7 @@ export default function TaskPlansPage() {
       dataIndex: "project_name",
       key: "project_name",
       width: 140,
+      ellipsis: true,
       render: (v: string | null) => v ?? "—",
     },
     {
@@ -355,6 +355,7 @@ export default function TaskPlansPage() {
       dataIndex: "work_partner",
       key: "work_partner",
       width: 120,
+      ellipsis: true,
       render: (v: string | null) => v ?? "—",
     },
     {
@@ -602,8 +603,9 @@ export default function TaskPlansPage() {
           loading={loading}
           size="small"
           bordered
+          tableLayout="fixed"
           rowClassName={(_row, idx) => (idx % 2 === 1 ? "bg-muted/40" : "")}
-          scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
+          scroll={{ y: "calc(100vh - 430px)" }}
           pagination={{
             current: page,
             pageSize,

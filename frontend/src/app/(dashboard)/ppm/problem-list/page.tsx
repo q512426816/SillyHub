@@ -241,7 +241,6 @@ export default function ProblemListPage() {
       title: "序号",
       key: "rowno",
       width: 60,
-      fixed: "left",
       render: (_v, _t: ProblemList, idx: number) => idx + 1,
     },
     {
@@ -249,7 +248,7 @@ export default function ProblemListPage() {
       dataIndex: "duty_user_name",
       key: "duty_user_name",
       width: 100,
-      fixed: "left",
+      ellipsis: true,
       render: (v: string | null, p: ProblemList) =>
         v ?? (p.duty_user_id ? p.duty_user_id : "待指派"),
     },
@@ -258,6 +257,7 @@ export default function ProblemListPage() {
       dataIndex: "project_name",
       key: "project_name",
       width: 150,
+      ellipsis: true,
       render: (v: string | null, p: ProblemList) => v ?? p.project_id ?? "—",
     },
     {
@@ -265,12 +265,15 @@ export default function ProblemListPage() {
       dataIndex: "model_name",
       key: "model_name",
       width: 120,
+      ellipsis: true,
       render: (v: string | null) => v ?? "—",
     },
     {
       title: "问题描述",
       dataIndex: "pro_desc",
       key: "pro_desc",
+      width: 180,
+      ellipsis: true,
       render: (v: string | null) => v ?? "—",
     },
     {
@@ -278,6 +281,7 @@ export default function ProblemListPage() {
       dataIndex: "func_name",
       key: "func_name",
       width: 120,
+      ellipsis: true,
       render: (v: string | null) => v ?? "—",
     },
     {
@@ -305,6 +309,7 @@ export default function ProblemListPage() {
       dataIndex: "find_by",
       key: "find_by",
       width: 100,
+      ellipsis: true,
       render: (v: string | null) => v ?? "—",
     },
     {
@@ -350,7 +355,6 @@ export default function ProblemListPage() {
       title: "状态",
       key: "status",
       width: 100,
-      fixed: "right",
       render: (_v: unknown, p: ProblemList) => (
         <Tag color={PROBLEM_STATUS_COLOR[p.status] ?? "default"}>
           {PROBLEM_STATUS_TEXT[p.status] ?? p.status}
@@ -361,7 +365,7 @@ export default function ProblemListPage() {
       title: "操作",
       key: "actions",
       align: "center",
-      width: "max-content",
+      width: 180,
       fixed: "right",
       render: (_v: unknown, p: ProblemList) => {
         const isDuty = matchAnyUser([p.duty_user_id], currentUserId);
@@ -380,13 +384,13 @@ export default function ProblemListPage() {
             )}
             {/* 开始: 新建 → 进行中 (建 in-flight TaskExecute) */}
             {p.status === "新建" && canOperate && (
-              <Button size="sm" onClick={() => void handleStart(p)}>
+              <Button size="sm" variant="ghost" onClick={() => void handleStart(p)}>
                 开始
               </Button>
             )}
             {/* 执行: 进行中 → 打开 execute 弹窗 (跨天填报, 提交回新建/完成) */}
             {p.status === "进行中" && canOperate && (
-              <Button size="sm" onClick={() => openExecute(p)}>
+              <Button size="sm" variant="ghost" onClick={() => openExecute(p)}>
                 执行
               </Button>
             )}
@@ -396,12 +400,7 @@ export default function ProblemListPage() {
             </Button>
             {/* 删除: 任意状态 (后端 can_delete 判断) */}
             {canDelete && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-red-600 hover:text-red-700"
-                onClick={() => void handleDelete(p)}
-              >
+              <Button size="sm" variant="ghost" onClick={() => void handleDelete(p)}>
                 删除
               </Button>
             )}
@@ -563,8 +562,9 @@ export default function ProblemListPage() {
           loading={loading}
           size="small"
           bordered
+          tableLayout="fixed"
           rowClassName={(_row, idx) => (idx % 2 === 1 ? "bg-muted/40" : "")}
-          scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
+          scroll={{ y: "calc(100vh - 430px)" }}
           pagination={{
             current,
             pageSize,
