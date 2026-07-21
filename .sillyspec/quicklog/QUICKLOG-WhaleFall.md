@@ -59,3 +59,9 @@ created_at: 2026-07-21T08:48:56
 关联变更：（无）
 文件：frontend/src/app/(dashboard)/ppm/problem-list/_problem-drawer.tsx
 结果：ql-008 把 Drawer→Modal 时未设 footer,antd Modal 默认渲染「取消/确定」,而 ProblemCreateForm 内部自带「取消/保存」,两组底部按钮重复。修复:Modal 加 footer={null}(表单自带按钮保留,与 problem-changes/其他 Modal 一致)。grep 确认其他 ppm Modal footer 均已正确(null 或自定义),仅此处漏。小改动无 test 影响。
+
+## ql-20260721-011-e3f2 | 2026-07-21 17:00:00 | 修复 PpmResourceTable edit 模式清空字段不传(validateFields 跳过空值→后端不更新)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-resource-table.tsx
+结果：formInst.validateFields() 只返回有值字段,清空的字段(undefined/空串)被静默跳过→请求体不含→exclude_unset 不含→后端不更新。edit 模式补全:getFieldsValue 拿所有 key,不在 validateFields returns 里的→设 null。create 模式不动(用户没填的非必填字段让后端用默认值)。影响/projects,/customers,/project-members,/project-stakeholders 4 页。eslint 0 error(15 既有 warning) tsc 0 error。
