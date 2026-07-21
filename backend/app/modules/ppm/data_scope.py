@@ -150,6 +150,7 @@ def build_project_scope_clause(scope: DataScope) -> Any | None:
                     PsProjectPlan.project_manager_id == scope.pm_user_id
                 )
             )
+            | (PpmProjectMaintenance.created_by == scope.pm_user_id)
         )
     if not clauses:
         return false()
