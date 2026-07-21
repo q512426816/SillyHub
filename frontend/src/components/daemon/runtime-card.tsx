@@ -64,7 +64,6 @@ export type RuntimeCardProps = {
   onEditAlias: (runtime: DaemonRuntimeRead) => void;
   onEditAllowedRoots: (runtime: DaemonRuntimeRead) => void;
   onUpgrade: (runtime: DaemonRuntimeRead) => void;
-  isPlatformAdmin: boolean;
 };
 
 export function RuntimeCard({
@@ -81,7 +80,6 @@ export function RuntimeCard({
   onEditAlias,
   onEditAllowedRoots,
   onUpgrade,
-  isPlatformAdmin,
 }: RuntimeCardProps) {
   const status = getStatusMeta(runtime.status);
   const capabilityChips = getCapabilityChips(runtime);
@@ -216,16 +214,14 @@ export function RuntimeCard({
         <button type="button" className={btnGhost} onClick={() => onEditAlias(runtime)} title="编辑展示别名">
           别名
         </button>
-        {isPlatformAdmin ? (
-          <button
-            type="button"
-            className={btnGhost}
-            onClick={() => onEditAllowedRoots(runtime)}
-            title="配置该运行时可写的目录沙箱（读取不受限）"
-          >
-            可写目录
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className={btnGhost}
+          onClick={() => onEditAllowedRoots(runtime)}
+          title="配置该运行时可写的目录沙箱（读取不受限）"
+        >
+          可写目录
+        </button>
         <button
           type="button"
           className={btnGhost}

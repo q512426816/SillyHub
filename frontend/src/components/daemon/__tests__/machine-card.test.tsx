@@ -107,7 +107,6 @@ function defaultProps(
     usageWindow: "7d" as const,
     actioning: false,
     sessions: [],
-    isPlatformAdmin: false,
     onEditAlias: vi.fn(),
     onUpgrade: vi.fn(),
     onRuntimeToggle: vi.fn(),

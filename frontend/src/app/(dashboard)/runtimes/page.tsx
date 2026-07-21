@@ -1012,7 +1012,6 @@ export default function RuntimesPage() {
                         machine.runtimes.some((r) => runtimeActionId === r.id)
                       }
                       sessions={sessions}
-                      isPlatformAdmin={isPlatformAdmin}
                       onEditAlias={handleOpenAlias}
                       onUpgrade={handleUpgrade}
                       onRuntimeToggle={handleToggleRuntime}

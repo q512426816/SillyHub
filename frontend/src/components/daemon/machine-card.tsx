@@ -54,7 +54,6 @@ export interface MachineCardProps {
   sessions: AgentSessionRead[];
   onEditAlias: (machine: DaemonMachineRead) => void;
   onUpgrade: (machine: DaemonMachineRead) => void;
-  isPlatformAdmin: boolean;
   onRuntimeToggle: (runtime: DaemonRuntimeRead) => Promise<void>;
   onRuntimeOpenSession: (runtime: DaemonRuntimeRead) => void;
   onRuntimeDelete: (runtime: DaemonRuntimeRead) => void;
@@ -89,7 +88,6 @@ export function MachineCard({
   sessions,
   onEditAlias,
   onUpgrade,
-  isPlatformAdmin,
   onRuntimeToggle,
   onRuntimeOpenSession,
   onRuntimeDelete,
@@ -257,7 +255,6 @@ export function MachineCard({
                   onEditAlias={onRuntimeEditAlias}
                   onEditAllowedRoots={onRuntimeEditRoots}
                   onUpgrade={() => onUpgrade(machine)}
-                  isPlatformAdmin={isPlatformAdmin}
                 />
               ))}
             </div>

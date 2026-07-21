@@ -82,7 +82,6 @@ function defaultProps(
     onEditAlias: vi.fn(),
     onEditAllowedRoots: vi.fn(),
     onUpgrade: vi.fn(),
-    isPlatformAdmin: false,
     ...overrides,
   };
 }
@@ -214,17 +213,11 @@ describe("RuntimeCard（task-07 / FR-01 / FR-04）", () => {
       expect(link).toHaveAttribute("href", "/runtimes/rt-audit/audit");
     });
 
-    it("isPlatformAdmin=true → 显示「可写目录」编辑按钮", () => {
-      const rt = makeRuntime({ id: "rt-admin" });
-      renderCard(<RuntimeCard {...defaultProps(rt, { isPlatformAdmin: true })} />);
+    it("始终显示「可写目录」编辑按钮（ql-20260721-001：去掉 is_platform_admin 门，对所有有 RUNTIME_ADMIN 权限的用户可见）", () => {
+      const rt = makeRuntime({ id: "rt-roots" });
+      renderCard(<RuntimeCard {...defaultProps(rt)} />);
       // 按钮文本「可写目录」（title 不进 accessible name，按文本查）。
       expect(screen.getByRole("button", { name: /^可写目录$/ })).toBeInTheDocument();
-    });
-
-    it("isPlatformAdmin=false → 不显示「可写目录」编辑按钮", () => {
-      const rt = makeRuntime({ id: "rt-user" });
-      renderCard(<RuntimeCard {...defaultProps(rt, { isPlatformAdmin: false })} />);
-      expect(screen.queryByRole("button", { name: /^可写目录$/ })).not.toBeInTheDocument();
     });
   });
 
