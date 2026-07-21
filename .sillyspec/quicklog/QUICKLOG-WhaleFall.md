@@ -65,3 +65,9 @@ created_at: 2026-07-21T08:48:56
 关联变更：（无）
 文件：frontend/src/components/ppm-resource-table.tsx
 结果：formInst.validateFields() 只返回有值字段,清空的字段(undefined/空串)被静默跳过→请求体不含→exclude_unset 不含→后端不更新。edit 模式补全:getFieldsValue 拿所有 key,不在 validateFields returns 里的→设 null。create 模式不动(用户没填的非必填字段让后端用默认值)。影响/projects,/customers,/project-members,/project-stakeholders 4 页。eslint 0 error(15 既有 warning) tsc 0 error。
+
+## ql-20260721-012-c6f7 | 2026-07-21 17:10:00 | 追修 PpmResourceTable 空串字段未补正(validateFields 返回空串但 key 存在→不补 null)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-resource-table.tsx
+结果：ql-011 用 !(key in values) 判断,但 validateFields 对非必填空字段返回 {key:""}(key 存在值空串)→!(key in values) false→不补 null→发空串(非 null),非 required 字段后端收到空串不返回旧值但仍没真正清空。改 values[key]===undefined/null/""→补 null。eslint 0 error tsc 0 error。

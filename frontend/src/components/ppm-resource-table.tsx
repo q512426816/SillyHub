@@ -771,13 +771,11 @@ function PpmResourceModal<T extends { id: string }>({
     setError(null);
     try {
       const values = await formInst.validateFields();
-      // edit 模式:清空字段 antd validateFields 不返回,补 null(否则后端 exclude_unset 不含→不更新)
-      if (mode === "edit") {
-        const all = formInst.getFieldsValue();
-        for (const key of Object.keys(all)) {
-          if (!(key in values)) {
-            (values as Record<string, unknown>)[key] = null;
-          }
+      // antd validateFields 不返回/返回空串的字段→补 null(否则请求体不含→后端不更新)
+      const all = formInst.getFieldsValue();
+      for (const key of Object.keys(all)) {
+        if (values[key] === undefined || values[key] === null || values[key] === "") {
+          (values as Record<string, unknown>)[key] = null;
         }
       }
       await onSubmit(values as Partial<T>);
