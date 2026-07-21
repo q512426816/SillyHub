@@ -28,6 +28,7 @@ def test_auth_user_read_email_optional() -> None:
         email=None,
         username="alice",
         display_name=None,
+        employee_no=None,
         status="active",
         is_platform_admin=False,
         last_login_at=None,

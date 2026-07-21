@@ -36,9 +36,9 @@ def test_permission_group_has_seven_members() -> None:
     assert set(members) == expected
 
 
-def test_permission_count_is_62() -> None:
-    """45 历史 + 17 PPM_* 菜单/读 = 62（change 2026-07-20-ppm-menu-unique-keys 扩容：8 旧 PPM + 9 菜单专属 key）。"""
-    assert len(list(Permission)) == 62
+def test_permission_count_is_63() -> None:
+    """46 历史 + 17 PPM_* 菜单/读 = 63（ccfab86a 精简至 53 后，cbd258eb/1f5e6ebe 菜单 unique-key 扩容回升到 63）。"""
+    assert len(list(Permission)) == 63
 
 
 @pytest.mark.parametrize(
@@ -86,7 +86,7 @@ def test_permission_group_resolution(perm: Permission, expected_group: Permissio
 
 
 def test_every_permission_has_non_default_group() -> None:
-    """All 71 permissions must resolve to a stable group (no KeyError)."""
+    """All 63 permissions must resolve to a stable group (no KeyError)."""
     for perm in Permission:
         group = perm.group
         assert isinstance(group, PermissionGroup)

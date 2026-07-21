@@ -5,7 +5,8 @@
 - /project-maintenance/simple-list 下拉
 - /project-maintenance/export-excel 与 /customer-maintenance/export-excel
   下载 .xlsx 合法 (Content-Type / Content-Disposition / 可被 openpyxl 读回)
-- 权限:非 admin 且无 PPM_* 权限的用户 → 403
+- 鉴权边界 (登录 200 / 未登录 401) 由 tests/modules/ppm/test_router_smoke.py 守护；
+  ppm router 仅认证不授权 (ccfab86a)，本文件不再测 403。
 
 依据:task-03.md 验收项 + design §7/§13。
 """
@@ -14,44 +15,7 @@ from __future__ import annotations
 
 import uuid
 
-import pytest
 from httpx import AsyncClient
-
-from app.core.security import password_hasher
-from app.modules.auth.model import User
-
-
-async def _make_non_admin(db_session) -> tuple[User, str]:
-    """创建一个非 platform_admin、无任何角色权限的用户,用于 403 测试。"""
-    from app.core.config import get_settings
-    from app.core.security import create_access_token
-
-    settings = get_settings()
-    password_hasher.configure(settings.auth_bcrypt_rounds)
-    user_id = uuid.uuid4()
-    user = User(
-        id=user_id,
-        email=f"noperm-{user_id.hex[:8]}@example.com",
-        password_hash=password_hasher.hash("Pass123!"),
-        display_name="NoPerm",
-        status="active",
-        is_platform_admin=False,
-    )
-    db_session.add(user)
-    await db_session.commit()
-    await db_session.refresh(user)
-    token, _ = create_access_token(
-        user_id=user.id,
-        email=user.email,
-        is_admin=False,
-        settings=settings,
-    )
-    return user, token
-
-
-def _auth(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
-
 
 # ---------------------------------------------------------------------------
 # 项目维护 HTTP
@@ -300,29 +264,6 @@ async def test_project_member_page_invalid_pm_project_id_tolerant(
 
 
 # ---------------------------------------------------------------------------
-# 权限:无 PPM_* 权限的用户 → 403
+# 权限:ppm router 仅认证不授权（ccfab86a「去后端接口权限校验」），登录即 200、未登录 401。
+# 该鉴权边界由 tests/modules/ppm/test_router_smoke.py 统一守护，本文件不再重复。
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "method,path",
-    [
-        ("POST", "/api/ppm/project-maintenance"),
-        ("GET", "/api/ppm/project-maintenance"),
-        ("GET", "/api/ppm/project-maintenance/simple-list"),
-        ("GET", "/api/ppm/project-maintenance/export-excel"),
-        ("POST", "/api/ppm/customer-maintenance"),
-        ("POST", "/api/ppm/project-member"),
-        ("POST", "/api/ppm/project-stakeholder"),
-    ],
-)
-async def test_endpoints_require_permission(
-    client: AsyncClient, db_session, method: str, path: str
-):
-    _, token = await _make_non_admin(db_session)
-    h = _auth(token)
-    if method == "GET":
-        resp = await client.get(path, headers=h)
-    else:
-        resp = await client.post(path, json={}, headers=h)
-    assert resp.status_code == 403, resp.text

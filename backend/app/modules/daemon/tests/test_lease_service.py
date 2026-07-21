@@ -1289,6 +1289,24 @@ async def _create_interactive_lease(
     return lease
 
 
+def _patch_spec_transport(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    """Patch ``app.modules.daemon.lease.context.get_settings`` 返回
+    spec_transport=value 的 mock settings（稳健写法，镜像 test_lease_claim_transport._patch_transport）。
+
+    build_claim_payload 在 context.py 调 ``get_settings().spec_transport``；直接替换该模块内
+    import 的 get_settings 符号返回 SimpleNamespace(spec_transport=value)，duck-type 对齐
+    build_claim_payload 只读该字段的契约。conftest 的 ``_reset_settings_cache`` autouse fixture
+    会在用例间 ``cache_clear``，但本 patch 直接替换模块符号、不依赖真 Settings cache，互不影响——
+    规避「改实例属性」在全量套件下与缓存清理时序冲突读到默认 tar 的问题。
+    """
+    from types import SimpleNamespace
+
+    from app.modules.daemon.lease import context as ctx_module
+
+    fake_settings = SimpleNamespace(spec_transport=value)
+    monkeypatch.setattr(ctx_module, "get_settings", lambda: fake_settings)
+
+
 class TestBuildClaimPayloadInteractiveSpecRoot:
     """task-03：interactive claim payload 透传 specRoot/runtimeRoot 给 daemon。
 
@@ -1302,6 +1320,13 @@ class TestBuildClaimPayloadInteractiveSpecRoot:
     specRoot（daemon pull）。AC-01/AC-02 守护的是 **shared 分支**的防御性透传 + DB 回填
     逻辑（context.py shared 分支双写，代码仍在），故显式把 settings.spec_transport 钉到
     shared 再测；AC-03/AC-04 在 tar 默认下同样成立（specRoot 本就 absent）。
+
+    注意（测试隔离）：spec_transport 必须用 ``_patch_spec_transport`` 替换
+    ``app.modules.daemon.lease.context.get_settings`` 模块符号，**不能**用
+    ``monkeypatch.setattr(get_settings(), "spec_transport", ...)`` 改实例属性——
+    conftest.py 的 autouse ``_reset_settings_cache`` 会在用例间 ``get_settings.cache_clear()``，
+    全量套件下实例属性 patch 与缓存清理时序冲突会读到默认 tar → specRoot 缺失（KeyError），
+    孤立跑过、全量挂。同款稳健写法见 test_lease_claim_transport.py 的 ``_patch_transport``。
     """
 
     @pytest.mark.asyncio
@@ -1309,11 +1334,10 @@ class TestBuildClaimPayloadInteractiveSpecRoot:
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """AC-01: lease_meta.spec_root 存在 → payload.specRoot = lease_meta.spec_root。"""
-        from app.core.config import get_settings
         from app.modules.daemon.lease.context import build_claim_payload
 
-        # 默认 tar 不透传 specRoot；钉到 shared 走防御性透传分支
-        monkeypatch.setattr(get_settings(), "spec_transport", "shared")
+        # 默认 tar 不透传 specRoot；钉到 shared 走防御性透传分支（模块符号 patch，见类 docstring）
+        _patch_spec_transport(monkeypatch, "shared")
 
         user_id = await _create_user(db_session)
         rt = await _create_runtime(db_session, user_id)
@@ -1344,13 +1368,12 @@ class TestBuildClaimPayloadInteractiveSpecRoot:
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """AC-02: lease_meta 无 spec_root，含 workspace_id；SpecWorkspace.spec_root 回填。"""
-        from app.core.config import get_settings
         from app.modules.daemon.lease.context import build_claim_payload
         from app.modules.spec_workspace.model import SpecWorkspace
         from app.modules.workspace.model import Workspace
 
-        # 默认 tar 不透传 specRoot；钉到 shared 走 DB 回填分支
-        monkeypatch.setattr(get_settings(), "spec_transport", "shared")
+        # 默认 tar 不透传 specRoot；钉到 shared 走 DB 回填分支（模块符号 patch，见类 docstring）
+        _patch_spec_transport(monkeypatch, "shared")
 
         user_id = await _create_user(db_session)
         rt = await _create_runtime(db_session, user_id)
