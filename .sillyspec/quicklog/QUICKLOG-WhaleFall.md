@@ -71,3 +71,9 @@ created_at: 2026-07-21T08:48:56
 关联变更：（无）
 文件：frontend/src/components/ppm-resource-table.tsx
 结果：ql-011 用 !(key in values) 判断,但 validateFields 对非必填空字段返回 {key:""}(key 存在值空串)→!(key in values) false→不补 null→发空串(非 null),非 required 字段后端收到空串不返回旧值但仍没真正清空。改 values[key]===undefined/null/""→补 null。eslint 0 error tsc 0 error。
+
+## ql-20260721-013-a2b8 | 2026-07-21 17:20:00 | 最终修复 stripForm 过滤 null 致清空不生效(projects/customers/stakeholders)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/{projects,customers,project-stakeholders}/page.tsx
+结果：stripForm(if(v===null)continue)把 PpmResourceTable 补的 null 又过滤了→请求体不含该字段→后端不更新→显示旧值。去掉 v===null 条件,保留 null(清空信号)。配合 ql-011/012(PpmResourceTable 补 null),projects/customers/stakeholders(干系人)清空全链路通。eslint 0 error tsc 0 error。

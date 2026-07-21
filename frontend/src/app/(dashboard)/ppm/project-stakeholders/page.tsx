@@ -106,7 +106,7 @@ export default function PpmProjectStakeholdersPage() {
 function stripForm(form: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(form)) {
-    if (v === "" || v === null || v === undefined) continue;
+    if (v === "" || v === undefined) continue;
     out[k] = v;
   }
   return out;
