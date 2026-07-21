@@ -38,7 +38,6 @@ import {
   Button,
   Checkbox,
   DatePicker,
-  Drawer,
   Form,
   Input,
   InputNumber,
@@ -1534,15 +1533,15 @@ function ModuleFormDrawer({
   };
 
   return (
-    <Drawer
+    <Modal
       open={open}
       title={mode === "create" ? "新建模块" : "编辑模块"}
       width={520}
-      onClose={onClose}
+      onCancel={onClose}
       destroyOnClose
       maskClosable={false}
-      extra={
-        <div className="flex gap-2">
+      footer={
+        <div className="flex justify-end gap-2">
           <Button onClick={onClose}>
             取消
           </Button>
@@ -1601,7 +1600,7 @@ function ModuleFormDrawer({
           )}
         </Form.Item>
       </Form>
-    </Drawer>
+    </Modal>
   );
 }
 
@@ -2283,19 +2282,22 @@ function DetailDrawer({
   const showSubmit = mode !== "view";
 
   return (
-    <Drawer
-      title={title}
+    <Modal
+      title={
+        <span className="flex items-center gap-2">
+          {title}
+          {detail ? (
+            <Tag color={PLAN_DETAIL_STATUS_COLOR[detail.status] ?? "default"}>
+              {PLAN_DETAIL_STATUS_TEXT[detail.status] ?? detail.status}
+            </Tag>
+          ) : null}
+        </span>
+      }
       open
-      onClose={onClose}
+      onCancel={onClose}
       width={720}
       destroyOnClose
-      extra={
-        detail ? (
-          <Tag color={PLAN_DETAIL_STATUS_COLOR[detail.status] ?? "default"}>
-            {PLAN_DETAIL_STATUS_TEXT[detail.status] ?? detail.status}
-          </Tag>
-        ) : null
-      }
+      maskClosable={false}
       footer={
         <div className="flex items-center justify-end gap-2">
           <Button onClick={onClose}>
@@ -2682,7 +2684,7 @@ function DetailDrawer({
       )}
 
       {err && <p className="mt-2 text-[11px] text-destructive">{err}</p>}
-    </Drawer>
+    </Modal>
   );
 }
 
@@ -2814,12 +2816,13 @@ function PsPlanNodeDrawer({
   };
 
   return (
-    <Drawer
+    <Modal
       title={mode === "create" ? "新建里程碑" : "编辑里程碑"}
       open={open}
-      onClose={onClose}
+      onCancel={onClose}
       width={640}
       destroyOnClose
+      maskClosable={false}
       footer={
         <div className="flex justify-end gap-2">
           <Button onClick={onClose}>
@@ -2909,6 +2912,6 @@ function PsPlanNodeDrawer({
         </div>
       </Form>
       {err && <p className="mt-2 text-[11px] text-destructive">{err}</p>}
-    </Drawer>
+    </Modal>
   );
 }

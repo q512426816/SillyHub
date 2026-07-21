@@ -11,3 +11,9 @@ created_at: 2026-07-21T08:48:56
 关联变更：（无）
 文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
 结果：第一批——shadcn Button 全量换 antd(28处;操作列 ghost→link small、删除加 danger、工具栏 outline→default、新建→primary、Drawer/footer 保存→primary+loading 去掉"提交中…"文案)+3处原生 confirm→Modal.confirm(静态,与 message 一致)+硬编码色→token(emerald→success、blue→primary、amber/red→destructive、slate→border/muted-foreground;bg-red-50 错误语境保留合规)。eslint 0 error(19既有warning) tsc 0 error。3个 Drawer→Modal 留第二批。
+
+## ql-20260721-003-c8d1 | 2026-07-21 10:05:00 | /ppm/milestone-details 按页面样式规范调整(第二批:3个 Drawer→Modal)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
+结果：第二批——3个 Drawer→Modal(模块 extra 按钮→footer、明细 extra 状态Tag→title 内联 footer 保留、里程碑 footer 保留);统一 onClose→onCancel、补 maskClosable={false}、删 Drawer import、</Drawer>→</Modal>。eslint 0 error(19既有warning) tsc 0 error milestone-details 24测试通过。
