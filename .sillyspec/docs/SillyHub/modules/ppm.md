@@ -127,3 +127,4 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 - ql-20260721-003-c8d1 | /ppm/milestone-details 按页面样式规范调整(第二批)：3个 Drawer→Modal(模块 extra 按钮→footer、明细 extra 状态Tag→title 内联 footer 保留、里程碑 footer 保留)；统一 onClose→onCancel、补 maskClosable={false}、删 Drawer import、</Drawer>→</Modal>；eslint 0 error tsc 0 error milestone-details 24测试通过
 - ql-20260721-004-a3f2 | /ppm/milestone-details 主表操作列加宽：width 280→340(+新建明细/编辑里程碑/删除里程碑 3 按钮避免挤换行)
 - ql-20260721-005-5d8e | /ppm/milestone-details 明细子表加计划开始/结束时间列：DetailLevelTable「计划工时」列后新增「计划开始」「计划结束」两列(fmtDate 回显 plan_begin_time/plan_complete_time)
+- ql-20260721-006-c7a1 | /ppm/plan-nodes 按页面样式规范调整：shadcn Button→antd(7处;操作列 link small/删除 danger、新建 primary、重新加载 default、明细/Drawer footer 保存 primary+loading)+1 confirm→Modal.confirm+1 Drawer→Modal(NodeFormDrawer footer 保留)+硬编码色→token(emerald→success、amber→destructive);eslint 0 error tsc 0 error

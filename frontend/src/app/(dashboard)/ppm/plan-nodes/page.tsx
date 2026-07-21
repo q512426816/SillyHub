@@ -16,10 +16,11 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Drawer,
+  Button,
   Form,
   Input,
   InputNumber,
+  Modal,
   Switch,
   Table,
   type TableProps,
@@ -27,7 +28,6 @@ import {
   message,
 } from "antd";
 
-import { Button } from "@/components/ui/button";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import {
   PpmDictSelect,
@@ -118,14 +118,23 @@ export default function PlanNodesPage() {
   };
 
   const handleDeleteNode = async (node: PlanNode) => {
-    if (!confirm(`删除模板「${node.overall_stage}」?此操作不可恢复。`)) return;
-    try {
-      await deletePlanNode(node.id);
-      showToast(true, "已删除");
-      await load();
-    } catch (err) {
-      showToast(false, err instanceof ApiError ? err.message : "删除失败");
-    }
+    Modal.confirm({
+      title: `删除模板「${node.overall_stage}」?`,
+      content: "此操作不可恢复。",
+      okText: "确认删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      maskClosable: false,
+      onOk: async () => {
+        try {
+          await deletePlanNode(node.id);
+          showToast(true, "已删除");
+          await load();
+        } catch (err) {
+          showToast(false, err instanceof ApiError ? err.message : "删除失败");
+        }
+      },
+    });
   };
 
   const columns: TableProps<PlanNode>["columns"] = [
@@ -166,16 +175,16 @@ export default function PlanNodesPage() {
       render: (_v: unknown, n: PlanNode) => (
         <div className="flex justify-center whitespace-nowrap gap-1">
           <Button
-            size="sm"
-            variant="ghost"
+            size="small"
+            type="link"
             onClick={() => setDrawer({ open: true, mode: "edit", node: n })}
           >
             编辑
           </Button>
           <Button
-            size="sm"
-            variant="ghost"
-            className="text-red-600 hover:text-red-700"
+            size="small"
+            type="link"
+            danger
             onClick={() => void handleDeleteNode(n)}
           >
             删除
@@ -196,7 +205,7 @@ export default function PlanNodesPage() {
         <div
           className={`rounded border px-3 py-2 text-xs ${
             toast.ok
-              ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+              ? "border-success/30 bg-success/10 text-success"
               : "border-destructive/30 bg-red-50 text-destructive"
           }`}
         >
@@ -208,7 +217,7 @@ export default function PlanNodesPage() {
         {/* 顶部按钮行:右对齐(新建模板) */}
         <div className="mb-2 flex items-center justify-end gap-2">
           <Button
-            size="sm"
+            type="primary"
             onClick={() => setDrawer({ open: true, mode: "create" })}
           >
             + 新建模板
@@ -219,8 +228,6 @@ export default function PlanNodesPage() {
           <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
             {error}
             <Button
-              size="sm"
-              variant="outline"
               className="ml-3"
               onClick={() => void load()}
             >
@@ -469,14 +476,15 @@ function DetailsSubTable({
         </h3>
         <div className="flex items-center gap-2">
           {isDirty && (
-            <span className="text-[11px] text-amber-600">有未保存修改</span>
+            <span className="text-[11px] text-destructive">有未保存修改</span>
           )}
           <Button
-            size="sm"
-            disabled={saving || !isDirty}
+            type="primary"
+            loading={saving}
+            disabled={!isDirty}
             onClick={() => void handleSave()}
           >
-            {saving ? "保存中…" : "保存"}
+            保存
           </Button>
         </div>
       </div>
@@ -567,20 +575,20 @@ function NodeFormDrawer({
   };
 
   return (
-    <Drawer
+    <Modal
       title={mode === "create" ? "新建模板" : "编辑模板"}
       open
-      onClose={onClose}
+      onCancel={onClose}
       width={460}
       destroyOnClose
       maskClosable={false}
       footer={
         <div className="flex justify-end gap-2">
-          <Button size="sm" variant="outline" onClick={onClose}>
+          <Button onClick={onClose}>
             取消
           </Button>
-          <Button size="sm" disabled={busy} onClick={() => void submit()}>
-            {busy ? "保存中…" : "保存"}
+          <Button type="primary" loading={busy} onClick={() => void submit()}>
+            保存
           </Button>
         </div>
       }
@@ -617,6 +625,6 @@ function NodeFormDrawer({
           <Switch checkedChildren="有" unCheckedChildren="无" />
         </Form.Item>
       </Form>
-    </Drawer>
+    </Modal>
   );
 }

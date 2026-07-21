@@ -29,3 +29,9 @@ created_at: 2026-07-21T08:48:56
 关联变更：（无）
 文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
 结果：明细子表(DetailLevelTable)在「计划工时」列后新增「计划开始」「计划结束」两列(width 120,fmtDate 回显 plan_begin_time/plan_complete_time)。tsc 0 error milestone-details 24测试通过。
+
+## ql-20260721-006-c7a1 | 2026-07-21 11:10:00 | /ppm/plan-nodes 按页面样式规范调整(按钮antd化+Drawer→Modal+删除确认+颜色token)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/plan-nodes/page.tsx
+结果：shadcn Button→antd(7处;操作列 ghost→link small/删除 danger、新建→primary、重新加载→default、明细保存→primary+loading、Drawer footer 保存→primary+loading)+1处原生 confirm→Modal.confirm+1个 Drawer→Modal(NodeFormDrawer footer 保留;onClose→onCancel)+硬编码色→token(emerald→success、amber→destructive、删除红随 danger;bg-red-50 错误语境保留)。eslint 0 error tsc 0 error。Table 保留(带 expandable)。
