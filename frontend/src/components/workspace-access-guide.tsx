@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api";
 import {
   listDaemonInstances,
@@ -15,6 +14,7 @@ import {
   upsertMyBinding,
   type MemberBindingUpsertRequest,
 } from "@/lib/workspace-binding";
+import WorkspacePathPicker from "@/components/workspace-path-picker";
 
 /**
  * 已绑定成员回填的当前值（编辑模式 initial）。
@@ -177,15 +177,15 @@ export function WorkspaceAccessGuide({
           )}
         </div>
         <div className="space-y-1">
-          <label htmlFor="rootPath" className="text-xs font-medium">
+          <label className="text-xs font-medium">
             本地项目路径
           </label>
-          <Input
-            id="rootPath"
-            placeholder="/Users/you/code/project"
+          <WorkspacePathPicker
+            daemonId={daemonId}
             value={rootPath}
-            onChange={(e) => setRootPath(e.target.value)}
-            className="text-xs"
+            onChange={setRootPath}
+            placeholder="/Users/you/code/project"
+            inputClassName="text-xs"
           />
         </div>
       </div>

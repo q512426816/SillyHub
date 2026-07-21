@@ -4,11 +4,10 @@ import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { DaemonDirBrowser } from "@/components/daemon-dir-browser";
+import { WorkspacePathPicker } from "@/components/workspace-path-picker";
 import { normalizeClientPath } from "@/lib/client-path";
 import {
   listDaemonInstances,
-  listDaemonRuntimes,
   PROVIDER_META,
   type DaemonInstanceRead,
 } from "@/lib/daemon";
@@ -33,9 +32,6 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
   // 下拉展示守护进程实体（含全部 provider），value=inst.id；不再按 runtime 一项一条。
   const [instances, setInstances] = useState<DaemonInstanceRead[]>([]);
   const [daemonId, setDaemonId] = useState<string>("");
-  // list-dir RPC 仍走 runtime 维度路由（/runtimes/{runtime_id}/list-dir，内部解析 daemon_id）。
-  // 选 daemon 后从此 daemon 的 online providers 中取第一个 runtime_id 用于路径浏览。
-  const [browseRuntimeId, setBrowseRuntimeId] = useState<string>("");
   const [daemonRootPath, setDaemonRootPath] = useState("");
   // spec 同步策略（2026-06-28-daemon-client-spec-sync-strategy）：daemon-client workspace
   // 创建时用户可选源项目已有 .sillyspec 如何进入平台。默认 platform-managed 零回归。
@@ -48,25 +44,6 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
       .then(setInstances)
       .catch(() => setInstances([]));
   }, []);
-
-  // task-10/11 补遗：选 daemon 后解析该 daemon 下第一个 online runtime_id 供 list-dir 浏览。
-  // list-dir RPC 端点仍按 runtime_id 路由（/runtimes/{runtime_id}/list-dir），内部解析 daemon_id；
-  // 创建则按 daemon_id 走 WorkspaceService.create 建 member binding 行。
-  useEffect(() => {
-    if (!daemonId) {
-      setBrowseRuntimeId("");
-      return;
-    }
-    void listDaemonRuntimes()
-      .then((all) => {
-        const hit = all.find(
-          (r) =>
-            r.daemon_instance_id === daemonId && r.status === "online",
-        );
-        setBrowseRuntimeId(hit?.id ?? "");
-      })
-      .catch(() => setBrowseRuntimeId(""));
-  }, [daemonId]);
 
   const handleCreateDaemonClient = async () => {
     if (!daemonId || !daemonRootPath) return;
@@ -139,35 +116,13 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
               </p>
             )}
           </div>
-          {daemonId && browseRuntimeId && (
-            <DaemonDirBrowser
-              runtimeId={browseRuntimeId}
-              onSelect={(p) => setDaemonRootPath(normalizeClientPath(p))}
-              selectedPath={daemonRootPath}
-            />
-          )}
-          {daemonId && !browseRuntimeId && (
-            <div className="space-y-1.5">
-              <label
-                className="text-xs font-medium text-muted-foreground"
-                htmlFor="daemon-root-path-manual"
-              >
-                守护进程暂无在线智能体，请手动填写项目路径
-              </label>
-              <Input
-                id="daemon-root-path-manual"
-                value={daemonRootPath}
-                onChange={(e) =>
-                  setDaemonRootPath(normalizeClientPath(e.target.value))
-                }
-                placeholder="C:\\path\\to\\repo  或  /abs/path/to/repo"
-                disabled={phase === "creating"}
-              />
-              <p className="text-[11px] text-amber-600">
-                无法浏览目录（守护进程无在线 provider runtime）；请直接填写绝对路径后创建。
-              </p>
-            </div>
-          )}
+          <WorkspacePathPicker
+            daemonId={daemonId}
+            value={daemonRootPath}
+            onChange={(p) => setDaemonRootPath(normalizeClientPath(p))}
+            placeholder="C:\\path\\to\\repo"
+            inputClassName="text-sm"
+          />
           {daemonRootPath && (
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground" htmlFor="ws-name-d">

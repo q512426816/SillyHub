@@ -16,6 +16,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("@/lib/daemon", () => ({
   listDaemonInstances: vi.fn(),
+  listDaemonRuntimes: vi.fn().mockResolvedValue([]),
   PROVIDER_META: {
     claude: { label: "Claude Code", icon: "🟣", color: "bg-purple-100" },
     cursor: { label: "Cursor", icon: "🟡", color: "bg-amber-100" },
@@ -106,7 +107,7 @@ describe("WorkspaceAccessGuide", () => {
     // 等下拉加载完
     await screen.findByLabelText("绑定守护进程");
     // 填本地路径
-    fireEvent.change(screen.getByLabelText("本地项目路径"), {
+    fireEvent.change(screen.getByPlaceholderText("/Users/you/code/project"), {
       target: { value: "/Users/me/code" },
     });
     // 选 daemon
@@ -164,7 +165,7 @@ describe("WorkspaceAccessGuide", () => {
       expect(daemonSelect.value).toBe("inst-mbp");
       // 路径回填
       expect(
-        (screen.getByLabelText("本地项目路径") as HTMLInputElement).value,
+        (screen.getByPlaceholderText("/Users/you/code/project") as HTMLInputElement).value,
       ).toBe("/Users/me/old-code");
       // 编辑模式按钮文案
       expect(
@@ -205,7 +206,7 @@ describe("WorkspaceAccessGuide", () => {
         target: { value: "inst-desktop" },
       });
       // 改路径
-      fireEvent.change(screen.getByLabelText("本地项目路径"), {
+      fireEvent.change(screen.getByPlaceholderText("/Users/you/code/project"), {
         target: { value: "/Users/me/new-code" },
       });
       // 点保存修改
