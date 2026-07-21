@@ -55,6 +55,7 @@ export function ProblemDrawer({
       onCancel={onClose}
       destroyOnClose
       maskClosable={false}
+      footer={null}
     >
       <ProblemCreateForm
         problem={mode === "edit" ? problem : undefined}
