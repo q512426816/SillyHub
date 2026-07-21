@@ -444,7 +444,7 @@ export default function MilestoneDetailsPage() {
         title: "操作",
         key: "actions",
         align: "center",
-        width: 280,
+        width: 340,
         render: (_v: unknown, n: PsPlanNode) => (
           <div className="flex flex-wrap justify-center gap-1">
             <Button

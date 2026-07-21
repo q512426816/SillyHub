@@ -17,3 +17,9 @@ created_at: 2026-07-21T08:48:56
 关联变更：（无）
 文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
 结果：第二批——3个 Drawer→Modal(模块 extra 按钮→footer、明细 extra 状态Tag→title 内联 footer 保留、里程碑 footer 保留);统一 onClose→onCancel、补 maskClosable={false}、删 Drawer import、</Drawer>→</Modal>。eslint 0 error(19既有warning) tsc 0 error milestone-details 24测试通过。
+
+## ql-20260721-004-a3f2 | 2026-07-21 10:12:00 | /ppm/milestone-details 主表操作列(+新建明细/编辑里程碑/删除里程碑)加宽
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
+结果：主表(里程碑)操作列 width 280→340(+新建明细/编辑里程碑/删除里程碑 3 按钮加宽,避免挤换行)。纯列宽数字改动。
