@@ -38,9 +38,6 @@
  *   (+ cost_adjustment         成本调剂)
  *   (+ adjustment_person_days  调剂人天)
  *
- * 状态:
- *   18 status                  完成状态 (Input)
- *
  * 走 AntD Drawer + Form,提交时按 create/edit 分流调用 createProjectPlan / updateProjectPlan。
  *
  * 设计依据:tasks/task-03.md §17 字段表单 + 源 ProjectPlanForm.vue。
@@ -84,7 +81,6 @@ interface FormValues {
   budget_person_days?: number | null;
   actual_consumption_person_days?: number | null;
   remaining_available_person_days?: number | null;
-  status?: string;
   total_cost?: number | null;
   labor_cost?: number | null;
   remaining_cost?: number | null;
@@ -158,7 +154,6 @@ export function PpmProjectPlanForm({
         remaining_available_person_days: numOr(
           plan.remaining_available_person_days,
         ),
-        status: plan.status,
         total_cost: numOr(plan.total_cost),
         labor_cost: numOr(plan.labor_cost),
         remaining_cost: numOr(plan.remaining_cost),
@@ -168,7 +163,6 @@ export function PpmProjectPlanForm({
       });
     } else {
       form.resetFields();
-      form.setFieldsValue({ status: "" });
     }
   }, [open, mode, plan, form]);
 
@@ -232,7 +226,6 @@ export function PpmProjectPlanForm({
       remaining_available_person_days: numToStr(
         values.remaining_available_person_days,
       ),
-      status: values.status ?? "",
       total_cost: numToStr(values.total_cost),
       labor_cost: numToStr(values.labor_cost),
       remaining_cost: numToStr(values.remaining_cost),
@@ -286,7 +279,6 @@ export function PpmProjectPlanForm({
         form={form}
         layout="vertical"
         requiredMark
-        initialValues={{ status: "" }}
       >
         {/* 基本信息 */}
         <FormSection title="基本信息">
@@ -477,20 +469,15 @@ export function PpmProjectPlanForm({
               />
             </Form.Item>
           </Row2>
-          <Row2>
-            <Form.Item label="调剂人天" name="adjustment_person_days">
-              <InputNumber
-                style={{ width: "100%" }}
-                step={1}
-                min={0}
-                addonAfter="人/天"
-                placeholder="请输入"
-              />
-            </Form.Item>
-            <Form.Item label="完成状态" name="status">
-              <Input placeholder="请输入完成状态" />
-            </Form.Item>
-          </Row2>
+          <Form.Item label="调剂人天" name="adjustment_person_days">
+            <InputNumber
+              style={{ width: "100%" }}
+              step={1}
+              min={0}
+              addonAfter="人/天"
+              placeholder="请输入"
+            />
+          </Form.Item>
           <Form.Item label="模块" name="module">
             <Input.TextArea rows={2} placeholder="请输入模块" />
           </Form.Item>

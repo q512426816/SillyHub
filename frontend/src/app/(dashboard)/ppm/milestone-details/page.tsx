@@ -35,9 +35,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
+  Button,
   Checkbox,
   DatePicker,
-  Drawer,
   Form,
   Input,
   InputNumber,
@@ -51,8 +51,6 @@ import {
   Upload,
 } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
-
-import { Button } from "@/components/ui/button";
 import {
   DataTable,
   PageContainer,
@@ -263,15 +261,23 @@ export default function MilestoneDetailsPage() {
   // P0-7:里程碑主表删除(对照源 OpenPlanNodeForm.handleDelete)。
   const handleDeleteNode = useCallback(
     async (n: PsPlanNode) => {
-      if (!confirm(`删除里程碑「${n.task_theme ?? n.no ?? n.id}」及其所有明细?`))
-        return;
-      try {
-        await deletePsPlanNode(n.id);
-        showToast(true, "已删除里程碑");
-        await reload();
-      } catch (err) {
-        showToast(false, err instanceof ApiError ? err.message : "删除里程碑失败");
-      }
+      Modal.confirm({
+        title: `删除里程碑「${n.task_theme ?? n.no ?? n.id}」及其所有明细?`,
+        content: "该操作不可恢复。",
+        okText: "确认删除",
+        okButtonProps: { danger: true },
+        cancelText: "取消",
+        maskClosable: false,
+        onOk: async () => {
+          try {
+            await deletePsPlanNode(n.id);
+            showToast(true, "已删除里程碑");
+            await reload();
+          } catch (err) {
+            showToast(false, err instanceof ApiError ? err.message : "删除里程碑失败");
+          }
+        },
+      });
     },
     [reload],
   );
@@ -438,12 +444,12 @@ export default function MilestoneDetailsPage() {
         title: "操作",
         key: "actions",
         align: "center",
-        width: 280,
+        width: 340,
         render: (_v: unknown, n: PsPlanNode) => (
           <div className="flex flex-wrap justify-center gap-1">
             <Button
-              size="sm"
-              variant="ghost"
+              size="small"
+              type="link"
               disabled={readOnly}
               title={readOnly ? "只读模式(非项目经理)" : undefined}
               onClick={() =>
@@ -459,8 +465,8 @@ export default function MilestoneDetailsPage() {
               + 新建明细
             </Button>
             <Button
-              size="sm"
-              variant="ghost"
+              size="small"
+              type="link"
               disabled={readOnly}
               title={readOnly ? "只读模式(非项目经理)" : undefined}
               onClick={() =>
@@ -470,9 +476,9 @@ export default function MilestoneDetailsPage() {
               编辑里程碑
             </Button>
             <Button
-              size="sm"
-              variant="ghost"
-              className="text-red-600 hover:text-red-700"
+              size="small"
+              type="link"
+              danger
               disabled={readOnly}
               title={readOnly ? "只读模式(非项目经理)" : undefined}
               onClick={() => void handleDeleteNode(n)}
@@ -585,8 +591,6 @@ export default function MilestoneDetailsPage() {
         {/* 顶部按钮行:右对齐(重置 | 分隔 | 导出 | 新建里程碑 | 刷新) */}
         <div className="mb-2 flex items-center justify-end gap-2">
           <Button
-            size="sm"
-            variant="outline"
             onClick={() => {
               setOverallStageFilter("");
               setDetailedStageFilter("");
@@ -597,22 +601,20 @@ export default function MilestoneDetailsPage() {
           </Button>
           <span className="mx-1 h-6 w-px bg-border" aria-hidden />
           <Button
-            size="sm"
-            variant="outline"
             disabled={exporting}
             onClick={() => void handleExport()}
           >
             {exporting ? "导出中…" : "导出"}
           </Button>
           <Button
-            size="sm"
+            type="primary"
             disabled={readOnly}
             title={readOnly ? "只读模式(非项目经理)" : undefined}
             onClick={() => setMasterDrawer({ open: true, mode: "create" })}
           >
             + 新建里程碑
           </Button>
-          <Button size="sm" variant="outline" onClick={() => void reload()}>
+          <Button onClick={() => void reload()}>
             刷新
           </Button>
         </div>
@@ -656,7 +658,7 @@ export default function MilestoneDetailsPage() {
         <div
           className={`rounded border px-3 py-2 text-xs ${
             toast.ok
-              ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+              ? "border-success/30 bg-success/10 text-success"
               : "border-destructive/30 bg-red-50 text-destructive"
           }`}
         >
@@ -816,15 +818,24 @@ function ModuleLevelTable({
   };
 
   const handleDeleteModule = async (m: PlanNodeModule) => {
-    if (!confirm(`删除模块「${m.module_name ?? m.id}」?`)) return;
-    try {
-      await deletePlanNodeModule(m.id);
-      await reload();
-    } catch (err) {
-      message.error(
-        err instanceof Error ? err.message : "删除模块失败",
-      );
-    }
+    Modal.confirm({
+      title: `删除模块「${m.module_name ?? m.id}」?`,
+      content: "该操作不可恢复。",
+      okText: "确认删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      maskClosable: false,
+      onOk: async () => {
+        try {
+          await deletePlanNodeModule(m.id);
+          await reload();
+        } catch (err) {
+          message.error(
+            err instanceof Error ? err.message : "删除模块失败",
+          );
+        }
+      },
+    });
   };
 
   const moduleColumns = useMemo<TableProps<PlanNodeModule>["columns"]>(
@@ -908,8 +919,8 @@ function ModuleLevelTable({
         render: (_v: unknown, m: PlanNodeModule) => (
           <div className="flex justify-center gap-1">
             <Button
-              size="sm"
-              variant="ghost"
+              size="small"
+              type="link"
               disabled={readOnly}
               title={readOnly ? "只读模式(非项目经理)" : undefined}
               onClick={() => onAddDetail(m.id)}
@@ -917,8 +928,8 @@ function ModuleLevelTable({
               + 新建明细
             </Button>
             <Button
-              size="sm"
-              variant="ghost"
+              size="small"
+              type="link"
               disabled={readOnly}
               title={readOnly ? "只读模式(非项目经理)" : undefined}
               onClick={() =>
@@ -928,9 +939,9 @@ function ModuleLevelTable({
               编辑
             </Button>
             <Button
-              size="sm"
-              variant="ghost"
-              className="text-red-600 hover:text-red-700"
+              size="small"
+              type="link"
+              danger
               disabled={readOnly}
               title={readOnly ? "只读模式(非项目经理)" : undefined}
               onClick={() => void handleDeleteModule(m)}
@@ -981,8 +992,6 @@ function ModuleLevelTable({
         </div>
         <div className="flex items-center gap-2">
           <Button
-            size="sm"
-            variant="outline"
             disabled={readOnly}
             title={readOnly ? "只读模式(非项目经理)" : undefined}
             onClick={() => setModuleDrawer({ open: true, mode: "create" })}
@@ -990,8 +999,6 @@ function ModuleLevelTable({
             + 新建模块
           </Button>
           <Button
-            size="sm"
-            variant="outline"
             disabled={readOnly || !projectId}
             title={
               readOnly
@@ -1171,7 +1178,7 @@ export function ImportModuleModal({
             <span>
               {v}
               {row.duty_unmatched_note ? (
-                <span className="ml-1 text-[10px] text-amber-600">
+                <span className="ml-1 text-[10px] text-destructive">
                   ({row.duty_unmatched_note})
                 </span>
               ) : null}
@@ -1285,10 +1292,10 @@ export function ImportModuleModal({
               className={[
                 "flex-1 border-t-2 px-1 py-2 text-center",
                 done
-                  ? "border-emerald-500 font-medium text-emerald-700"
+                  ? "border-success font-medium text-success"
                   : active
-                    ? "border-blue-600 font-semibold text-blue-700"
-                    : "border-slate-200 text-slate-400",
+                    ? "border-primary font-semibold text-primary"
+                    : "border-border text-muted-foreground",
               ].join(" ")}
             >
               {done ? "✓ " : `${n}. `}
@@ -1311,13 +1318,13 @@ export function ImportModuleModal({
           disabled={uploading}
         >
           <p className="text-3xl">📄</p>
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-muted-foreground">
             {uploading ? "解析中…" : "点击或拖拽 Excel 文件到此"}
           </p>
-          <p className="mt-1 text-xs text-slate-400">
+          <p className="mt-1 text-xs text-muted-foreground">
             支持 .xlsx，参考「项目详细开发计划」格式
           </p>
-          <p className="mt-2 text-sm font-semibold text-blue-600">
+          <p className="mt-2 text-sm font-semibold text-primary">
             选择文件开始预览
           </p>
         </Upload.Dragger>
@@ -1326,7 +1333,7 @@ export function ImportModuleModal({
       {step === 2 && preview ? (
         <div>
           <div className="mb-1 text-sm font-semibold">① 勾选要导入的 Sheet</div>
-          <div className="mb-3 rounded-lg border border-slate-200 px-4 py-1">
+          <div className="mb-3 rounded-lg border border-border px-4 py-1">
             {preview.sheets.map((s) => (
               <div
                 key={s.name}
@@ -1342,7 +1349,7 @@ export function ImportModuleModal({
                   }
                 >
                   <span className="text-sm">{s.name}</span>
-                  <span className="ml-2 text-xs text-slate-400">
+                  <span className="ml-2 text-xs text-muted-foreground">
                     （{s.plan_type} · {s.row_count} 行）
                   </span>
                 </Checkbox>
@@ -1350,7 +1357,7 @@ export function ImportModuleModal({
             ))}
           </div>
           <div className="mb-1 text-sm font-semibold">② 解析预览</div>
-          <div className="overflow-auto rounded-lg border border-slate-200">
+          <div className="overflow-auto rounded-lg border border-border">
             <Table<ImportPreviewRow>
               size="small"
               rowKey={(r, idx) => `${r.sheet_name}-${idx}`}
@@ -1362,22 +1369,21 @@ export function ImportModuleModal({
             />
           </div>
           <div className="mt-2 flex items-center justify-between">
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-muted-foreground">
               将提交 {validCount} 条可导入行
               {invalidCount > 0 ? `（${invalidCount} 条不可导入将跳过）` : ""}
             </span>
             <div className="flex gap-2">
               <Button
-                size="sm"
-                variant="outline"
                 disabled={committing}
                 onClick={() => setStep(1)}
               >
                 上一步
               </Button>
               <Button
-                size="sm"
-                disabled={committing || validCount === 0}
+                type="primary"
+                loading={committing}
+                disabled={validCount === 0}
                 onClick={() => void handleCommit()}
               >
                 {committing ? "导入中…" : "确认导入"}
@@ -1389,7 +1395,7 @@ export function ImportModuleModal({
 
       {step === 3 && result ? (
         <div>
-          <div className="mb-2 font-semibold text-emerald-700">
+          <div className="mb-2 font-semibold text-success">
             ✓ 导入完成
           </div>
           <div className="mb-4 flex flex-wrap gap-3">
@@ -1415,7 +1421,7 @@ export function ImportModuleModal({
             />
           </div>
           {result.failed_rows && result.failed_rows.length > 0 ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+            <div className="rounded-lg border border-destructive/30 bg-red-50 p-3 text-xs text-destructive">
               <b>入库失败行：</b>
               <ul className="mt-1 list-disc pl-5">
                 {result.failed_rows.map((f, i) => (
@@ -1424,11 +1430,11 @@ export function ImportModuleModal({
               </ul>
             </div>
           ) : null}
-          <div className="mt-4 flex items-center justify-between border-t border-slate-200 pt-3">
-            <span className="text-xs text-slate-500">
+          <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
+            <span className="text-xs text-muted-foreground">
               明细状态默认为「草稿」，可在明细列表里逐条提交。
             </span>
-            <Button size="sm" onClick={handleClose}>
+            <Button onClick={handleClose}>
               关闭
             </Button>
           </div>
@@ -1450,14 +1456,14 @@ function StatBox({
 }) {
   const numCls =
     tone === "amber"
-      ? "text-amber-600"
-      : "text-blue-600";
+      ? "text-destructive"
+      : "text-primary";
   return (
-    <div className="min-w-[120px] flex-1 rounded-lg border border-slate-200 bg-slate-50 p-3 text-center">
+    <div className="min-w-[120px] flex-1 rounded-lg border border-border bg-muted/40 p-3 text-center">
       <div className={`text-2xl font-bold leading-tight ${numCls}`}>
         {value}
       </div>
-      <div className="mt-1 text-xs text-slate-500">{label}</div>
+      <div className="mt-1 text-xs text-muted-foreground">{label}</div>
     </div>
   );
 }
@@ -1527,20 +1533,20 @@ function ModuleFormDrawer({
   };
 
   return (
-    <Drawer
+    <Modal
       open={open}
       title={mode === "create" ? "新建模块" : "编辑模块"}
       width={520}
-      onClose={onClose}
+      onCancel={onClose}
       destroyOnClose
       maskClosable={false}
-      extra={
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={onClose}>
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>
             取消
           </Button>
-          <Button size="sm" disabled={saving} onClick={() => void submit()}>
-            {saving ? "保存中…" : "保存"}
+          <Button type="primary" loading={saving} onClick={() => void submit()}>
+            保存
           </Button>
         </div>
       }
@@ -1594,7 +1600,7 @@ function ModuleFormDrawer({
           )}
         </Form.Item>
       </Form>
-    </Drawer>
+    </Modal>
   );
 }
 
@@ -1686,15 +1692,24 @@ function DetailLevelTable({
   }, [details, detailedStageFilter, taskThemeFilter]);
 
   const handleDelete = async (d: PsPlanNodeDetail) => {
-    if (!confirm("删除该里程碑明细?")) return;
-    try {
-      await deletePsPlanNodeDetail(d.id);
-      await reload();
-    } catch (err) {
-      message.error(
-        err instanceof Error ? err.message : "删除里程碑明细失败",
-      );
-    }
+    Modal.confirm({
+      title: "删除该里程碑明细?",
+      content: "该操作不可恢复。",
+      okText: "确认删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      maskClosable: false,
+      onOk: async () => {
+        try {
+          await deletePsPlanNodeDetail(d.id);
+          await reload();
+        } catch (err) {
+          message.error(
+            err instanceof Error ? err.message : "删除里程碑明细失败",
+          );
+        }
+      },
+    });
   };
 
   const columns = useMemo<TableProps<PsPlanNodeDetail>["columns"]>(
@@ -1739,6 +1754,20 @@ function DetailLevelTable({
         dataIndex: "plan_workload",
         key: "plan_workload",
         render: (v: string | null) => v ?? "—",
+      },
+      {
+        title: "计划开始",
+        dataIndex: "plan_begin_time",
+        key: "plan_begin_time",
+        width: 120,
+        render: (v: string | null) => fmtDate(v),
+      },
+      {
+        title: "计划结束",
+        dataIndex: "plan_complete_time",
+        key: "plan_complete_time",
+        width: 120,
+        render: (v: string | null) => fmtDate(v),
       },
       {
         title: "执行人",
@@ -1793,13 +1822,13 @@ function DetailLevelTable({
         width: 280,
         render: (_v: unknown, d: PsPlanNodeDetail) => (
           <div className="flex flex-wrap justify-center gap-1">
-            <Button size="sm" variant="ghost" onClick={() => onOpenDetail(d)}>
+            <Button size="small" type="link" onClick={() => onOpenDetail(d)}>
               详情
             </Button>
             {(d.status === "draft" || d.status === "rejected") && (
               <Button
-                size="sm"
-                variant="ghost"
+                size="small"
+                type="link"
                 onClick={() => onOpenDetail(d)}
               >
                 编辑
@@ -1811,8 +1840,8 @@ function DetailLevelTable({
                 不改明细/任务状态。 */}
             {d.status === "done" && (
               <Button
-                size="sm"
-                variant="ghost"
+                size="small"
+                type="link"
                 disabled={readOnly}
                 title={readOnly ? "只读模式(非项目经理)" : undefined}
                 onClick={() => onOpenDetail(d, "changeInfo")}
@@ -1821,9 +1850,9 @@ function DetailLevelTable({
               </Button>
             )}
             <Button
-              size="sm"
-              variant="ghost"
-              className="text-red-600 hover:text-red-700"
+              size="small"
+              type="link"
+              danger
               disabled={readOnly}
               title={readOnly ? "只读模式(非项目经理)" : undefined}
               onClick={() => void handleDelete(d)}
@@ -1844,8 +1873,6 @@ function DetailLevelTable({
           明细{moduleId ? ` · 模块 ${moduleName || "(未命名模块)"}` : ""}
         </span>
         <Button
-          size="sm"
-          variant="outline"
           disabled={readOnly}
           title={readOnly ? "只读模式(非项目经理)" : undefined}
           onClick={onAddDetail}
@@ -2269,45 +2296,47 @@ function DetailDrawer({
   const showSubmit = mode !== "view";
 
   return (
-    <Drawer
-      title={title}
+    <Modal
+      title={
+        <span className="flex items-center gap-2">
+          {title}
+          {detail ? (
+            <Tag color={PLAN_DETAIL_STATUS_COLOR[detail.status] ?? "default"}>
+              {PLAN_DETAIL_STATUS_TEXT[detail.status] ?? detail.status}
+            </Tag>
+          ) : null}
+        </span>
+      }
       open
-      onClose={onClose}
+      onCancel={onClose}
       width={720}
       destroyOnClose
-      extra={
-        detail ? (
-          <Tag color={PLAN_DETAIL_STATUS_COLOR[detail.status] ?? "default"}>
-            {PLAN_DETAIL_STATUS_TEXT[detail.status] ?? detail.status}
-          </Tag>
-        ) : null
-      }
+      maskClosable={false}
       footer={
         <div className="flex items-center justify-end gap-2">
-          <Button size="sm" variant="outline" onClick={onClose}>
+          <Button onClick={onClose}>
             关闭
           </Button>
           {showSubmit && (mode === "create" || mode === "edit") ? (
             <>
               <Button
-                size="sm"
-                variant="outline"
-                disabled={busy}
+                type="primary"
+                loading={busy}
                 onClick={() => void submit()}
               >
-                {busy ? "提交中…" : submitText}
+                {submitText}
               </Button>
               <Button
-                size="sm"
-                disabled={busy}
+                type="primary"
+                loading={busy}
                 onClick={() => void submit(true)}
               >
-                {busy ? "提交中…" : submitEditOrCreateText}
+                {submitEditOrCreateText}
               </Button>
             </>
           ) : showSubmit ? (
-            <Button size="sm" disabled={busy} onClick={() => void submit()}>
-              {busy ? "提交中…" : submitText}
+            <Button type="primary" loading={busy} onClick={() => void submit()}>
+              {submitText}
             </Button>
           ) : null}
         </div>
@@ -2669,7 +2698,7 @@ function DetailDrawer({
       )}
 
       {err && <p className="mt-2 text-[11px] text-destructive">{err}</p>}
-    </Drawer>
+    </Modal>
   );
 }
 
@@ -2801,19 +2830,20 @@ function PsPlanNodeDrawer({
   };
 
   return (
-    <Drawer
+    <Modal
       title={mode === "create" ? "新建里程碑" : "编辑里程碑"}
       open={open}
-      onClose={onClose}
+      onCancel={onClose}
       width={640}
       destroyOnClose
+      maskClosable={false}
       footer={
         <div className="flex justify-end gap-2">
-          <Button size="sm" variant="outline" onClick={onClose}>
+          <Button onClick={onClose}>
             关闭
           </Button>
-          <Button size="sm" disabled={busy} onClick={() => void submit()}>
-            {busy ? "保存中…" : "保存"}
+          <Button type="primary" loading={busy} onClick={() => void submit()}>
+            保存
           </Button>
         </div>
       }
@@ -2896,6 +2926,6 @@ function PsPlanNodeDrawer({
         </div>
       </Form>
       {err && <p className="mt-2 text-[11px] text-destructive">{err}</p>}
-    </Drawer>
+    </Modal>
   );
 }
