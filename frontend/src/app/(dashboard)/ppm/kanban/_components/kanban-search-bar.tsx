@@ -9,7 +9,7 @@
  *  - 项目筛选(PpmUserSelect res=project)→ store.filters.project_id
  *  - 关键词输入 → store.filters.keyword
  *  - 截止时间范围(RangePicker)→ store.filters.start_date/end_date
- *  - 顶部按钮:重置 / 新建任务(右对齐,对齐 project-plans)
+ *  - 顶部按钮:重置
  *
  * 任一筛选变化即 setFilters + 触发 store.fetchUsers/fetchTasks。
  */
@@ -38,11 +38,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-export function KanbanSearchBar({
-  onCreateTask,
-}: {
-  onCreateTask: () => void;
-}) {
+export function KanbanSearchBar() {
   const filters = useKanbanStore((s) => s.filters);
   const setFilters = useKanbanStore((s) => s.setFilters);
   const resetFilters = useKanbanStore((s) => s.resetFilters);
@@ -100,12 +96,8 @@ export function KanbanSearchBar({
 
   return (
     <div>
-      {/* 顶部按钮行(D-006):页面按钮(新建任务)左 | 基础组(重置)最右 */}
+      {/* 顶部重置按钮 */}
       <div className="mb-2 flex items-center justify-end gap-2">
-        <Button type="primary" onClick={onCreateTask}>
-          新建任务
-        </Button>
-        <span className="mx-1 h-6 w-px bg-border" aria-hidden />
         <Button onClick={onReset}>重置</Button>
       </div>
 

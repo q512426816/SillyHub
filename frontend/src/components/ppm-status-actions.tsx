@@ -79,13 +79,6 @@ export const PROBLEM_TYPE_TEXT: Record<string, string> = {
   change: "变更",
 };
 
-/** 问题变更状态 → 中文 (ProblemChangeStatus 1-3)。 */
-export const PROBLEM_CHANGE_STATUS_TEXT: Record<string, string> = {
-  "1": "审核中",
-  "2": "已完成",
-  "3": "已作废",
-};
-
 // ===========================================================================
 // 里程碑明细操作按钮
 // ===========================================================================

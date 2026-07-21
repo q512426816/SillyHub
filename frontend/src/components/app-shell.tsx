@@ -97,7 +97,6 @@ const MENU_ICON_MAP: Record<string, LucideIcon> = {
   "/ppm/plan-nodes": ListChecks,
   "/ppm/milestone-details": Flag,
   "/ppm/problem-list": AlertTriangle,
-  "/ppm/problem-changes": GitBranch,
   "/ppm/task-plans": ListTodo,
   "/ppm/work-hours": Clock,
   "/ppm/work-hour-statistics": BarChart3,

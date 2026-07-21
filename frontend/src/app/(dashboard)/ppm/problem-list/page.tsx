@@ -263,6 +263,15 @@ export default function ProblemListPage() {
         v ?? (p.duty_user_id ? p.duty_user_id : "待指派"),
     },
     {
+      title: "处置人",
+      dataIndex: "now_handle_user_name",
+      key: "now_handle_user_name",
+      width: 100,
+      ellipsis: true,
+      render: (v: string | null, p: ProblemList) =>
+        v ?? (p.now_handle_user ? p.now_handle_user : "—"),
+    },
+    {
       title: "项目",
       dataIndex: "project_name",
       key: "project_name",

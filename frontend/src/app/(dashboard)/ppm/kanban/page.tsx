@@ -4,7 +4,7 @@
  * 看板主页 — 人员 × 日期矩阵布局(对齐源 task-kanban 矩阵语义)。
  *
  * 布局(自上而下):
- *  - KanbanSearchBar(项目/状态/人员/关键词/截止范围/新建按钮)
+ *  - KanbanSearchBar(项目/状态/人员/关键词/截止范围)
  *  - 顶部一行:KanbanDateNav(上周/本周/下周 + RangePicker)
  *  - 主体两栏:
  *    · 左:KanbanMatrix(纵人员,横日期,单元格=该人该日任务缩略卡)
@@ -18,7 +18,7 @@
  *  - SearchBar 的截止范围决定**任务拉取**的过滤(可选,用户手动选才触发)
  *  - 任务默认全量拉取;DateNav 切换只改矩阵展示列,不重拉
  *
- * 弹窗/抽屉:Create / Edit / Assign / Detail / ContextMenu 全部保留。
+ * 弹窗/抽屉:ContextMenu(仅查看详情) / DetailDrawer。
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import dayjs, { type Dayjs } from "dayjs";
@@ -42,9 +42,6 @@ import { KanbanGantt } from "./_components/kanban-gantt";
 import { KanbanActualGantt } from "./_components/kanban-actual-gantt";
 import { KanbanDateNav } from "./_components/kanban-date-nav";
 import { KanbanWorkHourChart } from "./_components/kanban-work-hour-chart";
-import { KanbanCreateTaskDialog } from "./_components/kanban-create-task-dialog";
-import { KanbanEditTaskDialog } from "./_components/kanban-edit-task-dialog";
-import { KanbanAssignTaskDialog } from "./_components/kanban-assign-task-dialog";
 import {
   KanbanTaskContextMenu,
   type ContextMenuState,
@@ -95,14 +92,6 @@ export default function KanbanPage() {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
   // 弹窗状态
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createDefaultAssignee, setCreateDefaultAssignee] = useState<
-    string | undefined
-  >(undefined);
-  const [editOpen, setEditOpen] = useState(false);
-  const [editTask, setEditTask] = useState<KanbanTaskCard | null>(null);
-  const [assignOpen, setAssignOpen] = useState(false);
-  const [assignTask, setAssignTask] = useState<KanbanTaskCard | null>(null);
   const [detailTask, setDetailTask] = useState<KanbanTaskCard | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
@@ -193,20 +182,6 @@ export default function KanbanPage() {
   const handleContextMenu = (task: KanbanTaskCard, e: React.MouseEvent) => {
     setContextMenu({ task, x: e.clientX, y: e.clientY });
   };
-  const handleEdit = (task: KanbanTaskCard) => {
-    setEditTask(task);
-    setEditOpen(true);
-  };
-  const handleAssign = (task: KanbanTaskCard) => {
-    setAssignTask(task);
-    setAssignOpen(true);
-  };
-
-  const refreshAll = useCallback(async () => {
-    await Promise.all([fetchTasks(), fetchUsers()]).catch(() => {
-      // store 内已 message.error
-    });
-  }, [fetchTasks, fetchUsers]);
 
   return (
     <PageContainer size="full" className="h-full">
@@ -215,12 +190,7 @@ export default function KanbanPage() {
       <Toast toast={toast} />
 
       <SectionCard bodyPadding="p-2">
-        <KanbanSearchBar
-          onCreateTask={() => {
-            setCreateDefaultAssignee(undefined);
-            setCreateOpen(true);
-          }}
-        />
+        <KanbanSearchBar />
         {/* 日期导航条(计划/实际两 tab 共享) */}
         <div className="mt-2 flex items-center justify-between border-t border-border pt-2">
           <KanbanDateNav range={dateRange} onChange={setDateRange} />
@@ -337,37 +307,10 @@ export default function KanbanPage() {
       />
 
       {/* 弹窗 / 抽屉 / 菜单 */}
-      <KanbanCreateTaskDialog
-        open={createOpen}
-        defaultAssigneeId={createDefaultAssignee}
-        onClose={() => setCreateOpen(false)}
-        onSuccess={() => void refreshAll()}
-      />
-      <KanbanEditTaskDialog
-        open={editOpen}
-        task={editTask}
-        onClose={() => {
-          setEditOpen(false);
-          setEditTask(null);
-        }}
-        onSuccess={() => void refreshAll()}
-      />
-      <KanbanAssignTaskDialog
-        open={assignOpen}
-        task={assignTask}
-        onClose={() => {
-          setAssignOpen(false);
-          setAssignTask(null);
-        }}
-        onSuccess={() => void refreshAll()}
-      />
       <KanbanTaskContextMenu
         state={contextMenu}
         onClose={() => setContextMenu(null)}
         onViewDetail={(t) => setDetailTask(t)}
-        onEdit={handleEdit}
-        onAssign={handleAssign}
-        onDeleted={() => void refreshAll()}
       />
       <KanbanTaskDetailDrawer
         task={detailTask}

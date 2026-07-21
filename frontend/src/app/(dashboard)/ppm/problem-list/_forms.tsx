@@ -105,6 +105,7 @@ interface ProblemCreateValues {
   find_time?: Dayjs;
   work_type?: string;
   duty_user_id?: string;
+  now_handle_user?: string;
   work_load?: string;
   plan_start_time?: Dayjs;
   plan_end_time?: Dayjs;
@@ -180,6 +181,7 @@ export function ProblemCreateForm({
         | (typeof WORK_TYPE_OPTIONS)[number]["value"]
         | undefined,
       duty_user_id: problem?.duty_user_id ?? undefined,
+      now_handle_user: problem?.now_handle_user ?? undefined,
       work_load: problem?.work_load ?? undefined,
       plan_start_time:
         problem?.plan_start_time != null && problem.plan_start_time !== ""
@@ -258,6 +260,7 @@ export function ProblemCreateForm({
           find_time: payload.find_time,
           work_type: payload.work_type,
           duty_user_id: payload.duty_user_id,
+          now_handle_user: v.now_handle_user ?? null,
           plan_start_time: payload.plan_start_time,
           plan_end_time: payload.plan_end_time,
           audit_user_id: payload.audit_user_id,
@@ -414,6 +417,20 @@ export function ProblemCreateForm({
           }
         />
       </Form.Item>
+
+      {/* 处置人：编辑模式可调整，新建模式不展示（处置人由流程自动推进） */}
+      {isEdit && (
+        <Form.Item
+          label="处置人"
+          name="now_handle_user"
+        >
+          <PpmUserSelect
+            res="projectMember"
+            searchData={{ pm_project_id: projectId ?? null }}
+            placeholder="请选择处置人（可选）"
+          />
+        </Form.Item>
+      )}
 
       <Form.Item
         label="预计工作量"

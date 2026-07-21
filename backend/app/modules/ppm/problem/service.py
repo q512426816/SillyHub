@@ -338,6 +338,8 @@ class ProblemService:
     ) -> PpmProblemList:
         obj = await self.get_problem(item_id)
         await self._assert_can_operate(obj, user)
+        # 更新时也反查 name（新增 now_handle_user_name 可能为 null）
+        await self._backfill_names(data)
         return await _Crud(self._session, PpmProblemList).update(item_id, data)
 
     async def delete_problem(self, item_id: uuid.UUID, *, user: User) -> None:
@@ -417,10 +419,10 @@ class ProblemService:
         return await _Crud(self._session, PpmProblemChange).create(data)
 
     async def _backfill_names(self, data: dict[str, Any]) -> None:
-        """创建/变更落库前补 project_name + duty_user_name（仅当为空时）。
+        """创建/变更落库前补 project_name + duty_user_name + now_handle_user_name（仅当为空时）。
 
         前端 PpmUserSelect 的 onChange 只回传 id 不回传 label，提交 payload
-        的 project_name/duty_user_name 恒为 null，导致列表"项目"/"责任人"列
+        的 project_name/duty_user_name/now_handle_user_name 恒为 null，导致列表"项目"/"责任人"/"处置人"列
         回退显示 UUID。此处按 id 反查补全；历史 migrate 数据带 name 不受
         影响（仅空时补，不覆盖已传入值）。
         """
@@ -436,6 +438,15 @@ class ProblemService:
                 user = await self._session.get(User, duty_id)
                 if user is not None:
                     data["duty_user_name"] = user.display_name
+        # 处置人反查: now_handle_user 是 String(逗号分隔),仅单用户时反查
+        if not data.get("now_handle_user_name") and data.get("now_handle_user"):
+            raw = data["now_handle_user"]
+            if raw and "," not in raw:
+                uid = _safe_uuid(raw)
+                if uid is not None:
+                    user = await self._session.get(User, uid)
+                    if user is not None:
+                        data["now_handle_user_name"] = user.display_name
 
     async def get_change(self, item_id: uuid.UUID) -> PpmProblemChange:
         return await _Crud(self._session, PpmProblemChange).get(item_id)

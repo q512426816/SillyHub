@@ -420,16 +420,6 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
   },
   {
     section: "ppm",
-    menuKey: "ppm-problem-changes",
-    menuLabel: "问题变更",
-    icon: "\u{1F504}",
-    href: "/ppm/problem-changes",
-    absolute: true,
-    matchPattern: "/ppm/problem-changes",
-    permissions: [{ key: "ppm:problem-change:read", name: "问题变更查看" }],
-  },
-  {
-    section: "ppm",
     menuKey: "ppm-task-plans",
     menuLabel: "任务计划",
     icon: "\u{1F4DD}",

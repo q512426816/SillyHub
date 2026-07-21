@@ -79,7 +79,7 @@ const BACKEND_PERMISSION_KEYS = [
   "organization:write",
   "role:read",
   "role:write",
-  // PPM 项目与问题管理 (17, change 2026-07-20-ppm-menu-unique-keys 扩容：8 旧 + 9 菜单专属)
+  // PPM 项目与问题管理 (16, 已删问题变更)
   "ppm:project:read",
   "ppm:customer:read",
   "ppm:plan:read",
@@ -88,7 +88,7 @@ const BACKEND_PERMISSION_KEYS = [
   "ppm:work-hour:read",
   "ppm:work-hour:stat",
   "ppm:kanban:view",
-  // ── 菜单专属权限（14 菜单各独立 key；plan/problem/task:read 3 旧 key 悬空保留）──
+  // ── 菜单专属权限（13 菜单各独立 key；plan/problem/task:read 3 旧 key 悬空保留）──
   "ppm:workbench:view",
   "ppm:project-member:read",
   "ppm:project-stakeholder:read",
@@ -96,11 +96,10 @@ const BACKEND_PERMISSION_KEYS = [
   "ppm:plan-node:read",
   "ppm:milestone-detail:read",
   "ppm:problem-list:read",
-  "ppm:problem-change:read",
   "ppm:task-plan:read",
 ] as const;
 
-/** 34 个 menuKey 期望集合（FR-02 19 条 + Agent 团队 1 + PPM 14 条） */
+/** 33 个 menuKey 期望集合（FR-02 19 条 + Agent 团队 1 + PPM 13 条） */
 const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "workspaces",
   "components",
@@ -122,7 +121,7 @@ const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "roles",
   "runtimes",
   "settings",
-  // PPM 14 条
+  // PPM 13 条（已删问题变更）
   "ppm-workbench",
   "ppm-projects",
   "ppm-customers",
@@ -132,7 +131,6 @@ const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "ppm-plan-nodes",
   "ppm-milestone-details",
   "ppm-problem-list",
-  "ppm-problem-changes",
   "ppm-task-plans",
   "ppm-work-hours",
   "ppm-work-hour-statistics",
@@ -148,8 +146,8 @@ const VALID_SECTIONS: ReadonlySet<string> = new Set([
 ]);
 
 describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
-  it("MENU_PERMISSION_GROUPS 长度 === 34", () => {
-    expect(MENU_PERMISSION_GROUPS).toHaveLength(34);
+  it("MENU_PERMISSION_GROUPS 长度 === 33", () => {
+    expect(MENU_PERMISSION_GROUPS).toHaveLength(33);
   });
 
   it("所有 menuKey 互不重复，且严格等于 FR-02 预定义清单", () => {
@@ -164,7 +162,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("section 分布：overview 8 / management 7 / ppm 14 / admin 3 / system 2", () => {
+  it("section 分布：overview 8 / management 7 / ppm 13 / admin 3 / system 2", () => {
     const counter: Record<MenuSection, number> = {
       overview: 0,
       management: 0,
@@ -177,7 +175,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
     expect(counter.overview).toBe(8);
     expect(counter.management).toBe(7);
-    expect(counter.ppm).toBe(14);
+    expect(counter.ppm).toBe(13);
     expect(counter.admin).toBe(3);
     expect(counter.system).toBe(2);
   });
@@ -208,9 +206,9 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
   it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 63", () => {
     const valid = new Set<string>(BACKEND_PERMISSION_KEYS);
     // 镜像常量自身的完整性护栏：若被误删/重复，立即失败
-    // 46 (非 PPM) + 17 (PPM 菜单/读，change 2026-07-20-ppm-menu-unique-keys 扩容) = 63
-    expect(BACKEND_PERMISSION_KEYS.length).toBe(63);
-    expect(valid.size).toBe(63);
+    // 46 (非 PPM) + 16 (PPM 菜单/读，已删问题变更) = 62
+    expect(BACKEND_PERMISSION_KEYS.length).toBe(62);
+    expect(valid.size).toBe(62);
 
     MENU_PERMISSION_GROUPS.forEach((g) => {
       g.permissions.forEach((p) => {
@@ -392,19 +390,15 @@ describe("用户列明菜单的 permissions 精确匹配", () => {
     expect(keysOf("ppm-plan-nodes")).toEqual(["ppm:plan-node:read"]);
   });
 
-  it("ppm-problem-changes = ppm:problem-change:read", () => {
-    expect(keysOf("ppm-problem-changes")).toEqual(["ppm:problem-change:read"]);
-  });
-
   it("ppm-task-plans = ppm:task-plan:read", () => {
     expect(keysOf("ppm-task-plans")).toEqual(["ppm:task-plan:read"]);
   });
 });
 
 describe("PPM 菜单 section 与 absolute 完整性", () => {
-  it("14 个 ppm 菜单全部 section=ppm 且 absolute=true，href 以 /ppm/ 开头", () => {
+  it("13 个 ppm 菜单全部 section=ppm 且 absolute=true，href 以 /ppm/ 开头", () => {
     const ppmMenus = MENU_PERMISSION_GROUPS.filter((g) => g.section === "ppm");
-    expect(ppmMenus).toHaveLength(14);
+    expect(ppmMenus).toHaveLength(13);
     ppmMenus.forEach((g) => {
       expect(g.absolute).toBe(true);
       expect(g.href.startsWith("/ppm/")).toBe(true);

@@ -5,8 +5,6 @@
  * - /problem-list                 问题清单 CRUD
  * - /problem-list/{id}/start      start (新建→进行中, 建 in-flight TaskExecute)
  * - /problem-list/{id}/execute    execute (收口: submit 回新建 / complete 已完成)
- * - /problem-change               问题变更 CRUD (deprecated, D-005)
- * - /problem-change/{id}/next|reject|tasks|logs  变更审批流 (deprecated)
  * - /problem-list/export-excel    导出 (X-002)
  *
  * 走统一 `apiFetch`(自动带 token + 401 刷新);导出走 `downloadExcel`。
@@ -16,12 +14,6 @@ import { downloadExcel } from "./export";
 import type {
   PageReq,
   PageResp,
-  ProblemChange,
-  ProblemChangeCreate,
-  ProblemChangeNextProcessReq,
-  ProblemChangeRejectProcessReq,
-  ProblemChangePageReq,
-  ProblemChangeUpdate,
   ProblemExecuteReq,
   ProblemList,
   ProblemListCreate,
@@ -34,7 +26,7 @@ import type {
 } from "./types";
 
 function pageQuery(
-  params?: ProblemListPageReq | ProblemChangePageReq | PageReq,
+  params?: ProblemListPageReq | PageReq,
 ): { query: Record<string, string | number | string[] | undefined> } | undefined {
   if (!params) return undefined;
   const q: Record<string, string | number | string[] | undefined> = {};
@@ -134,94 +126,4 @@ export async function executeProblem(
 
 export async function exportProblems(): Promise<void> {
   await downloadExcel("/api/ppm/problem-list/export-excel", undefined, "problem_list.xlsx");
-}
-
-/** P2-3:导出问题变更 (problemchange)。 */
-export async function exportProblemChanges(): Promise<void> {
-  await downloadExcel(
-    "/api/ppm/problem-change/export-excel",
-    undefined,
-    "problem_changes.xlsx",
-  );
-}
-
-// ===========================================================================
-// 问题变更 /problem-change
-// ===========================================================================
-
-export async function listProblemChanges(
-  params?: ProblemChangePageReq,
-): Promise<PageResp<ProblemChange>> {
-  return apiFetch<PageResp<ProblemChange>>("/api/ppm/problem-change", pageQuery(params));
-}
-
-export async function getProblemChange(
-  changeId: string,
-): Promise<ProblemChange> {
-  return apiFetch<ProblemChange>(`/api/ppm/problem-change/${changeId}`);
-}
-
-export async function createProblemChange(
-  body: ProblemChangeCreate,
-): Promise<ProblemChange> {
-  return apiFetch<ProblemChange>("/api/ppm/problem-change", {
-    method: "POST",
-    json: body,
-  });
-}
-
-export async function updateProblemChange(
-  changeId: string,
-  body: ProblemChangeUpdate,
-): Promise<ProblemChange> {
-  return apiFetch<ProblemChange>(`/api/ppm/problem-change/${changeId}`, {
-    method: "PUT",
-    json: body,
-  });
-}
-
-export async function deleteProblemChange(changeId: string): Promise<void> {
-  await apiFetch(`/api/ppm/problem-change/${changeId}`, { method: "DELETE" });
-}
-
-// ---------- 变更审批流端点 (task-02:4 节点链) ----------
-
-/** 变更流 nextProcess — 推进到下一节点 (申请→开发经理→项目经理→[非bug部门经理]→结束)。 */
-export async function nextProcessProblemChange(
-  changeId: string,
-  body?: ProblemChangeNextProcessReq,
-): Promise<ProblemChange> {
-  return apiFetch<ProblemChange>(
-    `/api/ppm/problem-change/${changeId}/next`,
-    { method: "POST", json: body ?? {} },
-  );
-}
-
-/** 变更流 rejectProcess — 驳回到已作废 (仅审核节点 20/30/40 可驳回)。 */
-export async function rejectProcessProblemChange(
-  changeId: string,
-  body?: ProblemChangeRejectProcessReq,
-): Promise<ProblemChange> {
-  return apiFetch<ProblemChange>(
-    `/api/ppm/problem-change/${changeId}/reject`,
-    { method: "POST", json: body ?? {} },
-  );
-}
-
-/** 变更流在办任务 — 查询该变更当前未完成的流程任务。 */
-export async function listProblemChangeTasks(
-  changeId: string,
-): Promise<ProblemProcessTask[]> {
-  return apiFetch<ProblemProcessTask[]>(
-    `/api/ppm/problem-change/${changeId}/tasks`,
-  );
-}
-
-/** 变更流流程履历 — 查询该变更的所有流转记录。 */
-export async function listProblemChangeLogs(
-  changeId: string,
-): Promise<ProblemProcessLog[]> {
-  return apiFetch<ProblemProcessLog[]>(
-    `/api/ppm/problem-change/${changeId}/logs`,
-  );
 }

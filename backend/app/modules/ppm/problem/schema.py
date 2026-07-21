@@ -73,6 +73,9 @@ class ProblemListUpdate(PydanticModel):
     remarks: str | None = None
     is_delay_plan: str | None = None
     work_load: str | None = None
+    # 处置人 (流程当前处置人，编辑表单可调整)
+    now_handle_user: str | None = None
+    now_handle_user_name: str | None = None
 
 
 class ProblemListResp(ProblemListBase):

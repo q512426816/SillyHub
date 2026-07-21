@@ -38,7 +38,6 @@ const SEGMENT_LABEL: Record<string, string> = {
   "plan-nodes": "计划节点",
   "milestone-details": "里程碑明细",
   "problem-list": "问题清单",
-  "problem-changes": "问题变更",
   "task-plans": "任务计划",
   "work-hours": "工时",
   "work-hour-statistics": "工时统计",

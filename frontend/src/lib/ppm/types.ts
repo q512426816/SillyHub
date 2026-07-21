@@ -794,17 +794,6 @@ export interface ProblemListPageReq extends PageReq {
   duty_user_id?: string;
 }
 
-/** 问题变更查询参数(对齐后端 GET /problem-change Query)。 */
-export interface ProblemChangePageReq extends PageReq {
-  /** 关键字:项目/模块/变更内容/变更原因 模糊匹配 */
-  keyword?: string;
-  /** 状态(可多值)。后端用 status=1&status=2 重复 query 接收。 */
-  status?: string[];
-  /** created_at ISO 起止(闭区间) */
-  created_at_start?: string;
-  created_at_end?: string;
-}
-
 export interface ProblemListUpdate {
   project_name?: string | null;
   module_id?: string | null;
@@ -827,75 +816,9 @@ export interface ProblemListUpdate {
   work_load?: string | null;
   audit_user_id?: string | null;
   audit_user_name?: string | null;
-}
-
-export interface ProblemChange {
-  id: string;
-  resource_id: string;
-  project_id: string | null;
-  project_name: string | null;
-  model_name: string | null;
-  pro_desc: string | null;
-  func_name: string | null;
-  pro_type: string | null;
-  is_urgent: string | null;
-  find_by: string | null;
-  find_time: string | null;
-  pro_answer: string | null;
-  work_type: string | null;
-  duty_user_id: string | null;
-  duty_user_name: string | null;
-  plan_start_time: string | null;
-  plan_end_time: string | null;
-  remarks: string | null;
-  change_reason: string | null;
-  work_load: string | null;
-  is_delay_plan: string | null;
-  status: string;
-  now_node: number | null;
-  now_handle_user: string | null;
-  now_handle_user_name: string | null;
-  audit_user_id: string | null;
-  audit_user_name: string | null;
-  audit_time: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ProblemChangeCreate {
-  resource_id: string;
-  project_id?: string | null;
-  project_name?: string | null;
-  model_name?: string | null;
-  pro_desc?: string | null;
-  func_name?: string | null;
-  pro_type?: string | null;
-  is_urgent?: string | null;
-  find_by?: string | null;
-  find_time?: string | null;
-  pro_answer?: string | null;
-  work_type?: string | null;
-  duty_user_id?: string | null;
-  duty_user_name?: string | null;
-  plan_start_time?: string | null;
-  plan_end_time?: string | null;
-  remarks?: string | null;
-  change_reason?: string | null;
-  work_load?: string | null;
-  is_delay_plan?: string | null;
-}
-
-export interface ProblemChangeUpdate {
-  pro_desc?: string | null;
-  pro_type?: string | null;
-  is_urgent?: string | null;
-  duty_user_id?: string | null;
-  duty_user_name?: string | null;
-  plan_start_time?: string | null;
-  plan_end_time?: string | null;
-  change_reason?: string | null;
-  work_load?: string | null;
-  is_delay_plan?: string | null;
+  /** 处置人 (流程当前处置人，编辑表单可调整) */
+  now_handle_user?: string | null;
+  now_handle_user_name?: string | null;
 }
 
 export interface ProblemProcessTask {
@@ -937,14 +860,6 @@ export interface ProblemExecuteReq {
   actual_start_time?: string | null;
   actual_end_time?: string | null;
   execute_user_id?: string | null;
-}
-
-export interface ProblemChangeNextProcessReq {
-  comment?: string | null;
-}
-
-export interface ProblemChangeRejectProcessReq {
-  comment?: string | null;
 }
 
 // ===========================================================================
