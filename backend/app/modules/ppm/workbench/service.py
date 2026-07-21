@@ -443,10 +443,18 @@ class WorkbenchService:
         # defect_count:当前人名下未完成缺陷 (status!='已完成'),不受 range 影响。
         # 3 态简化后 status 为中文 (新建/进行中/已完成,见 problem.fsm.ProblemStatus),
         # 已完成=终态不计 (ql-20260721-002 修复:原 'status!="4"' 为旧数字码,3 态后永真致已完成也被统计)。
+        # 口径 (ql-20260721-003 用户确认):我负责 (duty_user_id=我) 或 我处理
+        # (now_handle_user 逗号分隔含我) 任一即算"我的缺陷",与待办列表口径对齐
+        # (原仅 duty_user_id=我,审批人/处理人非责任人时漏统计,致"缺陷数量"偏少)。
         defect_stmt = (
             select(PpmProblemList)
-            .where(PpmProblemList.duty_user_id == user.id)
             .where(PpmProblemList.status != "已完成")
+            .where(
+                or_(
+                    PpmProblemList.duty_user_id == user.id,
+                    PpmProblemList.now_handle_user.like(f"%{user.id}%"),
+                )
+            )
         )
         defect_count = await self._session.scalar(
             select(func.count()).select_from(defect_stmt.subquery())

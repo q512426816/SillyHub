@@ -490,6 +490,37 @@ async def test_summary_defect_count_range_invariant(db_session):
     assert week.metrics.defect_count == month.metrics.defect_count == all_.metrics.defect_count == 2
 
 
+@pytest.mark.asyncio
+async def test_summary_defect_count_handle_me_not_duty(db_session):
+    """ql-20260721-003 口径:duty≠me 但 now_handle_user 含 me → 也计为我的缺陷。"""
+    user = await _seed_user(db_session)
+    other = uuid.uuid4()
+    # 责任人是他人,但当前处理人是我 → 计
+    await _seed_problem(
+        db_session, duty_user_id=other, status="进行中", now_handle_user=str(user.id)
+    )
+
+    svc = WorkbenchService(db_session)
+    summary = await svc.get_summary(user, range="month")
+    assert summary.metrics.defect_count == 1
+
+
+@pytest.mark.asyncio
+async def test_summary_defect_count_excludes_unrelated(db_session):
+    """ql-20260721-003 口径:duty≠me 且 now_handle_user 不含 me → 不计。"""
+    user = await _seed_user(db_session)
+    other = uuid.uuid4()
+    other2 = uuid.uuid4()
+    # 责任人 + 处理人都不是 me → 不计
+    await _seed_problem(
+        db_session, duty_user_id=other, status="进行中", now_handle_user=str(other2)
+    )
+
+    svc = WorkbenchService(db_session)
+    summary = await svc.get_summary(user, range="month")
+    assert summary.metrics.defect_count == 0
+
+
 # ===========================================================================
 # summary —— work_hours 聚合
 # ===========================================================================
