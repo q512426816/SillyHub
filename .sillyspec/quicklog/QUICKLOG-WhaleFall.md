@@ -35,3 +35,9 @@ created_at: 2026-07-21T08:48:56
 关联变更：（无）
 文件：frontend/src/app/(dashboard)/ppm/plan-nodes/page.tsx
 结果：shadcn Button→antd(7处;操作列 ghost→link small/删除 danger、新建→primary、重新加载→default、明细保存→primary+loading、Drawer footer 保存→primary+loading)+1处原生 confirm→Modal.confirm+1个 Drawer→Modal(NodeFormDrawer footer 保留;onClose→onCancel)+硬编码色→token(emerald→success、amber→destructive、删除红随 danger;bg-red-50 错误语境保留)。eslint 0 error tsc 0 error。Table 保留(带 expandable)。
+
+## ql-20260721-007-9d2e | 2026-07-21 11:30:00 | 修复 /ppm/milestone-details 新建/编辑里程碑 plan-node-ps POST/PUT 422
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
+结果：根因=MasterDrawer submit 的 plan_workload 是 InputNumber(number),原 (vals.plan_workload as string) 直接发 number,后端 plan_workload:str 收 number 422(Pydantic v2 不 coerce number→str)。修复改 String() 转换(对齐明细表单 2122 写法)。日期字段 getValueProps/normalize+fromDate 返回 YYYY-MM-DD string,后端 datetime 正常解析,非 422 源。POST/PUT 都发 plan_workload 故都 422。tsc 0 error milestone-details 24测试通过。

@@ -2806,7 +2806,10 @@ function PsPlanNodeDrawer({
         overall_stage: (vals.overall_stage as string) || null,
         duty_user_id: (vals.duty_user_id as string) || null,
         task_theme: (vals.task_theme as string) || null,
-        plan_workload: (vals.plan_workload as string) || null,
+        plan_workload:
+          vals.plan_workload != null && vals.plan_workload !== ""
+            ? String(vals.plan_workload)
+            : null,
         plan_begin_time: (vals.plan_begin_time as string) || null,
         plan_complete_time: (vals.plan_complete_time as string) || null,
       };
