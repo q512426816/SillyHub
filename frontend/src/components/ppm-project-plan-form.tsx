@@ -297,6 +297,9 @@ export function PpmProjectPlanForm({
                 }
               />
             </Form.Item>
+            <Form.Item name="project_name" hidden>
+              <Input />
+            </Form.Item>
             <Form.Item
               label="项目经理名称"
               name="project_manager_id"

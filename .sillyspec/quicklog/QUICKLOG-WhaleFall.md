@@ -77,3 +77,9 @@ created_at: 2026-07-21T08:48:56
 关联变更：（无）
 文件：frontend/src/app/(dashboard)/ppm/{projects,customers,project-stakeholders}/page.tsx
 结果：stripForm(if(v===null)continue)把 PpmResourceTable 补的 null 又过滤了→请求体不含该字段→后端不更新→显示旧值。去掉 v===null 条件,保留 null(清空信号)。配合 ql-011/012(PpmResourceTable 补 null),projects/customers/stakeholders(干系人)清空全链路通。eslint 0 error tsc 0 error。
+
+## ql-20260721-014-b2e7 | 2026-07-21 17:30:00 | 修复项目计划编辑保存后 project_name 变 id
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-project-plan-form.tsx
+结果：「项目名称」Form.Item name="project_name" 缺失→setFieldsValue 回填但 validateFields 不返回(无 Form.Item 的字段不被 form 管理)→payload 发 project_name=null→后端写 null→列表 render(v??p.id)回退显示 id。加 hidden Form.Item(name="project_name") 让 form 兜住该字段。eslint 0 error tsc 0 error。
