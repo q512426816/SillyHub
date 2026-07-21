@@ -1756,6 +1756,20 @@ function DetailLevelTable({
         render: (v: string | null) => v ?? "—",
       },
       {
+        title: "计划开始",
+        dataIndex: "plan_begin_time",
+        key: "plan_begin_time",
+        width: 120,
+        render: (v: string | null) => fmtDate(v),
+      },
+      {
+        title: "计划结束",
+        dataIndex: "plan_complete_time",
+        key: "plan_complete_time",
+        width: 120,
+        render: (v: string | null) => fmtDate(v),
+      },
+      {
         title: "执行人",
         dataIndex: "execute_user_id",
         key: "execute_user_id",

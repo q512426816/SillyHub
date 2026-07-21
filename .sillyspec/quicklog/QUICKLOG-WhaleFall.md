@@ -23,3 +23,9 @@ created_at: 2026-07-21T08:48:56
 关联变更：（无）
 文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
 结果：主表(里程碑)操作列 width 280→340(+新建明细/编辑里程碑/删除里程碑 3 按钮加宽,避免挤换行)。纯列宽数字改动。
+
+## ql-20260721-005-5d8e | 2026-07-21 10:25:00 | /ppm/milestone-details 明细子表加计划开始/结束时间列
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
+结果：明细子表(DetailLevelTable)在「计划工时」列后新增「计划开始」「计划结束」两列(width 120,fmtDate 回显 plan_begin_time/plan_complete_time)。tsc 0 error milestone-details 24测试通过。
