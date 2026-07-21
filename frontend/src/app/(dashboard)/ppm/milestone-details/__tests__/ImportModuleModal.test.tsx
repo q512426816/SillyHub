@@ -350,8 +350,8 @@ describe("ImportModuleModal — 三态导入流程 (task-12 / FR-008)", () => {
     fireEvent.click(screen.getByText("确认导入"));
     await screen.findByText("导入完成", { exact: false });
 
-    // 结果态有「关闭」按钮
-    fireEvent.click(screen.getByText("关闭"));
+    // 结果态有「关闭」按钮（antd 两字按钮自动加字间距「关闭」→「关 闭」，正则兼容）
+    fireEvent.click(screen.getByText(/^关\s*闭$/));
     await waitFor(() => {
       expect(onSuccess).toHaveBeenCalledTimes(1);
     });
