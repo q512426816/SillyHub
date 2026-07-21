@@ -39,11 +39,18 @@ async def _seed(db_session: AsyncSession) -> tuple[uuid.UUID, uuid.UUID, uuid.UU
     db_session.add_all([proj_a, proj_b])
     user1, user2 = uuid.uuid4(), uuid.uuid4()
     # p1: proj_a + pm=user1; p2: proj_b + pm=user2; p3: proj_a + 无 pm
+    # p4: proj_b + 无 pm + created_by=user1 (创建人可见性用例,2026-07-21)
     db_session.add_all(
         [
             PsProjectPlan(id=uuid.uuid4(), project_id=proj_a.id, project_manager_id=user1),
             PsProjectPlan(id=uuid.uuid4(), project_id=proj_b.id, project_manager_id=user2),
             PsProjectPlan(id=uuid.uuid4(), project_id=proj_a.id, project_manager_id=None),
+            PsProjectPlan(
+                id=uuid.uuid4(),
+                project_id=proj_b.id,
+                project_manager_id=None,
+                created_by=user1,
+            ),
         ]
     )
     await db_session.commit()
@@ -76,7 +83,7 @@ def test_build_project_scope_full_returns_none() -> None:
 async def test_full_scope_sees_all(db_session: AsyncSession) -> None:
     await _seed(db_session)
     res = await PlanService(db_session).list_ps_project_plans(_req(), DataScope(is_full=True))
-    assert res.total == 3  # AC-1
+    assert res.total == 4  # AC-1
 
 
 async def test_dept_boss_sees_subtree_projects(db_session: AsyncSession) -> None:
@@ -92,7 +99,20 @@ async def test_pm_sees_own_plans(db_session: AsyncSession) -> None:
     res = await PlanService(db_session).list_ps_project_plans(
         _req(), DataScope(is_full=False, pm_user_id=u1)
     )
-    assert res.total == 1  # AC-3: 仅 p1
+    # AC-3: p1(pm=user1) + p4(created_by=user1) = 2 (创建人可见性, 2026-07-21)
+    assert res.total == 2
+
+
+async def test_creator_sees_plan_even_without_pm(db_session: AsyncSession) -> None:
+    """创建人可见性:计划无 pm、项目不在创建人部门,创建人仍可见 (2026-07-21)。"""
+    _org_a, _org_b, u1, _u2 = await _seed(db_session)
+    res = await PlanService(db_session).list_ps_project_plans(
+        _req(), DataScope(is_full=False, pm_user_id=u1)
+    )
+    # p4 的 project_manager_id=None 且 proj_b 不在 user1 部门,仅凭 created_by 可见
+    ids = {str(i.id) for i in res.items}
+    assert res.total == 2
+    assert len(ids) == 2  # p1 + p4
 
 
 async def test_empty_scope_sees_nothing(db_session: AsyncSession) -> None:
@@ -103,7 +123,7 @@ async def test_empty_scope_sees_nothing(db_session: AsyncSession) -> None:
 
 async def test_union_dept_and_pm(db_session: AsyncSession) -> None:
     org_a, _org_b, _u1, u2 = await _seed(db_session)
-    # dept=org_a (p1,p3) ∪ pm=u2 (p2) = 3 (并集, AC-5)
+    # dept=org_a (p1,p3) ∪ pm=u2 (p2) = 3 (并集, AC-5); p4 是 proj_b 无pm created_by=user1 不含
     res = await PlanService(db_session).list_ps_project_plans(
         _req(),
         DataScope(is_full=False, dept_org_ids=frozenset({org_a}), pm_user_id=u2),

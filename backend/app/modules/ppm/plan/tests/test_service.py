@@ -290,6 +290,26 @@ class TestPsProjectPlan:
         await svc.delete_ps_plan_node(node.id)
         assert await svc.list_ps_plan_nodes_by_plan(str(plan.id)) == []
 
+    async def test_create_plan_writes_created_by_from_operator(
+        self, db_session: AsyncSession
+    ) -> None:
+        """operator 写入 created_by (2026-07-21 创建人可见性修复)。
+
+        数据范围 build_plan_scope_clause 的项目经理分支 OR created_by,
+        依赖创建时落库 operator;不传 operator 时 created_by 为 None。
+        """
+        svc = PlanService(db_session)
+        operator = uuid.uuid4()
+        plan = await svc.create_ps_project_plan(
+            {"project_id": str(uuid.uuid4()), "status": "draft"}, operator=operator
+        )
+        assert plan.created_by == operator
+
+        plan_no_op = await svc.create_ps_project_plan(
+            {"project_id": str(uuid.uuid4()), "status": "draft"}
+        )
+        assert plan_no_op.created_by is None
+
     async def test_create_plan_fills_project_name_from_project(
         self, db_session: AsyncSession
     ) -> None:

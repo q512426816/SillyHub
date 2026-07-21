@@ -418,7 +418,7 @@ async def create_ps_project_plan(
 ) -> PsProjectPlanResp:
     data = body.model_dump()
     data["create_name"] = data.get("create_name") or user.display_name
-    obj = await PlanService(session).create_ps_project_plan(data)
+    obj = await PlanService(session).create_ps_project_plan(data, operator=user.id)
     return PsProjectPlanResp.model_validate(obj)
 
 

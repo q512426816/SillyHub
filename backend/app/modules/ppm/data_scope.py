@@ -113,6 +113,10 @@ def build_plan_scope_clause(scope: DataScope) -> Any | None:
 
     部门经理用 ``project_id.in_(SELECT id FROM project WHERE org_id IN dept_org_ids)``
     子查询,避免改 ``_Crud.list_paged`` 的 join 能力 (D-003@v1)。
+
+    项目经理分支:本人负责的 (``project_manager_id``) OR 本人创建的 (``created_by``)。
+    后者对齐 projects/problem 的创建人可见性约定 (2026-07-21 修复),
+    保证创建人即使把项目经理填成别人也能看到自己建的计划。
     """
     if scope.is_full:
         return None
@@ -126,7 +130,10 @@ def build_plan_scope_clause(scope: DataScope) -> Any | None:
             )
         )
     if scope.pm_user_id is not None:
-        clauses.append(PsProjectPlan.project_manager_id == scope.pm_user_id)
+        clauses.append(
+            (PsProjectPlan.project_manager_id == scope.pm_user_id)
+            | (PsProjectPlan.created_by == scope.pm_user_id)
+        )
     if not clauses:
         return false()
     return or_(*clauses)

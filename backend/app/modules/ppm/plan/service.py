@@ -431,7 +431,9 @@ class PlanService:
             where_clauses=where_clauses,
         )
 
-    async def create_ps_project_plan(self, data: dict[str, Any]) -> PsProjectPlan:
+    async def create_ps_project_plan(
+        self, data: dict[str, Any], *, operator: uuid.UUID | None = None
+    ) -> PsProjectPlan:
         # project_name 兜底:前端表单无 project_name 字段、onProjectChange 回填值
         # 未可靠进入提交体(实测新建记录 project_name=None)。此处按 project_id
         # 关联取项目名,作为单一可信源,避免列表回退显示 id。
@@ -441,9 +443,20 @@ class PlanService:
                 proj = await self._session.get(PpmProjectMaintenance, proj_id)
                 if proj and proj.project_name:
                     data["project_name"] = proj.project_name
+        # project_manager_name 兜底:前端隐藏字段靠下拉 options 反查回填,偶发漏传
+        # (选了经理只带 id 不带 name)致落库为空、列表裸露 UUID。有 id 但 name 为空时
+        # 按 id 反查 users.display_name 补上;显式传的 name 不覆盖。
+        if not (data.get("project_manager_name") or "").strip() and data.get("project_manager_id"):
+            looked_up = await self._lookup_user_display_name(data["project_manager_id"])
+            if looked_up:
+                data["project_manager_name"] = looked_up
         # task-03:建主表 + 同事务按模板批量建里程碑 (design §5.2)
         # 不复用 _Crud.create (单独 commit 破坏原子性),改 session.add + 末尾单 commit。
         plan = PsProjectPlan(id=uuid.uuid4(), **data)
+        # 创建人写入 created_by (2026-07-21 项目计划创建人可见性修复)。
+        # data 由 router 提供,不含 created_by;此处显式赋值,保证数据范围
+        # build_plan_scope_clause 的创建人可见性 (OR created_by == pm_user_id) 生效。
+        plan.created_by = operator
         plan.created_at = _now()
         plan.updated_at = _now()
         self._session.add(plan)
@@ -530,6 +543,16 @@ class PlanService:
     async def update_ps_project_plan(
         self, item_id: uuid.UUID, data: dict[str, Any]
     ) -> PsProjectPlan:
+        # project_manager_name 兜底 (同 create):_Crud.update 跳过 None 值,前端切换
+        # 经理漏传 name 时旧 name 会残留。data 经 exclude_unset、编辑表单必传
+        # project_manager_id,故 DB 现值即为目标经理;name 为空时按其反查 display_name。
+        if not (data.get("project_manager_name") or "").strip():
+            current = await _Crud(self._session, PsProjectPlan).get(item_id)
+            manager_id = current.project_manager_id
+            if manager_id:
+                looked_up = await self._lookup_user_display_name(manager_id)
+                if looked_up:
+                    data["project_manager_name"] = looked_up
         return await _Crud(self._session, PsProjectPlan).update(item_id, data)
 
     async def delete_ps_project_plan(self, item_id: uuid.UUID) -> None:
@@ -1513,6 +1536,22 @@ class PlanService:
     # 均复用 self._session,内部不 commit —— 由 create_detail/_transition/
     # update_detail/change_process/delete_detail/import_commit 等调用方统一
     # commit,保证明细操作与任务联动在同一事务内原子完成 (design §5.2)。
+    async def _lookup_user_display_name(self, user_id: uuid.UUID | None) -> str | None:
+        """反查 ``users.display_name`` (与 2026-07-21 生产数据回填 SQL 同口径)。
+
+        用于 ``PsProjectPlan.project_manager_name`` 兜底:项目经理是平台用户,
+        名字权威来源是 users 表;区别于 ``_lookup_user_name`` (查项目成员冗余名,
+        任务/看板口径)。查不到或 id 非法返回 None。
+        """
+        uid = self._safe_uuid(user_id)
+        if uid is None:
+            return None
+        stmt = select(User.display_name).where(User.id == uid).limit(1)
+        row = (await self._session.execute(stmt)).first()
+        if row is None:
+            return None
+        return row[0]
+
     async def _lookup_user_name(self, user_id: uuid.UUID | None) -> str | None:
         """反查 ``PpmProjectMember.user_name`` (项目成员冗余名,与 kanban 同口径)。
 
