@@ -1,0 +1,27 @@
+{
+  "generatedAt": "2026-07-21T06:47:10.557Z",
+  "schemaVersion": 1,
+  "items": [
+    {
+      "task": "task-08",
+      "verdict": "spec+quality",
+      "evidence": [
+        "curl 实测 PUT /plan-node-ps + /problem 清空字段返回 200 且库为 null"
+      ]
+    },
+    {
+      "task": "task-09",
+      "verdict": "spec+quality",
+      "evidence": [
+        "浏览器验收:编辑里程碑/明细/问题清空保存→库 null/前端回显空;只改一字段其他不动;change_process 正常"
+      ]
+    },
+    {
+      "task": "task-10",
+      "verdict": "spec+quality",
+      "evidence": [
+        "archive 阶段 sillyspec-archive 同步 ppm.md 变更索引 + quicklog 记录"
+      ]
+    }
+  ]
+}

@@ -586,6 +586,96 @@ class TestChangeProcess:
         assert change_procs[0].handle_info == "why"
 
 
+# service 未暴露模板明细的公开 get,这里直接用 _Crud(PlanNodeDetail).get
+# 从库再取一次,校验「清空/未传」是否真正落库 (非仅 update 返回值)。
+async def _get_detail_from_db(svc: PlanService, item_id: uuid.UUID):
+    from app.modules.ppm.plan.model import PlanNodeDetail
+    from app.modules.ppm.plan.service import _Crud
+
+    return await _Crud(svc._session, PlanNodeDetail).get(item_id)
+
+
+class TestUpdateClearVsKeep:
+    """task-05:`_Crud.update` 清空/部分更新语义 (清空→null,未传→不动)。
+
+    覆盖 task-05.md 验收:
+    - update 传 ``{field: None}`` → 库中该字段 ``is None`` (清空)。
+    - update 不含该字段 (dict 只有别的字段) → 库中该字段保持原值 (未传不动)。
+
+    依据:``_Crud.update`` 逐 key ``setattr`` —— key 在 dict 里才写、
+    value 为 None 即写 None (清空);key 缺席则不触碰该字段。
+    走 ``update_plan_node_detail`` → ``_Crud(PlanNodeDetail).update``。
+    字段选 ``PlanNodeDetail.task_theme`` (``str | None``,可清空)。
+    """
+
+    async def test_update_clear_nullable_field_to_none(self, db_session: AsyncSession) -> None:
+        """清空:update 传 task_theme=None → 库中 task_theme is None。"""
+        svc = PlanService(db_session)
+        node_id = str(uuid.uuid4())
+        detail = await svc.create_plan_node_detail(
+            {"plan_node_id": node_id, "no": "1", "task_theme": "原始主题"}
+        )
+        assert detail.task_theme == "原始主题"
+
+        updated = await svc.update_plan_node_detail(detail.id, {"task_theme": None})
+        assert updated.task_theme is None
+
+        # 再从库取一次,确认持久化 (非仅返回值)
+        got = await _get_detail_from_db(svc, detail.id)
+        assert got.task_theme is None
+
+    async def test_update_keep_field_when_absent(self, db_session: AsyncSession) -> None:
+        """未传:update 不含 task_theme (只改别的字段) → task_theme 保持原值。"""
+        svc = PlanService(db_session)
+        node_id = str(uuid.uuid4())
+        detail = await svc.create_plan_node_detail(
+            {"plan_node_id": node_id, "no": "1", "task_theme": "保留主题"}
+        )
+        assert detail.task_theme == "保留主题"
+
+        # 只改 no,不含 task_theme
+        updated = await svc.update_plan_node_detail(detail.id, {"no": "9"})
+        assert updated.no == "9"
+        assert updated.task_theme == "保留主题"  # 未传 → 不动
+
+        got = await _get_detail_from_db(svc, detail.id)
+        assert got.task_theme == "保留主题"
+
+
+class TestUpdateDetailClearsField:
+    """task-06:`PlanService.update_detail` (项目里程碑明细) 清空字段落 null。
+
+    覆盖 task-06.md 验收:
+    - update_detail 传 ``{nullable_field: None}`` → 返回值 + 库中该字段 ``is None``。
+
+    依据:``update_detail`` 逐 key ``setattr(obj, k, v)`` 后 refresh ——
+    key 在 dict 里且 value 为 None 即写 None (清空落库)。
+    字段选普通 nullable 业务字段 ``task_theme`` (``str | None``),
+    避开 ``execute_user_id`` / ``duty_user_id`` (它们走 ``_sync_task_fields``
+    的 uid 守卫兜底,清空不会落 null 到任务表,无法直接验证 update_detail 本身)。
+
+    与 TestUpdateClearVsKeep 区别:那条测 ``update_plan_node_detail`` (模板明细),
+    本类测 ``update_detail`` (项目里程碑明细 PsPlanNodeDetail)。
+    """
+
+    async def test_update_detail_clears_nullable_field(self, db_session: AsyncSession) -> None:
+        """清空:update_detail 传 task_theme=None → 返回值 + 库中 task_theme is None。"""
+        svc = PlanService(db_session)
+        detail = await _create_detail(svc)  # task_theme="里程碑明细1"
+        assert detail.task_theme == "里程碑明细1"
+
+        updated = await svc.update_detail(detail.id, {"task_theme": None})
+        assert updated.task_theme is None
+
+        # 再从库取一次,确认持久化 (非仅返回值)。
+        # 注意:_get_detail_from_db helper 查的是模板明细表 PlanNodeDetail,
+        # 这里测的是项目里程碑明细 PsPlanNodeDetail (另一张表),直接 session.get。
+        from app.modules.ppm.plan.service import _Crud
+
+        got = await _Crud(svc._session, PsPlanNodeDetail).get(detail.id)
+        assert got.task_theme is None
+
+
 class TestListDetailsExcludesArchived:
     async def test_archived_hidden_from_list(self, db_session: AsyncSession) -> None:
         svc = PlanService(db_session)

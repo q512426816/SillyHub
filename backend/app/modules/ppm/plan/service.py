@@ -171,8 +171,7 @@ class _Crud[T]:
     async def update(self, item_id: uuid.UUID, data: dict[str, Any]) -> T:
         obj = await self.get(item_id)
         for k, v in data.items():
-            if v is not None:
-                setattr(obj, k, v)
+            setattr(obj, k, v)
         obj = self._touch_updated(obj)
         await self._session.commit()
         await self._session.refresh(obj)
@@ -654,8 +653,7 @@ class PlanService:
         # 重构为原子事务：更新明细字段 + 同事务同步关联任务字段 (FR-03, D-007)。
         obj = await self.get_detail(item_id)
         for k, v in data.items():
-            if v is not None:
-                setattr(obj, k, v)
+            setattr(obj, k, v)
         obj.updated_at = _now()
         await self._sync_task_fields(obj)
         await self._session.commit()

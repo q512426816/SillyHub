@@ -171,8 +171,7 @@ class _Crud[T]:
     async def update(self, item_id: uuid.UUID, data: dict[str, Any]) -> T:
         obj = await self.get(item_id)
         for k, v in data.items():
-            if v is not None:
-                setattr(obj, k, v)
+            setattr(obj, k, v)
         obj = self._touch(obj)
         await self._session.commit()
         await self._session.refresh(obj)

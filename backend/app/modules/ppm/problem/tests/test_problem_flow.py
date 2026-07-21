@@ -233,6 +233,61 @@ class TestCrud:
         assert p.project_name == "自定义项目名"
         assert p.duty_user_name == "自定义责任人"
 
+    async def test_update_none_clears_nullable_field(self, db_session: AsyncSession) -> None:
+        """_Crud.update: 传 {nullable 字段: None} → 库该字段为 None (清空)。"""
+        import uuid as _uuid
+
+        from app.modules.auth.model import User
+
+        svc = ProblemService(db_session)
+        proj_id = await _make_project(db_session)
+        p = await _make_problem(svc, proj_id)
+        assert p.pro_desc == "发现一个 bug"  # 初始有值
+
+        admin = User(
+            id=_uuid.uuid4(),
+            username=f"adm_clr_{_uuid.uuid4().hex[:6]}",
+            display_name="管理员",
+            password_hash="x",
+            is_platform_admin=True,
+        )
+        db_session.add(admin)
+        await db_session.commit()
+
+        cleared = await svc.update_problem(p.id, {"pro_desc": None}, user=admin)
+        assert cleared.pro_desc is None
+        # 落库后重新读取确认
+        fresh = await svc.get_problem(p.id)
+        assert fresh.pro_desc is None
+
+    async def test_update_omitted_field_kept(self, db_session: AsyncSession) -> None:
+        """_Crud.update: data 不含某字段 → 库该字段保持原值 (未传不动)。"""
+        import uuid as _uuid
+
+        from app.modules.auth.model import User
+
+        svc = ProblemService(db_session)
+        proj_id = await _make_project(db_session)
+        p = await _make_problem(svc, proj_id)
+        assert p.pro_desc == "发现一个 bug"
+
+        admin = User(
+            id=_uuid.uuid4(),
+            username=f"adm_keep_{_uuid.uuid4().hex[:6]}",
+            display_name="管理员",
+            password_hash="x",
+            is_platform_admin=True,
+        )
+        db_session.add(admin)
+        await db_session.commit()
+
+        # 只改另一个字段,pro_desc 不在 data 里
+        updated = await svc.update_problem(p.id, {"remarks": "加备注"}, user=admin)
+        assert updated.remarks == "加备注"
+        assert updated.pro_desc == "发现一个 bug"  # 未传 → 保持原值
+        fresh = await svc.get_problem(p.id)
+        assert fresh.pro_desc == "发现一个 bug"
+
     async def test_create_change_backfills_empty_names(self, db_session: AsyncSession) -> None:
         """变更创建同样回填 project_name/duty_user_name。"""
         import uuid as _uuid

@@ -136,7 +136,7 @@ class PlanTaskService:
         return plan
 
     async def update(self, plan_id: uuid.UUID, data: PlanTaskUpdate) -> PlanTask:
-        """部分更新 (仅写入非 None 字段)。"""
+        """部分更新（直接 setattr；未传字段由路由 exclude_unset 过滤，null 表示清空）。"""
         plan = await self.get(plan_id)
         payload = data.model_dump(exclude_unset=True)
         for key, value in payload.items():
