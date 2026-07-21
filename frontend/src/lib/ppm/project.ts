@@ -194,8 +194,19 @@ export async function pageProjectMembers(
 export async function listProjectMembers(
   params?: ProjectMemberPageReq,
 ): Promise<ProjectMember[]> {
-  const resp = await pageProjectMembers(params);
-  return resp.items;
+  // 后端 /project-member 默认 page_size=20,这里按 200(后端 le=200 上限)翻页拿全量,
+  // 避免 PpmUserSelect res=projectMember 等下拉在大表时只显示前 20 条(第 21+ 缺失)。
+  const PAGE_SIZE = 200;
+  let page = 1;
+  let all: ProjectMember[] = [];
+  for (;;) {
+    const resp = await pageProjectMembers({ ...params, page, page_size: PAGE_SIZE });
+    all = all.concat(resp.items);
+    if (resp.items.length < PAGE_SIZE) break; // 最后一页(不足一页)
+    page += 1;
+    if (page > 100) break; // 安全上限(200*100=20000),防异常死循环
+  }
+  return all;
 }
 
 export async function getProjectMember(memberId: string): Promise<ProjectMember> {

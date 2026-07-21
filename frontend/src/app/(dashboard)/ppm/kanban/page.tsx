@@ -315,9 +315,6 @@ export default function KanbanPage() {
       <KanbanTaskDetailDrawer
         task={detailTask}
         onClose={() => setDetailTask(null)}
-        onTaskUpdated={(updated) =>
-          setDetailTask((cur) => (cur ? { ...cur, ...updated } : cur))
-        }
       />
     </PageContainer>
   );

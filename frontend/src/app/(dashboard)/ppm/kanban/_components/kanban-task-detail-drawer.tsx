@@ -1,23 +1,21 @@
 "use client";
 
 /**
- * KanbanTaskDetailDrawer — 对齐源 `TaskDetailDrawer.vue`。
+ * KanbanTaskDetailDrawer — 任务详情抽屉(只读为主 + 评论/子任务交互)。
  *
- * 结构:
- *  - 基本信息(el-descriptions):标题/描述/状态/项目/负责人/截止/工时/创建/更新时间。
- *    本仓数据约束:title=PlanTask.content 首行;描述=content 剩余行;无独立
- *    createTime/updateTime 暴露给看板(KanbanTaskCard 未含),用 deadline/estimate_hours
- *    /status/project_name/user_name 替代展示。
- *  - Tabs:子任务(SubTaskVO list + toggle)/ 评论(CommentVO list + add)/ 附件(file_urls)。
- *  - 修改负责人:Drawer 内嵌 Modal,searchUsers → updateKanbanTask user 字段(本仓
- *    update 不支持改 user_id,故走 store.assignTask,与 AssignTaskDialog 一致)。
+ * 重排版(2026-07-21 ql-006,易读优化):
+ *  - 头部:状态 Tag + 逾期红标(priority=1);
+ *  - 任务标题大字突出;
+ *  - 任务描述独立卡片块(优先 task_description,fallback 从 content 拆);
+ *  - 基本信息双列网格(项目/负责人/截止/预估工时/模块?/配合人员?);
+ *  - 进度条 + 有备注才显;
+ *  - Tabs:子任务/评论/附件。
  *
- * 字段差异:源子任务 SubTaskVO 含 assigneeId/assigneeName;本仓 KanbanSubtask 无
- * assignee 字段,只展示 title + done 勾选 + toggle。源附件是独立 VO 列表;本仓用
- * PlanTask.file_urls 字符串数组(对齐 task-01 设计)。
+ * 数据:TaskCardVO 现暴露 task_description/module_name/work_partner/remarks。
+ * 「修改负责人」入口已移除(改负责人走拖拽 + AssignTaskDialog)。
  */
 import { useCallback, useEffect, useState } from "react";
-import { Button, Checkbox, Drawer, Input, Modal, Progress, Select, Spin, Tabs, Tag, message } from "antd";
+import { Button, Checkbox, Drawer, Input, Progress, Spin, Tabs, Tag, message } from "antd";
 
 import { PpmFileUrls } from "@/components/ppm-file-urls";
 import { ApiError } from "@/lib/api";
@@ -25,16 +23,9 @@ import {
   addKanbanComment,
   listKanbanComments,
   listKanbanSubtasks,
-  searchKanbanUsers,
   toggleKanbanSubtask,
 } from "@/lib/ppm/kanban";
-import { useKanbanStore } from "@/stores/kanban";
-import type {
-  KanbanComment,
-  KanbanSubtask,
-  KanbanTaskCard,
-  KanbanUserColumn,
-} from "@/lib/ppm/types";
+import type { KanbanComment, KanbanSubtask, KanbanTaskCard } from "@/lib/ppm/types";
 import { fmtDay } from "../../shared";
 
 function statusTagOf(status: string | null): { text: string; color: string } {
@@ -50,7 +41,7 @@ function statusTagOf(status: string | null): { text: string; color: string } {
   }
 }
 
-/** 把 content 拆成 title 首行 + 描述剩余行(对齐 create dialog 合并写入语义)。 */
+/** 把 content 拆成 title 首段 + 描述剩余行(看板新建任务沿用 title\n\ndesc 合并语义)。 */
 function splitContent(content: string | null): { title: string; desc: string } {
   if (!content) return { title: "", desc: "" };
   const idx = content.indexOf("\n\n");
@@ -61,27 +52,15 @@ function splitContent(content: string | null): { title: string; desc: string } {
 export function KanbanTaskDetailDrawer({
   task,
   onClose,
-  onTaskUpdated,
 }: {
   task: KanbanTaskCard | null;
   onClose: () => void;
-  onTaskUpdated?: (task: KanbanTaskCard) => void;
 }) {
-  const assignTask = useKanbanStore((s) => s.assignTask);
-  const fetchTasks = useKanbanStore((s) => s.fetchTasks);
-
   const [loading, setLoading] = useState(false);
   const [comments, setComments] = useState<KanbanComment[]>([]);
   const [subtasks, setSubtasks] = useState<KanbanSubtask[]>([]);
   const [commentDraft, setCommentDraft] = useState("");
   const [activeTab, setActiveTab] = useState("subtasks");
-
-  // 修改负责人内嵌 Modal
-  const [assigneeModalOpen, setAssigneeModalOpen] = useState(false);
-  const [assigneeId, setAssigneeId] = useState<string | undefined>(undefined);
-  const [userResults, setUserResults] = useState<KanbanUserColumn[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [assigning, setAssigning] = useState(false);
 
   const taskId = task?.id ?? null;
 
@@ -147,43 +126,6 @@ export function KanbanTaskDetailDrawer({
     }
   };
 
-  // 修改负责人(对齐源 showAssigneeDialog + handleUpdateAssignee)
-  const openAssigneeModal = () => {
-    setAssigneeId(task?.user_id ?? undefined);
-    setAssigneeModalOpen(true);
-    void runUserSearch("");
-  };
-
-  const runUserSearch = async (kw: string) => {
-    setSearching(true);
-    try {
-      const list = await searchKanbanUsers(kw.trim());
-      setUserResults(list ?? []);
-    } catch {
-      setUserResults([]);
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  const handleUpdateAssignee = async () => {
-    if (!task || !assigneeId) return;
-    setAssigning(true);
-    try {
-      await assignTask({ task_id: task.id, assignee_id: assigneeId });
-      await fetchTasks();
-      void message.success("负责人修改成功");
-      setAssigneeModalOpen(false);
-      onTaskUpdated?.({ ...task, user_id: assigneeId });
-    } catch (err) {
-      void message.error(
-        err instanceof ApiError ? err.message : "修改负责人失败",
-      );
-    } finally {
-      setAssigning(false);
-    }
-  };
-
   if (!task) {
     return (
       <Drawer
@@ -197,7 +139,10 @@ export function KanbanTaskDetailDrawer({
   }
 
   const { title, desc } = splitContent(task.title);
+  // 任务描述:优先独立字段 task_description(里程碑明细来源),fallback 看 content 合并的描述(看板新建来源)
+  const description = task.task_description ?? desc;
   const tag = statusTagOf(task.status);
+  const overdue = task.priority === 1;
 
   return (
     <Drawer
@@ -209,58 +154,65 @@ export function KanbanTaskDetailDrawer({
       destroyOnClose
     >
       <Spin spinning={loading}>
-        {/* 基本信息 */}
-        <section className="mb-5">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="m-0 text-base font-semibold text-foreground">基本信息</h3>
-            <Button size="small" type="primary" onClick={openAssigneeModal}>
-              修改负责人
-            </Button>
-          </div>
-          <div className="space-y-1.5 rounded border border-border bg-muted/20 p-3 text-sm">
-            <Row label="任务标题">
-              <span className="font-medium text-foreground">{title || "(未命名)"}</span>
-            </Row>
-            <Row label="任务描述">
-              <span className="whitespace-pre-wrap break-words text-muted-foreground">
-                {desc || "暂无描述"}
-              </span>
-            </Row>
-            <Row label="状态">
-              <Tag color={tag.color}>{tag.text}</Tag>
-            </Row>
-            <Row label="所属项目">{task.project_name ?? "—"}</Row>
-            <Row label="负责人">{task.user_name ?? "未分配"}</Row>
-            <Row label="截止日期">{task.deadline ? fmtDay(task.deadline) : "—"}</Row>
-            <Row label="预估工时">{task.estimate_hours ?? "—"}h</Row>
-            <Row label="优先级">
-              <Tag
-                color={
-                  task.priority === 1
-                    ? "red"
-                    : task.priority === 2
-                      ? "blue"
-                      : task.priority === 3
-                        ? "green"
-                        : "default"
-                }
-              >
-                {task.priority === 1
-                  ? "逾期"
-                  : task.priority === 2
-                    ? "进行中"
-                    : task.priority === 3
-                      ? "已完成"
-                      : "—"}
-              </Tag>
-            </Row>
-            <Row label="进度">
-              <Progress percent={task.progress ?? 0} size="small" />
-            </Row>
-            <Row label="创建时间">{task.create_time ? fmtDay(task.create_time) : "—"}</Row>
-            <Row label="更新时间">{task.update_time ? fmtDay(task.update_time) : "—"}</Row>
-          </div>
-        </section>
+        {/* 头部:状态 + 逾期标记 */}
+        <div className="mb-3 flex items-center gap-2">
+          <Tag color={tag.color}>{tag.text}</Tag>
+          {overdue && <Tag color="red">已逾期</Tag>}
+        </div>
+
+        {/* 任务标题 */}
+        <h3 className="mb-4 text-lg font-semibold leading-snug text-foreground">
+          {title || "(未命名任务)"}
+        </h3>
+
+        {/* 任务描述 */}
+        <SectionLabel>任务描述</SectionLabel>
+        <div className="mb-4 rounded-md border border-border bg-muted/30 p-3 text-sm">
+          {description ? (
+            <span className="whitespace-pre-wrap break-words text-foreground">
+              {description}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">暂无描述</span>
+          )}
+        </div>
+
+        {/* 基本信息双列网格 */}
+        <SectionLabel>基本信息</SectionLabel>
+        <div className="mb-4 grid grid-cols-2 gap-x-6 gap-y-3 rounded-md border border-border bg-muted/10 p-3">
+          <InfoItem label="所属项目" value={task.project_name ?? "—"} />
+          <InfoItem label="负责人" value={task.user_name ?? "未分配"} />
+          <InfoItem
+            label="截止日期"
+            value={task.deadline ? fmtDay(task.deadline) : "—"}
+          />
+          <InfoItem
+            label="预估工时"
+            value={`${task.estimate_hours ?? "—"} 人天`}
+          />
+          {task.module_name && (
+            <InfoItem label="所属模块" value={task.module_name} />
+          )}
+          {task.work_partner && (
+            <InfoItem label="配合人员" value={task.work_partner} />
+          )}
+        </div>
+
+        {/* 进度 */}
+        <SectionLabel>进度</SectionLabel>
+        <div className="mb-4 px-1">
+          <Progress percent={task.progress ?? 0} size="small" />
+        </div>
+
+        {/* 备注(有才显) */}
+        {task.remarks && (
+          <>
+            <SectionLabel>备注</SectionLabel>
+            <div className="mb-4 whitespace-pre-wrap break-words rounded-md border border-border bg-muted/20 p-3 text-sm text-foreground">
+              {task.remarks}
+            </div>
+          </>
+        )}
 
         {/* Tabs:子任务 / 评论 / 附件 */}
         <Tabs
@@ -359,47 +311,23 @@ export function KanbanTaskDetailDrawer({
           ]}
         />
       </Spin>
-
-      {/* 修改负责人 Modal */}
-      <Modal
-        title="修改负责人"
-        open={assigneeModalOpen}
-        onOk={handleUpdateAssignee}
-        onCancel={() => setAssigneeModalOpen(false)}
-        confirmLoading={assigning}
-        okText="确定"
-        cancelText="取消"
-        okButtonProps={{ disabled: !assigneeId }}
-        destroyOnHidden
-      >
-        <div className="mb-1 text-xs text-muted-foreground">负责人</div>
-        <Select
-          showSearch
-          allowClear
-          style={{ width: "100%" }}
-          placeholder="请搜索人员"
-          value={assigneeId}
-          onChange={(v) => setAssigneeId((v as string | undefined) ?? undefined)}
-          onSearch={(kw) => void runUserSearch(kw)}
-          filterOption={false}
-          notFoundContent={searching ? <Spin size="small" /> : "无数据"}
-          options={userResults.map((u) => ({
-            value: u.user_id,
-            label: u.username
-              ? `${u.username}${u.dept_name ? ` · ${u.dept_name}` : ""}`
-              : u.user_id,
-          }))}
-        />
-      </Modal>
     </Drawer>
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex gap-3">
-      <span className="w-20 shrink-0 text-xs text-muted-foreground">{label}</span>
-      <div className="flex-1">{children}</div>
+    <div className="mb-2 text-xs font-medium text-muted-foreground">
+      {children}
+    </div>
+  );
+}
+
+function InfoItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[11px] text-muted-foreground">{label}</span>
+      <span className="text-sm text-foreground">{value}</span>
     </div>
   );
 }

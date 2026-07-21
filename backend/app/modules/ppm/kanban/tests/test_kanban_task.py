@@ -243,7 +243,7 @@ async def test_toggle_subtask_task_mismatch_returns_404(kanban_client, db_sessio
 
 
 async def test_user_column_saturation_calculation(kanban_client, db_session):
-    """total_hours=50h → saturation=125.0(50/40*100)。"""
+    """total_hours=50(人天) → saturation=125.0(50/40*100)。"""
     proj_id = await _seed_project(db_session)
     user_a = uuid.uuid4()
     await _seed_member(db_session, proj_id, user_a, "张三")

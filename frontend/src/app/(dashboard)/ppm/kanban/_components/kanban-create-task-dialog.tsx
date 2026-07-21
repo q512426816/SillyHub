@@ -142,7 +142,7 @@ export function KanbanCreateTaskDialog({
           />
         </Form.Item>
 
-        <Form.Item name="estimateHours" label="预估工时(小时)">
+        <Form.Item name="estimateHours" label="预估工时(人天)">
           <InputNumber min={0.5} max={100} step={0.5} style={{ width: "100%" }} />
         </Form.Item>
       </Form>

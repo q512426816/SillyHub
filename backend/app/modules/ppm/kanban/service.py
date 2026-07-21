@@ -11,6 +11,7 @@ project_member,可按 Organization 分组)。
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections import defaultdict
 from datetime import UTC, date, datetime, time
@@ -60,17 +61,27 @@ class CommentEmpty(KanbanError):
 
 
 def _parse_hours(raw: str | None) -> float:
-    """把 ``PlanTask.work_load`` 字符串解析为小时数 (无法解析返回 0)。
+    """把 ``PlanTask.work_load`` 字符串解析为**人天数** (无法解析返回 0)。
 
-    源 ``TaskCardVO.estimateHours`` 是整数;本项目 ``PlanTask.work_load``
-    存字符串 (如 "8"、"0.5天"),此处做宽松解析。
+    ``work_load`` 约定 (与前端 ``parseWorkLoadPersonDays``、workbench
+    ``_parse_workload_hours`` 同源,1 人天 = 8 小时):
+    - 纯数字 / 带 ``d`` / ``天`` → 视为人天,原值返回;
+    - 带 ``h`` / ``小时`` → 视为小时,÷8 换算成人天;
+    - 空 / 无法解析 (如 "约3") → 返回 ``0.0``。
+
+    看板 ``estimate_hours`` 与 task-plans 「工作量(人天)」「已消耗(人天)」
+    同量纲,均按人天展示。函数名沿用历史命名,返回值为人天。
     """
     if not raw:
         return 0.0
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
+    m = re.match(r"^\s*([\d.]+)\s*(h|d|小时|天)?\s*$", raw.strip(), re.I)
+    if not m:
         return 0.0
+    val = float(m.group(1))
+    unit = (m.group(2) or "").lower()
+    if unit in ("h", "小时"):
+        return val / 8.0
+    return val
 
 
 def _parse_date_range(
@@ -223,6 +234,10 @@ class PpdKanbanService:
                     create_time=t.created_at,
                     update_time=t.updated_at,
                     estimate_hours=_parse_hours(t.work_load),
+                    task_description=t.task_description,
+                    module_name=t.module_name,
+                    work_partner=t.work_partner,
+                    remarks=t.remarks,
                     kanban_order=t.kanban_order,
                     file_urls=list(t.file_urls or []),
                 )

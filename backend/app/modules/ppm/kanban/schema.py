@@ -191,8 +191,14 @@ class TaskCardVO(BaseModel):
     create_time: datetime | None = Field(default=None, description="创建时间 (PlanTask.created_at)")
     update_time: datetime | None = Field(default=None, description="更新时间 (PlanTask.updated_at)")
     estimate_hours: float | None = Field(
-        default=None, description="预估工时 (PlanTask.work_load 字符串解析)"
+        default=None, description="预估工时 (PlanTask.work_load 字符串解析,单位人天)"
     )
+    task_description: str | None = Field(
+        default=None, description="任务描述 (PlanTask.task_description)"
+    )
+    module_name: str | None = Field(default=None, description="所属模块名 (PlanTask.module_name)")
+    work_partner: str | None = Field(default=None, description="配合人员 (PlanTask.work_partner)")
+    remarks: str | None = Field(default=None, description="备注 (PlanTask.remarks)")
     kanban_order: int = Field(default=0, description="看板排序")
     file_urls: list[str] = Field(
         default_factory=list, description="附件 URL 列表 (PlanTask.file_urls)"

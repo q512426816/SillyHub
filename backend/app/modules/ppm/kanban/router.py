@@ -157,6 +157,10 @@ def _to_card(t: PlanTask) -> TaskCardVO:
         user_name=t.user_name,
         deadline=t.end_time,
         estimate_hours=_parse_hours(t.work_load),
+        task_description=t.task_description,
+        module_name=t.module_name,
+        work_partner=t.work_partner,
+        remarks=t.remarks,
         kanban_order=t.kanban_order,
         file_urls=list(t.file_urls or []),
     )

@@ -75,9 +75,9 @@ export function KanbanGantt({
   const rangeStart = useMemo(() => dayjs(startDate), [startDate]);
   const rangeEnd = useMemo(() => dayjs(endDate), [endDate]);
   const dates = useMemo(() => rangeDateKeys(rangeStart, rangeEnd), [rangeStart, rangeEnd]);
-  /** 范围内工作日容量(非休息日含调休补班 × 8h/日),用于行头饱和度。 */
+  /** 范围内工作日容量(非休息日含调休补班 = 人天容量,1 工作日 = 1 人天),用于行头饱和度。 */
   const rangeCapacity = useMemo(
-    () => dates.filter((dk) => !getDayStatus(dk).rest).length * 8,
+    () => dates.filter((dk) => !getDayStatus(dk).rest).length,
     [dates],
   );
   const today = todayKey();
@@ -202,7 +202,7 @@ export function KanbanGantt({
                     <div className="truncate text-xs font-semibold text-foreground">{displayName}</div>
                     <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                       <span>
-                        工时 <b className="text-foreground">{visibleHours}h</b>
+                        工时 <b className="text-foreground">{visibleHours}人天</b>
                       </span>
                       <span>任务 {visibleTasks.length}</span>
                     </div>

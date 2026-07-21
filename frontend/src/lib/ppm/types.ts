@@ -1204,8 +1204,16 @@ export interface KanbanTaskCard {
   create_time: string | null;
   /** 更新时间 (PlanTask.updated_at) */
   update_time: string | null;
-  /** 预估工时 (PlanTask.work_load 字符串解析) */
+  /** 预估工时 (PlanTask.work_load 字符串解析,单位人天) */
   estimate_hours: number | null;
+  /** 任务描述 (PlanTask.task_description) */
+  task_description: string | null;
+  /** 所属模块名 (PlanTask.module_name) */
+  module_name: string | null;
+  /** 配合人员 (PlanTask.work_partner) */
+  work_partner: string | null;
+  /** 备注 (PlanTask.remarks) */
+  remarks: string | null;
   kanban_order: number;
   /** 附件 URL 列表 (PlanTask.file_urls) */
   file_urls: string[];
