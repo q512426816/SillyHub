@@ -41,3 +41,9 @@ created_at: 2026-07-21T08:48:56
 关联变更：（无）
 文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
 结果：根因=MasterDrawer submit 的 plan_workload 是 InputNumber(number),原 (vals.plan_workload as string) 直接发 number,后端 plan_workload:str 收 number 422(Pydantic v2 不 coerce number→str)。修复改 String() 转换(对齐明细表单 2122 写法)。日期字段 getValueProps/normalize+fromDate 返回 YYYY-MM-DD string,后端 datetime 正常解析,非 422 源。POST/PUT 都发 plan_workload 故都 422。tsc 0 error milestone-details 24测试通过。
+
+## ql-20260721-008-a1b2 | 2026-07-21 15:10:00 | /ppm/problem-list 按页面样式规范调整(按钮antd化+Drawer→Modal+删除确认+颜色token)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/problem-list/page.tsx + _problem-drawer.tsx
+结果：shadcn Button→antd(操作列 ghost→link small/删除 danger、工具栏 outline→default、新建/搜索→primary)+1处 confirm→Modal.confirm+3处 alert→message.error+_problem-drawer Drawer→Modal+硬编码色→token(rgba(0,0,0,0.45)→muted-foreground、#dc2626/#16a34a→destructive/success)。eslint 0 error tsc 0 error。problem-detail-modal 组件待随 task-plans 批次改。

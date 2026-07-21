@@ -16,16 +16,17 @@
  */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
+  Button,
   DatePicker,
   Input,
+  message,
+  Modal,
   Select,
   Table,
   type TableProps,
   Tag,
 } from "antd";
 import type { Dayjs } from "dayjs";
-
-import { Button } from "@/components/ui/button";
 import {
   PageContainer,
   PageHeader,
@@ -173,7 +174,7 @@ export default function ProblemListPage() {
     try {
       await exportProblems();
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : "导出失败");
+      message.error(err instanceof ApiError ? err.message : "导出失败");
     } finally {
       setExporting(false);
     }
@@ -221,19 +222,28 @@ export default function ProblemListPage() {
       await startProblem(p.id);
       await load();
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : "开始失败");
+      message.error(err instanceof ApiError ? err.message : "开始失败");
     }
   };
 
   // 删除: 任意状态 (本人/管理员, D-004)
-  const handleDelete = async (p: ProblemList) => {
-    if (!confirm("删除该问题清单?")) return;
-    try {
-      await deleteProblem(p.id);
-      await load();
-    } catch (err) {
-      alert(err instanceof ApiError ? err.message : "删除失败");
-    }
+  const handleDelete = (p: ProblemList) => {
+    Modal.confirm({
+      title: "删除该问题清单?",
+      content: "该操作不可恢复。",
+      okText: "确认删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      maskClosable: false,
+      onOk: async () => {
+        try {
+          await deleteProblem(p.id);
+          await load();
+        } catch (err) {
+          message.error(err instanceof ApiError ? err.message : "删除失败");
+        }
+      },
+    });
   };
 
   const columns: TableProps<ProblemList>["columns"] = [
@@ -293,7 +303,7 @@ export default function ProblemListPage() {
         v ? (
           <Tag>{PROBLEM_TYPE_TEXT[v] ?? v}</Tag>
         ) : (
-          <span style={{ color: "rgba(0,0,0,0.45)" }}>—</span>
+          <span className="text-xs text-muted-foreground">—</span>
         ),
     },
     {
@@ -318,7 +328,7 @@ export default function ProblemListPage() {
       key: "find_time",
       width: 120,
       render: (v: string | null) =>
-        v ? v.slice(0, 10) : <span style={{ color: "rgba(0,0,0,0.45)" }}>—</span>,
+        v ? v.slice(0, 10) : <span className="text-xs text-muted-foreground">—</span>,
     },
     {
       title: "工作量(人/天)",
@@ -334,11 +344,11 @@ export default function ProblemListPage() {
       width: 110,
       render: (v: number | null | undefined, p: ProblemList) => {
         if (v == null || v <= 0) {
-          return <span style={{ color: "rgba(0,0,0,0.45)" }}>—</span>;
+          return <span className="text-xs text-muted-foreground">—</span>;
         }
         const over = isOverEstimate(v, p.work_load);
         return (
-          <span style={{ color: over ? "#dc2626" : "#16a34a", fontWeight: 500 }}>
+          <span className={`${over ? "text-destructive" : "text-success"} font-medium`}>
             {v} 人天
           </span>
         );
@@ -378,29 +388,29 @@ export default function ProblemListPage() {
           <div className="flex whitespace-nowrap gap-1 justify-center">
             {/* 编辑: 新建 / 进行中 (D-003 进行中保留编辑入口, 与执行分离) */}
             {(p.status === "新建" || p.status === "进行中") && canEdit && (
-              <Button size="sm" variant="ghost" onClick={() => openDrawer("edit", p)}>
+              <Button size="small" type="link" onClick={() => openDrawer("edit", p)}>
                 编辑
               </Button>
             )}
             {/* 开始: 新建 → 进行中 (建 in-flight TaskExecute) */}
             {p.status === "新建" && canOperate && (
-              <Button size="sm" variant="ghost" onClick={() => void handleStart(p)}>
+              <Button size="small" type="link" onClick={() => void handleStart(p)}>
                 开始
               </Button>
             )}
             {/* 执行: 进行中 → 打开 execute 弹窗 (跨天填报, 提交回新建/完成) */}
             {p.status === "进行中" && canOperate && (
-              <Button size="sm" variant="ghost" onClick={() => openExecute(p)}>
+              <Button size="small" type="link" onClick={() => openExecute(p)}>
                 执行
               </Button>
             )}
             {/* 详情: 任意状态 (打开 detail 弹窗只读) */}
-            <Button size="sm" variant="ghost" onClick={() => openDetail(p)}>
+            <Button size="small" type="link" onClick={() => openDetail(p)}>
               详情
             </Button>
             {/* 删除: 任意状态 (后端 can_delete 判断) */}
             {canDelete && (
-              <Button size="sm" variant="ghost" onClick={() => void handleDelete(p)}>
+              <Button size="small" type="link" danger onClick={() => void handleDelete(p)}>
                 删除
               </Button>
             )}
@@ -421,26 +431,22 @@ export default function ProblemListPage() {
         {/* 顶部按钮行(D-006):数据组(导出/新建)左 | 基础组(搜索/重置/展开)最右 */}
         <div className="mb-2 flex items-center justify-end gap-2">
           <Button
-            size="sm"
-            variant="outline"
             disabled={exporting}
             onClick={() => void handleExport()}
           >
             {exporting ? "导出中…" : "导出"}
           </Button>
-          <Button size="sm" onClick={() => openDrawer("create")}>
+          <Button type="primary" onClick={() => openDrawer("create")}>
             + 新建问题
           </Button>
           <span className="mx-1 h-6 w-px bg-border" aria-hidden />
-          <Button size="sm" onClick={commitKeyword}>
+          <Button type="primary" onClick={commitKeyword}>
             搜索
           </Button>
-          <Button size="sm" variant="outline" onClick={resetFilters}>
+          <Button onClick={resetFilters}>
             重置
           </Button>
           <Button
-            size="sm"
-            variant="outline"
             onClick={() => setExpanded((v) => !v)}
           >
             {expanded ? "收起" : "展开"}
@@ -546,8 +552,6 @@ export default function ProblemListPage() {
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {error}
           <Button
-            size="sm"
-            variant="outline"
             className="ml-3"
             onClick={() => void load()}
           >

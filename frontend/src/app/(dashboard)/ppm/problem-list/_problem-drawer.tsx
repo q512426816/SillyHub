@@ -10,7 +10,7 @@
  *
  * 设计依据:.sillyspec/changes/2026-07-20-problem-list-align-task-plan/design.md
  */
-import { Drawer } from "antd";
+import { Modal } from "antd";
 
 import { PROBLEM_STATUS_TEXT } from "@/components/ppm-status-actions";
 import type { ProblemList } from "@/lib/ppm";
@@ -39,26 +39,20 @@ export function ProblemDrawer({
   onSaved,
 }: ProblemDrawerProps) {
   return (
-    <Drawer
+    <Modal
       open={open}
       title={
         <span>
           {TITLE[mode]}
           {problem && (
-            <span
-              style={{
-                marginLeft: 8,
-                fontSize: 12,
-                color: "rgba(0,0,0,0.45)",
-              }}
-            >
+            <span className="ml-2 text-xs text-muted-foreground">
               {PROBLEM_STATUS_TEXT[problem.status] ?? problem.status}
             </span>
           )}
         </span>
       }
       width={680}
-      onClose={onClose}
+      onCancel={onClose}
       destroyOnClose
       maskClosable={false}
     >
@@ -67,6 +61,6 @@ export function ProblemDrawer({
         onSuccess={onSaved}
         onCancel={onClose}
       />
-    </Drawer>
+    </Modal>
   );
 }
