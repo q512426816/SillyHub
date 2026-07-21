@@ -544,11 +544,13 @@ class PlanService:
         self, item_id: uuid.UUID, data: dict[str, Any]
     ) -> PsProjectPlan:
         # project_manager_name 兜底 (同 create):_Crud.update 跳过 None 值,前端切换
-        # 经理漏传 name 时旧 name 会残留。data 经 exclude_unset、编辑表单必传
-        # project_manager_id,故 DB 现值即为目标经理;name 为空时按其反查 display_name。
+        # 经理漏传 name 时旧 name 会残留。有效经理 id 优先取 data 里的新 id (切换场景),
+        # 缺省 (未传/exclude_unset 剔除) 回退 DB 现值;name 为空时按其反查 display_name。
         if not (data.get("project_manager_name") or "").strip():
-            current = await _Crud(self._session, PsProjectPlan).get(item_id)
-            manager_id = current.project_manager_id
+            manager_id = data.get("project_manager_id")
+            if manager_id is None:
+                current = await _Crud(self._session, PsProjectPlan).get(item_id)
+                manager_id = current.project_manager_id
             if manager_id:
                 looked_up = await self._lookup_user_display_name(manager_id)
                 if looked_up:
