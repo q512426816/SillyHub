@@ -13,10 +13,18 @@
  * 依赖:lib/ppm/task (API) + lib/ppm/project (项目下拉) + stores/session。
  */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { DatePicker, Input, Select, Table, type TableProps, Tag } from "antd";
+import {
+  Button,
+  DatePicker,
+  Input,
+  Modal,
+  Select,
+  Table,
+  type TableProps,
+  Tag,
+} from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 
-import { Button } from "@/components/ui/button";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import {
   PpmUserSelect,
@@ -276,28 +284,32 @@ export default function TaskPlansPage() {
   const canDeleteTask = (t: PlanTask) =>
     currentUser?.id === t.user_id || !!currentUser?.is_platform_admin;
 
-  const handleBatchDelete = async () => {
+  const handleBatchDelete = () => {
     if (selectedRowKeys.length === 0) return;
-    if (
-      !confirm(
-        `确认删除选中的 ${selectedRowKeys.length} 条任务计划？此操作不可恢复。`,
-      )
-    )
-      return;
-    let ok = 0;
-    let fail = 0;
-    for (const id of selectedRowKeys) {
-      try {
-        await deletePlanTask(id);
-        ok += 1;
-      } catch {
-        fail += 1;
-      }
-    }
-    setSelectedRowKeys([]);
-    await load();
-    if (fail === 0) notify.success(`已删除 ${ok} 条任务计划`);
-    else notify.error(new Error(`成功 ${ok} 条，失败 ${fail} 条`));
+    Modal.confirm({
+      title: "确认删除任务计划？",
+      content: `确认删除选中的 ${selectedRowKeys.length} 条任务计划？此操作不可恢复。`,
+      okText: "确认删除",
+      cancelText: "取消",
+      okButtonProps: { danger: true },
+      maskClosable: false,
+      onOk: async () => {
+        let ok = 0;
+        let fail = 0;
+        for (const id of selectedRowKeys) {
+          try {
+            await deletePlanTask(id);
+            ok += 1;
+          } catch {
+            fail += 1;
+          }
+        }
+        setSelectedRowKeys([]);
+        await load();
+        if (fail === 0) notify.success(`已删除 ${ok} 条任务计划`);
+        else notify.error(new Error(`成功 ${ok} 条，失败 ${fail} 条`));
+      },
+    });
   };
 
   const rowSelection: TableProps<PlanTask>["rowSelection"] = {
@@ -419,14 +431,14 @@ export default function TaskPlansPage() {
         return (
           <div className="flex whitespace-nowrap gap-1 justify-center">
             {t.status === "未开始" && canOperate && (
-              <Button size="sm" variant="ghost" onClick={() => void handleStart(t)}>
+              <Button size="small" type="link" onClick={() => void handleStart(t)}>
                 启动
               </Button>
             )}
             {t.status === "进行中" && canOperate && (
               <Button
-                size="sm"
-                variant="ghost"
+                size="small"
+                type="link"
                 onClick={() => {
                   setDetailTask(t);
                   setDetailMode("execute");
@@ -436,8 +448,8 @@ export default function TaskPlansPage() {
               </Button>
             )}
             <Button
-              size="sm"
-              variant="ghost"
+              size="small"
+              type="link"
               onClick={() => {
                 setDetailTask(t);
                 setDetailMode("detail");
@@ -462,23 +474,19 @@ export default function TaskPlansPage() {
         {/* 顶部按钮行(D-006):数据组(导出/新建)左 | 基础组(搜索/重置/展开)最右 */}
         <div className="mb-2 flex items-center justify-end gap-2">
           <Button
-            size="sm"
-            variant="outline"
             disabled={exporting}
             onClick={() => void handleExport()}
           >
             {exporting ? "导出中…" : "导出"}
           </Button>
           <span className="mx-1 h-6 w-px bg-border" aria-hidden />
-          <Button size="sm" onClick={commitSearch}>
+          <Button type="primary" onClick={commitSearch}>
             搜索
           </Button>
-          <Button size="sm" variant="outline" onClick={resetFilters}>
+          <Button onClick={resetFilters}>
             重置
           </Button>
           <Button
-            size="sm"
-            variant="outline"
             onClick={() => setExpanded((v) => !v)}
           >
             {expanded ? "收起" : "展开"}
@@ -587,8 +595,6 @@ export default function TaskPlansPage() {
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {error}
           <Button
-            size="sm"
-            variant="outline"
             className="ml-3"
             onClick={() => void load()}
           >
@@ -871,10 +877,10 @@ function TaskDrawer({
         </div>
         {err && <p className="mt-2 text-[11px] text-destructive">{err}</p>}
         <div className="mt-4 flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onClose}>
+          <Button onClick={onClose}>
             取消
           </Button>
-          <Button size="sm" disabled={busy} onClick={() => void submit()}>
+          <Button type="primary" disabled={busy} onClick={() => void submit()}>
             {busy ? "保存中…" : "保存"}
           </Button>
         </div>
@@ -900,10 +906,10 @@ function DeleteConfirm({
           将删除任务「{task.content ?? task.id}」,该操作不可恢复。
         </p>
         <div className="mt-4 flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onCancel}>
+          <Button onClick={onCancel}>
             取消
           </Button>
-          <Button variant="destructive" size="sm" onClick={onConfirm}>
+          <Button danger type="primary" onClick={onConfirm}>
             确认删除
           </Button>
         </div>

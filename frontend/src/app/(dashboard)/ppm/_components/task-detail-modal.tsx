@@ -18,9 +18,8 @@
  */
 import { useEffect, useState } from "react";
 import dayjs from "dayjs";
-import { Modal, Tag } from "antd";
+import { Button, Modal, Tag } from "antd";
 
-import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import { isOverEstimate } from "@/lib/ppm/format";
 import {
@@ -339,14 +338,12 @@ export function TaskDetailModal({
           ))}
           <div className="flex gap-2">
             <Button
-              size="sm"
-              variant="outline"
               disabled={busy}
               onClick={() => void handleSubmit("submit")}
             >
               提交(回未开始)
             </Button>
-            <Button size="sm" disabled={busy} onClick={() => void handleSubmit("complete")}>
+            <Button type="primary" disabled={busy} onClick={() => void handleSubmit("complete")}>
               完成
             </Button>
           </div>

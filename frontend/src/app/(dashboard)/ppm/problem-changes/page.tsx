@@ -17,9 +17,11 @@
  */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
+  App,
+  Button,
   DatePicker,
-  Drawer,
   Input,
+  Modal,
   Select,
   Table,
   type TableProps,
@@ -27,7 +29,6 @@ import {
 } from "antd";
 import type { Dayjs } from "dayjs";
 
-import { Button } from "@/components/ui/button";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import {
   matchAnyUser,
@@ -67,6 +68,7 @@ const DRAWER_TITLE: Record<DrawerMode["kind"], string> = {
 };
 
 export default function ProblemChangesPage() {
+  const { modal, message } = App.useApp();
   const { user: currentUser } = useSession();
   const currentUserId = currentUser?.id ?? "";
 
@@ -148,21 +150,30 @@ export default function ProblemChangesPage() {
     try {
       await exportProblemChanges();
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : "导出失败");
+      message.error(err instanceof ApiError ? err.message : "导出失败");
     } finally {
       setExporting(false);
     }
   };
 
-  const handleDelete = async (c: ProblemChange) => {
+  const handleDelete = (c: ProblemChange) => {
     if (c.status !== "1") return;
-    if (!confirm("删除该问题变更?")) return;
-    try {
-      await deleteProblemChange(c.id);
-      await load();
-    } catch (err) {
-      alert(err instanceof ApiError ? err.message : "删除失败");
-    }
+    modal.confirm({
+      title: "删除该问题变更?",
+      content: "该操作不可恢复。",
+      okText: "确认删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      maskClosable: false,
+      onOk: async () => {
+        try {
+          await deleteProblemChange(c.id);
+          await load();
+        } catch (err) {
+          message.error(err instanceof ApiError ? err.message : "删除失败");
+        }
+      },
+    });
   };
 
   const columns: TableProps<ProblemChange>["columns"] = [
@@ -232,8 +243,8 @@ export default function ProblemChangesPage() {
         return (
           <div className="flex whitespace-nowrap gap-1 justify-center">
             <Button
-              size="sm"
-              variant="ghost"
+              size="small"
+              type="link"
               onClick={() => setDrawer({ kind: "detail", change: c })}
             >
               详情
@@ -241,7 +252,8 @@ export default function ProblemChangesPage() {
             {c.status === "1" && (
               <>
                 <Button
-                  size="sm"
+                  size="small"
+                  type="link"
                   disabled={!isHandler}
                   title={isHandler ? undefined : "仅当前处理人可审核"}
                   onClick={() => setDrawer({ kind: "audit", change: c })}
@@ -249,12 +261,12 @@ export default function ProblemChangesPage() {
                   审核
                 </Button>
                 <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-red-600 hover:text-red-700"
+                  size="small"
+                  type="link"
+                  danger
                   disabled={!isHandler}
                   title={isHandler ? undefined : "仅当前处理人可删除"}
-                  onClick={() => void handleDelete(c)}
+                  onClick={() => handleDelete(c)}
                 >
                   删除
                 </Button>
@@ -276,21 +288,14 @@ export default function ProblemChangesPage() {
       <SectionCard bodyPadding="p-2">
         {/* 顶部按钮行(D-006):数据组(导出)左 | 基础组(搜索/重置)最右 */}
         <div className="mb-2 flex items-center justify-end gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={exporting}
-            onClick={() => void handleExport()}
-          >
+          <Button disabled={exporting} onClick={() => void handleExport()}>
             {exporting ? "导出中…" : "导出"}
           </Button>
           <span className="mx-1 h-6 w-px bg-border" aria-hidden />
-          <Button size="sm" onClick={commitKeyword}>
+          <Button type="primary" onClick={commitKeyword}>
             搜索
           </Button>
-          <Button size="sm" variant="outline" onClick={resetFilters}>
-            重置
-          </Button>
+          <Button onClick={resetFilters}>重置</Button>
         </div>
 
         {/* 查询条件:垂直 grid-cols-4 */}
@@ -338,12 +343,7 @@ export default function ProblemChangesPage() {
       {error ? (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {error}
-          <Button
-            size="sm"
-            variant="outline"
-            className="ml-3"
-            onClick={() => void load()}
-          >
+          <Button className="ml-3" onClick={() => void load()}>
             重新加载
           </Button>
         </div>
@@ -370,11 +370,12 @@ export default function ProblemChangesPage() {
         />
       )}
 
-      <Drawer
+      <Modal
         open={drawer !== null}
         title={drawer ? DRAWER_TITLE[drawer.kind] : ""}
         width={720}
-        onClose={() => setDrawer(null)}
+        footer={null}
+        onCancel={() => setDrawer(null)}
         destroyOnClose
         maskClosable={false}
       >
@@ -394,7 +395,7 @@ export default function ProblemChangesPage() {
             onCancel={() => setDrawer(null)}
           />
         )}
-      </Drawer>
+      </Modal>
     </PageContainer>
   );
 }

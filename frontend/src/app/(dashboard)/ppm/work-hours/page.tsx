@@ -11,10 +11,16 @@
  * 依赖:lib/ppm/task (work-hour API) + lib/ppm/project (项目下拉) + stores/session。
  */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { DatePicker, Input, Select, Table, type TableProps } from "antd";
+import {
+  Button,
+  DatePicker,
+  Modal,
+  Select,
+  Table,
+  type TableProps,
+} from "antd";
 import type { Dayjs } from "dayjs";
 
-import { Button } from "@/components/ui/button";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import {
   PpmUserSelect,
@@ -320,16 +326,16 @@ export default function WorkHoursPage() {
       render: (_v, r: WorkHour) => (
         <div className="flex whitespace-nowrap gap-1 justify-center">
           <Button
-            size="sm"
-            variant="ghost"
+            size="small"
+            type="link"
             onClick={() => setDrawer({ open: true, mode: "edit", item: r })}
           >
             编辑
           </Button>
           <Button
-            size="sm"
-            variant="ghost"
-            className="text-red-600 hover:text-red-700"
+            size="small"
+            type="link"
+            danger
             onClick={() => setConfirmDelete(r)}
           >
             删除
@@ -351,20 +357,20 @@ export default function WorkHoursPage() {
       <SectionCard bodyPadding="p-2">
         {/* 顶部按钮行(D-006):页面按钮(工时统计/导出/新建)左 | 基础组(搜索/重置)最右 */}
         <div className="mb-2 flex items-center justify-end gap-2">
-          <Button size="sm" variant="outline" onClick={() => { window.location.href = "/ppm/work-hour-statistics"; }}>
+          <Button onClick={() => { window.location.href = "/ppm/work-hour-statistics"; }}>
             工时统计 →
           </Button>
-          <Button size="sm" variant="outline" disabled={exporting} onClick={() => void handleExport()}>
+          <Button disabled={exporting} onClick={() => void handleExport()}>
             {exporting ? "导出中…" : "导出"}
           </Button>
-          <Button size="sm" onClick={() => setDrawer({ open: true, mode: "create" })}>
+          <Button type="primary" onClick={() => setDrawer({ open: true, mode: "create" })}>
             + 录入工时
           </Button>
           <span className="mx-1 h-6 w-px bg-border" aria-hidden />
-          <Button size="sm" onClick={commitSearch}>
+          <Button type="primary" onClick={commitSearch}>
             搜索
           </Button>
-          <Button size="sm" variant="outline" onClick={resetFilters}>
+          <Button onClick={resetFilters}>
             重置
           </Button>
         </div>
@@ -434,8 +440,6 @@ export default function WorkHoursPage() {
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {error}
           <Button
-            size="sm"
-            variant="outline"
             className="ml-3"
             onClick={() => void load()}
           >
@@ -476,30 +480,21 @@ export default function WorkHoursPage() {
       )}
 
       {confirmDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-          <div className="w-96 rounded-md border bg-background p-5 shadow-lg">
-            <h3 className="text-sm font-semibold">确认删除工时记录？</h3>
-            <p className="mt-2 text-xs text-muted-foreground">
-              将删除 {fmtDay(confirmDelete.work_date)} 的工时记录,该操作不可恢复。
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setConfirmDelete(null)}
-              >
-                取消
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => void handleDelete()}
-              >
-                确认删除
-              </Button>
-            </div>
-          </div>
-        </div>
+        <Modal
+          open
+          title="确认删除工时记录？"
+          onCancel={() => setConfirmDelete(null)}
+          onOk={() => void handleDelete()}
+          okText="确认删除"
+          cancelText="取消"
+          okButtonProps={{ danger: true }}
+          maskClosable={false}
+          destroyOnClose
+        >
+          <p className="mt-2 text-xs text-muted-foreground">
+            将删除 {fmtDay(confirmDelete.work_date)} 的工时记录,该操作不可恢复。
+          </p>
+        </Modal>
       )}
     </PageContainer>
   );
@@ -596,12 +591,23 @@ function WorkHourDrawer({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-      <div className="w-[460px] rounded-md border bg-background p-5 shadow-lg">
-        <h3 className="text-sm font-semibold">
-          {state.mode === "create" ? "录入工时" : "编辑工时"}
-        </h3>
-        <div className="mt-3 grid grid-cols-2 gap-3">
+    <Modal
+      open
+      title={state.mode === "create" ? "录入工时" : "编辑工时"}
+      width={520}
+      onCancel={onClose}
+      maskClosable={false}
+      destroyOnClose
+      footer={
+        <div className="flex items-center justify-end gap-2">
+          <Button onClick={onClose}>取消</Button>
+          <Button type="primary" loading={busy} onClick={() => void submit()}>
+            保存
+          </Button>
+        </div>
+      }
+    >
+      <div className="mt-3 grid grid-cols-2 gap-3">
           <div>
             <label className="text-[11px] text-muted-foreground">日期 *</label>
             <input
@@ -693,15 +699,6 @@ function WorkHourDrawer({
           </div>
         </div>
         {err && <p className="mt-2 text-[11px] text-destructive">{err}</p>}
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onClose}>
-            取消
-          </Button>
-          <Button size="sm" disabled={busy} onClick={() => void submit()}>
-            {busy ? "保存中…" : "保存"}
-          </Button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

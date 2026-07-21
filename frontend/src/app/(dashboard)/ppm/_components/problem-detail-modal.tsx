@@ -21,9 +21,8 @@
  */
 import { useEffect, useState } from "react";
 import dayjs from "dayjs";
-import { Modal, Tag } from "antd";
+import { Button, Modal, Tag } from "antd";
 
-import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import { isOverEstimate } from "@/lib/ppm/format";
 import { executeProblem, startProblem } from "@/lib/ppm/problem";
@@ -381,14 +380,13 @@ export function ProblemDetailModal({
           ))}
           <div className="flex gap-2">
             <Button
-              size="sm"
-              variant="outline"
+              type="primary"
               disabled={busy}
               onClick={() => void handleSubmit("submit")}
             >
               提交(回新建)
             </Button>
-            <Button size="sm" disabled={busy} onClick={() => void handleSubmit("complete")}>
+            <Button type="primary" disabled={busy} onClick={() => void handleSubmit("complete")}>
               完成
             </Button>
           </div>

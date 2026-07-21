@@ -20,10 +20,9 @@
  *       components/ppm-user-select (成员选择) + components/charts。
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { DatePicker, message, Select, Tabs, type TableProps } from "antd";
+import { Button, DatePicker, message, Select, Tabs, type TableProps } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 
-import { Button } from "@/components/ui/button";
 import {
   DataTable,
   PageContainer,
@@ -315,11 +314,11 @@ export default function WorkHourStatisticsPage() {
       <SectionCard bodyPadding="p-2">
         {/* 顶部按钮行(D-006):页面按钮(返回工时录入)左 | 查询按钮(清除范围)最右 */}
         <div className="mb-2 flex items-center justify-end gap-2">
-          <Button size="sm" variant="outline" onClick={() => { window.location.href = "/ppm/work-hours"; }}>
+          <Button onClick={() => { window.location.href = "/ppm/work-hours"; }}>
             ← 返回工时录入
           </Button>
           <span className="mx-1 h-6 w-px bg-border" aria-hidden />
-          <Button size="sm" variant="outline" onClick={handleClearRange}>
+          <Button onClick={handleClearRange}>
             清除范围
           </Button>
         </div>
@@ -391,8 +390,6 @@ export default function WorkHourStatisticsPage() {
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {error}
           <Button
-            size="sm"
-            variant="outline"
             className="ml-3"
             onClick={() => void load()}
           >

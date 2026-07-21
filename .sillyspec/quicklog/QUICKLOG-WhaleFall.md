@@ -47,3 +47,9 @@ created_at: 2026-07-21T08:48:56
 关联变更：（无）
 文件：frontend/src/app/(dashboard)/ppm/problem-list/page.tsx + _problem-drawer.tsx
 结果：shadcn Button→antd(操作列 ghost→link small/删除 danger、工具栏 outline→default、新建/搜索→primary)+1处 confirm→Modal.confirm+3处 alert→message.error+_problem-drawer Drawer→Modal+硬编码色→token(rgba(0,0,0,0.45)→muted-foreground、#dc2626/#16a34a→destructive/success)。eslint 0 error tsc 0 error。problem-detail-modal 组件待随 task-plans 批次改。
+
+## ql-20260721-009-b2c3 | 2026-07-21 16:20:00 | 批量按样式规范调整 problem-changes/task-plans/work-hours/work-hour-statistics + task-detail-modal/problem-detail-modal
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/{problem-changes,task-plans,work-hours,work-hour-statistics}/page.tsx + _components/{task-detail-modal,problem-detail-modal}.tsx
+结果：4页面+2组件 shadcn Button→antd(操作列 ghost→link small/删除 danger、工具栏 outline→default、新建/搜索/完成/提交→primary、destructive→danger)+confirm→Modal.confirm+alert→message.error+Drawer/自写遮罩→antd Modal+硬编码色→token。子代理并行改+eslint/tsc 全 0 error。tsc 全量 0 error。至此 12 个 ppm 页面全部对齐 FRONTEND_PAGE_STYLE.md。
