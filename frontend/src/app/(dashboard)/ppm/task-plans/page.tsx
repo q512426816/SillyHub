@@ -4,11 +4,12 @@
  * 任务计划页面 (task-12 / FR-05) — 对齐 project-plans 风格。
  *
  * 功能:
- *  - 列表分页 (task-plan/page),状态/月份/项目/负责人/时间区间/配合人员服务端过滤。
- *  - 个人视图切换 (personal-task-plan/page,仅当前登录用户的任务)。
+ *  - 列表分页 (task-plan/page),视图/状态/项目/负责人/时间区间/配合人员服务端过滤。
+ *  - 视图切换 (personal-task-plan/page 我的任务 / task-plan/page 全部任务)。
  *  - 新建/编辑/删除任务计划。
  *  - 执行任务 (task-plan/execute) — 联动生成/推进 TaskExecute。
  *  - 导出 Excel (后端生成 `任务计划_YYYYMMDD_HHMMSS.xlsx`)。
+ *  - 列表固定按计划开始时间正序 (order_by=start_time asc)。
  *
  * 依赖:lib/ppm/task (API) + lib/ppm/project (项目下拉) + stores/session。
  */
@@ -23,8 +24,6 @@ import {
   type TableProps,
   Tag,
 } from "antd";
-import dayjs, { type Dayjs } from "dayjs";
-
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import {
   PpmUserSelect,
@@ -59,6 +58,8 @@ import {
   taskStatusTag,
 } from "../shared";
 import { TaskDetailModal } from "../_components/task-detail-modal";
+
+import type { Dayjs } from "dayjs";
 
 const { RangePicker } = DatePicker;
 
@@ -98,7 +99,7 @@ export default function TaskPlansPage() {
   const { user: currentUser } = useSession();
   const notify = useNotify();
 
-  const [view, setView] = useState<ViewMode>("personal");
+  const [view, setView] = useState<ViewMode>("all");
   const [rows, setRows] = useState<PlanTask[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -108,7 +109,6 @@ export default function TaskPlansPage() {
 
   // 筛选(全部走服务端 PlanTaskPageReq)
   const [statusFilterList, setStatusFilterList] = useState<string[]>(["未开始", "进行中"]);
-  const [monthFilter, setMonthFilter] = useState<string>("");
   const [projectFilter, setProjectFilter] = useState<string>("");
   const [userFilter, setUserFilter] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(
@@ -152,7 +152,6 @@ export default function TaskPlansPage() {
   ): PlanTaskPageReq => {
     const params: PlanTaskPageReq = { page: p, page_size: ps };
     if (statusFilterList.length > 0) params.status = statusFilterList;
-    if (monthFilter) params.month = monthFilter;
     if (projectFilter) params.project_id = projectFilter;
     if (opts.includeUserId && userFilter) params.user_id = userFilter;
     if (dateRange?.[0]) {
@@ -176,9 +175,9 @@ export default function TaskPlansPage() {
       try {
         // personal 视图:user_id 由后端从 token 注入,前端不传
         const params = buildParams(p, ps, { includeUserId: view !== "personal" });
-        // 列表固定按创建时间倒序
-        (params as PlanTaskPageReq).order_by = "created_at";
-        (params as PlanTaskPageReq).order = "desc";
+        // 列表固定按计划开始时间正序
+        (params as PlanTaskPageReq).order_by = "start_time";
+        (params as PlanTaskPageReq).order = "asc";
         const resp =
           view === "personal"
             ? await listPersonalPlanTasks(
@@ -202,7 +201,6 @@ export default function TaskPlansPage() {
       page,
       pageSize,
       statusFilterList,
-      monthFilter,
       projectFilter,
       userFilter,
       dateRange,
@@ -222,7 +220,6 @@ export default function TaskPlansPage() {
 
   const resetFilters = () => {
     setStatusFilterList([]);
-    setMonthFilter("");
     setProjectFilter("");
     setUserFilter(null);
     setDateRange(null);
@@ -326,47 +323,18 @@ export default function TaskPlansPage() {
       render: (_v, _t: PlanTask, idx: number) => idx + 1,
     },
     {
-      title: "任务内容",
-      dataIndex: "content",
-      key: "content",
-      width: 280,
-      ellipsis: true,
-      render: (v: string | null, t: PlanTask) => (
-        <div className="flex flex-col">
-          <span className="truncate text-sm" title={v ?? ""}>
-            {v ?? "（未填写）"}
-          </span>
-          {t.remarks && (
-            <span
-              className="truncate text-[10px] text-muted-foreground"
-              title={t.remarks}
-            >
-              {t.remarks}
-            </span>
-          )}
-        </div>
-      ),
-    },
-    {
       title: "项目",
       dataIndex: "project_name",
       key: "project_name",
-      width: 140,
+      width: 150,
       ellipsis: true,
       render: (v: string | null) => v ?? "—",
     },
     {
-      title: "负责人",
-      dataIndex: "user_name",
-      key: "user_name",
-      width: 100,
-      render: (v: string | null) => v ?? "—",
-    },
-    {
-      title: "配合人员",
-      dataIndex: "work_partner",
-      key: "work_partner",
-      width: 120,
+      title: "模块",
+      dataIndex: "module_name",
+      key: "module_name",
+      width: 130,
       ellipsis: true,
       render: (v: string | null) => v ?? "—",
     },
@@ -381,6 +349,13 @@ export default function TaskPlansPage() {
       },
     },
     {
+      title: "负责人",
+      dataIndex: "user_name",
+      key: "user_name",
+      width: 100,
+      render: (v: string | null) => v ?? "—",
+    },
+    {
       title: "计划时间",
       key: "time",
       width: 200,
@@ -392,28 +367,68 @@ export default function TaskPlansPage() {
       ),
     },
     {
-      title: "预估工时",
-      dataIndex: "work_load",
-      key: "work_load",
-      width: 90,
-      render: (v: string | null) => v ?? "—",
-    },
-    {
-      title: "已消耗(人天)",
-      dataIndex: "spent_time",
-      key: "spent_time",
-      width: 110,
-      render: (v: number | null | undefined, t: PlanTask) => {
-        if (v == null || v <= 0) {
-          return <span className="text-muted-foreground">—</span>;
-        }
-        const over = isOverEstimate(v, t.work_load);
+      title: "预估/已消耗(人天)",
+      key: "estimate_spent",
+      width: 150,
+      render: (_v, t: PlanTask) => {
+        const spent = t.spent_time ?? 0;
+        const hasSpent = spent > 0;
+        const over = isOverEstimate(spent, t.work_load);
         return (
-          <span className={over ? "font-medium text-red-600" : "font-medium text-emerald-600"}>
-            {v} 人天
+          <span className="text-xs">
+            <span>{t.work_load ?? "—"}</span>
+            <span className="text-muted-foreground"> / </span>
+            {hasSpent ? (
+              <span
+                className={
+                  over
+                    ? "font-medium text-red-600"
+                    : "font-medium text-emerald-600"
+                }
+              >
+                {spent}
+              </span>
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )}
           </span>
         );
       },
+    },
+    {
+      title: "任务内容",
+      dataIndex: "content",
+      key: "content",
+      width: 240,
+      ellipsis: true,
+      render: (v: string | null) => (
+        <span className="block truncate text-sm" title={v ?? ""}>
+          {v ?? "（未填写）"}
+        </span>
+      ),
+    },
+    {
+      title: "任务描述",
+      dataIndex: "task_description",
+      key: "task_description",
+      width: 220,
+      ellipsis: true,
+      render: (v: string | null) => (
+        <span
+          className="block truncate text-xs text-muted-foreground"
+          title={v ?? ""}
+        >
+          {v ?? "—"}
+        </span>
+      ),
+    },
+    {
+      title: "配合人员",
+      dataIndex: "work_partner",
+      key: "work_partner",
+      width: 120,
+      ellipsis: true,
+      render: (v: string | null) => v ?? "—",
     },
     {
       title: "操作",
@@ -493,8 +508,22 @@ export default function TaskPlansPage() {
           </Button>
         </div>
 
-        {/* 查询条件:垂直 grid-cols-4 */}
+        {/* 查询条件:垂直 grid-cols-4(视图固定在首列,展开区外) */}
         <div className="grid w-full grid-cols-4 gap-3">
+          <Field label="视图">
+            <Select<ViewMode>
+              className="w-full"
+              value={view}
+              onChange={(v) => {
+                setView(v as ViewMode);
+                setSearchNonce((n) => n + 1);
+              }}
+              options={[
+                { label: "全部任务", value: "all" },
+                { label: "我的任务", value: "personal" },
+              ]}
+            />
+          </Field>
           <Field label="状态">
             <Select<string[]>
               mode="multiple"
@@ -507,17 +536,6 @@ export default function TaskPlansPage() {
                 setSearchNonce((n) => n + 1);
               }}
               options={STATUS_CODE_OPTIONS}
-            />
-          </Field>
-          <Field label="月份">
-            <DatePicker.MonthPicker
-              className="w-full"
-              placeholder="选择月份"
-              value={monthFilter ? dayjs(monthFilter, "YYYY-MM") : null}
-              onChange={(d) => {
-                setMonthFilter(d ? d.format("YYYY-MM") : "");
-                setSearchNonce((n) => n + 1);
-              }}
             />
           </Field>
           <Field label="项目">
@@ -572,20 +590,6 @@ export default function TaskPlansPage() {
                   onPressEnter={commitSearch}
                 />
               </Field>
-              <Field label="视图">
-                <Select<ViewMode>
-                  className="w-full"
-                  value={view}
-                  onChange={(v) => {
-                    setView(v as ViewMode);
-                    setSearchNonce((n) => n + 1);
-                  }}
-                  options={[
-                    { label: "全部任务", value: "all" },
-                    { label: "我的任务", value: "personal" },
-                  ]}
-                />
-              </Field>
             </>
           )}
         </div>
@@ -611,7 +615,7 @@ export default function TaskPlansPage() {
           bordered
           tableLayout="fixed"
           rowClassName={(_row, idx) => (idx % 2 === 1 ? "bg-muted/40" : "")}
-          scroll={{ y: "calc(100vh - 430px)" }}
+          scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
           pagination={{
             current: page,
             pageSize,
