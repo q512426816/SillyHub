@@ -226,3 +226,11 @@ created_at: 2026-07-21T08:48:56
 根因：已确认部署产物含改动（git 干净 + bundle 命中 ppm-striped-table），排除没部署。真因是 antd `fixed` 列在三级嵌套（主表/模块表都 `scroll.x`）展开表内不可靠——sticky 相对最近的 overflow 祖先（父表 body）计算，导致固定列失效；`scroll.x=max-content` 在嵌套下不按内容宽建布局，连任务描述 250 列宽也不生效。三次调宽/scroll 均无效，证实是结构性问题、非配置问题。
 方案：弃用 antd 固定列，明细表改全宽自适应——①去 `scroll.x`，表格自动填满容器；②操作列去 `fixed`/`onCell`（作为末列自然落在右缘）；③任务描述保留 `width: 250`（全宽下列宽严格生效）；④回退 ql-009 加给明细阶段/任务主题/角色/计划工时/状态的刚性宽度改弹性（auto 自适应，配合全宽布局）；⑤斑马纹 ppm-striped-table 保留（对齐 projects）。
 结果：①前端 typecheck 0 error；②lint 0 error；③milestone-details 24 passed；④待 commit+push+重建 frontend 后用户验证（任务描述 250 + 表格填满 + 斑马纹一致；不再追求横向滚动固定列，因嵌套下不可行）。
+## ql-20260722-011-8c3f | 2026-07-22 19:14:20 | /ppm/milestone-details 明细子表(嵌套)操作列固定——照搬已生效子母表同法
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（DetailLevelTable：操作列加 fixed:right+onCell card；明细阶段/任务主题/角色/计划工时/状态 加固定宽；去 overflow-visible）
+需求：子母表（主表/模块表）操作列 fixed 已生效（用户确认），现要求嵌套子表（明细 DetailLevelTable）操作列也固定。
+根因：之前明细表固定失败，主因是多列无固定宽 → 表格不横向溢出 → 不滚动 → sticky 无处钉（叠加 ppm-striped-table/去 scroll 等乱改放大了问题），并非纯嵌套所致；主表/模块表（同样 scroll.x）能生效反证只要强制溢出，嵌套表 fixed 也可工作。
+方案：照搬已生效主表改法——①明细操作列加 `fixed:"right"` + `onCell card`；②给 auto 列加固定宽（明细阶段 140 / 任务主题 160 / 角色 100 / 计划工时 90 / 状态 100，合计 ~1620px 强制溢出 → sticky 有处钉）；③去 `className="overflow-visible"`（对齐主表/PpmResourceTable）。保留 `scroll x max-content` + 手动斑马纹。与主表/模块表改法完全一致。
+结果：①前端 typecheck 0 error；②lint 0 error；③milestone-details 24 passed；④待 commit+push+重建 frontend 后用户验证（明细表横向滚动时操作列钉右）。若仍不钉，则确属嵌套限制，需把明细从嵌套展开改为独立面板。
