@@ -190,8 +190,9 @@ export default function MilestoneDetailsPage() {
     open: false,
     mode: "view",
   });
-  // 明细提交/保存成功后刷新明细列表:detailTick 递增 → expandRender 子表 key 变 → 重 mount → reload(模块+明细)。
-  // 主组件 reload(psNodes) 只刷里程碑主表,明细在子表(三层各自 reload),需 key 联动强制子表重 mount。
+  // 明细提交/保存成功后刷新明细列表:detailTick 递增 → 下传为子表 refreshTick prop →
+  // 子表 useEffect 捕获变化原地 reload(不 remount,保留三级模块展开态不折叠)。
+  // 主组件 reload(psNodes) 只刷里程碑主表,明细在子表,需 refreshTick 信号联动子表原地 reload。
   const [detailTick, setDetailTick] = useState(0);
   // P0-7:里程碑主表(PsPlanNode)CRUD 抽屉状态。
   const [masterDrawer, setMasterDrawer] = useState<{
@@ -523,7 +524,7 @@ export default function MilestoneDetailsPage() {
       if (node.has_module) {
         return (
           <ModuleLevelTable
-            key={`${node.id}-${detailTick}`}
+            key={node.id}
             planNodeId={node.id}
             projectId={projectId}
             onAddDetail={(moduleId) =>
@@ -542,12 +543,13 @@ export default function MilestoneDetailsPage() {
             detailedStageFilter={detailedStageFilter}
             taskThemeFilter={taskThemeFilter}
             readOnly={readOnly}
+            refreshTick={detailTick}
           />
         );
       }
       return (
         <DetailLevelTable
-          key={`${node.id}-${detailTick}`}
+          key={node.id}
           planNodeId={node.id}
           projectId={projectId}
           moduleId={null}
@@ -567,6 +569,7 @@ export default function MilestoneDetailsPage() {
           detailedStageFilter={detailedStageFilter}
           taskThemeFilter={taskThemeFilter}
           readOnly={readOnly}
+          refreshTick={detailTick}
         />
       );
     },
@@ -762,6 +765,11 @@ interface ModuleLevelProps {
   taskThemeFilter?: string;
   /** 只读模式(非项目经理):禁用写入按钮。 */
   readOnly?: boolean;
+  /**
+   * 明细提交后原地刷新信号(递增数字)。变化时透传给明细子表原地 reload,
+   * 不靠 key 变更 remount(remount 会重置本模块表的展开态致折叠)。
+   */
+  refreshTick?: number;
 }
 
 function ModuleLevelTable({
@@ -774,6 +782,7 @@ function ModuleLevelTable({
   detailedStageFilter,
   taskThemeFilter,
   readOnly,
+  refreshTick,
 }: ModuleLevelProps) {
   const [modules, setModules] = useState<PlanNodeModule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -979,6 +988,7 @@ function ModuleLevelTable({
         detailedStageFilter={detailedStageFilter}
         taskThemeFilter={taskThemeFilter}
         readOnly={readOnly}
+        refreshTick={refreshTick}
       />
     ),
     [
@@ -991,6 +1001,7 @@ function ModuleLevelTable({
       detailedStageFilter,
       taskThemeFilter,
       readOnly,
+      refreshTick,
     ],
   );
 
@@ -1645,6 +1656,11 @@ interface DetailLevelProps {
   readOnly?: boolean;
   /** 项目 ID(执行人 PpmUserSelect 按项目成员范围查询)。 */
   projectId?: string | null;
+  /**
+   * 明细提交后原地刷新信号(递增数字)。变化时原地 reload 明细列表,
+   * 替代旧的 key 变更 remount(remount 致三级模块行折叠)。初始 undefined 不触发。
+   */
+  refreshTick?: number;
 }
 
 function DetailLevelTable({
@@ -1659,6 +1675,7 @@ function DetailLevelTable({
   taskThemeFilter,
   readOnly,
   projectId,
+  refreshTick,
 }: DetailLevelProps) {
   const [details, setDetails] = useState<PsPlanNodeDetail[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1683,7 +1700,8 @@ function DetailLevelTable({
 
   useEffect(() => {
     void reload();
-  }, [reload]);
+    // refreshTick 变化(明细提交后)原地 reload,不 remount(避免折叠展开态)。
+  }, [reload, refreshTick]);
 
   // plan 内前端过滤:明细阶段 / 任务主题
   const visibleDetails = useMemo(() => {
