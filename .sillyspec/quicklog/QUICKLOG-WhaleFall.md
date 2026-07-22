@@ -83,3 +83,9 @@ created_at: 2026-07-21T08:48:56
 关联变更：（无）
 文件：frontend/src/components/ppm-project-plan-form.tsx
 结果：「项目名称」Form.Item name="project_name" 缺失→setFieldsValue 回填但 validateFields 不返回(无 Form.Item 的字段不被 form 管理)→payload 发 project_name=null→后端写 null→列表 render(v??p.id)回退显示 id。加 hidden Form.Item(name="project_name") 让 form 兜住该字段。eslint 0 error tsc 0 error。
+
+## ql-20260721-015-d4a9 | 2026-07-21 17:40:00 | 追修项目计划 project_name 变 id(submit 兜底+onProjectChange 去 id 回退)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-project-plan-form.tsx
+结果：ql-014 加 hidden Form.Item 仍可能因 destroyOnClose 时序丢值。双保险:(1)submit payload project_name 改 values.project_name ?? plan?.project_name ?? null(edit 用 plan 初始值兜底);(2)onProjectChange 去掉 ?? id 回退(改 raw 没 project_name 时用 null,不再误填 id;create 后端按 project_id 兜底查名)。eslint 0 error tsc 0 error。

@@ -201,7 +201,7 @@ export function PpmProjectPlanForm({
     }
 
     const payload: Record<string, string | null> = {
-      project_name: values.project_name || null,
+      project_name: values.project_name ?? plan?.project_name ?? null,
       project_manager_id: values.project_manager_id || null,
       project_manager_name: values.project_manager_name || null,
       project_start_time: values.project_start_time
@@ -516,7 +516,7 @@ async function onProjectChange(
   const opt = _opts?.find((o) => o.value === id);
   const raw = opt?.raw as { project_name?: string } | undefined;
   // 先用 options 直出值同步重置联动字段,清掉上一个项目的残留。
-  form.setFieldValue("project_name", raw?.project_name ?? id ?? null);
+  form.setFieldValue("project_name", raw?.project_name ?? null);
   form.setFieldValue("company_name", null);
   form.setFieldValue("project_manager_id", undefined);
   form.setFieldValue("project_manager_name", undefined);
