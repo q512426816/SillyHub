@@ -210,3 +210,11 @@ created_at: 2026-07-21T08:48:56
 根因：①任务描述列原 width=220 偏窄，长文本 ellipsis 截断过多；②操作列无 fixed，列多（11 列）横向滚动时操作按钮被滚出视口，需来回拖才能点到。
 方案：①任务描述列 width 220→250（保留 ellipsis）；②操作列加 `fixed: "right"`。表格已 `scroll={{ x: "max-content" }}` 横向滚动启用，固定列生效。固定列 + 斑马纹（rowClassName bg-muted/40）：横向滚动时固定单元格透明会透出滑动行内容，加 `onCell` 不透明 `hsl(var(--muted))` 背景（本表容器 bg-muted/20，用 muted 比 card 更贴表面；对齐 ppm 固定列既有模式但按本表表面调整）。
 结果：①前端 typecheck 0 error；②lint 0 error；③milestone-details 24 passed；④待 commit+push+重建 frontend 部署。
+## ql-20260722-009-fb5f | 2026-07-22 15:44:05 | /ppm/milestone-details 明细子表表格样式对齐 /ppm/projects + 修复固定列/列宽不生效
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（DetailLevelTable：全列加固定宽；斑马纹改 ppm-striped-table CSS 模式；操作列 onCell 背景 muted→card；render 去 overflow-visible）
+需求：上轮（ql-008）任务描述固定 250px、操作列固定列都没生效；且里程碑明细子表样式与 /ppm/projects（PpmResourceTable）差别很大，要求一致。
+根因：①ql-008 只给任务描述/操作列设宽，其余列无固定宽 → 表格不横向溢出 → 不滚动 → `fixed:"right"` 的 sticky 无处钉、width 也无感（这是「没生效」的真因）；②斑马纹用手动 `bg-muted/40` rowClassName（旧法，与固定列冲突），与 projects 的 `ppm-striped-table` CSS 模式不一致。
+方案：①全列加固定宽（明细阶段 140 / 任务主题 160 / 任务描述 250 / 角色 100 / 计划工时 90 / 计划开始 120 / 计划结束 120 / 执行人 160 / 执行状态 100 / 状态 100 / 操作 280 = 1620px，强制溢出 → 固定列钉、列宽生效）；②斑马纹改 `ppm-striped-table` CSS 模式（包裹 div + `<style>` 注入 `nth-child(even) td{background:hsl(var(--muted)/0.4)}` + `rowClassName={()=>""}`，对齐 PpmResourceTable）；③操作列 `onCell` 背景 `hsl(var(--muted))`→`hsl(var(--card))`（对齐 PpmResourceTable）；④去掉 `className="overflow-visible"`（恢复 DataTable 默认 overflow-hidden，内部 scroll 不被裁）。
+结果：①前端 typecheck 0 error；②lint 0 error；③milestone-details 24 passed；④待 commit+push+重建 frontend 部署后用户浏览器验证（任务描述 250 + 操作列钉右 + 斑马纹与 projects 一致）。

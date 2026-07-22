@@ -1747,6 +1747,7 @@ function DetailLevelTable({
         title: "明细阶段",
         dataIndex: "detailed_stage",
         key: "detailed_stage",
+        width: 140,
         render: (v: string | null, d: PsPlanNodeDetail) => (
           <div className="flex items-center gap-2">
             <span>{v ?? "—"}</span>
@@ -1762,6 +1763,7 @@ function DetailLevelTable({
         title: "任务主题",
         dataIndex: "task_theme",
         key: "task_theme",
+        width: 160,
         render: (v: string | null) => v ?? "—",
       },
       {
@@ -1776,12 +1778,14 @@ function DetailLevelTable({
         title: "角色",
         dataIndex: "role_name",
         key: "role_name",
+        width: 100,
         render: (v: string | null) => v ?? "—",
       },
       {
         title: "计划工时",
         dataIndex: "plan_workload",
         key: "plan_workload",
+        width: 90,
         render: (v: string | null) => v ?? "—",
       },
       {
@@ -1852,6 +1856,7 @@ function DetailLevelTable({
         title: "状态",
         dataIndex: "status",
         key: "status",
+        width: 100,
         render: (v: string) => (
           <Tag color={PLAN_DETAIL_STATUS_COLOR[v] ?? "default"}>
             {PLAN_DETAIL_STATUS_TEXT[v] ?? v}
@@ -1864,9 +1869,9 @@ function DetailLevelTable({
         align: "center",
         width: 280,
         fixed: "right",
-        // 固定列 + 斑马纹(rowClassName bg-muted/40):横向滚动时固定单元格透明会
-        // 透出滑动行内容,加不透明 muted 背景(本表容器 bg-muted/20,用 muted 比 card 更贴表面)。
-        onCell: () => ({ style: { background: "hsl(var(--muted))" } }),
+        // 固定列 + ppm-striped-table 斑马纹:横向滚动时固定单元格透明会透出滑动行,
+        // 加不透明 card 背景(对齐 PpmResourceTable 固定列模式)。
+        onCell: () => ({ style: { background: "hsl(var(--card))" } }),
         render: (_v: unknown, d: PsPlanNodeDetail) => (
           <div className="flex flex-wrap justify-center gap-1">
             <Button size="small" type="link" onClick={() => onOpenDetail(d)}>
@@ -1932,19 +1937,25 @@ function DetailLevelTable({
           {error}
         </div>
       ) : (
-        <DataTable<PsPlanNodeDetail>
-          rowKey="id"
-          columns={columns}
-          dataSource={visibleDetails}
-          loading={loading}
-          size="small"
-          bordered
-          pagination={false}
-          scroll={{ x: "max-content" }}
-          className="overflow-visible"
-          rowClassName={(_row: PsPlanNodeDetail, idx: number) => idx % 2 === 1 ? "bg-muted/40" : ""}
-          emptyText={moduleId ? "该模块暂无明细" : "暂无明细"}
-        />
+        // 表格样式对齐 /ppm/projects(PpmResourceTable):ppm-striped-table CSS 斑马纹
+        // + 全列固定宽(强制横向溢出→固定列/列宽生效)+ 操作列 fixed right。
+        <div className="ppm-striped-table">
+          <style>{`
+.ppm-striped-table .ant-table-tbody tr.ant-table-row td{background:transparent}
+.ppm-striped-table .ant-table-tbody tr.ant-table-row:nth-child(even) td{background-color:hsl(var(--muted)/0.4)}`}</style>
+          <DataTable<PsPlanNodeDetail>
+            rowKey="id"
+            columns={columns}
+            dataSource={visibleDetails}
+            loading={loading}
+            size="small"
+            bordered
+            pagination={false}
+            scroll={{ x: "max-content" }}
+            rowClassName={() => ""}
+            emptyText={moduleId ? "该模块暂无明细" : "暂无明细"}
+          />
+        </div>
       )}
     </div>
   );
