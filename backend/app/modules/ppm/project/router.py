@@ -215,7 +215,7 @@ async def export_project_maintenance(
     columns = [
         ColumnDef("project_code", "项目编号", width=20),
         ColumnDef("project_name", "项目名称", width=30),
-        ColumnDef("company_name", "公司名称", width=30),
+        ColumnDef("company_name", "客户名称", width=30),
         ColumnDef("project_status", "项目状态", width=14),
         ColumnDef("project_type", "项目类型", width=14),
         ColumnDef("create_name", "创建人", width=14),

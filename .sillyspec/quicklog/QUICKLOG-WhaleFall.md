@@ -101,3 +101,9 @@ created_at: 2026-07-21T08:48:56
 关联变更：（无）
 文件：backend/app/modules/ppm/plan/service.py + backend/app/modules/ppm/plan/tests/test_service.py
 结果:根因=前端 project-plans/page.tsx:150 调 listProjectPlans 不传 order_by,后端 _project_plan_list_req 默认 order_by=None,apply_sort(crud.py:162)遇空值直接跳过排序致列表顺序不可预测。修复=service.list_ps_project_plans 调 list_paged 前兜底 if not req.order_by: req.order_by="created_at"(order 默认 desc=最新创建在前;allowed_sort 已含 created_at)。前端显式传 order_by(project_name/status)仍优先尊重。新增 2 单测(test_list_default_sorts_by_created_at_desc 验默认 P2/P1/P0、test_list_explicit_order_by_not_overridden 验显式 project_name asc 不被覆盖)。test_service+test_project_plan_data_scope 共 52 passed。
+
+## ql-20260722-002-b9e4 | 2026-07-22 09:46:30 | /ppm/projects 项目维护「公司名称」改文案为「客户名称」
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/projects/page.tsx + backend/app/modules/ppm/project/router.py
+结果:2处纯文案「公司名称」→「客户名称」:(1)projects/page.tsx:55 字段 label(列头/表单/搜索框经 PpmResourceTable 自动跟随);(2)project/router.py:218 项目维护导出(ProjectMaintenanceService)ColumnDef header。字段名 company_name 不动(保数据兼容)。客户维护 router.py:393 + test_router.py:148(level=VIP)属 /ppm/customers 不在范围未改。后端 project 模块 26 passed + ruff format/check 全过。

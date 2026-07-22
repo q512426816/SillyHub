@@ -52,7 +52,7 @@ type FieldName = keyof Entity & string;
 const fields: PpmFieldDef<Entity>[] = [
   { name: "project_code" as FieldName, label: "项目编号", required: true, readOnlyOnEdit: true, placeholder: "项目唯一编号" },
   { name: "project_name" as FieldName, label: "项目名称", required: true },
-  { name: "company_name" as FieldName, label: "公司名称" },
+  { name: "company_name" as FieldName, label: "客户名称" },
   { name: "create_name" as FieldName, label: "创建人", hideInForm: true },
   {
     name: "project_type" as FieldName,
