@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +26,9 @@ from app.modules.ppm.data_scope import DataScope
 from app.modules.ppm.plan.fsm import PROCESS_BUSINESS_TYPE, PlanNodeDetailStatus
 from app.modules.ppm.plan.model import (
     PsPlanNodeDetail,
+    PsProjectPlan,
 )
+from app.modules.ppm.plan.schema import PsProjectPlanListReq
 from app.modules.ppm.plan.service import PlanError, PlanNotFound, PlanService
 
 FULL_SCOPE = DataScope(is_full=True)
@@ -355,6 +358,53 @@ class TestPsProjectPlan:
         rows = await svc.list_ps_project_plans_for_export(FULL_SCOPE)
         assert any(r["project_name"] == "导出计划" for r in rows)
         assert any(r["contract_name"] == "合同X" for r in rows)
+
+    async def test_list_default_sorts_by_created_at_desc(self, db_session: AsyncSession) -> None:
+        """前端不传 order_by → 默认 created_at desc (最新创建在前, ql-20260722-001)。
+
+        显式给三条计划递增的 created_at,验证默认拉取顺序为最新在前;避免 apply_sort
+        遇空 order_by 跳过排序致列表顺序不可预测。
+        """
+        svc = PlanService(db_session)
+        base = datetime(2026, 1, 1, tzinfo=UTC)
+        for i in range(3):
+            plan = PsProjectPlan(
+                id=uuid.uuid4(),
+                project_id=uuid.uuid4(),
+                project_name=f"P{i}",
+                created_at=base + timedelta(hours=i),  # P0 最早 → P2 最新
+            )
+            db_session.add(plan)
+        await db_session.commit()
+
+        res = await svc.list_ps_project_plans(
+            PsProjectPlanListReq(page=1, page_size=20), FULL_SCOPE
+        )
+        assert res.total == 3
+        names = [r.project_name for r in res.items]
+        assert names == ["P2", "P1", "P0"]  # created_at desc → 最新在前
+
+    async def test_list_explicit_order_by_not_overridden(self, db_session: AsyncSession) -> None:
+        """显式传 order_by → 尊重前端,不被 created_at 兜底覆盖 (ql-20260722-001)。"""
+        svc = PlanService(db_session)
+        base = datetime(2026, 1, 1, tzinfo=UTC)
+        for i, name in enumerate(["Bravo", "Alpha", "Charlie"]):
+            db_session.add(
+                PsProjectPlan(
+                    id=uuid.uuid4(),
+                    project_id=uuid.uuid4(),
+                    project_name=name,
+                    created_at=base + timedelta(hours=i),
+                )
+            )
+        await db_session.commit()
+
+        res = await svc.list_ps_project_plans(
+            PsProjectPlanListReq(page=1, page_size=20, order_by="project_name", order="asc"),
+            FULL_SCOPE,
+        )
+        names = [r.project_name for r in res.items]
+        assert names == ["Alpha", "Bravo", "Charlie"]  # 按名升序,非 created_at
 
 
 # ===========================================================================

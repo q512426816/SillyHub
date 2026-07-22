@@ -425,6 +425,11 @@ class PlanService:
         plan_scope = build_plan_scope_clause(scope)
         if plan_scope is not None:
             where_clauses.append(plan_scope)
+        # 默认按创建时间倒序 (最新创建在前,ql-20260722-001):前端 /ppm/project-plans
+        # 列表不传 order_by 时兜底,避免 apply_sort 遇空 order_by 直接跳过排序致
+        # 列表顺序不可预测。前端显式传 order_by (project_name/status 等) 仍优先尊重。
+        if not req.order_by:
+            req.order_by = "created_at"
         return await _Crud(self._session, PsProjectPlan).list_paged(
             req=req,
             allowed_sort={"created_at", "project_name", "status"},

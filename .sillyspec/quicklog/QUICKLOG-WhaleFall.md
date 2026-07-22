@@ -95,3 +95,9 @@ created_at: 2026-07-21T08:48:56
 关联变更：（无）
 文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx + DB 数据修复
 结果:列表 render(v ?? p.id)在 project_name 为 null 时回退显示计划 id(误导)。之前 bug 写入旧数据 project_name=null/uuid。(1)render 改 v ?? "—";(2)DB 修 2 条坏数据(UPDATE project_name 按 project_id 查 ppm_project_maintenance.project_name,剩余 0 条坏)。配合 ql-014/015 保存逻辑,新数据正确+旧数据已修。
+
+## ql-20260722-001-a7f3 | 2026-07-22 09:23:00 | /ppm/project-plans 列表默认按创建时间倒序(最新创建在前)
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/plan/service.py + backend/app/modules/ppm/plan/tests/test_service.py
+结果:根因=前端 project-plans/page.tsx:150 调 listProjectPlans 不传 order_by,后端 _project_plan_list_req 默认 order_by=None,apply_sort(crud.py:162)遇空值直接跳过排序致列表顺序不可预测。修复=service.list_ps_project_plans 调 list_paged 前兜底 if not req.order_by: req.order_by="created_at"(order 默认 desc=最新创建在前;allowed_sort 已含 created_at)。前端显式传 order_by(project_name/status)仍优先尊重。新增 2 单测(test_list_default_sorts_by_created_at_desc 验默认 P2/P1/P0、test_list_explicit_order_by_not_overridden 验显式 project_name asc 不被覆盖)。test_service+test_project_plan_data_scope 共 52 passed。
