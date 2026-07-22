@@ -1768,7 +1768,7 @@ function DetailLevelTable({
         title: "任务描述",
         dataIndex: "task_description",
         key: "task_description",
-        width: 220,
+        width: 250,
         ellipsis: true,
         render: (v: string | null) => v ?? "—",
       },
@@ -1863,6 +1863,10 @@ function DetailLevelTable({
         key: "actions",
         align: "center",
         width: 280,
+        fixed: "right",
+        // 固定列 + 斑马纹(rowClassName bg-muted/40):横向滚动时固定单元格透明会
+        // 透出滑动行内容,加不透明 muted 背景(本表容器 bg-muted/20,用 muted 比 card 更贴表面)。
+        onCell: () => ({ style: { background: "hsl(var(--muted))" } }),
         render: (_v: unknown, d: PsPlanNodeDetail) => (
           <div className="flex flex-wrap justify-center gap-1">
             <Button size="small" type="link" onClick={() => onOpenDetail(d)}>
