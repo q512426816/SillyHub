@@ -1747,7 +1747,6 @@ function DetailLevelTable({
         title: "明细阶段",
         dataIndex: "detailed_stage",
         key: "detailed_stage",
-        width: 140,
         render: (v: string | null, d: PsPlanNodeDetail) => (
           <div className="flex items-center gap-2">
             <span>{v ?? "—"}</span>
@@ -1763,7 +1762,6 @@ function DetailLevelTable({
         title: "任务主题",
         dataIndex: "task_theme",
         key: "task_theme",
-        width: 160,
         render: (v: string | null) => v ?? "—",
       },
       {
@@ -1778,14 +1776,12 @@ function DetailLevelTable({
         title: "角色",
         dataIndex: "role_name",
         key: "role_name",
-        width: 100,
         render: (v: string | null) => v ?? "—",
       },
       {
         title: "计划工时",
         dataIndex: "plan_workload",
         key: "plan_workload",
-        width: 90,
         render: (v: string | null) => v ?? "—",
       },
       {
@@ -1856,7 +1852,6 @@ function DetailLevelTable({
         title: "状态",
         dataIndex: "status",
         key: "status",
-        width: 100,
         render: (v: string) => (
           <Tag color={PLAN_DETAIL_STATUS_COLOR[v] ?? "default"}>
             {PLAN_DETAIL_STATUS_TEXT[v] ?? v}
@@ -1868,10 +1863,6 @@ function DetailLevelTable({
         key: "actions",
         align: "center",
         width: 280,
-        fixed: "right",
-        // 固定列 + ppm-striped-table 斑马纹:横向滚动时固定单元格透明会透出滑动行,
-        // 加不透明 card 背景(对齐 PpmResourceTable 固定列模式)。
-        onCell: () => ({ style: { background: "hsl(var(--card))" } }),
         render: (_v: unknown, d: PsPlanNodeDetail) => (
           <div className="flex flex-wrap justify-center gap-1">
             <Button size="small" type="link" onClick={() => onOpenDetail(d)}>
@@ -1937,8 +1928,9 @@ function DetailLevelTable({
           {error}
         </div>
       ) : (
-        // 表格样式对齐 /ppm/projects(PpmResourceTable):ppm-striped-table CSS 斑马纹
-        // + 全列固定宽(强制横向溢出→固定列/列宽生效)+ 操作列 fixed right。
+        // 表格样式对齐 /ppm/projects(PpmResourceTable):全宽自适应填满容器、
+        // ppm-striped-table CSS 斑马纹。不设 scroll.x——antd 固定列在三级嵌套
+        // 展开表内不可靠(sticky 失效),改全宽布局让操作列自然落在右缘、表格自适应。
         <div className="ppm-striped-table">
           <style>{`
 .ppm-striped-table .ant-table-tbody tr.ant-table-row td{background:transparent}
@@ -1951,7 +1943,6 @@ function DetailLevelTable({
             size="small"
             bordered
             pagination={false}
-            scroll={{ x: "max-content" }}
             rowClassName={() => ""}
             emptyText={moduleId ? "该模块暂无明细" : "暂无明细"}
           />

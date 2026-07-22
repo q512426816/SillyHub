@@ -218,3 +218,11 @@ created_at: 2026-07-21T08:48:56
 根因：①ql-008 只给任务描述/操作列设宽，其余列无固定宽 → 表格不横向溢出 → 不滚动 → `fixed:"right"` 的 sticky 无处钉、width 也无感（这是「没生效」的真因）；②斑马纹用手动 `bg-muted/40` rowClassName（旧法，与固定列冲突），与 projects 的 `ppm-striped-table` CSS 模式不一致。
 方案：①全列加固定宽（明细阶段 140 / 任务主题 160 / 任务描述 250 / 角色 100 / 计划工时 90 / 计划开始 120 / 计划结束 120 / 执行人 160 / 执行状态 100 / 状态 100 / 操作 280 = 1620px，强制溢出 → 固定列钉、列宽生效）；②斑马纹改 `ppm-striped-table` CSS 模式（包裹 div + `<style>` 注入 `nth-child(even) td{background:hsl(var(--muted)/0.4)}` + `rowClassName={()=>""}`，对齐 PpmResourceTable）；③操作列 `onCell` 背景 `hsl(var(--muted))`→`hsl(var(--card))`（对齐 PpmResourceTable）；④去掉 `className="overflow-visible"`（恢复 DataTable 默认 overflow-hidden，内部 scroll 不被裁）。
 结果：①前端 typecheck 0 error；②lint 0 error；③milestone-details 24 passed；④待 commit+push+重建 frontend 部署后用户浏览器验证（任务描述 250 + 操作列钉右 + 斑马纹与 projects 一致）。
+## ql-20260722-010-9d8c | 2026-07-22 16:50:36 | /ppm/milestone-details 明细子表弃用 antd 固定列改全宽自适应(ql-009 仍不生效的定性追修)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（DetailLevelTable：去 scroll.x 改全宽；操作列去 fixed/onCell；回退 ql-009 刚性宽度改弹性）
+需求：ql-009 全列加宽 + ppm-striped-table 仍不生效（任务描述 250 不生效、操作列不固定），用户反馈「还是没生效」。
+根因：已确认部署产物含改动（git 干净 + bundle 命中 ppm-striped-table），排除没部署。真因是 antd `fixed` 列在三级嵌套（主表/模块表都 `scroll.x`）展开表内不可靠——sticky 相对最近的 overflow 祖先（父表 body）计算，导致固定列失效；`scroll.x=max-content` 在嵌套下不按内容宽建布局，连任务描述 250 列宽也不生效。三次调宽/scroll 均无效，证实是结构性问题、非配置问题。
+方案：弃用 antd 固定列，明细表改全宽自适应——①去 `scroll.x`，表格自动填满容器；②操作列去 `fixed`/`onCell`（作为末列自然落在右缘）；③任务描述保留 `width: 250`（全宽下列宽严格生效）；④回退 ql-009 加给明细阶段/任务主题/角色/计划工时/状态的刚性宽度改弹性（auto 自适应，配合全宽布局）；⑤斑马纹 ppm-striped-table 保留（对齐 projects）。
+结果：①前端 typecheck 0 error；②lint 0 error；③milestone-details 24 passed；④待 commit+push+重建 frontend 后用户验证（任务描述 250 + 表格填满 + 斑马纹一致；不再追求横向滚动固定列，因嵌套下不可行）。
