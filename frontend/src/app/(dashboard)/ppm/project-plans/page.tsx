@@ -33,7 +33,6 @@ import {
 } from "@/components/layout";
 import { PpmProjectPlanDetail } from "@/components/ppm-project-plan-detail";
 import { PpmProjectPlanForm } from "@/components/ppm-project-plan-form";
-import { matchAnyUser } from "@/components/ppm-status-actions";
 import { ApiError } from "@/lib/api";
 import {
   deleteProjectPlan,
@@ -41,7 +40,6 @@ import {
   listProjectPlans,
   type PsProjectPlan,
 } from "@/lib/ppm";
-import { useSession } from "@/stores/session";
 
 const { RangePicker } = DatePicker;
 
@@ -103,8 +101,6 @@ function Field({
 export default function ProjectPlansPage() {
   const router = useRouter();
   const { modal } = App.useApp();
-  const { user: currentUser } = useSession();
-  const currentUserId = currentUser?.id ?? "";
   const [plans, setPlans] = useState<PsProjectPlan[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -426,10 +422,10 @@ export default function ProjectPlansPage() {
       fixed: "right",
       width: 240,
       render: (_v: unknown, p: PsProjectPlan) => {
-        // RBAC:平台超管 bypass,否则按 project_manager_id 归属(无 create_user_id 字段)。
-        const isManager =
-          !!currentUser?.is_platform_admin ||
-          matchAnyUser([p.project_manager_id], currentUserId);
+        // 编辑/删除放行:后端按项目成员角色集中判断 (can_edit/can_delete),
+        // 前端只读 (与问题清单同模式)。历史后端未返回时降级为不可操作。
+        const canEdit = p.can_edit ?? false;
+        const canDelete = p.can_delete ?? false;
         return (
           <div className="flex gap-1 justify-center">
             <Button
@@ -442,8 +438,8 @@ export default function ProjectPlansPage() {
             <Button
               size="small"
               type="link"
-              disabled={!isManager}
-              title={isManager ? undefined : "仅项目经理可编辑"}
+              disabled={!canEdit}
+              title={canEdit ? undefined : "仅本项目经理/创建人/超管可编辑"}
               onClick={() => setDrawer({ open: true, mode: "edit", plan: p })}
             >
               编辑
@@ -452,8 +448,8 @@ export default function ProjectPlansPage() {
               size="small"
               type="link"
               danger
-              disabled={!isManager}
-              title={isManager ? undefined : "仅项目经理可删除"}
+              disabled={!canDelete}
+              title={canDelete ? undefined : "仅本项目经理/创建人/超管可删除"}
               onClick={() => handleDelete(p)}
             >
               删除

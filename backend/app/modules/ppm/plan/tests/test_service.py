@@ -21,6 +21,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import InvalidTransition
+from app.modules.auth.model import User
 from app.modules.ppm.common.crud import PageReq
 from app.modules.ppm.data_scope import DataScope
 from app.modules.ppm.plan.fsm import PROCESS_BUSINESS_TYPE, PlanNodeDetailStatus
@@ -276,7 +277,6 @@ class TestHasModuleAndDetailOwnership:
 class TestPsProjectPlan:
     async def test_crud(self, db_session: AsyncSession) -> None:
         svc = PlanService(db_session)
-        # get/list 取项目表真名 (W1 join),需先建对应 PpmProjectMaintenance 行。
         proj = PpmProjectMaintenance(id=uuid.uuid4(), project_code="PP-CRUD", project_name="项目甲")
         db_session.add(proj)
         await db_session.commit()
@@ -286,7 +286,18 @@ class TestPsProjectPlan:
         )
         got = await svc.get_ps_project_plan(plan.id)
         assert got.project_name == "项目甲"
-        updated = await svc.update_ps_project_plan(plan.id, {"project_name": "项目乙"})
+        # update 需有权限:用超管 (can_operate 放行)。
+        admin = User(
+            id=uuid.uuid4(),
+            username="crud-admin",
+            password_hash="x",
+            display_name="admin",
+            status="active",
+            is_platform_admin=True,
+        )
+        db_session.add(admin)
+        await db_session.commit()
+        updated = await svc.update_ps_project_plan(plan.id, {"project_name": "项目乙"}, user=admin)
         assert updated.project_name == "项目乙"
         # 里程碑子表
         node = await svc.create_ps_plan_node(

@@ -103,8 +103,9 @@ class PpmProjectMaintenance(BaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
-    # 所属部门(组织) —— 数据权限范围过滤键 (2026-07-18-project-plan-data-scope D-007@v1)。
-    # 部门经理(DEPTBOSS) 按 UserOrganization 部门+子树过滤本字段。
+    # 所属部门(组织) —— 历史字段。曾用于「部门经理按组织子树过滤」的数据权限
+    # (2026-07-18-project-plan-data-scope D-007@v1);2026-07-22 权限统一到「项目成员
+    # 角色」后,PPM 数据范围不再依赖本字段(列与索引保留,删列为更大的破坏性改动)。
     organization_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(

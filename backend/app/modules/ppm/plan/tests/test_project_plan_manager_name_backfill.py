@@ -48,6 +48,24 @@ async def _seed_user(
     return user
 
 
+async def _admin(session: AsyncSession) -> User:
+    """超管 (is_platform_admin) —— update 走 can_operate 放行;本文件聚焦 name 回填不验权。"""
+    u = User(
+        id=uuid.uuid4(),
+        username="admin",
+        password_hash="x",
+        display_name="admin",
+        status="active",
+        is_platform_admin=True,
+        created_at=_now(),
+        updated_at=_now(),
+    )
+    session.add(u)
+    await session.commit()
+    await session.refresh(u)
+    return u
+
+
 # ---------------------------------------------------------------------------
 # create 兜底
 # ---------------------------------------------------------------------------
@@ -141,7 +159,9 @@ async def test_update_backfills_manager_name_on_switch(db_session: AsyncSession)
 
     # 前端切换经理只带 id,name 传 None(漏传)
     updated = await PlanService(db_session).update_ps_project_plan(
-        plan.id, {"project_manager_id": new_uid, "project_manager_name": None}
+        plan.id,
+        {"project_manager_id": new_uid, "project_manager_name": None},
+        user=await _admin(db_session),
     )
 
     assert updated.project_manager_id == new_uid
@@ -157,7 +177,7 @@ async def test_update_keeps_explicit_manager_name(db_session: AsyncSession) -> N
     )
 
     updated = await PlanService(db_session).update_ps_project_plan(
-        plan.id, {"project_manager_name": "改名了"}
+        plan.id, {"project_manager_name": "改名了"}, user=await _admin(db_session)
     )
 
     assert updated.project_manager_name == "改名了"

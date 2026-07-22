@@ -242,6 +242,12 @@ class PsProjectPlanResp(PsProjectPlanBase):
     id: uuid.UUID
     created_at: datetime
     updated_at: datetime
+    # 操作权限(后端按项目成员角色集中判断, 前端只读):
+    # can_edit/can_delete = 超管 ‖ 创建人 ‖ 本计划所属项目的经理 (满足其一)
+    # 由 router 调 data_scope.compute_plan_can_operate 填充, 非 ORM 映射。
+    # (ProjectPlanThreeLevelResp 继承本类, 自动带上。)
+    can_edit: bool = False
+    can_delete: bool = False
 
     model_config = {"from_attributes": True}
 

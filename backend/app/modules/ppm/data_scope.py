@@ -1,16 +1,20 @@
-"""PPM 项目计划/项目维护 数据范围解析 (2026-07-18-project-plan-data-scope)。
+"""PPM 项目计划/项目维护 数据范围解析。
 
 按当前用户身份产出 ``DataScope``,供 plan/project service 注入 where 过滤。
 与功能权限 (``require_permission_any``) 正交:功能权限管"能不能进接口",
-``DataScope`` 管"能看哪些数据" (D-009@v1)。
+``DataScope`` 管"能看哪些数据"。
 
-身份判定 (D-001@v1,复用现有 RBAC 角色 key,不新建角色):
-- 超级管理员: 持 ``super_admin`` 角色 OR ``is_platform_admin`` → ``is_full=True`` (看全部, D-002@v1)
-- 部门经理: 持 ``DEPTBOSS`` 角色 → ``dept_org_ids`` = UserOrganization 部门+子树 (D-003@v1)
-- 项目经理: 持 ``XMJL`` 角色 → ``pm_user_id`` = 本人 (D-004@v1)
-- 多身份并存: ``DataScope`` 双字段同时有值,service where 用 ``or_`` 合并 (D-005@v1)
-- 三者皆无 → ``is_full=False`` / ``dept_org_ids`` 空 / ``pm_user_id`` None
-  → service ``where(false())`` 返回空集
+经理判定统一基于「项目成员角色」(``PpmProjectMember.role_name`` 逗号拆分后
+精确匹配 部门经理/项目经理/开发经理/业务经理),复用 ``common.data_scope`` 的
+``manager_project_ids`` / ``is_super_admin``——与任务计划/问题清单口径完全一致
+(2026-07-22 权限统一:单一可信源 = 项目成员角色,不再用系统 RBAC 角色 /
+``PsProjectPlan.project_manager_id`` / 部门组织树)。
+
+身份判定:
+- 超级管理员: ``is_platform_admin`` 或 ``super_admin`` 角色 → ``is_full=True`` (看全部)
+- 经理(项目成员含任一经理角色): ``manager_project_ids`` = 这些项目的 id 集合,
+  可见其名下全部计划/项目(含 ``project_manager_id`` 是别人的——不再依赖该字段)
+- 其余: ``manager_project_ids`` 空,仅凭 ``created_by`` 可见自己创建的
 
 author: qinyi
 created_at: 2026-07-18 17:30:00
@@ -23,21 +27,15 @@ from dataclasses import dataclass, field
 from typing import Annotated, Any
 
 from fastapi import Depends
-from sqlalchemy import false, or_, select
+from sqlalchemy import false, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_user
 from app.core.db import get_session
-from app.modules.admin.model import UserOrganization, UserRole
-from app.modules.admin.organizations_service import _descendant_ids
-from app.modules.auth.model import Role, User
+from app.modules.auth.model import User
+from app.modules.ppm.common.data_scope import is_super_admin, manager_project_ids
 from app.modules.ppm.plan.model import PsProjectPlan
 from app.modules.ppm.project.model import PpmProjectMaintenance
-
-# 复用现有 RBAC 角色 key (D-001@v1,不新建角色)
-SUPER_ADMIN_KEY = "super_admin"
-DEPT_BOSS_KEY = "DEPTBOSS"
-PROJECT_MANAGER_KEY = "XMJL"
 
 
 @dataclass(frozen=True)
@@ -45,95 +43,55 @@ class DataScope:
     """当前用户在 PPM 项目计划/项目维护 的可见数据范围。
 
     - is_full: 超管 → True,service 不加范围 where (全部)。
-    - dept_org_ids: 部门经理可见的部门(含子树)集合;非部门经理为空集。
-    - pm_user_id: 项目经理本人 id;非项目经理为 None。
-    多身份并存:部门经理+项目经理 → dept_org_ids 非空且 pm_user_id 有值 (D-005@v1 并集)。
+    - manager_project_ids: 当前用户作为经理(项目成员含任一经理角色)的项目 id 集合。
+    - creator_user_id: 当前用户 id;非超管时 ``build_*_scope_clause`` 用
+      ``created_by == creator_user_id`` 保证创建人可见自己建的计划/项目
+      (对齐任务/问题的创建人可见性)。
     """
 
     is_full: bool
-    dept_org_ids: frozenset[uuid.UUID] = field(default_factory=frozenset)
-    pm_user_id: uuid.UUID | None = None
-
-
-async def get_user_role_keys(session: AsyncSession, user: User) -> set[str]:
-    """返回当前用户的所有平台角色 key (JOIN user_roles + roles)。"""
-    rows = (
-        (
-            await session.execute(
-                select(Role.key)
-                .join(UserRole, UserRole.role_id == Role.id)
-                .where(UserRole.user_id == user.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    return set(rows)
-
-
-async def _user_org_subtree(session: AsyncSession, user: User) -> frozenset[uuid.UUID]:
-    """用户所属(UserOrganization)的所有部门 + 各自下级部门(子树)。
-
-    复用 ``organizations_service._descendant_ids`` (BFS,SQLite/PG 兼容)。
-    """
-    direct_orgs = (
-        (
-            await session.execute(
-                select(UserOrganization.organization_id).where(UserOrganization.user_id == user.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    org_ids: set[uuid.UUID] = set(direct_orgs)
-    for org_id in direct_orgs:
-        org_ids |= await _descendant_ids(session, org_id)
-    return frozenset(org_ids)
+    manager_project_ids: frozenset[uuid.UUID] = field(default_factory=frozenset)
+    creator_user_id: uuid.UUID | None = None
 
 
 async def get_ppm_data_scope(
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> DataScope:
-    """FastAPI 依赖项:解析当前用户的 PPM 项目计划/项目维护 数据范围。"""
-    roles = await get_user_role_keys(session, user)
-    if SUPER_ADMIN_KEY in roles or user.is_platform_admin:  # D-002@v1
+    """FastAPI 依赖项:解析当前用户的 PPM 项目计划/项目维护 数据范围。
+
+    经理判定复用 ``common.data_scope.manager_project_ids``(项目成员 role_name),
+    与任务/问题同一口径。``manager_project_ids`` 返回 ``set``,这里转 ``frozenset``
+    落入 frozen dataclass。
+    """
+    if await is_super_admin(session, user):
         return DataScope(is_full=True)
-    dept_org_ids = await _user_org_subtree(session, user) if DEPT_BOSS_KEY in roles else frozenset()
-    pm_user_id = user.id if PROJECT_MANAGER_KEY in roles else None
-    return DataScope(is_full=False, dept_org_ids=dept_org_ids, pm_user_id=pm_user_id)
+    manager_pids = await manager_project_ids(session, user)
+    return DataScope(
+        is_full=False,
+        manager_project_ids=frozenset(manager_pids),
+        creator_user_id=user.id,
+    )
 
 
 def build_plan_scope_clause(scope: DataScope) -> Any | None:
     """构造 ``PsProjectPlan`` 的数据范围 where 子句。
 
     - 返回 None:``is_full`` → 不加 where (看全部)。
-    - 返回 ``false()``:无任何身份 → 强制空集。
-    - 否则:``or_(部门经理项目集, 项目经理本人)`` (D-005@v1 并集)。
+    - 返回 ``false()``:无任何身份(非超管/非经理/无创建人,仅测试可手搓)→ 强制空集。
+    - 否则:``or_(经理项目集的全部计划, 创建人本人)``。
 
-    部门经理用 ``project_id.in_(SELECT id FROM project WHERE org_id IN dept_org_ids)``
-    子查询,避免改 ``_Crud.list_paged`` 的 join 能力 (D-003@v1)。
-
-    项目经理分支:本人负责的 (``project_manager_id``) OR 本人创建的 (``created_by``)。
-    后者对齐 projects/problem 的创建人可见性约定 (2026-07-21 修复),
-    保证创建人即使把项目经理填成别人也能看到自己建的计划。
+    经理分支:``project_id IN manager_project_ids``(我当经理的项目下的全部计划,
+    含 ``project_manager_id`` 是别人的——不再依赖该字段)。创建人分支:
+    ``created_by == creator_user_id``(对齐 projects/problem 创建人可见性)。
     """
     if scope.is_full:
         return None
     clauses: list[Any] = []
-    if scope.dept_org_ids:
-        clauses.append(
-            PsProjectPlan.project_id.in_(
-                select(PpmProjectMaintenance.id).where(
-                    PpmProjectMaintenance.organization_id.in_(scope.dept_org_ids)
-                )
-            )
-        )
-    if scope.pm_user_id is not None:
-        clauses.append(
-            (PsProjectPlan.project_manager_id == scope.pm_user_id)
-            | (PsProjectPlan.created_by == scope.pm_user_id)
-        )
+    if scope.manager_project_ids:
+        clauses.append(PsProjectPlan.project_id.in_(scope.manager_project_ids))
+    if scope.creator_user_id is not None:
+        clauses.append(PsProjectPlan.created_by == scope.creator_user_id)
     if not clauses:
         return false()
     return or_(*clauses)
@@ -142,35 +100,84 @@ def build_plan_scope_clause(scope: DataScope) -> Any | None:
 def build_project_scope_clause(scope: DataScope) -> Any | None:
     """构造 ``PpmProjectMaintenance`` 的数据范围 where 子句 (语义同 build_plan_scope_clause)。
 
-    项目经理分支:项目主表无 manager 字段,反查 ``PsProjectPlan.project_manager_id``
-    得到 project_id 集合 (D-008@v1)。
+    经理分支:``id IN manager_project_ids``(主键直接命中);创建人分支:
+    ``created_by == creator_user_id``。
     """
     if scope.is_full:
         return None
     clauses: list[Any] = []
-    if scope.dept_org_ids:
-        clauses.append(PpmProjectMaintenance.organization_id.in_(scope.dept_org_ids))
-    if scope.pm_user_id is not None:
-        clauses.append(
-            PpmProjectMaintenance.id.in_(
-                select(PsProjectPlan.project_id).where(
-                    PsProjectPlan.project_manager_id == scope.pm_user_id
-                )
-            )
-            | (PpmProjectMaintenance.created_by == scope.pm_user_id)
-        )
+    if scope.manager_project_ids:
+        clauses.append(PpmProjectMaintenance.id.in_(scope.manager_project_ids))
+    if scope.creator_user_id is not None:
+        clauses.append(PpmProjectMaintenance.created_by == scope.creator_user_id)
     if not clauses:
         return false()
     return or_(*clauses)
 
 
+# ===========================================================================
+# 项目计划 编辑/删除放行 (can_operate, 对齐问题清单 can_operate_problem)
+# 放行 = 超管 ‖ 创建人 ‖ 本计划所属项目的经理 (满足其一)
+# ===========================================================================
+
+
+def plan_operable(
+    plan: PsProjectPlan,
+    user_id: uuid.UUID,
+    manager_pids: frozenset[uuid.UUID] | set[uuid.UUID],
+) -> bool:
+    """单条放行判断(纯函数,超管已在调用方排除;供单/批量共用避免逻辑分叉)。
+
+    创建人(``plan.created_by == user_id``) ‖ 本计划所属项目的经理
+    (``plan.project_id in manager_pids``),满足其一即放行。
+    """
+    return (plan.created_by is not None and plan.created_by == user_id) or (
+        bool(manager_pids) and plan.project_id in manager_pids
+    )
+
+
+def plan_operable_by_scope(plan: PsProjectPlan, scope: DataScope) -> bool:
+    """按已解析的 ``DataScope`` 判定单条放行(router list/get 用,免再查库)。
+
+    超管(``scope.is_full``)直通;否则用 scope 内的 ``manager_project_ids`` +
+    ``creator_user_id`` 本地判定。
+    """
+    if scope.is_full:
+        return True
+    if scope.creator_user_id is None:
+        return False
+    return plan_operable(plan, scope.creator_user_id, scope.manager_project_ids)
+
+
+def compute_plan_can_operate(plans: list[PsProjectPlan], scope: DataScope) -> dict[uuid.UUID, bool]:
+    """批量计算各计划的编辑/删除放行(供列表/详情响应填 ``can_edit``/``can_delete``)。
+
+    纯函数:超管全 True,否则逐条 ``plan_operable_by_scope``。无 N+1
+    (``manager_project_ids`` 已在 ``get_ppm_data_scope`` 查好并随 scope 传入)。
+    """
+    if scope.is_full:
+        return {p.id: True for p in plans}
+    return {p.id: plan_operable_by_scope(p, scope) for p in plans}
+
+
+async def can_operate_plan(session: AsyncSession, user: User, plan: PsProjectPlan) -> bool:
+    """单条异步入口(service 写路径用,镜像 ``can_operate_problem``)。
+
+    超管直通;否则查一次 ``manager_project_ids`` 再 ``plan_operable``。
+    """
+    if await is_super_admin(session, user):
+        return True
+    manager_pids = await manager_project_ids(session, user)
+    return plan_operable(plan, user.id, manager_pids)
+
+
 __all__ = [
-    "DEPT_BOSS_KEY",
-    "PROJECT_MANAGER_KEY",
-    "SUPER_ADMIN_KEY",
     "DataScope",
     "build_plan_scope_clause",
     "build_project_scope_clause",
+    "can_operate_plan",
+    "compute_plan_can_operate",
     "get_ppm_data_scope",
-    "get_user_role_keys",
+    "plan_operable",
+    "plan_operable_by_scope",
 ]

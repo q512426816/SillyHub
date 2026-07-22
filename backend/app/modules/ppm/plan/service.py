@@ -40,7 +40,11 @@ from app.modules.ppm.common.crud import (
     count_total,
 )
 from app.modules.ppm.common.fsm import StateMachine
-from app.modules.ppm.data_scope import DataScope, build_plan_scope_clause
+from app.modules.ppm.data_scope import (
+    DataScope,
+    build_plan_scope_clause,
+    can_operate_plan,
+)
 from app.modules.ppm.plan.fsm import (
     PROCESS_BUSINESS_TYPE,
     TRANSITIONS,
@@ -92,6 +96,15 @@ class PlanNotFound(AppError):
 
     code = "HTTP_404_PPM_PLAN_NOT_FOUND"
     http_status = 404
+
+
+class PlanForbidden(AppError):
+    """plan 子域无权操作 (403) — 项目计划编辑/删除越权
+    (非创建人/非本项目经理/非超管)。
+    """
+
+    code = "HTTP_403_PPM_PLAN_FORBIDDEN"
+    http_status = 403
 
 
 def _now() -> datetime:
@@ -514,7 +527,8 @@ class PlanService:
         plan = PsProjectPlan(id=uuid.uuid4(), **data)
         # 创建人写入 created_by (2026-07-21 项目计划创建人可见性修复)。
         # data 由 router 提供,不含 created_by;此处显式赋值,保证数据范围
-        # build_plan_scope_clause 的创建人可见性 (OR created_by == pm_user_id) 生效。
+        # build_plan_scope_clause / can_operate_plan 的创建人分支生效
+        # (经理判定另走项目成员角色,与 created_by 是 OR 关系)。
         plan.created_by = operator
         plan.created_at = _now()
         plan.updated_at = _now()
@@ -614,24 +628,37 @@ class PlanService:
         return plan_obj
 
     async def update_ps_project_plan(
-        self, item_id: uuid.UUID, data: dict[str, Any]
+        self, item_id: uuid.UUID, data: dict[str, Any], *, user: User
     ) -> PsProjectPlan:
+        obj = await _Crud(self._session, PsProjectPlan).get(item_id)  # 含 PlanNotFound (404)
+        await self._assert_can_operate(obj, user)
         # project_manager_name 兜底 (同 create):_Crud.update 跳过 None 值,前端切换
         # 经理漏传 name 时旧 name 会残留。有效经理 id 优先取 data 里的新 id (切换场景),
         # 缺省 (未传/exclude_unset 剔除) 回退 DB 现值;name 为空时按其反查 display_name。
         if not (data.get("project_manager_name") or "").strip():
             manager_id = data.get("project_manager_id")
             if manager_id is None:
-                current = await _Crud(self._session, PsProjectPlan).get(item_id)
-                manager_id = current.project_manager_id
+                manager_id = obj.project_manager_id
             if manager_id:
                 looked_up = await self._lookup_user_display_name(manager_id)
                 if looked_up:
                     data["project_manager_name"] = looked_up
         return await _Crud(self._session, PsProjectPlan).update(item_id, data)
 
-    async def delete_ps_project_plan(self, item_id: uuid.UUID) -> None:
+    async def delete_ps_project_plan(self, item_id: uuid.UUID, *, user: User) -> None:
+        obj = await _Crud(self._session, PsProjectPlan).get(item_id)
+        await self._assert_can_operate(obj, user)
         await _Crud(self._session, PsProjectPlan).delete(item_id)
+
+    async def _assert_can_operate(self, plan: PsProjectPlan, user: User) -> None:
+        """越权 → PlanForbidden (403)。放行条件见 ``can_operate_plan``
+        (超管 ‖ 创建人 ‖ 本计划所属项目的经理,均按项目成员角色判定)。
+        """
+        if not await can_operate_plan(self._session, user, plan):
+            raise PlanForbidden(
+                "无权操作该项目计划(仅创建人/本项目经理/超管可编辑删除)",
+                details={"plan_id": str(plan.id)},
+            )
 
     # ---------- 里程碑 (ps_plan_node) CRUD ----------
     async def list_ps_plan_nodes_by_plan(self, ps_project_plan_id: str) -> list[PsPlanNode]:

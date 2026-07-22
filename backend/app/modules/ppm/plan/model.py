@@ -237,7 +237,8 @@ class PsProjectPlan(BaseModel, table=True):
     company_name: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
     create_name: str | None = Field(default=None, sa_column=Column(String(128), nullable=True))
     # audit —— 创建人 UUID (2026-07-21 项目计划创建人可见性修复,对齐 projects/problem 约定)。
-    # 数据范围 build_plan_scope_clause 的项目经理分支 OR 上此列,保证创建人可见自己建的计划。
+    # 数据范围 build_plan_scope_clause / can_operate_plan 的创建人分支用此列,
+    # 保证创建人可见且可操作自己建的计划(经理判定另走项目成员角色,不依赖本列)。
     created_by: uuid.UUID | None = Field(
         default=None, sa_column=Column(UuidCoercing, nullable=True)
     )

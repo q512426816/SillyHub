@@ -182,7 +182,9 @@ export default function MilestoneDetailsPage() {
   const [psNodes, setPsNodes] = useState<PsPlanNode[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState<string | null>(null);
-  const [projectManagerId, setProjectManagerId] = useState<string | null>(null);
+  // 后端按项目成员角色集中判断的编辑放行 (超管‖创建人‖本项目经理);
+  // readOnly 是页面级总开关,控制里程碑/明细/模块全部增删改。
+  const [canEdit, setCanEdit] = useState(false);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -219,7 +221,7 @@ export default function MilestoneDetailsPage() {
         const plan = await getProjectPlan(planId);
         setProjectId(plan.project_id ?? null);
         setProjectName(plan.project_name ?? null);
-        setProjectManagerId(plan.project_manager_id ?? null);
+        setCanEdit(plan.can_edit ?? false);
         const list = await listPsPlanNodes(planId);
         setPsNodes(list);
       } catch (err) {
@@ -230,9 +232,8 @@ export default function MilestoneDetailsPage() {
     })();
   }, [planId]);
 
-  // readOnlyFlag:平台超管 bypass,否则非项目经理(无 create_user_id,退化为 project_manager_id)→ 只读
-  const readOnly =
-    !currentUser?.is_platform_admin && !matchAnyUser([projectManagerId], currentUserId);
+  // readOnly:后端按项目成员角色集中判断 (can_edit),前端只读。非放行 → 整页只读。
+  const readOnly = !(canEdit ?? false);
 
   // 主表前端过滤:总体阶段(plan 内)
   const filteredNodes = useMemo(() => {

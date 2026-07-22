@@ -28,7 +28,11 @@ from app.core.db import get_session
 from app.modules.auth.model import User
 from app.modules.ppm.common.crud import Page, PageReq
 from app.modules.ppm.common.export import ColumnDef, timestamped_filename
-from app.modules.ppm.data_scope import DataScope, get_ppm_data_scope
+from app.modules.ppm.data_scope import (
+    DataScope,
+    compute_plan_can_operate,
+    get_ppm_data_scope,
+)
 from app.modules.ppm.plan.schema import (
     ChangeProcessReq,
     ImportCommitReq,
@@ -398,8 +402,17 @@ async def list_ps_project_plans(
     req: ProjectPlanListReqDep,
 ) -> Page[PsProjectPlanResp]:
     page = await PlanService(session).list_ps_project_plans(req, scope)
+    # 编辑/删除放行 (按项目成员角色集中判断), 前端只读 can_edit/can_delete。
+    # 复用 scope 内已查好的 manager_project_ids, 无 N+1。
+    can_map = compute_plan_can_operate(page.items, scope)
+    items = []
+    for i in page.items:
+        resp = PsProjectPlanResp.model_validate(i)
+        resp.can_edit = can_map.get(i.id, False)
+        resp.can_delete = can_map.get(i.id, False)
+        items.append(resp)
     return Page[PsProjectPlanResp](
-        items=[PsProjectPlanResp.model_validate(i) for i in page.items],
+        items=items,
         total=page.total,
         page=page.page,
         page_size=page.page_size,
@@ -461,8 +474,16 @@ async def get_ps_project_plan(
     item_id: uuid.UUID,
     session: SessionDep,
     user: AuthUser,
+    scope: Annotated[DataScope, Depends(get_ppm_data_scope)],
 ) -> PsProjectPlanResp:
-    return PsProjectPlanResp.model_validate(await PlanService(session).get_ps_project_plan(item_id))
+    obj = await PlanService(session).get_ps_project_plan(item_id)
+    resp = PsProjectPlanResp.model_validate(obj)
+    # 编辑/删除放行标志 (里程碑详情页 readOnly 依据)。详情不硬 403, 仅算标志
+    # (镜像 problem get);写操作 (update/delete) 才在 service 层硬校验。
+    can_map = compute_plan_can_operate([obj], scope)
+    resp.can_edit = can_map.get(obj.id, False)
+    resp.can_delete = can_map.get(obj.id, False)
+    return resp
 
 
 @router.get(
@@ -491,7 +512,7 @@ async def update_ps_project_plan(
     user: AuthUser,
 ) -> PsProjectPlanResp:
     obj = await PlanService(session).update_ps_project_plan(
-        item_id, body.model_dump(exclude_unset=True)
+        item_id, body.model_dump(exclude_unset=True), user=user
     )
     return PsProjectPlanResp.model_validate(obj)
 
@@ -502,7 +523,7 @@ async def delete_ps_project_plan(
     session: SessionDep,
     user: AuthUser,
 ) -> None:
-    await PlanService(session).delete_ps_project_plan(item_id)
+    await PlanService(session).delete_ps_project_plan(item_id, user=user)
 
 
 # ===========================================================================
