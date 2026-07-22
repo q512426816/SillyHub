@@ -107,3 +107,9 @@ created_at: 2026-07-21T08:48:56
 关联变更：（无）
 文件：frontend/src/app/(dashboard)/ppm/projects/page.tsx + backend/app/modules/ppm/project/router.py
 结果:2处纯文案「公司名称」→「客户名称」:(1)projects/page.tsx:55 字段 label(列头/表单/搜索框经 PpmResourceTable 自动跟随);(2)project/router.py:218 项目维护导出(ProjectMaintenanceService)ColumnDef header。字段名 company_name 不动(保数据兼容)。客户维护 router.py:393 + test_router.py:148(level=VIP)属 /ppm/customers 不在范围未改。后端 project 模块 26 passed + ruff format/check 全过。
+
+## ql-20260722-003-c4d8 | 2026-07-22 10:50:00 | /ppm/problem-list 字段清空(验证人)DB 不更新
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/problem/schema.py + backend/app/modules/ppm/problem/tests/test_schema.py
+结果:根因=ProblemListUpdate(schema.py 56-78)缺 audit_user_id 字段,前端 problem-list edit 的 upd(_forms.tsx:266)发 audit_user_id(清空时=null),后端 ProblemListUpdate 无此字段+Pydantic extra=ignore 静默丢弃→验证人无法更新/清空(DB updated_at 变但字段不变)。ProblemListBase(create,line44)/ORM(line113)都有 audit_user_id,唯独 Update 缺;前端不发 audit_user_name 故无残留。排查逐层排除:apiFetch 不过滤 null、前端 upd 不过滤、后端 exclude_unset 实测保留显式 null、_Crud.update 能写 null(plan TestUpdateClearVsKeep 验证)、_backfill_names 只补 3 个 name 不动 id 字段。修复=Update 加 audit_user_id: uuid.UUID|None=None。新增 problem/tests/test_schema.py 3 测试(接收 value/null/absent)。3 passed + ruff 过。module_id/now_handle_user schema 本就有,清空正常。

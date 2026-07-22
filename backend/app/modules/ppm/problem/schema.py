@@ -70,6 +70,9 @@ class ProblemListUpdate(PydanticModel):
     duty_user_name: str | None = None
     plan_start_time: datetime | None = None
     plan_end_time: datetime | None = None
+    # 验证人 (ql-20260722-003: 前端 edit 提交发 audit_user_id; 此前 Update 缺该字段,
+    # Pydantic extra=ignore 静默丢弃致验证人无法更新/清空。ProblemListBase/ORM 均有)
+    audit_user_id: uuid.UUID | None = None
     remarks: str | None = None
     is_delay_plan: str | None = None
     work_load: str | None = None
