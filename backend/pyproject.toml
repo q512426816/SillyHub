@@ -23,6 +23,8 @@ dependencies = [
   "openpyxl>=3.1",
   "python-multipart>=0.0.9",
   "psutil>=5.9",
+  # 平台文件中心：S3 兼容对象存储异步客户端（spike-01 实测与现有异步栈无冲突）。
+  "aiobotocore>=3.8,<4",
 ]
 
 [project.optional-dependencies]

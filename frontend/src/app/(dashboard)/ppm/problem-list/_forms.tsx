@@ -9,7 +9,7 @@
  * 执行 (开始/执行/跨天填报) 不在此处,走公共弹窗 problem-detail-modal
  * (与任务计划 task-detail-modal 一致)。
  *
- * 复用:PpmUserSelect / PpmFileUrls / addWorkingDaysDate / problem.ts API。
+ * 复用:PpmUserSelect / FileUpload / addWorkingDaysDate / problem.ts API。
  *
  * 设计依据:.sillyspec/changes/2026-07-20-problem-list-align-task-plan/design.md
  */
@@ -26,7 +26,7 @@ import {
 } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 
-import { PpmFileUrls } from "@/components/ppm-file-urls";
+import { FileUpload } from "@/components/file-upload";
 import {
   PpmUserSelect,
   type PpmSelectOption,
@@ -385,7 +385,12 @@ export function ProblemCreateForm({
       </Form.Item>
 
       <Form.Item label="问题附件">
-        <PpmFileUrls value={fileUrls} onChange={setFileUrls} />
+        <FileUpload
+          value={fileUrls}
+          onChange={setFileUrls}
+          owner_type="ppm_problem"
+          owner_id={problem?.id ?? null}
+        />
       </Form.Item>
 
       <Form.Item

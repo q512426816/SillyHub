@@ -22,7 +22,7 @@ import { useCallback, useEffect, useState } from "react";
 import dayjs from "dayjs";
 import { Button, Drawer, Input, Progress, Spin, Tabs, Tag, message } from "antd";
 
-import { PpmFileUrls } from "@/components/ppm-file-urls";
+import { FileViewer } from "@/components/file-viewer";
 import { ApiError } from "@/lib/api";
 import { addKanbanComment, listKanbanComments } from "@/lib/ppm/kanban";
 import { listTaskExecutes } from "@/lib/ppm/task";
@@ -307,11 +307,7 @@ export function KanbanTaskDetailDrawer({
               label: "附件",
               children: (
                 <div className="min-h-48">
-                  {(task.file_urls?.length ?? 0) === 0 ? (
-                    <EmptyHint text="暂无附件" />
-                  ) : (
-                    <PpmFileUrls value={task.file_urls ?? []} onChange={() => {}} disabled />
-                  )}
+                  <FileViewer fileIds={task.file_urls ?? []} />
                 </div>
               ),
             },

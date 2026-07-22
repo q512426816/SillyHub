@@ -1,0 +1,275 @@
+<!-- author: qinyi -->
+<!-- created_at: 2026-07-22T13:55:00 -->
+<!-- prototype: 平台级文件中心 · 上传/预览/PPM接入 可视化原型（对齐 frontend-style-system 设计系统） -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>平台级文件中心 · 原型</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --blue-50:#eff6ff;--blue-100:#dbeafe;--blue-600:#2563eb;--blue-700:#1d4ed8;
+    --cyan-500:#06b6d4;
+    --emerald-50:#ecfdf5;--emerald-500:#10b981;--emerald-600:#059669;--emerald-700:#047857;
+    --amber-50:#fffbeb;--amber-500:#f59e0b;
+    --red-50:#fef2f2;--red-500:#ef4444;--red-600:#dc2626;
+    --slate-50:#f8fafc;--slate-100:#f1f5f9;--slate-200:#e2e8f0;--slate-300:#cbd5e1;
+    --slate-400:#94a3b8;--slate-500:#64748b;--slate-600:#475569;--slate-700:#334155;--slate-800:#1e293b;--slate-900:#0f172a;
+    --r-sm:6px;--r-md:8px;--r-lg:12px;--r-xl:16px;
+    --sh-sm:0 1px 2px 0 rgb(15 23 42/.05);
+    --sh-md:0 4px 6px -1px rgb(15 23 42/.07),0 2px 4px -2px rgb(15 23 42/.05);
+    --sh-lg:0 10px 15px -3px rgb(15 23 42/.08),0 4px 6px -4px rgb(15 23 42/.05);
+    --font:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--slate-100);color:var(--slate-800);font-size:14px;line-height:1.6}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px}
+  .label{font-size:11px;font-weight:600;color:var(--slate-400);text-transform:uppercase;letter-spacing:.08em;margin:30px 0 10px}
+  .hint{font-size:12.5px;color:var(--slate-500);margin-bottom:14px}
+
+  .card{background:#fff;border:1px solid var(--slate-200);border-radius:var(--r-lg);box-shadow:var(--sh-sm);overflow:hidden}
+  .card-hd{padding:16px 20px;border-bottom:1px solid var(--slate-100);display:flex;align-items:center;justify-content:space-between}
+  .card-hd h3{font-size:15px;font-weight:700;color:var(--slate-900)}
+  .card-hd .tag{font-size:11px;font-weight:600;color:var(--blue-700);background:var(--blue-50);padding:3px 9px;border-radius:999px}
+  .card-bd{padding:20px}
+
+  .field-label{font-size:12.5px;font-weight:600;color:var(--slate-700);margin-bottom:7px;display:flex;align-items:center;gap:6px}
+  .field-label .req{color:var(--red-500)}
+
+  /* 普通输入框示意（表单场景） */
+  .mock-input{height:36px;border:1px solid var(--slate-300);border-radius:var(--r-md);padding:0 12px;font-size:13px;color:var(--slate-400);background:var(--slate-50);display:flex;align-items:center;margin-bottom:18px}
+
+  /* 上传拖拽区 */
+  .drop{border:1.5px dashed var(--slate-300);border-radius:var(--r-lg);background:var(--slate-50);padding:26px;text-align:center;cursor:pointer;transition:all .15s}
+  .drop:hover{border-color:var(--blue-600);background:var(--blue-50)}
+  .drop .ic{width:40px;height:40px;border-radius:var(--r-md);background:var(--blue-50);color:var(--blue-600);display:flex;align-items:center;justify-content:center;margin:0 auto 10px}
+  .drop .ic svg{width:22px;height:22px}
+  .drop .t1{font-size:13.5px;font-weight:600;color:var(--slate-700)}
+  .drop .t1 b{color:var(--blue-600)}
+  .drop .t2{font-size:12px;color:var(--slate-400);margin-top:3px}
+
+  /* 已上传文件项 */
+  .files{margin-top:14px;display:flex;flex-direction:column;gap:10px}
+  .file{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--slate-200);border-radius:var(--r-md);background:#fff;transition:all .15s}
+  .file:hover{border-color:var(--slate-300);box-shadow:var(--sh-sm)}
+  .file-thumb{width:44px;height:44px;border-radius:var(--r-sm);flex-shrink:0;overflow:hidden;display:flex;align-items:center;justify-content:center;color:#fff}
+  .file-thumb.img1{background:linear-gradient(135deg,#f59e0b,#ef4444)}
+  .file-thumb.img2{background:linear-gradient(135deg,#06b6d4,#2563eb)}
+  .file-thumb.img3{background:linear-gradient(135deg,#10b981,#059669)}
+  .file-thumb.doc{background:var(--blue-600)}
+  .file-thumb.sheet{background:var(--emerald-600)}
+  .file-thumb.pdf{background:var(--red-600)}
+  .file-thumb svg{width:22px;height:22px}
+  .file-meta{flex:1;min-width:0}
+  .file-meta .nm{font-size:13px;font-weight:600;color:var(--slate-800);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .file-meta .sub{font-size:11.5px;color:var(--slate-400);display:flex;align-items:center;gap:8px;margin-top:2px}
+  .file-meta .sub .badge-mini{font-size:10.5px;padding:1px 7px;border-radius:999px;font-weight:600}
+  .badge-mini.img{background:var(--cyan-50,#ecfeff);color:#0891b2}
+  .badge-mini.doc{background:var(--slate-100);color:var(--slate-600)}
+  .file-act{display:flex;gap:4px;flex-shrink:0}
+  .iconbtn{width:30px;height:30px;border-radius:var(--r-sm);border:1px solid var(--slate-200);background:#fff;display:flex;align-items:center;justify-content:center;color:var(--slate-500);cursor:pointer;transition:all .15s}
+  .iconbtn:hover{background:var(--slate-100);color:var(--slate-700)}
+  .iconbtn.danger:hover{background:var(--red-50);color:var(--red-600);border-color:var(--red-50)}
+  .iconbtn svg{width:15px;height:15px}
+
+  /* 上传中进度 */
+  .prog-track{flex:1;height:5px;background:var(--slate-100);border-radius:999px;overflow:hidden;min-width:90px;margin-top:4px}
+  .prog-fill{height:100%;border-radius:999px;background:var(--blue-600);transition:width .3s}
+
+  /* 图片网格（预览态） */
+  .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:12px}
+  .thumb{aspect-ratio:1;border-radius:var(--r-md);overflow:hidden;cursor:pointer;position:relative;border:1px solid var(--slate-200);transition:all .15s}
+  .thumb:hover{transform:translateY(-2px);box-shadow:var(--sh-md);border-color:var(--blue-600)}
+  .thumb .ph{width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:600}
+  .thumb .zoom{position:absolute;inset:0;background:rgb(15 23 42/.4);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .15s}
+  .thumb:hover .zoom{opacity:1}
+  .thumb .zoom svg{width:20px;height:20px;color:#fff}
+
+  /* 大图 modal */
+  .modal-mask{position:fixed;inset:0;background:rgb(15 23 42/.75);display:none;align-items:center;justify-content:center;z-index:50;padding:32px}
+  .modal-mask.show{display:flex}
+  .modal-box{max-width:760px;max-height:86vh;background:#fff;border-radius:var(--r-lg);overflow:hidden;display:flex;flex-direction:column;box-shadow:var(--sh-lg)}
+  .modal-hd{padding:12px 16px;border-bottom:1px solid var(--slate-100);display:flex;align-items:center;justify-content:space-between}
+  .modal-hd .nm{font-size:13.5px;font-weight:600;color:var(--slate-800)}
+  .modal-img{flex:1;display:flex;align-items:center;justify-content:center;padding:20px;background:var(--slate-50);min-height:320px}
+  .modal-img .ph{width:420px;height:300px;border-radius:var(--r-md);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600}
+
+  .btn{display:inline-flex;align-items:center;gap:7px;padding:8px 14px;border-radius:var(--r-md);font-size:13px;font-weight:600;cursor:pointer;border:1px solid transparent;font-family:var(--font)}
+  .btn svg{width:15px;height:15px}
+  .btn-primary{background:var(--blue-600);color:#fff;box-shadow:var(--sh-sm)}
+  .btn-primary:hover{background:var(--blue-700)}
+  .btn-outline{background:#fff;color:var(--slate-700);border-color:var(--slate-300)}
+  .btn-outline:hover{background:var(--slate-50)}
+
+  /* 设计要点 */
+  .pts{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:6px}
+  .pt{padding:12px 14px;border-radius:var(--r-md);background:var(--slate-50);border:1px solid var(--slate-100)}
+  .pt .k{font-size:12px;font-weight:700;color:var(--slate-700);display:flex;align-items:center;gap:6px}
+  .pt .k .dot{width:7px;height:7px;border-radius:50%;background:var(--blue-600)}
+  .pt .v{font-size:12px;color:var(--slate-500);margin-top:3px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+    <h1 style="font-size:22px;font-weight:700;color:var(--slate-900)">平台级文件中心 · 原型</h1>
+    <span style="font-size:12px;color:var(--slate-400)">变更 2026-07-22-platform-file-center</span>
+  </div>
+  <p class="hint">可视化确认文件上传 / 附件预览 / 图片回显 / PPM 接入交互。所有数据均为示意，实际上传走 <code>POST /api/file/upload</code>。</p>
+
+  <!-- 场景一：编辑态 - 通用上传组件（问题新建表单） -->
+  <div class="label">场景一 · 编辑态 — 通用上传组件 FileUpload（问题新建表单内）</div>
+  <div class="card">
+    <div class="card-hd">
+      <h3>新建问题</h3>
+      <span class="tag">可上传 / 可删除</span>
+    </div>
+    <div class="card-bd">
+      <div class="field-label">问题标题 <span class="req">*</span></div>
+      <div class="mock-input">示例：里程碑交付物缺失</div>
+
+      <div class="field-label">附件 <span style="font-weight:400;color:var(--slate-400);font-size:11.5px">（图片可预览，文件可下载）</span></div>
+      <div class="drop" id="drop">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 16V4m0 0L8 8m4-4l4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg></div>
+        <div class="t1"><b>点击上传</b> 或拖拽文件到此处</div>
+        <div class="t2">支持图片（jpg/png/gif/webp）与文档（pdf/doc/xlsx/zip 等），单文件 ≤ 50MB</div>
+      </div>
+      <div class="files" id="editFiles">
+        <div class="file">
+          <div class="file-thumb img1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg></div>
+          <div class="file-meta">
+            <div class="nm">现场照片-01.jpg</div>
+            <div class="sub"><span class="badge-mini img">图片</span>2.4 MB</div>
+          </div>
+          <div class="file-act"><div class="iconbtn danger" title="删除" onclick="rm(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m2 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/></svg></div></div>
+        </div>
+        <div class="file" id="uploading">
+          <div class="file-thumb doc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg></div>
+          <div class="file-meta">
+            <div class="nm">交付清单.xlsx</div>
+            <div class="prog-track"><div class="prog-fill" id="prog" style="width:45%"></div></div>
+            <div class="sub" style="margin-top:4px">上传中… 45%</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 场景二：只读态 - 附件预览组件（问题详情） -->
+  <div class="label">场景二 · 只读态 — 附件预览组件 FileViewer（问题详情）</div>
+  <div class="card">
+    <div class="card-hd">
+      <h3>问题详情 · 附件（3 张图片 / 2 个文件）</h3>
+      <span class="tag" style="color:var(--slate-600);background:var(--slate-100)">只读 · 预览回显</span>
+    </div>
+    <div class="card-bd">
+      <div class="field-label">图片 <span style="font-weight:400;color:var(--slate-400);font-size:11.5px">（点击放大预览）</span></div>
+      <div class="gallery">
+        <div class="thumb" onclick="openModal('现场照片-01.jpg','img1')"><div class="ph" style="background:linear-gradient(135deg,#f59e0b,#ef4444)">IMG 01</div><div class="zoom"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4M11 8v6M8 11h6"/></svg></div></div>
+        <div class="thumb" onclick="openModal('设计图纸.png','img2')"><div class="ph" style="background:linear-gradient(135deg,#06b6d4,#2563eb)">IMG 02</div><div class="zoom"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4M11 8v6M8 11h6"/></svg></div></div>
+        <div class="thumb" onclick="openModal('验收现场.jpg','img3')"><div class="ph" style="background:linear-gradient(135deg,#10b981,#059669)">IMG 03</div><div class="zoom"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4M11 8v6M8 11h6"/></svg></div></div>
+      </div>
+
+      <div class="field-label" style="margin-top:20px">文件</div>
+      <div class="files">
+        <div class="file">
+          <div class="file-thumb pdf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg></div>
+          <div class="file-meta"><div class="nm">需求说明书.pdf</div><div class="sub"><span class="badge-mini doc">PDF</span>1.8 MB</div></div>
+          <div class="file-act"><a class="iconbtn" title="下载" href="javascript:void(0)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v12m0 0l4-4m-4 4l-4-4M4 18v2h16v-2"/></svg></a></div>
+        </div>
+        <div class="file">
+          <div class="file-thumb sheet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg></div>
+          <div class="file-meta"><div class="nm">交付清单.xlsx</div><div class="sub"><span class="badge-mini doc">表格</span>640 KB</div></div>
+          <div class="file-act"><a class="iconbtn" title="下载" href="javascript:void(0)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v12m0 0l4-4m-4 4l-4-4M4 18v2h16v-2"/></svg></a></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 设计要点 -->
+  <div class="label">设计要点</div>
+  <div class="pts">
+    <div class="pt"><div class="k"><span class="dot"></span>存储：MinIO（S3 兼容）+ 抽象层</div><div class="v">后端 StorageBackend 抽象，MinIO 首实现，未来换阿里云 OSS 零改代码</div></div>
+    <div class="pt"><div class="k"><span class="dot"></span>上传链路：前端 → 后端 → MinIO</div><div class="v">鉴权集中在后端，前端只认 /api/file/*，换存储前端无感</div></div>
+    <div class="pt"><div class="k"><span class="dot"></span>图片/文件：前端按 MIME 判定</div><div class="v">图片缩略图 + 点击放大；文件图标 + 下载，无后端图像处理</div></div>
+    <div class="pt"><div class="k"><span class="dot"></span>PPM 接入：复用 file_urls 存文件 ID</div><div class="v">字段与前后端类型不变，约 10 处替换为 FileUpload/FileViewer</div></div>
+  </div>
+
+</div>
+
+<!-- 大图预览 modal -->
+<div class="modal-mask" id="modal" onclick="closeModal(event)">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-hd">
+      <span class="nm" id="modalName">图片预览</span>
+      <div class="iconbtn" onclick="closeModal()" style="cursor:pointer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg></div>
+    </div>
+    <div class="modal-img"><div class="ph" id="modalPh">图片</div></div>
+    <div style="padding:12px 16px;border-top:1px solid var(--slate-100);display:flex;justify-content:flex-end;gap:8px">
+      <a class="btn btn-outline" href="javascript:void(0)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v12m0 0l4-4m-4 4l-4-4M4 18v2h16v-2"/></svg>下载原图</a>
+    </div>
+  </div>
+</div>
+
+<script>
+  // 模拟拖拽/点击上传
+  const grads = {img1:'linear-gradient(135deg,#f59e0b,#ef4444)',img2:'linear-gradient(135deg,#06b6d4,#2563eb)',img3:'linear-gradient(135deg,#10b981,#059669)'};
+  let gi = 0;
+  document.getElementById('drop').addEventListener('click', () => {
+    const files = document.getElementById('editFiles');
+    const kinds = [['现场快照.jpg','img','img1'],['会议纪要.pdf','doc','pdf'],['施工图.png','img','img2'],['数据表.xlsx','doc','sheet']];
+    const [nm,kind,cls] = kinds[gi++ % kinds.length];
+    const isImg = kind === 'img';
+    const div = document.createElement('div');
+    div.className = 'file';
+    div.innerHTML = `
+      <div class="file-thumb ${cls}">${isImg
+        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg>'
+        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>'}</div>
+      <div class="file-meta">
+        <div class="nm">${nm}</div>
+        <div class="prog-track"><div class="prog-fill" style="width:10%"></div></div>
+        <div class="sub" style="margin-top:4px">上传中…</div>
+      </div>`;
+    files.appendChild(div);
+    const fill = div.querySelector('.prog-fill');
+    const sub = div.querySelector('.sub');
+    let p = 10;
+    const t = setInterval(() => {
+      p += 18; if (p > 100) p = 100;
+      fill.style.width = p + '%';
+      if (p >= 100) {
+        clearInterval(t);
+        sub.innerHTML = `<span class="badge-mini ${isImg?'img':'doc'}">${isImg?'图片':'文件'}</span>${(Math.random()*3+0.5).toFixed(1)} MB`;
+        const act = document.createElement('div');
+        act.className = 'file-act';
+        act.innerHTML = `<div class="iconbtn danger" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m2 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/></svg></div>`;
+        act.querySelector('.iconbtn').onclick = () => div.remove();
+        div.appendChild(act);
+      }
+    }, 280);
+  });
+  function rm(el){ el.closest('.file').remove(); }
+  function openModal(name, cls){
+    document.getElementById('modalName').textContent = name;
+    const ph = document.getElementById('modalPh');
+    ph.textContent = name;
+    ph.style.background = grads[cls];
+    document.getElementById('modal').classList.add('show');
+  }
+  function closeModal(e){ if(!e || e.target.id==='modal') document.getElementById('modal').classList.remove('show'); }
+  // 初始进度动画示意
+  let ip = 45;
+  setInterval(() => {
+    const p = document.getElementById('prog');
+    if (!p) return;
+    ip += 12; if (ip > 100) ip = 100;
+    p.style.width = ip + '%';
+  }, 600);
+</script>
+</body>
+</html>

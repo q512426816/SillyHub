@@ -34,6 +34,25 @@ services:
       retries: 20
     mem_limit: 128m
 
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 256m
+
   backend:
     # 固定 tag：本地 build / 服务器 docker load / compose up 三者复用同一镜像名。
     # 部署改用 save/load（见 deploy/scripts/build-and-save.sh + load-and-up.sh），服务器不再现场构建。
@@ -62,6 +81,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     volumes:
       # Mount host project directories so the scanner can read .sillyspec trees.
@@ -135,3 +156,4 @@ volumes:
   redisdata:
   worktree-data:
   claude-data:
+  minio-data:

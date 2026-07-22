@@ -3,7 +3,7 @@ project: backend
 source_commit: ba87eec
 generated_at: 2026-06-24 00:45:16
 generator: sillyspec-scan
-last_change: 2026-06-24 全量 scan 覆盖更新。backend/app/modules 实际 23 业务目录（admin / agent / archive / auth / change / change_writer / daemon / git_gateway / git_identity / health / incident / knowledge / ppm / release / runtime / scan_docs / settings / spec_profile / spec_workspace / task / tool_gateway / workflow / workspace / worktree），旧索引漏 admin、ppm 两模块；本次补齐并核对 entrypoints/main_symbols/depends_on（settings→admin、auth↔admin 双向、agent↔daemon 双向、daemon→workspace 等跨模块引用全部以 rg 验证）。
+last_change: 2026-06-24 全量 scan 覆盖更新。backend/app/modules 实际 23 业务目录（admin / agent / archive / auth / change / change_writer / daemon / git_gateway / git_identity / health / incident / knowledge / ppm / release / runtime / scan_docs / settings / spec_profile / spec_workspace / task / tool_gateway / workflow / workspace / worktree），旧索引漏 admin、ppm 两模块；本次补齐并核对 entrypoints/main_symbols/depends_on（settings→admin、auth↔admin 双向、agent↔daemon 双向、daemon→workspace 等跨模块引用全部以 rg 验证）。2026-07-22 平台文件中心（change `2026-07-22-platform-file-center`）手动补登 `storage` + `file` 两个新模块卡（scan 未跑，source_commit 标 pending，待归档后由下次 scan 对齐）。
 
 modules:
   # ── core 模块 ──────────────────────────────────────────────
@@ -852,6 +852,59 @@ modules:
     review_reasons:
       - modules/ppm.md 文档尚未创建，需补文档
       - 对齐源 ppdmq-module-ppm (Java/Spring Boot) 6 子域（pm/plan/ps/problem/task/kanban），规模最大
+
+  # ── platform 模块 ─────────────────────────────────────────
+
+  storage:
+    status: active
+    doc: modules/storage.md
+    paths:
+      - app/modules/storage/**
+    tags: [storage, object-storage, s3, minio, abstraction]
+    aliases: [object-storage]
+    entrypoints:
+      - get_storage_backend
+      - init_storage_backend
+    main_symbols:
+      - StorageBackend
+      - MinioStorage
+      - ObjectStat
+    depends_on:
+      - core
+    used_by:
+      - file
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  file:
+    status: active
+    doc: modules/file.md
+    paths:
+      - app/modules/file/**
+    tags: [file, attachment, upload, object-storage]
+    aliases: [file-center, attachment-center]
+    entrypoints:
+      - /api/file/upload
+      - /api/file/{id}
+      - /api/file/{id}/meta
+      - /api/file/batch-meta
+    main_symbols:
+      - File
+      - FileService
+      - file_router
+      - FileUploadResp
+      - FileMetaResp
+    depends_on:
+      - core
+      - models
+      - auth
+      - storage
+    used_by:
+      - ppm
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   # ── infra 模块 ─────────────────────────────────────────────
 

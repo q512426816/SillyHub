@@ -77,6 +77,7 @@ async def db_engine() -> AsyncIterator[Any]:
     from app.modules.auth import model as _auth_model  # noqa: F401
     from app.modules.change import model as _change_model  # noqa: F401
     from app.modules.daemon import model as _daemon_model  # noqa: F401
+    from app.modules.file import model as _file_model  # noqa: F401
     from app.modules.git_identity import model as _git_identity_model  # noqa: F401
 
     # ppm 子域模型 (task-06:平台级 task 三表)

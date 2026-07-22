@@ -172,6 +172,41 @@ class Settings(BaseSettings):
             return raw.strip().lower()
         return raw
 
+    # ── Object storage (platform file center) ──────────────────────────
+    # 设计依据 design.md §D-001/D-002/D-009。全部给默认值保证 brownfield 兼容。
+    storage_backend: str = Field(
+        default="minio",
+        description="对象存储后端（minio；未来可加 oss 等 S3 兼容实现，代码零改动）。",
+    )
+    s3_endpoint: str = Field(
+        default="http://localhost:9000",
+        description="S3 兼容端点。Docker 内为 http://minio:9000。",
+    )
+    s3_access_key: str = Field(default="minioadmin")
+    s3_secret_key: str = Field(default="minioadmin")
+    s3_bucket: str = Field(default="platform-files")
+    s3_region: str = Field(default="us-east-1")
+    file_max_size_mb: int = Field(
+        default=50, ge=1, description="单文件上传大小上限（MB），超限 413。"
+    )
+    file_allowed_types: str = Field(
+        default=(
+            "image/jpeg,image/png,image/gif,image/webp,"
+            "application/pdf,"
+            "application/msword,"
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
+            "application/vnd.ms-excel,"
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,"
+            "application/zip,text/plain"
+        ),
+        description="上传 MIME 白名单（逗号分隔），不在列 415。D-009 排除 text/html、image/svg+xml。",
+    )
+
+    @property
+    def file_allowed_type_set(self) -> frozenset[str]:
+        """file_allowed_types 解析为集合（去空白），供上传校验。"""
+        return frozenset(t.strip() for t in self.file_allowed_types.split(",") if t.strip())
+
     # ── Docker path mapping ────────────────────────────────────────────
     host_path_prefix: str = Field(
         default="",

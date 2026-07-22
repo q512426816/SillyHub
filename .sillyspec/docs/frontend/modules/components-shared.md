@@ -39,4 +39,9 @@ created_at: 2026-06-24T01:02:00
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
+- 2026-07-22 平台文件中心（change `2026-07-22-platform-file-center`）新增两个通用组件（scan 未跑，待下次 scan 自动归位）：
+  - `@/components/file-upload`（`FileUpload`）：编辑态受控上传组件，value=文件 id 列表，`customRequest` 调 `@/lib/file/api.uploadFile`（XHR + 进度 + 401 刷新重试），已上传项经 `fetchFileMetaBatch` 回显，图片显缩略图、文件显类型图标，可删除。PPM 各表单（问题清单/里程碑等）用它替代旧 `ppm-file-urls`。
+  - `@/components/file-viewer`（`FileViewer`）：只读查看态，图片走 antd `Image.PreviewGroup`、文件走下载链接，空 →「暂无附件」。详情弹窗（problem/task-detail-modal、看板抽屉）用它。
+- 配套 `@/lib/file/api`（uploadFile/fetchFileMetaBatch/getFileDownloadUrl）+ `@/lib/file/utils`（isImageMime/FileTypeIcon/formatFileSize）。
+- `file_urls` 字段名不变，值语义从 URL 改为**文件 id**（design D-006）。
 <!-- MANUAL_NOTES_END -->

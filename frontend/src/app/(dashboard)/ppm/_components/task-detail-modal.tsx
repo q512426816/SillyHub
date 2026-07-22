@@ -28,6 +28,7 @@ import {
   startPlanTask,
 } from "@/lib/ppm/task";
 import type { PlanTask, TaskExecute } from "@/lib/ppm/types";
+import { FileViewer } from "@/components/file-viewer";
 import { fmtDay, inputCls, taskStatusTag, Toast, useToast } from "../shared";
 
 export type TaskDetailMode = "detail" | "execute";
@@ -241,6 +242,12 @@ export function TaskDetailModal({
           {task.remarks ? (
             <div className="col-span-2"><span className="text-muted-foreground">备注：</span>{task.remarks}</div>
           ) : null}
+          <div className="col-span-2">
+            <span className="text-muted-foreground">附件：</span>
+            <div className="mt-1">
+              <FileViewer fileIds={task.file_urls ?? []} />
+            </div>
+          </div>
         </div>
       </div>
 

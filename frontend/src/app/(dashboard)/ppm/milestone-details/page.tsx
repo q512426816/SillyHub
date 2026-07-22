@@ -30,7 +30,7 @@
  * 设计依据:
  *  - tasks/task-04.md (主子结构)
  *  - tasks/task-05.md (6 状态表单分发 + Timeline + 工作日集成)
- *  - design.md §7 (PpmSubTable + PpmUserSelect + PpmText + PpmFileUrls)
+ *  - design.md §7 (PpmSubTable + PpmUserSelect + PpmText + FileUpload)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -59,7 +59,7 @@ import {
 } from "@/components/layout";
 import { PpmSubTable } from "@/components/ppm-sub-table";
 import { PpmUserSelect } from "@/components/ppm-user-select";
-import { PpmFileUrls } from "@/components/ppm-file-urls";
+import { FileUpload } from "@/components/file-upload";
 import { PpmText } from "@/components/ppm-text";
 import {
   matchAnyUser,
@@ -2570,7 +2570,7 @@ function DetailDrawer({
             </Form.Item>
           </div>
           <Form.Item label="附件" name="file_urls">
-            <PpmFileUrls disabled={!baseEditable} />
+            <FileUpload owner_type="ppm_ps_plan_node_detail" disabled={!baseEditable} />
           </Form.Item>
         </FormSection>
 

@@ -24,6 +24,7 @@ import dayjs from "dayjs";
 import { Button, Modal, Tag } from "antd";
 
 import { ApiError } from "@/lib/api";
+import { FileViewer } from "@/components/file-viewer";
 import { isOverEstimate } from "@/lib/ppm/format";
 import { executeProblem, startProblem } from "@/lib/ppm/problem";
 import { listTaskExecutes } from "@/lib/ppm/task";
@@ -288,6 +289,12 @@ export function ProblemDetailModal({
           {problem.remarks ? (
             <div className="col-span-2"><span className="text-muted-foreground">备注：</span>{problem.remarks}</div>
           ) : null}
+          <div className="col-span-2">
+            <span className="text-muted-foreground">附件：</span>
+            <div className="mt-1">
+              <FileViewer fileIds={problem.file_urls ?? []} />
+            </div>
+          </div>
         </div>
       </div>
 

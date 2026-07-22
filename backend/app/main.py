@@ -92,9 +92,23 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                     log.warning("gate.reconcile_reenqueued", **gate_result)
             except Exception:
                 log.exception("gate.reconcile_failed")
+        # 平台文件中心：初始化对象存储单例（minio 等 S3 兼容）。异常不阻断启动——
+        # 存储后端暂不可达时文件上传在请求期报错，其余功能不受影响（D-001/D-002）。
+        try:
+            from app.modules.storage.factory import init_storage_backend
+
+            init_storage_backend(settings)
+        except Exception:
+            log.exception("storage.init_failed")
         yield
     finally:
         log.info("app.shutdown")
+        try:
+            from app.modules.storage.factory import get_storage_backend
+
+            await get_storage_backend().aclose()
+        except Exception:
+            log.exception("storage.close_failed")
         await dispose_engine()
         await close_redis()
 
@@ -451,6 +465,10 @@ def create_app() -> FastAPI:
     # double-count members_router's own prefix and raise
     # ``ValueError: Duplicated param name workspace_id``.
     app.include_router(members_router, prefix="/api", tags=["workspace-members"])
+    # 平台级文件中心（2026-07-22-platform-file-center）：通用上传/预览/元数据/软删。
+    from app.modules.file.router import router as file_router
+
+    app.include_router(file_router, prefix="/api/file")
     app.include_router(member_runtimes_router, prefix="/api", tags=["workspace-member-runtimes"])
     app.include_router(auth_router, prefix="/api")
     app.include_router(change_router, prefix="/api")
