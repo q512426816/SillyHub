@@ -1928,25 +1928,19 @@ function DetailLevelTable({
           {error}
         </div>
       ) : (
-        // 表格样式对齐 /ppm/projects(PpmResourceTable):全宽自适应填满容器、
-        // ppm-striped-table CSS 斑马纹。不设 scroll.x——antd 固定列在三级嵌套
-        // 展开表内不可靠(sticky 失效),改全宽布局让操作列自然落在右缘、表格自适应。
-        <div className="ppm-striped-table">
-          <style>{`
-.ppm-striped-table .ant-table-tbody tr.ant-table-row td{background:transparent}
-.ppm-striped-table .ant-table-tbody tr.ant-table-row:nth-child(even) td{background-color:hsl(var(--muted)/0.4)}`}</style>
-          <DataTable<PsPlanNodeDetail>
-            rowKey="id"
-            columns={columns}
-            dataSource={visibleDetails}
-            loading={loading}
-            size="small"
-            bordered
-            pagination={false}
-            rowClassName={() => ""}
-            emptyText={moduleId ? "该模块暂无明细" : "暂无明细"}
-          />
-        </div>
+        <DataTable<PsPlanNodeDetail>
+          rowKey="id"
+          columns={columns}
+          dataSource={visibleDetails}
+          loading={loading}
+          size="small"
+          bordered
+          pagination={false}
+          scroll={{ x: "max-content" }}
+          className="overflow-visible"
+          rowClassName={(_row: PsPlanNodeDetail, idx: number) => idx % 2 === 1 ? "bg-muted/40" : ""}
+          emptyText={moduleId ? "该模块暂无明细" : "暂无明细"}
+        />
       )}
     </div>
   );
