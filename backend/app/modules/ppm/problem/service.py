@@ -284,7 +284,8 @@ class ProblemService:
                 clauses.append(scope)
         return await _Crud(self._session, PpmProblemList).list_paged(
             req=req,
-            allowed_sort={"created_at", "find_time", "status"},
+            # plan_start_time:问题清单列表默认按计划开始时间正序 (ql-20260722)
+            allowed_sort={"created_at", "find_time", "status", "plan_start_time"},
             where_clauses=clauses or None,
         )
 

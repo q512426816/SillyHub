@@ -89,8 +89,12 @@ async def task_scope_clause(session: AsyncSession, user: User):
 async def problem_scope_clause(session: AsyncSession, user: User):
     """返回 ``PpmProblemList`` 的范围 where 子句;``None`` 表示不加(超管看全部)(D-005/D-007)。
 
-    非超管:经理项目集的全部问题 OR 自己是 ``duty_user_id`` / ``audit_user_id`` /
-    ``now_handle_user``(逗号分隔含自己)任一(D-005)。
+    非超管:经理项目集的全部问题 OR 自己是 ``created_by``(创建人) /
+    ``duty_user_id``(责任人) / ``audit_user_id``(验证人) / ``now_handle_user``
+    (处置人,逗号分隔含自己)任一(D-005 + ql-20260722 创建人可见)。
+
+    创建人也纳入可见范围:``can_operate_problem`` 放行创建人编辑/删除,若可见
+    范围不含创建人,会出现"能编辑却在列表看不见自己创建的问题"的矛盾。
 
     ``now_handle_user`` 是 UUID 逗号字符串,两侧补逗号后 ``like`` 精确匹配
     ``%,uid,%``,避免 UUID 子串误匹配;NULL 经 ``coalesce``→空串不命中。
@@ -104,6 +108,7 @@ async def problem_scope_clause(session: AsyncSession, user: User):
     clauses: list = []
     if manager_pids:
         clauses.append(PpmProblemList.project_id.in_(manager_pids))
+    clauses.append(PpmProblemList.created_by == user.id)
     clauses.append(PpmProblemList.duty_user_id == user.id)
     clauses.append(PpmProblemList.audit_user_id == user.id)
     clauses.append(wrapped.like(uid_csv))

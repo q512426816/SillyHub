@@ -314,6 +314,23 @@ async def test_problem_now_handle_no_false_positive(db: AsyncSession) -> None:
     assert page.total == 0
 
 
+async def test_problem_creator_sees_own_created(db: AsyncSession) -> None:
+    """ql-20260722:创建人可见自己创建的问题(即使非责任人/验证人/处置人/项目经理)。
+
+    修复前可见范围漏创建人 → 创建人能编辑(can_operate_problem 放行)却在列表
+    看不见自己创建的问题。
+    """
+    creator = await _user(db, name="creator")
+    other = await _user(db, name="other")
+    proj = await _project(db)
+    # 创建人创建,责任/验证/处置全指向别人 → 仍应可见
+    p_mine = await _problem(db, proj.id, duty=other.id, audit=other.id, created_by=creator.id)
+    await _problem(db, proj.id, duty=other.id, created_by=other.id)  # 别人创建 → 不可见
+    page = await ProblemService(db).list_problems(PageReq(page=1, page_size=100), user=creator)
+    assert page.total == 1
+    assert {p.id for p in page.items} == {p_mine.id}
+
+
 async def test_problem_export_respects_scope(db: AsyncSession) -> None:
     """AC-7:导出同步按范围过滤(防绕过)。"""
     admin = await _user(db, is_admin=True)

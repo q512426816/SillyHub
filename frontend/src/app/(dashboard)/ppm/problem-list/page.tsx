@@ -78,7 +78,8 @@ const IS_URGENT_OPTIONS = [
 export default function ProblemListPage() {
   const { user: currentUser } = useSession();
   const currentUserId = currentUser?.id ?? "";
-  const [view, setView] = useState<"mine" | "all">("mine");
+  // 归属:默认「全部」(ql-20260722 调整,不再默认只看我的)
+  const [view, setView] = useState<"mine" | "all">("all");
 
   const [items, setItems] = useState<ProblemList[]>([]);
   const [total, setTotal] = useState(0);
@@ -135,8 +136,9 @@ export default function ProblemListPage() {
           find_time_start: dateRange?.[0]?.startOf("day")?.toISOString(),
           find_time_end: dateRange?.[1]?.endOf("day")?.toISOString(),
           duty_user_id: view === "mine" ? currentUserId : undefined,
-          order_by: "created_at",
-          order: "desc",
+          // 默认按计划开始时间正序 (ql-20260722);计划开始时间为空的排最后
+          order_by: "plan_start_time",
+          order: "asc",
         });
         setItems(resp.items);
         setTotal(resp.total);
@@ -246,30 +248,35 @@ export default function ProblemListPage() {
     });
   };
 
+  // 责任人&处置人 合并列显示规则 (ql-20260722):
+  //  - 处置人为空         → 只显示责任人
+  //  - 责任人 == 处置人    → 只显示一个
+  //  - 两者不一致           → 显示「责任人 & 处置人」
+  const renderDutyHandle = (p: ProblemList) => {
+    const duty = p.duty_user_name ?? (p.duty_user_id ? p.duty_user_id : "待指派");
+    const handle = p.now_handle_user_name ?? (p.now_handle_user ? p.now_handle_user : null);
+    const same =
+      handle != null &&
+      (p.now_handle_user === p.duty_user_id ||
+        (!!p.now_handle_user_name && p.now_handle_user_name === p.duty_user_name));
+    if (!handle || same) {
+      return <span>{duty}</span>;
+    }
+    return (
+      <span>
+        {duty}
+        <span className="mx-1 text-muted-foreground">&amp;</span>
+        {handle}
+      </span>
+    );
+  };
+
   const columns: TableProps<ProblemList>["columns"] = [
     {
       title: "序号",
       key: "rowno",
       width: 60,
       render: (_v, _t: ProblemList, idx: number) => idx + 1,
-    },
-    {
-      title: "责任人",
-      dataIndex: "duty_user_name",
-      key: "duty_user_name",
-      width: 100,
-      ellipsis: true,
-      render: (v: string | null, p: ProblemList) =>
-        v ?? (p.duty_user_id ? p.duty_user_id : "待指派"),
-    },
-    {
-      title: "处置人",
-      dataIndex: "now_handle_user_name",
-      key: "now_handle_user_name",
-      width: 100,
-      ellipsis: true,
-      render: (v: string | null, p: ProblemList) =>
-        v ?? (p.now_handle_user ? p.now_handle_user : "—"),
     },
     {
       title: "项目",
@@ -280,26 +287,10 @@ export default function ProblemListPage() {
       render: (v: string | null, p: ProblemList) => v ?? p.project_id ?? "—",
     },
     {
-      title: "模块名称",
+      title: "模块",
       dataIndex: "model_name",
       key: "model_name",
-      width: 120,
-      ellipsis: true,
-      render: (v: string | null) => v ?? "—",
-    },
-    {
-      title: "问题描述",
-      dataIndex: "pro_desc",
-      key: "pro_desc",
-      width: 180,
-      ellipsis: true,
-      render: (v: string | null) => v ?? "—",
-    },
-    {
-      title: "功能名称",
-      dataIndex: "func_name",
-      key: "func_name",
-      width: 120,
+      width: 110,
       ellipsis: true,
       render: (v: string | null) => v ?? "—",
     },
@@ -307,58 +298,70 @@ export default function ProblemListPage() {
       title: "问题类型",
       dataIndex: "pro_type",
       key: "pro_type",
-      width: 100,
+      width: 90,
+      // bug 标红 (ql-20260722)
       render: (v: string | null) =>
         v ? (
-          <Tag>{PROBLEM_TYPE_TEXT[v] ?? v}</Tag>
+          <Tag color={v === "bug" ? "red" : "default"}>
+            {PROBLEM_TYPE_TEXT[v] ?? v}
+          </Tag>
         ) : (
           <span className="text-xs text-muted-foreground">—</span>
         ),
     },
     {
-      title: "紧急",
-      dataIndex: "is_urgent",
-      key: "is_urgent",
-      width: 70,
-      render: (v: string | null) =>
-        v === "1" || v === "是" ? <Tag color="red">急</Tag> : "否",
-    },
-    {
-      title: "发现人",
-      dataIndex: "find_by",
-      key: "find_by",
-      width: 100,
+      title: "功能名称",
+      dataIndex: "func_name",
+      key: "func_name",
+      width: 110,
       ellipsis: true,
       render: (v: string | null) => v ?? "—",
     },
     {
-      title: "发现日期",
-      dataIndex: "find_time",
-      key: "find_time",
-      width: 120,
-      render: (v: string | null) =>
-        v ? v.slice(0, 10) : <span className="text-xs text-muted-foreground">—</span>,
-    },
-    {
-      title: "工作量(人/天)",
-      dataIndex: "work_load",
-      key: "work_load",
-      width: 130,
+      title: "问题描述",
+      dataIndex: "pro_desc",
+      key: "pro_desc",
+      width: 170,
+      ellipsis: true,
       render: (v: string | null) => v ?? "—",
     },
     {
-      title: "已消耗(人天)",
-      dataIndex: "spent_time",
-      key: "spent_time",
-      width: 110,
-      render: (v: number | null | undefined, p: ProblemList) => {
-        if (v == null || v <= 0) {
-          return <span className="text-xs text-muted-foreground">—</span>;
-        }
-        const over = isOverEstimate(v, p.work_load);
+      title: "责任人&处置人",
+      key: "duty_handle",
+      width: 150,
+      ellipsis: true,
+      render: (_v: unknown, p: ProblemList) => renderDutyHandle(p),
+    },
+    {
+      title: "紧急",
+      dataIndex: "is_urgent",
+      key: "is_urgent",
+      width: 60,
+      render: (v: string | null) =>
+        v === "1" || v === "是" ? <Tag color="red">急</Tag> : "否",
+    },
+    {
+      title: "预估/已消耗(人天)",
+      key: "estimate_spent",
+      width: 140,
+      render: (_v: unknown, p: ProblemList) => {
+        const estimate = p.work_load ?? "—";
+        const spent = p.spent_time;
+        const showSpent = spent != null && spent > 0;
+        const over = showSpent && isOverEstimate(spent, p.work_load);
         return (
-          <span className={`${over ? "text-destructive" : "text-success"} font-medium`}>
-            {v} 人天
+          <span>
+            <span>{estimate}</span>
+            <span className="mx-1 text-muted-foreground">/</span>
+            {showSpent ? (
+              <span
+                className={`${over ? "text-destructive" : "text-success"} font-medium`}
+              >
+                {spent}
+              </span>
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )}
           </span>
         );
       },
@@ -366,19 +369,59 @@ export default function ProblemListPage() {
     {
       title: "计划起止",
       key: "plan",
-      width: 200,
+      width: 180,
       render: (_v: unknown, p: ProblemList) =>
         `${p.plan_start_time?.slice(0, 10) ?? "?"} ~ ${p.plan_end_time?.slice(0, 10) ?? "?"}`,
     },
     {
       title: "状态",
       key: "status",
-      width: 100,
+      width: 90,
       render: (_v: unknown, p: ProblemList) => (
         <Tag color={PROBLEM_STATUS_COLOR[p.status] ?? "default"}>
           {PROBLEM_STATUS_TEXT[p.status] ?? p.status}
         </Tag>
       ),
+    },
+    {
+      title: "发现人",
+      dataIndex: "find_by",
+      key: "find_by",
+      width: 90,
+      ellipsis: true,
+      render: (v: string | null) => v ?? "—",
+    },
+    {
+      title: "发现时间",
+      dataIndex: "find_time",
+      key: "find_time",
+      width: 110,
+      render: (v: string | null) =>
+        v ? v.slice(0, 10) : <span className="text-xs text-muted-foreground">—</span>,
+    },
+    {
+      title: "问题答复/解答",
+      dataIndex: "pro_answer",
+      key: "pro_answer",
+      width: 150,
+      ellipsis: true,
+      render: (v: string | null) => v ?? "—",
+    },
+    {
+      title: "验证人",
+      dataIndex: "audit_user_name",
+      key: "audit_user_name",
+      width: 90,
+      ellipsis: true,
+      render: (v: string | null) => v ?? "—",
+    },
+    {
+      title: "备注",
+      dataIndex: "remarks",
+      key: "remarks",
+      width: 140,
+      ellipsis: true,
+      render: (v: string | null) => v ?? "—",
     },
     {
       title: "操作",
@@ -516,20 +559,21 @@ export default function ProblemListPage() {
               }}
             />
           </Field>
-          <Field label="问题类型">
-            <Select<string>
-              className="w-full"
-              placeholder="全部类型"
-              value={proTypeFilter || undefined}
-              onChange={(v) => {
-                setProTypeFilter(v ?? "");
-                setSearchNonce((n) => n + 1);
-              }}
-              options={PRO_TYPE_OPTIONS}
-            />
-          </Field>
           {expanded && (
             <>
+              {/* 问题类型移入展开区 (ql-20260722):默认收起,减少首屏条件 */}
+              <Field label="问题类型">
+                <Select<string>
+                  className="w-full"
+                  placeholder="全部类型"
+                  value={proTypeFilter || undefined}
+                  onChange={(v) => {
+                    setProTypeFilter(v ?? "");
+                    setSearchNonce((n) => n + 1);
+                  }}
+                  options={PRO_TYPE_OPTIONS}
+                />
+              </Field>
               <Field label="是否紧急">
                 <Select<string>
                   className="w-full"

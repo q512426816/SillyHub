@@ -47,6 +47,7 @@ from app.modules.ppm.problem.schema import (
 )
 from app.modules.ppm.problem.service import (
     ProblemService,
+    _safe_uuid,
 )
 from app.modules.ppm.task.model import TaskExecute
 from app.modules.ppm.task.schema import TaskExecuteResponse
@@ -119,12 +120,49 @@ async def list_problems(
     # 批量计算编辑/删除放行 (2026-07-20 权限改造), 前端按钮只读 can_edit/can_delete
     svc = ProblemService(session)
     can_map = await svc.compute_can_operate(page.items, user)
+    # 回填处置人显示名:now_handle_user 是 String(逗号分隔)仅存 id,name 常为 NULL
+    # (编辑表单只回传 id)。此处按 id 反查 user.display_name 补全,保证列表
+    # 「责任人&处置人」合并列展示姓名而非 UUID。历史 migrate 数据带 name 不重复查。
+    need_handle = [
+        i.now_handle_user
+        for i in page.items
+        if not i.now_handle_user_name and i.now_handle_user and "," not in i.now_handle_user
+    ]
+    handle_map: dict[str, str | None] = {}
+    if need_handle:
+        valid_ids = [uid for raw in need_handle if (uid := _safe_uuid(raw)) is not None]
+        if valid_ids:
+            rows = (
+                await session.execute(
+                    select(User.id, User.display_name).where(User.id.in_(valid_ids))
+                )
+            ).all()
+            handle_map = {str(uid): name for uid, name in rows}
+    # 创建人显示名:created_by 仅存 id,name 不落库,详情页展示创建人需反查
+    # (批量,与处置人合并同一趟 user 查询减少往返)
+    creator_ids = list({i.created_by for i in page.items if i.created_by is not None})
+    creator_map: dict[uuid.UUID, str | None] = {}
+    if creator_ids:
+        rows = (
+            await session.execute(
+                select(User.id, User.display_name).where(User.id.in_(creator_ids))
+            )
+        ).all()
+        creator_map = {uid: name for uid, name in rows}
     items = []
     for i in page.items:
         resp = ProblemListResp.model_validate(i)
         resp.spent_time = spent_map.get(i.id, 0.0)
         resp.can_edit = can_map.get(i.id, False)
         resp.can_delete = can_map.get(i.id, False)
+        if (
+            not resp.now_handle_user_name
+            and resp.now_handle_user
+            and "," not in resp.now_handle_user
+        ):
+            resp.now_handle_user_name = handle_map.get(resp.now_handle_user)
+        if i.created_by is not None:
+            resp.created_by_name = creator_map.get(i.created_by)
         items.append(resp)
     return Page.build(items=items, total=page.total, req=req)
 
@@ -202,6 +240,10 @@ async def get_problem(
     can_map = await svc.compute_can_operate([obj], user)
     resp.can_edit = can_map.get(obj.id, False)
     resp.can_delete = can_map.get(obj.id, False)
+    # 创建人显示名 (详情页展示创建人用)
+    if obj.created_by is not None:
+        creator = await session.get(User, obj.created_by)
+        resp.created_by_name = creator.display_name if creator else None
     return resp
 
 

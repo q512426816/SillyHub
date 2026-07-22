@@ -104,6 +104,9 @@ class ProblemListResp(ProblemListBase):
     # 由 router 调 service.compute_can_operate 填充, 非 ORM 映射。
     can_edit: bool = False
     can_delete: bool = False
+    # 创建人显示名 (router 按 created_by 反查 display_name 填充, 历史 created_by
+    # 为 NULL 时显示 None; 详情页展示创建人用, 非 ORM 映射)
+    created_by_name: str | None = None
 
     model_config = {"from_attributes": True}
 

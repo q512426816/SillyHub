@@ -27,7 +27,10 @@ import {
 import dayjs, { type Dayjs } from "dayjs";
 
 import { PpmFileUrls } from "@/components/ppm-file-urls";
-import { PpmUserSelect } from "@/components/ppm-user-select";
+import {
+  PpmUserSelect,
+  type PpmSelectOption,
+} from "@/components/ppm-user-select";
 import { ApiError } from "@/lib/api";
 import { errMessage } from "@/lib/errors";
 import {
@@ -139,6 +142,9 @@ export function ProblemCreateForm({
     problem?.file_urls ?? [],
   );
   const [planEndTouched, setPlanEndTouched] = useState(false);
+  // 处置人下拉选项缓存:提交时按选中 id 反查 user_name 一并回传,
+  // 否则 now_handle_user_name 恒为 null,列表「责任人&处置人」只能显示 UUID。
+  const [handleOptions, setHandleOptions] = useState<PpmSelectOption[]>([]);
   // 关联模块下拉:按当前项目反查 (module_id 用,避免手输 UUID 触发 422)。
   const [modules, setModules] = useState<ModuleSimpleItem[]>([]);
 
@@ -261,6 +267,10 @@ export function ProblemCreateForm({
           work_type: payload.work_type,
           duty_user_id: payload.duty_user_id,
           now_handle_user: v.now_handle_user ?? null,
+          // 处置人 name 随 id 一并回传(后端不再单独反查处置人)
+          now_handle_user_name:
+            handleOptions.find((o) => o.value === v.now_handle_user)?.label ??
+            null,
           plan_start_time: payload.plan_start_time,
           plan_end_time: payload.plan_end_time,
           audit_user_id: payload.audit_user_id,
@@ -281,6 +291,26 @@ export function ProblemCreateForm({
       setBusy(false);
     }
   };
+
+  // 处置人下拉选项:编辑时当前处置人可能不在当前项目成员列表里,
+  // 手动补一条保证回填显示姓名(而不是 UUID)。
+  const mergedHandleOptions = useMemo<PpmSelectOption[]>(() => {
+    if (problem?.now_handle_user && problem?.now_handle_user_name) {
+      const exists = handleOptions.some(
+        (o) => o.value === problem.now_handle_user,
+      );
+      if (!exists) {
+        return [
+          ...handleOptions,
+          {
+            value: problem.now_handle_user,
+            label: problem.now_handle_user_name,
+          },
+        ];
+      }
+    }
+    return handleOptions;
+  }, [handleOptions, problem?.now_handle_user, problem?.now_handle_user_name]);
 
   const dutySearchData = useMemo(
     () => ({
@@ -428,6 +458,8 @@ export function ProblemCreateForm({
             res="projectMember"
             searchData={{ pm_project_id: projectId ?? null }}
             placeholder="请选择处置人（可选）"
+            onLoadedOptions={setHandleOptions}
+            extraOptions={mergedHandleOptions}
           />
         </Form.Item>
       )}

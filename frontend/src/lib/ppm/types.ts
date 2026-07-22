@@ -370,6 +370,10 @@ export interface PsProjectPlan {
   create_name: string | null;
   created_at: string;
   updated_at: string;
+  /** 后端集中判断的编辑放行 (超管‖创建人‖本项目经理, 按项目成员角色), 前端只读 */
+  can_edit?: boolean;
+  /** 后端集中判断的删除放行 (同 can_edit), 前端只读 */
+  can_delete?: boolean;
 }
 
 export interface PsProjectPlanCreate {
@@ -721,6 +725,8 @@ export interface ProblemList {
   work_type: string | null;
   /** 创建人 ID (编辑/删除权限判断依据之一; 历史数据 null) */
   created_by: string | null;
+  /** 创建人显示名 (后端按 created_by 反查填充; 详情页展示用) */
+  created_by_name?: string | null;
   duty_user_id: string | null;
   duty_user_name: string | null;
   plan_start_time: string | null;

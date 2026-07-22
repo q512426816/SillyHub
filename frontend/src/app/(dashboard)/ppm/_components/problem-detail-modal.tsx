@@ -258,6 +258,11 @@ export function ProblemDetailModal({
           </div>
           <div><span className="text-muted-foreground">责任人：</span>{problem.duty_user_name ?? "—"}</div>
           <div><span className="text-muted-foreground">验证人：</span>{problem.audit_user_name ?? "—"}</div>
+          <div><span className="text-muted-foreground">创建人：</span>{problem.created_by_name ?? "—"}</div>
+          <div>
+            <span className="text-muted-foreground">创建时间：</span>
+            {problem.created_at ? dayjs(problem.created_at).format("YYYY-MM-DD HH:mm:ss") : "—"}
+          </div>
           <div className="col-span-2">
             <span className="text-muted-foreground">计划时间：</span>
             {problem.plan_start_time ? fmtDay(problem.plan_start_time) : "—"} ~{" "}

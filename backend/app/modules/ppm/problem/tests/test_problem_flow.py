@@ -288,6 +288,58 @@ class TestCrud:
         fresh = await svc.get_problem(p.id)
         assert fresh.pro_desc == "发现一个 bug"
 
+    async def test_list_problems_sort_by_plan_start_time_asc(
+        self, db_session: AsyncSession
+    ) -> None:
+        """列表按计划开始时间正序 (ql-20260722):plan_start_time 已入排序白名单。
+
+        建 3 条问题,plan_start_time 分别早/中/晚,但创建顺序相反,
+        断言返回顺序按计划开始时间升序(早→晚),非创建顺序。
+        """
+        from app.modules.ppm.common.crud import PageReq
+
+        svc = ProblemService(db_session)
+        proj_id = await _make_project(db_session)
+
+        async def _mk(plan_start: str, desc: str) -> None:
+            await svc.create_problem(
+                {
+                    "project_id": proj_id,
+                    "project_name": "项目甲",
+                    "pro_desc": desc,
+                    "plan_start_time": datetime.fromisoformat(plan_start).replace(tzinfo=UTC),
+                }
+            )
+
+        # 创建顺序与计划开始顺序相反(晚→早)
+        await _mk("2026-07-25T00:00:00", "最晚")
+        await _mk("2026-07-20T00:00:00", "中间")
+        await _mk("2026-07-15T00:00:00", "最早")
+
+        req = PageReq(page=1, page_size=10, order_by="plan_start_time", order="asc")
+        page = await svc.list_problems(req)
+        descs = [i.pro_desc for i in page.items]
+        assert descs == ["最早", "中间", "最晚"]
+
+    async def test_list_problems_rejects_unknown_order_field(
+        self, db_session: AsyncSession
+    ) -> None:
+        """排序白名单外的字段静默降级(不排序不报错),plan_start_time 已合法。"""
+        from app.modules.ppm.common.crud import PageReq
+
+        svc = ProblemService(db_session)
+        proj_id = await _make_project(db_session)
+        await _make_problem(svc, proj_id)
+
+        # 非法字段 → 忽略排序,正常返回
+        bad = PageReq(page=1, page_size=10, order_by="pro_desc", order="asc")
+        page = await svc.list_problems(bad)
+        assert page.total == 1
+        # 合法字段 plan_start_time → 不报错
+        ok = PageReq(page=1, page_size=10, order_by="plan_start_time", order="desc")
+        page2 = await svc.list_problems(ok)
+        assert page2.total == 1
+
     async def test_create_change_backfills_empty_names(self, db_session: AsyncSession) -> None:
         """变更创建同样回填 project_name/duty_user_name。"""
         import uuid as _uuid

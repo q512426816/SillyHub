@@ -8,14 +8,12 @@
  *  - 状态筛选(未开始/进行中/已完成)→ store.filters.status
  *  - 项目筛选(PpmUserSelect res=project)→ store.filters.project_id
  *  - 关键词输入 → store.filters.keyword
- *  - 截止时间范围(RangePicker)→ store.filters.start_date/end_date
  *  - 顶部按钮:重置
  *
  * 任一筛选变化即 setFilters + 触发 store.fetchUsers/fetchTasks。
  */
-import { Button, DatePicker, Input, Select } from "antd";
+import { Button, Input, Select } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
-import dayjs, { type Dayjs } from "dayjs";
 import type { ReactNode } from "react";
 
 import { PpmUserSelect } from "@/components/ppm-user-select";
@@ -67,23 +65,6 @@ export function KanbanSearchBar() {
   };
 
   const onKeywordChange = (v: string) => setFilters({ keyword: v || undefined });
-
-  // 日期范围筛选(按 deadline/截止日期过滤)
-  const dateValue: [Dayjs | null, Dayjs | null] | null = (() => {
-    if (!filters.start_date && !filters.end_date) return null;
-    return [
-      filters.start_date ? dayjs(filters.start_date) : null,
-      filters.end_date ? dayjs(filters.end_date) : null,
-    ];
-  })();
-
-  const onDateChange = async (range: [Dayjs | null, Dayjs | null] | null) => {
-    setFilters({
-      start_date: range?.[0]?.format("YYYY-MM-DD") ?? undefined,
-      end_date: range?.[1]?.format("YYYY-MM-DD") ?? undefined,
-    });
-    await applyAndRefresh();
-  };
 
   const onSearch = async () => {
     await applyAndRefresh();
@@ -143,17 +124,6 @@ export function KanbanSearchBar() {
             value={filters.keyword ?? ""}
             onChange={(e) => onKeywordChange(e.target.value)}
             onPressEnter={onSearch}
-          />
-        </Field>
-        <Field label="截止时间">
-          <DatePicker.RangePicker
-            className="w-full"
-            allowClear
-            placeholder={["截止开始", "截止结束"]}
-            value={dateValue ?? undefined}
-            onChange={(range) =>
-              onDateChange(range as [Dayjs | null, Dayjs | null] | null)
-            }
           />
         </Field>
       </div>

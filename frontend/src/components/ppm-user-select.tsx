@@ -74,6 +74,11 @@ export interface PpmUserSelectProps {
   style?: React.CSSProperties;
   /** 拉到选项后回调(供 task-03 联动回填)。 */
   onLoadedOptions?: (options: PpmSelectOption[]) => void;
+  /**
+   * 额外并入的选项(编辑回填场景:当前选中项不在服务端选项里时,
+   * 由调用方补一条保证 label 显示姓名而非 value)。按 value 去重。
+   */
+  extraOptions?: PpmSelectOption[];
   /** 服务端分页大小(user/role 生效)。默认 20。 */
   pageSize?: number;
 }
@@ -218,6 +223,7 @@ export function PpmUserSelect(props: PpmUserSelectProps) {
     allowClear = true,
     style,
     onLoadedOptions,
+    extraOptions,
     pageSize = 20,
   } = props;
 
@@ -300,18 +306,27 @@ export function PpmUserSelect(props: PpmUserSelectProps) {
     return Array.isArray(value) ? value.filter((v) => v != null) : [value];
   }, [value]);
 
+  // 先并入调用方提供的 extraOptions(编辑回填姓名),再按 value 补占位。
+  const baseOptions = useMemo<PpmSelectOption[]>(
+    () =>
+      extraOptions && extraOptions.length > 0
+        ? dedupeOptions([...options, ...extraOptions])
+        : options,
+    [options, extraOptions],
+  );
+
   const mergedOptions = useMemo<PpmSelectOption[]>(() => {
-    if (valueArr.length === 0) return options;
-    const known = new Set(options.map((o) => o.value));
+    if (valueArr.length === 0) return baseOptions;
+    const known = new Set(baseOptions.map((o) => o.value));
     const missing = valueArr.filter((v) => !known.has(v));
-    if (missing.length === 0) return options;
+    if (missing.length === 0) return baseOptions;
     // 为缺失 value 补占位 option(label 用 value 兜底,展示不至于空白)。
     const placeholders: PpmSelectOption[] = missing.map((v) => ({
       value: v,
       label: v,
     }));
-    return dedupeOptions([...options, ...placeholders]);
-  }, [options, valueArr]);
+    return dedupeOptions([...baseOptions, ...placeholders]);
+  }, [baseOptions, valueArr]);
 
   // 已选值缺失补全(res=user):已选 user_id 不在已加载 options(分页只取部分)时,
   // 按 id 批量查真实姓名回填 label,避免"姓名"字段回退显示 id。
