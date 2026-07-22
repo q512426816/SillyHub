@@ -205,6 +205,9 @@ class PpmProjectMember(BaseModel, table=True):
             "user_id",
             unique=True,
         ),
+        # 性能优化 Wave 1(2026-07-22):data_scope.manager_project_ids() 按 user_id
+        # 查询的 leading 索引(复合唯一索引 leading 是 pm_project_id 用不上)。
+        Index("ix_ppm_project_member_user", "user_id"),
     )
 
     id: uuid.UUID = Field(

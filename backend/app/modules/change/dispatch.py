@@ -7,6 +7,7 @@ defining how the agent should be invoked.
 
 from __future__ import annotations
 
+import functools
 import json
 import sqlite3
 import uuid
@@ -2156,19 +2157,29 @@ class SillySpecStageDispatchService:
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 
+@functools.cache
+def _read_prompt_file(template_name: str) -> str:
+    """Read raw prompt template text (cached).
+
+    性能优化 Wave 2 / C6-2:模板部署后不可变,lru_cache 避免每次 stage dispatch
+    重读盘。仅缓存"读取"——渲染(context 替换)在 load_prompt_template 做,因
+    context 是 dict 不可哈希、不能整体 lru_cache。
+    """
+    path = _PROMPTS_DIR / template_name
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        log.warning("prompt_template_not_found", template_name=template_name)
+        return ""
+
+
 def load_prompt_template(template_name: str, context: dict[str, Any] | None = None) -> str:
     """Load and render a prompt template.
 
     The template is a simple markdown file. ``{{variable}}`` placeholders
     are replaced with values from *context*.
     """
-    path = _PROMPTS_DIR / template_name
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        log.warning("prompt_template_not_found", template_name=template_name)
-        return ""
-
+    text = _read_prompt_file(template_name)
     if context:
         for key, value in context.items():
             text = text.replace(f"{{{{{key}}}}}", str(value))

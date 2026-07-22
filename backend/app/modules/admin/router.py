@@ -335,6 +335,81 @@ async def _user_with_relations(session: AsyncSession, user: User) -> UserRead:
     )
 
 
+async def _users_with_relations_bulk(session: AsyncSession, users: list[User]) -> list[UserRead]:
+    """批量装配多用户的 org/role(性能优化 Wave 2 / N1-3)。
+
+    N 用户固定 3 查询(org / platform-role / workspace-role 各一次 user_id IN ...),
+    替代原 list_users 里每用户调 _user_with_relations(每用户 3 查询)的 3N 次 N+1。
+    语义与单用户版一致:roles 按 role_id 去重(platform 优先)。
+    """
+    if not users:
+        return []
+    user_ids = [u.id for u in users]
+
+    org_pairs = (
+        await session.execute(
+            select(UserOrganization.__table__.c.user_id, Organization)
+            .join(
+                UserOrganization,
+                UserOrganization.__table__.c.organization_id == Organization.id,
+            )
+            .where(UserOrganization.__table__.c.user_id.in_(user_ids))
+        )
+    ).all()
+    org_by_user: dict[uuid.UUID, list[Organization]] = {}
+    for uid, org in org_pairs:
+        org_by_user.setdefault(uid, []).append(org)
+
+    plat_pairs = (
+        await session.execute(
+            select(UserRole.__table__.c.user_id, Role)
+            .join(UserRole, UserRole.__table__.c.role_id == Role.id)
+            .where(UserRole.__table__.c.user_id.in_(user_ids))
+        )
+    ).all()
+    plat_by_user: dict[uuid.UUID, list[Role]] = {}
+    for uid, role in plat_pairs:
+        plat_by_user.setdefault(uid, []).append(role)
+
+    ws_pairs = (
+        await session.execute(
+            select(UserWorkspaceRole.__table__.c.user_id, Role)
+            .join(UserWorkspaceRole, UserWorkspaceRole.__table__.c.role_id == Role.id)
+            .where(UserWorkspaceRole.__table__.c.user_id.in_(user_ids))
+        )
+    ).all()
+    ws_by_user: dict[uuid.UUID, list[Role]] = {}
+    for uid, role in ws_pairs:
+        ws_by_user.setdefault(uid, []).append(role)
+
+    result: list[UserRead] = []
+    for u in users:
+        merged: dict[uuid.UUID, Role] = {}
+        for r in plat_by_user.get(u.id, []):
+            merged[r.id] = r
+        for r in ws_by_user.get(u.id, []):
+            merged.setdefault(r.id, r)
+        result.append(
+            UserRead(
+                id=u.id,
+                email=u.email,
+                username=u.username,
+                display_name=u.display_name,
+                status=u.status,
+                is_platform_admin=u.is_platform_admin,
+                login_enabled=u.login_enabled,
+                last_login_at=u.last_login_at,
+                created_at=u.created_at,
+                organizations=[
+                    OrganizationBrief(id=o.id, name=o.name, code=o.code)
+                    for o in org_by_user.get(u.id, [])
+                ],
+                roles=[RoleBrief(id=r.id, key=r.key, name=r.name) for r in merged.values()],
+            )
+        )
+    return result
+
+
 @router.get(
     "/users",
     response_model=UserListResponse,
@@ -367,7 +442,7 @@ async def list_users(
         include_children=include_children,
         ids=ids,
     )
-    items = [await _user_with_relations(session, u) for u in rows]
+    items = await _users_with_relations_bulk(session, rows)
     return UserListResponse(items=items, total=total)
 
 

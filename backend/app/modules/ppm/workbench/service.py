@@ -12,7 +12,7 @@ import re
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.admin.model import Organization, UserOrganization
@@ -394,34 +394,34 @@ class WorkbenchService:
                 stmt = stmt.where(PlanTask.start_time >= start).where(PlanTask.start_time < end)
             return stmt
 
-        # task_count:区间内任务总数 (=分母)
-        count_stmt = _apply_range(select(PlanTask).where(PlanTask.user_id == user.id))
-        task_count = await self._session.scalar(
-            select(func.count()).select_from(count_stmt.subquery())
+        # 指标一次聚合 (性能优化 Wave 2 / E5-3:原 3 条 count roundtrip 合并为 1 条
+        # 条件聚合,配合 ix_ppm_plan_task_user_status 索引一次命中)。case 通用方言
+        # (SQLite/PG),比 PG FILTER 可移植。口径与原 task_count/completed/delayed
+        # 完全一致:total=区间内任务数;completed=status 已完成;delayed=end_time<now
+        # 且未完成 (D-010@v1)。
+        plan_agg = _apply_range(
+            select(
+                func.count().label("total"),
+                func.sum(case((PlanTask.status == "已完成", 1), else_=0)).label("completed"),
+                func.sum(
+                    case(
+                        (
+                            and_(
+                                PlanTask.end_time.is_not(None),
+                                PlanTask.end_time < now,
+                                PlanTask.status != "已完成",
+                            ),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ).label("delayed"),
+            ).where(PlanTask.user_id == user.id)
         )
-        task_count = int(task_count or 0)
-
-        # completed:区间内已完成数
-        completed_stmt = _apply_range(
-            select(PlanTask).where(PlanTask.user_id == user.id).where(PlanTask.status == "已完成")
-        )
-        completed = await self._session.scalar(
-            select(func.count()).select_from(completed_stmt.subquery())
-        )
-        completed = int(completed or 0)
-
-        # delayed:end_time 非空且早于 now 且未完成 (D-010@v1)
-        delayed_stmt = _apply_range(
-            select(PlanTask)
-            .where(PlanTask.user_id == user.id)
-            .where(PlanTask.end_time.is_not(None))
-            .where(PlanTask.end_time < now)
-            .where(PlanTask.status != "已完成")
-        )
-        delayed = await self._session.scalar(
-            select(func.count()).select_from(delayed_stmt.subquery())
-        )
-        delayed = int(delayed or 0)
+        row = (await self._session.execute(plan_agg)).one()
+        task_count = int(row.total or 0)
+        completed = int(row.completed or 0)
+        delayed = int(row.delayed or 0)
 
         completion_rate = completed / task_count if task_count else 0.0
         delay_rate = delayed / task_count if task_count else 0.0
@@ -446,13 +446,17 @@ class WorkbenchService:
         # 口径 (ql-20260721-003 用户确认):我负责 (duty_user_id=我) 或 我处理
         # (now_handle_user 逗号分隔含我) 任一即算"我的缺陷",与待办列表口径对齐
         # (原仅 duty_user_id=我,审批人/处理人非责任人时漏统计,致"缺陷数量"偏少)。
+        # now_handle_user 精确 token 匹配 (性能优化 Wave 2 / E5-6:原裸 like
+        # "%{uid}%" 有 UUID 前缀碰撞过计风险——改 concat(',',..,',') like '%,uid,%'
+        # 精确匹配,与 data_scope.problem_scope_clause 口径一致)。
+        defect_handle = func.concat(",", func.coalesce(PpmProblemList.now_handle_user, ""), ",")
         defect_stmt = (
             select(PpmProblemList)
             .where(PpmProblemList.status != "已完成")
             .where(
                 or_(
                     PpmProblemList.duty_user_id == user.id,
-                    PpmProblemList.now_handle_user.like(f"%{user.id}%"),
+                    defect_handle.like(f"%,{user.id},%"),
                 )
             )
         )
@@ -483,15 +487,19 @@ class WorkbenchService:
         uid_str = str(user.id)
 
         # ① 问题待办:当前处理人(now_handle_user)含我即显示,不限责任人 duty_user_id
-        # (duty 是责任人,审批人非责任人时也需看到待办;R-02 Python split 方言安全)
-        problem_stmt = select(PpmProblemList)
-        problem_rows = (await self._session.execute(problem_stmt)).scalars().all()
-        for p in problem_rows:
-            if p.status == "已完成":
-                continue
-            handle_users = (p.now_handle_user or "").split(",")
-            if uid_str not in handle_users:
-                continue
+        # (duty 是责任人,审批人非责任人时也需看到待办)。
+        # 性能优化 Wave 2 / E5-1:原 select(PpmProblemList) 无 where 全表拉取后
+        # Python 过滤,改 SQL where 下推(status != 已完成 + now_handle_user 精确
+        # token 含我),走索引消除全表扫描。精确 token 用 concat(',',..,',')
+        # like '%,uid,%',与原 Python split 语义一致(防 UUID 子串误匹配)。
+        uid_csv = f"%,{uid_str},%"
+        problem_handle = func.concat(",", func.coalesce(PpmProblemList.now_handle_user, ""), ",")
+        problem_stmt = (
+            select(PpmProblemList)
+            .where(PpmProblemList.status != "已完成")
+            .where(problem_handle.like(uid_csv))
+        )
+        for p in (await self._session.execute(problem_stmt)).scalars().all():
             todos.append(
                 WorkbenchTodoItem(
                     id=str(p.id),
@@ -502,14 +510,14 @@ class WorkbenchService:
             )
 
         # ② 问题变更待审批:status="1" 审核中 (ProblemChangeStatus.AUDITING,
-        # problem/fsm.py) 且 now_handle_user split 含我 (R-02 方言安全,
-        # 与问题清单分支同构)
-        change_stmt = select(PpmProblemChange).where(PpmProblemChange.status == "1")
-        change_rows = (await self._session.execute(change_stmt)).scalars().all()
-        for c in change_rows:
-            handle_users = (c.now_handle_user or "").split(",")
-            if uid_str not in handle_users:
-                continue
+        # problem/fsm.py) 且 now_handle_user 含我。同 ① 下推 SQL where。
+        change_handle = func.concat(",", func.coalesce(PpmProblemChange.now_handle_user, ""), ",")
+        change_stmt = (
+            select(PpmProblemChange)
+            .where(PpmProblemChange.status == "1")
+            .where(change_handle.like(uid_csv))
+        )
+        for c in (await self._session.execute(change_stmt)).scalars().all():
             todos.append(
                 WorkbenchTodoItem(
                     id=str(c.id),

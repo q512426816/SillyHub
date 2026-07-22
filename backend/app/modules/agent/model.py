@@ -51,6 +51,14 @@ class AgentRun(BaseModel, table=True):
             "context_fingerprint",
             postgresql_where=text("context_fingerprint IS NOT NULL"),
         ),
+        # 性能优化 Wave 1(2026-07-22 系统性能审计):status reconcile/listing 高频过滤
+        # + created_at 列表排序(见迁移 202607222330)。
+        Index("ix_agent_runs_status", "status"),
+        Index("ix_agent_runs_created_at", "created_at"),
+        # 多 agent 编排索引(迁移 202607060900 建,此前漏声明致 model↔迁移漂移,
+        # autogenerate 会误生成 drop_index;补声明对齐,无 DB 改动)。
+        Index("ix_agent_runs_mission_id", "mission_id"),
+        Index("ix_agent_runs_parent_run_id", "parent_run_id"),
     )
 
     id: uuid.UUID = Field(
@@ -410,6 +418,8 @@ class AgentSession(BaseModel, table=True):
         Index("ix_agent_sessions_lease_id", "lease_id"),
         Index("ix_agent_sessions_change_id", "change_id"),
         Index("ix_agent_sessions_deleted_at", "deleted_at"),
+        # 性能优化 Wave 1(2026-07-22):change/workspace 维度 session listing 兜底查询。
+        Index("ix_agent_sessions_workspace", "workspace_id"),
     )
 
     id: uuid.UUID = Field(

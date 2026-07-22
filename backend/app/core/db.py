@@ -32,6 +32,31 @@ _MAX_OVERFLOW: Final[int] = 30
 _POOL_TIMEOUT: Final[float] = 30.0
 _POOL_RECYCLE: Final[int] = 300  # 5 min — reclaim leaked/stale slots faster
 
+# 性能优化 Wave 1(2026-07-22 系统性能审计):会话级超时,防失控全表扫描/泄漏事务
+# 占满共享连接池(配合本次补的缺失索引,慢查会被快速中断而非无限挂住连接)。
+# 仅 asyncpg(PG)生效;aiosqlite(测试)忽略。单位毫秒。
+_STATEMENT_TIMEOUT_MS: Final[str] = "30000"  # 30s — 单条语句上限
+_IDLE_IN_TXN_TIMEOUT_MS: Final[str] = "10000"  # 10s — 空闲事务(开了事务未提交)
+_LOCK_TIMEOUT_MS: Final[str] = "5000"  # 5s — 拿锁等待上限(fail fast)
+
+
+def _build_connect_args(database_url: str) -> dict:
+    """Return asyncpg ``server_settings`` for PG; empty for SQLite (tests).
+
+    ``server_settings`` 在 asyncpg 连接建立时下发为 ``SET`` 等价会话参数,对所有
+    该连接上的语句生效。aiosqlite 不认这些参数,故按方言分支(传错会连接报错)。
+    """
+    url = str(database_url)
+    if url.startswith("postgresql"):
+        return {
+            "server_settings": {
+                "statement_timeout": _STATEMENT_TIMEOUT_MS,
+                "idle_in_transaction_session_timeout": _IDLE_IN_TXN_TIMEOUT_MS,
+                "lock_timeout": _LOCK_TIMEOUT_MS,
+            }
+        }
+    return {}
+
 
 def get_engine() -> AsyncEngine:
     """Return (and lazily create) the process-wide async engine."""
@@ -45,6 +70,7 @@ def get_engine() -> AsyncEngine:
             pool_timeout=_POOL_TIMEOUT,
             pool_recycle=_POOL_RECYCLE,
             pool_pre_ping=True,
+            connect_args=_build_connect_args(settings.database_url),
             future=True,
         )
     return _engine

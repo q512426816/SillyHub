@@ -694,12 +694,19 @@ class LeaseService:
         """Get a task lease by ID."""
         return await self._session.get(DaemonTaskLease, lease_id)
 
-    async def list_leases(self, runtime_id: uuid.UUID) -> list[DaemonTaskLease]:
-        """List all leases for a given daemon runtime."""
+    async def list_leases(
+        self, runtime_id: uuid.UUID, *, limit: int = 200
+    ) -> list[DaemonTaskLease]:
+        """List leases for a given daemon runtime.
+
+        性能优化 Wave 2 / P3-3:加 limit 防止 lease 历史无界增长导致全量返回
+        (created_at desc 取最近 N 条)。
+        """
         stmt = (
             select(DaemonTaskLease)
             .where(col(DaemonTaskLease.runtime_id) == runtime_id)
             .order_by(col(DaemonTaskLease.created_at).desc())
+            .limit(limit)
         )
         return list((await self._session.execute(stmt)).scalars().all())
 

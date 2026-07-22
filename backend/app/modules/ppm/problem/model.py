@@ -65,6 +65,10 @@ class PpmProblemList(BaseModel, table=True):
         Index("ix_ppm_problem_list_project", "project_id"),
         Index("ix_ppm_problem_list_status", "status"),
         Index("ix_ppm_problem_list_now_node", "now_node"),
+        # 性能优化 Wave 1(2026-07-22):data_scope.problem_scope_clause 的
+        # 创建人/责任人 OR 分支过滤。
+        Index("ix_ppm_problem_list_created_by", "created_by"),
+        Index("ix_ppm_problem_list_duty_user", "duty_user_id"),
     )
 
     id: uuid.UUID = Field(

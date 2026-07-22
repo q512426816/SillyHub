@@ -182,6 +182,8 @@ class PsProjectPlan(BaseModel, table=True):
     __table_args__ = (
         Index("ix_ppm_ps_project_plan_project", "project_id"),
         Index("ix_ppm_ps_project_plan_status", "status"),
+        # 性能优化 Wave 1(2026-07-22):data_scope.build_plan_scope_clause 创建人分支。
+        Index("ix_ppm_ps_project_plan_created_by", "created_by"),
     )
 
     id: uuid.UUID = Field(

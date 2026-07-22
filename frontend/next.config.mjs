@@ -5,6 +5,14 @@ const nextConfig = {
   poweredByHeader: false,
   experimental: {
     typedRoutes: true,
+    // 性能优化(2026-07-22):对这些重依赖的命名导入做模块级按需转换,减小 chunk
+    // 体积、加速构建。antd v6 / 图标 / xyflow 命名导入量大。
+    optimizePackageImports: [
+      "antd",
+      "@ant-design/icons",
+      "lucide-react",
+      "@xyflow/react",
+    ],
   },
   async rewrites() {
     const apiBaseUrl = (

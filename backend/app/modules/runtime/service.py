@@ -5,6 +5,7 @@ SillySpec v4 uses ``sillyspec.db`` (SQLite) as the canonical state source.
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 import uuid
 from datetime import datetime
@@ -102,7 +103,9 @@ class RuntimeService:
         # read_file 返 str 不能传二进制 sqlite db，扩接口超出 task-12 allowed_paths）。
         db_path = resolver.db_path()
         if db_path.is_file():
-            return self._read_sqlite_progress(db_path, runtime_dir)
+            # 性能优化 Wave 2 / S1-4:sqlite3 直读是同步阻塞 IO,包 to_thread 避免
+            # 阻塞 event loop(_read_sqlite_progress 纯 sqlite3 读,不碰 async session)。
+            return await asyncio.to_thread(self._read_sqlite_progress, db_path, runtime_dir)
 
         return None
 

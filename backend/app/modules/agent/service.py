@@ -693,6 +693,9 @@ class AgentService:
         self,
         workspace_id: uuid.UUID,
         task_id: uuid.UUID | None = None,
+        *,
+        limit: int = 200,
+        offset: int = 0,
     ) -> list[AgentRun]:
         # Query via M:N association table
         arw_subq = select(AgentRunWorkspace.agent_run_id).where(
@@ -708,7 +711,9 @@ class AgentService:
             stmt = select(AgentRun).where(
                 col(AgentRun.id).in_(arw_subq),
             )
-        stmt = stmt.order_by(col(AgentRun.started_at).desc())
+        # 性能优化 Wave 2 / P3-2:加 limit/offset 防止大 workspace 全量返回
+        # (agent_runs 随执行无限增长)。默认 200 覆盖工作区 run 列表常态。
+        stmt = stmt.order_by(col(AgentRun.started_at).desc()).limit(limit).offset(offset)
         return list((await self._session.execute(stmt)).scalars().all())
 
     # ------------------------------------------------------------------
@@ -726,11 +731,29 @@ class AgentService:
         return data
 
     async def enrich_list(self, runs: list[AgentRun]) -> list[AgentRunResponse]:
-        """Build AgentRunResponse list with workspace_ids populated."""
+        """Build AgentRunResponse list with workspace_ids populated.
+
+        性能优化 Wave 2 / N1-1:批量取所有 run 的 workspace 关联(一次 IN 查询 +
+        内存按 run_id 分组),消除原逐 run SELECT AgentRunWorkspace 的 N+1。
+        """
+        if not runs:
+            return []
+        run_ids = [r.id for r in runs]
+        rows = (
+            await self._session.execute(
+                select(AgentRunWorkspace.agent_run_id, AgentRunWorkspace.workspace_id).where(
+                    col(AgentRunWorkspace.agent_run_id).in_(run_ids)
+                )
+            )
+        ).all()
+        ws_map: dict[uuid.UUID, list[uuid.UUID]] = {}
+        for run_id, ws_id in rows:
+            ws_map.setdefault(run_id, []).append(ws_id)
         result: list[AgentRunResponse] = []
         for r in runs:
-            enriched = await self.enrich_with_workspace_ids(r)
-            result.append(enriched)
+            data = AgentRunResponse.model_validate(r)
+            data.workspace_ids = ws_map.get(r.id, [])
+            result.append(data)
         return result
 
     async def get_run_logs(
@@ -738,6 +761,7 @@ class AgentService:
         run_id: uuid.UUID,
         *,
         tool_kind: str | None = None,
+        limit: int = 5000,
     ) -> list[AgentRunLog]:
         stmt = (
             select(AgentRunLog)
@@ -754,6 +778,10 @@ class AgentService:
                     col(AgentRunLog.channel) == "tool_call",
                     col(AgentRunLog.tool_kind).in_(kinds),
                 )
+        # 性能优化 Wave 2 / P3-1:加 limit 防止超长 run 全量加载 TEXT 大列
+        # (content_redacted)。order_by timestamp asc + 前端 SSE after=lastLogId
+        # 游标衔接,正常 run(<5000 行)全量可见,极端 run 保护性截断早期行。
+        stmt = stmt.limit(limit)
         return list((await self._session.execute(stmt)).scalars().all())
 
     async def list_workspace_active_sessions(

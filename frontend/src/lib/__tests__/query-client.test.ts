@@ -1,5 +1,5 @@
 // lib/__tests__/query-client.test.ts
-// task-04：makeQueryClient retry 策略 + freshness-first 默认值单测（D-002@v1）。
+// task-04：makeQueryClient retry 策略 + freshness-first 默认值单测（D-002@v2）。
 import { describe, expect, it } from "vitest";
 import { ApiError } from "@/lib/api";
 import { makeQueryClient } from "../query-client";
@@ -31,10 +31,10 @@ describe("makeQueryClient retry strategy (D-002@v1)", () => {
     expect(retry(0, null)).toBe(false);
   });
 });
-describe("freshness-first defaults (D-002@v1)", () => {
-  it("staleTime=0 refetchOnWindowFocus=true", () => {
+describe("freshness-first defaults (D-002@v2)", () => {
+  it("staleTime=15000 refetchOnWindowFocus=true", () => {
     const q = makeQueryClient().getDefaultOptions().queries!;
-    expect(q.staleTime).toBe(0);
+    expect(q.staleTime).toBe(15000);
     expect(q.refetchOnWindowFocus).toBe(true);
   });
   it("fresh instance each call (no module singleton, R-01)", () => {

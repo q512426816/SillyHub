@@ -139,6 +139,10 @@ class TaskExecute(BaseModel, table=True):
     __table_args__ = (
         Index("ix_ppm_task_execute_plan", "plan_task_id"),
         Index("ix_ppm_task_execute_problem", "problem_task_id"),
+        # 性能优化 Wave 1(2026-07-22):工作台「我的任务」+ 状态分组热路径,
+        # 覆盖按执行人+状态过滤(workbench/service、task/service 多处
+        # WHERE execute_user_id=? [AND status=?])。见 migration 202607222330。
+        Index("ix_ppm_task_execute_exec_status", "execute_user_id", "status"),
     )
 
     id: uuid.UUID = Field(

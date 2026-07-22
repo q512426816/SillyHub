@@ -1681,6 +1681,8 @@ class SessionService:
         self,
         session_id: uuid.UUID,
         user_id: uuid.UUID,
+        *,
+        limit: int = 5000,
     ) -> list[AgentRunLog]:
         """Return all AgentRunLog rows for an owned session, cross-run aggregate.
 
@@ -1744,5 +1746,9 @@ class SessionService:
                 AgentRunLog.timestamp.asc(),
                 AgentRunLog.id.asc(),
             )
+            # 性能优化 Wave 2 / P3-3:加 limit 防止长会话(N runs × M logs)全量
+            # 加载 TEXT 大列(content_redacted)。order_by anchor/timestamp asc
+            # 保持跨 run 时间序,limit 取最早 N 条;正常会话(<5000 行)全量可见。
+            .limit(limit)
         )
         return list((await self._session.execute(stmt)).scalars().all())

@@ -220,3 +220,33 @@
     transform: none !important;
   }
 }
+
+/* 路由段 loading 骨架(性能优化 2026-07-22,见 (dashboard)/loading.tsx) */
+.silly-route-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 40vh;
+  gap: 12px;
+  color: var(--muted-fg, #8c8c8c);
+  font-size: 14px;
+}
+.silly-route-loading__spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid rgba(0, 0, 0, 0.08);
+  border-top-color: rgba(22, 119, 255, 0.7);
+  animation: silly-loading-spin 0.8s linear infinite;
+}
+@keyframes silly-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .silly-route-loading__spinner {
+    animation: none;
+  }
+}
