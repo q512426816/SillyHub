@@ -26,6 +26,7 @@ from typing import Any
 import anyio
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.expression import asc, desc
 
 from app.core.errors import AppError, PermissionDenied
 from app.core.logging import get_logger
@@ -33,6 +34,7 @@ from app.modules.auth.model import User
 from app.modules.ppm.common.crud import (
     Page,
     PageReq,
+    SortOrder,
     apply_pagination,
     apply_sort,
     count_total,
@@ -391,50 +393,80 @@ class PlanService:
     async def list_ps_project_plans(
         self, req: PsProjectPlanListReq, scope: DataScope
     ) -> Page[PsProjectPlan]:
+        # project_name 改 outerjoin ppm_project_maintenance 取真名 (design D-3):
+        # 不再用 PsProjectPlan 冗余字段 (易写坏),单一可信源 = 项目表。
+        # 自写 query (不再走 _Crud.list_paged),分页/排序/计数复用 common helper。
+        real_name = PpmProjectMaintenance.project_name
+        stmt: Select[Any] = (
+            select(PsProjectPlan, real_name.label("real_project_name"))
+            .outerjoin(PpmProjectMaintenance, PsProjectPlan.project_id == PpmProjectMaintenance.id)
+        )
         # 过滤条件:字符串字段 ilike 模糊匹配,时间字段闭区间 [start, end_next_day)。
         # 前端传 YYYY-MM-DD → datetime 是 00:00:00;end 加 1 天用 < 比较保证含当日。
-        where_clauses: list[Any] = []
+        # 注意:project_name 筛选走 join 真名 (task-04),其余字段仍按 PsProjectPlan。
         if req.project_name:
-            where_clauses.append(PsProjectPlan.project_name.ilike(f"%{req.project_name}%"))
+            stmt = stmt.where(real_name.ilike(f"%{req.project_name}%"))
         if req.contract_name:
-            where_clauses.append(PsProjectPlan.contract_name.ilike(f"%{req.contract_name}%"))
+            stmt = stmt.where(PsProjectPlan.contract_name.ilike(f"%{req.contract_name}%"))
         if req.company_name:
-            where_clauses.append(PsProjectPlan.company_name.ilike(f"%{req.company_name}%"))
+            stmt = stmt.where(PsProjectPlan.company_name.ilike(f"%{req.company_name}%"))
         if req.contract_sign_time_start:
-            where_clauses.append(PsProjectPlan.contract_sign_time >= req.contract_sign_time_start)
+            stmt = stmt.where(PsProjectPlan.contract_sign_time >= req.contract_sign_time_start)
         if req.contract_sign_time_end:
-            where_clauses.append(
+            stmt = stmt.where(
                 PsProjectPlan.contract_sign_time < req.contract_sign_time_end + timedelta(days=1)
             )
         if req.project_start_time_start:
-            where_clauses.append(PsProjectPlan.project_start_time >= req.project_start_time_start)
+            stmt = stmt.where(PsProjectPlan.project_start_time >= req.project_start_time_start)
         if req.project_start_time_end:
-            where_clauses.append(
+            stmt = stmt.where(
                 PsProjectPlan.project_start_time < req.project_start_time_end + timedelta(days=1)
             )
         if req.project_plan_end_time_start:
-            where_clauses.append(
+            stmt = stmt.where(
                 PsProjectPlan.project_plan_end_time >= req.project_plan_end_time_start
             )
         if req.project_plan_end_time_end:
-            where_clauses.append(
+            stmt = stmt.where(
                 PsProjectPlan.project_plan_end_time
                 < req.project_plan_end_time_end + timedelta(days=1)
             )
         # 数据范围过滤 (2026-07-18-project-plan-data-scope D-006@v1)
         plan_scope = build_plan_scope_clause(scope)
         if plan_scope is not None:
-            where_clauses.append(plan_scope)
+            stmt = stmt.where(plan_scope)
         # 默认按创建时间倒序 (最新创建在前,ql-20260722-001):前端 /ppm/project-plans
         # 列表不传 order_by 时兜底,避免 apply_sort 遇空 order_by 直接跳过排序致
         # 列表顺序不可预测。前端显式传 order_by (project_name/status 等) 仍优先尊重。
         if not req.order_by:
             req.order_by = "created_at"
-        return await _Crud(self._session, PsProjectPlan).list_paged(
-            req=req,
-            allowed_sort={"created_at", "project_name", "status"},
-            where_clauses=where_clauses,
-        )
+        # 计数:count_total 用 subquery 包裹,兼容 outerjoin。
+        total = await count_total(self._session, stmt)
+        # 排序:project_name → join 字段 (task-04),其余 (created_at/status) 仍按
+        # PsProjectPlan。apply_sort 的 column_map 把业务字段名 project_name 映射到
+        # PpmProjectMaintenance 上的真实列;但 apply_sort 只接受单一 model 取列,
+        # 故对 project_name 单独 order_by,其余字段仍走 apply_sort(PsProjectPlan)。
+        if req.order_by == "project_name":
+            direction = asc if SortOrder.normalize(req.order) == SortOrder.ASC else desc
+            stmt = stmt.order_by(direction(real_name))
+        else:
+            stmt = apply_sort(
+                stmt,
+                PsProjectPlan,
+                req.order_by,
+                {"created_at", "status"},
+                req.order,
+            )
+        stmt = apply_pagination(stmt, req)
+        result = (await self._session.execute(stmt)).all()
+        # 每行 (PsProjectPlan, real_project_name):用真名覆盖 ORM 实例的冗余字段值,
+        # 使后续 router 的 PsProjectPlanResp.model_validate 直接取到真名。
+        # project_name 是 PsProjectPlan 已声明字段,setattr 合法 (区别于未声明字段)。
+        items: list[PsProjectPlan] = []
+        for plan_obj, real_project_name in result:
+            plan_obj.project_name = real_project_name
+            items.append(plan_obj)
+        return Page[Any].build(items=items, total=total, req=req)
 
     async def create_ps_project_plan(
         self, data: dict[str, Any], *, operator: uuid.UUID | None = None
@@ -543,7 +575,21 @@ class PlanService:
             )
 
     async def get_ps_project_plan(self, item_id: uuid.UUID) -> PsProjectPlan:
-        return await _Crud(self._session, PsProjectPlan).get(item_id)
+        # project_name 改 outerjoin ppm_project_maintenance 取真名 (design D-3):
+        # 不再用 PsProjectPlan 冗余字段。不存在则 PlanNotFound (沿用 _Crud.get 语义)。
+        real_name = PpmProjectMaintenance.project_name
+        stmt = (
+            select(PsProjectPlan, real_name.label("real_project_name"))
+            .outerjoin(PpmProjectMaintenance, PsProjectPlan.project_id == PpmProjectMaintenance.id)
+            .where(PsProjectPlan.id == item_id)
+        )
+        row = (await self._session.execute(stmt)).first()
+        if row is None:
+            raise PlanNotFound(f"PsProjectPlan '{item_id}' 不存在")
+        plan_obj, real_project_name = row
+        # 用真名覆盖冗余字段,使 router 的 model_validate 取到真名 (task-02)。
+        plan_obj.project_name = real_project_name
+        return plan_obj
 
     async def update_ps_project_plan(
         self, item_id: uuid.UUID, data: dict[str, Any]
@@ -1031,15 +1077,21 @@ class PlanService:
         合同名称 / 合同金额 / 公司既定利润率 / 公司既定利润金额 /
         剩余可用人天 / 总成本 / 剩余成本 / 合同签订时间 / 项目开始时间 /
         预计验收时间。
+
+        project_name 改 outerjoin ppm_project_maintenance 取真名 (design D-3 / task-03),
+        不再用 PsProjectPlan 冗余字段。
         """
-        stmt = select(PsProjectPlan)
+        real_name = PpmProjectMaintenance.project_name
+        stmt = select(PsProjectPlan, real_name.label("real_project_name")).outerjoin(
+            PpmProjectMaintenance, PsProjectPlan.project_id == PpmProjectMaintenance.id
+        )
         plan_scope = build_plan_scope_clause(scope)
         if plan_scope is not None:
             stmt = stmt.where(plan_scope)
-        rows = (await self._session.execute(stmt)).scalars().all()
+        rows = (await self._session.execute(stmt)).all()
         return [
             {
-                "project_name": r.project_name,
+                "project_name": real_project_name,
                 "project_manager_name": r.project_manager_name,
                 "contract_name": r.contract_name,
                 "contract_amount": r.contract_amount,
@@ -1058,7 +1110,7 @@ class PlanService:
                     r.project_plan_end_time.isoformat() if r.project_plan_end_time else None
                 ),
             }
-            for r in rows
+            for r, real_project_name in rows
         ]
 
     async def list_plan_node_details_for_export(self) -> list[dict[str, Any]]:

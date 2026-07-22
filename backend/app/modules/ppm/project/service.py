@@ -15,7 +15,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Select, exists, func, select, update
+from sqlalchemy import Select, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -29,7 +29,6 @@ from app.modules.ppm.common.crud import (
     count_total,
 )
 from app.modules.ppm.data_scope import DataScope, build_project_scope_clause
-from app.modules.ppm.plan.model import PsProjectPlan
 from app.modules.ppm.project.model import (
     PpmCustomerMaintenance,
     PpmProjectMaintenance,
@@ -204,23 +203,11 @@ class ProjectMaintenanceService:
         operator: uuid.UUID,
     ) -> PpmProjectMaintenance:
         entity = await self.get(entity_id)
-        old_project_name = entity.project_name
         payload = data.model_dump(exclude_unset=True)
         for key, value in payload.items():
             setattr(entity, key, value)
         entity.updated_by = operator
         entity.updated_at = _now()
-        # 项目改名 → 同事务同步刷新关联项目计划的冗余 project_name
-        # (PsProjectPlan.project_name 是计划列表/详情/导出/任务联动 _resolve_project_context
-        # 的共同来源;创建时从项目表复制快照 ql-20260716-006,改名须同步否则下游显示旧名)。
-        # import plan.model 无循环 (plan.model 仅依赖 base/common);update() statement
-        # 走 model 类型适配 (UuidCoercing),避免 text SQL 绕过适配致 WHERE project_id 不匹配。
-        if "project_name" in payload and entity.project_name != old_project_name:
-            await self._session.execute(
-                update(PsProjectPlan)
-                .where(PsProjectPlan.project_id == entity_id)
-                .values(project_name=entity.project_name, updated_at=_now())
-            )
         await self._session.commit()
         await self._session.refresh(entity)
         log.info("ppm_project_updated", project_id=str(entity_id))
