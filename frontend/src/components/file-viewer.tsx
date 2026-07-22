@@ -17,10 +17,11 @@ import { Image, Typography } from "antd";
 import { DownloadOutlined } from "@ant-design/icons";
 
 import {
+  downloadFile,
   fetchFileMetaBatch,
-  getFileDownloadUrl,
   type FileMetaResp,
 } from "@/lib/file/api";
+import { FileImage } from "@/components/file-image";
 import { FileTypeIcon, formatFileSize, isImageMime } from "@/lib/file/utils";
 
 const { Text, Link } = Typography;
@@ -82,12 +83,12 @@ export function FileViewer({ fileIds = [] }: FileViewerProps) {
         <Image.PreviewGroup>
           <div className="grid grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-2">
             {images.map((m) => (
-              <Image
+              <FileImage
                 key={m.id}
-                src={getFileDownloadUrl(m.id)}
+                id={m.id}
                 alt={m.original_name}
                 className="aspect-square rounded-md border border-border object-cover"
-                preview={{ mask: "预览" }}
+                preview
               />
             ))}
           </div>
@@ -113,11 +114,12 @@ export function FileViewer({ fileIds = [] }: FileViewerProps) {
                 </div>
               </div>
               <Link
-                href={getFileDownloadUrl(m.id)}
-                target="_blank"
-                rel="noopener noreferrer"
                 className="flex-none"
                 aria-label={`下载 ${m.original_name}`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  void downloadFile(m.id, m.original_name);
+                }}
               >
                 <DownloadOutlined />
               </Link>

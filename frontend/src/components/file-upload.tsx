@@ -21,10 +21,10 @@ import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 
 import {
   fetchFileMetaBatch,
-  getFileDownloadUrl,
   uploadFile,
   type FileMetaResp,
 } from "@/lib/file/api";
+import { FileImage } from "@/components/file-image";
 import { FileTypeIcon, formatFileSize, isImageMime } from "@/lib/file/utils";
 
 const { Text } = Typography;
@@ -176,9 +176,8 @@ export function FileUpload({
                 className="flex items-center gap-2 rounded border border-border bg-muted/20 px-2 py-1"
               >
                 {img ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={getFileDownloadUrl(id)}
+                  <FileImage
+                    id={id}
                     alt={meta?.original_name ?? "附件"}
                     className="h-8 w-8 flex-none rounded object-cover"
                   />

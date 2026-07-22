@@ -17,7 +17,17 @@ import type { FileMetaResp } from "@/lib/file/api";
 
 vi.mock("@/lib/file/api", () => ({
   fetchFileMetaBatch: vi.fn(),
-  getFileDownloadUrl: (id: string) => `/api/file/${id}`,
+  fetchFileBlob: vi.fn(() => Promise.resolve(new Blob(["x"], { type: "image/jpeg" }))),
+  downloadFile: vi.fn(() => Promise.resolve()),
+}));
+
+// FileImage 的 fetch-blob→objectURL 逻辑在 file-upload.test 间接覆盖；
+// 此处 mock 成透传 img，专注测 FileViewer 的 MIME 归类/布局（jsdom 下 antd Image
+// 卡 loading 不渲染 img，见 frontend-markdown-text-jsdom-null 经验）。
+vi.mock("@/components/file-image", () => ({
+  FileImage: (props: { id: string; alt?: string; preview?: boolean }) => (
+    <img alt={props.alt} data-file-id={props.id} data-preview={props.preview ? "1" : "0"} />
+  ),
 }));
 
 import { fetchFileMetaBatch } from "@/lib/file/api";
@@ -51,28 +61,29 @@ describe("FileViewer", () => {
     expect(fetchMetaMock).not.toHaveBeenCalled();
   });
 
-  it("图片 → 渲染缩略图(下载直链)", async () => {
+  it("图片 → FileImage 带 token 取 blob 渲染缩略图", async () => {
     fetchMetaMock.mockResolvedValue([IMG]);
     const { container } = render(<FileViewer fileIds={["img-1"]} />);
     await waitFor(() => {
-      const img = container.querySelector('img[src="/api/file/img-1"]');
-      expect(img).toBeTruthy();
+      // FileImage 经 fetchFileBlob(带 Authorization)取 blob → objectURL 渲染 img，
+      // src 是 blob: URL（非裸下载链），用 alt 锁定。
+      expect(container.querySelector('img[alt="照片.jpg"]')).toBeTruthy();
     });
   });
 
-  it("非图片 → 文件名 + 下载链接(下载直链)", async () => {
+  it("非图片 → 文件名 + 下载链接(onClick 调 downloadFile 带 token)", async () => {
     fetchMetaMock.mockResolvedValue([PDF]);
     render(<FileViewer fileIds={["doc-1"]} />);
     await waitFor(() => expect(screen.getByText("说明书.pdf")).toBeTruthy());
-    const link = screen.getByLabelText("下载 说明书.pdf") as HTMLAnchorElement;
-    expect(link.getAttribute("href")).toBe("/api/file/doc-1");
+    // 下载改 downloadFile（fetch 带 token），Link 无 href，靠 aria-label 定位
+    expect(screen.getByLabelText("下载 说明书.pdf")).toBeTruthy();
   });
 
   it("混合 → 图片与非图片各自归位", async () => {
     fetchMetaMock.mockResolvedValue([IMG, PDF]);
     const { container } = render(<FileViewer fileIds={["img-1", "doc-1"]} />);
     await waitFor(() => expect(screen.getByText("说明书.pdf")).toBeTruthy());
-    expect(container.querySelector('img[src="/api/file/img-1"]')).toBeTruthy();
+    expect(container.querySelector('img[alt="照片.jpg"]')).toBeTruthy();
     expect(screen.getByLabelText("下载 说明书.pdf")).toBeTruthy();
   });
 });

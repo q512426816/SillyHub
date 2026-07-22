@@ -20,6 +20,7 @@ import type { FileMetaResp } from "@/lib/file/api";
 vi.mock("@/lib/file/api", () => ({
   uploadFile: vi.fn(),
   fetchFileMetaBatch: vi.fn(),
+  fetchFileBlob: vi.fn(() => Promise.resolve(new Blob(["x"], { type: "image/png" }))),
   getFileDownloadUrl: (id: string) => `/api/file/${id}`,
 }));
 

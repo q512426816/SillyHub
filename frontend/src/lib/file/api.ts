@@ -142,3 +142,51 @@ export async function fetchFileMetaBatch(ids: string[]): Promise<FileMetaResp[]>
 export function getFileDownloadUrl(id: string): string {
   return `/api/file/${id}`;
 }
+
+/**
+ * 取文件二进制（Blob）—— 带 Authorization 头，401 单飞刷新重试一次。
+ *
+ * 浏览器原生 ``<img src>`` / ``<a href>`` 不带 Authorization，而下载端点要 JWT 鉴权，
+ * 直接用 URL 会 401。故图片预览/文件下载都经本函数取 Blob：图片转 objectURL 给 img，
+ * 文件下载触发 ``<a download>``。
+ */
+export async function fetchFileBlob(id: string): Promise<Blob> {
+  const path = `/api/file/${id}`;
+  const doFetch = (token: string | null) =>
+    fetch(path, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
+
+  let token = useSession.getState().accessToken ?? null;
+  let resp = await doFetch(token);
+  if (resp.status === 401) {
+    const fresh = await ensureFreshAccessToken();
+    if (fresh) {
+      token = fresh;
+      resp = await doFetch(token);
+    }
+  }
+  if (!resp.ok) {
+    throw new ApiError(resp.status, {
+      code: "download_failed",
+      message: `下载失败（HTTP ${resp.status}）`,
+      request_id: safeUUID(),
+      details: null,
+    });
+  }
+  return resp.blob();
+}
+
+/** 触发浏览器下载（fetch Blob → ``<a download>`` click → revoke）。 */
+export async function downloadFile(id: string, filename: string): Promise<void> {
+  const blob = await fetchFileBlob(id);
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
