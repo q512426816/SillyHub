@@ -30,6 +30,7 @@ from app.modules.ppm.plan.model import (
 )
 from app.modules.ppm.plan.schema import PsProjectPlanListReq
 from app.modules.ppm.plan.service import PlanError, PlanNotFound, PlanService
+from app.modules.ppm.project.model import PpmProjectMaintenance
 
 FULL_SCOPE = DataScope(is_full=True)
 
@@ -275,7 +276,11 @@ class TestHasModuleAndDetailOwnership:
 class TestPsProjectPlan:
     async def test_crud(self, db_session: AsyncSession) -> None:
         svc = PlanService(db_session)
-        proj_id = str(uuid.uuid4())
+        # get/list 取项目表真名 (W1 join),需先建对应 PpmProjectMaintenance 行。
+        proj = PpmProjectMaintenance(id=uuid.uuid4(), project_code="PP-CRUD", project_name="项目甲")
+        db_session.add(proj)
+        await db_session.commit()
+        proj_id = str(proj.id)
         plan = await svc.create_ps_project_plan(
             {"project_id": proj_id, "project_name": "项目甲", "status": "draft"}
         )
@@ -320,8 +325,6 @@ class TestPsProjectPlan:
 
         依据:create_ps_project_plan 兜底;前端表单无 project_name 字段致提交为空。
         """
-        from app.modules.ppm.project.model import PpmProjectMaintenance
-
         svc = PlanService(db_session)
         proj = PpmProjectMaintenance(
             id=uuid.uuid4(), project_code="PP-FILL-006", project_name="关联项目名"
@@ -348,9 +351,15 @@ class TestPsProjectPlan:
     async def test_export_rows(self, db_session: AsyncSession) -> None:
         """P2-3:ps_project_plan 导出行 dict。"""
         svc = PlanService(db_session)
+        # export 取项目表真名 (W1 join),需先建对应项目行。
+        proj = PpmProjectMaintenance(
+            id=uuid.uuid4(), project_code="PP-EXP", project_name="导出计划"
+        )
+        db_session.add(proj)
+        await db_session.commit()
         await svc.create_ps_project_plan(
             {
-                "project_id": str(uuid.uuid4()),
+                "project_id": str(proj.id),
                 "project_name": "导出计划",
                 "contract_name": "合同X",
             }
@@ -368,9 +377,14 @@ class TestPsProjectPlan:
         svc = PlanService(db_session)
         base = datetime(2026, 1, 1, tzinfo=UTC)
         for i in range(3):
+            # list 取项目表真名 (W1 join),每条计划配一个同名项目行。
+            proj = PpmProjectMaintenance(
+                id=uuid.uuid4(), project_code=f"P{i}", project_name=f"P{i}"
+            )
+            db_session.add(proj)
             plan = PsProjectPlan(
                 id=uuid.uuid4(),
-                project_id=uuid.uuid4(),
+                project_id=proj.id,
                 project_name=f"P{i}",
                 created_at=base + timedelta(hours=i),  # P0 最早 → P2 最新
             )
@@ -389,10 +403,13 @@ class TestPsProjectPlan:
         svc = PlanService(db_session)
         base = datetime(2026, 1, 1, tzinfo=UTC)
         for i, name in enumerate(["Bravo", "Alpha", "Charlie"]):
+            # list 排序/取值基于项目表真名 (W1 join),每条计划配一个同名项目行。
+            proj = PpmProjectMaintenance(id=uuid.uuid4(), project_code=name, project_name=name)
+            db_session.add(proj)
             db_session.add(
                 PsProjectPlan(
                     id=uuid.uuid4(),
-                    project_id=uuid.uuid4(),
+                    project_id=proj.id,
                     project_name=name,
                     created_at=base + timedelta(hours=i),
                 )
@@ -405,6 +422,155 @@ class TestPsProjectPlan:
         )
         names = [r.project_name for r in res.items]
         assert names == ["Alpha", "Bravo", "Charlie"]  # 按名升序,非 created_at
+
+
+# Wave 2 join 测试共用基准时间 (排序走 project_name join 字段,created_at 无关)。
+_JOIN_BASE_DT = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+def _add_project_plan(
+    db_session: AsyncSession,
+    *,
+    real_name: str,
+    redundant_name: str | None = None,
+) -> tuple[PpmProjectMaintenance, PsProjectPlan]:
+    """造一对 (项目表真名, 计划冗余名) 并 add(不 commit,调用方负责)。
+
+    供 Wave 2 join 测试 (design D-3 显式 outerjoin 单一可信源):
+    real_name(项目表)与 redundant_name(PsProjectPlan 冗余列)可故意不一致,
+    验证 list/get/export 取的是项目表真名,非冗余列。
+    redundant_name 缺省 = real_name。
+    """
+    proj = PpmProjectMaintenance(
+        id=uuid.uuid4(), project_code=f"C-{real_name}", project_name=real_name
+    )
+    plan = PsProjectPlan(
+        id=uuid.uuid4(),
+        project_id=proj.id,
+        project_name=redundant_name if redundant_name is not None else real_name,
+        created_at=_JOIN_BASE_DT,
+    )
+    db_session.add(proj)
+    db_session.add(plan)
+    return proj, plan
+
+
+class TestProjectNameJoinRealName:
+    """Wave 2 单测 (task-06/07/08):list/get/export 的 project_name 取项目表真名。
+
+    依据 design D-3 (显式 outerjoin PpmProjectMaintenance, 单一可信源):
+    - task-06:list/get/export 返回项目表真名 (非 PsProjectPlan 冗余列值)。
+    - task-07:改 PpmProjectMaintenance.project_name → list 自动反映新名
+      (无需同步逻辑,印证 task-05 删改名同步后 join 仍实时一致)。
+    - task-08:按 project_name 筛选 / 排序基于 join 字段 (非冗余列)。
+
+    核心手法:把 PsProjectPlan.project_name (冗余) 与项目表真名设成不同值,
+    断言返回的是项目表真名。
+    """
+
+    async def test_list_returns_real_name_not_redundant(self, db_session: AsyncSession) -> None:
+        """task-06:list 返回项目表真名,非 PsProjectPlan 冗余字段。
+
+        冗余列写错值 / None 时,list 仍须返回 join 真名 (非冗余 / 非 null / 非 id)。
+        """
+        svc = PlanService(db_session)
+        proj = PpmProjectMaintenance(id=uuid.uuid4(), project_code="C-真名A", project_name="真名A")
+        db_session.add(proj)
+        # 两条计划挂同一项目:冗余列分别写错值 / None
+        db_session.add(
+            PsProjectPlan(
+                id=uuid.uuid4(),
+                project_id=proj.id,
+                project_name="坏冗余A",
+                created_at=_JOIN_BASE_DT,
+            )
+        )
+        db_session.add(
+            PsProjectPlan(
+                id=uuid.uuid4(), project_id=proj.id, project_name=None, created_at=_JOIN_BASE_DT
+            )
+        )
+        await db_session.commit()
+
+        res = await svc.list_ps_project_plans(
+            PsProjectPlanListReq(page=1, page_size=20), FULL_SCOPE
+        )
+        assert len(res.items) == 2
+        for item in res.items:
+            # join 真名,非冗余错值 / 非 None / 非 project_id uuid
+            assert item.project_name == "真名A"
+
+    async def test_get_returns_real_name_not_redundant(self, db_session: AsyncSession) -> None:
+        """task-06:get 返回项目表真名,非冗余字段。"""
+        svc = PlanService(db_session)
+        _proj, plan = _add_project_plan(db_session, real_name="真名B", redundant_name="冗余旧名B")
+        await db_session.commit()
+
+        got = await svc.get_ps_project_plan(plan.id)
+        assert got.project_name == "真名B"
+
+    async def test_export_returns_real_name_not_redundant(self, db_session: AsyncSession) -> None:
+        """task-06:export 返回项目表真名 (task-03 导出列同走 join)。"""
+        svc = PlanService(db_session)
+        _add_project_plan(db_session, real_name="真名C", redundant_name="冗余旧名C")
+        await db_session.commit()
+
+        rows = await svc.list_ps_project_plans_for_export(FULL_SCOPE)
+        assert len(rows) == 1
+        assert rows[0]["project_name"] == "真名C"
+
+    async def test_rename_project_reflects_in_list(self, db_session: AsyncSession) -> None:
+        """task-07:改 PpmProjectMaintenance.project_name → list 返回新名(无需同步)。
+
+        印证 task-05 删改名同步后,join 实时取项目表真名,改名自动反映。
+        """
+        svc = PlanService(db_session)
+        proj, _plan = _add_project_plan(db_session, real_name="改名前", redundant_name="改名前")
+        await db_session.commit()
+
+        # 直接改项目表名 (不碰计划,无同步逻辑)
+        proj.project_name = "改名后"
+        await db_session.commit()
+
+        res = await svc.list_ps_project_plans(
+            PsProjectPlanListReq(page=1, page_size=20), FULL_SCOPE
+        )
+        assert res.items[0].project_name == "改名后"
+
+    async def test_filter_by_project_name_uses_join_field(self, db_session: AsyncSession) -> None:
+        """task-08:按 project_name 筛选命中项目表真名 (非冗余列)。
+
+        两条计划冗余名都是"同冗余",真名 Alpha/Beta 不同;筛 Beta 只命中 Beta。
+        若筛冗余列则两条都会命中。
+        """
+        svc = PlanService(db_session)
+        _add_project_plan(db_session, real_name="Alpha项目", redundant_name="同冗余")
+        _add_project_plan(db_session, real_name="Beta项目", redundant_name="同冗余")
+        await db_session.commit()
+
+        res = await svc.list_ps_project_plans(
+            PsProjectPlanListReq(page=1, page_size=20, project_name="Beta"), FULL_SCOPE
+        )
+        assert len(res.items) == 1
+        assert res.items[0].project_name == "Beta项目"
+
+    async def test_sort_by_project_name_uses_join_field(self, db_session: AsyncSession) -> None:
+        """task-08:按 project_name 排序基于项目表真名 (非冗余列)。
+
+        三条计划冗余名故意乱序 (X3/X1/X2),真名 Charlie/Alpha/Bravo;
+        order_by=project_name asc → 按真名升序。
+        """
+        svc = PlanService(db_session)
+        for real, redundant in [("Charlie", "X3"), ("Alpha", "X1"), ("Bravo", "X2")]:
+            _add_project_plan(db_session, real_name=real, redundant_name=redundant)
+        await db_session.commit()
+
+        res = await svc.list_ps_project_plans(
+            PsProjectPlanListReq(page=1, page_size=20, order_by="project_name", order="asc"),
+            FULL_SCOPE,
+        )
+        names = [r.project_name for r in res.items]
+        assert names == ["Alpha", "Bravo", "Charlie"]  # 按项目表真名升序,非冗余列
 
 
 # ===========================================================================

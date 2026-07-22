@@ -97,11 +97,13 @@ async def test_project_crud_and_unique_code(db_session, operator):
         await svc.get(created.id)
 
 
-async def test_project_rename_syncs_ps_project_plan_name(db_session, operator):
-    """项目改名 → 关联项目计划冗余 project_name 同步刷新 (ql-20260717-004)。
+async def test_project_rename_does_not_sync_redundant_plan_name(db_session, operator):
+    """项目改名 → 不再同步刷新 PsProjectPlan 冗余 project_name (design D-2 / task-05)。
 
-    PsProjectPlan.project_name 是计划列表/详情/导出/任务联动的共同来源,
-    创建时从项目表复制快照;项目维护改名时须同事务刷新,否则下游显示旧名。
+    历史行为 (ql-20260717-004):改名同事务刷新所有关联计划冗余 project_name。
+    改造后 (2026-07-22-plan-project-name-join):list/get/export 改 outerjoin 项目表
+    取真名 (单一可信源),改名自动反映,冗余同步逻辑已删 —— 故改名后冗余列保持旧快照。
+    下游列表实时反映新名由 plan 侧 join 覆盖 (test_rename_project_reflects_in_list)。
     """
     from app.modules.ppm.plan.model import PsProjectPlan
 
@@ -130,7 +132,7 @@ async def test_project_rename_syncs_ps_project_plan_name(db_session, operator):
         operator=operator,
     )
 
-    # 验证 DB 实际值:select column 绕过 ORM identity map (expire_on_commit=False)
+    # 冗余列不再被同步刷新,保持旧快照 (印证 task-05 删改名同步)
     from sqlalchemy import select
 
     name_in_db = (
@@ -138,7 +140,7 @@ async def test_project_rename_syncs_ps_project_plan_name(db_session, operator):
             select(PsProjectPlan.project_name).where(PsProjectPlan.id == plan_id)
         )
     ).scalar_one()
-    assert name_in_db == "新名", f"DB project_name={name_in_db!r}"
+    assert name_in_db == "原名", f"冗余列不应被改名同步刷新,DB project_name={name_in_db!r}"
 
 
 async def test_project_create_name_auto_fill_from_operator(db_session, operator):

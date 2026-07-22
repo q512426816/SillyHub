@@ -397,9 +397,8 @@ class PlanService:
         # 不再用 PsProjectPlan 冗余字段 (易写坏),单一可信源 = 项目表。
         # 自写 query (不再走 _Crud.list_paged),分页/排序/计数复用 common helper。
         real_name = PpmProjectMaintenance.project_name
-        stmt: Select[Any] = (
-            select(PsProjectPlan, real_name.label("real_project_name"))
-            .outerjoin(PpmProjectMaintenance, PsProjectPlan.project_id == PpmProjectMaintenance.id)
+        stmt: Select[Any] = select(PsProjectPlan, real_name.label("real_project_name")).outerjoin(
+            PpmProjectMaintenance, PsProjectPlan.project_id == PpmProjectMaintenance.id
         )
         # 过滤条件:字符串字段 ilike 模糊匹配,时间字段闭区间 [start, end_next_day)。
         # 前端传 YYYY-MM-DD → datetime 是 00:00:00;end 加 1 天用 < 比较保证含当日。
