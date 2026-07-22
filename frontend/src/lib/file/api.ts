@@ -2,14 +2,16 @@
  * 平台级文件中心 — 前端文件 API 封装。
  *
  * - ``uploadFile``：走 XHR（fetch 无原生上传进度），401 时经 ``ensureFreshAccessToken``
- *   刷新并重试一次（对齐 apiFetch 的单飞刷新语义）。
+ *   刷新并重试一次（对齐 apiFetch 的单飞刷新语义）。用**相对路径**（``/api/file/upload``），
+ *   走 Next.js rewrite proxy，与 ``apiFetch`` 一致——任意 origin（公网域名/内网/localhost）可达，
+ *   不用绝对内网 IP（公网浏览器访问不到）。
  * - ``fetchFileMetaBatch``：走 ``apiFetch``（自带 401 refresh）。
- * - ``getFileDownloadUrl``：返回 ``/api/file/{id}`` 直连（供 FileViewer 预览/下载）。
+ * - ``getFileDownloadUrl``：返回 ``/api/file/{id}`` 相对路径（供 FileViewer 预览/下载，走 rewrite proxy）。
  *
  * 依据：design.md §D-003/D-005 + tasks/task-07.md。
  */
 
-import { ApiError, apiFetch, getDirectApiBaseUrl, safeUUID } from "@/lib/api";
+import { ApiError, apiFetch, safeUUID } from "@/lib/api";
 import { ensureFreshAccessToken } from "@/lib/token-refresh";
 import { useSession } from "@/stores/session";
 
@@ -49,7 +51,7 @@ function buildUploadUrl(owner_type?: string, owner_id?: string | null): string {
   if (owner_type) params.set("owner_type", owner_type);
   if (owner_id) params.set("owner_id", owner_id);
   const qs = params.toString();
-  return `${getDirectApiBaseUrl()}/api/file/upload${qs ? `?${qs}` : ""}`;
+  return `/api/file/upload${qs ? `?${qs}` : ""}`;
 }
 
 function xhrUpload(
@@ -136,7 +138,7 @@ export async function fetchFileMetaBatch(ids: string[]): Promise<FileMetaResp[]>
   });
 }
 
-/** 文件下载/预览直连（GET /api/file/{id}，浏览器带 session 由后端鉴权）。 */
+/** 文件下载/预览（GET /api/file/{id}，相对路径走 rewrite proxy，浏览器带 session 由后端鉴权）。 */
 export function getFileDownloadUrl(id: string): string {
-  return `${getDirectApiBaseUrl()}/api/file/${id}`;
+  return `/api/file/${id}`;
 }
