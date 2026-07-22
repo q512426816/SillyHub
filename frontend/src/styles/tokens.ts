@@ -3,6 +3,7 @@
  *
  * - TS 常量 `tokens`:供 antd 等运行时消费方以 hex 形式取色 (tokens.color.*)
  * - CSS 变量字符串 `cssVars`:供 globals.css 注入 :root,Tailwind 侧以 var(--color-*) 消费
+ * - breakpoint 段供移动端判定 (FR-09 / task-02):逻辑阈值常量,非视觉值,不注入 cssVars
  *
  * 色阶严格采用 Tailwind v3 默认值,禁止自行调色。
  * 新增颜色必须经本文件入口 (边界 #5)。
@@ -91,6 +92,12 @@ export const tokens = {
     16: 64,
     20: 80,
     24: 96,
+  },
+
+  // 移动端断点阈值 (px,D-005:仅手机 ≤768px;平板 >768 走桌面)
+  // 逻辑阈值常量,供移动组件 matchMedia / 响应式判定引用 (FR-09),不注入 cssVars
+  breakpoint: {
+    mobile: 768,
   },
 } as const;
 
