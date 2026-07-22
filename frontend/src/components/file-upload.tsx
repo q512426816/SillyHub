@@ -180,6 +180,7 @@ export function FileUpload({
                     id={id}
                     alt={meta?.original_name ?? "附件"}
                     className="h-8 w-8 flex-none rounded object-cover"
+                    preview
                   />
                 ) : (
                   <span className="flex h-8 w-8 flex-none items-center justify-center">

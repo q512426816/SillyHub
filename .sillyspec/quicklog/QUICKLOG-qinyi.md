@@ -315,3 +315,9 @@ created_at: 2026-07-05 16:33:00
 影响：仅看板查询条件 UI；后端查询能力未变。
 遗留：① 生效需 rebuild 前端(docker compose --build frontend)；② 未单独跑 tsc/eslint(纯删除干净改动，commit 时 ci-check hook 会跑全量 frontend 兜底)。
 坑：quick --done 收尾在 QUICKLOG 留下重复「状态」行(已完成+进行中并存)且 --output 仅落到「结果」字段，已手动补正为归档格式。
+## ql-20260722-012-dddb | 2026-07-22 20:48:47 | (quick 任务)
+状态：已完成
+关联变更：2026-07-22-platform-file-center
+文件：（见实际改动）
+
+结果：暂存确认:git add deploy/docker-compose.yml、deploy/.env.example、.sillyspec/docs/multi-agent-platform/modules/deploy.md(未 commit,由用户统一提交)。模块同步:命中 deploy 模块,deploy.md 契约摘要补 minio 服务条目+minio-data 卷+backend S3 配置,注意事项补 backend 连 minio 走 http://minio:9000 的坑(config.py s3_endpoint 默认 localhost 仅 native run 用),新增变更索引段追加 ql-20260722-012-dddb。tasks.md/QUICKLOG 由 CLI 自动收尾。非设计遗漏,无需 reverse sync design.md。

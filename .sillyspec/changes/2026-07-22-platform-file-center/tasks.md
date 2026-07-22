@@ -45,3 +45,4 @@ created_at: 2026-07-22T14:08:00
 
 - **task-23** 废弃/删除 `components/ppm-file-urls.tsx`（确认无引用后）
 - **task-24** 同步 scan 文档（ppm.md 加附件接入说明；新增 file 模块卡）
+- [x] ql-20260722-012-dddb (quick 任务)

@@ -89,6 +89,7 @@ export function FileViewer({ fileIds = [] }: FileViewerProps) {
                 alt={m.original_name}
                 className="aspect-square rounded-md border border-border object-cover"
                 preview
+                previewMask="预览"
               />
             ))}
           </div>

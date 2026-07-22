@@ -20,9 +20,10 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
 - **服务定义**（主 compose）：
   - `postgres`（postgres:16-alpine，healthcheck pg_isready，卷 pgdata）
   - `redis`（redis:7-alpine，appendonly 持久化，healthcheck redis-cli ping，卷 redisdata）
-  - `backend`（build 自 backend/Dockerfile，env_file 加载，depends_on postgres/redis，暴露端口，自定义 command）
+  - `minio`（minio/minio，S3 兼容对象存储，端口 9000/9001，卷 minio-data；平台文件中心后端，`MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` 默认 minioadmin）
+  - `backend`（build 自 backend/Dockerfile，env_file 加载，depends_on postgres/redis/minio(healthy)，暴露端口；environment 注入对象存储 `STORAGE_BACKEND`/`S3_ENDPOINT`(默认 `http://minio:9000`)/`S3_ACCESS_KEY`/`S3_SECRET_KEY`/`S3_BUCKET`，凭证须与 minio 服务一致）
   - `frontend`（build 自 frontend/Dockerfile，depends_on backend，env_file，端口 3000）
-  - 命名卷：pgdata、redisdata、worktree-data、claude-data。
+  - 命名卷：pgdata、redisdata、minio-data、worktree-data、claude-data。
 - **健康检查**：postgres/redis 用原生探测；backend/frontend 容器自带 healthcheck（frontend 用 node20 内置 fetch 零依赖）。
 
 ## 关键逻辑
@@ -38,7 +39,11 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
 - frontend 容器 healthcheck 曾因 busybox wget 走 Docker 注入 http_proxy 误报 unhealthy（忽略 no_proxy），现已改 node fetch，服务正常即应判 healthy。
 - 局域网访问需在 compose 端口映射与防火墙上放开，并配置 workspace 指向项目路径。
 - `.env.example` 占位密钥不可直接用于生产，SECRET_KEY/SILLYSPEC_MASTER_KEY 必须替换。
+- backend 连 minio 必须走容器服务名 `http://minio:9000`（compose backend environment 默认值已设）；`config.py` 的 `s3_endpoint` 默认 `http://localhost:9000` 仅给本机 native run 用，容器内用 localhost 连不通兄弟 minio 容器（`EndpointConnectionError` → 上传 500）。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 <!-- MANUAL_NOTES_END -->
+
+## 变更索引
+- ql-20260722-012-dddb | 补 backend environment S3 配置（默认 `http://minio:9000`）+ `.env.example` 同步，修复容器内连不通 minio 致平台文件中心上传 500

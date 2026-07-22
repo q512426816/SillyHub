@@ -25,9 +25,11 @@ export interface FileImageProps {
   className?: string;
   /** 是否可预览放大（antd Image，在 PreviewGroup 内自动加入）。默认 false=普通 img 缩略图。 */
   preview?: boolean;
+  /** 预览 hover 遮罩文案（仅 preview=true 生效）；不传则无遮罩、点击直接放大（小缩略图用）。 */
+  previewMask?: string;
 }
 
-export function FileImage({ id, alt = "", className, preview = false }: FileImageProps) {
+export function FileImage({ id, alt = "", className, preview = false, previewMask }: FileImageProps) {
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -59,7 +61,16 @@ export function FileImage({ id, alt = "", className, preview = false }: FileImag
     return <div className={`${className ?? ""} animate-pulse bg-muted/40`} aria-label="图片加载中" />;
   }
   if (preview) {
-    return <Image src={src} alt={alt} className={className} preview={{ mask: "预览" }} />;
+    // previewMask 有值 → hover 显示遮罩文案（FileViewer 大图用"预览"）；
+    // 无值 → 默认点击直接放大（FileUpload 小缩略图，文字遮罩会溢出）。
+    return (
+      <Image
+        src={src}
+        alt={alt}
+        className={className}
+        preview={previewMask ? { mask: previewMask } : true}
+      />
+    );
   }
   // 缩略图（FileUpload 编辑态，点击不放大）
   // eslint-disable-next-line @next/next/no-img-element
