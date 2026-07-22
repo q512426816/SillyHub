@@ -202,3 +202,11 @@ created_at: 2026-07-21T08:48:56
 根因：明细提交成功后 onSaved/handleSubmit 都 setDetailTick+1，而 expandRender 里 ModuleLevelTable/DetailLevelTable 的 key 含 detailTick → key 变 → 整个 ModuleLevelTable 重新挂载 → 其内部 antd 非受控 expandedRowKeys 复位 → 模块行折叠、第三层明细列表消失。两级（非模块）场景的 DetailLevelTable 无内层展开故不折，仅实施阶段三级出问题。
 方案：去掉子表 key 里的 detailTick（改 key={node.id} 稳定不 remount），改下传 refreshTick={detailTick} prop；ModuleLevelTable 接收并透传给其明细子表；DetailLevelTable 把 refreshTick 加进 reload 的 useEffect 依赖，变化即原地 reload。模块展开态因 ModuleLevelTable 不 remount 而保留 → 不折叠，明细数据照常刷新。
 结果：①前端 typecheck 0 error；②lint 0 error；③milestone-details 24 passed；④已 commit 1d85f752 push + 重建 frontend 部署，容器 healthy、前端 200。
+## ql-20260722-008-82dc | 2026-07-22 15:24:00 | /ppm/milestone-details 明细子表任务描述列固定 250px + 操作列设固定列
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（DetailLevelTable 任务描述列 width 220→250；操作列加 fixed:'right' + onCell 不透明背景）
+需求：里程碑明细（DetailLevelTable）的【任务描述】列固定为 250px；【操作】列设为固定列（横向滚动时钉住）。
+根因：①任务描述列原 width=220 偏窄，长文本 ellipsis 截断过多；②操作列无 fixed，列多（11 列）横向滚动时操作按钮被滚出视口，需来回拖才能点到。
+方案：①任务描述列 width 220→250（保留 ellipsis）；②操作列加 `fixed: "right"`。表格已 `scroll={{ x: "max-content" }}` 横向滚动启用，固定列生效。固定列 + 斑马纹（rowClassName bg-muted/40）：横向滚动时固定单元格透明会透出滑动行内容，加 `onCell` 不透明 `hsl(var(--muted))` 背景（本表容器 bg-muted/20，用 muted 比 card 更贴表面；对齐 ppm 固定列既有模式但按本表表面调整）。
+结果：①前端 typecheck 0 error；②lint 0 error；③milestone-details 24 passed；④待 commit+push+重建 frontend 部署。
