@@ -55,3 +55,6 @@ StateMachine(current, TRANSITIONS, entity=...).transition(target)
 - ql-20260714-001-8c02 | plan 子域 export-excel 路由顺序修复（前置 {item_id}）+ 回归测试
 - ql-20260714-002-1036 | ppm 导出文件名统一「中文+日期时间」timestamped_filename（common helper，5 端点共用）
 - 2026-07-14-milestone-module-import | 里程碑明细·实施阶段 模块导入（plan_type 字段+migration；Excel 两级导入：importer 按表头名/import_preview 责任人反查/import_commit D-008 单事务原子/router 两端点/前端三态弹窗 + 单测&集成测试）
+- ql-20260722-003-f7d9 | problem-list 列表页改造（前端归属默认全部/问题类型入展开/17列重排+bug标红+责任人&处置人合并列+预估·已消耗合并列；后端 service 排序白名单加 plan_start_time 支持按计划开始时间正序；router list 回填 now_handle_user_name 历史仅存 id 处置人反查 display_name）
+- ql-20260722-004 | problem 数据范围补创建人可见(common/data_scope.problem_scope_clause 加 created_by==user.id,修"能编辑却在列表看不见自己创建的问题"矛盾)+ 详情页展示创建人/创建时间(schema ProblemListResp 加 created_by_name,router 列表批量+详情单条反查 display_name)
+- 2026-07-22-ppm-permission-by-project-member-role | PPM 权限统一到「项目成员角色」:项目计划/项目维护数据范围(data_scope.py 根)从「系统 RBAC 角色 XMJL/DEPTBOSS + PsProjectPlan.project_manager_id + 部门组织树」改为复用 common.data_scope 的 manager_project_ids(PpmProjectMember.role_name),与任务/问题同口径;DataScope 改 (is_full, manager_project_ids, creator_user_id)。项目计划编辑/删除加 can_operate_plan(超管‖创建人‖本项目经理)+ PsProjectPlanResp.can_edit/can_delete,前端 project-plans/milestone-details 编辑门改读后端标志(对齐问题清单)。行为变化:普通用户获自建可见;部门经理不再自动看本部门全部项目(需配成员角色);里程碑页经理角色成员可编辑。项目维护写操作/任务编辑不在本次范围

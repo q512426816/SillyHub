@@ -227,3 +227,91 @@ created_at: 2026-07-05 16:33:00
 
 
 
+
+## ql-20260722-002-a3b9 | 2026-07-22 09:45:26 | ppm/task-plans 查询区与列表调整：视图移出展开且默认全部、删月份、按计划开始时间正序、列重排
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/task-plans/page.tsx
+依据：用户需求 4 项——①查询条件「视图」放展开区外且默认查全部；②删除「月份」条件；③列表按计划开始时间正序；④列表列固定为 序号|项目|模块|状态|负责人|计划时间|预估/已消耗|任务内容|任务描述|配合人员|操作(冻列)。后端零改动：task/service.py PLAN_SORT_FIELDS 白名单已含 start_time，task/router.py /task-plan/page 与 /personal-task-plan/page 均透传 order_by/order，纯前端展示调整。
+修法：①视图 Select 从 expanded 区移到查询区首列（展开区外），默认 view 由 personal 改 all；②删月份 Field + monthFilter state + buildParams 的 month 赋值 + load 依赖/resetFilters 清理 + dayjs 默认值改 type-only；③load 内 order_by 由 created_at desc 改 start_time asc；④columns 全量重排，新增 模块(module_name)、任务描述(task_description) 两列，原 预估工时+已消耗 合并为「预估/已消耗(人天)」一列（work_load / spent_time，消耗>预估标红、有消耗标绿），操作列 fixed:right；⑤表格 scroll 加 x:max-content 使多列横向滚动 + 操作冻列生效。任务内容列不再附 remarks 副行（改由独立任务描述列承载）。
+测试：tsc --noEmit 通过；next lint 仅历史遗留 warning（executeBusy/rowSelection/canEdit/canDelete 改动前已未使用），无 error；该页无单元测试。
+遗留：①需端到端部署验证（docker compose --build frontend 重新构建后人工确认页面效果）；②预估工时（work_load）实际就是纯数字预估人天（用户确认不会填"约3"这类文本），渲染原样显示数字即正确，超预估标红逻辑稳定生效。
+坑：表格新增模块/任务描述两列后总宽超视口，fixed:right 冻列必须配 scroll.x 才真正生效，否则横向不滚动冻列失效；前端排列表改 order_by 前需先核后端白名单（本次 start_time 已在白名单，省了后端改动）。
+
+## ql-20260721-002-b7f3 | 2026-07-21 18:07:08 | 工作台「缺陷数量」口径修正：duty=我 OR 当前处理人含我（原仅 duty=我，处理人非责任人漏统计致偏少）
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/workbench/service.py（get_summary defect_stmt 加 or_(duty_user_id==me, now_handle_user.like '%me%')）+ backend/app/modules/ppm/workbench/tests/test_workbench_service.py（新增 2 用例：handle_me_not_duty 计 / excludes_unrelated 不计）
+需求：用户反馈 /ppm/workbench「我的待办」指标卡「缺陷数量」显示 1 条，应为 3 条。
+根因：defect_count 原口径只按 duty_user_id=me（责任人）过滤，漏掉"我是当前处理人(now_handle_user 含我)但不是责任人"的缺陷。实测（唐健 17f3…）：仅 1 条 bug 缺陷 duty=我 且未完成 → 显示 1；但"我负责或我处理"口径下有 3 条（啊是多少啊=duty我 / E2E测试-创建线-问题=处理人我 / smoke submit direct=两者都我）。且同工作台「待办列表」用的是处理人口径，指标卡用责任人口径，两处口径不一致是"奇怪"根源。经用户确认口径=「我负责 OR 我处理」。
+方案：defect_stmt 去单一 duty where，改 status!='已完成' AND or_(duty_user_id==me, now_handle_user.like('%me%'))。UUID 定长无前缀歧义，LIKE 子串安全（与待办分支 Python split 同义，SQL 侧统计用 LIKE 即可）。or_ 已在 service.py:15 导入。
+结果：后端 workbench 39 passed（原 37 + 新增 2），ruff format/check 通过；真实库按新口径算出 3 条（与用户预期一致）。待 commit + rebuild backend 部署 + 用户验证（指标卡缺陷数量显示 3 条）。
+
+
+## ql-20260721-003-c90e | 2026-07-21 15:40:00 | 项目计划 project_manager_name 后端兜底回填（修复选了经理只带 id 不带 name 致列表裸露 UUID）
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/plan/service.py（新增 _lookup_user_display_name + create_ps_project_plan/update_ps_project_plan 接入兜底）+ backend/app/modules/ppm/plan/tests/test_project_plan_manager_name_backfill.py（新增 7 用例）
+需求：用户反馈 https://crrcdt.ppdmq.top/api/ppm/project-plan 返回的 project_manager_name 全空但 id 有值，要求后端加处理（先误解为"必填校验"，澄清后定为兜底回填，避免硬 422 卡死编辑流）。
+根因：① project_manager_name 是 ppm_ps_project_plan 落库字段（model.py:198），列表 list_ps_project_plans（service.py:392）只读落库值不 join 反查，故 name 空=库里就是空。② 生产实查 5 行 name 全 NULL、id 可 join users 出真人（王鹏/孙虓/修京廷/林元磊），created_at 全是 2026-07-21 当天新建，非历史迁移数据。③ 前端表单 project_manager_name 是隐藏字段（无 Form.Item），靠 onManagerChange 用 memberOptsRef 反查 options.label 回填；projectMember 模式下 options 分页/过滤异步加载，选中项可能不在缓存→opt?.label 拿不到→name 落 null。后端 create 只对 project_name 兜底（service.py:436），对 project_manager_name 无兜底，传 null 原样落库。另 _Crud.update 跳过 None 值（crud.py:171-179），update 漏传 name 也不更新。
+方案：后端兜底回填（非硬校验）。① 新增 _lookup_user_display_name 查 users.display_name（与 2026-07-21 生产回填 SQL 同口径；区别于既有 _lookup_user_name 查 PpmProjectMember.user_name 成员冗余口径）。② create：有 project_manager_id 且 name 为空（空串/None，strip 判空）时反查补上，显式传的 name 不覆盖。③ update：name 空时，有效经理 id 优先取 data 里的新 id（切换场景，exclude_unset 下前端碰过经理字段才带 id），缺省回退 DB 现值，再反查补上。显式 name 不覆盖。
+结果：先用 SQL 回填生产 5 行存量（UPDATE 5，验证 still_empty=0，王鹏/孙虓×2/修京廷/林元磊）。TDD：7 用例先红（3 核心回填失败）后绿全过；plan 子域 123 passed 零回归；ruff format/check + mypy 干净。待 commit + rebuild backend 部署 + 用户验证（新建/编辑项目计划不再出现 name 空）。
+
+
+## ql-20260722-001-b4c1 | 2026-07-22 09:00:48 | 看板任务详情「任务描述」显示暂无描述修复——回填 ppm_plan_task.task_description 历史空值（从关联明细同步）
+状态：已完成
+关联变更：（无）
+文件：backend/migrations/versions/20260722_backfill_plan_task_task_description.py（新增 data migration，revision=20260722_backfill_task_desc，down_revision=20260721_ps_plan_add_created_by）
+需求：用户反馈看板（/ppm/kanban）任务详情抽屉里「任务描述」显示「暂无描述」，但任务实际应有描述。
+根因：建任务（PlanTask）时把明细 task_description 带到 ppm_plan_task.task_description 是 2026-07-20（ql-20260720-007，commit a7fc4be1）才加的逻辑。在此之前建的 600+ 老任务 task_description 全为 NULL——但其关联明细 ppm_ps_plan_node_detail.task_description 有值（描述滞留在明细里）。前端 KanbanTaskDetailDrawer 的 `task.task_description ?? desc` fallback 拿不到（content 也无 \n\n 描述分隔符，desc 恒空）→ 显示「暂无描述」。DB 实测：627 个任务仅 1 个有 task_description、626 个 NULL；604 个关联明细且明细全部有描述；0 个 content 含 \n\n。
+方案：data migration 纯 UPDATE 回填——`UPDATE ppm_plan_task SET task_description = d.task_description FROM ppm_ps_plan_node_detail d WHERE ps_plan_node_detail_id=d.id AND d.task_description 非空 AND t.task_description IS NULL`。① 仅回填 NULL 行，重复 apply 幂等安全；② 不动 updated_at（纯数据修复，保留任务原始更新时间）；③ downgrade 留空（清空会丢用户已编辑值，不可逆）。迁移链核实：本地 + 容器 alembic heads 均唯一 `20260721_ps_plan_add_created_by`（无多 head/孤儿，20260722/23/24 那条链已被接上）。
+结果：本地容器 docker cp migration 文件后 alembic upgrade head，NULL 626→23（剩 23 个无明细任务本就无描述来源，保持空正确），604 个关联明细任务现全有 task_description；alembic_version=20260722_backfill_task_desc；抽查「质量生产异常开发设计」等任务 task_description 已从明细回填内容正确。前端零改动（逻辑本就对，DB 有值即显示，刷新看板生效）。待 commit + 生产（阿里云）部署 migration apply + 用户浏览器验证（任务详情显示描述）。
+
+## ql-20260722-004 | 2026-07-22 11:45:00 | 问题清单创建人可见修复 + 详情页展示创建人/创建时间
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/common/data_scope.py（problem_scope_clause 加 created_by==user.id）+ backend/app/modules/ppm/problem/schema.py（ProblemListResp 加 created_by_name）+ backend/app/modules/ppm/problem/router.py（list 批量 + get 单条反查 display_name 填 created_by_name）+ backend/app/modules/ppm/common/tests/test_data_scope.py（新增 test_problem_creator_sees_own_created）+ frontend/src/lib/ppm/types.ts（ProblemList 加 created_by_name）+ frontend/src/app/(dashboard)/ppm/_components/problem-detail-modal.tsx（问题信息区加创建人/创建时间两行）
+需求：①问题清单 /ppm/problem-list 新建问题后创建人看不到自己创建的问题（创建人非项目经理/责任人/处置人时），创建人也应可见；②问题详情里要展示创建人和创建时间。
+根因：可见范围过滤 problem_scope_clause（data_scope.py:89）只覆盖 经理项目集 ∪ duty（责任人）∪ audit（验证人）∪ now_handle（处置人），漏了创建人 created_by；而编辑/删除放行 can_operate_problem 是认创建人的 → 出现「能编辑却在列表看不见」的矛盾。详情页本就没有创建人/创建时间字段展示；created_by 只存 id，无 created_by_name 落库列。
+修法：① problem_scope_clause 补 clauses.append(PpmProblemList.created_by == user.id)，创建人纳入可见范围（与 can_operate 口径对齐）。② 详情展示创建人/创建时间：schema ProblemListResp 加 created_by_name（非 ORM 映射）；router list 端点批量反查创建人 display_name（与处置人合并思路，避免 N+1）、get 详情端点单条 session.get(User) 反查；前端 types ProblemList 加 created_by_name，problem-detail-modal 问题信息区加「创建人/创建时间」两行（创建时间精确到秒 dayjs format YYYY-MM-DD HH:mm:ss）。
+测试：后端 data_scope + problem 测试 71 passed（含新增创建人可见用例，修复前该用例 total=0 红、修复后 total=1 绿）；前端 problem-detail-modal 10 passed；tsc --noEmit 无错。用项目 venv（.venv/Scripts/python.exe，含 python-multipart）跑后端测试，系统 Python 缺该依赖会在 collection 阶段报错（与本次改动无关）。
+工具坑：sillyspec quick 会话 guard 不落盘 → --done 兜底补写编号错误（写成 ql-20260722-001-8e37 而非 004）且 output 摘要未真正落盘（3 个 step 摘要全丢），本条目为手动补写。详见 docs/sillyspec/quick-guard-missing-output-lost.md。
+遗留：①历史 created_by=NULL 的问题创建人列显示「—」（无可反查来源，正确行为）；②需部署后人工验证（新建问题后创建人在列表可见 + 详情显示创建人/创建时间）。
+
+
+## ql-20260722-005 | 2026-07-22 13:47:19 | 看板任务详情抽屉「子任务」tab（恒空）改为「执行记录」tab（只读），对齐任务计划/问题清单详情
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-task-detail-drawer.tsx（子任务tab→执行记录tab只读，复用 listTaskExecutes({plan_task_id,page:1,page_size:100})；删子任务死代码 subtasks state/listKanbanSubtasks/toggleKanbanSubtask/onToggleSubtask/KanbanSubtask import/Checkbox import；activeTab 默认 executes；保留评论+附件tab）+ frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-task-detail-drawer.test.tsx（新增5用例）+ frontend/src/test/setup.ts（补 ResizeObserver polyfill，antd Drawer 在 jsdom 需要，同 localStorage/matchMedia 模式 if-guard）
+需求：用户反馈看板 /ppm/kanban 任务详情抽屉下面「子任务」永远空白问是什么；澄清后要求改成显示「执行记录」，参考任务计划/问题清单详情（只读即可，不要填报）。
+根因：「子任务」功能只做一半——ppm_kanban_subtask 表建了，后端只有 list/toggle（model.py 注释「FR-01 仅要求勾选，新建/删除留待后续 task」），前端无录入入口；全项目除测试外无任何写入 → 表恒空 → 每个 task 详情都显示空「子任务」。不是 bug 是功能未接通。看板任务 KanbanTaskCard.id 即 PlanTask.id，可直接当 plan_task_id 复用任务计划同款 listTaskExecutes。
+方案：纯前端，抽屉 Tabs 第一项从「子任务」换成「执行记录」（label 带计数）。loadDetail 里 listKanbanSubtasks → listTaskExecutes({plan_task_id:id,page:1,page_size:100})，records=page.items；渲染只读4列表（开始/结束时间 dayjs 精确到秒/耗时人天/说明），空显示「暂无执行记录」，样式对齐 task-detail-modal.tsx L247-286。删子任务全部死代码。测试参考 problem-detail-modal.test.tsx 的 vi.mock("@/lib/ppm/task")+{items,total,page,page_size}。
+结果：目标5测试全过（plan_task_id 拉取参数守护/空态/有数据渲染说明+耗时/无子任务tab/task=null 不拉）；全量 vitest run 963 passed 零回归（94 files）；tsc --noEmit 过；next lint 改的3文件无 warning（既有 warning 无关）。已 git add 暂存3文件，未 commit（待用户统一提交）。模块文档 app-ppm-pages.md 已同步（KanbanPage 条目补详情抽屉tab + 变更索引）。
+工具坑：再次复现 docs/sillyspec/finished/quick-guard-missing-output-lost.md——quick 会话 guard 不落盘，--done 走兜底分支 output 摘要全丢 + 编号错（CLI 给 ql-20260722-002，真实应为 005），按该坑绕过方案手动补写本条目。另：启动时 step prompt 的「平台模式 specDir=~/.sillyhub」与 .sillyspec-platform.json 的 specRoot=项目内 .sillyspec 不一致（双根），文档须以项目内 .sillyspec 为准（首次误更 ~/.sillyhub 版已弃）。
+遗留：需用户浏览器验证（看板任务详情显示执行记录表：有执行数据的任务显示行，无的显示「暂无执行记录」）；部署需 docker compose --build frontend（纯前端改动）。
+
+## ql-20260722-006 | 2026-07-22 PPM 权限统一到「项目成员角色」（项目计划/项目维护读范围 + 项目计划编辑/删除）
+状态：已完成
+关联变更：（无，独立权限改造）
+文件：backend/app/modules/ppm/data_scope.py（重写：DataScope 改 (is_full, manager_project_ids, creator_user_id)；get_ppm_data_scope 复用 common.data_scope 的 is_super_admin/manager_project_ids；build_plan/project_scope_clause 用 manager_project_ids+created_by；删 get_user_role_keys/_user_org_subtree/DEPT_BOSS_KEY/PROJECT_MANAGER_KEY 及 RBAC/org import，保留 User import；新增 plan_operable/plan_operable_by_scope/compute_plan_can_operate/can_operate_plan）+ backend/app/modules/ppm/plan/service.py（新增 PlanForbidden(403) + update/delete_ps_project_plan 加 *, user 参数与 _assert_can_operate；注释更新）+ backend/app/modules/ppm/plan/schema.py（PsProjectPlanResp 加 can_edit/can_delete）+ backend/app/modules/ppm/plan/router.py（list/get 填 can_edit/can_delete；get 注入 scope；update/delete 透传 user）+ backend/app/modules/ppm/plan/model.py + project/model.py（过时注释清理）+ backend/app/modules/ppm/plan/tests/test_project_plan_data_scope.py（重写：seed PpmProjectMember.role_name，覆盖经理/非经理/多角色/创建人/并集/隔离/空 + can_operate 写校验 + compute 纯函数）+ test_service.py + test_project_plan_manager_name_backfill.py（update 调用补 user=超管）+ frontend/src/lib/ppm/types.ts（PsProjectPlan 加 can_edit/can_delete）+ frontend/src/app/(dashboard)/ppm/project-plans/page.tsx（编辑/删除门改读 p.can_edit/can_delete，清理 matchAnyUser/useSession/currentUserId）+ frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（readOnly 改读 plan.can_edit，删 projectManagerId state）
+需求：用户要求把「项目计划里配置的项目经理(project_manager_id)能看到/操作项目计划·问题清单·任务计划」改成「由项目→项目成员里配置的角色控制」。两次 AskUserQuestion 确认：① 部门经理也统一只认项目成员角色（不再按组织树自动看本部门全部项目）；② 「看得到」+「能操作」都统一。
+依据：PPM 原有两套数据范围——common/data_scope.py（任务/问题，已用 PpmProjectMember.role_name）与根 data_scope.py（项目计划/项目维护，仍用 RBAC XMJL/DEPTBOSS + project_manager_id + 组织树）。问题清单已有 can_operate_problem(超管‖创建人‖本项目经理‖责任人) + can_edit/can_delete 蓝本（problem/service.py _assert_can_operate/compute_can_operate、schema、router、ProblemForbidden）。本次把后者对齐前者，单一可信源 = 项目成员角色。校验子代理发现硬伤：User import 不能删（get_ppm_data_scope 签名 Annotated[User] 用到，删则启动崩）；manager_project_ids 返回 set 需 frozenset() 转。
+方案：① 读范围——DataScope 改字段，get_ppm_data_scope 复用 common 的 manager_project_ids（项目成员 role_name 逗号拆分精确匹配部门经理/项目经理/开发经理/业务经理），经理分支 project_id/id IN manager_project_ids，创建人分支 created_by==creator_user_id。② 写校验——plan_operable(创建人‖本项目经理) + can_operate_plan(超管直通)；service update/delete 先 get 再 _assert_can_operate 失败 raise PlanForbidden(403)；router list/get 用 compute_plan_can_operate(scope) 免查库填 can_edit/can_delete。③ 前端 project-plans 编辑/删除门 disabled 读 p.can_edit/p.can_delete；milestone-details readOnly=!(plan.can_edit)（页面级总开关，经理角色成员获里程碑树完整操作权）。
+结果：后端 plan/tests + project/tests 177 passed + data_scope 测试 61 passed 零回归；ruff format/check + mypy 全过。前端 tsc --noEmit 过；next lint 仅历史 warning 无新错。模块文档 ppm.md 加变更索引条目。
+行为变化（预期）：① 普通用户获「自己创建的」项目计划/项目可见性（与任务/问题一致）；② 经理判定从 RBAC 角色+project_manager_id+组织树 → 项目成员 role_name（持 XMJL/DEPTBOSS 但非成员经理角色者不再因系统角色可见，除非是创建人）；③ 部门经理不再自动看本部门全部项目，需在成员配「部门经理」角色；④ 里程碑页经理角色成员（非 project_manager_id）可编辑里程碑树。
+明确不在本次范围：项目维护(PpmProjectMaintenance)写操作不加 can_operate（前端无 project_manager_id 门、后端本就开放，加写限制超范围）；任务计划「操作」按指派人(user_id)控制非本次语义；organization_id 列/索引/迁移保留不删仅改注释。
+遗留：① 端到端部署验证（rebuild backend + frontend，用「项目成员配项目经理角色但非该计划 project_manager_id」的人登录确认项目计划/里程碑页可见且可编辑/删除；非经理非创建人确认不可见且按钮禁用；部门经理按成员角色可见）；② backend/openapi.json 未重新生成（PsProjectPlanResp 新增 can_edit/can_delete、get 端点加 scope 依赖），前端类型手写已覆盖不影响功能，后续重新生成对齐；③ 历史 created_by/project_id 为 NULL 的老计划非经理非超管不可见（与 task NULL 口径一致，符合预期）。
+坑：无。两套 data_scope 文件保留（common 管任务/问题，根管项目计划/项目维护），根文件复用 common 的 manager_project_ids/is_super_admin 避免重复；DataScope 字段改名后需同步所有构造点（grep 确认仅 test_project_plan_data_scope.py + service.py 注释）。
+
+
+## ql-20260722-008-702f | 2026-07-22 15:51:35 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-search-bar.tsx
+
+需求：看板 /ppm/kanban 查询条件移除「截止时间」字段。
+方案：仅改前端 kanban-search-bar.tsx——删除「截止时间」Field(RangePicker) 及其内部 dateValue/onDateChange、清理不再使用的 import(DatePicker/dayjs/Dayjs) 与顶部注释对应行；保留人员/状态/所属项目/任务关键词 4 个 Field，grid-cols-4 正好一行。store(stores/kanban.ts) 的 start_date/end_date 与 API 层(lib/ppm/kanban.ts 的 query 构造、types.ts 的 KanbanQueryReq) 作后端查询契约保留不动，前端仅不再有入口设置它们。
+结果：grep 该文件 DatePicker/dayjs/Dayjs/dateValue/onDateChange/start_date/end_date/截止 均无残留；改动为纯删除、删的恰是可能 unused 的符号故无 unused 风险；已 git add 暂存(由用户统一提交)。
+影响：仅看板查询条件 UI；后端查询能力未变。
+遗留：① 生效需 rebuild 前端(docker compose --build frontend)；② 未单独跑 tsc/eslint(纯删除干净改动，commit 时 ci-check hook 会跑全量 frontend 兜底)。
+坑：quick --done 收尾在 QUICKLOG 留下重复「状态」行(已完成+进行中并存)且 --output 仅落到「结果」字段，已手动补正为归档格式。

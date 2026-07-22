@@ -524,21 +524,3 @@ created_at: 2026-07-14T09:20:24
 关联变更：（无）
 文件：frontend/src/components/ppm-project-plan-form.tsx
 结果：清理 status 字段 7 处引用（文件头注释段、FormValues、edit 回填、create setFieldsValue、Form initialValues、提交 payload、Form.Item+Row2 双列改单字段独占行）。表单不再显示或编辑「完成状态」；后端 schema.status 默认 draft 保留不动；列表页无该列；详情组件 ppm-project-plan-detail.tsx 的 statusLabel「状态」展示未改（语义不同，待用户确认）。
-
-## ql-20260721-002-b7f3 | 2026-07-21 18:07:08 | 工作台「缺陷数量」口径修正：duty=我 OR 当前处理人含我（原仅 duty=我，处理人非责任人漏统计致偏少）
-状态：已完成
-关联变更：（无）
-文件：backend/app/modules/ppm/workbench/service.py（get_summary defect_stmt 加 or_(duty_user_id==me, now_handle_user.like '%me%')）+ backend/app/modules/ppm/workbench/tests/test_workbench_service.py（新增 2 用例：handle_me_not_duty 计 / excludes_unrelated 不计）
-需求：用户反馈 /ppm/workbench「我的待办」指标卡「缺陷数量」显示 1 条，应为 3 条。
-根因：defect_count 原口径只按 duty_user_id=me（责任人）过滤，漏掉"我是当前处理人(now_handle_user 含我)但不是责任人"的缺陷。实测（唐健 17f3…）：仅 1 条 bug 缺陷 duty=我 且未完成 → 显示 1；但"我负责或我处理"口径下有 3 条（啊是多少啊=duty我 / E2E测试-创建线-问题=处理人我 / smoke submit direct=两者都我）。且同工作台「待办列表」用的是处理人口径，指标卡用责任人口径，两处口径不一致是"奇怪"根源。经用户确认口径=「我负责 OR 我处理」。
-方案：defect_stmt 去单一 duty where，改 status!='已完成' AND or_(duty_user_id==me, now_handle_user.like('%me%'))。UUID 定长无前缀歧义，LIKE 子串安全（与待办分支 Python split 同义，SQL 侧统计用 LIKE 即可）。or_ 已在 service.py:15 导入。
-结果：后端 workbench 39 passed（原 37 + 新增 2），ruff format/check 通过；真实库按新口径算出 3 条（与用户预期一致）。待 commit + rebuild backend 部署 + 用户验证（指标卡缺陷数量显示 3 条）。
-
-## ql-20260721-003-c90e | 2026-07-21 15:40:00 | 项目计划 project_manager_name 后端兜底回填（修复选了经理只带 id 不带 name 致列表裸露 UUID）
-状态：已完成
-关联变更：（无）
-文件：backend/app/modules/ppm/plan/service.py（新增 _lookup_user_display_name + create_ps_project_plan/update_ps_project_plan 接入兜底）+ backend/app/modules/ppm/plan/tests/test_project_plan_manager_name_backfill.py（新增 7 用例）
-需求：用户反馈 https://crrcdt.ppdmq.top/api/ppm/project-plan 返回的 project_manager_name 全空但 id 有值，要求后端加处理（先误解为"必填校验"，澄清后定为兜底回填，避免硬 422 卡死编辑流）。
-根因：① project_manager_name 是 ppm_ps_project_plan 落库字段（model.py:198），列表 list_ps_project_plans（service.py:392）只读落库值不 join 反查，故 name 空=库里就是空。② 生产实查 5 行 name 全 NULL、id 可 join users 出真人（王鹏/孙虓/修京廷/林元磊），created_at 全是 2026-07-21 当天新建，非历史迁移数据。③ 前端表单 project_manager_name 是隐藏字段（无 Form.Item），靠 onManagerChange 用 memberOptsRef 反查 options.label 回填；projectMember 模式下 options 分页/过滤异步加载，选中项可能不在缓存→opt?.label 拿不到→name 落 null。后端 create 只对 project_name 兜底（service.py:436），对 project_manager_name 无兜底，传 null 原样落库。另 _Crud.update 跳过 None 值（crud.py:171-179），update 漏传 name 也不更新。
-方案：后端兜底回填（非硬校验）。① 新增 _lookup_user_display_name 查 users.display_name（与 2026-07-21 生产回填 SQL 同口径；区别于既有 _lookup_user_name 查 PpmProjectMember.user_name 成员冗余口径）。② create：有 project_manager_id 且 name 为空（空串/None，strip 判空）时反查补上，显式传的 name 不覆盖。③ update：name 空时，有效经理 id 优先取 data 里的新 id（切换场景，exclude_unset 下前端碰过经理字段才带 id），缺省回退 DB 现值，再反查补上。显式 name 不覆盖。
-结果：先用 SQL 回填生产 5 行存量（UPDATE 5，验证 still_empty=0，王鹏/孙虓×2/修京廷/林元磊）。TDD：7 用例先红（3 核心回填失败）后绿全过；plan 子域 123 passed 零回归；ruff format/check + mypy 干净。待 commit + rebuild backend 部署 + 用户验证（新建/编辑项目计划不再出现 name 空）。
