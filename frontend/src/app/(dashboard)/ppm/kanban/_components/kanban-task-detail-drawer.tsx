@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * KanbanTaskDetailDrawer — 任务详情抽屉(只读为主 + 评论/子任务交互)。
+ * KanbanTaskDetailDrawer — 任务详情抽屉(只读为主 + 评论交互)。
  *
  * 重排版(2026-07-21 ql-006,易读优化):
  *  - 头部:状态 Tag + 逾期红标(priority=1);
@@ -9,23 +9,24 @@
  *  - 任务描述独立卡片块(优先 task_description,fallback 从 content 拆);
  *  - 基本信息双列网格(项目/负责人/截止/预估工时/模块?/配合人员?);
  *  - 进度条 + 有备注才显;
- *  - Tabs:子任务/评论/附件。
+ *  - Tabs:执行记录/评论/附件。
+ *
+ * ql-20260722-002: 「子任务」tab(原 ppm_kanban_subtask 表只做一半,无录入入口恒空)
+ * 改为「执行记录」tab(只读),复用 listTaskExecutes({plan_task_id}),
+ * 对齐任务计划/问题清单详情的执行记录表。看板任务 KanbanTaskCard.id 即 PlanTask.id。
  *
  * 数据:TaskCardVO 现暴露 task_description/module_name/work_partner/remarks。
  * 「修改负责人」入口已移除(改负责人走拖拽 + AssignTaskDialog)。
  */
 import { useCallback, useEffect, useState } from "react";
-import { Button, Checkbox, Drawer, Input, Progress, Spin, Tabs, Tag, message } from "antd";
+import dayjs from "dayjs";
+import { Button, Drawer, Input, Progress, Spin, Tabs, Tag, message } from "antd";
 
 import { PpmFileUrls } from "@/components/ppm-file-urls";
 import { ApiError } from "@/lib/api";
-import {
-  addKanbanComment,
-  listKanbanComments,
-  listKanbanSubtasks,
-  toggleKanbanSubtask,
-} from "@/lib/ppm/kanban";
-import type { KanbanComment, KanbanSubtask, KanbanTaskCard } from "@/lib/ppm/types";
+import { addKanbanComment, listKanbanComments } from "@/lib/ppm/kanban";
+import { listTaskExecutes } from "@/lib/ppm/task";
+import type { KanbanComment, KanbanTaskCard, TaskExecute } from "@/lib/ppm/types";
 import { fmtDay } from "../../shared";
 
 function statusTagOf(status: string | null): { text: string; color: string } {
@@ -58,24 +59,24 @@ export function KanbanTaskDetailDrawer({
 }) {
   const [loading, setLoading] = useState(false);
   const [comments, setComments] = useState<KanbanComment[]>([]);
-  const [subtasks, setSubtasks] = useState<KanbanSubtask[]>([]);
+  const [records, setRecords] = useState<TaskExecute[]>([]);
   const [commentDraft, setCommentDraft] = useState("");
-  const [activeTab, setActiveTab] = useState("subtasks");
+  const [activeTab, setActiveTab] = useState("executes");
 
   const taskId = task?.id ?? null;
 
   const loadDetail = useCallback(async (id: string) => {
     setLoading(true);
     try {
-      const [cs, ss] = await Promise.all([
+      const [cs, page] = await Promise.all([
         listKanbanComments(id),
-        listKanbanSubtasks(id),
+        listTaskExecutes({ plan_task_id: id, page: 1, page_size: 100 }),
       ]);
       setComments(cs);
-      setSubtasks(ss);
+      setRecords(page.items ?? []);
     } catch (err) {
       setComments([]);
-      setSubtasks([]);
+      setRecords([]);
       void message.error(
         err instanceof ApiError ? err.message : "加载详情失败",
       );
@@ -87,26 +88,9 @@ export function KanbanTaskDetailDrawer({
   useEffect(() => {
     if (!task) return;
     setCommentDraft("");
-    setActiveTab("subtasks");
+    setActiveTab("executes");
     void loadDetail(task.id);
   }, [task, loadDetail]);
-
-  const onToggleSubtask = async (subtaskId: string) => {
-    if (!taskId) return;
-    const prev = subtasks;
-    setSubtasks((cur) =>
-      cur.map((s) => (s.id === subtaskId ? { ...s, done: !s.done } : s)),
-    );
-    try {
-      const updated = await toggleKanbanSubtask(taskId, subtaskId);
-      setSubtasks((cur) => cur.map((s) => (s.id === subtaskId ? updated : s)));
-    } catch (err) {
-      setSubtasks(prev);
-      void message.error(
-        err instanceof ApiError ? err.message : "勾选失败",
-      );
-    }
-  };
 
   const onAddComment = async () => {
     if (!taskId) return;
@@ -214,35 +198,58 @@ export function KanbanTaskDetailDrawer({
           </>
         )}
 
-        {/* Tabs:子任务 / 评论 / 附件 */}
+        {/* Tabs:执行记录 / 评论 / 附件 */}
         <Tabs
           activeKey={activeTab}
           onChange={setActiveTab}
           items={[
             {
-              key: "subtasks",
-              label: "子任务",
+              key: "executes",
+              label: `执行记录（${records.length}）`,
               children: (
                 <div className="min-h-48">
-                  {subtasks.length === 0 ? (
-                    <EmptyHint text="暂无子任务" />
+                  {records.length === 0 ? (
+                    <EmptyHint text="暂无执行记录" />
                   ) : (
-                    <ul className="space-y-2">
-                      {subtasks.map((s) => (
-                        <li
-                          key={s.id}
-                          className="flex items-center gap-2 rounded bg-muted/20 px-3 py-2"
-                        >
-                          <Checkbox
-                            checked={s.done}
-                            onChange={() => void onToggleSubtask(s.id)}
-                          />
-                          <span className={s.done ? "text-muted-foreground line-through" : ""}>
-                            {s.title}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
+                    <div className="overflow-hidden rounded-md border border-border">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-muted/50 text-left text-muted-foreground">
+                            <th className="px-3 py-2 font-medium">开始时间</th>
+                            <th className="px-3 py-2 font-medium">结束时间</th>
+                            <th className="px-3 py-2 font-medium">耗时</th>
+                            <th className="px-3 py-2 font-medium">说明</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {records.map((e) => (
+                            <tr
+                              key={e.id}
+                              className="border-t border-border hover:bg-muted/30"
+                            >
+                              <td className="px-3 py-2">
+                                {e.actual_start_time
+                                  ? dayjs(e.actual_start_time).format(
+                                      "YYYY-MM-DD HH:mm:ss",
+                                    )
+                                  : "—"}
+                              </td>
+                              <td className="px-3 py-2">
+                                {e.actual_end_time
+                                  ? dayjs(e.actual_end_time).format(
+                                      "YYYY-MM-DD HH:mm:ss",
+                                    )
+                                  : "—"}
+                              </td>
+                              <td className="px-3 py-2">
+                                {e.time_spent != null ? `${e.time_spent}人天` : "—"}
+                              </td>
+                              <td className="px-3 py-2">{e.execute_info ?? "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
                 </div>
               ),

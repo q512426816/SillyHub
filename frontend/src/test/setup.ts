@@ -40,3 +40,16 @@ if (!globalThis.matchMedia) {
       }) as MediaQueryList,
   });
 }
+
+// ResizeObserver polyfill: antd Drawer 等组件在 jsdom 需要 (与 matchMedia 同类)。
+if (!globalThis.ResizeObserver) {
+  Object.defineProperty(globalThis, "ResizeObserver", {
+    configurable: true,
+    writable: true,
+    value: class ResizeObserverStub {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver,
+  });
+}
