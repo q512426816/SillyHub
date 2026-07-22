@@ -166,6 +166,11 @@ class TaskExecute(BaseModel, table=True):
     end_remark: str | None = Field(default=None, sa_column=Column(String(500), nullable=True))
     execute_info: str | None = Field(default=None, sa_column=Column(String(2000), nullable=True))
     attach_group_id: str | None = Field(default=None, sa_column=Column(String(100), nullable=True))
+    # 文件 id 列表 (与 PlanTask/PpmProblemList 同语义, D-001@v1)
+    file_urls: list[str] = Field(
+        default_factory=list,
+        sa_column=Column(JSON, nullable=False, default=list),
+    )
     execute_user_id: uuid.UUID | None = Field(
         default=None, sa_column=Column(Uuid(as_uuid=True), nullable=True)
     )

@@ -173,6 +173,7 @@ class ExecutePlanReq(PydanticModel):
     execute_user_id: uuid.UUID | None = None
     start_remark: str | None = None
     end_remark: str | None = None
+    file_urls: list[str] | None = None
 
 
 class StartReq(PydanticModel):
@@ -204,6 +205,7 @@ class TaskExecuteCreate(PydanticModel):
     end_remark: str | None = None
     execute_info: str | None = None
     attach_group_id: str | None = None
+    file_urls: list[str] = Field(default_factory=list)
     execute_user_id: uuid.UUID | None = None
     check_info: str | None = None
     check_attach_group_id: str | None = None
@@ -236,6 +238,7 @@ class TaskExecuteUpdate(PydanticModel):
     end_remark: str | None = None
     execute_info: str | None = None
     attach_group_id: str | None = None
+    file_urls: list[str] | None = None
     execute_user_id: uuid.UUID | None = None
     check_info: str | None = None
     check_attach_group_id: str | None = None
@@ -269,6 +272,7 @@ class TaskExecuteResponse(PydanticModel):
     end_remark: str | None
     execute_info: str | None
     attach_group_id: str | None
+    file_urls: list[str]
     execute_user_id: uuid.UUID | None
     check_info: str | None
     check_attach_group_id: str | None

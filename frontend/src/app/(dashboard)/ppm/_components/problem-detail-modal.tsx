@@ -24,6 +24,7 @@ import dayjs from "dayjs";
 import { Button, Modal, Tag } from "antd";
 
 import { ApiError } from "@/lib/api";
+import { FileUpload } from "@/components/file-upload";
 import { FileViewer } from "@/components/file-viewer";
 import { isOverEstimate } from "@/lib/ppm/format";
 import { executeProblem, startProblem } from "@/lib/ppm/problem";
@@ -49,11 +50,13 @@ export interface ProblemDetailModalProps {
   onChanged?: () => void;
 }
 
-/** 跨天拆分的一行填报(日期/耗时/说明)。 */
+/** 跨天拆分的一行填报(日期/耗时/说明/附件)。 */
 export interface DetailDay {
   date: string;
   timeSpent: string;
   execInfo: string;
+  /** 当天附件(文件 id 列表, D-002 记录级归属)。 */
+  fileUrls: string[];
 }
 
 /** buildDetailDays 的输入(in-flight 执行记录的子集)。 */
@@ -61,11 +64,14 @@ export interface InflightLike {
   actual_start_time: string | null;
   time_spent: number | null;
   execute_info: string | null;
+  /** 首天 in-flight 已有附件(回填预填, D-003 / Design Grill B3)。 */
+  file_urls: string[] | null;
 }
 
 /**
  * 按 in-flight 执行记录的 actual_start_time ~ 今天 跨天拆分填报行 (复刻
- * task-detail-modal)。首条预填 inflight 的 time_spent/execute_info; 后续天空白。
+ * task-detail-modal)。首条预填 inflight 的 time_spent/execute_info/file_urls;
+ * 后续天空白(新记录尚未创建, D-003)。
  *
  * - inflight 为 null / actual_start_time 为 null → 返回 [] (无有效 in-flight)
  * - 超过 60 天 → 截断到 60 条 (兜底防死循环)
@@ -88,6 +94,8 @@ export function buildDetailDays(
           ? String(inflight.time_spent)
           : "",
       execInfo: i === 0 ? inflight.execute_info ?? "" : "",
+      // D-003: 首天回填 in-flight 已有附件; 后续天空 (新记录未创建)
+      fileUrls: i === 0 ? inflight.file_urls ?? [] : [],
     });
     cur = cur.add(1, "day");
     i += 1;
@@ -196,6 +204,8 @@ export function ProblemDetailModal({
           execute_info: d.execInfo || undefined,
           time_spent: ts !== undefined && !Number.isNaN(ts) ? ts : undefined,
           actual_end_time: endIso,
+          // D-007: 传了才更新, 空 → undefined 保留原值 (不清空附件)
+          file_urls: d.fileUrls.length ? d.fileUrls : undefined,
         });
       }
       showToast(true, action === "complete" ? "问题已完成" : "执行已保存");
@@ -315,6 +325,7 @@ export function ProblemDetailModal({
                 <th className="px-3 py-2 font-medium">结束时间</th>
                 <th className="px-3 py-2 font-medium">耗时</th>
                 <th className="px-3 py-2 font-medium">说明</th>
+                <th className="px-3 py-2 font-medium">附件</th>
               </tr>
             </thead>
             <tbody>
@@ -332,6 +343,10 @@ export function ProblemDetailModal({
                   </td>
                   <td className="px-3 py-2">{e.time_spent != null ? `${e.time_spent}人天` : "—"}</td>
                   <td className="px-3 py-2">{e.execute_info ?? "—"}</td>
+                  {/* D-004: 当天附件行内回显 (TaskExecute.file_urls) */}
+                  <td className="px-3 py-2">
+                    <FileViewer fileIds={e.file_urls ?? []} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -386,6 +401,24 @@ export function ProblemDetailModal({
                     )
                   }
                   className={`w-full ${inputCls}`}
+                />
+              </div>
+              {/* D-002/D-005: 每天各自一组附件; 首天 owner_id=inflightId, 后续天=null (新记录提交时才创建) */}
+              <div>
+                <label className="mb-1 block text-[11px] text-muted-foreground">
+                  附件
+                </label>
+                <FileUpload
+                  owner_type="ppm_task_execute"
+                  owner_id={idx === 0 ? inflightId : null}
+                  value={d.fileUrls}
+                  onChange={(next) =>
+                    setDetailDays((prev) =>
+                      prev.map((x, i) =>
+                        i === idx ? { ...x, fileUrls: next } : x,
+                      ),
+                    )
+                  }
                 />
               </div>
             </div>

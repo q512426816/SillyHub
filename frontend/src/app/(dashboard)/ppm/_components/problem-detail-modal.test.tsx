@@ -53,7 +53,7 @@ describe("buildDetailDays — 跨天拆分纯函数", () => {
   it("actual_start_time null → [] (无有效开始时间)", () => {
     expect(
       buildDetailDays(
-        { actual_start_time: null, time_spent: 1, execute_info: "x" },
+        { actual_start_time: null, time_spent: 1, execute_info: "x", file_urls: null },
         TODAY,
       ),
     ).toEqual([]);
@@ -65,6 +65,7 @@ describe("buildDetailDays — 跨天拆分纯函数", () => {
         actual_start_time: "2026-07-20T10:00:00Z",
         time_spent: null,
         execute_info: null,
+        file_urls: null,
       },
       TODAY,
     );
@@ -78,6 +79,7 @@ describe("buildDetailDays — 跨天拆分纯函数", () => {
         actual_start_time: "2026-07-18T10:00:00Z",
         time_spent: 1.5,
         execute_info: "首日说明",
+        file_urls: null,
       },
       TODAY,
     );
@@ -97,12 +99,49 @@ describe("buildDetailDays — 跨天拆分纯函数", () => {
     expect(r[2]?.execInfo).toBe("");
   });
 
+  it("首天预填 inflight.file_urls, 后续天空 (D-003 附件回填)", () => {
+    // task-13: 跨天拆分时首天回填 in-flight 已有附件, 后续天为新记录尚无附件。
+    const start = TODAY.subtract(1, "day").toISOString();
+    const r = buildDetailDays(
+      {
+        actual_start_time: start,
+        time_spent: 1,
+        execute_info: "首日说明",
+        file_urls: ["a", "b"],
+      },
+      TODAY,
+    );
+    expect(r).toHaveLength(2);
+    // D-003: 首天回填 in-flight 的附件 id 列表
+    expect(r[0]?.fileUrls).toEqual(["a", "b"]);
+    // 后续天空 (新记录未创建, 无附件)
+    expect(r[1]?.fileUrls).toEqual([]);
+  });
+
+  it("inflight.file_urls 为 null → 首天 fileUrls 空 (兜底, D-003)", () => {
+    const start = TODAY.subtract(1, "day").toISOString();
+    const r = buildDetailDays(
+      {
+        actual_start_time: start,
+        time_spent: 1,
+        execute_info: "x",
+        file_urls: null,
+      },
+      TODAY,
+    );
+    expect(r).toHaveLength(2);
+    // null → 空数组兜底 (?? [])
+    expect(r[0]?.fileUrls).toEqual([]);
+    expect(r[1]?.fileUrls).toEqual([]);
+  });
+
   it("time_spent null → 首条 timeSpent 空 (execute_info 仍预填)", () => {
     const r = buildDetailDays(
       {
         actual_start_time: "2026-07-20T10:00:00Z",
         time_spent: null,
         execute_info: "有说明无耗时",
+        file_urls: null,
       },
       TODAY,
     );
@@ -115,7 +154,7 @@ describe("buildDetailDays — 跨天拆分纯函数", () => {
     // 与 task-detail-modal 行为一致。100 天的区间被显著截断 (远小于 100)。
     const start = TODAY.subtract(100, "day").toISOString();
     const r = buildDetailDays(
-      { actual_start_time: start, time_spent: null, execute_info: null },
+      { actual_start_time: start, time_spent: null, execute_info: null, file_urls: null },
       TODAY,
     );
     expect(r).toHaveLength(61);
@@ -125,7 +164,7 @@ describe("buildDetailDays — 跨天拆分纯函数", () => {
   it("start 在未来 (today+2) → [] (异常数据, 开始时间不应晚于今天)", () => {
     const start = TODAY.add(2, "day").toISOString();
     const r = buildDetailDays(
-      { actual_start_time: start, time_spent: null, execute_info: null },
+      { actual_start_time: start, time_spent: null, execute_info: null, file_urls: null },
       TODAY,
     );
     expect(r).toEqual([]);
@@ -138,6 +177,7 @@ describe("buildDetailDays — 跨天拆分纯函数", () => {
       actual_start_time: todayIso,
       time_spent: null,
       execute_info: null,
+      file_urls: null,
     });
     expect(r.length).toBeGreaterThanOrEqual(1);
     expect(r[0]?.date).toBe(dayjs().format("YYYY-MM-DD"));

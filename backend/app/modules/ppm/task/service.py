@@ -352,6 +352,8 @@ class PlanTaskService:
             exc.end_remark = req.end_remark
         if req.execute_user_id is not None:
             exc.execute_user_id = req.execute_user_id
+        if req.file_urls is not None:
+            exc.file_urls = req.file_urls
         exc.current_user_id = req.execute_user_id or current_user_id
 
         # 推进状态机: submit/complete 都收口当前 in-flight 记录为 status=90

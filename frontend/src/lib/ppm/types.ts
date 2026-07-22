@@ -869,6 +869,8 @@ export interface ProblemExecuteReq {
   actual_start_time?: string | null;
   actual_end_time?: string | null;
   execute_user_id?: string | null;
+  /** 附件文件 id 列表 (D-001; 后端 list[str] | None = None, None=未传/显式清空二义) */
+  file_urls?: string[] | null;
 }
 
 // ===========================================================================
@@ -1003,6 +1005,8 @@ export interface ExecutePlanReq {
   execute_user_id?: string | null;
   start_remark?: string | null;
   end_remark?: string | null;
+  /** 附件文件 id 列表 (D-001; 后端 list[str] | None = None) */
+  file_urls?: string[] | null;
 }
 
 /** 启动任务请求(D-002: 未开始→进行中, 创建 in-flight TaskExecute 记 actual_start_time)。 */
@@ -1024,6 +1028,8 @@ export interface TaskExecute {
   end_remark: string | null;
   execute_info: string | null;
   attach_group_id: string | null;
+  /** 附件文件 id 列表 (D-001; 对齐后端 TaskExecuteResponse.file_urls 非空) */
+  file_urls: string[];
   execute_user_id: string | null;
   check_info: string | null;
   check_attach_group_id: string | null;
@@ -1064,6 +1070,8 @@ export interface TaskExecuteCreate {
   check_user_id?: string | null;
   check_flag?: string | null;
   current_user_id?: string | null;
+  /** 附件文件 id 列表 (D-001; 后端 list[str] = Field(default_factory=list), 非空可选) */
+  file_urls?: string[];
   status?: string;
 }
 
@@ -1083,6 +1091,8 @@ export interface TaskExecuteUpdate {
   check_user_id?: string | null;
   check_flag?: string | null;
   current_user_id?: string | null;
+  /** 附件文件 id 列表 (D-001; 后端 list[str] | None = None) */
+  file_urls?: string[] | null;
   status?: string | null;
 }
 

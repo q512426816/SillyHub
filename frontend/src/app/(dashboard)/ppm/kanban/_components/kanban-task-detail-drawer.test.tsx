@@ -94,6 +94,8 @@ describe("KanbanTaskDetailDrawer — 执行记录 tab(只读)", () => {
           end_remark: null,
           execute_info: "开发登录页",
           attach_group_id: null,
+          // task-10: TaskExecute.file_urls 必填 (下游 fixture 适配, 纯默认值)
+          file_urls: [],
           execute_user_id: null,
           check_info: null,
           check_attach_group_id: null,

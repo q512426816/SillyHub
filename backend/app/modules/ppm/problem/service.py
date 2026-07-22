@@ -530,6 +530,7 @@ class ProblemService:
         actual_start_time: datetime | None = None,
         actual_end_time: datetime | None = None,
         execute_user_id: uuid.UUID | None = None,
+        file_urls: list[str] | None = None,
     ) -> PpmProblemList:
         """执行问题：单事务收口 in-flight TaskExecute 并推进 3 态状态机。
 
@@ -592,6 +593,8 @@ class ProblemService:
         if execute_user_id is not None:
             exc.execute_user_id = execute_user_id
             exc.current_user_id = execute_user_id
+        if file_urls is not None:
+            exc.file_urls = file_urls
 
         # 收口 in-flight 记录 (终态 END 不可重复收口)
         self._assert_execute_transition(exc.status)

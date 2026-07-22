@@ -306,6 +306,96 @@ async def test_execute_plan_delete_cascades_execute(db_session):
     assert exc.id  # 仅确认返回了对象
 
 
+async def test_execute_plan_persists_file_urls_and_echoes(db_session):
+    """execute_plan 带 file_urls 落库 + TaskExecuteResponse 回显 (FR-02 / D-006 task 侧直传)。"""
+    from sqlalchemy import select as sa_select
+
+    from app.modules.ppm.task.model import TaskExecute
+    from app.modules.ppm.task.schema import TaskExecuteResponse
+
+    user_id = uuid.uuid4()
+    plan_id = await _seed_plan(db_session, user_id)
+    plan_svc = PlanTaskService(db_session)
+
+    # start: 建 in-flight TaskExecute(钉死 actual_start, execute 同日避免 D-004 跨天)
+    exc = await plan_svc.start(
+        plan_id,
+        execute_user_id=user_id,
+        actual_start_time=datetime(2026, 6, 20, 10, tzinfo=UTC),
+    )
+
+    # execute(submit) 带 file_urls: task router 直传 body, service 逐字段赋值落库
+    exc2 = await plan_svc.execute_plan(
+        ExecutePlanReq(
+            plan_task_id=plan_id,
+            task_execute_id=exc.id,
+            action="submit",
+            file_urls=["f1", "f2"],
+            actual_end_time=datetime(2026, 6, 20, 17, tzinfo=UTC),
+        ),
+        current_user_id=user_id,
+    )
+    assert exc2.file_urls == ["f1", "f2"]
+    assert exc2.status == STATUS_END
+
+    # 查 DB 证实落库(非仅内存对象)
+    row = (
+        (await db_session.execute(sa_select(TaskExecute).where(TaskExecute.id == exc.id)))
+        .scalars()
+        .one()
+    )
+    assert row.file_urls == ["f1", "f2"]
+
+    # Response 回显(from_attributes 映射)
+    assert TaskExecuteResponse.model_validate(row).file_urls == ["f1", "f2"]
+
+
+async def test_execute_plan_without_file_urls_preserves_existing(db_session):
+    """D-007 守卫: 不传 file_urls(None) 保留原值, 不被 default_factory=list 清空。
+
+    schema 用 ``list[str] | None = None`` + service ``if req.file_urls is not None`` 守卫;
+    若误用 default_factory=list, is not None 恒真、空 execute 会把已有附件覆盖为 []。
+    execute 收口后记录进入终态(90)不可再次 execute, 故先直接落 file_urls 再单次 execute 验保留。
+    """
+    from sqlalchemy import select as sa_select
+
+    from app.modules.ppm.task.model import TaskExecute
+
+    user_id = uuid.uuid4()
+    plan_id = await _seed_plan(db_session, user_id)
+    plan_svc = PlanTaskService(db_session)
+
+    exc = await plan_svc.start(
+        plan_id,
+        execute_user_id=user_id,
+        actual_start_time=datetime(2026, 6, 20, 10, tzinfo=UTC),
+    )
+
+    # 模拟记录已带附件(如前序保存写入): 直接落 file_urls=["x"]
+    exc.file_urls = ["x"]
+    await db_session.commit()
+    await db_session.refresh(exc)
+
+    # execute 不传 file_urls → req.file_urls 默认 None(D-007)
+    req = ExecutePlanReq(
+        plan_task_id=plan_id,
+        task_execute_id=exc.id,
+        action="complete",
+        actual_end_time=datetime(2026, 6, 20, 17, tzinfo=UTC),
+    )
+    assert req.file_urls is None  # 默认 None(非 []), is not None 守卫才有效
+    exc2 = await plan_svc.execute_plan(req, current_user_id=user_id)
+
+    # 原附件保留, 未被清空
+    assert exc2.file_urls == ["x"]
+    row = (
+        (await db_session.execute(sa_select(TaskExecute).where(TaskExecute.id == exc.id)))
+        .scalars()
+        .one()
+    )
+    assert row.file_urls == ["x"]
+
+
 # ---------------------------------------------------------------------------
 # TaskExecute CRUD
 # ---------------------------------------------------------------------------

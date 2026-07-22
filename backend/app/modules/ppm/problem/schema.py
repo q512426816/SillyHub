@@ -247,6 +247,8 @@ class ProblemExecuteReq(PydanticModel):
     actual_start_time: datetime | None = None
     actual_end_time: datetime | None = None
     execute_user_id: uuid.UUID | None = None
+    # 附件 (D-007: None 默认 + is not None 守卫, 区分「未传」与「显式清空」)
+    file_urls: list[str] | None = None
 
 
 # ===========================================================================

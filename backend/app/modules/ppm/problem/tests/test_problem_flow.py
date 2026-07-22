@@ -527,6 +527,53 @@ class TestStartExecute:
         )
         assert result.status == ProblemStatus.CLOSED.value
 
+    async def test_execute_submit_persists_file_urls(self, db_session: AsyncSession) -> None:
+        """execute_problem 传 file_urls → 落库 TaskExecute.file_urls (FR-03, D-006 service 层)。
+
+        与 router 透传用例 (test_router_execute_problem_passes_file_urls) 互补:
+        本用例直传 service kwarg, 证明 service 写库正确; router 用例证明 router
+        拆包层不丢字段 (D-006 防遮蔽)。
+        """
+        svc = ProblemService(db_session)
+        proj_id = await _make_project(db_session)
+        p = await _make_problem(svc, proj_id)
+        exc = await svc.start_problem(p.id, execute_user_id=_duty_uuid())
+
+        await svc.execute_problem(
+            p.id,
+            task_execute_id=exc.id,
+            action="submit",
+            file_urls=["p1"],
+        )
+        execs = await _problem_executes(db_session, p.id)
+        assert len(execs) == 1
+        assert execs[0].file_urls == ["p1"]
+
+    async def test_execute_omitted_file_urls_keeps_original(self, db_session: AsyncSession) -> None:
+        """execute_problem 不传 file_urls (None) → 保留 TaskExecute 原值 (D-007 守卫)。
+
+        service ``if file_urls is not None`` 守卫:None (未传/显式 None) 不覆盖原值,
+        区分「未传」与「显式清空 []」。TaskExecute.file_urls 默认 [], 此处预置
+        非空原值, 断言未被 None 清空。
+        """
+        svc = ProblemService(db_session)
+        proj_id = await _make_project(db_session)
+        p = await _make_problem(svc, proj_id)
+        exc = await svc.start_problem(p.id, execute_user_id=_duty_uuid())
+        # start 不写 file_urls (默认 []); 预置非空原值以验证「保留」语义
+        exc.file_urls = ["orig-keep"]
+        await db_session.commit()
+
+        await svc.execute_problem(
+            p.id,
+            task_execute_id=exc.id,
+            action="submit",
+            # 不传 file_urls → 保留原值, 不清空
+        )
+        execs = await _problem_executes(db_session, p.id)
+        assert len(execs) == 1
+        assert execs[0].file_urls == ["orig-keep"]
+
 
 def _duty_uuid():
     import uuid as _uuid
@@ -544,6 +591,58 @@ async def _problem_executes(session: AsyncSession, problem_id: object) -> list[T
         .scalars()
         .all()
     )
+
+
+# ===========================================================================
+# router→service 透传断言 (D-006 防遮蔽最后一道闸)
+# ===========================================================================
+
+
+async def test_router_execute_problem_passes_file_urls(client, auth_headers, db_engine) -> None:
+    """D-006 关键闸:PUT /problem-list/{id}/execute body.file_urls 经 router 逐字段
+    拆包透传到 service.execute_problem, 落库 TaskExecute.file_urls。
+
+    若 task-07 漏改 problem/router.py (execute_problem 端点漏传 ``file_urls=body.file_urls``),
+    file_urls 在 router 解包层即被丢弃 → DB 仍是 start 写入的默认 [], 此用例失败。
+    参照 memory「过度 mock 遮蔽真实 FK / scan-generate」教训:不只测 service 直传
+    kwarg (test_execute_submit_persists_file_urls 已覆盖), 必须经 router 拆包层
+    证明字段透传, 否则 service 单测全绿但生产 router 丢字段。
+
+    setup 用独立 session 建问题/start in-flight (完成即关, 释放连接);
+    execute 走 router PUT; 直接查 DB (另一空 identity map 的独立 session)
+    TaskExecute.file_urls 验证透传。不混用长生命周期 db_session 读 client 写入
+    (async session 共享 :memory: 单连接会触发 MissingGreenlet)。
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    factory = async_sessionmaker(bind=db_engine, class_=AsyncSession, expire_on_commit=False)
+
+    # setup (独立 session, 完成即关):建项目 + 问题 + start in-flight
+    async with factory() as s:
+        svc = ProblemService(s)
+        proj_id = await _make_project(s)
+        p = await _make_problem(svc, proj_id)
+        exc = await svc.start_problem(p.id, execute_user_id=_duty_uuid())
+        problem_id, exc_id = p.id, exc.id
+
+    # 经 router PUT execute, body 带 file_urls (这是被测的透传路径)
+    resp = await client.put(
+        f"/api/ppm/problem-list/{problem_id}/execute",
+        json={
+            "task_execute_id": str(exc_id),
+            "action": "submit",
+            "file_urls": ["r1", "r2"],
+        },
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+
+    # 直接查 DB 证明 router→service 透传落库。用全新 session (空 identity map,
+    # 无 start 时的陈旧 exc), 避免 expire_on_commit=False 下复用陈旧对象遮蔽。
+    async with factory() as s2:
+        execs = await _problem_executes(s2, problem_id)
+    assert len(execs) == 1
+    assert execs[0].file_urls == ["r1", "r2"]
 
 
 # ===========================================================================

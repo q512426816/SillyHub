@@ -28,6 +28,7 @@ import {
   startPlanTask,
 } from "@/lib/ppm/task";
 import type { PlanTask, TaskExecute } from "@/lib/ppm/types";
+import { FileUpload } from "@/components/file-upload";
 import { FileViewer } from "@/components/file-viewer";
 import { fmtDay, inputCls, taskStatusTag, Toast, useToast } from "../shared";
 
@@ -44,11 +45,12 @@ export interface TaskDetailModalProps {
   onChanged?: () => void;
 }
 
-/** 跨天拆分的一行填报(日期/耗时/说明)。 */
+/** 跨天拆分的一行填报(日期/耗时/说明/附件)。 */
 interface DetailDay {
   date: string;
   timeSpent: string;
   execInfo: string;
+  fileUrls: string[];
 }
 
 export function TaskDetailModal({
@@ -98,6 +100,7 @@ export function TaskDetailModal({
                   ? String(inflight.time_spent)
                   : "",
               execInfo: i === 0 ? inflight.execute_info ?? "" : "",
+              fileUrls: i === 0 ? inflight.file_urls ?? [] : [],
             });
             cur = cur.add(1, "day");
             i += 1;
@@ -170,6 +173,7 @@ export function TaskDetailModal({
           execute_info: d.execInfo || undefined,
           time_spent: ts !== undefined && !Number.isNaN(ts) ? ts : undefined,
           actual_end_time: endIso,
+          file_urls: d.fileUrls.length ? d.fileUrls : undefined,
         });
       }
       showToast(true, action === "complete" ? "任务已完成" : "执行已保存");
@@ -268,6 +272,7 @@ export function TaskDetailModal({
                 <th className="px-3 py-2 font-medium">结束时间</th>
                 <th className="px-3 py-2 font-medium">耗时</th>
                 <th className="px-3 py-2 font-medium">说明</th>
+                <th className="px-3 py-2 font-medium">附件</th>
               </tr>
             </thead>
             <tbody>
@@ -285,6 +290,9 @@ export function TaskDetailModal({
                   </td>
                   <td className="px-3 py-2">{e.time_spent != null ? `${e.time_spent}人天` : "—"}</td>
                   <td className="px-3 py-2">{e.execute_info ?? "—"}</td>
+                  <td className="px-3 py-2">
+                    <FileViewer fileIds={e.file_urls ?? []} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -339,6 +347,21 @@ export function TaskDetailModal({
                     )
                   }
                   className={`w-full ${inputCls}`}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-muted-foreground">
+                  附件
+                </label>
+                <FileUpload
+                  owner_type="ppm_task_execute"
+                  owner_id={idx === 0 ? inflightId : null}
+                  value={d.fileUrls}
+                  onChange={(v) =>
+                    setDetailDays((prev) =>
+                      prev.map((x, j) => (j === idx ? { ...x, fileUrls: v } : x)),
+                    )
+                  }
                 />
               </div>
             </div>

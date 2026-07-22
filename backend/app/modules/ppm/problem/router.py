@@ -319,6 +319,7 @@ async def execute_problem(
         actual_start_time=body.actual_start_time,
         actual_end_time=body.actual_end_time,
         execute_user_id=body.execute_user_id or user.id,
+        file_urls=body.file_urls,
     )
     return ProblemListResp.model_validate(problem)
 
