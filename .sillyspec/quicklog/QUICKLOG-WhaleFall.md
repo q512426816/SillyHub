@@ -89,3 +89,9 @@ created_at: 2026-07-21T08:48:56
 关联变更：（无）
 文件：frontend/src/components/ppm-project-plan-form.tsx
 结果：ql-014 加 hidden Form.Item 仍可能因 destroyOnClose 时序丢值。双保险:(1)submit payload project_name 改 values.project_name ?? plan?.project_name ?? null(edit 用 plan 初始值兜底);(2)onProjectChange 去掉 ?? id 回退(改 raw 没 project_name 时用 null,不再误填 id;create 后端按 project_id 兜底查名)。eslint 0 error tsc 0 error。
+
+## ql-20260721-016-e7c1 | 2026-07-21 17:55:00 | /ppm/project-plans 列表 project_name 兜底 id 修复(render+旧数据)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx + DB 数据修复
+结果:列表 render(v ?? p.id)在 project_name 为 null 时回退显示计划 id(误导)。之前 bug 写入旧数据 project_name=null/uuid。(1)render 改 v ?? "—";(2)DB 修 2 条坏数据(UPDATE project_name 按 project_id 查 ppm_project_maintenance.project_name,剩余 0 条坏)。配合 ql-014/015 保存逻辑,新数据正确+旧数据已修。

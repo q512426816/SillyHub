@@ -332,7 +332,7 @@ export default function ProjectPlansPage() {
           className="text-left font-medium hover:underline"
           onClick={() => setDetail({ open: true, planId: p.id })}
         >
-          {v ?? p.id}
+          {v ?? "—"}
         </button>
       ),
     },
