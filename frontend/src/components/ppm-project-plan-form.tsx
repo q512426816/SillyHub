@@ -263,6 +263,15 @@ export function PpmProjectPlanForm({
       width={920}
       maskClosable={false}
       destroyOnClose
+      styles={{
+        // body 限高:17 字段表单默认很长,超高时内部滚动不撑满屏幕;
+        // minHeight 给短内容一个下限,避免弹窗过矮 (ql-20260722-004)
+        body: {
+          maxHeight: "70vh",
+          minHeight: "300px",
+          overflowY: "auto",
+        },
+      }}
       footer={
         <div className="flex justify-end gap-2">
           <Button onClick={onClose}>

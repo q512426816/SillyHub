@@ -113,3 +113,9 @@ created_at: 2026-07-21T08:48:56
 关联变更：（无）
 文件：backend/app/modules/ppm/problem/schema.py + backend/app/modules/ppm/problem/tests/test_schema.py
 结果:根因=ProblemListUpdate(schema.py 56-78)缺 audit_user_id 字段,前端 problem-list edit 的 upd(_forms.tsx:266)发 audit_user_id(清空时=null),后端 ProblemListUpdate 无此字段+Pydantic extra=ignore 静默丢弃→验证人无法更新/清空(DB updated_at 变但字段不变)。ProblemListBase(create,line44)/ORM(line113)都有 audit_user_id,唯独 Update 缺;前端不发 audit_user_name 故无残留。排查逐层排除:apiFetch 不过滤 null、前端 upd 不过滤、后端 exclude_unset 实测保留显式 null、_Crud.update 能写 null(plan TestUpdateClearVsKeep 验证)、_backfill_names 只补 3 个 name 不动 id 字段。修复=Update 加 audit_user_id: uuid.UUID|None=None。新增 problem/tests/test_schema.py 3 测试(接收 value/null/absent)。3 passed + ruff 过。module_id/now_handle_user schema 本就有,清空正常。
+
+## ql-20260722-004-e5a2 | 2026-07-22 11:35:00 | /ppm/project-plans 新建弹窗加最小/最大高度
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-project-plan-form.tsx
+结果:PpmProjectPlanForm 的 Modal(ppm-project-plan-form.tsx:259,width=920,antd v6.4.4)承载 17 字段表单,body 无高度限制致弹窗过长撑屏。加 Modal styles.body={maxHeight:'70vh',minHeight:'300px',overflowY:'auto'}:超高时 body 内部滚动不撑满屏幕,minHeight 给短内容下限。antd v6 用 styles.body(bodyStyle 已废)。新建/编辑共用此 Modal 均受益。纯样式 prop,不改逻辑/字段。
