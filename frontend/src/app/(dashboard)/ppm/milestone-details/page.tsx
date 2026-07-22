@@ -108,6 +108,16 @@ import { useSession } from "@/stores/session";
 /** 实施阶段标识(对齐源 overallStage === '实施阶段' 判定)。 */
 const IMPLEMENT_STAGE = "实施阶段";
 
+/**
+ * 任务执行状态(明细关联任务 PlanTask.status)→ Tag 颜色。
+ * 值为中文文本 (未开始/进行中/已完成),后端实时查不落库。未知值用默认色。
+ */
+const TASK_EXECUTE_STATUS_COLOR: Record<string, string> = {
+  未开始: "default",
+  进行中: "processing",
+  已完成: "success",
+};
+
 /** 抽屉形态(对照源 6 Vue 表单 + P0-8 变更审批 + ql-20260720-006 信息变更)。 */
 type DrawerMode =
   | "create" // 草稿新增(AddNodeDetailForm)
@@ -1805,6 +1815,20 @@ function DetailLevelTable({
       //   render: (v: string | null, d: PsPlanNodeDetail) =>
       //     v ?? (d.approve_user_id ? d.approve_user_id : "待指派"),
       // },
+      {
+        // 执行状态(派生,不落库):明细关联任务 PlanTask.status 的实时值。
+        // 与「状态」(明细自身的 draft/done 审批态) 区分,此处是任务执行进度。
+        title: "执行状态",
+        dataIndex: "task_execute_status",
+        key: "task_execute_status",
+        width: 100,
+        render: (v: string | null) =>
+          v ? (
+            <Tag color={TASK_EXECUTE_STATUS_COLOR[v] ?? "default"}>{v}</Tag>
+          ) : (
+            <span className="text-xs text-muted-foreground">—</span>
+          ),
+      },
       {
         title: "状态",
         dataIndex: "status",

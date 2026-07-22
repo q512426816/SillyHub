@@ -29,7 +29,7 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 缺失则挂起 ProblemPendingAssignment
 ```
 里程碑变更走 `parent_id` 版本链（旧版 archived、新版 draft），不走状态迁移。
-明细-任务联动：里程碑明细（PsPlanNodeDetail）变 done 时自动建一条 PlanTask 挂执行人名下（plan/service.py 6 helper `_ensure_task_for_detail` 等 + 5 触发点 create_detail/_transition/import_commit/update+delete_detail/change_process，强一致同事务）；编辑同步任务字段、变更迁移（版本链）、删除解关联（ps_plan_node_detail_id 置 null，任务保留）；导入一行多责任人拆分（全匹配→每人一条，任一未匹配→整行标红）。
+明细-任务联动：里程碑明细（PsPlanNodeDetail）变 done 时自动建一条 PlanTask 挂执行人名下（plan/service.py 6 helper `_ensure_task_for_detail` 等 + 5 触发点 create_detail/_transition/import_commit/update+delete_detail/change_process，强一致同事务）；编辑同步任务字段、变更迁移（版本链）；**删除级联（ql-20260722-006-3aca）**：删明细时关联任务非[已完成]连任务+其 TaskExecute 一起删、[已完成]仅解关联保留；删模块（三级含模块子表）级联删该模块下全部明细（逐条套任务级联规则）+ 模块；明细列表「执行状态」列 = 关联任务 PlanTask.status 实时查派生（不落库）；导入一行多责任人拆分（全匹配→每人一条，任一未匹配→整行标红）。
 看板 matrix（`kanban-grouping`）：人员×日期矩阵，任务按 start_time~deadline 跨天连续落 cell（限 366 天）。
 导出：openpyxl 生成 xlsx，文件名时间戳格式 `{中文名}_YYYYMMDD_HHmmss.xlsx`。
 看板 service `_derive_priority`/`_derive_progress` 从状态派生优先级与进度；`_parse_hours`/`_parse_date_range` 解析工时与日期。
@@ -135,3 +135,4 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 - ql-20260722-004-e5a2 | /ppm/project-plans 新建弹窗限高：PpmProjectPlanForm 的 Modal 加 styles.body={maxHeight:'70vh',minHeight:'300px',overflowY:'auto'}(antd v6)，17 字段表单超高时内部滚动不撑屏、短内容有下限
 - 2026-07-22-plan-project-name-join | /ppm/project-plans 项目计划「项目名称」改 outerjoin 项目表取真名(单一可信源)：list/get/export 不再读 PsProjectPlan 冗余列、改 outerjoin ppm_project_maintenance 取 project_name 并覆盖；筛选 req.project_name / 排序 order_by=project_name 基于 join 字段；删 project/service.py 项目改名→同步刷新 PsProjectPlan.project_name 逻辑(join 实时一致,根因治理冗余字段易写坏,替代 ql-20260717-004 的写时同步)；保留冗余列不删 schema(免迁移)；create 兜底不动。W1 join 改造(commit 3f288705)+ W2 单测 task-06/07/08(6 条,commit 4c1dcf1a)+ 修复 W1 改坏的 4 现有测试 + project 改名测试改契；48 passed/366 ppm passed/ruff&mypy 0 error；curl 实测 AC-1/2/3/4 全过
 - 2026-07-21-ppm-update-null | ppm update 清空字段修复：plan/problem `_Crud.update` + plan `update_detail` 去 `if v is not None` 改直接 setattr(配合路由 exclude_unset：未传=不动、null=清空)；补 plan(TestUpdateClearVsKeep/TestUpdateDetailClearsField) + problem(test_problem_flow.py 清空单测) 测试；change_process/agent 不改(版本链/有意设计)；task update 仅修注释。verify plan+problem 172 passed
+- ql-20260722-006-3aca | 里程碑明细删除级联+模块级联+执行状态列：delete_detail 改为非[已完成]任务连任务+TaskExecute 删、[已完成]保留解关联(替原_unlink_task)；delete_module 级联删该模块下全部明细(逐条套任务级联)+模块(单事务,治原 module 删后 module_id 悬空脏数据)；明细列表新增「执行状态」派生列(关联 PlanTask.status 实时批量查不入库)+PsPlanNodeDetailResp 加 task_execute_status 字段。ppm 全量 374 passed/ruff&mypy 0 error/前端 typecheck+lint 0 error/milestone 24 passed。关键决策:删模块连带删其下明细(子表归属模块语义)

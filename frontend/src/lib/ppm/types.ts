@@ -497,6 +497,9 @@ export interface PsPlanNodeDetail {
   // 派生字段(不落库):后端查询时关联反查填充,只读视图展示用。
   execute_user_name: string | null;
   module_name: string | null;
+  // 执行状态(派生,不落库):关联任务 PlanTask.status 的实时值
+  // (未开始/进行中/已完成)。明细列表「执行状态」列展示用;无关联任务为 null。
+  task_execute_status: string | null;
   change_reason: string | null;
   created_at: string;
   updated_at: string;

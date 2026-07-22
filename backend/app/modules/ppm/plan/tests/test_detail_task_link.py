@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.ppm.plan.model import (
+    PlanNodeModule,
     PsPlanNode,
     PsPlanNodeDetail,
     PsProjectPlan,
@@ -31,7 +32,7 @@ from app.modules.ppm.plan.schema import (
 from app.modules.ppm.plan.service import PlanService
 from app.modules.ppm.project import model as _project_model  # noqa: F401
 from app.modules.ppm.project.model import PpmProjectMember
-from app.modules.ppm.task.model import PlanTask
+from app.modules.ppm.task.model import PlanTask, TaskExecute
 
 _ACTOR = ("00000000-0000-0000-0000-000000000099", "操作员")
 
@@ -113,6 +114,31 @@ async def _get_task_by_detail(session: AsyncSession, detail_id: uuid.UUID) -> Pl
 
 async def _get_task_by_id(session: AsyncSession, task_id: uuid.UUID) -> PlanTask | None:
     return await session.get(PlanTask, task_id)
+
+
+async def _seed_module(
+    session: AsyncSession,
+    node_id: uuid.UUID,
+    *,
+    name: str = "测试模块",
+) -> PlanNodeModule:
+    """建一条 PlanNodeModule (三级含模块子表用)。SQLite 不强制 FK,node_id 可悬空。"""
+    module = PlanNodeModule(
+        id=uuid.uuid4(),
+        plan_node_id=node_id,
+        module_name=name,
+        created_at=_now(),
+        updated_at=_now(),
+    )
+    session.add(module)
+    await session.commit()
+    await session.refresh(module)
+    return module
+
+
+async def _count_executes(session: AsyncSession) -> int:
+    rows = (await session.execute(select(TaskExecute))).scalars().all()
+    return len(rows)
 
 
 # ===========================================================================
@@ -466,14 +492,18 @@ class TestFR04ChangeMigratesTask:
 
 
 # ===========================================================================
-# FR-05: 删除解关联 (任务保留, ps_plan_node_detail_id 置 null)
+# FR-05: 删除级联 (非[已完成]任务删除, [已完成]任务保留解关联)
 # ===========================================================================
 
 
-class TestFR05DeleteUnlinksTask:
-    """FR-05 / D-004: delete_detail → 任务保留, ps_plan_node_detail_id=None。"""
+class TestFR05DeleteCascadesTask:
+    """FR-05 v2: delete_detail → 任务状态非[已完成]删除(含执行记录),
+    [已完成]保留(仅解关联)。"""
 
-    async def test_delete_detail_unlinks_but_keeps_task(self, db_session: AsyncSession) -> None:
+    async def test_delete_detail_with_not_done_task_deletes_task(
+        self, db_session: AsyncSession
+    ) -> None:
+        """非[已完成]任务(未开始):删明细 → 任务被删除(计数 0)。"""
         plan = await _seed_project_plan(db_session)
         node = await _seed_node(db_session, plan.id)
         member = await _seed_member(db_session, user_id=uuid.uuid4(), user_name="删除员")
@@ -489,16 +519,262 @@ class TestFR05DeleteUnlinksTask:
             }
         )
         task = await _get_task_by_detail(db_session, detail.id)
-        assert task is not None
-        task_id = task.id
+        assert task is not None  # 未开始 (create 默认态)
 
         await svc.delete_detail(detail.id)
 
-        # 任务仍在 (未删), 且 ps_plan_node_detail_id 已置 None
+        # 任务连同明细一起删除
+        assert await _count_tasks(db_session) == 0
+        assert await _get_task_by_id(db_session, task.id) is None
+
+    async def test_delete_detail_with_in_progress_task_deletes_task_and_executes(
+        self, db_session: AsyncSession
+    ) -> None:
+        """进行中任务:删明细 → 任务 + 其 TaskExecute 执行记录一起删除。"""
+        plan = await _seed_project_plan(db_session)
+        node = await _seed_node(db_session, plan.id)
+        member = await _seed_member(db_session, user_id=uuid.uuid4(), user_name="执行员")
+
+        svc = PlanService(db_session)
+        detail = await svc.create_detail(
+            {
+                "plan_node_id": node.id,
+                "no": "1",
+                "task_theme": "进行中明细",
+                "execute_user_id": member.user_id,
+                "status": "done",
+            }
+        )
+        task = await _get_task_by_detail(db_session, detail.id)
+        assert task is not None
+        # 构造一条执行记录 + 任务置进行中
+        db_session.add(
+            TaskExecute(
+                id=uuid.uuid4(),
+                plan_task_id=task.id,
+                execute_user_id=member.user_id,
+                status="30",
+                time_spent=1.5,
+            )
+        )
+        task.status = "进行中"
+        await db_session.commit()
+        assert await _count_executes(db_session) == 1
+
+        await svc.delete_detail(detail.id)
+
+        # 任务 + 执行记录均删除
+        assert await _count_tasks(db_session) == 0
+        assert await _count_executes(db_session) == 0
+
+    async def test_delete_detail_with_completed_task_preserves_task(
+        self, db_session: AsyncSession
+    ) -> None:
+        """[已完成]任务:删明细 → 任务保留(仅解关联 ps_plan_node_detail_id=None)。"""
+        plan = await _seed_project_plan(db_session)
+        node = await _seed_node(db_session, plan.id)
+        member = await _seed_member(db_session, user_id=uuid.uuid4(), user_name="完成员")
+
+        svc = PlanService(db_session)
+        detail = await svc.create_detail(
+            {
+                "plan_node_id": node.id,
+                "no": "1",
+                "task_theme": "已完成明细",
+                "execute_user_id": member.user_id,
+                "status": "done",
+            }
+        )
+        task = await _get_task_by_detail(db_session, detail.id)
+        assert task is not None
+        task.status = "已完成"
+        await db_session.commit()
+
+        await svc.delete_detail(detail.id)
+
+        # 任务保留, 解除关联
+        task_after = await _get_task_by_id(db_session, task.id)
+        assert task_after is not None
+        assert task_after.ps_plan_node_detail_id is None
+        assert task_after.status == "已完成"
+        assert await _count_tasks(db_session) == 1
+
+
+# ===========================================================================
+# FR-05b: 删模块级联 (三级含模块子表:删模块 → 其下明细 + 任务同步按方案删除)
+# ===========================================================================
+
+
+class TestFR05bDeleteModuleCascades:
+    """FR-05b / 三级含模块子表: delete_module → 删该模块下全部明细,
+    逐条套用任务级联规则(非已完成删、已完成保留解关联),再删模块。"""
+
+    async def test_delete_module_cascades_details_and_tasks(self, db_session: AsyncSession) -> None:
+        """模块下 2 条明细(各建任务,均未完成)→ 删模块:明细+任务+模块全删。"""
+        plan = await _seed_project_plan(db_session)
+        node = await _seed_node(db_session, plan.id)
+        member = await _seed_member(db_session, user_id=uuid.uuid4(), user_name="模块员")
+        module = await _seed_module(db_session, node.id)
+
+        svc = PlanService(db_session)
+        d1 = await svc.create_detail(
+            {
+                "plan_node_id": node.id,
+                "module_id": module.id,
+                "no": "1",
+                "task_theme": "模块明细A",
+                "execute_user_id": member.user_id,
+                "status": "done",
+            }
+        )
+        d2 = await svc.create_detail(
+            {
+                "plan_node_id": node.id,
+                "module_id": module.id,
+                "no": "2",
+                "task_theme": "模块明细B",
+                "execute_user_id": member.user_id,
+                "status": "done",
+            }
+        )
+        assert await _count_tasks(db_session) == 2
+
+        await svc.delete_module(module.id)
+
+        # 模块 + 其下明细 + 任务 全删
+        assert await _count_tasks(db_session) == 0
+        assert await db_session.get(PlanNodeModule, module.id) is None
+        assert await db_session.get(PsPlanNodeDetail, d1.id) is None
+        assert await db_session.get(PsPlanNodeDetail, d2.id) is None
+
+    async def test_delete_module_preserves_completed_tasks(self, db_session: AsyncSession) -> None:
+        """模块下明细的任务为[已完成] → 删模块:明细删、任务保留(解关联)。"""
+        plan = await _seed_project_plan(db_session)
+        node = await _seed_node(db_session, plan.id)
+        member = await _seed_member(db_session, user_id=uuid.uuid4(), user_name="完成员")
+        module = await _seed_module(db_session, node.id)
+
+        svc = PlanService(db_session)
+        detail = await svc.create_detail(
+            {
+                "plan_node_id": node.id,
+                "module_id": module.id,
+                "no": "1",
+                "task_theme": "已完成模块明细",
+                "execute_user_id": member.user_id,
+                "status": "done",
+            }
+        )
+        task = await _get_task_by_detail(db_session, detail.id)
+        assert task is not None
+        task.status = "已完成"
+        await db_session.commit()
+        task_id = task.id
+
+        await svc.delete_module(module.id)
+
+        # 明细 + 模块删, 任务保留解关联
+        assert await db_session.get(PsPlanNodeDetail, detail.id) is None
+        assert await db_session.get(PlanNodeModule, module.id) is None
         task_after = await _get_task_by_id(db_session, task_id)
         assert task_after is not None
         assert task_after.ps_plan_node_detail_id is None
+
+    async def test_delete_module_without_details_just_deletes_module(
+        self, db_session: AsyncSession
+    ) -> None:
+        """空模块(无明细)→ 删模块正常,无副作用。"""
+        plan = await _seed_project_plan(db_session)
+        node = await _seed_node(db_session, plan.id)
+        module = await _seed_module(db_session, node.id)
+
+        svc = PlanService(db_session)
+        await svc.delete_module(module.id)
+
+        assert await db_session.get(PlanNodeModule, module.id) is None
+        assert await _count_tasks(db_session) == 0
+
+    async def test_delete_module_does_not_touch_other_modules(
+        self, db_session: AsyncSession
+    ) -> None:
+        """删模块A不影响模块B的明细与任务。"""
+        plan = await _seed_project_plan(db_session)
+        node = await _seed_node(db_session, plan.id)
+        member = await _seed_member(db_session, user_id=uuid.uuid4(), user_name="隔离员")
+        module_a = await _seed_module(db_session, node.id, name="模块A")
+        module_b = await _seed_module(db_session, node.id, name="模块B")
+
+        svc = PlanService(db_session)
+        detail_b = await svc.create_detail(
+            {
+                "plan_node_id": node.id,
+                "module_id": module_b.id,
+                "no": "1",
+                "task_theme": "模块B明细",
+                "execute_user_id": member.user_id,
+                "status": "done",
+            }
+        )
+
+        await svc.delete_module(module_a.id)
+
+        # 模块A删, 模块B及其明细/任务不受影响
+        assert await db_session.get(PlanNodeModule, module_a.id) is None
+        assert await db_session.get(PlanNodeModule, module_b.id) is not None
+        assert await db_session.get(PsPlanNodeDetail, detail_b.id) is not None
         assert await _count_tasks(db_session) == 1
+
+
+# ===========================================================================
+# FR-08: 执行状态派生字段 (明细列表 task_execute_status 实时查)
+# ===========================================================================
+
+
+class TestFR08TaskExecuteStatusDerived:
+    """FR-08: details_to_resp 注入 task_execute_status(关联 PlanTask.status,
+    实时查不入库)。无关联任务为 None。"""
+
+    async def test_task_execute_status_reflects_linked_task(self, db_session: AsyncSession) -> None:
+        plan = await _seed_project_plan(db_session)
+        node = await _seed_node(db_session, plan.id)
+        member = await _seed_member(db_session, user_id=uuid.uuid4(), user_name="状态员")
+
+        svc = PlanService(db_session)
+        detail = await svc.create_detail(
+            {
+                "plan_node_id": node.id,
+                "no": "1",
+                "task_theme": "状态明细",
+                "execute_user_id": member.user_id,
+                "status": "done",
+            }
+        )
+        task = await _get_task_by_detail(db_session, detail.id)
+        assert task is not None
+        task.status = "进行中"
+        await db_session.commit()
+
+        resps = await svc.details_to_resp([detail])
+        assert resps[0].task_execute_status == "进行中"
+
+    async def test_task_execute_status_none_when_no_task(self, db_session: AsyncSession) -> None:
+        """draft 明细不建任务 → task_execute_status=None。"""
+        plan = await _seed_project_plan(db_session)
+        node = await _seed_node(db_session, plan.id)
+
+        svc = PlanService(db_session)
+        detail = await svc.create_detail(
+            {
+                "plan_node_id": node.id,
+                "no": "1",
+                "task_theme": "草稿明细",
+                "status": "draft",
+                "execute_user_id": uuid.uuid4(),
+            }
+        )
+
+        resps = await svc.details_to_resp([detail])
+        assert resps[0].task_execute_status is None
 
 
 # ===========================================================================

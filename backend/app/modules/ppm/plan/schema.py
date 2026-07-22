@@ -345,6 +345,9 @@ class PsPlanNodeDetailResp(PsPlanNodeDetailBase):
     # 匹配不到时(执行人已离场 / 模块已删或跨里程碑)裸露 UUID。
     execute_user_name: str | None = None
     module_name: str | None = None
+    # 执行状态(派生,不落库):明细关联任务 PlanTask.status 的实时值
+    # (未开始/进行中/已完成)。明细列表「执行状态」列展示用;无关联任务为 None。
+    task_execute_status: str | None = None
     change_reason: str | None = None
     created_at: datetime
     updated_at: datetime

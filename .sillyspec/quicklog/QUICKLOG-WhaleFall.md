@@ -119,3 +119,16 @@ created_at: 2026-07-21T08:48:56
 关联变更：（无）
 文件：frontend/src/components/ppm-project-plan-form.tsx
 结果:PpmProjectPlanForm 的 Modal(ppm-project-plan-form.tsx:259,width=920,antd v6.4.4)承载 17 字段表单,body 无高度限制致弹窗过长撑屏。加 Modal styles.body={maxHeight:'70vh',minHeight:'300px',overflowY:'auto'}:超高时 body 内部滚动不撑满屏幕,minHeight 给短内容下限。antd v6 用 styles.body(bodyStyle 已废)。新建/编辑共用此 Modal 均受益。纯样式 prop,不改逻辑/字段。
+
+## ql-20260722-005-5203 | 2026-07-22 11:35:54 | (补分配)
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+
+结果：提交 d55ba3b3(3文件:ppm-project-plan-form.tsx+quicklog+ppm.md)。工作区干净(外部 dirty 文件已由并行会话 commit)。QUICKLOG ql-004 已完成,ppm.md 追加。
+## ql-20260722-006-3aca | 2026-07-22 13:44:38 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+
+结果：暂存确认:7个代码/文档文件已 git add(service/schema/test/types/page/milestone-test/ppm.md)。模块文档同步:ppm.md 关键逻辑更新删除级联语义+变更索引追加ql-006。QUICKLOG清理:误建的无内容占位ql-007条目已删除(无关联change目录产生)。待CLI收尾ql-006为已完成后,连同QUICKLOG一起commit+push+部署。

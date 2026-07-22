@@ -70,9 +70,14 @@ from app.modules.ppm.plan.schema import (
     PsProjectPlanListReq,
 )
 from app.modules.ppm.project.model import PpmProjectMaintenance, PpmProjectMember
-from app.modules.ppm.task.model import PlanTask
+from app.modules.ppm.task.model import PlanTask, TaskExecute
 
 log = get_logger(__name__)
+
+# 任务计划(PlanTask)的「已完成」状态值。明细-任务联动删除级联以此判定:
+# 非[已完成]任务连同明细一起删,[已完成]任务保留(仅解关联)。对齐 task/service.py
+# execute_plan action="complete" 写入的 plan.status="已完成"。
+TASK_STATUS_DONE = "已完成"
 
 
 class PlanError(AppError):
@@ -387,7 +392,25 @@ class PlanService:
         return await _Crud(self._session, PlanNodeModule).update(item_id, data)
 
     async def delete_module(self, item_id: uuid.UUID) -> None:
-        await _Crud(self._session, PlanNodeModule).delete(item_id)
+        # 三级(含模块子表)级联删除:删该模块下全部明细(子表),逐条套用任务级联
+        # 规则(非[已完成]任务连同执行记录删除、[已完成]保留解关联),再删模块。
+        # 单事务原子完成,避免 module 删除后明细 module_id 悬空、任务残留。
+        # (FK 为软关联无约束,详见 migration 202607220900;原 delete 只删模块行致脏数据。)
+        module = await _Crud(self._session, PlanNodeModule).get(item_id)
+        details = list(
+            (
+                await self._session.execute(
+                    select(PsPlanNodeDetail).where(PsPlanNodeDetail.module_id == item_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for d in details:
+            await self._cascade_task_on_detail_removal(d.id)
+            await self._session.delete(d)
+        await self._session.delete(module)
+        await self._session.commit()
 
     # ---------- ps 项目计划 CRUD ----------
     async def list_ps_project_plans(
@@ -685,9 +708,36 @@ class PlanService:
 
         return user_map, module_map
 
+    async def _collect_task_status_map(
+        self, details: list[PsPlanNodeDetail]
+    ) -> dict[uuid.UUID, str]:
+        """批量查明细关联任务的 ``PlanTask.status``,建 ``{detail_id: status}`` 映射。
+
+        执行状态派生字段(不落库):明细经 ``ps_plan_node_detail_id`` 软关联一条任务,
+        其 ``status`` (未开始/进行中/已完成) 即明细列表「执行状态」列的实时值。
+        批量 IN 查询避免 N+1。一条明细理论可挂多条任务(无唯一约束),实践为 1:1
+        (``_ensure_task_for_detail`` 命中即更新、不新建),取首条即可。
+        无关联任务的明细不在映射中 → 调用方默认 None。
+        """
+        detail_ids = [d.id for d in details]
+        if not detail_ids:
+            return {}
+        rows = (
+            await self._session.execute(
+                select(PlanTask.ps_plan_node_detail_id, PlanTask.status).where(
+                    PlanTask.ps_plan_node_detail_id.in_(detail_ids)
+                )
+            )
+        ).all()
+        status_map: dict[uuid.UUID, str] = {}
+        for detail_id, status in rows:
+            if detail_id not in status_map:  # 首条生效 (1:1 实践下无歧义)
+                status_map[detail_id] = status
+        return status_map
+
     async def details_to_resp(self, details: list[PsPlanNodeDetail]) -> list[PsPlanNodeDetailResp]:
         """ORM 明细 → ``PsPlanNodeDetailResp``,并填充派生 execute_user_name /
-        module_name(不落库)。
+        module_name / task_execute_status(均不落库)。
 
         name 在 Resp 实例上 setattr(Resp 声明了这两个字段,合法),确保只读
         视图展示名称而非裸 UUID——即便执行人已不在项目成员表、模块已被删除
@@ -696,6 +746,7 @@ class PlanService:
         未声明字段赋值),故必须在 model_validate 之后作用于 Resp。
         """
         user_map, module_map = await self._collect_detail_name_maps(details)
+        task_status_map = await self._collect_task_status_map(details)
         resps = [PsPlanNodeDetailResp.model_validate(d) for d in details]
         for d, resp in zip(details, resps, strict=True):
             # 有 id:优先反查名;记录被物理删除查不到时兜底原 ID(至少不空),
@@ -708,6 +759,9 @@ class PlanService:
             resp.module_name = (
                 module_map.get(d.module_id) or str(d.module_id) if d.module_id else None
             )
+            # 执行状态 = 明细关联任务 PlanTask.status,实时批量查不入库。
+            # 无关联任务(draft 明细不建任务等)→ None(前端显「—」)。
+            resp.task_execute_status = task_status_map.get(d.id)
         return resps
 
     async def create_detail(self, data: dict[str, Any]) -> PsPlanNodeDetail:
@@ -736,10 +790,10 @@ class PlanService:
         return obj
 
     async def delete_detail(self, item_id: uuid.UUID) -> None:
-        # 重构为原子事务：先解关联任务 (ps_plan_node_detail_id 置 null, 任务保留)
-        # 再删明细 (FR-05, D-004)。
+        # 原子事务：先级联处理关联任务 (非[已完成]删除含执行记录/[已完成]保留解关联)
+        # 再删明细 (FR-05 v2)。
         obj = await self.get_detail(item_id)
-        await self._unlink_task(item_id)
+        await self._cascade_task_on_detail_removal(item_id)
         await self._session.delete(obj)
         await self._session.commit()
 
@@ -1765,17 +1819,39 @@ class PlanService:
         task.ps_plan_node_detail_id = new_detail_id
         task.updated_at = _now()
 
-    async def _unlink_task(self, detail_id: uuid.UUID) -> None:
-        """删明细时把关联任务 ``ps_plan_node_detail_id`` 置 null (任务保留,D-004)。
+    async def _cascade_task_on_detail_removal(self, detail_id: uuid.UUID) -> None:
+        """明细被移除(删除)时级联处理其关联任务 (FR-05 v2 / 删除级联)。
 
-        任务行不删 (保留历史/工时/看板记录),仅解除与明细的软绑定。
+        规则(对齐需求:任务计划非[已完成]才删除):
+        - 关联任务状态 **非 [已完成]** → 连任务及其 ``TaskExecute`` 执行记录一起删除
+          (对齐 ``PlanTaskService.delete`` 的清理逻辑,避免孤立执行记录);
+        - 关联任务状态 **[已完成]** → 仅解除关联 (``ps_plan_node_detail_id`` 置 null),
+          保留任务及其执行/工时历史;
+        - 无关联任务 → 无操作。
+
+        一条明细理论可挂多条任务(无唯一约束),逐条按上述规则处理。内部不 commit,
+        由调用方(``delete_detail`` / ``delete_module``)统一提交,保证原子性。
         """
-        stmt = select(PlanTask).where(PlanTask.ps_plan_node_detail_id == detail_id).limit(1)
-        task = (await self._session.execute(stmt)).scalar_one_or_none()
-        if task is None:
-            return
-        task.ps_plan_node_detail_id = None
-        task.updated_at = _now()
+        stmt = select(PlanTask).where(PlanTask.ps_plan_node_detail_id == detail_id)
+        tasks = list((await self._session.execute(stmt)).scalars().all())
+        for task in tasks:
+            if task.status == TASK_STATUS_DONE:
+                task.ps_plan_node_detail_id = None
+                task.updated_at = _now()
+                continue
+            # 非已完成 → 删任务 + 其执行记录
+            execs = (
+                (
+                    await self._session.execute(
+                        select(TaskExecute).where(TaskExecute.plan_task_id == task.id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for exc in execs:
+                await self._session.delete(exc)
+            await self._session.delete(task)
 
 
 __all__ = ["PlanError", "PlanNotFound", "PlanService"]
