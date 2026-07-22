@@ -457,6 +457,8 @@ export default function MilestoneDetailsPage() {
         key: "actions",
         align: "center",
         width: 340,
+        fixed: "right",
+        onCell: () => ({ style: { background: "hsl(var(--card))" } }),
         render: (_v: unknown, n: PsPlanNode) => (
           <div className="flex flex-wrap justify-center gap-1">
             <Button
@@ -936,6 +938,8 @@ function ModuleLevelTable({
         key: "actions",
         align: "center",
         width: 260,
+        fixed: "right",
+        onCell: () => ({ style: { background: "hsl(var(--card))" } }),
         render: (_v: unknown, m: PlanNodeModule) => (
           <div className="flex justify-center gap-1">
             <Button
