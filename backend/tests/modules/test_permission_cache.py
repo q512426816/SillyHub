@@ -28,6 +28,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.permission_cache import (
+    _breaker_is_open,
+    _BreakerState,
+    _record_failure,
+    _record_success,
     get_cached_permissions,
     get_cached_ppm_scope,
     invalidate_all_permissions,
@@ -107,6 +111,14 @@ def _raising() -> Any:
 
 
 # ── AC-01 / AC-04:helper 读写正确性 + uuid 类型(纯缓存,无 DB)──────────────
+
+
+@pytest.fixture(autouse=True)
+def _reset_breaker() -> None:
+    """每个测试前重置熔断器状态,避免模块级状态泄漏导致序相关失败。"""
+    _BreakerState["failure_count"] = 0
+    _BreakerState["state"] = "CLOSED"
+    _BreakerState["open_at"] = 0.0
 
 
 @pytest.mark.asyncio
@@ -545,3 +557,82 @@ async def test_scan_generate_new_workspace_calls_invalidate(
         daemon_id=daemon.id,
     )
     assert calls["n"] == 1  # 新建 workspace(workspace_created=True)后失效
+
+
+class TestBreaker:
+    """熔断器三态 + threshold=0 禁用 + 不影响 invalidate。"""
+
+    async def test_breaker_closed_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """熔断器默认 CLOSED,失败计数为 0。"""
+        assert _BreakerState["state"] == "CLOSED"
+        assert _BreakerState["failure_count"] == 0
+        assert _breaker_is_open() is False
+
+    async def test_breaker_opens_after_threshold(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """连续失败达阈值后 state 切换为 OPEN。"""
+        threshold = get_settings().permission_cache_breaker_threshold
+        for _ in range(threshold):
+            assert _breaker_is_open() is False
+            _record_failure()
+        assert _BreakerState["state"] == "OPEN"
+        assert _breaker_is_open() is True
+
+    async def test_breaker_open_skips_redis(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """熔断 OPEN 后 get_cached_permissions 直接返回 None,mock redis 确保不被调用。"""
+        threshold = get_settings().permission_cache_breaker_threshold
+        for _ in range(threshold + 1):
+            _record_failure()
+
+        async def _boom(*a, **kw):
+            pytest.fail("should not reach redis")
+
+        monkeypatch.setattr(
+            "app.core.permission_cache.get_redis", lambda: SimpleNamespace(get=_boom)
+        )
+        uid = uuid.uuid4()
+        result = await get_cached_permissions(uid, scope="platform")
+        assert result is None
+
+    async def test_breaker_half_open_recovers(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """HALF_OPEN 时成功操作恢复 CLOSED。"""
+        threshold = get_settings().permission_cache_breaker_threshold
+        for _ in range(threshold):
+            _record_failure()
+        assert _BreakerState["state"] == "OPEN"
+        _BreakerState["state"] = "HALF_OPEN"
+        _record_success()
+        assert _BreakerState["state"] == "CLOSED"
+
+    async def test_breaker_half_open_fails_back_to_open(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """HALF_OPEN 时失败重回 OPEN。"""
+        _BreakerState["state"] = "HALF_OPEN"
+        _BreakerState["failure_count"] = get_settings().permission_cache_breaker_threshold - 1
+        _record_failure()
+        assert _BreakerState["state"] == "OPEN"
+
+    async def test_breaker_threshold_zero_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """threshold=0 时熔断器始终 CLOSED,失败不累计。"""
+        old = get_settings().permission_cache_breaker_threshold
+        monkeypatch.setattr(get_settings(), "permission_cache_breaker_threshold", 0)
+        for _ in range(10):
+            _record_failure()
+        assert _BreakerState["state"] == "CLOSED"
+        assert _breaker_is_open() is False
+        monkeypatch.setattr(get_settings(), "permission_cache_breaker_threshold", old)
+
+    async def test_breaker_does_not_affect_invalidate(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """熔断 OPEN 时 invalidate_all_permissions 仍尝试 Redis。"""
+        threshold = get_settings().permission_cache_breaker_threshold
+        for _ in range(threshold + 1):
+            _record_failure()
+        assert _breaker_is_open() is True
+        mock_redis = AsyncMock()
+        mock_redis.scan_iter.return_value.__aiter__.return_value = iter([])
+        spy = mock_redis.scan_iter
+        monkeypatch.setattr("app.core.permission_cache.get_redis", lambda: mock_redis)
+        await invalidate_all_permissions()
+        spy.assert_called()

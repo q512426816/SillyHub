@@ -4,6 +4,9 @@
 ``api_key_service``:Redis 故障时业务读写静默降级(认证/鉴权永不因缓存层失败),
 只有 ``invalidate_all_permissions`` 失败升 ERROR(D-002@v2,安全事件必须告警)。
 
+熔断器(2026-07-23-backend-permission-perf):Redis 连接失败连续达阈值后,缓存层直接
+跳过 Redis 回退查 DB,不等待连接超时。熔断状态为进程级模块变量。
+
 key 设计(D-003@v2 三键分离,闭合 platform/all/everywhere 互相覆盖污染):
 - 权限集 platform/all/workspace 各占一键;``everywhere`` 读 platform+all 内存并集,不单独存
 - PPM data_scope 占 ``ppm-scope:{user_id}`` 一键
@@ -16,6 +19,7 @@ JSON 只能存 str,若读回仍是 set[str],则 ``data_scope.problem_operable`` 
 from __future__ import annotations
 
 import json
+import time
 import uuid
 
 from app.core.config import get_settings
@@ -23,6 +27,60 @@ from app.core.logging import get_logger
 from app.core.redis import get_redis
 
 log = get_logger(__name__)
+
+# ── 熔断器状态（2026-07-23-backend-permission-perf）──────────────────────
+# 进程级模块变量,4 个读写函数共享。熔断器三态:CLOSED(正常)/OPEN(断开)/HALF_OPEN(试探)。
+# CLOSED：正常读写 Redis。
+# OPEN：直接跳过缓存,不碰 Redis。Cooldown 超时后转为 HALF_OPEN。
+# HALF_OPEN：允许 1 次试探性操作,成功→CLOSED,失败→OPEN。
+_BreakerState: dict = {
+    "failure_count": 0,
+    "state": "CLOSED",
+    "open_at": 0.0,
+}
+
+
+def _breaker_is_open() -> bool:
+    """熔断器是否断开?断开=True（不碰 Redis,直接降级）。
+
+    - CLOSED/HALF_OPEN → False（允许操作）
+    - OPEN → 检查 cooldown 是否超时：未超时 → True；超时 → 转 HALF_OPEN,依然返回 True
+      （HALF_OPEN 允许一次试探,调用方执行成功后会调 _record_success 恢复,失败会调
+      _record_failure 重回 OPEN）。
+    """
+    threshold = get_settings().permission_cache_breaker_threshold
+    if threshold == 0:  # 禁用熔断器
+        return False
+    state = _BreakerState["state"]
+    if state == "CLOSED":
+        return False
+    if state == "OPEN":
+        cooldown = get_settings().permission_cache_breaker_cooldown
+        if cooldown > 0 and time.monotonic() - _BreakerState["open_at"] >= cooldown:
+            _BreakerState["state"] = "HALF_OPEN"
+        return True  # OPEN 或刚转 HALF_OPEN 时仍然阻止后续请求（本次先降级）
+    # HALF_OPEN 或意外未知状态→放行试探
+    return False
+
+
+def _record_failure() -> None:
+    """记录一次 Redis 操作失败。达标后切换为 OPEN。"""
+    threshold = get_settings().permission_cache_breaker_threshold
+    if threshold == 0:
+        return
+    _BreakerState["failure_count"] += 1
+    if _BreakerState["failure_count"] >= threshold:
+        _BreakerState["state"] = "OPEN"
+        _BreakerState["open_at"] = time.monotonic()
+
+
+def _record_success() -> None:
+    """记录一次 Redis 操作成功。HALF_OPEN 时恢复 CLOSED。"""
+    if _BreakerState["state"] == "HALF_OPEN":
+        _BreakerState["state"] = "CLOSED"
+        _BreakerState["failure_count"] = 0
+    elif _BreakerState["state"] == "CLOSED":
+        _BreakerState["failure_count"] = 0
 
 
 def _perm_cache_key(user_id: uuid.UUID, *, scope: str, workspace_id: uuid.UUID | None) -> str:
@@ -55,11 +113,15 @@ async def get_cached_permissions(
     非法 scope → ValueError(编程错误)。Redis 故障 / 值损坏 → None(降级,不抛)。
     """
     key = _perm_cache_key(user_id, scope=scope, workspace_id=workspace_id)
+    if _breaker_is_open():  # 熔断:直接返回 None(miss),调用方回退查 DB
+        return None
     try:
         raw = await get_redis().get(key)
     except Exception as exc:  # D-004 缓存层降级:任何 Redis 故障都回退查 DB
+        _record_failure()
         log.warning("permission_cache.read_failed", key=key, error=str(exc))
         return None
+    _record_success()
     if raw is None:
         return None
     try:
@@ -89,11 +151,16 @@ async def set_cached_permissions(
     ttl = get_settings().permission_cache_ttl
     if ttl <= 0:  # 禁用缓存(D-004 排障)
         return
+    if _breaker_is_open():  # 熔断:直接跳过,不写 Redis
+        return
     value = json.dumps(sorted(list(perms)))
     try:
         await get_redis().set(key, value, ex=ttl)
     except Exception as exc:  # D-004 缓存层降级:写失败不影响请求
+        _record_failure()
         log.warning("permission_cache.write_failed", key=key, error=str(exc))
+        return
+    _record_success()
 
 
 async def get_cached_ppm_scope(user_id: uuid.UUID) -> dict | None:
@@ -104,11 +171,15 @@ async def get_cached_ppm_scope(user_id: uuid.UUID) -> dict | None:
     miss 返回 None(降级,不抛)。
     """
     key = f"ppm-scope:{user_id}"
+    if _breaker_is_open():  # 熔断:直接返回 None(miss),调用方回退查 DB
+        return None
     try:
         raw = await get_redis().get(key)
     except Exception as exc:  # D-004 缓存层降级
+        _record_failure()
         log.warning("permission_cache.ppm_scope_read_failed", key=key, error=str(exc))
         return None
+    _record_success()
     if raw is None:
         return None
     try:
@@ -141,6 +212,8 @@ async def set_cached_ppm_scope(user_id: uuid.UUID, scope: dict) -> None:
     ttl = get_settings().permission_cache_ttl
     if ttl <= 0:
         return
+    if _breaker_is_open():  # 熔断:直接跳过,不写 Redis
+        return
     payload = {
         "manager_project_ids": [str(u) for u in scope["manager_project_ids"]],
         "is_super_admin": bool(scope["is_super_admin"]),
@@ -149,7 +222,10 @@ async def set_cached_ppm_scope(user_id: uuid.UUID, scope: dict) -> None:
     try:
         await get_redis().set(key, value, ex=ttl)
     except Exception as exc:  # D-004 缓存层降级
+        _record_failure()
         log.warning("permission_cache.ppm_scope_write_failed", key=key, error=str(exc))
+        return
+    _record_success()
 
 
 async def invalidate_all_permissions() -> None:

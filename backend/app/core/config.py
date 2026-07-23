@@ -114,6 +114,25 @@ class Settings(BaseSettings):
             "0=禁用缓存(每次回查 DB,仅用于排障)。"
         ),
     )
+    # ── 权限缓存熔断器（2026-07-23-backend-permission-perf）─────────────
+    permission_cache_breaker_threshold: int = Field(
+        5,
+        ge=0,
+        le=100,
+        description=(
+            "权限缓存熔断器——连续失败次数阈值。达到后缓存层直接跳过 Redis 回退 DB,"
+            "不等待连接超时。0=禁用熔断器(始终正常读写 Redis)。"
+        ),
+    )
+    permission_cache_breaker_cooldown: int = Field(
+        30,
+        ge=0,
+        le=3600,
+        description=(
+            "权限缓存熔断器——OPEN 状态下保持断开的最小秒数。超时后 HALF_OPEN 试探一次,"
+            "成功则恢复、失败则重回 OPEN。0=不自动恢复(需重启进程排障)。"
+        ),
+    )
     platform_bootstrap_admin_email: str | None = None
     platform_bootstrap_admin_password: str | None = Field(default=None, min_length=8)
     platform_bootstrap_admin_display_name: str | None = None
