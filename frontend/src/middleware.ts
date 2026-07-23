@@ -94,5 +94,5 @@ export default function middleware(req: NextRequest): NextResponse {
  * 未列出的路径（/api、/_next、静态资源、/daemon、其它后台页）天然不被拦截（R-07）。
  */
 export const config = {
-  matcher: ["/ppm/:path*", "/workspaces/:path*", "/login"],
+  matcher: ["/ppm/:path*", "/workspaces/:path*", "/login", "/account/:path*"],
 };

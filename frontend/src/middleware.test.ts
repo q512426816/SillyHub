@@ -189,11 +189,12 @@ function compileMatcherPattern(pattern: string): RegExp {
 describe("config.matcher 白名单（R-07）", () => {
   const patterns: readonly string[] = config.matcher;
 
-  it("白名单精确为 /ppm/*、/workspaces/*、/login", () => {
+  it("白名单精确为 /ppm/*、/workspaces/*、/login、/account/*", () => {
     expect([...patterns]).toEqual([
       "/ppm/:path*",
       "/workspaces/:path*",
       "/login",
+      "/account/:path*",
     ]);
   });
 
