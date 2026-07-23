@@ -1,30 +1,28 @@
 "use client";
 
 /**
- * 项目计划 (PsProjectPlan) · 移动视图。
+ * 项目计划 (PsProjectPlan) · 移动视图（全功能对齐 web，展示适配手机）。
  *
- * 移动端能力范围（与计划任务一致：只看不建删）：浏览 + 搜索 + 导出 + 查看详情。
- * 新建/编辑/删除在桌面端完成。
+ * 功能与桌面 web 一致（不多不少）：浏览 + 搜索 + 导出 + 新建/编辑/删除 + 详情。
+ *  - 新建/编辑：复用桌面 PpmProjectPlanForm（antd Drawer，手机全屏），单一源不重写 17 字段表单。
+ *  - 删除：deleteProjectPlan + Modal.confirm 二次确认（同桌面）。
+ *  - 权限：卡片动作按后端字段 can_edit / can_delete 显隐（同桌面 line 427-428）。
+ *  - 详情：复用桌面 PpmProjectPlanDetail（三联表 4 层嵌套）。
  *
- * 数据层 100% 复用（D-003，禁止自写请求）：
- *  - @/lib/ppm：listProjectPlans（分页）/ exportProjectPlans / statusLabel
- *  - 类型 PsProjectPlan / PageReq 来自 @/lib/ppm/types
- *
- * 详情复用桌面 @/components/ppm-project-plan-detail（PpmProjectPlanDetail，
- * 三联表 4 层嵌套，单一源只读引用不改 → 桌面零回归）；移动端以全屏 Modal 承载，
- * 内部 antd Table 窄屏横向滚动可查看。
- *
- * 桌面 `(dashboard)/ppm/project-plans/**` 不改（零回归硬约束）。容器由 app/m/layout 包裹。
+ * 数据层 100% 复用（D-003）：listProjectPlans / exportProjectPlans / deleteProjectPlan / statusLabel。
+ * 桌面 `(dashboard)/ppm/project-plans/**` 不改（零回归；复用其 Form/Detail 组件，只读引用）。
  * middleware matcher 含 `/ppm/:path*` → 手机访问 /ppm/project-plans 自动 rewrite 到本页。
  */
 import { useCallback, useEffect, useState } from "react";
-import { Input } from "antd";
+import { Input, Modal } from "antd";
 
 import { MobileCardList } from "@/components/mobile/mobile-card-list";
 import { MobileExportButton } from "@/components/mobile/mobile-export-button";
 import { PpmProjectPlanDetail } from "@/components/ppm-project-plan-detail";
+import { PpmProjectPlanForm } from "@/components/ppm-project-plan-form";
 import { ApiError } from "@/lib/api";
 import {
+  deleteProjectPlan,
   exportProjectPlans,
   listProjectPlans,
   statusLabel,
@@ -35,6 +33,12 @@ import { useToast, Toast } from "@/app/(dashboard)/ppm/shared";
 import { cn } from "@/lib/utils";
 
 const DEFAULT_PAGE_SIZE = 20;
+
+interface DrawerState {
+  open: boolean;
+  mode: "create" | "edit";
+  plan?: PsProjectPlan;
+}
 
 function fmtDate(v: string | null | undefined): string {
   if (!v) return "—";
@@ -68,6 +72,7 @@ export default function ProjectPlansMobilePage() {
 
   const [exporting, setExporting] = useState(false);
   const [detailPlanId, setDetailPlanId] = useState<string | null>(null);
+  const [drawer, setDrawer] = useState<DrawerState>({ open: false, mode: "create" });
 
   const load = useCallback(
     async (opts: { page?: number; page_size?: number } = {}) => {
@@ -99,14 +104,12 @@ export default function ProjectPlansMobilePage() {
     [page, pageSize, projectName, contractName, companyName],
   );
 
-  // 首屏 + 搜索「确定」→ 回第 1 页重拉
   useEffect(() => {
     void load({ page: 1 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchNonce]);
 
   const commitSearch = () => setSearchNonce((n) => n + 1);
-
   const resetSearch = () => {
     setProjectName("");
     setContractName("");
@@ -123,6 +126,65 @@ export default function ProjectPlansMobilePage() {
     } finally {
       setExporting(false);
     }
+  };
+
+  // 删除二次确认（对齐桌面 modal.confirm）
+  const handleDelete = (p: PsProjectPlan) => {
+    Modal.confirm({
+      title: `删除项目计划「${p.project_name ?? p.id}」?`,
+      content: "该操作不可恢复。",
+      okText: "确认删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      maskClosable: false,
+      onOk: async () => {
+        try {
+          await deleteProjectPlan(p.id);
+          showToast(true, "已删除");
+          await load();
+        } catch (err) {
+          showToast(false, err instanceof ApiError ? err.message : "删除失败");
+        }
+      },
+    });
+  };
+
+  const handleSaved = async () => {
+    setDrawer({ open: false, mode: "create" });
+    await load();
+  };
+
+  // 卡片动作：详情（所有）/ 编辑（can_edit）/ 删除（can_delete）—— 权限显隐对齐桌面
+  const buildActions = (p: PsProjectPlan) => {
+    const canEdit = p.can_edit ?? false;
+    const canDelete = p.can_delete ?? false;
+    const acts: {
+      key: string;
+      label: string;
+      danger?: boolean;
+      onPress: () => void;
+    }[] = [];
+    acts.push({
+      key: "detail",
+      label: "详情",
+      onPress: () => setDetailPlanId(p.id),
+    });
+    if (canEdit) {
+      acts.push({
+        key: "edit",
+        label: "编辑",
+        onPress: () => setDrawer({ open: true, mode: "edit", plan: p }),
+      });
+    }
+    if (canDelete) {
+      acts.push({
+        key: "delete",
+        label: "删除",
+        danger: true,
+        onPress: () => handleDelete(p),
+      });
+    }
+    return acts;
   };
 
   const renderCard = (p: PsProjectPlan) => {
@@ -161,7 +223,12 @@ export default function ProjectPlansMobilePage() {
           {margin ? (
             <>
               <span className="ml-2 text-muted-foreground">利润率：</span>
-              <span className={cn("font-medium", marginOver ? "text-red-600" : "text-emerald-600")}>
+              <span
+                className={cn(
+                  "font-medium",
+                  marginOver ? "text-red-600" : "text-emerald-600",
+                )}
+              >
                 {margin}%
               </span>
             </>
@@ -241,6 +308,7 @@ export default function ProjectPlansMobilePage() {
         items={rows}
         renderCard={renderCard}
         onItemPress={(p) => setDetailPlanId(p.id)}
+        actions={buildActions}
         pagination={{
           page,
           pageSize,
@@ -249,17 +317,34 @@ export default function ProjectPlansMobilePage() {
         }}
         emptyText={loading ? "加载中…" : "暂无项目计划"}
         headerActions={
-          <MobileExportButton
-            onClick={() => void handleExport()}
-            loading={exporting}
-          />
+          <>
+            <MobileExportButton
+              onClick={() => void handleExport()}
+              loading={exporting}
+            />
+            <button
+              type="button"
+              onClick={() => setDrawer({ open: true, mode: "create" })}
+              className="inline-flex min-h-[44px] items-center justify-center rounded-md bg-primary px-3 text-[14px] font-medium text-primary-foreground transition-colors hover:opacity-90"
+            >
+              新建
+            </button>
+          </>
         }
       />
 
       <Toast toast={toast} />
 
-      {/* 详情：复用桌面 PpmProjectPlanDetail（三联表 4 层嵌套，单一源；移动端全屏 Modal，
-          内部 antd Table 窄屏横向滚动可查看） */}
+      {/* 新建/编辑：复用桌面 PpmProjectPlanForm（17 字段表单，单一源；antd Drawer 手机全屏） */}
+      <PpmProjectPlanForm
+        open={drawer.open}
+        mode={drawer.mode}
+        plan={drawer.plan}
+        onClose={() => setDrawer({ open: false, mode: "create" })}
+        onSaved={() => void handleSaved()}
+      />
+
+      {/* 详情：复用桌面 PpmProjectPlanDetail（三联表 4 层嵌套） */}
       <PpmProjectPlanDetail
         open={detailPlanId !== null}
         planId={detailPlanId}
