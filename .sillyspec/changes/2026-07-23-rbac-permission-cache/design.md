@@ -89,7 +89,8 @@ scale: large
 | `backend/app/modules/workspace/members_service.py` | add_or_update_member/update_member_role/remove_member/transfer_ownership 后调 invalidate_all_permissions | P4 |
 | `backend/app/modules/workspace/service.py` | `_ensure_creator_as_owner` 所有调用方(create @148/165/222 + scan_generate @609/669)commit 后调 invalidate_all_permissions(D-006@v1) | P4 |
 | `backend/app/modules/ppm/project/service.py` | ProjectMemberService.create/update/delete 后调 invalidate_all_permissions | P4 |
-| 测试:auth/tests、workspace/tests、admin、ppm | 缓存读写+降级单测、每失效点清空安全测试、ppm-scope uuid 反序列化类型测试、无 Redis 回退正确性 | P6 |
+| `backend/tests/modules/test_permission_cache.py` | 新建(task-10):缓存读写+降级+失效安全(含scan_generate)+uuid类型+无Redis回退+经理problem_operable测试,17测试覆盖AC-01~05 | P6 |
+| auth/tests、workspace/tests、admin、ppm 既有测试 | 缓存接入+失效hook后零回归验证(核心315+ppm130 passed) | P6 |
 
 ## 6. 接口定义
 

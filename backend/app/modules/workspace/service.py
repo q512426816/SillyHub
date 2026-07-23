@@ -33,6 +33,7 @@ from app.core.errors import (
     WorkspaceSlugDuplicate,
 )
 from app.core.logging import get_logger
+from app.core.permission_cache import invalidate_all_permissions
 from app.modules.agent.model import AgentRun
 from app.modules.auth.model import Role, User, UserWorkspaceRole
 from app.modules.workspace.model import (
@@ -148,6 +149,8 @@ class WorkspaceService:
             await self._ensure_creator_as_owner(existing.id, user_id=created_by)
             await self.session.commit()
             await self.session.refresh(existing)
+            # D-006@v1：commit 后清权限缓存（新增 owner 角色，perm:*/ppm-scope:* 失效）。
+            await invalidate_all_permissions()
             log.info("workspace.activated_from_create", workspace_id=str(existing.id))
             return existing
 
@@ -178,6 +181,8 @@ class WorkspaceService:
                 )
             await self._session.commit()
             await self._session.refresh(resurrected)
+            # D-006@v1：commit 后清权限缓存（新增 owner 角色，perm:*/ppm-scope:* 失效）。
+            await invalidate_all_permissions()
             log.info("workspace.resurrected", workspace_id=str(resurrected.id))
             return resurrected
 
@@ -238,6 +243,8 @@ class WorkspaceService:
             )
         await self._session.commit()
         await self._session.refresh(workspace)
+        # D-006@v1：commit 后清权限缓存（新增 owner 角色，perm:*/ppm-scope:* 失效）。
+        await invalidate_all_permissions()
         log.info(
             "workspace.created.daemon_client",
             workspace_id=str(workspace.id),
@@ -643,6 +650,7 @@ class WorkspaceService:
         if daemon_id is not None:
             await self._guard_daemon_owned_by_user(daemon_id, user_id)
         workspace = await self._find_active_by_root_path(root_path)
+        workspace_created = False
         if workspace is None:
             name = Path(root_path).name
             slug = slugify(name)
@@ -667,6 +675,7 @@ class WorkspaceService:
             await self._ensure_empty_spec_workspace(workspace.id, strategy=spec_strategy)
             # scan-generate：创建人自动添加为 owner
             await self._ensure_creator_as_owner(workspace.id, user_id=user_id)
+            workspace_created = True
             # daemon_id 维度：建成员绑定行（workspace+user+daemon+path），对齐 create 流程，
             # 使后续 start_scan_dispatch 经 MemberBindingResolver 解析到该 daemon。
             if daemon_id is not None:
@@ -708,6 +717,12 @@ class WorkspaceService:
             agent_run_id=str(agent_run.id),
             daemon_id=str(daemon_id) if daemon_id else None,
         )
+        # D-006@v1：scan_generate 独立建工作区路径（不经 create）。新建 workspace 时
+        # _ensure_creator_as_owner 已写 owner 角色；start_scan_dispatch（含其
+        # _mark_no_online_daemon 分支）返回前已 commit，故此处为 commit 后失效，
+        # 清 perm:*/ppm-scope:*。existing_run 早返回分支未写角色（workspace 已存在），免失效。
+        if workspace_created:
+            await invalidate_all_permissions()
         return (workspace.id, agent_run.id)
 
     async def _guard_daemon_owned_by_user(self, daemon_id: uuid.UUID, user_id: uuid.UUID) -> None:

@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.core.errors import WorkspaceNotFound
+from app.core.permission_cache import invalidate_all_permissions
 from app.modules.auth.model import Role, User, UserWorkspaceRole
 from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
 from app.modules.workspace.model import Workspace
@@ -276,6 +277,8 @@ async def add_or_update_member(
         session.add(row)
 
     await session.commit()
+    # D-002@v2：工作区成员角色变更后清权限缓存。
+    await invalidate_all_permissions()
     await session.refresh(row)
     return row
 
@@ -336,6 +339,8 @@ async def update_member_role(
     existing.role_id = new_role.id
     existing.granted_at = datetime.now(UTC)
     await session.commit()
+    # D-002@v2：工作区成员角色变更后清权限缓存。
+    await invalidate_all_permissions()
     await session.refresh(existing)
     return existing
 
@@ -391,6 +396,8 @@ async def remove_member(
         )
     )
     await session.commit()
+    # D-002@v2：移除工作区成员后清权限缓存。
+    await invalidate_all_permissions()
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -501,6 +508,8 @@ async def transfer_ownership(
         # Exit ``begin_nested`` block → SAVEPOINT released. Commit the outer
         # transaction so the writes are durable.
         await session.commit()
+        # D-002@v2：所有权转移(owner 角色变更)后清权限缓存。
+        await invalidate_all_permissions()
     except Exception:
         await session.rollback()
         raise

@@ -25,24 +25,24 @@ Wave 2 全部只依赖 task-01,内部可并行;Wave 3 依赖 task-01~09。
 
 ## Wave 1: 缓存基础设施(无依赖)
 
-- [ ] task-01: 新建 core/permission_cache.py 缓存 helper(覆盖: FR-01, FR-05, D-001@v1, D-002@v2, D-003@v2, D-004@v1, D-005@v1)
-- [ ] task-02: core/config.py 加 permission_cache_ttl=300(覆盖: FR-05)
+- [x] task-01: 新建 core/permission_cache.py 缓存 helper(覆盖: FR-01, FR-05, D-001@v1, D-002@v2, D-003@v2, D-004@v1, D-005@v1)
+- [x] task-02: core/config.py 加 permission_cache_ttl=300(覆盖: FR-05)
 
 ## Wave 2: 缓存读接入 + 失效触发(均依赖 task-01,可并行)
 
 > 读接入(task-03/04)与失效触发(task-05~09)是两类关注点,均只依赖 task-01,同 Wave 并行。
 
-- [ ] task-03: auth/rbac.py collect_* 缓存接入 + everywhere 内存并集(覆盖: FR-02, D-003@v2)
-- [ ] task-04: ppm/common/data_scope.py manager_project_ids/is_super_admin 缓存接入(覆盖: FR-03, D-005@v1)
-- [ ] task-05: admin/roles_service 失效 hook(覆盖: FR-04, D-002@v2)
-- [ ] task-06: admin/users_service 失效 hook(覆盖: FR-04, D-002@v2)
-- [ ] task-07: workspace/members_service 失效 hook(覆盖: FR-04, D-002@v2)
-- [ ] task-08: workspace/service `_ensure_creator_as_owner` 所有调用方(create + scan_generate)失效 hook(覆盖: FR-04, D-006@v1, D-002@v2)
-- [ ] task-09: ppm/project/service.ProjectMemberService 失效 hook(覆盖: FR-04, D-002@v2)
+- [x] task-03: auth/rbac.py collect_* 缓存接入 + everywhere 内存并集(覆盖: FR-02, D-003@v2)
+- [x] task-04: ppm/common/data_scope.py manager_project_ids/is_super_admin 缓存接入(覆盖: FR-03, D-005@v1)
+- [x] task-05: admin/roles_service 失效 hook(覆盖: FR-04, D-002@v2)
+- [x] task-06: admin/users_service 失效 hook(覆盖: FR-04, D-002@v2)
+- [x] task-07: workspace/members_service 失效 hook(覆盖: FR-04, D-002@v2)
+- [x] task-08: workspace/service `_ensure_creator_as_owner` 所有调用方(create + scan_generate)失效 hook(覆盖: FR-04, D-006@v1, D-002@v2)
+- [x] task-09: ppm/project/service.ProjectMemberService 失效 hook(覆盖: FR-04, D-002@v2)
 
 ## Wave 3: 测试(依赖 task-01~09)
 
-- [ ] task-10: 权限缓存测试(读写/降级/失效安全含 scan_generate/uuid 类型/无 Redis 回退)(覆盖: FR-06, AC-01~05)
+- [x] task-10: 权限缓存测试(读写/降级/失效安全含 scan_generate/uuid 类型/无 Redis 回退)(覆盖: FR-06, AC-01~05)
 
 ## 任务总表
 

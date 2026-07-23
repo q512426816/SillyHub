@@ -30,6 +30,7 @@ from sqlmodel import col
 
 from app.core.errors import PermissionDenied
 from app.core.logging import get_logger
+from app.core.permission_cache import invalidate_all_permissions
 from app.core.security import password_hasher
 from app.modules.admin.model import Organization, UserOrganization, UserRole
 from app.modules.admin.organizations_service import _descendant_ids
@@ -219,6 +220,8 @@ class UserService:
             )
         )
         await self.session.commit()
+        # D-002@v2：用户创建(含初始平台角色绑定)后清权限缓存。
+        await invalidate_all_permissions()
         await self.session.refresh(user)
         log.info("user.created", email=user.email, user_id=str(user.id))
         return user
@@ -395,6 +398,8 @@ class UserService:
             )
         )
         await self.session.commit()
+        # D-002@v2：用户更新(_rewrite_roles / is_platform_admin 翻转)后清权限缓存。
+        await invalidate_all_permissions()
         await self.session.refresh(target)
         return target
 
@@ -430,6 +435,8 @@ class UserService:
             )
         )
         await self.session.commit()
+        # D-002@v2：用户删除后清权限缓存。
+        await invalidate_all_permissions()
 
     # ── Org / role bindings ──────────────────────────────────────────────
 

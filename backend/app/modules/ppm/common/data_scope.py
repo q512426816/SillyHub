@@ -21,6 +21,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from app.core.permission_cache import get_cached_ppm_scope, set_cached_ppm_scope
 from app.modules.admin.model import UserRole
 from app.modules.auth.model import Role, User
 from app.modules.ppm.problem.model import PpmProblemList
@@ -35,21 +36,54 @@ MANAGER_ROLE_NAMES: frozenset[str] = frozenset({"部门经理", "项目经理", 
 SUPER_ADMIN_KEY = "super_admin"
 
 
-async def is_super_admin(session: AsyncSession, user: User) -> bool:
-    """超管 = ``is_platform_admin`` 或持 ``super_admin`` 角色(D-006)。
+async def _compute_ppm_scope(session: AsyncSession, user: User) -> dict:
+    """查库计算 PPM 数据范围(``manager_project_ids`` + ``is_super_admin``)并回填缓存。
 
-    复用现有 RBAC 短路口径(``rbac.has_permission`` 的第一分支),并补 ``super_admin``
-    角色判定——DB 实测 ``is_platform_admin=true`` 与 ``super_admin`` 角色持有集不重合。
+    把 :func:`manager_project_ids` / :func:`is_super_admin` 的查库逻辑集中在此
+    (避免散落重复),供两者共享 ``ppm-scope`` 一键缓存——miss 时一次查库同时算出
+    两值回填,后续任一入口命中即直接返回。
+
+    注:``is_platform_admin`` 短路不进入本函数(在 :func:`is_super_admin` 调用方
+    保留);此处 ``is_super_admin`` 仅算"是否持 ``super_admin`` 角色"。
     """
-    if user.is_platform_admin:
-        return True
-    stmt = (
+    stmt_member = select(
+        col(PpmProjectMember.pm_project_id), col(PpmProjectMember.role_name)
+    ).where(col(PpmProjectMember.user_id) == user.id)
+    manager_ids: set[uuid.UUID] = set()
+    for pm_project_id, role_name in (await session.execute(stmt_member)).all():
+        names = {s.strip() for s in (role_name or "").split(",") if s.strip()}
+        if names & MANAGER_ROLE_NAMES:
+            manager_ids.add(pm_project_id)
+
+    stmt_role = (
         select(col(UserRole.role_id))
         .join(Role, col(Role.id) == col(UserRole.role_id))
         .where(col(UserRole.user_id) == user.id)
         .where(col(Role.key) == SUPER_ADMIN_KEY)
     )
-    return (await session.execute(stmt)).first() is not None
+    super_admin = (await session.execute(stmt_role)).first() is not None
+
+    scope = {"manager_project_ids": manager_ids, "is_super_admin": super_admin}
+    await set_cached_ppm_scope(user.id, scope)
+    return scope
+
+
+async def is_super_admin(session: AsyncSession, user: User) -> bool:
+    """超管 = ``is_platform_admin`` 或持 ``super_admin`` 角色(D-006)。
+
+    复用现有 RBAC 短路口径(``rbac.has_permission`` 的第一分支),并补 ``super_admin``
+    角色判定——DB 实测 ``is_platform_admin=true`` 与 ``super_admin`` 角色持有集不重合。
+
+    缓存(FR-03/D-005@v1):``is_platform_admin`` 短路保留(不查 DB/缓存);否则读
+    ``ppm-scope`` 缓存的 ``is_super_admin`` 字段,miss 时 :func:`_compute_ppm_scope`
+    查库回填。降级范式——Redis 故障 get 返回 None,自动回退查库。
+    """
+    if user.is_platform_admin:
+        return True
+    cached = await get_cached_ppm_scope(user.id)
+    if cached is not None:
+        return cached["is_super_admin"]
+    return (await _compute_ppm_scope(session, user))["is_super_admin"]
 
 
 async def manager_project_ids(session: AsyncSession, user: User) -> set[uuid.UUID]:
@@ -58,16 +92,15 @@ async def manager_project_ids(session: AsyncSession, user: User) -> set[uuid.UUI
     ``role_name`` 是逗号拼接多角色字符串(如"开发经理,项目经理,前端开发人员"),
     应用层拆分后精确匹配 :data:`MANAGER_ROLE_NAMES`——避免 SQL ``ilike '%经理%'``
     误伤维保经理等非目标角色。
+
+    缓存(FR-03/D-005@v1):读 ``ppm-scope`` 缓存的 ``manager_project_ids``(helper
+    已保证反序列化为 ``set[uuid.UUID]``,直接用),miss 时 :func:`_compute_ppm_scope`
+    查库回填。降级范式——Redis 故障 get 返回 None,自动回退查库。
     """
-    stmt = select(col(PpmProjectMember.pm_project_id), col(PpmProjectMember.role_name)).where(
-        col(PpmProjectMember.user_id) == user.id
-    )
-    ids: set[uuid.UUID] = set()
-    for pm_project_id, role_name in (await session.execute(stmt)).all():
-        names = {s.strip() for s in (role_name or "").split(",") if s.strip()}
-        if names & MANAGER_ROLE_NAMES:
-            ids.add(pm_project_id)
-    return ids
+    cached = await get_cached_ppm_scope(user.id)
+    if cached is not None:
+        return cached["manager_project_ids"]
+    return (await _compute_ppm_scope(session, user))["manager_project_ids"]
 
 
 async def task_scope_clause(session: AsyncSession, user: User):

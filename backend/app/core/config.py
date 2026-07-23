@@ -104,6 +104,16 @@ class Settings(BaseSettings):
             "0=禁用负缓存。"
         ),
     )
+    # ── 权限缓存（2026-07-23-rbac-permission-cache）─────────────────────
+    permission_cache_ttl: int = Field(
+        300,
+        ge=0,
+        description=(
+            "RBAC 权限缓存(platform/all/workspace 三键)+ PPM data_scope 缓存的 Redis TTL(秒)。"
+            "失效逻辑漏调或 invalidate 自身失败时,TTL 是最长越权窗口兜底(D-002@v2)。"
+            "0=禁用缓存(每次回查 DB,仅用于排障)。"
+        ),
+    )
     platform_bootstrap_admin_email: str | None = None
     platform_bootstrap_admin_password: str | None = Field(default=None, min_length=8)
     platform_bootstrap_admin_display_name: str | None = None

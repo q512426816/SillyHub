@@ -30,6 +30,7 @@ from app.core.errors import (
     RoleNotFound,
     RoleSystemProtected,
 )
+from app.core.permission_cache import invalidate_all_permissions
 from app.modules.admin.schema import (
     RoleCreateRequest,
     RoleListResponse,
@@ -225,6 +226,7 @@ class RoleService:
             details={"permissions": [p.value for p in payload.permission_keys]},
         )
         await self._session.commit()
+        await invalidate_all_permissions()
         await self._session.refresh(role)
         return await _to_read(self._session, role)
 
@@ -257,6 +259,7 @@ class RoleService:
         self._session.add(role)
         self._audit(action="role.updated", role=role, details={"is_active": role.is_active})
         await self._session.commit()
+        await invalidate_all_permissions()
         await self._session.refresh(role)
         return await _to_read(self._session, role)
 
@@ -273,6 +276,7 @@ class RoleService:
         self._session.add(role)
         self._audit(action="role.disabled", role=role)
         await self._session.commit()
+        await invalidate_all_permissions()
         await self._session.refresh(role)
         return await _to_read(self._session, role)
 
@@ -284,6 +288,7 @@ class RoleService:
         self._session.add(role)
         self._audit(action="role.enabled", role=role)
         await self._session.commit()
+        await invalidate_all_permissions()
         await self._session.refresh(role)
         return await _to_read(self._session, role)
 
@@ -306,6 +311,7 @@ class RoleService:
         )
         await self._session.delete(role)
         await self._session.commit()
+        await invalidate_all_permissions()
 
     async def list_users(self, role_id: uuid.UUID) -> RoleUserListResponse:
         """Return every user bound to ``role_id``.

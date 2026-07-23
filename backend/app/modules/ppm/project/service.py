@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.core.permission_cache import invalidate_all_permissions
 from app.modules.auth.model import User
 from app.modules.ppm.common.crud import (
     Page,
@@ -541,6 +542,8 @@ class ProjectMemberService:
         self._session.add(entity)
         await self._session.commit()
         await self._session.refresh(entity)
+        # D-002@v2:PpmProjectMember 写入影响经理 project_ids,必须清 ppm-scope:* + perm:*
+        await invalidate_all_permissions()
         log.info(
             "ppm_project_member_created",
             member_id=str(entity.id),
@@ -564,12 +567,16 @@ class ProjectMemberService:
         entity.updated_at = _now()
         await self._session.commit()
         await self._session.refresh(entity)
+        # D-002@v2:PpmProjectMember 写入影响经理 project_ids,必须清 ppm-scope:* + perm:*
+        await invalidate_all_permissions()
         return entity
 
     async def delete(self, entity_id: uuid.UUID) -> None:
         entity = await self.get(entity_id)
         await self._session.delete(entity)
         await self._session.commit()
+        # D-002@v2:PpmProjectMember 写入影响经理 project_ids,必须清 ppm-scope:* + perm:*
+        await invalidate_all_permissions()
 
     async def get(self, entity_id: uuid.UUID) -> PpmProjectMember:
         entity = await self._session.get(PpmProjectMember, entity_id)

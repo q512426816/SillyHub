@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from app.core.permission_cache import get_cached_permissions, set_cached_permissions
 from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
 from app.modules.auth.permissions import Permission
 
@@ -23,6 +24,9 @@ async def collect_permissions(
     session: AsyncSession, *, user_id: uuid.UUID, workspace_id: uuid.UUID
 ) -> set[str]:
     """Return the union of every permission this user has in this workspace."""
+    cached = await get_cached_permissions(user_id, scope="workspace", workspace_id=workspace_id)
+    if cached is not None:
+        return cached
     stmt = (
         select(col(RolePermission.permission))
         .join(Role, col(Role.id) == col(RolePermission.role_id))
@@ -31,11 +35,16 @@ async def collect_permissions(
         .where(col(UserWorkspaceRole.workspace_id) == workspace_id)
     )
     rows = (await session.execute(stmt)).scalars().all()
-    return set(rows)
+    perms = set(rows)
+    await set_cached_permissions(user_id, perms, scope="workspace", workspace_id=workspace_id)
+    return perms
 
 
 async def collect_permissions_all(session: AsyncSession, *, user_id: uuid.UUID) -> set[str]:
     """Union of permissions this user holds across *all* workspaces."""
+    cached = await get_cached_permissions(user_id, scope="all")
+    if cached is not None:
+        return cached
     stmt = (
         select(col(RolePermission.permission))
         .join(Role, col(Role.id) == col(RolePermission.role_id))
@@ -43,7 +52,9 @@ async def collect_permissions_all(session: AsyncSession, *, user_id: uuid.UUID) 
         .where(col(UserWorkspaceRole.user_id) == user_id)
     )
     rows = (await session.execute(stmt)).scalars().all()
-    return set(rows)
+    perms = set(rows)
+    await set_cached_permissions(user_id, perms, scope="all")
+    return perms
 
 
 async def collect_permissions_platform(session: AsyncSession, *, user_id: uuid.UUID) -> set[str]:
@@ -56,7 +67,14 @@ async def collect_permissions_platform(session: AsyncSession, *, user_id: uuid.U
     Falls back to an empty set when the admin module is not yet
     bootstrapped (task-03 pending) so existing workspace-scoped tests
     do not break during the staged rollout.
+
+    缓存(FR-02/D-003@v2):读 ``perm:{user_id}:platform``;miss 查库回填。
+    ``ImportError`` 降级分支(admin 未 bootstrap)不回填缓存(非真实空集,真实
+    权限可能非空,只是 admin 模块未装——缓存空集会导致后续命中错误返回空)。
     """
+    cached = await get_cached_permissions(user_id, scope="platform")
+    if cached is not None:
+        return cached
     try:
         from app.modules.admin.model import UserRole
     except ImportError:
@@ -69,7 +87,9 @@ async def collect_permissions_platform(session: AsyncSession, *, user_id: uuid.U
         .where(col(UserRole.user_id) == user_id)
     )
     rows = (await session.execute(stmt)).scalars().all()
-    return set(rows)
+    perms = set(rows)
+    await set_cached_permissions(user_id, perms, scope="platform")
+    return perms
 
 
 async def collect_permissions_everywhere(session: AsyncSession, *, user_id: uuid.UUID) -> set[str]:
