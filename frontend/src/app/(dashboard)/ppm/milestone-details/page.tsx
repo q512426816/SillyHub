@@ -1332,28 +1332,47 @@ export function ImportModuleModal({
       </div>
 
       {step === 1 ? (
-        <Upload.Dragger
-          accept=".xlsx"
-          multiple={false}
-          showUploadList={false}
-          beforeUpload={(file) => {
-            void handleUpload(file);
-            // 返回 false 阻止 AntD 自动上传
-            return false;
-          }}
-          disabled={uploading}
-        >
-          <p className="text-3xl">📄</p>
-          <p className="text-sm text-muted-foreground">
-            {uploading ? "解析中…" : "点击或拖拽 Excel 文件到此"}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            支持 .xlsx，参考「项目详细开发计划」格式
-          </p>
-          <p className="mt-2 text-sm font-semibold text-primary">
-            选择文件开始预览
-          </p>
-        </Upload.Dragger>
+        <>
+          <Upload.Dragger
+            accept=".xlsx"
+            multiple={false}
+            showUploadList={false}
+            beforeUpload={(file) => {
+              void handleUpload(file);
+              // 返回 false 阻止 AntD 自动上传
+              return false;
+            }}
+            disabled={uploading}
+          >
+            <p className="text-3xl">📄</p>
+            <p className="text-sm text-muted-foreground">
+              {uploading ? "解析中…" : "点击或拖拽 Excel 文件到此"}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              支持 .xlsx，参考「项目详细开发计划」格式
+            </p>
+            <p className="mt-2 text-sm font-semibold text-primary">
+              选择文件开始预览
+            </p>
+          </Upload.Dragger>
+          <div className="mt-3 text-center">
+            <Button
+              type="link"
+              onClick={() => {
+                // 模板置于 public/templates/(Next.js 静态服务),临时 anchor 触发下载,
+                // download 属性给中文名「项目详细开发计划模板.xlsx」。
+                const a = document.createElement("a");
+                a.href = "/templates/dev-plan-template.xlsx";
+                a.download = "项目详细开发计划模板.xlsx";
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+              }}
+            >
+              下载导入模板
+            </Button>
+          </div>
+        </>
       ) : null}
 
       {step === 2 && preview ? (

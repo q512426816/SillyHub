@@ -250,3 +250,11 @@ created_at: 2026-07-21T08:48:56
 根因：ql-001 的 `ellipsis:true + truncate` 是单行截断，不符合「换行显示全文」的要求。
 方案：①去掉列 `ellipsis:true`（它会强制 `white-space:nowrap` 单行截断）；②render 由 truncate 改为固定宽度换行容器 `<div className="whitespace-normal break-words" style={{maxWidth:220}}>`——长文本自动换行成多行、列宽仍固定 ~250（maxWidth 约束不被 max-content 撑开）、全文可见不截断。列 `width:250` 保留。
 结果：①前端 typecheck 0 error；②lint 0 error；③milestone-details 24 passed；④待 commit+push+重建 frontend 后用户验证（任务描述列固定~250、长文本换行多行、全文可见）。
+## ql-20260723-003-8b94 | 2026-07-23 09:08:27 | /ppm/milestone-details 三级「导入模块」弹窗上传步加模板下载
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（ImportModuleModal 上传步加「下载导入模板」按钮）+ frontend/public/templates/dev-plan-template.xlsx（新增静态模板，源 C:\Users\12532\Desktop\项目详细开发计划模板.xlsx）
+需求：实施阶段（三级）的「导入模块」弹窗，上传文件步骤加一个模板下载入口，模板由用户提供（桌面「项目详细开发计划模板.xlsx」）。
+根因：原上传步只有 Upload.Dragger（accept .xlsx），用户无从得知期望的列格式，需提供模板下载。
+方案：①把模板拷到 `frontend/public/templates/dev-plan-template.xlsx`（Next.js 静态服务；next.config 无 basePath，根路径 `/templates/...` 直接可访问）；②ImportModuleModal 上传步（step===1）Upload.Dragger 下方加「下载导入模板」antd Button（type=link），onClick 创建临时 `<a>`（href=`/templates/dev-plan-template.xlsx`、`download="项目详细开发计划模板.xlsx"` 中文名）触发下载；③Dragger + 按钮 Fragment 包裹（修复 JSX 多根元素 TS 报错）。
+结果：①前端 typecheck 0 error；②lint 0 error；③milestone-details 24 passed；④待 commit+push+重建 frontend 后用户验证（上传步点「下载导入模板」能下载到中文名 xlsx）。
