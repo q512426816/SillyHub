@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   BarChart3,
   Boxes,
+  CalendarDays,
   ClipboardList,
   Circle,
   Clock,
@@ -101,6 +102,7 @@ const MENU_ICON_MAP: Record<string, LucideIcon> = {
   "/ppm/work-hours": Clock,
   "/ppm/work-hour-statistics": BarChart3,
   "/ppm/kanban": LayoutDashboard,
+  "/ppm/weekly-plan": CalendarDays,
 };
 
 const FallbackIcon = Circle;

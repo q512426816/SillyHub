@@ -72,6 +72,8 @@ from app.modules.ppm.plan.schema import (
     PsPlanNodeDetailWithTasks,
     PsPlanNodeWithDetail,
     PsProjectPlanListReq,
+    WeeklyPlanPageReq,
+    WeeklyPlanRow,
 )
 from app.modules.ppm.project.model import PpmProjectMaintenance, PpmProjectMember
 from app.modules.ppm.task.model import PlanTask, TaskExecute
@@ -2053,6 +2055,152 @@ class PlanService:
             for exc in execs:
                 await self._session.delete(exc)
             await self._session.delete(task)
+
+    # ---------- 项目周计划一览表 (Weekly Plan) ----------
+    def _weekly_plan_stmt(self):
+        """构建项目周计划聚合查询(5 表 JOIN)。
+
+        PsPlanNodeDetail 驱动 → INNER JOIN PsPlanNode(has_module=true)
+        → PsProjectPlan → PpmProjectMaintenance;
+        LEFT JOIN PlanNodeModule(平台/计划类型) + PlanTask(任务计划信息)。
+        返回扁平列(对应 19 列中的 15 个有数据的列,4 列留空)。
+        """
+        return (
+            select(
+                PpmProjectMaintenance.project_name.label("project_name"),
+                PlanNodeModule.plan_type.label("plan_type"),
+                PsPlanNodeDetail.detailed_stage.label("detailed_stage"),
+                PlanNodeModule.module_name.label("module_name"),
+                PsPlanNodeDetail.task_theme.label("task_theme"),
+                PsPlanNodeDetail.task_description.label("task_description"),
+                func.coalesce(PlanTask.work_load, PsPlanNodeDetail.plan_workload).label(
+                    "work_load"
+                ),
+                PlanTask.user_name.label("user_name"),
+                func.coalesce(PlanTask.start_time, PsPlanNodeDetail.plan_begin_time).label(
+                    "start_time"
+                ),
+                func.coalesce(PlanTask.end_time, PsPlanNodeDetail.plan_complete_time).label(
+                    "end_time"
+                ),
+                PlanTask.status.label("status"),
+                PlanTask.actual_start_time.label("actual_start_time"),
+                PlanTask.actual_end_time.label("actual_end_time"),
+                PsPlanNodeDetail.id.label("detail_id"),
+            )
+            .select_from(PsPlanNodeDetail)
+            .join(PsPlanNode, PsPlanNode.id == PsPlanNodeDetail.plan_node_id)
+            .join(PsProjectPlan, PsProjectPlan.id == PsPlanNode.ps_project_plan_id)
+            .join(PpmProjectMaintenance, PpmProjectMaintenance.id == PsProjectPlan.project_id)
+            .outerjoin(PlanNodeModule, PlanNodeModule.id == PsPlanNodeDetail.module_id)
+            .outerjoin(PlanTask, PlanTask.ps_plan_node_detail_id == PsPlanNodeDetail.id)
+            .where(
+                PsPlanNode.has_module.is_(True),
+                PsPlanNodeDetail.status != PlanNodeDetailStatus.ARCHIVED.value,
+            )
+        )
+
+    @staticmethod
+    def _row_to_weekly(row: Any) -> WeeklyPlanRow:
+        """查询行 → WeeklyPlanRow(含周次派生)。"""
+        st = row.start_time
+        week_num = st.isocalendar()[1] if st else None
+        return WeeklyPlanRow(
+            project_name=row.project_name,
+            plan_type=row.plan_type,
+            detailed_stage=row.detailed_stage,
+            module_name=row.module_name,
+            task_theme=row.task_theme,
+            task_description=row.task_description,
+            work_load=row.work_load,
+            user_name=row.user_name,
+            start_time=st,
+            end_time=row.end_time,
+            status=row.status,
+            actual_start_time=row.actual_start_time,
+            actual_end_time=row.actual_end_time,
+            week_number=week_num,
+            detail_id=row.detail_id,
+        )
+
+    async def list_weekly_plan(self, req: WeeklyPlanPageReq) -> Page[WeeklyPlanRow]:
+        """项目周计划一览表分页查询(含筛选)。"""
+        stmt = self._weekly_plan_stmt()
+        if req.project_name:
+            stmt = stmt.where(PpmProjectMaintenance.project_name.ilike(f"%{req.project_name}%"))
+        if req.status:
+            stmt = stmt.where(PlanTask.status.in_(req.status))
+        if req.user_id:
+            stmt = stmt.where(PlanTask.user_id == req.user_id)
+        if req.start_time:
+            stmt = stmt.where(
+                func.coalesce(PlanTask.start_time, PsPlanNodeDetail.plan_begin_time)
+                >= req.start_time
+            )
+        if req.end_time:
+            stmt = stmt.where(
+                func.coalesce(PlanTask.start_time, PsPlanNodeDetail.plan_begin_time) <= req.end_time
+            )
+        total = await count_total(self._session, stmt)
+        stmt = stmt.order_by(PpmProjectMaintenance.project_name, PsPlanNodeDetail.no)
+        stmt = apply_pagination(stmt, req)
+        raw_rows = (await self._session.execute(stmt)).all()
+        items = [self._row_to_weekly(r) for r in raw_rows]
+        return Page[Any].build(items=items, total=total, req=req)
+
+    async def list_weekly_plan_for_export(self, req: WeeklyPlanPageReq) -> list[dict[str, Any]]:
+        """项目周计划导出(同查询不分页,返回 dict 列表供 grouped_report_to_workbook)。
+
+        延期原因/执行说明/评估说明/备注 4 列留空(系统无对应字段)。
+        """
+        stmt = self._weekly_plan_stmt()
+        if req.project_name:
+            stmt = stmt.where(PpmProjectMaintenance.project_name.ilike(f"%{req.project_name}%"))
+        if req.status:
+            stmt = stmt.where(PlanTask.status.in_(req.status))
+        if req.user_id:
+            stmt = stmt.where(PlanTask.user_id == req.user_id)
+        if req.start_time:
+            stmt = stmt.where(
+                func.coalesce(PlanTask.start_time, PsPlanNodeDetail.plan_begin_time)
+                >= req.start_time
+            )
+        if req.end_time:
+            stmt = stmt.where(
+                func.coalesce(PlanTask.start_time, PsPlanNodeDetail.plan_begin_time) <= req.end_time
+            )
+        stmt = stmt.order_by(PpmProjectMaintenance.project_name, PsPlanNodeDetail.no)
+        raw_rows = (await self._session.execute(stmt)).all()
+        out: list[dict[str, Any]] = []
+        for r in raw_rows:
+            st = r.start_time
+            out.append(
+                {
+                    "project_name": r.project_name or "",
+                    "plan_type": r.plan_type or "",
+                    "detailed_stage": r.detailed_stage or "",
+                    "module_name": r.module_name or "",
+                    "task_theme": r.task_theme or "",
+                    "task_description": r.task_description or "",
+                    "work_load": r.work_load or "",
+                    "week_number": st.isocalendar()[1] if st else "",
+                    "user_name": r.user_name or "",
+                    "start_time": st.strftime("%Y-%m-%d") if st else "",
+                    "end_time": r.end_time.strftime("%Y-%m-%d") if r.end_time else "",
+                    "status": r.status or "",
+                    "actual_start": r.actual_start_time.strftime("%Y-%m-%d")
+                    if r.actual_start_time
+                    else "",
+                    "actual_end": r.actual_end_time.strftime("%Y-%m-%d")
+                    if r.actual_end_time
+                    else "",
+                    "delay_reason": "",
+                    "exec_note": "",
+                    "eval_note": "",
+                    "remarks": "",
+                }
+            )
+        return out
 
 
 __all__ = ["PlanError", "PlanNotFound", "PlanService"]

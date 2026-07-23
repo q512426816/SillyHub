@@ -62,6 +62,8 @@ from app.modules.ppm.plan.schema import (
     PsProjectPlanResp,
     PsProjectPlanUpdate,
     SubmitDetailReq,
+    WeeklyPlanPageReq,
+    WeeklyPlanRow,
 )
 from app.modules.ppm.plan.service import PlanError, PlanService
 
@@ -120,6 +122,29 @@ def _project_plan_list_req(
 
 
 ProjectPlanListReqDep = Annotated[PsProjectPlanListReq, Depends(_project_plan_list_req)]
+
+
+def _weekly_plan_req(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    project_name: str | None = Query(None),
+    status: list[str] | None = Query(None),
+    user_id: uuid.UUID | None = Query(None),
+    start_time: datetime | None = Query(None),
+    end_time: datetime | None = Query(None),
+) -> WeeklyPlanPageReq:
+    return WeeklyPlanPageReq(
+        page=page,
+        page_size=page_size,
+        project_name=project_name,
+        status=status,
+        user_id=user_id,
+        start_time=start_time,
+        end_time=end_time,
+    )
+
+
+WeeklyPlanListReqDep = Annotated[WeeklyPlanPageReq, Depends(_weekly_plan_req)]
 
 
 def _actor(user: User) -> tuple[str, str | None]:
@@ -831,6 +856,69 @@ async def submit_detail(
         actor_name=actor_name,
     )
     return PsPlanNodeDetailResp.model_validate(obj)
+
+
+# ===========================================================================
+# 项目周计划一览表 (Weekly Plan)
+# ===========================================================================
+
+_WEEKLY_PLAN_COLUMNS = [
+    ColumnDef(field="project_name", header="项目名称", width=20),
+    ColumnDef(field="plan_type", header="计划类型", width=10),
+    ColumnDef(field="detailed_stage", header="任务分类", width=12),
+    ColumnDef(field="module_name", header="平台/子系统", width=14),
+    ColumnDef(field="task_theme", header="任务主题", width=14),
+    ColumnDef(field="task_description", header="任务描述", width=24),
+    ColumnDef(field="work_load", header="工作量(人天)", width=10),
+    ColumnDef(field="week_number", header="周次", width=6),
+    ColumnDef(field="user_name", header="责任人", width=10),
+    ColumnDef(field="start_time", header="开始日期", width=12),
+    ColumnDef(field="end_time", header="结束日期", width=12),
+    ColumnDef(field="status", header="状态", width=8),
+    ColumnDef(field="actual_start", header="开始时间", width=12),
+    ColumnDef(field="actual_end", header="完成时间", width=12),
+    ColumnDef(field="delay_reason", header="延期原因", width=14),
+    ColumnDef(field="exec_note", header="执行说明", width=16),
+    ColumnDef(field="eval_note", header="评估说明", width=14),
+    ColumnDef(field="remarks", header="备注", width=14),
+]
+
+
+@router.get("/weekly-plan", response_model=Page[WeeklyPlanRow])
+async def list_weekly_plan(
+    session: SessionDep,
+    user: AuthUser,
+    req: WeeklyPlanListReqDep,
+) -> Page[WeeklyPlanRow]:
+    """项目周计划一览表分页查询(所有项目实施阶段明细+任务计划)。"""
+    return await PlanService(session).list_weekly_plan(req)
+
+
+@router.get("/weekly-plan/export-excel")
+async def export_weekly_plan(
+    session: SessionDep,
+    user: AuthUser,
+    req: WeeklyPlanListReqDep,
+) -> Any:
+    """导出项目周计划一览表 Excel(按项目分组,grouped_report_to_workbook)。"""
+    rows = await PlanService(session).list_weekly_plan_for_export(req)
+    # 按项目分组构建 sections
+    sections: list[dict[str, Any]] = []
+    current_project: str | None = None
+    for r in rows:
+        pn = r["project_name"]
+        if pn != current_project:
+            current_project = pn
+            sections.append({"title": pn, "groups": [{"subtitle": None, "rows": []}]})
+        sections[-1]["groups"][0]["rows"].append(r)
+    return await anyio.to_thread.run_sync(
+        lambda: _build_grouped_excel_response(
+            _WEEKLY_PLAN_COLUMNS,
+            sections,
+            "项目周计划一览表",
+            filename=timestamped_filename("项目周计划一览表"),
+        )
+    )
 
 
 # ===========================================================================

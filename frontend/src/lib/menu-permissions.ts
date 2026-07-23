@@ -458,6 +458,16 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     matchPattern: "/ppm/kanban",
     permissions: [{ key: "ppm:kanban:view", name: "看板查看" }],
   },
+  {
+    section: "ppm",
+    menuKey: "ppm-weekly-plan",
+    menuLabel: "项目周计划",
+    icon: "\u{1F4C5}",
+    href: "/ppm/weekly-plan",
+    absolute: true,
+    matchPattern: "/ppm/weekly-plan",
+    permissions: [],
+  },
 ];
 
 /** section 固定渲染顺序，供 AppShell / Picker 使用 */

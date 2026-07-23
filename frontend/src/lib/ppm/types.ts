@@ -1407,3 +1407,35 @@ export interface WorkbenchCalendar {
   year_month: string;
   days: CalendarDay[];
 }
+
+// ===========================================================================
+// 项目周计划一览表 (Weekly Plan)
+// ===========================================================================
+
+/** 项目周计划一览表行(明细 + 任务计划聚合, 19 列)。 */
+export interface WeeklyPlanRow {
+  project_name: string | null;
+  plan_type: string | null;
+  detailed_stage: string | null;
+  module_name: string | null;
+  task_theme: string | null;
+  task_description: string | null;
+  work_load: string | null;
+  user_name: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  status: string | null;
+  actual_start_time: string | null;
+  actual_end_time: string | null;
+  week_number: number | null;
+  detail_id: string | null;
+}
+
+/** 项目周计划查询参数。 */
+export interface WeeklyPlanPageReq extends PageReq {
+  project_name?: string | null;
+  status?: string[];
+  user_id?: string | null;
+  start_time?: string;
+  end_time?: string;
+}

@@ -534,6 +534,52 @@ class ImportResultResp(PydanticModel):
     failed_rows: list[str] = Field(default_factory=list)  # 入库阶段失败的行描述
 
 
+# ===========================================================================
+# 项目周计划一览表 (Weekly Plan)
+# ===========================================================================
+
+
+class WeeklyPlanRow(PydanticModel):
+    """项目周计划一览表行（明细 + 任务计划聚合，19 列对应源 Excel）。
+
+    数据来自 5 表 JOIN：PpmProjectMaintenance → PsProjectPlan → PsPlanNode
+    (has_module=true) → PsPlanNodeDetail → PlanTask(LEFT JOIN)。
+    延期原因/执行说明/评估说明/备注 系统无对应字段，导出时留空。
+    """
+
+    project_name: str | None = None
+    plan_type: str | None = None
+    detailed_stage: str | None = None
+    module_name: str | None = None
+    task_theme: str | None = None
+    task_description: str | None = None
+    work_load: str | None = None
+    user_name: str | None = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    status: str | None = None
+    actual_start_time: datetime | None = None
+    actual_end_time: datetime | None = None
+    week_number: int | None = None
+    detail_id: uuid.UUID | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class WeeklyPlanPageReq(PageQuery):
+    """项目周计划列表查询（分页 + 筛选）。"""
+
+    project_name: str | None = None
+    status: list[str] | None = None
+    user_id: uuid.UUID | None = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+
+    @property
+    def offset(self) -> int:
+        return (self.page - 1) * self.page_size
+
+
 __all__ = [
     "ChangeProcessReq",
     "ImportCommitReq",
@@ -575,4 +621,6 @@ __all__ = [
     "PsProjectPlanResp",
     "PsProjectPlanUpdate",
     "SubmitDetailReq",
+    "WeeklyPlanPageReq",
+    "WeeklyPlanRow",
 ]
