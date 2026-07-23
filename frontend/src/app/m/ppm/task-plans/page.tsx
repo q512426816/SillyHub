@@ -1,35 +1,32 @@
 "use client";
 
 /**
- * 任务计划 · 移动视图（task-09 / FR-05 / D-001 / D-003 / D-007 / D-008）。
+ * 任务计划 · 移动视图（task-09 / FR-05 / D-001 / D-003 / D-007）。
  *
- * 桌面表格 `(dashboard)/ppm/task-plans` 在手机改为 MobileCardList 卡片列表（D-007），
- * 全功能对齐桌面（D-008）：新建/编辑/导出/批量删/启动/执行/详情 + 筛选 + 分页。
+ * 桌面表格改为 MobileCardList 卡片列表（D-007）。
+ * 移动端能力范围（用户 2026-07-23 调整）：浏览 + 筛选 + 导出 + 启动/执行/详情 + 编辑。
+ * **不做**新建 / 删除（含批量删）——建/删在桌面端完成。
  *
  * 数据层 100% 复用（D-003，禁止自写请求）：
- *  - @/lib/ppm/task：listPlanTasks / listPersonalPlanTasks / createPlanTask /
- *    updatePlanTask / deletePlanTask / startPlanTask / exportPlanTasks
+ *  - @/lib/ppm/task：listPlanTasks / listPersonalPlanTasks / updatePlanTask /
+ *    startPlanTask / exportPlanTasks
  *  - @/lib/ppm/project：listSimpleProjects（项目下拉）
  *  - @/lib/ppm/format：isOverEstimate（预估·已消耗对比）
  *  - @/stores/session：useSession（id / is_platform_admin 权限同源）
  * 列表固定 order_by=start_time&order=asc（与桌面一致）。
  *
- * 详情/执行复用桌面 `_components/task-detail-modal`（跨天填报 + 执行记录的复杂逻辑单一源，
- * 只读引用不改 → 桌面零回归）。新建/编辑用 task-07 MobileDetailSheet 承载表单，
- * 必填校验逐字对齐桌面 TaskDrawer（源 PlanForm.vue formRules）。
+ * 详情/执行复用桌面 _components/task-detail-modal（跨天填报复杂逻辑单一源，只读引用
+ * 不改 → 桌面零回归）。编辑用 task-07 MobileDetailSheet 承载表单，必填校验对齐桌面
+ * TaskDrawer（源 PlanForm.vue formRules）。
  *
- * 权限与桌面一致：
- *  - canDelete  = 负责人本人 || 平台管理员（单删/批量删共用）
- *  - canOperate = 负责人本人 || 平台管理员（启动/执行入口）
- *  - canEdit    = status="未开始" && 负责人本人
+ * 权限：canOperate = 负责人本人 || 平台管理员（启动/执行）；canEdit = 未开始 && 本人。
  *
- * 桌面 `(dashboard)/ppm/task-plans/**` 不改（零回归硬约束）。容器由 app/m/layout 自动包裹。
+ * 桌面 `(dashboard)/ppm/task-plans/**` 不改（零回归硬约束）。容器由 app/m/layout 包裹。
  */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { DatePicker, Input, Modal, Select } from "antd";
+import { DatePicker, Input, Select } from "antd";
 import type { Dayjs } from "dayjs";
 
-import { MobileBatchBar } from "@/components/mobile/mobile-batch-bar";
 import { MobileCardList } from "@/components/mobile/mobile-card-list";
 import { MobileDetailSheet } from "@/components/mobile/mobile-detail-sheet";
 import { MobileExportButton } from "@/components/mobile/mobile-export-button";
@@ -39,8 +36,6 @@ import { ApiError } from "@/lib/api";
 import { isOverEstimate } from "@/lib/ppm/format";
 import { listSimpleProjects } from "@/lib/ppm/project";
 import {
-  createPlanTask,
-  deletePlanTask,
   exportPlanTasks,
   listPersonalPlanTasks,
   listPlanTasks,
@@ -49,7 +44,6 @@ import {
 } from "@/lib/ppm/task";
 import type {
   PlanTask,
-  PlanTaskCreate,
   PlanTaskPageReq,
   PlanTaskUpdate,
   ProjectSimpleItem,
@@ -83,8 +77,8 @@ const mobileInputCls =
 
 interface DrawerState {
   open: boolean;
-  mode: "create" | "edit";
-  task?: PlanTask;
+  mode: "edit";
+  task: PlanTask;
 }
 
 export default function TaskPlansMobilePage() {
@@ -117,16 +111,9 @@ export default function TaskPlansMobilePage() {
   const [exporting, setExporting] = useState(false);
   const [projects, setProjects] = useState<ProjectSimpleItem[]>([]);
 
-  const [drawer, setDrawer] = useState<DrawerState>({
-    open: false,
-    mode: "create",
-  });
+  const [drawer, setDrawer] = useState<DrawerState | null>(null);
   const [detailTask, setDetailTask] = useState<PlanTask | null>(null);
   const [detailMode, setDetailMode] = useState<"detail" | "execute">("detail");
-
-  // 批量选择模式
-  const [batchMode, setBatchMode] = useState(false);
-  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
 
   useEffect(() => {
     void (async () => {
@@ -189,7 +176,6 @@ export default function TaskPlansMobilePage() {
         setLoading(false);
       }
     },
-    // buildParams 内部读取的 state 全列入 dep（镜像桌面），确保筛选条件变化时 load 引用变化
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       view,
@@ -235,16 +221,16 @@ export default function TaskPlansMobilePage() {
     }
   };
 
-  const handleSave = async (body: PlanTaskCreate | PlanTaskUpdate) => {
-    if (drawer.mode === "create") {
-      await createPlanTask(body as PlanTaskCreate);
-      showToast(true, "任务计划已创建");
-    } else if (drawer.task) {
-      await updatePlanTask(drawer.task.id, body as PlanTaskUpdate);
+  const handleSave = async (body: PlanTaskUpdate) => {
+    if (!drawer?.task) return;
+    try {
+      await updatePlanTask(drawer.task.id, body);
       showToast(true, "任务计划已更新");
+      setDrawer(null);
+      await load();
+    } catch (err) {
+      showToast(false, err instanceof ApiError ? err.message : "保存失败");
     }
-    setDrawer({ open: false, mode: "create" });
-    await load();
   };
 
   const handleStart = async (task: PlanTask) => {
@@ -257,88 +243,12 @@ export default function TaskPlansMobilePage() {
     }
   };
 
-  const confirmDelete = (task: PlanTask) => {
-    Modal.confirm({
-      title: "确认删除任务计划？",
-      content: `将删除任务「${task.content ?? task.id}」，该操作不可恢复。`,
-      okText: "确认删除",
-      cancelText: "取消",
-      okButtonProps: { danger: true },
-      maskClosable: false,
-      onOk: async () => {
-        try {
-          await deletePlanTask(task.id);
-          showToast(true, "任务计划已删除");
-          await load();
-        } catch (err) {
-          showToast(false, err instanceof ApiError ? err.message : "删除失败");
-        }
-      },
-    });
-  };
-
-  // 可删除：负责人本人 或 平台管理员（单删/批量删共用，与桌面 canDeleteTask 一致）
-  const canDeleteTask = (t: PlanTask) =>
-    currentUser?.id === t.user_id || !!currentUser?.is_platform_admin;
-
-  const handleBatchDelete = () => {
-    if (selectedKeys.length === 0) return;
-    const count = selectedKeys.length;
-    Modal.confirm({
-      title: "确认删除任务计划？",
-      content: `确认删除选中的 ${count} 条任务计划？此操作不可恢复。`,
-      okText: "确认删除",
-      cancelText: "取消",
-      okButtonProps: { danger: true },
-      maskClosable: false,
-      onOk: async () => {
-        let ok = 0;
-        let fail = 0;
-        for (const id of selectedKeys) {
-          try {
-            await deletePlanTask(id);
-            ok += 1;
-          } catch {
-            fail += 1;
-          }
-        }
-        setSelectedKeys([]);
-        setBatchMode(false);
-        await load();
-        if (fail === 0) showToast(true, `已删除 ${ok} 条任务计划`);
-        else showToast(false, `成功 ${ok} 条，失败 ${fail} 条`);
-      },
-    });
-  };
-
-  // 批量选择仅允许可删除项（对齐桌面 rowSelection.getCheckboxProps.disabled 语义：
-  // MobileCardList 不支持逐项禁用选择框，故在 onChange 拦截非可删 key 并提示）。
-  const onSelectedKeysChange = (keys: string[]) => {
-    const allowed = keys.filter((k) => {
-      const t = rows.find((r) => r.id === k);
-      return t ? canDeleteTask(t) : true;
-    });
-    if (allowed.length < keys.length) {
-      showToast(false, "仅可选择本人或管理员可删除的任务");
-    }
-    setSelectedKeys(allowed);
-  };
-
-  const enterBatch = () => {
-    setSelectedKeys([]);
-    setBatchMode(true);
-  };
-  const exitBatch = () => {
-    setSelectedKeys([]);
-    setBatchMode(false);
-  };
-
-  // 卡片动作集（经 MobileActionMenu 底部 ActionSheet 触发）：启动/执行/详情/编辑/删除
+  // 卡片动作集（经 MobileActionMenu 底部 ActionSheet 触发）：启动/执行/详情/编辑
+  // 用户 2026-07-23 调整：移动端不含删除（建/删在桌面端）
   const buildActions = (t: PlanTask) => {
     const isOwner = currentUser?.id === t.user_id;
     const canOperate = isOwner || !!currentUser?.is_platform_admin;
     const canEdit = t.status === "未开始" && isOwner;
-    const canDelete = canDeleteTask(t);
     const acts: {
       key: string;
       label: string;
@@ -375,14 +285,6 @@ export default function TaskPlansMobilePage() {
         key: "edit",
         label: "编辑",
         onPress: () => setDrawer({ open: true, mode: "edit", task: t }),
-      });
-    }
-    if (canDelete) {
-      acts.push({
-        key: "delete",
-        label: "删除",
-        danger: true,
-        onPress: () => confirmDelete(t),
       });
     }
     return acts;
@@ -444,7 +346,7 @@ export default function TaskPlansMobilePage() {
   };
 
   return (
-    <div className={cn("flex flex-col gap-3", batchMode && "pb-16")}>
+    <div className="flex flex-col gap-3">
       <header className="px-1 pb-1">
         <h1 className="text-[18px] font-semibold text-foreground">任务计划</h1>
         <p className="text-[12px] text-muted-foreground">
@@ -473,9 +375,6 @@ export default function TaskPlansMobilePage() {
           setDetailMode("detail");
         }}
         actions={buildActions}
-        selectable={batchMode}
-        selectedKeys={selectedKeys}
-        onSelectedKeysChange={onSelectedKeysChange}
         pagination={{
           page,
           pageSize,
@@ -512,30 +411,6 @@ export default function TaskPlansMobilePage() {
               onClick={() => void handleExport()}
               loading={exporting}
             />
-            <button
-              type="button"
-              onClick={() => setDrawer({ open: true, mode: "create" })}
-              className="inline-flex min-h-[44px] items-center justify-center rounded-md bg-primary px-3 text-[14px] font-medium text-primary-foreground transition-colors hover:opacity-90"
-            >
-              新建
-            </button>
-            {batchMode ? (
-              <button
-                type="button"
-                onClick={exitBatch}
-                className="inline-flex min-h-[44px] items-center justify-center rounded-md border border-border bg-card px-3 text-[14px] text-foreground transition-colors hover:bg-muted"
-              >
-                取消批量
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={enterBatch}
-                className="inline-flex min-h-[44px] items-center justify-center rounded-md border border-border bg-card px-3 text-[14px] text-foreground transition-colors hover:bg-muted"
-              >
-                批量
-              </button>
-            )}
             {/* 每页条数（桌面 PAGE_SIZE_OPTIONS）：改 pageSize 回第 1 页重拉 */}
             <Select<number>
               value={pageSize}
@@ -552,22 +427,11 @@ export default function TaskPlansMobilePage() {
 
       <Toast toast={toast} />
 
-      {batchMode ? (
-        <MobileBatchBar
-          selectedCount={selectedKeys.length}
-          onDelete={() => void handleBatchDelete()}
-        />
-      ) : null}
-
-      {drawer.open ? (
+      {drawer?.open ? (
         <TaskFormSheet
           state={drawer}
           projects={projects}
-          currentUserId={currentUser?.id ?? ""}
-          currentUserName={
-            currentUser?.displayName || currentUser?.email || null
-          }
-          onClose={() => setDrawer({ open: false, mode: "create" })}
+          onClose={() => setDrawer(null)}
           onSave={handleSave}
         />
       ) : null}
@@ -692,33 +556,25 @@ function FilterFields({
   );
 }
 
-/* ============================== 新建/编辑表单（MobileDetailSheet 承载） ============================== */
+/* ============================== 编辑表单（MobileDetailSheet 承载，仅编辑） ============================== */
 
 function TaskFormSheet({
   state,
   projects,
-  currentUserId,
-  currentUserName,
   onClose,
   onSave,
 }: {
   state: DrawerState;
   projects: ProjectSimpleItem[];
-  currentUserId: string;
-  currentUserName: string | null;
   onClose: () => void;
-  onSave: (_body: PlanTaskCreate | PlanTaskUpdate) => Promise<void>;
+  onSave: (_body: PlanTaskUpdate) => Promise<void>;
 }) {
   const editing = state.task;
   const [content, setContent] = useState(editing?.content ?? "");
-  const [userId, setUserId] = useState(editing?.user_id ?? currentUserId);
-  const [userName, setUserName] = useState(
-    editing?.user_name ?? currentUserName ?? "",
-  );
+  const [userId, setUserId] = useState(editing?.user_id ?? "");
+  const [userName, setUserName] = useState(editing?.user_name ?? "");
   const [projectId, setProjectId] = useState(editing?.project_id ?? "");
-  const [projectName, setProjectName] = useState(
-    editing?.project_name ?? "",
-  );
+  const [projectName, setProjectName] = useState(editing?.project_name ?? "");
   const [moduleId, setModuleId] = useState(editing?.module_id ?? "");
   const [moduleName, setModuleName] = useState(editing?.module_name ?? "");
   const [startTime, setStartTime] = useState(editing?.start_time ?? "");
@@ -747,7 +603,7 @@ function TaskFormSheet({
     setBusy(true);
     setErr(null);
     try {
-      const body: PlanTaskCreate | PlanTaskUpdate = {
+      const body: PlanTaskUpdate = {
         content: content.trim(),
         user_id: userId,
         user_name: userName,
@@ -762,9 +618,6 @@ function TaskFormSheet({
         work_partner: workPartner || null,
         remarks: remarks || null,
       };
-      if (state.mode === "create") {
-        (body as PlanTaskCreate).status = "10";
-      }
       await onSave(body);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "保存失败");
@@ -776,7 +629,7 @@ function TaskFormSheet({
   return (
     <MobileDetailSheet
       open
-      title={state.mode === "create" ? "新建任务计划" : "编辑任务计划"}
+      title="编辑任务计划"
       onClose={onClose}
       onSubmit={() => void submit()}
       loading={busy}
@@ -799,7 +652,6 @@ function TaskFormSheet({
             value={userId}
             onChange={(v) => {
               setUserId((v as string | null) ?? "");
-              // userName 留空，提交时由后端 user_id 反查；若选项已加载则回填 label
               if (!v) setUserName("");
             }}
             onLoadedOptions={(opts: PpmSelectOption[]) => {

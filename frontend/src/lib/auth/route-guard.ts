@@ -78,7 +78,10 @@ export function useMobileRouteGuard(): void {
   useEffect(() => {
     if (!hydrated) return;
     if (isPublic) return;
-    if (!accessToken) router.replace("/m/login");
+    if (!accessToken)
+      router.replace(
+        "/m/login?redirect=" + encodeURIComponent(stripped),
+      );
   }, [hydrated, isPublic, accessToken, router]);
 
   // ── 工作区守卫 ← 镜像 (dashboard)/layout.tsx:44-52（CB-3 顺序）──────────────────

@@ -62,11 +62,15 @@ afterEach(() => {
 });
 
 describe("useMobileRouteGuard 登录守卫 — 镜像桌面 layout.tsx:21-24", () => {
-  it("未登录访问受保护 /m 页 → replace /m/login（不回桌面 /login）", async () => {
+  it("未登录访问受保护 /m 页 → replace /m/login?redirect=<原路径>（深链回跳 FR-03）", async () => {
     useSession.setState({ accessToken: null, hydrated: true } as never);
     nav.pathname = "/m/ppm/workbench";
     renderGuard();
-    await waitFor(() => expect(nav.replace).toHaveBeenCalledWith("/m/login"));
+    await waitFor(() =>
+      expect(nav.replace).toHaveBeenCalledWith(
+        "/m/login?redirect=" + encodeURIComponent("/ppm/workbench"),
+      ),
+    );
     expect(nav.replace).not.toHaveBeenCalledWith("/login");
   });
 
