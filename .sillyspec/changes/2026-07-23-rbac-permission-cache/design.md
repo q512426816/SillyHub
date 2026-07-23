@@ -66,7 +66,7 @@ scale: large
 - 角色定义:`admin/roles_service.py` — create / update(RolePermission 删插、is_active 翻转)/ disable / enable / delete
 - 用户平台角色:`admin/users_service.py` — create / update_user(_rewrite_roles、is_platform_admin 翻转)/ delete_user
 - 工作区成员:`workspace/members_service.py` — add_or_update_member / update_member_role / remove_member / transfer_ownership
-- **工作区创建(D-006@v1,闭合 P2/X2)**:`workspace/service.py` `WorkspaceService.create`(`_ensure_creator_as_owner` 授创建者 owner,写 UserWorkspaceRole)
+- **工作区创建(D-006@v1,闭合 P2/X2 + plan-review 补 scan_generate)**:`workspace/service.py` `_ensure_creator_as_owner`(`:729`,授创建者 owner 写 UserWorkspaceRole)的**所有调用方**——`WorkspaceService.create`(`:148/165/222`)与 `scan_generate`(`:609`,daemon-client 建工作区独立路径,`:669` 调用,不经 create)
 - 项目成员:`ppm/project/service.py` `ProjectMemberService` — create / update / delete
 - **启动 bootstrap 种子**(auth/service.py `seed_workspace_owner_roles` / `seed_platform_admin_role`):启动期缓存冷,**免失效**(进程刚起无缓存)
 
@@ -87,7 +87,7 @@ scale: large
 | `backend/app/modules/admin/roles_service.py` | create/update/disable/enable/delete 后调 invalidate_all_permissions | P4 |
 | `backend/app/modules/admin/users_service.py` | create/update_user/delete_user 后调 invalidate_all_permissions | P4 |
 | `backend/app/modules/workspace/members_service.py` | add_or_update_member/update_member_role/remove_member/transfer_ownership 后调 invalidate_all_permissions | P4 |
-| `backend/app/modules/workspace/service.py` | WorkspaceService.create(_ensure_creator_as_owner)后调 invalidate_all_permissions(D-006@v1) | P4 |
+| `backend/app/modules/workspace/service.py` | `_ensure_creator_as_owner` 所有调用方(create @148/165/222 + scan_generate @609/669)commit 后调 invalidate_all_permissions(D-006@v1) | P4 |
 | `backend/app/modules/ppm/project/service.py` | ProjectMemberService.create/update/delete 后调 invalidate_all_permissions | P4 |
 | 测试:auth/tests、workspace/tests、admin、ppm | 缓存读写+降级单测、每失效点清空安全测试、ppm-scope uuid 反序列化类型测试、无 Redis 回退正确性 | P6 |
 
@@ -141,3 +141,13 @@ async def invalidate_all_permissions() -> None:
 ## 8. 决策引用
 
 见 `decisions.md`:D-001(缓存范围)、**D-002@v2**(整体清空 + 失效失败告警,supersedes v1)、**D-003@v2**(拆键 platform/all/workspace,supersedes v1)、D-004(降级回 DB)、**D-005@v1**(ppm-scope uuid 反序列化类型)、**D-006@v1**(WorkspaceService.create 失效点)。
+
+## 9. 自审
+
+- **章节齐全**:背景/设计目标/非目标/总体方案/文件变更清单/接口定义/风险登记/决策引用 均存在 ✓
+- **决策引用完整**:第 8 节引用 decisions.md 全部当前版本(D-001、D-002@v2、D-003@v2、D-004、D-005@v1、D-006@v1),无遗漏 ✓
+- **Design Grill 闭合**:P0(X1 key 碰撞)+ P1(X3 uuid 反序列化 / X4 失效失败)+ P2(X2 漏失效点)均有对应决策修订,无 unresolved blocker ✓
+- **生命周期契约**:本变更不涉 session/lease/agent_run/daemon 生命周期,无需契约表 ✓
+- **命名溯源**:表名/类名/方法名均来自真实代码(rbac.py / data_scope.py / api_key_service.py / 各 service),`permission_cache.py` 标注新建 ✓
+- **自审存疑**:无(所有疑点经 Design Grill 独立子代理代码实证确认)
+

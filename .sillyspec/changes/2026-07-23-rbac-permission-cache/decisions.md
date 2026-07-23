@@ -68,7 +68,7 @@ change: 2026-07-23-rbac-permission-cache
 - status: accepted
 - source: Design Grill X2
 - question: 创建工作区时 _ensure_creator_as_owner 授予 owner(写 UserWorkspaceRole),是否在失效清单?
-- answer: 补入。WorkspaceService.create 调用 _ensure_creator_as_owner(workspace/service.py:770)写 UserWorkspaceRole,创建者的 all/everywhere 缓存需失效(否则 /api/auth/me 最长 TTL 内缺新 ws 权限——权限缺失方向,非越权,但仍是错误)。bootstrap 启动种子(auth/service.py seed_*)免失效(进程冷启无缓存)。
+- answer: 补入。`_ensure_creator_as_owner`(`workspace/service.py:729`,line 770 写 UserWorkspaceRole 授 owner)的**所有调用方**——`create`(`:148/165/222`)与 `scan_generate`(`:609`,daemon-client 建工作区独立路径,`:669` 调用,不经 create)——commit 后都需调 invalidate_all_permissions,创建者的 all/everywhere 缓存才及时失效(否则最长 TTL 内缺新 ws 权限——权限缺失方向,非越权,但仍是错误)。plan-review 发现 scan_generate 遗漏(Design Grill X2 当时未穷尽 `_ensure_creator_as_owner` 调用方,属误判闭合,现补)。bootstrap 启动种子(auth/service.py seed_*)免失效(进程冷启无缓存)。
 - normalized_requirement: WorkspaceService.create commit 后调 invalidate_all_permissions;auth/service.py 启动种子路径文档注明免失效(不调)。
 - impacts: [P4-workspace create, 风险登记-失效漏调]
 - evidence: Design Grill X2;workspace/service.py:770 _ensure_creator_as_owner、:121 create;auth/service.py:427/502 seed
