@@ -242,3 +242,11 @@ created_at: 2026-07-21T08:48:56
 根因：明细表用 `scroll.x="max-content"`，antd 按内容计算列宽；任务描述列虽有 `width:250 + ellipsis:true`，但 max-content 会被长文本撑开列宽、ellipsis 随之失效，故列自适应变宽、内容全显。
 方案：任务描述 `render` 由直出文本改为受限宽度 truncate 容器——`<div className="truncate" title={v} style={{maxWidth:220}}>`（truncate=overflow:hidden+text-overflow:ellipsis+white-space:nowrap），强制长文本截断在 220px 内、`title` 悬浮看全文，不再受 max-content 撑开。列 `width:250 + ellipsis:true` 保留作兜底。
 结果：①前端 typecheck 0 error；②lint 0 error；③milestone-details 24 passed；④待 commit+push+重建 frontend 后用户验证（任务描述列固定 ~250、长文本截断显 …）。
+## ql-20260723-002-6f33 | 2026-07-23 09:00:10 | /ppm/milestone-details 明细子表【任务描述】列改换行不截断
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（DetailLevelTable 任务描述列：去 ellipsis，render 改固定宽度换行容器）
+需求：上轮（ql-001）把任务描述做了截断（truncate），用户改要求换行显示全文、不要截断。
+根因：ql-001 的 `ellipsis:true + truncate` 是单行截断，不符合「换行显示全文」的要求。
+方案：①去掉列 `ellipsis:true`（它会强制 `white-space:nowrap` 单行截断）；②render 由 truncate 改为固定宽度换行容器 `<div className="whitespace-normal break-words" style={{maxWidth:220}}>`——长文本自动换行成多行、列宽仍固定 ~250（maxWidth 约束不被 max-content 撑开）、全文可见不截断。列 `width:250` 保留。
+结果：①前端 typecheck 0 error；②lint 0 error；③milestone-details 24 passed；④待 commit+push+重建 frontend 后用户验证（任务描述列固定~250、长文本换行多行、全文可见）。

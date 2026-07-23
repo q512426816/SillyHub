@@ -1775,13 +1775,11 @@ function DetailLevelTable({
         dataIndex: "task_description",
         key: "task_description",
         width: 250,
-        ellipsis: true,
         render: (v: string | null) => (
-          // scroll.x=max-content 下 antd 按内容算列宽会撑开,ellipsis 失效;
-          // 用受限宽度 truncate 容器强制截断在 250 内,title 悬浮看全文。
+          // 固定宽度换行容器:长文本自动换行(whitespace-normal + break-words),
+          // 列宽固定 ~250 不被撑开、全文可见(不截断)。去 ellipsis(它会强制单行截断)。
           <div
-            className="truncate"
-            title={v ?? undefined}
+            className="whitespace-normal break-words"
             style={{ maxWidth: 220 }}
           >
             {v ?? "—"}
