@@ -154,21 +154,21 @@ class TestGroupedReportToWorkbook:
         content = grouped_report_to_workbook(cols, sections, sheet_name="明细")
         wb = load_workbook(BytesIO(content))
         ws = wb["明细"]
-        # 第1行:列头(始终)
-        assert ws.cell(row=1, column=1).value == "明细阶段"
-        assert ws.cell(row=1, column=2).value == "任务主题"
-        # section1: 标题(2) 子标题(3) 明细(4,5) 空行(6)
-        assert ws.cell(row=2, column=1).value == "里程碑 1. 实施阶段"
+        # section1: 标题(1) 列头(2) 子标题(3) 明细(4,5) 空行(6)
+        assert ws.cell(row=1, column=1).value == "里程碑 1. 实施阶段"
+        assert ws.cell(row=2, column=1).value == "明细阶段"
+        assert ws.cell(row=2, column=2).value == "任务主题"
         assert ws.cell(row=3, column=1).value == "模块: 前端"
         assert ws.cell(row=4, column=1).value == "需求"
         assert ws.cell(row=4, column=2).value == "调研"
         assert ws.cell(row=5, column=1).value == "开发"
-        # section2: 标题(7) 明细(8,无子标题) 空行(9)
+        # section2: 标题(7) 列头(8) 明细(9,无子标题)
         assert ws.cell(row=7, column=1).value == "里程碑 2. 设计阶段"
-        assert ws.cell(row=8, column=1).value == "概要"
-        # 标题/子标题行跨列合并
+        assert ws.cell(row=8, column=1).value == "明细阶段"
+        assert ws.cell(row=9, column=1).value == "概要"
+        # 标题/子标题行跨列合并(列头行不合并)
         merged = {str(r) for r in ws.merged_cells.ranges}
-        assert "A2:B2" in merged
+        assert "A1:B1" in merged
         assert "A3:B3" in merged
         assert "A7:B7" in merged
 

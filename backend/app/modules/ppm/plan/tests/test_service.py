@@ -441,6 +441,10 @@ class TestPsProjectPlan:
         assert sec_a["groups"][0]["subtitle"] is None
         assert len(sec_a["groups"][0]["rows"]) == 1
         assert sec_a["groups"][0]["rows"][0]["detailed_stage"] == "概要设计"
+        # 状态英→中(draft→草稿)、含任务描述/执行状态列(ql-20260723-008)
+        assert sec_a["groups"][0]["rows"][0]["status"] == "草稿"
+        assert "task_description" in sec_a["groups"][0]["rows"][0]
+        assert "task_execute_status" in sec_a["groups"][0]["rows"][0]
         # node_b(实施阶段,有模块):含「前端模块」子标题组,1 明细
         sec_b = sections[1]
         assert "实施阶段" in sec_b["title"]

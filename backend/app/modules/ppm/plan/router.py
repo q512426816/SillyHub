@@ -638,14 +638,18 @@ _PLAN_NODE_DETAIL_COLUMNS = [
 ]
 
 # 子母表分组导出的明细列(去掉「总体阶段」——里程碑标题行已展示)。
+# 含全部信息列:任务描述/执行人/执行状态(ql-20260723-008 补全)。
 _MILESTONE_DETAIL_GROUP_COLUMNS = [
     ColumnDef(field="detailed_stage", header="明细阶段", width=16),
-    ColumnDef(field="task_theme", header="任务主题", width=28),
+    ColumnDef(field="task_theme", header="任务主题", width=24),
+    ColumnDef(field="task_description", header="任务描述", width=30),
+    ColumnDef(field="role_name", header="角色", width=12),
     ColumnDef(field="plan_workload", header="计划工作量", width=12),
     ColumnDef(field="plan_begin_time", header="计划开始", width=14),
     ColumnDef(field="plan_complete_time", header="计划完成", width=14),
-    ColumnDef(field="role_name", header="角色", width=14),
-    ColumnDef(field="achievement", header="成果", width=28),
+    ColumnDef(field="execute_user_name", header="执行人", width=14),
+    ColumnDef(field="task_execute_status", header="执行状态", width=12),
+    ColumnDef(field="achievement", header="成果", width=24),
     ColumnDef(field="status", header="状态", width=10),
 ]
 

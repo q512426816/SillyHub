@@ -117,14 +117,16 @@ def grouped_report_to_workbook(
 ) -> bytes:
     """分组(子母表)报表 → ``.xlsx`` 字节流。
 
-    第 1 行为列头(冻结);其下每个 section 是一个「大分组」(如里程碑):
+    每个 section 是一个「大分组」(如里程碑),列头放在该 section 内(大标题行后),
+    使每个里程碑块自包含:
       - ``title``: 大标题行(跨所有列合并,深蓝底白字)。
+      - (列头行:本 section 的明细列标题)
       - ``groups``: 子分组列表(如模块);每组:
         - ``subtitle``: 子标题(跨列合并,浅蓝底);``None`` 则不输出子标题行。
         - ``rows``: 数据行(dict,按 ``columns`` 取值)。
 
-    输出:列头行 → (各 section:大标题行 → (各子组:子标题行? + 数据行) + 空行)。
-    ``sections`` 为空时仍输出列头行(便于端点 200 校验)。同步函数 (X-002)。
+    输出:(各 section:大标题行 → 列头行 → (各子组:子标题行? + 数据行) + 空行)。
+    ``sections`` 为空时输出空表。同步函数 (X-002)。
     """
     wb = Workbook()
     ws = wb.active
@@ -134,14 +136,7 @@ def grouped_report_to_workbook(
         if col.width is not None:
             ws.column_dimensions[get_column_letter(idx)].width = col.width
 
-    # 第 1 行:列头(始终输出,空 sections 时也保留)
-    for idx, col in enumerate(columns, start=1):
-        cell = ws.cell(row=1, column=idx, value=col.header)
-        cell.font = _HEADER_FONT
-        cell.fill = _HEADER_FILL
-        cell.alignment = _HEADER_ALIGN
-
-    row = 2
+    row = 1
     for sec in sections:
         # 大标题行(合并)
         ws.cell(row=row, column=1, value=sec.get("title", ""))
@@ -152,6 +147,13 @@ def grouped_report_to_workbook(
         title_cell.font = _SECTION_FONT
         title_cell.alignment = _LEFT_ALIGN
         ws.row_dimensions[row].height = 22
+        row += 1
+        # 列头行(本 section 内,紧跟大标题)
+        for idx, col in enumerate(columns, start=1):
+            cell = ws.cell(row=row, column=idx, value=col.header)
+            cell.font = _HEADER_FONT
+            cell.fill = _HEADER_FILL
+            cell.alignment = _HEADER_ALIGN
         row += 1
         # 子分组
         for grp in sec.get("groups", []):

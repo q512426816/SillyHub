@@ -290,3 +290,11 @@ created_at: 2026-07-21T08:48:56
 根因：原导出为扁平明细行（list_plan_node_details_for_export + rows_to_workbook），无里程碑/模块层级，看不出每条明细属于哪个里程碑/模块。
 方案：①common/export 新增 `grouped_report_to_workbook(columns, sections)`：第 1 行列头（冻结、空 sections 也保留）→ 每个 section 大标题行（跨列合并、深蓝底）→ 子分组（子标题合并行浅蓝底? + 明细行）；section 间空行。②service 新增 `build_milestone_export_sections(plan_id)`：取该计划里程碑（按 no），批量反查责任人姓名，has_module 里程碑按模块分子标题、未分模块明细单列「(未分模块)」组，非 has_module 直接挂里程碑；标题行含「里程碑 {no}. {阶段} | 责任人:.. | 计划:..~..」。③router export 端点改用分组构建 + 新列定义 `_MILESTONE_DETAIL_GROUP_COLUMNS`（去掉 overall_stage，标题行已含）。新增 grouped 构建纯测试（openpyxl 读回校验合并/列头/明细行）+ service 分组数据测试。
 结果：①ruff(format+check)/mypy 0 error；②plan+export 套件 172 passed 0 errors（含新增 2 测试）；③前端无改动（ql-006 已传 planId，downloadExcel 透传）；④待 commit+push+重建 backend 后用户验证（导出为分组合并的子母表 Excel）。
+## ql-20260723-008-a96e | 2026-07-23 11:56:46 | /ppm/milestone-details 导出子母表三补:列头入层级+补全列含执行状态+状态英转中
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/common/export.py（grouped_report_to_workbook 改每 section 自带列头）+ backend/app/modules/ppm/common/tests/test_export.py（per-section 列头布局测试）+ backend/app/modules/ppm/plan/router.py（_MILESTONE_DETAIL_GROUP_COLUMNS 补任务描述/执行人/执行状态）+ backend/app/modules/ppm/plan/service.py（DETAIL_STATUS_CN 常量 + build_milestone_export_sections 批量取明细/执行人名/执行状态/状态中文）+ backend/app/modules/ppm/plan/tests/test_router.py（plan-node-detail header 校验改 None）+ backend/app/modules/ppm/plan/tests/test_service.py（+状态中文/新列断言）
+需求：①导出 Excel 的明细列头放到对应里程碑层级里（每个里程碑块自带列头）；②列头要包含所有信息标题，包括执行状态；③状态列目前显示英文，处理成中文。
+根因：①ql-007 的列头只在顶部第 1 行，与各里程碑块分离，看某个里程碑明细时不知列含义；②导出列只有 8 列，缺任务描述/执行人/执行状态；③明细 status 存的是 draft/done 等英文枚举值，导出原样显示对用户不友好。
+方案：①`grouped_report_to_workbook` 去掉顶部列头，改为每个 section 大标题行后紧跟列头行（块自包含）；②`_MILESTONE_DETAIL_GROUP_COLUMNS` 补「任务描述/执行人/执行状态」共 11 列；③service 加 `DETAIL_STATUS_CN`（draft→草稿/review→审核中/approve→审批中/done→已完成/rejected→已驳回/archived→已归档），`build_milestone_export_sections` 改为批量取该计划全部明细、批量反查执行人姓名(auth.users)+执行状态(关联 PlanTask.status)、status 映射中文。更新 grouped 纯测试（per-section 列头）+ router parametrize（plan-node-detail 无 plan_id 空表，header 校验改 None 仅验 200）。
+结果：①ruff(format+check)/mypy 0 error；②plan+export 套件 172 passed 0 errors；③待 commit+push+重建 backend 后用户验证（导出每个里程碑块内自带完整列头含执行状态、状态显示中文）。

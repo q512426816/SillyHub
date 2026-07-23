@@ -83,6 +83,16 @@ log = get_logger(__name__)
 # execute_plan action="complete" 写入的 plan.status="已完成"。
 TASK_STATUS_DONE = "已完成"
 
+# 明细状态(PlanNodeDetailStatus)→ 中文,导出展示用(英文状态对用户不友好)。
+DETAIL_STATUS_CN: dict[str, str] = {
+    "draft": "草稿",
+    "review": "审核中",
+    "approve": "审批中",
+    "done": "已完成",
+    "rejected": "已驳回",
+    "archived": "已归档",
+}
+
 
 class PlanError(AppError):
     """plan 子域通用业务错误。"""
@@ -1256,23 +1266,59 @@ class PlanService:
         层级:里程碑(PsPlanNode) →(模块 PlanNodeModule,仅 has_module)→ 明细
         (PsPlanNodeDetail,非 archived)。每个里程碑成一个 section:大标题行带
         责任人/计划区间;has_module 里程碑按模块分子标题,否则明细直接挂里程碑。
-        责任人姓名批量反查 auth.users 避免逐条 N+1。
+        明细含全部信息列(任务描述/执行人/执行状态),状态英→中;责任人/执行人姓名、
+        执行状态(关联任务 PlanTask.status)批量反查避免 N+1。
         """
         nodes = await self.list_ps_plan_nodes_by_plan(str(plan_id))
 
-        # 批量反查里程碑责任人姓名
-        duty_ids = {n.duty_user_id for n in nodes if n.duty_user_id}
-        duty_name: dict[uuid.UUID, str] = {}
-        if duty_ids:
-            duty_rows = (
+        # 批量取该计划全部非 archived 明细(按 plan_node_id 分组)
+        all_details = list(
+            (
+                await self._session.execute(
+                    select(PsPlanNodeDetail)
+                    .join(PsPlanNode, PsPlanNode.id == PsPlanNodeDetail.plan_node_id)
+                    .where(
+                        PsPlanNode.ps_project_plan_id == plan_id,
+                        PsPlanNodeDetail.status != PlanNodeDetailStatus.ARCHIVED.value,
+                    )
+                    .order_by(PsPlanNodeDetail.no)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        details_by_node: dict[uuid.UUID, list[PsPlanNodeDetail]] = {}
+        for d in all_details:
+            details_by_node.setdefault(d.plan_node_id, []).append(d)
+
+        # 批量反查里程碑责任人 + 明细执行人姓名
+        user_ids = {n.duty_user_id for n in nodes if n.duty_user_id}
+        user_ids |= {d.execute_user_id for d in all_details if d.execute_user_id}
+        user_name: dict[uuid.UUID, str] = {}
+        if user_ids:
+            user_rows = (
                 await self._session.execute(
                     select(User.id, User.display_name, User.email, User.username).where(
-                        User.id.in_(duty_ids)
+                        User.id.in_(user_ids)
                     )
                 )
             ).all()
-            for r in duty_rows:
-                duty_name[r.id] = r.display_name or r.email or r.username or str(r.id)
+            for r in user_rows:
+                user_name[r.id] = r.display_name or r.email or r.username or str(r.id)
+
+        # 批量查明细关联任务状态(执行状态,首条生效 1:1 实践)
+        detail_ids = [d.id for d in all_details]
+        task_status: dict[uuid.UUID, str] = {}
+        if detail_ids:
+            task_rows = (
+                await self._session.execute(
+                    select(PlanTask.ps_plan_node_detail_id, PlanTask.status).where(
+                        PlanTask.ps_plan_node_detail_id.in_(detail_ids)
+                    )
+                )
+            ).all()
+            for did, st in task_rows:
+                task_status.setdefault(did, st)
 
         def _date(v: datetime | None) -> str:
             return v.strftime("%Y-%m-%d") if v else ""
@@ -1281,12 +1327,17 @@ class PlanService:
             return {
                 "detailed_stage": d.detailed_stage,
                 "task_theme": d.task_theme,
+                "task_description": d.task_description,
+                "role_name": d.role_name,
                 "plan_workload": d.plan_workload,
                 "plan_begin_time": _date(d.plan_begin_time),
                 "plan_complete_time": _date(d.plan_complete_time),
-                "role_name": d.role_name,
+                "execute_user_name": (
+                    user_name.get(d.execute_user_id) if d.execute_user_id else None
+                ),
+                "task_execute_status": task_status.get(d.id),
                 "achievement": d.achievement,
-                "status": d.status,
+                "status": DETAIL_STATUS_CN.get(d.status, d.status),
             }
 
         sections: list[dict[str, Any]] = []
@@ -1295,8 +1346,8 @@ class PlanService:
             no_part = f"{node.no}." if node.no else ""
             title = f"里程碑 {no_part} {node.overall_stage or ''}".strip()
             extras: list[str] = []
-            if node.duty_user_id and duty_name.get(node.duty_user_id):
-                extras.append(f"责任人: {duty_name[node.duty_user_id]}")
+            if node.duty_user_id and user_name.get(node.duty_user_id):
+                extras.append(f"责任人: {user_name[node.duty_user_id]}")
             begin_s, complete_s = _date(node.plan_begin_time), _date(node.plan_complete_time)
             if begin_s and complete_s:
                 extras.append(f"计划: {begin_s} ~ {complete_s}")
@@ -1307,7 +1358,7 @@ class PlanService:
             if extras:
                 title = f"{title}　|　{'　'.join(extras)}"
 
-            details = await self.list_details_by_node(str(node.id))
+            details = details_by_node.get(node.id, [])
             if node.has_module:
                 modules = await self.list_modules_by_node(str(node.id))
                 module_ids = {m.id for m in modules}
