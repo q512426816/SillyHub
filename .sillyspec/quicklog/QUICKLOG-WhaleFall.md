@@ -266,3 +266,11 @@ created_at: 2026-07-21T08:48:56
 根因：原 PsPlanNodeDrawer 总体阶段是 `<Input>`，用户无从知道有哪些既定阶段，易与模板不一致；而 antd 的 AutoComplete 正是「可选可输」的 combobox。
 方案：①导入 `AutoComplete`、`listPlanNodes`、`PlanNode` 类型；②PsPlanNodeDrawer 加 `stageOptions` state + `useEffect`（弹窗 open 时 `listPlanNodes({page_size:200})` 取模板 `overall_stage` 去重作下拉 options，加载失败静默降级为空下拉）；③总体阶段 `Input` → `<AutoComplete options={stageOptions} filterOption=模糊过滤 allowClear>`——可下拉选模板阶段，也可手输任意值（submit 本就纯文本提交，不匹配模板即不匹配，符合需求）。
 结果：①前端 typecheck 0 error；②lint 0 error；③milestone-details 24 passed；④待 commit+push+重建 frontend 后用户验证（总体阶段可下拉选模板阶段、也能手输新值）。
+## ql-20260723-005-fec1 | 2026-07-23 09:41:36 | /ppm/milestone-details 新建里程碑选模板总体阶段时复制模板明细(同新建项目计划逻辑)
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/plan/service.py（create_ps_plan_node 改单事务+按 overall_stage 匹配模板复制明细）+ backend/app/modules/ppm/plan/tests/test_service.py（+2 单测：匹配复制/不匹配不复制）
+需求：新建里程碑时，若选中的总体阶段是计划节点模板（PlanNode）的阶段，把该模板对应阶段的明细数据带过来——逻辑和新建项目计划时一样。
+根因：create_ps_plan_node 原只是 `_Crud.create` 建一条空里程碑，未像 create_ps_project_plan（`_init_milestones_from_template`）那样匹配模板并复制明细。
+方案：改 create_ps_plan_node 为单事务——建里程碑后按 `overall_stage` 查 PlanNode 模板（`select(PlanNode).where(overall_stage==stage).limit(1)`），命中则记 `template_plan_node_id`/`has_module`，且 `has_module=false` 时复用 `_copy_template_details_to_node` 复制模板明细（draft，module_id=null，与 `_init_milestones_from_template` 完全一致）；`has_module=true` 则只记归属（明细等建模块时由 create_module 复制）；不匹配则空里程碑。新增 2 单测覆盖匹配复制 / 不匹配不复制。
+结果：①ruff/mypy 0 error；②plan 套件 139 passed / 22 errors（22 errors 全是本地 venv 缺 aiobotocore 致 db_engine fixture 导入 file/storage 模块失败的预存环境问题，非本次逻辑；CI/生产镜像含 aiobotocore 可正常跑）；③待 commit+push+重建 backend 部署后用户验证（新建里程碑选模板阶段→展开有预置明细；手输非模板阶段→空里程碑）。

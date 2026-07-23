@@ -309,6 +309,63 @@ class TestPsProjectPlan:
         await svc.delete_ps_plan_node(node.id)
         assert await svc.list_ps_plan_nodes_by_plan(str(plan.id)) == []
 
+    async def test_create_ps_plan_node_copies_template_details_when_stage_matches(
+        self, db_session: AsyncSession
+    ) -> None:
+        """新建里程碑:overall_stage 匹配计划节点模板时,复制模板明细(draft) +
+        记 template_plan_node_id/has_module(同新建项目计划 _init_milestones_from_template 逻辑)。"""
+        svc = PlanService(db_session)
+        proj = PpmProjectMaintenance(id=uuid.uuid4(), project_code="P-TPL", project_name="项目模板")
+        db_session.add(proj)
+        await db_session.commit()
+        # 先建项目计划(此时无模板,不产里程碑),再种子一个独特阶段模板 + 明细。
+        plan = await svc.create_ps_project_plan(
+            {"project_id": str(proj.id), "project_name": "项目模板", "status": "draft"}
+        )
+        tpl = await svc.create_plan_node({"overall_stage": "独特阶段XYZ", "has_module": False})
+        await svc.create_plan_node_detail(
+            {
+                "plan_node_id": str(tpl.id),
+                "detailed_stage": "子阶段",
+                "task_theme": "模板任务",
+            }
+        )
+        # 新建里程碑,overall_stage 匹配模板
+        node = await svc.create_ps_plan_node(
+            {
+                "ps_project_plan_id": str(plan.id),
+                "no": "1",
+                "overall_stage": "独特阶段XYZ",
+            }
+        )
+        assert node.template_plan_node_id == tpl.id
+        assert node.has_module is False
+        details = await svc.list_details_by_node(str(node.id))
+        assert len(details) == 1
+        assert details[0].task_theme == "模板任务"
+        assert details[0].status == PlanNodeDetailStatus.DRAFT.value
+
+    async def test_create_ps_plan_node_no_copy_when_stage_not_in_template(
+        self, db_session: AsyncSession
+    ) -> None:
+        """新建里程碑:overall_stage 不匹配任何模板 → 不复制,空里程碑。"""
+        svc = PlanService(db_session)
+        proj = PpmProjectMaintenance(
+            id=uuid.uuid4(), project_code="P-NM", project_name="项目不匹配"
+        )
+        db_session.add(proj)
+        await db_session.commit()
+        plan = await svc.create_ps_project_plan({"project_id": str(proj.id), "status": "draft"})
+        node = await svc.create_ps_plan_node(
+            {
+                "ps_project_plan_id": str(plan.id),
+                "no": "1",
+                "overall_stage": "自定义阶段",
+            }
+        )
+        assert node.template_plan_node_id is None
+        assert await svc.list_details_by_node(str(node.id)) == []
+
     async def test_create_plan_writes_created_by_from_operator(
         self, db_session: AsyncSession
     ) -> None:

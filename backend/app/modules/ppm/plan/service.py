@@ -670,7 +670,28 @@ class PlanService:
         return list((await self._session.execute(stmt)).scalars().all())
 
     async def create_ps_plan_node(self, data: dict[str, Any]) -> PsPlanNode:
-        return await _Crud(self._session, PsPlanNode).create(data)
+        # 单事务建里程碑;若 overall_stage 匹配某计划节点模板(PlanNode),复用
+        # 「新建项目计划」逻辑(_init_milestones_from_template 单模板版):记
+        # template_plan_node_id/has_module + has_module=false 时复制模板明细(draft)。
+        # 手输非模板阶段则不匹配,仅建空里程碑。
+        obj = PsPlanNode(id=uuid.uuid4(), **data)
+        obj.created_at = _now()
+        obj.updated_at = _now()
+        self._session.add(obj)
+        stage = data.get("overall_stage")
+        if stage:
+            tpl = await self._session.scalar(
+                select(PlanNode).where(PlanNode.overall_stage == stage).limit(1)
+            )
+            if tpl is not None:
+                obj.template_plan_node_id = tpl.id
+                obj.has_module = tpl.has_module
+                if not tpl.has_module:
+                    # 复制模板明细 (draft, module_id=null),与项目计划初始化一致
+                    await self._copy_template_details_to_node(tpl.id, obj, module_id=None)
+        await self._session.commit()
+        await self._session.refresh(obj)
+        return obj
 
     async def get_ps_plan_node(self, item_id: uuid.UUID) -> PsPlanNode:
         return await _Crud(self._session, PsPlanNode).get(item_id)
