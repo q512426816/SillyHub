@@ -6,7 +6,7 @@
  * 功能:
  *  - 列表分页 (task-plan/page),视图/状态/项目/负责人/时间区间/配合人员服务端过滤。
  *  - 视图切换 (personal-task-plan/page 我的任务 / task-plan/page 全部任务)。
- *  - 新建/编辑/删除任务计划。
+ *  - 编辑任务计划。
  *  - 执行任务 (task-plan/execute) — 联动生成/推进 TaskExecute。
  *  - 导出 Excel (后端生成 `任务计划_YYYYMMDD_HHMMSS.xlsx`)。
  *  - 列表固定按计划开始时间正序 (order_by=start_time asc)。
@@ -18,7 +18,6 @@ import {
   Button,
   DatePicker,
   Input,
-  Modal,
   Select,
   Table,
   type TableProps,
@@ -33,8 +32,6 @@ import { ApiError } from "@/lib/api";
 import { useNotify } from "@/lib/errors";
 import { isOverEstimate } from "@/lib/ppm/format";
 import {
-  createPlanTask,
-  deletePlanTask,
   exportPlanTasks,
   listPersonalPlanTasks,
   listPlanTasks,
@@ -44,7 +41,6 @@ import {
 import { listSimpleProjects } from "@/lib/ppm/project";
 import type {
   PlanTask,
-  PlanTaskCreate,
   PlanTaskPageReq,
   PlanTaskUpdate,
   ProjectSimpleItem,
@@ -75,7 +71,7 @@ const STATUS_CODE_OPTIONS = [
 
 interface DrawerState {
   open: boolean;
-  mode: "create" | "edit";
+  mode: "edit";
   task?: PlanTask;
 }
 
@@ -125,13 +121,11 @@ export default function TaskPlansPage() {
 
   const [drawer, setDrawer] = useState<DrawerState>({
     open: false,
-    mode: "create",
+    mode: "edit",
   });
   const [detailTask, setDetailTask] = useState<PlanTask | null>(null);
   const [detailMode, setDetailMode] = useState<"detail" | "execute">("detail");
   const [executeBusy, setExecuteBusy] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState<PlanTask | null>(null);
-  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
 
   useEffect(() => {
     void (async () => {
@@ -239,15 +233,12 @@ export default function TaskPlansPage() {
     }
   };
 
-  const handleSave = async (body: PlanTaskCreate | PlanTaskUpdate) => {
-    if (drawer.mode === "create") {
-      await createPlanTask(body as PlanTaskCreate);
-      notify.success("任务计划已创建");
-    } else if (drawer.task) {
-      await updatePlanTask(drawer.task.id, body as PlanTaskUpdate);
+  const handleSave = async (body: PlanTaskUpdate) => {
+    if (drawer.task) {
+      await updatePlanTask(drawer.task.id, body);
       notify.success("任务计划已更新");
     }
-    setDrawer({ open: false, mode: "create" });
+    setDrawer({ open: false, mode: "edit" });
     await load();
   };
 
@@ -262,57 +253,6 @@ export default function TaskPlansPage() {
     } finally {
       setExecuteBusy(false);
     }
-  };
-
-  const handleDelete = async () => {
-    if (!confirmDelete) return;
-    const target = confirmDelete;
-    setConfirmDelete(null);
-    try {
-      await deletePlanTask(target.id);
-      notify.success("任务计划已删除");
-      await load();
-    } catch (err) {
-      notify.error(err, "删除失败");
-    }
-  };
-
-  // 可删除:负责人本人 或 超级管理员 (单删/批量删共用, ql-20260715-015/016)
-  const canDeleteTask = (t: PlanTask) =>
-    currentUser?.id === t.user_id || !!currentUser?.is_platform_admin;
-
-  const handleBatchDelete = () => {
-    if (selectedRowKeys.length === 0) return;
-    Modal.confirm({
-      title: "确认删除任务计划？",
-      content: `确认删除选中的 ${selectedRowKeys.length} 条任务计划？此操作不可恢复。`,
-      okText: "确认删除",
-      cancelText: "取消",
-      okButtonProps: { danger: true },
-      maskClosable: false,
-      onOk: async () => {
-        let ok = 0;
-        let fail = 0;
-        for (const id of selectedRowKeys) {
-          try {
-            await deletePlanTask(id);
-            ok += 1;
-          } catch {
-            fail += 1;
-          }
-        }
-        setSelectedRowKeys([]);
-        await load();
-        if (fail === 0) notify.success(`已删除 ${ok} 条任务计划`);
-        else notify.error(new Error(`成功 ${ok} 条，失败 ${fail} 条`));
-      },
-    });
-  };
-
-  const rowSelection: TableProps<PlanTask>["rowSelection"] = {
-    selectedRowKeys,
-    onChange: (keys) => setSelectedRowKeys(keys.map(String)),
-    getCheckboxProps: (t: PlanTask) => ({ disabled: !canDeleteTask(t) }),
   };
 
   const columns: TableProps<PlanTask>["columns"] = [
@@ -442,7 +382,6 @@ export default function TaskPlansPage() {
         const canOperate = isOwner || !!currentUser?.is_platform_admin;
         // 编辑:status="未开始"(PlanTask 中文初始态) + user_id 归属
         const canEdit = t.status === "未开始" && isOwner;
-        const canDelete = canDeleteTask(t);
         return (
           <div className="flex whitespace-nowrap gap-1 justify-center">
             {t.status === "未开始" && canOperate && (
@@ -472,6 +411,17 @@ export default function TaskPlansPage() {
             >
               详情
             </Button>
+            {canEdit && (
+              <Button
+                size="small"
+                type="link"
+                onClick={() =>
+                  setDrawer({ open: true, mode: "edit", task: t })
+                }
+              >
+                编辑
+              </Button>
+            )}
           </div>
         );
       },
@@ -486,7 +436,7 @@ export default function TaskPlansPage() {
       />
 
       <SectionCard bodyPadding="p-2">
-        {/* 顶部按钮行(D-006):数据组(导出/新建)左 | 基础组(搜索/重置/展开)最右 */}
+        {/* 顶部按钮行(D-006):数据组(导出)左 | 基础组(搜索/重置/展开)最右 */}
         <div className="mb-2 flex items-center justify-end gap-2">
           <Button
             disabled={exporting}
@@ -637,7 +587,7 @@ export default function TaskPlansPage() {
             currentUser?.displayName || currentUser?.email || null
           }
           currentUserId={currentUser?.id ?? ""}
-          onClose={() => setDrawer({ open: false, mode: "create" })}
+          onClose={() => setDrawer({ open: false, mode: "edit" })}
           onSubmit={handleSave}
         />
       )}
@@ -648,14 +598,6 @@ export default function TaskPlansPage() {
           mode={detailMode}
           onClose={() => setDetailTask(null)}
           onChanged={() => void load()}
-        />
-      )}
-
-      {confirmDelete && (
-        <DeleteConfirm
-          task={confirmDelete}
-          onCancel={() => setConfirmDelete(null)}
-          onConfirm={() => void handleDelete()}
         />
       )}
     </PageContainer>
@@ -675,7 +617,7 @@ function TaskDrawer({
   currentUserName: string | null;
   currentUserId: string;
   onClose: () => void;
-  onSubmit: (_body: PlanTaskCreate | PlanTaskUpdate) => Promise<void>;
+  onSubmit: (_body: PlanTaskUpdate) => Promise<void>;
 }) {
   const editing = state.task;
   const [content, setContent] = useState(editing?.content ?? "");
@@ -715,7 +657,7 @@ function TaskDrawer({
     setBusy(true);
     setErr(null);
     try {
-      const body: PlanTaskCreate | PlanTaskUpdate = {
+      const body: PlanTaskUpdate = {
         content: content.trim(),
         user_id: userId,
         user_name: userName,
@@ -730,9 +672,6 @@ function TaskDrawer({
         work_partner: workPartner || null,
         remarks: remarks || null,
       };
-      if (state.mode === "create") {
-        (body as PlanTaskCreate).status = "10";
-      }
       await onSubmit(body);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "保存失败");
@@ -744,9 +683,7 @@ function TaskDrawer({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
       <div className="w-[560px] rounded-md border bg-background p-5 shadow-lg">
-        <h3 className="text-sm font-semibold">
-          {state.mode === "create" ? "新建任务计划" : "编辑任务计划"}
-        </h3>
+        <h3 className="text-sm font-semibold">编辑任务计划</h3>
         <div className="mt-3 grid grid-cols-2 gap-3">
           <div className="col-span-2">
             <label className="text-[11px] text-muted-foreground">任务内容 *</label>
@@ -886,35 +823,6 @@ function TaskDrawer({
           </Button>
           <Button type="primary" disabled={busy} onClick={() => void submit()}>
             {busy ? "保存中…" : "保存"}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DeleteConfirm({
-  task,
-  onCancel,
-  onConfirm,
-}: {
-  task: PlanTask;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-      <div className="w-96 rounded-md border bg-background p-5 shadow-lg">
-        <h3 className="text-sm font-semibold">确认删除任务计划？</h3>
-        <p className="mt-2 text-xs text-muted-foreground">
-          将删除任务「{task.content ?? task.id}」,该操作不可恢复。
-        </p>
-        <div className="mt-4 flex justify-end gap-2">
-          <Button onClick={onCancel}>
-            取消
-          </Button>
-          <Button danger type="primary" onClick={onConfirm}>
-            确认删除
           </Button>
         </div>
       </div>
