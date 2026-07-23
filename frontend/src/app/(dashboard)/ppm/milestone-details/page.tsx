@@ -264,7 +264,7 @@ export default function MilestoneDetailsPage() {
   const handleExport = async () => {
     setExporting(true);
     try {
-      await exportMilestoneDetails();
+      await exportMilestoneDetails(planId || undefined);
       showToast(true, "导出已开始");
     } catch (err) {
       showToast(false, err instanceof ApiError ? err.message : "导出失败");

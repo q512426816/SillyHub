@@ -366,6 +366,32 @@ class TestPsProjectPlan:
         assert node.template_plan_node_id is None
         assert await svc.list_details_by_node(str(node.id)) == []
 
+    async def test_list_plan_node_details_for_export_filters_by_plan(
+        self, db_session: AsyncSession
+    ) -> None:
+        """导出按 plan_id 过滤:只返回该项目计划下里程碑的明细(ql-20260723-006)。"""
+        svc = PlanService(db_session)
+        proj = PpmProjectMaintenance(id=uuid.uuid4(), project_code="P-EXP", project_name="项目导出")
+        db_session.add(proj)
+        await db_session.commit()
+        plan_a = await svc.create_ps_project_plan({"project_id": str(proj.id), "status": "draft"})
+        plan_b = await svc.create_ps_project_plan({"project_id": str(proj.id), "status": "draft"})
+        node_a = await svc.create_ps_plan_node({"ps_project_plan_id": str(plan_a.id), "no": "1"})
+        node_b = await svc.create_ps_plan_node({"ps_project_plan_id": str(plan_b.id), "no": "1"})
+        await svc.create_detail(
+            {"plan_node_id": str(node_a.id), "task_theme": "A的明细", "status": "draft"}
+        )
+        await svc.create_detail(
+            {"plan_node_id": str(node_b.id), "task_theme": "B的明细", "status": "draft"}
+        )
+        # 不传 plan_id → 全量(2 条)
+        all_rows = await svc.list_plan_node_details_for_export()
+        assert len(all_rows) == 2
+        # 传 plan_a → 只 A 计划的明细(1 条)
+        a_rows = await svc.list_plan_node_details_for_export(plan_a.id)
+        assert len(a_rows) == 1
+        assert a_rows[0]["task_theme"] == "A的明细"
+
     async def test_create_plan_writes_created_by_from_operator(
         self, db_session: AsyncSession
     ) -> None:

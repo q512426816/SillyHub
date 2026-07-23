@@ -1214,14 +1214,24 @@ class PlanService:
             for r, real_project_name in rows
         ]
 
-    async def list_plan_node_details_for_export(self) -> list[dict[str, Any]]:
-        """返回里程碑明细全量行 (dict),供 Excel 导出 (P2-3)。
+    async def list_plan_node_details_for_export(
+        self, plan_id: uuid.UUID | None = None
+    ) -> list[dict[str, Any]]:
+        """返回里程碑明细行 (dict),供 Excel 导出 (P2-3)。
 
         仅导出非 archived (当前有效版本) 的明细。对照源 psplannodedetail
         列表列:总体阶段 / 明细阶段 / 任务主题 / 计划工作量 / 计划开始 /
         计划完成 / 角色 / 成果 / 状态。
+
+        ``plan_id`` 指定时只导出该项目计划(ps_project_plan)下的明细
+        (join ppm_ps_plan_node.ps_project_plan_id),否则导出全量。
         """
         stmt = select(PsPlanNodeDetail).where(PsPlanNodeDetail.status != "archived")
+        if plan_id is not None:
+            # 过滤到指定项目计划:明细 → 里程碑 → ps_project_plan_id
+            stmt = stmt.join(PsPlanNode, PsPlanNode.id == PsPlanNodeDetail.plan_node_id).where(
+                PsPlanNode.ps_project_plan_id == plan_id
+            )
         rows = (await self._session.execute(stmt)).scalars().all()
         return [
             {

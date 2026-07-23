@@ -106,11 +106,12 @@ export async function exportProjectPlans(): Promise<void> {
   );
 }
 
-/** P2-3:导出里程碑明细 (psplannodedetail,仅非 archived)。 */
-export async function exportMilestoneDetails(): Promise<void> {
+/** P2-3:导出里程碑明细 (psplannodedetail,仅非 archived)。
+ *  传 planId 时只导出该项目计划的明细(里程碑明细页按当前项目导出)。 */
+export async function exportMilestoneDetails(planId?: string): Promise<void> {
   await downloadExcel(
     "/api/ppm/plan-node-detail/export-excel",
-    undefined,
+    planId ? { plan_id: planId } : undefined,
     "plan_node_details.xlsx",
   );
 }

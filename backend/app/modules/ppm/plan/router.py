@@ -642,12 +642,13 @@ _PLAN_NODE_DETAIL_COLUMNS = [
 async def export_plan_node_details(
     session: SessionDep,
     user: AuthUser,
+    plan_id: uuid.UUID | None = Query(None, description="项目计划 ID,指定时只导出该计划的明细"),
 ) -> Any:
     """导出里程碑明细为 Excel (P2-3, X-002)。
 
-    仅导出非 archived (当前有效版本) 的明细。
+    仅导出非 archived (当前有效版本) 的明细。传 ``plan_id`` 时只导出该项目计划的明细。
     """
-    rows = await PlanService(session).list_plan_node_details_for_export()
+    rows = await PlanService(session).list_plan_node_details_for_export(plan_id)
     columns = _PLAN_NODE_DETAIL_COLUMNS
     return await anyio.to_thread.run_sync(
         lambda: _build_excel_response(

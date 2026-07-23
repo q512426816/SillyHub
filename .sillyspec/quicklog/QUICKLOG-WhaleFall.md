@@ -274,3 +274,11 @@ created_at: 2026-07-21T08:48:56
 根因：create_ps_plan_node 原只是 `_Crud.create` 建一条空里程碑，未像 create_ps_project_plan（`_init_milestones_from_template`）那样匹配模板并复制明细。
 方案：改 create_ps_plan_node 为单事务——建里程碑后按 `overall_stage` 查 PlanNode 模板（`select(PlanNode).where(overall_stage==stage).limit(1)`），命中则记 `template_plan_node_id`/`has_module`，且 `has_module=false` 时复用 `_copy_template_details_to_node` 复制模板明细（draft，module_id=null，与 `_init_milestones_from_template` 完全一致）；`has_module=true` 则只记归属（明细等建模块时由 create_module 复制）；不匹配则空里程碑。新增 2 单测覆盖匹配复制 / 不匹配不复制。
 结果：①ruff/mypy 0 error；②plan 套件 139 passed / 22 errors（22 errors 全是本地 venv 缺 aiobotocore 致 db_engine fixture 导入 file/storage 模块失败的预存环境问题，非本次逻辑；CI/生产镜像含 aiobotocore 可正常跑）；③待 commit+push+重建 backend 部署后用户验证（新建里程碑选模板阶段→展开有预置明细；手输非模板阶段→空里程碑）。
+## ql-20260723-006-2c41 | 2026-07-23 10:11:25 | /ppm/milestone-details 导出改为只导当前项目计划的明细
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/plan/service.py（list_plan_node_details_for_export 加 plan_id 过滤）+ backend/app/modules/ppm/plan/router.py（export_plan_node_details 加 plan_id Query）+ backend/app/modules/ppm/plan/tests/test_service.py（+1 单测）+ frontend/src/lib/ppm/plan.ts（exportMilestoneDetails 传 planId）+ frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（handleExport 传 planId）
+需求：【里程碑明细】页的导出数据不对，应只导出当前这个项目的里程碑明细。
+根因：原 list_plan_node_details_for_export 无任何过滤，导出全平台所有项目的非 archived 明细；前端 exportMilestoneDetails 也不传当前 planId，故导出的是全量而非当前项目。
+方案：①后端 service `list_plan_node_details_for_export(plan_id=None)`：plan_id 非空时 join `PsPlanNode`(ON plan_node.id == detail.plan_node_id) 过滤 `ps_project_plan_id == plan_id`，只导该项目计划的明细；不传仍全量（兼容）。②router `export_plan_node_details` 加 `plan_id: uuid.UUID|None = Query(None)` 透传。③前端 `exportMilestoneDetails(planId?)` 经 `downloadExcel` 传 `{plan_id}` query。④page handleExport 传当前 `planId`。新增 1 单测验证按 plan_id 过滤（2 计划各 1 明细，传 plan_a 只返回 A 的）。
+结果：①ruff(format+check)/mypy 0 error；②前端 typecheck/lint 0 error、milestone-details 24 passed；③后端 db 单测本地 venv 缺 aiobotocore 跑不了（CI 跑）；④待 commit+push+重建 backend+frontend 部署后用户验证（导出只含当前项目明细）。
