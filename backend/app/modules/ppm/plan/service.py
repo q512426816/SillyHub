@@ -2142,7 +2142,11 @@ class PlanService:
                 func.coalesce(PlanTask.start_time, PsPlanNodeDetail.plan_begin_time) <= req.end_time
             )
         total = await count_total(self._session, stmt)
-        stmt = stmt.order_by(PpmProjectMaintenance.project_name, PsPlanNodeDetail.no)
+        stmt = stmt.order_by(
+            PpmProjectMaintenance.project_name,
+            PlanNodeModule.module_name.asc().nullsfirst(),
+            func.coalesce(PlanTask.start_time, PsPlanNodeDetail.plan_begin_time).asc().nullsfirst(),
+        )
         stmt = apply_pagination(stmt, req)
         raw_rows = (await self._session.execute(stmt)).all()
         items = [self._row_to_weekly(r) for r in raw_rows]
@@ -2169,7 +2173,11 @@ class PlanService:
             stmt = stmt.where(
                 func.coalesce(PlanTask.start_time, PsPlanNodeDetail.plan_begin_time) <= req.end_time
             )
-        stmt = stmt.order_by(PpmProjectMaintenance.project_name, PsPlanNodeDetail.no)
+        stmt = stmt.order_by(
+            PpmProjectMaintenance.project_name,
+            PlanNodeModule.module_name.asc().nullsfirst(),
+            func.coalesce(PlanTask.start_time, PsPlanNodeDetail.plan_begin_time).asc().nullsfirst(),
+        )
         raw_rows = (await self._session.execute(stmt)).all()
         out: list[dict[str, Any]] = []
         for r in raw_rows:
