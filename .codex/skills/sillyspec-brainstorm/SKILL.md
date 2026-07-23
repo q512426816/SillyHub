@@ -46,7 +46,9 @@ sillyspec run brainstorm --done --answer "..." --output "..."    # 一步完成 
 
 ## brainstorm 特有：requiresWait 步骤
 
-某些步骤（如"对话式探索"）需要用户输入。两种方式：
+某些步骤（如"对话式探索与需求澄清"）需要用户输入。两种方式：
+
+> 自动去重：若前置 step 已对同一问题（waitReason 归一化后相同，如"确认设计方案" vs "最终确认设计方案"）确认过，后续重复 wait 会自动跳过，无需再 `--wait`。
 
 - **方式一（推荐）**：AI 自行与用户交互后，一步完成：
   ```bash
@@ -62,10 +64,16 @@ sillyspec run brainstorm --done --answer "..." --output "..."    # 一步完成 
 ## 阶段流转
 
 ```
-scan → brainstorm → plan
+                ┌─ scale=large → plan（四件套齐）
+scan → brainstorm ┤
+                └─ scale=small → quick --linked-changes（仅 design.md）
 ```
 
-brainstorm 完成后（四件套齐 + 自审通过），运行 `sillyspec run plan --change <变更名>` 进入实现计划。
+brainstorm 完成时按 design.md frontmatter 的 `scale` 分叉：
+- **large**（多文件/跨模块/有状态机或 schema 变更）：四件套齐 + Design Grill 审查通过（tier=independent 时由独立审查子代理产出 stage review.json）→ `sillyspec run plan --change <变更名>`
+- **small**（≤2 文件、单模块、无跨模块依赖）：仅生成 design.md → `sillyspec run quick --linked-changes <变更名>`
+
+> 规模由 AI 在 brainstorm 最后一步评估并写入 design.md frontmatter。判错可手动改 `scale` 后再跑相应阶段。
 
 ## 铁律
 

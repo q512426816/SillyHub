@@ -42,6 +42,9 @@ USER=$(git config user.name 2>/dev/null || echo "default")
 cat .sillyspec/quicklog/QUICKLOG-${USER}.md 2>/dev/null
 # 同时扫描活跃变更目录下的归属 quicklog
 for dir in .sillyspec/changes/*/quicklog/*.md; do [ -f "$dir" ] && cat "$dir"; done 2>/dev/null
+# 注：QUICKLOG 现由 CLI 接管写入（src/quicklog.js），描述取 quick 启动的任务参数、
+# 结果取 step3 --output 一句话，粒度可能较粗；条目仍含 标题|时间|描述 + 状态 + 结果 结构，
+# 可直接读取。描述过泛时结合 diff stat 与 tasks.md 补充语义。
 
 来源 B — tasks.md（execute 产生的修改）：
 LATEST=$(ls -d .sillyspec/changes/*/ 2>/dev/null | grep -v archive | tail -1)

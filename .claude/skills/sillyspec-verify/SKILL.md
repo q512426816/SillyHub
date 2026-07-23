@@ -53,7 +53,7 @@ verify 是只读阶段（**禁止改代码/改 git 状态**，只检查 + 写报
 ```markdown
 # 验证报告
 ## 结论
-PASS / PASS WITH NOTES / FAIL      ← 必须有此章节，FAIL 会阻断 verify 完成
+PASS / PASS WITH NOTES / FAIL      ← 必须有结论章节（标题含"结论/Conclusion/Result/结果"即可，不限于确切"## 结论"），FAIL 会阻断 verify 完成
 ## 任务完成度
 ## 设计一致性
 ## 探针结果

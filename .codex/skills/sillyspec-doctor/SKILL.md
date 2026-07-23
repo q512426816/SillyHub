@@ -49,7 +49,11 @@ sillyspec progress repair                      # 修复状态元数据（dry-run
 sillyspec progress repair --apply              # 真正修复
 sillyspec progress validate                    # 校验并修复
 sillyspec worktree doctor [--fix]              # worktree 健康检查 + 修复
+sillyspec doctor --align-execute-progress --change <name>          # 按 plan.md 声明对齐 execute 派生戳（dry-run，只报告将补哪些 step）
+sillyspec doctor --align-execute-progress --change <name> --confirm # 实际落盘：补 step 戳 + 置 execute stage status=completed
 ```
+
+> `--align-execute-progress` 仅当 `plan.md` 所有 task checkbox 全勾时才对齐 execute 阶段进度戳。典型用于 worktree 已 cleanup（终态）但 execute 派生戳未盖上的死锁。默认 dry-run，加 `--confirm` 才写盘。doctor 信任 `plan.md` 声明、不复核代码，verify 阶段兜底。`--change` 缺省时按单活跃变更自动兜底。
 
 ## 铁律
 

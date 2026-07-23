@@ -44,7 +44,7 @@ sillyspec run plan --done --answer "..." --output "..."    # 一步完成 wait+d
 
 ### 动态步骤
 
-plan 的步骤是动态的：`generate_plan` 步骤完成后，CLI 会从刚生成的 `plan.md` 解析出 task，自动插入"任务蓝图协调器"步骤（per-task）。这是正常行为，不要手动添加。
+plan 的步骤是动态的：`generate_plan`（生成分级计划）→ `review_plan`（审查计划，按规模分级：tier=self 当前 agent 自审 / tier=independent 启动独立审查子代理产出 stage review.json，避免生成+自审同一次输出的偏差）→ CLI 从 `plan.md` 解析出 task 自动插入"任务蓝图协调器"步骤（per-task）。这是正常行为，不要手动添加。
 
 ### 契约门控（阻断完成）
 
