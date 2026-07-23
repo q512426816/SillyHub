@@ -18,7 +18,9 @@ def _copy_fixtures(src: Path, tmp_path: Path, name: str = "ws") -> Path:
 
 
 @pytest.fixture()
-async def workspace_with_changes(client, tmp_path: Path, auth_headers: dict[str, str]) -> dict:
+async def workspace_with_changes(
+    client, tmp_path: Path, auth_headers: dict[str, str], seed_spec_root_fn
+) -> dict:
     """Create a workspace with components and change fixtures.
 
     2026-07-10-remove-server-local-workspace-mode: backend 读不到 client
@@ -29,7 +31,6 @@ async def workspace_with_changes(client, tmp_path: Path, auth_headers: dict[str,
     from pathlib import Path
 
     from app.core.config import get_settings
-    from conftest import seed_spec_root
 
     root = _copy_fixtures(COMPONENT_FIXTURES, tmp_path)
 
@@ -42,7 +43,7 @@ async def workspace_with_changes(client, tmp_path: Path, auth_headers: dict[str,
     ws_id = ws_resp.json()["id"]
 
     # COMPONENT_FIXTURES（包裹式 .sillyspec/）展平到 spec_root
-    seed_spec_root(ws_id, COMPONENT_FIXTURES)
+    seed_spec_root_fn(ws_id, COMPONENT_FIXTURES)
     # CHANGE_FIXTURES 是裸 changes 树，直接覆盖到 spec_root/changes/
     spec_changes = Path(get_settings().spec_data_root) / ws_id / "changes"
     spec_changes.mkdir(parents=True, exist_ok=True)

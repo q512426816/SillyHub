@@ -1,4 +1,14 @@
-# SillySpec 流程 bug — 2026-07-22-mobile-app-ui 全流程踩坑（活跃，待工具修复）
+# SillySpec 流程 bug — 2026-07-22-mobile-app-ui 全流程踩坑（已归档：6 bug 全部已修）
+
+> **核实结论（2026-07-23，sillyspec 3.24.3 源码实证，4 组只读 agent + diff 核对）**：下列 1–6 项 sillyspec 平台模式 bug **全部已修复**，主要落在 commit cf18848（archive 特例另在独立 commit 52767f1，为其祖先，已含于当前 main）。逐条证据：
+> - 坑1 步骤定义切换：run.js / brainstorm.js 加 migratedFrom 迁移映射，合并步骤不丢 completed，currentIdx 不再 9/13→3/8 回跳。回归测试 test/step-migration.test.mjs 全绿。
+> - 坑2 docHash 大小写：stage-review.js:137 改双边 .toLowerCase() 比较，PowerShell Get-FileHash 大写 hash 不再误判伪造。
+> - 坑3 task 编号重编号：plan.js parseTaskNames 保 plan.md 原始编号贯穿 buildCoordinatorStep，与 execute Wave 标号一致；非顺序编号不再被重编号致蓝图错配。回归测试 test/plan-task-numbering.test.mjs。
+> - 坑4 execute review gate：task-review.js emptyDiff 时回退查 working-tree（git status --porcelain），未提交改动按有效处理、不判零改动伪造；marker 4 站点 runtimeRoot 统一 + fallback 落盘，runID 不再漂移、.runtime 路径不再主仓/worktree 飘。
+> - 坑5 worktree apply --merge：worktree-apply.js 用 meta.branch + merge 后逐文件 git cat-file -e 落地校验 + cleanup fail-open（落地失败保留 worktree + exit 1），不再误报成功 / 不再丢码。回归测试 test/worktree-apply-uncommitted.test.mjs + worktree-apply-merge-fallback.test.mjs。
+> - 坑6 archive step4 移动后 step5 失联：stage-contract.js:63-72 validateChangeExists 加 archive 阶段特例，changes/名 不存在时检查 changes/archive/YYYY-MM-DD-名（精确匹配，auth ≠ deep-auth）；run.js 无活跃变更时取最新归档目录。回归测试 test/change-exists-validation.test.mjs（19 用例全绿）。
+>
+> 「衍生」ci-check hook 全量校验阻断：属 multi-agent-platform 自身 pre-commit hook + main 既有技术债（react-query test 未同步、backend ruff 格式），**非 sillyspec 缺陷**，不在本工具修复范围。
 
 本次移动端 App UI 变更走完整 `brainstorm → plan → execute → verify → archive` 流程，发现以下 sillyspec 平台模式 bug。
 

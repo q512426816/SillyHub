@@ -23,7 +23,9 @@ Makefile 暴露的目标（均为顶层 phony-like target）：
 - **frontend 系列**：frontend-install、frontend-run、frontend-test、frontend-lint、frontend-typecheck、frontend-build。
 - **`help`**：列出全部目标。
 
-底层配置来源：`backend/pyproject.toml`（uv/依赖/hatchling/ruff/mypy/pytest）、`frontend/package.json`（pnpm scripts）、`sillyhub-daemon/package.json`、`deploy/docker-compose.yml`。
+底层配置来源：`backend/pyproject.toml`（uv/依赖/hatchling/ruff/mypy/pytest/pytest-xdist）、`frontend/package.json`（pnpm scripts）、`sillyhub-daemon/package.json`、`deploy/docker-compose.yml`。
+
+- **并行测试**：backend 已引入 `pytest-xdist`（ql-20260723-010-32d6），全量用 `cd backend && uv run pytest -n auto` 可并行（20 核约 7min，单进程约 50min）；默认 `uv run pytest` 仍为单进程。CI/本地视机器核数选择 `-n auto`。
 
 ## 关键逻辑
 

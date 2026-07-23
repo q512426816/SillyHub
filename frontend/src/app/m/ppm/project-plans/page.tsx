@@ -3,7 +3,10 @@
 /**
  * 项目计划 (PsProjectPlan) · 移动视图（全功能对齐 web，展示适配手机）。
  *
- * 功能与桌面 web 一致（不多不少）：浏览 + 搜索 + 导出 + 新建/编辑/删除 + 详情。
+ * 功能与桌面 web 一致（不多不少）：浏览 + 搜索 + 导出 + 新建/编辑/删除 + 详情 + 里程碑。
+ *  - 查询条件：收进 MobileFilterDrawer 抽屉（参考问题清单），顶部只留「筛选」入口。
+ *  - 卡片点击：弹「里程碑那块」（MilestoneSheet 抽屉，里程碑层只读列表）；「⋯」动作里
+ *    「里程碑」钻取整页三层 / 「详情」打开三联表明细。
  *  - 新建/编辑：复用桌面 PpmProjectPlanForm（antd Drawer，手机全屏），单一源不重写 17 字段表单。
  *  - 删除：deleteProjectPlan + Modal.confirm 二次确认（同桌面）。
  *  - 权限：卡片动作按后端字段 can_edit / can_delete 显隐（同桌面 line 427-428）。
@@ -13,11 +16,14 @@
  * 桌面 `(dashboard)/ppm/project-plans/**` 不改（零回归；复用其 Form/Detail 组件，只读引用）。
  * middleware matcher 含 `/ppm/:path*` → 手机访问 /ppm/project-plans 自动 rewrite 到本页。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Input, Modal } from "antd";
+import { useRouter } from "next/navigation";
 
 import { MobileCardList } from "@/components/mobile/mobile-card-list";
 import { MobileExportButton } from "@/components/mobile/mobile-export-button";
+import { MobileFilterDrawer } from "@/components/mobile/mobile-filter-drawer";
+import { MilestoneSheet } from "@/components/mobile/milestone-sheet";
 import { PpmProjectPlanDetail } from "@/components/ppm-project-plan-detail";
 import { PpmProjectPlanForm } from "@/components/ppm-project-plan-form";
 import { ApiError } from "@/lib/api";
@@ -55,6 +61,7 @@ function fmtMoney(v: string | null | undefined): string {
 }
 
 export default function ProjectPlansMobilePage() {
+  const router = useRouter();
   const { toast, showToast } = useToast();
 
   const [rows, setRows] = useState<PsProjectPlan[]>([]);
@@ -73,6 +80,10 @@ export default function ProjectPlansMobilePage() {
   const [exporting, setExporting] = useState(false);
   const [detailPlanId, setDetailPlanId] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<DrawerState>({ open: false, mode: "create" });
+  // 筛选抽屉开关（查询条件收进抽屉，对齐问题清单）。
+  const [filterOpen, setFilterOpen] = useState(false);
+  // 点卡片弹「里程碑那块」面板（MilestoneSheet）的计划 id。
+  const [milestonePlanId, setMilestonePlanId] = useState<string | null>(null);
 
   const load = useCallback(
     async (opts: { page?: number; page_size?: number } = {}) => {
@@ -109,13 +120,14 @@ export default function ProjectPlansMobilePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchNonce]);
 
-  const commitSearch = () => setSearchNonce((n) => n + 1);
   const resetSearch = () => {
     setProjectName("");
     setContractName("");
     setCompanyName("");
     setSearchNonce((n) => n + 1);
   };
+  // 抽屉「确定」：提交当前条件并触发查询（抽屉自动关）。
+  const applyFilters = () => setSearchNonce((n) => n + 1);
 
   const handleExport = async () => {
     setExporting(true);
@@ -154,7 +166,7 @@ export default function ProjectPlansMobilePage() {
     await load();
   };
 
-  // 卡片动作：详情（所有）/ 编辑（can_edit）/ 删除（can_delete）—— 权限显隐对齐桌面
+  // 卡片动作：里程碑（钻取整页，所有）/ 详情（所有）/ 编辑（can_edit）/ 删除（can_delete）—— 权限显隐对齐桌面
   const buildActions = (p: PsProjectPlan) => {
     const canEdit = p.can_edit ?? false;
     const canDelete = p.can_delete ?? false;
@@ -164,6 +176,11 @@ export default function ProjectPlansMobilePage() {
       danger?: boolean;
       onPress: () => void;
     }[] = [];
+    acts.push({
+      key: "milestone",
+      label: "里程碑",
+      onPress: () => router.push(`/ppm/milestone-details?plan=${p.id}`),
+    });
     acts.push({
       key: "detail",
       label: "详情",
@@ -247,50 +264,6 @@ export default function ProjectPlansMobilePage() {
         </p>
       </header>
 
-      {/* 搜索（项目名 / 合同名 / 公司名） */}
-      <div className="flex flex-col gap-2 rounded-md border border-border/60 bg-card p-3">
-        <Input
-          allowClear
-          placeholder="项目名称"
-          value={projectName}
-          onChange={(e) => setProjectName(e.target.value)}
-          onPressEnter={commitSearch}
-          className="!min-h-[44px] !text-[14px]"
-        />
-        <Input
-          allowClear
-          placeholder="合同名称"
-          value={contractName}
-          onChange={(e) => setContractName(e.target.value)}
-          onPressEnter={commitSearch}
-          className="!min-h-[44px] !text-[14px]"
-        />
-        <Input
-          allowClear
-          placeholder="公司名称"
-          value={companyName}
-          onChange={(e) => setCompanyName(e.target.value)}
-          onPressEnter={commitSearch}
-          className="!min-h-[44px] !text-[14px]"
-        />
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={commitSearch}
-            className="inline-flex min-h-[44px] flex-1 items-center justify-center rounded-md bg-primary px-3 text-[14px] font-medium text-primary-foreground"
-          >
-            搜索
-          </button>
-          <button
-            type="button"
-            onClick={resetSearch}
-            className="inline-flex min-h-[44px] items-center justify-center rounded-md border border-border bg-card px-4 text-[14px] text-foreground"
-          >
-            重置
-          </button>
-        </div>
-      </div>
-
       {error ? (
         <div className="rounded-md border border-destructive/30 bg-red-50 px-3 py-2 text-[13px] text-destructive">
           {error}
@@ -307,7 +280,7 @@ export default function ProjectPlansMobilePage() {
       <MobileCardList<PsProjectPlan>
         items={rows}
         renderCard={renderCard}
-        onItemPress={(p) => setDetailPlanId(p.id)}
+        onItemPress={(p) => setMilestonePlanId(p.id)}
         actions={buildActions}
         pagination={{
           page,
@@ -329,6 +302,44 @@ export default function ProjectPlansMobilePage() {
             >
               新建
             </button>
+            <MobileFilterDrawer
+              open={filterOpen}
+              onOpenChange={setFilterOpen}
+              onApply={applyFilters}
+              onReset={resetSearch}
+              title="筛选项目计划"
+              triggerLabel="筛选"
+            >
+              <div className="flex flex-col gap-4">
+                <FilterField label="项目名称">
+                  <Input
+                    allowClear
+                    placeholder="项目名称"
+                    value={projectName}
+                    onChange={(e) => setProjectName(e.target.value)}
+                    onPressEnter={applyFilters}
+                  />
+                </FilterField>
+                <FilterField label="合同名称">
+                  <Input
+                    allowClear
+                    placeholder="合同名称"
+                    value={contractName}
+                    onChange={(e) => setContractName(e.target.value)}
+                    onPressEnter={applyFilters}
+                  />
+                </FilterField>
+                <FilterField label="公司名称">
+                  <Input
+                    allowClear
+                    placeholder="公司名称"
+                    value={companyName}
+                    onChange={(e) => setCompanyName(e.target.value)}
+                    onPressEnter={applyFilters}
+                  />
+                </FilterField>
+              </div>
+            </MobileFilterDrawer>
           </>
         }
       />
@@ -350,6 +361,33 @@ export default function ProjectPlansMobilePage() {
         planId={detailPlanId}
         onClose={() => setDetailPlanId(null)}
       />
+
+      {/* 里程碑那块：点卡片弹出（复用 MilestoneSheet；抽屉内只看里程碑层，无下钻） */}
+      {milestonePlanId !== null ? (
+        <MilestoneSheet
+          open
+          planId={milestonePlanId}
+          onClose={() => setMilestonePlanId(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/* ============================== 筛选项外壳 ============================== */
+
+/** 筛选项外壳：标题在上、控件在下（对齐问题清单 FilterField）。 */
+function FilterField({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex w-full flex-col gap-1">
+      <span className="text-[13px] leading-4 text-muted-foreground">{label}</span>
+      {children}
     </div>
   );
 }

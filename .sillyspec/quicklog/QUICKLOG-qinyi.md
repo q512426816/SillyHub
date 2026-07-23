@@ -321,3 +321,15 @@ created_at: 2026-07-05 16:33:00
 文件：（见实际改动）
 
 结果：暂存确认:git add deploy/docker-compose.yml、deploy/.env.example、.sillyspec/docs/multi-agent-platform/modules/deploy.md(未 commit,由用户统一提交)。模块同步:命中 deploy 模块,deploy.md 契约摘要补 minio 服务条目+minio-data 卷+backend S3 配置,注意事项补 backend 连 minio 走 http://minio:9000 的坑(config.py s3_endpoint 默认 localhost 仅 native run 用),新增变更索引段追加 ql-20260722-012-dddb。tasks.md/QUICKLOG 由 CLI 自动收尾。非设计遗漏,无需 reverse sync design.md。
+## ql-20260723-010-32d6 | 2026-07-23 14:55:59 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+
+结果：需求：把全量后端 pytest 从约50分钟降下来。根因：①20核只用1核无并行 ②bcrypt rounds=12每认证测试0.3s哈希 ③from conftest import因9个同名conftest模块名共享在xdist下解析错。方案：conftest设AUTH_BCRYPT_ROUNDS=4+pyproject加pytest-xdist+根conftest新增seed_spec_root_fn fixture供5个change/task测试依赖注入(根治导入歧义)+git_gateway参数化list(frozenset)改sorted(消xdist收集不一致)。结果：xdist全量2875passed/0error/0failed用时7分02秒(约7倍提速);ruff check+format全过;5改动文件单进程61passed零回归;backend.md/build.md模块文档已同步并暂存,未commit。
+## ql-20260723-011-8253 | 2026-07-23 15:38:58 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+
+结果：需求：移动APP工作台去掉我的待办/我的任务卡片、指标(任务量/缺陷)可点跳对应页、快捷入口去掉绩效考评/知识库/消息通知；项目计划页风格参考问题清单(查询条件隐藏进抽屉)、卡片点击弹里程碑那块而非详情。根因：无，纯样式/交互调整。方案：workbench删TodosCard/TaskEntryCard+指标包Link跳/ppm/task-plans·/ppm/problem-list+快捷入口留3项;抽components/mobile/milestone-sheet.tsx承载里程碑节点层(antd Drawer);milestone-details页第一层复用之(钻取关抽屉下钻);project-plans页3查询条件收MobileFilterDrawer+点卡片onItemPress弹MilestoneSheet。结果：前端全量1058 passed/0 failed(103文件);typecheck过;里程碑移动集成5/5过。

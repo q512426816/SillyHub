@@ -32,7 +32,9 @@ class TestWhitelist:
         }
         assert expected == ALLOWED_OPERATIONS
 
-    @pytest.mark.parametrize("op", list(ALLOWED_OPERATIONS))
+    # sorted() 保证参数化顺序确定:ALLOWED_OPERATIONS 是 frozenset,其迭代顺序受
+    # PYTHONHASHSEED 影响,各进程不同 → pytest-xdist 多 worker 收集顺序不一致而报错。
+    @pytest.mark.parametrize("op", sorted(ALLOWED_OPERATIONS))
     def test_allowed_operations_pass(self, op: str) -> None:
         validate_operation(op, [])  # should not raise
 

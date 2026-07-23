@@ -22,11 +22,8 @@
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import dayjs from "dayjs";
 import {
-  Award,
-  BookOpen,
   Bug,
   ChevronLeft,
   ChevronRight,
@@ -35,7 +32,6 @@ import {
   Clock3,
   Hourglass,
   ListChecks,
-  MessageSquare,
   TrendingUp,
   type LucideIcon,
 } from "lucide-react";
@@ -52,10 +48,9 @@ import type {
   WorkbenchCalendar,
   WorkbenchProfile,
   WorkbenchSummary,
-  WorkbenchTodoItem,
 } from "@/lib/ppm/types";
 import { cn } from "@/lib/utils";
-import { Toast, taskStatusTag, useToast } from "@/app/(dashboard)/ppm/shared";
+import { taskStatusTag } from "@/app/(dashboard)/ppm/shared";
 
 /** 单区块加载状态：独立 loading/error + data（三块互不阻塞，镜像桌面 page.tsx BlockState）。 */
 interface BlockState<T> {
@@ -82,14 +77,7 @@ function placeholder(v: string | null | undefined): string {
   return v && v.trim() !== "" ? v : "—";
 }
 
-/** 范围 → 中文短词（用于「我的任务」卡片任务量前缀）。 */
-function rangeLabel(range: MetricRange): string {
-  return range === "week" ? "本周" : range === "month" ? "本月" : "全部";
-}
-
 export default function WorkbenchMobilePage() {
-  const router = useRouter();
-
   const [profile, setProfile] = useState<BlockState<WorkbenchProfile>>(initialBlock);
   const [summary, setSummary] = useState<BlockState<WorkbenchSummary>>(initialBlock);
   // 指标范围（默认本月）：切换重载 summary。
@@ -153,19 +141,6 @@ export default function WorkbenchMobilePage() {
     void loadCalendar();
   }, [loadCalendar]);
 
-  /** 待办点击：plan_task → 任务计划页；problem_* → 问题清单页；其余不跳（对齐桌面 TodoListPanel）。 */
-  const onTodoPress = useCallback(
-    (todo: WorkbenchTodoItem) => {
-      const src = todo.source ?? "";
-      if (src === "plan_task") {
-        router.push("/ppm/task-plans");
-      } else if (src.startsWith("problem")) {
-        router.push("/ppm/problem-list");
-      }
-    },
-    [router],
-  );
-
   return (
     <div className="flex flex-col gap-3">
       <header className="px-1 pb-1">
@@ -203,20 +178,7 @@ export default function WorkbenchMobilePage() {
         />
       )}
 
-      {/* ③ 我的待办（左栏）：复用 task-07 MobileCardList，点击下钻 */}
-      <TodosCard
-        todos={summary.data?.todos ?? null}
-        loading={summary.loading}
-        onItemPress={onTodoPress}
-      />
-
-      {/* ④ 我的任务（中栏）：执行回跳入口 → /ppm/task-plans（middleware 自动 rewrite /m/） */}
-      <TaskEntryCard
-        taskCount={summary.data?.metrics.task_count ?? null}
-        range={summaryRange}
-      />
-
-      {/* ⑤ 工作日历（右栏）：月份切换重载 calendar */}
+      {/* ③ 工作日历（右栏）：月份切换重载 calendar */}
       {calendar.data ? (
         <CalendarBlock
           calendar={calendar.data}
@@ -233,7 +195,7 @@ export default function WorkbenchMobilePage() {
         />
       )}
 
-      {/* ⑥ 快捷入口（右栏）：与桌面 QuickEntryGrid 对齐 */}
+      {/* ④ 快捷入口（右栏）：与桌面 QuickEntryGrid 对齐 */}
       <QuickEntriesCard />
     </div>
   );
@@ -379,6 +341,8 @@ function MetricsCard({
     value: string;
     color: MetricColor;
     icon: LucideIcon;
+    /** 存在即整块可点，跳转对应页面（指标下钻）。 */
+    href?: string;
   }[] = [
     {
       key: "task_count",
@@ -386,6 +350,7 @@ function MetricsCard({
       value: metrics ? `${metrics.task_count}条` : "—",
       color: "blue",
       icon: ClipboardList,
+      href: "/ppm/task-plans",
     },
     {
       key: "completion_rate",
@@ -420,6 +385,7 @@ function MetricsCard({
       value: metrics ? `${metrics.defect_count}条` : "—",
       color: "red",
       icon: Bug,
+      href: "/ppm/problem-list",
     },
   ];
 
@@ -455,11 +421,8 @@ function MetricsCard({
       <div className="grid grid-cols-2 gap-2">
         {items.map((m) => {
           const Icon = m.icon;
-          return (
-            <div
-              key={m.key}
-              className="rounded-xl border border-border/60 bg-muted/30 p-2.5"
-            >
+          const inner = (
+            <>
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[12px] text-muted-foreground">{m.label}</span>
                 <span
@@ -479,6 +442,23 @@ function MetricsCard({
               >
                 {m.value}
               </div>
+            </>
+          );
+          return m.href ? (
+            <Link
+              key={m.key}
+              href={m.href}
+              aria-label={`${m.label}，点击查看`}
+              className="block cursor-pointer rounded-xl border border-border/60 bg-muted/30 p-2.5 transition hover:bg-muted/60 active:scale-[0.99]"
+            >
+              {inner}
+            </Link>
+          ) : (
+            <div
+              key={m.key}
+              className="rounded-xl border border-border/60 bg-muted/30 p-2.5"
+            >
+              {inner}
             </div>
           );
         })}
@@ -487,131 +467,7 @@ function MetricsCard({
   );
 }
 
-/* ============================== ③ 我的待办 ============================== */
-
-/** 待办 type/source → 徽标色 class + 文案（对齐桌面 TodoListPanel.todoBadge 语义）。 */
-function todoBadge(todo: WorkbenchTodoItem): { label: string; cls: string } {
-  const source = todo.source ?? "";
-  const type = todo.type ?? "";
-  if (source === "plan_task") {
-    return { label: "任务", cls: "bg-amber-100 text-amber-700" };
-  }
-  if (source === "problem_audit" || source === "problem_change") {
-    return { label: "缺陷", cls: "bg-red-100 text-red-700" };
-  }
-  if (type.includes("工时")) {
-    return { label: "工时", cls: "bg-blue-100 text-blue-700" };
-  }
-  if (type.includes("计划")) {
-    return { label: "计划", cls: "bg-slate-100 text-slate-700" };
-  }
-  if (type.includes("任务")) {
-    return { label: "任务", cls: "bg-amber-100 text-amber-700" };
-  }
-  if (type.includes("缺陷") || type.includes("问题")) {
-    return { label: "缺陷", cls: "bg-red-100 text-red-700" };
-  }
-  return { label: type || "待办", cls: "bg-muted text-muted-foreground" };
-}
-
-function TodosCard({
-  todos,
-  loading,
-  onItemPress,
-}: {
-  todos: WorkbenchTodoItem[] | null;
-  loading: boolean;
-  onItemPress: (todo: WorkbenchTodoItem) => void;
-}) {
-  const items = todos ?? [];
-  return (
-    <MobileCard
-      title="我的待办"
-      extra={
-        <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[12px] tabular-nums text-blue-600">
-          {items.length}
-        </span>
-      }
-      bodyClass="p-2"
-    >
-      {loading ? (
-        <div className="px-2 py-3 text-[14px] text-muted-foreground animate-pulse">
-          加载中…
-        </div>
-      ) : (
-        <MobileCardList<WorkbenchTodoItem>
-          items={items}
-          onItemPress={onItemPress}
-          emptyText="暂无待办"
-          renderCard={(todo) => {
-            const badge = todoBadge(todo);
-            const clickable =
-              todo.source === "plan_task" ||
-              (todo.source ?? "").startsWith("problem");
-            return (
-              <div className="flex min-w-0 items-center gap-2">
-                <span
-                  className={cn(
-                    "shrink-0 rounded-md px-1.5 py-0.5 text-[12px] font-medium",
-                    badge.cls,
-                  )}
-                >
-                  {badge.label}
-                </span>
-                <span
-                  className="min-w-0 flex-1 truncate text-[14px] text-foreground"
-                  title={todo.name}
-                >
-                  {todo.name}
-                </span>
-                {clickable ? (
-                  <ChevronRight
-                    className="size-4 shrink-0 text-muted-foreground/50"
-                    aria-hidden
-                  />
-                ) : null}
-              </div>
-            );
-          }}
-        />
-      )}
-    </MobileCard>
-  );
-}
-
-/* ============================== ④ 我的任务（执行回跳入口） ============================== */
-
-function TaskEntryCard({
-  taskCount,
-  range,
-}: {
-  taskCount: number | null;
-  range: MetricRange;
-}) {
-  return (
-    <MobileCard title="我的任务">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[14px] text-foreground">查看并执行分派给你的计划任务</div>
-          <div className="mt-0.5 text-[12px] text-muted-foreground">
-            {taskCount === null
-              ? "加载中…"
-              : `${rangeLabel(range)}任务量 ${taskCount} 条`}
-          </div>
-        </div>
-        <Link
-          href="/ppm/task-plans"
-          className="inline-flex min-h-[44px] shrink-0 items-center gap-1 rounded-md bg-primary px-4 text-[14px] font-medium text-primary-foreground"
-        >
-          进入
-          <ChevronRight className="size-4" aria-hidden />
-        </Link>
-      </div>
-    </MobileCard>
-  );
-}
-
-/* ============================== ⑤ 工作日历 ============================== */
+/* ============================== ③ 工作日历 ============================== */
 
 const WEEK_HEADERS = ["日", "一", "二", "三", "四", "五", "六"];
 
@@ -924,20 +780,17 @@ function statusPillCls(color: string): string {
   }
 }
 
-/* ============================== ⑥ 快捷入口 ============================== */
+/* ============================== ④ 快捷入口 ============================== */
 
 interface QuickEntry {
   label: string;
   icon: LucideIcon;
   tile: string;
-  /** 存在 href 即渲染为 Link 跳转；否则为占位（onClick 弹 Toast，对齐桌面 D-007@v1）。 */
-  href?: string;
-  onClick?: () => void;
+  /** 跳转目标。 */
+  href: string;
 }
 
 function QuickEntriesCard() {
-  const { toast, showToast } = useToast();
-
   const entries: QuickEntry[] = [
     {
       label: "问题清单",
@@ -957,24 +810,6 @@ function QuickEntriesCard() {
       tile: "bg-violet-50 text-violet-600",
       href: "/ppm/project-plans",
     },
-    {
-      label: "绩效考评",
-      icon: Award,
-      tile: "bg-emerald-50 text-emerald-600",
-      onClick: () => showToast(false, "绩效考评功能暂未开放"),
-    },
-    {
-      label: "知识库",
-      icon: BookOpen,
-      tile: "bg-cyan-50 text-cyan-600",
-      onClick: () => showToast(false, "知识库入口未配置"),
-    },
-    {
-      label: "消息通知",
-      icon: MessageSquare,
-      tile: "bg-amber-50 text-amber-600",
-      onClick: () => showToast(false, "消息功能开发中"),
-    },
   ];
 
   const tileCls =
@@ -985,8 +820,8 @@ function QuickEntriesCard() {
       <div className="grid grid-cols-3 gap-2">
         {entries.map((e) => {
           const Icon = e.icon;
-          const inner = (
-            <>
+          return (
+            <Link key={e.label} href={e.href} className={tileCls}>
               <span
                 className={cn(
                   "flex size-9 items-center justify-center rounded-lg",
@@ -996,26 +831,9 @@ function QuickEntriesCard() {
                 <Icon className="size-5" aria-hidden />
               </span>
               <span className="text-[13px] text-foreground">{e.label}</span>
-            </>
-          );
-          return e.href ? (
-            <Link key={e.label} href={e.href} className={tileCls}>
-              {inner}
             </Link>
-          ) : (
-            <button
-              key={e.label}
-              type="button"
-              onClick={e.onClick}
-              className={tileCls}
-            >
-              {inner}
-            </button>
           );
         })}
-      </div>
-      <div className="mt-2">
-        <Toast toast={toast} />
       </div>
     </MobileCard>
   );

@@ -479,13 +479,13 @@ def _copy_fixtures(src: Path, tmp_path: Path, name: str = "ws") -> Path:
 
 
 @pytest.fixture()
-async def workspace_with_changes(client, tmp_path: Path, auth_headers: dict[str, str]) -> dict:
+async def workspace_with_changes(
+    client, tmp_path: Path, auth_headers: dict[str, str], seed_spec_root_fn
+) -> dict:
     """Create a workspace with changes for API testing.
 
     2026-07-10-remove-server-local-workspace-mode: fixture 落到服务器 spec_root。
     """
-    from conftest import seed_spec_root
-
     root = _copy_fixtures(COMPONENT_FIXTURES, tmp_path)
 
     ws_resp = await client.post(
@@ -497,7 +497,7 @@ async def workspace_with_changes(client, tmp_path: Path, auth_headers: dict[str,
     ws_id = ws_resp.json()["id"]
 
     # COMPONENT_FIXTURES（包裹式）展平到 spec_root + CHANGE_FIXTURES 覆盖 changes/
-    spec_root = seed_spec_root(ws_id, COMPONENT_FIXTURES)
+    spec_root = seed_spec_root_fn(ws_id, COMPONENT_FIXTURES)
     changes_root = Path(spec_root) / "changes"
     changes_root.mkdir(parents=True, exist_ok=True)
     shutil.copytree(CHANGE_FIXTURES, changes_root, dirs_exist_ok=True)

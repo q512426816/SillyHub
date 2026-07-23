@@ -2,9 +2,17 @@
 author: qinyi
 created_at: 2026-07-23 10:37:00
 type: sillyspec-tool-defect
-status: active
+status: resolved（源码不复现，疑似误归因，详见下方核实结论）
 ---
-# sillyspec run <stage> --done / --done --answer 完成步骤时清理产物且不重新生成
+# sillyspec run <stage> --done / --done --answer 完成步骤时清理产物且不重新生成（已归档：源码不复现）
+
+> **核实结论（2026-07-23，sillyspec 3.24.3 源码实证，只读 agent + git log -S 全量排查）**：本报告描述的 bug 在当前源码中**不存在 / 不复现**，归档。
+> - 整个 src/ 目录 grep "git rm" / gitRm → 0 命中；git log -S "git rm" -- src/run.js 历史也为空 —— run.js 从未有过 git rm 级清理产物逻辑。
+> - completeStep（run.js:2806）/ --done 分支（run.js:1855）/ --done --answer（doneAnswer 参数）/ continueStep（run.js:2480）四条路径均无任何"删除该 step 关联产物"代码；--continue --answer 与 --done --answer 在清理/生成上无差异（因为两者都没有清理动作）。
+> - run.js 全部 rmSync/unlinkSync 仅 4 处（清旧版残留、quick 会话目录、scan 平台临时文件），均不碰 changes/名/ 下的 design.md / proposal.md / requirements.md / tasks.md。
+> - 校验失败 rollbackStageCompletion（run.js:2794）只回滚内存进度态（step → pending）让 agent 重做重生成，无文件删除，不存在"只清不生 → 死循环"。
+>
+> **疑似误归因**：报告观察到的"产物消失"更可能是 (a) agent 在 step8 因 scale 判定/skip 未生成产物，或 (b) 被外部 git 操作清掉 —— 非 CLI 删除。报告给的 progress complete-stage --force 绕过针对本 bug 不再必要（且若产物真缺失，complete-stage --force 只改 db 不校验，反会埋 db/磁盘分裂雷，慎用）。
 
 ## 现象
 变更 `2026-07-23-milestone-mobile` brainstorm step 8「用户确认并生成规范文件」：

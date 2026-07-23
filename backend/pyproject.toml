@@ -32,6 +32,8 @@ dev = [
   "pytest>=8",
   "pytest-asyncio>=0.23",
   "pytest-cov>=5",
+  # 并行执行:20 核闲置时用 -n auto 把全量从 ~50min 压到分钟级(ql-20260723-010-32d6)。
+  "pytest-xdist>=3.5",
   "ruff>=0.6",
   "mypy>=1.11",
   "types-passlib",

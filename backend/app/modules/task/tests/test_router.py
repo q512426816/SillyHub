@@ -19,14 +19,14 @@ def _copy_fixtures(src: Path, tmp_path: Path, name: str = "ws") -> Path:
 
 
 @pytest.fixture()
-async def workspace_with_tasks(client, tmp_path: Path, auth_headers: dict[str, str]) -> dict:
+async def workspace_with_tasks(
+    client, tmp_path: Path, auth_headers: dict[str, str], seed_spec_root_fn
+) -> dict:
     """Create a workspace with components, a change, and task fixtures.
 
     2026-07-10-remove-server-local-workspace-mode: backend 读不到 client
     root_path，fixture 必须落到服务器 spec_root（扁平布局）才能 reparse。
     """
-    from conftest import seed_spec_root
-
     root = _copy_fixtures(COMPONENT_FIXTURES, tmp_path)
 
     # Create workspace first
@@ -39,7 +39,7 @@ async def workspace_with_tasks(client, tmp_path: Path, auth_headers: dict[str, s
     ws_id = ws_resp.json()["id"]
 
     # COMPONENT_FIXTURES（包裹式）展平到 spec_root
-    spec_root = seed_spec_root(ws_id, COMPONENT_FIXTURES)
+    spec_root = seed_spec_root_fn(ws_id, COMPONENT_FIXTURES)
     # CHANGE_FIXTURES 覆盖到 spec_root/changes/
     changes_root = Path(spec_root) / "changes"
     changes_root.mkdir(parents=True, exist_ok=True)

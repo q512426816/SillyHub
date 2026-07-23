@@ -148,3 +148,22 @@ W2-W5 → W6（验收）
 - W1 抽取是相对 design 的补充（D-007），已标注需确认 ✓
 - 测试策略覆盖（桌面零回归 + 移动单测 + 集成）✓
 - ⚠️ execute 注意：W1 抽取严格保持行为不变（桌面测试守护）；移动竖屏适配 DetailDrawer 的 grid/Drawer wrapper
+
+## 11. 执行进度（execute）
+
+> 本次 resume（2026-07-23）推进到 W6，全部 Wave 完成。execute 完成，可进 verify。
+
+- **W1 桌面组件抽取 ✅（2026-07-23）**：抽 4 文件到 `@/components/ppm/milestone/`（`milestone-helpers.tsx` / `module-form-drawer.tsx` / `ps-plan-node-drawer.tsx` / `detail-drawer.tsx`）。采用**复制抽取**——page.tsx 保留内部定义（桌面零风险），抽取文件供移动端 import。typecheck 过 + 桌面 milestone-details 24 测试过（零回归）。
+  - ⚠️ 后续可选清理：page.tsx 删内部定义、改 import 抽取文件（单一来源），非移动端复用必须。
+- **W2 移动里程碑主页 ✅（2026-07-23）**：`app/m/ppm/milestone-details/page.tsx`（里程碑列表层 + 三层钻取骨架 + CRUD 复用 PsPlanNodeDrawer + readOnly + 导出，模块/明细层预留接口）+ `project-plans` 移动入口加「里程碑」跳转。typecheck 过。
+- **W3 明细层 + DetailDrawer 接通 ✅（2026-07-23）**：page.tsx details 层落地——明细卡片列表（变更版标识 + 状态/执行状态双徽标 + 主题/阶段/角色/工时/周期/执行人 PpmText）+ actions（详情 modeForStatus / 编辑 draft·rejected / 变更 done→changeInfo / 删除 Modal.confirm）+ 新建明细入口（readOnly 显隐）+ 钻取加载 listPsPlanNodeDetails + DetailDrawer 接通（mode 分发 + handleSubmit save/reject/change 流程 + 422/409 并发 reload + currentUserId 走 useSession）。typecheck 过 + 桌面 milestone-details·ImportModuleModal 24 测试过（零回归）。
+  - ⭐ **关键发现（影响 W4）**：W1 抽出的 DetailDrawer 内部已自包含 Timeline（流程履历 processColor 染色）+ 工作日联动（recomputeComplete + addWorkingDaysDate）+ 版本链（listPsPlanNodeDetailVersions）。即 plan 原 W4 的 Timeline/工作日/版本 三项**随 DetailDrawer 复用已一并落地**，移动端无需再单独实现。
+- **W4 审批流程 + Timeline + 工作日 + 版本链 ✅（2026-07-23，实质完成）**：原四项中 Timeline（履历 processColor 染色）/ 工作日联动（recomputeComplete + addWorkingDaysDate）/ 版本链（listPsPlanNodeDetailVersions）随 W1 抽出的 DetailDrawer 内置（见 W3 关键发现）；audit/approve/change/changeApprove 经 DetailDrawer onSubmit → handleDetailSubmit（save/reject/change + P0-8 透传）已通，移动列表暂无这些 mode 的显式入口（对齐桌面预留，线上少触达）。
+- **W5 模块层 + Excel 导入 + 权限 ✅（2026-07-23）**：复制抽取 ImportModuleModal 到 `components/ppm/milestone/import-module-modal.tsx`（桌面 page.tsx 保留原定义，零风险）；page.tsx 模块层落地——模块卡片列表（计划类型/模块名/工作量/周期/责任人 PpmText）+ actions（查明细钻取带 moduleId / 编辑 / 删除 Modal.confirm）+ headerActions（导入模块 + 新建模块，readOnly 显隐）+ 模块 CRUD（复用 ModuleFormDrawer，外层调 create/update/deletePlanNodeModule）+ Excel 导入（复用抽取的 ImportModuleModal 三步）。三级钻取闭环：nodes↔modules↔details（明细按 module_id 前端过滤 + 三级返回栈 + 标题随层切换）。权限块级（baseEditable/auditEditable/changeApproveEditable）随 DetailDrawer 内置，readOnly 总开关覆盖里程碑/模块/明细全部 CRUD。typecheck 过 + 桌面 milestone-details·ImportModuleModal 24 测试过（零回归）。
+- **W6 预留入口 + 单测 + lint/build 验收 ✅（2026-07-23）**：
+  - W6-T1 预留入口：audit/approve/change/changeApprove 经 `modeForStatus` 已在 `onItemPress` 接线（点明细卡片按 status 自动分发到对应 mode），DetailDrawer 内置各 mode 字段块，实质已覆盖（对齐桌面，线上少触达，无单独触发按钮）。
+  - W6-T2/T4 移动集成测试：新增 `app/m/ppm/milestone-details/__tests__/page.test.tsx`（5 用例：列表渲染 / readOnly 显隐 / 非模块→明细钻取 / 模块→模块层钻取 / mode 分发 draft→edit·done→view），mock `@/lib/ppm` + 重型子组件占位（DetailDrawer 锚定 data-mode 断言）。**5/5 全绿**。
+  - W6-T3 桌面零回归：milestone-details·ImportModuleModal **24 测试全绿**（W5 复制抽取后持续守护）。
+  - W6-T5：`pnpm typecheck` 过 + `pnpm lint` 过（无新增告警）+ `pnpm build` 生产构建绿（完整路由表）。
+- **全部 Wave 完成 ✅（2026-07-23）**：W1 桌面抽取 → W2 里程碑层 → W3 明细层 + DetailDrawer 8 mode → W4（实质并入 W3，DetailDrawer 内置 Timeline/工作日/版本链）→ W5 模块层 + Excel 导入 + 权限 → W6 验收。功能层 + 移动集成测试 + lint/build 全绿，桌面零回归。
+- **下一步**：进 **verify** 阶段（sillyspec run verify）对照 design + 模块文档做最终验收，然后 archive。

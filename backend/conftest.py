@@ -31,6 +31,10 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production-use-only")
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("SILLYSPEC_MASTER_KEY", "v1:" + "aa" * 32)
+# 测试环境把 bcrypt 降到允许的最小档位(4):rounds 只影响哈希计算成本,不影响哈希正确性。
+# 测试验证的是登录/刷新/权限流程,不验证密码强度。rounds=12 时每个需要认证态的测试
+# setup 要 ~0.3s 纯哈希,全量累积是分钟级;降到 4 后该项开销可忽略。
+os.environ.setdefault("AUTH_BCRYPT_ROUNDS", "4")
 
 # Set spec_data_root to a temp directory for tests (CI may not have /data permissions)
 _test_data_root = tempfile.gettempdir()
@@ -275,3 +279,13 @@ def seed_spec_root(ws_id: str, *src_dirs) -> str:
                 shutil.rmtree(target)
             shutil.copytree(src, target)
     return str(spec_root)
+
+
+# 以 fixture 形式导出,让测试通过依赖注入取到这个 helper,而不是 ``from conftest import``。
+# 原因:所有 ``conftest.py`` 共享同一个模块名 ``conftest``,本项目有 9 个,pytest 加载时
+# ``sys.modules['conftest']`` 互相覆盖——单进程下碰巧根 conftest 后加载才勉强可用,
+# pytest-xdist 多 worker 顺序变了就会 import 到错的 conftest 而失败。fixture 注入由 pytest
+# 按收集树解析,与 import 路径无关,是可靠获取根 helper 的方式。
+@pytest.fixture()
+def seed_spec_root_fn():
+    return seed_spec_root
