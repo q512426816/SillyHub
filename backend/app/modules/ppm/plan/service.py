@@ -2077,7 +2077,7 @@ class PlanService:
                 func.coalesce(PlanTask.work_load, PsPlanNodeDetail.plan_workload).label(
                     "work_load"
                 ),
-                PlanTask.user_name.label("user_name"),
+                User.display_name.label("user_name"),
                 func.coalesce(PlanTask.start_time, PsPlanNodeDetail.plan_begin_time).label(
                     "start_time"
                 ),
@@ -2098,6 +2098,7 @@ class PlanService:
                 PlanNodeModule.id == PsPlanNodeDetail.module_id,
             )
             .outerjoin(PlanTask, PlanTask.ps_plan_node_detail_id == PsPlanNodeDetail.id)
+            .outerjoin(User, User.id == PsPlanNodeDetail.execute_user_id)
             .where(
                 PsPlanNode.has_module.is_(True),
                 PsPlanNodeDetail.status != PlanNodeDetailStatus.ARCHIVED.value,
