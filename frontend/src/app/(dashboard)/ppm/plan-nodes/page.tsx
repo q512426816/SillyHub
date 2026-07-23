@@ -138,7 +138,7 @@ export default function PlanNodesPage() {
   };
 
   const columns: TableProps<PlanNode>["columns"] = [
-    { title: "编号", dataIndex: "no", key: "no", width: 70 },
+    { title: "编号", dataIndex: "no", key: "no", width: 70, align: "center" },
     {
       title: "总阶段",
       dataIndex: "overall_stage",

@@ -322,3 +322,11 @@ created_at: 2026-07-21T08:48:56
 根因：除 ppm-sub-table 的 dragSort 序号列（ql-010 已 align:center）外，其余序号列均默认左对齐，与居中的序号观感不一致。
 方案：统一给 6 处序号列加 `align: "center"`——milestone-details 主表序号 + 模块序号、ppm-project-plan-detail 序号、problem-list/task-plans/workbench 的 rowno 行序号。（ppm-sub-table dragSort 序号 ql-010 已居中，无需改。）
 结果：①前端 typecheck/lint 0 error；②milestone + plan-nodes 测试通过；③待 commit+push+重建 frontend 后用户验证（各页序号列表头与数字同居中）。
+## ql-20260723-012-eb04 | 2026-07-23 14:11:34 | /ppm/plan-nodes 主表「编号」(no)列补居中(ql-011 漏改)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/plan-nodes/page.tsx（主表「编号」列加 align:center）
+需求：/ppm/plan-nodes 子母表的序号也没居中（用户反馈 ql-011 漏改）。
+根因：plan-nodes 主表的序号列标题是「编号」（`{ title: "编号", dataIndex: "no", width: 70 }`），不是「序号」，故 ql-011 用 `grep title:"序号"` 扫描时漏掉了它，未加 align。
+方案：该「编号」列加 `align: "center"`，与其余序号列一致。纯样式。
+结果：①前端 typecheck/lint 0 error；②待 commit+push+重建 frontend 后用户验证（plan-nodes 主表编号列表头与数字同居中）。
