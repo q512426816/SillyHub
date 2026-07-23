@@ -17,6 +17,7 @@
  * 复用风格:frontend/src/components/ppm-resource-table.tsx (AntD Table + shadcn Button)
  */
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { HolderOutlined } from "@ant-design/icons";
 import {
   Button as AntButton,
   Form,
@@ -346,6 +347,22 @@ function EditableSubTable<T extends PpmSubTableRow>(
           <div className="text-center">{index != null ? index + 1 : "—"}</div>
         ),
       });
+      // 最左拖拽手柄列:只有手柄单元格 draggable(避免整行 draggable 与可编辑
+      // Input 冲突致拖不动)。onDragStart 记录起始 index,行(onRow)作 drop 目标。
+      result.unshift({
+        title: "",
+        key: "__drag_handle",
+        width: 40,
+        align: "center",
+        render: () => <HolderOutlined className="cursor-grab text-muted-foreground" />,
+        onCell: (_row: T, index?: number) =>
+          ({
+            draggable: true,
+            onDragStart: () => {
+              dragIndex.current = index ?? null;
+            },
+          }) as unknown as Record<string, unknown>,
+      });
     }
     if (canAddRemove) {
       result.push({
@@ -481,10 +498,7 @@ function EditableSubTable<T extends PpmSubTableRow>(
           onRow={
             dragSort
               ? (_record: T, index?: number) => ({
-                  draggable: true,
-                  onDragStart: () => {
-                    dragIndex.current = index ?? null;
-                  },
+                  // 手柄单元格已 draggable + onDragStart;行仅作 drop 目标
                   onDragOver: (e) => {
                     e.preventDefault();
                   },

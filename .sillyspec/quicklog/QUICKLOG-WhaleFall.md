@@ -339,3 +339,11 @@ created_at: 2026-07-21T08:48:56
 根因：PpmSubTable EditableSubTable 的自定义 `components.body.cell` 两个分支都渲染 `<td>{children}</td>` / `<td>{control}</td>` 时**丢了 `...rest`**，而 antd 的列 align 样式（textAlign / ant-table-cell-align-center 类）正是经 rest 传给 td 的 —— 自定义 cell 把它丢了，导致所有列 align 失效：序号列虽设了 `align:"center"`（ql-010），表头居中、数字却左对齐。
 方案：①cell 组件把 onCell 注入的自定义 props（colDef/record/handleFieldChange/rowKey）解构出来，剩余 antd td props（含 align）spread 回 `<td {...tdProps}>`，恢复 align —— 根因修复，子表所有列 align 重新生效；②序号 render 再包一层 `<div className="text-center">` 双保险，确保即使 antd align 机制有差异也居中。
 结果：①前端 typecheck/lint 0 error；②milestone-details 24 passed（PpmSubTable 共享组件无回归）；③待 commit+push+重建 frontend 后用户验证（模板明细子表序号表头与数字同居中）。注：本次 quick 会话因未带 `--change` 复用了上一任务(编号, ql-012)的会话导致 ql 撞号，已手动改用 ql-013 记录并 reset 该会话。
+## ql-20260723-014-bd20 | 2026-07-23 15:11:32 | /ppm/plan-nodes 拖拽手柄列 + 拖拽后保存排序顺序
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-sub-table.tsx（dragSort 加最左拖拽手柄列 HolderOutlined；onRow 去 draggable 仅留 drop 目标）
+需求：/ppm/plan-nodes 模板明细子表拖拽排序后点击保存要更新排序后的顺序（用户说「现在没保存逻辑」）；并在拖拽表格最左侧加一列拖拽符号，现在看不出可拖拽。
+根因：①save 逻辑其实已在（ql-010：toUpdate 检测 no 变化 + 更新/创建体含 no），「没保存」的真因是 ql-010 用「整行 draggable」+ onRow，而行内全是可编辑 Input，从单元格拖动被输入框拦截 → 拖不动 → 无重排 → 无可保存；②没有拖拽手柄，用户看不出可拖。
+方案：PpmSubTable dragSort 加**最左拖拽手柄列**（`HolderOutlined` 图标，`onCell` 仅手柄单元格 `draggable` + `onDragStart` 记录起始 index），`onRow` 去掉 `draggable`/`onDragStart`（移到手柄），仅保留 `onDragOver`(preventDefault)/`onDrop`(handleDrop) 作 drop 目标。这样只有手柄可拖（不与 Input 冲突），拖动→重排→no 重算→点「保存」持久化（ql-010 既有逻辑）。
+结果：①前端 typecheck/lint 0 error；②milestone-details 24 passed（PpmSubTable 共享组件无回归）；③待 commit+push+重建 frontend 后用户验证（明细子表最左有手柄图标、拖动可重排、点保存顺序持久化）。
