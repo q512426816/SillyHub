@@ -1742,13 +1742,17 @@ class SessionService:
             .select_from(AgentRunLog)
             .join(run_anchor, run_anchor.c.run_id == AgentRunLog.run_id)
             .order_by(
-                run_anchor.c.anchor_ts.asc(),
-                AgentRunLog.timestamp.asc(),
-                AgentRunLog.id.asc(),
+                run_anchor.c.anchor_ts.desc(),
+                AgentRunLog.timestamp.desc(),
+                AgentRunLog.id.desc(),
             )
             # 性能优化 Wave 2 / P3-3:加 limit 防止长会话(N runs × M logs)全量
-            # 加载 TEXT 大列(content_redacted)。order_by anchor/timestamp asc
-            # 保持跨 run 时间序,limit 取最早 N 条;正常会话(<5000 行)全量可见。
+            # 加载 TEXT 大列(content_redacted)。取**最新** N 条(anchor/timestamp/
+            # id desc),再 reverse 还原正序展示(同 run 连续、跨 run 按起始序)——
+            # 会话详情关心近期活动,超长会话丢弃的是早期而非最近;正常会话(<5000
+            # 行)全量可见。
             .limit(limit)
         )
-        return list((await self._session.execute(stmt)).scalars().all())
+        rows = list((await self._session.execute(stmt)).scalars().all())
+        rows.reverse()
+        return rows

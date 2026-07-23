@@ -766,7 +766,7 @@ class AgentService:
         stmt = (
             select(AgentRunLog)
             .where(col(AgentRunLog.run_id) == run_id)
-            .order_by(col(AgentRunLog.timestamp))
+            .order_by(col(AgentRunLog.timestamp).desc(), col(AgentRunLog.id).desc())
         )
         # 2026-07-05-agent-log-type-tags task-05 / FR-07 / D-003@v1：
         # ?tool_kind= 逗号分隔多选，仅筛 channel=tool_call 行（走
@@ -779,10 +779,13 @@ class AgentService:
                     col(AgentRunLog.tool_kind).in_(kinds),
                 )
         # 性能优化 Wave 2 / P3-1:加 limit 防止超长 run 全量加载 TEXT 大列
-        # (content_redacted)。order_by timestamp asc + 前端 SSE after=lastLogId
-        # 游标衔接,正常 run(<5000 行)全量可见,极端 run 保护性截断早期行。
+        # (content_redacted)。取**最新** N 条(timestamp/id desc),再 reverse
+        # 还原正序展示——日志查看关心尾部(最终结果/报错),超长 run 丢弃的是
+        # 早期而非结局。(router 暂未暴露 after 游标,N 条即上限,前端不翻页。)
         stmt = stmt.limit(limit)
-        return list((await self._session.execute(stmt)).scalars().all())
+        rows = list((await self._session.execute(stmt)).scalars().all())
+        rows.reverse()
+        return rows
 
     async def list_workspace_active_sessions(
         self,
