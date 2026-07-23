@@ -335,14 +335,16 @@ function EditableSubTable<T extends PpmSubTableRow>(
       };
     });
     if (dragSort) {
-      // 前置「序号」列:显示行序(index+1),与拖拽顺序一致
+      // 前置「序号」列:显示行序(index+1),与拖拽顺序一致;居中(自定义 cell
+      // 可能丢 align,render 内再包一层 text-center 双保险)。
       result.unshift({
         title: "序号",
         key: "__sub_no",
         width: 64,
         align: "center",
-        render: (_v: unknown, _row: T, index?: number) =>
-          index != null ? index + 1 : "—",
+        render: (_v: unknown, _row: T, index?: number) => (
+          <div className="text-center">{index != null ? index + 1 : "—"}</div>
+        ),
       });
     }
     if (canAddRemove) {
@@ -374,20 +376,28 @@ function EditableSubTable<T extends PpmSubTableRow>(
     rowKey,
   ]);
 
-  // 自定义 components:把 onCell 注入的 props 透传给可编辑单元格
+  // 自定义 components:把 onCell 注入的 props 透传给可编辑单元格。
+  // 注意:onCell 注入的自定义 props(colDef/record/...)需解构出来,剩余 antd
+  // td props(含 align 的 textAlign/className)spread 回 <td>,否则列 align 失效。
   const components = {
     body: {
       cell: ({ children, ...rest }: { children?: ReactNode } & Record<string, unknown>) => {
-        const colDef = rest.colDef as PpmSubEditableColumn<T> | undefined;
-        const record = rest.record as T | undefined;
-        const handleFieldChangeFn = rest.handleFieldChange as
-          | ((name: string, key: string, value: unknown) => void)
-          | undefined;
-        const rowKeyFn = rest.rowKey as ((row: T) => string) | undefined;
+        const {
+          colDef,
+          record,
+          handleFieldChange: handleFieldChangeFn,
+          rowKey: rowKeyFn,
+          ...tdProps
+        } = rest as {
+          colDef?: PpmSubEditableColumn<T>;
+          record?: T;
+          handleFieldChange?: (name: string, key: string, value: unknown) => void;
+          rowKey?: (row: T) => string;
+        } & Record<string, unknown>;
 
-        // 非可编辑列(无 colDef): 直接渲染 children
+        // 非可编辑列(无 colDef): 直接渲染 children(保留 antd td props 如 align)
         if (!colDef || !record || !handleFieldChangeFn || !rowKeyFn) {
-          return <td>{children}</td>;
+          return <td {...tdProps}>{children}</td>;
         }
 
         const key = rowKeyFn(record);
@@ -442,7 +452,7 @@ function EditableSubTable<T extends PpmSubTableRow>(
           );
         }
 
-        return <td>{control}</td>;
+        return <td {...tdProps}>{control}</td>;
       },
     },
   };

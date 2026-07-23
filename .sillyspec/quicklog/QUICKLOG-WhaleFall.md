@@ -330,3 +330,12 @@ created_at: 2026-07-21T08:48:56
 根因：plan-nodes 主表的序号列标题是「编号」（`{ title: "编号", dataIndex: "no", width: 70 }`），不是「序号」，故 ql-011 用 `grep title:"序号"` 扫描时漏掉了它，未加 align。
 方案：该「编号」列加 `align: "center"`，与其余序号列一致。纯样式。
 结果：①前端 typecheck/lint 0 error；②待 commit+push+重建 frontend 后用户验证（plan-nodes 主表编号列表头与数字同居中）。
+
+## ql-20260723-013-9c4d | 2026-07-23 14:50:00 | /ppm/plan-nodes 模板明细子表序号居中(自定义 cell 丢 align 根因修复)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-sub-table.tsx（EditableSubTable 自定义 cell 解构自定义 props 后 spread antd td props 恢复 align；序号 render 包 text-center 双保险）
+需求：/ppm/plan-nodes 模板明细子表的序号也居中（用户反馈 ql-011/012 后仍未居中）。
+根因：PpmSubTable EditableSubTable 的自定义 `components.body.cell` 两个分支都渲染 `<td>{children}</td>` / `<td>{control}</td>` 时**丢了 `...rest`**，而 antd 的列 align 样式（textAlign / ant-table-cell-align-center 类）正是经 rest 传给 td 的 —— 自定义 cell 把它丢了，导致所有列 align 失效：序号列虽设了 `align:"center"`（ql-010），表头居中、数字却左对齐。
+方案：①cell 组件把 onCell 注入的自定义 props（colDef/record/handleFieldChange/rowKey）解构出来，剩余 antd td props（含 align）spread 回 `<td {...tdProps}>`，恢复 align —— 根因修复，子表所有列 align 重新生效；②序号 render 再包一层 `<div className="text-center">` 双保险，确保即使 antd align 机制有差异也居中。
+结果：①前端 typecheck/lint 0 error；②milestone-details 24 passed（PpmSubTable 共享组件无回归）；③待 commit+push+重建 frontend 后用户验证（模板明细子表序号表头与数字同居中）。注：本次 quick 会话因未带 `--change` 复用了上一任务(编号, ql-012)的会话导致 ql 撞号，已手动改用 ql-013 记录并 reset 该会话。
