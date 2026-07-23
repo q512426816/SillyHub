@@ -138,7 +138,7 @@ export default function PlanNodesPage() {
   };
 
   const columns: TableProps<PlanNode>["columns"] = [
-    { title: "编号", dataIndex: "no", key: "no", width: 70 },
+    { title: "编号", dataIndex: "no", key: "no", width: 70, align: "center" },
     {
       title: "总阶段",
       dataIndex: "overall_stage",
@@ -300,6 +300,7 @@ interface DetailDraftRow extends PpmSubTableRow {
   id: string; // 已存在=真实 id;新增=`new-${n}` 临时键
   plan_node_id?: string | null;
   module_id?: string | null;
+  no: string | null; // 序号(拖拽排序后按 index+1 重算,保存时持久化)
   detailed_stage: string | null;
   task_theme: string | null;
   task_description: string | null;
@@ -354,6 +355,7 @@ function DetailsSubTable({
         id: d.id,
         plan_node_id: d.plan_node_id,
         module_id: d.module_id,
+        no: d.no,
         detailed_stage: d.detailed_stage,
         task_theme: d.task_theme,
         task_description: d.task_description,
@@ -384,6 +386,7 @@ function DetailsSubTable({
       plan_node_id: node.id,
       // 三层挂 moduleId;二层为 null (归属由后端 plan_node_id 决定)
       module_id: moduleId ?? null,
+      no: null,
       detailed_stage: null,
       task_theme: null,
       task_description: null,
@@ -416,13 +419,14 @@ function DetailsSubTable({
 
       // 1) 删除:原列表里有,draft 里没有的
       const toDelete = original.filter((r) => !draftIds.has(r.id));
-      // 2) 更新:有真实 id 且字段有变 (行内编辑不改 module_id 归属)
+      // 2) 更新:有真实 id 且字段有变(含序号 no —— 拖拽改顺序也要持久化)
       const toUpdate = draftRows.filter((r) => {
         if (r.id.startsWith("new-")) return false;
         const o = origMap.get(r.id);
         if (!o) return false;
-        return DETAIL_COLUMNS.some(
-          (c) => (o[c.name] ?? null) !== (r[c.name] ?? null),
+        return (
+          DETAIL_COLUMNS.some((c) => (o[c.name] ?? null) !== (r[c.name] ?? null)) ||
+          (o.no ?? null) !== (r.no ?? null)
         );
       });
       // 3) 新增:临时 id
@@ -433,6 +437,7 @@ function DetailsSubTable({
       }
       for (const r of toUpdate) {
         const body: PlanNodeDetailUpdate = {
+          no: r.no ?? null,
           detailed_stage: r.detailed_stage ?? null,
           task_theme: r.task_theme ?? null,
           task_description: r.task_description ?? null,
@@ -448,6 +453,7 @@ function DetailsSubTable({
           plan_node_id: node.id,
           // 三层挂 moduleId;二层为 null (design §5.1)
           module_id: moduleId ?? null,
+          no: r.no ?? null,
           detailed_stage: r.detailed_stage ?? null,
           task_theme: r.task_theme ?? null,
           task_description: r.task_description ?? null,
@@ -496,7 +502,8 @@ function DetailsSubTable({
         onChange={setDraftRows}
         newRowFactory={newRowFactory}
         canAddRemove
-        tableProps={{ loading, scroll: { x: 790 } }}
+        dragSort
+        tableProps={{ loading, scroll: { x: 860 } }}
       />
       <p className="mt-1 text-[11px] text-muted-foreground">
         整表行内编辑,修改后点击「保存」批量提交。

@@ -142,6 +142,7 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
       title: "序号",
       key: "no",
       width: 50,
+      align: "center",
       render: (_v: unknown, _t: PlanTask, idx: number) => idx + 1,
     },
     {

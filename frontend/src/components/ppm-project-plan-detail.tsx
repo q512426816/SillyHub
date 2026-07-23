@@ -224,7 +224,7 @@ function NodesSection({ nodes }: { nodes: PsPlanNodeWithDetail[] }) {
 
   const nodeColumns: PpmSubMasterColumns<PsPlanNodeWithDetail> = [
     { title: "里程碑", dataIndex: "overall_stage", key: "overall_stage" },
-    { title: "序号", dataIndex: "no", key: "no", width: 80 },
+    { title: "序号", dataIndex: "no", key: "no", width: 80, align: "center" },
     {
       title: "状态",
       dataIndex: "status",

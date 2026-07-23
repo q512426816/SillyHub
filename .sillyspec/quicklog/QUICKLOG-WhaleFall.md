@@ -306,3 +306,44 @@ created_at: 2026-07-21T08:48:56
 根因：①里程碑/明细的 no 是 String 列、按字符串排序，10 条以上出现 1/10/2 错序；②模块（第二层）根本没有序号字段，按 created_at 排。
 方案：①迁移 202607231200（down=202607222330）给 ppm_plan_node_module 加 nullable `no` 列 + model/schema 同步；②前端 types + 模块表单（ModuleFormDrawer）加序号输入 + 模块表加序号列 + create/edit payload 带 no；③service 加 `_no_sort_key`（纯数值优先、非数字文本居中、空/None 最后），三层 list（list_ps_plan_nodes_by_plan / list_modules_by_node / list_details_by_node）及导出明细批量取全部改 Python 数值排序（修字符串错序）；④导出模块子标题带序号（「模块: 1 前端模块」）。
 结果：①ruff/mypy 0 error；②前端 typecheck/lint 0 error、milestone 24 passed；③plan+export 套件 173 passed 0 errors（含序号排序纯测试）；④迁移链 202607222330→202607231200 head 正常；⑤待 commit+push+重建 backend+frontend 后用户验证（三层按序号 1/2/10 排序、模块表单可填序号）。
+## ql-20260723-010-0f89 | 2026-07-23 13:34:44 | /ppm/plan-nodes 模板明细子表加序号列 + 拖动排序(序号按拖动顺序自动更新)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-sub-table.tsx（PpmSubTable 加 dragSort 可选 prop + 序号列 + onRow HTML5 拖拽 + drop 重算 no）+ frontend/src/app/(dashboard)/ppm/plan-nodes/page.tsx（DetailDraftRow 加 no、load/newRow 带入、PpmSubTable 启用 dragSort、handleSave 持久化 no）
+需求：/ppm/plan-nodes 的模板明细子表增加序号列，并且子表可以拖动排序，序号按拖动排序的顺序自动更新。
+根因：模板明细子表（DetailsSubTable，用 PpmSubTable editable 模式）只有字段列、无序号列；行不可拖拽，无法调整明细顺序。
+方案：①PpmSubTable 加 `dragSort?: boolean` 可选 prop（默认 false，不影响其它展开/编辑用法）：启用时在 mergedColumns 前置「序号」列（render `index+1`，与拖拽顺序一致），并通过 antd Table `onRow(record, index)` 注入 HTML5 原生拖拽（draggable + onDragStart 记录起始 index + onDragOver preventDefault + onDrop 重排）；drop 后重排 rows 并按新顺序重算每行 `no`（= index+1）经 onChange 回写。②plan-nodes：DetailDraftRow 加 `no`，load 读 `d.no`、newRowFactory 给 null；PpmSubTable 启用 `dragSort`；handleSave 更新/创建体含 `no`、toUpdate 检测 `no` 变化（拖动改顺序也触发持久化）。纯前端——后端 PlanNodeDetail.no 字段 + list 数值排序（ql-009）已就绪。
+结果：①前端 typecheck/lint 0 error；②plan-nodes + milestone-details 24 passed（PpmSubTable 共享组件对展开模式无回归）；③待 commit+push+重建 frontend 后用户验证（明细子表有序号列、可拖拽行、拖动后序号按新顺序刷新、保存后顺序持久化）。
+## ql-20260723-011-737b | 2026-07-23 13:55:54 | ppm 各页「序号」列统一居中对齐
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（主表/模块两处序号）+ frontend/src/components/ppm-project-plan-detail.tsx（序号）+ frontend/src/app/(dashboard)/ppm/problem-list/page.tsx（rowno 序号）+ frontend/src/app/(dashboard)/ppm/task-plans/page.tsx（rowno 序号）+ frontend/src/app/(dashboard)/ppm/workbench/_components/workbench-task-table.tsx（rowno 序号）
+需求：序号列居中对齐。
+根因：除 ppm-sub-table 的 dragSort 序号列（ql-010 已 align:center）外，其余序号列均默认左对齐，与居中的序号观感不一致。
+方案：统一给 6 处序号列加 `align: "center"`——milestone-details 主表序号 + 模块序号、ppm-project-plan-detail 序号、problem-list/task-plans/workbench 的 rowno 行序号。（ppm-sub-table dragSort 序号 ql-010 已居中，无需改。）
+结果：①前端 typecheck/lint 0 error；②milestone + plan-nodes 测试通过；③待 commit+push+重建 frontend 后用户验证（各页序号列表头与数字同居中）。
+## ql-20260723-012-eb04 | 2026-07-23 14:11:34 | /ppm/plan-nodes 主表「编号」(no)列补居中(ql-011 漏改)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/plan-nodes/page.tsx（主表「编号」列加 align:center）
+需求：/ppm/plan-nodes 子母表的序号也没居中（用户反馈 ql-011 漏改）。
+根因：plan-nodes 主表的序号列标题是「编号」（`{ title: "编号", dataIndex: "no", width: 70 }`），不是「序号」，故 ql-011 用 `grep title:"序号"` 扫描时漏掉了它，未加 align。
+方案：该「编号」列加 `align: "center"`，与其余序号列一致。纯样式。
+结果：①前端 typecheck/lint 0 error；②待 commit+push+重建 frontend 后用户验证（plan-nodes 主表编号列表头与数字同居中）。
+
+## ql-20260723-013-9c4d | 2026-07-23 14:50:00 | /ppm/plan-nodes 模板明细子表序号居中(自定义 cell 丢 align 根因修复)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-sub-table.tsx（EditableSubTable 自定义 cell 解构自定义 props 后 spread antd td props 恢复 align；序号 render 包 text-center 双保险）
+需求：/ppm/plan-nodes 模板明细子表的序号也居中（用户反馈 ql-011/012 后仍未居中）。
+根因：PpmSubTable EditableSubTable 的自定义 `components.body.cell` 两个分支都渲染 `<td>{children}</td>` / `<td>{control}</td>` 时**丢了 `...rest`**，而 antd 的列 align 样式（textAlign / ant-table-cell-align-center 类）正是经 rest 传给 td 的 —— 自定义 cell 把它丢了，导致所有列 align 失效：序号列虽设了 `align:"center"`（ql-010），表头居中、数字却左对齐。
+方案：①cell 组件把 onCell 注入的自定义 props（colDef/record/handleFieldChange/rowKey）解构出来，剩余 antd td props（含 align）spread 回 `<td {...tdProps}>`，恢复 align —— 根因修复，子表所有列 align 重新生效；②序号 render 再包一层 `<div className="text-center">` 双保险，确保即使 antd align 机制有差异也居中。
+结果：①前端 typecheck/lint 0 error；②milestone-details 24 passed（PpmSubTable 共享组件无回归）；③待 commit+push+重建 frontend 后用户验证（模板明细子表序号表头与数字同居中）。注：本次 quick 会话因未带 `--change` 复用了上一任务(编号, ql-012)的会话导致 ql 撞号，已手动改用 ql-013 记录并 reset 该会话。
+## ql-20260723-014-bd20 | 2026-07-23 15:11:32 | /ppm/plan-nodes 拖拽手柄列 + 拖拽后保存排序顺序
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-sub-table.tsx（dragSort 加最左拖拽手柄列 HolderOutlined；onRow 去 draggable 仅留 drop 目标）
+需求：/ppm/plan-nodes 模板明细子表拖拽排序后点击保存要更新排序后的顺序（用户说「现在没保存逻辑」）；并在拖拽表格最左侧加一列拖拽符号，现在看不出可拖拽。
+根因：①save 逻辑其实已在（ql-010：toUpdate 检测 no 变化 + 更新/创建体含 no），「没保存」的真因是 ql-010 用「整行 draggable」+ onRow，而行内全是可编辑 Input，从单元格拖动被输入框拦截 → 拖不动 → 无重排 → 无可保存；②没有拖拽手柄，用户看不出可拖。
+方案：PpmSubTable dragSort 加**最左拖拽手柄列**（`HolderOutlined` 图标，`onCell` 仅手柄单元格 `draggable` + `onDragStart` 记录起始 index），`onRow` 去掉 `draggable`/`onDragStart`（移到手柄），仅保留 `onDragOver`(preventDefault)/`onDrop`(handleDrop) 作 drop 目标。这样只有手柄可拖（不与 Input 冲突），拖动→重排→no 重算→点「保存」持久化（ql-010 既有逻辑）。
+结果：①前端 typecheck/lint 0 error；②milestone-details 24 passed（PpmSubTable 共享组件无回归）；③待 commit+push+重建 frontend 后用户验证（明细子表最左有手柄图标、拖动可重排、点保存顺序持久化）。

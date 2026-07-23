@@ -16,7 +16,8 @@
  *          /design.md §7
  * 复用风格:frontend/src/components/ppm-resource-table.tsx (AntD Table + shadcn Button)
  */
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { HolderOutlined } from "@ant-design/icons";
 import {
   Button as AntButton,
   Form,
@@ -111,6 +112,12 @@ export interface PpmSubTableProps<T extends PpmSubTableRow> {
   newRowFactory?: () => T;
   /** 是否允许新增/删除行(默认 true)。 */
   canAddRemove?: boolean;
+  /**
+   * 是否启用拖拽排序(行内编辑模式,默认 false)。启用后:
+   * 前置「序号」列(显示行序 = index+1),整行可拖拽;拖拽后重排并按新顺序
+   * 重算每行 `no`(= index+1)经 onChange 回写。仅用于需要序号排序的场景。
+   */
+  dragSort?: boolean;
 
   /** 额外 AntD Table 属性透传(分页 / loading / size 等)。 */
   tableProps?: Partial<TableProps<T>>;
@@ -133,6 +140,7 @@ export function PpmSubTable<T extends PpmSubTableRow>(
     onChange,
     newRowFactory,
     canAddRemove = true,
+    dragSort = false,
     tableProps,
   } = props;
 
@@ -188,6 +196,7 @@ export function PpmSubTable<T extends PpmSubTableRow>(
         onChange={onChange}
         newRowFactory={newRowFactory}
         canAddRemove={canAddRemove}
+        dragSort={dragSort}
         tableColumns={tableColumns}
         tableProps={tableProps}
       />
@@ -225,6 +234,7 @@ interface EditableSubTableProps<T extends PpmSubTableRow> {
   onChange?: (rows: T[]) => void;
   newRowFactory?: () => T;
   canAddRemove: boolean;
+  dragSort: boolean;
   tableColumns: TableColumnsType<T>;
   tableProps?: Partial<TableProps<T>>;
 }
@@ -240,11 +250,29 @@ function EditableSubTable<T extends PpmSubTableRow>(
     onChange,
     newRowFactory,
     canAddRemove,
+    dragSort,
     tableColumns,
     tableProps,
   } = props;
 
   const [form] = Form.useForm();
+
+  // 拖拽排序:记录拖拽起始行下标,drop 时重排并按新顺序重算 no(= index+1)。
+  const dragIndex = useRef<number | null>(null);
+  const handleDrop = useCallback(
+    (dropIndex: number) => {
+      const dragIdx = dragIndex.current;
+      dragIndex.current = null;
+      if (dragIdx == null || dragIdx === dropIndex) return;
+      const next = [...rows];
+      const [moved] = next.splice(dragIdx, 1);
+      if (!moved) return;
+      next.splice(dropIndex, 0, moved);
+      // 按新顺序重算序号(行需有 no 字段;仅 dragSort 启用方使用)
+      onChange?.(next.map((r, i) => ({ ...r, no: String(i + 1) })) as T[]);
+    },
+    [rows, onChange],
+  );
 
   // 把整张表数据塞进 Form,字段名 = name__rowId
   const formValues = useMemo(() => {
@@ -307,6 +335,35 @@ function EditableSubTable<T extends PpmSubTableRow>(
         } as unknown as Record<string, unknown>),
       };
     });
+    if (dragSort) {
+      // 前置「序号」列:显示行序(index+1),与拖拽顺序一致;居中(自定义 cell
+      // 可能丢 align,render 内再包一层 text-center 双保险)。
+      result.unshift({
+        title: "序号",
+        key: "__sub_no",
+        width: 64,
+        align: "center",
+        render: (_v: unknown, _row: T, index?: number) => (
+          <div className="text-center">{index != null ? index + 1 : "—"}</div>
+        ),
+      });
+      // 最左拖拽手柄列:只有手柄单元格 draggable(避免整行 draggable 与可编辑
+      // Input 冲突致拖不动)。onDragStart 记录起始 index,行(onRow)作 drop 目标。
+      result.unshift({
+        title: "",
+        key: "__drag_handle",
+        width: 40,
+        align: "center",
+        render: () => <HolderOutlined className="cursor-grab text-muted-foreground" />,
+        onCell: (_row: T, index?: number) =>
+          ({
+            draggable: true,
+            onDragStart: () => {
+              dragIndex.current = index ?? null;
+            },
+          }) as unknown as Record<string, unknown>,
+      });
+    }
     if (canAddRemove) {
       result.push({
         title: "操作",
@@ -326,22 +383,38 @@ function EditableSubTable<T extends PpmSubTableRow>(
       });
     }
     return result;
-  }, [tableColumns, columns, canAddRemove, handleRemoveRow, handleFieldChange, rowKey]);
+  }, [
+    tableColumns,
+    columns,
+    canAddRemove,
+    dragSort,
+    handleRemoveRow,
+    handleFieldChange,
+    rowKey,
+  ]);
 
-  // 自定义 components:把 onCell 注入的 props 透传给可编辑单元格
+  // 自定义 components:把 onCell 注入的 props 透传给可编辑单元格。
+  // 注意:onCell 注入的自定义 props(colDef/record/...)需解构出来,剩余 antd
+  // td props(含 align 的 textAlign/className)spread 回 <td>,否则列 align 失效。
   const components = {
     body: {
       cell: ({ children, ...rest }: { children?: ReactNode } & Record<string, unknown>) => {
-        const colDef = rest.colDef as PpmSubEditableColumn<T> | undefined;
-        const record = rest.record as T | undefined;
-        const handleFieldChangeFn = rest.handleFieldChange as
-          | ((name: string, key: string, value: unknown) => void)
-          | undefined;
-        const rowKeyFn = rest.rowKey as ((row: T) => string) | undefined;
+        const {
+          colDef,
+          record,
+          handleFieldChange: handleFieldChangeFn,
+          rowKey: rowKeyFn,
+          ...tdProps
+        } = rest as {
+          colDef?: PpmSubEditableColumn<T>;
+          record?: T;
+          handleFieldChange?: (name: string, key: string, value: unknown) => void;
+          rowKey?: (row: T) => string;
+        } & Record<string, unknown>;
 
-        // 非可编辑列(无 colDef): 直接渲染 children
+        // 非可编辑列(无 colDef): 直接渲染 children(保留 antd td props 如 align)
         if (!colDef || !record || !handleFieldChangeFn || !rowKeyFn) {
-          return <td>{children}</td>;
+          return <td {...tdProps}>{children}</td>;
         }
 
         const key = rowKeyFn(record);
@@ -396,7 +469,7 @@ function EditableSubTable<T extends PpmSubTableRow>(
           );
         }
 
-        return <td>{control}</td>;
+        return <td {...tdProps}>{control}</td>;
       },
     },
   };
@@ -422,6 +495,19 @@ function EditableSubTable<T extends PpmSubTableRow>(
           size="small"
           scroll={{ x: "max-content" }}
           pagination={false}
+          onRow={
+            dragSort
+              ? (_record: T, index?: number) => ({
+                  // 手柄单元格已 draggable + onDragStart;行仅作 drop 目标
+                  onDragOver: (e) => {
+                    e.preventDefault();
+                  },
+                  onDrop: () => {
+                    if (index != null) handleDrop(index);
+                  },
+                })
+              : undefined
+          }
           {...tableProps}
         />
       </Form>
