@@ -234,3 +234,11 @@ created_at: 2026-07-21T08:48:56
 根因：之前明细表固定失败，主因是多列无固定宽 → 表格不横向溢出 → 不滚动 → sticky 无处钉（叠加 ppm-striped-table/去 scroll 等乱改放大了问题），并非纯嵌套所致；主表/模块表（同样 scroll.x）能生效反证只要强制溢出，嵌套表 fixed 也可工作。
 方案：照搬已生效主表改法——①明细操作列加 `fixed:"right"` + `onCell card`；②给 auto 列加固定宽（明细阶段 140 / 任务主题 160 / 角色 100 / 计划工时 90 / 状态 100，合计 ~1620px 强制溢出 → sticky 有处钉）；③去 `className="overflow-visible"`（对齐主表/PpmResourceTable）。保留 `scroll x max-content` + 手动斑马纹。与主表/模块表改法完全一致。
 结果：①前端 typecheck 0 error；②lint 0 error；③milestone-details 24 passed；④待 commit+push+重建 frontend 后用户验证（明细表横向滚动时操作列钉右）。若仍不钉，则确属嵌套限制，需把明细从嵌套展开改为独立面板。
+## ql-20260723-001-7a2d | 2026-07-23 08:42:03 | /ppm/milestone-details 明细子表【任务描述】列长内容撑宽修复
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（DetailLevelTable 任务描述列 render 改为受限 truncate 容器）
+需求：明细表【任务描述】列宽度仍是自适应——内容过长会整段展示、把列撑得很宽，要求截断固定在 250。
+根因：明细表用 `scroll.x="max-content"`，antd 按内容计算列宽；任务描述列虽有 `width:250 + ellipsis:true`，但 max-content 会被长文本撑开列宽、ellipsis 随之失效，故列自适应变宽、内容全显。
+方案：任务描述 `render` 由直出文本改为受限宽度 truncate 容器——`<div className="truncate" title={v} style={{maxWidth:220}}>`（truncate=overflow:hidden+text-overflow:ellipsis+white-space:nowrap），强制长文本截断在 220px 内、`title` 悬浮看全文，不再受 max-content 撑开。列 `width:250 + ellipsis:true` 保留作兜底。
+结果：①前端 typecheck 0 error；②lint 0 error；③milestone-details 24 passed；④待 commit+push+重建 frontend 后用户验证（任务描述列固定 ~250、长文本截断显 …）。

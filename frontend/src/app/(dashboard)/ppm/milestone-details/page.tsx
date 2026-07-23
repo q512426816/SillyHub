@@ -1776,7 +1776,17 @@ function DetailLevelTable({
         key: "task_description",
         width: 250,
         ellipsis: true,
-        render: (v: string | null) => v ?? "—",
+        render: (v: string | null) => (
+          // scroll.x=max-content 下 antd 按内容算列宽会撑开,ellipsis 失效;
+          // 用受限宽度 truncate 容器强制截断在 250 内,title 悬浮看全文。
+          <div
+            className="truncate"
+            title={v ?? undefined}
+            style={{ maxWidth: 220 }}
+          >
+            {v ?? "—"}
+          </div>
+        ),
       },
       {
         title: "角色",
