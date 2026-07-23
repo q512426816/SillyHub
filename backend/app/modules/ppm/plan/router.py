@@ -900,25 +900,204 @@ async def export_weekly_plan(
     user: AuthUser,
     req: WeeklyPlanListReqDep,
 ) -> Any:
-    """导出项目计划 Excel(按项目分组,grouped_report_to_workbook)。"""
+    """导出项目计划 Excel(精确复制模板样式:标题行+两级合并表头+数据行合并)。"""
     rows = await PlanService(session).list_weekly_plan_for_export(req)
-    # 按项目分组构建 sections
-    sections: list[dict[str, Any]] = []
-    current_project: str | None = None
-    for r in rows:
-        pn = r["project_name"]
-        if pn != current_project:
-            current_project = pn
-            sections.append({"title": pn, "groups": [{"subtitle": None, "rows": []}]})
-        sections[-1]["groups"][0]["rows"].append(r)
-    return await anyio.to_thread.run_sync(
-        lambda: _build_grouped_excel_response(
-            _WEEKLY_PLAN_COLUMNS,
-            sections,
-            "项目计划",
-            filename=timestamped_filename("项目计划"),
-        )
-    )
+    return await anyio.to_thread.run_sync(lambda: _build_weekly_plan_excel_response(rows))
+
+
+def _build_weekly_plan_excel_response(rows: list[dict[str, Any]]) -> Any:
+    """线程池内构造项目计划 Excel(精确复制模板样式,X-002)。"""
+    from app.modules.ppm.common.export import excel_response
+
+    content = _build_weekly_plan_workbook(rows)
+    return excel_response(content, filename=timestamped_filename("项目计划"))
+
+
+def _build_weekly_plan_workbook(rows: list[dict[str, Any]]) -> bytes:
+    """构建项目计划 Excel,精确复制模板「项目周计划表.xlsx」的样式:
+
+    - 行 1: 公司名(A:S 合并)
+    - 行 2: 表名(A:S 合并)
+    - 行 3: 说明(A:F + G:S 合并)
+    - 行 4-5: 两级表头(rowSpan/colSpan 合并,19 列)
+    - 行 6+: 数据行,B 列(项目名称)按同名项目合并、E 列(平台/子系统)按同平台合并
+    - 列宽、边框、表头底色与模板一致
+    """
+    from io import BytesIO
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+
+    # 样式
+    thin = Side(style="thin", color="000000")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    header_fill = PatternFill(start_color="305496", end_color="305496", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=10)
+    title_font = Font(bold=True, size=14)
+    sub_font = Font(size=9)
+    data_font = Font(size=10)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    # 列宽(对齐模板)
+    col_widths = [6, 40, 10, 10, 17, 21, 39, 8, 8, 13, 10, 10, 8, 10, 10, 10, 36, 17, 28]
+    for i, w in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    # 行 1: 公司名
+    ws.merge_cells("A1:S1")
+    ws["A1"] = "                   江苏中车数字科技有限公司"
+    ws["A1"].font = title_font
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 28
+
+    # 行 2: 表名
+    ws.merge_cells("A2:S2")
+    ws["A2"] = "项目计划一览表"
+    ws["A2"].font = Font(bold=True, size=12)
+    ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
+
+    # 行 3: 说明
+    ws.merge_cells("A3:F3")
+    ws["A3"] = "计划概述：根据详细计划拆解至每周工作具体内容"
+    ws.merge_cells("G3:S3")
+    ws["G3"] = "适用范围：由业务负责人与开发负责人，根据详细计划分配项目团队每个人的具体工作安排"
+    ws["A3"].font = sub_font
+    ws["G3"].font = sub_font
+
+    # 行 4-5: 两级表头
+    # rowSpan=2 的列(A~H, R, S): 合并 4:5
+    row_span_cols = [1, 2, 3, 4, 5, 6, 7, 8, 18, 19]
+    headers_main = {
+        1: "序号",
+        2: "项目名称",
+        3: "计划类型",
+        4: "任务分类",
+        5: "平台/子系统",
+        6: "任务主题",
+        7: "任务描述",
+        8: "工作量\n(人天)",
+        18: "评估说明",
+        19: "备注",
+    }
+    for c in row_span_cols:
+        cl = get_column_letter(c)
+        ws.merge_cells(f"{cl}4:{cl}5")
+        ws.cell(row=4, column=c, value=headers_main[c])
+        ws.cell(row=4, column=c).fill = header_fill
+        ws.cell(row=4, column=c).font = header_font
+        ws.cell(row=4, column=c).alignment = center
+        ws.cell(row=4, column=c).border = border
+
+    # colSpan=4: I4:L4 = 任务计划安排
+    ws.merge_cells("I4:L4")
+    ws["I4"] = "任务计划安排"
+    ws["I4"].fill = header_fill
+    ws["I4"].font = header_font
+    ws["I4"].alignment = center
+    ws["I4"].border = border
+
+    # colSpan=5: M4:Q4 = 计划执行情况
+    ws.merge_cells("M4:Q4")
+    ws["M4"] = "计划执行情况（执行人填写）"
+    ws["M4"].fill = header_fill
+    ws["M4"].font = header_font
+    ws["M4"].alignment = center
+    ws["M4"].border = border
+
+    # 行 5: 子表头
+    sub_headers = {
+        9: " 周次",
+        10: "责任人",
+        11: "开始日期",
+        12: "结束日期",
+        13: "状态",
+        14: "开始时间",
+        15: "完成时间",
+        16: "延期原因",
+        17: "执行说明",
+    }
+    for c, v in sub_headers.items():
+        cell = ws.cell(row=5, column=c, value=v)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = center
+        cell.border = border
+
+    # 数据行(行 6+)
+    start_row = 6
+    for idx, r in enumerate(rows):
+        row_num = start_row + idx
+        values = [
+            idx + 1,  # A: 序号
+            r.get("project_name", ""),  # B: 项目名称
+            r.get("plan_type", ""),  # C: 计划类型
+            r.get("detailed_stage", ""),  # D: 任务分类
+            r.get("module_name", ""),  # E: 平台/子系统
+            r.get("task_theme", ""),  # F: 任务主题
+            r.get("task_description", ""),  # G: 任务描述
+            r.get("work_load", ""),  # H: 工作量
+            r.get("week_number", ""),  # I: 周次
+            r.get("user_name", ""),  # J: 责任人
+            r.get("start_time", ""),  # K: 开始日期
+            r.get("end_time", ""),  # L: 结束日期
+            r.get("status", ""),  # M: 状态
+            r.get("actual_start", ""),  # N: 开始时间
+            r.get("actual_end", ""),  # O: 完成时间
+            "",  # P: 延期原因(留空)
+            "",  # Q: 执行说明(留空)
+            "",  # R: 评估说明(留空)
+            "",  # S: 备注(留空)
+        ]
+        for c, v in enumerate(values, 1):
+            cell = ws.cell(row=row_num, column=c, value=v)
+            cell.font = data_font
+            cell.border = border
+            cell.alignment = left if c in (2, 5, 6, 7) else center
+
+    end_row = start_row + len(rows) - 1
+
+    # B 列(项目名称)合并:同名连续行合并
+    if rows:
+        cur_project = None
+        merge_start = start_row
+        for i, r in enumerate(rows):
+            pn = r.get("project_name", "")
+            row_num = start_row + i
+            if pn != cur_project:
+                # 结束上一组合并
+                if cur_project is not None and row_num - 1 > merge_start:
+                    ws.merge_cells(f"B{merge_start}:B{row_num - 1}")
+                cur_project = pn
+                merge_start = row_num
+        # 最后一组
+        if end_row > merge_start:
+            ws.merge_cells(f"B{merge_start}:B{end_row}")
+
+        # E 列(平台/子系统)合并:同项目内同名连续行合并
+        cur_key = None
+        merge_start = start_row
+        for i, r in enumerate(rows):
+            key = f"{r.get('project_name', '')}|{r.get('module_name', '')}"
+            row_num = start_row + i
+            if key != cur_key:
+                if cur_key is not None and row_num - 1 > merge_start:
+                    ws.merge_cells(f"E{merge_start}:E{row_num - 1}")
+                cur_key = key
+                merge_start = row_num
+        if end_row > merge_start:
+            ws.merge_cells(f"E{merge_start}:E{end_row}")
+
+    ws.freeze_panes = "A6"
+
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
 
 # ===========================================================================
