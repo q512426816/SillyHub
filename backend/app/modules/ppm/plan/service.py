@@ -2062,8 +2062,9 @@ class PlanService:
 
         PsPlanNodeDetail 驱动 → INNER JOIN PsPlanNode(has_module=true)
         → PsProjectPlan → PpmProjectMaintenance;
-        LEFT JOIN PlanNodeModule(平台/计划类型) + PlanTask(任务计划信息)。
-        返回扁平列(对应 19 列中的 15 个有数据的列,4 列留空)。
+        **INNER JOIN PlanNodeModule**（约束 module 必须属于同里程碑 plan_node_id，
+        过滤掉 module_id 指向已删模块的孤儿明细 + module_id 为 NULL 的未分配明细）;
+        LEFT JOIN PlanTask(任务计划信息, 无任务时留空)。
         """
         return (
             select(
@@ -2092,7 +2093,10 @@ class PlanService:
             .join(PsPlanNode, PsPlanNode.id == PsPlanNodeDetail.plan_node_id)
             .join(PsProjectPlan, PsProjectPlan.id == PsPlanNode.ps_project_plan_id)
             .join(PpmProjectMaintenance, PpmProjectMaintenance.id == PsProjectPlan.project_id)
-            .outerjoin(PlanNodeModule, PlanNodeModule.id == PsPlanNodeDetail.module_id)
+            .join(
+                PlanNodeModule,
+                PlanNodeModule.id == PsPlanNodeDetail.module_id,
+            )
             .outerjoin(PlanTask, PlanTask.ps_plan_node_detail_id == PsPlanNodeDetail.id)
             .where(
                 PsPlanNode.has_module.is_(True),
