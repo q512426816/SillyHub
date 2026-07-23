@@ -347,3 +347,11 @@ created_at: 2026-07-21T08:48:56
 根因：①save 逻辑其实已在（ql-010：toUpdate 检测 no 变化 + 更新/创建体含 no），「没保存」的真因是 ql-010 用「整行 draggable」+ onRow，而行内全是可编辑 Input，从单元格拖动被输入框拦截 → 拖不动 → 无重排 → 无可保存；②没有拖拽手柄，用户看不出可拖。
 方案：PpmSubTable dragSort 加**最左拖拽手柄列**（`HolderOutlined` 图标，`onCell` 仅手柄单元格 `draggable` + `onDragStart` 记录起始 index），`onRow` 去掉 `draggable`/`onDragStart`（移到手柄），仅保留 `onDragOver`(preventDefault)/`onDrop`(handleDrop) 作 drop 目标。这样只有手柄可拖（不与 Input 冲突），拖动→重排→no 重算→点「保存」持久化（ql-010 既有逻辑）。
 结果：①前端 typecheck/lint 0 error；②milestone-details 24 passed（PpmSubTable 共享组件无回归）；③待 commit+push+重建 frontend 后用户验证（明细子表最左有手柄图标、拖动可重排、点保存顺序持久化）。
+## ql-20260723-015-14d9 | 2026-07-23 15:38:41 | /ppm/plan-nodes 拖动后保存按钮不可用修复(isDirty 漏检 no)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/plan-nodes/page.tsx（DetailsSubTable isDirty 加 no 比较）
+需求：拖动后保存按钮不可用（disabled，点不了保存）。
+根因：DetailsSubTable 的 `isDirty`（控制「保存」按钮 `disabled={!isDirty}`）只比较 DETAIL_COLUMNS 的可编辑字段、**没比较 `no`**。纯拖动（只改顺序/`no`、没改任何字段）时 isDirty 仍 = false → 保存按钮保持 disabled → 用户拖完点不了保存。
+方案：`isDirty` 的行比较循环里补 `(o.no ?? null) !== (r.no ?? null)` 检测，与 `toUpdate` 已有的 `no` 变化检测对齐——拖动改顺序也会置 dirty、启用保存按钮。
+结果：①前端 typecheck/lint 0 error；②待 commit+push+重建 frontend 后用户验证（拖动改顺序后保存按钮变可用、点保存顺序持久化）。

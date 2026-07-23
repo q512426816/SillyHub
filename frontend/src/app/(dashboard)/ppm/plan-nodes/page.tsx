@@ -406,6 +406,8 @@ function DetailsSubTable({
       for (const col of DETAIL_COLUMNS) {
         if ((o[col.name] ?? null) !== (r[col.name] ?? null)) return true;
       }
+      // 拖动改顺序(no 变化)也要算 dirty,否则保存按钮不启用
+      if ((o.no ?? null) !== (r.no ?? null)) return true;
     }
     return false;
   }, [draftRows, original]);
