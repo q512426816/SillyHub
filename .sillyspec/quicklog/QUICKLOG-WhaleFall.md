@@ -314,3 +314,11 @@ created_at: 2026-07-21T08:48:56
 根因：模板明细子表（DetailsSubTable，用 PpmSubTable editable 模式）只有字段列、无序号列；行不可拖拽，无法调整明细顺序。
 方案：①PpmSubTable 加 `dragSort?: boolean` 可选 prop（默认 false，不影响其它展开/编辑用法）：启用时在 mergedColumns 前置「序号」列（render `index+1`，与拖拽顺序一致），并通过 antd Table `onRow(record, index)` 注入 HTML5 原生拖拽（draggable + onDragStart 记录起始 index + onDragOver preventDefault + onDrop 重排）；drop 后重排 rows 并按新顺序重算每行 `no`（= index+1）经 onChange 回写。②plan-nodes：DetailDraftRow 加 `no`，load 读 `d.no`、newRowFactory 给 null；PpmSubTable 启用 `dragSort`；handleSave 更新/创建体含 `no`、toUpdate 检测 `no` 变化（拖动改顺序也触发持久化）。纯前端——后端 PlanNodeDetail.no 字段 + list 数值排序（ql-009）已就绪。
 结果：①前端 typecheck/lint 0 error；②plan-nodes + milestone-details 24 passed（PpmSubTable 共享组件对展开模式无回归）；③待 commit+push+重建 frontend 后用户验证（明细子表有序号列、可拖拽行、拖动后序号按新顺序刷新、保存后顺序持久化）。
+## ql-20260723-011-737b | 2026-07-23 13:55:54 | ppm 各页「序号」列统一居中对齐
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（主表/模块两处序号）+ frontend/src/components/ppm-project-plan-detail.tsx（序号）+ frontend/src/app/(dashboard)/ppm/problem-list/page.tsx（rowno 序号）+ frontend/src/app/(dashboard)/ppm/task-plans/page.tsx（rowno 序号）+ frontend/src/app/(dashboard)/ppm/workbench/_components/workbench-task-table.tsx（rowno 序号）
+需求：序号列居中对齐。
+根因：除 ppm-sub-table 的 dragSort 序号列（ql-010 已 align:center）外，其余序号列均默认左对齐，与居中的序号观感不一致。
+方案：统一给 6 处序号列加 `align: "center"`——milestone-details 主表序号 + 模块序号、ppm-project-plan-detail 序号、problem-list/task-plans/workbench 的 rowno 行序号。（ppm-sub-table dragSort 序号 ql-010 已居中，无需改。）
+结果：①前端 typecheck/lint 0 error；②milestone + plan-nodes 测试通过；③待 commit+push+重建 frontend 后用户验证（各页序号列表头与数字同居中）。

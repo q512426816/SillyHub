@@ -391,6 +391,7 @@ export default function MilestoneDetailsPage() {
         dataIndex: "no",
         key: "no",
         width: 80,
+        align: "center",
         render: (v: string | null) => v ?? "—",
       },
       {
@@ -866,6 +867,7 @@ function ModuleLevelTable({
         dataIndex: "no",
         key: "no",
         width: 70,
+        align: "center",
         render: (v: string | null) => v ?? "—",
       },
       {

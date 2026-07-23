@@ -260,6 +260,7 @@ export default function TaskPlansPage() {
       title: "序号",
       key: "rowno",
       width: 60,
+      align: "center",
       render: (_v, _t: PlanTask, idx: number) => idx + 1,
     },
     {

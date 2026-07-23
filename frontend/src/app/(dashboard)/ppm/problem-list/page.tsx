@@ -276,6 +276,7 @@ export default function ProblemListPage() {
       title: "序号",
       key: "rowno",
       width: 60,
+      align: "center",
       render: (_v, _t: ProblemList, idx: number) => idx + 1,
     },
     {
