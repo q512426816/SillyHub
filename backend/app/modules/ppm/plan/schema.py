@@ -535,12 +535,12 @@ class ImportResultResp(PydanticModel):
 
 
 # ===========================================================================
-# 项目周计划一览表 (Weekly Plan)
+# 项目计划 (Weekly Plan)
 # ===========================================================================
 
 
 class WeeklyPlanRow(PydanticModel):
-    """项目周计划一览表行（明细 + 任务计划聚合，19 列对应源 Excel）。
+    """项目计划行（明细 + 任务计划聚合，19 列对应源 Excel）。
 
     数据来自 5 表 JOIN：PpmProjectMaintenance → PsProjectPlan → PsPlanNode
     (has_module=true) → PsPlanNodeDetail → PlanTask(LEFT JOIN)。
@@ -567,7 +567,7 @@ class WeeklyPlanRow(PydanticModel):
 
 
 class WeeklyPlanPageReq(PageQuery):
-    """项目周计划列表查询（分页 + 筛选）。"""
+    """项目计划列表查询（分页 + 筛选）。"""
 
     project_name: str | None = None
     status: list[str] | None = None

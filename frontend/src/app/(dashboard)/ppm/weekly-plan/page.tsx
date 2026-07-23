@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * 项目周计划一览表 — 展示所有项目实施阶段（三级里程碑 has_module=true）下的
+ * 项目计划 — 展示所有项目实施阶段（三级里程碑 has_module=true）下的
  * 明细 + 任务计划（PlanTask），19 列两级表头，服务端分页 + 导出 Excel。
  *
  * 数据源：后端 GET /api/ppm/weekly-plan（5 表 JOIN 聚合）。
@@ -279,7 +279,7 @@ export default function WeeklyPlanPage() {
   return (
     <PageContainer size="full">
       <PageHeader
-        title="项目周计划一览表"
+        title="项目计划"
         subtitle="展示所有项目实施阶段（三级里程碑）下的任务计划，支持导出 Excel"
       />
 

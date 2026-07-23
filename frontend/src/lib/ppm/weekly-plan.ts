@@ -1,5 +1,5 @@
 /**
- * PPM 项目周计划一览表 API client。
+ * PPM 项目计划 API client。
  *
  * 端点前缀 `/api/ppm`,对齐后端 plan/router.py:
  * - GET /weekly-plan          分页列表(所有项目实施阶段明细+任务计划)
@@ -24,7 +24,7 @@ function weeklyQuery(
   return { query: q };
 }
 
-/** 项目周计划一览表分页查询。 */
+/** 项目计划分页查询。 */
 export async function listWeeklyPlan(
   params?: WeeklyPlanPageReq,
 ): Promise<PageResp<WeeklyPlanRow>> {
@@ -34,7 +34,7 @@ export async function listWeeklyPlan(
   );
 }
 
-/** 导出项目周计划一览表 Excel(按项目分组)。 */
+/** 导出项目计划 Excel(按项目分组)。 */
 export async function exportWeeklyPlan(
   params?: WeeklyPlanPageReq,
 ): Promise<void> {
@@ -49,7 +49,7 @@ export async function exportWeeklyPlan(
   await downloadExcel(
     "/api/ppm/weekly-plan/export-excel",
     Object.keys(query).length > 0 ? query : undefined,
-    "项目周计划一览表.xlsx",
+    "项目计划.xlsx",
   );
 }
 

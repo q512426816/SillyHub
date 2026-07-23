@@ -859,7 +859,7 @@ async def submit_detail(
 
 
 # ===========================================================================
-# 项目周计划一览表 (Weekly Plan)
+# 项目计划 (Weekly Plan)
 # ===========================================================================
 
 _WEEKLY_PLAN_COLUMNS = [
@@ -890,7 +890,7 @@ async def list_weekly_plan(
     user: AuthUser,
     req: WeeklyPlanListReqDep,
 ) -> Page[WeeklyPlanRow]:
-    """项目周计划一览表分页查询(所有项目实施阶段明细+任务计划)。"""
+    """项目计划分页查询(所有项目实施阶段明细+任务计划)。"""
     return await PlanService(session).list_weekly_plan(req)
 
 
@@ -900,7 +900,7 @@ async def export_weekly_plan(
     user: AuthUser,
     req: WeeklyPlanListReqDep,
 ) -> Any:
-    """导出项目周计划一览表 Excel(按项目分组,grouped_report_to_workbook)。"""
+    """导出项目计划 Excel(按项目分组,grouped_report_to_workbook)。"""
     rows = await PlanService(session).list_weekly_plan_for_export(req)
     # 按项目分组构建 sections
     sections: list[dict[str, Any]] = []
@@ -915,8 +915,8 @@ async def export_weekly_plan(
         lambda: _build_grouped_excel_response(
             _WEEKLY_PLAN_COLUMNS,
             sections,
-            "项目周计划一览表",
-            filename=timestamped_filename("项目周计划一览表"),
+            "项目计划",
+            filename=timestamped_filename("项目计划"),
         )
     )
 

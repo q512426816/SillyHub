@@ -2056,9 +2056,9 @@ class PlanService:
                 await self._session.delete(exc)
             await self._session.delete(task)
 
-    # ---------- 项目周计划一览表 (Weekly Plan) ----------
+    # ---------- 项目计划 (Weekly Plan) ----------
     def _weekly_plan_stmt(self):
-        """构建项目周计划聚合查询(5 表 JOIN)。
+        """构建项目计划聚合查询(5 表 JOIN)。
 
         PsPlanNodeDetail 驱动 → INNER JOIN PsPlanNode(has_module=true)
         → PsProjectPlan → PpmProjectMaintenance;
@@ -2124,7 +2124,7 @@ class PlanService:
         )
 
     async def list_weekly_plan(self, req: WeeklyPlanPageReq) -> Page[WeeklyPlanRow]:
-        """项目周计划一览表分页查询(含筛选)。"""
+        """项目计划分页查询(含筛选)。"""
         stmt = self._weekly_plan_stmt()
         if req.project_name:
             stmt = stmt.where(PpmProjectMaintenance.project_name.ilike(f"%{req.project_name}%"))
@@ -2149,7 +2149,7 @@ class PlanService:
         return Page[Any].build(items=items, total=total, req=req)
 
     async def list_weekly_plan_for_export(self, req: WeeklyPlanPageReq) -> list[dict[str, Any]]:
-        """项目周计划导出(同查询不分页,返回 dict 列表供 grouped_report_to_workbook)。
+        """项目计划导出(同查询不分页,返回 dict 列表供 grouped_report_to_workbook)。
 
         延期原因/执行说明/评估说明/备注 4 列留空(系统无对应字段)。
         """

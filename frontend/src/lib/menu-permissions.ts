@@ -461,7 +461,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
   {
     section: "ppm",
     menuKey: "ppm-weekly-plan",
-    menuLabel: "项目周计划",
+    menuLabel: "项目计划",
     icon: "\u{1F4C5}",
     href: "/ppm/weekly-plan",
     absolute: true,

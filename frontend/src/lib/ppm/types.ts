@@ -1409,10 +1409,10 @@ export interface WorkbenchCalendar {
 }
 
 // ===========================================================================
-// 项目周计划一览表 (Weekly Plan)
+// 项目计划 (Weekly Plan)
 // ===========================================================================
 
-/** 项目周计划一览表行(明细 + 任务计划聚合, 19 列)。 */
+/** 项目计划行(明细 + 任务计划聚合, 19 列)。 */
 export interface WeeklyPlanRow {
   project_name: string | null;
   plan_type: string | null;
@@ -1431,7 +1431,7 @@ export interface WeeklyPlanRow {
   detail_id: string | null;
 }
 
-/** 项目周计划查询参数。 */
+/** 项目计划查询参数。 */
 export interface WeeklyPlanPageReq extends PageReq {
   project_name?: string | null;
   status?: string[];
