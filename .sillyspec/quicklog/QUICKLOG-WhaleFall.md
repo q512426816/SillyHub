@@ -258,3 +258,11 @@ created_at: 2026-07-21T08:48:56
 根因：原上传步只有 Upload.Dragger（accept .xlsx），用户无从得知期望的列格式，需提供模板下载。
 方案：①把模板拷到 `frontend/public/templates/dev-plan-template.xlsx`（Next.js 静态服务；next.config 无 basePath，根路径 `/templates/...` 直接可访问）；②ImportModuleModal 上传步（step===1）Upload.Dragger 下方加「下载导入模板」antd Button（type=link），onClick 创建临时 `<a>`（href=`/templates/dev-plan-template.xlsx`、`download="项目详细开发计划模板.xlsx"` 中文名）触发下载；③Dragger + 按钮 Fragment 包裹（修复 JSX 多根元素 TS 报错）。
 结果：①前端 typecheck 0 error；②lint 0 error；③milestone-details 24 passed；④待 commit+push+重建 frontend 后用户验证（上传步点「下载导入模板」能下载到中文名 xlsx）。
+## ql-20260723-004-c388 | 2026-07-23 09:28:03 | /ppm/milestone-details 新建里程碑弹窗「总体阶段」改下拉选+输入(AutoComplete)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（导入 AutoComplete + listPlanNodes/PlanNode；PsPlanNodeDrawer 加 stageOptions 加载 + 总体阶段 Input→AutoComplete）
+需求：【新建里程碑】弹窗的「总体阶段」现在是纯输入，没有计划节点模板提示；改成 antd 的「下拉选 + 输入」组合框——下拉项是计划节点模板（PlanNode）的总阶段，且若输入的总体阶段不在模板里就不去匹配（仍接受该值）。
+根因：原 PsPlanNodeDrawer 总体阶段是 `<Input>`，用户无从知道有哪些既定阶段，易与模板不一致；而 antd 的 AutoComplete 正是「可选可输」的 combobox。
+方案：①导入 `AutoComplete`、`listPlanNodes`、`PlanNode` 类型；②PsPlanNodeDrawer 加 `stageOptions` state + `useEffect`（弹窗 open 时 `listPlanNodes({page_size:200})` 取模板 `overall_stage` 去重作下拉 options，加载失败静默降级为空下拉）；③总体阶段 `Input` → `<AutoComplete options={stageOptions} filterOption=模糊过滤 allowClear>`——可下拉选模板阶段，也可手输任意值（submit 本就纯文本提交，不匹配模板即不匹配，符合需求）。
+结果：①前端 typecheck 0 error；②lint 0 error；③milestone-details 24 passed；④待 commit+push+重建 frontend 后用户验证（总体阶段可下拉选模板阶段、也能手输新值）。

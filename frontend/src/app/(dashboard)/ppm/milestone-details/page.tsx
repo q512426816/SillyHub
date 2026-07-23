@@ -35,6 +35,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
+  AutoComplete,
   Button,
   Checkbox,
   DatePicker,
@@ -84,6 +85,7 @@ import {
   importModulesPreview,
   listPlanNodeDetailProcesses,
   listPlanNodeModules,
+  listPlanNodes,
   listPsPlanNodeDetails,
   listPsPlanNodeDetailVersions,
   listPsPlanNodes,
@@ -95,6 +97,7 @@ import {
   type ImportPreviewResp,
   type ImportPreviewRow,
   type ImportResultResp,
+  type PlanNode,
   type PlanProcessActionReq,
   type PlanChangeProcessReq,
   type PlanNodeModule,
@@ -2858,6 +2861,9 @@ function PsPlanNodeDrawer({
   const [form] = Form.useForm<PsPlanNodeVals>();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // 总体阶段下拉候选:计划节点模板(PlanNode)的 overall_stage 去重。
+  // AutoComplete 仍可手动输入不在模板里的值(不匹配模板即纯文本提交)。
+  const [stageOptions, setStageOptions] = useState<{ value: string }[]>([]);
 
   const initialValues = useMemo<PsPlanNodeVals>(
     () => ({
@@ -2875,6 +2881,25 @@ function PsPlanNodeDrawer({
   useEffect(() => {
     if (open) form.setFieldsValue(initialValues);
   }, [form, initialValues, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    void (async () => {
+      try {
+        const nodes = await listPlanNodes({ page_size: 200 });
+        const stages = Array.from(
+          new Set(
+            nodes
+              .map((n: PlanNode) => n.overall_stage)
+              .filter((s): s is string => Boolean(s)),
+          ),
+        );
+        setStageOptions(stages.map((s) => ({ value: s })));
+      } catch {
+        // 静默:加载失败时下拉为空,仍可手动输入
+      }
+    })();
+  }, [open]);
 
   const submit = async () => {
     setBusy(true);
@@ -2949,7 +2974,16 @@ function PsPlanNodeDrawer({
             name="overall_stage"
             rules={[{ required: true, message: "请输入总体阶段" }]}
           >
-            <Input placeholder="如 实施阶段" />
+            <AutoComplete
+              options={stageOptions}
+              filterOption={(input, option) =>
+                (option?.value ?? "")
+                  .toLowerCase()
+                  .includes(input.toLowerCase())
+              }
+              allowClear
+              placeholder="如 实施阶段"
+            />
           </Form.Item>
         </div>
         <Form.Item
