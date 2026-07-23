@@ -637,22 +637,38 @@ _PLAN_NODE_DETAIL_COLUMNS = [
     ColumnDef(field="status", header="状态", width=10),
 ]
 
+# 子母表分组导出的明细列(去掉「总体阶段」——里程碑标题行已展示)。
+_MILESTONE_DETAIL_GROUP_COLUMNS = [
+    ColumnDef(field="detailed_stage", header="明细阶段", width=16),
+    ColumnDef(field="task_theme", header="任务主题", width=28),
+    ColumnDef(field="plan_workload", header="计划工作量", width=12),
+    ColumnDef(field="plan_begin_time", header="计划开始", width=14),
+    ColumnDef(field="plan_complete_time", header="计划完成", width=14),
+    ColumnDef(field="role_name", header="角色", width=14),
+    ColumnDef(field="achievement", header="成果", width=28),
+    ColumnDef(field="status", header="状态", width=10),
+]
+
 
 @router.get("/plan-node-detail/export-excel")
 async def export_plan_node_details(
     session: SessionDep,
     user: AuthUser,
-    plan_id: uuid.UUID | None = Query(None, description="项目计划 ID,指定时只导出该计划的明细"),
+    plan_id: uuid.UUID | None = Query(
+        None, description="项目计划 ID;按子母表导出该计划的里程碑明细"
+    ),
 ) -> Any:
-    """导出里程碑明细为 Excel (P2-3, X-002)。
+    """导出里程碑明细为 Excel(子母表分组:里程碑 → 模块 → 明细,X-002)。
 
-    仅导出非 archived (当前有效版本) 的明细。传 ``plan_id`` 时只导出该项目计划的明细。
+    传 ``plan_id`` 时按当前项目计划的里程碑/模块分组导出(标题行合并);
+    不传则导出空表(里程碑明细页始终带 plan_id)。
     """
-    rows = await PlanService(session).list_plan_node_details_for_export(plan_id)
-    columns = _PLAN_NODE_DETAIL_COLUMNS
+    svc = PlanService(session)
+    sections = await svc.build_milestone_export_sections(plan_id) if plan_id else []
+    columns = _MILESTONE_DETAIL_GROUP_COLUMNS
     return await anyio.to_thread.run_sync(
-        lambda: _build_excel_response(
-            columns, rows, "里程碑明细", filename=timestamped_filename("里程碑明细")
+        lambda: _build_grouped_excel_response(
+            columns, sections, "里程碑明细", filename=timestamped_filename("里程碑明细")
         )
     )
 
@@ -850,6 +866,20 @@ def _build_excel_response(
     from app.modules.ppm.common.export import excel_response, rows_to_workbook
 
     content = rows_to_workbook(columns, rows, sheet_name=sheet_name)
+    return excel_response(content, filename=filename)
+
+
+def _build_grouped_excel_response(
+    columns: list[ColumnDef],
+    sections: list[dict[str, Any]],
+    sheet_name: str,
+    *,
+    filename: str = "milestone_details.xlsx",
+) -> Any:
+    """线程池内构造分组(子母表) Excel 下载响应 (X-002)。"""
+    from app.modules.ppm.common.export import excel_response, grouped_report_to_workbook
+
+    content = grouped_report_to_workbook(columns, sections, sheet_name=sheet_name)
     return excel_response(content, filename=filename)
 
 

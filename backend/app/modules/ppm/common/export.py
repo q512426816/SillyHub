@@ -32,6 +32,13 @@ _HEADER_FONT = Font(bold=True, color="FFFFFF")
 _HEADER_FILL = PatternFill(start_color="305496", end_color="305496", fill_type="solid")
 _HEADER_ALIGN = Alignment(horizontal="center", vertical="center")
 
+# 分组报表(子母表)样式:大标题行(里程碑)用深蓝,小标题行(模块)用浅蓝。
+_SECTION_FILL = PatternFill(start_color="305496", end_color="305496", fill_type="solid")
+_SECTION_FONT = Font(bold=True, color="FFFFFF", size=12)
+_SUB_FILL = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+_SUB_FONT = Font(bold=True, color="1F4E78")
+_LEFT_ALIGN = Alignment(horizontal="left", vertical="center")
+
 
 @dataclass(slots=True)
 class ColumnDef:
@@ -97,6 +104,75 @@ def rows_to_workbook(
     # 冻结首行，方便浏览
     ws.freeze_panes = "A2"
 
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def grouped_report_to_workbook(
+    columns: list[ColumnDef],
+    sections: Iterable[Mapping[str, Any]],
+    *,
+    sheet_name: str = "Sheet1",
+) -> bytes:
+    """分组(子母表)报表 → ``.xlsx`` 字节流。
+
+    第 1 行为列头(冻结);其下每个 section 是一个「大分组」(如里程碑):
+      - ``title``: 大标题行(跨所有列合并,深蓝底白字)。
+      - ``groups``: 子分组列表(如模块);每组:
+        - ``subtitle``: 子标题(跨列合并,浅蓝底);``None`` 则不输出子标题行。
+        - ``rows``: 数据行(dict,按 ``columns`` 取值)。
+
+    输出:列头行 → (各 section:大标题行 → (各子组:子标题行? + 数据行) + 空行)。
+    ``sections`` 为空时仍输出列头行(便于端点 200 校验)。同步函数 (X-002)。
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_name
+    n = len(columns)
+    for idx, col in enumerate(columns, start=1):
+        if col.width is not None:
+            ws.column_dimensions[get_column_letter(idx)].width = col.width
+
+    # 第 1 行:列头(始终输出,空 sections 时也保留)
+    for idx, col in enumerate(columns, start=1):
+        cell = ws.cell(row=1, column=idx, value=col.header)
+        cell.font = _HEADER_FONT
+        cell.fill = _HEADER_FILL
+        cell.alignment = _HEADER_ALIGN
+
+    row = 2
+    for sec in sections:
+        # 大标题行(合并)
+        ws.cell(row=row, column=1, value=sec.get("title", ""))
+        if n > 1:
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=n)
+        title_cell = ws.cell(row=row, column=1)
+        title_cell.fill = _SECTION_FILL
+        title_cell.font = _SECTION_FONT
+        title_cell.alignment = _LEFT_ALIGN
+        ws.row_dimensions[row].height = 22
+        row += 1
+        # 子分组
+        for grp in sec.get("groups", []):
+            subtitle = grp.get("subtitle")
+            if subtitle:
+                ws.cell(row=row, column=1, value=subtitle)
+                if n > 1:
+                    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=n)
+                sub_cell = ws.cell(row=row, column=1)
+                sub_cell.fill = _SUB_FILL
+                sub_cell.font = _SUB_FONT
+                sub_cell.alignment = _LEFT_ALIGN
+                row += 1
+            for d in grp.get("rows", []):
+                for idx, col in enumerate(columns, start=1):
+                    ws.cell(row=row, column=idx, value=col.extract(d))
+                row += 1
+        # section 间空一行
+        row += 1
+
+    ws.freeze_panes = "A2"
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -174,6 +250,7 @@ __all__ = [
     "Formatter",
     "excel_response",
     "export_to_response",
+    "grouped_report_to_workbook",
     "rows_to_workbook",
     "timestamped_filename",
 ]

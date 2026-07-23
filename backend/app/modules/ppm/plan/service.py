@@ -1250,6 +1250,82 @@ class PlanService:
             for r in rows
         ]
 
+    async def build_milestone_export_sections(self, plan_id: uuid.UUID) -> list[dict[str, Any]]:
+        """构建里程碑明细的分组(子母表)导出结构,供 ``grouped_report_to_workbook`` 消费。
+
+        层级:里程碑(PsPlanNode) →(模块 PlanNodeModule,仅 has_module)→ 明细
+        (PsPlanNodeDetail,非 archived)。每个里程碑成一个 section:大标题行带
+        责任人/计划区间;has_module 里程碑按模块分子标题,否则明细直接挂里程碑。
+        责任人姓名批量反查 auth.users 避免逐条 N+1。
+        """
+        nodes = await self.list_ps_plan_nodes_by_plan(str(plan_id))
+
+        # 批量反查里程碑责任人姓名
+        duty_ids = {n.duty_user_id for n in nodes if n.duty_user_id}
+        duty_name: dict[uuid.UUID, str] = {}
+        if duty_ids:
+            duty_rows = (
+                await self._session.execute(
+                    select(User.id, User.display_name, User.email, User.username).where(
+                        User.id.in_(duty_ids)
+                    )
+                )
+            ).all()
+            for r in duty_rows:
+                duty_name[r.id] = r.display_name or r.email or r.username or str(r.id)
+
+        def _date(v: datetime | None) -> str:
+            return v.strftime("%Y-%m-%d") if v else ""
+
+        def _detail_dict(d: PsPlanNodeDetail) -> dict[str, Any]:
+            return {
+                "detailed_stage": d.detailed_stage,
+                "task_theme": d.task_theme,
+                "plan_workload": d.plan_workload,
+                "plan_begin_time": _date(d.plan_begin_time),
+                "plan_complete_time": _date(d.plan_complete_time),
+                "role_name": d.role_name,
+                "achievement": d.achievement,
+                "status": d.status,
+            }
+
+        sections: list[dict[str, Any]] = []
+        for node in nodes:
+            # 大标题:里程碑 {no}. {overall_stage} | 责任人:.. | 计划:..~..
+            no_part = f"{node.no}." if node.no else ""
+            title = f"里程碑 {no_part} {node.overall_stage or ''}".strip()
+            extras: list[str] = []
+            if node.duty_user_id and duty_name.get(node.duty_user_id):
+                extras.append(f"责任人: {duty_name[node.duty_user_id]}")
+            begin_s, complete_s = _date(node.plan_begin_time), _date(node.plan_complete_time)
+            if begin_s and complete_s:
+                extras.append(f"计划: {begin_s} ~ {complete_s}")
+            elif begin_s:
+                extras.append(f"计划开始: {begin_s}")
+            elif complete_s:
+                extras.append(f"计划完成: {complete_s}")
+            if extras:
+                title = f"{title}　|　{'　'.join(extras)}"
+
+            details = await self.list_details_by_node(str(node.id))
+            if node.has_module:
+                modules = await self.list_modules_by_node(str(node.id))
+                module_ids = {m.id for m in modules}
+                groups: list[dict[str, Any]] = []
+                for m in modules:
+                    rows = [_detail_dict(d) for d in details if d.module_id == m.id]
+                    groups.append(
+                        {"subtitle": f"模块: {m.module_name or '(未命名模块)'}", "rows": rows}
+                    )
+                # 模块已删 / 未分模块的明细单列一组
+                orphans = [_detail_dict(d) for d in details if d.module_id not in module_ids]
+                if orphans:
+                    groups.append({"subtitle": "(未分模块)", "rows": orphans})
+            else:
+                groups = [{"subtitle": None, "rows": [_detail_dict(d) for d in details]}]
+            sections.append({"title": title, "groups": groups})
+        return sections
+
     # ---------- submitDetail (task-02):detail JSON 白名单 merge 落库 ----------
     # 提交明细字段更新 (对照源 PsPlanNodeDetailController.submitDetail):
     # detail 中非 None 的白名单字段 merge 到明细,未知键忽略 (边界 6)。
