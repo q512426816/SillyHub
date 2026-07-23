@@ -1,0 +1,311 @@
+<!-- author: qinyi -->
+<!-- created_at: 2026-07-09T11:02:00 -->
+<!-- prototype: AskUserQuestion 审批中心集成 · 渲染分流 + 来源上下文 + 跳转 mockup -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AskUserQuestion 审批中心集成 · 原型</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --blue-50:#eff6ff;--blue-100:#dbeafe;--blue-600:#2563eb;--blue-700:#1d4ed8;
+    --indigo-50:#eef2ff;--indigo-100:#e0e7ff;--indigo-400:#818cf8;--indigo-500:#6366f1;--indigo-700:#4338ca;
+    --emerald-50:#ecfdf5;--emerald-500:#10b981;--emerald-700:#047857;
+    --amber-50:#fffbeb;--amber-500:#f59e0b;--amber-600:#d97706;--amber-700:#b45309;
+    --red-50:#fef2f2;--red-500:#ef4444;--red-600:#dc2626;
+    --slate-50:#f8fafc;--slate-100:#f1f5f9;--slate-200:#e2e8f0;--slate-300:#cbd5e1;
+    --slate-400:#94a3b8;--slate-500:#64748b;--slate-600:#475569;--slate-700:#334155;--slate-800:#1e293b;--slate-900:#0f172a;
+    --r-sm:6px;--r-md:8px;--r-lg:12px;
+    --sh-sm:0 1px 2px 0 rgb(15 23 42/.05);
+    --sh-md:0 4px 6px -1px rgb(15 23 42/.07),0 2px 4px -2px rgb(15 23 42/.05);
+    --font:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--slate-100);color:var(--slate-800);font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1100px;margin:0 auto;padding:24px}
+  .label{font-size:11px;font-weight:600;color:var(--slate-400);text-transform:uppercase;letter-spacing:.08em;margin:24px 0 10px}
+  .note{font-size:12.5px;color:var(--slate-500);background:var(--blue-50);border:1px solid var(--blue-100);border-radius:var(--r-md);padding:10px 14px;margin-bottom:18px}
+  .note b{color:var(--blue-700)}
+  .page-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px}
+  .page-head h1{font-size:20px;font-weight:700;color:var(--slate-900)}
+  .page-head p{font-size:12.5px;color:var(--slate-500);margin-top:3px}
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border-radius:var(--r-md);font-size:12px;font-weight:600;cursor:pointer;border:1px solid transparent;transition:all .15s;font-family:var(--font);text-decoration:none}
+  .btn-primary{background:var(--blue-600);color:#fff;box-shadow:var(--sh-sm)}
+  .btn-outline{background:#fff;color:var(--slate-700);border-color:var(--slate-300)}
+  .btn-link{background:transparent;color:var(--blue-700);padding:3px 7px;font-size:11.5px}
+  .btn-link:hover{background:var(--blue-50)}
+
+  .panel{background:#fff;border:1px solid var(--slate-200);border-radius:var(--r-lg);box-shadow:var(--sh-sm);overflow:hidden}
+  .panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 16px;border-bottom:1px solid var(--slate-200);background:var(--slate-50)}
+  .panel-head .ttl{display:flex;align-items:center;gap:10px}
+  .panel-head .ico{width:30px;height:30px;border-radius:var(--r-md);background:var(--amber-50);color:var(--amber-600);display:flex;align-items:center;justify-content:center}
+  .panel-head .ico svg{width:17px;height:17px}
+  .panel-head h2{font-size:14px;font-weight:700;color:var(--slate-800)}
+  .panel-head .sub{font-size:11.5px;color:var(--slate-500);margin-top:1px}
+  .badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font-size:11.5px;font-weight:600}
+  .badge.amber{background:var(--amber-50);color:var(--amber-700)}
+  .badge.slate{background:var(--slate-100);color:var(--slate-600)}
+  .badge.indigo{background:var(--indigo-50);color:var(--indigo-700)}
+  .badge.blue{background:var(--blue-50);color:var(--blue-700)}
+  .badge.emerald{background:var(--emerald-50);color:var(--emerald-700)}
+  .panel-body{padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+
+  .card{border:1px solid var(--slate-200);border-radius:var(--r-md);background:#fff;box-shadow:var(--sh-sm);overflow:hidden}
+  .card-head{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--slate-100)}
+  .card-head .ico-sm{width:26px;height:26px;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .card-head .ico-sm svg{width:14px;height:14px}
+  .ico-ask{background:var(--indigo-100);color:var(--indigo-700)}
+  .ico-approval{background:var(--amber-50);color:var(--amber-600)}
+  .card-head .t{font-size:12.5px;font-weight:600;color:var(--slate-800)}
+  .card-head .rid{font-family:ui-monospace,Menlo,monospace;font-size:10px;color:var(--slate-400)}
+  .card-head .jump{margin-left:auto;display:flex;gap:3px}
+
+  /* 来源上下文条 —— 核心增强 */
+  .ctx{background:var(--slate-50);border-bottom:1px solid var(--slate-100);padding:8px 12px;display:flex;flex-direction:column;gap:4px}
+  .ctx-row{display:flex;flex-wrap:wrap;align-items:center;gap:7px;font-size:11.5px;color:var(--slate-600)}
+  .ctx-row .sep{color:var(--slate-300)}
+  .ctx-row .ws{color:var(--slate-700);font-weight:600}
+  .ctx-link{color:var(--blue-700);font-family:ui-monospace,Menlo,monospace;font-size:11px;cursor:pointer;text-decoration:none}
+  .ctx-link:hover{text-decoration:underline}
+  .ctx-task{display:flex;align-items:flex-start;gap:6px;font-size:11.5px;color:var(--slate-600);background:#fff;border:1px solid var(--slate-200);border-radius:var(--r-sm);padding:5px 8px;margin-top:2px}
+  .ctx-task svg{width:13px;height:13px;color:var(--slate-400);flex-shrink:0;margin-top:1px}
+  .ctx-task b{color:var(--slate-700);font-weight:600}
+
+  .card-body{padding:11px 12px}
+  .card-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-top:1px solid var(--slate-100);background:var(--slate-50)}
+  .card-foot .hint{font-size:10.5px;color:var(--slate-500)}
+
+  .q-block{margin-bottom:11px}
+  .q-block:last-child{margin-bottom:0}
+  .q-top{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;margin-bottom:6px}
+  .q-header{background:var(--slate-100);color:var(--slate-800);font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:var(--r-sm)}
+  .q-text{font-size:12.5px;font-weight:500;color:var(--slate-800)}
+  .q-multi{font-size:10px;color:var(--slate-400)}
+  .opts{display:flex;flex-direction:column;gap:5px}
+  .opt{display:flex;align-items:flex-start;gap:8px;border:1px solid var(--slate-200);border-radius:var(--r-sm);padding:7px 9px;cursor:pointer;transition:all .12s;background:#fff}
+  .opt:hover{border-color:var(--indigo-400);background:var(--indigo-50)}
+  .opt.sel{border-color:var(--indigo-500);background:var(--indigo-50)}
+  .opt .dot{width:15px;height:15px;border:1.5px solid var(--slate-300);border-radius:999px;flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center}
+  .opt.sel .dot{background:var(--indigo-500);border-color:var(--indigo-500)}
+  .opt .dot svg{width:9px;height:9px;color:#fff}
+  .opt .box{width:15px;height:15px;border:1.5px solid var(--slate-300);border-radius:3px;flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center}
+  .opt.sel .box{background:var(--indigo-500);border-color:var(--indigo-500)}
+  .opt .lab{font-size:12px;font-weight:500;color:var(--slate-800)}
+  .opt .desc{font-size:11px;color:var(--slate-500);margin-top:2px}
+  .manual{margin-top:5px;width:100%;height:30px;border:1px solid var(--slate-300);border-radius:var(--r-sm);padding:0 9px;font-size:11.5px;color:var(--slate-600);background:#fff;font-family:var(--font)}
+  .manual:focus{outline:none;border-color:var(--indigo-400)}
+
+  .ap-row{display:flex;gap:8px;font-size:11.5px;margin-bottom:5px}
+  .ap-row .k{color:var(--slate-500);width:48px;flex-shrink:0}
+  .ap-row .v{font-family:ui-monospace,Menlo,monospace;color:var(--slate-700)}
+  .ap-input{margin-top:7px;background:var(--slate-50);border:1px solid var(--slate-100);border-radius:var(--r-sm);padding:8px;font-family:ui-monospace,Menlo,monospace;font-size:10.5px;color:var(--slate-600);white-space:pre-wrap;line-height:1.5;max-height:90px;overflow:auto}
+
+  .footnote{margin-top:18px;padding:12px 14px;border:1px dashed var(--slate-300);border-radius:var(--r-md);font-size:12px;color:var(--slate-500);line-height:1.7}
+  .footnote b{color:var(--slate-700)}
+  .legend-row{display:flex;flex-wrap:wrap;gap:14px;margin-top:8px}
+  .legend-row span{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--slate-600)}
+  .sw{width:11px;height:11px;border-radius:3px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="label">/approvals 审批中心 ·「智能体实时询问与审批」面板（AskUserQuestion 问答卡 + 普通审批卡，带来源上下文 + 跳转）</div>
+  <div class="note">
+    <b>设计方向（含本次反馈增强）：</b>每张卡除问答内容外，<b>必须带来源上下文条</b>——工作区 · 场景(scan/对话/阶段) · 会话(可点跳转) · 运行(可点跳转) · 时间 · <b>上下文一句话</b>(agent 当前在做什么)。<br>
+    按 <code>dialog_kind</code> 分流：有 → <b>AskUserDialogCard</b>（问答）；无 → <b>PermissionApprovalCard</b>（allow/deny）。聚合 scan + 普通对话，SSE 实时 + 数据库兜底。
+  </div>
+
+  <div class="page-head">
+    <div>
+      <h1>审批中心</h1>
+      <p>审阅并管理智能体操作的工具网关审批请求。</p>
+    </div>
+    <button class="btn btn-outline">↻ 刷新</button>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div class="ttl">
+        <div class="ico">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <div>
+          <h2>智能体实时询问与审批</h2>
+          <div class="sub">订阅 4 个会话（2 scan · 2 对话）· AskUserQuestion 决策与工具审批实时聚合</div>
+        </div>
+      </div>
+      <span class="badge amber">3 待决策</span>
+    </div>
+
+    <div class="panel-body">
+
+      <!-- 卡片1: AskUserQuestion 单选（scan 场景） -->
+      <div class="card">
+        <div class="card-head">
+          <div class="ico-sm ico-ask">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          </div>
+          <span class="t">智能体提问</span>
+          <span class="badge indigo">AskUserQuestion</span>
+          <span class="rid">a3f9c2…</span>
+          <div class="jump">
+            <a class="btn btn-link" href="#">查看会话 →</a>
+          </div>
+        </div>
+        <!-- 来源上下文条 -->
+        <div class="ctx">
+          <div class="ctx-row">
+            <span class="ws">📂 multi-agent-platform</span>
+            <span class="sep">·</span>
+            <span class="badge blue">scan 扫描</span>
+            <span class="sep">·</span>
+            <span>会话 <a class="ctx-link" href="#" title="跳转到会话详情">53cfaea7</a></span>
+            <span class="sep">·</span>
+            <span>运行 <a class="ctx-link" href="#" title="跳转到运行日志">9f2a…</a></span>
+            <span class="sep">·</span>
+            <span>⏱ 2 分钟前</span>
+          </div>
+          <div class="ctx-task">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+            <span><b>上下文：</b>扫描工作区，识别项目技术栈与目录结构（claude）</span>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="q-block">
+            <div class="q-top">
+              <span class="q-header">检测到的框架</span>
+              <span class="q-text">这个项目使用的前端框架是？</span>
+            </div>
+            <div class="opts">
+              <div class="opt sel">
+                <div class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
+                <div><div class="lab">Next.js 14</div><div class="desc">App Router + React 18，匹配 package.json</div></div>
+              </div>
+              <div class="opt"><div class="dot"></div><div><div class="lab">Vue 3</div></div></div>
+              <div class="opt"><div class="dot"></div><div><div class="lab">Nuxt</div></div></div>
+              <input class="manual" placeholder="或手动输入（填写后以此内容作答）" />
+            </div>
+          </div>
+        </div>
+        <div class="card-foot">
+          <span class="hint">智能体正在等待你的回答</span>
+          <button class="btn btn-primary">✓ 提交回答</button>
+        </div>
+      </div>
+
+      <!-- 卡片2: AskUserQuestion 多选（对话场景） -->
+      <div class="card">
+        <div class="card-head">
+          <div class="ico-sm ico-ask">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          </div>
+          <span class="t">智能体提问</span>
+          <span class="badge indigo">AskUserQuestion</span>
+          <span class="rid">b71e0a…</span>
+          <div class="jump">
+            <a class="btn btn-link" href="#">查看会话 →</a>
+          </div>
+        </div>
+        <div class="ctx">
+          <div class="ctx-row">
+            <span class="ws">📂 my-bot</span>
+            <span class="sep">·</span>
+            <span class="badge slate">💬 普通对话</span>
+            <span class="sep">·</span>
+            <span>会话 <a class="ctx-link" href="#">7b1c…</a></span>
+            <span class="sep">·</span>
+            <span>运行 <a class="ctx-link" href="#">3e8d…</a></span>
+            <span class="sep">·</span>
+            <span>⏱ 5 分钟前</span>
+          </div>
+          <div class="ctx-task">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+            <span><b>上下文：</b>用户请求「帮我写一个登录页面」，agent 澄清技术选型</span>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="q-block">
+            <div class="q-top">
+              <span class="q-header">需要补测试的模块</span>
+              <span class="q-text">要为哪些模块补测试？（可多选）</span>
+              <span class="q-multi">（可多选）</span>
+            </div>
+            <div class="opts">
+              <div class="opt sel"><div class="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="lab">backend permission_service</div></div></div>
+              <div class="opt sel"><div class="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="lab">SessionPermissionPanel</div></div></div>
+              <div class="opt"><div class="box"></div><div><div class="lab">approvals lib</div></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="card-foot">
+          <span class="hint">智能体正在等待你的回答</span>
+          <button class="btn btn-primary">✓ 提交回答</button>
+        </div>
+      </div>
+
+      <!-- 卡片3: 普通审批卡（allow/deny，分流对比） -->
+      <div class="card">
+        <div class="card-head">
+          <div class="ico-sm ico-approval">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <span class="t">权限审批：Bash</span>
+          <span class="rid">c5d8…</span>
+          <div class="jump">
+            <a class="btn btn-link" href="#">查看会话 →</a>
+          </div>
+        </div>
+        <div class="ctx">
+          <div class="ctx-row">
+            <span class="ws">📂 multi-agent-platform</span>
+            <span class="sep">·</span>
+            <span class="badge emerald">stage 阶段</span>
+            <span class="sep">·</span>
+            <span>变更 <a class="ctx-link" href="#">2026-07-09-…</a></span>
+            <span class="sep">·</span>
+            <span>会话 <a class="ctx-link" href="#">d4f1…</a></span>
+            <span class="sep">·</span>
+            <span>⏱ 1 分钟前</span>
+          </div>
+          <div class="ctx-task">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+            <span><b>上下文：</b>变更 plan 阶段执行中，agent 提交代码前请求 push 权限</span>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="ap-row"><span class="k">工具</span><span class="v">Bash</span></div>
+          <div class="ap-row"><span class="k">运行</span><span class="v">c5d8…</span></div>
+          <div class="ap-input">{"command": "git push origin feature/x", "timeout": 120}</div>
+        </div>
+        <div class="card-foot">
+          <span class="hint">⏱ 5 分钟内审批</span>
+          <div style="display:flex;gap:6px">
+            <button class="btn" style="background:#fff;color:var(--red-600);border-color:var(--slate-300)">✕ 拒绝</button>
+            <button class="btn btn-primary">✓ 允许</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="footnote">
+    <b>来源上下文条（核心增强）：</b>每张卡显示 <b>工作区 · 场景(scan/对话/阶段) · 会话(可点) · 运行(可点) · 时间 · 上下文一句话</b>，
+    让审批者知道「谁在什么场景下问了什么」。会话/运行链接跳转 runtime 会话详情 / 运行日志，可看完整上下文。<br>
+    <b>渲染分流：</b>有 <code>dialog_kind</code> → AskUserDialogCard（问答）；无 → PermissionApprovalCard（allow/deny）。
+    <div class="legend-row">
+      <span><span class="sw" style="background:var(--indigo-500)"></span>AskUserDialogCard（问答）</span>
+      <span><span class="sw" style="background:var(--amber-500)"></span>PermissionApprovalCard（allow/deny）</span>
+      <span><span class="sw" style="background:var(--blue-600)"></span>scan</span>
+      <span><span class="sw" style="background:var(--slate-400)"></span>对话</span>
+      <span><span class="sw" style="background:var(--emerald-500)"></span>stage 阶段</span>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,134 @@
+<!--
+  author: qinyi
+  created_at: 2026-07-16 10:41:26
+  变更: 2026-07-16-workbench-load-crossday
+  说明: 方案A 执行流程重设计 线框原型(非精美UI,仅供确认交互方向)
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>执行流程重设计 - 线框原型</title>
+<style>
+  body { font-family: -apple-system, "Microsoft YaHei", sans-serif; background:#f5f5f5; margin:0; padding:24px; color:#222; }
+  h1 { font-size:18px; }
+  h2 { font-size:15px; margin-top:28px; border-left:3px solid #2563eb; padding-left:8px; }
+  .panel { background:#fff; border:1px solid #d4d4d8; border-radius:6px; padding:14px 16px; margin:10px 0; }
+  .row { display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px dashed #cbd5e1; border-radius:4px; margin:6px 0; background:#fafafa;}
+  .tag { font-size:11px; padding:2px 8px; border-radius:10px; border:1px solid #94a3b8; color:#475569; }
+  .tag.go { background:#dcfce7; border-color:#16a34a; color:#15803d; }
+  .tag.doing { background:#fef9c3; border-color:#ca8a04; color:#a16207; }
+  .tag.done { background:#e0e7ff; border-color:#6366f1; color:#4338ca; }
+  button { font-size:12px; padding:4px 12px; border:1px solid #64748b; background:#fff; border-radius:4px; cursor:pointer; }
+  button.primary { background:#2563eb; color:#fff; border-color:#2563eb; }
+  button.success { background:#16a34a; color:#fff; border-color:#16a34a; }
+  button.outline { background:#fff; }
+  .modal { border:2px solid #2563eb; border-radius:8px; padding:16px; background:#fff; max-width:480px; }
+  .field { margin:8px 0; }
+  .field label { display:block; font-size:11px; color:#64748b; margin-bottom:3px; }
+  .field input, .field textarea { width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th, td { border:1px solid #e2e8f0; padding:6px 8px; text-align:left; }
+  th { background:#f1f5f9; }
+  .note { font-size:11px; color:#64748b; margin-top:6px; }
+  .warn { background:#fef3c7; border:1px solid #f59e0b; border-radius:4px; padding:6px 10px; font-size:12px; color:#92400e; }
+  .split-row { display:grid; grid-template-columns: 90px 1fr 1fr; gap:8px; align-items:center; margin:6px 0; }
+</style>
+</head>
+<body>
+
+<h1>方案A · 执行流程重设计（线框原型）</h1>
+<p class="note">变更 2026-07-16-workbench-load-crossday ｜ 下列为交互方向确认，非最终视觉</p>
+
+<h2>① 任务列表行 —— 按状态显示不同按钮</h2>
+<div class="panel">
+  <div class="row">
+    <span class="tag go">未开始</span>
+    <span style="flex:1">融通航发质量模块-开发</span>
+    <span class="note">负责人 张三</span>
+    <button class="primary">启动</button>
+    <span class="note">↑ 点击后:创建执行记录(记开始时间) → 进行中</span>
+  </div>
+  <div class="row">
+    <span class="tag doing">进行中</span>
+    <span style="flex:1">融通航发质量模块-开发</span>
+    <span class="note">开始 07-16 09:00</span>
+    <button class="primary">执行</button>
+    <span class="note">↑ 点击后:打开执行弹窗(见②)</span>
+  </div>
+  <div class="row">
+    <span class="tag done">已完成</span>
+    <span style="flex:1">工作站接口联调</span>
+    <span class="note">2条执行记录</span>
+    <button class="outline">查看记录</button>
+    <span class="note">↑ 点击后:展开历次执行记录(见④)</span>
+  </div>
+</div>
+
+<h2>② 执行弹窗 —— 提交 / 完成 双按钮</h2>
+<div class="panel">
+  <div class="modal">
+    <div style="font-weight:600; margin-bottom:8px">执行任务</div>
+    <div class="field"><label>任务</label><div style="font-size:13px">融通航发质量模块-开发</div></div>
+    <div class="field"><label>开始时间（启动时已记录）</label><input value="2026-07-16 09:00" disabled /></div>
+    <div class="field"><label>本次耗时（人天）</label><input value="1" /></div>
+    <div class="field"><label>执行情况说明</label><textarea rows="2">完成开发权限转入对接</textarea></div>
+    <div style="display:flex; gap:8px; margin-top:12px; border-top:1px solid #e2e8f0; padding-top:10px">
+      <button class="outline">取消</button>
+      <span style="flex:1"></span>
+      <button class="primary">提交</button>
+      <button class="success">完成</button>
+    </div>
+    <div class="note">
+      <b>提交</b>：保存本次记录(记结束时间) + 任务<u>回未开始</u>（可再次启动=多次填报）<br/>
+      <b>完成</b>：保存本次记录(记结束时间) + 任务 → <u>已完成</u>（终结）
+    </div>
+  </div>
+</div>
+
+<h2>③ 跨天检测 —— 拆成多条单日记录（每天单独填）</h2>
+<div class="panel">
+  <div class="warn">⚠ 检测到跨天：开始 07-16 09:00，当前 07-18 14:00（跨 3 天）。已拆成 3 条单日记录，请逐天填写耗时与说明。</div>
+  <div class="split-row">
+    <span class="tag">07-16</span>
+    <input placeholder="耗时(人天)" />
+    <input placeholder="当天执行情况说明" />
+  </div>
+  <div class="split-row">
+    <span class="tag">07-17</span>
+    <input placeholder="耗时(人天)" />
+    <input placeholder="当天执行情况说明" />
+  </div>
+  <div class="split-row">
+    <span class="tag">07-18</span>
+    <input placeholder="耗时(人天)" />
+    <input placeholder="当天执行情况说明" />
+  </div>
+  <div class="note">提交后 → 后端逐条校验起止同日，跨天拒绝(422)。</div>
+  <div style="margin-top:10px"><button class="primary">提交 3 条</button> <button class="outline">取消</button></div>
+</div>
+
+<h2>④ 执行记录详情 —— 列表/抽屉可见（你补充的需求）</h2>
+<div class="panel">
+  <div style="font-weight:600; margin-bottom:8px">融通航发质量模块-开发 · 执行记录</div>
+  <table>
+    <tr><th>开始时间</th><th>结束时间</th><th>耗时</th><th>说明</th><th>结果</th></tr>
+    <tr><td>07-14 09:00</td><td>07-14 17:00</td><td>1 人天</td><td>开发权限转入对接</td><td><span class="tag done">已完成</span></td></tr>
+    <tr><td>07-15 09:00</td><td>07-15 15:00</td><td>0.5 人天</td><td>接口联调</td><td><span class="tag doing">提交(回未开始)</span></td></tr>
+    <tr><td>07-16 09:00</td><td>07-16 18:00</td><td>1 人天</td><td>质量模块开发</td><td><span class="tag done">已完成</span></td></tr>
+  </table>
+  <div class="note">task-plans 与 problem-list 列表详情/抽屉均展示此表（problem 处置记录同理，结果列=完成→待验证 / 提交→保持处置中）。</div>
+</div>
+
+<h2>⑤ 工作日历左点负载 —— 求和后正确标色</h2>
+<div class="panel">
+  <div class="row">
+    <span class="tag">07-16</span>
+    <span style="flex:1">当天执行记录：1人天 + 0人天 = <b>1 人天(8h)</b></span>
+    <span class="tag done">饱和(绿) ✓</span>
+  </div>
+  <div class="note">过去日期左点 = 当天涉及的执行记录 time_spent×8 <b>求和</b>（不再平摊）。&lt;8h 有空余(黄) / 8~10h 饱和(绿) / &gt;10h 过载(红)。</div>
+</div>
+
+</body>
+</html>

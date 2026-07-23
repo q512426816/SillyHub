@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<!--
+  author: qinyi
+  created_at: 2026-07-14 22:49:40
+  变更: 2026-07-14-daemon-install-os-aware
+  说明: daemon 安装命令按操作系统切换 —— InstallDaemonBlock 改动原型（线框图风格）
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>daemon 安装命令 - 按操作系统切换（原型）</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f8fafc; padding: 28px 20px; color: #0f172a; margin: 0; }
+  .container { max-width: 680px; margin: 0 auto; }
+  h1 { font-size: 16px; margin: 0 0 6px; }
+  .hint { font-size: 12px; color: #64748b; line-height: 1.6; margin: 0 0 22px; }
+  .label { font-size: 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: .5px; margin: 0 0 6px; }
+
+  /* 复刻 InstallDaemonBlock：dashed border + muted/30 bg + radius-md */
+  .block { border: 1px dashed #cbd5e1; background: #f1f5f9; border-radius: 6px; }
+  .block-header { display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; user-select: none; }
+  .block-header .ico { font-size: 12px; color: #64748b; }
+  .block-header .title { font-size: 11px; font-weight: 500; color: #0f172a; }
+  .block-header .toggle { margin-left: auto; font-size: 10px; color: #64748b; }
+  .block-body { border-top: 1px dashed #cbd5e1; padding: 10px; }
+
+  /* OS 切换：segmented control 风格 */
+  .os-switch { display: inline-flex; border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden; margin-bottom: 10px; background: #fff; }
+  .os-switch button { font-size: 11px; padding: 5px 14px; border: none; background: transparent; color: #475569; cursor: pointer; transition: all .15s; }
+  .os-switch button:not(:last-child) { border-right: 1px solid #cbd5e1; }
+  .os-switch button.active { background: #0f172a; color: #fff; }
+
+  .cmd-row { display: flex; align-items: center; gap: 8px; }
+  .cmd-box { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; border: 1px solid #e2e8f0; background: #fff; border-radius: 6px; padding: 6px 10px; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+  .cmd-box .ico { font-size: 12px; color: #64748b; flex-shrink: 0; }
+  .cmd-box code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 11px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .copy-btn { font-size: 11px; padding: 7px 12px; border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; cursor: pointer; flex-shrink: 0; color: #334155; }
+  .copy-btn:hover { background: #f8fafc; }
+  .ps-hint { font-size: 10px; color: #b45309; margin: 8px 0 0; line-height: 1.5; }
+  .spacer { height: 18px; }
+  .anno { font-size: 11px; color: #2563eb; margin: 4px 0 0; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>首次安装 daemon（新机器）—— 按操作系统切换</h1>
+  <p class="hint">
+    改动点：原折叠区块「首次安装 daemon」展开后，新增 <b>「macOS / Linux ｜ Windows」</b> 切换开关。
+    默认按浏览器 OS 自动选中（navigator.userAgent），可手动切换（应对远程部署：浏览器 OS ≠ daemon 目标机器 OS）。
+    Windows 给 PowerShell 一行 <code>irm ... | iex</code>；macOS/Linux 保持 <code>curl ... | bash</code>。
+  </p>
+
+  <p class="label">▼ 状态一：选中 Windows（PowerShell 一行）</p>
+  <div class="block">
+    <div class="block-header" onclick="toggleHead(this)">
+      <span class="ico">▅</span><span class="title">首次安装 daemon（新机器）</span><span class="toggle">收起</span>
+    </div>
+    <div class="block-body">
+      <div class="os-switch">
+        <button onclick="pick(this)">macOS / Linux</button>
+        <button class="active" onclick="pick(this)">Windows</button>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-box"><span class="ico">▅</span><code>irm http://127.0.0.1:3001/daemon/install.ps1 | iex</code></div>
+        <button class="copy-btn" onclick="copied(this)">复制</button>
+      </div>
+      <p class="ps-hint">⚠️ 在 PowerShell 或 cmd 中运行（开始菜单搜「PowerShell」打开后粘贴）。</p>
+    </div>
+  </div>
+
+  <div class="spacer"></div>
+
+  <p class="label">▼ 状态二：选中 macOS / Linux（curl|bash）</p>
+  <div class="block">
+    <div class="block-header" onclick="toggleHead(this)">
+      <span class="ico">▅</span><span class="title">首次安装 daemon（新机器）</span><span class="toggle">收起</span>
+    </div>
+    <div class="block-body">
+      <div class="os-switch">
+        <button class="active" onclick="pick(this)">macOS / Linux</button>
+        <button onclick="pick(this)">Windows</button>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-box"><span class="ico">▅</span><code>curl -fsSL http://127.0.0.1:3001/daemon/install.sh | bash -s -- --server-url http://127.0.0.1:3001</code></div>
+        <button class="copy-btn" onclick="copied(this)">复制</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="spacer"></div>
+  <p class="anno">说明：上面两个 block 是同一个组件的两种 OS 选中态（实际只有一个，这里并排展示便于对比）。点切换按钮看交互。</p>
+</div>
+
+<script>
+  function pick(btn) {
+    const sw = btn.parentElement;
+    sw.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  function copied(btn) {
+    const old = btn.textContent;
+    btn.textContent = '已复制';
+    setTimeout(() => { btn.textContent = old; }, 1500);
+  }
+  function toggleHead(head) {
+    const t = head.querySelector('.toggle');
+    t.textContent = t.textContent === '收起' ? '展开' : '收起';
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,382 @@
+<!-- author: qinyi -->
+<!-- created_at: 2026-07-12 02:50:00 -->
+<!-- prototype: team 模式平台级入口 · SillyHub 样式系统 mockup -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>team 模式平台级入口 · 原型</title>
+<style>
+  :root{
+    --blue-50:#eff6ff;--blue-100:#dbeafe;--blue-600:#2563eb;--blue-700:#1d4ed8;--blue-900:#1e3a8a;
+    --cyan-500:#06b6d4;--cyan-50:#ecfeff;
+    --emerald-50:#ecfdf5;--emerald-500:#10b981;--emerald-600:#059669;--emerald-700:#047857;
+    --amber-50:#fffbeb;--amber-500:#f59e0b;--amber-600:#d97706;--amber-700:#b45309;
+    --red-50:#fef2f2;--red-500:#ef4444;--red-600:#dc2626;--red-700:#b91c1c;
+    --violet-50:#f5f3ff;--violet-500:#8b5cf6;--violet-600:#7c3aed;--violet-700:#6d28d9;
+    --slate-50:#f8fafc;--slate-100:#f1f5f9;--slate-200:#e2e8f0;--slate-300:#cbd5e1;
+    --slate-400:#94a3b8;--slate-500:#64748b;--slate-600:#475569;--slate-700:#334155;--slate-800:#1e293b;--slate-900:#0f172a;
+    --r-sm:6px;--r-md:8px;--r-lg:12px;--r-xl:16px;
+    --sh-sm:0 1px 2px 0 rgb(15 23 42/.05);
+    --sh-md:0 4px 6px -1px rgb(15 23 42/.07),0 2px 4px -2px rgb(15 23 42/.05);
+    --sh-lg:0 10px 15px -3px rgb(15 23 42/.08),0 4px 6px -4px rgb(15 23 42/.05);
+    --font:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--slate-100);color:var(--slate-800);font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased;padding:24px}
+  .wrap{max-width:1240px;margin:0 auto}
+  .doc-head{margin-bottom:8px}
+  .doc-head h1{font-size:24px;font-weight:700;color:var(--slate-900);letter-spacing:-.01em}
+  .doc-head p{font-size:13px;color:var(--slate-500);margin-top:4px}
+  .tag{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:600;background:var(--violet-50);color:var(--violet-700);margin-left:8px}
+  .tag .dot{width:6px;height:6px;border-radius:50%;background:var(--violet-500)}
+  .scene-label{font-size:11px;font-weight:600;color:var(--slate-400);text-transform:uppercase;letter-spacing:.08em;margin:28px 0 10px;display:flex;align-items:center;gap:8px}
+  .scene-label .num{width:22px;height:22px;border-radius:50%;background:var(--blue-600);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;letter-spacing:0}
+
+  /* app shell */
+  .app{display:flex;min-height:560px;background:var(--slate-50);border:1px solid var(--slate-200);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--sh-lg)}
+  .sidebar{width:208px;background:#fff;border-right:1px solid var(--slate-200);padding:14px 10px;display:flex;flex-direction:column;flex-shrink:0}
+  .brand{display:flex;align-items:center;gap:9px;padding:4px 8px 14px}
+  .brand-logo{width:28px;height:28px;border-radius:var(--r-md);background:linear-gradient(135deg,var(--blue-600),var(--cyan-500));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px}
+  .brand-name{font-weight:700;font-size:14px;color:var(--slate-900)}
+  .nav-item{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:var(--r-md);color:var(--slate-600);font-size:13px;font-weight:500;position:relative}
+  .nav-item.active{background:var(--blue-50);color:var(--blue-700);font-weight:600}
+  .nav-item.active::before{content:"";position:absolute;left:-10px;top:6px;bottom:6px;width:3px;border-radius:2px;background:var(--blue-600)}
+  .nav-item .ic{font-size:14px;width:16px;text-align:center}
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .topbar{height:48px;background:#fff;border-bottom:1px solid var(--slate-200);display:flex;align-items:center;gap:10px;padding:0 16px;flex-shrink:0}
+  .crumb{font-size:12.5px;color:var(--slate-500)}
+  .crumb b{color:var(--slate-800);font-weight:600}
+  .crumb .sep{margin:0 5px;color:var(--slate-300)}
+  .content{padding:20px;overflow:auto;flex:1}
+
+  .page-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px}
+  .page-head h2{font-size:18px;font-weight:700;color:var(--slate-900)}
+  .page-head p{font-size:12.5px;color:var(--slate-500);margin-top:2px}
+
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border-radius:var(--r-md);font-size:13px;font-weight:600;cursor:pointer;border:1px solid transparent;transition:all .15s;font-family:var(--font)}
+  .btn-primary{background:var(--blue-600);color:#fff;box-shadow:var(--sh-sm)}
+  .btn-primary:hover{background:var(--blue-700)}
+  .btn-violet{background:var(--violet-600);color:#fff;box-shadow:var(--sh-sm)}
+  .btn-violet:hover{background:var(--violet-700)}
+  .btn-outline{background:#fff;color:var(--slate-700);border-color:var(--slate-300)}
+  .btn-outline:hover{background:var(--slate-50)}
+  .btn-ghost{background:transparent;color:var(--slate-600)}
+  .btn-ghost:hover{background:var(--slate-100)}
+
+  .card{background:#fff;border:1px solid var(--slate-200);border-radius:var(--r-lg);box-shadow:var(--sh-sm)}
+  .card-pad{padding:18px}
+
+  /* form */
+  .field{display:flex;flex-direction:column;gap:6px;margin-bottom:16px}
+  .field label{font-size:12px;color:var(--slate-600);font-weight:600}
+  .field .hint{font-size:11.5px;color:var(--slate-400)}
+  .input,.textarea,.select{border:1px solid var(--slate-300);border-radius:var(--r-md);padding:8px 11px;font-size:13px;color:var(--slate-800);background:#fff;font-family:var(--font);width:100%}
+  .textarea{min-height:64px;resize:vertical;line-height:1.5}
+  .input:focus,.textarea:focus,.select:focus{outline:none;border-color:var(--blue-600);box-shadow:0 0 0 3px var(--blue-50)}
+
+  /* mode cards */
+  .mode-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .mode-card{border:1.5px solid var(--slate-200);border-radius:var(--r-lg);padding:14px;cursor:pointer;background:#fff;transition:all .15s;position:relative}
+  .mode-card:hover{border-color:var(--slate-400)}
+  .mode-card.sel-single{border-color:var(--emerald-500);background:var(--emerald-50)}
+  .mode-card.sel-team{border-color:var(--violet-500);background:var(--violet-50)}
+  .mode-card .mc-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  .mode-card .mc-title{font-weight:700;font-size:14px;color:var(--slate-900);display:flex;align-items:center;gap:7px}
+  .mode-card .mc-title .ic{font-size:16px}
+  .mode-card .mc-radio{width:18px;height:18px;border-radius:50%;border:2px solid var(--slate-300);position:relative}
+  .mode-card.sel-single .mc-radio{border-color:var(--emerald-600)}
+  .mode-card.sel-single .mc-radio::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--emerald-600)}
+  .mode-card.sel-team .mc-radio{border-color:var(--violet-600)}
+  .mode-card.sel-team .mc-radio::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--violet-600)}
+  .mode-card .mc-desc{font-size:12px;color:var(--slate-500);line-height:1.5}
+  .mode-card .mc-meta{font-size:11px;color:var(--slate-400);margin-top:6px}
+
+  /* worker preview */
+  .worker-preview{margin-top:14px;padding:12px;background:var(--slate-50);border:1px dashed var(--slate-300);border-radius:var(--r-md)}
+  .worker-preview .wp-title{font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px}
+  .role-chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font-size:11.5px;font-weight:600;background:#fff;border:1px solid var(--slate-200);color:var(--slate-700)}
+  .chip .d{width:5px;height:5px;border-radius:50%}
+
+  /* stage tabs */
+  .stage-tabs{display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--slate-200);padding-bottom:0}
+  .stage-tab{padding:8px 14px;font-size:13px;font-weight:600;color:var(--slate-500);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+  .stage-tab.active{color:var(--blue-700);border-bottom-color:var(--blue-600)}
+  .stage-tab.done{color:var(--emerald-600)}
+  .stage-tab .ck{font-size:11px;margin-left:4px}
+
+  .team-toggle{display:flex;align-items:center;gap:12px;padding:14px;background:var(--violet-50);border:1px solid var(--violet-500);border-radius:var(--r-md);margin-bottom:14px}
+  .toggle{width:38px;height:22px;border-radius:999px;background:var(--slate-300);position:relative;cursor:pointer;flex-shrink:0;transition:background .15s}
+  .toggle.on{background:var(--violet-600)}
+  .toggle::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:var(--sh-sm);transition:left .15s}
+  .toggle.on::after{left:18px}
+  .team-toggle .tt-text{flex:1}
+  .team-toggle .tt-text b{font-size:13px;color:var(--violet-700);display:block}
+  .team-toggle .tt-text span{font-size:11.5px;color:var(--slate-500)}
+
+  .worker-list{display:flex;flex-direction:column;gap:8px}
+  .worker-row{display:flex;align-items:center;gap:10px;padding:10px 12px;background:#fff;border:1px solid var(--slate-200);border-radius:var(--r-md)}
+  .worker-row .wr-role{font-size:12px;font-weight:600;color:var(--slate-700);min-width:88px;display:flex;align-items:center;gap:6px}
+  .worker-row .wr-obj{flex:1;font-size:12px;color:var(--slate-500);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  .badge{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:600}
+  .badge .dot{width:5px;height:5px;border-radius:50%}
+  .badge.emerald{background:var(--emerald-50);color:var(--emerald-700)} .badge.emerald .dot{background:var(--emerald-600)}
+  .badge.amber{background:var(--amber-50);color:var(--amber-700)} .badge.amber .dot{background:var(--amber-500)}
+  .badge.blue{background:var(--blue-50);color:var(--blue-700)} .badge.blue .dot{background:var(--blue-600);animation:pulse 1.5s infinite}
+  .badge.slate{background:var(--slate-100);color:var(--slate-600)} .badge.slate .dot{background:var(--slate-400)}
+  .badge.violet{background:var(--violet-50);color:var(--violet-700)} .badge.violet .dot{background:var(--violet-500)}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+  .prog{display:flex;align-items:center;gap:7px}
+  .prog-track{flex:1;height:5px;background:var(--slate-100);border-radius:999px;overflow:hidden;min-width:60px}
+  .prog-fill{height:100%;border-radius:999px;background:var(--blue-600)}
+  .prog-fill.ok{background:var(--emerald-500)}
+  .prog-fill.warn{background:var(--amber-500)}
+  .prog-fill.over{background:var(--red-500)}
+  .prog span{font-size:11px;color:var(--slate-500);font-variant-numeric:tabular-nums;min-width:38px;text-align:right}
+
+  /* chat */
+  .chat-flow{display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
+  .bubble{max-width:78%;padding:9px 13px;border-radius:var(--r-lg);font-size:13px;line-height:1.55}
+  .bubble.user{align-self:flex-end;background:var(--blue-600);color:#fff;border-bottom-right-radius:4px}
+  .bubble.bot{align-self:flex-start;background:#fff;border:1px solid var(--slate-200);border-bottom-left-radius:4px;color:var(--slate-700)}
+  .bubble.bot .who{font-size:11px;color:var(--slate-400);margin-bottom:2px;font-weight:600}
+
+  .inline-mission{margin:8px 0;border:1px solid var(--violet-500);border-radius:var(--r-lg);overflow:hidden;background:#fff}
+  .inline-mission .im-head{padding:10px 13px;background:var(--violet-50);display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--violet-500)}
+  .inline-mission .im-head b{font-size:12.5px;color:var(--violet-700);display:flex;align-items:center;gap:6px}
+  .inline-mission .im-body{padding:10px 13px}
+  .im-summary{font-size:11.5px;color:var(--slate-600);margin-bottom:8px;padding:7px 9px;background:var(--slate-50);border-radius:var(--r-sm)}
+  .cost-bar{margin-top:8px}
+
+  .chat-input{display:flex;gap:8px;align-items:center;padding:10px;background:#fff;border:1px solid var(--slate-200);border-radius:var(--r-lg)}
+  .chat-input .ci-field{flex:1;border:none;font-size:13px;color:var(--slate-700);font-family:var(--font);outline:none;padding:6px 8px}
+
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:14px;padding:12px;background:#fff;border:1px solid var(--slate-200);border-radius:var(--r-md);font-size:11.5px;color:var(--slate-600)}
+  .legend b{color:var(--slate-800)}
+  .note-box{background:var(--amber-50);border-left:3px solid var(--amber-500);padding:9px 13px;font-size:12px;color:var(--slate-700);margin-top:10px;border-radius:0 var(--r-sm) var(--r-sm) 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="doc-head">
+    <h1>team 模式平台级入口 <span class="tag"><span class="dot"></span>方案 B 归一 mission</span></h1>
+    <p>变更 2026-07-12-team-mode-platform-wide · 默认 single · team 全 opt-in · 三入口触发都建一个 mission</p>
+  </div>
+
+  <!-- ===== 场景 1：mission 创建 ===== -->
+  <div class="scene-label"><span class="num">1</span>入口 ① — mission 创建表单（Phase 1）</div>
+  <div class="app">
+    <div class="sidebar">
+      <div class="brand"><div class="brand-logo">S</div><div class="brand-name">SillyHub</div></div>
+      <div class="nav-item"><span class="ic">📁</span>工作区</div>
+      <div class="nav-item active"><span class="ic">🤖</span>Agent 团队</div>
+      <div class="nav-item"><span class="ic">🔄</span>变更中心</div>
+      <div class="nav-item"><span class="ic">⚡</span>智能体</div>
+      <div class="nav-item"><span class="ic">✅</span>审批</div>
+    </div>
+    <div class="main">
+      <div class="topbar"><div class="crumb">工作区 <span class="sep">/</span> <b>multi-agent-platform</b> <span class="sep">/</span> Agent 团队</div></div>
+      <div class="content">
+        <div class="page-head">
+          <div><h2>发起 Agent 团队</h2><p>让多个 agent 并行分析/执行同一目标，Finalizer 合并结果</p></div>
+        </div>
+        <div class="card card-pad">
+          <div class="field">
+            <label>目标</label>
+            <textarea class="textarea">分析 backend/app/modules/agent 目录的模块职责划分，产出架构文档</textarea>
+            <span class="hint">描述越具体，Coordinator 拆解越准</span>
+          </div>
+
+          <div class="field">
+            <label>模式</label>
+            <div class="mode-row">
+              <div class="mode-card sel-single">
+                <div class="mc-head"><div class="mc-title"><span class="ic">👤</span>single</div><div class="mc-radio"></div></div>
+                <div class="mc-desc">单 agent 跑完全程。默认，零回归。</div>
+                <div class="mc-meta">适用：小任务、问答、简单修改</div>
+              </div>
+              <div class="mode-card sel-team">
+                <div class="mc-head"><div class="mc-title"><span class="ic">👥</span>team</div><div class="mc-radio"></div></div>
+                <div class="mc-desc">Coordinator 拆 1-5 个 Worker 并行，Finalizer 合并。</div>
+                <div class="mc-meta">适用：扫描、多模块、重构、核验</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="worker-preview">
+            <div class="wp-title">Team 预览 · Coordinator（GLM）将拆解为</div>
+            <div class="role-chips">
+              <span class="chip"><span class="d" style="background:var(--blue-600)"></span>arch · 架构</span>
+              <span class="chip"><span class="d" style="background:var(--emerald-500)"></span>code_style · 代码风格</span>
+              <span class="chip"><span class="d" style="background:var(--amber-500)"></span>test · 测试覆盖</span>
+              <span class="chip"><span class="d" style="background:var(--violet-500)"></span>integration · 集成</span>
+              <span class="chip" style="color:var(--slate-400)">+ 按需拆解…</span>
+            </div>
+            <div class="note-box">⚠️ team 模式多 worker 烧 token，建议设预算。Finalizer 单点合并避免并发写冲突。</div>
+          </div>
+
+          <div class="field" style="margin-top:16px;max-width:240px">
+            <label>预算（USD，可选）</label>
+            <input class="input" value="4.00" style="text-align:right">
+            <span class="hint">超预算拒绝派发新 worker（软门）</span>
+          </div>
+
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn btn-violet">👥 启动团队</button>
+            <button class="btn btn-outline">取消</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 场景 2：变更阶段 team ===== -->
+  <div class="scene-label"><span class="num">2</span>入口 ② — 变更阶段 team（Phase 2 execute / Phase 3 verify）</div>
+  <div class="app">
+    <div class="sidebar">
+      <div class="brand"><div class="brand-logo">S</div><div class="brand-name">SillyHub</div></div>
+      <div class="nav-item"><span class="ic">📁</span>工作区</div>
+      <div class="nav-item"><span class="ic">🤖</span>Agent 团队</div>
+      <div class="nav-item active"><span class="ic">🔄</span>变更中心</div>
+      <div class="nav-item"><span class="ic">⚡</span>智能体</div>
+    </div>
+    <div class="main">
+      <div class="topbar"><div class="crumb">变更 <span class="sep">/</span> <b>#abc-123 重构 agent 调度</b></div></div>
+      <div class="content">
+        <div class="page-head"><div><h2>重构 agent 调度</h2><p>brainstorm → plan → execute → verify → archive</p></div></div>
+
+        <div class="stage-tabs">
+          <div class="stage-tab done">✓ brainstorm</div>
+          <div class="stage-tab done">✓ plan</div>
+          <div class="stage-tab active">execute</div>
+          <div class="stage-tab">verify</div>
+          <div class="stage-tab">archive</div>
+        </div>
+
+        <div class="card card-pad">
+          <div class="team-toggle">
+            <div class="toggle on"></div>
+            <div class="tt-text">
+              <b>👥 用团队执行</b>
+              <span>Coordinator 按 plan task 拆多个 impl worker 并行写代码，Finalizer 合并 patch（人审 apply-back）</span>
+            </div>
+          </div>
+
+          <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Worker 进度（3 个并行）</div>
+          <div class="worker-list">
+            <div class="worker-row">
+              <div class="wr-role"><span class="chip" style="background:var(--blue-50);color:var(--blue-700);border:0">impl</span> task 1-3</div>
+              <div class="wr-obj">placement.py / decide_backend 改造</div>
+              <span class="badge blue"><span class="dot"></span>running</span>
+              <div class="prog" style="width:120px"><div class="prog-track"><div class="prog-fill" style="width:62%"></div></div><span>62%</span></div>
+            </div>
+            <div class="worker-row">
+              <div class="wr-role"><span class="chip" style="background:var(--blue-50);color:var(--blue-700);border:0">impl</span> task 4-6</div>
+              <div class="wr-obj">dispatch_worker 链路</div>
+              <span class="badge emerald"><span class="dot"></span>completed</span>
+              <div class="prog" style="width:120px"><div class="prog-track"><div class="prog-fill ok" style="width:100%"></div></div><span>100%</span></div>
+            </div>
+            <div class="worker-row">
+              <div class="wr-role"><span class="chip" style="background:var(--blue-50);color:var(--blue-700);border:0">impl</span> task 7-9</div>
+              <div class="wr-obj">router 透传 + 测试</div>
+              <span class="badge slate"><span class="dot"></span>pending</span>
+              <div class="prog" style="width:120px"><div class="prog-track"><div class="prog-fill" style="width:0%"></div></div><span>0%</span></div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:16px;margin-top:14px;padding-top:12px;border-top:1px solid var(--slate-100)">
+            <div style="font-size:12px;color:var(--slate-500)">累计成本</div>
+            <div class="prog" style="flex:1"><div class="prog-track"><div class="prog-fill warn" style="width:58%"></div></div><span>$2.32 / $4.00</span></div>
+            <button class="btn btn-primary">启动 execute</button>
+          </div>
+        </div>
+
+        <div class="card card-pad" style="margin-top:12px">
+          <div class="team-toggle" style="background:var(--slate-50);border-color:var(--slate-300)">
+            <div class="toggle"></div>
+            <div class="tt-text">
+              <b style="color:var(--slate-700)">👥 用团队核验（verify 阶段，Phase 3）</b>
+              <span>多 verify worker 从不同角度（正确性/边界/性能/安全）并行核验，gate 按策略 A 合并（全过才过）</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="legend">
+          <span><b>策略 A</b> gate 合并：全 worker exit=0 才算过，任一失败取最严重值</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 场景 3：会话发起 team ===== -->
+  <div class="scene-label"><span class="num">3</span>入口 ③ — 会话中发起 team（Phase 4，D-001）</div>
+  <div class="app">
+    <div class="sidebar">
+      <div class="brand"><div class="brand-logo">S</div><div class="brand-name">SillyHub</div></div>
+      <div class="nav-item"><span class="ic">📁</span>工作区</div>
+      <div class="nav-item"><span class="ic">🤖</span>Agent 团队</div>
+      <div class="nav-item"><span class="ic">🔄</span>变更中心</div>
+      <div class="nav-item active"><span class="ic">💬</span>会话</div>
+    </div>
+    <div class="main">
+      <div class="topbar"><div class="crumb">会话 <span class="sep">/</span> <b>scan-runtime-02</b> <span class="sep">·</span> claude</div></div>
+      <div class="content">
+        <div class="chat-flow">
+          <div class="bubble user">分析下 agent 模块的职责划分，给我一份架构概览</div>
+          <div class="bubble bot">
+            <div class="who">assistant · claude</div>
+            好的，这个目标适合用团队并行分析。我发起一个 team mission，3 个 worker 分别看架构/代码风格/测试覆盖，最后合并。
+          </div>
+        </div>
+
+        <div class="inline-mission">
+          <div class="im-head">
+            <b>👥 团队分析 · 进行中</b>
+            <span class="badge violet"><span class="dot"></span>mission #m-8821</span>
+          </div>
+          <div class="im-body">
+            <div class="im-summary">Coordinator 已拆解：3 个 Worker · 预算 $2.32 / $4.00</div>
+            <div class="worker-list">
+              <div class="worker-row">
+                <div class="wr-role"><span class="chip"><span class="d" style="background:var(--blue-600)"></span>arch</span></div>
+                <div class="wr-obj">模块边界与依赖</div>
+                <span class="badge blue"><span class="dot"></span>running</span>
+              </div>
+              <div class="worker-row">
+                <div class="wr-role"><span class="chip"><span class="d" style="background:var(--emerald-500)"></span>code_style</span></div>
+                <div class="wr-obj">命名/注释/分层</div>
+                <span class="badge emerald"><span class="dot"></span>completed</span>
+              </div>
+              <div class="worker-row">
+                <div class="wr-role"><span class="chip"><span class="d" style="background:var(--amber-500)"></span>test</span></div>
+                <div class="wr-obj">测试覆盖缺口</div>
+                <span class="badge slate"><span class="dot"></span>pending</span>
+              </div>
+            </div>
+            <div class="cost-bar prog"><div class="prog-track"><div class="prog-fill warn" style="width:58%"></div></div><span>$2.32 / $4.00 · 58%</span></div>
+            <div style="margin-top:8px"><button class="btn btn-ghost" style="font-size:12px;padding:5px 10px">查看完整 mission →</button></div>
+          </div>
+        </div>
+
+        <div class="chat-input">
+          <div style="font-size:18px">💬</div>
+          <input class="ci-field" placeholder="继续追问，或点右侧发起团队分析…">
+          <button class="btn btn-violet" style="font-size:12px;padding:6px 11px">💡 用团队分析</button>
+          <button class="btn btn-primary" style="font-size:12px;padding:6px 11px">发送</button>
+        </div>
+
+        <div class="note-box">点「用团队分析」= 创建一个 mission（绑当前 session_id）。完成后结果摘要回传对话 + 跳转 mission 详情。<b>不是</b>会话内多 agent 轮转（那个需 driver 层新机制，成本高 5 倍）。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend" style="margin-top:20px">
+    <span><b>决策</b> D-001 会话=发起 mission · D-002 execute+verify · D-003 默认 single · D-004 方案B · D-005 gate 策略A</span>
+  </div>
+</div>
+</body>
+</html>

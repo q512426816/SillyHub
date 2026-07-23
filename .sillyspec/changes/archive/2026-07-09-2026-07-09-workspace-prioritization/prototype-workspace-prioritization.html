@@ -1,0 +1,345 @@
+<!--
+author: qinyi
+created_at: 2026-07-09T22:30:00
+change: 2026-07-09-workspace-prioritization
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>工作区前置化 — 原型</title>
+<style>
+  :root{
+    --primary:#2563eb; --cyan:#06b6d4; --emerald:#10b981;
+    --success:#10b981; --warning:#f59e0b; --error:#ef4444;
+    --bg:#f8fafc; --card:#ffffff; --border:#e2e8f0;
+    --slate-900:#0f172a; --slate-700:#334155; --slate-500:#64748b; --slate-300:#cbd5e1; --slate-100:#f1f5f9;
+    --r-sm:6px; --r-md:8px; --r-lg:12px; --r-xl:16px;
+    --shadow:0 1px 3px rgba(15,23,42,.08),0 1px 2px rgba(15,23,42,.06);
+    --shadow-md:0 4px 12px rgba(15,23,42,.1);
+    font-family:Inter,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--slate-900);font-size:14px;line-height:1.5;}
+  .tabs{display:flex;gap:8px;padding:12px 20px;background:var(--card);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:50;box-shadow:var(--shadow);}
+  .tab{padding:8px 16px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--card);cursor:pointer;font-size:13px;color:var(--slate-700);}
+  .tab.active{background:var(--primary);color:#fff;border-color:var(--primary);}
+  .scene{display:none;padding:24px;}
+  .scene.active{display:block;}
+  .note{background:#eff6ff;border:1px solid #bfdbfe;border-radius:var(--r-md);padding:10px 14px;color:#1e40af;font-size:12.5px;margin-bottom:16px;}
+  .note b{color:#1e3a8a;}
+
+  /* === 通用顶栏 === */
+  .topbar{height:52px;background:var(--card);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:14px;}
+  .logo{font-weight:700;color:var(--primary);font-size:15px;letter-spacing:.3px;}
+  .topbar .spacer{flex:1;}
+
+  /* === 状态徽标 === */
+  .badge{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;line-height:1.6;}
+  .badge .dot{width:7px;height:7px;border-radius:50%;}
+  .b-success{background:#dcfce7;color:#166534;} .b-success .dot{background:var(--success);}
+  .b-error{background:#fee2e2;color:#991b1b;} .b-error .dot{background:var(--error);}
+  .b-warn{background:#fef3c7;color:#92400e;} .b-warn .dot{background:var(--warning);}
+  .b-neutral{background:var(--slate-100);color:var(--slate-500);} .b-neutral .dot{background:var(--slate-500);}
+
+  /* === 画面1 选择器 === */
+  .picker-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:18px;}
+  .picker-head h2{margin:0;font-size:20px;}
+  .picker-head .sub{color:var(--slate-500);font-size:13px;margin-top:4px;}
+  .bypass{display:flex;gap:8px;}
+  .bypass a{padding:6px 12px;border:1px solid var(--border);border-radius:var(--r-md);color:var(--slate-700);text-decoration:none;font-size:12.5px;background:var(--card);}
+  .bypass a:hover{border-color:var(--primary);color:var(--primary);}
+  .ws-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;}
+  .ws-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r-lg);padding:16px;cursor:pointer;transition:all .15s;box-shadow:var(--shadow);}
+  .ws-card:hover{border-color:var(--primary);box-shadow:var(--shadow-md);transform:translateY(-1px);}
+  .ws-card .name{font-weight:600;font-size:15px;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;}
+  .ws-card .path{color:var(--slate-500);font-size:12px;font-family:monospace;background:var(--slate-100);padding:3px 7px;border-radius:var(--r-sm);display:inline-block;margin-top:8px;}
+  .ws-card .bind-hint{color:var(--warning);font-size:12px;margin-top:8px;}
+  .empty{text-align:center;padding:60px 20px;border:2px dashed var(--slate-300);border-radius:var(--r-lg);color:var(--slate-500);}
+  .empty button{margin-top:14px;padding:8px 18px;background:var(--primary);color:#fff;border:none;border-radius:var(--r-md);cursor:pointer;font-size:13px;}
+
+  /* === 画面2 AppShell === */
+  .shell{display:flex;height:560px;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;background:var(--bg);}
+  .sidebar{width:60px;background:#0f172a;color:#cbd5e1;display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:14px;}
+  .sidebar .ico{width:36px;height:36px;border-radius:var(--r-md);display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer;}
+  .sidebar .ico.active{background:var(--primary);color:#fff;}
+  .main-area{flex:1;display:flex;flex-direction:column;}
+  .content{flex:1;padding:20px;overflow:auto;}
+  .switcher{position:relative;}
+  .switcher-btn{display:flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--card);cursor:pointer;font-size:13px;}
+  .switcher-btn:hover{border-color:var(--primary);}
+  .switcher-btn .chev{color:var(--slate-500);font-size:10px;}
+  .switcher-menu{position:absolute;top:46px;left:0;width:280px;background:var(--card);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow-md);padding:6px;z-index:40;display:none;}
+  .switcher-menu.open{display:block;}
+  .switcher-menu .mhead{padding:8px 10px;font-size:11px;color:var(--slate-500);text-transform:uppercase;letter-spacing:.5px;}
+  .switcher-menu .mitem{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:var(--r-md);cursor:pointer;font-size:13px;}
+  .switcher-menu .mitem:hover{background:var(--slate-100);}
+  .switcher-menu .mitem.current{background:#eff6ff;color:var(--primary);}
+  .switcher-menu .mitem .left{display:flex;align-items:center;gap:8px;}
+  .switcher-menu .sep{height:1px;background:var(--border);margin:4px 0;}
+  .switcher-menu .new{color:var(--primary);font-weight:600;}
+  .demo-bar{background:var(--slate-100);border-radius:var(--r-md);padding:10px 14px;font-size:12.5px;color:var(--slate-700);margin-bottom:14px;font-family:monospace;}
+  .demo-bar b{color:var(--primary);}
+
+  /* === 画面3 弹窗 === */
+  .modal-mask{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:100;}
+  .modal-mask.open{display:flex;}
+  .modal{background:var(--card);border-radius:var(--r-xl);width:460px;box-shadow:var(--shadow-md);overflow:hidden;}
+  .modal h3{margin:0;padding:18px 20px;border-bottom:1px solid var(--border);font-size:16px;}
+  .modal .body{padding:20px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-size:12.5px;color:var(--slate-700);margin-bottom:5px;font-weight:500;}
+  .field .ctrl{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-md);font-size:13px;background:var(--card);}
+  .radios{display:flex;flex-direction:column;gap:8px;}
+  .radio{display:flex;align-items:flex-start;gap:8px;padding:10px;border:1px solid var(--border);border-radius:var(--r-md);cursor:pointer;font-size:13px;}
+  .radio.on{border-color:var(--primary);background:#eff6ff;}
+  .radio .desc{color:var(--slate-500);font-size:11.5px;margin-top:2px;}
+  .modal .foot{padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--slate-100);}
+  .btn{padding:8px 16px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--card);cursor:pointer;font-size:13px;}
+  .btn.primary{background:var(--primary);color:#fff;border-color:var(--primary);}
+  .open-modal{padding:10px 18px;background:var(--primary);color:#fff;border:none;border-radius:var(--r-md);cursor:pointer;font-size:13px;}
+
+  /* === 画面4 流程图 === */
+  .flow{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:20px 0;}
+  .node{padding:12px 18px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--card);font-size:13px;text-align:center;min-width:110px;box-shadow:var(--shadow);}
+  .node.start{background:#eff6ff;border-color:var(--primary);color:var(--primary);font-weight:600;}
+  .node.decision{background:#fef3c7;border-color:var(--warning);}
+  .node.end{background:#dcfce7;border-color:var(--success);}
+  .arrow{color:var(--slate-500);font-size:18px;}
+  .switch-demo{display:flex;gap:14px;align-items:center;margin-top:24px;flex-wrap:wrap;}
+  .url-pill{font-family:monospace;background:var(--card);border:1px solid var(--border);border-radius:var(--r-md);padding:10px 14px;font-size:13px;}
+  .url-pill .ws{color:var(--primary);font-weight:700;}
+  .do-switch{padding:8px 16px;background:var(--cyan);color:#fff;border:none;border-radius:var(--r-md);cursor:pointer;font-size:13px;}
+</style>
+</head>
+<body>
+
+<div class="tabs">
+  <button class="tab active" onclick="show(1)">① 工作区选择器（登录落地）</button>
+  <button class="tab" onclick="show(2)">② 顶栏切换器（详情页）</button>
+  <button class="tab" onclick="show(3)">③ daemon 绑定弹窗</button>
+  <button class="tab" onclick="show(4)">④ 守卫流程 + 切同模块</button>
+</div>
+
+<!-- 画面1：工作区选择器 -->
+<div class="scene active" id="s1">
+  <div class="note">登录后<b>强制落到此页</b>（取代原标题页）。不选工作区时，左侧侧边栏只露全局菜单。右上角<b>平台管理 / 系统设置</b>是<b>后台旁路</b>（D-001），任何人可不选工作区直接进后台。守护进程（daemon）状态以徽标显示：绿=在线、红=离线、黄=未绑定。</div>
+  <div class="topbar">
+    <span class="logo">SillyHub</span>
+    <span class="spacer"></span>
+    <div class="bypass">
+      <a href="#">⚙ 平台管理</a>
+      <a href="#">🛠 系统设置</a>
+    </div>
+  </div>
+  <div class="scene" style="display:block;padding:24px 0 0;">
+    <div class="picker-head">
+      <div>
+        <h2>选择工作区</h2>
+        <div class="sub">选择一个工作区开始，或在右上角进入平台后台</div>
+      </div>
+      <button class="btn primary" onclick="toggleEmpty()">切换：空状态 / 有工作区</button>
+    </div>
+    <div class="ws-grid" id="wsGrid">
+      <div class="ws-card" onclick="alert('进入：前端中台（daemon 在线）')">
+        <div class="name">前端中台 <span class="badge b-success"><span class="dot"></span>守护在线</span></div>
+        <div class="sub" style="color:var(--slate-500);font-size:12px;">3 成员 · 最近活跃</div>
+        <span class="path">D:/projects/frontend-mid</span>
+      </div>
+      <div class="ws-card" onclick="alert('进入：后端 API（daemon 离线，仅显示状态不阻断 D-005）')">
+        <div class="name">后端 API <span class="badge b-error"><span class="dot"></span>守护离线</span></div>
+        <div class="sub" style="color:var(--slate-500);font-size:12px;">2 成员</div>
+        <span class="path">D:/projects/backend-api</span>
+      </div>
+      <div class="ws-card" onclick="alert('未绑定 → 弹 daemon 绑定弹窗 D-003')">
+        <div class="name">数据看板 <span class="badge b-warn"><span class="dot"></span>未绑定</span></div>
+        <div class="bind-hint">⚠ 需先配置守护进程，点击配置</div>
+      </div>
+      <div class="ws-card" onclick="alert('进入：Agent 实验室')">
+        <div class="name">Agent 实验室 <span class="badge b-success"><span class="dot"></span>守护在线</span></div>
+        <div class="sub" style="color:var(--slate-500);font-size:12px;">1 成员</div>
+        <span class="path">D:/projects/agent-lab</span>
+      </div>
+      <div class="ws-card" style="border-style:dashed;display:flex;align-items:center;justify-content:center;color:var(--slate-500);min-height:110px;" onclick="alert('创建新工作区')">
+        ＋ 创建工作区
+      </div>
+    </div>
+    <div class="empty" id="emptyState" style="display:none;">
+      <div style="font-size:40px;">📂</div>
+      <div style="margin-top:8px;">你还没有任何工作区</div>
+      <div style="font-size:12px;margin-top:4px;">创建一个工作区开始使用平台</div>
+      <button>＋ 创建工作区</button>
+    </div>
+  </div>
+</div>
+
+<!-- 画面2：顶栏切换器 -->
+<div class="scene" id="s2">
+  <div class="note">进入工作区后的<b>顶栏全局切换器</b>。显示当前工作区名 + daemon 状态徽标。点击下拉切换，<b>跳到新工作区的同模块</b>（A/变更 → B/变更，D-002）。下拉里每项都带 daemon 状态。</div>
+  <div class="shell">
+    <div class="sidebar">
+      <div class="ico active">🏠</div>
+      <div class="ico">📦</div>
+      <div class="ico">🔄</div>
+      <div class="ico">🤖</div>
+      <div class="ico">📊</div>
+      <div class="ico">⚙</div>
+    </div>
+    <div class="main-area">
+      <div class="topbar">
+        <div class="switcher">
+          <div class="switcher-btn" onclick="toggleMenu()">
+            <span class="badge b-success"><span class="dot"></span></span>
+            <b id="curName">前端中台</b>
+            <span class="chev">▼</span>
+          </div>
+          <div class="switcher-menu" id="switcherMenu">
+            <div class="mhead">最近使用</div>
+            <div class="mitem current" onclick="pick('前端中台','success')">
+              <span class="left">前端中台</span>
+              <span class="badge b-success"><span class="dot"></span>在线</span>
+            </div>
+            <div class="mitem" onclick="pick('Agent 实验室','success')">
+              <span class="left">Agent 实验室</span>
+              <span class="badge b-success"><span class="dot"></span>在线</span>
+            </div>
+            <div class="mitem" onclick="pick('后端 API','error')">
+              <span class="left">后端 API</span>
+              <span class="badge b-error"><span class="dot"></span>离线</span>
+            </div>
+            <div class="mitem" onclick="alert('未绑定 → 弹绑定弹窗 D-003')">
+              <span class="left">数据看板</span>
+              <span class="badge b-warn"><span class="dot"></span>未绑定</span>
+            </div>
+            <div class="sep"></div>
+            <div class="mitem new" onclick="alert('打开完整工作区列表')">查看全部工作区 →</div>
+          </div>
+        </div>
+        <span class="spacer"></span>
+        <span style="color:var(--slate-500);font-size:12px;">🔍 全局搜索　🔔　👤 admin</span>
+      </div>
+      <div class="content">
+        <div class="demo-bar">当前路径：<b>/workspaces/<span id="pathWs">frontend-mid</span>/changes</b>　←　切换器只替换工作区段，保留「变更」模块（D-002）</div>
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r-lg);padding:20px;">
+          <h3 style="margin:0 0 8px;">变更中心 — 前端中台</h3>
+          <div style="color:var(--slate-500);font-size:13px;">（页面内容示意：当前在工作区「前端中台」的「变更」模块）</div>
+          <div style="margin-top:16px;display:flex;gap:10px;">
+            <div style="flex:1;background:var(--slate-100);border-radius:var(--r-md);padding:14px;">进行中：3</div>
+            <div style="flex:1;background:var(--slate-100);border-radius:var(--r-md);padding:14px;">待审批：1</div>
+            <div style="flex:1;background:var(--slate-100);border-radius:var(--r-md);padding:14px;">已归档：12</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 画面3：daemon 绑定弹窗 -->
+<div class="scene" id="s3">
+  <div class="note">未绑定 daemon 的工作区，点击工作区项时弹出此<b>绑定弹窗</b>（D-003，不内嵌下拉）。选守护进程实例 + 本地路径 + 路径来源，绑好才进。</div>
+  <button class="open-modal" onclick="openModal()">打开 daemon 绑定弹窗</button>
+  <div style="margin-top:18px;color:var(--slate-500);font-size:13px;">提示：实际触发时机 = 在选择器/切换器点击「未绑定」状态的工作区。</div>
+
+  <div class="modal-mask" id="modal">
+    <div class="modal">
+      <h3>配置守护进程接入 — 数据看板</h3>
+      <div class="body">
+        <div class="field">
+          <label>守护进程实例</label>
+          <div class="ctrl">本机 daemon · 192.168.1.10 ▼</div>
+        </div>
+        <div class="field">
+          <label>工作区本地路径</label>
+          <div class="ctrl" style="font-family:monospace;">D:/projects/data-dashboard</div>
+        </div>
+        <div class="field">
+          <label>路径来源</label>
+          <div class="radios">
+            <div class="radio on">
+              <input type="radio" checked />
+              <div>
+                <div><b>守护进程客户端</b>（daemon-client）</div>
+                <div class="desc">路径在守护进程所在机器，文件操作经 daemon 代理</div>
+              </div>
+            </div>
+            <div class="radio">
+              <input type="radio" />
+              <div>
+                <div>服务器本地（server-local）</div>
+                <div class="desc">路径在 backend 服务器，直接本地访问</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="foot">
+        <button class="btn" onclick="closeModal()">取消</button>
+        <button class="btn primary" onclick="alert('绑定完成 → 进入工作区');closeModal();">确认并进入</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 画面4：守卫流程 + 切同模块 -->
+<div class="scene" id="s4">
+  <div class="note"><b>守卫逻辑</b>（D-001/D-006 客户端守卫）：在 dashboard layout 层，路径无 /workspaces/:id 且不在白名单 → 重定向到选择器。</div>
+  <h3 style="margin-top:8px;">登录后守卫流程</h3>
+  <div class="flow">
+    <div class="node start">登录成功</div>
+    <span class="arrow">→</span>
+    <div class="node decision">路径含<br/>/workspaces/:id ?</div>
+    <span class="arrow">→ 否</span>
+    <div class="node">在白名单？<br/><small style="color:var(--slate-500)">/admin /settings /ppm</small></div>
+    <span class="arrow">→ 否</span>
+    <div class="node end">重定向<br/>/workspaces 选择器</div>
+  </div>
+  <div class="flow">
+    <div class="node decision" style="opacity:.6;">（含 wsId）</div>
+    <span class="arrow">→ 是</span>
+    <div class="node end">正常渲染<br/>工作区功能菜单</div>
+  </div>
+
+  <h3 style="margin-top:30px;">切换器「切同模块」示意（D-002）</h3>
+  <div class="switch-demo">
+    <div class="url-pill">/workspaces/<span class="ws">A</span>/changes</div>
+    <button class="do-switch" onclick="doSwitch()">▼ 用切换器切到 B</button>
+    <span class="arrow">→</span>
+    <div class="url-pill" id="afterSwitch">/workspaces/<span class="ws">A</span>/changes</div>
+  </div>
+  <div style="margin-top:10px;color:var(--slate-500);font-size:12.5px;">只替换工作区 id 段，保留「/changes」模块；不保留子路径（如 /changes/123），避免目标工作区 404。</div>
+</div>
+
+<script>
+  function show(n){
+    document.querySelectorAll('.scene').forEach(s=>s.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    document.getElementById('s'+n).classList.add('active');
+    document.querySelectorAll('.tab')[n-1].classList.add('active');
+    closeModal();
+    document.getElementById('switcherMenu')?.classList.remove('open');
+  }
+  function toggleEmpty(){
+    const grid=document.getElementById('wsGrid'), empty=document.getElementById('emptyState');
+    const showGrid = grid.style.display!=='none';
+    grid.style.display = showGrid?'none':'grid';
+    empty.style.display = showGrid?'block':'none';
+  }
+  function toggleMenu(){ document.getElementById('switcherMenu').classList.toggle('open'); }
+  function pick(name,kind){
+    document.getElementById('curName').textContent=name;
+    const pathMap={'前端中台':'frontend-mid','Agent 实验室':'agent-lab','后端 API':'backend-api'};
+    document.getElementById('pathWs').textContent=pathMap[name]||'xxx';
+    document.getElementById('switcherMenu').classList.remove('open');
+    document.querySelectorAll('#switcherMenu .mitem').forEach(m=>m.classList.remove('current'));
+    event.currentTarget.classList.add('current');
+  }
+  function openModal(){ document.getElementById('modal').classList.add('open'); }
+  function closeModal(){ document.getElementById('modal').classList.remove('open'); }
+  function doSwitch(){
+    const el=document.getElementById('afterSwitch');
+    el.innerHTML='/workspaces/<span class="ws">B</span>/changes';
+  }
+</script>
+</body>
+</html>

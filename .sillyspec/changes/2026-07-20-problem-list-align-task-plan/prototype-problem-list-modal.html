@@ -1,0 +1,158 @@
+<!--
+author: qinyi
+created_at: 2026-07-20 11:23:19
+description: 问题清单对齐任务计划 — 列表操作列 + 统一详情/执行弹窗 原型
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>问题清单对齐任务计划 · 原型</title>
+<style>
+  :root { --bd:#d1d5db; --bg:#f9fafb; --muted:#6b7280; --accent:#2563eb; --ok:#059669; --warn:#d97706; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHeu", sans-serif; margin: 0; padding: 24px; background:#fff; color:#111827; font-size: 13px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  h2 { font-size: 14px; margin: 24px 0 8px; color: var(--muted); font-weight: 600; border-left: 3px solid var(--accent); padding-left: 8px; }
+  .sub { color: var(--muted); margin-bottom: 16px; }
+  table { width: 100%; border-collapse: collapse; border: 1px solid var(--bd); background: #fff; }
+  th, td { border: 1px solid var(--bd); padding: 6px 8px; text-align: left; }
+  th { background: var(--bg); font-weight: 600; color: var(--muted); font-size: 12px; }
+  .tag { display:inline-block; padding:1px 8px; border-radius: 10px; font-size: 11px; }
+  .t-new { background:#eef2ff; color:#3730a3; }      /* 新建 */
+  .t-doing { background:#dbeafe; color:#1e40af; }    /* 进行中 */
+  .t-done { background:#d1fae5; color:#065f46; }     /* 已完成 */
+  button { font-size: 12px; padding: 2px 8px; margin-right: 4px; border:1px solid var(--bd); background:#fff; border-radius: 4px; cursor: pointer; }
+  button.primary { background: var(--accent); color:#fff; border-color: var(--accent); }
+  button.ghost { color: var(--muted); }
+  button.danger { color: #b91c1c; }
+  .modal { border: 2px solid var(--bd); border-radius: 8px; max-width: 780px; margin-top: 8px; background:#fff; box-shadow: 0 4px 16px rgba(0,0,0,.06); }
+  .modal-head { padding: 10px 14px; border-bottom: 1px solid var(--bd); display:flex; align-items:center; gap:8px; background: var(--bg); border-radius: 8px 8px 0 0; }
+  .modal-body { padding: 14px; }
+  .card { border:1px solid var(--bd); background: var(--bg); border-radius: 6px; padding: 12px; margin-bottom: 12px; }
+  .card-title { font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 8px; }
+  .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; }
+  .grid div { font-size: 12px; }
+  .grid .k { color: var(--muted); }
+  .rec-tbl td { font-size: 11px; }
+  .form-area { border:1px solid var(--bd); border-radius:6px; padding:10px; margin-top:8px; }
+  .day-row { background:#fff; border:1px solid var(--bd); border-radius:4px; padding:8px; margin-bottom:6px; }
+  .day-date { font-size:11px; font-weight:600; margin-bottom:4px; }
+  .form-title { font-size:11px; font-weight:600; color: var(--muted); margin-bottom:6px; }
+  input { border:1px solid var(--bd); border-radius:4px; padding:3px 6px; font-size:12px; }
+  .flow { display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:12px; border:1px dashed var(--bd); border-radius:6px; background:var(--bg); }
+  .flow .node { padding:4px 10px; border-radius: 14px; font-size:12px; font-weight:600; }
+  .arrow { color: var(--muted); }
+  .legend { font-size:11px; color: var(--muted); margin-top:6px; }
+  .note { background:#fffbeb; border:1px solid #fde68a; color:#92400e; padding:8px 10px; border-radius:6px; font-size:12px; margin-top:8px; }
+</style>
+</head>
+<body>
+
+<h1>问题清单对齐任务计划 · 交互原型</h1>
+<div class="sub">状态 7 态 → 3 态（新建 / 进行中 / 已完成）；执行流程对齐任务计划：开始 → 执行（可重复 + 跨天）→ 完成。</div>
+
+<h2>① 列表操作列（按状态显示不同按钮）</h2>
+<table>
+  <thead>
+    <tr>
+      <th>问题描述</th><th>责任人</th><th>项目/模块</th><th>问题类型</th><th>紧急度</th>
+      <th>已消耗</th><th>状态</th><th style="width:280px">操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>导出按钮偶发无响应</td><td>张三</td><td>PPM / 任务计划</td><td>缺陷</td><td>高</td>
+      <td>—</td><td><span class="tag t-new">新建</span></td>
+      <td><button class="primary">开始</button><button>编辑</button><button>详情</button><button class="danger">删除</button></td>
+    </tr>
+    <tr>
+      <td>日历跨天工时不累加</td><td>李四</td><td>PPM / 工作台</td><td>缺陷</td><td>中</td>
+      <td>1.5 人天</td><td><span class="tag t-doing">进行中</span></td>
+      <td><button class="primary">执行</button><button>编辑</button><button>详情</button><button class="danger">删除</button></td>
+    </tr>
+    <tr>
+      <td>列表默认查 20 条</td><td>王五</td><td>PPM / 问题清单</td><td>优化</td><td>低</td>
+      <td>0.5 人天</td><td><span class="tag t-done">已完成</span></td>
+      <td><button>编辑</button><button>详情</button><button class="danger">删除</button></td>
+    </tr>
+  </tbody>
+</table>
+<div class="legend">说明：新建态可「开始」；进行中可「执行」(打开右侧弹窗)；任意态可「编辑」基本信息 / 「详情」/「删除」(本人或管理员)。已完成的旧「审核/验证/驳回」入口全部移除。</div>
+
+<h2>② 点「执行」打开的统一弹窗 ProblemDetailModal（execute 模式）</h2>
+<div class="modal">
+  <div class="modal-head">
+    <b>详情</b>
+    <span class="tag t-doing">进行中</span>
+    <span style="color:var(--muted)">日历跨天工时不累加</span>
+  </div>
+  <div class="modal-body">
+    <!-- 问题信息卡 -->
+    <div class="card">
+      <div class="card-title">问题信息</div>
+      <div class="grid">
+        <div><span class="k">项目：</span>PPM</div>
+        <div><span class="k">模块：</span>工作台</div>
+        <div><span class="k">功能名称：</span>日历面板</div>
+        <div><span class="k">问题类型：</span>缺陷</div>
+        <div><span class="k">紧急度：</span>中</div>
+        <div><span class="k">已消耗：</span><span style="color:var(--ok);font-weight:600">1.5 人天</span></div>
+        <div><span class="k">责任人：</span>李四</div>
+        <div><span class="k">发现人：</span>赵六</div>
+        <div class="k" style="grid-column:1/3"><span class="k">计划时间：</span>2026-07-15 ~ 2026-07-22</div>
+        <div style="grid-column:1/3"><span class="k">问题描述：</span>工作台日历同一任务跨天填报后，负载求和未按天累加，显示偏小。</div>
+      </div>
+    </div>
+
+    <!-- 处置记录表 -->
+    <div class="card-title">处置记录（2）</div>
+    <table class="rec-tbl">
+      <thead><tr><th>开始时间</th><th>结束时间</th><th>耗时</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>2026-07-15 09:00:00</td><td>2026-07-15 18:00:00</td><td>1 人天</td><td>定位求和逻辑</td></tr>
+        <tr><td>2026-07-16 09:00:00</td><td>—</td><td>0.5 人天</td><td>处置中（in-flight）</td></tr>
+      </tbody>
+    </table>
+
+    <!-- 跨天填报区（execute 模式 + 进行中 + 有 in-flight 记录时显示）-->
+    <div class="form-area">
+      <div class="form-title">填报执行（跨 2 天，已自动按天拆分，逐天填写耗时与说明）</div>
+      <div class="day-row">
+        <div class="day-date">2026-07-16</div>
+        耗时(人天) <input style="width:90px" value="0.5" />
+        执行情况说明 <input style="width:260px" value="修复求和分支" />
+      </div>
+      <div class="day-row">
+        <div class="day-date">2026-07-17</div>
+        耗时(人天) <input style="width:90px" />
+        执行情况说明 <input style="width:260px" />
+      </div>
+      <div style="margin-top:8px">
+        <button>提交(回新建)</button>
+        <button class="primary">完成</button>
+      </div>
+    </div>
+    <div class="note">
+      「提交(回新建)」= 收口本次处置记录，问题状态回到<b>新建</b>，可再次「开始」(重复执行)；
+      「完成」= 问题进入<b>已完成</b>(终态)。中间天强制 submit，只有最后一天用你选的动作。
+    </div>
+  </div>
+</div>
+<div class="legend">detail 模式 = 仅上面「问题信息卡 + 处置记录表」，无填报区（点「详情」进入）。</div>
+
+<h2>③ 状态流转（与任务计划一致）</h2>
+<div class="flow">
+  <span class="node t-new">新建</span>
+  <span class="arrow">─「开始」(建进行中处置记录)─▶</span>
+  <span class="node t-doing">进行中</span>
+  <span class="arrow">─「执行」弹窗─▶ 「提交」</span>
+  <span class="arrow">─▶</span>
+  <span class="node t-new">新建(可再次开始)</span>
+  <span class="arrow">　·　「执行」弹窗 ─▶ 「完成」 ─▶</span>
+  <span class="node t-done">已完成(终态)</span>
+</div>
+<div class="legend">废弃：审核中 / 待验证 / 已作废 / 变更中 及对应 submit / next / reject / close 端点全部删除。</div>
+
+</body>
+</html>

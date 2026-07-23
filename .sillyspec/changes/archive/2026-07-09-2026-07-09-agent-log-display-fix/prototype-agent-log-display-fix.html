@@ -1,0 +1,225 @@
+<!--
+author: qinyi
+created_at: 2026-07-09 05:54:32
+change: 2026-07-09-agent-log-display-fix
+description: 智能体执行日志回显修复原型（工具合并卡片 + SYSTEM 折叠 + token 四维）
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>智能体执行日志回显修复 · 原型</title>
+<style>
+  :root{
+    --blue-50:#eff6ff;--blue-100:#dbeafe;--blue-600:#2563eb;--blue-700:#1d4ed8;
+    --emerald-50:#ecfdf5;--emerald-100:#d1fae5;--emerald-600:#059669;--emerald-700:#047857;
+    --amber-50:#fffbeb;--amber-100:#fef3c7;--amber-600:#d97706;--amber-700:#b45309;
+    --red-50:#fef2f2;--red-500:#ef4444;--red-600:#dc2626;
+    --slate-50:#f8fafc;--slate-100:#f1f5f9;--slate-200:#e2e8f0;--slate-300:#cbd5e1;
+    --slate-400:#94a3b8;--slate-500:#64748b;--slate-600:#475569;--slate-700:#334155;--slate-800:#1e293b;--slate-900:#0f172a;
+    --r-sm:6px;--r-md:8px;--r-lg:12px;
+    --sh-sm:0 1px 2px 0 rgb(15 23 42/.05);--sh-md:0 4px 6px -1px rgb(15 23 42/.07);
+    --font:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;
+    --mono:'JetBrains Mono','Consolas','Courier New',monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--slate-100);color:var(--slate-800);font-size:14px;line-height:1.6;padding:24px}
+  h1{font-size:22px;font-weight:700;color:var(--slate-900);letter-spacing:-.01em}
+  .sub{font-size:13px;color:var(--slate-500);margin-top:4px;margin-bottom:20px}
+  .badge-row{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap}
+  .tag{font-size:11px;font-weight:600;padding:3px 9px;border-radius:99px;border:1px solid var(--slate-200);background:#fff;color:var(--slate-600)}
+  .tag.b{border-color:var(--blue-100);background:var(--blue-50);color:var(--blue-700)}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .col{background:#fff;border:1px solid var(--slate-200);border-radius:var(--r-lg);box-shadow:var(--sh-sm);overflow:hidden}
+  .col-head{padding:12px 16px;border-bottom:1px solid var(--slate-200);display:flex;align-items:center;justify-content:space-between}
+  .col-head h2{font-size:14px;font-weight:700;color:var(--slate-900)}
+  .col-head .label{font-size:11px;font-weight:600;padding:3px 8px;border-radius:var(--r-sm)}
+  .label-bad{background:var(--red-50);color:var(--red-600)}
+  .label-good{background:var(--emerald-50);color:var(--emerald-700)}
+  .col-body{padding:14px 16px;background:var(--slate-50);max-height:560px;overflow:auto}
+
+  /* 日志行 */
+  .logline{display:flex;gap:10px;padding:8px 10px;border-radius:var(--r-md);margin-bottom:6px;align-items:flex-start;border:1px solid transparent}
+  .logline .badge{font-size:11px;font-weight:600;padding:2px 7px;border-radius:var(--r-sm);white-space:nowrap;border:1px solid;min-width:38px;text-align:center}
+  .b-log{background:#fff;color:var(--slate-500);border-color:var(--slate-200)}
+  .b-tool{background:var(--blue-50);color:var(--blue-700);border-color:var(--blue-100)}
+  .b-result{background:var(--emerald-50);color:var(--emerald-700);border-color:var(--emerald-100)}
+  .b-system{background:var(--amber-50);color:var(--amber-700);border-color:var(--amber-100)}
+  .b-assist{background:var(--blue-50);color:var(--blue-700);border-color:var(--blue-100)}
+  .logline .txt{font-family:var(--mono);font-size:12px;color:var(--slate-700);word-break:break-all;flex:1}
+  .logline.muted{opacity:.45}
+  .logline.deleted{background:repeating-linear-gradient(45deg,#fff,#fff 6px,var(--slate-100) 6px,var(--slate-100) 12px);text-decoration:line-through}
+
+  /* 工具卡片（修复后） */
+  .toolcard{border:1px solid var(--blue-100);background:#fff;border-radius:var(--r-md);margin-bottom:8px;overflow:hidden;box-shadow:var(--sh-sm)}
+  .tc-head{display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--blue-50);cursor:pointer}
+  .tc-head .tk-badge{font-size:11px;font-weight:600;padding:2px 8px;border-radius:var(--r-sm);background:#fff;border:1px solid var(--blue-100);color:var(--blue-700)}
+  .tc-head .cmd{font-family:var(--mono);font-size:12px;color:var(--slate-700);flex:1;word-break:break-all}
+  .tc-head .arrow{color:var(--slate-400);font-size:12px;transition:transform .15s}
+  .toolcard.open .tc-head .arrow{transform:rotate(90deg)}
+  .tc-body{display:none;padding:10px 12px;border-top:1px solid var(--blue-100);background:var(--emerald-50)}
+  .toolcard.open .tc-body{display:block}
+  .tc-body .res-label{font-size:11px;font-weight:600;color:var(--emerald-700);margin-bottom:4px}
+  .tc-body pre{font-family:var(--mono);font-size:11.5px;color:var(--slate-700);white-space:pre-wrap;background:#fff;padding:8px;border-radius:var(--r-sm);border:1px solid var(--emerald-100)}
+
+  /* 折叠摘要（SYSTEM/thinking） */
+  .fold{display:flex;gap:10px;align-items:center;padding:7px 10px;border-radius:var(--r-md);margin-bottom:6px;background:#fff;border:1px solid var(--slate-200);cursor:pointer}
+  .fold .arrow{color:var(--slate-400);font-size:11px;transition:transform .15s}
+  .fold.open .arrow{transform:rotate(90deg)}
+  .fold .summary{font-size:12px;color:var(--slate-600);flex:1}
+  .fold-detail{display:none;margin:-2px 0 6px 28px;padding:8px 10px;background:var(--slate-50);border-radius:var(--r-sm);font-family:var(--mono);font-size:11px;color:var(--slate-500);border:1px solid var(--slate-200)}
+  .fold.open + .fold-detail{display:block}
+
+  /* token 面板 */
+  .token-panel{background:#fff;border:1px solid var(--slate-200);border-radius:var(--r-md);padding:12px 14px;margin-top:14px}
+  .token-panel h3{font-size:12px;font-weight:700;color:var(--slate-700);margin-bottom:10px;display:flex;align-items:center;gap:8px}
+  .token-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .tok{padding:8px 10px;border-radius:var(--r-sm);background:var(--slate-50);border:1px solid var(--slate-200)}
+  .tok .k{font-size:10.5px;color:var(--slate-500);display:flex;align-items:center;gap:4px}
+  .tok .v{font-size:15px;font-weight:700;color:var(--slate-900);font-family:var(--mono);margin-top:2px}
+  .tok .v.zero{color:var(--slate-400)}
+  .tok .v.unknown{color:var(--amber-600);font-size:13px}
+  .tok .v.placeholder{color:var(--slate-400);font-size:12px;font-weight:600;font-family:var(--font)}
+
+  .note{margin-top:14px;padding:10px 12px;background:var(--amber-50);border:1px solid var(--amber-100);border-radius:var(--r-md);font-size:12px;color:var(--amber-700)}
+  .note b{color:var(--amber-700)}
+  .hint{font-size:11px;color:var(--slate-400);margin-top:6px;text-align:center}
+</style>
+</head>
+<body>
+
+<h1>智能体执行日志回显修复</h1>
+<p class="sub">基于真实执行 run 8fab8465（sillyspec verify · 75 轮）· 方案 B：daemon 源头治理 + 前端合并</p>
+<div class="badge-row">
+  <span class="tag b">Phase 1 · daemon 不双写</span>
+  <span class="tag b">Phase 2 · 前端合并卡片 + 折叠</span>
+  <span class="tag b">Phase 3 · token 四维</span>
+</div>
+
+<div class="grid">
+
+  <!-- ============ 修复前 ============ -->
+  <div class="col">
+    <div class="col-head">
+      <h2>修复前 · 当前线上行为</h2>
+      <span class="label label-bad">三行分裂 / 标签错位 / 缺失</span>
+    </div>
+    <div class="col-body">
+
+      <div class="logline"><span class="badge b-assist">助手</span><span class="txt">[ASSISTANT] 我来执行 verify 阶段…</span></div>
+
+      <!-- 三行分裂的工具调用 -->
+      <div class="logline muted"><span class="badge b-log">日志</span><span class="txt">[TOOL_USE] Bash: sillyspec run verify --change 2026-06-03-…</span></div>
+      <div class="logline"><span class="badge b-tool">工具</span><span class="txt">{"tool":"Bash","args":{"command":"sillyspec run verify --change 2026-06-03-…"}}</span></div>
+      <div class="logline"><span class="badge b-result">返回</span><span class="txt">[TOOL_RESULT] stage: verify  step: 1/7  stepName:…</span></div>
+
+      <div style="font-size:11px;color:var(--red-600);margin:4px 0 10px 10px">↑ 同一个工具被记了 3 遍，一条有标签两条没有，"返回"行看不出归属哪个工具</div>
+
+      <!-- SYSTEM 被删除 -->
+      <div class="logline deleted"><span class="badge b-system">系统</span><span class="txt">[SYSTEM:thinking_tokens] 38  ·  292  ·  1875  ·  41…</span></div>
+      <div style="font-size:11px;color:var(--red-600);margin:4px 0 10px 10px">↑ 535 条系统/思考日志被当噪音整条删除，"看起来日志丢了"</div>
+
+      <div class="logline"><span class="badge b-system">系统</span><span class="txt">[SYSTEM:api_retry] …</span></div>
+
+      <!-- token 面板：缓存写空白 -->
+      <div class="token-panel">
+        <h3>📊 token 用量</h3>
+        <div class="token-grid">
+          <div class="tok"><div class="k">↓ 输入</div><div class="v">714,555</div></div>
+          <div class="tok"><div class="k">↑ 输出</div><div class="v">42,962</div></div>
+          <div class="tok"><div class="k">⚡ 缓存读</div><div class="v">4,223,680</div></div>
+          <div class="tok"><div class="k">✎ 缓存写</div><div class="v zero">0</div></div>
+        </div>
+        <div class="note" style="margin-top:8px"><b>缓存写恒为 0</b>：采集层疑漏 cache_creation_input_tokens（execute 前实证）</div>
+      </div>
+
+      <!-- killed run -->
+      <div class="token-panel">
+        <h3>📊 被中断任务（killed）</h3>
+        <div class="token-grid">
+          <div class="tok"><div class="k">↓ 输入</div><div class="v zero">—</div></div>
+          <div class="tok"><div class="k">↑ 输出</div><div class="v">225</div></div>
+          <div class="tok"><div class="k">💰 费用</div><div class="v zero">—</div></div>
+          <div class="tok"><div class="k">🔁 轮数</div><div class="v zero">—</div></div>
+        </div>
+        <div class="note" style="margin-top:8px"><b>空白</b>：用户不知道是"没数据"还是"任务没跑完"</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 修复后 ============ -->
+  <div class="col">
+    <div class="col-head">
+      <h2>修复后 · 目标行为</h2>
+      <span class="label label-good">合并卡片 / 折叠保留 / 四维齐全</span>
+    </div>
+    <div class="col-body">
+
+      <div class="logline"><span class="badge b-assist">助手</span><span class="txt">[ASSISTANT] 我来执行 verify 阶段…</span></div>
+
+      <!-- 合并成一张卡片 -->
+      <div class="toolcard" onclick="this.classList.toggle('open')">
+        <div class="tc-head">
+          <span class="tk-badge">🔧 sillyspec</span>
+          <span class="cmd">$ sillyspec run verify --change 2026-06-03-…</span>
+          <span class="arrow">▸</span>
+        </div>
+        <div class="tc-body">
+          <div class="res-label">✓ 执行结果（点击折叠）</div>
+<pre>stage: verify
+step: 1/7
+stepName: 项目基础信息
+result: PASS</pre>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--emerald-700);margin:4px 0 10px 10px">↑ 工具+命令+结果合并为单卡，带 sillyspec 标签，结果默认折叠可展开</div>
+
+      <!-- SYSTEM 折叠 -->
+      <div class="fold" onclick="this.classList.toggle('open')">
+        <span class="arrow">▸</span>
+        <span class="badge b-system">系统</span>
+        <span class="summary">思考 token 计数 · 4 条（38 / 292 / 1875 / 41）</span>
+      </div>
+      <div class="fold-detail">[SYSTEM:thinking_tokens] 38<br>[SYSTEM:thinking_tokens] 292<br>[SYSTEM:thinking_tokens] 1875<br>[SYSTEM:thinking_tokens] 41</div>
+      <div style="font-size:11px;color:var(--emerald-700);margin:4px 0 10px 10px">↑ 不再删除，默认折叠摘要、点击展开详情</div>
+
+      <div class="fold" onclick="this.classList.toggle('open')">
+        <span class="arrow">▸</span>
+        <span class="badge b-system">系统</span>
+        <span class="summary">系统信息 · 1 条</span>
+      </div>
+      <div class="fold-detail">[SYSTEM:api_retry] attempt=1 reason=rate_limit</div>
+
+      <!-- token 四维 -->
+      <div class="token-panel">
+        <h3>📊 token 用量</h3>
+        <div class="token-grid">
+          <div class="tok"><div class="k">↓ 输入</div><div class="v">714,555</div></div>
+          <div class="tok"><div class="k">↑ 输出</div><div class="v">42,962</div></div>
+          <div class="tok"><div class="k">⚡ 缓存读</div><div class="v">4,223,680</div></div>
+          <div class="tok"><div class="k">✎ 缓存写</div><div class="v unknown">—/未知</div></div>
+        </div>
+        <div class="note" style="margin-top:8px">交互面板补齐缓存读/写两维；缓存写若 Claude 不返回则显示<b>"—/未知"</b>而非误导的"0"</div>
+      </div>
+
+      <!-- killed 占位 -->
+      <div class="token-panel">
+        <h3>📊 被中断任务（killed）</h3>
+        <div class="token-grid">
+          <div class="tok"><div class="k">↓ 输入</div><div class="v zero">—</div></div>
+          <div class="tok"><div class="k">↑ 输出</div><div class="v">225</div></div>
+          <div class="tok"><div class="k">💰 费用</div><div class="v placeholder">未汇总</div></div>
+          <div class="tok"><div class="k">🔁 轮数</div><div class="v placeholder">已中断</div></div>
+        </div>
+        <div class="note" style="margin-top:8px"><b>"已中断·未汇总"</b>占位：明确告知任务未完成，而非空白</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<p class="hint">💡 点击修复后区域的工具卡片 / 折叠行可展开详情</p>
+
+</body>
+</html>

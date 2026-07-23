@@ -1,0 +1,302 @@
+<!--
+  author: qinyi
+  created_at: 2026-07-14 10:08:00
+  desc: Agent 团队(Mission) 页面重设计原型 — 方案 A「单栏流式」。
+        砍掉 single/team 选择，固定走团队；藏所有内部黑话(Coordinator/Worker/daemon/orchestrator/三层标识)。
+        两个状态，纯 JS 切换：
+          ① 创建态：输入框顶置 + 历史(3)收进顶部按钮 + 「高级:手动配分身」默认折叠 + 启动
+          ② 详情态：顶部总览卡(中文状态 + 成败统计 + 成本 + AI 最终结论) + 分身列表(中文角色、分工目标折叠、状态全中文)
+        线框风格，非最终视觉。所有状态词/角色均为目标中文文案。
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Agent 团队 — 重设计原型</title>
+<style>
+  :root {
+    --border: #d8dee9;
+    --bg: #f4f6f9;
+    --card: #ffffff;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --faint: #9ca3af;
+    --primary: #4f46e5;     /* 团队紫 */
+    --primary-bg: #eef2ff;
+    --green: #059669; --green-bg: #d1fae5;
+    --blue: #2563eb;  --blue-bg: #dbeafe;
+    --yellow:#b45309; --yellow-bg:#fef3c7;
+    --red:   #dc2626; --red-bg: #fee2e2;
+    --gray:  #6b7280; --gray-bg: #f3f4f6;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-size: 14px; line-height: 1.6;
+  }
+  .wrap { max-width: 880px; margin: 24px auto; padding: 0 16px; }
+
+  /* 顶栏 */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .topbar h1 { font-size: 20px; margin: 0; font-weight: 700; }
+  .topbar .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .hist-btn {
+    position: relative;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 12px; cursor: pointer; font-size: 13px; color: var(--text);
+  }
+  .hist-btn:hover { border-color: var(--primary); }
+  .hist-dropdown {
+    display: none; position: absolute; right: 0; top: calc(100% + 6px);
+    width: 420px; max-width: 90vw; background: var(--card);
+    border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.12);
+    padding: 6px; z-index: 20;
+  }
+  .hist-dropdown.open { display: block; }
+  .hist-item {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    border-radius: 6px; cursor: pointer; border: none; background: none; width: 100%; text-align: left;
+  }
+  .hist-item:hover { background: var(--gray-bg); }
+  .hist-item .obj { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hist-item .meta { font-size: 11px; color: var(--faint); white-space: nowrap; }
+
+  /* 卡片 */
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+
+  /* 创建态 */
+  .create textarea {
+    width: 100%; min-height: 96px; resize: vertical;
+    border: 1px solid var(--border); border-radius: 10px; padding: 12px;
+    font-size: 15px; font-family: inherit; color: var(--text);
+  }
+  .create textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-bg); }
+  .hint { font-size: 12px; color: var(--muted); margin: 8px 2px 14px; }
+
+  .advanced {
+    border: 1px dashed var(--border); border-radius: 10px; margin-bottom: 16px; overflow: hidden;
+  }
+  .advanced > summary {
+    cursor: pointer; padding: 10px 14px; font-size: 13px; font-weight: 600; color: var(--muted);
+    list-style: none; user-select: none;
+  }
+  .advanced > summary::-webkit-details-marker { display: none; }
+  .advanced > summary::before { content: "▸ "; color: var(--faint); }
+  .advanced[open] > summary::before { content: "▾ "; }
+  .adv-body { padding: 0 14px 14px; border-top: 1px solid var(--bg); }
+  .adv-note { font-size: 12px; color: var(--muted); margin: 10px 0; }
+  .field-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+  .field label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+  .field input, .field select {
+    width: 100%; height: 32px; border: 1px solid var(--border); border-radius: 6px; padding: 0 8px;
+    font-size: 13px; color: var(--text); background: var(--card);
+  }
+  .worker-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-bottom: 8px; }
+  .worker-card .wc-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .worker-card .wc-head span { font-size: 12px; color: var(--muted); }
+  .del-link { font-size: 12px; color: var(--red); cursor: pointer; background: none; border: none; }
+  .add-link { font-size: 13px; color: var(--primary); cursor: pointer; background: none; border: none; padding: 4px 0; }
+
+  .actions { display: flex; align-items: flex-end; gap: 14px; }
+  .budget label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+  .budget input { width: 150px; height: 38px; border: 1px solid var(--border); border-radius: 8px; padding: 0 10px; font-size: 14px; }
+  .btn-primary {
+    background: var(--primary); color: #fff; border: none; border-radius: 8px;
+    padding: 0 22px; height: 38px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-ghost {
+    background: var(--card); color: var(--muted); border: 1px solid var(--border); border-radius: 8px;
+    padding: 0 16px; height: 34px; font-size: 13px; cursor: pointer;
+  }
+  .btn-ghost:hover { border-color: var(--primary); color: var(--primary); }
+
+  /* 状态徽标（中文） */
+  .badge { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .b-planning { background: var(--gray-bg);  color: var(--gray); }
+  .b-running  { background: var(--blue-bg);  color: var(--blue); }
+  .b-done     { background: var(--green-bg); color: var(--green); }
+  .b-degraded { background: var(--yellow-bg);color: var(--yellow); }
+  .b-failed   { background: var(--red-bg);   color: var(--red); }
+  .b-cancelled{ background: var(--gray-bg);  color: var(--faint); }
+
+  /* 详情态 — 总览卡 */
+  .summary { margin-bottom: 16px; }
+  .summary .s-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  .summary .stat { font-size: 13px; color: var(--muted); }
+  .summary .stat b { color: var(--text); }
+  .ai-conclusion {
+    background: var(--primary-bg); border: 1px solid #c7d2fe; border-radius: 10px; padding: 12px 14px;
+  }
+  .ai-conclusion .ac-label { font-size: 11px; font-weight: 700; color: var(--primary); letter-spacing: .5px; margin-bottom: 4px; }
+  .ai-conclusion .ac-text { font-size: 13px; color: var(--text); }
+
+  /* 分身列表 */
+  .section-label { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: .5px; margin: 18px 0 10px; text-transform: uppercase; }
+  .worker { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+  .worker .w-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .role { font-size: 12px; font-weight: 600; color: var(--text); background: var(--gray-bg); padding: 2px 9px; border-radius: 6px; }
+  .role-main { background: var(--primary-bg); color: var(--primary); }
+  .log-link { margin-left: auto; font-size: 12px; color: var(--blue); cursor: pointer; background: none; border: none; }
+  .obj-toggle { margin-top: 8px; font-size: 12px; color: var(--muted); cursor: pointer; background: none; border: none; padding: 0; }
+  .obj-toggle::before { content: "▸ 分工目标（点开看完整指令）"; }
+  .obj-toggle.open::before { content: "▾ 收起分工目标"; }
+  .obj-full { display: none; margin-top: 8px; padding: 10px; background: var(--bg); border-radius: 8px; font-size: 12px; color: var(--muted); }
+  .obj-full.open { display: block; }
+
+  .hidden { display: none !important; }
+
+  .legend { font-size: 11px; color: var(--faint); margin-top: 18px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 顶栏（唯一标题，历史收进按钮） -->
+  <div class="topbar">
+    <div>
+      <h1>Agent 团队</h1>
+      <div class="sub">描述任务，主控 AI 自动拆解分身并行干活，跑完给最终结论</div>
+    </div>
+    <div class="hist-btn" onclick="toggleHist(event)">
+      历史 (3) ▾
+      <div class="hist-dropdown" id="histDrop">
+        <button class="hist-item" onclick="showDetail(event)">
+          <span class="badge b-degraded">部分完成</span>
+          <span class="obj">团队分析当前会话上下文</span>
+          <span class="meta">7/14 09:06 · 4 分身</span>
+        </button>
+        <button class="hist-item" onclick="showDetail(event)">
+          <span class="badge b-degraded">部分完成</span>
+          <span class="obj">此项目 Agent 团队功能问题排查…</span>
+          <span class="meta">7/14 01:17 · 2 分身</span>
+        </button>
+        <button class="hist-item" onclick="showDetail(event)">
+          <span class="badge b-failed">失败</span>
+          <span class="obj">集成到变更阶段的团队分析…</span>
+          <span class="meta">7/13 13:30 · 3 分身</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 创建态 ============ -->
+  <div id="viewCreate" class="card create">
+    <textarea placeholder="描述你要 AI 团队做什么…
+例：把这几天的销售数据整理成一份周报，重点标出环比下降最多的三个产品"></textarea>
+    <div class="hint">只写目标就行。派几个分身、各自分工由主控 AI 自动决定。</div>
+
+    <!-- 高级：手动配分身（默认折叠） -->
+    <details class="advanced">
+      <summary>高级：手动配分身（默认不用动，想精细控制再展开）</summary>
+      <div class="adv-body">
+        <div class="adv-note">主控 AI 配置（不填走默认：Claude · claude-sonnet-4-6）</div>
+        <div class="field-row">
+          <div class="field"><label>AI 类型</label><select><option>Claude Code</option><option>Codex</option></select></div>
+          <div class="field"><label>厂家</label><select><option>Claude（Anthropic）</option><option>GLM（智谱）</option><option>GPT（OpenAI）</option></select></div>
+          <div class="field"><label>模型</label><input value="claude-sonnet-4-6" /></div>
+        </div>
+        <div class="adv-note">分身列表（留空 = 主控 AI 自己拆）</div>
+        <div class="worker-card">
+          <div class="wc-head"><span>分身 1</span><button class="del-link">删除</button></div>
+          <div class="field-row">
+            <div class="field"><label>AI 类型</label><select><option>Claude Code</option></select></div>
+            <div class="field"><label>角色</label><select><option>架构分析</option><option>验证</option><option>测试</option></select></div>
+            <div class="field"><label>模型</label><input placeholder="如 glm-4.6" /></div>
+          </div>
+          <div class="field"><label>分工目标</label><input placeholder="这个分身具体干什么" /></div>
+        </div>
+        <button class="add-link">+ 添加分身</button>
+      </div>
+    </details>
+
+    <div class="actions">
+      <div class="budget">
+        <label>费用上限（USD，可选）</label>
+        <input type="number" placeholder="留空 = 不限" />
+      </div>
+      <button class="btn-primary" onclick="showDetail()">启动</button>
+    </div>
+  </div>
+
+  <!-- ============ 详情态 ============ -->
+  <div id="viewDetail" class="hidden">
+    <button class="btn-ghost" onclick="showCreate()" style="margin-bottom:14px;">← 返回新建</button>
+
+    <!-- 总览卡 -->
+    <div class="card summary">
+      <div class="s-top">
+        <span class="badge b-degraded">部分完成</span>
+        <span class="stat"><b>4</b> 个分身 · <b>1</b> 成功 <b>3</b> 失败</span>
+        <span class="stat">花费 <b>$0.4712</b>（未设预算）</span>
+        <button class="btn-ghost" style="height:30px;padding:0 12px;">取消</button>
+      </div>
+      <div class="ai-conclusion">
+        <div class="ac-label">🤖 AI 最终结论</div>
+        <div class="ac-text">团队分析了当前会话上下文的整体架构：这是一个 SillySpec 多 agent 编排系统，主控经一组工具编排分身完成「拆解→派发→读产出→收敛」闭环。本次 4 个分身中 1 个成功产出架构报告，3 个因后台无在线承接而失败，建议重启后台后重跑。</div>
+      </div>
+    </div>
+
+    <!-- 分身列表 -->
+    <div class="section-label">分身（4）</div>
+
+    <div class="worker">
+      <div class="w-head">
+        <span class="role role-main">主控</span>
+        <span class="badge b-done">已完成</span>
+        <button class="log-link">查看日志</button>
+      </div>
+      <button class="obj-toggle" onclick="toggleObj(this)"></button>
+      <div class="obj-full">团队分析当前会话上下文（主控负责拆解、派发、读产出、收敛，不亲自写代码）。</div>
+    </div>
+
+    <div class="worker">
+      <div class="w-head">
+        <span class="role">架构分析</span>
+        <span class="badge b-failed">失败</span>
+        <button class="log-link">查看日志</button>
+      </div>
+      <button class="obj-toggle" onclick="toggleObj(this)"></button>
+      <div class="obj-full">你是架构分析师。团队目标：团队分析当前会话上下文。请结构化分析当前会话上下文的整体架构，输出一份《架构分析报告》，至少覆盖：系统定性、数据流、职责边界、标识体系、当前态势。只读分析，不要修改任何文件或状态。（点开可见完整指令，默认折叠避免一屏文字墙）</div>
+    </div>
+
+    <div class="worker">
+      <div class="w-head">
+        <span class="role">验证</span>
+        <span class="badge b-failed">失败</span>
+        <button class="log-link">查看日志</button>
+      </div>
+      <button class="obj-toggle" onclick="toggleObj(this)"></button>
+      <div class="obj-full">你是核查员。核查当前会话上下文中关键事实的准确性与自洽性，逐条给出「事实陈述 / 核查依据 / 可信度」。</div>
+    </div>
+
+    <div class="worker">
+      <div class="w-head">
+        <span class="role">架构分析</span>
+        <span class="badge b-failed">失败</span>
+        <button class="log-link">查看日志</button>
+      </div>
+      <button class="obj-toggle" onclick="toggleObj(this)"></button>
+      <div class="obj-full">结构化分析当前会话上下文，输出架构分析报告。只读，不修改状态。</div>
+    </div>
+  </div>
+
+  <div class="legend">线框原型 · 非最终视觉 · 单栏流式（方案 A） · 团队模式固定</div>
+</div>
+
+<script>
+  function showDetail(e){ if(e) e.stopPropagation(); document.getElementById('viewCreate').classList.add('hidden'); document.getElementById('viewDetail').classList.remove('hidden'); closeHist(); window.scrollTo(0,0); }
+  function showCreate(){ document.getElementById('viewDetail').classList.add('hidden'); document.getElementById('viewCreate').classList.remove('hidden'); window.scrollTo(0,0); }
+  function toggleHist(e){ e.stopPropagation(); document.getElementById('histDrop').classList.toggle('open'); }
+  function closeHist(){ document.getElementById('histDrop').classList.remove('open'); }
+  function toggleObj(btn){ btn.classList.toggle('open'); var f=btn.nextElementSibling; f.classList.toggle('open'); }
+  document.addEventListener('click', closeHist);
+</script>
+</body>
+</html>

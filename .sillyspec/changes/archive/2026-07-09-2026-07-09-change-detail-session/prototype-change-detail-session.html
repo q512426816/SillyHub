@@ -1,0 +1,246 @@
+<!--
+author: qinyi
+created_at: 2026-07-09T17:10:00+08:00
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>变更详情页 · 内嵌会话 · 原型</title>
+<style>
+  :root{
+    --blue-50:#eff6ff;--blue-100:#dbeafe;--blue-600:#2563eb;--blue-700:#1d4ed8;--blue-900:#1e3a8a;
+    --cyan-500:#06b6d4;--cyan-50:#ecfeff;
+    --emerald-50:#ecfdf5;--emerald-500:#10b981;--emerald-600:#059669;--emerald-700:#047857;
+    --amber-50:#fffbeb;--amber-500:#f59e0b;--amber-600:#d97706;
+    --red-50:#fef2f2;--red-500:#ef4444;
+    --slate-50:#f8fafc;--slate-100:#f1f5f9;--slate-200:#e2e8f0;--slate-300:#cbd5e1;
+    --slate-400:#94a3b8;--slate-500:#64748b;--slate-600:#475569;--slate-700:#334155;--slate-800:#1e293b;--slate-900:#0f172a;
+    --r-sm:6px;--r-md:8px;--r-lg:12px;--r-xl:16px;
+    --sh-sm:0 1px 2px 0 rgb(15 23 42/.05);
+    --sh-md:0 4px 6px -1px rgb(15 23 42/.07),0 2px 4px -2px rgb(15 23 42/.05);
+    --sh-lg:0 10px 15px -3px rgb(15 23 42/.08),0 4px 6px -4px rgb(15 23 42/.05);
+    --font:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;
+    --highlight:0 0 0 2px var(--blue-600), 0 0 0 6px var(--blue-100);
+  }
+  *{box-sizing:border-box}
+  body{font-family:var(--font);background:var(--slate-100);color:var(--slate-800);font-size:14px;line-height:1.6;margin:0;-webkit-font-smoothing:antialiased}
+  .page{max-width:1080px;margin:0 auto;padding:24px 20px 80px}
+  .crumb{color:var(--slate-400);font-size:12px;margin-bottom:10px}
+  .h1{font-size:22px;font-weight:700;color:var(--slate-900);margin:0}
+  .h1 .ck{font-size:11px;color:var(--slate-400);font-weight:500;margin-left:8px;font-family:ui-monospace,Menlo,monospace}
+  .label{font-size:11px;font-weight:600;color:var(--slate-400);text-transform:uppercase;letter-spacing:.08em;margin:24px 0 10px;display:flex;align-items:center;gap:8px}
+  .label .tag-new{background:var(--blue-600);color:#fff;font-size:10px;padding:1px 6px;border-radius:999px;letter-spacing:.04em;text-transform:none}
+
+  /* 阶段进度条 */
+  .pipeline{display:flex;gap:6px;align-items:center;background:#fff;border:1px solid var(--slate-200);border-radius:var(--r-lg);padding:12px;box-shadow:var(--sh-sm)}
+  .stage{flex:1;text-align:center;padding:8px 4px;border-radius:var(--r-md);font-size:12px;color:var(--slate-500);background:var(--slate-50);position:relative}
+  .stage.done{color:var(--emerald-700);background:var(--emerald-50)}
+  .stage.done::before{content:"✓ ";font-weight:700}
+  .stage.active{color:#fff;background:var(--blue-600);font-weight:600;box-shadow:var(--sh-sm)}
+  .arr{color:var(--slate-300)}
+
+  .card{background:#fff;border:1px solid var(--slate-200);border-radius:var(--r-lg);box-shadow:var(--sh-sm);padding:16px}
+  .muted{color:var(--slate-500)}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .chip{font-size:12px;background:var(--slate-100);color:var(--slate-600);padding:3px 9px;border-radius:999px}
+  .chip.blue{background:var(--blue-50);color:var(--blue-700)}
+  .chip.amb{background:var(--amber-50);color:var(--amber-600)}
+  .chip.void{opacity:.5}
+
+  /* 日志块（既有，非本次改动） */
+  .log{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--slate-900);color:var(--slate-300);border-radius:var(--r-md);padding:12px;line-height:1.7}
+  .log .g{color:var(--emerald-500)}
+  .log .y{color:var(--amber-500)}
+
+  /* ============ 本次新增：会话区块 ============ */
+  .session-wrap{border:1px solid var(--blue-600);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--sh-md);background:#fff}
+  .session-head{display:flex;align-items:center;justify-content:space-between;background:linear-gradient(135deg,var(--blue-600),var(--blue-700));color:#fff;padding:10px 14px}
+  .session-head .t{font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px}
+  .session-head .t .dot{width:8px;height:8px;border-radius:50%;background:var(--emerald-500);box-shadow:0 0 0 3px rgb(16 185 129/.25)}
+  .session-head .sub{font-size:11px;opacity:.85}
+  .session-body{display:flex;min-height:420px}
+  /* 左：历史列表 */
+  .sess-list{width:230px;border-right:1px solid var(--slate-200);background:var(--slate-50);display:flex;flex-direction:column}
+  .new-btn{margin:10px;border:1px dashed var(--blue-600);color:var(--blue-700);background:#fff;border-radius:var(--r-md);padding:8px;font-size:12px;font-weight:600;cursor:pointer;text-align:center}
+  .new-btn:hover{background:var(--blue-50)}
+  .list-title{padding:4px 12px;font-size:10px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.06em}
+  .sess-item{padding:9px 12px;border-bottom:1px solid var(--slate-200);cursor:pointer;font-size:12px}
+  .sess-item.active{background:var(--blue-50);border-left:3px solid var(--blue-600);padding-left:9px}
+  .sess-item .ti{color:var(--slate-800);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sess-item .me{font-size:11px;color:var(--slate-500);margin-top:2px;display:flex;justify-content:space-between}
+  .avatar{display:inline-block;width:16px;height:16px;border-radius:50%;background:var(--cyan-500);color:#fff;font-size:9px;text-align:center;line-height:16px;margin-right:4px;vertical-align:middle}
+  .avatar.b{background:var(--amber-500)}
+  .status-dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:3px;vertical-align:middle}
+  .sd-active{background:var(--emerald-500)}
+  .sd-ended{background:var(--slate-300)}
+
+  /* 右：对话区（复用 InteractiveSessionPanel 形态） */
+  .sess-chat{flex:1;display:flex;flex-direction:column}
+  .chat-top{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--slate-200);font-size:12px}
+  .sel{background:var(--slate-100);border:1px solid var(--slate-200);border-radius:var(--r-sm);padding:3px 8px;color:var(--slate-700)}
+  .chat-mid{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:12px;background:var(--slate-50)}
+  .turn{max-width:80%}
+  .turn .who{font-size:11px;color:var(--slate-500);margin-bottom:3px}
+  .bubble{padding:9px 12px;border-radius:var(--r-md);font-size:13px}
+  .b-ctx{background:var(--blue-50);border:1px solid var(--blue-100);border-left:3px solid var(--blue-600);color:var(--slate-700);font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-space:pre-line}
+  .b-ctx .h{font-weight:700;color:var(--blue-700);font-family:var(--font);font-size:12px;margin-bottom:4px}
+  .b-user{background:var(--blue-600);color:#fff;align-self:flex-end}
+  .b-agent{background:#fff;border:1px solid var(--slate-200);color:var(--slate-800)}
+  .b-agent code{background:var(--slate-100);padding:1px 4px;border-radius:3px;font-size:12px}
+  .turn.user{align-self:flex-end}
+  .turn.user .who{text-align:right}
+  .chat-input{border-top:1px solid var(--slate-200);padding:10px 12px;background:#fff}
+  .input-box{display:flex;gap:8px;align-items:flex-end}
+  textarea{flex:1;border:1px solid var(--slate-200);border-radius:var(--r-md);padding:8px 10px;font-family:var(--font);font-size:13px;resize:none;height:38px;outline:none}
+  textarea:focus{border-color:var(--blue-600)}
+  .send{background:var(--blue-600);color:#fff;border:none;border-radius:var(--r-md);padding:0 16px;height:38px;font-weight:600;cursor:pointer}
+  .send:hover{background:var(--blue-700)}
+  .input-hint{font-size:11px;color:var(--slate-400);margin-top:6px}
+
+  .legend{margin-top:18px;display:flex;gap:18px;font-size:12px;color:var(--slate-500);flex-wrap:wrap}
+  .legend span{display:flex;align-items:center;gap:6px}
+  .legend .sw{width:14px;height:14px;border-radius:4px;border:1px solid var(--blue-600)}
+  .note{margin-top:6px;font-size:12px;color:var(--slate-500)}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="crumb">变更中心 / multi-agent-platform / <strong>变更详情</strong></div>
+  <h1 class="h1">变更详情页 · 内嵌会话（原型） <span class="ck">2026-07-09-change-detail-session</span></h1>
+  <p class="note muted">本原型展示<strong>在变更详情页内嵌入会话区块</strong>（蓝色高亮框）。上下文为示意，非真实数据。</p>
+
+  <!-- 阶段进度（既有，示意） -->
+  <div class="label">阶段进度 <span class="muted" style="text-transform:none;font-weight:400">（既有区块，非本次改动）</span></div>
+  <div class="pipeline">
+    <div class="stage done">头脑风暴</div><span class="arr">›</span>
+    <div class="stage done">实现计划</div><span class="arr">›</span>
+    <div class="stage active">波次执行</div><span class="arr">›</span>
+    <div class="stage">验证确认</div><span class="arr">›</span>
+    <div class="stage">归档变更</div>
+  </div>
+
+  <!-- Agent provider（既有，示意） -->
+  <div class="label">Agent Provider / Model <span class="muted" style="text-transform:none;font-weight:400">（既有区块）</span></div>
+  <div class="card">
+    <div class="row">
+      <span class="chip blue">claude</span>
+      <span class="chip">claude-opus-4-8</span>
+      <span class="muted">·</span>
+      <span class="chip amb">手动审批 开</span>
+      <span class="muted">该变更当前绑定的 agent 配置</span>
+    </div>
+  </div>
+
+  <!-- Agent 执行日志（既有，示意，与新会话区块并存） -->
+  <div class="label">Agent 执行日志 <span class="muted" style="text-transform:none;font-weight:400">（既有 = 流程推进；与新会话并存独立）</span></div>
+  <div class="card">
+    <div class="log">
+<span class="g">✓</span> brainstorm 完成 → design.md / plan.md 已生成<br>
+<span class="g">✓</span> execute wave-1 task-01..05 通过<br>
+<span class="y">▶</span> execute wave-2 进行中…
+    </div>
+  </div>
+
+  <!-- ===================== 本次新增：会话区块 ===================== -->
+  <div class="label">会话 <span class="tag-new">本次新增</span></div>
+
+  <div class="session-wrap">
+    <div class="session-head">
+      <div class="t"><span class="dot"></span>围绕此变更的会话</div>
+      <div class="sub">只显示与该变更关联的会话 · 跨成员可见</div>
+    </div>
+    <div class="session-body">
+      <!-- 左：历史列表 -->
+      <div class="sess-list">
+        <div class="new-btn" id="newBtn">＋ 新建会话</div>
+        <div class="list-title">历史会话（3）</div>
+        <div class="sess-item active">
+          <div class="ti">design.md 里 D-001 为什么选加列</div>
+          <div class="me"><span><span class="avatar">Q</span>qinyi</span><span><span class="status-dot sd-active"></span>活跃</span></div>
+        </div>
+        <div class="sess-item">
+          <div class="ti">task-03 报错怎么排查</div>
+          <div class="me"><span><span class="avatar b">L</span>lihua</span><span><span class="status-dot sd-ended"></span>已结束</span></div>
+        </div>
+        <div class="sess-item">
+          <div class="ti">前端组件复用范围确认</div>
+          <div class="me"><span><span class="avatar">Q</span>qinyi</span><span><span class="status-dot sd-ended"></span>已结束</span></div>
+        </div>
+      </div>
+
+      <!-- 右：对话区（复用 InteractiveSessionPanel 形态） -->
+      <div class="sess-chat">
+        <div class="chat-top">
+          <span class="muted">模型：</span>
+          <span class="sel">claude</span>
+          <span class="sel">claude-opus-4-8 ▾</span>
+          <span style="margin-left:auto" class="muted">会话内手动选择</span>
+        </div>
+        <div class="chat-mid" id="chatMid">
+          <!-- 自动注入的变更上下文前导（后端按 change 拼装，注入首条 developer 消息） -->
+          <div class="turn">
+            <div class="who">⚙️ 自动注入 · 变更上下文（后端拼装）</div>
+            <div class="bubble b-ctx"><span class="h">【变更上下文】</span>
+- 变更：变更详情页内嵌会话（当前阶段：波次执行）
+- 工作目录：C:\Users\qinyi\IdeaProjects\multi-agent-platform
+- 变更文档：
+  design.md / plan.md / tasks.md（.sillyspec/changes/2026-07-09-change-detail-session/）
+- 已变更文件：
+  backend/app/modules/agent/model.py
+  backend/app/modules/daemon/session/service.py
+  frontend/.../changes/[cid]/page.tsx</div>
+          </div>
+
+          <div class="turn user">
+            <div class="who">我</div>
+            <div class="bubble b-user">design.md 里 D-001 为什么选「加列」而不是反查 AgentRun.change_id？</div>
+          </div>
+
+          <div class="turn">
+            <div class="who">Claude</div>
+            <div class="bubble b-agent">因为需求是「只看与此变更关联的会话」，要能干净过滤。<code>AgentRun.change_id</code> 是给调度型 run 用的，交互会话的首 run 才有；一个会话多 run 时若 change_id 不一致反查就会乱。加列让关联直接挂在 <code>AgentSession</code> 上，列表过滤、跨成员可见都简单。</div>
+          </div>
+        </div>
+        <div class="chat-input">
+          <div class="input-box">
+            <textarea id="msg" placeholder="就这个变更提问、排查、讨论… 上下文已自动带上"></textarea>
+            <button class="send" id="send">发送</button>
+          </div>
+          <div class="input-hint">工作目录、变更标题/阶段/文档路径/已变更文件清单已在上下文里，无需手动贴</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><span class="sw" style="background:var(--blue-50)"></span>自动注入的变更上下文（后端按 change_id 拼装）</span>
+    <span><span class="sw" style="background:var(--blue-600)"></span>用户消息</span>
+    <span><span class="sw" style="background:#fff"></span>Agent 回复</span>
+    <span><span class="sw" style="background:var(--slate-50)"></span>历史会话列表（该变更下全部）</span>
+  </div>
+</div>
+
+<script>
+  // 轻交互：点「新建会话」清空对话区并重新注入上下文前导；发送追加一条用户气泡
+  const chatMid=document.getElementById('chatMid');
+  const ctx=chatMid.querySelector('.b-ctx').cloneNode(true);
+  document.getElementById('newBtn').addEventListener('click',()=>{
+    chatMid.innerHTML='';
+    const t=document.createElement('div');t.className='turn';
+    t.innerHTML='<div class="who">⚙️ 自动注入 · 变更上下文（后端拼装）</div>';
+    t.appendChild(ctx.cloneNode(true));chatMid.appendChild(t);
+    chatMid.scrollTop=chatMid.scrollHeight;
+  });
+  document.getElementById('send').addEventListener('click',()=>{
+    const v=document.getElementById('msg').value.trim();if(!v)return;
+    const t=document.createElement('div');t.className='turn user';
+    t.innerHTML='<div class="who">我</div><div class="bubble b-user"></div>';
+    t.querySelector('.bubble').textContent=v;
+    chatMid.appendChild(t);document.getElementById('msg').value='';
+    chatMid.scrollTop=chatMid.scrollHeight;
+  });
+</script>
+</body>
+</html>

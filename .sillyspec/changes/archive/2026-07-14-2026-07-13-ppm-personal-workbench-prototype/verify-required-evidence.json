@@ -1,0 +1,17 @@
+{
+  "generatedAt": "2026-07-14T03:52:04.445Z",
+  "schemaVersion": 1,
+  "items": [
+    {
+      "task": "task-13",
+      "verdict": "spec+quality",
+      "evidence": [
+        "部署后访问 /ppm/workbench 验证三栏渲染",
+        "指标与库 SELECT count 一致",
+        "待办 now_handle_user 派生匹配",
+        "工作日历双圆点 load/alert",
+        "消息通知/绩效考评占位空状态"
+      ]
+    }
+  ]
+}
