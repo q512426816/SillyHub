@@ -306,3 +306,11 @@ created_at: 2026-07-21T08:48:56
 根因：①里程碑/明细的 no 是 String 列、按字符串排序，10 条以上出现 1/10/2 错序；②模块（第二层）根本没有序号字段，按 created_at 排。
 方案：①迁移 202607231200（down=202607222330）给 ppm_plan_node_module 加 nullable `no` 列 + model/schema 同步；②前端 types + 模块表单（ModuleFormDrawer）加序号输入 + 模块表加序号列 + create/edit payload 带 no；③service 加 `_no_sort_key`（纯数值优先、非数字文本居中、空/None 最后），三层 list（list_ps_plan_nodes_by_plan / list_modules_by_node / list_details_by_node）及导出明细批量取全部改 Python 数值排序（修字符串错序）；④导出模块子标题带序号（「模块: 1 前端模块」）。
 结果：①ruff/mypy 0 error；②前端 typecheck/lint 0 error、milestone 24 passed；③plan+export 套件 173 passed 0 errors（含序号排序纯测试）；④迁移链 202607222330→202607231200 head 正常；⑤待 commit+push+重建 backend+frontend 后用户验证（三层按序号 1/2/10 排序、模块表单可填序号）。
+## ql-20260723-010-0f89 | 2026-07-23 13:34:44 | /ppm/plan-nodes 模板明细子表加序号列 + 拖动排序(序号按拖动顺序自动更新)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/ppm-sub-table.tsx（PpmSubTable 加 dragSort 可选 prop + 序号列 + onRow HTML5 拖拽 + drop 重算 no）+ frontend/src/app/(dashboard)/ppm/plan-nodes/page.tsx（DetailDraftRow 加 no、load/newRow 带入、PpmSubTable 启用 dragSort、handleSave 持久化 no）
+需求：/ppm/plan-nodes 的模板明细子表增加序号列，并且子表可以拖动排序，序号按拖动排序的顺序自动更新。
+根因：模板明细子表（DetailsSubTable，用 PpmSubTable editable 模式）只有字段列、无序号列；行不可拖拽，无法调整明细顺序。
+方案：①PpmSubTable 加 `dragSort?: boolean` 可选 prop（默认 false，不影响其它展开/编辑用法）：启用时在 mergedColumns 前置「序号」列（render `index+1`，与拖拽顺序一致），并通过 antd Table `onRow(record, index)` 注入 HTML5 原生拖拽（draggable + onDragStart 记录起始 index + onDragOver preventDefault + onDrop 重排）；drop 后重排 rows 并按新顺序重算每行 `no`（= index+1）经 onChange 回写。②plan-nodes：DetailDraftRow 加 `no`，load 读 `d.no`、newRowFactory 给 null；PpmSubTable 启用 `dragSort`；handleSave 更新/创建体含 `no`、toUpdate 检测 `no` 变化（拖动改顺序也触发持久化）。纯前端——后端 PlanNodeDetail.no 字段 + list 数值排序（ql-009）已就绪。
+结果：①前端 typecheck/lint 0 error；②plan-nodes + milestone-details 24 passed（PpmSubTable 共享组件对展开模式无回归）；③待 commit+push+重建 frontend 后用户验证（明细子表有序号列、可拖拽行、拖动后序号按新顺序刷新、保存后顺序持久化）。
