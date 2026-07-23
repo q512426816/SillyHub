@@ -168,6 +168,20 @@ def _date_to_datetime(value: date | None) -> datetime | None:
     return datetime.combine(value, time.min, tzinfo=UTC)
 
 
+def _no_sort_key(no: str | None) -> tuple[int, float, str]:
+    """序号排序键:纯数值越小越前,非数字文本次之,空/None 最后。
+
+    用于里程碑/模块/明细的 ``no``(String 列)数值排序,避免字符串排序的
+    "1"/"10"/"2" 错序。返回三元组,不同类之间靠首位 int 区分、不冲突。
+    """
+    s = str(no).strip() if no is not None else ""
+    if not s:
+        return (2, 0.0, "")
+    if re.fullmatch(r"-?\d+", s):
+        return (0, float(s), "")
+    return (1, 0.0, s)
+
+
 # ===========================================================================
 # 通用 CRUD 工厂
 # ===========================================================================
@@ -367,12 +381,12 @@ class PlanService:
 
     # ---------- 模块 (子表,按 plan_node_id 列表) ----------
     async def list_modules_by_node(self, plan_node_id: str) -> list[PlanNodeModule]:
-        stmt = (
-            select(PlanNodeModule)
-            .where(PlanNodeModule.plan_node_id == self._safe_uuid(plan_node_id))
-            .order_by(PlanNodeModule.created_at)
+        stmt = select(PlanNodeModule).where(
+            PlanNodeModule.plan_node_id == self._safe_uuid(plan_node_id)
         )
-        return list((await self._session.execute(stmt)).scalars().all())
+        rows = list((await self._session.execute(stmt)).scalars().all())
+        rows.sort(key=lambda m: _no_sort_key(m.no))
+        return rows
 
     async def list_modules_by_project(self, project_id: uuid.UUID) -> list[PlanNodeModule]:
         """按项目列出其下所有模块 (problem 表单下拉用)。
@@ -672,12 +686,12 @@ class PlanService:
 
     # ---------- 里程碑 (ps_plan_node) CRUD ----------
     async def list_ps_plan_nodes_by_plan(self, ps_project_plan_id: str) -> list[PsPlanNode]:
-        stmt = (
-            select(PsPlanNode)
-            .where(PsPlanNode.ps_project_plan_id == self._safe_uuid(ps_project_plan_id))
-            .order_by(PsPlanNode.no)
+        stmt = select(PsPlanNode).where(
+            PsPlanNode.ps_project_plan_id == self._safe_uuid(ps_project_plan_id)
         )
-        return list((await self._session.execute(stmt)).scalars().all())
+        rows = list((await self._session.execute(stmt)).scalars().all())
+        rows.sort(key=lambda n: _no_sort_key(n.no))
+        return rows
 
     async def create_ps_plan_node(self, data: dict[str, Any]) -> PsPlanNode:
         # 单事务建里程碑;若 overall_stage 匹配某计划节点模板(PlanNode),复用
@@ -715,15 +729,13 @@ class PlanService:
     # ---------- 里程碑明细 (核心表) CRUD ----------
     async def list_details_by_node(self, plan_node_id: str) -> list[PsPlanNodeDetail]:
         """列出某里程碑下「最新有效」的明细版本 (排除 archived 旧版本)。"""
-        stmt = (
-            select(PsPlanNodeDetail)
-            .where(
-                PsPlanNodeDetail.plan_node_id == self._safe_uuid(plan_node_id),
-                PsPlanNodeDetail.status != PlanNodeDetailStatus.ARCHIVED.value,
-            )
-            .order_by(PsPlanNodeDetail.no)
+        stmt = select(PsPlanNodeDetail).where(
+            PsPlanNodeDetail.plan_node_id == self._safe_uuid(plan_node_id),
+            PsPlanNodeDetail.status != PlanNodeDetailStatus.ARCHIVED.value,
         )
-        return list((await self._session.execute(stmt)).scalars().all())
+        rows = list((await self._session.execute(stmt)).scalars().all())
+        rows.sort(key=lambda d: _no_sort_key(d.no))
+        return rows
 
     async def get_detail(self, item_id: uuid.UUID) -> PsPlanNodeDetail:
         return await _Crud(self._session, PsPlanNodeDetail).get(item_id)
@@ -1271,7 +1283,7 @@ class PlanService:
         """
         nodes = await self.list_ps_plan_nodes_by_plan(str(plan_id))
 
-        # 批量取该计划全部非 archived 明细(按 plan_node_id 分组)
+        # 批量取该计划全部非 archived 明细(按序号数值排序后按 plan_node_id 分组)
         all_details = list(
             (
                 await self._session.execute(
@@ -1281,12 +1293,12 @@ class PlanService:
                         PsPlanNode.ps_project_plan_id == plan_id,
                         PsPlanNodeDetail.status != PlanNodeDetailStatus.ARCHIVED.value,
                     )
-                    .order_by(PsPlanNodeDetail.no)
                 )
             )
             .scalars()
             .all()
         )
+        all_details.sort(key=lambda d: _no_sort_key(d.no))
         details_by_node: dict[uuid.UUID, list[PsPlanNodeDetail]] = {}
         for d in all_details:
             details_by_node.setdefault(d.plan_node_id, []).append(d)
@@ -1365,8 +1377,12 @@ class PlanService:
                 groups: list[dict[str, Any]] = []
                 for m in modules:
                     rows = [_detail_dict(d) for d in details if d.module_id == m.id]
+                    no_part = f"{m.no} " if m.no else ""
                     groups.append(
-                        {"subtitle": f"模块: {m.module_name or '(未命名模块)'}", "rows": rows}
+                        {
+                            "subtitle": f"模块: {no_part}{m.module_name or '(未命名模块)'}",
+                            "rows": rows,
+                        }
                     )
                 # 模块已删 / 未分模块的明细单列一组
                 orphans = [_detail_dict(d) for d in details if d.module_id not in module_ids]
