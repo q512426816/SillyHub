@@ -40,6 +40,15 @@ _ACTOR = ("00000000-0000-0000-0000-000000000001", "张三")
 _AUDIT_USER_ID = "00000000-0000-0000-0000-000000000003"
 
 
+def test_no_sort_key_numeric_order() -> None:
+    """序号数值排序:1/2/10 而非字符串的 1/10/2;非数字文本居中;空/None 最后。"""
+    from app.modules.ppm.plan.service import _no_sort_key
+
+    ordered = sorted(["10", "2", "1", "前端模块", None, ""], key=_no_sort_key)
+    # 数值升序 → 文本 → 空(稳定排序保留 None 在 "" 前)
+    assert ordered == ["1", "2", "10", "前端模块", None, ""]
+
+
 # ===========================================================================
 # CRUD
 # ===========================================================================
@@ -391,6 +400,64 @@ class TestPsProjectPlan:
         a_rows = await svc.list_plan_node_details_for_export(plan_a.id)
         assert len(a_rows) == 1
         assert a_rows[0]["task_theme"] == "A的明细"
+
+    async def test_build_milestone_export_sections_groups_by_milestone_and_module(
+        self, db_session: AsyncSession
+    ) -> None:
+        """分组(子母表)导出结构:里程碑 →(模块)→ 明细(ql-20260723-007)。"""
+        svc = PlanService(db_session)
+        proj = PpmProjectMaintenance(id=uuid.uuid4(), project_code="P-GRP", project_name="项目分组")
+        db_session.add(proj)
+        await db_session.commit()
+        plan = await svc.create_ps_project_plan({"project_id": str(proj.id), "status": "draft"})
+        # 二级里程碑(无模块)+ 明细
+        node_a = await svc.create_ps_plan_node(
+            {"ps_project_plan_id": str(plan.id), "no": "1", "overall_stage": "设计阶段"}
+        )
+        await svc.create_detail(
+            {
+                "plan_node_id": str(node_a.id),
+                "detailed_stage": "概要设计",
+                "task_theme": "架构",
+                "status": "draft",
+            }
+        )
+        # 三级里程碑(有模块)+ 模块 + 明细
+        node_b = await svc.create_ps_plan_node(
+            {
+                "ps_project_plan_id": str(plan.id),
+                "no": "2",
+                "overall_stage": "实施阶段",
+                "has_module": True,
+            }
+        )
+        mod_b = await svc.create_module({"plan_node_id": str(node_b.id), "module_name": "前端模块"})
+        await svc.create_detail(
+            {
+                "plan_node_id": str(node_b.id),
+                "module_id": str(mod_b.id),
+                "detailed_stage": "需求",
+                "task_theme": "调研",
+                "status": "draft",
+            }
+        )
+        sections = await svc.build_milestone_export_sections(plan.id)
+        assert len(sections) == 2
+        # node_a(设计阶段,无模块):1 组无子标题,1 明细
+        sec_a = sections[0]
+        assert "设计阶段" in sec_a["title"]
+        assert len(sec_a["groups"]) == 1
+        assert sec_a["groups"][0]["subtitle"] is None
+        assert len(sec_a["groups"][0]["rows"]) == 1
+        assert sec_a["groups"][0]["rows"][0]["detailed_stage"] == "概要设计"
+        # 状态英→中(draft→草稿)、含任务描述/执行状态列(ql-20260723-008)
+        assert sec_a["groups"][0]["rows"][0]["status"] == "草稿"
+        assert "task_description" in sec_a["groups"][0]["rows"][0]
+        assert "task_execute_status" in sec_a["groups"][0]["rows"][0]
+        # node_b(实施阶段,有模块):含「前端模块」子标题组,1 明细
+        sec_b = sections[1]
+        assert "实施阶段" in sec_b["title"]
+        assert any("前端模块" in (g["subtitle"] or "") for g in sec_b["groups"])
 
     async def test_create_plan_writes_created_by_from_operator(
         self, db_session: AsyncSession

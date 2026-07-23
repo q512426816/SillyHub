@@ -821,11 +821,7 @@ function ModuleLevelTable({
   const handleSaveModule = async (
     vals: Pick<
       PlanNodeModule,
-      | "module_name"
-      | "plan_workload"
-      | "plan_begin_time"
-      | "plan_complete_time"
-      | "duty_user_id"
+      "module_name" | "no" | "plan_workload" | "plan_begin_time" | "plan_complete_time" | "duty_user_id"
     >,
   ) => {
     setModuleSaving(true);
@@ -865,6 +861,13 @@ function ModuleLevelTable({
 
   const moduleColumns = useMemo<TableProps<PlanNodeModule>["columns"]>(
     () => [
+      {
+        title: "序号",
+        dataIndex: "no",
+        key: "no",
+        width: 70,
+        render: (v: string | null) => v ?? "—",
+      },
       {
         title: "模块名称",
         dataIndex: "module_name",
@@ -1531,6 +1534,7 @@ interface ModuleFormDrawerProps {
   onClose: () => void;
   onSave: (vals: {
     module_name: string | null;
+    no: string | null;
     plan_workload: string | null;
     plan_begin_time: string | null;
     plan_complete_time: string | null;
@@ -1549,6 +1553,7 @@ function ModuleFormDrawer({
 }: ModuleFormDrawerProps) {
   const [form] = Form.useForm<{
     module_name: string;
+    no: string;
     plan_workload: string;
     plan_begin_time: string;
     plan_complete_time: string;
@@ -1559,6 +1564,7 @@ function ModuleFormDrawer({
     if (!open) return;
     form.setFieldsValue({
       module_name: moduleRow?.module_name ?? "",
+      no: moduleRow?.no ?? "",
       plan_workload: moduleRow?.plan_workload ?? "",
       plan_begin_time: moduleRow?.plan_begin_time ?? "",
       plan_complete_time: moduleRow?.plan_complete_time ?? "",
@@ -1570,6 +1576,7 @@ function ModuleFormDrawer({
     const vals = await form.validateFields();
     onSave({
       module_name: vals.module_name || null,
+      no: vals.no || null,
       plan_workload:
         vals.plan_workload != null && vals.plan_workload !== ""
           ? String(vals.plan_workload)
@@ -1600,6 +1607,9 @@ function ModuleFormDrawer({
       }
     >
       <Form form={form} layout="vertical">
+        <Form.Item label="序号" name="no">
+          <Input placeholder="如 1(按序号数值排序)" />
+        </Form.Item>
         <Form.Item
           label="模块名称"
           name="module_name"

@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from io import BytesIO
+
 import pytest
 from fastapi.responses import StreamingResponse
 from openpyxl import load_workbook
@@ -14,6 +16,7 @@ from app.modules.ppm.common.export import (
     ColumnDef,
     excel_response,
     export_to_response,
+    grouped_report_to_workbook,
     rows_to_workbook,
     timestamped_filename,
 )
@@ -118,6 +121,56 @@ class TestTimestampedFilename:
         assert timestamped_filename("项目维护").startswith("项目维护_")
         assert timestamped_filename("客户维护").startswith("客户维护_")
         assert timestamped_filename("计划节点模板").startswith("计划节点模板_")
+
+
+class TestGroupedReportToWorkbook:
+    """子母表分组导出:里程碑标题行(合并)→列头→模块子标题(合并)→明细行。"""
+
+    def test_grouped_layout_roundtrip(self) -> None:
+        cols = [
+            ColumnDef(field="detailed_stage", header="明细阶段", width=16),
+            ColumnDef(field="task_theme", header="任务主题", width=20),
+        ]
+        sections = [
+            {
+                "title": "里程碑 1. 实施阶段",
+                "groups": [
+                    {
+                        "subtitle": "模块: 前端",
+                        "rows": [
+                            {"detailed_stage": "需求", "task_theme": "调研"},
+                            {"detailed_stage": "开发", "task_theme": "编码"},
+                        ],
+                    },
+                ],
+            },
+            {
+                "title": "里程碑 2. 设计阶段",
+                "groups": [
+                    {"subtitle": None, "rows": [{"detailed_stage": "概要", "task_theme": "架构"}]},
+                ],
+            },
+        ]
+        content = grouped_report_to_workbook(cols, sections, sheet_name="明细")
+        wb = load_workbook(BytesIO(content))
+        ws = wb["明细"]
+        # section1: 标题(1) 列头(2) 子标题(3) 明细(4,5) 空行(6)
+        assert ws.cell(row=1, column=1).value == "里程碑 1. 实施阶段"
+        assert ws.cell(row=2, column=1).value == "明细阶段"
+        assert ws.cell(row=2, column=2).value == "任务主题"
+        assert ws.cell(row=3, column=1).value == "模块: 前端"
+        assert ws.cell(row=4, column=1).value == "需求"
+        assert ws.cell(row=4, column=2).value == "调研"
+        assert ws.cell(row=5, column=1).value == "开发"
+        # section2: 标题(7) 列头(8) 明细(9,无子标题)
+        assert ws.cell(row=7, column=1).value == "里程碑 2. 设计阶段"
+        assert ws.cell(row=8, column=1).value == "明细阶段"
+        assert ws.cell(row=9, column=1).value == "概要"
+        # 标题/子标题行跨列合并(列头行不合并)
+        merged = {str(r) for r in ws.merged_cells.ranges}
+        assert "A1:B1" in merged
+        assert "A3:B3" in merged
+        assert "A7:B7" in merged
 
 
 if __name__ == "__main__":

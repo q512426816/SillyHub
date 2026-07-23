@@ -140,6 +140,8 @@ class PlanNodeModule(BaseModel, table=True):
     plan_node_id: uuid.UUID | None = Field(
         default=None, sa_column=Column(UuidCoercing, nullable=True)
     )
+    # 序号(排序用,里程碑明细三层统一按序号数值排序);历史数据/未填为 NULL 排最后。
+    no: str | None = Field(default=None, sa_column=Column(String(32), nullable=True))
     module_name: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
     plan_workload: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
     plan_begin_time: datetime | None = Field(

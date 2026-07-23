@@ -40,11 +40,13 @@ from app.modules.ppm.project.model import PpmProjectMember
     "path,expected_header",
     [
         ("/api/ppm/plan-node/export-excel", "总体阶段"),
-        ("/api/ppm/plan-node-detail/export-excel", "任务主题"),
+        # plan-node-detail 导出已改子母表分组(列头在每里程碑块内),无 plan_id 时空表,
+        # 此处仅校验路由不被 {item_id} 拦截(200+xlsx),header 校验留给分组导出专项测试。
+        ("/api/ppm/plan-node-detail/export-excel", None),
     ],
 )
 async def test_export_excel_literal_route_not_shadowed(
-    client: AsyncClient, auth_headers: dict, path: str, expected_header: str
+    client: AsyncClient, auth_headers: dict, path: str, expected_header: str | None
 ) -> None:
     """export-excel 字面量路径必须命中专用导出端点 (200 + 合法 xlsx),
     不能被 ``{item_id}`` 路径参数拦截返回 422。"""
@@ -55,9 +57,10 @@ async def test_export_excel_literal_route_not_shadowed(
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
     assert "attachment" in resp.headers["content-disposition"]
-    wb = load_workbook(BytesIO(resp.content))
-    headers = [c.value for c in wb.active[1]]
-    assert expected_header in headers
+    if expected_header is not None:
+        wb = load_workbook(BytesIO(resp.content))
+        headers = [c.value for c in wb.active[1]]
+        assert expected_header in headers
 
 
 # ---------- 模块导入上传校验 (P1#1 / P1#2) ----------

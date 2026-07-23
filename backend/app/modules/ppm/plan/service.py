@@ -83,6 +83,16 @@ log = get_logger(__name__)
 # execute_plan action="complete" 写入的 plan.status="已完成"。
 TASK_STATUS_DONE = "已完成"
 
+# 明细状态(PlanNodeDetailStatus)→ 中文,导出展示用(英文状态对用户不友好)。
+DETAIL_STATUS_CN: dict[str, str] = {
+    "draft": "草稿",
+    "review": "审核中",
+    "approve": "审批中",
+    "done": "已完成",
+    "rejected": "已驳回",
+    "archived": "已归档",
+}
+
 
 class PlanError(AppError):
     """plan 子域通用业务错误。"""
@@ -156,6 +166,20 @@ def _date_to_datetime(value: date | None) -> datetime | None:
     if value is None:
         return None
     return datetime.combine(value, time.min, tzinfo=UTC)
+
+
+def _no_sort_key(no: str | None) -> tuple[int, float, str]:
+    """序号排序键:纯数值越小越前,非数字文本次之,空/None 最后。
+
+    用于里程碑/模块/明细的 ``no``(String 列)数值排序,避免字符串排序的
+    "1"/"10"/"2" 错序。返回三元组,不同类之间靠首位 int 区分、不冲突。
+    """
+    s = str(no).strip() if no is not None else ""
+    if not s:
+        return (2, 0.0, "")
+    if re.fullmatch(r"-?\d+", s):
+        return (0, float(s), "")
+    return (1, 0.0, s)
 
 
 # ===========================================================================
@@ -357,12 +381,12 @@ class PlanService:
 
     # ---------- 模块 (子表,按 plan_node_id 列表) ----------
     async def list_modules_by_node(self, plan_node_id: str) -> list[PlanNodeModule]:
-        stmt = (
-            select(PlanNodeModule)
-            .where(PlanNodeModule.plan_node_id == self._safe_uuid(plan_node_id))
-            .order_by(PlanNodeModule.created_at)
+        stmt = select(PlanNodeModule).where(
+            PlanNodeModule.plan_node_id == self._safe_uuid(plan_node_id)
         )
-        return list((await self._session.execute(stmt)).scalars().all())
+        rows = list((await self._session.execute(stmt)).scalars().all())
+        rows.sort(key=lambda m: _no_sort_key(m.no))
+        return rows
 
     async def list_modules_by_project(self, project_id: uuid.UUID) -> list[PlanNodeModule]:
         """按项目列出其下所有模块 (problem 表单下拉用)。
@@ -662,12 +686,12 @@ class PlanService:
 
     # ---------- 里程碑 (ps_plan_node) CRUD ----------
     async def list_ps_plan_nodes_by_plan(self, ps_project_plan_id: str) -> list[PsPlanNode]:
-        stmt = (
-            select(PsPlanNode)
-            .where(PsPlanNode.ps_project_plan_id == self._safe_uuid(ps_project_plan_id))
-            .order_by(PsPlanNode.no)
+        stmt = select(PsPlanNode).where(
+            PsPlanNode.ps_project_plan_id == self._safe_uuid(ps_project_plan_id)
         )
-        return list((await self._session.execute(stmt)).scalars().all())
+        rows = list((await self._session.execute(stmt)).scalars().all())
+        rows.sort(key=lambda n: _no_sort_key(n.no))
+        return rows
 
     async def create_ps_plan_node(self, data: dict[str, Any]) -> PsPlanNode:
         # 单事务建里程碑;若 overall_stage 匹配某计划节点模板(PlanNode),复用
@@ -705,15 +729,13 @@ class PlanService:
     # ---------- 里程碑明细 (核心表) CRUD ----------
     async def list_details_by_node(self, plan_node_id: str) -> list[PsPlanNodeDetail]:
         """列出某里程碑下「最新有效」的明细版本 (排除 archived 旧版本)。"""
-        stmt = (
-            select(PsPlanNodeDetail)
-            .where(
-                PsPlanNodeDetail.plan_node_id == self._safe_uuid(plan_node_id),
-                PsPlanNodeDetail.status != PlanNodeDetailStatus.ARCHIVED.value,
-            )
-            .order_by(PsPlanNodeDetail.no)
+        stmt = select(PsPlanNodeDetail).where(
+            PsPlanNodeDetail.plan_node_id == self._safe_uuid(plan_node_id),
+            PsPlanNodeDetail.status != PlanNodeDetailStatus.ARCHIVED.value,
         )
-        return list((await self._session.execute(stmt)).scalars().all())
+        rows = list((await self._session.execute(stmt)).scalars().all())
+        rows.sort(key=lambda d: _no_sort_key(d.no))
+        return rows
 
     async def get_detail(self, item_id: uuid.UUID) -> PsPlanNodeDetail:
         return await _Crud(self._session, PsPlanNodeDetail).get(item_id)
@@ -1249,6 +1271,127 @@ class PlanService:
             }
             for r in rows
         ]
+
+    async def build_milestone_export_sections(self, plan_id: uuid.UUID) -> list[dict[str, Any]]:
+        """构建里程碑明细的分组(子母表)导出结构,供 ``grouped_report_to_workbook`` 消费。
+
+        层级:里程碑(PsPlanNode) →(模块 PlanNodeModule,仅 has_module)→ 明细
+        (PsPlanNodeDetail,非 archived)。每个里程碑成一个 section:大标题行带
+        责任人/计划区间;has_module 里程碑按模块分子标题,否则明细直接挂里程碑。
+        明细含全部信息列(任务描述/执行人/执行状态),状态英→中;责任人/执行人姓名、
+        执行状态(关联任务 PlanTask.status)批量反查避免 N+1。
+        """
+        nodes = await self.list_ps_plan_nodes_by_plan(str(plan_id))
+
+        # 批量取该计划全部非 archived 明细(按序号数值排序后按 plan_node_id 分组)
+        all_details = list(
+            (
+                await self._session.execute(
+                    select(PsPlanNodeDetail)
+                    .join(PsPlanNode, PsPlanNode.id == PsPlanNodeDetail.plan_node_id)
+                    .where(
+                        PsPlanNode.ps_project_plan_id == plan_id,
+                        PsPlanNodeDetail.status != PlanNodeDetailStatus.ARCHIVED.value,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        all_details.sort(key=lambda d: _no_sort_key(d.no))
+        details_by_node: dict[uuid.UUID, list[PsPlanNodeDetail]] = {}
+        for d in all_details:
+            details_by_node.setdefault(d.plan_node_id, []).append(d)
+
+        # 批量反查里程碑责任人 + 明细执行人姓名
+        user_ids = {n.duty_user_id for n in nodes if n.duty_user_id}
+        user_ids |= {d.execute_user_id for d in all_details if d.execute_user_id}
+        user_name: dict[uuid.UUID, str] = {}
+        if user_ids:
+            user_rows = (
+                await self._session.execute(
+                    select(User.id, User.display_name, User.email, User.username).where(
+                        User.id.in_(user_ids)
+                    )
+                )
+            ).all()
+            for r in user_rows:
+                user_name[r.id] = r.display_name or r.email or r.username or str(r.id)
+
+        # 批量查明细关联任务状态(执行状态,首条生效 1:1 实践)
+        detail_ids = [d.id for d in all_details]
+        task_status: dict[uuid.UUID, str] = {}
+        if detail_ids:
+            task_rows = (
+                await self._session.execute(
+                    select(PlanTask.ps_plan_node_detail_id, PlanTask.status).where(
+                        PlanTask.ps_plan_node_detail_id.in_(detail_ids)
+                    )
+                )
+            ).all()
+            for did, st in task_rows:
+                task_status.setdefault(did, st)
+
+        def _date(v: datetime | None) -> str:
+            return v.strftime("%Y-%m-%d") if v else ""
+
+        def _detail_dict(d: PsPlanNodeDetail) -> dict[str, Any]:
+            return {
+                "detailed_stage": d.detailed_stage,
+                "task_theme": d.task_theme,
+                "task_description": d.task_description,
+                "role_name": d.role_name,
+                "plan_workload": d.plan_workload,
+                "plan_begin_time": _date(d.plan_begin_time),
+                "plan_complete_time": _date(d.plan_complete_time),
+                "execute_user_name": (
+                    user_name.get(d.execute_user_id) if d.execute_user_id else None
+                ),
+                "task_execute_status": task_status.get(d.id),
+                "achievement": d.achievement,
+                "status": DETAIL_STATUS_CN.get(d.status, d.status),
+            }
+
+        sections: list[dict[str, Any]] = []
+        for node in nodes:
+            # 大标题:里程碑 {no}. {overall_stage} | 责任人:.. | 计划:..~..
+            no_part = f"{node.no}." if node.no else ""
+            title = f"里程碑 {no_part} {node.overall_stage or ''}".strip()
+            extras: list[str] = []
+            if node.duty_user_id and user_name.get(node.duty_user_id):
+                extras.append(f"责任人: {user_name[node.duty_user_id]}")
+            begin_s, complete_s = _date(node.plan_begin_time), _date(node.plan_complete_time)
+            if begin_s and complete_s:
+                extras.append(f"计划: {begin_s} ~ {complete_s}")
+            elif begin_s:
+                extras.append(f"计划开始: {begin_s}")
+            elif complete_s:
+                extras.append(f"计划完成: {complete_s}")
+            if extras:
+                title = f"{title}　|　{'　'.join(extras)}"
+
+            details = details_by_node.get(node.id, [])
+            if node.has_module:
+                modules = await self.list_modules_by_node(str(node.id))
+                module_ids = {m.id for m in modules}
+                groups: list[dict[str, Any]] = []
+                for m in modules:
+                    rows = [_detail_dict(d) for d in details if d.module_id == m.id]
+                    no_part = f"{m.no} " if m.no else ""
+                    groups.append(
+                        {
+                            "subtitle": f"模块: {no_part}{m.module_name or '(未命名模块)'}",
+                            "rows": rows,
+                        }
+                    )
+                # 模块已删 / 未分模块的明细单列一组
+                orphans = [_detail_dict(d) for d in details if d.module_id not in module_ids]
+                if orphans:
+                    groups.append({"subtitle": "(未分模块)", "rows": orphans})
+            else:
+                groups = [{"subtitle": None, "rows": [_detail_dict(d) for d in details]}]
+            sections.append({"title": title, "groups": groups})
+        return sections
 
     # ---------- submitDetail (task-02):detail JSON 白名单 merge 落库 ----------
     # 提交明细字段更新 (对照源 PsPlanNodeDetailController.submitDetail):

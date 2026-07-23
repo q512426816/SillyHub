@@ -312,6 +312,8 @@ export interface PlanNodeModule {
   // 同 PlanNodeDetail.plan_node_id (D-fix@plan500)
   plan_node_id: string | null;
   module_name: string | null;
+  // 序号(排序用,里程碑明细三层按序号数值排序)
+  no: string | null;
   // 计划类型: "正常计划" / "临时计划" / null (design §6 + task-02; 旧数据为 NULL)
   plan_type: string | null;
   plan_workload: string | null;
@@ -325,6 +327,7 @@ export interface PlanNodeModule {
 export interface PlanNodeModuleCreate {
   plan_node_id: string;
   module_name?: string | null;
+  no?: string | null;
   plan_workload?: string | null;
   plan_begin_time?: string | null;
   plan_complete_time?: string | null;
@@ -333,6 +336,7 @@ export interface PlanNodeModuleCreate {
 
 export interface PlanNodeModuleUpdate {
   module_name?: string | null;
+  no?: string | null;
   // 计划类型(编辑保存不丢字段,design §12 自审)
   plan_type?: string | null;
   plan_workload?: string | null;

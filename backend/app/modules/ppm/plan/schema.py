@@ -108,6 +108,8 @@ class PlanNodeModuleBase(PydanticModel):
     # 同上 (D-fix@plan500)
     plan_node_id: uuid.UUID | None = None
     module_name: str | None = None
+    # 序号(排序用),见 model PlanNodeModule.no
+    no: str | None = None
     plan_workload: str | None = None
     plan_begin_time: datetime | None = None
     plan_complete_time: datetime | None = None
@@ -121,6 +123,7 @@ class PlanNodeModuleCreate(PlanNodeModuleBase):
 
 class PlanNodeModuleUpdate(PydanticModel):
     module_name: str | None = None
+    no: str | None = None
     plan_workload: str | None = None
     plan_begin_time: datetime | None = None
     plan_complete_time: datetime | None = None
