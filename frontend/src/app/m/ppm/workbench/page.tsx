@@ -952,6 +952,12 @@ function QuickEntriesCard() {
       href: "/ppm/task-plans",
     },
     {
+      label: "项目计划",
+      icon: ClipboardList,
+      tile: "bg-violet-50 text-violet-600",
+      href: "/ppm/project-plans",
+    },
+    {
       label: "绩效考评",
       icon: Award,
       tile: "bg-emerald-50 text-emerald-600",
