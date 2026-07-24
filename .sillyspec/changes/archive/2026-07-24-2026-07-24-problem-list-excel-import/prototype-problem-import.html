@@ -1,0 +1,113 @@
+<!doctype html>
+<!--
+  问题清单 Excel 批量导入 — 交互原型（线框风格）
+  author: qinyi
+  created_at: 2026-07-24 09:16:11
+  用途：确认设计方向，非实现。对齐「项目计划导入」两步式范式。
+-->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>问题清单 Excel 导入 — 原型</title>
+<style>
+  body { font-family: system-ui, "Microsoft YaHei", sans-serif; background: #f5f5f5; margin: 0; padding: 24px; color: #222; }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 18px; }
+  h2 { font-size: 15px; border-left: 4px solid #305496; padding-left: 8px; margin: 24px 0 8px; }
+  .steps { display: flex; gap: 8px; margin: 12px 0; }
+  .step { flex: 1; border-top: 3px solid #ddd; text-align: center; padding: 8px 0; font-size: 12px; color: #888; }
+  .step.active { border-color: #305496; color: #305496; font-weight: 600; }
+  .step.done { border-color: #16a34a; color: #16a34a; }
+  .box { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 18px; margin: 8px 0; }
+  .drag { border: 2px dashed #aaa; border-radius: 8px; padding: 30px; text-align: center; color: #666; background: #fafafa; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
+  th { background: #305496; color: #fff; }
+  tr.bad { background: #fef2f2; }
+  tr.bad td.err { color: #dc2626; font-weight: 600; }
+  .stat { display: inline-block; background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 12px 22px; margin: 4px; text-align: center; min-width: 100px; }
+  .stat b { display: block; font-size: 24px; }
+  .stat span { font-size: 12px; color: #666; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; }
+  .tag.red { background: #fee2e2; color: #dc2626; }
+  .tag.green { background: #dcfce7; color: #16a34a; }
+  .note { font-size: 12px; color: #555; background: #f0f7ff; border-left: 3px solid #305496; padding: 8px 12px; margin: 8px 0; border-radius: 0 4px 4px 0; }
+  .btn { background: #305496; color: #fff; border: 0; padding: 6px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  .btn.ghost { background: #fff; color: #333; border: 1px solid #ccc; }
+  .right { text-align: right; }
+  small { color: #888; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>问题清单 Excel 导入 — 交互原型</h1>
+  <p class="note">入口：问题清单页"导出"旁新增"导入"按钮。对齐「项目计划导入」两步式范式：上传 → 预览(未匹配行标红) → 确认入库。</p>
+
+  <h2>① 上传文件</h2>
+  <div class="box">
+    <div class="steps">
+      <div class="step active">1. 上传文件</div>
+      <div class="step">2. 预览解析</div>
+      <div class="step">3. 完成导入</div>
+    </div>
+    <div class="drag">
+      📄<br>
+      点击或拖拽 Excel 文件到此<br>
+      <small>支持 .xlsx，参考「问题清单导入模板」格式</small><br>
+      <b style="color:#305496">选择文件开始预览</b>
+    </div>
+    <div class="right" style="margin-top:12px"><a href="#" style="color:#305496;font-size:13px;text-decoration:none">⬇ 下载导入模板</a></div>
+  </div>
+
+  <h2>② 预览解析（未匹配行标红，确认前可纠错）</h2>
+  <div class="box">
+    <table>
+      <tr><th>项目名称</th><th>模块</th><th>问题描述</th><th>类型</th><th>加急</th><th>责任人</th><th>验证人</th><th>计划起止</th><th>状态</th></tr>
+      <tr><td>转向架项目</td><td>构架</td><td>焊缝裂纹</td><td>bug</td><td>是</td><td>张三</td><td>李四</td><td>08-01~08-10</td><td class="err"><span class="tag green">就绪</span></td></tr>
+      <tr class="bad"><td>不存在的项目</td><td>—</td><td>制动失灵</td><td>bug</td><td>—</td><td>张三</td><td>—</td><td>—</td><td class="err"><span class="tag red">项目不存在</span></td></tr>
+      <tr class="bad"><td>转向架项目</td><td>—</td><td>(空描述)</td><td>change</td><td>—</td><td>不认识的人</td><td>—</td><td>—</td><td class="err"><span class="tag red">问题描述必填 + 责任人未匹配</span></td></tr>
+      <tr><td>制动项目</td><td>阀类</td><td>管路泄漏</td><td>bug</td><td>否</td><td>王五</td><td>—</td><td>08-05~08-15</td><td class="err"><span class="tag green">就绪</span></td></tr>
+    </table>
+    <p style="font-size:12px;color:#666;margin-top:8px">将提交 <b>2</b> 条可导入行（2 条不可导入将跳过）</p>
+    <div class="right" style="margin-top:8px">
+      <button class="btn ghost">上一步</button>
+      &nbsp;
+      <button class="btn">确认导入</button>
+    </div>
+  </div>
+
+  <h2>③ 导入完成</h2>
+  <div class="box">
+    <div class="stat"><b style="color:#305496">2</b><span>新建成功</span></div>
+    <div class="stat"><b style="color:#d97706">2</b><span>不可导入跳过</span></div>
+    <div class="stat"><b style="color:#dc2626">0</b><span>入库失败</span></div>
+    <p style="font-size:12px;color:#666">新建问题状态默认为「新建」，创建人=当前登录用户，可在列表里逐条「开始 / 执行」。</p>
+    <div class="right"><button class="btn ghost">关闭</button></div>
+  </div>
+
+  <h2>导入模板列（全字段）</h2>
+  <div class="box">
+    <table>
+      <tr><th>列名</th><th>说明</th><th>匹配规则</th></tr>
+      <tr><td>项目名称</td><td>必填</td><td>按名匹配系统项目，<b>必须匹配否则整行拒绝</b></td></tr>
+      <tr><td>模块名称</td><td>选填</td><td>填了须匹配，不填留空</td></tr>
+      <tr><td>问题描述</td><td>必填</td><td>—</td></tr>
+      <tr><td>问题类型</td><td>bug / change / 其他</td><td>—</td></tr>
+      <tr><td>是否加急</td><td>是 / 否</td><td>—</td></tr>
+      <tr><td>功能名称</td><td>选填</td><td>—</td></tr>
+      <tr><td>责任人</td><td>姓名</td><td>填了须匹配系统用户</td></tr>
+      <tr><td>发现人</td><td>文本</td><td>原样保存，不匹配</td></tr>
+      <tr><td>发现时间</td><td>日期</td><td>—</td></tr>
+      <tr><td>计划开始 / 结束</td><td>日期</td><td>—</td></tr>
+      <tr><td>验证人</td><td>姓名</td><td>填了须匹配系统用户</td></tr>
+      <tr><td>工作量(人天)</td><td>文本/数值</td><td>—</td></tr>
+      <tr><td>工作类型</td><td>选填</td><td>—</td></tr>
+      <tr><td>问题答复</td><td>选填</td><td>—</td></tr>
+      <tr><td>是否延期计划</td><td>是/否</td><td>—</td></tr>
+      <tr><td>备注</td><td>选填</td><td>—</td></tr>
+    </table>
+    <p class="note">附件、实际结束时间、验证时间、已消耗工时、流程节点等系统字段不导入（由执行流程产生）。导入<b>不查重</b>，Excel 有几行建几条。</p>
+  </div>
+</div>
+</body>
+</html>

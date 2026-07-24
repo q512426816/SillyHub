@@ -268,6 +268,88 @@ class ChangeRejectProcessReq(PydanticModel):
     comment: str | None = None
 
 
+# ===========================================================================
+# 问题清单 Excel 批量导入 DTO (task-03) — 两阶段预览/提交
+# design §7;对齐 plan 子域 ImportPreviewRow/Resp/CommitReq/ResultResp 命名范式。
+# 字段 = 1 行号 + 17 业务列(Excel 原文/importer 已规范化枚举) +
+#        4 反查 UUID(仅展示,commit 重查 D-011) + valid/error。
+# ===========================================================================
+
+
+class ProblemImportPreviewRow(PydanticModel):
+    """单行预览结果 — Excel 一行对应一 DTO。
+
+    - 业务字段取自 importer 解析;枚举已规范化:``is_urgent``/``is_delay_plan``
+      为 "1"/"0"(空→None),``pro_type`` 原样保留(bug/change/其他)。
+    - 4 个反查 UUID(project/module/duty/audit)由 service 预览阶段填充,
+      仅供前端展示;commit 不信任,按原文重新反查(D-011)。
+    - 时间字段统一 ``datetime | None``;importer 产 ``date``,
+      service 做 date→datetime 转换(D-010)。
+    - ``valid`` 必填(语义上必须显式判断),``error`` 默认 None。
+    """
+
+    row_index: int
+    # 业务字段(Excel 原文 / 解析后)
+    project_name: str | None = None
+    module_name: str | None = None  # Excel 列名友好;入库→ORM.model_name(D-012)
+    pro_desc: str | None = None
+    pro_type: str | None = None  # bug / change / 其他(原样)
+    is_urgent: str | None = None  # importer 已转 "1"/"0"
+    func_name: str | None = None
+    duty_user_name: str | None = None
+    find_by: str | None = None  # 文本,不反查
+    find_time: datetime | None = None  # importer 产 date,service 转换(D-010)
+    plan_start_time: datetime | None = None
+    plan_end_time: datetime | None = None
+    audit_user_name: str | None = None
+    work_load: str | None = None
+    work_type: str | None = None
+    pro_answer: str | None = None
+    is_delay_plan: str | None = None  # importer 已转 "1"/"0"
+    remarks: str | None = None
+    # 反查结果(preview 填,仅供前端展示;commit 不信任,重新反查 D-011)
+    project_id: uuid.UUID | None = None
+    module_id: uuid.UUID | None = None
+    duty_user_id: uuid.UUID | None = None
+    audit_user_id: uuid.UUID | None = None
+    valid: bool  # 是否可导入(必填/反查未匹配→False,D-004/D-009)
+    error: str | None = None  # 不可导入原因
+
+
+class ProblemImportPreviewResp(PydanticModel):
+    """预览响应 — 全部行(含标红) + 解析级错误(如找不到表头/空文件)。
+
+    ``valid_count``/``invalid_count`` 由 service 按 ``row.valid`` 聚合。
+    """
+
+    rows: list[ProblemImportPreviewRow]
+    parse_errors: list[str] = Field(default_factory=list)
+    valid_count: int
+    invalid_count: int
+
+
+class ProblemImportCommitReq(PydanticModel):
+    """导入提交请求 — 前端勾选回传的行(通常 valid=True 的行)。
+
+    反查 UUID 仅展示用,commit 阶段按原文重新反查 + data_scope 校验(D-011)。
+    """
+
+    rows: list[ProblemImportPreviewRow]
+
+
+class ProblemImportResultResp(PydanticModel):
+    """导入结果 — 创建计数 + 失败行诊断。
+
+    - ``skipped``:preview 阶段 valid=false 未回传的(前端统计补 0)。
+    - ``failed_rows``:commit 重查/data_scope 失败行诊断;
+      原子提交成功(D-008)时为空列表。
+    """
+
+    created: int
+    skipped: int
+    failed_rows: list[str] = Field(default_factory=list)
+
+
 __all__ = [
     "ChangeNextProcessReq",
     "ChangeRejectProcessReq",
@@ -276,6 +358,10 @@ __all__ = [
     "ProblemChangeResp",
     "ProblemChangeUpdate",
     "ProblemExecuteReq",
+    "ProblemImportCommitReq",
+    "ProblemImportPreviewResp",
+    "ProblemImportPreviewRow",
+    "ProblemImportResultResp",
     "ProblemListBase",
     "ProblemListCreate",
     "ProblemListResp",

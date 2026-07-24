@@ -22,7 +22,7 @@ from datetime import datetime
 from typing import Annotated, Any
 
 import anyio
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +31,7 @@ from app.core.db import get_session
 from app.modules.auth.model import User
 from app.modules.ppm.common.crud import Page, PageReq
 from app.modules.ppm.common.export import ColumnDef
+from app.modules.ppm.common.upload import validate_xlsx_upload
 from app.modules.ppm.problem.schema import (
     ChangeNextProcessReq,
     ChangeRejectProcessReq,
@@ -38,6 +39,9 @@ from app.modules.ppm.problem.schema import (
     ProblemChangeResp,
     ProblemChangeUpdate,
     ProblemExecuteReq,
+    ProblemImportCommitReq,
+    ProblemImportPreviewResp,
+    ProblemImportResultResp,
     ProblemListCreate,
     ProblemListResp,
     ProblemListUpdate,
@@ -191,6 +195,51 @@ async def export_problems(
     return await anyio.to_thread.run_sync(
         lambda: _build_excel_response(columns, rows, "问题清单", filename=filename)
     )
+
+
+# ---------- 问题清单 Excel 批量导入 (两阶段:预览 → 提交, D-001@v1) ----------
+# 字面量路径 /problem-list/import-preview 与 /problem-list/import-commit 必须
+# 前置于 /problem-list/{item_id} 参数化路由,否则 FastAPI 按注册顺序把
+# "import-preview" / "import-commit" 当 item_id 解析为 UUID 失败返回 422
+# (同本文件 export-excel / list-by-date-range 的前置约定,design §5 step4)。
+@router.post(
+    "/problem-list/import-preview",
+    response_model=ProblemImportPreviewResp,
+)
+async def import_problems_preview(
+    session: SessionDep,
+    user: AuthUser,
+    file: UploadFile = File(...),
+) -> ProblemImportPreviewResp:
+    """问题清单导入预览 (task-04 / design §7)。
+
+    先用 :func:`validate_xlsx_upload` 校验大小/扩展名 (D-013,中立异常由
+    ``AppError`` 统一翻译),再交 service 解析 + 反查项目/模块/成员,不入库。
+    Excel 解析为同步 openpyxl 操作,由 service 内部 ``anyio.to_thread`` 包裹
+    避免阻塞事件循环 (R-03,对齐 plan 模块导入范式)。返回
+    ``ProblemImportPreviewResp`` 供前端标红确认后再提交。
+    """
+    file_bytes = await file.read()
+    validate_xlsx_upload(file, file_bytes)
+    return await ProblemService(session).import_preview(file_bytes, user=user)
+
+
+@router.post(
+    "/problem-list/import-commit",
+    response_model=ProblemImportResultResp,
+)
+async def import_problems_commit(
+    body: ProblemImportCommitReq,
+    session: SessionDep,
+    user: AuthUser,
+) -> ProblemImportResultResp:
+    """问题清单导入提交 (task-04 / design §7)。
+
+    按 preview 返回的行原子入库;service 不信任前端 UUID,按原文重新反查
+    + data_scope 校验 (D-011),单次事务提交 (D-008)。router 不二次包装,
+    直接回传 service 产出的 ``ProblemImportResultResp``。
+    """
+    return await ProblemService(session).import_commit(body, user=user)
 
 
 @router.post(

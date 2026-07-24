@@ -22,9 +22,11 @@ decisions.md D-001~D-006 + ``tasks/task-03.md``；镜像
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, time
 from typing import Any
 
+import anyio
 from sqlalchemy import Select, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,6 +48,7 @@ from app.modules.ppm.common.data_scope import (
     problem_scope_clause,
 )
 from app.modules.ppm.common.fsm import assert_transition
+from app.modules.ppm.plan.service import PlanService
 from app.modules.ppm.problem.fsm import (
     CHANGE_TRANSITIONS,
     NODE_NAMES,
@@ -56,6 +59,7 @@ from app.modules.ppm.problem.fsm import (
     compute_change_next_node,
     is_change_audit_node,
 )
+from app.modules.ppm.problem.importer import parse_problem_workbook
 from app.modules.ppm.problem.model import (
     PpmProblemChange,
     PpmProblemChangeProcessLog,
@@ -63,6 +67,12 @@ from app.modules.ppm.problem.model import (
     PpmProblemList,
     PpmProblemListProcessLog,
     PpmProblemListProcessTask,
+)
+from app.modules.ppm.problem.schema import (
+    ProblemImportCommitReq,
+    ProblemImportPreviewResp,
+    ProblemImportPreviewRow,
+    ProblemImportResultResp,
 )
 from app.modules.ppm.project.model import PpmProjectMaintenance, PpmProjectMember
 from app.modules.ppm.task.model import TaskExecute
@@ -142,6 +152,18 @@ def _safe_uuid(value: str | uuid.UUID | None) -> uuid.UUID | None:
         return None
 
 
+def _date_to_datetime(value: date | None) -> datetime | None:
+    """把导入解析得到的 ``date`` 转成 ``datetime`` (当日 00:00:00, UTC)。
+
+    导入 DTO ``ProblemImportPreviewRow`` 时间字段为 ``datetime | None`` (对齐
+    ORM ``DateTime(timezone=True)``);importer 产出 ``date`` (Excel 日期),
+    这里统一补全为带 UTC tz 的 datetime (D-010)。对照 plan 子域同名 helper。
+    """
+    if value is None:
+        return None
+    return datetime.combine(value, time.min, tzinfo=UTC)
+
+
 # ===========================================================================
 # 通用 CRUD helper (字段差异大但形状一致,抽出复用)
 # ===========================================================================
@@ -214,6 +236,23 @@ class _Crud[T]:
 # ===========================================================================
 # ProblemService
 # ===========================================================================
+
+
+@dataclass(slots=True)
+class _RowResolveResult:
+    """单行反查 + 严格校验结果 (preview / commit 共用, D-011 重查复用同逻辑)。
+
+    ``errors`` 为空表示该行可导入;此时 ``project_id`` 必非空 (project_name 必
+    填且须命中,否则 errors 含「项目名称必填」/「项目不存在:...」)。module/duty/
+    audit 反查到的 UUID 供 preview 展示与 commit 入库;commit 不信任前端回传
+    UUID,按原文重新走本逻辑 (D-011)。
+    """
+
+    project_id: uuid.UUID | None
+    module_id: uuid.UUID | None
+    duty_user_id: uuid.UUID | None
+    audit_user_id: uuid.UUID | None
+    errors: list[str]
 
 
 class ProblemService:
@@ -923,6 +962,315 @@ class ProblemService:
             }
             for r in rows
         ]
+
+    # ------------------------------------------------------------------
+    # 问题清单 Excel 批量导入 (task-05)
+    # ------------------------------------------------------------------
+    # 两步式 (design §5 / §7):preview 解析+反查+严格校验标红;commit 不信任前端
+    # UUID 重查 + data_scope 校验 + 原子单次事务入库。反查/校验逻辑两段共享
+    # ``_resolve_row_lookup`` + 批量反查 helper,避免分叉 (D-011)。
+
+    async def import_preview(self, file_bytes: bytes, user: User) -> ProblemImportPreviewResp:
+        """Excel 解析 + 批量反查 + 逐行严格校验 → 预览响应 (design §7 / D-004/D-009)。
+
+        纯预览不入库 (不写 DB,不复用 ``_Crud``)。
+
+        - 解析丢线程池 (R-03):``parse_problem_workbook`` 是同步 openpyxl,
+          ``anyio.to_thread.run_sync`` 包裹,不阻塞事件循环。
+        - 批量反查 (D-006/D-014):project 按 ``project_name`` 一次查库建表;
+          module 复用 ``PlanService.list_modules_by_project`` (每个出现项目调一次,
+          非逐行);duty/audit 一次查全部相关项目的 ``PpmProjectMember`` 按项目分组
+          (限项目成员)。
+        - 逐行严格校验:project_name 必填且须匹配 (D-009),未匹配短路不再查其余
+          (D-004×D-006);pro_desc 必填 (D-009);module/duty/audit 填了须匹配 (D-004)。
+        - 时间 date→datetime (D-010)。
+        - 反查到的 4 个 UUID 填入预览行仅供前端展示,commit 不信任 (D-011)。
+
+        ``user`` 暂未参与预览权限校验 (导入权限由 router 复用 create_problem 闸口);
+        保留入参以对齐 commit 签名与未来扩展。
+        """
+        # 1. 线程池跑同步解析 (R-03)
+        parsed_rows = await anyio.to_thread.run_sync(parse_problem_workbook, file_bytes)
+
+        # 2. 批量反查 (D-006/D-014):去重后一次查库,避免逐行 N+1
+        project_name_map = await self._build_project_name_map(
+            {r.project_name for r in parsed_rows if r.project_name}
+        )
+        matched_pids: set[uuid.UUID] = set(project_name_map.values())
+        module_maps = await self._build_module_maps(matched_pids)
+        member_maps = await self._build_member_maps(matched_pids)
+
+        # 3. 逐行反查 + 严格校验 → 预览行
+        preview_rows: list[ProblemImportPreviewRow] = []
+        for r in parsed_rows:
+            resolved = self._resolve_row_lookup(
+                r.project_name,
+                r.module_name,
+                r.pro_desc,
+                r.duty_user_name,
+                r.audit_user_name,
+                project_name_map,
+                module_maps,
+                member_maps,
+            )
+            preview_rows.append(
+                ProblemImportPreviewRow(
+                    row_index=r.row_index,
+                    project_name=r.project_name,
+                    module_name=r.module_name,
+                    pro_desc=r.pro_desc,
+                    pro_type=r.pro_type,
+                    is_urgent=r.is_urgent,
+                    func_name=r.func_name,
+                    duty_user_name=r.duty_user_name,
+                    find_by=r.find_by,
+                    find_time=_date_to_datetime(r.find_time),
+                    plan_start_time=_date_to_datetime(r.plan_start_time),
+                    plan_end_time=_date_to_datetime(r.plan_end_time),
+                    audit_user_name=r.audit_user_name,
+                    work_load=r.work_load,
+                    work_type=r.work_type,
+                    pro_answer=r.pro_answer,
+                    is_delay_plan=r.is_delay_plan,
+                    remarks=r.remarks,
+                    project_id=resolved.project_id,
+                    module_id=resolved.module_id,
+                    duty_user_id=resolved.duty_user_id,
+                    audit_user_id=resolved.audit_user_id,
+                    valid=not resolved.errors,
+                    error="；".join(resolved.errors) if resolved.errors else None,
+                )
+            )
+
+        valid_count = sum(1 for x in preview_rows if x.valid)
+        return ProblemImportPreviewResp(
+            rows=preview_rows,
+            parse_errors=[],
+            valid_count=valid_count,
+            invalid_count=len(preview_rows) - valid_count,
+        )
+
+    async def import_commit(
+        self, req: ProblemImportCommitReq, user: User
+    ) -> ProblemImportResultResp:
+        """原子批量入库 — 不信任前端 UUID,按原文重查 + data_scope 校验 (D-011/D-008)。
+
+        - 重查防篡改 (D-011/R-06):忽略前端回传 project/module/duty/audit UUID,
+          按原文重新走 ``_resolve_row_lookup``;严格校验 (pro_desc 必填、
+          module/duty/audit 填了须匹配) 失败的行剔除,诊断入 ``failed_rows``。
+        - data_scope 校验:每行 project_id 须当前用户可访问 (超管 ‖ 该项目经理,
+          复用 ``manager_project_ids``/``is_super_admin``);不可访问剔除计
+          ``failed_rows`` (防越权导入他人项目)。
+        - 显式字段映射 (D-012,module_name→model_name,不用 ``**dict``);系统字段
+          status="新建" / created_by=user.id / file_urls=[] (D-007)。
+        - 时间字段已在 preview 转 datetime,DTO 回传仍为 datetime,直接透传 (D-010)。
+        - 原子单次事务 (D-008):``session.add_all`` + 末尾单次 ``commit``;异常冒泡
+          → 不 commit → 整体回滚 (R-07)。不查重 (D-005)。
+        """
+        # 1. 重查 (按原文,忽略前端回传 UUID)
+        project_name_map = await self._build_project_name_map(
+            {r.project_name for r in req.rows if r.project_name}
+        )
+        matched_pids: set[uuid.UUID] = set(project_name_map.values())
+        module_maps = await self._build_module_maps(matched_pids)
+        member_maps = await self._build_member_maps(matched_pids)
+
+        # 2. data_scope:当前用户可访问项目集 (超管全部,否则经理项目集)
+        is_admin = await is_super_admin(self._session, user)
+        manager_pids = await manager_project_ids(self._session, user) if not is_admin else set()
+
+        # 3. 逐行重查 + 严格校验 + data_scope 过滤 → 待入库对象
+        objs: list[PpmProblemList] = []
+        failed_rows: list[str] = []
+        for r in req.rows:
+            resolved = self._resolve_row_lookup(
+                r.project_name,
+                r.module_name,
+                r.pro_desc,
+                r.duty_user_name,
+                r.audit_user_name,
+                project_name_map,
+                module_maps,
+                member_maps,
+            )
+            if resolved.errors:
+                failed_rows.append(f"第{r.row_index}行: " + "；".join(resolved.errors))
+                continue
+            project_id = resolved.project_id
+            if project_id is None:
+                # 理论不可达 (errors 为空即 project 必命中);防御兜底
+                failed_rows.append(f"第{r.row_index}行: 项目未匹配")
+                continue
+            if not is_admin and project_id not in manager_pids:
+                failed_rows.append(f"第{r.row_index}行: 无权导入该项目:{r.project_name}")
+                continue
+
+            objs.append(
+                PpmProblemList(
+                    id=uuid.uuid4(),
+                    project_id=project_id,
+                    project_name=r.project_name,
+                    model_name=r.module_name,
+                    module_id=resolved.module_id,
+                    pro_desc=r.pro_desc,
+                    pro_type=r.pro_type,
+                    is_urgent=r.is_urgent,
+                    func_name=r.func_name,
+                    duty_user_id=resolved.duty_user_id,
+                    duty_user_name=r.duty_user_name,
+                    audit_user_id=resolved.audit_user_id,
+                    audit_user_name=r.audit_user_name,
+                    find_by=r.find_by,
+                    find_time=r.find_time,
+                    plan_start_time=r.plan_start_time,
+                    plan_end_time=r.plan_end_time,
+                    work_load=r.work_load,
+                    work_type=r.work_type,
+                    pro_answer=r.pro_answer,
+                    is_delay_plan=r.is_delay_plan,
+                    remarks=r.remarks,
+                    status=ProblemStatus.NEW.value,
+                    created_by=user.id,
+                    file_urls=[],
+                    created_at=_now(),
+                    updated_at=_now(),
+                )
+            )
+
+        # 4. 原子单次事务入库 (D-008);异常冒泡不 commit 即整体回滚 (R-07)
+        if objs:
+            self._session.add_all(objs)
+            await self._session.commit()
+
+        log.info(
+            "problem_import_committed",
+            created=len(objs),
+            failed=len(failed_rows),
+            actor=str(user.id),
+        )
+        return ProblemImportResultResp(
+            created=len(objs),
+            skipped=0,
+            failed_rows=failed_rows,
+        )
+
+    # ----- 导入反查 / 校验 helper (preview 与 commit 共用, D-011) -----
+
+    async def _build_project_name_map(self, names: set[str]) -> dict[str, uuid.UUID]:
+        """按项目名批量反查 → ``{project_name: project_id}`` (D-002, 字段 ``project_name``)。
+
+        一次查库 (非逐行 N+1);``project_name`` 为 NULL 的项目不命中 ``in_`` 过滤,
+        自然排除。同名项目取最后写入者 (与 plan ``_build_member_name_map`` 同口径,
+        重名在预览层不阻断)。
+        """
+        if not names:
+            return {}
+        stmt = select(PpmProjectMaintenance.id, PpmProjectMaintenance.project_name).where(
+            PpmProjectMaintenance.project_name.in_(names)
+        )
+        out: dict[str, uuid.UUID] = {}
+        for pid, pname in (await self._session.execute(stmt)).all():
+            if pname:
+                out[str(pname)] = pid
+        return out
+
+    async def _build_module_maps(
+        self, project_ids: set[uuid.UUID]
+    ) -> dict[uuid.UUID, dict[str, uuid.UUID]]:
+        """每个项目 → ``{module_name: PlanNodeModule.id}`` 反查表 (D-006, 复用 plan)。
+
+        对每个出现的 project_id 调一次 ``PlanService.list_modules_by_project`` (关联链
+        project→ps_project_plan→ps_plan_node→plan_node_module 自洽,R-01),不逐行查,
+        也不自拼 module SQL。``module_name`` 为空的模块不进表 (不可匹配)。
+        """
+        out: dict[uuid.UUID, dict[str, uuid.UUID]] = {}
+        if not project_ids:
+            return out
+        plan_svc = PlanService(self._session)
+        for pid in project_ids:
+            modules = await plan_svc.list_modules_by_project(pid)
+            name_to_id: dict[str, uuid.UUID] = {}
+            for mod in modules:
+                if mod.module_name:
+                    name_to_id[str(mod.module_name)] = mod.id
+            out[pid] = name_to_id
+        return out
+
+    async def _build_member_maps(
+        self, project_ids: set[uuid.UUID]
+    ) -> dict[uuid.UUID, dict[str, uuid.UUID]]:
+        """每个项目 → ``{成员姓名: user_id}`` 反查表 (D-014, 限项目成员)。
+
+        一次查全部相关项目的 ``PpmProjectMember`` (``pm_project_id in``),按项目分组。
+        对照 plan ``_build_member_name_map`` 范式,problem 按项目分组(duty/audit 各
+        从该项目成员表反查)。``user_name`` 为空的成员不进表 (不可匹配,Grill X-005)。
+        """
+        out: dict[uuid.UUID, dict[str, uuid.UUID]] = {}
+        if not project_ids:
+            return out
+        stmt = select(
+            PpmProjectMember.pm_project_id,
+            PpmProjectMember.user_id,
+            PpmProjectMember.user_name,
+        ).where(PpmProjectMember.pm_project_id.in_(project_ids))
+        for pm_pid, uid, uname in (await self._session.execute(stmt)).all():
+            if not uname or not str(uname).strip():
+                continue
+            out.setdefault(pm_pid, {})[str(uname).strip()] = uid
+        return out
+
+    @staticmethod
+    def _resolve_row_lookup(
+        project_name: str | None,
+        module_name: str | None,
+        pro_desc: str | None,
+        duty_user_name: str | None,
+        audit_user_name: str | None,
+        project_name_map: dict[str, uuid.UUID],
+        module_maps: dict[uuid.UUID, dict[str, uuid.UUID]],
+        member_maps: dict[uuid.UUID, dict[str, uuid.UUID]],
+    ) -> _RowResolveResult:
+        """单行反查 + 严格校验 (preview / commit 共用, D-004/D-009/D-014)。
+
+        project_name 必填且须匹配 (D-009):空 → 「项目名称必填」;填了未命中 →
+        「项目不存在:xxx」并**短路** (不再查 module/duty/audit, D-004×D-006)。
+        project 命中后再校验 pro_desc 必填、module/duty/audit 填了须匹配,多错误
+        用 ``errors`` 列表收集 (preview 阶段 ``；`` 拼接展示)。问题责任人单值,
+        不拆分多人 (区别 plan 顿号拆分)。返回反查到的 UUID (module/duty/audit
+        未填或 project 未命中时为 None) + errors 列表。
+        """
+        errors: list[str] = []
+        module_id: uuid.UUID | None = None
+        duty_user_id: uuid.UUID | None = None
+        audit_user_id: uuid.UUID | None = None
+
+        if not project_name:
+            errors.append("项目名称必填")
+            return _RowResolveResult(None, None, None, None, errors)
+
+        project_id = project_name_map.get(project_name)
+        if project_id is None:
+            errors.append(f"项目不存在:{project_name}")
+            return _RowResolveResult(None, None, None, None, errors)
+
+        # project 命中后继续校验其余维度
+        if not pro_desc:
+            errors.append("问题描述必填")
+        if module_name:
+            module_id = module_maps.get(project_id, {}).get(module_name)
+            if module_id is None:
+                errors.append(f"模块不存在:{module_name}")
+        member_map = member_maps.get(project_id, {})
+        if duty_user_name:
+            duty_user_id = member_map.get(duty_user_name)
+            if duty_user_id is None:
+                errors.append(f"责任人不是项目成员:{duty_user_name}")
+        if audit_user_name:
+            audit_user_id = member_map.get(audit_user_name)
+            if audit_user_id is None:
+                errors.append(f"验证人不是项目成员:{audit_user_name}")
+
+        return _RowResolveResult(project_id, module_id, duty_user_id, audit_user_id, errors)
 
     # ==================================================================
     # 内部 helper

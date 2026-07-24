@@ -54,6 +54,7 @@ import {
   ProblemDetailModal,
   type ProblemDetailMode,
 } from "../_components/problem-detail-modal";
+import { ImportProblemModal } from "@/components/ppm/problem/import-problem-modal";
 
 const { RangePicker } = DatePicker;
 
@@ -109,6 +110,8 @@ export default function ProblemListPage() {
   // 搜索触发计数器:点搜索/回车就 +1,即使 keyword 没变也强制 useEffect 触发查询
   const [searchNonce, setSearchNonce] = useState(0);
   const [exporting, setExporting] = useState(false);
+  // Excel 批量导入弹窗开关 (task-09)
+  const [importOpen, setImportOpen] = useState(false);
   // 查询条件展开/收起:默认只显示 4 个,展开后追加 2 个(是否紧急/发现时间)
   const [expanded, setExpanded] = useState(false);
 
@@ -489,6 +492,9 @@ export default function ProblemListPage() {
           >
             {exporting ? "导出中…" : "导出"}
           </Button>
+          <Button onClick={() => setImportOpen(true)}>
+            导入
+          </Button>
           <Button type="primary" onClick={() => openDrawer("create")}>
             + 新建问题
           </Button>
@@ -653,6 +659,16 @@ export default function ProblemListPage() {
         mode={modalMode}
         onClose={() => setModalProblem(null)}
         onChanged={() => void load()}
+      />
+
+      {/* Excel 批量导入弹窗 (task-09): 成功后刷新列表 */}
+      <ImportProblemModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onSuccess={() => {
+          setImportOpen(false);
+          void load();
+        }}
       />
     </PageContainer>
   );

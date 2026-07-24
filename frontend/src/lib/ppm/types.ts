@@ -877,6 +877,95 @@ export interface ProblemExecuteReq {
   file_urls?: string[] | null;
 }
 
+// ---------- Excel 批量导入 (task-07 / design §7) ----------
+// 字段对齐后端 problem/schema.py 导入 DTO:
+// - uuid.UUID → string;
+// - datetime → ISO string (importer 产 date, service 转 datetime D-010, 前端统一 string);
+// - 扁平单层 rows (非 plan 的多 Sheet 结构), 项目按 Excel 每行 project_name 反查 (D-002)。
+
+/**
+ * 问题清单 Excel 导入预览单行 (design §7)。
+ *
+ * 24 字段 = row_index + 17 业务字段 + 4 反查 UUID + valid/error。
+ * - 17 业务字段: Excel 原文 / importer 规范化后 (is_urgent / is_delay_plan 已转 "1"/"0");
+ * - 4 反查 UUID: preview 阶段反查结果, 仅供前端展示; commit 不信任, 重算 (D-011);
+ * - valid/error: 严格校验结果 (项目/模块/责任人/验证人 匹配不到或必填缺失 → false, D-004/D-009)。
+ */
+export interface ProblemImportPreviewRow {
+  /** Excel 行号 (1-based, 含表头) */
+  row_index: number;
+  // ---- 业务字段 (Excel 原文 / 规范化) ----
+  project_name: string | null;
+  /** Excel 列名友好; 入库映射 ORM.model_name (D-012) */
+  module_name: string | null;
+  pro_desc: string | null;
+  /** bug / change / 其他 (原样保留) */
+  pro_type: string | null;
+  /** importer 已转 "1"(急) / "0"(否) */
+  is_urgent: string | null;
+  func_name: string | null;
+  duty_user_name: string | null;
+  /** 文本, 不反查 */
+  find_by: string | null;
+  /** ISO 字符串 (后端 datetime) */
+  find_time: string | null;
+  plan_start_time: string | null;
+  plan_end_time: string | null;
+  audit_user_name: string | null;
+  work_load: string | null;
+  work_type: string | null;
+  pro_answer: string | null;
+  /** importer 已转 "1"/"0" */
+  is_delay_plan: string | null;
+  remarks: string | null;
+  // ---- 反查结果 (preview 填, 仅供前端展示; commit 重算) ----
+  project_id: string | null;
+  module_id: string | null;
+  duty_user_id: string | null;
+  audit_user_id: string | null;
+  // ---- 校验结果 ----
+  /** 是否可导入 (项目/模块/责任人/验证人 未匹配或必填缺失 → false) */
+  valid: boolean;
+  /** 不可导入原因 (valid=false 时填) */
+  error: string | null;
+}
+
+/**
+ * 问题清单导入预览响应 (design §7)。
+ *
+ * 扁平单层 rows (非 plan 的多 Sheet 结构); parse_errors 为整体解析错误
+ * (如找不到表头 / 空文件), 行级错误在每行的 error 字段。
+ */
+export interface ProblemImportPreviewResp {
+  rows: ProblemImportPreviewRow[];
+  parse_errors: string[];
+  valid_count: number;
+  invalid_count: number;
+}
+
+/**
+ * 问题清单导入提交请求 (design §7)。
+ *
+ * 前端勾选回传 valid 行 (通常全为 valid=true 的行); rows 内 UUID 字段仅展示用,
+ * 后端 commit 不信任, 按原文重新反查 (D-011)。
+ */
+export interface ProblemImportCommitReq {
+  rows: ProblemImportPreviewRow[];
+}
+
+/**
+ * 问题清单导入结果响应 (design §7)。
+ *
+ * created: 成功入库条数; skipped: preview 阶段 valid=false 未回传的行数
+ * (前端可统计); failed_rows: commit 重查 / data_scope 失败行诊断,
+ * 原子提交成功时为空数组 (D-008)。
+ */
+export interface ProblemImportResultResp {
+  created: number;
+  skipped: number;
+  failed_rows: string[];
+}
+
 // ===========================================================================
 // task 子域 (task/schema.py)
 // ===========================================================================

@@ -6,15 +6,21 @@
  * - /problem-list/{id}/start      start (新建→进行中, 建 in-flight TaskExecute)
  * - /problem-list/{id}/execute    execute (收口: submit 回新建 / complete 已完成)
  * - /problem-list/export-excel    导出 (X-002)
+ * - /problem-list/import-preview  Excel 批量导入预览 (multipart, task-07 / design §7)
+ * - /problem-list/import-commit   Excel 批量导入提交 (JSON, task-07 / design §7)
  *
- * 走统一 `apiFetch`(自动带 token + 401 刷新);导出走 `downloadExcel`。
+ * 走统一 `apiFetch`(自动带 token + 401 刷新);导出走 `downloadExcel`;
+ * 导入预览走 `uploadExcelWithAuth`(multipart, 不复用强制 JSON 的 apiFetch)。
  */
 import { apiFetch } from "@/lib/api";
-import { downloadExcel } from "./export";
+import { downloadExcel, uploadExcelWithAuth } from "./export";
 import type {
   PageReq,
   PageResp,
   ProblemExecuteReq,
+  ProblemImportCommitReq,
+  ProblemImportPreviewResp,
+  ProblemImportResultResp,
   ProblemList,
   ProblemListCreate,
   ProblemListPageReq,
@@ -126,4 +132,42 @@ export async function executeProblem(
 
 export async function exportProblems(): Promise<void> {
   await downloadExcel("/api/ppm/problem-list/export-excel", undefined, "problem_list.xlsx");
+}
+
+// ---------- Excel 批量导入 (task-07 / design §7) ----------
+
+/**
+ * 上传 Excel 预览导入 (POST /api/ppm/problem-list/import-preview, multipart)。
+ *
+ * 走 `uploadExcelWithAuth`(不复用强制 JSON 的 apiFetch), 与 plan 子域
+ * `importModulesPreview` 范式一致;差异:**不带 pm_project_id query** — 项目按
+ * Excel 每行 `project_name` 反查(D-002),preview 函数只收一个 File。
+ *
+ * 后端解析 + 严格校验(项目/模块/责任人/验证人 匹配 + 必填 D-004/D-009),
+ * 返回每行 valid/error 及反查到的 UUID(仅供前端展示)。
+ */
+export async function importProblemsPreview(
+  file: File,
+): Promise<ProblemImportPreviewResp> {
+  const resp = await uploadExcelWithAuth(
+    "/api/ppm/problem-list/import-preview",
+    file,
+  );
+  return (await resp.json()) as ProblemImportPreviewResp;
+}
+
+/**
+ * 确认提交导入 (POST /api/ppm/problem-list/import-commit, JSON body)。
+ *
+ * 走 `apiFetch` POST JSON;body.rows 为用户勾选确认导入的行(含 preview 已反查
+ * 的 UUID,但后端 commit 不信任,按原文重新反查 + data_scope 校验,D-011)。
+ * 单次事务原子提交,要么全进要么全回滚(D-008)。
+ */
+export async function importProblemsCommit(
+  body: ProblemImportCommitReq,
+): Promise<ProblemImportResultResp> {
+  return apiFetch<ProblemImportResultResp>(
+    "/api/ppm/problem-list/import-commit",
+    { method: "POST", json: body },
+  );
 }
