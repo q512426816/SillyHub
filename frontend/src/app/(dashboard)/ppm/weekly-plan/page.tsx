@@ -291,9 +291,12 @@ export default function WeeklyPlanPage() {
       dataIndex: "task_description",
       key: "task_description",
       width: 180,
-      ellipsis: true,
       onCell: (r: DisplayRow) => ({ rowSpan: r.__isGroup ? 0 : 1 }),
-      render: (v: string | null) => v ?? "—",
+      render: (v: string | null) => (
+        <div className="whitespace-normal break-words" style={{ maxWidth: 160 }}>
+          {v ?? "—"}
+        </div>
+      ),
     },
     {
       title: "工作量\n(人天)",
