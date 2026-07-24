@@ -126,7 +126,7 @@ ProjectPlanListReqDep = Annotated[PsProjectPlanListReq, Depends(_project_plan_li
 
 def _weekly_plan_req(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=200),
+    page_size: int = Query(20, ge=1, le=500),
     project_name: str | None = Query(None),
     status: list[str] | None = Query(None),
     user_id: uuid.UUID | None = Query(None),

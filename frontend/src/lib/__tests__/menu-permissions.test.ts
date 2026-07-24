@@ -99,7 +99,7 @@ const BACKEND_PERMISSION_KEYS = [
   "ppm:task-plan:read",
 ] as const;
 
-/** 33 个 menuKey 期望集合（FR-02 19 条 + Agent 团队 1 + PPM 13 条） */
+/** 34 个 menuKey 期望集合（FR-02 19 条 + Agent 团队 1 + PPM 14 条） */
 const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "workspaces",
   "components",
@@ -121,7 +121,7 @@ const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "roles",
   "runtimes",
   "settings",
-  // PPM 13 条（已删问题变更）
+  // PPM 14 条
   "ppm-workbench",
   "ppm-projects",
   "ppm-customers",
@@ -135,6 +135,7 @@ const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "ppm-work-hours",
   "ppm-work-hour-statistics",
   "ppm-kanban",
+  "ppm-weekly-plan",
 ]);
 
 const VALID_SECTIONS: ReadonlySet<string> = new Set([
@@ -146,8 +147,8 @@ const VALID_SECTIONS: ReadonlySet<string> = new Set([
 ]);
 
 describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
-  it("MENU_PERMISSION_GROUPS 长度 === 33", () => {
-    expect(MENU_PERMISSION_GROUPS).toHaveLength(33);
+  it("MENU_PERMISSION_GROUPS 长度 === 34", () => {
+    expect(MENU_PERMISSION_GROUPS).toHaveLength(34);
   });
 
   it("所有 menuKey 互不重复，且严格等于 FR-02 预定义清单", () => {
@@ -162,7 +163,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("section 分布：overview 8 / management 7 / ppm 13 / admin 3 / system 2", () => {
+  it("section 分布：overview 8 / management 7 / ppm 14 / admin 3 / system 2", () => {
     const counter: Record<MenuSection, number> = {
       overview: 0,
       management: 0,
@@ -175,13 +176,14 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
     expect(counter.overview).toBe(8);
     expect(counter.management).toBe(7);
-    expect(counter.ppm).toBe(13);
+    expect(counter.ppm).toBe(14);
     expect(counter.admin).toBe(3);
     expect(counter.system).toBe(2);
   });
 
-  it("每个 menu 至少 1 个 permission", () => {
+  it("每个 menu 至少 1 个 permission（pickerHidden 或无权限菜单除外）", () => {
     MENU_PERMISSION_GROUPS.forEach((g) => {
+      if (g.menuKey === "ppm-weekly-plan") return; // 平台级，无需特定权限
       expect(g.permissions.length).toBeGreaterThanOrEqual(1);
     });
   });
@@ -396,9 +398,9 @@ describe("用户列明菜单的 permissions 精确匹配", () => {
 });
 
 describe("PPM 菜单 section 与 absolute 完整性", () => {
-  it("13 个 ppm 菜单全部 section=ppm 且 absolute=true，href 以 /ppm/ 开头", () => {
+  it("14 个 ppm 菜单全部 section=ppm 且 absolute=true，href 以 /ppm/ 开头", () => {
     const ppmMenus = MENU_PERMISSION_GROUPS.filter((g) => g.section === "ppm");
-    expect(ppmMenus).toHaveLength(13);
+    expect(ppmMenus).toHaveLength(14);
     ppmMenus.forEach((g) => {
       expect(g.absolute).toBe(true);
       expect(g.href.startsWith("/ppm/")).toBe(true);
