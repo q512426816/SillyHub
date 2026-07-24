@@ -45,6 +45,7 @@ interface DisplayRow extends WeeklyPlanRow {
   __groupProject?: string;
   __projectSpan?: number;
   __moduleSpan?: number;
+  __seq?: number;
 }
 
 export default function WeeklyPlanPage() {
@@ -110,6 +111,7 @@ export default function WeeklyPlanPage() {
     const result: DisplayRow[] = [];
     let curProject: string | null = null;
     let projectStartIdx = -1;
+    let dataSeq = 0;
 
     for (const row of allData) {
       const pn = row.project_name ?? "";
@@ -152,6 +154,7 @@ export default function WeeklyPlanPage() {
       }
 
       // 数据行
+      dataSeq++;
       const dataRow: DisplayRow = {
         project_name: row.project_name ?? null,
         plan_type: row.plan_type ?? null,
@@ -170,6 +173,7 @@ export default function WeeklyPlanPage() {
         detail_id: row.detail_id ?? null,
         __projectSpan: 1,
         __moduleSpan: 1,
+        __seq: dataSeq,
       };
       result.push(dataRow);
     }
@@ -235,9 +239,8 @@ export default function WeeklyPlanPage() {
             </div>
           );
         }
-        // 计算非分组行的序号(idx - 分组行数)
-        const dataIdx = idx ?? 0;
-        return dataIdx + 1;
+        // 序号用预计算的 __seq(跳过分组行)
+        return _r.__seq ?? 1;
       },
     },
     {
