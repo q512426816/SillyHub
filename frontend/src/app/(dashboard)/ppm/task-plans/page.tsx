@@ -479,6 +479,8 @@ export default function TaskPlansPage() {
             <Select<string[]>
               mode="multiple"
               allowClear
+              showSearch
+              optionFilterProp="label"
               className="w-full"
               placeholder="状态(可多选)"
               value={statusFilterList}
@@ -494,6 +496,8 @@ export default function TaskPlansPage() {
               className="w-full"
               placeholder="全部项目"
               allowClear
+              showSearch
+              optionFilterProp="label"
               value={projectFilter || undefined}
               onChange={(v) => {
                 setProjectFilter(v ?? "");

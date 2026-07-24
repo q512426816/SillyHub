@@ -24,6 +24,8 @@ openpyxl 是纯 CPU 同步库会阻塞事件循环；service 层应用
 from __future__ import annotations
 
 import re
+import xml.etree.ElementTree as ET
+import zipfile
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from io import BytesIO
@@ -480,10 +482,266 @@ def _attach_unanchored_images(
         rows[-1].images.extend(leftover)
 
 
-def _parse_sheet(ws: Worksheet) -> list[ParsedProblemRow]:
+# ---------------------------------------------------------------------------
+# Excel「嵌入单元格图片」(cellimages.xml) 提取 —— openpyxl ws._images 读不到的格式
+# ---------------------------------------------------------------------------
+# 依据：Microsoft 365 / WPS「右键单元格 → 嵌入图片」用 ``xl/cellimages.xml`` 定义图片
+# 清单 + 单元格 ``=DISPIMG("ID_XXX","")`` 公式引用, 不同于传统「插入 → 图片」的浮动
+# 锚定 (xl/drawing/*.xml, openpyxl ``ws._images`` 能读到)。本组函数手动解压 xlsx (ZIP)
+# 解析该格式, 作为 ``_extract_row_images`` 的补充来源 (同 key 行号追加)。
+#
+# 命名空间 (ElementTree 解析后 tag 形如 ``{ns}local``, 用 ``_local_tag`` 取 localname):
+# - etc: http://schemas.microsoft.com/office/spreadsheetml/2009/9/main (cellImages 根)
+# - xdr: .../spreadsheetDrawing (pic / cNvPr)
+# - a:   .../drawingml/2006/main (blip)
+# - r:   .../officeDocument/2006/relationships (r:embed)
+# cellimages.xml 不存在或解析异常 → 返回空 dict, 不影响现有 ws._images 逻辑 (铁律 1)。
+
+# DISPIMG("ID_XXX","...") 引用 ID 提取正则。兼容裸 ``DISPIMG`` 与 ``_xlfn.DISPIMG``
+# 前缀 (Excel 未来函数前缀, openpyxl 写公式时可能加); 大小写敏感 (Excel 恒为 DISPIMG)。
+_DISPIMG_RE = re.compile(r'DISPIMG\(\s*"([^"]+)"')
+
+
+def _local_tag(tag: str) -> str:
+    """XML 元素 tag → 去命名空间的 localname (``{ns}local`` → ``local``)。"""
+    idx = tag.rfind("}")
+    return tag[idx + 1 :] if idx != -1 else tag
+
+
+def _attr_by_local(elem: ET.Element, local: str) -> str | None:
+    """按 localname 取属性值 (忽略命名空间前缀差异, 兼容 ``r:embed`` 等)。
+
+    ElementTree 解析带前缀属性时 key 为 ``{ns}local``, 不同产商可能用不同 ns URI;
+    按 localname 匹配最稳 (不写死 ns URI)。
+    """
+    for key, value in elem.attrib.items():
+        if _local_tag(key) == local:
+            return value
+    return None
+
+
+def _join_zip_path(base_dir: str, target: str) -> str:
+    """cellimages.xml 所在目录 + rels ``Target`` → zip 内完整路径。
+
+    ``Target`` (如 ``media/image1.png``) 相对于 ``cellimages.xml`` 所在目录 (如
+    ``xl``)。处理 ``./`` 与 ``../`` 前缀兜底 (cellimages rels 一般不带, 但稳)。
+    """
+    parts = (f"{base_dir}/{target}" if base_dir else target).split("/")
+    stack: list[str] = []
+    for part in parts:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if stack:
+                stack.pop()
+            continue
+        stack.append(part)
+    return "/".join(stack)
+
+
+def _parse_cellimages_xml(xml_bytes: bytes) -> dict[str, str]:
+    """解析 ``cellimages.xml`` → ``{图片 ID: r:embed rId}``。
+
+    每个 ``xdr:pic`` 下 ``xdr:cNvPr[@name]`` = 图片 ID (如 ``ID_12345``),
+    ``a:blip[@r:embed]`` = rId (如 ``rId1``)。按 localname 配对, 不依赖具体 ns URI。
+    """
+    root = ET.fromstring(xml_bytes)
+    mapping: dict[str, str] = {}
+    for el in root.iter():
+        if _local_tag(el.tag) != "pic":
+            continue
+        name: str | None = None
+        embed: str | None = None
+        for sub in el.iter():
+            local = _local_tag(sub.tag)
+            if local == "cNvPr" and name is None:
+                name = sub.get("name")
+            elif local == "blip" and embed is None:
+                embed = _attr_by_local(sub, "embed")
+        if name and embed:
+            mapping[name] = embed
+    return mapping
+
+
+def _parse_rels_xml(xml_bytes: bytes) -> dict[str, str]:
+    """解析 relationships XML → ``{rId: Target 媒体路径}``。
+
+    ``<Relationship Id="rId1" Target="media/image1.png"/>`` →
+    ``{"rId1": "media/image1.png"}``。按 localname ``Relationship`` 过滤, 不依赖默认 ns。
+    """
+    root = ET.fromstring(xml_bytes)
+    mapping: dict[str, str] = {}
+    for el in root.iter():
+        if _local_tag(el.tag) != "Relationship":
+            continue
+        rid = el.get("Id")
+        target = el.get("Target")
+        if rid and target:
+            mapping[rid] = target
+    return mapping
+
+
+def _parse_worksheet_image_cells(
+    xml_bytes: bytes, known_ids: frozenset[str]
+) -> dict[int, list[str]]:
+    """解析单个 worksheet XML → ``{1-based 行号: [图片 ID, ...]}``。
+
+    找 ``<c r="C2">`` 单元格下 ``<f>``/``<v>``/``<t>`` 文本中 ``DISPIMG("ID_XXX",...)``
+    公式引用的图片 ID (M365 格式); 兜底也匹配单元格值直接等于已知 ID (WPS 等可能
+    不用 DISPIMG 公式, 值层直接带 ID)。行号取自 cell 引用属性 ``r`` 的末尾数字
+    (如 ``C2`` → 2, 与 ``row_index`` 同 1-based 基准, 铁律 3)。
+    """
+    root = ET.fromstring(xml_bytes)
+    row_to_ids: dict[int, list[str]] = {}
+    for el in root.iter():
+        if _local_tag(el.tag) != "c":
+            continue
+        ref = el.get("r")
+        if not ref:
+            continue
+        m_ref = re.search(r"(\d+)$", ref)
+        if not m_ref:
+            continue
+        row = int(m_ref.group(1))
+        # 收集该单元格所有公式/值文本 (<f> 公式 / <v> 缓存值 / <t> inline string)。
+        texts: list[str] = []
+        for sub in el.iter():
+            if _local_tag(sub.tag) in ("f", "v", "t") and sub.text:
+                texts.append(sub.text)
+        matched: list[str] = []
+        for text in texts:
+            for m_disp in _DISPIMG_RE.finditer(text):
+                img_id = m_disp.group(1)
+                if img_id in known_ids and img_id not in matched:
+                    matched.append(img_id)
+            # WPS/其它兜底: 值文本 strip 后直接等于已知 ID (无 DISPIMG 公式包裹)。
+            stripped = text.strip()
+            if stripped in known_ids and stripped not in matched:
+                matched.append(stripped)
+        if matched:
+            row_to_ids.setdefault(row, []).extend(matched)
+    return row_to_ids
+
+
+def _extract_cell_embedded_images(xlsx_bytes: bytes) -> dict[int, list[ImageExtracted]]:
+    """提取 Excel「嵌入单元格图片」(cellimages.xml 格式), 按 1-based 行号分桶。
+
+    Excel/WPS「右键单元格 → 嵌入图片」用 ``xl/cellimages.xml`` 定义图片清单 + 单元格
+    ``=DISPIMG("ID_XXX","")`` 公式引用, 不同于传统「插入 → 图片」浮动锚定,
+    openpyxl ``ws._images`` 读不到。本函数手动解压 xlsx (ZIP) 解析该格式, 与
+    ``_extract_row_images`` 互补 (同 key 行号追加, 不改 ws._images 逻辑 铁律 6)。
+
+    流程: 解压 → cellimages.xml (ID→rId) → cellimages.xml.rels (rId→media 路径) →
+    读 media bytes → worksheets/sheet*.xml (DISPIMG 单元格 → 行号+ID) → 组装。
+    MIME 从 media 扩展名推断 (铁律 4); cellimages.xml 不存在 → 空 dict (铁律 1);
+    任意 XML/IO 异常 try/except 兜底返回空 dict (铁律 2, 不阻断导入)。
+
+    多 Sheet 注意: 返回 dict 仅按行号聚合 (不带 sheet 维度)。问题清单模板为单数据
+    Sheet (模块顶部「差异点」), cellimages 一般仅出现在该 Sheet; 多数据 Sheet +
+    cellimages 同时出现的极端场景下, 图片可能被重复挂到不同 Sheet 同行 —— best-effort
+    已知边界, 零回归优先 (无 cellimages 时完全不影响现有逻辑)。
+
+    Args:
+        xlsx_bytes: ``.xlsx`` 文件字节内容 (与 ``parse_problem_workbook`` 同源)。
+
+    Returns:
+        ``{1-based 行号: [该行嵌入单元格图片 ImageExtracted...]}``; 无 cellimages.xml
+        / 无 DISPIMG 引用 / 解析失败 → ``{}``。
+    """
+    result: dict[int, list[ImageExtracted]] = {}
+    try:
+        zf = zipfile.ZipFile(BytesIO(xlsx_bytes))
+    except (zipfile.BadZipFile, OSError):
+        return result
+    try:
+        names = zf.namelist()
+        # 1. 定位 cellimages.xml (标准 xl/cellimages.xml; 兼容路径变体, 排除 .rels)。
+        cellimages_name = next(
+            (n for n in names if n.rsplit("/", 1)[-1] == "cellimages.xml" and "/_rels/" not in n),
+            None,
+        )
+        # 铁律 1: 无 cellimages.xml → 空 dict, 不影响现有 ws._images 提取。
+        if cellimages_name is None:
+            return result
+        # 2. cellimages.xml → {图片 ID: rId}
+        id_to_rid = _parse_cellimages_xml(zf.read(cellimages_name))
+        if not id_to_rid:
+            return result
+        dir_part = cellimages_name.rsplit("/", 1)[0] if "/" in cellimages_name else ""
+        # 3. 定位 cellimages.xml.rels (同目录 _rels/cellimages.xml.rels)。
+        rels_name = next(
+            (n for n in names if n.endswith("cellimages.xml.rels") and "/_rels/" in n),
+            None,
+        )
+        if rels_name is None:
+            return result
+        rid_to_target = _parse_rels_xml(zf.read(rels_name))
+        # 4. 组装 {图片 ID: (media bytes, mime)} (Target 相对 cellimages.xml 所在目录)。
+        id_to_media: dict[str, tuple[bytes, str]] = {}
+        for img_id, rid in id_to_rid.items():
+            target = rid_to_target.get(rid)
+            if not target:
+                continue
+            media_path = _join_zip_path(dir_part, target)
+            if media_path not in names:
+                continue
+            ext = target.rsplit(".", 1)[-1].lower() if "." in target else ""
+            mime = _FORMAT_TO_MIME.get(ext, "application/octet-stream")
+            try:
+                data = zf.read(media_path)
+            except (KeyError, OSError):
+                continue
+            id_to_media[img_id] = (data, mime)
+        if not id_to_media:
+            return result
+        # 5. 解析所有 worksheet XML → {行号: [图片 ID, ...]} (铁律 3: 1-based)。
+        known_ids = frozenset(id_to_media.keys())
+        row_to_ids: dict[int, list[str]] = {}
+        for ws_name in names:
+            if not (
+                ws_name.startswith("xl/worksheets/")
+                and ws_name.endswith(".xml")
+                and "/_rels/" not in ws_name
+            ):
+                continue
+            try:
+                partial = _parse_worksheet_image_cells(zf.read(ws_name), known_ids)
+            except ET.ParseError:
+                continue
+            for row, ids in partial.items():
+                row_to_ids.setdefault(row, []).extend(ids)
+        if not row_to_ids:
+            return result
+        # 6. 组装 {行号: [ImageExtracted...]} (同行多图按解析顺序追加)。
+        for row, ids in row_to_ids.items():
+            for img_id in ids:
+                media = id_to_media.get(img_id)
+                if media is None:
+                    continue
+                data, mime = media
+                result.setdefault(row, []).append(
+                    ImageExtracted(data=data, mime_type=mime, anchor_row=row)
+                )
+        return result
+    except (ET.ParseError, KeyError, OSError, zipfile.BadZipFile):
+        # 铁律 2: 任意解析异常兜底返回空 dict (不阻断导入, 现有 ws._images 仍生效)。
+        return result
+    finally:
+        zf.close()
+
+
+def _parse_sheet(
+    ws: Worksheet,
+    cell_embedded_images: dict[int, list[ImageExtracted]] | None = None,
+) -> list[ParsedProblemRow]:
     """解析单个 Sheet → ``ParsedProblemRow`` 列表。
 
     无「项目名称」列表头时视为非数据 Sheet，返回空列表（跳过）。
+
+    ``cell_embedded_images``: ``_extract_cell_embedded_images`` 返回的「嵌入单元格
+    图片」分桶 (openpyxl ``ws._images`` 读不到的 cellimages.xml 格式); 同 key 行号
+    追加到 ``row_images`` (不改 ws._images 现有逻辑, 互补来源)。``None``/空 dict →
+    零回归 (仅走 ws._images)。
     """
     header_row = _find_header_row(ws)
     colmap = _build_column_map(ws, header_row)
@@ -494,6 +752,12 @@ def _parse_sheet(ws: Worksheet) -> list[ParsedProblemRow]:
     merged = _build_merged_index(ws)
     # 嵌入图片按 1-based 锚点行分桶，下面按 row_index 挂载到对应数据行。
     row_images = _extract_row_images(ws)
+    # 合并「嵌入单元格图片」(cellimages.xml, openpyxl ws._images 读不到的「嵌入
+    # 图片」)——同 key 行号追加 (传统 ws._images 图保留在前), 不改 ws._images 逻辑。
+    if cell_embedded_images:
+        for row_key, cell_imgs in cell_embedded_images.items():
+            if cell_imgs:
+                row_images.setdefault(row_key, []).extend(cell_imgs)
 
     col_project = colmap["project_name"]
     col_module = colmap.get("module_name")
@@ -618,10 +882,13 @@ def parse_problem_workbook(file_bytes: bytes) -> list[ParsedProblemRow]:
         解析成功的 ``ParsedProblemRow`` 列表；无数据 Sheet 时返回空列表。
     """
     wb = load_workbook(BytesIO(file_bytes), data_only=True)
+    # 「嵌入单元格图片」(cellimages.xml) 解压解析 (openpyxl ws._images 读不到的格式);
+    # 无 cellimages.xml → 空 dict, 不影响现有 ws._images 提取 (铁律 1)。
+    cell_embedded_images = _extract_cell_embedded_images(file_bytes)
     rows: list[ParsedProblemRow] = []
     try:
         for ws in wb.worksheets:
-            rows.extend(_parse_sheet(ws))
+            rows.extend(_parse_sheet(ws, cell_embedded_images))
     finally:
         wb.close()
     return rows

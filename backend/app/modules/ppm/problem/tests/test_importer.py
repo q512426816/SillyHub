@@ -17,6 +17,7 @@ fixture 用 openpyxl Workbook 在测试内程序构造 xlsx (写 BytesIO, 不落
 
 from __future__ import annotations
 
+import zipfile
 from collections.abc import Sequence
 from datetime import date
 from io import BytesIO
@@ -841,6 +842,280 @@ class TestImageExtraction:
         rows = parse_problem_workbook(xlsx)
         assert len(rows) == 1
         assert rows[0].images == []
+
+
+# ---------------------------------------------------------------------------
+# 「嵌入单元格图片」(cellimages.xml) 提取 (task-06 扩展 / design §5.1 / R-01)
+# ---------------------------------------------------------------------------
+# Excel/WPS「右键单元格 → 嵌入图片」用 xl/cellimages.xml 定义图片清单 + 单元格
+# =DISPIMG("ID_XXX","") 公式引用, openpyxl ws._images 读不到。importer 额外解压
+# xlsx 解析该格式 (与 ws._images 互补, 同 key 行号追加)。openpyxl 无法生成该格式,
+# 故测试程序构造:openpyxl 造基础 xlsx (含 DISPIMG 公式单元格) → zipfile 注入
+# cellimages.xml + cellimages.xml.rels + media → 喂 parse_problem_workbook。
+
+
+def _inject_cellimages(
+    base_xlsx: bytes,
+    entries: list[tuple[str, str, bytes]],
+    *,
+    media_ext: str = "png",
+) -> bytes:
+    """把 ``cellimages.xml`` + rels + media 注入基础 xlsx bytes → 新 xlsx bytes。
+
+    openpyxl 不会生成 cellimages.xml 格式, 测试用 zipfile 二次打包注入。``entries``
+    为 ``[(图片 ID, rId, media bytes), ...]``, 每项写一个 ``media/cellimgN.<ext>`` 条目
+    (用 ``cellimg`` 前缀避开 openpyxl 自动生成的 ``media/imageN.<ext>`` —— 同名 zip
+    条目会读首项导致串数据), cellimages.xml 与 rels.xml 按 entries 拼接。命名空间用
+    Microsoft 365 官方 URI (etc/xdr/a/r), importer 按 localname 解析不依赖具体 URI。
+    """
+    cell_images_parts = []
+    rels_parts = []
+    # 每条独立 media 文件 media/cellimgN.<ext> (避开 openpyxl 的 imageN 命名冲突)。
+    media_files: list[tuple[str, bytes]] = []
+    for idx, (img_id, rid, media) in enumerate(entries, start=1):
+        media_path = f"media/cellimg{idx}.{media_ext}"
+        cell_images_parts.append(
+            "<etc:cellImage><xdr:pic><xdr:nvPicPr>"
+            f'<xdr:cNvPr id="{idx}" name="{img_id}"/>'
+            "</xdr:nvPicPr><xdr:blipFill>"
+            f'<a:blip r:embed="{rid}"/>'
+            "</xdr:blipFill></xdr:pic></etc:cellImage>"
+        )
+        rels_parts.append(
+            f'<Relationship Id="{rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="{media_path}"/>'
+        )
+        media_files.append((f"xl/{media_path}", media))
+    cellimages_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        '<etc:cellImages xmlns:etc="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" '
+        'xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" '
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        + "".join(cell_images_parts)
+        + "</etc:cellImages>"
+    )
+    rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        + "".join(rels_parts)
+        + "</Relationships>"
+    )
+    out_buf = BytesIO()
+    src = zipfile.ZipFile(BytesIO(base_xlsx))
+    try:
+        with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as dst:
+            for item in src.infolist():
+                dst.writestr(item, src.read(item.filename))
+            dst.writestr("xl/cellimages.xml", cellimages_xml)
+            dst.writestr("xl/_rels/cellimages.xml.rels", rels_xml)
+            for path, data in media_files:
+                dst.writestr(path, data)
+    finally:
+        src.close()
+    return out_buf.getvalue()
+
+
+class TestCellEmbeddedImages:
+    """「嵌入单元格图片」(cellimages.xml) 提取 (R-01 / 铁律 1~6)。
+
+    覆盖:cellimages 不存在零回归、单图行号对齐、_xlfn 前缀兼容、与 ws._images 传统
+    图合并、WPS 直 ID 兜底、多行多图、jpeg 扩展名 MIME 推断。
+    """
+
+    def test_no_cellimages_returns_empty_no_impact(self) -> None:
+        """普通 xlsx (无 cellimages.xml) → ``_extract_cell_embedded_images`` 返回空 dict,
+        现有 ws._images 流程不受影响 (铁律 1)。"""
+        from app.modules.ppm.problem.importer import _extract_cell_embedded_images
+
+        xlsx = _build_xlsx(_HEADERS, [["项目甲"] + [None] * 16])
+        assert _extract_cell_embedded_images(xlsx) == {}
+        # 端到端:无 cellimages 时 images 为空 (走 ws._images 分支, 无图)。
+        rows = parse_problem_workbook(xlsx)
+        assert rows[0].images == []
+
+    def test_single_cellimage_attached_to_row(self) -> None:
+        """C2 含 ``=_xlfn.DISPIMG("ID_001","")`` + cellimages.xml 定义 ID_001 →
+        row 2 挂 1 图, data/mime/anchor_row 正确 (铁律 3: 1-based 行号)。"""
+        from app.modules.ppm.problem.importer import _extract_cell_embedded_images
+
+        png = _png_bytes()
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "问题清单"
+        ws.cell(row=1, column=1, value="项目名称")
+        ws.cell(row=2, column=1, value="项目甲")
+        # C2 = DISPIMG 公式 (_xlfn 前缀, Excel 未来函数写法)
+        ws.cell(row=2, column=3, value='=_xlfn.DISPIMG("ID_001","")')
+        buf = BytesIO()
+        wb.save(buf)
+        xlsx = _inject_cellimages(buf.getvalue(), [("ID_001", "rId1", png)])
+
+        # 直接验私有函数
+        d = _extract_cell_embedded_images(xlsx)
+        assert list(d.keys()) == [2]
+        assert len(d[2]) == 1
+        assert d[2][0].data == png
+        assert d[2][0].mime_type == "image/png"
+        assert d[2][0].anchor_row == 2
+
+        # 端到端
+        rows = parse_problem_workbook(xlsx)
+        assert len(rows) == 1
+        r = rows[0]
+        assert r.row_index == 2
+        assert len(r.images) == 1
+        assert r.images[0].data == png
+        assert r.images[0].mime_type == "image/png"
+        assert r.images[0].anchor_row == 2
+
+    def test_bare_dispimg_without_xlfn_prefix(self) -> None:
+        """裸 ``=DISPIMG("ID_X","")`` (无 _xlfn 前缀) 同样解析 (兼容 Excel/WPS 写法)。"""
+        png = _png_bytes((0, 255, 0))
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "问题清单"
+        ws.cell(row=1, column=1, value="项目名称")
+        ws.cell(row=2, column=1, value="项目甲")
+        ws.cell(row=2, column=3, value='=DISPIMG("ID_X","")')
+        buf = BytesIO()
+        wb.save(buf)
+        xlsx = _inject_cellimages(buf.getvalue(), [("ID_X", "rId1", png)])
+        rows = parse_problem_workbook(xlsx)
+        assert len(rows[0].images) == 1
+        assert rows[0].images[0].data == png
+
+    def test_cellimages_merged_with_traditional_images(self) -> None:
+        """同行 ws._images 传统图 (OneCellAnchor) + cellimages 嵌入图 → 两图都挂上,
+        传统图在前、cellimages 图追加在后 (铁律 6: 不改 ws._images 逻辑, 互补追加)。"""
+        from openpyxl.drawing.image import Image as XlImage
+
+        png_trad = _png_bytes((0, 255, 0))
+        png_cell = _png_bytes((255, 0, 0))
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "问题清单"
+        ws.cell(row=1, column=1, value="项目名称")
+        ws.cell(row=2, column=1, value="项目甲")
+        ws.cell(row=2, column=3, value='=_xlfn.DISPIMG("ID_C","")')
+        # 传统浮动图 (ws._images) 锚到 C2
+        ws.add_image(XlImage(BytesIO(png_trad)), "C2")
+        buf = BytesIO()
+        wb.save(buf)
+        xlsx = _inject_cellimages(buf.getvalue(), [("ID_C", "rId1", png_cell)])
+
+        rows = parse_problem_workbook(xlsx)
+        r = rows[0]
+        assert r.row_index == 2
+        assert len(r.images) == 2
+        # ws._images 传统图先挂, cellimages 嵌入图追加在后 (合并顺序)。
+        assert r.images[0].data == png_trad
+        assert r.images[1].data == png_cell
+        for img in r.images:
+            assert img.anchor_row == 2
+
+    def test_wps_direct_id_value_matched(self) -> None:
+        """WPS 等可能不用 DISPIMG 公式, 单元格值直接是已知图片 ID → 兜底匹配。
+
+        值文本 strip 后等于 cellimages 定义的 ID 即视为该单元格引用的图片 (best-effort)。
+        """
+        png = _png_bytes((255, 0, 255))
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "问题清单"
+        ws.cell(row=1, column=1, value="项目名称")
+        ws.cell(row=2, column=1, value="项目甲")
+        # C2 值直接是图片 ID (无 DISPIMG 公式包裹)
+        ws.cell(row=2, column=3, value="ID_WPS")
+        buf = BytesIO()
+        wb.save(buf)
+        xlsx = _inject_cellimages(buf.getvalue(), [("ID_WPS", "rId1", png)])
+        rows = parse_problem_workbook(xlsx)
+        assert len(rows[0].images) == 1
+        assert rows[0].images[0].data == png
+
+    def test_multiple_cellimages_distinct_rows(self) -> None:
+        """多行多图 (row2 → ID_A / row3 → ID_B) → 各行各挂各的图, 不串。"""
+        png_a = _png_bytes((255, 0, 0))
+        png_b = _png_bytes((0, 0, 255))
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "问题清单"
+        ws.cell(row=1, column=1, value="项目名称")
+        ws.cell(row=2, column=1, value="项目甲")
+        ws.cell(row=2, column=3, value='=_xlfn.DISPIMG("ID_A","")')
+        ws.cell(row=3, column=1, value="项目乙")
+        ws.cell(row=3, column=3, value='=_xlfn.DISPIMG("ID_B","")')
+        buf = BytesIO()
+        wb.save(buf)
+        xlsx = _inject_cellimages(
+            buf.getvalue(),
+            [("ID_A", "rId1", png_a), ("ID_B", "rId2", png_b)],
+        )
+        rows = parse_problem_workbook(xlsx)
+        assert len(rows) == 2
+        assert rows[0].row_index == 2
+        assert len(rows[0].images) == 1
+        assert rows[0].images[0].data == png_a
+        assert rows[1].row_index == 3
+        assert len(rows[1].images) == 1
+        assert rows[1].images[0].data == png_b
+
+    def test_jpeg_media_mime_inferred_from_extension(self) -> None:
+        """media 扩展名 .jpeg → mime ``image/jpeg`` (铁律 4: 从扩展名推断 MIME)。
+
+        用 JPEG bytes (Pillow 造) + media 文件名 image1.jpeg 验证扩展名分支。
+        """
+        from PIL import Image as PILImage
+
+        jpg_buf = BytesIO()
+        PILImage.new("RGB", (1, 1), (0, 128, 0)).save(jpg_buf, format="JPEG")
+        jpg = jpg_buf.getvalue()
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "问题清单"
+        ws.cell(row=1, column=1, value="项目名称")
+        ws.cell(row=2, column=1, value="项目甲")
+        ws.cell(row=2, column=3, value='=_xlfn.DISPIMG("ID_J","")')
+        buf = BytesIO()
+        wb.save(buf)
+        xlsx = _inject_cellimages(buf.getvalue(), [("ID_J", "rId1", jpg)], media_ext="jpeg")
+        rows = parse_problem_workbook(xlsx)
+        assert len(rows[0].images) == 1
+        assert rows[0].images[0].data == jpg
+        assert rows[0].images[0].mime_type == "image/jpeg"
+
+    def test_corrupt_cellimages_xml_falls_back_to_empty(self) -> None:
+        """cellimages.xml 存在但 XML 非法 → try/except 兜底返回空 dict (铁律 2),
+        不阻断导入 (现有 ws._images 图仍生效)。"""
+        from openpyxl.drawing.image import Image as XlImage
+
+        png_trad = _png_bytes()
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "问题清单"
+        ws.cell(row=1, column=1, value="项目名称")
+        ws.cell(row=2, column=1, value="项目甲")
+        # 同行放一张传统图, 验证 cellimages 解析失败时传统图仍挂上。
+        ws.add_image(XlImage(BytesIO(png_trad)), "C2")
+        buf = BytesIO()
+        wb.save(buf)
+        # 注入非法 cellimages.xml (未闭合标签)
+        out = BytesIO()
+        src = zipfile.ZipFile(BytesIO(buf.getvalue()))
+        try:
+            with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+                for item in src.infolist():
+                    dst.writestr(item, src.read(item.filename))
+                dst.writestr("xl/cellimages.xml", "<?xml broken><not-closed")
+        finally:
+            src.close()
+        corrupt_xlsx = out.getvalue()
+
+        rows = parse_problem_workbook(corrupt_xlsx)
+        # cellimages 解析失败兜底空 dict, 但 ws._images 传统图仍挂上 (不阻断)。
+        assert len(rows) == 1
+        assert len(rows[0].images) == 1
+        assert rows[0].images[0].data == png_trad
 
 
 if __name__ == "__main__":

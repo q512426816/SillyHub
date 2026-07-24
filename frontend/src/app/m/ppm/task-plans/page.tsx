@@ -503,6 +503,8 @@ function FilterFields({
         <Select<string[]>
           mode="multiple"
           allowClear
+          showSearch
+          optionFilterProp="label"
           className="w-full"
           placeholder="状态（可多选）"
           value={statusList}
@@ -515,6 +517,8 @@ function FilterFields({
           className="w-full"
           placeholder="全部项目"
           allowClear
+          showSearch
+          optionFilterProp="label"
           value={projectFilter || undefined}
           onChange={onProjectChange}
           options={projects.map((p) => ({
