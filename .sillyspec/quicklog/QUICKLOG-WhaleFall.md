@@ -355,3 +355,8 @@ created_at: 2026-07-21T08:48:56
 根因：DetailsSubTable 的 `isDirty`（控制「保存」按钮 `disabled={!isDirty}`）只比较 DETAIL_COLUMNS 的可编辑字段、**没比较 `no`**。纯拖动（只改顺序/`no`、没改任何字段）时 isDirty 仍 = false → 保存按钮保持 disabled → 用户拖完点不了保存。
 方案：`isDirty` 的行比较循环里补 `(o.no ?? null) !== (r.no ?? null)` 检测，与 `toUpdate` 已有的 `no` 变化检测对齐——拖动改顺序也会置 dirty、启用保存按钮。
 结果：①前端 typecheck/lint 0 error；②待 commit+push+重建 frontend 后用户验证（拖动改顺序后保存按钮变可用、点保存顺序持久化）。
+
+## ql-20260724-001-7821 | 2026-07-24 10:20:28 | (quick 任务)
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）
