@@ -925,11 +925,7 @@ def _build_weekly_plan_workbook(rows: list[dict[str, Any]]) -> bytes:
     from openpyxl import load_workbook
     from openpyxl.styles import Alignment, Border, Font, Side
 
-    template_path = (
-        Path(__file__).resolve().parent.parent.parent.parent
-        / "templates"
-        / "weekly-plan-template.xlsx"
-    )
+    template_path = Path("templates/weekly-plan-template.xlsx")
     wb = load_workbook(template_path)
     ws = wb.active
 
