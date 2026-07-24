@@ -42,12 +42,17 @@ import {
   fetchWorkbenchCalendar,
   fetchWorkbenchProfile,
   fetchWorkbenchSummary,
+  fetchWorkbenchSwitchableUsers,
+  fetchWorkbenchTodos,
 } from "@/lib/ppm/workbench";
 import type {
   CalendarDay,
+  PageResp,
   WorkbenchCalendar,
   WorkbenchProfile,
   WorkbenchSummary,
+  WorkbenchSwitchableUser,
+  WorkbenchTodoItem,
 } from "@/lib/ppm/types";
 import { cn } from "@/lib/utils";
 import { taskStatusTag } from "@/app/(dashboard)/ppm/shared";
@@ -87,11 +92,15 @@ export default function WorkbenchMobilePage() {
   const [calendarMonth, setCalendarMonth] = useState<string>(() =>
     dayjs().format("YYYY-MM"),
   );
+  // 切换用户（FR-02）：null=我自己；否则目标用户 id。整页 profile/指标/日历/待办跟随。
+  const [targetUserId, setTargetUserId] = useState<string | null>(null);
+  // 可切换用户列表（登录人可见集；非经理/非超管为空）。
+  const [switchableUsers, setSwitchableUsers] = useState<WorkbenchSwitchableUser[]>([]);
 
   const loadProfile = useCallback(async () => {
     setProfile((s) => ({ ...s, loading: true, error: null }));
     try {
-      const data = await fetchWorkbenchProfile();
+      const data = await fetchWorkbenchProfile(targetUserId);
       setProfile({ loading: false, error: null, data });
     } catch (err) {
       setProfile({
@@ -100,12 +109,12 @@ export default function WorkbenchMobilePage() {
         data: null,
       });
     }
-  }, []);
+  }, [targetUserId]);
 
   const loadSummary = useCallback(async () => {
     setSummary((s) => ({ ...s, loading: true, error: null }));
     try {
-      const data = await fetchWorkbenchSummary(summaryRange);
+      const data = await fetchWorkbenchSummary(summaryRange, targetUserId);
       setSummary({ loading: false, error: null, data });
     } catch (err) {
       setSummary({
@@ -114,12 +123,12 @@ export default function WorkbenchMobilePage() {
         data: null,
       });
     }
-  }, [summaryRange]);
+  }, [summaryRange, targetUserId]);
 
   const loadCalendar = useCallback(async () => {
     setCalendar((s) => ({ ...s, loading: true, error: null }));
     try {
-      const data = await fetchWorkbenchCalendar(calendarMonth);
+      const data = await fetchWorkbenchCalendar(calendarMonth, targetUserId);
       setCalendar({ loading: false, error: null, data });
     } catch (err) {
       setCalendar({
@@ -128,7 +137,7 @@ export default function WorkbenchMobilePage() {
         data: null,
       });
     }
-  }, [calendarMonth]);
+  }, [calendarMonth, targetUserId]);
 
   // 首屏：profile + summary 并行装配（任务表不在工作台内装配，见「我的任务」入口卡）。
   useEffect(() => {
@@ -141,6 +150,19 @@ export default function WorkbenchMobilePage() {
     void loadCalendar();
   }, [loadCalendar]);
 
+  // 可切换用户列表（一次拉；仅登录人能力相关，不随 target 变）。
+  useEffect(() => {
+    void fetchWorkbenchSwitchableUsers()
+      .then(setSwitchableUsers)
+      .catch(() => {
+        // 忽略：切换入口缺失不影响工作台
+      });
+  }, []);
+
+  // can_view_others 始终反映登录人（后端 profile.can_view_others = actor 能力）
+  const canViewOthers = profile.data?.can_view_others ?? false;
+  const isViewingOther = targetUserId !== null;
+
   return (
     <div className="flex flex-col gap-3">
       <header className="px-1 pb-1">
@@ -150,7 +172,23 @@ export default function WorkbenchMobilePage() {
         </p>
       </header>
 
-      {/* ① 个人信息（左栏顶） */}
+      {/* 切换查看他人时提示条 + 返回我自己 */}
+      {isViewingOther ? (
+        <div className="flex items-center justify-between gap-2 rounded-[var(--radius-lg)] border border-amber-300 bg-amber-50 px-3 py-2 text-[13px] text-amber-800">
+          <span className="min-w-0 truncate">
+            查看「{profile.data?.display_name ?? "他人"}」的工作台
+          </span>
+          <button
+            type="button"
+            onClick={() => setTargetUserId(null)}
+            className="inline-flex min-h-[36px] shrink-0 items-center rounded-md border border-amber-400 bg-white px-3 text-[12px] font-medium text-amber-700"
+          >
+            返回我自己
+          </button>
+        </div>
+      ) : null}
+
+      {/* ① 个人信息（左栏顶） + 切换用户入口 */}
       {profile.loading || profile.error ? (
         <BlockFallback
           title="个人信息"
@@ -159,10 +197,19 @@ export default function WorkbenchMobilePage() {
           onRetry={loadProfile}
         />
       ) : (
-        <ProfileCard profile={profile.data} />
+        <ProfileCard
+          profile={profile.data}
+          canViewOthers={canViewOthers}
+          switchableUsers={switchableUsers}
+          targetUserId={targetUserId}
+          onSwitchUser={setTargetUserId}
+        />
       )}
 
-      {/* ② 指标（中栏）：range 切换重载 summary */}
+      {/* ② 我的待办（分页，跟随 target；当前页独有，桌面左栏对齐） */}
+      <TodoCard targetUserId={targetUserId} />
+
+      {/* ③ 指标（中栏）：range 切换重载 summary */}
       {summary.loading || summary.error ? (
         <BlockFallback
           title="指标"
@@ -268,8 +315,21 @@ function BlockFallback({
 
 /* ============================== ① 个人信息 ============================== */
 
-function ProfileCard({ profile }: { profile: WorkbenchProfile | null }) {
+function ProfileCard({
+  profile,
+  canViewOthers,
+  switchableUsers,
+  targetUserId,
+  onSwitchUser,
+}: {
+  profile: WorkbenchProfile | null;
+  canViewOthers: boolean;
+  switchableUsers: WorkbenchSwitchableUser[];
+  targetUserId: string | null;
+  onSwitchUser: (userId: string | null) => void;
+}) {
   const role = profile?.role_name?.trim();
+  const showSwitch = canViewOthers && switchableUsers.length > 0;
   return (
     <MobileCard title="个人信息" bodyClass="p-4">
       <div className="flex items-center gap-3">
@@ -300,11 +360,180 @@ function ProfileCard({ profile }: { profile: WorkbenchProfile | null }) {
           </span>
         </div>
       </div>
+      {/* 切换查看其他成员工作台（仅经理 ‖ super_admin 且有可切换用户） */}
+      {showSwitch ? (
+        <div className="mt-3 border-t border-border/60 pt-3">
+          <label className="mb-1 block text-[12px] text-muted-foreground">
+            切换查看其他成员
+          </label>
+          <select
+            value={targetUserId ?? "__me__"}
+            onChange={(e) =>
+              onSwitchUser(e.target.value === "__me__" ? null : e.target.value)
+            }
+            className="min-h-[44px] w-full rounded-md border border-border bg-background px-2 text-[14px] text-foreground"
+          >
+            <option value="__me__">我自己</option>
+            {switchableUsers.map((u) => (
+              <option key={u.user_id} value={u.user_id}>
+                {placeholder(u.display_name)}
+                {u.department_name ? `（${u.department_name}）` : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
     </MobileCard>
   );
 }
 
-/* ============================== ② 指标 ============================== */
+/* ============================== ② 我的待办（分页） ============================== */
+
+/** 待办 type → 移动徽标色（对齐桌面 TodoListPanel 映射）。 */
+function todoTagCls(todo: WorkbenchTodoItem): { cls: string; label: string } {
+  const src = todo.source ?? "";
+  if (src === "plan_task") return { cls: "bg-amber-100 text-amber-700", label: "任务" };
+  if (src === "problem_audit" || src === "problem_change")
+    return { cls: "bg-red-100 text-red-700", label: "缺陷" };
+  const t = todo.type ?? "";
+  if (t.includes("工时")) return { cls: "bg-blue-100 text-blue-700", label: "工时" };
+  if (t.includes("计划")) return { cls: "bg-slate-100 text-slate-700", label: "计划" };
+  return { cls: "bg-slate-100 text-slate-700", label: t || "待办" };
+}
+
+/** 待办点击跳转目标（按来源）。 */
+function todoHref(todo: WorkbenchTodoItem): string | null {
+  const src = todo.source ?? "";
+  if (src === "plan_task") return "/ppm/task-plans";
+  if (src.startsWith("problem")) return "/ppm/problem-list";
+  return null;
+}
+
+const TODO_PAGE_SIZE = 10;
+
+function TodoCard({ targetUserId }: { targetUserId: string | null }) {
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [items, setItems] = useState<WorkbenchTodoItem[]>([]);
+  const [total, setTotal] = useState(0);
+
+  // target 变化 → 重置第 1 页
+  useEffect(() => {
+    setPage(1);
+  }, [targetUserId]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const resp = await fetchWorkbenchTodos(targetUserId, page, TODO_PAGE_SIZE);
+      setItems(resp.items);
+      setTotal(resp.total);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "加载待办失败");
+      setItems([]);
+      setTotal(0);
+    } finally {
+      setLoading(false);
+    }
+  }, [targetUserId, page]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const totalPages = Math.max(1, Math.ceil(total / TODO_PAGE_SIZE));
+  const isEmpty = !loading && !error && items.length === 0;
+
+  return (
+    <MobileCard
+      title="我的待办"
+      extra={
+        <span className="rounded-full bg-indigo-100 px-2 text-[12px] font-medium text-indigo-700 tabular-nums">
+          {total}
+        </span>
+      }
+    >
+      {error ? (
+        <div className="flex items-center gap-2 py-1">
+          <span className="text-[14px] text-destructive">{error}</span>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="text-[14px] text-blue-600"
+          >
+            重新加载
+          </button>
+        </div>
+      ) : isEmpty ? (
+        <div className="py-2 text-[14px] text-muted-foreground/70">暂无待办</div>
+      ) : (
+        <ul className="space-y-1">
+          {items.map((todo) => {
+            const tag = todoTagCls(todo);
+            const href = todoHref(todo);
+            const inner = (
+              <div className="flex items-center gap-2">
+                <span
+                  className={cn(
+                    "shrink-0 rounded-md px-1.5 py-px text-[11px] font-medium",
+                    tag.cls,
+                  )}
+                >
+                  {tag.label}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[14px]" title={todo.name}>
+                  {todo.name}
+                </span>
+              </div>
+            );
+            return (
+              <li key={todo.id} className="min-h-[36px] py-1">
+                {href ? (
+                  <Link href={href} className="block active:opacity-70">
+                    {inner}
+                  </Link>
+                ) : (
+                  inner
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {/* 移动分页器 */}
+      {total > 0 ? (
+        <div className="mt-2 flex items-center justify-between border-t border-border/60 pt-2 text-[12px] text-muted-foreground">
+          <span>
+            {page}/{totalPages} 页 · 共 {total} 条
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              disabled={page <= 1 || loading}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="inline-flex min-h-[36px] min-w-[36px] items-center justify-center rounded border border-border disabled:opacity-40"
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              disabled={page >= totalPages || loading}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              className="inline-flex min-h-[36px] min-w-[36px] items-center justify-center rounded border border-border disabled:opacity-40"
+            >
+              ›
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </MobileCard>
+  );
+}
+
+/* ============================== ③ 指标 ============================== */
 
 /** 指标语义色（对齐桌面 PersonalMetricStrip 配色）。 */
 type MetricColor = "blue" | "green" | "amber" | "cyan" | "red";

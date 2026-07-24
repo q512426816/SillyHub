@@ -24,6 +24,7 @@ import pytest
 from app.modules.admin.model import Organization, UserOrganization
 from app.modules.auth.model import Role, User, UserWorkspaceRole
 from app.modules.ppm.problem.model import PpmProblemChange, PpmProblemList
+from app.modules.ppm.project.model import PpmProjectMember
 from app.modules.ppm.task.model import PlanTask, TaskExecute
 from app.modules.ppm.workbench.service import WorkbenchService
 
@@ -173,7 +174,7 @@ async def test_profile_with_org_link_returns_department(db_session):
     await _seed_org_link(db_session, user.id, org_name="研发部")
 
     svc = WorkbenchService(db_session)
-    profile = await svc.get_profile(user)
+    profile = await svc.get_profile(user, user)
 
     assert profile.display_name == "李四"
     assert profile.employee_no == "E100"
@@ -188,7 +189,7 @@ async def test_profile_without_org_link_department_none(db_session):
     user = await _seed_user(db_session)
 
     svc = WorkbenchService(db_session)
-    profile = await svc.get_profile(user)
+    profile = await svc.get_profile(user, user)
 
     assert profile.department_name is None
 
@@ -199,7 +200,7 @@ async def test_profile_employee_no_none(db_session):
     user = await _seed_user(db_session, employee_no=None)
 
     svc = WorkbenchService(db_session)
-    profile = await svc.get_profile(user)
+    profile = await svc.get_profile(user, user)
 
     assert profile.employee_no is None
 
@@ -220,7 +221,7 @@ async def test_profile_role_name_from_workspace_role(db_session):
     await db_session.commit()
 
     svc = WorkbenchService(db_session)
-    profile = await svc.get_profile(user)
+    profile = await svc.get_profile(user, user)
 
     assert profile.role_name == "开发工程师"
 
@@ -231,7 +232,7 @@ async def test_profile_avatar_text_fallback_chain(db_session):
     # display_name 为空,走 username
     user = await _seed_user(db_session, display_name=None, username="wangwu")
     svc = WorkbenchService(db_session)
-    profile = await svc.get_profile(user)
+    profile = await svc.get_profile(user, user)
     assert profile.avatar_text == "w"
 
 
@@ -308,8 +309,8 @@ async def test_summary_todo_problem_handle_user_match(db_session):
     )
 
     svc = WorkbenchService(db_session)
-    summary = await svc.get_summary(user, range="month")
-    problem_todos = [t for t in summary.todos if t.source == "problem_audit"]
+    todos = await svc.get_todos(user)
+    problem_todos = [t for t in todos.items if t.source == "problem_audit"]
 
     assert len(problem_todos) >= 1
     assert any(t.name == "问题A" for t in problem_todos)
@@ -329,8 +330,8 @@ async def test_summary_todo_problem_handle_user_no_match(db_session):
     )
 
     svc = WorkbenchService(db_session)
-    summary = await svc.get_summary(user, range="month")
-    problem_todos = [t for t in summary.todos if t.source == "problem_audit"]
+    todos = await svc.get_todos(user)
+    problem_todos = [t for t in todos.items if t.source == "problem_audit"]
 
     assert not any("问题B" in (t.name or "") for t in problem_todos)
 
@@ -350,8 +351,8 @@ async def test_summary_todo_problem_handle_me_even_not_duty(db_session):
     )
 
     svc = WorkbenchService(db_session)
-    summary = await svc.get_summary(user, range="month")
-    problem_todos = [t for t in summary.todos if t.source == "problem_audit"]
+    todos = await svc.get_todos(user)
+    problem_todos = [t for t in todos.items if t.source == "problem_audit"]
 
     assert any(t.name == "流转给我处理的问题" for t in problem_todos)
 
@@ -370,8 +371,8 @@ async def test_summary_todo_task_non_terminal(db_session):
     )
 
     svc = WorkbenchService(db_session)
-    summary = await svc.get_summary(user, range="month")
-    task_todos = [t for t in summary.todos if t.source == "plan_task"]
+    todos = await svc.get_todos(user)
+    task_todos = [t for t in todos.items if t.source == "plan_task"]
 
     assert any(t.name == "任务X" for t in task_todos)
 
@@ -392,8 +393,8 @@ async def test_summary_todo_split_not_substring_match(db_session):
     )
 
     svc = WorkbenchService(db_session)
-    summary = await svc.get_summary(me, range="month")
-    problem_todos = [t for t in summary.todos if t.source == "problem_audit"]
+    todos = await svc.get_todos(me)
+    problem_todos = [t for t in todos.items if t.source == "problem_audit"]
     assert not any("他人问题" in (t.name or "") for t in problem_todos)
     # me_str 仅用于消除 unused 警告,确认匹配走的是精确 split
     assert me_str == str(me.id)
@@ -413,8 +414,8 @@ async def test_summary_todo_problem_change_auditing_match(db_session):
     )
 
     svc = WorkbenchService(db_session)
-    summary = await svc.get_summary(user, range="month")
-    change_todos = [t for t in summary.todos if t.source == "problem_change"]
+    todos = await svc.get_todos(user)
+    change_todos = [t for t in todos.items if t.source == "problem_change"]
 
     assert len(change_todos) >= 1
     assert any(t.name == "变更A" for t in change_todos)
@@ -433,8 +434,8 @@ async def test_summary_todo_problem_change_handle_user_no_match(db_session):
     )
 
     svc = WorkbenchService(db_session)
-    summary = await svc.get_summary(user, range="month")
-    change_todos = [t for t in summary.todos if t.source == "problem_change"]
+    todos = await svc.get_todos(user)
+    change_todos = [t for t in todos.items if t.source == "problem_change"]
 
     assert not any("他人变更" in (t.name or "") for t in change_todos)
 
@@ -452,8 +453,8 @@ async def test_summary_todo_problem_change_only_auditing_status(db_session):
     )
 
     svc = WorkbenchService(db_session)
-    summary = await svc.get_summary(user, range="month")
-    change_todos = [t for t in summary.todos if t.source == "problem_change"]
+    todos = await svc.get_todos(user)
+    change_todos = [t for t in todos.items if t.source == "problem_change"]
 
     assert not any("已完成变更" in (t.name or "") for t in change_todos)
 
@@ -1147,3 +1148,295 @@ async def test_calendar_invalid_year_month_fallback_current(db_session):
 
     expected = _cal.monthrange(now.year, now.month)[1]
     assert len(cal.days) == expected
+
+
+# ===========================================================================
+# 切换用户:can_view_others / 可见用户集 / resolve_target / 分页 (FR-02~04)
+# ===========================================================================
+
+
+async def _seed_member(
+    db_session, user_id: uuid.UUID, project_id: uuid.UUID, role_name: str
+) -> PpmProjectMember:
+    """造一条 PpmProjectMember(项目成员角色字符串)。"""
+    m = PpmProjectMember(pm_project_id=project_id, user_id=user_id, role_name=role_name)
+    db_session.add(m)
+    await db_session.commit()
+    await db_session.refresh(m)
+    return m
+
+
+async def _seed_org_tree(db_session, manager_id: uuid.UUID):
+    """造父部门 + 子部门,manager 挂父部门;返回 (parent, child)。"""
+    parent = Organization(name="研发中心", code=f"p-{uuid.uuid4().hex[:6]}", status="active")
+    db_session.add(parent)
+    await db_session.flush()
+    child = Organization(
+        name="前端组",
+        code=f"c-{uuid.uuid4().hex[:6]}",
+        status="active",
+        parent_id=parent.id,
+    )
+    db_session.add(child)
+    await db_session.flush()
+    db_session.add(UserOrganization(user_id=manager_id, organization_id=parent.id))
+    await db_session.commit()
+    return parent, child
+
+
+async def _seed_user_in_org(db_session, org_id: uuid.UUID, name: str) -> User:
+    """造用户并挂到指定 org。"""
+    u = await _seed_user(db_session, display_name=name)
+    db_session.add(UserOrganization(user_id=u.id, organization_id=org_id))
+    await db_session.commit()
+    await db_session.refresh(u)
+    return u
+
+
+@pytest.mark.asyncio
+async def test_can_view_others_plain_user_false(db_session):
+    """非经理非超管 → can_view_others=False。"""
+    user = await _seed_user(db_session)
+    svc = WorkbenchService(db_session)
+    assert await svc._can_view_others(user) is False
+
+
+@pytest.mark.asyncio
+async def test_can_view_others_dept_manager_true(db_session):
+    """部门经理(项目成员 role_name 含「部门经理」)→ True。"""
+    user = await _seed_user(db_session)
+    await _seed_member(db_session, user.id, uuid.uuid4(), "部门经理")
+    svc = WorkbenchService(db_session)
+    assert await svc._can_view_others(user) is True
+
+
+@pytest.mark.asyncio
+async def test_can_view_others_super_admin_true(db_session):
+    """is_platform_admin → True(超管短路)。"""
+    user = await _seed_user(db_session)
+    user.is_platform_admin = True
+    await db_session.commit()
+    svc = WorkbenchService(db_session)
+    assert await svc._can_view_others(user) is True
+
+
+@pytest.mark.asyncio
+async def test_visible_dept_manager_org_subtree(db_session):
+    """部门经理可见:本部门 + 下属部门成员(FR-3 / C3 并回根)。"""
+    mgr = await _seed_user(db_session, display_name="经理")
+    await _seed_member(db_session, mgr.id, uuid.uuid4(), "部门经理")
+    parent, child = await _seed_org_tree(db_session, mgr.id)
+    # 本部门成员(父)
+    peer = await _seed_user_in_org(db_session, parent.id, "同事A")
+    # 下属部门成员(子)
+    sub = await _seed_user_in_org(db_session, child.id, "下属B")
+
+    svc = WorkbenchService(db_session)
+    visible = await svc._visible_user_ids(mgr)
+    assert mgr.id in visible
+    assert peer.id in visible  # 本部门成员(C3 并回根,否则漏)
+    assert sub.id in visible  # 下属部门成员
+
+
+@pytest.mark.asyncio
+async def test_visible_project_manager_project_members(db_session):
+    """项目经理可见:其经理项目的项目组成员(多项目去重并集)。"""
+    mgr = await _seed_user(db_session, display_name="项经")
+    pid1, pid2 = uuid.uuid4(), uuid.uuid4()
+    await _seed_member(db_session, mgr.id, pid1, "项目经理")
+    await _seed_member(db_session, mgr.id, pid2, "项目经理")
+    m1 = await _seed_user(db_session, display_name="组员1")
+    m2 = await _seed_user(db_session, display_name="组员2")
+    await _seed_member(db_session, m1.id, pid1, "前端开发")
+    await _seed_member(db_session, m2.id, pid2, "后端开发")
+
+    svc = WorkbenchService(db_session)
+    visible = await svc._visible_user_ids(mgr)
+    assert mgr.id in visible
+    assert m1.id in visible
+    assert m2.id in visible
+
+
+@pytest.mark.asyncio
+async def test_visible_super_admin_all_active(db_session):
+    """超管可见全部 active 用户。"""
+    admin = await _seed_user(db_session, display_name="超管")
+    admin.is_platform_admin = True
+    await db_session.commit()
+    other = await _seed_user(db_session, display_name="路人")
+
+    svc = WorkbenchService(db_session)
+    visible = await svc._visible_user_ids(admin)
+    assert admin.id in visible
+    assert other.id in visible
+
+
+@pytest.mark.asyncio
+async def test_resolve_target_no_arg_returns_actor(db_session):
+    """不传 target → 返回登录人(兼容)。"""
+    user = await _seed_user(db_session)
+    svc = WorkbenchService(db_session)
+    assert await svc._resolve_target_user(user, None) is user
+
+
+@pytest.mark.asyncio
+async def test_resolve_target_own_id_returns_actor(db_session):
+    """传自己 id → 返回登录人。"""
+    user = await _seed_user(db_session)
+    svc = WorkbenchService(db_session)
+    assert await svc._resolve_target_user(user, str(user.id)) is user
+
+
+@pytest.mark.asyncio
+async def test_resolve_target_other_not_visible_403(db_session):
+    """非经理非超管传他人 → 403。"""
+    user = await _seed_user(db_session)
+    other = await _seed_user(db_session, display_name="他人")
+    svc = WorkbenchService(db_session)
+    with pytest.raises(Exception) as exc:
+        await svc._resolve_target_user(user, str(other.id))
+    assert "403" in str(exc.value) or "无权" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_resolve_target_super_admin_any(db_session):
+    """超管可解析任意存在的目标用户。"""
+    admin = await _seed_user(db_session, display_name="超管")
+    admin.is_platform_admin = True
+    await db_session.commit()
+    other = await _seed_user(db_session, display_name="目标")
+    svc = WorkbenchService(db_session)
+    target = await svc._resolve_target_user(admin, str(other.id))
+    assert target.id == other.id
+
+
+@pytest.mark.asyncio
+async def test_resolve_target_nonexistent_404(db_session):
+    """超管传不存在的 target → 404。"""
+    admin = await _seed_user(db_session, display_name="超管")
+    admin.is_platform_admin = True
+    await db_session.commit()
+    svc = WorkbenchService(db_session)
+    with pytest.raises(Exception) as exc:
+        await svc._resolve_target_user(admin, str(uuid.uuid4()))
+    assert "404" in str(exc.value) or "不存在" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_resolve_target_dept_manager_visible_ok(db_session):
+    """部门经理传其下属部门成员 → 放行(可见集内)。"""
+    mgr = await _seed_user(db_session, display_name="经理")
+    await _seed_member(db_session, mgr.id, uuid.uuid4(), "部门经理")
+    _parent, child = await _seed_org_tree(db_session, mgr.id)
+    sub = await _seed_user_in_org(db_session, child.id, "下属")
+    svc = WorkbenchService(db_session)
+    target = await svc._resolve_target_user(mgr, str(sub.id))
+    assert target.id == sub.id
+
+
+@pytest.mark.asyncio
+async def test_get_todos_pagination(db_session):
+    """造 15 条任务待办 → page_size=10:page1=10/total=15,page2=5。"""
+    user = await _seed_user(db_session)
+    now = datetime.now(UTC)
+    for i in range(15):
+        await _seed_plan(
+            db_session,
+            user.id,
+            status="进行中",
+            start_time=now + timedelta(days=i),
+            end_time=now + timedelta(days=i + 1),
+            content=f"任务{i}",
+        )
+    svc = WorkbenchService(db_session)
+    p1 = await svc.get_todos(user, page=1, page_size=10)
+    assert p1.total == 15
+    assert len(p1.items) == 10
+    assert p1.page == 1
+    p2 = await svc.get_todos(user, page=2, page_size=10)
+    assert len(p2.items) == 5
+    assert p2.page == 2
+
+
+@pytest.mark.asyncio
+async def test_get_todos_default_page_size_10(db_session):
+    """默认 page_size=10(FR-1)。"""
+    user = await _seed_user(db_session)
+    now = datetime.now(UTC)
+    for i in range(12):
+        await _seed_plan(
+            db_session,
+            user.id,
+            status="进行中",
+            start_time=now + timedelta(days=i),
+            content=f"t{i}",
+        )
+    svc = WorkbenchService(db_session)
+    page = await svc.get_todos(user)
+    assert page.page_size == 10
+    assert len(page.items) == 10
+    assert page.total == 12
+
+
+@pytest.mark.asyncio
+async def test_list_switchable_users_dept_manager(db_session):
+    """部门经理 switchable-users 含本部门及下属部门成员。"""
+    mgr = await _seed_user(db_session, display_name="经理")
+    await _seed_member(db_session, mgr.id, uuid.uuid4(), "部门经理")
+    parent, child = await _seed_org_tree(db_session, mgr.id)
+    peer = await _seed_user_in_org(db_session, parent.id, "同事")
+    sub = await _seed_user_in_org(db_session, child.id, "下属")
+    svc = WorkbenchService(db_session)
+    users = await svc.list_switchable_users(mgr)
+    uids = {u.user_id for u in users}
+    assert str(mgr.id) in uids
+    assert str(peer.id) in uids
+    assert str(sub.id) in uids
+
+
+@pytest.mark.asyncio
+async def test_list_switchable_users_plain_empty(db_session):
+    """非经理非超管 switchable-users 为空。"""
+    user = await _seed_user(db_session)
+    svc = WorkbenchService(db_session)
+    users = await svc.list_switchable_users(user)
+    # 仅含自己(visible 恒含 actor),但 can_view_others=False 前端不显入口
+    assert all(u.user_id == str(user.id) for u in users)
+
+
+@pytest.mark.asyncio
+async def test_profile_can_view_others_from_actor(db_session):
+    """profile.can_view_others 反映登录人(actor)能力,非 target。"""
+    mgr = await _seed_user(db_session, display_name="经理")
+    await _seed_member(db_session, mgr.id, uuid.uuid4(), "项目经理")
+    plain = await _seed_user(db_session, display_name="普通")
+    svc = WorkbenchService(db_session)
+    # mgr 看 plain 的工作台:can_view_others 仍反映 mgr=True
+    profile = await svc.get_profile(mgr, plain)
+    assert profile.display_name == "普通"
+    assert profile.can_view_others is True
+
+
+@pytest.mark.asyncio
+async def test_summary_with_target_returns_target_metrics(db_session):
+    """get_summary 按 target 取数(切换用户后指标是目标人的)。"""
+    now = datetime.now(UTC)
+    target = await _seed_user(db_session, display_name="目标")
+    in_month = now.replace(day=1, hour=9, minute=0, second=0, microsecond=0) + timedelta(days=2)
+    if in_month.month != now.month:
+        in_month = now.replace(day=1, hour=9, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    await _seed_plan(
+        db_session,
+        target.id,
+        status="已完成",
+        start_time=in_month,
+        end_time=now + timedelta(days=1),
+    )
+    actor = await _seed_user(db_session, display_name="查看者")
+    actor.is_platform_admin = True
+    await db_session.commit()
+    svc = WorkbenchService(db_session)
+    summary = await svc.get_summary(target, range="month")
+    assert summary.metrics.task_count == 1  # target 的任务
+    # summary 无 todos 字段(D-003)
+    assert not hasattr(summary, "todos") or getattr(summary, "todos", None) is None

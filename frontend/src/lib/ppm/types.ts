@@ -1315,6 +1315,8 @@ export interface WorkbenchProfile {
   department_name: string | null;
   role_name: string | null;
   avatar_text: string;
+  /** 登录人(非 target)是否可切换查看他人工作台(经理 ‖ super_admin);D-005。前端用 ?? 兜底。 */
+  can_view_others?: boolean;
 }
 
 /**
@@ -1347,13 +1349,22 @@ export interface WorkbenchTodoItem {
 }
 
 /**
+ * 可切换查看的工作台用户 (GET /workbench/switchable-users, D-002)。
+ */
+export interface WorkbenchSwitchableUser {
+  user_id: string;
+  display_name: string | null;
+  employee_no: string | null;
+  department_name: string | null;
+}
+
+/**
  * 个人工作台汇总 (design §7.2 / GET /api/ppm/workbench/summary?range=month)。
  *
- * metrics + 派生待办列表(top N)。
+ * 待办已移至独立分页端点 /workbenchtodos(D-003@v1),summary 只留 metrics。
  */
 export interface WorkbenchSummary {
   metrics: WorkbenchMetrics;
-  todos: WorkbenchTodoItem[];
 }
 
 /**

@@ -1,0 +1,164 @@
+<!doctype html>
+<!--
+  原型:个人工作台「我的待办」分页 + 切换用户 (方案A)
+  author: qinyi
+  created_at: 2026-07-24 08:40:00
+  仅用于确认 UX 方向,非生产样式。线框风格。
+-->
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>工作台 · 待办分页 + 切换用户 原型</title>
+<style>
+  :root { --bd:#cbd5e1; --bg:#f8fafc; --card:#fff; --mut:#64748b; --blue:#2563eb; --amber:#d97706; --red:#dc2626; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 -apple-system,"Microsoft YaHei",sans-serif; background:var(--bg); color:#0f172a; }
+  .wrap { max-width:1100px; margin:0 auto; padding:20px; }
+  h1 { font-size:18px; }
+  h2 { font-size:14px; color:var(--mut); margin:18px 0 8px; font-weight:600; }
+  .grid { display:grid; grid-template-columns:240px 1fr; gap:16px; }
+  .card { background:var(--card); border:1px solid var(--bd); border-radius:10px; padding:14px; }
+  .av { width:52px;height:52px;border-radius:12px;background:linear-gradient(135deg,#2563eb,#06b6d4);color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700; }
+  .row { display:flex; align-items:center; gap:12px; }
+  .name { font-weight:600; font-size:15px; }
+  .role { background:#dbeafe;color:#1d4ed8;padding:1px 6px;border-radius:6px;font-size:12px; }
+  .sub { color:var(--mut); font-size:12px; }
+  .switch { margin-top:10px; }
+  select,button { font:inherit; padding:6px 10px; border:1px solid var(--bd); border-radius:8px; background:#fff; cursor:pointer; }
+  .primary { background:var(--blue); color:#fff; border-color:var(--blue); }
+  .banner { background:#fef3c7; border:1px solid #fcd34d; color:#92400e; padding:8px 12px; border-radius:8px; display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;}
+  ul { list-style:none; margin:0; padding:0; }
+  li { display:flex; align-items:center; gap:8px; padding:9px 0; border-bottom:1px solid #eef2f7; }
+  .tag { font-size:11px; padding:1px 6px; border-radius:6px; }
+  .t-warn{background:#fef3c7;color:#92400e;} .t-red{background:#fee2e2;color:#991b1b;} .t-blue{background:#dbeafe;color:#1e40af;}
+  .cnt { background:#e0e7ff;color:#3730a3;border-radius:999px;padding:0 8px;font-size:12px; }
+  .pager { display:flex; align-items:center; gap:8px; justify-content:flex-end; margin-top:10px; color:var(--mut); font-size:12px; }
+  .hdr { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;}
+  .hide { display:none; }
+  .muted { color:var(--mut); }
+  .mobile { max-width:360px; border:1px dashed var(--bd); border-radius:14px; padding:12px; background:#fff; }
+  .mcard{border:1px solid var(--bd);border-radius:12px;margin-bottom:10px;overflow:hidden;}
+  .mcard .mh{padding:8px 12px;border-bottom:1px solid #eef2f7;font-weight:600;font-size:13px;}
+  .mcard .mb{padding:10px 12px;}
+  .mlink{display:inline-block;margin-top:6px;color:var(--blue);font-size:13px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>个人工作台 · 待办分页 + 切换用户(方案A 原型)</h1>
+  <p class="muted">切换右上下拉模拟「切换用户」;待办区底部分页器可翻页;查看他人时出现黄色提示条。</p>
+
+  <h2>① 桌面端 WEB</h2>
+  <div class="banner hide" id="banner">
+    <span>👁 正在查看 <b id="bannerName">李四</b> 的工作台</span>
+    <button class="primary" onclick="resetUser()">返回我自己</button>
+  </div>
+  <div class="grid">
+    <div>
+      <div class="card">
+        <div class="row">
+          <div class="av" id="avatar">张</div>
+          <div>
+            <div class="name" id="pname">张三 <span class="role">项目经理</span></div>
+            <div class="sub">工号：zhangsan</div>
+            <div class="sub" id="pdept">部门：研发一部</div>
+          </div>
+        </div>
+        <div class="switch">
+          <div class="sub" style="margin-bottom:4px">切换查看(经理/超管可见)</div>
+          <select id="userSel" onchange="onSwitch()">
+            <option value="me">我自己(张三)</option>
+            <option value="u2">李四 · 部门成员</option>
+            <option value="u3">王五 · 项目组成员</option>
+            <option value="u4">赵六 · 项目组成员</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <div class="hdr"><b>我的待办</b><span class="cnt" id="badge">23</span></div>
+        <ul id="todoList"></ul>
+        <div class="pager">
+          <button onclick="prev()">‹ 上一页</button>
+          <span id="pageInfo">第 1 / 3 页 · 共 23 条</span>
+          <button onclick="next()">下一页 ›</button>
+          <span class="muted">每页 10 条</span>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <div class="hdr"><b>本月指标</b></div>
+        <div class="muted" style="font-size:13px">任务量 / 完成率 / 延期率 / 工时 / 缺陷数量 —— 切换用户后此处也跟随变化</div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <div class="hdr"><b>我的任务</b><span class="muted">切换用户后此表也跟随 target_user</span></div>
+        <div class="muted">任务表(自包含 fetch)…</div>
+      </div>
+    </div>
+  </div>
+
+  <h2>② 移动端 APP(纵向卡片流,新增「我的待办」卡片 + 切换入口)</h2>
+  <div class="mobile">
+    <div class="mcard">
+      <div class="mh">个人信息</div>
+      <div class="mb">
+        <div class="row">
+          <div class="av">张</div>
+          <div><div class="name">张三 <span class="role">项目经理</span></div><div class="sub">研发一部</div></div>
+        </div>
+        <a class="mlink" onclick="alert('底部弹出选择 sheet:我部门/项目组成员')">⇅ 切换查看其他成员 ›</a>
+      </div>
+    </div>
+    <div class="mcard">
+      <div class="mh">我的待办 <span class="cnt" style="float:right">23</span></div>
+      <div class="mb">
+        <ul id="mList"></ul>
+        <div class="pager">
+          <button onclick="mprev()">‹</button><span id="mPage">1/3</span><button onclick="mnext()">›</button>
+        </div>
+      </div>
+    </div>
+    <div class="mcard"><div class="mh">指标 / 工作日历 / 快捷入口</div><div class="mb muted">…切换后全部跟随</div></div>
+  </div>
+</div>
+
+<script>
+  const todos = Array.from({length:23},(_,i)=>{
+    const src = i%3;
+    return { id:i, tag: src===0?'任务':src===1?'缺陷':'工时', cls: src===0?'t-warn':src===1?'t-red':'t-blue',
+      name: ['方案评审','缺陷#1024修复','工时填报','里程碑对齐','需求确认','联调测试'][i%6]+ (i>=6?(' #'+(i+1)):'') };
+  });
+  let page=1, ps=10, mpage=1;
+  function render(){
+    const start=(page-1)*ps, slice=todos.slice(start,start+ps);
+    document.getElementById('todoList').innerHTML = slice.map(t=>`<li><span class="tag ${t.cls}">${t.tag}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.name}</span></li>`).join('');
+    const pages=Math.ceil(todos.length/ps);
+    document.getElementById('pageInfo').textContent=`第 ${page} / ${pages} 页 · 共 ${todos.length} 条`;
+    document.getElementById('badge').textContent=todos.length;
+  }
+  function prev(){ if(page>1){page--;render();} }
+  function next(){ const pages=Math.ceil(todos.length/ps); if(page<pages){page++;render();} }
+  function mrender(){ const start=(mpage-1)*ps,slice=todos.slice(start,start+ps);
+    document.getElementById('mList').innerHTML=slice.map(t=>`<li><span class="tag ${t.cls}">${t.tag}</span><span style="flex:1">${t.name}</span></li>`).join('');
+    document.getElementById('mPage').textContent=`${mpage}/${Math.ceil(todos.length/ps)}`; }
+  function mprev(){ if(mpage>1){mpage--;mrender();} }
+  function mnext(){ const p=Math.ceil(todos.length/ps); if(mpage<p){mpage++;mrender();} }
+  const users={me:{n:'张三',d:'研发一部',a:'张',r:'项目经理'},u2:{n:'李四',d:'研发一部',a:'李',r:'前端开发'},u3:{n:'王五',d:'平台组',a:'王',r:'后端开发'},u4:{n:'赵六',d:'测试组',a:'赵',r:'测试工程师'}};
+  function onSwitch(){
+    const v=document.getElementById('userSel').value;
+    const u=users[v];
+    document.getElementById('pname').innerHTML=`${u.n} <span class="role">${u.r}</span>`;
+    document.getElementById('pdept').textContent='部门：'+u.d;
+    document.getElementById('avatar').textContent=u.a;
+    const banner=document.getElementById('banner');
+    if(v==='me'){ banner.classList.add('hide'); }
+    else { banner.classList.remove('hide'); document.getElementById('bannerName').textContent=u.n; }
+  }
+  function resetUser(){ document.getElementById('userSel').value='me'; onSwitch(); }
+  render(); mrender();
+</script>
+</body>
+</html>

@@ -297,9 +297,9 @@ describe("AdminRolePermissionPicker", () => {
   // D. 数据源切换（3 例）— 验证已迁移到 MENU_PERMISSION_GROUPS
   // ────────────────────────────────────────────────────────────────────
 
-  it("MENU_PERMISSION_GROUPS data has all 33 menus across 5 sections", () => {
-    // 验证测试期望的数据源本身完整（已移除问题变更 34→33）
-    expect(MENU_PERMISSION_GROUPS).toHaveLength(33);
+  it("MENU_PERMISSION_GROUPS data has all 34 menus across 5 sections", () => {
+    // 数据源当前 34 项(与 lib/__tests__/menu-permissions.test.ts 长度断言一致)
+    expect(MENU_PERMISSION_GROUPS).toHaveLength(34);
     expect(MENU_PERMISSION_GROUPS.map((g) => g.menuKey)).toEqual(
       expect.arrayContaining(["users", "organizations", "roles"]),
     );
@@ -315,7 +315,7 @@ describe("AdminRolePermissionPicker", () => {
       management: 7,
       admin: 3,
       system: 2,
-      ppm: 13,
+      ppm: 14,
     });
   });
 

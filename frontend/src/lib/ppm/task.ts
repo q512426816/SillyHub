@@ -124,10 +124,12 @@ export async function exportPlanTasks(
 
 export async function listPersonalPlanTasks(
   params?: Omit<PlanTaskPageReq, "user_id">,
+  targetUserId?: string | null,
 ): Promise<PageResp<PlanTask>> {
+  const merged = { ...params, target_user_id: targetUserId ?? undefined };
   return apiFetch<PageResp<PlanTask>>(
     "/api/ppm/personal-task-plan/page",
-    queryOf(params as Record<string, unknown> | undefined),
+    queryOf(merged as Record<string, unknown>),
   );
 }
 

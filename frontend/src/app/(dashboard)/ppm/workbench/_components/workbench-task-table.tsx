@@ -35,6 +35,8 @@ import { Toast, taskStatusTag, useToast } from "../../shared";
 export interface WorkbenchTaskTableProps {
   /** 执行/提交后回调(page 刷 summary 等)。 */
   onChanged?: () => void;
+  /** 切换查看的目标用户 id;null/undefined=当前登录人(D-004 任务表跟随切换)。 */
+  targetUserId?: string | null;
 }
 
 /** 本周一~周日 [start, end] (本地日, 对齐 page 旧 inTaskRange 口径)。 */
@@ -49,7 +51,7 @@ function thisWeekRange(): [Dayjs, Dayjs] {
 
 const STATUS_OPTIONS = ["未开始", "进行中", "已完成"] as const;
 
-export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
+export function WorkbenchTaskTable({ onChanged, targetUserId }: WorkbenchTaskTableProps) {
   // 查询条件: 日期范围 / 项目(后端) / 状态(后端)
   // 默认本月 + 未开始/进行中(进行中任务最需本人关注)
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(() => [
@@ -82,7 +84,7 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
       }
       if (projectId) params.project_id = projectId;
       if (statusF.length > 0) params.status = statusF;
-      const page = await listPersonalPlanTasks(params);
+      const page = await listPersonalPlanTasks(params, targetUserId);
       setTasks(page.items ?? []);
     } catch {
       setTasks([]);
@@ -90,11 +92,11 @@ export function WorkbenchTaskTable({ onChanged }: WorkbenchTaskTableProps) {
       setLoading(false);
     }
   };
-  // 日期/项目/状态 变 → 后端重查
+  // 日期/项目/状态/target 变 → 后端重查
   useEffect(() => {
     void loadTasks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateRange, projectId, statusF]);
+  }, [dateRange, projectId, statusF, targetUserId]);
 
   // 预设按钮高亮: 日期范围与预设区间一致时标记对应预设(自定义/清空后取消高亮)
   const [activePreset, setActivePreset] = useState<"week" | "month" | "all" | null>(

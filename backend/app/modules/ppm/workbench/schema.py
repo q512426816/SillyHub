@@ -20,6 +20,9 @@ class WorkbenchProfile(PydanticModel):
 
     ``avatar_text`` 为头像占位文案(取 display_name 首字),其余字段
     允许 ``None`` (来源数据缺失时)。
+
+    ``can_view_others`` 反映**当前登录人**(非 target)是否可切换查看他人
+    工作台(经理角色 ‖ super_admin);前端据此显隐切换入口(D-005@v1)。
     """
 
     display_name: str | None = None
@@ -27,6 +30,7 @@ class WorkbenchProfile(PydanticModel):
     department_name: str | None = None
     role_name: str | None = None
     avatar_text: str
+    can_view_others: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -68,10 +72,26 @@ class WorkbenchTodoItem(PydanticModel):
 
 
 class WorkbenchSummary(PydanticModel):
-    """个人工作台聚合视图:指标卡片 + 待办列表。"""
+    """个人工作台聚合视图:指标卡片。
+
+    待办已移至独立分页端点 ``GET /workbench/todos``(D-003@v1 职责瘦身);
+    summary 只保留 metrics。
+    """
 
     metrics: WorkbenchMetrics
-    todos: list[WorkbenchTodoItem]
+
+
+class WorkbenchSwitchableUser(PydanticModel):
+    """可切换查看的工作台用户条目(GET /workbench/switchable-users)。
+
+    ``user_id`` 为目标用户 id(切换时透传 target_user_id);其余为展示字段,
+    部门名取首个 active 组织(对齐 profile 部门装配口径)。
+    """
+
+    user_id: str
+    display_name: str | None = None
+    employee_no: str | None = None
+    department_name: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -142,5 +162,6 @@ __all__ = [
     "WorkbenchMetrics",
     "WorkbenchProfile",
     "WorkbenchSummary",
+    "WorkbenchSwitchableUser",
     "WorkbenchTodoItem",
 ]

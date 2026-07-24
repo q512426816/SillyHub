@@ -12,13 +12,18 @@ import re
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
+from fastapi import HTTPException
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.admin.model import Organization, UserOrganization
+from app.modules.admin.organizations_service import _descendant_ids
 from app.modules.auth.model import User
 from app.modules.auth.rbac import list_user_workspace_roles
+from app.modules.ppm.common.crud import Page
+from app.modules.ppm.common.data_scope import MANAGER_ROLE_NAMES, is_super_admin
 from app.modules.ppm.problem.model import PpmProblemChange, PpmProblemList
+from app.modules.ppm.project.model import PpmProjectMember
 from app.modules.ppm.task.model import PlanTask, TaskExecute
 from app.modules.ppm.workbench.schema import (
     CalendarDay,
@@ -29,11 +34,26 @@ from app.modules.ppm.workbench.schema import (
     WorkbenchMetrics,
     WorkbenchProfile,
     WorkbenchSummary,
+    WorkbenchSwitchableUser,
     WorkbenchTodoItem,
 )
 
 # 任务待办取数上限 (top N,§7.2 待办派生)
 _TODO_TASK_LIMIT = 20
+# 分页待办单源保护上限 (Grill F2):移除 top20 后防极端用户单源膨胀。
+_TODO_SOURCE_LIMIT = 200
+# 默认每页条数 (FR-1 待办分页默认 10 条/页)。
+_TODO_DEFAULT_PAGE_SIZE = 10
+
+# 可见用户口径常量 (D-002@v1):复用 data_scope.MANAGER_ROLE_NAMES 避免硬编码漂移。
+# 部门经理 → Organization 子树;项目/开发/业务经理 → 项目成员。
+DEPT_MANAGER_NAME = "部门经理"
+PROJECT_MANAGER_NAMES: frozenset[str] = MANAGER_ROLE_NAMES - {DEPT_MANAGER_NAME}
+
+
+def _split_roles(role_name: str | None) -> set[str]:
+    """逗号拼接角色名 → 去空 trimmed 集合(对齐 data_scope 拆分口径)。"""
+    return {s.strip() for s in (role_name or "").split(",") if s.strip()}
 
 
 def _to_aware(dt: datetime) -> datetime:
@@ -323,10 +343,13 @@ class WorkbenchService:
     # profile —— 当前登录用户工作台头部信息
     # ------------------------------------------------------------------
 
-    async def get_profile(self, user: User) -> WorkbenchProfile:
-        """装配当前登录用户的头部信息。
+    async def get_profile(self, actor: User, target: User) -> WorkbenchProfile:
+        """装配工作台头部信息。
 
-        display_name / employee_no 直取 user;部门通过 user_organizations
+        数据取自 ``target``(切换用户时为目标人,否则=登录人);``can_view_others``
+        反映 ``actor``(登录人)是否可切换查看他人(经理 ‖ super_admin,D-005@v1)。
+
+        display_name / employee_no 直取 target;部门通过 user_organizations
         JOIN organizations 取首个 active 组织名;role_name 复用
         ``list_user_workspace_roles`` 取首个非空角色名 (D-004@v1);
         avatar_text 永远非空单字 (兜底 '#')。
@@ -339,14 +362,14 @@ class WorkbenchService:
                 UserOrganization,
                 UserOrganization.organization_id == Organization.id,
             )
-            .where(UserOrganization.user_id == user.id)
+            .where(UserOrganization.user_id == target.id)
             .where(Organization.status == "active")
             .limit(1)
         )
         department_name = await self._session.scalar(dept_stmt)
 
         # 角色:复用 rbac 查询,取首个非空 role_name (tuple[2])
-        ws_roles = await list_user_workspace_roles(self._session, user_id=user.id)
+        ws_roles = await list_user_workspace_roles(self._session, user_id=target.id)
         role_name: str | None = None
         for _wid, _key, name in ws_roles:
             if name:
@@ -355,19 +378,23 @@ class WorkbenchService:
 
         # avatar_text:display_name → username → email → '#' 兜底,取 strip 后首字
         avatar_src = (
-            (user.display_name or "").strip()
-            or (user.username or "").strip()
-            or (user.email or "").strip()
+            (target.display_name or "").strip()
+            or (target.username or "").strip()
+            or (target.email or "").strip()
         )
         avatar_text = avatar_src[:1] if avatar_src else "#"
 
+        # can_view_others:登录人(actor)能力,与 target 无关
+        can_view_others = await self._can_view_others(actor)
+
         return WorkbenchProfile(
-            display_name=user.display_name,
+            display_name=target.display_name,
             # 工号未录时用登录名(username)兜底覆盖,避免前端显示空
-            employee_no=user.employee_no or user.username,
+            employee_no=target.employee_no or target.username,
             department_name=department_name,
             role_name=role_name,
             avatar_text=avatar_text,
+            can_view_others=can_view_others,
         )
 
     # ------------------------------------------------------------------
@@ -376,14 +403,14 @@ class WorkbenchService:
 
     async def get_summary(
         self,
-        user: User,
+        target: User,
         range: str = "month",
     ) -> WorkbenchSummary:
-        """装配个人工作台聚合视图 (指标 + 待办)。
+        """装配个人工作台指标聚合 (待办已移至 /workbench/todos,D-003@v1)。
 
-        ``range`` ∈ {'week','month','all'}:统一按 ``PlanTask.start_time``
-        区间过滤 (X-001 不依赖 month 字符串字段)。指标分母 = 区间内任务
-        总数;defect_count 不受 range 影响。待办只读派生。
+        数据取自 ``target``(切换用户时为目标人)。``range`` ∈ {'week','month',
+        'all'}:统一按 ``PlanTask.start_time`` 区间过滤 (X-001 不依赖 month 字符串
+        字段)。指标分母 = 区间内任务总数;defect_count 不受 range 影响。
         """
         now = datetime.now(UTC)
         start, end = self._range_window(range, now)
@@ -416,7 +443,7 @@ class WorkbenchService:
                         else_=0,
                     )
                 ).label("delayed"),
-            ).where(PlanTask.user_id == user.id)
+            ).where(PlanTask.user_id == target.id)
         )
         row = (await self._session.execute(plan_agg)).one()
         task_count = int(row.total or 0)
@@ -431,7 +458,7 @@ class WorkbenchService:
         # 进行中(actual_end_time=NULL)与跨月(actual_end_time 在下月)的执行记录不再漏算,
         # 与日历侧 _sum_actual_hours 区间相交口径对齐。
         hours_stmt = select(func.sum(TaskExecute.time_spent)).where(
-            TaskExecute.execute_user_id == user.id
+            TaskExecute.execute_user_id == target.id
         )
         if start is not None and end is not None:
             hours_stmt = hours_stmt.where(TaskExecute.actual_start_time >= start).where(
@@ -455,8 +482,8 @@ class WorkbenchService:
             .where(PpmProblemList.status != "已完成")
             .where(
                 or_(
-                    PpmProblemList.duty_user_id == user.id,
-                    defect_handle.like(f"%,{user.id},%"),
+                    PpmProblemList.duty_user_id == target.id,
+                    defect_handle.like(f"%,{target.id},%"),
                 )
             )
         )
@@ -473,18 +500,18 @@ class WorkbenchService:
             defect_count=defect_count,
         )
 
-        # 待办派生
-        todos = await self._derive_todos(user)
+        # 待办已移至独立分页端点 GET /workbench/todos (D-003@v1 职责瘦身)。
+        return WorkbenchSummary(metrics=metrics)
 
-        return WorkbenchSummary(metrics=metrics, todos=todos)
+    async def _derive_todos(self, target: User) -> list[WorkbenchTodoItem]:
+        """派生待办列表(全量有序,供 get_todos 分页切片):① 问题在办
+        (now_handle_user split 匹配);② 问题变更待审批 (status="1" 审核中 且
+        now_handle_user 含我);③ 任务待办 (非已完成的 PlanTask)。
 
-    async def _derive_todos(self, user: User) -> list[WorkbenchTodoItem]:
-        """派生待办列表:① 问题在办 (now_handle_user split 匹配);
-        ② 问题变更待审批 (status="1" 审核中 且 now_handle_user 含我);
-        ③ 任务待办 (非已完成的 PlanTask)。
+        顺序稳定:问题 → 变更 → 任务(任务内按 start_time 升序)。
         """
         todos: list[WorkbenchTodoItem] = []
-        uid_str = str(user.id)
+        uid_str = str(target.id)
 
         # ① 问题待办:当前处理人(now_handle_user)含我即显示,不限责任人 duty_user_id
         # (duty 是责任人,审批人非责任人时也需看到待办)。
@@ -527,13 +554,13 @@ class WorkbenchService:
                 )
             )
 
-        # ③ 任务待办:非已完成,按 start_time 升序 top N
+        # ③ 任务待办:非已完成,按 start_time 升序(保护上限 _TODO_SOURCE_LIMIT)
         task_stmt = (
             select(PlanTask)
-            .where(PlanTask.user_id == user.id)
+            .where(PlanTask.user_id == target.id)
             .where(PlanTask.status != "已完成")
             .order_by(PlanTask.start_time.asc())
-            .limit(_TODO_TASK_LIMIT)
+            .limit(_TODO_SOURCE_LIMIT)
         )
         task_rows = (await self._session.execute(task_stmt)).scalars().all()
         for t in task_rows:
@@ -548,18 +575,208 @@ class WorkbenchService:
 
         return todos
 
+    async def get_todos(
+        self,
+        target: User,
+        page: int = 1,
+        page_size: int = _TODO_DEFAULT_PAGE_SIZE,
+    ) -> Page[WorkbenchTodoItem]:
+        """分页待办(FR-1 / D-001@v1):全量派生后按 (page, page_size) 切片。
+
+        total = 全量长度(三源合并),items = 切片。page<1 兜底为 1。
+        """
+        all_todos = await self._derive_todos(target)
+        total = len(all_todos)
+        page = max(page, 1)
+        page_size = max(page_size, 1)
+        offset = (page - 1) * page_size
+        items = all_todos[offset : offset + page_size]
+        return Page[WorkbenchTodoItem](
+            items=items,
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+
+    # ------------------------------------------------------------------
+    # 切换用户:权限收口 + 可见用户集 (D-002@v1 / D-005@v1 / FR-02~04)
+    # ------------------------------------------------------------------
+
+    async def _load_user(self, user_id: uuid.UUID) -> User:
+        """按 id 载入用户;不存在 → 404。"""
+        u = (
+            await self._session.execute(select(User).where(User.id == user_id))
+        ).scalar_one_or_none()
+        if u is None:
+            raise HTTPException(status_code=404, detail="目标用户不存在")
+        return u
+
+    async def _resolve_target_user(self, actor: User, target_user_id: str | None) -> User:
+        """解析工作台展示目标用户(切换用户权限收口,FR-04 / R-01)。
+
+        - 不传 / 传自己 → actor(完全兼容旧行为)
+        - 超管 → 任意目标(校验存在性 → 404)
+        - 经理 → 目标须在可见集,否则 403
+        """
+        if not target_user_id:
+            return actor
+        try:
+            tid = uuid.UUID(str(target_user_id))
+        except (ValueError, AttributeError, TypeError):
+            raise HTTPException(status_code=400, detail="target_user_id 非法") from None
+        if tid == actor.id:
+            return actor
+        if await is_super_admin(self._session, actor):
+            return await self._load_user(tid)
+        visible = await self._visible_user_ids(actor)
+        if tid not in visible:
+            raise HTTPException(status_code=403, detail="无权查看该用户工作台")
+        return await self._load_user(tid)
+
+    async def _visible_user_ids(self, actor: User) -> set[uuid.UUID]:
+        """当前登录人可切换查看的用户集(D-002@v1 按经理角色分口径)。
+
+        - 部门经理 → 所属 org 子树({oid} | _descendant_ids)成员
+        - 项目/开发/业务经理 → 其经理项目(不含部门经理角色项目)的 PpmProjectMember.user_id
+        - 兼具 → 并集;恒含 actor 自己
+        超管 → 全部 active 用户(供 list_switchable_users;_resolve_target_user
+        对超管已短路,不依赖此分支)。
+        """
+        # 超管:全部 active 用户
+        if await is_super_admin(self._session, actor):
+            all_active = (
+                (await self._session.execute(select(User.id).where(User.status == "active")))
+                .scalars()
+                .all()
+            )
+            return set(all_active)
+
+        member_rows = (
+            (
+                await self._session.execute(
+                    select(PpmProjectMember).where(PpmProjectMember.user_id == actor.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        has_dept = any(_split_roles(r.role_name) & {DEPT_MANAGER_NAME} for r in member_rows)
+        proj_pids = {
+            r.pm_project_id
+            for r in member_rows
+            if _split_roles(r.role_name) & PROJECT_MANAGER_NAMES
+        }
+        ids: set[uuid.UUID] = set()
+
+        if has_dept:
+            my_orgs = (
+                (
+                    await self._session.execute(
+                        select(UserOrganization.organization_id).where(
+                            UserOrganization.user_id == actor.id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for oid in my_orgs:
+                # _descendant_ids 排除根,须 {oid} 并回(对齐 _subtree_member_count,
+                # 否则部门经理看不到本部门成员,违反 FR-3;Grill C3)。
+                subtree = {oid} | await _descendant_ids(self._session, oid)
+                member_uids = (
+                    (
+                        await self._session.execute(
+                            select(UserOrganization.user_id).where(
+                                UserOrganization.organization_id.in_(subtree)
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                ids.update(member_uids)
+
+        if proj_pids:
+            proj_uids = (
+                (
+                    await self._session.execute(
+                        select(PpmProjectMember.user_id).where(
+                            PpmProjectMember.pm_project_id.in_(proj_pids)
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            ids.update(proj_uids)
+
+        ids.add(actor.id)
+        return ids
+
+    async def _can_view_others(self, actor: User) -> bool:
+        """登录人是否可切换查看他人工作台(超管 ‖ 任一经理角色,D-005@v1)。"""
+        if await is_super_admin(self._session, actor):
+            return True
+        rows = (
+            (
+                await self._session.execute(
+                    select(PpmProjectMember.role_name).where(PpmProjectMember.user_id == actor.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return any(_split_roles(r) & MANAGER_ROLE_NAMES for r in rows)
+
+    async def list_switchable_users(self, actor: User) -> list[WorkbenchSwitchableUser]:
+        """当前登录人可切换查看的用户列表(GET /workbench/switchable-users)。
+
+        非经理非超管 → 空(前端不显切换入口)。装配批量 JOIN 取
+        display_name/employee_no/首个 active 部门名,防 N+1。
+        """
+        ids = await self._visible_user_ids(actor)
+        # 超管时 _visible_user_ids 也返回全部 active 用户(见下),此处统一装配。
+        rows = (
+            await self._session.execute(
+                select(User, Organization.name)
+                .outerjoin(UserOrganization, UserOrganization.user_id == User.id)
+                .outerjoin(
+                    Organization,
+                    and_(
+                        Organization.id == UserOrganization.organization_id,
+                        Organization.status == "active",
+                    ),
+                )
+                .where(User.id.in_(ids), User.status == "active")
+                .order_by(User.display_name.asc())
+            )
+        ).all()
+        # 每用户取首个 active 部门名(可能多行,取第一行)。
+        seen: dict[uuid.UUID, WorkbenchSwitchableUser] = {}
+        for u, dept_name in rows:
+            if u.id in seen:
+                continue
+            seen[u.id] = WorkbenchSwitchableUser(
+                user_id=str(u.id),
+                display_name=u.display_name,
+                employee_no=u.employee_no,
+                department_name=dept_name,
+            )
+        return list(seen.values())
+
     # ------------------------------------------------------------------
     # calendar —— 月度日历负载
     # ------------------------------------------------------------------
 
     async def get_calendar(
         self,
-        user: User,
+        target: User,
         year_month: str,
     ) -> WorkbenchCalendar:
         """装配个人工作台月度日历 (左点负载 D-001~007 + 右点进度 D-008 + 详情 D-009)。
 
-        ``year_month`` 形如 ``YYYY-MM``。
+        数据取自 ``target``(切换用户时为目标人)。``year_month`` 形如 ``YYYY-MM``。
 
         左点 ``load_level`` (负载,以今天分界,今天归未来侧):
           - 过去 (day < today): 实际工时平摊 (D-001~005)。
@@ -585,7 +802,7 @@ class WorkbenchService:
             (
                 await self._session.execute(
                     select(PlanTask).where(
-                        PlanTask.user_id == user.id,
+                        PlanTask.user_id == target.id,
                         PlanTask.start_time.is_not(None),
                         PlanTask.start_time < next_month_start,
                         or_(PlanTask.end_time.is_(None), PlanTask.end_time >= month_start),
@@ -601,7 +818,7 @@ class WorkbenchService:
             (
                 await self._session.execute(
                     select(PpmProblemList).where(
-                        PpmProblemList.duty_user_id == user.id,
+                        PpmProblemList.duty_user_id == target.id,
                         PpmProblemList.plan_start_time.is_not(None),
                         PpmProblemList.plan_start_time < next_month_start,
                         or_(
@@ -621,7 +838,7 @@ class WorkbenchService:
             (
                 await self._session.execute(
                     select(TaskExecute).where(
-                        TaskExecute.execute_user_id == user.id,
+                        TaskExecute.execute_user_id == target.id,
                         or_(
                             and_(
                                 TaskExecute.actual_start_time.is_not(None),
@@ -650,7 +867,7 @@ class WorkbenchService:
         spent_rows = (
             await self._session.execute(
                 select(TaskExecute.plan_task_id, func.sum(TaskExecute.time_spent))
-                .where(TaskExecute.execute_user_id == user.id)
+                .where(TaskExecute.execute_user_id == target.id)
                 .group_by(TaskExecute.plan_task_id)
             )
         ).all()

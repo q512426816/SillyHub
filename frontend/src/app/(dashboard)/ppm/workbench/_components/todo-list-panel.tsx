@@ -1,39 +1,34 @@
 "use client";
 
 /**
- * TodoListPanel — 个人工作台待办列表 (task-10 / FR-06 / D-005@v1 / D-006@v1)。
+ * TodoListPanel — 个人工作台待办列表 (task-10 / FR-01 / D-001@v1)。
  *
- * 左栏「我的待办」:渲染 summary.todos(后端 task-04 派生,top N),每条 name +
- * type 徽标。type 徽标按 source/type 分支映射颜色(参照原型 type 标签「计划/
- * 缺陷/工时/任务」)。
+ * 左栏「我的待办」:**自带 fetch** 调 `/workbench/todos`(分页,默认每页 10 条),
+ * 支持 targetUserId(切换用户后跟随目标)。底部分页器上一页/下一页 + 共 N 条,
+ * 标题徽标显示 total。
  *
- * 组件为纯展示(不调接口,不派生):todos 由 task-08 page.tsx 装配
- * fetchWorkbenchSummary → summary.todos 后下传(constraints:避免双重请求)。
- * todos 为空/null → EmptyState「暂无待办」不报错。
+ * type 徽标按 source/type 分支映射颜色(参照原型 type 标签「计划/缺陷/工时/任务」)。
+ * 点击待办按来源跳转:plan_task→/ppm/task-plans,其余 problem_*→/ppm/problem-list。
  *
- * 点击待办按来源跳转(D-增强):plan_task→/ppm/task-plans,其余 problem_*→
- * /ppm/problem-list,便于从工作台下钻到具体业务列表。
- *
- * type 徽标映射:
- *   source="plan_task"              → warning  「任务」
- *   source="problem_audit"/"change" → destructive 「缺陷」
- *   type 含「工时」                  → info      「工时」
- *   type 含「计划」                  → default   「计划」
- *   其余                            → outline   type 原文
+ * 空态「暂无待办」;loading/error 各独立兜底。
  */
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronRight } from "lucide-react";
 
 import { SectionCard } from "@/components/layout";
+import { ApiError } from "@/lib/api";
+import { fetchWorkbenchTodos } from "@/lib/ppm/workbench";
+import type { WorkbenchTodoItem } from "@/lib/ppm/types";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import type { WorkbenchTodoItem } from "@/lib/ppm/types";
+
+/** 默认每页条数(FR-1)。 */
+const PAGE_SIZE = 10;
 
 export interface TodoListPanelProps {
-  /** 后端派生的待办列表;null/空数组渲染空态。 */
-  todos: WorkbenchTodoItem[] | null;
-  /** 加载态(预留,当前由 page 控制 SectionCard 文案)。 */
-  loading?: boolean;
+  /** 切换查看的目标用户 id;null/undefined=当前登录人。切换时重置到第 1 页。 */
+  targetUserId?: string | null;
 }
 
 interface BadgeStyle {
@@ -83,10 +78,41 @@ function todoBadge(todo: WorkbenchTodoItem): BadgeStyle {
   return { variant: "outline", label: type || "待办" };
 }
 
-export function TodoListPanel({ todos, loading }: TodoListPanelProps) {
+export function TodoListPanel({ targetUserId }: TodoListPanelProps) {
   const router = useRouter();
-  const count = todos?.length ?? 0;
-  const isEmpty = !loading && count === 0;
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [items, setItems] = useState<WorkbenchTodoItem[]>([]);
+  const [total, setTotal] = useState(0);
+
+  // targetUserId 变化 → 重置到第 1 页
+  useEffect(() => {
+    setPage(1);
+  }, [targetUserId]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const resp = await fetchWorkbenchTodos(targetUserId ?? null, page, PAGE_SIZE);
+      setItems(resp.items);
+      setTotal(resp.total);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "加载待办失败");
+      setItems([]);
+      setTotal(0);
+    } finally {
+      setLoading(false);
+    }
+  }, [targetUserId, page]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const isEmpty = !loading && !error && items.length === 0;
 
   /** 按来源跳转:任务待办→任务计划页,其余问题待办→问题清单页。 */
   const goTodo = (todo: WorkbenchTodoItem) => {
@@ -103,47 +129,87 @@ export function TodoListPanel({ todos, loading }: TodoListPanelProps) {
       title="我的待办"
       extra={
         <Badge variant="info" className="tabular-nums">
-          {count}
+          {total}
         </Badge>
       }
       bodyPadding="p-0"
     >
-      {isEmpty ? (
+      {error ? (
+        <div className="flex items-center gap-2 px-4 py-3">
+          <span className="text-xs text-destructive">{error}</span>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="text-xs text-blue-600 hover:underline"
+          >
+            重新加载
+          </button>
+        </div>
+      ) : isEmpty ? (
         <EmptyState title="暂无待办" />
       ) : (
         <ul className="divide-y divide-border">
-          {todos?.map((todo) => {
-            const badge = todoBadge(todo);
-            const clickable =
-              todo.source === "plan_task" ||
-              (todo.source ?? "").startsWith("problem");
-            return (
-              <li
-                key={todo.id}
-                className={`flex items-center gap-2 px-4 py-2.5 ${
-                  clickable
-                    ? "group cursor-pointer transition-colors hover:bg-muted/50"
-                    : "cursor-default"
-                }`}
-                onClick={() => clickable && goTodo(todo)}
-              >
-                <Badge variant={badge.variant} className="shrink-0">
-                  {badge.label}
-                </Badge>
-                <span
-                  className="min-w-0 flex-1 truncate text-sm text-foreground"
-                  title={todo.name}
-                >
-                  {todo.name}
-                </span>
-                {clickable ? (
-                  <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/40 transition group-hover:translate-x-0.5 group-hover:text-muted-foreground" />
-                ) : null}
-              </li>
-            );
-          })}
+          {loading && items.length === 0
+            ? null
+            : items.map((todo) => {
+                const badge = todoBadge(todo);
+                const clickable =
+                  todo.source === "plan_task" ||
+                  (todo.source ?? "").startsWith("problem");
+                return (
+                  <li
+                    key={todo.id}
+                    className={`flex items-center gap-2 px-4 py-2.5 ${
+                      clickable
+                        ? "group cursor-pointer transition-colors hover:bg-muted/50"
+                        : "cursor-default"
+                    }`}
+                    onClick={() => clickable && goTodo(todo)}
+                  >
+                    <Badge variant={badge.variant} className="shrink-0">
+                      {badge.label}
+                    </Badge>
+                    <span
+                      className="min-w-0 flex-1 truncate text-sm text-foreground"
+                      title={todo.name}
+                    >
+                      {todo.name}
+                    </span>
+                    {clickable ? (
+                      <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/40 transition group-hover:translate-x-0.5 group-hover:text-muted-foreground" />
+                    ) : null}
+                  </li>
+                );
+              })}
         </ul>
       )}
+
+      {/* 分页器:上一页 / 页码 / 下一页 / 共 N 条 / 每页 10 条 */}
+      {total > 0 ? (
+        <div className="flex items-center justify-between gap-2 border-t border-border px-4 py-2 text-xs text-muted-foreground">
+          <span>
+            第 {page}/{totalPages} 页 · 共 {total} 条 · 每页 {PAGE_SIZE} 条
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              disabled={page <= 1 || loading}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="rounded border border-border px-2 py-0.5 disabled:cursor-not-allowed disabled:opacity-40 enabled:hover:bg-muted"
+            >
+              上一页
+            </button>
+            <button
+              type="button"
+              disabled={page >= totalPages || loading}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              className="rounded border border-border px-2 py-0.5 disabled:cursor-not-allowed disabled:opacity-40 enabled:hover:bg-muted"
+            >
+              下一页
+            </button>
+          </div>
+        </div>
+      ) : null}
     </SectionCard>
   );
 }

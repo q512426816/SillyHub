@@ -50,6 +50,7 @@ from app.modules.ppm.task.service import (
     TaskExecuteService,
     WorkHourService,
 )
+from app.modules.ppm.workbench.service import WorkbenchService
 
 # 前缀由 ``app.main`` 统一以 ``prefix="/api/ppm"`` 挂载,本 router 不自带 prefix
 router = APIRouter(tags=["ppm-task"])
@@ -300,12 +301,20 @@ async def personal_plan_task_page(
     work_partner: str | None = Query(None),
     order_by: str | None = Query(None),
     order: str = Query("desc"),
+    target_user_id: str | None = Query(
+        None, description="切换查看的目标用户 id;空=当前登录人(仅经理‖超管可传他人)"
+    ),
 ) -> Page[PlanTaskResponse]:
-    """仅返回当前登录用户的任务计划。"""
+    """返回(目标)用户的任务计划。不传 target_user_id=当前登录人(兼容旧行为)。
+
+    切换用户时仅走 workbench ``_resolve_target_user`` 收口(超管‖经理且目标
+    ∈可见集),**禁用 data_scope**(其按 viewer 项目集过滤行,语义不符,design F5)。
+    """
+    target = await WorkbenchService(session)._resolve_target_user(user, target_user_id)
     req = PlanTaskPageReq(
         page=page,
         page_size=page_size,
-        user_id=user.id,
+        user_id=target.id,
         project_id=project_id,
         module_id=module_id,
         status=plan_status,
