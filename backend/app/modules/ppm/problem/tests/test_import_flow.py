@@ -20,6 +20,7 @@ fixture 全部用根 conftest (client/auth_headers/db_session/db_engine) + probl
 
 from __future__ import annotations
 
+import json
 import uuid
 from io import BytesIO
 
@@ -29,10 +30,15 @@ from openpyxl import Workbook
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.errors import AppError
+from app.modules.file.model import File
+from app.modules.file.service import FileService
 from app.modules.ppm.plan.model import PlanNodeModule, PsPlanNode, PsProjectPlan
 from app.modules.ppm.problem.model import PpmProblemList
 from app.modules.ppm.problem.service import ProblemService
 from app.modules.ppm.project.model import PpmProjectMaintenance, PpmProjectMember
+from app.modules.storage.base import ObjectStat, StorageBackend
+from app.modules.storage.factory import get_storage_backend
 
 # ---------------------------------------------------------------------------
 # xlsx 构造 (openpyxl 程序生成, 写 BytesIO 不落盘)
@@ -60,12 +66,22 @@ _HEADERS = [
 ]
 
 
-def _build_xlsx(rows: list[dict[str, object]]) -> bytes:
+def _build_xlsx(
+    rows: list[dict[str, object]],
+    *,
+    images_by_row: dict[int, list[bytes]] | None = None,
+) -> bytes:
     """按 {header: value} 字典列表构造单 Sheet xlsx bytes。
 
     表头写在第 1 行, 数据从第 2 行开始。dict 缺失的 header 默认 None。
     列顺序固定 = _HEADERS (列顺序容错由 test_importer.py 覆盖, 此处用标准序)。
+
+    ``images_by_row`` (task-06 附件用例):``{row_index: [png_bytes, ...]}`` →
+    每张图 ``ws.add_image(Image(BytesIO(png)), "{col}{row}")`` 锚到该行 (附件列
+    R/S/T...,importer 只读 anchor 行,任意列均可)。默认 None 不嵌图,向后兼容。
     """
+    from openpyxl.drawing.image import Image as XlImage
+
     wb = Workbook()
     ws = wb.active
     ws.title = "问题清单"
@@ -74,6 +90,13 @@ def _build_xlsx(rows: list[dict[str, object]]) -> bytes:
     for r_idx, row_dict in enumerate(rows, start=2):
         for c, h in enumerate(_HEADERS, start=1):
             ws.cell(row=r_idx, column=c, value=row_dict.get(h))
+    if images_by_row:
+        # 附件列从 R (col 18) 起,按图序右移 S/T...;importer 只读行,列字母仅便于阅读。
+        _col_letters = ["R", "S", "T", "U", "V", "W"]
+        for row_idx, pngs in images_by_row.items():
+            for i, png in enumerate(pngs):
+                col = _col_letters[i] if i < len(_col_letters) else f"R{i}"
+                ws.add_image(XlImage(BytesIO(png)), f"{col}{row_idx}")
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -210,6 +233,9 @@ def _preview_row_dict(
     valid: bool = True,
     error: str | None = None,
     row_index: int = 2,
+    # task-06 附件字段 (向后兼容:默认 0/False;现有 9 用例不传照常工作)
+    attachment_count: int = 0,
+    attachment_exceeded: bool = False,
 ) -> dict:
     """构造一个 ProblemImportPreviewRow dict (import-commit body.rows 元素)。
 
@@ -241,12 +267,124 @@ def _preview_row_dict(
         "audit_user_id": str(audit_user_id) if audit_user_id else None,
         "valid": valid,
         "error": error,
+        # 附件契约 (task-03/D-005):默认 0/False 向后兼容无附件路径
+        "attachment_count": attachment_count,
+        "attachment_exceeded": attachment_exceeded,
     }
 
 
 def _commit_body(rows: list[dict]) -> dict:
     """构造 ProblemImportCommitReq body。"""
     return {"rows": rows}
+
+
+def _xlsx_from_commit_rows(
+    rows: list[dict],
+    *,
+    images_by_row: dict[int, list[bytes]] | None = None,
+) -> bytes:
+    """按 commit rows 构造单 Sheet xlsx (import-commit multipart 的 file 部分, D-013)。
+
+    commit 端重解析原 Excel 按 ``row_index`` 取嵌入图片;默认无图场景仅需合法
+    xlsx 且数据行与 rows 对齐 (row_index 默认 2 = 表头行 1 之后的第 1 数据行)。
+    ``images_by_row`` 透传给 ``_build_xlsx`` 嵌图到对应行 (task-06 附件用例)。
+    """
+    excel_rows = [
+        {
+            "项目名称": r.get("project_name"),
+            "问题描述": r.get("pro_desc"),
+            "模块": r.get("module_name"),
+            "责任人": r.get("duty_user_name"),
+            "验证人": r.get("audit_user_name"),
+        }
+        for r in rows
+    ]
+    return _build_xlsx(excel_rows, images_by_row=images_by_row)
+
+
+def _commit_multipart(
+    rows: list[dict],
+    *,
+    images_by_row: dict[int, list[bytes]] | None = None,
+) -> dict:
+    """构造 import-commit multipart 请求 kwargs (``file`` + ``rows`` form, D-013)。
+
+    D-013 改造后 commit 收 multipart:``file`` = 原 Excel (重解析取图片 bytes) +
+    ``rows`` = ProblemImportCommitReq 的 JSON 串。返回 ``{"files": ..., "data": ...}``
+    供 ``client.post(url, headers=..., **_commit_multipart([...]))`` 展开。
+
+    ``images_by_row`` (task-06):嵌图到 xlsx 对应行,commit 端重解析取图片 bytes
+    透传 service.import_commit 逐图 upload_file。
+    """
+    xlsx = _xlsx_from_commit_rows(rows, images_by_row=images_by_row)
+    return {
+        "files": {"file": ("problems.xlsx", BytesIO(xlsx), "xlsx")},
+        "data": {"rows": json.dumps(_commit_body(rows))},
+    }
+
+
+# ---------------------------------------------------------------------------
+# PNG 生成 + 内存 MockStorage (task-06 附件上传用例, 不依赖真实 MinIO, NFR-4)
+# ---------------------------------------------------------------------------
+
+
+def _png_bytes(rgb: tuple[int, int, int] = (255, 0, 0)) -> bytes:
+    """生成最小 1×1 PNG bytes (Pillow 硬依赖 D-008;测试导入 PIL 安全)。"""
+    from PIL import Image as PILImage
+
+    buf = BytesIO()
+    PILImage.new("RGB", (1, 1), rgb).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+class _MockStorage(StorageBackend):
+    """内存存储后端 (对齐 file/tests/conftest.MockStorage 范式, NFR-4)。
+
+    record put 调用、回放 get 内容;不依赖真实 MinIO。用于附件上传集成测试
+    (case A 真实 upload_file 路径 → 验 File 表行 owner_type=problem_import)。
+    """
+
+    def __init__(self) -> None:
+        self.objects: dict[str, tuple[bytes, str]] = {}
+
+    async def put_object(self, key: str, data: bytes, content_type: str) -> None:
+        self.objects[key] = (data, content_type)
+
+    async def get_object_stream(self, key: str):
+        data, _ = self.objects[key]
+        yield data
+
+    async def delete_object(self, key: str) -> None:
+        self.objects.pop(key, None)
+
+    async def head_object(self, key: str) -> ObjectStat:
+        data, ctype = self.objects[key]
+        return ObjectStat(size=len(data), content_type=ctype)
+
+
+@pytest.fixture()
+async def mock_storage() -> _MockStorage:
+    """内存存储后端 (附件上传用例 D-009 真实路径)。"""
+    return _MockStorage()
+
+
+async def _attach_storage(client: AsyncClient, storage: _MockStorage) -> None:
+    """把 mock storage 注入 app.dependency_overrides (default client 不含 storage override)。
+
+    ``client`` fixture (根 conftest) 只覆盖 ``get_session``;import-commit / export-excel
+    端点另有 ``StorageDep`` 走默认 MinIO 兜底,测试需显式注入内存后端 (NFR-4)。
+    调用方应 ``try/finally`` 调 ``_detach_storage`` 还原避免污染后续用例。
+    """
+    from app.main import app
+
+    app.dependency_overrides[get_storage_backend] = lambda: storage
+
+
+def _detach_storage() -> None:
+    """还原 storage override (与 ``_attach_storage`` 配对)。"""
+    from app.main import app
+
+    app.dependency_overrides.pop(get_storage_backend, None)
 
 
 # ===========================================================================
@@ -398,22 +536,19 @@ async def test_import_commit_creates_problem(
     assert prev.status_code == 200, prev.text
     assert prev.json()["valid_count"] == 1
 
-    # commit (module_id 留空, commit 按原文 module_name 重查 — D-011)
+    # commit (module_id 留空, commit 按原文 module_name 重查 — D-011;D-013 multipart)
+    commit_row = _preview_row_dict(
+        project_name="项目甲",
+        pro_desc="登录按钮无响应",
+        module_name="登录模块",
+        duty_user_name="张三",
+        project_id=pid,
+        duty_user_id=duty_uid,
+    )
     resp = await client.post(
         "/api/ppm/problem-list/import-commit",
-        json=_commit_body(
-            [
-                _preview_row_dict(
-                    project_name="项目甲",
-                    pro_desc="登录按钮无响应",
-                    module_name="登录模块",
-                    duty_user_name="张三",
-                    project_id=pid,
-                    duty_user_id=duty_uid,
-                )
-            ]
-        ),
         headers=auth_headers,
+        **_commit_multipart([commit_row]),
     )
     assert resp.status_code == 200, resp.text
     result = resp.json()
@@ -469,7 +604,8 @@ async def test_import_commit_atomic_rollback_on_failure(
     with pytest.raises(RuntimeError, match="injected failure"):
         await client.post(
             "/api/ppm/problem-list/import-commit",
-            json=_commit_body(
+            headers=auth_headers,
+            **_commit_multipart(
                 [
                     _preview_row_dict(
                         project_name="项目甲",
@@ -478,7 +614,6 @@ async def test_import_commit_atomic_rollback_on_failure(
                     )
                 ]
             ),
-            headers=auth_headers,
         )
 
     # 核心验收:无脏数据 — PpmProblemList 未写入 (D-008 整体回滚)
@@ -511,7 +646,8 @@ async def test_import_commit_ignores_forged_project_id(
 
     resp = await client.post(
         "/api/ppm/problem-list/import-commit",
-        json=_commit_body(
+        headers=auth_headers,
+        **_commit_multipart(
             [
                 _preview_row_dict(
                     project_name="项目甲",  # 原文 → 重查得 P1
@@ -524,7 +660,6 @@ async def test_import_commit_ignores_forged_project_id(
                 )
             ]
         ),
-        headers=auth_headers,
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["created"] == 1
@@ -560,7 +695,8 @@ async def test_import_commit_data_scope_rejects_unauthorized_project(
 
     resp = await client.post(
         "/api/ppm/problem-list/import-commit",
-        json=_commit_body(
+        headers=user_headers,  # 普通用户
+        **_commit_multipart(
             [
                 _preview_row_dict(
                     project_name="项目甲",
@@ -569,7 +705,6 @@ async def test_import_commit_data_scope_rejects_unauthorized_project(
                 )
             ]
         ),
-        headers=user_headers,  # 普通用户
     )
     assert resp.status_code == 200, resp.text
     result = resp.json()
@@ -605,9 +740,210 @@ async def test_import_endpoints_require_auth(client: AsyncClient) -> None:
 
     resp_commit = await client.post(
         "/api/ppm/problem-list/import-commit",
-        json=_commit_body([_preview_row_dict(project_name="项目甲", pro_desc="x")]),
+        **_commit_multipart([_preview_row_dict(project_name="项目甲", pro_desc="x")]),
     )
     assert resp_commit.status_code == 401, resp_commit.text
+
+
+# ===========================================================================
+# 用例⑩ commit: 附件 ≤3 张 → file_urls 存 file_id + File 表行 (FR-04/D-004/D-009)
+# ===========================================================================
+
+
+async def test_import_commit_with_attachments_stores_file_ids(
+    client: AsyncClient,
+    auth_headers: dict,
+    db_session: AsyncSession,
+    db_engine: object,
+    mock_storage: _MockStorage,
+) -> None:
+    """≤3 张附件 commit 成功 → 落库 ``file_urls`` 含 3 个 file_id (UUID 串) +
+    File 表 3 行 (``owner_type=problem_import``, D-004 值=file_id / D-009 真实路径)。
+
+    D-009 逐图 best-effort 上传:router 注入 FileService(真实 upload_file 走 mock
+    storage),service.import_commit 入库 problem 后逐图 upload_file 存对象 + 落 File
+    行 + file_id 追加 ``file_urls``。3 张图全部成功 → 无 failed_rows。
+    """
+    pid = await _seed_project(db_session, name="项目甲")
+    await _seed_member(db_session, project_id=pid, user_name="张三")
+
+    pngs = [_png_bytes((255, 0, 0)), _png_bytes((0, 255, 0)), _png_bytes((0, 0, 255))]
+    commit_row = _preview_row_dict(
+        project_name="项目甲",
+        pro_desc="带附件的问题",
+        duty_user_name="张三",
+        project_id=pid,
+    )
+
+    # 注入内存 storage (import-commit 端点 StorageDep 走默认 MinIO 否则)
+    await _attach_storage(client, mock_storage)
+    try:
+        resp = await client.post(
+            "/api/ppm/problem-list/import-commit",
+            headers=auth_headers,
+            **_commit_multipart([commit_row], images_by_row={2: pngs}),
+        )
+    finally:
+        _detach_storage()
+
+    assert resp.status_code == 200, resp.text
+    result = resp.json()
+    assert result["created"] == 1
+    assert result["failed_rows"] == []
+
+    # 独立 session 查库:problem.file_urls 长度 3 + 元素 UUID 串 (D-004)
+    factory = _fresh_session_factory(db_engine)
+    async with factory() as s:
+        problems = list((await s.execute(select(PpmProblemList))).scalars().all())
+        file_rows = list(
+            (await s.execute(select(File).where(File.owner_type == "problem_import")))
+            .scalars()
+            .all()
+        )
+    assert len(problems) == 1
+    p = problems[0]
+    assert len(p.file_urls) == 3
+    # 元素均为合法 UUID 串 (file_id)
+    for fid in p.file_urls:
+        uuid.UUID(fid)  # 解析成功即合法
+    # File 表 3 行 owner_type=problem_import, owner_id 指向该 problem
+    assert len(file_rows) == 3
+    for fr in file_rows:
+        assert fr.owner_type == "problem_import"
+        assert fr.owner_id == p.id
+        assert fr.mime_type == "image/png"
+
+
+# ===========================================================================
+# 用例⑪ preview: 附件 4 张超额 → valid=false + error「附件超过3张」(D-005)
+# ===========================================================================
+
+
+async def test_import_preview_attachment_exceeded(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+) -> None:
+    """4 张附件图 → preview ``attachment_exceeded==True`` + ``valid==False`` +
+    error 含「附件超过3张」(D-005 ≤3 张超额标红)。
+
+    preview 不入库不调 storage,仅按 importer 提取的 images 数判定 >3 标红。
+    """
+    pid = await _seed_project(db_session, name="项目甲")
+    await _seed_member(db_session, project_id=pid, user_name="张三")
+
+    pngs = [_png_bytes((255, 0, 0)) for _ in range(4)]
+    xlsx = _build_xlsx(
+        [{"项目名称": "项目甲", "问题描述": "超额附件", "责任人": "张三"}],
+        images_by_row={2: pngs},
+    )
+    resp = await client.post(
+        "/api/ppm/problem-list/import-preview",
+        files={"file": ("problems.xlsx", BytesIO(xlsx), "xlsx")},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    row = resp.json()["rows"][0]
+    assert row["attachment_count"] == 4
+    assert row["attachment_exceeded"] is True
+    assert row["valid"] is False
+    assert "附件超过3张" in (row["error"] or "")
+
+
+# ===========================================================================
+# 用例⑫ commit: 单图失败 → failed_rows 不中断 + problem 不回滚 file_urls=[]
+#                           (D-009 best-effort / R-05)
+# ===========================================================================
+
+
+async def test_import_commit_single_image_failure_does_not_break_batch(
+    client: AsyncClient,
+    auth_headers: dict,
+    db_session: AsyncSession,
+    db_engine: object,
+    monkeypatch: pytest.MonkeyPatch,
+    mock_storage: _MockStorage,
+) -> None:
+    """单图 upload_file 抛 AppError → failed_rows 含该行诊断 + ``created==1``
+    (problem 已入库不回滚) + 落库 ``file_urls==[]`` (D-009 best-effort / R-05)。
+
+    monkeypatch ``FileService.upload_file`` 抛 AppError 模拟 upload_file 内部
+    validate_upload 拒绝 (格式/大小, D-009);附件非阻断,problem 仍 created。
+    """
+    pid = await _seed_project(db_session, name="项目甲")
+    await _seed_member(db_session, project_id=pid, user_name="张三")
+
+    async def _boom(*args, **kwargs):
+        raise AppError("injected upload failure", code="file_type_not_allowed", http_status=415)
+
+    monkeypatch.setattr(FileService, "upload_file", _boom)
+
+    png = _png_bytes()
+    commit_row = _preview_row_dict(
+        project_name="项目甲",
+        pro_desc="单图失败不中断",
+        duty_user_name="张三",
+        project_id=pid,
+    )
+    # 注入 storage (即使 upload_file 被 mock 替换,router 仍构造 FileService 需 backend)
+    await _attach_storage(client, mock_storage)
+    try:
+        resp = await client.post(
+            "/api/ppm/problem-list/import-commit",
+            headers=auth_headers,
+            **_commit_multipart([commit_row], images_by_row={2: [png]}),
+        )
+    finally:
+        _detach_storage()
+
+    assert resp.status_code == 200, resp.text
+    result = resp.json()
+    # problem 已入库 (附件失败不回滚 D-009)
+    assert result["created"] == 1
+    # failed_rows 含该行附件诊断 (单图失败计 failed_rows 不中断整批)
+    assert any("附件1上传失败" in msg for msg in result["failed_rows"])
+
+    # 独立 session 查库:problem 落库 + file_urls 空 (图上传失败, 无 file_id 追加)
+    factory = _fresh_session_factory(db_engine)
+    async with factory() as s:
+        problems = list((await s.execute(select(PpmProblemList))).scalars().all())
+    assert len(problems) == 1
+    assert problems[0].file_urls == []
+
+
+# ===========================================================================
+# 用例⑬ GET /import-template → 动态下拉模板 xlsx (D-002/D-007/D-012)
+# ===========================================================================
+
+
+async def test_import_template_returns_dynamic_xlsx(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+) -> None:
+    """GET ``/problem-list/import-template`` → 200 xlsx + 主表 18 列表头 +
+    隐藏 sheet ``_data`` 存在 + DataValidation 存在 (D-002/D-012 结构事实)。
+
+    端点权限走 get_current_principal (同导入预览/提交),需 auth_headers。
+    详细 DV 公式校验 (range vs inline) 在 test_template_export.py 覆盖。
+    """
+    from openpyxl import load_workbook
+
+    # seed 一些下拉源 (项目/成员/模块) 让模板非空 (验证可下载即可)
+    pid = await _seed_project(db_session, name="项目甲")
+    await _seed_member(db_session, project_id=pid, user_name="张三")
+    await _seed_module(db_session, project_id=pid, module_name="登录模块")
+
+    resp = await client.get("/api/ppm/problem-list/import-template", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    # excel_response 是 StreamingResponse,xlsx 字节在 resp.content
+    wb = load_workbook(BytesIO(resp.content))
+    # 主表「问题清单」18 列表头 (17 业务列 + 附件)
+    ws = wb["问题清单"]
+    headers = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
+    assert len(headers) == 18
+    assert headers[0] == "项目名称"
+    assert headers[-1] == "附件"
+    # 隐藏 sheet _data 存在 (DV 引用绕 255 字符限 R-03)
+    assert "_data" in wb.sheetnames
+    # DataValidation 存在 (下拉类型)
+    assert len(ws.data_validations.dataValidation) > 0
 
 
 if __name__ == "__main__":

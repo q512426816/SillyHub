@@ -1,6 +1,6 @@
 // task-11: import-problem-modal 单测 (问题清单 Excel 批量导入, 2026-07-24)。
 //
-// 覆盖三态切换 + 标红 + 提交回传:
+// 覆盖三态切换 + 标红 + 提交回传 + 附件超额 + 下载模板动态:
 //   用例1: step1 上传 → preview mock 返回含 valid=false 行 → 进入 step2
 //          且该行标红 (rowClassName bg-red-50) + error Tag 文案渲染
 //   用例2: step2 点「确认导入」→ importProblemsCommit 被调用
@@ -9,6 +9,11 @@
 //          + failed_rows 空不渲染失败列表 + 点「关闭」触发 onSuccess 一次
 //          (handleClose step3 触发 onSuccess 范式)。注:结果态「不可导入跳过」
 //          取 preview invalidCount,非 result.skipped (service 恒 0,QA P2)。
+//   用例A (task-10 / D-005 附件超额): preview 返回 attachment_exceeded=true 行
+//          → 附件列显计数 "4" + 行标红 (bg-red-50) + 状态列 Tag 「附件超过3张」
+//   用例B (task-10 / D-007 下载动态): step1 点「下载导入模板」→ downloadImportTemplate
+//          被调用一次 (走 GET /api/ppm/problem-list/import-template), 反向断言未
+//          注入静态 <a download> (旧 public/templates xlsx 已由 task-09 删除)
 //
 // 测试边界 (对齐 problem-detail-modal.test.tsx L14-18 的 vi.mock 纯渲染哲学):
 //   - jsdom 下 antd Modal/Dashboard 异步提交序列易脆, 此处全 mock API, 不触发真实网络。
@@ -17,7 +22,7 @@
 //   - 不测真实 API / 真实 Excel 解析 (importer 在后端 task-02 / service 在 task-05 已测)。
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 
 import { ImportProblemModal } from "@/components/ppm/problem/import-problem-modal";
 import type {
@@ -33,16 +38,21 @@ import type {
 vi.mock("@/lib/ppm/problem", () => ({
   importProblemsPreview: vi.fn(),
   importProblemsCommit: vi.fn(),
+  // task-10: modal step1 「下载导入模板」现走动态端点 downloadImportTemplate
+  // (D-007), 不再是静态 a.href; mock 之避免触发真实 downloadExcel。
+  downloadImportTemplate: vi.fn(),
 }));
 
 // vi.mock hoisted 后, 真实 import 拿到 mock 版本
 import {
   importProblemsPreview,
   importProblemsCommit,
+  downloadImportTemplate,
 } from "@/lib/ppm/problem";
 
 const previewMock = vi.mocked(importProblemsPreview);
 const commitMock = vi.mocked(importProblemsCommit);
+const downloadMock = vi.mocked(downloadImportTemplate);
 
 // ---------------------------------------------------------------------------
 // fixtures
@@ -74,6 +84,8 @@ function mkPreviewRow(
     pro_answer: over.pro_answer ?? null,
     is_delay_plan: over.is_delay_plan ?? null,
     remarks: over.remarks ?? null,
+    attachment_count: over.attachment_count ?? 0,
+    attachment_exceeded: over.attachment_exceeded ?? false,
     project_id: over.project_id ?? null,
     module_id: over.module_id ?? null,
     duty_user_id: over.duty_user_id ?? null,
@@ -131,6 +143,11 @@ describe("ImportProblemModal — 三态切换 + 标红 + 提交回传", () => {
   beforeEach(() => {
     previewMock.mockReset();
     commitMock.mockReset();
+    downloadMock.mockReset();
+    // modal 内以 `void downloadImportTemplate().catch(...)` 调用, 故 mock 必须返回
+    // Promise; vi.fn() 默认返回 undefined, 会让 .catch 触发 "Cannot read properties
+    // of undefined" 并污染 unhandled rejection。
+    downloadMock.mockResolvedValue(undefined);
   });
 
   it("用例1: step1 上传 → preview 含 valid=false 行 → 进入 step2 且该行标红 (bg-red-50) + error 文案", async () => {
@@ -210,13 +227,12 @@ describe("ImportProblemModal — 三态切换 + 标红 + 提交回传", () => {
     // 点「确认导入」
     fireEvent.click(commitBtn);
 
-    // commit 被调用一次, body.rows 仅含 valid 行 (D-011: 前端只回传 valid, commit 重算)
+    // commit 被调用一次, 签名 (file, rows) — rows 仅含 valid 行 + 原文件回传
+    // (D-013 multipart: file + rows; D-011: 前端只回传 valid, commit 重算)
     await waitFor(() => {
       expect(commitMock).toHaveBeenCalledTimes(1);
     });
-    expect(commitMock).toHaveBeenCalledWith({
-      rows: [validRow],
-    });
+    expect(commitMock).toHaveBeenCalledWith(expect.any(File), [validRow]);
 
     // 进入 step3: 导入完成文案出现
     await waitFor(() => {
@@ -285,5 +301,80 @@ describe("ImportProblemModal — 三态切换 + 标红 + 提交回传", () => {
       expect(onSuccess).toHaveBeenCalledTimes(1);
     });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("用例A (D-005 附件超额): preview 返回 attachment_exceeded 行 → 附件列显计数 + 行标红 + 状态列「附件超过3张」", async () => {
+    // 后端 D-005: attachment_exceeded ⇒ valid=false + error "附件超过3张"。
+    // 此处 valid/error 一并造齐, 与后端契约一致 (与用例1 普通 valid=false 行区分)。
+    previewMock.mockResolvedValue(
+      mkPreviewResp([
+        mkPreviewRow({
+          row_index: 1,
+          project_name: "项目甲",
+          pro_desc: "某问题",
+          valid: false,
+          attachment_count: 4,
+          attachment_exceeded: true,
+          error: "附件超过3张",
+        }),
+      ]),
+    );
+
+    render(
+      <ImportProblemModal
+        open={true}
+        onClose={() => undefined}
+        onSuccess={() => undefined}
+      />,
+    );
+
+    await fireUploadFile();
+
+    // 状态列 Tag 文案 "附件超过3张" 渲染 (同时证明已进入 step2 预览态)
+    const statusTag = await screen.findByText("附件超过3张");
+    expect(statusTag).toBeInTheDocument();
+
+    // 该行 <tr> 带 bg-red-50 (rowClassName: !valid || attachment_exceeded)
+    const tr = statusTag.closest("tr");
+    expect(tr).not.toBeNull();
+    expect(tr?.className).toContain("bg-red-50");
+
+    // 附件列单元格渲染计数 "4" (attachment_count>0 → String(v); 该行其它字段全
+    // null → 显 "—", 无 "4" 干扰, within(tr) 精确定位附件 td)。
+    expect(within(tr as HTMLElement).getByText("4")).toBeInTheDocument();
+  });
+
+  it("用例B (D-007 下载模板动态端点): step1 点「下载导入模板」→ downloadImportTemplate 调用一次 (非静态 a.href)", async () => {
+    render(
+      <ImportProblemModal
+        open={true}
+        onClose={() => undefined}
+        onSuccess={() => undefined}
+      />,
+    );
+
+    // step1 渲染: 下载按钮存在 (antd Button type="link" 渲染为 <button>, 非 <a>)
+    const downloadBtn = screen.getByRole("button", { name: /下载导入模板/ });
+    expect(downloadBtn).toBeInTheDocument();
+
+    // 反向断言: 渲染态无静态 xlsx 锚 (旧 public/templates/*.xlsx 已由 task-09 删,
+    // 动态端点不走 <a href download> 静态下载)。
+    expect(
+      document.querySelectorAll('a[href*=".xlsx"], a[href*="template"]'),
+    ).toHaveLength(0);
+
+    // 点击 → 走动态端点 GET /api/ppm/problem-list/import-template
+    fireEvent.click(downloadBtn);
+
+    await waitFor(() => {
+      expect(downloadMock).toHaveBeenCalledTimes(1);
+    });
+    // 无参数调用 (端点无 body, downloadImportTemplate() 签名)
+    expect(downloadMock).toHaveBeenCalledWith();
+
+    // 点击后仍未注入静态 <a href/*.xlsx|template/> (确保非 a.href + click 静态路径)
+    expect(
+      document.querySelectorAll('a[href*=".xlsx"], a[href*="template"]'),
+    ).toHaveLength(0);
   });
 });

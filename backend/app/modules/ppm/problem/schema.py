@@ -314,6 +314,12 @@ class ProblemImportPreviewRow(PydanticModel):
     audit_user_id: uuid.UUID | None = None
     valid: bool  # 是否可导入(必填/反查未匹配→False,D-004/D-009)
     error: str | None = None  # 不可导入原因
+    # 附件图片数(task-03/D-005):service 统计该行附件图片数量填入,
+    # 默认 0 兼容无附件路径(原导入行序列化不破)。
+    attachment_count: int = 0
+    # 是否超过 3 张(task-03/D-005):>3 张超额标红,前端预览高亮。
+    # 默认 False;判断逻辑在 service.import_preview(task-04),schema 只承载契约。
+    attachment_exceeded: bool = False
 
 
 class ProblemImportPreviewResp(PydanticModel):

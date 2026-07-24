@@ -24,13 +24,47 @@ openpyxl 是纯 CPU 同步库会阻塞事件循环；service 层应用
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from io import BytesIO
 
 from openpyxl import load_workbook
 from openpyxl.utils.datetime import from_excel
 from openpyxl.worksheet.worksheet import Worksheet
+
+# 图片格式名 → MIME 映射（与 file 模块 validate_upload 白名单对齐：
+# image/png/jpeg/gif/webp 为 file 模块支持类型；其余扩展名也尽力映射，最终由
+# service 层 import_commit 的 upload_file.validate_upload 裁决，未识别 →
+# application/octet-stream，task-04 单图失败计 failed_rows 不中断整批）。
+_FORMAT_TO_MIME: dict[str, str] = {
+    "png": "image/png",
+    "jpeg": "image/jpeg",
+    "jpg": "image/jpeg",
+    "gif": "image/gif",
+    "webp": "image/webp",
+    "bmp": "image/bmp",
+    "tiff": "image/tiff",
+    "tif": "image/tiff",
+}
+
+
+@dataclass(slots=True)
+class ImageExtracted:
+    """单张 Excel 嵌入图片的提取结果（中间结构，非 DTO）。
+
+    依据 design §7 / D-001：``data`` 为图片二进制（openpyxl ``image._data()``
+    返回的 bytes）；``mime_type`` 由 ``image.format``/扩展名映射得到（如
+    ``image/png``）；``anchor_row`` 为 1-based 原始 Excel 行号，与
+    ``ParsedProblemRow.row_index`` 同基准——openpyxl ``image.anchor._from.row``
+    是 0-based，故需 +1 对齐；跨行图（OneCellAnchor/TwoCellAnchor）统一归
+    ``_from.row`` 起始行（不读 ``_to.row``）。
+
+    不做大小/格式/数量校验（task-04 commit 时 upload_file.validate_upload 负责）。
+    """
+
+    data: bytes
+    mime_type: str
+    anchor_row: int
 
 
 @dataclass(slots=True)
@@ -43,6 +77,10 @@ class ParsedProblemRow:
     为 ``date``（``date``→``datetime`` 转换由 service 层完成，D-010）。
     ``module_name`` 原文保留；``module_name``→ORM ``model_name`` 映射是 service
     层的事（D-012）。``pro_type``（bug/change/其他）原样保留。
+
+    ``images``：该行锚点对应的嵌入图片列表（design §5.1 / D-001）；按
+    ``anchor_row`` 匹配 ``row_index`` 挂载，无图行默认空列表，≤3 校验由 task-04
+    负责。
     """
 
     project_name: str | None
@@ -63,6 +101,9 @@ class ParsedProblemRow:
     is_delay_plan: str | None
     remarks: str | None
     row_index: int
+    # 带默认值字段必须放无默认值字段之后（slots=True 同此规则）；末位追加不动既有
+    # 17 业务字段 + row_index 顺序，零回归。
+    images: list[ImageExtracted] = field(default_factory=list)
 
 
 # 表头查找窗口：模板表头一般在第 1 行，留一点容错余量（允许前面有标题/说明行）。
@@ -243,11 +284,11 @@ def _build_column_map(ws: Worksheet, header_row: int) -> dict[str, int]:
             text_to_col[label] = c
 
     colmap: dict[str, int] = {}
-    for field, aliases in _FIELD_ALIASES.items():
+    for field_name, aliases in _FIELD_ALIASES.items():
         for alias in aliases:
             col = text_to_col.get(alias)
             if col is not None:
-                colmap[field] = col
+                colmap[field_name] = col
                 break
     return colmap
 
@@ -270,6 +311,60 @@ def _normalize_yes_no(value: object) -> str | None:
     return None
 
 
+def _infer_mime_type(image: object) -> str:
+    """从 openpyxl Image 的 ``format``/``path`` 推断 MIME 类型。
+
+    ``image.format`` 形如 ``"png"``（openpyxl 读取时通常小写）；为空时退回
+    ``image.path``（如 ``/xl/media/image1.png``）的扩展名。未命中映射 →
+    ``application/octet-stream``，交 service 层 ``upload_file.validate_upload``
+    拒绝（task-04，白名单 image/png/jpeg/gif/webp）。
+    """
+    fmt = str(getattr(image, "format", None) or "").lower()
+    if fmt in _FORMAT_TO_MIME:
+        return _FORMAT_TO_MIME[fmt]
+    path = str(getattr(image, "path", None) or "")
+    ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+    return _FORMAT_TO_MIME.get(ext, "application/octet-stream")
+
+
+def _extract_row_images(ws: Worksheet) -> dict[int, list[ImageExtracted]]:
+    """提取 Sheet 内所有嵌入图片，按 1-based 锚点行号分桶返回。
+
+    依据 design §5.1 / D-001 / R-01：遍历 ``ws._images``（openpyxl 私有属性，
+    task-01 spike 已验 PIL 可用）。每张图读 ``image.anchor._from.row``——该值
+    0-based，故 ``+1`` 对齐 1-based ``row_index``；跨行图（OneCellAnchor/
+    TwoCellAnchor）统一归 ``_from.row`` 起始行（不读 ``_to.row``）。二进制走
+    ``image._data()``，MIME 走 ``_infer_mime_type``。
+
+    每图 try/except 兜底（R-05 思想类同：单图解析失败不拖垮整 Sheet）；无
+    ``_from`` 锚点（如 AbsoluteAnchor）或读取异常的图丢弃，不抛出。
+
+    Returns:
+        ``{1-based 行号: [该行锚点的图片 Extracted...]}``；空工作簿/无图 → ``{}``。
+    """
+    buckets: dict[int, list[ImageExtracted]] = {}
+    # ws._images 是 openpyxl 私有属性；空工作簿/非图 Sheet 可能不存在，getattr 兜底。
+    images = getattr(ws, "_images", None) or ()
+    for img in images:
+        try:
+            anchor = img.anchor
+            marker = getattr(anchor, "_from", None)
+            if marker is None:
+                # AbsoluteAnchor 等无 _from 锚点（浮动绝对定位）无法关联数据行 → 丢弃。
+                continue
+            # openpyxl anchor._from.row 为 0-based，+1 对齐 1-based 原始行号。
+            anchor_row = int(marker.row) + 1
+            data = bytes(img._data())
+            mime_type = _infer_mime_type(img)
+        except (AttributeError, ValueError, TypeError, OSError):
+            # 单图解析失败不中断整 Sheet：跳过该图（不挂相邻行避免错配）。
+            continue
+        buckets.setdefault(anchor_row, []).append(
+            ImageExtracted(data=data, mime_type=mime_type, anchor_row=anchor_row)
+        )
+    return buckets
+
+
 def _parse_sheet(ws: Worksheet) -> list[ParsedProblemRow]:
     """解析单个 Sheet → ``ParsedProblemRow`` 列表。
 
@@ -282,6 +377,8 @@ def _parse_sheet(ws: Worksheet) -> list[ParsedProblemRow]:
         return []
 
     merged = _build_merged_index(ws)
+    # 嵌入图片按 1-based 锚点行分桶，下面按 row_index 挂载到对应数据行。
+    row_images = _extract_row_images(ws)
 
     col_project = colmap["project_name"]
     col_module = colmap.get("module_name")
@@ -374,6 +471,9 @@ def _parse_sheet(ws: Worksheet) -> list[ParsedProblemRow]:
                 is_delay_plan=is_delay_plan,
                 remarks=remarks,
                 row_index=r,
+                # 按锚点行（1-based）挂载该行嵌图；无图行为空列表（零回归）。
+                # 锚点落表头/空行/无对应数据行的图不挂相邻行（row_images 里没该 key）。
+                images=row_images.get(r, []),
             )
         )
 
@@ -408,6 +508,7 @@ def parse_problem_workbook(file_bytes: bytes) -> list[ParsedProblemRow]:
 
 
 __all__ = [
+    "ImageExtracted",
     "ParsedProblemRow",
     "parse_problem_workbook",
 ]

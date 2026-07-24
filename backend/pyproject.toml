@@ -21,6 +21,8 @@ dependencies = [
   "httpx>=0.27",
   "python-frontmatter>=1.1",
   "openpyxl>=3.1",
+  # openpyxl 图像读写必需（ws._images 读 + add_image 写），D-008 / grill B-001 P0。
+  "Pillow>=10",
   "python-multipart>=0.0.9",
   "psutil>=5.9",
   # 平台文件中心：S3 兼容对象存储异步客户端（spike-01 实测与现有异步栈无冲突）。

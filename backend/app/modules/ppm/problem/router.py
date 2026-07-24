@@ -22,16 +22,22 @@ from datetime import datetime
 from typing import Annotated, Any
 
 import anyio
-from fastapi import APIRouter, Depends, File, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_principal
+from app.core.config import Settings, get_settings
 from app.core.db import get_session
+from app.core.logging import get_logger
 from app.modules.auth.model import User
+from app.modules.file.service import FileService
 from app.modules.ppm.common.crud import Page, PageReq
+from app.modules.ppm.common.data_scope import is_super_admin, manager_project_ids
 from app.modules.ppm.common.export import ColumnDef
 from app.modules.ppm.common.upload import validate_xlsx_upload
+from app.modules.ppm.plan.model import PlanNodeModule
+from app.modules.ppm.problem.importer import ImageExtracted, parse_problem_workbook
 from app.modules.ppm.problem.schema import (
     ChangeNextProcessReq,
     ChangeRejectProcessReq,
@@ -53,13 +59,22 @@ from app.modules.ppm.problem.service import (
     ProblemService,
     _safe_uuid,
 )
+from app.modules.ppm.project.model import PpmProjectMaintenance, PpmProjectMember
 from app.modules.ppm.task.model import TaskExecute
 from app.modules.ppm.task.schema import TaskExecuteResponse
+from app.modules.storage.base import StorageBackend
+from app.modules.storage.factory import get_storage_backend
 
 router = APIRouter(tags=["ppm-problem"])
 
+log = get_logger(__name__)
+
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 AuthUser = Annotated[User, Depends(get_current_principal)]
+# storage/settings 注入 (task-05:导出嵌图 get_stream + commit 逐图 upload 需 FileService,
+# 装配方式对齐 file/router.py 的 _make_service)。
+StorageDep = Annotated[StorageBackend, Depends(get_storage_backend)]
+SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 
 def _req(
@@ -171,30 +186,124 @@ async def list_problems(
     return Page.build(items=items, total=page.total, req=req)
 
 
-# export-excel 必须前置于 /{item_id} 参数化路由,否则 FastAPI 按注册顺序
-# 把 "export-excel" 当 item_id 解析为 UUID 失败返回 422 (同 ql-020)。
-_PROBLEM_COLUMNS = [
+# export-excel / import-template 必须前置于 /{item_id} 参数化路由,否则 FastAPI
+# 按注册顺序把 "export-excel" / "import-template" 当 item_id 解析为 UUID 失败返回
+# 422 (同 ql-020)。
+
+
+def _fmt_yesno(value: Any) -> Any:
+    """``is_urgent`` / ``is_delay_plan`` 导出友好化:``"1"`` → ``"是"``、``"0"`` → ``"否"``。
+
+    存储值为 ``"1"``/``"0"`` (importer 规范化结果);导出展示为「是/否」更可读,
+    再导入时 importer._normalize_yes_no 仍能识别 (D-003 往返)。
+    """
+    if value == "1":
+        return "是"
+    if value == "0":
+        return "否"
+    return value
+
+
+# 18 列布局 = 17 业务列 + 末列「附件」(D-003/D-010)。17 业务列顺序对齐
+# importer.py _FIELD_ALIASES 表头主名 + task-04 list_problems_for_export 返回键,
+# 使「模板填写 → 导入 → 导出」可往返 (D-003)。模板/导出共用本列定义。
+_PROBLEM_EXPORT_COLUMNS = [
     ColumnDef(field="project_name", header="项目名称", width=24),
+    ColumnDef(field="module_name", header="模块", width=16),
     ColumnDef(field="pro_desc", header="问题描述", width=40),
-    ColumnDef(field="pro_type", header="问题类型", width=12),
-    ColumnDef(field="status", header="状态", width=10),
-    ColumnDef(field="duty_user_name", header="责任人", width=16),
-    ColumnDef(field="find_time", header="发现时间", width=20),
+    ColumnDef(field="pro_type", header="问题类型", width=10),
+    ColumnDef(field="is_urgent", header="是否紧急", width=10, formatter=_fmt_yesno),
+    ColumnDef(field="func_name", header="功能名称", width=16),
+    ColumnDef(field="duty_user_name", header="责任人", width=14),
+    ColumnDef(field="find_by", header="发现人", width=14),
+    ColumnDef(field="find_time", header="发现时间", width=18),
+    ColumnDef(field="plan_start_time", header="计划开始时间", width=18),
+    ColumnDef(field="plan_end_time", header="计划结束时间", width=18),
+    ColumnDef(field="audit_user_name", header="验证人", width=14),
+    ColumnDef(field="work_load", header="工作量", width=10),
+    ColumnDef(field="work_type", header="工作类型", width=12),
+    ColumnDef(field="pro_answer", header="解决方案", width=30),
+    ColumnDef(field="is_delay_plan", header="是否延期", width=10, formatter=_fmt_yesno),
+    ColumnDef(field="remarks", header="备注", width=24),
 ]
+# 末列附件表头 (导出嵌图 / 模板留空给用户插图);列定义不用 ColumnDef 因其取值非
+# 行字典字段而是内存图片 bytes,需 add_image 特殊处理。
+_ATTACHMENT_HEADER = "附件"
+# 固定枚举下拉值 (D-002):与前端 PROBLEM_TYPE_TEXT / WORK_TYPE_OPTIONS 对齐;
+# is_urgent / is_delay_plan 用「是/否」(importer._normalize_yes_no 自动转 "1"/"0")。
+_PRO_TYPE_OPTIONS = ["bug", "change"]
+_WORK_TYPE_OPTIONS = ["前端", "后端", "业务"]
+_YESNO_OPTIONS = ["是", "否"]
+# 隐藏数据 sheet 名 (DV 引用绕 255 字符限, R-03);名称仅字母数字下划线无需引号包裹。
+_TEMPLATE_DATA_SHEET = "_data"
+# DV 下拉覆盖的最大行数 (模板留足填写空间;超出仍可填,只是不校验下拉)。
+_TEMPLATE_DV_MAX_ROW = 500
+
+
+@router.get("/problem-list/import-template")
+async def download_import_template(
+    session: SessionDep,
+    user: AuthUser,
+) -> Any:
+    """下载动态下拉导入模板 (FR-01/D-002/D-007/D-012)。
+
+    按 data_scope 收敛项目/成员 (超管全部,否则经理项目集),模块全部平铺 (DV 列级
+    静态不支持按项目级联, D-012);固定枚举取前端同款。openpyxl 同步构造丢线程池
+    (R-03):主表 18 列表头 + 隐藏 sheet ``_data`` 分列存 project/member/module/枚举
+    + 主表 DataValidation type=list 引用隐藏 sheet 列 (绕 255 字符限, R-03) / 固定
+    inline list。
+    """
+    projects, members, modules = await _collect_template_options(session, user)
+    filename = "问题清单导入模板.xlsx"
+    return await anyio.to_thread.run_sync(
+        lambda: _build_template_response(projects, members, modules, filename)
+    )
 
 
 @router.get("/problem-list/export-excel")
 async def export_problems(
     session: SessionDep,
     user: AuthUser,
+    storage: StorageDep,
+    settings: SettingsDep,
 ) -> Any:
-    """导出问题清单为 Excel (X-002)。"""
+    """导出问题清单为 Excel (18 列对齐导入 + 附件嵌图片, D-003/D-006/D-011/R-07)。
+
+    拆两段 (跨 async/sync 边界, D-011):
+    ① async 段:调 ``list_problems_for_export`` 取 18 列 + 对每行 ``file_urls`` 的
+      file_id 调 ``FileService.get_stream`` 收图 bytes 到内存 (``get_stream`` 返回
+      ``AsyncIterator``, 不能在 sync 段 await);
+    ② sync 段 (``anyio.to_thread.run_sync``):openpyxl 构造 workbook (18 列表头 +
+      数据行 + 附件列对每行 images ``add_image`` 锚到该行单元格)。
+    单图取流失败 (缺失/已删/底层存储瞬时错误,含非 AppError) 跳过不阻断导出
+    (best-effort, 对齐 D-009 口径;P2 捕获面扩到 Exception)。
+    """
     rows = await ProblemService(session).list_problems_for_export(user=user)
-    columns = _PROBLEM_COLUMNS
+    # ① async 段:逐行 file_urls → get_stream 收图 bytes
+    file_svc = FileService(session, storage, settings)
+    for row in rows:
+        images: list[bytes] = []
+        for fid in row.get("file_urls") or []:
+            try:
+                fid_uuid = uuid.UUID(str(fid))
+            except (ValueError, AttributeError, TypeError):
+                continue  # 非 UUID 脏值跳过
+            try:
+                _meta, stream = await file_svc.get_stream(fid_uuid)
+                images.append(b"".join([chunk async for chunk in stream]))
+            except Exception as exc:  # P2:扩到 Exception,MinIO get_object_stream 连接/超时不阻断
+                # 单图缺失/已删/底层存储瞬时错误均跳过,不阻断整表导出 (best-effort,
+                # 对齐 D-009 口径);记 warning 便于排查导出缺图。
+                log.warning(
+                    "problem_export_image_stream_failed",
+                    file_id=str(fid_uuid),
+                    error=str(exc),
+                )
+                continue
+        row["images"] = images
     filename = f"问题清单_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
-    return await anyio.to_thread.run_sync(
-        lambda: _build_excel_response(columns, rows, "问题清单", filename=filename)
-    )
+    # ② sync 段:openpyxl 构造 + 嵌图
+    return await anyio.to_thread.run_sync(lambda: _build_export_with_images(rows, filename))
 
 
 # ---------- 问题清单 Excel 批量导入 (两阶段:预览 → 提交, D-001@v1) ----------
@@ -229,17 +338,38 @@ async def import_problems_preview(
     response_model=ProblemImportResultResp,
 )
 async def import_problems_commit(
-    body: ProblemImportCommitReq,
     session: SessionDep,
     user: AuthUser,
+    storage: StorageDep,
+    settings: SettingsDep,
+    file: UploadFile = File(
+        ..., description="preview 阶段同一个 Excel 文件 (重传以取嵌入图片 bytes)"
+    ),
+    rows: str = Form(..., description="ProblemImportCommitReq 的 JSON 串 (勾选回传的预览行)"),
 ) -> ProblemImportResultResp:
-    """问题清单导入提交 (task-04 / design §7)。
+    """问题清单导入提交 (task-05 / design §7 / D-013)。
 
-    按 preview 返回的行原子入库;service 不信任前端 UUID,按原文重新反查
-    + data_scope 校验 (D-011),单次事务提交 (D-008)。router 不二次包装,
-    直接回传 service 产出的 ``ProblemImportResultResp``。
+    **multipart 改造 (D-013)**:preview → commit 是 JSON 往返,图片二进制带不过去;
+    故 commit 端收 ``file`` (原 Excel, 同 preview 那份) + ``rows`` (JSON 串, 勾选
+    的预览行)。router 重新解析 ``file`` 取 ``parsed_rows`` (含 images),按
+    ``row_index`` 建 ``images_by_row`` 映射,装配 ``FileService`` 一并传入 service。
+
+    service 不信任前端 UUID,按原文重新反查 + data_scope 校验 (D-011),单次事务提交
+    (D-008);逐图上传存 file_id (task-04/D-004/D-009, 单图失败 failed_rows 不中断)。
+    router 不二次包装,直接回传 service 产出的 ``ProblemImportResultResp``。
     """
-    return await ProblemService(session).import_commit(body, user=user)
+    file_bytes = await file.read()
+    validate_xlsx_upload(file, file_bytes)
+    # 重解析原 Excel 取嵌入图片 (D-013: JSON 往返丢 bytes, 必须从原文件重取)
+    parsed_rows = await anyio.to_thread.run_sync(parse_problem_workbook, file_bytes)
+    images_by_row: dict[int, list[ImageExtracted]] = {
+        r.row_index: list(r.images) for r in parsed_rows if r.images
+    }
+    req = ProblemImportCommitReq.model_validate_json(rows)
+    file_svc = FileService(session, storage, settings)
+    return await ProblemService(session).import_commit(
+        req, user=user, file_service=file_svc, images_by_row=images_by_row
+    )
 
 
 @router.post(
@@ -544,6 +674,229 @@ def _build_excel_response(
 
     content = rows_to_workbook(columns, rows, sheet_name=sheet_name)
     return excel_response(content, filename=filename)
+
+
+# ---------------------------------------------------------------------------
+# 动态下拉模板 + 嵌图导出辅助 (task-05 / D-002/D-003/D-006/D-011/D-012)
+# ---------------------------------------------------------------------------
+
+
+async def _collect_all_module_names(session: AsyncSession) -> list[str]:
+    """全部模块名去重平铺 (D-012) — 不按项目级联,模板模块列引用全集。
+
+    直接 ``select distinct module_name`` (不走 plan 关联链);模板只供用户选填,
+    service 会在 preview/commit 阶段重查校验模块是否属该项目。
+    """
+    stmt = (
+        select(PlanNodeModule.module_name).where(PlanNodeModule.module_name.is_not(None)).distinct()
+    )
+    return sorted(
+        {str(n).strip() for (n,) in (await session.execute(stmt)).all() if n and str(n).strip()}
+    )
+
+
+async def _collect_template_options(
+    session: AsyncSession, user: User
+) -> tuple[list[str], list[str], list[str]]:
+    """收集动态下拉模板数据 (D-002/D-007/D-012)。
+
+    返回 ``(项目名, 成员姓名, 模块名)`` 三列:
+    - 项目/成员按 data_scope 收敛 (超管全部, 否则经理项目集 ``manager_project_ids``),
+      防越权下载到他人项目名/成员;
+    - 模块**全部平铺** (D-012: DV 列级静态不支持按项目级联);用户在项目列先选项目,
+      模块列从全集选,service 重查阶段校验模块是否属该项目。
+    三列各自去空白、去重、升序。非超管且非经理 → 项目/成员空,仅返回全部模块。
+    """
+    admin = await is_super_admin(session, user)
+    pids: set[uuid.UUID] = set() if admin else await manager_project_ids(session, user)
+    if not admin and not pids:
+        # 无可见项目/成员 (普通用户非任何项目经理) → 仅模块 (模块不涉权限)
+        return [], [], await _collect_all_module_names(session)
+
+    proj_stmt = select(PpmProjectMaintenance.project_name).where(
+        PpmProjectMaintenance.project_name.is_not(None)
+    )
+    mem_stmt = select(PpmProjectMember.user_name).where(PpmProjectMember.user_name.is_not(None))
+    if not admin:
+        proj_stmt = proj_stmt.where(PpmProjectMaintenance.id.in_(pids))
+        mem_stmt = mem_stmt.where(PpmProjectMember.pm_project_id.in_(pids))
+
+    projects = sorted(
+        {
+            str(n).strip()
+            for (n,) in (await session.execute(proj_stmt)).all()
+            if n and str(n).strip()
+        }
+    )
+    members = sorted(
+        {str(n).strip() for (n,) in (await session.execute(mem_stmt)).all() if n and str(n).strip()}
+    )
+    modules = await _collect_all_module_names(session)
+    return projects, members, modules
+
+
+def _write_data_column(ws: Any, col_idx: int, values: list[str]) -> None:
+    """把 values 写入隐藏 sheet 第 col_idx 列 (从第 1 行起)。
+
+    空列表写一个空串占位,避免 DV 引用整列空区间触发 Excel 修复提示。
+    """
+    items = values if values else [""]
+    for r, v in enumerate(items, start=1):
+        ws.cell(row=r, column=col_idx, value=v)
+
+
+def _dv_range(col: str) -> str:
+    """构造某列数据行的 DV 应用区间 (``{col}2:{col}{max}``)。
+
+    DV 需同列闭合区间 (``A2:A500``),非 ``A2:500``。覆盖到 ``_TEMPLATE_DV_MAX_ROW``
+    行;用户填超过该行不校验下拉,但不阻断填写。
+    """
+    return f"{col}2:{col}{_TEMPLATE_DV_MAX_ROW}"
+
+
+def _add_range_dv(ws: Any, cell_range: str, sheet_ref: str) -> None:
+    """添加跨 sheet 区域引用的 list DV (绕 255 字符限, R-03)。
+
+    ``sheet_ref`` 形如 ``_data!$A:$A`` (不加前导 ``=``,Excel XML 原样写入)。
+    """
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    dv = DataValidation(type="list", formula1=sheet_ref, allow_blank=True, showErrorMessage=False)
+    dv.add(cell_range)
+    ws.add_data_validation(dv)
+
+
+def _add_inline_dv(ws: Any, cell_range: str, options: list[str]) -> None:
+    """添加固定 inline list DV (选项少时用;formula1 双引号包裹逗号串)。"""
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    # inline list: "a,b,c";选项内不得含逗号 (会切分)。本枚举均为单词/中文,安全。
+    dv = DataValidation(
+        type="list",
+        formula1='"' + ",".join(options) + '"',
+        allow_blank=True,
+        showErrorMessage=False,
+    )
+    dv.add(cell_range)
+    ws.add_data_validation(dv)
+
+
+def _style_header_cell(cell: Any) -> None:
+    """统一 18 列表头样式 (与 common.export rows_to_workbook 同款深蓝底白字)。"""
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    cell.font = Font(bold=True, color="FFFFFF")
+    cell.fill = PatternFill(start_color="305496", end_color="305496", fill_type="solid")
+    cell.alignment = Alignment(horizontal="center", vertical="center")
+
+
+def _build_template_response(
+    projects: list[str],
+    members: list[str],
+    modules: list[str],
+    filename: str,
+) -> Any:
+    """线程池内构造动态下拉导入模板 xlsx (D-002/D-007/D-012/R-03)。
+
+    结构:主表「问题清单」18 列表头 (17 业务列 + 附件列) + 隐藏 sheet ``_data``
+    (A=项目 / B=成员 / C=模块) + 主表 DataValidation:
+      - 项目名称(A) / 责任人(G) / 验证人(L) 引用隐藏 sheet 区域 (绕 255 字符限);
+      - 模块(B) 引用隐藏 sheet 模块列 (全集平铺, D-012);
+      - 问题类型(D) / 工作类型(N) / 是否紧急(E) / 是否延期(P) 用 inline list。
+    """
+    from openpyxl import Workbook
+    from openpyxl.utils import get_column_letter
+
+    from app.modules.ppm.common.export import excel_response
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "问题清单"
+
+    for idx, col in enumerate(_PROBLEM_EXPORT_COLUMNS, start=1):
+        cell = ws.cell(row=1, column=idx, value=col.header)
+        _style_header_cell(cell)
+        if col.width is not None:
+            ws.column_dimensions[get_column_letter(idx)].width = col.width
+    attach_idx = len(_PROBLEM_EXPORT_COLUMNS) + 1
+    _style_header_cell(ws.cell(row=1, column=attach_idx, value=_ATTACHMENT_HEADER))
+    ws.column_dimensions[get_column_letter(attach_idx)].width = 30
+    ws.freeze_panes = "A2"
+
+    # 隐藏 sheet _data:A=项目 B=成员 C=模块 (枚举走 inline list 无需列存)
+    data_ws = wb.create_sheet(_TEMPLATE_DATA_SHEET)
+    _write_data_column(data_ws, 1, projects)
+    _write_data_column(data_ws, 2, members)
+    _write_data_column(data_ws, 3, modules)
+    data_ws.sheet_state = "hidden"
+
+    # 列字母与 _PROBLEM_EXPORT_COLUMNS 顺序对齐:A 项目/B 模块/D 类型/E 紧急/
+    # G 责任人/L 验证人/N 工作类型/P 延期。DV 覆盖第 2..N 数据行 (逐列同列闭合区间)。
+    _add_range_dv(ws, _dv_range("A"), f"{_TEMPLATE_DATA_SHEET}!$A:$A")  # 项目名称
+    _add_range_dv(ws, _dv_range("B"), f"{_TEMPLATE_DATA_SHEET}!$C:$C")  # 模块
+    _add_range_dv(ws, _dv_range("G"), f"{_TEMPLATE_DATA_SHEET}!$B:$B")  # 责任人
+    _add_range_dv(ws, _dv_range("L"), f"{_TEMPLATE_DATA_SHEET}!$B:$B")  # 验证人
+    _add_inline_dv(ws, _dv_range("D"), _PRO_TYPE_OPTIONS)  # 问题类型
+    _add_inline_dv(ws, _dv_range("E"), _YESNO_OPTIONS)  # 是否紧急
+    _add_inline_dv(ws, _dv_range("N"), _WORK_TYPE_OPTIONS)  # 工作类型
+    _add_inline_dv(ws, _dv_range("P"), _YESNO_OPTIONS)  # 是否延期
+
+    from io import BytesIO
+
+    buf = BytesIO()
+    wb.save(buf)
+    return excel_response(buf.getvalue(), filename=filename)
+
+
+def _build_export_with_images(rows: list[dict[str, Any]], filename: str) -> Any:
+    """线程池内构造 18 列嵌图导出 xlsx (D-003/D-006/D-011/R-07)。
+
+    17 业务列 (复用 ``ColumnDef.extract``) + 末列「附件」对每行 ``images`` 逐张
+    ``ws.add_image(Image(BytesIO(bytes)), anchor=单元格)`` 锚到该行附件列 (嵌图
+    非链接, D-006)。单图 add_image 异常 (Pillow 识别失败/流损坏等) 跳过不阻断导出
+    (D-009 best-effort 口径)。Image 在函数内 import 避免模块顶层强依赖 Pillow。
+    """
+    from io import BytesIO
+
+    from openpyxl import Workbook
+    from openpyxl.drawing.image import Image
+    from openpyxl.utils import get_column_letter
+
+    from app.modules.ppm.common.export import excel_response
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "问题清单"
+
+    columns = _PROBLEM_EXPORT_COLUMNS
+    n_business = len(columns)
+    attach_idx = n_business + 1
+    attach_col_letter = get_column_letter(attach_idx)
+
+    for idx, col in enumerate(columns, start=1):
+        cell = ws.cell(row=1, column=idx, value=col.header)
+        _style_header_cell(cell)
+        if col.width is not None:
+            ws.column_dimensions[get_column_letter(idx)].width = col.width
+    _style_header_cell(ws.cell(row=1, column=attach_idx, value=_ATTACHMENT_HEADER))
+    ws.column_dimensions[attach_col_letter].width = 30
+    ws.freeze_panes = "A2"
+
+    for r_idx, row in enumerate(rows, start=2):
+        for c_idx, col in enumerate(columns, start=1):
+            ws.cell(row=r_idx, column=c_idx, value=col.extract(row))
+        for img_bytes in row.get("images") or []:
+            try:
+                img = Image(BytesIO(img_bytes))
+                img.anchor = f"{attach_col_letter}{r_idx}"
+                ws.add_image(img)
+            except Exception:
+                # 单图损坏/不可识别跳过 (D-009 best-effort);不阻断整表导出。
+                continue
+
+    buf = BytesIO()
+    wb.save(buf)
+    return excel_response(buf.getvalue(), filename=filename)
 
 
 __all__ = ["router"]

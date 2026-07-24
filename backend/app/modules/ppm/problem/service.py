@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.modules.auth.model import User
+from app.modules.file.service import FileService
 from app.modules.ppm.common.crud import (
     Page,
     PageReq,
@@ -59,7 +60,7 @@ from app.modules.ppm.problem.fsm import (
     compute_change_next_node,
     is_change_audit_node,
 )
-from app.modules.ppm.problem.importer import parse_problem_workbook
+from app.modules.ppm.problem.importer import ImageExtracted, parse_problem_workbook
 from app.modules.ppm.problem.model import (
     PpmProblemChange,
     PpmProblemChangeProcessLog,
@@ -921,11 +922,18 @@ class ProblemService:
     # ------------------------------------------------------------------
 
     async def list_problems_for_export(self, *, user: User | None = None) -> list[dict[str, Any]]:
-        """返回问题清单全量行 (dict),供 Excel 导出。
+        """返回问题清单全量行 (dict),供 Excel 导出 (task-04/D-010)。
 
-        ``user`` 非空时按角色注入数据范围过滤(防导出绕过,D-007)。
+        ``user`` 非空时按角色注入数据范围过滤(防导出绕过,D-007);过滤与排序
+        不变,仅扩字段。返回 18 列全字段(含 ``file_urls`` list[str]),对齐导入
+        模板 + 嵌图往返(D-003/D-006);``module_name``/``model_name`` 同源
+        ``r.model_name``(D-012 模块名列导入映射到 model_name,导出双 key 兼容
+        前端/模板表头),供 task-05 export-excel 端点取源。
         """
-        stmt = select(PpmProblemList)
+        # order_by created_at 保证多次导出顺序一致 (P2:避免依赖 DB 默认序不稳定);
+        # 对齐 PpmProblemList 列表默认时间序口径 (list_problems_by_date_range 用 find_time,
+        # 此处全量导出取入库时序 created_at,语义更稳)。
+        stmt = select(PpmProblemList).order_by(PpmProblemList.created_at)
         if user is not None:
             scope = await problem_scope_clause(self._session, user)
             if scope is not None:
@@ -934,11 +942,24 @@ class ProblemService:
         return [
             {
                 "project_name": r.project_name,
+                "module_name": r.model_name,
+                "model_name": r.model_name,
                 "pro_desc": r.pro_desc,
                 "pro_type": r.pro_type,
-                "status": r.status,
+                "is_urgent": r.is_urgent,
+                "func_name": r.func_name,
                 "duty_user_name": r.duty_user_name,
+                "find_by": r.find_by,
                 "find_time": r.find_time.isoformat() if r.find_time else None,
+                "plan_start_time": r.plan_start_time.isoformat() if r.plan_start_time else None,
+                "plan_end_time": r.plan_end_time.isoformat() if r.plan_end_time else None,
+                "audit_user_name": r.audit_user_name,
+                "work_load": r.work_load,
+                "work_type": r.work_type,
+                "pro_answer": r.pro_answer,
+                "is_delay_plan": r.is_delay_plan,
+                "remarks": r.remarks,
+                "file_urls": list(r.file_urls or []),
             }
             for r in rows
         ]
@@ -1013,6 +1034,14 @@ class ProblemService:
                 module_maps,
                 member_maps,
             )
+            # 附件校验 (task-04/D-005):统计该行嵌入图片数;>3 张超额标红,
+            # 接入现有 errors 链 → valid=false + error 追加「附件超过3张」
+            # (与 project/pro_desc 校验同口径,preview 阶段 ``；`` 拼接展示)。
+            attachment_count = len(r.images)
+            attachment_exceeded = attachment_count > 3
+            errors = list(resolved.errors)
+            if attachment_exceeded:
+                errors.append("附件超过3张")
             preview_rows.append(
                 ProblemImportPreviewRow(
                     row_index=r.row_index,
@@ -1037,8 +1066,10 @@ class ProblemService:
                     module_id=resolved.module_id,
                     duty_user_id=resolved.duty_user_id,
                     audit_user_id=resolved.audit_user_id,
-                    valid=not resolved.errors,
-                    error="；".join(resolved.errors) if resolved.errors else None,
+                    attachment_count=attachment_count,
+                    attachment_exceeded=attachment_exceeded,
+                    valid=not errors,
+                    error="；".join(errors) if errors else None,
                 )
             )
 
@@ -1051,7 +1082,12 @@ class ProblemService:
         )
 
     async def import_commit(
-        self, req: ProblemImportCommitReq, user: User
+        self,
+        req: ProblemImportCommitReq,
+        user: User,
+        *,
+        file_service: FileService | None = None,
+        images_by_row: dict[int, list[ImageExtracted]] | None = None,
     ) -> ProblemImportResultResp:
         """原子批量入库 — 不信任前端 UUID,按原文重查 + data_scope 校验 (D-011/D-008)。
 
@@ -1066,6 +1102,21 @@ class ProblemService:
         - 时间字段已在 preview 转 datetime,DTO 回传仍为 datetime,直接透传 (D-010)。
         - 原子单次事务 (D-008):``session.add_all`` + 末尾单次 ``commit``;异常冒泡
           → 不 commit → 整体回滚 (R-07)。不查重 (D-005)。
+
+        附件逐图上传 (task-04/FR-04/D-004/D-009):``file_service`` 由 router 注入
+        (``Depends`` 装配 FileService,参考 file/router.py ``_make_service``;未注入
+        时跳过上传,兼容现有无附件往返)。入库 commit 成功后,逐行逐图调
+        ``upload_file`` 存对象 + 落 File 表,成功 file_id 追加该问题 ``file_urls``
+        (值=file_id,D-004);**每图 try/except Exception**,单图失败(格式/大小校验、
+        MinIO put_object 连接/超时等)计 ``failed_rows`` 跳过,**不中断整批、不回滚
+        已入库问题**(附件 best-effort,D-009/R-05;P2 捕获面扩到 Exception,覆盖非
+        AppError)。``upload_file`` 内部自 commit(file/service.py:93)
+        → 每图独立事务。
+
+        图片 bytes 透传 (task-05/D-013):preview→commit 是 JSON 往返,二进制带不过
+        去;router 改 multipart 重传原 Excel 文件,解析后按 ``row_index`` 建
+        ``images_by_row`` 映射传入本方法。此处优先按映射取图,``getattr`` 兜底兼容
+        未来可能直接挂载的非 Pydantic 行路径。
         """
         # 1. 重查 (按原文,忽略前端回传 UUID)
         project_name_map = await self._build_project_name_map(
@@ -1081,6 +1132,8 @@ class ProblemService:
 
         # 3. 逐行重查 + 严格校验 + data_scope 过滤 → 待入库对象
         objs: list[PpmProblemList] = []
+        # (obj, row) 对:入库后逐图上传需按行取 images + row_index (task-04)
+        commit_pairs: list[tuple[PpmProblemList, ProblemImportPreviewRow]] = []
         failed_rows: list[str] = []
         for r in req.rows:
             resolved = self._resolve_row_lookup(
@@ -1105,41 +1158,87 @@ class ProblemService:
                 failed_rows.append(f"第{r.row_index}行: 无权导入该项目:{r.project_name}")
                 continue
 
-            objs.append(
-                PpmProblemList(
-                    id=uuid.uuid4(),
-                    project_id=project_id,
-                    project_name=r.project_name,
-                    model_name=r.module_name,
-                    module_id=resolved.module_id,
-                    pro_desc=r.pro_desc,
-                    pro_type=r.pro_type,
-                    is_urgent=r.is_urgent,
-                    func_name=r.func_name,
-                    duty_user_id=resolved.duty_user_id,
-                    duty_user_name=r.duty_user_name,
-                    audit_user_id=resolved.audit_user_id,
-                    audit_user_name=r.audit_user_name,
-                    find_by=r.find_by,
-                    find_time=r.find_time,
-                    plan_start_time=r.plan_start_time,
-                    plan_end_time=r.plan_end_time,
-                    work_load=r.work_load,
-                    work_type=r.work_type,
-                    pro_answer=r.pro_answer,
-                    is_delay_plan=r.is_delay_plan,
-                    remarks=r.remarks,
-                    status=ProblemStatus.NEW.value,
-                    created_by=user.id,
-                    file_urls=[],
-                    created_at=_now(),
-                    updated_at=_now(),
-                )
+            obj = PpmProblemList(
+                id=uuid.uuid4(),
+                project_id=project_id,
+                project_name=r.project_name,
+                model_name=r.module_name,
+                module_id=resolved.module_id,
+                pro_desc=r.pro_desc,
+                pro_type=r.pro_type,
+                is_urgent=r.is_urgent,
+                func_name=r.func_name,
+                duty_user_id=resolved.duty_user_id,
+                duty_user_name=r.duty_user_name,
+                audit_user_id=resolved.audit_user_id,
+                audit_user_name=r.audit_user_name,
+                find_by=r.find_by,
+                find_time=r.find_time,
+                plan_start_time=r.plan_start_time,
+                plan_end_time=r.plan_end_time,
+                work_load=r.work_load,
+                work_type=r.work_type,
+                pro_answer=r.pro_answer,
+                is_delay_plan=r.is_delay_plan,
+                remarks=r.remarks,
+                status=ProblemStatus.NEW.value,
+                created_by=user.id,
+                file_urls=[],
+                created_at=_now(),
+                updated_at=_now(),
             )
+            objs.append(obj)
+            commit_pairs.append((obj, r))
 
         # 4. 原子单次事务入库 (D-008);异常冒泡不 commit 即整体回滚 (R-07)
         if objs:
             self._session.add_all(objs)
+            await self._session.commit()
+
+        # 5. 逐图上传存 file_id 入 file_urls (task-04/FR-04/D-004/D-009)。
+        #    仅在 router 注入 file_service 时启用 (task-05 接线);每图独立事务
+        #    (upload_file 内部自 commit),单图失败计 failed_rows 不中断整批、
+        #    不回滚已入库 problem (附件 best-effort, D-009/R-05)。
+        if file_service is not None and commit_pairs:
+            for obj, row in commit_pairs:
+                # 图片 bytes 由 router 重解析原 Excel 后按 row_index 透传 (D-013:
+                # preview→commit JSON 往返带不过 bytes,router 收 multipart file 重解
+                # 析取图建 images_by_row 映射;getattr 兜底兼容非 Pydantic 行路径)。
+                row_images = (
+                    (images_by_row or {}).get(row.row_index) or getattr(row, "images", None) or ()
+                )
+                new_ids: list[str] = []
+                for idx, img in enumerate(row_images):
+                    try:
+                        mime = str(getattr(img, "mime_type", "") or "")
+                        ext = mime.rsplit("/", 1)[-1] if mime else "img"
+                        resp = await file_service.upload_file(
+                            data=bytes(getattr(img, "data", b"")),
+                            mime_type=mime or "application/octet-stream",
+                            uploaded_by=user.id,
+                            original_name=f"problem_{obj.id}_{idx}.{ext}",
+                            owner_type="problem_import",
+                            owner_id=obj.id,
+                        )
+                        new_ids.append(str(resp.id))  # D-004 值=file_id
+                    except Exception as exc:  # D-009 单图失败 best-effort (P2:扩到 Exception)
+                        # 捕获面扩到 Exception:MinIO put_object 连接/超时等非 AppError
+                        # 也走 best-effort,避免单图故障冒泡让前端拿 500 看不到 result。
+                        # AppError 仍取 exc.code 兼容既有 failed_rows 诊断格式;其它异常
+                        # 退回类名,保证消息可读。
+                        code = getattr(exc, "code", None) or exc.__class__.__name__
+                        log.warning(
+                            "problem_import_image_upload_failed",
+                            row_index=row.row_index,
+                            image_index=idx,
+                            error=str(exc),
+                        )
+                        failed_rows.append(f"第{row.row_index}行: 附件{idx + 1}上传失败:{code}")
+                        continue
+                if new_ids:
+                    # file_urls 是 JSON 列无 MutableList 追踪 → 整体重新赋值方触发 ORM 脏检
+                    obj.file_urls = [*obj.file_urls, *new_ids]
+            # file_urls 回写 problem (upload_file 各自已 commit File 行;此处收尾提交)
             await self._session.commit()
 
         log.info(

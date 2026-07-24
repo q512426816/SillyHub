@@ -7,19 +7,23 @@
  * - /problem-list/{id}/execute    execute (收口: submit 回新建 / complete 已完成)
  * - /problem-list/export-excel    导出 (X-002)
  * - /problem-list/import-preview  Excel 批量导入预览 (multipart, task-07 / design §7)
- * - /problem-list/import-commit   Excel 批量导入提交 (JSON, task-07 / design §7)
+ * - /problem-list/import-commit   Excel 批量导入提交 (**multipart: file + rows** D-013 / design §7)
+ * - /problem-list/import-template 下载导入模板 (动态 xlsx, D-007 / design §7)
  *
- * 走统一 `apiFetch`(自动带 token + 401 刷新);导出走 `downloadExcel`;
- * 导入预览走 `uploadExcelWithAuth`(multipart, 不复用强制 JSON 的 apiFetch)。
+ * 走统一 `apiFetch`(自动带 token + 401 刷新);导出 / 模板下载走 `downloadExcel`;
+ * 导入预览走 `uploadExcelWithAuth`;提交 commit 走裸 fetch multipart
+ * (file + rows Form, 不复用强制 JSON 的 apiFetch, D-013)。
  */
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getApiBaseUrl, safeUUID } from "@/lib/api";
+import { ensureFreshAccessToken } from "@/lib/token-refresh";
+import { useSession } from "@/stores/session";
 import { downloadExcel, uploadExcelWithAuth } from "./export";
 import type {
   PageReq,
   PageResp,
   ProblemExecuteReq,
-  ProblemImportCommitReq,
   ProblemImportPreviewResp,
+  ProblemImportPreviewRow,
   ProblemImportResultResp,
   ProblemList,
   ProblemListCreate,
@@ -134,6 +138,22 @@ export async function exportProblems(): Promise<void> {
   await downloadExcel("/api/ppm/problem-list/export-excel", undefined, "problem_list.xlsx");
 }
 
+/**
+ * 下载导入模板 (GET /api/ppm/problem-list/import-template, 动态生成 xlsx)。
+ *
+ * 后端按当前用户 data_scope 生成: 18 列表头 + 隐藏 sheet "_data" +
+ * DataValidation 下拉 (项目/责任人/验证人 按范围、模块全部平铺 D-012、枚举固定)。
+ * 替代旧静态 public/templates/problem-import-template.xlsx (task-09 删)。
+ * 走统一 `downloadExcel` (token + 401 单飞刷新 + Content-Disposition 文件名兜底)。
+ */
+export async function downloadImportTemplate(): Promise<void> {
+  await downloadExcel(
+    "/api/ppm/problem-list/import-template",
+    undefined,
+    "problem-import-template.xlsx",
+  );
+}
+
 // ---------- Excel 批量导入 (task-07 / design §7) ----------
 
 /**
@@ -157,17 +177,67 @@ export async function importProblemsPreview(
 }
 
 /**
- * 确认提交导入 (POST /api/ppm/problem-list/import-commit, JSON body)。
+ * 确认提交导入 (POST /api/ppm/problem-list/import-commit, **multipart: file + rows** D-013)。
  *
- * 走 `apiFetch` POST JSON;body.rows 为用户勾选确认导入的行(含 preview 已反查
- * 的 UUID,但后端 commit 不信任,按原文重新反查 + data_scope 校验,D-011)。
- * 单次事务原子提交,要么全进要么全回滚(D-008)。
+ * D-013 breaking: body 从 JSON 改为 multipart/form-data ——
+ * - `file` 字段 = 用户预览时选择的同一 .xlsx (后端二次解析 ws._images, 按锚点行
+ *   row_index 填回 commit rows 的 attachment, D-001);
+ * - `rows` 字段 = `JSON.stringify({ rows })` 字符串 (用户勾选确认导入的行,
+ *   含 preview 已反查的 UUID; 后端 commit 不信任, 按原文重新反查 + data_scope
+ *   校验, D-011); 对齐后端 `UploadFile file + Form rows` (task-05)。
+ *
+ * 走裸 fetch + 401 单飞刷新 (复用 `uploadExcelWithAuth` 模式), 不复用强制 JSON
+ * 的 `apiFetch`; **不设 Content-Type** 让浏览器按 FormData 自动加 multipart
+ * boundary。单次事务原子提交 (D-008); 附件单图失败进 failed_rows 不中断 (D-009)。
+ *
+ * @param file 与 preview 同一文件 (后端按 row_index 关联附件图)
+ * @param rows 用户勾选确认导入的预览行 (通常为 valid=true 的行)
  */
 export async function importProblemsCommit(
-  body: ProblemImportCommitReq,
+  file: File,
+  rows: ProblemImportPreviewRow[],
 ): Promise<ProblemImportResultResp> {
-  return apiFetch<ProblemImportResultResp>(
-    "/api/ppm/problem-list/import-commit",
-    { method: "POST", json: body },
-  );
+  // 相对路径走与 uploadExcelWithAuth 一致的 origin 解析 (浏览器内走 next rewrite)。
+  const url = "/api/ppm/problem-list/import-commit";
+  const resolved =
+    typeof window === "undefined"
+      ? new URL(url, getApiBaseUrl()).toString()
+      : new URL(url, window.location.origin).toString();
+
+  const doFetch = async (token: string | null): Promise<Response> => {
+    // 不设 Content-Type — 让浏览器根据 FormData 自动加 multipart boundary。
+    const headers: Record<string, string> = {
+      accept: "application/json",
+      "x-request-id": safeUUID(),
+    };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const formData = new FormData();
+    formData.append("file", file);
+    // rows = JSON 串 (后端 Form rows 解析, D-013); 包一层 { rows } 对齐后端 schema。
+    formData.append("rows", JSON.stringify({ rows }));
+    return fetch(resolved, { method: "POST", headers, body: formData });
+  };
+
+  let { accessToken } = useSession.getState();
+  let resp = await doFetch(accessToken);
+
+  // 401 → refresh + retry once (uploadExcelWithAuth / apiFetch 行为对齐)
+  if (resp.status === 401) {
+    const newToken = await ensureFreshAccessToken();
+    if (newToken) {
+      resp = await doFetch(newToken);
+    }
+    if (resp.status === 401) {
+      useSession.getState().clear();
+      if (typeof window !== "undefined") {
+        window.location.href = "/login";
+      }
+      throw new Error("导入失败:登录已过期,请重新登录");
+    }
+  }
+
+  if (!resp.ok) {
+    throw new Error(`导入失败:HTTP ${resp.status}`);
+  }
+  return (await resp.json()) as ProblemImportResultResp;
 }

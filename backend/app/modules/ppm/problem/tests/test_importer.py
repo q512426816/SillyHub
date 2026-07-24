@@ -535,5 +535,212 @@ class TestNoHeaderSheetSkipped:
         assert rows[0].project_name == "项目甲"
 
 
+# ---------------------------------------------------------------------------
+# 图片附件提取 (task-06 / design §5.1 / D-001 / R-01)
+# ---------------------------------------------------------------------------
+
+
+# 图片 fixture 用 Pillow 现造 1×1 PNG (D-008 Pillow 已是 openpyxl Image 读写硬依赖,
+# 测试导入 PIL 安全)。不同 RGB 便于多图用例区分 data 不串。
+def _png_bytes(rgb: tuple[int, int, int] = (255, 0, 0)) -> bytes:
+    """生成最小 1×1 PNG bytes (Pillow 必需 D-008; 不依赖外部 fixture 文件)。"""
+    from PIL import Image as PILImage
+
+    buf = BytesIO()
+    PILImage.new("RGB", (1, 1), rgb).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _build_xlsx_with_images(
+    headers: list[str],
+    rows: list[Sequence[object]],
+    *,
+    images: list[tuple[str, bytes]] | None = None,
+    sheet_title: str = "问题清单",
+) -> bytes:
+    """单 Sheet + 嵌入图片 → xlsx bytes (task-06 图片提取用例 fixture)。
+
+    表头第 1 行 + 数据从第 2 行起;``images`` 是 ``[(coord, png_bytes), ...]``,
+    每个 ``ws.add_image(Image(BytesIO(png)), coord)`` 字符串锚点 (openpyxl 转
+    OneCellAnchor,``_from.row/col`` 按 coord 解析为 0-based)。
+    """
+    from openpyxl.drawing.image import Image as XlImage
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_title
+    for c, h in enumerate(headers, start=1):
+        ws.cell(row=1, column=c, value=h)
+    for r, row in enumerate(rows, start=2):
+        for c, val in enumerate(row, start=1):
+            ws.cell(row=r, column=c, value=val)
+    for coord, png in images or []:
+        ws.add_image(XlImage(BytesIO(png)), coord)
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+class TestImageExtraction:
+    """图片提取 (task-06 / design §5.1 / D-001 / R-01)。
+
+    覆盖 importer._extract_row_images 的四条分支:单图锚点对齐、跨行图归起始行、
+    同行多图顺序稳定、无图空列表 (零回归 D-001 非阻断)。
+    """
+
+    def test_single_image_anchor_row2(self) -> None:
+        """单图锚点 ``C2`` → ``images[0].anchor_row==2``、data 原样、``image/png``。
+
+        openpyxl ``anchor._from.row`` 为 0-based:``C2`` → ``_from.col=2, _from.row=1``;
+        importer ``+1`` 对齐 1-based ``row_index=2`` (R-01 / task-02 constraints)。
+        """
+        png = _png_bytes()
+        xlsx = _build_xlsx_with_images(
+            _HEADERS,
+            [
+                [
+                    "项目甲",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ]
+            ],
+            images=[("C2", png)],
+        )
+        rows = parse_problem_workbook(xlsx)
+        assert len(rows) == 1
+        r = rows[0]
+        assert r.row_index == 2
+        assert len(r.images) == 1
+        img = r.images[0]
+        assert img.anchor_row == 2  # _from.row=1 (0-based) +1 = 2
+        assert img.data == png  # 原始 bytes 透传
+        assert img.mime_type == "image/png"  # format=png → image/png
+
+    def test_spanning_image_attached_to_start_row(self) -> None:
+        """跨行图 (TwoCellAnchor _from=row1 to=row4) → 归起始行 ``anchor_row==2`` (R-01)。
+
+        importer 只读 ``_from.row`` 不读 ``to.row``,跨行图统一归起始行
+        (design §5.1 / D-001 constraints)。
+        """
+        from openpyxl.drawing.image import Image as XlImage
+        from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, TwoCellAnchor
+
+        png = _png_bytes((0, 255, 0))
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "问题清单"
+        for c, h in enumerate(_HEADERS, start=1):
+            ws.cell(row=1, column=c, value=h)
+        # 数据行 row 2:给 project_name 防「全空行跳过」
+        ws.cell(row=2, column=1, value="项目甲")
+        # 跨行图:_from row=1 (0-based=row 2 1-based), to row=4 (0-based=row 5)
+        img = XlImage(BytesIO(png))
+        anchor = TwoCellAnchor()
+        anchor._from = AnchorMarker(col=2, colOff=0, row=1, rowOff=0)
+        anchor.to = AnchorMarker(col=3, colOff=0, row=4, rowOff=0)
+        img.anchor = anchor
+        ws.add_image(img)
+        buf = BytesIO()
+        wb.save(buf)
+
+        rows = parse_problem_workbook(buf.getvalue())
+        assert len(rows) == 1
+        r = rows[0]
+        assert r.row_index == 2
+        assert len(r.images) == 1
+        # 归 _from.row +1 = 2, 不是 to.row+1 = 5 (R-01 起始行语义)
+        assert r.images[0].anchor_row == 2
+
+    def test_multiple_images_same_row_stable_order(self) -> None:
+        """同行多图 (3 张锚到 row 2 不同列) → ``len==3``、按 add_image 顺序稳定。
+
+        importer 遍历 ``ws._images`` 保持工作簿内顺序;多图挂同一 ``row_index``。
+        """
+        pngs = [
+            _png_bytes((255, 0, 0)),
+            _png_bytes((0, 255, 0)),
+            _png_bytes((0, 0, 255)),
+        ]
+        xlsx = _build_xlsx_with_images(
+            _HEADERS,
+            [
+                [
+                    "项目甲",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ]
+            ],
+            images=[("R2", pngs[0]), ("S2", pngs[1]), ("T2", pngs[2])],
+        )
+        rows = parse_problem_workbook(xlsx)
+        assert len(rows) == 1
+        r = rows[0]
+        assert len(r.images) == 3
+        # ws._images 保持 add_image 顺序 (稳定, 非按列字母重排)
+        assert r.images[0].data == pngs[0]
+        assert r.images[1].data == pngs[1]
+        assert r.images[2].data == pngs[2]
+        for img in r.images:
+            assert img.anchor_row == 2
+
+    def test_no_images_empty_list(self) -> None:
+        """无图 xlsx → ``images == []`` (D-001 零回归:原无附件导入流程兼容)。"""
+        xlsx = _build_xlsx(
+            _HEADERS,
+            [
+                [
+                    "项目甲",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ]
+            ],
+        )
+        rows = parse_problem_workbook(xlsx)
+        assert len(rows) == 1
+        assert rows[0].images == []
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

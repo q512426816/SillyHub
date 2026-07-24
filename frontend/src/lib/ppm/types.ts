@@ -886,10 +886,11 @@ export interface ProblemExecuteReq {
 /**
  * 问题清单 Excel 导入预览单行 (design §7)。
  *
- * 24 字段 = row_index + 17 业务字段 + 4 反查 UUID + valid/error。
+ * 26 字段 = row_index + 17 业务字段 + 2 附件统计 + 4 反查 UUID + valid/error。
  * - 17 业务字段: Excel 原文 / importer 规范化后 (is_urgent / is_delay_plan 已转 "1"/"0");
+ * - 2 附件统计: attachment_count / attachment_exceeded (importer 从 ws._images 按锚点行聚合, D-001/D-005);
  * - 4 反查 UUID: preview 阶段反查结果, 仅供前端展示; commit 不信任, 重算 (D-011);
- * - valid/error: 严格校验结果 (项目/模块/责任人/验证人 匹配不到或必填缺失 → false, D-004/D-009)。
+ * - valid/error: 严格校验结果 (项目/模块/责任人/验证人 未匹配 / 必填缺失 / 附件超 3 张 → false, D-004/D-005/D-009)。
  */
 export interface ProblemImportPreviewRow {
   /** Excel 行号 (1-based, 含表头) */
@@ -918,6 +919,11 @@ export interface ProblemImportPreviewRow {
   /** importer 已转 "1"/"0" */
   is_delay_plan: string | null;
   remarks: string | null;
+  // ---- 附件统计 (importer 从 ws._images 按锚点行聚合, D-001) ----
+  /** 该行附件图片数量 (>3 时 valid=false, D-005) */
+  attachment_count: number;
+  /** 附件是否超过 3 张 (true → valid=false, error "附件超过3张", D-005) */
+  attachment_exceeded: boolean;
   // ---- 反查结果 (preview 填, 仅供前端展示; commit 重算) ----
   project_id: string | null;
   module_id: string | null;

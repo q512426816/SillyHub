@@ -5,7 +5,7 @@
  * 适配问题清单单表 flat rows（非 plan 的多 Sheet 结构）。
  *
  * 三态：1=上传 / 2=预览(未匹配/必填缺失行标红) / 3=结果。
- * 预览走 importProblemsPreview (FormData)，提交走 importProblemsCommit (JSON)。
+ * 预览走 importProblemsPreview (FormData)，提交走 importProblemsCommit (multipart: file + rows, D-013)。
  *
  * 依据：
  * - design.md §5 Wave2 step3、§7 DTO 与字段映射、§3 非目标（不导入附件/不查重/只产「新建」态）；
@@ -17,7 +17,7 @@
  * 关键差异（vs import-module-modal）：
  * - 单表 flat rows：去掉 Sheet 分组维度，dataSource 直接喂 preview.rows；
  * - props 瘦身：项目归属来自 Excel 每行 project_name 反查（D-002），无 planNodeId/projectId；
- * - client 签名：importProblemsPreview(file) / importProblemsCommit({ rows })；
+ * - client 签名：importProblemsPreview(file) / importProblemsCommit(file, rows)（D-013 multipart）；
  * - 提交所有 valid 行（原型倾向后者，不做行级勾选）。
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
@@ -33,9 +33,9 @@ import {
 
 import { StatBox } from "@/components/ppm/milestone/milestone-helpers";
 import {
+  downloadImportTemplate,
   importProblemsCommit,
   importProblemsPreview,
-  type ProblemImportCommitReq,
   type ProblemImportPreviewResp,
   type ProblemImportPreviewRow,
   type ProblemImportResultResp,
@@ -59,6 +59,8 @@ export function ImportProblemModal({
   const [preview, setPreview] = useState<ProblemImportPreviewResp | null>(null);
   const [committing, setCommitting] = useState(false);
   const [result, setResult] = useState<ProblemImportResultResp | null>(null);
+  // 预览时选中的 .xlsx — commit 阶段需原文件回传 (D-013 multipart, 后端按 row_index 关联附件图)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   // 每次打开重置状态
   useEffect(() => {
@@ -68,6 +70,7 @@ export function ImportProblemModal({
       setResult(null);
       setUploading(false);
       setCommitting(false);
+      setSelectedFile(null);
     }
   }, [open]);
 
@@ -84,6 +87,7 @@ export function ImportProblemModal({
         message.error("未解析到任何数据行，请检查 Excel 表头格式");
         return;
       }
+      setSelectedFile(file);
       setPreview(resp);
       setStep(2);
     } catch (err) {
@@ -210,11 +214,28 @@ export function ImportProblemModal({
         render: (v: string | null) => v ?? "—",
       },
       {
+        title: "附件",
+        dataIndex: "attachment_count",
+        key: "attachment_count",
+        width: 70,
+        // attachment_count=0 显 "—"; >0 显数字。超额行整行标红 + 状态列文案,见 rowClassName / 状态列。
+        render: (v: number) => (v > 0 ? String(v) : "—"),
+      },
+      {
         title: "状态",
         key: "status",
         width: 120,
         fixed: "right",
         render: (_v: unknown, row: ProblemImportPreviewRow) => {
+          // attachment_exceeded 优先展示 (design §5.3 预览阶段超额即 valid=false,
+          // error "附件超过3张", 与 valid 分支文案一致不冲突); 超额优先以明确归因。
+          if (row.attachment_exceeded) {
+            return (
+              <Tag color="red" className="text-[10px]">
+                附件超过3张
+              </Tag>
+            );
+          }
           if (!row.valid) {
             return (
               <Tag color="red" className="text-[10px]">
@@ -234,13 +255,18 @@ export function ImportProblemModal({
   );
 
   const rowClassName = useCallback((row: ProblemImportPreviewRow) => {
-    // problem 无 duty_matched 维度(plan 才有),只看 valid
-    return !row.valid ? "bg-red-50" : "";
+    // problem 无 duty_matched 维度(plan 才有),看 valid 或 attachment_exceeded 取并集;
+    // 后端按 D-005 attachment_exceeded ⇒ valid=false, 两者并集等价 (显式取并集防御)。
+    return !row.valid || row.attachment_exceeded ? "bg-red-50" : "";
   }, []);
 
   // --- 确认导入:提交所有 valid 行(原型倾向后者,不做行级勾选) ---
   const handleCommit = async () => {
     if (!preview) return;
+    if (!selectedFile) {
+      message.warning("请先选择 Excel 文件");
+      return;
+    }
     const validRows = preview.rows.filter((r) => r.valid);
     if (validRows.length === 0) {
       message.warning("没有可导入的行");
@@ -248,8 +274,8 @@ export function ImportProblemModal({
     }
     setCommitting(true);
     try {
-      const body: ProblemImportCommitReq = { rows: validRows };
-      const resp = await importProblemsCommit(body);
+      // D-013 multipart: file + rows (后端按 row_index 关联附件图, task-05)
+      const resp = await importProblemsCommit(selectedFile, validRows);
       setResult(resp);
       setStep(3);
     } catch (err) {
@@ -333,13 +359,13 @@ export function ImportProblemModal({
             <Button
               type="link"
               onClick={() => {
-                // 模板置于 public/templates(Next.js 静态服务),临时 anchor 触发下载。
-                const a = document.createElement("a");
-                a.href = "/templates/problem-import-template.xlsx";
-                a.download = "问题清单导入模板.xlsx";
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
+                // D-007: 走动态端点 GET /api/ppm/problem-list/import-template,
+                // 后端按当前用户 data_scope 生成 (含下拉验证), 替代旧静态 xlsx (task-09 删)。
+                void downloadImportTemplate().catch((e) =>
+                  message.error(
+                    e instanceof Error ? e.message : "模板下载失败",
+                  ),
+                );
               }}
             >
               下载导入模板
