@@ -129,11 +129,26 @@ export default function WeeklyPlanPage() {
       fixed: "left",
       render: (v: string | null, _r: WeeklyPlanRow, idx?: number) => {
         const isBoundary = idx != null && isProjectBoundary(_r, idx);
-        return (
-          <span style={{ fontWeight: isBoundary ? 600 : 400 }}>
-            {v ?? "—"}
-          </span>
-        );
+        if (isBoundary) {
+          return (
+            <div
+              style={{
+                background: "#305496",
+                color: "#fff",
+                fontWeight: 600,
+                fontSize: 13,
+                padding: "4px 10px",
+                borderRadius: 3,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {v ?? "—"}
+            </div>
+          );
+        }
+        return <span className="text-muted-foreground">{v ?? "—"}</span>;
       },
     },
     {
@@ -342,7 +357,7 @@ export default function WeeklyPlanPage() {
           scroll={{ x: "max-content", y: 600 }}
           pagination={false}
           rowClassName={(_r: WeeklyPlanRow, idx: number) =>
-            isProjectBoundary(_r, idx) ? "border-t-2 border-t-[#305496]" : ""
+            isProjectBoundary(_r, idx) ? "bg-blue-50/50" : ""
           }
         />
       </SectionCard>
