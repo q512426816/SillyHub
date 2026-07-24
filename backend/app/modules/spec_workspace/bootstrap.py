@@ -776,37 +776,6 @@ async def _load_spec_workspace(
     return result
 
 
-def _parse_log_timestamp(ts: str) -> datetime:
-    """Parse ISO timestamp from adapter callback."""
-    try:
-        return datetime.fromisoformat(ts)
-    except (ValueError, TypeError):
-        return datetime.now(UTC)
-
-
-async def _publish_log_event(
-    run_id: uuid.UUID,
-    channel: str,
-    content: str,
-    ts: str,
-) -> None:
-    """Publish a log event to Redis for SSE subscribers."""
-    try:
-        redis = get_redis()
-        payload = json.dumps(
-            {
-                "run_id": str(run_id),
-                "channel": channel,
-                "content": content[:4000],
-                "timestamp": ts,
-            },
-            ensure_ascii=False,
-        )
-        await redis.publish(f"agent_run:{run_id}", payload)
-    except Exception:
-        log.warning("bootstrap_redis_publish_failed", run_id=str(run_id))
-
-
 async def _publish_done_event(
     run_id: uuid.UUID,
     status: str,

@@ -38,8 +38,6 @@ from app.modules.ppm.workbench.schema import (
     WorkbenchTodoItem,
 )
 
-# 任务待办取数上限 (top N,§7.2 待办派生)
-_TODO_TASK_LIMIT = 20
 # 分页待办单源保护上限 (Grill F2):移除 top20 后防极端用户单源膨胀。
 _TODO_SOURCE_LIMIT = 200
 # 默认每页条数 (FR-1 待办分页默认 10 条/页)。
@@ -65,10 +63,6 @@ def _to_aware(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=UTC)
     return dt
-
-
-# 日历 alert(任务进度)严重度排序:延期 > 临期 > 正常 > 无
-_ALERT_SEVERITY = {"none": 0, "normal": 1, "late": 2, "over": 3}
 
 
 def _parse_workload_hours(work_load: str | None) -> float:
@@ -200,22 +194,6 @@ def _spread_remaining_hours(
 
 # 右点进度严重度排序 (D-008): red(延期) > yellow(临期) > green(正常) > none
 _ALERT_SEVERITY_PROGRESS = {"none": 0, "green": 1, "yellow": 2, "red": 3}
-
-
-def _covers_date(start_dt: datetime | None, end_dt: datetime | None, day: date) -> bool:
-    """区间 [start, end] 是否含 day (三档兜底,与 actual/计划/缺陷区间覆盖同构)。
-
-    双端有 → ``s <= day <= e``;仅一端 → ``== 该端``;都无 → False。
-    """
-    s = _to_aware(start_dt).date() if start_dt is not None else None
-    e = _to_aware(end_dt).date() if end_dt is not None else None
-    if s is not None and e is not None:
-        return s <= day <= e
-    if s is not None:
-        return s == day
-    if e is not None:
-        return e == day
-    return False
 
 
 def _progress_alert(

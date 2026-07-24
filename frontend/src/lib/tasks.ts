@@ -14,27 +14,6 @@ export type TaskParseWarning = components["schemas"]["TaskParseWarning"];
 export type TaskReparseStats = components["schemas"]["TaskReparseStats"];
 export type TaskReparseResponse = components["schemas"]["TaskReparseResponse"];
 
-export function listTasks(
-  workspaceId: string,
-  changeId: string,
-  params?: {
-    status?: string;
-    owner?: string;
-    priority?: string;
-    phase?: string;
-  },
-) {
-  const searchParams = new URLSearchParams();
-  if (params?.status) searchParams.set("status", params.status);
-  if (params?.owner) searchParams.set("owner", params.owner);
-  if (params?.priority) searchParams.set("priority", params.priority);
-  if (params?.phase) searchParams.set("phase", params.phase);
-  const qs = searchParams.toString();
-  return apiFetch<TaskList>(
-    `/api/workspaces/${workspaceId}/changes/${changeId}/tasks${qs ? `?${qs}` : ""}`,
-  );
-}
-
 export function getTask(workspaceId: string, taskId: string) {
   return apiFetch<TaskRead>(
     `/api/workspaces/${workspaceId}/tasks/${taskId}`,

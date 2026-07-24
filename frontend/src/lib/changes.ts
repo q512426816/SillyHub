@@ -166,13 +166,6 @@ export function reparseChanges(workspaceId: string) {
   );
 }
 
-// 获取审批状态
-export function getChangeApproval(workspaceId: string, changeKey: string) {
-  return apiFetch<{ status: string; reason: string | null }>(
-    `/api/workspaces/${workspaceId}/changes/${changeKey}/approval`,
-  );
-}
-
 // 批准
 export function approveChange(workspaceId: string, changeKey: string, approvedBy: string) {
   return apiFetch<{ ok: boolean }>(
@@ -191,21 +184,6 @@ export function rejectChange(workspaceId: string, changeKey: string, reason: str
     {
       method: "POST",
       json: { reason },
-    },
-  );
-}
-
-// 更新进度
-export function updateChangeProgress(
-  workspaceId: string,
-  changeKey: string,
-  data: { currentStage: string; stages: Record<string, any>; lastActive: string },
-) {
-  return apiFetch<{ ok: boolean }>(
-    `/api/workspaces/${workspaceId}/changes/${changeKey}/progress`,
-    {
-      method: "POST",
-      json: data,
     },
   );
 }
@@ -318,27 +296,6 @@ export function transitionChange(
     {
       method: "POST",
       json: body,
-    },
-  );
-}
-
-/**
- * 提交反馈 — POST /api/workspaces/{wid}/changes/{cid}/feedback
- *
- * 在 verify 阶段（pending_review=human_test）提交返工反馈。
- * 后端根据 category 自动决定返工目标阶段（execute/brainstorm 等）。
- */
-export function submitFeedback(
-  workspaceId: string,
-  changeId: string,
-  category: string,
-  text: string,
-) {
-  return apiFetch<ChangeRead>(
-    `/api/workspaces/${workspaceId}/changes/${changeId}/feedback`,
-    {
-      method: "POST",
-      json: { category, text } satisfies FeedbackRequest,
     },
   );
 }

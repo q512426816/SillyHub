@@ -78,13 +78,6 @@ class CustomSkillService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    # ── 校验 ──────────────────────────────────────────────────────────
-
-    @staticmethod
-    def validate_name(name: str) -> None:
-        """暴露给 router 复用（如需独立校验端点）。"""
-        _validate_name(name)
-
     # ── 查询 ──────────────────────────────────────────────────────────
 
     async def list_(self) -> list[CustomSkill]:

@@ -80,11 +80,6 @@ const DICT_DATA: Record<PpmDictType, PpmDictOption[]> = {
   ],
 };
 
-/** 取某字典类型的内置选项(供表格 dict 渲染等场景直接用)。 */
-export function getPpmDictOptions(type: PpmDictType): PpmDictOption[] {
-  return DICT_DATA[type] ?? [];
-}
-
 /** 按 type+value 反查 label(供只读展示,与 PpmText 互补)。 */
 export function getPpmDictLabel(
   type: PpmDictType,

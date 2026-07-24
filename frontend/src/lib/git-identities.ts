@@ -20,10 +20,6 @@ export function createGitIdentity(data: GitIdentityCreate) {
   });
 }
 
-export function getGitIdentity(identityId: string) {
-  return apiFetch<GitIdentityRead>(`/api/git/identities/${identityId}`);
-}
-
 export function revokeGitIdentity(identityId: string) {
   return apiFetch<GitIdentityRead>(`/api/git/identities/${identityId}`, {
     method: "DELETE",

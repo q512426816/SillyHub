@@ -71,11 +71,6 @@ class ToolOperationForbidden(AppError):
     http_status = 403
 
 
-class ToolOperationFailed(AppError):
-    code = "TOOL_OPERATION_FAILED"
-    http_status = 502
-
-
 class ToolPathForbidden(AppError):
     code = "TOOL_PATH_FORBIDDEN"
     http_status = 403

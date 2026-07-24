@@ -69,12 +69,6 @@ _H_DUTY = "责任人"
 _H_BEGIN = "开始日期"
 _H_COMPLETE = "结束日期"
 
-# 需要对合并单元格向下填充（forward-fill）的列：序号 / 平台 / 任务分类。
-# 序号列本身不进 ParsedRow，但平台/任务分类合并区影响 module_name / detailed_stage。
-_FILL_HEADERS = (_H_PLATFORM, _H_STAGE)
-
-_WS_NONE = object()  # sentinel for "no value read yet"
-
 
 def _normalize_header(value: object) -> str:
     """表头标准化：转 str、去换行、去所有空白字符（含全角空格）、strip。

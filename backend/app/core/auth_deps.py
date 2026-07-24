@@ -83,20 +83,6 @@ async def get_current_user(
     return user
 
 
-async def get_optional_user(
-    request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    settings: Annotated[Settings, Depends(get_settings)],
-) -> User | None:
-    """Like :func:`get_current_user` but returns ``None`` instead of 401."""
-    if _extract_bearer(request) is None:
-        return None
-    try:
-        return await get_current_user(request, session, settings)
-    except (AuthTokenMissing, AuthTokenInvalid, AuthTokenExpired, AuthUserInactive):
-        return None
-
-
 def require_permission(permission: Permission):
     """Return a dependency that enforces ``permission`` inside ``{workspace_id}``."""
 

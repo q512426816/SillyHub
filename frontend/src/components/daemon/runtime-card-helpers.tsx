@@ -20,14 +20,12 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
   isVersionBelow,
   MIN_VERSIONS,
   PROVIDER_META,
   type DaemonRuntimeRead,
-  type DaemonVersionInfo,
   type RuntimeUsageItem,
   type RuntimeUsagePoint,
   type RuntimeUsageWindow,
@@ -336,63 +334,6 @@ export function UsageStat({
       <p className={cn("mt-0.5 truncate text-[13px] font-bold tabular-nums", valueColor)}>{value}</p>
     </div>
   );
-}
-
-/**
- * 2026-07-04-daemon-version-management task-09：daemon 进程版本徽标。
- *
- * 比对逻辑（design §版本徽标）：
- *   - build_id 为 null/undefined（daemon 旧版未上报）→ 「未知」灰
- *   - build_id === "dev"（本地开发 daemon）→ 「dev」灰
- *   - latest 非空非 unknown 且 build_id === latest.latest_build_id → 「最新」绿
- *   - 两者都有效且不等 → 「可升级」橙
- *
- * latest 可能未拉到（getDaemonVersion 失败/未登录）或为 "unknown"
- *（install.sh fallback），此时无法判定「最新」/「可升级」，统一降级为「未知」灰。
- *
- * task-07：该徽标从 page 迁到此处，单独保留导出 —— task-08 机器头要复用渲染
- * daemon 版本短码 + 徽标（C-002 Daemon 版本信息上提机器头）。
- */
-type DaemonVersionBadgeState = {
-  label: string;
-  variant: BadgeVariant;
-};
-
-export function getDaemonVersionBadgeState(
-  buildId: string | null | undefined,
-  latest: DaemonVersionInfo | undefined,
-): DaemonVersionBadgeState {
-  if (!buildId) {
-    return { label: "未知", variant: "outline" };
-  }
-  if (buildId === "dev") {
-    return { label: "dev", variant: "outline" };
-  }
-  const latestBuildId = latest?.latest_build_id;
-  if (
-    latestBuildId &&
-    latestBuildId !== "unknown" &&
-    latest?.latest_version &&
-    latest.latest_version !== "unknown"
-  ) {
-    if (buildId === latestBuildId) {
-      return { label: "最新", variant: "success" };
-    }
-    return { label: "可升级", variant: "warning" };
-  }
-  // latest 未拉到 / unknown：无法判定，保守显示「未知」。
-  return { label: "未知", variant: "outline" };
-}
-
-export function DaemonVersionBadge({
-  buildId,
-  latest,
-}: {
-  buildId: string | null | undefined;
-  latest: DaemonVersionInfo | undefined;
-}) {
-  const state = getDaemonVersionBadgeState(buildId, latest);
-  return <Badge variant={state.variant}>{state.label}</Badge>;
 }
 
 /**

@@ -116,11 +116,3 @@ export function Toast({ toast }: { toast: ToastState | null }) {
     </div>
   );
 }
-
-/** 解析工时字符串 (如 "0.5"/"2d") 为数字小时数,失败返回 null。 */
-export function parseHours(raw: string | null | undefined): number | null {
-  if (raw === null || raw === undefined || raw === "") return null;
-  const n = Number(raw);
-  if (!Number.isNaN(n) && n >= 0) return n;
-  return null;
-}

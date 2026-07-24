@@ -32,7 +32,6 @@ log = get_logger(__name__)
 class ExecutionBackend(enum.Enum):
     """Where an AgentRun will be executed."""
 
-    SERVER = "server"  # legacy server subprocess mode (path removed task-01; enum retained)
     DAEMON = "daemon"  # local daemon mode
 
 

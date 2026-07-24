@@ -330,29 +330,6 @@ class DaemonMachineListResponse(BaseModel):
     offset: int
 
 
-# ── Heartbeat ───────────────────────────────────────────────────────────────
-
-
-# [DEPRECATED] 旧 per-runtime heartbeat body（runtime_id 版本），已被 router.py 内联的
-# per-daemon DaemonHeartbeatRequest（daemon_local_id 版本，design §5.4 / D-006）取代，
-# 不再被任何端点使用。保留仅为历史参考，勿复用。
-# 2026-07-04-daemon-version-management 核实（R-01 命名冲突，生效版在 router.py:152）。
-class DaemonHeartbeatRequest(BaseModel):
-    """[DEPRECATED] 旧 per-runtime heartbeat body，已被 per-daemon 版本取代。"""
-
-    runtime_id: uuid.UUID
-
-
-class DaemonHeartbeatResponse(BaseModel):
-    """Response body for HTTP heartbeat."""
-
-    runtime_id: uuid.UUID
-    status: str
-    pending_operations: dict | None = None
-    # 2026-06-29-runtime-allowed-roots-config task-03：daemon 心跳拉取同步本地 config
-    allowed_roots: list[str] = Field(default_factory=list)
-
-
 # ── Lease claim ─────────────────────────────────────────────────────────────
 
 

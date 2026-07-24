@@ -65,27 +65,6 @@ class SpecProfileProvider:
     def __init__(self, source_path: str | None = None) -> None:
         self.source_path = Path(source_path or self.DEFAULT_SOURCE_PATH)
 
-    async def discover_manifests(self) -> list[ProfileManifestData]:
-        """Scan the source directory and return available manifests.
-
-        Stub: returns an empty list. Will be implemented to walk the source
-        tree, locate ``profile.yaml`` / ``manifest.json`` files, parse them,
-        and return structured data.
-        """
-        log.info("spec_profile.discover_manifests", source=str(self.source_path))
-        # TODO: implement actual discovery in follow-up task
-        return []
-
-    async def load_manifest(self, profile_path: str) -> ProfileManifestData | None:
-        """Load a single manifest from the given path.
-
-        Stub: returns ``None``. Will be implemented to read and parse the
-        profile file at *profile_path*.
-        """
-        log.info("spec_profile.load_manifest", path=profile_path)
-        # TODO: implement actual loading in follow-up task
-        return None
-
     async def get_active_manifest(self) -> ProfileManifestData | None:
         """Return the currently active manifest, if any.
 

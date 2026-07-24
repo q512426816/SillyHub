@@ -165,15 +165,6 @@ class DaemonService:
             daemon_build_id=daemon_build_id,
         )
 
-    async def heartbeat(self, runtime_id: uuid.UUID) -> DaemonRuntime:
-        """Per-runtime 心跳 facade（legacy，仅残留调用方使用）。
-
-        2026-07-03-daemon-entity-binding task-07：HTTP ``/heartbeat`` 端点改走
-        ``heartbeat_daemon``（per-daemon 合并心跳）。本方法保留供单 runtime 测试与
-        潜在残留调用方使用（provider 无独立心跳，design §9.2）。
-        """
-        return await self._rt.heartbeat(runtime_id)
-
     async def heartbeat_daemon(
         self,
         daemon_local_id: uuid.UUID,

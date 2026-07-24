@@ -82,16 +82,3 @@ class ScanDocConflictService:
             .limit(limit)
         )
         return list((await self._session.execute(stmt)).scalars().all())
-
-    async def get_history(
-        self,
-        workspace_id: uuid.UUID,
-        history_id: uuid.UUID,
-    ) -> ScanDocConflictHistory | None:
-        """Return a single archived version by its id."""
-        stmt = (
-            select(ScanDocConflictHistory)
-            .where(col(ScanDocConflictHistory.id) == history_id)
-            .where(col(ScanDocConflictHistory.workspace_id) == workspace_id)
-        )
-        return (await self._session.execute(stmt)).scalars().first()

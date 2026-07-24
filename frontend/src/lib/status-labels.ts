@@ -53,20 +53,6 @@ export const AUDIT_RESOURCE_TYPE_LABELS: Record<string, string> = {
   other: "其他",
 };
 
-/** 审批结果状态 */
-export const APPROVAL_STATUS_LABELS: Record<string, string> = {
-  approved: "已批准",
-  rejected: "已拒绝",
-  pending: "待审批",
-};
-
-/** 工具网关审批策略 */
-export const APPROVAL_ACTION_LABELS: Record<string, string> = {
-  "auto-pass": "自动放行",
-  "needs approval": "需审批",
-  "must approve": "必须审批",
-};
-
 /** 风险等级 */
 export const RISK_LABELS: Record<string, string> = {
   low: "低",

@@ -29,15 +29,6 @@ export interface Release {
   updated_at: string;
 }
 
-export interface ReleaseApproval {
-  id: string;
-  release_id: string;
-  approver_id: string;
-  verdict: "approve" | "reject";
-  comment: string | null;
-  created_at: string;
-}
-
 export interface CreateReleaseInput {
   version: string;
   title?: string;
@@ -58,21 +49,6 @@ export function createRelease(workspaceId: string, input: CreateReleaseInput) {
     method: "POST",
     json: input,
   });
-}
-
-export function approveRelease(
-  releaseId: string,
-  verdict: "approve" | "reject",
-  comment?: string,
-) {
-  return apiFetch<ReleaseApproval>(`/api/releases/${releaseId}/approve`, {
-    method: "POST",
-    json: { verdict, comment },
-  });
-}
-
-export function listApprovals(releaseId: string) {
-  return apiFetch<ReleaseApproval[]>(`/api/releases/${releaseId}/approvals`);
 }
 
 export function deployRelease(releaseId: string) {

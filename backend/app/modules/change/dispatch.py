@@ -2142,13 +2142,6 @@ class SillySpecStageDispatchService:
                 unique.append(c)
         return unique
 
-    async def _read_verify_result(
-        self,
-        session: AsyncSession,
-        change_id: uuid.UUID,
-    ) -> str:
-        return await read_verify_result(session, change_id)
-
 
 # ---------------------------------------------------------------------------
 # Prompt template loader

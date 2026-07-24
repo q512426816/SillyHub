@@ -48,11 +48,6 @@ if TYPE_CHECKING:
 # constraints bullet 2). The 30.0 default aligns with design §11 risk headroom.
 HOST_FS_RPC_TIMEOUT = float(os.getenv("HOST_FS_RPC_TIMEOUT", "30.0"))
 
-# Back-compat alias for the inlined literal task-02 left behind (some callers /
-# tests may import the original private name). Kept pointing at the env-derived
-# constant so both paths honour an operator override.
-_HOST_FS_RPC_TIMEOUT_SECONDS = HOST_FS_RPC_TIMEOUT
-
 
 async def send_host_fs_rpc(
     ws_hub: "DaemonWsHub",

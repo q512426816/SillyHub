@@ -9,7 +9,6 @@ import dynamic from "next/dynamic";
 
 import type { WorkHourBarChartProps } from "./WorkHourBarChart";
 import type { WorkHourPieChartProps } from "./WorkHourPieChart";
-import type { ProjectPlanCostBarChartProps } from "./ProjectPlanCostBarChart";
 import type { RuntimeUsageLineChartProps } from "./RuntimeUsageLineChart";
 
 const Loading = () => <div className="h-64 animate-pulse rounded bg-muted/30" />;
@@ -21,12 +20,6 @@ export const WorkHourBarChart = dynamic<WorkHourBarChartProps>(
 
 export const WorkHourPieChart = dynamic<WorkHourPieChartProps>(
   () => import("./WorkHourPieChart").then((m) => m.WorkHourPieChart),
-  { ssr: false, loading: Loading },
-);
-
-export const ProjectPlanCostBarChart = dynamic<ProjectPlanCostBarChartProps>(
-  () =>
-    import("./ProjectPlanCostBarChart").then((m) => m.ProjectPlanCostBarChart),
   { ssr: false, loading: Loading },
 );
 

@@ -204,27 +204,6 @@ class WorktreeService:
         log.info("worktree_extended", lease_id=str(lease_id))
         return lease
 
-    # ── GC ───────────────────────────────────────────────────────────────
-
-    async def gc_expired_leases(self) -> int:
-        stmt = select(WorktreeLease).where(
-            col(WorktreeLease.status) == "locked",
-            col(WorktreeLease.expires_at) < datetime.now(UTC),
-        )
-        rows = list((await self._session.execute(stmt)).scalars().all())
-        count = 0
-        for lease in rows:
-            lease_root = self._path_or_none(lease.path)
-            if lease_root:
-                self._exec_env.shred_askpass(lease_root)
-                self._exec_env.cleanup(lease_root)
-            lease.status = "expired"
-            count += 1
-        if count:
-            await self._session.commit()
-        log.info("worktree_gc", expired=count)
-        return count
-
     # ── Helpers ──────────────────────────────────────────────────────────
 
     async def _get_lease(self, lease_id: uuid.UUID) -> WorktreeLease:

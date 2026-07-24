@@ -10,8 +10,7 @@
  * @module mcp-config
  */
 
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseJsonFromResponse } from './hub-client.js';
@@ -31,11 +30,6 @@ export interface McpConfig {
 export interface MergedMcpResult {
   config: McpConfig;
   rejected: string[]; // 被白名单剔除的 server 名
-}
-
-export interface InjectResult {
-  mcpConfigPath: string; // 临时 .mcp.json 路径，供 --mcp-config
-  cleanup: () => Promise<void>; // 删除临时文件
 }
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -110,17 +104,6 @@ export async function loadPlatformMcpConfigFromBackend(
   }
   logger?.('debug', 'mcp_config_fallback_local_file');
   return loadPlatformMcpConfig(logger);
-}
-
-/**
- * 读取 workspace 级 `.mcp.json`（specDir/docs/<ws>/.mcp.json 或 workspace specDir）。
- * 文件不存在/解析失败 → 返回空配置。
- */
-export async function loadWorkspaceMcpConfig(
-  workspaceSpecDir: string,
-  logger?: McpConfigLogger,
-): Promise<McpConfig> {
-  return loadMcpConfigFile(join(workspaceSpecDir, '.mcp.json'), logger);
 }
 
 async function loadMcpConfigFile(path: string, logger?: McpConfigLogger): Promise<McpConfig> {
@@ -208,28 +191,6 @@ export function mergeMcpConfigs(
 }
 
 // ── 注入 ──────────────────────────────────────────────────────────────────────
-
-/**
- * 写合并后的 MCP 配置到临时 `.mcp.json`，供 spawn claude `--mcp-config <path>`。
- * 返回路径 + cleanup 函数（调用方负责清理）。
- */
-export async function injectMcpConfig(
-  mergedConfig: McpConfig,
-): Promise<InjectResult> {
-  const dir = await mkdtemp(join(tmpdir(), 'sillyhub-mcp-'));
-  const mcpConfigPath = join(dir, '.mcp.json');
-  await writeFile(mcpConfigPath, JSON.stringify(mergedConfig), 'utf-8');
-  return {
-    mcpConfigPath,
-    cleanup: async () => {
-      try {
-        await rm(dir, { recursive: true, force: true });
-      } catch {
-        // cleanup 失败不致命
-      }
-    },
-  };
-}
 
 /**
  * 快速判断是否有任何 MCP server（决定是否需要注入）。

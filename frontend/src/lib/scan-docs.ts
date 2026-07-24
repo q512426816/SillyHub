@@ -8,8 +8,6 @@ export type ScanDocList = components["schemas"]["ScanDocList"];
 export type ScanDocWarning = components["schemas"]["ScanDocWarning"];
 export type ScanDocReparseStats = components["schemas"]["ScanDocReparseStats"];
 export type ScanDocReparseResponse = components["schemas"]["ScanDocReparseResponse"];
-// 单条冲突历史归档记录（对应后端 ScanDocConflictRead）。
-export type ConflictHistoryItem = components["schemas"]["ScanDocConflictRead"];
 
 /**
  * Stale threshold in ms (default 1h). Override via env var.
@@ -38,14 +36,5 @@ export function reparseScanDocs(workspaceId: string) {
   return apiFetch<ScanDocReparseResponse>(
     `/api/workspaces/${workspaceId}/scan-docs/reparse`,
     { method: "POST" },
-  );
-}
-
-export function listDocConflicts(
-  workspaceId: string,
-  docId: string,
-) {
-  return apiFetch<{ items: ConflictHistoryItem[] }>(
-    `/api/workspaces/${workspaceId}/scan-docs/${docId}/conflicts`,
   );
 }

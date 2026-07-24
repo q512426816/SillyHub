@@ -41,13 +41,6 @@ export interface BarRow {
   total_hours: number;
 }
 
-/** 折线图输入点(x 轴 ts + 输入/输出 token)。 */
-export interface LinePoint {
-  ts: string;
-  input_tokens: number;
-  output_tokens: number;
-}
-
 /**
  * 柱状图 option:names 为 X 轴,hours 为单系列。
  * - 类别 > 30 时启用 dataZoom + 标签旋转 45°。
@@ -90,68 +83,6 @@ export function toBarSeries(rows: BarRow[], color: string): EChartsOption {
     ...(crowded
       ? { dataZoom: [{ type: "slider", xAxisIndex: 0, start: 0, end: 30 }] }
       : {}),
-  };
-}
-
-/**
- * 用量折线图 option(FR-04):输入(蓝)/输出(绿)双线 sparkline。
- * - 与 task-12 组件内联 option 行为一致;x 轴隐藏标签、legend 顶部、smooth line。
- * - 复用 CHART_COLORS.user(blue[600],输入)/ CHART_COLORS.project(emerald,输出),不新增颜色。
- * - 纯函数(无 React/echarts-for-react 依赖),便于单测覆盖空数据/单点/极值。
- *
- * @param points 时间序列(小时桶 1d / 日桶 7d·30d,D-002@v1);组件传入 RuntimeUsagePoint[](其结构是 LinePoint 超集)。
- * @param opts.height 可选高度(默认 120,仅调用方参考;option 本身不含 height,由组件 style 控制)。
- */
-export function toLineSeries(
-  points: LinePoint[],
-  opts: { height?: number } = {},
-): EChartsOption {
-  void opts; // height 仅调用方参考,option 内不使用(避免未读形参)。
-  const xs = points.map((p) => p.ts);
-  const inputs = points.map((p) => toNumber(p.input_tokens));
-  const outputs = points.map((p) => toNumber(p.output_tokens));
-  return {
-    tooltip: {
-      trigger: "axis",
-      valueFormatter: (v) => `${toNumber(v).toLocaleString()} tokens`,
-    },
-    legend: { data: ["输入", "输出"], top: 0, textStyle: { fontSize: 10 } },
-    grid: { left: 8, right: 8, top: 24, bottom: 8, containLabel: false },
-    xAxis: {
-      type: "category",
-      boundaryGap: false,
-      data: xs,
-      axisLabel: { show: false },
-      axisTick: { show: false },
-      axisLine: { show: false },
-    },
-    yAxis: {
-      type: "value",
-      axisLabel: { show: false },
-      splitLine: { show: false },
-    },
-    series: [
-      {
-        name: "输入",
-        type: "line",
-        data: inputs,
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 2 },
-        itemStyle: { color: CHART_COLORS.user },
-        areaStyle: { opacity: 0.08 },
-      },
-      {
-        name: "输出",
-        type: "line",
-        data: outputs,
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 2 },
-        itemStyle: { color: CHART_COLORS.project },
-        areaStyle: { opacity: 0.08 },
-      },
-    ],
   };
 }
 

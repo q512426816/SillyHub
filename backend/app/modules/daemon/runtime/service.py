@@ -312,30 +312,6 @@ class RuntimeService:
             runtimes=result_runtimes,
         )
 
-    async def heartbeat(self, runtime_id: uuid.UUID) -> DaemonRuntime:
-        """Update heartbeat timestamp for a daemon runtime.
-
-        2026-07-03-daemon-entity-binding task-07：provider 无独立心跳（design §9.2），
-        daemon 单条心跳合并上报经 ``heartbeat_daemon``。本方法保留供残留调用方与
-        单 runtime 测试使用（不再被 HTTP ``/heartbeat`` 端点调用）。
-        """
-        runtime = await self._session.get(DaemonRuntime, runtime_id)
-        if runtime is None:
-            raise DaemonRuntimeNotFound(
-                f"Daemon runtime '{runtime_id}' not found.",
-                details={"runtime_id": str(runtime_id)},
-            )
-
-        now = datetime.now(UTC)
-        runtime.last_heartbeat_at = now
-        if runtime.status != "disabled":
-            runtime.status = "online"
-        runtime.updated_at = now
-        self._session.add(runtime)
-        await self._session.commit()
-        await self._session.refresh(runtime)
-        return runtime
-
     async def heartbeat_daemon(
         self,
         daemon_local_id: uuid.UUID,

@@ -58,25 +58,6 @@ class SpecPathResolver:
     # Standard doc_type list used by the parser
     STANDARD_DOC_TYPES: frozenset[str] = frozenset(STANDARD_FILENAMES.keys())
 
-    # scan doc types (aligned with scan_docs module)
-    SCAN_DOC_TYPES: list[str] = [
-        "ARCHITECTURE",
-        "CONVENTIONS",
-        "STRUCTURE",
-        "INTEGRATIONS",
-        "TESTING",
-        "CONCERNS",
-        "PROJECT",
-    ]
-
-    # Default documents created for a new change
-    DEFAULT_CHANGE_DOCS: list[str] = [
-        PROPOSAL,
-        DESIGN,
-        REQUIREMENTS,
-        TASKS,
-    ]
-
     # ------------------------------------------------------------------
     # Instance methods
     # ------------------------------------------------------------------
@@ -135,10 +116,6 @@ class SpecPathResolver:
         if name is not None:
             return base / name
         return base
-
-    def legacy_change_dir(self, name: str) -> Path:
-        """Legacy active change directory: ``.sillyspec/changes/change/<name>/``"""
-        return self.changes_root() / "change" / name
 
     # -- Runtime -----------------------------------------------------------
 
