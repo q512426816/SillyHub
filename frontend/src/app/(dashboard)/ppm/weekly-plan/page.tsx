@@ -62,6 +62,16 @@ export default function WeeklyPlanPage() {
   >(null);
   const [searchNonce, setSearchNonce] = useState(0);
 
+  // 表头筛选/排序(Excel 式):受控状态。实际过滤+排序在 processedData 中完成,
+  // 不依赖 antd 内部 onFilter —— virtual 虚拟列表 + 分组行(colSpan)组合下,外部计算更稳。
+  const [columnFilters, setColumnFilters] = useState<
+    Record<string, (string | number)[]>
+  >({});
+  const [columnSorter, setColumnSorter] = useState<{
+    field?: string;
+    order?: "ascend" | "descend";
+  }>({});
+
   const buildReq = useCallback((): WeeklyPlanPageReq => {
     const req: WeeklyPlanPageReq = { page: 1, page_size: 10000 };
     if (projectName.trim()) req.project_name = projectName.trim();
@@ -108,13 +118,43 @@ export default function WeeklyPlanPage() {
     }
   };
 
+  // 项目名称筛选下拉选项(从当前数据动态去重,下拉内带搜索框)
+  const projectNameFilters = useMemo(() => {
+    const names = Array.from(
+      new Set(rawData.map((r) => r.project_name).filter(Boolean))
+    ) as string[];
+    return names
+      .sort((a, b) => a.localeCompare(b, "zh"))
+      .map((n) => ({ text: n, value: n }));
+  }, [rawData]);
+
+  // 应用表头筛选 + 排序后的扁平行(分组行插入前)
+  const processedData = useMemo<WeeklyPlanRow[]>(() => {
+    let rows = rawData;
+    // 项目名称多选筛选(精确匹配)
+    const pnFilter = columnFilters.project_name;
+    if (pnFilter && pnFilter.length) {
+      const allow = new Set(pnFilter.map(String));
+      rows = rows.filter((r) => allow.has(r.project_name ?? ""));
+    }
+    // 项目名称排序:升序 / 降序,第三次点击取消
+    if (columnSorter.field === "project_name" && columnSorter.order) {
+      const dir = columnSorter.order === "ascend" ? 1 : -1;
+      rows = [...rows].sort(
+        (a, b) =>
+          (a.project_name ?? "").localeCompare(b.project_name ?? "", "zh") * dir
+      );
+    }
+    return rows;
+  }, [rawData, columnFilters, columnSorter]);
+
   // 构建带分组行的 displayData(项目切换时插入独占一行的分组行)
   const displayData = useMemo<DisplayRow[]>(() => {
     const result: DisplayRow[] = [];
     let curProject: string | null = null;
     let seq = 0;
 
-    for (const row of rawData) {
+    for (const row of processedData) {
       const pn = row.project_name ?? "";
       if (pn !== curProject) {
         curProject = pn;
@@ -128,7 +168,7 @@ export default function WeeklyPlanPage() {
       result.push({ ...row, __seq: seq });
     }
     return result;
-  }, [rawData]);
+  }, [processedData]);
 
   // colSpan 辅助:分组行首列 colSpan=19(独占一整行),其余列 colSpan=0(隐藏)
   const groupCell = (r: DisplayRow) => ({
@@ -176,6 +216,17 @@ export default function WeeklyPlanPage() {
       width: 140,
       fixed: "left",
       onCell: hiddenCell,
+      // Excel 式表头:排序(升/降/取消) + 多选筛选(下拉内可搜索)
+      sorter: true,
+      sortOrder:
+        columnSorter.field === "project_name"
+          ? columnSorter.order
+          : undefined,
+      filters: projectNameFilters,
+      filterMultiple: true,
+      filterSearch: true,
+      filteredValue: columnFilters.project_name ?? null,
+      onFilter: () => true, // 实际过滤在 processedData 外部完成
       render: (v: string | null) => v ?? "—",
     },
     {
@@ -405,6 +456,16 @@ export default function WeeklyPlanPage() {
           virtual
           scroll={{ x: "max-content", y: 600 }}
           pagination={false}
+          onChange={(_pagination, filters, sorter) => {
+            setColumnFilters(
+              filters as Record<string, (string | number)[]>
+            );
+            const s = (Array.isArray(sorter) ? sorter[0] : sorter) ?? {};
+            setColumnSorter({
+              field: (s as { field?: string }).field,
+              order: (s as { order?: "ascend" | "descend" }).order,
+            });
+          }}
         />
       </SectionCard>
     </PageContainer>

@@ -356,3 +356,10 @@ created_at: 2026-07-21T08:48:56
 方案：`isDirty` 的行比较循环里补 `(o.no ?? null) !== (r.no ?? null)` 检测，与 `toUpdate` 已有的 `no` 变化检测对齐——拖动改顺序也会置 dirty、启用保存按钮。
 结果：①前端 typecheck/lint 0 error；②待 commit+push+重建 frontend 后用户验证（拖动改顺序后保存按钮变可用、点保存顺序持久化）。
 
+
+## ql-20260724-001-db48 | 2026-07-24 22:50:36 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+
+结果：需求：/ppm/weekly-plan 列表表头像 Excel 那样支持排序+多选筛选，先落地项目名称列看效果。根因：原 Table 项目名称列无 sorter/filters 配置，表头仅静态文本；数据已一次性全前端加载(page_size=10000)但未提供列级排序/筛选入口。方案：项目名称列加 sorter(升/降/第三次取消)+filters(多选 filterSearch 下拉内可搜，选项从 rawData 动态去重 localeCompare 排序)；新增受控状态 columnFilters/columnSorter，过滤+排序在 processedData useMemo 外部完成(不依赖 antd 内部 onFilter——virtual 虚拟列表+分组行 colSpan=19 独占行组合下外部计算更稳)，分组行序号随之重算；Table onChange 统一回写状态。结果：tsc --noEmit 0 error(修 sorter[0] possibly undefined 用 ?? {} 兜底)；仅改 page.tsx 单文件+同步 ppm.md 变更索引 ql-
