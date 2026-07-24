@@ -357,15 +357,29 @@ created_at: 2026-07-21T08:48:56
 结果：①前端 typecheck/lint 0 error；②待 commit+push+重建 frontend 后用户验证（拖动改顺序后保存按钮变可用、点保存顺序持久化）。
 
 
-## ql-20260724-001-db48 | 2026-07-24 22:50:36 | (quick 任务)
+## ql-20260724-001-db48 | 2026-07-24 22:50:36 | /ppm/weekly-plan 项目名称列表头加 Excel 式排序+多选筛选
 状态：已完成
 关联变更：（无）
-文件：（见实际改动）
+文件：frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（项目名称列加 sorter/filters/filterSearch + 新增受控 state columnFilters/columnSorter + processedData useMemo 外部过滤排序 + Table onChange 回写）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：用户要求 weekly-plan 列表表头像 Excel 那样支持排序+多选筛选，先落地项目名称列看效果。
+根因：原 Table 项目名称列无 sorter/filters 配置，表头仅静态文本；数据已一次性全前端加载(page_size=10000)但未提供列级排序/筛选入口。
+方案：项目名称列加 sorter(升/降/第三次点击取消)+filters(多选,filterSearch 下拉内可搜,选项从 rawData 动态去重 localeCompare 排序)；新增受控状态 columnFilters/columnSorter，过滤+排序在 processedData useMemo 外部完成(不依赖 antd 内部 onFilter——virtual 虚拟列表+分组行 colSpan=19 独占行组合下外部计算更稳)，分组行序号随之重算；Table onChange 统一回写筛选/排序状态。
+结果：①tsc --noEmit 0 error(修 sorter[0] possibly undefined 用 ?? {} 兜底)；②仅改 page.tsx 单文件+同步 ppm.md 变更索引 ql-20260724-001-db48；③commit e7735e4f→本机 Docker 重建 frontend 部署,commit_sha 验证生效；④用户确认效果后继续推广其它列。
 
-结果：需求：/ppm/weekly-plan 列表表头像 Excel 那样支持排序+多选筛选，先落地项目名称列看效果。根因：原 Table 项目名称列无 sorter/filters 配置，表头仅静态文本；数据已一次性全前端加载(page_size=10000)但未提供列级排序/筛选入口。方案：项目名称列加 sorter(升/降/第三次取消)+filters(多选 filterSearch 下拉内可搜，选项从 rawData 动态去重 localeCompare 排序)；新增受控状态 columnFilters/columnSorter，过滤+排序在 processedData useMemo 外部完成(不依赖 antd 内部 onFilter——virtual 虚拟列表+分组行 colSpan=19 独占行组合下外部计算更稳)，分组行序号随之重算；Table onChange 统一回写状态。结果：tsc --noEmit 0 error(修 sorter[0] possibly undefined 用 ?? {} 兜底)；仅改 page.tsx 单文件+同步 ppm.md 变更索引 ql-
-## ql-20260724-002-b4c2 | 2026-07-24 23:15:59 | (quick 任务)
+## ql-20260724-002-b4c2 | 2026-07-24 23:15:59 | /ppm/weekly-plan 任务主题列表头加 Excel 式排序+多选筛选
 状态：已完成
 关联变更：（无）
-文件：（见实际改动）
+文件：frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（task_theme 列加 sorter/filters/filterSearch + processedData 加 task_theme 过滤/排序分支 + taskThemeFilters）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：用户要求任务主题列也加上（同项目名称列模式）。
+根因：上轮只落地项目名称列，任务主题列仍是静态表头无排序/筛选入口。
+方案：复用 ql-001 的 columnFilters/columnSorter 受控机制 + processedData 外部计算模式，新增 taskThemeFilters(rawData 去重 task_theme)+ processedData 加 task_theme 多选过滤/排序分支(升/降/第三次取消)，task_theme 列加 sorter/filters/filterSearch(filteredValue 受控)。多列筛选 AND 叠加、单列排序(同时刻一列)。
+结果：①tsc --noEmit 0 error；②仅改 page.tsx + 同步 ppm.md 变更索引 ql-20260724-002-b4c2；③commit 5bd83e01→本机 Docker 重建 frontend 部署生效；④继续推广剩余列。
 
-结果：需求：/ppm/weekly-plan 任务主题列表头也加 Excel 式排序+多选筛选。根因：上轮只落地了项目名称列,任务主题列仍是静态表头无排序/筛选入口。方案：复用 ql-001 的 columnFilters/columnSorter 受控机制 + processedData 外部计算模式,新增 taskThemeFilters(rawData 去重 task_theme)+ processedData 加 task_theme 多选过滤/排序分支(升/降/第三次取消),task_theme 列加 sorter/filters/filterSearch(filteredValue 受控)。多列筛选 AND 叠加、单列排序。结果：tsc --noEmit 0 error；仅改 page.tsx + 同步 ppm.md 变更索引 ql-20260724-002-b4c2。
+## ql-20260724-003-63c6 | 2026-07-24 23:34:14 | /ppm/weekly-plan 全列表头加 Excel 式排序+筛选(配置驱动重构 14 列)+QUICKLOG 改回丰富格式
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（SORTABLE_FIELDS 配置 + fieldText/compareNonEmpty 纯函数 + fieldFiltersMap 一次生成所有字段下拉 + processedData 通用循环过滤/排序 + sortableColProps(key) 生成列属性；project_name/task_theme 改 spread + 新增 12 列加 spread）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：①用户要求剩余列都加上排序筛选；②QUICKLOG 按之前的丰富格式记录(不用 CLI 简版)。
+根因：①前两轮每列单独写过滤/排序代码,推广到全部 14 列会冗长难维护；②CLI 接管的 QUICKLOG 是简版(标题"(quick 任务)"、文件"（见实际改动）"、四字段全挤"结果："一行),不符合用户要的丰富格式。
+方案：①配置驱动重构——SORTABLE_FIELDS(key+kind text/number/date)统一管 14 列,fieldFiltersMap 一次生成所有字段下拉选项,processedData 通用循环过滤(AND叠加)+排序(空值固定排最后,不受升降序影响),sortableColProps(key) 生成列属性(排序+多选筛选 filterSearch,受控)；project_name/task_theme 由显式配置改 spread,新增计划类型/任务分类/平台/任务描述/工作量/周次/责任人/开始结束日期/状态/实际开始完成时间 12 列加 spread,占位列(延期原因/执行说明/评估说明/备注 无数据源)不加；②QUICKLOG 001/002/003 手动改回需求/根因/方案/结果分段(参照 QUICKLOG-WhaleFall-2026-07-21.md)。
+结果：①tsc --noEmit 0 error(修 fieldText 的 as unknown as Record 类型转换)；②改 page.tsx + QUICKLOG-WhaleFall.md + ppm.md；③待 commit+push+重建 frontend 部署 + 用户验证全列排序筛选。

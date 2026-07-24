@@ -43,6 +43,45 @@ const STATUS_OPTIONS = [
   { value: "已完成", label: "已完成" },
 ];
 
+/** 可排序+筛选的列配置(字段名 + 值类型)。占位列(无数据源)不加入。 */
+type SortFieldKind = "text" | "number" | "date";
+const SORTABLE_FIELDS: { key: string; kind: SortFieldKind }[] = [
+  { key: "project_name", kind: "text" },
+  { key: "plan_type", kind: "text" },
+  { key: "detailed_stage", kind: "text" },
+  { key: "module_name", kind: "text" },
+  { key: "task_theme", kind: "text" },
+  { key: "task_description", kind: "text" },
+  { key: "work_load", kind: "number" },
+  { key: "week_number", kind: "number" },
+  { key: "user_name", kind: "text" },
+  { key: "start_time", kind: "date" },
+  { key: "end_time", kind: "date" },
+  { key: "status", kind: "text" },
+  { key: "actual_start_time", kind: "date" },
+  { key: "actual_end_time", kind: "date" },
+];
+
+/** 取行字段值统一转字符串(空值→"")。 */
+const fieldText = (r: WeeklyPlanRow, key: string): string => {
+  const v = (r as unknown as Record<string, unknown>)[key];
+  return v == null ? "" : String(v);
+};
+
+/** 非空值比较:number 用数值,其余(含 ISO 日期)用字符串字典序。 */
+const compareNonEmpty = (
+  a: string,
+  b: string,
+  kind: SortFieldKind
+): number => {
+  if (kind === "number") {
+    const na = Number(a);
+    const nb = Number(b);
+    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+  }
+  return a.localeCompare(b, "zh");
+};
+
 /** 分组行标记类型。 */
 interface DisplayRow extends WeeklyPlanRow {
   __isGroup?: boolean;
@@ -118,59 +157,60 @@ export default function WeeklyPlanPage() {
     }
   };
 
-  // 项目名称筛选下拉选项(从当前数据动态去重,下拉内带搜索框)
-  const projectNameFilters = useMemo(() => {
-    const names = Array.from(
-      new Set(rawData.map((r) => r.project_name).filter(Boolean))
-    ) as string[];
-    return names
-      .sort((a, b) => a.localeCompare(b, "zh"))
-      .map((n) => ({ text: n, value: n }));
-  }, [rawData]);
-
-  // 任务主题筛选下拉选项(同上)
-  const taskThemeFilters = useMemo(() => {
-    const names = Array.from(
-      new Set(rawData.map((r) => r.task_theme).filter(Boolean))
-    ) as string[];
-    return names
-      .sort((a, b) => a.localeCompare(b, "zh"))
-      .map((n) => ({ text: n, value: n }));
+  // 各可排序字段的筛选下拉选项(从当前数据动态去重,下拉内带搜索框)
+  const fieldFiltersMap = useMemo(() => {
+    const map: Record<string, { text: string; value: string }[]> = {};
+    for (const { key } of SORTABLE_FIELDS) {
+      const vals = Array.from(
+        new Set(rawData.map((r) => fieldText(r, key)).filter(Boolean))
+      );
+      map[key] = vals
+        .sort((a, b) => a.localeCompare(b, "zh"))
+        .map((n) => ({ text: n, value: n }));
+    }
+    return map;
   }, [rawData]);
 
   // 应用表头筛选 + 排序后的扁平行(分组行插入前)
   const processedData = useMemo<WeeklyPlanRow[]>(() => {
     let rows = rawData;
-    // 项目名称多选筛选(精确匹配)
-    const pnFilter = columnFilters.project_name;
-    if (pnFilter && pnFilter.length) {
-      const allow = new Set(pnFilter.map(String));
-      rows = rows.filter((r) => allow.has(r.project_name ?? ""));
+    // 多列筛选(AND 叠加)
+    for (const { key } of SORTABLE_FIELDS) {
+      const sel = columnFilters[key];
+      if (sel && sel.length) {
+        const allow = new Set(sel.map(String));
+        rows = rows.filter((r) => allow.has(fieldText(r, key)));
+      }
     }
-    // 任务主题多选筛选(精确匹配)
-    const ttFilter = columnFilters.task_theme;
-    if (ttFilter && ttFilter.length) {
-      const allow = new Set(ttFilter.map(String));
-      rows = rows.filter((r) => allow.has(r.task_theme ?? ""));
-    }
-    // 项目名称排序:升序 / 降序,第三次点击取消
-    if (columnSorter.field === "project_name" && columnSorter.order) {
-      const dir = columnSorter.order === "ascend" ? 1 : -1;
-      rows = [...rows].sort(
-        (a, b) =>
-          (a.project_name ?? "").localeCompare(b.project_name ?? "", "zh") * dir
-      );
-    }
-    // 任务主题排序:升序 / 降序,第三次点击取消
-    if (columnSorter.field === "task_theme" && columnSorter.order) {
-      const dir = columnSorter.order === "ascend" ? 1 : -1;
-      rows = [...rows].sort(
-        (a, b) =>
-          (a.task_theme ?? "").localeCompare(b.task_theme ?? "", "zh") * dir
-      );
+    // 单列排序:升序 / 降序,第三次点击取消(空值固定排最后,不受升降序影响)
+    const { field, order } = columnSorter;
+    if (field && order) {
+      const spec = SORTABLE_FIELDS.find((f) => f.key === field);
+      if (spec) {
+        const dir = order === "ascend" ? 1 : -1;
+        rows = [...rows].sort((a, b) => {
+          const va = fieldText(a, field);
+          const vb = fieldText(b, field);
+          if (!va && !vb) return 0;
+          if (!va) return 1;
+          if (!vb) return -1;
+          return compareNonEmpty(va, vb, spec.kind) * dir;
+        });
+      }
     }
     return rows;
   }, [rawData, columnFilters, columnSorter]);
+
+  /** 生成某字段的 Excel 式表头属性(排序 + 多选筛选,受控)。 */
+  const sortableColProps = (key: string) => ({
+    sorter: true as const,
+    sortOrder: columnSorter.field === key ? columnSorter.order : undefined,
+    filters: fieldFiltersMap[key] ?? [],
+    filterMultiple: true,
+    filterSearch: true,
+    filteredValue: columnFilters[key] ?? null,
+    onFilter: () => true, // 实际过滤在 processedData 外部完成
+  });
 
   // 构建带分组行的 displayData(项目切换时插入独占一行的分组行)
   const displayData = useMemo<DisplayRow[]>(() => {
@@ -240,17 +280,7 @@ export default function WeeklyPlanPage() {
       width: 140,
       fixed: "left",
       onCell: hiddenCell,
-      // Excel 式表头:排序(升/降/取消) + 多选筛选(下拉内可搜索)
-      sorter: true,
-      sortOrder:
-        columnSorter.field === "project_name"
-          ? columnSorter.order
-          : undefined,
-      filters: projectNameFilters,
-      filterMultiple: true,
-      filterSearch: true,
-      filteredValue: columnFilters.project_name ?? null,
-      onFilter: () => true, // 实际过滤在 processedData 外部完成
+      ...sortableColProps("project_name"),
       render: (v: string | null) => v ?? "—",
     },
     {
@@ -260,6 +290,7 @@ export default function WeeklyPlanPage() {
       width: 80,
       align: "center",
       onCell: hiddenCell,
+      ...sortableColProps("plan_type"),
       render: (v: string | null) => v ?? "—",
     },
     {
@@ -268,6 +299,7 @@ export default function WeeklyPlanPage() {
       key: "detailed_stage",
       width: 90,
       onCell: hiddenCell,
+      ...sortableColProps("detailed_stage"),
       render: (v: string | null) => v ?? "—",
     },
     {
@@ -276,6 +308,7 @@ export default function WeeklyPlanPage() {
       key: "module_name",
       width: 110,
       onCell: hiddenCell,
+      ...sortableColProps("module_name"),
       render: (v: string | null) => v ?? "—",
     },
     {
@@ -284,15 +317,7 @@ export default function WeeklyPlanPage() {
       key: "task_theme",
       width: 100,
       onCell: hiddenCell,
-      // Excel 式表头:排序(升/降/取消) + 多选筛选(下拉内可搜索)
-      sorter: true,
-      sortOrder:
-        columnSorter.field === "task_theme" ? columnSorter.order : undefined,
-      filters: taskThemeFilters,
-      filterMultiple: true,
-      filterSearch: true,
-      filteredValue: columnFilters.task_theme ?? null,
-      onFilter: () => true, // 实际过滤在 processedData 外部完成
+      ...sortableColProps("task_theme"),
       render: (v: string | null) => v ?? "—",
     },
     {
@@ -301,6 +326,7 @@ export default function WeeklyPlanPage() {
       key: "task_description",
       width: 180,
       onCell: hiddenCell,
+      ...sortableColProps("task_description"),
       render: (v: string | null) => (
         <div className="whitespace-normal break-words" style={{ maxWidth: 160 }}>
           {v ?? "—"}
@@ -314,6 +340,7 @@ export default function WeeklyPlanPage() {
       width: 70,
       align: "center",
       onCell: hiddenCell,
+      ...sortableColProps("work_load"),
       render: (v: string | null) => v ?? "—",
     },
     {
@@ -326,6 +353,7 @@ export default function WeeklyPlanPage() {
           width: 50,
           align: "center",
           onCell: hiddenCell,
+          ...sortableColProps("week_number"),
           render: (v: number | null) => v ?? "—",
         },
         {
@@ -334,6 +362,7 @@ export default function WeeklyPlanPage() {
           key: "user_name",
           width: 70,
           onCell: hiddenCell,
+          ...sortableColProps("user_name"),
           render: (v: string | null) => v ?? "—",
         },
         {
@@ -342,6 +371,7 @@ export default function WeeklyPlanPage() {
           key: "start_time",
           width: 90,
           onCell: hiddenCell,
+          ...sortableColProps("start_time"),
           render: (v: string | null) => fmtDate(v),
         },
         {
@@ -350,6 +380,7 @@ export default function WeeklyPlanPage() {
           key: "end_time",
           width: 90,
           onCell: hiddenCell,
+          ...sortableColProps("end_time"),
           render: (v: string | null) => fmtDate(v),
         },
       ],
@@ -364,6 +395,7 @@ export default function WeeklyPlanPage() {
           width: 60,
           align: "center",
           onCell: hiddenCell,
+          ...sortableColProps("status"),
           render: (v: string | null) =>
             v ? (
               <Tag color={STATUS_COLOR[v] ?? "default"}>{v}</Tag>
@@ -377,6 +409,7 @@ export default function WeeklyPlanPage() {
           key: "actual_start_time",
           width: 90,
           onCell: hiddenCell,
+          ...sortableColProps("actual_start_time"),
           render: (v: string | null) => fmtDate(v),
         },
         {
@@ -385,6 +418,7 @@ export default function WeeklyPlanPage() {
           key: "actual_end_time",
           width: 90,
           onCell: hiddenCell,
+          ...sortableColProps("actual_end_time"),
           render: (v: string | null) => fmtDate(v),
         },
         {
