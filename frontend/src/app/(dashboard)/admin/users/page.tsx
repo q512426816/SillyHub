@@ -66,7 +66,7 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 const DEFAULT_INITIAL_PASSWORD = "SillyHub@123";
 
 export default function AdminUsersPage() {
-  const { user: currentUser } = useSession();
+  const currentUser = useSession((s) => s.user);
   const canWrite = !!currentUser?.is_platform_admin ||
     !!currentUser?.permissions?.includes("user:write");
   const canLoginManage = !!currentUser?.is_platform_admin ||

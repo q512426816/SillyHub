@@ -105,7 +105,29 @@ class DaemonWsHub:
                 total_connected=len(self._connections),
             )
 
-    # ── Message sending ───────────────────────────────────────────────────────
+    async def _evict_stale(self, daemon_id: uuid.UUID, ws: WebSocket) -> bool:
+        """Evict a connection only if it's still the one we tried to send on.
+
+        R4（并发修复）：``send_to_runtime`` 在锁外持 ws 引用执行 send；若期间
+        :meth:`connect` 用新 ws 替换了旧连接（daemon 快速重连），send 失败不该
+        逐掉新连接、也不该取消属于新连接/其它 daemon 的在途 RPC。按对象身份
+        check-and-remove：仅当当前存储的 ws 仍是失败的那个才清理并取消在途 RPC。
+        返回是否真正执行了逐出。
+        """
+        async with self._lock:
+            if self._connections.get(daemon_id) is not ws:
+                # 已被新连接替换——失败属于陈旧 ws，新连接无辜，不清理。
+                return False
+            self._connections.pop(daemon_id, None)
+
+        # 真正逐出旧连接：取消在途 RPC（awaiters 收 DaemonRuntimeOffline）。
+        await self.cancel_all_pending()
+        log.info(
+            "ws_daemon_disconnected",
+            daemon_id=str(daemon_id),
+            total_connected=len(self._connections),
+        )
+        return True
 
     async def send_to_runtime(
         self,
@@ -117,7 +139,11 @@ class DaemonWsHub:
         Returns True if the message was sent successfully, False otherwise.
         Evicts slow connections whose send buffer is full.
         """
-        ws = self._connections.get(daemon_id)
+        # R4（并发修复，2026-07-24）：锁内快照 ws 引用。若 send 期间 connect() 用新 ws
+        # 替换了旧连接（daemon 快速重连），失败时按对象身份 check-and-remove
+        # （_evict_stale），不逐掉新连接、也不取消属于新连接/其它 daemon 的在途 RPC。
+        async with self._lock:
+            ws = self._connections.get(daemon_id)
         if ws is None:
             log.warning("ws_send_no_connection", daemon_id=str(daemon_id))
             return False
@@ -133,7 +159,7 @@ class DaemonWsHub:
                 "ws_send_timeout_evicting",
                 daemon_id=str(daemon_id),
             )
-            await self.disconnect(daemon_id)
+            await self._evict_stale(daemon_id, ws)
             return False
         except Exception:
             log.warning(
@@ -141,7 +167,7 @@ class DaemonWsHub:
                 daemon_id=str(daemon_id),
                 exc_info=True,
             )
-            await self.disconnect(daemon_id)
+            await self._evict_stale(daemon_id, ws)
             return False
 
     async def broadcast(
@@ -156,12 +182,18 @@ class DaemonWsHub:
         ``exclude`` is a set of daemon_ids to skip.
         """
         exclude = exclude or set()
-        targets = [did for did in self._connections if did not in exclude]
-        sent = 0
-        for did in targets:
-            if await self.send_to_runtime(did, message):
-                sent += 1
-        return sent
+        # P8（性能）：锁内快照 targets（防 connect/disconnect 并发改 dict 大小），再
+        # asyncio.gather 并发扇出——原顺序 await 会被单个慢/卡顿 daemon 拖到 N×_SEND_TIMEOUT。
+        # send_to_runtime 已自处理超时/异常并返回 bool，互不阻塞。
+        async with self._lock:
+            targets = [did for did in self._connections if did not in exclude]
+        if not targets:
+            return 0
+        results = await asyncio.gather(
+            *(self.send_to_runtime(did, message) for did in targets),
+            return_exceptions=True,
+        )
+        return sum(1 for r in results if r is True)
 
     # ── High-level helpers ────────────────────────────────────────────────────
 

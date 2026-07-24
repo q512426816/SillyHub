@@ -47,6 +47,9 @@ class PlanTask(BaseModel, table=True):
     __table_args__ = (
         Index("ix_ppm_plan_task_user_status", "user_id", "status"),
         Index("ix_ppm_plan_task_project", "project_id"),
+        # Wave B（性能）：ps_plan_node_detail_id 过滤在 7+ 热点（详情页加载/保存、导入提交、
+        # 任务级联、三级查询），缺索引全表扫 ppm_plan_task。
+        Index("ix_ppm_plan_task_detail", "ps_plan_node_detail_id"),
     )
 
     id: uuid.UUID = Field(

@@ -148,7 +148,16 @@ class LeaseService:
         Returns a tuple of (lease, payload) where payload contains the
         execution context built from the associated AgentRun.
         """
-        lease = await self._session.get(DaemonTaskLease, lease_id)
+        # R1（并发修复，2026-07-24 代码健壮性优化）：FOR UPDATE 锁定 lease 行直到
+        # commit，杜绝两个 daemon 同时 claim 同一 lease 的 TOCTOU——都读到 pending→
+        # 都过检查→都写不同 claim_token→都拿走工作区上下文/密钥（第二个 daemon 后续
+        # start 才失败，但可能已开始执行）。对齐 session/service.py:1225 的 with_for_update
+        # 用法；SQLite 上为 no-op（测试不验证并发），Postgres 上加行锁。
+        lease = (
+            await self._session.execute(
+                select(DaemonTaskLease).where(DaemonTaskLease.id == lease_id).with_for_update()
+            )
+        ).scalar_one_or_none()
         if lease is None:
             raise DaemonLeaseNotFound(
                 f"Daemon task lease '{lease_id}' not found.",
@@ -717,9 +726,18 @@ class LeaseService:
         can inspect them for follow-up actions (e.g. lease expiry handling).
         """
         now = datetime.now(UTC)
-        stmt = select(DaemonTaskLease).where(
-            col(DaemonTaskLease.status).in_(["claimed", "pending"]),
-            col(DaemonTaskLease.lease_expires_at) < now,
+        # R3（并发修复）+ P14（有界）：FOR UPDATE 锁定待过期 lease 直到 commit，
+        # 防止两个并发 expire cron 都选到同一批→都标 expired→都触发 handle_lease_expiry
+        # 造重复新 pending lease（attempt_number 重复+1、AgentRun 被重置两次、唤醒发两次）。
+        # limit(200) 让后端宕机积压的大批量分批在后续 cron tick 处理（GC 重跑兜底）。
+        stmt = (
+            select(DaemonTaskLease)
+            .where(
+                col(DaemonTaskLease.status).in_(["claimed", "pending"]),
+                col(DaemonTaskLease.lease_expires_at) < now,
+            )
+            .with_for_update()
+            .limit(200)
         )
         expired = list((await self._session.execute(stmt)).scalars().all())
         for lease in expired:
@@ -732,7 +750,9 @@ class LeaseService:
 
     # ── Lease expiry / rollback ────────────────────────────────────────────
 
-    async def handle_lease_expiry(self, agent_run_id: UUID) -> None:
+    async def handle_lease_expiry(
+        self, agent_run_id: UUID, *, lease: DaemonTaskLease | None = None
+    ) -> None:
         """Handle a single lease expiry: rollback or fail the associated AgentRun.
 
         Decision logic:
@@ -746,15 +766,19 @@ class LeaseService:
         ``self._facade`` 反向委托。
         """
         # -- Look up the most recent expired lease for this agent_run_id -----
-        lease_stmt = (
-            select(DaemonTaskLease)
-            .where(
-                col(DaemonTaskLease.agent_run_id) == agent_run_id,
-                col(DaemonTaskLease.status) == "expired",
+        # P10（性能）：批处理路径（handle_expired_leases_batch）已持有刚标 expired 的
+        # lease 对象，调用方传入即可跳过按 agent_run_id 重查（每个 GC tick N 次冗余
+        # SELECT+排序）。非 batch 调用（lease=None）仍按 agent_run_id 查最近 expired lease。
+        if lease is None:
+            lease_stmt = (
+                select(DaemonTaskLease)
+                .where(
+                    col(DaemonTaskLease.agent_run_id) == agent_run_id,
+                    col(DaemonTaskLease.status) == "expired",
+                )
+                .order_by(col(DaemonTaskLease.updated_at).desc())
             )
-            .order_by(col(DaemonTaskLease.updated_at).desc())
-        )
-        lease = (await self._session.execute(lease_stmt)).scalars().first()
+            lease = (await self._session.execute(lease_stmt)).scalars().first()
 
         if lease is None:
             log.warning(
@@ -880,7 +904,7 @@ class LeaseService:
                 continue
 
             try:
-                await self.handle_lease_expiry(lease.agent_run_id)
+                await self.handle_lease_expiry(lease.agent_run_id, lease=lease)
             except Exception:
                 log.exception(
                     "handle_expired_leases_single_failed",

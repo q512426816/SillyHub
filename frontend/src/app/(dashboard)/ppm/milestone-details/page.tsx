@@ -179,7 +179,7 @@ export function modeForStatus(status: string): DrawerMode {
 export default function MilestoneDetailsPage() {
   const params = useSearchParams();
   const planId = params.get("plan") ?? "";
-  const { user: currentUser } = useSession();
+  const currentUser = useSession((s) => s.user);
   const currentUserId = currentUser?.id ?? "";
 
   const [psNodes, setPsNodes] = useState<PsPlanNode[]>([]);

@@ -164,7 +164,12 @@ class AgentRunWorkspace(BaseModel, table=True):
     """M:N association between agent runs and workspaces."""
 
     __tablename__ = "agent_run_workspaces"
-    __table_args__ = (Index("ix_agent_run_workspaces_workspace", "workspace_id"),)
+    __table_args__ = (
+        Index("ix_agent_run_workspaces_workspace", "workspace_id"),
+        # Wave B（性能，2026-07-24 代码健壮性优化）：agent_run_id 维度查询（patch apply /
+        # 工作区对话列表 / run→workspace 反查）高频，缺索引全表扫。
+        Index("ix_agent_run_workspaces_agent_run_id", "agent_run_id"),
+    )
 
     agent_run_id: uuid.UUID = Field(
         sa_column=Column(

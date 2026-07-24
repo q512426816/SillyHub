@@ -280,6 +280,15 @@ export class ResilienceService {
           }
         }
       }
+    } catch (e) {
+      // D4（健壮性，2026-07-24）：外层兜底——runs()/pendingByRun/终态校验里的
+      // markDelivered 等抛异常时，内层 per-entry catch 不覆盖；本方法经 void 调用，
+      // 未捕获会成 unhandled rejection 被 cli.ts 全局处理器静默吞掉、drain 批次中途终止。
+      // 记 warn 不重抛（drain 是尽力而为的后台任务；_draining 由 finally 复位，
+      // 下轮 heartbeat healthy 会重跑）。
+      this._logger.warn('drain_outbox_unexpected_failed', {
+        error: this._causeForLog(e),
+      });
     } finally {
       this._draining = false;
     }

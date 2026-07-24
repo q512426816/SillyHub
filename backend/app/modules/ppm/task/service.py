@@ -258,6 +258,15 @@ class PlanTaskService:
         返回的 ``id`` 作为后续 execute(action=submit/complete) 的 ``task_execute_id``。
         """
         plan = await self.get(plan_task_id)
+        # R6（并发修复，2026-07-24）：FOR UPDATE 锁定 plan 行直到 commit，杜绝双击"启动"
+        # 产生重复 in-flight TaskExecute（1 plan : 2 execute，第二条 status=30 永挂）。
+        # 第二个请求阻塞到第一个 commit（status→进行中）后重读，看到非"未开始"即 raise。
+        # 对齐 lease/auth 的 with_for_update；SQLite 为 no-op，Postgres 加行锁。
+        plan = (
+            await self._session.execute(
+                select(PlanTask).where(PlanTask.id == plan_task_id).with_for_update()
+            )
+        ).scalar_one()
         if plan.status != "未开始":
             raise TaskError(
                 f"仅未开始状态可启动(current={plan.status})",

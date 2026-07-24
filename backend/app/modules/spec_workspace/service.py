@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -154,10 +155,17 @@ class SpecWorkspaceService:
         try:
             return await self.get(workspace_id)
         except SpecWorkspaceNotFound:
-            return await self.create(
-                workspace_id,
-                SpecWorkspaceCreate(strategy="platform-managed"),
-            )
+            try:
+                return await self.create(
+                    workspace_id,
+                    SpecWorkspaceCreate(strategy="platform-managed"),
+                )
+            except IntegrityError:
+                # R10（并发修复，2026-07-24）：并发 init-dispatch 对同一 workspace 都
+                # NotFound→都 create，第二个撞 ix_spec_workspaces_workspace_id 唯一约束。
+                # rollback 后重查拿对方建好的行（幂等收口），而非未处理 500。
+                await self._session.rollback()
+                return await self.get(workspace_id)
 
     # ── Update ─────────────────────────────────────────────────────────────
 

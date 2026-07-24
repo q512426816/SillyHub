@@ -148,7 +148,7 @@ function dayStrToApi(v: string | null | undefined): string | null {
 }
 
 export default function ProblemListMobilePage() {
-  const { user: currentUser } = useSession();
+  const currentUser = useSession((s) => s.user);
   const currentUserId = currentUser?.id ?? "";
 
   // 归属:默认「全部」（对齐桌面 ql-20260722 调整）

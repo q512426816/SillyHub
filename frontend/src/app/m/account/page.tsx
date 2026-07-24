@@ -23,7 +23,7 @@ import { useSession } from "@/stores/session";
 
 export default function MobileAccountPage() {
   const router = useRouter();
-  const { user } = useSession();
+  const user = useSession((s) => s.user);
   const [loading, setLoading] = useState(false);
 
   // 修改密码表单

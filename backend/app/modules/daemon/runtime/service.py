@@ -430,6 +430,29 @@ class RuntimeService:
         )
         return list((await self._session.execute(stmt)).scalars().all())
 
+    async def _get_runtimes_by_instances(
+        self, instance_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, list[DaemonRuntime]]:
+        """Batch variant of :meth:`_get_runtimes_by_instance` (N+1 规避).
+
+        B2（性能，2026-07-24 代码健壮性优化）：一次 IN 查询取多个 instance 的 runtimes
+        并按 ``daemon_instance_id`` 分组，供 list_daemon_instances 等"列表 + 每行 join
+        runtimes"场景取代循环内逐实例查询。对齐 list_machines 的 runtimes_by_instance 模式。
+        """
+        if not instance_ids:
+            return {}
+        stmt = (
+            select(DaemonRuntime)
+            .where(col(DaemonRuntime.daemon_instance_id).in_(instance_ids))
+            .order_by(col(DaemonRuntime.provider))
+        )
+        rows = list((await self._session.execute(stmt)).scalars().all())
+        grouped: dict[uuid.UUID, list[DaemonRuntime]] = {}
+        for rt in rows:
+            if rt.daemon_instance_id is not None:
+                grouped.setdefault(rt.daemon_instance_id, []).append(rt)
+        return grouped
+
     async def list_instances(
         self,
         user_id: uuid.UUID,

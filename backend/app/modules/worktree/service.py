@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -109,7 +110,8 @@ class WorktreeService:
             self._exec_env.write_askpass(lease_root, token)
         except Exception:
             await self._session.rollback()
-            self._exec_env.cleanup(lease_root)
+            # Wave C（性能）：cleanup 是 shutil.rmtree 整个 git checkout，同步阻塞事件循环，移到线程。
+            await asyncio.to_thread(self._exec_env.cleanup, lease_root)
             raise
 
         await self._session.commit()
@@ -148,7 +150,8 @@ class WorktreeService:
             except Exception:
                 log.warning("worktree_remove_failed", lease_id=str(lease_id))
             self._exec_env.shred_askpass(lease_root)
-            self._exec_env.cleanup(lease_root)
+            # Wave C（性能）：cleanup 是 shutil.rmtree 整个 checkout，移到线程避免阻塞事件循环。
+            await asyncio.to_thread(self._exec_env.cleanup, lease_root)
 
         lease.status = "released"
         lease.released_at = datetime.now(UTC)

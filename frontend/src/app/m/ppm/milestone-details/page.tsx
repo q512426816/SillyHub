@@ -62,7 +62,7 @@ export default function MilestoneDetailsMobilePage() {
   const params = useSearchParams();
   const planId = params.get("plan") ?? "";
   const { toast, showToast } = useToast();
-  const { user: currentUser } = useSession();
+  const currentUser = useSession((s) => s.user);
   const currentUserId = currentUser?.id ?? "";
 
   const [plan, setPlan] = useState<PsProjectPlan | null>(null);

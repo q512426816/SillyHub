@@ -77,7 +77,7 @@ const IS_URGENT_OPTIONS = [
 ];
 
 export default function ProblemListPage() {
-  const { user: currentUser } = useSession();
+  const currentUser = useSession((s) => s.user);
   const currentUserId = currentUser?.id ?? "";
   // 归属:默认「全部」(ql-20260722 调整,不再默认只看我的)
   const [view, setView] = useState<"mine" | "all">("all");

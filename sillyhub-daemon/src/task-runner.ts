@@ -884,12 +884,23 @@ export class TaskRunner {
       // 可中断 sleep：parent 或 stop 任一 abort 立即跳出
       // 注意：若信号已 aborted（race），Promise executor 同步 resolve，避免悬挂。
       if (parentSignal.aborted || stopSignal.aborted) return;
+      // D1（健壮性修复，2026-07-24）：定时器正常触发时也必须移除 abort 监听器——
+      // 原 {once:true} 仅在 abort 事件触发时移除该信号上的监听器，定时器 resolve 路径
+      // 两个监听器永不移除 → 每个 lease 跑超 ~25s 就累积 10+ 监听器触发
+      // MaxListenersExceededWarning + 内存膨胀；abort 时未触发的那条信号上的监听器也泄漏。
+      // done 守卫 + onAbort 统一在两条路径清理两个信号 + 清定时器。
       await new Promise<void>((resolve) => {
-        const t = setTimeout(resolve, intervalMs);
+        let done = false;
+        let timer: ReturnType<typeof setTimeout> | undefined;
         const onAbort = () => {
-          clearTimeout(t);
+          if (done) return;
+          done = true;
+          if (timer) clearTimeout(timer);
+          parentSignal.removeEventListener('abort', onAbort);
+          stopSignal.removeEventListener('abort', onAbort);
           resolve();
         };
+        timer = setTimeout(onAbort, intervalMs);
         parentSignal.addEventListener('abort', onAbort, { once: true });
         stopSignal.addEventListener('abort', onAbort, { once: true });
       });

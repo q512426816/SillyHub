@@ -92,7 +92,7 @@ function Field({
 }
 
 export default function TaskPlansPage() {
-  const { user: currentUser } = useSession();
+  const currentUser = useSession((s) => s.user);
   const notify = useNotify();
 
   const [view, setView] = useState<ViewMode>("all");

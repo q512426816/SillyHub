@@ -715,7 +715,17 @@ export class CodexAppServerDriver implements InteractiveDriver {
         sessionPermission: ctx.sessionPermission,
       });
 
-      const events = h.adapter.parse(line);
+      // D2（健壮性修复，2026-07-24）：parse 包 try/catch——畸形行让 adapter.parse 抛
+      // 异常时，readline 'line' 回调未捕获异常会被 cli.ts 全局处理器吞掉，但
+      // currentTurnPromise 永不 resolve → 交互式会话永久卡死。对齐 task-runner.ts:1420：
+      // 记 warn 后 return，让行循环存活、当前 turn 可正常收尾。
+      let events: ReturnType<typeof h.adapter.parse> | null = null;
+      try {
+        events = h.adapter.parse(line);
+      } catch (e) {
+        console.warn('codex_driver: parse_error', line.slice(0, 100), e);
+        return;
+      }
       if (!events) return;
 
       for (const ev of events) {

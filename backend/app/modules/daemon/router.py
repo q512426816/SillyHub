@@ -900,13 +900,15 @@ async def list_daemon_instances(
     await svc.cleanup_stale_runtimes()
     instances = await svc.list_instances(user.id)
 
+    # B2（性能，N+1 规避）：原循环每实例单独查 runtimes（+ 每次重 import RuntimeService），
+    # 改成一次 IN 查询按 daemon_instance_id 分组。对齐 list_machines 的 runtimes_by_instance。
+    from app.modules.daemon.runtime.service import RuntimeService
+
+    rt_svc = RuntimeService(session)
+    runtimes_by_instance = await rt_svc._get_runtimes_by_instances([inst.id for inst in instances])
     reads: list[DaemonInstanceRead] = []
     for inst in instances:
-        # Fetch provider runtimes for this daemon instance
-        from app.modules.daemon.runtime.service import RuntimeService
-
-        rt_svc = RuntimeService(session)
-        provider_rows = await rt_svc._get_runtimes_by_instance(inst.id)
+        provider_rows = runtimes_by_instance.get(inst.id, [])
         reads.append(
             DaemonInstanceRead(
                 id=inst.id,

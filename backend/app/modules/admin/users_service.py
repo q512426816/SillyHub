@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 
 from fastapi import HTTPException
 from sqlalchemy import exists, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -192,7 +193,14 @@ class UserService:
             updated_at=now,
         )
         self.session.add(user)
-        await self.session.flush()
+        try:
+            await self.session.flush()
+        except IntegrityError:
+            # R9（并发修复，2026-07-24）：并发建同 username 时预检双通过、flush 撞
+            # ux_users_username 唯一约束。rollback 后重跑预检转友好 409，而非未处理 500。
+            await self.session.rollback()
+            await self._assert_username_available(resolved_username)
+            raise  # 不可达：_assert_username_available 冲突时必 raise
 
         if organization_ids:
             await self._validate_organizations(organization_ids)

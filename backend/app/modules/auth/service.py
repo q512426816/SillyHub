@@ -279,7 +279,19 @@ class AuthService:
                 user = await self._db.get(User, session.user_id)
                 if user is None or user.deleted_at is not None or user.status != "active":
                     raise AuthUserInactive("User account is no longer active.")
-                return user, session, False
+                # R2（并发安全修复，2026-07-24 代码健壮性优化）：锁定匹配的 session 行直到
+                # commit，杜绝两个并发 refresh 持同一 token 都读到"存活"→都签发新对、
+                # 复用检测永不触发（安全漏洞）。锁后复查 revoked_at：若锁期间已被并发
+                # refresh rotate，则 break 转入下方 revoked 检测（grace 续期或重放吊销），
+                # 由该路径保证同一 token 只产生单一有效对。SQLite 上 with_for_update 为 no-op。
+                locked = (
+                    await self._db.execute(
+                        select(SessionRow).where(col(SessionRow.id) == session.id).with_for_update()
+                    )
+                ).scalar_one_or_none()
+                if locked is not None and locked.revoked_at is None:
+                    return user, locked, False
+                break  # 锁期间被并发 rotate → 走 revoked 检测路径（grace 续期或重放吊销）
 
         # live 未命中 → 查 revoked session(可能是 grace 续期,也可能是重放攻击)。
         revoked = await self._find_revoked_session(refresh_token)

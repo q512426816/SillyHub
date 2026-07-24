@@ -529,6 +529,14 @@ class ProblemService:
         - problem_task_id 关联 (与 plan_task_id 互斥，见 TaskExecute 模型)
         """
         problem = await self.get_problem(problem_id)
+        # R7（并发修复，2026-07-24）：FOR UPDATE 锁定 problem 行直到 commit，杜绝双击
+        # "开始"产生重复 in-flight TaskExecute（1 problem : 2 execute，第二条永挂）。
+        # 对齐 task/service.start；SQLite 为 no-op，Postgres 加行锁。
+        problem = (
+            await self._session.execute(
+                select(PpmProblemList).where(PpmProblemList.id == problem_id).with_for_update()
+            )
+        ).scalar_one()
         if problem.status != ProblemStatus.NEW.value:
             raise ProblemError(
                 f"仅「新建」状态可开始 (current={problem.status})",

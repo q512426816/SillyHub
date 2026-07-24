@@ -149,7 +149,11 @@ class ToolGatewayService:
             policy = default_policy()
 
         # Policy check — raises ToolOperationForbidden on violation
-        ToolPolicyService.check(policy, tool_type, params, lease_root)
+        # Wave C（性能，2026-07-24 代码健壮性优化）：check 内部做同步 socket.getaddrinfo
+        # （SSRF 私网检查），直接在事件循环上跑会阻塞工作协程 + 所有 daemon WS 连接直到
+        # DNS 超时（慢解析器拖垮整个 worker）。check 是纯函数（无 session/DB 状态），
+        # 整块移到线程池；ToolOperationForbidden 异常照常透传给调用方。
+        await asyncio.to_thread(ToolPolicyService.check, policy, tool_type, params, lease_root)
 
         # Apply resource limits
         limits = ToolPolicyService.apply_limits(policy, params)
@@ -245,7 +249,8 @@ class ToolGatewayService:
             return {"result_code": 1, "output": f"File not found: {path_str}"}
 
         try:
-            content = target.read_text(encoding="utf-8", errors="replace")
+            # Wave C（性能）：read_text 同步阻塞 I/O 移到线程，避免大文件读取阻塞事件循环。
+            content = await asyncio.to_thread(target.read_text, encoding="utf-8", errors="replace")
         except OSError as e:
             return {"result_code": 1, "output": f"Read error: {e}"}
 
@@ -261,9 +266,13 @@ class ToolGatewayService:
         content = params.get("content", "")
         target = validate_path(lease_root, path_str, allowed_paths)
 
-        try:
+        def _do_write() -> None:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
+
+        try:
+            # Wave C（性能）：同步文件 I/O 移到线程。
+            await asyncio.to_thread(_do_write)
         except OSError as e:
             return {"result_code": 1, "output": f"Write error: {e}"}
 
@@ -282,7 +291,7 @@ class ToolGatewayService:
         if not target.is_dir():
             return {"result_code": 1, "output": f"Not a directory: {path_str}"}
 
-        try:
+        def _do_list() -> list[str]:
             entries: list[str] = []
             if recursive:
                 for p in sorted(target.rglob("*")):
@@ -294,6 +303,11 @@ class ToolGatewayService:
                     rel = p.relative_to(target)
                     kind = "dir" if p.is_dir() else "file"
                     entries.append(f"{kind}  {rel}")
+            return entries
+
+        try:
+            # Wave C（性能）：rglob/iterdir 同步遍历移到线程（递归列大目录会阻塞事件循环数秒）。
+            entries = await asyncio.to_thread(_do_list)
             output = "\n".join(entries) if entries else "(empty)"
         except OSError as e:
             return {"result_code": 1, "output": f"List error: {e}"}
@@ -313,13 +327,18 @@ class ToolGatewayService:
         if not pattern:
             return {"result_code": 1, "output": "Missing search pattern."}
 
-        try:
+        def _do_search() -> list[str]:
             matches: list[str] = []
             for p in target.rglob("*"):
                 if p.is_file():
                     rel = p.relative_to(target)
                     if fnmatch.fnmatch(str(rel).replace("\\", "/"), f"*{pattern}*"):
                         matches.append(f"file  {rel}")
+            return matches
+
+        try:
+            # Wave C（性能）：rglob 同步遍历移到线程。
+            matches = await asyncio.to_thread(_do_search)
             output = "\n".join(matches) if matches else "No matches found."
         except OSError as e:
             return {"result_code": 1, "output": f"Search error: {e}"}

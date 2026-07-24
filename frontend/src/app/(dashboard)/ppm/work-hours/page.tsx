@@ -90,7 +90,7 @@ function Field({
 }
 
 export default function WorkHoursPage() {
-  const { user: currentUser } = useSession();
+  const currentUser = useSession((s) => s.user);
   const { toast, showToast } = useToast();
 
   const [rows, setRows] = useState<WorkHour[]>([]);

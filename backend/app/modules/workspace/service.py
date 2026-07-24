@@ -7,6 +7,7 @@ HTTP <-> service calls.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from datetime import UTC, datetime
@@ -499,10 +500,24 @@ class WorkspaceService:
                         details={"slug": new_slug},
                     )
 
+            _upd_slug = changes.get("slug")
+            _upd_root = changes.get("root_path")
             for field, value in changes.items():
                 setattr(ws, field, value)
             ws.updated_at = datetime.now(UTC)
-            await self._session.commit()
+            try:
+                await self._session.commit()
+            except IntegrityError as exc:
+                # R14（并发修复，2026-07-24）：并发 update 把两个 workspace 改成同 slug
+                # （或 root_path）时预检双通过、commit 撞唯一约束。rollback 后复用
+                # _translate_integrity_error 转友好 409（对齐 create 路径 :218-223），而非 500。
+                await self._session.rollback()
+                self._translate_integrity_error(
+                    exc,
+                    slug=_upd_slug or ws.slug,
+                    root_path=_upd_root or ws.root_path,
+                )
+                raise  # 不可达：_translate_integrity_error 必 raise
             await self._session.refresh(ws)
             log.info(
                 "workspace.updated",
@@ -941,14 +956,20 @@ class WorkspaceService:
         source = Path(sillyspec_path)
         if source.is_dir():
             try:
-                if platform_sillyspec.exists():
-                    shutil.rmtree(platform_sillyspec)
-                shutil.copytree(
-                    str(source),
-                    str(platform_sillyspec),
-                    ignore=shutil.ignore_patterns(".runtime"),
-                    ignore_dangling_symlinks=True,
-                )
+
+                def _do_copy() -> None:
+                    if platform_sillyspec.exists():
+                        shutil.rmtree(platform_sillyspec)
+                    shutil.copytree(
+                        str(source),
+                        str(platform_sillyspec),
+                        ignore=shutil.ignore_patterns(".runtime"),
+                        ignore_dangling_symlinks=True,
+                    )
+
+                # Wave C（性能）：rmtree+copytree 整个 .sillyspec 树（文档/变更/技能），
+                # 同步 I/O 移到线程避免阻塞事件循环数秒。
+                await asyncio.to_thread(_do_copy)
                 log.info(
                     "spec_workspace.sillyspec_copied",
                     workspace_id=str(workspace_id),

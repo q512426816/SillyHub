@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import Select, exists, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -187,7 +188,15 @@ class ProjectMaintenanceService:
             updated_by=operator,
         )
         self._session.add(entity)
-        await self._session.commit()
+        try:
+            await self._session.commit()
+        except IntegrityError:
+            # R8（并发修复，2026-07-24）：并发 create 同 project_code 时预检双通过、
+            # commit 撞 ux_pm_project_maintenance_project_code 唯一约束。rollback 后
+            # 重跑预检转友好 409（PpmProjectCodeDuplicate），而非未处理 500。
+            await self._session.rollback()
+            await self._assert_code_available(data.project_code)
+            raise  # 不可达：_assert_code_available 冲突时必 raise
         await self._session.refresh(entity)
         log.info(
             "ppm_project_created",

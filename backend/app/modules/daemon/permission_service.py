@@ -404,15 +404,11 @@ class DaemonPermissionService:
         row working and matches the session service's fallback 1:1. Returns
         ``None`` only when the runtime row is missing entirely.
         """
-        from app.modules.daemon.model import DaemonRuntime
+        # A1（去重，2026-07-24 代码健壮性优化）：委托 session.service 的单一真相源
+        # （逻辑完全一致，含 D-007 migration window fallback），避免两份实现演进漂移。
+        from app.modules.daemon.session.service import _resolve_daemon_id_for_runtime
 
-        rt = await self._svc._session.get(DaemonRuntime, runtime_id)
-        if rt is None:
-            return None
-        if rt.daemon_instance_id is None:
-            # D-007 migration window: no daemon entity yet -> route by runtime_id.
-            return runtime_id
-        return rt.daemon_instance_id
+        return await _resolve_daemon_id_for_runtime(self._svc._session, runtime_id)
 
     # ── Dialog persistence helper ────────────────────────────────────────────
 

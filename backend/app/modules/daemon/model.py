@@ -300,6 +300,14 @@ class DaemonTaskLease(BaseModel, table=True):
             "lease_expires_at",
             postgresql_where=text("status IN ('claimed', 'pending')"),
         ),
+        # Wave B（性能）：daemon 高频轮询 get_pending_leases 按 runtime_id+status 过滤并
+        # ORDER BY created_at，复合索引覆盖避免每轮 polling 回表+排序。
+        Index(
+            "idx_daemon_task_leases_runtime_status_created",
+            "runtime_id",
+            "status",
+            "created_at",
+        ),
     )
 
     id: uuid.UUID = Field(

@@ -54,7 +54,7 @@ const textareaCls =
   "min-h-[80px] w-full rounded border border-input bg-background px-2.5 py-1.5 text-sm focus:border-ring focus:outline-none";
 
 export default function AdminRolesPage() {
-  const { user } = useSession();
+  const user = useSession((s) => s.user);
   const canWrite = !!user?.is_platform_admin ||
     !!user?.permissions?.includes("role:write");
 
