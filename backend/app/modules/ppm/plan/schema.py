@@ -567,7 +567,12 @@ class WeeklyPlanRow(PydanticModel):
 
 
 class WeeklyPlanPageReq(PageQuery):
-    """项目计划列表查询（分页 + 筛选）。"""
+    """项目计划列表查询（分页 + 筛选）。
+
+    page_size 上限覆盖为 500(前端一次加载全部用于合并单元格)。
+    """
+
+    page_size: int = Field(default=20, ge=1, le=500)
 
     project_name: str | None = None
     status: list[str] | None = None
