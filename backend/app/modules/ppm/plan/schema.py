@@ -572,7 +572,7 @@ class WeeklyPlanPageReq(PageQuery):
     page_size 上限覆盖为 500(前端一次加载全部用于合并单元格)。
     """
 
-    page_size: int = Field(default=20, ge=1, le=500)
+    page_size: int = Field(default=20, ge=1, le=10000)
 
     project_name: str | None = None
     status: list[str] | None = None

@@ -60,7 +60,7 @@ export default function WeeklyPlanPage() {
   const [searchNonce, setSearchNonce] = useState(0);
 
   const buildReq = useCallback((): WeeklyPlanPageReq => {
-    const req: WeeklyPlanPageReq = { page: 1, page_size: 500 };
+    const req: WeeklyPlanPageReq = { page: 1, page_size: 10000 };
     if (projectName.trim()) req.project_name = projectName.trim();
     if (statusFilter.length) req.status = statusFilter;
     if (dateRange && dateRange[0])
@@ -476,7 +476,8 @@ export default function WeeklyPlanPage() {
           loading={loading}
           size="small"
           bordered
-          scroll={{ x: "max-content", y: "calc(100vh - 380px)" }}
+          virtual
+          scroll={{ x: "max-content", y: 600 }}
           pagination={false}
           rowClassName={(_r: DisplayRow, idx: number) =>
             idx % 2 === 1 ? "bg-muted/30" : ""
