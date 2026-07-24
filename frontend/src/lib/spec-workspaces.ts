@@ -231,20 +231,3 @@ export async function listPendingSync(
   );
 }
 
-// ── Spec Workspace Update ──
-
-export interface SpecWorkspaceUpdateInput {
-  strategy?: SpecStrategy;
-  repo_sillyspec_path?: string | null;
-  profile_version?: string;
-}
-
-export async function updateSpecWorkspace(
-  workspaceId: string,
-  input: SpecWorkspaceUpdateInput,
-): Promise<SpecWorkspace> {
-  return apiFetch<SpecWorkspace>(
-    `/api/workspaces/${workspaceId}/spec-workspace`,
-    { method: "PATCH", json: input },
-  );
-}

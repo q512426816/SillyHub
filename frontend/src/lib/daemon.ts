@@ -217,15 +217,6 @@ export async function updateRuntimeAllowedRoots(
 }
 
 /**
- * 在线 daemon runtime 列表（task-10/11，2026-06-18-workspace-client-path）。
- * 用于 daemon-client workspace 创建时选择目标 daemon。
- */
-export async function listOnlineRuntimes(): Promise<DaemonRuntimeRead[]> {
-  const all = await listDaemonRuntimes();
-  return all.filter((r) => r.status === "online");
-}
-
-/**
  * 目录条目（task-11 list_dir RPC 响应，FR-03 / D-005@v1）。
  */
 export interface DirEntry {

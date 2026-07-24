@@ -32,15 +32,6 @@ export type TopologyEdge = Schemas["TopologyEdge"];
 
 export type TopologyResponse = Schemas["TopologyResponse"];
 
-// ── Workspace CRUD ──
-
-export async function scanWorkspace(rootPath: string): Promise<ScanResult> {
-  return apiFetch<ScanResult>("/api/workspaces/scan", {
-    method: "POST",
-    json: { root_path: rootPath },
-  });
-}
-
 // task-11：对齐 OpenAPI 生成类型。
 export type ScanGenerateResponse = Schemas["ScanGenerateResponse"];
 
@@ -62,12 +53,6 @@ export async function scanGenerate(
       ...(daemonId ? { daemon_id: daemonId } : {}),
       ...(specStrategy ? { spec_strategy: specStrategy } : {}),
     },
-  });
-}
-
-export async function activateWorkspace(workspaceId: string): Promise<Workspace> {
-  return apiFetch<Workspace>(`/api/workspaces/${workspaceId}/activate`, {
-    method: "POST",
   });
 }
 

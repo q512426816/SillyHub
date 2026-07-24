@@ -6,14 +6,10 @@ import type { components } from "@/lib/api-types";
 export type HealthResponse = components["schemas"]["HealthResponse"];
 export type SystemStatus = components["schemas"]["SystemStatusResponse"];
 
-// 从生成类型推导的子类型，保持 health-card.tsx 等 import 向后兼容。
+// 从生成类型推导的子类型。
 export type DependencyStatus = HealthResponse["db"];
 export type OverallStatus = HealthResponse["status"];
 
 export async function getHealth(): Promise<HealthResponse> {
   return apiFetch<HealthResponse>("/api/health");
-}
-
-export async function getSystemStatus(): Promise<SystemStatus> {
-  return apiFetch<SystemStatus>("/api/system-status");
 }
