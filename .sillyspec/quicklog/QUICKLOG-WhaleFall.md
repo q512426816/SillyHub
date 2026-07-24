@@ -363,3 +363,9 @@ created_at: 2026-07-21T08:48:56
 文件：（见实际改动）
 
 结果：需求：/ppm/weekly-plan 列表表头像 Excel 那样支持排序+多选筛选，先落地项目名称列看效果。根因：原 Table 项目名称列无 sorter/filters 配置，表头仅静态文本；数据已一次性全前端加载(page_size=10000)但未提供列级排序/筛选入口。方案：项目名称列加 sorter(升/降/第三次取消)+filters(多选 filterSearch 下拉内可搜，选项从 rawData 动态去重 localeCompare 排序)；新增受控状态 columnFilters/columnSorter，过滤+排序在 processedData useMemo 外部完成(不依赖 antd 内部 onFilter——virtual 虚拟列表+分组行 colSpan=19 独占行组合下外部计算更稳)，分组行序号随之重算；Table onChange 统一回写状态。结果：tsc --noEmit 0 error(修 sorter[0] possibly undefined 用 ?? {} 兜底)；仅改 page.tsx 单文件+同步 ppm.md 变更索引 ql-
+## ql-20260724-002-b4c2 | 2026-07-24 23:15:59 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+
+结果：需求：/ppm/weekly-plan 任务主题列表头也加 Excel 式排序+多选筛选。根因：上轮只落地了项目名称列,任务主题列仍是静态表头无排序/筛选入口。方案：复用 ql-001 的 columnFilters/columnSorter 受控机制 + processedData 外部计算模式,新增 taskThemeFilters(rawData 去重 task_theme)+ processedData 加 task_theme 多选过滤/排序分支(升/降/第三次取消),task_theme 列加 sorter/filters/filterSearch(filteredValue 受控)。多列筛选 AND 叠加、单列排序。结果：tsc --noEmit 0 error；仅改 page.tsx + 同步 ppm.md 变更索引 ql-20260724-002-b4c2。

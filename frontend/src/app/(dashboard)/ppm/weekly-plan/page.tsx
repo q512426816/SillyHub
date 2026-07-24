@@ -128,6 +128,16 @@ export default function WeeklyPlanPage() {
       .map((n) => ({ text: n, value: n }));
   }, [rawData]);
 
+  // 任务主题筛选下拉选项(同上)
+  const taskThemeFilters = useMemo(() => {
+    const names = Array.from(
+      new Set(rawData.map((r) => r.task_theme).filter(Boolean))
+    ) as string[];
+    return names
+      .sort((a, b) => a.localeCompare(b, "zh"))
+      .map((n) => ({ text: n, value: n }));
+  }, [rawData]);
+
   // 应用表头筛选 + 排序后的扁平行(分组行插入前)
   const processedData = useMemo<WeeklyPlanRow[]>(() => {
     let rows = rawData;
@@ -137,12 +147,26 @@ export default function WeeklyPlanPage() {
       const allow = new Set(pnFilter.map(String));
       rows = rows.filter((r) => allow.has(r.project_name ?? ""));
     }
+    // 任务主题多选筛选(精确匹配)
+    const ttFilter = columnFilters.task_theme;
+    if (ttFilter && ttFilter.length) {
+      const allow = new Set(ttFilter.map(String));
+      rows = rows.filter((r) => allow.has(r.task_theme ?? ""));
+    }
     // 项目名称排序:升序 / 降序,第三次点击取消
     if (columnSorter.field === "project_name" && columnSorter.order) {
       const dir = columnSorter.order === "ascend" ? 1 : -1;
       rows = [...rows].sort(
         (a, b) =>
           (a.project_name ?? "").localeCompare(b.project_name ?? "", "zh") * dir
+      );
+    }
+    // 任务主题排序:升序 / 降序,第三次点击取消
+    if (columnSorter.field === "task_theme" && columnSorter.order) {
+      const dir = columnSorter.order === "ascend" ? 1 : -1;
+      rows = [...rows].sort(
+        (a, b) =>
+          (a.task_theme ?? "").localeCompare(b.task_theme ?? "", "zh") * dir
       );
     }
     return rows;
@@ -260,6 +284,15 @@ export default function WeeklyPlanPage() {
       key: "task_theme",
       width: 100,
       onCell: hiddenCell,
+      // Excel 式表头:排序(升/降/取消) + 多选筛选(下拉内可搜索)
+      sorter: true,
+      sortOrder:
+        columnSorter.field === "task_theme" ? columnSorter.order : undefined,
+      filters: taskThemeFilters,
+      filterMultiple: true,
+      filterSearch: true,
+      filteredValue: columnFilters.task_theme ?? null,
+      onFilter: () => true, // 实际过滤在 processedData 外部完成
       render: (v: string | null) => v ?? "—",
     },
     {
