@@ -347,14 +347,12 @@ export default function WeeklyPlanPage() {
       />
 
       <SectionCard bodyPadding="p-2">
-        <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="mb-2 flex items-center justify-end gap-2">
           <Button loading={exporting} onClick={() => void handleExport()}>
             {exporting ? "导出中…" : "导出 Excel"}
           </Button>
-          <div className="flex items-center gap-2">
-            <Button onClick={handleReset}>重置</Button>
-            <Button type="primary" onClick={handleSearch}>搜索</Button>
-          </div>
+          <Button onClick={handleReset}>重置</Button>
+          <Button type="primary" onClick={handleSearch}>搜索</Button>
         </div>
         <div className="grid w-full grid-cols-4 gap-3">
           <div className="flex flex-col gap-1">
