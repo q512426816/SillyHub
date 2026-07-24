@@ -76,7 +76,8 @@ class ParsedProblemRow:
     3 个日期字段（``find_time``/``plan_start_time``/``plan_end_time``）在本层转
     为 ``date``（``date``→``datetime`` 转换由 service 层完成，D-010）。
     ``module_name`` 原文保留；``module_name``→ORM ``model_name`` 映射是 service
-    层的事（D-012）。``pro_type``（bug/change/其他）原样保留。
+    层的事（D-012）。``pro_type`` 中文展示值 (``Bug``/``变更``) 已归一为内部
+    英文值 (``bug``/``change``)；历史英文值及其它自定义值原样保留。
 
     ``images``：该行锚点对应的嵌入图片列表（design §5.1 / D-001）；按
     ``anchor_row`` 匹配 ``row_index`` 挂载，无图行默认空列表，≤3 校验由 task-04
@@ -156,6 +157,17 @@ _FIELD_ALIASES: dict[str, tuple[str, ...]] = {
 # 英文 yes/no、true/false，覆盖用户可能的手填变体；其它非预期值 → None（不污染 DB）。
 _YES_VALUES = frozenset({"是", "1", "true", "yes", "y"})
 _NO_VALUES = frozenset({"否", "0", "false", "no", "n"})
+
+# pro_type 中文展示值 → 内部值映射 (D-002 模板 DV 改中文下拉后的往返闭环)。
+# 模板 ``router._PRO_TYPE_OPTIONS = ["Bug", "变更"]``, 用户从下拉选中文 → 导入时
+# 必须归一到内部英文值, 否则 ``fsm.compute_change_next_node`` 的
+# ``pro_type == BUG_TYPE == "bug"`` 强判断失效 (bug 跳部门经理的逻辑误判)。
+# 历史英文值 (bug/change) 与其它自定义值 (其他/custom) 不在表内, 原样保留 ——
+# 与 ``test_pro_type_kept_verbatim`` 契约一致 (零回归)。
+_PRO_TYPE_CANONICAL: dict[str, str] = {
+    "Bug": "bug",
+    "变更": "change",
+}
 
 
 def _normalize_header(value: object) -> str:
@@ -311,6 +323,21 @@ def _normalize_yes_no(value: object) -> str | None:
     return None
 
 
+def _normalize_pro_type(value: object) -> str | None:
+    """pro_type 归一化：模板 DV 中文展示值 → 内部英文值。
+
+    模板 ``_PRO_TYPE_OPTIONS = ["Bug", "变更"]`` 后，用户从下拉选的中文值需转回
+    内部英文值 (``Bug``→``bug``、``变更``→``change``)，否则 fsm 的
+    ``compute_change_next_node`` (``pro_type == BUG_TYPE == "bug"``) 判断失效。
+    历史英文 ``bug``/``change`` 及其它自定义值 (``其他``/``custom``) 原样保留 ——
+    与 ``test_pro_type_kept_verbatim`` 契约一致，零回归。
+    """
+    text = _normalize_cell(value)
+    if text is None:
+        return None
+    return _PRO_TYPE_CANONICAL.get(text, text)
+
+
 def _infer_mime_type(image: object) -> str:
     """从 openpyxl Image 的 ``format``/``path`` 推断 MIME 类型。
 
@@ -327,20 +354,80 @@ def _infer_mime_type(image: object) -> str:
     return _FORMAT_TO_MIME.get(ext, "application/octet-stream")
 
 
+# EMU (English Metric Unit) → point 换算常数。openpyxl anchor 坐标单位为 EMU,
+# 1 point = 12700 EMU; AbsoluteAnchor 浮动图片用 pos.y (EMU) 估算所属行时需换算。
+_EMU_PER_POINT = 12700
+# Excel 默认行高 (point)。openpyxl ``row_dimensions[r].height`` 为 None (未显式设置)
+# 时用此兜底 —— Calibri 11pt 默认行高 15pt。
+_DEFAULT_ROW_HEIGHT_PT = 15.0
+# AbsoluteAnchor 无 _from 锚点且 pos 不可用时占位的哨兵行号。0 不是有效 1-based 行号,
+# _parse_sheet 兜底时把哨兵桶的图片挂到最后一个数据行 (不丢浮动图片)。
+_UNANCHORED_ROW_SENTINEL = 0
+
+
+def _estimate_row_from_absolute_pos(ws: Worksheet, anchor: object) -> int | None:
+    """AbsoluteAnchor 浮动图片的 EMU y 坐标 → 1-based 行号估算。
+
+    AbsoluteAnchor (用户在 Excel 里拖动后的浮动绝对定位) 无 ``_from`` 锚点, 改读
+    ``anchor.pos.y`` (EMU)。自第 1 行起累减各行高 (point), 累计高度首次超过 y_pt
+    时该行即图片顶部所在行:
+
+    - ``ws.row_dimensions[r].height`` 为显式行高 (point); None → 默认 15pt;
+    - 1 point = 12700 EMU, 故 ``y_pt = pos.y / 12700``;
+    - 多扫 50 行兜底: 图片可能落在 ``ws.max_row`` 之外的尾部空行 (用户在末尾插图)。
+
+    Args:
+        ws: openpyxl Worksheet (读 ``row_dimensions`` / ``max_row``)。
+        anchor: 图片 anchor 对象 (读 ``anchor.pos.y``)。
+
+    Returns:
+        1-based 行号; ``pos`` 缺失 / ``y`` 非正 / 累减越界 → ``None``
+        (由 ``_parse_sheet`` 兜底挂到最后数据行)。
+    """
+    pos = getattr(anchor, "pos", None)
+    if pos is None:
+        return None
+    y_emu = getattr(pos, "y", None)
+    if y_emu is None:
+        return None
+    try:
+        y_pt = float(int(y_emu)) / _EMU_PER_POINT
+    except (TypeError, ValueError):
+        return None
+    if y_pt < 0:
+        return None
+    cumulative = 0.0
+    max_row = getattr(ws, "max_row", 0) or 0
+    # 多扫 50 行兜底 (用户可能在 max_row 之外的空行插图)。
+    scan_limit = max(max_row, 1) + 50
+    for r in range(1, scan_limit + 1):
+        dim_height = ws.row_dimensions[r].height if r <= max_row else None
+        height_pt = float(dim_height) if dim_height and dim_height > 0 else _DEFAULT_ROW_HEIGHT_PT
+        if cumulative + height_pt > y_pt:
+            return r
+        cumulative += height_pt
+    return None
+
+
 def _extract_row_images(ws: Worksheet) -> dict[int, list[ImageExtracted]]:
     """提取 Sheet 内所有嵌入图片，按 1-based 锚点行号分桶返回。
 
     依据 design §5.1 / D-001 / R-01：遍历 ``ws._images``（openpyxl 私有属性，
-    task-01 spike 已验 PIL 可用）。每张图读 ``image.anchor._from.row``——该值
-    0-based，故 ``+1`` 对齐 1-based ``row_index``；跨行图（OneCellAnchor/
-    TwoCellAnchor）统一归 ``_from.row`` 起始行（不读 ``_to.row``）。二进制走
-    ``image._data()``，MIME 走 ``_infer_mime_type``。
+    task-01 spike 已验 PIL 可用）。按 anchor 类型分派行号：
 
-    每图 try/except 兜底（R-05 思想类同：单图解析失败不拖垮整 Sheet）；无
-    ``_from`` 锚点（如 AbsoluteAnchor）或读取异常的图丢弃，不抛出。
+    - ``OneCellAnchor`` / ``TwoCellAnchor``: 读 ``anchor._from.row``（0-based）+1
+      对齐 1-based ``row_index``；跨行图统一归 ``_from.row`` 起始行（不读 ``_to.row``）。
+    - ``AbsoluteAnchor`` (浮动绝对定位, 用户拖动后可能变此类型): 无 ``_from``,
+      改用 ``_estimate_row_from_absolute_pos`` 由 ``pos.y`` (EMU) 估算行号;
+      pos 不可用时落 ``_UNANCHORED_ROW_SENTINEL`` 哨兵桶, 由 ``_parse_sheet``
+      兜底挂到最后数据行 (不丢弃浮动图片)。
+
+    二进制走 ``image._data()``，MIME 走 ``_infer_mime_type``。每图 try/except 兜底
+    (R-05 思想类同：单图解析失败不拖垮整 Sheet)；读取异常的图丢弃，不抛出。
 
     Returns:
-        ``{1-based 行号: [该行锚点的图片 Extracted...]}``；空工作簿/无图 → ``{}``。
+        ``{1-based 行号: [该行锚点的图片 Extracted...]}``；哨兵桶 key=0 表示无法
+        定行的浮动图片 (由调用方兜底)；空工作簿/无图 → ``{}``。
     """
     buckets: dict[int, list[ImageExtracted]] = {}
     # ws._images 是 openpyxl 私有属性；空工作簿/非图 Sheet 可能不存在，getattr 兜底。
@@ -349,11 +436,14 @@ def _extract_row_images(ws: Worksheet) -> dict[int, list[ImageExtracted]]:
         try:
             anchor = img.anchor
             marker = getattr(anchor, "_from", None)
-            if marker is None:
-                # AbsoluteAnchor 等无 _from 锚点（浮动绝对定位）无法关联数据行 → 丢弃。
-                continue
-            # openpyxl anchor._from.row 为 0-based，+1 对齐 1-based 原始行号。
-            anchor_row = int(marker.row) + 1
+            if marker is not None:
+                # OneCellAnchor / TwoCellAnchor: openpyxl _from.row 0-based, +1 对齐。
+                anchor_row = int(marker.row) + 1
+            else:
+                # AbsoluteAnchor (浮动绝对定位): 无 _from, 用 pos.y (EMU) 估算行号。
+                anchor_row = _estimate_row_from_absolute_pos(ws, anchor) or (
+                    _UNANCHORED_ROW_SENTINEL
+                )
             data = bytes(img._data())
             mime_type = _infer_mime_type(img)
         except (AttributeError, ValueError, TypeError, OSError):
@@ -363,6 +453,28 @@ def _extract_row_images(ws: Worksheet) -> dict[int, list[ImageExtracted]]:
             ImageExtracted(data=data, mime_type=mime_type, anchor_row=anchor_row)
         )
     return buckets
+
+
+def _attach_unanchored_images(
+    rows: list[ParsedProblemRow], row_images: dict[int, list[ImageExtracted]]
+) -> None:
+    """未挂到任何数据行的图片兜底挂到最后一个数据行。
+
+    AbsoluteAnchor 浮动图片估算到非数据行 (或 pos 不可用落哨兵 0) 时, 无对应
+    ``ParsedProblemRow``, 原 ``row_images.get(r, [])`` 取不到会丢。遍历
+    ``row_images`` 中未被数据行消耗的桶, 全部 append 到最后一个数据行 ——
+    保证用户拖动过的浮动图片不丢失 (best-effort, 近邻归并)。
+    """
+    if not rows:
+        return
+    consumed = {r.row_index for r in rows}
+    leftover: list[ImageExtracted] = []
+    for row_key, imgs in row_images.items():
+        if row_key in consumed:
+            continue
+        leftover.extend(imgs)
+    if leftover:
+        rows[-1].images.extend(leftover)
 
 
 def _parse_sheet(ws: Worksheet) -> list[ParsedProblemRow]:
@@ -404,7 +516,7 @@ def _parse_sheet(ws: Worksheet) -> list[ParsedProblemRow]:
         project_name = _cell_text(ws, r, col_project, merged)
         module_name = _cell_text(ws, r, col_module, merged) if col_module else None
         pro_desc = _cell_text(ws, r, col_desc, merged) if col_desc else None
-        pro_type = _cell_text(ws, r, col_type, merged) if col_type else None
+        pro_type = _normalize_pro_type(_cell_text(ws, r, col_type, merged)) if col_type else None
         is_urgent = _normalize_yes_no(_cell_text(ws, r, col_urgent, merged)) if col_urgent else None
         func_name = _cell_text(ws, r, col_func, merged) if col_func else None
         duty_user_name = _cell_text(ws, r, col_duty, merged) if col_duty else None
@@ -477,6 +589,10 @@ def _parse_sheet(ws: Worksheet) -> list[ParsedProblemRow]:
             )
         )
 
+    # 兜底: AbsoluteAnchor 浮动图片估算到非数据行 (或 pos 不可用落哨兵 0) 时,
+    # 无对应 ParsedProblemRow 会丢; 挂到最后数据行不让浮动图片丢失。
+    _attach_unanchored_images(rows, row_images)
+
     return rows
 
 
@@ -486,7 +602,8 @@ def parse_problem_workbook(file_bytes: bytes) -> list[ParsedProblemRow]:
     同步函数（R-03）：调用方需用 ``anyio.to_thread.run_sync`` 包裹。按表头文字
     定位列（R-02 容错列顺序/排版）、合并单元格向下填充（R-04）、Excel 日期序列号
     → ``date``（R-08）、跳过全空行；``is_urgent``/``is_delay_plan``「是/否」→
-    ``"1"``/``"0"``（空/非预期 → ``None``），``pro_type`` 原样保留。
+    ``"1"``/``"0"``（空/非预期 → ``None``），``pro_type`` 中文展示值 (``Bug``/
+    ``变更``) 归一为内部英文值 (``bug``/``change``)，其它原样保留。
 
     多 Sheet 工作簿：逐 Sheet 解析，跳过无「项目名称」表头的 Sheet（如说明页），
     结果按工作簿中 Sheet 出现顺序拼接。

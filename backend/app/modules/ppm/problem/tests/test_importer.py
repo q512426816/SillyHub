@@ -331,13 +331,39 @@ class TestEnumNormalize:
         assert r.is_delay_plan is None
 
     def test_pro_type_kept_verbatim(self) -> None:
-        """pro_type (bug/change/其他) 原样保留, 不做枚举规范化。"""
+        """历史英文/自定义值 (bug/change/其他/custom) 原样保留, 不强制枚举规范化。
+
+        注: 模板 DV 中文展示值 (Bug/变更) 的归一见 ``test_pro_type_chinese_canonical``;
+        本用例只验非中文值直通。
+        """
         for val in ("bug", "change", "其他", "custom"):
             row = ["项目甲"] + [None] * 16
             row[3] = val  # 问题类型
             xlsx = _build_xlsx(_HEADERS, [row])
             r = parse_problem_workbook(xlsx)[0]
             assert r.pro_type == val
+
+    def test_pro_type_chinese_canonical(self) -> None:
+        """模板 DV 中文展示值 → 内部英文值 (Bug→bug, 变更→change)。
+
+        模板 ``router._PRO_TYPE_OPTIONS = ["Bug", "变更"]`` 后, 用户从下拉选的中文
+        值需在 importer 归一为内部英文值, 否则 ``fsm.compute_change_next_node``
+        (``pro_type == BUG_TYPE == "bug"``) 的 bug 跳部门经理判断失效。历史英文
+        bug/change 与其它自定义值原样保留 (与 test_pro_type_kept_verbatim 一致)。
+        """
+        for raw, expected in [
+            ("Bug", "bug"),
+            ("变更", "change"),
+            ("bug", "bug"),  # 英文小写直通
+            ("change", "change"),
+            ("其他", "其他"),  # 未识别中文原样保留
+            ("custom", "custom"),  # 自定义值原样保留
+        ]:
+            row = ["项目甲"] + [None] * 16
+            row[3] = raw  # 问题类型
+            xlsx = _build_xlsx(_HEADERS, [row])
+            r = parse_problem_workbook(xlsx)[0]
+            assert r.pro_type == expected, f"raw={raw!r} expected={expected!r} got={r.pro_type!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -664,6 +690,81 @@ class TestImageExtraction:
         assert len(r.images) == 1
         # 归 _from.row +1 = 2, 不是 to.row+1 = 5 (R-01 起始行语义)
         assert r.images[0].anchor_row == 2
+
+    def test_absolute_anchor_estimated_by_pos_y(self) -> None:
+        """AbsoluteAnchor 浮动图 (无 ``_from``) 由 ``pos.y`` (EMU) 估算行号, 不丢弃。
+
+        用户在 Excel 拖动图片后 anchor 可能从 OneCellAnchor 变为 AbsoluteAnchor,
+        原逻辑 ``marker is None → continue`` 直接丢图。修复后按 ``pos.y`` 累减行高
+        估算所属行 (1 point = 12700 EMU, 默认行高 15pt): ``y=20pt`` → row 2。
+        """
+        from openpyxl.drawing.image import Image as XlImage
+        from openpyxl.drawing.spreadsheet_drawing import AbsoluteAnchor
+        from openpyxl.drawing.xdr import XDRPoint2D, XDRPositiveSize2D
+
+        png = _png_bytes((255, 0, 0))
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "问题清单"
+        for c, h in enumerate(_HEADERS, start=1):
+            ws.cell(row=1, column=c, value=h)
+        ws.cell(row=2, column=1, value="项目甲")
+        # AbsoluteAnchor: pos.y = 20pt (EMU) → 估算 row 2
+        # (row1 [0,15) 不含 20, row2 [15,30) 含 20)
+        img = XlImage(BytesIO(png))
+        anchor = AbsoluteAnchor()
+        anchor.pos = XDRPoint2D(x=0, y=20 * 12700)
+        anchor.ext = XDRPositiveSize2D(cx=100000, cy=100000)
+        img.anchor = anchor
+        ws.add_image(img)
+        buf = BytesIO()
+        wb.save(buf)
+
+        rows = parse_problem_workbook(buf.getvalue())
+        assert len(rows) == 1
+        r = rows[0]
+        assert r.row_index == 2
+        assert len(r.images) == 1
+        assert r.images[0].data == png
+        assert r.images[0].anchor_row == 2  # 估算到数据行 2
+
+    def test_absolute_anchor_on_non_data_row_fallback_to_last(self) -> None:
+        """AbsoluteAnchor 估算到非数据行 (表头) → 兜底挂到最后数据行, 不丢图。
+
+        pos.y 落在表头行 (无对应 ParsedProblemRow) 时, ``row_images.get(r, [])``
+        取不到该图会丢; ``_attach_unanchored_images`` 把这类未消耗的图全部挂到
+        最后一个数据行 (best-effort 近邻归并), 保证浮动图片不丢失。
+        """
+        from openpyxl.drawing.image import Image as XlImage
+        from openpyxl.drawing.spreadsheet_drawing import AbsoluteAnchor
+        from openpyxl.drawing.xdr import XDRPoint2D, XDRPositiveSize2D
+
+        png = _png_bytes((0, 255, 0))
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "问题清单"
+        for c, h in enumerate(_HEADERS, start=1):
+            ws.cell(row=1, column=c, value=h)
+        ws.cell(row=2, column=1, value="项目甲")
+        ws.cell(row=3, column=1, value="项目乙")
+        # AbsoluteAnchor: pos.y = 0pt → 估算 row 1 (表头, 非数据行) → 兜底到 row 3
+        img = XlImage(BytesIO(png))
+        anchor = AbsoluteAnchor()
+        anchor.pos = XDRPoint2D(x=0, y=0)
+        anchor.ext = XDRPositiveSize2D(cx=100000, cy=100000)
+        img.anchor = anchor
+        ws.add_image(img)
+        buf = BytesIO()
+        wb.save(buf)
+
+        rows = parse_problem_workbook(buf.getvalue())
+        assert len(rows) == 2
+        # 浮动图估算到表头 row 1 (非数据行), 兜底挂到最后数据行 row 3
+        assert rows[0].row_index == 2
+        assert rows[0].images == []
+        assert rows[1].row_index == 3
+        assert len(rows[1].images) == 1
+        assert rows[1].images[0].data == png
 
     def test_multiple_images_same_row_stable_order(self) -> None:
         """同行多图 (3 张锚到 row 2 不同列) → ``len==3``、按 add_image 顺序稳定。

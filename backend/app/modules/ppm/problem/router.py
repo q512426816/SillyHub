@@ -228,10 +228,12 @@ _PROBLEM_EXPORT_COLUMNS = [
 ]
 # 末列附件表头 (导出嵌图 / 模板留空给用户插图);列定义不用 ColumnDef 因其取值非
 # 行字典字段而是内存图片 bytes,需 add_image 特殊处理。
-_ATTACHMENT_HEADER = "附件"
-# 固定枚举下拉值 (D-002):与前端 PROBLEM_TYPE_TEXT / WORK_TYPE_OPTIONS 对齐;
+_ATTACHMENT_HEADER = "附件（仅图片，每行≤3张）"
+# 固定枚举下拉值 (D-002):问题类型用中文展示 (Bug/变更), importer 导入时归一到
+# 内部英文值 bug/change (fsm.compute_change_next_node 强判断 pro_type=="bug");
+# 工作类型与前端 WORK_TYPE_OPTIONS 对齐;
 # is_urgent / is_delay_plan 用「是/否」(importer._normalize_yes_no 自动转 "1"/"0")。
-_PRO_TYPE_OPTIONS = ["bug", "change"]
+_PRO_TYPE_OPTIONS = ["Bug", "变更"]
 _WORK_TYPE_OPTIONS = ["前端", "后端", "业务"]
 _YESNO_OPTIONS = ["是", "否"]
 # 隐藏数据 sheet 名 (DV 引用绕 255 字符限, R-03);名称仅字母数字下划线无需引号包裹。
