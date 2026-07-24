@@ -226,6 +226,9 @@ def _to_date(value: object) -> date | None:
         text = value.strip()
         if not text:
             return None
+        # 兼容 ISO/space datetime (如 "2026-08-01T00:00:00" 或 "2026-08-01 00:00:00") → 截取日期部分
+        if "T" in text or " " in text:
+            text = text.split("T")[0].split(" ")[0]
         for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%Y%m%d"):
             try:
                 return datetime.strptime(text, fmt).date()

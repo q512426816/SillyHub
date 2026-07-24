@@ -925,6 +925,8 @@ async def test_import_template_returns_dynamic_xlsx(
     """
     from openpyxl import load_workbook
 
+    from app.modules.ppm.problem.router import _ATTACHMENT_HEADER
+
     # seed 一些下拉源 (项目/成员/模块) 让模板非空 (验证可下载即可)
     pid = await _seed_project(db_session, name="项目甲")
     await _seed_member(db_session, project_id=pid, user_name="张三")
@@ -939,7 +941,7 @@ async def test_import_template_returns_dynamic_xlsx(
     headers = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
     assert len(headers) == 18
     assert headers[0] == "项目名称"
-    assert headers[-1] == "附件"
+    assert headers[-1] == _ATTACHMENT_HEADER
     # 隐藏 sheet _data 存在 (DV 引用绕 255 字符限 R-03)
     assert "_data" in wb.sheetnames
     # DataValidation 存在 (下拉类型)

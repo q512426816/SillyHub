@@ -32,8 +32,10 @@ from openpyxl import load_workbook
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.file.service import FileService
+from app.modules.ppm.plan.model import PlanNodeModule, PsPlanNode, PsProjectPlan
 from app.modules.ppm.problem.importer import parse_problem_workbook
 from app.modules.ppm.problem.model import PpmProblemList
+from app.modules.ppm.problem.router import _ATTACHMENT_HEADER
 from app.modules.ppm.project.model import PpmProjectMaintenance, PpmProjectMember
 from app.modules.storage.base import ObjectStat, StorageBackend
 from app.modules.storage.factory import get_storage_backend
@@ -153,6 +155,29 @@ async def _seed_member(session: AsyncSession, *, project_id: uuid.UUID, user_nam
     await session.commit()
 
 
+async def _seed_module(
+    session: AsyncSession, *, project_id: uuid.UUID, module_name: str
+) -> uuid.UUID:
+    """造 project → ps_project_plan → ps_plan_node → plan_node_module 链, 返回模块 id。
+
+    反查链对齐 PlanService.list_modules_by_project / router._collect_project_module_map
+    (problem 模块下拉与模板级联复用同一关联链)。
+    """
+    plan = PsProjectPlan(id=uuid.uuid4(), project_id=project_id)
+    session.add(plan)
+    await session.commit()
+    await session.refresh(plan)
+    node = PsPlanNode(id=uuid.uuid4(), ps_project_plan_id=plan.id)
+    session.add(node)
+    await session.commit()
+    await session.refresh(node)
+    mod = PlanNodeModule(id=uuid.uuid4(), plan_node_id=node.id, module_name=module_name)
+    session.add(mod)
+    await session.commit()
+    await session.refresh(mod)
+    return mod.id
+
+
 async def _seed_problem(
     session: AsyncSession,
     *,
@@ -220,7 +245,7 @@ class TestImportTemplate:
         headers = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
         assert len(headers) == 18
         assert headers[:17] == _EXPECTED_HEADERS
-        assert headers[17] == "附件"
+        assert headers[17] == _ATTACHMENT_HEADER
 
     async def test_template_has_hidden_data_sheet(
         self, client: AsyncClient, auth_headers: dict, db_session: AsyncSession
@@ -239,12 +264,14 @@ class TestImportTemplate:
     async def test_template_data_validations_range_and_inline(
         self, client: AsyncClient, auth_headers: dict, db_session: AsyncSession
     ) -> None:
-        """DataValidation 形态 (D-002/D-012):
+        """DataValidation 形态 (D-002/D-012 级联):
 
-        - 跨 sheet range 引用 (绕 255 限):项目名称/模块/责任人/验证人 → ``_data!$X:$X``;
+        - 跨 sheet range 引用 (绕 255 限):项目名称/责任人/验证人 → ``_data!$X:$X``;
+        - 模块列 INDIRECT 级联 (D-012 升级): ``INDIRECT($A2)`` 据同行项目值查找命名区域,
+          不再引用固定列;
         - inline 固定 list:问题类型/是否紧急/工作类型/是否延期 → ``"a,b,c"``。
 
-        至少 4 条 range DV + 4 条 inline DV (各自不同列)。
+        至少 3 条 range DV (项目/责任人/验证人) + 1 条 INDIRECT DV + 4 条 inline DV。
         """
         pid = await _seed_project(db_session)
         await _seed_member(db_session, project_id=pid, user_name="张三")
@@ -253,15 +280,129 @@ class TestImportTemplate:
         assert resp.status_code == 200, resp.text
         ws = load_workbook(BytesIO(resp.content))["问题清单"]
         dvs = ws.data_validations.dataValidation
-        # 至少 8 条 DV (4 range + 4 inline)
+        # 至少 8 条 DV (3 range + 1 INDIRECT + 4 inline)
         assert len(dvs) >= 8
         formulas = [dv.formula1 for dv in dvs]
-        # range 引用形态 (含 ``_data!`` 跨 sheet)
+        # range 引用形态 (含 ``_data!`` 跨 sheet): 项目/责任人/验证人 (模块已改 INDIRECT)
         range_dvs = [f for f in formulas if f and "_data!" in f]
-        assert len(range_dvs) >= 4  # 项目/模块/责任人/验证人
+        assert len(range_dvs) >= 3
+        # 模块级联 INDIRECT (相对行 $A2)
+        indirect_dvs = [f for f in formulas if f and "INDIRECT" in f]
+        assert len(indirect_dvs) >= 1
+        assert any("$A2" in f for f in indirect_dvs)
         # inline 形态 (双引号包裹逗号串)
         inline_dvs = [f for f in formulas if f and f.startswith('"') and f.endswith('"')]
         assert len(inline_dvs) >= 4  # 类型/加急/工作类型/延期
+
+
+# ===========================================================================
+# 项目→模块级联下拉 (D-012 升级)
+# ===========================================================================
+
+
+class TestImportTemplateModuleCascade:
+    """GET ``/problem-list/import-template`` 项目→模块级联结构 (D-012 升级)。
+
+    验证隐藏 sheet ``_data`` 按项目分列 (C 起)、每项目一个命名区域 (DefinedName)、
+    且不同项目模块落在不同列 (互斥),使模块列 ``INDIRECT($A2)`` 能据项目值只显示该项目
+    模块。干净 CJK 项目名 sanitize 后不变 → 命名区域名等于项目名 (INDIRECT 可匹配)。
+    """
+
+    async def test_per_project_module_columns_and_defined_names(
+        self, client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+    ) -> None:
+        """两项目各挂不同模块 → ``_data`` 两列分属两项目 + 两个命名区域 (互斥)。"""
+        from openpyxl.utils import get_column_letter
+
+        pid_a = await _seed_project(db_session, name="项目甲")
+        pid_b = await _seed_project(db_session, name="项目乙")
+        await _seed_module(db_session, project_id=pid_a, module_name="登录模块")
+        await _seed_module(db_session, project_id=pid_a, module_name="权限模块")
+        await _seed_module(db_session, project_id=pid_b, module_name="构架模块")
+
+        resp = await client.get("/api/ppm/problem-list/import-template", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        wb = load_workbook(BytesIO(resp.content))
+        data_ws = wb["_data"]
+
+        # 按「第 1 行列头 = 项目名」定位每个项目的列 (顺序无关, Unicode 排序不定)。
+        header_to_col: dict[str, int] = {}
+        for c in range(3, data_ws.max_column + 1):
+            v = data_ws.cell(row=1, column=c).value
+            if v is not None:
+                header_to_col[str(v)] = c
+        assert set(header_to_col) == {"项目甲", "项目乙"}
+
+        def _col_modules(col: int) -> list[str]:
+            return [
+                str(data_ws.cell(row=r, column=col).value)
+                for r in range(2, data_ws.max_row + 1)
+                if data_ws.cell(row=r, column=col).value
+            ]
+
+        # 项目甲 = 2 模块 (登录/权限); 项目乙 = 1 模块 (构架); 互斥。
+        mods_a = _col_modules(header_to_col["项目甲"])
+        mods_b = _col_modules(header_to_col["项目乙"])
+        assert sorted(mods_a) == ["权限模块", "登录模块"]
+        assert mods_b == ["构架模块"]
+        assert not (set(mods_a) & set(mods_b))
+
+        # 命名区域: 干净 CJK 名 sanitize 后不变 → 名称等于项目名; 列字母匹配实际列。
+        for proj, mods in [("项目甲", mods_a), ("项目乙", mods_b)]:
+            assert proj in wb.defined_names
+            col_letter = get_column_letter(header_to_col[proj])
+            end_row = len(mods) + 1
+            assert (
+                wb.defined_names[proj].attr_text == f"_data!${col_letter}$2:${col_letter}${end_row}"
+            )
+
+    async def test_module_dv_uses_indirect(
+        self, client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+    ) -> None:
+        """模块列 DV = ``INDIRECT($A2)`` (相对行, 单条覆盖整列)。"""
+        pid = await _seed_project(db_session, name="项目甲")
+        await _seed_module(db_session, project_id=pid, module_name="登录模块")
+
+        resp = await client.get("/api/ppm/problem-list/import-template", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        ws = load_workbook(BytesIO(resp.content))["问题清单"]
+        module_dvs = [
+            dv
+            for dv in ws.data_validations.dataValidation
+            if dv.formula1 and "INDIRECT" in dv.formula1
+        ]
+        assert len(module_dvs) == 1
+        assert module_dvs[0].formula1 == "INDIRECT($A2)"
+        # 覆盖 B 列数据行 (B2:B500)
+        assert str(module_dvs[0].sqref).startswith("B2:")
+
+    async def test_project_name_with_space_sanitized(
+        self, client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+    ) -> None:
+        """项目名含空格 → 命名区域名 sanitize (空格→下划线), 不损坏文件 (铁律 #1)。"""
+        pid = await _seed_project(db_session, name="转向架 项目")
+        await _seed_module(db_session, project_id=pid, module_name="构架模块")
+
+        resp = await client.get("/api/ppm/problem-list/import-template", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        wb = load_workbook(BytesIO(resp.content))
+        # sanitize 后命名区域名 = "转向架_项目" (空格→下划线); 项目 DV 列 A 保留原文
+        assert "转向架_项目" in wb.defined_names
+        assert wb.defined_names["转向架_项目"].attr_text == "_data!$C$2:$C$2"
+        # 列 A 项目源保留原文 (铁律 #4: 项目 DV 不变)
+        assert wb["_data"].cell(row=1, column=1).value == "转向架 项目"
+
+    async def test_project_with_no_modules_still_has_name(
+        self, client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+    ) -> None:
+        """项目无模块 → 仍建命名区域指向单个空单元格 (INDIRECT 解析为空, 不报错)。"""
+        await _seed_project(db_session, name="空项目")
+
+        resp = await client.get("/api/ppm/problem-list/import-template", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        wb = load_workbook(BytesIO(resp.content))
+        assert "空项目" in wb.defined_names
+        assert wb.defined_names["空项目"].attr_text == "_data!$C$2:$C$2"
 
 
 # ===========================================================================
@@ -299,7 +440,7 @@ class TestExportWithImages:
         headers = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
         assert len(headers) == 18
         assert headers[:17] == _EXPECTED_HEADERS
-        assert headers[17] == "附件"
+        assert headers[17] == _ATTACHMENT_HEADER
 
     async def test_export_embeds_images_in_attachment_column(
         self,

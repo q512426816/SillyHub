@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime
 from typing import Annotated, Any
@@ -36,7 +37,7 @@ from app.modules.ppm.common.crud import Page, PageReq
 from app.modules.ppm.common.data_scope import is_super_admin, manager_project_ids
 from app.modules.ppm.common.export import ColumnDef
 from app.modules.ppm.common.upload import validate_xlsx_upload
-from app.modules.ppm.plan.model import PlanNodeModule
+from app.modules.ppm.plan.model import PlanNodeModule, PsPlanNode, PsProjectPlan
 from app.modules.ppm.problem.importer import ImageExtracted, parse_problem_workbook
 from app.modules.ppm.problem.schema import (
     ChangeNextProcessReq,
@@ -249,16 +250,17 @@ async def download_import_template(
 ) -> Any:
     """下载动态下拉导入模板 (FR-01/D-002/D-007/D-012)。
 
-    按 data_scope 收敛项目/成员 (超管全部,否则经理项目集),模块全部平铺 (DV 列级
-    静态不支持按项目级联, D-012);固定枚举取前端同款。openpyxl 同步构造丢线程池
-    (R-03):主表 18 列表头 + 隐藏 sheet ``_data`` 分列存 project/member/module/枚举
-    + 主表 DataValidation type=list 引用隐藏 sheet 列 (绕 255 字符限, R-03) / 固定
-    inline list。
+    按 data_scope 收敛项目/成员 (超管全部,否则经理项目集);模块按项目分组实现
+    **项目→模块级联下拉** (D-012 升级): 选了项目后模块下拉只显示该项目下的模块。
+    固定枚举取前端同款。openpyxl 同步构造丢线程池 (R-03):主表 18 列表头 + 隐藏
+    sheet ``_data`` (A=项目 / B=成员 / C 起每项目一列模块) + 主表 DataValidation
+    type=list 引用隐藏 sheet 列 (绕 255 字符限, R-03) / 模块列用 INDIRECT($A2)
+    据同行项目单元格值查找该项目的命名区域 / 固定 inline list。
     """
-    projects, members, modules = await _collect_template_options(session, user)
+    projects, members, project_modules = await _collect_template_options(session, user)
     filename = "问题清单导入模板.xlsx"
     return await anyio.to_thread.run_sync(
-        lambda: _build_template_response(projects, members, modules, filename)
+        lambda: _build_template_response(projects, members, project_modules, filename)
     )
 
 
@@ -683,39 +685,52 @@ def _build_excel_response(
 # ---------------------------------------------------------------------------
 
 
-async def _collect_all_module_names(session: AsyncSession) -> list[str]:
-    """全部模块名去重平铺 (D-012) — 不按项目级联,模板模块列引用全集。
+async def _collect_project_module_map(
+    session: AsyncSession, project_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[str]]:
+    """每个项目 id → 其下去重升序的模块名列表 (D-012 升级, 按项目级联)。
 
-    直接 ``select distinct module_name`` (不走 plan 关联链);模板只供用户选填,
-    service 会在 preview/commit 阶段重查校验模块是否属该项目。
+    反查链同 ``PlanService.list_modules_by_project``:
+    ``PlanNodeModule`` → ``PsPlanNode`` → ``PsProjectPlan.project_id`` (R-01)。
+    单次 JOIN 批量取全部可见项目的模块,避免 N 个项目 N 次单查。空模块名不入表。
     """
+    if not project_ids:
+        return {}
     stmt = (
-        select(PlanNodeModule.module_name).where(PlanNodeModule.module_name.is_not(None)).distinct()
+        select(PsProjectPlan.project_id, PlanNodeModule.module_name)
+        .join(PsPlanNode, PsPlanNode.id == PlanNodeModule.plan_node_id)
+        .join(PsProjectPlan, PsProjectPlan.id == PsPlanNode.ps_project_plan_id)
+        .where(PsProjectPlan.project_id.in_(project_ids))
+        .where(PlanNodeModule.module_name.is_not(None))
     )
-    return sorted(
-        {str(n).strip() for (n,) in (await session.execute(stmt)).all() if n and str(n).strip()}
-    )
+    grouped: dict[uuid.UUID, set[str]] = {}
+    for pid, mname in (await session.execute(stmt)).all():
+        if mname and str(mname).strip():
+            grouped.setdefault(pid, set()).add(str(mname).strip())
+    return {pid: sorted(names) for pid, names in grouped.items()}
 
 
 async def _collect_template_options(
     session: AsyncSession, user: User
-) -> tuple[list[str], list[str], list[str]]:
-    """收集动态下拉模板数据 (D-002/D-007/D-012)。
+) -> tuple[list[str], list[str], dict[str, list[str]]]:
+    """收集动态下拉模板数据 (D-002/D-007/D-012 升级为项目→模块级联)。
 
-    返回 ``(项目名, 成员姓名, 模块名)`` 三列:
+    返回 ``(项目名列表, 成员姓名列表, {项目名: [模块名...]})``:
     - 项目/成员按 data_scope 收敛 (超管全部, 否则经理项目集 ``manager_project_ids``),
       防越权下载到他人项目名/成员;
-    - 模块**全部平铺** (D-012: DV 列级静态不支持按项目级联);用户在项目列先选项目,
-      模块列从全集选,service 重查阶段校验模块是否属该项目。
-    三列各自去空白、去重、升序。非超管且非经理 → 项目/成员空,仅返回全部模块。
+    - 模块**按项目分组** (D-012 升级): 每个可见项目 → 其下模块列表,供模板生成器在
+      隐藏 sheet 里按项目分列 + 命名区域,实现模块列 INDIRECT 级联 (选项目后只显示
+      该项目模块)。模块反查走 plan 关联链,自然只含可见项目下的模块 (不再全局平铺)。
+    项目名/成员各自去空白、去重、升序;同名项目合并各自模块去重升序。
+    非超管且非经理 → 三者皆空 (无可见项目即无模块可级联)。
     """
     admin = await is_super_admin(session, user)
     pids: set[uuid.UUID] = set() if admin else await manager_project_ids(session, user)
     if not admin and not pids:
-        # 无可见项目/成员 (普通用户非任何项目经理) → 仅模块 (模块不涉权限)
-        return [], [], await _collect_all_module_names(session)
+        # 无可见项目/成员 (普通用户非任何项目经理) → 无项目即无模块可级联
+        return [], [], {}
 
-    proj_stmt = select(PpmProjectMaintenance.project_name).where(
+    proj_stmt = select(PpmProjectMaintenance.id, PpmProjectMaintenance.project_name).where(
         PpmProjectMaintenance.project_name.is_not(None)
     )
     mem_stmt = select(PpmProjectMember.user_name).where(PpmProjectMember.user_name.is_not(None))
@@ -723,18 +738,32 @@ async def _collect_template_options(
         proj_stmt = proj_stmt.where(PpmProjectMaintenance.id.in_(pids))
         mem_stmt = mem_stmt.where(PpmProjectMember.pm_project_id.in_(pids))
 
-    projects = sorted(
-        {
-            str(n).strip()
-            for (n,) in (await session.execute(proj_stmt)).all()
-            if n and str(n).strip()
-        }
-    )
+    proj_rows = (await session.execute(proj_stmt)).all()
+    # 项目名去空白去重升序 (列 A + 各模块列头用);id→name 用于模块按项目聚合。
+    name_set: set[str] = set()
+    id_to_name: dict[uuid.UUID, str] = {}
+    for pid, name in proj_rows:
+        n = str(name).strip() if name else ""
+        if not n:
+            continue
+        name_set.add(n)
+        # 同一项目 id 只有一个 project_name;重复 id 取首个非空值即可。
+        id_to_name.setdefault(pid, n)
+    projects = sorted(name_set)
+
     members = sorted(
         {str(n).strip() for (n,) in (await session.execute(mem_stmt)).all() if n and str(n).strip()}
     )
-    modules = await _collect_all_module_names(session)
-    return projects, members, modules
+
+    mod_by_pid = await _collect_project_module_map(session, list(id_to_name.keys()))
+    # 按项目名聚合模块 (DB 允许不同 id 同名 → 合并各自模块去重升序)。
+    project_modules: dict[str, list[str]] = {name: [] for name in projects}
+    for pid, name in id_to_name.items():
+        project_modules.setdefault(name, [])
+        project_modules[name].extend(mod_by_pid.get(pid, []))
+    for name in project_modules:
+        project_modules[name] = sorted(set(project_modules[name]))
+    return projects, members, project_modules
 
 
 def _write_data_column(ws: Any, col_idx: int, values: list[str]) -> None:
@@ -768,6 +797,59 @@ def _add_range_dv(ws: Any, cell_range: str, sheet_ref: str) -> None:
     ws.add_data_validation(dv)
 
 
+def _add_indirect_dv(ws: Any, cell_range: str, project_col: str = "A") -> None:
+    """模块列级联 list DV (D-012 升级): ``INDIRECT`` 据同行项目单元格值查找命名区域。
+
+    ``formula1=INDIRECT($A2)`` — ``$`` 锁定项目列 (A),行号 ``2`` 相对。单条 DV 覆盖
+    整个数据区间时,Excel 按 DV 首单元格 (B2) 平移相对引用到各行 (B3→A3, B4→A4…):
+    用户在 A 列选了某项目,B 列下拉即 ``INDIRECT(项目名)`` → 命名区域 → 只显示该项目
+    的模块。命名区域名 = ``_sanitize_defined_name(项目名)`` (见 ``_build_template_response``)。
+    不加前导 ``=`` (DV XML 原样写入)。
+    """
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    dv = DataValidation(
+        type="list",
+        formula1=f"INDIRECT(${project_col}2)",
+        allow_blank=True,
+        showErrorMessage=False,
+    )
+    dv.add(cell_range)
+    ws.add_data_validation(dv)
+
+
+# Excel 命名区域 (DefinedName) 名称合法性:
+# - 合法字符 = 字母 / 数字 / 下划线 / 点 (py3 ``\w`` 对 str 默认 Unicode,含 CJK 视作字母);
+# - 首字符不得为数字;不得形似单元格引用 (如 ``C2``);不得含空格/标点。
+_INVALID_NAME_CHAR_RE = re.compile(r"[^\w]")
+_CELL_REF_RE = re.compile(r"^[A-Za-z]{1,3}[0-9]+$")
+
+
+def _sanitize_defined_name(name: str, used: set[str]) -> str:
+    """项目名 → 合法且唯一的 Excel 命名区域名 (DefinedName)。
+
+    策略: 非法字符 (空格/标点等非 ``\\w``) → 下划线; 空串 → ``_project``; 首字符为数字
+    或形似单元格引用 → 前缀 ``_``; 同名碰撞 → 追加 ``_2``/``_3``。
+
+    级联匹配说明: ``INDIRECT`` 据项目单元格「原文值」匹配命名区域名。干净 CJK 项目名
+    (无空格/特殊字符) 经本函数不变 → 与原文一致 → 级联正常生效; 含空格/特殊字符的
+    项目名经本函数会变形 (如 ``转向架 项目`` → ``转向架_项目``),与原文不一致,该项目
+    级联降级 (模块下拉空, 用户手填, importer 重查校验),不阻断也不损坏文件。
+    """
+    sanitized = _INVALID_NAME_CHAR_RE.sub("_", name).strip()
+    if not sanitized:
+        sanitized = "_project"
+    if sanitized[0].isdigit() or _CELL_REF_RE.match(sanitized):
+        sanitized = "_" + sanitized
+    base = sanitized
+    n = 2
+    while sanitized in used:
+        sanitized = f"{base}_{n}"
+        n += 1
+    used.add(sanitized)
+    return sanitized
+
+
 def _add_inline_dv(ws: Any, cell_range: str, options: list[str]) -> None:
     """添加固定 inline list DV (选项少时用;formula1 双引号包裹逗号串)。"""
     from openpyxl.worksheet.datavalidation import DataValidation
@@ -795,19 +877,25 @@ def _style_header_cell(cell: Any) -> None:
 def _build_template_response(
     projects: list[str],
     members: list[str],
-    modules: list[str],
+    project_modules: dict[str, list[str]],
     filename: str,
 ) -> Any:
-    """线程池内构造动态下拉导入模板 xlsx (D-002/D-007/D-012/R-03)。
+    """线程池内构造动态下拉导入模板 xlsx (D-002/D-007/D-012 级联/R-03)。
 
     结构:主表「问题清单」18 列表头 (17 业务列 + 附件列) + 隐藏 sheet ``_data``
-    (A=项目 / B=成员 / C=模块) + 主表 DataValidation:
+    (A=项目 / B=成员 / C 起每项目一列模块) + 工作簿级命名区域 (每项目模块列一个)
+    + 主表 DataValidation:
       - 项目名称(A) / 责任人(G) / 验证人(L) 引用隐藏 sheet 区域 (绕 255 字符限);
-      - 模块(B) 引用隐藏 sheet 模块列 (全集平铺, D-012);
+      - 模块(B) 用 ``INDIRECT($A2)`` 据同行项目值查找命名区域 → 只显示该项目模块
+        (D-012 升级, 项目→模块级联);
       - 问题类型(D) / 工作类型(N) / 是否紧急(E) / 是否延期(P) 用 inline list。
+
+    命名区域: 每个项目占 ``_data`` 一列 (C 起), 第 1 行 = 项目名 (列头), 第 2 行起 =
+    该项目模块名; 区域名 = ``_sanitize_defined_name(项目名)``, 引用 ``_data!$X$2:$X${n+1}``。
     """
     from openpyxl import Workbook
     from openpyxl.utils import get_column_letter
+    from openpyxl.workbook.defined_name import DefinedName
 
     from app.modules.ppm.common.export import excel_response
 
@@ -825,17 +913,32 @@ def _build_template_response(
     ws.column_dimensions[get_column_letter(attach_idx)].width = 30
     ws.freeze_panes = "A2"
 
-    # 隐藏 sheet _data:A=项目 B=成员 C=模块 (枚举走 inline list 无需列存)
+    # 隐藏 sheet _data:A=项目 (项目 DV 源 + INDIRECT 匹配键) / B=成员 / C 起每项目一列模块。
     data_ws = wb.create_sheet(_TEMPLATE_DATA_SHEET)
     _write_data_column(data_ws, 1, projects)
     _write_data_column(data_ws, 2, members)
-    _write_data_column(data_ws, 3, modules)
+    # 每个项目一列模块 (C 起),定义命名区域供模块列 INDIRECT 级联查找。
+    used_names: set[str] = set()
+    for offset, project in enumerate(projects):
+        col_idx = 3 + offset
+        col_letter = get_column_letter(col_idx)
+        modules = project_modules.get(project, [])
+        # 第 1 行 = 项目名 (列头, 亦文档化该列归属); 第 2 行起 = 该项目模块名。
+        data_ws.cell(row=1, column=col_idx, value=project)
+        for r, module_name in enumerate(modules, start=2):
+            data_ws.cell(row=r, column=col_idx, value=module_name)
+        # 命名区域引用第 2 行起 (不含列头): 有模块 → $X$2:$X${n+1}; 无模块 → $X$2:$X$2
+        # (指向单个空单元格, INDIRECT 解析为空列表, 不报错)。
+        end_row = len(modules) + 1 if modules else 2
+        ref = f"{_TEMPLATE_DATA_SHEET}!${col_letter}$2:${col_letter}${end_row}"
+        defined_name = _sanitize_defined_name(project, used_names)
+        wb.defined_names.add(DefinedName(name=defined_name, attr_text=ref))
     data_ws.sheet_state = "hidden"
 
     # 列字母与 _PROBLEM_EXPORT_COLUMNS 顺序对齐:A 项目/B 模块/D 类型/E 紧急/
     # G 责任人/L 验证人/N 工作类型/P 延期。DV 覆盖第 2..N 数据行 (逐列同列闭合区间)。
     _add_range_dv(ws, _dv_range("A"), f"{_TEMPLATE_DATA_SHEET}!$A:$A")  # 项目名称
-    _add_range_dv(ws, _dv_range("B"), f"{_TEMPLATE_DATA_SHEET}!$C:$C")  # 模块
+    _add_indirect_dv(ws, _dv_range("B"))  # 模块: INDIRECT($A2) 项目→模块级联
     _add_range_dv(ws, _dv_range("G"), f"{_TEMPLATE_DATA_SHEET}!$B:$B")  # 责任人
     _add_range_dv(ws, _dv_range("L"), f"{_TEMPLATE_DATA_SHEET}!$B:$B")  # 验证人
     _add_inline_dv(ws, _dv_range("D"), _PRO_TYPE_OPTIONS)  # 问题类型
