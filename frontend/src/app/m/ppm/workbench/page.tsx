@@ -43,16 +43,13 @@ import {
   fetchWorkbenchProfile,
   fetchWorkbenchSummary,
   fetchWorkbenchSwitchableUsers,
-  fetchWorkbenchTodos,
 } from "@/lib/ppm/workbench";
 import type {
   CalendarDay,
-  PageResp,
   WorkbenchCalendar,
   WorkbenchProfile,
   WorkbenchSummary,
   WorkbenchSwitchableUser,
-  WorkbenchTodoItem,
 } from "@/lib/ppm/types";
 import { cn } from "@/lib/utils";
 import { taskStatusTag } from "@/app/(dashboard)/ppm/shared";
@@ -206,10 +203,7 @@ export default function WorkbenchMobilePage() {
         />
       )}
 
-      {/* ② 我的待办（分页，跟随 target；当前页独有，桌面左栏对齐） */}
-      <TodoCard targetUserId={targetUserId} />
-
-      {/* ③ 指标（中栏）：range 切换重载 summary */}
+      {/* ② 指标（中栏）：range 切换重载 summary;只读时禁用指标下钻跳转 */}
       {summary.loading || summary.error ? (
         <BlockFallback
           title="指标"
@@ -222,6 +216,7 @@ export default function WorkbenchMobilePage() {
           summary={summary.data}
           range={summaryRange}
           onRangeChange={setSummaryRange}
+          readOnly={isViewingOther}
         />
       )}
 
@@ -242,8 +237,8 @@ export default function WorkbenchMobilePage() {
         />
       )}
 
-      {/* ④ 快捷入口（右栏）：与桌面 QuickEntryGrid 对齐 */}
-      <QuickEntriesCard />
+      {/* ④ 快捷入口（右栏）：与桌面 QuickEntryGrid 对齐;只读时禁用跳转 */}
+      <QuickEntriesCard readOnly={isViewingOther} />
     </div>
   );
 }
@@ -330,6 +325,22 @@ function ProfileCard({
 }) {
   const role = profile?.role_name?.trim();
   const showSwitch = canViewOthers && switchableUsers.length > 0;
+  // 切换人员搜索(姓名/工号/部门过滤)
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const filteredUsers = switchableUsers.filter((u) => {
+    const hay = `${u.display_name ?? ""} ${u.employee_no ?? ""} ${
+      u.department_name ?? ""
+    }`.toLowerCase();
+    return !q || hay.includes(q);
+  });
+  const rowCls = (active: boolean) =>
+    cn(
+      "flex min-h-[44px] w-full items-center rounded-md px-2 py-2 text-left text-[14px]",
+      active
+        ? "bg-blue-50 font-medium text-blue-700"
+        : "text-foreground active:bg-muted",
+    );
   return (
     <MobileCard title="个人信息" bodyClass="p-4">
       <div className="flex items-center gap-3">
@@ -360,172 +371,50 @@ function ProfileCard({
           </span>
         </div>
       </div>
-      {/* 切换查看其他成员工作台（仅经理 ‖ super_admin 且有可切换用户） */}
+      {/* 切换查看其他成员工作台（仅经理 ‖ super_admin;支持输入搜索） */}
       {showSwitch ? (
         <div className="mt-3 border-t border-border/60 pt-3">
           <label className="mb-1 block text-[12px] text-muted-foreground">
-            切换查看其他成员
+            切换查看其他成员（可输入姓名/工号/部门搜索）
           </label>
-          <select
-            value={targetUserId ?? "__me__"}
-            onChange={(e) =>
-              onSwitchUser(e.target.value === "__me__" ? null : e.target.value)
-            }
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="搜索成员…"
             className="min-h-[44px] w-full rounded-md border border-border bg-background px-2 text-[14px] text-foreground"
-          >
-            <option value="__me__">我自己</option>
-            {switchableUsers.map((u) => (
-              <option key={u.user_id} value={u.user_id}>
-                {placeholder(u.display_name)}
-                {u.department_name ? `（${u.department_name}）` : ""}
-              </option>
+          />
+          <div className="mt-1 max-h-56 space-y-0.5 overflow-auto">
+            <button
+              type="button"
+              onClick={() => onSwitchUser(null)}
+              className={rowCls(targetUserId === null)}
+            >
+              我自己
+            </button>
+            {filteredUsers.map((u) => (
+              <button
+                key={u.user_id}
+                type="button"
+                onClick={() => onSwitchUser(u.user_id)}
+                className={rowCls(targetUserId === u.user_id)}
+              >
+                <span className="min-w-0 flex-1 truncate">
+                  {placeholder(u.display_name)}
+                  {u.department_name ? ` · ${u.department_name}` : ""}
+                </span>
+                {u.employee_no ? (
+                  <span className="shrink-0 text-[12px] text-muted-foreground">
+                    {u.employee_no}
+                  </span>
+                ) : null}
+              </button>
             ))}
-          </select>
-        </div>
-      ) : null}
-    </MobileCard>
-  );
-}
-
-/* ============================== ② 我的待办（分页） ============================== */
-
-/** 待办 type → 移动徽标色（对齐桌面 TodoListPanel 映射）。 */
-function todoTagCls(todo: WorkbenchTodoItem): { cls: string; label: string } {
-  const src = todo.source ?? "";
-  if (src === "plan_task") return { cls: "bg-amber-100 text-amber-700", label: "任务" };
-  if (src === "problem_audit" || src === "problem_change")
-    return { cls: "bg-red-100 text-red-700", label: "缺陷" };
-  const t = todo.type ?? "";
-  if (t.includes("工时")) return { cls: "bg-blue-100 text-blue-700", label: "工时" };
-  if (t.includes("计划")) return { cls: "bg-slate-100 text-slate-700", label: "计划" };
-  return { cls: "bg-slate-100 text-slate-700", label: t || "待办" };
-}
-
-/** 待办点击跳转目标（按来源）。 */
-function todoHref(todo: WorkbenchTodoItem): string | null {
-  const src = todo.source ?? "";
-  if (src === "plan_task") return "/ppm/task-plans";
-  if (src.startsWith("problem")) return "/ppm/problem-list";
-  return null;
-}
-
-const TODO_PAGE_SIZE = 10;
-
-function TodoCard({ targetUserId }: { targetUserId: string | null }) {
-  const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [items, setItems] = useState<WorkbenchTodoItem[]>([]);
-  const [total, setTotal] = useState(0);
-
-  // target 变化 → 重置第 1 页
-  useEffect(() => {
-    setPage(1);
-  }, [targetUserId]);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const resp = await fetchWorkbenchTodos(targetUserId, page, TODO_PAGE_SIZE);
-      setItems(resp.items);
-      setTotal(resp.total);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "加载待办失败");
-      setItems([]);
-      setTotal(0);
-    } finally {
-      setLoading(false);
-    }
-  }, [targetUserId, page]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const totalPages = Math.max(1, Math.ceil(total / TODO_PAGE_SIZE));
-  const isEmpty = !loading && !error && items.length === 0;
-
-  return (
-    <MobileCard
-      title="我的待办"
-      extra={
-        <span className="rounded-full bg-indigo-100 px-2 text-[12px] font-medium text-indigo-700 tabular-nums">
-          {total}
-        </span>
-      }
-    >
-      {error ? (
-        <div className="flex items-center gap-2 py-1">
-          <span className="text-[14px] text-destructive">{error}</span>
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="text-[14px] text-blue-600"
-          >
-            重新加载
-          </button>
-        </div>
-      ) : isEmpty ? (
-        <div className="py-2 text-[14px] text-muted-foreground/70">暂无待办</div>
-      ) : (
-        <ul className="space-y-1">
-          {items.map((todo) => {
-            const tag = todoTagCls(todo);
-            const href = todoHref(todo);
-            const inner = (
-              <div className="flex items-center gap-2">
-                <span
-                  className={cn(
-                    "shrink-0 rounded-md px-1.5 py-px text-[11px] font-medium",
-                    tag.cls,
-                  )}
-                >
-                  {tag.label}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-[14px]" title={todo.name}>
-                  {todo.name}
-                </span>
+            {filteredUsers.length === 0 ? (
+              <div className="px-2 py-2 text-[13px] text-muted-foreground">
+                无匹配成员
               </div>
-            );
-            return (
-              <li key={todo.id} className="min-h-[36px] py-1">
-                {href ? (
-                  <Link href={href} className="block active:opacity-70">
-                    {inner}
-                  </Link>
-                ) : (
-                  inner
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      {/* 移动分页器 */}
-      {total > 0 ? (
-        <div className="mt-2 flex items-center justify-between border-t border-border/60 pt-2 text-[12px] text-muted-foreground">
-          <span>
-            {page}/{totalPages} 页 · 共 {total} 条
-          </span>
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              disabled={page <= 1 || loading}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="inline-flex min-h-[36px] min-w-[36px] items-center justify-center rounded border border-border disabled:opacity-40"
-            >
-              ‹
-            </button>
-            <button
-              type="button"
-              disabled={page >= totalPages || loading}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              className="inline-flex min-h-[36px] min-w-[36px] items-center justify-center rounded border border-border disabled:opacity-40"
-            >
-              ›
-            </button>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -556,10 +445,12 @@ function MetricsCard({
   summary,
   range,
   onRangeChange,
+  readOnly,
 }: {
   summary: WorkbenchSummary | null;
   range: MetricRange;
   onRangeChange: (r: MetricRange) => void;
+  readOnly?: boolean;
 }) {
   const metrics = summary?.metrics ?? null;
   const prefix = range === "week" ? "本周" : range === "month" ? "本月" : "";
@@ -673,7 +564,7 @@ function MetricsCard({
               </div>
             </>
           );
-          return m.href ? (
+          return m.href && !readOnly ? (
             <Link
               key={m.key}
               href={m.href}
@@ -685,7 +576,10 @@ function MetricsCard({
           ) : (
             <div
               key={m.key}
-              className="rounded-xl border border-border/60 bg-muted/30 p-2.5"
+              className={cn(
+                "rounded-xl border border-border/60 bg-muted/30 p-2.5",
+                readOnly && "opacity-60",
+              )}
             >
               {inner}
             </div>
@@ -1019,7 +913,7 @@ interface QuickEntry {
   href: string;
 }
 
-function QuickEntriesCard() {
+function QuickEntriesCard({ readOnly }: { readOnly?: boolean }) {
   const entries: QuickEntry[] = [
     {
       label: "问题清单",
@@ -1041,16 +935,18 @@ function QuickEntriesCard() {
     },
   ];
 
-  const tileCls =
-    "group flex min-h-[68px] flex-col items-center justify-center gap-1.5 rounded-xl border border-border/60 bg-muted/30 py-2 text-center transition hover:bg-muted/70";
+  const tileCls = cn(
+    "group flex min-h-[68px] flex-col items-center justify-center gap-1.5 rounded-xl border border-border/60 bg-muted/30 py-2 text-center transition",
+    readOnly ? "opacity-50" : "hover:bg-muted/70",
+  );
 
   return (
     <MobileCard title="快捷入口">
       <div className="grid grid-cols-3 gap-2">
         {entries.map((e) => {
           const Icon = e.icon;
-          return (
-            <Link key={e.label} href={e.href} className={tileCls}>
+          const inner = (
+            <>
               <span
                 className={cn(
                   "flex size-9 items-center justify-center rounded-lg",
@@ -1060,10 +956,24 @@ function QuickEntriesCard() {
                 <Icon className="size-5" aria-hidden />
               </span>
               <span className="text-[13px] text-foreground">{e.label}</span>
+            </>
+          );
+          return readOnly ? (
+            <div key={e.label} className={tileCls} aria-disabled>
+              {inner}
+            </div>
+          ) : (
+            <Link key={e.label} href={e.href} className={tileCls}>
+              {inner}
             </Link>
           );
         })}
       </div>
+      {readOnly ? (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          查看他人工作台时入口已禁用
+        </p>
+      ) : null}
     </MobileCard>
   );
 }

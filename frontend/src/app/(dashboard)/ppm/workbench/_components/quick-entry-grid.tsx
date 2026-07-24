@@ -35,7 +35,7 @@ interface EntryDef {
   onClick: () => void;
 }
 
-export function QuickEntryGrid() {
+export function QuickEntryGrid({ readOnly }: { readOnly?: boolean }) {
   const router = useRouter();
   const { toast, showToast } = useToast();
 
@@ -81,8 +81,14 @@ export function QuickEntryGrid() {
             <button
               key={e.label}
               type="button"
+              disabled={readOnly}
               onClick={e.onClick}
-              className="group flex items-center gap-2.5 rounded-xl border border-border/60 bg-muted/40 px-3 py-2.5 text-left transition hover:-translate-y-0.5 hover:bg-muted/70 hover:shadow-sm"
+              className={cn(
+                "group flex items-center gap-2.5 rounded-xl border border-border/60 bg-muted/40 px-3 py-2.5 text-left transition",
+                readOnly
+                  ? "cursor-not-allowed opacity-50"
+                  : "hover:-translate-y-0.5 hover:bg-muted/70 hover:shadow-sm",
+              )}
             >
               <span
                 className={cn(
@@ -99,6 +105,11 @@ export function QuickEntryGrid() {
           );
         })}
       </div>
+      {readOnly ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          查看他人工作台时入口已禁用
+        </p>
+      ) : null}
       <div className="mt-2">
         <Toast toast={toast} />
       </div>

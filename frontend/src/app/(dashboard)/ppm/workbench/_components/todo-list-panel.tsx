@@ -29,6 +29,8 @@ const PAGE_SIZE = 10;
 export interface TodoListPanelProps {
   /** 切换查看的目标用户 id;null/undefined=当前登录人。切换时重置到第 1 页。 */
   targetUserId?: string | null;
+  /** 只读模式(查看他人工作台时):禁用待办点击跳转。 */
+  readOnly?: boolean;
 }
 
 interface BadgeStyle {
@@ -78,7 +80,7 @@ function todoBadge(todo: WorkbenchTodoItem): BadgeStyle {
   return { variant: "outline", label: type || "待办" };
 }
 
-export function TodoListPanel({ targetUserId }: TodoListPanelProps) {
+export function TodoListPanel({ targetUserId, readOnly }: TodoListPanelProps) {
   const router = useRouter();
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -154,8 +156,9 @@ export function TodoListPanel({ targetUserId }: TodoListPanelProps) {
             : items.map((todo) => {
                 const badge = todoBadge(todo);
                 const clickable =
-                  todo.source === "plan_task" ||
-                  (todo.source ?? "").startsWith("problem");
+                  !readOnly &&
+                  (todo.source === "plan_task" ||
+                    (todo.source ?? "").startsWith("problem"));
                 return (
                   <li
                     key={todo.id}

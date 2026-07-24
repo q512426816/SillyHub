@@ -10,6 +10,8 @@
  * 切换用户后 profile 数据为目标人,但 can_view_others/switchableUsers 始终反映
  * 登录人能力(后端 profile.can_view_others 反映 actor,见 D-005)。
  */
+import { Select } from "antd";
+
 import { SectionCard } from "@/components/layout";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -77,27 +79,31 @@ export function ProfileSummaryCard({
         </div>
       </div>
 
-      {/* 切换用户(仅经理 ‖ super_admin 且有可切换用户时渲染) */}
+      {/* 切换用户(仅经理 ‖ super_admin 且有可切换用户时渲染;支持输入搜索) */}
       {showSwitch ? (
         <div className="mt-3 border-t border-border pt-3">
           <label className="mb-1 block text-xs text-muted-foreground">
-            切换查看其他成员工作台
+            切换查看其他成员工作台(可输入姓名/工号/部门搜索)
           </label>
-          <select
+          <Select
+            showSearch
             value={selectValue}
-            onChange={(e) =>
-              onSwitchUser?.(e.target.value === "__me__" ? null : e.target.value)
+            onChange={(v: string) =>
+              onSwitchUser?.(v === "__me__" ? null : v)
             }
-            className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          >
-            <option value="__me__">我自己</option>
-            {switchableUsers?.map((u) => (
-              <option key={u.user_id} value={u.user_id}>
-                {placeholder(u.display_name)}
-                {u.department_name ? `（${u.department_name}）` : ""}
-              </option>
-            ))}
-          </select>
+            placeholder="搜索或选择成员"
+            style={{ width: "100%" }}
+            optionFilterProp="label"
+            options={[
+              { value: "__me__", label: "我自己" },
+              ...(switchableUsers?.map((u) => ({
+                value: u.user_id,
+                label: `${u.display_name ?? "—"}${
+                  u.employee_no ? ` · ${u.employee_no}` : ""
+                }${u.department_name ? ` · ${u.department_name}` : ""}`,
+              })) ?? []),
+            ]}
+          />
         </div>
       ) : null}
     </SectionCard>

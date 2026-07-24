@@ -242,3 +242,11 @@ async def list_switchable_users(self, user) -> list[WorkbenchSwitchableUser]:
   - F4/§3：「任务表本就分页」更正为「cap 100 条无分页器」。
 - ✅ F3（R-05 担忧）已消解：`personal_plan_task_page` 现状不依赖 data_scope，注入 target 耦合浅，回退方案大概率不用。
 - ✅ `scale: large`（跨 backend+WEB+APP 三模块、新 API、权限、DTO 变更）。
+
+## 13. 第二轮细化(2026-07-24,D-006~008)
+
+部署第一轮后用户追加 3 点细化:
+
+- **只读模式(D-006)**:切换查看他人工作台(targetUserId≠null)时,整台只读——禁用所有数据操作(任务详情/执行/启动 → 「仅查看」)+ 禁用所有页面跳转(待办点击、WEB 快捷入口、APP 指标下钻/快捷入口)。前端 `readOnly=isViewingOther` 透传 TodoListPanel/WorkbenchTaskTable/QuickEntryGrid(WEB)、MetricsCard/QuickEntriesCard(APP);只读态按钮 `disabled`、`<Link>` 退化为不可点 div + 提示文案。后端无需改(写操作本就不带 target_user_id;只读是前端约束,管理视角纯查看)。
+- **切换人员可搜索(D-007)**:纯下拉改可搜索——WEB 用 antd `Select`(showSearch,按姓名/工号/部门过滤);APP 用输入框 + 实时过滤可点列表(我自己始终置顶)。
+- **APP 不展示待办(D-008)**:移除 APP `TodoCard`(第一版新增的)。APP 工作台=个人信息(含切换)+ 指标 + 工作日历 + 快捷入口;待办分页仅 WEB。后端 `/workbench/todos` 保留(WEB 用)。

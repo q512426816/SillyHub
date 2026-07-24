@@ -187,8 +187,8 @@ export default function WorkbenchPage() {
             />
           )}
 
-          {/* 我的待办: 自包含 fetch + 分页(默认 10 条/页),跟随 target */}
-          <TodoListPanel targetUserId={targetUserId} />
+          {/* 我的待办: 自包含 fetch + 分页(默认 10 条/页),跟随 target;只读时禁用跳转 */}
+          <TodoListPanel targetUserId={targetUserId} readOnly={isViewingOther} />
 
           <MessagePlaceholder />
         </div>
@@ -210,10 +210,11 @@ export default function WorkbenchPage() {
             />
           )}
 
-          {/* 我的任务: 自包含 fetch + 筛选(ql-005); 执行后回调刷 summary;跟随 target */}
+          {/* 我的任务: 自包含 fetch + 筛选(ql-005); 执行后回调刷 summary;跟随 target;只读时禁用操作 */}
           <SectionCard title="我的任务" bodyPadding="p-4">
             <WorkbenchTaskTable
               targetUserId={targetUserId}
+              readOnly={isViewingOther}
               onChanged={() => void loadSummary()}
             />
           </SectionCard>
@@ -237,7 +238,7 @@ export default function WorkbenchPage() {
             />
           )}
 
-          <QuickEntryGrid />
+          <QuickEntryGrid readOnly={isViewingOther} />
         </div>
       </div>
     </PageContainer>

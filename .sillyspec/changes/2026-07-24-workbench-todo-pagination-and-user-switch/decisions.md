@@ -72,3 +72,45 @@ created_at: 2026-07-24T08:45:00
 - **impacts**: WorkbenchProfile += can_view_others；前端 ?? 兜底旧响应。
 - **evidence**: design.md §7.2 / FR-4
 - **priority**: medium
+
+---
+
+## D-006@v1 — 切换查看他人工作台时整台只读
+
+- **type**: requirement
+- **status**: accepted
+- **source**: 用户细化(2026-07-24 第二轮)「切换他人工作台时数据不允许操作,并且对应的页面跳转都禁用掉」
+- **question**: 切换查看他人时,工作台内的操作与跳转如何处理?
+- **answer**: targetUserId≠null(查看他人)时,整台只读——禁用所有数据操作(任务详情/执行/启动按钮 → 「仅查看」) + 禁用所有页面跳转(待办点击、快捷入口、APP 指标下钻/快捷入口 Link)。
+- **normalized_requirement**: 前端 readOnly=isViewingOther 透传到 TodoListPanel/WorkbenchTaskTable/QuickEntryGrid(WEB)+ MetricsCard/QuickEntriesCard(APP);只读态按钮 disabled、Link 退化为非可点 div。
+- **impacts**: WEB 5 组件 + APP MetricsCard/QuickEntriesCard 加 readOnly;page.tsx 透传。
+- **evidence**: 用户原话;design §5.2/§5.3
+- **priority**: high
+
+---
+
+## D-007@v1 — 切换人员支持输入搜索
+
+- **type**: ux
+- **status**: accepted
+- **source**: 用户细化「切换人员可以输入查询」
+- **question**: 切换人员控件如何选人?
+- **answer**: 改纯下拉为可搜索:WEB 用 antd Select(showSearch,按姓名/工号/部门过滤);APP 用输入框 + 实时过滤的可点列表(移动端)。
+- **normalized_requirement**: 切换器可输入关键字过滤可见用户列表(我自己始终置顶)。
+- **impacts**: WEB ProfileSummaryCard(select→antd Select);APP ProfileCard(select→搜索框+过滤列表)。
+- **evidence**: 用户原话
+- **priority**: medium
+
+---
+
+## D-008@v1 — APP 不展示「我的待办」
+
+- **type**: requirement
+- **status**: accepted
+- **source**: 用户细化「我的待办 在 APP UI 不要展示」
+- **question**: APP 工作台是否展示待办?
+- **answer**: 否。移除 APP TodoCard(第一版新增的)。待办分页仅 WEB 展示;APP 工作台=个人信息(含切换)+ 指标 + 工作日历 + 快捷入口。
+- **normalized_requirement**: APP m/ppm/workbench/page.tsx 不渲染待办卡片;移除 TodoCard 组件 + fetchWorkbenchTodos/WorkbenchTodoItem/PageResp 相关 import。后端 /workbench/todos 端点保留(WEB 用)。
+- **impacts**: APP page.tsx(删 TodoCard + helpers + imports)。
+- **evidence**: 用户原话(推翻第一版 APP 待办)
+- **priority**: medium

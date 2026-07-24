@@ -37,6 +37,8 @@ export interface WorkbenchTaskTableProps {
   onChanged?: () => void;
   /** 切换查看的目标用户 id;null/undefined=当前登录人(D-004 任务表跟随切换)。 */
   targetUserId?: string | null;
+  /** 只读模式(查看他人工作台时):操作列禁用(详情/执行/启动 → 仅查看)。 */
+  readOnly?: boolean;
 }
 
 /** 本周一~周日 [start, end] (本地日, 对齐 page 旧 inTaskRange 口径)。 */
@@ -51,7 +53,7 @@ function thisWeekRange(): [Dayjs, Dayjs] {
 
 const STATUS_OPTIONS = ["未开始", "进行中", "已完成"] as const;
 
-export function WorkbenchTaskTable({ onChanged, targetUserId }: WorkbenchTaskTableProps) {
+export function WorkbenchTaskTable({ onChanged, targetUserId, readOnly }: WorkbenchTaskTableProps) {
   // 查询条件: 日期范围 / 项目(后端) / 状态(后端)
   // 默认本月 + 未开始/进行中(进行中任务最需本人关注)
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(() => [
@@ -184,37 +186,40 @@ export function WorkbenchTaskTable({ onChanged, targetUserId }: WorkbenchTaskTab
       key: "action",
       align: "center",
       width: 180,
-      render: (_v: unknown, t: PlanTask) => (
-        <div className="flex whitespace-nowrap gap-1 justify-center">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => {
-              setDetailTask(t);
-              setDetailMode("detail");
-            }}
-          >
-            详情
-          </Button>
-          {t.status === "未开始" && (
-            <Button size="sm" variant="ghost" onClick={() => void handleStart(t)}>
-              启动
-            </Button>
-          )}
-          {t.status === "进行中" && (
+      render: (_v: unknown, t: PlanTask) =>
+        readOnly ? (
+          <span className="text-xs text-muted-foreground">仅查看</span>
+        ) : (
+          <div className="flex whitespace-nowrap gap-1 justify-center">
             <Button
               size="sm"
               variant="ghost"
               onClick={() => {
                 setDetailTask(t);
-                setDetailMode("execute");
+                setDetailMode("detail");
               }}
             >
-              执行
+              详情
             </Button>
-          )}
-        </div>
-      ),
+            {t.status === "未开始" && (
+              <Button size="sm" variant="ghost" onClick={() => void handleStart(t)}>
+                启动
+              </Button>
+            )}
+            {t.status === "进行中" && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setDetailTask(t);
+                  setDetailMode("execute");
+                }}
+              >
+                执行
+              </Button>
+            )}
+          </div>
+        ),
     },
   ];
 
