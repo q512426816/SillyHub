@@ -2,7 +2,10 @@
 
 /**
  * 项目计划 — 展示所有项目实施阶段（三级里程碑 has_module=true）下的
- * 明细 + 任务计划（PlanTask），19 列两级表头 + 项目分组行 + 合并单元格 + 导出。
+ * 明细 + 任务计划（PlanTask），19 列两级表头 + 虚拟列表 + 导出。
+ *
+ * 虚拟列表模式不支持 rowSpan 合并,改为每行都显示项目名称/平台,
+ * 项目切换时用粗上边框做视觉分组。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -39,17 +42,8 @@ const STATUS_OPTIONS = [
   { value: "已完成", label: "已完成" },
 ];
 
-/** 带 rowSpan 标记的行类型(合并单元格用)。 */
-interface DisplayRow extends WeeklyPlanRow {
-  __isGroup?: boolean;
-  __groupProject?: string;
-  __projectSpan?: number;
-  __moduleSpan?: number;
-  __seq?: number;
-}
-
 export default function WeeklyPlanPage() {
-  const [allData, setAllData] = useState<WeeklyPlanRow[]>([]);
+  const [data, setData] = useState<WeeklyPlanRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
 
@@ -75,7 +69,7 @@ export default function WeeklyPlanPage() {
     setLoading(true);
     try {
       const resp = await listWeeklyPlan(buildReq());
-      setAllData(resp.items);
+      setData(resp.items);
     } catch (err) {
       message.error(err instanceof ApiError ? err.message : "加载失败");
     } finally {
@@ -106,142 +100,26 @@ export default function WeeklyPlanPage() {
     }
   };
 
-  // 构建带分组行 + rowSpan 的显示数据
-  const displayData = useMemo<DisplayRow[]>(() => {
-    const result: DisplayRow[] = [];
-    let curProject: string | null = null;
-    let projectStartIdx = -1;
-    let dataSeq = 0;
+  // 项目切换行(粗上边框)判定:第一行 or 与前一行 project_name 不同
+  const isProjectBoundary = useCallback(
+    (row: WeeklyPlanRow, idx: number) => {
+      if (idx === 0) return true;
+      const prev = data[idx - 1];
+      if (!prev) return false;
+      return (prev.project_name ?? "") !== (row.project_name ?? "");
+    },
+    [data],
+  );
 
-    for (const row of allData) {
-      const pn = row.project_name ?? "";
-
-      // 项目切换 → 插入分组行
-      if (pn !== curProject) {
-        // 修正上一个项目的 projectSpan
-        if (projectStartIdx >= 0 && result.length > projectStartIdx) {
-          const span = result.length - projectStartIdx;
-          for (let j = projectStartIdx; j < result.length; j++) {
-            const rj = result[j];
-            if (rj) rj.__projectSpan = j === projectStartIdx ? span : 0;
-          }
-        }
-        curProject = pn;
-        // 分组行
-        const groupRow: DisplayRow = {
-          project_name: row.project_name ?? null,
-          plan_type: row.plan_type ?? null,
-          detailed_stage: row.detailed_stage ?? null,
-          module_name: row.module_name ?? null,
-          task_theme: row.task_theme ?? null,
-          task_description: row.task_description ?? null,
-          work_load: row.work_load ?? null,
-          user_name: row.user_name ?? null,
-          start_time: row.start_time ?? null,
-          end_time: row.end_time ?? null,
-          status: row.status ?? null,
-          actual_start_time: row.actual_start_time ?? null,
-          actual_end_time: row.actual_end_time ?? null,
-          week_number: row.week_number ?? null,
-          detail_id: row.detail_id ?? null,
-          __isGroup: true,
-          __groupProject: pn,
-          __projectSpan: 0,
-          __moduleSpan: 0,
-        };
-        result.push(groupRow);
-        projectStartIdx = result.length;
-      }
-
-      // 数据行
-      dataSeq++;
-      const dataRow: DisplayRow = {
-        project_name: row.project_name ?? null,
-        plan_type: row.plan_type ?? null,
-        detailed_stage: row.detailed_stage ?? null,
-        module_name: row.module_name ?? null,
-        task_theme: row.task_theme ?? null,
-        task_description: row.task_description ?? null,
-        work_load: row.work_load ?? null,
-        user_name: row.user_name ?? null,
-        start_time: row.start_time ?? null,
-        end_time: row.end_time ?? null,
-        status: row.status ?? null,
-        actual_start_time: row.actual_start_time ?? null,
-        actual_end_time: row.actual_end_time ?? null,
-        week_number: row.week_number ?? null,
-        detail_id: row.detail_id ?? null,
-        __projectSpan: 1,
-        __moduleSpan: 1,
-        __seq: dataSeq,
-      };
-      result.push(dataRow);
-    }
-    // 最后一组 projectSpan
-    if (projectStartIdx >= 0 && result.length > projectStartIdx) {
-      const span = result.length - projectStartIdx;
-      for (let j = projectStartIdx; j < result.length; j++) {
-        const rj = result[j];
-        if (rj) rj.__projectSpan = j === projectStartIdx ? span : 0;
-      }
-    }
-
-    // 计算 moduleSpan(同项目内同平台合并)
-    let i = 0;
-    while (i < result.length) {
-      const ri = result[i];
-      if (!ri) { i++; continue; }
-      if (ri.__isGroup) {
-        i++;
-        continue;
-      }
-      const proj = ri.project_name ?? "";
-      const mod = ri.module_name ?? "";
-      let j = i + 1;
-      while (j < result.length) {
-        const rj = result[j];
-        if (!rj || rj.__isGroup) break;
-        if ((rj.project_name ?? "") !== proj || (rj.module_name ?? "") !== mod) break;
-        rj.__moduleSpan = 0;
-        j++;
-      }
-      ri.__moduleSpan = j - i;
-      i = j;
-    }
-
-    return result;
-  }, [allData]);
-
-  const columns: TableProps<DisplayRow>["columns"] = [
+  const columns: TableProps<WeeklyPlanRow>["columns"] = [
     {
       title: "序号",
       key: "seq",
       width: 50,
       fixed: "left",
       align: "center",
-      onCell: (_r: DisplayRow, idx?: number) => ({
-        colSpan: _r.__isGroup ? 19 : 1,
-      }),
-      render: (_v: unknown, _r: DisplayRow, idx?: number) => {
-        if (_r.__isGroup) {
-          return (
-            <div
-              style={{
-                background: "#305496",
-                color: "#fff",
-                fontWeight: 600,
-                fontSize: 13,
-                padding: "4px 12px",
-                textAlign: "left",
-              }}
-            >
-              📁 {_r.__groupProject}
-            </div>
-          );
-        }
-        // 序号用预计算的 __seq(跳过分组行)
-        return _r.__seq ?? 1;
-      },
+      render: (_v: unknown, _r: WeeklyPlanRow, idx?: number) =>
+        (idx ?? 0) + 1,
     },
     {
       title: "项目名称",
@@ -249,10 +127,14 @@ export default function WeeklyPlanPage() {
       key: "project_name",
       width: 140,
       fixed: "left",
-      onCell: (r: DisplayRow) => ({
-        rowSpan: r.__isGroup ? 0 : r.__projectSpan,
-      }),
-      render: (v: string | null) => v ?? "—",
+      render: (v: string | null, _r: WeeklyPlanRow, idx?: number) => {
+        const isBoundary = idx != null && isProjectBoundary(_r, idx);
+        return (
+          <span style={{ fontWeight: isBoundary ? 600 : 400 }}>
+            {v ?? "—"}
+          </span>
+        );
+      },
     },
     {
       title: "计划类型",
@@ -260,7 +142,6 @@ export default function WeeklyPlanPage() {
       key: "plan_type",
       width: 80,
       align: "center",
-      onCell: (r: DisplayRow) => ({ rowSpan: r.__isGroup ? 0 : 1 }),
       render: (v: string | null) => v ?? "—",
     },
     {
@@ -268,7 +149,6 @@ export default function WeeklyPlanPage() {
       dataIndex: "detailed_stage",
       key: "detailed_stage",
       width: 90,
-      onCell: (r: DisplayRow) => ({ rowSpan: r.__isGroup ? 0 : 1 }),
       render: (v: string | null) => v ?? "—",
     },
     {
@@ -276,9 +156,6 @@ export default function WeeklyPlanPage() {
       dataIndex: "module_name",
       key: "module_name",
       width: 110,
-      onCell: (r: DisplayRow) => ({
-        rowSpan: r.__isGroup ? 0 : r.__moduleSpan,
-      }),
       render: (v: string | null) => v ?? "—",
     },
     {
@@ -286,7 +163,6 @@ export default function WeeklyPlanPage() {
       dataIndex: "task_theme",
       key: "task_theme",
       width: 100,
-      onCell: (r: DisplayRow) => ({ rowSpan: r.__isGroup ? 0 : 1 }),
       render: (v: string | null) => v ?? "—",
     },
     {
@@ -294,7 +170,6 @@ export default function WeeklyPlanPage() {
       dataIndex: "task_description",
       key: "task_description",
       width: 180,
-      onCell: (r: DisplayRow) => ({ rowSpan: r.__isGroup ? 0 : 1 }),
       render: (v: string | null) => (
         <div className="whitespace-normal break-words" style={{ maxWidth: 160 }}>
           {v ?? "—"}
@@ -307,7 +182,6 @@ export default function WeeklyPlanPage() {
       key: "work_load",
       width: 70,
       align: "center",
-      onCell: (r: DisplayRow) => ({ rowSpan: r.__isGroup ? 0 : 1 }),
       render: (v: string | null) => v ?? "—",
     },
     {
@@ -319,7 +193,6 @@ export default function WeeklyPlanPage() {
           key: "week_number",
           width: 50,
           align: "center",
-          onCell: (r: DisplayRow) => ({ rowSpan: r.__isGroup ? 0 : 1 }),
           render: (v: number | null) => v ?? "—",
         },
         {
@@ -327,7 +200,6 @@ export default function WeeklyPlanPage() {
           dataIndex: "user_name",
           key: "user_name",
           width: 70,
-          onCell: (r: DisplayRow) => ({ rowSpan: r.__isGroup ? 0 : 1 }),
           render: (v: string | null) => v ?? "—",
         },
         {
@@ -335,7 +207,6 @@ export default function WeeklyPlanPage() {
           dataIndex: "start_time",
           key: "start_time",
           width: 90,
-          onCell: (r: DisplayRow) => ({ rowSpan: r.__isGroup ? 0 : 1 }),
           render: (v: string | null) => fmtDate(v),
         },
         {
@@ -343,7 +214,6 @@ export default function WeeklyPlanPage() {
           dataIndex: "end_time",
           key: "end_time",
           width: 90,
-          onCell: (r: DisplayRow) => ({ rowSpan: r.__isGroup ? 0 : 1 }),
           render: (v: string | null) => fmtDate(v),
         },
       ],
@@ -357,7 +227,6 @@ export default function WeeklyPlanPage() {
           key: "status",
           width: 60,
           align: "center",
-          onCell: (r: DisplayRow) => ({ rowSpan: r.__isGroup ? 0 : 1 }),
           render: (v: string | null) =>
             v ? (
               <Tag color={STATUS_COLOR[v] ?? "default"}>{v}</Tag>
@@ -370,7 +239,6 @@ export default function WeeklyPlanPage() {
           dataIndex: "actual_start_time",
           key: "actual_start_time",
           width: 90,
-          onCell: (r: DisplayRow) => ({ rowSpan: r.__isGroup ? 0 : 1 }),
           render: (v: string | null) => fmtDate(v),
         },
         {
@@ -378,14 +246,12 @@ export default function WeeklyPlanPage() {
           dataIndex: "actual_end_time",
           key: "actual_end_time",
           width: 90,
-          onCell: (r: DisplayRow) => ({ rowSpan: r.__isGroup ? 0 : 1 }),
           render: (v: string | null) => fmtDate(v),
         },
         {
           title: "延期原因",
           key: "delay_reason",
           width: 100,
-          onCell: (r: DisplayRow) => ({ rowSpan: r.__isGroup ? 0 : 1 }),
           render: () => (
             <span className="text-xs text-muted-foreground">—</span>
           ),
@@ -394,7 +260,6 @@ export default function WeeklyPlanPage() {
           title: "执行说明",
           key: "exec_note",
           width: 120,
-          onCell: (r: DisplayRow) => ({ rowSpan: r.__isGroup ? 0 : 1 }),
           render: () => (
             <span className="text-xs text-muted-foreground">—</span>
           ),
@@ -405,14 +270,12 @@ export default function WeeklyPlanPage() {
       title: "评估说明",
       key: "eval_note",
       width: 100,
-      onCell: (r: DisplayRow) => ({ rowSpan: r.__isGroup ? 0 : 1 }),
       render: () => <span className="text-xs text-muted-foreground">—</span>,
     },
     {
       title: "备注",
       key: "remarks",
       width: 100,
-      onCell: (r: DisplayRow) => ({ rowSpan: r.__isGroup ? 0 : 1 }),
       render: () => <span className="text-xs text-muted-foreground">—</span>,
     },
   ];
@@ -468,22 +331,18 @@ export default function WeeklyPlanPage() {
       </SectionCard>
 
       <SectionCard bodyPadding="p-0">
-        <Table<DisplayRow>
-          rowKey={(r, idx) =>
-            r.__isGroup
-              ? `group-${r.__groupProject}-${idx}`
-              : r.detail_id ?? `row-${idx}`
-          }
+        <Table<WeeklyPlanRow>
+          rowKey={(r, idx) => r.detail_id ?? `row-${idx}`}
           columns={columns}
-          dataSource={displayData}
+          dataSource={data}
           loading={loading}
           size="small"
           bordered
           virtual
           scroll={{ x: "max-content", y: 600 }}
           pagination={false}
-          rowClassName={(_r: DisplayRow, idx: number) =>
-            idx % 2 === 1 ? "bg-muted/30" : ""
+          rowClassName={(_r: WeeklyPlanRow, idx: number) =>
+            isProjectBoundary(_r, idx) ? "border-t-2 border-t-[#305496]" : ""
           }
         />
       </SectionCard>
