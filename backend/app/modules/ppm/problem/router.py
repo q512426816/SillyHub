@@ -885,9 +885,23 @@ def _build_export_with_images(rows: list[dict[str, Any]], filename: str) -> Any:
     for r_idx, row in enumerate(rows, start=2):
         for c_idx, col in enumerate(columns, start=1):
             ws.cell(row=r_idx, column=c_idx, value=col.extract(row))
-        for img_bytes in row.get("images") or []:
+        img_list = list(row.get("images") or [])
+        if img_list:
+            # 有附件的行设高行高，让图片能嵌入单元格内
+            ws.row_dimensions[r_idx].height = 80
+        for img_bytes in img_list:
             try:
                 img = Image(BytesIO(img_bytes))
+                # 缩放图片嵌入单元格（保持宽高比，不溢出）
+                max_w, max_h = 120, 60  # 像素
+                aspect = img.width / img.height if img.height else 1
+                if img.width > max_w or img.height > max_h:
+                    if aspect > 1:
+                        img.width = max_w
+                        img.height = int(max_w / aspect)
+                    else:
+                        img.height = max_h
+                        img.width = int(max_h * aspect)
                 img.anchor = f"{attach_col_letter}{r_idx}"
                 ws.add_image(img)
             except Exception:
