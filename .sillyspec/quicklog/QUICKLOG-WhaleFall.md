@@ -383,3 +383,11 @@ created_at: 2026-07-21T08:48:56
 根因：①前两轮每列单独写过滤/排序代码,推广到全部 14 列会冗长难维护；②CLI 接管的 QUICKLOG 是简版(标题"(quick 任务)"、文件"（见实际改动）"、四字段全挤"结果："一行),不符合用户要的丰富格式。
 方案：①配置驱动重构——SORTABLE_FIELDS(key+kind text/number/date)统一管 14 列,fieldFiltersMap 一次生成所有字段下拉选项,processedData 通用循环过滤(AND叠加)+排序(空值固定排最后,不受升降序影响),sortableColProps(key) 生成列属性(排序+多选筛选 filterSearch,受控)；project_name/task_theme 由显式配置改 spread,新增计划类型/任务分类/平台/任务描述/工作量/周次/责任人/开始结束日期/状态/实际开始完成时间 12 列加 spread,占位列(延期原因/执行说明/评估说明/备注 无数据源)不加；②QUICKLOG 001/002/003 手动改回需求/根因/方案/结果分段(参照 QUICKLOG-WhaleFall-2026-07-21.md)。
 结果：①tsc --noEmit 0 error(修 fieldText 的 as unknown as Record 类型转换)；②改 page.tsx + QUICKLOG-WhaleFall.md + ppm.md；③待 commit+push+重建 frontend 部署 + 用户验证全列排序筛选。
+## ql-20260725-001-5075 | 2026-07-25 13:51:15 | /ppm/weekly-plan 加宽列表列(加筛选图标后表头偏挤)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（14 个有筛选的列 width 加宽）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：用户反馈加了筛选/排序图标后列表头有点挤，要求调整列宽。
+根因：上轮 ql-003 给 14 列加了 sortableColProps（表头排序箭头 + 筛选漏斗约 40px），原列宽未预留图标空间，致表头文字与图标挤压。
+方案：14 个有筛选的列 width 各 +20~40px——项目名称 140→160 / 计划类型 80→110 / 任务分类 90→110 / 平台 110→130 / 任务主题 100→120 / 任务描述 180→200(渲染 maxWidth 160→180) / 工作量 70→100 / 周次 50→80 / 责任人 70→100 / 开始结束日期 90→120 / 状态 60→90 / 实际开始完成时间 90→120；序号列 50 不变(无筛选图标)。
+结果：①纯 width 数字调整无逻辑变更,跳过 tsc；②仅改 page.tsx + 同步 ppm.md 变更索引 ql-20260725-001-5075；③待 commit+push+重建 frontend 部署 + 用户验证列宽不挤。
