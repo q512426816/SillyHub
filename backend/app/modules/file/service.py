@@ -20,9 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import AppError
+from app.core.logging import get_logger
 from app.modules.file.model import File
 from app.modules.file.schema import FileMetaResp, FileUploadResp
 from app.modules.storage.base import StorageBackend
+
+log = get_logger(__name__)
 
 
 def _safe_ext(original_name: str) -> str:
@@ -90,7 +93,17 @@ class FileService:
             created_at=now,
         )
         self._session.add(row)
-        await self._session.commit()
+        try:
+            await self._session.commit()
+        except Exception:
+            # 第五批 code-quality：commit 失败（DB 异常/连接断）→ MinIO 对象已写但
+            # 无 File 行指向 → 孤儿对象。best-effort 补偿删存储对象（失败仅记日志，
+            # 不掩盖原始 commit 异常，对齐 lease WS 容错范式）。
+            try:
+                await self._storage.delete_object(stored_key)
+            except Exception:
+                log.warning("file.upload_compensation_failed", stored_key=stored_key)
+            raise
         return FileUploadResp(
             id=row.id, original_name=row.original_name, mime_type=row.mime_type, size=row.size
         )
@@ -120,7 +133,22 @@ class FileService:
         return [FileMetaResp.model_validate(r) for r in rows]
 
     async def soft_delete(self, file_id: uuid.UUID) -> None:
-        """软删：置 deleted_at。对象本体由后续清理流程删除，这里不动存储。"""
+        """软删：置 deleted_at + 同步删存储对象本体。
+
+        第五批 code-quality：原仅置 deleted_at、注释称"对象本体由后续清理流程删除"
+        但该清理流程全仓不存在 → MinIO 孤儿单调增长（账单泄漏）。改同步删对象本体
+        (best-effort：删失败仅记日志、仍标软删防重复；历史已软删未删的孤儿需一次性
+        清理脚本)。顺序：先 commit DB 软删标记，后删 MinIO——若反序 commit 失败会留
+        下指向已删对象的 active File（下载 404 损坏功能），故宁可孤儿不可损坏。
+        """
         row = await self._get_active(file_id)
         row.deleted_at = datetime.now(UTC)
         await self._session.commit()
+        try:
+            await self._storage.delete_object(row.stored_key)
+        except Exception:
+            log.warning(
+                "file.soft_delete_storage_failed",
+                file_id=str(file_id),
+                stored_key=row.stored_key,
+            )

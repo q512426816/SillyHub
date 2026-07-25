@@ -275,3 +275,38 @@ DEFER（带原因）：
 
 > 第四批无 alembic migration（全代码层修复），migration 链仍单头 `202607251000`。
 > 本批最高价值：F1（gate 死循环防护生产失效，一行 merge + e2e 闭环）+ F5（codex 主 agent 会话永久卡死）。
+
+---
+
+## 8. 🟢 第五批（2026-07-25，用户"后续批次"指示）
+
+> 第四批识别的 HIGH/MED 中，本批做可安全代码层修复的 file 存储一致性 + workspace
+> soft_delete 防烧 token + 第四批遗留注释；需 migration / 跨文件 / 逐表设计的项 DEFER。
+
+### Wave G — file 存储一致性 + workspace soft_delete 防烧 token ✅ 零回归
+
+| ID | 文件:行 | 问题 | 修法 |
+|---|---|---|---|
+| G1 | `file/service.py:80,122` | upload_file MinIO put 先于 DB commit 无补偿 → commit 失败留孤儿对象；soft_delete 仅置 deleted_at 不删存储本体（注释称"后续清理流程"但全仓不存在）→ MinIO 孤儿单调增长（账单泄漏） | upload commit 失败 best-effort 补偿 `delete_object`；soft_delete 同步删对象本体（先 commit DB 后删 MinIO，宁可孤儿不可损坏） |
+| G2 | `workspace/service.py:456` | soft_delete 仅置 deleted_at/status，**不取消该 workspace 下在跑 AgentRun** → daemon 继续 burn token / 向已删实体回写 | 复用 P0-2 链路：查 active runs（经 AgentRunWorkspace JOIN）逐个 `cancel_lease`（含 pending 兜底），best-effort 单 run 失败不中断 |
+| G3 | `frontend/lib/daemon.ts:398` | 第四批删 streamQuickChat 后注释仍提及（纯注释瑕疵） | 清理注释 |
+
+### DEFER 复评（修正 a4f18dab 判断 + 大工程留专项）
+
+| 项 | 复评结论 |
+|---|---|
+| **PPM 父表删除级联** | **修正 a4f18dab 的"生产 PG FK 500"判断**：`delete_module` 注释 :437 明示 PPM FK 为**软关联无约束**（migration 202607220900），删父行**不会 FK 违约 500**，而是留孤儿子行（**MED 数据质量**，非 HIGH 崩溃）。4 父表（plan/problem/task/project）子表需逐表确认 + 显式级联，留 PPM 数据一致性专项 |
+| PPM 全域乐观锁 | DEFER：需 version 列 migration（多表）+ update WHERE version + 前端并发 409 协调，大工程走专项 brainstorm（复用 `agent/coordinator.update_with_optimistic_lock` 范式） |
+| workspace create 单事务 | DEFER：helper（_ensure_empty_spec_workspace / upsert_my_binding）内部 commit 跨文件，改 flush + commit 上提涉及其它入口，风险中，留专项 |
+| import_commit :1250 边缘 commit | DEFER：file_urls 回写 commit 失败留"File 行存在但 file_urls 不引用"边缘场景；当前 best-effort 附件设计（D-009/R-05）可接受，且 G1 upload 补偿已覆盖单图 upload |
+| workspace soft_delete 子表清理 | DEFER：软删后子表（member binding / lease / AgentRunWorkspace）残留是数据冗余不影响功能，G2 cancel run 是防烧 token 核心 |
+
+### 验证（第五批）
+
+| 端 | 改动 | 改后 |
+|---|---|---|
+| backend | G1/G2 | file 9 passed / workspace 183 passed（全零回归）；ruff ✅ / mypy ✅ |
+| frontend | G3 | daemon.ts 注释（tsc 不影响） |
+
+> 第五批无 alembic migration，链仍单头 `202607251000`。
+> 关键修正：核实 PPM FK 为软关联无约束，a4f18dab 的"删父表 FK 500"判断不准（实为 MED 孤儿数据）。

@@ -463,13 +463,51 @@ class WorkspaceService:
         # If created_by is None (legacy data), skip the check.
         if workspace.created_by is not None and deleted_by != workspace.created_by:
             raise WorkspacePermissionDenied("Only the workspace owner can delete this workspace.")
+
+        # 第五批 code-quality：取消该 workspace 下所有在跑 AgentRun（防软删后 daemon
+        # 继续 burn token / 向已删实体回写）。复用 P0-2 链路（cancel_lease 内部含
+        # "标记 killed + lease cancelled + 发信号"，对无 lease 的 pending run 也走
+        # _mark_agent_run_killed_if_pending 兜底）。best-effort：单 run 失败不中断软删。
+        # 注：子表（member binding / lease / AgentRunWorkspace）清理留专项——软删后
+        # 残留子表是数据冗余不影响功能，cancel run 是防烧 token 的核心。
+        active_runs = (
+            (
+                await self._session.execute(
+                    select(AgentRun)
+                    .join(AgentRunWorkspace, AgentRunWorkspace.agent_run_id == AgentRun.id)
+                    .where(AgentRunWorkspace.workspace_id == workspace_id)
+                    .where(AgentRun.status.in_(("pending", "running")))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if active_runs:
+            from app.modules.daemon.lease_service import DaemonLeaseService
+
+            lease_svc = DaemonLeaseService(self._session)
+            for run in active_runs:
+                try:
+                    await lease_svc.cancel_lease(run.id)
+                except Exception as exc:
+                    log.warning(
+                        "workspace.soft_delete_cancel_failed",
+                        workspace_id=str(workspace_id),
+                        run_id=str(run.id),
+                        error=str(exc),
+                    )
+
         now = datetime.now(UTC)
         workspace.deleted_at = now
         workspace.updated_at = now
         workspace.status = "deleted"
         await self._session.commit()
         await self._session.refresh(workspace)
-        log.info("workspace.soft_deleted", workspace_id=str(workspace.id))
+        log.info(
+            "workspace.soft_deleted",
+            workspace_id=str(workspace.id),
+            cancelled_runs=len(active_runs),
+        )
         return workspace
 
     async def update(
