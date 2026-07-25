@@ -92,6 +92,21 @@ class ExecutionContextResponse(BaseModel):
         default=None,
         description="是否 stage 投递（daemon 用它判定是否构造 skill 调用 prompt）。",
     )
+    # task-06（2026-07-25-llm-provider-management / D-005@v1 / FR-03）：用户默认 LLM
+    # 供应商配置（含解密 api_key），claim/create 阶段下发给 daemon 注入 ANTHROPIC_* env。
+    # 来源：build_claim_payload 按 lease→user_id 查 is_default 且 agent_kind 对齐的
+    # LlmProvider，命中才填（8 字段 contract，见 task-06 provides）；用户未配默认
+    # provider → None（absent，D-007 零回归，daemon spawn-env 第0层跳过）。
+    # R-02：明文 api_key 仅在 claim/create 阶段下发；submit/complete/end 链路与
+    # AuditLog / 日志严禁回传（audit_hooks 只读 ORM 列，明文不入 ORM 故捕获不到）。
+    provider_config: dict | None = Field(
+        default=None,
+        description=(
+            "用户默认 LLM 供应商配置。含 agent_kind/base_url/api_key(明文)/auth_field/"
+            "model/model_role_mappings/default_fallback_model/extra_env。仅 claim/create "
+            "阶段下发；submit/complete 链路与审计日志严禁回传 api_key（R-02）。"
+        ),
+    )
 
 
 class QuickChatRequest(BaseModel):

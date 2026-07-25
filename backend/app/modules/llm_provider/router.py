@@ -1,0 +1,106 @@
+"""HTTP routes for LLM provider management.
+
+所有端点按 ``current_user.id`` 过滤（D-008 owner 级，用 ``get_current_user`` 非
+``require_permission_any``）；list/detail 仅经 ``service._to_read`` 输出
+``api_key_masked``，严禁返回明文 / ``encrypted_api_key``（R-02/R-04）。
+"""
+
+from __future__ import annotations
+
+import uuid
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.auth_deps import get_current_user
+from app.core.db import get_session
+from app.modules.auth.model import User
+from app.modules.llm_provider.schema import (
+    LlmProviderCreate,
+    LlmProviderList,
+    LlmProviderRead,
+    LlmProviderUpdate,
+)
+from app.modules.llm_provider.service import LlmProviderService
+
+router = APIRouter(prefix="/llm-providers", tags=["llm_provider"])
+
+SessionDep = Annotated[AsyncSession, Depends(get_session)]
+CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def _parse_id(provider_id: str) -> uuid.UUID:
+    return uuid.UUID(provider_id)
+
+
+@router.get("", response_model=LlmProviderList)
+async def list_providers(
+    session: SessionDep,
+    user: CurrentUser,
+) -> LlmProviderList:
+    service = LlmProviderService(session)
+    items = await service.list_(user.id)
+    return LlmProviderList(
+        items=[service._to_read(i) for i in items],
+        total=len(items),
+    )
+
+
+@router.post(
+    "",
+    response_model=LlmProviderRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_provider(
+    data: LlmProviderCreate,
+    session: SessionDep,
+    user: CurrentUser,
+) -> LlmProviderRead:
+    service = LlmProviderService(session)
+    row = await service.create(user.id, data)
+    return service._to_read(row)
+
+
+@router.get("/{provider_id}", response_model=LlmProviderRead)
+async def get_provider(
+    provider_id: str,
+    session: SessionDep,
+    user: CurrentUser,
+) -> LlmProviderRead:
+    service = LlmProviderService(session)
+    row = await service.get(_parse_id(provider_id), user.id)
+    return service._to_read(row)
+
+
+@router.patch("/{provider_id}", response_model=LlmProviderRead)
+async def update_provider(
+    provider_id: str,
+    data: LlmProviderUpdate,
+    session: SessionDep,
+    user: CurrentUser,
+) -> LlmProviderRead:
+    service = LlmProviderService(session)
+    row = await service.update(_parse_id(provider_id), user.id, data)
+    return service._to_read(row)
+
+
+@router.delete("/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_provider(
+    provider_id: str,
+    session: SessionDep,
+    user: CurrentUser,
+) -> None:
+    service = LlmProviderService(session)
+    await service.delete(_parse_id(provider_id), user.id)
+
+
+@router.post("/{provider_id}/set-default", response_model=LlmProviderRead)
+async def set_default_provider(
+    provider_id: str,
+    session: SessionDep,
+    user: CurrentUser,
+) -> LlmProviderRead:
+    service = LlmProviderService(session)
+    row = await service.set_default(_parse_id(provider_id), user.id)
+    return service._to_read(row)

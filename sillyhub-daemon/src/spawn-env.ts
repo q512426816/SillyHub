@@ -1,22 +1,27 @@
 /**
  * spawn-env —— claude 子进程 env 构造器（task-09 / B1）。
  *
- * 合并三层 env（优先级从高到低）：
+ * 合并四层 env（优先级从高到低）：
+ *   0. provider_config（平台下发，injector.toEnv 产 ANTHROPIC_* env）—— task-09 新增
  *   1. tool_config.env（ctx.toolConfig，经 credential.buildEnv 渲染占位符 + 大写）
  *   2. claude token（credentials.json ANTHROPIC_API_KEY / CLAUDE_OAUTH_TOKEN，
  *      process.env 兜底）
  *   3. process.env 副本
  *
- * 附 redactEnv 守卫：遮蔽疑似密钥 value，供日志输出使用。
+ * 附 redactEnv / redactProviderConfig 守卫：遮蔽疑似密钥 value，供日志输出使用。
  *
- * ⚠️ 不泄漏铁律（R-09）：
+ * ⚠️ 不泄漏铁律（R-09 / R-02）：
  *   - buildSpawnEnv 返回值**仅本地内存**传给 spawn({ env })，禁止序列化到
  *     日志 / Redis publish / HTTP 回传 / 磁盘 / lease.metadata。
  *   - 任何 env 相关日志**必须**先经 redactEnv，禁止直接 console.log(buildSpawnEnv(...))。
+ *   - provider_config 对象含 api_key 明文，直接打对象须先经 redactProviderConfig。
  *   - token 不入 submitMessages（claude 输出链路）、不入 complete_lease payload。
  *
- * design §4.2.3（用户密钥不离开本机）；requirements FR-05。
+ * design §5（第 0 层注入最高优先级）/ §9（未配兜底零回归 D-007）；requirements FR-04 / FR-05。
  */
+
+import { getInjector } from './credential-injector.js';
+import type { ProviderConfig } from './types.js';
 
 /**
  * buildSpawnEnv 需要的凭据管理器接口子集（对齐 src/credential.ts 的
@@ -38,6 +43,12 @@ export interface SpawnCredentialManager {
  */
 export interface SpawnEnvCtx {
   toolConfig?: Record<string, unknown> | null;
+  /**
+   * task-09（D-004@v1 / D-007@v1）：平台下发的 LLM 供应商配置（最高优先级第 0 层）。
+   * 存在 + agent_kind 已注册 → injector.toEnv 产 env 盖过三层；
+   * absent / null / agent_kind 未注册 → 第 0 层跳过，env 与现状三层逐字一致（零回归）。
+   */
+  provider_config?: ProviderConfig | null;
 }
 
 /** spawn env 构造选项。 */
@@ -83,8 +94,14 @@ const SENSITIVE_KEY = /KEY\b|TOKEN\b|SECRET\b|PASSWORD\b|PAT\b|CREDENTIAL\b/i;
 /**
  * 构造 claude 子进程 env（spawn 的 SpawnOptions.env）。
  *
- * 三层合并（优先级从高到低）：tool_config.env > claude token > process.env。
+ * 四层合并（优先级从高到低）：provider_config（第 0 层）> tool_config.env（层 1）
+ * > claude token（层 2）> process.env（层 3）。
  * token 绝不写空串（避免误判已配置）；credentials.json 与 process.env 都无则不写入。
+ *
+ * 第 0 层（task-09 / D-004）：provider_config 存在 + agent_kind 已注册 injector
+ * → injector.toEnv 产 env **最后赋值**盖过三层同名 key（最高优先级）。
+ * provider_config absent / null / agent_kind 未注册（getInjector 返回 undefined）
+ * → 第 0 层整体跳过，env 与原三层合并逐字一致（D-007 brownfield 零回归，绝不抛异常）。
  *
  * @returns env 仅本地内存使用，禁止序列化到日志/Redis/HTTP/磁盘
  */
@@ -106,7 +123,7 @@ export function buildSpawnEnv(
     }
   }
 
-  // 层 1：tool_config.env（最高优先级，覆盖下层）
+  // 层 1：tool_config.env（覆盖下层 process.env / token）
   // 复用 credential.buildEnv：渲染 {{USER_*}} 占位符 + key 大写 + 过滤未解析项
   const toolEnv = opts.credential.buildEnv(ctx.toolConfig ?? {});
   for (const [k, v] of Object.entries(toolEnv)) {
@@ -119,6 +136,17 @@ export function buildSpawnEnv(
     env[k] = v;
   }
 
+  // 层 0：provider_config（最高优先级，task-09 / D-004）
+  // 平台下发的 LLM 供应商配置盖过 tool_config.env（层 1）/ token（层 2）/ process.env（层 3）。
+  // 放在最后赋值保证同名 key 第 0 层生效。provider_config absent / null / agent_kind 未注册
+  // → getInjector 返回 undefined，第 0 层跳过，env 与现状三层逐字一致（D-007 零回归）。
+  if (ctx.provider_config) {
+    const inj = getInjector(ctx.provider_config.agent_kind);
+    if (inj) {
+      Object.assign(env, inj.toEnv(ctx.provider_config));
+    }
+  }
+
   return env;
 }
 
@@ -128,6 +156,10 @@ export function buildSpawnEnv(
  * 规则：key 名匹配 `/KEY|TOKEN|SECRET|PASSWORD|PAT|CREDENTIAL/i` → value 替换为
  * `***REDACTED***`；其他 key 保留原值。
  *
+ * 主路径已覆盖 provider_config 注入的认证 key（ANTHROPIC_AUTH_TOKEN /
+ * ANTHROPIC_API_KEY 等，均匹配 SENSITIVE_KEY 正则）；本函数对 buildSpawnEnv 产出
+ * 自动脱敏，无需改正则（R-02）。
+ *
  * 不修改入参 env（返回新对象）。
  */
 export function redactEnv(
@@ -136,6 +168,25 @@ export function redactEnv(
   const out: Record<string, string | undefined> = {};
   for (const [k, v] of Object.entries(env)) {
     out[k] = SENSITIVE_KEY.test(k) ? '***REDACTED***' : v;
+  }
+  return out;
+}
+
+/**
+ * 遮蔽 ProviderConfig 的 api_key 字段（防御性 helper，R-02 不泄漏）。
+ *
+ * 适用场景：daemon 日志 / 调试路径**直接打 provider_config 对象本身**（含 api_key
+ * 明文字段，不经 buildSpawnEnv → env key 路径，redactEnv 抓不到）。
+ *
+ * 主链路（buildSpawnEnv → env）已被 redactEnv 覆盖（认证 env key 匹配 SENSITIVE_KEY），
+ * 本 helper 留作防御性工具应对直接打对象场景。不修改入参（返回浅拷贝）。
+ *
+ * design §10 R-02 / task-09 constraints（防御性日志脱敏）。
+ */
+export function redactProviderConfig(config: ProviderConfig): ProviderConfig {
+  const out: ProviderConfig = { ...config };
+  if (out.api_key) {
+    out.api_key = '***REDACTED***';
   }
   return out;
 }

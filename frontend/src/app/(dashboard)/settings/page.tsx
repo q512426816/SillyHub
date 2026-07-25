@@ -6,6 +6,7 @@ import { Boxes, BookOpen, KeyRound, Network } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { LlmProviderSection } from "@/components/llm-providers/llm-provider-list";
 import { ApiError } from "@/lib/api";
 import { getHealth, type HealthResponse } from "@/lib/health";
 import {
@@ -13,9 +14,10 @@ import {
   updateSettings,
 } from "@/lib/settings";
 
-type Tab = "workspace" | "agent" | "security" | "integrations";
+type Tab = "providers" | "workspace" | "agent" | "security" | "integrations";
 
 const TABS: { key: Tab; label: string }[] = [
+  { key: "providers", label: "我的供应商" },
   { key: "workspace", label: "工作区信息" },
   { key: "agent", label: "智能体配置" },
   { key: "security", label: "安全策略" },
@@ -415,7 +417,7 @@ function EntryCard({
 /* ---------- Main Page ---------- */
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<Tab>("workspace");
+  const [tab, setTab] = useState<Tab>("providers");
   const [health, setHealth] = useState<HealthResponse | null>(null);
 
   useEffect(() => {
@@ -483,6 +485,7 @@ export default function SettingsPage() {
         ))}
       </div>
 
+      {tab === "providers" && <LlmProviderSection />}
       {tab === "workspace" && <WorkspaceTab dbStatus={health} />}
       {tab === "agent" && <AgentConfigTab />}
       {tab === "security" && <SecurityTab />}

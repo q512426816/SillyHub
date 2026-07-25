@@ -63,7 +63,7 @@ import { listRoots } from './roots-rpc.js';
 // task-03（2026-07-06-daemon-host-fs-delegate）：host_fs.* WS handler 业务层。
 // backend 经 HostFsDelegate + ws_rpc 调本 handler 在宿主执行 stat/git_apply/...（FR-02）。
 import { HostFsHandler } from './host-fs-handler.js';
-import { buildSpawnEnv } from './spawn-env.js';
+import { buildSpawnEnv, type SpawnCredentialManager } from './spawn-env.js';
 // 2026-06-24 preflight：启动前预检 sillyspec 版本 + daemon 自更新（失败不阻断启动）。
 import { runPreflight } from './preflight.js';
 // 2026-07-07-daemon-skill-execution task-03：skill-manager，启动同步平台 sillyspec skills。
@@ -2809,16 +2809,26 @@ export class Daemon {
       this._logger.warn('interactive_link_skills_failed', { lease_id: leaseId, error: String(e) });
     }
 
-    // gap-8（interactive 凭证 parity）：与 batch 一致用 buildSpawnEnv 构造子进程 env，
-    // 让 driver 能读到 credentials.json 的 ANTHROPIC token（+ lease tool_config 占位符
-    // 渲染）。未注入 credentialManager 时传 undefined，driver 回退裸 process.env（兼容）。
-    let interactiveEnv: NodeJS.ProcessEnv | undefined;
-    if (this._credentialManager) {
-      interactiveEnv = buildSpawnEnv(
-        { toolConfig: execPayload.toolConfig ?? {} },
-        { credential: this._credentialManager },
-      );
-    }
+    // gap-8（interactive 凭证 parity）+ task-09（X-02 门控独立化）：
+    // 与 batch 一致用 buildSpawnEnv 构造子进程 env，让 driver 能读到 credentials.json
+    // 的 ANTHROPIC token（+ lease tool_config 占位符渲染）。**provider_config 第 0 层
+    // 注入不依赖 credentialManager 存在**——credentialManager 缺失时用 noop credential
+    //（层 2 token 读取自然跳过：get→undefined / buildEnv→{}），平台下发的 provider_config
+    // 仍独立经第 0 层生效。避免「daemon 未注入 credentialManager → 即使 lease 带
+    // provider_config 也走不进 buildSpawnEnv → 第 0 层失效」回归（X-02 选方案 (a)，
+    // 不依赖生产 main.ts 必注入 credentialManager 假设漂移）。
+    const noopCredential: SpawnCredentialManager = {
+      get: () => undefined,
+      buildEnv: () => ({}),
+    };
+    const interactiveEnv = buildSpawnEnv(
+      {
+        toolConfig: execPayload.toolConfig ?? {},
+        // task-09（D-004@v1）：lease 下发的 provider_config 透传给第 0 层。
+        provider_config: execPayload.provider_config,
+      },
+      { credential: this._credentialManager ?? noopCredential },
+    );
 
     // 先登记 lease→session（即使 create 抛错也登记，防 create 失败后 WS 重放反复重试；
     // SessionManager.create 抛 SessionAlreadyExistsError 时 store 已无此 session，安全）。
@@ -3266,6 +3276,14 @@ export class Daemon {
       stage:
         (rawExec.stage as string | undefined) ??
         payload.stage,
+      // task-08 / task-09（D-004@v1 / D-005@v1）：LLM 供应商配置透传。backend
+      // build_claim_payload 按 lease→user 解析默认 provider 解密 api_key 后下发；
+      // daemon spawn-env 第 0 层据此注入 ANTHROPIC_* env。interactive 经 execPayload
+      // 直读（:2817），batch 经 ctx 透传（:3318）。absent → 第 0 层跳过零回归（D-007）。
+      provider_config:
+        (rawExec.provider_config as LeaseCtx['provider_config'] | undefined) ??
+        (rawExec.providerConfig as LeaseCtx['provider_config'] | undefined) ??
+        payload.provider_config,
     };
 
     // task-04（D-002@v3）：kind 分流。在 fetch/startLease 之前——interactive 不走
@@ -3335,6 +3353,9 @@ export class Daemon {
       // toolConfig：fetch.tool_config 是 snake_case Record，payload.toolConfig 是 camelCase；
       // fetch 优先（端点是 task-03 之后的最新源）
       toolConfig: execCtx?.tool_config ?? execPayload.toolConfig,
+      // task-09（D-004@v1）：provider_config 透传给 batch 路径 task-runner
+      //（task-runner.ts:549 buildSpawnEnv 第 0 层自动消费）。fetch 优先（最新源）。
+      provider_config: execCtx?.provider_config ?? execPayload.provider_config,
       // resumeSessionId 优先用 fetch（端点是最新源）；session_id 兜底
       resumeSessionId: execCtx?.resume_session_id ?? execPayload.resumeSessionId,
       sessionId: execCtx?.session_id ?? execPayload.sessionId,

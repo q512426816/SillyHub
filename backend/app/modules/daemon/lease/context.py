@@ -59,6 +59,99 @@ def _normalize_lease_provider(raw: str | None) -> str | None:
     return raw
 
 
+async def _inject_provider_config(
+    session: AsyncSession,
+    lease: DaemonTaskLease,
+    lease_meta: dict,
+    payload: dict,
+    *,
+    agent_kind_raw: str | None,
+) -> None:
+    """task-06 / FR-03 / D-005@v1：按 lease 关联用户查默认 LlmProvider，注入 provider_config。
+
+    user_id 解析（R-01 已关闭）：
+      - 主路径 ``lease.runtime_id → DaemonRuntime.user_id``（daemon/model.py:144，
+        nullable=False，全 lease kind 适用——claim 阶段 runtime 必在）。
+      - interactive 兜底 ``lease_meta.session_id → AgentSession.user_id``
+        （agent/model.py:429；session_id 是 AgentSession.id 的 str 形式，
+        placement.py:434 写入）。仅 runtime 缺失才走此路（防御性，batch 不会触发）。
+
+    agent_kind 归一化（X-08）：复用 ``_normalize_lease_provider``（claude_code→claude）。
+    查询（D-008 owner 级 + R-05 is_default 互斥）：``user_id AND agent_kind=归一化
+    AND is_default=True``，三者对齐才命中。
+
+    命中：
+      - ``CredentialCipher.decrypt``（task-03 service 同款，复用 ``get_cipher()``）
+        明文 api_key 放入 provider_config（8 字段，task-06 provides contract）。
+      - X-10 default_model 落点：provider.model 优先（design §9），否则
+        default_fallback_model，覆盖 payload[model] 原 lease_meta/agent_run 来源。
+    未配（D-007 零回归）：payload 不加 provider_config 键（absent），daemon 第0层跳过，
+    payload[model] 维持原值。
+    R-02：明文 api_key 仅放 provider_config（claim/create 阶段下发），不入 ORM/审计/日志。
+    """
+    # ── user_id 解析（R-01：runtime_id→DaemonRuntime.user_id 主路径）──
+    user_id: uuid.UUID | None = None
+    if lease.runtime_id is not None:
+        runtime = await session.get(DaemonRuntime, lease.runtime_id)
+        if runtime is not None:
+            user_id = runtime.user_id
+    if user_id is None:
+        # interactive 兜底：lease_meta.session_id（AgentSession.id 的 str）→ AgentSession.user_id
+        sess_raw = lease_meta.get("session_id")
+        sess_uuid: uuid.UUID | None = None
+        if sess_raw:
+            try:
+                sess_uuid = uuid.UUID(sess_raw) if isinstance(sess_raw, str) else sess_raw
+            except (ValueError, AttributeError, TypeError):
+                sess_uuid = None
+        if sess_uuid is not None:
+            from app.modules.agent.model import AgentSession
+
+            uid_stmt = select(AgentSession.user_id).where(AgentSession.id == sess_uuid).limit(1)
+            user_id = (await session.execute(uid_stmt)).scalar()
+    if user_id is None:
+        return  # 无法解析用户 → 不注入（D-007）
+
+    # ── agent_kind 归一化（X-08：复用 _normalize_lease_provider）──
+    agent_kind = _normalize_lease_provider(agent_kind_raw)
+    if agent_kind is None:
+        return  # 无 agent_kind 信号 → 不注入
+
+    # ── 查默认 provider（owner 级 + agent_kind 对齐 + is_default=True）──
+    from app.core.crypto import get_cipher
+    from app.modules.llm_provider.model import LlmProvider
+
+    stmt = (
+        select(LlmProvider)
+        .where(
+            LlmProvider.user_id == user_id,
+            LlmProvider.agent_kind == agent_kind,
+            LlmProvider.is_default.is_(True),
+        )
+        .limit(1)
+    )
+    provider = (await session.execute(stmt)).scalars().first()
+    if provider is None:
+        return  # D-007：用户未配默认 provider → absent
+
+    # 解密 api_key 明文（daemon spawn-env 注入 AUTH_TOKEN/AUTH_API_KEY 必需）
+    api_key_plain = get_cipher().decrypt(provider.encrypted_api_key, provider.key_id)
+    payload["provider_config"] = {
+        "agent_kind": provider.agent_kind,
+        "base_url": provider.base_url,
+        "api_key": api_key_plain,
+        "auth_field": provider.auth_field,
+        "model": provider.model,
+        "model_role_mappings": provider.model_role_mappings,
+        "default_fallback_model": provider.default_fallback_model,
+        "extra_env": provider.extra_env,
+    }
+    # X-10：provider.model（design §9 优先）→ default_fallback_model 覆盖 payload[model]
+    override_model = provider.model or provider.default_fallback_model
+    if override_model:
+        payload["model"] = override_model
+
+
 async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> dict:
     """Build execution context payload for a claimed lease.
 
@@ -90,6 +183,16 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
         payload["provider"] = _normalize_lease_provider(lease_meta.get("provider"))
         payload["model"] = lease_meta.get("model")
         payload["root_path"] = lease_meta.get("cwd") or lease_meta.get("root_path")
+        # task-06 / D-005@v1：interactive 路注入 provider_config（含解密 api_key）。
+        # agent_kind_raw 用 lease_meta.provider（adapter id，如 claude_code）经归一化命中。
+        # tar/shared 两分支下方各自 return，此处统一注入覆盖两路。未配则 absent（D-007）。
+        await _inject_provider_config(
+            session,
+            lease,
+            lease_meta,
+            payload,
+            agent_kind_raw=lease_meta.get("provider"),
+        )
         # scan 真阻塞：透传 manual_approval / ask_user_only（prepare_scan_interactive_dispatch
         # 写入 lease metadata）→ daemon execPayload 归一化 → SessionManager.create input：
         #   - manual_approval 决定是否注入 canUseTool（per-session，chat=false 不注入）
@@ -358,4 +461,14 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
             payload["cmd_path"] = caps.get("bin_path", "")
             payload["protocol"] = caps.get("protocol", "")
 
+    # task-06 / D-005@v1：batch 路同 interactive 注入 provider_config。
+    # agent_kind_raw 用 agent_run.agent_type（adapter id，如 claude_code）经归一化命中。
+    # init lease 在上方 mode=='init' 分支已 return（不启 agent，无需 provider_config）。
+    await _inject_provider_config(
+        session,
+        lease,
+        lease_meta,
+        payload,
+        agent_kind_raw=agent_run.agent_type,
+    )
     return payload

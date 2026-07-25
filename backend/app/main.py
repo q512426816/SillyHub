@@ -28,6 +28,7 @@ from app.modules.git_identity import git_identity_router
 from app.modules.health import health_router
 from app.modules.incident.router import router as incident_router
 from app.modules.knowledge.router import router as knowledge_router
+from app.modules.llm_provider.router import router as llm_provider_router
 from app.modules.ppm.kanban.router import router as ppm_kanban_router
 from app.modules.ppm.plan.router import router as ppm_plan_router
 from app.modules.ppm.problem.router import router as ppm_problem_router
@@ -475,6 +476,7 @@ def create_app() -> FastAPI:
     app.include_router(scan_docs_router, prefix="/api")
     app.include_router(task_router, prefix="/api")
     app.include_router(git_identity_router, prefix="/api")
+    app.include_router(llm_provider_router, prefix="/api")
     app.include_router(agent_router, prefix="/api")
     app.include_router(daemon_router, prefix="/api")
     # 2026-07-07-skills-mcp-management-ui task-02：平台 CustomSkill admin CRUD。

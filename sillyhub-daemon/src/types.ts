@@ -193,6 +193,44 @@ export type TaskAvailablePayload = LeasePayload;
 export type ToolConfig = Record<string, string>;
 
 /**
+ * task-08（D-006@v1）：平台下发的 LLM 供应商配置（中性 snake_case 结构）。
+ *
+ * backend `build_claim_payload` 按 lease→user 解析默认 provider 后解密 api_key，
+ * 经 lease 字段下发；daemon spawn-env 第 0 层调 `CredentialInjector.toEnv` 翻译成
+ * 各 agent 认得的 env（design §7 注入器 TS 块）。
+ *
+ * 字段与 task-06 后端 provides 完全一致（8 字段 snake_case，对齐
+ * ExecutionContextPayload 风格）；缺省 / absent → daemon 走现有三层 env 兜底（D-007 零回归）。
+ * api_key 为明文（backend 已解密），严禁入 submitMessages / complete_lease / 日志（R-02）。
+ */
+export interface ProviderConfig {
+  /** agent 种类（如 'claude'），决定用哪个 CredentialInjector（D-006）。 */
+  agent_kind: string;
+  /** API 接口地址 → ANTHROPIC_BASE_URL（claude）。 */
+  base_url?: string;
+  /** API 密钥（明文，backend 已解密）→ env[auth_field]。 */
+  api_key?: string;
+  /** 认证 env 名：'ANTHROPIC_AUTH_TOKEN' | 'ANTHROPIC_API_KEY'（缺省前者，X-13）。 */
+  auth_field?: string;
+  /** 默认模型简写（= default_fallback_model 兼容）→ ANTHROPIC_MODEL 兜底。 */
+  model?: string;
+  /**
+   * 角色映射 {sonnet/opus/fable/haiku: {display?, model?, one_m?}}
+   * → ANTHROPIC_DEFAULT_{ROLE}_MODEL（仅 model 非空注入；D-011）。
+   * one_m=true 时模型名追加 [1m] 后缀触发 1M 上下文（X-12）。
+   */
+  model_role_mappings?: Record<string, {
+    display?: string;
+    model?: string;
+    one_m?: boolean;
+  }>;
+  /** 默认兜底模型 → ANTHROPIC_MODEL（优先于 model，D-010）。 */
+  default_fallback_model?: string;
+  /** 自定义 env {KEY:VALUE}（Object.assign 注入，可覆盖角色 env，design §7）。 */
+  extra_env?: Record<string, string>;
+}
+
+/**
  * Lease 执行上下文（claim_lease 响应中的 payload 或 task_available 直带）。
  *
  * 对照 Python `task_runner.py:77-150` 的 payload.get(...) 全部字段 +
@@ -264,6 +302,15 @@ export interface LeaseCtx {
   agentSessionId?: string;
   /** 凭据/工具配置，渲染成环境变量。 */
   toolConfig?: ToolConfig;
+  /**
+   * task-08 / task-09（D-004@v1 / D-005@v1）：平台下发的 LLM 供应商配置。
+   * backend `build_claim_payload` 按 lease→user 解析默认 provider 解密后下发；
+   * daemon `spawn-env.ts buildSpawnEnv` 第 0 层调 `CredentialInjector.toEnv` 注入
+   * ANTHROPIC_* env（最高优先级，盖过三层）。absent / agent_kind 未注册 → 第 0 层
+   * 跳过，走现有三层兜底（D-007 零回归）。interactive 经 execPayload 直读（daemon.ts:2817），
+   * batch 经 ctx 透传（daemon.ts:3318 → task-runner.ts:549）。
+   */
+  provider_config?: ProviderConfig;
   /**
    * task-02（2026-07-07-daemon-skill-execution / D-007）：stage 投递元数据。
    * StageDispatchMeta：{change_id, stage, skill_name, workspace_id, spec_root_ref}。
@@ -377,6 +424,13 @@ export interface ExecutionContextPayload {
   allowed_paths?: string[];
   /** 凭据/工具配置，渲染成环境变量（snake_case Record<string,string>）。 */
   tool_config?: Record<string, string>;
+  /**
+   * task-08 / task-09（D-004@v1）：平台下发的 LLM 供应商配置（execution-context 端点
+   * 是 task-05 之后的最新源，优先覆盖 execPayload）。daemon 在 ctx 构造时
+   * `provider_config: execCtx?.provider_config ?? execPayload.provider_config`。
+   * 字段形态同 LeaseCtx.provider_config（ProviderConfig 8 字段 snake_case）。
+   */
+  provider_config?: ProviderConfig;
   /**
    * task-02（2026-07-07-daemon-skill-execution / D-007）：stage 投递元数据。
    * StageDispatchMeta snake_case：{change_id, stage, skill_name, workspace_id, spec_root_ref}。
