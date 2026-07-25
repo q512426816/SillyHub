@@ -14,6 +14,7 @@ import {
   DatePicker,
   Input,
   Select,
+  Switch,
   Table,
   Tag,
   message,
@@ -110,6 +111,8 @@ export default function WeeklyPlanPage() {
     field?: string;
     order?: "ascend" | "descend";
   }>({});
+  // 平铺模式:开启=排序时全表整列排序、不显示项目分组标题行;关闭=组内排序+分组(默认)
+  const [flattenMode, setFlattenMode] = useState(false);
 
   const buildReq = useCallback((): WeeklyPlanPageReq => {
     const req: WeeklyPlanPageReq = { page: 1, page_size: 10000 };
@@ -183,7 +186,8 @@ export default function WeeklyPlanPage() {
       }
     }
     // 单列排序:升序 / 降序,第三次点击取消(空值固定排最后,不受升降序影响)
-    // 保持项目分组聚集——否则排序会打散 project_name 连续性,分组标题行会重复穿插错位。
+    // 平铺模式(flattenMode)或排 project_name 时整列排序;否则保持项目分组聚集(组内排序)
+    // ——否则排序会打散 project_name 连续性,分组标题行会重复穿插错位。
     const { field, order } = columnSorter;
     if (field && order) {
       const spec = SORTABLE_FIELDS.find((f) => f.key === field);
@@ -198,11 +202,11 @@ export default function WeeklyPlanPage() {
           if (!vb) return -1;
           return compareNonEmpty(va, vb, spec.kind) * dir;
         };
-        if (field === "project_name") {
-          // 排项目名称本身:整列排序,同项目自然连续(分组顺序随之变化)
+        if (flattenMode || field === "project_name") {
+          // 平铺模式 或 排项目名称:整列排序(平铺模式配合 displayData 不插分组行,实现全表平铺)
           rows = [...rows].sort(valueCmp);
         } else {
-          // 排其它列:先按 project_name 聚集(保持筛选后首次出现顺序),组内再按字段排序
+          // 排其它列(分组模式):先按 project_name 聚集(保持筛选后首次出现顺序),组内再按字段排序
           const projOrder = new Map<string, number>();
           for (const r of rows) {
             const p = r.project_name ?? "";
@@ -218,7 +222,7 @@ export default function WeeklyPlanPage() {
       }
     }
     return rows;
-  }, [rawData, columnFilters, columnSorter]);
+  }, [rawData, columnFilters, columnSorter, flattenMode]);
 
   /** 生成某字段的 Excel 式表头属性(排序 + 多选筛选,受控)。 */
   const sortableColProps = (key: string) => ({
@@ -231,27 +235,29 @@ export default function WeeklyPlanPage() {
     onFilter: () => true, // 实际过滤在 processedData 外部完成
   });
 
-  // 构建带分组行的 displayData(项目切换时插入独占一行的分组行)
+  // 构建 displayData:分组模式插入项目分组行(独占一整行);平铺模式不插分组行、序号连续
   const displayData = useMemo<DisplayRow[]>(() => {
     const result: DisplayRow[] = [];
     let curProject: string | null = null;
     let seq = 0;
 
     for (const row of processedData) {
-      const pn = row.project_name ?? "";
-      if (pn !== curProject) {
-        curProject = pn;
-        result.push({
-          ...row,
-          __isGroup: true,
-          __groupProject: pn,
-        });
+      if (!flattenMode) {
+        const pn = row.project_name ?? "";
+        if (pn !== curProject) {
+          curProject = pn;
+          result.push({
+            ...row,
+            __isGroup: true,
+            __groupProject: pn,
+          });
+        }
       }
       seq++;
       result.push({ ...row, __seq: seq });
     }
     return result;
-  }, [processedData]);
+  }, [processedData, flattenMode]);
 
   // colSpan 辅助:分组行首列 colSpan=19(独占一整行),其余列 colSpan=0(隐藏)
   const groupCell = (r: DisplayRow) => ({
@@ -484,14 +490,26 @@ export default function WeeklyPlanPage() {
       />
 
       <SectionCard bodyPadding="p-2">
-        {/* 按钮行:导出 | 分隔 | 搜索(primary) 重置(default,透明) 全右对齐 */}
-        <div className="mb-2 flex items-center justify-end gap-2">
-          <Button loading={exporting} onClick={() => void handleExport()}>
-            {exporting ? "导出中…" : "导出 Excel"}
-          </Button>
-          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
-          <Button type="primary" onClick={handleSearch}>搜索</Button>
-          <Button onClick={handleReset}>重置</Button>
+        {/* 按钮行:左=平铺排序开关 | 右=导出 | 分隔 | 搜索(primary) 重置(default) */}
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Switch
+              size="small"
+              checked={flattenMode}
+              onChange={setFlattenMode}
+            />
+            <span className="text-xs text-muted-foreground">
+              排序时不分组（全表平铺）
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button loading={exporting} onClick={() => void handleExport()}>
+              {exporting ? "导出中…" : "导出 Excel"}
+            </Button>
+            <span className="mx-1 h-6 w-px bg-border" aria-hidden />
+            <Button type="primary" onClick={handleSearch}>搜索</Button>
+            <Button onClick={handleReset}>重置</Button>
+          </div>
         </div>
         <div className="grid w-full grid-cols-4 gap-3">
           <div className="flex flex-col gap-1">

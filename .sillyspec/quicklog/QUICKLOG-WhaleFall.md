@@ -399,3 +399,11 @@ created_at: 2026-07-21T08:48:56
 根因：ql-003 加的排序逻辑对 processedData 整列排序，打散了 project_name 的连续聚集(如按任务主题排序后 A、B 项目行交替)。而 displayData 的分组逻辑是"遇到 project_name 变化即插一个分组标题行"——聚集一散，每个变化处都插分组行，导致同一项目出现多个错位分组标题。
 方案：processedData 排序段改为保持项目分组聚集：①提取 valueCmp(空值固定排最后,不受升降序影响)；②排 project_name 列时整列排序(同项目自然连续,分组顺序随之变化)；③排其它列时先按 project_name 聚集(Map 记录筛选后首次出现顺序作组顺序)、组内再按字段排序。这样任何排序下同一项目行都连续,displayData 分组逻辑恢复正常。
 结果：①tsc --noEmit 0 error；②仅改 page.tsx + 同步 ppm.md 变更索引 ql-20260725-002-384e；③待 commit+push+重建 frontend 部署 + 用户验证排序后分组标题不再穿插。
+## ql-20260725-003-3060 | 2026-07-25 17:21:30 | /ppm/weekly-plan 加「排序时不分组(全表平铺)」开关
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（import Switch + flattenMode state + processedData 排序加平铺分支 + displayData 加平铺分支 + 工具栏加 Switch）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：用户要求加一个开关——开启=排序时全表平铺、临时不要项目分组；关闭=保持现状(组内排序+分组)。
+根因：上轮 ql-002 的修复让排序强制保持项目分组(组内排)，但用户有时想全表平铺排序看全局分布，需要两种模式可选。
+方案：新增 flattenMode 开关(默认关)。①processedData 排序：flattenMode 或排 project_name 时整列排序，否则组内排(保持聚集)；②displayData：flattenMode 时不插分组标题行(平铺连续序号)，否则原分组逻辑；③工具栏左侧加 antd Switch + label「排序时不分组(全表平铺)」，右侧保留导出/搜索/重置。开启=整列排序+无分组标题行，关闭=组内排序+项目分组。
+结果：①tsc --noEmit 0 error；②仅改 page.tsx + 同步 ppm.md 变更索引 ql-20260725-003-3060；③待 commit+push+重建 frontend 部署 + 用户验证两种模式切换。
