@@ -183,19 +183,38 @@ export default function WeeklyPlanPage() {
       }
     }
     // 单列排序:升序 / 降序,第三次点击取消(空值固定排最后,不受升降序影响)
+    // 保持项目分组聚集——否则排序会打散 project_name 连续性,分组标题行会重复穿插错位。
     const { field, order } = columnSorter;
     if (field && order) {
       const spec = SORTABLE_FIELDS.find((f) => f.key === field);
       if (spec) {
         const dir = order === "ascend" ? 1 : -1;
-        rows = [...rows].sort((a, b) => {
+        // 按当前排序字段比较两行(空值固定排最后,不受升降序影响)
+        const valueCmp = (a: WeeklyPlanRow, b: WeeklyPlanRow) => {
           const va = fieldText(a, field);
           const vb = fieldText(b, field);
           if (!va && !vb) return 0;
           if (!va) return 1;
           if (!vb) return -1;
           return compareNonEmpty(va, vb, spec.kind) * dir;
-        });
+        };
+        if (field === "project_name") {
+          // 排项目名称本身:整列排序,同项目自然连续(分组顺序随之变化)
+          rows = [...rows].sort(valueCmp);
+        } else {
+          // 排其它列:先按 project_name 聚集(保持筛选后首次出现顺序),组内再按字段排序
+          const projOrder = new Map<string, number>();
+          for (const r of rows) {
+            const p = r.project_name ?? "";
+            if (!projOrder.has(p)) projOrder.set(p, projOrder.size);
+          }
+          rows = [...rows].sort((a, b) => {
+            const pa = projOrder.get(a.project_name ?? "") ?? 0;
+            const pb = projOrder.get(b.project_name ?? "") ?? 0;
+            if (pa !== pb) return pa - pb; // 组顺序:项目首次出现顺序
+            return valueCmp(a, b); // 组内:按排序字段
+          });
+        }
       }
     }
     return rows;
