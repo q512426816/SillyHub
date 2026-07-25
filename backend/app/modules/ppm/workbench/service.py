@@ -503,6 +503,10 @@ class WorkbenchService:
             select(PpmProblemList)
             .where(PpmProblemList.status != "已完成")
             .where(problem_handle.like(uid_csv))
+            # 第四批 code-quality：止血全表实体化（now_handle_user 被 concat 包裹致
+            # LIKE 索引失效，无 limit 时全表加载含 pro_desc/remarks 等 Text 大列）。
+            # 对齐 ③ 任务待办。total = 三源 limit 内合并数（待办 200/源足够展示近期）。
+            .limit(_TODO_SOURCE_LIMIT)
         )
         for p in (await self._session.execute(problem_stmt)).scalars().all():
             todos.append(
@@ -521,6 +525,7 @@ class WorkbenchService:
             select(PpmProblemChange)
             .where(PpmProblemChange.status == "1")
             .where(change_handle.like(uid_csv))
+            .limit(_TODO_SOURCE_LIMIT)  # 第四批 code-quality：止血全表实体化（同 ①）
         )
         for c in (await self._session.execute(change_stmt)).scalars().all():
             todos.append(

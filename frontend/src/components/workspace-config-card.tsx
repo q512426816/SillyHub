@@ -154,6 +154,10 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
 
   const initPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 第四批 code-quality：5min 轮询上限 timeout 句柄（卸载 + 自停时 clearTimeout，
+  // 防卸载后 setTimeout 触发 setState + 闭包泄漏；init 对齐 sync 的 R-06）。
+  const initDeadlineRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncDeadlineRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* ---- 绑定初始化状态徽标随 prop 同步 ---- */
   useEffect(() => {
@@ -170,6 +174,15 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
       if (syncPollRef.current) {
         clearInterval(syncPollRef.current);
         syncPollRef.current = null;
+      }
+      // 第四批 code-quality：清 5min deadline timeout（防卸载后触发 setState）
+      if (initDeadlineRef.current) {
+        clearTimeout(initDeadlineRef.current);
+        initDeadlineRef.current = null;
+      }
+      if (syncDeadlineRef.current) {
+        clearTimeout(syncDeadlineRef.current);
+        syncDeadlineRef.current = null;
       }
     };
   }, []);
@@ -190,6 +203,11 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
               clearInterval(initPollRef.current);
               initPollRef.current = null;
             }
+            if (initDeadlineRef.current) {
+              // 第四批：自停时清 deadline，避免卸载/重init 时孤儿 timeout
+              clearTimeout(initDeadlineRef.current);
+              initDeadlineRef.current = null;
+            }
             setInitSyncedAt(syncedAt);
             setIniting(false);
             onRefresh();
@@ -198,6 +216,18 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
           // 轮询错误忽略，下一 tick 重试
         }
       }, 2000);
+      // 第四批 code-quality（MED-1）：5min deadline 对齐 handleSyncManual R-06。
+      // daemon 卡住 / init 静默失败（init_synced_at 永不到达）时停止无限轮询，
+      // 否则用户停留配置页会每 2s 发一次 fetchMyBinding 直到卸载。
+      initDeadlineRef.current = setTimeout(() => {
+        setLocalError("初始化超时，请稍后重试");
+        setIniting(false);
+        if (initPollRef.current) {
+          clearInterval(initPollRef.current);
+          initPollRef.current = null;
+        }
+        initDeadlineRef.current = null;
+      }, 5 * 60 * 1000);
     } catch (err) {
       setLocalError(err instanceof ApiError ? err.message : "初始化失败");
       setIniting(false);
@@ -249,8 +279,8 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
           // 轮询错误忽略，下一 tick 重试
         }
       }, 2000);
-      // 5min 上限（R-06）
-      setTimeout(() => {
+      // 5min 上限（R-06）。第四批 code-quality（LOW-1）：句柄存 ref，卸载时 clearTimeout。
+      syncDeadlineRef.current = setTimeout(() => {
         setSyncStatus((s) => {
           if (s === "syncing") {
             setSyncError("仍在排队，请稍后再试");
@@ -262,6 +292,7 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
           clearInterval(syncPollRef.current);
           syncPollRef.current = null;
         }
+        syncDeadlineRef.current = null;
       }, 5 * 60 * 1000);
     } catch (err) {
       setSyncStatus("failed");

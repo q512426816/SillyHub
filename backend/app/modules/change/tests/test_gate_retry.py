@@ -22,8 +22,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.model import AgentRun
 from app.modules.change.dispatch import (
+    StageAgentConfig,
     StageSyncResult,
     auto_dispatch_next_step,
+    dispatch,
 )
 from app.modules.change.model import Change
 from app.modules.workspace.model import Workspace
@@ -623,3 +625,111 @@ class TestGateRetryNoRegression:
         last_dispatch = (change.stages or {}).get("last_dispatch", {})
         assert "gate_retry_count" not in last_dispatch
         assert "gate_last_errors" not in last_dispatch
+
+
+class TestDispatchPreservesGateRetryCount:
+    """第四批 code-quality 回归：dispatch() merge last_dispatch 保留 gate_retry_count。
+
+    修前 dispatch() 用全新 dict 覆盖 last_dispatch，丢弃 auto_dispatch_next_step 在
+    exit1 打回点写入的 gate_retry_count → 下一轮读回 0 → R12 死循环防护（count>=3
+    升级 exit2）生产完全失效。现有 TestGateRetryCount 全 mock dispatch
+    （_patch_dispatch_and_complete）绕过覆盖点，故单测全绿却掩盖生产 bug。
+    本组直接测 dispatch() 的 merge / 跨 stage 重置行为，不 mock dispatch 本身。
+    """
+
+    async def _dispatch_with_fake_run(
+        self,
+        db_session: AsyncSession,
+        ws: Workspace,
+        change: Change,
+        *,
+        target_stage: str,
+        user_id: uuid.UUID,
+    ) -> None:
+        from types import SimpleNamespace
+
+        fake_run = SimpleNamespace(id=uuid.uuid4())
+        with (
+            patch(
+                "app.modules.change.dispatch.get_config_for_stage",
+                return_value=StageAgentConfig(prompt_template="verify.md", read_only=True),
+            ),
+            patch(
+                "app.modules.change.dispatch.has_active_run",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch(
+                "app.modules.change.dispatch._cleanup_before_dispatch",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.modules.agent.service.AgentService.start_stage_dispatch",
+                new_callable=AsyncMock,
+                return_value=fake_run,
+            ),
+        ):
+            await dispatch(
+                session=db_session,
+                workspace_id=ws.id,
+                change_id=change.id,
+                target_stage=target_stage,
+                user_id=user_id,
+            )
+
+    async def test_preserves_count_same_stage(
+        self, db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """同 stage 重跑：gate_retry_count / gate_last_errors 经 dispatch() 保留。"""
+        ws = await _create_workspace(db_session, root_path=str(tmp_path))
+        user_id = uuid.uuid4()
+        change = await _create_change(
+            db_session,
+            workspace_id=ws.id,
+            current_stage="verify",
+            owner_id=user_id,
+            stages={
+                "last_dispatch": {
+                    "stage": "verify",
+                    "gate_retry_count": 2,
+                    "gate_last_errors": ["prev-fail"],
+                }
+            },
+        )
+        await self._dispatch_with_fake_run(
+            db_session, ws, change, target_stage="verify", user_id=user_id
+        )
+        await db_session.refresh(change)
+        last = (change.stages or {}).get("last_dispatch", {})
+        assert last.get("gate_retry_count") == 2  # 修前被全新 dict 覆盖丢失
+        assert last.get("gate_last_errors") == ["prev-fail"]
+        assert last.get("stage") == "verify"
+        assert "run_id" in last  # dispatch() :872 merge 写入
+
+    async def test_resets_count_on_stage_change(
+        self, db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """跨 stage 推进：gate_retry_count 重置（gate count 是「同 stage 连续失败」语义）。"""
+        ws = await _create_workspace(db_session, root_path=str(tmp_path))
+        user_id = uuid.uuid4()
+        change = await _create_change(
+            db_session,
+            workspace_id=ws.id,
+            current_stage="verify",
+            owner_id=user_id,
+            stages={
+                "last_dispatch": {
+                    "stage": "verify",
+                    "gate_retry_count": 2,
+                    "gate_last_errors": ["prev-fail"],
+                }
+            },
+        )
+        await self._dispatch_with_fake_run(
+            db_session, ws, change, target_stage="archive", user_id=user_id
+        )
+        await db_session.refresh(change)
+        last = (change.stages or {}).get("last_dispatch", {})
+        assert "gate_retry_count" not in last  # 跨 stage 重置
+        assert "gate_last_errors" not in last
+        assert last.get("stage") == "archive"

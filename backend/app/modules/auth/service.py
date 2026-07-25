@@ -16,6 +16,7 @@ Refresh strategy (references/15 §3):
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -275,7 +276,12 @@ class AuthService:
         )
         candidates = (await self._db.execute(stmt)).scalars().all()
         for session in candidates:
-            if verify_refresh_token(refresh_token, session.refresh_token_hash):
+            # 第四批 code-quality：bcrypt cost-12 verify 同步阻塞事件循环（每次
+            # 250-400ms × N 个活跃 session 全表扫），对齐 api_key_service.authenticate
+            # 移到线程池。R2 的 FOR UPDATE 行锁在 verify 之后不受影响。
+            if await asyncio.to_thread(
+                verify_refresh_token, refresh_token, session.refresh_token_hash
+            ):
                 user = await self._db.get(User, session.user_id)
                 if user is None or user.deleted_at is not None or user.status != "active":
                     raise AuthUserInactive("User account is no longer active.")
@@ -326,7 +332,11 @@ class AuthService:
             .limit(50)
         )
         for session in (await self._db.execute(stmt)).scalars().all():
-            if verify_refresh_token(refresh_token, session.refresh_token_hash):
+            # 第四批 code-quality：同 consume 路径，bcrypt verify 移线程池（limit 50
+            # 个 revoked session，最坏 ~12-20s 阻塞事件循环）。
+            if await asyncio.to_thread(
+                verify_refresh_token, refresh_token, session.refresh_token_hash
+            ):
                 return session
         return None
 

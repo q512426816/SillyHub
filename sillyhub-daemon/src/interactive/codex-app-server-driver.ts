@@ -666,15 +666,22 @@ export class CodexAppServerDriver implements InteractiveDriver {
       });
       finishTurn({ kind: 'failed' });
     });
-    child.on('exit', (code) => {
+    child.on('exit', (code, signal) => {
       if (h.closing) return; // 正常 close 触发的 exit
-      if (code !== null && code !== 0) {
-        finalizeWithError({
-          subtype: 'error_during_execution',
-          is_error: true,
-          result: `codex exited code=${code}`,
-        });
-      }
+      // 第四批 code-quality：任何非 daemon 主动 close 的退出都视为异常收敛（对称于
+      // 上方 'error' handler）。修前仅 code!==0 才 finalizeWithError → code=0 干净
+      // 退出 / code=null 被信号杀（OOM / SIGKILL）时不置 finalized，consume 主循环
+      // while(!h.closing && !finalized) 永不退出、currentTurnPromise 永不 resolve
+      // → 交互式会话永久卡死（主 agent lease 永不过期，卡到 daemon 重启）。
+      // finalizeWithError 幂等（上方 finalized 守卫），'error'+'exit' 双触发安全。
+      finalizeWithError({
+        subtype: 'error_during_execution',
+        is_error: true,
+        result:
+          code === null
+            ? `codex killed by signal ${signal ?? 'unknown'}`
+            : `codex exited code=${code}`,
+      });
       finishTurn({ kind: 'failed' });
     });
 

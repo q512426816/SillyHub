@@ -837,16 +837,30 @@ async def dispatch(
 
     # dict() copy avoids SQLAlchemy JSON in-place mutation not persisting.
     stages = dict(change.stages or {})
-    stages["last_dispatch"] = {
-        "stage": target_stage,
-        "user_id": str(user_id),
-        "at": datetime.now(UTC).isoformat(),
-        "config": {
-            "prompt_template": config.prompt_template,
-            "requires_worktree": config.requires_worktree,
-            "read_only": config.read_only,
-        },
-    }
+    # 第四批 code-quality（gate_retry 覆盖修复）：merge 而非覆盖 last_dispatch。
+    # auto_dispatch_next_step 在 exit1 打回点把 gate_retry_count/gate_last_errors
+    # 写进 last_dispatch（见 :351），此处若用全新 dict 覆盖会丢弃它们 → 下一轮
+    # 打回读回 count=0 → R12 死循环防护（count>=_GATE_RETRY_LIMIT 升级 exit2
+    # 卡住报警）生产完全失效（现有 test_gate_retry 全 mock dispatch 绕过此处，
+    # 故单测全绿却掩盖生产 bug）。同 stage 重跑保留计数；跨 stage 推进重置
+    # （gate count 是「同 stage 连续失败」语义，跨 stage 不应累积）。
+    prev_last_dispatch = dict(stages.get("last_dispatch") or {})
+    if prev_last_dispatch.get("stage") != target_stage:
+        prev_last_dispatch.pop("gate_retry_count", None)
+        prev_last_dispatch.pop("gate_last_errors", None)
+    prev_last_dispatch.update(
+        {
+            "stage": target_stage,
+            "user_id": str(user_id),
+            "at": datetime.now(UTC).isoformat(),
+            "config": {
+                "prompt_template": config.prompt_template,
+                "requires_worktree": config.requires_worktree,
+                "read_only": config.read_only,
+            },
+        }
+    )
+    stages["last_dispatch"] = prev_last_dispatch
     change.stages = stages
     session.add(change)
     await session.commit()

@@ -224,3 +224,54 @@ DEFER（带原因）：
 
 > daemon 全量 2 failed（B1+B2）均为 task-09 spec-sync 的 vitest hook 10s 超时（环境性 flaky），重跑 `daemon-interactive-spec-sync.test.ts` 14 passed 确证；memory `sillyspec-324-verify-archive-pitfalls` 标注该区为已知脆弱。skill-manager 改动（gunzipAsync）单测 25 passed，与 spec bundle（pullSpecBundle）不同代码路径。
 > 三批累计 alembic 单头 `202607251000`（接 `202607250100`），migration 链无分叉。
+
+---
+
+## 7. 🟢 第四批（2026-07-25，用户"重新分析"指示）
+
+> 性质延续前三批：证据驱动（4 并行只读审查 agent 因账户 429 挂 3 个，但后端正确性的
+> 数据一致性子代理 + 后端性能 + daemon 三份报告成功返回，共 336 次工具调用），5 个最高
+> 价值 HIGH 全部主 agent 亲自读源码核实（行号准确）。DEFER 项逐一复评，顺带纠正前批 D8 误判。
+
+### Wave F — 后端正确性/性能 + daemon 卡死 + 前端轮询健壮性 ✅ 零回归
+
+| ID | 文件:行 | 问题 | 修法 |
+|---|---|---|---|
+| F1 | `change/dispatch.py:840` | gate_retry_count 被 dispatch() 用新 dict 覆盖→**R12 死循环防护生产完全失效**（verify gate 失败无限重跑烧钱）；现有 test_gate_retry 全 mock dispatch 绕过覆盖点，单测全绿却掩盖 | :840 改 merge 保留 count + 跨 stage 重置；补不 mock dispatch 的 e2e（同 stage 保留 / 跨 stage 重置两条） |
+| F2 | `auth/service.py:278,330` | refresh token 校验循环内同步 bcrypt（cost-12，250-400ms/次 × N session 全表扫）**阻塞事件循环**；api_key 同模式已修（to_thread + Redis），refresh 漏修且每~20min 轮换更高频。R2 只修并发未修 blocking | `_consume_refresh_token` + `_find_revoked_session` 两处 verify 包 `asyncio.to_thread`（对齐 api_key_service:237） |
+| F3 | `daemon/session/service.py:1719` | session 日志 min_ts_subq 对最大表 agent_run_logs **全表 GROUP BY 无 session 过滤**，随日志增长线性恶化 | 子查询加 `WHERE run_id IN (该 session 的 runs)` 收敛聚合范围 |
+| F4 | `ppm/workbench/service.py:502,520` | 工作台"我的待办"①② 无 limit + concat 包裹 now_handle_user 致索引失效全表扫（含 Text 大列），首屏必跑；③ 已有 limit | ①② 各加 `.limit(_TODO_SOURCE_LIMIT)` 对齐③（止血全表实体化；根治 concat-LIKE 需拆关联子表 + migration，DEFER） |
+| F5 | `codex-app-server-driver.ts:669` | exit handler 仅 code!==0 才 finalize → codex 干净退出(0)/被信号杀(null) 时不置 finalized，consume 主循环永不退出、currentTurnPromise 永不 resolve → **交互式会话永久卡死**（主 agent lease 永不过期，卡到 daemon 重启）。现有测试都先 close() input 让 consume break 再 _emitExit，故未捕获 | exit handler 改任何 !h.closing 退出都 finalizeWithError（对称于 'error' handler，加 signal 参数）+ 补不 close input 的 fake child exit(0)/exit(null) 回归测试。finalizeWithError 幂等（finalized 守卫） |
+| F6 | `workspace-config-card.tsx` | MED-1: handleInit initPoll 无 5min deadline（daemon 卡住时无限轮询，handleSyncManual 已有 R-06 5min 兜底）；LOW-1: handleSyncManual 5min setTimeout 未存 ref，unmount 未 clearTimeout | handleInit 加 5min deadline（initDeadlineRef）对齐 R-06；setTimeout 存 syncDeadlineRef；unmount + 自停分支 clearTimeout |
+| F7 | `frontend/lib/daemon.ts:459` | streamQuickChat 死代码（无生产调用方，仅 2 个 test 的 vi.mock 字段 + 废弃注释） | 删除函数（test 用 vi.mock 独立 vi.fn()，零影响） |
+
+### DEFER 复评结论（维持不做，附核验依据）
+
+| 项 | 复评结论 |
+|---|---|
+| 后端新增索引 | **无需**：性能 agent 逐一核实候选（AgentRunLog.channel/subagent_type、DaemonTaskLease.kind、ChangeDocument.last_modified_at 等），leading filter 已被既有索引覆盖或仅写入无查询；剩余 LOW 遵循 Wave1 YAGNI |
+| daemon D3/D5/D6/D7 | 维持不做：D3 回调实际安全（fire-and-forget 不 reject）；D5 重连 5s 对齐 Python parity；D6 30s 超时够；D7 背压 parity |
+| **daemon D8 `_fire` 一次性任务重用** | **确认是前批误判**：daemon.ts:1714-1769 每次 crash 后 .catch 内递归调 _fire 新建 AbortController + promise（_controllers finally 删旧），非重用 one-shot controller。代码实际正确 |
+| daemon ND-2 codex _close 不等 exit | 维持 DEFER：仅 daemon 异常 shutdown 时 codex 子进程可能孤儿，待 shutdown 链路专项 |
+| daemon god 文件拆分 | 维持不做：高耦合 lease payload 鸭子类型几十处，无低风险切片 |
+| import_commit N+1（_build_module_maps/两段循环） | 维持 DEFER：手动 Excel 导入低频，N 小；批量化需重写 kanban per-user 计数器 |
+| A6 stream-json cache token 聚合 | 维持 DEFER：语义微妙（+= vs =）+ SAFE=N，需真实数据 diff |
+
+### 其余已识别但未在本批做的 HIGH/MED（留后续批次）
+
+> 本批聚焦"已核实 + 零回归 + 无需 migration"的 7 项。以下数据一致性 HIGH 需设计/migration，留专项：
+> - file 存储一致性三连（upload 补偿 / soft_delete reaper / import_commit 原子化）—— platform-file-center 收尾债
+> - PPM 父表删除不级联（plan/problem/task/project）—— 需逐表 + PG migration
+> - workspace soft_delete 不取消在跑任务 / create 多事务孤儿
+> - submit_feedback blocked 死锁、transition() 对 blocked 抛 500、write_file 顺序颠倒、PPM helper 内部 commit 破坏原子性、execute_problem 无行锁、PPM 全域缺乐观锁（已有 coordinator 范式）
+
+### 验证（第四批）
+
+| 端 | 改动 | 改后 |
+|---|---|---|
+| backend | F1-F4 | change 272 / auth 98 / session 21 / workbench 57（全零回归）；ruff ✅ / mypy ✅（4 文件） |
+| daemon | F5 | codex-app-server-driver 23 passed（含 2 新回归）；tsc ✅ |
+| frontend | F6/F7 | workspace-config-card 18 / runtime-session-dialog+interactive-session-panel 50（全零回归）；tsc ✅ |
+
+> 第四批无 alembic migration（全代码层修复），migration 链仍单头 `202607251000`。
+> 本批最高价值：F1（gate 死循环防护生产失效，一行 merge + e2e 闭环）+ F5（codex 主 agent 会话永久卡死）。

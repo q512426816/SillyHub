@@ -401,6 +401,56 @@ describe('TDD-3：首轮 turn 生命周期', () => {
   });
 });
 
+// ── 第四批 code-quality：子进程非主动退出对称收敛（exit handler 回归）─────────
+//
+// 修前 exit handler 仅 code!==0 才 finalizeWithError → codex 干净退出(code=0) 或
+// 被信号杀(code=null, OOM/SIGKILL) 时不置 finalized，consume 主循环
+// while(!h.closing && !finalized) 永不退出、currentTurnPromise 永不 resolve →
+// 交互式会话永久卡死（主 agent lease 永不过期，卡到 daemon 重启）。现有用例都先
+// close() input queue 让 consume break 再 _emitExit，故未捕获（生产 exit 时 input
+// 未关）。本组不 close input、turn 中途直接 exit，验证对称收敛。
+
+describe('第四批 code-quality：子进程非主动退出对称收敛', () => {
+  /** 驱动到「首轮 turn 进行中」（握手 + push + turn/started），input queue 不 close。 */
+  async function driveUntilTurnInProgress(): Promise<{
+    child: FakeChild;
+    consumeP: Promise<void>;
+    results: Record<string, unknown>[];
+  }> {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [threadStartResponse('thr_123')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+    push('hi');
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [turnStartedNotif('thr_123', 'turn_1')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+    return { child, consumeP, results };
+  }
+
+  it('turn 中途 codex 干净退出 exit(0)（未 close）→ consume 收敛 + onTurnResult is_error=true', async () => {
+    const { child, consumeP, results } = await driveUntilTurnInProgress();
+    child._emitExit(0); // 修前：exit handler 不 finalize → consume 卡死（测试超时红）
+    await consumeP; // 修后：finalized=true → 主循环退出 → consume resolve
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ is_error: true });
+  });
+
+  it('turn 中途 codex 被信号杀 exit(null, SIGKILL)（未 close）→ consume 收敛 + is_error=true', async () => {
+    const { child, consumeP, results } = await driveUntilTurnInProgress();
+    child._emitExit(null, 'SIGKILL');
+    await consumeP;
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ is_error: true });
+  });
+});
+
 // ── TDD-2b：usage cache 尽力而为透传（task-02 / D-001@v1）─────────────────────
 //
 // 覆盖蓝图 task-02 §TDD 步骤 1 两用例：

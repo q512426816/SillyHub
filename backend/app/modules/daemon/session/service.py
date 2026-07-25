@@ -1716,11 +1716,17 @@ class SessionService:
             )
 
         # Per-run earliest log timestamp (for cross-run ordering anchor).
+        # 第四批 code-quality：原 min_ts_subq 对整张 agent_run_logs（系统最大表）
+        # GROUP BY 无 session 过滤，PG 必须先物化全表聚合再 JOIN，随日志增长线性
+        # 恶化。收敛到当前 session 的 run 集（语义不变：外层 run_anchor 已 WHERE
+        # agent_session_id == session_id，缩小聚合范围不改变最终结果集）。
+        session_run_ids = select(AgentRun.id).where(AgentRun.agent_session_id == session_id)
         min_ts_subq = (
             select(
                 AgentRunLog.run_id.label("run_id"),
                 func.min(AgentRunLog.timestamp).label("min_ts"),
             )
+            .where(AgentRunLog.run_id.in_(session_run_ids))
             .group_by(AgentRunLog.run_id)
             .subquery()
         )
