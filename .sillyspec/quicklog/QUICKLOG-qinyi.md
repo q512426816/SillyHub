@@ -333,3 +333,15 @@ created_at: 2026-07-05 16:33:00
 文件：（见实际改动）
 
 结果：需求：移动APP工作台去掉我的待办/我的任务卡片、指标(任务量/缺陷)可点跳对应页、快捷入口去掉绩效考评/知识库/消息通知；项目计划页风格参考问题清单(查询条件隐藏进抽屉)、卡片点击弹里程碑那块而非详情。根因：无，纯样式/交互调整。方案：workbench删TodosCard/TaskEntryCard+指标包Link跳/ppm/task-plans·/ppm/problem-list+快捷入口留3项;抽components/mobile/milestone-sheet.tsx承载里程碑节点层(antd Drawer);milestone-details页第一层复用之(钻取关抽屉下钻);project-plans页3查询条件收MobileFilterDrawer+点卡片onItemPress弹MilestoneSheet。结果：前端全量1058 passed/0 failed(103文件);typecheck过;里程碑移动集成5/5过。
+
+## ql-20260724-001 | 2026-07-24 22:16:04 | 任务计划页面查询条件下拉加输入搜索（项目/状态下拉补 showSearch，PC+移动端）
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/task-plans/page.tsx, frontend/src/app/m/ppm/task-plans/page.tsx
+
+需求：任务计划页面（PC+移动端）查询条件，部分下拉不支持输入文字筛选，需支持。
+根因：项目下拉、状态下拉这两个 antd Select 缺 showSearch 属性，只能点选不能输入过滤；负责人用 PpmUserSelect 已内置搜索（showSearch+onSearch+filterOption=false），视图仅2选项、计划时间为 RangePicker、配合人员为 Input，均无需加搜索。故仅项目与状态两处下拉缺搜索能力。
+方案：PC端 (dashboard)/ppm/task-plans/page.tsx 与移动端 app/m/ppm/task-plans/page.tsx 的 FilterFields，各自给【项目下拉】(Select\<string\>) 和【状态多选下拉】(Select\<string[]\> mode=multiple) 加 showSearch + optionFilterProp="label"。projects 已由 listSimpleProjects 全量加载到组件 state（内存），走 antd Select 内置本地过滤，无需改数据层/API。
+结果：2 文件 4 处改完；前端 typecheck（tsc --noEmit）通过；task-plans 无专门单测，grep 命中的6个测试（menu-permissions/middleware/task-detail-modal/mobile-tab-bar/m layout/problem-detail-modal）均为菜单/路由/详情弹窗/移动tab，与查询条件下拉无逻辑关联，零影响。已 git add 暂存这两文件（仅本次文件，未卷入工作区其他在途 M 文件），待用户统一提交。
+坑：①本机 sillyspec CLI 全局安装损坏——PATH 优先解析 C:\nvm4w\nodejs\sillyspec，但其 node_modules/sillyspec/bin/sillyspec.js 缺失（只剩空 node_modules），报 Cannot find module；改用完整的 C:\Users\qinyi\AppData\Roaming\npm\sillyspec（v3.10.0）绕过。②cd frontend 跑 typecheck 致 cwd 变，sillyspec 按 cwd 推断 project（multi-agent-platform→frontend）触发 progress.json 重置、step 倒退，复现已归档坑 multi-project-cwd-state-split.md（quick 全程须在项目根 cwd 跑）。③CLI --done 未把本次 quick 条目写入 QUICKLOG（复现 quick-guard-missing-output-lost.md），本条手动补写。
+遗留：①生效需 rebuild 前端（docker compose --build frontend）；②需用户浏览器验证（项目多时项目下拉可输入名称筛选、状态下拉可输入筛选项）。

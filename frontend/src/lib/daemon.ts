@@ -395,9 +395,6 @@ export async function getQuickChatLogs(
  *   2. 聚合 messages（保留兼容，backend 还会发一条 summary）：
  *      `{ event:"messages", lease_id, count, agent_run_status?, messages?: [...] }`
  *
- * streamQuickChat 内部把扁平形态包装成聚合（messages 数组单元素）传给 onMessage，
- * 上层调用方无需感知差异，renderStreamMessage 仍按 messages[i].event_type 渲染。
- *
  * 扁平 payload 没有 event_type 字段，按 channel 反推：
  *   - stdout → text
  *   - stderr → error
