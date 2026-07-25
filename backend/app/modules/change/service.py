@@ -7,6 +7,7 @@ content is read from the filesystem on-demand (not stored in DB).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from dataclasses import dataclass
@@ -222,19 +223,11 @@ class ChangeService:
         suffix = Path(name).suffix.lower()
         return suffix in ChangeService._TEXT_SUFFIXES
 
-    async def list_files(self, workspace_id: uuid.UUID, change_id: uuid.UUID) -> list[dict]:
-        """遍历变更目录全部文件，返回扁平清单（task-03 / FR-03）。
-
-        每项 ``{path, name, size, last_modified_at, is_text}``，path 相对变更目录
-        （posix 风格，如 ``tasks/task-01.md``）。排除目录、``.`` 开头隐藏文件、
-        ``__pycache__``。目录不存在返回空列表（不抛）。
-        """
-        change = await self.get(workspace_id, change_id)
-        workspace = await self._workspace_service.get(workspace_id)
-        change_dir = await self._resolve_change_dir(workspace, change)
+    @staticmethod
+    def _list_files_sync(change_dir: Path) -> list[dict]:
+        """``list_files`` 同步遍历段（Wave C 续：移出事件循环，对齐 tool_gateway 范式）。"""
         if not change_dir.is_dir():
             return []
-
         items: list[dict] = []
         for entry in sorted(change_dir.rglob("*")):
             if not entry.is_file():
@@ -256,10 +249,39 @@ class ChangeService:
                     "name": name,
                     "size": stat.st_size,
                     "last_modified_at": datetime.fromtimestamp(stat.st_mtime, tz=UTC),
-                    "is_text": self._is_text_file(name),
+                    "is_text": ChangeService._is_text_file(name),
                 }
             )
         return items
+
+    @staticmethod
+    def _read_file_sync(full_path: Path, rel_path: str) -> tuple[str, str | None, bool]:
+        """``read_file`` 同步读段（Wave C 续：移出事件循环）。"""
+        if not full_path.is_file():
+            return rel_path, None, False
+        size = full_path.stat().st_size
+        content = full_path.read_text(encoding="utf-8", errors="replace")
+        if size > MAX_CONTENT_BYTES:
+            content = content[: MAX_CONTENT_BYTES // 4]
+        return rel_path, content, True
+
+    @staticmethod
+    def _write_text_sync(full_path: Path, content: str) -> None:
+        """写 UTF-8 文本（Wave C 续：``write_file`` / ``sync_documents`` 共用，移出事件循环）。"""
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_text(content, encoding="utf-8")
+
+    async def list_files(self, workspace_id: uuid.UUID, change_id: uuid.UUID) -> list[dict]:
+        """遍历变更目录全部文件，返回扁平清单（task-03 / FR-03）。
+
+        每项 ``{path, name, size, last_modified_at, is_text}``，path 相对变更目录
+        （posix 风格，如 ``tasks/task-01.md``）。排除目录、``.`` 开头隐藏文件、
+        ``__pycache__``。目录不存在返回空列表（不抛）。
+        """
+        change = await self.get(workspace_id, change_id)
+        workspace = await self._workspace_service.get(workspace_id)
+        change_dir = await self._resolve_change_dir(workspace, change)
+        return await asyncio.to_thread(self._list_files_sync, change_dir)
 
     async def read_file(
         self,
@@ -284,13 +306,7 @@ class ChangeService:
                 details={"path": rel_path},
             ) from None
 
-        if not full_path.is_file():
-            return rel_path, None, False
-        size = full_path.stat().st_size
-        content = full_path.read_text(encoding="utf-8", errors="replace")
-        if size > MAX_CONTENT_BYTES:
-            content = content[: MAX_CONTENT_BYTES // 4]
-        return rel_path, content, True
+        return await asyncio.to_thread(self._read_file_sync, full_path, rel_path)
 
     async def write_file(
         self,
@@ -327,9 +343,8 @@ class ChangeService:
                 details={"path": rel_path},
             ) from None
 
-        # 写盘（直写镜像，spike-01 验证可写）
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-        full_path.write_text(content, encoding="utf-8")
+        # 写盘（直写镜像，spike-01 验证可写）—— Wave C 续：移出事件循环
+        await asyncio.to_thread(self._write_text_sync, full_path, content)
 
         # 同文件 pending 合并 + 离线续传 outbox
         task_id = await self._enqueue_edit_write(
@@ -581,8 +596,7 @@ class ChangeService:
             resolved = full_path.resolve()
             if not str(resolved).startswith(str(root.resolve())):
                 raise ChangeDocNotFound("Path traversal detected.")
-            full_path.parent.mkdir(parents=True, exist_ok=True)
-            full_path.write_text(content, encoding="utf-8")
+            await asyncio.to_thread(self._write_text_sync, full_path, content)
             now = datetime.now(UTC)
 
             # Upsert ChangeDocument row
@@ -997,6 +1011,24 @@ class ChangeService:
             existing_by_key.pop(old_key, None)
             existing_by_key[new_key] = old_row
 
+        # Wave B（2026-07-25）：批量预取所有 existing change 的 docs（原 _sync_docs
+        # 每 change 一次 _fetch_existing_docs = N+1）。新建 change 无 existing docs（[]）。
+        existing_change_ids = [c.id for c in existing_by_key.values()]
+        docs_by_change: dict[uuid.UUID, list[ChangeDocument]] = {}
+        if existing_change_ids:
+            for d in (
+                (
+                    await self._session.execute(
+                        select(ChangeDocument).where(
+                            ChangeDocument.change_id.in_(existing_change_ids)
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            ):
+                docs_by_change.setdefault(d.change_id, []).append(d)
+
         seen_keys: set[str] = set()
 
         for parsed in result.changes:
@@ -1022,6 +1054,7 @@ class ChangeService:
                 workspace_id=workspace_id,
                 existing_change=_existing,
                 stats=stats,
+                existing_docs=docs_by_change.get(_existing.id, []),
             )
 
             # D-005@V1：M:N change_workspaces 投影已废，变更只属单一 workspace，无需 sync。
@@ -1102,8 +1135,11 @@ class ChangeService:
         workspace_id: uuid.UUID,
         existing_change: Change,
         stats: dict[str, int],
+        existing_docs: list[ChangeDocument] | None = None,
     ) -> None:
-        existing_docs = await self._fetch_existing_docs(existing_change.id)
+        # Wave B：existing_docs 由 reparse 批量预取传入；None 兜底单查（保留旧调用方）。
+        if existing_docs is None:
+            existing_docs = await self._fetch_existing_docs(existing_change.id)
         existing_by_key = {(d.doc_type, d.path): d for d in existing_docs}
 
         seen_keys: set[tuple[str, str]] = set()

@@ -14,6 +14,7 @@ content = ``CustomSkill.content``。version hash 含 DB content（编辑/增删 
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import tarfile
@@ -103,7 +104,7 @@ async def _gather_all_files(
     skills (so a codebase-only caller with ``session=None`` gets the original
     ordering unchanged).
     """
-    fs_files = _collect_skill_files(skills_dir)
+    fs_files = await asyncio.to_thread(_collect_skill_files, skills_dir)
     db_files = await _collect_custom_skills(session)
     return fs_files + db_files
 
@@ -174,6 +175,11 @@ async def build_skills_bundle(
     if not files:
         return b""
 
+    return await asyncio.to_thread(_build_tar_gz, files)
+
+
+def _build_tar_gz(files: list[tuple[Path, bytes]]) -> bytes:
+    """``build_skills_bundle`` 同步 tar 构建段（Wave C 续：移出事件循环）。"""
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         for rel_path, content in files:

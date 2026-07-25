@@ -575,40 +575,50 @@ class DaemonPermissionService:
             for lid, meta in lease_rows:
                 lease_prompt[lid] = (meta or {}).get("prompt") if isinstance(meta, dict) else None
 
-        results: list[WorkspaceDialogRead] = []
-        for row, run in joined:
-            # session_type 推导（D-003，C3 修正）
-            is_stage = run.change_id is not None
+        # Wave B（2026-07-25）：预推导 session_type + 批量查 chat 型 user log。
+        # 原每 chat dialog 一次 SELECT AgentRunLog LIMIT 1 = N+1（N = chat 型 dialog 数）。
+        session_types: list[str] = []
+        chat_run_ids: list[uuid.UUID] = []
+        for _row, _run in joined:
+            is_stage = _run.change_id is not None
             mode = (
-                session_cfg_mode.get(run.agent_session_id)
-                if run.agent_session_id is not None
+                session_cfg_mode.get(_run.agent_session_id)
+                if _run.agent_session_id is not None
                 else None
             )
             if is_stage:
-                session_type = "stage"
+                session_types.append("stage")
             elif mode == "scan":
-                session_type = "scan"
+                session_types.append("scan")
             else:
-                session_type = "chat"
+                session_types.append("chat")
+                chat_run_ids.append(_run.id)
 
+        chat_summary: dict[uuid.UUID, str | None] = {}
+        if chat_run_ids:
+            # ORDER BY timestamp DESC：Python 端按 run_id 取首条（每 run 最新 user log）。
+            for rid, content in (
+                await session.execute(
+                    select(AgentRunLog.run_id, AgentRunLog.content_redacted)
+                    .where(
+                        AgentRunLog.run_id.in_(chat_run_ids),
+                        AgentRunLog.channel == "user",
+                    )
+                    .order_by(AgentRunLog.timestamp.desc())
+                )
+            ).all():
+                if rid not in chat_summary:
+                    chat_summary[rid] = content
+
+        results: list[WorkspaceDialogRead] = []
+        for idx, (row, run) in enumerate(joined):
+            session_type = session_types[idx]
             # run_summary 推导（D-003，C2 修正）
             if session_type in ("scan", "stage"):
                 run_summary = lease_prompt.get(run.lease_id) if run.lease_id is not None else None
             else:
-                # chat：取首条 channel=="user" 的 AgentRunLog.content_redacted。
-                # 列名是 content_redacted + timestamp（非 content / created_at），方言无关。
-                log_row = (
-                    await session.execute(
-                        select(AgentRunLog.content_redacted)
-                        .where(
-                            AgentRunLog.run_id == run.id,
-                            AgentRunLog.channel == "user",
-                        )
-                        .order_by(AgentRunLog.timestamp.desc())
-                        .limit(1)
-                    )
-                ).first()
-                run_summary = log_row[0] if log_row is not None else None
+                # chat：预取的最新 user log content_redacted。
+                run_summary = chat_summary.get(run.id)
 
             results.append(
                 WorkspaceDialogRead.from_model(

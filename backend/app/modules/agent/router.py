@@ -750,14 +750,44 @@ async def list_missions(
         .offset(offset)
     )
     missions = (await session.execute(stmt)).scalars().all()
-    ctrl = MissionControlService(session)
-    out: list[MissionResponse] = []
-    for m in missions:
-        runs = await ctrl.worker_runs(m.id)
-        cost = await ctrl.cost_so_far(m.id)
-        arts = await _load_mission_artifacts(session, m.id)
-        out.append(_mission_to_response(m, runs, cost, arts))
-    return out
+    if not missions:
+        return []
+    mission_ids = [m.id for m in missions]
+    # Wave B（2026-07-25）：批量化 runs + cost + artifacts。原每 mission 调 worker_runs
+    # + cost_so_far（内部重复 worker_runs）+ _load_mission_artifacts = 3 SELECT × N。
+    # 现改为 2 SELECT（runs IN mission_ids / artifacts IN run_ids），cost 复用 runs 聚合。
+    all_runs = (
+        (await session.execute(select(AgentRun).where(AgentRun.mission_id.in_(mission_ids))))
+        .scalars()
+        .all()
+    )
+    runs_by_mission: dict[uuid.UUID, list[AgentRun]] = {}
+    cost_by_mission: dict[uuid.UUID, float] = {}
+    for r in all_runs:
+        # IN mission_ids 查询保证 mission_id 非空；narrow 给 mypy（AgentRun.mission_id 可空）。
+        mid = r.mission_id
+        if mid is None:
+            continue
+        runs_by_mission.setdefault(mid, []).append(r)
+        cost_by_mission[mid] = cost_by_mission.get(mid, 0.0) + (r.total_cost_usd or 0.0)
+    arts_by_run: dict[uuid.UUID, list[AgentArtifact]] = {}
+    if all_runs:
+        art_stmt = (
+            select(AgentArtifact)
+            .where(AgentArtifact.run_id.in_([r.id for r in all_runs]))
+            .order_by(AgentArtifact.created_at)
+        )
+        for a in (await session.execute(art_stmt)).scalars().all():
+            arts_by_run.setdefault(a.run_id, []).append(a)
+    return [
+        _mission_to_response(
+            m,
+            runs_by_mission.get(m.id, []),
+            cost_by_mission.get(m.id, 0.0),
+            arts_by_run,
+        )
+        for m in missions
+    ]
 
 
 @router.post(

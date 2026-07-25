@@ -27,8 +27,10 @@ human_test / archive_confirm），为 task-08 review 端点与 task-09
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 import uuid
+from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +40,72 @@ from app.modules.change.model import Change
 from app.modules.change.schema import PendingReview
 
 log = get_logger(__name__)
+
+
+def _read_stage_progress_sync(
+    db_path: Path,
+    fallback_db_path: Path | None,
+    change_key: str,
+    change_id: uuid.UUID,
+) -> tuple[str | None, set[str]] | None:
+    """``compute_pending_review`` 的 sqlite3 直读段（Wave C 续：移出事件循环）。
+
+    返回 ``(current_stage, completed_stages)``；返回 ``None`` 表示降级
+    （change 不在 db / 读取失败）。绝不抛异常。对齐 ``runtime/service.py`` 的
+    sqlite3 ``asyncio.to_thread`` 范式。
+    """
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+
+        # changes.name 即 change_key（dispatch.py:1085 同款查询）。
+        row = conn.execute(
+            "SELECT current_stage FROM changes WHERE name = ?",
+            (change_key,),
+        ).fetchone()
+        if (
+            row is None
+            and fallback_db_path
+            and fallback_db_path.is_file()
+            and db_path != fallback_db_path
+        ):
+            # Try fallback db (workspace root_path) — 与 dispatch.py:1089 一致的两段式查询。
+            conn.close()
+            conn = sqlite3.connect(f"file:{fallback_db_path}?mode=ro", uri=True)
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT current_stage FROM changes WHERE name = ?",
+                (change_key,),
+            ).fetchone()
+        if row is None:
+            log.info(
+                "projection.change_not_in_db",
+                change_key=change_key,
+                change_id=str(change_id),
+            )
+            return None
+
+        current_stage = row["current_stage"]
+
+        # 收集所有已完成的 stage（D-004@v2：基于 stage 完成事件投影）。
+        stage_rows = conn.execute(
+            "SELECT stage FROM stages "
+            "WHERE change_id = (SELECT id FROM changes WHERE name = ?) "
+            "AND status = 'completed'",
+            (change_key,),
+        ).fetchall()
+        return current_stage, {r["stage"] for r in stage_rows}
+    except sqlite3.Error as exc:
+        log.info(
+            "projection.db_read_failed",
+            change_id=str(change_id),
+            error=str(exc),
+        )
+        return None
+    finally:
+        if conn:
+            conn.close()
 
 
 class StageProjectionService:
@@ -92,62 +160,16 @@ class StageProjectionService:
                 )
                 return None
 
-        current_stage: str | None = None
-        completed_stages: set[str] = set()
-        conn: sqlite3.Connection | None = None
-        try:
-            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-            conn.row_factory = sqlite3.Row
-
-            # changes.name 即 change_key（dispatch.py:1085 同款查询）。
-            row = conn.execute(
-                "SELECT current_stage FROM changes WHERE name = ?",
-                (change.change_key,),
-            ).fetchone()
-            if (
-                row is None
-                and fallback_db_path
-                and fallback_db_path.is_file()
-                and db_path != fallback_db_path
-            ):
-                # Try fallback db (workspace root_path) — 与 dispatch.py:1089
-                # 一致的两段式查询。
-                conn.close()
-                conn = sqlite3.connect(f"file:{fallback_db_path}?mode=ro", uri=True)
-                conn.row_factory = sqlite3.Row
-                row = conn.execute(
-                    "SELECT current_stage FROM changes WHERE name = ?",
-                    (change.change_key,),
-                ).fetchone()
-            if row is None:
-                log.info(
-                    "projection.change_not_in_db",
-                    change_key=change.change_key,
-                    change_id=str(change_id),
-                )
-                return None
-
-            current_stage = row["current_stage"]
-
-            # 收集所有已完成的 stage（D-004@v2：基于 stage 完成事件投影）。
-            stage_rows = conn.execute(
-                "SELECT stage FROM stages "
-                "WHERE change_id = (SELECT id FROM changes WHERE name = ?) "
-                "AND status = 'completed'",
-                (change.change_key,),
-            ).fetchall()
-            completed_stages = {r["stage"] for r in stage_rows}
-        except sqlite3.Error as exc:
-            log.info(
-                "projection.db_read_failed",
-                change_id=str(change_id),
-                error=str(exc),
-            )
+        result = await asyncio.to_thread(
+            _read_stage_progress_sync,
+            db_path,
+            fallback_db_path,
+            change.change_key,
+            change_id,
+        )
+        if result is None:
             return None
-        finally:
-            if conn:
-                conn.close()
-
+        current_stage, completed_stages = result
         return self._map(current_stage, completed_stages)
 
     @staticmethod

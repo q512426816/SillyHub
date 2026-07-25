@@ -145,3 +145,82 @@ token 轮换（~20min + 401 刷新）不再重渲染这些页（含 3000 行的 
 | backend | 2955 passed | 2955 passed（Wave A+C+B 索引/B2/A1，零回归）|
 | frontend | 1059 passed | 1059 passed（Wave E F1+F2 安全子集 11 页，零回归）|
 | daemon | 1945 passed / 7 failed(超时) | 1951 passed / 1 failed(基线 flaky 超时 task-09 B2，非本轮引入)|
+
+---
+
+## 6. 🟢 第三批（2026-07-25，用户"再做一轮"指示）
+
+> 性质延续前两批：证据驱动（2 并行只读审查 agent 产 file:line 清单 + 读源码核实每处），
+> 按"真实阻塞收益 + 零回归风险"取舍——**不做过度优化**（小文件 write_text to_thread、
+> 低频导入 N+1 等）。动手前已读本文件 §1-§5 + `docs/agent-platform-deep-audit-2026-07-12.md`。
+
+### Wave C 续 — 后端/daemon 同步 I/O 移出事件循环 ✅ 零回归
+
+| ID | 文件:行 | 问题 | 修法 |
+|---|---|---|---|
+| C6 | `change/service.py` list_files/read_file/write_file/sync_documents | rglob+stat / read_text / write_text（含循环）在 async 内 | 抽 `_list_files_sync`/`_read_file_sync`/`_write_text_sync` helper + `asyncio.to_thread` |
+| C7 | `runtime/service.py` get_artifacts/_read_text | iterdir+stat（server-local 分支）/ read_text | 抽 `_list_artifacts_local`/`_read_text_local` + to_thread |
+| C8 | `change/dispatch.py:1238` read_verify_result | read_text | 抽 `_read_verify_result_sync` + to_thread |
+| C9 | `workspace/skills_view_service.py` list_skills/get_mcp_config | iterdir / read_text+json | 抽 `_list_skills_sync`/`_read_mcp_config_sync` + to_thread |
+| C10 | `agent/skills_bundle_service.py` _gather_all_files/build_skills_bundle | 经同步 helper（glob/rglob/read_bytes）/ tarfile 构建 | `_collect_skill_files` 调用点 to_thread + 抽 `_build_tar_gz` + to_thread |
+| C11 | `workspace/router.py:93` + `workspace/service.py:440` | scanner.scan（iterdir+parse）被 async 调用点同步调用 | 调用点 `asyncio.to_thread(service.scan, ...)` |
+| C12 | `spec_workspace/service.py:560` _write_spec_root | tarfile 校验+extractall + rmtree staging（大 tar 阻塞） | 抽 `_extract_spec_tar_to_staging`（校验+解包）to_thread + rmtree to_thread；per-file read_bytes/DB/move 保留 loop（与 DB await 交织，小文件非瓶颈） |
+| C13 | `change/projection.py:62` compute_pending_review | sqlite3 直读 sillyspec.db（mode=ro）在 async 内 | 抽 `_read_stage_progress_sync` + to_thread（对齐 `runtime/service.py:108` 范式） |
+| D9 | `sillyhub-daemon/src/skill-manager.ts:171` extractSkillsBundle | gunzipSync（bundle 解压在 async 内） | `promisify(gunzip)` → `gunzipAsync` |
+
+DEFER（带原因，非遗漏）：
+
+| 项 | 原因 |
+|---|---|
+| `change_writer` create_change/generate_document/batch_generate（write_text）| KB 级 markdown 写，微秒级；to_thread 线程池开销 > 阻塞，过度优化 |
+| `change/dispatch.py` _sync_stage_status_daemon_client（sqlite3）| 降级 `return StageSyncResult` 路径多、频率中、阻塞不大；重写风险/收益不划算 |
+| daemon `workspace.ts` prepareWorkspace existsSync/statSync 探针 | 单次 syscall，收益微 |
+| daemon `dist_router` get_install_ps1 / dispatch `_resolve_db_path` | 一次性小文件 / 单次 stat |
+| `agent/context_builder` + `post_scan_validator`（async 调 sync helper）| 一次性 spec 读 / scan 校验，非高频瓶颈 |
+| daemon `rmtreeWindowsSafe`（workspace.ts:369）| **有意同步设计**（R-06/FR-06）：Node v26 `fs.promises.rm` 在 vitest 有 rimraf callback 竞态，注释明示；改异步重引入测试竞态 |
+| daemon `path-utils` realpathSync（写决策热路径）| 异步化要改 `resolveRealPath` 签名，波及 PolicyEngine 所有 canWrite/canCreate，中风险 |
+
+### Wave B — N+1 查询批量化（部分）✅ 零回归
+
+> 只读审查 agent 核实 DEFER 清单 8 处：真 N+1 共 5 处，本批改 3 处（高频/清晰），2 处低频导入 defer；另 5 处审查确认**已批量/非 N+1**（get_pending_leases 已用复合索引+单 JOIN / _find_role_members 单查 / _cleanup_before_dispatch 固定 3 查 / scan_docs reparse 已批量 / placement 单 run 决策）。
+
+| ID | 文件:行 | 问题 | 修法 |
+|---|---|---|---|
+| B3 | `agent/router.py:730` list_missions | 每 mission 调 worker_runs + cost_so_far（**内部重复 worker_runs**）+ _load_mission_artifacts = 3 SELECT × N | 一次 runs `IN mission_ids` + 一次 artifacts `IN run_ids`；cost 复用 runs 聚合（sum total_cost_usd） |
+| B4 | `change/service.py:975` reparse → _sync_docs | 每 change 一次 `_fetch_existing_docs`（ChangeDocument WHERE change_id） | 循环前一次 `ChangeDocument WHERE change_id IN (...)` → dict 分组；_sync_docs 加 `existing_docs` 参数（None 兜底旧调用方） |
+| B5 | `daemon/permission_service.py:578` list_pending_dialogs（chat 分支）| 每 chat 型 dialog 一次 `SELECT AgentRunLog LIMIT 1` | 预推导 session_type + 一次 `SELECT AgentRunLog WHERE run_id IN (...) ORDER BY timestamp DESC` → Python 端按 run_id 取首条 |
+
+DEFER（带原因）：
+
+| 项 | 原因 |
+|---|---|
+| `ppm/problem` import_commit._build_module_maps（每项目 4 表 JOIN）| 手动 Excel 导入低频，N=项目数小 |
+| `ppm/plan` import_commit 两段循环（_find_existing_module + _ensure_task_for_detail）| 最复杂：`kanban_order=max+1` 需 per-user 递增计数器 + _resolve_project_context/_lookup_user_name 批量反查；低频导入，风险/收益不划算 |
+
+### Wave C — R5 converge 重复收敛守卫 ✅ agent 317 passed 零回归
+
+| ID | 文件:行 | 问题 | 修法 |
+|---|---|---|---|
+| R5 | `agent/finalizer.py:469` converge_mission_for_completed_run | 两个 worker 同时 complete → 都 derive 出 done/degraded → 都跑 finalize（重复 GLM 合并 / 重复 merge artifact / 重复计费） | `AgentMission` 加 `converged_at` 列 + migration `202607251000`；finalize 前原子 `UPDATE...WHERE converged_at IS NULL` 抢占，`rowcount=0` 跳过 |
+
+> **为何用原子 UPDATE 而非 with_for_update 行锁**：`finalize_bootstrap_mission`/`finalize_execute_mission` 内部有 commit（会释放行锁），行锁挡不住"finalize commit 后、converged_at 置位前"的并发窗口；原子 `UPDATE...WHERE IS NULL` 是单 SQL，不受后续 commit 影响。
+> **为何守卫放 finalize 前而非 collect 前**：`collect_completed_artifacts` 幂等（execution.py:305 注释 + 321 查重，已有 artifact 的 run 跳过），重复 collect 无害，守卫只需挡重的 finalize。
+> **不破坏重入**：`mcp_tools.converge_mission` 的冲突重入靠 `_finalize_merge_for_mission`（独立调 finalize_execute_mission，task-06 §5.2），不依赖 `converge_mission_for_completed_run` 内的 finalize；`test_converge_mission_reentrant` mock 了 `converge_mission_for_completed_run`，不触及守卫。
+
+### Wave C — A6 缓存 token 聚合（DEFER）
+
+| 项 | 原因 |
+|---|---|
+| `stream-json.ts` cache token 聚合（L461 `+=` / L549 `=` / L706 `+=`）| **语义微妙 + SAFE=N**：message_start（L461 `+=`）累加每个 API call 的 cache（一 turn 多 tool-use call 各自增量），message_delta（L549 `=`）是累计覆盖——这不是简单"+= → ="，需对照真实 Claude stream-json 输出确认每事件的 cache 语义。代码经 ql-token-fix/task-01 修正过，盲目改破坏计费。留专项（需真实数据 diff 验证）。印证 memory `claude-cache-token-semantics`。 |
+
+### 验证（累计三批）
+
+| 端 | 第三批改后 |
+|---|---|
+| backend | 2955 passed（Wave C 续 + Wave B + R5，零回归）|
+| backend 静态 | ruff ✅ / mypy ✅（494 文件全绿）|
+| frontend | 未改（本轮无前端改动）|
+| daemon | skill-manager 25 passed；全量 1950 passed / 2 failed（task-09 B1+B2 超时 flaky，重跑 B1 14 passed 确证非本轮引入）；tsc ✅ |
+
+> daemon 全量 2 failed（B1+B2）均为 task-09 spec-sync 的 vitest hook 10s 超时（环境性 flaky），重跑 `daemon-interactive-spec-sync.test.ts` 14 passed 确证；memory `sillyspec-324-verify-archive-pitfalls` 标注该区为已知脆弱。skill-manager 改动（gunzipAsync）单测 25 passed，与 spec bundle（pullSpecBundle）不同代码路径。
+> 三批累计 alembic 单头 `202607251000`（接 `202607250100`），migration 链无分叉。

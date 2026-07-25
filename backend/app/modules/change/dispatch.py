@@ -7,6 +7,7 @@ defining how the agent should be invoked.
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import json
 import sqlite3
@@ -1254,6 +1255,11 @@ async def read_verify_result(
         return "passed"
 
     vr_path = Path(ws.root_path) / change.path / "verify-result.md"
+    return await asyncio.to_thread(_read_verify_result_sync, vr_path)
+
+
+def _read_verify_result_sync(vr_path: Path) -> str:
+    """``read_verify_result`` 同步读+判定段（Wave C 续：移出事件循环）。"""
     if not vr_path.is_file():
         return "passed"
 

@@ -24,10 +24,11 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -502,6 +503,27 @@ async def converge_mission_for_completed_run(
     status = derive_status(runs, cancelled=cancelled)
 
     if status in ("done", "degraded"):
+        # R5 守卫（2026-07-25）：原子抢占 converged_at（UPDATE...WHERE IS NULL）。
+        # 两个 worker 同时 complete → 两个 converge 都 derive 出 done/degraded，但只有
+        # 抢占到（rowcount=1）的执行 finalize；另一个 rowcount=0 直接返回，不重复
+        # finalize（重复 GLM 合并 / merge artifact）。用原子 UPDATE 而非 with_for_update
+        # 行锁：finalize_* 内部 commit 会释放行锁，挡不住"finalize commit 后置位前"的并发。
+        # collect_completed_artifacts 幂等（已有 artifact 的 run 跳过，execution.py:305），
+        # 重复 collect 无害，故守卫只需挡 finalize。
+        claim = await session.execute(
+            update(AgentMission)
+            .where(AgentMission.id == mission_id, AgentMission.converged_at.is_(None))
+            .values(converged_at=datetime.now(UTC))
+        )
+        if claim.rowcount == 0:
+            log.info(
+                "mission_already_converged",
+                mission_id=str(mission_id),
+                trigger_run_id=str(run_id),
+            )
+            return status
+        await session.commit()
+
         finalizer = FinalizerService(
             session, glm_config, host_fs_delegate=new_host_fs_delegate(session)
         )

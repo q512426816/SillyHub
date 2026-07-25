@@ -557,6 +557,43 @@ class SpecWorkspaceService:
 
         return spec_root_abs, _stream()
 
+    @staticmethod
+    def _extract_spec_tar_to_staging(
+        tar_bytes: bytes,
+        spec_root: Path,
+        spec_root_resolved: Path,
+    ) -> tuple[tarfile.TarFile, Path]:
+        """tar 校验 + 整包解包到 staging（Wave C 续：移出事件循环）。
+
+        返回 ``(tf, staging)``。tar 无效 / 路径越界 → 抛 ``_spec_bundle_invalid``
+        （异常经 ``asyncio.to_thread`` 透传回 loop）。staging 由本函数创建，调用方
+        负责 finally 里 ``tf.close()`` + ``shutil.rmtree(staging)``。
+        """
+        try:
+            tf = tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*")  # noqa: SIM115
+        except tarfile.TarError as e:
+            raise _spec_bundle_invalid("Invalid tar payload.", reason=str(e)) from e
+
+        staging = Path(tempfile.mkdtemp(prefix="spec-sync-"))
+        for m in tf.getmembers():
+            name = m.name.replace("\\", "/")
+            if name.startswith("/") or (len(name) > 1 and name[1] == ":"):
+                raise _spec_bundle_invalid(
+                    "Absolute path in tar is not allowed.",
+                    member=m.name,
+                )
+            target = (spec_root / name).resolve()
+            try:
+                target.relative_to(spec_root_resolved)
+            except ValueError:
+                raise _spec_bundle_invalid(
+                    "Tar member escapes spec_root.",
+                    member=m.name,
+                ) from None
+
+        tf.extractall(staging, filter="fully_trusted")
+        return tf, staging
+
     async def _write_spec_root(
         self,
         workspace_id: uuid.UUID,
@@ -574,31 +611,12 @@ class SpecWorkspaceService:
         spec_root.mkdir(parents=True, exist_ok=True)
         spec_root_resolved = spec_root.resolve()
 
+        # Wave C 续：tar 校验 + 整包解包到 staging 移出事件循环（大 tar 阻塞）。
+        # per-file read_bytes / DB select / shutil.move 仍留 loop（与 DB await 交织）。
+        tf, staging = await asyncio.to_thread(
+            self._extract_spec_tar_to_staging, tar_bytes, spec_root, spec_root_resolved
+        )
         try:
-            tf = tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*")  # noqa: SIM115
-        except tarfile.TarError as e:
-            raise _spec_bundle_invalid("Invalid tar payload.", reason=str(e)) from e
-
-        staging = Path(tempfile.mkdtemp(prefix="spec-sync-"))
-        try:
-            for m in tf.getmembers():
-                name = m.name.replace("\\", "/")
-                if name.startswith("/") or (len(name) > 1 and name[1] == ":"):
-                    raise _spec_bundle_invalid(
-                        "Absolute path in tar is not allowed.",
-                        member=m.name,
-                    )
-                target = (spec_root / name).resolve()
-                try:
-                    target.relative_to(spec_root_resolved)
-                except ValueError:
-                    raise _spec_bundle_invalid(
-                        "Tar member escapes spec_root.",
-                        member=m.name,
-                    ) from None
-
-            tf.extractall(staging, filter="fully_trusted")
-
             # 3. Per-file merge (D-006@v2): walk staging files, compare content_hash
             # / source_mtime against existing scan_documents.  Files in spec_root
             # but NOT in staging are kept (preserve other members' exclusive docs).
@@ -680,7 +698,8 @@ class SpecWorkspaceService:
                     shutil.move(str(src_file), str(target))
         finally:
             tf.close()
-            shutil.rmtree(staging, ignore_errors=True)
+            # Wave C 续：staging 整树删除移出事件循环
+            await asyncio.to_thread(shutil.rmtree, staging, ignore_errors=True)
 
         now = datetime.now(UTC)
         spec_ws.sync_status = "clean"

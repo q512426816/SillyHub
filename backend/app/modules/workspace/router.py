@@ -7,6 +7,7 @@ permissions from ``references/16-rbac.md``.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Annotated
 
@@ -90,7 +91,7 @@ async def scan_workspace(
     user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_WRITE))],
 ) -> ScanResponse:
     service = WorkspaceService(session)
-    return _build_scan_response(service.scan(payload.root_path))
+    return _build_scan_response(await asyncio.to_thread(service.scan, payload.root_path))
 
 
 @router.post("/scan-generate", response_model=ScanGenerateResponse)

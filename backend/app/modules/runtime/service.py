@@ -254,7 +254,6 @@ class RuntimeService:
                 st = await self._host_fs.stat(workspace, child)
                 if not st.get("exists") or st.get("is_dir"):
                     continue
-                from datetime import datetime as dt
 
                 # delegate.stat 不返 mtime（task-01 契约只 exists/is_dir/size），
                 # last_modified 退化为 None（前端展示 size 仍可用；mtime 需扩接口）。
@@ -267,9 +266,15 @@ class RuntimeService:
                 )
             return entries
 
-        # server-local 旧分支（host_fs=None）：容器 Path 直读。
+        # server-local 旧分支（host_fs=None）：容器 Path 直读。Wave C 续：移出事件循环
+        return await asyncio.to_thread(self._list_artifacts_local, artifacts_dir)
+
+    @staticmethod
+    def _list_artifacts_local(artifacts_dir: Path) -> list[ArtifactEntry]:
+        """``get_artifacts`` server-local 同步遍历段（Wave C 续：移出事件循环）。"""
         if not artifacts_dir.is_dir():
             return []
+        entries: list[ArtifactEntry] = []
         for f in sorted(artifacts_dir.iterdir()):
             if f.is_file():
                 stat = f.stat()
@@ -317,11 +322,19 @@ class RuntimeService:
                 return await self._host_fs.read_file(workspace, path_str)
             except Exception:
                 return None
+        # server-local 容器分支（Wave C 续：移出事件循环）。errors 语义见 _read_text_local。
+        return await asyncio.to_thread(self._read_text_local, abs_path, errors)
+
+    @staticmethod
+    def _read_text_local(abs_path: Path, errors: str) -> str | None:
+        """``_read_text`` server-local 同步读段（Wave C 续：移出事件循环）。
+
+        errors="replace" 时 UnicodeDecodeError 被替换字符吞（原 get_artifact_content 行为）；
+        errors="strict" 时坏编码 UnicodeDecodeError 传播（原 get_user_inputs 行为，
+        except OSError 不接 UnicodeDecodeError）。
+        """
         if not abs_path.is_file():
             return None
-        # server-local 容器分支：errors="replace" 时 UnicodeDecodeError 被替换字符吞
-        # （原 get_artifact_content 行为）；errors="strict" 时坏编码 UnicodeDecodeError
-        # 传播（原 get_user_inputs 行为，except OSError 不接 UnicodeDecodeError）。
         if errors == "replace":
             try:
                 return abs_path.read_text(encoding="utf-8", errors="replace")

@@ -19,8 +19,12 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile, readdir, copyFile, stat } from 'node:fs/promises';
 import { join, dirname, relative, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
-import { gunzipSync } from 'node:zlib';
+import { gunzip } from 'node:zlib';
+import { promisify } from 'node:util';
 import { parseJsonFromResponse } from './hub-client.js';
+
+// Wave C 续：gunzip 移出事件循环（bundle 解压在 async extractSkillsBundle 内）。
+const gunzipAsync = promisify(gunzip);
 
 // ── 常量 ──────────────────────────────────────────────────────────────────────
 
@@ -168,7 +172,7 @@ export async function extractSkillsBundle(
   // gunzip → tar 字节
   let tarBytes: Uint8Array;
   try {
-    tarBytes = gunzipSync(Buffer.from(bundleBytes));
+    tarBytes = await gunzipAsync(Buffer.from(bundleBytes));
   } catch (e) {
     logger?.('error', 'skill_bundle_gunzip_failed', { error: String(e) });
     return false;

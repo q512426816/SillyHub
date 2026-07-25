@@ -14,6 +14,7 @@ backend 容器路径，RPC 打到 daemon 宿主会读不到——daemon 宿主�
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from pathlib import Path
@@ -91,20 +92,7 @@ class SkillsViewService:
             return SkillsViewResponse(skills=[])
 
         skills_dir = resolver._spec_root() / "skills"
-        if not skills_dir.is_dir():
-            return SkillsViewResponse(skills=[])
-
-        skills: list[SkillFileEntry] = []
-        try:
-            for entry in sorted(skills_dir.iterdir()):
-                if not entry.is_dir():
-                    continue
-                files = self._list_files_local(entry)
-                skills.append(SkillFileEntry(name=entry.name, files=files))
-        except (OSError, PermissionError):
-            return SkillsViewResponse(skills=[])
-
-        return SkillsViewResponse(skills=skills)
+        return await asyncio.to_thread(self._list_skills_sync, skills_dir)
 
     async def get_mcp_config(self, workspace_id: uuid.UUID) -> McpConfigViewResponse:
         """读 specDir/.mcp.json（只读，env secret 脱敏，本地直读）。
@@ -118,26 +106,7 @@ class SkillsViewService:
             return McpConfigViewResponse(mcpServers={})
 
         mcp_path = resolver._spec_root() / ".mcp.json"
-        if not mcp_path.is_file():
-            return McpConfigViewResponse(mcpServers={})
-        try:
-            raw = mcp_path.read_text(encoding="utf-8")
-        except (OSError, PermissionError):
-            return McpConfigViewResponse(mcpServers={})
-
-        try:
-            data = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            return McpConfigViewResponse(mcpServers={})
-
-        if not isinstance(data, dict):
-            return McpConfigViewResponse(mcpServers={})
-
-        mcp_servers = data.get("mcpServers")
-        if not isinstance(mcp_servers, dict):
-            mcp_servers = {}
-
-        return McpConfigViewResponse(mcpServers=_redact_mcp_env(mcp_servers))
+        return await asyncio.to_thread(self._read_mcp_config_sync, mcp_path)
 
     # ── 文件清单 helper（本地）──────────────────────────────────────────────
 
@@ -159,3 +128,39 @@ class SkillsViewService:
         except (OSError, PermissionError):
             pass
         return files
+
+    @staticmethod
+    def _list_skills_sync(skills_dir: Path) -> SkillsViewResponse:
+        """``list_skills`` 同步遍历段（Wave C 续：移出事件循环）。"""
+        if not skills_dir.is_dir():
+            return SkillsViewResponse(skills=[])
+        skills: list[SkillFileEntry] = []
+        try:
+            for entry in sorted(skills_dir.iterdir()):
+                if not entry.is_dir():
+                    continue
+                files = SkillsViewService._list_files_local(entry)
+                skills.append(SkillFileEntry(name=entry.name, files=files))
+        except (OSError, PermissionError):
+            return SkillsViewResponse(skills=[])
+        return SkillsViewResponse(skills=skills)
+
+    @staticmethod
+    def _read_mcp_config_sync(mcp_path: Path) -> McpConfigViewResponse:
+        """``get_mcp_config`` 同步读+解析段（Wave C 续：移出事件循环）。"""
+        if not mcp_path.is_file():
+            return McpConfigViewResponse(mcpServers={})
+        try:
+            raw = mcp_path.read_text(encoding="utf-8")
+        except (OSError, PermissionError):
+            return McpConfigViewResponse(mcpServers={})
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return McpConfigViewResponse(mcpServers={})
+        if not isinstance(data, dict):
+            return McpConfigViewResponse(mcpServers={})
+        mcp_servers = data.get("mcpServers")
+        if not isinstance(mcp_servers, dict):
+            mcp_servers = {}
+        return McpConfigViewResponse(mcpServers=_redact_mcp_env(mcp_servers))

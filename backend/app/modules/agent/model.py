@@ -598,6 +598,14 @@ class AgentMission(BaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    # 2026-07-25 Wave C / R5：mission 收敛守卫列。converge_mission_for_completed_run
+    # 在 finalize 前用原子 UPDATE...WHERE converged_at IS NULL 抢占置位，防两个 worker
+    # 同时 complete 触发重复 finalize（重复 GLM 合并 / 重复 merge artifact）。
+    # nullable 兼容历史 mission（None = 未收敛）。
+    converged_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
 
 
 class AgentRunDependency(BaseModel, table=True):

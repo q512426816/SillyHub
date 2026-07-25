@@ -437,7 +437,7 @@ class WorkspaceService:
                 details={"workspace_id": str(workspace.id)},
             ) from None
 
-        scan = self.scan(scan_path)
+        scan = await asyncio.to_thread(self.scan, scan_path)
         workspace.last_scanned_at = datetime.now(UTC)
         workspace.updated_at = workspace.last_scanned_at
 
