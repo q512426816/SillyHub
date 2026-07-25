@@ -535,6 +535,7 @@ class HostFsDelegate:
         cwd: str,
         timeout: float,
         env: dict[str, str] | None = None,
+        release_transaction: bool = False,
     ) -> dict:
         """Run a whitelisted command on the daemon side, returning
         ``{exit_code, stdout, stderr, duration_ms}``.
@@ -580,6 +581,7 @@ class HostFsDelegate:
                 "env": env,
             },
             timeout=timeout,
+            release_transaction=release_transaction,
         )
 
     def _enforce_command_whitelist(self, *, command: str, args: list[str]) -> None:
@@ -659,6 +661,7 @@ class HostFsDelegate:
         workspace: Workspace,
         args: dict[str, Any],
         timeout: float | None = None,
+        release_transaction: bool = False,
     ) -> dict:
         """Forward a host_fs.* call over the daemon WS RPC.
 
@@ -679,36 +682,46 @@ class HostFsDelegate:
         ``timeout`` 参数）零回归；非 ``None`` 时才 ``rpc.send_rpc(..., timeout=)``。
         """
         rpc = self._ws_rpc
+        # H2（第六批）：快照 ws_id，release_transaction 提交后 workspace 对象 expire，
+        # 后续 send_rpc 不再访问其属性（避免 DetachedInstance/lazy refresh）。
+        ws_id = getattr(workspace, "id", "")
         if rpc is None:
             raise HostFsDelegateUnavailable(
                 "ws_rpc not wired (task-02 pending)",
                 details={
                     "method": method,
-                    "workspace_id": str(getattr(workspace, "id", "")),
+                    "workspace_id": str(ws_id),
                 },
             )
-        daemon_id = await self._daemon_id_resolver(self._session, workspace.id)
+        daemon_id = await self._daemon_id_resolver(self._session, ws_id)
         if daemon_id is None:
             raise HostFsDelegateUnavailable(
                 "workspace has no bound daemon instance (member binding resolves "
                 "no daemon_instances.id)",
                 details={
                     "method": method,
-                    "workspace_id": str(getattr(workspace, "id", "")),
+                    "workspace_id": str(ws_id),
                 },
             )
+        # H2（第六批）：长网络 RPC 前 release DB 事务，避免 PG idle_in_transaction
+        # 超时（gate verify 可达 12min，事务从 daemon_id 解析的 SELECT 一直开到
+        # send_rpc 返回）。仅 release_transaction=True 时触发——调用方须保证此刻
+        # session 无未提交写（gate 任务的 gate_session 在 RPC 前只有读）。
+        # 默认 False：现有 8 方法 + 既有事务语义逐字节零回归。
+        if release_transaction and self._session is not None:
+            await self._session.commit()
         # M5 向下兼容：timeout=None 时**不**传给 send_rpc——现有 8 方法 +
         # 早期 mock（send_rpc 无 timeout 参数）零回归；非 None 才透传。
         if timeout is None:
             return await rpc.send_rpc(
                 method=method,
-                workspace_id=str(workspace.id),
+                workspace_id=str(ws_id),
                 daemon_id=str(daemon_id),
                 args=args,
             )
         return await rpc.send_rpc(
             method=method,
-            workspace_id=str(workspace.id),
+            workspace_id=str(ws_id),
             daemon_id=str(daemon_id),
             args=args,
             timeout=timeout,

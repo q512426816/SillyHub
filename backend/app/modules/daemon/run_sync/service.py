@@ -1148,6 +1148,10 @@ class RunSyncService:
                 if change is None:
                     raise RuntimeError(f"change not found: {change_id}")
                 change_name = change.change_key
+                # H2（第六批）：RPC 前 snapshot owner_id——_run_gate_via_delegate 内
+                # release_transaction 会 commit gate_session 释放长 RPC 期间的事务，
+                # commit 后 change 对象 expire，:1192 不再能访问 change.owner_id。
+                change_owner_id = change.owner_id
                 code_root, spec_dir = await self._resolve_gate_spec_root(
                     gate_session, workspace, change
                 )
@@ -1188,8 +1192,9 @@ class RunSyncService:
                     agent_run_id,
                 )
                 # user_id：对齐 _trigger_stage_completion_callback 的回退策略
-                # （change.owner_id → 零 UUID）。
-                user_id = change.owner_id or uuid.UUID(int=0)
+                # （change.owner_id → 零 UUID）。H2：用 RPC 前 snapshot 的
+                # change_owner_id（change 对象已在 RPC 内 commit 后 expire）。
+                user_id = change_owner_id or uuid.UUID(int=0)
                 # auto_dispatch_next_step 经模块属性引用（``_change_dispatch.``）调用，
                 # 让单测 patch ``app.modules.change.dispatch.auto_dispatch_next_step``
                 # 生效（模块级 ``from`` 导入会固化原函数引用，patch dispatch 模块属性

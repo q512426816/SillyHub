@@ -588,8 +588,29 @@ class ChangeService:
         workspace = await self._workspace_service.get(workspace_id)
         root = Path(workspace.root_path)
 
+        # 第六批：批量取已存在 ChangeDocument（原逐文档 SELECT → N+1 upsert）。
+        # 单请求内无并发写入，循环前一次性 IN 查询与原逐条语义等价。
+        doc_items = list(documents)
+        existing_docs: dict[str, ChangeDocument] = (
+            {
+                doc.doc_type: doc
+                for doc in (
+                    await self._session.execute(
+                        select(ChangeDocument).where(
+                            col(ChangeDocument.change_id) == change.id,
+                            col(ChangeDocument.doc_type).in_(
+                                [filename for filename, _ in doc_items]
+                            ),
+                        )
+                    )
+                ).scalars().all()
+            }
+            if doc_items
+            else {}
+        )
+
         synced = 0
-        for filename, content in documents:
+        for filename, content in doc_items:
             # Write file to .sillyspec/changes/{change_key}/{filename}
             relative = f".sillyspec/changes/{change_key}/{filename}"
             full_path = root / relative
@@ -600,11 +621,7 @@ class ChangeService:
             now = datetime.now(UTC)
 
             # Upsert ChangeDocument row
-            stmt = select(ChangeDocument).where(
-                col(ChangeDocument.change_id) == change.id,
-                col(ChangeDocument.doc_type) == filename,
-            )
-            doc = (await self._session.execute(stmt)).scalars().first()
+            doc = existing_docs.get(filename)
             if doc is None:
                 doc = ChangeDocument(
                     id=uuid.uuid4(),

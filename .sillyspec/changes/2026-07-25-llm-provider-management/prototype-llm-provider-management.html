@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>LLM 供应商管理 - 线框原型</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background:#f5f5f5; margin:0; padding:24px; color:#222; }
+  .note { background:#fffbe6; border:1px dashed #d4b106; padding:8px 12px; border-radius:4px; font-size:13px; margin-bottom:16px; line-height:1.6; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:#888; font-size:13px; margin-bottom:20px; line-height:1.6; }
+  .card { background:#fff; border:1px solid #e0e0e0; border-radius:8px; padding:16px; margin-bottom:16px; }
+  .card h2 { font-size:15px; margin:0 0 12px; border-left:3px solid #1677ff; padding-left:8px; }
+  .row { display:flex; gap:12px; align-items:center; padding:10px; border:1px solid #eee; border-radius:6px; margin-bottom:8px; }
+  .row.default { border-color:#52c41a; background:#f6ffed; }
+  .name { font-weight:600; min-width:120px; }
+  .kind { font-size:12px; background:#fff0e6; color:#d46b08; padding:2px 8px; border-radius:10px; }
+  .url { color:#888; font-size:12px; flex:1; font-family:monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .model { color:#1677ff; font-size:12px; }
+  .models { color:#888; font-size:11px; }
+  .badge { font-size:11px; background:#52c41a; color:#fff; padding:2px 6px; border-radius:3px; }
+  .ops { margin-left:auto; white-space:nowrap; }
+  .ops button { font-size:12px; margin-left:4px; padding:4px 10px; border:1px solid #d9d9d9; background:#fff; border-radius:4px; cursor:pointer; }
+  .ops button.primary { background:#1677ff; color:#fff; border-color:#1677ff; }
+  .ops button.danger { color:#ff4d4f; }
+  .new-btn { background:#1677ff; color:#fff; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:13px; }
+  form label { display:block; font-size:13px; color:#555; margin:10px 0 4px; }
+  form .lbl-hint { color:#999; font-weight:normal; font-size:12px; margin-left:4px; }
+  form input, form select, form textarea { width:100%; padding:8px; border:1px solid #d9d9d9; border-radius:4px; font-size:13px; }
+  form textarea { font-family:monospace; min-height:70px; resize:vertical; }
+  .hint { font-size:12px; color:#999; margin-top:4px; line-height:1.5; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  details { margin-top:12px; border-top:1px dashed #e0e0e0; padding-top:12px; }
+  summary { font-size:13px; color:#555; cursor:pointer; padding:6px 0; font-weight:600; }
+  table.role-map { width:100%; border-collapse:collapse; margin-top:8px; font-size:12px; }
+  table.role-map th, table.role-map td { border:1px solid #eee; padding:6px 8px; text-align:left; }
+  table.role-map th { background:#fafafa; color:#666; font-weight:600; }
+  table.role-map td.role { font-weight:600; color:#d46b08; width:80px; }
+  table.role-map input { padding:4px 6px; font-size:12px; }
+  .env-rows { margin-top:8px; }
+  .env-row { display:grid; grid-template-columns:1fr 2fr auto; gap:6px; margin-bottom:6px; }
+  .env-row button { padding:4px 10px; border:1px solid #d9d9d9; background:#fff; border-radius:4px; cursor:pointer; font-size:12px; color:#ff4d4f; }
+  .section-title { font-size:12px; color:#999; text-transform:uppercase; letter-spacing:1px; margin:20px 0 8px; }
+  .flow { font-size:13px; line-height:1.9; color:#555; }
+  .flow b { color:#222; }
+  .arrow { color:#1677ff; font-weight:bold; }
+  code { background:#f5f5f5; padding:1px 5px; border-radius:3px; font-size:12px; color:#c41d7f; }
+</style>
+</head>
+<body>
+
+<div class="note">📐 线框原型 · 字段对齐 cc-switch 核心可用集（反代相关字段因 daemon 直 spawn 架构不支持，已排除）· execute 阶段按设计系统实现。</div>
+
+<h1>我的供应商</h1>
+<div class="sub">管理你用于 Claude Code 的 LLM 供应商。配置跟随你的账号，<b>所有工作空间通用</b>。<br>填好 API Key 和请求地址就能用；模型映射等高级项默认折叠，用中转站时再展开。</div>
+
+<p><button class="new-btn">+ 新建供应商</button></p>
+
+<div class="card">
+  <h2>供应商列表（2）</h2>
+
+  <div class="row default">
+    <span class="name">Claude 官方</span>
+    <span class="kind">claude</span>
+    <span class="url">https://api.anthropic.com</span>
+    <span class="model">claude-opus-4-8</span>
+    <span class="models">Sonnet/Opus/Haiku → 官方模型</span>
+    <span class="badge">默认</span>
+    <span class="ops">
+      <button>编辑</button>
+      <button>设默认</button>
+      <button class="danger">删除</button>
+    </span>
+  </div>
+
+  <div class="row">
+    <span class="name">Kimi 中转</span>
+    <span class="kind">claude</span>
+    <span class="url">https://api.moonshot.cn/anthropic</span>
+    <span class="model">kimi-k2</span>
+    <span class="models">角色映射: Sonnet/Opus/Haiku→kimi-k2</span>
+    <span class="ops">
+      <button>编辑</button>
+      <button class="primary">设默认</button>
+      <button class="danger">删除</button>
+    </span>
+  </div>
+</div>
+
+<div class="card">
+  <h2>新建 / 编辑供应商</h2>
+  <form onsubmit="return false">
+
+    <div class="grid2">
+      <div>
+        <label>供应商名称 <span class="lbl-hint">必填</span></label>
+        <input placeholder="例如：Kimi 中转 / 公司专用账号">
+      </div>
+      <div>
+        <label>Agent 种类 <span class="lbl-hint">必填</span></label>
+        <select>
+          <option>Claude Code</option>
+          <option disabled>Codex（即将支持）</option>
+          <option disabled>Gemini（即将支持）</option>
+        </select>
+        <div class="hint">第一版固定 Claude Code；下拉预留其他 agent。</div>
+      </div>
+    </div>
+
+    <label>备注</label>
+    <input placeholder="例如：公司专用账号 / 个人测试 / 限额 $50/月">
+
+    <label>官网链接 <span class="lbl-hint">可选</span></label>
+    <input placeholder="https://example.com（可选，方便日后查账）">
+
+    <label>API Key <span class="lbl-hint">必填，加密存储</span></label>
+    <input type="password" placeholder="sk-***">
+    <div class="hint">💡 加密存储，列表只显示打码。编辑时不填则保持原密钥不变。</div>
+
+    <label>请求地址 (base_url) <span class="lbl-hint">必填</span></label>
+    <input placeholder="https://api.anthropic.com（官方）或中转站完整地址，不要以斜杠结尾">
+    <div class="hint">兼容 Claude API 的服务端点。官方填 <code>https://api.anthropic.com</code>；中转站填中转地址。</div>
+
+    <details>
+      <summary>高级选项（模型映射 / 认证字段 / 自定义环境变量）</summary>
+
+      <label>认证字段</label>
+      <select>
+        <option>ANTHROPIC_AUTH_TOKEN（默认，中转站常用）</option>
+        <option>ANTHROPIC_API_KEY（官方 API key）</option>
+      </select>
+      <div class="hint">选择把 API Key 写入哪个环境变量。中转站一般用 AUTH_TOKEN，官方用 API_KEY。</div>
+
+      <label style="margin-top:14px">模型角色映射</label>
+      <div class="hint">Claude Code 内部按角色（Sonnet/Opus/Fable/Haiku）请求模型。用中转站时，把每个角色映射到中转站实际的模型名；官方端点可全部留空。</div>
+      <table class="role-map">
+        <tr><th>角色</th><th>显示名称（仅 UI 展示）</th><th>实际请求模型</th><th>1M 上下文</th></tr>
+        <tr>
+          <td class="role">Sonnet</td>
+          <td><input placeholder="如 Kimi K2"></td>
+          <td><input placeholder="如 kimi-k2 / claude-sonnet-5"></td>
+          <td><input type="checkbox"></td>
+        </tr>
+        <tr>
+          <td class="role">Opus</td>
+          <td><input placeholder="如 DeepSeek V4 Pro"></td>
+          <td><input placeholder="如 deepseek-v4-pro / claude-opus-4-8"></td>
+          <td><input type="checkbox" checked></td>
+        </tr>
+        <tr>
+          <td class="role">Fable</td>
+          <td><input placeholder=""></td>
+          <td><input placeholder="留空=该角色走默认兜底"></td>
+          <td><input type="checkbox"></td>
+        </tr>
+        <tr>
+          <td class="role">Haiku</td>
+          <td><input placeholder=""></td>
+          <td><input placeholder="如 kimi-k2（后台子任务也走中转）"></td>
+          <td><input type="checkbox"></td>
+        </tr>
+      </table>
+      <div class="hint">⚠️ 用中转站时建议至少填 Sonnet/Opus/Haiku，否则这些请求会以原始 Claude 模型名透传给上游，可能因上游无此模型而报错。</div>
+
+      <label style="margin-top:14px">默认兜底模型 <span class="lbl-hint">可选</span></label>
+      <input placeholder="如 kimi-k2（未映射的角色都走这个模型）">
+      <div class="hint">用中转站时建议填写：未明确映射的请求（含 Haiku 后台子任务）会以这个模型名发给上游，避免透传原始 Claude 模型名报错。</div>
+
+      <label style="margin-top:14px">自定义环境变量 <span class="lbl-hint">可选，高级</span></label>
+      <div class="env-rows">
+        <div class="env-row">
+          <input placeholder="变量名（如 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC）">
+          <input placeholder="值（如 1）">
+          <button>删除</button>
+        </div>
+        <div class="env-row">
+          <input placeholder="API_TIMEOUT_MS">
+          <input placeholder="3000000">
+          <button>删除</button>
+        </div>
+      </div>
+      <button type="button" class="new-btn" style="margin-top:6px">+ 添加环境变量</button>
+      <div class="hint">注入任意额外的 Claude Code 环境变量（超时、流量控制等）。这些会和上面的配置一起下发给 daemon。</div>
+    </details>
+
+    <div style="margin-top:16px">
+      <button class="new-btn">保存</button>
+      <button type="button" style="font-size:13px;padding:8px 16px;border:1px solid #d9d9d9;background:#fff;border-radius:6px;cursor:pointer;margin-left:8px">取消</button>
+    </div>
+  </form>
+</div>
+
+<div class="section-title">生效链路（设计要点）</div>
+<div class="card flow">
+  <b>你</b> 在网页配好供应商（API Key 加密存后端）
+  <span class="arrow">→</span> 跑 Claude Code 时，后端把你的<b>默认供应商</b>随任务包(lease)下发
+  <span class="arrow">→</span> <b>daemon</b> 把配置翻译成环境变量：<code>ANTHROPIC_BASE_URL</code> / <code>ANTHROPIC_AUTH_TOKEN</code> / <code>ANTHROPIC_DEFAULT_SONNET_MODEL</code> 等
+  <span class="arrow">→</span> Claude Code 用你指定的供应商和模型映射跑。
+  <br><br>
+  • 配置<b>跟随账号</b>，所有工作空间通用。<br>
+  • 没配供应商时，daemon 用本机原有配置兜底（不影响现有使用）。<br>
+  • 切换默认 = 一键，立即对后续任务生效。<br>
+  • 加 Codex/Gemini：后端表 agent 种类加值 + daemon 加注入器，<b>协议/表结构不变</b>。<br>
+  • <b>不支持</b>（反代相关）：自定义 User-Agent / Header 覆盖 / Body 覆盖 / API 格式转换 —— 这些需要本地反代拦截，daemon 是直接启动设环境变量、不走反代。
+</div>
+
+</body>
+</html>

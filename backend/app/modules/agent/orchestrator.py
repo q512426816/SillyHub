@@ -280,7 +280,7 @@ class OrchestratorService:
         # can_dispatch_worker 同一数据源（避免双源不一致）。
         forced_degraded = False
         if mission.budget_usd is not None:
-            cost = await ctrl.cost_so_far(mission_id)
+            cost = MissionControlService.cost_from_runs(all_runs)
             if cost >= mission.budget_usd:
                 forced_degraded = True
                 log.warning(

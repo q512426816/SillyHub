@@ -87,13 +87,16 @@ export default function WorkspaceDetailPage({ params }: Props) {
     setLoading(true);
     setPageError(null);
     try {
-      const [ws, sw, comps, active, archived, rt] = await Promise.all([
+      // 第六批：fetchMyBinding 仅依赖 workspaceId，与上 6 路相互独立，并入
+      // Promise.all 并行（原串行排在 6 路之后，白多一个 RTT）。各路已有 .catch 降级。
+      const [ws, sw, comps, active, archived, rt, binding] = await Promise.all([
         getWorkspace(workspaceId),
         getSpecWorkspace(workspaceId).catch(() => null),
         listComponents(workspaceId).catch(() => ({ items: [], total: 0 })),
         listChanges(workspaceId, { location: "active" }).catch(() => ({ items: [], total: 0 })),
         listChanges(workspaceId, { location: "archive" }).catch(() => ({ items: [], total: 0 })),
         getRuntimeProgress(workspaceId).catch(() => null),
+        fetchMyBinding(workspaceId).catch(() => null),
       ]);
       setWorkspace(ws);
       setDefaultAgent(ws.default_agent);
@@ -110,7 +113,6 @@ export default function WorkspaceDetailPage({ params }: Props) {
       setCurrentStage(rt?.current_stage ?? null);
 
       // task-08 / D-002：获取当前成员 binding 以判定 init 状态
-      const binding = await fetchMyBinding(workspaceId).catch(() => null);
       setMyBinding(binding);
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "加载工作区失败");

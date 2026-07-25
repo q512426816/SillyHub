@@ -1,0 +1,11 @@
+{
+  "name_zh": "worktree 元数据",
+  "changeName": "2026-07-25-daemon-borrow-for-business",
+  "branch": "sillyspec/2026-07-25-daemon-borrow-for-business",
+  "baseBranch": "main",
+  "baseHash": "5815d28613c7dc33778034f47d353dfe910efb58",
+  "worktreePath": "C:\\Users\\qinyi\\IdeaProjects\\multi-agent-platform\\.sillyspec\\.runtime\\worktrees\\2026-07-25-daemon-borrow-for-business",
+  "mode": "worktree",
+  "createdAt": "2026-07-25T14:08:49.435Z",
+  "provisioning": true
+}

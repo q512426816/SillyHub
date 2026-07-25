@@ -40,10 +40,16 @@ class MissionControlService:
         stmt = select(AgentRun).where(col(AgentRun.mission_id) == mission_id)
         return list((await self._session.execute(stmt)).scalars().all())
 
+    @staticmethod
+    def cost_from_runs(runs: list[AgentRun]) -> float:
+        """第六批：从内存 runs 直接求 cost（与 cost_so_far 同公式），供调用方复用
+        已 fetch 的 runs 避免「worker_runs 后又 cost_so_far 再 SELECT 一遍」的冗余。
+        """
+        return sum(r.total_cost_usd or 0.0 for r in runs)
+
     async def cost_so_far(self, mission_id: uuid.UUID) -> float:
         """Sum of ``total_cost_usd`` across the Mission's Worker Runs."""
-        runs = await self.worker_runs(mission_id)
-        return sum(r.total_cost_usd or 0.0 for r in runs)
+        return self.cost_from_runs(await self.worker_runs(mission_id))
 
     async def active_worker_count(self, mission_id: uuid.UUID) -> int:
         runs = await self.worker_runs(mission_id)

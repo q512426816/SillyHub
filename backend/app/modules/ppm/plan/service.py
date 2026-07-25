@@ -1354,6 +1354,25 @@ class PlanService:
                 "status": DETAIL_STATUS_CN.get(d.status, d.status),
             }
 
+        # 第六批：批量取所有 has_module node 的模块（原逐 node list_modules_by_node
+        # → N 次 SELECT）。按 plan_node_id 分组 + 复用 _no_sort_key 排序，语义等价。
+        _module_node_ids = [n.id for n in nodes if n.has_module]
+        modules_by_node: dict[Any, list[PlanNodeModule]] = {}
+        if _module_node_ids:
+            _all_mods = list(
+                (
+                    await self._session.execute(
+                        select(PlanNodeModule).where(
+                            PlanNodeModule.plan_node_id.in_(_module_node_ids)
+                        )
+                    )
+                ).scalars().all()
+            )
+            for _m in _all_mods:
+                modules_by_node.setdefault(_m.plan_node_id, []).append(_m)
+            for _k in modules_by_node:
+                modules_by_node[_k].sort(key=lambda x: _no_sort_key(x.no))
+
         sections: list[dict[str, Any]] = []
         for node in nodes:
             # 大标题:里程碑 {no}. {overall_stage} | 责任人:.. | 计划:..~..
@@ -1374,7 +1393,7 @@ class PlanService:
 
             details = details_by_node.get(node.id, [])
             if node.has_module:
-                modules = await self.list_modules_by_node(str(node.id))
+                modules = modules_by_node.get(node.id, [])
                 module_ids = {m.id for m in modules}
                 groups: list[dict[str, Any]] = []
                 for m in modules:

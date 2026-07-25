@@ -55,6 +55,13 @@ export default function WorkspacesPage() {
   // task-08 / FR-04 / FR-05 / D-003@v1：筛选分页 + 平台管理员人员搜索 + 别名编辑。
   const isPlatformAdmin = useSession((s) => s.user?.is_platform_admin === true);
   const [query, setQuery] = useState("");
+  // 第六批：搜索框防抖——输入即时回显(query)，reload 用 debouncedQuery，
+  // 避免每次按键触发 4 路后端请求（"project" 8 键原本 32 次请求 → 现 4 次）。
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query), 300);
+    return () => clearTimeout(t);
+  }, [query]);
   const [typeFilter, setTypeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [ownerUserId, setOwnerUserId] = useState<string | null>(null);
@@ -80,7 +87,7 @@ export default function WorkspacesPage() {
         bindings,
       ] = await Promise.all([
         listWorkspaces({
-          q: query.trim() || undefined,
+          q: debouncedQuery.trim() || undefined,
           type: typeFilter || undefined,
           status: statusFilter || undefined,
           user_id: isPlatformAdmin ? ownerUserId ?? undefined : undefined,
@@ -108,7 +115,7 @@ export default function WorkspacesPage() {
       setBindingsByWs(new Map());
       setError(err instanceof ApiError ? err.message : "加载列表失败");
     }
-  }, [query, typeFilter, statusFilter, ownerUserId, page, isPlatformAdmin]);
+  }, [debouncedQuery, typeFilter, statusFilter, ownerUserId, page, isPlatformAdmin]);
 
   useEffect(() => {
     void reload();

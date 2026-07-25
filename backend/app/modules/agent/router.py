@@ -825,7 +825,7 @@ async def create_mission(
         )
         ctrl = MissionControlService(session)
         fresh = await ctrl.worker_runs(mission.id)
-        cost = await ctrl.cost_so_far(mission.id)
+        cost = MissionControlService.cost_from_runs(fresh)
         arts = await _load_mission_artifacts(session, mission.id)
         return _mission_to_response(mission, fresh, cost, arts)
     cfg = GLMConfig.from_env()
@@ -880,7 +880,7 @@ async def create_mission(
             log.warning("mission_worker_dispatch_failed", run_id=str(run.id), error=str(exc))
     await session.commit()  # 提交 killed / dispatch 状态
     fresh = await ctrl.worker_runs(mission.id)
-    cost = await ctrl.cost_so_far(mission.id)
+    cost = MissionControlService.cost_from_runs(fresh)
     arts = await _load_mission_artifacts(session, mission.id)
     return _mission_to_response(mission, fresh, cost, arts)
 
@@ -899,7 +899,7 @@ async def get_mission(
     # Artifact 回灌 is triggered explicitly (cancel) / via complete_lease hook (todo).
     ctrl = MissionControlService(session)
     runs = await ctrl.worker_runs(mission.id)
-    cost = await ctrl.cost_so_far(mission.id)
+    cost = MissionControlService.cost_from_runs(runs)
     arts = await _load_mission_artifacts(session, mission.id)
     return _mission_to_response(mission, runs, cost, arts)
 
@@ -916,7 +916,7 @@ async def cancel_mission(
     ctrl = MissionControlService(session)
     await ctrl.cancel(mission)
     runs = await ctrl.worker_runs(mission.id)
-    cost = await ctrl.cost_so_far(mission.id)
+    cost = MissionControlService.cost_from_runs(runs)
     arts = await _load_mission_artifacts(session, mission.id)
     return _mission_to_response(mission, runs, cost, arts)
 
