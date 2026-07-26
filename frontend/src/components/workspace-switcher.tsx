@@ -56,8 +56,9 @@ import { cn } from "@/lib/utils";
 import { useWorkspaceContext } from "@/lib/use-workspace-context";
 import { useDaemonStatusMap } from "@/lib/workspace-daemon-status";
 import { listWorkspaces, type Workspace } from "@/lib/workspaces";
-import { fetchMyBindings } from "@/lib/workspace-binding";
+import { canBorrowSharedDaemon, fetchMyBindings } from "@/lib/workspace-binding";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { useSession } from "@/stores/session";
 import { WorkspaceBindingDialog } from "@/components/workspace-binding-dialog";
 
 /** 下拉项呈现所需的最小信息（由列表 + binding + statusMap 聚合得出）。 */
@@ -114,6 +115,10 @@ export function WorkspaceSwitcher(): JSX.Element {
   const { workspaceId, current, switchWorkspace } = useWorkspaceContext();
   const { statusMap } = useDaemonStatusMap();
   const setCurrent = useWorkspaceStore((s) => s.setCurrent);
+  // ql-20260726-004 / FR-04：business_member（canBorrow）未绑定也放行切工作区（靠借用）。
+  const permissions = useSession((s) => s.user?.permissions);
+  const isPlatformAdmin = useSession((s) => s.user?.is_platform_admin === true);
+  const canBorrow = canBorrowSharedDaemon(permissions, isPlatformAdmin);
 
   // 列表数据（workspace id→name + 当前用户 binding），切换器常驻顶栏需及时
   // 反映新建/重命名工作区。失败降级为空（按钮 name 退化用 current.id）。
@@ -217,12 +222,12 @@ export function WorkspaceSwitcher(): JSX.Element {
   }
 
   const handleClickEntry = (entry: SwitcherEntry) => {
-    if (!entry.bound) {
-      // 未绑定 → 打开绑定弹窗（D-003），不切工作区
+    if (!entry.bound && !canBorrow) {
+      // 未绑定且无借用能力 → 打开绑定弹窗（D-003），不切工作区
       setBindingTargetId(entry.id);
       return;
     }
-    // 已绑定（含离线，D-005 不阻断）→ 切同模块
+    // 已绑定（含离线，D-005 不阻断）或可借用（ql-20260726-004 business_member）→ 切同模块
     switchWorkspace(entry.id);
   };
 

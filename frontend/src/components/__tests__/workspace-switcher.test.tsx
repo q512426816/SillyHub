@@ -48,10 +48,17 @@ vi.mock("@/lib/workspaces", () => ({
   listWorkspaces: vi.fn(),
 }));
 
-// ── mock @/lib/workspace-binding（fetchMyBindings 列表） ──
-vi.mock("@/lib/workspace-binding", () => ({
-  fetchMyBindings: vi.fn(),
-}));
+// ── mock @/lib/workspace-binding（fetchMyBindings 列表 + canBorrowSharedDaemon） ──
+// ql-20260726-004：canBorrowSharedDaemon 默认 false（保留"未绑定→弹绑定 Dialog"语义），
+// 借用测试用例里 mockImplementation 切 true。
+vi.mock("@/lib/workspace-binding", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/workspace-binding")>();
+  return {
+    fetchMyBindings: vi.fn(),
+    canBorrowSharedDaemon: vi.fn(() => false),
+    DAEMON_BORROW_PERMISSION: actual.DAEMON_BORROW_PERMISSION,
+  };
+});
 
 // ── mock WorkspaceBindingDialog（task-06），只验 open/workspaceId 透传 ──
 let lastDialogProps: { workspaceId: string; open: boolean } | null = null;
@@ -89,6 +96,7 @@ vi.mock("next/navigation", () => ({
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { listWorkspaces, type Workspace } from "@/lib/workspaces";
 import {
+  canBorrowSharedDaemon,
   fetchMyBindings,
   type MemberBindingView,
 } from "@/lib/workspace-binding";
@@ -193,6 +201,9 @@ function setupStatus(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // ql-20260726-004：canBorrowSharedDaemon 的 mockReturnValue(true) 不被 clearAllMocks
+  // 重置，显式还原默认 false，防 borrow 测试的实现泄漏到后续测试。
+  vi.mocked(canBorrowSharedDaemon).mockReturnValue(false);
   lastDialogProps = null;
 });
 
@@ -358,6 +369,35 @@ describe("WorkspaceSwitcher", () => {
     expect(lastDialogProps).not.toBeNull();
     expect(lastDialogProps?.open).toBe(true);
     expect(lastDialogProps?.workspaceId).toBe("ws-c");
+  });
+
+  it("未绑定 + canBorrow（business_member）→ 直接 switchWorkspace，不弹 Dialog（ql-20260726-004）", async () => {
+    vi.mocked(canBorrowSharedDaemon).mockReturnValue(true);
+    setupCtx({ currentName: "前端中台", daemonOnline: true });
+    setupStatus({
+      "ws-a": { daemon_id: "d-a", online: true },
+      "ws-c": { daemon_id: null, online: false },
+    });
+    mockedList.mockResolvedValue({
+      items: [
+        mkWorkspace({ id: "ws-a", name: "前端中台" }),
+        mkWorkspace({ id: "ws-c", name: "数据看板" }),
+      ],
+      total: 2,
+    });
+    mockedBindings.mockResolvedValue([
+      mkBinding({ workspace_id: "ws-a", daemon_id: "d-a" }),
+      mkBinding({ workspace_id: "ws-c", daemon_id: null }),
+    ]);
+
+    withQueryClient(<WorkspaceSwitcher />);
+    await waitFor(() => expect(screen.getByText("前端中台")).toBeInTheDocument());
+
+    await openMenu();
+    await clickItem("数据看板");
+
+    expect(mockSwitchWorkspace).toHaveBeenCalledWith("ws-c");
+    expect(lastDialogProps).toBeNull();
   });
 
   it("绑定弹窗成功后，切进入（onBound 回调触发 switchWorkspace）", async () => {

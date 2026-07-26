@@ -58,4 +58,6 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 - 2026-07-25-daemon-borrow-for-business | 借用 daemon 前端：lender 工作空间设置「共享我的 daemon」开关（shared-daemon-toggle）+ owner 成员/设置页管理共享列表/撤销/授 business_member 角色（shared-daemon-manager + workspace-member-row 加业务成员选项）+ 业务人员触发 agent 无感借用（agent/page 门禁放宽 canBorrowSharedDaemon）+ 方案查看（borrowed-solution-files/-panel + workspaces/[id]/files/page + lib/file/api listFiles + lib/workspace-binding canBorrow/共享端点封装）。
 
+- ql-20260726-004-e9db | 业务人员工作空间入口门禁放宽（agent 页 task-13 已放宽，入口门禁漏补）：列表页 workspaces/page + 顶栏 switcher + 移动端 m/workspaces + 详情 guard 的未绑定分支加 canBorrowSharedDaemon 判定——business_member（无自有 daemon + daemon:borrow 权限）未绑定时直接进入（靠借用），不弹/不渲染 daemon 绑定 Dialog/表单。switcher 测试补 mock 导出 + beforeEach 重置默认 false + 加 business_member 放行用例。
+
 <!-- MANUAL_NOTES_END -->

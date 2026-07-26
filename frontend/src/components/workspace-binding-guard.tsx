@@ -8,9 +8,11 @@ import {
   type AccessGuideInitial,
 } from "@/components/workspace-access-guide";
 import {
+  canBorrowSharedDaemon,
   fetchMyBinding,
   type MemberBindingView,
 } from "@/lib/workspace-binding";
+import { useSession } from "@/stores/session";
 
 interface Props {
   workspaceId: string;
@@ -30,6 +32,11 @@ export function WorkspaceBindingGuard({ workspaceId }: Props) {
   const [state, setState] = useState<"loading" | "bound" | "unbound">("loading");
   const [binding, setBinding] = useState<MemberBindingView | null>(null);
   const [editing, setEditing] = useState(false);
+  // ql-20260726-004 / FR-04：business_member 无自有 binding 但有 daemon:borrow 权限，
+  // 不渲染绑定引导（靠借用共享 daemon 进入）。后端 placement 做权威校验。
+  const permissions = useSession((s) => s.user?.permissions);
+  const isPlatformAdmin = useSession((s) => s.user?.is_platform_admin === true);
+  const canBorrow = canBorrowSharedDaemon(permissions, isPlatformAdmin);
 
   const check = async () => {
     const current = await fetchMyBinding(workspaceId);
@@ -49,6 +56,9 @@ export function WorkspaceBindingGuard({ workspaceId }: Props) {
   if (state === "loading") return null;
 
   if (state === "unbound") {
+    // ql-20260726-004：business_member（canBorrow）无自有 binding 不需绑定 → 不渲染
+    // 绑定引导，让工作区内容正常展示（agent 页 placement 自动借用）。
+    if (canBorrow) return null;
     return <WorkspaceAccessGuide workspaceId={workspaceId} onConfigured={check} />;
   }
 

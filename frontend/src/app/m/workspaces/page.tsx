@@ -54,6 +54,7 @@ import {
   type Workspace,
 } from "@/lib/workspaces";
 import { useDaemonStatusMap } from "@/lib/workspace-daemon-status";
+import { canBorrowSharedDaemon } from "@/lib/workspace-binding";
 import { STATUS_LABELS, labelOf } from "@/lib/status-labels";
 import { useSession } from "@/stores/session";
 import { cn } from "@/lib/utils";
@@ -96,6 +97,9 @@ export default function WorkspacesMobilePage() {
   const notify = useNotify();
   const { message } = App.useApp();
   const isPlatformAdmin = useSession((s) => s.user?.is_platform_admin === true);
+  // ql-20260726-004 / FR-04：business_member（canBorrow）未绑定也放行（靠借用）。
+  const permissions = useSession((s) => s.user?.permissions);
+  const canBorrow = canBorrowSharedDaemon(permissions, isPlatformAdmin);
 
   // 列表 + 分页（page 0-based，与桌面同 offset=page*PAGE_SIZE）。
   const [items, setItems] = useState<Workspace[]>([]);
@@ -195,13 +199,14 @@ export default function WorkspacesMobilePage() {
     (w: Workspace) => {
       const entry = statusMap[w.id];
       const bound = !!entry?.daemon_id;
-      if (bound) {
+      // ql-20260726-004：已绑定或可借用（business_member）→ 提示电脑端；否则弹绑定。
+      if (bound || canBorrow) {
         message.info("请在电脑端打开");
       } else {
         setBindingTarget(w);
       }
     },
-    [statusMap, message],
+    [statusMap, message, canBorrow],
   );
 
   // ── 别名编辑（对齐桌面 handleOpenAlias / handleSaveAlias）──

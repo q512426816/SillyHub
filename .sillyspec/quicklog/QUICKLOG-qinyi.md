@@ -357,3 +357,13 @@ created_at: 2026-07-05 16:33:00
 文件：（见实际改动）
 
 结果：需求：平台 daemon spawn claude 被 cc-switch settings.json(~/.claude 顶层 model+env) 污染,claude 用 opus[1m] 调 DeepSeek 报模型不存在。根因：claude code 读宿主机 ~/.claude/settings.json(顶层 model 优先注入的 ANTHROPIC_MODEL),daemon 注入的 deepseek 配置被覆盖。方案：daemon spawn claude 时注入 CLAUDE_CONFIG_DIR=~/.sillyhub/daemon/claude-config 隔离,平台 spawn 的 claude 不读宿主机 settings.json 只用注入 env;daemon 启动 writePid ensure 目录。结果：config.ts(CLAUDE_CONFIG_DIR export)+spawn-env.ts(import/总注入)+cli.ts(import/writePid ensure) 三处改,typecheck OK+52 test passed,cc-switch(用户手动claude)与平台(daemon spawn)共存。
+## ql-20260726-003-7d4e | 2026-07-26 12:57:34 | 修 audit hook 对复合主键表崩溃(_get_resource_id 硬编码 instance.id)
+状态：已完成
+关联变更：（无）
+文件：backend/app/core/audit_hooks.py, backend/app/modules/workflow/tests/test_audit_hooks.py
+
+结果：需求：pytest 全量 1 failed——test_permission_cache::test_role_create_calls_invalidate 在 RoleService.create commit 插 RolePermission 时 after_insert hook 抛 AttributeError: 'RolePermission' object has no attribute 'id'。根因：audit_hooks._get_resource_id:64 硬编码 `return instance.id`,假设所有被审计表都有单列 id UUID 主键;但 RolePermission(role_id+permission) 及多张关联表(member_runtimes / admin 关联表 / settings 用 String key)是复合主键或非 UUID 主键,无 id 列,after_insert/update/delete 三钩子均会在 commit flush 时崩。方案:_get_resource_id 鲁棒化——先 getattr(instance,"id") 命中 UUID 走快路径(绝大多数表行为不变);否则 inspect mapper.primary_key,仅单列且为 UUID 才返回,复合或非 UUID 返回 None;三钩子在 resource_id is None 时 debug 日志 + return 跳过(AuditLog.resource_id 是非空 UUID,本就装不下这类关联表行,审计意义低)。结果:test_permission_cache 24 passed + test_audit_hooks 10 passed(含新增 2 回归用例:集成测试复刻 RolePermission 插入不崩且被跳过 + 纯函数测试覆盖单/复合 PK 分支);ruff + mypy(2 文件) clean;原失败转绿、零回归。
+## ql-20260726-004-e9db | 2026-07-26 13:36:14 | (quick 任务)
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）
