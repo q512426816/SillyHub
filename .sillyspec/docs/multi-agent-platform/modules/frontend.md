@@ -56,4 +56,6 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 - ql-20260709-004-f0a1 | 变更详情页「变更文件」区增强：① html/.htm 文件渲染预览（iframe srcDoc + sandbox=allow-scripts allow-popups，不设 allow-same-origin 隔离唯一源，安全）；② 内容区交互反转——默认预览、点「编辑」才进文本编辑（.md→Markdown / .html→iframe / 纯文本→只读源码，统一默认预览）；模式切换保留未保存改动。改 change-file-tree.tsx（抽 FilePreview + mode 状态）。
 
+- 2026-07-25-daemon-borrow-for-business | 借用 daemon 前端：lender 工作空间设置「共享我的 daemon」开关（shared-daemon-toggle）+ owner 成员/设置页管理共享列表/撤销/授 business_member 角色（shared-daemon-manager + workspace-member-row 加业务成员选项）+ 业务人员触发 agent 无感借用（agent/page 门禁放宽 canBorrowSharedDaemon）+ 方案查看（borrowed-solution-files/-panel + workspaces/[id]/files/page + lib/file/api listFiles + lib/workspace-binding canBorrow/共享端点封装）。
+
 <!-- MANUAL_NOTES_END -->

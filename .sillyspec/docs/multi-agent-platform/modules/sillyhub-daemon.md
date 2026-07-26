@@ -52,4 +52,6 @@ created_at: 2026-06-24T01:16:42
 
 - ql-20260709-002-1b8c | MAX_OUTPUT 1万→5万(run最终输出) + thinking 2000→2万 + [TOOL_USE] 命令行 2000→2万（task-runner.ts），A 类日志截断放宽（B 类 MAX_STDERR_FORWARD/ECHO_MAX_LEN 防刷屏保留）。
 
+- 2026-07-25-daemon-borrow-for-business | 借用任务沙箱只读隔离（候选 B，D-007@v2）：daemon.ts 检测 lease rootPath 的 `borrow-sandbox:<slug>` marker → `_getBorrowWorkspaceManager`（lazy，`<workspace_dir>/borrow-sandboxes`，非借用部署零回归）prepareWorkspace(slug=borrow-<actor>-<run>) 作独立 cwd + `registerBorrowSandbox`；session-manager.ts 写守卫（`_judgeWriteViaPolicyEngine`）对借用 session **跳过 lender runtime 缓存**，按 sessionId 隔离只允许写沙箱 root（`isPathUnderAnyRoot`），沙箱外/UNC 路径 deny（R-02 借用继承 lender 写权限堵住）。沙箱创建失败 fail-open 退化 workspace_dir 不阻塞读源码主流程。借用产出走 submit_lease_messages 回传不落沙箱。
+
 <!-- MANUAL_NOTES_END -->

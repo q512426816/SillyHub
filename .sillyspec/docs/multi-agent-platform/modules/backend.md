@@ -59,4 +59,6 @@ multi-agent-platform 的核心 API 服务，monorepo 的"大脑"。以 FastAPI �
 
 - ql-20260726-001-ac8a | daemon-borrow 迁移 revision 碰撞修复：本变更 3 迁移与 llm-provider 变更撞 revision id `202607251100` 致 alembic 双 head（生产 `alembic upgrade head` 必报 Multiple heads crash-loop，daemon-borrow verify-result.md P0）。renumber 内容 revision 1100/1200/1300→1400/500/600（1400 down_revision 接 llm-provider 的 1100，形成 1000→1100llm→1400→1500→1600 单 head 链），同步改 3 测试硬编码 id 断言。13fc1dc9 已先纯重命名文件名但未改内容，本 ql 补全内容修复。
 
+- 2026-07-25-daemon-borrow-for-business | 业务/管理人员（business_member 角色）借用工作空间共享 daemon 跑 agent 读源码出业务方案。数据：workspace_member_runtimes 加 shared 列 + daemon_borrow_audit 表 + business_member 角色种子（DAEMON_BORROW=daemon:borrow + task:run_agent + workspace:read）。派发：4 路 resolver（placement dispatch/decide/interactive + member_runtimes writeback）收敛到 agent/borrow_resolver._resolve_borrowed_or_own_runtime（先自有零回归，无则借用三重校验 权限→shared→online）。落点：close_interactive_run 回调落 FileService（owner_type=workspace, text/markdown 白名单）+ 审计。接口：PUT /my-binding/shared + GET /shared-daemons + GET /api/file/list。零回归：shared 默认 false、DAEMON_BORROW 默认不授、helper 第1步自有原路径。
+
 <!-- MANUAL_NOTES_END -->
