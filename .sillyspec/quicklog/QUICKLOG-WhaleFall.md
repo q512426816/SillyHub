@@ -407,3 +407,11 @@ created_at: 2026-07-21T08:48:56
 根因：上轮 ql-002 的修复让排序强制保持项目分组(组内排)，但用户有时想全表平铺排序看全局分布，需要两种模式可选。
 方案：新增 flattenMode 开关(默认关)。①processedData 排序：flattenMode 或排 project_name 时整列排序，否则组内排(保持聚集)；②displayData：flattenMode 时不插分组标题行(平铺连续序号)，否则原分组逻辑；③工具栏左侧加 antd Switch + label「排序时不分组(全表平铺)」，右侧保留导出/搜索/重置。开启=整列排序+无分组标题行，关闭=组内排序+项目分组。
 结果：①tsc --noEmit 0 error；②仅改 page.tsx + 同步 ppm.md 变更索引 ql-20260725-003-3060；③待 commit+push+重建 frontend 部署 + 用户验证两种模式切换。
+## ql-20260726-001-9c4b | 2026-07-26 14:29:06 | /ppm/weekly-plan 表头筛选改 Excel 级联联动(某列选项随其它列筛选收窄)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（fieldFiltersMap 改级联计算）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：用户要求表头筛选和 Excel 一致——第一个被筛的列再点开仍显示所有值，但其余列的筛选下拉只显示"已筛数据对应的值"（级联收窄）。
+根因：fieldFiltersMap 基于全量 rawData 算每列去重，不随筛选联动，所有列下拉恒显示全部原始值，不符合 Excel 级联行为。
+方案：fieldFiltersMap 每列选项改为"排除本列、应用其它列筛选后的数据"去重——内层循环遍历 SORTABLE_FIELDS 应用各列筛选，遇到本列 key 时 continue 跳过(本列选项不受本列已选值影响)。依赖数组加 columnFilters。processedData 最终筛选(全列 AND)不变,只是下拉选项随其它列收窄。
+结果：①tsc --noEmit 0 error；②仅改 page.tsx + 同步 ppm.md 变更索引 ql-20260726-001-9c4b；③待 commit+push+重建 frontend 部署 + 用户验证级联收窄。
