@@ -364,6 +364,11 @@ created_at: 2026-07-05 16:33:00
 
 结果：需求：pytest 全量 1 failed——test_permission_cache::test_role_create_calls_invalidate 在 RoleService.create commit 插 RolePermission 时 after_insert hook 抛 AttributeError: 'RolePermission' object has no attribute 'id'。根因：audit_hooks._get_resource_id:64 硬编码 `return instance.id`,假设所有被审计表都有单列 id UUID 主键;但 RolePermission(role_id+permission) 及多张关联表(member_runtimes / admin 关联表 / settings 用 String key)是复合主键或非 UUID 主键,无 id 列,after_insert/update/delete 三钩子均会在 commit flush 时崩。方案:_get_resource_id 鲁棒化——先 getattr(instance,"id") 命中 UUID 走快路径(绝大多数表行为不变);否则 inspect mapper.primary_key,仅单列且为 UUID 才返回,复合或非 UUID 返回 None;三钩子在 resource_id is None 时 debug 日志 + return 跳过(AuditLog.resource_id 是非空 UUID,本就装不下这类关联表行,审计意义低)。结果:test_permission_cache 24 passed + test_audit_hooks 10 passed(含新增 2 回归用例:集成测试复刻 RolePermission 插入不崩且被跳过 + 纯函数测试覆盖单/复合 PK 分支);ruff + mypy(2 文件) clean;原失败转绿、零回归。
 ## ql-20260726-004-e9db | 2026-07-26 13:36:14 | (quick 任务)
-状态：进行中
+状态：已完成
 关联变更：（无）
 文件：（见实际改动）
+
+需求：业务人员(business_member)进工作空间被daemon绑定门禁拦住(列表/switcher/移动端未绑定弹Dialog,详情guard渲染绑定表单),应免绑定靠借用进入。
+根因：入口门禁只按daemon_id是否存在判定,漏canBorrowSharedDaemon(business_member有daemon:borrow权限);agent页task-13已放宽入口门禁没对齐。
+方案：4文件(list page/switcher/m page/guard)加canBorrow=canBorrowSharedDaemon(permissions,is_platform_admin)判定,未绑定+canBorrow时放行直进(列表/switcher导航,移动端走电脑端打开,guard return null不渲染表单);switcher测试补mock导出+beforeEach重置默认false+加business_member放行用例。
+结果：typecheck clean/lint我4文件无告警/switcher13+page6=19测试全绿含新borrow用例。6文件已git add(5修复+QUICKLOG+frontend模块文档)未commit。

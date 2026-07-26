@@ -9,8 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from app.core.audit_hooks import register_audit_hooks
-from app.modules.auth.model import User
+from app.core.audit_hooks import _get_resource_id, register_audit_hooks
+from app.modules.auth.model import Role, RolePermission, User
 from app.modules.change.model import Change
 from app.modules.workflow.model import AuditLog
 from app.modules.workspace.model import Workspace
@@ -325,3 +325,54 @@ async def test_multiple_inserts_in_same_session(db_session: AsyncSession) -> Non
     logged_ids = {log.resource_id for log in logs}
     expected_ids = {c.id for c in changes}
     assert logged_ids == expected_ids
+
+
+async def test_composite_pk_table_skipped_without_error(db_session: AsyncSession) -> None:
+    """Regression: association tables with a composite / non-UUID primary key
+    (e.g. ``role_permissions`` = ``role_id`` + ``permission``) must NOT crash
+    the audit hook. ``AuditLog.resource_id`` is a non-null UUID and cannot
+    represent such a row, so the hook skips it silently.
+
+    Previously ``_get_resource_id`` did ``instance.id`` unconditionally and
+    raised ``AttributeError: 'RolePermission' object has no attribute 'id'``
+    on commit — surfaced by ``test_role_create_calls_invalidate``.
+    """
+    _maybe_register_hooks(db_session)
+    user, ws = await _setup_audit_env(db_session)
+    _set_audit_context(db_session, user.id, ws.id)
+
+    role = Role(
+        id=uuid.uuid4(),
+        key=f"audit-{uuid.uuid4().hex[:6]}",
+        name="Audit Role",
+    )
+    db_session.add(role)
+    await db_session.flush()  # role.insert audited (single UUID PK)
+
+    # RolePermission has a composite PK and no `id` column — the crash site.
+    db_session.add(RolePermission(role_id=role.id, permission="workspace:read"))
+    await db_session.commit()  # must not raise
+
+    rp_logs = await _get_audit_logs(db_session, resource_type="role_permission")
+    assert len(rp_logs) == 0  # skipped — no single UUID PK to record
+
+    # Sanity: the Role insert (single UUID PK) was still audited normally.
+    role_logs = await _get_audit_logs(db_session, resource_type="role")
+    assert len(role_logs) >= 1
+
+
+def test_get_resource_id_handles_composite_and_single_pk() -> None:
+    """``_get_resource_id`` returns the UUID for single-PK tables and None
+    for composite / non-UUID PK tables (no DB round-trip needed)."""
+    user_id = uuid.uuid4()
+    user = User(
+        id=user_id,
+        email="rp-unit@example.com",
+        password_hash="x",
+        status="active",
+    )
+    assert _get_resource_id(user) == user_id
+
+    # Composite PK (role_id + permission) — no `id` attribute at all.
+    rp = RolePermission(role_id=uuid.uuid4(), permission="workspace:read")
+    assert _get_resource_id(rp) is None

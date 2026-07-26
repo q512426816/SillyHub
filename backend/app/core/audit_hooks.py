@@ -59,9 +59,31 @@ def _serialize_value(val: Any) -> Any:
     return val
 
 
-def _get_resource_id(instance: object) -> uuid.UUID:
-    """Get the primary key ID from an instance."""
-    return instance.id
+def _get_resource_id(instance: object) -> uuid.UUID | None:
+    """Return the single UUID primary key of ``instance``, or ``None``.
+
+    Most audited tables have a single ``id`` UUID column — that is the fast
+    path. Association tables with composite primary keys (e.g.
+    ``role_permissions`` keyed by ``role_id`` + ``permission``) or non-UUID
+    keys (e.g. settings keyed by a string) have no single UUID id; we return
+    ``None`` and the caller skips writing an ``AuditLog`` row. ``AuditLog.
+    resource_id`` is a non-null UUID, so such rows cannot be represented
+    anyway, and auditing a join-table membership change is low value.
+    """
+    obj_id = getattr(instance, "id", None)
+    if isinstance(obj_id, uuid.UUID):
+        return obj_id
+
+    try:
+        pk_cols = inspect(instance.__class__).primary_key
+    except Exception:
+        return None
+    if len(pk_cols) != 1:
+        return None
+    pk_val = getattr(instance, pk_cols[0].key, None)
+    if isinstance(pk_val, uuid.UUID):
+        return pk_val
+    return None
 
 
 def _get_audit_context(connection: Any, target: object = None) -> dict | None:
@@ -168,6 +190,10 @@ def _after_insert_hook(mapper: Any, connection: Any, target: object) -> None:
     table_name = target.__tablename__
     resource_type = _singularize(table_name)
     resource_id = _get_resource_id(target)
+    if resource_id is None:
+        # Composite / non-UUID PK: cannot populate AuditLog.resource_id (UUID).
+        logger.debug("Skipping audit for %s: no single UUID primary key", table_name)
+        return
     action = f"{resource_type}.insert"
 
     fields = _collect_all_fields(target)
@@ -199,6 +225,9 @@ def _after_update_hook(mapper: Any, connection: Any, target: object) -> None:
     table_name = target.__tablename__
     resource_type = _singularize(table_name)
     resource_id = _get_resource_id(target)
+    if resource_id is None:
+        logger.debug("Skipping audit for %s: no single UUID primary key", table_name)
+        return
     action = f"{resource_type}.update"
 
     from_fields = {k: v["from"] for k, v in changed_fields.items()}
@@ -235,6 +264,9 @@ def _after_delete_hook(mapper: Any, connection: Any, target: object) -> None:
     table_name = target.__tablename__
     resource_type = _singularize(table_name)
     resource_id = _get_resource_id(target)
+    if resource_id is None:
+        logger.debug("Skipping audit for %s: no single UUID primary key", table_name)
+        return
     action = f"{resource_type}.delete"
 
     details_json = json.dumps({"deleted": True}, default=str, ensure_ascii=False)
