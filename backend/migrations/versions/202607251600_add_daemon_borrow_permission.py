@@ -1,7 +1,7 @@
 """add daemon:borrow permission + business_member role seed
 
-Revision ID: 202607251300
-Revises: 202607251200
+Revision ID: 202607251600
+Revises: 202607251500
 Create Date: 2026-07-25 13:00:00.000000
 
 Change 2026-07-25-daemon-borrow-for-business task-03 / FR-03 / D-006@v2：
@@ -24,8 +24,9 @@ business_member 权限组合（D-006@v2）：
 permission 字符串刻意重复（同 202605280900 范式）：迁移须在无 app.* 导入时仍可
 生成离线 SQL。
 
-down_revision 接 ``202607251200``（task-02 审计表迁移，alembic heads 实测当前
+down_revision 接 ``202607251500``（task-02 审计表迁移，alembic heads 实测当前
 单 head），单 head 接续避免多 head 分叉（migration-chain-fragmentation-pattern 记忆）。
+renumber 见 202607251400 ql-20260726-001-ac8a 说明。
 
 **缓存失效对齐 rbac-permission-cache（R-05）**：本迁移只种角色模板，不向任何用户
 授予；``perm:{user_id}:*`` 缓存按用户懒填，迁移时刻无 business_member 的用户缓存
@@ -51,8 +52,8 @@ from typing import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "202607251300"
-down_revision: str | None = "202607251200"
+revision: str = "202607251600"
+down_revision: str | None = "202607251500"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

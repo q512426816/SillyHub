@@ -1,7 +1,7 @@
 """daemon_borrow_audit audit table
 
-Revision ID: 202607251200
-Revises: 202607251100
+Revision ID: 202607251500
+Revises: 202607251400
 Create Date: 2026-07-25 12:00:00.000000
 
 Change 2026-07-25-daemon-borrow-for-business task-02 / FR-07 / D-004@v1：
@@ -17,8 +17,9 @@ FK ondelete 语义（design §8）：
   - daemon_instance_id → daemon_instances.id RESTRICT（审计红线，被引用时
     禁止删 daemon 实例，保留审计链完整）
 
-down_revision 接 202607251100（task-01，alembic heads 实测当前单 head），
+down_revision 接 202607251400（task-01 shared 列迁移，alembic heads 实测单 head），
 单 head 接续避免多 head 分叉（见 migration-chain-fragmentation-pattern 记忆）。
+renumber 见 202607251400 ql-20260726-001-ac8a 说明。
 """
 
 from __future__ import annotations
@@ -28,8 +29,8 @@ from typing import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "202607251200"
-down_revision: str | None = "202607251100"
+revision: str = "202607251500"
+down_revision: str | None = "202607251400"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

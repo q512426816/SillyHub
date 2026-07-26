@@ -4,7 +4,8 @@ Change 2026-07-25-daemon-borrow-for-business task-01 / D-005@v1：
 workspace_member_runtimes 加 shared 列 + 部分索引 ix_wmr_shared。
 
 覆盖：
-  1. 迁移元数据（revision / down_revision 可导入、链路接 202607251000 实测 head）；
+  1. 迁移元数据（revision / down_revision 可导入、链路接 202607251100 即 llm-provider
+     变更的 create_llm_providers 迁移 head，单 head 接续）；
   2. ORM 表元数据已声明 shared 列 + ix_wmr_shared 索引（dialect 无关）；
   3. upgrade/downgrade 的 DDL 在 SQLite 上可逆（replay 迁移体内 add_column /
      create_index / drop_index / drop_column）。
@@ -43,13 +44,14 @@ def _load_migration(revision_id: str):
 
 
 def test_migration_metadata():
-    """revision = 202607251100；down_revision = 202607251000（alembic heads 实测当前 head）。
+    """revision = 202607251400；down_revision = 202607251100（llm-provider 变更 head）。
 
     单 head 接续，不撞 migration-chain-fragmentation-pattern 的多 head 分叉。
+    renumber（ql-20260726-001-ac8a）：原 1100 与 llm-provider 撞 id，改 1400 接 1100。
     """
-    mod = _load_migration("202607251100")
-    assert mod.revision == "202607251100"
-    assert mod.down_revision == "202607251000"
+    mod = _load_migration("202607251400")
+    assert mod.revision == "202607251400"
+    assert mod.down_revision == "202607251100"
     assert mod.branch_labels is None
     assert mod.depends_on is None
     assert callable(mod.upgrade)

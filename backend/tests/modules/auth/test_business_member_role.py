@@ -4,7 +4,7 @@ Change 2026-07-25-daemon-borrow-for-business task-03 / FR-03 / D-006@v2：
 新增 ``daemon:borrow`` 权限 + ``business_member`` 工作空间角色种子迁移。
 
 覆盖：
-  1. 迁移元数据（revision 202607251300 / down_revision 202607251200、模块可导入）；
+  1. 迁移元数据（revision 202607251600 / down_revision 202607251500、模块可导入）；
   2. 种子常量内容（task:run_agent + daemon:borrow + workspace:read）；
   3. upgrade() 在 SQLite 上真实跑通——bulk_insert role（Python uuid）→ 复用
      role_id → bulk_insert role_permissions，落地 business_member 角色 + 3 条权限，
@@ -26,8 +26,8 @@ import sqlalchemy as sa
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 
-REVISION_ID = "202607251300"
-DOWN_REVISION_ID = "202607251200"
+REVISION_ID = "202607251600"
+DOWN_REVISION_ID = "202607251500"
 
 
 def _load_migration(revision_id: str):
@@ -48,9 +48,10 @@ def _load_migration(revision_id: str):
 
 
 def test_migration_metadata() -> None:
-    """revision = 202607251300；down_revision = 202607251200（task-02 审计表 head）。
+    """revision = 202607251600；down_revision = 202607251500（task-02 审计表 head）。
 
     单 head 接续，不撞 migration-chain-fragmentation-pattern 的多 head 分叉。
+    renumber（ql-20260726-001-ac8a）。
     """
     mod = _load_migration(REVISION_ID)
     assert mod.revision == REVISION_ID

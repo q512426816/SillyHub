@@ -55,6 +55,8 @@ multi-agent-platform 的核心 API 服务，monorepo 的"大脑"。以 FastAPI �
 
 - ql-20260709-002-1b8c | thinking/TOOL_USE 命令行截断 2000→2万 + result_summary 兜底 4000→5万（service.py `_extract_sdk_messages`），A 类日志截断放宽（B 类防刷屏保留）。
 
-- ql-20260723-010-32d6 | 后端测试提速：conftest 设 `AUTH_BCRYPT_ROUNDS=4`（测试档位，省每认证测试 ~0.3s 哈希）+ pyproject 加 pytest-xdist 并行（`-n auto` 全量 ~50min→7min）+ 根 conftest 新增 `seed_spec_root_fn` fixture 让 5 个 change/task 测试经依赖注入取根 helper（根治 `from conftest import` 因 9 个同名 conftest 模块名共享在 xdist 下解析错的歧义）+ git_gateway 参数化 `list(frozenset)`→`sorted`（消 xdist 多 worker 收集顺序不一致）。
+- ql-20260723-010-32d6 | 后端测试提速：conftest 设 `AUTH_BCRYPT_ROUNDS=4`（测试档位，省每认证测试 ~0.3s 哈希）+ pyproject 加 pytest-xdist 并行（`-n auto` 全量 ~50min→7min）+ 根 conftest 新增 `seed_spec_root_fn` fixture 让 5 个 change/task 测试经依赖注入取根 helper（根治 `from conftest import` 因 9 个同名 conftest 模块名共享在 xdist 下解析顺序歧义）+ git_gateway 参数化 `list(frozenset)`→`sorted`（消 xdist 多 worker 收集顺序不一致）。
+
+- ql-20260726-001-ac8a | daemon-borrow 迁移 revision 碰撞修复：本变更 3 迁移与 llm-provider 变更撞 revision id `202607251100` 致 alembic 双 head（生产 `alembic upgrade head` 必报 Multiple heads crash-loop，daemon-borrow verify-result.md P0）。renumber 内容 revision 1100/1200/1300→1400/500/600（1400 down_revision 接 llm-provider 的 1100，形成 1000→1100llm→1400→1500→1600 单 head 链），同步改 3 测试硬编码 id 断言。13fc1dc9 已先纯重命名文件名但未改内容，本 ql 补全内容修复。
 
 <!-- MANUAL_NOTES_END -->

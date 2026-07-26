@@ -8,7 +8,7 @@ daemon_borrow_audit 审计表（不限额度，仅记录每次借用）。
   2. FK ondelete 语义：borrower/lender/workspace/agent_run CASCADE，
      daemon_instance RESTRICT（design §8）；
   3. usage_summary JSON nullable（D-004 先记基础字段，不实现额度限额）；
-  4. 迁移元数据：revision=202607251200，down_revision=202607251100（接 task-01
+  4. 迁移元数据：revision=202607251500，down_revision=202607251400（接 task-01
      单 head，避免多 head 分叉，见 migration-chain-fragmentation-pattern 记忆）；
   5. 迁移 upgrade/downgrade 在 SQLite 上可逆（replay create_table / drop_table）。
 
@@ -202,11 +202,11 @@ def test_defaults_id_and_usage_summary() -> None:
 
 
 def test_migration_metadata() -> None:
-    """revision=202607251200；down_revision=202607251100（task-01，alembic heads
-    实测当前单 head）。单 head 接续，不撞多 head 分叉。"""
-    mod = _load_migration("202607251200")
-    assert mod.revision == "202607251200"
-    assert mod.down_revision == "202607251100"
+    """revision=202607251500；down_revision=202607251400（task-01，alembic heads
+    实测当前单 head）。单 head 接续，不撞多 head 分叉。renumber ql-20260726-001-ac8a。"""
+    mod = _load_migration("202607251500")
+    assert mod.revision == "202607251500"
+    assert mod.down_revision == "202607251400"
     assert mod.branch_labels is None
     assert mod.depends_on is None
     assert callable(mod.upgrade)
@@ -238,7 +238,7 @@ def test_migration_upgrade_downgrade_reversibility_sqlite() -> None:
         for ddl in parent_ddl:
             conn.execute(sa.text(ddl))
 
-    mod = _load_migration("202607251200")
+    mod = _load_migration("202607251500")
 
     # replay upgrade
     with engine.begin() as conn:

@@ -345,3 +345,15 @@ created_at: 2026-07-05 16:33:00
 结果：2 文件 4 处改完；前端 typecheck（tsc --noEmit）通过；task-plans 无专门单测，grep 命中的6个测试（menu-permissions/middleware/task-detail-modal/mobile-tab-bar/m layout/problem-detail-modal）均为菜单/路由/详情弹窗/移动tab，与查询条件下拉无逻辑关联，零影响。已 git add 暂存这两文件（仅本次文件，未卷入工作区其他在途 M 文件），待用户统一提交。
 坑：①本机 sillyspec CLI 全局安装损坏——PATH 优先解析 C:\nvm4w\nodejs\sillyspec，但其 node_modules/sillyspec/bin/sillyspec.js 缺失（只剩空 node_modules），报 Cannot find module；改用完整的 C:\Users\qinyi\AppData\Roaming\npm\sillyspec（v3.10.0）绕过。②cd frontend 跑 typecheck 致 cwd 变，sillyspec 按 cwd 推断 project（multi-agent-platform→frontend）触发 progress.json 重置、step 倒退，复现已归档坑 multi-project-cwd-state-split.md（quick 全程须在项目根 cwd 跑）。③CLI --done 未把本次 quick 条目写入 QUICKLOG（复现 quick-guard-missing-output-lost.md），本条手动补写。
 遗留：①生效需 rebuild 前端（docker compose --build frontend）；②需用户浏览器验证（项目多时项目下拉可输入名称筛选、状态下拉可输入筛选项）。
+## ql-20260726-001-ac8a | 2026-07-26 11:33:35 | (quick 任务)
+状态：已完成
+关联变更：2026-07-25-daemon-borrow-for-business
+文件：（见实际改动）
+
+结果：需求：修复 daemon-borrow 变更迁移 revision 碰撞致 alembic 双头、生产 upgrade head 报 Multiple heads crash-loop（verify-result.md P0）。根因：本变更 3 迁移与 llm-provider 同用 revision=202607251100+down=202607251000，worktree base 落后未感知 llm-provider 占用；13fc1dc9 仅纯重命名文件名未改内容，碰撞仍在。方案：保留 llm-provider 的 1100，daemon-borrow 3 迁移内容 renumber 为 202607251400/1500/1600（1400 down接 1100，成 1000→1100llm→1400→1500→1600 单 head 线性链），同步改 3 测试硬编码 id 断言+backend 模块文档变更索引。结果：alembic heads=单 head 202607251600（重复告警消失）+history 线性确认；3 迁移测试 24 passed+借用核心回归 51 passed；ruff 6 文件 clean；无残留旧 id。7 文件已 git add（6 修复+模块文档，未 commit）。tasks.md 仅 CLI 自动追加的 1 行 ql 簿记，--force-baseline 覆盖守卫。
+## ql-20260726-002-1180 | 2026-07-26 11:33:54 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+
+结果：需求：平台 daemon spawn claude 被 cc-switch settings.json(~/.claude 顶层 model+env) 污染,claude 用 opus[1m] 调 DeepSeek 报模型不存在。根因：claude code 读宿主机 ~/.claude/settings.json(顶层 model 优先注入的 ANTHROPIC_MODEL),daemon 注入的 deepseek 配置被覆盖。方案：daemon spawn claude 时注入 CLAUDE_CONFIG_DIR=~/.sillyhub/daemon/claude-config 隔离,平台 spawn 的 claude 不读宿主机 settings.json 只用注入 env;daemon 启动 writePid ensure 目录。结果：config.ts(CLAUDE_CONFIG_DIR export)+spawn-env.ts(import/总注入)+cli.ts(import/writePid ensure) 三处改,typecheck OK+52 test passed,cc-switch(用户手动claude)与平台(daemon spawn)共存。

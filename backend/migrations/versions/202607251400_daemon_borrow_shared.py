@@ -1,7 +1,7 @@
 """workspace_member_runtimes add shared column + partial index
 
-Revision ID: 202607251100
-Revises: 202607251000
+Revision ID: 202607251400
+Revises: 202607251100
 Create Date: 2026-07-25 11:00:00.000000
 
 Change 2026-07-25-daemon-borrow-for-business task-01 / D-005@v1 / FR-01：
@@ -12,8 +12,12 @@ ix_wmr_shared（WHERE shared = true），让 lender（开发人员）能把自�
 零回归核心：server_default=false 保证既有 binding 行迁移后默认非共享，
 现有「自带 daemon」派发路径行为完全不变（design §9）。
 
-down_revision 接 202607251000（alembic heads 实测当前单 head，避免多 head
-分叉，见 migration-chain-fragmentation-pattern 记忆）。
+down_revision 接 202607251100（llm-provider-management 变更的
+create_llm_providers 迁移，alembic heads 实测单 head 接续）。
+
+renumber 说明（ql-20260726-001-ac8a）：原 revision 202607251100 与 llm-provider
+变更撞 id 致 alembic 双 head（详见 daemon-borrow verify-result.md P0）。
+llm-provider 先提交（5f8fbeb9）保留 1100，本变更 renumber 到 1400 接续 1100。
 """
 
 from __future__ import annotations
@@ -23,8 +27,8 @@ from typing import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "202607251100"
-down_revision: str | None = "202607251000"
+revision: str = "202607251400"
+down_revision: str | None = "202607251100"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

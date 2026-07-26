@@ -47,3 +47,4 @@ created_at: 2026-07-25 21:21:12
 **关键路径**：task-01 → task-07 → task-08/09/10/11（4 路一致）→ task-12/13（沙箱）→ task-14（落点）→ task-20（验证）。
 
 **待 plan spike**：R-07（task-11 接入方式）/ R-09（候选 A 独立 runtime_id 可选）/ R-04（白名单）。
+- [x] ql-20260726-001-ac8a (quick 任务)
