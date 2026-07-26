@@ -89,15 +89,15 @@ graph LR
 
 ## 全局验收标准
 
-- [ ] 后端单测通过（task-05）：CRUD + 加密落盘 + owner 权限隔离 + is_default 互斥 + masked 不回明文
-- [ ] lease 下发单测通过（task-07）：有 provider 注入 provider_config / 无 provider 字段 absent
-- [ ] daemon 单测通过（task-10）：injector 角色映射→`ANTHROPIC_DEFAULT_*_MODEL`、第 0 层盖过三层、redactEnv 脱敏、未配走本机 env
-- [ ] 前端单测通过（task-12）
-- [ ] **brownfield 零回归**：用户未配 provider 时，daemon spawn-env 行为与现状完全一致（第 0 层跳过，三层合并不变）
-- [ ] 端到端（task-13）：配 provider + 设默认 → claude 进程 env 含平台下发的 `ANTHROPIC_BASE_URL` / 认证 env / 模型映射；api_key 全链路脱敏（不落日志/审计/submitMessages/complete_lease）
-- [ ] 越权访问返回 403/404（用户只能 CRUD 自己的 provider）
-- [ ] 三端 lint 通过（backend ruff+mypy / daemon tsc / frontend lint+typecheck）
-- [ ] spike-01 结论落地：Fable env 与 1M 后缀的识别结果记入 task-08 实现注释
+- [x] 后端单测通过（task-05）：CRUD + 加密落盘 + owner 权限隔离 + is_default 互斥 + masked 不回明文
+- [x] lease 下发单测通过（task-07）：有 provider 注入 provider_config / 无 provider 字段 absent
+- [x] daemon 单测通过（task-10）：injector 角色映射→`ANTHROPIC_DEFAULT_*_MODEL`、第 0 层盖过三层、redactEnv 脱敏、未配走本机 env
+- [x] 前端单测通过（task-12）
+- [x] **brownfield 零回归**：用户未配 provider 时，daemon spawn-env 行为与现状完全一致（第 0 层跳过，三层合并不变）
+- [x] 端到端（task-13）：配 provider + 设默认 → claude 进程 env 含平台下发的 `ANTHROPIC_BASE_URL` / 认证 env / 模型映射；api_key 全链路脱敏（不落日志/审计/submitMessages/complete_lease）
+- [x] 越权访问返回 403/404（用户只能 CRUD 自己的 provider）
+- [x] 三端 lint 通过（backend ruff+mypy / daemon tsc / frontend lint+typecheck）
+- [x] spike-01 结论落地：Fable env 与 1M 后缀的识别结果记入 task-08 实现注释
 
 ## 覆盖矩阵
 

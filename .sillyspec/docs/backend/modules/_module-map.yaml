@@ -446,6 +446,30 @@ modules:
     concerns: []
     review_reasons: []
 
+  llm_provider:
+    status: active
+    doc: modules/llm_provider.md
+    paths:
+      - app/modules/llm_provider/**
+    tags: [llm, provider, credential, crypto, anthropic, api-key, model, vendor]
+    aliases: [llm-providers, 供应商管理]
+    entrypoints:
+      - /api/llm-providers
+    main_symbols:
+      - LlmProviderService
+      - LlmProvider
+      - llm_provider_router
+    depends_on:
+      - core
+      - models
+      - auth
+    used_by:
+      - agent
+      - daemon
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
   worktree:
     status: active
     doc: modules/worktree.md
