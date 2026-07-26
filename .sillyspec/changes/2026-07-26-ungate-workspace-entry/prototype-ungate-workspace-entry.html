@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>工作区入口门禁后移 · 设计原型</title>
+<style>
+  body { font-family: -apple-system, "Microsoft YaHei", sans-serif; background: #f5f6fa; color: #1f2937; margin: 0; padding: 24px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #6b7280; font-size: 13px; margin-bottom: 20px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; }
+  .card h3 { font-size: 14px; margin: 0 0 10px; display: flex; align-items: center; gap: 6px; }
+  .tag { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: #eef2ff; color: #4338ca; }
+  .tag.r { background: #fef2f2; color: #b91c1c; }
+  .tag.g { background: #ecfdf5; color: #047857; }
+  .mock { background: #f9fafb; border: 1px dashed #d1d5db; border-radius: 8px; padding: 10px; font-size: 12px; color: #374151; }
+  .ws { display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; border-radius: 6px; }
+  .ws + .ws { margin-top: 4px; }
+  .ws:hover { background: #eff6ff; cursor: pointer; }
+  .badge { font-size: 10px; padding: 1px 6px; border-radius: 999px; }
+  .b-online { background: #ecfdf5; color: #047857; }
+  .b-unbound { background: #f3f4f6; color: #6b7280; }
+  .notice { border: 1px solid #fde68a; background: #fffbeb; border-radius: 8px; padding: 10px; font-size: 12px; }
+  .notice .h { font-weight: 600; color: #92400e; margin-bottom: 4px; }
+  .btn { display: inline-block; font-size: 12px; padding: 4px 10px; border-radius: 6px; background: #4f46e5; color: #fff; margin-right: 6px; margin-top: 6px; }
+  .btn.o { background: #fff; color: #4f46e5; border: 1px solid #c7d2fe; }
+  .nudge { border: 1px solid #bfdbfe; background: #eff6ff; border-radius: 8px; padding: 10px; font-size: 12px; color: #1e40af; }
+  .arrow { text-align: center; color: #9ca3af; font-size: 18px; margin: 4px 0; }
+  code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+  .legend { font-size: 12px; color: #6b7280; margin-top: 8px; }
+  .del { text-decoration: line-through; color: #9ca3af; }
+</style>
+</head>
+<body>
+
+<h1>工作区入口门禁后移 · 设计原型（方案 A）</h1>
+<div class="sub">工作区 = 类 git 仓库容器，成员随时可进；daemon 只在操作 agent / 读源码时要求。binding 降级为可选配置。</div>
+
+<div class="row">
+  <div class="card">
+    <h3>① 进门：列表页点击 <span class="tag g">改造后</span></h3>
+    <div class="mock">
+      <div class="ws"><span>SillyHub</span><span class="badge b-online">● 在线</span></div>
+      <div class="ws"><span>Agent 实验室</span><span class="badge b-unbound">○ 未绑定</span></div>
+      <div class="arrow">↓ 点击「Agent 实验室」（未绑定）</div>
+      <div class="notice" style="background:#ecfdf5;border-color:#a7f3d0;">
+        <div class="h" style="color:#047857;">✓ 直接进入工作区（不再弹绑定框）</div>
+        进入 /workspaces/agent-lab/overview
+      </div>
+      <div class="legend"><span class="del">旧：弹「配置此工作空间的守护进程」Dialog，被拦死</span></div>
+    </div>
+    <div class="legend">同步改：顶栏 switcher / 移动端列表 / 详情 guard — 全部不再因未绑定拦截。</div>
+  </div>
+
+  <div class="card">
+    <h3>② 概览页（无 binding）<span class="tag">soft nudge</span></h3>
+    <div class="mock">
+      <div style="font-weight:600;margin-bottom:6px;">Agent 实验室 · 概览</div>
+      <div style="color:#6b7280;font-size:11px;margin-bottom:8px;">成员 5 · 文档 23 · 变更 4</div>
+      <div class="nudge">
+        💡 想在此工作区跑 agent 或读源码？配置你的守护进程，或借用工作空间共享的 daemon。
+        <div><span class="btn o">配置我的 daemon</span></div>
+      </div>
+      <div class="legend">非阻断 — 仅引导；文档/变更/成员等正常浏览。</div>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="card">
+    <h3>③ daemon 依赖页（运行时 / 扫描文档 / 读源码）<span class="tag r">成员无 daemon</span></h3>
+    <div class="mock">
+      <div style="font-weight:600;margin-bottom:8px;">运行时</div>
+      <div class="notice">
+        <div class="h">⚠ 此功能需要守护进程</div>
+        运行时信息来自工作区的守护进程。你没有自有 daemon。
+        <div>
+          <span class="btn">配置我的 daemon</span>
+          <span class="btn o">借用共享 daemon</span>
+        </div>
+      </div>
+      <div class="legend">统一组件 <code>DaemonRequiredNotice</code>，内联空态，非阻断；页面其余部分正常。</div>
+      <div class="legend">接入页：runtime · scan-docs · components(读源码) · agent(已有 canBorrow，不改)</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>④ 设置页：我的接入配置（可选）<span class="tag">binding 新家</span></h3>
+    <div class="mock">
+      <div style="font-weight:600;margin-bottom:6px;">设置 · 我的接入配置</div>
+      <div style="border:1px solid #e5e7eb;border-radius:6px;padding:8px;font-size:11px;">
+        守护进程：DESKTOP-HJ0AM09（在线）<br/>
+        本地路径：C:/Users/qinyi/.../project<br/>
+        <label><input type="checkbox" checked> 标记为本工作空间共享（可被业务人员借用）</label>
+        <div><span class="btn">保存</span></div>
+      </div>
+      <div class="legend">开发人员在此配自己 daemon（跑自有 agent + 标 shared 借出）。进门不再依赖。</div>
+      <div class="legend">WorkspaceAccessGuide 复用；WorkspaceBindingDialog 进门用法移除，组件保留供设置页。</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>影响范围 & 决策</h3>
+  <div style="font-size:12px;line-height:1.7;">
+    <b>进门自由化（4 入口）</b>：list page <code>handleActivate</code> / switcher <code>handleClickEntry</code> / 移动端 / <code>WorkspaceBindingGuard</code> — 移除"未绑定→拦"分支。<br/>
+    <b>Guard 降级</b>：unbound 不再渲染绑定表单（已绑定仍可"编辑接入配置"）。<br/>
+    <b>概览 soft nudge</b>：workspaces/[id]/page.tsx 无 binding 时一张引导卡。<br/>
+    <b>统一空态组件</b>：<code>daemon-required-notice.tsx</code>（新）。<br/>
+    <b>daemon 依赖页接入</b>：runtime / scan-docs / components 主区无 daemon 时渲染空态。<br/>
+    <b>设置页接入</b>：binding 配置卡片（复用 WorkspaceAccessGuide）。<br/>
+    <b>不动</b>：files / changes / members / knowledge / audit / approvals / releases / incidents（daemon 无关）；agent 页（已有 canBorrow）；后端无 schema/API 变更。<br/>
+    <b>进门权</b>：工作区成员 + 平台管理员（membership = 进入权，后端已强制）。<br/>
+    <b>scale</b>：large（多文件前端、跨多页、UX 模型变化）。
+  </div>
+</div>
+
+</body>
+</html>
