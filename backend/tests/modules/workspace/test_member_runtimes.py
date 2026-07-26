@@ -544,3 +544,352 @@ async def test_ac3_resolver_hit_returns_row(
     assert row.workspace_id == ws.id
     assert row.user_id == owner.id
     assert row.root_path == "/home/owner/repo"
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# task-04: lender 共享标记 + owner 查询/撤销（D-003@v1 / FR-01 / FR-02）
+# change 2026-07-25-daemon-borrow-for-business
+# ────────────────────────────────────────────────────────────────────────────
+
+
+async def _seed_shared_binding(
+    db_session,
+    *,
+    workspace_id,
+    user_id,
+    daemon_id,
+    shared: bool = False,
+):
+    """Helper：建一条 binding（可指定 shared），返回刷新后的行。
+
+    注意 ``upsert_my_binding`` 返回 ``(row, created)`` tuple（service.py:30），
+    必须解包——直接拿返回值赋给 row 会得到 tuple，后续 ``row.shared = True`` 报 AttributeError。
+    """
+    from app.modules.workspace.member_runtimes import service as binding_service
+
+    row, _created = await binding_service.upsert_my_binding(
+        db_session,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        daemon_id=daemon_id,
+        root_path=f"/home/{user_id}/repo",
+        path_source="daemon-client",
+    )
+    if shared:
+        row.shared = True
+        await db_session.commit()
+    return row
+
+
+async def test_t04_lender_mark_shared_returns_200_and_flag(
+    client: AsyncClient,
+    db_session,
+    role_seeder,
+    user_factory,
+    ws_factory,
+    member_factory,
+    daemon_factory,
+):
+    """FR-01: lender PUT /my-binding/shared {shared:true} → 200, binding.shared=True."""
+    dev, dev_tok = await user_factory(email="dev@x.com", display_name="Dev")
+    ws = await ws_factory(owner_id=dev.id)
+    await member_factory(ws.id, dev.id, "developer", granted_by=dev.id)
+    dev_daemon = await daemon_factory(dev.id, hostname="dev-host")
+
+    # 先建 binding（绑自己的 daemon）
+    resp0 = await client.put(
+        f"/api/workspaces/{ws.id}/my-binding",
+        headers=_bearer(dev_tok),
+        json={
+            "daemon_id": str(dev_daemon.id),
+            "root_path": "/home/dev/repo",
+            "path_source": "daemon-client",
+        },
+    )
+    assert resp0.status_code == 201, resp0.text
+
+    resp = await client.put(
+        f"/api/workspaces/{ws.id}/my-binding/shared",
+        headers=_bearer(dev_tok),
+        json={"shared": True},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["shared"] is True
+    assert body["user_id"] == str(dev.id)
+
+
+async def test_t04_lender_unmark_shared(
+    client: AsyncClient,
+    db_session,
+    role_seeder,
+    user_factory,
+    ws_factory,
+    member_factory,
+    daemon_factory,
+):
+    """FR-01: lender PUT {shared:false} → shared=False（撤销自己共享）。"""
+    dev, dev_tok = await user_factory(email="dev@x.com", display_name="Dev")
+    ws = await ws_factory(owner_id=dev.id)
+    await member_factory(ws.id, dev.id, "developer", granted_by=dev.id)
+    dev_daemon = await daemon_factory(dev.id)
+    await _seed_shared_binding(
+        db_session,
+        workspace_id=ws.id,
+        user_id=dev.id,
+        daemon_id=dev_daemon.id,
+        shared=True,
+    )
+
+    resp = await client.put(
+        f"/api/workspaces/{ws.id}/my-binding/shared",
+        headers=_bearer(dev_tok),
+        json={"shared": False},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["shared"] is False
+
+
+async def test_t04_lender_mark_shared_without_binding_returns_409(
+    client: AsyncClient,
+    role_seeder,
+    user_factory,
+    ws_factory,
+    member_factory,
+):
+    """FR-01: lender 未配 binding 标 shared → 409 member_binding_not_found。"""
+    dev, dev_tok = await user_factory(email="dev@x.com", display_name="Dev")
+    ws = await ws_factory(owner_id=dev.id)
+    await member_factory(ws.id, dev.id, "developer", granted_by=dev.id)
+
+    resp = await client.put(
+        f"/api/workspaces/{ws.id}/my-binding/shared",
+        headers=_bearer(dev_tok),
+        json={"shared": True},
+    )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["code"] == "member_binding_not_found"
+
+
+async def test_t04_lender_can_only_touch_own_binding(
+    client: AsyncClient,
+    db_session,
+    role_seeder,
+    user_factory,
+    ws_factory,
+    member_factory,
+    daemon_factory,
+):
+    """FR-01: 端点无 user_id 参数，钉死当前用户。dev 标自己 shared 不影响 owner。"""
+    owner, _ = await user_factory(email="owner@x.com", display_name="Owner")
+    dev, dev_tok = await user_factory(email="dev@x.com", display_name="Dev")
+    ws = await ws_factory(owner_id=owner.id)
+    await member_factory(ws.id, owner.id, "workspace_owner", granted_by=owner.id)
+    await member_factory(ws.id, dev.id, "developer", granted_by=owner.id)
+    owner_daemon = await daemon_factory(owner.id)
+    dev_daemon = await daemon_factory(dev.id)
+    await _seed_shared_binding(
+        db_session, workspace_id=ws.id, user_id=owner.id, daemon_id=owner_daemon.id
+    )
+    await _seed_shared_binding(
+        db_session, workspace_id=ws.id, user_id=dev.id, daemon_id=dev_daemon.id
+    )
+
+    resp = await client.put(
+        f"/api/workspaces/{ws.id}/my-binding/shared",
+        headers=_bearer(dev_tok),
+        json={"shared": True},
+    )
+    assert resp.status_code == 200, resp.text
+
+    from app.modules.workspace.member_runtimes import service as binding_service
+
+    owner_row = await binding_service.get_my_binding(db_session, ws.id, owner.id)
+    dev_row = await binding_service.get_my_binding(db_session, ws.id, dev.id)
+    assert owner_row.shared is False  # owner 的 shared 未被波及
+    assert dev_row.shared is True
+
+
+async def test_t04_owner_list_shared_daemons(
+    client: AsyncClient,
+    db_session,
+    role_seeder,
+    user_factory,
+    ws_factory,
+    member_factory,
+    daemon_factory,
+):
+    """FR-02: owner GET /shared-daemons 列出所有 shared=True 的 binding（含 lender/在线状态）。"""
+    owner, owner_tok = await user_factory(email="owner@x.com", display_name="Owner")
+    dev1, _ = await user_factory(email="dev1@x.com", display_name="Dev1")
+    dev2, _ = await user_factory(email="dev2@x.com", display_name="Dev2")
+    ws = await ws_factory(owner_id=owner.id)
+    await member_factory(ws.id, owner.id, "workspace_owner", granted_by=owner.id)
+    await member_factory(ws.id, dev1.id, "developer", granted_by=owner.id)
+    await member_factory(ws.id, dev2.id, "developer", granted_by=owner.id)
+    d1 = await daemon_factory(dev1.id, hostname="h1")
+    d2 = await daemon_factory(dev2.id, hostname="h2")
+    # dev1 标 shared，dev2 不标
+    await _seed_shared_binding(
+        db_session, workspace_id=ws.id, user_id=dev1.id, daemon_id=d1.id, shared=True
+    )
+    await _seed_shared_binding(
+        db_session, workspace_id=ws.id, user_id=dev2.id, daemon_id=d2.id, shared=False
+    )
+
+    resp = await client.get(
+        f"/api/workspaces/{ws.id}/shared-daemons",
+        headers=_bearer(owner_tok),
+    )
+    assert resp.status_code == 200, resp.text
+    items = resp.json()
+    assert len(items) == 1, items
+    it = items[0]
+    assert it["lender_user_id"] == str(dev1.id)
+    assert it["daemon_id"] == str(d1.id)
+    assert it["daemon_status"] == "online"
+    assert it["daemon_hostname"] == "h1"
+    assert it["revocable"] is True
+
+
+async def test_t04_owner_revoke_shared(
+    client: AsyncClient,
+    db_session,
+    role_seeder,
+    user_factory,
+    ws_factory,
+    member_factory,
+    daemon_factory,
+):
+    """FR-02: owner DELETE /members/{user_id}/shared → shared=False, binding 行保留。"""
+    owner, owner_tok = await user_factory(email="owner@x.com", display_name="Owner")
+    dev, _ = await user_factory(email="dev@x.com", display_name="Dev")
+    ws = await ws_factory(owner_id=owner.id)
+    await member_factory(ws.id, owner.id, "workspace_owner", granted_by=owner.id)
+    await member_factory(ws.id, dev.id, "developer", granted_by=owner.id)
+    daemon = await daemon_factory(dev.id)
+    await _seed_shared_binding(
+        db_session, workspace_id=ws.id, user_id=dev.id, daemon_id=daemon.id, shared=True
+    )
+
+    resp = await client.delete(
+        f"/api/workspaces/{ws.id}/members/{dev.id}/shared",
+        headers=_bearer(owner_tok),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["shared"] is False
+
+    # binding 行仍在（未删），daemon_id 保留
+    from app.modules.workspace.member_runtimes import service as binding_service
+
+    row = await binding_service.get_my_binding(db_session, ws.id, dev.id)
+    assert row is not None
+    assert row.shared is False
+    assert row.daemon_id == daemon.id
+
+
+async def test_t04_owner_revoke_missing_binding_returns_409(
+    client: AsyncClient,
+    role_seeder,
+    user_factory,
+    ws_factory,
+    member_factory,
+):
+    """FR-02: owner 撤销一个没配 binding 的成员 → 409 member_binding_not_found。"""
+    owner, owner_tok = await user_factory(email="owner@x.com", display_name="Owner")
+    dev, _ = await user_factory(email="dev@x.com", display_name="Dev")
+    ws = await ws_factory(owner_id=owner.id)
+    await member_factory(ws.id, owner.id, "workspace_owner", granted_by=owner.id)
+    await member_factory(ws.id, dev.id, "developer", granted_by=owner.id)
+
+    resp = await client.delete(
+        f"/api/workspaces/{ws.id}/members/{dev.id}/shared",
+        headers=_bearer(owner_tok),
+    )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["code"] == "member_binding_not_found"
+
+
+async def test_t04_non_owner_list_shared_daemons_returns_403(
+    client: AsyncClient,
+    role_seeder,
+    user_factory,
+    ws_factory,
+    member_factory,
+):
+    """FR-02: developer（无 WORKSPACE_MEMBER_MANAGE）查 shared-daemons → 403。"""
+    owner, _ = await user_factory(email="owner@x.com", display_name="Owner")
+    dev, dev_tok = await user_factory(email="dev@x.com", display_name="Dev")
+    ws = await ws_factory(owner_id=owner.id)
+    await member_factory(ws.id, owner.id, "workspace_owner", granted_by=owner.id)
+    await member_factory(ws.id, dev.id, "developer", granted_by=owner.id)
+
+    resp = await client.get(
+        f"/api/workspaces/{ws.id}/shared-daemons",
+        headers=_bearer(dev_tok),
+    )
+    assert resp.status_code == 403, resp.text
+
+
+async def test_t04_non_owner_revoke_returns_403(
+    client: AsyncClient,
+    db_session,
+    role_seeder,
+    user_factory,
+    ws_factory,
+    member_factory,
+    daemon_factory,
+):
+    """FR-02: developer 撤销他人 shared → 403。"""
+    owner, _ = await user_factory(email="owner@x.com", display_name="Owner")
+    dev, dev_tok = await user_factory(email="dev@x.com", display_name="Dev")
+    other, _ = await user_factory(email="other@x.com", display_name="Other")
+    ws = await ws_factory(owner_id=owner.id)
+    await member_factory(ws.id, owner.id, "workspace_owner", granted_by=owner.id)
+    await member_factory(ws.id, dev.id, "developer", granted_by=owner.id)
+    await member_factory(ws.id, other.id, "developer", granted_by=owner.id)
+    daemon = await daemon_factory(other.id)
+    await _seed_shared_binding(
+        db_session, workspace_id=ws.id, user_id=other.id, daemon_id=daemon.id, shared=True
+    )
+
+    resp = await client.delete(
+        f"/api/workspaces/{ws.id}/members/{other.id}/shared",
+        headers=_bearer(dev_tok),
+    )
+    assert resp.status_code == 403, resp.text
+
+
+async def test_t04_shared_defaults_false_zero_regression(
+    client: AsyncClient,
+    db_session,
+    role_seeder,
+    user_factory,
+    ws_factory,
+    member_factory,
+    daemon_factory,
+):
+    """零回归：PUT /my-binding 建 binding 后 GET → shared=false（默认值，task-01 契约）。"""
+    dev, dev_tok = await user_factory(email="dev@x.com", display_name="Dev")
+    ws = await ws_factory(owner_id=dev.id)
+    await member_factory(ws.id, dev.id, "developer", granted_by=dev.id)
+    dev_daemon = await daemon_factory(dev.id)
+
+    resp = await client.put(
+        f"/api/workspaces/{ws.id}/my-binding",
+        headers=_bearer(dev_tok),
+        json={
+            "daemon_id": str(dev_daemon.id),
+            "root_path": "/r",
+            "path_source": "daemon-client",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["shared"] is False
+
+    resp2 = await client.get(
+        f"/api/workspaces/{ws.id}/my-binding",
+        headers=_bearer(dev_tok),
+    )
+    assert resp2.status_code == 200, resp2.text
+    assert resp2.json()["shared"] is False

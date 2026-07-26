@@ -168,6 +168,91 @@ async def resolve_daemon_instance_for_workspace(
         return None
 
 
+async def resolve_shared_daemon_for_borrow(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    provider: str | None,
+) -> dict | None:
+    """Resolve a workspace-shared daemon runtime for borrow dispatch.
+
+    Change 2026-07-25-daemon-borrow-for-business task-05 / D-002@v1 / D-008@v1 /
+    FR-04. Workspace-scoped counterpart of :func:`resolve_daemon_instance_for_workspace`
+    with three borrow-specific gates layered on the member-binding join (design
+    §5 Phase 3 / §7):
+
+    1. ``shared = TRUE`` — lender（开发人员）必须显式把自己的 binding 标记为工作空间
+       共享（D-003@v1 / D-005@v1）；默认 ``shared=false`` 的行不命中。
+    2. ``user_id <> actor_user_id`` — 永不「借用」自己的 daemon（自有路径由 helper
+       step 1 在本查询之前处理；此过滤是 defense-in-depth）。
+    3. ``daemon_instances.status = 'online'`` — lender 的 daemon 当前必须可达。
+
+    命中第一行（``LIMIT 1``）即取 ``daemon_id``，再叠加
+    :func:`query_runtime_by_daemon_and_provider` 按 ``provider`` 解析出 lender daemon
+    上的在线 runtime。返回的 runtime dict shape 与 placement 现有
+    ``{id, user_id, provider, status, daemon_instance_id}``（``placement.py:793``）
+    完全一致——``user_id`` 即 lender（daemon 归属人），调用方据此填 lender_user_id。
+
+    provider 解析语义与派发链路同一查询（D-005）：``provider`` 非空时严格匹配，
+    ``None`` 时取该 daemon 上最近心跳的在线 runtime。
+
+    本函数**只做 shared + online 的数据解析**，不查 DAEMON_BORROW 权限——三重
+    校验顺序「权限 → shared → online」中权限闸由调用方 helper
+    （:func:`_resolve_borrowed_or_own_runtime`）在调本查询之前完成（fail fast，
+    权限不通过不浪费 DB 查询）。
+
+    Args:
+        session: 数据库会话。
+        workspace_id: 工作空间 id（借用边界 = 工作空间成员资格）。
+        actor_user_id: 借用方（业务/管理人员）user_id，用于 ``user_id <> actor`` 排除。
+        provider: 期望的 provider（claude/codex/...）；``None`` 取任意在线 runtime。
+
+    Returns:
+        runtime dict（``user_id`` = lender），或 ``None``（无共享 / 离线 / 无匹配 provider /
+        查询异常）。
+    """
+    try:
+        result = await session.execute(
+            text(
+                """
+                SELECT wmr.daemon_id
+                FROM workspace_member_runtimes wmr
+                JOIN daemon_instances di ON di.id = wmr.daemon_id
+                WHERE wmr.workspace_id = :wid
+                  AND wmr.shared = TRUE
+                  AND wmr.daemon_id IS NOT NULL
+                  AND wmr.user_id <> :actor
+                  AND di.status = 'online'
+                LIMIT 1
+                """
+            ),
+            {"wid": workspace_id.hex, "actor": actor_user_id.hex},
+        )
+        row = result.first()
+        if row is None:
+            return None
+
+        daemon_id_raw = row[0]
+        if daemon_id_raw is None:
+            return None
+        daemon_id = (
+            daemon_id_raw if isinstance(daemon_id_raw, uuid.UUID) else uuid.UUID(str(daemon_id_raw))
+        )
+
+        # 叠加 provider 解析（与派发链路同一查询 / D-005）：命中 lender daemon 上
+        # 匹配 provider 的在线 runtime；provider=None 取最近心跳的在线 runtime。
+        return await query_runtime_by_daemon_and_provider(session, daemon_id, provider)
+    except Exception as exc:
+        log.warning(
+            "resolve_shared_daemon_for_borrow_failed",
+            workspace_id=str(workspace_id),
+            actor_user_id=str(actor_user_id),
+            provider=provider,
+            error=str(exc),
+        )
+        return None
+
+
 async def get_daemon_enabled_providers(
     session: AsyncSession,
     daemon_id: uuid.UUID,

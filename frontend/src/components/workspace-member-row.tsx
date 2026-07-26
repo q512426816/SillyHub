@@ -7,14 +7,17 @@ import type {
   WorkspaceMemberView,
 } from "@/lib/workspace-members";
 
-// FR-07 第 1 GWT：role dropdown 选项只含白名单 3 个
+// FR-07 第 1 GWT：role dropdown 选项只含白名单 4 个
 // 与 task-07 ROLE_OPTIONS 同步；不暴露 platform_admin / reviewer / qa / component_lead
+// change 2026-07-25-daemon-borrow-for-business task-12：加 business_member（FR-01/02，
+// owner 可把成员授为业务成员 → 借用共享 daemon 出方案，不带全量开发权）。
 const ROLE_OPTIONS: ReadonlyArray<{
   value: WorkspaceMemberRoleKey;
   label: string;
 }> = [
   { value: "developer", label: "开发者" },
   { value: "viewer", label: "只读成员" },
+  { value: "business_member", label: "业务成员（借用守护进程）" },
   { value: "workspace_owner", label: "工作区所有者" },
 ];
 

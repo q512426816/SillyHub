@@ -9,11 +9,15 @@
 import { apiFetch } from "@/lib/api";
 
 // ── Literal union (与 backend Literal["workspace_owner","developer","viewer"] 1:1) ──
+// change 2026-07-25-daemon-borrow-for-business task-12：加 "business_member"
+// （后端 members_service.ROLE_KEY_WHITELIST task-03 已纳入）。owner 在角色下拉里
+// 把成员授为业务成员 → 可借用工作空间共享 daemon，仅触发 agent 出方案、不改代码。
 
 export type WorkspaceMemberRoleKey =
   | "workspace_owner"
   | "developer"
-  | "viewer";
+  | "viewer"
+  | "business_member";
 
 // ── Response DTOs (与 backend schema.py WorkspaceMemberView 等字段名 1:1) ──
 

@@ -79,6 +79,14 @@ class Permission(StrEnum):
     TASK_CANCEL = "task:cancel"
     TASK_APPROVE = "task:approve"
 
+    # ── Daemon borrow（业务/管理人员借用开发人员 daemon）──────────────────
+    # change 2026-07-25-daemon-borrow-for-business task-03 / D-006@v2。
+    # business_member 角色带本权限 + task:run_agent：业务人员触发现有 agent
+    # 端点（agent/router.py:305 require_permission(TASK_RUN_AGENT)）后，因无自有
+    # daemon，placement 必然走借用回退，回退校验 daemon:borrow 授权。不新建独立
+    # 借用端点、不改 agent 端点鉴权（design §5 Phase 2）。
+    DAEMON_BORROW = "daemon:borrow"
+
     # ── Code ────────────────────────────────────────────────
     CODE_READ = "code:read"
     CODE_WRITE = "code:write"
@@ -182,7 +190,7 @@ class Permission(StrEnum):
             return PermissionGroup.WORKSPACE
         if prefix == "change":
             return PermissionGroup.CHANGE
-        if prefix in ("task", "code", "tool", "deploy"):
+        if prefix in ("task", "code", "tool", "deploy", "daemon"):
             return PermissionGroup.AGENT
         # PPM_* 全部以 ppm: 前缀，归入 PPM 业务域组
         if prefix == "ppm":

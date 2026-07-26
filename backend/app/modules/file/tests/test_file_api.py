@@ -12,7 +12,7 @@ import uuid
 
 from httpx import AsyncClient
 
-from app.modules.file.tests.conftest import MockStorage, png_upload
+from app.modules.file.tests.conftest import MockStorage, make_id, png_upload
 
 
 async def test_upload_success(
@@ -105,4 +105,94 @@ async def test_soft_delete_then_404(file_client: AsyncClient, auth_headers: dict
 
 async def test_upload_requires_auth(file_client: AsyncClient) -> None:
     resp = await file_client.post("/api/file/upload", files=png_upload())
+    assert resp.status_code == 401, resp.text
+
+
+# ── task-13 / FR-06：按 owner_type 列文件端点（业务人员「借用方案」查看）──────
+# 业务人员（business_member）借用工作空间共享 daemon 产出的方案文件落 File 表
+# owner_type="workspace" + owner_id=ws_id（design §5 Phase 5 / D-009@v1）。本端点
+# 供前端 BorrowedSolutionFiles 列方案，按 owner_type / owner_id 过滤。
+
+
+async def test_list_by_owner_type_workspace(file_client: AsyncClient, auth_headers: dict) -> None:
+    """按 owner_type=workspace + owner_id 列文件，仅返回匹配归属的活跃文件。"""
+    ws_id = make_id()
+    # 两条 workspace 方案 + 一条 ppm_problem 文件（不同 owner_type）
+    for name in ("plan-a.md", "plan-b.md"):
+        resp = await file_client.post(
+            "/api/file/upload",
+            headers=auth_headers,
+            params={"owner_type": "workspace", "owner_id": str(ws_id)},
+            files={"file": (name, b"# plan", "text/markdown")},
+        )
+        assert resp.status_code == 201, resp.text
+    other = await file_client.post(
+        "/api/file/upload",
+        headers=auth_headers,
+        params={"owner_type": "ppm_problem", "owner_id": str(make_id())},
+        files={"file": ("问题附件.png", b"\x89PNG\r", "image/png")},
+    )
+    assert other.status_code == 201
+
+    listed = await file_client.get(
+        "/api/file/list",
+        headers=auth_headers,
+        params={"owner_type": "workspace", "owner_id": str(ws_id)},
+    )
+    assert listed.status_code == 200, listed.text
+    rows = listed.json()
+    # 只返回 workspace 归属的 2 条；ppm_problem 不在
+    assert len(rows) == 2
+    assert all(r["owner_type"] == "workspace" for r in rows)
+    assert all(r["owner_id"] == str(ws_id) for r in rows)
+
+
+async def test_list_excludes_soft_deleted(file_client: AsyncClient, auth_headers: dict) -> None:
+    """软删文件不出现在列表。"""
+    ws_id = make_id()
+    up1 = await file_client.post(
+        "/api/file/upload",
+        headers=auth_headers,
+        params={"owner_type": "workspace", "owner_id": str(ws_id)},
+        files={"file": ("保留.md", b"x", "text/markdown")},
+    )
+    up2 = await file_client.post(
+        "/api/file/upload",
+        headers=auth_headers,
+        params={"owner_type": "workspace", "owner_id": str(ws_id)},
+        files={"file": ("删除.md", b"y", "text/markdown")},
+    )
+    dele = await file_client.delete(f"/api/file/{up2.json()['id']}", headers=auth_headers)
+    assert dele.status_code == 204
+
+    listed = await file_client.get(
+        "/api/file/list",
+        headers=auth_headers,
+        params={"owner_type": "workspace", "owner_id": str(ws_id)},
+    )
+    rows = listed.json()
+    assert len(rows) == 1
+    assert rows[0]["id"] == up1.json()["id"]
+
+
+async def test_list_without_filters_returns_all_active(
+    file_client: AsyncClient, auth_headers: dict
+) -> None:
+    """无过滤参数 → 返回全部活跃文件（owner_type 任意）。"""
+    before = await file_client.get("/api/file/list", headers=auth_headers)
+    assert before.status_code == 200
+    pre_count = len(before.json())
+
+    await file_client.post(
+        "/api/file/upload",
+        headers=auth_headers,
+        params={"owner_type": "workspace", "owner_id": str(make_id())},
+        files={"file": ("x.md", b"x", "text/markdown")},
+    )
+    after = await file_client.get("/api/file/list", headers=auth_headers)
+    assert len(after.json()) == pre_count + 1
+
+
+async def test_list_requires_auth(file_client: AsyncClient) -> None:
+    resp = await file_client.get("/api/file/list")
     assert resp.status_code == 401, resp.text

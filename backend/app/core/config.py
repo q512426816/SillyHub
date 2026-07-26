@@ -226,9 +226,10 @@ class Settings(BaseSettings):
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
             "application/vnd.ms-excel,"
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,"
-            "application/zip,text/plain"
+            "application/zip,text/plain,text/markdown"
         ),
-        description="上传 MIME 白名单（逗号分隔），不在列 415。D-009 排除 text/html、image/svg+xml。",
+        description="上传 MIME 白名单（逗号分隔），不在列 415。D-009 排除 text/html、image/svg+xml。"
+        "text/markdown 供借用 agent run 方案落文件中心（2026-07-25-daemon-borrow-for-business D-001/FR-06）。",
     )
 
     @property

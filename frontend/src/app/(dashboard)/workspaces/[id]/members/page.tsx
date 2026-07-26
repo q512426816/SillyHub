@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
+import { SharedDaemonManager } from "@/components/workspace/shared-daemon-manager";
 import { WorkspaceMemberAddDialog } from "@/components/workspace-member-add-dialog";
 import { WorkspaceMemberRow } from "@/components/workspace-member-row";
 import { errMessage } from "@/lib/errors";
@@ -150,6 +151,14 @@ export default function MembersPage({ params }: Props) {
           </button>
         </div>
       )}
+
+      {/* task-12 / FR-02 / D-003@v1：owner 共享 daemon 管理区（列表 + 撤销）。
+          owner/有 WORKSPACE_MEMBER_MANAGE 权限可见；非 owner 调 GET /shared-daemons
+          会 403 → SharedDaemonManager 内部降级空数组，不阻塞页面。 */}
+      <SharedDaemonManager
+        workspaceId={workspaceId}
+        members={members ?? undefined}
+      />
 
       {loading ? (
         <p className="py-12 text-center text-xs text-muted-foreground">

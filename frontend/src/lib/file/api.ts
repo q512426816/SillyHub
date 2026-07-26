@@ -138,6 +138,29 @@ export async function fetchFileMetaBatch(ids: string[]): Promise<FileMetaResp[]>
   });
 }
 
+/**
+ * 按归属/上传者列文件元数据（task-13 / FR-06 借用方案查看）。
+ *
+ * 后端 ``GET /api/file/list``：query ``owner_type`` / ``owner_id`` / ``uploaded_by``
+ * / ``limit``。业务人员「借用方案」用 ``owner_type="workspace"&owner_id=<ws_id>``
+ * 列该工作空间借用 daemon 产出的方案文件。走 apiFetch（自带 401 refresh）。
+ */
+export interface ListFilesParams {
+  owner_type?: string;
+  owner_id?: string | null;
+  uploaded_by?: string | null;
+  limit?: number;
+}
+
+export async function listFiles(params: ListFilesParams = {}): Promise<FileMetaResp[]> {
+  const query: Record<string, string | number> = {};
+  if (params.owner_type) query.owner_type = params.owner_type;
+  if (params.owner_id) query.owner_id = params.owner_id;
+  if (params.uploaded_by) query.uploaded_by = params.uploaded_by;
+  if (params.limit != null) query.limit = params.limit;
+  return apiFetch<FileMetaResp[]>("/api/file/list", { query });
+}
+
 /** 文件下载/预览（GET /api/file/{id}，相对路径走 rewrite proxy，浏览器带 session 由后端鉴权）。 */
 export function getFileDownloadUrl(id: string): string {
   return `/api/file/${id}`;

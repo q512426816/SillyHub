@@ -45,7 +45,7 @@ import { PermissionResolver } from './permission-resolver.js';
 import type { PermissionSendFn } from './permission-resolver.js';
 import type { CanUseToolDecision } from './types.js';
 import type { PolicyEngine } from '../policy/filesystem-policy.js';
-import { isPathUnderAnyRoot } from '../policy/path-utils.js';
+import { isPathUnderAnyRoot, resolveRealPath, UNC_REJECTED } from '../policy/path-utils.js';
 import {
   extractShellWritePaths,
   type ShellKind,
@@ -375,6 +375,27 @@ export class SessionManager {
   private static readonly PARTIAL_FLUSH_MS = 500;
 
   /**
+   * task-09 / D-007@v2（候选 B 主路径）：借用 session 沙箱根目录注册表。
+   *
+   * key=sessionId，value=该借用 session 的独立沙箱目录绝对路径（daemon
+   * ``_startInteractiveSession`` 经 ``prepareWorkspace(slug)`` 创建）。
+   * daemon 在 ``sessionManager.create`` 成功后调 ``registerBorrowSandbox`` 登记；
+   * ``end``/``fail``/consume 退出时清除。
+   *
+   * **按 lease 隔离只读 policy 的核心**（R-02）：``_judgeWriteViaPolicyEngine`` 命中
+   * 本表时**不走 PolicyEngine 的 runtime 缓存**（缓存键是 lender 的 runtime_id，
+   * allowed_roots 是 lender 代码区——借用 agent 命中即继承 lender 写权限，污染开发代码）。
+   * 借用 session 改为只校验写路径是否落在 ``[sandboxRoot]`` 下（沙箱外一律 deny），
+   * 与 lender 的 allowed_roots 完全解耦。
+   *
+   * 不写入 SessionState / PersistedSessionRecord（types.ts 不在 task-09 allowed_paths，
+   * 且借用标记本就来自 lease metadata，daemon 重启恢复时可由 ``_startInteractiveSession``
+   * 重检 marker 重新登记——当前 daemon 恢复路径未接此重检，属 R-09 可选优化，重启后
+   * 借用 session 退化为普通 runtime policy，仅影响重启窗口内极少数 in-flight 借用）。
+   */
+  private readonly _borrowSandboxRoots = new Map<string, string>();
+
+  /**
    * task-07（FR-06 / D-004@v1）：空闲扫描定时器。start() 启动、stop() 清理。
    * unref 不阻止 node 退出；daemon.shutdown 显式 stop。
    */
@@ -542,6 +563,35 @@ export class SessionManager {
    */
   getPermissionResolver(sessionId: string): PermissionResolver | undefined {
     return this._resolversBySession.get(sessionId);
+  }
+
+  /**
+   * task-09 / D-007@v2（候选 B 主路径）：登记一个借用 session 的沙箱根目录。
+   *
+   * daemon ``_startInteractiveSession`` 检测 lease rootPath 上的
+   * ``borrow-sandbox:<slug>`` marker 后调本方法：把 daemon 经 ``prepareWorkspace(slug)``
+   * 创建的真实沙箱目录绝对路径登记到本 session。
+   *
+   * 登记后 ``_judgeWriteViaPolicyEngine`` 对本 session 的写校验**只允许落沙箱内**，
+   * 不再查 PolicyEngine 的 runtime 缓存（避免命中 lender 的 allowed_roots 继承开发代码
+   * 区写权限）。未登记的 session 走原有 runtime policy（开发人员自有任务零回归）。
+   *
+   * 幂等：重复登记覆盖旧值（daemon WS 重放时安全）。沙箱路径为空 → 不登记（退化到
+   * runtime policy，fail-open 不卡 session）。
+   */
+  registerBorrowSandbox(sessionId: string, sandboxRoot: string): void {
+    if (!sessionId || !sandboxRoot) return;
+    this._borrowSandboxRoots.set(sessionId, sandboxRoot);
+  }
+
+  /** task-09：查询本 session 是否登记为借用沙箱（测试 + 内部写守卫用）。 */
+  getBorrowSandboxRoot(sessionId: string): string | undefined {
+    return this._borrowSandboxRoots.get(sessionId);
+  }
+
+  /** task-09：从借用沙箱注册表移除（end/fail/consume 退出时调，幂等）。 */
+  private _clearBorrowSandbox(sessionId: string): void {
+    this._borrowSandboxRoots.delete(sessionId);
   }
 
   /**
@@ -1083,11 +1133,41 @@ export class SessionManager {
     toolInput: Record<string, unknown>,
   ): string | null {
     const engine = this._policyEngine;
-    if (!engine) return null;
 
     // 提取写目标路径。
     const writePaths = this._extractWritePathsForTool(toolName, toolInput);
     if (writePaths.length === 0) return null; // 非写工具 / 提取不到 → 放行
+
+    // task-09 / D-007@v2（候选 B 主路径）：借用 session 按 lease 隔离只读沙箱 root。
+    // **不查 PolicyEngine runtime 缓存**——缓存键是 lender runtime_id，allowed_roots 是
+    // lender 代码区，借用 agent 命中即继承 lender 写权限（R-02 核心坑）。借用 session
+    // 只允许写沙箱目录内，沙箱外（含 lender 代码区）一律 deny。登记见
+    // ``registerBorrowSandbox``（daemon _startInteractiveSession 检测 marker 后调）。
+    const borrowRoot = this._borrowSandboxRoots.get(sessionId);
+    if (borrowRoot) {
+      for (const p of writePaths) {
+        const np = resolveRealPath(p);
+        if (np === UNC_REJECTED) {
+          return (
+            `借用任务沙箱隔离拒绝写入。\n` +
+            `Agent：${provider}\n` +
+            `目标路径：${p}\n` +
+            `原因：UNC 路径（\\\\server\\share）不允许写入。`
+          );
+        }
+        if (!isPathUnderAnyRoot(np, [borrowRoot])) {
+          return (
+            `借用任务沙箱隔离拒绝写入。\n` +
+            `Agent：${provider}\n` +
+            `目标路径：${np}\n` +
+            `原因：借用 agent 仅可写沙箱目录（${borrowRoot}），不可写开发代码区。`
+          );
+        }
+      }
+      return null; // 全部落沙箱内 → 放行（交内层 allow / 审批）
+    }
+
+    if (!engine) return null;
 
     const runtimeId = this._runtimeIdProvider?.(provider) ?? '';
     const tool = toolName; // PolicyEngine audit 字段（Write/Edit/Bash/...）。
@@ -1764,6 +1844,8 @@ export class SessionManager {
     // task-08（AC-08.7）：session 终态时 abortAll 当前 session 的 pending 审批
     // + 移除 resolver（session 不再可 inject，resolver 无存在意义）。
     this._abortPermissionResolver(sessionId, 'session_ended');
+    // task-09：清除借用沙箱登记（session 已终态，写守卫注册表不再需要本条）。
+    this._clearBorrowSandbox(sessionId);
     // ql-20260621-partial：销毁 partial buffer（含 timer），防止 end 后定时器
     // 仍 fire 推送到已结束 session。
     this._destroyPartialBuffer(sessionId);
@@ -1785,6 +1867,8 @@ export class SessionManager {
     state.status = 'failed';
     // task-08：failed 时同样 abortAll + 移除 resolver。
     this._abortPermissionResolver(sessionId, 'session_failed');
+    // task-09：清除借用沙箱登记（session 已 failed，写守卫注册表不再需要本条）。
+    this._clearBorrowSandbox(sessionId);
     // ql-20260621-partial：销毁 partial buffer（含 timer），同 end。
     this._destroyPartialBuffer(sessionId);
     try {

@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.modules.daemon.model import DaemonInstance
+from app.modules.workspace.member_runtimes.exceptions import MemberBindingNotFound
 from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
 
 log = get_logger(__name__)
@@ -114,3 +116,94 @@ async def list_member_bindings(
         .order_by(col(WorkspaceMemberRuntime.user_id))
     )
     return list((await session.execute(stmt)).scalars().all())
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Daemon 共享标记（change 2026-07-25-daemon-borrow-for-business task-04）
+# D-003@v1 / FR-01 / FR-02：lender 把自己的 daemon 标为本工作空间共享，
+# 业务/管理人员（business_member）即可借用跑 agent 读源码。撤销 = shared=False，
+# 不删 binding 行（lender 配置的 daemon + 路径保留，可随时再标 shared）。
+# 默认 false：现有「自带 daemon」binding 行为零回归，仅显式调用端点才置位。
+# ────────────────────────────────────────────────────────────────────────────
+
+
+async def set_my_binding_shared(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    *,
+    shared: bool,
+) -> WorkspaceMemberRuntime:
+    """标记/撤销当前成员自己 binding 的 daemon 共享状态（FR-01 / D-003@v1）。
+
+    lender（开发人员）把自己的 daemon 标为本工作空间共享，业务/管理人员即可
+    借用。binding 行必须已存在（先 PUT /my-binding 配 daemon + 路径），否则
+    复用既有 ``MemberBindingNotFound``（409）——前端按 code 引导先配置。
+    端点无 user_id 路径参数，server 钉死 ``user_id`` → 仅能改自己 binding。
+    """
+    row = await session.get(WorkspaceMemberRuntime, (workspace_id, user_id))
+    if row is None:
+        raise MemberBindingNotFound(workspace_id=workspace_id, user_id=user_id)
+    row.shared = shared
+    row.updated_at = datetime.now(UTC)
+    await session.commit()
+    await session.refresh(row)
+    return row
+
+
+async def list_shared_daemons(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+) -> list[dict[str, Any]]:
+    """owner 查工作空间所有共享 daemon（FR-02 / D-003@v1）。
+
+    JOIN ``daemon_instances`` 拿在线状态 + hostname，供 owner 决定是否撤销。
+    仅命中 ``shared=True`` 的行；``daemon_id`` 为 NULL 的行也返回（前端提示
+    lender 未绑 daemon），借用查询（task-05）会自行过滤 daemon_id IS NOT NULL。
+    返回 dict 列表（service 层不引入 pydantic），router 转 SharedDaemonView。
+    """
+    stmt: Select[Any] = (
+        select(
+            col(WorkspaceMemberRuntime.user_id).label("lender_user_id"),
+            col(WorkspaceMemberRuntime.daemon_id).label("daemon_id"),
+            col(DaemonInstance.status).label("daemon_status"),
+            col(DaemonInstance.hostname).label("daemon_hostname"),
+        )
+        .outerjoin(
+            DaemonInstance,
+            DaemonInstance.id == WorkspaceMemberRuntime.daemon_id,
+        )
+        .where(col(WorkspaceMemberRuntime.workspace_id) == workspace_id)
+        .where(col(WorkspaceMemberRuntime.shared).is_(True))
+        .order_by(col(WorkspaceMemberRuntime.user_id))
+    )
+    rows = (await session.execute(stmt)).all()
+    return [
+        {
+            "lender_user_id": r.lender_user_id,
+            "daemon_id": r.daemon_id,
+            "daemon_status": r.daemon_status,
+            "daemon_hostname": r.daemon_hostname,
+        }
+        for r in rows
+    ]
+
+
+async def revoke_shared(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    target_user_id: uuid.UUID,
+) -> WorkspaceMemberRuntime:
+    """owner 撤销某成员 daemon 的共享（FR-02 / D-003@v1）。
+
+    设 ``shared=False``，**不删 binding 行**（lender 配置的 daemon + 路径保留，
+    可随时再标 shared）。target 无 binding → ``MemberBindingNotFound``（409）。
+    """
+    row = await session.get(WorkspaceMemberRuntime, (workspace_id, target_user_id))
+    if row is None:
+        raise MemberBindingNotFound(workspace_id=workspace_id, user_id=target_user_id)
+    row.shared = False
+    row.updated_at = datetime.now(UTC)
+    await session.commit()
+    await session.refresh(row)
+    return row

@@ -68,9 +68,14 @@ vi.mock("@/lib/workspaces", async () => {
   const actual = await vi.importActual<typeof import("@/lib/workspaces")>("@/lib/workspaces");
   return { ...actual, getWorkspace: mockWorkspace, scanGenerate: mockScanGenerate };
 });
-vi.mock("@/lib/workspace-binding", () => ({
-  fetchMyBinding: mockFetchMyBinding,
-}));
+vi.mock("@/lib/workspace-binding", async () => {
+  // task-13：importActual 保留真实 canBorrowSharedDaemon（纯函数，测真实门禁放宽
+  // 逻辑），只覆盖 fetchMyBinding（避免真实 fetch）。
+  const actual = await vi.importActual<typeof import("@/lib/workspace-binding")>(
+    "@/lib/workspace-binding",
+  );
+  return { ...actual, fetchMyBinding: mockFetchMyBinding };
+});
 vi.mock("@/lib/daemon", async () => {
   const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
   return { ...actual, listDaemonRuntimes: mockListDaemonRuntimes };

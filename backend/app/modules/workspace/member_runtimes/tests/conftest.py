@@ -27,12 +27,20 @@ def _selected_metadata() -> Any:
     Importing the feature models attaches them to ``BaseModel.metadata``; we
     then copy just the relevant ``Table`` objects into a fresh ``MetaData`` so
     ``create_all`` does not try to emit the broken daemon_change_writes DDL.
+
+    2026-07-25-daemon-borrow-for-business task-07：``resolve_runtime_for_writeback``
+    借用兜底接入 ``_resolve_borrowed_or_own_runtime`` → ``has_permission``，需要
+    RBAC 表（``roles`` / ``role_permissions`` / ``user_workspace_roles`` +
+    admin 的 ``user_roles``）。把这些表纳入 selected schema，否则借用回退的权限查询
+    在最小 schema 下抛 ``no such table``（既有 not_bound / daemon_offline 用例的 actor
+    无任何角色，权限查询返回空集 → helper 返回 None → 原错误文案不变，零回归）。
     """
     from sqlalchemy import MetaData
 
     from app.models.base import BaseModel
 
     # Import to ensure registration (order-independent; tables are idempotent).
+    from app.modules.admin import model as _admin  # noqa: F401
     from app.modules.auth import model as _auth  # noqa: F401
     from app.modules.daemon import model as _daemon  # noqa: F401
     from app.modules.workspace import model as _ws  # noqa: F401
@@ -45,6 +53,11 @@ def _selected_metadata() -> Any:
         "daemon_runtimes",
         "workspaces",
         "workspace_member_runtimes",
+        # RBAC（task-07 借用 helper 的 has_permission 查询需要）。
+        "roles",
+        "role_permissions",
+        "user_workspace_roles",
+        "user_roles",
     }
     meta = MetaData()
     for name in needed:

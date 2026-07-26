@@ -132,6 +132,34 @@ class FileService:
         rows = (await self._session.execute(stmt)).scalars().all()
         return [FileMetaResp.model_validate(r) for r in rows]
 
+    async def list_files(
+        self,
+        *,
+        owner_type: str | None = None,
+        owner_id: uuid.UUID | None = None,
+        uploaded_by: uuid.UUID | None = None,
+        limit: int = 100,
+    ) -> list[FileMetaResp]:
+        """按归属/上传者列文件元数据（task-13 / FR-06 借用方案查看）。
+
+        业务/管理人员「借用方案」查看用：后端 close_interactive_run 回调把借用产出
+        落 File 表（owner_type="workspace"、owner_id=ws_id、uploaded_by=业务人员，
+        design §5 Phase 5 / D-009@v1），前端按 owner_type+owner_id 列方案文件。
+
+        过滤掉已软删（deleted_at IS NULL）。``limit`` 上限 200 防滥用（router 层
+        Query(le=200) 已约束，此处再 min 一道防御）。
+        """
+        stmt = select(File).where(File.deleted_at.is_(None))
+        if owner_type:
+            stmt = stmt.where(File.owner_type == owner_type)
+        if owner_id is not None:
+            stmt = stmt.where(File.owner_id == owner_id)
+        if uploaded_by is not None:
+            stmt = stmt.where(File.uploaded_by == uploaded_by)
+        stmt = stmt.order_by(File.created_at.desc()).limit(min(max(limit, 1), 200))
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [FileMetaResp.model_validate(r) for r in rows]
+
     async def soft_delete(self, file_id: uuid.UUID) -> None:
         """软删：置 deleted_at + 同步删存储对象本体。
 

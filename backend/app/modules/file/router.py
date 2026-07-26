@@ -64,6 +64,32 @@ async def upload_file(
     )
 
 
+# task-13 / FR-06：按 owner_type 列文件（业务人员「借用方案」查看）。
+# 必须定义在 ``/{file_id}``（GET download）之前——GET 路由按注册顺序匹配，否则
+# ``/list`` 会被 ``/{file_id}`` 捕获（``list`` 当 file_id 路径段，uuid 解析失败 422）。
+# query 过滤 owner_type/owner_id/uploaded_by，返回 FileMetaResp 列表（已剔除软删）。
+@router.get("/list", response_model=list[FileMetaResp])
+async def list_files(
+    service: Annotated[FileService, Depends(_make_service)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    owner_type: Annotated[str | None, Query()] = None,
+    owner_id: Annotated[uuid.UUID | None, Query()] = None,
+    uploaded_by: Annotated[uuid.UUID | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+) -> list[FileMetaResp]:
+    """按归属/上传者列文件元数据（task-13 / FR-06）。
+
+    业务人员「借用方案」查看：``owner_type=workspace&owner_id=<ws_id>`` 列该工作空间
+    借用 daemon 产出的方案文件。无参数则返回全部活跃文件（按 created_at 倒序）。
+    """
+    return await service.list_files(
+        owner_type=owner_type,
+        owner_id=owner_id,
+        uploaded_by=uploaded_by,
+        limit=limit,
+    )
+
+
 @router.get("/{file_id}")
 async def download_file(
     file_id: uuid.UUID,

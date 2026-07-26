@@ -36,9 +36,14 @@ def test_permission_group_has_seven_members() -> None:
     assert set(members) == expected
 
 
-def test_permission_count_is_63() -> None:
-    """46 历史 + 17 PPM_* 菜单/读 = 63（ccfab86a 精简至 53 后，cbd258eb/1f5e6ebe 菜单 unique-key 扩容回升到 63）。"""
-    assert len(list(Permission)) == 63
+def test_permission_count_is_64() -> None:
+    """46 历史 + 17 PPM_* 菜单/读 + daemon:borrow = 64。
+
+    cbd258eb/1f5e6ebe 菜单 unique-key 扩容回升到 63；change
+    2026-07-25-daemon-borrow-for-business task-03 / D-006@v2 再加
+    ``DAEMON_BORROW``（业务人员借用开发人员 daemon 回退授权）→ 64。
+    """
+    assert len(list(Permission)) == 64
 
 
 @pytest.mark.parametrize(
@@ -79,6 +84,8 @@ def test_permission_count_is_63() -> None:
         (Permission.CODE_REVIEW, PermissionGroup.AGENT),
         (Permission.TOOL_NETWORK, PermissionGroup.AGENT),
         (Permission.DEPLOY_PRODUCTION, PermissionGroup.AGENT),
+        # task-03: daemon 前缀归 AGENT 组（业务借用回退授权）
+        (Permission.DAEMON_BORROW, PermissionGroup.AGENT),
     ],
 )
 def test_permission_group_resolution(perm: Permission, expected_group: PermissionGroup) -> None:
@@ -111,3 +118,8 @@ def test_existing_permission_string_values_unchanged() -> None:
     assert Permission.TASK_RUN_AGENT.value == "task:run_agent"
     assert Permission.DEPLOY_ROLLBACK.value == "deploy:rollback"
     assert Permission.TOOL_SECRET_READ.value == "tool:secret:read"
+
+
+def test_daemon_borrow_permission_value() -> None:
+    """task-03 / D-006@v2：DAEMON_BORROW 权限点字符串值落地。"""
+    assert Permission.DAEMON_BORROW.value == "daemon:borrow"
