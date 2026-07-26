@@ -676,3 +676,76 @@ class AgentArtifact(BaseModel, table=True):
             server_default=text("now()"),
         ),
     )
+
+
+class DaemonBorrowAudit(BaseModel, table=True):
+    """审计表：业务/管理人员借用开发人员 daemon 的每一次调用（FR-07 / D-004@v1）。
+
+    仅审计不限额（design §3 非目标 / D-004）。每次借用落一行；额度/限额明细
+    后续变更补，当前 usage_summary 暂存 token/turn 数等基础字段（nullable）。
+
+    FK 语义（design §8）：
+      - borrower_user_id / lender_user_id / workspace_id / agent_run_id → CASCADE
+        （随主体清理，不残留孤儿审计行）
+      - daemon_instance_id → RESTRICT（审计红线：daemon 实例被引用时禁止删除，
+        保留审计链完整，区别于其它 CASCADE 外键）
+    """
+
+    __tablename__ = "daemon_borrow_audit"
+    __table_args__ = (
+        Index("ix_daemon_borrow_audit_borrower", "borrower_user_id"),
+        Index("ix_daemon_borrow_audit_lender", "lender_user_id"),
+        Index("ix_daemon_borrow_audit_daemon", "daemon_instance_id"),
+        Index("ix_daemon_borrow_audit_workspace", "workspace_id"),
+        Index("ix_daemon_borrow_audit_run", "agent_run_id"),
+        Index("ix_daemon_borrow_audit_borrowed_at", "borrowed_at"),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    borrower_user_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    lender_user_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    daemon_instance_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("daemon_instances.id", ondelete="RESTRICT"),
+            nullable=False,
+        ),
+    )
+    workspace_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    agent_run_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_runs.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    borrowed_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    # D-004 仅审计：先记基础字段，后续额度明细变更再补 schema。
+    usage_summary: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )

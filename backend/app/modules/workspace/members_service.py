@@ -39,7 +39,13 @@ from app.modules.workspace.schema import UserSearchHit, WorkspaceMemberView
 #: / ``reviewer`` / ``qa`` / ``component_lead`` are deliberately excluded —
 #: they are system / cross-workspace roles and must never be granted via the
 #: per-workspace members endpoint.
-ROLE_KEY_WHITELIST: frozenset[str] = frozenset({"workspace_owner", "developer", "viewer"})
+#:
+#: ``business_member`` (change 2026-07-25-daemon-borrow-for-business task-03 /
+#: D-006@v2) is a workspace-scoped role for 业务/管理人员 who borrow a shared
+#: daemon — granted per-workspace exactly like ``developer`` / ``viewer``.
+ROLE_KEY_WHITELIST: frozenset[str] = frozenset(
+    {"workspace_owner", "developer", "viewer", "business_member"}
+)
 
 
 # ────────────────────────────────────────────────────────────────────────────

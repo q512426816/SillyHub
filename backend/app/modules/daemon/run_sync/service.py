@@ -956,6 +956,21 @@ class RunSyncService:
         await self._session.commit()
         await self._session.refresh(agent_run)
 
+        # task-10 / FR-06 / D-010@v1：借用 agent run 完成 → 方案文本落文件中心 +
+        # 补 daemon_borrow_audit.usage_summary。仅 borrowed lease 生效（helper 内部
+        # 判别 ``lease_meta.borrowed=True``），普通 lease 零回归。helper 自带 try/except
+        # 守门（落 file/审计失败仅记日志，不影响已 commit 的 run 终态——H4）。
+        try:
+            from app.modules.agent.service import AgentService
+
+            await AgentService(self._session).persist_borrow_run_output(agent_run, lease_meta)
+        except Exception as exc:
+            log.warning(
+                "borrow_run_output_hook_failed",
+                run_id=str(agent_run.id),
+                error=str(exc),
+            )
+
         # task-05 / design §5.1：commit 后 enqueue gate 决策后台任务并立即返回 HTTP
         # （<30s，daemon notifyRunResult 不重试）。仅 change_id 非空 + completed 场景
         # enqueue（gate 只核验完成的 verify turn；对话 turn/failed 不进 gate）。不 await

@@ -85,6 +85,8 @@ import type {
 import type { PolicyCache } from './policy/runtime-policy.js';
 import type { AuditSink } from './policy/audit-sink.js';
 import type { PolicyEngine } from './policy/filesystem-policy.js';
+// task-09（D-007@v2 候选 B）：借用 session 沙箱目录创建（mirror by slug，复用 WorkspaceManager）。
+import { WorkspaceManager } from './workspace.js';
 import type { SessionManager } from './interactive/session-manager.js';
 // task-06（D-007@v1）：spec bundle 同步共享 utility（task-04 抽出），interactive
 // 路径接入 pull（session 开始）+ sync（session end）。纯函数 + client 参数注入，
@@ -447,6 +449,21 @@ export interface RecoveryCoordinator {
 
 // ── DaemonOptions（便于测试注入 mock detector/wsClientFactory）────────────────
 
+/**
+ * task-09 / D-007@v2（候选 B 主路径）：借用沙箱 cwd marker。
+ *
+ * backend placement（placement.py）对借用 lease 写 ``metadata.cwd =
+ * "<BORROW_SANDBOX_MARKER><slug>"``，借 ``build_claim_payload`` 既有 cwd→root_path
+ * 透传链路（context.py:92，**无需改 context.py**）把 marker 带到 daemon execPayload.rootPath。
+ * daemon ``_startInteractiveSession`` 检测 marker 前缀 → 提取 slug → prepareWorkspace
+ * 创建独立沙箱目录作 cwd（不复用 lender 代码 rootPath）→ 登记到 SessionManager
+ * 激活按 lease 隔离的只读 policy。
+ *
+ * marker 字符串本身从不进入真实文件系统路径——daemon 解析后 cwd 落到
+ * ``<workspace_dir>/borrow-sandboxes/<slug>`` 真实目录。
+ */
+const BORROW_SANDBOX_MARKER = 'borrow-sandbox:';
+
 export interface DaemonOptions {
   /** 注入自定义 AgentDetector（测试用 mock）。默认 new AgentDetector()。 */
   detector?: DetectorLike;
@@ -516,6 +533,17 @@ export interface DaemonOptions {
   auditSink?: AuditSink | null;
   /** 同 {@link DaemonOptions.policyCache}。 */
   policyEngine?: PolicyEngine | null;
+  /**
+   * task-09（D-007@v2 候选 B）：借用沙箱目录管理器（mirror by slug）。
+   *
+   * 注入后 ``_startInteractiveSession`` 检测到借用 lease 时用它 ``prepareWorkspace(slug)``
+   * 创建独立沙箱目录作 cwd。默认 undefined：daemon 首次借用 lease 时 lazy 构造一个
+   * 指向 ``<workspace_dir>/borrow-sandboxes`` 的 WorkspaceManager（与 TaskRunner 的
+   * workspace 管理器隔离，避免借用沙箱混入开发 mirror）。
+   *
+   * 测试可注入指向 tmp 目录的实例，避免污染真实 ~/.sillyhub。
+   */
+  borrowWorkspaceManager?: WorkspaceManager | null;
 }
 
 /**
@@ -601,6 +629,15 @@ export class Daemon {
   private readonly _auditSink: AuditSink | null;
   /** 同 {@link _policyCache}。 */
   private readonly _policyEngine: PolicyEngine | null;
+  /**
+   * task-09（D-007@v2 候选 B）：借用沙箱目录管理器（构造注入或 lazy 构造）。
+   *
+   * daemon 首次处理借用 lease 时（_startInteractiveSession 检测 marker）经
+   * ``_getBorrowWorkspaceManager`` 取实例；未注入则 lazy ``new WorkspaceManager``。
+   * 用 ``WorkspaceManager | null`` 字段 + getter 而非构造期 eager 创建：
+   * 避免非借用部署（绝大多数）启动时无谓 mkdir borrow-sandboxes 目录。
+   */
+  private _borrowWorkspaceManager: WorkspaceManager | null = null;
   /**
    * task-04：interactive lease.id → session_id（防 WS 重放重复 create，AC-09）。
    * batch lease 不进此 map（走 _inflightLeases 去重）。
@@ -712,6 +749,8 @@ export class Daemon {
     this._policyCache = options?.policyCache ?? null;
     this._auditSink = options?.auditSink ?? null;
     this._policyEngine = options?.policyEngine ?? null;
+    // task-09（D-007@v2 候选 B）：借用沙箱管理器，构造期注入优先；未注入走 lazy。
+    this._borrowWorkspaceManager = options?.borrowWorkspaceManager ?? null;
     this._persistence = options?.persistence ?? null;
     this._recoveryClient = options?.recoveryClient ?? null;
     this._recoveryConcurrency =
@@ -728,6 +767,27 @@ export class Daemon {
       return level;
     }
     return 'info';
+  }
+
+  /**
+   * task-09（D-007@v2 候选 B）：借用沙箱目录管理器 lazy 取用。
+   *
+   * 构造期注入（测试 / 未来 cli.ts 显式接线）优先；未注入时首次借用 lease 触发 lazy
+   * 构造 ``new WorkspaceManager(<workspace_dir>/borrow-sandboxes)``。借用沙箱与
+   * TaskRunner 的开发 mirror 目录隔离（不同 baseDir），避免借用 slug 混入开发工作区。
+   *
+   * WorkspaceManager 构造函数内部 mkdirSync baseDir（recursive），lazy 触发即创建。
+   * 非借用部署永不调本方法 → 永不创建 borrow-sandboxes 目录（零回归）。
+   */
+  private _getBorrowWorkspaceManager(): WorkspaceManager {
+    if (!this._borrowWorkspaceManager) {
+      const baseDir = join(this._config.workspace_dir, 'borrow-sandboxes');
+      this._borrowWorkspaceManager = new WorkspaceManager(baseDir);
+      this._logger.info('borrow_sandbox_workspace_manager_initialized', {
+        base_dir: baseDir,
+      });
+    }
+    return this._borrowWorkspaceManager;
   }
 
   // ── 公开 API ──────────────────────────────────────────────────────────────
@@ -2719,8 +2779,47 @@ export class Daemon {
       }
     }
     // specRootMap 空串 → 完全跳过（向后兼容旧 daemon，AC-04）
-    // rootPath 优先作 cwd（与 batch 一致，ql-20260617-009）；无则 workspace_dir 兜底。
-    const cwd = execPayload.rootPath ?? this._config.workspace_dir;
+    // task-09 / D-007@v2（候选 B 主路径）：借用 lease cwd 解析。
+    // backend placement 对借用 lease 写 metadata.cwd = "<BORROW_SANDBOX_MARKER><slug>"，
+    // 经 build_claim_payload 透传到 execPayload.rootPath。检测 marker → 提取 slug →
+    // prepareWorkspace 创建独立沙箱目录作 cwd（不复用 lender 代码 rootPath，防借用污染开发代码）。
+    // sandbox 创建失败 → 回退 workspace_dir（fail-open cwd 让 session 能跑，但写隔离仍由
+    // SessionManager 在登记沙箱后才激活；创建失败时不登记 → 退化 runtime policy，仅影响借用
+    // 写隔离，不阻塞业务读源码出方案的主流程）。
+    const rawRootPath = execPayload.rootPath;
+    let borrowSandboxRoot: string | undefined;
+    let cwd: string;
+    if (
+      typeof rawRootPath === 'string' &&
+      rawRootPath.startsWith(BORROW_SANDBOX_MARKER)
+    ) {
+      const sandboxSlug = rawRootPath.slice(BORROW_SANDBOX_MARKER.length);
+      try {
+        borrowSandboxRoot = await this._getBorrowWorkspaceManager().prepareWorkspace(
+          sandboxSlug,
+        );
+        cwd = borrowSandboxRoot;
+        this._logger.info('borrow_sandbox_prepared', {
+          lease_id: leaseId,
+          slug: sandboxSlug,
+          sandbox_root: borrowSandboxRoot,
+        });
+      } catch (e) {
+        // 沙箱创建失败（磁盘满 / 权限）→ 回退 workspace_dir 不阻塞 session 启动。
+        // 不登记 borrowSandboxRoot → SessionManager 写守卫走 runtime policy（fail-open）。
+        // 业务方案主产出走 submit_lease_messages 回传不落沙箱，cwd 退化不影响读源码。
+        cwd = this._config.workspace_dir;
+        this._logger.warn('borrow_sandbox_prepare_failed', {
+          lease_id: leaseId,
+          slug: sandboxSlug,
+          error: (e as Error)?.message ?? String(e),
+          fallback_cwd: cwd,
+        });
+      }
+    } else {
+      // 非借用：rootPath 优先作 cwd（与 batch 一致，ql-20260617-009）；无则 workspace_dir 兜底。
+      cwd = rawRootPath ?? this._config.workspace_dir;
+    }
     // ql-20260703-001：归一化 adapter id → detector provider key（claude_code→claude），
     // 对齐 reopen 路径（:2144）。原 (execPayload.provider ?? 'claude') as 'claude'|'codex'
     // 直接透传 backend 的 'claude_code' → _agentPaths.get('claude_code')=undefined →
@@ -2844,11 +2943,17 @@ export class Daemon {
     const specStrategy =
       (execPayload as { specStrategy?: string }).specStrategy ??
       (execPayload as { spec_strategy?: string }).spec_strategy;
-    const specRootPath =
-      (execPayload as { rootPath?: string }).rootPath ??
-      (execPayload as { root_path?: string }).root_path;
+    // task-09（D-007@v2 候选 B）：借用 lease 的 execPayload.rootPath 是沙箱 marker
+    // （非真实 spec 路径）→ 不能透传给 pullSpecBundle。借用 agent 读源码出方案，不参与
+    // sillyspec 文档同步，spec pull 整块跳过（下方 transport 分支加 !borrowSandboxRoot 守卫）。
+    const specRootPath = borrowSandboxRoot
+      ? undefined
+      : ((execPayload as { rootPath?: string }).rootPath ??
+        (execPayload as { root_path?: string }).root_path);
 
-    if (transport === 'tar') {
+    // task-09：借用 session 跳过 spec pull（业务/管理人员读源码，不写 spec；沙箱 cwd 也
+    // 非 spec 根）。非借用维持 tar/shared 原逻辑。
+    if (transport === 'tar' && !borrowSandboxRoot) {
       if (!workspaceId) {
         // 边界 5：transport=tar 但 workspaceId 缺失 → task-03 透传链路异常，warn 不阻塞。
         this._logger.warn('interactive_spec_pull_no_workspace', {
@@ -2960,10 +3065,18 @@ export class Daemon {
         // 普通会话 stage 未传/其他值 → 不注入（零回归）。
         stage: execPayload.stage,
       });
+      // task-09（D-007@v2 候选 B）：借用 session 登记沙箱根，激活 SessionManager
+      // 按 lease 隔离的只读 policy（写守卫只允许落沙箱内，不命中 lender runtime 缓存）。
+      // create 成功后立即登记（同步，在 SDK 跑首 turn 前生效）；非借用 session 不登记，
+      // 走原 runtime policy（开发人员自有任务零回归）。
+      if (borrowSandboxRoot) {
+        this._sessionManager.registerBorrowSandbox(sessionId, borrowSandboxRoot);
+      }
       this._logger.info('interactive_session_started', {
         lease_id: leaseId,
         session_id: sessionId,
         run_id: firstRunId,
+        borrow_sandbox: borrowSandboxRoot ?? null,
       });
     } catch (e) {
       // create 抛错（ClaudeExecutableNotFoundError wrapper 解析失败等）：移除登记，

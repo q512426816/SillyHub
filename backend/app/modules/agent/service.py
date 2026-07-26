@@ -1780,6 +1780,126 @@ class AgentService:
 
         return DaemonService(self._session).host_fs_delegate
 
+    # ------------------------------------------------------------------
+    # Borrow run completion: 方案落文件中心 + 补审计 usage_summary
+    # task-10 / task-11 / FR-06 / FR-07 / D-001/D-009/D-010/D-004@v1
+    # ------------------------------------------------------------------
+
+    async def persist_borrow_run_output(
+        self,
+        agent_run: AgentRun,
+        lease_metadata: dict,
+    ) -> None:
+        """借用 agent run 完成时把方案文本落文件中心 + 补审计 usage_summary。
+
+        D-010 钩子（close_interactive_run 回调）调用。仅对 borrowed lease
+        （``lease_metadata.borrowed=True``）+ run ``completed`` 生效；普通 lease / 失败
+        run 零回归（直接返回，不落 file）。
+
+        落点（D-001/D-009）：``FileService.upload_file(owner_type="workspace",
+        owner_id=ws_id, uploaded_by=borrower_id)``，方案文本取 ``agent_run.output_redacted``
+        （SDK result summary，close_interactive_run 写入；已 redact 防泄密）。
+
+        审计 usage_summary（D-004@v1）补基础字段（input/output tokens、turn 数、cost、
+        status）；明细后续变更再补。失败仅记日志不抛——run 终态已 commit，落 file/审计
+        属 best-effort，不得阻断 close_interactive_run 收口（H4 守门，对齐 stage sync 范式）。
+
+        Args:
+            agent_run: 已收口的 AgentRun（status 已为 completed/failed 终态）。
+            lease_metadata: 该 run 所在 lease 的 metadata dict（读 ``borrowed`` 标记）。
+        """
+        # D-010：只对 borrowed lease 落 file（普通 lease 零回归）。
+        if not lease_metadata.get("borrowed"):
+            return
+        # 失败 run 不落方案 file（无可用方案文本）。
+        if agent_run.status != "completed":
+            log.info(
+                "borrow_run_skip_not_completed",
+                agent_run_id=str(agent_run.id),
+                status=agent_run.status,
+            )
+            return
+        try:
+            # borrower + workspace 从 AgentSession 读（AgentRun 无 user_id 列）。
+            if agent_run.agent_session_id is None:
+                log.warning("borrow_run_no_session", agent_run_id=str(agent_run.id))
+                return
+            session_row = await self._session.get(AgentSession, agent_run.agent_session_id)
+            if (
+                session_row is None
+                or session_row.user_id is None
+                or session_row.workspace_id is None
+            ):
+                log.warning(
+                    "borrow_run_session_missing_fields",
+                    agent_run_id=str(agent_run.id),
+                )
+                return
+            borrower_id = session_row.user_id
+            workspace_id = session_row.workspace_id
+
+            # 方案文本：SDK result summary（close_interactive_run 写入 output_redacted）。
+            plan_text = (agent_run.output_redacted or "").strip()
+            if not plan_text:
+                log.info("borrow_run_no_plan_text", agent_run_id=str(agent_run.id))
+                return
+
+            # 落 file（D-009：复用 FileService.upload_file，不经前端上传）。
+            # storage/settings 走工厂单例（与 file router 同源）；测试经 patch 注入 mock。
+            from app.core.config import get_settings
+            from app.modules.file.service import FileService
+            from app.modules.storage.factory import get_storage_backend
+
+            file_svc = FileService(self._session, get_storage_backend(), get_settings())
+            await file_svc.upload_file(
+                original_name=f"方案-{agent_run.id}.md",
+                data=plan_text.encode("utf-8"),
+                mime_type="text/markdown",
+                uploaded_by=borrower_id,
+                owner_type="workspace",
+                owner_id=workspace_id,
+            )
+
+            # 补审计 usage_summary 基础字段（D-004@v1）。
+            await self._update_borrow_audit_usage(agent_run)
+
+            log.info(
+                "borrow_run_output_persisted",
+                agent_run_id=str(agent_run.id),
+                workspace_id=str(workspace_id),
+                borrower_user_id=str(borrower_id),
+            )
+        except Exception as exc:
+            # H4 守门：落 file / 审计失败不得影响已 commit 的 run 终态行。
+            log.warning(
+                "borrow_run_output_persist_failed",
+                agent_run_id=str(agent_run.id),
+                error=str(exc),
+            )
+
+    async def _update_borrow_audit_usage(self, agent_run: AgentRun) -> None:
+        """补 daemon_borrow_audit.usage_summary 基础字段（task-11 / D-004@v1）。
+
+        按 agent_run_id 定位审计行（placement 创建借用 lease 时写入），把 run 终态
+        可得的 usage 基础字段（tokens / turn / cost / status）落入 usage_summary。
+        行不存在（创建时审计写失败 / 非 borrow run）→ no-op，不抛。
+        """
+        from app.modules.agent.model import DaemonBorrowAudit
+
+        stmt = select(DaemonBorrowAudit).where(col(DaemonBorrowAudit.agent_run_id) == agent_run.id)
+        audit = (await self._session.execute(stmt)).scalars().first()
+        if audit is None:
+            return
+        audit.usage_summary = {
+            "status": agent_run.status,
+            "num_turns": agent_run.num_turns,
+            "input_tokens": agent_run.input_tokens,
+            "output_tokens": agent_run.output_tokens,
+            "total_cost_usd": agent_run.total_cost_usd,
+        }
+        self._session.add(audit)
+        await self._session.commit()
+
 
 async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
     """Scan for stale running-state AgentRuns and mark them as failed.

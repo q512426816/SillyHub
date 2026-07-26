@@ -20,8 +20,173 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.modules.agent.borrow_resolver import _resolve_borrowed_or_own_runtime
 
 log = get_logger(__name__)
+
+
+# ``_borrowed`` / ``_lender_user_id``：runtime dict 上的借用标记私有键（D-008@v1 /
+# task-06 provides BorrowedLeaseFlag）。``_resolve_dispatch_runtime`` 解析出借用
+# runtime 时把这两个键塞进 dict，调用方（``dispatch_to_daemon`` /
+# ``prepare_scan_interactive_dispatch``）读出后写进 lease metadata，供 task-09 沙箱 +
+# task-10 落 file 判别。前缀下划线 = transport-only，不进 lease metadata 原始键名。
+_BORROWED_FLAG_KEY = "_borrowed"
+_LENDER_USER_ID_KEY = "_lender_user_id"
+
+
+def _stamp_borrowed_flag(rt: dict, borrowed: bool, lender: uuid.UUID | None) -> dict:
+    """Mark borrowed/lender on a resolved runtime dict (D-008@v1 / task-06).
+
+    ``_resolve_dispatch_runtime`` 在借用兜底命中时调用：把 ``_borrowed=True`` +
+    ``_lender_user_id=<str>`` 塞进 runtime dict，让消费方（``dispatch_to_daemon`` /
+    ``prepare_scan_interactive_dispatch``）读出后写进 lease metadata（task-06
+    provides BorrowedLeaseFlag，供 task-09 沙箱 + task-10 落 file 判别）。
+
+    自有路径（``borrowed=False``）不写任何标记 → 零回归（消费方读不到键 = 自有）。
+    """
+    if borrowed:
+        rt[_BORROWED_FLAG_KEY] = True
+        if lender is not None:
+            rt[_LENDER_USER_ID_KEY] = str(lender)
+    return rt
+
+
+def _pop_borrowed_flag(rt: dict) -> tuple[bool, str | None]:
+    """Read + remove the stashed borrowed/lender markers from a runtime dict.
+
+    消费方（``dispatch_to_daemon`` / ``prepare_scan_interactive_dispatch``）在拿到
+    ``_resolve_dispatch_runtime`` 返回的 runtime dict 后调用本函数取出（并清除）借用
+    标记，写进 lease metadata。返回 ``(borrowed, lender_user_id_str)``；自有路径
+    返回 ``(False, None)``。
+    """
+    borrowed = bool(rt.pop(_BORROWED_FLAG_KEY, False))
+    lender_str: str | None = rt.pop(_LENDER_USER_ID_KEY, None)
+    return borrowed, lender_str
+
+
+# task-09 / D-007@v2（候选 B 主路径）：借用 lease 沙箱隔离 marker + slug 构造。
+#
+# daemon 不自动隔离借用任务（agent cwd 直接取 lease rootPath，daemon.ts:2723）。
+# backend 派发借用 lease 时必须显式让 daemon 走独立沙箱：
+#   - slug ``borrow-<actor>-<run>``（design §5 Phase 4）→ daemon 侧 ``prepareWorkspace``
+#     mirror by slug 创建空目录（workspace.ts:118-160 分支 3）作 agent cwd。
+#   - daemon ``_startInteractiveSession`` 检测 rootPath 上的 ``_BORROW_SANDBOX_MARKER``
+#     前缀（``borrow-sandbox:<slug>``）→ 切沙箱 cwd + 调 SessionManager.registerBorrowSandbox
+#     激活按 lease 隔离的只读 policy（session-manager.ts PolicyEngine 不命中 lender 缓存）。
+#
+# marker 走 ``metadata.cwd`` 字段：``build_claim_payload``（context.py:92）已有
+# ``payload.root_path = lease_meta.cwd or root_path`` 透传链路，marker 借此搭车到 daemon，
+# **无需改 context.py**（task-09 allowed_paths 不含 context.py）。daemon 解析 marker 后
+# cwd 落到真实沙箱目录，marker 字符串本身不进真实文件系统路径。
+_BORROW_SANDBOX_MARKER = "borrow-sandbox:"
+
+
+def _make_borrow_sandbox_slug(actor_user_id: uuid.UUID, run_id: uuid.UUID) -> str:
+    """构造借用沙箱目录 slug（``borrow-<actor>-<run>``，design §5 Phase 4）。
+
+    actor + run_id 双段确保全局唯一（同一 actor 多次借用 / 跨 actor 不撞目录）。
+    各取 hex 前 8 位缩减目录名长度（完整 32 位 hex 冗长；8 位 = 32 bit 已足够区分）。
+    daemon 侧 ``prepareWorkspace(slug)`` 用此 slug 作 mirror 目录名。
+    """
+    return f"borrow-{actor_user_id.hex[:8]}-{run_id.hex[:8]}"
+
+
+def _stamp_borrow_sandbox_metadata(
+    metadata: dict,
+    actor_user_id: uuid.UUID,
+    run_id: uuid.UUID,
+) -> str:
+    """借用 lease 写沙箱 slug + cwd marker（task-09 / D-007@v2）。
+
+    写入两字段：
+      - ``borrow_sandbox_slug``：干净 slug（供 task-10 落 file / 审计 / observability 直接读，
+        不需解析 marker）；
+      - ``cwd`` = ``_BORROW_SANDBOX_MARKER + slug``：marker 协议串，借
+        ``build_claim_payload`` 既有 cwd→root_path 透传链路带给 daemon（避免改 context.py）。
+
+    本函数**覆盖**调用方此前写入的 ``metadata.cwd``（借用场景 cwd 必须是沙箱 marker，
+    不能是 lender 代码路径——否则 daemon 用 lender 代码作 cwd，PolicyEngine 按 lease
+    隔离失效）。
+
+    Returns:
+        构造的 slug（调用方可记日志）。
+    """
+    slug = _make_borrow_sandbox_slug(actor_user_id, run_id)
+    metadata["borrow_sandbox_slug"] = slug
+    metadata["cwd"] = _BORROW_SANDBOX_MARKER + slug
+    return slug
+
+
+def _runtime_daemon_instance_id(runtime: dict) -> uuid.UUID:
+    """从 resolved runtime dict 抽 daemon_instance_id（task-11 审计写入用）。
+
+    runtime dict shape = ``{id, user_id, provider, status, daemon_instance_id}``
+    （placement.py:793 / queries.py:78）。借用路（resolve_shared_daemon_for_borrow →
+    query_runtime_by_daemon_and_provider）的 daemon_instance_id 必非空（SQL select 该列）。
+    SQLite 返回 CHAR(32) hex、PG 返 uuid.UUID，统一规范化。
+    """
+    raw = runtime.get("daemon_instance_id")
+    if isinstance(raw, str):
+        return uuid.UUID(raw)
+    if isinstance(raw, uuid.UUID):
+        return raw
+    # 借用路不应命中（daemon_instance_id 在 select 列），防御性兜底用 runtime_id。
+    rid = runtime["id"]
+    return uuid.UUID(rid) if isinstance(rid, str) else rid
+
+
+async def _insert_borrow_audit_row(
+    session: AsyncSession,
+    *,
+    borrower_user_id: uuid.UUID,
+    lender_user_id: uuid.UUID,
+    daemon_instance_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    agent_run_id: uuid.UUID,
+) -> None:
+    """显式 INSERT 一条 daemon_borrow_audit 审计行（task-11 / FR-07 / D-004@v1）。
+
+    借用 lease 创建时调用：每次借用落一行，D-004 仅审计不限额。usage_summary 在
+    run 完成回调（AgentService.persist_borrow_run_output）补基础字段。
+
+    **显式 INSERT 不靠 audit_hooks**（知识条目 daemon-usage-submit-chain / audit_hooks
+    只在测试 lifespan 注册，生产要业务代码显式写）。失败仅记日志不抛——审计写入不得
+    阻断借用派发（借用 lease 已建，审计失败属 best-effort，对齐 stage sync 范式）。
+
+    raw SQL 而非 ORM：DaemonBorrowAudit model 在 agent/model.py，但本模块仅 import
+    text()，沿用 placement.py 全程 raw SQL 风格，避免 model import 循环。SQLite 用
+    hex 绑定、PG Uuid 列同样接受（对齐 lease INSERT 范式 :396）。
+    """
+    now = datetime.now(UTC)
+    try:
+        await session.execute(
+            text(
+                """
+                INSERT INTO daemon_borrow_audit
+                    (id, borrower_user_id, lender_user_id, daemon_instance_id,
+                     workspace_id, agent_run_id, borrowed_at, usage_summary)
+                VALUES
+                    (:id, :borrower, :lender, :daemon, :ws, :run, :now, NULL)
+                """
+            ),
+            {
+                "id": uuid.uuid4().hex,
+                "borrower": borrower_user_id.hex,
+                "lender": lender_user_id.hex,
+                "daemon": daemon_instance_id.hex,
+                "ws": workspace_id.hex,
+                "run": agent_run_id.hex,
+                "now": now,
+            },
+        )
+    except Exception as exc:
+        log.warning(
+            "borrow_audit_insert_failed",
+            borrower_user_id=str(borrower_user_id),
+            lender_user_id=str(lender_user_id),
+            agent_run_id=str(agent_run_id),
+            error=str(exc),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +370,11 @@ class RunPlacementService:
             )
             return None
 
+        # D-008@v1（task-06 provides BorrowedLeaseFlag）：从 runtime dict 取出借用标记
+        # （_resolve_dispatch_runtime 借用兜底命中时塞入），稍后写进 lease metadata。
+        # 自有路径返回 (False, None) → 不写标记，零回归。
+        borrowed, lender_user_id_str = _pop_borrowed_flag(runtime)
+
         # raw SQL 返回的 id 在 SQLite 是 CHAR(32) hex string、在 PostgreSQL 是
         # UUID 对象；统一标准化为 uuid.UUID，供后续 .hex / str() / WS hub 使用。
         rid_raw = runtime["id"]
@@ -257,6 +427,30 @@ class RunPlacementService:
         # 此处补设（task-01 修正：原改 prepare_interactive_dispatch 但 stage 不走那）。
         metadata["manual_approval"] = True
         metadata["ask_user_only"] = True
+
+        # D-008@v1（task-06 provides BorrowedLeaseFlag）：借用 lease 标记 borrowed=True
+        # + lender_user_id，供 task-09 沙箱（按 lease 隔离只读 root_path）+ task-10 落 file
+        # 判别（owner_type=workspace 落点）。自有路径不写（零回归）。
+        if borrowed:
+            metadata["borrowed"] = True
+            if lender_user_id_str:
+                metadata["lender_user_id"] = lender_user_id_str
+            # task-09 / D-007@v2（候选 B 主路径）：借用 lease cwd 必须是独立沙箱 marker，
+            # 不能是 lender 代码 rootPath（否则 daemon 用 lender 代码作 cwd + PolicyEngine
+            # 按 lease 隔离失效 → 借用 agent 可写开发代码区）。marker 借 build_claim_payload
+            # 既有 cwd→root_path 透传带给 daemon，无需改 context.py。
+            _stamp_borrow_sandbox_metadata(metadata, user_id, agent_run_id)
+            # task-11 / FR-07 / D-004@v1：显式写 daemon_borrow_audit 审计行（不限额）。
+            # 借用必然 workspace-scoped（AC7：无 workspace_id 不借用），故 workspace_id 非空。
+            if workspace_id is not None:
+                await _insert_borrow_audit_row(
+                    self._session,
+                    borrower_user_id=user_id,
+                    lender_user_id=uuid.UUID(lender_user_id_str),
+                    daemon_instance_id=_runtime_daemon_instance_id(runtime),
+                    workspace_id=workspace_id,
+                    agent_run_id=agent_run_id,
+                )
 
         # 2026-07-08：interactive lease 必须带 session_id + run_id（daemon
         # _startInteractiveSession 缺这两个字段会 interactive_missing_fields 早返回）。
@@ -405,7 +599,21 @@ class RunPlacementService:
         for the daemon. Ordinary quick-chat sessions leave both ``None`` and
         behave exactly as before.
         """
+        # D-008@v1（task-08 spike-01 前置解析）：先按原 user 级查自有 daemon（零回归，
+        # 不改 _get_online_runtime 的 user 级签名）。无自有在线 daemon + 有 workspace 上下文
+        # → 调 _resolve_borrowed_or_own_runtime 借用工作空间共享 daemon（业务/管理人员
+        # quick-chat 场景）。helper 内部复检自有（同样 None）→ DAEMON_BORROW → shared lender。
+        # 无 workspace_id（普通 quick-chat 无变更上下文）不借用——借用边界 = 工作空间成员资格
+        # （design §3 非目标），保持原 NoOnlineDaemonError 行为零回归。
         runtime = await self._get_online_runtime(user_id, provider=provider)
+        borrowed = False
+        lender_user_id: uuid.UUID | None = None
+        if runtime is None and workspace_id is not None:
+            rt, borrowed, lender_user_id = await _resolve_borrowed_or_own_runtime(
+                self._session, workspace_id, user_id, provider
+            )
+            if rt is not None:
+                runtime = rt
         if runtime is None:
             log.warning(
                 "interactive_dispatch_no_online_runtime",
@@ -453,6 +661,29 @@ class RunPlacementService:
             metadata["workspace_id"] = str(workspace_id)
         if cwd:
             metadata["cwd"] = cwd
+        # D-008@v1（task-06 provides BorrowedLeaseFlag）：借用 lease 标记 borrowed=True
+        # + lender_user_id，供 task-09 沙箱（按 lease 隔离只读 root_path）+ task-10 落 file
+        # 判别。自有 daemon 路径 borrowed=False 不写（零回归）。
+        if borrowed:
+            metadata["borrowed"] = True
+            if lender_user_id is not None:
+                metadata["lender_user_id"] = str(lender_user_id)
+            # task-09 / D-007@v2（候选 B 主路径）：借用 lease cwd 必须是独立沙箱 marker，
+            # 覆盖上方 caller cwd（quick-chat 场景 cwd 可能指 lender 代码 → daemon 会用作
+            # cwd → PolicyEngine 按 lease 隔离失效）。marker 借 build_claim_payload 既有
+            # cwd→root_path 透传带给 daemon，无需改 context.py。
+            _stamp_borrow_sandbox_metadata(metadata, user_id, agent_run_id)
+            # task-11 / FR-07 / D-004@v1：显式写 daemon_borrow_audit 审计行（不限额）。
+            # workspace_id / lender_user_id 借用必然非空（AC7 + borrow_resolver 契约）。
+            if lender_user_id is not None and workspace_id is not None:
+                await _insert_borrow_audit_row(
+                    self._session,
+                    borrower_user_id=user_id,
+                    lender_user_id=lender_user_id,
+                    daemon_instance_id=daemon_id,
+                    workspace_id=workspace_id,
+                    agent_run_id=agent_run_id,
+                )
 
         # Raw SQL mirrors dispatch_to_daemon so we can set kind/agent_run_id=NULL
         # without touching the batch ORM insert path. NULL lease_expires_at is
@@ -538,6 +769,10 @@ class RunPlacementService:
             )
             raise NoOnlineDaemonError(user_id=user_id)
 
+        # D-008@v1（task-06 provides BorrowedLeaseFlag）：与 dispatch_to_daemon 同语义，
+        # 从 runtime dict 取借用标记写进 lease metadata（scan 路也走借用兜底）。
+        borrowed, lender_user_id_str = _pop_borrowed_flag(runtime)
+
         rid_raw = runtime["id"]
         runtime_id: uuid.UUID = uuid.UUID(rid_raw) if isinstance(rid_raw, str) else rid_raw
         did_raw = runtime.get("daemon_instance_id")
@@ -584,6 +819,30 @@ class RunPlacementService:
             metadata["repo_url"] = repo_url
         if branch:
             metadata["branch"] = branch
+        # D-008@v1（task-06 provides BorrowedLeaseFlag）：借用 lease 标记，供 task-09 沙箱
+        # + task-10 落 file 判别。与 dispatch_to_daemon 同语义（scan 路也读 runtime dict 标记）。
+        if borrowed:
+            metadata["borrowed"] = True
+            if lender_user_id_str:
+                metadata["lender_user_id"] = lender_user_id_str
+            # task-09 / D-007@v2（候选 B 主路径）：借用 scan lease cwd 必须是独立沙箱 marker，
+            # 覆盖上方 root_path（scan 路的 root_path 是 lender 代码路径，若作 cwd 则 daemon
+            # 在 lender 代码区跑 + PolicyEngine 按 lease 隔离失效）。marker 借 build_claim_payload
+            # 既有 cwd→root_path 透传（cwd 优先于 root_path）带给 daemon，无需改 context.py。
+            # scan 语义字段（root_path/spec_root/runtime_root）仍保留在 metadata，仅 cwd 透传
+            # 给 daemon 时被 marker 优先覆盖。
+            _stamp_borrow_sandbox_metadata(metadata, user_id, agent_run_id)
+            # task-11 / FR-07 / D-004@v1：显式写 daemon_borrow_audit 审计行（不限额）。
+            # scan 借用同样 workspace-scoped（AC7），workspace_id 非空。
+            if workspace_id is not None:
+                await _insert_borrow_audit_row(
+                    self._session,
+                    borrower_user_id=user_id,
+                    lender_user_id=uuid.UUID(lender_user_id_str),
+                    daemon_instance_id=_runtime_daemon_instance_id(runtime),
+                    workspace_id=workspace_id,
+                    agent_run_id=agent_run_id,
+                )
 
         # Raw SQL 与 prepare_interactive_dispatch 一致：kind='interactive' + NULL
         # lease_expires_at（scan 长任务永不过期，由 DaemonService.end_session 管生命周期）。
@@ -721,6 +980,13 @@ class RunPlacementService:
         if workspace_id is None:
             raise NoOnlineDaemonError(user_id=user_id)
 
+        # D-008@v1（task-06）：提前解析 target_provider，供自有解析 + 借用 helper 共用。
+        # provider 调用方解析（task-05 遗留契约）：caller override 优先，否则 workspace
+        # .default_agent。原 Step 2 逻辑前移，零回归（同样的解析顺序与 SQL）。
+        target_provider = provider
+        if target_provider is None:
+            target_provider = await self._resolve_workspace_default_agent(workspace_id)
+
         # Per-member binding (D-006, 2026-07-02-workspace-config-flow task-01 +
         # D-007 单一 daemon-client)：WorkspaceMemberRuntime 行是唯一绑定真相源。
         # 无 binding 行 → NoOnlineDaemonError（不再回退 legacy Workspace 全局列）。
@@ -747,6 +1013,16 @@ class RunPlacementService:
             binding = None
 
         if binding is None:
+            # D-008@v1（task-06）：无自有 binding → 借用兜底（业务/管理人员场景）。
+            # helper 内部先复检自有（同样 None）→ DAEMON_BORROW 权限闸 → shared lender。
+            # 命中借用 runtime 即返回（dict 上塞 borrowed 标记供 lease metadata）；
+            # 未命中（无权限 / 无 shared lender）→ 抛原 NoOnlineDaemonError 文案不变。
+            borrowed_rt = await _resolve_borrowed_or_own_runtime(
+                self._session, workspace_id, user_id, target_provider
+            )
+            rt, borrowed, lender = borrowed_rt
+            if rt is not None:
+                return _stamp_borrowed_flag(rt, borrowed, lender)
             raise NoOnlineDaemonError(
                 workspace_id=workspace_id,
                 user_id=user_id,
@@ -757,6 +1033,8 @@ class RunPlacementService:
         daemon_id = binding.daemon_id
         if daemon_id is None:
             # 旧 binding 行尚未迁移 daemon_id—指引用户重绑（D-004 过渡期）。
+            # 此分支不接入借用：stale binding 属配置问题（非"无自有 daemon"），
+            # 业务/管理人员通常无 binding 行（走上面 binding-None 借用兜底）。
             raise NoOnlineDaemonError(
                 workspace_id=workspace_id,
                 user_id=user_id,
@@ -768,33 +1046,29 @@ class RunPlacementService:
         # Step 1: verify the daemon_instance is online + owned by user
         daemon = await self._query_daemon_online_by_id(did, user_id)
         if daemon is None:
+            # D-008@v1（task-06）：自有 daemon 离线 → 借用兜底。helper 复检自有（仍离线）
+            # → 权限 → shared lender。命中借用则返回；未命中 → 抛原"离线"文案不变。
+            borrowed_rt = await _resolve_borrowed_or_own_runtime(
+                self._session, workspace_id, user_id, target_provider
+            )
+            rt, borrowed, lender = borrowed_rt
+            if rt is not None:
+                return _stamp_borrowed_flag(rt, borrowed, lender)
             raise NoOnlineDaemonError(
                 workspace_id=workspace_id,
                 user_id=user_id,
                 message="绑定的守护进程离线或不存在，请启动后重试",
             )
 
-        # Step 2: resolve target provider — caller override or workspace.default_agent
-        target_provider = provider
-        if target_provider is None:
-            ws_data = (
-                (
-                    await self._session.execute(
-                        text("SELECT default_agent FROM workspaces WHERE id = :id"),
-                        {"id": workspace_id.hex},
-                    )
-                )
-                .mappings()
-                .first()
-            )
-            target_provider = ws_data["default_agent"] if ws_data else None
-
-        # Step 3: find a runtime matching target_provider on this daemon
+        # Step 2: find a runtime matching target_provider on this daemon
+        # （target_provider 已在函数入口解析，此处直接用）。
         rt = await self._query_runtime_by_daemon_and_provider(did, target_provider)
         if rt is not None:
             return rt
 
-        # Step 4: D-008 — no auto-fallback, error with enabled providers list
+        # Step 3: D-008 — 自有 daemon 在线但缺 default_agent provider：no auto-fallback。
+        # **不借用另一台 daemon**（避免 silent fallback 到其他 lender；自有 daemon 在线
+        # 时优先让用户修 provider 配置，而非偷借）。error with enabled providers list。
         enabled = await self._get_daemon_enabled_providers(did)
         if target_provider:
             msg = f"守护进程已启用 {enabled}，但未启用 default_agent '{target_provider}'"
@@ -809,6 +1083,29 @@ class RunPlacementService:
     # ------------------------------------------------------------------
     # Daemon-entity resolution helpers (task-08 / D-004 / D-005 / D-008)
     # ------------------------------------------------------------------
+
+    async def _resolve_workspace_default_agent(
+        self,
+        workspace_id: uuid.UUID,
+    ) -> str | None:
+        """Return ``workspace.default_agent`` for *workspace_id*, or None.
+
+        D-008@v1（task-06）：派发 / 决策两路的 target_provider 解析前移到 binding 检查
+        之前，供自有解析 + 借用 helper（``_resolve_borrowed_or_own_runtime``）共用同一
+        provider，保证 4 路借用语义一致（R-01 反割裂）。原 ``_resolve_dispatch_runtime``
+        Step 2 内联 SQL 抽到这里，零回归（同 SQL 同顺序）。
+        """
+        ws_data = (
+            (
+                await self._session.execute(
+                    text("SELECT default_agent FROM workspaces WHERE id = :id"),
+                    {"id": workspace_id.hex},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        return ws_data["default_agent"] if ws_data else None
 
     async def _query_daemon_online_by_id(
         self,
@@ -898,6 +1195,17 @@ class RunPlacementService:
             binding = None
 
         if binding is None:
+            # D-008@v1（task-06）：无自有 binding → 借用兜底，与 _resolve_dispatch_runtime
+            # 同语义。helper provider 用 workspace.default_agent（与 dispatch 借用同 provider），
+            # 避免「decide 借用任一 provider 通过、dispatch 因 default_agent 不匹配报错」割裂
+            # （R-01 / 重现 D-007）。命中借用 runtime 即返回（decide 只验可达性，不消费 borrowed
+            # 标记）；未命中 → 抛原 NoOnlineDaemonError 文案不变。
+            target_provider = await self._resolve_workspace_default_agent(workspace_id)
+            rt, _borrowed, _lender = await _resolve_borrowed_or_own_runtime(
+                self._session, workspace_id, user_id, target_provider
+            )
+            if rt is not None:
+                return rt
             raise NoOnlineDaemonError(
                 workspace_id=workspace_id,
                 user_id=user_id,
@@ -908,6 +1216,7 @@ class RunPlacementService:
         daemon_id = binding.daemon_id
         if daemon_id is None:
             # 旧 binding 行尚未迁移 daemon_id—指引用户重绑（D-004 过渡期）。
+            # 与 _resolve_dispatch_runtime 同：此分支不接入借用（stale binding 属配置问题）。
             raise NoOnlineDaemonError(
                 workspace_id=workspace_id,
                 user_id=user_id,
@@ -919,6 +1228,14 @@ class RunPlacementService:
         # Verify the daemon_instance is online + owned by user.
         daemon = await self._query_daemon_online_by_id(did, user_id)
         if daemon is None:
+            # D-008@v1（task-06）：自有 daemon 离线 → 借用兜底，与 _resolve_dispatch_runtime
+            # 同语义（provider=default_agent）。命中借用则返回；未命中 → 抛原"离线"文案不变。
+            target_provider = await self._resolve_workspace_default_agent(workspace_id)
+            rt, _borrowed, _lender = await _resolve_borrowed_or_own_runtime(
+                self._session, workspace_id, user_id, target_provider
+            )
+            if rt is not None:
+                return rt
             raise NoOnlineDaemonError(
                 workspace_id=workspace_id,
                 user_id=user_id,

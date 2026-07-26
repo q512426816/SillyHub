@@ -35,7 +35,12 @@ import {
 import { useAgentRuns } from "@/lib/use-agent-runs";
 import { PROVIDER_META, listDaemonRuntimes, type DaemonRuntimeRead } from "@/lib/daemon";
 import { getWorkspace, scanGenerate, type Workspace } from "@/lib/workspaces";
-import { fetchMyBinding, type MemberBindingView } from "@/lib/workspace-binding";
+import {
+  canBorrowSharedDaemon,
+  fetchMyBinding,
+  type MemberBindingView,
+} from "@/lib/workspace-binding";
+import { useSession } from "@/stores/session";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -269,6 +274,16 @@ export default function AgentPage({ params }: Props) {
   const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [formLoading, setFormLoading] = useState(true);
 
+  /* ---- task-13 / FR-04：借用能力判定（业务/管理人员无自有 daemon 时放行门禁）----
+   * 订阅 session user 使 permissions 变化（登录/fetchMe 刷新）时重算。后端 placement
+   * _resolve_borrowed_or_own_runtime 做权威三重校验（权限+shared+online），前端只放行。 */
+  const sessionUser = useSession((s) => s.user);
+  const canBorrow = canBorrowSharedDaemon(
+    sessionUser?.permissions,
+    sessionUser?.is_platform_admin,
+  );
+  const hasOwnDaemon = Boolean(myBinding?.daemon_id);
+
   /* ---- 获取 workspace / binding / daemon runtimes ---- */
   useEffect(() => {
     let active = true;
@@ -324,9 +339,13 @@ export default function AgentPage({ params }: Props) {
   const handleDispatch = useCallback(async () => {
     if (!workspaceData?.root_path) return;
     // daemon-entity-binding 后稳定绑定键是 myBinding.daemon_id（runtime 维度已
-    // 下沉到 per-member binding 行）。未绑定直接提示，避免 backend 422。
+    // 下沉到 per-member binding 行）。
+    // task-13 / FR-04：无自有 daemon 但有借用能力（canBorrow）时不报错——daemonId
+    // 传 null，scanGenerate 不发 daemon_id 字段，后端 scan_generate → placement
+    // _resolve_borrowed_or_own_runtime 走借用回退（design §5 Phase 3）。无自有且
+    // 不能借 → 仍提示先绑定，避免 backend 422/403。
     const daemonId = myBinding?.daemon_id ?? null;
-    if (!daemonId) {
+    if (!daemonId && !canBorrow) {
       setDispatchError("未绑定守护进程，无法启动扫描。请先在「我的接入」完成绑定。");
       return;
     }
@@ -336,6 +355,7 @@ export default function AgentPage({ params }: Props) {
       // task-11 / 2026-07-10-remove-server-local-workspace-mode：scanGenerate
       // 签名收敛（pathSource/daemonRuntimeId 入参已删，平台唯一 daemon-client），
       // 调用收敛为 (rootPath, provider, model, specStrategy=undefined, daemonId)。
+      // task-13：daemonId=null（借用场景）scanGenerate 内部不发 daemon_id 字段。
       await scanGenerate(
         workspaceData.root_path,
         selectedProvider, // 单次覆盖（D-005），不写回 workspace.default_agent
@@ -349,7 +369,7 @@ export default function AgentPage({ params }: Props) {
     } finally {
       setDispatching(false);
     }
-  }, [workspaceData, myBinding, selectedProvider, selectedModel, refetch]);
+  }, [workspaceData, myBinding, selectedProvider, selectedModel, refetch, canBorrow]);
 
   /* ---- Derived ---- */
   const runningRuns = useMemo(
@@ -578,7 +598,7 @@ export default function AgentPage({ params }: Props) {
                 onClick={() => void handleDispatch()}
                 disabled={
                   dispatching ||
-                  !myBinding?.daemon_id ||
+                  (!hasOwnDaemon && !canBorrow) ||
                   (!providerEnabled && selectedProvider !== null) ||
                   !workspaceData?.root_path
                 }
@@ -595,9 +615,15 @@ export default function AgentPage({ params }: Props) {
               该守护进程未启用 {PROVIDER_META[selectedProvider]?.label ?? selectedProvider}
             </p>
           )}
-          {!myBinding?.daemon_id && (
+          {/* task-13 / FR-04：无自有 daemon 区分「需先绑定」与「将借用」提示。 */}
+          {!hasOwnDaemon && !canBorrow && (
             <p className="mt-2 text-xs text-amber-600">
               请先在工作区设置中绑定守护进程
+            </p>
+          )}
+          {!hasOwnDaemon && canBorrow && (
+            <p className="mt-2 text-xs text-sky-600">
+              未绑定自有守护进程，将借用工作空间共享守护进程
             </p>
           )}
           {dispatchError && (

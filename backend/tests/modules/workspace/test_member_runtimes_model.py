@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import DateTime, String, inspect
+from sqlalchemy import Boolean, DateTime, String, inspect
 from sqlmodel import SQLModel
 
 from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
@@ -38,6 +38,15 @@ def test_indexes():
     idx = {i.name for i in WorkspaceMemberRuntime.__table__.indexes}
     assert "ix_wmr_workspace" in idx
     assert "ix_wmr_runtime" in idx
+    # task-01 (2026-07-25-daemon-borrow-for-business / D-005@v1):
+    # 借用查询走部分索引 ix_wmr_shared（WHERE shared=TRUE），仅命中共享行。
+    assert "ix_wmr_shared" in idx
+    shared_idx = next(
+        i for i in WorkspaceMemberRuntime.__table__.indexes if i.name == "ix_wmr_shared"
+    )
+    # 部分索引仅在 shared=TRUE 时生效（design §8）；postgresql_where 为 PG 方言 kw，
+    # SQLite dialect 会在 create_all 时忽略它（建为全索引），但 kw 必须挂上供 PG 取用。
+    assert shared_idx.dialect_options["postgresql"]["where"] is not None
 
 
 def test_column_types():
@@ -55,3 +64,26 @@ def test_create_all_builds_table(tmp_path):
     eng = create_engine(f"sqlite:///{tmp_path}/wmr.db")
     SQLModel.metadata.create_all(eng, tables=[WorkspaceMemberRuntime.__table__])
     assert "workspace_member_runtimes" in set(inspect(eng).get_table_names())
+
+
+def test_shared_column_bool_not_null_default_false():
+    """task-01 / D-005@v1：shared 列存在，Boolean，nullable=False，server_default=false。
+
+    server_default=false 保证既有 binding 行迁移后默认非共享（零回归核心），
+    业务/管理人员的借用查询仅命中 lender 主动 shared=True 的行。
+    """
+    c = WorkspaceMemberRuntime.__table__.c
+    assert "shared" in set(c.keys())
+    shared = c.shared
+    assert isinstance(shared.type, Boolean)
+    assert shared.nullable is False
+    # server_default=false：迁移给旧行回填 false，新行不显式赋值也落 false
+    assert shared.server_default is not None
+    assert shared.server_default.arg.text == "false"
+
+
+def test_shared_field_defaults_false_on_construct():
+    """task-01：未显式给 shared 时构造实例，默认 False（Python 层默认值）。"""
+    # 只给必填最小字段即可构造（PK + root_path + path_source）
+    binding = WorkspaceMemberRuntime(root_path="/tmp/x", path_source="daemon_client")
+    assert binding.shared is False
