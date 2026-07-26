@@ -786,6 +786,36 @@ async def _cleanup_before_dispatch(
     await cleanup_stale_pending_runs(session, change_id)
 
 
+def _write_last_dispatch_payload(
+    stages: dict,
+    target_stage: str,
+    user_id,
+    config_payload: dict,
+) -> dict:
+    """构造 last_dispatch 写入值，统一两个 dispatch 入口的 gate 计数合并语义。
+
+    第六批 code-quality（双入口漂移修复）：``dispatch()`` 与 ``dispatch_next_step()``
+    是两条平行 stage 调度入口，此前各写各的 last_dispatch——第四批 F1 只给
+    ``dispatch()`` 加了 merge（同 stage 保留 gate_retry_count/gate_last_errors，
+    跨 stage 重置，R12 死循环防护），``dispatch_next_step()``（/execute 端点 +
+    测试入口）仍用全新 dict 覆盖致计数丢失。抽单一真相源消除漂移，config 形状
+    由调用方决定（dispatch 用 prompt_template，dispatch_next_step 用 phase）。
+    """
+    prev = dict(stages.get("last_dispatch") or {})
+    if prev.get("stage") != target_stage:
+        prev.pop("gate_retry_count", None)
+        prev.pop("gate_last_errors", None)
+    prev.update(
+        {
+            "stage": target_stage,
+            "user_id": str(user_id),
+            "at": datetime.now(UTC).isoformat(),
+            "config": config_payload,
+        }
+    )
+    return prev
+
+
 async def dispatch(
     session: AsyncSession,
     workspace_id: uuid.UUID,
@@ -837,30 +867,18 @@ async def dispatch(
 
     # dict() copy avoids SQLAlchemy JSON in-place mutation not persisting.
     stages = dict(change.stages or {})
-    # 第四批 code-quality（gate_retry 覆盖修复）：merge 而非覆盖 last_dispatch。
-    # auto_dispatch_next_step 在 exit1 打回点把 gate_retry_count/gate_last_errors
-    # 写进 last_dispatch（见 :351），此处若用全新 dict 覆盖会丢弃它们 → 下一轮
-    # 打回读回 count=0 → R12 死循环防护（count>=_GATE_RETRY_LIMIT 升级 exit2
-    # 卡住报警）生产完全失效（现有 test_gate_retry 全 mock dispatch 绕过此处，
-    # 故单测全绿却掩盖生产 bug）。同 stage 重跑保留计数；跨 stage 推进重置
-    # （gate count 是「同 stage 连续失败」语义，跨 stage 不应累积）。
-    prev_last_dispatch = dict(stages.get("last_dispatch") or {})
-    if prev_last_dispatch.get("stage") != target_stage:
-        prev_last_dispatch.pop("gate_retry_count", None)
-        prev_last_dispatch.pop("gate_last_errors", None)
-    prev_last_dispatch.update(
+    # 第四批 F1 merge 语义（同 stage 保留 gate_retry_count/gate_last_errors，
+    # 跨 stage 重置）已抽 _write_last_dispatch_payload；dispatch_next_step 同源。
+    stages["last_dispatch"] = _write_last_dispatch_payload(
+        stages,
+        target_stage,
+        user_id,
         {
-            "stage": target_stage,
-            "user_id": str(user_id),
-            "at": datetime.now(UTC).isoformat(),
-            "config": {
-                "prompt_template": config.prompt_template,
-                "requires_worktree": config.requires_worktree,
-                "read_only": config.read_only,
-            },
-        }
+            "prompt_template": config.prompt_template,
+            "requires_worktree": config.requires_worktree,
+            "read_only": config.read_only,
+        },
     )
-    stages["last_dispatch"] = prev_last_dispatch
     change.stages = stages
     session.add(change)
     await session.commit()
@@ -1390,6 +1408,7 @@ async def _run_gate_via_delegate(
     code_root: str,
     spec_dir: str | None,
     stage: str = "verify",
+    release_transaction: bool = True,
 ) -> dict[str, Any]:
     """经 HostFsDelegate.run_command 在 daemon 侧执行 ``sillyspec gate``。
 
@@ -1441,6 +1460,7 @@ async def _run_gate_via_delegate(
             args=args,
             cwd=code_root,
             timeout=_GATE_RPC_TIMEOUT_SECONDS,
+            release_transaction=release_transaction,
         )
     except Exception as exc:
         # RPC 异常 / ws_rpc 未接线 / daemon 离线 / 超时 → fail-loud exit 2
@@ -1680,17 +1700,19 @@ class SillySpecStageDispatchService:
         # Step 5: Record last_dispatch in change.stages JSON (run_id is
         # backfilled in Step 7 once start_stage_dispatch returns the real Run).
         # dict() copy avoids SQLAlchemy JSON in-place mutation not persisting.
+        # 第六批：复用 _write_last_dispatch_payload（与 dispatch() 同源 merge 语义，
+        # 同 stage 保留 gate_retry_count/gate_last_errors），消除双入口漂移。
         stages = dict(change.stages or {})
-        stages["last_dispatch"] = {
-            "stage": target_stage,
-            "user_id": str(user_id),
-            "at": datetime.now(UTC).isoformat(),
-            "config": {
+        stages["last_dispatch"] = _write_last_dispatch_payload(
+            stages,
+            target_stage,
+            user_id,
+            {
                 "phase": config.phase,
                 "requires_worktree": config.requires_worktree,
                 "read_only": config.read_only,
             },
-        }
+        )
         change.stages = stages
         session.add(change)
         await session.commit()

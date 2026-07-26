@@ -514,7 +514,11 @@ class PpdKanbanService:
         """
         if not user_ids:
             return {}
-        stmt = select(PlanTask).where(PlanTask.user_id.in_(user_ids))
+        # 第六批：只取统计用到的 3 列（避免载入 task_description/content/remarks 等
+        # Text 大列），结果集语义不变（count/work_load/id 与原 select(PlanTask) 一致）。
+        stmt = select(PlanTask.user_id, PlanTask.work_load, PlanTask.id).where(
+            PlanTask.user_id.in_(user_ids)
+        )
         if req.project_id is not None:
             stmt = stmt.where(PlanTask.project_id == req.project_id)
         if req.status is not None:
@@ -528,11 +532,11 @@ class PpdKanbanService:
         stats: dict[uuid.UUID, dict[str, Any]] = defaultdict(
             lambda: {"count": 0, "hours": 0.0, "task_ids": []}
         )
-        for t in result.scalars().all():
-            s = stats[t.user_id]
+        for user_id, work_load, task_id in result.all():
+            s = stats[user_id]
             s["count"] += 1
-            s["hours"] += _parse_hours(t.work_load)
-            s["task_ids"].append(t.id)
+            s["hours"] += _parse_hours(work_load)
+            s["task_ids"].append(task_id)
         return dict(stats)
 
     async def _load_org_map(self, user_ids: list[uuid.UUID]) -> dict[uuid.UUID, Organization]:

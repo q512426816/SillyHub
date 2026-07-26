@@ -383,6 +383,13 @@ export default function RuntimesPage() {
   // D-007：机器级分页，默认 20/页。
   const PAGE_SIZE = 20;
   const [query, setQuery] = useState("");
+  // 第六批：搜索框防抖——输入即时回显(query)，listParams 用 debouncedQuery，
+  // 避免每次按键触发 react-query 重取（"project" 8 键原本 8 次重取 → 现 1 次）。
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query), 300);
+    return () => clearTimeout(t);
+  }, [query]);
   const [providerFilter, setProviderFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [ownerUserId, setOwnerUserId] = useState<string | null>(null);
@@ -452,14 +459,14 @@ export default function RuntimesPage() {
   // hook 内部走 daemonMachines.list。
   const listParams = useMemo<DaemonMachineListParams>(
     () => ({
-      q: query.trim() || undefined,
+      q: debouncedQuery.trim() || undefined,
       status: statusFilter || undefined,
       provider: providerFilter || undefined,
       user_id: isPlatformAdmin ? ownerUserId ?? undefined : undefined,
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
     }),
-    [query, statusFilter, providerFilter, ownerUserId, page, isPlatformAdmin],
+    [debouncedQuery, statusFilter, providerFilter, ownerUserId, page, isPlatformAdmin],
   );
   const { items: machines, total, sessions, isLoading, error: listError, refetch } = useDaemonMachines(listParams);
 

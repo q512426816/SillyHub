@@ -117,6 +117,84 @@ async def _to_read(session: AsyncSession, role: Role) -> RoleRead:
     )
 
 
+async def _perms_by_roles(
+    session: AsyncSession, role_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[str]]:
+    """Batched per-role permission lists（原 list 逐角色 SELECT → N+1）。"""
+    if not role_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(col(RolePermission.role_id), col(RolePermission.permission)).where(
+                col(RolePermission.role_id).in_(role_ids)
+            )
+        )
+    ).all()
+    out: dict[uuid.UUID, list[str]] = {rid: [] for rid in role_ids}
+    for rid, perm in rows:
+        out.setdefault(rid, []).append(perm)
+    return out
+
+
+async def _count_users_by_roles(
+    session: AsyncSession, role_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, int]:
+    """Batched distinct-user-count per role across user_workspace_roles + user_roles
+    （set-union 语义对齐 _count_users：fetch (role_id,user_id) 对后按角色 union 计数，
+    替代 N×2 查询）。"""
+    if not role_ids:
+        return {}
+    ws_pairs = {
+        (rid, uid)
+        for rid, uid in (
+            await session.execute(
+                select(col(UserWorkspaceRole.role_id), col(UserWorkspaceRole.user_id)).where(
+                    col(UserWorkspaceRole.role_id).in_(role_ids)
+                )
+            )
+        ).all()
+    }
+    plat_pairs: set[tuple[uuid.UUID, uuid.UUID]] = set()
+    user_role_cls = _user_roles_model()
+    if user_role_cls is not None:
+        plat_pairs = {
+            (rid, uid)
+            for rid, uid in (
+                await session.execute(
+                    select(user_role_cls.role_id, user_role_cls.user_id).where(
+                        user_role_cls.role_id.in_(role_ids)
+                    )
+                )
+            ).all()
+        }
+    per_role: dict[uuid.UUID, set[uuid.UUID]] = {rid: set() for rid in role_ids}
+    for rid, uid in ws_pairs | plat_pairs:
+        per_role.setdefault(rid, set()).add(uid)
+    return {rid: len(users) for rid, users in per_role.items()}
+
+
+async def _to_read_many(session: AsyncSession, roles: list[Role]) -> list[RoleRead]:
+    """Batched _to_read for list()（perms + user_count 各一次批量查询，替代 N×3）。"""
+    role_ids = [role.id for role in roles]
+    perms_by = await _perms_by_roles(session, role_ids)
+    counts_by = await _count_users_by_roles(session, role_ids)
+    return [
+        RoleRead(
+            id=role.id,
+            key=role.key,
+            name=role.name,
+            description=role.description,
+            is_system=role.is_system,
+            is_active=role.is_active,
+            permissions=perms_by.get(role.id, []),
+            user_count=counts_by.get(role.id, 0),
+            created_at=role.created_at,
+            updated_at=role.updated_at,
+        )
+        for role in roles
+    ]
+
+
 class RoleService:
     """All write operations are guarded by ``require_permission_any``
     at the router layer; this class focuses on business rules."""
@@ -190,7 +268,7 @@ class RoleService:
             .all()
         )
 
-        items = [await _to_read(self._session, role) for role in rows]
+        items = await _to_read_many(self._session, list(rows))
         return RoleListResponse(items=items, total=total, page=page, size=size)
 
     async def get(self, role_id: uuid.UUID) -> RoleRead:

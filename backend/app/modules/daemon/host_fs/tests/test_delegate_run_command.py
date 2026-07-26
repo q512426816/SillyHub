@@ -564,3 +564,79 @@ class TestGateSpecDirWhitelist:
                 cwd="/code/root",
                 timeout=30,
             )
+
+
+# ── 5. H2（第六批）：release_transaction 在长 RPC 前 commit 释放事务 ─────────────
+
+
+class _SpySession:
+    """记录 commit 调用的最小 session 替身（_via_rpc 仅用到 .commit()）。"""
+
+    def __init__(self) -> None:
+        self.commit_calls: list[bool] = []
+
+    async def commit(self) -> None:
+        self.commit_calls.append(True)
+
+
+class TestReleaseTransaction:
+    """H2（第六批 code-quality）：gate 决策任务的 12min RPC 会触发 PG
+    idle-in-transaction 超时——_via_rpc 在 send_rpc 前 commit 释放事务。
+
+    release_transaction=True（gate 路径）→ commit 发生在 send_rpc 之前；
+    默认 False（现有 8 方法）→ 不 commit，事务语义逐字节零回归。
+    """
+
+    async def test_release_commits_before_send_rpc(self):
+        ws = _make_daemon_client_workspace()
+        rpc = _MockWsRpcTimeout(
+            result={"exit_code": 0, "stdout": "", "stderr": "", "duration_ms": 0}
+        )
+        session = _SpySession()
+        # 包装 send_rpc：记录调用瞬间 commit 已发生的次数，钉死「先 commit 后 send」。
+        commits_seen_at_send: list[int] = []
+        orig_send = rpc.send_rpc
+
+        async def _spy_send(**kwargs: Any) -> dict[str, Any]:
+            commits_seen_at_send.append(len(session.commit_calls))
+            return await orig_send(**kwargs)
+
+        rpc.send_rpc = _spy_send
+        delegate = HostFsDelegate(
+            session=session,
+            ws_hub=None,
+            ws_rpc=rpc,
+            daemon_id_resolver=_fake_daemon_id_resolver,
+        )
+        await delegate.run_command(
+            ws,
+            command="sillyspec",
+            args=_gate_args("c1"),
+            cwd=ws.root_path,
+            timeout=720.0,
+            release_transaction=True,
+        )
+        assert session.commit_calls == [True]  # 恰好一次 commit
+        assert commits_seen_at_send == [1]  # send_rpc 跑时 commit 已完成
+
+    async def test_default_does_not_commit(self):
+        # 默认 release_transaction=False：8 方法事务语义不变，绝不 commit。
+        ws = _make_daemon_client_workspace()
+        rpc = _MockWsRpcTimeout(
+            result={"exit_code": 0, "stdout": "", "stderr": "", "duration_ms": 0}
+        )
+        session = _SpySession()
+        delegate = HostFsDelegate(
+            session=session,
+            ws_hub=None,
+            ws_rpc=rpc,
+            daemon_id_resolver=_fake_daemon_id_resolver,
+        )
+        await delegate.run_command(
+            ws,
+            command="sillyspec",
+            args=_gate_args("c1"),
+            cwd=ws.root_path,
+            timeout=720.0,
+        )
+        assert session.commit_calls == []

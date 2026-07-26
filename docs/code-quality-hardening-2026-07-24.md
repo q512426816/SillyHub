@@ -310,3 +310,68 @@ DEFER（带原因）：
 
 > 第五批无 alembic migration，链仍单头 `202607251000`。
 > 关键修正：核实 PPM FK 为软关联无约束，a4f18dab 的"删父表 FK 500"判断不准（实为 MED 孤儿数据）。
+
+---
+
+## 9. 🟢 第六批（2026-07-25，用户"多 agent 交叉审查 + 架构优化/性能提升 + 直接动手"指示）
+
+> 性质延续前五批。本轮用 **Workflow 多 agent 交叉审查**：5 维度并行只读审查 agent
+> （后端性能/后端架构/daemon/前端/数据层）→ 每条发现派对抗式验证 agent 核实"真问题 + 零回归"
+> （共 23 agent / 667 工具调用）。18 条发现全部核实为真问题，其中 13 条 ADOPT（真问题 + 零回归），
+> 5 条 REAL-noZR（真问题但提案需额外设计）。本轮落地 11 处零回归改动 + 1 个聚焦回归测试，
+> 余下 7 条 DEFER（附原因）。动手前已读本文件 §1-§8 + `agent-platform-deep-audit-2026-07-12.md`。
+
+### Wave H — 架构：双入口收口 + 长事务边界 ✅ 零回归
+
+| ID | 文件:行 | 问题 | 修法 |
+|---|---|---|---|
+| H1 | `change/dispatch.py:789`(_write_last_dispatch_payload)/`:847`/`:1683` | `dispatch()` 与 `dispatch_next_step()` 两条平行 stage 调度入口各写各的 `last_dispatch`——第四批 F1 只给 `dispatch()` 加了 gate 计数 merge，`dispatch_next_step()`（/execute 端点 + 测试入口）仍用全新 dict 覆盖丢 `gate_retry_count`，双入口漂移 | 抽模块级 `_write_last_dispatch_payload(stages,stage,user,config)` 单一真相源（同 stage 保留 gate_retry_count/gate_last_errors、跨 stage 重置），两入口各自传 config 形状（dispatch=prompt_template / dispatch_next_step=phase）调用，消除漂移 |
+| H2 | `daemon/host_fs/delegate.py:655`(_via_rpc)/`:529`(run_command) + `change/dispatch.py:1386`(_run_gate_via_delegate) + `daemon/run_sync/service.py:1150` | gate 决策任务的 12min 网络 RPC 期间持有 DB 事务（`gate_session.get(Workspace)` 开事务 → `_run_gate_via_delegate` 内 daemon_id 解析 SELECT 后 `send_rpc` 持事务到返回 → commit），触发 PG `idle_in_transaction_session_timeout` | `_via_rpc` 加 `release_transaction: bool=False` 参数，daemon_id 解析后、`send_rpc` 前 `await self._session.commit()` 释放事务（快照 `ws_id` 避免 commit 后 workspace expire）；`run_command` 透传 flag；`_run_gate_via_delegate` 默认 `release_transaction=True`（gate 专用）；gate 任务 RPC 前 snapshot `change_owner_id`（commit 后 change expire，:1192 不再访问 `change.owner_id`）。默认 False = 现有 8 方法事务语义逐字节零回归 |
+
+### Wave B（续）— 后端 N+1 批量化（6 处）✅ 零回归
+
+| ID | 文件:行 | 问题 | 修法 |
+|---|---|---|---|
+| B6 | `agent/control.py:43`(cost_from_runs) + `router.py:827/882/901/918` + `orchestrator.py:283` | `cost_so_far(mission_id)` 内部再 `worker_runs` SELECT 一次；5 个调用点上一行已 fetch 同款 runs → 每 get_mission 轮询 / 每 worker 完成多跑一次冗余 SELECT | 加 `@staticmethod cost_from_runs(runs)`（与 cost_so_far 同公式），`cost_so_far` 复用它；5 调用点改用上文内存 runs（fresh/runs/all_runs）。`cost_so_far` 原签名不动（test_control 直测通过） |
+| B7 | `agent/execution.py:317`(collect_completed_artifacts) | 每 completed run 一次 `SELECT AgentArtifact WHERE run_id=? LIMIT 1` 探测是否已有 artifact（N worker = N 次，converge 每 worker 触发一次 = O(N²)） | 循环前一次 `SELECT run_id WHERE run_id IN(...)` → set，循环内 `if run.id in existing: continue`。语义等价（collect_artifact 本身幂等，R5 已接受并发重复 collect 无害） |
+| B8 | `change/service.py:591`(sync_documents) | 逐文档 `SELECT ChangeDocument WHERE change_id+doc_type` 探测 upsert（N 文档 = N 次） | `list(documents)` 物化 + 一次 `WHERE change_id+doc_type IN(...)` → dict，循环内 `existing_docs.get(filename)` |
+| B9 | `ppm/plan/service.py:1357`(build_milestone_export_sections) | 每 has_module 里程碑一次 `list_modules_by_node`（N 里程碑 = N 次 SELECT PlanNodeModule） | 循环前一次 `WHERE plan_node_id IN(...)` → 按 node 分组 + 复用 `_no_sort_key` 排序，循环内 `modules_by_node.get(node.id,[])` |
+| B10 | `admin/roles_service.py:159`(list) + 新增 `_perms_by_roles`/`_count_users_by_roles`/`_to_read_many` | 角色列表每角色 3 查询（权限 + user_workspace_roles 计数 + user_roles 计数），20 行页=62 往返 | 新增批量 helper：perms 一次 `WHERE role_id IN(...)`、user 计数 fetch (role_id,user_id) 对后按角色 set-union（语义对齐 _count_users 跨表去重）；`list()` 改用 `_to_read_many`。单角色路径（get/create/update）仍走 `_to_read`（非 N+1，不动） |
+| B11 | `ppm/kanban/service.py:517`(_aggregate_task_stats) | `select(PlanTask)` 载入整行（含 task_description/content/remarks 等 Text 大列），循环只用 user_id/work_load/id 三字段 | `select(PlanTask.user_id, PlanTask.work_load, PlanTask.id)` 列裁剪，循环 `for user_id, work_load, task_id in result.all()` |
+
+### Wave F（续）— 前端请求优化 ✅ 零回归
+
+| ID | 文件:行 | 问题 | 修法 |
+|---|---|---|---|
+| F8 | `app/(dashboard)/runtimes/page.tsx:385` | 搜索框每按键改 `query` → listParams → react-query queryKey 变 → 重取（"project" 8 键 = 8 次重取） | 加 `debouncedQuery` state + 300ms setTimeout effect；输入框仍绑 `query`（即时回显），listParams 用 `debouncedQuery` |
+| F9 | `app/(dashboard)/workspaces/page.tsx:57` | 同上，且 reload 把 4 路请求（listWorkspaces + runtimes + instances + bindings）绑在 query 变化上，每键 4 请求 | 同款 `debouncedQuery`，reload deps + listWorkspaces `q` 改用 `debouncedQuery`（"project" 8 键 32 请求 → 4） |
+| F10 | `app/(dashboard)/workspaces/[id]/page.tsx:90` | `fetchMyBinding` 串行排在 6 路 Promise.all 之后（独立于其它 6 路却不同发），白多一个 RTT | 并入 Promise.all（第 7 路，带 .catch 降级），与原 fetch 同源同语义 |
+
+### 回归测试新增
+
+| ID | 文件 | 内容 |
+|---|---|---|
+| T-H2 | `daemon/host_fs/tests/test_delegate_run_command.py::TestReleaseTransaction` | H2 关键分支（`release_transaction=True` 时 commit 先于 send_rpc；默认 False 不 commit）。**必要**：`test_run_sync_gate_decision_task` 把 `_run_gate_via_delegate` 整个 AsyncMock 掉（memory「过度 mock 遮蔽」模式），H2 的 RPC 前提交分支原本零覆盖；本测试用 _SpySession + 包装 send_rpc 钉死「先 commit 后 send」 ordering |
+
+### DEFER（REAL-noZR 或需设计，附原因，非遗漏）
+
+| 项 | 原因 |
+|---|---|
+| `session-manager.ts:1777` end/fail 不清 `_store`（MEDIUM 内存泄漏） | `_store.delete` 删除会与 `get()`(daemon 路由校验) / list `_store.values()` / 落盘 flush（"不复活 ended session"逻辑）/ restore 交织；需设计"哪些 session 可驱逐 + 与持久化协调"，非安全局部改 |
+| `workspace-binding-guard.tsx:35` fetchMyBinding 走 react-query（LOW） | 验证者提示"零风险被高估，需补三项实现细节"——guard 内 check→redirect 逻辑改 react-query 需逐处反应性设计 |
+| `ppm/plan:192` + `ppm/problem:173` `_Crud[T]` 去重（LOW） | 两处已漂移（plan create 显式设 created_at，problem 不设依赖模型默认）；去重到 common/crud.py 需先定 created_at 哪个为准（LOW 维护性去重 + 漂移决策） |
+| `scan_docs/service.py:53` 列裁剪（LOW） | `list_` 返回完整 ORM 对象供 `ScanDocSummary.model_validate(d)` + conflict_counts 用 `.path`；列裁剪需同步改返回构造（pydantic 从 Row 校验会破），比 kanban 侵入大 |
+| `agent/service.py:177` tool_failure 死代码（LOW） | 删代码 + 删对应测试 + 核实无动态引用，范围大于本轮；死代码不影响运行 |
+| `codex-app-server-driver.ts:1061` pendingServerRequests 累积（LOW） | 该数组是**有意审计轨迹**（test 在 dispatch 完成后断言 length≥1），"完成后移除"会破坏测试（rule 9）；生产从不读，仅 cap 可选但边际 |
+| `coordinator.py:86` _fire_background_task 三处复制（LOW） | 去重需共享基类 + 三处类级 `_background_tasks` set 迁移，纯维护性无正确性收益 |
+
+### 验证（第六批）
+
+| 端 | 改动 | 改后 |
+|---|---|---|
+| backend | H1/H2/B6-B11 | change/agent/admin/plan 全套 889 passed + delegate/run_sync gate/kanban 127 passed + delegate run_command 21 passed（含 H2 新 2 例）；ruff ✅ / mypy ✅（494 文件） |
+| frontend | F8/F9/F10 | vitest 1059 passed（全量，零回归）；tsc ✅ |
+
+> 第六批无 alembic migration（纯代码层 + 事务边界），链仍单头 `202607251000`。
+> 方法论：Workflow 5 维度交叉审查 + 每条对抗式验证，避免单 agent 误报；H2 因 gate 测试过度 mock 补聚焦回归测试锁定 RPC 前提交契约。
+> 最高价值：H1（dispatch 双入口漂移收口，第四批 F1 漏网的平行入口）+ H2（gate 12min RPC 长事务致 PG 超时，架构级事务边界修复）。

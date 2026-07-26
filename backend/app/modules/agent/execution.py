@@ -313,18 +313,25 @@ class MissionExecutionService:
             col(AgentRun.mission_id) == mission_id,
             AgentRun.status == "completed",
         )
+        runs = (await self._session.execute(stmt)).scalars().all()
         collected = 0
-        for run in (await self._session.execute(stmt)).scalars().all():
-            has = (
-                (
-                    await self._session.execute(
-                        select(AgentArtifact).where(AgentArtifact.run_id == run.id).limit(1)
-                    )
+        if not runs:
+            return collected
+        # 第六批：批量取已存在 artifact 的 run_id 集（原逐 run SELECT limit(1) → N+1）。
+        # 语义等价：任一 artifact 存在即跳过该 run（collect_artifact 本身幂等，R5 已
+        # 接受并发重复 collect 无害，TOCTOU 窗口未引入新故障类别）。
+        run_ids = [run.id for run in runs]
+        existing_run_ids = set(
+            (
+                await self._session.execute(
+                    select(AgentArtifact.run_id).where(AgentArtifact.run_id.in_(run_ids))
                 )
-                .scalars()
-                .first()
             )
-            if has:
+            .scalars()
+            .all()
+        )
+        for run in runs:
+            if run.id in existing_run_ids:
                 continue
             await self.collect_artifact(run, run.output_redacted or "(无产出)", kind="summary")
             collected += 1
