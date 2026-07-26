@@ -89,8 +89,13 @@ def upgrade() -> None:
         sa.column("description", sa.Text),
         sa.column("is_system", sa.Boolean),
         sa.column("is_active", sa.Boolean),
-        sa.column("created_at", sa.DateTime),
-        sa.column("updated_at", sa.DateTime),
+        # sa.TIMESTAMP(timezone=True) 对齐实际列（auth/model.py:72 DateTime(timezone=True)
+        # = TIMESTAMPTZ）+ 既有迁移 202605280900 范式。若用 sa.DateTime（naive），
+        # bulk_insert 的 INSERT cast 成 TIMESTAMP WITHOUT TIME ZONE，
+        # asyncpg 拒绝 tz-aware datetime（can't subtract offset-naive and offset-aware，
+        # SQLite 宽松不暴露，PG 才触发）。
+        sa.column("created_at", sa.TIMESTAMP(timezone=True)),
+        sa.column("updated_at", sa.TIMESTAMP(timezone=True)),
     )
     op.bulk_insert(
         roles_table,
