@@ -46,6 +46,7 @@ import { hostname } from 'node:os';
 
 import {
   DEFAULT_CONFIG_DIR,
+  CLAUDE_CONFIG_DIR,
   DEFAULT_CONFIG,
   loadConfig,
   saveConfig,
@@ -281,6 +282,9 @@ export function isProcessAlive(pid: number): boolean {
 export async function writePid(pid: number): Promise<void> {
   const pidFile = getPidFile();
   await mkdir(dirname(pidFile), { recursive: true });
+  // ql-20260726-002-1180：确保 claude 隔离配置目录存在（spawn-env 注入 CLAUDE_CONFIG_DIR，
+  // daemon spawn claude 时 claude 读此目录而非宿主机 ~/.claude，避免 cc-switch 污染）。
+  await mkdir(CLAUDE_CONFIG_DIR, { recursive: true });
   await writeFile(pidFile, String(pid), 'utf-8');
 }
 

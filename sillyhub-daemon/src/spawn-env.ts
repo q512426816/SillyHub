@@ -21,6 +21,7 @@
  */
 
 import { getInjector } from './credential-injector.js';
+import { CLAUDE_CONFIG_DIR } from './config.js';
 import type { ProviderConfig } from './types.js';
 
 /**
@@ -146,6 +147,12 @@ export function buildSpawnEnv(
       Object.assign(env, inj.toEnv(ctx.provider_config));
     }
   }
+
+  // ql-20260726-002-1180：隔离 claude 配置目录（避免宿主机 ~/.claude/settings.json
+  // 如 cc-switch 的 model/env 污染平台注入）。daemon 启动确保 CLAUDE_CONFIG_DIR 存在。
+  // 总注入（含无 provider_config 场景）：平台 daemon spawn 的 claude 一律不读宿主机
+  // settings.json，只用 daemon 注入/兜底 env。
+  env.CLAUDE_CONFIG_DIR = CLAUDE_CONFIG_DIR
 
   return env;
 }

@@ -50,6 +50,16 @@ function stripBOM(s: string): string {
 export const DEFAULT_CONFIG_DIR: string = join(homedir(), '.sillyhub', 'daemon');
 
 /**
+ * 平台 daemon spawn claude 的隔离配置目录（ql-20260726-002-1180）。
+ *
+ * claude code 读 `$CLAUDE_CONFIG_DIR/settings.json`；默认 `~/.claude` 会被宿主机
+ * 的 cc-switch 等工具污染（model/env），覆盖平台注入的 provider_config env。
+ * 指向 daemon 专属目录（无 settings.json → claude 走默认 + 注入 env）让平台
+ * daemon spawn 的 claude 与用户手动跑的 claude（cc-switch）互不干扰。
+ */
+export const CLAUDE_CONFIG_DIR: string = join(DEFAULT_CONFIG_DIR, 'claude-config');
+
+/**
  * 默认配置文件 `<DEFAULT_CONFIG_DIR>/config.json`。
  * 等价 Python `DEFAULT_CONFIG_DIR / "config.json"`。
  *
