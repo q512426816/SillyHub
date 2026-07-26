@@ -44,6 +44,7 @@ from app.modules.agent.service import AgentService, submit_run_input
 from app.modules.auth.model import User, UserWorkspaceRole
 from app.modules.auth.permissions import Permission
 from app.modules.daemon.host_fs import new_host_fs_delegate
+from app.modules.daemon.lease.context import _inject_provider_config
 from app.modules.daemon.model import DaemonTaskLease
 from app.modules.daemon.permission_service import WorkspaceDialogRead
 from app.modules.daemon.router import PermissionServiceDep
@@ -262,6 +263,35 @@ async def get_execution_context(
     # 原 server-local + scan 的 lease_meta spec_root 透传已废（server-local 列删除）。
     response_spec_root: str | None = None
 
+    # task-06 X-10 补漏（2026-07-26）：/execution-context 也注入 provider_config
+    # + 覆盖 model。原 X-10 只覆盖 claim_lease payload[model]，但 claude SDK 走
+    # /execution-context 拿 execPayload.model，漏覆盖致 opus[1m] 透传给 DeepSeek 报
+    # "模型不存在"。此处复用 _inject_provider_config 与 claim 同源。
+    exec_lease = (
+        (
+            await session.execute(
+                select(DaemonTaskLease)
+                .where(
+                    DaemonTaskLease.agent_run_id == run_id,
+                    DaemonTaskLease.status.in_(["pending", "claimed"]),
+                )
+                .order_by(DaemonTaskLease.created_at.desc())
+                .limit(1)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    exec_payload: dict = {"model": run.model or lease_meta.get("model")}
+    if exec_lease is not None:
+        await _inject_provider_config(
+            session,
+            exec_lease,
+            lease_meta,
+            exec_payload,
+            agent_kind_raw=run.provider or lease_meta.get("provider"),
+        )
+
     return ExecutionContextResponse(
         agent_run_id=str(run.id),
         claude_md=claude_md,
@@ -272,7 +302,8 @@ async def get_execution_context(
         # ql-20260618-009：AgentRun 是 source of truth；lease_meta 仅在 AgentRun
         # 字段为空时兜底（旧测试场景），避免 transport 覆盖快照。
         provider=run.provider or lease_meta.get("provider"),
-        model=run.model or lease_meta.get("model"),
+        model=exec_payload.get("model") or run.model or lease_meta.get("model"),
+        provider_config=exec_payload.get("provider_config"),
         resume_session_id=lease_meta.get("resume_session_id"),
         repo_url=lease_meta.get("repo_url"),
         branch=lease_meta.get("branch"),
@@ -825,7 +856,7 @@ async def create_mission(
         )
         ctrl = MissionControlService(session)
         fresh = await ctrl.worker_runs(mission.id)
-        cost = await ctrl.cost_so_far(mission.id)
+        cost = MissionControlService.cost_from_runs(fresh)
         arts = await _load_mission_artifacts(session, mission.id)
         return _mission_to_response(mission, fresh, cost, arts)
     cfg = GLMConfig.from_env()
@@ -880,7 +911,7 @@ async def create_mission(
             log.warning("mission_worker_dispatch_failed", run_id=str(run.id), error=str(exc))
     await session.commit()  # 提交 killed / dispatch 状态
     fresh = await ctrl.worker_runs(mission.id)
-    cost = await ctrl.cost_so_far(mission.id)
+    cost = MissionControlService.cost_from_runs(fresh)
     arts = await _load_mission_artifacts(session, mission.id)
     return _mission_to_response(mission, fresh, cost, arts)
 
@@ -899,7 +930,7 @@ async def get_mission(
     # Artifact 回灌 is triggered explicitly (cancel) / via complete_lease hook (todo).
     ctrl = MissionControlService(session)
     runs = await ctrl.worker_runs(mission.id)
-    cost = await ctrl.cost_so_far(mission.id)
+    cost = MissionControlService.cost_from_runs(runs)
     arts = await _load_mission_artifacts(session, mission.id)
     return _mission_to_response(mission, runs, cost, arts)
 
@@ -916,7 +947,7 @@ async def cancel_mission(
     ctrl = MissionControlService(session)
     await ctrl.cancel(mission)
     runs = await ctrl.worker_runs(mission.id)
-    cost = await ctrl.cost_so_far(mission.id)
+    cost = MissionControlService.cost_from_runs(runs)
     arts = await _load_mission_artifacts(session, mission.id)
     return _mission_to_response(mission, runs, cost, arts)
 
