@@ -8,21 +8,23 @@ created_at: 2026-07-25 23:42:38
 ---
 # llm_provider
 ## 定位
-用户级 LLM 供应商管理（D-002 用户级作用域）。负责用户自己的 LLM 供应商配置（接口地址 / API 密钥 / 模型 / 角色映射）的加密存储、CRUD、设默认，并经 lease 下发给 daemon 注入为 agent 环境变量。复用 `core/crypto.py` 的 `CredentialCipher` 加密（D-001 平台 SSOT，同 git_identity 范式 D-009）。
+用户级 LLM 供应商管理（D-002 用户级作用域）。负责用户自己的 LLM 供应商配置（接口地址 / API 密钥 / 模型 / 角色映射）的加密存储、CRUD、设默认/取消默认（cc-switch 式「启动/停止」），并经 lease 下发给 daemon 注入为 agent 环境变量。复用 `core/crypto.py` 的 `CredentialCipher` 加密（D-001 平台 SSOT，同 git_identity 范式 D-009）。
 ## 契约摘要
 - `GET /api/llm-providers` → LlmProviderList：当前用户供应商（api_key masked）。
 - `POST /api/llm-providers` → LlmProviderRead：新建（api_key 加密入库）。
 - `GET /api/llm-providers/{id}` → LlmProviderRead：详情（masked）。
 - `PATCH /api/llm-providers/{id}` → LlmProviderRead：编辑（api_key 不传则不动）。
 - `DELETE /api/llm-providers/{id}` → 204。
-- `POST /api/llm-providers/{id}/set-default` → LlmProviderRead：设默认（同 user×agent_kind 互斥）。
-- `LlmProviderService`：list_/get/create/update/delete/set_default + 加解密 + is_default 互斥 + owner 过滤。
+- `POST /api/llm-providers/{id}/set-default` → LlmProviderRead：设默认/「启动」（同 user×agent_kind 互斥，R-05）。
+- `POST /api/llm-providers/{id}/unset-default` → LlmProviderRead：取消默认/「停止」（对称 set-default；不清兄弟；全停则 lease 不注入 provider_config，daemon 回归本机，D-007）。
+- `LlmProviderService`：list_/get/create/update/delete/set_default/unset_default + 加解密 + is_default 互斥 + owner 过滤。
 - 模型：`LlmProvider`（user_id/name/agent_kind/base_url/encrypted_api_key/key_id/model/notes/website_url/auth_field/model_role_mappings/default_fallback_model/extra_env/is_default）。
 - lease 下发：`build_claim_payload` 按 `lease.runtime_id → DaemonRuntime.user_id`（主）解析用户默认 provider，解密后注入 `provider_config`（8 字段，D-005）。
 ## 关键逻辑
 ```
 create/update: CredentialCipher.encrypt(api_key) → 存 encrypted_api_key + key_id（明文不入 ORM）
 set_default: 事务内 UPDATE 同 (user_id, agent_kind) 清 is_default 再置（R-05 互斥）
+unset_default: 置本行 is_default=False（不清兄弟，幂等；cc-switch「停止」，全停→lease 不注入→daemon 回归本机 D-007）
 get/list: WHERE user_id = current_user.id（D-008 owner 过滤）
 _to_read: decrypt → X-09 masked（首4...尾4 / <8位**** / 空None）→ LlmProviderRead
 lease 下发: 命中默认 provider → 解密 api_key → provider_config（D-007 未配则 absent，daemon 走本机 env 兜底）
@@ -37,3 +39,6 @@ lease 下发: 命中默认 provider → 解密 api_key → provider_config（D-0
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 <!-- MANUAL_NOTES_END -->
+
+## 变更索引
+- ql-20260726-005-a43f | 加 cc-switch 式「启动/停止」：新增 unset-default 端点 + service.unset_default（全停→lease 不注入→daemon 回归本机）+ 前端启动/停止按钮 UI。

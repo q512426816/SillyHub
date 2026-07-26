@@ -104,3 +104,19 @@ async def set_default_provider(
     service = LlmProviderService(session)
     row = await service.set_default(_parse_id(provider_id), user.id)
     return service._to_read(row)
+
+
+@router.post("/{provider_id}/unset-default", response_model=LlmProviderRead)
+async def unset_default_provider(
+    provider_id: str,
+    session: SessionDep,
+    user: CurrentUser,
+) -> LlmProviderRead:
+    """取消默认（cc-switch 式「停止」）。
+
+    对称 ``set-default``（「启动」）：取消本行默认。若取消后该用户×agent_kind 无任何
+    默认供应商 → lease 不再下发 provider_config → daemon 回归本机凭证管理（D-007）。
+    """
+    service = LlmProviderService(session)
+    row = await service.unset_default(_parse_id(provider_id), user.id)
+    return service._to_read(row)

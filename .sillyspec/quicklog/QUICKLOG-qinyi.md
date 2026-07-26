@@ -372,3 +372,12 @@ created_at: 2026-07-05 16:33:00
 根因：入口门禁只按daemon_id是否存在判定,漏canBorrowSharedDaemon(business_member有daemon:borrow权限);agent页task-13已放宽入口门禁没对齐。
 方案：4文件(list page/switcher/m page/guard)加canBorrow=canBorrowSharedDaemon(permissions,is_platform_admin)判定,未绑定+canBorrow时放行直进(列表/switcher导航,移动端走电脑端打开,guard return null不渲染表单);switcher测试补mock导出+beforeEach重置默认false+加business_member放行用例。
 结果：typecheck clean/lint我4文件无告警/switcher13+page6=19测试全绿含新borrow用例。6文件已git add(5修复+QUICKLOG+frontend模块文档)未commit。
+## ql-20260726-005-a43f | 2026-07-26 22:59:30 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+
+需求：为「我的供应商」加 cc-switch 式启动/停止，启动的才生效且只能一个，启动后可停止，全停则平台不管控、daemon 回归本地。
+根因：现有 is_default 已是启动语义(R-05互斥+lease查is_default=True下发+无则absent回归本地D-007)，唯一缺口是无停止入口(前端无按钮、后端无专属端点)且UI用默认措辞而非cc-switch式启动/停止。
+方案：后端service.unset_default+POST /unset-default端点(对称set-default，不清兄弟，幂等)；前端api.unsetDefaultProvider+list组件改启动/停止按钮(Power图标)+已启动徽标+描述文案；form复选框措辞对齐；llm_provider模块文档同步。无迁移/无daemon/无lease改动。
+结果：backend llm_provider 27passed(+3 unset_default)；frontend全量1118passed；typecheck/ruff/format/mypy/lint全绿。

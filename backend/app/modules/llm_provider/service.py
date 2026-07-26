@@ -157,6 +157,26 @@ class LlmProviderService:
         log.info("llm_provider.set_default", provider_id=str(row.id))
         return row
 
+    async def unset_default(
+        self,
+        provider_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> LlmProvider:
+        """取消本行默认（cc-switch 式「停止」）。
+
+        对称 ``set_default``（「启动」）：仅置本行 ``is_default=False``，**不清兄弟**
+        —— 取消不会波及其它行（``_clear_sibling_defaults`` 仅在置 True 时触发）。
+        若取消后该 (user_id, agent_kind) 无任何默认 → lease 不再注入 provider_config
+        → daemon 回归本机凭证管理（design §9 D-007 兼容策略）。
+        幂等：对本就 False 的行取消是 no-op。
+        """
+        row = await self.get(provider_id, user_id)
+        row.is_default = False
+        await self._session.commit()
+        await self._session.refresh(row)
+        log.info("llm_provider.unset_default", provider_id=str(row.id))
+        return row
+
     # ── Helpers ───────────────────────────────────────────────────────
 
     async def _clear_sibling_defaults(

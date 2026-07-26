@@ -340,6 +340,24 @@ class TestOwnerIsolation:
         assert fresh is not None
         assert fresh.is_default is False
 
+    @pytest.mark.asyncio
+    async def test_unset_default_other_users_provider_raises(
+        self, db_session: AsyncSession
+    ) -> None:
+        """跨用户 unset_default 被拒且不改数据（owner 级 WHERE user_id 过滤）。"""
+        user_a = await _create_user(db_session, label="a")
+        user_b = await _create_user(db_session, label="b")
+        svc = LlmProviderService(db_session)
+        b_row = await svc.create(user_b, _create_payload(name="b-default", is_default=True))
+
+        with pytest.raises(PermissionDenied):
+            await svc.unset_default(b_row.id, user_a)
+
+        # B 的默认态未被 A 取消
+        fresh = await db_session.get(LlmProvider, b_row.id)
+        assert fresh is not None
+        assert fresh.is_default is True
+
 
 # ── is_default 互斥（R-05）──────────────────────────────────────────────────
 
@@ -454,6 +472,42 @@ class TestIsDefaultMutex:
         )
         defaults = (await db_session.execute(stmt)).scalars().all()
         assert defaults == []
+
+    @pytest.mark.asyncio
+    async def test_unset_default_clears_active_to_zero(self, db_session: AsyncSession) -> None:
+        """unset_default（cc-switch「停止」）：唯一默认被取消 → 同组默认数归零（全停→本地）。"""
+        user_id = await _create_user(db_session, label="a")
+        svc = LlmProviderService(db_session)
+        a = await svc.create(user_id, _create_payload(name="a", is_default=True))
+        b = await svc.create(user_id, _create_payload(name="b"))  # default=False
+
+        await svc.unset_default(a.id, user_id)
+
+        await db_session.refresh(a)
+        await db_session.refresh(b)
+        assert a.is_default is False
+        assert b.is_default is False  # 未被波及
+        stmt = select(LlmProvider).where(
+            LlmProvider.user_id == user_id,
+            LlmProvider.agent_kind == "claude",
+            LlmProvider.is_default.is_(True),
+        )
+        defaults = (await db_session.execute(stmt)).scalars().all()
+        assert defaults == []  # 全停 → lease 不注入 provider_config（D-007 回归本地）
+
+    @pytest.mark.asyncio
+    async def test_unset_default_idempotent_on_non_default(self, db_session: AsyncSession) -> None:
+        """对本就 False 的行 unset_default 是 no-op（幂等，不抛错）。"""
+        user_id = await _create_user(db_session, label="a")
+        svc = LlmProviderService(db_session)
+        a = await svc.create(user_id, _create_payload(name="a"))  # default=False
+
+        row = await svc.unset_default(a.id, user_id)
+
+        assert row.is_default is False
+        # 再取消一次仍正常返回
+        row2 = await svc.unset_default(a.id, user_id)
+        assert row2.is_default is False
 
 
 # ── masked 不回明文（X-09）─────────────────────────────────────────────────

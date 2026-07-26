@@ -21,6 +21,7 @@ import {
   formToUpdate,
   listProviders,
   setDefaultProvider,
+  unsetDefaultProvider,
   updateProvider,
   type LlmProviderFormValues,
 } from "@/lib/api/llm-providers";
@@ -156,6 +157,14 @@ describe("llm-providers API — method + path", () => {
     await setDefaultProvider("p-1");
     expect(h.lastMethod()).toBe("POST");
     expect(h.lastUrl()).toContain("/api/llm-providers/p-1/set-default");
+    expect(h.lastBody()).toBeNull();
+  });
+
+  it("unsetDefaultProvider → POST /api/llm-providers/{id}/unset-default（无 body）", async () => {
+    const h = mockFetch({ status: 200, body: READ });
+    await unsetDefaultProvider("p-1");
+    expect(h.lastMethod()).toBe("POST");
+    expect(h.lastUrl()).toContain("/api/llm-providers/p-1/unset-default");
     expect(h.lastBody()).toBeNull();
   });
 

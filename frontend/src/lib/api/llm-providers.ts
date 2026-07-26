@@ -154,12 +154,26 @@ export async function deleteProvider(id: string): Promise<void> {
   });
 }
 
-/** 设为默认（同 user×agent_kind 互斥，后端事务内先清兄弟行）。 */
+/** 设为默认/「启动」（同 user×agent_kind 互斥，后端事务内先清兄弟行）。 */
 export async function setDefaultProvider(
   id: string,
 ): Promise<LlmProviderRead> {
   return apiFetch<LlmProviderRead>(
     `/api/llm-providers/${encodeURIComponent(id)}/set-default`,
+    { method: "POST" },
+  );
+}
+
+/**
+ * 取消默认/「停止」（对称 setDefaultProvider）。取消本行默认，不清兄弟。
+ * 若取消后该用户×agent_kind 无任何默认 → lease 不再下发 provider_config
+ * → daemon 回归本机凭证管理（design §9 D-007）。
+ */
+export async function unsetDefaultProvider(
+  id: string,
+): Promise<LlmProviderRead> {
+  return apiFetch<LlmProviderRead>(
+    `/api/llm-providers/${encodeURIComponent(id)}/unset-default`,
     { method: "POST" },
   );
 }

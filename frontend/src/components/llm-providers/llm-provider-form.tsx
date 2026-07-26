@@ -312,7 +312,9 @@ export function LlmProviderForm({
           onChange={(e) => setIsDefault(e.target.checked)}
           className="h-3.5 w-3.5 rounded border border-input"
         />
-        <span className="text-xs">设为默认供应商（同 agent 种类仅一个默认）</span>
+        <span className="text-xs">
+          保存后立即启动此供应商（同 agent 种类仅一个生效；启动后可在列表「停止」）
+        </span>
       </label>
 
       <details className="rounded border border-dashed border-input/70 p-3">

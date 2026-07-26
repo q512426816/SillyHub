@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, RefreshCw, Sparkles, Star } from "lucide-react";
+import { Plus, Power, RefreshCw, Sparkles } from "lucide-react";
 
 import { SectionCard } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +15,7 @@ import {
   formToUpdate,
   listProviders,
   setDefaultProvider,
+  unsetDefaultProvider,
   updateProvider,
   type LlmProviderFormValues,
   type LlmProviderRead,
@@ -25,11 +26,13 @@ import { LlmProviderForm } from "./llm-provider-form";
 /**
  * 「我的供应商」区块（task-11）。
  *
- * 列表 + 新建/编辑表单 + 设默认 + 删除，配置跟随账号、所有工作空间通用（D-002）。
+ * 列表 + 新建/编辑表单 + 启动/停止（cc-switch 式） + 删除，配置跟随账号、所有工作空间通用（D-002）。
  * 嵌入设置页（settings/page.tsx），不单独开路由（task allowed_paths 限定）。
  *
  * 状态机：list ↔ form（create/edit）。form 打开时只渲染表单，取消回列表。
- * 操作后即时 reload 列表（设默认/删除/新建/编辑均刷新）。
+ * 启动 = set-default（is_default=true，同 agent 种类 R-05 互斥仅一个生效）；
+ * 停止 = unset-default（is_default=false，全停则 lease 不注入 provider_config，daemon 回归本机，D-007）。
+ * 操作后即时 reload 列表（启动/停止/删除/新建/编辑均刷新）。
  */
 
 /** 角色显示顺序，用于模型摘要。 */
@@ -108,10 +111,20 @@ export function LlmProviderSection() {
   const handleSetDefault = async (p: LlmProviderRead) => {
     try {
       await setDefaultProvider(p.id);
-      notify.success(`已将「${p.name}」设为默认`);
+      notify.success(`已启动「${p.name}」（同 agent 种类仅一个生效）`);
       await load();
     } catch (err) {
-      notify.error(err, "设默认失败");
+      notify.error(err, "启动失败");
+    }
+  };
+
+  const handleUnsetDefault = async (p: LlmProviderRead) => {
+    try {
+      await unsetDefaultProvider(p.id);
+      notify.success(`已停止「${p.name}」，平台不再下发，daemon 回归本机凭证`);
+      await load();
+    } catch (err) {
+      notify.error(err, "停止失败");
     }
   };
 
@@ -193,6 +206,8 @@ export function LlmProviderSection() {
     >
       <p className="mb-3 text-[11px] text-muted-foreground">
         管理你用于 Claude Code 的 LLM 供应商。配置跟随你的账号，<b>所有工作空间通用</b>。
+        点「<b>启动</b>」选中要生效的供应商，<b>同一时间只生效一个</b>（参考 cc-switch）；
+        点「<b>停止</b>」停用，<b>全部停止则平台不再管控，改用 daemon 本机凭证</b>。
         填好 API Key 和请求地址就能用；模型映射等高级项默认折叠，用中转站时再展开。
       </p>
 
@@ -239,11 +254,31 @@ export function LlmProviderSection() {
                   <Badge variant="warning">{p.agent_kind}</Badge>
                   {p.is_default && (
                     <Badge variant="success" className="gap-0.5">
-                      <Star className="h-2.5 w-2.5 fill-current" />
-                      默认
+                      <Power className="h-2.5 w-2.5" />
+                      已启动
                     </Badge>
                   )}
                   <div className="ml-auto flex items-center gap-1.5">
+                    {p.is_default ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 gap-1 text-[11px]"
+                        onClick={() => void handleUnsetDefault(p)}
+                      >
+                        <Power className="h-3.5 w-3.5" />
+                        停止
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        className="h-7 gap-1 text-[11px]"
+                        onClick={() => void handleSetDefault(p)}
+                      >
+                        <Power className="h-3.5 w-3.5" />
+                        启动
+                      </Button>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"
@@ -254,16 +289,6 @@ export function LlmProviderSection() {
                     >
                       编辑
                     </Button>
-                    {!p.is_default && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-[11px]"
-                        onClick={() => void handleSetDefault(p)}
-                      >
-                        设默认
-                      </Button>
-                    )}
                     <Button
                       variant="ghost"
                       size="sm"
