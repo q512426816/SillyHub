@@ -75,7 +75,10 @@ BUSINESS_MEMBER_PERMISSIONS: tuple[str, ...] = (
 
 
 def upgrade() -> None:
-    now = datetime.now(UTC)
+    # naive UTC:roles.created_at/updated_at 列为 TIMESTAMP WITHOUT TIME ZONE,
+    # aware(datetime.now(UTC)) 会被 asyncpg 拒绝(can't subtract offset-naive and offset-aware)。
+    # 对齐同库 202605280900 的 datetime.utcnow() 范式(naive UTC),复用已 import 的 UTC 避免 deprecated utcnow。
+    now = datetime.now(UTC).replace(tzinfo=None)
     # Python 侧生成 role_id 并在两条 bulk_insert 复用（同 202605280900 范式）。
     # 不用 SELECT id FROM roles：数据依赖型 SELECT 在 alembic offline --sql 模式
     # 下 op.get_bind()=None 无法跑；Python uuid 复用跨 online/offline 双模式可移植。

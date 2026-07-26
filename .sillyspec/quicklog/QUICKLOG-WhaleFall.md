@@ -415,3 +415,11 @@ created_at: 2026-07-21T08:48:56
 根因：fieldFiltersMap 基于全量 rawData 算每列去重，不随筛选联动，所有列下拉恒显示全部原始值，不符合 Excel 级联行为。
 方案：fieldFiltersMap 每列选项改为"排除本列、应用其它列筛选后的数据"去重——内层循环遍历 SORTABLE_FIELDS 应用各列筛选，遇到本列 key 时 continue 跳过(本列选项不受本列已选值影响)。依赖数组加 columnFilters。processedData 最终筛选(全列 AND)不变,只是下拉选项随其它列收窄。
 结果：①tsc --noEmit 0 error；②仅改 page.tsx + 同步 ppm.md 变更索引 ql-20260726-001-9c4b；③待 commit+push+重建 frontend 部署 + 用户验证级联收窄。
+## ql-20260726-003-7a2e | 2026-07-26 15:00:49 | 修复 backend 迁移 datetime aware/naive 致启动崩溃重启循环
+状态：已完成
+关联变更：（无）
+文件：backend/migrations/versions/202607251600_add_daemon_borrow_permission.py（upgrade() 的 now 由 aware 改 naive + 注释）
+需求：部署 weekly-plan 筛选时发现 backend 启动崩溃、restart 循环，阻塞整个站点（前端 healthy 但 API 500 无数据）。
+根因：迁移 202607251600 upgrade() 用 now=datetime.now(UTC)（aware 带时区），但 roles 表 created_at/updated_at 列是 naive（TIMESTAMP WITHOUT TIME ZONE，asyncpg 错误信息 $7::TIMESTAMP WITHOUT TIME ZONE 确认），asyncpg 拒绝 aware 插 naive，报 "can't subtract offset-naive and offset-aware datetimes"，seed business_member role 失败 → backend 启动崩溃 → restart 循环。同库 202605280900 用 datetime.utcnow()（naive）能正常跑。
+方案：行 78 now 改 naive=datetime.now(UTC).replace(tzinfo=None)（naive UTC，对齐 202605280900 的 utcnow 范式，复用已 import 的 UTC 避免 deprecated utcnow），加注释说明 roles 列为 naive。迁移此前每次失败回滚未应用，改后重跑成功。
+结果：①重建 backend 镜像后 backend healthy（Up 53s 不再 restart）；②日志 Application startup complete + Uvicorn running，无 datetime 错；③迁移重跑成功（business_member role 创建）；④/api/health 200 ok（db/redis ok）；⑤仅改 1 个迁移文件。
