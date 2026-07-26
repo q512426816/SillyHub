@@ -21,6 +21,13 @@ import {
   type StageProgress,
   type ArtifactEntry,
 } from "@/lib/runtime";
+import { DaemonRequiredNotice } from "@/components/daemon-required-notice";
+import {
+  canBorrowSharedDaemon,
+  fetchMyBinding,
+  type MemberBindingView,
+} from "@/lib/workspace-binding";
+import { useSession } from "@/stores/session";
 
 interface Props {
   params: { id: string };
@@ -48,6 +55,14 @@ export default function RuntimePage({ params }: Props) {
   const [artifactContent, setArtifactContent] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
+  // 2026-07-26-ungate-workspace-entry / FR-04：运行时数据经 spec_root（daemon-client 读
+  // 源码 .sillyspec/.runtime），无 binding 时 fetch 失败。门禁后移后，无 binding 主区
+  // 渲染 DaemonRequiredNotice（非阻断），有 binding 走原运行时展示。
+  const [myBinding, setMyBinding] = useState<MemberBindingView | null>(null);
+  const [bindingReady, setBindingReady] = useState(false);
+  const permissions = useSession((s) => s.user?.permissions);
+  const isPlatformAdmin = useSession((s) => s.user?.is_platform_admin === true);
+  const canBorrow = canBorrowSharedDaemon(permissions, isPlatformAdmin);
 
   const load = async () => {
     setLoading(true);
@@ -68,10 +83,36 @@ export default function RuntimePage({ params }: Props) {
     }
   };
 
+  // 先判 binding：无 binding 不 fetch runtime（避免无谓失败），主区渲染 DaemonRequiredNotice。
   useEffect(() => {
+    let active = true;
+    setBindingReady(false);
+    fetchMyBinding(workspaceId)
+      .then((b) => {
+        if (active) {
+          setMyBinding(b);
+          setBindingReady(true);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setMyBinding(null);
+          setBindingReady(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspaceId]);
+
+  const hasDaemon = !!myBinding?.daemon_id;
+
+  // 仅在已绑定 daemon 时加载运行时数据（零回归：有 binding 路径完全不变）。
+  useEffect(() => {
+    if (!hasDaemon) return;
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId]);
+  }, [hasDaemon, workspaceId]);
 
   const handleSelectArtifact = async (filename: string) => {
     if (selectedArtifact === filename) {
@@ -167,7 +208,22 @@ export default function RuntimePage({ params }: Props) {
         </div>
       )}
 
-      {loading ? (
+      {!bindingReady ? (
+        <p className="py-12 text-center text-xs text-muted-foreground">
+          加载中…
+        </p>
+      ) : !hasDaemon ? (
+        <DaemonRequiredNotice
+          feature="运行时"
+          workspaceId={workspaceId}
+          canBorrow={canBorrow}
+          onConfigured={() => {
+            void fetchMyBinding(workspaceId)
+              .then((b) => setMyBinding(b))
+              .catch(() => {});
+          }}
+        />
+      ) : loading ? (
         <p className="py-12 text-center text-xs text-muted-foreground">
           加载中…
         </p>

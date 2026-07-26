@@ -21,9 +21,9 @@
  *   - STATUS_LABELS / labelOf @/lib/status-labels（UI 无关文案表）
  *   - normalizeClientPath @/lib/client-path（路径规范化，与桌面创建同源）
  *
- * D-006：工作区详情及之后功能手机端不渲染——点卡片不 router.push('/workspaces/[id]')：
- *   - 已绑定（daemon_id 非空）→ message.info('请在电脑端打开')，不导航
- *   - 未绑定（daemon_id null）→ 唤起 WorkspaceBindingDialog
+ * D-006 / 2026-07-26-ungate-workspace-entry：工作区详情及之后功能手机端不渲染——
+ * 点卡片不 router.push('/workspaces/[id]')，任意工作区（含未绑定，门禁后移）一律：
+ *   - message.info('请在电脑端打开')，不导航（daemon 绑定降级为概览可选配置）
  *
  * 桌面对照：app/(dashboard)/workspaces/page.tsx（列表/筛选/创建/别名/绑定/daemon 徽标）。
  * 设计依据：.sillyspec/changes/2026-07-22-mobile-app-ui/design.md §5.3 / FR-07 / D-003 / D-006 / D-008。
@@ -36,7 +36,6 @@ import { App, Input } from "antd";
 
 import { MobileCardList, type MobileAction } from "@/components/mobile/mobile-card-list";
 import { MobileDetailSheet } from "@/components/mobile/mobile-detail-sheet";
-import { WorkspaceBindingDialog } from "@/components/workspace-binding-dialog";
 import { WorkspacePathPicker } from "@/components/workspace-path-picker";
 import { ApiError } from "@/lib/api";
 import { normalizeClientPath } from "@/lib/client-path";
@@ -54,7 +53,6 @@ import {
   type Workspace,
 } from "@/lib/workspaces";
 import { useDaemonStatusMap } from "@/lib/workspace-daemon-status";
-import { canBorrowSharedDaemon } from "@/lib/workspace-binding";
 import { STATUS_LABELS, labelOf } from "@/lib/status-labels";
 import { useSession } from "@/stores/session";
 import { cn } from "@/lib/utils";
@@ -97,9 +95,6 @@ export default function WorkspacesMobilePage() {
   const notify = useNotify();
   const { message } = App.useApp();
   const isPlatformAdmin = useSession((s) => s.user?.is_platform_admin === true);
-  // ql-20260726-004 / FR-04：business_member（canBorrow）未绑定也放行（靠借用）。
-  const permissions = useSession((s) => s.user?.permissions);
-  const canBorrow = canBorrowSharedDaemon(permissions, isPlatformAdmin);
 
   // 列表 + 分页（page 0-based，与桌面同 offset=page*PAGE_SIZE）。
   const [items, setItems] = useState<Workspace[]>([]);
@@ -125,8 +120,6 @@ export default function WorkspacesMobilePage() {
   const [aliasTarget, setAliasTarget] = useState<Workspace | null>(null);
   const [aliasValue, setAliasValue] = useState("");
   const [aliasSaving, setAliasSaving] = useState(false);
-  // task-07 / CB-1：未绑定工作区点击 → 唤起 daemon 绑定弹窗（复用桌面 WorkspaceBindingDialog）。
-  const [bindingTarget, setBindingTarget] = useState<Workspace | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -191,22 +184,13 @@ export default function WorkspacesMobilePage() {
     [statusMap],
   );
 
-  // D-006：点卡片分流（禁 router.push('/workspaces/[id]')）。
-  //   已绑定（daemon_id 非空）→ message.info('请在电脑端打开')，不导航；
-  //   未绑定（daemon_id null）→ 唤起绑定弹窗。
-  // daemon 离线仅显示状态不阻断（D-005），故只按 daemon_id 是否存在判定，与 online 无关。
+  // D-006 / 2026-07-26-ungate-workspace-entry：移动端不导航进详情（FR-07 手机端不渲染详情），
+  // 点任意工作区（含未绑定，门禁后移）一律提示电脑端打开。daemon 绑定降级为概览可选配置。
   const handleActivate = useCallback(
-    (w: Workspace) => {
-      const entry = statusMap[w.id];
-      const bound = !!entry?.daemon_id;
-      // ql-20260726-004：已绑定或可借用（business_member）→ 提示电脑端；否则弹绑定。
-      if (bound || canBorrow) {
-        message.info("请在电脑端打开");
-      } else {
-        setBindingTarget(w);
-      }
+    (_w: Workspace) => {
+      message.info("请在电脑端打开");
     },
-    [statusMap, message, canBorrow],
+    [message],
   );
 
   // ── 别名编辑（对齐桌面 handleOpenAlias / handleSaveAlias）──
@@ -377,17 +361,6 @@ export default function WorkspacesMobilePage() {
         ) : null}
       </MobileDetailSheet>
 
-      {/* 未绑定工作区 daemon 绑定弹窗（复用桌面 WorkspaceBindingDialog；
-          绑定成功 onBound → reload 刷徽标三态，AC-5 / D-003）。 */}
-      <WorkspaceBindingDialog
-        workspaceId={bindingTarget?.id ?? ""}
-        open={bindingTarget !== null}
-        onBound={() => {
-          setBindingTarget(null);
-          void reload();
-        }}
-        onClose={() => setBindingTarget(null)}
-      />
     </div>
   );
 }
@@ -454,12 +427,9 @@ function WorkspaceMobileCard({
         {w.slug}
       </p>
 
-      {/* 行 4：负责人 + 未绑定引导（对齐桌面 WorkspaceCard 未绑定提示） */}
+      {/* 行 4：负责人（未绑定态由徽标展示，配置入口在概览页，不再做进门引导） */}
       {ownerName ? (
         <p className="text-[12px] text-muted-foreground">负责人：{ownerName}</p>
-      ) : null}
-      {daemonStatus === "unbound" ? (
-        <p className="text-[12px] text-warning">需先配置守护进程，点击配置</p>
       ) : null}
     </div>
   );

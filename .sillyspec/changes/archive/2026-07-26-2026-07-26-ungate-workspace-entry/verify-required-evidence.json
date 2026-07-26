@@ -1,0 +1,18 @@
+{
+  "generatedAt": "2026-07-26T14:27:49.988Z",
+  "schemaVersion": 1,
+  "items": [
+    {
+      "task": "task-11",
+      "verdict": "spec+quality",
+      "evidence": [
+        "部署后e2e:180072点SillyHub工作区进门直进不弹Dialog(FR-01)",
+        "180072浏览文件中心/变更中心/成员/知识库正常(FR-05 daemon无关)",
+        "180072进runtime+scan-docs显示DaemonRequiredNotice空态+配置/借用按钮(FR-04)",
+        "180072进概览WorkspaceConfigCard配置引导非阻断与统计共存(FR-03)",
+        "180072进详情guard不阻断tabs正常(FR-02)",
+        "admin已绑定原行为零回归:进门导航/guard编辑入口/agent/scan"
+      ]
+    }
+  ]
+}

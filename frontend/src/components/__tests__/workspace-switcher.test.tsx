@@ -341,7 +341,7 @@ describe("WorkspaceSwitcher", () => {
     expect(mockSwitchWorkspace).toHaveBeenCalledWith("ws-b");
   });
 
-  it("未绑定项点击 → 打开 WorkspaceBindingDialog，不调 switchWorkspace（D-003）", async () => {
+  it("未绑定项点击 → switchWorkspace（2026-07-26-ungate-workspace-entry 门禁后移，不弹 Dialog）", async () => {
     setupCtx({ currentName: "前端中台", daemonOnline: true });
     setupStatus({
       "ws-a": { daemon_id: "d-a", online: true },
@@ -365,14 +365,14 @@ describe("WorkspaceSwitcher", () => {
     await openMenu();
     await clickItem("数据看板");
 
-    expect(mockSwitchWorkspace).not.toHaveBeenCalled();
-    expect(lastDialogProps).not.toBeNull();
-    expect(lastDialogProps?.open).toBe(true);
-    expect(lastDialogProps?.workspaceId).toBe("ws-c");
+    // 门禁后移：未绑定也直接切换，不弹绑定弹窗
+    expect(mockSwitchWorkspace).toHaveBeenCalledWith("ws-c");
+    expect(lastDialogProps).toBeNull();
   });
 
-  it("未绑定 + canBorrow（business_member）→ 直接 switchWorkspace，不弹 Dialog（ql-20260726-004）", async () => {
-    vi.mocked(canBorrowSharedDaemon).mockReturnValue(true);
+  it("门禁后移：canBorrow 判定已从入口移除，任意成员未绑定项也直接切换（不再依赖 daemon:borrow）", async () => {
+    // 进门闸移除后 switcher 不再调用 canBorrowSharedDaemon；保持默认 false，
+    // 验证任意成员（含无 daemon:borrow）未绑定项点击都直接 switchWorkspace。
     setupCtx({ currentName: "前端中台", daemonOnline: true });
     setupStatus({
       "ws-a": { daemon_id: "d-a", online: true },
@@ -398,34 +398,8 @@ describe("WorkspaceSwitcher", () => {
 
     expect(mockSwitchWorkspace).toHaveBeenCalledWith("ws-c");
     expect(lastDialogProps).toBeNull();
-  });
-
-  it("绑定弹窗成功后，切进入（onBound 回调触发 switchWorkspace）", async () => {
-    setupCtx({ currentName: "前端中台", daemonOnline: true });
-    setupStatus({
-      "ws-a": { daemon_id: "d-a", online: true },
-      "ws-c": { daemon_id: null, online: false },
-    });
-    mockedList.mockResolvedValue({
-      items: [
-        mkWorkspace({ id: "ws-a", name: "前端中台" }),
-        mkWorkspace({ id: "ws-c", name: "数据看板" }),
-      ],
-      total: 2,
-    });
-    mockedBindings.mockResolvedValue([
-      mkBinding({ workspace_id: "ws-a", daemon_id: "d-a" }),
-      mkBinding({ workspace_id: "ws-c", daemon_id: null }),
-    ]);
-
-    withQueryClient(<WorkspaceSwitcher />);
-    await waitFor(() => expect(screen.getByText("前端中台")).toBeInTheDocument());
-
-    await openMenu();
-    await clickItem("数据看板");
-    fireEvent.click(await screen.findByTestId("dialog-confirm-bound"));
-
-    expect(mockSwitchWorkspace).toHaveBeenCalledWith("ws-c");
+    // canBorrow 判定已从入口移除，不应被调用
+    expect(canBorrowSharedDaemon).not.toHaveBeenCalled();
   });
 
   it("daemon 离线项仍可点击切换（D-005 仅标红不阻断）", async () => {

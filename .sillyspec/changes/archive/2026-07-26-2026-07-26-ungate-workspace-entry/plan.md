@@ -14,21 +14,21 @@ plan_level: full
 | spike-02 | 概览 `WorkspaceConfigCard` unbound 渲染：是轻量引导卡还是重型表单占满屏。决定 task-09 是否需收敛 | 不收敛若过重，UX 欠佳但不阻断；task-09 按需收敛 |
 
 ## Wave 1（并行，无依赖：进门自由化 + guard 降级 + 空态组件）
-- [ ] task-01: `workspaces/page.tsx` `handleActivate` 移除未绑定→Dialog 分支（always `router.push`）+ 删 `bindingTarget` state + 列表页 `WorkspaceBindingDialog` 进门用法（覆盖：FR-01, D-001, D-004）
-- [ ] task-02: `workspace-switcher.tsx` `handleClickEntry` 移除未绑定→Dialog 分支（always `switchWorkspace`）+ 删顶栏 `WorkspaceBindingDialog` 进门用法 + 移除 ql-004 入口点 `canBorrow` 判定（随进门闸移除）（覆盖：FR-01）
-- [ ] task-03: `m/workspaces/page.tsx` `handleActivate` 移除未绑定→Dialog 分支（always 提示电脑端）（覆盖：FR-01）
-- [ ] task-04: `workspace-binding-guard.tsx` unbound 不再渲染绑定表单（return null），降级为已绑定编辑入口（覆盖：FR-02, D-004）
-- [ ] task-05: 新建 `components/daemon-required-notice.tsx`（feature/workspaceId/canBorrow + [配置]/[借用] 按钮，非阻断）+ 单测（覆盖：FR-04, D-003）
+- [x] task-01: `workspaces/page.tsx` `handleActivate` 移除未绑定→Dialog 分支（always `router.push`）+ 删 `bindingTarget` state + 列表页 `WorkspaceBindingDialog` 进门用法（覆盖：FR-01, D-001, D-004）
+- [x] task-02: `workspace-switcher.tsx` `handleClickEntry` 移除未绑定→Dialog 分支（always `switchWorkspace`）+ 删顶栏 `WorkspaceBindingDialog` 进门用法 + 移除 ql-004 入口点 `canBorrow` 判定（随进门闸移除）（覆盖：FR-01）
+- [x] task-03: `m/workspaces/page.tsx` `handleActivate` 移除未绑定→Dialog 分支（always 提示电脑端）（覆盖：FR-01）
+- [x] task-04: `workspace-binding-guard.tsx` unbound 不再渲染绑定表单（return null），降级为已绑定编辑入口（覆盖：FR-02, D-004）
+- [x] task-05: 新建 `components/daemon-required-notice.tsx`（feature/workspaceId/canBorrow + [配置]/[借用] 按钮，非阻断）+ 单测（覆盖：FR-04, D-003）
 
 ## Wave 2（依赖 Wave 1：daemon 依赖页接入空态 + 概览 config-card 核实）
-- [ ] task-06: `runtime/page.tsx` 先核 daemon 耦合（spike-01），无 binding 主区渲染 `DaemonRequiredNotice`（覆盖：FR-04, R-01）
-- [ ] task-07: `scan-docs/page.tsx` 同（host_fs 读源码，spike-01）（覆盖：FR-04, R-01）
-- [ ] task-08: `components/page.tsx` 同（组件拓扑读源码，spike-01）（覆盖：FR-04, R-01）
-- [ ] task-09: 核实概览 `WorkspaceConfigCard` unbound 渲染（spike-02），过重则收敛为轻量引导（保留配置入口）；复用既有，无新建（覆盖：FR-03, D-002）
+- [x] task-06: `runtime/page.tsx` 先核 daemon 耦合（spike-01），无 binding 主区渲染 `DaemonRequiredNotice`（覆盖：FR-04, R-01）
+- [x] task-07: `scan-docs/page.tsx` 同（host_fs 读源码，spike-01）（覆盖：FR-04, R-01）
+- [x] task-08: `components/page.tsx` 同（组件拓扑读源码，spike-01）（覆盖：FR-04, R-01）
+- [x] task-09: 核实概览 `WorkspaceConfigCard` unbound 渲染（spike-02），过重则收敛为轻量引导（保留配置入口）；复用既有，无新建（覆盖：FR-03, D-002）
 
 ## Wave 3（依赖全部：测试 + 真实点页 verify）
-- [ ] task-10: 各 `__tests__/page.test.tsx` + guard/switcher 测试更新（进门自由化 + guard 降级 + 空态断言 + 移除 ql-004 入口 canBorrow 用例改判进门自由）（覆盖：全局回归）
-- [ ] task-11: 180072（无 binding 成员）真实点开各页 verify：进门直进（不弹 Dialog）/ 文档类正常 / daemon 依赖页空态 / 概览 config-card（覆盖：FR-01~05 全局验收）
+- [x] task-10: 各 `__tests__/page.test.tsx` + guard/switcher 测试更新（进门自由化 + guard 降级 + 空态断言 + 移除 ql-004 入口 canBorrow 用例改判进门自由）（覆盖：全局回归）
+- [x] task-11: 180072（无 binding 成员）真实点开各页 verify：进门直进（不弹 Dialog）/ 文档类正常 / daemon 依赖页空态 / 概览 config-card（覆盖：FR-01~05 全局验收）
 
 ## 任务总表
 

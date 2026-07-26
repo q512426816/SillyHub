@@ -9,8 +9,6 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { PageContainer, PageHeader } from "@/components/layout";
 import { WorkspaceCard, type DaemonBadgeStatus } from "@/components/workspace-card";
 import { WorkspaceScanDialog } from "@/components/workspace-scan-dialog";
-// task-07 / CB-1：未绑定工作区点击弹窗（task-06 产物，容器化 AccessGuide）。
-import { WorkspaceBindingDialog } from "@/components/workspace-binding-dialog";
 import { ApiError } from "@/lib/api";
 import {
   listDaemonInstances,
@@ -24,7 +22,7 @@ import {
   updateWorkspace,
   type Workspace,
 } from "@/lib/workspaces";
-import { canBorrowSharedDaemon, fetchMyBindings } from "@/lib/workspace-binding";
+import { fetchMyBindings } from "@/lib/workspace-binding";
 // task-07 / FR-06 / R-02：daemon 在线状态聚合（task-03 产物），单数据源供徽标消费。
 import { useDaemonStatusMap } from "@/lib/workspace-daemon-status";
 import { useNotify } from "@/lib/errors";
@@ -50,15 +48,8 @@ export default function WorkspacesPage() {
   );
   const [error, setError] = useState<string | null>(null);
   const [showDialog, setShowDialog] = useState(false);
-  // task-07 / CB-1：被点击的未绑定工作区，驱动 WorkspaceBindingDialog（task-06）。
-  const [bindingTarget, setBindingTarget] = useState<Workspace | null>(null);
   // task-08 / FR-04 / FR-05 / D-003@v1：筛选分页 + 平台管理员人员搜索 + 别名编辑。
   const isPlatformAdmin = useSession((s) => s.user?.is_platform_admin === true);
-  // ql-20260726-004 / FR-04：business_member 无自有 daemon 但有 daemon:borrow 权限，
-  // 入口门禁放行让其直接进入工作区（靠借用共享 daemon），不弹绑定 Dialog。
-  // 后端 placement _resolve_borrowed_or_own_runtime 做权威校验，前端只放行。
-  const permissions = useSession((s) => s.user?.permissions);
-  const canBorrow = canBorrowSharedDaemon(permissions, isPlatformAdmin);
   const [query, setQuery] = useState("");
   // 第六批：搜索框防抖——输入即时回显(query)，reload 用 debouncedQuery，
   // 避免每次按键触发 4 路后端请求（"project" 8 键原本 32 次请求 → 现 4 次）。
@@ -188,21 +179,14 @@ export default function WorkspacesPage() {
     [statusMap],
   );
 
-  // task-07 / CB-1：卡片整张点击分流。已绑定（daemon_id 非空）→ 进详情；
-  // 未绑定（daemon_id null）→ 弹 WorkspaceBindingDialog（task-06）。daemon 离线
-  // 仅显示状态不阻断进入（D-005），故只按 daemon_id 是否存在判定，与 online 无关。
-  // ql-20260726-004：未绑定但 canBorrow（business_member）→ 直接进详情（靠借用）。
+  // 2026-07-26-ungate-workspace-entry / FR-01 / D-001：门禁后移，卡片点击一律进详情，
+  // 不再按 daemon 绑定状态分流。daemon 绑定降级为概览页可选配置（WorkspaceConfigCard），
+  // daemon 依赖功能（runtime/scan-docs/components）在各自页面内联空态引导。
   const handleActivate = useCallback(
     (w: Workspace) => {
-      const entry = statusMap[w.id];
-      const bound = !!entry?.daemon_id;
-      if (bound || canBorrow) {
-        router.push(`/workspaces/${w.id}`);
-      } else {
-        setBindingTarget(w);
-      }
+      router.push(`/workspaces/${w.id}`);
     },
-    [statusMap, router, canBorrow],
+    [router],
   );
 
   return (
@@ -398,17 +382,6 @@ export default function WorkspacesPage() {
         ) : null}
       </Modal>
 
-      {/* task-07 / CB-1：未绑定工作区点击 → 弹 daemon 绑定弹窗（task-06 容器化 AccessGuide）。
-          绑定成功 onBound → 关窗 + reload 刷新徽标状态（AC-5 / D-003）。 */}
-      <WorkspaceBindingDialog
-        workspaceId={bindingTarget?.id ?? ""}
-        open={bindingTarget !== null}
-        onBound={() => {
-          setBindingTarget(null);
-          void reload();
-        }}
-        onClose={() => setBindingTarget(null)}
-      />
     </PageContainer>
   );
 }

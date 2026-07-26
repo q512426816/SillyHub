@@ -39,7 +39,7 @@
  *   - 不改 top-bar.tsx 接入（task-09 职责）。
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -56,10 +56,8 @@ import { cn } from "@/lib/utils";
 import { useWorkspaceContext } from "@/lib/use-workspace-context";
 import { useDaemonStatusMap } from "@/lib/workspace-daemon-status";
 import { listWorkspaces, type Workspace } from "@/lib/workspaces";
-import { canBorrowSharedDaemon, fetchMyBindings } from "@/lib/workspace-binding";
+import { fetchMyBindings } from "@/lib/workspace-binding";
 import { useWorkspaceStore } from "@/stores/workspace";
-import { useSession } from "@/stores/session";
-import { WorkspaceBindingDialog } from "@/components/workspace-binding-dialog";
 
 /** 下拉项呈现所需的最小信息（由列表 + binding + statusMap 聚合得出）。 */
 interface SwitcherEntry {
@@ -104,21 +102,17 @@ function statusBadgeLabel(entry: Pick<SwitcherEntry, "bound" | "online">): {
  *   1. 平台页引导态（workspaceId === null 且 current 为空，即从未选过）：显示「选择工作区」灰底，点击跳 /workspaces。
  *      若 current 有值（跳平台页前选过 ws），保留显示 current（会话级，不因跳平台页清空）。
  *   2. 已选工作区：按钮显示当前 ws 名 + daemon 徽标，下拉切同模块。
- *   3. 下拉内：列可切换工作区，未绑定项点击触发绑定弹窗（D-003）。
+ *   3. 下拉内：列可切换工作区，每项带 daemon 三态徽标（在线/离线/未绑定）。
  *
- * 切换：已绑定项 → switchWorkspace(id)（task-04 重写 URL，D-002 切同模块）。
- *       未绑定项 → 打开 WorkspaceBindingDialog，绑定成功 onBound → switchWorkspace。
- *       daemon 离线项 → 仅徽标标红，仍可点击（D-005 不阻断）。
+ * 切换（2026-07-26-ungate-workspace-entry 门禁后移）：任意项点击 → switchWorkspace(id)
+ * （task-04 重写 URL，D-002 切同模块），不再按绑定状态分流。daemon 绑定降级为概览页
+ * 可选配置；徽标仅展示三态，不阻断切换。
  */
 export function WorkspaceSwitcher(): JSX.Element {
   const router = useRouter();
   const { workspaceId, current, switchWorkspace } = useWorkspaceContext();
   const { statusMap } = useDaemonStatusMap();
   const setCurrent = useWorkspaceStore((s) => s.setCurrent);
-  // ql-20260726-004 / FR-04：business_member（canBorrow）未绑定也放行切工作区（靠借用）。
-  const permissions = useSession((s) => s.user?.permissions);
-  const isPlatformAdmin = useSession((s) => s.user?.is_platform_admin === true);
-  const canBorrow = canBorrowSharedDaemon(permissions, isPlatformAdmin);
 
   // 列表数据（workspace id→name + 当前用户 binding），切换器常驻顶栏需及时
   // 反映新建/重命名工作区。失败降级为空（按钮 name 退化用 current.id）。
@@ -202,8 +196,6 @@ export function WorkspaceSwitcher(): JSX.Element {
     return statusBadgeLabel({ bound, online: status?.online ?? false });
   })();
 
-  const [bindingTargetId, setBindingTargetId] = useState<string | null>(null);
-
   // ── 平台页引导态（workspaceId === null 且无 current：从未选过工作区） ──
   // 若 current 有值（跳平台页前选过 ws），保留显示 current，不因跳平台页清空。
   if (!workspaceId && !current) {
@@ -221,20 +213,10 @@ export function WorkspaceSwitcher(): JSX.Element {
     );
   }
 
+  // 2026-07-26-ungate-workspace-entry / FR-01：门禁后移，切换器点击一律切工作区，
+  // 不再按绑定状态分流。daemon 绑定降级为概览页可选配置；徽标仍展示三态。
   const handleClickEntry = (entry: SwitcherEntry) => {
-    if (!entry.bound && !canBorrow) {
-      // 未绑定且无借用能力 → 打开绑定弹窗（D-003），不切工作区
-      setBindingTargetId(entry.id);
-      return;
-    }
-    // 已绑定（含离线，D-005 不阻断）或可借用（ql-20260726-004 business_member）→ 切同模块
     switchWorkspace(entry.id);
-  };
-
-  const handleBound = () => {
-    // 绑定成功 → 切进入目标 ws（D-002 切同模块）
-    if (bindingTargetId) switchWorkspace(bindingTargetId);
-    setBindingTargetId(null);
   };
 
   return (
@@ -306,15 +288,6 @@ export function WorkspaceSwitcher(): JSX.Element {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-
-      {bindingTargetId && (
-        <WorkspaceBindingDialog
-          workspaceId={bindingTargetId}
-          open={true}
-          onBound={handleBound}
-          onClose={() => setBindingTargetId(null)}
-        />
-      )}
     </>
   );
 }

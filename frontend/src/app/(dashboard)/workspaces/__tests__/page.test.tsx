@@ -265,7 +265,7 @@ describe("WorkspacesPage 选择器改造 (task-07)", () => {
     expect(screen.queryByTestId("binding-dialog")).not.toBeInTheDocument();
   });
 
-  it("CB-1：未绑定工作区（daemon_id null）点击 → 弹 WorkspaceBindingDialog，不跳转", async () => {
+  it("CB-1：未绑定工作区（daemon_id null）点击 → 直接 router.push 详情（2026-07-26-ungate-workspace-entry 门禁后移，不弹 Dialog）", async () => {
     workspacesApi.listWorkspaces.mockResolvedValue({
       items: [mkWorkspace("ws-free")],
       total: 1,
@@ -279,39 +279,12 @@ describe("WorkspacesPage 选择器改造 (task-07)", () => {
     await waitFor(() =>
       expect(screen.getByTestId("ws-card-ws-free")).toBeInTheDocument(),
     );
-    // 徽标透传：未绑定 → unbound
+    // 徽标透传：未绑定 → unbound（仅展示，不阻断进门）
     expect(cardMock.lastProps?.daemonStatus).toBe("unbound");
 
-    // 整卡点击 → 弹绑定弹窗，不跳转
+    // 门禁后移：整卡点击 → 直接进详情，不弹绑定弹窗
     fireEvent.click(screen.getByTestId("card-activate"));
-    expect(nav.push).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.getByTestId("binding-dialog")).toBeInTheDocument());
-    expect(screen.getByTestId("binding-dialog")).toHaveAttribute("data-workspace", "ws-free");
-  });
-
-  it("AC-5：绑定弹窗 onBound → 关窗 + reload 刷新徽标状态", async () => {
-    workspacesApi.listWorkspaces.mockResolvedValue({
-      items: [mkWorkspace("ws-rebind")],
-      total: 1,
-    });
-    statusApi.statusMap = {
-      "ws-rebind": { daemon_id: null, online: false, status: null },
-    };
-
-    renderPage(<WorkspacesPage />);
-    await waitFor(() =>
-      expect(screen.getByTestId("ws-card-ws-rebind")).toBeInTheDocument(),
-    );
-    fireEvent.click(screen.getByTestId("card-activate"));
-    await waitFor(() => expect(screen.getByTestId("binding-dialog")).toBeInTheDocument());
-
-    // 模拟 task-06 绑定成功回调
-    fireEvent.click(screen.getByTestId("binding-bound"));
-
-    // 弹窗关闭 + listWorkspaces 再调（reload 刷新徽标）
-    await waitFor(() =>
-      expect(workspacesApi.listWorkspaces).toHaveBeenCalledTimes(2),
-    );
+    expect(nav.push).toHaveBeenCalledWith("/workspaces/ws-free");
     expect(screen.queryByTestId("binding-dialog")).not.toBeInTheDocument();
   });
 

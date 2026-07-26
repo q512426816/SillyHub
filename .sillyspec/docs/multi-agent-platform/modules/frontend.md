@@ -60,4 +60,6 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 - ql-20260726-004-e9db | 业务人员工作空间入口门禁放宽（agent 页 task-13 已放宽，入口门禁漏补）：列表页 workspaces/page + 顶栏 switcher + 移动端 m/workspaces + 详情 guard 的未绑定分支加 canBorrowSharedDaemon 判定——business_member（无自有 daemon + daemon:borrow 权限）未绑定时直接进入（靠借用），不弹/不渲染 daemon 绑定 Dialog/表单。switcher 测试补 mock 导出 + beforeEach 重置默认 false + 加 business_member 放行用例。
 
+- 2026-07-26-ungate-workspace-entry | 工作区入口门禁后移（daemon 要求下沉到操作点）：列表 workspaces/page + 顶栏 switcher + 移动端 m/workspaces + 详情 guard 四入口移除未绑定→拦分支，always 导航/切换/提示电脑端；guard unbound→return null（降级为已绑定编辑入口）；新建 DaemonRequiredNotice 组件（feature/workspaceId/canBorrow/onConfigured，复用 WorkspaceAccessGuide，内联非阻断）+ runtime/scan-docs 无 binding 主区渲染空态；components 页 daemon 无关不接入（数据走 getWorkspaceComponents backend API）；概览复用既有 WorkspaceConfigCard 为可选配置入口。纯前端零回归，无后端/schema/API 变更。
+
 <!-- MANUAL_NOTES_END -->

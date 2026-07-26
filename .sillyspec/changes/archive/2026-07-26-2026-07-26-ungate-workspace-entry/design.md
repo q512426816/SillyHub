@@ -146,7 +146,8 @@ interface Props {
 | 修改 | `frontend/src/app/(dashboard)/workspaces/[id]/components/page.tsx` | 同（组件拓扑读源码） |
 | 不改（复用） | `frontend/src/components/workspace-config-card.tsx` | 已是 binding 配置卡片，挂在概览页；guard 降级后自然成可选配置入口（Phase 3+6 合并，无新建） |
 | 不改（复用） | `frontend/src/components/workspace-access-guide.tsx` | 首次/编辑表单，config-card 复用 |
-| 修改 | 各对应 `__tests__/page.test.tsx` + `workspace-binding-guard.test` 等 | 进门自由化 + guard 降级 + 空态断言 |
+| 修改 | `frontend/src/app/(dashboard)/workspaces/__tests__/page.test.tsx` | 进门自由化断言（未绑定→router.push 不弹 Dialog）+ 删 AC-5 onBound 用例 |
+| 修改 | `frontend/src/components/__tests__/workspace-switcher.test.tsx` | 进门自由化断言（未绑定→switchWorkspace）+ canBorrow 判定移除改判 + 删 onBound 用例 |
 | 不改 | `frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx` | task-13 canBorrow 已处理 |
 | 不改 | files/changes/members/knowledge/audit/approvals/releases/incidents 页 | daemon 无关 |
 | 不改 | 后端 / migrations / daemon | 纯前端改造 |

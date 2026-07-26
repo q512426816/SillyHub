@@ -21,6 +21,13 @@ import {
   type ScanDocRead,
 } from "@/lib/scan-docs";
 import { buildTree, type TreeNode } from "@/lib/scan-docs-tree";
+import { DaemonRequiredNotice } from "@/components/daemon-required-notice";
+import {
+  canBorrowSharedDaemon,
+  fetchMyBinding,
+  type MemberBindingView,
+} from "@/lib/workspace-binding";
+import { useSession } from "@/stores/session";
 
 interface Props { params: { id: string }; }
 
@@ -101,6 +108,13 @@ export default function ScanDocsPage({ params }: Props) {
   const [pageError, setPageError] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
+  // 2026-07-26-ungate-workspace-entry / FR-04：扫描文档 reparse 经 host_fs 读源码
+  // （daemon-client），无 binding 时失败。门禁后移后，无 binding 主区渲染 DaemonRequiredNotice。
+  const [myBinding, setMyBinding] = useState<MemberBindingView | null>(null);
+  const [bindingReady, setBindingReady] = useState(false);
+  const permissions = useSession((s) => s.user?.permissions);
+  const isPlatformAdmin = useSession((s) => s.user?.is_platform_admin === true);
+  const canBorrow = canBorrowSharedDaemon(permissions, isPlatformAdmin);
 
   // 仅拉文档列表（可选关键词过滤 path/title/content）。搜索时不触发 reparse，保证响应快。
   const fetchDocs = useCallback(async (q?: string) => {
@@ -122,7 +136,35 @@ export default function ScanDocsPage({ params }: Props) {
     finally { setLoading(false); }
   }, [workspaceId, fetchDocs]);
 
-  useEffect(() => { void reparseAndLoad(); }, [reparseAndLoad]);
+  // 先判 binding：无 binding 不 reparse（避免无谓失败），主区渲染 DaemonRequiredNotice。
+  useEffect(() => {
+    let active = true;
+    setBindingReady(false);
+    fetchMyBinding(workspaceId)
+      .then((b) => {
+        if (active) {
+          setMyBinding(b);
+          setBindingReady(true);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setMyBinding(null);
+          setBindingReady(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspaceId]);
+
+  const hasDaemon = !!myBinding?.daemon_id;
+
+  // 仅在已绑定 daemon 时 reparse + 拉文档（零回归：有 binding 路径不变）。
+  useEffect(() => {
+    if (!hasDaemon) return;
+    void reparseAndLoad();
+  }, [hasDaemon, reparseAndLoad]);
 
   // 搜索框输入 debounce 300ms → debouncedQ。
   useEffect(() => {
@@ -187,7 +229,20 @@ export default function ScanDocsPage({ params }: Props) {
         </SectionCard>
       )}
 
-      {loading ? (
+      {!bindingReady ? (
+        <p className="py-12 text-center text-xs text-muted-foreground">加载中…</p>
+      ) : !hasDaemon ? (
+        <DaemonRequiredNotice
+          feature="扫描文档"
+          workspaceId={workspaceId}
+          canBorrow={canBorrow}
+          onConfigured={() => {
+            void fetchMyBinding(workspaceId)
+              .then((b) => setMyBinding(b))
+              .catch(() => {});
+          }}
+        />
+      ) : loading ? (
         <p className="py-12 text-center text-xs text-muted-foreground">加载中…</p>
       ) : docs.length === 0 ? (
         <div className="py-12 text-center text-xs text-muted-foreground">
