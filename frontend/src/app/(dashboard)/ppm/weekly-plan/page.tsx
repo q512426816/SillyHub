@@ -160,19 +160,30 @@ export default function WeeklyPlanPage() {
     }
   };
 
-  // 各可排序字段的筛选下拉选项(从当前数据动态去重,下拉内带搜索框)
+  // 各可排序字段的筛选下拉选项(Excel 级联:某列选项 = 排除本列筛选、应用其它列筛选后的数据去重)
+  // 效果:已筛的列再点开仍显示其可见范围内的全部值;未筛的列只显示其它列筛选后剩余的值。
   const fieldFiltersMap = useMemo(() => {
     const map: Record<string, { text: string; value: string }[]> = {};
     for (const { key } of SORTABLE_FIELDS) {
+      // 应用【除本列外】的其它列筛选(本列选项不受本列已选值影响,符合 Excel)
+      let rows = rawData;
+      for (const { key: other } of SORTABLE_FIELDS) {
+        if (other === key) continue;
+        const sel = columnFilters[other];
+        if (sel && sel.length) {
+          const allow = new Set(sel.map(String));
+          rows = rows.filter((r) => allow.has(fieldText(r, other)));
+        }
+      }
       const vals = Array.from(
-        new Set(rawData.map((r) => fieldText(r, key)).filter(Boolean))
+        new Set(rows.map((r) => fieldText(r, key)).filter(Boolean))
       );
       map[key] = vals
         .sort((a, b) => a.localeCompare(b, "zh"))
         .map((n) => ({ text: n, value: n }));
     }
     return map;
-  }, [rawData]);
+  }, [rawData, columnFilters]);
 
   // 应用表头筛选 + 排序后的扁平行(分组行插入前)
   const processedData = useMemo<WeeklyPlanRow[]>(() => {
