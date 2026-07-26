@@ -51,7 +51,7 @@ import {
   type RuntimeUsageItem,
   type RuntimeUsageWindow,
 } from "@/lib/daemon";
-// task-09：数据源从 useDaemonRuntimes 切到 useDaemonMachines（机器级，D-005 完全替换平铺）。
+// task-09：数据源 useDaemonMachines（机器级，D-005）。
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/query-keys";

@@ -3,7 +3,6 @@
  */
 import { apiFetch, ApiError } from "@/lib/api";
 import { useSession } from "@/stores/session";
-import type { AgentRunStatus } from "@/lib/agent";
 
 export type SpecStrategy = "platform-managed" | "repo-mirrored" | "repo-native";
 export type SyncStatus = "pending" | "clean" | "dirty" | "conflicted";
@@ -124,23 +123,6 @@ export async function importSpecWorkspace(
     for (const block of blocks) flush(block);
   }
   if (buffer.trim()) flush(buffer);
-}
-
-export interface BootstrapResult {
-  agent_run_id: string;
-  stream_url: string;
-  status: AgentRunStatus;
-  spec_root: string;
-  message: string;
-}
-
-export async function bootstrapSpecWorkspace(
-  workspaceId: string,
-): Promise<BootstrapResult> {
-  return apiFetch<BootstrapResult>(
-    `/api/workspaces/${workspaceId}/spec-bootstrap`,
-    { method: "POST" },
-  );
 }
 
 export interface GenerateProjectsResult {

@@ -16,12 +16,10 @@ import type {
   ExecutePlanReq,
   PageResp,
   PlanTask,
-  PlanTaskCreate,
   PlanTaskPageReq,
   PlanTaskUpdate,
   StartReq,
   TaskExecute,
-  TaskExecuteCreate,
   TaskExecuteWithPlan,
   TaskExecutePageReq,
   TaskExecuteUpdate,
@@ -63,13 +61,6 @@ export async function getPlanTask(planTaskId: string): Promise<PlanTask> {
   });
 }
 
-export async function createPlanTask(body: PlanTaskCreate): Promise<PlanTask> {
-  return apiFetch<PlanTask>("/api/ppm/task-plan/create", {
-    method: "POST",
-    json: body,
-  });
-}
-
 export async function updatePlanTask(
   planTaskId: string,
   body: PlanTaskUpdate,
@@ -78,13 +69,6 @@ export async function updatePlanTask(
     method: "PUT",
     query: { plan_id: planTaskId },
     json: body,
-  });
-}
-
-export async function deletePlanTask(planTaskId: string): Promise<void> {
-  await apiFetch("/api/ppm/task-plan/delete", {
-    method: "DELETE",
-    query: { plan_id: planTaskId },
   });
 }
 
@@ -133,17 +117,6 @@ export async function listPersonalPlanTasks(
   );
 }
 
-/** 当前登录用户在 [start, end] 区间的任务计划。 */
-export async function listPersonalPlanTasksByDateRange(
-  start: string,
-  end: string,
-): Promise<PlanTask[]> {
-  return apiFetch<PlanTask[]>(
-    "/api/ppm/personal-task-plan/list-by-date-range",
-    { query: { start, end } },
-  );
-}
-
 // ===========================================================================
 // 任务执行 /task-execute/*
 // ===========================================================================
@@ -157,21 +130,6 @@ export async function listTaskExecutes(
   );
 }
 
-export async function getTaskExecute(executeId: string): Promise<TaskExecute> {
-  return apiFetch<TaskExecute>("/api/ppm/task-execute/get", {
-    query: { execute_id: executeId },
-  });
-}
-
-export async function createTaskExecute(
-  body: TaskExecuteCreate,
-): Promise<TaskExecute> {
-  return apiFetch<TaskExecute>("/api/ppm/task-execute/create", {
-    method: "POST",
-    json: body,
-  });
-}
-
 export async function updateTaskExecute(
   executeId: string,
   body: TaskExecuteUpdate,
@@ -181,25 +139,6 @@ export async function updateTaskExecute(
     query: { execute_id: executeId },
     json: body,
   });
-}
-
-export async function deleteTaskExecute(executeId: string): Promise<void> {
-  await apiFetch("/api/ppm/task-execute/delete", {
-    method: "DELETE",
-    query: { execute_id: executeId },
-  });
-}
-
-/** 按日期区间查任务执行 (可选按执行人过滤)。 */
-export async function listTaskExecutesByDateRange(
-  start: string,
-  end: string,
-  executeUserId?: string,
-): Promise<TaskExecute[]> {
-  return apiFetch<TaskExecute[]>(
-    "/api/ppm/task-execute/list-by-date-range",
-    { query: { start, end, execute_user_id: executeUserId } },
-  );
 }
 
 /** 按日期区间查任务执行 + 关联计划任务(看板「实际」tab,展示任务名/项目)。 */
@@ -236,12 +175,6 @@ export async function listWorkHours(
     "/api/ppm/work-hour/page",
     queryOf(params as Record<string, unknown> | undefined),
   );
-}
-
-export async function getWorkHour(workHourId: string): Promise<WorkHour> {
-  return apiFetch<WorkHour>("/api/ppm/work-hour/get", {
-    query: { work_hour_id: workHourId },
-  });
 }
 
 export async function createWorkHour(body: WorkHourCreate): Promise<WorkHour> {

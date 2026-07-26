@@ -18,7 +18,7 @@ created_at: 2026-06-24T01:10:13
 - `TaskRunner(client, workspaceManager, credentialManager, config)`：3 位置参数 + config。
 - `runLease(ctx: LeaseCtx): Promise<TaskRunnerResult>`：核心入口（注意是 runLease 非 executeTask）。
 - `track(leaseId): AbortController`、`untrack(leaseId)`、`cancel(leaseId): Promise<boolean>`、`getState(leaseId)`。
-- 辅助：`resolveTimeout`、`resolveMaxRetries`、`isSpawnLevelFailure`、`renderAgentEvent`/`echoAgentEvent`/`renderTaskBoundary`/`echoTaskBoundary`。
+- 辅助：`resolveTimeout`、`resolveMaxRetries`、`isSpawnLevelFailure`、`renderAgentEvent`/`renderTaskBoundary`/`echoTaskBoundary`。
 
 ## 关键逻辑
 ```

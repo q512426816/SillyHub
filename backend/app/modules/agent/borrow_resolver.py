@@ -30,7 +30,6 @@ from app.core.logging import get_logger
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.auth.rbac import has_permission
-from app.modules.workspace.member_runtimes.exceptions import MemberBindingNotFound
 from app.modules.workspace.member_runtimes.queries import (
     query_daemon_online_by_id,
     query_runtime_by_daemon_and_provider,
@@ -148,17 +147,10 @@ async def _resolve_own_online_runtime(
         actor 自有的在线 runtime dict，或 ``None``（无 binding / daemon_id None /
         离线 / 不属于 actor / 无匹配 provider 的在线 runtime）。
     """
-    try:
-        binding = await MemberBindingResolver.resolve_member_binding(session, workspace_id, user_id)
-    except MemberBindingNotFound:
-        return None
-    except Exception as exc:
-        log.warning(
-            "borrow_resolver_own_binding_unexpected_error",
-            workspace_id=str(workspace_id),
-            user_id=str(user_id),
-            error=str(exc),
-        )
+    binding = await MemberBindingResolver.resolve_member_binding_or_none(
+        session, workspace_id, user_id, log_tag="borrow_resolver_own_binding_unexpected_error"
+    )
+    if binding is None:
         return None
 
     daemon_id = binding.daemon_id

@@ -42,7 +42,6 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import * as readline from 'node:readline';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, relative, isAbsolute, dirname } from 'node:path';
-import { randomUUID } from 'node:crypto';
 
 import {
   pullSpecBundle,
@@ -1030,7 +1029,6 @@ export class TaskRunner {
     }) as ChildProcess;
 
     let exitCode = 0;
-    let exitSignal: string | null = null;
     let exited = false;
     // 用对象容器存 spawn 错误：TS 控制流分析对「在异步闭包内赋值的 let 变量」
     // 会保守假定其类型恒为初始值（即 null），导致后续读取被收窄到 never。
@@ -1093,7 +1091,6 @@ export class TaskRunner {
     // 'exit' 事件
     child.once('exit', (code: number | null, sig: string | null) => {
       exitCode = code ?? (sig ? -1 : 0);
-      exitSignal = sig;
       exited = true;
     });
 
@@ -2663,18 +2660,6 @@ export function renderAgentEvent(leaseId: string, ev: AgentEvent): string {
     line = line.slice(0, ECHO_MAX_LEN) + '…<truncated>';
   }
   return line;
-}
-
-/**
- * 把渲染好的 line 写到 daemon 本地 stdout。
- * 包装 try/catch 避免极端情况（stdout 已关闭）影响业务。
- */
-export function echoAgentEvent(leaseId: string, ev: AgentEvent): void {
-  try {
-    process.stdout.write(renderAgentEvent(leaseId, ev) + '\n');
-  } catch {
-    // stdout 已关闭（极端场景：进程退出中）—— 静默吞掉，不影响业务
-  }
 }
 
 /** leaseId 取短显示（前 8 位），用于 echo 前缀，避免长 UUID 刷屏。 */

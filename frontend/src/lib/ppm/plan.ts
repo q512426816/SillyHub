@@ -71,10 +71,6 @@ export async function listPlanNodes(params?: PageReq): Promise<PlanNode[]> {
   return apiFetch<PlanNode[]>("/api/ppm/plan-node", pageQuery(params));
 }
 
-export async function getPlanNode(nodeId: string): Promise<PlanNode> {
-  return apiFetch<PlanNode>(`/api/ppm/plan-node/${nodeId}`);
-}
-
 export async function createPlanNode(body: PlanNodeCreate): Promise<PlanNode> {
   return apiFetch<PlanNode>("/api/ppm/plan-node", { method: "POST", json: body });
 }
@@ -308,10 +304,6 @@ export async function listPsPlanNodes(planId: string): Promise<PsPlanNode[]> {
   return apiFetch<PsPlanNode[]>(`/api/ppm/project-plan/${planId}/plan-nodes`);
 }
 
-export async function getPsPlanNode(nodeId: string): Promise<PsPlanNode> {
-  return apiFetch<PsPlanNode>(`/api/ppm/plan-node-ps/${nodeId}`);
-}
-
 export async function createPsPlanNode(
   body: PsPlanNodeCreate,
 ): Promise<PsPlanNode> {
@@ -346,12 +338,6 @@ export async function listPsPlanNodeDetails(
   return apiFetch<PsPlanNodeDetail[]>(
     `/api/ppm/plan-node-ps/${planNodeId}/details`,
   );
-}
-
-export async function getPsPlanNodeDetail(
-  detailId: string,
-): Promise<PsPlanNodeDetail> {
-  return apiFetch<PsPlanNodeDetail>(`/api/ppm/plan-node-detail/${detailId}`);
 }
 
 export async function createPsPlanNodeDetail(

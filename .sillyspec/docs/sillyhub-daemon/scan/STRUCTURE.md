@@ -1,83 +1,101 @@
 ---
-source_commit: ba87eec
-updated_at: 2026-06-23T16:28:30Z
-created_at: 2026-06-24T00:28:30
 author: qinyi
+created_at: 2026-07-27 00:35:31
+source_commit: 6e78b29a
+updated_at: 2026-07-26T16:35:31Z
 generator: sillyspec-scan
 ---
 
-# sillyhub-daemon · 目录结构
+# 目录结构(Structure)
 
-> 基于 `src/` 实际目录扫描（ba87eec），ESM TypeScript 工程，rootDir=src，outDir=dist。
+sillyhub-daemon 是 SillyHub 平台的本地守护进程(Node.js / TypeScript 重写版),负责在本机执行 AI 任务、对接 Claude Code / Codex 运行时,并通过 HTTP + WebSocket 与后端通信。ESM 工程,`rootDir=src`、`outDir=dist`,NodeNext + strict。
 
-## 顶层结构
+## 顶层布局
 
 ```
 sillyhub-daemon/
-├── src/                      # TypeScript 源码（rootDir，24 个 .ts 文件 + 2 子目录）
-│   ├── cli.ts                # commander 入口（start/stop/status/logs + PID 管理）
-│   ├── daemon.ts             # 守护类 Daemon（三循环 + 会话恢复 + 控制消息路由）
-│   ├── hub-client.ts         # HubClient（原生 fetch，lease 生命周期 + 注册/恢复/spec 同步 HTTP）
-│   ├── ws-client.ts          # WsClient（基于 ws，DaemonMessage 收发 + RPC + 自动重连）
-│   ├── task-runner.ts        # TaskRunner（非交互式 lease 编排核心，spawn 子进程）
-│   ├── config.ts             # loadConfig / DaemonConfig / DEFAULT_CONFIG（~/.sillyhub/daemon/config.json）
-│   ├── protocol.ts           # MSG 常量 / WS_PATH / REST_PREFIX / payload 类型
-│   ├── types.ts              # DaemonMessage / LeaseCtx / AgentEvent 等公共类型
-│   ├── index.ts              # 包导出（占位）
-│   ├── version.ts            # 外部 agent CLI 的 SemVer 解析 + checkMinVersion（claude/codex/copilot）
-│   ├── daemon-version.ts     # daemon 自身版本号唯一来源（读 package.json）
-│   ├── cursor-version.ts     # Cursor 版本解析
-│   ├── credential.ts         # 凭证占位符 {{USER_XXX}} 替换（仅全串匹配）
-│   ├── workspace.ts          # WorkspaceManager（git，GitError）
-│   ├── spec-sync.ts          # spec bundle 同步共享 utility（纯函数 + client 注入，D-007@v1）
-│   ├── agent-detector.ts     # AgentDetector（12 provider 本机可执行探测：claude/codex/copilot/opencode/...）
-│   ├── terminal-launcher.ts  # 终端窗口启动（可选）
-│   ├── terminal-observer.ts  # 观察日志 tail（可选，NOOP_TERMINAL_OBSERVER）
-│   ├── spawn-env.ts          # buildSpawnEnv / redactEnv（子进程环境构造）
-│   ├── cmd-shim.ts           # resolveWindowsCmdShim 命令 shim 工具
-│   ├── file-rpc.ts           # 受限文件读写 RPC（防 allowed_roots 越界）
-│   ├── adapters/             # 协议适配层（6 文件）
-│   │   ├── index.ts          # PROTOCOL_PROVIDERS / provider 反查表 / 启动期断言
-│   │   ├── protocol-adapter.ts  # 统一 ProtocolAdapter 接口
-│   │   ├── stream-json.ts    # stream_json 协议
-│   │   ├── json-rpc.ts       # json_rpc 协议
-│   │   ├── jsonl.ts          # jsonl 协议
-│   │   ├── ndjson.ts         # ndjson 协议
-│   │   └── text.ts           # text 协议
-│   └── interactive/          # 交互式会话子系统（6 文件）
-│       ├── claude-sdk-driver.ts          # Claude Agent SDK 封装（query/interrupt/canUseTool/resume）
-│       ├── session-manager.ts            # SessionManager（生命周期/空闲扫描/恢复）
-│       ├── input-queue.ts                # 跨 turn AsyncIterable 输入队列
-│       ├── permission-resolver.ts        # tool 权限 ↔ backend REQUEST/RESPONSE
-│       ├── session-store-persistence.ts  # JsonSessionPersistence 会话快照落盘与启动恢复
-│       └── types.ts                      # 会话类型 + 错误类 + SESSION_FILE_VERSION
-├── scripts/                  # 构建与安装脚本
-│   ├── build-bundle.sh       # tsc → ncc 打单文件 bundle（build/bundle/sillyhub-daemon.js）
-│   └── install.sh            # 一键安装/下载发布 bundle
-├── tests/                    # vitest 测试（environment=node）
-│   ├── _sanity.test.ts
-│   ├── helpers.ts + helpers/fake-child.ts   # 伪造子进程 / 配置目录隔离
-│   ├── fixtures/             # 5 协议样例输出（stream-json/json-rpc/jsonl/ndjson/text）
-│   ├── adapters/             # adapters 单元测试（factory/jsonl/ndjson/protocol-adapter/text/json-rpc）
-│   └── interactive/          # 交互式会话测试（16 个，含 driver/session-manager/recovery/permission）
-├── build/                    # ncc bundle 产物（build/bundle/sillyhub-daemon.js，git 忽略）
-├── dist/                     # tsc 产物（outDir，git 忽略）
-├── package.json              # 依赖：claude-agent-sdk 0.3.181 + commander ^12 + ws ^8；ncc/vitest/typescript devDeps
-├── pnpm-lock.yaml
-├── tsconfig.json             # NodeNext + strict + declaration + sourceMap
-├── vitest.config.ts
-└── README.md
+├── src/                    # TypeScript 源码(编译输入,rootDir)
+├── dist/                   # tsc 构建产物(.js + .d.ts + .js.map,镜像 src 结构)
+├── scripts/                # 构建 / 安装 / 类型生成脚本
+├── spikes/                 # 探索性原型(如 06-mcp-server)
+├── tests/                  # 单元测试(vitest,tsconfig 已 exclude)
+├── build/                  # ncc bundle 产物(build/bundle/sillyhub-daemon.js,git 忽略)
+├── package.json            # npm 元信息 + 依赖 + scripts
+├── tsconfig.json           # NodeNext / ES2022 / strict,outDir=./dist
+├── vitest.config.ts        # 主测试配置
+├── vitest.spikes.config.ts # spikes 独立测试配置
+├── pnpm-lock.yaml / .npmrc # pnpm@9.6.0 锁文件与覆盖配置
+└── README.md / .dockerignore / .gitattributes / .gitignore
 ```
 
-## 模块说明（一句话）
+## src/ 模块职责
 
-- **cli.ts**：commander 程序构造与主入口（`createProgram`/`startAction`/`stopAction`/`statusAction`/`logsAction`）；PID 文件读写（`getPidFile`/`readPid`/`isProcessAlive`/`writePid`/`removePid`）、配置加载、注入 SessionManager + persistence + recoveryClient 后启动 Daemon。
-- **daemon.ts**：守护进程核心类 `Daemon`，三循环（heartbeat/poll/lease）+ 会话恢复（recoverSession/restoreAndReconnect）+ 控制消息路由；定义 `RecoveryCoordinator`/`DaemonOptions`/`InteractiveCredentialManager` 接口。
-- **hub-client.ts**：基于原生 fetch 的 backend HTTP 瘦客户端（lease 生命周期 + 注册/心跳/恢复/spec 同步，`HubHttpError`，无连接池）；方法含 register/heartbeat/markOffline/claimLease/startLease/leaseHeartbeat/submitMessages/completeLease/getPendingLeases/syncStatus/notifyRunResult/notifySessionEnd/recoverSession/confirmReconnected/markRecoveryFailed/getExecutionContext/getSpecBundle/postSpecSync。
-- **ws-client.ts**：基于 ws 的实时通道客户端（`DaemonMessage` 收发 + 内建 RPC 分发 + 自动重连，`RpcError`/`WsState`）。
-- **task-runner.ts**：非交互式 lease 任务编排（claim→spawn→adapter→submit→complete，`resolveTimeout`/`resolveMaxRetries`/`isSpawn-levelFailure` 重试循环）。
-- **interactive/**：交互式会话全栈（SDK driver + SessionManager + 输入队列 + 权限解析 + JSON 持久化）。
-- **adapters/**：5 协议（stream_json/json_rpc/jsonl/ndjson/text）× 12 provider 的输出解析层（启动期断言 provider 数=12）。
-- **config.ts / protocol.ts / types.ts**：配置、协议常量（`WS_PATH='/api/daemon/ws'`、`REST_PREFIX='/api/daemon'`、`MSG` 类型表）、公共类型。
-- **版本双轨**：`version.ts` 解析外部 agent CLI 版本字符串（claude/codex/copilot 最低版本校验），`daemon-version.ts` 读 package.json 提供 daemon 自身版本。
-- **辅助**：workspace（git）/ credential（占位符）/ spec-sync（spec bundle tar 同步）/ agent-detector（12 provider 探测）/ terminal-* / spawn-env / cmd-shim / file-rpc / cursor-version。
+- **入口 / 进程编排**
+  - `cli.ts` — commander CLI 入口(对应 `bin: dist/cli.js`),装配 HubClient / Daemon / TaskRunner / ResilienceService / ClaudeSdkDriver 等。
+  - `index.ts` — 模块导出聚合。
+  - `daemon.ts` — 守护进程主类(三循环 + 会话恢复 + 控制消息路由)。
+  - `task-runner.ts` — 非交互式 lease 任务编排核心(claim → spawn → adapter → submit → complete)。
+  - `protocol.ts` — 与后端 WS 通信的消息协议(`WS_PATH` / `REST_PREFIX` / `MSG` 常量 / payload 类型)。
+
+- **与 backend 通信**
+  - `hub-client.ts` — HTTP 瘦客户端(原生 `fetch`,lease 生命周期 + 注册/心跳/恢复/spec 同步 + `getExecutionContext` / `getSpecBundle` / `postSpecSync` / `dispatch_worker` 等)。
+  - `ws-client.ts` — WebSocket 客户端(基于 `ws`,`http→ws` / `https→wss` 自动转换 + 自动重连 + 内建 RPC)。
+
+- **AI 运行时(interactive/)** — 交互式 / 流式 agent 驱动
+  - `driver.ts` — 驱动抽象(`InteractiveProvider = 'claude' | 'codex'`)。
+  - `claude-sdk-driver.ts` — 基于 claude-agent-sdk 的 Claude Code 驱动(query / interrupt / canUseTool / resume)。
+  - `codex-app-server-driver.ts` — Codex app-server 驱动(并列 provider)。
+  - `session-manager.ts` / `session-store-persistence.ts` — 会话生命周期 / 空闲扫描 / 快照落盘与启动恢复。
+  - `permission-resolver.ts` — tool 权限 ↔ backend REQUEST/RESPONSE 桥接。
+  - `input-queue.ts` — 跨 turn 的 AsyncIterable 输入队列。
+  - `types.ts` — 复用 SDK 的 `Query` / `SDKMessage` / `SDKResultMessage` 类型。
+
+- **adapters/** — AI 输出流协议适配器(6 协议)
+  - `stream-json.ts` / `json-rpc.ts` / `jsonl.ts` / `ndjson.ts` / `pi-json.ts` / `text.ts` — 多种流式格式解析。
+  - `protocol-adapter.ts` — 统一 `ProtocolAdapter` 接口。
+  - `index.ts` — `PROTOCOL_PROVIDERS` 反查表 + 启动期断言。
+
+- **MCP**
+  - `mcp-server.ts` — stdio MCP 服务(`@modelcontextprotocol/sdk` 的 `McpServer` + `StdioServerTransport`),向 team 主 agent 暴露 daemon 工具。
+  - `mcp-config.ts` — MCP 服务端配置装配。
+
+- **policy/** — 文件 / 命令策略与审计
+  - `filesystem-policy.ts` / `runtime-policy.ts` — 写入与执行策略。
+  - `audit-sink.ts` — 审计日志下沉。
+  - `path-utils.ts` / `shell-paths.ts` — 路径规整与 shell 解析。
+
+- **resilience/** — 网络韧性
+  - `error-classify.ts` — 错误分类(可重试 / 致命)。
+  - `outbox.ts` — 文件 outbox(断网消息暂存,同步落盘防 Win EBUSY)。
+  - `service.ts` — 韧性服务门面(由 cli.ts 注入)。
+
+- **宿主文件系统 / RPC**
+  - `host-fs-handler.ts` — 宿主文件系统操作处理器。
+  - `file-rpc.ts` — 受限文件读写 RPC(`assertWithinAllowedRoots` 防 `allowed_roots` 越界)。
+  - `roots-rpc.ts` — roots 相关 RPC。
+
+- **凭证 / 环境**
+  - `credential.ts` — `{{USER_XXX}}` 凭证占位符替换。
+  - `credential-injector.ts` — 凭证注入到 spawn 子进程(含 `CLAUDE_CONFIG_DIR` 隔离等)。
+  - `spawn-env.ts` — `buildSpawnEnv` / `redactEnv` 子进程环境构造(三层合并)。
+  - `preflight.ts` — 启动前检查。
+
+- **通用工具 / 元信息**
+  - `workspace.ts`(WorkspaceManager,git 操作,`GitError`)、`config.ts`(`loadConfig` / `~/.sillyhub/daemon/config.json`)、`types.ts`、`api-types.ts`(由后端 OpenAPI 生成)。
+  - 版本与构建:`version.ts`(外部 agent CLI SemVer + 最低版本校验)、`daemon-version.ts`(daemon 自身版本)、`cursor-version.ts`、`build-id.ts`(构建 ID)。
+  - 其它:`agent-detector.ts`(本机 agent CLI 探测)、`tool-kind.ts`(工具分类徽标)、`permission-rules.ts`(权限规则)、`spec-sync.ts`(spec bundle 同步工具)、`skill-manager.ts`(skill 管理)、`runtime-lock.ts`(运行时锁,防多实例)、`terminal-launcher.ts` / `terminal-observer.ts`(终端拉起 / 观察)、`cmd-shim.ts`(Windows 命令 shim)。
+
+## scripts/
+
+- `build-bundle.sh` — `tsc` → `@vercel/ncc` 把 `dist/cli.js` 及依赖(含 claude-agent-sdk 原生包)打成单文件 `build/bundle/sillyhub-daemon.js`(用于 self-update / 远程升级分发)。
+- `install.sh` / `install.ps1` — 跨平台安装脚本(Linux/macOS 与 Windows)。
+- `gen-api-types.mjs` — 调用 `openapi-typescript` 从后端 OpenAPI 生成 `src/api-types.ts`。
+
+## dist/ 与 build/
+
+- **dist/** — `tsc` 构建产物,目录结构与 src 一一对应(`interactive/`、`adapters/`、`policy/`、`resilience/` 子目录均镜像)。包含 `.js`(运行入口,`main` / `bin` 指向 `dist/cli.js`)、`.d.ts`(类型声明,tsconfig 开启 `declaration`)、`.js.map`(source map)。
+- **build/** — ncc bundle 产物(`build/bundle/sillyhub-daemon.js`,单文件零依赖,仅依赖 node runtime),git 忽略。
+
+## spikes/
+
+探索性原型目录,独立 vitest 配置(`vitest.spikes.config.ts`)。当前有 `06-mcp-server/`(`server.ts` + `spike.test.ts` + `README.md`),用于验证 MCP server 接入团队主 agent 的能力。

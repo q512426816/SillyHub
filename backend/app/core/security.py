@@ -23,7 +23,6 @@ from pydantic import BaseModel
 from app.core.config import Settings
 
 ACCESS_TOKEN_TYPE = "access"
-REFRESH_TOKEN_TYPE = "refresh"
 
 
 class TokenPayload(BaseModel):

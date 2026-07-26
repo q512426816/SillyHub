@@ -1,15 +1,11 @@
----
-author: qinyi
-created_at: 2026-06-03T20:35:00+08:00
-updated_at: 2026-06-24T00:00:00+08:00
----
-
+# 模块映射（sillyspec-scan 增量更新，2026-07-27）
+# author: qinyi
 schema_version: 1
 project: frontend
-source_commit: ba87eec
-generated_at: 2026-06-24 00:00:00
+source_commit: 6e78b29a
+generated_at: 2026-07-27 01:18:13
 generator: sillyspec-scan
-last_change: 2026-06-24 全量重扫覆盖更新；新增 admin/ppm/permissions/menu-permissions/api-keys/workspace-members/daemon/layout/charts/kanban 等模块；新增模块暂无 modules/<id>.md 文档故 needs_review:true
+last_change: 2026-07-27 增量更新；核对源码补缺：新增 stores-workspace/lib-react-query/components-file-center/lib-workspace-context/lib-mcp-skills/components-workspace-config；lib-api 补 api-types.ts；PPM 页面入口补 kanban/workbench/problem-list/project-plans/task-plans/work-hours 等子路由
 
 modules:
   # ─── App Router Pages (top-level) ──────────────────────────────────
@@ -22,9 +18,13 @@ modules:
       - "frontend/src/app/(auth)/login/page.tsx"
       - "frontend/src/app/(dashboard)/workspaces/page.tsx"
       - "frontend/src/app/(dashboard)/runtimes/page.tsx"
+      - "frontend/src/app/(dashboard)/runtimes/[id]/audit/page.tsx"
       - "frontend/src/app/(dashboard)/settings/page.tsx"
       - "frontend/src/app/(dashboard)/settings/git-identities/page.tsx"
       - "frontend/src/app/(dashboard)/settings/api-keys/page.tsx"
+      - "frontend/src/app/(dashboard)/settings/mcp/page.tsx"
+      - "frontend/src/app/(dashboard)/settings/skills/page.tsx"
+      - "frontend/src/app/(dashboard)/account/page.tsx"
     tags: [pages, nextjs-app-router, routes]
     aliases: [pages, 路由, 页面]
     entrypoints:
@@ -32,17 +32,25 @@ modules:
       - LoginPage         # /login
       - WorkspacesPage    # /workspaces
       - RuntimesPage      # /runtimes
+      - RuntimeAuditPage  # /runtimes/[id]/audit
       - SettingsPage      # /settings
       - GitIdentitiesPage # /settings/git-identities
       - ApiKeysPage       # /settings/api-keys
+      - SettingsMcpPage   # /settings/mcp
+      - SettingsSkillsPage # /settings/skills
+      - AccountPage       # /account
     main_symbols:
       - HomePage
       - LoginPage
       - WorkspacesPage
       - RuntimesPage
+      - RuntimeAuditPage
       - SettingsPage
       - GitIdentitiesPage
       - ApiKeysPage
+      - SettingsMcpPage
+      - SettingsSkillsPage
+      - AccountPage
     depends_on: [components-ui, components-shared, components-layout, lib-api, stores-session]
     used_by: []
     needs_review: false
@@ -93,6 +101,13 @@ modules:
       - PpmTaskExecutePage       # /ppm/task-execute
       - PpmProjectStakeholdersPage # /ppm/project-stakeholders
       - PpmPlanNodesPage         # /ppm/plan-nodes
+      - PpmKanbanPage            # /ppm/kanban
+      - PpmWorkbenchPage         # /ppm/workbench
+      - PpmProblemListPage       # /ppm/problem-list
+      - PpmProjectPlansPage      # /ppm/project-plans
+      - PpmTaskPlansPage         # /ppm/task-plans
+      - PpmWorkHoursPage         # /ppm/work-hours
+      - PpmWorkHourStatisticsPage # /ppm/work-hour-statistics
       - PpmProblemChangesForms   # /ppm/problem-changes/_forms
     main_symbols:
       - PpmHomePage
@@ -103,6 +118,13 @@ modules:
       - PpmTaskExecutePage
       - PpmProjectStakeholdersPage
       - PpmPlanNodesPage
+      - PpmKanbanPage
+      - PpmWorkbenchPage
+      - PpmProblemListPage
+      - PpmProjectPlansPage
+      - PpmTaskPlansPage
+      - PpmWorkHoursPage
+      - PpmWorkHourStatisticsPage
     depends_on: [components-ui, components-layout, components-charts, lib-ppm, stores-kanban, lib-api, stores-session]
     used_by: []
     needs_review: false
@@ -139,6 +161,8 @@ modules:
       - IncidentDetailPage  # /workspaces/[id]/incidents/[iid]
       - MissionsPage        # /workspaces/[id]/missions
       - MembersPage         # /workspaces/[id]/members
+      - WorkspaceMcpPage    # /workspaces/[id]/mcp
+      - WorkspaceSkillsPage # /workspaces/[id]/skills
     main_symbols:
       - WorkspaceDetailPage
       - ChangesPage
@@ -159,6 +183,8 @@ modules:
       - IncidentDetailPage
       - MissionsPage
       - MembersPage
+      - WorkspaceMcpPage
+      - WorkspaceSkillsPage
     depends_on: [components-ui, components-shared, components-layout, lib-api, stores-session, lib-agent-stream, lib-use-agent-run-stream, components-agent-log, lib-changes, lib-tasks, lib-workflow, lib-components, lib-scan-docs, lib-knowledge, lib-runtime, lib-releases, lib-incidents, lib-approvals, lib-audit, lib-workspace-members]
     used_by: []
     needs_review: false
@@ -466,6 +492,60 @@ modules:
     review_reasons:
       - 新增模块，modules/components-admin.md 尚未生成
 
+  # ─── File Center Components（文件上传/预览/图片） ─────────────────
+
+  components-file-center:
+    status: active
+    doc: modules/components-file-center.md
+    paths:
+      - "frontend/src/components/file-upload.tsx"
+      - "frontend/src/components/file-viewer.tsx"
+      - "frontend/src/components/file-image.tsx"
+    tags: [components, files, minio, upload, preview]
+    aliases: [file-components]
+    entrypoints: []
+    main_symbols:
+      - FileUpload
+      - FileViewer
+      - FileImage
+    depends_on: [components-ui, lib-api]
+    used_by: [app-workspace-pages, app-ppm-pages, components-ppm]
+    needs_review: true
+    concerns: [new-module-pending-card]
+    review_reasons:
+      - 新增模块(platform-file-center 变更派生，MinIO/StorageBackend 后端)，modules/components-file-center.md 卡片待下次 scan 生成
+
+  # ─── Workspace Config Components（绑定/配置/守卫/切换） ──────────
+
+  components-workspace-config:
+    status: active
+    doc: modules/components-workspace-config.md
+    paths:
+      - "frontend/src/components/workspace-binding-dialog.tsx"
+      - "frontend/src/components/workspace-binding-guard.tsx"
+      - "frontend/src/components/workspace-config-card.tsx"
+      - "frontend/src/components/workspace-access-guide.tsx"
+      - "frontend/src/components/workspace-path-picker.tsx"
+      - "frontend/src/components/workspace-switcher.tsx"
+      - "frontend/src/components/daemon-required-notice.tsx"
+    tags: [components, workspace, binding, config, guard]
+    aliases: [workspace-config-components]
+    entrypoints: []
+    main_symbols:
+      - WorkspaceBindingDialog
+      - WorkspaceBindingGuard
+      - WorkspaceConfigCard
+      - WorkspaceAccessGuide
+      - WorkspacePathPicker
+      - WorkspaceSwitcher
+      - DaemonRequiredNotice
+    depends_on: [components-ui, components-layout, lib-workspace-context, lib-workspace-members, stores-workspace, stores-session]
+    used_by: [app-pages, app-workspace-pages, app-layouts]
+    needs_review: true
+    concerns: [new-module-pending-card]
+    review_reasons:
+      - 新增模块(workspace-prioritization/workspace-config-flow 变更派生)，modules/components-workspace-config.md 卡片待下次 scan 生成
+
   # ─── API Client Core ───────────────────────────────────────────────
 
   lib-api:
@@ -473,6 +553,7 @@ modules:
     doc: modules/lib-api.md
     paths:
       - "frontend/src/lib/api.ts"
+      - "frontend/src/lib/api-types.ts"
     tags: [api, fetch, http-client, core]
     aliases: [api-client, lib, api]
     entrypoints: []
@@ -1331,6 +1412,75 @@ modules:
     concerns: []
     review_reasons: []
 
+  # ─── React Query Infrastructure（query-client/query-keys） ────────
+
+  lib-react-query:
+    status: active
+    doc: modules/lib-react-query.md
+    paths:
+      - "frontend/src/lib/query-client.ts"
+      - "frontend/src/lib/query-keys.ts"
+    tags: [react-query, tanstack, data-fetching, cache]
+    aliases: [react-query-lib]
+    entrypoints: []
+    main_symbols:
+      - queryClient
+      - QueryKeys
+    depends_on: []
+    used_by: [app-layouts, app-pages, app-workspace-pages, app-ppm-pages]
+    needs_review: true
+    concerns: [new-module-pending-card]
+    review_reasons:
+      - 新增模块(react-query 迁移派生)，modules/lib-react-query.md 卡片待下次 scan 生成
+
+  # ─── Workspace Context Hooks（绑定/daemon 状态/上下文） ──────────
+
+  lib-workspace-context:
+    status: active
+    doc: modules/lib-workspace-context.md
+    paths:
+      - "frontend/src/lib/use-workspace-context.ts"
+      - "frontend/src/lib/workspace-binding.ts"
+      - "frontend/src/lib/workspace-daemon-status.ts"
+    tags: [hooks, workspace, daemon-binding, context]
+    aliases: [workspace-context]
+    entrypoints: []
+    main_symbols:
+      - useWorkspaceContext
+      - resolveWorkspaceBinding
+      - daemonStatusVariant
+    depends_on: [stores-session, stores-workspace, lib-api]
+    used_by: [app-workspace-pages, components-workspace-config]
+    needs_review: true
+    concerns: [new-module-pending-card]
+    review_reasons:
+      - 新增模块(工作区前置化/daemon-entity-binding 派生)，modules/lib-workspace-context.md 卡片待下次 scan 生成
+
+  # ─── MCP / Skills Client（mcp-settings/custom-skills/skills-view） ──
+
+  lib-mcp-skills:
+    status: active
+    doc: modules/lib-mcp-skills.md
+    paths:
+      - "frontend/src/lib/mcp-settings.ts"
+      - "frontend/src/lib/custom-skills.ts"
+      - "frontend/src/lib/workspace-skills-view.ts"
+    tags: [api, mcp, skills, claude-code]
+    aliases: [mcp-skills-lib]
+    entrypoints: []
+    main_symbols:
+      - listMcpSettings
+      - updateMcpSettings
+      - listCustomSkills
+      - saveCustomSkill
+      - getWorkspaceSkillsView
+    depends_on: [lib-api]
+    used_by: [app-pages, app-workspace-pages]
+    needs_review: true
+    concerns: [new-module-pending-card]
+    review_reasons:
+      - 新增模块(MCP/Skills 设置页派生)，modules/lib-mcp-skills.md 卡片待下次 scan 生成
+
   # ─── Session Store ─────────────────────────────────────────────────
 
   stores-session:
@@ -1382,6 +1532,25 @@ modules:
     concerns: []
     review_reasons:
       - 新增模块，modules/stores-kanban.md 尚未生成
+
+  # ─── Workspace Store（当前工作区/daemon 绑定状态） ───────────────
+
+  stores-workspace:
+    status: active
+    doc: modules/stores-workspace.md
+    paths:
+      - "frontend/src/stores/workspace.ts"
+    tags: [store, zustand, workspace, daemon-binding]
+    aliases: [workspace-store]
+    entrypoints: []
+    main_symbols:
+      - useWorkspaceStore
+    depends_on: []
+    used_by: [app-workspace-pages, app-layouts, components-shared, lib-workspace-context]
+    needs_review: true
+    concerns: [new-module-pending-card]
+    review_reasons:
+      - 新增模块(工作区前置化/workspace-binding 变更派生)，modules/stores-workspace.md 卡片待下次 scan 生成
 
   # ─── Test Infrastructure ───────────────────────────────────────────
 

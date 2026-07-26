@@ -15,13 +15,10 @@ import {
   enableRole,
   enableUserLogin,
   getOrganization,
-  getRole,
-  getUser,
   listOrganizations,
   listRoles,
   listUserAudit,
   listUserSessions,
-  listUserWorkspaces,
   listUsers,
   resetUserPassword,
   revokeAllUserSessions,
@@ -105,25 +102,6 @@ describe("admin API client", () => {
     expect(url).toContain("status=active");
     expect(url).toContain("limit=20");
     expect(url).toContain("offset=0");
-  });
-
-  it("getUser returns UserRead", async () => {
-    jsonOnce({
-      id: "u1",
-      email: "a@b.c",
-      display_name: null,
-      status: "active",
-      is_platform_admin: false,
-      login_enabled: true,
-      last_login_at: null,
-      created_at: "2024-01-01T00:00:00Z",
-      organizations: [],
-      roles: [],
-    });
-    const result = await getUser("u1");
-    expect(result.id).toBe("u1");
-    expect(result.login_enabled).toBe(true);
-    expect(result.organizations).toEqual([]);
   });
 
   it("createUser sends POST + JSON body", async () => {
@@ -223,19 +201,6 @@ describe("admin API client", () => {
     ]);
     const logs = await listUserAudit("u1");
     expect(logs).toHaveLength(1);
-  });
-
-  it("listUserWorkspaces returns array", async () => {
-    jsonOnce([
-      {
-        workspace_id: "w1",
-        workspace_name: "WS",
-        workspace_slug: "ws",
-        role: "workspace_owner",
-      },
-    ]);
-    const list = await listUserWorkspaces("u1");
-    expect(list[0]!.workspace_id).toBe("w1");
   });
 
   it("resetUserPassword returns new password", async () => {
@@ -430,24 +395,6 @@ describe("admin API client", () => {
     await listRoles({ search: "admin", page: 1, size: 20 });
     expect(lastCallUrl()).toContain("search=admin");
     expect(lastCallUrl()).toContain("page=1");
-  });
-
-  it("getRole returns RoleRead", async () => {
-    jsonOnce({
-      id: "r1",
-      key: "custom",
-      name: "Custom",
-      description: null,
-      is_system: false,
-      is_active: true,
-      permissions: ["user:read"],
-      user_count: 0,
-      created_at: "",
-      updated_at: "",
-    });
-    const result = await getRole("r1");
-    expect(result.key).toBe("custom");
-    expect(result.permissions).toEqual(["user:read"]);
   });
 
   it("createRole sends POST + permission_keys", async () => {

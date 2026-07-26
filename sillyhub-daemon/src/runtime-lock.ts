@@ -239,19 +239,6 @@ function emptyHolder(identity: LockIdentity, opts: AcquireOptions): LockFileData
   };
 }
 
-/**
- * 释放单个 lock（按 identity）。best-effort：文件不存在/删除失败均吞掉（幂等）。
- * daemon.stop 用 RuntimeLockManager.releaseAll 批量释放本次持有的 lock。
- */
-export async function releaseLock(identity: LockIdentity, dir: string = LOCKS_DIR): Promise<void> {
-  const path = lockFilePath(computeLockKey(identity), dir);
-  try {
-    await unlink(path);
-  } catch {
-    /* best-effort，幂等 */
-  }
-}
-
 /** 按 key 释放 lock（RuntimeLockManager.releaseAll 用）。 */
 export async function releaseLockByKey(key: string, dir: string = LOCKS_DIR): Promise<void> {
   try {

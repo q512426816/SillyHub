@@ -131,16 +131,6 @@ class SpecWorkspaceService:
             )
         return result
 
-    async def get_by_id(self, spec_workspace_id: uuid.UUID) -> SpecWorkspace:
-        """Return a spec workspace by its own primary key, or raise."""
-        spec_ws = await self._session.get(SpecWorkspace, spec_workspace_id)
-        if spec_ws is None:
-            raise SpecWorkspaceNotFound(
-                "Spec workspace not found.",
-                details={"spec_workspace_id": str(spec_workspace_id)},
-            )
-        return spec_ws
-
     async def ensure_spec_workspace(self, workspace_id: uuid.UUID) -> SpecWorkspace:
         """Ensure a SpecWorkspace exists for the given workspace_id (D-009).
 
@@ -452,32 +442,6 @@ class SpecWorkspaceService:
             for rw in rows
         ]
 
-    async def sync(self, workspace_id: uuid.UUID) -> SpecWorkspace:
-        """Synchronise the platform spec workspace with the repo ``.sillyspec``
-        directory.
-
-        **Stub**: only updates ``sync_status`` to ``clean`` and stamps
-        ``last_synced_at``. The actual bidirectional sync logic will be added
-        in a later wave.
-        """
-        spec_ws = await self.get(workspace_id)
-        now = datetime.now(UTC)
-
-        spec_ws.sync_status = "clean"
-        spec_ws.last_synced_at = now
-        spec_ws.updated_at = now
-
-        await self._session.commit()
-        await self._session.refresh(spec_ws)
-
-        log.info(
-            "spec_workspace.sync",
-            spec_workspace_id=str(spec_ws.id),
-            workspace_id=str(workspace_id),
-            note="stub — no filesystem changes made",
-        )
-        return spec_ws
-
     # ── Sync status ────────────────────────────────────────────────────────
 
     async def update_sync_status(
@@ -625,6 +589,22 @@ class SpecWorkspaceService:
 
             conflict_svc = ScanDocConflictService(self._session)
             now = datetime.now(UTC)
+            # 性能优化（2026-07-27）：循环前一次 IN 查询预取既有 ScanDocument，
+            # 消除原逐 tar 成员 SELECT 的 N+1（活跃 spec 树数十~百文件）。
+            # ux_scan_docs_workspace_path 唯一约束 + SQLAlchemy identity map 保证
+            # 预取对象与原循环内 SELECT 同一 Python 对象，原地改写语义不变。
+            rel_paths = [m.name.replace("\\", "/") for m in tf.getmembers() if m.isfile()]
+            existing_by_path: dict[str, ScanDocument] = {}
+            if rel_paths:
+                existing_rows = (
+                    await self._session.execute(
+                        select(ScanDocument).where(
+                            ScanDocument.workspace_id == workspace_id,
+                            ScanDocument.path.in_(rel_paths),
+                        )
+                    )
+                ).scalars()
+                existing_by_path = {d.path: d for d in existing_rows}
             for m in tf.getmembers():
                 if not m.isfile():
                     continue
@@ -637,20 +617,7 @@ class SpecWorkspaceService:
                 ch = hashlib.sha256(content).hexdigest()
                 src_mtime = datetime.fromtimestamp(m.mtime, tz=UTC) if m.mtime > 0 else None
 
-                cur = (
-                    (
-                        await self._session.execute(
-                            select(ScanDocument)
-                            .where(
-                                ScanDocument.workspace_id == workspace_id,
-                                ScanDocument.path == rel_path,
-                            )
-                            .limit(1)
-                        )
-                    )
-                    .scalars()
-                    .first()
-                )
+                cur = existing_by_path.get(rel_path)
 
                 if cur:
                     if cur.content_hash == ch:

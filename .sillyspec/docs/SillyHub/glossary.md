@@ -130,7 +130,47 @@ ppm 中里程碑明细的状态枚举：`draft → review → approve → done`�
 
 ---
 
+## 新增术语（2026-07-27 重扫）
+
+> 2026-06-24 之后新增模块/概念增量补充，定义基于实际代码符号与模块 docstring 核实，未臆造。
+
+### LLM Provider（llm_provider / 用户级 LLM 提供商凭证）
+用户级 LLM 提供商凭证管理（`backend/app/modules/llm_provider`，路由前缀 `/llm-providers`）。`LlmProvider` 表 owner = `user_id`（D-002 用户级作用域，非平台级）；`agent_kind` 标识 claude / codex / gemini / pi 等代理种类；`encrypted_api_key` + `key_id` 复用 `core.crypto.CredentialCipher`（xchacha20-poly1305，照 git_identity）。`is_default` 在 `(user_id, agent_kind)` 维度互斥（service 层事务内清同级，R-05）。所有端点按 `current_user.id` 过滤（owner 级而非权限点），list/detail 只输出 `api_key_masked`，严禁回明文。
+
+### cc-switch 式启停（set-default / unset-default）
+多 LLM 提供商启停的交互范式（借鉴 cc-switch）。`POST /llm-providers/{id}/set-default` = 「启动」（置默认），`POST /llm-providers/{id}/unset-default` = 「停止」（取消默认，对称 set-default）。用户×agent_kind 无任何默认供应商时，lease 不再下发 `provider_config`，daemon 回归本机凭证管理（D-007）。第 9 个工具 PI（earendil-works/pi）即由此接入。
+
+### provider_config 注入（_inject_provider_config）
+批处理 lease 派发前，按 lease 关联用户查默认 LlmProvider，解密明文 api_key 注入 `provider_config`（8 字段契约）下发 daemon（`daemon/lease/context.py:_inject_provider_config`，task-06 / FR-03 / D-005@v1）。是 llm_provider 表落地到 daemon 实际执行的桥梁。
+
+### file / 文件中心（File 表）
+平台级文件中心元数据（`backend/app/modules/file`，`/api/file`）。`File` 表只存对象存储的业务元数据，PPM 各 `file_urls` 字段改存本表 id（D-006）。`stored_key` = 日期分桶 + uuid（非原名，防覆盖）；`owner_type`/`owner_id` 多态归属（如 ppm_problem / ppm_plan_task / ppm_task_execute），新建场景先上传后绑定（owner_id 可空，D-008）；`deleted_at` 软删。五端点：上传 / 下载预览 / 单条元数据 / 批量元数据 / 软删。预览安全契约（D-009）：图片白名单 inline，其余强制 attachment。
+
+### StorageBackend / MinioStorage（对象存储抽象）
+平台文件中心的存储抽象层（`backend/app/modules/storage`）。`StorageBackend` ABC 定义 put_object / get_object_stream / delete_object / head_object 四个抽象方法；`MinioStorage` 是 MinIO 实现（aiobotocore，S3 兼容异步客户端，首个写入前确保 bucket 存在）；`factory` 按配置注册后端。业务（file 服务）只依赖抽象接口，切换 MinIO/OSS/其它 S3 兼容实现只改配置 + factory 注册，业务代码零改动（NFR-2）。测试用 `dependency_overrides` 注入 mock，不依赖真实 MinIO（NFR-4）。
+
+### CustomSkill（custom_skills / 自定义技能）
+平台级自定义技能管理（`backend/app/modules/skills`）。`CustomSkill` 表存用户编写的 SKILL.md：`name`（DB 层 UNIQUE + [a-z0-9-] 2-40，字符集校验在 service）、`description`、`content`（SKILL.md 正文，YAML frontmatter 由业务层组装）。**平台级共享**：无 `workspace_id`，所有工作区可见同一份（D-010）。`created_by` 仅作审计，用户删除时 SET NULL。
+
+### workbench / 工作台（ppm/workbench）
+PPM 工作台聚合视图子域（`backend/app/modules/ppm/workbench`，挂在 `/api/ppm` 下）。平台级、仅认证不授权（`get_current_principal`）。端点：`/workbench/profile`（头部信息）/`/workbench/summary`（汇总）/`/workbench/calendar`（日历）/`/workbench/todos`（待办分页）。支持 `target_user_id` 切换查看目标用户（`_resolve_target_user` 收口，越权 403）与 `switchable-users`（可切换用户列表）。经理可见口径与 data_scope 一致。
+
+### PPM 问题清单（problem-list / problem 子域）
+PPM 项目管理的问题清单子域（`backend/app/modules/ppm/problem`，`/api/ppm/problem-list`）。`ppm_problem_list` 表 `status` 取中文 3 态「新建/进行中/已完成」（2026-07-20 简化）；执行流两步：`/start`（新建→进行中，建 in-flight TaskExecute）+ `/execute`（收口 in-flight）。Excel 导入两步式：`import-preview`（解析校验）+ `import-commit`（原子单 commit），按表头文字定位列、合并单元格向下填充、严格校验（填了未匹配整行拒绝）。问题变更（problem-change）4 节点审批流已 deprecated（D-005）。区别于现有「问题变更流」词条——后者讲历史审批状态机，本条讲清单数据 + 执行 + 导入。
+
+### DataScope（data_scope / 数据范围）
+PPM 数据可见范围解析（`backend/app/modules/ppm/data_scope.py` 与 `ppm/common/data_scope.py`）。`DataScope` dataclass 三字段：`is_full`（超管→True，不加 where）、`manager_project_ids`（经理可见项目 id 集合）、`creator_user_id`（创建人兜底可见自己建的）。与功能权限（`require_permission_any` 管「能不能进接口」）正交，data_scope 管「能看哪些数据」。2026-07-22 权限统一后，经理判定单一可信源 = 项目成员角色 `PpmProjectMember.role_name`（部门/项目/开发/业务经理），不再用系统 RBAC 角色 / `project_manager_id` / 部门组织树。
+
+### daemon-borrow / 借用（borrow_resolver）
+业务/管理人员借用开发成员在线 daemon 执行的能力（变更 2026-07-25-daemon-borrow-for-business）。`_resolve_borrowed_or_own_runtime`（`agent/borrow_resolver.py`）是 4 路派发 resolver 的统一入口（主派发 / 决策预检 / 写回 / interactive quick-chat）。两步语义：① 先查 actor 自己的 member binding → 有在线自有 daemon 走原路径（零回归）；② 无在线自有 → DAEMON_BORROW 权限闸 → `resolve_shared_daemon_for_borrow` → 返回借用 runtime + lender_user_id。三重校验顺序：权限 → shared → online（fail fast）。沙箱候选 B 实建 + 审计落表。
+
+### AskUserQuestion / dialog（dialog_kind 对话框扩展）
+审批中心对话框集成（复用 daemon permission_request 通道）。`dialog_kind` 非空时该请求**不是**工具审批而是面向用户的问答题（如 `ask_user_question`），无 5min 自动拒绝、可无限期等待，长存 `session_dialog_requests` 表以跨前端刷新；`dialog_payload` 原样转发问题+选项给前端卡片（`daemon/protocol.py`）。resolve 端点（`POST .../permission-resolved`）同时处理 plain canUseTool 审批与 dialog 回答（`dialog_result` 字段）。前端按 `dialog_kind` 分流展示。区别于普通 tool_gateway 审批——后者有 5min 超时且为工具放行。
+
+---
+
 ## 注
 
 - 本表术语取自实际代码符号（表名/类名/服务名）与模块卡片定位，同名异义处（如 runtime 在 daemon 域 vs spec 域）已标注区分。
 - 模块完整契约见 `.sillyspec/docs/SillyHub/modules/<module>.md`。
+- 2026-07-27 增量小节中的术语同样基于实际代码符号核实，新增模块卡片未补时以本表为准。

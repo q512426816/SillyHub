@@ -19,37 +19,3 @@ export function normalizeClientPath(path: string): string {
   }
   return trimmed.replace(/\\/g, "/");
 }
-
-/**
- * 在 base 下拼接子路径名，并规范化结果。
- */
-export function joinClientPath(base: string, name: string): string {
-  if (!base) return normalizeClientPath(name);
-  const norm = normalizeClientPath(base);
-  const sep = isWindowsAbsPath(norm) ? "\\" : "/";
-  const suffix = norm.endsWith(sep) ? "" : sep;
-  return normalizeClientPath(`${norm}${suffix}${name}`);
-}
-
-/**
- * 返回父目录路径；已是根时返回原路径。
- */
-export function parentClientPath(path: string): string {
-  const norm = normalizeClientPath(path);
-  if (!norm) return norm;
-  if (isWindowsAbsPath(norm)) {
-    const m = /^([A-Za-z]:)(\\.*)?$/.exec(norm);
-    if (!m) return norm;
-    const drive = m[1]!;
-    const rest = (m[2] ?? "").replace(/^\\/, "");
-    if (!rest) return `${drive}\\`;
-    const parts = rest.split("\\").filter(Boolean);
-    parts.pop();
-    return parts.length ? `${drive}\\${parts.join("\\")}` : `${drive}\\`;
-  }
-  const leading = norm.startsWith("/");
-  const parts = norm.split("/").filter(Boolean);
-  parts.pop();
-  if (!parts.length) return leading ? "/" : norm;
-  return (leading ? "/" : "") + parts.join("/");
-}

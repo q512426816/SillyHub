@@ -1,50 +1,59 @@
 ---
-source_commit: ba87eec
-updated_at: 2026-06-23T16:20:03Z
-created_at: 2026-06-24T00:20:03
 author: qinyi
+created_at: 2026-07-27 00:35:31
+source_commit: 6e78b29a
+updated_at: 2026-07-26T16:35:31Z
 generator: sillyspec-scan
 ---
 
-# Backend 关注点与债务（CONCERNS）
+# 关注点(Concerns)
 
-> 基于 grep（`TODO|FIXME|deprecated|NotImplemented`）、`pyproject.toml` 配置、`app/main.py`、`app/core/*`、`app/modules/agent/model.py` 摘录的真实债务。按严重程度 🔴 严重 / 🟡 中等 / 🟢 轻微 分组。
+> 仅列已核实真实问题，每条标注来源（审计文档 / 代码文件:行 / 记忆索引 / code-quality 文档）。颜色按严重度：🔴 正确性/阻塞、🟡 半成品/数据质量、🟢 已就绪可盘活/低风险。
 
 ## 代码质量
 
-- 🔴 **AgentRunLog 表无 metadata 列（已知约束）**：`app/modules/agent/model.py` 第 274 行 `class AgentRunLog(BaseModel, table=True)` 表 `agent_run_logs` 仅有 5 列：`id / run_id / timestamp / channel / content_redacted`，**没有 metadata 列**。三层日志（tool_call / 结构化事件）的 metadata 在 daemon `submit_messages` 上报时丢失。模型注释（第 395 行附近）明确："intent metadata is stored; the source of truth remains AgentRun + Lease"。若需保留 tool_call 入参/出参等结构化字段，须先加迁移补列再改读写路径。这是当前 agent-run 调试链路的主要信息缺口。
+### 🔴 正确性 bug（界面骗人级，审计 P0）
 
-- 🟡 **mypy 实质失效**：`[tool.mypy]` 中 `strict = false`，且 `disable_error_code` 显式关闭 9 类：`attr-defined / union-attr / assignment / arg-type / valid-type / operator / call-overload / call-arg / unused-ignore`，`ignore_missing_imports = true`。类型检查约束极弱，新增代码的类型错误基本不会被拦截。建议逐步收窄 `disable_error_code` 列表。
-- 🟡 **`main.py` 内联 quick-chat 路由（约 290 行）**：`app/main.py`（共 458 行）第 119 行 `_register_quick_chat(app)` 在 `create_app` 闭包内定义 `/api/daemon-chat*` 四个端点（`POST /quick_chat`、`GET /get_quick_chat_result`、`GET /stream_quick_chat`、`POST /kill_quick_chat`、`GET /quick_chat_logs`），用裸 `sa_text` SQL 直接操作 `agent_runs` 表（行 152/167/200/228 等多处 `from sqlalchemy import text as sa_text`），绕过了模块四件套（service/model/schema）。维护成本高，SQL 字段名与 ORM 模型易漂移。
-- 🟡 **裸 SQL 散落**：除 `main.py` quick-chat 外，SQL 字段名与模型列名耦合，迁移易断裂；需留意其他模块是否也绕过 ORM 直接 `sa_text`。
+- **interactive kill 是假停（僵尸）** — `backend/app/modules/daemon/lease_service.py:340` 的 `_ws_cancel_stub` 只打一行日志、什么都不发；lease 置 cancelled + AgentRun 置 killed 后，daemon 里的 claude/codex 进程继续跑到自然结束 / idle expire，仍在烧 token。来源：`docs/agent-platform-deep-audit-2026-07-12.md` §2 发现 1。
+- **MissionControl.cancel 造僵尸** — `backend/app/modules/agent/control.py:83-99` cancel mission 时只改 AgentRun.status，不调 `cancel_lease`，daemon 不被通知，worker 继续跑（与上面同病）。来源：同审计 §2 发现 4 / §3 P0-2。
+- **scan 文档全量结构性过期** — 停在 `source_commit ba87eec`（即本扫描的前一版），与当前主分支漂移；sillyspec.db changes 表为空（进度跟踪失效）。来源：审计 §5.5 已知技术债。
 
-- 🟢 **`spec_profile` 多处 TODO 未实现**（实测命中）：
-  - `app/modules/spec_profile/provider.py:76` — `# TODO: implement actual discovery in follow-up task`
-  - `app/modules/spec_profile/provider.py:86` — `# TODO: implement actual loading in follow-up task`
-  - `app/modules/spec_profile/provider.py:96` — `# TODO: implement in follow-up task`
-  - `app/modules/spec_profile/policy.py:61` — `# TODO: implement stage conflict detection`
-  - `app/modules/spec_profile/policy.py:97` — `# TODO: implement document conflict detection`
+### 🟡 半成品 / 数据质量（审计 P1-P2 + code-quality DEFER）
 
-  该模块功能尚未完成，调用方需注意返回值可能是占位。
-- 🟢 **NotImplementedError 占位**：`app/modules/git_identity/providers/base.py:22` `raise NotImplementedError`；`app/modules/agent/base.py:145` docstring 说明 `run` 抽象方法未实现会抛 `NotImplementedError`。
-- 🟢 **已废弃代码仍在仓库**（本项目未上线、不考虑兼容，可择机删除）：
-  - `app/modules/workflow/fsm.py:3` `.. deprecated::`，`ChangeFSM is deprecated. Use StageEnum + TRANSITIONS`（第 61/81 行）。
-  - `app/modules/agent/coordinator.py:484/575` `.. deprecated::`，`start_sillyspec_run` 等方法记 `deprecated_method_called` 日志（第 503/509/580 行）。
-  - `app/modules/agent/base.py:39/143` 含 `.. deprecated::` docstring。
-  - `app/modules/workflow/tests/test_fsm.py` 专门测试 deprecated 路径的兼容性。
-- 🟢 **错误类命名不一致**：抽象基类 `AppError(Exception)`（后缀 `Error`），但大量领域错误按事件命名（`WorkspaceNotFound`、`ChangeNotFound`），ruff 因此关闭 `N818`。属有意约定，但对新人阅读有门槛。
+- **预算只挡新派发、不杀在跑的** — `backend/app/modules/agent/control.py:76-80` `can_dispatch_worker` 是 pre-dispatch 门，已派出的 worker 不再检查；`budget_tokens` 字段全代码无任何强制点；默认 `budget_usd=4.0` 硬编码（`spec_workspace/bootstrap.py:257`、`change/dispatch.py:943`）。来源：审计 §2 发现 4 / §3 P2-1。
+- **写代码 team mission 断链** — `finalize_execute_mission`（`agent/finalizer.py:167-186`）是 Wave 4 占位、全代码无调用点；`collect_completed_artifacts` 未把 daemon 上报的 patch 存成 `AgentArtifact(kind="patch")`；硬阻塞 C：`execution.py:104-130` 给每个 worker 传同一个 `root_path`（v1 共享 worktree，并行写互相覆盖 + patch 基线漂移，D-006 延后）。来源：审计 §2 发现 3 / §3 P2-2。
+- **daemon-client spec 同步断裂** — scan/runtime 页空根因：session 不 end → `postSpecSync` 不触发 + `.sillyspec` 包裹错位 + daemon 无 HTTP 只能 lease 轮询；修复变更待 plan。来源：记忆索引 `daemon-client-spec-sync-broken.md`。
+- **PPM 父表删除不级联（软关联）** — PPM FK 为软关联无约束（migration `202607220900`），删父行不会 FK 违约 500，而是留孤儿子行（`ppm/task/service.py:437` 注释明示）；4 父表（plan/problem/task/project）子表需逐表确认 + 显式级联。来源：`docs/code-quality-hardening-2026-07-24.md` §8 G1-G3 DEFER。
+- **PPM 全域缺乐观锁** — 需 version 列 migration（多表）+ update WHERE version + 前端并发 409 协调；复用 `agent/coordinator.update_with_optimistic_lock` 范式，走专项 brainstorm。来源：同上 §8。
+- **缓存 token 聚合不一致（A6）** — daemon 端 `sillyhub-daemon/src/adapters/stream-json.ts` L461 `+=` / L549 `=` / L706 `+=` 语义微妙（message_start 累加每 call 增量 vs message_delta 累计覆盖），盲目改破坏计费（SAFE=N），需真实数据 diff 验证；backend 聚合消费侧需对齐。来源：code-quality §3/§7 A6 DEFER + 记忆 `claude-cache-token-semantics`。
+- **残余 N+1 查询** — `ppm/problem/import_commit._build_module_maps`（每项目 4 表 JOIN）、`ppm/plan/import_commit` 两段循环（per-user kanban 计数器）；低频手动 Excel 导入，N 小，DEFER。来源：code-quality §7 Wave B DEFER。
+- **file 存储一致性收尾债** — upload 补偿 / soft_delete reaper / import_commit 原子化（platform-file-center 收尾）。来源：code-quality §7 §8。
+- **mypy 实质偏弱** — `[tool.mypy]` `strict=false` + `disable_error_code` 关闭 9 类（`attr-defined/union-attr/assignment/arg-type/valid-type/operator/call-overload/call-arg` 等），`ignore_missing_imports=true`；新增代码类型错误基本不被拦截。来源：`backend/pyproject.toml`。
+
+### 🟢 已就绪可盘活 / 低风险维护项
+
+- **WS Hub 早已完整就绪** — `backend/app/modules/daemon/ws_hub.py:42` `DaemonWsHub.send_session_control`（含 SESSION_INTERRUPT/END/INJECT/RESUME）现成可用，`_ws_cancel_stub` 的 "Wave 2 实现" 注释为陈旧误导；修上面 P0-1 不需要补 Hub。来源：审计 §2 发现 2。
+- **只读 team mission 链路完整可用** — 只差入口（`spec_workspace/router.py:273` 透传 `mode` 参数 + 前端按钮），即可用上 agent 团队做并行分析。来源：审计 §3 P1-1。
+- **断点续跑后端全通、前端无按钮** — `coordinator.py:236-311` `resume_run` + interactive SESSION_RESUME 已就绪（claude/codex），缺前端入口。来源：审计 §3 P1-2。
+- **deprecated 代码保留（有意）** — `agent/coordinator.py:484/575` `start_sillyspec_run` deprecated（仍可调，发 `deprecated_method_called` 事件）；`ppm/problem` 的 problem_change 模块 D-005 deprecated 但保留（`ppm/problem/fsm.py:11`、`router.py:11`）；`workspace/member_runtimes/model.py:7` 部分列 deprecated 只读；`workflow/fsm.py` ChangeFSM deprecated（用 StageEnum+TRANSITIONS 替代）。非 bug，按迁移节奏保留。
+- **真实 TODO（3 处，spec_profile 模块）** — `spec_profile/policy.py:61`（stage 冲突检测）、`spec_profile/policy.py:97`（document 冲突检测）、`spec_profile/provider.py:75`（follow-up task）。来源：grep `TODO` `backend/app`。
 
 ## 依赖风险
 
-- 🟡 **OpenTelemetry 仍是 stub**：`app/core/telemetry.py` 仅 `log.info("telemetry.init", endpoint=..., status="stub")`（第 21 行），docstring 自述 "without having to depend on the OTEL SDK"，未真正接入 exporter；若生产依赖链路追踪会落空。需确认是否纳入路线图或移除 `otel_endpoint` 配置项。
-- 🟡 **Redis 在测试中未真正隔离**：`conftest.py` 仅 `os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")`，未提供 fake/in-memory redis fixture；涉及 pub/sub（AgentRun 日志 SSE、daemon WebSocket hub）的测试若触碰真实 Redis 会脆弱或被跳过。
-- 🟡 **生产密钥管理依赖环境变量**：`SECRET_KEY`、`SILLYSPEC_MASTER_KEY`、`PLATFORM_BOOTSTRAP_ADMIN_PASSWORD` 全部走 env / `.env`，无 KMS/Vault 集成；容器编排需自行保证密钥注入与轮转。
-- 🟢 **`resolved_commit_sha` 静默回退**：`app/core/config.py:144` `resolved_commit_sha` 属性用 `subprocess.check_output(["git","rev-parse","--short=12","HEAD"])` 失败时 `return "unknown"`（第 162 行）；生产容器可能无 git，健康端点 version 字段可能无意义。
-- 🟢 **bcrypt rounds 上限 15**：`app/core/config.py:48` `auth_bcrypt_rounds: int = Field(12, ge=4, le=15)`，上线后若需提升到 15 以上需改约束。
-- 🟢 **`types-passlib` 类型来源**：dev 组含 `types-passlib`，若 `.venv` 同时存在 `passlib-stubs` 会重复，需确认一致性。
+### 🔴 阻塞 / 易踩
 
-## 架构风险
+- **alembic migration 多 head 分叉** — `backend/migrations/versions/` 共 117 个 migration 文件；并行变更易撞 revision/down 分叉致多 head → 启动 crash-loop。SQLite 单测抓不到（PG 才暴露），需用官方 `alembic heads` 核实单头，新 migration 接真实 head + 唯一 id。来源：记忆索引 `migration-chain-fragmentation-pattern.md`。
+- **worktree migration 污染部署** — 未合并 worktree 的 migration 若 apply 到本地 PG，切 main 部署会断链 crash-loop；修复需 `down -v` 重置（勿 stamp）。来源：记忆索引 `worktree-migration-pollutes-deploy.md`。
 
-- 🟡 **路由挂载顺序是隐式契约**：`app/main.py` 中 `_register_quick_chat(app)`（第 414 行）必须早于 `workspace_router`（第 415 行）；`members_router`（第 424 行）必须兄弟挂载（不能 `include_router(prefix=...)`，否则会 double-count 自带 prefix，代码注释明确记录这个 2026-06-16-workspace-members 的坑）。新人新增带 `{workspace_id}` 前缀的定长路由时极易踩坑（FastAPI 路由匹配不区分定长/参数优先级）。建议加单元测试断言挂载顺序。
-- 🟢 **daemon facade 跨域引用**：`DaemonService` 通过 `self._facade` 反向注入实现跨子域调用，daemon 已拆 5 子包（lease/patch/run_sync/session/permission）。新增子包服务时需保持 facade 引用注入，否则跨域委托会 NPE。
-- 🟢 **审计钩子全局生效**：`app/core/audit_hooks.py` 对所有 `BaseModel(table=True)` 生效（`_EXCLUDED_TABLES = {"audit_logs"}` 递归保护），高写入表（如 `agent_run_logs`）会产生大量 audit 记录，需确认 `audit_logs` 表容量与清理策略。实测 `table=True` 标注 **66 处**（约 60+ 张业务表）。
+### 🟡 方言 / 环境
+
+- **单测 SQLite vs 生产 PostgreSQL 方言差异** — `date_trunc` 等需方言分支；asyncpg 在 Windows 装不上（README §常见问题），本地连容器 PG；aiosqlite 存本地 naive 时间比较要转本地。来源：记忆索引 `backend-test-sqlite-vs-pg.md`、`README.md`。
+- **daemon-client spec_root cwd 风险** — daemon-client 平台模式 daemon 跑 gate 的 spec_root 若是 specDir（只有 spec 文档，无 backend/frontend 代码），`cd backend` 会找不到目录；待 sillyspec gate 发版后真实联调确认。来源：`.sillyspec/local.yaml` 坑 3。
+- **后端 venv 路径不可达** — 全局/项目根 `.venv` 缺 aiobotocore，pytest 必须用 `backend/.venv/Scripts/python.exe`；git bash 绝对路径 `.venv` 有时不可达。来源：记忆索引 `backend-venv-test-env.md`。
+- **生产密钥管理走 env 无 KMS** — `SECRET_KEY`、`SILLYSPEC_MASTER_KEY`、`PLATFORM_BOOTSTRAP_ADMIN_PASSWORD` 全部 env/`.env`，无 KMS/Vault 集成，容器编排需自行保证密钥注入与轮转。来源：`app/core/config.py`。
+- **OpenTelemetry 仍是 stub** — `app/core/telemetry.py` 仅 `log.info("telemetry.init", status="stub")`，未真正接入 exporter；生产链路追踪会落空。来源：旧 scan + 代码注释。
+
+### 🟢 已缓解
+
+- **backend 全量 ~12min 超 gate 10min timeout** — sillyspec 3.24+ 已支持 `SILLYSPEC_TEST_TIMEOUT_MS` 环境变量配置（`local.yaml` 坑 2 已解）。
+- **预存非业务模块 errors 阻塞 verify** — `local.yaml` 已用 `test_strategy: module` 子模块粒度（ppm/llm_provider/frontend/daemon 各自独立 test）规避，未命中不跑。

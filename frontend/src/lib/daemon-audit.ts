@@ -150,7 +150,7 @@ export function usePolicyAuditByRuntime(
 //
 // queryKey 内联在本模块(query-keys.ts 不在本任务 allowed_paths 内)。
 // params 进 key:筛选/分页变化即新查询(react-query 自动停旧启新)。
-// 风格对齐 lib/use-daemon-runtimes.ts(useQuery + ApiError 类型 + 暴露常用态)。
+// 风格：useQuery + ApiError 类型 + 暴露常用态。
 
 /** 本模块内联 queryKey(workspaceId + runtimeId + params 全进 key)。 */
 function auditQueryKey(
@@ -166,7 +166,7 @@ function auditQueryKey(
  *
  * 默认不轮询(审计是回看场景,非实时);调用方需要刷新用 refetch 或自行加 refetchInterval。
  *
- * @returns 与 use-daemon-runtimes 同构的扁平返回(items/total/isXxx/error/refetch)
+ * @returns 扁平返回(items/total/isXxx/error/refetch)
  */
 export function usePolicyAudit(
   workspaceId: string | number | null | undefined,

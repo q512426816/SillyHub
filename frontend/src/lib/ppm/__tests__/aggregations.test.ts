@@ -3,11 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   CHART_COLORS,
   toBarSeries,
-  toCostSeries,
   toNumber,
   toPieSeries,
 } from "@/lib/ppm/aggregations";
-import type { PsProjectPlan } from "@/lib/ppm/types";
 
 // echarts option 是复杂联合类型,测试中用宽松结构断言字段。
 interface AxisLike {
@@ -30,51 +28,8 @@ function xAxisData(o: ReturnType<typeof toBarSeries>): unknown[] {
   const ax = Array.isArray(opt.xAxis) ? opt.xAxis[0] : opt.xAxis;
   return (ax?.data as unknown[]) ?? [];
 }
-function yAxisData(o: ReturnType<typeof toCostSeries>): unknown[] {
-  const opt = o as unknown as OptionLike;
-  const ax = Array.isArray(opt.yAxis) ? opt.yAxis[0] : opt.yAxis;
-  return (ax?.data as unknown[]) ?? [];
-}
-function seriesOf(
-  o: ReturnType<typeof toBarSeries> | ReturnType<typeof toCostSeries>,
-): SeriesLike[] {
+function seriesOf(o: ReturnType<typeof toBarSeries>): SeriesLike[] {
   return ((o as unknown as OptionLike).series as SeriesLike[]) ?? [];
-}
-
-function makePlan(
-  id: string,
-  over: Partial<PsProjectPlan> = {},
-): PsProjectPlan {
-  return {
-    id,
-    project_id: "p1",
-    project_name: id,
-    project_manager_id: null,
-    project_manager_name: null,
-    project_start_time: null,
-    project_plan_end_time: null,
-    contract_sign_time: null,
-    contract_name: null,
-    contract_amount: null,
-    profit_margin: null,
-    profit_amount: null,
-    module: null,
-    budget_amount: "100",
-    budget_person_days: null,
-    actual_consumption_person_days: null,
-    remaining_available_person_days: null,
-    status: "active",
-    adjustment_person_days: null,
-    total_cost: "40",
-    labor_cost: null,
-    remaining_cost: "60",
-    cost_adjustment: null,
-    company_name: null,
-    create_name: null,
-    created_at: "",
-    updated_at: "",
-    ...over,
-  };
 }
 
 describe("toNumber", () => {
@@ -161,68 +116,5 @@ describe("toPieSeries", () => {
       itemStyle: { color: string };
     }[];
     expect(data[0]!.itemStyle.color).toBe(CHART_COLORS.pie[0]);
-  });
-});
-
-describe("toCostSeries", () => {
-  it("三系列 budget/actual/remaining,字符串解析", () => {
-    const plans = [
-      makePlan("A", {
-        budget_amount: "100",
-        total_cost: "40",
-        remaining_cost: "60",
-      }),
-      makePlan("B", {
-        budget_amount: "200",
-        total_cost: "80",
-        remaining_cost: "120",
-      }),
-    ];
-    const option = toCostSeries(plans);
-    const s = seriesOf(option);
-    expect(yAxisData(option)).toEqual(["B", "A"]); // 反转
-    expect(s).toHaveLength(3);
-    expect(s[0]!.data).toEqual([200, 100]);
-    expect(s[1]!.data).toEqual([80, 40]);
-    expect(s[2]!.data).toEqual([120, 60]);
-  });
-
-  it("null 字段兜底为 0", () => {
-    const plans = [
-      makePlan("A", {
-        budget_amount: null,
-        total_cost: null,
-        remaining_cost: null,
-      }),
-    ];
-    const option = toCostSeries(plans);
-    const s = seriesOf(option);
-    expect(s[0]!.data).toEqual([0]);
-    expect(s[1]!.data).toEqual([0]);
-    expect(s[2]!.data).toEqual([0]);
-  });
-
-  it("actual 缺省 total_cost 回退 actual_consumption_person_days", () => {
-    const plans = [
-      makePlan("A", {
-        total_cost: null,
-        actual_consumption_person_days: "15",
-      }),
-    ];
-    const option = toCostSeries(plans);
-    const actual = seriesOf(option)[1]!.data as number[];
-    expect(actual).toEqual([15]);
-  });
-
-  it("project_name 缺省回退 id", () => {
-    const plans = [makePlan("X", { project_name: null })];
-    const option = toCostSeries(plans);
-    expect(yAxisData(option)).toEqual(["X"]);
-  });
-
-  it("空 plans 返回合法 option 不抛错", () => {
-    const option = toCostSeries([]);
-    expect(yAxisData(option)).toEqual([]);
-    expect(seriesOf(option)).toHaveLength(3);
   });
 });

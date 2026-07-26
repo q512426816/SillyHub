@@ -62,3 +62,12 @@ SillySpec 变更生命周期是显式 FSM，定义在工具内部 StageEnum + TR
 `sillyhub-daemon` 是 Node ESM（`"type": "module"`），**所有相对路径 import 必须显式写 `.js` 后缀**（即便源文件是 `.ts`）：`import { X } from './config.js'`、`from './types.js'`。
 - 漏 `.js` 会在 `pnpm build`（tsc/tsx）或运行时报 ERR_MODULE_NOT_FOUND。
 - 改 daemon import 时养成习惯：源码 `.ts`，import 路径写 `.js`；类型 import 用 `import type`。
+
+## backend 模块分层与基类/异常约定（router/service/schema + BaseModel + AppError）
+
+backend 业务模块（`app/modules/<域>/`）除 `model.py` 单数命名外，还有三条隐形硬约定，新增模块 / 加表 / 抛业务异常时必须遵守：
+
+- **四文件分层**：`router.py`（FastAPI APIRouter，HTTP 层）+ `service.py`（业务）+ `model.py`（SQLModel 表）+ `schema.py`（Pydantic IO DTO）。`app/main.py` 注册 router 统一 `prefix="/api"`。
+- **service 在请求处理函数内实例化、注入 session**（非模块级单例）：router 里 `async def handler(session: SessionDep, ...): svc = IncidentService(session); ...`。保证异步会话隔离，别在模块级 `svc = XService(...)`。
+- **数据模型必须继承 `app.models/base.py` 的 `BaseModel`**（`class BaseModel(SQLModel): pass`，文件注释明示 "Inherit from this — not SQLModel"），写成 `class Foo(BaseModel, table=True)`。绕过它直接继承 `SQLModel` 会脱离共享 metadata 对象（Alembic autogenerate 扫的是 `BaseModel` 的 metadata），导致迁移漏表。
+- **领域错误继承 `app/core/errors.py` 的 `AppError`**（带类属性 `code` / `http_status`，可经 `__init__` 实例级覆盖），子类**按事件命名**（`IncidentNotFound` / `LlmProviderNotFound` / `PlanNotFound`），**不带 `Error` 后缀**——这正是 ruff `N818` 被显式关闭的原因。全局异常处理器按 `AppError` → HTTP 映射，业务 service 抛 `AppError` 子类而非裸 `HTTPException`。

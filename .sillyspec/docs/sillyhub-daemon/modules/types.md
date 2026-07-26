@@ -16,7 +16,7 @@ sillyhub-daemon 共享类型定义中枢（`src/types.ts`）。仅导出 type/in
 - **Backend 结果**：`TaskResultStatus`（completed/failed/timeout/aborted）、`BackendTaskResult`（adapter 子进程返回）。
 - **TaskRunner 终态**：`TaskResult`（success/exitCode/patch/filesChanged/insertions/deletions/output/error/durationMs/metadata），序列化为 `LeaseCompleteResult` 提交 server。
 - **任务状态**：`TaskState`（pending/running/completed/failed/cancelled）。
-- **WS 消息**：`DaemonMessage<T extends MsgType>`（type + payload unknown，使用点收窄）、`TaskAvailablePayload`。
+- **WS 消息**：`DaemonMessage<T extends MsgType>`（type + payload unknown，使用点收窄）。
 - **Lease 上下文**：`LeaseCtx`（leaseId/runtimeId/agentRunId/workspaceName/workspaceSlug/rootPath/repoUrl/branch/claudeMd/provider/cmdPath/cmd/prompt/model/sessionId/resumeSessionId/timeout/timeoutSeconds/kind/agentSessionId/toolConfig/claimToken/manualApproval/askUserOnly）、`LeasePayload = LeaseCtx`、`ExecutionContextPayload`（snake_case，GET execution-context 响应）、`LeaseClaimResult`、`LeaseMessage`（submit_messages 单条）、`ToolConfig = Record<string,string>`。
 
 ## 关键逻辑

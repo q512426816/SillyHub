@@ -31,7 +31,6 @@ import type {
   SDKResultMessage,
   UserDialogResult,
 } from '@anthropic-ai/claude-agent-sdk';
-import type { ClaudeSdkDriver } from './claude-sdk-driver.js';
 import type {
   InteractiveDriver,
   InteractiveDriverCallbacks,
@@ -56,8 +55,6 @@ import type {
   PersistedSessionRecord,
   SessionManagerDeps,
   SessionState,
-  SessionStatus,
-  SessionStorePersistence,
 } from './types.js';
 import {
   SessionAlreadyExistsError,
@@ -829,7 +826,6 @@ export class SessionManager {
       // task-08（D-007@v1 / FR-07）：manual_approval=true 时为当前 session 建独立
       // resolver（每 session 一份，互不干扰）+ 构造远程人审 canUseTool 回调；
       // false（默认）时不传，SDK 走内置默认策略（spike H1 行为不变）。
-      let resolver: PermissionResolver | undefined;
       // _buildDriverOptions 内部按 enableApproval 注入 canUseTool/onUserDialog +
       // 建 resolver（scan 真阻塞，改造点 C/D）；create/restore 复用同一套注入逻辑。
       // task-06：主 agent session 注入 MCP tool（让主 agent discover daemon MCP
@@ -853,8 +849,6 @@ export class SessionManager {
         effectiveAskUserOnly,
         mcpServers: mainAgentMcp,
       });
-      // 抽 helper 后 resolver 仍需在本作用域持有（create catch 清理用）。
-      resolver = this._resolversBySession.get(input.sessionId);
       // task-02（D-001）：用 session 归属 driver（不再全局 this.deps.driver）。
       // 过渡期 ClaudeSdkDriver.start 同步返回 Query、InteractiveDriver.start 返回
       // Promise<Handle>；统一 await（同步返回值经 await 等价直传）。按 provider 写句柄：
@@ -1543,11 +1537,9 @@ export class SessionManager {
     const onMessage = (m: SDKMessage | Record<string, unknown>): void => {
       void this._onMessage(state, m as SDKMessage);
     };
-    const onError = (e: unknown): void => {
+    const onError = (_e: unknown): void => {
       // 边界 2：driver 异常 → fail。fail 内部幂等。
       void this.fail(state.sessionId).then(() => undefined, () => undefined);
-      // 记录原始错误（便于 daemon 日志），consume 已结束。
-      this._lastError = e;
     };
     // 适配对象：新旧两组键并存（见方法注释）。
     const callbacks = {
@@ -1584,9 +1576,6 @@ export class SessionManager {
       }
     }
   }
-
-  /** 最近一次 driver error（测试 / 日志用）。 */
-  private _lastError: unknown = null;
 
   /**
    * 追问：push 新 SDKUserMessage（spike H2/S1）。

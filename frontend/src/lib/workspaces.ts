@@ -10,9 +10,6 @@ import type { components } from "@/lib/api-types";
 
 type Schemas = components["schemas"];
 
-// task-11：响应类型对齐 OpenAPI 生成类型，保留原类型名作为别名（调用方零改动）。
-export type WorkspaceStructure = Schemas["WorkspaceStructureDTO"];
-
 export type ScanResult = Schemas["ScanResponse"];
 
 // task-11：从生成类型派生 WorkspaceStatus，自动含 "pending"（单一真相）。

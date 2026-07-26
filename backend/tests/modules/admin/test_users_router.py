@@ -529,21 +529,12 @@ async def test_create_user_username_too_short_422(client: AsyncClient, auth_head
 async def test_create_user_email_optional_none(client: AsyncClient, auth_headers):
     """SC-1/5: email:null → 201 且 email is None。"""
     username = f"optnull-{uuid.uuid4().hex[:6]}"
-    try:
-        resp = await client.post(
-            "/api/admin/users",
-            json={"username": username, "password": "Password123!", "email": None},
-            headers=auth_headers,
-        )
-    except Exception:
-        pytest.xfail(
-            "task-02 缺陷:User.email ORM nullable=False,email=null 命中 DB NOT NULL "
-            "抛 IntegrityError 未被 router 转 500/409"
-        )
-    if resp.status_code != 201:
-        pytest.xfail(
-            f"task-02 缺陷:User.email ORM nullable=False,email=null → 非预期 {resp.status_code}"
-        )
+    resp = await client.post(
+        "/api/admin/users",
+        json={"username": username, "password": "Password123!", "email": None},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 201, resp.text
     data = resp.json()
     assert data["email"] is None
     assert data["username"] == username
@@ -553,21 +544,12 @@ async def test_create_user_email_optional_none(client: AsyncClient, auth_headers
 async def test_create_user_email_optional_omitted(client: AsyncClient, auth_headers):
     """SC-1: 不传 email 字段 → 201 且 email is None。"""
     username = f"optomit-{uuid.uuid4().hex[:6]}"
-    try:
-        resp = await client.post(
-            "/api/admin/users",
-            json={"username": username, "password": "Password123!"},
-            headers=auth_headers,
-        )
-    except Exception:
-        pytest.xfail(
-            "task-02 缺陷:User.email ORM nullable=False,不传 email 命中 DB NOT NULL "
-            "抛 IntegrityError 未被 router 转 500/409"
-        )
-    if resp.status_code != 201:
-        pytest.xfail(
-            f"task-02 缺陷:User.email ORM nullable=False,不传 email → 非预期 {resp.status_code}"
-        )
+    resp = await client.post(
+        "/api/admin/users",
+        json={"username": username, "password": "Password123!"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 201, resp.text
     assert resp.json()["email"] is None
 
 
@@ -575,20 +557,16 @@ async def test_create_user_email_optional_omitted(client: AsyncClient, auth_head
 async def test_create_user_then_login_by_username(client: AsyncClient, auth_headers):
     """SC-1 端到端: create username → username 登录成功。"""
     username = f"carol-{uuid.uuid4().hex[:6]}"
-    try:
-        resp = await client.post(
-            "/api/admin/users",
-            json={
-                "username": username,
-                "password": "Password123!",
-                "email": f"{username}@example.com",
-            },
-            headers=auth_headers,
-        )
-    except Exception:
-        pytest.xfail("task-02 缺陷:create 链路异常")
-    if resp.status_code != 201:
-        pytest.xfail(f"task-02 缺陷:create 链路异常 {resp.status_code}")
+    resp = await client.post(
+        "/api/admin/users",
+        json={
+            "username": username,
+            "password": "Password123!",
+            "email": f"{username}@example.com",
+        },
+        headers=auth_headers,
+    )
+    assert resp.status_code == 201, resp.text
     login = await client.post(
         "/api/auth/login",
         json={"account": username, "password": "Password123!"},
@@ -782,14 +760,11 @@ async def test_update_email_set_to_null_allowed(client: AsyncClient, auth_header
     await db_session.commit()
     await db_session.refresh(user)
 
-    try:
-        resp = await client.patch(
-            f"/api/admin/users/{user.id}",
-            json={"email": None},
-            headers=auth_headers,
-        )
-    except Exception:
-        pytest.xfail("task-02 缺陷:User.email ORM nullable=False,email 清空抛 IntegrityError")
+    resp = await client.patch(
+        f"/api/admin/users/{user.id}",
+        json={"email": None},
+        headers=auth_headers,
+    )
     if resp.status_code != 200 or resp.json().get("email") is not None:
         pytest.xfail(
             "task-03 缺陷:update_user 无法区分 omitted vs 显式 email=null,"
@@ -834,10 +809,7 @@ async def test_userread_email_nullable(client: AsyncClient, auth_headers, db_ses
         status="active",
     )
     db_session.add(user)
-    try:
-        await db_session.commit()
-    except Exception:
-        pytest.xfail("task-02 缺陷:User.email ORM nullable=False,email=None 插入失败")
+    await db_session.commit()
     await db_session.refresh(user)
 
     resp = await client.get(f"/api/admin/users/{user.id}", headers=auth_headers)
@@ -857,10 +829,7 @@ async def test_userread_email_null_in_list(client: AsyncClient, auth_headers, db
         status="active",
     )
     db_session.add(user)
-    try:
-        await db_session.commit()
-    except Exception:
-        pytest.xfail("task-02 缺陷:User.email ORM nullable=False,email=None 插入失败")
+    await db_session.commit()
 
     resp = await client.get("/api/admin/users", headers=auth_headers)
     assert resp.status_code == 200
@@ -885,10 +854,7 @@ async def test_multiple_null_emails_coexist(client: AsyncClient, auth_headers, d
         status="active",
     )
     db_session.add_all([a, b])
-    try:
-        await db_session.commit()
-    except Exception:
-        pytest.xfail("task-02 缺陷:User.email ORM nullable=False,email=None 插入失败")
+    await db_session.commit()
     assert a.id is not None
     assert b.id is not None
 

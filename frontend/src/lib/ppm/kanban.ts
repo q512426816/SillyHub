@@ -16,12 +16,10 @@ import type {
   KanbanCommentCreateReq,
   KanbanOrgGroup,
   KanbanQueryReq,
-  KanbanSubtask,
   KanbanTaskAssignReq,
   KanbanTaskCard,
   KanbanTaskCreateReq,
   KanbanTaskReorderReq,
-  KanbanTaskUpdateReq,
   KanbanUserColumn,
 } from "./types";
 
@@ -125,13 +123,6 @@ export async function reorderKanbanTasks(
   });
 }
 
-/** 搜人 — 按 project_member.user_name 模糊匹配。 */
-export async function searchKanbanUsers(keyword: string): Promise<KanbanUserColumn[]> {
-  return apiFetch<KanbanUserColumn[]>("/api/ppm/kanban/search/users", {
-    query: { keyword },
-  });
-}
-
 // ---------------------------------------------------------------------------
 // task-01: task CRUD + comment/subtask (FR-01 / D-011)
 // ---------------------------------------------------------------------------
@@ -142,16 +133,6 @@ export async function createKanbanTask(
 ): Promise<KanbanTaskCard> {
   return apiFetch<KanbanTaskCard>("/api/ppm/kanban/task", {
     method: "POST",
-    json: body,
-  });
-}
-
-/** 更新任务(非空字段)。 */
-export async function updateKanbanTask(
-  body: KanbanTaskUpdateReq,
-): Promise<KanbanTaskCard> {
-  return apiFetch<KanbanTaskCard>("/api/ppm/kanban/task", {
-    method: "PUT",
     json: body,
   });
 }
@@ -184,25 +165,5 @@ export async function addKanbanComment(
       method: "POST",
       json: body,
     },
-  );
-}
-
-/** 列任务子任务(按 sort_order 升序)。 */
-export async function listKanbanSubtasks(
-  taskId: string,
-): Promise<KanbanSubtask[]> {
-  return apiFetch<KanbanSubtask[]>(
-    `/api/ppm/kanban/task/${encodeURIComponent(taskId)}/subtasks`,
-  );
-}
-
-/** 翻转子任务 done 标志。 */
-export async function toggleKanbanSubtask(
-  taskId: string,
-  subtaskId: string,
-): Promise<KanbanSubtask> {
-  return apiFetch<KanbanSubtask>(
-    `/api/ppm/kanban/task/${encodeURIComponent(taskId)}/subtask/${encodeURIComponent(subtaskId)}/toggle`,
-    { method: "PUT" },
   );
 }

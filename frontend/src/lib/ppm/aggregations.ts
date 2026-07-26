@@ -9,7 +9,6 @@
 import type { EChartsOption } from "echarts";
 
 import { tokens } from "@/styles";
-import type { PsProjectPlan } from "./types";
 
 /** 图表配色:集中管理,柱/饼/成本三图共用。 */
 export const CHART_COLORS = {
@@ -139,73 +138,5 @@ export function toPieSeries(
         data,
       },
     ],
-  };
-}
-
-/**
- * 成本条形图 option:横向,Y 轴项目名,三系列 budget/actual/remaining。
- * - 字符串/null 兜底为 0;actual 优先用 total_cost,缺省回退 actual_consumption_person_days(口径不同)。
- * - 项目 > 20 时启用 yAxis dataZoom。
- */
-export function toCostSeries(
-  plans: Pick<
-    PsProjectPlan,
-    | "id"
-    | "project_name"
-    | "budget_amount"
-    | "total_cost"
-    | "actual_consumption_person_days"
-    | "remaining_cost"
-  >[],
-): EChartsOption {
-  // Y 轴自下而上展示,反转使第一个项目在顶部。
-  const names = plans.map((p) => p.project_name ?? p.id).reverse();
-  const budget = plans.map((p) => toNumber(p.budget_amount)).reverse();
-  const actual = plans
-    .map((p) =>
-      toNumber(p.total_cost) !== 0
-        ? toNumber(p.total_cost)
-        : toNumber(p.actual_consumption_person_days),
-    )
-    .reverse();
-  const remaining = plans.map((p) => toNumber(p.remaining_cost)).reverse();
-
-  const crowded = plans.length > 20;
-
-  return {
-    tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
-    legend: { top: 0, data: ["预算", "实际", "剩余"] },
-    grid: { left: 16, right: 24, top: 40, bottom: crowded ? 56 : 24, containLabel: true },
-    xAxis: { type: "value", name: "金额" },
-    yAxis: { type: "category", data: names },
-    series: [
-      {
-        name: "预算",
-        type: "bar",
-        data: budget,
-        itemStyle: { color: CHART_COLORS.budget },
-      },
-      {
-        name: "实际",
-        type: "bar",
-        data: actual,
-        itemStyle: { color: CHART_COLORS.actual },
-      },
-      {
-        name: "剩余",
-        type: "bar",
-        data: remaining,
-        // 负剩余(超支)标红;其余绿。逐项着色。
-        itemStyle: {
-          color: (p: { value: unknown }) =>
-            toNumber(p.value) < 0
-              ? CHART_COLORS.negative
-              : CHART_COLORS.remaining,
-        },
-      },
-    ],
-    ...(crowded
-      ? { dataZoom: [{ type: "slider", yAxisIndex: 0, start: 0, end: 20 }] }
-      : {}),
   };
 }

@@ -56,7 +56,7 @@ import type {
 } from './types.js';
 import { AgentDetector, normalizeProvider } from './agent-detector.js';
 import type { DetectedAgent } from './agent-detector.js';
-import { HubClient, extractCause } from './hub-client.js';
+import { extractCause } from './hub-client.js';
 import { WsClient } from './ws-client.js';
 import { listDir } from './file-rpc.js';
 import { listRoots } from './roots-rpc.js';
@@ -75,7 +75,6 @@ import { ResilienceService } from './resilience/service.js';
 import type { Envelope } from './resilience/service.js';
 import { dedupKeyFor } from './resilience/error-classify.js';
 import type {
-  TaskRunner,
   TaskRunnerResult,
   ChangeWriteCtx,
   ChangeWriteFile,
@@ -83,8 +82,6 @@ import type {
 } from './task-runner.js';
 // task-11（design §5）：Filesystem Policy Engine 三件套（构造注入，additive）。
 import type { PolicyCache } from './policy/runtime-policy.js';
-import type { AuditSink } from './policy/audit-sink.js';
-import type { PolicyEngine } from './policy/filesystem-policy.js';
 // task-09（D-007@v2 候选 B）：借用 session 沙箱目录创建（mirror by slug，复用 WorkspaceManager）。
 import { WorkspaceManager } from './workspace.js';
 import type { SessionManager } from './interactive/session-manager.js';
@@ -474,8 +471,6 @@ export interface DaemonOptions {
    * daemon 需要 _wsLoop 时按 server_url 构造。
    */
   wsClientFactory?: WsClientFactory;
-  /** WS 重连退避（毫秒），默认 10000（对齐 Python daemon.py:251 `asyncio.sleep(10)`）。 */
-  wsReconnectDelay?: number;
   /**
    * task-04（D-002@v3）：注入 SessionManager（交互式会话生命周期管理）。
    * 默认 undefined：kind=interactive lease 记 error 并由 backend 收 failed，不崩 daemon
@@ -529,10 +524,6 @@ export interface DaemonOptions {
    * 真正接入各 tool 接入点由后续 task-12 ~ task-18 完成；本任务仅持有引用。
    */
   policyCache?: PolicyCache | null;
-  /** 同 {@link DaemonOptions.policyCache}。 */
-  auditSink?: AuditSink | null;
-  /** 同 {@link DaemonOptions.policyCache}。 */
-  policyEngine?: PolicyEngine | null;
   /**
    * task-09（D-007@v2 候选 B）：借用沙箱目录管理器（mirror by slug）。
    *
@@ -625,10 +616,6 @@ export class Daemon {
    * backend 推送序列号，两者语义不同（design §5.3 + R-07）。
    */
   private readonly _lastPolicyVersion = new Map<string, number>();
-  /** 同 {@link _policyCache}。 */
-  private readonly _auditSink: AuditSink | null;
-  /** 同 {@link _policyCache}。 */
-  private readonly _policyEngine: PolicyEngine | null;
   /**
    * task-09（D-007@v2 候选 B）：借用沙箱目录管理器（构造注入或 lazy 构造）。
    *
@@ -678,7 +665,6 @@ export class Daemon {
    */
   private _wsClient: WsClientLike | null = null;
   private readonly _wsClientFactory: WsClientFactory;
-  private readonly _wsReconnectDelay: number;
 
   /** 运行标志，三循环 while 条件。 */
   private _running = false;
@@ -740,15 +726,12 @@ export class Daemon {
     this._wsClientFactory =
       options?.wsClientFactory ??
       ((opts) => new WsClient(opts) as unknown as WsClientLike);
-    this._wsReconnectDelay = options?.wsReconnectDelay ?? 10_000;
     this._sessionManager = options?.sessionManager ?? null;
     this._credentialManager = options?.credentialManager ?? null;
     this._lockManager = options?.lockManager ?? null;
     this._resilience = options?.resilience ?? null;
     // task-11：Policy 三件套构造注入（additive，未传 = null，行为不变）。
     this._policyCache = options?.policyCache ?? null;
-    this._auditSink = options?.auditSink ?? null;
-    this._policyEngine = options?.policyEngine ?? null;
     // task-09（D-007@v2 候选 B）：借用沙箱管理器，构造期注入优先；未注入走 lazy。
     this._borrowWorkspaceManager = options?.borrowWorkspaceManager ?? null;
     this._persistence = options?.persistence ?? null;

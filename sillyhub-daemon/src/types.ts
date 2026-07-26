@@ -174,13 +174,6 @@ export interface DaemonMessage<T extends MsgType = MsgType> {
   payload: unknown;
 }
 
-/**
- * task_available 消息的 payload 形状（DaemonMessage<'daemon:task_available'>）。
- * 对照 Python `daemon.py:259-263` + `_execute_task(payload)`。
- * 实质与 LeasePayload 同构（claim_lease 后再注入 claim_token 等）。
- */
-export type TaskAvailablePayload = LeasePayload;
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 6. Lease 相关类型
 // ─────────────────────────────────────────────────────────────────────────────

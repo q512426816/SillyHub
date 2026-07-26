@@ -1,68 +1,49 @@
 ---
-source_commit: ba87eec
-updated_at: 2026-06-23T16:32:31Z
-created_at: 2026-06-24T00:32:31
 author: qinyi
+created_at: 2026-07-27 00:35:31
+source_commit: 6e78b29a
+updated_at: 2026-07-26T16:35:31Z
 generator: sillyspec-scan
 ---
 
-# SillyHub — 测试说明
+# 测试(Testing)
 
-## 总览
+SillyHub 三端各自独立测试栈,统一目标:变更后零回归才允许合入主干。所有静态检查(ruff / mypy / 两端 tsc)要求全绿,作为"零静态债务"基线。产品根 `package.json` 的 `test` 仅为占位(默认 `echo && exit 1`),所有测试在 3 个子项目内运行,或经根 `Makefile` 聚合。
 
-SillyHub 产品根**无测试**（根 `package.json` 的 `test` 为默认 `echo ... && exit 1` 占位）。所有测试在 3 个子项目内独立运行，命令须在对应子项目目录执行，或通过根 `Makefile` 聚合 target。
+## 测试栈
 
-SillySpec 流程约定（`.sillyspec/.runtime/local.yaml`）：
+| 端 | 框架 | 配置入口 | 关键依赖 |
+|---|---|---|---|
+| backend | pytest | `backend/pyproject.toml [tool.pytest.ini_options]`(`testpaths=["tests","app"]`,`asyncio_mode=auto`) | pytest-asyncio / pytest-xdist(`-n auto` 并行) / pytest-cov / aiosqlite(单测 DB) |
+| frontend | vitest 2.0 + jsdom | `frontend/package.json` scripts.`test`="vitest run" | @testing-library/react / @testing-library/jest-dom / openapi-typescript(类型生成) |
+| daemon | vitest(node 环境) | `sillyhub-daemon/vitest.config.ts` + `vitest.spikes.config.ts` | forks 池(`maxForks: 8`) / 30s testTimeout |
 
-- `test_strategy = module`（测试策略按模块粒度执行）
-- `backend_test = "cd backend && uv run pytest -q --cov=app --cov-fail-under=60"`（覆盖率门槛 **≥ 60%**）
-- `frontend_test = "cd frontend && pnpm test"`
+## 测试规模(实测,source_commit 6e78b29a)
 
-## backend — pytest
+- **backend**:68 个集成测试(`backend/tests/test_*.py`)+ 193 个模块内单测(`backend/app/modules/*/tests/test_*.py`)= **261 个测试文件**,另配 10 个 `conftest.py` fixture。基线 **2955 passed / 10 skipped / 5 xfailed**(`docs/code-quality-hardening-2026-07-24.md` §0)。
+- **frontend**:**115 个测试文件**(`frontend/src/**/*.test.ts(x)`)。基线 **1059 passed / 29 todo / 1 file skipped**。
+- **daemon**:**117 个测试文件**(`sillyhub-daemon/tests/**/*.test.ts`,分布 interactive 28 / policy 7 / adapters 7 / resilience 4 / spec-transport-tar-sync 3 等);探索性 spike 代码另走 `vitest.spikes.config.ts`(`include=['spikes/**/*.test.ts']`),**不进 CI 主套件**。基线 **1951 passed / 1~2 flaky 超时**。
 
-- 测试框架：pytest ≥8 + pytest-asyncio ≥0.23 + pytest-cov ≥5（`backend/pyproject.toml` dev extras）
-- pytest 配置（`backend/pyproject.toml [tool.pytest.ini_options]`）：
-  - `asyncio_mode = "auto"`（异步测试自动套 event loop）
-  - `testpaths = ["tests", "app"]`（同时发现顶层集成套件与各模块本地单测）
-  - `python_files = ["test_*.py"]`
-- 顶层 conftest：`backend/conftest.py`
-- 运行命令（`backend/` 下）：`uv run pytest`，根目录：`make backend-test`
-- 测试函数数（`def test_` / `async def test_`，已排除 `.venv`）：**1757 个**
-- 测试目录：`backend/tests/`（顶层集成）+ 各模块 `backend/app/modules/*/tests/`（本地单测）
+## 覆盖与门禁
 
-## frontend — vitest
+- backend 覆盖率目标 **≥ 60%**(`README.md` 开发指南 + `.sillyspec/.runtime/local.yaml` `backend_test` 带 `--cov-fail-under=60`);ruff + mypy 全绿是零容忍静态基线(`pyproject.toml [tool.mypy]` strict=false 但 `warn_unused_ignores=true`)。
+- frontend `pnpm gen:types:check`(`package.json` scripts)= 生成 `api-types.ts` 后 `git diff --exit-code`,守护前端类型与后端 OpenAPI 不漂移;tsc `--noEmit` + ESLint 必过。
+- daemon tsc 全绿;spec-sync(task-09)与 lease.kind 分流(D-002)为已知脆弱区,单文件/隔离均 <100ms,满载并行下偶发 30s 超时,重跑即过(`vitest.config.ts` 注释)。
+- SillySpec `test_strategy=module`:每个变更在 verify 阶段按受影响模块触发对应测试,而非全量跑。
 
-- 测试框架：vitest ^2.0.0（dev），配合 `@testing-library/react` ^16、`@testing-library/jest-dom` ^6.4、`jsdom`、`@playwright/test` ^1.60、`puppeteer` ^24.43
-- 配置：`frontend/package.json` scripts `test = "vitest run"`、`test:watch = "vitest"`
-- 运行命令（`frontend/` 下）：`pnpm test`，根目录：`make frontend-test`（`pnpm test --run`）
-- 测试文件分布：`frontend/src/**/*.test.ts(x)` 与 `frontend/src/**/__tests__/*.test.ts(x)`（覆盖组件、lib 工具、daemon/agent/ppm/hooks 等）
-- 测试文件数（`*.test.ts` / `*.test.tsx`，已排除 `node_modules` / `.next` / `dist`）：**36 个**
+## 已知测试坑(动手前必读)
 
-## sillyhub-daemon — vitest
+- backend 全量 pytest 未并行时约 **12 分钟**,超过 SillySpec verify 默认 10 分钟 gate;必须用 `pytest -n auto` 并行压到分钟级(`pyproject.toml [tool.pytest.ini_options]` 注释 + memory)。
+- main 分支 backend 存在**预存非业务 errors**(瞬时/环境性),全量失败先排除环境与 worktree overlay 污染,而非假定回归。
+- **PPM 前端变更 verify 必踩**:SillySpec CLI 按路径子串把 `frontend/components/ppm` 或 `lib/ppm` 关联到 ppm 后端测试,405 passed 但 ~700s 超 600s 默认 timeout 阻断(非失败);解法 `SILLYSPEC_TEST_TIMEOUT_MS=900000` 后台重跑。
+- **SQLite(单测) vs PostgreSQL(生产)方言差异**:`with_for_update` 在 SQLite 为 no-op(测不到并发行锁),`date_trunc` 等需方言分支;并发正确性与 PG 特性只能在生产环境验证。断言不绑死 SQL 函数名。
+- 改 FastAPI router 必跑对应 `test_router`(参数顺序 SyntaxError service 测覆盖不到,重建容器 import 才暴露);`asyncpg` Windows 装不上时用 Docker 起 Postgres、本地后端连容器。
+- SillySpec verify/archive 实测要 `local.yaml` `modules` 块(非 `module_paths`),否则 fallback 全量;`archive step5 --change` 移动后找不到致 db 分裂,改用不带 `--change` + `status=archived` 判完成。
 
-- 测试框架：vitest ^2.0.0（dev）
-- 配置：`sillyhub-daemon/package.json` scripts `test = "vitest run --passWithNoTests"`、`test:watch = "vitest"`
-- 运行命令（`sillyhub-daemon/` 下）：`pnpm test`
-- 测试目录：`sillyhub-daemon/tests/`（含 `adapters/`、`interactive/` 子目录）
-- 测试文件数（`*.test.ts` / `*.spec.ts`，已排除 `node_modules` / `dist`）：**65 个**
+## 常用命令
 
-## 测试数量汇总
-
-| 子项目 | 框架 | 测试量 | 运行命令 |
-| --- | --- | --- | --- |
-| backend | pytest + pytest-asyncio | 1757 个测试函数（cov ≥ 60） | `cd backend && uv run pytest` |
-| frontend | vitest + Testing Library | 36 个测试文件 | `cd frontend && pnpm test` |
-| sillyhub-daemon | vitest | 65 个测试文件 | `cd sillyhub-daemon && pnpm test` |
-| 根（SillyHub 产品根） | — | 0（仅占位） | 无 |
-
-## E2E 现状
-
-- frontend 同时声明 `@playwright/test` ^1.60 与 `puppeteer` ^24.43 两套浏览器自动化依赖，但仓库内**未见独立 `playwright.config.*` / `e2e/` 目录**（无 playwright 配置文件），E2E 尚未形成独立测试套件；puppeteer/playwright 当前主要作为依赖引入，未见根级 E2E 运行脚本。
-
-## 注意事项
-
-- 所有命令默认在各子项目目录下运行；根目录只能用 `make backend-test` / `make frontend-test` 聚合 target（`make test` = `backend-test + frontend-test`）。
-- backend 的 `testpaths` 同时覆盖 `tests/` 与 `app/`，统计的 1757 个测试函数已排除 `backend/.venv`。
-- daemon 的 `test` 脚本带 `--passWithNoTests`，无匹配文件时不会失败。
-- backend 测试用 `aiosqlite`（dev），生产用 `asyncpg` + PostgreSQL，存在 async 驱动方言差异风险（详见 CONCERNS.md）。
-- SillySpec `test_strategy=module`：每个变更在 verify 阶段按受影响模块触发对应测试，而非全量跑。
+- 后端:`make backend-test`(或 `cd backend && uv run pytest -n auto`)
+- 前端:`make frontend-test`(或 `cd frontend && pnpm test`)
+- daemon:`cd sillyhub-daemon && pnpm test`(spike 单独:`pnpm vitest run --config vitest.spikes.config.ts`)
+- 全量:`make test`(后端 + 前端) / `make lint`(后端 ruff+mypy + 前端 ESLint)
+- backend 测试须用 `backend/.venv/Scripts/python.exe`(非全局/项目根 .venv,全局缺 aiobotocore)

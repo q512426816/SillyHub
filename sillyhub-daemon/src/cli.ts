@@ -148,7 +148,7 @@ export async function saveConfigFn(
  * 故 cli 侧独立提供。
  */
 function cliResilienceLogger(): ResilienceLogger {
-  const write = (level: 'info' | 'warn' | 'error', event: string, kv?: Record<string, unknown>): void => {
+  const write = (_level: 'info' | 'warn' | 'error', event: string, kv?: Record<string, unknown>): void => {
     const parts = kv ? Object.entries(kv).map(([k, v]) => `${k}=${v instanceof Error ? v.message : typeof v === 'object' ? JSON.stringify(v) : String(v)}`) : [];
     process.stderr.write(`[resilience.${event}] ${parts.join(' ')}\n`);
   };
@@ -762,8 +762,6 @@ export async function startAction(opts: StartOptions): Promise<number> {
     lockManager,
     resilience,
     policyCache,
-    auditSink,
-    policyEngine,
   });
 
   // step 6: 写 PID 文件（对齐 Python __main__.py:106 `_write_pid(os.getpid())`）。

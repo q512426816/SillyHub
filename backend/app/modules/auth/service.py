@@ -202,16 +202,6 @@ class AuthService:
 
     # ── Helpers ───────────────────────────────────────────────────────────
 
-    async def _lookup_active_user_by_email(self, email: str) -> User | None:
-        stmt = (
-            select(User)
-            .where(col(User.email) == email.lower())
-            .where(col(User.deleted_at).is_(None))
-            .where(col(User.status) == "active")
-            .limit(1)
-        )
-        return (await self._db.execute(stmt)).scalars().first()
-
     async def _lookup_active_user_by_username(self, username: str) -> User | None:
         stmt = (
             select(User)

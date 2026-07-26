@@ -1,72 +1,45 @@
 ---
-source_commit: ba87eec
-updated_at: 2026-06-23T16:28:40Z
-created_at: 2026-06-24T00:28:40
 author: qinyi
+created_at: 2026-07-27 00:35:31
+source_commit: 6e78b29a
+updated_at: 2026-07-26T16:35:31Z
 generator: sillyspec-scan
 ---
 
-# sillyhub-daemon · 测试
+# 测试(Testing)
 
-## 测试框架与配置
+## 框架与配置
 
-- **框架**：`vitest` ^2.0.0（devDependencies）
-- **配置**：`vitest.config.ts`（`environment=node`，`include='tests/**/*.test.ts'`，`globals=false`）
-- **脚本**：
-  - `pnpm test` → `vitest run --passWithNoTests`
-  - `pnpm test:watch` → `vitest`（watch 模式）
-  - `pnpm typecheck` → `tsc --noEmit`（类型检查，独立于测试）
-- **`--passWithNoTests` 含义**：当 `include` 模式未匹配到任何测试文件时不报错退出（CI 友好）；本项目当前有 65 个测试文件，实际总会命中，该标志仅作兜底。
-- **辅助**：`tests/helpers.ts` + `tests/helpers/fake-child.ts`（伪造子进程）；多个测试用 `vi.resetModules()` + `vi.stubEnv('HOME', tmpDir)` 隔离配置目录；`tests/fixtures/` 放测试数据。
+- 测试框架:**vitest 2**(devDependency `vitest ^2.0.0`),`environment: 'node'`,`globals: false`(用例内显式 import `describe`/`it`/`expect`)。
+- 两套 vitest 配置:
+  - `vitest.config.ts`——主套件,`include: ['tests/**/*.test.ts']`,即 `pnpm test`(`vitest run --passWithNoTests`)。
+  - `vitest.spikes.config.ts`——探索性 spike 专用,`include: ['spikes/**/*.test.ts']`,**不进 CI 主套件**,需手动 `pnpm vitest run --config vitest.spikes.config.ts`。
+- 并发与超时:`pool: 'forks'`,`maxForks: 8`(本机 20 核限到 40%),`testTimeout: 30000`。配置注释说明:套件含大量真实文件 I/O(tar 解包/打包、mkdtemp、spec sync),在 20 路并行 fork 池 + Windows AV 扫描下 vitest 默认 5s 超时偶发 flaky,30s 是给足余量的上限(<5s 用例照常秒过)。
 
-## 测试规模
+## 测试规模与分布
 
-`tests/` 下 **65 个测试文件**，覆盖 src 全部主要模块。主要分组：
+- 主套件 **117 个测试文件**(`sillyhub-daemon/tests/**/*.test.ts`);spike 套件 1 个(`spikes/06-mcp-server/spike.test.ts`)。
+- 按目录分布(主要模块):
+  - `tests/interactive/`——交互式会话:session-manager / claude-sdk-driver / codex-app-server-driver / session-recovery / session-store-persistence / idle-scanner / permission-resolver / input-queue / driver 等(约 24 文件,**最重区域**)。
+  - `tests/adapters/`——6 协议适配器:stream-json / jsonl / ndjson / text / json-rpc / pi-json / protocol-adapter / factory。
+  - `tests/resilience/`——网络韧性:dedup-key / error-classify / outbox / resilience-service。
+  - `tests/policy/`——文件系统策略与权限:filesystem-policy / runtime-policy / path-utils / shell-paths / audit-sink / allowed-roots-temp-paths。
+  - `tests/spec-transport-tar-sync/` 及顶层 `task-09-*` / `task-13-spec-sync` / `spec-sync`——spec 同步(task-09 `.runtime` tar pull/push)。
+  - 顶层散布:cli / daemon / task-runner / hub-client / ws-client / credential / workspace / skill-manager / agent-detector / version / config / runtime-lock / preflight / tool-kind / terminal-launcher / terminal-observer / cmd-shim 等。
+- 覆盖手段:真实子进程 spawn(claude/codex fake child)、mock backend HTTP、tar 解包、mkdtemp 临时工作区、permission-rules 决策表;集成测试以 `.integ.test.ts` 命名(如 `agent-detector.system-claude.integ.test.ts`)。
 
-### 入口 / CLI
-- `cli.test.ts`：start/stop/status/logs 四子命令端到端（PID 文件、`--server/--token/--api-key` 互斥、`--terminal-*` 选项组、退出码与输出断言）
-- `cli-session-manager-injection.test.ts`：验证 startAction 注入 SessionManager + persistence + recoveryClient
-- `_sanity.test.ts`：环境自检
+## 基线与已知 flaky 区
 
-### 守护进程 / 生命周期
-- `daemon.test.ts`、`daemon-parity.test.ts`、`daemon-multi-runtime.test.ts`、`daemon-kind-dispatch.test.ts`、`daemon-session-lifecycle-wiring.test.ts`、`daemon-session-resume-route.test.ts`、`daemon-spec-root-map.test.ts`、`daemon-interactive-bridge.test.ts`
+- 基线(据 `docs/code-quality-hardening-2026-07-24.md` §3/§6):全量 **1950 passed / 2 failed**;2 个失败均为 `task-09 spec-sync` 的 vitest hook 10s 超时(**环境性 flaky**),重跑 `daemon-interactive-spec-sync.test.ts` 14 passed 确证非代码逻辑引入。
+- 已知脆弱区:`task-09 spec-sync`(spec bundle pull/push,真实 tar I/O 大)、`lease.kind` 分流(D-002 策略变更在途)——对应 memory `sillyspec-324-verify-archive-pitfalls`、`daemon-client-spec-sync-broken`。
+- 改完跑对应子目录(如 `pnpm vitest run tests/interactive/`);`pnpm typecheck`=`tsc --noEmit` 全绿是合入前置(`tsconfig` 开 `strict` + `noUncheckedIndexedAccess` + `verbatimModuleSyntax` + `NodeNext`,源码无 `: any`/`as any` 逃逸)。
 
-### 通信
-- `hub-client.test.ts`（HTTP lease）、`ws-client.test.ts`、`ws-client-permission-route.test.ts`、`ws-client-session-control.test.ts`、`protocol.contract.test.ts`、`protocol-session-contract.test.ts`、`task-09-hub-client-spec.test.ts`、`task-09-spec-pull-push.test.ts`、`file-rpc.test.ts`
+## 开发命令
 
-### 任务编排
-- `task-runner.test.ts`、`task-runner-retry-timeout.test.ts`、`task-runner-terminal-observer.test.ts`、`task-runner-provider-dispatch.test.ts`、`execution-context.test.ts`、`diff-truncate.test.ts`、`stats-passthrough.test.ts`、`stream-json.test.ts`
-
-### 交互式会话（tests/interactive/，16 个）
-- driver：`claude-sdk-driver.test.ts` / `claude-sdk-driver-canuse.test.ts` / `claude-sdk-driver-glm-passthrough.test.ts` / `claude-sdk-driver-permission.test.ts`
-- session：`session-manager.test.ts` / `session-manager-pending-cleanup.test.ts` / `session-manager.partial-dedup.test.ts` / `session-manager-permission.test.ts` / `session-concurrent-inject.test.ts` / `session-idle-scanner.test.ts` / `session-interrupt.test.ts` / `session-recovery.test.ts` / `session-store-persistence.test.ts` / `daemon-recovery-boot.test.ts`
-- 其他：`input-queue.test.ts`、`permission-resolver.test.ts`
-
-### spec 同步（tests/spec-transport-tar-sync/，3 个）
-- `daemon-interactive-spec-sync.test.ts`、`spec-sync.test.ts`、`task-runner-stage-spec-sync.test.ts`
-
-### 模块单元
-- `config.test.ts`、`workspace.test.ts`、`credential.test.ts`、`spawn-env.test.ts`、`version.test.ts`、`cursor-version.test.ts`、`types.test.ts`、`cmd-shim.test.ts`、`terminal-launcher.test.ts`、`terminal-observer.test.ts`、`agent-detector.test.ts`、`agent-detector.system-claude.integ.test.ts`
-- adapters（tests/adapters/）：`factory.test.ts` / `jsonl.test.ts` / `ndjson.test.ts` / `protocol-adapter.test.ts` / `text.test.ts` / `json-rpc.test.ts`
-
-## 测试约定
-
-- `describe` / `it` / `expect` 显式导入（globals=false）；用 `vi.spyOn` / `vi.mock` / `vi.stubEnv` / `vi.resetModules` 做隔离
-- 集成测试（如 `agent-detector.system-claude.integ.test.ts`）单独命名 `.integ.test.ts`
-- 测试用例命名用中文陈述句，强调行为与退出码/输出断言
-- WS / SDK 等外部依赖用 stub/fake 替换（`WsClient._createSocket` 为 protected 便于测试 stub；SDK driver 测试用 fake query 句柄）
-
-## 运行
-
-```
-cd sillyhub-daemon
-pnpm test            # 全量（vitest run --passWithNoTests）
-pnpm test:watch      # watch
-pnpm typecheck       # tsc --noEmit 类型检查
-pnpm vitest run tests/interactive/session-manager.test.ts   # 单文件
-```
-
-## 类型检查约定
-
-- `pnpm typecheck`（`tsc --noEmit`）是独立于测试的类型校验环节，`tsconfig.json` 开启 `strict` + `noUncheckedIndexedAccess` + `verbatimModuleSyntax` + `NodeNext`，类型严格度高。
-- 源码中未发现 `: any` / `as any` 显式逃逸（grep 验证），类型安全性较好。
+| 命令 | 作用 |
+| --- | --- |
+| `pnpm test` | vitest 全套 run(`--passWithNoTests`) |
+| `pnpm test:watch` | vitest watch 模式 |
+| `pnpm typecheck` | 仅类型检查(`tsc --noEmit`) |
+| `pnpm vitest run tests/<dir>/` | 跑单个子目录(改某模块后定向验证) |
+| `pnpm vitest run --config vitest.spikes.config.ts` | 跑 spike 套件(默认不跑) |

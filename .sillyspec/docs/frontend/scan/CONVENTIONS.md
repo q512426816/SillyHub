@@ -1,142 +1,59 @@
 ---
-source_commit: ba87eec
-updated_at: 2026-06-23T16:25:04Z
-created_at: 2026-06-24T00:25:04
 author: qinyi
+created_at: 2026-07-27 00:35:31
+source_commit: 6e78b29a
+updated_at: 2026-07-26T16:35:31Z
 generator: sillyspec-scan
 ---
 
-# frontend 代码约定
+# 代码约定(Conventions)
 
-> 基于 `frontend/src/` grep 摘录（source_commit ba87eec），覆盖旧版文档。
-> 纠错：旧版提及 React Query (`@tanstack/react-query`) 实际在源码中**零命中**，本仓数据层为自封装 `apiFetch` + Zustand，下文已更正。
+> 子项目:**frontend** · Next 14.2.5 / React 18.3.1 / TS 5.5.4 · pnpm 9.6.0,Node ≥20
+> 范围:仅 `frontend/` 内的代码约定(commit 6e78b29a,覆盖旧版)。页面级实现规范见 `.sillyspec/docs/SillyHub/scan/FRONTEND_PAGE_STYLE.md`,设计系统总纲见 `.sillyspec/changes/archive/2026-06-21-2026-06-21-frontend-style-system/`。
+> 重要更正:旧版(commit ba87eec)记载"无 React Query",自 react-query 迁移(记忆 `react-query-migration-status`)后**已全面采用**,下文已更新。
 
 ## 框架隐形规则
 
-### Next.js App Router
+这些是"不写就会踩"的框架级硬约束,违反通常不立即报错,而在构建/运行期/提交守护处爆雷。
 
-- **目录约定**：页面固定 `page.tsx`，嵌套用 `layout.tsx`；路由组 `(auth)` / `(dashboard)` 仅组织不出现在 URL；动态段 `[id]` / `[cid]` / `[tid]`。
-- **Server / Client 边界**：默认 RSC；任何含 hooks / 浏览器 API / 事件处理 / antd 交互的组件顶部显式 `"use client"`（实测命中 20+ 文件，如 `agent-run-panel.tsx:1`、`workspace-tabs.tsx:1`、`app/(dashboard)/layout.tsx:1`、`antd-providers.tsx:1`）。
-- **页面导出**：页面一律 `export default function XxxPage({ params }: Props)`（如 `workspaces/[id]/page.tsx:107`）；根 `app/layout.tsx:8` 用 `export const metadata: Metadata`（RSC 侧）。
-- **错误边界**：路由级 `error.tsx` 具名导出（`workspaces/[id]/error.tsx:19`）。
-- **路径别名**：`@/*` → `./src/*`（`tsconfig.json` paths）；`experimental.typedRoutes: true` 路由类型受控。
-- **StrictMode**：`reactStrictMode: true`（`next.config.mjs:4`）—— effect / SSE 订阅必须容忍双调用。
+1. **API 类型由 OpenAPI 生成,禁止手改 `src/lib/api-types.ts`,提交前必须跑类型同步守护。**
+   `package.json:14` 的 `gen:types:check` 会重新生成 `api-types.ts` 并用 `git diff --exit-code` 阻止漂移提交。消费方式统一为 `import type { components } from "@/lib/api-types"`,再从 `components["schemas"]["..."]` 取类型(`frontend/src/lib/auth.ts:4`、`frontend/src/lib/workspaces.ts:9`、`frontend/src/lib/runtime.ts:5`)。后端 schema 一改,必须先 `pnpm gen:types` 再改前端,不能凭记忆手写类型。
 
-### 数据访问（无 React Query）
+2. **服务端状态全部走 react-query,queryKey 必须经集中工厂 `queryKeys` 构造,不能就地拼字符串。**
+   工厂定义在 `frontend/src/lib/query-keys.ts:15`,规则是"凡影响查询结果的变量都进 key"(分页/过滤 params 整体进 key,见文件头注释)。消费侧一律 `useQuery<TData, ApiError>({ queryKey: queryKeys.xxx.all, ... })`,mutation 失效缓存也复用同一 key 做 `invalidateQueries`(`frontend/src/lib/custom-skills.ts:119-120,160-161`)。key 拼错会静默去重到不存在的缓存条目,是已踩过的坑。
 
-- **统一出口**：所有后端调用走 `lib/api.ts` 的 `apiFetch()`（`api.ts:94`），禁止直接 `fetch("/api/...")` 绕过。
-- **工具函数**：`getApiBaseUrl()`（`api.ts:29`）、`safeUUID()`（`api.ts:77`）。
-- **路径前缀**：前端只调 `/api/*`，由 `next.config.mjs` `rewrites()` 转发到 backend；不直接拼 backend host。
-- **Token 刷新**：`apiFetch` 内部捕获 401 → 自动 `POST /api/auth/refresh` → 重放原请求（`api.ts:187` 递归 `apiFetch<T>`）。
-- **领域 client**：`lib/<domain>.ts` 暴露动词式 API（`listXxx` / `getXxx` / `createXxx` / `updateXxx`），见 `lib/changes.ts`、`lib/tasks.ts`、`lib/ppm/*`。
-- **服务端取数**：客户端组件内 `useEffect` + `apiFetch` 手动拉取并 `setState`；**无 `useQuery`/`useMutation`**，缓存失效/loading 由组件自管。
+3. **HTTP 调用统一走 `apiFetch`,错误归一化为 `ApiError`,禁止裸 `fetch`。**
+   `apiFetch` 自动带 session bearer token、归一化错误(`frontend/src/lib/admin.ts:9,123`、`frontend/src/lib/daemon-audit.ts:28`)。因此 react-query 的 error 类型固定写 `ApiError`,业务函数 JSDoc 用 `@throws ApiError 401/403/422/5xx` 标注(`frontend/src/lib/daemon-audit.ts:94,137`)。
 
-### 状态（Zustand）
+4. **antd 6 的静态方法 `message.xxx` 在 Next 14 App Router 下拿不到主题/上下文,需经 `<App>` 包裹并用 `App.useApp()`。**
+   项目通过 `frontend/src/lib/errors.ts:2,39` 的 `import { App } from "antd"` 暴露 `useNotify()` hook 收敛错误提示;页面级直接用 `App` 组件入口(`frontend/src/app/m/workspaces/page.tsx:35`)。新代码不要 `message.error(...)` 裸调。
 
-- store 一律放 `src/stores/`，签名 `export const useXxxStore = create<...>()(...)`：
-  - `stores/session.ts`：`create` + `persist` 中间件持久化 token，暴露 `setUser/setTokens/clear/markHydrated`。
-  - `stores/kanban.ts`：无 persist，含 `fetchUsers/fetchTasks/assignTask/reorderTasks/setFilters/reset` 等 action，action 内直接调 `lib/ppm/kanban.ts` 并 `message` 反馈。
-- 组件用 `useSession` / `useKanbanStore` selector hook 消费。
-- **流式数据不进全局 store**：agent run 日志由 `lib/use-agent-run-stream.ts` 的 `useAgentRunStream`（`use-agent-run-stream.ts:73`）在 hook 内用十余个 `useState` 维护（`logs/status/streaming/loading/error/perms/...`），避免高频 SSE 更新触发整树渲染。
-
-### 类型（TypeScript strict）
-
-- `tsconfig.json`: `strict: true` + `noUncheckedIndexedAccess`（旧文档亦载）；数组/对象索引访问需 narrowing 或兜底（`arr[0]!` / `?? fallback`）。
-- 领域类型集中在 `lib/*.ts`，`export type` 与 `export interface` 并用：
-  - `lib/changes.ts`：大量 `export type ChangeXxx = { ... }`（对象类型偏好 `type`，如 `ChangeSummary`、`ChangeList`）。
-  - `lib/workspace-members.ts`、`lib/audit.ts`、`lib/menu-permissions.ts`：偏好 `export interface XxxView`（数据视图/请求体）。
-  - 联合字面量用 `type`（`approvals.ts:7` `RiskLevel = "low" | "medium" | "high" | "extreme"`；`agent-stream.ts:10` `StreamStatus`）。
-- PPM 领域类型集中在 `lib/ppm/types.ts`。
-
-### SSE hook 隐形规则
-
-- `useAgentRunStream` 内部用 `cancelled` flag（`use-agent-run-stream.ts:179`）保护 unmount / 依赖变化后的旧 effect 闭包（多处 `if (cancelled) return;` 如 `:187/:195`）。**任何修改必须保留该 guard**，否则 StrictMode 双调用或快速重连会产生孤儿订阅或写入已卸载组件。
+5. **路径别名 `@/*` → `./src/*`,TS 严格模式 + `noUncheckedIndexedAccess`。**
+   见 `frontend/tsconfig.json:8-9,20`。`noUncheckedIndexedAccess: true` 意味着 `arr[i]` 类型是 `T | undefined`,下标访问后必须窄化或兜底,不能直接当 `T` 用。
 
 ## 代码风格
 
-### 命名
+1. **数据 hook 统一 `useXxx` 命名,集中在 `src/lib/`,返回 react-query 结果对象(含 `data/isLoading/error`),不拆散。**
+   典型:`usePolicyAudit` / `usePolicyAuditByRuntime`(`frontend/src/lib/daemon-audit.ts:131,171`),`useMcpConfig` / `useUpdateMcpConfig`(`frontend/src/lib/mcp-settings.ts:92,126`)。源码注释明确"风格对齐 lib/use-daemon-runtimes.ts(useQuery + ApiError + 暴露常用态)"(`frontend/src/lib/daemon-audit.ts:153`),新 hook 照此对齐。
 
-- **组件文件**：业务组件统一 **kebab-case**（`workspace-tabs.tsx`、`agent-run-panel.tsx`、`ppm-user-select.tsx`、`admin-organization-tree.tsx`）；少量原子组件 PascalCase（`AgentModelInput.tsx`、`AgentProviderSelect.tsx`）。
-- **命名空间子目录**：小写（`agent-log/`、`daemon/`、`permissions/`、`charts/`、`layout/`、`ui/`）。
-- **导出**：组件 `export function X({ ... }: Props)` 或 `export default function XPage()`；hook `export function useXxx(...)`（`useAgentRunStream`、`useToast`）。
-- **store**：`useXxxStore`（`useSession` 例外，历史命名）；action 动词式（`setXxx` / `fetchXxx` / `resetXxx`）。
+2. **UI 基元用 `cva` 定义 variant,再用 `cn()` 合并 className,放在 `src/components/ui/`。**
+   `cn = twMerge(clsx(inputs))`,定义在 `frontend/src/lib/utils.ts:1-5`。variant 用例:`frontend/src/components/ui/badge.tsx:2,6,29` —— `cva(...)` 产出 `badgeVariants`,组件内 `className={cn(badgeVariants({ variant }), className)}`。Radix + Tailwind 的 dialog/input 同构(`frontend/src/components/ui/dialog.tsx:25`、`frontend/src/components/ui/input.tsx:12`)。
 
-### 样式（双 UI 库并存）
+3. **antd 6 与 Tailwind 3.4 共存:antd 管交互/语义,Tailwind 管布局/间距/微调,经 `className` 叠加。**
+   antd 组件直接导入(`frontend/src/components/admin-user-drawer.tsx:4` 的 `Form/Input/Select/Modal`、`frontend/src/components/admin-org-tree.tsx:4` 的 `Tree`),同组件用 Tailwind class 调布局(`frontend/src/components/file-upload.tsx:156,176` 的 `rounded border border-border ... px-2 py-1.5`、`flex items-center gap-2`)。新页面优先复用既有 antd 组件 + Tailwind 原子类,不要引第三个 UI 库。
 
-- **业务组件优先 Ant Design**：`import { Table, Tag, Select, ... } from "antd"`（命中 14+ 文件），`TableProps`/`TableColumnsType` 用 `type` 导入；`@ant-design/icons` 图标；`message` 静态方法反馈。
-  - antd 上下文由 `components/antd-providers.tsx`（`App as AntApp` + `ConfigProvider`）统一注入，组件内用 `App.useApp()` 取实例。
-- **原子/自定义控件** 用 shadcn 风格 `@/components/ui/*`，类名经 `cn()`（`lib/utils.ts:4` = `clsx` + `tailwind-merge`）合并。
-- Tailwind utility 为主，shadcn 主题用 CSS variables（`globals.css` 定义，`tailwind.config.ts` 映射 `hsl(var(--xxx))`）。
+4. **UI 文案默认中文;测试标题也用中文描述业务语义,不写英文化名。**
+   依据 `.claude/CLAUDE.md` 规则 12(必要专业术语除外)。测试用例:`frontend/src/middleware.test.ts:70-105` 的 `describe("isMobileUserAgent")` 下 `it("识别 iPhone / Android 手机 / Windows Phone / BlackBerry 为移动")` 等中文断言标题,决策编号 `R-02 / D-005` 直接写进标题便于溯源。
 
-### 测试
+5. **测试用 Vitest(jsdom + globals),文件就近放置:`*.test.ts(x)` 与组件同名同目录,或落在 `__tests__/` 子目录。**
+   配置见 `frontend/vitest.config.ts:8-15`(`environment: "jsdom"`、`globals: true`、`testTimeout: 15000` 治全量 flaky 超时)。纯逻辑 `*.test.ts`,组件 `*.test.tsx`(已命中 100+ 测试文件);运行 `pnpm test`(= `vitest run`)。已知坑:jsdom 下 `next/dynamic` 的 `ssr:false` 组件同步渲染为 null,需在测试顶部 `vi.mock` 成纯文本渲染(记忆 `frontend-markdown-text-jsdom-null`)。
 
-- vitest + jsdom + @testing-library/react + jest-dom（`globals: true`，无需 import `describe/it/expect`）。
-- setup 在 `src/test/setup.ts`；测试与被测同模块 `__tests__/` 下或 `<name>.test.tsx` 并置（`agent-run-panel.test.tsx`、`lib/daemon.test.ts`、`lib/__tests__/`）。
+## 相关脚本(pnpm)
 
-### 导出风格
-
-- 类型与实现同文件导出（`export type Foo = {...}` 紧邻 action / hook）。
-- Route Handler（`app/api/**/stream/route.ts`）用具名导出 `GET` / `POST`，返回 `new Response(stream, { headers: { "Content-Type": "text/event-stream" } })`，不写默认导出。
-
-## 典型模式
-
-**模式 1 — 客户端页面 + 手动取数**（无 React Query）
-
-```tsx
-"use client";
-import { useEffect, useState } from "react";
-import { apiFetch } from "@/lib/api";
-import type { ChangeSummary } from "@/lib/changes";
-
-export default function ChangesPage({ params }: Props) {
-  const [list, setList] = useState<ChangeSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    let cancelled = false;                 // StrictMode 双调用保护
-    apiFetch<ChangeList>(`/api/.../changes`).then(r => {
-      if (!cancelled) setList(r.items);
-    }).finally(() => !cancelled && setLoading(false));
-    return () => { cancelled = true; };
-  }, [params.id]);
-  ...
-}
-```
-
-**模式 2 — Zustand store + 领域 client**
-
-```ts
-export const useKanbanStore = create<KanbanState>()((set, get) => ({
-  users: [], tasks: [], filters: {}, loading: false,
-  fetchTasks: async () => {
-    set({ loading: true });
-    const tasks = await listKanbanTasks(get().filters);   // lib/ppm/kanban.ts
-    set({ tasks, loading: false });
-    return tasks;
-  },
-  assignTask: async (taskId, userId) => {
-    await assignKanbanTask(taskId, userId);
-    message.success("已分配");
-    await get().fetchTasks();                              // 成功后刷新
-  },
-}));
-```
-
-**模式 3 — 类型集中导出（lib/changes.ts）**
-
-```ts
-export type ChangeSummary = { id: string; title: string; status: ChangeStatus; ... };
-export type ChangeList = { items: ChangeSummary[]; total: number };
-export type RiskLevel = "low" | "medium" | "high" | "extreme";   // 联合字面量
-export interface UserSearchHit { id: string; email: string; ... } // 视图/请求体用 interface
-```
-
-**模式 4 — antd Table 受控列**
-
-```tsx
-import { Table, type TableProps } from "antd";
-const columns: TableColumnsType<ChangeSummary> = [
-  { title: "标题", dataIndex: "title", key: "title" },
-  { title: "状态", dataIndex: "status", render: (_, r) => <Tag>{r.status}</Tag> },
-];
-<Table rowKey="id" columns={columns} dataSource={list} loading={loading} />;
-```
+| 用途 | 脚本 | 来源 |
+|------|------|------|
+| 类型检查 | `pnpm typecheck` | `package.json:10` |
+| Lint(eslint-config-next) | `pnpm lint` | `package.json:9` |
+| 单元测试 | `pnpm test` | `package.json:11` |
+| 生成 OpenAPI 类型 | `pnpm gen:types` | `package.json:13` |
+| 类型漂移守护(提交前必跑) | `pnpm gen:types:check` | `package.json:14` |

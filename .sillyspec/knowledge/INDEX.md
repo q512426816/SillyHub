@@ -16,6 +16,7 @@
 - sillyspec|stage|fsm|verify|archive|流转|transition → [SillySpec 变更状态机](conventions.md#sillyspec-变更状态机stageenum--transition-map)
 - backend|model.py|ruff|line-length|esm|.js → [backend Python 工程约定](conventions.md#backend-python-工程约定modelpy-单数--ruff-配置)
 - daemon|esm|import|.js|扩展名|node → [daemon ESM import 必须 .js](conventions.md#daemon-esm-import-必须带-js-扩展名)
+- basemodel|apperror|异常命名|分层|schema.py|service|请求内实例化|sqlmodel基类 → [backend 模块分层与基类/异常约定](conventions.md#backend-模块分层与基类异常约定routerserviceschema--basemodel--apperror)
 
 ## Patterns
 
@@ -24,6 +25,7 @@
 - sse|websocket|通信|http → [子项目间通信](patterns.md#子项目间通信)
 - agentrun|lease|编排|sessionmanager|执行链路 → [AgentRun + DaemonTaskLease 编排流程](patterns.md#agentrun--daemontasklease-编排流程)
 - daemon|adapters|协议|stream-json|json-rpc|ndjson|多provider → [daemon adapters/ 多协议抽象](patterns.md#daemon-adapters-多协议抽象stream-json--json-rpc--jsonl--ndjson--text)
+- storage|minio|对象存储|存储后端|文件中心|aiobotocore|s3 → [平台文件中心：对象存储抽象](patterns.md#平台文件中心对象存储抽象storagebackend--factory--miniobackend)
 
 ## Known Issues
 

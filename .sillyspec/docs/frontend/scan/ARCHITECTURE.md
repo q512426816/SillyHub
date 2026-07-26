@@ -1,86 +1,58 @@
 ---
-source_commit: ba87eec
-updated_at: 2026-06-23T16:24:24Z
-created_at: 2026-06-24T00:24:24
 author: qinyi
+created_at: 2026-07-27 00:35:31
+source_commit: 6e78b29a
+updated_at: 2026-07-26T16:35:31Z
 generator: sillyspec-scan
 ---
 
-# frontend 架构
+# 架构(Architecture)
 
-> 范围：`frontend/src/`，基于 grep/glob 事实采集。覆盖旧版文档。
+> 子项目:`frontend/`(包名 `multi-agent-platform-web`)——SillyHub 平台的 Next.js 前端,承担 SillySpec 变更查看器、多 Agent 执行控制台、PPM 项目/任务管理三大前台界面。
+> 本文为 `--force-rescan` 重新生成的快照,依据 `frontend/` 实际源码(commit `6e78b29a`),排除 `node_modules`。
 
 ## 技术栈
 
-- **运行时/框架**：Next.js 14.2.5（App Router，Server + Client Components 混合），React 18.3.1，TypeScript 5.5.4（target ES2022）
-- **UI 双栈**：
-  - Ant Design 6.4.4 + `@ant-design/icons` 6.2.5 + `@ant-design/nextjs-registry` 1.3.0（业务主 UI 库，`components/antd-providers.tsx` 为 client，根 `app/layout.tsx` 用 `<AntdRegistry>` 注入）
-  - shadcn/ui（`components.json`：style=default, rsc=true, baseColor=slate, cssVariables=true）+ Radix primitives，落地 `components/ui/{button,card,dialog,input,badge,tooltip,avatar,dropdown-menu,tag,skeleton,empty-state,status-badge}.tsx`
-- **样式**：Tailwind 3.4.7 + tailwindcss-animate 1.0.7 + lucide-react 0.400；`cn()` 合并工具在 `lib/utils.ts`；`darkMode: ["class"]`，HSL CSS 变量主题，全局样式 `app/globals.css`
-- **客户端状态**：Zustand 4.5（`stores/session.ts` 会话/Token `useSession`、`stores/kanban.ts` 看板视图 `useKanbanStore`）
-- **服务端数据**：TanStack React Query 5.51（`@tanstack/react-query`，缓存与失效）
-- **可视化**：ECharts 6.1（`components/charts/`：`ProjectPlanCostBarChart` / `WorkHourBarChart` / `WorkHourPieChart` + `index.tsx`）、`@xyflow/react` 12.10（组件拓扑图 `workspaces/[id]/components/topology`）
-- **Markdown**：`@uiw/react-markdown-preview` 5.2（agent 日志、文档渲染）
-- **流式集成**：`EventSource`（`lib/agent-stream.ts` 的 `AgentRunStreamClient`），3 个 Route Handler 透传 backend SSE
-- **构建**：`next build`（可选 `NEXT_BUILD_STANDALONE=1` standalone）；`next.config.mjs` `rewrites()` 将 `/api/:path*` 代理到 `INTERNAL_API_BASE_URL ?? NEXT_PUBLIC_API_BASE_URL`（默认 backend `http://localhost:8000`）的 `/api/:path*`
-- **测试**：vitest 2 + jsdom 24 + @testing-library/react + jest-dom（setup `src/test/setup.ts`）
+- **框架**:Next.js 14.2.5(App Router,`src/app/` 目录),React 18.3.1,React DOM 18.3.1;Node ≥ 20,pnpm 9.6.0 管理。
+- **语言**:TypeScript 5.5.4,`strict` + `noUncheckedIndexedAccess` 全开(`tsconfig.json`),路径别名 `@/* → ./src/*`,开启实验性 `typedRoutes`。
+- **UI 组件**:antd 6.4 + `@ant-design/icons` 6.2 + `@ant-design/nextjs-registry`(SSR 样式注入);Tailwind CSS 3.4.7 + `tailwindcss-animate`;Radix UI(`react-avatar` / `react-dialog` / `react-dropdown-menu`)封装的 headless 组件位于 `src/components/ui/`;`lucide-react` 图标;`class-variance-authority` + `clsx` + `tailwind-merge` 做变体与类名合并。
+- **数据/状态**:`@tanstack/react-query` 5.51 做服务端状态(查询/变更缓存,`src/lib/query-client.ts` 工厂 + `src/lib/providers.tsx` 全局 Provider);`zustand` 4.5 做客户端状态(`src/stores/session.ts` 鉴权会话、`workspace.ts` 当前工作区、`kanban.ts`);`zod` 运行时校验;`dayjs` 时间处理。
+- **可视化**:`echarts` 6.1 + `echarts-for-react`(图表在 `src/components/charts/`);`@xyflow/react` 12.10 组件拓扑图;`@uiw/react-markdown-preview` 渲染 Agent 输出与文档。
+- **API 类型**:`scripts/gen-api-types.mjs` 先跑 backend `dump_openapi.py` 刷新 `openapi.json`,再用 `openapi-typescript` 生成 `src/lib/api-types.ts`;`pnpm gen:types:check` 以 `git diff --exit-code` 守护类型漂移。
+- **构建优化**:`next.config.mjs` 对 `antd` / `@ant-design/icons` / `lucide-react` / `@xyflow/react` 启用 `optimizePackageImports`(命名导入按需转换,减小 chunk);`NEXT_BUILD_STANDALONE=1` 切 standalone 输出供 Docker 镜像。
+- **测试**:`vitest` 2 + `@testing-library/react` + `jsdom`(单测,`types` 引入 `vitest/globals` 与 `@testing-library/jest-dom`);`@playwright/test` 与 `puppeteer` 做 e2e。
 
 ## 架构概览
 
-### 分层
+### 路由组织(App Router 路由组)
 
-```
-src/
-├── app/            Next.js App Router（路由组 + API 代理 route handlers）
-│   ├── layout.tsx / page.tsx / globals.css   根布局（AntdRegistry）+ 首页 + 全局样式
-│   ├── (auth)/login/                         登录页
-│   ├── (dashboard)/                          仪表盘壳层（layout.tsx 包裹）
-│   │   ├── admin/{organizations,roles,users} 管理后台
-│   │   ├── ppm/                              PPM 项目管理（最大业务模块，15 子路由）
-│   │   ├── settings/{api-keys,git-identities} 个人设置（+ settings 根页）
-│   │   ├── workspaces/ + [id]/               工作区列表 + 详情（20 子路由）
-│   │   └── runtimes/                         运行时健康
-│   └── api/                                  Next route handlers（SSE 代理，3 条）
-│       ├── workspaces/[workspaceId]/agent/runs/[runId]/stream/
-│       ├── daemon-chat/[runId]/stream/
-│       └── daemon/sessions/[sessionId]/stream/
-├── components/     UI 组件（按功能聚合，不按技术分）；共 109 个文件声明 "use client"
-│   ├── ui/                        shadcn 基础件（12 个：button/card/dialog/input/badge/tooltip/avatar/dropdown-menu/tag/skeleton/empty-state/status-badge）
-│   ├── layout/                    page-container / page-header / data-table / form-layout / section-card / search-bar（+ index.ts 桶导出）
-│   ├── charts/                    ECharts 图表封装（bar/pie/cost）+ index.ts
-│   ├── agent-log/                 日志归一化（normalize.ts）+ 工具调用渲染（tool-renderers.tsx）
-│   ├── daemon/                    交互式会话面板
-│   ├── permissions/               会话级权限面板
-│   └── ppm-*.tsx / workspace-*.tsx / admin-*.tsx / permission-approval-*.tsx  业务组件
-├── lib/            数据层 + hooks + 工具（40+ 模块）
-│   ├── api.ts                     apiFetch / getApiBaseUrl / getDirectApiBaseUrl / ApiError / safeUUID（统一 fetch 包装）
-│   ├── agent.ts / daemon.ts / approvals.ts / workspaces.ts / admin.ts / audit.ts / releases.ts / ...  各业务 API 客户端
-│   ├── ppm/                       PPM 领域聚合（types/plan/project/task/problem/kanban/kanban-grouping/aggregations/format/status-label/workday/export）
-│   ├── agent-stream.ts            AgentRunStreamClient（封装 EventSource）
-│   ├── use-agent-run-stream.ts    useAgentRunStream hook（SSE 订阅 + 状态机 + cancelled flag）
-│   ├── utils.ts                   cn() 等工具
-│   └── *.ts                       其余领域类型 / 工具（format-token / client-path / scan-docs / change-writer / ...）
-├── stores/         Zustand stores（session.ts / kanban.ts）
-├── styles/         全局样式
-└── test/setup.ts   vitest setup（jest-dom）
-```
+`src/app/` 用路由组(`(...)`)与动态段组织三大类入口:
 
-### App Router 路由分组
+- `(auth)/login` —— 登录页(根级,不经 Dashboard 外壳)。
+- `(dashboard)/...` —— 主桌面台,外层 `(dashboard)/layout.tsx` 装配 `AppShell`,内含登录守卫 + 工作区守卫(白名单 `/workspaces` `/admin` `/settings` `/ppm` `/runtimes` `/account`;依赖工作区但无 `wsId` 的路由重定向到 `/workspaces` 选择器)。下设:
+  - `workspaces/[id]/...` —— 单工作区维度:changes(变更/任务/创建)、agent(执行面板)、runtime、scan-docs、files、members、mcp、skills、knowledge、incidents、releases、approvals、audit、components/topology 等。
+  - `ppm/...` —— PPM 项目管理:projects、project-plans、project-members、task-plans、task-execute、workbench、kanban、problem-list、plan-nodes、milestone-details、work-hours、work-hour-statistics、weekly-plan、customers、project-stakeholders。
+  - `runtimes`、`admin/{users,roles,organizations}`、`settings/{api-keys,git-identities,skills,mcp}`、`account` —— 平台级后台。
+- `m/...` —— 移动端精简入口(`m/login`、`m/ppm/{workbench,project-plans,task-plans,milestone-details,problem-list}`、`m/workspaces`、`m/account`),独立 `m/layout.tsx`。
 
-- 路由组：`(auth)` / `(dashboard)`，URL 不含分组名
-- 顶层页面聚合在 `(dashboard)` 下：admin / ppm / settings / workspaces / runtimes
-- **PPM 模块（15 子路由）**：projects / project-plans / plan-nodes / task-plans / task-execute / milestone-details / problem-list / problem-changes / project-members / project-stakeholders / kanban / work-hours / work-hour-statistics / customers（+ 根 page.tsx）
-- **workspaces/[id] 详情（20 子路由，含嵌套动态段）**：根 + create-change / releases / scan-docs / missions / changes（含 `[cid]` → tasks → `[tid]` 三级嵌套）/ runtime / agent / components（含 topology）/ audit / knowledge / members / approvals / incidents（含 `[iid]`）
-- admin：organizations / roles / users；settings：api-keys / git-identities（+ 根页）
+### 分层(自下而上)
 
-### 通信模型
+1. **API 层** `src/lib/api.ts` 的 `apiFetch<T>()`:薄 fetch 封装,自动注入 `x-request-id`(便于后端日志关联)与 `Authorization: Bearer <accessToken>`(从 `useSession` zustand store 读);浏览器端走相对 URL,经 Next.js rewrite 代理到 backend(`next.config.mjs` 的 `rewrites` 把 `/api/:path*` 与 `/daemon/:path*` 转发到 `INTERNAL_API_BASE_URL` / `NEXT_PUBLIC_API_BASE_URL`,默认 `http://localhost:8000`);SSR 直连绝对地址。401 触发单飞 token 刷新(`token-refresh.ts` 模块级 inflight 保证并发风暴只发 1 次 `POST /api/auth/refresh`),成功后带 `x-auth-retry:1` 重试一次,失败清 session 跳 `/login`;非 2xx 抛 `ApiError`(`code` / `status` / `requestId` / `details`)。
+2. **领域服务层** `src/lib/<domain>.ts`(如 `changes.ts` / `daemon.ts` / `workspaces.ts` / `tasks.ts` / `agent.ts` / `releases.ts` / `scan-docs.ts` / `auth.ts` / `admin.ts` / `ppm/*`):每个文件按业务域封装一组 API 调用 + 本地类型,react-query 的 hook(`use-*.ts`、`use-agent-runs.ts`、`use-daemon-runtimes.ts`、`use-agent-run-stream.ts` 等)与 `query-keys.ts`(查询键工厂)在其上构建缓存策略。
+3. **状态层** zustand store(`src/stores/`)持有跨页面的客户端态:鉴权 token、当前工作区、看板视图。
+4. **组件层** `src/components/`:
+   - `layout/`(`page-container` / `page-header` / `section-card` / `data-table` / `form-layout` / `search-bar`)—— 页面级统一布局骨架。
+   - `ui/`(`button` / `card` / `dialog` / `dropdown-menu` / `avatar` / `badge` / `input` / `empty-state` / `markdown-text`)—— Radix + cva 封装的基础组件(设计系统原子)。
+   - 业务组件按域分目录:`daemon/`(runtime 卡片、交互式会话面板、远程文件夹选择)、`charts/`(echarts 图表)、`permissions/`(会话权限面板)、`ppm/`(里程碑/问题导入抽屉)、`changes/`(变更会话段)、`agent-log/`(工具渲染器)等;以及顶层业务组件(`agent-run-panel`、`mission-console`、`team-progress`、`workspace-card`、`top-bar`、`app-shell`、`error-boundary`)。
+5. **页面层** `src/app/.../page.tsx` 组合上述组件 + hook 渲染。
 
-- **REST**：`lib/api.ts` 的 `apiFetch<T>()` 统一包装 fetch，前缀 `/api/*`；`getApiBaseUrl()` 读 `NEXT_PUBLIC_API_BASE_URL`。Next.js `rewrites()` 将 `/api/:path*` 代理到 backend FastAPI。
-- **SSE**：三类流（agent-run / daemon-session / daemon-chat），均通过 `src/app/api/**/stream/route.ts` route handler 透传后端 SSE；浏览器端用 `AgentRunStreamClient`（`new EventSource`）订阅；`useAgentRunStream` hook 把事件转换为 `logs / status / perms / pending_input` 状态。
-- **Server / Client Component**：默认页面/布局为 Server Component；凡需 hooks、事件、浏览器 API 的组件加 `"use client"`（当前 109 个 client 组件文件，如 `agent-run-panel.tsx`、`use-agent-run-stream` 消费方、antd-providers、app-shell、top-bar、各业务抽屉/对话框）。antd 经 `AntdRegistry` 包裹于根 layout，避免 Server 端样式闪烁。
+### Provider 装配链(根 layout)
 
-### 状态管理边界
+`src/app/layout.tsx` 自外向内:`<html lang="zh-CN">` → `AntdRegistry`(antd SSR 样式)→ `AntdProviders`(antd ConfigProvider/主题)→ `AppProviders`(`QueryClientProvider` + `ReactQueryDevtools`,dev 才挂 DevTools;`QueryClient` 用 `useState` 工厂法创建稳定实例,避免 SSR 跨请求共享缓存)。Inter 字体由 `src/styles/fonts.ts` 注入。
 
-- **服务端数据**：React Query（缓存、失效、加载态）。
-- **客户端 UI/会话状态**：Zustand（`useSession` 管理当前用户与 Token；`useKanbanStore` 管理看板视图与 `KanbanFilters`）。
-- **流式数据**：由 `useAgentRunStream` 在 hook 内用 `useState` 维护，不进全局 store（避免高频 SSE 更新触发整树渲染）。
+### 数据流与约定
+
+- **服务端状态**:统一走 react-query(`useQuery` / `useMutation`),查询键集中在 `query-keys.ts`,变更后按需 invalidate;流式场景(Agent 输出)由 `agent-stream.ts` / `use-agent-run-stream.ts` 处理。
+- **类型真相**:后端 OpenAPI 生成的 `api-types.ts` 是接口形状的唯一来源,手写类型仅作局部视图模型;`gen:types:check` 守护漂移。
+- **样式**:Tailwind utility 为主,设计 token 集中在 `src/styles/tokens.ts`;页面级规范参考 `.sillyspec/changes/archive/2026-06-21-2026-06-21-frontend-style-system/` 与 `docs/SillyHub/scan/FRONTEND_PAGE_STYLE.md`。
+- **i18n / 文案**:UI 与文档默认中文(本项目未正式上线,PPM 模块已上线)。

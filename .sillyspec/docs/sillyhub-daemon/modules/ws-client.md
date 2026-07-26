@@ -12,7 +12,7 @@ created_at: 2026-06-24T01:10:50
 daemon ↔ backend 的 WebSocket 传输层（`src/ws-client.ts`）。封装连接生命周期、心跳、自动重连、消息收发，并内嵌 RPC 分发（task-05 / D-005@v1）。只负责收发与分发，不内嵌 fs 业务逻辑（listDir 等业务层由 daemon 包装成 RpcHandler 注册进来）。
 
 ## 契约摘要
-- 常量：`RECONNECT_INTERVAL_MS=5000`、`RECONNECT_MAX_INTERVAL_MS=5000`、`CONNECT_TIMEOUT_MS=10000`、`CLOSE_TIMEOUT_MS=5000`。
+- 常量：`RECONNECT_INTERVAL_MS=5000`、`CONNECT_TIMEOUT_MS=10000`、`CLOSE_TIMEOUT_MS=5000`。
 - `WsClientCallbacks`（onMessage/onConnected/onDisconnected/onError）。
 - `WsClientOptions`（runtimeId/url/token 等 + callbacks）。
 - `RpcHandler = (params) => unknown | Promise<unknown>`。

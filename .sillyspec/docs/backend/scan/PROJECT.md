@@ -1,75 +1,68 @@
 ---
-source_commit: ba87eec
-updated_at: 2026-06-23T16:20:03Z
-created_at: 2026-06-24T00:20:03
 author: qinyi
+created_at: 2026-07-27 00:35:31
+source_commit: 6e78b29a
+updated_at: 2026-07-26T16:35:31Z
 generator: sillyspec-scan
 ---
 
-# Backend 项目说明（PROJECT）
-
-> 扫描对象：`backend/`（`multi-agent-platform` / SillyHub 单体仓库下的 FastAPI 子项目，包名 `app`，wheel 构建名 `multi-agent-platform-api`）。
+# 项目(Project)
 
 ## 项目简介
 
-`multi-agent-platform-api` 是多智能体协作平台的**后端 API 服务**，提供基于文档驱动（SillySpec）的多 agent 编排能力：管理项目工作区、变更（change）、任务（task）、工作流（workflow），调度 agent 运行（agent_run）并通过 daemon 租约派发到实际 agent 进程，同时提供 Git 网关、工具网关、扫描文档、发布、事件复盘、PPM（项目/计划/问题/看板/任务）等完整能力。
+**SillyHub — 多智能体协作管理平台** 的后端服务（包名 `multi-agent-platform-api`，构建名 `app`）。它把 [SillySpec](https://github.com/nicepkg/sillyspec) 规范驱动开发方法论产品化，提供多用户、多项目、多 Agent 的全生命周期管理系统：通过 Web 界面管理工作空间（Git 仓库）、编排 AI Agent（首发 Claude Code）、跟踪结构化变更规格（proposal → design → plan → tasks → execute → verify → archive）、协调团队协作。
 
-核心特征：
+后端职责（来源：根 `README.md` + `backend/README.md`）：
 
-- **模块化**：`app/modules/` 下 **26 个业务目录**（实测：admin / agent / archive / auth / change / change_writer / daemon / git_gateway / git_identity / health / incident / knowledge / ppm / release / runtime / scan_docs / settings / spec_profile / spec_workspace / task / tool_gateway / workflow / workspace / worktree 等），其中 `ppm` 子域下含 6 个 feature 目录（common / kanban / plan / problem / project / task）。每个遵循 `router / service / model / schema / tests` 五件套约定。
-- **文档驱动闭环**：`change → task → change_writer → workflow → archive`，配套 `change/prompts/*.md` 的 brainstorm/plan/execute/verify/scan/quick 等 SillySpec 阶段 prompt。
-- **多 agent 编排**：`agent` 模块负责运行编排与日志收集，`daemon` 模块负责运行时注册、任务租约与 WebSocket RPC。DaemonService 已拆分为 5 个子包服务（lease / patch / run_sync / session / permission_service），DaemonService 退化为 facade；agent run 日志经 Redis pub/sub → SSE 实时推送。
-- **双路径鉴权**：JWT（浏览器会话）+ API Key（daemon 长凭证），细粒度 RBAC（workspace 维度 + 平台管理员）。
-- **约 66 张数据表**（实测 `table=True` 标注）+ Alembic 迁移约 63 个 revision；测试用内存 SQLite + httpx ASGI client 完全 hermetic。
+- **工作空间管理** — 注册 Git 仓库为工作空间，扫描 `.sillyspec` 目录结构。
+- **变更生命周期** — 完整 SillySpec 流程的状态机与持久化（`change` 模块四态 PendingReview + Gate 三态决策：exit 0 推进 / exit 1 重跑 / exit 2 fail-loud）。
+- **AI Agent 编排** — 调度 Claude Code Agent 执行扫描 / stage / 任务 / 对话 / 初始化 / 多 agent mission，经 SSE 实时回传日志。
+- **Git Worktree 隔离** — 每个变更 / 任务在独立 worktree 执行（`worktree` 模块）。
+- **多用户认证** — JWT（浏览器会话）+ API Key（daemon 长凭证）双路径 + bcrypt + RBAC（7 角色、~40 权限点，`auth/permissions.py`）。
+- **双层审批** — 工具级（`tool_gateway` + AskUserQuestion）+ 阶段级（PendingReview 四面板 proposal/plan/human_test/archive）。
+- **本地 Daemon 协同** — 通过 WebSocket 与 per-host daemon 通信，下发 lease、回收 patch / usage / artifact。
+- **PPM（项目 / 计划 / 问题管理）** — **已上线**模块：计划任务、问题清单、看板、工时、工作台待办、里程碑（`ppm` 模块族 6 feature：common / kanban / plan / problem / project / task）。
 
-入口：`app/main.py::create_app()` → `app = create_app()`。OpenAPI 文档：`/api/docs`（Swagger）、`/api/redoc`。
+代码组织采用 **vertical slice**：每个业务模块一个独立目录 `app/modules/<feature>/`，内含 `router.py`（APIRouter）+ `schema.py`（Pydantic）+ `service.py`（业务逻辑，不依赖 HTTP / DB session）+ `models.py`（SQLModel，如有）+ `tests/`，在 `app/main.py::create_app()` 聚合挂载到 `/api` 前缀。共 **29 个业务模块**（实测 `ls app/modules/`）：admin / agent / auth / change / change_writer / daemon / file / git_gateway / git_identity / health / incident / knowledge / llm_provider / ppm / release / runtime / scan_docs / settings / skills / spec_profile / spec_workspace / storage / task / tool_gateway / workflow / workspace / worktree。
 
-## 仓库定位（monorepo 角色）
-
-`backend/` 是 `multi-agent-platform` / SillyHub 单体仓库的**后端 API 子项目**：
-
-- **前端**（`frontend/`，Next.js）通过 HTTP REST API 调用本服务，消费 SSE 实时日志流。
-- **daemon**（`sillyhub-daemon` 等独立客户端）通过 HTTP + WebSocket 长连接注册到本服务，按租约（lease）拉取任务、上报 agent 运行结果与交互会话事件。
-- 本服务作为**编排中枢**，对外暴露 REST API（`/api/*` 前缀），对内通过 Redis pub/sub 解耦 agent run 日志推送与 daemon 会话控制。
-
-本次扫描严格限定在 `backend/` 目录内，不涉及主项目或其他子项目源码。
+规模：`app/**/*.py` 非测试源码 273 个文件、测试文件 261 个（顶层 `tests/` 68 + 模块内 193）；alembic migration 117 个 revision；约 66 张数据表（`table=True` 标注）。基线测试 **2955 passed / 10 skipped / 5 xfailed**，静态检查 ruff ✅ / mypy ✅ 全绿（来源：`docs/code-quality-hardening-2026-07-24.md`）。入口 `app.main:app`，OpenAPI 文档 `/api/docs`（Swagger）、`/api/redoc`。
 
 ## 技术栈
 
-| 维度 | 技术 | 版本约束（pyproject.toml） |
-| --- | --- | --- |
-| 语言 | Python | ≥ 3.12（全量 `from __future__ import annotations` + PEP 604 类型） |
-| Web 框架 | FastAPI | ≥ 0.115 |
-| ASGI 服务器 | Uvicorn[standard] | ≥ 0.30 |
-| ORM | SQLModel | ≥ 0.0.22 |
-| DB 驱动 | SQLAlchemy[asyncio] + asyncpg | ≥ 2.0 / ≥ 0.29（PostgreSQL） |
-| 迁移 | Alembic | ≥ 1.13 |
-| 缓存/消息 | Redis（`redis.asyncio`，pub/sub） | ≥ 5.0 |
+| 维度 | 技术 | 版本约束（`pyproject.toml`） |
+|---|---|---|
+| 语言 | Python **3.12**（`requires-python = ">=3.12"`，全量 `from __future__ import annotations`） | ≥ 3.12 |
+| Web 框架 | **FastAPI** + Uvicorn[standard] | ≥ 0.115 / ≥ 0.30 |
+| 数据建模 | Pydantic + pydantic-settings + **SQLModel** | ≥ 2.8 / ≥ 2.4 / ≥ 0.0.22 |
+| ORM / DB 驱动 | SQLAlchemy[asyncio] + **asyncpg**（生产 PG） | ≥ 2.0 / ≥ 0.29 |
+| 迁移 | **Alembic**（`backend/migrations/versions/`，117 个 revision） | ≥ 1.13 |
+| 缓存 / 消息 | **Redis** `redis.asyncio`（pub/sub、token / permission cache、限流） | ≥ 5.0 |
+| 对象存储 | **aiobotocore**（S3 兼容 / MinIO，平台文件中心） | ≥ 3.8, <4 |
 | 认证加密 | python-jose[cryptography]（JWT）+ passlib[bcrypt]（密码）+ pynacl（NaCl SecretBox） | ≥ 3.3 / ≥ 1.7 / ≥ 1.5 |
-| 日志/可观测 | structlog + OpenTelemetry（stub） | ≥ 24.4 |
-| HTTP 客户端 | httpx（外部调用 + 测试 ASGI client） | ≥ 0.27 |
-| 配置 | Pydantic + Pydantic-Settings（`Settings` 单例 + `.env`/env 双层覆盖） | ≥ 2.8 / ≥ 2.4 |
-| 文档解析 | python-frontmatter（SillySpec markdown frontmatter）+ openpyxl（Excel 导出） | ≥ 1.1 / ≥ 3.1 |
+| 结构化日志 | structlog（禁 `print`）；OpenTelemetry 当前为 stub | ≥ 24.4 |
+| HTTP 客户端 | httpx（GLM messages API、daemon HTTP 回调、测试 ASGI client） | ≥ 0.27 |
+| Excel / 图像 | openpyxl + Pillow（PPM 导入 / DISPIMG 公式图像） | ≥ 3.1 / ≥ 10 |
+| 文档解析 | python-frontmatter（SillySpec markdown frontmatter）+ python-multipart | ≥ 1.1 / ≥ 0.0.9 |
 | 系统信息 | psutil | ≥ 5.9 |
-| 测试 | pytest + pytest-asyncio（auto）+ pytest-cov + anyio + aiosqlite | ≥ 8 / ≥ 0.23 / ≥ 5 / ≥ 4 / ≥ 0.20 |
-| 代码质量 | ruff（line-length=100, py312）+ mypy（非严格）+ pre-commit | ≥ 0.6 / ≥ 1.11 / ≥ 4.6 |
-| 构建/包管理 | hatchling 构建（wheel packages=`["app"]`）+ uv 运行 | — |
+| 测试 | pytest + pytest-asyncio（auto）+ pytest-cov + pytest-xdist + anyio + aiosqlite | ≥ 8 / ≥ 0.23 / ≥ 5 / ≥ 3.5 / ≥ 4 / ≥ 0.20 |
+| 代码质量 | ruff（line-length=100, py312）+ mypy（非严格，pydantic 插件）+ pre-commit | ≥ 0.6 / ≥ 1.11 / ≥ 4.6 |
+| 构建 / 包管理 | hatchling（wheel packages=`["app"]`）+ [uv](https://github.com/astral-sh/uv) ≥ 0.4 | — |
 
-## 关键能力
+**生产数据库**：PostgreSQL 16；**测试数据库**：内存异步 SQLite（aiosqlite），conftest override `get_session`，零外部依赖。
 
-- **鉴权与权限**：JWT 会话 + API Key 双路径；workspace 维度 RBAC + 平台管理员角色（`auth` 模块 + `admin` 模块管理 organizations/users/roles）。
-- **agent 编排**：`agent` 模块负责运行编排、上下文构建、diff 收集、扫描分发、交互会话调度、kill 与状态映射；日志收集经 Redis pub/sub → SSE。
-- **daemon 运行时**：`daemon` 模块负责运行注册、任务租约（lease claim）、WebSocket RPC、交互会话生命周期、补丁（patch）、运行同步（run_sync）、权限定时器。5 子包各司其职。
-- **workspace / spec 管理**：`workspace` 模块管理项目工作区、成员、扫描生成、迁移路径、schema 默认 agent、拓扑关系；`spec_workspace` 负责规格工作区 bootstrap / bundle 同步 / 校验 / 回填；`spec_profile` 负责 spec 策略与冲突检测（部分 TODO 未实现，见 CONCERNS）。
-- **change / task / workflow**：`change` 模块驱动变更状态机（StageEnum + TRANSITIONS）、dispatch 链、门禁转换、自动分发、阶段配置；`task` 解析器；`workflow` 状态机 + 审计钩子 + spec guardian；`change_writer` 生成 markdown。
-- **Git 与工具网关**：`git_gateway`（危险操作策略 + 服务）、`git_identity`（凭据加密 NaCl）、`worktree`（git worktree + exec_env）、`tool_gateway`（工具策略）。
-- **PPM（项目组合管理）**：`ppm` 子域 6 feature——`project`（项目）、`plan`（计划，含三联级查询与 FSM）、`problem`（问题）、`kanban`（看板任务）、`task`（任务）、`common`（CRUD/导出/FSM 公共能力）。
-- **其他**：`archive`（归档服务）、`incident`（事件复盘）、`knowledge`（知识解析）、`release`（发布）、`runtime`、`scan_docs`（扫描文档生成）、`health`、`settings`。
+**外部协作者**：
 
-## 运行与开发
+- **sillyhub-daemon**（Node.js / TypeScript）— per-host 本地守护进程，WebSocket 协议通信，负责宿主机 Agent 检测（探测 12 provider）、interactive session（claude-sdk-driver / codex-app-server-driver）、batch lease 执行、worktree 文件系统操作。
+- **Claude Code CLI** — 首发被编排的 AI Agent；后端用 `agent_type='claude_code'`，daemon detector 用 `'claude'`，需 `normalizeProvider()` 归一。
+- **GLM（智谱）** — team mission 的 Coordinator / Finalizer 直接走 messages API（不走 CLI，spike-04 结论：CLI 的 agentic system prompt 让 GLM 拒绝输出纯委派 JSON）。
 
-- 安装依赖：`cd backend && uv sync`（dev 组含 pre-commit/pytest/pytest-asyncio/pytest-cov/mypy/ruff/types-passlib/anyio/aiosqlite）。
-- 启动开发服务：`cd backend && uv run uvicorn app.main:app --reload`（需提供 `DATABASE_URL`、`SECRET_KEY` 等环境变量，或 `.env`）。
-- 必填环境变量：`DATABASE_URL`、`SECRET_KEY`（≥16 字符）；常用：`REDIS_URL`、`ENVIRONMENT`、`CORS_ALLOWED_ORIGINS`、`SPEC_DATA_ROOT`、`SILLYSPEC_MASTER_KEY`、`PLATFORM_BOOTSTRAP_ADMIN_PASSWORD`、`otel_endpoint`。
-- 运行测试：`cd backend && uv run pytest`（hermetic，内存 SQLite + httpx ASGI，不需要真实 PG/Redis）。
-- Lint/类型：`cd backend && uv run ruff check .` / `uv run mypy app`。
+**部署**：Docker Compose（`deploy/`），前端 Next.js 14 + 此后端 + Postgres + Redis + MinIO + daemon 分发；健康检查 `GET /api/health`。
+
+## 运行入口与开发约定
+
+- 安装：`cd backend && uv sync --all-extras`（dev 组含 pytest 全家桶 / ruff / mypy / pre-commit）。
+- 启动：`cd backend && uv run uvicorn app.main:app --reload --port 8000`（需 `DATABASE_URL`、`SECRET_KEY` 等 env 或 `.env`）。
+- 必填 env：`DATABASE_URL`、`SECRET_KEY`（≥16 字符）；常用：`REDIS_URL`、`ENVIRONMENT`、`CORS_ALLOWED_ORIGINS`、`SPEC_DATA_ROOT`、`SILLYSPEC_MASTER_KEY`、`PLATFORM_BOOTSTRAP_ADMIN_PASSWORD`。
+- 测试：`uv run pytest -q --cov=app --cov-fail-under=60`（hermetic，内存 SQLite + httpx ASGI，不需真实 PG/Redis）。
+- Lint / 类型：`uv run ruff check .` / `uv run mypy app`。
+- 约定（`backend/README.md`）：Async-first（同步代码仅限 CLI / migrations）；settings 不可变、`get_settings()` 单例缓存；structlog 禁 `print`；错误响应统一 `{code, message, request_id, details}`。

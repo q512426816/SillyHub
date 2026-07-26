@@ -102,16 +102,6 @@ export type ArchiveGateResponse = {
   checks: ArchiveCheckItem[];
 };
 
-/** 创建变更的请求参数 */
-export type CreateChangeInput = {
-  title: string;
-  description?: string;
-  scope?: "full" | "quick";
-  change_type?: string;
-  affected_components?: string[];
-  lease_id?: string;
-};
-
 /** daemon-client 代理创建变更的请求参数。
 
 D-002@v1（2026-07-05-daemon-client-change-binding-fix）：删 ``runtime_id`` 字段——
@@ -184,24 +174,6 @@ export function rejectChange(workspaceId: string, changeKey: string, reason: str
     {
       method: "POST",
       json: { reason },
-    },
-  );
-}
-
-/**
- * 创建变更 — POST /workspaces/{id}/changes/create
- *
- * 支持传入 description 和 scope，两者均有后端默认值。
- */
-export function createChange(
-  workspaceId: string,
-  input: CreateChangeInput,
-) {
-  return apiFetch<CreateChangeResponse>(
-    `/api/workspaces/${workspaceId}/changes/create`,
-    {
-      method: "POST",
-      json: input,
     },
   );
 }

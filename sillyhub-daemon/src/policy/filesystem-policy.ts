@@ -14,7 +14,7 @@
  * @module policy/filesystem-policy
  */
 
-import type { PolicyCache, RuntimePolicy } from './runtime-policy.js';
+import type { PolicyCache } from './runtime-policy.js';
 import type { AuditEvent, AuditSink } from './audit-sink.js';
 import { isPathUnderAnyRoot, resolveRealPath, UNC_REJECTED } from './path-utils.js';
 
@@ -80,12 +80,12 @@ export class PolicyEngine {
    *
    * 仍返回 normalizedPath，方便调用方对齐路径展示。
    *
-   * @param runtimeId runtime_id（per-runtime 隔离）
+   * @param _runtimeId runtime_id（per-runtime 隔离，读全 allow 故未使用）
    * @param path      原始路径
    * @param _provider agent 种类（保留参数签名对称性，读不审计故未使用）
    * @param _tool     触发工具（同上）
    */
-  canRead(runtimeId: string, path: string, _provider = '', _tool = ''): PolicyDecision {
+  canRead(_runtimeId: string, path: string, _provider = '', _tool = ''): PolicyDecision {
     // 读全 allow，但仍做规范化以便调用方拿到真实路径（不抛错、不审计）。
     const normalizedPath = resolveRealPath(path);
     return { allowed: true, reason: ALLOW_DECISION, normalizedPath };

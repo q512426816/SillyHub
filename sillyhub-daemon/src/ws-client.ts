@@ -31,13 +31,6 @@ import type { DaemonMessage } from './types.js';
 /** 断线重连退避间隔（毫秒）。design §9 + FR-03：5s，与 Python 版策略一致。 */
 export const RECONNECT_INTERVAL_MS = 5_000;
 
-/**
- * 重连退避上限（毫秒）。本 v1 采用固定退避（5s）而非指数退避，
- * 与 Python 单层 asyncio.sleep 语义一致；此常量预留供未来切换指数退避时使用，
- * 当前固定退避场景下等于 RECONNECT_INTERVAL_MS，避免无限增长（边界 §4）。
- */
-export const RECONNECT_MAX_INTERVAL_MS = 5_000;
-
 /** 单次 connect 的握手超时（毫秒）。Python open_timeout=10 → 10s。 */
 export const CONNECT_TIMEOUT_MS = 10_000;
 

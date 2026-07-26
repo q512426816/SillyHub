@@ -37,6 +37,36 @@ class MemberBindingResolver:
             raise MemberBindingNotFound(workspace_id=workspace_id, user_id=actor_user_id)
         return row
 
+    @staticmethod
+    async def resolve_member_binding_or_none(
+        session: AsyncSession,
+        workspace_id: uuid.UUID,
+        actor_user_id: uuid.UUID,
+        *,
+        log_tag: str = "resolve_member_binding_unexpected_error",
+    ) -> WorkspaceMemberRuntime | None:
+        """Same as :meth:`resolve_member_binding` but return None on miss/error.
+
+        收敛 placement + borrow_resolver 三处同款 try/except 脚手架（2026-07-27 结构优化）。
+        MemberBindingNotFound → None（上层走借用兜底 / NoOnlineDaemonError）；
+        意外异常 → log.warning(best-effort) + None，不阻断主流程。默认 log_tag 与
+        placement 两处一致；borrow_resolver 自有路径传专属 tag 区分来源。
+        """
+        try:
+            return await MemberBindingResolver.resolve_member_binding(
+                session, workspace_id, actor_user_id
+            )
+        except MemberBindingNotFound:
+            return None
+        except Exception as exc:
+            log.warning(
+                log_tag,
+                workspace_id=str(workspace_id),
+                user_id=str(actor_user_id),
+                error=str(exc),
+            )
+            return None
+
 
 async def _raise_no_session(
     workspace_id: uuid.UUID,

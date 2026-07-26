@@ -1,80 +1,46 @@
+# 架构(Architecture)
+
 ---
-source_commit: ba87eec
-updated_at: 2026-06-23T16:28:15Z
-created_at: 2026-06-24T00:28:15
 author: qinyi
+created_at: 2026-07-27 00:35:31
+source_commit: 6e78b29a
+updated_at: 2026-07-26T16:35:31Z
 generator: sillyspec-scan
 ---
 
-# sillyhub-daemon · 架构
-
-> 基于实际源码扫描（`sillyhub-daemon/src/` 下 25 个 `.ts` 文件 + `adapters/`、`interactive/` 两个子目录）。该项目原为 Python 实现，task-21 已整体重写为 Node.js/TypeScript，旧 `sillyhub_daemon/` Python 包不再使用。
-
 ## 技术栈
 
-- **运行时**：Node.js ≥ 20（ESM，`package.json` 中 `"type": "module"`，`engines.node` 要求 `>=20.0.0`）
-- **语言**：TypeScript 5.5.4（`tsconfig.json`：`module/moduleResolution=NodeNext` + `strict`，`rootDir=src`，`outDir=dist`）
-- **Agent 执行核心**：`@anthropic-ai/claude-agent-sdk` 0.3.181（Claude Agent SDK，驱动同进程多轮 `query`）
-  - `package.json` 通过 pnpm `overrides` 把 8 个平台 optional package（win32/linux/darwin × x64/arm64 × glibc/musl）统一解析到主包 0.3.181，绕开平台 native 依赖分发问题
-- **CLI**：`commander` ^12.1.0（bin: `sillyhub-daemon` → `./dist/cli.js`）
-- **传输**：`ws` ^8.18.0（WebSocket，daemon → backend 实时通道）
-- **HTTP**：Node 20 原生 `fetch`（零 HTTP 库依赖，hub-client.ts 明确采用）
-- **包管理**：pnpm 9.6.0（`packageManager` 字段）；无 pnpm 也可用 npm
-- **测试**：`vitest` ^2.0.0（`environment=node`，include `tests/**/*.test.ts`）
-- **构建**：`tsc`（脚本：`dev`=`tsc --watch` / `build`=`tsc` / `typecheck`=`tsc --noEmit` / `start`=`node dist/cli.js`）；bundle via `@vercel/ncc` ^0.44.0（`bundle` 脚本 = `bash scripts/build-bundle.sh`）
+sillyhub-daemon 是 SillyHub 平台的本地守护进程(Node.js 重写版,原 Python 实现已废弃),运行在开发者/业务人员本机,负责在本地隔离环境中驱动 Claude Code agent 执行任务,并通过 WebSocket 长连接与后端 backend 协同。
+
+- **运行时与语言**:Node.js ≥ 20(`engines.node`),ESM(`package.json` 中 `"type": "module"`);TypeScript 5.5.4(`tsconfig.json` target `ES2022`、module/moduleResolution `NodeNext`、`strict` + `noUncheckedIndexedAccess` + `verbatimModuleSyntax` + `isolatedModules`,`rootDir=src`、`outDir=dist`)。包管理器 pnpm 9.6.0(`packageManager`)。
+- **核心依赖**(`package.json` dependencies):
+  - `@anthropic-ai/claude-agent-sdk` `0.3.181` —— 驱动 Claude Code agent 执行;通过其 `query({ prompt: AsyncIterable, options })` 入口发起同进程多轮(interactive 链路)。
+  - `@modelcontextprotocol/sdk` `^1.29.0` —— MCP 工具注入,daemon 内置 MCP server 走 stdio transport(`McpServer` + `StdioServerTransport`),供主 agent 调用平台工具。
+  - `commander` `^12.1.0` —— CLI 子命令(`start`/`stop`/`status`/`logs`)。
+  - `ws` `^8.18.0` —— 与 backend 的 WebSocket 长连接,接收任务、回写结果。
+  - `zod` `^4.4.3` —— 运行时校验。
+  - `js-yaml` `^4.1.0` —— YAML 解析。
+- **HTTP**:Node 20 原生 `fetch`(零 HTTP 库依赖,`hub-client.ts` 采用)。
+- **构建与发布**:`tsc` 编译(`dev`/`build`/`typecheck`/`start` 脚本);`@vercel/ncc` `^0.44.0` 经 `scripts/build-bundle.sh` 打成单文件 bundle(产物 `build/bundle/sillyhub-daemon.js` + 独立子进程入口 `mcp-server.js`),`BUILD_ID`(git SHA)注入 `src/build-id.ts`,配合 daemon self-update 对齐 backend `get_latest_manifest`;`openapi-typescript` 生成 `src/api-types.ts`(`gen:types` 脚本)。
+- **pnpm overrides**:`claude-agent-sdk` 各平台可选依赖(win32/linux/darwin × x64/arm64 × musl/glibc)统一重定向到 `npm:@anthropic-ai/claude-agent-sdk@0.3.181`,绕开平台 native 依赖分发,保证跨平台一致。
+- **测试**:`vitest` ^2.0.0(`environment=node`,`test` 脚本 `--passWithNoTests`)。
 
 ## 架构概览
 
-守护进程以单进程常驻方式运行在用户机器上，对上承接 platform backend（WebSocket + HTTP），对下驱动 Claude agent 执行任务，并向 backend 上报 lease 生命周期与交互式会话状态。
+daemon 是一个「后端事件驱动 + 本地 agent 执行」的单进程常驻边车。入口 `src/cli.ts` 用 commander 注册 `start`/`stop`/`status`/`logs` 子命令,`start` 构造并启动 `Daemon` 主循环;对上承接 backend(WebSocket + HTTP),对下驱动 Claude/Codex agent,并向 backend 上报 lease 生命周期与交互式会话状态。
 
-```
-                ┌────────────────────────────────────────────────────────────────┐
-                │                        sillyhub-daemon                          │
-                │                                                                │
-  backend ──WS──►  WsClient  ──►  Daemon (主循环/三循环) ──►  SessionManager ──►  ClaudeSdkDriver ──► Claude Agent SDK (query)
-   (HTTP)   ◄──HTTP── HubClient ─►     │                              │              (canUseTool / interrupt / resume)
-                                    │                              ▼
-                                    ├──► TaskRunner (非交互 lease)  ──►  WorkspaceManager / CredentialManager / AgentDetector
-                                    │         │   │
-                                    │         │   └──► spec-sync (spec bundle pull/push，含 Tar Slip 防护)
-                                    │         │
-                                    │         └──► adapters (5 协议：stream_json / json_rpc / jsonl / ndjson / text)
-                                    │
-                                    └──► protocol (MSG 常量 + WS 路径 + lease 状态)
-                └────────────────────────────────────────────────────────────────┘
-```
+核心组件(均为 `sillyhub-daemon/src` 下 `.ts` 模块):
 
-### 关键组件（按职责）
+- **`Daemon`(`daemon.ts`)**:守护总编排,维护三循环(HTTP 轮询 / WS 心跳 / lease 执行),持有下列组件实例,启动时对持久化 session 调 `recoverSession` + `restoreAndReconnect`(query resume),路由 `SESSION_INJECT/INTERRUPT/END` 与 `PERMISSION_RESPONSE` 控制消息。
+- **`WsClient`(`ws-client.ts`)**:`ws` WebSocket 客户端(`new WebSocket(url)`),`http(s)://` → `ws(s)://` 转换,收发 `DaemonMessage`;接收 `task_available` 分派给 `TaskRunner`;RPC 请求走独立分支不污染 lease 消息分发;自动重连。不含 lease 状态机(归 Daemon)。
+- **`HubClient`(`hub-client.ts`)**:backend REST 瘦客户端,每次请求独立原生 `fetch`(无连接池,超时 `AbortSignal.timeout(30_000)`)。封装 lease 生命周期(`claim`/`start`/`heartbeat`/`submit_lease_messages`/`complete_lease`/`sync_status`)、`close_interactive_run`(`notifyRunResult`,绑定 lease 的 `X-Claim-Token`)、self-update manifest、skills manifest 等。
+- **任务执行分两条链路**:
+  1. **batch / task 链路 —— `TaskRunner`(`task-runner.ts`)**:对每个非交互 lease 经 `runLease` claim→start→heartbeat→submitMessages→complete,spawn agent 子进程,`getBackend(provider)`(默认 `claude`)取 adapter 解析输出;spawn 前由 `credential.ts`/`spawn-env.ts` 注入凭证与隔离环境(`CLAUDE_CONFIG_DIR` 指向 `~/.sillyhub/.../claude-config`,避免读宿主机 `~/.claude/settings.json` 造成 cc-switch 环境污染)。
+  2. **interactive 链路 —— `SessionManager`(`interactive/session-manager.ts`)**:同进程多轮,直接调 SDK `query({ prompt: AsyncIterable, options })`(由 `claude-sdk-driver.ts` 封装,`codex-app-server-driver.ts` 为另一 provider 驱动);`input-queue.ts` 提供跨 turn 长生命周期 AsyncIterable,`permission-resolver.ts` 把 tool 权限请求映射为 backend `PERMISSION_REQUEST/RESPONSE` 往返,`session-store-persistence.ts` 落盘 session 快照(`~/.sillyhub/daemon/sessions.json`)支持重启恢复。
+- **MCP 工具注入**:`mcp-server.ts` 提供 daemon 内置 MCP server,注册平台工具(如 `dispatch_worker` 等,team 主 agent 链路);`mcp-config.ts` 负责加载/校验/合并 platform_default + daemon 内置 server(`loadPlatformMcpConfigFromBackend` + `validateMcpServers` 白名单 + `mergeMcpConfigs`),`buildDaemonMcpServerConfig` 构造 spawn 配置,在主 agent spawn 时经 `mainAgentMcpConfigProvider` 注入(clique 隔离:`isMainAgentSession` 谓词配对)。
+- **协议适配**:`adapters/`(stream-json、json-rpc、jsonl、ndjson、text、pi-json、protocol-adapter、index)适配不同 agent 输出协议,统一归一到内部 `protocol.ts` 消息模型(`PROTOCOL_PROVIDERS` 正向映射 + `PROVIDER_TO_PROTOCOL` 反查)。
+- **韧性与恢复**:`resilience/`(outbox + error-classify + service)做应用层去重与离线 outbox 落盘防丢;`runtime-lock.ts` 防止多 daemon 实例并发;interactive session 持久化 + `recoverSession`/`restoreAndReconnect` 支持断点恢复(注:恢复≠断点续跑,见 daemon 恢复能力边界)。
+- **策略与文件访问**:`policy/`(filesystem-policy、runtime-policy、audit-sink、path-utils、shell-paths)实施文件系统访问策略与审计;`host-fs-handler.ts`、`file-rpc.ts`(`assertWithinAllowedRoots` 防 `allowed_roots` 越界)、`roots-rpc.ts` 处理宿主文件系统 RPC。
+- **辅助模块**:`config.ts`(配置加载,含 `CLAUDE_CONFIG_DIR` 常量)、`preflight.ts`(启动前检查 + BUILD_ID)、`daemon-version.ts`/`agent-detector.ts`(版本与 agent 探测,`PROVIDER_SPECS`)、`version.ts`/`cursor-version.ts`(外部 CLI semver 校验)、`skill-manager.ts`(workspace skills 同步,对齐 backend `get_skills_manifest`)、`spec-sync.ts`(SillySpec spec bundle 双向同步,含 Tar Slip 防护,纯函数式供 interactive 路径复用)、`terminal-launcher.ts`/`terminal-observer.ts`(可选本地终端 tail)。
 
-- **`src/cli.ts`**：commander 入口，`createProgram()` 导出为函数（非单例）便于多次 parse。命令：`start`（含 `--server/--token/--api-key/--workspace-dir/--poll-interval/--heartbeat-interval/--max-concurrent/--log-level` + terminal observer 选项组 `--open-terminal/--terminal-mode/--terminal-close-on-exit/--terminal-command`）、`stop`、`status`、`logs [--tail N]`。负责 PID 文件读写（`getPidFile`/`readPid`/`isProcessAlive`/`writePid`/`removePid`）、配置加载、构造并启动 `Daemon`。`--version` 由 `DAEMON_VERSION` 提供。
-- **`src/daemon.ts`**：核心守护类 `Daemon`。维护三循环（HTTP 轮询 / WS 心跳 / lease 执行），启动时对每条持久化 session 记录调 `recoverSession` + `restoreAndReconnect`（query resume）。路由 `SESSION_INJECT/INTERRUPT/END` 控制消息与 `PERMISSION_RESPONSE` 到 `SessionManager`。定义 `RecoveryCoordinator` / `DaemonOptions` / `InteractiveCredentialManager` 接口。
-- **`src/interactive/`**：交互式会话子系统。
-  - `claude-sdk-driver.ts`：封装 `@anthropic-ai/claude-agent-sdk` 的 `query({ prompt: AsyncIterable, options })` / `interrupt()` / `canUseTool` / `resume`；无状态（不持 query 句柄）。`canUseTool` 是否注入由 lease metadata `manual_approval` 决定（scan=true 注入人审，chat=false 不注入）。
-  - `session-manager.ts`：`SessionManager` 类，会话生命周期（create/active/idle/failed/ended）、空闲扫描、并发 inject、恢复；自定义 `SessionNotFoundError` / `SessionAlreadyExistsError` / `SessionNotActiveError` / `UnsupportedProviderError`。
-  - `input-queue.ts`：长生命周期跨 turn 的 AsyncIterable 输入队列（`SessionQueueClosedError` / `SessionQueueDoubleSubscribeError`）。
-  - `permission-resolver.ts`：把 SDK 的 tool 权限请求映射为对 backend 的 `PERMISSION_REQUEST/RESPONSE` 往返。
-  - `session-store-persistence.ts`：会话快照落盘与启动恢复（`SessionPersistenceError` / `JsonSessionPersistence`，默认写 `~/.sillyhub/daemon/sessions.json`）。
-  - `types.ts`：交互式会话相关类型 + 错误类集中定义。
-- **`src/task-runner.ts`**：非交互式 lease 任务编排核心（`TaskRunner.runLease`）：claim/start/heartbeat/submitMessages/complete，spawn agent 子进程，`getBackend(provider)`（默认 `claude`）取 adapter 解析输出。导出纯函数 `resolveTimeout` / `resolveMaxRetries` / `isSpawnLevelFailure` / `renderAgentEvent` / `echoAgentEvent` 等。
-- **`src/spec-sync.ts`**：spec bundle 双向同步共享 utility（纯函数 + client 参数注入）。从 task-runner 等价迁移：`resolveSpecDir`（`~/.sillyhub/daemon/specs/{wsId}`，wsId 含路径分隔符拒绝）、`pullSpecBundle`（含 404 容错）、`extractTar`（Tar Slip 防护）、`packSpecDir`、`postSpecSync`。设计为纯模块级函数，使 interactive 路径（无 TaskRunner 实例）可直接调用。
-- **`src/hub-client.ts`**：`HubClient` 无状态瘦客户端，每次请求独立原生 `fetch`（无连接池）。lease 生命周期 HTTP（claim/start/heartbeat/complete）+ spec sync 上报。非 2xx 抛 `HubHttpError`，body 字段 snake_case 对齐 backend Pydantic，超时 `AbortSignal.timeout(30_000)`。
-- **`src/ws-client.ts`**：`WsClient`（基于 `ws`），收发 `DaemonMessage`；内建 RPC 分发（`RpcError`），心跳 `send`，自动重连（`RECONNECT_INTERVAL_MS=5_000` / `RECONNECT_MAX_INTERVAL_MS=5_000` / `CONNECT_TIMEOUT_MS=10_000` / `CLOSE_TIMEOUT_MS=5_000`）。`_createSocket` 抽为 protected 便于测试 stub。
-- **`src/adapters/`**：5 协议（stream-json / json-rpc / jsonl / ndjson / text）的协议适配层。`protocol-adapter.ts` 定义统一接口，`index.ts` 维护正向映射 `PROTOCOL_PROVIDERS` 与反查表 `PROVIDER_TO_PROTOCOL`。各 provider 的输出解析（stdout 分帧 / 事件归一化为 `AgentEvent`）在此层完成。
-- **`src/config.ts`**：`loadConfig(path?)` 函数式加载 `~/.sillyhub/daemon/config.json`，浅拷贝 `DEFAULT_CONFIG` 起始，规范化 `allowed_roots`，自动生成 `runtime_id`。`DaemonConfig` 接口集中字段定义。
-- **辅助模块**：
-  - `workspace.ts`（`WorkspaceManager`，git 操作，`GitError`，`MAX_PATCH_CHARS=50_000`）
-  - `credential.ts`（`CredentialManager`，凭证占位符 `{{USER_XXX}}` 替换，仅全串匹配）
-  - `agent-detector.ts`（`AgentDetector` 探测本机 agent 可执行，`PROVIDER_SPECS`）
-  - `daemon-version.ts`（daemon 自身版本号唯一来源，ESM 静态 import package.json 带 `with { type: 'json' }`，供 cli `--version` 与 json-rpc codex 握手 `clientInfo.version`）
-  - `version.ts`（外部 agent CLI 的 semver 解析工具，`MIN_VERSIONS` / `checkMinVersion`，区别于 daemon-version）
-  - `cursor-version.ts`（Cursor 版本探测）
-  - `terminal-launcher.ts` + `terminal-observer.ts`（可选：为每个 agent 任务开本地终端窗口 tail 日志）
-  - `spawn-env.ts`（`buildSpawnEnv` / `redactEnv`）
-  - `file-rpc.ts`（受限文件读写 RPC，`assertWithinAllowedRoots` 防 `allowed_roots` 越界）
-  - `cmd-shim.ts`、`protocol.ts`（MSG 常量 + WS 路径 + lease 状态）、`types.ts`、`index.ts`
-
-## 数据流要点
-
-- **交互式会话**：backend → WS `task_available` → `Daemon` 委托 `SessionManager.create` 建 session + 启动 driver 协程 → `ClaudeSdkDriver.start` 调 SDK `query` → 输入来自 `input-queue`（跨 turn AsyncIterable）→ 输出回传 backend。`SESSION_INJECT/INTERRUPT` 经 `Daemon._routeSessionControl` 入队；`PERMISSION_RESPONSE` 经 `_routePermissionResponse` 路由。会话快照持久化（`JsonSessionPersistence` → sessions.json），启动时 `Daemon` 调 `recoverSession` + `restoreAndReconnect`（query resume）恢复。
-- **非交互式 lease**：`Daemon` 三循环之一 → `HubClient` 轮询 → `TaskRunner.runLease` claim → spawn → adapter 解析 → submitMessages → complete。spec bundle 同步走 `spec-sync` 的 `pullSpecBundle`/`postSpecSync`。
-- **canUseTool 人审开关**：scan 类任务（lease metadata `manual_approval=true`）注入 `canUseTool` 回调走 backend 人审往返；chat 类（`manual_approval=false`）不注入，工具直接放行。`AskUserQuestion` 走对话回调而非 canUseTool。
+数据流概要:backend 投递 lease → WsClient 接收 → Daemon 分派(TaskRunner spawn 或 SessionManager SDK query)→ agent 执行中经 adapters 解析输出 → HubClient 经 lease API 回写消息/usage/结果 → 完成 `complete_lease`,或 interactive 走 `notifyRunResult` + `close_interactive_run`(用 `X-Claim-Token` 校验 + 绑定 session 防跨会话注入)。

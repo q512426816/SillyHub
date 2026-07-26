@@ -206,14 +206,3 @@ class AgentAdapter(ABC):
         if not ctx.change_title:
             violations.append("Change title is required.")
         return violations
-
-    def validate_bundle(self, bundle: AgentSpecBundle) -> list[str]:
-        """Validate the spec bundle. Returns list of violations."""
-        violations: list[str] = []
-        if not bundle.task_title:
-            violations.append("Task title is required.")
-        if not bundle.change_summary:
-            violations.append("Change summary is required.")
-        if not bundle.task_key:
-            violations.append("Task key is required.")
-        return violations

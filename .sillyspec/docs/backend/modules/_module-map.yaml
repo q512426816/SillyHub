@@ -1,9 +1,9 @@
 schema_version: 1
 project: backend
-source_commit: ba87eec
-generated_at: 2026-06-24 00:45:16
+source_commit: 6e78b29a
+generated_at: 2026-07-27 01:18:13
 generator: sillyspec-scan
-last_change: 2026-06-24 全量 scan 覆盖更新。backend/app/modules 实际 23 业务目录（admin / agent / archive / auth / change / change_writer / daemon / git_gateway / git_identity / health / incident / knowledge / ppm / release / runtime / scan_docs / settings / spec_profile / spec_workspace / task / tool_gateway / workflow / workspace / worktree），旧索引漏 admin、ppm 两模块；本次补齐并核对 entrypoints/main_symbols/depends_on（settings→admin、auth↔admin 双向、agent↔daemon 双向、daemon→workspace 等跨模块引用全部以 rg 验证）。2026-07-22 平台文件中心（change `2026-07-22-platform-file-center`）手动补登 `storage` + `file` 两个新模块卡（scan 未跑，source_commit 标 pending，待归档后由下次 scan 对齐）。
+last_change: 2026-07-27 增量更新。补登新模块 `skills`（platform 级 CustomSkill admin CRUD，router tags=[custom-skills] 挂 /api，model CustomSkill + CustomSkillService，依赖 core/models）；删除已下线模块 `archive`（目录 app/modules/archive 不存在，全后端无 modules.archive 引用）并清理 core/auth/workspace/change 的 used_by 对 archive 的引用。`file`/`llm_provider`/`storage` 三卡已于先前手动补登（见上次 last_change），本次核对无误不再重复。上一次全量 scan 说明保留：backend/app/modules 实际业务目录（admin / agent / auth / change / change_writer / daemon / file / git_gateway / git_identity / health / incident / knowledge / llm_provider / ppm / release / runtime / scan_docs / settings / skills / spec_profile / spec_workspace / storage / task / tool_gateway / workflow / workspace / worktree），旧索引漏 admin、ppm 两模块；entrypoints/main_symbols/depends_on 均以 rg 验证。
 
 modules:
   # ── core 模块 ──────────────────────────────────────────────
@@ -70,7 +70,6 @@ modules:
       - health
       - spec_profile
       - spec_workspace
-      - archive
       - admin
     needs_review: false
     concerns: []
@@ -182,7 +181,6 @@ modules:
       - runtime
       - settings
       - spec_workspace
-      - archive
       - admin
       - ppm
     needs_review: false
@@ -222,7 +220,6 @@ modules:
       - agent
       - daemon
       - change_writer
-      - archive
       - knowledge
       - runtime
       - scan_docs
@@ -258,7 +255,6 @@ modules:
       - task
       - agent
       - change_writer
-      - archive
       - workflow
       - release
     needs_review: false
@@ -684,29 +680,6 @@ modules:
     concerns: []
     review_reasons: []
 
-  archive:
-    status: active
-    doc: modules/archive.md
-    paths:
-      - app/modules/archive/**
-    tags: [archive]
-    aliases: []
-    entrypoints:
-      - /api/workspaces/{workspace_id}/archive
-    main_symbols:
-      - ArchiveService
-      - archive_router
-    depends_on:
-      - core
-      - models
-      - auth
-      - change
-      - workspace
-    used_by: []
-    needs_review: false
-    concerns: []
-    review_reasons: []
-
   settings:
     status: active
     doc: modules/settings.md
@@ -926,6 +899,33 @@ modules:
       - storage
     used_by:
       - ppm
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  skills:
+    status: active
+    doc: modules/skills.md
+    paths:
+      - app/modules/skills/**
+    tags: [skills, custom-skills, admin, crud, mcp]
+    aliases: [custom-skills]
+    entrypoints:
+      - /api/custom-skills
+      - /api/custom-skills/{skill_id}
+    main_symbols:
+      - CustomSkill
+      - CustomSkillService
+      - CustomSkillCreate
+      - CustomSkillUpdate
+      - CustomSkillRead
+      - CustomSkillDetail
+      - skills_router  # app.main include_router(skills_router, prefix="/api")
+    depends_on:
+      - core
+      - models
+      - auth
+    used_by: []
     needs_review: false
     concerns: []
     review_reasons: []

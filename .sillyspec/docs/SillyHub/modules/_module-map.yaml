@@ -5,8 +5,8 @@
 
 schema_version: 1
 project: SillyHub
-source_commit: ba87eec
-generated_at: 2026-07-14 16:58:34
+source_commit: 6e78b29a
+generated_at: 2026-07-27 01:18:13
 generator: sillyspec-scan
 
 modules:
@@ -47,7 +47,7 @@ modules:
     main_symbols:
       - models.base (TimestampModel 基类)
     depends_on: [core]
-    used_by: [agent, daemon, archive, change, git_gateway, git_identity, incident, knowledge, release, settings, spec_workspace, task, tool_gateway, workspace, worktree, ppm]
+    used_by: [agent, daemon, change, git_gateway, git_identity, incident, knowledge, release, settings, spec_workspace, task, tool_gateway, workspace, worktree, ppm, file, llm_provider, skills]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -125,23 +125,7 @@ modules:
     concerns: [交互式会话生命周期(2026-06-23-codex-interactive-session)]
     review_reasons: []
 
-  archive:
-    status: active
-    doc: modules/archive.md
-    paths:
-      - backend/app/modules/archive/**
-    tags: [backend, spec, archive]
-    aliases: [spec-archive]
-    entrypoints:
-      - API tag=archive (POST /api/.../archive, distill-knowledge)
-    main_symbols:
-      - archive.service.ArchiveService
-      - archive.router
-    depends_on: [core, models, change, knowledge]
-    used_by: [workflow, change_writer]
-    needs_review: false
-    concerns: []
-    review_reasons: []
+  # archive 模块已于 decouple-scan 变更移除(目录 backend/app/modules/archive 已不存在)
 
   change:
     status: active
@@ -493,6 +477,82 @@ modules:
       - worktree.model.WorktreeLease
       - worktree.router
     depends_on: [core, models, workspace, git_gateway, git_identity]
+    used_by: [agent, daemon]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # === Backend 新增模块（2026-07-27 重扫发现） ===
+  storage:
+    status: active
+    doc: modules/storage.md
+    paths:
+      - backend/app/modules/storage/**
+    tags: [backend, storage, infra]
+    aliases: [object-storage, storage-backend]
+    entrypoints: []
+    main_symbols:
+      - storage.base.StorageBackend（抽象后端）
+      - storage.factory（后端工厂）
+      - storage.minio_backend.MinioBackend（S3/MinIO 实现，平台文件中心）
+    depends_on: [core]
+    used_by: [file]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  file:
+    status: active
+    doc: modules/file.md
+    paths:
+      - backend/app/modules/file/**
+    tags: [backend, file, upload]
+    aliases: [file-center, files]
+    entrypoints:
+      - APIRouter tags=[file]（上传/下载/元数据/批量元数据）
+    main_symbols:
+      - file.service.FileService（upload_file/get_meta/get_stream/batch_meta）
+      - file.model.File
+      - file.router
+    depends_on: [core, models, storage]
+    used_by: [agent, daemon, frontend_app]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  llm_provider:
+    status: active
+    doc: modules/llm_provider.md
+    paths:
+      - backend/app/modules/llm_provider/**
+    tags: [backend, llm, provider]
+    aliases: [llm-providers, cc-switch]
+    entrypoints:
+      - APIRouter prefix=/llm-providers tags=[llm_provider]（CRUD + 启停/set-default）
+    main_symbols:
+      - llm_provider.service.LlmProviderService（list/get/create/update/delete）
+      - llm_provider.model.LlmProvider
+      - llm_provider.router
+    depends_on: [core, models]
+    used_by: [agent, daemon]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  skills:
+    status: active
+    doc: modules/skills.md
+    paths:
+      - backend/app/modules/skills/**
+    tags: [backend, skill, custom-skills]
+    aliases: [custom-skills]
+    entrypoints:
+      - APIRouter tags=[custom-skills]（自定义技能 CRUD）
+    main_symbols:
+      - skills.service.CustomSkillService（list/get/create/update/delete）
+      - skills.model.CustomSkill
+      - skills.router
+    depends_on: [core, models]
     used_by: [agent, daemon]
     needs_review: false
     concerns: []

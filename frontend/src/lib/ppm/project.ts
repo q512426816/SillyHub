@@ -142,10 +142,6 @@ export async function listCustomers(
   return resp.items;
 }
 
-export async function getCustomer(customerId: string): Promise<CustomerMaintenance> {
-  return apiFetch<CustomerMaintenance>(`/api/ppm/customer-maintenance/${customerId}`);
-}
-
 export async function createCustomer(
   body: CustomerMaintenanceCreate,
 ): Promise<CustomerMaintenance> {
@@ -209,10 +205,6 @@ export async function listProjectMembers(
   return all;
 }
 
-export async function getProjectMember(memberId: string): Promise<ProjectMember> {
-  return apiFetch<ProjectMember>(`/api/ppm/project-member/${memberId}`);
-}
-
 export async function createProjectMember(
   body: ProjectMemberCreate,
 ): Promise<ProjectMember> {
@@ -256,14 +248,6 @@ export async function listProjectStakeholders(
 ): Promise<ProjectStakeholder[]> {
   const resp = await pageProjectStakeholders(params);
   return resp.items;
-}
-
-export async function getProjectStakeholder(
-  stakeholderId: string,
-): Promise<ProjectStakeholder> {
-  return apiFetch<ProjectStakeholder>(
-    `/api/ppm/project-stakeholder/${stakeholderId}`,
-  );
 }
 
 export async function createProjectStakeholder(

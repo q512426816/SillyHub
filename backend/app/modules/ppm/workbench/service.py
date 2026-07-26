@@ -85,30 +85,6 @@ def _parse_workload_hours(work_load: str | None) -> float:
     return val  # h / 小时 / 无单位 → 按小时
 
 
-def _task_alert(task: PlanTask, now: datetime) -> str:
-    """单任务进度状态: normal(正常) / late(临期) / over(延期)。
-
-    已完成或无截止 → normal。延期: end_time<now 且未完成 → over。临期
-    (design 注意事项 2): 周期≤3日 → 截止前 1 天临期(含 1 日任务); 周期>3日
-    → 截止前 2 天临期。周期 = (end_time - start_time).days。
-    """
-    if task.status == "已完成":
-        return "normal"
-    end_time = task.end_time
-    if end_time is None:
-        return "normal"
-    end_aware = _to_aware(end_time)
-    if end_aware < now:
-        return "over"
-    start_time = task.start_time
-    if start_time is not None:
-        period_days = (end_aware - _to_aware(start_time)).days
-        threshold_days = 1 if period_days <= 3 else 2
-        if now >= end_aware - timedelta(days=threshold_days):
-            return "late"
-    return "normal"
-
-
 def _load_level_workload(hours: float) -> str:
     """load_level(任务饱和)按当日工时分档(design 注意事项 2):
     0→none(灰无计划) / <8→leisure(黄有空余) / 8-10→full(绿饱和) / >10→over(红过载)。"""
@@ -236,18 +212,6 @@ def _progress_alert(
                 return "yellow"
         return "green"
     return "green" if covers else None
-
-
-def _worst_alert(alerts: list[str | None]) -> str:
-    """取最严重的进度状态 (red > yellow > green > none)。"""
-    level = 0
-    result = "none"
-    for a in alerts:
-        sev = _ALERT_SEVERITY_PROGRESS.get(a or "none", 0)
-        if sev > level:
-            level = sev
-            result = a
-    return result
 
 
 def _covered_days_in_month(

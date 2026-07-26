@@ -1,123 +1,88 @@
 ---
-source_commit: ba87eec
-updated_at: 2026-06-23T16:31:56Z
-created_at: 2026-06-24T00:31:56
 author: qinyi
+created_at: 2026-07-27 00:35:31
+source_commit: 6e78b29a
+updated_at: 2026-07-26T16:35:31Z
 generator: sillyspec-scan
 ---
 
-# ARCHITECTURE.md — SillyHub（产品整体架构）
+# 架构(Architecture)
 
-> 本文档描述 SillyHub 产品的**整体架构与运行时交互链路**（path = `.`，仓库根视角）。
-> 实际代码分布在 3 个子项目 + 1 个部署目录：`backend/` / `frontend/` / `sillyhub-daemon/` / `deploy/`。
+> SillyHub（仓库根 path = `.`）整体架构与三端运行时交互链路。代码分布在 4 个目录：
+> `backend/`（FastAPI）、`frontend/`（Next.js）、`sillyhub-daemon/`（Node）、`deploy/`（compose 栈）。
 
 ## 技术栈
 
-### backend (`backend/pyproject.toml`)
-- Python ≥3.12，FastAPI ≥0.115 + Uvicorn ≥0.30
-- SQLModel ≥0.0.22 + SQLAlchemy[asyncio] ≥2.0 + asyncpg ≥0.29（PostgreSQL 16）；Alembic ≥1.13 迁移
-- Redis ≥5.0（缓存 / Pub-Sub / SSE 事件桥接 / 锁）
-- AuthN/AuthZ：python-jose[cryptography]（JWT）、passlib[bcrypt]、pynacl
-- 结构化日志 structlog ≥24.4；httpx ≥0.27（与 daemon 对接的 HTTP 客户端基线）
-- openpyxl（Excel 导出）、psutil、python-frontmatter
-- 测试：pytest + pytest-asyncio + aiosqlite（dev）
+### backend（Python 3.12 / FastAPI，`backend/pyproject.toml`）
+- Web 框架：`fastapi>=0.115` + `uvicorn[standard]`（lifespan 启停钩子在 `backend/app/main.py`）。
+- ORM / DB：`sqlmodel>=0.0.22` + `sqlalchemy[asyncio]>=2.0` + `asyncpg`（PostgreSQL 异步驱动）；迁移 `alembic>=1.13`，迁移脚本在 `backend/migrations/versions`（117 个 revision 文件，含多个 merge head）。
+- 缓存 / 实时：`redis>=5.0`（agent run 日志走 Redis pub/sub 扇出）。
+- 对象存储：`aiobotocore>=3.8,<4`（平台文件中心，S3 兼容 / MinIO）。
+- 认证：`python-jose[cryptography]` + `passlib[bcrypt]` + `pynacl`（JWT + bcrypt + 会话）。
+- 其他：`structlog`（结构化日志）、`httpx`、`python-frontmatter`、`openpyxl`+`Pillow`（Excel/图像导入）、`psutil`。
+- 质量：`pytest` + `pytest-asyncio` + `pytest-xdist`、`ruff`、`mypy`（py312，非 strict）。
 
-### frontend (`frontend/package.json`)
-- Next.js 14.2.5 + React 18.3.1 + TypeScript 5.5.4（App Router）
-- 数据/状态：TanStack Query 5.51、Zustand 4.5、Zod 3.23
-- UI：Ant Design 6.4 + Tailwind 3.4 + Radix UI primitives + lucide-react；@xyflow/react（拓扑流程图）、ECharts 6、@uiw/react-markdown-preview
-- 测试：Vitest 2 + Testing Library + jsdom；E2E：Playwright 1.60 + Puppeteer；包管理 pnpm 9.6.0（Node ≥20）
+### frontend（Next.js 14.2.5 / React 18.3 / TypeScript 5.5，`frontend/package.json`）
+- 路由：Next.js app-router（源码在 `frontend/src/app`，非 `frontend/app`）；顶层组 `(dashboard)` 下挂 `workspaces/[id]`、`admin`、`ppm`、`runtimes`、`settings`。
+- UI：`antd@^6.4.4` + `@ant-design/icons` + `@ant-design/nextjs-registry`、`tailwindcss` + `tailwind-merge` + `class-variance-authority`、`lucide-react`、`@radix-ui/*`、`@xyflow/react`（拓扑图）、`echarts` + `echarts-for-react`（图表）。
+- 数据：`@tanstack/react-query@^5.51`、`zustand@^4.5`、`zod`、`dayjs`、`@uiw/react-markdown-preview`。
+- 测试 / 类型：`vitest` + `@testing-library/react` + `jsdom`、`puppeteer` + `@playwright/test`、`openapi-typescript`（从 backend OpenAPI 生成 `src/lib/api-types.ts`）。
 
-### sillyhub-daemon (`sillyhub-daemon/package.json`)
-- Node ≥20，TypeScript 5.5.4，ESM（`"type": "module"`）
-- `@anthropic-ai/claude-agent-sdk@0.3.181`（pnpm overrides 统一多平台二进制）
-- `ws@^8.18`（WebSocket 客户端，连 backend Hub）、`commander@^12`（CLI 参数）
-- HTTP 通信用 Node 20 原生 `fetch`（零 HTTP 库依赖，设计 G-05）；测试 Vitest 2
+### sillyhub-daemon（Node ≥20 / ESM / TypeScript，`sillyhub-daemon/package.json`）
+- 入口：`bin: sillyhub-daemon → ./dist/cli.js`（`src/cli.ts`，commander；子命令 `start/stop/status/logs`）。
+- Agent 执行：`@anthropic-ai/claude-agent-sdk@0.3.181`（spawn 本地 Claude Code agent）。
+- 工具协议：`@modelcontextprotocol/sdk@^1.29`（daemon 内置 MCP server，注入 host 文件 / spec / skill 等工具）。
+- 通信：`ws@^8.18`（daemon 主动拨号 backend 的 WebSocket）、`commander`、`zod@^4`、`js-yaml`。
+- 打包 / 类型：`@vercel/ncc`（产 `build/bundle/sillyhub-daemon.js` 单文件分发）、`openapi-typescript`（生成 `src/api-types.ts`）、`vitest`。
+
+### 基础设施（`deploy/docker-compose.yml`，5 服务）
+- `postgres:16-alpine`（PG 主库）、`redis:7-alpine`（缓存 + pub/sub）、`minio/minio`（对象存储，9000/9001）、`backend`（本地 build / 服务器 load 同镜像名 `multi-agent-platform-backend:latest`，启动跑 `alembic upgrade head` 再 `uvicorn`，`--ws-max-size 100MB` 以容纳 spec bundle RPC）、`frontend`（`multi-agent-platform-frontend:latest`）。
+- 卷：`/host-projects`（扫描宿主 `.sillyspec` 树）、`/data/spec-workspaces`（宿主 daemon 与 backend 容器共享 spec 文档的 bind mount）。
 
 ## 架构概览
 
-SillyHub 由 **frontend ↔ backend ↔ daemon** 三层构成，核心运行时是**任务编排链路**：
-
+### 三端拓扑
 ```
-┌─────────────┐   HTTP REST + SSE   ┌──────────────────┐   WebSocket + HTTP   ┌──────────────────┐
-│  frontend   │ ───────────────────▶│     backend      │◀────────────────────▶│  sillyhub-daemon │
-│ (浏览器)    │ ◀─── SSE 日志流 ────│  (FastAPI)       │   (本地守护进程)     │  (Claude Agent)  │
-│ Next.js 14  │                     │  :8000           │                      │  :动态端口        │
-└─────────────┘                     └────────┬─────────┘                      └────────┬─────────┘
-       │                                      │                                        │ spawn
-       │ TanStack Query /                     │ PostgreSQL (持久, ~55 表)               │
-       │ EventSource(SSE)                     │ Redis (缓存/锁/Pub-Sub)                 ▼
-       │ fetch                                └────────────────                          Claude Code CLI
-                                                                                  (@anthropic-ai/
-                                                                                   claude-agent-sdk)
+浏览器 ──HTTP/REST(/api/*)+SSE(quick-chat 流)──> backend(FastAPI)
+                                                      │  │
+                                          PostgreSQL  │  │ Redis pub/sub(运行日志扇出)
+                                                      │  │
+                  sillyhub-daemon(Node) ──WebSocket──>│  │
+                       │  daemon 拨号 /ws              │  │
+                       │  (backend/app/modules/daemon/router.py:1958)
+                  spawn Claude Agent SDK + 内置 MCP server
+                  读写宿主文件系统 / spec 文档 / skills
 ```
+- backend 是唯一持久化与鉴权中心；daemon 是执行边缘节点，主动连 backend 的 `/ws`（无独立 HTTP 服务），通过 WS 双向消息 + lease 轮询领取任务。
+- daemon 分发：`backend/app/modules/daemon/dist_router` 暴露公共 `install.sh` 端点（curl … | bash 安装），backend 镜像 build 时 `additional_contexts` 注入 daemon 的 `build/bundle/`。
 
-**核心数据流向**（产品语义）：
+### backend 分层（`backend/app/`）
+- `core/`：基础设施（`db` 引擎/会话、`redis`、`config`/settings、`logging`/structlog、`telemetry`/OTEL、`errors` 全局异常、`auth_deps`、`audit_hooks`）。
+- `modules/`：按业务域拆分（~27 个），每个模块典型含 `router.py` + `service.py` + `model.py` + `schema.py` + `tests/`。main.py 注册的 router 包括：auth、admin、workspace（+ members、member_runtimes）、change、change_writer、scan_docs、task、git_identity、git_gateway、agent、daemon（+ dist）、runtime、worktree、workflow、incident、knowledge、release、tool_gateway（+ policy）、settings、spec_workspace、llm_provider、file、skills、health，以及 `ppm/` 子域（project / plan / task / problem / kanban / workbench，统一前缀 `/api/ppm`）。
+- 快捷聊天：main.py 内联注册 `/api/daemon-chat*`（POST 创建 agent_run → RunPlacementService.dispatch_to_daemon；GET/SSE/kill/logs）。
 
-1. **frontend → backend**：浏览器通过 TanStack Query 发 REST 请求（工作空间、变更、任务、PPM、租约等），通过 `EventSource` 订阅 SSE 实时日志。
-2. **backend → sillyhub-daemon**：backend 经 `DaemonWsHub`（`backend/app/modules/daemon/ws_hub.py`）按 `runtime_id` 推送 `task_available` 等事件给已注册 daemon；daemon 反向用原生 `fetch`（`sillyhub-daemon/src/hub-client.ts` 的 `HubClient`，对齐 Python httpx `trust_env=False` 语义）回调 backend REST（注册、心跳、claim/start/complete lease、提交消息、session 恢复）。
-3. **sillyhub-daemon → Claude**：daemon 用 Claude Agent SDK（`@anthropic-ai/claude-agent-sdk@0.3.181`）spawn Claude 进程执行实际任务，把产出 / 日志经 `submit_lease_messages` 回传 backend。交互式会话由 `interactive/session-manager.ts` + `interactive/claude-sdk-driver.ts` 驱动（含 `input-queue` / `permission-resolver` / `session-store-persistence`），输出协议由 `adapters/*`（stream-json / json-rpc / jsonl / ndjson / text）适配。
-4. **backend → frontend（实时）**：backend 把 daemon 回传日志落库（`AgentRunLog`）后，经 SSE 端点 `/workspaces/{id}/agent/runs/{run_id}/stream`（`agent/router.py` 的 `stream_agent_run_logs`）推给浏览器。
+### DB Schema 概况（PostgreSQL，~70 张表）
+按域分组（仅列代表性表名 + 说明，不列字段）：
+- 认证 / 组织：`users`、`sessions`、`roles`、`role_permissions`、`api_keys`、`user_workspace_roles`、`organizations`、`user_organizations`、`user_roles`。
+- 工作空间 / 协作：`workspaces`、`workspace_member_runtimes`、`task_workspaces`、`agent_run_workspaces`。
+- 变更流 / 文档：`changes`、`change_documents`、`change_reviews`、`tasks`、`scan_documents`、`scan_doc_conflict_history`、`spec_workspaces`、`spec_profile_manifests`、`spec_conflicts`。
+- Agent 编排：`agent_runs`、`agent_run_logs`、`agent_sessions`、`agent_missions`、`agent_run_dependencies`、`agent_artifacts`、`daemon_borrow_audit`。
+- Daemon 运行时：`daemon_instances`、`daemon_runtimes`、`daemon_task_leases`、`daemon_change_writes`、`session_dialog_requests`、`policy_audit_log`。
+- 网关 / 审计：`git_identities`、`git_operation_logs`、`tool_operation_logs`、`tool_policies`、`audit_logs`。
+- DevOps：`releases`、`release_approvals`、`incidents`、`postmortems`、`worktree_leases`、`custom_skills`、`llm_providers`、`platform_settings`。
+- PPM 子域（项目计划管理，~20 张）：`ppm_plan_task`、`ppm_task_execute`、`ppm_work_hour`、`ppm_project_maintenance`、`ppm_customer_maintenance`、`ppm_project_member`、`ppm_project_stakeholder`、`ppm_problem_list`、`ppm_problem_change`、`ppm_*_process_task`、`ppm_*_process_log`、`ppm_kanban_comment`、`ppm_kanban_subtask`、`ppm_plan_node(_detail/_module)`、`ppm_ps_project_plan`、`ppm_ps_plan_node_*` 等。
+- 文件中心：`file`（平台级，元数据指向 MinIO 对象）。
 
-## 后端模块拓扑（`backend/app/modules/`）
+### sillyhub-daemon 核心模块（`sillyhub-daemon/src/`）
+- `cli.ts`（commander 入口，`start` 拉起 `daemon.ts` 主循环）、`daemon.ts`（生命周期 + 心跳）、`ws-client.ts`（daemon→backend WebSocket，http↔ws / https↔wss 自动转换）。
+- `task-runner.ts`（领取并执行 lease 任务）、`interactive/`（交互式会话 driver）、`agent-detector.ts`、`runtime-lock.ts`、`spawn-env.ts`、`preflight.ts`。
+- 工具 / RPC：`mcp-server.ts` + `mcp-config.ts`（内置 MCP server + 注入配置）、`host-fs-handler.ts`、`roots-rpc.ts`、`file-rpc.ts`（宿主文件系统读写）、`spec-sync.ts`（.sillyspec 文档回写同步）、`skill-manager.ts`、`permission-rules.ts`、`tool-kind.ts`。
+- 凭证：`credential.ts` + `credential-injector.ts`（向 agent 进程注入 API key 等，含 `CLAUDE_CONFIG_DIR` 隔离）。
+- 协议：`protocol.ts`（与 backend 的 WS 消息信封）、`hub-client.ts`（HTTP 调 backend REST）、`api-types.ts`（OpenAPI 生成）。
 
-`backend/app/main.py` 共注册 **32 个 `include_router`**（含 qc/health），覆盖以下功能域（与 `.sillyspec/docs/SillyHub/modules/` 29 篇一一对应）：
+### 三端契约同步
+- 单一真相：backend 的 OpenAPI（`/api/openapi.json`）。
+- 生成器：`scripts/gen-api-types.mjs`（frontend 与 daemon 各有一份），分别产出 `frontend/src/lib/api-types.ts` 与 `sillyhub-daemon/src/api-types.ts`；CI 用 `gen:types:check`（生成后 `git diff --exit-code`）卡类型漂移。
 
-| 功能域 | 后端模块 | 说明 |
-| --- | --- | --- |
-| Agent 运行时编排 | `agent/` | AgentRun / AgentRunLog / AgentSession / AgentMission / 依赖 / 产物，运行时核心 |
-| Workspace / Spec 文档 | `workspace/`、`spec_workspace/`、`spec_profile/`、`scan_docs/` | 工作空间成员、Spec Profile、扫描文档解析（scan_docs 已独立成模块） |
-| 变更工作流 | `change/`、`change_writer/`、`archive/` | 变更提案、变更写入器、归档 |
-| Task | `task/` | 任务管理 |
-| Daemon 本地执行 | `daemon/` | DaemonWsHub / 租约（lease）/ 交互式会话生命周期 |
-| Runtime 会话 | `runtime/` | runtime 归属与 session 恢复 |
-| Auth / Admin | `auth/`、`admin/` | JWT 鉴权、平台管理 |
-| Git | `git_gateway/`、`git_identity/` | Git 网关、Git 身份（二者均已独立成模块） |
-| Tool Gateway | `tool_gateway/` | 工具调用网关 + policy |
-| PPM 项目管理 | `ppm/`（project / plan / task / problem / kanban） | 最大功能域，5 子路由挂 `/api/ppm` |
-| Knowledge | `knowledge/` | 知识库 |
-| Release | `release/` | 发布管理 |
-| Incident | `incident/` | 事件管理 |
-| Workflow | `workflow/` | 工作流 |
-| Settings / Health | `settings/`、`health/` | 平台设置、健康检查 |
-
-## 部署拓扑（`deploy/`）
-
-### 生产 / 全栈 — `deploy/docker-compose.yml`（`name: multi-agent-platform`）
-四服务，统一 `.env` 注入：
-
-| 服务 | 镜像/构建 | 端口 | 依赖 |
-| --- | --- | --- | --- |
-| `postgres` | postgres:16-alpine | `${POSTGRES_PORT:-5432}:5432` | healthcheck `pg_isready` |
-| `redis` | redis:7-alpine（appendonly AOF） | —（内部） | healthcheck `redis-cli ping` |
-| `backend` | 构建 `../backend/Dockerfile`（build-args 注入 `CLAUDE_CODE_VERSION=2.1.158`、`SILLYSPEC_VERSION=3.19.1`） | `${BACKEND_PORT:-8000}:8000` | postgres/redis healthy |
-| `frontend` | 构建 `../frontend/Dockerfile`（SSR，`INTERNAL_API_BASE_URL=http://backend:8000`） | `${FRONTEND_PORT:-3000}:3000` | backend |
-
-backend 关键挂载与配置：
-- `${HOST_PROJECTS_DIR:-C:/Users/qinyi/IdeaProjects}:/host-projects` — 扫描器读宿主 `.sillyspec` 树
-- `${SPEC_DATA_HOST_DIR}:/data/spec-workspaces` bind mount — 宿主 daemon（Windows）与 backend 容器共享同一物理 spec 目录
-- `worktree-data`、`claude-data` 命名卷
-- `HOST_PATH_PREFIX` / `CONTAINER_PATH_PREFIX` 把宿主风格路径重写为容器挂载路径
-- 启动命令：`alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 必填 env：`SECRET_KEY`、`SILLYSPEC_MASTER_KEY`；CORS 默认放行 `http://localhost:3001`、`http://127.0.0.1:3001`
-
-> 注：`deploy/` 下**没有** sillyhub-daemon 的 compose 服务 —— daemon 始终在宿主机本地运行（`daemon-start.bat` 等脚本拉起），与 backend 通过本地协议交互。
-
-### 开发 — `deploy/docker-compose.dev.yml`（`name: multi-agent-platform-dev`）
-仅起 `postgres:16-alpine` + `redis:7-alpine`，backend / frontend 在宿主以 `uvicorn --reload`、`next dev` 热重载运行。
-
-## 数据模型概览
-
-backend 全部持久化模型继承 `app/models/base.py:BaseModel(SQLModel)`，审计钩子 `app/core/audit_hooks.py` 自动捕获所有 `table=True` 变更写入 `AuditLog`。共约 55 张表，按模块分组：auth(6) / admin(3) / **agent(6，运行时核心：AgentRun / AgentRunLog / AgentSession / AgentMission / AgentRunDependency / AgentArtifacts)** / daemon(3) / workspace(5) / change(2) / task(1) / workflow(2) / **ppm(≈20，最大域)** / release / git_gateway / tool_gateway / 其他（Incident / SpecProfileManifest / ScanDocument / PlatformSetting 等）。
-
-## 关键交互协议
-
-- **Daemon WebSocket Hub**（`backend/app/modules/daemon/ws_hub.py`）：按 `runtime_id` 维护连接注册表，支持广播 `task_available`、逐连接定向发送、去重保护、慢连接驱逐。
-- **协议消息**（`backend/app/modules/daemon/protocol.py`）：`DaemonMessage(type)` + 一组 payload（TaskAvailable / Heartbeat+Ack / LeaseClaim+Ack / LeaseComplete / RpcRequest+Result / SessionInject / SessionControl / PermissionRequest+Response）。
-- **daemon REST 回调**（`backend/app/modules/daemon/router.py`，约 25 端点）：register / heartbeat / claim / start / lease_heartbeat / submit_lease_messages / complete / sync_status / close_interactive_run / recover_session / confirm_session_reconnected / mark_session_recovery_failed 等。
-- **SSE**：`agent/router.py` 的 `stream_agent_run_logs`（`EventSourceResponse`，`text/event-stream`）；session SSE 见 `daemon/tests/test_session_sse.py`。
-- **daemon 侧**：`WsClient`（`ws-client.ts`，连 backend Hub，含重连与握手超时）+ `HubClient`（`hub-client.ts`，原生 fetch 调 REST）+ `daemon.ts`（生命周期）+ `RecoveryCoordinator`（session 恢复）。
-
-## 设计文档索引（`docs/`）
-
-`claude-loop-v1-p0.md`、`execution-plan-v2-v5.md`、`change-center-redesign.md`、`spec-alignment.md`、`sillyspec-tool-side-requirements.md`、`agent-sillyspec-stage-execution-analysis.md`、`sillyhub_refs/`（harness-runtime / knowledge-moat / cloud-runner 等设计参考）、`qa/sillyhub-functional-review-2026-05-31.md`。
+### 跨平台
+- 三端均要求兼容 Windows / Linux / macOS（CLAUDE.md 规则 13）；daemon 在 Windows 走宿主进程，spec 文档经 `deploy/docker-compose.yml` 的 bind mount `/data/spec-workspaces` 与 backend 容器共享。

@@ -229,13 +229,29 @@ class TaskService:
         return data
 
     async def enrich_summaries(self, tasks: list[Task]) -> list[TaskSummary]:
-        """Build TaskSummary list with workspace_ids populated."""
+        """Build TaskSummary list with workspace_ids populated.
+
+        性能优化（2026-07-27）：批量取所有 task 的 workspace 关联（一次 IN 查询 +
+        内存按 task_id 分组），消除原逐 task SELECT TaskWorkspace 的 N+1。
+        对齐 agent/service.py:enrich_list 范式；TaskWorkspace 存 primary 行故
+        secondary 须排除 task.workspace_id 去重。
+        """
+        if not tasks:
+            return []
+        task_ids = [t.id for t in tasks]
+        rows = (
+            await self._session.execute(
+                select(TaskWorkspace.task_id, TaskWorkspace.workspace_id).where(
+                    col(TaskWorkspace.task_id).in_(task_ids)
+                )
+            )
+        ).all()
+        ws_map: dict[uuid.UUID, list[uuid.UUID]] = {}
+        for task_id, ws_id in rows:
+            ws_map.setdefault(task_id, []).append(ws_id)
         result: list[TaskSummary] = []
         for t in tasks:
-            stmt = select(TaskWorkspace.workspace_id).where(
-                col(TaskWorkspace.task_id) == t.id,
-            )
-            all_mn = [row[0] for row in (await self._session.execute(stmt)).all()]
+            all_mn = ws_map.get(t.id, [])
             secondary = [wid for wid in all_mn if wid != t.workspace_id]
             data = TaskSummary.model_validate(t)
             data.workspace_ids = [t.workspace_id] + secondary

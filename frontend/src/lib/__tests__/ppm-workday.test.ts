@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   addWorkingDaysDate,
-  addWorkingDaysISO,
   addWorkingDaysMs,
 } from "@/lib/ppm/workday";
 
@@ -21,8 +20,6 @@ describe("ppm workday helpers", () => {
 
   it("工作量 1 天 → 当天(起点算第 1 天)", () => {
     expect(addWorkingDaysDate(monday, 1)).toBe("2024-06-03");
-    const iso = addWorkingDaysISO(monday, 1);
-    expect(iso.startsWith("2024-06-03")).toBe(true);
   });
 
   it("工作量 2 天 → 起点 +1 工作日(用户口径 7/1→7/2)", () => {
@@ -70,11 +67,6 @@ describe("ppm workday helpers", () => {
   it("工时为 0 或非法时不抛错,返回合理值", () => {
     expect(() => addWorkingDaysMs(monday, 0)).not.toThrow();
     expect(() => addWorkingDaysMs(monday, Number.NaN)).not.toThrow();
-  });
-
-  it("ISO 输出长度恒为 19(YYYY-MM-DD HH:mm:ss)", () => {
-    const out = addWorkingDaysISO(monday, 1);
-    expect(out.length).toBe(19);
   });
 });
 

@@ -3,16 +3,14 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { MessageSquarePlus, RefreshCw, Trash2 } from "lucide-react";
+import { MessageSquarePlus } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MarkdownText } from "@/components/ui/markdown-text";
 import { InteractiveSessionPanel, type SessionTurnView } from "@/components/daemon/interactive-session-panel";
 import { sanitizeSessionLogContent } from "@/components/daemon/session-log-sanitize";
 import { type AgentRunLogEntry } from "@/lib/agent";
 import {
-  PROVIDER_META,
   type AgentSessionRead,
   type AgentSessionStatus,
   type DaemonRuntimeRead,
@@ -137,101 +135,6 @@ export const ACTIVE_SESSION_VIEW_STATUSES: ReadonlySet<AgentSessionStatus> = new
 
 export function isActiveSession(s: AgentSessionRead): boolean {
   return ACTIVE_SESSION_VIEW_STATUSES.has(s.status);
-}
-
-/**
- * 受控会话列表 sidebar。active/pending/reconnecting → live（task-11 面板）；
- * ended/failed → history 只读回看。selection 由父级持有，不创建第二套 SSE。
- */
-export function SessionsSidebar({
-  sessions,
-  loading,
-  error,
-  selectedSessionId,
-  deletingSessionId,
-  onSelect,
-  onDelete,
-  onRetry,
-}: {
-  sessions: AgentSessionRead[];
-  loading: boolean;
-  error: string | null;
-  selectedSessionId: string | null;
-  deletingSessionId: string | null;
-  onSelect: (_session: AgentSessionRead) => void;
-  onDelete: (_session: AgentSessionRead) => void;
-  onRetry: () => void;
-}) {
-  return (
-    <section
-      data-testid="session-list-scroll"
-      className="flex h-full min-h-0 flex-col overflow-hidden border-r bg-card"
-    >
-      <header className="border-b bg-muted/20 px-5 py-4">
-        <h2 className="text-sm font-semibold">会话列表</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          {loading ? "加载中…" : `${sessions.length} 个会话`}
-        </p>
-      </header>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {error ? (
-          <div className="space-y-2 px-3 py-3">
-            <p className="text-[11px] text-destructive">{error}</p>
-            <Button size="sm" variant="outline" onClick={onRetry} className="h-7 text-[11px]">
-              重试
-            </Button>
-          </div>
-        ) : sessions.length === 0 ? (
-          <p className="py-6 text-center text-[11px] text-muted-foreground">没有会话</p>
-        ) : (
-          <ul className="divide-y">
-            {sessions.map((s) => {
-              const active = isActiveSession(s);
-              return (
-                <li key={s.id} className="flex items-stretch">
-                  <button
-                    type="button"
-                    onClick={() => onSelect(s)}
-                    className={cn(
-                      "flex min-w-0 flex-1 flex-col items-start gap-1 px-4 py-3 text-left hover:bg-muted/40",
-                      selectedSessionId === s.id && "bg-muted/60",
-                    )}
-                  >
-                    <span className="flex w-full items-center justify-between gap-2">
-                      <span className="font-mono text-[11px]">{shortId(s.id)}</span>
-                      <Badge variant={active ? "success" : "outline"} className="text-[10px]">
-                        {s.status}
-                      </Badge>
-                    </span>
-                    <span className="text-[10px] text-muted-foreground">
-                      {PROVIDER_META[s.provider]?.label ?? s.provider} · {s.turn_count} turn
-                      {s.turn_count === 1 ? "" : "s"}
-                    </span>
-                  </button>
-                  {/* task-04 / FR-3：去掉 {!active} 限制，所有状态都渲染删除按钮。
-                      active 会话删除的后台 end 收口由后端 task-03 处理，前端透明。 */}
-                  <button
-                    type="button"
-                    aria-label={`删除会话 ${s.id}`}
-                    title="删除会话"
-                    disabled={deletingSessionId === s.id}
-                    onClick={() => onDelete(s)}
-                    className="flex w-10 shrink-0 items-center justify-center border-l text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-                  >
-                    {deletingSessionId === s.id ? (
-                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-3.5 w-3.5" />
-                    )}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
-    </section>
-  );
 }
 
 /**

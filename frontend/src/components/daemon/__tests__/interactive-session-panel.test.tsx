@@ -35,10 +35,6 @@ const sessionApi = vi.hoisted(() => ({
   streamSession: vi.fn(),
   getAgentSession: vi.fn(),
   fetchPendingDialogs: vi.fn(),
-  // task-08（FR-07 / D-005）：codex 路径不得调用 quick-chat API，mock 供断言 not.toHaveBeenCalled
-  quickChat: vi.fn(),
-  streamQuickChat: vi.fn(),
-  getQuickChatResult: vi.fn(),
 }));
 
 // task-08（FR-08）：「用团队分析」按钮调 createMission(mode=team, session_id 绑定)
@@ -57,9 +53,6 @@ vi.mock("@/lib/daemon", async () => {
     streamSession: sessionApi.streamSession,
     getAgentSession: sessionApi.getAgentSession,
     fetchPendingDialogs: sessionApi.fetchPendingDialogs,
-    quickChat: sessionApi.quickChat,
-    streamQuickChat: sessionApi.streamQuickChat,
-    getQuickChatResult: sessionApi.getQuickChatResult,
   };
 });
 
@@ -986,10 +979,6 @@ describe("InteractiveSessionPanel", () => {
     // 建交互式 SSE（不是 quick-chat）
     expect(sessionApi.streamSession).toHaveBeenCalledTimes(1);
     expect(sessionApi.streamSession.mock.calls[0]![0]).toBe("sess-codex");
-    // 全程不调 quick-chat API
-    expect(sessionApi.quickChat).not.toHaveBeenCalled();
-    expect(sessionApi.streamQuickChat).not.toHaveBeenCalled();
-    expect(sessionApi.getQuickChatResult).not.toHaveBeenCalled();
   });
 
   it("task-08 codex 多轮 → 第二条 injectSession，SSE 累计仍 1 次", async () => {
@@ -1025,10 +1014,6 @@ describe("InteractiveSessionPanel", () => {
     expect(sessionApi.injectSession).toHaveBeenCalledWith("sess-codex", "second codex");
     // 同 session 不重建 SSE
     expect(sessionApi.streamSession).toHaveBeenCalledTimes(1);
-    // 全程不调 quick-chat
-    expect(sessionApi.quickChat).not.toHaveBeenCalled();
-    expect(sessionApi.streamQuickChat).not.toHaveBeenCalled();
-    expect(sessionApi.getQuickChatResult).not.toHaveBeenCalled();
   });
 
   /* ---- task-09（FR-09 / D-006@v1 / D-008@v1 / D-010@v1）：Codex dialog 卡片

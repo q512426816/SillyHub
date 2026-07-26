@@ -128,10 +128,6 @@ export async function listUsers(
   });
 }
 
-export async function getUser(userId: string): Promise<UserRead> {
-  return apiFetch<UserRead>(`/api/admin/users/${userId}`);
-}
-
 export async function createUser(
   body: UserCreateRequest,
 ): Promise<UserRead> {
@@ -186,12 +182,6 @@ export async function listUserAudit(
   return apiFetch<AuditLogRead[]>(`/api/admin/users/${userId}/audit`, {
     query: params as Record<string, number | undefined>,
   });
-}
-
-export async function listUserWorkspaces(
-  userId: string,
-): Promise<UserWorkspaceRead[]> {
-  return apiFetch<UserWorkspaceRead[]>(`/api/admin/users/${userId}/workspaces`);
 }
 
 export async function resetUserPassword(
@@ -386,10 +376,6 @@ export async function listRoles(
   return apiFetch<RoleListResponse>("/api/admin/roles", {
     query: params as Record<string, string | number | boolean | undefined>,
   });
-}
-
-export async function getRole(roleId: string): Promise<RoleRead> {
-  return apiFetch<RoleRead>(`/api/admin/roles/${roleId}`);
 }
 
 export async function createRole(

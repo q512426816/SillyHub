@@ -57,26 +57,6 @@ export async function listProblems(
   return apiFetch<PageResp<ProblemList>>("/api/ppm/problem-list", pageQuery(params));
 }
 
-export async function getProblem(problemId: string): Promise<ProblemList> {
-  return apiFetch<ProblemList>(`/api/ppm/problem-list/${problemId}`);
-}
-
-/**
- * 按 find_time 区间过滤问题清单 (task-06 / FR-06)。
- *
- * 端点固定路径前置于 /{item_id},参数对齐后端 start_date/end_date 命名。
- * 后端反向区间自动 swap,find_time 为空的 problem 不返回。
- */
-export async function listProblemsByDateRange(
-  start: string,
-  end: string,
-): Promise<ProblemList[]> {
-  return apiFetch<ProblemList[]>(
-    "/api/ppm/problem-list/list-by-date-range",
-    { query: { start_date: start, end_date: end } },
-  );
-}
-
 export async function createProblem(
   body: ProblemListCreate,
 ): Promise<ProblemList> {

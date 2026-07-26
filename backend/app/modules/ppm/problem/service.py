@@ -66,8 +66,6 @@ from app.modules.ppm.problem.model import (
     PpmProblemChangeProcessLog,
     PpmProblemChangeProcessTask,
     PpmProblemList,
-    PpmProblemListProcessLog,
-    PpmProblemListProcessTask,
 )
 from app.modules.ppm.problem.schema import (
     ProblemImportCommitReq,
@@ -694,22 +692,6 @@ class ProblemService:
     # ------------------------------------------------------------------
     # 流程查询
     # ------------------------------------------------------------------
-
-    async def list_list_tasks(self, business_id: str) -> list[PpmProblemListProcessTask]:
-        stmt = (
-            select(PpmProblemListProcessTask)
-            .where(PpmProblemListProcessTask.business_id == _safe_uuid(business_id))
-            .order_by(PpmProblemListProcessTask.created_at)
-        )
-        return list((await self._session.execute(stmt)).scalars().all())
-
-    async def list_list_logs(self, business_id: str) -> list[PpmProblemListProcessLog]:
-        stmt = (
-            select(PpmProblemListProcessLog)
-            .where(PpmProblemListProcessLog.business_id == _safe_uuid(business_id))
-            .order_by(PpmProblemListProcessLog.created_at)
-        )
-        return list((await self._session.execute(stmt)).scalars().all())
 
     async def list_change_logs(self, business_id: str) -> list[PpmProblemChangeProcessLog]:
         stmt = (

@@ -244,7 +244,7 @@ export interface DaemonConfig {
   lease_heartbeat_interval: number;
   /**
    * 观察日志写入模式：
-   *   - 'parsed'：只写 echoAgentEvent/echoTaskBoundary 渲染后的可读文本
+   *   - 'parsed'：只写 renderAgentEvent/echoTaskBoundary 渲染后的可读文本
    *   - 'raw'：只写 Claude 原始 stdout/stderr
    *   - 'both'：parsed + raw 都写
    */

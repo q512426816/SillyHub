@@ -1,134 +1,82 @@
+# 代码约定(Conventions)
+
 ---
-source_commit: ba87eec
-updated_at: 2026-06-23T16:21:42Z
-created_at: 2026-06-24T00:21:42
 author: qinyi
+created_at: 2026-07-27 00:35:31
+source_commit: 6e78b29a
+updated_at: 2026-07-26T16:35:31Z
 generator: sillyspec-scan
 ---
 
-# Backend 代码约定（CONVENTIONS）
-
-> 基于 `backend/pyproject.toml`（ruff/mypy/pytest 配置）、`app/core/*.py`、`app/models/base.py`、`app/main.py` 及各模块 `router/service/model/schema` 的 rg 摘要。所有规则均可在源码中 grep 验证。
+> 范围:`backend/`(Python 3.12 + FastAPI + SQLModel/SQLAlchemy 异步栈)。所有结论均给出 `file:line` 证据;配置类陈述以 `backend/pyproject.toml` 为准。
 
 ## 框架隐形规则
 
-1. **模块四件套**：每个业务模块目录固定含 `router.py`（`APIRouter(tags=[...])`）+ `service.py`（业务编排）+ `model.py`（`BaseModel(SQLModel, table=True)` 表）+ `schema.py`（Pydantic v2 DTO）+ `tests/`（模块内单测）；个别模块额外有 `policy.py` / `fsm.py` / `providers/` / `dispatch.py` / `tool_policy.py`。PPM 子域在 `app/modules/ppm/<feature>/` 下重复该结构。
-2. **统一前缀挂载**：所有路由在 `app/main.py::create_app` 内以 `app.include_router(<x>_router, prefix="/api")` 挂载（共 30+ 个）；PPM 五个 router 统一 `prefix="/api/ppm"`（`ppm_project_router` / `ppm_plan_router` / `ppm_task_router` / `ppm_problem_router` / `ppm_kanban_router`）；workspace 维度路由由 router 自带 `prefix="/workspaces/{workspace_id}"`。
-3. **配置只走 Settings**：所有运行时配置必须经 `app/core/config.py::get_settings()`（`@lru_cache(maxsize=1)` 单例），禁止业务代码直接 `os.environ`。`Settings` 支持 `.env` + 环境变量 + 显式默认值三层覆盖。
-4. **鉴权显式声明**：无全局身份中间件；受保护路由必须用 `Depends(...)` 显式声明，五类依赖在 `app/core/auth_deps.py`：
-   - `get_current_user`（JWT 必需）
-   - `get_optional_user`（JWT 可选，失败返回 None）
-   - `require_permission(Permission.X)` / `require_permission_any(...)`（RBAC 权限校验）
-   - `require_platform_admin`（平台管理员）
-   - `get_current_principal`（JWT 或 API Key 双通道）
-5. **错误统一抛 `AppError` 子类**：`app/core/errors.py::AppError(Exception)` 是抽象基类，每个错误子类带类属性 `code`（形如 `HTTP_404_WORKSPACE_NOT_FOUND`）+ `http_status`（`status.HTTP_xxx`）；`__init__` 支持实例级覆盖 `code`/`http_status`/`details` 而不污染类属性。由 `register_exception_handlers` 统一翻译为 `{code, message, request_id, details}` 响应。模块内 service 也常自定义 `AppError` 子类（如 `tool_gateway` 的 `ToolOperationForbidden` / `ToolOperationFailed` / `ToolPathForbidden` / `ToolPolicyNotFound`）。
-6. **审计自动**：所有 `BaseModel(table=True)` 子类的增删改由 `app/core/audit_hooks.py` 捕获（`_after_insert_hook` / `_after_update_hook` / `_after_delete_hook` + `register_audit_hooks`），自动写入 `audit_logs`，无需手工埋点。
-7. **请求 ID 透传**：`request_id_middleware`（`main.py`）优先取 `x-request-id` 头，否则生成 UUID，写入 `request.state.request_id` 和响应头；异常 handler 经同一逻辑读取。
-8. **异步优先**：所有 DB/外部 IO 为 `async def`；`pytest-asyncio` 配 `asyncio_mode = "auto"`，测试协程无需 `@pytest.mark.asyncio` 装饰器。
-9. **lifespan 启动钩子**：`lifespan(_app)` 内顺序执行 `configure_logging` → `init_telemetry` → RBAC 引导（`bootstrap_admin_and_seed_rbac`）→ stale agent run 清理（`AgentService.cleanup_stale_runs`）。stale 清理失败用 `log.exception("agent.stale_run_cleanup_failed")` 吞掉不阻断启动；`finally` 块负责 `dispose_engine()` + `close_redis()`。
-10. **structlog 事件式日志**：全用 `log.info("app.start", version=..., environment=...)` 事件名 + kv 上下文风格，事件名点分蛇形（`app.start`、`app.shutdown`、`agent.stale_runs_cleaned_on_startup`、`runtime.sqlite_read_failed`、`migration.moved_change`），禁止 f-string 拼接消息。异常处理统一 `log.exception("<event>", ...)`。
-11. **daemon facade + 子包**：`DaemonService` 是 facade，业务逻辑在 `runtime/lease/run_sync/session/patch` 五子包的 `service.py`；跨子域调用经 `self._facade.<method>` 反向委托；新功能应落到对应子包，不要塞回 facade。
+下列规则不是写死在代码里的,而是由 `backend/pyproject.toml` 的工具配置隐式「允许」的。改动时需先看清这些豁免,否则会被 ruff/mypy 误判为「违规」而改错方向。
+
+- **mypy 非严格,且批量禁用错误码**(`backend/pyproject.toml:60-67`):`strict = false`,且 `disable_error_code = ["attr-defined", "union-attr", "assignment", "arg-type", "valid-type", "operator", "call-overload", "call-arg"]`。含义:SQLModel/Pydantic 动态属性、SQLAlchemy 表达式类型推断、FastAPI `Depends`/`Query` 装饰出的参数类型,mypy 都不再报错——新写此类代码**无需**为这些码补 `# type: ignore`。`warn_unused_ignores = true`(`backend/pyproject.toml:63`)意味着**多余的 ignore 反而会被点名**,不要无脑堆 ignore。
+- **ruff 行宽 100、目标 py312**(`backend/pyproject.toml:70-71`),但 `E501`(行长)被整体忽略(`backend/pyproject.toml:76`,注释「行长交给 formatter 兜底」)——**不要手工折行去消 E501**。
+- **异常按「事件」命名,而非 `Error` 后缀**:`N818` 被忽略(`backend/pyproject.toml:77`,注释明确「领域异常以事件命名,只有抽象基类 `AppError` 带 Error 后缀」)。因此 `ReleaseNotAllowed`、`IdentityRevoked`、`LeaseConflict` 等都是合规命名,勿改名为 `XxxError`。
+- **下列 ruff 规则被显式豁免**(`backend/pyproject.toml:80-87`,每条都带注释 rationale):
+  - `B008`——FastAPI 在参数默认值里写 `Query()`/`Depends()` 是标准模式。
+  - `RUF012`——Pydantic/SQLModel 的可变类属性(`model_config = ConfigDict(...)`、`code: str = ...`)是故意的。
+  - `BLE001`——异步错误处理中 `except Exception` 兜底常见。
+  - `SIM105`——禁用 `contextlib.suppress`,要显式 `try/except`;`SIM117`——允许嵌套 `with`。
+  - `RUF006`——「发射后不管」的 asyncio 任务不需要保留引用;`RUF005`——列表拼接风格不限。
+  - `RUF001/002/003`——中文字符串/注释/文档串中的全角标点不报错。
+  - `UP037`——允许注解中的前向引用引号化(配合 `from __future__ import annotations`)。
+- **测试目录放宽命名规则**(`backend/pyproject.toml:89-91`):`tests/*` 与 `**/tests/*` 对 `N802/N803/N806/E402/B017` 豁免——测试函数可用大写打头(`TestXxx`)、参数可大写、允许后置 import、允许 `pytest.raises(BaseException)`。`migrations/versions/*` 豁免 `UP035`(alembic 模板用 `typing.Sequence`)。
+- **pytest-asyncio = auto**(`backend/pyproject.toml:54`):异步测试函数**无需**加 `@pytest.mark.asyncio` 装饰器即可被识别,新增测试直接 `async def test_...`。`addopts = "-ra"`、`testpaths = ["tests", "app"]`(同上文件 55-57 行)。
+- **格式化引号统一双引号**(`backend/pyproject.toml:95`):`quote-style = "double"`,手写代码也请用双引号保持一致。
 
 ## 代码风格
 
-### 类型与标注
+### 1. 模块分层:`router / service / schema / model` 四件套
 
-- **类型标注强制**：全量 `from __future__ import annotations`（`rg` 命中 294 个文件）；函数签名用 PEP 604 联合类型（`str | None`）和 `Annotated[T, Depends(...)]` / `Annotated[T, Field(...)]`。
-- **依赖注入别名**：模块 router 顶部常定义 `SessionDep = Annotated[AsyncSession, Depends(get_session)]` 和 `CurrentUser = Annotated[User, Depends(get_current_user)]`，handler 参数直接引用；权限依赖直接内联 `Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))]`。
-- **Pydantic v2**：DTO 继承 `pydantic.BaseModel`；字段用 `Field(default_factory=dict)` / `Field(description="...")`；可变默认值必用 `default_factory` 防共享。
+每个业务域在 `backend/app/modules/<域>/` 下固定拆分,文件名一致,禁止把路由/持久化/契约混在一起。证据(同结构遍布全部模块,Glob 命中 60+ 个文件):
 
-### ruff 配置（`pyproject.toml [tool.ruff]`）
+- 路由层:`backend/app/modules/auth/router.py:36`、`backend/app/modules/worktree/router.py:23`、`backend/app/modules/daemon/router.py:242`——一律 `router = APIRouter(prefix=..., tags=[...])`,挂载时 `app.include_router(router)`。
+- 服务层:`backend/app/modules/change_writer/service.py:41`、`backend/app/modules/git_gateway/service.py:157`、`backend/app/modules/admin/users_service.py:51`——`class XxxService:` 有状态类。
+- 契约层:`backend/app/modules/worktree/schema.py:11` 起的 `XxxRequest / XxxRead`,`backend/app/modules/change/model.py:96` 的 `Change(BaseModel, table=True)` 持久化模型。
 
-- **行宽 100**：`line-length = 100`，`target-version = "py312"`，`extend-exclude = ["docker-entrypoint.sh"]`。
-- **select**：`E, F, I, B, UP, N, SIM, RUF, BLE`（pycodestyle errors / pyflakes / isort / bugbear / pyupgrade / pep8-naming / simplify / ruff-specific / blind-except）。
-- **ignore（显式匹配项目惯例）**：
-  - `E501`：行长交给 formatter 兜底。
-  - `N818`：领域异常按事件命名（`WorkspaceNotFound`）而非 `Error` 后缀；抽象基类 `AppError` 仍带 `Error`。
-  - `RUF001/002/003`：代码/注释含中文标点与字符。
-  - `BLE001`：async 错误处理常用 `except Exception`。
-  - `SIM105/SIM117`：偏好显式 `try/except`、嵌套 `with` 可读性可接受。
-  - `B008`：FastAPI `Query()` / `Depends()` 作参数默认值是标准模式。
-  - `RUF012`：Pydantic/SQLModel 模型有意使用可变类属性。
-  - `RUF006`：fire-and-forget task 不需要引用。
-  - `RUF005`：list concat 风格偏好。
-  - `UP037`：注解中允许引号化的前向引用（配合 `from __future__ import annotations`）。
-- **format**：`quote-style = "double"`（见 `[tool.ruff.format]`）。
-- **per-file-ignores**：`tests/*` 与 `**/tests/*` 忽略 `N802/N803/N806/E402/B017`（测试函数大写、变量命名、import 顺序、宽泛 except）；`migrations/versions/*` 忽略 `UP035`（alembic 模板用 `typing.Sequence`）。
+### 2. 依赖注入用 `Annotated` 别名,而非裸 `Depends(...)`
 
-### mypy 配置（`pyproject.toml [tool.mypy]`）
+会话与当前用户通过类型别名复用,模块顶部统一声明一次,handler 直接引用别名。证据:
 
-- `strict = false`，`warn_unused_ignores = true`，`ignore_missing_imports = true`，`plugins = ["pydantic.mypy"]`。
-- `disable_error_code` 显式关闭一批：`attr-defined / union-attr / assignment / arg-type / valid-type / operator / call-overload / call-arg / unused-ignore`——实质上类型检查约束较弱（见 CONCERNS）。
+- `backend/app/modules/worktree/router.py:25`:`SessionDep = Annotated[AsyncSession, Depends(get_session)]`。
+- `backend/app/modules/worktree/router.py:40,54,68`:`Annotated[User, Depends(require_permission(Permission.TASK_RUN_AGENT))]`、`CurrentUser = Annotated[User, Depends(get_current_user)]`。
+- `backend/app/modules/admin/router.py:61,64-65`:路由级 `dependencies=[Depends(require_permission_any(...))]` 做整组鉴权,再逐参注入 `session` 与 `user`。
+- 鉴权统一走 `backend/app/core/auth_deps.py:56,140` 的 `get_current_user` / `get_current_principal`,**不要在 service 里再读 request**。
 
-### 命名约定
+### 3. Service 是「持有 session 的有状态类」,查询走 `session.execute + scalars`
 
-- **表名复数蛇形**：`agent_runs`、`change_documents`、`tool_operation_logs`、`tool_policies`、`incidents`、`postmortems`、`workspaces`、`users`。
-- **错误码**：`HTTP_<STATUS>_<RESOURCE>_<EVENT>` 蛇形大写（如 `HTTP_404_WORKSPACE_NOT_FOUND`、`HTTP_409_WORKSPACE_SLUG_DUPLICATE`、`HTTP_403_WORKSPACE_PERMISSION_DENIED`）。
-- **structlog 事件名**：点分蛇形（`app.start`、`agent.stale_runs_cleaned_on_startup`、`runtime.sqlite_read_failed`、`migration.moved_change`）。
-- **注释与 docstring**：业务注释用中文（如 `"ql-20260618-009：与 service.py / bootstrap.py / dispatch.py 一致"`），故 ruff 关闭中文相关 RUF 规则。
+Service 在构造期接收 `AsyncSession`,字段命名为 `_session`;查询统一走 SQLAlchemy 2.x `select(...) → execute → scalars().all()/.first()`。证据:
 
-### SQLModel 用法约定
+- `backend/app/modules/change_writer/service.py:44-45`、`backend/app/modules/git_gateway/service.py:160-161`:`def __init__(self, session: AsyncSession) -> None: self._session = session`;需要操作者身份时多带一个参数,见 `backend/app/modules/admin/users_service.py:54` `def __init__(self, session: AsyncSession, actor_id: uuid.UUID)`。
+- `backend/app/modules/change/service.py:62,69` 同款构造。
+- 查询形态(`backend/app/modules/change/service.py:145,151,163`):`(await self._session.execute(count_stmt)).scalar() or 0`、`list((await self._session.execute(base)).scalars().all())`、`.scalars().first()`;`backend/app/modules/worktree/service.py:185,213` 同款。
+- Service 间组合**复用同一 session**(不要各自开新事务):`backend/app/modules/change/service.py:87` `SpecWorkspaceService(self._session).get(...)`。
+- 在 router 之外(后台任务/启动钩子)手动开 session 时,用 `async with get_session_factory()() as session:`(`backend/app/main.py:305,341`),**不要** `Depends(get_session)`。
 
-- 所有表继承 `app/models/base.py::BaseModel(SQLModel)`（`table=True`），`__tablename__` 强制复数蛇形。`BaseModel` 仅共享 metadata 对象（Alembic autogenerate 扫描用），无额外字段。
-- **UUID 主键**（两种并存写法）：
-  - `id: uuid.UUID = Field(default_factory=uuid.uuid4, sa_column=Column(Uuid, primary_key=True))`
-  - `id: uuid.UUID = Field(default_factory=uuid.uuid4, sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False))`
-- **外键**：`ForeignKey("target.id", ondelete="CASCADE")`，配 `Column(Uuid, ..., nullable=False)`；自引用或可空 FK 用 `nullable=True`（如 incident 的 `owner_id`）。
-- **时间戳**：`datetime` + `Column(DateTime(timezone=True))`，值用 `datetime.now(UTC)`。
-- 复合索引 `__table_args__ = (Index("ix_<tbl>_<col>", "<col>"),)`。
+### 4. 异常分层:`AppError` 为域错误基类,路由层不手写 `HTTPException`
 
-### 典型代码模式（5 个）
+领域错误继承 `AppError`,由全局 handler 统一翻译成固定响应体(`code/message/request_id/details`)。证据:
 
-**模式 1：路由 + 依赖注入（tool_gateway/router.py）**
-```python
-SessionDep = Annotated[AsyncSession, Depends(get_session)]
-CurrentUser = Annotated[User, Depends(get_current_user)]
+- 基类与契约:`backend/app/core/errors.py:1-12`(响应形状文档)、`backend/app/core/errors.py:28-38`(`class AppError(Exception)`,`code`/`http_status` 为类属性,可在 `__init__` 实例级覆盖)。
+- 典型领域异常:`backend/app/modules/release/service.py:45,50,55`(`ReleaseError(AppError)` → `ReleaseNotAllowed` / `ReleaseNotFound`)、`backend/app/modules/git_identity/service.py:23,28,33`(`IdentityNotFound / IdentityRevoked / IdentityExpired`)、`backend/app/modules/daemon/lease_service.py:28,35,42,49`(`LeaseConflict / LeaseNotFound / LeaseTokenMismatch / LeaseNotClaimable`)、`backend/app/modules/ppm/task/service.py:80-102`(域内再分一层 `TaskError(AppError)` 作子基类)。
+- 全局注册:`backend/app/core/errors.py:343` `register_exception_handlers(app)`,在 `backend/app/main.py:148` 挂载;`errors.py:346/360/373/396` 分别捕获 `AppError / HTTPException / RequestValidationError / Exception`。**新错误请继承 `AppError` 并给 `code`,不要在 router 里 `raise HTTPException`。**
 
-@router.post("/{policy_id}/execute", tags=["tool-gateway"])
-async def execute_tool(
-    session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_APPROVE))],
-    req: ToolExecuteRequest,
-) -> ToolExecuteResponse: ...
-```
+### 5. Schema/Model 分治与 ORM ↔ Pydantic 转换
 
-**模式 2：错误类定义（core/errors.py）**
-```python
-class WorkspaceNotFound(AppError):
-    code = "HTTP_404_WORKSPACE_NOT_FOUND"
-    http_status = status.HTTP_404_NOT_FOUND
-```
+- 持久化模型统一继承 `backend/app/models/base.py:13` 的 `BaseModel(SQLModel)`,以 `table=True` 落表(如 `backend/app/modules/change/model.py:96` `class Change(BaseModel, table=True)`)。
+- 出入参 DTO 子类化(同 `BaseModel`),用 `model_config = ConfigDict(from_attributes=True)` 开启 ORM → Pydantic 转换:`backend/app/modules/worktree/schema.py:20`、`backend/app/modules/workspace/schema.py:188`、`backend/app/modules/llm_provider/schema.py:45`。少量历史写法 `model_config = {"from_attributes": True}`(如 `backend/app/modules/workflow/schema.py:21`)也接受,新代码建议用 `ConfigDict(...)` 形式。
 
-**模式 3：SQLModel 表定义（incident/model.py）**
-```python
-class Incident(BaseModel, table=True):
-    __tablename__ = "incidents"
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, sa_column=Column(Uuid, primary_key=True))
-    workspace_id: uuid.UUID = Field(
-        sa_column=Column(Uuid, ForeignKey("workspaces.id"), nullable=False)
-    )
-```
+### 6. 日志:`structlog` + 模块级 `get_logger(__name__)`,事件名点分蛇形
 
-**模式 4：structlog 事件日志（main.py lifespan）**
-```python
-log.info("app.start", version=__version__, environment=settings.environment, commit=settings.resolved_commit_sha)
-log.warning("agent.stale_runs_cleaned_on_startup", count=stale_count)
-log.exception("agent.stale_run_cleanup_failed")
-```
+不在业务代码里用 `print` 或裸 `logging`。证据:`backend/app/core/logging.py:13,17` 配置 `structlog`(含 `merge_contextvars`);各 service/router 顶部 `log = get_logger(__name__)`,如 `backend/app/modules/worktree/service.py:27`、`backend/app/modules/git_gateway/service.py:30`、`backend/app/modules/health/router.py:29`、`backend/app/core/errors.py:25`。审计上下文走 `AsyncSession.info`(见 `backend/app/core/audit_hooks.py:93,104`),不要另起一套。异常统一 `log.exception("<event>", ...)`,事件名点分蛇形(如 `app.start`、`agent.stale_run_cleanup_failed`)。
 
-**模式 5：鉴权依赖分支（core/auth_deps.py）**
-```python
-async def get_current_user(token, session):
-    if not token: raise AuthTokenMissing(...)
-    try: payload = decode(token)
-    except AccessTokenError as exc:
-        if exc.code == "expired": raise AuthTokenExpired(exc.message) from exc
-        raise AuthTokenInvalid(exc.message, details={"reason": exc.code}) from exc
-```
+### 7. 命名小细节
 
-## 相关文件
-
-- 配置：`backend/pyproject.toml`（ruff / mypy / pytest 全部在此）
-- 基础设施：`backend/app/main.py`、`backend/app/core/{config,errors,auth_deps,audit_hooks,redis}.py`
-- 模型基类：`backend/app/models/base.py`
-- 测试夹具：`backend/conftest.py`（pytest-asyncio auto 模式、async engine fixture）
+- 列表查询方法用 `list_`(尾下划线避开内置 `list`):`backend/app/modules/change/service.py:98` `async def list_(...)`;对应 router 用动词前缀,如 `backend/app/modules/change/router.py:71` `async def list_changes`。
+- 内部方法以 `_` 前缀标内部:`backend/app/modules/change/service.py:75` `async def _resolve_change_dir(...)`。
+- 数据库会话工厂懒加载、单例:`backend/app/core/db.py:24,79-83` `_SessionFactory: async_sessionmaker[AsyncSession] | None` + `get_session_factory()`;`get_session` 是给 `Depends` 用的依赖生成器(`backend/app/core/db.py:146`)。

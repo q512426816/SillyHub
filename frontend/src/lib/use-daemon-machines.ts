@@ -1,7 +1,7 @@
 /**
  * useDaemonMachines — daemon 机器列表 + 会话组合查询（机器级，覆盖 FR-4,6）。
  *
- * 机器级数据 hook，对齐 useDaemonRuntimes 结构：Promise.all 并发 listDaemonMachines
+ * 机器级数据 hook：Promise.all 并发 listDaemonMachines
  * + listAgentSessions（sessions 失败 .catch(null) 降级为 []，不阻塞列表渲染）。
  * params 进 queryKey，过滤/分页变化即新查询（react-query 自动停旧启新 R-02）。
  * 15s 无条件轮询。用量（用量统计）不走本 hook，由 page 单独调

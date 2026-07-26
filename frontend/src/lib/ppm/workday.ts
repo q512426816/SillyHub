@@ -149,21 +149,3 @@ export function addWorkingDaysDate(
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
-
-/**
- * 加 N 个工作日,返回完整 ISO 字符串(YYYY-MM-DD HH:mm:ss)。
- * 表单字段需要带时间时使用。
- */
-export function addWorkingDaysISO(
-  start: WorkdayStart,
-  days: number,
-  ignoreWeekend = true,
-): string {
-  const ms = addWorkingDaysMs(start, days, ignoreWeekend);
-  const d = new Date(ms);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
-    `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-  );
-}

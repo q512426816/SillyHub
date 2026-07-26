@@ -46,24 +46,6 @@ import { extractShellWritePaths, type ShellKind } from '../policy/shell-paths.js
 export type JsonRpcProvider = 'codex' | 'hermes' | 'kimi' | 'kiro';
 
 /**
- * task-17 / R-06：Codex 带内审批协议 method 名（item/fileChange / item/commandExecution）。
- *
- * method 名逐字来自 codex app-server（对照 codex-app-server-driver.ts:1152-1162）。
- * hermes/kimi/kiro 复用同一套 method 名（共享 JsonRpcAdapter）。execCommandApproval /
- * applyPatchApproval 是旧别名（部分 provider 仍用），一并识别。
- *
- * 响应格式：`{ decision: 'accept' | 'decline' }`（对照 _writeFailClosedResponse L1096）。
- * decline 不带额外字段，理由通过 audit + AgentEvent 透传（不回传给 codex，codex 只看 decision）。
- */
-const APPROVAL_METHODS = new Set<string>([
-  'item/commandExecution/requestApproval',
-  'item/fileChange/requestApproval',
-  // 旧别名（hermes/kimi 等 provider 可能仍用）
-  'execCommandApproval',
-  'applyPatchApproval',
-]);
-
-/**
  * task-17 / R-06：mcpServer/elicitation/request 的固定应答（非写类，不参与 PolicyEngine 决策）。
  *
  * elicitation 是 codex 向用户提问（非文件写），batch 无人工，按 design 默认 accept 空回复，

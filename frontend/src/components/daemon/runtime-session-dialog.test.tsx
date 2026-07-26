@@ -62,9 +62,6 @@ const daemon = vi.hoisted(() => ({
   streamSession: vi.fn(),
   createSession: vi.fn(),
   injectSession: vi.fn(),
-  quickChat: vi.fn(),
-  streamQuickChat: vi.fn(),
-  getQuickChatResult: vi.fn(),
 }));
 
 vi.mock("@/lib/daemon", async () => {
@@ -79,9 +76,6 @@ vi.mock("@/lib/daemon", async () => {
     streamSession: daemon.streamSession,
     createSession: daemon.createSession,
     injectSession: daemon.injectSession,
-    quickChat: daemon.quickChat,
-    streamQuickChat: daemon.streamQuickChat,
-    getQuickChatResult: daemon.getQuickChatResult,
   };
 });
 
@@ -161,27 +155,6 @@ beforeEach(() => {
     lease_id: "lease-stub",
     status: "active",
     stream_url: "/api/daemon/sessions/sess-stub/stream",
-  });
-  daemon.quickChat.mockResolvedValue({
-    id: "run-codex",
-    agent_type: "claude_code",
-    provider: "codex",
-    model: null,
-    status: "pending",
-  });
-  daemon.streamQuickChat.mockImplementation((_runId, _onMessage, onDone) => {
-    queueMicrotask(() => onDone({ status: "completed" }));
-    return { close: vi.fn() };
-  });
-  daemon.getQuickChatResult.mockResolvedValue({
-    id: "run-codex",
-    status: "completed",
-    output_redacted: "codex 输出",
-    agent_type: "claude_code",
-    provider: "codex",
-    model: null,
-    started_at: null,
-    finished_at: null,
   });
 });
 
@@ -616,10 +589,6 @@ describe("RuntimeSessionDialog", () => {
         expect.anything(),
       ),
     );
-    // 全程不调 quick-chat API
-    expect(daemon.quickChat).not.toHaveBeenCalled();
-    expect(daemon.streamQuickChat).not.toHaveBeenCalled();
-    expect(daemon.getQuickChatResult).not.toHaveBeenCalled();
   });
 
   /* ---------- 用例 6：关闭清理无泄漏（SC-5 / FR-05 / R-02） ---------- */

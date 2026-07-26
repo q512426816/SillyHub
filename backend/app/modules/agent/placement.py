@@ -990,27 +990,13 @@ class RunPlacementService:
         # Per-member binding (D-006, 2026-07-02-workspace-config-flow task-01 +
         # D-007 单一 daemon-client)：WorkspaceMemberRuntime 行是唯一绑定真相源。
         # 无 binding 行 → NoOnlineDaemonError（不再回退 legacy Workspace 全局列）。
-        from app.modules.workspace.member_runtimes.exceptions import (
-            MemberBindingNotFound,
-        )
         from app.modules.workspace.member_runtimes.resolver import (
             MemberBindingResolver,
         )
 
-        try:
-            binding = await MemberBindingResolver.resolve_member_binding(
-                self._session, workspace_id, user_id
-            )
-        except MemberBindingNotFound:
-            binding = None  # No binding row → raise below.
-        except Exception as exc:
-            log.warning(
-                "resolve_member_binding_unexpected_error",
-                workspace_id=str(workspace_id),
-                user_id=str(user_id),
-                error=str(exc),
-            )
-            binding = None
+        binding = await MemberBindingResolver.resolve_member_binding_or_none(
+            self._session, workspace_id, user_id
+        )
 
         if binding is None:
             # D-008@v1（task-06）：无自有 binding → 借用兜底（业务/管理人员场景）。
@@ -1173,26 +1159,13 @@ class RunPlacementService:
         """
         # Per-member binding (D-004, 2026-07-03-daemon-entity-binding task-08 +
         # D-007 单一 daemon-client)。WorkspaceMemberRuntime 行是唯一绑定真相源。
-        from app.modules.workspace.member_runtimes.exceptions import (
-            MemberBindingNotFound,
-        )
         from app.modules.workspace.member_runtimes.resolver import (
             MemberBindingResolver,
         )
 
-        try:
-            binding = await MemberBindingResolver.resolve_member_binding(
-                self._session, workspace_id, user_id
-            )
-        except MemberBindingNotFound:
-            binding = None  # No binding row → raise below.
-        except Exception as exc:
-            log.warning(
-                "resolve_member_binding_unexpected_error",
-                workspace_id=str(workspace_id),
-                error=str(exc),
-            )
-            binding = None
+        binding = await MemberBindingResolver.resolve_member_binding_or_none(
+            self._session, workspace_id, user_id
+        )
 
         if binding is None:
             # D-008@v1（task-06）：无自有 binding → 借用兜底，与 _resolve_dispatch_runtime

@@ -1,80 +1,53 @@
 ---
-source_commit: ba87eec
-updated_at: 2026-06-23T16:32:31Z
-created_at: 2026-06-24T00:32:31
 author: qinyi
+created_at: 2026-07-27 00:35:31
+source_commit: 6e78b29a
+updated_at: 2026-07-26T16:35:31Z
 generator: sillyspec-scan
 ---
 
-# SillyHub — 项目说明
-
-> SillyHub 是本 monorepo 的**产品名**（path = `.`，与 `multi-agent-platform` 同指仓库根）。
-> 本文档由 `sillyspec-scan` 在 `ba87eec` 处基于产品语义重新生成，覆盖旧版。
+# 项目(Project)
 
 ## 项目简介
 
-SillyHub 将 [SillySpec](https://github.com/nicepkg/sillyspec) 规范驱动开发方法论**产品化**，是一个面向研发团队的**多用户、多项目、多 Agent 协作管理平台**。核心目标是把软件工程流程中的规格编写、任务分解、代码实现与验证，通过 AI Agent 自动化串联起来。
+SillyHub(仓库 `multi-agent-platform`)是多智能体协作管理平台,将 [SillySpec](https://github.com/nicepkg/sillyspec) 规范驱动开发方法论产品化,提供多用户、多项目、多 Agent 的全生命周期管理系统。通过 Web 界面管理工作空间(Git 仓库)、编排 AI Agent(首发 Claude Code + Codex)、跟踪结构化变更规格、协调团队协作。产品形态为模块化单体 backend + Next.js 前端 + 本地 daemon 的全栈 Web 应用。
 
-**目标用户**：使用 Claude（及兼容 Agent）作为研发助手的工程团队 / 平台运维人员；希望把"规范驱动开发"沉淀为可审计、可协作平台能力的产品团队。
+核心能力:工作空间管理(注册 Git 仓库 + 扫描 `.sillyspec` 目录)、变更生命周期(brainstorm → plan → execute → verify → archive 五段)、AI Agent 编排(实时 SSE 流式输出 + 中断恢复 + 上下文指纹 + 审批门禁)、Git Worktree 隔离(每个变更在独立 worktree 执行)、多用户认证(JWT + bcrypt + RBAC)、Git 凭据网关(共享服务器多用户隔离)、本地 Daemon(宿主机 Agent 检测 + 任务执行)、拓扑可视化、知识库 / 事件 / 发布工作流、PPM 项目计划管理域(约 20 张表)。
 
-**核心能力**（产品视角）：
-
-- **工作空间管理** — 注册 Git 仓库为工作空间，扫描 `.sillyspec` 目录，识别组件与依赖
-- **变更全生命周期** — proposal → design → plan → tasks → execute → verify 完整流程，阶段可自动触发 Agent
-- **AI Agent 编排引擎** — 通过本地 daemon 驱动 Claude Code CLI 执行任务，实时 SSE 流式输出，支持中断恢复、上下文指纹、审批门禁
-- **Git Worktree 隔离** — 每个变更在独立 worktree 中执行，互不干扰
-- **多用户认证与权限** — JWT + bcrypt + RBAC，平台管理员引导，工作区级权限
-- **Git 凭据网关** — 共享服务器部署下的多用户 Git 凭据隔离，操作日志与脱敏
-- **本地 Daemon** — 轻量守护进程，负责宿主机 Agent 检测、交互式会话与任务执行
-- **拓扑可视化** — 基于 @xyflow/react 的组件拓扑交互视图
-- **知识库 / 事件 / 发布** — 内置知识库管理、事件（Incident）追踪、发布工作流
-- **PPM 项目管理域** — 项目维护、客户/成员/干系人、问题清单与变更、看板评论等约 20 张表
-
-**产品形态**：全栈 Web 应用（模块化单体 backend + Next.js 前端 + 本地 daemon）。**未正式上线**（按 `.claude/CLAUDE.md` 约定，无需考虑版本迭代兼容，数据可清空）。
+项目状态:**未正式上线**(仅 PPM 模块已上线),允许重置开发 / 测试数据,不要求历史兼容(`.claude/CLAUDE.md` 规则 11)。
 
 ## 技术栈
 
-| 产品层 | 子项目（路径） | 技术栈 |
-| --- | --- | --- |
-| Web 前端 | `frontend/` | Next.js 14.2.5 (App Router) + React 18.3.1 + TypeScript 5.5 + Tailwind 3.4.7 + Ant Design 6.4.4 + @xyflow/react 12 + Zustand + TanStack Query + ECharts |
-| API 后端 | `backend/` | Python 3.12 + FastAPI 0.115 + SQLModel 0.0.22 + SQLAlchemy(async) 2.0 + asyncpg 0.29 + Alembic 1.13 + Redis + structlog；python-jose(JWT) + passlib[bcrypt] + PyNaCl；Ruff + Mypy |
-| 本地守护 | `sillyhub-daemon/` | Node ≥20 + TypeScript 5.5.4 + ESM(`type: module`) + `@anthropic-ai/claude-agent-sdk` 0.3.181 + `ws` 8.18 + `commander` 12.1；HTTP 用 Node 20 原生 `fetch`（零 HTTP 库依赖） |
-| 数据/缓存 | 容器编排 | PostgreSQL 16 + Redis 7（Docker Compose） |
-| 部署 | `deploy/` | Docker Compose（全栈 4 服务 / 开发仅 db+redis） |
-| 规范驱动 | `.sillyspec/` | SillySpec 工作区（changes / docs / knowledge / projects / workflows） |
+| 层 | 技术 |
+|---|---|
+| 后端 | Python 3.12 + FastAPI + SQLModel + SQLAlchemy(async) + Alembic + Pydantic v2 + structlog;python-jose(JWT) + passlib[bcrypt] + PyNaCl;aiobotocore(对象存储) |
+| 前端 | Next.js 14.2.5(App Router) + React 18.3.1 + TypeScript 5.5 + shadcn/ui + Ant Design 6 + @xyflow/react 12 + TanStack Query + Zustand + Tailwind 3.4 + ECharts |
+| 数据库 | PostgreSQL 16(生产,asyncpg) / aiosqlite(单测) |
+| 缓存 | Redis 7(Pub/Sub + 凭据 / token 缓存) |
+| Agent | Claude Code CLI / Codex(经 daemon interactive driver) |
+| Daemon | Node.js 20 + TypeScript 5.5(ESM / pnpm)+ `@anthropic-ai/claude-agent-sdk` 0.3.181 + `ws`;HTTP 用 Node 20 原生 `fetch`(零 HTTP 库依赖) |
+| 对象存储 | MinIO(S3 兼容,平台文件中心) |
+| 部署 | Docker Compose(`deploy/docker-compose.yml`,全栈 4 服务) |
+| 包管理 | uv(后端) / pnpm 9.6.0(前端 + daemon) |
 
-通用工具链：`pnpm@9.6.0`（前端 / daemon）、`uv`（backend）、`docker compose`（编排）、SillySpec（文档驱动开发流程）。
+## 三端架构
 
-## 核心功能域
+- **backend(`backend/app/`)**:24 个业务模块 vertical slice,每模块标准布局 `router.py` / `schema.py` / `service.py` / `models.py` / `tests/`。核心抽象:Agent Adapter、Change Writer、Execution Coordinator、Tool Gateway、Workflow State Machine。`core/` 含配置、数据库、Redis、认证、加密、日志。
+- **frontend(`frontend/src/`)**:App Router 页面(`app/`)+ 共享组件(`components/`)+ 33 个 lib API 模块(`lib/`)+ Zustand 全局状态(`stores/`)。类型由 OpenAPI 生成(`lib/api-types.ts`,`pnpm gen:types`)。
+- **sillyhub-daemon(`sillyhub-daemon/`)**:本地守护进程,负责宿主机 Agent 检测(12 provider:claude / codex / copilot / opencode / hermes / gemini / pi / cursor / kimi / kiro / antigravity / openclaw)、任务执行(`task-runner.ts` batch lease)、交互式会话(`claude-sdk-driver.ts` / `codex-app-server-driver.ts`)、文件系统代理(`host_fs/delegate.ts` + `FilesystemPolicyEngine`)、技能 / MCP 分发、网络韧性(outbox + 重连)。
 
-backend 按业务域模块化（`backend/app/modules/`），当前含 26 个模块：
+**数据层关键模型**:`AgentRun` / `AgentSession` / `AgentMission` / `AgentArtifact` / `AgentRunLog` / `DaemonTaskLease` / `DaemonInstance` / `WorkspaceMemberRuntime`。工作区绑定 = daemon 实体(per-member binding,per-daemon WebSocket)。
 
-| 域 | 模块 | 职责 |
-| --- | --- | --- |
-| 鉴权 | `auth` / `admin` | JWT 登录、RBAC 权限、平台管理员引导、用户管理 |
-| Agent 编排 | `agent` / `runtime` / `daemon` | agent-run 调度入口、运行时会话、daemon 注册与心跳 |
-| 规范驱动 | `change` / `task` / `change_writer` / `spec_profile` / `spec_workspace` | 变更/任务生命周期、文档写入、spec profile、spec 工作区 |
-| Git 集成 | `workspace` / `worktree` / `git_gateway` / `git_identity` | 工作空间注册、worktree 隔离、git 操作网关、凭据隔离 |
-| 工具 | `tool_gateway` / `scan_docs` | 工具网关、扫描文档生成 |
-| 业务域 | `knowledge` / `incident` / `release` / `workflow` / `archive` | 知识库、事件追踪、发布、工作流、归档 |
-| 项目管理 | `ppm` | PPM 域约 20 张表（项目/客户/成员/干系人/问题/变更/看板/工时统计） |
-| 基础 | `health` / `settings` | 健康检查、系统设置 |
+## 关键架构决策
 
-## 子项目索引
+- **5 段变更流程**:brainstorm → plan → execute → verify → archive(scan / propose / quick 已移除);状态机定义 `backend/app/modules/change/model.py StageEnum`。
+- **工作区绑定 = daemon 实体**(非 runtime):`daemon_instances` 表,per-daemon WS + dispatch daemon_id,runtime 退化为 daemon 的从属。
+- **provider 抽象**:Claude / Codex 经 6 协议适配器(stream_json / json_rpc / jsonl / ndjson / pi_json / text)+ interactive driver;新增 provider 加 driver 不触碰控制面。batch 能跑任何探测到的 provider,interactive / scan 仅 claude + codex。
+- **前端类型生成**:手写类型 → OpenAPI 生成类型(react-query 服务端状态 + zustand 全局状态并存)。
+- **双层审批**:工具级(`permission_service` canUseTool 5min 超时 deny + AskUserQuestion 持久化不超时)+ 阶段级(PendingReview 四面板 proposal / plan / human_test / archive)。
 
-| 子项目 | 路径 | 职责 | 构建文件 | 包管理 |
-| --- | --- | --- | --- | --- |
-| backend | `backend/` | REST/SSE/WebSocket API、鉴权、持久化、agent-run 调度入口、26 个业务模块 | `backend/pyproject.toml` + `backend/alembic.ini` + `backend/Dockerfile` | uv（`backend/uv.lock`） |
-| frontend | `frontend/` | Web UI：工作空间 / 变更 / 任务 / 会话 / PPM / 工作流 / 监控 / 拓扑 | `frontend/package.json` + `frontend/next.config.mjs` + `frontend/Dockerfile` | pnpm 9.6.0 |
-| sillyhub-daemon | `sillyhub-daemon/` | 本地 Agent 守护进程：拉起 / 交互式会话 / SSE 流 / 权限 / spec 同步 / session 恢复 | `sillyhub-daemon/package.json` + `sillyhub-daemon/tsconfig.json` | pnpm 9.6.0 |
+## 开发入口与文档
 
-## 开发入口
+根 `Makefile` 暴露跨子项目统一入口(约 22 个 target):`make dev-up` / `dev-down`(起/停 pg+redis)、`make up` / `down`(全栈 docker)、`make test` / `backend-test` / `frontend-test`、`make lint` / `backend-format` / `frontend-typecheck` / `frontend-build`。后端启动后 API 文档:`http://localhost:8000/api/docs`(Swagger)/ `/api/redoc` / `/api/openapi.json`。
 
-根 `Makefile` 暴露跨子项目统一入口（根目录执行，约 22 个 target，Linux/macOS/Git Bash 通用）：
-
-- 开发环境：`make dev-up` / `dev-down`（docker 起/停 pg+redis）
-- 全栈部署：`make up` / `down`（全栈 docker 4 服务）
-- 测试聚合：`make test`（= `backend-test` + `frontend-test`）、`make backend-test`、`make frontend-test`
-- 代码质量：`make lint`、`make backend-format`、`make frontend-typecheck`、`make frontend-build`
-
-API 文档：后端启动后访问 `http://localhost:8000/api/docs`（Swagger）、`/api/redoc`、`/api/openapi.json`。
+权威文档:`README.md`(快速开始 / 项目结构 / 开发指南)、`ROADMAP.md`(里程碑 / 活跃变更 / 已知技术债)、`docs/agent-platform-deep-audit-2026-07-12.md`(能力审计 + P0~P3 方案带 file:line)、`docs/code-quality-hardening-2026-07-24.md`(六批加固 + DEFER 清单)、`.claude/CLAUDE.md`(项目规则 + 完成汇报格式)、`.sillyspec/changes/` 与 `.sillyspec/changes/archive/`(详细变更规格)。
