@@ -527,7 +527,7 @@ export default function WeeklyPlanPage() {
             <Button onClick={handleReset}>重置</Button>
           </div>
         </div>
-        <div className="grid w-full grid-cols-3 gap-3">
+        <div className="grid w-full grid-cols-4 gap-3">
           <div className="flex flex-col gap-1">
             <label className="text-xs text-muted-foreground">项目名称</label>
             <Input
