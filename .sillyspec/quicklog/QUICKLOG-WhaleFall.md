@@ -431,3 +431,11 @@ created_at: 2026-07-21T08:48:56
 根因：fieldText 对所有字段统一返回 String(原始值)，日期字段原始值是 ISO 字符串，下拉直接显示 ISO，与列 render 的 fmtDate 不一致。
 方案：fieldText 对 SORTABLE_FIELDS 里 kind==='date' 的字段改用 fmtDate(v, '') 格式化(空/非法→'' 被 filter(Boolean) 过滤，有效→YYYY-MM-DD)。一处改动同时让筛选下拉选项(按天去重)、筛选匹配(processedData 用同款 fieldText)、日期排序(YYYY-MM-DD 字典序=日期序)都按天一致。
 结果：①tsc --noEmit 0 error；②仅改 page.tsx 的 fieldText + 同步 ppm.md 变更索引 ql-20260727-001-c380；③待 commit+push+重建 frontend 部署 + 用户验证日期筛选下拉显示 YYYY-MM-DD。
+## ql-20260727-002-5bb2 | 2026-07-27 08:58:15 | /ppm/weekly-plan 日期范围查询条件占两格改一格
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（搜索区 grid 布局调整）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：用户反馈「日期范围(按计划开始日期)」查询条件占了两个位置，改成和其它条件一样占一格。
+根因：搜索区用 grid-cols-4，日期范围 div 带 col-span-2 跨了两格。
+方案：grid-cols-4→grid-cols-3（项目名称/状态/日期范围 三项均分各占1格），日期范围 div 去掉 col-span-2；RangePicker style width:100% 在 1/3 宽自适应。
+结果：①纯 className 改动无类型影响，跳过 tsc；②仅改 page.tsx 搜索区 2 处 + 同步 ppm.md 变更索引 ql-20260727-002-5bb2；③待 commit+push+重建 frontend 部署 + 用户验证日期范围占一格。
