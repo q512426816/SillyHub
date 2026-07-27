@@ -1782,6 +1782,14 @@ function DetailLevelTable({
   const columns = useMemo<TableProps<PsPlanNodeDetail>["columns"]>(
     () => [
       {
+        title: "序号",
+        dataIndex: "no",
+        key: "no",
+        width: 70,
+        align: "center",
+        render: (v: string | null) => v ?? "—",
+      },
+      {
         title: "明细阶段",
         dataIndex: "detailed_stage",
         key: "detailed_stage",
@@ -2139,6 +2147,7 @@ function DetailDrawer({
   // 初值:detail 优先,否则用 moduleId 兜底。
   const initialValues = useMemo<FormVals>(
     () => ({
+      no: detail?.no ?? "",
       detailed_stage: detail?.detailed_stage ?? "",
       task_theme: detail?.task_theme ?? "",
       task_description: detail?.task_description ?? "",
@@ -2222,6 +2231,7 @@ function DetailDrawer({
       const vals = await form.validateFields();
       // ql-20260720-006: 开立信息字段集合(create/edit/changeInfo 共用)。
       const baseBody = {
+        no: (vals.no as string) || null,
         detailed_stage: (vals.detailed_stage as string) || null,
         task_theme: (vals.task_theme as string) || null,
         task_description: (vals.task_description as string) || null,
@@ -2453,7 +2463,10 @@ function DetailDrawer({
       >
         {/* 开立信息块(对照源 AddNodeDetailForm / ViewNodeDetailForm 开立段) */}
         <FormSection title="开立信息">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
+            <Form.Item label="序号" name="no">
+              <Input disabled={!baseEditable} placeholder="如 1(按序号数值排序)" />
+            </Form.Item>
             <Form.Item
               label="明细阶段"
               name="detailed_stage"
