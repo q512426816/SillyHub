@@ -636,16 +636,20 @@ class TestSettingsConfigMigration:
     """
 
     def test_alembic_single_head(self) -> None:
-        """``alembic heads`` 仅 ``202607270900``（单 head，无分叉）。"""
+        """``alembic heads`` 恰 1 个（单 head，无分叉）。
+
+        不锁死具体 revision——后续变更合法叠迁移会移动 head（如 auth 迁移
+        ``202607271700`` 压在本迁移 ``202607270900`` 之上），锁值会在每次新迁移
+        落地时误伤。本迁移自身 revision/down_revision 由
+        ``test_upgrade_adds_settings_config_column`` 校验。
+        """
         from alembic.config import Config
         from alembic.script import ScriptDirectory
 
         config = Config(str(_BACKEND_ROOT / "alembic.ini"))
         script = ScriptDirectory.from_config(config)
         heads = script.get_heads()
-        assert heads == [_EXPECTED_HEAD], (
-            f"期望单头 {_EXPECTED_HEAD}，实际 heads={heads}（多 head 分叉）"
-        )
+        assert len(heads) == 1, f"期望单 head 无分叉，实际 heads={heads}（多 head 分叉）"
 
     def test_upgrade_adds_settings_config_column(self) -> None:
         """``upgrade()`` 给 ``llm_providers`` 加 ``settings_config`` JSON 列。"""

@@ -1013,10 +1013,12 @@ async def test_calendar_alert_green_future_covered(db_session):
         work_load="1d",
     )
     svc = WorkbenchService(db_session)
-    ym = f"{end.year:04d}-{end.month:02d}"
+    # ym 取 future_day 所在月（不能取 end 的月：end=now+5d 跨月底时 future_day=now+3d
+    # 仍在 start 月，用 end 的月 + future_day 的日会拼出该月不存在的幽灵日期 → alert=none）
+    future_day = now + timedelta(days=3)
+    ym = f"{future_day.year:04d}-{future_day.month:02d}"
     cal = await svc.get_calendar(user, ym)
     by_date = {d.date: d for d in cal.days}
-    future_day = now + timedelta(days=3)
     future_key = f"{ym}-{future_day.day:02d}"
     assert by_date[future_key].alert_level == "green"
 
@@ -1037,10 +1039,12 @@ async def test_calendar_alert_completed_green(db_session):
         work_load="1d",
     )
     svc = WorkbenchService(db_session)
-    ym = f"{end.year:04d}-{end.month:02d}"
+    # ym 取 future_day 所在月（不能取 end 的月：end=now+5d 跨月底时 future_day=now+3d
+    # 仍在 start 月，用 end 的月 + future_day 的日会拼出该月不存在的幽灵日期 → alert=none）
+    future_day = now + timedelta(days=3)
+    ym = f"{future_day.year:04d}-{future_day.month:02d}"
     cal = await svc.get_calendar(user, ym)
     by_date = {d.date: d for d in cal.days}
-    future_day = now + timedelta(days=3)
     future_key = f"{ym}-{future_day.day:02d}"
     assert by_date[future_key].alert_level == "green"
 

@@ -40,6 +40,8 @@ _PROVIDER_CONFIG_FIELDS: frozenset[str] = frozenset(
         "model_role_mappings",
         "default_fallback_model",
         "extra_env",
+        # settings_config：llm_provider 变更 task-04 / D-009，context.py 原样透传（不解密/不加工）
+        "settings_config",
     }
 )
 
