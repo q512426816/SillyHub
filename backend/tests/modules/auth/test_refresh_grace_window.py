@@ -84,7 +84,7 @@ async def _make_other_active_session(db: AsyncSession, *, user_id: uuid.UUID) ->
     row = SessionRow(
         id=uuid.uuid4(),
         user_id=user_id,
-        refresh_token_hash=hash_refresh_token(generate_refresh_token()),
+        refresh_token_hash=hash_refresh_token(generate_refresh_token()[0]),
         created_at=datetime.now(UTC),
         expires_at=datetime.now(UTC) + timedelta(days=7),
     )

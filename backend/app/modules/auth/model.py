@@ -16,7 +16,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, String, Uuid
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, String, Uuid, text
 from sqlmodel import Field
 
 from app.models.base import BaseModel
@@ -93,7 +93,19 @@ class Session(BaseModel, table=True):
     """
 
     __tablename__ = "sessions"
-    __table_args__ = (Index("ix_sessions_user_revoked", "user_id", "revoked_at"),)
+    __table_args__ = (
+        Index("ix_sessions_user_revoked", "user_id", "revoked_at"),
+        # task-01 / D-003: refresh token 编号指纹的部分唯一索引（O(1) 查找）。
+        # 裸 Column + __table_args__ Index 范式对齐 workspace/model.py:32-49；
+        # 双 where 保证 PG 生产 / SQLite 测试索引形态一致；NULL 旧行不参与唯一约束。
+        Index(
+            "ux_sessions_token_id_hmac",
+            "token_id_hmac",
+            unique=True,
+            postgresql_where=text("token_id_hmac IS NOT NULL"),
+            sqlite_where=text("token_id_hmac IS NOT NULL"),
+        ),
+    )
 
     id: uuid.UUID = Field(
         default_factory=uuid.uuid4,
@@ -107,6 +119,14 @@ class Session(BaseModel, table=True):
         ),
     )
     refresh_token_hash: str = Field(sa_column=Column(String(255), nullable=False))
+    # task-01 / D-003: HMAC-SHA256(secret_key, token_id) hex（64 字符）。
+    # refresh token 加明文编号段后，按此列 O(1) 定位 session（部分唯一索引见 __table_args__）。
+    # nullable=True 兼容旧 session 行（token_id_hmac NULL，不进部分唯一索引，自然失效 D-008）。
+    # 裸 Column 不带 unique/index（索引在 __table_args__ 声明，对齐 workspace/model.py 范式）。
+    token_id_hmac: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
     user_agent: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     ip: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
     created_at: datetime = Field(

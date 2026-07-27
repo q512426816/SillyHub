@@ -39,6 +39,8 @@ from app.core.security import (
     create_access_token,
     generate_refresh_token,
     hash_refresh_token,
+    hmac_token_id,
+    parse_refresh_token,
     password_hasher,
     refresh_token_expiry,
     verify_refresh_token,
@@ -225,12 +227,13 @@ class AuthService:
             is_admin=user.is_platform_admin,
             settings=self._settings,
         )
-        refresh_token = generate_refresh_token()
+        refresh_token, token_id = generate_refresh_token()
         expires_at = refresh_token_expiry(self._settings)
         row = SessionRow(
             id=uuid.uuid4(),
             user_id=user.id,
             refresh_token_hash=hash_refresh_token(refresh_token),
+            token_id_hmac=hmac_token_id(token_id, self._settings),
             user_agent=user_agent,
             ip=ip,
             created_at=_utc_now(),
@@ -253,44 +256,46 @@ class AuthService:
         :meth:`_mark_session_rotated` 直接签发新对(否则会刷新 rotated_at
         把 grace 窗口无限续期)。
         """
-        # We can't index by the plain token (it's bcrypt-hashed) so we walk
-        # the recent live sessions of *anyone* and pick the one whose hash
-        # verifies. For V1 (single host, <1k active sessions) this is fine;
-        # if we ever scale this hot path we'll switch to per-token jti +
-        # HMAC lookup.
-        stmt = (
-            select(SessionRow)
-            .where(col(SessionRow.revoked_at).is_(None))
-            .where(col(SessionRow.expires_at) > _utc_now())
-            .order_by(col(SessionRow.created_at).desc())
-        )
-        candidates = (await self._db.execute(stmt)).scalars().all()
-        for session in candidates:
-            # 第四批 code-quality：bcrypt cost-12 verify 同步阻塞事件循环（每次
-            # 250-400ms × N 个活跃 session 全表扫），对齐 api_key_service.authenticate
-            # 移到线程池。R2 的 FOR UPDATE 行锁在 verify 之后不受影响。
-            if await asyncio.to_thread(
+        # O(1) 根治 refresh 慢请求（2026-07-27 auth-refresh-token-index，D-001/D-006）：
+        # token = "{token_id}.{secret}"，按 token_id 的 HMAC 走部分唯一索引 ux_sessions_token_id_hmac
+        # 直接定位活跃 session，**单次** bcrypt 确认 secret 段（双层防御：HMAC 命中但 secret
+        # 错→AuthTokenInvalid）。旧格式 token（无 "."）parse 即抛 AuthTokenInvalid→401；
+        # token_id_hmac NULL 的旧行不命中→转 revoked 路径。
+        token_id, _secret = parse_refresh_token(refresh_token)
+        target_hmac = hmac_token_id(token_id, self._settings)
+        session = (
+            await self._db.execute(
+                select(SessionRow)
+                .where(col(SessionRow.token_id_hmac) == target_hmac)
+                .where(col(SessionRow.revoked_at).is_(None))
+                .where(col(SessionRow.expires_at) > _utc_now())
+            )
+        ).scalar_one_or_none()
+        if session is not None:
+            # 单次 bcrypt 确认 secret 段：HMAC 命中但 secret 错（构造 token / HMAC 碰撞）→拒绝。
+            if not await asyncio.to_thread(
                 verify_refresh_token, refresh_token, session.refresh_token_hash
             ):
-                user = await self._db.get(User, session.user_id)
-                if user is None or user.deleted_at is not None or user.status != "active":
-                    raise AuthUserInactive("User account is no longer active.")
-                # R2（并发安全修复，2026-07-24 代码健壮性优化）：锁定匹配的 session 行直到
-                # commit，杜绝两个并发 refresh 持同一 token 都读到"存活"→都签发新对、
-                # 复用检测永不触发（安全漏洞）。锁后复查 revoked_at：若锁期间已被并发
-                # refresh rotate，则 break 转入下方 revoked 检测（grace 续期或重放吊销），
-                # 由该路径保证同一 token 只产生单一有效对。SQLite 上 with_for_update 为 no-op。
-                locked = (
-                    await self._db.execute(
-                        select(SessionRow).where(col(SessionRow.id) == session.id).with_for_update()
-                    )
-                ).scalar_one_or_none()
-                if locked is not None and locked.revoked_at is None:
-                    return user, locked, False
-                break  # 锁期间被并发 rotate → 走 revoked 检测路径（grace 续期或重放吊销）
+                raise AuthTokenInvalid("Refresh token is not recognised.")
+            user = await self._db.get(User, session.user_id)
+            if user is None or user.deleted_at is not None or user.status != "active":
+                raise AuthUserInactive("User account is no longer active.")
+            # R2（并发安全修复，2026-07-24）：锁定匹配的 session 行直到 commit，杜绝两个并发
+            # refresh 持同一 token 都读到"存活"→都签发新对、复用检测永不触发。锁后复查
+            # revoked_at：若锁期间已被并发 refresh rotate，落入下方 revoked 检测（grace 续期
+            # 或重放吊销），保证同一 token 只产生单一有效对。SQLite 上 with_for_update 为 no-op。
+            locked = (
+                await self._db.execute(
+                    select(SessionRow).where(col(SessionRow.id) == session.id).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if locked is not None and locked.revoked_at is None:
+                return user, locked, False
+            # 锁期间被并发 rotate → 走 revoked 检测路径（grace 续期或重放吊销）
 
-        # live 未命中 → 查 revoked session(可能是 grace 续期,也可能是重放攻击)。
-        revoked = await self._find_revoked_session(refresh_token)
+        # live 未命中（旧格式 token / token_id_hmac NULL 旧行 / 已 revoked）→ 查 revoked session
+        # (可能是 grace 续期,也可能是重放攻击)。
+        revoked = await self._find_revoked_session(refresh_token, target_hmac)
         if revoked is not None:
             user = await self._db.get(User, revoked.user_id)
             if user is None or user.deleted_at is not None or user.status != "active":
@@ -313,21 +318,26 @@ class AuthService:
 
         raise AuthTokenInvalid("Refresh token is not recognised.")
 
-    async def _find_revoked_session(self, refresh_token: str) -> SessionRow | None:
-        """查匹配 refresh token 的已吊销 session(返回整行,以便读 rotated_at)。"""
-        stmt = (
-            select(SessionRow)
-            .where(col(SessionRow.revoked_at).is_not(None))
-            .order_by(col(SessionRow.revoked_at).desc())
-            .limit(50)
-        )
-        for session in (await self._db.execute(stmt)).scalars().all():
-            # 第四批 code-quality：同 consume 路径，bcrypt verify 移线程池（limit 50
-            # 个 revoked session，最坏 ~12-20s 阻塞事件循环）。
-            if await asyncio.to_thread(
-                verify_refresh_token, refresh_token, session.refresh_token_hash
-            ):
-                return session
+    async def _find_revoked_session(
+        self, refresh_token: str, target_hmac: str
+    ) -> SessionRow | None:
+        """按 token_id_hmac O(1) 查匹配 refresh token 的已吊销 session。
+
+        返回整行以便读 rotated_at（grace 续期判定锚点）。HMAC 命中但 secret 错
+        （构造 token / 碰撞）→ None。调用方已算好 target_hmac，避免重复算。
+        """
+        session = (
+            await self._db.execute(
+                select(SessionRow)
+                .where(col(SessionRow.token_id_hmac) == target_hmac)
+                .where(col(SessionRow.revoked_at).is_not(None))
+            )
+        ).scalar_one_or_none()
+        if session is None:
+            return None
+        # 单次 bcrypt 确认 secret 段（对齐 _consume 路径，bcrypt verify 移线程池）。
+        if await asyncio.to_thread(verify_refresh_token, refresh_token, session.refresh_token_hash):
+            return session
         return None
 
     async def _mark_session_revoked(self, session: SessionRow) -> None:

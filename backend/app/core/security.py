@@ -2,8 +2,10 @@
 
 * Password hashing: ``passlib`` with bcrypt at cost 12 (references/15 §4).
 * Access token: HS256 JWT signed by ``Settings.secret_key``, 15 min TTL.
-* Refresh token: 32 random bytes, base64url-encoded, returned to the
-  client once and stored in DB as bcrypt(refresh_token).
+* Refresh token: ``f"{token_id}.{secret}"`` (uuid4 hex + 32 random bytes,
+  base64url-encoded). Returned to the client once; the full string is
+  stored in DB as bcrypt(refresh_token), and ``hmac_token_id(token_id)``
+  is stored alongside as the O(1) lookup index (D-002/D-005).
 
 Token TTLs and the cost factor are settable so tests can drop bcrypt to
 cost 4 for sub-100 ms login flows.
@@ -11,6 +13,8 @@ cost 4 for sub-100 ms login flows.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -21,6 +25,7 @@ from jose import JWTError, jwt
 from pydantic import BaseModel
 
 from app.core.config import Settings
+from app.core.errors import AuthTokenInvalid
 
 ACCESS_TOKEN_TYPE = "access"
 
@@ -159,9 +164,48 @@ def decode_access_token(token: str, *, settings: Settings) -> TokenPayload:
 # ── Refresh tokens ──────────────────────────────────────────────────────────
 
 
-def generate_refresh_token() -> str:
-    """Opaque, URL-safe 32-byte token (≈43 chars after base64url)."""
-    return secrets.token_urlsafe(32)
+def generate_refresh_token() -> tuple[str, str]:
+    """Return ``(refresh_token, token_id)``.
+
+    ``refresh_token`` has the form ``f"{token_id}.{secret}"`` where
+    ``token_id`` is a uuid4 hex (used to derive the DB lookup index) and
+    ``secret`` is 32 random bytes, base64url-encoded. The full string is
+    what the client carries and what gets bcrypt-hashed; only ``token_id``
+    is fed to :func:`hmac_token_id` for indexing (D-002).
+    """
+    token_id = uuid.uuid4().hex
+    secret = secrets.token_urlsafe(32)
+    return f"{token_id}.{secret}", token_id
+
+
+def parse_refresh_token(token: str) -> tuple[str, str]:
+    """Split ``'{token_id}.{secret}'``; raise :class:`AuthTokenInvalid` on malformed.
+
+    Malformed = no ``"."`` separator, or an empty ``token_id`` / ``secret``
+    segment. Old opaque tokens (no ``"."``) trip this path and surface as a
+    401 to the client (D-006).
+    """
+    if "." not in token:
+        raise AuthTokenInvalid("Refresh token format is invalid.")
+    token_id, secret = token.split(".", 1)
+    if not token_id or not secret:
+        raise AuthTokenInvalid("Refresh token format is invalid.")
+    return token_id, secret
+
+
+def hmac_token_id(token_id: str, settings: Settings) -> str:
+    """HMAC-SHA256(``secret_key``, ``token_id``) hex — irreversible DB index key.
+
+    Reusing ``settings.secret_key`` (D-005) so no new secret to manage. The
+    hex digest is stored on the session row and used as the O(1) lookup key
+    so the DB never sees the raw ``token_id`` in cleartext (defence against
+    list/backup leakage).
+    """
+    return hmac.new(
+        settings.secret_key.encode(),
+        token_id.encode(),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def hash_refresh_token(token: str) -> str:
