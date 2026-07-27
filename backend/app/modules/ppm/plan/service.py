@@ -1339,6 +1339,7 @@ class PlanService:
 
         def _detail_dict(d: PsPlanNodeDetail) -> dict[str, Any]:
             return {
+                "no": d.no,
                 "detailed_stage": d.detailed_stage,
                 "task_theme": d.task_theme,
                 "task_description": d.task_description,
@@ -1350,6 +1351,7 @@ class PlanService:
                     user_name.get(d.execute_user_id) if d.execute_user_id else None
                 ),
                 "task_execute_status": task_status.get(d.id),
+                "requirements": d.requirements,
                 "achievement": d.achievement,
                 "status": DETAIL_STATUS_CN.get(d.status, d.status),
             }
