@@ -221,6 +221,22 @@ export interface ProviderConfig {
   default_fallback_model?: string;
   /** 自定义 env {KEY:VALUE}（Object.assign 注入，可覆盖角色 env，design §7）。 */
   extra_env?: Record<string, string>;
+  /**
+   * task-05（D-007@v2 / D-009）：高级配置片段（backend `llm_providers.settings_config` 透传）。
+   *
+   * daemon `toEnv` 仅消费 `settings_config.env`（在 extra_env 之后最后 Object.assign，
+   * 覆盖优先级最高，D-007）；其余顶层键（attribution / enabledPlugins /
+   * skipDangerousModePermissionPrompt / model）由 daemon 生成 Claude settings.json 处
+   * 合并（归 task-06）。**api_key 永不从 settings_config 取**（只走 c.api_key + c.auth_field）。
+   * absent / undefined → toEnv `c.settings_config?.env ?? {}` 安全跳过（零回归）。
+   */
+  settings_config?: {
+    env?: Record<string, string>;
+    attribution?: { commit?: string; pr?: string };
+    enabledPlugins?: Record<string, unknown>;
+    model?: string;
+    skipDangerousModePermissionPrompt?: boolean;
+  };
 }
 
 /**

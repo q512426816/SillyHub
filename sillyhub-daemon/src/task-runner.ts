@@ -57,6 +57,7 @@ import {
 import { getBackend } from './adapters/index.js';
 import type { ProtocolAdapter } from './adapters/protocol-adapter.js';
 import { buildSpawnEnv } from './spawn-env.js';
+import { applyClaudeSettings } from './claude-settings.js';
 import { resolveWindowsCmdShim } from './cmd-shim.js';
 // 2026-07-08 修复：spawn 前把同步的平台 skills 拷到 workDir/.claude/skills/。
 import { linkSkillsToWorkdir } from './skill-manager.js';
@@ -544,6 +545,13 @@ export class TaskRunner {
           retryCount: 0,
         });
       }
+
+      // task-06（spike-01 修正 / D-009）：spawn 前把 provider_config.settings_config 的
+      // 白名单顶层键（attribution/enabledPlugins/model/skipDangerousModePermissionPrompt）
+      // 写进 $CLAUDE_CONFIG_DIR/settings.json，让无 env 等价物的开关（attribution）生效。
+      // absent / null / 仅 env → helper 内 return 不写文件（零回归）；写盘失败 best-effort
+      // 不阻断 spawn。单 lease 内只写一次（retry 循环在下方，同一 settings.json 重写幂等）。
+      await applyClaudeSettings(ctx.provider_config);
 
       const spawnEnv = buildSpawnEnv(ctx, { credential: this.credential });
 

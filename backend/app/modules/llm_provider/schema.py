@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 
 class LlmProviderCreate(BaseModel):
@@ -24,6 +24,7 @@ class LlmProviderCreate(BaseModel):
     model_role_mappings: dict[str, Any] | None = None
     default_fallback_model: str | None = None
     extra_env: dict[str, Any] | None = None
+    settings_config: dict[str, Any] | None = None
     is_default: bool = False
 
 
@@ -38,6 +39,7 @@ class LlmProviderUpdate(BaseModel):
     model_role_mappings: dict[str, Any] | None = None
     default_fallback_model: str | None = None
     extra_env: dict[str, Any] | None = None
+    settings_config: dict[str, Any] | None = None
     is_default: bool | None = None
 
 
@@ -56,6 +58,7 @@ class LlmProviderRead(BaseModel):
     model_role_mappings: dict[str, Any] | None
     default_fallback_model: str | None
     extra_env: dict[str, Any] | None
+    settings_config: dict[str, Any] | None = None
     is_default: bool
     # service _to_read 算后注入（默认 None = 安全方向，绝不泄漏明文，规则 X-09）
     api_key_masked: str | None = None
@@ -66,3 +69,54 @@ class LlmProviderRead(BaseModel):
 class LlmProviderList(BaseModel):
     items: list[LlmProviderRead]
     total: int
+
+
+# ── fetch-models（task-02 / D-001/D-006）─────────────────────────────────────
+# 独立段落：本块只加 fetch-models 相关新 schema，不动既有 LlmProvider* 块（task-01 负责
+# settings_config）。双形态联合：``provider_id``（编辑态后端解密）或 ``base_url+api_key``
+# （新建态用完即弃，NFR-02）。
+
+
+class FetchModelsRequest(BaseModel):
+    """``POST /api/llm-providers/fetch-models`` 双形态请求体（D-001）。
+
+    形态① 编辑态：``provider_id`` → service 查行 + ``cipher.decrypt`` 取明文 key +
+    auth_field + base_url（前端只传 id，明文 key 不出后端）。
+    形态② 新建态：``base_url`` + ``api_key``（+可选 ``auth_field``）→ 直传不落库不入日志，
+    用完即弃（NFR-02）。
+
+    二者互斥（``_enforce_dual_form`` 保证），不能同时填也不能都不填。
+    """
+
+    provider_id: uuid.UUID | None = None
+    base_url: str | None = None
+    api_key: str | None = None  # 仅新建态；明文永不落库（NFR-02）
+    auth_field: Literal["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"] | None = None
+
+    @model_validator(mode="after")
+    def _enforce_dual_form(self) -> FetchModelsRequest:
+        has_provider = self.provider_id is not None
+        has_inline_url = self.base_url is not None
+        has_inline_key = self.api_key is not None
+        # 互斥：provider_id 与 base_url/api_key 不能同时出现
+        if has_provider and (has_inline_url or has_inline_key or self.auth_field is not None):
+            raise ValueError(
+                "fetch-models: provider_id 与 base_url/api_key/auth_field 互斥（二选一）"
+            )
+        # 完整性：无 provider_id 时必须同时给 base_url + api_key
+        if not has_provider and not (has_inline_url and has_inline_key):
+            raise ValueError("fetch-models: 必须提供 provider_id 或 (base_url + api_key)")
+        return self
+
+
+class FetchModelsItem(BaseModel):
+    """上游 /v1/models 返回的单条模型（OpenAI 兼容字段；owned_by 上游缺失则 None）。"""
+
+    id: str
+    owned_by: str | None = None
+
+
+class FetchModelsResponse(BaseModel):
+    """fetch-models 响应：模型列表（明文 key 永不进响应，NFR-02）。"""
+
+    models: list[FetchModelsItem]

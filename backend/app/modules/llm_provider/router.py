@@ -17,6 +17,8 @@ from app.core.auth_deps import get_current_user
 from app.core.db import get_session
 from app.modules.auth.model import User
 from app.modules.llm_provider.schema import (
+    FetchModelsRequest,
+    FetchModelsResponse,
     LlmProviderCreate,
     LlmProviderList,
     LlmProviderRead,
@@ -60,6 +62,25 @@ async def create_provider(
     service = LlmProviderService(session)
     row = await service.create(user.id, data)
     return service._to_read(row)
+
+
+@router.post("/fetch-models", response_model=FetchModelsResponse)
+async def fetch_provider_models(
+    data: FetchModelsRequest,
+    session: SessionDep,
+    user: CurrentUser,
+) -> FetchModelsResponse:
+    """拉上游 ``/v1/models``（design §5.1 D-001/D-006）。
+
+    双形态 body：
+    - 编辑态 ``{provider_id}`` → 后端解密 encrypted_api_key 用；
+    - 新建态 ``{base_url, api_key, auth_field?}`` → 直传不落库（用完即弃）。
+
+    无状态查询（POST 仅因双形态 body，design §9 豁免生命周期契约）。
+    响应仅含 ``{models:[{id, owned_by}]}``；明文 key 永不回传（NFR-02）。
+    """
+    service = LlmProviderService(session)
+    return await service.fetch_models(user.id, data)
 
 
 @router.get("/{provider_id}", response_model=LlmProviderRead)

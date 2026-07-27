@@ -10,7 +10,9 @@
 from __future__ import annotations
 
 import uuid
+from urllib.parse import urlparse
 
+import httpx
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,10 +21,14 @@ from app.core.errors import AppError, PermissionDenied
 from app.core.logging import get_logger
 from app.modules.llm_provider.model import LlmProvider
 from app.modules.llm_provider.schema import (
+    FetchModelsItem,
+    FetchModelsRequest,
+    FetchModelsResponse,
     LlmProviderCreate,
     LlmProviderRead,
     LlmProviderUpdate,
 )
+from app.modules.tool_gateway.tool_policy import SsrfBlocked, ToolPolicyService
 
 log = get_logger(__name__)
 
@@ -30,6 +36,51 @@ log = get_logger(__name__)
 class LlmProviderNotFound(AppError):
     code = "HTTP_404_LLM_PROVIDER_NOT_FOUND"
     http_status = 404
+
+
+# ── fetch-models 错误分类（task-02 / D-006）──────────────────────────────────
+# 4 类事件码遵循既有 AppError ``HTTP_<status>_<EVENT>`` 命名范式（N818 ignore）。
+
+
+class LlmProviderAuthFailed(AppError):
+    """上游 401/403 → 凭证被拒（不区分 key 错还是权限不够，前端统一提示鉴权失败）。"""
+
+    code = "HTTP_401_LLM_PROVIDER_AUTH_FAILED"
+    http_status = 401
+
+
+class LlmProviderModelsUnsupported(AppError):
+    """所有候选 URL 终态 404/405 → 上游未开放 /v1/models（中转站常见）。"""
+
+    code = "HTTP_404_LLM_PROVIDER_MODELS_UNSUPPORTED"
+    http_status = 404
+
+
+class LlmProviderModelsAllFailed(AppError):
+    """全部候选 URL 都失败（非 404/405 类终态，如 5xx / 网络 / 解析错）。"""
+
+    code = "HTTP_502_LLM_PROVIDER_MODELS_ALL_FAILED"
+    http_status = 502
+
+
+class LlmProviderModelsTimeout(AppError):
+    """上游 /v1/models 请求超时（10s，NFR-03）。"""
+
+    code = "HTTP_504_LLM_PROVIDER_MODELS_TIMEOUT"
+    http_status = 504
+
+
+class LlmProviderSsrfBlocked(AppError):
+    """候选 base_url 解析到私网/保留 IP 或 DNS 解析失败 → 安全侧拒绝（task-03 / D-006）。
+
+    复用 ``tool_policy.ToolPolicyService.assert_public_hostname``（IPv4 + IPv6
+    + ``getaddrinfo`` 包 ``asyncio.to_thread`` 防阻塞）；解析失败（``gaierror``）
+    同样拒绝，不 fallback、不抛裸 ``OSError``。本类把跨模块的 ``SsrfBlocked``
+    信号翻译回 llm_provider 自身的错误范式（与 task-02 四类错误对齐）。
+    """
+
+    code = "HTTP_400_LLM_PROVIDER_SSRF_BLOCKED"
+    http_status = 400
 
 
 class LlmProviderService:
@@ -93,6 +144,7 @@ class LlmProviderService:
             model_role_mappings=data.model_role_mappings,
             default_fallback_model=data.default_fallback_model,
             extra_env=data.extra_env,
+            settings_config=data.settings_config,
             is_default=data.is_default,
         )
         self._session.add(row)
@@ -214,3 +266,203 @@ class LlmProviderService:
         if len(plaintext) < 8:
             return "****"
         return f"{plaintext[:4]}...{plaintext[-4:]}"
+
+    # ── fetch-models（task-02 / D-001/D-006）──────────────────────────────
+
+    _FETCH_TIMEOUT: float = 10.0  # NFR-03：上游 /v1/models 超时 10s
+    _STRIP_SUFFIXES: tuple[str, ...] = ("/anthropic", "/compatibility", "/api")
+
+    async def fetch_models(
+        self,
+        user_id: uuid.UUID,
+        data: FetchModelsRequest,
+    ) -> FetchModelsResponse:
+        """拉上游 ``/v1/models``（无状态查询，design §9 豁免生命周期契约）。
+
+        双形态凭证解析（D-001）：
+        - ``provider_id`` → ``self.get(row)`` + ``cipher.decrypt`` 取明文 key + auth_field + base_url；
+        - ``{base_url, api_key, auth_field?}`` → 直传不落库不入日志，用完即弃（NFR-02）。
+
+        候选 URL 顺序尝试（NFR-03 不并发防中转站限流）：``base + /v1/models`` → 剥离
+        ``/anthropic``/``/compatibility``/``/api`` 子路径再试。
+
+        错误分类（4 类）：401/403→``LlmProviderAuthFailed``；候选终态 404/405→
+        ``LlmProviderModelsUnsupported``；全失败→``LlmProviderModelsAllFailed``；
+        超时→``LlmProviderModelsTimeout``。明文 key 永不进响应 / 日志。
+        """
+        base_url, api_key_plain, auth_field = await self._resolve_fetch_credentials(user_id, data)
+        headers = self._build_auth_headers(api_key_plain, auth_field)
+        candidates = self._candidate_urls(base_url)
+
+        last_status: int | None = None
+        last_kind: str | None = None
+        last_url: str | None = None
+        for url in candidates:
+            # task-03：SSRF 防护（D-006）—— 候选 URL 发请求前先解析域名 IP，拒绝
+            # 私网/保留/解析失败。复用 tool_policy.assert_public_hostname（IPv4 +
+            # IPv6 + socket.getaddrinfo 包 asyncio.to_thread 防阻塞事件循环）。
+            # SsrfBlocked 翻译回 llm_provider 自身错误类（不破坏 task-02 错误分类）。
+            host = urlparse(url).hostname or ""
+            try:
+                await ToolPolicyService.assert_public_hostname(host)
+            except SsrfBlocked as exc:
+                raise LlmProviderSsrfBlocked(
+                    "Upstream URL blocked by SSRF policy.",
+                    details={"url": url, "host": host, **(exc.details or {})},
+                ) from exc
+            try:
+                async with httpx.AsyncClient(timeout=self._FETCH_TIMEOUT) as client:
+                    resp = await client.get(url, headers=headers)
+            except httpx.TimeoutException as exc:
+                raise LlmProviderModelsTimeout(
+                    "Upstream /v1/models request timed out.",
+                    details={"url": url, "timeout_seconds": self._FETCH_TIMEOUT},
+                ) from exc
+            except httpx.HTTPError as exc:
+                # 连接 / 协议错（DNS 失败、连接拒绝、TLS 错等）：尝试下一候选
+                last_status = None
+                last_kind = f"network_error:{type(exc).__name__}"
+                last_url = url
+                continue
+
+            if resp.status_code in (401, 403):
+                # 凭证被上游拒 → 立即终止（再试其它 URL 也是 401/403，无意义）
+                raise LlmProviderAuthFailed(
+                    "Upstream /v1/models rejected credentials.",
+                    details={"status": resp.status_code, "url": url},
+                )
+            if resp.status_code == 200:
+                return self._parse_models_response(resp, url)
+
+            # 404 / 405 / 5xx 等 → 记录并尝试下一候选
+            last_status = resp.status_code
+            last_kind = f"http_{resp.status_code}"
+            last_url = url
+
+        # 全候选耗尽：按最后一次失败类型分类
+        if last_status in (404, 405):
+            raise LlmProviderModelsUnsupported(
+                "Upstream does not expose /v1/models.",
+                details={
+                    "last_status": last_status,
+                    "tried_urls": candidates,
+                },
+            )
+        raise LlmProviderModelsAllFailed(
+            "All candidate /v1/models endpoints failed.",
+            details={
+                "last_status": last_status,
+                "last_kind": last_kind,
+                "last_url": last_url,
+                "tried_urls": candidates,
+            },
+        )
+
+    async def _resolve_fetch_credentials(
+        self,
+        user_id: uuid.UUID,
+        data: FetchModelsRequest,
+    ) -> tuple[str, str, str]:
+        """双形态凭证解析 → (base_url, api_key_plain, auth_field)。
+
+        - ``provider_id``：查行 + ``cipher.decrypt`` 取明文 key；用 row.base_url / row.auth_field。
+        - inline：直接取 data 字段（schema validator 已保证 base_url + api_key 同时非空）。
+          ``auth_field`` 缺省回退 ``ANTHROPIC_AUTH_TOKEN``（与 schema 默认一致）。
+
+        明文 key 仅以局部变量存在，永不落库 / 入日志 / 入响应（NFR-02）。
+        """
+        if data.provider_id is not None:
+            row = await self.get(data.provider_id, user_id)
+            # 真实加密 → 解密（与 _to_read 同范式，复用 cipher）
+            api_key_plain: str = self._cipher.decrypt(row.encrypted_api_key, row.key_id)
+            base_url: str | None = row.base_url
+            auth_field: str = row.auth_field
+        else:
+            # inline 形态：schema validator 保证非 None，做类型 narrowing
+            assert data.base_url is not None and data.api_key is not None
+            api_key_plain = data.api_key
+            base_url = data.base_url
+            auth_field = data.auth_field or "ANTHROPIC_AUTH_TOKEN"
+
+        if not base_url:
+            raise LlmProviderModelsUnsupported(
+                "Provider has no base_url to fetch models from.",
+                details={"reason": "missing_base_url"},
+            )
+        if not api_key_plain:
+            raise LlmProviderAuthFailed(
+                "Provider has no api_key to authenticate.",
+                details={"reason": "missing_api_key"},
+            )
+        return base_url, api_key_plain, auth_field
+
+    @classmethod
+    def _build_auth_headers(cls, api_key: str, auth_field: str) -> dict[str, str]:
+        """按 auth_field 产鉴权头（FR-03）。
+
+        - ``ANTHROPIC_API_KEY`` → ``x-api-key: <key>`` + ``anthropic-version: 2023-06-01``；
+        - ``ANTHROPIC_AUTH_TOKEN``（默认）→ ``Authorization: Bearer <key>``。
+        """
+        if auth_field == "ANTHROPIC_API_KEY":
+            return {
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+            }
+        return {"Authorization": f"Bearer {api_key}"}
+
+    @classmethod
+    def _candidate_urls(cls, base_url: str) -> list[str]:
+        """候选 URL 列表（顺序尝试，NFR-03 不并发防中转站限流）。
+
+        主候选 = ``base_url.rstrip('/') + '/v1/models'``。
+        若 base 尾部含 ``/anthropic`` / ``/compatibility`` / ``/api`` 子路径 → 剥离后再加一候选
+        （cc-switch 范式，对中转站 404 兜底）。
+        """
+        base = base_url.rstrip("/")
+        candidates: list[str] = [f"{base}/v1/models"]
+        for suffix in cls._STRIP_SUFFIXES:
+            if base.endswith(suffix):
+                stripped = base[: -len(suffix)]
+                url = f"{stripped}/v1/models"
+                if url not in candidates:
+                    candidates.append(url)
+        return candidates
+
+    @staticmethod
+    def _parse_models_response(
+        resp: httpx.Response,
+        url: str,
+    ) -> FetchModelsResponse:
+        """解析上游 /v1/models 响应（OpenAI 兼容 ``{data: [{id, owned_by, ...}]}``）。
+
+        Anthropic 官方 /v1/models 不返 ``owned_by`` → 该字段缺失视为 None。
+        非 200 由调用方分类；200 但 body 不可解析 → ``LlmProviderModelsAllFailed``。
+        """
+        try:
+            body = resp.json()
+        except ValueError as exc:
+            raise LlmProviderModelsAllFailed(
+                "Upstream /v1/models returned non-JSON body.",
+                details={"url": url, "parse_error": str(exc)},
+            ) from exc
+        data = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(data, list):
+            raise LlmProviderModelsAllFailed(
+                "Upstream /v1/models response missing 'data' list.",
+                details={"url": url},
+            )
+        models: list[FetchModelsItem] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            item_id = item.get("id")
+            if not isinstance(item_id, str):
+                continue
+            owned = item.get("owned_by")
+            models.append(
+                FetchModelsItem(
+                    id=item_id,
+                    owned_by=owned if isinstance(owned, str) else None,
+                )
+            )
+        return FetchModelsResponse(models=models)

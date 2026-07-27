@@ -1,15 +1,21 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
+import { Download, Loader2, Package, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { JsonEditor } from "@/components/ui/json-editor";
 import {
+  fetchProviderModels,
+  type FetchProviderModelsRequest,
   type LlmProviderAuthField,
   type LlmProviderAgentKind,
   type LlmProviderFormValues,
   type LlmProviderRead,
   type LlmProviderRoleMapping,
 } from "@/lib/api/llm-providers";
+import { errMessage } from "@/lib/errors";
+import { ModelInputWithFetch, type FetchedModel } from "./model-input-with-fetch";
 
 /**
  * 供应商新建/编辑表单（task-11）。
@@ -133,6 +139,33 @@ export function LlmProviderForm({
     initEnvRows(initial),
   );
 
+  /**
+   * 配置 JSON 面板的 raw 文本（task-10 / D-005）。
+   * 初始化：编辑态把 initial.settings_config 序列化为美化 JSON；其余默认 "{}"。
+   * 5 开关 / 应用预设 / JsonEditor 三处都读写同一份字符串（单一真相），
+   * handleSubmit 时 parse 回对象写入 values.settings_config。
+   */
+  const [settingsConfigJson, setSettingsConfigJson] = useState<string>(() => {
+    const cfg = initial?.settings_config;
+    if (cfg && typeof cfg === "object" && !Array.isArray(cfg)) {
+      try {
+        return JSON.stringify(cfg, null, 2);
+      } catch {
+        return "{}";
+      }
+    }
+    return "{}";
+  });
+
+  // 4 角色共用的上游模型列表（D-003：全局一个获取按钮，一次请求供 4 角色复用）。
+  const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
+  const [isFetching, setIsFetching] = useState(false);
+  // 获取/一键设置的行内反馈（对齐 prototype fetchStatus；不用 antd toast 避免测试 AntApp 依赖）。
+  const [notice, setNotice] = useState<{
+    kind: "ok" | "err" | "loading";
+    msg: string;
+  } | null>(null);
+
   const setRole = (
     role: string,
     patch: Partial<RoleRowState>,
@@ -186,6 +219,21 @@ export function LlmProviderForm({
         one_m: s.one_m,
       };
     }
+    // 配置 JSON 面板 → settings_config 对象（task-10 / D-004）：
+    // JSON 非法 / 非对象 / 空对象 一律归一为 null（schema 语义：null=未配置）。
+    let settingsConfig: Record<string, unknown> | null = null;
+    try {
+      const parsed = JSON.parse(settingsConfigJson || "{}");
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        settingsConfig =
+          Object.keys(parsed).length === 0
+            ? null
+            : (parsed as Record<string, unknown>);
+      }
+    } catch {
+      settingsConfig = null;
+    }
+
     const values: LlmProviderFormValues = {
       name,
       agent_kind: agentKind,
@@ -197,9 +245,225 @@ export function LlmProviderForm({
       model_role_mappings: mapping,
       default_fallback_model: defaultFallbackModel,
       extra_env: extraEnv,
+      settings_config: settingsConfig,
       is_default: isDefault,
     };
     void onSubmit(values);
+  };
+
+  /**
+   * 全局「获取模型列表」（D-003：4 角色共用一次请求）。
+   * 双形态（D-001）：编辑态 {provider_id}（后端解密 key）/ 新建态 {base_url, api_key, auth_field}（用完即弃）。
+   * isFetching 守卫防重复点击；结果存 fetchedModels 供 4 角色 ModelInputWithFetch 共用。
+   */
+  const handleFetch = async (): Promise<void> => {
+    if (isFetching) return;
+    let req: FetchProviderModelsRequest;
+    if (isEdit) {
+      if (!initial?.id) {
+        setNotice({ kind: "err", msg: "缺少供应商 ID，无法获取模型列表。" });
+        return;
+      }
+      req = { provider_id: initial.id };
+    } else {
+      const url = baseUrl.trim();
+      const key = apiKey.trim();
+      if (!url || !key) {
+        setNotice({
+          kind: "err",
+          msg: "请先填写 base_url 和 API Key，再获取模型列表。",
+        });
+        return;
+      }
+      req = { base_url: url, api_key: key, auth_field: authField };
+    }
+    setIsFetching(true);
+    setNotice({ kind: "loading", msg: "正在获取模型列表…" });
+    try {
+      const resp = await fetchProviderModels(req);
+      const models = resp.models ?? [];
+      setFetchedModels(models);
+      if (models.length === 0) {
+        setNotice({
+          kind: "err",
+          msg: "上游返回空模型列表，该中转站可能未开放 /v1/models。",
+        });
+      } else {
+        setNotice({
+          kind: "ok",
+          msg: `✓ 已拉到 ${models.length} 个模型，可从右侧下拉选择。`,
+        });
+      }
+    } catch (err) {
+      setNotice({ kind: "err", msg: errMessage(err, "获取模型列表失败") });
+    } finally {
+      setIsFetching(false);
+    }
+  };
+
+  /**
+   * 「一键设置」（D-002）：取 sonnet||opus||fable||haiku 第一个 model 非空值，
+   * 填全部 4 角色 model 单元格（display / one_m 不动）。全空时按钮禁用。
+   */
+  const handleAutoFill = (): void => {
+    const firstNonEmpty = ROLE_ROWS.map(
+      (r) => (roleRows[r.key]?.model ?? "").trim(),
+    ).find((v) => v !== "");
+    if (!firstNonEmpty) {
+      setNotice({
+        kind: "err",
+        msg: "请先在任一角色填模型名，或先「获取模型列表」选一个。",
+      });
+      return;
+    }
+    const next: Record<string, RoleRowState> = {};
+    for (const r of ROLE_ROWS) {
+      const cur: RoleRowState = roleRows[r.key] ?? {
+        display: "",
+        model: "",
+        one_m: false,
+      };
+      next[r.key] = { ...cur, model: firstNonEmpty };
+    }
+    setRoleRows(next);
+    setNotice({
+      kind: "ok",
+      msg: `✓ 已把「${firstNonEmpty}」应用到全部 4 角色。`,
+    });
+  };
+
+  // 一键设置可用性：4 角色 model 全空时禁用（D-002 全空提示以禁用承载）。
+  const autoFillDisabled = ROLE_ROWS.every(
+    (r) => (roleRows[r.key]?.model ?? "").trim() === "",
+  );
+
+  /**
+   * 5 开关当前态（D-008）：从 settingsConfigJson parse 推导；JSON 非法时全 false
+   * （照 cc-switch CommonConfigEditor:72-98 范式）。useMemo 避免每次按键重 parse。
+   */
+  const configToggles = useMemo<{
+    hideAttribution: boolean;
+    teammates: boolean;
+    enableToolSearch: boolean;
+    effortMax: boolean;
+    disableAutoUpgrade: boolean;
+  }>(() => {
+    try {
+      const cfg = JSON.parse(settingsConfigJson || "{}");
+      const env =
+        (cfg?.env as Record<string, unknown> | undefined) ?? undefined;
+      return {
+        hideAttribution:
+          cfg?.attribution?.commit === "" && cfg?.attribution?.pr === "",
+        teammates: env?.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS === "1",
+        enableToolSearch: env?.ENABLE_TOOL_SEARCH === "true",
+        effortMax: env?.CLAUDE_CODE_EFFORT_LEVEL === "max",
+        disableAutoUpgrade: env?.DISABLE_AUTOUPDATER === "1",
+      };
+    } catch {
+      return {
+        hideAttribution: false,
+        teammates: false,
+        enableToolSearch: false,
+        effortMax: false,
+        disableAutoUpgrade: false,
+      };
+    }
+  }, [settingsConfigJson]);
+
+  /**
+   * 5 开关 toggle（D-008）：parse settings_config → 增删对应键（env 空对象则 delete env）
+   * → stringify 回写。JSON 非法静默不动（照 cc-switch catch，不崩不丢输入）。
+   * 映射：
+   *   隐藏 AI 署名 → attribution:{commit:"",pr:""}（顶层键）
+   *   Teammates     → env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = "1"
+   *   Tool Search   → env.ENABLE_TOOL_SEARCH = "true"
+   *   最大强度思考  → env.CLAUDE_CODE_EFFORT_LEVEL = "max"
+   *   禁用自动升级  → env.DISABLE_AUTOUPDATER = "1"
+   */
+  const handleConfigToggle = (
+    key:
+      | "hideAttribution"
+      | "teammates"
+      | "enableToolSearch"
+      | "effortMax"
+      | "disableAutoUpgrade",
+    checked: boolean,
+  ): void => {
+    let cfg: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(settingsConfigJson || "{}");
+      cfg =
+        parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? (parsed as Record<string, unknown>)
+          : {};
+    } catch {
+      return; // JSON 非法 → 静默不动
+    }
+    const env =
+      (cfg.env as Record<string, string> | undefined) ?? {};
+    switch (key) {
+      case "hideAttribution":
+        if (checked) cfg.attribution = { commit: "", pr: "" };
+        else delete cfg.attribution;
+        break;
+      case "teammates":
+        if (checked) env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = "1";
+        else delete env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS;
+        break;
+      case "enableToolSearch":
+        if (checked) env.ENABLE_TOOL_SEARCH = "true";
+        else delete env.ENABLE_TOOL_SEARCH;
+        break;
+      case "effortMax":
+        if (checked) env.CLAUDE_CODE_EFFORT_LEVEL = "max";
+        else delete env.CLAUDE_CODE_EFFORT_LEVEL;
+        break;
+      case "disableAutoUpgrade":
+        if (checked) env.DISABLE_AUTOUPDATER = "1";
+        else delete env.DISABLE_AUTOUPDATER;
+        break;
+    }
+    if (key !== "hideAttribution") {
+      // env 键增删后：空对象 delete env（保持 JSON 干净，对齐 cc-switch）。
+      if (Object.keys(env).length === 0) delete cfg.env;
+      else cfg.env = env;
+    }
+    setSettingsConfigJson(JSON.stringify(cfg, null, 2));
+  };
+
+  /**
+   * 「应用通用配置」预设（D-005）：浅合并 env / enabledPlugins 到 settings_config。
+   * 合并顺序 { ...preset, ...current }：用户已有键保留（同键用户值胜出），预设补齐缺失。
+   * JSON 非法时回退为空对象再合并（不崩，不丢预设）。
+   */
+  const handleApplyCommon = (): void => {
+    let cfg: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(settingsConfigJson || "{}");
+      cfg =
+        parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? (parsed as Record<string, unknown>)
+          : {};
+    } catch {
+      cfg = {};
+    }
+    const presetEnv: Record<string, string> = {
+      API_TIMEOUT_MS: "3000000",
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+      ENABLE_TOOL_SEARCH: "true",
+    };
+    const presetPlugins: Record<string, boolean> = {
+      "frontend-design": true,
+      playwright: true,
+    };
+    const curEnv =
+      (cfg.env as Record<string, string> | undefined) ?? {};
+    const curPlugins =
+      (cfg.enabledPlugins as Record<string, boolean> | undefined) ?? {};
+    cfg.env = { ...presetEnv, ...curEnv };
+    cfg.enabledPlugins = { ...presetPlugins, ...curPlugins };
+    setSettingsConfigJson(JSON.stringify(cfg, null, 2));
   };
 
   // 新建：必须填名称 + api_key；编辑：必须填名称，api_key 可空（保持原密钥）。
@@ -348,6 +612,53 @@ export function LlmProviderForm({
             <p className={hintCls}>
               Claude Code 按角色（Sonnet/Opus/Fable/Haiku）请求模型。用中转站时把每个角色映射到中转站实际模型名；官方端点可全部留空。
             </p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={handleFetch}
+                disabled={isFetching}
+              >
+                {isFetching ? (
+                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Download className="mr-1 h-3.5 w-3.5" />
+                )}
+                {isFetching ? "获取中…" : "获取模型列表"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={handleAutoFill}
+                disabled={autoFillDisabled || isFetching}
+                title={
+                  autoFillDisabled
+                    ? "请先在任一角色填模型名，或先获取模型列表"
+                    : "把当前第一个非空模型应用到全部 4 角色"
+                }
+              >
+                <Sparkles className="mr-1 h-3.5 w-3.5" />
+                一键设置
+              </Button>
+              {notice && (
+                <span
+                  role={notice.kind === "err" ? "alert" : "status"}
+                  className={
+                    notice.kind === "err"
+                      ? "text-xs text-destructive"
+                      : notice.kind === "ok"
+                        ? "text-xs text-emerald-600"
+                        : "text-xs text-muted-foreground"
+                  }
+                >
+                  {notice.msg}
+                </span>
+              )}
+            </div>
             <div className="mt-1.5 overflow-x-auto">
               <table className="w-full border-collapse text-xs">
                 <thead>
@@ -381,12 +692,12 @@ export function LlmProviderForm({
                           />
                         </td>
                         <td className="px-2 py-1.5">
-                          <input
+                          <ModelInputWithFetch
                             value={s.model}
-                            onChange={(e) =>
-                              setRole(r.key, { model: e.target.value })
-                            }
-                            className="h-7 w-full rounded border border-input bg-background px-1.5 text-xs focus:border-ring focus:outline-none"
+                            onChange={(v) => setRole(r.key, { model: v })}
+                            fetchedModels={fetchedModels}
+                            isLoading={isFetching}
+                            onFetch={handleFetch}
                             placeholder={r.placeholder}
                           />
                         </td>
@@ -469,6 +780,102 @@ export function LlmProviderForm({
               注入任意额外的 Claude Code 环境变量（超时、流量控制等），会和上面的配置一起下发给 daemon。
             </p>
           </div>
+        </div>
+      </details>
+
+      <details className="rounded border border-dashed border-input/70 p-3">
+        <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+          配置 JSON（高级 env 覆盖上方结构化字段）
+        </summary>
+
+        <div className="mt-3 space-y-3">
+          <p className={hintCls}>
+            直接编辑下发 daemon 的 Claude Code settings 片段，存于{" "}
+            <code className="text-xs">settings_config</code>{" "}
+            字段（与基础字段合并下发）。开关快捷开关常用项；JSON 编辑器可格式化。{" "}
+            <span className="text-amber-700">
+              注意：这里的 <code className="text-xs">env</code>{" "}
+              优先级最高，会覆盖上方「自定义环境变量」（D-007）。
+            </span>
+          </p>
+
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+            <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={configToggles.hideAttribution}
+                onChange={(e) =>
+                  handleConfigToggle("hideAttribution", e.target.checked)
+                }
+                className="h-3.5 w-3.5 rounded border border-input"
+              />
+              隐藏 AI 署名
+            </label>
+            <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={configToggles.teammates}
+                onChange={(e) =>
+                  handleConfigToggle("teammates", e.target.checked)
+                }
+                className="h-3.5 w-3.5 rounded border border-input"
+              />
+              Teammates 模式
+            </label>
+            <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={configToggles.enableToolSearch}
+                onChange={(e) =>
+                  handleConfigToggle("enableToolSearch", e.target.checked)
+                }
+                className="h-3.5 w-3.5 rounded border border-input"
+              />
+              启用 Tool Search
+            </label>
+            <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={configToggles.effortMax}
+                onChange={(e) =>
+                  handleConfigToggle("effortMax", e.target.checked)
+                }
+                className="h-3.5 w-3.5 rounded border border-input"
+              />
+              最大强度思考
+            </label>
+            <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={configToggles.disableAutoUpgrade}
+                onChange={(e) =>
+                  handleConfigToggle("disableAutoUpgrade", e.target.checked)
+                }
+                className="h-3.5 w-3.5 rounded border border-input"
+              />
+              禁用自动升级
+            </label>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={handleApplyCommon}
+              title="把通用 env / 插件预设浅合并进配置 JSON"
+            >
+              <Package className="mr-1 h-3.5 w-3.5" />
+              应用通用配置（预设）
+            </Button>
+          </div>
+
+          <JsonEditor
+            value={settingsConfigJson}
+            onChange={setSettingsConfigJson}
+            placeholder={`{\n  "env": { "API_TIMEOUT_MS": "3000000" },\n  "attribution": { "commit": "", "pr": "" }\n}`}
+          />
         </div>
       </details>
 

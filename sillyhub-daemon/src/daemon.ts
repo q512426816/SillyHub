@@ -64,6 +64,7 @@ import { listRoots } from './roots-rpc.js';
 // backend 经 HostFsDelegate + ws_rpc 调本 handler 在宿主执行 stat/git_apply/...（FR-02）。
 import { HostFsHandler } from './host-fs-handler.js';
 import { buildSpawnEnv, type SpawnCredentialManager } from './spawn-env.js';
+import { applyClaudeSettings } from './claude-settings.js';
 // 2026-06-24 preflight：启动前预检 sillyspec 版本 + daemon 自更新（失败不阻断启动）。
 import { runPreflight } from './preflight.js';
 // 2026-07-07-daemon-skill-execution task-03：skill-manager，启动同步平台 sillyspec skills。
@@ -2903,6 +2904,12 @@ export class Daemon {
       get: () => undefined,
       buildEnv: () => ({}),
     };
+    // task-06（spike-01 修正 / D-009）：spawn 前把 provider_config.settings_config 白名单
+    // 顶层键写进 $CLAUDE_CONFIG_DIR/settings.json（attribution 等无 env 等价物项）。
+    // 与 batch（task-runner.ts buildSpawnEnv 前）对齐，interactive 也走同一 helper。
+    // absent / null / 仅 env → 不写文件（零回归）；写盘失败 best-effort 不阻断 session create。
+    await applyClaudeSettings(execPayload.provider_config);
+
     const interactiveEnv = buildSpawnEnv(
       {
         toolConfig: execPayload.toolConfig ?? {},
