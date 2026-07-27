@@ -14,6 +14,11 @@ from app.core.config import get_settings
 from app.core.db import dispose_engine
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
+from app.core.monitoring import (
+    slow_request_middleware,
+    start_event_loop_watchdog,
+    stop_event_loop_watchdog,
+)
 from app.core.redis import close_redis
 from app.core.telemetry import init_telemetry
 from app.modules.admin.router import router as admin_router
@@ -65,6 +70,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         environment=settings.environment,
         commit=settings.resolved_commit_sha,
     )
+    # 启动事件循环堵塞看门狗（后台协程，每 100ms 自检）
+    watchdog_task = start_event_loop_watchdog()
+    log.info("monitoring.watchdog_started")
     try:
         # Bootstrap auth once the DB connection pool exists.
         from app.core.db import get_session_factory
@@ -104,6 +112,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         log.info("app.shutdown")
+        # 停止事件循环堵塞看门狗
+        stop_event_loop_watchdog(watchdog_task)
         try:
             from app.modules.storage.factory import get_storage_backend
 
@@ -144,6 +154,13 @@ def create_app() -> FastAPI:
         response: Response = await call_next(request)
         response.headers["x-request-id"] = rid
         return response
+
+    # 慢请求监控中间件（>1s 打 slow.request 日志，复用 request_id）
+    @app.middleware("http")
+    async def monitoring_middleware(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        return await slow_request_middleware(request, call_next)
 
     register_exception_handlers(app)
 

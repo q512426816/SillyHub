@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.core.config import get_settings
+from app.core.monitoring import setup_slow_query_logging
 
 _engine: AsyncEngine | None = None
 _SessionFactory: async_sessionmaker[AsyncSession] | None = None
@@ -73,6 +74,8 @@ def get_engine() -> AsyncEngine:
             connect_args=_build_connect_args(settings.database_url),
             future=True,
         )
+        # 慢查询日志：SQL 执行 >500ms 打 slow.query 日志
+        setup_slow_query_logging(_engine)
     return _engine
 
 
