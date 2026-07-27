@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>LLM 供应商编辑页原型 — 获取模型/一键设置/配置JSON</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; background: #f5f5f5; margin: 0; padding: 24px; color: #222; font-size: 13px; }
+  .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 16px; max-width: 880px; }
+  h2 { margin: 0 0 4px; font-size: 15px; }
+  h3 { margin: 0 0 10px; font-size: 13px; color: #555; }
+  .hint { color: #888; font-size: 11px; margin: 4px 0 10px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  label { display: block; font-size: 11px; color: #666; margin-bottom: 3px; }
+  input[type=text], input[type=password], select, textarea {
+    width: 100%; padding: 5px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; box-sizing: border-box;
+  }
+  textarea { font-family: ui-monospace, Menlo, monospace; font-size: 11px; line-height: 1.5; }
+  button { padding: 4px 10px; border: 1px solid #888; background: #fff; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+  button:hover { background: #f0f0f0; }
+  button.primary:hover { background: #1d4ed8; }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #f0f0f0; text-align: left; padding: 6px 8px; font-size: 11px; color: #555; border-bottom: 1px solid #ddd; }
+  td { padding: 5px 8px; border-bottom: 1px solid #eee; vertical-align: middle; }
+  .role { color: #b45309; font-weight: 600; }
+  .model-cell { display: flex; gap: 4px; }
+  .model-cell input { flex: 1; }
+  .toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; margin-bottom: 10px; }
+  .toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  .json-tools { display: flex; gap: 6px; margin-bottom: 6px; }
+  .badge { background: #e0e7ff; color: #3730a3; padding: 1px 6px; border-radius: 8px; font-size: 10px; margin-left: 6px; }
+  .ok { color: #16a34a; font-size: 11px; margin-left: 8px; }
+  summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h2>供应商：Kimi 中转 <span class="badge">编辑</span></h2>
+  <h3>基础字段（结构化，不变）</h3>
+  <div class="grid2">
+    <div><label>供应商名称 *</label><input type="text" value="Kimi 中转"></div>
+    <div><label>Agent 种类 *</label><select><option>Claude Code</option></select></div>
+    <div><label>base_url *</label><input type="text" value="https://open.bigmodel.cn/api/anthropic"></div>
+    <div><label>API Key *</label><input type="password" value="sk-***"></div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>模型角色映射 <span class="badge">本次新增</span></h3>
+  <div class="hint">Claude Code 按角色（Sonnet/Opus/Fable/Haiku）请求模型。点「获取模型列表」从中转站拉取可用模型，再从下拉选；「一键设置」把当前模型应用到全部角色。</div>
+  <div class="json-tools">
+    <button class="primary" onclick="fetchModels()">⬇ 获取模型列表（全局，拉一次）</button>
+    <button onclick="quickSet()">✨ 一键设置（应用到全部角色）</button>
+    <span id="fetchStatus"></span>
+  </div>
+  <table>
+    <thead><tr><th>角色</th><th>显示名称（仅UI）</th><th>实际请求模型</th><th>1M</th></tr></thead>
+    <tbody>
+      <tr><td class="role">Sonnet</td><td><input type="text" placeholder="如 Sonnet"></td>
+        <td><div class="model-cell"><input type="text" id="m-sonnet" placeholder="如 glm-5.2"><button onclick="toggleDropdown('sonnet')">▾</button></div>
+          <div id="dd-sonnet" style="display:none;border:1px solid #ccc;margin-top:2px;max-height:90px;overflow:auto;background:#fff"></div></td>
+        <td><input type="checkbox"></td></tr>
+      <tr><td class="role">Opus</td><td><input type="text"></td>
+        <td><div class="model-cell"><input type="text" id="m-opus"><button onclick="toggleDropdown('opus')">▾</button></div>
+          <div id="dd-opus" style="display:none;border:1px solid #ccc;margin-top:2px;max-height:90px;overflow:auto;background:#fff"></div></td>
+        <td><input type="checkbox" checked></td></tr>
+      <tr><td class="role">Fable</td><td><input type="text"></td>
+        <td><div class="model-cell"><input type="text" id="m-fable" placeholder="留空=走兜底"><button onclick="toggleDropdown('fable')">▾</button></div>
+          <div id="dd-fable" style="display:none;border:1px solid #ccc;margin-top:2px;max-height:90px;overflow:auto;background:#fff"></div></td>
+        <td><input type="checkbox"></td></tr>
+      <tr><td class="role">Haiku</td><td><input type="text"></td>
+        <td><div class="model-cell"><input type="text" id="m-haiku"><button onclick="toggleDropdown('haiku')">▾</button></div>
+          <div id="dd-haiku" style="display:none;border:1px solid #ccc;margin-top:2px;max-height:90px;overflow:auto;background:#fff"></div></td>
+        <td><input type="checkbox"></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <details open>
+    <summary>配置 JSON <span class="badge">本次新增 · 高级</span></summary>
+    <div class="hint">直接编辑下发 daemon 的完整 Claude Code settings.json 片段。开关快捷编辑常用项；JSON 编辑器可格式化。存于新字段 settings_config，与基础字段合并下发。</div>
+    <div class="toggles">
+      <label class="toggle"><input type="checkbox" data-key="hideAttribution" onchange="onToggle(this)"> 隐藏 AI 署名</label>
+      <label class="toggle"><input type="checkbox" data-key="teammates" onchange="onToggle(this)"> Teammates 模式</label>
+      <label class="toggle"><input type="checkbox" data-key="enableToolSearch" onchange="onToggle(this)"> 启用 Tool Search</label>
+      <label class="toggle"><input type="checkbox" data-key="effortMax" onchange="onToggle(this)"> 最大强度思考</label>
+      <label class="toggle"><input type="checkbox" data-key="disableAutoUpgrade" onchange="onToggle(this)"> 禁用自动升级</label>
+    </div>
+    <div class="json-tools">
+      <button onclick="applyCommon()">📦 应用通用配置（预设）</button>
+      <button onclick="formatJson()">格式化</button>
+      <button onclick="extractCommon()">↩ 提取为通用配置</button>
+    </div>
+    <textarea id="settingsJson" rows="12" oninput="syncToggles()">{
+  "env": {
+    "API_TIMEOUT_MS": "3000000",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+  }
+}</textarea>
+    <div class="hint">JSON 编辑器：行号 / 折叠 / 格式化（生产用 JsonEditor 组件，此处简化为 textarea 演示）。</div>
+  </details>
+</div>
+
+<div class="card">
+  <button class="primary">保存修改</button> <button>取消</button>
+</div>
+
+<script>
+const FAKE_MODELS = [
+  {id:"glm-5.2", ownedBy:"ZhipuAI"}, {id:"glm-5.2[1M]", ownedBy:"ZhipuAI"},
+  {id:"glm-4.6", ownedBy:"ZhipuAI"}, {id:"kimi-k2", ownedBy:"Moonshot"},
+  {id:"deepseek-v4-pro", ownedBy:"DeepSeek"}, {id:"claude-sonnet-5", ownedBy:"Anthropic"}
+];
+let models = [];
+function fetchModels(){
+  document.getElementById('fetchStatus').innerHTML = '<span style="color:#888">拉取中…</span>';
+  setTimeout(()=>{
+    models = FAKE_MODELS;
+    document.getElementById('fetchStatus').innerHTML = '<span class="ok">✓ 拉到 '+models.length+' 个模型</span>';
+  }, 700);
+}
+function toggleDropdown(role){
+  const dd = document.getElementById('dd-'+role);
+  if(!models.length){ alert('请先点「获取模型列表」'); return; }
+  dd.style.display = dd.style.display==='none' ? 'block':'none';
+  // 按 ownedBy 分组
+  const grouped = {};
+  models.forEach(m=>{ (grouped[m.ownedBy]=grouped[m.ownedBy]||[]).push(m); });
+  dd.innerHTML = Object.keys(grouped).sort().map(v=>
+    `<div style="padding:2px 8px;font-weight:600;color:#555;background:#fafafa">${v}</div>` +
+    grouped[v].map(m=>`<div style="padding:3px 8px;cursor:pointer" onmouseover="this.style.background='#e0e7ff'" onmouseout="this.style.background=''" onclick="pickModel('${role}','${m.id}')">${m.id}</div>`).join('')
+  ).join('');
+}
+function pickModel(role,id){ document.getElementById('m-'+role).value=id; document.getElementById('dd-'+role).style.display='none'; }
+function quickSet(){
+  const v = ['sonnet','opus','fable','haiku'].map(r=>document.getElementById('m-'+r).value).find(x=>x);
+  if(!v){ alert('请先在一个角色填模型名，或先「获取模型列表」选一个'); return; }
+  ['sonnet','opus','fable','haiku'].forEach(r=>document.getElementById('m-'+r).value=v);
+}
+// 配置 JSON 开关
+function syncToggles(){
+  let cfg; try{ cfg = JSON.parse(document.getElementById('settingsJson').value); }catch{ return; }
+  const map = {
+    hideAttribution: cfg.attribution && cfg.attribution.commit==="" && cfg.attribution.pr==="",
+    teammates: cfg.env && (cfg.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS==="1"),
+    enableToolSearch: cfg.env && (cfg.env.ENABLE_TOOL_SEARCH==="true"),
+    effortMax: cfg.env && (cfg.env.CLAUDE_CODE_EFFORT_LEVEL==="max"),
+    disableAutoUpgrade: cfg.env && (cfg.env.DISABLE_AUTOUPDATER==="1"),
+  };
+  document.querySelectorAll('[data-key]').forEach(cb=>{ cb.checked = !!map[cb.dataset.key]; });
+}
+function onToggle(cb){
+  let cfg; try{ cfg = JSON.parse(document.getElementById('settingsJson').value||'{}'); }catch{ alert('JSON 非法，无法切换'); cb.checked=!cb.checked; return; }
+  const k = cb.dataset.key, on = cb.checked;
+  if(k==='hideAttribution'){ if(on) cfg.attribution={commit:"",pr:""}; else delete cfg.attribution; }
+  else { cfg.env = cfg.env||{}; const M={teammates:['CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS','1'],enableToolSearch:['ENABLE_TOOL_SEARCH','true'],effortMax:['CLAUDE_CODE_EFFORT_LEVEL','max'],disableAutoUpgrade:['DISABLE_AUTOUPDATER','1']}[k]; if(on) cfg.env[M[0]]=M[1]; else { delete cfg.env[M[0]]; if(!Object.keys(cfg.env).length) delete cfg.env; } }
+  document.getElementById('settingsJson').value = JSON.stringify(cfg, null, 2);
+}
+function formatJson(){ try{ document.getElementById('settingsJson').value = JSON.stringify(JSON.parse(document.getElementById('settingsJson').value), null, 2); }catch(e){ alert('JSON 非法：'+e.message); } }
+function applyCommon(){ const pre={env:{API_TIMEOUT_MS:"3000000",CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:"1",ENABLE_TOOL_SEARCH:"true"},enabledPlugins:{"frontend-design@claude-plugins-official":true,"playwright@claude-plugins-official":true}}; let cfg; try{ cfg=JSON.parse(document.getElementById('settingsJson').value||'{}'); }catch{ cfg={}; } cfg.env={...pre.env,...(cfg.env||{})}; cfg.enabledPlugins={...pre.enabledPlugins,...(cfg.enabledPlugins||{})}; document.getElementById('settingsJson').value=JSON.stringify(cfg,null,2); syncToggles(); }
+function extractCommon(){ alert('已把当前 JSON 的 env 顶层项提取为「通用配置」预设（演示）'); }
+syncToggles();
+</script>
+</body>
+</html>
