@@ -57,7 +57,7 @@ cp deploy/.env.example deploy/.env   # Windows git-bash 同样可用 cp
 python3 - <<'PY'
 import secrets
 print("SECRET_KEY=" + secrets.token_urlsafe(32))
-print("SILLYSPEC_MASTER_KEY=" + secrets.token_urlsafe(32))
+print("SILLYSPEC_MASTER_KEY=v1:" + secrets.token_hex(32))  # crypto.py 要 hex，不是 base64（token_urlsafe 会致解密端点 500）
 PY
 ```
 

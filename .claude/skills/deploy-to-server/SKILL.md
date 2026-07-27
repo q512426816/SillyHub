@@ -122,7 +122,7 @@ scp -r -i ~/.ssh/aliyun_deploy deploy/docker-compose.yml deploy/.env.example dep
 ```bash
 ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'cd /opt/sillyhub/deploy/deploy && cp .env.example .env'
 # 本地生成密钥：
-python -c "import secrets; print('SECRET_KEY='+secrets.token_urlsafe(32)); print('SILLYSPEC_MASTER_KEY='+secrets.token_urlsafe(32))"
+python -c "import secrets; print('SECRET_KEY='+secrets.token_urlsafe(32)); print('SILLYSPEC_MASTER_KEY=v1:'+secrets.token_hex(32))"
 # SSH 进去填（或本地编辑后 scp 覆盖）：
 ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'vi /opt/sillyhub/deploy/deploy/.env'
 ```
@@ -132,7 +132,7 @@ ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'vi /opt/sillyhub/deploy/deploy/
 BACKEND_PORT=8001
 FRONTEND_PORT=3001
 SECRET_KEY=<随机48字符>
-SILLYSPEC_MASTER_KEY=<随机48字符>
+SILLYSPEC_MASTER_KEY=v1:<64位hex>   # crypto.py 要求 hex（token_hex），不是 base64；写成 token_urlsafe 会让 /api/llm-providers 等解密端点 500（bytes.fromhex 失败）
 ANTHROPIC_AUTH_TOKEN=<真实token>
 NEXT_PUBLIC_API_BASE_URL=http://192.168.0.143:8001   # 生产前端访问后端地址，或公网域名
 INTERNAL_API_BASE_URL=http://backend:8000
