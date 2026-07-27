@@ -463,3 +463,11 @@ created_at: 2026-07-21T08:48:56
 根因：导出走 grouped_report_to_workbook，列定义 _MILESTONE_DETAIL_GROUP_COLUMNS(router:656) 与行构造 _detail_dict(service:1340) 缺 no 与 requirements；成果 achievement 列原已存在(router:666+service:1353)无需新增，仅需补序号+要求。
 方案：后端 2 文件——service.py _detail_dict 加 no+requirements 两字段；router.py _MILESTONE_DETAIL_GROUP_COLUMNS 首位加序号列(field=no width=8)、成果列前加要求列(field=requirements width=30)，成果列与状态列不动，顺更列注释；前端 exportMilestoneDetails 仅触发下载无需改。
 结果：①venv pytest test_export+test_service 62 passed(1 既有 HTTP_422 弃用警告无关)；②ruff check All checks passed；③commit 03f43c85 push + 重建 backend 部署，容器 healthy、容器内 grep 校验新代码命中、commit_sha 验证生效。
+## ql-20260727-006-adc4 | 2026-07-27 13:15:45 | /ppm/milestone-details 导出列顺序对齐新建弹窗(状态置序号后/执行状态置执行人后)
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/plan/router.py（_MILESTONE_DETAIL_GROUP_COLUMNS 13 列重排 + 注释）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：里程碑明细导出的列顺序乱，要求参考新建明细弹窗的字段顺序重排，且「状态」放序号后面、「执行状态」放执行人后面。
+根因：上轮 ql-005 补序号+要求列时，把要求/成果/状态三列堆在末尾，与新建明细弹窗（page.tsx 开立信息块：序号/明细阶段/任务主题/任务描述/要求/角色/成果/计划工作量/计划开始/计划完成/执行人）的顺序不一致，看起来杂乱。
+方案：router.py _MILESTONE_DETAIL_GROUP_COLUMNS 13 列重排为「序号/状态/明细阶段/任务主题/任务描述/要求/角色/成果/计划工作量/计划开始/计划完成/执行人/执行状态」——对齐新建弹窗顺序，且状态紧随序号、执行状态紧随执行人；顺更列注释。_detail_dict 不用改（grouped_report_to_workbook 按 columns 顺序取值，字段都在）。
+结果：①ruff check All checks passed；②pytest test_export+test_service 62 passed；③仅改 router.py + 同步 ppm.md 变更索引 ql-20260727-006-adc4。
