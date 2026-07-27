@@ -423,3 +423,11 @@ created_at: 2026-07-21T08:48:56
 根因：迁移 202607251600 upgrade() 用 now=datetime.now(UTC)（aware 带时区），但 roles 表 created_at/updated_at 列是 naive（TIMESTAMP WITHOUT TIME ZONE，asyncpg 错误信息 $7::TIMESTAMP WITHOUT TIME ZONE 确认），asyncpg 拒绝 aware 插 naive，报 "can't subtract offset-naive and offset-aware datetimes"，seed business_member role 失败 → backend 启动崩溃 → restart 循环。同库 202605280900 用 datetime.utcnow()（naive）能正常跑。
 方案：行 78 now 改 naive=datetime.now(UTC).replace(tzinfo=None)（naive UTC，对齐 202605280900 的 utcnow 范式，复用已 import 的 UTC 避免 deprecated utcnow），加注释说明 roles 列为 naive。迁移此前每次失败回滚未应用，改后重跑成功。
 结果：①重建 backend 镜像后 backend healthy（Up 53s 不再 restart）；②日志 Application startup complete + Uvicorn running，无 datetime 错；③迁移重跑成功（business_member role 创建）；④/api/health 200 ok（db/redis ok）；⑤仅改 1 个迁移文件。
+## ql-20260727-001-c380 | 2026-07-27 08:35:05 | /ppm/weekly-plan 日期列筛选下拉选项格式化(YYYY-MM-DD)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（fieldText 对 date 字段加 fmtDate 格式化）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：用户反馈日期列(开始/结束日期/实际开始/完成时间)的筛选下拉选项显示原始 ISO 值(如 2026-07-24T10:00:00)，没像单元格那样格式化，要求格式化成 YYYY-MM-DD。
+根因：fieldText 对所有字段统一返回 String(原始值)，日期字段原始值是 ISO 字符串，下拉直接显示 ISO，与列 render 的 fmtDate 不一致。
+方案：fieldText 对 SORTABLE_FIELDS 里 kind==='date' 的字段改用 fmtDate(v, '') 格式化(空/非法→'' 被 filter(Boolean) 过滤，有效→YYYY-MM-DD)。一处改动同时让筛选下拉选项(按天去重)、筛选匹配(processedData 用同款 fieldText)、日期排序(YYYY-MM-DD 字典序=日期序)都按天一致。
+结果：①tsc --noEmit 0 error；②仅改 page.tsx 的 fieldText + 同步 ppm.md 变更索引 ql-20260727-001-c380；③待 commit+push+重建 frontend 部署 + 用户验证日期筛选下拉显示 YYYY-MM-DD。

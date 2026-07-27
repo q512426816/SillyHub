@@ -63,10 +63,15 @@ const SORTABLE_FIELDS: { key: string; kind: SortFieldKind }[] = [
   { key: "actual_end_time", kind: "date" },
 ];
 
-/** 取行字段值统一转字符串(空值→"")。 */
+/** 取行字段值统一转字符串(空值→"")。日期字段格式化为 YYYY-MM-DD
+ * (与列 render fmtDate 一致;筛选选项/筛选匹配/排序都按天,避免下拉显示原始 ISO)。 */
 const fieldText = (r: WeeklyPlanRow, key: string): string => {
   const v = (r as unknown as Record<string, unknown>)[key];
-  return v == null ? "" : String(v);
+  if (v == null) return "";
+  if (SORTABLE_FIELDS.find((f) => f.key === key)?.kind === "date") {
+    return fmtDate(v as string, ""); // 空/非法→""(被 filter 过滤),有效→YYYY-MM-DD
+  }
+  return String(v);
 };
 
 /** 非空值比较:number 用数值,其余(含 ISO 日期)用字符串字典序。 */
