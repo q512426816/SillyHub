@@ -7,6 +7,7 @@ restrictions, resource limits).
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
 import uuid
@@ -138,6 +139,20 @@ class ToolOperationForbidden(AppError):
     http_status = 403
 
 
+class SsrfBlocked(AppError):
+    """Raised when a hostname resolves to a private/reserved IP or cannot be
+    resolved at all (SSRF protection — safe-side rejection).
+
+    Generic / cross-module signal produced by
+    ``ToolPolicyService.assert_public_hostname``. Callers in other modules
+    typically catch this and re-raise as their own domain error to keep their
+    error surface coherent (see ``llm_provider.service.fetch_models``).
+    """
+
+    code = "HTTP_400_SSRF_BLOCKED"
+    http_status = 400
+
+
 # ── Data class ───────────────────────────────────────────────────────────────
 
 
@@ -168,6 +183,12 @@ class ToolPolicyService:
         ipaddress.IPv4Network("127.0.0.0/8"),
         ipaddress.IPv4Network("169.254.0.0/16"),
         ipaddress.IPv4Network("0.0.0.0/8"),
+    ]
+    # task-03：IPv6 私网/保留段（既有 _check_not_private_ip 仅 AF_INET，此处补 v6）。
+    _PRIVATE_NETWORKS_V6: list[ipaddress.IPv6Network] = [
+        ipaddress.IPv6Network("::1/128"),  # loopback
+        ipaddress.IPv6Network("fc00::/7"),  # unique local (ULA)
+        ipaddress.IPv6Network("fe80::/10"),  # link-local
     ]
 
     @staticmethod
@@ -297,6 +318,70 @@ class ToolPolicyService:
                         )
             except ValueError:
                 continue
+
+    # ── task-03：共享 SSRF helper（IPv4 + IPv6 + 防阻塞 DNS）──────────────────
+    # 既有 _check_not_private_ip 保持 IPv4-only / 同步 / 抛 ToolOperationForbidden
+    # 不变（tool_gateway 路径不变）；下方为 llm_provider 等需要 v4+v6 + async 的
+    # 调用方提供独立 helper。两条路径共享 _PRIVATE_NETWORKS(_V6) 网段定义。
+
+    @staticmethod
+    def _ip_is_private(ip_str: str) -> bool:
+        """Return True if ``ip_str`` is in any private/reserved v4 or v6 range.
+
+        Single source of truth for the IP-vs-network check: reuses
+        ``_PRIVATE_NETWORKS`` (IPv4) and ``_PRIVATE_NETWORKS_V6`` (IPv6) by
+        membership (``ip in network``), matching the existing
+        ``_check_not_private_ip`` semantics. IPv6 zone indices such as
+        ``fe80::1%eth0`` are stripped before parsing so scoped link-local
+        addresses still classify correctly.
+        """
+        candidate = ip_str.split("%", 1)[0]
+        try:
+            ip = ipaddress.ip_address(candidate)
+        except ValueError:
+            return False
+        if isinstance(ip, ipaddress.IPv4Address):
+            return any(ip in net for net in ToolPolicyService._PRIVATE_NETWORKS)
+        if isinstance(ip, ipaddress.IPv6Address):
+            return any(ip in net for net in ToolPolicyService._PRIVATE_NETWORKS_V6)
+        return False
+
+    @staticmethod
+    async def assert_public_hostname(host: str) -> None:
+        """Resolve ``host`` (IPv4 + IPv6) and reject if any resolved address is
+        private/reserved, or if resolution fails (SSRF protection — safe-side).
+
+        Differs from the sync ``_check_not_private_ip`` (IPv4-only, used by the
+        tool_gateway policy path) in two ways: it also checks IPv6, and it
+        wraps the blocking ``socket.getaddrinfo`` in ``asyncio.to_thread`` so a
+        slow DNS resolver cannot stall the event loop (aligned with the
+        ``tool_gateway/service.py`` Wave C ``to_thread`` pattern).
+
+        Raises:
+            SsrfBlocked: if ``host`` is empty, unresolvable (``gaierror`` /
+                ``OSError`` — no bare ``OSError`` escapes), or resolves to any
+                address in ``_PRIVATE_NETWORKS`` / ``_PRIVATE_NETWORKS_V6``.
+        """
+        if not host:
+            raise SsrfBlocked(
+                "URL has no hostname — cannot verify it is public.",
+                details={"host": host},
+            )
+        try:
+            addrinfos = await asyncio.to_thread(socket.getaddrinfo, host, None)
+        except (socket.gaierror, OSError) as exc:
+            raise SsrfBlocked(
+                f"Cannot resolve hostname '{host}' — rejected for safety.",
+                details={"host": host, "error": str(exc)},
+            ) from exc
+
+        for _, _, _, _, sockaddr in addrinfos:
+            ip_str = sockaddr[0]
+            if ToolPolicyService._ip_is_private(ip_str):
+                raise SsrfBlocked(
+                    f"Hostname '{host}' resolves to private/reserved IP '{ip_str}' — SSRF blocked.",
+                    details={"host": host, "ip": ip_str},
+                )
 
 
 def _extract_domain(url: str) -> str:

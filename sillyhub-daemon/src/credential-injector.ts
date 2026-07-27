@@ -48,7 +48,8 @@ export interface CredentialInjector {
  *   3. default_fallback_model ?? model → ANTHROPIC_MODEL（两者皆空不写）
  *   4. model_role_mappings → ANTHROPIC_DEFAULT_{ROLE}_MODEL（仅 model 非空注入；未知角色忽略，D-011）
  *   5. one_m=true → 角色模型名追加 [1m] 后缀（X-12 官方文档实测，触发 1M 上下文）
- *   6. extra_env → Object.assign 注入（最后，可覆盖角色 env，design §7 Object.assign 顺序）
+ *   6. extra_env → Object.assign 注入（可覆盖角色 env，design §7 Object.assign 顺序）
+ *   7. settings_config.env → Object.assign 注入（最后，覆盖优先级最高，D-007 / task-05）
  */
 export class ClaudeCredentialInjector implements CredentialInjector {
   readonly agentKind = 'claude';
@@ -94,8 +95,13 @@ export class ClaudeCredentialInjector implements CredentialInjector {
       }
     }
 
-    // 6. extra_env → Object.assign（最后，可覆盖角色 env，design §7 Object.assign 顺序）
+    // 6. extra_env → Object.assign（可覆盖角色 env，design §7 Object.assign 顺序）
     Object.assign(env, c.extra_env ?? {});
+
+    // 7. settings_config.env → Object.assign（最后，覆盖优先级最高，D-007 / task-05）
+    //    仅 env 子键在 toEnv 处理；attribution/enabledPlugins/model/skipDangerousModePermissionPrompt
+    //    顶层键归 task-06（settings.json 生成处）。api_key 永不从 settings_config 取（安全）。
+    Object.assign(env, c.settings_config?.env ?? {});
 
     return env;
   }

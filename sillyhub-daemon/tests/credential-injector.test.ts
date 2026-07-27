@@ -189,6 +189,131 @@ describe('ClaudeCredentialInjector', () => {
     });
   });
 
+  // task-05 / D-007@v2：settings_config.env 在 extra_env 之后最后 Object.assign，覆盖优先级最高。
+  // 用例矩阵（task-13 acceptance）：
+  //   - settings_config.env 注入
+  //   - settings_config.env 覆盖 extra_env 同名 key（D-007 最高）
+  //   - settings_config.env 覆盖角色 env 同名 key（优先级链：角色 < extra_env < settings_config.env）
+  //   - settings_config 缺失/undefined → toEnv 与现状逐字一致（零回归，结构 no-op）
+  //   - settings_config 仅含顶层键（attribution，无 env）→ toEnv 不受影响（顶层键归 task-06）
+  //   - api_key 永不从 settings_config 取（只走 c.api_key + auth_field，安全）
+  describe('settings_config.env（D-007 覆盖优先级最高，task-05）', () => {
+    it('settings_config.env 注入到 env', () => {
+      const env = injector.toEnv({
+        ...baseConfig,
+        settings_config: { env: { CUSTOM_FLAG: 'on', ANOTHER: 'v' } },
+      });
+      expect(env.CUSTOM_FLAG).toBe('on');
+      expect(env.ANOTHER).toBe('v');
+    });
+
+    it('settings_config.env 覆盖 extra_env 同名 key（最后 Object.assign，D-007）', () => {
+      const env = injector.toEnv({
+        ...baseConfig,
+        extra_env: { FOO: 'from-extra' },
+        settings_config: { env: { FOO: 'from-settings' } },
+      });
+      expect(env.FOO).toBe('from-settings');
+    });
+
+    it('settings_config.env 覆盖角色 env 同名 key（优先级链角色<extra_env<settings_config.env）', () => {
+      const env = injector.toEnv({
+        ...baseConfig,
+        model_role_mappings: { sonnet: { model: 'kimi-k2' } },
+        extra_env: { ANTHROPIC_DEFAULT_SONNET_MODEL: 'extra-override' },
+        settings_config: { env: { ANTHROPIC_DEFAULT_SONNET_MODEL: 'settings-override' } },
+      });
+      // 最终 settings_config.env 胜出
+      expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('settings-override');
+    });
+
+    it('settings_config 缺失/undefined → toEnv 与无该字段逐字一致（零回归，D-007 brownfield）', () => {
+      // task-05 仅在 toEnv 末尾追加 Object.assign(env, c.settings_config?.env ?? {})；
+      // settings_config absent/undefined 时 ?? {} 得空对象，Object.assign 是 no-op → 结构性零回归。
+      const rich: ProviderConfig = {
+        agent_kind: 'claude',
+        base_url: 'https://gw.example.com',
+        api_key: 'sk-x',
+        model_role_mappings: { opus: { model: 'glm-4.6', one_m: true } },
+        extra_env: { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' },
+      };
+      // omit settings_config vs explicit undefined → 完全相同
+      const withoutField = injector.toEnv(rich);
+      const withUndefined = injector.toEnv({ ...rich, settings_config: undefined });
+      expect(withUndefined).toEqual(withoutField);
+      // 锁死期望输出（与 task-05 前逐字一致）
+      expect(withoutField).toEqual({
+        ANTHROPIC_BASE_URL: 'https://gw.example.com',
+        ANTHROPIC_AUTH_TOKEN: 'sk-x',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-4.6[1m]',
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+      });
+    });
+
+    it('settings_config=null → toEnv 安全跳过不抛（运行时防御）', () => {
+      // 运行时 backend 可能下发 null；c.settings_config?.env ?? {} 兜底成 {} 不抛。
+      const env = injector.toEnv({
+        ...baseConfig,
+        extra_env: { X: '1' },
+        settings_config: null as unknown as ProviderConfig['settings_config'],
+      });
+      expect(env.X).toBe('1');
+    });
+
+    it('settings_config 仅含顶层 attribution（无 env）→ toEnv 不受影响（顶层键归 task-06 settings.json）', () => {
+      const env = injector.toEnv({
+        ...baseConfig,
+        base_url: 'https://gw.example.com',
+        settings_config: { attribution: { commit: '', pr: '' } },
+      });
+      // attribution 是顶层键不进 env（归 task-06 applyClaudeSettings 写 settings.json）
+      expect(env).toEqual({ ANTHROPIC_BASE_URL: 'https://gw.example.com' });
+      expect('attribution' in env).toBe(false);
+    });
+
+    it('api_key 永不从 settings_config 取（只走 c.api_key + auth_field，安全 D-009）', () => {
+      // settings_config 类型无 api_key 字段；确认 toEnv 认证来源恒为 c.api_key，
+      // settings_config.env 即使含同名 KEY_* 也不影响 auth 落点。
+      const env = injector.toEnv({
+        ...baseConfig,
+        api_key: 'sk-real',
+        auth_field: 'ANTHROPIC_AUTH_TOKEN',
+        settings_config: { env: { UNRELATED: 'x' } },
+      });
+      expect(env.ANTHROPIC_AUTH_TOKEN).toBe('sk-real');
+      expect(env.UNRELATED).toBe('x');
+    });
+
+    it('端到端：extra_env + settings_config.env 共存 → settings_config.env 胜', () => {
+      const env = injector.toEnv({
+        agent_kind: 'claude',
+        base_url: 'https://open.bigmodel.cn/api/anthropic',
+        api_key: 'sk-bigmodel',
+        default_fallback_model: 'glm-4.6',
+        extra_env: {
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+          SHARED: 'extra',
+        },
+        settings_config: {
+          env: {
+            SHARED: 'settings-wins',
+            EXTRA_FROM_SETTINGS: 'yes',
+          },
+          attribution: { commit: '', pr: '' },
+        },
+      });
+      expect(env.ANTHROPIC_BASE_URL).toBe('https://open.bigmodel.cn/api/anthropic');
+      expect(env.ANTHROPIC_AUTH_TOKEN).toBe('sk-bigmodel');
+      expect(env.ANTHROPIC_MODEL).toBe('glm-4.6');
+      expect(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBe('1');
+      // 覆盖
+      expect(env.SHARED).toBe('settings-wins');
+      expect(env.EXTRA_FROM_SETTINGS).toBe('yes');
+      // attribution 顶层键不进 env
+      expect('attribution' in env).toBe(false);
+    });
+  });
+
   it('不修改入参 config（纯函数）', () => {
     const config: ProviderConfig = {
       agent_kind: 'claude',

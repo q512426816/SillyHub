@@ -52,6 +52,11 @@ export interface LlmProviderRead {
   model_role_mappings: Record<string, LlmProviderRoleMapping> | null;
   default_fallback_model: string | null;
   extra_env: Record<string, string> | null;
+  /**
+   * 高级配置片段（design §4 / D-004）：下发链路透传，daemon toEnv/settings.json
+   * 合并（D-007/D-009）。null=未配置；消费方走 `?? null` 归一（frontend-type-migration 坑）。
+   */
+  settings_config?: Record<string, unknown> | null;
   is_default: boolean;
   /** 如 "sk-1...abcd"（首4...尾4），空 key → null，短 key → "****"。 */
   api_key_masked: string | null;
@@ -72,6 +77,8 @@ export interface LlmProviderCreate {
   model_role_mappings?: Record<string, LlmProviderRoleMapping> | null;
   default_fallback_model?: string | null;
   extra_env?: Record<string, string> | null;
+  /** 高级配置片段（design §4 / D-004）；null=清空/未配置。 */
+  settings_config?: Record<string, unknown> | null;
   is_default: boolean;
 }
 
@@ -88,6 +95,8 @@ export interface LlmProviderUpdate {
   model_role_mappings?: Record<string, LlmProviderRoleMapping> | null;
   default_fallback_model?: string | null;
   extra_env?: Record<string, string> | null;
+  /** 高级配置片段（design §4 / D-004）；null=清空/未配置。 */
+  settings_config?: Record<string, unknown> | null;
   is_default?: boolean;
 }
 
@@ -115,6 +124,11 @@ export interface LlmProviderFormValues {
   model_role_mappings: Record<string, LlmProviderRoleMapping>;
   default_fallback_model: string;
   extra_env: Record<string, string>;
+  /**
+   * 高级配置片段（design §4 / D-004；配置 JSON 面板 task-10 产出）。
+   * 可选：表单初始构建/单测固件不带此字段，提交时 `?? null` 归一（design §6.1 Grill B5）。
+   */
+  settings_config?: Record<string, unknown> | null;
   is_default: boolean;
 }
 
@@ -175,6 +189,43 @@ export async function unsetDefaultProvider(
   return apiFetch<LlmProviderRead>(
     `/api/llm-providers/${encodeURIComponent(id)}/unset-default`,
     { method: "POST" },
+  );
+}
+
+// ── fetch-models（task-11 / D-001/D-006）──────────────────────────────────
+
+/**
+ * fetch-models 请求体（双形态联合，D-001）。
+ * - 编辑态 `{provider_id}`：后端查行 + 解密 api_key 取明文，前端只传 id。
+ * - 新建态 `{base_url, api_key, auth_field?}`：直传上游凭证，用完即弃，
+ *   前端永不落本地存储/日志（NFR-02；design §8 安全）。
+ */
+export type FetchProviderModelsRequest =
+  | { provider_id: string }
+  | { base_url: string; api_key: string; auth_field?: LlmProviderAuthField };
+
+/** fetch-models 单条模型（OpenAI 兼容字段；owned_by 上游缺失则 null）。 */
+export interface FetchedProviderModel {
+  id: string;
+  owned_by: string | null;
+}
+
+/** fetch-models 响应（对齐后端 FetchModelsResponse；明文 key 永不回传）。 */
+export interface FetchProviderModelsResponse {
+  models: FetchedProviderModel[];
+}
+
+/**
+ * 拉取上游 `/v1/models`（`POST /api/llm-providers/fetch-models`）。
+ * 双形态：编辑态 `provider_id`（后端解密）/ 新建态 `base_url+api_key`（+可选
+ * `auth_field`，用完即弃，不落本地存储/日志）。响应仅含 `models`，明文 key 不回传。
+ */
+export async function fetchProviderModels(
+  req: FetchProviderModelsRequest,
+): Promise<FetchProviderModelsResponse> {
+  return apiFetch<FetchProviderModelsResponse>(
+    "/api/llm-providers/fetch-models",
+    { method: "POST", json: req },
   );
 }
 
@@ -241,6 +292,7 @@ export function formToCreate(v: LlmProviderFormValues): LlmProviderCreate {
     model_role_mappings: cleanRoleMappings(v.model_role_mappings),
     default_fallback_model: clean(v.default_fallback_model) ?? null,
     extra_env: cleanExtraEnv(v.extra_env),
+    settings_config: v.settings_config ?? null,
     is_default: v.is_default,
   };
 }
@@ -260,6 +312,7 @@ export function formToUpdate(v: LlmProviderFormValues): LlmProviderUpdate {
     model_role_mappings: cleanRoleMappings(v.model_role_mappings),
     default_fallback_model: clean(v.default_fallback_model) ?? null,
     extra_env: cleanExtraEnv(v.extra_env),
+    settings_config: v.settings_config ?? null,
     is_default: v.is_default,
   };
   const apiKey = clean(v.api_key);

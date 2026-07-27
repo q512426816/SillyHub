@@ -145,6 +145,9 @@ async def _inject_provider_config(
         "model_role_mappings": provider.model_role_mappings,
         "default_fallback_model": provider.default_fallback_model,
         "extra_env": provider.extra_env,
+        # task-04（D-009 / design §5.2）：原样透传 settings_config，不解密/不加工/不判空。
+        # None（含 task-01 brownfield 老行）照传 None，daemon 侧 ?.env ?? {} 链路判空。
+        "settings_config": provider.settings_config,
     }
     # X-10：provider.model（design §9 优先）→ default_fallback_model 覆盖 payload[model]
     override_model = provider.model or provider.default_fallback_model

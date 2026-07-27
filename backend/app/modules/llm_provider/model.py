@@ -89,6 +89,10 @@ class LlmProvider(BaseModel, table=True):
         default=None,
         sa_column=Column(JSON, nullable=True),
     )
+    settings_config: dict[str, Any] | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
     is_default: bool = Field(
         default=False,
         sa_column=Column(Boolean, nullable=False, default=False),
