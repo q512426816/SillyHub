@@ -29,6 +29,12 @@
   * `.sillyspec/changes/archive/2026-06-21-2026-06-21-frontend-style-system/prototype-frontend-style-system.html`（设计系统总纲·原型）
   * `.sillyspec/changes/archive/2026-06-21-2026-06-21-frontend-style-system/design.md`（设计系统总纲·设计决策）
   * `.sillyspec/docs/SillyHub/scan/FRONTEND_PAGE_STYLE.md`（页面级实现规范，改其它页面照这个）
+20. QUICKLOG 必须用丰富格式（CLI 自动写的是简版，不合格，每次 quick `--done` 后必须手动改写）：
+  * 标题：写真实需求摘要（如「/ppm/milestone-details 明细加序号」），禁止用 CLI 默认的「(quick 任务)」；
+  * 文件：列实际改动的具体文件路径（带关键改动括注），禁止用「（见实际改动）」；
+  * 正文：必须分「需求：」「根因：」「方案：」「结果：」四段逐项写清，不允许只留一段「结果：」；
+  * 参照 `.sillyspec/quicklog/QUICKLOG-WhaleFall-2026-07-21.md` 或同文件早期 ql 条目；
+  * 一条 quick = 一条独立 ql 条目，不追加到旧条目。
 
 
 ## 完成汇报格式

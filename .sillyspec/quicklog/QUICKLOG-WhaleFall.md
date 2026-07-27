@@ -447,13 +447,19 @@ created_at: 2026-07-21T08:48:56
 根因：上轮 ql-002 把 grid-cols-4 改成 grid-cols-3（三项均分），破坏了原有的一行四列布局。
 方案：grid-cols-3→grid-cols-4 恢复四列，三个查询条件（项目名称/状态/日期范围）各占 1 格、第 4 格留白（日期范围保持上轮的去 col-span-2）。
 结果：①纯 className 改动无类型影响，跳过 tsc；②仅改 page.tsx 1 处 + 同步 ppm.md 变更索引 ql-20260727-003-b62a；③待 commit+push+重建 frontend 部署 + 用户验证一行四列。
-## ql-20260727-004-862e | 2026-07-27 09:55:12 | (quick 任务)
+## ql-20260727-004-862e | 2026-07-27 09:55:12 | /ppm/milestone-details 明细新建/编辑加序号录入+列表序号列
 状态：已完成
 关联变更：（无）
-文件：（见实际改动）
-
-结果：已暂存 4 文件并同步模块文档。改动:page.tsx 桌面明细表单加序号输入+列表序号列;detail-drawer.tsx 移动明细表单加序号输入;ppm.md 变更索引追加 ql-20260727-004-862e。tsc 0 error;vitest 29 测试全过。后端零改。
-## ql-20260727-005-e6d2 | 2026-07-27 10:27:27 | (quick 任务)
-状态：进行中
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（内联 DetailDrawer 开立信息加序号 Input + DetailLevelTable 首位序号列）+ frontend/src/components/ppm/milestone/detail-drawer.tsx（移动明细表单加序号 Input）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：里程碑明细新建/编辑时加序号录入，查询按序号排序。
+根因：后端 PsPlanNodeDetail.no 字段(model)+schema Create/Update+查询排序(list_details_by_node 已用 _no_sort_key 数值升序 NULL 最后)+前端类型(PsPlanNodeDetail.no/Create.no/Update.no)早已就绪，唯一缺口是前端明细表单无序号录入入口致 no 全 NULL 排不出效果，且明细列表无序号列展示。
+方案：纯前端 2 文件 7 处——桌面 page.tsx 内联 DetailDrawer 开立信息块加序号 Input(initialValues 取 detail.no + baseBody 透传 no + Form.Item，首行 grid-cols-2→3 容纳序号/明细阶段/任务主题)+DetailLevelTable 首位列加序号列(对齐主表/模块表 no 列)；移动 detail-drawer.tsx 同步加序号 Input。后端零改。
+结果：①tsc --noEmit 0 error；②vitest milestone-details 桌面+移动 3 文件 29 测试全过；③commit 2f87f70e push + 重建 frontend 部署，容器 healthy、commit_sha 验证生效。
+## ql-20260727-005-e6d2 | 2026-07-27 10:27:27 | /ppm/milestone-details 导出加序号+要求列(成果列原已存在)
+状态：已完成
 关联变更：（无）
-文件：（见实际改动）
+文件：backend/app/modules/ppm/plan/service.py（_detail_dict 加 no + requirements 字段）+ backend/app/modules/ppm/plan/router.py（_MILESTONE_DETAIL_GROUP_COLUMNS 首位加序号列、成果前加要求列、顺更注释）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：里程碑明细导出加序号列、要求列、成果列。
+根因：导出走 grouped_report_to_workbook，列定义 _MILESTONE_DETAIL_GROUP_COLUMNS(router:656) 与行构造 _detail_dict(service:1340) 缺 no 与 requirements；成果 achievement 列原已存在(router:666+service:1353)无需新增，仅需补序号+要求。
+方案：后端 2 文件——service.py _detail_dict 加 no+requirements 两字段；router.py _MILESTONE_DETAIL_GROUP_COLUMNS 首位加序号列(field=no width=8)、成果列前加要求列(field=requirements width=30)，成果列与状态列不动，顺更列注释；前端 exportMilestoneDetails 仅触发下载无需改。
+结果：①venv pytest test_export+test_service 62 passed(1 既有 HTTP_422 弃用警告无关)；②ruff check All checks passed；③commit 03f43c85 push + 重建 backend 部署，容器 healthy、容器内 grep 校验新代码命中、commit_sha 验证生效。
