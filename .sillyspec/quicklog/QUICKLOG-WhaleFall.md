@@ -575,3 +575,12 @@ created_at: 2026-07-21T08:48:56
 根因：ql-011 为修穿透直接 sorter:false 关了排序，但用户实际要排序与右击菜单共存。
 方案：恢复 sortableColProps 的 sorter；title 的 span 加 onClick stopPropagation（左击 title 文字不触发 th 排序，避免误触），antd 排序图标区（th 内 title 旁）仍可左击排序；右击 title 由 Dropdown contextMenu 弹聚合菜单。
 结果：tsc --noEmit 0 error；共存：左击排序图标排序 + 右击 title 弹菜单。
+
+## ql-20260728-013-769f | 2026-07-28 20:38:36 | /ppm/weekly-plan 工作量列排序+右击菜单彻底解耦(ql-012 未解决)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（title 纯文本 + onHeaderCell contextmenu + 受控 Dropdown 挂 body）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：修复点击求和/平均值菜单项仍触发排序（ql-012 的 Dropdown 包 title 方案未解决，菜单项 click 冒泡 th 排序）。
+根因：ql-012 用 Dropdown 包 title，菜单 Portal 可能被 antd 挂到 th 内（或 th click 排序监听范围大），导致菜单项 click 冒泡 th 触发排序；span stopPropagation 拦不住菜单项（菜单在 Portal）。
+方案：彻底 DOM 解耦 —— title 改回纯文本（恢复 sorter 左击 th 正常排序）；onHeaderCell 注入 onContextMenu（preventDefault + stopPropagation + 记录 clientX/Y 到 aggMenu state）；Table 外加受控 Dropdown（open=true，onOpenChange 关闭清坐标，getPopupContainer=body，trigger 是 fixed 定位锚点 pointerEvents:none）。菜单渲染在 body 与 th 完全分离，菜单项 click 不可能冒泡到 th。
+结果：tsc --noEmit 0 error；菜单项 click 不再触发排序（已在 body DOM）；右击列头弹菜单、左击 th 排序共存。
