@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import { AgentModelInput } from "@/components/AgentModelInput";
 import { SharedDaemonToggle } from "@/components/workspace/shared-daemon-toggle";
+import { LinkedProjectsSection } from "@/components/workspace/LinkedProjectsSection";
 import { WorkspaceConfigCard } from "@/components/workspace-config-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -315,6 +316,10 @@ export default function WorkspaceDetailPage({ params }: Props) {
           <p className="text-sm font-semibold">{currentStage ?? "—"}</p>
         </Link>
       </section>
+
+      {/* 关联 PPM 项目(change 2026-07-28-ppm-project-link-workspace task-11 / FR-03):
+          工作区维度绑定/解绑项目,与项目维护页「关联工作区」操作同一张表。 */}
+      <LinkedProjectsSection workspaceId={workspaceId} />
 
       {/* Spec workspace config card（task-07 / D-003@V1，原规范管理区迁入） */}
       <WorkspaceConfigCard

@@ -9,12 +9,17 @@
  * W1 task-03:项目行新增「成员管理」入口 → 打开抽屉,内嵌按 pm_project_id 过滤的
  * PpmProjectMembersTable(对照源 ProjectMemberListForm)。
  *
+ * change 2026-07-28-ppm-project-link-workspace task-10:项目行新增「关联工作区」入口 →
+ * 打开 LinkWorkspaceDialog,对该项目绑定/解绑工作区(双边对称,与工作区详情页同表)。
+ *
  * 依据:.sillyspec/changes/2026-06-21-ppm-frontend-alignment/tasks/task-03.md
  * 参照源:vue views/ppm/projectmaintenance/index.vue
  */
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "antd";
+import { LinkWorkspaceDialog } from "@/components/workspace/LinkWorkspaceDialog";
 import type { StatusKind } from "@/components/ui/status-badge";
 import { PpmResourceTable, type PpmFieldDef } from "@/components/ppm-resource-table";
 import {
@@ -94,9 +99,19 @@ const fields: PpmFieldDef<Entity>[] = [
 
 export default function PpmProjectsPage() {
   const router = useRouter();
+  // task-10:当前打开关联工作区弹窗的目标项目(null = 关闭)。
+  const [linkTarget, setLinkTarget] = useState<{ id: string; name: string } | null>(
+    null,
+  );
 
   return (
     <>
+      <LinkWorkspaceDialog
+        open={linkTarget !== null}
+        projectId={linkTarget?.id ?? ""}
+        projectName={linkTarget?.name ?? ""}
+        onClose={() => setLinkTarget(null)}
+      />
       <PpmResourceTable<
         Entity,
         ProjectMaintenanceCreate,
@@ -120,19 +135,33 @@ export default function PpmProjectsPage() {
           row.project_name ?? row.project_code ?? row.id
         }
         extraActions={(row) => (
-          <Button
-            size="small"
-            type="link"
-            onClick={() =>
-              router.push(
-                `/ppm/project-members?project_name=${encodeURIComponent(
-                  row.project_name ?? "",
-                )}`,
-              )
-            }
-          >
-            成员管理
-          </Button>
+          <>
+            <Button
+              size="small"
+              type="link"
+              onClick={() =>
+                router.push(
+                  `/ppm/project-members?project_name=${encodeURIComponent(
+                    row.project_name ?? "",
+                  )}`,
+                )
+              }
+            >
+              成员管理
+            </Button>
+            <Button
+              size="small"
+              type="link"
+              onClick={() =>
+                setLinkTarget({
+                  id: row.id,
+                  name: row.project_name ?? row.project_code ?? row.id,
+                })
+              }
+            >
+              关联工作区
+            </Button>
+          </>
         )}
         list={(params) => pageProjects(params)}
         create={(body) => createProject(body)}
