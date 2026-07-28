@@ -471,27 +471,35 @@ created_at: 2026-07-21T08:48:56
 根因：上轮 ql-005 补序号+要求列时，把要求/成果/状态三列堆在末尾，与新建明细弹窗（page.tsx 开立信息块：序号/明细阶段/任务主题/任务描述/要求/角色/成果/计划工作量/计划开始/计划完成/执行人）的顺序不一致，看起来杂乱。
 方案：router.py _MILESTONE_DETAIL_GROUP_COLUMNS 13 列重排为「序号/状态/明细阶段/任务主题/任务描述/要求/角色/成果/计划工作量/计划开始/计划完成/执行人/执行状态」——对齐新建弹窗顺序，且状态紧随序号、执行状态紧随执行人；顺更列注释。_detail_dict 不用改（grouped_report_to_workbook 按 columns 顺序取值，字段都在）。
 结果：①ruff check All checks passed；②pytest test_export+test_service 62 passed；③仅改 router.py + 同步 ppm.md 变更索引 ql-20260727-006-adc4。
-## ql-20260728-001-652a | 2026-07-28 08:45:05 | (quick 任务)
+## ql-20260728-001-652a | 2026-07-28 08:45:05 | ppm 全模块弹窗高度按新建项目计划统一限高
 状态：已完成
 关联变更：（无）
-文件：（见实际改动）
-
-结果：需求：把 ppm 桌面端所有一级二级页面弹窗高度按【新建项目计划】(ql-20260722-004)统一调整。根因：无,纯样式统一——参考 ppm-project-plan-form 的 Modal styles.body={maxHeight:70vh,minHeight:300px,overflowY:'auto'} 已验证有效,推广到全模块其余弹窗,消除超高撑屏/内容过短弹窗过矮的不一致体验。方案：14 文件 17 处弹窗统一加 styles.body 限高(milestone-details×4 导入模块/模块表单/计划详情/里程碑表单、plan-nodes 模板表单、kanban 实际工作详情、work-hours 工时表单、problem-list 问题抽屉、task-detail-modal、problem-detail-modal、components 下 import-problem-modal/detail-drawer/ps-plan-node-drawer/import-module-modal/module-form-drawer、kanban-task-detail-drawer 用 antd Drawer styles.body);task-plans TaskDrawer 是手写 div 浮层改用等效 Tailwind max-h-[70vh] min-h-[300px] overflow-y-auto。跳过 2 处:work-hours 删除确认短弹窗(套 minHeight 300 会空荡,违背参考初衷)+kanban-task-detail-drawer 的 open=false 空壳占位。结果：tsc --noEmit 0 error;已同步 ppm 模块文档变更索引追加 ql-20260728-001-652a;暂存 14 前端文件+模块文档(QUICKLOG 由 CLI 自动收尾)。
-## ql-20260728-002-718e | 2026-07-28 09:12:41 | (quick 任务)
+文件：frontend/src/app/(dashboard)/ppm/{milestone-details,plan-nodes,kanban,work-hours,problem-list,task-plans}/page.tsx + _components/{task-detail-modal,problem-detail-modal}.tsx + kanban/_components/kanban-task-detail-drawer.tsx + frontend/src/components/ppm/{problem/import-problem-modal,milestone/detail-drawer,milestone/ps-plan-node-drawer,milestone/import-module-modal,milestone/module-form-drawer}.tsx（共 14 文件 17 处弹窗加 styles.body 限高）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：把 ppm 桌面端所有一级/二级页面弹窗的高度按【新建项目计划】(ql-20260722-004)统一调整。
+根因：无，纯样式统一——参考 ppm-project-plan-form 的 Modal styles.body={maxHeight:'70vh',minHeight:'300px',overflowY:'auto'} 已验证有效，推广到全模块其余弹窗，消除超高撑屏/内容过短弹窗过矮的不一致体验。
+方案：14 文件 17 处弹窗统一加 styles.body 限高（milestone-details×4 导入模块/模块表单/计划详情/里程碑表单、plan-nodes 模板表单、kanban 实际工作详情、work-hours 工时表单、problem-list 问题抽屉、task-detail-modal、problem-detail-modal、components 下 import-problem-modal/detail-drawer/ps-plan-node-drawer/import-module-modal/module-form-drawer、kanban-task-detail-drawer 用 antd Drawer styles.body）；task-plans TaskDrawer 是手写 div 浮层改用等效 Tailwind max-h-[70vh] min-h-[300px] overflow-y-auto。跳过 2 处：work-hours 删除确认短弹窗（套 minHeight 300 会空荡，违背参考初衷）+kanban-task-detail-drawer 的 open=false 空壳占位。
+结果：tsc --noEmit 0 error；commit ddd6b0db push + 本机 Docker 重建 frontend 部署，容器 healthy、容器内 grep maxHeight/70vh 命中确认新代码生效。
+## ql-20260728-002-718e | 2026-07-28 09:12:41 | /ppm/project-plans 弹窗 InputNumber 不占满改 className(后证实无效)
 状态：已完成
 关联变更：（无）
-文件：（见实际改动）
-
-结果：需求：编辑/新建项目计划弹窗里合同金额等 InputNumber 数字输入框要占满宽度,对齐正常 Input/Select。根因：12 个 InputNumber 已带 style={{width:'100%'}},但 antd v6 下该 style 未作用于组件 root 宽度(对比项目内 ppm-resource-table.tsx:859 用 className=w-full 占满正常,无全局 CSS 覆盖),故不占满。方案：12 个 InputNumber 的 style={{width:'100%'}} 全改为 className='w-full'(作用于 root,项目验证写法),按缩进深层10处+浅层2处分两批 replace_all 精确替换;DatePicker 3 处 style 保留不动。结果：Grep 确认 12 个 InputNumber 全为 className=w-full、DatePicker 未误伤;tsc --noEmit 0 error;同步 ppm 模块文档变更索引追加 ql-20260728-002-718e;暂存 ppm-project-plan-form.tsx + ppm.md(QUICKLOG CLI 自动收尾)。
-## ql-20260728-003-6cb3 | 2026-07-28 09:40:06 | (quick 任务)
+文件：frontend/src/components/ppm-project-plan-form.tsx（12 个 InputNumber style width:100% → className=w-full）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：编辑/新建项目计划弹窗里合同金额等 InputNumber 数字输入框要占满宽度，对齐正常 Input/Select。
+根因：12 个 InputNumber 已带 style={{width:'100%'}} 但不占满（误判为 antd v6 style 不作用于 root），对比 ppm-resource-table.tsx:859 用 className=w-full 占满（误推），无全局 CSS 覆盖。
+方案：12 个 InputNumber 的 style={{width:'100%'}} 全改为 className='w-full'（深层10处+浅层2处分两批 replace_all）；DatePicker 3 处 style 保留。
+结果：tsc --noEmit 0 error；commit 96beef96 push + 部署。⚠️ 本次判断有误，用户反馈 className 比 style 更短，ql-003 用 SSR 查到真根因（addon deprecated 触发外层 compact 塌缩）并修正。
+## ql-20260728-003-6cb3 | 2026-07-28 09:40:06 | 修正 ql-002:项目计划 InputNumber 占满真根因 addon→prefix/suffix
 状态：已完成
 关联变更：（无）
-文件：（见实际改动）
-
-结果：需求：编辑/新建项目计划弹窗合同金额等 InputNumber 占满宽度,对齐正常 Input/Select(ql-002 的 className 修复无效,用户反馈反而更短)。根因：SSR renderToStaticMarkup 验证——antd v6 addonBefore/addonAfter 已 deprecated,自动用外层 .ant-space-compact 包裹 addon+InputNumber,style/className 应用到内部 .ant-input-number 而非外层 compact,compact 是 inline-flex 无宽度基准致塌缩不占满;无 addon 的成本调剂 InputNumber 无 compact 包裹、style 在 root 正常占满。ql-002 误判为 style 不生效改 className,实际两类都因外层 compact 失效。方案：12 个 InputNumber className=w-full(ql-002) 改回 style={{width:'100%'}},11 个 addon 改 prefix/suffix(addonBefore ¥×6→prefix、addonAfter %×1→suffix、addonAfter 人/天×4→suffix),prefix/suffix 不触发 compact 包裹、style 在 root 占满,视觉不变(单位仍显示框内)。结果：Grep addon 残留 0、prefix/suffix 11 处数量正确;tsc --noEmit 0 error;SSR 验证 prefix/suffix 无 compact 包裹且 style 在 root;同步 ppm 模块文档追加 ql-20260728-003-6cb3。
-## ql-20260728-004-8ca4 | 2026-07-28 10:01:47 | (quick 任务)
+文件：frontend/src/components/ppm-project-plan-form.tsx（12 个 InputNumber className=w-full 改回 style + 11 个 addon 改 prefix/suffix）+ frontend/_check_in.js（临时 SSR 诊断脚本，已删）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：修正 ql-002 的 InputNumber 占满修复（ql-002 className 无效，用户反馈反而更短）。
+根因：用 SSR renderToStaticMarkup 验证真根因——antd v6 addonBefore/addonAfter 已 deprecated，自动用外层 .ant-space-compact 包裹 addon+InputNumber，style/className 应用到内部 .ant-input-number 而非外层 compact，compact 是 inline-flex 无宽度基准致塌缩不占满；无 addon 的成本调剂 InputNumber 无 compact 包裹、style 在 root 正常占满。ql-002 误判为 style 不生效改 className，实际两类都因外层 compact 失效。
+方案：12 个 InputNumber className=w-full(ql-002) 改回 style={{width:'100%'}}，11 个 addon 改 prefix/suffix（addonBefore ¥×6→prefix、addonAfter %×1→suffix、addonAfter 人/天×4→suffix），SSR 验证 prefix/suffix 不触发 compact 包裹、style 在 root 占满，视觉不变（单位仍显示框内）。
+结果：Grep addon 残留 0、prefix/suffix 11 处数量正确；tsc --noEmit 0 error；commit 3366eba8 push + 部署，容器 healthy。
+## ql-20260728-004-8ca4 | 2026-07-28 10:01:47 | /ppm/problem-list 弹窗表单两列布局+InputNumber 占满
 状态：已完成
 关联变更：（无）
-文件：（见实际改动）
-
-结果：需求：problem-list 弹窗表单按项目计划弹窗标准调整(占满+两列),能一行两个的改一行两个,缩短过长的纵向高度。根因：_forms.tsx 19 个 Form.Item 全垂直堆叠(一行一个)致弹窗过长;预计工作量 InputNumber 用 addonAfter(antd v6 addon 触发外层 compact 致宽度塌缩,同 ql-003 根因)。方案：Form 加 className='grid grid-cols-2 gap-x-3' 两列布局,短字段默认占1格 grid auto-flow 两两排列,长字段(问题答复/问题附件/备注)+按钮区加 col-span-2 独占,处置人(仅编辑)条件渲染自动补位;预计工作量 addonAfter='人/天'→suffix(对齐 ql-003)。结果：Grep grid-cols-2×1、col-span-2×4、suffix×1、addon 残留 0;tsc --noEmit 0 error;19 行→约 11 行;同步 ppm 模块文档追加 ql-20260728-004-8ca4。
+文件：frontend/src/app/(dashboard)/ppm/problem-list/_forms.tsx（Form 加 grid-cols-2 + 长字段 col-span-2 + 预计工作量 addonAfter→suffix）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：problem-list 弹窗表单按项目计划弹窗标准调整（占满+两列），能一行两个的改一行两个，缩短过长的纵向高度。
+根因：_forms.tsx 19 个 Form.Item 全垂直堆叠（一行一个）致弹窗过长；预计工作量 InputNumber 用 addonAfter（antd v6 addon 触发外层 compact 致宽度塌缩，同 ql-003 根因）。
+方案：Form 加 className='grid grid-cols-2 gap-x-3' 两列布局，短字段（项目/模块/问题描述/功能名称/类型/紧急/发现人/日期/工作类型/责任人/处置人/工作量/计划开始/完成/验证人）默认占1格 grid auto-flow 两两排列，长字段（问题答复 TextArea/问题附件 FileUpload/备注 TextArea）+按钮区加 col-span-2 独占整行，处置人（仅 isEdit）条件渲染自动补位不留空；预计工作量 addonAfter='人/天'→suffix（对齐 ql-003）。
+结果：Grep grid-cols-2×1、col-span-2×4、suffix×1、addon 残留 0；tsc --noEmit 0 error；19 行→约 11 行；commit e563c6c3 push + 部署，容器 healthy。
