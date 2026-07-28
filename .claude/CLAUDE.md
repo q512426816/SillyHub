@@ -29,13 +29,7 @@
   * `.sillyspec/changes/archive/2026-06-21-2026-06-21-frontend-style-system/prototype-frontend-style-system.html`（设计系统总纲·原型）
   * `.sillyspec/changes/archive/2026-06-21-2026-06-21-frontend-style-system/design.md`（设计系统总纲·设计决策）
   * `.sillyspec/docs/SillyHub/scan/FRONTEND_PAGE_STYLE.md`（页面级实现规范，改其它页面照这个）
-20. QUICKLOG 必须用丰富格式（CLI 自动写的是简版，不合格，每次 quick `--done` 后必须手动改写）：
-  * 标题：写真实需求摘要（如「/ppm/milestone-details 明细加序号」），禁止用 CLI 默认的「(quick 任务)」；
-  * 文件：列实际改动的具体文件路径（带关键改动括注），禁止用「（见实际改动）」；
-  * 正文：必须分「需求：」「根因：」「方案：」「结果：」四段逐项写清，不允许只留一段「结果：」；
-  * 参照 `.sillyspec/quicklog/QUICKLOG-WhaleFall-2026-07-21.md` 或同文件早期 ql 条目；
-  * 一条 quick = 一条独立 ql 条目，不追加到旧条目。
-21. 前端接口类型（`frontend/src/lib/api-types.ts`）必须从后端 OpenAPI 生成（`pnpm gen:types`），禁止手写：
+20. 前端接口类型（`frontend/src/lib/api-types.ts`）必须从后端 OpenAPI 生成（`pnpm gen:types`），禁止手写：
   * 后端 schema（DTO/请求/响应）有改动时，同一 quick/change 内必须跑 `pnpm gen:types` 并提交 `api-types.ts` + `backend/openapi.json`，不让类型落后后端形成债；
   * **gen:types 前先确认前端 node_modules 健康**（`pnpm exec tsc --version` 能跑、`.bin` 有 shim）：node_modules 半坏会报一堆**假的** `CSSProperties 不存在某属性` / `Cannot find module '@ant-design/icons'`（根因是缺间接依赖 csstype 等），误判成代码问题。修复 `pnpm install --force`（普通 install 可能命中缓存不修）；
   * 若 gen:types 暴露了与本次改动**无关**的旧测试债（如 mock 缺某字段），按惯例顺手补字段修好，而不是为躲报错改回手写。
