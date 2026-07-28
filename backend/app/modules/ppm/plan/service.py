@@ -532,6 +532,18 @@ class PlanService:
     async def create_ps_project_plan(
         self, data: dict[str, Any], *, operator: uuid.UUID | None = None
     ) -> PsProjectPlan:
+        # 同一项目只能建一条项目计划:project_id 已存在则拒绝
+        if data.get("project_id"):
+            proj_id = self._safe_uuid(str(data["project_id"]))
+            if proj_id is not None:
+                dup_id = await self._session.scalar(
+                    select(PsProjectPlan.id).where(PsProjectPlan.project_id == proj_id)
+                )
+                if dup_id is not None:
+                    raise PlanError(
+                        "该项目已有项目计划,不能重复创建",
+                        details={"project_id": str(proj_id)},
+                    )
         # project_name 兜底:前端表单无 project_name 字段、onProjectChange 回填值
         # 未可靠进入提交体(实测新建记录 project_name=None)。此处按 project_id
         # 关联取项目名,作为单一可信源,避免列表回退显示 id。

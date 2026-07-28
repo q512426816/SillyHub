@@ -31,7 +31,6 @@ import {
   PageHeader,
   SectionCard,
 } from "@/components/layout";
-import { PpmProjectPlanDetail } from "@/components/ppm-project-plan-detail";
 import { PpmProjectPlanForm } from "@/components/ppm-project-plan-form";
 import { ApiError } from "@/lib/api";
 import {
@@ -47,11 +46,6 @@ interface DrawerState {
   open: boolean;
   mode: "create" | "edit";
   plan?: PsProjectPlan;
-}
-
-interface DetailState {
-  open: boolean;
-  planId: string | null;
 }
 
 interface SearchForm {
@@ -111,10 +105,6 @@ export default function ProjectPlansPage() {
   const [drawer, setDrawer] = useState<DrawerState>({
     open: false,
     mode: "create",
-  });
-  const [detail, setDetail] = useState<DetailState>({
-    open: false,
-    planId: null,
   });
   const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(
     null,
@@ -323,14 +313,7 @@ export default function ProjectPlansPage() {
       dataIndex: "project_name",
       key: "project_name",
       width: 180,
-      render: (v: string | null, p: PsProjectPlan) => (
-        <button
-          className="text-left font-medium hover:underline"
-          onClick={() => setDetail({ open: true, planId: p.id })}
-        >
-          {v ?? "—"}
-        </button>
-      ),
+      render: (v: string | null) => v ?? "—",
     },
     {
       title: "项目经理",
@@ -669,12 +652,6 @@ export default function ProjectPlansPage() {
           setDrawer({ open: false, mode: "create" });
           void load();
         }}
-      />
-
-      <PpmProjectPlanDetail
-        open={detail.open}
-        planId={detail.planId}
-        onClose={() => setDetail({ open: false, planId: null })}
       />
     </PageContainer>
   );
