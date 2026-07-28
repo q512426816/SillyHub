@@ -51,6 +51,7 @@ from app.modules.tool_gateway.policy_router import router as policy_crud_router
 from app.modules.tool_gateway.router import router as tool_gateway_router
 from app.modules.workflow.router import router as workflow_router
 from app.modules.workspace import workspace_router
+from app.modules.workspace.link_router import router as ppm_project_link_router
 from app.modules.workspace.member_runtimes.router import (
     router as member_runtimes_router,
 )
@@ -483,6 +484,12 @@ def create_app() -> FastAPI:
     # double-count members_router's own prefix and raise
     # ``ValueError: Duplicated param name workspace_id``.
     app.include_router(members_router, prefix="/api", tags=["workspace-members"])
+    # PPM 项目 ↔ 工作区 关联·工作区维度(change ``2026-07-28-ppm-project-link-workspace``
+    # task-07):sibling include 仿 members_router。link_router 自带
+    # ``/workspaces/{workspace_id}/ppm-projects`` prefix,外层只加 ``/api`` →
+    # ``/api/workspaces/{workspace_id}/ppm-projects/*``(双边对称的项目维度端点在
+    # ppm/project/router.py,挂 /api/ppm)。
+    app.include_router(ppm_project_link_router, prefix="/api", tags=["workspace-ppm-links"])
     # 平台级文件中心（2026-07-22-platform-file-center）：通用上传/预览/元数据/软删。
     from app.modules.file.router import router as file_router
 

@@ -24,8 +24,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_principal
 from app.core.db import get_session
+from app.core.errors import AppError, PermissionDenied
 from app.modules.auth.model import User
 from app.modules.ppm.common.crud import Page, PageReq
+from app.modules.ppm.common.data_scope import is_super_admin, manager_project_ids
 from app.modules.ppm.common.export import (
     ColumnDef,
     excel_response,
@@ -55,6 +57,8 @@ from app.modules.ppm.project.schema import (
     ProjectStakeholderResp,
     ProjectStakeholderUpdate,
 )
+from app.modules.workspace import link_service
+from app.modules.workspace.schema import BindWorkspaceRequest, WorkspaceBrief
 
 router = APIRouter(tags=["ppm-project"])
 
@@ -611,6 +615,99 @@ async def page_project_stakeholder(
         total=result.total,
         req=PageReq(page=page, page_size=page_size, order_by=order_by, order=order),
     )
+
+
+# ---------------------------------------------------------------------------
+# PPM 项目 ↔ 工作区 关联(change 2026-07-28-ppm-project-link-workspace task-06)
+# 项目维度 GET/POST/DELETE /projects/{project_id}/workspaces,与工作区维度
+# (workspace/link_router.py)操作同一张 ppm_project_workspace 表(双边对称)。
+# 只读写新关联表,零 PPM 数据模型改动(D-001@v1)。
+# ---------------------------------------------------------------------------
+
+
+async def _require_project_manager(
+    session: AsyncSession, user: User, project_id: uuid.UUID
+) -> None:
+    """校验当前用户对该 PPM 项目有 manager 权限,否则 403(FR-05)。
+
+    复用 ppm/common/data_scope 的 is_super_admin + manager_project_ids
+    (2026-07-22 权限统一到项目成员角色)。
+    """
+    if await is_super_admin(session, user):
+        return
+    if project_id in await manager_project_ids(session, user):
+        return
+    raise PermissionDenied(
+        "Project manager permission required to manage workspace links.",
+        details={"project_id": str(project_id)},
+    )
+
+
+@router.get(
+    "/projects/{project_id}/workspaces",
+    response_model=list[WorkspaceBrief],
+)
+async def list_project_workspaces(
+    project_id: uuid.UUID,
+    session: SessionDep,
+    user: AuthUser,
+) -> list[WorkspaceBrief]:
+    """列出项目关联的工作区(过滤软删除工作区,FR-06)。权限:登录用户(项目可见)。"""
+    return await link_service.list_by_project(session, ppm_project_id=project_id)
+
+
+@router.post(
+    "/projects/{project_id}/workspaces",
+    response_model=WorkspaceBrief,
+    status_code=status.HTTP_201_CREATED,
+)
+async def link_workspace(
+    project_id: uuid.UUID,
+    payload: BindWorkspaceRequest,
+    session: SessionDep,
+    user: AuthUser,
+) -> WorkspaceBrief:
+    """绑定工作区到本 PPM 项目。权限:项目 manager(非 manager 403)。
+
+    重复绑定 409、目标工作区不存在 404(由 link_service 抛)。回读 list 取带
+    name/status/type 的摘要。
+    """
+    await _require_project_manager(session, user, project_id)
+    await link_service.bind(
+        session,
+        ppm_project_id=project_id,
+        workspace_id=payload.workspace_id,
+    )
+    linked = await link_service.list_by_project(session, ppm_project_id=project_id)
+    for brief in linked:
+        if brief.workspace_id == payload.workspace_id:
+            return brief
+    # 防御:bind 已提交成功,list 必含目标,理论不可达。
+    raise AppError(
+        "Link created but could not be read back.",
+        code="internal_error",
+        http_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    )
+
+
+@router.delete(
+    "/projects/{project_id}/workspaces/{workspace_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def unlink_workspace(
+    project_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    user: AuthUser,
+) -> None:
+    """解绑工作区。权限:项目 manager(非 manager 403)。幂等(不存在静默 204)。"""
+    await _require_project_manager(session, user, project_id)
+    await link_service.unbind(
+        session,
+        ppm_project_id=project_id,
+        workspace_id=workspace_id,
+    )
+    return None
 
 
 __all__ = ["router"]
