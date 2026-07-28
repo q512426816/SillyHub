@@ -521,3 +521,12 @@ created_at: 2026-07-21T08:48:56
 根因：按钮原在 _forms.tsx 的 Form 内容区内，随 body overflowY 滚动，不固定底部；project-plans 按钮在 Modal footer（固定底部，参考 ppm-project-plan-form）。
 方案：_forms 用 forwardRef + useImperativeHandle 暴露 {submit}、删 Form 内按钮区 div；_problem-drawer 加 formRef + Modal 自定义 footer（取消 onClose / 保存 formRef.current?.submit()，无 loading 对齐 project-plans）+ ProblemCreateForm 加 ref，去掉 footer={null}。
 结果：tsc --noEmit 0 error；对齐 project-plans footer 模式，按钮固定弹窗底部不随内容滚动。
+
+## ql-20260728-007-14cc | 2026-07-28 13:38:11 | /ppm/project-plans 取消项目名称点击弹抽屉+相同项目唯一
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx（项目名称列 button→纯文本+清理 dead detail 5 处）+ backend/app/modules/ppm/plan/service.py（create_ps_project_plan 加 project_id 查重）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：① 取消项目名称点击弹出详情抽屉；② 相同项目只能建一条项目计划。
+根因：① 项目名称列 render 是 button onClick 打开 PpmProjectPlanDetail 抽屉；② create_ps_project_plan 无 project_id 唯一校验，可重复建同一项目的计划。
+方案：① project-plans/page.tsx 项目名称列 button→纯文本 v??—，清理 dead detail（import PpmProjectPlanDetail / DetailState interface / detail state / PpmProjectPlanDetail 组件 共 5 处）；② plan/service.py create_ps_project_plan 开头加 project_id 查重（select PsProjectPlan.id where project_id，已存在 raise PlanError 400「该项目已有项目计划」），前端无需改（createProjectPlan catch ApiError message.error 自动提示）。
+结果：前端 tsc --noEmit 0 error；后端 py_compile OK + ruff All checks passed。
