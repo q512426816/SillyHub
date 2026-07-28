@@ -687,7 +687,7 @@ function TaskDrawer({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-      <div className="w-[560px] rounded-md border bg-background p-5 shadow-lg">
+      <div className="w-[560px] max-h-[70vh] min-h-[300px] overflow-y-auto rounded-md border bg-background p-5 shadow-lg">
         <h3 className="text-sm font-semibold">编辑任务计划</h3>
         <div className="mt-3 grid grid-cols-2 gap-3">
           <div className="col-span-2">

@@ -247,6 +247,14 @@ export function ImportModuleModal({
       open={open}
       title="导入模块（实施阶段）"
       width={880}
+      styles={{
+        // body 限高:多步导入内容超高时内部滚动不撑满屏幕 (对齐 ppm-project-plan-form ql-20260728-001)
+        body: {
+          maxHeight: "70vh",
+          minHeight: "300px",
+          overflowY: "auto",
+        },
+      }}
       destroyOnClose
       maskClosable={false}
       onCancel={handleClose}

@@ -471,3 +471,9 @@ created_at: 2026-07-21T08:48:56
 根因：上轮 ql-005 补序号+要求列时，把要求/成果/状态三列堆在末尾，与新建明细弹窗（page.tsx 开立信息块：序号/明细阶段/任务主题/任务描述/要求/角色/成果/计划工作量/计划开始/计划完成/执行人）的顺序不一致，看起来杂乱。
 方案：router.py _MILESTONE_DETAIL_GROUP_COLUMNS 13 列重排为「序号/状态/明细阶段/任务主题/任务描述/要求/角色/成果/计划工作量/计划开始/计划完成/执行人/执行状态」——对齐新建弹窗顺序，且状态紧随序号、执行状态紧随执行人；顺更列注释。_detail_dict 不用改（grouped_report_to_workbook 按 columns 顺序取值，字段都在）。
 结果：①ruff check All checks passed；②pytest test_export+test_service 62 passed；③仅改 router.py + 同步 ppm.md 变更索引 ql-20260727-006-adc4。
+## ql-20260728-001-652a | 2026-07-28 08:45:05 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+
+结果：需求：把 ppm 桌面端所有一级二级页面弹窗高度按【新建项目计划】(ql-20260722-004)统一调整。根因：无,纯样式统一——参考 ppm-project-plan-form 的 Modal styles.body={maxHeight:70vh,minHeight:300px,overflowY:'auto'} 已验证有效,推广到全模块其余弹窗,消除超高撑屏/内容过短弹窗过矮的不一致体验。方案：14 文件 17 处弹窗统一加 styles.body 限高(milestone-details×4 导入模块/模块表单/计划详情/里程碑表单、plan-nodes 模板表单、kanban 实际工作详情、work-hours 工时表单、problem-list 问题抽屉、task-detail-modal、problem-detail-modal、components 下 import-problem-modal/detail-drawer/ps-plan-node-drawer/import-module-modal/module-form-drawer、kanban-task-detail-drawer 用 antd Drawer styles.body);task-plans TaskDrawer 是手写 div 浮层改用等效 Tailwind max-h-[70vh] min-h-[300px] overflow-y-auto。跳过 2 处:work-hours 删除确认短弹窗(套 minHeight 300 会空荡,违背参考初衷)+kanban-task-detail-drawer 的 open=false 空壳占位。结果：tsc --noEmit 0 error;已同步 ppm 模块文档变更索引追加 ql-20260728-001-652a;暂存 14 前端文件+模块文档(QUICKLOG 由 CLI 自动收尾)。

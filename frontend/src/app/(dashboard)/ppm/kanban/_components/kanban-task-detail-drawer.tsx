@@ -136,6 +136,10 @@ export function KanbanTaskDetailDrawer({
       open={task !== null}
       onClose={onClose}
       destroyOnClose
+      styles={{
+        // body 限高:任务详情内容超高时内部滚动 (对齐 ppm-project-plan-form ql-20260728-001)
+        body: { maxHeight: "70vh", minHeight: "300px", overflowY: "auto" },
+      }}
     >
       <Spin spinning={loading}>
         {/* 头部:状态 + 逾期标记 */}

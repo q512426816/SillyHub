@@ -141,6 +141,14 @@ export function PsPlanNodeDrawer({
       open={open}
       onCancel={onClose}
       width={640}
+      styles={{
+        // body 限高:表单内容超高时内部滚动不撑满屏幕 (对齐 ppm-project-plan-form ql-20260728-001)
+        body: {
+          maxHeight: "70vh",
+          minHeight: "300px",
+          overflowY: "auto",
+        },
+      }}
       destroyOnClose
       maskClosable={false}
       footer={
