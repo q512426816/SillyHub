@@ -548,3 +548,12 @@ created_at: 2026-07-21T08:48:56
 根因：import_commit 建新建模块/导入明细时未赋 no 字段，导入数据无序号（与手动建的明细/模块有序号不一致）。
 方案：后端 plan/service.py 加 _max_numeric_no helper（查最大纯数字 no，非数字/None 忽略，无则 0）；import_commit 开头算模块序号起点（plan_node 下 PlanNodeModule max no），新建模块 module_no_next+1 赋 no（merged 模块复用既有序号不赋）；每模块算明细序号起点（module 下 PsPlanNodeDetail max no），导入明细递增赋 no（new 模块明细从 1 起，merged 从该模块 max no+1 起）。
 结果：ruff format（已合规）+ check All checks passed + py_compile OK。
+
+## ql-20260728-010-15a2 | 2026-07-28 19:26:06 | /ppm/weekly-plan 工作量列右击表头聚合(求和/平均值多选)+总结栏
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（工作量列头 Dropdown + workloadAgg + Table summary）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：工作量列头右击弹【求和/求平均值】可多选，选后底部总结栏在该列显示求和/平均值结果。
+根因：weekly-plan 工作量列无聚合能力，无法快速统计总量/均值。
+方案：page.tsx 工作量列 title 改 Dropdown（trigger=contextMenu，menu selectable multiple 求和/平均值，weeklyAgg state 受控）；workloadAgg useMemo 基于 processedData 实际数据行 Number(work_load) 过滤 finite 求和/平均 round 2 位；Table 加 summary（weeklyAgg 非空时 Fixed 底部，前 7 列 colSpan=7「合计」，工作量列 index=7 显示求和/平均值两行）。
+结果：tsc --noEmit 0 error；virtual+多级表头 summary 兼容性待部署验证。
