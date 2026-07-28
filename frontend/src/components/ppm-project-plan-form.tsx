@@ -352,11 +352,11 @@ export function PpmProjectPlanForm({
           </Row2>
           <Form.Item label="合同金额(含税)" name="contract_amount">
             <InputNumber
-              className="w-full"
+              style={{ width: "100%" }}
               precision={2}
               step={1}
               min={0}
-              addonBefore="¥"
+              prefix="¥"
               placeholder="请输入"
               onChange={() => countMoney()}
             />
@@ -368,23 +368,23 @@ export function PpmProjectPlanForm({
           <Row2>
             <Form.Item label="公司既定利润率" name="profit_margin">
               <InputNumber
-                className="w-full"
+                style={{ width: "100%" }}
                 precision={2}
                 step={1}
                 min={0}
                 max={100}
-                addonAfter="%"
+                suffix="%"
                 placeholder="请输入"
                 onChange={() => countMoney()}
               />
             </Form.Item>
             <Form.Item label="公司既定利润金额" name="profit_amount">
               <InputNumber
-                className="w-full"
+                style={{ width: "100%" }}
                 precision={2}
                 step={1}
                 min={0}
-                addonBefore="¥"
+                prefix="¥"
                 placeholder="自动计算"
                 disabled
               />
@@ -397,20 +397,20 @@ export function PpmProjectPlanForm({
           <Row2>
             <Form.Item label="预算金额" name="budget_amount">
               <InputNumber
-                className="w-full"
+                style={{ width: "100%" }}
                 precision={2}
                 step={1}
                 min={0}
-                addonBefore="¥"
+                prefix="¥"
                 placeholder="请输入"
               />
             </Form.Item>
             <Form.Item label="预算人天" name="budget_person_days">
               <InputNumber
-                className="w-full"
+                style={{ width: "100%" }}
                 step={1}
                 min={0}
-                addonAfter="人/天"
+                suffix="人/天"
                 placeholder="请输入"
                 onChange={() => countUser()}
               />
@@ -419,19 +419,19 @@ export function PpmProjectPlanForm({
           <Row2>
             <Form.Item label="实际花费人天" name="actual_consumption_person_days">
               <InputNumber
-                className="w-full"
+                style={{ width: "100%" }}
                 step={1}
                 min={0}
-                addonAfter="人/天"
+                suffix="人/天"
                 placeholder="请输入"
                 onChange={() => countUser()}
               />
             </Form.Item>
             <Form.Item label="剩余可用人天" name="remaining_available_person_days">
               <InputNumber
-                className="w-full"
+                style={{ width: "100%" }}
                 step={1}
-                addonAfter="人/天"
+                suffix="人/天"
                 placeholder="自动计算"
               />
             </Form.Item>
@@ -443,21 +443,21 @@ export function PpmProjectPlanForm({
           <Row2>
             <Form.Item label="总成本" name="total_cost">
               <InputNumber
-                className="w-full"
+                style={{ width: "100%" }}
                 precision={2}
                 step={1}
                 min={0}
-                addonBefore="¥"
+                prefix="¥"
                 placeholder="请输入"
               />
             </Form.Item>
             <Form.Item label="人力成本" name="labor_cost">
               <InputNumber
-                className="w-full"
+                style={{ width: "100%" }}
                 precision={2}
                 step={1}
                 min={0}
-                addonBefore="¥"
+                prefix="¥"
                 placeholder="请输入"
               />
             </Form.Item>
@@ -465,16 +465,16 @@ export function PpmProjectPlanForm({
           <Row2>
             <Form.Item label="剩余成本" name="remaining_cost">
               <InputNumber
-                className="w-full"
+                style={{ width: "100%" }}
                 precision={2}
                 step={1}
-                addonBefore="¥"
+                prefix="¥"
                 placeholder="请输入"
               />
             </Form.Item>
             <Form.Item label="成本调剂" name="cost_adjustment">
               <InputNumber
-                className="w-full"
+                style={{ width: "100%" }}
                 precision={2}
                 step={1}
                 placeholder="请输入"
@@ -483,10 +483,10 @@ export function PpmProjectPlanForm({
           </Row2>
           <Form.Item label="调剂人天" name="adjustment_person_days">
             <InputNumber
-              className="w-full"
+              style={{ width: "100%" }}
               step={1}
               min={0}
-              addonAfter="人/天"
+              suffix="人/天"
               placeholder="请输入"
             />
           </Form.Item>

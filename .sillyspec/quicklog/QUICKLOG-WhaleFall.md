@@ -483,3 +483,9 @@ created_at: 2026-07-21T08:48:56
 文件：（见实际改动）
 
 结果：需求：编辑/新建项目计划弹窗里合同金额等 InputNumber 数字输入框要占满宽度,对齐正常 Input/Select。根因：12 个 InputNumber 已带 style={{width:'100%'}},但 antd v6 下该 style 未作用于组件 root 宽度(对比项目内 ppm-resource-table.tsx:859 用 className=w-full 占满正常,无全局 CSS 覆盖),故不占满。方案：12 个 InputNumber 的 style={{width:'100%'}} 全改为 className='w-full'(作用于 root,项目验证写法),按缩进深层10处+浅层2处分两批 replace_all 精确替换;DatePicker 3 处 style 保留不动。结果：Grep 确认 12 个 InputNumber 全为 className=w-full、DatePicker 未误伤;tsc --noEmit 0 error;同步 ppm 模块文档变更索引追加 ql-20260728-002-718e;暂存 ppm-project-plan-form.tsx + ppm.md(QUICKLOG CLI 自动收尾)。
+## ql-20260728-003-6cb3 | 2026-07-28 09:40:06 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+
+结果：需求：编辑/新建项目计划弹窗合同金额等 InputNumber 占满宽度,对齐正常 Input/Select(ql-002 的 className 修复无效,用户反馈反而更短)。根因：SSR renderToStaticMarkup 验证——antd v6 addonBefore/addonAfter 已 deprecated,自动用外层 .ant-space-compact 包裹 addon+InputNumber,style/className 应用到内部 .ant-input-number 而非外层 compact,compact 是 inline-flex 无宽度基准致塌缩不占满;无 addon 的成本调剂 InputNumber 无 compact 包裹、style 在 root 正常占满。ql-002 误判为 style 不生效改 className,实际两类都因外层 compact 失效。方案：12 个 InputNumber className=w-full(ql-002) 改回 style={{width:'100%'}},11 个 addon 改 prefix/suffix(addonBefore ¥×6→prefix、addonAfter %×1→suffix、addonAfter 人/天×4→suffix),prefix/suffix 不触发 compact 包裹、style 在 root 占满,视觉不变(单位仍显示框内)。结果：Grep addon 残留 0、prefix/suffix 11 处数量正确;tsc --noEmit 0 error;SSR 验证 prefix/suffix 无 compact 包裹且 style 在 root;同步 ppm 模块文档追加 ql-20260728-003-6cb3。
