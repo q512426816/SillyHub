@@ -452,3 +452,18 @@ created_at: 2026-07-05 16:33:00
 根因：本次先手写 captcha 类型、后又因全量 gen:types 暴露无关债而退回手写，根源是缺一条明确规则约束"类型必须生成、后端 schema 改了必须同步提交 api-types"，且 node_modules 损坏(csstype/@ant-design/icons 缺失)会产生大量假 CSSProperties/Cannot find module 报错误导判断。
 方案：在 CLAUDE.md 规则 20 后新增规则 21，三条约束——①类型必须 gen:types 生成禁止手写、后端 schema 改动同一 quick 内同步提交 api-types+openapi.json；②gen 前先确认 node_modules 健康(tsc 能跑/.bin 有 shim)，半坏的假报错用 pnpm install --force 修复；③gen 暴露无关旧测试债(如 mock 缺字段)顺手补字段修好而非改回手写。该规则属项目工程/CI 门禁范畴，非 SillySpec 工具坑，故记 CLAUDE.md 而非 docs/sillyspec/。
 结果：CLAUDE.md 加 1 条规则，后续 session 开局即读到。无代码改动、无需测试。
+
+## ql-20260728-008-375b | 2026-07-28 22:48:06 | 修阿里云全站周期性卡 17s（idle_in_transaction 超时 10s 误伤长事务）
+状态：已完成
+关联变更：（无）
+文件：backend/app/core/db.py
+- backend/app/core/db.py（`_IDLE_IN_TXN_TIMEOUT_MS` 由 `10000`(10s) 调为 `120000`(120s)，并补根因/取值注释；仅参数+注释，无逻辑分支）
+
+需求：阿里云生产环境访问页面接口周期性卡 ~17 秒后又自动恢复，用户反馈「加载好久，现在又好了」，需定位并根治。
+
+根因：不是 HTTP/2 也不是 bcrypt（那两个此前已修）。真实链路——`backend/app/core/db.py:40` 给每条 PG 连接下发 `idle_in_transaction_session_timeout=10000`(10s，7-22 性能审计引入，本意防泄漏事务占满连接池)。某些请求开启事务后中间 `await` 慢外部调用（daemon WS/LLM/SSE），事务空闲超 10s,PG 于 14:40:05(UTC，本地 22:40）批量 `terminating connection due to idle-in-transaction timeout` 强杀 9 条悬挂连接；14:40:11 后端复用到这些断连接，回滚时连接状态已损坏（`cannot switch to state 15; another operation in progress`),SQLAlchemy 连接池重建 ≈17s，导致同时段所有请求（admin/users、workbench/todos、project-plan、work-hour 等）集体卡 17s。证据：PG 日志 9 条 idle-in-transaction FATAL（同秒）+ 后端 slow.request 一批 ~17s（同秒）+ unhandled_error 断连接回滚栈。`delegate.py` 此前已对「长 RPC 前 commit 释放事务」做过点状修复（H2 第六批），但全局 10s 对未做该优化的其它路径仍太短。
+
+方案：最小对症修复，调大 `idle_in_transaction_session_timeout` 10s→120s。120s 足够覆盖绝大多数合法「事务内 await 慢调用」的空闲等待，不再被误杀；同时保留防泄漏事务兜底（真泄漏连接 120s 后仍被回收，连接池 pool_size20+overflow30 不会被永久占满）。与 `statement_timeout=30s` 比例协调。delegate 等已知超长 RPC(gate 可达 12min）仍应走「RPC 前释放事务」而非靠大超时硬扛，该点状优化不受影响。
+
+结果：`backend/app/core/db.py` 单文件参数+注释改动；import 验证 `server_settings.idle_in_transaction_session_timeout='120000'` 生效；`app/core` 测试 40 passed 零回归。改动为连接级 `server_settings`，需重启/重部署 backend 容器后对新连接生效（已有连接不受影响，连接池随 pool_recycle=300s 逐步换新）。遗留建议：排查哪些具体路径在事务内 await 慢调用（可对照 PG `pg_stat_activity state='idle in transaction'` 定期采样），逐个做「RPC 前释放事务」点状优化，把 120s 当作兜底而非依赖。
+

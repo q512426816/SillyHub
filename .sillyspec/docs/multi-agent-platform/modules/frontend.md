@@ -66,4 +66,6 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 - ql-20260728-003 | 滑块下线换「我不是机器人」点按 + 登录页 UI 现代化 + 修 token 闭包 bug：删 `slider-captcha.tsx`，新建 `components/ui/confirm-captcha.tsx`（点按一次性 captcha_id→token，lucide Shield/ShieldCheck/Loader2 四态）；`lib/auth.ts` 改 `fetchConfirmCaptcha`/`verifyConfirmCaptcha`（去 x）。**关键 bug 修复**：`handleVerified` 原 `setCaptchaToken(token)` 后立即 `doLogin`，闭包读到 setState 前的旧 `captchaToken` → login 漏带 token 仍 423（"验证过了登不进"根因）；改为 `doLogin(values, token)` 直传。`(auth)/login/page.tsx` UI 重写为现代深色品牌风（左侧深蓝渐变+网格+光斑+lucide 特性条，右侧亮色玻璃拟态卡，token primary #2563EB，无新依赖）；`m/login/page.tsx` 补齐原本缺失的整套 423/验证码链路并接入 ConfirmCaptcha。
 
+- 2026-07-28-llm-provider-presets-and-usage | LLM 供应商预设模板 + 用量/余额查询前端：新增 `config/llmProviderPresets.ts`（10 家 claude 风格预设常量，6 家标 `usage:{type:balance|token_plan}`，settings_config env 块抄 cc-switch）+ form 顶部预设选择器（网格按钮、分类排序 官方/国内官方/聚合站、💰可查用量标记、＋自定义重置，点预设 setState 填 name/base_url/auth_field/model/website_url，api_key 留空）；`lib/api/llm-providers.ts` 加 `queryUsage(id)` + `detectUsageProvider` + UsageResult/UsageData 类型；新增 `usage-footer.tsx`（多 tier 余额条逐 UsageData 渲染 + 翻红 + keep-last-good 保留上次成功值 10 分钟，移植 cc-switch `resolveDisplayUsage` + 不支持文案）；list 每行挂 UsageFooter + 💰 徽标 + 进页面自动查 + 手动单家刷新。3 件 `__tests__/*.test.tsx`。
+
 <!-- MANUAL_NOTES_END -->

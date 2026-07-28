@@ -1,6 +1,8 @@
 # execute --done 进度重置 + review.json 双层门控
 
-> 2026-07-28 变更 `2026-07-28-llm-provider-presets-and-usage` execute 阶段实测踩坑，待工具修复。
+> 2026-07-28 变更 `2026-07-28-llm-provider-presets-and-usage` execute 阶段实测踩坑。
+>
+> **状态更新（2026-07-28 核对源码）**：下方「逐次 `--done` 推进」摩擦已由 batch-complete 机制解决（commit `8bc4cd7`，源码已落地、截至 v3.25.4 **未发布**）——plan.md 全勾 + 代码核验（`checkExecuteCodeEvidence` 非 `unchanged`）时，单次 `--done` 批量完成剩余 execute step，直接进 stage 完成分支（不绕过任何 gate）。**双层 review.json 门控（task 级 + stage 级）仍按设计保留**，下方的门控契约/路径/schema/worktree apply baseline 漂移/ci-check hook 全树扫描仍准确。仅「现象/推进策略」段的逐 step 手动法过时（见该段标注）。
 
 ## 现象
 
@@ -35,8 +37,11 @@ execute 阶段还需一个**独立的 stage 级** review.json：
 - `docHash` = `sha256(design.md 内容)`（hex）。
 - `checklist` 每项 `{item, result:"pass|fail", note}`，按 design 章节 + FR/NFR/决策对照代码逐条核验。
 
-## 推进策略（实测可用）
+## 推进策略
 
+> **首选（已落地，commit `8bc4cd7`，截至 v3.25.4 未发布）**：plan.md 全勾 + 代码已核验（`checkExecuteCodeEvidence` 非 `unchanged`）→ 单次 `--done` 批量完成剩余 execute step，直接进 stage 完成分支。下方逐 step 手动法仅在 plan 未全勾 / 代码未核验时需要。
+
+逐 step 手动法（batch-complete 落地前 / plan 未全勾时）：
 1. 单次 `--done` 推进 1 step；每次输出会打印当前 step 的 prompt（含下一步要的产物路径）。
 2. 写齐 11 个 task review.json + contract-artifacts 后，--done 从 Step 5 能连续吃到 Step 11。
 3. Step 12 `--done` 会因缺 stage review.json 而 FAILED；补 stage review.json 后再 --done 即 12/12。

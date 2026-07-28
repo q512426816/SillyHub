@@ -22,6 +22,7 @@ multi-agent-platform 的核心 API 服务，monorepo 的"大脑"。以 FastAPI �
 - SillySpec 编排：change、change_writer、task、workflow、archive、spec_workspace、release、knowledge、incident
 - Agent/运行时：agent、runtime、daemon（守护进程接入）、lease（租约）、tool_gateway、policy（权限策略）
 - Git：git_identity、git_gateway、worktree
+- LLM：llm_provider（LLM 供应商配置，含 `POST /api/llm-providers/{id}/usage` 用量/余额查询）
 - PPM 子树（统一前缀 `/api/ppm`）：project、plan、task、problem、kanban
 
 启动入口 `uvicorn app.main:app`，带 `lifespan` 钩子（初始化/释放 DB 引擎、Redis、遥测）。`app = FastAPI(...)` 实例在 `main.py` 构建，装配 CORS 中间件与全局异常处理器（`core/errors.register_exception_handlers`）。
@@ -64,5 +65,7 @@ multi-agent-platform 的核心 API 服务，monorepo 的"大脑"。以 FastAPI �
 - ql-20260728-002-21aa | 登录爆破防护（安全审计 P0-8/P1-14 修复）：同 IP 60s 窗口 INCR 限流（`auth_login_rate_limit_per_minute=5` → 429）+ 失败计数（达 `auth_login_fail_threshold=3` 后该 IP 须带 captcha_token）+ Pillow 滑块验证码（背景含凹槽+滑块块，target_x 仅存 Redis 不返前端，±6px 容差验过签发一次性 captcha_token；slider/token 均一次性消费防重放爆破）。新增 `modules/auth/captcha_service.py`；router 加 `GET /captcha/slider`、`POST /captcha/verify`，登录端点串 check_rate_limit→assert_captcha_if_needed→record_login_failure；Redis 故障降级放行不阻断登录（同 api_key 缓存降级哲学）。
 
 - ql-20260728-003 | 滑块验证码下线换点按式人机确认（滑块交互 ±6px 难对齐、体验差）：`captcha_service.py` 删 Pillow 滑块生成/校验，新增 `create_confirmation`/`verify_confirmation`（一次性 captcha_id→captcha_token，取到即签发，无坐标判断）；限流/失败计数/`assert_captcha_if_needed`/`_consume_captcha_token`/Redis 降级全保留。schema 删 `SliderCaptcha*` 加 `ConfirmCaptchaResponse`/`CaptchaVerifyRequest`/`CaptchaVerifyResponse`；router `GET /captcha/slider`→`/captcha/confirm`、`POST /captcha/verify` 体 `{captcha_id,x}`→`{captcha_id}`；登录端点/423 触发不动。Pillow 因 PPM 模块在用保留依赖。`tests/test_login_captcha.py` 重写为 6 测试（限流/423/全流程/id 一次性/未知 id/降级放行）。
+
+- 2026-07-28-llm-provider-presets-and-usage | LLM 供应商预设模板 + 用量/余额查询：llm_provider 模块新增 `POST /api/llm-providers/{id}/usage`（owner 级，跨用户 404/403 不泄漏）。schema 加 `UsageData`（plan_name/total/used/remaining/unit/is_valid 全 Optional）+ `UsageResult`（success/data/error）；新增 `usage_handlers.py` 按 balance（DeepSeek `/user/balance`、硅基 `/v1/user/info`、OpenRouter `/api/v1/credits`）与 token_plan（Kimi For Coding、智谱 coding-plan/quota、MiniMax coding_plan/remains）两路径逐家硬编码 query+parser；`service.query_usage()` 解密 key + `_detect_usage_provider(base_url)` 路由 + 错误两态（瞬时网络/5xx/429/超时 → raise 5xx；确定性 401/403/空 key/未知供应商 → success:false）+ SSRF 复用 `tool_policy.assert_public_hostname`（15s 超时）。无 DB 字段（D-004，detect_provider(base_url) 实时路由）。新增 `tests/test_usage.py`（46 用例：各家正常 + 错误分类 + detect 路由 + SSRF 拒私网/IPv6 + key 明文不入响应）。
 
 <!-- MANUAL_NOTES_END -->
