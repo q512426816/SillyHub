@@ -11,9 +11,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Button,
-  Checkbox,
   DatePicker,
-  Dropdown,
   Input,
   Select,
   Switch,
@@ -122,6 +120,13 @@ export default function WeeklyPlanPage() {
   const [flattenMode, setFlattenMode] = useState(false);
   // 工作量列右击聚合(求和/平均值,可多选),选后底部总结栏显示结果
   const [weeklyAgg, setWeeklyAgg] = useState<string[]>([]);
+  // 工作量列右击自定义菜单坐标(原生 fixed div 菜单,不经 antd Dropdown,避免菜单项 click 触发排序)
+  const [aggMenu, setAggMenu] = useState<{ x: number; y: number } | null>(null);
+  const toggleAgg = (key: string) => {
+    setWeeklyAgg((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
+  };
 
   const buildReq = useCallback((): WeeklyPlanPageReq => {
     const req: WeeklyPlanPageReq = { page: 1, page_size: 10000 };
@@ -393,41 +398,21 @@ export default function WeeklyPlanPage() {
       ),
     },
     {
-      title: (
-        <Dropdown
-          trigger={["contextMenu"]}
-          getPopupContainer={() => document.body}
-          menu={{
-            items: [
-              { key: "sum", label: "求和" },
-              { key: "avg", label: "求平均值" },
-            ],
-            selectable: true,
-            multiple: true,
-            selectedKeys: weeklyAgg,
-            onSelect: ({ selectedKeys }) =>
-              setWeeklyAgg(selectedKeys as string[]),
-            onDeselect: ({ selectedKeys }) =>
-              setWeeklyAgg(selectedKeys as string[]),
-          }}
-        >
-          {/* onClick stopPropagation:左击 title 文字不触发 th 排序(左击排序图标仍可排序);
-              getPopupContainer=body:菜单挂 body 脱离 th,菜单项 click 不冒泡 th 排序;
-              右击 contextmenu 由 Dropdown trigger 弹聚合菜单 */}
-          <span
-            className="inline-block cursor-context-menu px-1"
-            title="右击选择聚合(求和/平均值)"
-            onClick={(e) => e.stopPropagation()}
-          >
-            工作量(人天)
-          </span>
-        </Dropdown>
-      ),
+      title: "工作量\n(人天)",
       dataIndex: "work_load",
       key: "work_load",
       width: 100,
       align: "center",
       onCell: hiddenCell,
+      // 列头右击:preventDefault 阻止浏览器默认菜单 + 记录坐标 → 自定义 fixed div 菜单。
+      // 不用 antd Dropdown(virtual+sorter 下菜单项 click 会触发排序);左击 th 仍正常排序。
+      onHeaderCell: () => ({
+        onContextMenu: (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setAggMenu({ x: e.clientX, y: e.clientY });
+        },
+      }),
       ...sortableColProps("work_load"),
       render: (v: string | null) => v ?? "—",
     },
@@ -666,6 +651,41 @@ export default function WeeklyPlanPage() {
           }
         />
       </SectionCard>
+
+      {/* 工作量列右击聚合菜单(原生 fixed div,不经 antd Dropdown;菜单项 click stopPropagation 不冒泡 th) */}
+      {aggMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-[1049]"
+            onClick={() => setAggMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setAggMenu(null);
+            }}
+          />
+          <div
+            className="fixed z-[1050] min-w-[140px] rounded-lg border border-border bg-background p-1 shadow-md"
+            style={{ left: aggMenu.x, top: aggMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {[
+              { key: "sum", label: "求和" },
+              { key: "avg", label: "求平均值" },
+            ].map((opt) => (
+              <div
+                key={opt.key}
+                className="flex cursor-pointer items-center gap-2 px-4 py-1.5 text-[13px] hover:bg-muted"
+                onClick={() => toggleAgg(opt.key)}
+              >
+                <span className="w-4 text-primary">
+                  {weeklyAgg.includes(opt.key) ? "✓" : ""}
+                </span>
+                {opt.label}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </PageContainer>
   );
 }

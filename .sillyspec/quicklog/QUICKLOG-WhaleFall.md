@@ -593,3 +593,12 @@ created_at: 2026-07-21T08:48:56
 根因：ql-013 用 onHeaderCell contextmenu + 受控 fixed 锚点 Dropdown（pointerEvents:none），antd Dropdown 因 trigger 锚点不可交互/无尺寸不弹菜单。
 方案：撤回 ql-013（删 onHeaderCell contextmenu + 受控 Dropdown + aggMenu state）；回到 Dropdown contextMenu trigger 包 title span（antd 原生右击正常弹），关键补 getPopupContainer=()=>document.body（菜单挂 body 脱离 th，菜单项 click 不冒泡 th 排序）+ span onClick stopPropagation（左击 title 不触发 th 排序，左击排序图标仍排序）。
 结果：tsc --noEmit 0 error；右击弹菜单 + 菜单项不触发排序 + 左击排序图标排序 三者共存。
+
+## ql-20260728-015-6774 | 2026-07-28 21:29:41 | /ppm/weekly-plan 工作量列右击菜单改原生自定义(antd Dropdown 菜单项 click 仍触发排序)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（撤 antd Dropdown,改原生自定义菜单 + onHeaderCell contextmenu + toggleAgg）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：修复工作量列右击菜单项 click 仍触发排序（ql-014 的 getPopupContainer=body 未解决）。
+根因：antd virtual + sorter 下 Dropdown 菜单项 click 仍触发 th 排序，getPopupContainer=body 无法解决（非 Portal 挂载位置问题，是 antd 事件机制）。
+方案：彻底放弃 antd Dropdown，改原生自定义菜单 —— title 改纯文本恢复 sorter；onHeaderCell 注入 onContextMenu（preventDefault + stopPropagation + 记录坐标 aggMenu）；Table 外自定义 fixed div 菜单（遮罩 inset-0 点外部关闭 + 菜单 div 在右击坐标，菜单项 onClick toggleAgg 切换 weeklyAgg + 菜单 div onClick stopPropagation）。原生 DOM 菜单不经 antd Portal/事件机制，菜单项 click 不可能触发 th 排序。删 Dropdown/Checkbox unused import。
+结果：tsc --noEmit 0 error（修了 onCell 重复属性）；菜单项 click 不可能触发 th 排序（原生 DOM + stopPropagation）。
