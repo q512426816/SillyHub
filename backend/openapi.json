@@ -1509,6 +1509,344 @@
         }
       }
     },
+    "/api/file/upload": {
+      "post": {
+        "tags": [
+          "file"
+        ],
+        "summary": "Upload File",
+        "description": "上传文件（multipart）。query 传 owner_type/owner_id（新建可空，D-008）。",
+        "operationId": "upload_file_api_file_upload_post",
+        "parameters": [
+          {
+            "name": "owner_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Owner Type"
+            }
+          },
+          {
+            "name": "owner_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_file_api_file_upload_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileUploadResp"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/file/list": {
+      "get": {
+        "tags": [
+          "file"
+        ],
+        "summary": "List Files",
+        "description": "按归属/上传者列文件元数据（task-13 / FR-06）。\n\n业务人员「借用方案」查看：``owner_type=workspace&owner_id=<ws_id>`` 列该工作空间\n借用 daemon 产出的方案文件。无参数则返回全部活跃文件（按 created_at 倒序）。",
+        "operationId": "list_files_api_file_list_get",
+        "parameters": [
+          {
+            "name": "owner_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Type"
+            }
+          },
+          {
+            "name": "owner_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Id"
+            }
+          },
+          {
+            "name": "uploaded_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Uploaded By"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FileMetaResp"
+                  },
+                  "title": "Response List Files Api File List Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/file/{file_id}": {
+      "get": {
+        "tags": [
+          "file"
+        ],
+        "summary": "Download File",
+        "description": "下载/预览文件流。图片白名单 inline，其余强制 attachment（D-009）。",
+        "operationId": "download_file_api_file__file_id__get",
+        "parameters": [
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "File Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "file"
+        ],
+        "summary": "Delete File",
+        "description": "软删文件（置 deleted_at）。",
+        "operationId": "delete_file_api_file__file_id__delete",
+        "parameters": [
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "File Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/file/{file_id}/meta": {
+      "get": {
+        "tags": [
+          "file"
+        ],
+        "summary": "Get File Meta",
+        "description": "单条文件元数据。",
+        "operationId": "get_file_meta_api_file__file_id__meta_get",
+        "parameters": [
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "File Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileMetaResp"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/file/batch-meta": {
+      "post": {
+        "tags": [
+          "file"
+        ],
+        "summary": "Batch File Meta",
+        "description": "批量文件元数据（前端回显用）。",
+        "operationId": "batch_file_meta_api_file_batch_meta_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchMetaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FileMetaResp"
+                  },
+                  "type": "array",
+                  "title": "Response Batch File Meta Api File Batch Meta Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/my-binding": {
       "get": {
         "tags": [
@@ -1664,6 +2002,165 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/my-binding/shared": {
+      "put": {
+        "tags": [
+          "workspace-member-runtimes",
+          "workspace-member-runtimes"
+        ],
+        "summary": "Set My Binding Shared Endpoint",
+        "description": "lender 标记/撤销自己 binding 的 daemon 共享（FR-01 / D-003@v1）。\n\n端点无 user_id 路径参数，server 钉死当前用户 → 仅能改自己 binding。\nbinding 未配置时 service 抛 ``MemberBindingNotFound``（409）直通全局处理器。",
+        "operationId": "set_my_binding_shared_endpoint_api_workspaces__workspace_id__my_binding_shared_put",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SharedFlagRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberBindingView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/shared-daemons": {
+      "get": {
+        "tags": [
+          "workspace-member-runtimes",
+          "workspace-member-runtimes"
+        ],
+        "summary": "List Shared Daemons Endpoint",
+        "description": "owner 查工作空间所有共享 daemon（FR-02 / D-003@v1）。\n\n返回含 lender_user_id / daemon 在线状态 / 可撤销标记。",
+        "operationId": "list_shared_daemons_endpoint_api_workspaces__workspace_id__shared_daemons_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SharedDaemonView"
+                  },
+                  "title": "Response List Shared Daemons Endpoint Api Workspaces  Workspace Id  Shared Daemons Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/members/{user_id}/shared": {
+      "delete": {
+        "tags": [
+          "workspace-member-runtimes",
+          "workspace-member-runtimes"
+        ],
+        "summary": "Revoke Shared Endpoint",
+        "description": "owner 撤销某成员 daemon 共享（FR-02 / D-003@v1）。\n\n设 shared=False，**不删 binding 行**（lender 配置保留）。target 无 binding\n时 service 抛 ``MemberBindingNotFound``（409）。",
+        "operationId": "revoke_shared_endpoint_api_workspaces__workspace_id__members__user_id__shared_delete",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberBindingView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/login": {
       "post": {
         "tags": [
@@ -1688,6 +2185,70 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TokenPair"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/captcha/confirm": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Get Confirm Captcha",
+        "description": "签发一次性 captcha_id,前端点「我不是机器人」时取。\n\n无需鉴权(登录前调用);前端在收到 423 need_captcha 后调用。",
+        "operationId": "get_confirm_captcha_api_auth_captcha_confirm_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfirmCaptchaResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/captcha/verify": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Verify Captcha",
+        "description": "校验 captcha_id(一次性)→ 通过签发一次性 captcha_token,登录时回传。",
+        "operationId": "verify_captcha_api_auth_captcha_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaptchaVerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptchaVerifyResponse"
                 }
               }
             }
@@ -4049,6 +4610,361 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AccessCheckResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/llm-providers": {
+      "get": {
+        "tags": [
+          "llm_provider"
+        ],
+        "summary": "List Providers",
+        "operationId": "list_providers_api_llm_providers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmProviderList"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "llm_provider"
+        ],
+        "summary": "Create Provider",
+        "operationId": "create_provider_api_llm_providers_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmProviderCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmProviderRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/llm-providers/fetch-models": {
+      "post": {
+        "tags": [
+          "llm_provider"
+        ],
+        "summary": "Fetch Provider Models",
+        "description": "拉上游 ``/v1/models``（design §5.1 D-001/D-006）。\n\n双形态 body：\n- 编辑态 ``{provider_id}`` → 后端解密 encrypted_api_key 用；\n- 新建态 ``{base_url, api_key, auth_field?}`` → 直传不落库（用完即弃）。\n\n无状态查询（POST 仅因双形态 body，design §9 豁免生命周期契约）。\n响应仅含 ``{models:[{id, owned_by}]}``；明文 key 永不回传（NFR-02）。",
+        "operationId": "fetch_provider_models_api_llm_providers_fetch_models_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FetchModelsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FetchModelsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/llm-providers/{provider_id}/usage": {
+      "post": {
+        "tags": [
+          "llm_provider"
+        ],
+        "summary": "Query Provider Usage",
+        "description": "查供应商用量（余额 / 套餐额度），design §5.2 D-002/D-005。\n\nowner 级（``get_current_user`` + service 内 user_id 过滤，跨用户 → 404/403 不泄漏，\n同 fetch-models/get_provider 范式）。无状态查询（POST 仅因复用路径参数，design §8\n豁免生命周期契约）。\n\n- 200 ``UsageResult{success:true, data}``：多 tier 余额 / 额度；\n- 200 ``UsageResult{success:false}``：确定性失败（鉴权翻红带 ``is_valid:False`` /\n  不支持 / 解析错 / SSRF）；\n- 5xx：瞬时失败（网络 / 5xx / 429 / 超时）经 service raise ``AppError`` 自然冒泡，\n  本层不 try/except（同 fetch-models），前端保留上次成功值 10 分钟。\n\n响应无 api_key 字段（NFR-02）。",
+        "operationId": "query_provider_usage_api_llm_providers__provider_id__usage_post",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/llm-providers/{provider_id}": {
+      "get": {
+        "tags": [
+          "llm_provider"
+        ],
+        "summary": "Get Provider",
+        "operationId": "get_provider_api_llm_providers__provider_id__get",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmProviderRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "llm_provider"
+        ],
+        "summary": "Update Provider",
+        "operationId": "update_provider_api_llm_providers__provider_id__patch",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmProviderUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmProviderRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "llm_provider"
+        ],
+        "summary": "Delete Provider",
+        "operationId": "delete_provider_api_llm_providers__provider_id__delete",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/llm-providers/{provider_id}/set-default": {
+      "post": {
+        "tags": [
+          "llm_provider"
+        ],
+        "summary": "Set Default Provider",
+        "operationId": "set_default_provider_api_llm_providers__provider_id__set_default_post",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmProviderRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/llm-providers/{provider_id}/unset-default": {
+      "post": {
+        "tags": [
+          "llm_provider"
+        ],
+        "summary": "Unset Default Provider",
+        "description": "取消默认（cc-switch 式「停止」）。\n\n对称 ``set-default``（「启动」）：取消本行默认。若取消后该用户×agent_kind 无任何\n默认供应商 → lease 不再下发 provider_config → daemon 回归本机凭证管理（D-007）。",
+        "operationId": "unset_default_provider_api_llm_providers__provider_id__unset_default_post",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmProviderRead"
                 }
               }
             }
@@ -13613,8 +14529,29 @@
           "ppm-plan"
         ],
         "summary": "Export Plan Node Details",
-        "description": "导出里程碑明细为 Excel (P2-3, X-002)。\n\n仅导出非 archived (当前有效版本) 的明细。",
+        "description": "导出里程碑明细为 Excel(子母表分组:里程碑 → 模块 → 明细,X-002)。\n\n传 ``plan_id`` 时按当前项目计划的里程碑/模块分组导出(标题行合并);\n不传则导出空表(里程碑明细页始终带 plan_id)。",
         "operationId": "export_plan_node_details_api_ppm_plan_node_detail_export_excel_get",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "项目计划 ID;按子母表导出该计划的里程碑明细",
+              "title": "Plan Id"
+            },
+            "description": "项目计划 ID;按子母表导出该计划的里程碑明细"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -13622,6 +14559,16 @@
               "application/json": {
                 "schema": {
                   "title": "Response Export Plan Node Details Api Ppm Plan Node Detail Export Excel Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -14047,6 +14994,292 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PsPlanNodeDetailResp"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ppm/weekly-plan": {
+      "get": {
+        "tags": [
+          "ppm-plan"
+        ],
+        "summary": "List Weekly Plan",
+        "description": "项目计划分页查询(所有项目实施阶段明细+任务计划)。",
+        "operationId": "list_weekly_plan_api_ppm_weekly_plan_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 10000,
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
+            }
+          },
+          {
+            "name": "project_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Name"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "start_time",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Time"
+            }
+          },
+          {
+            "name": "end_time",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End Time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_WeeklyPlanRow_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ppm/weekly-plan/export-excel": {
+      "get": {
+        "tags": [
+          "ppm-plan"
+        ],
+        "summary": "Export Weekly Plan",
+        "description": "导出项目计划 Excel(精确复制模板样式:标题行+两级合并表头+数据行合并)。",
+        "operationId": "export_weekly_plan_api_ppm_weekly_plan_export_excel_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 10000,
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
+            }
+          },
+          {
+            "name": "project_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Name"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "start_time",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Time"
+            }
+          },
+          {
+            "name": "end_time",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End Time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Export Weekly Plan Api Ppm Weekly Plan Export Excel Get"
                 }
               }
             }
@@ -14765,7 +15998,7 @@
           "ppm-task"
         ],
         "summary": "Personal Plan Task Page",
-        "description": "仅返回当前登录用户的任务计划。",
+        "description": "返回(目标)用户的任务计划。不传 target_user_id=当前登录人(兼容旧行为)。\n\n切换用户时仅走 workbench ``_resolve_target_user`` 收口(超管‖经理且目标\n∈可见集),**禁用 data_scope**(其按 viewer 项目集过滤行,语义不符,design F5)。",
         "operationId": "personal_plan_task_page_api_ppm_personal_task_plan_page_get",
         "parameters": [
           {
@@ -14951,6 +16184,24 @@
               "default": "desc",
               "title": "Order"
             }
+          },
+          {
+            "name": "target_user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "切换查看的目标用户 id;空=当前登录人(仅经理‖超管可传他人)",
+              "title": "Target User Id"
+            },
+            "description": "切换查看的目标用户 id;空=当前登录人(仅经理‖超管可传他人)"
           }
         ],
         "responses": {
@@ -16443,13 +17694,35 @@
         }
       }
     },
+    "/api/ppm/problem-list/import-template": {
+      "get": {
+        "tags": [
+          "ppm-problem"
+        ],
+        "summary": "Download Import Template",
+        "description": "下载动态下拉导入模板 (FR-01/D-002/D-007/D-012)。\n\n按 data_scope 收敛项目/成员 (超管全部,否则经理项目集);模块按项目分组实现\n**项目→模块级联下拉** (D-012 升级): 选了项目后模块下拉只显示该项目下的模块。\n固定枚举取前端同款。openpyxl 同步构造丢线程池 (R-03):主表 18 列表头 + 隐藏\nsheet ``_data`` (A=项目 / B=成员 / C 起每项目一列模块) + 主表 DataValidation\ntype=list 引用隐藏 sheet 列 (绕 255 字符限, R-03) / 模块列用 INDIRECT($A2)\n据同行项目单元格值查找该项目的命名区域 / 固定 inline list。",
+        "operationId": "download_import_template_api_ppm_problem_list_import_template_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Download Import Template Api Ppm Problem List Import Template Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/ppm/problem-list/export-excel": {
       "get": {
         "tags": [
           "ppm-problem"
         ],
         "summary": "Export Problems",
-        "description": "导出问题清单为 Excel (X-002)。",
+        "description": "导出问题清单为 Excel (18 列对齐导入 + 附件嵌图片, D-003/D-006/D-011/R-07)。\n\n拆两段 (跨 async/sync 边界, D-011):\n① async 段:调 ``list_problems_for_export`` 取 18 列 + 对每行 ``file_urls`` 的\n  file_id 调 ``FileService.get_stream`` 收图 bytes 到内存 (``get_stream`` 返回\n  ``AsyncIterator``, 不能在 sync 段 await);\n② sync 段 (``anyio.to_thread.run_sync``):openpyxl 构造 workbook (18 列表头 +\n  数据行 + 附件列对每行 images ``add_image`` 锚到该行单元格)。\n单图取流失败 (缺失/已删/底层存储瞬时错误,含非 AppError) 跳过不阻断导出\n(best-effort, 对齐 D-009 口径;P2 捕获面扩到 Exception)。",
         "operationId": "export_problems_api_ppm_problem_list_export_excel_get",
         "responses": {
           "200": {
@@ -16458,6 +17731,90 @@
               "application/json": {
                 "schema": {
                   "title": "Response Export Problems Api Ppm Problem List Export Excel Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ppm/problem-list/import-preview": {
+      "post": {
+        "tags": [
+          "ppm-problem"
+        ],
+        "summary": "Import Problems Preview",
+        "description": "问题清单导入预览 (task-04 / design §7)。\n\n先用 :func:`validate_xlsx_upload` 校验大小/扩展名 (D-013,中立异常由\n``AppError`` 统一翻译),再交 service 解析 + 反查项目/模块/成员,不入库。\nExcel 解析为同步 openpyxl 操作,由 service 内部 ``anyio.to_thread`` 包裹\n避免阻塞事件循环 (R-03,对齐 plan 模块导入范式)。返回\n``ProblemImportPreviewResp`` 供前端标红确认后再提交。",
+        "operationId": "import_problems_preview_api_ppm_problem_list_import_preview_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_problems_preview_api_ppm_problem_list_import_preview_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemImportPreviewResp"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ppm/problem-list/import-commit": {
+      "post": {
+        "tags": [
+          "ppm-problem"
+        ],
+        "summary": "Import Problems Commit",
+        "description": "问题清单导入提交 (task-05 / design §7 / D-013)。\n\n**multipart 改造 (D-013)**:preview → commit 是 JSON 往返,图片二进制带不过去;\n故 commit 端收 ``file`` (原 Excel, 同 preview 那份) + ``rows`` (JSON 串, 勾选\n的预览行)。router 重新解析 ``file`` 取 ``parsed_rows`` (含 images),按\n``row_index`` 建 ``images_by_row`` 映射,装配 ``FileService`` 一并传入 service。\n\nservice 不信任前端 UUID,按原文重新反查 + data_scope 校验 (D-011),单次事务提交\n(D-008);逐图上传存 file_id (task-04/D-004/D-009, 单图失败 failed_rows 不中断)。\nrouter 不二次包装,直接回传 service 产出的 ``ProblemImportResultResp``。",
+        "operationId": "import_problems_commit_api_ppm_problem_list_import_commit_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_problems_commit_api_ppm_problem_list_import_commit_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemImportResultResp"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -18075,8 +19432,28 @@
           "ppm-workbench"
         ],
         "summary": "Get Workbench Profile",
-        "description": "当前登录用户的个人工作台头部信息。",
+        "description": "工作台头部信息(支持切换用户)。",
         "operationId": "get_workbench_profile_api_ppm_workbench_profile_get",
+        "parameters": [
+          {
+            "name": "target_user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "切换查看的目标用户 id;空=当前登录人",
+              "title": "Target User Id"
+            },
+            "description": "切换查看的目标用户 id;空=当前登录人"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -18084,6 +19461,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WorkbenchProfile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -18097,7 +19484,7 @@
           "ppm-workbench"
         ],
         "summary": "Get Workbench Summary",
-        "description": "个人工作台聚合视图:指标卡片 + 待办列表。",
+        "description": "个人工作台指标聚合(支持切换用户;待办走 /workbench/todos)。",
         "operationId": "get_workbench_summary_api_ppm_workbench_summary_get",
         "parameters": [
           {
@@ -18111,6 +19498,24 @@
               "title": "Range"
             },
             "description": "统计区间标识 (如 month / week)"
+          },
+          {
+            "name": "target_user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "切换查看的目标用户 id;空=当前登录人",
+              "title": "Target User Id"
+            },
+            "description": "切换查看的目标用户 id;空=当前登录人"
           }
         ],
         "responses": {
@@ -18143,7 +19548,7 @@
           "ppm-workbench"
         ],
         "summary": "Get Workbench Calendar",
-        "description": "个人工作台月度日历负载。",
+        "description": "个人工作台月度日历负载(支持切换用户)。",
         "operationId": "get_workbench_calendar_api_ppm_workbench_calendar_get",
         "parameters": [
           {
@@ -18156,6 +19561,24 @@
               "title": "Year Month"
             },
             "description": "目标月份,形如 YYYY-MM"
+          },
+          {
+            "name": "target_user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "切换查看的目标用户 id;空=当前登录人",
+              "title": "Target User Id"
+            },
+            "description": "切换查看的目标用户 id;空=当前登录人"
           }
         ],
         "responses": {
@@ -18175,6 +19598,111 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ppm/workbench/todos": {
+      "get": {
+        "tags": [
+          "ppm-workbench"
+        ],
+        "summary": "Get Workbench Todos",
+        "description": "个人工作台待办(分页,默认每页 10 条;支持切换用户)。",
+        "operationId": "get_workbench_todos_api_ppm_workbench_todos_get",
+        "parameters": [
+          {
+            "name": "target_user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "切换查看的目标用户 id;空=当前登录人",
+              "title": "Target User Id"
+            },
+            "description": "切换查看的目标用户 id;空=当前登录人"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "页码,从 1 起",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码,从 1 起"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "每页条数,默认 10",
+              "default": 10,
+              "title": "Page Size"
+            },
+            "description": "每页条数,默认 10"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_WorkbenchTodoItem_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ppm/workbench/switchable-users": {
+      "get": {
+        "tags": [
+          "ppm-workbench"
+        ],
+        "summary": "Get Workbench Switchable Users",
+        "description": "当前登录人可切换查看的用户列表(经理 ‖ super_admin);其余返回空。",
+        "operationId": "get_workbench_switchable_users_api_ppm_workbench_switchable_users_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/WorkbenchSwitchableUser"
+                  },
+                  "type": "array",
+                  "title": "Response Get Workbench Switchable Users Api Ppm Workbench Switchable Users Get"
                 }
               }
             }
@@ -23102,6 +24630,22 @@
         ],
         "title": "BatchGenerateResponse"
       },
+      "BatchMetaRequest": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "title": "Ids"
+          }
+        },
+        "type": "object",
+        "title": "BatchMetaRequest",
+        "description": "批量元数据请求（按 id 列表查 FileMetaResp）。"
+      },
       "Body_import_modules_preview_api_ppm_plan_node__plan_node_id__modules_import_preview_post": {
         "properties": {
           "file": {
@@ -23115,6 +24659,55 @@
           "file"
         ],
         "title": "Body_import_modules_preview_api_ppm_plan_node__plan_node_id__modules_import_preview_post"
+      },
+      "Body_import_problems_commit_api_ppm_problem_list_import_commit_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "preview 阶段同一个 Excel 文件 (重传以取嵌入图片 bytes)"
+          },
+          "rows": {
+            "type": "string",
+            "title": "Rows",
+            "description": "ProblemImportCommitReq 的 JSON 串 (勾选回传的预览行)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file",
+          "rows"
+        ],
+        "title": "Body_import_problems_commit_api_ppm_problem_list_import_commit_post"
+      },
+      "Body_import_problems_preview_api_ppm_problem_list_import_preview_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_problems_preview_api_ppm_problem_list_import_preview_post"
+      },
+      "Body_upload_file_api_file_upload_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_file_api_file_upload_post"
       },
       "CalendarDay": {
         "properties": {
@@ -23333,6 +24926,45 @@
         ],
         "title": "CalendarProblemItem",
         "description": "日历当日缺陷摘要(区间覆盖该天的 PpmProblemList)。"
+      },
+      "CaptchaVerifyRequest": {
+        "properties": {
+          "captcha_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Captcha Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "captcha_id"
+        ],
+        "title": "CaptchaVerifyRequest"
+      },
+      "CaptchaVerifyResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "captcha_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Captcha Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success"
+        ],
+        "title": "CaptchaVerifyResponse",
+        "description": "校验通过 → 返回一次性 captcha_token,登录时回传。"
       },
       "ChangeCreateRequest": {
         "properties": {
@@ -24549,6 +26181,20 @@
         ],
         "title": "ComponentRead",
         "description": "单个只读组件的响应 DTO（对齐 design §7.1）。"
+      },
+      "ConfirmCaptchaResponse": {
+        "properties": {
+          "captcha_id": {
+            "type": "string",
+            "title": "Captcha Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "captcha_id"
+        ],
+        "title": "ConfirmCaptchaResponse",
+        "description": "GET /auth/captcha/confirm 返回:一次性 captcha_id(点「我不是机器人」时取)。"
       },
       "ConvergeResponse": {
         "properties": {
@@ -26277,6 +27923,20 @@
               }
             ],
             "title": "End Remark"
+          },
+          "file_urls": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Urls"
           }
         },
         "type": "object",
@@ -26497,6 +28157,19 @@
             ],
             "title": "Stage Dispatch",
             "description": "是否 stage 投递（daemon 用它判定是否构造 skill 调用 prompt）。"
+          },
+          "provider_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Config",
+            "description": "用户默认 LLM 供应商配置。含 agent_kind/base_url/api_key(明文)/auth_field/model/model_role_mappings/default_fallback_model/extra_env。仅 claim/create 阶段下发；submit/complete 链路与审计日志严禁回传 api_key（R-02）。"
           }
         },
         "type": "object",
@@ -26542,6 +28215,181 @@
         ],
         "title": "FeedbackRequest",
         "description": "反馈提交请求。"
+      },
+      "FetchModelsItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "owned_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owned By"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "FetchModelsItem",
+        "description": "上游 /v1/models 返回的单条模型（OpenAI 兼容字段；owned_by 上游缺失则 None）。"
+      },
+      "FetchModelsRequest": {
+        "properties": {
+          "provider_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Id"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "auth_field": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ANTHROPIC_AUTH_TOKEN",
+                  "ANTHROPIC_API_KEY"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auth Field"
+          }
+        },
+        "type": "object",
+        "title": "FetchModelsRequest",
+        "description": "``POST /api/llm-providers/fetch-models`` 双形态请求体（D-001）。\n\n形态① 编辑态：``provider_id`` → service 查行 + ``cipher.decrypt`` 取明文 key +\nauth_field + base_url（前端只传 id，明文 key 不出后端）。\n形态② 新建态：``base_url`` + ``api_key``（+可选 ``auth_field``）→ 直传不落库不入日志，\n用完即弃（NFR-02）。\n\n二者互斥（``_enforce_dual_form`` 保证），不能同时填也不能都不填。"
+      },
+      "FetchModelsResponse": {
+        "properties": {
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/FetchModelsItem"
+            },
+            "type": "array",
+            "title": "Models"
+          }
+        },
+        "type": "object",
+        "required": [
+          "models"
+        ],
+        "title": "FetchModelsResponse",
+        "description": "fetch-models 响应：模型列表（明文 key 永不进响应，NFR-02）。"
+      },
+      "FileMetaResp": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "original_name": {
+            "type": "string",
+            "title": "Original Name"
+          },
+          "mime_type": {
+            "type": "string",
+            "title": "Mime Type"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "owner_type": {
+            "type": "string",
+            "title": "Owner Type"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "original_name",
+          "mime_type",
+          "size",
+          "owner_type"
+        ],
+        "title": "FileMetaResp",
+        "description": "文件元数据响应（task-04 provides；batch-meta 回显用）。"
+      },
+      "FileUploadResp": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "original_name": {
+            "type": "string",
+            "title": "Original Name"
+          },
+          "mime_type": {
+            "type": "string",
+            "title": "Mime Type"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "original_name",
+          "mime_type",
+          "size"
+        ],
+        "title": "FileUploadResp",
+        "description": "上传成功响应（task-04 provides）。"
       },
       "GitIdentityCreate": {
         "properties": {
@@ -28070,6 +29918,468 @@
         "title": "ListRootsResponse",
         "description": "POST /runtimes/{runtime_id}/list-roots 响应：daemon 主机磁盘根锚点列表。"
       },
+      "LlmProviderCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "agent_kind": {
+            "type": "string",
+            "const": "claude",
+            "title": "Agent Kind",
+            "default": "claude"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "website_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website Url"
+          },
+          "auth_field": {
+            "type": "string",
+            "enum": [
+              "ANTHROPIC_AUTH_TOKEN",
+              "ANTHROPIC_API_KEY"
+            ],
+            "title": "Auth Field",
+            "default": "ANTHROPIC_AUTH_TOKEN"
+          },
+          "model_role_mappings": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Role Mappings"
+          },
+          "default_fallback_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Fallback Model"
+          },
+          "extra_env": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extra Env"
+          },
+          "settings_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings Config"
+          },
+          "is_default": {
+            "type": "boolean",
+            "title": "Is Default",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "LlmProviderCreate"
+      },
+      "LlmProviderList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LlmProviderRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "LlmProviderList"
+      },
+      "LlmProviderRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "agent_kind": {
+            "type": "string",
+            "title": "Agent Kind"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "website_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website Url"
+          },
+          "auth_field": {
+            "type": "string",
+            "title": "Auth Field"
+          },
+          "model_role_mappings": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Role Mappings"
+          },
+          "default_fallback_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Fallback Model"
+          },
+          "extra_env": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extra Env"
+          },
+          "settings_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings Config"
+          },
+          "is_default": {
+            "type": "boolean",
+            "title": "Is Default"
+          },
+          "api_key_masked": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Masked"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "name",
+          "agent_kind",
+          "base_url",
+          "model",
+          "notes",
+          "website_url",
+          "auth_field",
+          "model_role_mappings",
+          "default_fallback_model",
+          "extra_env",
+          "is_default",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "LlmProviderRead"
+      },
+      "LlmProviderUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "website_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website Url"
+          },
+          "auth_field": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ANTHROPIC_AUTH_TOKEN",
+                  "ANTHROPIC_API_KEY"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auth Field"
+          },
+          "model_role_mappings": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Role Mappings"
+          },
+          "default_fallback_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Fallback Model"
+          },
+          "extra_env": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extra Env"
+          },
+          "settings_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings Config"
+          },
+          "is_default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Default"
+          }
+        },
+        "type": "object",
+        "title": "LlmProviderUpdate"
+      },
       "LoginRequest": {
         "properties": {
           "account": {
@@ -28081,6 +30391,17 @@
             "type": "string",
             "minLength": 1,
             "title": "Password"
+          },
+          "captcha_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Captcha Token"
           }
         },
         "type": "object",
@@ -28308,6 +30629,11 @@
           "path_source": {
             "type": "string",
             "title": "Path Source"
+          },
+          "shared": {
+            "type": "boolean",
+            "title": "Shared",
+            "default": false
           },
           "synced_at": {
             "anyOf": [
@@ -29358,6 +31684,34 @@
         "type": "object",
         "title": "Page[TaskExecuteResponse]"
       },
+      "Page_WeeklyPlanRow_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WeeklyPlanRow"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "default": 1
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size",
+            "default": 20
+          }
+        },
+        "type": "object",
+        "title": "Page[WeeklyPlanRow]"
+      },
       "Page_WorkHourResponse_": {
         "properties": {
           "items": {
@@ -29385,6 +31739,34 @@
         },
         "type": "object",
         "title": "Page[WorkHourResponse]"
+      },
+      "Page_WorkbenchTodoItem_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchTodoItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "default": 1
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size",
+            "default": 20
+          }
+        },
+        "type": "object",
+        "title": "Page[WorkbenchTodoItem]"
       },
       "PendingFileEntry": {
         "properties": {
@@ -29461,12 +31843,14 @@
           "change:read",
           "change:update",
           "change:approve",
+          "change:archive",
           "task:read",
           "task:create",
           "task:assign",
           "task:run_agent",
           "task:cancel",
           "task:approve",
+          "daemon:borrow",
           "code:read",
           "code:write",
           "code:review",
@@ -30007,6 +32391,17 @@
             ],
             "title": "Module Name"
           },
+          "no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "No"
+          },
           "plan_workload": {
             "anyOf": [
               {
@@ -30093,6 +32488,17 @@
               }
             ],
             "title": "Module Name"
+          },
+          "no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "No"
           },
           "plan_workload": {
             "anyOf": [
@@ -30214,6 +32620,17 @@
               }
             ],
             "title": "Module Name"
+          },
+          "no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "No"
           },
           "plan_workload": {
             "anyOf": [
@@ -32457,6 +34874,20 @@
               }
             ],
             "title": "Execute User Id"
+          },
+          "file_urls": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Urls"
           }
         },
         "type": "object",
@@ -32466,6 +34897,344 @@
         ],
         "title": "ProblemExecuteReq",
         "description": "execute — 收口 in-flight TaskExecute 并推进 3 态状态机。\n\n- ``action=\"submit\"``   : 回「新建」(可再次 start，重复执行)\n- ``action=\"complete\"`` : 「已完成」(终态)\n\n``task_execute_id`` 必填 (start 返回的 in-flight 记录)。跨天校验在 service。"
+      },
+      "ProblemImportPreviewResp": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ProblemImportPreviewRow"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "parse_errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Parse Errors"
+          },
+          "valid_count": {
+            "type": "integer",
+            "title": "Valid Count"
+          },
+          "invalid_count": {
+            "type": "integer",
+            "title": "Invalid Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows",
+          "valid_count",
+          "invalid_count"
+        ],
+        "title": "ProblemImportPreviewResp",
+        "description": "预览响应 — 全部行(含标红) + 解析级错误(如找不到表头/空文件)。\n\n``valid_count``/``invalid_count`` 由 service 按 ``row.valid`` 聚合。"
+      },
+      "ProblemImportPreviewRow": {
+        "properties": {
+          "row_index": {
+            "type": "integer",
+            "title": "Row Index"
+          },
+          "project_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Name"
+          },
+          "module_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Module Name"
+          },
+          "pro_desc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pro Desc"
+          },
+          "pro_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pro Type"
+          },
+          "is_urgent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Urgent"
+          },
+          "func_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Func Name"
+          },
+          "duty_user_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duty User Name"
+          },
+          "find_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Find By"
+          },
+          "find_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Find Time"
+          },
+          "plan_start_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Start Time"
+          },
+          "plan_end_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan End Time"
+          },
+          "audit_user_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audit User Name"
+          },
+          "work_load": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Load"
+          },
+          "work_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Type"
+          },
+          "pro_answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pro Answer"
+          },
+          "is_delay_plan": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Delay Plan"
+          },
+          "remarks": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remarks"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "module_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Module Id"
+          },
+          "duty_user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duty User Id"
+          },
+          "audit_user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audit User Id"
+          },
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "attachment_count": {
+            "type": "integer",
+            "title": "Attachment Count",
+            "default": 0
+          },
+          "attachment_exceeded": {
+            "type": "boolean",
+            "title": "Attachment Exceeded",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "row_index",
+          "valid"
+        ],
+        "title": "ProblemImportPreviewRow",
+        "description": "单行预览结果 — Excel 一行对应一 DTO。\n\n- 业务字段取自 importer 解析;枚举已规范化:``is_urgent``/``is_delay_plan``\n  为 \"1\"/\"0\"(空→None),``pro_type`` 原样保留(bug/change/其他)。\n- 4 个反查 UUID(project/module/duty/audit)由 service 预览阶段填充,\n  仅供前端展示;commit 不信任,按原文重新反查(D-011)。\n- 时间字段统一 ``datetime | None``;importer 产 ``date``,\n  service 做 date→datetime 转换(D-010)。\n- ``valid`` 必填(语义上必须显式判断),``error`` 默认 None。"
+      },
+      "ProblemImportResultResp": {
+        "properties": {
+          "created": {
+            "type": "integer",
+            "title": "Created"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped"
+          },
+          "failed_rows": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Failed Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created",
+          "skipped"
+        ],
+        "title": "ProblemImportResultResp",
+        "description": "导入结果 — 创建计数 + 失败行诊断。\n\n- ``skipped``:preview 阶段 valid=false 未回传的(前端统计补 0)。\n- ``failed_rows``:commit 重查/data_scope 失败行诊断;\n  原子提交成功(D-008)时为空列表。"
       },
       "ProblemListCreate": {
         "properties": {
@@ -33159,6 +35928,17 @@
             "type": "boolean",
             "title": "Can Delete",
             "default": false
+          },
+          "created_by_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By Name"
           }
         },
         "type": "object",
@@ -33357,6 +36137,18 @@
             ],
             "title": "Plan End Time"
           },
+          "audit_user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audit User Id"
+          },
           "remarks": {
             "anyOf": [
               {
@@ -33389,6 +36181,28 @@
               }
             ],
             "title": "Work Load"
+          },
+          "now_handle_user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Now Handle User"
+          },
+          "now_handle_user_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Now Handle User Name"
           }
         },
         "type": "object",
@@ -34785,6 +37599,16 @@
             "format": "date-time",
             "title": "Updated At"
           },
+          "can_edit": {
+            "type": "boolean",
+            "title": "Can Edit",
+            "default": false
+          },
+          "can_delete": {
+            "type": "boolean",
+            "title": "Can Delete",
+            "default": false
+          },
           "nodes": {
             "items": {
               "$ref": "#/components/schemas/PsPlanNodeWithDetail"
@@ -35839,6 +38663,17 @@
             ],
             "title": "Module Name"
           },
+          "task_execute_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Execute Status"
+          },
           "change_reason": {
             "anyOf": [
               {
@@ -36363,6 +39198,17 @@
               }
             ],
             "title": "Module Name"
+          },
+          "task_execute_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Execute Status"
           },
           "change_reason": {
             "anyOf": [
@@ -37324,6 +40170,16 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "can_edit": {
+            "type": "boolean",
+            "title": "Can Edit",
+            "default": false
+          },
+          "can_delete": {
+            "type": "boolean",
+            "title": "Can Delete",
+            "default": false
           }
         },
         "type": "object",
@@ -39630,6 +42486,74 @@
         ],
         "title": "SettingsUpdateResponse"
       },
+      "SharedDaemonView": {
+        "properties": {
+          "lender_user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Lender User Id"
+          },
+          "daemon_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daemon Id"
+          },
+          "daemon_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daemon Status"
+          },
+          "daemon_hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daemon Hostname"
+          },
+          "revocable": {
+            "type": "boolean",
+            "title": "Revocable",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "lender_user_id"
+        ],
+        "title": "SharedDaemonView",
+        "description": "owner 视角下一条共享 daemon（FR-02 / D-003@v1）。\n\n``daemon_status`` / ``daemon_hostname`` 来自 JOIN daemon_instances；\n``revocable`` 恒 True（owner 调用，总可撤销）。"
+      },
+      "SharedFlagRequest": {
+        "properties": {
+          "shared": {
+            "type": "boolean",
+            "title": "Shared"
+          }
+        },
+        "type": "object",
+        "required": [
+          "shared"
+        ],
+        "title": "SharedFlagRequest",
+        "description": "Body for PUT /my-binding/shared — lender toggles own daemon sharing."
+      },
       "SkillFileEntry": {
         "properties": {
           "name": {
@@ -40487,7 +43411,55 @@
               }
             ],
             "title": "Estimate Hours",
-            "description": "预估工时 (PlanTask.work_load 字符串解析)"
+            "description": "预估工时 (PlanTask.work_load 字符串解析,单位人天)"
+          },
+          "task_description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Description",
+            "description": "任务描述 (PlanTask.task_description)"
+          },
+          "module_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Module Name",
+            "description": "所属模块名 (PlanTask.module_name)"
+          },
+          "work_partner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Partner",
+            "description": "配合人员 (PlanTask.work_partner)"
+          },
+          "remarks": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remarks",
+            "description": "备注 (PlanTask.remarks)"
           },
           "kanban_order": {
             "type": "integer",
@@ -40702,6 +43674,13 @@
             ],
             "title": "Attach Group Id"
           },
+          "file_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "File Urls"
+          },
           "execute_user_id": {
             "anyOf": [
               {
@@ -40891,6 +43870,13 @@
             ],
             "title": "Attach Group Id"
           },
+          "file_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "File Urls"
+          },
           "execute_user_id": {
             "anyOf": [
               {
@@ -40987,6 +43973,7 @@
           "end_remark",
           "execute_info",
           "attach_group_id",
+          "file_urls",
           "execute_user_id",
           "check_info",
           "check_attach_group_id",
@@ -41104,6 +44091,20 @@
               }
             ],
             "title": "Attach Group Id"
+          },
+          "file_urls": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Urls"
           },
           "execute_user_id": {
             "anyOf": [
@@ -41300,6 +44301,13 @@
             ],
             "title": "Attach Group Id"
           },
+          "file_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "File Urls"
+          },
           "execute_user_id": {
             "anyOf": [
               {
@@ -41406,6 +44414,7 @@
           "end_remark",
           "execute_info",
           "attach_group_id",
+          "file_urls",
           "execute_user_id",
           "check_info",
           "check_attach_group_id",
@@ -42605,6 +45614,140 @@
         "title": "TransitionResponse",
         "description": "POST /changes/{id}/transition 的返回类型。\n\n包含变更状态和 agent dispatch 信息。"
       },
+      "UsageData": {
+        "properties": {
+          "plan_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Name"
+          },
+          "extra": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extra"
+          },
+          "is_valid": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Valid"
+          },
+          "invalid_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invalid Message"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "used": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Used"
+          },
+          "remaining": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "type": "object",
+        "title": "UsageData",
+        "description": "单条用量（一个套餐窗口 = 一条；多窗口 5h/周/月各自一条 tier）。\n\n- ``plan_name``：套餐名 / 币种 / 窗口名（如「CNY」「5小时窗」「周限额」）；\n- ``extra``：附加信息（token_plan 的重置时间 ISO8601 等）；\n- ``is_valid``：凭据是否有效，``False`` → 前端翻红；\n- ``invalid_message``：失效原因（鉴权失败等）；\n- ``total/used/remaining``：balance=金额（CNY/USD）；token_plan=百分比（total=100）；\n- ``unit``：``\"USD\"`` / ``\"CNY\"`` / ``\"%\"``。"
+      },
+      "UsageResult": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/UsageData"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success"
+        ],
+        "title": "UsageResult",
+        "description": "用量查询统一返回（D-005 错误两态）。\n\n- ``success=True`` + ``data``：多 tier 余额/额度；\n- ``success=False`` + ``data=[{is_valid:False}]``：确定性鉴权失败（前端翻红）；\n- ``success=False`` + ``error``：其它确定性失败（不支持 / 解析错 / SSRF，前端灰提示）；\n- 瞬时失败（网络/5xx/429/超时）在 service 层 ``raise``（5xx），不走到本结构。"
+      },
       "UserColumnVO": {
         "properties": {
           "user_id": {
@@ -43097,6 +46240,183 @@
         ],
         "title": "VersionResponse"
       },
+      "WeeklyPlanRow": {
+        "properties": {
+          "project_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Name"
+          },
+          "plan_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Type"
+          },
+          "detailed_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detailed Stage"
+          },
+          "module_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Module Name"
+          },
+          "task_theme": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Theme"
+          },
+          "task_description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Description"
+          },
+          "work_load": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Load"
+          },
+          "user_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Name"
+          },
+          "start_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Time"
+          },
+          "end_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Time"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "actual_start_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Start Time"
+          },
+          "actual_end_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual End Time"
+          },
+          "week_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Week Number"
+          },
+          "detail_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail Id"
+          }
+        },
+        "type": "object",
+        "title": "WeeklyPlanRow",
+        "description": "项目计划行（明细 + 任务计划聚合，19 列对应源 Excel）。\n\n数据来自 5 表 JOIN：PpmProjectMaintenance → PsProjectPlan → PsPlanNode\n(has_module=true) → PsPlanNodeDetail → PlanTask(LEFT JOIN)。\n延期原因/执行说明/评估说明/备注 系统无对应字段，导出时留空。"
+      },
       "WorkHourCreate": {
         "properties": {
           "project_id": {
@@ -43508,6 +46828,11 @@
           "avatar_text": {
             "type": "string",
             "title": "Avatar Text"
+          },
+          "can_view_others": {
+            "type": "boolean",
+            "title": "Can View Others",
+            "default": false
           }
         },
         "type": "object",
@@ -43515,28 +46840,67 @@
           "avatar_text"
         ],
         "title": "WorkbenchProfile",
-        "description": "个人工作台头部用户信息。\n\n``avatar_text`` 为头像占位文案(取 display_name 首字),其余字段\n允许 ``None`` (来源数据缺失时)。"
+        "description": "个人工作台头部用户信息。\n\n``avatar_text`` 为头像占位文案(取 display_name 首字),其余字段\n允许 ``None`` (来源数据缺失时)。\n\n``can_view_others`` 反映**当前登录人**(非 target)是否可切换查看他人\n工作台(经理角色 ‖ super_admin);前端据此显隐切换入口(D-005@v1)。"
       },
       "WorkbenchSummary": {
         "properties": {
           "metrics": {
             "$ref": "#/components/schemas/WorkbenchMetrics"
-          },
-          "todos": {
-            "items": {
-              "$ref": "#/components/schemas/WorkbenchTodoItem"
-            },
-            "type": "array",
-            "title": "Todos"
           }
         },
         "type": "object",
         "required": [
-          "metrics",
-          "todos"
+          "metrics"
         ],
         "title": "WorkbenchSummary",
-        "description": "个人工作台聚合视图:指标卡片 + 待办列表。"
+        "description": "个人工作台聚合视图:指标卡片。\n\n待办已移至独立分页端点 ``GET /workbench/todos``(D-003@v1 职责瘦身);\nsummary 只保留 metrics。"
+      },
+      "WorkbenchSwitchableUser": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "employee_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Employee No"
+          },
+          "department_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id"
+        ],
+        "title": "WorkbenchSwitchableUser",
+        "description": "可切换查看的工作台用户条目(GET /workbench/switchable-users)。\n\n``user_id`` 为目标用户 id(切换时透传 target_user_id);其余为展示字段,\n部门名取首个 active 组织(对齐 profile 部门装配口径)。"
       },
       "WorkbenchTodoItem": {
         "properties": {

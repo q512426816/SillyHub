@@ -671,6 +671,113 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/file/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload File
+         * @description 上传文件（multipart）。query 传 owner_type/owner_id（新建可空，D-008）。
+         */
+        post: operations["upload_file_api_file_upload_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/file/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Files
+         * @description 按归属/上传者列文件元数据（task-13 / FR-06）。
+         *
+         *     业务人员「借用方案」查看：``owner_type=workspace&owner_id=<ws_id>`` 列该工作空间
+         *     借用 daemon 产出的方案文件。无参数则返回全部活跃文件（按 created_at 倒序）。
+         */
+        get: operations["list_files_api_file_list_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/file/{file_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download File
+         * @description 下载/预览文件流。图片白名单 inline，其余强制 attachment（D-009）。
+         */
+        get: operations["download_file_api_file__file_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete File
+         * @description 软删文件（置 deleted_at）。
+         */
+        delete: operations["delete_file_api_file__file_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/file/{file_id}/meta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get File Meta
+         * @description 单条文件元数据。
+         */
+        get: operations["get_file_meta_api_file__file_id__meta_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/file/batch-meta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Batch File Meta
+         * @description 批量文件元数据（前端回显用）。
+         */
+        post: operations["batch_file_meta_api_file_batch_meta_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/my-binding": {
         parameters: {
             query?: never;
@@ -719,6 +826,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/my-binding/shared": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set My Binding Shared Endpoint
+         * @description lender 标记/撤销自己 binding 的 daemon 共享（FR-01 / D-003@v1）。
+         *
+         *     端点无 user_id 路径参数，server 钉死当前用户 → 仅能改自己 binding。
+         *     binding 未配置时 service 抛 ``MemberBindingNotFound``（409）直通全局处理器。
+         */
+        put: operations["set_my_binding_shared_endpoint_api_workspaces__workspace_id__my_binding_shared_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/shared-daemons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Shared Daemons Endpoint
+         * @description owner 查工作空间所有共享 daemon（FR-02 / D-003@v1）。
+         *
+         *     返回含 lender_user_id / daemon 在线状态 / 可撤销标记。
+         */
+        get: operations["list_shared_daemons_endpoint_api_workspaces__workspace_id__shared_daemons_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/members/{user_id}/shared": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke Shared Endpoint
+         * @description owner 撤销某成员 daemon 共享（FR-02 / D-003@v1）。
+         *
+         *     设 shared=False，**不删 binding 行**（lender 配置保留）。target 无 binding
+         *     时 service 抛 ``MemberBindingNotFound``（409）。
+         */
+        delete: operations["revoke_shared_endpoint_api_workspaces__workspace_id__members__user_id__shared_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/login": {
         parameters: {
             query?: never;
@@ -730,6 +905,48 @@ export interface paths {
         put?: never;
         /** Login */
         post: operations["login_api_auth_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/captcha/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Confirm Captcha
+         * @description 签发一次性 captcha_id,前端点「我不是机器人」时取。
+         *
+         *     无需鉴权(登录前调用);前端在收到 423 need_captcha 后调用。
+         */
+        get: operations["get_confirm_captcha_api_auth_captcha_confirm_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/captcha/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify Captcha
+         * @description 校验 captcha_id(一次性)→ 通过签发一次性 captcha_token,登录时回传。
+         */
+        post: operations["verify_captcha_api_auth_captcha_verify_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1434,6 +1651,142 @@ export interface paths {
         put?: never;
         /** Check Access */
         post: operations["check_access_api_git_check_access_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/llm-providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Providers */
+        get: operations["list_providers_api_llm_providers_get"];
+        put?: never;
+        /** Create Provider */
+        post: operations["create_provider_api_llm_providers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/llm-providers/fetch-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fetch Provider Models
+         * @description 拉上游 ``/v1/models``（design §5.1 D-001/D-006）。
+         *
+         *     双形态 body：
+         *     - 编辑态 ``{provider_id}`` → 后端解密 encrypted_api_key 用；
+         *     - 新建态 ``{base_url, api_key, auth_field?}`` → 直传不落库（用完即弃）。
+         *
+         *     无状态查询（POST 仅因双形态 body，design §9 豁免生命周期契约）。
+         *     响应仅含 ``{models:[{id, owned_by}]}``；明文 key 永不回传（NFR-02）。
+         */
+        post: operations["fetch_provider_models_api_llm_providers_fetch_models_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/llm-providers/{provider_id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Query Provider Usage
+         * @description 查供应商用量（余额 / 套餐额度），design §5.2 D-002/D-005。
+         *
+         *     owner 级（``get_current_user`` + service 内 user_id 过滤，跨用户 → 404/403 不泄漏，
+         *     同 fetch-models/get_provider 范式）。无状态查询（POST 仅因复用路径参数，design §8
+         *     豁免生命周期契约）。
+         *
+         *     - 200 ``UsageResult{success:true, data}``：多 tier 余额 / 额度；
+         *     - 200 ``UsageResult{success:false}``：确定性失败（鉴权翻红带 ``is_valid:False`` /
+         *       不支持 / 解析错 / SSRF）；
+         *     - 5xx：瞬时失败（网络 / 5xx / 429 / 超时）经 service raise ``AppError`` 自然冒泡，
+         *       本层不 try/except（同 fetch-models），前端保留上次成功值 10 分钟。
+         *
+         *     响应无 api_key 字段（NFR-02）。
+         */
+        post: operations["query_provider_usage_api_llm_providers__provider_id__usage_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/llm-providers/{provider_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Provider */
+        get: operations["get_provider_api_llm_providers__provider_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Provider */
+        delete: operations["delete_provider_api_llm_providers__provider_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Provider */
+        patch: operations["update_provider_api_llm_providers__provider_id__patch"];
+        trace?: never;
+    };
+    "/api/llm-providers/{provider_id}/set-default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Default Provider */
+        post: operations["set_default_provider_api_llm_providers__provider_id__set_default_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/llm-providers/{provider_id}/unset-default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unset Default Provider
+         * @description 取消默认（cc-switch 式「停止」）。
+         *
+         *     对称 ``set-default``（「启动」）：取消本行默认。若取消后该用户×agent_kind 无任何
+         *     默认供应商 → lease 不再下发 provider_config → daemon 回归本机凭证管理（D-007）。
+         */
+        post: operations["unset_default_provider_api_llm_providers__provider_id__unset_default_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3733,6 +4086,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ppm/project-maintenance/member-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Page Project Member Summary
+         * @description 项目成员聚合 (派生 owner_name/member_count + 多维筛选)。
+         *
+         *     必须声明在 ``/{entity_id}`` GET 之前 (路径优先级见 :134 注释),否则
+         *     ``member-summary`` 会被当 entity_id 解析为 UUID 失败 (422)。
+         */
+        get: operations["page_project_member_summary_api_ppm_project_maintenance_member_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ppm/customer-maintenance": {
         parameters: {
             query?: never;
@@ -3928,7 +4304,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Plan Node Details */
+        /**
+         * List Plan Node Details
+         * @description 列出模板明细 (design §5.2)。
+         *
+         *     - 不传 ``module_id`` → 返回该模板全部明细 (无模块模板二层用)。
+         *     - 传 ``module_id`` → 仅返回挂该模块的明细 (有模块模板三层按模块拉,D-002)。
+         */
         get: operations["list_plan_node_details_api_ppm_plan_node__plan_node_id__details_get"];
         put?: never;
         post?: never;
@@ -3982,6 +4364,32 @@ export interface paths {
         };
         /** List Modules */
         get: operations["list_modules_api_ppm_plan_node__plan_node_id__modules_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ppm/plan-node-module/by-project": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Modules By Project
+         * @description 按项目列出其下所有模块 (problem 表单下拉用)。
+         *
+         *     反查 project → ps_project_plan → ps_plan_node → plan_node_module。
+         *     固定路径前置于 ``/plan-node-module/{item_id}`` 参数化路由,否则
+         *     FastAPI 按注册顺序把 ``by-project`` 当 item_id 解析为 UUID 失败返回 422
+         *     (同 export-excel / list-by-date-range 模式)。非法 project_id 由路由层
+         *     UUID 校验拦截为 422,service 永远收到合法 UUID。
+         */
+        get: operations["list_modules_by_project_api_ppm_plan_node_module_by_project_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4250,9 +4658,10 @@ export interface paths {
         };
         /**
          * Export Plan Node Details
-         * @description 导出里程碑明细为 Excel (P2-3, X-002)。
+         * @description 导出里程碑明细为 Excel(子母表分组:里程碑 → 模块 → 明细,X-002)。
          *
-         *     仅导出非 archived (当前有效版本) 的明细。
+         *     传 ``plan_id`` 时按当前项目计划的里程碑/模块分组导出(标题行合并);
+         *     不传则导出空表(里程碑明细页始终带 plan_id)。
          */
         get: operations["export_plan_node_details_api_ppm_plan_node_detail_export_excel_get"];
         put?: never;
@@ -4395,6 +4804,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ppm/weekly-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Weekly Plan
+         * @description 项目计划分页查询(所有项目实施阶段明细+任务计划)。
+         */
+        get: operations["list_weekly_plan_api_ppm_weekly_plan_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ppm/weekly-plan/export-excel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Weekly Plan
+         * @description 导出项目计划 Excel(精确复制模板样式:标题行+两级合并表头+数据行合并)。
+         */
+        get: operations["export_weekly_plan_api_ppm_weekly_plan_export_excel_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ppm/task-plan/create": {
         parameters: {
             query?: never;
@@ -4500,6 +4949,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ppm/task-plan/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Plan Task
+         * @description 启动任务(未开始→进行中): 创建 in-flight TaskExecute 记 actual_start_time。
+         *
+         *     返回的 ``id`` 作为后续 POST /task-plan/execute 的 ``task_execute_id``。
+         *     D-002 多次填报: 每次 start 产生一条独立 TaskExecute(1 plan : N execute)。
+         */
+        post: operations["start_plan_task_api_ppm_task_plan_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ppm/task-plan/export-excel": {
         parameters: {
             query?: never;
@@ -4529,7 +5001,10 @@ export interface paths {
         };
         /**
          * Personal Plan Task Page
-         * @description 仅返回当前登录用户的任务计划。
+         * @description 返回(目标)用户的任务计划。不传 target_user_id=当前登录人(兼容旧行为)。
+         *
+         *     切换用户时仅走 workbench ``_resolve_target_user`` 收口(超管‖经理且目标
+         *     ∈可见集),**禁用 data_scope**(其按 viewer 项目集过滤行,语义不符,design F5)。
          */
         get: operations["personal_plan_task_page_api_ppm_personal_task_plan_page_get"];
         put?: never;
@@ -4842,6 +5317,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ppm/problem-list/import-template": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Import Template
+         * @description 下载动态下拉导入模板 (FR-01/D-002/D-007/D-012)。
+         *
+         *     按 data_scope 收敛项目/成员 (超管全部,否则经理项目集);模块按项目分组实现
+         *     **项目→模块级联下拉** (D-012 升级): 选了项目后模块下拉只显示该项目下的模块。
+         *     固定枚举取前端同款。openpyxl 同步构造丢线程池 (R-03):主表 18 列表头 + 隐藏
+         *     sheet ``_data`` (A=项目 / B=成员 / C 起每项目一列模块) + 主表 DataValidation
+         *     type=list 引用隐藏 sheet 列 (绕 255 字符限, R-03) / 模块列用 INDIRECT($A2)
+         *     据同行项目单元格值查找该项目的命名区域 / 固定 inline list。
+         */
+        get: operations["download_import_template_api_ppm_problem_list_import_template_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ppm/problem-list/export-excel": {
         parameters: {
             query?: never;
@@ -4851,11 +5353,75 @@ export interface paths {
         };
         /**
          * Export Problems
-         * @description 导出问题清单为 Excel (X-002)。
+         * @description 导出问题清单为 Excel (18 列对齐导入 + 附件嵌图片, D-003/D-006/D-011/R-07)。
+         *
+         *     拆两段 (跨 async/sync 边界, D-011):
+         *     ① async 段:调 ``list_problems_for_export`` 取 18 列 + 对每行 ``file_urls`` 的
+         *       file_id 调 ``FileService.get_stream`` 收图 bytes 到内存 (``get_stream`` 返回
+         *       ``AsyncIterator``, 不能在 sync 段 await);
+         *     ② sync 段 (``anyio.to_thread.run_sync``):openpyxl 构造 workbook (18 列表头 +
+         *       数据行 + 附件列对每行 images ``add_image`` 锚到该行单元格)。
+         *     单图取流失败 (缺失/已删/底层存储瞬时错误,含非 AppError) 跳过不阻断导出
+         *     (best-effort, 对齐 D-009 口径;P2 捕获面扩到 Exception)。
          */
         get: operations["export_problems_api_ppm_problem_list_export_excel_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ppm/problem-list/import-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Problems Preview
+         * @description 问题清单导入预览 (task-04 / design §7)。
+         *
+         *     先用 :func:`validate_xlsx_upload` 校验大小/扩展名 (D-013,中立异常由
+         *     ``AppError`` 统一翻译),再交 service 解析 + 反查项目/模块/成员,不入库。
+         *     Excel 解析为同步 openpyxl 操作,由 service 内部 ``anyio.to_thread`` 包裹
+         *     避免阻塞事件循环 (R-03,对齐 plan 模块导入范式)。返回
+         *     ``ProblemImportPreviewResp`` 供前端标红确认后再提交。
+         */
+        post: operations["import_problems_preview_api_ppm_problem_list_import_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ppm/problem-list/import-commit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Problems Commit
+         * @description 问题清单导入提交 (task-05 / design §7 / D-013)。
+         *
+         *     **multipart 改造 (D-013)**:preview → commit 是 JSON 往返,图片二进制带不过去;
+         *     故 commit 端收 ``file`` (原 Excel, 同 preview 那份) + ``rows`` (JSON 串, 勾选
+         *     的预览行)。router 重新解析 ``file`` 取 ``parsed_rows`` (含 images),按
+         *     ``row_index`` 建 ``images_by_row`` 映射,装配 ``FileService`` 一并传入 service。
+         *
+         *     service 不信任前端 UUID,按原文重新反查 + data_scope 校验 (D-011),单次事务提交
+         *     (D-008);逐图上传存 file_id (task-04/D-004/D-009, 单图失败 failed_rows 不中断)。
+         *     router 不二次包装,直接回传 service 产出的 ``ProblemImportResultResp``。
+         */
+        post: operations["import_problems_commit_api_ppm_problem_list_import_commit_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4904,7 +5470,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/ppm/problem-list/{item_id}/next": {
+    "/api/ppm/problem-list/{item_id}/start": {
         parameters: {
             query?: never;
             header?: never;
@@ -4913,15 +5479,21 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Next Process */
-        post: operations["next_process_api_ppm_problem_list__item_id__next_post"];
+        /**
+         * Start Problem
+         * @description 启动问题 (新建 → 进行中)：建 in-flight TaskExecute，返回其 id 供 execute 用。
+         *
+         *     返回的 ``id`` 作为后续 PUT /problem-list/{id}/execute 的 ``task_execute_id``。
+         *     多次执行每次「开始」产生一条独立 TaskExecute (1 problem : N execute)。
+         */
+        post: operations["start_problem_api_ppm_problem_list__item_id__start_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/ppm/problem-list/{item_id}/reject": {
+    "/api/ppm/problem-list/{item_id}/execute": {
         parameters: {
             query?: never;
             header?: never;
@@ -4929,76 +5501,14 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
-        /** Reject Process */
-        post: operations["reject_process_api_ppm_problem_list__item_id__reject_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/ppm/problem-list/{item_id}/done": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Done Task */
-        post: operations["done_task_api_ppm_problem_list__item_id__done_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/ppm/problem-list/{item_id}/close": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Close Task */
-        post: operations["close_task_api_ppm_problem_list__item_id__close_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/ppm/problem-list/{item_id}/tasks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Tasks */
-        get: operations["list_tasks_api_ppm_problem_list__item_id__tasks_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/ppm/problem-list/{item_id}/logs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Logs */
-        get: operations["list_logs_api_ppm_problem_list__item_id__logs_get"];
-        put?: never;
+        /**
+         * Execute Problem
+         * @description 执行问题：收口 in-flight TaskExecute 并推进状态机。
+         *
+         *     - action=complete → 已完成 (终态)
+         *     - action=submit → 回新建 (可再次 start，重复执行)
+         */
+        put: operations["execute_problem_api_ppm_problem_list__item_id__execute_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -5332,7 +5842,7 @@ export interface paths {
         };
         /**
          * Get Workbench Profile
-         * @description 当前登录用户的个人工作台头部信息。
+         * @description 工作台头部信息(支持切换用户)。
          */
         get: operations["get_workbench_profile_api_ppm_workbench_profile_get"];
         put?: never;
@@ -5352,7 +5862,7 @@ export interface paths {
         };
         /**
          * Get Workbench Summary
-         * @description 个人工作台聚合视图:指标卡片 + 待办列表。
+         * @description 个人工作台指标聚合(支持切换用户;待办走 /workbench/todos)。
          */
         get: operations["get_workbench_summary_api_ppm_workbench_summary_get"];
         put?: never;
@@ -5372,9 +5882,49 @@ export interface paths {
         };
         /**
          * Get Workbench Calendar
-         * @description 个人工作台月度日历负载。
+         * @description 个人工作台月度日历负载(支持切换用户)。
          */
         get: operations["get_workbench_calendar_api_ppm_workbench_calendar_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ppm/workbench/todos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workbench Todos
+         * @description 个人工作台待办(分页,默认每页 10 条;支持切换用户)。
+         */
+        get: operations["get_workbench_todos_api_ppm_workbench_todos_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ppm/workbench/switchable-users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workbench Switchable Users
+         * @description 当前登录人可切换查看的用户列表(经理 ‖ super_admin);其余返回空。
+         */
+        get: operations["get_workbench_switchable_users_api_ppm_workbench_switchable_users_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6893,17 +7443,50 @@ export interface components {
             /** Generated */
             generated: string[];
         };
+        /**
+         * BatchMetaRequest
+         * @description 批量元数据请求（按 id 列表查 FileMetaResp）。
+         */
+        BatchMetaRequest: {
+            /** Ids */
+            ids?: string[];
+        };
         /** Body_import_modules_preview_api_ppm_plan_node__plan_node_id__modules_import_preview_post */
         Body_import_modules_preview_api_ppm_plan_node__plan_node_id__modules_import_preview_post: {
             /** File */
             file: string;
         };
+        /** Body_import_problems_commit_api_ppm_problem_list_import_commit_post */
+        Body_import_problems_commit_api_ppm_problem_list_import_commit_post: {
+            /**
+             * File
+             * @description preview 阶段同一个 Excel 文件 (重传以取嵌入图片 bytes)
+             */
+            file: string;
+            /**
+             * Rows
+             * @description ProblemImportCommitReq 的 JSON 串 (勾选回传的预览行)
+             */
+            rows: string;
+        };
+        /** Body_import_problems_preview_api_ppm_problem_list_import_preview_post */
+        Body_import_problems_preview_api_ppm_problem_list_import_preview_post: {
+            /** File */
+            file: string;
+        };
+        /** Body_upload_file_api_file_upload_post */
+        Body_upload_file_api_file_upload_post: {
+            /** File */
+            file: string;
+        };
         /**
          * CalendarDay
-         * @description 日历单日负载。
+         * @description 日历单日(左点负载/右点进度 + 当日三类详情)。
          *
-         *     ``date`` 形如 ``YYYY-MM-DD``;``load_level`` / ``alert_level``
-         *     为前端展示用的分级文案(如 ``low`` / ``high``、``normal`` / ``alert``)。
+         *     ``date`` 形如 ``YYYY-MM-DD``;``load_level`` (左点负载 none/leisure/full/over)
+         *     与 ``alert_level`` (右点进度 none/green/yellow/red) 为分级文案。
+         *     ``plan_items`` / ``problem_items`` / ``execute_items`` 为当日覆盖的三类摘要,
+         *     供前端点击该天时展开 (D-009)。
          */
         CalendarDay: {
             /** Date */
@@ -6914,6 +7497,82 @@ export interface components {
             alert_level: string;
             /** Task Count */
             task_count: number;
+            /**
+             * Plan Items
+             * @default []
+             */
+            plan_items: components["schemas"]["CalendarPlanItem"][];
+            /**
+             * Problem Items
+             * @default []
+             */
+            problem_items: components["schemas"]["CalendarProblemItem"][];
+            /**
+             * Execute Items
+             * @default []
+             */
+            execute_items: components["schemas"]["CalendarExecuteItem"][];
+        };
+        /**
+         * CalendarExecuteItem
+         * @description 日历当日实际执行摘要(actual 覆盖该天的 TaskExecute,所有状态)。
+         */
+        CalendarExecuteItem: {
+            /** Id */
+            id: string;
+            /** Content */
+            content?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Time Spent */
+            time_spent?: number | null;
+        };
+        /**
+         * CalendarPlanItem
+         * @description 日历当日计划任务摘要(区间覆盖该天的 PlanTask)。
+         */
+        CalendarPlanItem: {
+            /** Id */
+            id: string;
+            /** Content */
+            content?: string | null;
+            /** Project Name */
+            project_name?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Start Time */
+            start_time?: string | null;
+            /** End Time */
+            end_time?: string | null;
+        };
+        /**
+         * CalendarProblemItem
+         * @description 日历当日缺陷摘要(区间覆盖该天的 PpmProblemList)。
+         */
+        CalendarProblemItem: {
+            /** Id */
+            id: string;
+            /** Pro Desc */
+            pro_desc?: string | null;
+            /** Project Name */
+            project_name?: string | null;
+            /** Status */
+            status?: string | null;
+        };
+        /** CaptchaVerifyRequest */
+        CaptchaVerifyRequest: {
+            /** Captcha Id */
+            captcha_id: string;
+        };
+        /**
+         * CaptchaVerifyResponse
+         * @description 校验通过 → 返回一次性 captcha_token,登录时回传。
+         */
+        CaptchaVerifyResponse: {
+            /** Success */
+            success: boolean;
+            /** Captcha Token */
+            captcha_token?: string | null;
         };
         /** ChangeCreateRequest */
         ChangeCreateRequest: {
@@ -7337,21 +7996,6 @@ export interface components {
             created_at?: string | null;
         };
         /**
-         * CloseTaskReq
-         * @description closeTask — 验证人验证关闭。
-         *
-         *     ``check_result == "1"`` 通过→已关闭;否则打回责任人→处置中。
-         */
-        CloseTaskReq: {
-            /** Check Info */
-            check_info?: string | null;
-            /**
-             * Check Result
-             * @default 1
-             */
-            check_result: string;
-        };
-        /**
          * CommentCreateReq
          * @description 评论新建请求。空内容由 service 层 ``.strip()`` 校验 (422)。
          */
@@ -7424,6 +8068,14 @@ export interface components {
              * @default active
              */
             status: string;
+        };
+        /**
+         * ConfirmCaptchaResponse
+         * @description GET /auth/captcha/confirm 返回:一次性 captcha_id(点「我不是机器人」时取)。
+         */
+        ConfirmCaptchaResponse: {
+            /** Captcha Id */
+            captcha_id: string;
         };
         /**
          * ConvergeResponse
@@ -8136,30 +8788,13 @@ export interface components {
             synced: number;
         };
         /**
-         * DoneTaskReq
-         * @description doneTask — 责任人完成处置。
-         *
-         *     ``completed=true`` 推进到待验证;``false`` 仅追加处置情况 (仍处置中)。
-         */
-        DoneTaskReq: {
-            /** Handle Info */
-            handle_info?: string | null;
-            /** Time Spent */
-            time_spent?: number | null;
-            /**
-             * Completed
-             * @default true
-             */
-            completed: boolean;
-        };
-        /**
          * ExecutePlanReq
          * @description 执行计划请求 (联动生成/更新 TaskExecute)。
          *
          *     Attributes:
          *         plan_task_id: 被执行的计划任务 ID。
-         *         submit: 是否标记完成 (True → 状态 90 已完成)。
-         *         task_execute_id: 已存在执行记录 ID 时为更新,否则新建。
+         *         action: 执行动作 "submit"(保存本次+任务回未开始,可再次填报) / "complete"(保存本次+任务已完成)。
+         *         task_execute_id: start 端点返回的 in-flight 执行记录 ID(execute 时必填,收口哪条)。
          *         execute_info / time_spent / actual_start_time / actual_end_time:
          *             本次执行信息。
          *         execute_user_id: 执行人。
@@ -8172,12 +8807,15 @@ export interface components {
              */
             plan_task_id: string;
             /**
-             * Submit
-             * @default false
+             * Action
+             * @enum {string}
              */
-            submit: boolean;
-            /** Task Execute Id */
-            task_execute_id?: string | null;
+            action: "submit" | "complete";
+            /**
+             * Task Execute Id
+             * Format: uuid
+             */
+            task_execute_id: string;
             /** Execute Info */
             execute_info?: string | null;
             /** Time Spent */
@@ -8192,6 +8830,8 @@ export interface components {
             start_remark?: string | null;
             /** End Remark */
             end_remark?: string | null;
+            /** File Urls */
+            file_urls?: string[] | null;
         };
         /**
          * ExecutionContextResponse
@@ -8265,6 +8905,13 @@ export interface components {
              * @description 是否 stage 投递（daemon 用它判定是否构造 skill 调用 prompt）。
              */
             stage_dispatch?: boolean | null;
+            /**
+             * Provider Config
+             * @description 用户默认 LLM 供应商配置。含 agent_kind/base_url/api_key(明文)/auth_field/model/model_role_mappings/default_fallback_model/extra_env。仅 claim/create 阶段下发；submit/complete 链路与审计日志严禁回传 api_key（R-02）。
+             */
+            provider_config?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * FeedbackRequest
@@ -8286,6 +8933,83 @@ export interface components {
              * @description 自定义返工目标（覆盖类别默认值，可选）
              */
             target_stage?: string | null;
+        };
+        /**
+         * FetchModelsItem
+         * @description 上游 /v1/models 返回的单条模型（OpenAI 兼容字段；owned_by 上游缺失则 None）。
+         */
+        FetchModelsItem: {
+            /** Id */
+            id: string;
+            /** Owned By */
+            owned_by?: string | null;
+        };
+        /**
+         * FetchModelsRequest
+         * @description ``POST /api/llm-providers/fetch-models`` 双形态请求体（D-001）。
+         *
+         *     形态① 编辑态：``provider_id`` → service 查行 + ``cipher.decrypt`` 取明文 key +
+         *     auth_field + base_url（前端只传 id，明文 key 不出后端）。
+         *     形态② 新建态：``base_url`` + ``api_key``（+可选 ``auth_field``）→ 直传不落库不入日志，
+         *     用完即弃（NFR-02）。
+         *
+         *     二者互斥（``_enforce_dual_form`` 保证），不能同时填也不能都不填。
+         */
+        FetchModelsRequest: {
+            /** Provider Id */
+            provider_id?: string | null;
+            /** Base Url */
+            base_url?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /** Auth Field */
+            auth_field?: ("ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY") | null;
+        };
+        /**
+         * FetchModelsResponse
+         * @description fetch-models 响应：模型列表（明文 key 永不进响应，NFR-02）。
+         */
+        FetchModelsResponse: {
+            /** Models */
+            models: components["schemas"]["FetchModelsItem"][];
+        };
+        /**
+         * FileMetaResp
+         * @description 文件元数据响应（task-04 provides；batch-meta 回显用）。
+         */
+        FileMetaResp: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Original Name */
+            original_name: string;
+            /** Mime Type */
+            mime_type: string;
+            /** Size */
+            size: number;
+            /** Owner Type */
+            owner_type: string;
+            /** Owner Id */
+            owner_id?: string | null;
+        };
+        /**
+         * FileUploadResp
+         * @description 上传成功响应（task-04 provides）。
+         */
+        FileUploadResp: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Original Name */
+            original_name: string;
+            /** Mime Type */
+            mime_type: string;
+            /** Size */
+            size: number;
         };
         /** GitIdentityCreate */
         GitIdentityCreate: {
@@ -8895,12 +9619,155 @@ export interface components {
             /** Roots */
             roots: string[];
         };
+        /** LlmProviderCreate */
+        LlmProviderCreate: {
+            /** Name */
+            name: string;
+            /**
+             * Agent Kind
+             * @default claude
+             * @constant
+             */
+            agent_kind: "claude";
+            /** Base Url */
+            base_url?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /** Website Url */
+            website_url?: string | null;
+            /**
+             * Auth Field
+             * @default ANTHROPIC_AUTH_TOKEN
+             * @enum {string}
+             */
+            auth_field: "ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY";
+            /** Model Role Mappings */
+            model_role_mappings?: {
+                [key: string]: unknown;
+            } | null;
+            /** Default Fallback Model */
+            default_fallback_model?: string | null;
+            /** Extra Env */
+            extra_env?: {
+                [key: string]: unknown;
+            } | null;
+            /** Settings Config */
+            settings_config?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Is Default
+             * @default false
+             */
+            is_default: boolean;
+        };
+        /** LlmProviderList */
+        LlmProviderList: {
+            /** Items */
+            items: components["schemas"]["LlmProviderRead"][];
+            /** Total */
+            total: number;
+        };
+        /** LlmProviderRead */
+        LlmProviderRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /** Name */
+            name: string;
+            /** Agent Kind */
+            agent_kind: string;
+            /** Base Url */
+            base_url: string | null;
+            /** Model */
+            model: string | null;
+            /** Notes */
+            notes: string | null;
+            /** Website Url */
+            website_url: string | null;
+            /** Auth Field */
+            auth_field: string;
+            /** Model Role Mappings */
+            model_role_mappings: {
+                [key: string]: unknown;
+            } | null;
+            /** Default Fallback Model */
+            default_fallback_model: string | null;
+            /** Extra Env */
+            extra_env: {
+                [key: string]: unknown;
+            } | null;
+            /** Settings Config */
+            settings_config?: {
+                [key: string]: unknown;
+            } | null;
+            /** Is Default */
+            is_default: boolean;
+            /** Api Key Masked */
+            api_key_masked?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** LlmProviderUpdate */
+        LlmProviderUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Base Url */
+            base_url?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /** Website Url */
+            website_url?: string | null;
+            /** Auth Field */
+            auth_field?: ("ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY") | null;
+            /** Model Role Mappings */
+            model_role_mappings?: {
+                [key: string]: unknown;
+            } | null;
+            /** Default Fallback Model */
+            default_fallback_model?: string | null;
+            /** Extra Env */
+            extra_env?: {
+                [key: string]: unknown;
+            } | null;
+            /** Settings Config */
+            settings_config?: {
+                [key: string]: unknown;
+            } | null;
+            /** Is Default */
+            is_default?: boolean | null;
+        };
         /** LoginRequest */
         LoginRequest: {
             /** Account */
             account: string;
             /** Password */
             password: string;
+            /** Captcha Token */
+            captcha_token?: string | null;
         };
         /** MarkdownGenerateRequest */
         MarkdownGenerateRequest: {
@@ -8996,6 +9863,11 @@ export interface components {
             root_path: string;
             /** Path Source */
             path_source: string;
+            /**
+             * Shared
+             * @default false
+             */
+            shared: boolean;
             /** Synced At */
             synced_at: string | null;
             /** Last Scan At */
@@ -9107,14 +9979,6 @@ export interface components {
              * @default []
              */
             artifacts: components["schemas"]["MissionArtifactResponse"][];
-        };
-        /**
-         * NextProcessReq
-         * @description nextProcess — 推进到下一节点。
-         */
-        NextProcessReq: {
-            /** Comment */
-            comment?: string | null;
         };
         /** OkResponse */
         OkResponse: {
@@ -9412,6 +10276,26 @@ export interface components {
              */
             page_size: number;
         };
+        /** Page[ProjectMemberSummaryItem] */
+        Page_ProjectMemberSummaryItem_: {
+            /** Items */
+            items?: components["schemas"]["ProjectMemberSummaryItem"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /**
+             * Page Size
+             * @default 20
+             */
+            page_size: number;
+        };
         /** Page[ProjectStakeholderResp] */
         Page_ProjectStakeholderResp_: {
             /** Items */
@@ -9472,10 +10356,50 @@ export interface components {
              */
             page_size: number;
         };
+        /** Page[WeeklyPlanRow] */
+        Page_WeeklyPlanRow_: {
+            /** Items */
+            items?: components["schemas"]["WeeklyPlanRow"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /**
+             * Page Size
+             * @default 20
+             */
+            page_size: number;
+        };
         /** Page[WorkHourResponse] */
         Page_WorkHourResponse_: {
             /** Items */
             items?: components["schemas"]["WorkHourResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /**
+             * Page Size
+             * @default 20
+             */
+            page_size: number;
+        };
+        /** Page[WorkbenchTodoItem] */
+        Page_WorkbenchTodoItem_: {
+            /** Items */
+            items?: components["schemas"]["WorkbenchTodoItem"][];
             /**
              * Total
              * @default 0
@@ -9519,7 +10443,7 @@ export interface components {
          * Permission
          * @enum {string}
          */
-        Permission: "platform:admin" | "platform:billing" | "platform:audit:read" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "component:read" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "incident:read" | "change:create" | "change:read" | "change:update" | "change:approve" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "task:cancel" | "task:approve" | "code:read" | "code:write" | "code:review" | "code:merge" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "tool:shell_exec" | "tool:network" | "tool:database" | "tool:secret:read" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:project:write" | "ppm:project:delete" | "ppm:project:export" | "ppm:customer:read" | "ppm:customer:write" | "ppm:customer:delete" | "ppm:customer:export" | "ppm:plan:read" | "ppm:plan:write" | "ppm:plan:delete" | "ppm:plan:export" | "ppm:problem:read" | "ppm:problem:write" | "ppm:problem:delete" | "ppm:problem:export" | "ppm:task:read" | "ppm:task:write" | "ppm:task:delete" | "ppm:task:export" | "ppm:work-hour:read" | "ppm:work-hour:write" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:kanban:assign";
+        Permission: "platform:admin" | "platform:billing" | "platform:audit:read" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "component:read" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "incident:read" | "change:create" | "change:read" | "change:update" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "task:cancel" | "task:approve" | "daemon:borrow" | "code:read" | "code:write" | "code:review" | "code:merge" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "tool:shell_exec" | "tool:network" | "tool:database" | "tool:secret:read" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read";
         /**
          * PermissionResponseRead
          * @description REST response body for POST /sessions/{id}/permissions/{req}/response.
@@ -9562,11 +10486,15 @@ export interface components {
             project_type?: string | null;
             /** No */
             no?: number | null;
+            /** Has Module */
+            has_module: boolean;
         };
         /** PlanNodeDetailCreate */
         PlanNodeDetailCreate: {
             /** Plan Node Id */
             plan_node_id?: string | null;
+            /** Module Id */
+            module_id?: string | null;
             /** Detailed Stage */
             detailed_stage?: string | null;
             /** No */
@@ -9588,6 +10516,8 @@ export interface components {
         PlanNodeDetailResp: {
             /** Plan Node Id */
             plan_node_id?: string | null;
+            /** Module Id */
+            module_id?: string | null;
             /** Detailed Stage */
             detailed_stage?: string | null;
             /** No */
@@ -9638,6 +10568,8 @@ export interface components {
             achievement?: string | null;
             /** Overall Stage */
             overall_stage?: string | null;
+            /** Module Id */
+            module_id?: string | null;
         };
         /** PlanNodeModuleCreate */
         PlanNodeModuleCreate: {
@@ -9645,6 +10577,8 @@ export interface components {
             plan_node_id?: string | null;
             /** Module Name */
             module_name?: string | null;
+            /** No */
+            no?: string | null;
             /** Plan Workload */
             plan_workload?: string | null;
             /** Plan Begin Time */
@@ -9662,6 +10596,8 @@ export interface components {
             plan_node_id?: string | null;
             /** Module Name */
             module_name?: string | null;
+            /** No */
+            no?: string | null;
             /** Plan Workload */
             plan_workload?: string | null;
             /** Plan Begin Time */
@@ -9688,10 +10624,27 @@ export interface components {
              */
             updated_at: string;
         };
+        /**
+         * PlanNodeModuleSimpleItem
+         * @description 模块下拉项 ({id, module_name}) — problem 表单按项目选模块用。
+         *
+         *     数据来自 ``list_modules_by_project`` (反查 plan_node_module)。
+         */
+        PlanNodeModuleSimpleItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Module Name */
+            module_name?: string | null;
+        };
         /** PlanNodeModuleUpdate */
         PlanNodeModuleUpdate: {
             /** Module Name */
             module_name?: string | null;
+            /** No */
+            no?: string | null;
             /** Plan Workload */
             plan_workload?: string | null;
             /** Plan Begin Time */
@@ -9711,6 +10664,11 @@ export interface components {
             project_type?: string | null;
             /** No */
             no?: number | null;
+            /**
+             * Has Module
+             * @default false
+             */
+            has_module: boolean;
             /**
              * Id
              * Format: uuid
@@ -9735,6 +10693,8 @@ export interface components {
             project_type?: string | null;
             /** No */
             no?: number | null;
+            /** Has Module */
+            has_module?: boolean | null;
         };
         /** PlanReviewRequest */
         PlanReviewRequest: {
@@ -9799,6 +10759,8 @@ export interface components {
             module_name?: string | null;
             /** Content */
             content?: string | null;
+            /** Task Description */
+            task_description?: string | null;
             /** Work Load */
             work_load?: string | null;
             /** Add Work */
@@ -9872,6 +10834,8 @@ export interface components {
             module_name: string | null;
             /** Content */
             content: string | null;
+            /** Task Description */
+            task_description: string | null;
             /** Work Load */
             work_load: string | null;
             /** Add Work */
@@ -9910,6 +10874,11 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /**
+             * Spent Time
+             * @default 0
+             */
+            spent_time: number;
         };
         /**
          * PlanTaskSimple
@@ -9972,6 +10941,8 @@ export interface components {
             module_name?: string | null;
             /** Content */
             content?: string | null;
+            /** Task Description */
+            task_description?: string | null;
             /** Work Load */
             work_load?: string | null;
             /** Add Work */
@@ -10199,6 +11170,143 @@ export interface components {
             /** Is Delay Plan */
             is_delay_plan?: string | null;
         };
+        /**
+         * ProblemExecuteReq
+         * @description execute — 收口 in-flight TaskExecute 并推进 3 态状态机。
+         *
+         *     - ``action="submit"``   : 回「新建」(可再次 start，重复执行)
+         *     - ``action="complete"`` : 「已完成」(终态)
+         *
+         *     ``task_execute_id`` 必填 (start 返回的 in-flight 记录)。跨天校验在 service。
+         */
+        ProblemExecuteReq: {
+            /**
+             * Task Execute Id
+             * Format: uuid
+             */
+            task_execute_id: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "submit" | "complete";
+            /** Execute Info */
+            execute_info?: string | null;
+            /** Time Spent */
+            time_spent?: number | null;
+            /** Actual Start Time */
+            actual_start_time?: string | null;
+            /** Actual End Time */
+            actual_end_time?: string | null;
+            /** Execute User Id */
+            execute_user_id?: string | null;
+            /** File Urls */
+            file_urls?: string[] | null;
+        };
+        /**
+         * ProblemImportPreviewResp
+         * @description 预览响应 — 全部行(含标红) + 解析级错误(如找不到表头/空文件)。
+         *
+         *     ``valid_count``/``invalid_count`` 由 service 按 ``row.valid`` 聚合。
+         */
+        ProblemImportPreviewResp: {
+            /** Rows */
+            rows: components["schemas"]["ProblemImportPreviewRow"][];
+            /** Parse Errors */
+            parse_errors?: string[];
+            /** Valid Count */
+            valid_count: number;
+            /** Invalid Count */
+            invalid_count: number;
+        };
+        /**
+         * ProblemImportPreviewRow
+         * @description 单行预览结果 — Excel 一行对应一 DTO。
+         *
+         *     - 业务字段取自 importer 解析;枚举已规范化:``is_urgent``/``is_delay_plan``
+         *       为 "1"/"0"(空→None),``pro_type`` 原样保留(bug/change/其他)。
+         *     - 4 个反查 UUID(project/module/duty/audit)由 service 预览阶段填充,
+         *       仅供前端展示;commit 不信任,按原文重新反查(D-011)。
+         *     - 时间字段统一 ``datetime | None``;importer 产 ``date``,
+         *       service 做 date→datetime 转换(D-010)。
+         *     - ``valid`` 必填(语义上必须显式判断),``error`` 默认 None。
+         */
+        ProblemImportPreviewRow: {
+            /** Row Index */
+            row_index: number;
+            /** Project Name */
+            project_name?: string | null;
+            /** Module Name */
+            module_name?: string | null;
+            /** Pro Desc */
+            pro_desc?: string | null;
+            /** Pro Type */
+            pro_type?: string | null;
+            /** Is Urgent */
+            is_urgent?: string | null;
+            /** Func Name */
+            func_name?: string | null;
+            /** Duty User Name */
+            duty_user_name?: string | null;
+            /** Find By */
+            find_by?: string | null;
+            /** Find Time */
+            find_time?: string | null;
+            /** Plan Start Time */
+            plan_start_time?: string | null;
+            /** Plan End Time */
+            plan_end_time?: string | null;
+            /** Audit User Name */
+            audit_user_name?: string | null;
+            /** Work Load */
+            work_load?: string | null;
+            /** Work Type */
+            work_type?: string | null;
+            /** Pro Answer */
+            pro_answer?: string | null;
+            /** Is Delay Plan */
+            is_delay_plan?: string | null;
+            /** Remarks */
+            remarks?: string | null;
+            /** Project Id */
+            project_id?: string | null;
+            /** Module Id */
+            module_id?: string | null;
+            /** Duty User Id */
+            duty_user_id?: string | null;
+            /** Audit User Id */
+            audit_user_id?: string | null;
+            /** Valid */
+            valid: boolean;
+            /** Error */
+            error?: string | null;
+            /**
+             * Attachment Count
+             * @default 0
+             */
+            attachment_count: number;
+            /**
+             * Attachment Exceeded
+             * @default false
+             */
+            attachment_exceeded: boolean;
+        };
+        /**
+         * ProblemImportResultResp
+         * @description 导入结果 — 创建计数 + 失败行诊断。
+         *
+         *     - ``skipped``:preview 阶段 valid=false 未回传的(前端统计补 0)。
+         *     - ``failed_rows``:commit 重查/data_scope 失败行诊断;
+         *       原子提交成功(D-008)时为空列表。
+         */
+        ProblemImportResultResp: {
+            /** Created */
+            created: number;
+            /** Skipped */
+            skipped: number;
+            /** Failed Rows */
+            failed_rows?: string[];
+        };
         /** ProblemListCreate */
         ProblemListCreate: {
             /**
@@ -10230,6 +11338,8 @@ export interface components {
             pro_answer?: string | null;
             /** Work Type */
             work_type?: string | null;
+            /** Created By */
+            created_by?: string | null;
             /** Duty User Id */
             duty_user_id?: string | null;
             /** Duty User Name */
@@ -10252,11 +11362,6 @@ export interface components {
             is_delay_plan?: string | null;
             /** Work Load */
             work_load?: string | null;
-            /**
-             * Submit
-             * @default false
-             */
-            submit: boolean;
         };
         /** ProblemListResp */
         ProblemListResp: {
@@ -10289,6 +11394,8 @@ export interface components {
             pro_answer?: string | null;
             /** Work Type */
             work_type?: string | null;
+            /** Created By */
+            created_by?: string | null;
             /** Duty User Id */
             duty_user_id?: string | null;
             /** Duty User Name */
@@ -10346,6 +11453,23 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /**
+             * Spent Time
+             * @default 0
+             */
+            spent_time: number;
+            /**
+             * Can Edit
+             * @default false
+             */
+            can_edit: boolean;
+            /**
+             * Can Delete
+             * @default false
+             */
+            can_delete: boolean;
+            /** Created By Name */
+            created_by_name?: string | null;
         };
         /** ProblemListUpdate */
         ProblemListUpdate: {
@@ -10381,12 +11505,29 @@ export interface components {
             plan_start_time?: string | null;
             /** Plan End Time */
             plan_end_time?: string | null;
+            /** Audit User Id */
+            audit_user_id?: string | null;
             /** Remarks */
             remarks?: string | null;
             /** Is Delay Plan */
             is_delay_plan?: string | null;
             /** Work Load */
             work_load?: string | null;
+            /** Now Handle User */
+            now_handle_user?: string | null;
+            /** Now Handle User Name */
+            now_handle_user_name?: string | null;
+        };
+        /**
+         * ProblemStartReq
+         * @description start — 启动问题 (新建 → 进行中)，建 in-flight TaskExecute。
+         *
+         *     ``actual_start_time`` 可选 (前端跨天拆分补填时传指定日期，默认 now)。
+         *     problem_id 取自路径，execute_user_id 取自登录用户。
+         */
+        ProblemStartReq: {
+            /** Actual Start Time */
+            actual_start_time?: string | null;
         };
         /**
          * ProcessActionReq
@@ -10643,6 +11784,8 @@ export interface components {
             role_name: string | null;
             /** Depart Name */
             depart_name: string | null;
+            /** Username */
+            username?: string | null;
             /** Created By */
             created_by: string | null;
             /** Updated By */
@@ -10652,6 +11795,39 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * ProjectMemberSummaryItem
+         * @description 项目成员聚合行 (派生,非表实体)。
+         *
+         *     ``owner_name`` 由 service 推算:该项目 ``role_name ilike '%项目经理%'`` 的成员
+         *     取 ``created_at`` 最早;无则 None。``member_count`` 派生自该项目成员行数。
+         */
+        ProjectMemberSummaryItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Project Name */
+            project_name: string | null;
+            /** Project Code */
+            project_code: string;
+            /** Project Status */
+            project_status: string | null;
+            /** Project Type */
+            project_type: string | null;
+            /** Company Name */
+            company_name: string | null;
+            /** Owner Name */
+            owner_name: string | null;
+            /** Member Count */
+            member_count: number;
             /**
              * Updated At
              * Format: date-time
@@ -10751,6 +11927,16 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /**
+             * Can Edit
+             * @default false
+             */
+            can_edit: boolean;
+            /**
+             * Can Delete
+             * @default false
+             */
+            can_delete: boolean;
             /** Nodes */
             nodes?: components["schemas"]["PsPlanNodeWithDetail"][];
         };
@@ -10881,6 +12067,13 @@ export interface components {
             plan_complete_time?: string | null;
             /** Duty User Id */
             duty_user_id?: string | null;
+            /** Template Plan Node Id */
+            template_plan_node_id?: string | null;
+            /**
+             * Has Module
+             * @default false
+             */
+            has_module: boolean;
         };
         /** PsPlanNodeDetailCreate */
         PsPlanNodeDetailCreate: {
@@ -11012,6 +12205,12 @@ export interface components {
             approve_user_id?: string | null;
             /** Approve User Name */
             approve_user_name?: string | null;
+            /** Execute User Name */
+            execute_user_name?: string | null;
+            /** Module Name */
+            module_name?: string | null;
+            /** Task Execute Status */
+            task_execute_status?: string | null;
             /** Change Reason */
             change_reason?: string | null;
             /**
@@ -11120,6 +12319,12 @@ export interface components {
             approve_user_id?: string | null;
             /** Approve User Name */
             approve_user_name?: string | null;
+            /** Execute User Name */
+            execute_user_name?: string | null;
+            /** Module Name */
+            module_name?: string | null;
+            /** Task Execute Status */
+            task_execute_status?: string | null;
             /** Change Reason */
             change_reason?: string | null;
             /**
@@ -11161,6 +12366,13 @@ export interface components {
             plan_complete_time?: string | null;
             /** Duty User Id */
             duty_user_id?: string | null;
+            /** Template Plan Node Id */
+            template_plan_node_id?: string | null;
+            /**
+             * Has Module
+             * @default false
+             */
+            has_module: boolean;
             /**
              * Id
              * Format: uuid
@@ -11225,6 +12437,13 @@ export interface components {
             plan_complete_time?: string | null;
             /** Duty User Id */
             duty_user_id?: string | null;
+            /** Template Plan Node Id */
+            template_plan_node_id?: string | null;
+            /**
+             * Has Module
+             * @default false
+             */
+            has_module: boolean;
             /**
              * Id
              * Format: uuid
@@ -11365,6 +12584,16 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /**
+             * Can Edit
+             * @default false
+             */
+            can_edit: boolean;
+            /**
+             * Can Delete
+             * @default false
+             */
+            can_delete: boolean;
         };
         /** PsProjectPlanUpdate */
         PsProjectPlanUpdate: {
@@ -11442,14 +12671,6 @@ export interface components {
         RefreshRequest: {
             /** Refresh Token */
             refresh_token: string;
-        };
-        /**
-         * RejectProcessReq
-         * @description rejectProcess — 驳回到已作废。
-         */
-        RejectProcessReq: {
-            /** Comment */
-            comment?: string | null;
         };
         /** RejectRequest */
         RejectRequest: {
@@ -12278,6 +13499,39 @@ export interface components {
             updated: string[];
         };
         /**
+         * SharedDaemonView
+         * @description owner 视角下一条共享 daemon（FR-02 / D-003@v1）。
+         *
+         *     ``daemon_status`` / ``daemon_hostname`` 来自 JOIN daemon_instances；
+         *     ``revocable`` 恒 True（owner 调用，总可撤销）。
+         */
+        SharedDaemonView: {
+            /**
+             * Lender User Id
+             * Format: uuid
+             */
+            lender_user_id: string;
+            /** Daemon Id */
+            daemon_id?: string | null;
+            /** Daemon Status */
+            daemon_status?: string | null;
+            /** Daemon Hostname */
+            daemon_hostname?: string | null;
+            /**
+             * Revocable
+             * @default true
+             */
+            revocable: boolean;
+        };
+        /**
+         * SharedFlagRequest
+         * @description Body for PUT /my-binding/shared — lender toggles own daemon sharing.
+         */
+        SharedFlagRequest: {
+            /** Shared */
+            shared: boolean;
+        };
+        /**
          * SkillFileEntry
          * @description 单个 workspace 自定义 skill 的只读视图。
          */
@@ -12469,6 +13723,24 @@ export interface components {
             output?: string | null;
         };
         /**
+         * StartReq
+         * @description 启动任务请求(未开始→进行中,创建 in-flight TaskExecute 记 actual_start_time)。
+         *
+         *     D-002: 多次填报每次"启动"产生一条 TaskExecute。返回的 id 用于 execute 的 task_execute_id。
+         *     actual_start_time 可选(跨天拆分补填时传指定日期,默认 now)。
+         */
+        StartReq: {
+            /**
+             * Plan Task Id
+             * Format: uuid
+             */
+            plan_task_id: string;
+            /** Execute User Id */
+            execute_user_id?: string | null;
+            /** Actual Start Time */
+            actual_start_time?: string | null;
+        };
+        /**
          * SubmitDetailReq
          * @description submitDetail — 提交明细 detail JSON,白名单字段 merge 落库。
          *
@@ -12657,9 +13929,29 @@ export interface components {
             update_time?: string | null;
             /**
              * Estimate Hours
-             * @description 预估工时 (PlanTask.work_load 字符串解析)
+             * @description 预估工时 (PlanTask.work_load 字符串解析,单位人天)
              */
             estimate_hours?: number | null;
+            /**
+             * Task Description
+             * @description 任务描述 (PlanTask.task_description)
+             */
+            task_description?: string | null;
+            /**
+             * Module Name
+             * @description 所属模块名 (PlanTask.module_name)
+             */
+            module_name?: string | null;
+            /**
+             * Work Partner
+             * @description 配合人员 (PlanTask.work_partner)
+             */
+            work_partner?: string | null;
+            /**
+             * Remarks
+             * @description 备注 (PlanTask.remarks)
+             */
+            remarks?: string | null;
             /**
              * Kanban Order
              * @description 看板排序
@@ -12739,6 +14031,8 @@ export interface components {
             execute_info?: string | null;
             /** Attach Group Id */
             attach_group_id?: string | null;
+            /** File Urls */
+            file_urls?: string[];
             /** Execute User Id */
             execute_user_id?: string | null;
             /** Check Info */
@@ -12785,6 +14079,8 @@ export interface components {
             execute_info: string | null;
             /** Attach Group Id */
             attach_group_id: string | null;
+            /** File Urls */
+            file_urls: string[];
             /** Execute User Id */
             execute_user_id: string | null;
             /** Check Info */
@@ -12833,6 +14129,8 @@ export interface components {
             execute_info?: string | null;
             /** Attach Group Id */
             attach_group_id?: string | null;
+            /** File Urls */
+            file_urls?: string[] | null;
             /** Execute User Id */
             execute_user_id?: string | null;
             /** Check Info */
@@ -12876,6 +14174,8 @@ export interface components {
             execute_info: string | null;
             /** Attach Group Id */
             attach_group_id: string | null;
+            /** File Urls */
+            file_urls: string[];
             /** Execute User Id */
             execute_user_id: string | null;
             /** Check Info */
@@ -13438,6 +14738,52 @@ export interface components {
             agent_dispatch?: components["schemas"]["TransitionDispatchResponse"] | null;
         };
         /**
+         * UsageData
+         * @description 单条用量（一个套餐窗口 = 一条；多窗口 5h/周/月各自一条 tier）。
+         *
+         *     - ``plan_name``：套餐名 / 币种 / 窗口名（如「CNY」「5小时窗」「周限额」）；
+         *     - ``extra``：附加信息（token_plan 的重置时间 ISO8601 等）；
+         *     - ``is_valid``：凭据是否有效，``False`` → 前端翻红；
+         *     - ``invalid_message``：失效原因（鉴权失败等）；
+         *     - ``total/used/remaining``：balance=金额（CNY/USD）；token_plan=百分比（total=100）；
+         *     - ``unit``：``"USD"`` / ``"CNY"`` / ``"%"``。
+         */
+        UsageData: {
+            /** Plan Name */
+            plan_name?: string | null;
+            /** Extra */
+            extra?: string | null;
+            /** Is Valid */
+            is_valid?: boolean | null;
+            /** Invalid Message */
+            invalid_message?: string | null;
+            /** Total */
+            total?: number | null;
+            /** Used */
+            used?: number | null;
+            /** Remaining */
+            remaining?: number | null;
+            /** Unit */
+            unit?: string | null;
+        };
+        /**
+         * UsageResult
+         * @description 用量查询统一返回（D-005 错误两态）。
+         *
+         *     - ``success=True`` + ``data``：多 tier 余额/额度；
+         *     - ``success=False`` + ``data=[{is_valid:False}]``：确定性鉴权失败（前端翻红）；
+         *     - ``success=False`` + ``error``：其它确定性失败（不支持 / 解析错 / SSRF，前端灰提示）；
+         *     - 瞬时失败（网络/5xx/429/超时）在 service 层 ``raise``（5xx），不走到本结构。
+         */
+        UsageResult: {
+            /** Success */
+            success: boolean;
+            /** Data */
+            data?: components["schemas"]["UsageData"][] | null;
+            /** Error */
+            error?: string | null;
+        };
+        /**
          * UserColumnVO
          * @description 人员列 (源 ``UserColumnVO``)。
          *
@@ -13636,6 +14982,46 @@ export interface components {
             environment: string;
         };
         /**
+         * WeeklyPlanRow
+         * @description 项目计划行（明细 + 任务计划聚合，19 列对应源 Excel）。
+         *
+         *     数据来自 5 表 JOIN：PpmProjectMaintenance → PsProjectPlan → PsPlanNode
+         *     (has_module=true) → PsPlanNodeDetail → PlanTask(LEFT JOIN)。
+         *     延期原因/执行说明/评估说明/备注 系统无对应字段，导出时留空。
+         */
+        WeeklyPlanRow: {
+            /** Project Name */
+            project_name?: string | null;
+            /** Plan Type */
+            plan_type?: string | null;
+            /** Detailed Stage */
+            detailed_stage?: string | null;
+            /** Module Name */
+            module_name?: string | null;
+            /** Task Theme */
+            task_theme?: string | null;
+            /** Task Description */
+            task_description?: string | null;
+            /** Work Load */
+            work_load?: string | null;
+            /** User Name */
+            user_name?: string | null;
+            /** Start Time */
+            start_time?: string | null;
+            /** End Time */
+            end_time?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Actual Start Time */
+            actual_start_time?: string | null;
+            /** Actual End Time */
+            actual_end_time?: string | null;
+            /** Week Number */
+            week_number?: number | null;
+            /** Detail Id */
+            detail_id?: string | null;
+        };
+        /**
          * WorkHourCreate
          * @description 创建工时记录。
          */
@@ -13794,6 +15180,9 @@ export interface components {
          *
          *     ``avatar_text`` 为头像占位文案(取 display_name 首字),其余字段
          *     允许 ``None`` (来源数据缺失时)。
+         *
+         *     ``can_view_others`` 反映**当前登录人**(非 target)是否可切换查看他人
+         *     工作台(经理角色 ‖ super_admin);前端据此显隐切换入口(D-005@v1)。
          */
         WorkbenchProfile: {
             /** Display Name */
@@ -13806,15 +15195,38 @@ export interface components {
             role_name?: string | null;
             /** Avatar Text */
             avatar_text: string;
+            /**
+             * Can View Others
+             * @default false
+             */
+            can_view_others: boolean;
         };
         /**
          * WorkbenchSummary
-         * @description 个人工作台聚合视图:指标卡片 + 待办列表。
+         * @description 个人工作台聚合视图:指标卡片。
+         *
+         *     待办已移至独立分页端点 ``GET /workbench/todos``(D-003@v1 职责瘦身);
+         *     summary 只保留 metrics。
          */
         WorkbenchSummary: {
             metrics: components["schemas"]["WorkbenchMetrics"];
-            /** Todos */
-            todos: components["schemas"]["WorkbenchTodoItem"][];
+        };
+        /**
+         * WorkbenchSwitchableUser
+         * @description 可切换查看的工作台用户条目(GET /workbench/switchable-users)。
+         *
+         *     ``user_id`` 为目标用户 id(切换时透传 target_user_id);其余为展示字段,
+         *     部门名取首个 active 组织(对齐 profile 部门装配口径)。
+         */
+        WorkbenchSwitchableUser: {
+            /** User Id */
+            user_id: string;
+            /** Display Name */
+            display_name?: string | null;
+            /** Employee No */
+            employee_no?: string | null;
+            /** Department Name */
+            department_name?: string | null;
         };
         /**
          * WorkbenchTodoItem
@@ -15514,6 +16926,200 @@ export interface operations {
             };
         };
     };
+    upload_file_api_file_upload_post: {
+        parameters: {
+            query?: {
+                owner_type?: string;
+                owner_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_file_api_file_upload_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileUploadResp"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_files_api_file_list_get: {
+        parameters: {
+            query?: {
+                owner_type?: string | null;
+                owner_id?: string | null;
+                uploaded_by?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileMetaResp"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_file_api_file__file_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_file_api_file__file_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_file_meta_api_file__file_id__meta_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileMetaResp"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    batch_file_meta_api_file_batch_meta_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchMetaRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileMetaResp"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_my_binding_endpoint_api_workspaces__workspace_id__my_binding_get: {
         parameters: {
             query?: never;
@@ -15611,6 +17217,104 @@ export interface operations {
             };
         };
     };
+    set_my_binding_shared_endpoint_api_workspaces__workspace_id__my_binding_shared_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharedFlagRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberBindingView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_shared_daemons_endpoint_api_workspaces__workspace_id__shared_daemons_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedDaemonView"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_shared_endpoint_api_workspaces__workspace_id__members__user_id__shared_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberBindingView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     login_api_auth_login_post: {
         parameters: {
             query?: never;
@@ -15631,6 +17335,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TokenPair"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_confirm_captcha_api_auth_captcha_confirm_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfirmCaptchaResponse"];
+                };
+            };
+        };
+    };
+    verify_captcha_api_auth_captcha_verify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaptchaVerifyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptchaVerifyResponse"];
                 };
             };
             /** @description Validation Error */
@@ -17029,6 +18786,280 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AccessCheckResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_providers_api_llm_providers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmProviderList"];
+                };
+            };
+        };
+    };
+    create_provider_api_llm_providers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmProviderCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmProviderRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fetch_provider_models_api_llm_providers_fetch_models_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FetchModelsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FetchModelsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    query_provider_usage_api_llm_providers__provider_id__usage_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_provider_api_llm_providers__provider_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmProviderRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_provider_api_llm_providers__provider_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_provider_api_llm_providers__provider_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmProviderUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmProviderRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_default_provider_api_llm_providers__provider_id__set_default_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmProviderRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unset_default_provider_api_llm_providers__provider_id__unset_default_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmProviderRead"];
                 };
             };
             /** @description Validation Error */
@@ -21022,6 +23053,46 @@ export interface operations {
             };
         };
     };
+    page_project_member_summary_api_ppm_project_maintenance_member_summary_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                order_by?: string | null;
+                order?: string;
+                project_name?: string | null;
+                project_status?: string | null;
+                project_type?: string | null;
+                owner_name?: string | null;
+                member_keyword?: string | null;
+                role_name?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ProjectMemberSummaryItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     page_customer_maintenance_api_ppm_customer_maintenance_get: {
         parameters: {
             query?: {
@@ -21738,7 +23809,9 @@ export interface operations {
     };
     list_plan_node_details_api_ppm_plan_node__plan_node_id__details_get: {
         parameters: {
-            query?: never;
+            query?: {
+                module_id?: string | null;
+            };
             header?: never;
             path: {
                 plan_node_id: string;
@@ -21882,6 +23955,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlanNodeModuleResp"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_modules_by_project_api_ppm_plan_node_module_by_project_get: {
+        parameters: {
+            query: {
+                /** @description 项目 ID */
+                project_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanNodeModuleSimpleItem"][];
                 };
             };
             /** @description Validation Error */
@@ -22511,7 +24616,10 @@ export interface operations {
     };
     export_plan_node_details_api_ppm_plan_node_detail_export_excel_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 项目计划 ID;按子母表导出该计划的里程碑明细 */
+                plan_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -22525,6 +24633,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -22826,6 +24943,80 @@ export interface operations {
             };
         };
     };
+    list_weekly_plan_api_ppm_weekly_plan_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                project_name?: string | null;
+                status?: string[] | null;
+                user_id?: string | null;
+                start_time?: string | null;
+                end_time?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_WeeklyPlanRow_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_weekly_plan_api_ppm_weekly_plan_export_excel_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                project_name?: string | null;
+                status?: string[] | null;
+                user_id?: string | null;
+                start_time?: string | null;
+                end_time?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_plan_task_api_ppm_task_plan_create_post: {
         parameters: {
             query?: never;
@@ -22964,6 +25155,7 @@ export interface operations {
                 page_size?: number;
                 user_id?: string | null;
                 project_id?: string | null;
+                module_id?: string | null;
                 /** @description 状态(可多值) */
                 status?: string[] | null;
                 month?: string | null;
@@ -23036,6 +25228,39 @@ export interface operations {
             };
         };
     };
+    start_plan_task_api_ppm_task_plan_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartReq"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskExecuteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     export_plan_task_excel_api_ppm_task_plan_export_excel_get: {
         parameters: {
             query?: {
@@ -23083,6 +25308,7 @@ export interface operations {
                 page?: number;
                 page_size?: number;
                 project_id?: string | null;
+                module_id?: string | null;
                 /** @description 状态(可多值) */
                 status?: string[] | null;
                 month?: string | null;
@@ -23092,6 +25318,8 @@ export interface operations {
                 work_partner?: string | null;
                 order_by?: string | null;
                 order?: string;
+                /** @description 切换查看的目标用户 id;空=当前登录人(仅经理‖超管可传他人) */
+                target_user_id?: string | null;
             };
             header?: never;
             path?: never;
@@ -23290,6 +25518,7 @@ export interface operations {
                 page?: number;
                 page_size?: number;
                 plan_task_id?: string | null;
+                problem_task_id?: string | null;
                 status?: string | null;
                 execute_user_id?: string | null;
                 order_by?: string | null;
@@ -23674,6 +25903,8 @@ export interface operations {
                 is_urgent?: string | null;
                 find_time_start?: string | null;
                 find_time_end?: string | null;
+                /** @description 责任人 id(我的任务) */
+                duty_user_id?: string | null;
                 page?: number;
                 page_size?: number;
                 order_by?: string | null;
@@ -23738,6 +25969,26 @@ export interface operations {
             };
         };
     };
+    download_import_template_api_ppm_problem_list_import_template_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     export_problems_api_ppm_problem_list_export_excel_get: {
         parameters: {
             query?: never;
@@ -23754,6 +26005,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    import_problems_preview_api_ppm_problem_list_import_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_problems_preview_api_ppm_problem_list_import_preview_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemImportPreviewResp"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_problems_commit_api_ppm_problem_list_import_commit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_problems_commit_api_ppm_problem_list_import_commit_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemImportResultResp"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -23887,7 +26204,7 @@ export interface operations {
             };
         };
     };
-    next_process_api_ppm_problem_list__item_id__next_post: {
+    start_problem_api_ppm_problem_list__item_id__start_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -23898,17 +26215,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["NextProcessReq"];
+                "application/json": components["schemas"]["ProblemStartReq"];
             };
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemListResp"];
+                    "application/json": components["schemas"]["TaskExecuteResponse"];
                 };
             };
             /** @description Validation Error */
@@ -23922,7 +26239,7 @@ export interface operations {
             };
         };
     };
-    reject_process_api_ppm_problem_list__item_id__reject_post: {
+    execute_problem_api_ppm_problem_list__item_id__execute_put: {
         parameters: {
             query?: never;
             header?: never;
@@ -23933,7 +26250,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RejectProcessReq"];
+                "application/json": components["schemas"]["ProblemExecuteReq"];
             };
         };
         responses: {
@@ -23944,138 +26261,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemListResp"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    done_task_api_ppm_problem_list__item_id__done_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                item_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DoneTaskReq"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemListResp"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    close_task_api_ppm_problem_list__item_id__close_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                item_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CloseTaskReq"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemListResp"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_tasks_api_ppm_problem_list__item_id__tasks_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                item_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProcessTaskResp"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_logs_api_ppm_problem_list__item_id__logs_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                item_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProcessLogResp"][];
                 };
             };
             /** @description Validation Error */
@@ -24813,7 +26998,10 @@ export interface operations {
     };
     get_workbench_profile_api_ppm_workbench_profile_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 切换查看的目标用户 id;空=当前登录人 */
+                target_user_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -24829,6 +27017,15 @@ export interface operations {
                     "application/json": components["schemas"]["WorkbenchProfile"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     get_workbench_summary_api_ppm_workbench_summary_get: {
@@ -24836,6 +27033,8 @@ export interface operations {
             query?: {
                 /** @description 统计区间标识 (如 month / week) */
                 range?: string;
+                /** @description 切换查看的目标用户 id;空=当前登录人 */
+                target_user_id?: string | null;
             };
             header?: never;
             path?: never;
@@ -24868,6 +27067,8 @@ export interface operations {
             query: {
                 /** @description 目标月份,形如 YYYY-MM */
                 year_month: string;
+                /** @description 切换查看的目标用户 id;空=当前登录人 */
+                target_user_id?: string | null;
             };
             header?: never;
             path?: never;
@@ -24891,6 +27092,62 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workbench_todos_api_ppm_workbench_todos_get: {
+        parameters: {
+            query?: {
+                /** @description 切换查看的目标用户 id;空=当前登录人 */
+                target_user_id?: string | null;
+                /** @description 页码,从 1 起 */
+                page?: number;
+                /** @description 每页条数,默认 10 */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_WorkbenchTodoItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workbench_switchable_users_api_ppm_workbench_switchable_users_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchSwitchableUser"][];
                 };
             };
         };
@@ -26359,6 +28616,7 @@ export interface operations {
                 offset?: number;
                 organization_id?: string | null;
                 include_children?: boolean;
+                ids?: string[] | null;
             };
             header?: never;
             path?: never;

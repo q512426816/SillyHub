@@ -55,6 +55,7 @@ function mkBinding(
     daemon_id: o.daemon_id ?? null,
     root_path: o.root_path ?? "/home/user/project",
     path_source: o.path_source ?? "daemon-client",
+    shared: o.shared ?? false,
     synced_at: o.synced_at ?? null,
     last_scan_at: o.last_scan_at ?? null,
     init_synced_at: o.init_synced_at ?? null,

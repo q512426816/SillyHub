@@ -75,18 +75,10 @@ export async function changePassword(
   });
 }
 
-// 点按式人机确认(登录爆破防护;原拖拉滑块已下线)。后端 schema 在
-// backend/app/modules/auth/schema.py(ConfirmCaptchaResponse / CaptchaVerifyRequest/
-// CaptchaVerifyResponse);待 `pnpm gen:types` 拉 OpenAPI 对齐到 api-types.ts,这里暂手写
-// (字段一一对应,避免阻塞 quick;全量 gen:types 会带入其它进行中功能的类型漂移,不在本 quick 范围)。
-export interface ConfirmCaptchaData {
-  captcha_id: string;
-}
-
-export interface CaptchaVerifyResult {
-  success: boolean;
-  captcha_token: string | null;
-}
+// 点按式人机确认(登录爆破防护;原拖拉滑块已下线)。类型复用 OpenAPI 生成类型
+// (backend/app/modules/auth/schema.py 的 ConfirmCaptchaResponse / CaptchaVerifyResponse)。
+export type ConfirmCaptchaData = components["schemas"]["ConfirmCaptchaResponse"];
+export type CaptchaVerifyResult = components["schemas"]["CaptchaVerifyResponse"];
 
 export async function fetchConfirmCaptcha(): Promise<ConfirmCaptchaData> {
   return apiFetch<ConfirmCaptchaData>("/api/auth/captcha/confirm");
