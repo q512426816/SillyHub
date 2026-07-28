@@ -18,7 +18,7 @@ quick 阶段的 `--change` 语义是「关联变更」**且会触发步骤重置
 - `--linked-changes a,b`：显式关联到变更 a、b
 - `--non-interactive`：CI/脚本环境，默认不关联（避免交互 prompt 崩溃）
 
-首次 `sillyspec run quick` 选定的关联会持久化到 `.runtime/quick-guard.json`，后续 `--done` 自动复用，**不会重复弹交互 prompt**。
+首次 `sillyspec run quick` 选定的关联会持久化到 `.runtime/quick-sessions/<quick-session-id>/guard.json`（每个 quick 会话独立，多会话并发不互覆盖），后续 `--done` 自动复用，**不会重复弹交互 prompt**。
 
 ## 步骤生命周期（所有阶段通用）
 
@@ -50,8 +50,17 @@ sillyspec run quick --reopen --from-step N     # 重新打开已完成阶段修�
 | `--linked-changes none\|a,b` | **显式关联变更（取代 `--change`，推荐）**。none=不关联，a,b=关联列表 |
 | `--files a.js,b.js` | 显式声明本次允许修改的文件（边界保护） |
 | `--allow-new` | 允许新增文件（默认禁止，防意外创建） |
-| `--force-baseline` | 允许覆盖 baseline 受保护文件（危险，慎用） |
-| `--confirm` | 完成时确认接受变更审计结果（warning/blocked 时用） |
+| `--force-baseline` | 允许覆盖 baseline 受保护文件 / 压制 `.sillyspec/` 危险判定（危险，慎用） |
+| `--confirm` | ⚠️ 仅打印变更概览，**不解锁 blocked**（blocked 仍 exit 1）。真正解锁用 `--force-baseline`/`--allow-new` |
+
+## 审计与并发变更（`--done` 边界审计）
+
+`--done` 收尾时对比 step1 baseline 与当前 `git status`，拦「危险文件 / 新增文件 / 覆盖 baseline」。要点：
+
+- **并发其他会话的 `.sillyspec/changes/<非关联变更>/` 不再被本 quick 拦截**。quick 自己没有 `changes/` 目录，该路径下非关联内容视为并发会话的工作，整体放行（确定性审计无法区分「并发工作」与「本 quick 偷建变更」，后者这类意图软判定留给 sillyhub）。
+- **关联变更的文件仍走审计**：reverse-sync 改自己关联变更的 `design.md` 会被拦，需 `--force-baseline` 显式确认。
+- **baseline 折叠目录前缀匹配**：step1 启动时整片 `changes/` 未跟踪会被 git 折叠成 `?? .sillyspec/changes/`（带尾斜杠 token）；审计时若该目录下文件被并发会话跟踪而展开成文件级路径，按尾斜杠 token 前缀放行其下所有文件，不误判。
+- **`--confirm` ≠ 解锁**：它只打印概览。blocked 时真正解锁的是 `--force-baseline`（压制 `.sillyspec/` 危险判定 + baseline 覆盖）/`--allow-new`（放行新增），两者在 step1 或 `--done` 传都生效。
 
 ## 典型用法
 

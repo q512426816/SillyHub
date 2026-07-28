@@ -51,9 +51,18 @@ sillyspec progress validate                    # 校验并修复
 sillyspec worktree doctor [--fix]              # worktree 健康检查 + 修复
 sillyspec doctor --align-execute-progress --change <name>          # 按 plan.md 声明对齐 execute 派生戳（dry-run，只报告将补哪些 step）
 sillyspec doctor --align-execute-progress --change <name> --confirm # 实际落盘：补 step 戳 + 置 execute stage status=completed
+sillyspec doctor --cleanup-remnant                                  # 扫描并报告 0 字节空占位 db（dry-run）
+sillyspec doctor --cleanup-remnant --confirm                        # 实际删除空占位 db（仅删 0 字节，不动有内容的 db）
+sillyspec doctor --dump-db --path <db 路径>                         # dump 指定 db 内容到文件（取证，查 stages/steps/changes 表）
+sillyspec doctor --json                                             # 结构化诊断 + 落盘 .sillyspec/.runtime/doctor-diagnosis.json
+sillyspec runtime list                                              # 枚举 .sillyspec/.runtime/ 下所有运行时产物（只读，看手上有哪些证据/状态文件）
 ```
 
 > `--align-execute-progress` 仅当 `plan.md` 所有 task checkbox 全勾时才对齐 execute 阶段进度戳。典型用于 worktree 已 cleanup（终态）但 execute 派生戳未盖上的死锁。默认 dry-run，加 `--confirm` 才写盘。doctor 信任 `plan.md` 声明、不复核代码，verify 阶段兜底。`--change` 缺省时按单活跃变更自动兜底。
+>
+> `--cleanup-remnant` 清理 init/平台切换残留的 0 字节空 db（占位但无数据）。默认 dry-run 只报告，`--confirm` 才删。绝不删有内容的 db。
+>
+> `runtime list` 是只读枚举：列出 `.sillyspec/.runtime/` 下的 db、doctor-diagnosis.json、workflow-runs/、gate-status.json、user-inputs.md 等产物及用途。多会话/压缩后想知道「我手上有哪些证据文件」时用。加 `--json` 程序化读取。
 
 ## 铁律
 
