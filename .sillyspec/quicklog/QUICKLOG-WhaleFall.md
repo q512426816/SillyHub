@@ -489,3 +489,9 @@ created_at: 2026-07-21T08:48:56
 文件：（见实际改动）
 
 结果：需求：编辑/新建项目计划弹窗合同金额等 InputNumber 占满宽度,对齐正常 Input/Select(ql-002 的 className 修复无效,用户反馈反而更短)。根因：SSR renderToStaticMarkup 验证——antd v6 addonBefore/addonAfter 已 deprecated,自动用外层 .ant-space-compact 包裹 addon+InputNumber,style/className 应用到内部 .ant-input-number 而非外层 compact,compact 是 inline-flex 无宽度基准致塌缩不占满;无 addon 的成本调剂 InputNumber 无 compact 包裹、style 在 root 正常占满。ql-002 误判为 style 不生效改 className,实际两类都因外层 compact 失效。方案：12 个 InputNumber className=w-full(ql-002) 改回 style={{width:'100%'}},11 个 addon 改 prefix/suffix(addonBefore ¥×6→prefix、addonAfter %×1→suffix、addonAfter 人/天×4→suffix),prefix/suffix 不触发 compact 包裹、style 在 root 占满,视觉不变(单位仍显示框内)。结果：Grep addon 残留 0、prefix/suffix 11 处数量正确;tsc --noEmit 0 error;SSR 验证 prefix/suffix 无 compact 包裹且 style 在 root;同步 ppm 模块文档追加 ql-20260728-003-6cb3。
+## ql-20260728-004-8ca4 | 2026-07-28 10:01:47 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+
+结果：需求：problem-list 弹窗表单按项目计划弹窗标准调整(占满+两列),能一行两个的改一行两个,缩短过长的纵向高度。根因：_forms.tsx 19 个 Form.Item 全垂直堆叠(一行一个)致弹窗过长;预计工作量 InputNumber 用 addonAfter(antd v6 addon 触发外层 compact 致宽度塌缩,同 ql-003 根因)。方案：Form 加 className='grid grid-cols-2 gap-x-3' 两列布局,短字段默认占1格 grid auto-flow 两两排列,长字段(问题答复/问题附件/备注)+按钮区加 col-span-2 独占,处置人(仅编辑)条件渲染自动补位;预计工作量 addonAfter='人/天'→suffix(对齐 ql-003)。结果：Grep grid-cols-2×1、col-span-2×4、suffix×1、addon 残留 0;tsc --noEmit 0 error;19 行→约 11 行;同步 ppm 模块文档追加 ql-20260728-004-8ca4。

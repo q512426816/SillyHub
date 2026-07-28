@@ -324,6 +324,7 @@ export function ProblemCreateForm({
     <Form<ProblemCreateValues>
       form={form}
       layout="vertical"
+      className="grid grid-cols-2 gap-x-3"
       initialValues={initialValues}
       onValuesChange={(changed) => {
         if ("project_id" in changed) {
@@ -377,14 +378,14 @@ export function ProblemCreateForm({
         <Input placeholder="请输入问题描述" />
       </Form.Item>
 
-      <Form.Item label="问题答复/问题解答" name="pro_answer">
+      <Form.Item label="问题答复/问题解答" name="pro_answer" className="col-span-2">
         <TextArea
           rows={2}
           placeholder="请输入问题解答(问题详细描述)"
         />
       </Form.Item>
 
-      <Form.Item label="问题附件">
+      <Form.Item label="问题附件" className="col-span-2">
         <FileUpload
           value={fileUrls}
           onChange={setFileUrls}
@@ -479,7 +480,7 @@ export function ProblemCreateForm({
           precision={1}
           step={0.5}
           min={0}
-          addonAfter="人/天"
+          suffix="人/天"
           style={{ width: "100%" }}
         />
       </Form.Item>
@@ -511,11 +512,12 @@ export function ProblemCreateForm({
         />
       </Form.Item>
 
-      <Form.Item label="备注" name="remarks">
+      <Form.Item label="备注" name="remarks" className="col-span-2">
         <TextArea rows={2} placeholder="请输入备注" />
       </Form.Item>
 
       <div
+        className="col-span-2"
         style={{
           display: "flex",
           justifyContent: "flex-end",
