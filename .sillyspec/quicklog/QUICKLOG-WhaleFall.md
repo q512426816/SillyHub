@@ -530,3 +530,12 @@ created_at: 2026-07-21T08:48:56
 根因：① 项目名称列 render 是 button onClick 打开 PpmProjectPlanDetail 抽屉；② create_ps_project_plan 无 project_id 唯一校验，可重复建同一项目的计划。
 方案：① project-plans/page.tsx 项目名称列 button→纯文本 v??—，清理 dead detail（import PpmProjectPlanDetail / DetailState interface / detail state / PpmProjectPlanDetail 组件 共 5 处）；② plan/service.py create_ps_project_plan 开头加 project_id 查重（select PsProjectPlan.id where project_id，已存在 raise PlanError 400「该项目已有项目计划」），前端无需改（createProjectPlan catch ApiError message.error 自动提示）。
 结果：前端 tsc --noEmit 0 error；后端 py_compile OK + ruff All checks passed。
+
+## ql-20260728-008-c7b0 | 2026-07-28 14:19:29 | /ppm/milestone-details 导入校验放宽+预览多选固定列
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/plan/service.py（_to_preview_rows 空责任人 valid=True）+ frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（状态列/rowClassName/多选/handleCommit）+ frontend/src/components/ppm/milestone/import-module-modal.tsx（同步）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：① 导入必填空（责任人空等）允许导入（状态草稿），责任人填了未匹配不可导入；② 预览列表加多选固定列，默认全选，只导选中行（替代全或无）。
+根因：① 后端 _to_preview_rows 空责任人 valid=False 不允许导入；② 预览 Table 无行级多选，只能整 sheet 全导或全不导。
+方案：① 后端 _to_preview_rows 空责任人 valid=True（允许 draft，责任人留空），责任人未匹配 valid=False 保持；前端桌面+移动状态列去 duty_matched 橙（空责任人不再误标红/橙，只看 valid）、rowClassName 只看 !valid；② 桌面+移动 Table 加 rowSelection（行级 checkbox fixed:left，useEffect[visibleRows] 默认全选），handleCommit 按 selectedRowKeys 过滤选中行按 sheet_name 重组 sheets 只传选中行，counts 基于选中行，后端 import_commit 不改（前端传选中行，后端照常按 valid 过滤）。
+结果：前端 tsc --noEmit 0 error（桌面+移动）；后端 ruff format（已合规）+ check All checks passed。
