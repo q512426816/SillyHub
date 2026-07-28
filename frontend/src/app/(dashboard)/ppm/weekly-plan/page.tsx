@@ -122,8 +122,6 @@ export default function WeeklyPlanPage() {
   const [flattenMode, setFlattenMode] = useState(false);
   // 工作量列右击聚合(求和/平均值,可多选),选后底部总结栏显示结果
   const [weeklyAgg, setWeeklyAgg] = useState<string[]>([]);
-  // 工作量列右击菜单坐标(open 受控;菜单挂 body 脱离 th,避免菜单项 click 冒泡 th 排序)
-  const [aggMenu, setAggMenu] = useState<{ x: number; y: number } | null>(null);
 
   const buildReq = useCallback((): WeeklyPlanPageReq => {
     const req: WeeklyPlanPageReq = { page: 1, page_size: 10000 };
@@ -395,21 +393,41 @@ export default function WeeklyPlanPage() {
       ),
     },
     {
-      title: "工作量\n(人天)",
+      title: (
+        <Dropdown
+          trigger={["contextMenu"]}
+          getPopupContainer={() => document.body}
+          menu={{
+            items: [
+              { key: "sum", label: "求和" },
+              { key: "avg", label: "求平均值" },
+            ],
+            selectable: true,
+            multiple: true,
+            selectedKeys: weeklyAgg,
+            onSelect: ({ selectedKeys }) =>
+              setWeeklyAgg(selectedKeys as string[]),
+            onDeselect: ({ selectedKeys }) =>
+              setWeeklyAgg(selectedKeys as string[]),
+          }}
+        >
+          {/* onClick stopPropagation:左击 title 文字不触发 th 排序(左击排序图标仍可排序);
+              getPopupContainer=body:菜单挂 body 脱离 th,菜单项 click 不冒泡 th 排序;
+              右击 contextmenu 由 Dropdown trigger 弹聚合菜单 */}
+          <span
+            className="inline-block cursor-context-menu px-1"
+            title="右击选择聚合(求和/平均值)"
+            onClick={(e) => e.stopPropagation()}
+          >
+            工作量(人天)
+          </span>
+        </Dropdown>
+      ),
       dataIndex: "work_load",
       key: "work_load",
       width: 100,
       align: "center",
       onCell: hiddenCell,
-      // 列头右击拦截:阻止默认菜单+冒泡,记录坐标 → 受控菜单(挂 body)弹聚合。
-      // 左击 th 仍正常排序(sorter 不受影响),菜单与 th 完全解耦,菜单项 click 不冒泡 th。
-      onHeaderCell: () => ({
-        onContextMenu: (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          setAggMenu({ x: e.clientX, y: e.clientY });
-        },
-      }),
       ...sortableColProps("work_load"),
       render: (v: string | null) => v ?? "—",
     },
@@ -648,40 +666,6 @@ export default function WeeklyPlanPage() {
           }
         />
       </SectionCard>
-
-      {/* 工作量列右击聚合菜单(受控,挂 body;trigger 是 fixed 定位锚点,与 th 完全解耦) */}
-      {aggMenu && (
-        <Dropdown
-          open
-          onOpenChange={(o) => {
-            if (!o) setAggMenu(null);
-          }}
-          menu={{
-            items: [
-              { key: "sum", label: "求和" },
-              { key: "avg", label: "求平均值" },
-            ],
-            selectable: true,
-            multiple: true,
-            selectedKeys: weeklyAgg,
-            onSelect: ({ selectedKeys }) =>
-              setWeeklyAgg(selectedKeys as string[]),
-            onDeselect: ({ selectedKeys }) =>
-              setWeeklyAgg(selectedKeys as string[]),
-          }}
-          getPopupContainer={() => document.body}
-        >
-          <span
-            style={{
-              position: "fixed",
-              left: aggMenu.x,
-              top: aggMenu.y,
-              zIndex: 1050,
-              pointerEvents: "none",
-            }}
-          />
-        </Dropdown>
-      )}
     </PageContainer>
   );
 }

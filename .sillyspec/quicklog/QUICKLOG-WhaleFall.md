@@ -584,3 +584,12 @@ created_at: 2026-07-21T08:48:56
 根因：ql-012 用 Dropdown 包 title，菜单 Portal 可能被 antd 挂到 th 内（或 th click 排序监听范围大），导致菜单项 click 冒泡 th 触发排序；span stopPropagation 拦不住菜单项（菜单在 Portal）。
 方案：彻底 DOM 解耦 —— title 改回纯文本（恢复 sorter 左击 th 正常排序）；onHeaderCell 注入 onContextMenu（preventDefault + stopPropagation + 记录 clientX/Y 到 aggMenu state）；Table 外加受控 Dropdown（open=true，onOpenChange 关闭清坐标，getPopupContainer=body，trigger 是 fixed 定位锚点 pointerEvents:none）。菜单渲染在 body 与 th 完全分离，菜单项 click 不可能冒泡到 th。
 结果：tsc --noEmit 0 error；菜单项 click 不再触发排序（已在 body DOM）；右击列头弹菜单、左击 th 排序共存。
+
+## ql-20260728-014-48cc | 2026-07-28 21:06:14 | /ppm/weekly-plan 工作量列右击菜单弹不出修复(撤回 ql-013)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（撤回 onHeaderCell/受控锚点,Dropdown contextMenu 包 title + getPopupContainer=body + span onClick stopPropagation）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：修复右击工作量列头不弹聚合菜单（ql-013 后右击失效）。
+根因：ql-013 用 onHeaderCell contextmenu + 受控 fixed 锚点 Dropdown（pointerEvents:none），antd Dropdown 因 trigger 锚点不可交互/无尺寸不弹菜单。
+方案：撤回 ql-013（删 onHeaderCell contextmenu + 受控 Dropdown + aggMenu state）；回到 Dropdown contextMenu trigger 包 title span（antd 原生右击正常弹），关键补 getPopupContainer=()=>document.body（菜单挂 body 脱离 th，菜单项 click 不冒泡 th 排序）+ span onClick stopPropagation（左击 title 不触发 th 排序，左击排序图标仍排序）。
+结果：tsc --noEmit 0 error；右击弹菜单 + 菜单项不触发排序 + 左击排序图标排序 三者共存。
