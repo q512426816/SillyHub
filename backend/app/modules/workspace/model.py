@@ -160,6 +160,40 @@ class TaskWorkspace(BaseModel, table=True):
     )
 
 
+class PpmProjectWorkspace(BaseModel, table=True):
+    """M:N association between PPM projects and workspaces.
+
+    平台级 PPM 项目(:class:`~app.modules.ppm.project.model.PpmProjectMaintenance`)
+    与工作区的多对多关联表(change ``2026-07-28-ppm-project-link-workspace`` A 阶段)。
+    仿 :class:`TaskWorkspace`:复合主键 ``(ppm_project_id, workspace_id)`` 天然防止
+    重复绑定(无需额外唯一索引),双向 ``ON DELETE CASCADE`` 与现有 PPM 强 FK 引用
+    (``PpmProjectMember``/``PpmProjectStakeholder``)行为一致。工作区作为关联中枢,
+    项目侧与工作区侧两个 router 操作同一张表(双边对称,数据自动一致)。
+
+    不含关联元数据(类型/主次/备注/角色)——YAGNI,B 阶段如需再扩展。
+    """
+
+    __tablename__ = "ppm_project_workspace"
+    __table_args__ = (Index("ix_ppm_project_workspace_workspace", "workspace_id"),)
+
+    ppm_project_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("ppm_project_maintenance.id", ondelete="CASCADE"),
+            primary_key=True,
+            nullable=False,
+        ),
+    )
+    workspace_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id", ondelete="CASCADE"),
+            primary_key=True,
+            nullable=False,
+        ),
+    )
+
+
 class AgentRunWorkspace(BaseModel, table=True):
     """M:N association between agent runs and workspaces."""
 
