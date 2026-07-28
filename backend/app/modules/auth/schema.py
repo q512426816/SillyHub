@@ -12,6 +12,28 @@ class LoginRequest(BaseModel):
     # 登录账号:邮箱或 username(含 @ 走 email 查,否则走 username 查)。
     account: str = Field(min_length=3)
     password: str = Field(min_length=1)
+    # 滑块验证码 token:同一 IP 失败≥threshold 时必填(前端 verify 通过后回传)。
+    captcha_token: str | None = None
+
+
+class SliderCaptchaResponse(BaseModel):
+    """GET /auth/captcha/slider 返回:背景图 + 滑块块(base64 data-URI),target_x 仅存后端。"""
+
+    captcha_id: str
+    bg_image: str  # data:image/png;base64,....（前端 <img src=> 直接用）
+    slider_image: str
+
+
+class SliderCaptchaVerifyRequest(BaseModel):
+    captcha_id: str = Field(min_length=1)
+    x: int = Field(ge=0, le=1000)  # 用户拖动停止时滑块左边缘 x 坐标(px)
+
+
+class SliderCaptchaVerifyResponse(BaseModel):
+    """校验通过 → 返回一次性 captcha_token,登录时回传。"""
+
+    success: bool
+    captcha_token: str | None = None
 
 
 class RefreshRequest(BaseModel):

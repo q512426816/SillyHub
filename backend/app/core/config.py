@@ -104,6 +104,27 @@ class Settings(BaseSettings):
             "0=禁用负缓存。"
         ),
     )
+    # ── 登录限流 + 滑块验证码（安全止血:登录爆破防护）────────────────────
+    auth_login_rate_limit_per_minute: int = Field(
+        5,
+        ge=1,
+        description="登录限流:同一 IP 每 60s 窗口最大尝试次数,超限 429。",
+    )
+    auth_login_fail_threshold: int = Field(
+        3,
+        ge=1,
+        description="登录连续失败达到此次数后,该 IP 后续登录强制滑块验证码。",
+    )
+    auth_login_fail_window_seconds: int = Field(
+        900,
+        ge=60,
+        description="登录失败计数窗口(秒),窗口内累计达 threshold 触发验证码。",
+    )
+    auth_captcha_token_ttl_seconds: int = Field(
+        120,
+        ge=10,
+        description="滑块校验通过后签发的 captcha_token 有效期(秒),登录一次性消费。",
+    )
     # ── 权限缓存（2026-07-23-rbac-permission-cache）─────────────────────
     permission_cache_ttl: int = Field(
         300,

@@ -61,4 +61,6 @@ multi-agent-platform 的核心 API 服务，monorepo 的"大脑"。以 FastAPI �
 
 - 2026-07-25-daemon-borrow-for-business | 业务/管理人员（business_member 角色）借用工作空间共享 daemon 跑 agent 读源码出业务方案。数据：workspace_member_runtimes 加 shared 列 + daemon_borrow_audit 表 + business_member 角色种子（DAEMON_BORROW=daemon:borrow + task:run_agent + workspace:read）。派发：4 路 resolver（placement dispatch/decide/interactive + member_runtimes writeback）收敛到 agent/borrow_resolver._resolve_borrowed_or_own_runtime（先自有零回归，无则借用三重校验 权限→shared→online）。落点：close_interactive_run 回调落 FileService（owner_type=workspace, text/markdown 白名单）+ 审计。接口：PUT /my-binding/shared + GET /shared-daemons + GET /api/file/list。零回归：shared 默认 false、DAEMON_BORROW 默认不授、helper 第1步自有原路径。
 
+- ql-20260728-002-21aa | 登录爆破防护（安全审计 P0-8/P1-14 修复）：同 IP 60s 窗口 INCR 限流（`auth_login_rate_limit_per_minute=5` → 429）+ 失败计数（达 `auth_login_fail_threshold=3` 后该 IP 须带 captcha_token）+ Pillow 滑块验证码（背景含凹槽+滑块块，target_x 仅存 Redis 不返前端，±6px 容差验过签发一次性 captcha_token；slider/token 均一次性消费防重放爆破）。新增 `modules/auth/captcha_service.py`；router 加 `GET /captcha/slider`、`POST /captcha/verify`，登录端点串 check_rate_limit→assert_captcha_if_needed→record_login_failure；Redis 故障降级放行不阻断登录（同 api_key 缓存降级哲学）。
+
 <!-- MANUAL_NOTES_END -->

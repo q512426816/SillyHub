@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth_deps import get_current_user, require_permission_any
 from app.core.config import Settings, get_settings
 from app.core.db import get_session
-from app.core.errors import ApiKeyNotFound
+from app.core.errors import ApiKeyNotFound, AuthInvalidCredentials, LoginCaptchaRequired
 from app.modules.auth.api_key_schema import (
     ApiKeyCreated,
     ApiKeyCreateRequest,
@@ -19,6 +19,7 @@ from app.modules.auth.api_key_schema import (
     ApiKeyRead,
 )
 from app.modules.auth.api_key_service import ApiKeyService
+from app.modules.auth.captcha_service import CaptchaService
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.auth.rbac import collect_permissions_everywhere, list_user_workspace_roles
@@ -27,6 +28,9 @@ from app.modules.auth.schema import (
     LoginRequest,
     MeResponse,
     RefreshRequest,
+    SliderCaptchaResponse,
+    SliderCaptchaVerifyRequest,
+    SliderCaptchaVerifyResponse,
     TokenPair,
     UserRead,
     WorkspaceRoleAssignment,
@@ -39,10 +43,22 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 
+def _client_ip(request: Request) -> str | None:
+    """客户端 IP:nginx 反代下取 X-Forwarded-For 最左段(原始客户端),直连回退 client.host。
+
+    ⚠️ XFF 可被客户端伪造;生产 nginx 必须覆写 XFF(不透传客户端自带头)才可信。
+    """
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        first = xff.split(",")[0].strip()
+        if first:
+            return first
+    return request.client.host if request.client else None
+
+
 def _client_metadata(request: Request) -> tuple[str | None, str | None]:
     ua = request.headers.get("user-agent")
-    ip = request.client.host if request.client else None
-    return ua, ip
+    return ua, _client_ip(request)
 
 
 @router.post("/login", response_model=TokenPair)
@@ -53,10 +69,47 @@ async def login(
     settings: SettingsDep,
 ) -> TokenPair:
     ua, ip = _client_metadata(request)
-    _, pair = await AuthService(session, settings=settings).login(
-        account=payload.account, password=payload.password, user_agent=ua, ip=ip
-    )
+    captcha = CaptchaService(settings=settings)
+    # 1) 限流(同一 IP 60s 窗口);2) 若该 IP 累计失败达阈值,强制校验滑块 token。
+    await captcha.check_rate_limit(ip)
+    await captcha.assert_captcha_if_needed(ip, payload.captcha_token)
+    try:
+        _, pair = await AuthService(session, settings=settings).login(
+            account=payload.account, password=payload.password, user_agent=ua, ip=ip
+        )
+    except AuthInvalidCredentials:
+        # 凭证错:累计失败次数;达到阈值则要求滑块验证(前端据 423 need_captcha 弹滑块)。
+        fails = await captcha.record_login_failure(ip)
+        if fails >= settings.auth_login_fail_threshold:
+            raise LoginCaptchaRequired(
+                "登录失败次数过多,请完成滑块验证后重试。",
+                details={"need_captcha": True},
+            ) from None
+        raise
+    # 登录成功:清失败计数。
+    await captcha.clear_login_failures(ip)
     return pair
+
+
+@router.get("/captcha/slider", response_model=SliderCaptchaResponse)
+async def get_slider_captcha(settings: SettingsDep) -> SliderCaptchaResponse:
+    """生成一组滑块验证码图(背景+凹槽+滑块块),target_x 仅存后端。
+
+    无需鉴权(登录前调用);前端在收到 423 need_captcha 后拉取。
+    """
+    data = await CaptchaService(settings=settings).create_slider()
+    return SliderCaptchaResponse(**data)
+
+
+@router.post("/captcha/verify", response_model=SliderCaptchaVerifyResponse)
+async def verify_slider_captcha(
+    payload: SliderCaptchaVerifyRequest, settings: SettingsDep
+) -> SliderCaptchaVerifyResponse:
+    """校验拖动位置 → 通过签发一次性 captcha_token,登录时回传。"""
+    token = await CaptchaService(settings=settings).verify_slider(payload.captcha_id, payload.x)
+    if not token:
+        return SliderCaptchaVerifyResponse(success=False)
+    return SliderCaptchaVerifyResponse(success=True, captcha_token=token)
 
 
 @router.post("/refresh", response_model=TokenPair)

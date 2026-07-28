@@ -62,4 +62,6 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 - 2026-07-26-ungate-workspace-entry | 工作区入口门禁后移（daemon 要求下沉到操作点）：列表 workspaces/page + 顶栏 switcher + 移动端 m/workspaces + 详情 guard 四入口移除未绑定→拦分支，always 导航/切换/提示电脑端；guard unbound→return null（降级为已绑定编辑入口）；新建 DaemonRequiredNotice 组件（feature/workspaceId/canBorrow/onConfigured，复用 WorkspaceAccessGuide，内联非阻断）+ runtime/scan-docs 无 binding 主区渲染空态；components 页 daemon 无关不接入（数据走 getWorkspaceComponents backend API）；概览复用既有 WorkspaceConfigCard 为可选配置入口。纯前端零回归，无后端/schema/API 变更。
 
+- ql-20260728-002-21aa | 登录爆破防护前端（配合后端 423 need_captcha）：登录失败达阈值 → 弹 `SliderCaptcha` 拖拉滑块（指针事件支持鼠标+触控，凹槽垂直固定 CSS `calc(50%-22px)` 对齐后端 `_SLIDER_Y=53`），拖对取 captcha_token 后自动带 token 重试登录。新建 `components/ui/slider-captcha.tsx`；改 `app/(auth)/login/page.tsx`（needCaptcha/captchaToken 状态 + doLogin 拆分 + handleVerified 自动重试）+ `lib/auth.ts`（login 加 `captcha_token` 形参 + fetchSliderCaptcha/verifySliderCaptcha，类型暂手写待 `pnpm gen:types`）。
+
 <!-- MANUAL_NOTES_END -->

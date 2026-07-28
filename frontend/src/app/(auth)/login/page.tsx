@@ -8,6 +8,7 @@ import Image from "next/image";
 import { ApiError } from "@/lib/api";
 import { login } from "@/lib/auth";
 import { Card, CardContent } from "@/components/ui/card";
+import { SliderCaptcha } from "@/components/ui/slider-captcha";
 
 const REMEMBER_KEY = "sillyhub.login.remember";
 
@@ -33,6 +34,10 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [platform, setPlatform] = useState<LoginPlatform>("sillyhub");
+  const [needCaptcha, setNeedCaptcha] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | undefined>(
+    undefined,
+  );
   const [form] = Form.useForm<LoginFormValues>();
 
   // 读取"记住我"缓存,回填账号(及密码)+ 平台选择
@@ -56,11 +61,11 @@ export default function LoginPage() {
     }
   }, [form]);
 
-  const onFinish = async (values: LoginFormValues) => {
+  const doLogin = async (values: LoginFormValues) => {
     setError(null);
     setSubmitting(true);
     try {
-      await login(values.account, values.password);
+      await login(values.account, values.password, captchaToken);
 
       // 记住我:存账号(密码与源项目行为一致一并缓存,仅本地浏览器)
       if (values.remember) {
@@ -80,10 +85,33 @@ export default function LoginPage() {
       localStorage.setItem(PLATFORM_KEY, platform);
       router.replace(PLATFORM_REDIRECT[platform]);
     } catch (err) {
+      // 登录失败次数达阈值 → 后端 423 need_captcha:清旧 token、弹滑块,
+      // 用户拖对后 handleVerified 带 token 自动重试。
+      if (
+        err instanceof ApiError &&
+        (err.code === "HTTP_423_LOGIN_CAPTCHA_REQUIRED" ||
+          (err.details as { need_captcha?: boolean } | null)?.need_captcha ===
+            true)
+      ) {
+        setCaptchaToken(undefined);
+        setNeedCaptcha(true);
+        return;
+      }
       setError(err instanceof ApiError ? err.message : "登录失败");
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const onFinish = (values: LoginFormValues) => {
+    void doLogin(values);
+  };
+
+  const handleVerified = async (token: string) => {
+    const values = form.getFieldsValue(true) as LoginFormValues;
+    setCaptchaToken(token);
+    setNeedCaptcha(false);
+    await doLogin(values);
   };
 
   return (
@@ -190,6 +218,12 @@ export default function LoginPage() {
                 {error && (
                   <div className="mb-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-600">
                     {error}
+                  </div>
+                )}
+
+                {needCaptcha && (
+                  <div className="mb-3">
+                    <SliderCaptcha onVerified={handleVerified} />
                   </div>
                 )}
 

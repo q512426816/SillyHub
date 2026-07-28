@@ -227,6 +227,23 @@ class AuthUserLoginDisabled(AppError):
     http_status = status.HTTP_401_UNAUTHORIZED
 
 
+class LoginRateLimited(AppError):
+    """登录限流:同一 IP 在窗口内请求过多。"""
+
+    code = "HTTP_429_LOGIN_RATE_LIMITED"
+    http_status = status.HTTP_429_TOO_MANY_REQUESTS
+
+
+class LoginCaptchaRequired(AppError):
+    """登录需要滑块验证码(失败次数达阈值,或已要求但请求未带有效 token)。
+
+    前端据 ``details.need_captcha`` 弹出滑块,verify 拿到 captcha_token 后重试登录。
+    """
+
+    code = "HTTP_423_LOGIN_CAPTCHA_REQUIRED"
+    http_status = 423  # Locked(fastapi.status 无标准常量,裸值)
+
+
 class RoleInUse(AppError):
     code = "HTTP_409_ROLE_IN_USE"
     http_status = status.HTTP_409_CONFLICT

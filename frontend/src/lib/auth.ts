@@ -23,10 +23,10 @@ export async function fetchMe(): Promise<MeResponse> {
   return me;
 }
 
-export async function login(account: string, password: string) {
+export async function login(account: string, password: string, captchaToken?: string) {
   const pair = await apiFetch<TokenPair>("/api/auth/login", {
     method: "POST",
-    json: { account, password },
+    json: { account, password, captcha_token: captchaToken },
   });
 
   useSession.getState().setTokens({
@@ -72,5 +72,33 @@ export async function changePassword(
   await apiFetch<void>("/api/auth/change-password", {
     method: "POST",
     json: { old_password: oldPassword, new_password: newPassword },
+  });
+}
+
+// 滑块验证码(登录爆破防护)。后端 schema 在 backend/app/modules/auth/schema.py
+// (SliderCaptchaResponse / VerifyResponse);待 `pnpm gen:types` 拉 OpenAPI 对齐到
+// api-types.ts,这里暂手写(字段一一对应,避免阻塞 quick)。
+export interface SliderCaptchaData {
+  captcha_id: string;
+  bg_image: string;
+  slider_image: string;
+}
+
+export interface SliderCaptchaVerifyResult {
+  success: boolean;
+  captcha_token: string | null;
+}
+
+export async function fetchSliderCaptcha(): Promise<SliderCaptchaData> {
+  return apiFetch<SliderCaptchaData>("/api/auth/captcha/slider");
+}
+
+export async function verifySliderCaptcha(
+  captchaId: string,
+  x: number,
+): Promise<SliderCaptchaVerifyResult> {
+  return apiFetch<SliderCaptchaVerifyResult>("/api/auth/captcha/verify", {
+    method: "POST",
+    json: { captcha_id: captchaId, x },
   });
 }
