@@ -13,7 +13,7 @@
  *
  * 设计依据:.sillyspec/changes/2026-07-20-problem-list-align-task-plan/design.md
  */
-import { useEffect, useMemo, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from "react";
 import {
   Button,
   DatePicker,
@@ -123,11 +123,14 @@ export interface ProblemCreateFormProps {
   onCancel: () => void;
 }
 
-export function ProblemCreateForm({
-  problem,
-  onSuccess,
-  onCancel,
-}: ProblemCreateFormProps) {
+export interface ProblemCreateFormHandle {
+  submit: () => Promise<void>;
+}
+
+export const ProblemCreateForm = forwardRef<
+  ProblemCreateFormHandle,
+  ProblemCreateFormProps
+>(function ProblemCreateForm({ problem, onSuccess, onCancel }, ref) {
   const isEdit = !!problem;
   const [form] = Form.useForm<ProblemCreateValues>();
   const [busy, setBusy] = useState(false);
@@ -291,6 +294,9 @@ export function ProblemCreateForm({
       setBusy(false);
     }
   };
+
+  // 暴露 submit 给父组件(_problem-drawer Modal footer 调用,按钮移出内容区固定底部)
+  useImperativeHandle(ref, () => ({ submit }), [submit]);
 
   // 处置人下拉选项:编辑时当前处置人可能不在当前项目成员列表里,
   // 手动补一条保证回填显示姓名(而不是 UUID)。
@@ -516,20 +522,6 @@ export function ProblemCreateForm({
         <TextArea rows={2} placeholder="请输入备注" />
       </Form.Item>
 
-      <div
-        className="col-span-2"
-        style={{
-          display: "flex",
-          justifyContent: "flex-end",
-          gap: 8,
-          marginTop: 8,
-        }}
-      >
-        <Button onClick={onCancel}>取消</Button>
-        <Button type="primary" loading={busy} onClick={() => void submit()}>
-          保存
-        </Button>
-      </div>
     </Form>
   );
-}
+});

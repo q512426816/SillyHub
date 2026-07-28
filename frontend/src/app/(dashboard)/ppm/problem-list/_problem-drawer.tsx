@@ -10,11 +10,12 @@
  *
  * 设计依据:.sillyspec/changes/2026-07-20-problem-list-align-task-plan/design.md
  */
-import { Modal } from "antd";
+import { useRef } from "react";
+import { Button, Modal } from "antd";
 
 import { PROBLEM_STATUS_TEXT } from "@/components/ppm-status-actions";
 import type { ProblemList } from "@/lib/ppm";
-import { ProblemCreateForm } from "./_forms";
+import { ProblemCreateForm, type ProblemCreateFormHandle } from "./_forms";
 
 export type ProblemDrawerMode = "create" | "edit";
 
@@ -38,6 +39,7 @@ export function ProblemDrawer({
   onClose,
   onSaved,
 }: ProblemDrawerProps) {
+  const formRef = useRef<ProblemCreateFormHandle>(null);
   return (
     <Modal
       open={open}
@@ -63,9 +65,17 @@ export function ProblemDrawer({
       onCancel={onClose}
       destroyOnClose
       maskClosable={false}
-      footer={null}
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>取消</Button>
+          <Button type="primary" onClick={() => void formRef.current?.submit()}>
+            保存
+          </Button>
+        </div>
+      }
     >
       <ProblemCreateForm
+        ref={formRef}
         problem={mode === "edit" ? problem : undefined}
         onSuccess={onSaved}
         onCancel={onClose}
