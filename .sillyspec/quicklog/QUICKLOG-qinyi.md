@@ -441,3 +441,14 @@ created_at: 2026-07-05 16:33:00
 根因：(1) 滑块交互要求滑块左缘对齐凹槽 ±6px、只能凭肉眼对缺口无滑轨，体验差易误判；(2) 诊断中发现更深 bug——前端 handleVerified 里 setCaptchaToken(token) 后立即 doLogin，但 doLogin 闭包读到的是 setState 生效前的旧 captchaToken（异步未更新），导致 login 实际没带 token 仍 423，这正是"验证过了却登不进"的真正技术根因（原滑块时代因难拖对很少走到自动重登，故从未暴露）；(3) 移动端登录页原本完全没有 423/验证码处理。
 方案：安全机制不变（后端 IP 限流+失败计数+一次性 captcha_token+Redis 降级全保留），只把"取证交互"从拖滑块换成点按「我不是机器人」——点一下取一次性 captcha_id 并立即校验换 token，登录回传。闭包 bug 修法：doLogin 增加 tokenOverride 可选参，handleVerified 直传刚拿到的 token，不再依赖 state。登录页 UI 按设计系统 token(primary #2563EB)做现代深色品牌风，装饰纯 CSS 渐变/网格+已装 lucide，不引新依赖；Pillow 因 PPM 模块仍在用而保留依赖，仅删 captcha 内引用。
 结果：后端 auth 模块 137 通过零回归（6 captcha 测试全过），ruff/mypy 干净；前端 116 文件 1140 测试全过零回归，tsc 0 error、eslint 0 error。浏览器实测（本机 3001，已 docker rebuild 前后端）：桌面端+移动端均 错密码3次→弹「我不是机器人」→点一下→自动带正确密码重登→跳 /workspaces 成功（修复后 login 请求 hasToken:true）。新 UI 截图确认现代深色品牌风达标。代码未 commit（按规则交统一提交工具）。
+
+## ql-20260728-004 | 2026-07-28 22:20:00 | CLAUDE.md 加前端类型同步规则(防 api-types 落后后端)
+状态：已完成
+关联变更：（无）
+文件：
+- .claude/CLAUDE.md（新增规则 21：前端接口类型必须 gen:types 生成禁止手写 + gen 前查 node_modules 健康防假报错 + 暴露无关旧测试债顺手补字段）
+
+需求：把本次"api-types.ts 落后后端 + node_modules 半坏致满屏假报错"的教训固化，避免后续复发。
+根因：本次先手写 captcha 类型、后又因全量 gen:types 暴露无关债而退回手写，根源是缺一条明确规则约束"类型必须生成、后端 schema 改了必须同步提交 api-types"，且 node_modules 损坏(csstype/@ant-design/icons 缺失)会产生大量假 CSSProperties/Cannot find module 报错误导判断。
+方案：在 CLAUDE.md 规则 20 后新增规则 21，三条约束——①类型必须 gen:types 生成禁止手写、后端 schema 改动同一 quick 内同步提交 api-types+openapi.json；②gen 前先确认 node_modules 健康(tsc 能跑/.bin 有 shim)，半坏的假报错用 pnpm install --force 修复；③gen 暴露无关旧测试债(如 mock 缺字段)顺手补字段修好而非改回手写。该规则属项目工程/CI 门禁范畴，非 SillySpec 工具坑，故记 CLAUDE.md 而非 docs/sillyspec/。
+结果：CLAUDE.md 加 1 条规则，后续 session 开局即读到。无代码改动、无需测试。
