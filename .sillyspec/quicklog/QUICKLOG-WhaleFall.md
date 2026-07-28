@@ -512,3 +512,12 @@ created_at: 2026-07-21T08:48:56
 根因：_problem-drawer.tsx Modal width=680 比项目计划弹窗(920)窄，ql-004 两列布局下每格偏挤。
 方案：Modal width 680→920 单行改动，对齐 ppm-project-plan-form.tsx；两列布局在 920 宽度下每格约 440px 更宽敞。
 结果：纯 antd Modal width prop 数字改动无类型影响（跳过 tsc）；同步 ppm 模块文档追加 ql-005。
+
+## ql-20260728-006-7764 | 2026-07-28 13:05:13 | /ppm/problem-list 弹窗按钮移到 Modal footer 固定底部
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/problem-list/_forms.tsx（forwardRef 暴露 {submit}+删 Form 内按钮区）+ frontend/src/app/(dashboard)/ppm/problem-list/_problem-drawer.tsx（加 formRef+Modal 自定义 footer+ProblemCreateForm ref）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：问题清单弹窗取消/保存按钮固定底部（Modal footer），参考项目计划弹窗（按钮在 footer 固定）。
+根因：按钮原在 _forms.tsx 的 Form 内容区内，随 body overflowY 滚动，不固定底部；project-plans 按钮在 Modal footer（固定底部，参考 ppm-project-plan-form）。
+方案：_forms 用 forwardRef + useImperativeHandle 暴露 {submit}、删 Form 内按钮区 div；_problem-drawer 加 formRef + Modal 自定义 footer（取消 onClose / 保存 formRef.current?.submit()，无 loading 对齐 project-plans）+ ProblemCreateForm 加 ref，去掉 footer={null}。
+结果：tsc --noEmit 0 error；对齐 project-plans footer 模式，按钮固定弹窗底部不随内容滚动。
