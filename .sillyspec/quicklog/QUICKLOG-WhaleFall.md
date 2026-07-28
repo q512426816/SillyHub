@@ -503,3 +503,12 @@ created_at: 2026-07-21T08:48:56
 根因：_forms.tsx 19 个 Form.Item 全垂直堆叠（一行一个）致弹窗过长；预计工作量 InputNumber 用 addonAfter（antd v6 addon 触发外层 compact 致宽度塌缩，同 ql-003 根因）。
 方案：Form 加 className='grid grid-cols-2 gap-x-3' 两列布局，短字段（项目/模块/问题描述/功能名称/类型/紧急/发现人/日期/工作类型/责任人/处置人/工作量/计划开始/完成/验证人）默认占1格 grid auto-flow 两两排列，长字段（问题答复 TextArea/问题附件 FileUpload/备注 TextArea）+按钮区加 col-span-2 独占整行，处置人（仅 isEdit）条件渲染自动补位不留空；预计工作量 addonAfter='人/天'→suffix（对齐 ql-003）。
 结果：Grep grid-cols-2×1、col-span-2×4、suffix×1、addon 残留 0；tsc --noEmit 0 error；19 行→约 11 行；commit e563c6c3 push + 部署，容器 healthy。
+
+## ql-20260728-005-a050 | 2026-07-28 10:59:40 | /ppm/problem-list 弹窗宽度对齐项目计划(680→920)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/problem-list/_problem-drawer.tsx（Modal width 680→920）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：问题清单新建/编辑弹窗宽度对齐项目计划弹窗（参考 ppm-project-plan-form width=920）。
+根因：_problem-drawer.tsx Modal width=680 比项目计划弹窗(920)窄，ql-004 两列布局下每格偏挤。
+方案：Modal width 680→920 单行改动，对齐 ppm-project-plan-form.tsx；两列布局在 920 宽度下每格约 440px 更宽敞。
+结果：纯 antd Modal width prop 数字改动无类型影响（跳过 tsc）；同步 ppm 模块文档追加 ql-005。
