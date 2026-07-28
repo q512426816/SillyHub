@@ -477,3 +477,9 @@ created_at: 2026-07-21T08:48:56
 文件：（见实际改动）
 
 结果：需求：把 ppm 桌面端所有一级二级页面弹窗高度按【新建项目计划】(ql-20260722-004)统一调整。根因：无,纯样式统一——参考 ppm-project-plan-form 的 Modal styles.body={maxHeight:70vh,minHeight:300px,overflowY:'auto'} 已验证有效,推广到全模块其余弹窗,消除超高撑屏/内容过短弹窗过矮的不一致体验。方案：14 文件 17 处弹窗统一加 styles.body 限高(milestone-details×4 导入模块/模块表单/计划详情/里程碑表单、plan-nodes 模板表单、kanban 实际工作详情、work-hours 工时表单、problem-list 问题抽屉、task-detail-modal、problem-detail-modal、components 下 import-problem-modal/detail-drawer/ps-plan-node-drawer/import-module-modal/module-form-drawer、kanban-task-detail-drawer 用 antd Drawer styles.body);task-plans TaskDrawer 是手写 div 浮层改用等效 Tailwind max-h-[70vh] min-h-[300px] overflow-y-auto。跳过 2 处:work-hours 删除确认短弹窗(套 minHeight 300 会空荡,违背参考初衷)+kanban-task-detail-drawer 的 open=false 空壳占位。结果：tsc --noEmit 0 error;已同步 ppm 模块文档变更索引追加 ql-20260728-001-652a;暂存 14 前端文件+模块文档(QUICKLOG 由 CLI 自动收尾)。
+## ql-20260728-002-718e | 2026-07-28 09:12:41 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+
+结果：需求：编辑/新建项目计划弹窗里合同金额等 InputNumber 数字输入框要占满宽度,对齐正常 Input/Select。根因：12 个 InputNumber 已带 style={{width:'100%'}},但 antd v6 下该 style 未作用于组件 root 宽度(对比项目内 ppm-resource-table.tsx:859 用 className=w-full 占满正常,无全局 CSS 覆盖),故不占满。方案：12 个 InputNumber 的 style={{width:'100%'}} 全改为 className='w-full'(作用于 root,项目验证写法),按缩进深层10处+浅层2处分两批 replace_all 精确替换;DatePicker 3 处 style 保留不动。结果：Grep 确认 12 个 InputNumber 全为 className=w-full、DatePicker 未误伤;tsc --noEmit 0 error;同步 ppm 模块文档变更索引追加 ql-20260728-002-718e;暂存 ppm-project-plan-form.tsx + ppm.md(QUICKLOG CLI 自动收尾)。
