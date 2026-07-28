@@ -64,4 +64,6 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 - ql-20260728-002-21aa | 登录爆破防护前端（配合后端 423 need_captcha）：登录失败达阈值 → 弹 `SliderCaptcha` 拖拉滑块（指针事件支持鼠标+触控，凹槽垂直固定 CSS `calc(50%-22px)` 对齐后端 `_SLIDER_Y=53`），拖对取 captcha_token 后自动带 token 重试登录。新建 `components/ui/slider-captcha.tsx`；改 `app/(auth)/login/page.tsx`（needCaptcha/captchaToken 状态 + doLogin 拆分 + handleVerified 自动重试）+ `lib/auth.ts`（login 加 `captcha_token` 形参 + fetchSliderCaptcha/verifySliderCaptcha，类型暂手写待 `pnpm gen:types`）。
 
+- ql-20260728-003 | 滑块下线换「我不是机器人」点按 + 登录页 UI 现代化 + 修 token 闭包 bug：删 `slider-captcha.tsx`，新建 `components/ui/confirm-captcha.tsx`（点按一次性 captcha_id→token，lucide Shield/ShieldCheck/Loader2 四态）；`lib/auth.ts` 改 `fetchConfirmCaptcha`/`verifyConfirmCaptcha`（去 x）。**关键 bug 修复**：`handleVerified` 原 `setCaptchaToken(token)` 后立即 `doLogin`，闭包读到 setState 前的旧 `captchaToken` → login 漏带 token 仍 423（"验证过了登不进"根因）；改为 `doLogin(values, token)` 直传。`(auth)/login/page.tsx` UI 重写为现代深色品牌风（左侧深蓝渐变+网格+光斑+lucide 特性条，右侧亮色玻璃拟态卡，token primary #2563EB，无新依赖）；`m/login/page.tsx` 补齐原本缺失的整套 423/验证码链路并接入 ConfirmCaptcha。
+
 <!-- MANUAL_NOTES_END -->

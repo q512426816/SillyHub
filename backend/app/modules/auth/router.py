@@ -24,13 +24,13 @@ from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.auth.rbac import collect_permissions_everywhere, list_user_workspace_roles
 from app.modules.auth.schema import (
+    CaptchaVerifyRequest,
+    CaptchaVerifyResponse,
     ChangePasswordRequest,
+    ConfirmCaptchaResponse,
     LoginRequest,
     MeResponse,
     RefreshRequest,
-    SliderCaptchaResponse,
-    SliderCaptchaVerifyRequest,
-    SliderCaptchaVerifyResponse,
     TokenPair,
     UserRead,
     WorkspaceRoleAssignment,
@@ -78,7 +78,7 @@ async def login(
             account=payload.account, password=payload.password, user_agent=ua, ip=ip
         )
     except AuthInvalidCredentials:
-        # 凭证错:累计失败次数;达到阈值则要求滑块验证(前端据 423 need_captcha 弹滑块)。
+        # 凭证错:累计失败次数;达到阈值则要求人机确认(前端据 423 need_captcha 弹确认)。
         fails = await captcha.record_login_failure(ip)
         if fails >= settings.auth_login_fail_threshold:
             raise LoginCaptchaRequired(
@@ -91,25 +91,25 @@ async def login(
     return pair
 
 
-@router.get("/captcha/slider", response_model=SliderCaptchaResponse)
-async def get_slider_captcha(settings: SettingsDep) -> SliderCaptchaResponse:
-    """生成一组滑块验证码图(背景+凹槽+滑块块),target_x 仅存后端。
+@router.get("/captcha/confirm", response_model=ConfirmCaptchaResponse)
+async def get_confirm_captcha(settings: SettingsDep) -> ConfirmCaptchaResponse:
+    """签发一次性 captcha_id,前端点「我不是机器人」时取。
 
-    无需鉴权(登录前调用);前端在收到 423 need_captcha 后拉取。
+    无需鉴权(登录前调用);前端在收到 423 need_captcha 后调用。
     """
-    data = await CaptchaService(settings=settings).create_slider()
-    return SliderCaptchaResponse(**data)
+    data = await CaptchaService(settings=settings).create_confirmation()
+    return ConfirmCaptchaResponse(**data)
 
 
-@router.post("/captcha/verify", response_model=SliderCaptchaVerifyResponse)
-async def verify_slider_captcha(
-    payload: SliderCaptchaVerifyRequest, settings: SettingsDep
-) -> SliderCaptchaVerifyResponse:
-    """校验拖动位置 → 通过签发一次性 captcha_token,登录时回传。"""
-    token = await CaptchaService(settings=settings).verify_slider(payload.captcha_id, payload.x)
+@router.post("/captcha/verify", response_model=CaptchaVerifyResponse)
+async def verify_captcha(
+    payload: CaptchaVerifyRequest, settings: SettingsDep
+) -> CaptchaVerifyResponse:
+    """校验 captcha_id(一次性)→ 通过签发一次性 captcha_token,登录时回传。"""
+    token = await CaptchaService(settings=settings).verify_confirmation(payload.captcha_id)
     if not token:
-        return SliderCaptchaVerifyResponse(success=False)
-    return SliderCaptchaVerifyResponse(success=True, captcha_token=token)
+        return CaptchaVerifyResponse(success=False)
+    return CaptchaVerifyResponse(success=True, captcha_token=token)
 
 
 @router.post("/refresh", response_model=TokenPair)

@@ -63,4 +63,6 @@ multi-agent-platform 的核心 API 服务，monorepo 的"大脑"。以 FastAPI �
 
 - ql-20260728-002-21aa | 登录爆破防护（安全审计 P0-8/P1-14 修复）：同 IP 60s 窗口 INCR 限流（`auth_login_rate_limit_per_minute=5` → 429）+ 失败计数（达 `auth_login_fail_threshold=3` 后该 IP 须带 captcha_token）+ Pillow 滑块验证码（背景含凹槽+滑块块，target_x 仅存 Redis 不返前端，±6px 容差验过签发一次性 captcha_token；slider/token 均一次性消费防重放爆破）。新增 `modules/auth/captcha_service.py`；router 加 `GET /captcha/slider`、`POST /captcha/verify`，登录端点串 check_rate_limit→assert_captcha_if_needed→record_login_failure；Redis 故障降级放行不阻断登录（同 api_key 缓存降级哲学）。
 
+- ql-20260728-003 | 滑块验证码下线换点按式人机确认（滑块交互 ±6px 难对齐、体验差）：`captcha_service.py` 删 Pillow 滑块生成/校验，新增 `create_confirmation`/`verify_confirmation`（一次性 captcha_id→captcha_token，取到即签发，无坐标判断）；限流/失败计数/`assert_captcha_if_needed`/`_consume_captcha_token`/Redis 降级全保留。schema 删 `SliderCaptcha*` 加 `ConfirmCaptchaResponse`/`CaptchaVerifyRequest`/`CaptchaVerifyResponse`；router `GET /captcha/slider`→`/captcha/confirm`、`POST /captcha/verify` 体 `{captcha_id,x}`→`{captcha_id}`；登录端点/423 触发不动。Pillow 因 PPM 模块在用保留依赖。`tests/test_login_captcha.py` 重写为 6 测试（限流/423/全流程/id 一次性/未知 id/降级放行）。
+
 <!-- MANUAL_NOTES_END -->

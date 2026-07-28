@@ -1,10 +1,10 @@
-"""登录限流 + 滑块验证码 契约测试(安全止血:登录爆破防护)。
+"""登录限流 + 点按式人机确认 契约测试(安全止血:登录爆破防护)。
 
 覆盖:
 - 同 IP 60s 窗口超 5 次 → 429
 - 连续失败达阈值(3)→ 423 need_captcha
-- 完整流程:失败触发 → slider 取图 → verify 正确位置拿 token → login 带 token 成功
-- 位置错误 → success=False
+- 完整流程:失败触发 → confirm 取 captcha_id → verify 拿 token → login 带 token 成功
+- captcha_id 一次性(重复 verify 失败)
 - captcha_token 一次性消费
 - Redis 故障降级放行(不阻断登录)
 """
@@ -94,33 +94,30 @@ async def test_failures_trigger_captcha(client: AsyncClient, bob, fake_redis) ->
 
 @pytest.mark.asyncio
 async def test_full_captcha_login_flow(client: AsyncClient, bob, fake_redis) -> None:
-    """触发 → slider → verify 正确位置 → login 带 token 成功;token 一次性消费。"""
+    """触发 → confirm 取 id → verify 拿 token → login 带 token 成功;id/token 一次性。"""
     # 触发 needs_captcha(2 次 401 + 第 3 次 423)
     for _ in range(2):
         await client.post("/api/auth/login", json={"account": "bob", "password": "wrong"})
     resp = await client.post("/api/auth/login", json={"account": "bob", "password": "wrong"})
     assert resp.status_code == 423
 
-    # 取滑块图
-    resp = await client.get("/api/auth/captcha/slider")
+    # 点「我不是机器人」→ 取一次性 captcha_id
+    resp = await client.get("/api/auth/captcha/confirm")
     assert resp.status_code == 200
-    cap = resp.json()
-    captcha_id = cap["captcha_id"]
-    assert cap["bg_image"].startswith("data:image/png;base64,")
-    assert cap["slider_image"].startswith("data:image/png;base64,")
-    # target_x 仅存后端(redis),前端拿不到——测试从 fake_redis 读出校验用
-    target_x = int(fake_redis.store[f"captcha:slider:{captcha_id}"])
+    captcha_id = resp.json()["captcha_id"]
+    assert captcha_id
+    # id 已存后端(redis)
+    assert f"captcha:confirm:{captcha_id}" in fake_redis.store
 
-    # 正确位置 verify → 拿 token
-    resp = await client.post(
-        "/api/auth/captcha/verify", json={"captcha_id": captcha_id, "x": target_x}
-    )
+    # verify → 拿 token
+    resp = await client.post("/api/auth/captcha/verify", json={"captcha_id": captcha_id})
     assert resp.status_code == 200
+    assert resp.json()["success"] is True
     token = resp.json()["captcha_token"]
     assert token
 
-    # slider 一次性:用过即删
-    assert f"captcha:slider:{captcha_id}" not in fake_redis.store
+    # confirm id 一次性:用过即删
+    assert f"captcha:confirm:{captcha_id}" not in fake_redis.store
 
     # login 带正确 token + 正确密码 → 200
     resp = await client.post(
@@ -133,22 +130,28 @@ async def test_full_captcha_login_flow(client: AsyncClient, bob, fake_redis) -> 
 
 
 @pytest.mark.asyncio
-async def test_verify_wrong_position_fails(client: AsyncClient, fake_redis) -> None:
-    """拖动位置偏离超容差 → success=False(且 slider 作废防爆破 target)。"""
-    resp = await client.get("/api/auth/captcha/slider")
+async def test_confirm_id_single_use(client: AsyncClient, fake_redis) -> None:
+    """同一 captcha_id 第二次 verify → success=False(一次性,防重放)。"""
+    resp = await client.get("/api/auth/captcha/confirm")
     captcha_id = resp.json()["captcha_id"]
-    target_x = int(fake_redis.store[f"captcha:slider:{captcha_id}"])
-    # 偏离 100px(远超 6px 容差)
-    resp = await client.post(
-        "/api/auth/captcha/verify",
-        json={"captcha_id": captcha_id, "x": target_x + 100},
-    )
+    # 第一次 verify → 成功
+    resp = await client.post("/api/auth/captcha/verify", json={"captcha_id": captcha_id})
+    assert resp.json()["success"] is True
+    # 第二次 verify 同一 id → 失败
+    resp = await client.post("/api/auth/captcha/verify", json={"captcha_id": captcha_id})
     assert resp.status_code == 200
     body = resp.json()
     assert body["success"] is False
     assert body["captcha_token"] is None
-    # 错误也作废 slider(一次性,防穷举 target)
-    assert f"captcha:slider:{captcha_id}" not in fake_redis.store
+
+
+@pytest.mark.asyncio
+async def test_verify_unknown_id_fails(client: AsyncClient, fake_redis) -> None:
+    """伪造/不存在的 captcha_id → success=False。"""
+    resp = await client.post("/api/auth/captcha/verify", json={"captcha_id": "not-exist"})
+    assert resp.status_code == 200
+    assert resp.json()["success"] is False
+    assert resp.json()["captcha_token"] is None
 
 
 @pytest.mark.asyncio

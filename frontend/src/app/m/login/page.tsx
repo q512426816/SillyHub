@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { ApiError } from "@/lib/api";
 import { login } from "@/lib/auth";
+import { ConfirmCaptcha } from "@/components/ui/confirm-captcha";
 
 /**
  * task-06 · 移动登录页（design §5.3 / FR-03 / D-003 / R-04）。
@@ -88,6 +89,10 @@ function MobileLoginPageInner() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [platform, setPlatform] = useState<LoginPlatform>("sillyhub");
+  const [needCaptcha, setNeedCaptcha] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | undefined>(
+    undefined,
+  );
   const [form] = Form.useForm<LoginFormValues>();
 
   // redirect 优先于 next；URL 固定，渲染期计算一次。非法值回落 null（交给平台默认页）。
@@ -116,14 +121,15 @@ function MobileLoginPageInner() {
     }
   }, [form]);
 
-  const onFinish = async (values: LoginFormValues) => {
+  const doLogin = async (values: LoginFormValues, tokenOverride?: string) => {
     setError(null);
     setSubmitting(true);
     try {
-      // 复用桌面同源 login：token / user 写入同一 useSession store，与桌面互通。
-      await login(values.account, values.password);
+      // 复用桌面同源 login:token / user 写入同一 useSession store,与桌面互通。
+      // token 优先用入参(handleVerified 直传,避免 setCaptchaToken 异步导致闭包读到旧值)。
+      await login(values.account, values.password, tokenOverride ?? captchaToken);
 
-      // 记住我：与源项目行为一致一并缓存账号+密码（仅本地浏览器）。
+      // 记住我:与源项目行为一致一并缓存账号+密码(仅本地浏览器)。
       if (values.remember) {
         localStorage.setItem(
           REMEMBER_KEY,
@@ -137,17 +143,39 @@ function MobileLoginPageInner() {
         localStorage.removeItem(REMEMBER_KEY);
       }
 
-      // 持久化平台选择（与桌面同一 key，下次进站回填一致）。
+      // 持久化平台选择(与桌面同一 key,下次进站回填一致)。
       localStorage.setItem(PLATFORM_KEY, platform);
 
-      // 回目标：redirect/next 优先，否则按平台默认页。目标为桌面路径形态，手机访问时
-      // middleware 自动 rewrite 到 /m/ 版，地址栏 URL 不变（design §5.1 / D-002@v2）。
+      // 回目标:redirect/next 优先,否则按平台默认页。目标为桌面路径形态,手机访问时
+      // middleware 自动 rewrite 到 /m/ 版,地址栏 URL 不变(design §5.1 / D-002@v2)。
       router.replace(presetRedirect ?? PLATFORM_REDIRECT[platform]);
     } catch (err) {
+      // 失败达阈值 → 后端 423 need_captcha:清旧 token、弹人机确认,点按通过后自动重试。
+      if (
+        err instanceof ApiError &&
+        (err.code === "HTTP_423_LOGIN_CAPTCHA_REQUIRED" ||
+          (err.details as { need_captcha?: boolean } | null)?.need_captcha ===
+            true)
+      ) {
+        setCaptchaToken(undefined);
+        setNeedCaptcha(true);
+        return;
+      }
       setError(err instanceof ApiError ? err.message : "登录失败");
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const onFinish = (values: LoginFormValues) => {
+    void doLogin(values);
+  };
+
+  const handleVerified = async (token: string) => {
+    const values = form.getFieldsValue(true) as LoginFormValues;
+    setCaptchaToken(token);
+    setNeedCaptcha(false);
+    await doLogin(values, token);
   };
 
   return (
@@ -211,6 +239,12 @@ function MobileLoginPageInner() {
         {error && (
           <div className="mb-3 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-[14px] text-red-600">
             {error}
+          </div>
+        )}
+
+        {needCaptcha && (
+          <div className="mb-4">
+            <ConfirmCaptcha onVerified={handleVerified} />
           </div>
         )}
 

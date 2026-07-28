@@ -1,4 +1,4 @@
-"""登录保护:IP 限流 + 失败计数 + 滑块验证码。
+"""登录保护:IP 限流 + 失败计数 + 点按式人机确认(原滑块验证码,体验差已下线)。
 
 设计要点
 ========
@@ -8,20 +8,16 @@
 - 限流:同一 IP 60s 窗口 INCR,超 ``auth_login_rate_limit_per_minute`` → 429。
 - 失败计数:登录失败 INCR,达 ``auth_login_fail_threshold`` 后该 IP 登录必须带
   有效 captcha_token;登录成功清零。
-- 滑块:Pillow 生成背景图(渐变+噪点)+ 凹槽阴影 + 滑块块,target_x 仅存后端
-  (不返回前端),前端据视觉拖动对齐,提交 x 后端校验 ``|x-target_x|≤容差``,
-  通过签发一次性 captcha_token。slider 与 token 均一次性消费,防重放/爆破。
+- 人机确认:失败达阈值后,前端弹「我不是机器人」点按组件,点击即向后端取一次性
+  captcha_id 并立刻校验换 captcha_token,登录时回传。token 一次性消费,防重放/爆破。
+  防爆破主力是上面的 IP 限流 + 失败计数;点按确认只是把人机环节从"拖滑块对位置"
+  (±6px 难对齐、体验差)简化为"点一下",安全语义不变(仍需一次后端往返取有效 token)。
 """
 
 from __future__ import annotations
 
-import asyncio
-import base64
-import io
 import secrets
 import uuid
-
-from PIL import Image, ImageDraw, ImageFilter
 
 from app.core.config import Settings
 from app.core.errors import LoginCaptchaRequired, LoginRateLimited
@@ -29,14 +25,6 @@ from app.core.logging import get_logger
 from app.core.redis import get_redis
 
 log = get_logger(__name__)
-
-# 滑块几何(常量;生产如需调整再提 config)
-_BG_W, _BG_H = 300, 150
-_GAP = 44  # 凹槽 / 滑块块边长(px)
-# 凹槽 x 范围:左侧留出滑道空间,右侧留边
-_TARGET_X_MIN, _TARGET_X_MAX = 80, _BG_W - _GAP - 20
-_SLIDER_Y = (_BG_H - _GAP) // 2  # 凹槽/滑块块固定垂直居中(只 x 随机;前端块 CSS 居中自动对齐)
-_POS_TOLERANCE = 6  # 拖动位置容差(px)
 
 _RATE_WINDOW = 60  # 限流窗口 = 60s(每分钟)
 
@@ -49,8 +37,8 @@ def _fail_key(ip: str) -> str:
     return f"login:fail:{ip}"
 
 
-def _slider_key(captcha_id: str) -> str:
-    return f"captcha:slider:{captcha_id}"
+def _confirm_key(captcha_id: str) -> str:
+    return f"captcha:confirm:{captcha_id}"
 
 
 def _token_key(token: str) -> str:
@@ -132,48 +120,40 @@ class CaptchaService:
             details={"need_captcha": True},
         )
 
-    # ── 滑块生成 / 校验 ────────────────────────────────────────────────────
+    # ── 点按式人机确认 ─────────────────────────────────────────────────────
 
-    async def create_slider(self) -> dict[str, str]:
-        """生成一组滑块图(背景含凹槽 + 滑块块),target_x 存 Redis(不返回)。"""
+    async def create_confirmation(self) -> dict[str, str]:
+        """签发一次性 captcha_id(存 Redis),前端点「我不是机器人」时取。"""
         captcha_id = uuid.uuid4().hex
-        target_x = secrets.randbelow(_TARGET_X_MAX - _TARGET_X_MIN + 1) + _TARGET_X_MIN
-        bg_b64, slider_b64 = await asyncio.to_thread(_render_slider_images, target_x)
         try:
             await get_redis().set(
-                _slider_key(captcha_id),
-                str(target_x),
+                _confirm_key(captcha_id),
+                "1",
                 ex=self._settings.auth_captcha_token_ttl_seconds,
             )
         except Exception as exc:
-            # 图已生成但存不下:verify 取不到会失败,客户端重取即可
-            log.warning("captcha.slider_store_failed", captcha_id=captcha_id, error=str(exc))
-        return {"captcha_id": captcha_id, "bg_image": bg_b64, "slider_image": slider_b64}
+            # 存不下则 verify 取不到会失败,客户端重取即可
+            log.warning("captcha.confirm_store_failed", captcha_id=captcha_id, error=str(exc))
+        return {"captcha_id": captcha_id}
 
-    async def verify_slider(self, captcha_id: str, x: int) -> str | None:
-        """校验拖动位置 → 通过签发一次性 captcha_token;slider 无论对错都作废(防爆破 target)。"""
+    async def verify_confirmation(self, captcha_id: str) -> str | None:
+        """校验 captcha_id 有效(一次性消费)→ 签发一次性 captcha_token;无效返 None。"""
         try:
             redis = get_redis()
-            key = _slider_key(captcha_id)
+            key = _confirm_key(captcha_id)
             raw = await redis.get(key)
             if not raw:
                 return None
             await redis.delete(key)  # 一次性
-            try:
-                target_x = int(raw)
-            except (TypeError, ValueError):
-                return None
-            if abs(x - target_x) <= _POS_TOLERANCE:
-                token = secrets.token_urlsafe(24)
-                await redis.set(
-                    _token_key(token),
-                    "1",
-                    ex=self._settings.auth_captcha_token_ttl_seconds,
-                )
-                return token
-            return None
+            token = secrets.token_urlsafe(24)
+            await redis.set(
+                _token_key(token),
+                "1",
+                ex=self._settings.auth_captcha_token_ttl_seconds,
+            )
+            return token
         except Exception as exc:
-            log.warning("captcha.slider_verify_failed", captcha_id=captcha_id, error=str(exc))
+            log.warning("captcha.confirm_verify_failed", captcha_id=captcha_id, error=str(exc))
             return None
 
     async def _consume_captcha_token(self, token: str) -> bool:
@@ -188,73 +168,3 @@ class CaptchaService:
             return True
         except Exception:
             return False
-
-
-# ── Pillow 渲染(同步;由 asyncio.to_thread 调度,不阻塞事件循环)──────────
-
-
-def _render_slider_images(target_x: int) -> tuple[str, str]:
-    """返回 (背景图 data-URI, 滑块块 data-URI)。
-
-    背景图 = 渐变+噪点底图 + 在缺口位置叠半透明凹槽(用户看见缺口);
-    滑块块 = 从底图裁出缺口那块像素 + 白色描边(用户拖它对齐凹槽)。
-    """
-    target_y = _SLIDER_Y
-    bg = _make_background()
-    overlay = Image.new("RGBA", (_BG_W, _BG_H), (0, 0, 0, 0))
-    ImageDraw.Draw(overlay).rectangle(
-        (target_x, target_y, target_x + _GAP, target_y + _GAP),
-        fill=(0, 0, 0, 96),
-        outline=(255, 255, 255, 200),
-        width=1,
-    )
-    bg_with_gap = Image.alpha_composite(bg.convert("RGBA"), overlay)
-
-    slider = bg.crop((target_x, target_y, target_x + _GAP, target_y + _GAP)).convert("RGBA")
-    ImageDraw.Draw(slider).rectangle(
-        (0, 0, _GAP - 1, _GAP - 1), outline=(255, 255, 255, 230), width=2
-    )
-    return _to_data_uri(bg_with_gap), _to_data_uri(slider)
-
-
-def _make_background() -> Image.Image:
-    """随机渐变背景 + 噪点干扰线(增加缺口位置 OCR 难度)。"""
-    c1 = (
-        secrets.randbelow(106) + 60,
-        secrets.randbelow(106) + 60,
-        secrets.randbelow(106) + 60,
-    )
-    c2 = (
-        secrets.randbelow(106) + 100,
-        secrets.randbelow(106) + 100,
-        secrets.randbelow(106) + 100,
-    )
-    img = Image.new("RGB", (_BG_W, _BG_H), c1)
-    draw = ImageDraw.Draw(img)
-    for y in range(_BG_H):
-        ratio = y / _BG_H
-        draw.line(
-            [(0, y), (_BG_W, y)],
-            fill=(
-                int(c1[0] + (c2[0] - c1[0]) * ratio),
-                int(c1[1] + (c2[1] - c1[1]) * ratio),
-                int(c1[2] + (c2[2] - c1[2]) * ratio),
-            ),
-        )
-    for _ in range(8):  # 噪点干扰线
-        gray = secrets.randbelow(256)
-        draw.line(
-            [
-                (secrets.randbelow(_BG_W), secrets.randbelow(_BG_H)),
-                (secrets.randbelow(_BG_W), secrets.randbelow(_BG_H)),
-            ],
-            fill=(gray, gray, gray),
-            width=1,
-        )
-    return img.filter(ImageFilter.SMOOTH)
-
-
-def _to_data_uri(img: Image.Image) -> str:
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")

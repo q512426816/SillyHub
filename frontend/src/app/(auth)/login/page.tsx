@@ -4,11 +4,11 @@ import { Button, Checkbox, Form, Input, Segmented } from "antd";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import { Bot, Workflow, BookOpenText, Sparkles } from "lucide-react";
 
 import { ApiError } from "@/lib/api";
 import { login } from "@/lib/auth";
-import { Card, CardContent } from "@/components/ui/card";
-import { SliderCaptcha } from "@/components/ui/slider-captcha";
+import { ConfirmCaptcha } from "@/components/ui/confirm-captcha";
 
 const REMEMBER_KEY = "sillyhub.login.remember";
 
@@ -61,11 +61,12 @@ export default function LoginPage() {
     }
   }, [form]);
 
-  const doLogin = async (values: LoginFormValues) => {
+  const doLogin = async (values: LoginFormValues, tokenOverride?: string) => {
     setError(null);
     setSubmitting(true);
     try {
-      await login(values.account, values.password, captchaToken);
+      // token 优先用入参(handleVerified 直传,避免 setCaptchaToken 异步导致闭包读到旧值)。
+      await login(values.account, values.password, tokenOverride ?? captchaToken);
 
       // 记住我:存账号(密码与源项目行为一致一并缓存,仅本地浏览器)
       if (values.remember) {
@@ -85,8 +86,8 @@ export default function LoginPage() {
       localStorage.setItem(PLATFORM_KEY, platform);
       router.replace(PLATFORM_REDIRECT[platform]);
     } catch (err) {
-      // 登录失败次数达阈值 → 后端 423 need_captcha:清旧 token、弹滑块,
-      // 用户拖对后 handleVerified 带 token 自动重试。
+      // 登录失败次数达阈值 → 后端 423 need_captcha:清旧 token、弹人机确认,
+      // 用户点按通过后 handleVerified 带 token 自动重试。
       if (
         err instanceof ApiError &&
         (err.code === "HTTP_423_LOGIN_CAPTCHA_REQUIRED" ||
@@ -111,60 +112,42 @@ export default function LoginPage() {
     const values = form.getFieldsValue(true) as LoginFormValues;
     setCaptchaToken(token);
     setNeedCaptcha(false);
-    await doLogin(values);
+    await doLogin(values, token);
   };
 
   return (
-    <main className="relative flex min-h-screen w-full overflow-hidden bg-slate-50 text-slate-800">
-      {/* 左侧:品牌区 + 明亮蓝同色系渐变 + 欢迎语 */}
-      <section className="relative hidden flex-1 flex-col overflow-hidden lg:flex">
-        {/* 蓝同色系柔和渐变(blue-600 → blue-500 → cyan-500) */}
+    <main className="relative flex min-h-screen w-full overflow-hidden bg-background text-foreground">
+      {/* 左侧:品牌区(深蓝渐变 + 光斑 + 网格 + 特性条) */}
+      <BrandPanel />
+
+      {/* 右侧:表单区(亮色 + 玻璃拟态登录卡) */}
+      <section className="relative flex flex-1 items-center justify-center overflow-y-auto px-6 py-10 sm:px-10">
+        {/* 右侧极淡背景光晕,呼应品牌区 */}
         <div
           aria-hidden
-          className="absolute inset-0 bg-gradient-to-br from-blue-600 via-blue-500 to-cyan-500"
-        />
-        {/* 装饰性柔光球(同色系透明球) */}
-        <div
-          aria-hidden
-          className="absolute -left-24 top-24 h-72 w-72 rounded-full bg-white/20 blur-3xl"
+          className="pointer-events-none absolute -right-32 -top-32 h-96 w-96 rounded-full bg-blue-100/60 blur-3xl"
         />
         <div
           aria-hidden
-          className="absolute bottom-[-6rem] right-[-4rem] h-80 w-80 rounded-full bg-cyan-300/30 blur-3xl"
+          className="pointer-events-none absolute -bottom-32 -left-24 h-80 w-80 rounded-full bg-cyan-100/50 blur-3xl"
         />
 
-        {/* 左上角 LOGO（深色 hero 底，白字清晰） */}
-        <div className="relative z-10 flex items-center gap-3 p-8">
-          <LogoMark />
-        </div>
-
-        {/* 中部欢迎语 + 插画占位 */}
-        <div className="relative z-10 flex flex-1 flex-col items-center justify-center gap-6 px-8 text-center">
-          <IllustrationPlaceholder />
-          <h2 className="text-3xl font-semibold text-white">
-            欢迎使用 SillyHub
-          </h2>
-          <p className="max-w-md text-sm font-normal leading-relaxed text-white/80">
-            多智能体协作平台 · 知识沉淀 · 规格驱动开发
-          </p>
-        </div>
-      </section>
-
-      {/* 右侧:表单区(shadcn Card 包裹 antd Form) */}
-      <section className="relative flex flex-1 items-center justify-center overflow-y-auto bg-slate-50 p-6 text-slate-800 sm:p-10">
-        <div className="w-full max-w-[420px]">
-          {/* 移动端(无左侧)时显示 LOGO（浅底,加深色衬底保证白字可见） */}
+        <div className="relative w-full max-w-[420px]">
+          {/* 移动端(无左侧)时显示 LOGO */}
           <div className="mb-8 flex items-center justify-center lg:hidden">
-            <span className="inline-flex items-center justify-center rounded-xl bg-slate-900/90 p-2 shadow-sm">
+            <span className="inline-flex items-center justify-center rounded-2xl bg-slate-900/90 p-2.5 shadow-lg">
               <LogoMark className="h-10" />
             </span>
           </div>
 
-          <Card className="border-slate-200 shadow-sm">
-            <CardContent className="p-6 sm:p-8">
-              <div className="mb-6">
-                <h1 className="text-2xl font-bold text-slate-900">账号登录</h1>
-                <p className="mt-1 text-sm text-slate-500">
+          {/* 玻璃拟态登录卡 */}
+          <div className="rounded-2xl border border-white/60 bg-white/80 shadow-[0_8px_40px_-12px_rgba(37,99,235,0.18)] backdrop-blur-xl">
+            <div className="p-6 sm:p-9">
+              <div className="mb-7">
+                <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+                  账号登录
+                </h1>
+                <p className="mt-1.5 text-sm text-slate-500">
                   使用登录名访问平台
                 </p>
               </div>
@@ -180,12 +163,12 @@ export default function LoginPage() {
                 size="large"
               >
                 <Form.Item label="访问平台" className="mb-4">
-              <Segmented
-                value={platform}
-                onChange={(v) => setPlatform(v as LoginPlatform)}
-                options={PLATFORM_OPTIONS}
-                block
-              />
+                  <Segmented
+                    value={platform}
+                    onChange={(v) => setPlatform(v as LoginPlatform)}
+                    options={PLATFORM_OPTIONS}
+                    block
+                  />
                 </Form.Item>
 
                 <Form.Item
@@ -211,19 +194,23 @@ export default function LoginPage() {
                   />
                 </Form.Item>
 
-                <Form.Item className="mb-3" name="remember" valuePropName="checked">
+                <Form.Item
+                  className="mb-3"
+                  name="remember"
+                  valuePropName="checked"
+                >
                   <Checkbox>记住密码</Checkbox>
                 </Form.Item>
 
                 {error && (
-                  <div className="mb-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-600">
+                  <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
                     {error}
                   </div>
                 )}
 
                 {needCaptcha && (
-                  <div className="mb-3">
-                    <SliderCaptcha onVerified={handleVerified} />
+                  <div className="mb-4">
+                    <ConfirmCaptcha onVerified={handleVerified} />
                   </div>
                 )}
 
@@ -233,16 +220,125 @@ export default function LoginPage() {
                     htmlType="submit"
                     loading={submitting}
                     block
+                    className="!h-11 !text-[15px] !font-medium"
                   >
                     {submitting ? "登录中…" : "登录"}
                   </Button>
                 </Form.Item>
               </Form>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
+
+          <p className="mt-6 text-center text-xs text-slate-400">
+            多智能体协作平台 · 知识沉淀 · 规格驱动开发
+          </p>
         </div>
       </section>
     </main>
+  );
+}
+
+/** 左侧品牌区:深蓝渐变 + 径向光斑 + 细网格纹理 + lucide 特性条。 */
+function BrandPanel() {
+  return (
+    <section className="relative hidden flex-1 flex-col overflow-hidden lg:flex">
+      {/* 深蓝渐变底(primary #2563EB → 深 slate/blue) */}
+      <div
+        aria-hidden
+        className="absolute inset-0 bg-gradient-to-br from-blue-700 via-blue-800 to-slate-950"
+      />
+      {/* 细网格纹理 */}
+      <div
+        aria-hidden
+        className="absolute inset-0 opacity-[0.13]"
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)",
+          backgroundSize: "44px 44px",
+        }}
+      />
+      {/* 径向光斑 */}
+      <div
+        aria-hidden
+        className="absolute -left-28 top-20 h-80 w-80 rounded-full bg-cyan-400/25 blur-3xl"
+      />
+      <div
+        aria-hidden
+        className="absolute bottom-[-5rem] right-[-3rem] h-96 w-96 rounded-full bg-blue-500/30 blur-3xl"
+      />
+      <div
+        aria-hidden
+        className="absolute right-1/4 top-1/3 h-56 w-56 rounded-full bg-indigo-400/20 blur-3xl"
+      />
+      <div
+        aria-hidden
+        className="absolute bottom-[-4rem] left-1/4 h-72 w-72 rounded-full bg-cyan-500/15 blur-3xl"
+      />
+
+      {/* 左上角 LOGO */}
+      <div className="relative z-10 flex items-center gap-3 p-9">
+        <span className="inline-flex items-center justify-center rounded-xl bg-white/10 p-2 backdrop-blur-sm">
+          <LogoMark className="h-12" />
+        </span>
+      </div>
+
+      {/* 中部主视觉 */}
+      <div className="relative z-10 flex flex-1 flex-col items-start justify-center gap-8 px-12 xl:px-16">
+        <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 text-xs font-medium text-blue-100 backdrop-blur-sm">
+          <Sparkles className="h-3.5 w-3.5" />
+          多智能体协作平台
+        </div>
+        <h2 className="max-w-md text-4xl font-bold leading-tight tracking-tight text-white">
+          欢迎使用
+          <br />
+          SillyHub
+        </h2>
+        <p className="max-w-md text-sm leading-relaxed text-blue-100/80">
+          多智能体协作平台 · 知识沉淀 · 规格驱动开发,让团队协作与知识资产在一处生长。
+        </p>
+
+        {/* 特性条(lucide 图标,替换原占位 SVG 插画) */}
+        <div className="mt-2 flex flex-col gap-4">
+          <FeatureItem
+            icon={<Bot className="h-4 w-4" />}
+            title="多智能体协作"
+            desc="编排 Agent 团队,自动完成开发任务"
+          />
+          <FeatureItem
+            icon={<Workflow className="h-4 w-4" />}
+            title="规格驱动开发"
+            desc="文档先行,变更可追踪、可验收"
+          />
+          <FeatureItem
+            icon={<BookOpenText className="h-4 w-4" />}
+            title="知识沉淀"
+            desc="项目知识与决策过程持续积累"
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function FeatureItem({
+  icon,
+  title,
+  desc,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  desc: string;
+}) {
+  return (
+    <div className="flex items-center gap-3.5">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-white/10 text-cyan-200 backdrop-blur-sm">
+        {icon}
+      </span>
+      <div>
+        <div className="text-sm font-semibold text-white">{title}</div>
+        <div className="text-xs text-blue-100/70">{desc}</div>
+      </div>
+    </div>
   );
 }
 
@@ -256,62 +352,9 @@ function LogoMark({ className }: { className?: string }) {
       width={690}
       height={788}
       priority
-      className={["h-14 w-auto select-none", className].filter(Boolean).join(" ")}
+      className={["h-14 w-auto select-none", className]
+        .filter(Boolean)
+        .join(" ")}
     />
-  );
-}
-
-/** 中央插画占位:源项目是彩色 SVG 插画,这里用纯 CSS 几何图形近似,避免引入外部资源 */
-function IllustrationPlaceholder() {
-  return (
-    <svg
-      width={320}
-      height={220}
-      viewBox="0 0 320 220"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      role="img"
-      aria-label="SillyHub 多智能体协作"
-    >
-      <rect
-        x="40"
-        y="60"
-        width="240"
-        height="130"
-        rx="14"
-        fill="white"
-        opacity="0.12"
-      />
-      <rect x="60" y="90" width="200" height="14" rx="7" fill="white" opacity="0.45" />
-      <rect x="60" y="116" width="150" height="14" rx="7" fill="white" opacity="0.35" />
-      <g className="text-blue-200">
-        <circle cx="90" cy="160" r="14" fill="currentColor" />
-      </g>
-      <g className="text-cyan-200">
-        <circle cx="130" cy="160" r="14" fill="currentColor" />
-      </g>
-      <g className="text-sky-200">
-        <circle cx="170" cy="160" r="14" fill="currentColor" />
-      </g>
-      <g className="text-indigo-200">
-        <circle cx="210" cy="160" r="14" fill="currentColor" />
-      </g>
-      <rect
-        x="120"
-        y="20"
-        width="80"
-        height="44"
-        rx="10"
-        fill="white"
-        opacity="0.22"
-      />
-      <path
-        d="M160 64 L160 78 M150 78 L170 78"
-        stroke="white"
-        strokeOpacity="0.4"
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
-    </svg>
   );
 }

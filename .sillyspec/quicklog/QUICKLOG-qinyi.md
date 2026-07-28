@@ -422,3 +422,22 @@ created_at: 2026-07-05 16:33:00
 根因：原 /api/auth/login 无任何频率/失败保护，攻击者可对单账号无限次尝试密码爆破；既无 IP 限流也无失败锁定，是登录环节最高危缺口。
 方案：后端新增 CaptchaService 全状态走 Redis（复用 get_redis）——同 IP 60s 窗口 INCR 超 5 次→429；登录失败 INCR 计数达 3 后该 IP 登录须带有效 captcha_token（登录成功清零）；Pillow 生成背景图（渐变+噪点干扰线）含凹槽+滑块块，target_x 仅存后端 Redis 不返前端，前端据视觉拖动提交 x，|x-target_x|≤6px 容差验过签发一次性 captcha_token；slider 与 token 均一次性消费（验过/验错都删），防重放与穷举爆破。Redis 故障 best-effort 降级放行（同 api_key_service 缓存降级哲学），不因 Redis 挂让登录完全不可用。前端登录页捕获后端 423 need_captcha 后弹 SliderCaptcha，拖对取 token 自动带 token 重试登录。
 结果：后端 auth 模块测试 141 通过（136 回归 + 5 新增）零回归；ruff format+check 全过、mypy 12 文件无问题；前端新增滑块组件 + 登录页接线，slider-captcha.tsx 仅 2 处 CSSProperties 报错（与 global-error/change-file-tree 等已提交文件同属本机 node_modules 预存环境问题，非本次引入）。代码已 git add 暂存（9 文件 + 2 模块文档），未 commit（按规则交统一提交工具）。
+## ql-20260728-003 | 2026-07-28 17:33:00 | 登录滑块验证换「我不是机器人」点按 + 登录页 UI 现代化 + 修 token 闭包 bug
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/auth/captcha_service.py（删 Pillow 滑块生成/校验 create_slider/verify_slider/_render_slider_images 等；新增 create_confirmation/verify_confirmation 点按式一次性 captcha_id→captcha_token；限流/失败计数/token 消费全保留）
+- backend/app/modules/auth/schema.py（删 SliderCaptchaResponse/SliderCaptchaVerifyRequest；新增 ConfirmCaptchaResponse/CaptchaVerifyRequest/CaptchaVerifyResponse）
+- backend/app/modules/auth/router.py（GET /captcha/slider→/captcha/confirm；POST /captcha/verify 体由 {captcha_id,x} 改 {captcha_id}；登录端点/423 触发不动）
+- backend/tests/modules/auth/test_login_captcha.py（重写为 6 测试：限流 429/失败达阈值 423/全流程 confirm→verify→login 成功/confirm id 一次性/未知 id 失败/Redis 降级放行）
+- frontend/src/components/ui/confirm-captcha.tsx（新建「我不是机器人」点按组件，lucide 图标 Shield/ShieldCheck/Loader2，idle/verifying/ok/fail 四态）
+- frontend/src/components/ui/slider-captcha.tsx（删除，滑块下线）
+- frontend/src/lib/auth.ts（fetchSliderCaptcha/verifySliderCaptcha→fetchConfirmCaptcha/verifyConfirmCaptcha(去 x 形参)；SliderCaptchaData→ConfirmCaptchaData，类型暂手写待 gen:types）
+- frontend/src/app/(auth)/login/page.tsx（换用 ConfirmCaptcha；UI 重写为现代深色品牌风：左侧深蓝渐变+网格纹理+径向光斑+lucide 特性条，右侧亮色玻璃拟态登录卡；并修 doLogin token 闭包 bug）
+- frontend/src/app/m/login/page.tsx（补齐验证码链路：原移动端无任何 423/验证码处理,失败3次会卡死;接入 ConfirmCaptcha + needCaptcha/captchaToken 状态 + doLogin 拆 423 + handleVerified;并同修 token 闭包 bug）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md, frontend.md（变更索引补 ql-20260728-003 条目）
+
+需求：①用户反馈登录滑块"滑了一直不通过"，要求换掉该组件；②登录页 UI"太土"要求优化；③移动端登录页也要加同样的「我不是机器人」。
+根因：(1) 滑块交互要求滑块左缘对齐凹槽 ±6px、只能凭肉眼对缺口无滑轨，体验差易误判；(2) 诊断中发现更深 bug——前端 handleVerified 里 setCaptchaToken(token) 后立即 doLogin，但 doLogin 闭包读到的是 setState 生效前的旧 captchaToken（异步未更新），导致 login 实际没带 token 仍 423，这正是"验证过了却登不进"的真正技术根因（原滑块时代因难拖对很少走到自动重登，故从未暴露）；(3) 移动端登录页原本完全没有 423/验证码处理。
+方案：安全机制不变（后端 IP 限流+失败计数+一次性 captcha_token+Redis 降级全保留），只把"取证交互"从拖滑块换成点按「我不是机器人」——点一下取一次性 captcha_id 并立即校验换 token，登录回传。闭包 bug 修法：doLogin 增加 tokenOverride 可选参，handleVerified 直传刚拿到的 token，不再依赖 state。登录页 UI 按设计系统 token(primary #2563EB)做现代深色品牌风，装饰纯 CSS 渐变/网格+已装 lucide，不引新依赖；Pillow 因 PPM 模块仍在用而保留依赖，仅删 captcha 内引用。
+结果：后端 auth 模块 137 通过零回归（6 captcha 测试全过），ruff/mypy 干净；前端 116 文件 1140 测试全过零回归，tsc 0 error、eslint 0 error。浏览器实测（本机 3001，已 docker rebuild 前后端）：桌面端+移动端均 错密码3次→弹「我不是机器人」→点一下→自动带正确密码重登→跳 /workspaces 成功（修复后 login 请求 hasToken:true）。新 UI 截图确认现代深色品牌风达标。代码未 commit（按规则交统一提交工具）。

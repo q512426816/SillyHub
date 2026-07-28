@@ -75,30 +75,28 @@ export async function changePassword(
   });
 }
 
-// 滑块验证码(登录爆破防护)。后端 schema 在 backend/app/modules/auth/schema.py
-// (SliderCaptchaResponse / VerifyResponse);待 `pnpm gen:types` 拉 OpenAPI 对齐到
-// api-types.ts,这里暂手写(字段一一对应,避免阻塞 quick)。
-export interface SliderCaptchaData {
+// 点按式人机确认(登录爆破防护;原拖拉滑块已下线)。后端 schema 在
+// backend/app/modules/auth/schema.py(ConfirmCaptchaResponse / CaptchaVerifyRequest/
+// CaptchaVerifyResponse);待 `pnpm gen:types` 拉 OpenAPI 对齐到 api-types.ts,这里暂手写
+// (字段一一对应,避免阻塞 quick;全量 gen:types 会带入其它进行中功能的类型漂移,不在本 quick 范围)。
+export interface ConfirmCaptchaData {
   captcha_id: string;
-  bg_image: string;
-  slider_image: string;
 }
 
-export interface SliderCaptchaVerifyResult {
+export interface CaptchaVerifyResult {
   success: boolean;
   captcha_token: string | null;
 }
 
-export async function fetchSliderCaptcha(): Promise<SliderCaptchaData> {
-  return apiFetch<SliderCaptchaData>("/api/auth/captcha/slider");
+export async function fetchConfirmCaptcha(): Promise<ConfirmCaptchaData> {
+  return apiFetch<ConfirmCaptchaData>("/api/auth/captcha/confirm");
 }
 
-export async function verifySliderCaptcha(
+export async function verifyConfirmCaptcha(
   captchaId: string,
-  x: number,
-): Promise<SliderCaptchaVerifyResult> {
-  return apiFetch<SliderCaptchaVerifyResult>("/api/auth/captcha/verify", {
+): Promise<CaptchaVerifyResult> {
+  return apiFetch<CaptchaVerifyResult>("/api/auth/captcha/verify", {
     method: "POST",
-    json: { captcha_id: captchaId, x },
+    json: { captcha_id: captchaId },
   });
 }
