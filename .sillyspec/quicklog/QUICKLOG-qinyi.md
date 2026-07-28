@@ -381,3 +381,44 @@ created_at: 2026-07-05 16:33:00
 根因：现有 is_default 已是启动语义(R-05互斥+lease查is_default=True下发+无则absent回归本地D-007)，唯一缺口是无停止入口(前端无按钮、后端无专属端点)且UI用默认措辞而非cc-switch式启动/停止。
 方案：后端service.unset_default+POST /unset-default端点(对称set-default，不清兄弟，幂等)；前端api.unsetDefaultProvider+list组件改启动/停止按钮(Power图标)+已启动徽标+描述文案；form复选框措辞对齐；llm_provider模块文档同步。无迁移/无daemon/无lease改动。
 结果：backend llm_provider 27passed(+3 unset_default)；frontend全量1118passed；typecheck/ruff/format/mypy/lint全绿。
+## ql-20260727-007-685f | 2026-07-27 16:39:26 | (quick 任务)
+状态：已完成
+关联变更：backend-monitoring
+文件：（见实际改动）
+
+需求：给 backend 加轻量性能监控，抓'偶发卡几十秒'的根因
+根因：用户反馈正常接口<100ms 但瞎点会整体卡几十秒，需区分慢接口 vs 整体堵塞（同步调用堵异步事件循环/数据库连接池耗尽）
+方案：新增 monitoring.py 三件套（1. 慢请求中间件>1s 打 slow.request 日志 2. 事件循环堵塞看门狗 100ms 自检>500ms 打 event_loop.blocked 3. SQLAlchemy 慢查询监听>500ms 打 slow.query）；main.py 接中间件+lifespan 管理 watchdog 启停；db.py engine 创建后接慢查询事件监听
+结果：本地隔离测试全过（慢请求 1.2s 触发 slow.request 日志 duration_ms=1210）+llm_provider 61 测试零回归+ruff format/check+mypy 全过；服务器 py-spy 已装（/app/.local/bin/py-spy），下次卡住拍 py-spy dump 快照
+## ql-20260728-001-c979 | 2026-07-28 01:02:00 | 修复 main 上 5 个预存后端测试失败（alembic head 快照过期 / provider_config 漏 settings_config 常量 / workbench calendar 跨月底幽灵日期）
+状态：已完成
+关联变更：（无）
+文件：
+- `backend/app/modules/llm_provider/tests/test_fetch_models.py`（`TestSettingsConfigMigration.test_alembic_single_head`：断言 `heads == [_EXPECTED_HEAD]` 改 `len(heads) == 1`，不再锁会随新迁移移动的 head；`_EXPECTED_HEAD` 保留供 `test_upgrade_adds_settings_config_column` 校验本迁移自身 revision）
+- `backend/tests/modules/daemon/lease/test_provider_config_payload.py`（`_PROVIDER_CONFIG_FIELDS` frozenset 补 `settings_config` 字段，对齐 `context.py` task-04/D-009 原样透传）
+- `backend/app/modules/ppm/workbench/tests/test_workbench_service.py`（`test_calendar_alert_green_future_covered` + `test_calendar_alert_completed_green`：`ym` 从 `end` 月改取 `future_day` 所在月，修月末跨月拼幽灵日期）
+- 环境修复（非代码、不入库）：`uv sync --extra dev` 把 pytest 等测试依赖补进 `backend/.venv`（此前 venv 无 pytest → `uv run pytest` 回退全局 → 缺 python-multipart 致 collection 崩）
+
+需求：后端 pytest 全量跑 5 个失败（+ collection 报 python-multipart 缺失），用户要求修复让测试转绿。
+根因：(1) test_alembic_single_head 锁死 head==202607270900，auth 变更迁移 202607271700 合法叠在其上致 head 移位误伤；(2) _PROVIDER_CONFIG_FIELDS frozenset 漏 settings_config——llm_provider 变更 task-04/D-009 在 context.py 故意透传该字段但 lease 测试常量未跟；(3) workbench 两个 calendar 测试 ym 取 end 月(now+5d 跨月底)而 future_day 取 now 月，拼出该月不存在的幽灵日期致 alert=none；另 collection 报错根因是 venv 漏装 dev extra(pytest 走全局缺 python-multipart)。
+方案：(1) test_alembic_single_head 断言改 len(heads)==1(防分叉不锁移动的 head，本迁移自身 revision 仍由 test_upgrade_adds_settings_config_column 校验)；(2) frozenset 补 settings_config；(3) 两 calendar 测试 ym 改取 future_day 所在月保证 key 自洽；另 uv sync --extra dev 补测试依赖进 venv(非代码)。
+结果：定向跑三文件 97 passed/0 failed，5 个失败全转绿；源码零改动纯测试侧；未跑全量回归(测试侧隔离，定向全文件已覆盖相关范围)。
+## ql-20260728-002-21aa | 2026-07-28 10:35:33 | 登录加 IP 限流（5 次/分）+ 失败 3 次滑块验证
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/core/errors.py（新增 LoginRateLimited 429 / LoginCaptchaRequired 423 异常类）
+- backend/app/core/config.py（新增 auth_login_rate_limit_per_minute/fail_threshold/fail_window_seconds/captcha_token_ttl_seconds 4 个配置，带 ge 校验）
+- backend/app/modules/auth/captcha_service.py（新建 CaptchaService：限流 INCR + 失败计数 + Pillow 滑块生成/校验 + 一次性 token 消费；Redis 故障降级放行）
+- backend/app/modules/auth/router.py（登录端点串 check_rate_limit→assert_captcha_if_needed→record_login_failure；新增 GET /captcha/slider、POST /captcha/verify；加 _client_ip 读 X-Forwarded-For）
+- backend/app/modules/auth/schema.py（LoginRequest 加 captcha_token；新增 SliderCaptchaResponse/VerifyRequest/VerifyResponse 三组 schema）
+- backend/tests/modules/auth/test_login_captcha.py（新建 5 测试：限流第 6 次拦截 / 失败达阈值触发 / 全流程拖对登录 / 位置错失败 / Redis 全挂降级放行）
+- frontend/src/components/ui/slider-captcha.tsx（新建拖拉滑块组件，指针事件支持鼠标+触控，CSS calc(50%-22px) 垂直对齐后端固定凹槽 _SLIDER_Y=53）
+- frontend/src/app/(auth)/login/page.tsx（needCaptcha/captchaToken 状态 + doLogin 拆分捕获 423 + handleVerified 拖对自动带 token 重试）
+- frontend/src/lib/auth.ts（login 加 captcha_token 形参 + fetchSliderCaptcha/verifySliderCaptcha；类型暂手写待 pnpm gen:types 对齐）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md, frontend.md（变更索引补 ql-20260728-002-21aa 条目）
+
+需求：登录端点零爆破防护（安全审计 P0-8/P1-14），要求同 IP 每分钟限流 5 次，连续失败超过 3 次后强制滑块验证码（拖拉形式）。
+根因：原 /api/auth/login 无任何频率/失败保护，攻击者可对单账号无限次尝试密码爆破；既无 IP 限流也无失败锁定，是登录环节最高危缺口。
+方案：后端新增 CaptchaService 全状态走 Redis（复用 get_redis）——同 IP 60s 窗口 INCR 超 5 次→429；登录失败 INCR 计数达 3 后该 IP 登录须带有效 captcha_token（登录成功清零）；Pillow 生成背景图（渐变+噪点干扰线）含凹槽+滑块块，target_x 仅存后端 Redis 不返前端，前端据视觉拖动提交 x，|x-target_x|≤6px 容差验过签发一次性 captcha_token；slider 与 token 均一次性消费（验过/验错都删），防重放与穷举爆破。Redis 故障 best-effort 降级放行（同 api_key_service 缓存降级哲学），不因 Redis 挂让登录完全不可用。前端登录页捕获后端 423 need_captcha 后弹 SliderCaptcha，拖对取 token 自动带 token 重试登录。
+结果：后端 auth 模块测试 141 通过（136 回归 + 5 新增）零回归；ruff format+check 全过、mypy 12 文件无问题；前端新增滑块组件 + 登录页接线，slider-captcha.tsx 仅 2 处 CSSProperties 报错（与 global-error/change-file-tree 等已提交文件同属本机 node_modules 预存环境问题，非本次引入）。代码已 git add 暂存（9 文件 + 2 模块文档），未 commit（按规则交统一提交工具）。
