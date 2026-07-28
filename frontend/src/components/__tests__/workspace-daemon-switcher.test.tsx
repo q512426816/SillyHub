@@ -60,9 +60,6 @@ function mkBinding(
     last_scan_at: o.last_scan_at ?? null,
     init_synced_at: o.init_synced_at ?? null,
     init_synced_spec_version: o.init_synced_spec_version ?? null,
-    // task-13(api-types regen):MemberBindingView.shared 现为 required(对齐后端真实
-    // schema,committed api-types.ts 此前过期缺该字段)。fixture 补默认值。
-    shared: o.shared ?? false,
   };
 }
 

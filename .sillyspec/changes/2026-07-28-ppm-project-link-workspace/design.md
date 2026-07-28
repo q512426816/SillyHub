@@ -66,7 +66,7 @@ scale: large
 | 操作 | 文件路径 | 说明 |
 |---|---|---|
 | 修改 | `backend/app/modules/workspace/model.py` | 新增 `PpmProjectWorkspace` 类(仿 `TaskWorkspace`) |
-| 新增 | `backend/migrations/versions/<rev>_ppm_project_workspace.py` | 建表 migration(revision 唯一 + down 接当前 head) |
+| 新增 | `backend/migrations/versions/202607281500_ppm_project_workspace.py` | 建表 migration(revision=202607281500 唯一 + down_revision 接当前 head 202607271700) |
 | 新增 | `backend/app/modules/workspace/link_service.py` | 关联表级逻辑(bind/unbind/list,权限无关,供两 router 复用) |
 | 新增 | `backend/app/modules/workspace/link_router.py` | 工作区维度关联接口(挂 `/api/workspaces`) |
 | 修改 | `backend/app/modules/ppm/project/router.py` | 项目维度关联接口(挂 `/api/ppm/projects`,新增端点,只读写新关联表) |
@@ -80,7 +80,11 @@ scale: large
 | 新增 | `frontend/src/components/workspace/LinkWorkspaceDialog.tsx` | 项目侧关联工作区弹窗 |
 | 新增 | `frontend/src/components/workspace/LinkedProjectsSection.tsx` | 工作区侧关联项目区块 |
 | 修改 | `frontend/src/app/(dashboard)/workspaces/[id]/page.tsx` | 嵌入「关联项目」区块 |
-| 新增 | `frontend` 组件测试 | 弹窗/区块交互测试 |
+| 新增 | `frontend/src/components/workspace/__tests__/LinkWorkspaceDialog.test.tsx` | 弹窗绑定/解绑交互测试 |
+| 新增 | `frontend/src/components/workspace/__tests__/LinkedProjectsSection.test.tsx` | 区块对称操作测试 |
+| 修改 | `frontend/src/components/__tests__/workspace-daemon-switcher.test.tsx` | 预存类型漂移修复(mkBinding fixture 补 MemberBindingView.shared 必填字段,regen api-types 暴露,仅补 fixture 未动断言) |
+| 重新生成 | `frontend/src/lib/api-types.ts` | pnpm gen:types 重新生成(含本变更新端点+顺带同步过期 schema,纯生成产物) |
+| 重新生成 | `backend/openapi.json` | dump_openapi 重新导出(342 paths/408 schemas,含新端点,纯生成产物) |
 
 > PPM 后端**零数据模型改动**:项目维度端点只读写新关联表 `ppm_project_workspace`,不碰 PPM 现有表/业务逻辑,对已上线 PPM 模块无侵入。plan 阶段细化每个文件的函数签名与改动点。
 
