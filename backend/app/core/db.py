@@ -37,7 +37,12 @@ _POOL_RECYCLE: Final[int] = 300  # 5 min — reclaim leaked/stale slots faster
 # 占满共享连接池(配合本次补的缺失索引,慢查会被快速中断而非无限挂住连接)。
 # 仅 asyncpg(PG)生效;aiosqlite(测试)忽略。单位毫秒。
 _STATEMENT_TIMEOUT_MS: Final[str] = "30000"  # 30s — 单条语句上限
-_IDLE_IN_TXN_TIMEOUT_MS: Final[str] = "10000"  # 10s — 空闲事务(开了事务未提交)
+# ql-20260728-008：10s 太短，误伤「事务内 await 慢外部调用(daemon/LLM/SSE)」的合法
+# 长事务——PG 批量杀悬挂连接,后端复用断连接重建池,导致全站周期性卡 ~17s(2026-07-28
+# 22:40 阿里云实测)。放宽到 120s:足够覆盖绝大多数长事务空闲等待,同时保留防泄漏事务
+# 兜底(真泄漏连接 120s 后仍被回收,不会永久占满 pool)。delegate 等已知超长 RPC(gate
+# 可达 12min)应走「RPC 前 commit 释放事务」(delegate.py release_transaction)而非靠大超时。
+_IDLE_IN_TXN_TIMEOUT_MS: Final[str] = "120000"  # 120s — 空闲事务(开了事务未提交)
 _LOCK_TIMEOUT_MS: Final[str] = "5000"  # 5s — 拿锁等待上限(fail fast)
 
 
