@@ -118,6 +118,15 @@ export default function WeeklyPlanPage() {
   }>({});
   // 平铺模式:开启=排序时全表整列排序、不显示项目分组标题行;关闭=组内排序+分组(默认)
   const [flattenMode, setFlattenMode] = useState(false);
+  // 工作量列右击聚合(求和/平均值,可多选),选后底部总结栏显示结果
+  const [weeklyAgg, setWeeklyAgg] = useState<string[]>([]);
+  // 工作量列右击自定义菜单坐标(原生 fixed div 菜单,不经 antd Dropdown,避免菜单项 click 触发排序)
+  const [aggMenu, setAggMenu] = useState<{ x: number; y: number } | null>(null);
+  const toggleAgg = (key: string) => {
+    setWeeklyAgg((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
+  };
 
   const buildReq = useCallback((): WeeklyPlanPageReq => {
     const req: WeeklyPlanPageReq = { page: 1, page_size: 10000 };
@@ -275,6 +284,20 @@ export default function WeeklyPlanPage() {
     return result;
   }, [processedData, flattenMode]);
 
+  // 工作量聚合:基于实际数据行(排除分组行),数值求和/平均值
+  const workloadAgg = useMemo(() => {
+    const nums = processedData
+      .map((r) => Number(r.work_load))
+      .filter((n) => Number.isFinite(n));
+    const sum = nums.reduce((acc, n) => acc + n, 0);
+    const avg = nums.length > 0 ? sum / nums.length : 0;
+    return {
+      sum: Number.isFinite(sum) ? Math.round(sum * 100) / 100 : null,
+      avg: Number.isFinite(avg) ? Math.round(avg * 100) / 100 : null,
+      hasData: nums.length > 0,
+    };
+  }, [processedData]);
+
   // colSpan 辅助:分组行首列 colSpan=19(独占一整行),其余列 colSpan=0(隐藏)
   const groupCell = (r: DisplayRow) => ({
     colSpan: r.__isGroup ? 19 : 1,
@@ -381,6 +404,15 @@ export default function WeeklyPlanPage() {
       width: 100,
       align: "center",
       onCell: hiddenCell,
+      // 列头右击:preventDefault 阻止浏览器默认菜单 + 记录坐标 → 自定义 fixed div 菜单。
+      // 不用 antd Dropdown(virtual+sorter 下菜单项 click 会触发排序);左击 th 仍正常排序。
+      onHeaderCell: () => ({
+        onContextMenu: (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setAggMenu({ x: e.clientX, y: e.clientY });
+        },
+      }),
       ...sortableColProps("work_load"),
       render: (v: string | null) => v ?? "—",
     },
@@ -586,8 +618,74 @@ export default function WeeklyPlanPage() {
               order: (s as { order?: "ascend" | "descend" }).order,
             });
           }}
+          summary={
+            weeklyAgg.length > 0
+              ? () => (
+                  <Table.Summary fixed>
+                    <Table.Summary.Row>
+                      <Table.Summary.Cell index={0} colSpan={7}>
+                        合计
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={7} align="center">
+                        <div className="text-xs leading-tight">
+                          {weeklyAgg.includes("sum") && workloadAgg.hasData ? (
+                            <div>
+                              求和:
+                              <br />
+                              <b>{workloadAgg.sum}</b>
+                            </div>
+                          ) : null}
+                          {weeklyAgg.includes("avg") && workloadAgg.hasData ? (
+                            <div>
+                              平均:
+                              <br />
+                              <b>{workloadAgg.avg}</b>
+                            </div>
+                          ) : null}
+                        </div>
+                      </Table.Summary.Cell>
+                    </Table.Summary.Row>
+                  </Table.Summary>
+                )
+              : undefined
+          }
         />
       </SectionCard>
+
+      {/* 工作量列右击聚合菜单(原生 fixed div,不经 antd Dropdown;菜单项 click stopPropagation 不冒泡 th) */}
+      {aggMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-[1049]"
+            onClick={() => setAggMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setAggMenu(null);
+            }}
+          />
+          <div
+            className="fixed z-[1050] min-w-[140px] rounded-lg border border-border bg-background p-1 shadow-md"
+            style={{ left: aggMenu.x, top: aggMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {[
+              { key: "sum", label: "求和" },
+              { key: "avg", label: "求平均值" },
+            ].map((opt) => (
+              <div
+                key={opt.key}
+                className="flex cursor-pointer items-center gap-2 px-4 py-1.5 text-[13px] hover:bg-muted"
+                onClick={() => toggleAgg(opt.key)}
+              >
+                <span className="w-4 text-primary">
+                  {weeklyAgg.includes(opt.key) ? "✓" : ""}
+                </span>
+                {opt.label}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </PageContainer>
   );
 }

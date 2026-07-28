@@ -530,3 +530,75 @@ created_at: 2026-07-21T08:48:56
 根因：① 项目名称列 render 是 button onClick 打开 PpmProjectPlanDetail 抽屉；② create_ps_project_plan 无 project_id 唯一校验，可重复建同一项目的计划。
 方案：① project-plans/page.tsx 项目名称列 button→纯文本 v??—，清理 dead detail（import PpmProjectPlanDetail / DetailState interface / detail state / PpmProjectPlanDetail 组件 共 5 处）；② plan/service.py create_ps_project_plan 开头加 project_id 查重（select PsProjectPlan.id where project_id，已存在 raise PlanError 400「该项目已有项目计划」），前端无需改（createProjectPlan catch ApiError message.error 自动提示）。
 结果：前端 tsc --noEmit 0 error；后端 py_compile OK + ruff All checks passed。
+
+## ql-20260728-008-c7b0 | 2026-07-28 14:19:29 | /ppm/milestone-details 导入校验放宽+预览多选固定列
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/plan/service.py（_to_preview_rows 空责任人 valid=True）+ frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（状态列/rowClassName/多选/handleCommit）+ frontend/src/components/ppm/milestone/import-module-modal.tsx（同步）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：① 导入必填空（责任人空等）允许导入（状态草稿），责任人填了未匹配不可导入；② 预览列表加多选固定列，默认全选，只导选中行（替代全或无）。
+根因：① 后端 _to_preview_rows 空责任人 valid=False 不允许导入；② 预览 Table 无行级多选，只能整 sheet 全导或全不导。
+方案：① 后端 _to_preview_rows 空责任人 valid=True（允许 draft，责任人留空），责任人未匹配 valid=False 保持；前端桌面+移动状态列去 duty_matched 橙（空责任人不再误标红/橙，只看 valid）、rowClassName 只看 !valid；② 桌面+移动 Table 加 rowSelection（行级 checkbox fixed:left，useEffect[visibleRows] 默认全选），handleCommit 按 selectedRowKeys 过滤选中行按 sheet_name 重组 sheets 只传选中行，counts 基于选中行，后端 import_commit 不改（前端传选中行，后端照常按 valid 过滤）。
+结果：前端 tsc --noEmit 0 error（桌面+移动）；后端 ruff format（已合规）+ check All checks passed。
+
+## ql-20260728-009-ad9d | 2026-07-28 16:56:54 | /ppm/milestone-details 导入数据默认序号(当前层级最大 no 往后加)
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/plan/service.py（import_commit 序号逻辑 + _max_numeric_no helper）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：导入的数据给默认序号，在其当前层级最大序号开始往后加。
+根因：import_commit 建新建模块/导入明细时未赋 no 字段，导入数据无序号（与手动建的明细/模块有序号不一致）。
+方案：后端 plan/service.py 加 _max_numeric_no helper（查最大纯数字 no，非数字/None 忽略，无则 0）；import_commit 开头算模块序号起点（plan_node 下 PlanNodeModule max no），新建模块 module_no_next+1 赋 no（merged 模块复用既有序号不赋）；每模块算明细序号起点（module 下 PsPlanNodeDetail max no），导入明细递增赋 no（new 模块明细从 1 起，merged 从该模块 max no+1 起）。
+结果：ruff format（已合规）+ check All checks passed + py_compile OK。
+
+## ql-20260728-010-15a2 | 2026-07-28 19:26:06 | /ppm/weekly-plan 工作量列右击表头聚合(求和/平均值多选)+总结栏
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（工作量列头 Dropdown + workloadAgg + Table summary）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：工作量列头右击弹【求和/求平均值】可多选，选后底部总结栏在该列显示求和/平均值结果。
+根因：weekly-plan 工作量列无聚合能力，无法快速统计总量/均值。
+方案：page.tsx 工作量列 title 改 Dropdown（trigger=contextMenu，menu selectable multiple 求和/平均值，weeklyAgg state 受控）；workloadAgg useMemo 基于 processedData 实际数据行 Number(work_load) 过滤 finite 求和/平均 round 2 位；Table 加 summary（weeklyAgg 非空时 Fixed 底部，前 7 列 colSpan=7「合计」，工作量列 index=7 显示求和/平均值两行）。
+结果：tsc --noEmit 0 error；virtual+多级表头 summary 兼容性待部署验证。
+
+## ql-20260728-011-ee1f | 2026-07-28 19:52:28 | /ppm/weekly-plan 工作量列右击菜单穿透排序修复(ql-010 bug)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（工作量列加 sorter:false）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：修复工作量列右击聚合菜单时点击穿透，导致排序一直触发。
+根因：ql-010 给工作量列 title 加 Dropdown 聚合菜单，但该列还保留 sortableColProps 的 sorter:true，列头 th 响应 click 排序，与右击菜单冲突（点击/右击穿透到排序）。
+方案：工作量列加 sorter:false 覆盖 sortableColProps 的 sorter:true（保留 filters 过滤），列头只右击聚合菜单、不再排序。
+结果：tsc --noEmit 0 error。
+
+## ql-20260728-012-b7b3 | 2026-07-28 20:23:00 | /ppm/weekly-plan 工作量列排序+右击菜单共存(撤销 ql-011 sorter:false)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（恢复 sorter + span onClick stopPropagation）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：工作量列既要能排序又要右击聚合菜单共存（撤销 ql-011 直接关排序的简单处理）。
+根因：ql-011 为修穿透直接 sorter:false 关了排序，但用户实际要排序与右击菜单共存。
+方案：恢复 sortableColProps 的 sorter；title 的 span 加 onClick stopPropagation（左击 title 文字不触发 th 排序，避免误触），antd 排序图标区（th 内 title 旁）仍可左击排序；右击 title 由 Dropdown contextMenu 弹聚合菜单。
+结果：tsc --noEmit 0 error；共存：左击排序图标排序 + 右击 title 弹菜单。
+
+## ql-20260728-013-769f | 2026-07-28 20:38:36 | /ppm/weekly-plan 工作量列排序+右击菜单彻底解耦(ql-012 未解决)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（title 纯文本 + onHeaderCell contextmenu + 受控 Dropdown 挂 body）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：修复点击求和/平均值菜单项仍触发排序（ql-012 的 Dropdown 包 title 方案未解决，菜单项 click 冒泡 th 排序）。
+根因：ql-012 用 Dropdown 包 title，菜单 Portal 可能被 antd 挂到 th 内（或 th click 排序监听范围大），导致菜单项 click 冒泡 th 触发排序；span stopPropagation 拦不住菜单项（菜单在 Portal）。
+方案：彻底 DOM 解耦 —— title 改回纯文本（恢复 sorter 左击 th 正常排序）；onHeaderCell 注入 onContextMenu（preventDefault + stopPropagation + 记录 clientX/Y 到 aggMenu state）；Table 外加受控 Dropdown（open=true，onOpenChange 关闭清坐标，getPopupContainer=body，trigger 是 fixed 定位锚点 pointerEvents:none）。菜单渲染在 body 与 th 完全分离，菜单项 click 不可能冒泡到 th。
+结果：tsc --noEmit 0 error；菜单项 click 不再触发排序（已在 body DOM）；右击列头弹菜单、左击 th 排序共存。
+
+## ql-20260728-014-48cc | 2026-07-28 21:06:14 | /ppm/weekly-plan 工作量列右击菜单弹不出修复(撤回 ql-013)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（撤回 onHeaderCell/受控锚点,Dropdown contextMenu 包 title + getPopupContainer=body + span onClick stopPropagation）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：修复右击工作量列头不弹聚合菜单（ql-013 后右击失效）。
+根因：ql-013 用 onHeaderCell contextmenu + 受控 fixed 锚点 Dropdown（pointerEvents:none），antd Dropdown 因 trigger 锚点不可交互/无尺寸不弹菜单。
+方案：撤回 ql-013（删 onHeaderCell contextmenu + 受控 Dropdown + aggMenu state）；回到 Dropdown contextMenu trigger 包 title span（antd 原生右击正常弹），关键补 getPopupContainer=()=>document.body（菜单挂 body 脱离 th，菜单项 click 不冒泡 th 排序）+ span onClick stopPropagation（左击 title 不触发 th 排序，左击排序图标仍排序）。
+结果：tsc --noEmit 0 error；右击弹菜单 + 菜单项不触发排序 + 左击排序图标排序 三者共存。
+
+## ql-20260728-015-6774 | 2026-07-28 21:29:41 | /ppm/weekly-plan 工作量列右击菜单改原生自定义(antd Dropdown 菜单项 click 仍触发排序)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（撤 antd Dropdown,改原生自定义菜单 + onHeaderCell contextmenu + toggleAgg）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：修复工作量列右击菜单项 click 仍触发排序（ql-014 的 getPopupContainer=body 未解决）。
+根因：antd virtual + sorter 下 Dropdown 菜单项 click 仍触发 th 排序，getPopupContainer=body 无法解决（非 Portal 挂载位置问题，是 antd 事件机制）。
+方案：彻底放弃 antd Dropdown，改原生自定义菜单 —— title 改纯文本恢复 sorter；onHeaderCell 注入 onContextMenu（preventDefault + stopPropagation + 记录坐标 aggMenu）；Table 外自定义 fixed div 菜单（遮罩 inset-0 点外部关闭 + 菜单 div 在右击坐标，菜单项 onClick toggleAgg 切换 weeklyAgg + 菜单 div onClick stopPropagation）。原生 DOM 菜单不经 antd Portal/事件机制，菜单项 click 不可能触发 th 排序。删 Dropdown/Checkbox unused import。
+结果：tsc --noEmit 0 error（修了 onCell 重复属性）；菜单项 click 不可能触发 th 排序（原生 DOM + stopPropagation）。

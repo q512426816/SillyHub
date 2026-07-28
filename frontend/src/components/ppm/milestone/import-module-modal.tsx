@@ -52,6 +52,7 @@ export function ImportModuleModal({
     {},
   );
   const [committing, setCommitting] = useState(false);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
   const [result, setResult] = useState<ImportResultResp | null>(null);
 
   // 每次打开重置状态
@@ -98,6 +99,16 @@ export function ImportModuleModal({
       .filter((s) => checkedSheets[s.name])
       .flatMap((s) => s.rows);
   }, [preview, checkedSheets]);
+
+  // visibleRows 变化(preview 加载/切 sheet)默认全选行
+  useEffect(() => {
+    setSelectedRowKeys(visibleRows.map((r, i) => `${r.sheet_name}-${i}`));
+  }, [visibleRows]);
+
+  // 选中行(按 selectedRowKeys 过滤 visibleRows)
+  const selectedRows = visibleRows.filter((r, i) =>
+    selectedRowKeys.includes(`${r.sheet_name}-${i}`),
+  );
 
   const previewColumns = useMemo<TableProps<ImportPreviewRow>["columns"]>(
     () => [
@@ -187,13 +198,6 @@ export function ImportModuleModal({
               </Tag>
             );
           }
-          if (!row.duty_matched) {
-            return (
-              <Tag color="orange" className="text-[10px]">
-                责任人未匹配
-              </Tag>
-            );
-          }
           return (
             <Tag color="green" className="text-[10px]">
               就绪
@@ -206,19 +210,29 @@ export function ImportModuleModal({
   );
 
   const rowClassName = useCallback((row: ImportPreviewRow) => {
-    return !row.valid || !row.duty_matched ? "bg-red-50" : "";
+    return !row.valid ? "bg-red-50" : "";
   }, []);
 
-  // --- 确认导入:组装勾选 sheet 的 rows 原样回传 ---
+  // --- 确认导入:按选中行重组 sheets(按 sheet_name 分组,只传选中行) ---
   const handleCommit = async () => {
     if (!preview) return;
-    const sheets = preview.sheets
-      .filter((s) => checkedSheets[s.name])
-      .map((s) => ({ name: s.name, plan_type: s.plan_type, rows: s.rows }));
-    if (sheets.length === 0) {
-      message.warning("请至少勾选一个 Sheet");
+    if (selectedRows.length === 0) {
+      message.warning("请至少勾选一行数据");
       return;
     }
+    const bySheet = new Map<string, ImportPreviewRow[]>();
+    for (const r of selectedRows) {
+      const arr = bySheet.get(r.sheet_name) ?? [];
+      arr.push(r);
+      bySheet.set(r.sheet_name, arr);
+    }
+    const sheets = preview.sheets
+      .filter((s) => bySheet.has(s.name))
+      .map((s) => ({
+        name: s.name,
+        plan_type: s.plan_type,
+        rows: bySheet.get(s.name) ?? [],
+      }));
     setCommitting(true);
     try {
       const resp = await importModulesCommit(planNodeId, { sheets });
@@ -239,8 +253,8 @@ export function ImportModuleModal({
     onClose();
   };
 
-  const validCount = visibleRows.filter((r) => r.valid).length;
-  const invalidCount = visibleRows.length - validCount;
+  const validCount = selectedRows.filter((r) => r.valid).length;
+  const invalidCount = selectedRows.length - validCount;
 
   return (
     <Modal
@@ -364,6 +378,11 @@ export function ImportModuleModal({
               pagination={false}
               scroll={{ x: "max-content", y: 320 }}
               rowClassName={rowClassName}
+              rowSelection={{
+                selectedRowKeys,
+                onChange: (keys) => setSelectedRowKeys(keys as string[]),
+                fixed: "left",
+              }}
             />
           </div>
           <div className="mt-2 flex items-center justify-between">
