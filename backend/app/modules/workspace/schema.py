@@ -265,3 +265,37 @@ class UserSearchHit(BaseModel):
 
 class UserSearchResponse(BaseModel):
     items: list[UserSearchHit]
+
+
+# ── PPM 项目 ↔ 工作区 关联 DTO(change 2026-07-28-ppm-project-link-workspace)──
+# 双边对称:工作区侧 POST 带 ppm_project_id,项目侧 POST 带 workspace_id;
+# 各自的 Brief 用于对方维度的列表展示。link_service 构造,两 router 复用。
+
+
+class BindPpmProjectRequest(BaseModel):
+    """工作区侧绑定 PPM 项目的请求体(``POST /workspaces/{id}/ppm-projects``)。"""
+
+    ppm_project_id: uuid.UUID
+
+
+class BindWorkspaceRequest(BaseModel):
+    """项目侧绑定工作区的请求体(``POST /ppm/projects/{id}/workspaces``)。"""
+
+    workspace_id: uuid.UUID
+
+
+class WorkspaceBrief(BaseModel):
+    """项目侧查看关联工作区的摘要(FR-02 展示 name/status/type)。"""
+
+    workspace_id: uuid.UUID
+    name: str
+    status: str
+    type: str | None = None
+
+
+class PpmProjectBrief(BaseModel):
+    """工作区侧查看关联 PPM 项目的摘要(FR-03 展示 project_name/project_status)。"""
+
+    project_id: uuid.UUID
+    project_name: str | None = None
+    project_status: str | None = None
