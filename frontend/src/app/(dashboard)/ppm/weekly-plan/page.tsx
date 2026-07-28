@@ -408,9 +408,12 @@ export default function WeeklyPlanPage() {
             onDeselect: ({ selectedKeys }) => setWeeklyAgg(selectedKeys as string[]),
           }}
         >
+          {/* onClick stopPropagation:左击 title 文字不触发 th 排序(排序仍可点 th 排序图标);
+              右击 contextmenu 由 Dropdown 处理弹聚合菜单 */}
           <span
             className="inline-block cursor-context-menu px-1"
             title="右击选择聚合(求和/平均值)"
+            onClick={(e) => e.stopPropagation()}
           >
             工作量(人天)
           </span>
@@ -422,8 +425,6 @@ export default function WeeklyPlanPage() {
       align: "center",
       onCell: hiddenCell,
       ...sortableColProps("work_load"),
-      // 工作量列关闭排序(列头用于右击聚合菜单,避免 click/右击穿透触发排序)
-      sorter: false,
       render: (v: string | null) => v ?? "—",
     },
     {

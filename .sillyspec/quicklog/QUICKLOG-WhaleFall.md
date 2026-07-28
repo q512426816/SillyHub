@@ -566,3 +566,12 @@ created_at: 2026-07-21T08:48:56
 根因：ql-010 给工作量列 title 加 Dropdown 聚合菜单，但该列还保留 sortableColProps 的 sorter:true，列头 th 响应 click 排序，与右击菜单冲突（点击/右击穿透到排序）。
 方案：工作量列加 sorter:false 覆盖 sortableColProps 的 sorter:true（保留 filters 过滤），列头只右击聚合菜单、不再排序。
 结果：tsc --noEmit 0 error。
+
+## ql-20260728-012-b7b3 | 2026-07-28 20:23:00 | /ppm/weekly-plan 工作量列排序+右击菜单共存(撤销 ql-011 sorter:false)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（恢复 sorter + span onClick stopPropagation）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：工作量列既要能排序又要右击聚合菜单共存（撤销 ql-011 直接关排序的简单处理）。
+根因：ql-011 为修穿透直接 sorter:false 关了排序，但用户实际要排序与右击菜单共存。
+方案：恢复 sortableColProps 的 sorter；title 的 span 加 onClick stopPropagation（左击 title 文字不触发 th 排序，避免误触），antd 排序图标区（th 内 title 旁）仍可左击排序；右击 title 由 Dropdown contextMenu 弹聚合菜单。
+结果：tsc --noEmit 0 error；共存：左击排序图标排序 + 右击 title 弹菜单。
