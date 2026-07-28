@@ -1509,6 +1509,156 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/ppm-projects": {
+      "get": {
+        "tags": [
+          "workspace-ppm-links",
+          "workspace-ppm-links"
+        ],
+        "summary": "List Linked Projects",
+        "description": "列出工作区关联的 PPM 项目(过滤软删除工作区,FR-06)。权限:工作区可见。",
+        "operationId": "list_linked_projects_api_workspaces__workspace_id__ppm_projects_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PpmProjectBrief"
+                  },
+                  "title": "Response List Linked Projects Api Workspaces  Workspace Id  Ppm Projects Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "workspace-ppm-links",
+          "workspace-ppm-links"
+        ],
+        "summary": "Link Project",
+        "description": "绑定 PPM 项目到本工作区。权限:工作区成员管理。\n\n重复绑定 409、目标项目不存在 404(由 link_service 抛)。回读 list 取带\nproject_name/status 的摘要(link_service.bind 返回关联行,摘要需回查项目实体)。",
+        "operationId": "link_project_api_workspaces__workspace_id__ppm_projects_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindPpmProjectRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PpmProjectBrief"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/ppm-projects/{ppm_project_id}": {
+      "delete": {
+        "tags": [
+          "workspace-ppm-links",
+          "workspace-ppm-links"
+        ],
+        "summary": "Unlink Project",
+        "description": "解绑 PPM 项目。权限:工作区成员管理。幂等(不存在静默 204)。",
+        "operationId": "unlink_project_api_workspaces__workspace_id__ppm_projects__ppm_project_id__delete",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "ppm_project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Ppm Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/file/upload": {
       "post": {
         "tags": [
@@ -12934,6 +13084,153 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ppm/projects/{project_id}/workspaces": {
+      "get": {
+        "tags": [
+          "ppm-project"
+        ],
+        "summary": "List Project Workspaces",
+        "description": "列出项目关联的工作区(过滤软删除工作区,FR-06)。权限:登录用户(项目可见)。",
+        "operationId": "list_project_workspaces_api_ppm_projects__project_id__workspaces_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WorkspaceBrief"
+                  },
+                  "title": "Response List Project Workspaces Api Ppm Projects  Project Id  Workspaces Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "ppm-project"
+        ],
+        "summary": "Link Workspace",
+        "description": "绑定工作区到本 PPM 项目。权限:项目 manager(非 manager 403)。\n\n重复绑定 409、目标工作区不存在 404(由 link_service 抛)。回读 list 取带\nname/status/type 的摘要。",
+        "operationId": "link_workspace_api_ppm_projects__project_id__workspaces_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindWorkspaceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceBrief"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ppm/projects/{project_id}/workspaces/{workspace_id}": {
+      "delete": {
+        "tags": [
+          "ppm-project"
+        ],
+        "summary": "Unlink Workspace",
+        "description": "解绑工作区。权限:项目 manager(非 manager 403)。幂等(不存在静默 204)。",
+        "operationId": "unlink_workspace_api_ppm_projects__project_id__workspaces__workspace_id__delete",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -24646,6 +24943,36 @@
         "title": "BatchMetaRequest",
         "description": "批量元数据请求（按 id 列表查 FileMetaResp）。"
       },
+      "BindPpmProjectRequest": {
+        "properties": {
+          "ppm_project_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Ppm Project Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ppm_project_id"
+        ],
+        "title": "BindPpmProjectRequest",
+        "description": "工作区侧绑定 PPM 项目的请求体(``POST /workspaces/{id}/ppm-projects``)。"
+      },
+      "BindWorkspaceRequest": {
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workspace_id"
+        ],
+        "title": "BindWorkspaceRequest",
+        "description": "项目侧绑定工作区的请求体(``POST /ppm/projects/{id}/workspaces``)。"
+      },
       "Body_import_modules_preview_api_ppm_plan_node__plan_node_id__modules_import_preview_post": {
         "properties": {
           "file": {
@@ -34135,6 +34462,43 @@
           "updated_at"
         ],
         "title": "PostmortemResponse"
+      },
+      "PpmProjectBrief": {
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Project Id"
+          },
+          "project_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Name"
+          },
+          "project_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "project_id"
+        ],
+        "title": "PpmProjectBrief",
+        "description": "工作区侧查看关联 PPM 项目的摘要(FR-03 展示 project_name/project_status)。"
       },
       "ProblemChangeCreate": {
         "properties": {
@@ -47102,6 +47466,42 @@
           "agent_type"
         ],
         "title": "WorkerRunResponse"
+      },
+      "WorkspaceBrief": {
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workspace_id",
+          "name",
+          "status"
+        ],
+        "title": "WorkspaceBrief",
+        "description": "项目侧查看关联工作区的摘要(FR-02 展示 name/status/type)。"
       },
       "WorkspaceCreate": {
         "properties": {

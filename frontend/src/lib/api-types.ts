@@ -671,6 +671,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/ppm-projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Linked Projects
+         * @description 列出工作区关联的 PPM 项目(过滤软删除工作区,FR-06)。权限:工作区可见。
+         */
+        get: operations["list_linked_projects_api_workspaces__workspace_id__ppm_projects_get"];
+        put?: never;
+        /**
+         * Link Project
+         * @description 绑定 PPM 项目到本工作区。权限:工作区成员管理。
+         *
+         *     重复绑定 409、目标项目不存在 404(由 link_service 抛)。回读 list 取带
+         *     project_name/status 的摘要(link_service.bind 返回关联行,摘要需回查项目实体)。
+         */
+        post: operations["link_project_api_workspaces__workspace_id__ppm_projects_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/ppm-projects/{ppm_project_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Unlink Project
+         * @description 解绑 PPM 项目。权限:工作区成员管理。幂等(不存在静默 204)。
+         */
+        delete: operations["unlink_project_api_workspaces__workspace_id__ppm_projects__ppm_project_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/file/upload": {
         parameters: {
             query?: never;
@@ -4237,6 +4284,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ppm/projects/{project_id}/workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Project Workspaces
+         * @description 列出项目关联的工作区(过滤软删除工作区,FR-06)。权限:登录用户(项目可见)。
+         */
+        get: operations["list_project_workspaces_api_ppm_projects__project_id__workspaces_get"];
+        put?: never;
+        /**
+         * Link Workspace
+         * @description 绑定工作区到本 PPM 项目。权限:项目 manager(非 manager 403)。
+         *
+         *     重复绑定 409、目标工作区不存在 404(由 link_service 抛)。回读 list 取带
+         *     name/status/type 的摘要。
+         */
+        post: operations["link_workspace_api_ppm_projects__project_id__workspaces_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ppm/projects/{project_id}/workspaces/{workspace_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Unlink Workspace
+         * @description 解绑工作区。权限:项目 manager(非 manager 403)。幂等(不存在静默 204)。
+         */
+        delete: operations["unlink_workspace_api_ppm_projects__project_id__workspaces__workspace_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ppm/plan-node": {
         parameters: {
             query?: never;
@@ -7450,6 +7544,28 @@ export interface components {
         BatchMetaRequest: {
             /** Ids */
             ids?: string[];
+        };
+        /**
+         * BindPpmProjectRequest
+         * @description 工作区侧绑定 PPM 项目的请求体(``POST /workspaces/{id}/ppm-projects``)。
+         */
+        BindPpmProjectRequest: {
+            /**
+             * Ppm Project Id
+             * Format: uuid
+             */
+            ppm_project_id: string;
+        };
+        /**
+         * BindWorkspaceRequest
+         * @description 项目侧绑定工作区的请求体(``POST /ppm/projects/{id}/workspaces``)。
+         */
+        BindWorkspaceRequest: {
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
         };
         /** Body_import_modules_preview_api_ppm_plan_node__plan_node_id__modules_import_preview_post */
         Body_import_modules_preview_api_ppm_plan_node__plan_node_id__modules_import_preview_post: {
@@ -11025,6 +11141,21 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /**
+         * PpmProjectBrief
+         * @description 工作区侧查看关联 PPM 项目的摘要(FR-03 展示 project_name/project_status)。
+         */
+        PpmProjectBrief: {
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Project Name */
+            project_name?: string | null;
+            /** Project Status */
+            project_status?: string | null;
         };
         /** ProblemChangeCreate */
         ProblemChangeCreate: {
@@ -15312,6 +15443,23 @@ export interface components {
             error_code?: string | null;
         };
         /**
+         * WorkspaceBrief
+         * @description 项目侧查看关联工作区的摘要(FR-02 展示 name/status/type)。
+         */
+        WorkspaceBrief: {
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
+            /** Type */
+            type?: string | null;
+        };
+        /**
          * WorkspaceCreate
          * @description Request body for ``POST /api/workspaces``.
          *
@@ -16914,6 +17062,102 @@ export interface operations {
                         [key: string]: unknown;
                     };
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_linked_projects_api_workspaces__workspace_id__ppm_projects_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PpmProjectBrief"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    link_project_api_workspaces__workspace_id__ppm_projects_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BindPpmProjectRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PpmProjectBrief"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unlink_project_api_workspaces__workspace_id__ppm_projects__ppm_project_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                ppm_project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -23602,6 +23846,102 @@ export interface operations {
             header?: never;
             path: {
                 entity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_project_workspaces_api_ppm_projects__project_id__workspaces_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceBrief"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    link_workspace_api_ppm_projects__project_id__workspaces_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BindWorkspaceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceBrief"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unlink_workspace_api_ppm_projects__project_id__workspaces__workspace_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                workspace_id: string;
             };
             cookie?: never;
         };
