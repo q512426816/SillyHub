@@ -539,3 +539,12 @@ created_at: 2026-07-21T08:48:56
 根因：① 后端 _to_preview_rows 空责任人 valid=False 不允许导入；② 预览 Table 无行级多选，只能整 sheet 全导或全不导。
 方案：① 后端 _to_preview_rows 空责任人 valid=True（允许 draft，责任人留空），责任人未匹配 valid=False 保持；前端桌面+移动状态列去 duty_matched 橙（空责任人不再误标红/橙，只看 valid）、rowClassName 只看 !valid；② 桌面+移动 Table 加 rowSelection（行级 checkbox fixed:left，useEffect[visibleRows] 默认全选），handleCommit 按 selectedRowKeys 过滤选中行按 sheet_name 重组 sheets 只传选中行，counts 基于选中行，后端 import_commit 不改（前端传选中行，后端照常按 valid 过滤）。
 结果：前端 tsc --noEmit 0 error（桌面+移动）；后端 ruff format（已合规）+ check All checks passed。
+
+## ql-20260728-009-ad9d | 2026-07-28 16:56:54 | /ppm/milestone-details 导入数据默认序号(当前层级最大 no 往后加)
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/ppm/plan/service.py（import_commit 序号逻辑 + _max_numeric_no helper）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：导入的数据给默认序号，在其当前层级最大序号开始往后加。
+根因：import_commit 建新建模块/导入明细时未赋 no 字段，导入数据无序号（与手动建的明细/模块有序号不一致）。
+方案：后端 plan/service.py 加 _max_numeric_no helper（查最大纯数字 no，非数字/None 忽略，无则 0）；import_commit 开头算模块序号起点（plan_node 下 PlanNodeModule max no），新建模块 module_no_next+1 赋 no（merged 模块复用既有序号不赋）；每模块算明细序号起点（module 下 PsPlanNodeDetail max no），导入明细递增赋 no（new 模块明细从 1 起，merged 从该模块 max no+1 起）。
+结果：ruff format（已合规）+ check All checks passed + py_compile OK。

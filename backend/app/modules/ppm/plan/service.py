@@ -1690,6 +1690,12 @@ class PlanService:
         module_id_of: dict[str, uuid.UUID] = {}
         done_details: list[PsPlanNodeDetail] = []
 
+        # 序号起点:plan_node 下模块最大数值 no(新建模块递增);明细序号按模块分别起点
+        module_no_next = await self._max_numeric_no(
+            select(PlanNodeModule.no).where(PlanNodeModule.plan_node_id == node_uuid)
+        )
+        detail_no_next: dict[uuid.UUID, int] = {}
+
         for key, rows in groups.items():
             existing_id = await self._find_existing_module(node_uuid, key)
             if existing_id is not None:
@@ -1697,18 +1703,29 @@ class PlanService:
                 module_id_of[key] = existing_id
                 merged_modules += 1
             else:
+                module_no_next += 1
                 new_module = self._build_module(
                     node_uuid=node_uuid,
                     module_name=key,
                     plan_type=sheet_plan_type[key],
                     rows=rows,
                 )
+                new_module.no = str(module_no_next)
                 self._session.add(new_module)
                 module_id_of[key] = new_module.id
                 created_modules += 1
 
+            # 明细序号起点(该模块当前最大数值 no)
+            if module_id_of[key] not in detail_no_next:
+                detail_no_next[module_id_of[key]] = await self._max_numeric_no(
+                    select(PsPlanNodeDetail.no).where(
+                        PsPlanNodeDetail.module_id == module_id_of[key]
+                    )
+                )
+
             # 3. 逐行建明细 (必填字段齐全→done, 缺失→draft)
             for row in rows:
+                detail_no_next[module_id_of[key]] += 1
                 # 必填字段: 明细阶段/任务主题/任务描述/工作量/开始/结束/执行人
                 required_filled = all(
                     [
@@ -1725,6 +1742,7 @@ class PlanService:
                     id=uuid.uuid4(),
                     plan_node_id=node_uuid,
                     module_id=module_id_of[key],
+                    no=str(detail_no_next[module_id_of[key]]),
                     detailed_stage=row.detailed_stage,
                     task_theme=row.task_theme,
                     task_description=row.task_description,
@@ -1770,6 +1788,18 @@ class PlanService:
             PlanNodeModule.module_name == target,
         )
         return await self._session.scalar(stmt)
+
+    async def _max_numeric_no(self, stmt: Select) -> int:
+        """查最大数值序号(仅纯数字 no,非数字/None 忽略;无 → 0)。
+
+        导入赋默认序号用:模块(plan_node 层级)/明细(module 层级)各取当前最大 + 递增。
+        """
+        result = await self._session.execute(stmt)
+        max_no = 0
+        for (no,) in result.all():
+            if no and re.fullmatch(r"\d+", str(no).strip()):
+                max_no = max(max_no, int(str(no).strip()))
+        return max_no
 
     @staticmethod
     def _build_module(
