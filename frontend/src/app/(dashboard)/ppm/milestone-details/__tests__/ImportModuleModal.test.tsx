@@ -142,7 +142,7 @@ function mkPreview(): ImportPreviewResp {
             error: "模块名称缺失",
           },
           {
-            // duty 未匹配 → duty_matched=false(但 valid 可能仍 true,后端按业务定)
+            // duty 未匹配 → 后端 valid=False + error(ql-008 校验:责任人填了未匹配不可导入)
             sheet_name: "临时Sheet",
             plan_type: "临时计划",
             module_name: "临时支撑",
@@ -156,8 +156,8 @@ function mkPreview(): ImportPreviewResp {
             duty_unmatched_note: null,
             plan_begin_time: "2026-07-15",
             plan_complete_time: "2026-07-16",
-            valid: true,
-            error: null,
+            valid: false,
+            error: "责任人未匹配: 未知用户",
           },
         ],
       },
@@ -248,8 +248,8 @@ describe("ImportModuleModal — 三态导入流程 (task-12 / FR-008)", () => {
     await uploadFile(new File(["x"], "m.xlsx"));
     await screen.findByText("① 勾选要导入的 Sheet");
 
-    // duty 未匹配行:状态列渲染「责任人未匹配」Tag 文案
-    expect(screen.getByText("责任人未匹配")).toBeInTheDocument();
+    // duty 未匹配行:valid=false,状态列渲染红 Tag(文案=error 含未匹配人)
+    expect(screen.getByText("责任人未匹配: 未知用户")).toBeInTheDocument();
     // valid=false 行:状态列渲染错误 Tag(文案=error)
     expect(screen.getByText("模块名称缺失")).toBeInTheDocument();
 

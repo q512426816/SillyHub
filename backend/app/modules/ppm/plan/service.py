@@ -1600,7 +1600,7 @@ class PlanService:
             plan_complete_time=_date_to_datetime(row.plan_complete),
         )
 
-        # 空责任人 → 1 条标红
+        # 空责任人 → 允许导入(必填放宽,状态草稿;责任人留空,可导入后补)
         if not duty_names:
             return [
                 ImportPreviewRow(
@@ -1608,8 +1608,8 @@ class PlanService:
                     duty_user_id=None,
                     duty_matched=False,
                     duty_unmatched_note=None,
-                    valid=False,
-                    error="责任人未填写",
+                    valid=True,
+                    error=None,
                     **base,
                 )
             ]
