@@ -557,3 +557,12 @@ created_at: 2026-07-21T08:48:56
 根因：weekly-plan 工作量列无聚合能力，无法快速统计总量/均值。
 方案：page.tsx 工作量列 title 改 Dropdown（trigger=contextMenu，menu selectable multiple 求和/平均值，weeklyAgg state 受控）；workloadAgg useMemo 基于 processedData 实际数据行 Number(work_load) 过滤 finite 求和/平均 round 2 位；Table 加 summary（weeklyAgg 非空时 Fixed 底部，前 7 列 colSpan=7「合计」，工作量列 index=7 显示求和/平均值两行）。
 结果：tsc --noEmit 0 error；virtual+多级表头 summary 兼容性待部署验证。
+
+## ql-20260728-011-ee1f | 2026-07-28 19:52:28 | /ppm/weekly-plan 工作量列右击菜单穿透排序修复(ql-010 bug)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（工作量列加 sorter:false）+ .sillyspec/docs/SillyHub/modules/ppm.md（变更索引）
+需求：修复工作量列右击聚合菜单时点击穿透，导致排序一直触发。
+根因：ql-010 给工作量列 title 加 Dropdown 聚合菜单，但该列还保留 sortableColProps 的 sorter:true，列头 th 响应 click 排序，与右击菜单冲突（点击/右击穿透到排序）。
+方案：工作量列加 sorter:false 覆盖 sortableColProps 的 sorter:true（保留 filters 过滤），列头只右击聚合菜单、不再排序。
+结果：tsc --noEmit 0 error。

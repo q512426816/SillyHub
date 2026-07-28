@@ -422,6 +422,8 @@ export default function WeeklyPlanPage() {
       align: "center",
       onCell: hiddenCell,
       ...sortableColProps("work_load"),
+      // 工作量列关闭排序(列头用于右击聚合菜单,避免 click/右击穿透触发排序)
+      sorter: false,
       render: (v: string | null) => v ?? "—",
     },
     {
