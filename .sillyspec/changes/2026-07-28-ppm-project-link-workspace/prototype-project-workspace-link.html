@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>项目↔工作区 关联(A阶段)线框原型</title>
+<style>
+  body{font-family:-apple-system,"Microsoft YaHei",sans-serif;background:#f5f5f5;margin:0;padding:24px;color:#222}
+  h1{font-size:18px;margin:0 0 4px}
+  h2{font-size:14px;margin:0 0 8px;color:#555;border-left:3px solid #4f46e5;padding-left:8px}
+  .wrap{display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:1100px;margin-top:14px}
+  .panel{background:#fff;border:1px solid #ddd;border-radius:8px;padding:16px}
+  .note{font-size:12px;color:#888;margin:4px 0 12px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{border:1px solid #e5e5e5;padding:6px 8px;text-align:left}
+  th{background:#fafafa;font-weight:600}
+  .btn{display:inline-block;padding:3px 10px;background:#4f46e5;color:#fff;border-radius:4px;font-size:12px;cursor:pointer;margin-right:4px}
+  .btn.ghost{background:#fff;color:#4f46e5;border:1px solid #4f46e5}
+  .btn.danger{background:#fff;color:#dc2626;border:1px solid #dc2626}
+  .modal{margin-top:14px;border:1px dashed #4f46e5;border-radius:6px;padding:12px;background:#fafaff}
+  .modal h3{margin:0 0 8px;font-size:13px}
+  .sub{font-size:12px;color:#666;margin:10px 0 4px;font-weight:600}
+  .chip{display:inline-block;background:#eef;padding:3px 8px;border-radius:10px;font-size:12px;margin:2px}
+  .chip .x{color:#dc2626;cursor:pointer;margin-left:4px}
+  .badge{font-size:11px;padding:1px 6px;border-radius:8px;background:#dcfce7;color:#166534}
+  .badge.pause{background:#fef9c3;color:#854d0e}
+  input{width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box}
+  .foot{font-size:12px;color:#888;margin-top:18px;max-width:1100px}
+</style>
+</head>
+<body>
+<h1>项目 ↔ 工作区 关联(A阶段)线框原型</h1>
+<div class="note">多对多 · 两边都能绑定/解绑 · 绑定后互相可见(名/状态)。同一张关联表,两边操作同一份数据,自动一致。</div>
+
+<div class="wrap">
+
+  <!-- 项目维护页 -->
+  <div class="panel">
+    <h2>① 项目维护页(/ppm/projects)</h2>
+    <div class="note">项目列表每行加「关联工作区」按钮,点开弹窗管理。</div>
+    <table>
+      <tr><th>项目编号</th><th>项目名称</th><th>状态</th><th>工作区</th><th>操作</th></tr>
+      <tr><td>P-001</td><td>XX研发项目</td><td><span class="badge">进行中</span></td><td>2 个</td><td><span class="btn">关联工作区</span></td></tr>
+      <tr><td>P-002</td><td>YY实施项目</td><td><span class="badge pause">已暂停</span></td><td>0 个</td><td><span class="btn">关联工作区</span></td></tr>
+    </table>
+    <div class="modal">
+      <h3>关联工作区 — XX研发项目(P-001)</h3>
+      <div class="sub">已关联(点 ✕ 解绑)</div>
+      <span class="chip">multi-agent-platform [active] <span class="x">✕</span></span>
+      <span class="chip">前端仓库 [active] <span class="x">✕</span></span>
+      <div class="sub">可绑定的工作区</div>
+      <span class="chip">守护进程仓库 <span class="btn ghost" style="padding:1px 6px">+ 绑定</span></span>
+      <span class="chip">测试仓库 <span class="btn ghost" style="padding:1px 6px">+ 绑定</span></span>
+      <div style="margin-top:10px"><span class="btn">完成</span> <span class="btn ghost">取消</span></div>
+    </div>
+  </div>
+
+  <!-- 工作区详情页 -->
+  <div class="panel">
+    <h2>② 工作区详情页(/workspaces/[id])</h2>
+    <div class="note">详情页加「关联项目」区块,对称操作。</div>
+    <div class="sub">当前工作区:multi-agent-platform [active]</div>
+    <table>
+      <tr><th>项目编号</th><th>项目名称</th><th>状态</th><th>操作</th></tr>
+      <tr><td>P-001</td><td>XX研发项目</td><td><span class="badge">进行中</span></td><td><span class="btn danger">解绑</span></td></tr>
+    </table>
+    <div class="modal">
+      <h3>+ 绑定项目到本工作区</h3>
+      <input type="text" placeholder="搜索项目名 / 编号…">
+      <div style="margin-top:8px">
+        <span class="chip">P-002 YY实施项目 <span class="btn ghost" style="padding:1px 6px">+ 绑定</span></span>
+        <span class="chip">P-003 ZZ运维项目 <span class="btn ghost" style="padding:1px 6px">+ 绑定</span></span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="foot">
+  <b>说明:</b> 关联是同一张表 <code>ppm_project_workspace</code>,①②两边操作同一份数据,自动一致。<br>
+  <b>本阶段不做:</b> 「项目里开 AI 会话」的入口和界面(那是 B 阶段,依赖本关联)。本阶段只把「项目和谁关联」管好。
+</div>
+</body>
+</html>
