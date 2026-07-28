@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 from urllib.parse import urlparse
 
 import httpx
@@ -27,6 +28,17 @@ from app.modules.llm_provider.schema import (
     LlmProviderCreate,
     LlmProviderRead,
     LlmProviderUpdate,
+    UsageData,
+    UsageResult,
+)
+from app.modules.llm_provider.usage_handlers import (
+    UsageUpstreamError,
+    query_deepseek,
+    query_kimi,
+    query_minimax,
+    query_openrouter,
+    query_siliconflow,
+    query_zhipu,
 )
 from app.modules.tool_gateway.tool_policy import SsrfBlocked, ToolPolicyService
 
@@ -81,6 +93,32 @@ class LlmProviderSsrfBlocked(AppError):
 
     code = "HTTP_400_LLM_PROVIDER_SSRF_BLOCKED"
     http_status = 400
+
+
+# ── usage 查询错误分类（task-03 / D-005）──────────────────────────────────────
+
+
+class LlmProviderUsageTransient(AppError):
+    """用量查询瞬时失败（网络 / 5xx / 429 / 超时 / 读体中断）→ 5xx。
+
+    前端见 5xx → 保留上次成功值 10 分钟（D-005）。本类仅在 service 层 raise，
+    router 不 try/except，自然冒泡交全局异常处理器转 5xx（同 fetch-models 范式）。
+    """
+
+    code = "HTTP_502_LLM_PROVIDER_USAGE_TRANSIENT"
+    http_status = 502
+
+
+# detect_provider(base_url) 路由键 → 各家硬编码 handler（task-02 产出）。
+# detect 不加 DB 字段，纯 base_url 子串匹配（D-004）。
+_USAGE_HANDLERS: dict[str, Callable[[httpx.AsyncClient, str, str], Awaitable[list[UsageData]]]] = {
+    "deepseek": query_deepseek,
+    "siliconflow": query_siliconflow,
+    "openrouter": query_openrouter,
+    "kimi": query_kimi,
+    "zhipu": query_zhipu,
+    "minimax": query_minimax,
+}
 
 
 class LlmProviderService:
@@ -271,6 +309,7 @@ class LlmProviderService:
 
     _FETCH_TIMEOUT: float = 10.0  # NFR-03：上游 /v1/models 超时 10s
     _STRIP_SUFFIXES: tuple[str, ...] = ("/anthropic", "/compatibility", "/api")
+    _USAGE_TIMEOUT: float = 15.0  # 用量查询上游超时 15s（task-03）
 
     async def fetch_models(
         self,
@@ -466,3 +505,133 @@ class LlmProviderService:
                 )
             )
         return FetchModelsResponse(models=models)
+
+    # ── usage 查询（task-03 / D-002/D-004/D-005/D-009）───────────────────────────
+
+    async def query_usage(
+        self,
+        provider_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> UsageResult:
+        """查供应商用量（余额 / 套餐额度），后端代查（D-002）。
+
+        无状态查询（design §8 豁免生命周期契约）：解密 api_key + ``_detect_usage_provider``
+        按 base_url 路由（D-004，不加 DB 字段）→ task-02 handler → 统一 ``UsageResult``。
+        明文 key 仅局部变量，永不入响应 / 日志（NFR-02，同 fetch-models）。
+
+        错误两态（D-005）：
+        - 瞬时（网络 / 5xx / 429 / 超时 / 读体中断）→ ``raise LlmProviderUsageTransient``
+          （5xx，router 不吞，前端保留上次成功值 10 分钟）；
+        - 确定性（401/403 鉴权 → ``success:false`` + ``is_valid:False`` 翻红；404/空 key /
+          未知供应商 / 解析失败 / 业务错 / SSRF → ``success:false`` 灰提示）。
+        """
+        row = await self.get(provider_id, user_id)  # owner 校验：跨用户 404/403 不泄漏
+
+        api_key_plain = self._cipher.decrypt(row.encrypted_api_key, row.key_id)
+        base_url = row.base_url or ""
+        if not base_url or not api_key_plain:
+            return UsageResult(success=False, error="缺少 base_url 或 API Key，无法查询用量")
+
+        provider = self._detect_usage_provider(base_url)
+        if provider is None:
+            return UsageResult(success=False, error="该供应商暂不支持余额查询")
+        handler = _USAGE_HANDLERS[provider]
+
+        # SSRF（D-009）：6 家用量端点均与 base_url 同 host，故对 base_url 的 host 做一次
+        # assert_public_hostname 即覆盖。复用 fetch-models 范式（IPv4 + IPv6 + getaddrinfo
+        # 包 asyncio.to_thread 防阻塞事件循环）。
+        host = urlparse(base_url).hostname or ""
+        try:
+            await ToolPolicyService.assert_public_hostname(host)
+        except SsrfBlocked:
+            return UsageResult(success=False, error="上游地址被安全策略拒绝")
+
+        try:
+            async with httpx.AsyncClient(timeout=self._USAGE_TIMEOUT) as client:
+                tiers = await handler(client, base_url, api_key_plain)
+        except httpx.TimeoutException as exc:
+            raise LlmProviderUsageTransient(
+                "用量查询超时，请稍后重试。",
+                details={"provider": provider, "timeout_seconds": self._USAGE_TIMEOUT},
+            ) from exc
+        except httpx.HTTPError as exc:
+            # 连接 / 协议错（DNS 失败、连接拒绝、TLS、读体中断）：瞬时
+            raise LlmProviderUsageTransient(
+                "用量查询暂时不可用，请稍后重试。",
+                details={"provider": provider, "kind": type(exc).__name__},
+            ) from exc
+        except UsageUpstreamError as exc:
+            return self._classify_usage_upstream_error(provider, exc)
+
+        return UsageResult(success=True, data=tiers, error=None)
+
+    @staticmethod
+    def _classify_usage_upstream_error(
+        provider: str,
+        exc: UsageUpstreamError,
+    ) -> UsageResult:
+        """把 task-02 的 ``UsageUpstreamError`` 翻译成两态 ``UsageResult``（D-005）。
+
+        - 401/403 → 确定性鉴权失败：``data=[{is_valid:False}]``（前端翻红）；
+        - 429 / 5xx → **raise** ``LlmProviderUsageTransient``（瞬时，前端保留上次值）；
+        - 其它 4xx / 解析失败 / 业务错（``status_code=None``）→ 确定性灰提示。
+
+        上游 body 仅记 debug 日志（不含 api_key），**不**回传前端（防上游回显泄漏）。
+        本方法对瞬时分支会 raise 而非 return，调用方 ``except`` 块据此传播。
+        """
+        status = exc.status_code
+        if status in (401, 403):
+            log.info(
+                "llm_provider.usage_auth_failed",
+                provider=provider,
+                status=status,
+            )
+            return UsageResult(
+                success=False,
+                data=[
+                    UsageData(
+                        is_valid=False,
+                        invalid_message="鉴权失败，请检查 API Key",
+                    )
+                ],
+                error=f"上游鉴权失败（HTTP {status}）",
+            )
+        if status is not None and (status == 429 or status >= 500):
+            raise LlmProviderUsageTransient(
+                "用量查询暂时不可用，请稍后重试。",
+                details={"provider": provider, "status": status},
+            )
+        # 确定性：404/400/解析失败/业务错 → 灰提示（文案安全，不含上游 body）
+        log.warning(
+            "llm_provider.usage_upstream_error",
+            provider=provider,
+            status=status,
+        )
+        if status is None:
+            return UsageResult(success=False, error="用量查询失败：上游响应异常")
+        return UsageResult(success=False, error=f"用量查询失败（HTTP {status}）")
+
+    @staticmethod
+    def _detect_usage_provider(base_url: str) -> str | None:
+        """按 base_url 子串路由 balance/token_plan（照 cc-switch balance.rs:26 /
+        coding_plan.rs:25，D-004 不加 DB 字段）。
+
+        - DeepSeek / 硅基（.cn/.com）/ OpenRouter → balance；
+        - Kimi（api.kimi.com，Kimi 与 Kimi For Coding 同 coding 端点）/ 智谱
+          （bigmodel.cn / api.z.ai）/ MiniMax（.cn/.io）→ token_plan；
+        - 其余（含 api.moonshot.cn 通用 Kimi、百炼、Anthropic 官方）→ None（不支持）。
+        """
+        url = (base_url or "").lower()
+        if "api.deepseek.com" in url:
+            return "deepseek"
+        if "siliconflow.cn" in url or "siliconflow.com" in url:
+            return "siliconflow"
+        if "openrouter.ai" in url:
+            return "openrouter"
+        if "api.kimi.com" in url:
+            return "kimi"
+        if "bigmodel.cn" in url or "api.z.ai" in url:
+            return "zhipu"
+        if "api.minimaxi.com" in url or "api.minimax.io" in url:
+            return "minimax"
+        return None

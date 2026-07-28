@@ -23,6 +23,7 @@ from app.modules.llm_provider.schema import (
     LlmProviderList,
     LlmProviderRead,
     LlmProviderUpdate,
+    UsageResult,
 )
 from app.modules.llm_provider.service import LlmProviderService
 
@@ -81,6 +82,30 @@ async def fetch_provider_models(
     """
     service = LlmProviderService(session)
     return await service.fetch_models(user.id, data)
+
+
+@router.post("/{provider_id}/usage", response_model=UsageResult)
+async def query_provider_usage(
+    provider_id: str,
+    session: SessionDep,
+    user: CurrentUser,
+) -> UsageResult:
+    """查供应商用量（余额 / 套餐额度），design §5.2 D-002/D-005。
+
+    owner 级（``get_current_user`` + service 内 user_id 过滤，跨用户 → 404/403 不泄漏，
+    同 fetch-models/get_provider 范式）。无状态查询（POST 仅因复用路径参数，design §8
+    豁免生命周期契约）。
+
+    - 200 ``UsageResult{success:true, data}``：多 tier 余额 / 额度；
+    - 200 ``UsageResult{success:false}``：确定性失败（鉴权翻红带 ``is_valid:False`` /
+      不支持 / 解析错 / SSRF）；
+    - 5xx：瞬时失败（网络 / 5xx / 429 / 超时）经 service raise ``AppError`` 自然冒泡，
+      本层不 try/except（同 fetch-models），前端保留上次成功值 10 分钟。
+
+    响应无 api_key 字段（NFR-02）。
+    """
+    service = LlmProviderService(session)
+    return await service.query_usage(_parse_id(provider_id), user.id)
 
 
 @router.get("/{provider_id}", response_model=LlmProviderRead)

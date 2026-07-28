@@ -229,6 +229,78 @@ export async function fetchProviderModels(
   );
 }
 
+// ── usage 查询（task-06 / D-002/D-005）──────────────────────────────────────
+
+/** 用量查询类型（balance=账户余额绝对额 / token_plan=套餐额度百分比）。 */
+export type LlmProviderUsageType = "balance" | "token_plan";
+
+/**
+ * 单条用量 tier（一个套餐窗口一条；对齐后端 `UsageData`）。
+ * - balance：total/used/remaining = 金额，unit="CNY"/"USD"；
+ * - token_plan：total=100，remaining=剩余百分比，used=已用百分比，unit="%"；
+ * - is_valid=false → 凭据失效，前端翻红（invalid_message 为原因）；
+ * - plan_name：套餐名 / 币种 / 窗口名；extra：重置时间等附加信息。
+ */
+export interface UsageData {
+  plan_name?: string | null;
+  extra?: string | null;
+  is_valid?: boolean | null;
+  invalid_message?: string | null;
+  total?: number | null;
+  used?: number | null;
+  remaining?: number | null;
+  unit?: string | null;
+}
+
+/**
+ * 用量查询统一返回（D-005 两态）。
+ * - success=true + data：多 tier 余额/额度；
+ * - success=false + data=[{is_valid:false}]：确定性鉴权失效（前端翻红）；
+ * - success=false + error：暂不支持 / SSRF / 解析错 / HTTP（前端灰提示）；
+ * - 瞬时（网络 / 5xx / 429 / 超时）：后端 raise 5xx → `apiFetch` 抛 `ApiError`，
+ *   调用方（UsageFooter）保留上次成功值 10 分钟（keep-last-good）。
+ */
+export interface UsageResult {
+  success: boolean;
+  data?: UsageData[] | null;
+  error?: string | null;
+}
+
+/**
+ * 查供应商用量（`POST /api/llm-providers/{id}/usage`）。
+ * - 200 success=true → 返回 tiers；
+ * - 200 success=false → 鉴权失效（data[0].is_valid=false）/ 暂不支持（error）等确定性失败；
+ * - 5xx / 网络 / 超时 → 抛 `ApiError`（调用方保留上次值）。
+ * 请求不带明文 key（后端按 id 解密）；响应无 api_key 字段（NFR-02）。
+ */
+export async function queryUsage(providerId: string): Promise<UsageResult> {
+  return apiFetch<UsageResult>(
+    `/api/llm-providers/${encodeURIComponent(providerId)}/usage`,
+    { method: "POST" },
+  );
+}
+
+/**
+ * 客户端 base_url → 用量类型探测（镜像后端 `_detect_usage_provider`，D-004 不加 DB 字段）。
+ * **纯 UX 用途**：决定行级 💰 徽标 / 是否渲染用量条 / 是否发起查询；后端 detect 才是安全
+ * 真相（本函数错判只会多/少发一次查询，后端兜底 success=false「暂不支持」）。
+ * 子串规则与后端逐字一致：DeepSeek / 硅基(.cn/.com) / OpenRouter → balance；
+ * Kimi(api.kimi.com) / 智谱(bigmodel.cn|api.z.ai) / MiniMax(.cn/.io) → token_plan。
+ */
+export function detectUsageProvider(
+  baseUrl: string | null | undefined,
+): LlmProviderUsageType | null {
+  const u = (baseUrl ?? "").toLowerCase();
+  if (!u) return null;
+  if (u.includes("api.deepseek.com")) return "balance";
+  if (u.includes("siliconflow.cn") || u.includes("siliconflow.com")) return "balance";
+  if (u.includes("openrouter.ai")) return "balance";
+  if (u.includes("api.kimi.com")) return "token_plan";
+  if (u.includes("bigmodel.cn") || u.includes("api.z.ai")) return "token_plan";
+  if (u.includes("api.minimaxi.com") || u.includes("api.minimax.io")) return "token_plan";
+  return null;
+}
+
 // ── 表单值 → 请求 body 映射（单一真实源，表单 + 单测共用）──────────────────
 
 /** 去前后空白；空串 → undefined。 */

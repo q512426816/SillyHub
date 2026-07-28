@@ -15,6 +15,8 @@ import {
   type LlmProviderRoleMapping,
 } from "@/lib/api/llm-providers";
 import { errMessage } from "@/lib/errors";
+import { PRESETS_BY_CATEGORY, type LlmProviderPreset } from "@/config/llmProviderPresets";
+import { cn } from "@/lib/utils";
 import { ModelInputWithFetch, type FetchedModel } from "./model-input-with-fetch";
 
 /**
@@ -156,6 +158,9 @@ export function LlmProviderForm({
     }
     return "{}";
   });
+
+  // 预设选择器：当前选中的预设 key（null=自定义/未选）；仅新建模式渲染（task-07 / D-001）。
+  const [selectedPresetKey, setSelectedPresetKey] = useState<string | null>(null);
 
   // 4 角色共用的上游模型列表（D-003：全局一个获取按钮，一次请求供 4 角色复用）。
   const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
@@ -466,6 +471,61 @@ export function LlmProviderForm({
     setSettingsConfigJson(JSON.stringify(cfg, null, 2));
   };
 
+  /**
+   * 套用预设（task-07 / D-001）：一键预填 name / base_url / auth_field /
+   * default_fallback_model / website_url / settings_config（settings_config_partial
+   * 序列化为美化 JSON，复用既有单一真相）+ 角色映射（default_model 套用到全部 4 角色，
+   * 照 handleAutoFill 范式）；**api_key 始终留空**给用户填（永不预填明文 token）。
+   * 仅新建模式调用（编辑模式不渲染选择器，避免覆盖既有配置）。
+   */
+  const applyPreset = (preset: LlmProviderPreset): void => {
+    setSelectedPresetKey(preset.key);
+    setName(preset.name);
+    setBaseUrl(preset.base_url);
+    setAuthField(preset.auth_field);
+    setDefaultFallbackModel(preset.default_model ?? "");
+    setWebsiteUrl(preset.website_url);
+    setApiKey("");
+    try {
+      setSettingsConfigJson(
+        JSON.stringify(preset.settings_config_partial ?? {}, null, 2),
+      );
+    } catch {
+      setSettingsConfigJson("{}");
+    }
+    // default_model 套用到全部 4 角色（照 handleAutoFill 范式；无 default_model 则清空）。
+    const model = preset.default_model ?? "";
+    const nextRoles: Record<string, RoleRowState> = {};
+    for (const r of ROLE_ROWS) {
+      const cur: RoleRowState = roleRows[r.key] ?? {
+        display: "",
+        model: "",
+        one_m: false,
+      };
+      nextRoles[r.key] = { ...cur, model };
+    }
+    setRoleRows(nextRoles);
+    setNotice({
+      kind: "ok",
+      msg: `✓ 已套用「${preset.name}」预设，请填写 API Key 后保存。`,
+    });
+  };
+
+  /** 「＋自定义」重置为空表单（task-07 / D-001）。 */
+  const resetToCustom = (): void => {
+    setSelectedPresetKey(null);
+    setName("");
+    setBaseUrl("");
+    setDefaultFallbackModel("");
+    setWebsiteUrl("");
+    setApiKey("");
+    setAuthField("ANTHROPIC_AUTH_TOKEN");
+    setRoleRows(initRoleRows(null));
+    setEnvRows(initEnvRows(null));
+    setSettingsConfigJson("{}");
+    setNotice(null);
+  };
+
   // 新建：必须填名称 + api_key；编辑：必须填名称，api_key 可空（保持原密钥）。
   const nameMissing = name.trim() === "";
   const apiKeyMissing = !isEdit && apiKey.trim() === "";
@@ -473,6 +533,63 @@ export function LlmProviderForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
+      {/* 预设选择器（task-07 / D-001）：仅新建模式；点预设一键预填，点「＋自定义」清空。
+          💰 标记 = 该预设支持余额查询（后端 detect 可路由），不带的（Anthropic 官方 /
+          Kimi=moonshot / 百炼 / Bailian For Coding）查不了。 */}
+      {!isEdit && (
+        <div className="rounded-lg border border-dashed border-input/70 bg-muted/20 p-2.5">
+          <div className={lblCls}>从预设快速开始（可选，点一下自动填好表单）</div>
+          <div className="mt-1.5 space-y-1.5">
+            {PRESETS_BY_CATEGORY.map((group) => (
+              <div key={group.category}>
+                <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+                  {group.label}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {group.items.map((p) => {
+                    const selected = selectedPresetKey === p.key;
+                    return (
+                      <button
+                        key={p.key}
+                        type="button"
+                        onClick={() => applyPreset(p)}
+                        title={p.usage ? "支持余额查询" : undefined}
+                        aria-pressed={selected}
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors",
+                          selected
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-input bg-background hover:bg-muted",
+                        )}
+                      >
+                        <span>{p.name}</span>
+                        {p.usage && <span aria-label="支持余额查询">💰</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            <div>
+              <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+                其它
+              </div>
+              <button
+                type="button"
+                onClick={resetToCustom}
+                aria-pressed={selectedPresetKey === null}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md border border-dashed border-input bg-background px-2 py-1 text-xs transition-colors hover:bg-muted",
+                  selectedPresetKey === null && "border-primary text-primary",
+                )}
+              >
+                ＋自定义
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <div>
           <label className={lblCls}>

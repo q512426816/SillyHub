@@ -200,3 +200,74 @@ describe("LlmProviderForm — 编辑模式", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 });
+
+// ── 预设选择器（task-07 / D-001）──────────────────────────────────────────────
+// 注：task 卡称「7 家（含 Kimi=moonshot）」，但 cc-switch detect 不含 api.moonshot.cn
+// （通用 Kimi 无套餐用量端点），本实现据 detect 现实标 6 家（Kimi=moonshot 不标）。
+// 故 💰 标记数为 6，非卡的 7（详见 task-05/10 说明）。
+describe("LlmProviderForm — 预设选择器（task-07 / D-001）", () => {
+  it("点「Kimi For Coding」预设 → 预填 name/base_url/兜底模型/官网/角色映射，api_key 仍空", () => {
+    render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Kimi For Coding/ }));
+
+    expect(
+      (screen.getByPlaceholderText(/Kimi 中转/) as HTMLInputElement).value,
+    ).toBe("Kimi For Coding");
+    expect(
+      (screen.getByPlaceholderText(/https:\/\/api\.anthropic\.com/) as HTMLInputElement)
+        .value,
+    ).toBe("https://api.kimi.com/coding/");
+    // 默认兜底模型（在折叠的「高级选项」内，jsdom 仍可查询）
+    expect(
+      (screen.getByPlaceholderText(/未映射的角色都走这个模型/) as HTMLInputElement)
+        .value,
+    ).toBe("kimi-for-coding");
+    // 官网链接
+    expect(
+      (screen.getByPlaceholderText(/方便日后查账/) as HTMLInputElement).value,
+    ).toBe("https://www.kimi.com/code/");
+    // 角色映射：default_model 套用到 sonnet（照 handleAutoFill 范式）
+    expect(
+      (screen.getByPlaceholderText(/kimi-k2 \/ claude-sonnet-5/) as HTMLInputElement)
+        .value,
+    ).toBe("kimi-for-coding");
+    // api_key 始终留空（永不预填明文 token）
+    expect(
+      (screen.getByPlaceholderText("sk-***") as HTMLInputElement).value,
+    ).toBe("");
+  });
+
+  it("点「＋自定义」→ 重置为空表单", () => {
+    render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
+    // 先套用预设填入
+    fireEvent.click(screen.getByRole("button", { name: /Kimi For Coding/ }));
+    expect(
+      (screen.getByPlaceholderText(/Kimi 中转/) as HTMLInputElement).value,
+    ).toBe("Kimi For Coding");
+    // 再点「＋自定义」重置
+    fireEvent.click(screen.getByRole("button", { name: /＋自定义/ }));
+    expect(
+      (screen.getByPlaceholderText(/Kimi 中转/) as HTMLInputElement).value,
+    ).toBe("");
+    expect(
+      (screen.getByPlaceholderText(/https:\/\/api\.anthropic\.com/) as HTMLInputElement)
+        .value,
+    ).toBe("");
+  });
+
+  it("💰 可查用量标记仅出现在 6 家支持用量的预设按钮上", () => {
+    render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
+    // 6 家：DeepSeek / 硅基流动 / OpenRouter / Kimi For Coding / 智谱 GLM / MiniMax
+    // （Anthropic 官方 / Kimi=moonshot / 百炼 / Bailian For Coding 不带）
+    expect(screen.getAllByTitle("支持余额查询")).toHaveLength(6);
+  });
+
+  it("编辑模式不渲染预设选择器（避免覆盖既有配置）", () => {
+    render(
+      <LlmProviderForm mode="edit" initial={INITIAL} onSubmit={vi.fn()} onCancel={vi.fn()} />,
+    );
+    expect(screen.queryByRole("button", { name: /＋自定义/ })).toBeNull();
+    expect(screen.queryAllByTitle("支持余额查询")).toHaveLength(0);
+  });
+});

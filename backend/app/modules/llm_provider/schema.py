@@ -120,3 +120,44 @@ class FetchModelsResponse(BaseModel):
     """fetch-models 响应：模型列表（明文 key 永不进响应，NFR-02）。"""
 
     models: list[FetchModelsItem]
+
+
+# ── usage 查询（task-01 / D-005）──────────────────────────────────────────────
+# 对齐 cc-switch ``provider.rs:283-315`` snake_case 契约（balance 回绝对额 / token_plan
+# 回百分比，统一进 UsageData；多窗口 tier 走 UsageResult.data 数组）。明文 key 永不进
+# 该结构（NFR-02），故无任何 api_key 字段。
+
+
+class UsageData(BaseModel):
+    """单条用量（一个套餐窗口 = 一条；多窗口 5h/周/月各自一条 tier）。
+
+    - ``plan_name``：套餐名 / 币种 / 窗口名（如「CNY」「5小时窗」「周限额」）；
+    - ``extra``：附加信息（token_plan 的重置时间 ISO8601 等）；
+    - ``is_valid``：凭据是否有效，``False`` → 前端翻红；
+    - ``invalid_message``：失效原因（鉴权失败等）；
+    - ``total/used/remaining``：balance=金额（CNY/USD）；token_plan=百分比（total=100）；
+    - ``unit``：``"USD"`` / ``"CNY"`` / ``"%"``。
+    """
+
+    plan_name: str | None = None
+    extra: str | None = None
+    is_valid: bool | None = None
+    invalid_message: str | None = None
+    total: float | None = None
+    used: float | None = None
+    remaining: float | None = None
+    unit: str | None = None
+
+
+class UsageResult(BaseModel):
+    """用量查询统一返回（D-005 错误两态）。
+
+    - ``success=True`` + ``data``：多 tier 余额/额度；
+    - ``success=False`` + ``data=[{is_valid:False}]``：确定性鉴权失败（前端翻红）；
+    - ``success=False`` + ``error``：其它确定性失败（不支持 / 解析错 / SSRF，前端灰提示）；
+    - 瞬时失败（网络/5xx/429/超时）在 service 层 ``raise``（5xx），不走到本结构。
+    """
+
+    success: bool
+    data: list[UsageData] | None = None
+    error: str | None = None

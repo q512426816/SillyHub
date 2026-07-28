@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>我的供应商 — 预设模版 + 用量查询 设计原型</title>
+<style>
+  body{font:13px/1.6 -apple-system,"Segoe UI",sans-serif;color:#333;background:#f6f7f9;margin:0;padding:24px}
+  .wrap{max-width:900px;margin:0 auto}
+  h1{font-size:18px;margin:0 0 4px}
+  .sub{color:#888;font-size:12px;margin-bottom:20px}
+  .card{background:#fff;border:1px solid #e2e5ea;border-radius:8px;padding:16px;margin-bottom:18px}
+  .card h2{font-size:14px;margin:0 0 10px;display:flex;align-items:center;gap:6px}
+  .tag{font-size:10px;background:#eef2ff;color:#4f46e5;padding:1px 6px;border-radius:4px;font-weight:normal}
+  .tag.green{background:#dcfce7;color:#15803d}
+  .grp-label{font-size:11px;color:#888;margin:12px 0 6px}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .preset{border:1px solid #e2e5ea;border-radius:6px;padding:8px;text-align:center;cursor:pointer;background:#fff;font-size:12px}
+  .preset.on{border-color:#4f46e5;background:#eef2ff;box-shadow:0 0 0 2px #c7d2fe}
+  .preset .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:middle}
+  .preset .usage{display:block;font-size:9px;color:#10b981;margin-top:3px}
+  .preset.custom{border-style:dashed;color:#888}
+  .field{margin-bottom:8px}
+  .field label{font-size:11px;color:#888;display:block;margin-bottom:2px}
+  .field .v{border:1px dashed #c9ced6;border-radius:4px;padding:5px 8px;background:#fafbfc;font-size:12px;min-height:18px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .btn{font-size:11px;border:1px solid #d4d8de;background:#fff;border-radius:4px;padding:3px 8px;cursor:pointer}
+  .btn.pri{background:#4f46e5;color:#fff;border-color:#4f46e5}
+  .prov{border:1px solid #e2e5ea;border-radius:6px;padding:10px;margin-bottom:8px}
+  .prov.on{background:#f0fdf4;border-color:#86efac}
+  .prov.bad{background:#fef2f2;border-color:#fecaca}
+  .meta{font-size:11px;color:#888;margin-top:4px}
+  .usage-bar{display:flex;gap:10px;align-items:center;font-size:11px;margin-top:6px;padding:6px 8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px}
+  .usage-bar.bad{background:#fef2f2;border-color:#fecaca;color:#b91c1c}
+  .usage-bar.muted{background:#f8fafc;border-color:#e2e5ea;color:#888}
+  .bar{flex:1;height:6px;background:#e2e5ea;border-radius:3px;margin:0 6px;overflow:hidden}
+  .bar > i{display:block;height:6px;background:#10b981;border-radius:3px}
+  .amt{font-family:monospace}
+  .legend{font-size:11px;color:#888;margin-top:12px;border-top:1px dashed #e2e5ea;padding-top:10px;line-height:1.7}
+  .legend b{color:#333}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>我的供应商 — 预设模版 + 用量查询</h1>
+<div class="sub">线框原型 · 用于确认设计方向（非最终视觉）。两个新增点：① 新建表单顶部「预设选择器」② 列表行「余额展示」。</div>
+
+<!-- ① 预设选择器 -->
+<div class="card">
+  <h2>① 新建供应商 — 预设选择器 <span class="tag">表单顶部新增</span></h2>
+
+  <div class="grp-label">官方</div>
+  <div class="grid">
+    <div class="preset"><span class="dot" style="background:#d4915d"></span>Anthropic 官方</div>
+  </div>
+
+  <div class="grp-label">国内官方</div>
+  <div class="grid">
+    <div class="preset on"><span class="dot" style="background:#6366f1"></span>Kimi For Coding<span class="usage">💰 可查用量</span></div>
+    <div class="preset"><span class="dot" style="background:#6366f1"></span>Kimi<span class="usage">💰 可查用量</span></div>
+    <div class="preset"><span class="dot" style="background:#3b82f6"></span>智谱 GLM<span class="usage">💰 可查用量</span></div>
+    <div class="preset"><span class="dot" style="background:#475569"></span>DeepSeek<span class="usage">💰 可查用量</span></div>
+    <div class="preset"><span class="dot" style="background:#0ea5e9"></span>MiniMax<span class="usage">💰 可查用量</span></div>
+    <div class="preset"><span class="dot" style="background:#f59e0b"></span>百炼</div>
+    <div class="preset"><span class="dot" style="background:#f59e0b"></span>Bailian For Coding</div>
+  </div>
+
+  <div class="grp-label">聚合站</div>
+  <div class="grid">
+    <div class="preset"><span class="dot" style="background:#64748b"></span>硅基流动<span class="usage">💰 可查用量</span></div>
+    <div class="preset"><span class="dot" style="background:#64748b"></span>OpenRouter<span class="usage">💰 可查用量</span></div>
+    <div class="preset custom">＋ 自定义（手填）</div>
+  </div>
+
+  <div class="legend">选中「<b>Kimi For Coding</b>」后，下方表单自动填好（base_url / 认证字段 / 默认模型 / 官网），用户只需填 <b>API Key</b>：</div>
+  <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+    <div class="field"><label>供应商名称</label><div class="v">Kimi For Coding</div></div>
+    <div class="field"><label>请求地址 base_url</label><div class="v">https://api.kimi.com/coding/</div></div>
+    <div class="field"><label>API Key（用户填）</label><div class="v" style="color:#aaa">sk-***</div></div>
+    <div class="field"><label>默认模型</label><div class="v">kimi-for-coding</div></div>
+  </div>
+</div>
+
+<!-- ② 余额展示 -->
+<div class="card">
+  <h2>② 供应商列表 — 余额展示 <span class="tag">每行新增</span></h2>
+
+  <div class="prov on">
+    <div class="row">
+      <b>DeepSeek</b> <span class="tag">claude</span> <span class="tag green">● 已启动</span>
+      <div style="margin-left:auto"><span class="btn">停止</span> <span class="btn">编辑</span> <span class="btn">删除</span></div>
+    </div>
+    <div class="meta">base_url：api.deepseek.com · 密钥：sk-1…abcd</div>
+    <div class="usage-bar">
+      <span>💰</span> <b>余额</b> <span class="amt">剩余 $42.18</span> <span style="color:#888">/ 总额 $50.00</span>
+      <div class="bar"><i style="width:84%"></i></div>
+      <span class="btn">查余额</span> <span style="color:#aaa">3 分钟前</span>
+    </div>
+  </div>
+
+  <div class="prov">
+    <div class="row">
+      <b>智谱 GLM</b> <span class="tag">claude</span>
+      <div style="margin-left:auto"><span class="btn pri">启动</span> <span class="btn">编辑</span> <span class="btn">删除</span></div>
+    </div>
+    <div class="meta">base_url：open.bigmodel.cn · 密钥：****</div>
+    <div class="usage-bar">
+      <span>💰</span> <b>5小时窗</b> <span class="amt">已用 62%</span> <span style="color:#888">重置 02:14:30</span>
+      <div class="bar"><i style="width:62%"></i></div>
+    </div>
+    <div class="usage-bar" style="margin-top:4px">
+      <span>💰</span> <b>周限额</b> <span class="amt">已用 38%</span> <span style="color:#888">重置 4天12时</span>
+      <div class="bar"><i style="width:38%"></i></div>
+      <span class="btn" style="margin-left:auto">查余额</span>
+    </div>
+  </div>
+
+  <div class="prov">
+    <div class="row">
+      <b>百炼</b> <span class="tag">claude</span>
+      <div style="margin-left:auto"><span class="btn pri">启动</span> <span class="btn">编辑</span> <span class="btn">删除</span></div>
+    </div>
+    <div class="meta">base_url：dashscope.aliyuncs.com · 密钥：****</div>
+    <div class="usage-bar muted">
+      <span>—</span> <span>该供应商暂不支持余额查询</span>
+    </div>
+  </div>
+
+  <div class="prov bad">
+    <div class="row">
+      <b>硅基流动</b> <span class="tag">claude</span>
+      <div style="margin-left:auto"><span class="btn pri">启动</span> <span class="btn">编辑</span> <span class="btn">删除</span></div>
+    </div>
+    <div class="usage-bar bad">
+      <span>⚠</span> <b>鉴权失败</b> <span>API Key 无效或已过期（仍显示上次成功值：<span class="amt">剩余 $12.40</span>）</span>
+      <div style="flex:1"></div>
+      <span class="btn">查余额</span>
+    </div>
+  </div>
+
+  <div class="legend">
+    <b>余额展示规则：</b><br>
+    ① 支持的供应商进页面<b>自动查一次</b> + 手动「查余额」按钮；<br>
+    ② 成功显示 已用/剩余/总额 + 进度条；<br>
+    ③ <b>鉴权失败翻红</b>，但仍保留上次成功值（照搬 cc-switch）；<br>
+    ④ 网络抖动保留上次成功值 10 分钟，不闪烁；<br>
+    ⑤ 不支持余额的供应商（百炼 / Anthropic 官方）显示灰色说明，不报错。
+  </div>
+</div>
+
+</div>
+</body>
+</html>

@@ -11,6 +11,7 @@ import { errMessage, useNotify } from "@/lib/errors";
 import {
   createProvider,
   deleteProvider,
+  detectUsageProvider,
   formToCreate,
   formToUpdate,
   listProviders,
@@ -22,6 +23,7 @@ import {
 } from "@/lib/api/llm-providers";
 import { cn } from "@/lib/utils";
 import { LlmProviderForm } from "./llm-provider-form";
+import { UsageFooter } from "./usage-footer";
 
 /**
  * 「我的供应商」区块（task-11）。
@@ -252,6 +254,11 @@ export function LlmProviderSection() {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium">{p.name}</span>
                   <Badge variant="warning">{p.agent_kind}</Badge>
+                  {detectUsageProvider(p.base_url) && (
+                    <Badge variant="outline" className="gap-0.5" title="支持余额查询">
+                      💰 可查用量
+                    </Badge>
+                  )}
                   {p.is_default && (
                     <Badge variant="success" className="gap-0.5">
                       <Power className="h-2.5 w-2.5" />
@@ -325,6 +332,13 @@ export function LlmProviderSection() {
                     <span className="text-muted-foreground">{summary.secondary}</span>
                   )}
                 </div>
+                {/*
+                  用量页脚（task-09 / D-006）：每行底部挂 UsageFooter。组件内置挂载即查
+                  （仅可查供应商）+ keep-last-good + 手动刷新图标，故列表层无需再写
+                  useEffect 自动查 / 「查余额」按钮——自动查使用量加载即显示，独立按钮冗余。
+                  不可查供应商由 footer 渲染中性「暂不支持余额查询」文案，不报错。
+                */}
+                <UsageFooter providerId={p.id} baseUrl={p.base_url} />
               </div>
             );
           })}
