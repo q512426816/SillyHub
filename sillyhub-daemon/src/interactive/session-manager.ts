@@ -62,6 +62,11 @@ import {
   SessionNotActiveError,
   UnsupportedProviderError,
 } from './types.js';
+// task-04（FR-01 / D-005@v1）：turn 收尾把模型调用失败归类为结构化 ModelError，
+// 挂到 result.modelError 透传给 daemon 桥接 → notifyRunResult → backend error_detail。
+// 与 stream-json.ts:954 批量路径同源（近源归类，D-005 方案 C 三端标准协议）。
+import { classifyModelError } from '../model-error/classifier.js';
+import type { ModelError } from '../model-error/types.js';
 
 /**
  * task-08（D-007@v1 / FR-07）：wsClient.send 注入接口（鸭子类型，便于测试 mock）。
@@ -2173,6 +2178,36 @@ export class SessionManager {
       this._resolversBySession
         .get(state.sessionId)
         ?.abortAll('turn_completed');
+      // task-04（FR-01 / D-005@v1）：turn 失败时近源归类模型错误，挂到 result.modelError
+      // 透传给 daemon.onTurnResult → notifyRunResult payload.error → backend error_detail。
+      // - interactive 路径不经 stream-json adapter（claude-sdk-driver 直接消费 SDK），
+      //   故在此归类（与批量 stream-json.ts:954 同源逻辑，输入用 result.result 文本）。
+      // - 仅 is_error=true 调 classifier（成功路径不产出 ModelError，D-008 不回归）；
+      //   classifier 对 is_error=true 恒返回非空 ModelError（claude 按规则，codex 兜底 unknown）。
+      // - 挂载用 duck-type（对齐 _onMessage 挂 msg.depth 模式），daemon 侧 resultMeta 读取。
+      const resultRecord = result as Record<string, unknown>;
+      if (resultRecord['is_error'] === true) {
+        const rawResult = resultRecord['result'];
+        const resultText =
+          typeof rawResult === 'string'
+            ? rawResult
+            : rawResult === undefined
+              ? ''
+              : JSON.stringify(rawResult);
+        const subtype =
+          typeof resultRecord['subtype'] === 'string'
+            ? (resultRecord['subtype'] as string)
+            : undefined;
+        const modelError: ModelError | null = classifyModelError({
+          agent: state.provider,
+          isError: true,
+          subtype,
+          resultText,
+        });
+        if (modelError) {
+          resultRecord['modelError'] = modelError;
+        }
+      }
       await this.deps.onTurnResult(state.sessionId, runId, result);
     }
     // task-10：turn result 收尾后排队 flush（currentRunId 已清空）。

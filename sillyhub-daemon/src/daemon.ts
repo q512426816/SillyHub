@@ -57,6 +57,9 @@ import type {
 import { AgentDetector, normalizeProvider } from './agent-detector.js';
 import type { DetectedAgent } from './agent-detector.js';
 import { extractCause } from './hub-client.js';
+// task-04（FR-01 / D-005@v1）：onTurnResult 桥接把模型层 ModelError 注入
+// notifyRunResult payload.error（与 backend ModelErrorDTO 三端同构）。
+import type { ModelError } from './model-error/types.js';
 import { WsClient } from './ws-client.js';
 import { listDir } from './file-rpc.js';
 import { listRoots } from './roots-rpc.js';
@@ -288,6 +291,8 @@ interface ClientLike {
       // task-16：cache 两维（短名，对齐 backend _METADATA_FIELDS）。
       cache_read_tokens?: number;
       cache_creation_tokens?: number;
+      // task-04：模型层结构化错误（is_error=true 时归类器产出，成功路径不 set）。
+      error?: ModelError;
     },
   ): Promise<unknown>;
   /**
@@ -1372,6 +1377,10 @@ export class Daemon {
         cache_creation_input_tokens?: number;
         cache_read_input_tokens?: number;
       };
+      // task-04（FR-01 / D-005@v1）：session-manager._onResult 收尾时归类并挂到
+      // result.modelError（duck-type，对齐 _onMessage 挂 depth 的模式）。null/undefined
+      // = 非模型错误或成功路径（classifier 对 is_error=false 返回 null，D-008）。
+      modelError?: ModelError | null;
     };
     const status = resultMeta.subtype ?? 'success';
     const isError = resultMeta.is_error === true;
@@ -1389,6 +1398,8 @@ export class Daemon {
       // task-16：cache 两维（短名），SDK 全名在此处映射注入。
       cache_read_tokens?: number;
       cache_creation_tokens?: number;
+      // task-04：模型层结构化错误（is_error=true 时 session-manager 已挂到 result.modelError）。
+      error?: ModelError;
     } = {
       status,
       is_error: isError,
@@ -1438,6 +1449,15 @@ export class Daemon {
       typeof resultMeta.usage.cache_read_input_tokens === 'number'
     ) {
       payload.cache_read_tokens = resultMeta.usage.cache_read_input_tokens;
+    }
+    // task-04（FR-01 / D-005@v1）：模型层结构化错误注入。session-manager._onResult
+    // 收尾时已按 provider + is_error + resultText 调 classifyModelError 归类，把非空
+    // ModelError 挂到 result.modelError（duck-type 透传，对齐 depth 挂载）。此处仅读取
+    // 注入 payload.error，供 hubClient.notifyRunResult → backend error_detail。
+    // 守卫用 truthy（ModelError 恒为对象）：null/undefined（成功 / 非模型错误）不 set，
+    // backend error_detail 保留 NULL（D-008 成功路径不回归）。
+    if (resultMeta.modelError) {
+      payload.error = resultMeta.modelError;
     }
     try {
       // task-12（FR-05 / D-005@v1）：终态上报包 retryTerminal 轻量重试（不暂存）。

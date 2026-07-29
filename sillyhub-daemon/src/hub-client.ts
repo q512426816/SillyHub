@@ -26,6 +26,9 @@ import { DAEMON_VERSION } from './daemon-version.js';
 import { BUILD_ID } from './build-id.js';
 import type { ExecutionContextPayload } from './types.js';
 import type { SessionRecoverStatus } from './daemon.js';
+// task-04（FR-01 / D-005@v1）：notifyRunResult payload 的 error 字段类型。
+// 与 backend ModelErrorDTO、daemon/src/model-error/types.ts ModelError 三端同构。
+import type { ModelError } from './model-error/types.js';
 
 // ── body 类型（字段名 snake_case 对齐 backend Pydantic 模型）──────────────────
 
@@ -527,7 +530,9 @@ export class HubClient {
    * @param leaseId  interactive lease.id（SessionState.leaseId）
    * @param claimToken  lease 级 claim_token（SessionState.claimToken）
    * @param runId  当前 turn 的 AgentRun.id（SessionState.currentRunId at result time）
-   * @param payload  { status, is_error, subtype?, result_summary? }
+   * @param payload  { status, is_error, subtype?, result_summary?, error? }
+   *   - error：task-04 新增。is_error=true 且归类器产出非空 ModelError 时透传，
+   *     backend 写入 AgentRun.error_detail（D-005@v1 三端标准协议）；其余不 set。
    */
   async notifyRunResult(
     leaseId: string,
@@ -550,6 +555,10 @@ export class HubClient {
       // backend 收不到该字段 → NULL（D-001@v1）。
       cache_read_tokens?: number;
       cache_creation_tokens?: number;
+      // task-04（FR-01 / D-005@v1）：模型层结构化错误。仅 is_error=true 且归类器产出
+      // 非空 ModelError 时 set（session-manager turn 收尾归类 + 挂到 result.modelError，
+      // daemon 桥接读取注入）；成功路径 / 非模型错误不 set → backend error_detail=NULL（D-008）。
+      error?: ModelError;
     },
   ): Promise<Record<string, unknown>> {
     const path = `${REST_PREFIX}/leases/${encodeURIComponent(
@@ -597,6 +606,12 @@ export class HubClient {
     }
     if (payload.cache_creation_tokens !== undefined) {
       body.cache_creation_tokens = payload.cache_creation_tokens;
+    }
+    // task-04：模型层结构化错误守卫。undefined（成功 / 非模型错误，未 set）→ 不写 →
+    // backend error_detail 保留 NULL（D-008 成功路径不回归）。非空对象直接透传（与
+    // backend ModelErrorDTO 同构：{type,code,message,retryable,hint,raw}）。
+    if (payload.error !== undefined) {
+      body.error = payload.error;
     }
     const resp = await fetch(url, {
       method: 'POST',
