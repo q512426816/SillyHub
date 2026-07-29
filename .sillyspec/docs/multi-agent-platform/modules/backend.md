@@ -20,7 +20,7 @@ multi-agent-platform 的核心 API 服务，monorepo 的"大脑"。以 FastAPI �
 
 - 基础：health、auth、members、workspace、admin、settings、scan_docs
 - SillySpec 编排：change、change_writer、task、workflow、archive、spec_workspace、release、knowledge、incident
-- Agent/运行时：agent、runtime、daemon（守护进程接入）、lease（租约）、tool_gateway、policy（权限策略）
+- Agent/运行时：agent、runtime、daemon（守护进程接入）、lease（租约）、tool_gateway、policy（权限策略）。**模型错误可见性**：daemon 回传的 `InteractiveRunResultRequest.error`（ModelErrorDTO）写入 `AgentRun.error_detail` JSON 列（与 `error_code` 正交）；`GET /api/daemon/sessions/{id}/runs` 返 SessionRunRead（含 error_detail）；会话 SSE 在 failed turn 推 `run_error` 事件。三端同构 ModelErrorDTO 由 gen:types 对齐（design §7.1）。
 - Git：git_identity、git_gateway、worktree
 - LLM：llm_provider（LLM 供应商配置，含 `POST /api/llm-providers/{id}/usage` 用量/余额查询）
 - PPM 子树（统一前缀 `/api/ppm`）：project、plan、task、problem、kanban
@@ -31,7 +31,7 @@ multi-agent-platform 的核心 API 服务，monorepo 的"大脑"。以 FastAPI �
 
 - **分层结构**：`app/core/`（config/db/redis/security/crypto/logging/telemetry/audit_hooks/spec_paths 等横切关注）+ `app/models/base.py`（SQLModel 基类）+ `app/modules/<域>/`（每域含 `router.py` + 业务/service + tests）。
 - **领域模块清单**：admin、agent、archive、auth、change、change_writer、daemon、git_gateway、git_identity、health、incident、knowledge、ppm(5 子域)、release、runtime、scan_docs、settings、spec_profile、spec_workspace、task、tool_gateway、workflow、workspace、worktree。
-- **Daemon 接入**：daemon 模块与 lease 模块共同支撑本地守护进程注册、领租约、心跳、消息回传的在线交互模型。
+- **Daemon 接入**：daemon 模块与 lease 模块共同支撑本地守护进程注册、领租约、心跳、消息回传的在线交互模型。**模型错误回传**：daemon 在 turn 失败时归类出 ModelError（auth_failed/quota_exceeded[不可重试]/rate_limited[可重试]/timeout/model_not_found/network/provider_error/unknown），经 notifyRunResult → close_interactive_run 三层透传（router+facade+实体）写 AgentRun.error_detail，run→failed。
 - **迁移与建表**：Alembic（`migrations/`）+ `create_tables.py` 兜底；`core/layout_migration.py` 处理 SillySpec Native Layout 演进。
 - **测试**：`backend/tests/` + 各模块内 `tests/`；CI 要求 `--cov-fail-under=60`。
 

@@ -66,14 +66,14 @@ task-01 → task-06 → task-07 → task-08 → task-09 → task-10 → task-11�
 
 ## 全局验收标准
 
-- [ ] daemon classifier 单测 8 类全过（auth_failed / quota_exceeded / rate_limited / timeout / model_not_found / network / provider_error / unknown）
-- [ ] backend：AgentRun.error_detail migration 成功（alembic upgrade head 无多 head）；close_interactive_run 写入 error_detail；GET /sessions/{id}/runs 返回 error_detail；SSE 推 error 事件
-- [ ] frontend：pnpm gen:types 同步（api-types.ts + backend/openapi.json）；normalize 将 error_detail → error 类日志项；RunErrorItem 渲染 + actions 可用；run/session failed 标红
-- [ ] 回归：agent-log-display-fix 的 NOISE 折叠不误吞 error_detail 错误项；成功路径（is_error=false）无 ModelError、error_detail=None
-- [ ] e2e 复现：模型调用失败时（执行期若 GLM 额度已重置恢复，改用无效凭证注入触发 auth_failed 或 mock 429 验证 classifier 各 type）会话页显示错误项 + 原因 + hint + actions
-- [ ] 三端 ModelError 契约一致（pnpm gen:types 保证，非手写）
-- [ ] 不影响 PPM 模块（已上线）
-- [ ] （brownfield）未配置 / 无错误时行为不变（error 字段可选，缺失兜底，不崩溃）
+- [x] daemon classifier 单测 8 类全过（auth_failed / quota_exceeded / rate_limited / timeout / model_not_found / network / provider_error / unknown）
+- [x] backend：AgentRun.error_detail migration 成功（alembic upgrade head 无多 head）；close_interactive_run 写入 error_detail；GET /sessions/{id}/runs 返回 error_detail；SSE 推 error 事件
+- [x] frontend：pnpm gen:types 同步（api-types.ts + backend/openapi.json）；normalize 将 error_detail → error 类日志项；RunErrorItem 渲染 + actions 可用；run/session failed 标红
+- [x] 回归：agent-log-display-fix 的 NOISE 折叠不误吞 error_detail 错误项；成功路径（is_error=false）无 ModelError、error_detail=None
+- [x] e2e 复现：模型调用失败时（执行期若 GLM 额度已重置恢复，改用无效凭证注入触发 auth_failed 或 mock 429 验证 classifier 各 type）会话页显示错误项 + 原因 + hint + actions
+- [x] 三端 ModelError 契约一致（pnpm gen:types 保证，非手写）
+- [x] 不影响 PPM 模块（已上线）
+- [x] （brownfield）未配置 / 无错误时行为不变（error 字段可选，缺失兜底，不崩溃）
 
 ## 覆盖矩阵（decisions.md）
 

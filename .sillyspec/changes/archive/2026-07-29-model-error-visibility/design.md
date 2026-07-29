@@ -2,6 +2,7 @@
 author: qinyi
 created_at: 2026-07-29T10:02:27
 scale: large
+risk_level: contract-required
 ---
 
 # 设计文档（Design）— 模型调用失败可见性完整修复（claude code 会话）

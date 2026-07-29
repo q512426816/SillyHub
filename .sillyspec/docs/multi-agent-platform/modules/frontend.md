@@ -20,13 +20,13 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 - **页面路由**（App Router）：根 `page.tsx`；`(auth)/login` 登录；`(dashboard)/` 下含 workspaces、runtimes、settings、admin、ppm 五大功能区，各自带 `layout.tsx`。
 - **BFF route handlers**：`src/app/api/` 下 daemon、daemon-chat、workspaces，承接需要服务端代理的 daemon 通信与 SSE/WS 转发。
-- **后端依赖**：所有领域数据来自 backend `/api/*`；daemon 实时会话走 WebSocket/SSE。
+- **后端依赖**：所有领域数据来自 backend `/api/*`；daemon 实时会话走 WebSocket/SSE。**模型错误可见性**：run failed 时 `listSessionRuns`（`lib/daemon.ts`）取 `GET /api/daemon/sessions/{id}/runs` 的 error_detail，normalize（`agent-log/normalize.ts`）生成 error 类日志项，`RunErrorItem` 渲染原因/hint/actions（重发/切换供应商/详情）；agent 页（agent-run-panel）与 runtime 聊天窗（interactive-session-panel）两面接通。
 - **构建产物**：`next build` 产出独立 Node 服务，Docker 中以独立容器运行，端口对 backend 反代或直连。
 
 ## 关键逻辑
 
 - **目录组织**：`src/app`（路由）、`src/components`（40+ 业务组件，含 daemon/、agent-log/、layout/、charts/、permissions/、ui/ 子树及大量 ppm-/workspace-/admin- 前缀组件）、`src/lib`（工具/API 封装）、`src/stores`（Zustand）、`src/styles`、`src/test`。
-- **核心组件**：app-shell（外壳布局）、top-bar、workspace-tabs、mission-console（任务控制台）、agent-run-panel、agent-log-viewer、runtime-session-dialog、permission-approval-dialog、ask-user-dialog-card、health-card、server-status-card、sillyspec-step-progress。
+- **核心组件**：app-shell（外壳布局）、top-bar、workspace-tabs、mission-console（任务控制台）、agent-run-panel、agent-log-viewer、runtime-session-dialog、permission-approval-dialog、ask-user-dialog-card、health-card、server-status-card、sillyspec-step-progress、**run-error-item**（模型调用失败结构化展示：type→图标/颜色/文案/hint/actions）。
 - **数据层**：React Query 管理服务端状态，Zustand 管 UI/会话状态；daemon 聊天与权限流为长连接交互。
 - **脚本**：dev/build/start/lint/typecheck/test，CI 跑 lint+typecheck+test+build 全链路。
 
@@ -67,5 +67,6 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 - ql-20260728-003 | 滑块下线换「我不是机器人」点按 + 登录页 UI 现代化 + 修 token 闭包 bug：删 `slider-captcha.tsx`，新建 `components/ui/confirm-captcha.tsx`（点按一次性 captcha_id→token，lucide Shield/ShieldCheck/Loader2 四态）；`lib/auth.ts` 改 `fetchConfirmCaptcha`/`verifyConfirmCaptcha`（去 x）。**关键 bug 修复**：`handleVerified` 原 `setCaptchaToken(token)` 后立即 `doLogin`，闭包读到 setState 前的旧 `captchaToken` → login 漏带 token 仍 423（"验证过了登不进"根因）；改为 `doLogin(values, token)` 直传。`(auth)/login/page.tsx` UI 重写为现代深色品牌风（左侧深蓝渐变+网格+光斑+lucide 特性条，右侧亮色玻璃拟态卡，token primary #2563EB，无新依赖）；`m/login/page.tsx` 补齐原本缺失的整套 423/验证码链路并接入 ConfirmCaptcha。
 
 - 2026-07-28-llm-provider-presets-and-usage | LLM 供应商预设模板 + 用量/余额查询前端：新增 `config/llmProviderPresets.ts`（10 家 claude 风格预设常量，6 家标 `usage:{type:balance|token_plan}`，settings_config env 块抄 cc-switch）+ form 顶部预设选择器（网格按钮、分类排序 官方/国内官方/聚合站、💰可查用量标记、＋自定义重置，点预设 setState 填 name/base_url/auth_field/model/website_url，api_key 留空）；`lib/api/llm-providers.ts` 加 `queryUsage(id)` + `detectUsageProvider` + UsageResult/UsageData 类型；新增 `usage-footer.tsx`（多 tier 余额条逐 UsageData 渲染 + 翻红 + keep-last-good 保留上次成功值 10 分钟，移植 cc-switch `resolveDisplayUsage` + 不支持文案）；list 每行挂 UsageFooter + 💰 徽标 + 进页面自动查 + 手动单家刷新。3 件 `__tests__/*.test.tsx`。
+- ql-20260729-004-5845 | 补 model-error-visibility 测试债：normalize.test.ts 追加 task-08「模型错误可见性」describe 块——buildErrorLogItem 8 类 type 参数化映射 + type 非法→unknown + message 缺失→「运行失败」 + retryable 严格===true + code/hint/raw 缺失/非字符串→null + null/非对象→null；isAssistantApiErrorText 识别 API Error/Request rejected 且不误判普通回复；classifyLog [ASSISTANT]+API Error→error（修正原 :352 全归 assistant 缺陷）；normalizeLogs errorDetail 追加结构化 error 项（hidden=false, R-02 不进 NOISE）+ 有结构化错误时 [ASSISTANT] API Error 行 hidden；brownfield runStatus=failed 无 errorDetail→兜底「运行失败（无详情）」；成功路径不追加 error 项零回归。normalize.test.ts 60 tests 全过。
 
 <!-- MANUAL_NOTES_END -->

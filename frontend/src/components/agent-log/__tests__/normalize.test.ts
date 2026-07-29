@@ -10,6 +10,9 @@ import {
   isAssistantOnly,
   mergeAssistantPiece,
   mergeThinkingPiece,
+  buildErrorLogItem,
+  isAssistantApiErrorText,
+  classifyLog,
 } from "../normalize";
 import type { AgentRunLogEntry } from "@/lib/agent";
 
@@ -547,5 +550,162 @@ describe("tool_result 按 parent_tool_use_id 精确配对 (2026-07-09-agent-log-
     const tr = result.find((p) => p.log.id === "tr1");
     // 无 id 但紧邻 tool_call → 退化合并（现有行为不变）
     expect(tr?.hidden).toBe(true);
+  });
+});
+
+// task-08 / FR-03 / D-002@v1（2026-07-29-model-error-visibility）：模型调用错误可见性。
+// daemon 把模型失败记为 [ASSISTANT] API Error 文本（design §1 原缺陷：被当助手回复）；
+// 本组覆盖 buildErrorLogItem 安全提取 + :352 误判修正 + brownfield 兜底 + R-02 不进 NOISE。
+describe("task-08: 模型错误可见性 (buildErrorLogItem / :352 修正 / brownfield / R-02)", () => {
+  // ---- buildErrorLogItem：8 类 type 映射 ----
+  it.each([
+    ["auth_failed"],
+    ["quota_exceeded"],
+    ["rate_limited"],
+    ["timeout"],
+    ["model_not_found"],
+    ["network"],
+    ["provider_error"],
+    ["unknown"],
+  ] as const)("buildErrorLogItem 合法 type=%s 原样映射", (type) => {
+    const item = buildErrorLogItem({
+      type,
+      code: "429",
+      message: "失败原因",
+      retryable: type === "rate_limited",
+      hint: "建议",
+      raw: "原始文本",
+    });
+    expect(item).not.toBeNull();
+    expect(item?.type).toBe(type);
+    expect(item?.code).toBe("429");
+    expect(item?.message).toBe("失败原因");
+    expect(item?.hint).toBe("建议");
+    expect(item?.raw).toBe("原始文本");
+  });
+
+  it("buildErrorLogItem type 非法/缺失 → 兜底 unknown（brownfield 不崩）", () => {
+    expect(buildErrorLogItem({ type: "not_a_real_type", message: "x" })?.type).toBe("unknown");
+    expect(buildErrorLogItem({ message: "x" })?.type).toBe("unknown");
+    expect(buildErrorLogItem({ type: 123, message: "x" })?.type).toBe("unknown");
+  });
+
+  it("buildErrorLogItem message 缺失/空 → 兜底「运行失败」", () => {
+    expect(buildErrorLogItem({ type: "timeout" })?.message).toBe("运行失败");
+    expect(buildErrorLogItem({ type: "timeout", message: "   " })?.message).toBe("运行失败");
+  });
+
+  it("buildErrorLogItem retryable 仅严格 === true 才可重试（保守，不盲目建议重试）", () => {
+    expect(buildErrorLogItem({ type: "timeout", retryable: true })?.retryable).toBe(true);
+    expect(buildErrorLogItem({ type: "timeout", retryable: "true" })?.retryable).toBe(false);
+    expect(buildErrorLogItem({ type: "timeout", retryable: 1 })?.retryable).toBe(false);
+    expect(buildErrorLogItem({ type: "timeout" })?.retryable).toBe(false);
+  });
+
+  it("buildErrorLogItem code/hint/raw 缺失/非字符串 → null", () => {
+    const item = buildErrorLogItem({ type: "network" });
+    expect(item?.code).toBeNull();
+    expect(item?.hint).toBeNull();
+    expect(item?.raw).toBeNull();
+    // 非字符串值不算（防 number/object 透传到 UI）
+    const item2 = buildErrorLogItem({ type: "network", code: 429, hint: {}, raw: [] });
+    expect(item2?.code).toBeNull();
+    expect(item2?.hint).toBeNull();
+    expect(item2?.raw).toBeNull();
+  });
+
+  it("buildErrorLogItem null / undefined / 非对象 → null（调用方据 runStatus 走兜底）", () => {
+    expect(buildErrorLogItem(null)).toBeNull();
+    expect(buildErrorLogItem(undefined)).toBeNull();
+    expect(buildErrorLogItem("string" as any)).toBeNull();
+    expect(buildErrorLogItem(42 as any)).toBeNull();
+  });
+
+  // ---- isAssistantApiErrorText：错误文本识别 ----
+  it("isAssistantApiErrorText 识别 daemon 模型失败文本（API Error / Request rejected）", () => {
+    // design §1 真实文本：[ASSISTANT] API Error: Request rejected (429) · [1310]...
+    expect(isAssistantApiErrorText("[ASSISTANT] API Error: Request rejected (429)")).toBe(true);
+    expect(isAssistantApiErrorText("[ASSISTANT] Request rejected by upstream")).toBe(true);
+    expect(isAssistantApiErrorText("API Error: something")).toBe(true);
+  });
+
+  it("isAssistantApiErrorText 普通助手回复不误判", () => {
+    expect(isAssistantApiErrorText("[ASSISTANT] 你好！有什么我可以帮你的吗？")).toBe(false);
+    expect(isAssistantApiErrorText("[ASSISTANT] 我来帮你实现这个功能")).toBe(false);
+  });
+
+  // ---- classifyLog :352 修正：[ASSISTANT] + API Error → error ----
+  it("classifyLog [ASSISTANT] 含 API Error 归 error（修正原 :352 全归 assistant 的缺陷）", () => {
+    expect(classifyLog("stdout", "[ASSISTANT] API Error: Request rejected (429)")).toBe("error");
+  });
+
+  it("classifyLog [ASSISTANT] 普通文本仍归 assistant（不回归成功路径）", () => {
+    expect(classifyLog("stdout", "[ASSISTANT] 你好")).toBe("assistant");
+  });
+
+  // ---- normalizeLogs：结构化错误项追加（errorDetail）----
+  it("normalizeLogs errorDetail 有值 → 末尾追加 error 类结构化项（hidden=false, R-02）", () => {
+    const logs: AgentRunLogEntry[] = [makeLog("stdout", "[ASSISTANT] 你好", "a1")];
+    const result = normalizeLogs(logs, {
+      errorDetail: {
+        type: "quota_exceeded",
+        code: "1310",
+        message: "额度已耗尽",
+        retryable: false,
+        hint: "请充值或切换供应商",
+        raw: "您已达到每周使用上限",
+      },
+    });
+    const errItem = result[result.length - 1];
+    expect(errItem?.semanticCategory).toBe("error");
+    expect(errItem?.hidden).toBe(false); // R-02：不进 NOISE 折叠白名单
+    expect(errItem?.errorLogItem?.type).toBe("quota_exceeded");
+    expect(errItem?.errorLogItem?.code).toBe("1310");
+    expect(errItem?.errorLogItem?.message).toBe("额度已耗尽");
+    expect(errItem?.errorLogItem?.retryable).toBe(false);
+  });
+
+  it("normalizeLogs 有结构化错误时，[ASSISTANT] API Error 文本行被 hidden（结构化项取代，避免重复）", () => {
+    const logs: AgentRunLogEntry[] = [
+      makeLog("stdout", "[ASSISTANT] API Error: Request rejected (429)", "api1"),
+    ];
+    const result = normalizeLogs(logs, {
+      errorDetail: { type: "rate_limited", message: "限流", retryable: true },
+    });
+    const apiLine = result.find((p) => p.log.id === "api1");
+    expect(apiLine?.hidden).toBe(true);
+    // 末尾仍有结构化 error 项
+    expect(result[result.length - 1]?.semanticCategory).toBe("error");
+  });
+
+  // ---- brownfield 兜底：failed 无 errorDetail ----
+  it("normalizeLogs runStatus=failed 无 errorDetail → 兜底追加「运行失败（无详情）」", () => {
+    const logs: AgentRunLogEntry[] = [makeLog("stdout", "[ASSISTANT] 你好", "a1")];
+    const result = normalizeLogs(logs, { runStatus: "failed" });
+    const errItem = result[result.length - 1];
+    expect(errItem?.semanticCategory).toBe("error");
+    expect(errItem?.hidden).toBe(false);
+    expect(errItem?.errorLogItem?.type).toBe("unknown");
+    expect(errItem?.errorLogItem?.message).toBe("运行失败（无详情）");
+    expect(errItem?.errorLogItem?.retryable).toBe(false);
+  });
+
+  // ---- 成功路径零回归 ----
+  it("normalizeLogs 无 errorDetail 且非 failed → 不追加 error 项（成功路径零回归）", () => {
+    const logs: AgentRunLogEntry[] = [makeLog("stdout", "[ASSISTANT] 你好", "a1")];
+    const result = normalizeLogs(logs); // 不传 options
+    expect(result.find((p) => p.semanticCategory === "error")).toBeUndefined();
+    const result2 = normalizeLogs(logs, { runStatus: "completed" });
+    expect(result2.find((p) => p.semanticCategory === "error")).toBeUndefined();
+  });
+
+  it("normalizeLogs 无结构化错误时，[ASSISTANT] API Error 文本保留为独立 error 类项（不 hidden）", () => {
+    const logs: AgentRunLogEntry[] = [
+      makeLog("stdout", "[ASSISTANT] API Error: Request rejected (429)", "api1"),
+    ];
+    const result = normalizeLogs(logs); // 无 errorDetail / 非 failed
+    const apiLine = result.find((p) => p.log.id === "api1");
+    expect(apiLine?.semanticCategory).toBe("error");
+    expect(apiLine?.hidden).toBe(false); // 无结构化项取代 → 保留独立显示
   });
 });
