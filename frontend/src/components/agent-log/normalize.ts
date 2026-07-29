@@ -315,6 +315,129 @@ export function mergeThinkingPiece(prev: string, piece: string): string {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Run error detail (task-08 / FR-03 / D-002@v1)                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * task-08 / FR-03：模型调用错误类型枚举（前端形态；三端同构 ModelError 协议
+ * design §7.1）。从 run.error_detail.type 映射；非法/缺失 → "unknown"（兜底）。
+ */
+export type ModelErrorType =
+  | "auth_failed"
+  | "quota_exceeded"
+  | "rate_limited"
+  | "timeout"
+  | "model_not_found"
+  | "network"
+  | "provider_error"
+  | "unknown";
+
+/**
+ * task-08 / FR-03 / D-002@v1：运行错误日志项的结构化载荷（provides contract）。
+ * task-09 RunErrorItem 据此渲染图标 / 文案 / hint / actions。
+ */
+export interface ErrorLogItem {
+  type: ModelErrorType;
+  code: string | null;
+  message: string;
+  retryable: boolean;
+  hint: string | null;
+  raw: string | null;
+}
+
+const MODEL_ERROR_TYPES: ReadonlySet<ModelErrorType> = new Set<ModelErrorType>([
+  "auth_failed",
+  "quota_exceeded",
+  "rate_limited",
+  "timeout",
+  "model_not_found",
+  "network",
+  "provider_error",
+  "unknown",
+]);
+
+function isModelErrorType(value: unknown): value is ModelErrorType {
+  return typeof value === "string" && (MODEL_ERROR_TYPES as Set<string>).has(value);
+}
+
+function asStringOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function asStringOrDefault(value: unknown, fallback: string): string {
+  if (typeof value === "string" && value.trim().length > 0) return value;
+  return fallback;
+}
+
+/**
+ * task-08：从 run.error_detail（task-07 透传的 OpenAPI 宽松字典
+ * `{ [key: string]: unknown } | null`）安全提取结构化 ErrorLogItem。
+ *
+ * 缺字段用兜底，brownfield 不崩（design §9）：
+ * - type：合法枚举校验，非法/缺失 → "unknown"
+ * - retryable：仅严格 === true 才可重试（保守，不盲目建议重试）
+ * - message：缺失 → "运行失败"
+ *
+ * 返回 null 表示 error_detail 无值/非对象（调用方据 runStatus 走 failed 兜底或不追加）。
+ */
+export function buildErrorLogItem(
+  errorDetail: { [key: string]: unknown } | null | undefined,
+): ErrorLogItem | null {
+  if (!errorDetail || typeof errorDetail !== "object") return null;
+  return {
+    type: isModelErrorType(errorDetail["type"]) ? errorDetail["type"] : "unknown",
+    code: asStringOrNull(errorDetail["code"]),
+    message: asStringOrDefault(errorDetail["message"], "运行失败"),
+    retryable: errorDetail["retryable"] === true,
+    hint: asStringOrNull(errorDetail["hint"]),
+    raw: asStringOrNull(errorDetail["raw"]),
+  };
+}
+
+/**
+ * task-08：识别 [ASSISTANT] 行是否为模型调用错误文本。
+ *
+ * daemon 把模型失败记为 `[ASSISTANT] API Error: Request rejected (429) · ...`
+ * （design §1）。原缺陷 normalize:352 把所有 [ASSISTANT] 归 assistant，这条错误
+ * 文本被当普通助手回复。此处用关键词识别，让 classifyLog 归 error 类。
+ */
+export function isAssistantApiErrorText(content: string): boolean {
+  const body = extractAssistantText(content) || content;
+  return /API\s*Error/i.test(body) || /Request\s+rejected/i.test(body);
+}
+
+/**
+ * task-08：合成结构化错误日志项（ProcessedLog）。追加在 processedLogs 末尾，
+ * semanticCategory=error，errorLogItem 载荷供 task-09 渲染。hidden=false
+ * （R-02：不进 NOISE 折叠白名单）。
+ */
+function makeErrorProcessedLog(item: ErrorLogItem): ProcessedLog {
+  const syntheticLog: AgentRunLogEntry = {
+    id: `error-detail-${item.type}`,
+    run_id: "error-detail",
+    // 占位 timestamp 放末尾（失败错误项出现在消息流最后）；new Date 兼容三端。
+    timestamp: new Date().toISOString(),
+    channel: "stderr",
+    content_redacted: item.message,
+  };
+  return {
+    log: syntheticLog,
+    hidden: false,
+    semanticCategory: "error",
+    errorLogItem: item,
+  };
+}
+
+// task-08：通过 TS module augmentation（declare module）给 ProcessedLog 附加
+// errorLogItem 字段，不修改 types.ts（本任务 allowed_paths 仅 normalize.ts）。
+// task-09/10 从 processedLogs[i].errorLogItem 读取结构化错误详情渲染 RunErrorItem。
+declare module "./types" {
+  interface ProcessedLog {
+    errorLogItem?: ErrorLogItem;
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Log normalization                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -349,7 +472,11 @@ export function classifyLog(
   // （历史降级——新 daemon 不再发 stdout [TOOL_USE]，旧日志兼容）
   if (text.startsWith("[TOOL_USE]")) return "tool_call";
   if (text.startsWith("[THINKING]")) return "thinking";
-  if (text.startsWith("[ASSISTANT]")) return "assistant";
+  // task-08 / FR-03：[ASSISTANT] 开头但含模型调用错误特征（"API Error" /
+  // "Request rejected"）不再归 assistant（design §1 原缺陷：错误被当助手回复）。
+  if (text.startsWith("[ASSISTANT]")) {
+    return isAssistantApiErrorText(text) ? "error" : "assistant";
+  }
   if (text.startsWith("[SYSTEM")) return "system";
   if (text.startsWith("[RESULT")) return "result";
   if (channel === "stderr") return "error";
@@ -360,11 +487,30 @@ export function classifyLog(
   return "log";
 }
 
-export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
+/**
+ * task-08 / FR-03：normalize 可选入参，携带 run 级错误信息（不属单条 log）。
+ *
+ * - errorDetail：run.error_detail（task-07 透传的 ModelError 序列化字典）；有值时
+ *   在 processedLogs 末尾追加结构化 error 类日志项。
+ * - runStatus：run.status；为 "failed" 且无 errorDetail 时，brownfield 兜底追加
+ *   「运行失败（无详情）」error 项（design §9 / D-008）。
+ *
+ * 调用方不传（旧调用）→ 行为与历史完全一致（成功路径零回归）。task-10 集成时
+ * 由 viewer 传入 run.error_detail / run.status。
+ */
+export interface NormalizeOptions {
+  errorDetail?: { [key: string]: unknown } | null;
+  runStatus?: string | null;
+}
+
+export function normalizeLogs(
+  logs: AgentRunLogEntry[],
+  options?: NormalizeOptions,
+): ProcessedLog[] {
   // ql-20260620：归一化本身若因异常数据抛错，回退为逐条原样渲染，
   // 保证日志面板不整页崩（client-side exception）。
   try {
-    return normalizeLogsImpl(logs);
+    return normalizeLogsImpl(logs, options);
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error("[normalizeLogs] 归一化失败，回退为逐条原样渲染", err);
@@ -372,7 +518,15 @@ export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
   }
 }
 
-function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
+function normalizeLogsImpl(
+  logs: AgentRunLogEntry[],
+  options?: NormalizeOptions,
+): ProcessedLog[] {
+  // task-08：是否已具备结构化错误（error_detail 或 failed 兜底）。若有，则
+  // [ASSISTANT] API Error 文本行将被结构化项取代（hidden，避免重复/误导）。
+  const hasStructuredError =
+    !!options?.errorDetail || options?.runStatus === "failed";
+
   // 2026-07-09-agent-log-display-fix / D-002@v2 原保留 [SYSTEM:thinking_tokens] 折叠显示；
   // ql-20260709-003 推翻为默认隐藏（用户反馈 token 估算意义不大、且穿插把 thinking 切碎）。
   // thinking_tokens 行在下方 stdout 分支 hidden + continue，且不重置 thinking 合并指针，
@@ -513,6 +667,18 @@ function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
     }
     lastThinkingIdx = -1;
 
+    // task-08 / FR-03：[ASSISTANT] API Error 文本行不并入 assistant 合并。
+    // design §1 原缺陷：此类错误文本被 mergeAssistantPiece 吞成普通助手回复。
+    // - 有结构化错误（error_detail / failed 兜底）→ hidden（结构化项取代，避免重复）
+    // - 无结构化错误 → 保留为独立 error 类项（classifyLog 已标 semanticCategory=error）
+    if (isAssistantOnly(content) && isAssistantApiErrorText(content)) {
+      if (hasStructuredError) {
+        current.hidden = true;
+      }
+      lastAssistantIdx = -1;
+      continue;
+    }
+
     // ql-20260618-012：连续 [ASSISTANT] stdout 合并（cursor partial / 历史日志兜底）
     if (isAssistantOnly(content)) {
       const piece = extractAssistantText(content);
@@ -647,6 +813,26 @@ function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
         }
       }
     }
+  }
+
+  // task-08 / FR-03 / D-002@v1：在常规归一化后追加结构化 error 类日志项。
+  // errorDetail 有值 → 结构化项；failed 无 errorDetail → brownfield 兜底项
+  // （「运行失败（无详情）」）。两者 hidden=false（R-02：不进 NOISE 折叠白名单），
+  // semanticCategory=error。errorDetail 缺失且非 failed → 不追加（成功路径零回归）。
+  const errorItem = buildErrorLogItem(options?.errorDetail);
+  if (errorItem) {
+    result.push(makeErrorProcessedLog(errorItem));
+  } else if (options?.runStatus === "failed") {
+    result.push(
+      makeErrorProcessedLog({
+        type: "unknown",
+        code: null,
+        message: "运行失败（无详情）",
+        retryable: false,
+        hint: null,
+        raw: null,
+      }),
+    );
   }
 
   return result;
