@@ -319,3 +319,51 @@ describe("task-09: 无 actions 时不渲染操作区", () => {
     expect(screen.getByText(MODEL_ERROR_META.unknown.defaultHint)).toBeInTheDocument();
   });
 });
+
+/* ------------------------------------------------------------------ */
+/*  task-11 回归补强：多 actions 组合 / a11y / 无 raw 回调边界          */
+/* ------------------------------------------------------------------ */
+
+describe("task-11 回归补强：actions 组合 / a11y / 边界", () => {
+  it("retryable=true + onResend + onSwitchProvider + raw → 三按钮同现，重发为 primary（其余 default）", () => {
+    render(
+      <RunErrorItem
+        item={makeItem({ type: "rate_limited", retryable: true, raw: "限流原始文本" })}
+        onResend={() => {}}
+        onSwitchProvider={() => {}}
+      />,
+    );
+    const resend = screen.getByRole("button", { name: /重新发送/ });
+    const switchBtn = screen.getByRole("button", { name: /切换供应商/ });
+    const detail = screen.getByRole("button", { name: /查看详情/ });
+    // 重发为 primary（首个修复动作）；切换 / 详情为 default（非 primary）。
+    expect(resend.className).toContain("bg-primary");
+    expect(switchBtn.className).not.toContain("bg-primary");
+    expect(detail.className).not.toContain("bg-primary");
+  });
+
+  it("查看详情 aria-expanded 随折叠状态切换（a11y 契约）", () => {
+    render(<RunErrorItem item={makeItem({ type: "timeout", raw: "raw text" })} />);
+    const btn = screen.getByRole("button", { name: /查看详情/ });
+    expect(btn.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(btn);
+    expect(btn.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(btn);
+    expect(btn.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("raw=null + onViewDetail → 仍显示「查看详情」，点击触发回调但不渲染 raw <pre>", () => {
+    const onView = vi.fn();
+    const { container } = render(
+      <RunErrorItem
+        item={makeItem({ type: "unknown", raw: null })}
+        onViewDetail={onView}
+      />,
+    );
+    // 无 raw 但传了 onViewDetail → 查看详情按钮仍渲染（showDetailBtn = hasRaw || onViewDetail）。
+    fireEvent.click(screen.getByRole("button", { name: /查看详情/ }));
+    expect(onView).toHaveBeenCalledTimes(1);
+    // 无 raw 可展开，点击后不渲染 <pre> 原文区。
+    expect(container.querySelector("pre")).not.toBeInTheDocument();
+  });
+});

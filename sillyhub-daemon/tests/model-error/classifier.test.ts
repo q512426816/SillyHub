@@ -217,6 +217,35 @@ describe('classifyModelError — 非错误 / 非 claude（task-02 约束）', ()
     expect(result).toBeNull();
   });
 
+  // task-11 回归补强（D-008 成功路径关键守卫）：
+  // classifier.ts 注释明确——成功 turn 即便残留 api_retry / 429 / 上限文本也不算失败
+  //（曾瞬时限流但最终 is_error=false 已恢复）。判定只看 isError，不能因文本含失败关键词
+  // 就在成功 turn 产出 ModelError。这是「成功路径不产 error」的核心回归点：防止后续改动
+  // 误把文本检测前置于 isError 守卫，导致成功 run 被错误标红。
+  it('成功路径关键回归：isError=false 即便残留 429/上限/api_retry 文本也 → null', () => {
+    const result = classifyModelError({
+      agent: 'claude',
+      isError: false,
+      resultText: 'Request rejected (429) · [1310][您已达到每周/每月使用上限]',
+      apiRetryError: 'api_retry: http=429 error=Too Many Requests',
+      assistantStdout: 'API Error: Request rejected (429) · 使用上限',
+    });
+    expect(result).toBeNull();
+  });
+
+  it('成功路径：isError=false 且各文本来源全空 → null（不兜底 unknown）', () => {
+    const result = classifyModelError({
+      agent: 'claude',
+      isError: false,
+      resultText: '',
+      apiRetryError: '',
+      assistantStdout: '',
+      stderrText: '',
+    });
+    // isError=false 优先于「文本为空兜底 unknown」分支，成功路径绝不产 error。
+    expect(result).toBeNull();
+  });
+
   it('isError=true 但文本为空 → 兜底 unknown（仍属运行失败）', () => {
     const result = classifyModelError({
       agent: 'claude',
