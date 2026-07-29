@@ -164,3 +164,12 @@
 - 根因：WSL 的 `$USER` 是 **Linux 用户名**（默认常 root），≠ Windows 用户名。install.sh WSL 分支原用 `$USER` 拼 `/mnt/c/Users/${USER}/.sillyhub/daemon`，若 WSL $USER=root 则 `/mnt/c/Users/root/` 不存在（Windows 用户目录是 `<winname>`，如 12532），`mkdir -p` 在 `C:\Users\` 下建 `root/` 被 drvfs 拒。
 - 修复（ql-20260713-004）：WSL 下改用 `/mnt/c/Windows/System32/cmd.exe /c "echo %USERPROFILE%"` 拿真实 Windows 用户目录（`C:\Users\<winname>`），转 `/mnt/<drive>/...` 拼 INSTALL_DIR。**`powershell $env:USERPROFILE` 在 WSL root 下不展开**（`$env` 被 bash/interop 吃，返回空），`cmd.exe echo %USERPROFILE%` 可靠。
 - 通用坑：WSL 下要拿 Windows 用户目录/用户名，**别用 WSL 的 `$USER`/`$HOME`**（是 Linux 的，常 root），用 `cmd.exe /c "echo %USERPROFILE%"`/`%USERNAME%` 或读注册表。跨 Git Bash/WSL 的脚本里 `$USER` 语义不同：Git Bash `$USER`=Windows 用户名，WSL `$USER`=Linux 用户名——不能假设一致。
+
+## 2026-07-29 — SILLYSPEC_MASTER_KEY 必须 v1:<64位hex>，非 hex 值致 get_cipher() 裸 ValueError 全模块 500
+
+> 来源：ql-20260729-001-b3af（GET /api/llm-providers 500 修复）。
+
+- 现象：GET /api/llm-providers 返回 500（及所有走 `CredentialCipher` 的接口：llm_provider / git_identity / worktree 等）。后端日志 `ValueError: non-hexadecimal number found in fromhex() arg at position 0`，栈顶在 `app/modules/llm_provider/service.py:138 _default_cipher` → `app/core/crypto.py:49 bytes.fromhex`。
+- 根因：`deploy/.env` 的 `SILLYSPEC_MASTER_KEY` 被填成人类可读标识串 `msk-sillyhub-dev-90d223fd-...`（看着像密钥，实则非十六进制）。`crypto._load_master_key()` 只对**空值**抛友好 `MasterKeyMissing`，非空但非 hex 直接走 `bytes.fromhex(hex_key)` → 裸 `ValueError` → `get_cipher()` 构造期崩溃 → 任何 `new LlmProviderService(session)` / `WorktreeService(...)` 立即 500（list 接口构造 service 时就炸，根本到不了 SQL）。
+- 修复（ql-20260729-001-b3af）：`deploy/.env` 第5行换成合法 `v1:<secrets.token_hex(32) 生成的 64位hex>`；`docker compose up -d --force-recreate backend` 重建容器重读 env。零数据风险：`llm_providers`/`git_identities` 表均空、`api_keys` 为 hash 存储不依赖 master key。
+- 通用坑：① `SILLYSPEC_MASTER_KEY` 格式必须是 `<key_id>:<64位hex>`（如 `v1:ab12...`）或裸 64 位 hex，**不能**填标识串/base64/明文密码；生成命令 `python -c "import secrets; print(f'v1:{secrets.token_hex(32)}')"`（`crypto.py:42` MasterKeyMissing 的 hint 已给）。② `deploy/.env` 被 `.gitignore`，改它不进 `git status`，靠重建容器重读 env 落地（`docker compose up -d` 检测到 backend env 变化会自动 recreate，保险用 `--force-recreate backend`）。③ `_load_master_key` 对「非空但格式非法」抛裸 ValueError 是健壮性缺陷——建议后续把 `bytes.fromhex` 包 try/except 转 `MasterKeyMissing`（带 hint），避免 500 时栈里只有裸 fromhex 难定位。
