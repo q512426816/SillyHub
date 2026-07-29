@@ -34,6 +34,8 @@ import {
 
 import { AgentModelInput } from "@/components/AgentModelInput";
 import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
+import { RunErrorItem } from "@/components/agent-log/run-error-item";
+import { buildErrorLogItem, type ErrorLogItem } from "@/components/agent-log/normalize";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,6 +50,7 @@ import {
   endSession,
   streamSession,
   getAgentSession,
+  listSessionRuns,
   PROVIDER_META,
   type InteractiveProvider,
   type SessionPermissionRequest,
@@ -74,6 +77,13 @@ export interface SessionTurnView {
    */
   inputTokens: number | null;
   outputTokens: number | null;
+  /**
+   * 2026-07-29-model-error-visibility / FR-04：turn 终态=failed 时拉取的结构化错误
+   * 详情（GET /sessions/{id}/runs 的 error_detail 经 buildErrorLogItem 映射）。
+   * null/undefined（成功 turn / brownfield / attach 历史 turn）→ 不渲染 RunErrorItem。
+   * 可选：外部 logsToTurns 构造的历史 turn 不带此字段（只读 import，不改其构造）。
+   */
+  errorDetail?: ErrorLogItem | null;
 }
 
 interface InteractiveSessionView {
@@ -178,6 +188,9 @@ export function InteractiveSessionPanel({
   const streamConnRef = useRef<SessionStreamConnection | null>(null);
   // task-10 attach 模式轮询句柄（unmount / 转出 attach 模式时清理）
   const attachPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 2026-07-29-model-error-visibility：已拉取过 error_detail 的 failed run_id 集合，
+  // 防 SSE 重连重发 turn_completed 触发重复 listSessionRuns（同一 failed run 只拉一次）。
+  const fetchedErrorRunIdsRef = useRef<Set<string>>(new Set());
 
   // 当在线 provider 变化且当前选中的不再可用，回退到默认。
   useEffect(() => {
@@ -243,6 +256,40 @@ export function InteractiveSessionPanel({
             inputTokens: env.input_tokens ?? turn.inputTokens,
             outputTokens: env.output_tokens ?? turn.outputTokens,
           }), { clearCurrentRun: env.run_id! }));
+
+          // 2026-07-29-model-error-visibility / FR-04：turn 终态=failed 时拉取该 run 的
+          // 结构化错误详情（AgentRun.error_detail，GET /sessions/{id}/runs），用
+          // buildErrorLogItem 安全映射成 ErrorLogItem 写入对应 turn，供 RunErrorItem
+          // 渲染（原因 + 针对性建议 + 操作）。
+          // - 同 run_id 只拉一次：fetchedErrorRunIdsRef 去重，防 SSE 重连重发触发重复请求。
+          // - 拉取失败 / error_detail 缺失 → 静默不崩（brownfield 守护），失败 turn 仍显示
+          //   状态徽标（失败）+ 通用 errorMsg。
+          if (
+            terminal === "failed" &&
+            env.run_id &&
+            !fetchedErrorRunIdsRef.current.has(env.run_id)
+          ) {
+            const failedRunId = env.run_id;
+            fetchedErrorRunIdsRef.current.add(failedRunId);
+            void (async () => {
+              try {
+                const runs = await listSessionRuns(sessionId);
+                const matched = runs.find((r) => r.id === failedRunId);
+                const item = buildErrorLogItem(matched?.error_detail ?? null);
+                if (!item) return;
+                setView((prev) => ({
+                  ...prev,
+                  turns: prev.turns.map((t) =>
+                    t.runId === failedRunId && !t.errorDetail
+                      ? { ...t, errorDetail: item }
+                      : t,
+                  ),
+                }));
+              } catch {
+                // 拉取失败不阻塞：失败 turn 仍有状态徽标 + 通用 errorMsg
+              }
+            })();
+          }
         },
         onTokens: (env) => {
           // ql-20260621：执行中实时累积 token。每次 submit_messages 都推一条，
@@ -442,6 +489,64 @@ export function InteractiveSessionPanel({
     }
   }, []);
 
+  // 2026-07-29-model-error-visibility：后续 turn 提交（injectSession）共享逻辑。
+  // handleSend 的追问分支与失败轮次「重新发送」(handleResend) 共用此函数，确保占位
+  // turn 创建 / SSE 不重建 / turn conflict 回填等行为完全一致（不新建提交逻辑）。
+  const submitFollowup = useCallback(
+    async (sessionId: string, prompt: string): Promise<void> => {
+      const placeholderId = `__pending_inject_${Date.now()}__`;
+      setView((prev) => ({
+        ...prev,
+        currentRunId: placeholderId,
+        turns: [
+          ...prev.turns,
+          {
+            runId: placeholderId,
+            turn: null,
+            prompt,
+            output: "",
+            status: "pending",
+            seenLogIds: new Set(),
+            inputTokens: null,
+            outputTokens: null,
+            errorDetail: null,
+          },
+        ],
+      }));
+      try {
+        const resp = await injectSession(sessionId, prompt);
+        setView((prev) => ({
+          ...prev,
+          currentRunId: resp.run_id,
+          turns: prev.turns.map((t) =>
+            t.runId === placeholderId
+              ? { ...t, runId: resp.run_id, status: "running" }
+              : t,
+          ),
+          errorMsg: null,
+        }));
+        // 不重建 SSE（贯穿多 turn）
+      } catch (err) {
+        const apiErr = err as ApiError;
+        const isTurnConflict =
+          apiErr instanceof ApiError &&
+          apiErr.status === 409 &&
+          apiErr.code === "DAEMON_SESSION_TURN_CONFLICT";
+        // 移除未被接受的占位 turn；currentRunId 清空（inject 失败，无运行中 turn）
+        setView((prev) => ({
+          ...prev,
+          currentRunId: null,
+          turns: prev.turns.filter((t) => t.runId !== placeholderId),
+          errorMsg: apiErr instanceof ApiError ? apiErr.message : "追问失败",
+        }));
+        if (isTurnConflict) {
+          setInput(prompt); // turn conflict：保留 prompt 供重试
+        }
+      }
+    },
+    [],
+  );
+
   // 发送主入口
   const handleSend = useCallback(async () => {
     const prompt = input.trim();
@@ -462,7 +567,7 @@ export function InteractiveSessionPanel({
         ...INITIAL_VIEW,
         status: "creating",
         turns: [
-          { runId: "__pending_create__", turn: null, prompt, output: "", status: "pending", seenLogIds: new Set(), inputTokens: null, outputTokens: null },
+          { runId: "__pending_create__", turn: null, prompt, output: "", status: "pending", seenLogIds: new Set(), inputTokens: null, outputTokens: null, errorDetail: null },
         ],
       });
       try {
@@ -508,50 +613,36 @@ export function InteractiveSessionPanel({
       return;
     }
 
-    // 后续 turn：injectSession（同一 session 下一 turn）
+    // 后续 turn：injectSession（同一 session 下一 turn）。复用 submitFollowup，与失败
+    // 轮次「重新发送」共用同一提交链路（不新建提交逻辑）。
     if (view.status === "active" && view.sessionId) {
-      const sessionId = view.sessionId;
-      const placeholderId = `__pending_inject_${Date.now()}__`;
-      setView((prev) => ({
-        ...prev,
-        currentRunId: placeholderId,
-        turns: [
-          ...prev.turns,
-          { runId: placeholderId, turn: null, prompt, output: "", status: "pending", seenLogIds: new Set(), inputTokens: null, outputTokens: null },
-        ],
-      }));
-      try {
-        const resp = await injectSession(sessionId, prompt);
-        setView((prev) => ({
-          ...prev,
-          currentRunId: resp.run_id,
-          turns: prev.turns.map((t) =>
-            t.runId === placeholderId
-              ? { ...t, runId: resp.run_id, status: "running" }
-              : t,
-          ),
-          errorMsg: null,
-        }));
-        // 不重建 SSE（贯穿多 turn）
-      } catch (err) {
-        const apiErr = err as ApiError;
-        const isTurnConflict =
-          apiErr instanceof ApiError &&
-          apiErr.status === 409 &&
-          apiErr.code === "DAEMON_SESSION_TURN_CONFLICT";
-        // 移除未被接受的占位 turn；currentRunId 清空（inject 失败，无运行中 turn）
-        setView((prev) => ({
-          ...prev,
-          currentRunId: null,
-          turns: prev.turns.filter((t) => t.runId !== placeholderId),
-          errorMsg: apiErr instanceof ApiError ? apiErr.message : "追问失败",
-        }));
-        if (isTurnConflict) {
-          setInput(prompt); // turn conflict：保留 prompt 供重试
-        }
-      }
+      await submitFollowup(view.sessionId, prompt);
     }
-  }, [input, hasOnlineProvider, view, provider, model, establishStream, onSessionCreated]);
+  }, [input, hasOnlineProvider, view, provider, model, establishStream, onSessionCreated, submitFollowup]);
+
+  // 2026-07-29-model-error-visibility：失败轮次「重新发送」— 复用 submitFollowup 重新
+  // 提交该 turn 的 prompt（injectSession，不新建提交逻辑）。受 turn 级串行 / active 守卫；
+  // retryable=false 的错误由 RunErrorItem 隐藏按钮（onResend 仅在 retryable 时渲染），
+  // 故点击时必为可重试错误。
+  const handleResend = useCallback(async (prompt: string) => {
+    if (!view.sessionId) return;
+    if (!hasOnlineProvider) return;
+    if (view.status !== "active") return;
+    if (view.currentRunId) return; // turn 级串行：等待当前 turn 完成
+    const trimmed = prompt.trim();
+    if (!trimmed || trimmed.length > MAX_PROMPT_LEN) return;
+    await submitFollowup(view.sessionId, trimmed);
+  }, [view.sessionId, view.status, view.currentRunId, hasOnlineProvider, submitFollowup]);
+
+  // 2026-07-29-model-error-visibility：「切换供应商」— 跳设置页（默认 tab=providers 我的供应商）。
+  // 用 window.location.assign 做整页跳转（非 next/navigation useRouter）：后者需在每个渲染
+  // 本组件的测试文件单独 vi.mock，而本面板被多个未 mock next/navigation 的测试覆盖且只读
+  // 不可改，整页跳转零 mock 依赖、零回归，生产可达 /settings（providers 为默认 tab）。
+  const handleSwitchProvider = useCallback(() => {
+    if (typeof window !== "undefined") {
+      window.location.assign("/settings");
+    }
+  }, []);
 
   // interrupt：只收敛 currentRun
   const handleInterrupt = useCallback(async () => {
@@ -891,6 +982,36 @@ export function InteractiveSessionPanel({
                     </div>
                   </div>
                 )}
+                {turn.errorDetail && (
+                  <div className="flex justify-start">
+                    <div className="max-w-[86%]">
+                      <ErrorBoundary
+                        label="run-error-item"
+                        fallback={() => (
+                          <div className="text-[11px] text-red-600/70">
+                            运行错误展示失败
+                          </div>
+                        )}
+                      >
+                        {/* 2026-07-29-model-error-visibility：turn 失败的结构化错误展示
+                            （原因 + 针对性建议 + 操作）。onResend 仅在 prompt 存在时提供，
+                            RunErrorItem 内部再按 retryable 决定是否渲染「重新发送」；
+                            retryable=false 时主操作自动升为「切换供应商」。 */}
+                        <RunErrorItem
+                          item={turn.errorDetail}
+                          onResend={
+                            turn.prompt.trim()
+                              ? () => {
+                                  void handleResend(turn.prompt);
+                                }
+                              : undefined
+                          }
+                          onSwitchProvider={handleSwitchProvider}
+                        />
+                      </ErrorBoundary>
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                   <TurnStatusBadge
                     status={turn.status}
@@ -1048,6 +1169,7 @@ function upsertTurn(
       seenLogIds: new Set(),
       inputTokens: env.input_tokens ?? null,
       outputTokens: env.output_tokens ?? null,
+      errorDetail: null,
     };
     turns = [...prev.turns, apply(newTurn)];
   } else {

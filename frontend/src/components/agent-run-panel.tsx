@@ -7,6 +7,7 @@ import { AgentLogViewer } from "@/components/agent-log-viewer";
 import type { AgentLogInputControls } from "@/components/agent-log/types";
 import { Button } from "@/components/ui/button";
 import { getAgentRun } from "@/lib/agent";
+import { listSessionRuns } from "@/lib/daemon";
 import { formatTokenCount } from "@/lib/format-token";
 import { useAgentRunStream } from "@/lib/use-agent-run-stream";
 import type { AgentRunInputStream } from "@/lib/use-agent-run-stream";
@@ -70,6 +71,14 @@ export interface AgentRunPanelProps {
    * SSE gate_status_changed 触发，父组件据此更新 verify stage gate 徽标。
    */
   onGateStatusChanged?: (gateStatus: GateStatusEvent | null) => void;
+  /**
+   * task-10 / 2026-07-29-model-error-visibility：运行错误「切换供应商」回调（透传
+   * viewer.onRunErrorSwitchProvider → RunErrorItem.onSwitchProvider）。父级（agent 页）
+   * 注入 router.push('/settings')；未传则错误项不显示切换按钮（零回归，与 RunErrorItem
+   * 「纯展示 + 发事件」分层一致）。重发不接：panel 场景 run 多为扫描 / 任务型，前端
+   * 无 prompt 上下文重放（injectSession 需 prompt），强接易误导。
+   */
+  onRunErrorSwitchProvider?: () => void;
 }
 
 /**
@@ -151,6 +160,7 @@ export function AgentRunPanel({
   onDone,
   onClose,
   onGateStatusChanged,
+  onRunErrorSwitchProvider,
 }: AgentRunPanelProps) {
   // ──────────────────────────────────────────────────────────────────────────
   // task-16 / FR-11：run 累计 input/output token 状态 + 5s 轮询刷新。
@@ -171,6 +181,15 @@ export function AgentRunPanel({
     cacheRead: number | null;
     cacheCreation: number | null;
   } | null>(null);
+
+  // task-10 / 2026-07-29-model-error-visibility：run 失败结构化错误展示。
+  // AgentRun 主响应（getAgentRun）不含 error_detail（只在 SessionRunRead），故 run
+  // failed 时用 run.session_id 调 listSessionRuns 再按 run.id 匹配取 error_detail，
+  // 传给 AgentLogViewer（runErrorDetail + runStatus）→ normalize 合成 error 日志项 →
+  // RunErrorItem 渲染原因 + 操作。每个 run 只拉一次（errorDetailFetchedRef 防重）。
+  const [runStatus, setRunStatus] = React.useState<string | null>(null);
+  const [runErrorDetail, setRunErrorDetail] = React.useState<{ [key: string]: unknown } | null>(null);
+  const errorDetailFetchedRef = React.useRef(false);
 
   // fetchUsage 通过 ref 暴露给 handleDone：handleDone 闭包在 useAgentRunStream 内部
   // 注册一次（依赖 onDone 变化重连），如直接闭包 fetchUsage 会拿到 stale 值。
@@ -214,9 +233,16 @@ export function AgentRunPanel({
   React.useEffect(() => {
     if (!runId) {
       setTokenUsage(null);
+      setRunStatus(null);
+      setRunErrorDetail(null);
+      errorDetailFetchedRef.current = false;
       fetchUsageRef.current = null;
       return;
     }
+    // runId 变化：重置错误状态 + 拉取标记（切 run 不串错 error_detail）。
+    setRunStatus(null);
+    setRunErrorDetail(null);
+    errorDetailFetchedRef.current = false;
     let cancelled = false;
     const fetchUsage = () => {
       getAgentRun(workspaceId, runId)
@@ -228,6 +254,28 @@ export function AgentRunPanel({
               cacheRead: run.cache_read_tokens,
               cacheCreation: run.cache_creation_tokens,
             });
+            setRunStatus(run.status);
+            // task-10 / 2026-07-29-model-error-visibility：failed run 拉结构化错误详情。
+            // 仅 status=failed 且有 session_id 时触发，每 run 一次（ref 防重，避免 5s
+            // 轮询重复打）。error_detail 缺失（brownfield 老 run）→ 保持 null，normalize
+            // 据 runStatus=failed 兜底「运行失败（无详情）」（design §9）。
+            if (
+              run.status === "failed" &&
+              run.session_id &&
+              !errorDetailFetchedRef.current
+            ) {
+              errorDetailFetchedRef.current = true;
+              listSessionRuns(run.session_id)
+                .then((sessionRuns) => {
+                  if (!cancelled) {
+                    const matched = sessionRuns.find((sr) => sr.id === runId);
+                    setRunErrorDetail(matched?.error_detail ?? null);
+                  }
+                })
+                .catch(() => {
+                  /* 静默：error_detail 拉取失败不阻断面板（brownfield 不崩） */
+                });
+            }
           }
         })
         .catch(() => {
@@ -334,6 +382,9 @@ export function AgentRunPanel({
         inputControls={inputControls}
         permissionRequests={perms}
         onPermissionResolved={handlePermissionResolved}
+        runErrorDetail={runErrorDetail}
+        runStatus={runStatus}
+        onRunErrorSwitchProvider={onRunErrorSwitchProvider}
       />
     </div>
   );

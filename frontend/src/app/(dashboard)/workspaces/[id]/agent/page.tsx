@@ -33,7 +33,7 @@ import {
   type AgentRunLogEntry,
 } from "@/lib/agent";
 import { useAgentRuns } from "@/lib/use-agent-runs";
-import { PROVIDER_META, listDaemonRuntimes, type DaemonRuntimeRead } from "@/lib/daemon";
+import { PROVIDER_META, listDaemonRuntimes, listSessionRuns, type DaemonRuntimeRead } from "@/lib/daemon";
 import { getWorkspace, scanGenerate, type Workspace } from "@/lib/workspaces";
 import {
   canBorrowSharedDaemon,
@@ -248,6 +248,14 @@ function SectionTitle({
 
 export default function AgentPage({ params }: Props) {
   const workspaceId = params.id;
+  // 2026-07-29-model-error-visibility：运行错误「切换供应商」跳平台设置页（默认 tab
+  // 「我的供应商」providers），RunErrorItem 回调（活跃 panel + 历史展开共用）。
+  // 用 window.location 而非 next/navigation useRouter：page 单测未挂 app router 上下文
+  // （测试文件不在本次改动范围），顶层 useRouter 会让其 invariant 失败；window 跳转
+  // 在回调内惰性执行，测试不触发回调即不受影响，对「跳设置页」语义等价。
+  const handleSwitchProvider = useCallback(() => {
+    window.location.href = "/settings";
+  }, []);
 
   // task-09（2026-07-01-react-query-migration）：react-query 接管 list 获取 + 条件轮询。
   const { runs, isLoading, error: listError, refetch } = useAgentRuns(workspaceId);
@@ -258,6 +266,9 @@ export default function AgentPage({ params }: Props) {
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [expandedLogs, setExpandedLogs] = useState<AgentRunLogEntry[] | null>(null);
   const [expandedLogsLoading, setExpandedLogsLoading] = useState(false);
+  // 2026-07-29-model-error-visibility：历史 failed run 的结构化错误详情（按展开 run
+  // 单值缓存，随 expandedRunId 切换 / 折叠清空）。
+  const [expandedErrorDetail, setExpandedErrorDetail] = useState<{ [key: string]: unknown } | null>(null);
 
   // ql-20260617-002：UI 优化 — 历史记录的状态筛选 + 分页。
   const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "failed" | "killed">("all");
@@ -487,11 +498,13 @@ export default function AgentPage({ params }: Props) {
       if (expandedRunId === runId) {
         setExpandedRunId(null);
         setExpandedLogs(null);
+        setExpandedErrorDetail(null);
         return;
       }
       setExpandedRunId(runId);
       setExpandedLogsLoading(true);
       setExpandedLogs(null);
+      setExpandedErrorDetail(null);
       try {
         const logs = await getAgentRunLogs(workspaceId, runId);
         setExpandedLogs(logs);
@@ -500,8 +513,23 @@ export default function AgentPage({ params }: Props) {
       } finally {
         setExpandedLogsLoading(false);
       }
+      // 2026-07-29-model-error-visibility：failed run 额外拉结构化错误详情。
+      // AgentRun 主响应不含 error_detail（只在 SessionRunRead），按 run.session_id
+      // 拉 listSessionRuns 再用 run.id 匹配。缺失（brownfield 老 run / session_id 为
+      // null）→ 保持 null，normalize 据 runStatus=failed 兜底「运行失败（无详情）」。
+      const run = runs.find((r) => r.id === runId);
+      if (run?.status === "failed" && run.session_id) {
+        listSessionRuns(run.session_id)
+          .then((sessionRuns) => {
+            const matched = sessionRuns.find((sr) => sr.id === runId);
+            setExpandedErrorDetail(matched?.error_detail ?? null);
+          })
+          .catch(() => {
+            /* 静默：error_detail 缺失走 brownfield 兜底（normalize runStatus=failed） */
+          });
+      }
     },
-    [expandedRunId, workspaceId],
+    [expandedRunId, workspaceId, runs],
   );
 
   /* ================================================================ */
@@ -799,6 +827,7 @@ export default function AgentPage({ params }: Props) {
             isLive
             onDone={handleActiveRunDone}
             onClose={() => setActiveRunId(null)}
+            onRunErrorSwitchProvider={handleSwitchProvider}
           />
         </section>
       )}
@@ -956,6 +985,9 @@ export default function AgentPage({ params }: Props) {
                                 maxHeightClass="max-h-[480px]"
                                 compact
                                 variant="embedded"
+                                runErrorDetail={expandedErrorDetail}
+                                runStatus={run.status}
+                                onRunErrorSwitchProvider={handleSwitchProvider}
                                 actions={
                                   expandedLogs && expandedLogs.length > 0 ? (
                                     <Button

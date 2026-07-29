@@ -1046,6 +1046,34 @@ export async function getAgentSessionLogs(
   );
 }
 
+/**
+ * GET /api/daemon/sessions/{id}/runs 返回项（对齐后端 SessionRunRead，task-07 / FR-02）。
+ * 每项含 ``error_detail``（模型层 ModelError 序列化值；成功/无错误为 null），
+ * 供前端在 run 失败时拉取结构化错误原因（change 2026-07-29-model-error-visibility）。
+ */
+export interface SessionRunRead {
+  id: string;
+  status: string | null;
+  error_code: string | null;
+  /** 模型层 ModelError（type/code/message/retryable/hint/raw），与 error_code 正交（D-009）。 */
+  error_detail: { [key: string]: unknown } | null;
+  started_at: string | null;
+  finished_at: string | null;
+  exit_code: number | null;
+}
+
+/**
+ * GET /api/daemon/sessions/{id}/runs — 列出 session 的 AgentRun，每项含 error_detail。
+ * 会话页 run 失败时拉取，按 run_id 匹配取结构化错误详情（task-07 端点）。
+ */
+export async function listSessionRuns(
+  sessionId: string,
+): Promise<SessionRunRead[]> {
+  return apiFetch<SessionRunRead[]>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/runs`,
+  );
+}
+
 // 内部 dev-time 校验（不暴露给业务层，避免与 backend DTO 双重维护）。
 export const AgentSessionListResponseSchema = z.object({
   items: z.array(z.object({}).passthrough()),
