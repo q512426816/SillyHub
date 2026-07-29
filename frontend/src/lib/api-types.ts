@@ -3378,6 +3378,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Session Runs
+         * @description List the AgentRuns of an owned session, each carrying error_detail (task-07 / FR-02).
+         *
+         *     design §7.4：响应 run 项含 ``error_detail``（模型层 ModelError；成功 / 无错误
+         *     run 为 None），供前端拉历史与当前 run 错误。归属 / 存在性复用
+         *     ``get_agent_session``（missing / 跨用户 / 软删均 404，不泄露存在性），与其它
+         *     session 读端点同一道闸门。查询内联在此（service.py 非本任务 allowed_path），
+         *     与 get_session_detail 的 run 查询同款。
+         */
+        get: operations["list_session_runs_api_daemon_sessions__session_id__runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/logs": {
         parameters: {
             query?: never;
@@ -9523,6 +9549,7 @@ export interface components {
             input_tokens?: number | null;
             /** Output Tokens */
             output_tokens?: number | null;
+            error?: components["schemas"]["ModelErrorDTO"] | null;
         };
         /** InteractiveRunResultResponse */
         InteractiveRunResultResponse: {
@@ -10096,6 +10123,32 @@ export interface components {
              */
             artifacts: components["schemas"]["MissionArtifactResponse"][];
         };
+        /**
+         * ModelErrorDTO
+         * @description 模型层错误详情（存 AgentRun.error_detail JSON 列）。
+         *
+         *     与既有 AgentRun.error_code（调度层/系统错误，如 no_online_daemon）正交，
+         *     不互相覆盖（D-009）。仅当 run 因模型调用失败时由 daemon 归类回传。
+         */
+        ModelErrorDTO: {
+            type: components["schemas"]["ModelErrorType"];
+            /** Code */
+            code?: string | null;
+            /** Message */
+            message: string;
+            /** Retryable */
+            retryable: boolean;
+            /** Hint */
+            hint?: string | null;
+            /** Raw */
+            raw?: string | null;
+        };
+        /**
+         * ModelErrorType
+         * @description 模型错误类型（与 daemon ModelErrorType 同构）。
+         * @enum {string}
+         */
+        ModelErrorType: "auth_failed" | "quota_exceeded" | "rate_limited" | "timeout" | "model_not_found" | "network" | "provider_error" | "unknown";
         /** OkResponse */
         OkResponse: {
             /**
@@ -13589,6 +13642,36 @@ export interface components {
             session_id: string;
             /** Status */
             status: string;
+        };
+        /**
+         * SessionRunRead
+         * @description GET /sessions/{id}/runs 单个 run 项（task-07 / FR-02 / design §7.4）。
+         *
+         *     透传 ``AgentRun.error_detail``（模型层 ModelError 序列化值；成功 / 无错误 run
+         *     为 None），供前端拉历史与当前 run 错误。``error_code``（调度层 / 系统错误）
+         *     与 ``error_detail`` 正交共存（D-009），前端可分别用作系统错误兜底与模型错误
+         *     渲染。DTO 内联在此避免触碰 schema.py（非本任务 allowed_path）。
+         */
+        SessionRunRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Status */
+            status: string;
+            /** Error Code */
+            error_code?: string | null;
+            /** Error Detail */
+            error_detail?: {
+                [key: string]: unknown;
+            } | null;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Exit Code */
+            exit_code?: number | null;
         };
         /**
          * SessionRuntimeRequest
@@ -21715,6 +21798,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_session_runs_api_daemon_sessions__session_id__runs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionRunRead"][];
                 };
             };
             /** @description Validation Error */

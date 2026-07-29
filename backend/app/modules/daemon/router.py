@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
+import json
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
@@ -1553,6 +1555,25 @@ class SessionEndRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=2000)
 
 
+class SessionRunRead(BaseModel):
+    """GET /sessions/{id}/runs 单个 run 项（task-07 / FR-02 / design §7.4）。
+
+    透传 ``AgentRun.error_detail``（模型层 ModelError 序列化值；成功 / 无错误 run
+    为 None），供前端拉历史与当前 run 错误。``error_code``（调度层 / 系统错误）
+    与 ``error_detail`` 正交共存（D-009），前端可分别用作系统错误兜底与模型错误
+    渲染。DTO 内联在此避免触碰 schema.py（非本任务 allowed_path）。
+    """
+
+    id: uuid.UUID
+    status: str
+    error_code: str | None = None
+    error_detail: dict | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    exit_code: int | None = None
+    model_config = {"from_attributes": True}
+
+
 # ── Interactive session permission approval (task-08, FR-07 / D-007@v1) ──────
 # DTOs inline (per task-08 allowed_paths: schema.py is the batch DTO home).
 # The service is wired via get_permission_service so the request-scoped DB
@@ -1882,6 +1903,66 @@ async def delete_session(
     await DaemonService(session).delete_agent_session(session_id, user.id)
 
 
+async def _inject_run_error_events(
+    session_id: uuid.UUID,
+    inner: AsyncGenerator[str, None],
+) -> AsyncGenerator[str, None]:
+    """Wrap ``AgentService.stream_session_logs`` to append ``run_error`` SSE 帧（task-07）。
+
+    design §7.4 / §7.5 error_event_push：既有事件流**原样透传**（不改成功 / 失败的
+    turn_completed 帧、不动 done / keepalive）；仅当一个 ``turn_completed`` 帧报告
+    ``status=failed`` 且该 run 有 ``error_detail`` 时，在其后**追加**一个 ``run_error``
+    数据帧（``run_id`` + ``error{type,code,message,retryable,hint,raw}``），让前端
+    实时拿到模型层 ModelError 渲染错误卡片。
+
+    实现为 router 侧包装：生成器本体在 ``AgentService.stream_session_logs``，非本变更
+    allowed_path，故只在外层包一层。``error_detail`` 的 DB 查询用短 session（不贯穿
+    SSE 生命周期，对齐 stream_session_logs 的连接池安全约束）；``turn_completed`` 由
+    ``close_interactive_run`` 在 DB commit 之后才 publish，故此处查到的 error_detail
+    必然已落库（run_sync/service.py commit :968 早于 session publish :1038）。
+
+    事件名用默认 data 帧 + ``event=run_error``（与 turn_completed / log 同通道，前端
+    onmessage dispatch），不复用既有 ``event: error`` 命名事件（那是 Redis 连接失败等
+    传输层错误，避免语义混淆）。
+    """
+    from app.modules.agent.model import AgentRun
+
+    async for frame in inner:
+        yield frame
+        # 仅 data 帧承载可内省的 JSON 载荷（connected / keepalive 注释、done / error
+        # 命名事件均无 "data: " 前缀，直接跳过，零干扰既有事件流）。
+        if not frame.startswith("data: ") or not frame.endswith("\n\n"):
+            continue
+        try:
+            payload = json.loads(frame[len("data: ") : -2])
+        except (json.JSONDecodeError, ValueError, TypeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("event") != "turn_completed" or payload.get("status") != "failed":
+            continue
+        run_id_raw = payload.get("run_id")
+        if not run_id_raw:
+            continue
+        try:
+            run_id = uuid.UUID(str(run_id_raw))
+        except (ValueError, AttributeError):
+            continue
+        # 短 session 查 error_detail（不占连接池 slot 贯穿 SSE 生命周期）。
+        async with get_session_factory()() as db:
+            run = await db.get(AgentRun, run_id)
+        # 无 error_detail（成功 run 不到此分支；历史 failed run 无 ModelError）→ 不追加。
+        if run is None or not run.error_detail:
+            continue
+        error_event = {
+            "event": "run_error",
+            "session_id": str(session_id),
+            "run_id": str(run_id),
+            "error": run.error_detail,
+        }
+        yield f"data: {json.dumps(error_event, default=str)}\n\n"
+
+
 @router.get("/sessions/{session_id}/stream")
 async def stream_session_logs(
     session_id: uuid.UUID,
@@ -1922,7 +2003,12 @@ async def stream_session_logs(
         if owned is not None:
             # 构造生成器对象（惰性求值，此处不执行其 body）；session 随
             # async with 结束立即归还，stream_session_logs 内部自建短 session。
-            gen = AgentService(session).stream_session_logs(session_id)
+            # task-07：外层包一层 _inject_run_error_events，在 failed turn 后追加
+            # run_error 帧（透传 ModelError）；既有事件流不变。
+            gen = _inject_run_error_events(
+                session_id,
+                AgentService(session).stream_session_logs(session_id),
+            )
     if owned is None:
         raise DaemonSessionNotFound(
             f"AgentSession '{session_id}' not found.",
@@ -1934,6 +2020,42 @@ async def stream_session_logs(
         media_type="text/event-stream",
         headers=_SESSION_SSE_HEADERS,
     )
+
+
+@router.get(
+    "/sessions/{session_id}/runs",
+    response_model=list[SessionRunRead],
+)
+async def list_session_runs(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> list[SessionRunRead]:
+    """List the AgentRuns of an owned session, each carrying error_detail (task-07 / FR-02).
+
+    design §7.4：响应 run 项含 ``error_detail``（模型层 ModelError；成功 / 无错误
+    run 为 None），供前端拉历史与当前 run 错误。归属 / 存在性复用
+    ``get_agent_session``（missing / 跨用户 / 软删均 404，不泄露存在性），与其它
+    session 读端点同一道闸门。查询内联在此（service.py 非本任务 allowed_path），
+    与 get_session_detail 的 run 查询同款。
+    """
+    from app.modules.agent.model import AgentRun
+
+    svc = DaemonService(session)
+    # 归属 / 存在性校验（404 on missing / cross-user / soft-deleted）。
+    await svc.get_agent_session(session_id, user.id)
+    runs = (
+        (
+            await session.execute(
+                select(AgentRun)
+                .where(AgentRun.agent_session_id == session_id)
+                .order_by(AgentRun.started_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [SessionRunRead.model_validate(r) for r in runs]
 
 
 @router.get(

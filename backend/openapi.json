@@ -9306,6 +9306,54 @@
         }
       }
     },
+    "/api/daemon/sessions/{session_id}/runs": {
+      "get": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "List Session Runs",
+        "description": "List the AgentRuns of an owned session, each carrying error_detail (task-07 / FR-02).\n\ndesign §7.4：响应 run 项含 ``error_detail``（模型层 ModelError；成功 / 无错误\nrun 为 None），供前端拉历史与当前 run 错误。归属 / 存在性复用\n``get_agent_session``（missing / 跨用户 / 软删均 404，不泄露存在性），与其它\nsession 读端点同一道闸门。查询内联在此（service.py 非本任务 allowed_path），\n与 get_session_detail 的 run 查询同款。",
+        "operationId": "list_session_runs_api_daemon_sessions__session_id__runs_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SessionRunRead"
+                  },
+                  "title": "Response List Session Runs Api Daemon Sessions  Session Id  Runs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/sessions/{session_id}/logs": {
       "get": {
         "tags": [
@@ -29826,6 +29874,16 @@
               }
             ],
             "title": "Output Tokens"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelErrorDTO"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -31341,6 +31399,77 @@
           "status"
         ],
         "title": "MissionWorkerRunResponse"
+      },
+      "ModelErrorDTO": {
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/ModelErrorType"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "retryable": {
+            "type": "boolean",
+            "title": "Retryable"
+          },
+          "hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hint"
+          },
+          "raw": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "message",
+          "retryable"
+        ],
+        "title": "ModelErrorDTO",
+        "description": "模型层错误详情（存 AgentRun.error_detail JSON 列）。\n\n与既有 AgentRun.error_code（调度层/系统错误，如 no_online_daemon）正交，\n不互相覆盖（D-009）。仅当 run 因模型调用失败时由 daemon 归类回传。"
+      },
+      "ModelErrorType": {
+        "type": "string",
+        "enum": [
+          "auth_failed",
+          "quota_exceeded",
+          "rate_limited",
+          "timeout",
+          "model_not_found",
+          "network",
+          "provider_error",
+          "unknown"
+        ],
+        "title": "ModelErrorType",
+        "description": "模型错误类型（与 daemon ModelErrorType 同构）。"
       },
       "OkResponse": {
         "properties": {
@@ -42743,6 +42872,84 @@
         ],
         "title": "SessionReopenResponse",
         "description": "Response body for POST /sessions/{id}/reopen (task-05 / FR-2).\n\n``status`` is the backend-side placeholder state immediately after a\nsuccessful reopen request — the daemon runs the SDK resume asynchronously\n(task-07 drives the full lease/WS transition, task-08 the daemon SDK\nresume), so the endpoint never blocks on daemon confirmation (design §4.3.1\nstep 7)."
+      },
+      "SessionRunRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Detail"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "SessionRunRead",
+        "description": "GET /sessions/{id}/runs 单个 run 项（task-07 / FR-02 / design §7.4）。\n\n透传 ``AgentRun.error_detail``（模型层 ModelError 序列化值；成功 / 无错误 run\n为 None），供前端拉历史与当前 run 错误。``error_code``（调度层 / 系统错误）\n与 ``error_detail`` 正交共存（D-009），前端可分别用作系统错误兜底与模型错误\n渲染。DTO 内联在此避免触碰 schema.py（非本任务 allowed_path）。"
       },
       "SessionRuntimeRequest": {
         "properties": {
