@@ -130,6 +130,39 @@ async def test_full_captcha_login_flow(client: AsyncClient, bob, fake_redis) -> 
 
 
 @pytest.mark.asyncio
+async def test_captcha_verified_then_wrong_password_returns_401(
+    client: AsyncClient, bob, fake_redis
+) -> None:
+    """阈值触发后,带有效 captcha_token 但密码错 → 应 401 密码错误,而非 423 又要验证码。
+
+    回归保护:修复前这里返回 423(密码错误被吞成"要验证码",且 token 已被白白消费),
+    导致用户陷"验证→又让验证"循环、永远看不到密码错误提示。
+    """
+    # 触发 needs_captcha:前 2 次 401 + 第 3 次 423
+    for _ in range(2):
+        await client.post("/api/auth/login", json={"account": "bob", "password": "wrong"})
+    resp = await client.post("/api/auth/login", json={"account": "bob", "password": "wrong"})
+    assert resp.status_code == 423
+
+    # 点「我不是机器人」过验证 → 拿一次性 token
+    captcha_id = (await client.get("/api/auth/captcha/confirm")).json()["captcha_id"]
+    token = (await client.post("/api/auth/captcha/verify", json={"captcha_id": captcha_id})).json()[
+        "captcha_token"
+    ]
+    assert token
+
+    # 带有效 token + 错密码 → 必须明确提示密码错(401),不再绕回验证码(423)
+    resp = await client.post(
+        "/api/auth/login",
+        json={"account": "bob", "password": "wrong", "captcha_token": token},
+    )
+    assert resp.status_code == 401, resp.text
+    assert "AUTH_INVALID_CREDENTIALS" in resp.json()["code"]
+    # token 仍被一次性消费(即便密码错,验证已通过)
+    assert f"captcha:token:{token}" not in fake_redis.store
+
+
+@pytest.mark.asyncio
 async def test_confirm_id_single_use(client: AsyncClient, fake_redis) -> None:
     """同一 captcha_id 第二次 verify → success=False(一次性,防重放)。"""
     resp = await client.get("/api/auth/captcha/confirm")

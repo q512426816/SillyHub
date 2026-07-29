@@ -71,15 +71,23 @@ async def login(
     ua, ip = _client_metadata(request)
     captcha = CaptchaService(settings=settings)
     # 1) 限流(同一 IP 60s 窗口);2) 若该 IP 累计失败达阈值,强制校验滑块 token。
+    #    captcha_verified=True 表示本次已通过人机验证(消费了有效一次性 token)。
     await captcha.check_rate_limit(ip)
-    await captcha.assert_captcha_if_needed(ip, payload.captcha_token)
+    captcha_verified = await captcha.assert_captcha_if_needed(ip, payload.captcha_token)
     try:
         _, pair = await AuthService(session, settings=settings).login(
             account=payload.account, password=payload.password, user_agent=ua, ip=ip
         )
     except AuthInvalidCredentials:
-        # 凭证错:累计失败次数;达到阈值则要求人机确认(前端据 423 need_captcha 弹确认)。
+        # 凭证错:累计失败次数。
         fails = await captcha.record_login_failure(ip)
+        # 本次已通过人机验证(带了有效 captcha_token)→ 密码错应明确提示密码错(401),
+        # 不再绕回"要验证码"(423):token 一次性已被消费,若再要求验证码会让用户陷入
+        # "验证→又让验证"循环,永远看不到密码错误。爆破防护不降——每次试密码仍须先过
+        # 验证码(token 一次性)且受 IP 限流约束,只是把真实失败原因(密码错)如实反馈。
+        if captcha_verified:
+            raise
+        # 未过验证:达阈值则要求人机确认(前端据 423 need_captcha 弹确认)。
         if fails >= settings.auth_login_fail_threshold:
             raise LoginCaptchaRequired(
                 "登录失败次数过多,请完成滑块验证后重试。",

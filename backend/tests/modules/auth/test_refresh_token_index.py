@@ -16,8 +16,8 @@ session 表存 HMAC 部分唯一索引 ``ux_sessions_token_id_hmac`` 改造的�
 - AC-08: ``_find_revoked_session`` O(1)（hmac 命中 + bcrypt 通过 → 返回；secret 错 → None；
   无匹配 → None）。
 - AC-09: FOR UPDATE 锁复查路径（锁期间被 rotate → 走 revoked 检测/grace 续期）。
-- AC-10: migration 单头 ``202607271700`` + upgrade/downgrade 可逆 + 部分唯一索引
-  NULL 行不冲突（D-008）。
+- AC-10: migration ``202607271700`` 已落地进 alembic 链(单 head 无分叉)+ upgrade/downgrade
+  可逆 + 部分唯一索引 NULL 行不冲突（D-008）。
 
 约束
 ----
@@ -527,8 +527,11 @@ def test_migration_metadata():
 
 
 def test_alembic_head_includes_new_revision():
-    """AC-10: ``alembic heads`` 单头且为 ``202607271700``。
+    """AC-10: refresh-token-index 的 migration ``202607271700`` 已落地进 alembic 链。
 
+    断言"在链中存在"而非"是 head"——head 会随后续 migration(如 ppm_project_workspace
+    的 202607281500 接在 202607271700 之后)演进而变化,绑定具体 head 会让测试在下一个
+    migration 落地即过时失败。保留"链单 head 无分叉"检查(防多 head crash-loop)。
     用 ScriptDirectory API 直接读(免 subprocess 开销),与 CLI ``alembic heads`` 等价。
     """
     from alembic.config import Config
@@ -538,8 +541,11 @@ def test_alembic_head_includes_new_revision():
     cfg = Config(str(backend_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(backend_root / "migrations"))
     script = ScriptDirectory.from_config(cfg)
+    # 链单 head(健康,无分叉)
     heads = script.get_heads()
-    assert _REVISION_ID in heads, f"{_REVISION_ID} 应为 alembic head, 实际 heads={heads}"
+    assert len(heads) == 1, f"alembic 应为单 head, 实际 heads={heads}"
+    # 本变更的 migration 已落地链中(不绑定 head——head 会随新 migration 演进)
+    assert script.get_revision(_REVISION_ID) is not None, f"{_REVISION_ID} 应在 alembic 链中存在"
 
 
 def test_migration_upgrade_body_adds_column_and_partial_unique_index():

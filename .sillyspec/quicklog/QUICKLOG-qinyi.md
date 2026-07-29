@@ -467,3 +467,48 @@ created_at: 2026-07-05 16:33:00
 
 结果：`backend/app/core/db.py` 单文件参数+注释改动；import 验证 `server_settings.idle_in_transaction_session_timeout='120000'` 生效；`app/core` 测试 40 passed 零回归。改动为连接级 `server_settings`，需重启/重部署 backend 容器后对新连接生效（已有连接不受影响，连接池随 pool_recycle=300s 逐步换新）。遗留建议：排查哪些具体路径在事务内 await 慢调用（可对照 PG `pg_stat_activity state='idle in transaction'` 定期采样），逐个做「RPC 前释放事务」点状优化，把 120s 当作兜底而非依赖。
 
+
+## ql-20260729-001-30e5 | 2026-07-29 10:36:05 | 登录验证码吞密码错误提示修复(验证通过+错密码→401,不再绕 423)
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/auth/captcha_service.py（`assert_captcha_if_needed` 由返回 None 改返回 bool：True=本次已通过人机验证/消费了有效一次性 token，False=当前无需验证码，需但无 token 仍 raise LoginCaptchaRequired）
+- backend/app/modules/auth/router.py（login 的 except AuthInvalidCredentials 分支：本次 `captcha_verified=True` 时密码错直接 raise AuthInvalidCredentials(401)，不再绕回 423；未过验证仍按达阈值转 LoginCaptchaRequired）
+- backend/tests/modules/auth/test_login_captcha.py（新增 `test_captcha_verified_then_wrong_password_returns_401` 回归：验证通过+错密码→401 而非 423）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（变更索引追加 ql-20260729-001-30e5 条目）
+
+需求：用户反馈登录点「我不是机器人」一直不通过。排查发现根因不是验证码本身——本地后端/Redis/前端代理逐项实测全正常，真正问题是密码错误没能正确提示：同一 IP 登录连续失败达阈值(3 次)后触发人机验证，用户点过「我不是机器人」(拿到有效 captcha_token)后前端自动带 token 重试登录，但密码仍错时后端不提示密码错误、而是又要求验证码，陷"验证→又让验证"死循环，用户永远看不到"密码错误"(误判成"验证不通过")。
+
+根因：router.py login 的 except AuthInvalidCredentials 分支——达阈值后把所有密码错误一律 raise LoginCaptchaRequired(423)，且 captcha_token 已被前置的 assert_captcha_if_needed 提前一次性消费。于是①密码错误信息被吞、②token 白白消耗、③每次重试都要重新验证。接口实测坐实：带有效 token + 错密码 → HTTP 423(而非 401)。测试盲区：test_login_captcha.py 只测"验证通过+正确密码→200"，未覆盖"验证通过+错密码"，故 bug 长期未暴露。
+
+方案：assert_captcha_if_needed 返回 bool 表达"本次是否已通过人机验证"(True=消费了有效一次性 token)；router login 在 captcha_verified=True 时密码错直接 raise AuthInvalidCredentials(401 明确提示密码错误)，不再绕回 423。爆破防护不降——每次试密码仍须先过验证码(token 一次性)、仍受 IP 限流(5 次/分)约束，只是把真实失败原因(密码错)如实反馈给已通过人机验证的请求。
+
+结果：CaptchaService 返回值三分支(需验证+无 token→raise / 需验证+有效 token→True 且消费 / 无需验证→False)独立脚本全通过；端到端 curl 真实容器(docker cp 改动 + restart)带有效 token + 错密码 → 401「用户名或密码错误」(修复前 423)、带 token + 正确密码 → 200；新增回归测试。安全语义不变(限流/失败计数/token 一次性全保留)。预存阻塞(非本次，需另开 quick)：main 上 ppm_project_workspace 表外键引用无 ORM 模型的 ppm_project_maintenance，致 sqlite create_all 报 NoReferencedTableError、所有后端 DB 依赖测试 collection 即 ERROR——本 quick 用独立脚本 + 端到端 curl 绕过验证，该 PPM 外键债另修。
+## ql-20260729-002-833d | 2026-07-29 10:58:32 | 修后端测试 collection ERROR 阻塞(conftest 漏 import ppm.project.model)
+状态：已完成
+关联变更：（无）
+文件：
+- backend/conftest.py（db_engine fixture 模型 import 列表补 `from app.modules.ppm.project import model as _ppm_project_model`，注册 ppm_project_maintenance/customer/member/stakeholder 4 表，解决 ppm_project_workspace 外键→ppm_project_maintenance 的 NoReferencedTableError）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（变更索引追加 ql-20260729-002-833d 条目）
+
+需求：后端 pytest 所有依赖 db_session/client 的测试在 collection 阶段全 ERROR(auth 全模块 138 errors)，报 `NoReferencedTableError: ppm_project_workspace.ppm_project_id ... could not find table 'ppm_project_maintenance'`，导致后端测试无法运行。
+
+根因：backend/conftest.py 的 db_engine fixture(用 sqlite + BaseModel.metadata.create_all 建表)模型 import 列表(line 79-97)漏了 app.modules.ppm.project.model——它定义了 ppm_project_maintenance/customer/member/stakeholder 4 表；而 workspace.model(已 import)的 ppm_project_workspace 表外键→ppm_project_maintenance.id，后者未注册→create_all 找不到目标表即炸。ppm-project-link-workspace 变更 apply 后引入该外键但没同步更新 conftest import 列表。
+
+方案：conftest db_engine 补一行 `from app.modules.ppm.project import model as _ppm_project_model` 注册 4 表。外部依赖链已验证全满足(ppm_project_maintenance→organizations.id 在 admin.model 已注册、ppm_project_member→users.id 在 auth.model 已注册、member/stakeholder→ppm_project_maintenance 同文件、customer 无 FK)。
+
+结果：captcha 测试 7 passed(含 ql-001 回归)不再 collection ERROR；auth 全模块 138 errors→137 passed、2 xfailed。修正了上次记忆 ppm-foreign-key-blocks-backend-tests 的误判(上次以为"无 ORM 模型"，实为模型存在但 conftest 漏 import)。暴露 1 个预存 migration 测试债 test_alembic_head_includes_new_revision(refresh-token-index 变更过时断言"202607271700 是 head"，实际被 202607281500 接续，与本次 import 无关，需另修)。
+## ql-20260729-003-2ff0 | 2026-07-29 11:08:57 | 修 migration 测试债让 auth 全绿(断言"是 head"→"在链中存在")
+状态：已完成
+关联变更：（无）
+文件：
+- backend/tests/modules/auth/test_refresh_token_index.py（`test_alembic_head_includes_new_revision` 断言从 `_REVISION_ID in heads` 改为 `script.get_revision(_REVISION_ID) is not None`，保留 `len(heads)==1` 单 head 检查；同步更新文件级 docstring 的 AC-10 描述）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（变更索引追加 ql-20260729-003-2ff0 条目）
+
+需求：ql-002 修 conftest import 让 auth 测试能跑后，暴露 1 个预存 migration 测试债——`test_alembic_head_includes_new_revision` failed，需修掉让 auth 全模块全绿。
+
+根因：该测试断言 refresh-token-index 的 migration revision `202607271700` 是 alembic head(`_REVISION_ID in heads`)。但 ppm-project-link-workspace 变更的 migration `202607281500`(down_revision=202607271700，合法接续)已把 head 接续成 202607281500——该 migration 文件 line20 自己注释了"heads 实测当前单 head"，却没更新这个依赖 head 断言的测试。链健康(alembic history 线性单 head，无分叉)。修复前被 ql-001/002 的 collection ERROR 掩盖跑不到，ql-002 修通后才暴露。
+
+方案：AC-10 真实意图是验证 refresh-token-index 的 migration 已落地进 alembic 链。断言从"是 head"改"在链中存在"(`script.get_revision(_REVISION_ID) is not None`)，保留"链单 head 无分叉"检查(`len(heads)==1`)，不绑定具体 head——head 会随新 migration 演进，绑死必然过时。同步更新文件级 docstring 的 AC-10 描述。符合规则9(测试断言语义过时，非被测代码错)。
+
+结果：单测 1 passed；auth 全模块 137 passed/1 failed → **138 passed、2 xfailed、0 failed 全绿零回归**(255s)。至此 ql-001(captcha 修复)→ql-002(conftest 解阻塞)→ql-003(migration 测试债)三连修闭环，auth 模块测试完全可用。

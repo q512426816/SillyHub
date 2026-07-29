@@ -109,12 +109,23 @@ class CaptchaService:
     async def needs_captcha(self, ip: str | None) -> bool:
         return await self._failures(ip) >= self._settings.auth_login_fail_threshold
 
-    async def assert_captcha_if_needed(self, ip: str | None, captcha_token: str | None) -> None:
-        """需要验证码时,校验 captcha_token(一次性消费);缺失/无效 → LoginCaptchaRequired。"""
+    async def assert_captcha_if_needed(self, ip: str | None, captcha_token: str | None) -> bool:
+        """需要验证码时校验 captcha_token(一次性消费)。
+
+        返回值语义:
+        - True:本次已通过人机验证(消费了有效 captcha_token);
+        - False:当前无需验证码(needs_captcha 未达阈值);
+        - 需要但缺失/无效 token → raise LoginCaptchaRequired。
+
+        调用方据返回值决定密码错时如何反馈:captcha_verified=True 时密码错应正常抛
+        AuthInvalidCredentials(明确提示密码错误),不再绕回"要验证码"——否则阈值触发后
+        用户带有效 token 登录、密码仍错时,会陷入"验证→又让验证"循环(token 已被本方法
+        一次性消费),永远看不到密码错误提示。
+        """
         if not await self.needs_captcha(ip):
-            return
+            return False
         if captcha_token and await self._consume_captcha_token(captcha_token):
-            return
+            return True
         raise LoginCaptchaRequired(
             "登录失败次数过多,请完成滑块验证后重试。",
             details={"need_captcha": True},
