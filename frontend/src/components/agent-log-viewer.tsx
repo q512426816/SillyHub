@@ -54,6 +54,7 @@ import {
   EMPTY_REPLIED_INPUTS,
 } from "./agent-log/normalize";
 import { ToolCallPreview, CollapsibleSection, ToolResultCard } from "./agent-log/tool-renderers";
+import { RunErrorItem } from "./agent-log/run-error-item";
 import { toolKindMeta } from "./agent-log/tool-kind-meta";
 import type { AgentLogInputControls, ProcessedLog, ScanCheckResult, SemanticCategory } from "./agent-log/types";
 
@@ -297,11 +298,23 @@ export function AgentLogRow({
   allLogs,
   compact,
   inputControls,
+  onRunErrorResend,
+  onRunErrorSwitchProvider,
+  onRunErrorViewDetail,
 }: {
   processedLog: ProcessedLog;
   allLogs: ProcessedLog[];
   compact?: boolean;
   inputControls?: AgentLogInputControls;
+  /**
+   * task-10 / FR-03 / D-004@v1：错误项 actions 回调（透传到 RunErrorItem）。
+   * 仅当 processedLog.errorLogItem 存在时本行渲染 RunErrorItem；回调由父级
+   * AgentLogViewer 按场景注入（重发=复用 inject 链路 / 切换供应商=跳设置页 /
+   * 查看详情=组件内折叠 raw）。缺失则 RunErrorItem 不显示对应按钮（零回归）。
+   */
+  onRunErrorResend?: () => void;
+  onRunErrorSwitchProvider?: () => void;
+  onRunErrorViewDetail?: () => void;
 }) {
   const log = processedLog.log;
   const meta = semanticCategoryMeta(processedLog.semanticCategory ?? "log");
@@ -397,7 +410,18 @@ export function AgentLogRow({
           );
         })()}
         {/* channel=tool_call → specialized renderer */}
-        {toolCall ? (
+        {processedLog.errorLogItem ? (
+          /* task-10 / FR-03 / D-002@v1：结构化运行错误项（normalize.ts 由
+             run.error_detail / runStatus=failed 合成，追加在 processedLogs 末尾）。
+             渲染 RunErrorItem 取代普通日志行：图标/文案/hint/actions（重发/切换供应商/
+             查看详情）。actions 回调由父级注入；未注入时仅展示信息无按钮（零回归）。 */
+          <RunErrorItem
+            item={processedLog.errorLogItem}
+            onResend={onRunErrorResend}
+            onSwitchProvider={onRunErrorSwitchProvider}
+            onViewDetail={onRunErrorViewDetail}
+          />
+        ) : toolCall ? (
           <div className="font-mono [overflow-wrap:anywhere]">
             <ToolCallPreview
               entry={toolCall}
@@ -544,6 +568,9 @@ function TurnBlock({
   embedded,
   inputControls,
   allLogs,
+  onRunErrorResend,
+  onRunErrorSwitchProvider,
+  onRunErrorViewDetail,
 }: {
   turnLogs: ProcessedLog[];
   turnIdx: number;
@@ -551,6 +578,10 @@ function TurnBlock({
   embedded?: boolean;
   inputControls?: AgentLogInputControls;
   allLogs: ProcessedLog[];
+  /** task-10：错误项 actions 透传到每个 AgentLogRow（错误项可出现在任意 turn 末尾）。 */
+  onRunErrorResend?: () => void;
+  onRunErrorSwitchProvider?: () => void;
+  onRunErrorViewDetail?: () => void;
 }): JSX.Element {
   if (turnLogs.length === 0) return <></>;
 
@@ -603,6 +634,9 @@ function TurnBlock({
               allLogs={allLogs}
               compact={compact}
               inputControls={inputControls}
+              onRunErrorResend={onRunErrorResend}
+              onRunErrorSwitchProvider={onRunErrorSwitchProvider}
+              onRunErrorViewDetail={onRunErrorViewDetail}
             />
           </ErrorBoundary>
         ))}
@@ -632,6 +666,11 @@ export function AgentLogViewer({
   inputControls,
   permissionRequests,
   onPermissionResolved,
+  runErrorDetail,
+  runStatus,
+  onRunErrorResend,
+  onRunErrorSwitchProvider,
+  onRunErrorViewDetail,
 }: {
   title: string;
   runId: string;
@@ -660,6 +699,31 @@ export function AgentLogViewer({
   permissionRequests?: SessionPermissionRequest[];
   /** 卡片决策/超时后被父组件移除时触发（同步本地 permissionRequests 状态）。 */
   onPermissionResolved?: (requestId: string, decision: "allow" | "deny") => void;
+  /**
+   * task-10 / FR-03 / D-002@v1：run 级模型调用错误详情（task-07 透传的
+   * run.error_detail，OpenAPI 宽松字典）。传入后 normalizeLogs 在日志末尾追加
+   * 结构化 error 类日志项（errorLogItem），由 AgentLogRow 渲染为 RunErrorItem。
+   * 缺失且 runStatus!=='failed' → 不追加（成功路径零回归）。
+   */
+  runErrorDetail?: { [key: string]: unknown } | null;
+  /**
+   * task-10：run 状态。'failed' 且无 runErrorDetail 时，normalizeLogs 兜底追加
+   * 「运行失败（无详情）」error 项（design §9 brownfield）；同时本 viewer 头部
+   * 渲染红色「运行失败」状态徽标（会话页 run failed 标红，D-002@v1）。
+   */
+  runStatus?: string | null;
+  /**
+   * task-10 / D-004@v1：错误项 actions 回调（注入 RunErrorItem）。
+   * - onRunErrorResend：重新发送——父级复用现有 inject 链路重新提交同一 prompt
+   *   （不新建提交逻辑）；仅 retryable=true 的错误项渲染按钮。
+   * - onRunErrorSwitchProvider：切换供应商——父级跳 llm-provider 设置页。
+   * - onRunErrorViewDetail：查看详情——RunErrorItem 内部已折叠展开 raw，此回调
+   *   仅作额外埋点（可空）。
+   * 全部可选；不传则 RunErrorItem 不显示对应按钮（零回归）。
+   */
+  onRunErrorResend?: () => void;
+  onRunErrorSwitchProvider?: () => void;
+  onRunErrorViewDetail?: () => void;
 }) {
   const internalRef = useRef<HTMLDivElement>(null);
   const scrollRef = containerRef ?? internalRef;
@@ -676,7 +740,14 @@ export function AgentLogViewer({
 
   // ql-20260622-003 / P1-1：normalize + 过滤 + turn 分组全部 memo，依赖 logs 引用 /
   // activeFilters，避免大日志列表每次 render 全量重算（normalize O(N)、turn 分组 O(N)）。
-  const processedLogs = useMemo(() => normalizeLogs(logs ?? []), [logs]);
+  // task-10 / FR-03：normalize 透传 run 级错误（error_detail + status）。runErrorDetail
+  // 有值或 runStatus='failed' 时，normalizeLogs 在日志末尾追加结构化 error 类项
+  // （errorLogItem），供 AgentLogRow 渲染 RunErrorItem。依赖含 runErrorDetail/runStatus，
+  // 任一变化重算（与 logs 引用一起 memo，O(N) 不每帧重算）。
+  const processedLogs = useMemo(
+    () => normalizeLogs(logs ?? [], { errorDetail: runErrorDetail, runStatus }),
+    [logs, runErrorDetail, runStatus],
+  );
   const visibleLogs = useMemo(
     () => processedLogs.filter((p) => !p.hidden),
     [processedLogs],
@@ -710,7 +781,10 @@ export function AgentLogViewer({
     (p: ProcessedLog) =>
       p.log.channel === "user_input"
       || p.log.channel === "pending_input"
-      || p.mergedAssistantContent != null,
+      || p.mergedAssistantContent != null
+      // task-10 / FR-03：结构化错误项（RunErrorItem）在对话视图始终可见——
+      // 运行失败是用户最需感知的信息，不应被「对话」视图（默认）隐藏。
+      || p.errorLogItem != null,
     [],
   );
   const filteredLogs = useMemo(() => {
@@ -845,6 +919,16 @@ export function AgentLogViewer({
             <span className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
               LIVE
+            </span>
+          )}
+          {/* task-10 / FR-03 / D-002@v1：run failed 状态标红（会话页运行失败可见）。
+              runStatus='failed' 时在标题行渲染红色「运行失败」徽标，与 AgentLogRow
+              渲染的 RunErrorItem 卡片呼应（卡片给原因/操作，徽标给状态总览）。
+              配色对齐样式系统 destructive（border-red-200/bg-red-50/text-red-700）。 */}
+          {runStatus === "failed" && (
+            <span className="inline-flex items-center gap-1 rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
+              <AlertTriangle className="h-3 w-3" aria-hidden />
+              运行失败
             </span>
           )}
         </div>
@@ -1025,6 +1109,9 @@ export function AgentLogViewer({
                       embedded={variant === "embedded"}
                       inputControls={inputControls}
                       allLogs={processedLogs}
+                      onRunErrorResend={onRunErrorResend}
+                      onRunErrorSwitchProvider={onRunErrorSwitchProvider}
+                      onRunErrorViewDetail={onRunErrorViewDetail}
                     />
                   </ErrorBoundary>
                 ))}

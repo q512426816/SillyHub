@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle } from "lucide-react";
 
 import {
   InteractiveSessionPanel,
@@ -119,11 +120,25 @@ function RuntimeSessionDialogBody({
       visibleSessions.map((s) => ({
         id: s.id,
         title: s.title,
+        // task-10 / FR-03：failed 会话在次要行前置红色「失败」警示文案，让用户在
+        // 会话列表一眼识别运行失败的会话（列表徽标颜色由共享 SessionListLayout 控制为
+        // 中性 outline，此处用次要行文案补强可见性）。
         statusBadge: s.status,
-        secondaryText: `${getProviderLabel(s.provider)} · ${s.turn_count} 轮`,
+        secondaryText:
+          s.status === "failed"
+            ? `⚠ 失败 · ${getProviderLabel(s.provider)} · ${s.turn_count} 轮`
+            : `${getProviderLabel(s.provider)} · ${s.turn_count} 轮`,
         lastActiveAt: s.last_active_at,
       })),
     [visibleSessions],
+  );
+
+  // task-10 / FR-03 / D-002@v1：当前选中会话（据列表快照状态）。failed 时在右侧面板
+  // 顶部渲染红色失败横幅——会话页 session failed 标红（run/turn 级标红由子组件
+  // InteractiveSessionPanel 的 TurnStatusBadge 已覆盖）。
+  const selectedSession = useMemo(
+    () => sessions.find((s) => s.id === selectedId) ?? null,
+    [sessions, selectedId],
   );
 
   // providers（与 ChangeSessionSection / InteractiveSessionChatSection 同源逻辑）
@@ -296,6 +311,21 @@ function RuntimeSessionDialogBody({
           onDelete={handleDelete}
         />
         <div className="flex min-h-[420px] flex-col overflow-hidden rounded-md border bg-card">
+          {/* task-10 / FR-03 / D-002@v1：选中会话 failed 时顶部红色失败横幅
+              （会话页 session failed 标红）。配色对齐样式系统 destructive
+              （border-red-200/bg-red-50/text-red-700）。run/turn 级失败标红由
+              InteractiveSessionPanel 内部 TurnStatusBadge（failed: text-destructive）覆盖。 */}
+          {selectedSession?.status === "failed" && (
+            <div
+              role="status"
+              className="flex shrink-0 items-start gap-2 border-b border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700"
+            >
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span className="min-w-0 break-words">
+                该会话的运行已失败。可在下方查看失败详情，或新建会话重试。
+              </span>
+            </div>
+          )}
           {/* key 随 selectedId 切换重 mount（清旧 SSE/轮询）；idle 用 runtime.id 锁 focusProvider */}
           <InteractiveSessionPanel
             key={selectedId ?? `new-${runtimeId ?? "closed"}`}
