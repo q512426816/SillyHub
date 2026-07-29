@@ -1,0 +1,128 @@
+<!--
+author: qinyi
+created_at: 2026-07-29 10:02:27
+变更: 2026-07-29-model-error-visibility
+说明: 模型调用失败可见性 - 线框原型。展示 RunErrorItem 错误项(3 种 type)+ actions + 详情展开。
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>模型错误可见性 - 原型</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background:#f5f5f5; margin:0; padding:24px; color:#1f1f1f; }
+  h1 { font-size:16px; text-align:center; margin:0 0 6px; }
+  .sub { text-align:center; font-size:12px; color:#999; margin-bottom:20px; }
+  .panel { max-width:560px; margin:0 auto; background:#fff; border:1px solid #e5e5e5; border-radius:8px; overflow:hidden; }
+  .head { padding:12px 16px; border-bottom:1px solid #eee; font-weight:600; background:#fafafa; display:flex; justify-content:space-between; align-items:center; }
+  .head .st { font-size:12px; color:#ff4d4f; font-weight:normal; }
+  .msg { padding:10px 16px; }
+  .role { font-size:12px; color:#888; margin-bottom:4px; }
+  .bubble { display:inline-block; padding:8px 12px; background:#f0f0f0; border-radius:6px; }
+  .err { padding:14px 16px; border-left:4px solid #ff4d4f; background:#fff2f0; margin:10px 16px; border-radius:4px; }
+  .err.quota { border-left-color:#fa8c16; background:#fff7e6; }
+  .err.auth   { border-left-color:#ff4d4f; background:#fff2f0; }
+  .err.timeout{ border-left-color:#722ed1; background:#f9f0ff; }
+  .err.network{ border-left-color:#13c2c2; background:#e6fffb; }
+  .err-title { font-weight:600; display:flex; align-items:center; gap:8px; }
+  .tag { font-size:11px; padding:2px 8px; border-radius:10px; background:#fff; border:1px solid #d9d9d9; color:#666; }
+  .err-msg { margin:8px 0 4px; font-size:14px; }
+  .err-hint { font-size:13px; color:#666; margin-bottom:10px; }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .btn { font-size:13px; padding:5px 12px; border:1px solid #d9d9d9; background:#fff; border-radius:4px; cursor:pointer; }
+  .btn:hover { border-color:#1677ff; color:#1677ff; }
+  .btn.primary { background:#1677ff; color:#fff; border-color:#1677ff; }
+  .detail { margin-top:10px; padding:8px; background:#f5f5f5; border-radius:4px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; color:#555; white-space:pre-wrap; display:none; }
+  .sep { font-size:13px; color:#bbb; text-align:center; margin:6px 0; }
+</style>
+</head>
+<body>
+  <h1>claude code 会话 · 运行失败可见性</h1>
+  <div class="sub">RunErrorItem 错误项原型 · type → 图标/颜色/文案/hint/action 映射</div>
+
+  <div class="panel">
+    <div class="head">claude code 会话 <span class="st">● 运行失败</span></div>
+
+    <div class="msg"><div class="role">你</div><div class="bubble">你好</div></div>
+
+    <!-- 1. 额度耗尽(本次实际复现的场景)-->
+    <div class="err quota">
+      <div class="err-title">⛔ 运行失败 <span class="tag">额度耗尽 · quota_exceeded</span></div>
+      <div class="err-msg">模型调用失败 · 当前供应商(智谱 GLM)额度已达每周/每月上限。</div>
+      <div class="err-hint">💡 建议:切换到有额度的供应商,或等待 10:26 自动重置后重试。</div>
+      <div class="actions">
+        <button class="btn primary">重新发送</button>
+        <button class="btn">切换供应商</button>
+        <button class="btn">查看详情</button>
+      </div>
+      <div class="detail">[ASSISTANT] API Error: Request rejected (429) · [1310][您已达到每周/每月使用上限,您的限额将在 2026-07-29 10:26:02 重置。]
+
+type: quota_exceeded
+code: 1310
+retryable: false</div>
+    </div>
+
+    <div class="sep">— 其他错误类型示例 —</div>
+
+    <!-- 2. 凭证失效 -->
+    <div class="err auth">
+      <div class="err-title">⛔ 运行失败 <span class="tag">凭证失效 · auth_failed</span></div>
+      <div class="err-msg">模型调用失败 · API Key 无效或已过期。</div>
+      <div class="err-hint">💡 建议:前往供应商设置检查并更新凭证。</div>
+      <div class="actions">
+        <button class="btn primary">重新发送</button>
+        <button class="btn">切换供应商</button>
+        <button class="btn">查看详情</button>
+      </div>
+      <div class="detail">[ASSISTANT] API Error: 401 · invalid api key
+
+type: auth_failed
+code: 401
+retryable: false</div>
+    </div>
+
+    <!-- 3. 超时 -->
+    <div class="err timeout">
+      <div class="err-title">⏱ 运行失败 <span class="tag">超时 · timeout</span></div>
+      <div class="err-msg">模型响应超时,本次运行未完成。</div>
+      <div class="err-hint">💡 建议:稍后重试;若持续超时,检查网络或更换供应商。</div>
+      <div class="actions">
+        <button class="btn primary">重新发送</button>
+        <button class="btn">查看详情</button>
+      </div>
+      <div class="detail">[ASSISTANT] API Error: request timed out
+
+type: timeout
+code: null
+retryable: true</div>
+    </div>
+
+    <!-- 4. 网络 -->
+    <div class="err network">
+      <div class="err-title">🔌 运行失败 <span class="tag">网络错误 · network</span></div>
+      <div class="err-msg">无法连接模型服务,可能是网络或供应商地址问题。</div>
+      <div class="err-hint">💡 建议:检查网络连接与供应商 BASE_URL 配置。</div>
+      <div class="actions">
+        <button class="btn primary">重新发送</button>
+        <button class="btn">查看详情</button>
+      </div>
+    </div>
+
+    <div class="msg" style="border-top:1px solid #eee; background:#fffbe6; color:#8c6e2a; font-size:12px;">
+      说明:错误项插入消息流,run/session 状态标「失败」;成功路径不受影响;agent-log 现有 NOISE 折叠不误吞错误项。
+    </div>
+  </div>
+
+  <script>
+    document.querySelectorAll('.err').forEach(box => {
+      const btn = [...box.querySelectorAll('.btn')].find(b => b.textContent.trim() === '查看详情');
+      if (!btn) return;
+      btn.addEventListener('click', () => {
+        const d = box.querySelector('.detail');
+        d.style.display = (d.style.display === 'block') ? 'none' : 'block';
+      });
+    });
+  </script>
+</body>
+</html>
