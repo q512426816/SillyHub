@@ -150,9 +150,18 @@ export function buildSpawnEnv(
 
   // ql-20260726-002-1180：隔离 claude 配置目录（避免宿主机 ~/.claude/settings.json
   // 如 cc-switch 的 model/env 污染平台注入）。daemon 启动确保 CLAUDE_CONFIG_DIR 存在。
-  // 总注入（含无 provider_config 场景）：平台 daemon spawn 的 claude 一律不读宿主机
-  // settings.json，只用 daemon 注入/兜底 env。
-  env.CLAUDE_CONFIG_DIR = CLAUDE_CONFIG_DIR
+  //
+  // ql-20260729-002：仅当有平台注入的 provider_config（启用供应商）时才隔离 —— 让平台
+  // 注入的 env 不被宿主机 cc-switch 污染。无 provider_config（未配/未启用供应商）时不设
+  // CLAUDE_CONFIG_DIR，claude CLI 回退读默认 ~/.claude/settings.json（cc-switch/手配生效），
+  // 避免"未配供应商 → 隔离空目录 → Not logged in"。
+  if (ctx.provider_config) {
+    env.CLAUDE_CONFIG_DIR = CLAUDE_CONFIG_DIR
+  } else if (env.CLAUDE_CONFIG_DIR !== undefined) {
+    // process.env 可能继承残留 CLAUDE_CONFIG_DIR（如 daemon 自身被设过），未隔离场景清掉，
+    // 确保 claude CLI 读默认 ~/.claude 而非旧隔离目录。
+    delete env.CLAUDE_CONFIG_DIR
+  }
 
   return env;
 }

@@ -268,9 +268,8 @@ describe('spawn-env layer-0 (task-09: provider_config 第 0 层注入)', () => {
     expect(withNull).toEqual(withoutLayer0);
   });
 
-  it('agent_kind 未注册（如 codex）→ 第 0 层跳过，env 与 absent 一致（不抛）', () => {
+  it('agent_kind 未注册（如 codex）→ 第 0 层 env 注入跳过（无 ANTHROPIC_*），但 CLAUDE_CONFIG_DIR 仍隔离（ql-20260729-002：provider_config 存在即隔离）', () => {
     cred.set(ANTHROPIC_API_KEY_FIELD, 'sk-cred');
-    const absent = buildSpawnEnv({ toolConfig: {} }, { credential: cred });
     const unregistered = buildSpawnEnv(
       {
         toolConfig: {},
@@ -278,7 +277,10 @@ describe('spawn-env layer-0 (task-09: provider_config 第 0 层注入)', () => {
       },
       { credential: cred },
     );
-    expect(unregistered).toEqual(absent);
+    // 第 0 层 env 注入跳过（codex 无 injector，不产 ANTHROPIC_* env）
+    expect(unregistered.ANTHROPIC_BASE_URL).toBeUndefined();
+    // 但 provider_config 存在 → 仍隔离 CLAUDE_CONFIG_DIR
+    expect(unregistered.CLAUDE_CONFIG_DIR).toBeDefined();
   });
 
   it('tool_config + provider_config 共存：tool_config 非冲突 key 仍渲染', () => {
@@ -345,5 +347,37 @@ describe('spawn-env layer-0 (task-09: provider_config 第 0 层注入)', () => {
     delete config.api_key;
     const safe = redactProviderConfig(config);
     expect(safe.api_key).toBeUndefined();
+  });
+
+  // ql-20260729-002：CLAUDE_CONFIG_DIR 隔离条件化（有 provider_config 才隔离）
+  describe('ql-20260729-002: CLAUDE_CONFIG_DIR 条件隔离', () => {
+    it('有 provider_config → 设 CLAUDE_CONFIG_DIR（隔离,避免 cc-switch 污染平台注入）', () => {
+      const env = buildSpawnEnv(
+        { toolConfig: {}, provider_config: claudeConfig() },
+        { credential: cred },
+      );
+      expect(env.CLAUDE_CONFIG_DIR).toBeDefined();
+      expect(env.CLAUDE_CONFIG_DIR).toMatch(/claude-config$/);
+    });
+
+    it('无 provider_config（未配/未启用）→ 不设 CLAUDE_CONFIG_DIR（读默认 ~/.claude）', () => {
+      const env = buildSpawnEnv({ toolConfig: {} }, { credential: cred });
+      expect(env.CLAUDE_CONFIG_DIR).toBeUndefined();
+    });
+
+    it('provider_config=null → 不隔离（同 absent）', () => {
+      const env = buildSpawnEnv(
+        { toolConfig: {}, provider_config: null },
+        { credential: cred },
+      );
+      expect(env.CLAUDE_CONFIG_DIR).toBeUndefined();
+    });
+
+    it('process.env 残留 CLAUDE_CONFIG_DIR + 无 provider_config → 清掉残留（确保读默认）', () => {
+      process.env.CLAUDE_CONFIG_DIR = '/tmp/leftover-isolated';
+      const env = buildSpawnEnv({ toolConfig: {} }, { credential: cred });
+      expect(env.CLAUDE_CONFIG_DIR).toBeUndefined();
+      delete process.env.CLAUDE_CONFIG_DIR;
+    });
   });
 });
