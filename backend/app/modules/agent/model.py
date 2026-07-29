@@ -114,6 +114,10 @@ class AgentRun(BaseModel, table=True):
         default=None,
         sa_column=Column(String(64), nullable=True),
     )  # e.g. no_online_daemon (task-01)
+    error_detail: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )  # 模型层 ModelError 序列化（auth_failed/quota_exceeded/...）；与 error_code 正交（D-009）
     spec_strategy: str | None = Field(
         default=None,
         sa_column=Column(String(30), nullable=True),
