@@ -16,6 +16,11 @@
 import type { AgentEvent } from '../types.js';
 import type { ProtocolAdapter } from './protocol-adapter.js';
 import { buildCcSettingsJson } from '../permission-rules.js';
+// task-03 (FR-01)：result is_error=true 时调归类器产出结构化 ModelError。
+// 注意 model-error/index.ts 暂未导出 classifyModelError（task-01 只导出协议类型），
+// 故直接从 classifier.js 取（蓝图expects_from task-02 明确）。
+import { classifyModelError } from '../model-error/classifier.js';
+import type { ModelError } from '../model-error/types.js';
 
 /** stream-json 协议支持的 provider 子集（三者共用一套解析逻辑）。 */
 export type StreamJsonProvider = 'claude' | 'gemini' | 'cursor';
@@ -25,6 +30,12 @@ interface ResultInfo {
   sessionId: string;
   resultText: string;
   isError: boolean;
+  /**
+   * task-03 (FR-01)：is_error=true 时由 classifyModelError 产出的结构化错误；
+   * is_error=false 时为 null（成功路径不产出 ModelError，D-008）。
+   * 供 task-04 notifyRunResult 随 run result 回传 backend。
+   */
+  modelError: ModelError | null;
 }
 
 /**
@@ -62,6 +73,15 @@ export class StreamJsonAdapter implements ProtocolAdapter {
 
   /** 从 result 事件累积的最终状态（对照 Python self._last_result_info L368-373）。 */
   private lastResultInfo?: ResultInfo;
+
+  /**
+   * task-03 (FR-01)：result 收尾前累积的归类器输入信号，跨 lease 在 resetAccumulator 清零。
+   *   - _apiRetryError：api_retry 事件的 http 状态/错误文本（含供应商业务码）。
+   *   - _lastAssistantText：最近一条 assistant 消息的文本（可能含 "API Error: ..." 行）。
+   * stderrText 在 task-runner 层（stderrBuf），adapter 拿不到，留 undefined（task-04 范围）。
+   */
+  private _apiRetryError = '';
+  private _lastAssistantText = '';
 
   /**
    * 跨 assistant 事件累加的 usage（task-06：对齐 SERVER _extract_result_metadata 聚合策略）。
@@ -225,6 +245,9 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     this._thinkingBufStartedAt = 0;
     this._assistantBuf = '';
     this._lastFlushedAssistant = '';
+    // task-03：归类输入累加器一并清零，防跨 lease 污染（上一 lease 的 api_retry / assistant 残留不带入）。
+    this._apiRetryError = '';
+    this._lastAssistantText = '';
   }
 
   /** 读取累积的 session_id（供 TaskRunner 在 lease 结束时上报）。 */
@@ -712,6 +735,9 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     }
 
     const events: AgentEvent[] = [];
+    // task-03 (FR-01)：累积本条 assistant 消息的文本（不含 thinking），收尾后覆盖 _lastAssistantText。
+    // 失败 turn 的 "API Error: ..." 以普通 text block 出现，供 result 收尾归类（design §7.2）。
+    let assistantTextBuf = '';
     for (const block of content) {
       if (!isRecord(block)) continue;
       const blockType = typeof block.type === 'string' ? block.type : '';
@@ -719,6 +745,8 @@ export class StreamJsonAdapter implements ProtocolAdapter {
       if (blockType === 'text') {
         const text = typeof block.text === 'string' ? block.text : '';
         if (!text) continue;
+        // task-03：捕获 assistant 文本（partial / 完整路径都记），供 result 收尾归类。
+        assistantTextBuf += assistantTextBuf ? `\n${text}` : text;
         if (this._usesPartialAssistantStream()) {
           this._appendPartialAssistantText(text);
           continue;
@@ -754,6 +782,10 @@ export class StreamJsonAdapter implements ProtocolAdapter {
           },
         });
       }
+    }
+    // task-03：本条 assistant 消息有文本 → 覆盖最近 assistant 文本（取「最近」，design §7.2）。
+    if (assistantTextBuf) {
+      this._lastAssistantText = assistantTextBuf;
     }
     // ql-20260617-012：parseAssistant 入口 flush 的残留 thinking_delta 事件
     // 必须排在前面（chronologically 先于完整 message 的 content blocks）。
@@ -871,6 +903,16 @@ export class StreamJsonAdapter implements ProtocolAdapter {
       if (attempt !== '' && max !== '') parts.push(`attempt=${attempt}/${max}`);
       if (errStatus !== '') parts.push(`http=${errStatus}`);
       if (err) parts.push(`error=${err}`);
+      // task-03 (FR-01)：累积 api_retry 错误文本（含 http 状态/供应商业务码）供 result
+      //   收尾归类。多次重试追加并去重，保留全部信号给 classifier 状态码/关键词匹配。
+      const retryText = [errStatus !== '' ? `http=${errStatus}` : '', err]
+        .filter((t) => t.length > 0)
+        .join(' ');
+      if (retryText && !this._apiRetryError.includes(retryText)) {
+        this._apiRetryError = this._apiRetryError
+          ? `${this._apiRetryError} | ${retryText}`
+          : retryText;
+      }
     } else {
       // 未知 subtype：保留 subtype + 任何顶层标量字段（除 session_id/subtype 本身）
       for (const [k, v] of Object.entries(msg)) {
@@ -900,8 +942,27 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     const sessionId = typeof msg.session_id === 'string' ? msg.session_id : '';
     const resultText = typeof msg.result === 'string' ? msg.result : '';
     const isError = msg.is_error === true;
+    const subtype = typeof msg.subtype === 'string' ? msg.subtype : undefined;
 
-    this.lastResultInfo = { sessionId, resultText, isError };
+    // task-03 (FR-01 / D-005)：result 收尾时若 is_error=true，组装归类器输入调
+    //   classifyModelError，把产出的 ModelError 缓存到 lastResultInfo.modelError，
+    //   供 task-04 notifyRunResult 随 run result 回传 backend。
+    //   - is_error=false 不调 classifier（成功路径不产出 ModelError，D-008 不回归）。
+    //   - agent 传 this.provider：claude 走完整规则；gemini/cursor 由 classifier 兜底
+    //     unknown（D-001 预留扩展点，比硬编码 'claude' 更忠实于决策）。
+    //   - stderrText 在 task-runner 层（stderrBuf），adapter 拿不到，留 undefined。
+    const modelError = isError
+      ? classifyModelError({
+          agent: this.provider,
+          isError,
+          subtype,
+          resultText,
+          apiRetryError: this._apiRetryError || undefined,
+          assistantStdout: this._lastAssistantText || undefined,
+        })
+      : null;
+
+    this.lastResultInfo = { sessionId, resultText, isError, modelError };
     if (sessionId) {
       this.sessionId = sessionId;
     }
