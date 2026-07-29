@@ -12,36 +12,36 @@ plan_level: full
 
 ## Wave 1（并行，无依赖 — 契约基础 + 独立 schema/配置）
 
-- [ ] task-01: 定义三端同构 ModelError 协议 + 类型枚举（daemon `model-error/types.ts` + backend `model_error.py` ModelErrorDTO；覆盖：FR-01, D-001, D-003, D-005, D-006）
-- [ ] task-05: backend AgentRun 加 `error_detail`（JSON 列）+ alembic migration（全局 `backend/migrations/versions/`，down 接当前真实 head；覆盖：FR-02, D-007, D-009）
-- [ ] task-12: local.yaml modules 块加 backend daemon + agent 子模块 test 条目（防 verify fallback backend 全量预存 errors；覆盖：非功能-可测试）
+- [x] task-01: 定义三端同构 ModelError 协议 + 类型枚举（daemon `model-error/types.ts` + backend `model_error.py` ModelErrorDTO；覆盖：FR-01, D-001, D-003, D-005, D-006）
+- [x] task-05: backend AgentRun 加 `error_detail`（JSON 列）+ alembic migration（全局 `backend/migrations/versions/`，down 接当前真实 head；覆盖：FR-02, D-007, D-009）
+- [x] task-12: local.yaml modules 块加 backend daemon + agent 子模块 test 条目（防 verify fallback backend 全量预存 errors；覆盖：非功能-可测试）
 
 ## Wave 2（依赖 Wave 1）
 
-- [ ] task-02: daemon `model-error/classifier.ts` 实现（claude 错误归类：is_error / resultText / api_retry / assistant stdout → ModelError）+ 单测覆盖 8 类（覆盖：FR-01, D-003, D-006）
-- [ ] task-06: backend InteractiveRunResultRequest 加 `error` + close_interactive_run（run_sync/service.py:735 实体 + service.py:508 facade + router.py:1118 路由）接收写入 AgentRun.error_detail（覆盖：FR-02, D-009）
+- [x] task-02: daemon `model-error/classifier.ts` 实现（claude 错误归类：is_error / resultText / api_retry / assistant stdout → ModelError）+ 单测覆盖 8 类（覆盖：FR-01, D-003, D-006）
+- [x] task-06: backend InteractiveRunResultRequest 加 `error` + close_interactive_run（run_sync/service.py:735 实体 + service.py:508 facade + router.py:1118 路由）接收写入 AgentRun.error_detail（覆盖：FR-02, D-009）
 
 ## Wave 3（依赖 Wave 2）
 
-- [ ] task-03: daemon stream-json adapter 接入 classifier（result is_error=true 时产出 ModelError，stream-json.ts:902+）（覆盖：FR-01）
-- [ ] task-07: backend 新增 `GET /sessions/{id}/runs` 返回 error_detail + SSE（router.py:1880）推 error 事件 + `pnpm gen:types` 同步 OpenAPI（覆盖：FR-02）
+- [x] task-03: daemon stream-json adapter 接入 classifier（result is_error=true 时产出 ModelError，stream-json.ts:902+）（覆盖：FR-01）
+- [x] task-07: backend 新增 `GET /sessions/{id}/runs` 返回 error_detail + SSE（router.py:1880）推 error 事件 + `pnpm gen:types` 同步 OpenAPI（覆盖：FR-02）
 
 ## Wave 4（依赖 Wave 3）
 
-- [ ] task-04: daemon notifyRunResult payload 增 `error` 字段（hub-client.ts:530+）+ daemon.ts payload 映射（:1354-1397）+ session-manager turn 收尾携带 error（覆盖：FR-01/02 链路贯通）
-- [ ] task-08: frontend `pnpm gen:types` + normalize.ts 识别 error_detail 生成 error 类日志项（修正 :352 把 `[ASSISTANT] API Error` 误判 assistant）（覆盖：FR-03, FR-04）
+- [x] task-04: daemon notifyRunResult payload 增 `error` 字段（hub-client.ts:530+）+ daemon.ts payload 映射（:1354-1397）+ session-manager turn 收尾携带 error（覆盖：FR-01/02 链路贯通）
+- [x] task-08: frontend `pnpm gen:types` + normalize.ts 识别 error_detail 生成 error 类日志项（修正 :352 把 `[ASSISTANT] API Error` 误判 assistant）（覆盖：FR-03, FR-04）
 
 ## Wave 5（依赖 Wave 4）
 
-- [ ] task-09: frontend RunErrorItem 组件（type → 图标/颜色/文案/hint/actions）+ 单测（覆盖：FR-03, D-002, D-004）
+- [x] task-09: frontend RunErrorItem 组件（type → 图标/颜色/文案/hint/actions）+ 单测（覆盖：FR-03, D-002, D-004）
 
 ## Wave 6（依赖 Wave 5）
 
-- [ ] task-10: frontend 会话页（agent/runtime 页）集成 RunErrorItem + run failed 状态标红 + actions（重发 inject / 切换供应商 / 查看详情 raw）（覆盖：FR-03, D-002, D-004）
+- [x] task-10: frontend 会话页（agent/runtime 页）集成 RunErrorItem + run failed 状态标红 + actions（重发 inject / 切换供应商 / 查看详情 raw）（覆盖：FR-03, D-002, D-004）
 
 ## Wave 7（依赖全部）
 
-- [ ] task-11: 回归测试（agent-log-display-fix NOISE 折叠不误吞 error_detail 错误项 + 成功路径 is_error=false 不回归）+ e2e 复现（模型失败 → 看到错误项 + actions）（覆盖：FR-04, D-008）
+- [x] task-11: 回归测试（agent-log-display-fix NOISE 折叠不误吞 error_detail 错误项 + 成功路径 is_error=false 不回归）+ e2e 复现（模型失败 → 看到错误项 + actions）（覆盖：FR-04, D-008）
 
 ## 任务总表
 
