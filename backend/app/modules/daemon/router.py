@@ -31,6 +31,7 @@ from app.modules.agent.schema import AgentRunLogEntry
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime
+from app.modules.daemon.model_error import ModelErrorDTO
 from app.modules.daemon.permission_service import (
     DaemonPermissionService,
     PermissionResponseRead,
@@ -1104,6 +1105,9 @@ class InteractiveRunResultRequest(BaseModel):
     duration_api_ms: int | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    # task-06 / FR-02：daemon classifyModelError 回传的模型层错误（可选）。
+    # 旧 daemon 不传 → None → AgentRun.error_detail 保持 None（design §9 兼容）。
+    error: ModelErrorDTO | None = None
 
 
 class InteractiveRunResultResponse(BaseModel):
@@ -1152,6 +1156,7 @@ async def close_interactive_run(
         duration_api_ms=data.duration_api_ms,
         input_tokens=data.input_tokens,
         output_tokens=data.output_tokens,
+        error=data.error,
     )
     return InteractiveRunResultResponse(
         agent_run_id=agent_run.id,

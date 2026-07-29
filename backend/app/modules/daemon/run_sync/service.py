@@ -34,6 +34,7 @@ from app.modules.change.dispatch import (
 )
 from app.modules.daemon.lease.service import DaemonAgentRunNotFound
 from app.modules.daemon.model import DaemonTaskLease
+from app.modules.daemon.model_error import ModelErrorDTO
 from app.modules.daemon.session.service import (
     TERMINAL_TURN_STATUSES,
     _apply_session_terminal_status,
@@ -757,6 +758,9 @@ class RunSyncService:
         # 终态一次写入直接覆盖（无 max 守卫，对齐 input/output 终态覆盖模式）。
         cache_read_tokens: int | None = None,
         cache_creation_tokens: int | None = None,
+        # task-06 / FR-02：daemon classifyModelError 回传的模型层错误。None=daemon
+        # 未传（旧 daemon / 成功 run），AgentRun.error_detail 保持 None（design §9）。
+        error: ModelErrorDTO | None = None,
     ) -> AgentRun:
         """Close an interactive AgentRun from daemon SDK result (gap-3 / design §4).
 
@@ -849,6 +853,14 @@ class RunSyncService:
             agent_run.status = "failed"
             agent_run.exit_code = 1
             agent_run.error_code = "interactive_unknown_status"
+
+        # task-06 / FR-02 / D-009：模型层错误详情写入 error_detail（JSON 列）。
+        # 与 error_code（上面 status 映射设置的调度层/系统错误）正交，不互相覆盖：
+        # 这里只持久化 ModelError，绝不动 error_code。daemon 契约（design §7.5）
+        # error 总伴随 is_error=true → 上面已置 failed；此处补存错误详情供前端展示。
+        # model_dump(mode='json') 把 StrEnum 等转成 JSON 原生类型，适配 JSON 列存储。
+        if error is not None:
+            agent_run.error_detail = error.model_dump(mode="json")
 
         # task-05（D-003@v1）修正：interactive run 走 close_interactive_run（非
         # complete_lease，因 interactive lease agent_run_id=NULL per D-005），stage

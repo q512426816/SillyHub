@@ -88,6 +88,7 @@ async def db_engine() -> AsyncIterator[Any]:
     # ppm_project_workspace 外键→ppm_project_maintenance.id,必须一并注册,否则 create_all 报
     # NoReferencedTableError(ppm_project_maintenance),连带所有 DB 测试 collection ERROR。
     # (外部依赖 organizations→admin.model、users→auth.model 均已在上文 import,链路完整。)
+    # (task-06 同样为此加 import;main 已由 captcha fix 提前修,此处保留更详注释。)
     from app.modules.ppm.project import model as _ppm_project_model  # noqa: F401
 
     # ppm 子域模型 (task-06:平台级 task 三表)

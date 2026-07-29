@@ -12,6 +12,7 @@ from app.core.logging import get_logger
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
+from app.modules.daemon.model_error import ModelErrorDTO
 from app.modules.daemon.schema import SessionReopenResponse
 
 log = get_logger(__name__)
@@ -531,6 +532,9 @@ class DaemonService:
         # 保证老调用方（router/WS）不传该参数时向后兼容。
         cache_read_tokens: int | None = None,
         cache_creation_tokens: int | None = None,
+        # task-06 / FR-02：模型层错误详情（ModelErrorDTO）。facade 委托签名必须与
+        # RunSyncService 同步（service.py:528-531 警告），None=daemon 未传保持兼容。
+        error: ModelErrorDTO | None = None,
     ) -> AgentRun:
         """Close an interactive AgentRun from daemon SDK result (gap-3 / design §4).
 
@@ -571,6 +575,7 @@ class DaemonService:
             output_tokens=output_tokens,
             cache_read_tokens=cache_read_tokens,
             cache_creation_tokens=cache_creation_tokens,
+            error=error,
         )
 
     # ── Lease expiry / rollback (delegate to LeaseService, task-06) ───────
