@@ -34,3 +34,12 @@
 根因：ql-001 的 toolEvents.raw 直接整段渲染（daemon 推的完整 JSON），未解析，难看。
 方案：加 parseToolRaw helper（JSON.parse raw → 按工具类型提取：Bash→command / Write,Edit,Read→file_path+content / Agent→description / 通用→args JSON）；工具卡片渲染：工具名标签用解析的 tool 名（替代固定"工具"）、命令显示 primary（command/file_path 等，代码字体）、加"复制"按钮（navigator.clipboard.writeText copyText）。解析失败（非 JSON）原样显示 raw 兼容。
 结果：tsc --noEmit 0 error。
+
+## ql-20260730-003-4a35 | 2026-07-30 09:21:41 | 会话折叠样式对齐原型(灰底思考/蓝底工具)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/daemon/interactive-session-panel.tsx（加 SessionCollapsible 组件 + 替换 CollapsibleSection + 删 import）
+需求：思考/工具折叠样式和原型差别大，对齐原型（灰底思考 / 蓝底工具折叠条）。
+根因：复用了 agent-log 的 CollapsibleSection（纯文字小箭头 text-zinc-500 + Chevron + 斜体摘要，无卡片视觉），与原型的灰底/蓝底折叠条不搭。
+方案：加 SessionCollapsible 组件（对齐原型：思考 bg-zinc-100 border-zinc-200 text-zinc-600 / 工具 bg-blue-50 border-blue-200 text-blue-700；▶▼ 箭头 + 摘要 truncate；展开内容区白底带顶边框），替换两处 CollapsibleSection，删其 import。
+结果：tsc --noEmit 0 error；interactive-session-panel 40 测试过。
