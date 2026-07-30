@@ -27,7 +27,7 @@ import {
   listTaskExecutes,
   startPlanTask,
 } from "@/lib/ppm/task";
-import { pickExecuteEndIso } from "@/lib/ppm/execute-time";
+import { localDayTimeToIso, pickExecuteEndIso } from "@/lib/ppm/execute-time";
 import type { PlanTask, TaskExecute } from "@/lib/ppm/types";
 import { FileUpload } from "@/components/file-upload";
 import { FileViewer } from "@/components/file-viewer";
@@ -149,7 +149,6 @@ export function TaskDetailModal({
     }
     setBusy(true);
     try {
-      const inflightRec = records.find((e) => e.id === inflightId);
       let lastExcId = inflightId;
       // 提交时刻固定一次,避免逐天网络延迟导致末天 now 漂移
       const now = dayjs();
@@ -158,13 +157,11 @@ export function TaskDetailModal({
         if (!d) continue;
         const isLast = i === detailDays.length - 1;
         const ts = d.timeSpent ? Number(d.timeSpent) : undefined;
-        const dayIso = `${d.date}T12:00:00Z`;
-        // 首条 start = in-flight 真实启动时刻; 后续天 start = 当天12:00占位
-        const startIso =
-          i === 0 ? inflightRec?.actual_start_time ?? dayIso : dayIso;
-        // 结束时间: 中间天=当天23:59:59; 最后一天=提交时刻(倒置兜底退回日末)。
-        // 旧逻辑把 end 写成 =start 致执行记录「开始=结束」, 按 ql-20260730-001 修正。
-        const endIso = pickExecuteEndIso(d.date, isLast, startIso, now);
+        // 后续天 start 占位 = 本地当天 12:00(转 UTC,避免 +8 回显成 20:00 / 末天 end 漂到次日)
+        const dayIso = localDayTimeToIso(d.date, "12:00:00");
+        // 结束时间: 中间天=本地当天 23:59:59; 最后一天=提交时刻 now(用户明确按提交时间,不做倒置兜底)。
+        // 经 localDayTimeToIso / now.toISOString 按「本地时刻→UTC」,前端 dayjs 回显停在当天。
+        const endIso = pickExecuteEndIso(d.date, isLast, now);
         if (i > 0) {
           // 后续天: start 创建新 in-flight(记当天 UTC 中午)
           const newExc = await startPlanTask({

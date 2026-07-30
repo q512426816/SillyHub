@@ -36,6 +36,8 @@
 根因：两个详情弹窗的 handleSubmit 在跨天拆分填报时，为绕过后端 D-004「执行起止时间不可跨天」校验，把每条 TaskExecute 记录的 actual_end_time 故意写成等于 actual_start_time——首条 end 取 in-flight 的真实 start，后续天的 start 与 end 同设为当天 12:00——导致每条记录开始=结束，显示必然相同。真实工时由 time_spent（人天）承载，actual 起止本应是有意义的时刻。
 方案：① 抽纯函数 pickExecuteEndIso(date, isLast, startIso, now)：中间天返回当天 23:59:59Z；最后一天（=提交当天）返回提交时刻 now，若 now 早于当天 start（上午提交且 start 占位 12:00）倒置兜底退回日末。拆分循环天然保证「末条即今天、中间天均过去日期」，故 start/end 同日不触发跨天校验、且 end>=start。② task/problem-detail-modal 的 handleSubmit 对称改造：循环外固定一次提交时刻 now 避免逐天漂移，每日 start 保持原值（首条=in-flight 真实启动时刻，后续天=当天 12:00 占位），end 改用 pickExecuteEndIso 替换原 end=start。③ 新增 execute-time.test.ts 6 用例。
 结果：vitest 3 文件 23 测试全绿（纯函数 6 + 任务弹窗 5 + 问题弹窗 12，零回归）；tsc --noEmit 通过；后端零改动。任务计划与问题清单同款缺陷一并修正，未部署，建议浏览器实测确认开始/结束不再相同。
+
+补漏（2026-07-30 第二轮，真实数据实测）：用户反馈执行记录结束时间仍异常——① 时区：中间天 end 用 `${date}T23:59:59Z`（UTC），+8 下显示成次日 07:59:59、日期晚一天；后续天 start `12:00:00Z` 显示成 20:00。根因是把本地日期直接拼成 UTC 字面量。② 最后一天未记提交时刻：提交时刻早于占位 start（12:00 UTC=本地 20:00）时触发「倒置兜底」被退回日末。修复：新增 localDayTimeToIso(date, time) 按本地时刻解析再转 UTC（前端 dayjs 回显停当天）；pickExecuteEndIso 去掉 startIso 参数与倒置兜底，最后一天恒返回 now.toISOString()；两个 handleSubmit 的 start 占位改 localDayTimeToIso(d.date,"12:00:00")，顺带删去不再使用的 inflightRec / startIso。验证：execute-time 测试改为时区无关断言（本地→UTC→本地往返一致），3 文件 23 测试全绿，tsc exit=0。
 ## ql-20260730-003-f13c | 2026-07-30 13:08:25 | /runtimes 会话弹窗工具 use/result 配对+状态徽章+思考同类合并
 状态：已完成
 关联变更：（无）
