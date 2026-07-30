@@ -1054,7 +1054,7 @@ export function InteractiveSessionPanel({
                               >
                                 <div className="mb-1 flex items-center gap-1.5">
                                   <span className="rounded bg-primary px-1.5 py-0.5 text-[10px] text-primary-foreground">
-                                    工具
+                                    {parseToolRaw(evt.raw)?.tool ?? "工具"}
                                   </span>
                                   <span
                                     className={
@@ -1071,9 +1071,22 @@ export function InteractiveSessionPanel({
                                         ? "✗ 失败/拒绝"
                                         : "⏳ 进行中"}
                                   </span>
+                                  {parseToolRaw(evt.raw)?.copyText && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const ct = parseToolRaw(evt.raw)?.copyText ?? "";
+                                        void navigator.clipboard?.writeText(ct);
+                                      }}
+                                      className="ml-auto rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+                                      title="复制命令"
+                                    >
+                                      复制
+                                    </button>
+                                  )}
                                 </div>
                                 <div className="break-all font-mono text-[10px] text-muted-foreground">
-                                  {evt.raw}
+                                  {parseToolRaw(evt.raw)?.primary ?? evt.raw}
                                 </div>
                                 {evt.result && (
                                   <div className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 p-1.5 font-mono text-[10px] text-muted-foreground">
@@ -1176,6 +1189,38 @@ export function InteractiveSessionPanel({
 }
 
 /* ---------- helpers ---------- */
+
+/**
+ * ql-20260730-002：解析 tool_use raw（JSON 字符串）为工具名 + 主要参数 + 复制文本。
+ * 解析失败（非 JSON）返回 null，渲染时原样显示 raw。
+ */
+function parseToolRaw(
+  raw: string,
+): { tool: string; primary: string; copyText: string } | null {
+  try {
+    const obj = JSON.parse(raw);
+    const tool = obj.tool ?? "工具";
+    const args = obj.args ?? {};
+    if (tool === "Bash") {
+      const cmd = args.command ?? "";
+      return { tool, primary: cmd, copyText: cmd };
+    }
+    if (tool === "Write" || tool === "Edit" || tool === "Read") {
+      const fp = args.file_path ?? "";
+      const ct = args.content ? `${fp}\n\n${args.content}` : fp;
+      return { tool, primary: fp, copyText: ct };
+    }
+    if (tool === "Agent") {
+      const desc = args.description ?? args.prompt ?? "";
+      return { tool, primary: desc, copyText: desc };
+    }
+    // 通用：取 description/command/file_path/prompt，复制完整 args JSON
+    const generic = args.description ?? args.command ?? args.file_path ?? args.prompt ?? raw.slice(0, 120);
+    return { tool, primary: generic, copyText: JSON.stringify(args, null, 2) };
+  } catch {
+    return null;
+  }
+}
 
 function TurnStatusBadge({
   status,
