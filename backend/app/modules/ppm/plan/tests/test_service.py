@@ -384,7 +384,13 @@ class TestPsProjectPlan:
         db_session.add(proj)
         await db_session.commit()
         plan_a = await svc.create_ps_project_plan({"project_id": str(proj.id), "status": "draft"})
-        plan_b = await svc.create_ps_project_plan({"project_id": str(proj.id), "status": "draft"})
+        # ql-20260728-007 起"一项目一计划"约束,plan_b 用独立 project 保留"按 plan 过滤明细"测试意图
+        proj_b = PpmProjectMaintenance(
+            id=uuid.uuid4(), project_code="P-EXP-B", project_name="项目导出B"
+        )
+        db_session.add(proj_b)
+        await db_session.commit()
+        plan_b = await svc.create_ps_project_plan({"project_id": str(proj_b.id), "status": "draft"})
         node_a = await svc.create_ps_plan_node({"ps_project_plan_id": str(plan_a.id), "no": "1"})
         node_b = await svc.create_ps_plan_node({"ps_project_plan_id": str(plan_b.id), "no": "1"})
         await svc.create_detail(
@@ -497,9 +503,14 @@ class TestPsProjectPlan:
         plan = await svc.create_ps_project_plan({"project_id": str(proj.id), "status": "draft"})
         assert plan.project_name == "关联项目名"
 
-        # 显式传 project_name 不被覆盖
+        # 显式传 project_name 不被覆盖(用独立 project,ql-20260728-007 一项目一计划约束)
+        proj2 = PpmProjectMaintenance(
+            id=uuid.uuid4(), project_code="PP-FILL-006-B", project_name="关联项目名B"
+        )
+        db_session.add(proj2)
+        await db_session.commit()
         plan2 = await svc.create_ps_project_plan(
-            {"project_id": str(proj.id), "project_name": "显式名", "status": "draft"}
+            {"project_id": str(proj2.id), "project_name": "显式名", "status": "draft"}
         )
         assert plan2.project_name == "显式名"
 

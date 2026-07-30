@@ -205,6 +205,39 @@ class TaskCardVO(BaseModel):
     )
 
 
+# ---------------------------------------------------------------------------
+# 工时热力网格 (2026-07-30-kanban-workload-heatmap, FR-02)
+# ---------------------------------------------------------------------------
+
+
+class WorkloadGridUserRow(BaseModel):
+    """工时热力网格·单人员行。
+
+    ``plan_hours``/``actual_hours`` 为 ``{YYYY-MM-DD: 人天}`` 字典,缺省日期视为 0。
+    plan = 剩余负载摊天 (仅 ≥ today,面向未来);actual = time_spent 覆盖日求和 (含今天)。
+    """
+
+    user_id: uuid.UUID
+    username: str | None = Field(default=None, description="人员名 (project_member.user_name)")
+    plan_hours: dict[str, float] = Field(
+        default_factory=dict, description="计划工时 {日期: 人天} (剩余负载摊天,面向未来)"
+    )
+    actual_hours: dict[str, float] = Field(
+        default_factory=dict, description="实际工时 {日期: 人天} (time_spent 覆盖日求和)"
+    )
+
+
+class WorkloadGridResponse(BaseModel):
+    """工时热力网格响应 (FR-02)。"""
+
+    start_date: str = Field(..., description="日期范围起 YYYY-MM-DD")
+    end_date: str = Field(..., description="日期范围止 YYYY-MM-DD")
+    days: list[str] = Field(default_factory=list, description="dateRange 内每日 YYYY-MM-DD 升序")
+    users: list[WorkloadGridUserRow] = Field(
+        default_factory=list, description="人员行 (与甘特人员列一致)"
+    )
+
+
 __all__ = [
     "CommentCreateReq",
     "CommentVO",
@@ -217,4 +250,6 @@ __all__ = [
     "TaskReorderReq",
     "TaskUpdateReq",
     "UserColumnVO",
+    "WorkloadGridResponse",
+    "WorkloadGridUserRow",
 ]

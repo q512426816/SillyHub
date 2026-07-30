@@ -14,10 +14,10 @@ from __future__ import annotations
 import re
 import uuid
 from collections import defaultdict
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -33,14 +33,19 @@ from app.modules.ppm.kanban.schema import (
     TaskCreateReq,
     TaskUpdateReq,
     UserColumnVO,
+    WorkloadGridResponse,
+    WorkloadGridUserRow,
 )
 from app.modules.ppm.project.model import PpmProjectMember
-from app.modules.ppm.task.model import PlanTask
+from app.modules.ppm.task.model import PlanTask, TaskExecute
 
 log = get_logger(__name__)
 
 # 饱和度可用工时基线:每周 40 小时 (FR-01 MVP 简化,固定常量)。
 DEFAULT_AVAILABLE_HOURS_PER_WEEK = 40
+
+# 工时热力网格 dateRange 上限 (R-03,防大范围×多人员聚合慢)。
+_MAX_GRID_DAYS = 62
 
 
 class KanbanError(AppError):
@@ -57,6 +62,13 @@ class TaskNotFound(KanbanError):
 
 class CommentEmpty(KanbanError):
     code = "PPM_KANBAN_COMMENT_EMPTY"
+    http_status = 422
+
+
+class DateRangeTooLarge(KanbanError):
+    """工时热力网格 dateRange 超过上限 (R-03)。"""
+
+    code = "PPM_KANBAN_DATE_RANGE_TOO_LARGE"
     http_status = 422
 
 
@@ -243,6 +255,171 @@ class PpdKanbanService:
                 )
             )
         return cards
+
+    # ------------------------------------------------------------------
+    # 工时热力网格 (2026-07-30-kanban-workload-heatmap, FR-02/03/04)
+    # ------------------------------------------------------------------
+
+    async def get_workload_grid(
+        self,
+        user_ids: list[uuid.UUID] | None,
+        project_id: uuid.UUID | None,
+        start_date: str,
+        end_date: str,
+    ) -> WorkloadGridResponse:
+        """工时热力网格聚合:逐人逐日 plan/actual 工时 (人天)。
+
+        口径与 workbench 工作日历同源 (design §7.3):plan=剩余负载摊天 (≥today),
+        actual=time_spent 覆盖日求和 (含今天)。人员复用 ``_query_visible_members``
+        保证与甘特人员列一致。dateRange 超过 ``_MAX_GRID_DAYS`` 天抛 ``DateRangeTooLarge`` (R-03)。
+        """
+        start_d = date.fromisoformat(start_date)
+        end_d = date.fromisoformat(end_date)
+        if end_d < start_d:
+            start_d, end_d = end_d, start_d
+        if (end_d - start_d).days + 1 > _MAX_GRID_DAYS:
+            raise DateRangeTooLarge(f"日期范围过大,最大支持 {_MAX_GRID_DAYS} 天")
+        days = [
+            (start_d + timedelta(days=i)).isoformat() for i in range((end_d - start_d).days + 1)
+        ]
+        today = datetime.now(UTC).date()
+
+        members = await self._query_visible_members(user_ids, project_id)
+        if not members:
+            return WorkloadGridResponse(
+                start_date=start_date, end_date=end_date, days=days, users=[]
+            )
+
+        member_ids = [m.user_id for m in members]
+        plan_by_user = await self._spread_plan_person_days(
+            member_ids, project_id, start_d, end_d, today
+        )
+        actual_by_user = await self._sum_actual_person_days(member_ids, project_id, start_d, end_d)
+
+        users = [
+            WorkloadGridUserRow(
+                user_id=m.user_id,
+                username=m.user_name,
+                plan_hours=plan_by_user.get(m.user_id, {}),
+                actual_hours=actual_by_user.get(m.user_id, {}),
+            )
+            for m in members
+        ]
+        return WorkloadGridResponse(
+            start_date=start_date, end_date=end_date, days=days, users=users
+        )
+
+    async def _spread_plan_person_days(
+        self,
+        user_ids: list[uuid.UUID],
+        project_id: uuid.UUID | None,
+        start_d: date,
+        end_d: date,
+        today: date,
+    ) -> dict[uuid.UUID, dict[str, float]]:
+        """plan_hours:剩余负载摊天 (FR-03)。
+
+        对齐 workbench ``_spread_remaining_hours`` 但单位直接用**人天**
+        (``_parse_hours`` 返回人天,不再 ×8):未完成任务 ``(计划人天 − 已用人天) /
+        剩余日历天数`` 摊到 ``[max(today, start), end] ∩ [start_d, end_d] ∩ [today, ∞)``。
+        过去日期 (< today) 无 plan (=0)。
+        """
+        stmt = select(PlanTask).where(
+            PlanTask.user_id.in_(user_ids),
+            PlanTask.status != "已完成",
+            PlanTask.end_time.isnot(None),
+        )
+        if project_id is not None:
+            stmt = stmt.where(PlanTask.project_id == project_id)
+        result = await self._session.execute(stmt)
+        tasks = list(result.scalars().all())
+        if not tasks:
+            return {}
+
+        plan_ids = [t.id for t in tasks]
+        spent_stmt = (
+            select(TaskExecute.plan_task_id, func.sum(TaskExecute.time_spent))
+            .where(TaskExecute.plan_task_id.in_(plan_ids))
+            .group_by(TaskExecute.plan_task_id)
+        )
+        spent_result = await self._session.execute(spent_stmt)
+        spent_by_plan = {pid: float(s or 0.0) for pid, s in spent_result.all()}
+
+        out: dict[uuid.UUID, dict[str, float]] = defaultdict(dict)
+        for t in tasks:
+            total_days = _parse_hours(t.work_load)
+            if total_days <= 0:
+                continue
+            remaining = total_days - spent_by_plan.get(t.id, 0.0)
+            if remaining <= 0:
+                continue
+            end_date = t.end_time.date() if t.end_time is not None else None
+            if end_date is None:
+                continue
+            start_date = t.start_time.date() if t.start_time is not None else end_date
+            lower = max(today, start_date)
+            if end_date < lower:
+                continue
+            span = (end_date - lower).days + 1
+            per_day = remaining / span
+            if per_day <= 0:
+                continue
+            cur = lower
+            while cur <= end_date:
+                if start_d <= cur <= end_d and cur >= today:
+                    key = cur.isoformat()
+                    cell = out[t.user_id]
+                    cell[key] = round(cell.get(key, 0.0) + per_day, 2)
+                cur += timedelta(days=1)
+        return dict(out)
+
+    async def _sum_actual_person_days(
+        self,
+        user_ids: list[uuid.UUID],
+        project_id: uuid.UUID | None,
+        start_d: date,
+        end_d: date,
+    ) -> dict[uuid.UUID, dict[str, float]]:
+        """actual_hours:time_spent 覆盖日求和 (FR-04)。
+
+        对齐 workbench ``_sum_actual_hours`` 但单位用**人天** (``time_spent`` 本为人天,
+        不再 ×8):每条 execute 的 ``time_spent`` 全额计入 ``actual_start → actual_end``
+        覆盖的每个日历日 (∩ dateRange,含今天)。记录选取按 ``actual_start_time ∈
+        [start_d, end_d]`` (与 ``list_by_date_range_with_plan`` 一致);``project_id``
+        过滤 join PlanTask,problem 执行 (无 plan_task_id) 被排除 (对齐现有看板实际 tab)。
+        """
+        stmt = select(TaskExecute).where(
+            TaskExecute.execute_user_id.in_(user_ids),
+            func.date(TaskExecute.actual_start_time) >= start_d,
+            func.date(TaskExecute.actual_start_time) <= end_d,
+        )
+        if project_id is not None:
+            stmt = stmt.join(PlanTask, PlanTask.id == TaskExecute.plan_task_id).where(
+                PlanTask.project_id == project_id
+            )
+        result = await self._session.execute(stmt)
+        executes = list(result.scalars().all())
+
+        out: dict[uuid.UUID, dict[str, float]] = defaultdict(dict)
+        for ex in executes:
+            uid = ex.execute_user_id
+            if uid is None:
+                continue
+            hours = float(ex.time_spent or 0.0)
+            if hours <= 0:
+                continue
+            s = ex.actual_start_time.date() if ex.actual_start_time is not None else None
+            if s is None:
+                continue
+            e = ex.actual_end_time.date() if ex.actual_end_time is not None else s
+            cur = max(s, start_d)
+            hi = min(e, end_d)
+            while cur <= hi:
+                key = cur.isoformat()
+                cell = out[uid]
+                cell[key] = round(cell.get(key, 0.0) + hours, 2)
+                cur += timedelta(days=1)
+        return dict(out)
 
     # ------------------------------------------------------------------
     # 分配 + 排序 (写)

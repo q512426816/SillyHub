@@ -37,6 +37,7 @@ from app.modules.ppm.kanban.schema import (
     TaskReorderReq,
     TaskUpdateReq,
     UserColumnVO,
+    WorkloadGridResponse,
 )
 from app.modules.ppm.kanban.service import PpdKanbanService, _parse_hours
 from app.modules.ppm.task.model import PlanTask
@@ -100,6 +101,25 @@ async def get_task_cards(
     )
     svc = PpdKanbanService(session)
     return await svc.get_task_cards(req)
+
+
+@router.get("/kanban/workload-grid", response_model=WorkloadGridResponse)
+async def get_workload_grid(
+    session: SessionDep,
+    _user: AuthUser,
+    start_date: str = Query(..., description="日期范围起 YYYY-MM-DD"),
+    end_date: str = Query(..., description="日期范围止 YYYY-MM-DD (含当天)"),
+    project_id: str | None = Query(None, description="项目过滤"),
+    user_ids: list[str] | None = Query(None, description="人员范围 (多次传参)"),
+) -> WorkloadGridResponse:
+    """工时热力网格:逐人逐日 plan/actual 工时 (人天,FR-02)。"""
+    svc = PpdKanbanService(session)
+    return await svc.get_workload_grid(
+        user_ids=_parse_user_ids(user_ids),
+        project_id=uuid.UUID(project_id) if project_id else None,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
 @router.post("/kanban/task/assign")

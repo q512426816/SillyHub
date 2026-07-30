@@ -27,7 +27,7 @@ import {
   listSimpleProjects,
 } from "@/lib/ppm/project";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
-import { DatePicker, Form, message, Modal, Radio, Tabs } from "antd";
+import { DatePicker, Form, message, Modal, Radio, Segmented, Tabs } from "antd";
 import type {
   KanbanTaskCard,
   ProjectSimpleItem,
@@ -42,6 +42,7 @@ import { KanbanGantt } from "./_components/kanban-gantt";
 import { KanbanActualGantt } from "./_components/kanban-actual-gantt";
 import { KanbanDateNav } from "./_components/kanban-date-nav";
 import { KanbanWorkHourChart } from "./_components/kanban-work-hour-chart";
+import { KanbanWorkloadGrid } from "./_components/kanban-workload-grid";
 import {
   KanbanTaskContextMenu,
   type ContextMenuState,
@@ -97,6 +98,8 @@ export default function KanbanPage() {
 
   // 计划/实际 tab + 实际工作表数据(对齐源 Home ScheduleCard/WorkCard)
   const [activeTab, setActiveTab] = useState<"plan" | "actual">("plan");
+  // 视图切换:甘特图(默认,现有) / 工时热力(2026-07-30-kanban-workload-heatmap FR-01)
+  const [viewMode, setViewMode] = useState<"gantt" | "heat">("gantt");
   const [actualExecutes, setActualExecutes] = useState<TaskExecuteWithPlan[]>([]);
   const [actualLoading, setActualLoading] = useState(false);
   const [displayMode, setDisplayMode] = useState<"both" | "task" | "problem">("both");
@@ -194,14 +197,25 @@ export default function KanbanPage() {
         {/* 日期导航条(计划/实际两 tab 共享) */}
         <div className="mt-2 flex items-center justify-between border-t border-border pt-2">
           <KanbanDateNav range={dateRange} onChange={setDateRange} />
-          <div className="text-xs text-muted-foreground">
-            {activeTab === "plan"
-              ? loading
-                ? "加载中…"
-                : `共 ${tasks.length} 个任务 / ${users.length} 人`
-              : actualLoading
-                ? "加载中…"
-                : `共 ${filteredExecutes.length} 条实际工作 / ${users.length} 人`}
+          <div className="flex items-center gap-3">
+            <Segmented
+              size="small"
+              value={viewMode}
+              onChange={(v) => setViewMode(v as "gantt" | "heat")}
+              options={[
+                { value: "gantt", label: "甘特图" },
+                { value: "heat", label: "工时热力" },
+              ]}
+            />
+            <div className="text-xs text-muted-foreground">
+              {activeTab === "plan"
+                ? loading
+                  ? "加载中…"
+                  : `共 ${tasks.length} 个任务 / ${users.length} 人`
+                : actualLoading
+                  ? "加载中…"
+                  : `共 ${filteredExecutes.length} 条实际工作 / ${users.length} 人`}
+            </div>
           </div>
         </div>
       </SectionCard>
@@ -215,7 +229,15 @@ export default function KanbanPage() {
           {
             key: "plan",
             label: "团队计划排程表",
-            children: (
+            children: viewMode === "heat" ? (
+              <KanbanWorkloadGrid
+                mode="plan"
+                startDate={dateRange[0].format("YYYY-MM-DD")}
+                endDate={dateRange[1].format("YYYY-MM-DD")}
+                projectId={filters.project_id}
+                userIds={filters.user_ids}
+              />
+            ) : (
               <div className="flex h-full gap-3 overflow-hidden">
                 <div className="min-w-0 flex-1">
                   <KanbanGantt
@@ -247,7 +269,15 @@ export default function KanbanPage() {
           {
             key: "actual",
             label: "团队实际工作表",
-            children: (
+            children: viewMode === "heat" ? (
+              <KanbanWorkloadGrid
+                mode="actual"
+                startDate={dateRange[0].format("YYYY-MM-DD")}
+                endDate={dateRange[1].format("YYYY-MM-DD")}
+                projectId={filters.project_id}
+                userIds={filters.user_ids}
+              />
+            ) : (
               <div className="flex h-full gap-3 overflow-hidden">
                 <div className="flex min-w-0 flex-1 flex-col gap-2 overflow-hidden">
                   <div className="flex items-center gap-2">

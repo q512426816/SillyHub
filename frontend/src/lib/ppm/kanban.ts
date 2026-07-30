@@ -11,6 +11,7 @@
  * 走统一 `apiFetch`(自动带 token + 401 刷新)。
  */
 import { apiFetch } from "@/lib/api";
+import type { components } from "@/lib/api-types";
 import type {
   KanbanComment,
   KanbanCommentCreateReq,
@@ -22,6 +23,10 @@ import type {
   KanbanTaskReorderReq,
   KanbanUserColumn,
 } from "./types";
+
+/** 工时热力网格响应(类型来自 api-types 生成,禁手写)。 */
+export type WorkloadGridResponse = components["schemas"]["WorkloadGridResponse"];
+export type WorkloadGridUserRow = components["schemas"]["WorkloadGridUserRow"];
 
 /** /kanban/users:group_by_org 决定返回 UserColumnVO[] 或 OrgGroup[]。 */
 export type KanbanUsersResult = KanbanUserColumn[] | KanbanOrgGroup[];
@@ -101,6 +106,37 @@ export async function listKanbanTasks(
     path = `${path}?${query.join("&")}`;
   }
   return apiFetch<KanbanTaskCard[]>(path);
+}
+
+/**
+ * 工时热力网格 — 逐人逐日 plan/actual 工时 (人天,FR-02)。
+ *
+ * 后端聚合口径 (kanban/service.py `get_workload_grid`):
+ * - plan_hours   剩余负载摊天 (仅 ≥ today,面向未来;过去日期无值)
+ * - actual_hours time_spent 覆盖日求和 (含今天)
+ * user_ids 多次同名 query(同 listKanbanTasks 拼 URL 方式)。
+ */
+export async function fetchWorkloadGrid(params: {
+  start_date: string;
+  end_date: string;
+  project_id?: string | null;
+  user_ids?: string[] | null;
+}): Promise<WorkloadGridResponse> {
+  const query: string[] = [
+    `start_date=${encodeURIComponent(params.start_date)}`,
+    `end_date=${encodeURIComponent(params.end_date)}`,
+  ];
+  if (params.project_id !== undefined && params.project_id !== null) {
+    query.push(`project_id=${encodeURIComponent(params.project_id)}`);
+  }
+  if (params.user_ids && params.user_ids.length > 0) {
+    for (const uid of params.user_ids) {
+      query.push(`user_ids=${encodeURIComponent(uid)}`);
+    }
+  }
+  return apiFetch<WorkloadGridResponse>(
+    `/api/ppm/kanban/workload-grid?${query.join("&")}`,
+  );
 }
 
 /** 分配任务给人员 (更新 PlanTask.user_id/user_name/kanban_order)。 */

@@ -19315,6 +19315,101 @@
         }
       }
     },
+    "/api/ppm/kanban/workload-grid": {
+      "get": {
+        "tags": [
+          "ppm-kanban"
+        ],
+        "summary": "Get Workload Grid",
+        "description": "工时热力网格:逐人逐日 plan/actual 工时 (人天,FR-02)。",
+        "operationId": "get_workload_grid_api_ppm_kanban_workload_grid_get",
+        "parameters": [
+          {
+            "name": "start_date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "日期范围起 YYYY-MM-DD",
+              "title": "Start Date"
+            },
+            "description": "日期范围起 YYYY-MM-DD"
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "日期范围止 YYYY-MM-DD (含当天)",
+              "title": "End Date"
+            },
+            "description": "日期范围止 YYYY-MM-DD (含当天)"
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "项目过滤",
+              "title": "Project Id"
+            },
+            "description": "项目过滤"
+          },
+          {
+            "name": "user_ids",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "人员范围 (多次传参)",
+              "title": "User Ids"
+            },
+            "description": "人员范围 (多次传参)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkloadGridResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/ppm/kanban/task/assign": {
       "post": {
         "tags": [
@@ -47675,6 +47770,86 @@
           "agent_type"
         ],
         "title": "WorkerRunResponse"
+      },
+      "WorkloadGridResponse": {
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "title": "Start Date",
+            "description": "日期范围起 YYYY-MM-DD"
+          },
+          "end_date": {
+            "type": "string",
+            "title": "End Date",
+            "description": "日期范围止 YYYY-MM-DD"
+          },
+          "days": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Days",
+            "description": "dateRange 内每日 YYYY-MM-DD 升序"
+          },
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/WorkloadGridUserRow"
+            },
+            "type": "array",
+            "title": "Users",
+            "description": "人员行 (与甘特人员列一致)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start_date",
+          "end_date"
+        ],
+        "title": "WorkloadGridResponse",
+        "description": "工时热力网格响应 (FR-02)。"
+      },
+      "WorkloadGridUserRow": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username",
+            "description": "人员名 (project_member.user_name)"
+          },
+          "plan_hours": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Plan Hours",
+            "description": "计划工时 {日期: 人天} (剩余负载摊天,面向未来)"
+          },
+          "actual_hours": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Actual Hours",
+            "description": "实际工时 {日期: 人天} (time_spent 覆盖日求和)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id"
+        ],
+        "title": "WorkloadGridUserRow",
+        "description": "工时热力网格·单人员行。\n\n``plan_hours``/``actual_hours`` 为 ``{YYYY-MM-DD: 人天}`` 字典,缺省日期视为 0。\nplan = 剩余负载摊天 (仅 ≥ today,面向未来);actual = time_spent 覆盖日求和 (含今天)。"
       },
       "WorkspaceBrief": {
         "properties": {

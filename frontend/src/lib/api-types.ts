@@ -5801,6 +5801,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ppm/kanban/workload-grid": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workload Grid
+         * @description 工时热力网格:逐人逐日 plan/actual 工时 (人天,FR-02)。
+         */
+        get: operations["get_workload_grid_api_ppm_kanban_workload_grid_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ppm/kanban/task/assign": {
         parameters: {
             query?: never;
@@ -15524,6 +15544,65 @@ export interface components {
             lease_id?: string | null;
             /** Error Code */
             error_code?: string | null;
+        };
+        /**
+         * WorkloadGridResponse
+         * @description 工时热力网格响应 (FR-02)。
+         */
+        WorkloadGridResponse: {
+            /**
+             * Start Date
+             * @description 日期范围起 YYYY-MM-DD
+             */
+            start_date: string;
+            /**
+             * End Date
+             * @description 日期范围止 YYYY-MM-DD
+             */
+            end_date: string;
+            /**
+             * Days
+             * @description dateRange 内每日 YYYY-MM-DD 升序
+             */
+            days?: string[];
+            /**
+             * Users
+             * @description 人员行 (与甘特人员列一致)
+             */
+            users?: components["schemas"]["WorkloadGridUserRow"][];
+        };
+        /**
+         * WorkloadGridUserRow
+         * @description 工时热力网格·单人员行。
+         *
+         *     ``plan_hours``/``actual_hours`` 为 ``{YYYY-MM-DD: 人天}`` 字典,缺省日期视为 0。
+         *     plan = 剩余负载摊天 (仅 ≥ today,面向未来);actual = time_spent 覆盖日求和 (含今天)。
+         */
+        WorkloadGridUserRow: {
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /**
+             * Username
+             * @description 人员名 (project_member.user_name)
+             */
+            username?: string | null;
+            /**
+             * Plan Hours
+             * @description 计划工时 {日期: 人天} (剩余负载摊天,面向未来)
+             */
+            plan_hours?: {
+                [key: string]: number;
+            };
+            /**
+             * Actual Hours
+             * @description 实际工时 {日期: 人天} (time_spent 覆盖日求和)
+             */
+            actual_hours?: {
+                [key: string]: number;
+            };
         };
         /**
          * WorkspaceBrief
@@ -27114,6 +27193,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskCardVO"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workload_grid_api_ppm_kanban_workload_grid_get: {
+        parameters: {
+            query: {
+                /** @description 日期范围起 YYYY-MM-DD */
+                start_date: string;
+                /** @description 日期范围止 YYYY-MM-DD (含当天) */
+                end_date: string;
+                /** @description 项目过滤 */
+                project_id?: string | null;
+                /** @description 人员范围 (多次传参) */
+                user_ids?: string[] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkloadGridResponse"];
                 };
             };
             /** @description Validation Error */

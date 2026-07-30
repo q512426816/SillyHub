@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<!--
+  ppm/kanban 工时热力网格 — 设计原型(线框示意,确认设计方向用)
+  author: qinyi
+  created_at: 2026-07-30 10:00:00
+
+  核心确认点:
+  1. 视图切换: 计划/实际tab 内加「甘特图 / 工时热力」切换(保留甘特)
+  2. 人员×日期网格: 行=人员, 列=日期, 格内数字=当日工时(人天)
+  3. 锚点偏离式配色: =1人天无色(达标) / <1越少越绿(0=绿) / >1越大越红→黑
+  4. 周末/法定假日: 灰底休息态不染色
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>看板工时热力网格 — 设计原型</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+         background: #f3f4f6; color: #1f2937; padding: 24px; font-size: 13px; }
+  .proto-tag { display:inline-block; background:#0ea5e9; color:#fff; font-size:11px;
+               padding:2px 8px; border-radius:10px; margin-bottom:12px; }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .sub { color:#6b7280; font-size:12px; margin-bottom:20px; }
+
+  /* 顶部: 主tab + 视图切换 */
+  .topbar { background:#fff; border:1px solid #e5e7eb; border-radius:8px;
+            padding:12px 16px; margin-bottom:16px; display:flex;
+            align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; }
+  .maintabs { display:flex; gap:4px; }
+  .maintab { padding:6px 14px; border-radius:6px; cursor:pointer; border:1px solid transparent; }
+  .maintab.active { background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe; font-weight:600; }
+  .viewseg { display:flex; border:1px solid #d1d5db; border-radius:6px; overflow:hidden; }
+  .viewseg div { padding:6px 14px; cursor:pointer; background:#fff; color:#6b7280; }
+  .viewseg div.on { background:#1f2937; color:#fff; }
+
+  .panel { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:16px; }
+
+  /* 网格 */
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border:1px solid #eef0f2; text-align:center; }
+  thead th { background:#f9fafb; font-weight:600; padding:8px 4px; font-size:12px; }
+  thead th .dow { display:block; font-size:10px; color:#9ca3af; font-weight:400; }
+  thead th.rest { background:#f3f4f6; color:#9ca3af; }
+  .rowhead { text-align:left; padding:8px 10px; background:#fafafa; min-width:120px; }
+  .rowhead .nm { font-weight:600; }
+  .rowhead .rl { font-size:10px; color:#9ca3af; }
+  td.cell { width:64px; height:40px; font-variant-numeric:tabular-nums; font-weight:600; }
+  td.cell.rest { background:#f3f4f6 !important; color:#d1d5db !important; }
+  td.cell.empty { color:#cbd5e1; font-weight:400; }
+
+  /* 图例 */
+  .legend { margin-top:18px; padding:14px; background:#f9fafb; border-radius:8px; }
+  .legend h3 { font-size:13px; margin-bottom:10px; }
+  .ramp { display:flex; align-items:center; gap:0; margin:8px 0; flex-wrap:wrap; }
+  .ramp .sw { width:56px; height:26px; display:flex; align-items:center; justify-content:center;
+              font-size:11px; font-weight:600; border:1px solid #e5e7eb; }
+  .ramp-note { font-size:11px; color:#6b7280; margin-top:6px; line-height:1.6; }
+  .note { margin-top:16px; padding:12px; background:#fffbeb; border:1px solid #fde68a;
+          border-radius:8px; font-size:12px; line-height:1.7; color:#92400e; }
+  code { background:#f3f4f6; padding:1px 5px; border-radius:4px; font-size:11px; }
+</style>
+</head>
+<body>
+  <span class="proto-tag">设计原型 · 线框示意</span>
+  <h1>/ppm/kanban — 人员工时热力网格</h1>
+  <div class="sub">确认三件事:①视图切换位置 ②网格形态 ③锚点偏离式配色。数据为示意。</div>
+
+  <div class="topbar">
+    <div class="maintabs">
+      <div class="maintab active" id="tab-plan">团队计划排程表</div>
+      <div class="maintab" id="tab-actual">团队实际工作表</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span style="font-size:12px;color:#6b7280;">视图:</span>
+      <div class="viewseg">
+        <div id="seg-gantt">甘特图</div>
+        <div id="seg-heat" class="on">工时热力</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel-heat">
+    <div style="font-size:12px;color:#6b7280;margin-bottom:10px;" id="grid-caption">
+      计划tab · 工时热力 — 当日<b>计划</b>工时(剩余负载摊天,今天及未来;过去日期无计划负载)
+    </div>
+    <div style="overflow-x:auto;">
+      <table id="grid"></table>
+    </div>
+
+    <div class="legend">
+      <h3>配色规则(锚点偏离式 · 基准 1人天=8h)</h3>
+      <div class="ramp" id="ramp"></div>
+      <div class="ramp-note">
+        不足(<1人天): 越接近 0 越<b style="color:#16a34a;">绿</b>(闲) → 越接近 1 越<b style="color:#d97706;">黄</b>；
+        正好 <b>1 人天</b> = <b>无色</b>(达标,不染色)；
+        超出(>1人天): 越大越<b style="color:#dc2626;">红</b> → 极大(≥3)趋<b>黑</b>。
+        周末/法定假日 = 灰底休息态(不染色)；调休补班日按正常工作日染色。
+      </div>
+    </div>
+
+    <div class="note">
+      <b>口径边界(需你知晓):</b><br>
+      · <b>计划tab</b> = 剩余负载摊天(<code>(计划工时-已用工时)/剩余天数</code>),是「<b>面向未来</b>」的口径 —— 今天及未来有值,
+        <b>过去日期为 0</b>(剩余负载只往后排)。和工作台工作日历同源(按日历日摊,不跳周末)。<br>
+      · <b>实际tab</b> = <code>TaskExecute.time_spent</code> 按 <code>actual_start_time</code> 落点累加,是「<b>面向过去</b>」的口径 —— 过去及今天有值,未来为 0。<br>
+      · 两个 tab 天然互补: 计划看将来排得满不满, 实际看过去干了多少。<br>
+      · 工作日状态(周末/法定/调休)由前端 <code>workday.ts</code> 判断(单一数据源,后端不重复维护节假日表)。
+    </div>
+  </div>
+
+  <div class="panel" id="panel-gantt" style="display:none;">
+    <div style="padding:60px 20px;text-align:center;color:#9ca3af;border:2px dashed #e5e7eb;border-radius:8px;">
+      甘特图视图(现有,保留不动) — 任务条横跨日期。点「工时热力」切回网格。
+    </div>
+  </div>
+
+<script>
+// ── 锚点偏离式配色(与最终实现同一套函数逻辑) ─────────────────
+// hours: 当日工时(人天); 返回 {bg, fg}
+function lerp(a, b, t){ return a + (b - a) * t; }
+function hsl(h, s, l){ return `hsl(${h}, ${s}%, ${l}%)`; }
+function workloadColor(hours){
+  const h = Math.round(hours * 10) / 10;
+  if (h <= 0)        return { bg: hsl(140, 60, 82), fg: '#14532d' };   // 0 = 绿(最闲)
+  if (h === 1.0)     return { bg: 'transparent',     fg: '#374151' };  // 达标 = 无色
+  if (h < 1.0) {                                                        // 不足: 绿→黄
+    const t = h / 1.0;                       // 0..1
+    const hue = lerp(140, 45, t);            // 绿140 → 黄45
+    return { bg: hsl(hue, 65, 80), fg: '#3f3f06' };
+  }
+  // 超出: 浅红→黑 (1→3人天 映射 0..1)
+  const t = Math.min((h - 1.0) / 2.0, 1.0);
+  const light = lerp(72, 8, t);              // 浅红72% → 黑8%
+  const fg = t > 0.55 ? '#f9fafb' : '#7f1d1d';
+  return { bg: hsl(0, 70, light), fg };
+}
+
+// ── 示意数据: 人员 × 两周日期 ────────────────────────────────
+const people = [
+  { name: '张伟', role: '前端' },
+  { name: '李娜', role: '后端' },
+  { name: '王强', role: '测试' },
+  { name: '陈静', role: '产品' },
+  { name: '刘洋', role: '后端' },
+];
+// 生成两周日期 2026-07-27(一) ~ 2026-08-09
+const dates = [];
+for (let i = 0; i < 14; i++){ const d = new Date(2026, 6, 27 + i); dates.push(d); }
+const DOW = ['日','一','二','三','四','五','六'];
+function key(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function isWeekend(d){ return d.getDay()===0 || d.getDay()===6; }
+
+// 固定工时数据(人天), mode=plan/actual 给不同分布
+function hoursFor(pi, di, mode){
+  const seed = (pi * 31 + di * 7 + (mode==='actual'?13:0)) % 17;
+  const table = [0,0.5,1,1.5,0.8,1,2,0,1,1.2,0.5,1,3,0.9,1,0.6,2.5];
+  let v = table[seed];
+  if (mode==='plan' && di < 3) v = 0;        // 计划: 过去3天(相对"今天"7-30)无未来负载→0
+  return v;
+}
+
+let mode = 'plan';
+function render(){
+  const g = document.getElementById('grid');
+  let html = '<thead><tr><th class="rowhead">人员</th>';
+  dates.forEach(d=>{
+    const rest = isWeekend(d);
+    html += `<th class="${rest?'rest':''}">${d.getMonth()+1}/${d.getDate()}<span class="dow">${DOW[d.getDay()]}</span></th>`;
+  });
+  html += '</tr></thead><tbody>';
+  people.forEach((p, pi)=>{
+    html += `<tr><td class="rowhead"><span class="nm">${p.name}</span> <span class="rl">${p.role}</span></td>`;
+    dates.forEach((d, di)=>{
+      const rest = isWeekend(d);
+      const v = hoursFor(pi, di, mode);
+      if (rest){ html += `<td class="cell rest">—</td>`; return; }
+      const c = workloadColor(v);
+      const txt = v === 0 ? '<span class="empty">0</span>' : v.toFixed(1);
+      html += `<td class="cell" style="background:${c.bg};color:${c.fg};">${txt}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody>';
+  g.innerHTML = html;
+  document.getElementById('grid-caption').innerHTML =
+    (mode==='plan'
+      ? '计划tab · 工时热力 — 当日<b>计划</b>工时(剩余负载摊天,今天及未来;过去日期无计划负载=0)'
+      : '实际tab · 工时热力 — 当日<b>实际</b>工时(time_spent 按执行落点累加;未来无记录=0)');
+}
+
+// 图例色阶
+(function(){
+  const ramp = document.getElementById('ramp');
+  const stops = [0, 0.3, 0.6, 0.9, 1.0, 1.3, 1.7, 2.2, 3.0];
+  stops.forEach(v=>{
+    const c = workloadColor(v);
+    const d = document.createElement('div');
+    d.className = 'sw';
+    d.style.background = c.bg === 'transparent' ? '#fff' : c.bg;
+    d.style.color = c.fg;
+    d.textContent = v.toFixed(1);
+    ramp.appendChild(d);
+  });
+})();
+
+// 交互: 视图切换 + tab切换
+document.getElementById('seg-gantt').onclick = ()=>{
+  document.getElementById('seg-gantt').classList.add('on');
+  document.getElementById('seg-heat').classList.remove('on');
+  document.getElementById('panel-gantt').style.display='block';
+  document.getElementById('panel-heat').style.display='none';
+};
+document.getElementById('seg-heat').onclick = ()=>{
+  document.getElementById('seg-heat').classList.add('on');
+  document.getElementById('seg-gantt').classList.remove('on');
+  document.getElementById('panel-heat').style.display='block';
+  document.getElementById('panel-gantt').style.display='none';
+};
+document.getElementById('tab-plan').onclick = ()=>{
+  mode='plan';
+  document.getElementById('tab-plan').classList.add('active');
+  document.getElementById('tab-actual').classList.remove('active');
+  render();
+};
+document.getElementById('tab-actual').onclick = ()=>{
+  mode='actual';
+  document.getElementById('tab-actual').classList.add('active');
+  document.getElementById('tab-plan').classList.remove('active');
+  render();
+};
+render();
+</script>
+</body>
+</html>
