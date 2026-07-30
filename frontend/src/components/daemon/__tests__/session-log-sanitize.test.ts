@@ -44,8 +44,8 @@ describe("sanitizeSessionLogContent", () => {
     expect(sanitizeSessionLogContent("出错了", "stderr")).toBe("⚠️ 出错了");
   });
 
-  it("tool_call 加 🔧 前缀", () => {
-    expect(sanitizeSessionLogContent("Read file.ts", "tool_call")).toBe("🔧 Read file.ts");
+  it("tool_call 不再加 🔧 前缀(ql-20260730-001:tool 走 classify 分流到 toolEvents,卡片自带图标)", () => {
+    expect(sanitizeSessionLogContent("Read file.ts", "tool_call")).toBe("Read file.ts");
   });
 
   it("空内容返回空字符串", () => {

@@ -73,11 +73,32 @@ export type SessionDetailItem = SessionLogSegment;
 type SessionUiStatus = "idle" | "creating" | "active" | "ending" | "ended" | "failed" | "reconnecting";
 type TurnUiStatus = "pending" | "running" | "interrupting" | "completed" | "failed" | "killed";
 
+/**
+ * ql-20260730-001：agent 回合内的工具调用事件（折叠卡片用）。
+ * - raw：[TOOL_USE] 内容（命令/args，已剥前缀）
+ * - result：配对的 [TOOL_RESULT] 内容（已剥前缀，可能缺失=进行中）
+ * - status：running（未配对 result）/ ok（成功）/ deny（被拒/失败）
+ */
+export interface SessionToolEvent {
+  raw: string;
+  result?: string;
+  status: "running" | "ok" | "deny";
+}
+
 export interface SessionTurnView {
   runId: string;
   turn: number | null;
   prompt: string;
   output: string;
+  /**
+   * ql-20260730-001：思考过程（[THINKING] 累积，折叠展示）。
+   * 融合说明（ql-20260730-merge）：展示层统一走下方 `details`（4 分类过程项），
+   * `thinking`/`toolEvents` 保留为可选，便于外部构造的 turn（历史 attach 等）
+   * 兼容旧字段；本组件实时链路不再写入这两个字段。
+   */
+  thinking?: string;
+  /** ql-20260730-001：工具调用事件列表（[TOOL_USE]/[TOOL_RESULT] 配对，折叠卡片）。可选，见上。 */
+  toolEvents?: SessionToolEvent[];
   status: TurnUiStatus;
   seenLogIds: Set<string>;
   /**
@@ -533,6 +554,8 @@ export function InteractiveSessionPanel({
             turn: null,
             prompt,
             output: "",
+            thinking: "",
+            toolEvents: [],
             status: "pending",
             seenLogIds: new Set(),
             inputTokens: null,
@@ -596,7 +619,7 @@ export function InteractiveSessionPanel({
         ...INITIAL_VIEW,
         status: "creating",
         turns: [
-          { runId: "__pending_create__", turn: null, prompt, output: "", status: "pending", seenLogIds: new Set(), inputTokens: null, outputTokens: null, errorDetail: null, details: [] },
+          { runId: "__pending_create__", turn: null, prompt, output: "", thinking: "", toolEvents: [], status: "pending", seenLogIds: new Set(), inputTokens: null, outputTokens: null, errorDetail: null, details: [] },
         ],
       });
       try {
@@ -1150,8 +1173,10 @@ export function InteractiveSessionPanel({
 /**
  * ql-20260729-005：「全部」视图的过程项列表（思考/工具调用/stderr）。
  * 缩进对齐答复气泡（pl-9 ≈ 助手图标宽度），左侧竖线表示"执行过程"语义。
- * - thinking：默认折叠（复用运行日志的 CollapsibleSection，风格一致），灰字斜体摘要
- * - tool：蓝色 🔧→Wrench 小行，单行截断，title 悬停看全文
+ * 融合说明（ql-20260730-merge）：数据层用本地 4 分类 details（reply/thinking/tool/stderr），
+ * 工具行嫁接远程 ql-20260730-002 的「命令形式 + 复制按钮」卡片（parseToolRaw）。
+ * - thinking：默认折叠（复用运行日志的 CollapsibleSection，风格一致），灰字摘要
+ * - tool：命令卡片（Wrench 图标 + 工具名 + 命令/路径 mono + 复制按钮）；解析失败原样显示
  * - stderr：琥珀 ⚠ 小行
  */
 function TurnDetailsList({ details }: { details: SessionDetailItem[] }) {
@@ -1173,14 +1198,37 @@ function TurnDetailsList({ details }: { details: SessionDetailItem[] }) {
           );
         }
         if (item.kind === "tool") {
+          // ql-20260730-002 嫁接：解析 tool_use JSON → 工具名 + 命令 + 复制；
+          // 非 JSON（纯文本工具行）原样降级显示。
+          const parsed = parseToolRaw(item.text);
           return (
             <div
               key={idx}
-              className="flex items-center gap-1.5 text-[11px] text-blue-700"
-              title={item.text}
+              className="rounded border border-blue-200 bg-blue-50/40 px-2 py-1.5"
             >
-              <Wrench className="h-3 w-3 shrink-0" aria-hidden />
-              <span className="min-w-0 truncate">{item.text}</span>
+              <div className="mb-0.5 flex items-center gap-1.5 text-[10px] text-blue-700">
+                <Wrench className="h-3 w-3 shrink-0" aria-hidden />
+                <span className="font-medium">{parsed?.tool ?? "工具调用"}</span>
+                {parsed?.copyText && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const ct = parsed?.copyText ?? "";
+                      void navigator.clipboard?.writeText(ct);
+                    }}
+                    className="ml-auto rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+                    title="复制命令"
+                  >
+                    复制
+                  </button>
+                )}
+              </div>
+              <div
+                className="break-all font-mono text-[10px] text-muted-foreground"
+                title={item.text}
+              >
+                {parsed?.primary ?? item.text}
+              </div>
             </div>
           );
         }
@@ -1197,6 +1245,38 @@ function TurnDetailsList({ details }: { details: SessionDetailItem[] }) {
       })}
     </div>
   );
+}
+
+/**
+ * ql-20260730-002：解析 tool_use raw（JSON 字符串）为工具名 + 主要参数 + 复制文本。
+ * 解析失败（非 JSON）返回 null，渲染时原样显示 raw。
+ */
+function parseToolRaw(
+  raw: string,
+): { tool: string; primary: string; copyText: string } | null {
+  try {
+    const obj = JSON.parse(raw);
+    const tool = obj.tool ?? "工具";
+    const args = obj.args ?? {};
+    if (tool === "Bash") {
+      const cmd = args.command ?? "";
+      return { tool, primary: cmd, copyText: cmd };
+    }
+    if (tool === "Write" || tool === "Edit" || tool === "Read") {
+      const fp = args.file_path ?? "";
+      const ct = args.content ? `${fp}\n\n${args.content}` : fp;
+      return { tool, primary: fp, copyText: ct };
+    }
+    if (tool === "Agent") {
+      const desc = args.description ?? args.prompt ?? "";
+      return { tool, primary: desc, copyText: desc };
+    }
+    // 通用：取 description/command/file_path/prompt，复制完整 args JSON
+    const generic = args.description ?? args.command ?? args.file_path ?? args.prompt ?? raw.slice(0, 120);
+    return { tool, primary: generic, copyText: JSON.stringify(args, null, 2) };
+  } catch {
+    return null;
+  }
 }
 
 function TurnStatusBadge({
@@ -1294,6 +1374,8 @@ function upsertTurn(
       turn: env.turn ?? null,
       prompt: "",
       output: "",
+      thinking: "",
+      toolEvents: [],
       status: "running",
       seenLogIds: new Set(),
       inputTokens: env.input_tokens ?? null,

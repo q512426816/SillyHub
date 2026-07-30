@@ -5,34 +5,37 @@
  *（helpers 已 import panel 的 InteractiveSessionPanel；若 panel 反向 import
  * helpers 会成环，故共享纯函数下沉到此独立文件）。
  *
- * attach 历史预填（logsToTurns）与实时 SSE（renderLogContent）共用同一过滤，
+ * attach 历史预填（logsToTurns）与实时 SSE（onLog）共用同一过滤，
  * 避免 thinking/SYSTEM/AskUserQuestion 等原始标记泄漏到正文（修复 attach 历史
  * 消息渲染 BUG：[SYSTEM:thinking_tokens]/[THINKING] 不再显示）。
  *
  * 过滤规则（与原 interactive-session-panel.tsx:894 renderLogContent 完全一致）：
  *   - 含 AskUserQuestion / [TOOL_RESULT] User answered / [SYSTEM…]/[RESULT…] → 丢弃
  *   - channel=stderr → 加 ⚠️ 前缀
- *   - channel=tool_call → 加 🔧 前缀
- *   - 剥 [ASSISTANT|THINKING|LOG:\w+] 前缀
+ *   - channel=tool_call → 不加 🔧 前缀（ql-20260730-001：tool 内容走 classifySessionLog
+ *     分流到工具卡片，卡片自带图标；保留正文不再加 emoji 前缀）
+ *   - 剥 [ASSISTANT|THINKING|LOG:\w+|TOOL_USE|TOOL_RESULT] 前缀
  */
 export function sanitizeSessionLogContent(content: string, channel?: string | null): string {
-  const seg = classifySessionLog(content, channel);
-  if (!seg) return "";
-  if (seg.kind === "stderr") return `⚠️ ${seg.text}`;
-  if (seg.kind === "tool") return `🔧 ${seg.text}`;
-  return seg.text;
+  const trimmed = (content ?? "").trim();
+  if (!trimmed) return "";
+  if (trimmed.includes("AskUserQuestion")) return "";
+  if (/^\[TOOL_RESULT\]\s*User answered/.test(trimmed)) return "";
+  if (/^\[(SYSTEM|RESULT)[^\]]*\]/.test(trimmed)) return "";
+  if (channel === "stderr") return `⚠️ ${trimmed}`;
+  return trimmed.replace(/^\[(ASSISTANT|THINKING|LOG:\w+|TOOL_USE|TOOL_RESULT)\]\s?/, "");
 }
 
 /**
  * ql-20260729-005：会话日志分类（对话 / 过程信息分流）。
  *
- * 与 sanitizeSessionLogContent 同一套过滤规则，但返回结构化分类而非拼接字符串，
+ * 与 sanitizeSessionLogContent 同一套丢弃规则，但返回结构化分类而非拼接字符串，
  * 供会话面板把「答复正文（reply）」与「过程信息（thinking/tool/stderr）」分流：
  * 默认对话视图只渲染 reply，过程信息经「对话/全部」切换后再展示。
  *
  * 分类规则：
  *   - 丢弃（返回 null）：AskUserQuestion 卡片协议行 / [TOOL_RESULT] User answered /
- *     [SYSTEM…] / [RESULT…] 与空内容（与原函数完全一致）
+ *     [SYSTEM…] / [RESULT…] 与空内容（与原函数完全一致；丢弃优先于 channel 分流）
  *   - kind=thinking：[THINKING] 前缀行（剥前缀）
  *   - kind=tool：channel=tool_call（daemon 上报的工具 JSON），或
  *     内容以 [TOOL_USE] / [TOOL_RESULT] 前缀的 stdout 文本行（ql-20260729-005 补：

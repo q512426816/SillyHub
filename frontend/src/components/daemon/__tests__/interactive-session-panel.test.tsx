@@ -600,6 +600,8 @@ describe("InteractiveSessionPanel", () => {
         turn: 1,
         prompt: "历史提问",
         output: "历史回答",
+        thinking: "",
+        toolEvents: [],
         status: "completed" as const,
         seenLogIds: new Set<string>(),
         extraLogs: [],
