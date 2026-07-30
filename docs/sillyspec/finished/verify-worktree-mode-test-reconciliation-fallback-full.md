@@ -5,6 +5,8 @@ created_at: 2026-07-28 23:22:06
 
 # 坑:worktree 模式下 verify CLI 对账回退全量 commands.test 必然阻断
 
+> **✅ 已解决（2026-07-30 移 finished）**：三个修复方向均已落地源码 + 真实 git fixture 测试全绿（`test/verify-postcheck-worktree.test.mjs` 4 场景 + `test/verify-postcheck-known-failures.test.mjs` 29），且已发布 **v3.25.5**。作者原定「待真实 worktree verify 实测确认」的 fixture 级实测已满足；端到端留待真实 multi-agent-platform worktree 使用中确认（若复现可重开新坑）。下方为原始记录。
+
 > 状态:**活跃坑**,待 sillyspec 工具修复。首次踩中:change 2026-07-28-ppm-project-link-workspace(verify 阶段)。
 >
 > **状态更新（2026-07-29 核对+全量修复源码，三个方向均已落地；截至 v3.25.4 未发布）**：

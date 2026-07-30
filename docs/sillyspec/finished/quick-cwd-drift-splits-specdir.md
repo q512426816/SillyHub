@@ -2,10 +2,12 @@
 author: qinyi
 created_at: 2026-07-30 11:05:00
 title: quick 跑测试 cd 子项目后 cwd 漂移致 specDir 分裂（frontend/.sillyspec 独立实例）
-status: 活跃
+status: 已解决（2026-07-30 工具加 fail-fast 守卫）
 ---
 
 # quick：cd frontend 跑测试后未回根目录，sillyspec --done 操作子项目 .sillyspec 致 session 分裂
+
+> **✅ 已解决（2026-07-30，sillyspec v3.25.5+）**：`src/run/shared.js` 新增 `detectQuickSessionDrift`（+ `ancestorSpecDirs`/`locateQuickSessionGuard`），`src/run/command.js` 在 quick `--done`/`--status` 接入 **fail-fast 守卫**——当前 specBase 无本 session guard、但祖先链别处 specBase 有同 sessionId guard = 跨 specDir 漂移 → `exit 2` 拦截。平台模式 / 显式 `--spec-dir` / 新会话首次启动（别处无 guard）均放行，不误伤。`src/run/stage.js` guard 加 `specDir` 锚定。测试 `test/quick-cwd-drift-guard.test.mjs` + 端到端 smoke（漂移 `exit 2` / 同 specDir 放行推进 Step 1/3）双验证。下方「补救/预防」为工具修复前的 agent 纪律，保留备查。
 
 ## 现象（2026-07-30 ql-20260730-001）
 quick 启动时 cwd=项目根，guard 正常建在 `.sillyspec/.runtime/quick-sessions/<id>/guard.json`，QUICKLOG「进行中」条目写根。

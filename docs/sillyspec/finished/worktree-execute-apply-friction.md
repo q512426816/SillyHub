@@ -1,6 +1,13 @@
-# worktree execute→apply 阶段四个摩擦点（待工具改进）
+# worktree execute→apply 阶段四个摩擦点（✅ 已修复）
 
 > 2026-07-30 变更 `2026-07-30-kanban-workload-heatmap` execute→verify 实测踩坑。四个点都围绕 worktree 隔离执行模式收尾（assess / apply / per-task review / docHash），属活跃坑，待 sillyspec 工具改进。
+>
+> **✅ 全部 4 坑已修复（2026-07-30，sillyspec 主线）**：
+> - **坑1/4**（assess 顺带修复 allowed_paths 豁免 + 一次报全）：`worktree-apply.js assessApplyRisk` 的 Gate2 对 design §6 标注「顺带修复」的预存债文件豁免 allowed_paths 严格校验（降 warning 不 BLOCKED）；`applyWorktree(checkOnly)` 的 Gate1/Gate3 不再短路，assess 聚合各道 reasons 一次报全。新增 `change-list.js parseFileChangeListDetailed`（incidental 标记嗅探）。Gate2 allowed_paths 解析复用 `parseAllowedPaths` + `pathMatches`（消除内联字面弱匹配漂移）。
+> - **坑2**（execute 收尾自动落 per-task review 草稿）：`task-review.js generateTaskReviewDrafts` 据 `resolveVerifyChangedFiles`（worktree-aware base..head diff）按各 task `allowed_paths` 归属，生成 `verdict=cannot_verify` + 非空 `requiredEvidence` 草稿到 `.runtime/execute-runs/<exec-id>/tasks/task-XX/review.json`。幂等（已存在跳过）；exec-id 与 Task Review Gate 同源。`complete.js` execute 块每次 `--done` 调用。
+> - **坑3**（docHash CRLF/LF 双口径容忍，上轮已修）：`stage-review.js verifyStageReviewDocHash` 同时算原始字节 + LF 规范化两个 sha256，匹配任一即过。
+>
+> 测试：`test/worktree-apply-incidental.test.mjs`（坑1/4 豁免 + 一次报全）+ `test/task-review-draft.test.mjs`（坑2 草稿生成/幂等/exec-id 同源）+ `test/stage-review.test.mjs`（坑3 双口径）。
 
 ---
 
@@ -52,6 +59,9 @@ worktree execute 收尾（`--done` 进 Task Review Gate 前）**自动生成 per
 ---
 
 ## 坑 3：docHash 连锁（design 每改一次都要重算 + LF/CRLF 字节差异致反复不匹配）
+
+> **✅ 子问题(b) 已修（2026-07-30，sillyspec v3.25.5+）**：`src/stage-review.js` 的 `verifyStageReviewDocHash` 改**双口径容忍**——gate 重算「原始字节 sha256」与「LF 规范化 sha256」两个值，agent 写的 docHash 匹配任一即过，消除 Windows CRLF/LF 在 git add / eol 规范化前后字节漂移导致的反复「疑似伪造」误报。不改 agent 行为（仍可 `sha256sum` 原始字节）、不破坏存量 review.json、不改契约文档。测试 `test/stage-review.test.mjs` 加 CRLF 双口径用例。
+> **子问题(a) 保留为设计特性**：design 每改一次都要重算 docHash 是防伪造的设计（docHash 锚定主文档内容）。「流程性修订不失效」需引入标记机制，属产品决策，暂不做。
 
 ### 现象
 
