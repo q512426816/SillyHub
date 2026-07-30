@@ -40,7 +40,6 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MarkdownText } from "@/components/ui/markdown-text";
-import { CollapsibleSection } from "@/components/agent-log/tool-renderers";
 import { ApiError } from "@/lib/api";
 import { createMission } from "@/lib/agent";
 import {
@@ -1030,21 +1029,21 @@ export function InteractiveSessionPanel({
                     <div className="max-w-[86%] space-y-1.5 rounded-md border bg-card px-3 py-2 text-xs leading-relaxed text-foreground shadow-sm">
                       {/* ql-20260730-001：思考过程(默认折叠) */}
                       {turn.thinking && (
-                        <CollapsibleSection
+                        <SessionCollapsible
+                          tone="thinking"
                           title="💭 思考过程"
-                          defaultOpen={false}
                           summary={turn.thinking.replace(/\s+/g, " ").trim().slice(0, 50)}
                         >
                           <div className="whitespace-pre-wrap break-words text-muted-foreground">
                             {turn.thinking}
                           </div>
-                        </CollapsibleSection>
+                        </SessionCollapsible>
                       )}
                       {/* 工具调用(默认折叠,显示数量) */}
                       {turn.toolEvents.length > 0 && (
-                        <CollapsibleSection
+                        <SessionCollapsible
+                          tone="tool"
                           title={`🔧 工具调用 · ${turn.toolEvents.length} 个`}
-                          defaultOpen={false}
                         >
                           <div className="space-y-1.5">
                             {turn.toolEvents.map((evt, i) => (
@@ -1096,7 +1095,7 @@ export function InteractiveSessionPanel({
                               </div>
                             ))}
                           </div>
-                        </CollapsibleSection>
+                        </SessionCollapsible>
                       )}
                       {/* 最终回复(突出) */}
                       {turn.output && (
@@ -1190,6 +1189,52 @@ export function InteractiveSessionPanel({
 
 /* ---------- helpers ---------- */
 
+/**
+ * ql-20260730-003：会话气泡内的折叠卡片（灰底思考 / 蓝底工具）。
+ * 带摘要的单行折叠条，点击展开内容。替代 agent-log 的 CollapsibleSection
+ * （后者是日志流纯文字小箭头风格，与气泡视觉不搭）。
+ */
+function SessionCollapsible({
+  tone,
+  title,
+  summary,
+  defaultOpen = false,
+  children,
+}: {
+  tone: "thinking" | "tool";
+  title: string;
+  summary?: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const headerCls =
+    tone === "thinking"
+      ? "bg-zinc-100 border-zinc-200 text-zinc-600"
+      : "bg-blue-50 border-blue-200 text-blue-700";
+  return (
+    <div className={`overflow-hidden rounded border ${headerCls}`}>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-[11px] font-medium"
+      >
+        <span className="text-[9px]">{open ? "▼" : "▶"}</span>
+        <span className="shrink-0">{title}</span>
+        {!open && summary && (
+          <span className="ml-1 min-w-0 flex-1 truncate text-[10px] font-normal opacity-60">
+            {summary}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="border-t border-current/10 bg-background px-2.5 py-2 text-foreground">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
 /**
  * ql-20260730-002：解析 tool_use raw（JSON 字符串）为工具名 + 主要参数 + 复制文本。
  * 解析失败（非 JSON）返回 null，渲染时原样显示 raw。
