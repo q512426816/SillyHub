@@ -3,24 +3,28 @@
  *
  * 设计依据：
  * - `2026-06-18-menu-driven-permissions/design.md` §5.1（类型定义）+ §5.2（19 菜单权限映射表）
- * - 后端 Permission 枚举：`backend/app/modules/auth/permissions.py`（46 个值，含
+ * - `2026-07-29-sidebar-menu-restructure/design.md` §5.1（新 6 分组结构表）+ §7.1
+ *   （MenuSection 六值 + 新增 llm-providers/skills/mcp 菜单项定义）
+ * - 后端 Permission 枚举：`backend/app/modules/auth/permissions.py`（含
  *   2026-06-18 ql-003 新增的 6 个子菜单独立 read 权限 + ql-004 新增的 3 个
- *   管理子菜单独立 admin 权限 + ql-005 git_identity:admin）
+ *   管理子菜单独立 admin 权限 + ql-005 git_identity:admin
+ *   + 2026-07-29-sidebar-menu-restructure 新增 llm_provider:read）
  *
- * 子菜单独立查看权限：每个 overview/management 子菜单有独立 read 权限
+ * 子菜单独立查看权限：每个 workspace 子菜单有独立 read 权限
  * （component:read / topology:read / scan-docs:read / runtime:read /
  * knowledge:read / incident:read），避免共用 workspace:read 致 picker 冗余展示。
  * 后端各 router 已 require 对应权限。
  *
- * 管理菜单独立权限（ql-004/005）：所有 management/system 子菜单各有独立 admin 权限
+ * 管理菜单独立权限（ql-004/005）：config/system 组子菜单各有独立 admin 权限
  * （settings:admin / api_key:admin / runtime:admin / git_identity:admin），
  * 避免共用 platform:admin 致 picker 重复或缺失。后端 router 各自 require 对应权限。
  */
 
 export type MenuSection =
-  | "overview"
-  | "management"
-  | "admin"
+  | "workspace"
+  | "agent"
+  | "config"
+  | "governance"
   | "system"
   | "ppm";
 
@@ -40,7 +44,13 @@ export interface MenuPermissionGroup {
   menuKey: string;
   /** 菜单中文展示名 */
   menuLabel: string;
-  /** emoji 图标字符串 */
+  /**
+   * emoji 图标字符串（遗留数据字段）。
+   * 侧边栏实际图标由 app-shell.tsx 的 MENU_ICON_MAP（lucide）按 href 解析渲染，
+   * 本字段目前无任何渲染消费者，仅为历史数据保留；新增菜单可填语义贴近的 emoji 占位。
+   * （2026-07-29-sidebar-menu-restructure task-04 排查确认：app-shell / picker /
+   * permission.ts 均不消费 icon 字段。）
+   */
   icon: string;
   /** 路由路径，relative 时拼 workspace 前缀，absolute 时直接用 */
   href: string;
@@ -63,9 +73,9 @@ export interface MenuPermissionGroup {
 }
 
 export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
-  // ── overview（8 条）──────────────────────────────────────────
+  // ── workspace 工作区（8 条，原 overview 组平移）───────────────
   {
-    section: "overview",
+    section: "workspace",
     menuKey: "workspaces",
     menuLabel: "工作区首页",
     icon: "\u{1F3E0}",
@@ -79,7 +89,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     ],
   },
   {
-    section: "overview",
+    section: "workspace",
     menuKey: "components",
     menuLabel: "项目组组件",
     icon: "\u{1F4E6}",
@@ -88,7 +98,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     permissions: [{ key: "component:read", name: "组件查看" }],
   },
   {
-    section: "overview",
+    section: "workspace",
     menuKey: "topology",
     menuLabel: "拓扑图",
     icon: "\u{1F5FA}",
@@ -97,7 +107,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     permissions: [{ key: "topology:read", name: "拓扑查看" }],
   },
   {
-    section: "overview",
+    section: "workspace",
     menuKey: "changes",
     menuLabel: "变更中心",
     icon: "\u{1F504}",
@@ -112,7 +122,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     ],
   },
   {
-    section: "overview",
+    section: "workspace",
     menuKey: "scan-docs",
     menuLabel: "扫描文档",
     icon: "\u{1F4C4}",
@@ -121,7 +131,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     permissions: [{ key: "scan-docs:read", name: "扫描文档查看" }],
   },
   {
-    section: "overview",
+    section: "workspace",
     menuKey: "runtime",
     menuLabel: "运行时",
     icon: "\u{26A1}",
@@ -133,7 +143,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     ],
   },
   {
-    section: "overview",
+    section: "workspace",
     menuKey: "knowledge",
     menuLabel: "知识 & 日志",
     icon: "\u{1F4DA}",
@@ -142,7 +152,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     permissions: [{ key: "knowledge:read", name: "知识查看" }],
   },
   {
-    section: "overview",
+    section: "workspace",
     menuKey: "releases",
     menuLabel: "发布",
     icon: "\u{1F680}",
@@ -155,32 +165,9 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     ],
   },
 
-  // ── management（6 条）───────────────────────────────────────
+  // ── agent 智能体（4 条，含新增 skills/mcp）────────────────────
   {
-    section: "management",
-    menuKey: "git-identities",
-    menuLabel: "Git 身份管理",
-    icon: "\u{1F511}",
-    href: "/settings/git-identities",
-    absolute: true,
-    matchPattern: "/settings/git-identities",
-    // 后端 git_identity router 全部端点 require git_identity:admin
-    // （platform:admin 自动通过）。
-    permissions: [{ key: "git_identity:admin", name: "Git 身份访问" }],
-  },
-  {
-    section: "management",
-    menuKey: "api-keys",
-    menuLabel: "API 密钥",
-    icon: "\u{1F4A1}",
-    href: "/settings/api-keys",
-    absolute: true,
-    matchPattern: "/settings/api-keys",
-    // 后端 auth/router 3 个 /api-keys 端点 require api_key:admin（platform:admin 自动通过）。
-    permissions: [{ key: "api_key:admin", name: "API 密钥管理" }],
-  },
-  {
-    section: "management",
+    section: "agent",
     menuKey: "agent",
     menuLabel: "智能体控制台",
     icon: "\u{1F916}",
@@ -203,7 +190,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     ],
   },
   {
-    section: "management",
+    section: "agent",
     menuKey: "missions",
     menuLabel: "Agent 团队",
     icon: "\u{1F91D}",
@@ -215,7 +202,83 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     ],
   },
   {
-    section: "management",
+    // 2026-07-29-sidebar-menu-restructure 新增（D-003）：技能管理提为独立菜单，
+    // 指向平台级 /settings/skills（工作区级仍在工作区内部访问）。
+    section: "agent",
+    menuKey: "skills",
+    menuLabel: "技能管理",
+    icon: "\u{1F9E9}",
+    href: "/settings/skills",
+    absolute: true,
+    matchPattern: "/settings/skills",
+    permissions: [{ key: "settings:admin", name: "平台设置管理" }],
+  },
+  {
+    // 2026-07-29-sidebar-menu-restructure 新增（D-003）：MCP 管理提为独立菜单，
+    // 指向平台级 /settings/mcp。
+    section: "agent",
+    menuKey: "mcp",
+    menuLabel: "MCP 管理",
+    icon: "\u{1F517}",
+    href: "/settings/mcp",
+    absolute: true,
+    matchPattern: "/settings/mcp",
+    permissions: [{ key: "settings:admin", name: "平台设置管理" }],
+  },
+
+  // ── config 配置中心（4 条，含新增 llm-providers；runtimes 自 system 移入，D-006）
+  {
+    // 2026-07-29-sidebar-menu-restructure 新增（D-002）：我的供应商提为独立菜单，
+    // 可见性由新权限 llm_provider:read 控制（可在角色管理分配/收回）。
+    section: "config",
+    menuKey: "llm-providers",
+    menuLabel: "我的供应商",
+    icon: "\u{1F50C}",
+    href: "/settings/providers",
+    absolute: true,
+    matchPattern: "/settings/providers",
+    permissions: [{ key: "llm_provider:read", name: "供应商管理" }],
+  },
+  {
+    section: "config",
+    menuKey: "api-keys",
+    menuLabel: "API 密钥",
+    icon: "\u{1F4A1}",
+    href: "/settings/api-keys",
+    absolute: true,
+    matchPattern: "/settings/api-keys",
+    // 后端 auth/router 3 个 /api-keys 端点 require api_key:admin（platform:admin 自动通过）。
+    permissions: [{ key: "api_key:admin", name: "API 密钥管理" }],
+  },
+  {
+    section: "config",
+    menuKey: "git-identities",
+    menuLabel: "Git 身份管理",
+    icon: "\u{1F511}",
+    href: "/settings/git-identities",
+    absolute: true,
+    matchPattern: "/settings/git-identities",
+    // 后端 git_identity router 全部端点 require git_identity:admin
+    // （platform:admin 自动通过）。
+    permissions: [{ key: "git_identity:admin", name: "Git 身份访问" }],
+  },
+  {
+    // D-006：守护进程运行时归入配置中心（管 daemon 实例/版本等平台运行资源）。
+    section: "config",
+    menuKey: "runtimes",
+    menuLabel: "守护进程运行时",
+    icon: "\u{1F5A5}",
+    href: "/runtimes",
+    absolute: true,
+    matchPattern: "/runtimes",
+    // 后端 daemon/router 管理 UI 端点（list/get/disable/enable/leases）
+    // require runtime:admin（platform:admin 自动通过）。
+    permissions: [{ key: "runtime:admin", name: "守护进程运行时管理" }],
+  },
+
+  // ── governance 协作治理（3 条）────────────────────────────────
+  {
+    section: "governance",
     menuKey: "approvals",
     menuLabel: "审批中心",
     icon: "✅",
@@ -227,7 +290,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     ],
   },
   {
-    section: "management",
+    section: "governance",
     menuKey: "audit",
     menuLabel: "审计中心",
     icon: "\u{1F4DC}",
@@ -242,7 +305,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     ],
   },
   {
-    section: "management",
+    section: "governance",
     menuKey: "incidents",
     menuLabel: "事件",
     icon: "\u{1F6A8}",
@@ -251,9 +314,9 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     permissions: [{ key: "incident:read", name: "事件查看" }],
   },
 
-  // ── admin（3 条）────────────────────────────────────────────
+  // ── system 系统管理（4 条：用户/组织/角色/设置）───────────────
   {
-    section: "admin",
+    section: "system",
     menuKey: "users",
     menuLabel: "用户",
     icon: "\u{1F465}",
@@ -267,7 +330,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     ],
   },
   {
-    section: "admin",
+    section: "system",
     menuKey: "organizations",
     menuLabel: "组织",
     icon: "\u{1F3E2}",
@@ -280,7 +343,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     ],
   },
   {
-    section: "admin",
+    section: "system",
     menuKey: "roles",
     menuLabel: "角色",
     icon: "\u{1F511}",
@@ -291,20 +354,6 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
       { key: "role:read", name: "角色查看" },
       { key: "role:write", name: "角色编辑" },
     ],
-  },
-
-  // ── system（2 条）───────────────────────────────────────────
-  {
-    section: "system",
-    menuKey: "runtimes",
-    menuLabel: "守护进程运行时",
-    icon: "\u{1F5A5}",
-    href: "/runtimes",
-    absolute: true,
-    matchPattern: "/runtimes",
-    // 后端 daemon/router 管理 UI 端点（list/get/disable/enable/leases）
-    // require runtime:admin（platform:admin 自动通过）。
-    permissions: [{ key: "runtime:admin", name: "守护进程运行时管理" }],
   },
   {
     section: "system",
@@ -319,7 +368,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     permissions: [{ key: "settings:admin", name: "平台设置管理" }],
   },
 
-  // ── ppm（13 条，平台级项目与问题管理）──────────────────────
+  // ── ppm（14 条，平台级项目与问题管理）──────────────────────
   // change 2026-06-20-ppm-module-migration task-13：13 个 ppm 子域页面登记。
   // 全部 absolute（平台级，不拼 workspace 前缀），href 指向 /ppm/<页面>。
   // permissions 映射后端 Permission.PPM_*（task-02 产出），任一命中即可见。
@@ -472,18 +521,20 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
 
 /** section 固定渲染顺序，供 AppShell / Picker 使用 */
 export const MENU_SECTION_ORDER: MenuSection[] = [
-  "overview",
-  "management",
+  "workspace",
+  "agent",
+  "config",
+  "governance",
   "ppm",
-  "admin",
   "system",
 ];
 
 /** section 中文标题，供 AppShell 渲染分组标题使用 */
 export const MENU_SECTION_LABEL: Record<MenuSection, string> = {
-  overview: "概览",
-  management: "管理",
+  workspace: "工作区",
+  agent: "智能体",
+  config: "配置中心",
+  governance: "协作治理",
+  system: "系统管理",
   ppm: "项目管理",
-  admin: "系统管理",
-  system: "系统",
 };

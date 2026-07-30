@@ -40,10 +40,12 @@ function labelOf(menuKey: string): string {
 
 describe("AdminRolePermissionPicker", () => {
   // ────────────────────────────────────────────────────────────────────
-  // A. 渲染结构（5 例）— FR-08
+  // A. 渲染结构（6 例）— FR-08
+  // change 2026-07-29-sidebar-menu-restructure: 分组由 overview/management/admin/system
+  // 重组为 workspace/agent/config/governance/system（ppm 不变），本组用例同步适配。
   // ────────────────────────────────────────────────────────────────────
 
-  it("renders 4 sections in fixed order", () => {
+  it("renders 6 sections in fixed order", () => {
     render(<AdminRolePermissionPicker permissions={[]} onChange={vi.fn()} />);
 
     const renderedTitles = MENU_SECTION_ORDER.map(
@@ -79,54 +81,72 @@ describe("AdminRolePermissionPicker", () => {
     expect(actualOrderKeys).toEqual([...MENU_SECTION_ORDER]);
   });
 
-  it("overview section renders 8 menus", () => {
+  it("workspace section renders 8 menus", () => {
     render(<AdminRolePermissionPicker permissions={[]} onChange={vi.fn()} />);
 
-    const overviewMenus = MENU_PERMISSION_GROUPS.filter(
-      (g) => g.section === "overview",
+    const workspaceMenus = MENU_PERMISSION_GROUPS.filter(
+      (g) => g.section === "workspace",
     );
-    expect(overviewMenus).toHaveLength(8);
-    overviewMenus.forEach((g) => {
+    expect(workspaceMenus).toHaveLength(8);
+    workspaceMenus.forEach((g) => {
       expect(screen.getByText(g.menuLabel)).toBeInTheDocument();
     });
   });
 
-  it("management section renders 6 menus (ql-005: git-identities 改用 git_identity:admin 后重新可见)", () => {
+  it("agent section renders 4 menus (含新增 技能管理/MCP 管理)", () => {
     render(<AdminRolePermissionPicker permissions={[]} onChange={vi.fn()} />);
 
-    // ql-005: git-identities 改独立权限 git_identity:admin 后，picker 重新渲染该卡片，
-    // management 区现在有 6 个 menu 全部可见。
-    const managementMenus = MENU_PERMISSION_GROUPS.filter(
-      (g) => g.section === "management",
+    const agentMenus = MENU_PERMISSION_GROUPS.filter(
+      (g) => g.section === "agent",
     );
-    expect(managementMenus).toHaveLength(7);
-    managementMenus.forEach((g) => {
+    expect(agentMenus).toHaveLength(4);
+    agentMenus.forEach((g) => {
+      expect(screen.getByText(g.menuLabel)).toBeInTheDocument();
+    });
+  });
+
+  it("config section renders 4 menus (git-identities 与我的供应商可分配)", () => {
+    render(<AdminRolePermissionPicker permissions={[]} onChange={vi.fn()} />);
+
+    // ql-005: git-identities 改独立权限 git_identity:admin 后，picker 重新渲染该卡片。
+    // change 2026-07-29-sidebar-menu-restructure: config 组现有 4 个 menu
+    // （llm-providers / api-keys / git-identities / runtimes）全部可见。
+    const configMenus = MENU_PERMISSION_GROUPS.filter(
+      (g) => g.section === "config",
+    );
+    expect(configMenus).toHaveLength(4);
+    configMenus.forEach((g) => {
       expect(screen.getByText(g.menuLabel)).toBeInTheDocument();
     });
 
     // git-identities 应出现在 picker 中
     expect(screen.getByText("Git 身份管理")).toBeInTheDocument();
+    // 我的供应商（llm_provider:read）应可作为权限卡片分配
+    expect(screen.getByText("我的供应商")).toBeInTheDocument();
+    expect(
+      screen.getAllByLabelText("llm_provider:read").length,
+    ).toBeGreaterThanOrEqual(1);
   });
 
-  it("admin section renders 3 menus", () => {
+  it("governance section renders 3 menus", () => {
     render(<AdminRolePermissionPicker permissions={[]} onChange={vi.fn()} />);
 
-    const adminMenus = MENU_PERMISSION_GROUPS.filter(
-      (g) => g.section === "admin",
+    const governanceMenus = MENU_PERMISSION_GROUPS.filter(
+      (g) => g.section === "governance",
     );
-    expect(adminMenus).toHaveLength(3);
-    adminMenus.forEach((g) => {
+    expect(governanceMenus).toHaveLength(3);
+    governanceMenus.forEach((g) => {
       expect(screen.getByText(g.menuLabel)).toBeInTheDocument();
     });
   });
 
-  it("system section renders 2 menus", () => {
+  it("system section renders 4 menus", () => {
     render(<AdminRolePermissionPicker permissions={[]} onChange={vi.fn()} />);
 
     const systemMenus = MENU_PERMISSION_GROUPS.filter(
       (g) => g.section === "system",
     );
-    expect(systemMenus).toHaveLength(2);
+    expect(systemMenus).toHaveLength(4);
     systemMenus.forEach((g) => {
       expect(screen.getByText(g.menuLabel)).toBeInTheDocument();
     });
@@ -297,9 +317,10 @@ describe("AdminRolePermissionPicker", () => {
   // D. 数据源切换（3 例）— 验证已迁移到 MENU_PERMISSION_GROUPS
   // ────────────────────────────────────────────────────────────────────
 
-  it("MENU_PERMISSION_GROUPS data has all 34 menus across 5 sections", () => {
-    // 数据源当前 34 项(与 lib/__tests__/menu-permissions.test.ts 长度断言一致)
-    expect(MENU_PERMISSION_GROUPS).toHaveLength(34);
+  it("MENU_PERMISSION_GROUPS data has all 37 menus across 6 sections", () => {
+    // 数据源当前 37 项(与 lib/__tests__/menu-permissions.test.ts 长度断言一致)
+    // change 2026-07-29-sidebar-menu-restructure: 34 → 37（新增 skills/mcp/llm-providers）
+    expect(MENU_PERMISSION_GROUPS).toHaveLength(37);
     expect(MENU_PERMISSION_GROUPS.map((g) => g.menuKey)).toEqual(
       expect.arrayContaining(["users", "organizations", "roles"]),
     );
@@ -311,10 +332,11 @@ describe("AdminRolePermissionPicker", () => {
       return acc;
     }, {});
     expect(sectionCounts).toEqual({
-      overview: 8,
-      management: 7,
-      admin: 3,
-      system: 2,
+      workspace: 8,
+      agent: 4,
+      config: 4,
+      governance: 3,
+      system: 4,
       ppm: 14,
     });
   });

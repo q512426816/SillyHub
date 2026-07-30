@@ -36,14 +36,16 @@ def test_permission_group_has_seven_members() -> None:
     assert set(members) == expected
 
 
-def test_permission_count_is_64() -> None:
-    """46 历史 + 17 PPM_* 菜单/读 + daemon:borrow = 64。
+def test_permission_count_is_65() -> None:
+    """46 历史 + 17 PPM_* 菜单/读 + daemon:borrow + llm_provider:read = 65。
 
     cbd258eb/1f5e6ebe 菜单 unique-key 扩容回升到 63；change
     2026-07-25-daemon-borrow-for-business task-03 / D-006@v2 再加
-    ``DAEMON_BORROW``（业务人员借用开发人员 daemon 回退授权）→ 64。
+    ``DAEMON_BORROW``（业务人员借用开发人员 daemon 回退授权）→ 64；
+    change 2026-07-29-sidebar-menu-restructure task-01 / D-002@v1 再加
+    ``LLM_PROVIDER_READ``（前端「我的供应商」菜单显隐 + 角色分配）→ 65。
     """
-    assert len(list(Permission)) == 64
+    assert len(list(Permission)) == 65
 
 
 @pytest.mark.parametrize(
@@ -86,6 +88,8 @@ def test_permission_count_is_64() -> None:
         (Permission.DEPLOY_PRODUCTION, PermissionGroup.AGENT),
         # task-03: daemon 前缀归 AGENT 组（业务借用回退授权）
         (Permission.DAEMON_BORROW, PermissionGroup.AGENT),
+        # task-01: llm_provider 前缀无特判分支，落默认 PLATFORM 组
+        (Permission.LLM_PROVIDER_READ, PermissionGroup.PLATFORM),
     ],
 )
 def test_permission_group_resolution(perm: Permission, expected_group: PermissionGroup) -> None:
@@ -123,3 +127,15 @@ def test_existing_permission_string_values_unchanged() -> None:
 def test_daemon_borrow_permission_value() -> None:
     """task-03 / D-006@v2：DAEMON_BORROW 权限点字符串值落地。"""
     assert Permission.DAEMON_BORROW.value == "daemon:borrow"
+
+
+def test_llm_provider_read_permission() -> None:
+    """change 2026-07-29-sidebar-menu-restructure task-01 / D-002@v1 / FR-05。
+
+    LLM_PROVIDER_READ 字符串值必须与前端 menu-permissions.ts 约定的
+    ``llm_provider:read`` 完全一致；group 落默认 PLATFORM 组
+    （llm_provider 前缀无特判分支）。该权限仅用于前端菜单显隐 +
+    角色管理分配，不改任何接口鉴权。
+    """
+    assert Permission.LLM_PROVIDER_READ.value == "llm_provider:read"
+    assert Permission.LLM_PROVIDER_READ.group is PermissionGroup.PLATFORM

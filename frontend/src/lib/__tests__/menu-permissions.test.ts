@@ -10,7 +10,8 @@ import { MENU_PERMISSION_GROUPS } from "../menu-permissions";
  * 若后端扩/删枚举，需同时更新本常量；用例 5 会在漂移时失败提示。
  *
  * 分组顺序与后端一致：
- * - Platform (7, 含 2026-06-18 ql-004/005 新增的 4 个管理子菜单独立 admin 权限)
+ * - Platform (8, 含 2026-06-18 ql-004/005 新增的 4 个管理子菜单独立 admin 权限
+ *   + 2026-07-29-sidebar-menu-restructure 新增 llm_provider:read)
  * - Workspace (4)
  * - Workspace 子菜单独立 read (6, 2026-06-18 ql-003 新增)
  * - Change (5)
@@ -20,11 +21,10 @@ import { MENU_PERMISSION_GROUPS } from "../menu-permissions";
  * - Tool (4)
  * - Admin (7)
  * - PPM (8, change 2026-07-20-ppm-permission-simplify task-04 精简：删 16 个 write/delete/export/assign 摆设动作)
- *
- * 合计 7 + 4 + 6 + 5 + 6 + 4 + 3 + 4 + 7 + 8 = 54。
  */
 const BACKEND_PERMISSION_KEYS = [
-  // Platform (7, ql-004 新增 3 个管理子菜单 admin + ql-005 新增 git_identity:admin)
+  // Platform (8, ql-004 新增 3 个管理子菜单 admin + ql-005 新增 git_identity:admin
+  // + 2026-07-29-sidebar-menu-restructure 新增 llm_provider:read)
   "platform:admin",
   "platform:billing",
   "platform:audit:read",
@@ -32,6 +32,7 @@ const BACKEND_PERMISSION_KEYS = [
   "api_key:admin",
   "runtime:admin",
   "git_identity:admin",
+  "llm_provider:read",
   // Workspace (4)
   "workspace:read",
   "workspace:write",
@@ -99,7 +100,7 @@ const BACKEND_PERMISSION_KEYS = [
   "ppm:task-plan:read",
 ] as const;
 
-/** 34 个 menuKey 期望集合（FR-02 19 条 + Agent 团队 1 + PPM 14 条） */
+/** 37 个 menuKey 期望集合（原 34 条 + 2026-07-29-sidebar-menu-restructure 新增 3 条） */
 const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "workspaces",
   "components",
@@ -113,6 +114,10 @@ const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "api-keys",
   "agent",
   "missions",
+  // 2026-07-29-sidebar-menu-restructure 新增（D-002/D-003）
+  "llm-providers",
+  "skills",
+  "mcp",
   "approvals",
   "audit",
   "incidents",
@@ -139,16 +144,17 @@ const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 const VALID_SECTIONS: ReadonlySet<string> = new Set([
-  "overview",
-  "management",
-  "admin",
+  "workspace",
+  "agent",
+  "config",
+  "governance",
   "system",
   "ppm",
 ]);
 
 describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
-  it("MENU_PERMISSION_GROUPS 长度 === 34", () => {
-    expect(MENU_PERMISSION_GROUPS).toHaveLength(34);
+  it("MENU_PERMISSION_GROUPS 长度 === 37", () => {
+    expect(MENU_PERMISSION_GROUPS).toHaveLength(37);
   });
 
   it("所有 menuKey 互不重复，且严格等于 FR-02 预定义清单", () => {
@@ -157,28 +163,30 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(new Set(keys)).toEqual(EXPECTED_MENU_KEYS);
   });
 
-  it("section 字段只能是 overview/management/admin/system 之一", () => {
+  it("section 字段只能是 workspace/agent/config/governance/system/ppm 之一", () => {
     MENU_PERMISSION_GROUPS.forEach((g) => {
       expect(VALID_SECTIONS.has(g.section)).toBe(true);
     });
   });
 
-  it("section 分布：overview 8 / management 7 / ppm 14 / admin 3 / system 2", () => {
+  it("section 分布：workspace 8 / agent 4 / config 4 / governance 3 / system 4 / ppm 14", () => {
     const counter: Record<MenuSection, number> = {
-      overview: 0,
-      management: 0,
-      ppm: 0,
-      admin: 0,
+      workspace: 0,
+      agent: 0,
+      config: 0,
+      governance: 0,
       system: 0,
+      ppm: 0,
     };
     MENU_PERMISSION_GROUPS.forEach((g) => {
       counter[g.section] += 1;
     });
-    expect(counter.overview).toBe(8);
-    expect(counter.management).toBe(7);
+    expect(counter.workspace).toBe(8);
+    expect(counter.agent).toBe(4);
+    expect(counter.config).toBe(4);
+    expect(counter.governance).toBe(3);
+    expect(counter.system).toBe(4);
     expect(counter.ppm).toBe(14);
-    expect(counter.admin).toBe(3);
-    expect(counter.system).toBe(2);
   });
 
   it("每个 menu 至少 1 个 permission（pickerHidden 或无权限菜单除外）", () => {
@@ -208,9 +216,9 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
   it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 63", () => {
     const valid = new Set<string>(BACKEND_PERMISSION_KEYS);
     // 镜像常量自身的完整性护栏：若被误删/重复，立即失败
-    // 46 (非 PPM) + 16 (PPM 菜单/读，已删问题变更) = 62
-    expect(BACKEND_PERMISSION_KEYS.length).toBe(62);
-    expect(valid.size).toBe(62);
+    // 47 (非 PPM, 含 llm_provider:read) + 16 (PPM 菜单/读，已删问题变更) = 63
+    expect(BACKEND_PERMISSION_KEYS.length).toBe(63);
+    expect(valid.size).toBe(63);
 
     MENU_PERMISSION_GROUPS.forEach((g) => {
       g.permissions.forEach((p) => {
@@ -284,12 +292,46 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(g!.permissions.length).toBe(1);
   });
 
-  it("runtimes 菜单应有 1 个 permission (runtime:admin；对齐后端 require_permission_any(RUNTIME_ADMIN))", () => {
+  it("runtimes 菜单应有 1 个 permission (runtime:admin；对齐后端 require_permission_any(RUNTIME_ADMIN))，且归入 config 组（D-006）", () => {
     const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "runtimes");
     expect(g).toBeDefined();
     const keys = g!.permissions.map((p) => p.key).sort();
     expect(keys).toEqual(["runtime:admin"]);
     expect(g!.permissions.length).toBe(1);
+    expect(g!.section).toBe("config");
+  });
+
+  it("新增 llm-providers 菜单：config 组 /settings/providers + llm_provider:read（design §7.1）", () => {
+    const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "llm-providers");
+    expect(g).toBeDefined();
+    expect(g!.section).toBe("config");
+    expect(g!.menuLabel).toBe("我的供应商");
+    expect(g!.href).toBe("/settings/providers");
+    expect(g!.absolute).toBe(true);
+    expect(g!.matchPattern).toBe("/settings/providers");
+    expect(g!.permissions).toEqual([{ key: "llm_provider:read", name: "供应商管理" }]);
+  });
+
+  it("新增 skills 菜单：agent 组 /settings/skills + settings:admin（design §7.1）", () => {
+    const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "skills");
+    expect(g).toBeDefined();
+    expect(g!.section).toBe("agent");
+    expect(g!.menuLabel).toBe("技能管理");
+    expect(g!.href).toBe("/settings/skills");
+    expect(g!.absolute).toBe(true);
+    expect(g!.matchPattern).toBe("/settings/skills");
+    expect(g!.permissions).toEqual([{ key: "settings:admin", name: "平台设置管理" }]);
+  });
+
+  it("新增 mcp 菜单：agent 组 /settings/mcp + settings:admin（design §7.1）", () => {
+    const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "mcp");
+    expect(g).toBeDefined();
+    expect(g!.section).toBe("agent");
+    expect(g!.menuLabel).toBe("MCP 管理");
+    expect(g!.href).toBe("/settings/mcp");
+    expect(g!.absolute).toBe(true);
+    expect(g!.matchPattern).toBe("/settings/mcp");
+    expect(g!.permissions).toEqual([{ key: "settings:admin", name: "平台设置管理" }]);
   });
 
   it("agent 菜单应有 13 个 permissions (task 5 + code 4 + tool 4)", () => {

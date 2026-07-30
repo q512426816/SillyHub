@@ -125,7 +125,7 @@ describe("canSeeMenu", () => {
   it("boundary: empty group.permissions yields false for non-admin and true for admin", () => {
     // 构造一个 permissions 为空的 mock group，验证非 admin 看不到、admin 短路可见。
     const mockGroup: MenuPermissionGroup = {
-      section: "admin",
+      section: "system",
       menuKey: "mock-empty",
       menuLabel: "Mock Empty",
       icon: "x",
@@ -201,63 +201,66 @@ describe("canSeeMenu", () => {
 });
 
 describe("visibleMenusBySection", () => {
-  it("FR-06 #1: with ['user:read'] on 'admin' returns only users (1 entry)", () => {
+  // change 2026-07-29-sidebar-menu-restructure: 分组由 overview/management/admin/system
+  // 重组为 workspace/agent/config/governance/system，以下用例同步改用新分组名。
+  it("FR-06 #1: with ['user:read'] on 'system' returns only users (1 entry)", () => {
     // Given user.permissions = ["user:read"]
-    // When visibleMenusBySection(user, "admin")
-    // Then 长度 = 1 且 menuKey === "users"
+    // When visibleMenusBySection(user, "system")
+    // Then 长度 = 1 且 menuKey === "users"（organizations/roles/settings 权限不命中）
     const user = mkUser({ permissions: ["user:read"] });
-    const result = visibleMenusBySection(user, "admin");
+    const result = visibleMenusBySection(user, "system");
     expect(result).toHaveLength(1);
     expect(result.map((g) => g.menuKey)).toEqual(["users"]);
   });
 
-  it("FR-06 #2: with ['workspace:read'] on 'system' returns empty (no platform:admin)", () => {
+  it("FR-06 #2: with ['workspace:read'] on 'system' returns empty (无命中权限)", () => {
     // Given user.permissions = ["workspace:read"]
     // When visibleMenusBySection(user, "system")
-    // Then 空数组（system 段均为 platform:admin / platform:billing）
+    // Then 空数组（system 段为 user/org/role/settings:admin 权限，均不命中 workspace:read）
     const user = mkUser({ permissions: ["workspace:read"] });
     const result = visibleMenusBySection(user, "system");
     expect(result).toEqual([]);
   });
 
-  it("FR-06 #3: platform admin sees all 3 entries in 'admin' section", () => {
+  it("FR-06 #3: platform admin sees all 4 entries in 'system' section", () => {
     // Given is_platform_admin = true
-    // When visibleMenusBySection(user, "admin")
-    // Then 全部 3 条（users / organizations / roles），顺序与数据源一致
+    // When visibleMenusBySection(user, "system")
+    // Then 全部 4 条（users / organizations / roles / settings），顺序与数据源一致
     const user = mkUser({ is_platform_admin: true, permissions: [] });
-    const result = visibleMenusBySection(user, "admin");
+    const result = visibleMenusBySection(user, "system");
     expect(result.map((g) => g.menuKey)).toEqual([
       "users",
       "organizations",
       "roles",
+      "settings",
     ]);
   });
 
-  it("FR-06 #4: with ['task:read'] on 'management' includes agent", () => {
+  it("FR-06 #4: with ['task:read'] on 'agent' includes agent", () => {
     // Given user.permissions = ["task:read"]
-    // When visibleMenusBySection(user, "management")
+    // When visibleMenusBySection(user, "agent")
     // Then 至少包含 agent（不锁死其它菜单）
     const user = mkUser({ permissions: ["task:read"] });
-    const result = visibleMenusBySection(user, "management");
+    const result = visibleMenusBySection(user, "agent");
     expect(result.some((g) => g.menuKey === "agent")).toBe(true);
   });
 
-  it("FR-06 #5: with ['change:read'] on 'overview' includes changes", () => {
+  it("FR-06 #5: with ['change:read'] on 'workspace' includes changes", () => {
     // Given user.permissions = ["change:read"]
-    // When visibleMenusBySection(user, "overview")
+    // When visibleMenusBySection(user, "workspace")
     // Then 至少包含 changes
     const user = mkUser({ permissions: ["change:read"] });
-    const result = visibleMenusBySection(user, "overview");
+    const result = visibleMenusBySection(user, "workspace");
     expect(result.some((g) => g.menuKey === "changes")).toBe(true);
   });
 
   it("boundary: returns [] for null user", () => {
-    expect(visibleMenusBySection(null, "admin")).toEqual([]);
+    expect(visibleMenusBySection(null, "system")).toEqual([]);
   });
 
   it("boundary: returns [] for non-admin user with empty permissions", () => {
     const user = mkUser({ permissions: [] });
-    expect(visibleMenusBySection(user, "admin")).toEqual([]);
+    expect(visibleMenusBySection(user, "system")).toEqual([]);
   });
 
   it("boundary: returns [] for nonexistent section at runtime (defensive)", () => {

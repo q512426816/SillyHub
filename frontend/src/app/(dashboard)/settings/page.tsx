@@ -1,12 +1,9 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-import Link from "next/link";
-import { Boxes, BookOpen, KeyRound, Network } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { LlmProviderSection } from "@/components/llm-providers/llm-provider-list";
 import { ApiError } from "@/lib/api";
 import { getHealth, type HealthResponse } from "@/lib/health";
 import {
@@ -14,10 +11,13 @@ import {
   updateSettings,
 } from "@/lib/settings";
 
-type Tab = "providers" | "workspace" | "agent" | "security" | "integrations";
+// change 2026-07-29-sidebar-menu-restructure task-06 / D-004@v1:
+// 设置页瘦身——移除「我的供应商」Tab(已提为独立页 /settings/providers)
+// 与 4 个子页 EntryCard 卡片入口(技能/MCP/API 密钥/Git 身份均已提为侧边栏独立菜单),
+// 仅保留 4 个平台配置 Tab,默认选中工作区信息。
+type Tab = "workspace" | "agent" | "security" | "integrations";
 
 const TABS: { key: Tab; label: string }[] = [
-  { key: "providers", label: "我的供应商" },
   { key: "workspace", label: "工作区信息" },
   { key: "agent", label: "智能体配置" },
   { key: "security", label: "安全策略" },
@@ -385,39 +385,10 @@ function KVRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-/* ---------- Entry Cards（子页入口，task-09 MCP） ---------- */
-
-function EntryCard({
-  href,
-  icon,
-  title,
-  desc,
-}: {
-  href: string;
-  icon: ReactNode;
-  title: string;
-  desc: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className="group rounded-lg border bg-card p-4 shadow-sm transition hover:border-primary/50 hover:shadow-md"
-    >
-      <div className="flex items-center gap-2">
-        <span className="flex h-8 w-8 items-center justify-center rounded-md bg-blue-50 text-blue-700">
-          {icon}
-        </span>
-        <span className="text-sm font-medium group-hover:text-primary">{title}</span>
-      </div>
-      <p className="mt-2 text-[11px] text-muted-foreground">{desc}</p>
-    </Link>
-  );
-}
-
 /* ---------- Main Page ---------- */
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<Tab>("providers");
+  const [tab, setTab] = useState<Tab>("workspace");
   const [health, setHealth] = useState<HealthResponse | null>(null);
 
   useEffect(() => {
@@ -442,33 +413,6 @@ export default function SettingsPage() {
         <p className="text-xs text-muted-foreground">平台配置、安全策略</p>
       </header>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <EntryCard
-          href="/settings/skills"
-          icon={<BookOpen className="h-4 w-4" />}
-          title="技能管理"
-          desc="查看平台 SillySpec 技能 + 管理自定义技能"
-        />
-        <EntryCard
-          href="/settings/mcp"
-          icon={<Network className="h-4 w-4" />}
-          title="MCP 配置"
-          desc="平台默认 MCP 配置与 server 白名单"
-        />
-        <EntryCard
-          href="/settings/api-keys"
-          icon={<KeyRound className="h-4 w-4" />}
-          title="API 密钥"
-          desc="守护进程长期凭证签发与吊销"
-        />
-        <EntryCard
-          href="/settings/git-identities"
-          icon={<Boxes className="h-4 w-4" />}
-          title="Git 身份"
-          desc="提交身份与签名配置"
-        />
-      </div>
-
       <div className="flex gap-4 border-b">
         {TABS.map((t) => (
           <button
@@ -485,7 +429,6 @@ export default function SettingsPage() {
         ))}
       </div>
 
-      {tab === "providers" && <LlmProviderSection />}
       {tab === "workspace" && <WorkspaceTab dbStatus={health} />}
       {tab === "agent" && <AgentConfigTab />}
       {tab === "security" && <SecurityTab />}

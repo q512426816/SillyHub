@@ -46,6 +46,10 @@ class Permission(StrEnum):
     API_KEY_ADMIN = "api_key:admin"
     RUNTIME_ADMIN = "runtime:admin"
     GIT_IDENTITY_ADMIN = "git_identity:admin"
+    # change 2026-07-29-sidebar-menu-restructure task-01 / D-002@v1。
+    # 仅用于前端「我的供应商」菜单显隐 + 角色管理分配（design §5.3）；
+    # llm_provider router 本为 per-user 个人级，本权限不改任何接口鉴权。
+    LLM_PROVIDER_READ = "llm_provider:read"
 
     # ── Workspace ───────────────────────────────────────────
     WORKSPACE_READ = "workspace:read"
