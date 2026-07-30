@@ -320,7 +320,10 @@ export function InteractiveSessionPanel({
                 return {
                   ...turn,
                   seenLogIds: nextSeen,
-                  output: turn.output + (turn.output ? "\n" : "") + seg.text,
+                  // ql-20260730-004：reply 流式 delta 直接 concat（不加 \n）——
+                  // 它们是同一段流式输出的连续片段，换行保留在各 delta 内部，
+                  // 在 token 边界插 \n 会破坏 markdown 连续结构（实测 7fb9227d 确诊）。
+                  output: turn.output + seg.text,
                 };
               }
               // thinking / stderr → 追加过程项（保留到达顺序，渲染时连续 thinking 才合并）

@@ -43,3 +43,13 @@
 根因：复用了 agent-log 的 CollapsibleSection（纯文字小箭头 text-zinc-500 + Chevron + 斜体摘要，无卡片视觉），与原型的灰底/蓝底折叠条不搭。
 方案：加 SessionCollapsible 组件（对齐原型：思考 bg-zinc-100 border-zinc-200 text-zinc-600 / 工具 bg-blue-50 border-blue-200 text-blue-700；▶▼ 箭头 + 摘要 truncate；展开内容区白底带顶边框），替换两处 CollapsibleSection，删其 import。
 结果：tsc --noEmit 0 error；interactive-session-panel 40 测试过。
+## ql-20260730-004-9f0a | 2026-07-30 15:21:13 | 会话回复格式修复——reply 流式 delta 改直接 concat(去掉 \n 拼接)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/daemon/interactive-session-panel.tsx（onLog reply 分支 :323 去掉 (output?'\n':'')，改直接 concat output+seg.text）
+     + frontend/src/components/daemon/runtime-session-helpers.tsx（logsToTurns :237 outputs.join('\n')→join('')，与实时 onLog 一致）
+     + frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx（:48 reply 拼接断言改 concat 语义）
+需求：会话气泡里 agent 回复的 markdown 标题/列表与正文粘成一行、没格式重点（实测会话 7fb9227d logs 确诊）。
+根因：agent 一段连续回复被 daemon 拆成多个 ASSISTANT 流式 delta（7fb9227d 的 #30/#31/#32/#33/#34 是同一段流式输出的连续片段），前端 onLog/logsToTurns 却当独立段落用 \n 拼接，在原本连续的文本（如 #32 结尾"这" + #33"通常需要在" 本是连续的"这通常需要在"）里插入 \n，破坏 markdown 连续结构和列表；delta 内部换行（\n\n）数据层是有的、没丢，问题在前端拼接。
+方案：reply 流式 delta 直接 concat（去掉 \n 分隔）——它们是同一段流式输出的连续片段（非独立段落），换行保留在各 delta 内部，直接拼接让 agent 原始 markdown 连续完整渲染。实时 onLog（interactive-session-panel.tsx:323）+ 历史回看 logsToTurns（runtime-session-helpers.tsx:237）两处同改保持一致。不碰 thinking/tool/stderr 的 processItems（独立过程项仍按到达顺序）、不碰 daemon（重复 #35 是 daemon bug 另行处理）、不改 MarkdownText 渲染器。
+结果：vitest 3 文件 77 passed（runtime-session-helpers 8 + interactive-session-panel 41 + session-log-sanitize 28，含更新后的 reply concat 断言）；daemon 当前 offline 无法实跑验证，靠单测验证拼接逻辑。

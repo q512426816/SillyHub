@@ -234,7 +234,8 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
       runId: `__attach_history_${turnIndex}__`,
       turn: turnIndex,
       prompt: prompts.join("\n"),
-      output: outputs.join("\n"),
+      // ql-20260730-004：reply 流式 delta 直接 concat（同 onLog），换行在 delta 内部。
+      output: outputs.join(""),
       status: "completed",
       seenLogIds: new Set(entries.map((e) => e.id)),
       processItems,
