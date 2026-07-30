@@ -28,23 +28,29 @@ export function sanitizeSessionLogContent(content: string, channel?: string | nu
 
 /**
  * ql-20260729-005：会话日志分类（对话 / 过程信息分流）。
+ * ql-20260730-003：tool 拆回 tool_use / tool_result，恢复 use↔result 配对 + 状态徽章。
  *
  * 与 sanitizeSessionLogContent 同一套丢弃规则，但返回结构化分类而非拼接字符串，
- * 供会话面板把「答复正文（reply）」与「过程信息（thinking/tool/stderr）」分流：
+ * 供会话面板把「答复正文（reply）」与「过程信息（thinking/tool_use/tool_result/stderr）」分流：
  * 默认对话视图只渲染 reply，过程信息经「对话/全部」切换后再展示。
  *
  * 分类规则：
  *   - 丢弃（返回 null）：AskUserQuestion 卡片协议行 / [TOOL_RESULT] User answered /
  *     [SYSTEM…] / [RESULT…] 与空内容（与原函数完全一致；丢弃优先于 channel 分流）
  *   - kind=thinking：[THINKING] 前缀行（剥前缀）
- *   - kind=tool：channel=tool_call（daemon 上报的工具 JSON），或
- *     内容以 [TOOL_USE] / [TOOL_RESULT] 前缀的 stdout 文本行（ql-20260729-005 补：
- *     daemon 会把工具调用同时发 channel=stdout 的 [TOOL_USE] 文本行与 channel=tool_call
- *     的 JSON，之前只拦了 JSON，[TOOL_USE]/[TOOL_RESULT] 文本行漏判成 reply 混进对话）
+ *   - kind=tool_use：channel=tool_call（daemon 上报的工具 JSON，含 tool_use_id/success，
+ *     权威源）。stdout 的 [TOOL_USE] 文本行与该 JSON 重复 → 丢弃（双发去重，否则 tool_use
+ *     翻倍、result 仅够配一半，余下永显「执行中 ⏳」）
+ *   - kind=tool_result：[TOOL_RESULT] 前缀的 stdout 文本行（剥前缀，供配对最近 tool_use）
  *   - kind=stderr：channel=stderr
  *   - kind=reply：其余（剥 [ASSISTANT]/[LOG:\w+] 前缀）
  */
-export type SessionLogSegmentKind = "reply" | "thinking" | "tool" | "stderr";
+export type SessionLogSegmentKind =
+  | "reply"
+  | "thinking"
+  | "tool_use"
+  | "tool_result"
+  | "stderr";
 
 export interface SessionLogSegment {
   kind: SessionLogSegmentKind;
@@ -61,12 +67,15 @@ export function classifySessionLog(
   if (/^\[TOOL_RESULT\]\s*User answered/.test(trimmed)) return null;
   if (/^\[(SYSTEM|RESULT)[^\]]*\]/.test(trimmed)) return null;
   if (channel === "stderr") return { kind: "stderr", text: trimmed };
-  if (channel === "tool_call") return { kind: "tool", text: trimmed };
-  // ql-20260729-005：stdout 里的工具文本行也归 tool（[TOOL_USE] 调用 / [TOOL_RESULT] 结果）。
-  // 剥掉前缀保留正文，过程项渲染更干净（如 "Read: {…}" / 文件内容）。
-  const toolTextMatch = trimmed.match(/^\[(TOOL_USE|TOOL_RESULT)\]\s?/);
-  if (toolTextMatch) {
-    return { kind: "tool", text: trimmed.replace(/^\[(TOOL_USE|TOOL_RESULT)\]\s?/, "") };
+  if (channel === "tool_call") return { kind: "tool_use", text: trimmed };
+  // ql-20260730-003 修正：stdout [TOOL_USE] 文本行与 channel=tool_call JSON 是同一工具的
+  // 重复记录（daemon 双发），丢弃文本行、以 tool_call JSON 为权威源——否则 tool_use 翻倍、
+  // result 仅够配一半，余下永显「执行中 ⏳」（已结束会话也假运行）。
+  if (/^\[TOOL_USE\]\s?/.test(trimmed)) {
+    return null;
+  }
+  if (/^\[TOOL_RESULT\]\s?/.test(trimmed)) {
+    return { kind: "tool_result", text: trimmed.replace(/^\[TOOL_RESULT\]\s?/, "") };
   }
   if (/^\[THINKING\]\s?/.test(trimmed)) {
     return { kind: "thinking", text: trimmed.replace(/^\[THINKING\]\s?/, "") };
@@ -75,4 +84,39 @@ export function classifySessionLog(
     kind: "reply",
     text: trimmed.replace(/^\[(ASSISTANT|THINKING|LOG:\w+)\]\s?/, ""),
   };
+}
+
+/**
+ * ql-20260730-003：判断 tool_result 文本是否表示工具执行失败/被拒（→ deny 状态徽章 ✗）。
+ *
+ * 命中「拒绝/denied/error/失败/fail」任一关键词（大小写不敏感）即判 deny。宁可宽松
+ * （疑似失败也标 deny 提示用户），deny 仅影响视觉徽标不影响功能。onLog（实时）与
+ * logsToTurns（attach 历史）共用此函数，避免两处正则不一致。
+ */
+export function isToolResultDenied(text: string): boolean {
+  return /拒绝|denied|error|失败|fail/i.test(text ?? "");
+}
+
+/**
+ * ql-20260730-003 修正：从 tool_call JSON raw 解析工具执行状态（状态徽章权威源）。
+ *
+ * daemon 上报的 tool_call JSON 形如
+ *   {"tool":"Bash","args":{...},"tool_use_id":"call_xxx","success":true}
+ * 含 `success` 布尔字段——工具执行结果真值。以此定状态徽章，不再靠 [TOOL_RESULT] 文本
+ * 关键词猜测（避免结果正文里出现 "error"/"fail" 字样误判 ✗）。
+ *
+ *   - success: true  → "ok"（✓）
+ *   - success: false → "deny"（✗）
+ *   - 解析失败 / 无 success 字段 → "running"（回退靠后续 result 配对兜底）
+ */
+export function statusFromToolUseRaw(raw: string): "ok" | "deny" | "running" {
+  try {
+    const obj = JSON.parse((raw ?? "").trim());
+    if (obj && typeof obj.success === "boolean") {
+      return obj.success ? "ok" : "deny";
+    }
+  } catch {
+    // 非 JSON（人类可读摘要等），回退 running
+  }
+  return "running";
 }

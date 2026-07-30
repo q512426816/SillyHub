@@ -73,4 +73,6 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 - 2026-07-29-sidebar-menu-restructure | 侧边栏菜单信息架构重组：`menu-permissions.ts` MenuSection 改 6 值（workspace/agent/config/governance/system/ppm）+ 菜单按功能域重组 5 组（工作区 8 / 智能体 4 / 配置中心 4 / 协作治理 3 / 系统管理 4，ppm 14 项隔离不变），新增 3 独立菜单技能管理 + MCP 管理（智能体组，平台级 /settings/skills、/settings/mcp，复用 settings:admin）、我的供应商（配置中心，独立页 /settings/providers 复用 LlmProviderSection，新增 llm_provider:read 显隐）；守护进程运行时归配置中心（D-006）。`app-shell.tsx` MENU_ICON_MAP 补 Puzzle/PlugZap/Cloud，emoji icon 字段确认无渲染消费者（侧边栏图标按 href 解析）。`settings/page.tsx` 瘦身移除 4 EntryCard 卡片入口 + providers Tab，仅留工作区信息/智能体配置/安全策略/集成 4 Tab 默认工作区信息。受影响测试 4 文件（menu-permissions 37 + permission + picker 40 + 新 providers 页 2）+ settings 相关全绿，前端全量 121 文件 1224 全绿 + typecheck exit 0。
 
+- ql-20260730-003-f13c | /runtimes 会话弹窗工具 use/result 配对+状态徽章+思考按序合并+md 渲染：classifySessionLog 拆 tool→tool_use/tool_result + isToolResultDenied 纯函数（拒绝/denied/error/失败/fail 判 deny）；SessionTurnView 改 processItems 有序过程项（替代 toolEvents+details），onLog 与 logsToTurns 两链路按真实到达顺序构建——tool_use 推 running、tool_result 配对最近 running 设 ok/deny、孤儿降级 raw 空 tool 项兜底；TurnDetailsList 连续同类合并（连续 thinking 拼成一个卡片，被工具穿插则分段保持顺序，修「一股脑全合并丢顺序」）；ToolEventCard 工具结果默认折叠（太长）+ ✓/✗/⏳ 徽章；思考与工具结果均 MarkdownText 渲染（与对话气泡一致）。daemon 测试全绿 + tsc 0 错。
+
 <!-- MANUAL_NOTES_END -->

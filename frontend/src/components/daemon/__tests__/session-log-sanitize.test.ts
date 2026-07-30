@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { classifySessionLog, sanitizeSessionLogContent } from "../session-log-sanitize";
+import { classifySessionLog, sanitizeSessionLogContent, statusFromToolUseRaw } from "../session-log-sanitize";
 
 describe("sanitizeSessionLogContent", () => {
   it("过滤 [SYSTEM:thinking_tokens] 技术标记", () => {
@@ -91,33 +91,30 @@ describe("classifySessionLog", () => {
     });
   });
 
-  it("channel=tool_call → tool（不加 🔧 前缀，前缀由展示层决定）", () => {
+  it("channel=tool_call → tool_use（不加前缀，前缀由展示层决定；配对用 result）", () => {
     expect(classifySessionLog("Read file.ts", "tool_call")).toEqual({
-      kind: "tool",
+      kind: "tool_use",
       text: "Read file.ts",
     });
   });
 
-  it("stdout 的 [TOOL_USE] 文本行 → tool 剥前缀（ql-20260729-005：daemon 双发之一）", () => {
-    expect(
-      classifySessionLog('[TOOL_USE] Read: {"file_path": "a.ts"}', "stdout"),
-    ).toEqual({ kind: "tool", text: 'Read: {"file_path": "a.ts"}' });
+  it("stdout 的 [TOOL_USE] 文本行 → 丢弃（与 tool_call JSON 重复，双发去重）", () => {
+    // ql-20260730-003 修正：daemon 双发 [TOOL_USE] 文本 + tool_call JSON，丢弃文本行以
+    // tool_call JSON 为权威源，避免 tool_use 翻倍致 result 配对半数落空、永显「执行中」。
+    expect(classifySessionLog('[TOOL_USE] Read: {"file_path": "a.ts"}', "stdout")).toBeNull();
   });
 
-  it("stdout 的 [TOOL_RESULT] 结果行 → tool 剥前缀（ql-20260729-005）", () => {
+  it("stdout 的 [TOOL_RESULT] 结果行 → tool_result 剥前缀（供配对最近 tool_use）", () => {
     expect(classifySessionLog("[TOOL_RESULT] 文件内容如下", "stdout")).toEqual({
-      kind: "tool",
+      kind: "tool_result",
       text: "文件内容如下",
     });
   });
 
-  it("无 channel（null）的 [TOOL_USE]/[TOOL_RESULT] 也归 tool", () => {
-    expect(classifySessionLog("[TOOL_USE] Glob: x", null)).toEqual({
-      kind: "tool",
-      text: "Glob: x",
-    });
+  it("无 channel（null）的 [TOOL_USE] → 丢弃（双发去重），[TOOL_RESULT] → tool_result", () => {
+    expect(classifySessionLog("[TOOL_USE] Glob: x", null)).toBeNull();
     expect(classifySessionLog("[TOOL_RESULT] done", null)).toEqual({
-      kind: "tool",
+      kind: "tool_result",
       text: "done",
     });
   });
@@ -137,5 +134,27 @@ describe("classifySessionLog", () => {
 
   it("tool_call channel 的 SYSTEM 行仍丢弃（丢弃规则优先于 channel 分流）", () => {
     expect(classifySessionLog("[SYSTEM] noise", "tool_call")).toBeNull();
+  });
+});
+
+/**
+ * ql-20260730-003 修正：statusFromToolUseRaw 从 tool_call JSON 的 success 字段定状态徽章
+ * （权威源，不再靠 [TOOL_RESULT] 文本关键词猜测）。
+ */
+describe("statusFromToolUseRaw", () => {
+  it("success: true → ok（✓）", () => {
+    expect(statusFromToolUseRaw('{"tool":"Bash","success":true}')).toBe("ok");
+  });
+  it("success: false → deny（✗）", () => {
+    expect(statusFromToolUseRaw('{"tool":"Bash","success":false}')).toBe("deny");
+  });
+  it("无 success 字段 → running（回退靠后续 result 配对兜底）", () => {
+    expect(statusFromToolUseRaw('{"tool":"Bash","args":{}}')).toBe("running");
+  });
+  it("非 JSON（人类可读摘要）→ running", () => {
+    expect(statusFromToolUseRaw("Read: file.ts")).toBe("running");
+  });
+  it("空串 → running", () => {
+    expect(statusFromToolUseRaw("")).toBe("running");
   });
 });

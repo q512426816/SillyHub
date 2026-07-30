@@ -600,11 +600,9 @@ describe("InteractiveSessionPanel", () => {
         turn: 1,
         prompt: "历史提问",
         output: "历史回答",
-        thinking: "",
-        toolEvents: [],
         status: "completed" as const,
         seenLogIds: new Set<string>(),
-        extraLogs: [],
+        processItems: [],
       },
     ];
   }
@@ -1434,9 +1432,9 @@ describe("InteractiveSessionPanel 对话/全部视图切换（ql-20260729-005）
           seenLogIds: new Set(),
           inputTokens: null,
           outputTokens: null,
-          details: [
+          processItems: [
             { kind: "thinking", text: "历史思考内容" },
-            { kind: "tool", text: "Bash ls -la" },
+            { kind: "tool", raw: "Bash ls -la", status: "ok" },
           ],
         },
       ],

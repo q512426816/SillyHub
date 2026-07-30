@@ -21,7 +21,7 @@
  * 会话列表 / 历史回看 / permission 审批弹窗 = task-12（本组件不做）。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Ban,
   Bot,
@@ -37,7 +37,6 @@ import {
 import { AgentModelInput } from "@/components/AgentModelInput";
 import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
 import { RunErrorItem } from "@/components/agent-log/run-error-item";
-import { CollapsibleSection } from "@/components/agent-log/tool-renderers";
 import { buildErrorLogItem, type ErrorLogItem } from "@/components/agent-log/normalize";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Badge } from "@/components/ui/badge";
@@ -62,20 +61,27 @@ import {
   type SessionStreamEnvelope,
 } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
-import {
-  classifySessionLog,
-  type SessionLogSegment,
-} from "@/components/daemon/session-log-sanitize";
+import { classifySessionLog, isToolResultDenied, statusFromToolUseRaw } from "@/components/daemon/session-log-sanitize";
 
-/** ql-20260729-005：过程信息项（thinking/tool/stderr），对话视图默认隐藏，「全部」视图展示。 */
-export type SessionDetailItem = SessionLogSegment;
+/**
+ * ql-20260730-003：一个回合内按真实到达顺序排列的过程项。
+ * 思考/工具/stderr 混在同一有序序列，渲染时连续 thinking 合并成一整段（被工具/stderr
+ * 打断则分段、工具卡片穿插其间），保留 agent 真实执行时序——不一股脑合并丢顺序。
+ * - thinking：[THINKING] 片段（可能多段，连续的才合并）
+ * - tool：工具调用事件（含配对 result + 状态；raw 空串=孤儿 result 无配对 use）
+ * - stderr：channel=stderr 的错误/告警文本
+ */
+export type SessionProcessItem =
+  | { kind: "thinking"; text: string }
+  | ({ kind: "tool" } & SessionToolEvent)
+  | { kind: "stderr"; text: string };
 
 type SessionUiStatus = "idle" | "creating" | "active" | "ending" | "ended" | "failed" | "reconnecting";
 type TurnUiStatus = "pending" | "running" | "interrupting" | "completed" | "failed" | "killed";
 
 /**
  * ql-20260730-001：agent 回合内的工具调用事件（折叠卡片用）。
- * - raw：[TOOL_USE] 内容（命令/args，已剥前缀）
+ * - raw：[TOOL_USE] 内容（命令/args，已剥前缀；空串=孤儿 result 无配对 use）
  * - result：配对的 [TOOL_RESULT] 内容（已剥前缀，可能缺失=进行中）
  * - status：running（未配对 result）/ ok（成功）/ deny（被拒/失败）
  */
@@ -90,15 +96,6 @@ export interface SessionTurnView {
   turn: number | null;
   prompt: string;
   output: string;
-  /**
-   * ql-20260730-001：思考过程（[THINKING] 累积，折叠展示）。
-   * 融合说明（ql-20260730-merge）：展示层统一走下方 `details`（4 分类过程项），
-   * `thinking`/`toolEvents` 保留为可选，便于外部构造的 turn（历史 attach 等）
-   * 兼容旧字段；本组件实时链路不再写入这两个字段。
-   */
-  thinking?: string;
-  /** ql-20260730-001：工具调用事件列表（[TOOL_USE]/[TOOL_RESULT] 配对，折叠卡片）。可选，见上。 */
-  toolEvents?: SessionToolEvent[];
   status: TurnUiStatus;
   seenLogIds: Set<string>;
   /**
@@ -115,11 +112,12 @@ export interface SessionTurnView {
    */
   errorDetail?: ErrorLogItem | null;
   /**
-   * ql-20260729-005：过程信息（thinking/tool/stderr），按到达顺序累积。
-   * 默认「对话」视图只渲染 prompt + output（答复正文）；切「全部」后在答复
-   * 气泡前按序渲染本列表。可选：外部构造的历史 turn（logsToTurns 已填充）。
+   * ql-20260730-003：回合过程项（思考/工具/stderr），按真实到达顺序累积。
+   * 默认「对话」视图只渲染 prompt + output（答复正文）；切「全部」后在答复气泡前按序
+   * 渲染——连续 thinking 合并成一整段、被工具/stderr 打断则分段（保留时序）。
+   * 可选：外部构造的历史 turn（logsToTurns 已填充）。
    */
-  details?: SessionDetailItem[];
+  processItems?: SessionProcessItem[];
 }
 
 interface InteractiveSessionView {
@@ -274,21 +272,67 @@ export function InteractiveSessionPanel({
               }
               const nextSeen = new Set(turn.seenLogIds);
               if (env.log_id) nextSeen.add(env.log_id);
-              // ql-20260729-005：分类分流——reply 进答复正文（对话视图默认展示），
-              // thinking/tool/stderr 进 details 过程项（「全部」视图才展示）。
+              // ql-20260730-003：分类分流 + 工具 use/result 配对，按真实到达顺序入 processItems
+              // （思考/工具/stderr 混在同一有序序列，渲染时连续 thinking 才合并、被工具打断分段）。
+              // - tool_use → 追加 tool 项（status 从 tool_call JSON 的 success 取，已结束会话不假运行）
+              // - tool_result → 配对最近「尚无 result」的 tool 项补输出文本（status 保留 success 值）；
+              //   找不到配对（孤儿 result）降级为 raw 空的 tool 项兜底，不丢数据
+              // - thinking/stderr → 追加过程项（保留到达顺序）
+              // - reply → 答复正文（对话视图默认展示）
               const seg = classifySessionLog(env.content ?? "", env.channel);
               if (!seg) return turn;
-              if (seg.kind !== "reply") {
+              if (seg.kind === "tool_use") {
+                // status 从 tool_call JSON 的 success 字段取（权威源，避免已结束会话假运行）
                 return {
                   ...turn,
                   seenLogIds: nextSeen,
-                  details: [...(turn.details ?? []), seg],
+                  processItems: [
+                    ...(turn.processItems ?? []),
+                    { kind: "tool", raw: seg.text, status: statusFromToolUseRaw(seg.text) },
+                  ],
                 };
               }
+              if (seg.kind === "tool_result") {
+                // 配对最近「尚无 result」的 tool 项（补输出文本）：status 优先保留 success 已定
+                // 的值；仅当仍 running（success 未解析出）才用 result 文本关键词兜底。
+                const items = [...(turn.processItems ?? [])];
+                let paired = false;
+                for (let i = items.length - 1; i >= 0; i -= 1) {
+                  const it = items[i];
+                  if (it && it.kind === "tool" && it.result === undefined) {
+                    const status =
+                      it.status === "running"
+                        ? isToolResultDenied(seg.text)
+                          ? "deny"
+                          : "ok"
+                        : it.status;
+                    items[i] = { kind: "tool", raw: it.raw, result: seg.text, status };
+                    paired = true;
+                    break;
+                  }
+                }
+                if (!paired) {
+                  items.push({ kind: "tool", raw: "", result: seg.text, status: "ok" });
+                }
+                return { ...turn, seenLogIds: nextSeen, processItems: items };
+              }
+              if (seg.kind === "reply") {
+                return {
+                  ...turn,
+                  seenLogIds: nextSeen,
+                  output: turn.output + (turn.output ? "\n" : "") + seg.text,
+                };
+              }
+              // thinking / stderr → 追加过程项（保留到达顺序，渲染时连续 thinking 才合并）
               return {
                 ...turn,
                 seenLogIds: nextSeen,
-                output: turn.output + (turn.output ? "\n" : "") + seg.text,
+                processItems: [
+                  ...(turn.processItems ?? []),
+                  seg.kind === "thinking"
+                    ? { kind: "thinking", text: seg.text }
+                    : { kind: "stderr", text: seg.text },
+                ],
               };
             }, {});
           });
@@ -554,14 +598,12 @@ export function InteractiveSessionPanel({
             turn: null,
             prompt,
             output: "",
-            thinking: "",
-            toolEvents: [],
             status: "pending",
             seenLogIds: new Set(),
             inputTokens: null,
             outputTokens: null,
             errorDetail: null,
-            details: [],
+            processItems: [],
           },
         ],
       }));
@@ -619,7 +661,7 @@ export function InteractiveSessionPanel({
         ...INITIAL_VIEW,
         status: "creating",
         turns: [
-          { runId: "__pending_create__", turn: null, prompt, output: "", thinking: "", toolEvents: [], status: "pending", seenLogIds: new Set(), inputTokens: null, outputTokens: null, errorDetail: null, details: [] },
+          { runId: "__pending_create__", turn: null, prompt, output: "", status: "pending", seenLogIds: new Set(), inputTokens: null, outputTokens: null, errorDetail: null, processItems: [] },
         ],
       });
       try {
@@ -1056,11 +1098,13 @@ export function InteractiveSessionPanel({
                     </div>
                   </div>
                 )}
-                {/* ql-20260729-005：「全部」视图追加过程项（思考/工具/stderr），
+                {/* ql-20260729-005：「全部」视图追加过程项（思考/stderr + 工具配对卡片），
                     渲染在答复气泡之前（与 agent 实际执行顺序一致）。 */}
-                {viewMode === "all" && turn.details && turn.details.length > 0 && (
-                  <TurnDetailsList details={turn.details} />
-                )}
+                {viewMode === "all" &&
+                  turn.processItems &&
+                  turn.processItems.length > 0 && (
+                    <TurnDetailsList items={turn.processItems} />
+                  )}
                 {/* agent 答复气泡（左，带助手图标）。运行中尚无答复时显示思考占位。 */}
                 {turn.output ? (
                   <div className="flex items-start gap-2.5">
@@ -1171,78 +1215,169 @@ export function InteractiveSessionPanel({
 /* ---------- helpers ---------- */
 
 /**
- * ql-20260729-005：「全部」视图的过程项列表（思考/工具调用/stderr）。
- * 缩进对齐答复气泡（pl-9 ≈ 助手图标宽度），左侧竖线表示"执行过程"语义。
- * 融合说明（ql-20260730-merge）：数据层用本地 4 分类 details（reply/thinking/tool/stderr），
- * 工具行嫁接远程 ql-20260730-002 的「命令形式 + 复制按钮」卡片（parseToolRaw）。
- * - thinking：默认折叠（复用运行日志的 CollapsibleSection，风格一致），灰字摘要
- * - tool：命令卡片（Wrench 图标 + 工具名 + 命令/路径 mono + 复制按钮）；解析失败原样显示
- * - stderr：琥珀 ⚠ 小行
+ * ql-20260729-005：「全部」视图的过程项列表，按真实到达顺序渲染。
+ * 缩进对齐答复气泡（ml-9 ≈ 助手图标宽度），左侧竖线表示"执行过程"语义。
+ * ql-20260730-003：连续 thinking 合并成一整段「思考过程」卡片，被工具/stderr 打断则
+ * 分段（参考 agent 日志 mergedThinkingContent），工具卡片穿插其间保留时序；思考正文
+ * 与工具结果均用 MarkdownText 渲染（与对话答复一致）。
  */
-function TurnDetailsList({ details }: { details: SessionDetailItem[] }) {
+function TurnDetailsList({ items }: { items: SessionProcessItem[] }) {
+  // 先把连续 thinking 合并成单个渲染项（被 tool/stderr 打断则分段），保留真实顺序
+  type RenderItem =
+    | { kind: "thinking"; text: string }
+    | { kind: "tool"; event: SessionToolEvent }
+    | { kind: "stderr"; text: string };
+  const grouped: RenderItem[] = [];
+  for (const item of items) {
+    if (item.kind === "thinking") {
+      const last = grouped[grouped.length - 1];
+      if (last && last.kind === "thinking") {
+        last.text = `${last.text}\n${item.text}`;
+      } else {
+        grouped.push({ kind: "thinking", text: item.text });
+      }
+    } else if (item.kind === "tool") {
+      grouped.push({
+        kind: "tool",
+        event: { raw: item.raw, result: item.result, status: item.status },
+      });
+    } else {
+      grouped.push({ kind: "stderr", text: item.text });
+    }
+  }
   return (
     <div className="ml-9 space-y-1 border-l-2 border-muted pl-3">
-      {details.map((item, idx) => {
+      {grouped.map((item, idx) => {
         if (item.kind === "thinking") {
+          const summary = item.text.replace(/\s+/g, " ").trim();
           return (
-            <CollapsibleSection
+            <SessionCollapsible
               key={idx}
+              tone="thinking"
               title="思考过程"
-              defaultOpen={false}
-              summary={item.text.slice(0, 60) + (item.text.length > 60 ? "…" : "")}
+              summary={summary.slice(0, 60) + (summary.length > 60 ? "…" : "")}
             >
-              <p className="whitespace-pre-wrap break-words rounded-md bg-muted/50 px-2.5 py-1.5 text-[11px] leading-5 text-muted-foreground">
-                {item.text}
-              </p>
-            </CollapsibleSection>
+              <div className="rounded-md bg-muted/50 px-2.5 py-1.5 text-[11px] leading-5 text-muted-foreground">
+                <MarkdownText content={item.text} />
+              </div>
+            </SessionCollapsible>
           );
         }
         if (item.kind === "tool") {
-          // ql-20260730-002 嫁接：解析 tool_use JSON → 工具名 + 命令 + 复制；
-          // 非 JSON（纯文本工具行）原样降级显示。
-          const parsed = parseToolRaw(item.text);
-          return (
-            <div
-              key={idx}
-              className="rounded border border-blue-200 bg-blue-50/40 px-2 py-1.5"
-            >
-              <div className="mb-0.5 flex items-center gap-1.5 text-[10px] text-blue-700">
-                <Wrench className="h-3 w-3 shrink-0" aria-hidden />
-                <span className="font-medium">{parsed?.tool ?? "工具调用"}</span>
-                {parsed?.copyText && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const ct = parsed?.copyText ?? "";
-                      void navigator.clipboard?.writeText(ct);
-                    }}
-                    className="ml-auto rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
-                    title="复制命令"
-                  >
-                    复制
-                  </button>
-                )}
-              </div>
-              <div
-                className="break-all font-mono text-[10px] text-muted-foreground"
-                title={item.text}
-              >
-                {parsed?.primary ?? item.text}
-              </div>
-            </div>
-          );
+          return <ToolEventCard key={idx} event={item.event} />;
         }
         // stderr
         return (
-          <div
-            key={idx}
-            className="flex items-start gap-1.5 text-[11px] text-amber-700"
-          >
+          <div key={idx} className="flex items-start gap-1.5 text-[11px] text-amber-700">
             <span aria-hidden className="shrink-0">⚠</span>
             <span className="min-w-0 whitespace-pre-wrap break-words">{item.text}</span>
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * ql-20260730-003：单个配对工具事件卡片。
+ * 解析 raw（tool_use JSON）为工具名 + 命令 + 复制文本（parseToolRaw，解析失败原样显示），
+ * 右上角状态徽章（✓ 成功 / ✗ 失败·被拒 / ⏳ 执行中），result 默认折叠（结果常太长），
+ * 展开后用 MarkdownText 渲染。raw 空串=孤儿 result（无配对 use），只显示结果。
+ */
+function ToolEventCard({ event }: { event: SessionToolEvent }) {
+  const parsed = event.raw ? parseToolRaw(event.raw) : null;
+  const badge =
+    event.status === "ok"
+      ? { icon: "✓", cls: "text-emerald-600", title: "执行成功" }
+      : event.status === "deny"
+        ? { icon: "✗", cls: "text-destructive", title: "执行失败 / 被拒" }
+        : { icon: "⏳", cls: "text-blue-600", title: "执行中" };
+  const result = event.result?.trim() ?? "";
+  return (
+    <div className="rounded border border-blue-200 bg-blue-50/40 px-2 py-1.5">
+      <div className="mb-0.5 flex items-center gap-1.5 text-[10px] text-blue-700">
+        <Wrench className="h-3 w-3 shrink-0" aria-hidden />
+        <span className="font-medium">{parsed?.tool ?? (event.raw ? "工具调用" : "工具结果")}</span>
+        <span className={cn("font-mono", badge.cls)} title={badge.title} aria-label={badge.title}>
+          {badge.icon}
+        </span>
+        {parsed?.copyText && (
+          <button
+            type="button"
+            onClick={() => {
+              const ct = parsed?.copyText ?? "";
+              void navigator.clipboard?.writeText(ct);
+            }}
+            className="ml-auto rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+            title="复制命令"
+          >
+            复制
+          </button>
+        )}
+      </div>
+      {event.raw && (
+        <div className="break-all font-mono text-[10px] text-muted-foreground" title={event.raw}>
+          {parsed?.primary ?? event.raw}
+        </div>
+      )}
+      {result && (
+        <SessionCollapsible
+          tone="tool"
+          title="结果"
+          summary={result.slice(0, 60) + (result.length > 60 ? "…" : "")}
+        >
+          <div className="rounded-md bg-muted/50 px-2 py-1 text-[10px] leading-5 text-muted-foreground">
+            <MarkdownText content={result} />
+          </div>
+        </SessionCollapsible>
+      )}
+    </div>
+  );
+}
+
+/**
+ * ql-20260730-003：会话气泡内的折叠卡片（灰底思考 / 蓝底工具）。
+ * 带摘要的单行折叠条，点击展开内容。替代 agent-log 的 CollapsibleSection
+ * （后者日志流小箭头风格与气泡不搭）。融合自 WhaleFall d5466b7e，配 processItems 渲染。
+ */
+function SessionCollapsible({
+  tone,
+  title,
+  summary,
+  defaultOpen = false,
+  children,
+}: {
+  tone: "thinking" | "tool";
+  title: string;
+  summary?: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const headerCls =
+    tone === "thinking"
+      ? "bg-zinc-100 border-zinc-200 text-zinc-600"
+      : "bg-blue-50 border-blue-200 text-blue-700";
+  return (
+    <div className={`overflow-hidden rounded border ${headerCls}`}>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-[11px] font-medium"
+      >
+        <span className="text-[9px]">{open ? "▼" : "▶"}</span>
+        <span className="shrink-0">{title}</span>
+        {!open && summary && (
+          <span className="ml-1 min-w-0 flex-1 truncate text-[10px] font-normal opacity-60">
+            {summary}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="border-t border-current/10 bg-background px-2.5 py-2 text-foreground">
+          {children}
+        </div>
+      )}
     </div>
   );
 }
@@ -1374,14 +1509,12 @@ function upsertTurn(
       turn: env.turn ?? null,
       prompt: "",
       output: "",
-      thinking: "",
-      toolEvents: [],
       status: "running",
       seenLogIds: new Set(),
       inputTokens: env.input_tokens ?? null,
       outputTokens: env.output_tokens ?? null,
       errorDetail: null,
-      details: [],
+      processItems: [],
     };
     turns = [...prev.turns, apply(newTurn)];
   } else {

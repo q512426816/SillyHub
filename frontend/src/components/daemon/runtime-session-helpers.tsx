@@ -8,7 +8,7 @@ import { MessageSquarePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MarkdownText } from "@/components/ui/markdown-text";
 import { InteractiveSessionPanel, type SessionTurnView } from "@/components/daemon/interactive-session-panel";
-import { classifySessionLog } from "@/components/daemon/session-log-sanitize";
+import { classifySessionLog, isToolResultDenied, statusFromToolUseRaw } from "@/components/daemon/session-log-sanitize";
 import { type AgentRunLogEntry } from "@/lib/agent";
 import {
   type AgentSessionRead,
@@ -164,8 +164,8 @@ export function resumeDisabledTitle(session: AgentSessionRead): string {
 /**
  * task-11 logsToTurns：把历史日志按 run_id 分组，转成 attach 面板预填的 SessionTurnView。
  * channel==="user" 的 log → prompt；kind=reply 的 log → output（答复正文，拼接保留换行）；
- * thinking/tool/stderr → details 过程项（ql-20260729-005，默认对话视图不展示，
- * 切「全部」后按到达顺序渲染在答复气泡之前）。
+ * thinking/tool/stderr → processItems 过程项（ql-20260730-003，按真实到达顺序，
+ * 连续 thinking 合并、被工具打断分段；默认对话视图不展示，切「全部」后渲染在答复气泡之前）。
  *
  * 2026-07-11-unify-runtime-session-dialog / FR-04: 对每条 content_redacted 先经
  * classifySessionLog 过滤（与 sanitizeSessionLogContent 同源规则），
@@ -184,7 +184,8 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
     turnIndex += 1;
     const prompts: string[] = [];
     const outputs: string[] = [];
-    const details: NonNullable<SessionTurnView["details"]> = [];
+    // ql-20260730-003：思考/工具/stderr 按真实到达顺序入 processItems（与实时 onLog 同模型）。
+    const processItems: NonNullable<SessionTurnView["processItems"]> = [];
     // 2026-07-11-unify-runtime-session-dialog task-12: 去重（同内容只保留一次），
     // 避免 attach 历史时后端 logs 含重复 user_input/agent log 致消息重复显示
     //（防御性，覆盖 logs 内重复条目等多种根因）。
@@ -199,8 +200,34 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
         prompts.push(seg.text);
       } else if (seg.kind === "reply") {
         outputs.push(seg.text);
+      } else if (seg.kind === "tool_use") {
+        // status 从 tool_call JSON 的 success 取（已结束历史会话不假运行）
+        processItems.push({ kind: "tool", raw: seg.text, status: statusFromToolUseRaw(seg.text) });
+      } else if (seg.kind === "tool_result") {
+        // 配对最近「尚无 result」的 tool 项补输出文本；status 保留 success 值，仅 running 时兜底
+        let paired = false;
+        for (let i = processItems.length - 1; i >= 0; i -= 1) {
+          const it = processItems[i];
+          if (it && it.kind === "tool" && it.result === undefined) {
+            const status =
+              it.status === "running"
+                ? isToolResultDenied(seg.text)
+                  ? "deny"
+                  : "ok"
+                : it.status;
+            processItems[i] = { kind: "tool", raw: it.raw, result: seg.text, status };
+            paired = true;
+            break;
+          }
+        }
+        if (!paired) {
+          processItems.push({ kind: "tool", raw: "", result: seg.text, status: "ok" });
+        }
       } else {
-        details.push({ kind: seg.kind, text: seg.text });
+        // thinking/stderr → 保留到达顺序
+        processItems.push(
+          seg.kind === "thinking" ? { kind: "thinking", text: seg.text } : { kind: "stderr", text: seg.text },
+        );
       }
     }
     turns.push({
@@ -210,7 +237,7 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
       output: outputs.join("\n"),
       status: "completed",
       seenLogIds: new Set(entries.map((e) => e.id)),
-      details,
+      processItems,
       // ql-20260621：历史回看无实时 token（logs 接口不含 token），置 null。
       // 若后续 logs 接口补 token 字段可在此填充。
       inputTokens: null,
