@@ -60,12 +60,14 @@ EXPECTED_PPM_PERMISSIONS: dict[str, str] = {
     "PPM_PROBLEM_CHANGE_READ": "ppm:problem-change:read",
     # 任务计划
     "PPM_TASK_PLAN_READ": "ppm:task-plan:read",
+    # 项目计划(weekly-plan 汇总视图)
+    "PPM_WEEKLY_PLAN_VIEW": "ppm:weekly-plan:view",
 }
 
 
-def test_ppm_permission_member_count_is_17() -> None:
-    """change 2026-07-20-ppm-menu-unique-keys 扩容后共 17 个 PPM_* 成员（14 菜单 key + 3 悬空旧 key）。"""
-    assert len(EXPECTED_PPM_PERMISSIONS) == 17
+def test_ppm_permission_member_count_is_18() -> None:
+    """17 + weekly-plan 菜单权限 = 18 个 PPM_* 成员（15 菜单 key + 3 悬空旧 key）。"""
+    assert len(EXPECTED_PPM_PERMISSIONS) == 18
 
 
 @pytest.mark.parametrize("name,value", list(EXPECTED_PPM_PERMISSIONS.items()))

@@ -515,7 +515,9 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/ppm/weekly-plan",
     absolute: true,
     matchPattern: "/ppm/weekly-plan",
-    permissions: [],
+    // 菜单专属 key（仿 ppm:kanban:view）。ppm 域菜单权限为前端可见性语义，
+    // 后端 plan/router 走 get_current_principal + DataScope 仅认证不授权。
+    permissions: [{ key: "ppm:weekly-plan:view", name: "项目计划查看" }],
   },
 ];
 

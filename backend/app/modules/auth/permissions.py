@@ -160,6 +160,8 @@ class Permission(StrEnum):
     PPM_PROBLEM_CHANGE_READ = "ppm:problem-change:read"
     # 任务计划(task:plan:read)
     PPM_TASK_PLAN_READ = "ppm:task-plan:read"
+    # 项目计划(weekly-plan:项目实施阶段明细 + 任务计划汇总视图)
+    PPM_WEEKLY_PLAN_VIEW = "ppm:weekly-plan:view"
 
     @property
     def group(self) -> PermissionGroup:

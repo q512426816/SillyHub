@@ -32285,6 +32285,7 @@
           "api_key:admin",
           "runtime:admin",
           "git_identity:admin",
+          "llm_provider:read",
           "workspace:read",
           "workspace:write",
           "workspace:admin",
@@ -32341,7 +32342,8 @@
           "ppm:milestone-detail:read",
           "ppm:problem-list:read",
           "ppm:problem-change:read",
-          "ppm:task-plan:read"
+          "ppm:task-plan:read",
+          "ppm:weekly-plan:view"
         ],
         "title": "Permission"
       },

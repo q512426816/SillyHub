@@ -80,7 +80,7 @@ const BACKEND_PERMISSION_KEYS = [
   "organization:write",
   "role:read",
   "role:write",
-  // PPM 项目与问题管理 (16, 已删问题变更)
+  // PPM 项目与问题管理 (17, 已删问题变更 + 新增 weekly-plan:view)
   "ppm:project:read",
   "ppm:customer:read",
   "ppm:plan:read",
@@ -98,6 +98,8 @@ const BACKEND_PERMISSION_KEYS = [
   "ppm:milestone-detail:read",
   "ppm:problem-list:read",
   "ppm:task-plan:read",
+  // 项目计划(weekly-plan 汇总视图)
+  "ppm:weekly-plan:view",
 ] as const;
 
 /** 37 个 menuKey 期望集合（原 34 条 + 2026-07-29-sidebar-menu-restructure 新增 3 条） */
@@ -189,9 +191,8 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(counter.ppm).toBe(14);
   });
 
-  it("每个 menu 至少 1 个 permission（pickerHidden 或无权限菜单除外）", () => {
+  it("每个 menu 至少 1 个 permission", () => {
     MENU_PERMISSION_GROUPS.forEach((g) => {
-      if (g.menuKey === "ppm-weekly-plan") return; // 平台级，无需特定权限
       expect(g.permissions.length).toBeGreaterThanOrEqual(1);
     });
   });
@@ -213,12 +214,12 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 63", () => {
+  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 64", () => {
     const valid = new Set<string>(BACKEND_PERMISSION_KEYS);
     // 镜像常量自身的完整性护栏：若被误删/重复，立即失败
-    // 47 (非 PPM, 含 llm_provider:read) + 16 (PPM 菜单/读，已删问题变更) = 63
-    expect(BACKEND_PERMISSION_KEYS.length).toBe(63);
-    expect(valid.size).toBe(63);
+    // 47 (非 PPM, 含 llm_provider:read) + 17 (PPM 菜单/读，已删问题变更 + weekly-plan:view) = 64
+    expect(BACKEND_PERMISSION_KEYS.length).toBe(64);
+    expect(valid.size).toBe(64);
 
     MENU_PERMISSION_GROUPS.forEach((g) => {
       g.permissions.forEach((p) => {
@@ -436,6 +437,10 @@ describe("用户列明菜单的 permissions 精确匹配", () => {
 
   it("ppm-task-plans = ppm:task-plan:read", () => {
     expect(keysOf("ppm-task-plans")).toEqual(["ppm:task-plan:read"]);
+  });
+
+  it("ppm-weekly-plan = ppm:weekly-plan:view", () => {
+    expect(keysOf("ppm-weekly-plan")).toEqual(["ppm:weekly-plan:view"]);
   });
 });
 

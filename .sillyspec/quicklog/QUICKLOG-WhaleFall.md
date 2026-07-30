@@ -53,3 +53,21 @@
 根因：agent 一段连续回复被 daemon 拆成多个 ASSISTANT 流式 delta（7fb9227d 的 #30/#31/#32/#33/#34 是同一段流式输出的连续片段），前端 onLog/logsToTurns 却当独立段落用 \n 拼接，在原本连续的文本（如 #32 结尾"这" + #33"通常需要在" 本是连续的"这通常需要在"）里插入 \n，破坏 markdown 连续结构和列表；delta 内部换行（\n\n）数据层是有的、没丢，问题在前端拼接。
 方案：reply 流式 delta 直接 concat（去掉 \n 分隔）——它们是同一段流式输出的连续片段（非独立段落），换行保留在各 delta 内部，直接拼接让 agent 原始 markdown 连续完整渲染。实时 onLog（interactive-session-panel.tsx:323）+ 历史回看 logsToTurns（runtime-session-helpers.tsx:237）两处同改保持一致。不碰 thinking/tool/stderr 的 processItems（独立过程项仍按到达顺序）、不碰 daemon（重复 #35 是 daemon bug 另行处理）、不改 MarkdownText 渲染器。
 结果：vitest 3 文件 77 passed（runtime-session-helpers 8 + interactive-session-panel 41 + session-log-sanitize 28，含更新后的 reply concat 断言）；daemon 当前 offline 无法实跑验证，靠单测验证拼接逻辑。
+
+## ql-20260730-005-1891 | 2026-07-30 15:45:17 | /ppm/weekly-plan 页面加独立菜单权限 ppm:weekly-plan:view
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/auth/permissions.py（新增枚举 PPM_WEEKLY_PLAN_VIEW = "ppm:weekly-plan:view"，group 靠 ppm: 前缀自动归 PPM 组）
+- backend/migrations/versions/202607041000_seed_ppm_permissions.py（PPM_PERMISSIONS 列表双写 "ppm:weekly-plan:view"，覆盖新环境从头 seed + 单一真源完整）
+- backend/migrations/versions/202607301000_seed_ppm_weekly_plan_perm.py（新建增量 migration：down_revision=202607291100 head，幂等给已上线 platform_admin 补种，downgrade 精确删单条）
+- backend/tests/modules/auth/test_ppm_permissions.py（EXPECTED_PPM_PERMISSIONS 加 PPM_WEEKLY_PLAN_VIEW，count 用例 17→18）
+- backend/openapi.json（gen:types 重新 dump，Permission 枚举含 ppm:weekly-plan:view）
+- frontend/src/lib/menu-permissions.ts（ppm-weekly-plan 菜单 permissions:[] → [{key:"ppm:weekly-plan:view",name:"项目计划查看"}]）
+- frontend/src/lib/__tests__/menu-permissions.test.ts（镜像 BACKEND_PERMISSION_KEYS 63→64、PPM 注释 16→17、删 weekly-plan 跳过、加 ppm-weekly-plan 精确匹配用例）
+- frontend/src/lib/api-types.ts（gen:types 生成，含新枚举）
+- sillyhub-daemon/src/api-types.ts（gen:types 同步，含新枚举）
+需求：/ppm/weekly-plan「项目计划」页面对所有登录用户无门槛可见，需像其它 ppm 菜单（如看板 ppm:kanban:view）一样配独立菜单权限，使无此权限的用户侧边栏看不到、角色管理可分配/回收。
+根因：menu-permissions.ts 中 ppm-weekly-plan 菜单 permissions 为空数组 []，canSeeMenu 对空权限组放行致全员可见；后端亦无 ppm:weekly-plan:view 枚举与 platform_admin seed，角色管理无从分配。
+方案：①后端 permissions.py 新增 PPM_WEEKLY_PLAN_VIEW 枚举（group 靠 ppm: 前缀自动归 PPM 组，无需改 group 判定）；②20260741000 PPM_PERMISSIONS 列表双写该 key 覆盖新环境 seed，并新建增量 migration 202607301000（down_revision=202607291100 head）幂等给已上线 platform_admin 补种——因 PPM 已上线、原 seed revision 已应用不会重跑，必须增量补，否则连平台管理员都看不到该菜单；③前端 menu-permissions.ts 填权限 key；④ppm 域后端 router 统一 get_current_principal + DataScope 仅认证不授权（data_scope.py 注释"与功能权限正交"），故不改 plan/router.py，与 kanban 等其它 ppm 菜单一致；⑤gen:types 刷新 backend/openapi.json + frontend 与 daemon 两处 api-types.ts，避免类型落后后端。
+结果：后端 pytest test_ppm_permissions.py 24 passed（含 count=18、新增成员存在、platform_admin seed 含 weekly-plan、归 PPM 组、非系统角色回归）；前端 vitest menu-permissions + permission 共 60 passed（含 ppm-weekly-plan 精确匹配、镜像常量 64、删跳过后全菜单≥1 权限）；alembic 单 head 202607301000、chain 202607291100→202607301000 正确无多 head；gen:types 三处类型文件均含 ppm:weekly-plan:view。遗留：weekly-plan 与 ppm-project-plans 的 menuLabel 均为「项目计划」系既有重名，不在本次范围，未处理。

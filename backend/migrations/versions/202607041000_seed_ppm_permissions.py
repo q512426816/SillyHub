@@ -75,6 +75,8 @@ PPM_PERMISSIONS: list[str] = [
     "ppm:problem-change:read",
     # 任务计划
     "ppm:task-plan:read",
+    # 项目计划(weekly-plan 汇总视图)
+    "ppm:weekly-plan:view",
 ]
 
 
