@@ -1320,3 +1320,135 @@ describe("InteractiveSessionPanel", () => {
     expect(screen.getByText("用团队分析")).toBeInTheDocument();
   });
 });
+
+/**
+ * ql-20260729-005：对话/全部二态切换 + 过程信息分流。
+ * - 默认「对话」：只显用户消息 + agent 答复正文；thinking/tool/stderr 不渲染
+ * - 切「全部」：过程项（思考折叠块 / 工具行 / stderr 行）出现在答复气泡前
+ * - 运行中无答复：对话模式显示「正在思考…」占位
+ */
+describe("InteractiveSessionPanel 对话/全部视图切换（ql-20260729-005）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sessionApi.fetchPendingDialogs.mockResolvedValue([]);
+  });
+
+  it("默认对话视图：tool_call/thinking 不展示，reply 正常展示；切全部后过程项出现", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-1", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+
+    setupPanel();
+    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "帮我读文件" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
+
+    const conn = stream.conn;
+    act(() => {
+      conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-1", turn: 1 }));
+      conn.handlers.route(
+        makeEnvelope("log", { run_id: "run-1", channel: null, content: "[THINKING] 先想想怎么读" }),
+        "L1",
+      );
+      conn.handlers.route(
+        makeEnvelope("log", { run_id: "run-1", channel: "tool_call", content: "Read src/a.ts" }),
+        "L2",
+      );
+      conn.handlers.route(
+        makeEnvelope("log", { run_id: "run-1", channel: "stdout", content: "文件内容如下" }),
+        "L3",
+      );
+    });
+
+    // 对话视图：答复可见，过程项不可见
+    await waitFor(() => expect(screen.getByText(/文件内容如下/)).toBeInTheDocument());
+    expect(screen.queryByText(/Read src\/a\.ts/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/先想想怎么读/)).not.toBeInTheDocument();
+    expect(screen.queryByText("思考过程")).not.toBeInTheDocument();
+
+    // 切「全部」：过程项出现（thinking 折叠块标题 + 摘要，tool 行）
+    fireEvent.click(screen.getByRole("tab", { name: "全部" }));
+    await waitFor(() => expect(screen.getByText(/Read src\/a\.ts/)).toBeInTheDocument());
+    expect(screen.getByText("思考过程")).toBeInTheDocument();
+    // thinking 默认折叠：摘要（截断文本）可见
+    expect(screen.getByText(/先想想怎么读/)).toBeInTheDocument();
+
+    // 切回「对话」：过程项再次隐藏，答复仍在
+    fireEvent.click(screen.getByRole("tab", { name: "对话" }));
+    await waitFor(() => expect(screen.queryByText(/Read src\/a\.ts/)).not.toBeInTheDocument());
+    expect(screen.getByText(/文件内容如下/)).toBeInTheDocument();
+  });
+
+  it("运行中尚无答复：对话视图显示「正在思考…」占位", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-1", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+
+    setupPanel();
+    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "hi" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
+
+    const conn = stream.conn;
+    act(() => {
+      conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-1", turn: 1 }));
+    });
+    await waitFor(() => expect(screen.getByText(/正在思考…/)).toBeInTheDocument());
+
+    // 答复到达后占位消失
+    act(() => {
+      conn.handlers.route(
+        makeEnvelope("log", { run_id: "run-1", channel: "stdout", content: "你好" }),
+        "L1",
+      );
+    });
+    await waitFor(() => expect(screen.queryByText(/正在思考…/)).not.toBeInTheDocument());
+  });
+
+  it("attach 历史 turn 的 details：对话默认隐藏，切全部展示", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.getAgentSession.mockResolvedValue({
+      id: "sess-h", status: "ended", current_run_id: null,
+    });
+
+    setupPanel({
+      attachSessionId: "sess-h",
+      initialTurns: [
+        {
+          runId: "__attach_history_1__",
+          turn: 1,
+          prompt: "历史问题",
+          output: "历史答复",
+          status: "completed",
+          seenLogIds: new Set(),
+          inputTokens: null,
+          outputTokens: null,
+          details: [
+            { kind: "thinking", text: "历史思考内容" },
+            { kind: "tool", text: "Bash ls -la" },
+          ],
+        },
+      ],
+    });
+
+    // 对话视图：prompt/reply 可见，details 隐藏
+    await waitFor(() => expect(screen.getByText(/历史答复/)).toBeInTheDocument());
+    expect(screen.getByText(/历史问题/)).toBeInTheDocument();
+    expect(screen.queryByText(/Bash ls -la/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/历史思考内容/)).not.toBeInTheDocument();
+
+    // 切「全部」：details 出现
+    fireEvent.click(screen.getByRole("tab", { name: "全部" }));
+    await waitFor(() => expect(screen.getByText(/Bash ls -la/)).toBeInTheDocument());
+    expect(screen.getByText(/历史思考内容/)).toBeInTheDocument();
+  });
+});

@@ -24,17 +24,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Ban,
+  Bot,
   MessageSquareText,
   Plus,
   RefreshCw,
   Send,
   Square,
   Users,
+  Wrench,
 } from "lucide-react";
 
 import { AgentModelInput } from "@/components/AgentModelInput";
 import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
 import { RunErrorItem } from "@/components/agent-log/run-error-item";
+import { CollapsibleSection } from "@/components/agent-log/tool-renderers";
 import { buildErrorLogItem, type ErrorLogItem } from "@/components/agent-log/normalize";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Badge } from "@/components/ui/badge";
@@ -59,7 +62,13 @@ import {
   type SessionStreamEnvelope,
 } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
-import { sanitizeSessionLogContent } from "@/components/daemon/session-log-sanitize";
+import {
+  classifySessionLog,
+  type SessionLogSegment,
+} from "@/components/daemon/session-log-sanitize";
+
+/** ql-20260729-005：过程信息项（thinking/tool/stderr），对话视图默认隐藏，「全部」视图展示。 */
+export type SessionDetailItem = SessionLogSegment;
 
 type SessionUiStatus = "idle" | "creating" | "active" | "ending" | "ended" | "failed" | "reconnecting";
 type TurnUiStatus = "pending" | "running" | "interrupting" | "completed" | "failed" | "killed";
@@ -84,6 +93,12 @@ export interface SessionTurnView {
    * 可选：外部 logsToTurns 构造的历史 turn 不带此字段（只读 import，不改其构造）。
    */
   errorDetail?: ErrorLogItem | null;
+  /**
+   * ql-20260729-005：过程信息（thinking/tool/stderr），按到达顺序累积。
+   * 默认「对话」视图只渲染 prompt + output（答复正文）；切「全部」后在答复
+   * 气泡前按序渲染本列表。可选：外部构造的历史 turn（logsToTurns 已填充）。
+   */
+  details?: SessionDetailItem[];
 }
 
 interface InteractiveSessionView {
@@ -184,6 +199,10 @@ export function InteractiveSessionPanel({
   // 仅渲染 dialog_kind 存在的（AskUserDialogCard）；普通工具审批卡在本面板不展示
   //（/runtimes 页的 PermissionApprovalsPanel 负责普通 allow/deny）。
   const [pendingRequests, setPendingRequests] = useState<SessionPermissionRequest[]>([]);
+  // ql-20260729-005：消息视图模式。「对话」（默认）只显用户消息 + agent 答复正文；
+  // 「全部」追加 thinking/工具调用/stderr 过程项。参考 agent-log-viewer 的
+  // 对话/全部二态 tab（ql-20260626-001），但不做二级筛选按钮组。
+  const [viewMode, setViewMode] = useState<"conversation" | "all">("conversation");
   const scrollRef = useRef<HTMLDivElement>(null);
   const streamConnRef = useRef<SessionStreamConnection | null>(null);
   // task-10 attach 模式轮询句柄（unmount / 转出 attach 模式时清理）
@@ -234,12 +253,21 @@ export function InteractiveSessionPanel({
               }
               const nextSeen = new Set(turn.seenLogIds);
               if (env.log_id) nextSeen.add(env.log_id);
-              const text = renderLogContent(env);
-              if (!text) return turn;
+              // ql-20260729-005：分类分流——reply 进答复正文（对话视图默认展示），
+              // thinking/tool/stderr 进 details 过程项（「全部」视图才展示）。
+              const seg = classifySessionLog(env.content ?? "", env.channel);
+              if (!seg) return turn;
+              if (seg.kind !== "reply") {
+                return {
+                  ...turn,
+                  seenLogIds: nextSeen,
+                  details: [...(turn.details ?? []), seg],
+                };
+              }
               return {
                 ...turn,
                 seenLogIds: nextSeen,
-                output: turn.output + (turn.output ? "\n" : "") + text,
+                output: turn.output + (turn.output ? "\n" : "") + seg.text,
               };
             }, {});
           });
@@ -510,6 +538,7 @@ export function InteractiveSessionPanel({
             inputTokens: null,
             outputTokens: null,
             errorDetail: null,
+            details: [],
           },
         ],
       }));
@@ -567,7 +596,7 @@ export function InteractiveSessionPanel({
         ...INITIAL_VIEW,
         status: "creating",
         turns: [
-          { runId: "__pending_create__", turn: null, prompt, output: "", status: "pending", seenLogIds: new Set(), inputTokens: null, outputTokens: null, errorDetail: null },
+          { runId: "__pending_create__", turn: null, prompt, output: "", status: "pending", seenLogIds: new Set(), inputTokens: null, outputTokens: null, errorDetail: null, details: [] },
         ],
       });
       try {
@@ -833,6 +862,32 @@ export function InteractiveSessionPanel({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            {/* ql-20260729-005：对话/全部二态切换（仅在有消息时出现）。对话=只显
+                用户消息与 agent 答复；全部=追加思考/工具/ stderr 过程项。 */}
+            {view.turns.length > 0 && (
+              <div
+                role="tablist"
+                aria-label="消息显示范围"
+                className="inline-flex items-center rounded-full border bg-muted/50 p-0.5"
+              >
+                {(["conversation", "all"] as const).map((m) => (
+                  <button
+                    key={m}
+                    role="tab"
+                    aria-selected={viewMode === m}
+                    onClick={() => setViewMode(m)}
+                    className={cn(
+                      "rounded-full px-2.5 py-1 text-[11px] leading-none transition-colors",
+                      viewMode === m
+                        ? "bg-card font-medium text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {m === "conversation" ? "对话" : "全部"}
+                  </button>
+                ))}
+              </div>
+            )}
             {workspaceId && (
               <Button
                 variant="outline"
@@ -967,20 +1022,50 @@ export function InteractiveSessionPanel({
             </p>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-5">
             {view.turns.map((turn) => (
-              <div key={turn.runId} className="space-y-1.5">
-                <div className="flex justify-end">
-                  <div className="max-w-[86%] rounded-md bg-primary px-3 py-2 text-xs leading-relaxed text-primary-foreground shadow-sm">
-                    <div className="whitespace-pre-wrap break-words">{turn.prompt}</div>
+              <div key={turn.runId} className="space-y-2.5">
+                {/* 用户消息气泡（右）。attach 中途接入的 unknown-run turn 无 prompt，不渲染。 */}
+                {turn.prompt && (
+                  <div className="flex justify-end">
+                    <div className="max-w-[82%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-sm">
+                      <div className="whitespace-pre-wrap break-words">{turn.prompt}</div>
+                    </div>
                   </div>
-                </div>
-                {turn.output && (
-                  <div className="flex justify-start">
-                    <div className="max-w-[86%] rounded-md border bg-card px-3 py-2 text-xs leading-relaxed text-foreground shadow-sm">
+                )}
+                {/* ql-20260729-005：「全部」视图追加过程项（思考/工具/stderr），
+                    渲染在答复气泡之前（与 agent 实际执行顺序一致）。 */}
+                {viewMode === "all" && turn.details && turn.details.length > 0 && (
+                  <TurnDetailsList details={turn.details} />
+                )}
+                {/* agent 答复气泡（左，带助手图标）。运行中尚无答复时显示思考占位。 */}
+                {turn.output ? (
+                  <div className="flex items-start gap-2.5">
+                    <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-muted text-muted-foreground">
+                      <Bot className="h-3.5 w-3.5" aria-hidden />
+                    </span>
+                    <div className="max-w-[82%] rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
                       <MarkdownText content={turn.output} />
                     </div>
                   </div>
+                ) : (
+                  (turn.status === "running" ||
+                    turn.status === "pending" ||
+                    turn.status === "interrupting") && (
+                    <div className="flex items-start gap-2.5">
+                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-muted text-muted-foreground">
+                        <Bot className="h-3.5 w-3.5" aria-hidden />
+                      </span>
+                      <div className="flex items-center gap-1.5 rounded-2xl rounded-tl-md border bg-card px-4 py-3 shadow-sm">
+                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/60" />
+                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/60 [animation-delay:150ms]" />
+                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/60 [animation-delay:300ms]" />
+                        <span className="ml-1 text-xs text-muted-foreground">
+                          {viewMode === "all" ? "执行中…" : "正在思考…"}
+                        </span>
+                      </div>
+                    </div>
+                  )
                 )}
                 {turn.errorDetail && (
                   <div className="flex justify-start">
@@ -1012,7 +1097,7 @@ export function InteractiveSessionPanel({
                     </div>
                   </div>
                 )}
-                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                <div className="flex items-center gap-1.5 pl-9 text-[10px] text-muted-foreground">
                   <TurnStatusBadge
                     status={turn.status}
                     turn={turn.turn}
@@ -1061,6 +1146,58 @@ export function InteractiveSessionPanel({
 }
 
 /* ---------- helpers ---------- */
+
+/**
+ * ql-20260729-005：「全部」视图的过程项列表（思考/工具调用/stderr）。
+ * 缩进对齐答复气泡（pl-9 ≈ 助手图标宽度），左侧竖线表示"执行过程"语义。
+ * - thinking：默认折叠（复用运行日志的 CollapsibleSection，风格一致），灰字斜体摘要
+ * - tool：蓝色 🔧→Wrench 小行，单行截断，title 悬停看全文
+ * - stderr：琥珀 ⚠ 小行
+ */
+function TurnDetailsList({ details }: { details: SessionDetailItem[] }) {
+  return (
+    <div className="ml-9 space-y-1 border-l-2 border-muted pl-3">
+      {details.map((item, idx) => {
+        if (item.kind === "thinking") {
+          return (
+            <CollapsibleSection
+              key={idx}
+              title="思考过程"
+              defaultOpen={false}
+              summary={item.text.slice(0, 60) + (item.text.length > 60 ? "…" : "")}
+            >
+              <p className="whitespace-pre-wrap break-words rounded-md bg-muted/50 px-2.5 py-1.5 text-[11px] leading-5 text-muted-foreground">
+                {item.text}
+              </p>
+            </CollapsibleSection>
+          );
+        }
+        if (item.kind === "tool") {
+          return (
+            <div
+              key={idx}
+              className="flex items-center gap-1.5 text-[11px] text-blue-700"
+              title={item.text}
+            >
+              <Wrench className="h-3 w-3 shrink-0" aria-hidden />
+              <span className="min-w-0 truncate">{item.text}</span>
+            </div>
+          );
+        }
+        // stderr
+        return (
+          <div
+            key={idx}
+            className="flex items-start gap-1.5 text-[11px] text-amber-700"
+          >
+            <span aria-hidden className="shrink-0">⚠</span>
+            <span className="min-w-0 whitespace-pre-wrap break-words">{item.text}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function TurnStatusBadge({
   status,
@@ -1117,14 +1254,6 @@ function TurnStatusBadge({
   );
 }
 
-/** 把 log envelope 渲染成纯文本片段。
- *  2026-07-11-unify-runtime-session-dialog / FR-04 / D-004: 改调共享
- *  sanitizeSessionLogContent，与 logsToTurns（attach 历史预填）共用同一过滤，
- *  避免 thinking/SYSTEM/AskUserQuestion 等原始标记泄漏到正文。 */
-function renderLogContent(env: SessionStreamEnvelope): string {
-  return sanitizeSessionLogContent(env.content ?? "", env.channel);
-}
-
 interface UpsertOpts {
   setCurrentRun?: string;
   clearCurrentRun?: string;
@@ -1170,6 +1299,7 @@ function upsertTurn(
       inputTokens: env.input_tokens ?? null,
       outputTokens: env.output_tokens ?? null,
       errorDetail: null,
+      details: [],
     };
     turns = [...prev.turns, apply(newTurn)];
   } else {

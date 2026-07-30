@@ -16,12 +16,60 @@
  *   - 剥 [ASSISTANT|THINKING|LOG:\w+] 前缀
  */
 export function sanitizeSessionLogContent(content: string, channel?: string | null): string {
+  const seg = classifySessionLog(content, channel);
+  if (!seg) return "";
+  if (seg.kind === "stderr") return `⚠️ ${seg.text}`;
+  if (seg.kind === "tool") return `🔧 ${seg.text}`;
+  return seg.text;
+}
+
+/**
+ * ql-20260729-005：会话日志分类（对话 / 过程信息分流）。
+ *
+ * 与 sanitizeSessionLogContent 同一套过滤规则，但返回结构化分类而非拼接字符串，
+ * 供会话面板把「答复正文（reply）」与「过程信息（thinking/tool/stderr）」分流：
+ * 默认对话视图只渲染 reply，过程信息经「对话/全部」切换后再展示。
+ *
+ * 分类规则：
+ *   - 丢弃（返回 null）：AskUserQuestion 卡片协议行 / [TOOL_RESULT] User answered /
+ *     [SYSTEM…] / [RESULT…] 与空内容（与原函数完全一致）
+ *   - kind=thinking：[THINKING] 前缀行（剥前缀）
+ *   - kind=tool：channel=tool_call（daemon 上报的工具 JSON），或
+ *     内容以 [TOOL_USE] / [TOOL_RESULT] 前缀的 stdout 文本行（ql-20260729-005 补：
+ *     daemon 会把工具调用同时发 channel=stdout 的 [TOOL_USE] 文本行与 channel=tool_call
+ *     的 JSON，之前只拦了 JSON，[TOOL_USE]/[TOOL_RESULT] 文本行漏判成 reply 混进对话）
+ *   - kind=stderr：channel=stderr
+ *   - kind=reply：其余（剥 [ASSISTANT]/[LOG:\w+] 前缀）
+ */
+export type SessionLogSegmentKind = "reply" | "thinking" | "tool" | "stderr";
+
+export interface SessionLogSegment {
+  kind: SessionLogSegmentKind;
+  text: string;
+}
+
+export function classifySessionLog(
+  content: string,
+  channel?: string | null,
+): SessionLogSegment | null {
   const trimmed = (content ?? "").trim();
-  if (!trimmed) return "";
-  if (trimmed.includes("AskUserQuestion")) return "";
-  if (/^\[TOOL_RESULT\]\s*User answered/.test(trimmed)) return "";
-  if (/^\[(SYSTEM|RESULT)[^\]]*\]/.test(trimmed)) return "";
-  if (channel === "stderr") return `⚠️ ${trimmed}`;
-  if (channel === "tool_call") return `🔧 ${trimmed}`;
-  return trimmed.replace(/^\[(ASSISTANT|THINKING|LOG:\w+)\]\s?/, "");
+  if (!trimmed) return null;
+  if (trimmed.includes("AskUserQuestion")) return null;
+  if (/^\[TOOL_RESULT\]\s*User answered/.test(trimmed)) return null;
+  if (/^\[(SYSTEM|RESULT)[^\]]*\]/.test(trimmed)) return null;
+  if (channel === "stderr") return { kind: "stderr", text: trimmed };
+  if (channel === "tool_call") return { kind: "tool", text: trimmed };
+  // ql-20260729-005：stdout 里的工具文本行也归 tool（[TOOL_USE] 调用 / [TOOL_RESULT] 结果）。
+  // 剥掉前缀保留正文，过程项渲染更干净（如 "Read: {…}" / 文件内容）。
+  const toolTextMatch = trimmed.match(/^\[(TOOL_USE|TOOL_RESULT)\]\s?/);
+  if (toolTextMatch) {
+    return { kind: "tool", text: trimmed.replace(/^\[(TOOL_USE|TOOL_RESULT)\]\s?/, "") };
+  }
+  if (/^\[THINKING\]\s?/.test(trimmed)) {
+    return { kind: "thinking", text: trimmed.replace(/^\[THINKING\]\s?/, "") };
+  }
+  return {
+    kind: "reply",
+    text: trimmed.replace(/^\[(ASSISTANT|THINKING|LOG:\w+)\]\s?/, ""),
+  };
 }
