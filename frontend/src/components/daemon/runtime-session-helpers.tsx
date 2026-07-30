@@ -8,7 +8,7 @@ import { MessageSquarePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MarkdownText } from "@/components/ui/markdown-text";
 import { InteractiveSessionPanel, type SessionTurnView } from "@/components/daemon/interactive-session-panel";
-import { sanitizeSessionLogContent } from "@/components/daemon/session-log-sanitize";
+import { sanitizeSessionLogContent, classifySessionLog } from "@/components/daemon/session-log-sanitize";
 import { type AgentRunLogEntry } from "@/lib/agent";
 import {
   type AgentSessionRead,
@@ -181,17 +181,35 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
     turnIndex += 1;
     const prompts: string[] = [];
     const outputs: string[] = [];
+    const thinkings: string[] = [];
+    const toolEvents: import("@/components/daemon/interactive-session-panel").SessionToolEvent[] = [];
     // 2026-07-11-unify-runtime-session-dialog task-12: 去重（同内容只保留一次），
     // 避免 attach 历史时后端 logs 含重复 user_input/agent log 致消息重复显示
     //（防御性，覆盖 logs 内重复条目等多种根因）。
     const seenText = new Set<string>();
     for (const entry of entries) {
+      // ql-20260730-001：按类型分流(thinking/tool/output),与实时 onLog 一致
+      const kind = classifySessionLog(entry.content_redacted ?? "", entry.channel);
+      if (kind === "skip") continue;
       const text = sanitizeSessionLogContent(entry.content_redacted ?? "", entry.channel);
       if (!text) continue;
       if (seenText.has(text)) continue;
       seenText.add(text);
       if (entry.channel === "user_input") {
         prompts.push(text);
+      } else if (kind === "thinking") {
+        thinkings.push(text);
+      } else if (kind === "tool_use") {
+        toolEvents.push({ raw: text, status: "running" });
+      } else if (kind === "tool_result") {
+        for (let i = toolEvents.length - 1; i >= 0; i--) {
+          const evt = toolEvents[i];
+          if (evt && evt.status === "running") {
+            const isDeny = /拒绝|denied|error|失败/i.test(text);
+            toolEvents[i] = { raw: evt.raw, result: text, status: isDeny ? "deny" : "ok" };
+            break;
+          }
+        }
       } else {
         outputs.push(text);
       }
@@ -201,6 +219,8 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
       turn: turnIndex,
       prompt: prompts.join("\n"),
       output: outputs.join("\n"),
+      thinking: thinkings.join("\n"),
+      toolEvents,
       status: "completed",
       seenLogIds: new Set(entries.map((e) => e.id)),
       // ql-20260621：历史回看无实时 token（logs 接口不含 token），置 null。

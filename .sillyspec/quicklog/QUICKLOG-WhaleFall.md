@@ -16,3 +16,12 @@
 根因：spawn-env.ts:155 无脑 `env.CLAUDE_CONFIG_DIR = CLAUDE_CONFIG_DIR`（强制隔离），未配供应商时 lease 不带 provider_config（层0 跳过）+ 隔离目录空（无 settings.json/credentials.json）→ claude CLI 无凭证 → 报 "Not logged in · Please run /login"。
 方案：CLAUDE_CONFIG_DIR 条件化——仅 ctx.provider_config 存在（启用供应商，平台下发）时才设隔离目录（避免 cc-switch 污染平台注入）；否则不设 + 清 process.env 可能残留的 CLAUDE_CONFIG_DIR，claude CLI 回退读默认 ~/.claude/settings.json（cc-switch/手配生效）。加 4 个新测试覆盖（有 provider_config→隔离 / 无→不隔离 / null→不隔离 / 残留清理）；修 1 个旧测试（codex provider_config 存在但 injector 未注册 → 仍隔离，不再 toEqual absent）。
 结果：spawn-env 27/27 passed；daemon 全量 2033 passed（5 failed 均为预存的 spy/路径失败，与本次无关）；tsc 0 error；bundle + dist 编译完成，npm 全局目录=项目目录已含新逻辑，daemon 已重启（registered+started）。
+
+## ql-20260730-001-04ac | 2026-07-30 08:34:29 | agent 会话气泡三层(思考/工具折叠+回复突出)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/daemon/session-log-sanitize.ts（加 classifySessionLog 分类 + sanitize 剥 TOOL 前缀）+ frontend/src/components/daemon/interactive-session-panel.tsx（SessionTurnView 加 thinking/toolEvents + SessionToolEvent 类型 + onLog 分流 + 占位×3 + 渲染三层）+ frontend/src/components/daemon/runtime-session-helpers.tsx（logsToTurns 历史同步分流）+ frontend/src/components/daemon/__tests__/session-log-sanitize.test.ts（改 tool_call 测试 + 加 classify 6 测试）+ frontend/src/components/daemon/__tests__/interactive-session-panel.test.tsx（mock turn 加字段）
+需求：agent 会话气泡里思考过程/工具调用/回复混排不直观，要按原型（思考+工具折叠默认收起，回复突出）。
+根因：interactive-session-panel turn.output 把一回合所有日志（[THINKING]+[TOOL_USE]+[TOOL_RESULT]+[ASSISTANT]）拼成一串整段 MarkdownText 渲染；sanitize 只剥 [THINKING] 前缀但保留思考内容，导致思考混进正文。
+方案：① sanitize 加 classifySessionLog（按 [THINKING]/[TOOL_USE]/[TOOL_RESULT] 标记 + channel 分 thinking/tool_use/tool_result/assistant/skip）+ 剥 TOOL 前缀（去 tool_call 🔧 分支，tool 走卡片自带图标）；② SessionTurnView 加 thinking（思考累积）+ toolEvents（SessionToolEvent 列表，raw/result/status）；onLog 按 classify 分流（thinking 累积 / tool_use push / tool_result 配对最近 running 的 ok/deny / assistant 进 output）；占位 turn×3 + newTurn 加字段；③ 渲染 agent 气泡三层（复用 agent-log CollapsibleSection：思考默认折叠 50 字摘要 / 工具默认折叠 N 个 + ✓✗⏳ 状态 + 命令+结果 / 回复 MarkdownText 突出，分隔线隔开）；④ logsToTurns 历史会话同步分流。
+结果：tsc --noEmit 0 error；全量 118 文件 1152 passed（0 fail）。

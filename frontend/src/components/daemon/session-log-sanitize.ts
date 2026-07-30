@@ -22,6 +22,37 @@ export function sanitizeSessionLogContent(content: string, channel?: string | nu
   if (/^\[TOOL_RESULT\]\s*User answered/.test(trimmed)) return "";
   if (/^\[(SYSTEM|RESULT)[^\]]*\]/.test(trimmed)) return "";
   if (channel === "stderr") return `⚠️ ${trimmed}`;
-  if (channel === "tool_call") return `🔧 ${trimmed}`;
-  return trimmed.replace(/^\[(ASSISTANT|THINKING|LOG:\w+)\]\s?/, "");
+  // ql-20260730-001：剥 [TOOL_USE]/[TOOL_RESULT] 前缀(tool 内容分流到 toolEvents 卡片,
+  // 不再加 🔧 前缀,tool 卡片自带图标);原 tool_call 🔧 分支移除(由 classify 分流)。
+  return trimmed.replace(/^\[(ASSISTANT|THINKING|LOG:\w+|TOOL_USE|TOOL_RESULT)\]\s?/, "");
+}
+
+/**
+ * ql-20260730-001：会话日志分类(思考/工具/回复)，供 turn 组装按类型分流到
+ * thinking / toolEvents / output 三层渲染(原型 prototype-session-turn.html)。
+ *
+ * 在 sanitize 剥前缀前按原始 [THINKING]/[TOOL_USE]/[TOOL_RESULT] 标记判断；
+ * channel=tool_call 也归 tool_use(无前缀的 tool 日志)。
+ */
+export type SessionLogKind =
+  | "thinking"
+  | "tool_use"
+  | "tool_result"
+  | "assistant"
+  | "skip";
+
+export function classifySessionLog(
+  content: string,
+  channel?: string | null,
+): SessionLogKind {
+  const trimmed = (content ?? "").trim();
+  if (!trimmed) return "skip";
+  if (trimmed.includes("AskUserQuestion")) return "skip";
+  if (/^\[TOOL_RESULT\]\s*User answered/.test(trimmed)) return "skip";
+  if (/^\[(SYSTEM|RESULT)[^\]]*\]/.test(trimmed)) return "skip";
+  if (/^\[THINKING\]/.test(trimmed)) return "thinking";
+  if (/^\[TOOL_USE\]/.test(trimmed)) return "tool_use";
+  if (/^\[TOOL_RESULT\]/.test(trimmed)) return "tool_result";
+  if (channel === "tool_call") return "tool_use";
+  return "assistant";
 }

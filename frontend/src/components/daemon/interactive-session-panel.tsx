@@ -40,6 +40,7 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MarkdownText } from "@/components/ui/markdown-text";
+import { CollapsibleSection } from "@/components/agent-log/tool-renderers";
 import { ApiError } from "@/lib/api";
 import { createMission } from "@/lib/agent";
 import {
@@ -59,16 +60,32 @@ import {
   type SessionStreamEnvelope,
 } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
-import { sanitizeSessionLogContent } from "@/components/daemon/session-log-sanitize";
+import { sanitizeSessionLogContent, classifySessionLog } from "@/components/daemon/session-log-sanitize";
 
 type SessionUiStatus = "idle" | "creating" | "active" | "ending" | "ended" | "failed" | "reconnecting";
 type TurnUiStatus = "pending" | "running" | "interrupting" | "completed" | "failed" | "killed";
+
+/**
+ * ql-20260730-001：agent 回合内的工具调用事件（折叠卡片用）。
+ * - raw：[TOOL_USE] 内容（命令/args，已剥前缀）
+ * - result：配对的 [TOOL_RESULT] 内容（已剥前缀，可能缺失=进行中）
+ * - status：running（未配对 result）/ ok（成功）/ deny（被拒/失败）
+ */
+export interface SessionToolEvent {
+  raw: string;
+  result?: string;
+  status: "running" | "ok" | "deny";
+}
 
 export interface SessionTurnView {
   runId: string;
   turn: number | null;
   prompt: string;
   output: string;
+  /** ql-20260730-001：思考过程（[THINKING] 累积，折叠展示） */
+  thinking: string;
+  /** ql-20260730-001：工具调用事件列表（[TOOL_USE]/[TOOL_RESULT] 配对，折叠卡片） */
+  toolEvents: SessionToolEvent[];
   status: TurnUiStatus;
   seenLogIds: Set<string>;
   /**
@@ -234,8 +251,39 @@ export function InteractiveSessionPanel({
               }
               const nextSeen = new Set(turn.seenLogIds);
               if (env.log_id) nextSeen.add(env.log_id);
-              const text = renderLogContent(env);
+              // ql-20260730-001：按 log 类型分流到 thinking / toolEvents / output 三层
+              const kind = classifySessionLog(env.content ?? "", env.channel);
+              if (kind === "skip") return turn;
+              const text = sanitizeSessionLogContent(env.content ?? "", env.channel);
               if (!text) return turn;
+              if (kind === "thinking") {
+                return {
+                  ...turn,
+                  seenLogIds: nextSeen,
+                  thinking: turn.thinking + (turn.thinking ? "\n" : "") + text,
+                };
+              }
+              if (kind === "tool_use") {
+                return {
+                  ...turn,
+                  seenLogIds: nextSeen,
+                  toolEvents: [...turn.toolEvents, { raw: text, status: "running" }],
+                };
+              }
+              if (kind === "tool_result") {
+                // 配对最近一个 running 的 tool_use
+                const toolEvents = [...turn.toolEvents];
+                for (let i = toolEvents.length - 1; i >= 0; i--) {
+                  const evt = toolEvents[i];
+                  if (evt && evt.status === "running") {
+                    const isDeny = /拒绝|denied|error|失败/i.test(text);
+                    toolEvents[i] = { raw: evt.raw, result: text, status: isDeny ? "deny" : "ok" };
+                    break;
+                  }
+                }
+                return { ...turn, seenLogIds: nextSeen, toolEvents };
+              }
+              // assistant（含 stderr ⚠️）
               return {
                 ...turn,
                 seenLogIds: nextSeen,
@@ -505,6 +553,8 @@ export function InteractiveSessionPanel({
             turn: null,
             prompt,
             output: "",
+            thinking: "",
+            toolEvents: [],
             status: "pending",
             seenLogIds: new Set(),
             inputTokens: null,
@@ -567,7 +617,7 @@ export function InteractiveSessionPanel({
         ...INITIAL_VIEW,
         status: "creating",
         turns: [
-          { runId: "__pending_create__", turn: null, prompt, output: "", status: "pending", seenLogIds: new Set(), inputTokens: null, outputTokens: null, errorDetail: null },
+          { runId: "__pending_create__", turn: null, prompt, output: "", thinking: "", toolEvents: [], status: "pending", seenLogIds: new Set(), inputTokens: null, outputTokens: null, errorDetail: null },
         ],
       });
       try {
@@ -975,10 +1025,75 @@ export function InteractiveSessionPanel({
                     <div className="whitespace-pre-wrap break-words">{turn.prompt}</div>
                   </div>
                 </div>
-                {turn.output && (
+                {(turn.thinking || turn.toolEvents.length > 0 || turn.output) && (
                   <div className="flex justify-start">
-                    <div className="max-w-[86%] rounded-md border bg-card px-3 py-2 text-xs leading-relaxed text-foreground shadow-sm">
-                      <MarkdownText content={turn.output} />
+                    <div className="max-w-[86%] space-y-1.5 rounded-md border bg-card px-3 py-2 text-xs leading-relaxed text-foreground shadow-sm">
+                      {/* ql-20260730-001：思考过程(默认折叠) */}
+                      {turn.thinking && (
+                        <CollapsibleSection
+                          title="💭 思考过程"
+                          defaultOpen={false}
+                          summary={turn.thinking.replace(/\s+/g, " ").trim().slice(0, 50)}
+                        >
+                          <div className="whitespace-pre-wrap break-words text-muted-foreground">
+                            {turn.thinking}
+                          </div>
+                        </CollapsibleSection>
+                      )}
+                      {/* 工具调用(默认折叠,显示数量) */}
+                      {turn.toolEvents.length > 0 && (
+                        <CollapsibleSection
+                          title={`🔧 工具调用 · ${turn.toolEvents.length} 个`}
+                          defaultOpen={false}
+                        >
+                          <div className="space-y-1.5">
+                            {turn.toolEvents.map((evt, i) => (
+                              <div
+                                key={i}
+                                className="rounded border border-border bg-background px-2 py-1.5"
+                              >
+                                <div className="mb-1 flex items-center gap-1.5">
+                                  <span className="rounded bg-primary px-1.5 py-0.5 text-[10px] text-primary-foreground">
+                                    工具
+                                  </span>
+                                  <span
+                                    className={
+                                      evt.status === "ok"
+                                        ? "text-[10px] text-success"
+                                        : evt.status === "deny"
+                                          ? "text-[10px] text-destructive"
+                                          : "text-[10px] text-muted-foreground"
+                                    }
+                                  >
+                                    {evt.status === "ok"
+                                      ? "✓ 成功"
+                                      : evt.status === "deny"
+                                        ? "✗ 失败/拒绝"
+                                        : "⏳ 进行中"}
+                                  </span>
+                                </div>
+                                <div className="break-all font-mono text-[10px] text-muted-foreground">
+                                  {evt.raw}
+                                </div>
+                                {evt.result && (
+                                  <div className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 p-1.5 font-mono text-[10px] text-muted-foreground">
+                                    {evt.result}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </CollapsibleSection>
+                      )}
+                      {/* 最终回复(突出) */}
+                      {turn.output && (
+                        <>
+                          {(turn.thinking || turn.toolEvents.length > 0) && (
+                            <div className="border-t border-border" />
+                          )}
+                          <MarkdownText content={turn.output} />
+                        </>
+                      )}
                     </div>
                   </div>
                 )}
@@ -1165,6 +1280,8 @@ function upsertTurn(
       turn: env.turn ?? null,
       prompt: "",
       output: "",
+      thinking: "",
+      toolEvents: [],
       status: "running",
       seenLogIds: new Set(),
       inputTokens: env.input_tokens ?? null,
