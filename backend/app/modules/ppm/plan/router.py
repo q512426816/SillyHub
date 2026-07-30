@@ -851,7 +851,7 @@ async def submit_detail(
 
 
 # ===========================================================================
-# 项目计划 (Weekly Plan)
+# 实施计划汇总 (Weekly Plan)
 # ===========================================================================
 
 _WEEKLY_PLAN_COLUMNS = [
@@ -882,7 +882,7 @@ async def list_weekly_plan(
     user: AuthUser,
     req: WeeklyPlanListReqDep,
 ) -> Page[WeeklyPlanRow]:
-    """项目计划分页查询(所有项目实施阶段明细+任务计划)。"""
+    """实施计划汇总分页查询(所有项目实施阶段明细+任务计划)。"""
     return await PlanService(session).list_weekly_plan(req)
 
 
@@ -892,17 +892,17 @@ async def export_weekly_plan(
     user: AuthUser,
     req: WeeklyPlanListReqDep,
 ) -> Any:
-    """导出项目计划 Excel(精确复制模板样式:标题行+两级合并表头+数据行合并)。"""
+    """导出实施计划汇总 Excel(精确复制模板样式:标题行+两级合并表头+数据行合并)。"""
     rows = await PlanService(session).list_weekly_plan_for_export(req)
     return await anyio.to_thread.run_sync(lambda: _build_weekly_plan_excel_response(rows))
 
 
 def _build_weekly_plan_excel_response(rows: list[dict[str, Any]]) -> Any:
-    """线程池内构造项目计划 Excel(精确复制模板样式,X-002)。"""
+    """线程池内构造实施计划汇总 Excel(精确复制模板样式,X-002)。"""
     from app.modules.ppm.common.export import excel_response
 
     content = _build_weekly_plan_workbook(rows)
-    return excel_response(content, filename=timestamped_filename("项目计划"))
+    return excel_response(content, filename=timestamped_filename("实施计划汇总"))
 
 
 def _build_weekly_plan_workbook(rows: list[dict[str, Any]]) -> bytes:

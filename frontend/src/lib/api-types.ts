@@ -4933,7 +4933,7 @@ export interface paths {
         };
         /**
          * List Weekly Plan
-         * @description 项目计划分页查询(所有项目实施阶段明细+任务计划)。
+         * @description 实施计划汇总分页查询(所有项目实施阶段明细+任务计划)。
          */
         get: operations["list_weekly_plan_api_ppm_weekly_plan_get"];
         put?: never;
@@ -4953,7 +4953,7 @@ export interface paths {
         };
         /**
          * Export Weekly Plan
-         * @description 导出项目计划 Excel(精确复制模板样式:标题行+两级合并表头+数据行合并)。
+         * @description 导出实施计划汇总 Excel(精确复制模板样式:标题行+两级合并表头+数据行合并)。
          */
         get: operations["export_weekly_plan_api_ppm_weekly_plan_export_excel_get"];
         put?: never;

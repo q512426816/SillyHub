@@ -98,7 +98,7 @@ const BACKEND_PERMISSION_KEYS = [
   "ppm:milestone-detail:read",
   "ppm:problem-list:read",
   "ppm:task-plan:read",
-  // 项目计划(weekly-plan 汇总视图)
+  // 实施计划汇总(weekly-plan 汇总视图)
   "ppm:weekly-plan:view",
 ] as const;
 

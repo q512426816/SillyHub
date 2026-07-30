@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * 项目计划 — 展示所有项目实施阶段（三级里程碑 has_module=true）下的
+ * 实施计划汇总 — 展示所有项目实施阶段（三级里程碑 has_module=true）下的
  * 明细 + 任务计划（PlanTask），19 列两级表头 + 项目分组行 + 虚拟列表 + 导出。
  *
  * 虚拟列表不支持 rowSpan(跨行合并),但支持 colSpan(跨列,单行内)。
@@ -533,7 +533,7 @@ export default function WeeklyPlanPage() {
   return (
     <PageContainer size="full">
       <PageHeader
-        title="项目计划"
+        title="实施计划汇总"
         subtitle="展示所有项目实施阶段（三级里程碑）下的任务计划，支持导出 Excel"
       />
 

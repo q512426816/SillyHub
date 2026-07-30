@@ -71,3 +71,19 @@
 根因：menu-permissions.ts 中 ppm-weekly-plan 菜单 permissions 为空数组 []，canSeeMenu 对空权限组放行致全员可见；后端亦无 ppm:weekly-plan:view 枚举与 platform_admin seed，角色管理无从分配。
 方案：①后端 permissions.py 新增 PPM_WEEKLY_PLAN_VIEW 枚举（group 靠 ppm: 前缀自动归 PPM 组，无需改 group 判定）；②20260741000 PPM_PERMISSIONS 列表双写该 key 覆盖新环境 seed，并新建增量 migration 202607301000（down_revision=202607291100 head）幂等给已上线 platform_admin 补种——因 PPM 已上线、原 seed revision 已应用不会重跑，必须增量补，否则连平台管理员都看不到该菜单；③前端 menu-permissions.ts 填权限 key；④ppm 域后端 router 统一 get_current_principal + DataScope 仅认证不授权（data_scope.py 注释"与功能权限正交"），故不改 plan/router.py，与 kanban 等其它 ppm 菜单一致；⑤gen:types 刷新 backend/openapi.json + frontend 与 daemon 两处 api-types.ts，避免类型落后后端。
 结果：后端 pytest test_ppm_permissions.py 24 passed（含 count=18、新增成员存在、platform_admin seed 含 weekly-plan、归 PPM 组、非系统角色回归）；前端 vitest menu-permissions + permission 共 60 passed（含 ppm-weekly-plan 精确匹配、镜像常量 64、删跳过后全菜单≥1 权限）；alembic 单 head 202607301000、chain 202607291100→202607301000 正确无多 head；gen:types 三处类型文件均含 ppm:weekly-plan:view。遗留：weekly-plan 与 ppm-project-plans 的 menuLabel 均为「项目计划」系既有重名，不在本次范围，未处理。
+## ql-20260730-006-a837 | 2026-07-30 16:22:48 | 将 /ppm/weekly-plan 改名为「实施计划汇总」（消除与 ppm-project-plans 重名）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/lib/menu-permissions.ts（ppm-weekly-plan 菜单 menuLabel「项目计划」→「实施计划汇总」，权限 name「项目计划查看」→「实施计划汇总查看」）
+- frontend/src/app/(dashboard)/ppm/weekly-plan/page.tsx（PageHeader title + 文件头注释「项目计划」→「实施计划汇总」，subtitle 不含该词保留）
+- frontend/src/lib/ppm/weekly-plan.ts（API client 文件头/分页/导出注释 + 导出默认文件名 项目计划.xlsx→实施计划汇总.xlsx）
+- frontend/src/lib/ppm/types.ts（Weekly Plan 段 3 处类型注释：段头/行/查询参数）
+- backend/app/modules/ppm/plan/router.py（weekly-plan 段：导出文件名 timestamped_filename + 4 docstring + 段注释；仅 weekly-plan 段，不动 project-plan 段）
+- backend/app/modules/auth/permissions.py（PPM_WEEKLY_PLAN_VIEW 枚举注释）
+- frontend/src/lib/__tests__/menu-permissions.test.ts（BACKEND_PERMISSION_KEYS 上方注释）
+- backend/openapi.json + frontend/src/lib/api-types.ts + sillyhub-daemon/src/api-types.ts（gen:types 同步，weekly-plan 端点描述更新）
+需求：/ppm/weekly-plan 与 ppm-project-plans 侧边栏菜单都叫「项目计划」，两个同名菜单并列易混淆，需把 weekly-plan 改成区分名「实施计划汇总」。
+根因：weekly-plan 的侧边栏 menuLabel、页面 PageHeader title、前后端 Excel 导出文件名等全套沿用「项目计划」，与 ppm-project-plans（PsProjectPlan 数据）完全撞名。
+方案：把 weekly-plan 专属的 21 处「项目计划」文案统一改为「实施计划汇总」——侧边栏 menuLabel + 权限显示名（角色管理）+ 页面标题 + 前端导出默认名 + 后端导出文件名 + 相关代码注释/docstring；改后端 router docstring 后跑 gen:types 同步 openapi.json 与 frontend/daemon 两处 api-types.ts 的端点描述。严格只动 weekly-plan 专属文案，绝不碰 ppm-project-plans（PsProjectPlan）任何「项目计划」；移动端工作台 m/ppm/workbench:931 的「项目计划」入口经确认 href 指向 /ppm/project-plans，不在本次范围。
+结果：纯 weekly-plan 文件（page.tsx/weekly-plan.ts）残留「项目计划」=0；21 处「实施计划汇总」落点全为 weekly-plan 相关；ruff format/check 全过；前端 vitest menu-permissions+permission 共 60 passed（无字面断言依赖改名）；gen:types 三处类型同步。后端导出文件名改动需重建 backend 容器才生效。
