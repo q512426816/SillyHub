@@ -54,14 +54,33 @@ def _collect_skill_files(skills_dir: Path) -> list[tuple[Path, bytes]]:
     return files
 
 
+def _build_skill_md(row: CustomSkill) -> str:
+    """拼装自定义技能的 SKILL.md：frontmatter（name+description）+ body。
+
+    ``model.py`` / ``schema.py`` 注释承诺「YAML frontmatter 由业务层组装，DB
+    只存 body」。本函数在打包层组装（change skills-settings-p0-fixup D-001）：
+    用 DB 的 name + description 拼 YAML frontmatter 头部，DB content 作为 body
+    跟在其后。一次性修复全部历史/新建自定义技能，无需数据迁移。
+
+    防双拼（D-003）：若 content 已以 frontmatter 围栏 ``---`` 开头，视为用户已
+    手写 frontmatter，原样返回 content 不再重复拼接。Claude 靠 SKILL.md 顶部
+    的 description 判断何时触发该技能——不拼 frontmatter 则 AI 无法识别。
+    """
+    body = row.content or ""
+    if body.lstrip().startswith("---"):
+        return body
+    return f"---\nname: {row.name}\ndescription: {row.description}\n---\n\n{body}"
+
+
 async def _collect_custom_skills(
     session: "AsyncSession | None",
 ) -> list[tuple[Path, bytes]]:
     """Merge DB ``CustomSkill`` rows into the same ``(relpath, content)`` shape.
 
-    Each CustomSkill → ``<name>/SKILL.md``（D-001 单文件）。content = DB body
-    utf-8 encoded. ``name`` 排序保证确定性。当 ``session`` 为 ``None`` 时跳过
-    （向后兼容旧调用方/不依赖 DB 的纯代码库扫描场景）。
+    Each CustomSkill → ``<name>/SKILL.md``（D-001 单文件）。SKILL.md 内容由
+    :func:`_build_skill_md` 拼装（frontmatter + body，D-001）。``name`` 排序
+    保证确定性。当 ``session`` 为 ``None`` 时跳过（向后兼容旧调用方/不依赖
+    DB 的纯代码库扫描场景）。
     """
     if session is None:
         return []
@@ -69,7 +88,7 @@ async def _collect_custom_skills(
     out: list[tuple[Path, bytes]] = []
     for row in rows:
         rel_path = Path(row.name) / "SKILL.md"
-        out.append((rel_path, row.content.encode("utf-8")))
+        out.append((rel_path, _build_skill_md(row).encode("utf-8")))
     return out
 
 

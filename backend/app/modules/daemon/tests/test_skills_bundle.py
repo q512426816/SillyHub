@@ -229,9 +229,13 @@ async def test_manifest_includes_custom_skills(
     # 代码库 sillyspec-* 仍在（零回归）
     assert any(p.startswith("sillyspec-verify/") for p in paths)
 
-    # sha256 与 DB content 一致
+    # sha256 与打包层拼装的 frontmatter+body 一致（D-001：_build_skill_md 拼 frontmatter）
+    expected_my = (
+        "---\nname: my-custom\ndescription: custom skill my-custom\n---\n\n"
+        "# my custom skill\nbody line"
+    )
     custom_entry = next(f for f in files if f["path"] == "my-custom/SKILL.md")
-    assert custom_entry["sha256"] == hashlib.sha256(b"# my custom skill\nbody line").hexdigest()
+    assert custom_entry["sha256"] == hashlib.sha256(expected_my.encode("utf-8")).hexdigest()
 
 
 async def test_bundle_includes_custom_skills(
@@ -254,8 +258,11 @@ async def test_bundle_includes_custom_skills(
             if f is not None:
                 extracted[member.name] = f.read()
 
+    expected_bundle = (
+        b"---\nname: bundled-skill\ndescription: custom skill bundled-skill\n---\n\n## hello\nworld"
+    )
     assert "bundled-skill/SKILL.md" in extracted
-    assert extracted["bundled-skill/SKILL.md"] == b"## hello\nworld"
+    assert extracted["bundled-skill/SKILL.md"] == expected_bundle
     # 代码库文件仍在
     assert any(p.startswith("sillyspec-verify/") for p in extracted)
 

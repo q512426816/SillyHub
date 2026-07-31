@@ -24,7 +24,9 @@ class CustomSkillCreate(BaseModel):
     name: str = Field(..., description="skill 唯一标识，[a-z0-9-]{2,40}，禁 sillyspec- 前缀")
     description: str = Field(..., min_length=1, max_length=200, description="一句话描述")
     content: str = Field(
-        ..., min_length=1, description="SKILL.md 正文（YAML frontmatter 由业务层组装）"
+        ...,
+        min_length=1,
+        description="SKILL.md 正文 body（YAML frontmatter 由打包层 skills_bundle_service 组装）",
     )
 
 

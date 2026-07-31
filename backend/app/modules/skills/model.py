@@ -40,7 +40,7 @@ class CustomSkill(BaseModel, table=True):
     description: str = Field(
         sa_column=Column(String(200), nullable=False),
     )
-    # SKILL.md 正文（YAML frontmatter 由业务层组装，DB 只存 body）。
+    # SKILL.md 正文 body（YAML frontmatter 由打包层 skills_bundle_service 组装，DB 只存 body）。
     content: str = Field(sa_column=Column(Text, nullable=False))
     # 平台级，但记录创建者以便审计；用户删除时 SET NULL（与 agent_missions.created_by 同风格）。
     created_by: uuid.UUID | None = Field(

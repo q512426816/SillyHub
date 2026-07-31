@@ -1,15 +1,18 @@
 /**
  * 2026-07-07-skills-mcp-management-ui task-08：/settings/skills 页单测。
+ * （skills-settings-p0-fixup task-04：补 useNotify mock + amber banner 断言 +
+ *  placeholder 适配步骤模板。）
  *
  * 依据文档:
- *   - .sillyspec/changes/2026-07-07-skills-mcp-management-ui/design.md（§5.3 + D-007）
- *   - tasks/task-08.md（验收 A-D）
+ *   - .sillyspec/changes/skills-settings-p0-fixup/design.md（P0-3/4 + D-005）
+ *   - tasks/task-03.md / task-04.md（验收）
  *
  * 覆盖:
  *   1. 平台 skills 只读列表展示 manifest（version + 文件名 + 文件数）（AC-A）
  *   2. 自定义 skills 表格展示 list 数据（AC-B）
- *   3. admin 可见「新增技能」「编辑」「删除」按钮；非 admin 只读（AC-D）
+ *   3. admin 可见「新增技能」「编辑」「删除」按钮；非 admin 只读 + amber banner（AC-D）
  *   4. 点击「新增技能」打开弹窗，填写后调 createCustomSkill（AC-B/C）
+ *   5. 点击删除 → confirm 后调 deleteCustomSkill
  *
  * 测试模式：照搬 runtimes/__tests__/page.test.tsx 的 QueryClientProvider + useSession mock 脚手架。
  */
@@ -155,6 +158,17 @@ vi.mock("@/components/ui/markdown-text", () => ({
   ),
 }));
 
+// ── useNotify mock：弹窗 + 页面都用 useNotify（App.useApp().message），测试环境无
+//    antd <App> provider，mock 成 vi.fn 避免报错；保留 errMessage 真实实现
+//    （页面/弹窗内部仍用 errMessage 解析错误文案）。
+vi.mock("@/lib/errors", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/errors")>("@/lib/errors");
+  return {
+    ...actual,
+    useNotify: () => ({ success: vi.fn(), error: vi.fn() }),
+  };
+});
+
 beforeEach(() => {
   vi.stubGlobal("confirm", vi.fn(() => true));
 });
@@ -191,7 +205,7 @@ describe("/settings/skills 页", () => {
     renderPage(<SkillsPage />);
 
     // 平台 section 标题 + 同步状态徽标
-    expect(await screen.findByText("平台 SillySpec 技能")).toBeInTheDocument();
+    expect(await screen.findByText("平台 SillySpec 技能（系统自带）")).toBeInTheDocument();
     expect(await screen.findByText("已同步")).toBeInTheDocument();
     // version 短码展示（slice 12）
     expect(await screen.findByText("abc123def456")).toBeInTheDocument();
@@ -209,7 +223,7 @@ describe("/settings/skills 页", () => {
   it("展示自定义 skills 表格行（admin 可见 编辑/删除）", async () => {
     renderPage(<SkillsPage />);
 
-    expect(await screen.findByText("自定义技能")).toBeInTheDocument();
+    expect(await screen.findByText("自定义技能（自己加的）")).toBeInTheDocument();
     expect(await screen.findByText("my-helper")).toBeInTheDocument();
     expect(await screen.findByText("一个辅助技能")).toBeInTheDocument();
     // admin 可见 编辑 + 删除 + 新增
@@ -218,11 +232,15 @@ describe("/settings/skills 页", () => {
     expect(screen.getByText("新增技能")).toBeInTheDocument();
   });
 
-  it("非 admin：无 新增/编辑/删除 按钮，行内显示只读", async () => {
+  it("非 admin：amber 只读提示 + 无 新增/编辑/删除 按钮 + 行内只读", async () => {
     session.user = { id: "u2", is_platform_admin: false, permissions: [] };
     renderPage(<SkillsPage />);
 
     expect(await screen.findByText("my-helper")).toBeInTheDocument();
+    // 非 admin 顶部 amber 只读 banner
+    expect(
+      screen.getByText("仅平台管理员可编辑，当前为只读视图。"),
+    ).toBeInTheDocument();
     // 非 admin 无新增按钮
     await waitFor(() => {
       expect(screen.queryByText("新增技能")).not.toBeInTheDocument();
@@ -250,14 +268,14 @@ describe("/settings/skills 页", () => {
 
     // 弹窗标题
     expect(await screen.findByText("新增自定义技能")).toBeInTheDocument();
-    // 填表
+    // 填表（正文 placeholder 已改为步骤模板，匹配「何时使用」）
     fireEvent.change(screen.getByPlaceholderText("例如 my-helper"), {
       target: { value: "new-skill" },
     });
     fireEvent.change(screen.getByPlaceholderText("一句话说明该技能用途"), {
       target: { value: "新技能描述" },
     });
-    fireEvent.change(screen.getByPlaceholderText(/技能标题/), {
+    fireEvent.change(screen.getByPlaceholderText(/何时使用/), {
       target: { value: "# new skill\n正文" },
     });
 

@@ -8300,7 +8300,7 @@ export interface components {
             description: string;
             /**
              * Content
-             * @description SKILL.md 正文（YAML frontmatter 由业务层组装）
+             * @description SKILL.md 正文 body（YAML frontmatter 由打包层 skills_bundle_service 组装）
              */
             content: string;
         };

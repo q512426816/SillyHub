@@ -5,7 +5,9 @@ import Link from "next/link";
 import {
   BookOpen,
   Boxes,
+  ChevronDown,
   FileCode2,
+  Lightbulb,
   Pencil,
   Plus,
   RefreshCw,
@@ -17,7 +19,7 @@ import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { errMessage } from "@/lib/errors";
+import { errMessage, useNotify } from "@/lib/errors";
 import {
   useCreateCustomSkill,
   useCustomSkills,
@@ -70,9 +72,12 @@ export default function SkillsSettingsPage() {
   } = usePlatformSkillsManifest();
 
   const deleteSkill = useDeleteCustomSkill();
+  const notify = useNotify();
 
   const [editing, setEditing] = useState<CustomSkillRead | "new" | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
+  // 新手引导卡：默认展开，让不懂技能的用户先看懂（P0-4 白话化）。
+  const [showGuide, setShowGuide] = useState(true);
 
   // mutation 错误透传到页面顶部（dialog 自身也展示，这里冗余兜底）
   useEffect(() => {
@@ -96,6 +101,7 @@ export default function SkillsSettingsPage() {
     setPageError(null);
     try {
       await deleteSkill.mutateAsync(s.id);
+      notify.success("已删除，需重启守护进程才在所有 AI 助手处生效");
     } catch {
       // 错误已由 effect 透传
     }
@@ -111,7 +117,7 @@ export default function SkillsSettingsPage() {
               设置
             </Link>
             <span className="px-1 text-muted-foreground/60">/</span>
-            查看平台 SillySpec 技能 + 管理自定义技能（分发给所有守护进程）
+            管理「给 AI 看的操作说明书」——系统自带的只读查看，自己加的可编辑并分发给所有 AI 助手
           </span>
         }
         actions={
@@ -128,6 +134,53 @@ export default function SkillsSettingsPage() {
         }
       />
 
+      {/* 新手引导卡：白话讲清楚「技能是什么 / 在哪用 / 怎么生效」（P0-4）。默认展开，可折叠。 */}
+      <div className="rounded-lg border border-blue-200 bg-blue-50/40">
+        <button
+          type="button"
+          onClick={() => setShowGuide((v) => !v)}
+          className="flex w-full items-center gap-2 px-4 py-3 text-left"
+        >
+          <Lightbulb className="h-4 w-4 shrink-0 text-blue-600" />
+          <span className="text-sm font-medium text-foreground">
+            什么是技能？在哪里用到？怎么生效？（点此{showGuide ? "收起" : "展开"}）
+          </span>
+          <ChevronDown
+            className={cn(
+              "ml-auto h-4 w-4 text-muted-foreground transition-transform",
+              showGuide && "rotate-180",
+            )}
+          />
+        </button>
+        {showGuide && (
+          <div className="space-y-2.5 border-t border-blue-200/60 px-4 py-3 text-sm text-muted-foreground">
+            <p>
+              <span className="font-medium text-foreground">技能是什么：</span>
+              一份给 AI 看的「操作说明书」。每个技能告诉 AI——什么情况下该用它、按什么步骤做。
+            </p>
+            <p>
+              <span className="font-medium text-foreground">在哪里用到：</span>
+              平台上所有 AI 助手（开发的 AI、你建的智能体）启动时都会自动加载这些技能。AI 会根据技能里的「描述」自己判断要不要用，就像它知道什么时候该查文档、什么时候该写代码。
+            </p>
+            <p>
+              <span className="font-medium text-foreground">怎么生效：</span>
+              你在这里新增或修改技能后，需要<strong className="text-foreground">重启守护进程</strong>才会同步给所有 AI，保存时会有提示。
+            </p>
+            <p>
+              <span className="font-medium text-foreground">怎么写：</span>
+              点「插入步骤模板」会自动填入骨架（何时使用 / 步骤 / 注意事项），把步骤写清楚，AI 就能照着做。
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* 非管理员只读提示（P0-4，复用 MCP 页 amber banner 样式）。 */}
+      {!isPlatformAdmin && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          仅平台管理员可编辑，当前为只读视图。
+        </div>
+      )}
+
       {pageError && (
         <div className="rounded-lg border border-destructive/30 bg-red-50 px-4 py-3 text-sm text-destructive">
           {pageError}
@@ -136,7 +189,7 @@ export default function SkillsSettingsPage() {
 
       {/* 上区：平台 sillyspec skills 只读列表 */}
       <SectionCard
-        title="平台 SillySpec 技能"
+        title="平台 SillySpec 技能（系统自带）"
         extra={
           manifest ? (
             <div className="flex items-center gap-2">
@@ -151,6 +204,10 @@ export default function SkillsSettingsPage() {
         }
         bodyPadding="p-0"
       >
+        {/* 灰字效果说明：系统自带技能 AI 启动自动加载，不可改（P0-3）。 */}
+        <p className="border-b px-4 py-2 text-xs text-muted-foreground">
+          这些是系统自带技能，AI 启动时自动加载使用，不能在这里修改。列表只读。
+        </p>
         {manifestLoading ? (
           <div className="px-6 py-10 text-center text-sm text-muted-foreground">
             加载中...
@@ -199,7 +256,7 @@ export default function SkillsSettingsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">
-                      只读 · 随部署更新，daemon 启动自动同步
+                      只读 · 随部署更新，AI 启动自动加载
                     </td>
                   </tr>
                 ))}
@@ -217,7 +274,7 @@ export default function SkillsSettingsPage() {
 
       {/* 下区：自定义 skills 表格 CRUD */}
       <SectionCard
-        title="自定义技能"
+        title="自定义技能（自己加的）"
         extra={
           isPlatformAdmin ? (
             <Button size="sm" onClick={() => setEditing("new")} className="gap-1">
@@ -240,7 +297,7 @@ export default function SkillsSettingsPage() {
             title="还没有自定义技能"
             description={
               isPlatformAdmin ? (
-                <span>新增后技能会并入 skills bundle，分发给所有守护进程。</span>
+                <span>新增后会把这份「AI 操作说明书」分发给所有 AI 助手，重启守护进程后生效。</span>
               ) : (
                 <span>需要平台管理员权限才能新增自定义技能。</span>
               )
