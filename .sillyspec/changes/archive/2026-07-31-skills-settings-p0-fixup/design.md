@@ -1,6 +1,7 @@
 ---
 author: qinyi
 created_at: 2026-07-31 11:36:08
+risk_level: contract-required
 ---
 
 # skills-settings-p0-fixup 设计
