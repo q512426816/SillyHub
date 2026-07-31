@@ -608,18 +608,9 @@ export default function MilestoneDetailsPage() {
 
       {/* plan 内前端过滤(后端无对应过滤参数) */}
       <SectionCard bodyPadding="p-2">
-        {/* 顶部按钮行:右对齐(重置 | 分隔 | 导出 | 新建里程碑 | 刷新) */}
+        {/* 顶部按钮行(对齐 projects/PpmResourceTable D-006):左=数据组(导出/新建里程碑/刷新)
+            | 竖分隔 | 右=基础组(重置,最右)。搜索/展开本页无(前端实时过滤 grid + 无折叠)。 */}
         <div className="mb-2 flex items-center justify-end gap-2">
-          <Button
-            onClick={() => {
-              setOverallStageFilter("");
-              setDetailedStageFilter("");
-              setTaskThemeFilter("");
-            }}
-          >
-            重置
-          </Button>
-          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
           <Button
             disabled={exporting}
             onClick={() => void handleExport()}
@@ -636,6 +627,16 @@ export default function MilestoneDetailsPage() {
           </Button>
           <Button onClick={() => void reload()}>
             刷新
+          </Button>
+          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
+          <Button
+            onClick={() => {
+              setOverallStageFilter("");
+              setDetailedStageFilter("");
+              setTaskThemeFilter("");
+            }}
+          >
+            重置
           </Button>
         </div>
 

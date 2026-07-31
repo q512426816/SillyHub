@@ -87,3 +87,12 @@
 根因：weekly-plan 的侧边栏 menuLabel、页面 PageHeader title、前后端 Excel 导出文件名等全套沿用「项目计划」，与 ppm-project-plans（PsProjectPlan 数据）完全撞名。
 方案：把 weekly-plan 专属的 21 处「项目计划」文案统一改为「实施计划汇总」——侧边栏 menuLabel + 权限显示名（角色管理）+ 页面标题 + 前端导出默认名 + 后端导出文件名 + 相关代码注释/docstring；改后端 router docstring 后跑 gen:types 同步 openapi.json 与 frontend/daemon 两处 api-types.ts 的端点描述。严格只动 weekly-plan 专属文案，绝不碰 ppm-project-plans（PsProjectPlan）任何「项目计划」；移动端工作台 m/ppm/workbench:931 的「项目计划」入口经确认 href 指向 /ppm/project-plans，不在本次范围。
 结果：纯 weekly-plan 文件（page.tsx/weekly-plan.ts）残留「项目计划」=0；21 处「实施计划汇总」落点全为 weekly-plan 相关；ruff format/check 全过；前端 vitest menu-permissions+permission 共 60 passed（无字面断言依赖改名）；gen:types 三处类型同步。后端导出文件名改动需重建 backend 容器才生效。
+## ql-20260731-001-2290 | 2026-07-31 13:25:03 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
+
+需求：/ppm/milestone-details 查询条件右上角按钮布局对齐 /ppm/projects(个性化按钮在左,搜索/重置/展开在右)。
+根因：milestone-details 顶部按钮行现状为【重置|分隔|导出|新建里程碑|刷新】(重置在最左、个性化在右),与 projects(PpmResourceTable D-006:数据组左|分隔|基础组右)相反。
+方案：重排 milestone-details(page.tsx:611-640)按钮为【导出|新建里程碑|刷新】(数据组/个性化,左) | 竖分隔 | 【重置】(基础组,最右),对齐 projects;注释同步。本页无搜索/展开按钮(前端实时过滤 grid + 查询条件无折叠)。
+结果：1 文件改动(frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx),typecheck 绿 + milestone-details 24 测试绿,无回归。
