@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Input, type TableProps, Tag } from "antd";
+import { Input, Button as AntButton, type TableProps, Tag } from "antd";
 
 import { AdminRolePermissionPicker } from "@/components/admin-role-permission-picker";
 import { Badge } from "@/components/ui/badge";
@@ -197,17 +197,22 @@ export default function AdminRolesPage() {
     {
       title: "操作",
       key: "actions",
-      align: "right",
+      align: "center",
+      width: 180,
+      fixed: "right",
+      onCell: () => ({ style: { background: "hsl(var(--card))" } }),
       render: (_v: unknown, record: RoleRead) => (
-        <div className="flex items-center justify-end gap-2">
-          <button
-            className="text-[11px] text-primary hover:underline"
+        <div className="flex justify-center gap-1">
+          <AntButton
+            type="link"
+            size="small"
             onClick={() => setDrawer({ open: true, mode: "edit", role: record })}
           >
             编辑
-          </button>
-          <button
-            className="text-[11px] text-primary hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground/40 disabled:no-underline"
+          </AntButton>
+          <AntButton
+            type="link"
+            size="small"
             disabled={!canWrite || record.is_system}
             title={
               record.is_system
@@ -219,9 +224,11 @@ export default function AdminRolesPage() {
             onClick={() => void handleToggleActive(record)}
           >
             {record.is_active ? "禁用" : "启用"}
-          </button>
-          <button
-            className="text-[11px] text-destructive hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground/40 disabled:no-underline"
+          </AntButton>
+          <AntButton
+            type="link"
+            danger
+            size="small"
             disabled={!canWrite || record.is_system || record.user_count > 0}
             title={
               record.is_system
@@ -235,7 +242,7 @@ export default function AdminRolesPage() {
             onClick={() => setConfirmDelete(record)}
           >
             删除
-          </button>
+          </AntButton>
         </div>
       ),
     },

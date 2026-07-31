@@ -114,3 +114,12 @@
 根因：/admin/roles 工具栏现状为【搜索|重置|分隔|新建角色】(基础组在左、数据组在右),与规范相反;且用 size=sm(规范 §5 禁 small,字顶边框)。
 方案：重排为【+新建角色】(数据组,左) | 竖分隔 |【搜索|重置】(基础组,右);去 size=sm 用默认 middle;新建角色/搜索 variant=default(主操作)、重置 outline(次)。shadcn Button 保持(整页一致),variant 对应 antd type 语义。规范文档(FRONTEND_PAGE_STYLE §2)已完整,本次只是应用,不改规范。
 结果：1 文件改动(admin/roles/page.tsx),typecheck 绿(admin/roles 无测试文件),无回归。
+## ql-20260731-004-13f4 | 2026-07-31 14:39:09 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/admin/roles/page.tsx
+
+需求：/admin/roles 操作列样式对齐 /ppm/projects 与 milestone-details(走 FRONTEND_PAGE_STYLE §4/§5 规范)。
+根因：admin/roles 操作列用 3 个原生 <button>(text-primary/destructive + hover:underline)+ align=right + justify-end gap-2,与规范(antd Button type=link size=small、删除 link danger、align center、fixed right、justify-center gap-1)不符;milestone-details 操作列已符合,唯独 admin/roles 不一致。
+方案：操作列 3 个原生 button → antd Button(别名 AntButton,因 shadcn Button 已占名)type=link size=small(编辑/禁用启用)、type=link danger size=small(删除);align right→center;加 fixed=right + width=180 + onCell 不透明背景(防固定列穿透);justify-end gap-2 → justify-center gap-1。
+结果：1 文件改动(admin/roles/page.tsx),typecheck 绿,操作列与 projects/milestone-details 统一。
