@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Input, Button as AntButton, type TableProps, Tag } from "antd";
+import { Input, Button as AntButton, Modal, type TableProps, Tag } from "antd";
 
 import { AdminRolePermissionPicker } from "@/components/admin-role-permission-picker";
 import { Badge } from "@/components/ui/badge";
@@ -439,85 +439,79 @@ function RoleDrawer({
   };
 
   return (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
-      <div className="fixed right-0 top-0 z-50 h-full w-[560px] overflow-y-auto border-l bg-background shadow-xl">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <h3 className="text-sm font-medium">
-            {mode === "create" ? "新建角色" : `编辑角色 ${role?.key}`}
-            {isReadonly && (
-              <span className="ml-2 text-[11px] text-muted-foreground">
-                （系统角色，仅可改描述）
-              </span>
-            )}
-          </h3>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
-            ✕
-          </button>
-        </div>
-        <div className="space-y-3 p-4">
-          <div>
-            <label className="text-[11px] text-muted-foreground">Key（唯一标识）</label>
-            <input
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              disabled={mode === "edit"}
-              className={`mt-0.5 font-mono ${inputCls}`}
-              placeholder="如 editor / viewer"
-            />
-            {mode === "create" && !keyValid && key && (
-              <p className="mt-1 text-[10px] text-destructive">
-                key 必须以小写字母开头，仅含小写字母/数字/下划线
-              </p>
-            )}
-          </div>
-          <div>
-            <label className="text-[11px] text-muted-foreground">名称</label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              disabled={!canWrite}
-              className={`mt-0.5 ${inputCls}`}
-              maxLength={50}
-            />
-          </div>
-          <div>
-            <label className="text-[11px] text-muted-foreground">描述</label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className={`mt-0.5 ${textareaCls}`}
-              maxLength={500}
-            />
-          </div>
-          <div>
-            <label className="text-[11px] text-muted-foreground">
-              权限（{permissionKeys.length} 项已选）
-            </label>
-            <div className="mt-1">
-              <AdminRolePermissionPicker
-                permissions={permissionKeys}
-                onChange={setPermissionKeys}
-                disabled={!canWrite || isReadonly}
-              />
-            </div>
-          </div>
-          {error && (
-            <p className="text-[11px] text-destructive">{error}</p>
+    <Modal
+      open
+      title={
+        <>
+          {mode === "create" ? "新建角色" : `编辑角色 ${role?.key}`}
+          {isReadonly && (
+            <span className="ml-2 text-[11px] font-normal text-muted-foreground">
+              （系统角色，仅可改描述）
+            </span>
+          )}
+        </>
+      }
+      width={720}
+      onCancel={onClose}
+      onOk={() => void submit()}
+      okText="保存"
+      cancelText="取消"
+      confirmLoading={saving}
+      okButtonProps={{ disabled: !canWrite || !formValid || saving }}
+      destroyOnClose
+    >
+      <div className="space-y-3">
+        <div>
+          <label className="text-[11px] text-muted-foreground">Key（唯一标识）</label>
+          <input
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            disabled={mode === "edit"}
+            className={`mt-0.5 font-mono ${inputCls}`}
+            placeholder="如 editor / viewer"
+          />
+          {mode === "create" && !keyValid && key && (
+            <p className="mt-1 text-[10px] text-destructive">
+              key 必须以小写字母开头，仅含小写字母/数字/下划线
+            </p>
           )}
         </div>
-        <div className="sticky bottom-0 flex items-center justify-end gap-2 border-t bg-background px-4 py-3">
-          <Button variant="outline" size="sm" onClick={onClose}>取消</Button>
-          <Button
-            size="sm"
-            disabled={!canWrite || !formValid || saving}
-            onClick={() => void submit()}
-          >
-            {saving ? "保存中…" : "保存"}
-          </Button>
+        <div>
+          <label className="text-[11px] text-muted-foreground">名称</label>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            disabled={!canWrite}
+            className={`mt-0.5 ${inputCls}`}
+            maxLength={50}
+          />
         </div>
+        <div>
+          <label className="text-[11px] text-muted-foreground">描述</label>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            className={`mt-0.5 ${textareaCls}`}
+            maxLength={500}
+          />
+        </div>
+        <div>
+          <label className="text-[11px] text-muted-foreground">
+            权限（{permissionKeys.length} 项已选）
+          </label>
+          <div className="mt-1">
+            <AdminRolePermissionPicker
+              permissions={permissionKeys}
+              onChange={setPermissionKeys}
+              disabled={!canWrite || isReadonly}
+            />
+          </div>
+        </div>
+        {error && (
+          <p className="text-[11px] text-destructive">{error}</p>
+        )}
       </div>
-    </>
+    </Modal>
   );
 }
 
