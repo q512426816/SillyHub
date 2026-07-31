@@ -57,9 +57,24 @@ export interface PlatformSkillsManifestFile {
   sha256: string;
 }
 
+/** 平台 skill 摘要（展示用）。来源 skills_bundle_service._summarize_skills。 */
+export interface PlatformSkillSummary {
+  /** 顶层目录名（技能标识，如 sillyspec-archive；与 daemon 同步路径一致）。 */
+  name: string;
+  /** SKILL.md frontmatter description；无 frontmatter 时为空字符串。 */
+  description: string;
+  /** 该 skill 目录下文件数。 */
+  file_count: number;
+}
+
 export interface PlatformSkillsManifest {
   version: string;
   files: PlatformSkillsManifestFile[];
+  /**
+   * 每个 skill 的摘要（name + description + file_count），供清单页展示「每个技能
+   * 干什么」。正常返回必有；后端空/错误状态可能缺省，前端用 `?? []` 兜底。
+   */
+  skills?: PlatformSkillSummary[];
   /** 当代码库无 sillyspec skills 时返回的提示信息（version 为空字符串）。 */
   message?: string;
 }

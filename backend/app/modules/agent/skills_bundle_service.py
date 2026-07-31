@@ -21,6 +21,7 @@ import tarfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import yaml
 from sqlalchemy import select
 
 from app.core.config import get_settings
@@ -113,6 +114,74 @@ def _compute_version(
     return digest.hexdigest()[:12]
 
 
+def _parse_skill_frontmatter(content: bytes) -> dict[str, str]:
+    """解析 SKILL.md 开头的 YAML frontmatter，返回 ``{name, description}``（仅这两键）。
+
+    展示用途：平台技能清单页要显示每个技能「干什么」，从 SKILL.md 顶部 frontmatter
+    取 description。无法解析（无 frontmatter 围栏 / YAML 语法错 / 解码错）时返回
+    空 dict，**不抛异常**——description 是展示用的锦上添花，单个坏文件不能炸掉整个
+    manifest。
+
+    SKILL.md 格式（见 ``.claude/skills/sillyspec-*/SKILL.md``）::
+
+        ---
+        name: sillyspec:archive
+        description: 用于归档已验证完成的变更。适合用户说"归档、archive"……
+        ---
+
+        ## 何时使用 …
+    """
+    try:
+        text = content.decode("utf-8")
+    except (UnicodeDecodeError, AttributeError):
+        return {}
+    if not text.lstrip().startswith("---"):
+        return {}
+    lines = text.split("\n")
+    # 取首尾两个 ``---`` 围栏之间的 YAML 块
+    markers = [i for i, ln in enumerate(lines) if ln.strip() == "---"]
+    if len(markers) < 2:
+        return {}
+    body = "\n".join(lines[markers[0] + 1 : markers[1]])
+    try:
+        data = yaml.safe_load(body) or {}
+    except yaml.YAMLError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: str(v).strip() for k, v in data.items() if k in ("name", "description") and v}
+
+
+def _summarize_skills(files: list[tuple[Path, bytes]]) -> list[dict[str, Any]]:
+    """按 skill 顶层目录聚合，返回 ``[{name, description, file_count}]``。
+
+    * ``name`` —— 顶层目录名（技能标识，与 daemon 同步路径、前端 ``deriveSkillGroups``
+      口径一致；注意它可能与 frontmatter ``name`` 不同，如目录 ``sillyspec-archive``
+      vs frontmatter ``sillyspec:archive``，展示统一用目录名）。
+    * ``description`` —— 该目录下 ``SKILL.md`` 的 frontmatter description
+      （:func:`_parse_skill_frontmatter`）；无 SKILL.md 或无 frontmatter 时为空串。
+    * ``file_count`` —— 该顶层目录下文件数。
+
+    按 ``name`` 排序保证确定性（与 ``deriveSkillGroups`` 一致）。
+    """
+    groups: dict[str, dict[str, Any]] = {}
+    for rel_path, content in files:
+        parts = str(rel_path).replace("\\", "/").split("/")
+        top = parts[0]
+        if not top:
+            continue
+        grp = groups.setdefault(top, {"description": "", "file_count": 0, "skill_md_parsed": False})
+        grp["file_count"] += 1
+        # SKILL.md 在顶层目录根下：parts == [top, "SKILL.md"]
+        if len(parts) == 2 and parts[1] == "SKILL.md" and not grp["skill_md_parsed"]:
+            grp["description"] = _parse_skill_frontmatter(content).get("description", "")
+            grp["skill_md_parsed"] = True
+    return [
+        {"name": name, "description": grp["description"], "file_count": grp["file_count"]}
+        for name, grp in sorted(groups.items())
+    ]
+
+
 async def _gather_all_files(
     skills_dir: Path,
     session: "AsyncSession | None",
@@ -140,6 +209,9 @@ async def build_skills_manifest(
       when no skills are found.
     * ``files`` — list of ``{path, sha256}`` entries, one per file.
     * ``message`` — informational string (only present on error/empty states).
+    * ``skills`` — list of ``{name, description, file_count}`` summaries for the
+      platform skills list UI（展示用：解析每个顶层 skill 目录下 ``SKILL.md`` 的
+      frontmatter ``description``）。``files`` 为空时为空列表。
 
     When ``skills_dir`` is ``None`` (default) the value from
     ``Settings.skills_bundle_dir`` is used. When the directory does not exist
@@ -170,7 +242,8 @@ async def build_skills_manifest(
         )
 
     version = _compute_version(files, skills_dir)
-    return {"version": version, "files": file_entries}
+    skill_summaries = _summarize_skills(files)
+    return {"version": version, "files": file_entries, "skills": skill_summaries}
 
 
 async def build_skills_bundle(

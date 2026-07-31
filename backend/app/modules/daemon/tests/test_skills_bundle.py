@@ -363,3 +363,93 @@ async def test_custom_skill_name_no_sillyspec_prefix_collision(
     assert "plain-name/SKILL.md" in paths
     # 代码库 sillyspec-verify/index.ts 仍在（custom 不抢占其命名空间）
     assert any(p.startswith("sillyspec-verify/index") for p in paths)
+
+
+# ---------------------------------------------------------------------------
+# ql-20260731-001-3abf：manifest.skills 字段（展示用，每个 skill 的 description）。
+# 从 SKILL.md frontmatter 提取 description，供平台技能清单页显示每个技能「干什么」。
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def skills_dir_with_descriptions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """skills 目录，每个 skill 含带 frontmatter 的 SKILL.md（模拟真实 ``.claude/skills``）。"""
+    src = tmp_path / "skills-with-md"
+    src.mkdir()
+
+    archive = src / "sillyspec-archive"
+    archive.mkdir()
+    (archive / "SKILL.md").write_bytes(
+        (
+            "---\nname: sillyspec:archive\n"
+            "description: 用于归档已验证完成的变更\n"
+            "---\n\n## 何时使用\nbody\n"
+        ).encode()
+    )
+    (archive / "helper.md").write_bytes(b"helper file\n")
+
+    plain = src / "sillyspec-plain"
+    plain.mkdir()
+    # 无 frontmatter 围栏的 SKILL.md（只有 body）→ description 兜底空串
+    (plain / "SKILL.md").write_bytes(b"## plain skill\nno frontmatter here\n")
+
+    _patch_skills_dir(monkeypatch, src)
+    return src
+
+
+def test_parse_skill_frontmatter_extracts_description() -> None:
+    """_parse_skill_frontmatter 取出 name + description。"""
+    from app.modules.agent.skills_bundle_service import _parse_skill_frontmatter
+
+    md = (
+        "---\nname: sillyspec:archive\ndescription: 用于归档已验证完成的变更\n---\n\n## body\n"
+    ).encode()
+    fm = _parse_skill_frontmatter(md)
+    assert fm["name"] == "sillyspec:archive"
+    assert fm["description"] == "用于归档已验证完成的变更"
+
+
+def test_parse_skill_frontmatter_no_fence_returns_empty() -> None:
+    """无 frontmatter 围栏 → 空 dict（不抛异常）。"""
+    from app.modules.agent.skills_bundle_service import _parse_skill_frontmatter
+
+    assert _parse_skill_frontmatter(b"## plain\nbody\n") == {}
+
+
+def test_summarize_skills_aggregates_by_top_dir() -> None:
+    """按顶层目录聚合：name=目录名、description 来自 SKILL.md、file_count 计数。"""
+    from app.modules.agent.skills_bundle_service import _summarize_skills
+
+    files = [
+        (Path("sillyspec-a/SKILL.md"), b"---\nname: a\ndescription: A skill\n---\n\nbody"),
+        (Path("sillyspec-a/helper.ts"), b"helper"),
+        (Path("sillyspec-b/SKILL.md"), b"---\ndescription: B\n---\n"),
+    ]
+    assert _summarize_skills(files) == [
+        {"name": "sillyspec-a", "description": "A skill", "file_count": 2},
+        {"name": "sillyspec-b", "description": "B", "file_count": 1},
+    ]
+
+
+async def test_manifest_includes_skill_descriptions(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    skills_dir_with_descriptions: Path,
+) -> None:
+    """manifest.skills 含每个 skill 的 description（有 frontmatter 提取，无则空兜底）。"""
+    resp = await client.get("/api/daemon/skills/latest/manifest", headers=auth_headers)
+    assert resp.status_code == 200
+
+    payload = resp.json()
+    assert "skills" in payload
+    skills = {s["name"]: s for s in payload["skills"]}
+
+    # 有 frontmatter 的技能：description 被提取；file_count = SKILL.md + helper.md
+    archive = skills["sillyspec-archive"]
+    assert archive["description"] == "用于归档已验证完成的变更"
+    assert archive["file_count"] == 2
+
+    # 无 frontmatter 的技能：description 空串兜底，不报错
+    plain = skills["sillyspec-plain"]
+    assert plain["description"] == ""
+    assert plain["file_count"] == 1

@@ -75,4 +75,6 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 - ql-20260730-003-f13c | /runtimes 会话弹窗工具 use/result 配对+状态徽章+思考按序合并+md 渲染：classifySessionLog 拆 tool→tool_use/tool_result + isToolResultDenied 纯函数（拒绝/denied/error/失败/fail 判 deny）；SessionTurnView 改 processItems 有序过程项（替代 toolEvents+details），onLog 与 logsToTurns 两链路按真实到达顺序构建——tool_use 推 running、tool_result 配对最近 running 设 ok/deny、孤儿降级 raw 空 tool 项兜底；TurnDetailsList 连续同类合并（连续 thinking 拼成一个卡片，被工具穿插则分段保持顺序，修「一股脑全合并丢顺序」）；ToolEventCard 工具结果默认折叠（太长）+ ✓/✗/⏳ 徽章；思考与工具结果均 MarkdownText 渲染（与对话气泡一致）。daemon 测试全绿 + tsc 0 错。
 
+- ql-20260731-001-3abf | 平台技能清单显示每个技能描述：`lib/custom-skills.ts` 加 `PlatformSkillSummary` 类型（name/description/file_count）+ `PlatformSkillsManifest` 加可选 `skills` 字段（manifest 端点返回 dict[str,Any] 未进 OpenAPI 生成范围，继续手写对齐后端）；`settings/skills/page.tsx` 的 `deriveSkillGroups` 回退结构对齐（skill→name / fileCount→file_count），`platformGroups` 优先用 `manifest.skills`（兜底 deriveSkillGroups），表格「说明」列渲染 `g.description || 通用文案`（原所有技能写死同一句废话）；`page.test.tsx` 加 description 渲染测试（mock manifest 带 skills），7 passed + tsc 0 错。
+
 <!-- MANUAL_NOTES_END -->

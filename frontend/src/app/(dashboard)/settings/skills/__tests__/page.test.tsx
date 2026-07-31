@@ -362,4 +362,30 @@ describe("/settings/skills 页", () => {
       });
     });
   });
+
+  it("展示平台 skills 每个 skill 的 description（manifest.skills 提供）", async () => {
+    // 后端 build_skills_manifest 现在返回 skills 摘要（带 description），说明列
+    // 应渲染每个技能真实描述，而非写死的通用文案。
+    skillsApi.getPlatformSkillsManifest.mockResolvedValueOnce({
+      version: "desc-version-012",
+      files: [
+        { path: "sillyspec-archive/SKILL.md", sha256: "a1" },
+        { path: "sillyspec-archive/helper.md", sha256: "a2" },
+      ],
+      skills: [
+        {
+          name: "sillyspec-archive",
+          description: "用于归档已验证完成的变更",
+          file_count: 2,
+        },
+      ],
+    });
+    renderPage(<SkillsPage />);
+
+    expect(await screen.findByText("sillyspec-archive")).toBeInTheDocument();
+    // description 渲染到说明列（不再是写死的"只读 · 随部署更新…"）
+    expect(
+      await screen.findByText("用于归档已验证完成的变更"),
+    ).toBeInTheDocument();
+  });
 });

@@ -36,10 +36,14 @@ function formatDateTime(value: string | null): string {
   return new Date(value).toLocaleString("zh-CN");
 }
 
-/** 从 manifest files[] 聚合「顶层 skill 目录」列表（一个 skill = 一个一级目录）。 */
+/**
+ * 从 manifest files[] 前端兜底聚合「顶层 skill 目录」列表（无 description）。
+ * 正常路径优先用后端 ``manifest.skills``（带 description）；本函数仅在后端未返回
+ * skills 摘要时回退，结构与 PlatformSkillSummary 对齐（description 留空）。
+ */
 function deriveSkillGroups(
   files: { path: string; sha256: string }[],
-): { skill: string; fileCount: number }[] {
+): { name: string; description: string; file_count: number }[] {
   const groups = new Map<string, number>();
   for (const f of files) {
     // path 形如 `sillyspec-foo/SKILL.md` 或 `my-skill/helpers/x.ts`，取第一段为 skill 名
@@ -47,8 +51,8 @@ function deriveSkillGroups(
     groups.set(top, (groups.get(top) ?? 0) + 1);
   }
   return Array.from(groups.entries())
-    .map(([skill, fileCount]) => ({ skill, fileCount }))
-    .sort((a, b) => a.skill.localeCompare(b.skill));
+    .map(([name, file_count]) => ({ name, description: "", file_count }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export default function SkillsSettingsPage() {
@@ -84,10 +88,14 @@ export default function SkillsSettingsPage() {
     if (deleteSkill.isError) setPageError(errMessage(deleteSkill.error, "删除失败"));
   }, [deleteSkill.isError, deleteSkill.error]);
 
-  const platformGroups = useMemo(
-    () => (manifest ? deriveSkillGroups(manifest.files) : []),
-    [manifest],
-  );
+  const platformGroups = useMemo(() => {
+    if (!manifest) return [];
+    // 优先用后端聚合的 skills 摘要（带 description）；缺省回退前端按 files 聚合（无 description）
+    if (manifest.skills && manifest.skills.length > 0) {
+      return manifest.skills;
+    }
+    return deriveSkillGroups(manifest.files);
+  }, [manifest]);
 
   const handleRefresh = () => {
     void refetchSkills();
@@ -242,21 +250,21 @@ export default function SkillsSettingsPage() {
               </thead>
               <tbody>
                 {platformGroups.map((g) => (
-                  <tr key={g.skill} className="border-b last:border-0 hover:bg-muted/25">
+                  <tr key={g.name} className="border-b last:border-0 hover:bg-muted/25">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2 font-medium text-foreground">
                         <BookOpen className="h-3.5 w-3.5 text-muted-foreground" />
-                        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{g.skill}</code>
+                        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{g.name}</code>
                       </div>
                     </td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                         <FileCode2 className="h-3.5 w-3.5" />
-                        {g.fileCount}
+                        {g.file_count}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">
-                      只读 · 随部署更新，AI 启动自动加载
+                      {g.description || "只读 · 随部署更新，AI 启动自动加载"}
                     </td>
                   </tr>
                 ))}
