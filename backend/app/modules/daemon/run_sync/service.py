@@ -255,6 +255,41 @@ class RunSyncService:
         if exc is not None:
             log.exception("background_task_failed", task_id=id(task), exc_info=exc)
 
+    async def _revoke_committed_partials(self, agent_run_id: uuid.UUID, segment_id: str) -> int:
+        """task-14 / FR-02：跨 submit_messages 调用撤销已 commit 的同 segmentId partial 行。
+
+        partial（半截）与 override 信号常分两次 submit_messages 到达——partial 在先前
+        调用已 commit 落库，本调用局部 ``flushed_partials`` 查不到、且对象已 persisted
+        无法 expunge。此处按 segment_id 把已落库的 partial 行 select 出来再
+        ``session.delete``（ORM 级，正确同步 identity map；非 bulk delete，避免同 session
+        跨调用脏对象），让 DB 只剩完整行。complete 行 segment_id=NULL 不被命中（仅 partial
+        行写 segment_id）。
+
+        返回删除行数（观测用）。本方法只标记 DELETE、不 commit，随 submit_messages 事务提交。
+        """
+        rows = (
+            (
+                await self._session.execute(
+                    select(AgentRunLog).where(
+                        AgentRunLog.run_id == agent_run_id,
+                        AgentRunLog.segment_id == segment_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for row in rows:
+            await self._session.delete(row)
+        if rows:
+            log.info(
+                "daemon_messages_override_deleted_committed_partial",
+                agent_run_id=str(agent_run_id),
+                segment_id=segment_id,
+                deleted=len(rows),
+            )
+        return len(rows)
+
     # ── public ────────────────────────────────────────────────────────────
 
     async def submit_messages(
@@ -391,6 +426,41 @@ class RunSyncService:
                     self._session.expunge(stale)
                     count -= 1
                     published_logs = [p for p in published_logs if p["log_id"] != str(stale.id)]
+                # task-14：跨 submit_messages 调用——partial 已在先前调用 commit 落库，
+                # 本调用局部 flushed_partials 查不到、也无法 expunge（已 persisted）。按
+                # segment_id DELETE 已 commit 的 partial（complete 行 segment_id=NULL 不受
+                # 影响），让 DB 只剩完整行。
+                await self._revoke_committed_partials(agent_run_id, segment_id)
+                continue
+
+            # task-08 / D-002@v1：识别 [ASSISTANT_OVERRIDE] <segmentId> 信号 —— daemon
+            # task-05/06/07 在完整 assistant message 到达后 emit 该信号，通知"该 segment
+            # 已被完整 message 覆盖"，让 backend 删同 segmentId 的 assistant partial
+            # （对齐 [THINKING_OVERRIDE] :378-394 模板，消除 #35 双发）。信号本身不落库
+            # （continue 跳过 INSERT + publish），仅把 segmentId 加入 completed_segments
+            # 兜底后续乱序 late partial。daemon [ASSISTANT_OVERRIDE] metadata 不含
+            # thinking:True（assistant 专属），segmentId 用 daemon 格式
+            # （${prefix}:${mid}:${blockIndex}）与 daemon partial 行 metadata.segmentId
+            # 一致，命中删除路径。
+            if (
+                isinstance(content, str)
+                and content.startswith("[ASSISTANT_OVERRIDE] ")
+                and segment_id
+            ):
+                completed_segments.add(segment_id)
+                # 若同 segment 的 assistant partial 已 flush（pending 未 commit），回退
+                # 保持 DB 真相一致。对齐 thinking 模板：用 expunge 撤销待插入
+                # （session.delete 要求对象已 persisted，会抛 InvalidRequestError）。
+                stale = flushed_partials.pop(segment_id, None)
+                if stale is not None:
+                    self._session.expunge(stale)
+                    count -= 1
+                    published_logs = [p for p in published_logs if p["log_id"] != str(stale.id)]
+                # task-14：跨 submit_messages 调用——assistant partial 已在先前调用 commit
+                # 落库（半截先到、完整+override 后到的真实流式顺序），本调用局部
+                # flushed_partials 查不到。按 segment_id DELETE 已 commit 的 partial，
+                # 让 DB 只剩完整行（消除 #35 累积重复）。对齐 thinking override 同款 DELETE。
+                await self._revoke_committed_partials(agent_run_id, segment_id)
                 continue
 
             # ql-20260617-001：usage / session_id 在每条 message 顶层（daemon 透传），
@@ -516,6 +586,9 @@ class RunSyncService:
                 # task-04 / FR-04 FR-05：tool_kind 落库列（_extract_sdk_messages 主路径
                 # 或 JSON.parse 兜底；stdout 行为 None）。
                 tool_kind=tool_kind,
+                # task-14 / FR-02：partial 行持久化 segment_id 供 override 跨调用 DELETE；
+                # complete 行（is_partial=False）写 None，DELETE by segment_id 不误删完整行。
+                segment_id=segment_id if is_partial else None,
             )
             self._session.add(log_entry)
             count += 1
@@ -1840,6 +1913,15 @@ def _extract_sdk_messages(msg: dict) -> list[dict]:
                             "event_type": "text",
                             "content": f"[ASSISTANT] {text}",
                             "channel": "stdout",
+                            # task-08：完整 assistant 文本行标记 segmentId + isComplete，
+                            # 让 submit_messages 识别 [ASSISTANT_OVERRIDE] 信号后丢弃/回退
+                            # 同 segment 的 assistant partial（对齐 thinking :1847-1866）。
+                            # assistant 文本不带 thinking:True（仅 thinking block 才打该
+                            # 标记），让 daemon 端 / submit_messages 能区分两类 segment。
+                            "metadata": {
+                                "segmentId": f"{msg_id}:{idx}",
+                                "isComplete": True,
+                            },
                         }
                     )
                 )

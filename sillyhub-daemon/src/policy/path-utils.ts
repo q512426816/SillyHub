@@ -147,19 +147,25 @@ function normalizeCase(p: string): string {
  * @returns true 当目标路径在任一 allowedRoot 下
  */
 export function isPathUnderAnyRoot(target: string, allowedRoots: string[]): boolean {
-  const resolved = normalizePath(target);
+  // D-001@v1 / task-02：比较前对 target 与每个 root 调 resolveRealPath（realpath + 盘符小写），
+  // 下沉到判定层防 symlink/junction/borrow root 绕过；不在 PolicyCache.set 存（与 task-01 配合）。
+  // resolveRealPath 内部已 normalizePath + normalizeCase + UNC 标记 + 不存在 fallback。
+  const resolved = resolveRealPath(target);
 
-  // 若 target 是 UNC → 拒（不落在任何 root 下）
-  if (resolved.startsWith(UNC_PREFIX)) return false;
+  // 若 target 是 UNC（resolveRealPath 返回 UNC_REJECTED）→ 拒（不落在任何 root 下）
+  if (resolved === UNC_REJECTED) return false;
 
   const isWin = sep === '\\' || /^[A-Za-z]:[\\/]/.test(resolved);
   return allowedRoots.some((root) => {
-    const r = normalizePath(root);
+    const r = resolveRealPath(root);
+    // root 经 resolveRealPath 后若为 UNC_REJECTED，此 root 无法匹配任何 target
+    if (r === UNC_REJECTED) return false;
     if (isWin) {
       const rl = r.toLowerCase();
       const dl = resolved.toLowerCase();
-      // ql-20260702-007：root 已含尾部 sep（盘符根 D:\）时不再补 sep，
-      // 否则 rl+sep 产生 "D:\\" 双反斜杠前缀，dl.startsWith 永远 false → 误 deny。
+      // ql-20260702-007：root 已含尾部 sep（盘符根 D:\ / Unix 根 /）时不再补 sep，
+      // 否则 rl+sep 产生 "D:\\" 或 "//" 双分隔符前缀，dl.startsWith 永远 false → 误 deny。
+      // realpath 后同样的值走同样的 prefix 比较逻辑，未破坏尾 sep 不变量。
       const prefix = rl.endsWith(sep) ? rl : rl + sep;
       return dl === rl || dl.startsWith(prefix);
     }

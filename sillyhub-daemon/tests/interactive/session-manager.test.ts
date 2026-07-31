@@ -28,6 +28,7 @@ import {
   SessionNotActiveError,
   UnsupportedProviderError,
 } from '../../src/interactive/types.js';
+import type { SessionState } from '../../src/interactive/types.js';
 import type {
   ClaudeSdkDriver,
   ConsumeCallbacks,
@@ -405,5 +406,217 @@ describe('SessionManager.fail', () => {
     await new Promise((r) => setTimeout(r, 5));
     expect(sm.get('sess-1')!.status).toBe('failed');
     expect(deps.onSessionEnd).toHaveBeenCalledWith('sess-1', 'failed');
+  });
+});
+
+// ── task-12：assistant override 删 partial 端到端去重（对齐 thinking override） ─
+//
+// 变更 2026-07-30-daemon-heartbeat-dedup-fix task-12 / D-002@v1 / FR-02：daemon
+// 端验证「assistant 完整 message 到达 → emit [ASSISTANT_OVERRIDE] <segmentId>」
+// 信号，metadata 严禁 thinking:true（B2，否则被 backend thinking override 链路
+// 误撤 assistant partial）。对照 thinking override（task-11 已覆盖）保持一致，
+// 两者按 kind 分流不串扰。
+//
+// 策略对齐 session-manager.partial-dedup.test.ts：白盒直接调 SessionManager 的
+// _onMessage 私有方法（经 any 桥接），spy deps.onTurnMessage 捕获所有 emit，
+// 不启动真实 driver。
+//
+// segmentId 契约（task-05/06）：partial 端 _resolveSegmentId → `main:mid:idx`
+// （parentKey='main' + messageId + content_block_delta.index），完整 message 端
+// _extractCompletedSegments text block → `main:mid:i`（同结构），override 才能
+// 命中。此处 text_delta 用 index=0（同 message 仅 1 个 text block），故 segmentId
+// = main:<mid>:0。
+
+describe('task-12: assistant override emit [ASSISTANT_OVERRIDE] 删 partial', () => {
+  const SID_OVR = 'sess-override';
+  const RUN_ID_OVR = 'run-override';
+
+  /** 白盒夹具：构造 SessionManager + 注入伪 SessionState（绕过 create/driver）。 */
+  function makeOverrideManager(): {
+    sm: SessionManager;
+    onTurnMessage: ReturnType<typeof vi.fn>;
+    state: SessionState;
+  } {
+    const onTurnMessage = vi.fn().mockResolvedValue(undefined);
+    const onTurnResult = vi.fn().mockResolvedValue(undefined);
+    const onSessionEnd = vi.fn().mockResolvedValue(undefined);
+    const sm = new SessionManager(
+      {
+        driver: { start: vi.fn(), consume: vi.fn(), interrupt: vi.fn() } as never,
+        onTurnMessage,
+        onTurnResult,
+        onSessionEnd,
+      },
+      {},
+    );
+    const state: SessionState = {
+      sessionId: SID_OVR,
+      leaseId: 'lease-x',
+      claimToken: 'claim-x',
+      status: 'running',
+      currentRunId: RUN_ID_OVR,
+      lastActiveAt: Date.now(),
+      cwd: '/tmp',
+      provider: 'claude',
+      pathToClaudeCodeExecutable: '/tmp/claude',
+      inputQueue: { push: vi.fn(), close: vi.fn() } as never,
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (sm as any)._store.set(SID_OVR, state);
+    return { sm, onTurnMessage, state };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const priv = (sm: SessionManager): any => sm as any;
+
+  function msgStart(mid: string): Record<string, unknown> {
+    return {
+      type: 'stream_event',
+      event: { type: 'message_start', message: { id: mid } },
+    };
+  }
+
+  function textDelta(index: number, text: string): Record<string, unknown> {
+    return {
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        index,
+        delta: { type: 'text_delta', text },
+      },
+    };
+  }
+
+  /** 完整 assistant message（含一个 text block）。 */
+  function completeAssistant(
+    mid: string,
+    text: string,
+    blockIndex = 0,
+  ): Record<string, unknown> {
+    const content: Array<Record<string, unknown>> = [];
+    content[blockIndex] = { type: 'text', text };
+    for (let i = 0; i < content.length; i++) {
+      if (!content[i]) content[i] = { type: 'text', text: '' };
+    }
+    return {
+      type: 'assistant',
+      message: { id: mid, role: 'assistant', content },
+    };
+  }
+
+  it('完整 assistant message 到达 → emit [ASSISTANT_OVERRIDE] <segmentId>，metadata 不含 thinking:true（B2）', async () => {
+    const { sm, onTurnMessage, state } = makeOverrideManager();
+    const p = priv(sm);
+    const MID = 'msg-asst-1';
+
+    // 1. partial flush 一条 assistant text（segmentId = main:msg-asst-1:0）。
+    p._onMessage(state, msgStart(MID));
+    p._onMessage(state, textDelta(0, 'x'.repeat(90))); // >80 字符触发 flush 阈值
+    await p._flushPartial(SID_OVR, 'main');
+    expect(onTurnMessage).toHaveBeenCalledTimes(1);
+    const partialMeta = (onTurnMessage.mock.calls[0][2].metadata ?? {}) as Record<
+      string,
+      unknown
+    >;
+    expect(partialMeta.segmentId).toBe('main:msg-asst-1:0');
+    expect(partialMeta.isPartial).toBe(true);
+
+    // 2. 完整 assistant message 到达（含同 text block 全文）。
+    await p._onMessage(state, completeAssistant(MID, '完整 assistant 回复'));
+
+    // 至少 emit 了 [ASSISTANT_OVERRIDE] main:msg-asst-1:0。
+    const calls = onTurnMessage.mock.calls.map((c) => c[2]) as Array<
+      Record<string, unknown>
+    >;
+    const override = calls.find(
+      (m) =>
+        typeof m.content === 'string' &&
+        m.content.startsWith('[ASSISTANT_OVERRIDE]'),
+    );
+    expect(override, 'expected [ASSISTANT_OVERRIDE] signal').toBeDefined();
+    expect(override!.content).toBe('[ASSISTANT_OVERRIDE] main:msg-asst-1:0');
+    const meta = (override!.metadata ?? {}) as Record<string, unknown>;
+    expect(meta.segmentId).toBe('main:msg-asst-1:0');
+    expect(meta.stale).toBe(true);
+    // B2 关键断言：assistant override metadata 绝不带 thinking:true。
+    expect(meta.thinking).toBeUndefined();
+
+    // 不串扰：不应 emit [THINKING_OVERRIDE]（本场景无 thinking block）。
+    const thinkingOverride = calls.find(
+      (m) =>
+        typeof m.content === 'string' &&
+        m.content.startsWith('[THINKING_OVERRIDE]'),
+    );
+    expect(thinkingOverride).toBeUndefined();
+
+    // completedSegments 已记录该 segment（兜底 late partial 守卫）。
+    const buf = p._partialBuffers.get(SID_OVR).get('main');
+    expect(buf.completedSegments.has('main:msg-asst-1:0')).toBe(true);
+  });
+
+  it('thinking override 仍 emit [THINKING_OVERRIDE] 不串扰 assistant 信号', async () => {
+    // 同 message 内含 thinking block（index=0）+ text block（index=1），
+    // 分别 flush partial 后完整 message 到达，应各自 emit 对应 override。
+    const { sm, onTurnMessage, state } = makeOverrideManager();
+    const p = priv(sm);
+    const MID = 'msg-mix';
+
+    // partial：thinking（index=0）+ assistant text（index=1）。
+    p._onMessage(state, msgStart(MID));
+    p._onMessage(state, {
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'thinking_delta', thinking: 't'.repeat(90) },
+      },
+    });
+    await p._flushPartial(SID_OVR, 'main');
+    p._onMessage(state, textDelta(1, 'a'.repeat(90)));
+    await p._flushPartial(SID_OVR, 'main');
+
+    // 完整 message 含两个 block（thinking index=0 + text index=1）。
+    const content: Array<Record<string, unknown>> = [
+      { type: 'thinking', thinking: '完整思考' },
+      { type: 'text', text: '完整回复' },
+    ];
+    await p._onMessage(state, {
+      type: 'assistant',
+      message: { id: MID, role: 'assistant', content },
+    });
+
+    const calls = onTurnMessage.mock.calls.map((c) => c[2]) as Array<
+      Record<string, unknown>
+    >;
+    const assistantOvr = calls
+      .filter(
+        (m) =>
+          typeof m.content === 'string' &&
+          m.content.startsWith('[ASSISTANT_OVERRIDE]'),
+      )
+      .map((m) => m.content as string);
+    const thinkingOvr = calls
+      .filter(
+        (m) =>
+          typeof m.content === 'string' &&
+          m.content.startsWith('[THINKING_OVERRIDE]'),
+      )
+      .map((m) => m.content as string);
+
+    // 按 kind 分流：thinking block（index=0）→ [THINKING_OVERRIDE]；
+    // text block（index=1）→ [ASSISTANT_OVERRIDE]。两者 segmentId 各自独立，
+    // 不串扰。
+    expect(thinkingOvr).toContain('[THINKING_OVERRIDE] main:msg-mix:0');
+    expect(assistantOvr).toContain('[ASSISTANT_OVERRIDE] main:msg-mix:1');
+
+    // thinking override metadata 带 thinking:true；assistant override 不带。
+    const thinkMeta = (calls.find(
+      (m) => m.content === '[THINKING_OVERRIDE] main:msg-mix:0',
+    )!.metadata ?? {}) as Record<string, unknown>;
+    const asstMeta = (calls.find(
+      (m) => m.content === '[ASSISTANT_OVERRIDE] main:msg-mix:1',
+    )!.metadata ?? {}) as Record<string, unknown>;
+    expect(thinkMeta.thinking).toBe(true);
+    expect(asstMeta.thinking).toBeUndefined();
   });
 });

@@ -40,6 +40,7 @@ aggregate_tool_failure(logs) → should_warn_tool_failure(threshold) → 告警
 
 ## 变更索引
 - 2026-06-27-p0-perf-optimization | `AgentRunLog` 补 `ix_agent_run_logs_timestamp`（单列 timestamp）+ `ix_agent_run_logs_run_timestamp`（run_id, timestamp 联合）索引，优化「按时间范围查日志」与「按 run 查日志并按时间排序」的高频读；迁移 `202606271300`（down_revision `202606261130`），可回滚。该表无 started_at 字段（属 agent_runs）。
+- 2026-07-30-daemon-heartbeat-dedup-fix | `AgentRunLog` 加 `segment_id` 列（String 200, nullable, indexed）；流式 partial 行（半截）写 metadata.segmentId、complete 行 NULL，供 backend run_sync override 信号（`[ASSISTANT_OVERRIDE]`/`[THINKING_OVERRIDE]`）跨 submit_messages 调用 DELETE 已落库 partial（task-14）；migration `202608310900`（down_revision `202607301000`）。不入对外 API 响应（DB-only 去重字段）。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->

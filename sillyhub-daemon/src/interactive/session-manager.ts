@@ -308,11 +308,29 @@ interface PartialFlushBuffer {
    */
   currentSegmentId: string | null;
   /**
-   * task-11：本 turn 已 flush 的 thinking partial segment 列表（供 _clearPartialBuffer
-   * 在完整 message 到达时 emit [THINKING_OVERRIDE] 覆盖信号）。turn 边界
-   *（_clearPartialBuffer）清空。
+   * task-05（2026-07-30-daemon-heartbeat-dedup-fix，D-002@v1）：当前累积中的
+   * assistant text segment 的 segmentId（`messageId:blockIndex` 或退化
+   * `runId:thinking`，同 _resolveSegmentId 口径）。null = 尚未收到 text_delta。
+   * 与 currentSegmentId 分桶：thinking 与 assistant text 可能在同一 turn 共存，
+   * 各自 segmentId 互不污染。flush 时据此拼 assistant partial 行的 segmentId，
+   * 与 task-06 _extractCompletedSegments 的 text block segmentId 严格对齐，
+   * 使 _emitOverrideSignals（task-07 扩 assistant）能命中撤回。
    */
-  flushedSegments: Array<{ segmentId: string; logTimestamp: string }>;
+  currentAssistantSegmentId: string | null;
+  /**
+   * task-11：本 turn 已 flush 的 partial segment 列表（供 _emitOverrideSignals 在
+   * 完整 message 到达时 emit override 覆盖信号）。turn 边界
+   *（_clearPartialBuffer）清空。
+   * task-07：扩 `kind` 字段区分 thinking / assistant override——
+   * - thinking override → emit `[THINKING_OVERRIDE]`，metadata 带 thinking:true
+   * - assistant override → emit `[ASSISTANT_OVERRIDE]`，metadata **严禁** thinking:true（B2）
+   * 两者信号前缀 + metadata 不同，必须按 kind 分流。
+   */
+  flushedSegments: Array<{
+    segmentId: string;
+    logTimestamp: string;
+    kind: 'thinking' | 'assistant';
+  }>;
   /**
    * task-11：本 turn 已到达完整 message 的 thinking segmentId 集合（late partial
    * 守卫：同 segment 的后续 partial 直接丢弃）。_clearPartialBuffer 后清空（turn 边界）。
@@ -2407,6 +2425,7 @@ export class SessionManager {
         timer: null,
         currentMessageId: null,
         currentSegmentId: null,
+        currentAssistantSegmentId: null,
         flushedSegments: [],
         completedSegments: new Set<string>(),
         pendingUsage: null,
@@ -2437,7 +2456,7 @@ export class SessionManager {
   private _resolveSegmentId(
     state: SessionState,
     buf: PartialFlushBuffer,
-    blockIndex: number | undefined,
+    typeSegment: string,
   ): string {
     // P1 修复：messageId 单一数据源 = buf.currentMessageId（由 message_start 事件
     // event.message.id 设置）。真实 SDK 的 content_block_delta 事件自身不带
@@ -2449,7 +2468,12 @@ export class SessionManager {
     // 主/子代理 segment 空间隔离，避免不同 agent 的同 messageId:index 撞 id 导致
     // completedSegments 守卫跨 agent 误判。partial 与 complete 都加同前缀，去重自洽。
     const mid = buf.currentMessageId;
-    const idx = typeof blockIndex === 'number' ? String(blockIndex) : 'thinking';
+    // task-13修复：segmentId 第 3 段用 block type（thinking/text）而非 stream index。
+    // 根因：SDK 把一个 turn 的 thinking+text 拆成多条同 mid message（每条 content 从 0），
+    // 但 stream content_block_delta.index 是 turn 级累计 → partial(stream index) 与
+    // complete(message content index) 对不上 → override 删不到 partial → 半截+全文双发。
+    // 用 type 不受消息拆分影响，partial 与 complete 稳定对齐（thinking 巧合对齐不再依赖）。
+    const idx = typeSegment;
     const prefix = buf.parentKey;
     if (mid) {
       return `${prefix}:${mid}:${idx}`;
@@ -2460,11 +2484,17 @@ export class SessionManager {
   }
 
   /**
-   * task-11：从完整 assistant message 提取所有 thinking block 的 segmentId。
+   * task-11 / task-06：从完整 assistant message 提取所有 thinking 与 assistant text
+   * block 的 segmentId。
    *
-   * 遍历 `msg.message.content` 数组，对 `type==='thinking'` 的 block 用其数组下标
-   * 拼 segmentId（与 partial 的 `messageId:blockIndex` 对齐）。messageId 优先用
-   * `msg.message.id`；缺失时退化到 currentRunId:thinking（同 _resolveSegmentId 策略）。
+   * 遍历 `msg.message.content` 数组：
+   * - `type==='thinking'`（task-11）用其数组下标拼 segmentId；
+   * - `type==='text'`（task-06）用同结构 segmentId（`parentKey:mid:i`）。
+   * segmentId 与 partial 端 `_resolveSegmentId` 严格同格式（`messageId:blockIndex`，
+   * parentKey 前缀由入参提供，与 partial 的 buf.parentKey 同源），使完整 message
+   * 到达时 emit 的 [ASSISTANT_OVERRIDE]（task-07）能命中 partial 行的 segmentId 撤回。
+   * messageId 优先用 `msg.message.id`；缺失时退化到 currentRunId:thinking
+   * （同 _resolveSegmentId 策略，仅 thinking 分支退化，assistant text 不退化见下）。
    */
   private _extractCompletedSegments(
     state: SessionState,
@@ -2481,10 +2511,22 @@ export class SessionManager {
     if (!Array.isArray(content)) return segments;
     for (let i = 0; i < content.length; i++) {
       const block = content[i] as { type?: string } | null;
-      if (block && block.type === 'thinking') {
+      if (!block) continue;
+      if (block.type === 'thinking') {
         // task-03 / D-002：segmentId 带 parentKey 前缀，与 _resolveSegmentId 对齐
         //（partial/complete 同前缀，completedSegments 守卫不跨 agent 误判）。
-        segments.add(mid ? `${parentKey}:${mid}:${i}` : `${parentKey}:${runKey}:thinking`);
+        segments.add(mid ? `${parentKey}:${mid}:thinking` : `${parentKey}:${runKey}:thinking`);
+      } else if (block.type === 'text') {
+        // task-06（FR-02 / D-002@v1）：assistant text block completed segmentId，
+        // 与 task-05 partial（_resolveSegmentId → `parentKey:mid:idx`，idx=ev.index）
+        // 严格同格式（parentKey + mid + content 数组下标 i）。注意 assistant text 不
+        // 退化到 runKey:thinking——partial 端 mid 缺失时 idx='thinking' 仍走
+        // `prefix:mid:thinking` 不会是 runKey 分支（除非 mid 也缺失），故此处只在 mid
+        // 存在时提取（mid 缺失的退化场景由 thinking 分支覆盖，assistant 无独立退化态，
+        // 与 partial 退化口径一致：partial assistant 同样 mid 缺失才退化 runKey:thinking）。
+        if (mid) {
+          segments.add(`${parentKey}:${mid}:text`);
+        }
       }
     }
     return segments;
@@ -2568,13 +2610,23 @@ export class SessionManager {
             // partial 被放行。现状：_clearPartialBufferSync 不再清 currentMessageId
             //（完整 message 与 message_start 共享同一 id，下一条 message_start 自然
             // 覆盖），late delta 解析出与原 partial 相同的 segmentId → 守卫正确拦截。
-            const segId = this._resolveSegmentId(state, buf, ev.index);
+            const segId = this._resolveSegmentId(state, buf, 'thinking');
             if (buf.completedSegments.has(segId)) {
               return;
             }
             buf.currentSegmentId = segId;
             buf.thinking += delta.thinking;
           } else if (delta.type === 'text_delta' && typeof delta.text === 'string') {
+            // task-05（D-002@v1）：assistant text partial segmentId，照搬 thinking_delta
+            //（:2571-2576）口径——复用 _resolveSegmentId(state, buf, ev.index)，使 partial
+            // segmentId 与 task-06 _extractCompletedSegments 的 text block segmentId
+            //（${parentKey}:${mid}:${i}）严格一致，override（task-07 扩 assistant）才能命中。
+            // late text_delta 守卫（同 thinking：完整 message 已覆盖该 segment → 丢弃）。
+            const textSegId = this._resolveSegmentId(state, buf, 'text');
+            if (buf.completedSegments.has(textSegId)) {
+              return;
+            }
+            buf.currentAssistantSegmentId = textSegId;
             buf.assistant += delta.text;
           }
         }
@@ -2697,7 +2749,7 @@ export class SessionManager {
     if (thinking) {
       // task-11（FR-07/FR-08）：partial 行携带 segmentId + isPartial，
       // 供 backend（task-12）+ 前端 normalize 识别「该 segment 已有完整行时丢弃」。
-      const segmentId = buf.currentSegmentId ?? this._resolveSegmentId(state, buf, undefined);
+      const segmentId = buf.currentSegmentId ?? this._resolveSegmentId(state, buf, 'thinking');
       const formatted = {
         event_type: 'text',
         content: `[THINKING] ${thinking}`,
@@ -2706,19 +2758,44 @@ export class SessionManager {
       } as unknown as SDKMessage;
       attachUsage(formatted);
       // 记录已 flush 的 segment（完整 message 到达时据此 emit override 信号）。
-      buf.flushedSegments.push({ segmentId, logTimestamp: new Date().toISOString() });
+      // task-07：标 kind:'thinking'——_emitOverrideSignals 据此选 [THINKING_OVERRIDE] 前缀
+      // + thinking:true metadata（与 assistant override 分流）。
+      buf.flushedSegments.push({ segmentId, logTimestamp: new Date().toISOString(), kind: 'thinking' });
       await this.deps.onTurnMessage(sessionId, runId, formatted);
       // 清空 currentSegmentId（下批 delta 会重新解析；text_delta 不污染）。
       buf.currentSegmentId = null;
     }
     if (assistant) {
+      // task-05（FR-02 / D-002@v1）：assistant partial 行携带 segmentId + isPartial，
+      // 照搬 thinking partial（:2718-2733）口径，使完整 message 到达时 _emitOverrideSignals
+      //（task-07 扩 assistant）能 emit [ASSISTANT_OVERRIDE] 撤回本 partial 行，
+      // 消除「已 flush 半截 + 完整全文」双发（#35）。
+      // segmentId 复用 buf.currentAssistantSegmentId（text_delta 累积时由 _resolveSegmentId
+      // 解析，:2589-2598），缺失退化到 _resolveSegmentId(state, buf, undefined)——
+      // 与 task-06 _extractCompletedSegments 的 text block segmentId（${parentKey}:${mid}:${i}）
+      // 严格同格式，override 才能命中。
+      // 注意：metadata **不带 thinking:true**（B2，assistant 不是 thinking，否则被 thinking
+      // override 链路误撤）。
+      const segmentId =
+        buf.currentAssistantSegmentId ?? this._resolveSegmentId(state, buf, 'text');
       const formatted = {
         event_type: 'text',
         content: `[ASSISTANT] ${assistant}`,
         channel: 'stdout',
+        metadata: { segmentId, isPartial: true },
       } as unknown as SDKMessage;
       attachUsage(formatted);
+      // 记录已 flush 的 segment（完整 message 到达时据此 emit override 信号，对齐 thinking）。
+      // task-07：标 kind:'assistant'——_emitOverrideSignals 据此选 [ASSISTANT_OVERRIDE]
+      // 前缀，metadata **不带 thinking:true**（B2，assistant override 不走 thinking 链路）。
+      buf.flushedSegments.push({
+        segmentId,
+        logTimestamp: new Date().toISOString(),
+        kind: 'assistant',
+      });
       await this.deps.onTurnMessage(sessionId, runId, formatted);
+      // 清空 currentAssistantSegmentId（下批 delta 会重新解析）。
+      buf.currentAssistantSegmentId = null;
     }
     // thinking_tokens 仅在值变化时 emit（running total，去重）。
     if (tokens && tokens !== buf.flushedTokens) {
@@ -2807,6 +2884,8 @@ export class SessionManager {
     // 守卫需在本 turn 内持续生效；turn 真正结束由 _onResult 收尾时清。
     buf.flushedSegments = [];
     buf.currentSegmentId = null;
+    // task-05：同步清 assistant partial segmentId（对齐 currentSegmentId，turn 边界重置）。
+    buf.currentAssistantSegmentId = null;
     // P1 修复：保留 currentMessageId。完整 assistant message 与 message_start
     // 共享同一 message.id，late partial delta（content_block_delta 自身不带 id）
     // 必须据此解析 segmentId 才能与 completedSegments 对齐 → 守卫才能拦截。
@@ -2815,8 +2894,11 @@ export class SessionManager {
   }
 
   /**
-   * task-11：对「已 flush 过 + 完整 message 已覆盖」的 segment emit
-   * [THINKING_OVERRIDE] <segmentId> 覆盖信号。
+   * task-11：对「已 flush 过 + 完整 message 已覆盖」的 segment emit override 覆盖信号。
+   * task-07 扩 assistant：按 kind 分流两种信号（信号前缀 + metadata 不同）：
+   * - kind:'thinking'  → `[THINKING_OVERRIDE] <segmentId>`，metadata { thinking:true, segmentId, stale:true }
+   * - kind:'assistant' → `[ASSISTANT_OVERRIDE] <segmentId>`，metadata { segmentId, stale:true }
+   *   **严禁 thinking:true**（B2：否则被 backend thinking override 链路误撤 assistant partial）。
    *
    * daemon 无法召回已发给 backend 的 partial 行（HTTP 已发、可能已落库 + SSE push），
    * 只能 emit 信号通知 backend（task-12 据此丢弃同 segmentId 的 partial 落库行）+
@@ -2829,7 +2911,11 @@ export class SessionManager {
     sessionId: string,
     runId: string | undefined,
     completedSegments: ReadonlySet<string>,
-    flushedSnapshot: Array<{ segmentId: string; logTimestamp: string }>,
+    flushedSnapshot: Array<{
+      segmentId: string;
+      logTimestamp: string;
+      kind: 'thinking' | 'assistant';
+    }>,
   ): Promise<void> {
     if (completedSegments.size === 0 || !runId) return;
     const overrides = flushedSnapshot.filter((s) =>
@@ -2837,14 +2923,23 @@ export class SessionManager {
     );
     if (overrides.length === 0) return;
     await Promise.all(
-      overrides.map((s) =>
-        this.deps.onTurnMessage(sessionId, runId, {
+      overrides.map((s) => {
+        // task-07：按 kind 选信号前缀 + metadata。assistant 分支 metadata 严禁
+        // thinking:true（B2），否则被 backend thinking override 链路误撤。
+        const isAssistant = s.kind === 'assistant';
+        const content = isAssistant
+          ? `[ASSISTANT_OVERRIDE] ${s.segmentId}`
+          : `[THINKING_OVERRIDE] ${s.segmentId}`;
+        const metadata = isAssistant
+          ? { segmentId: s.segmentId, stale: true }
+          : { thinking: true, segmentId: s.segmentId, stale: true };
+        return this.deps.onTurnMessage(sessionId, runId, {
           event_type: 'text',
-          content: `[THINKING_OVERRIDE] ${s.segmentId}`,
+          content,
           channel: 'stdout',
-          metadata: { thinking: true, segmentId: s.segmentId, stale: true },
-        } as unknown as SDKMessage),
-      ),
+          metadata,
+        } as unknown as SDKMessage);
+      }),
     );
   }
 
