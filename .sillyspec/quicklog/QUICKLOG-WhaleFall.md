@@ -123,3 +123,12 @@
 根因：admin/roles 操作列用 3 个原生 <button>(text-primary/destructive + hover:underline)+ align=right + justify-end gap-2,与规范(antd Button type=link size=small、删除 link danger、align center、fixed right、justify-center gap-1)不符;milestone-details 操作列已符合,唯独 admin/roles 不一致。
 方案：操作列 3 个原生 button → antd Button(别名 AntButton,因 shadcn Button 已占名)type=link size=small(编辑/禁用启用)、type=link danger size=small(删除);align right→center;加 fixed=right + width=180 + onCell 不透明背景(防固定列穿透);justify-end gap-2 → justify-center gap-1。
 结果：1 文件改动(admin/roles/page.tsx),typecheck 绿,操作列与 projects/milestone-details 统一。
+## ql-20260731-005-6824 | 2026-07-31 15:44:01 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/admin/roles/page.tsx
+
+需求：/admin/roles 完全 antd 化(FRONTEND_PAGE_STYLE §5「全部用 antd Button,不用 shadcn Button」)。
+根因：该页混用 antd+shadcn+自定义,工具栏 Button/Badge/删除确认 modal Button 是 shadcn(@/components/ui/button + @/components/ui/badge),不符 §5。
+方案：删 shadcn Button/Badge import;统一 antd Button——工具栏新建/搜索 type=primary、重置 default;error 重新加载 default size=small;删除确认 modal 取消 default/确认 type=primary danger;操作列 AntButton 别名→Button(type=link/link danger size=small);shadcn Badge→antd Tag(平台级 color=blue、工作区级默认、超管/普通 color=success、禁止登录 color=error)。逻辑不变,仅组件库统一。
+结果：1 文件改动(admin/roles/page.tsx),shadcn 残留 0,typecheck 绿。
