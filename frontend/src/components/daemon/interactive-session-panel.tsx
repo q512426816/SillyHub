@@ -191,6 +191,13 @@ export interface InteractiveSessionPanelProps {
    * mode=team + session_id 绑当前会话，主 agent 接管上下文。
    */
   onTeamMissionCreated?: (missionId: string) => void;
+  /**
+   * 2026-07-31-offline-session-readonly：运行时离线只读模式。true 时禁用 4 操作
+   * （新建/发送/打断/结束）+ 顶部离线横幅 + attach 不建 SSE 直接以 initialTurns 只读。
+   * 由 RuntimeSessionDialog 据 runtime.status!=='online' 传入；change-session-section
+   * 不传（默认 false）→ 原行为不变（D-003）。
+   */
+  offlineReadOnly?: boolean;
 }
 
 export function InteractiveSessionPanel({
@@ -206,6 +213,7 @@ export function InteractiveSessionPanel({
   changeId,
   workspaceId,
   onTeamMissionCreated,
+  offlineReadOnly,
 }: InteractiveSessionPanelProps) {
   const [provider, setProvider] = useState(defaultProvider);
   const [input, setInput] = useState("");
@@ -443,6 +451,23 @@ export function InteractiveSessionPanel({
   // 轮询单独 effect 处理（见下）。
   useEffect(() => {
     if (!attachSessionId) return;
+    // task-04（2026-07-31-offline-session-readonly / B3）：离线只读——不建 SSE，直接以
+    // initialTurns 只读渲染（active 态保持），重连后 effect 重跑建 SSE（deps 含 offlineReadOnly）。
+    if (offlineReadOnly) {
+      if (streamConnRef.current) {
+        streamConnRef.current.close();
+        streamConnRef.current = null;
+      }
+      setView({
+        sessionId: attachSessionId,
+        status: "active",
+        currentRunId: null,
+        turns: initialTurns ?? [],
+        errorMsg: null,
+      });
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      return;
+    }
     // 防御：清旧 SSE（重复 attach / props 变化重建）
     if (streamConnRef.current) {
       streamConnRef.current.close();
@@ -458,7 +483,7 @@ export function InteractiveSessionPanel({
     });
     // initialTurns 仅在 mount 时读取，避免 props 变更抖动（react-hooks/exhaustive-deps 忽略）
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attachSessionId, establishStream]);
+  }, [attachSessionId, establishStream, offlineReadOnly]);
 
   // task-10 attach 轮询：每 ATTACH_POLL_MS 调 getAgentSession，
   // active → 转 active + 清轮询 + 启用输入；failed 或累计超时 → 回退 failed（只读）。
@@ -895,12 +920,14 @@ export function InteractiveSessionPanel({
     (view.status === "active" && view.currentRunId !== null) || // turn 级串行
     view.status === "ended" ||
     view.status === "failed" ||
-    !hasOnlineProvider;
+    !hasOnlineProvider ||
+    offlineReadOnly; // task-03：离线只读禁用发送
 
   const interruptDisabled =
     view.status !== "active" || !view.currentRunId ||
-    view.turns.some((t) => t.runId === view.currentRunId && t.status === "interrupting");
-  const endDisabled = view.status !== "active";
+    view.turns.some((t) => t.runId === view.currentRunId && t.status === "interrupting") ||
+    offlineReadOnly; // task-03：离线只读禁用打断
+  const endDisabled = view.status !== "active" || offlineReadOnly; // task-03：离线只读禁用结束
 
   const placeholder = useMemo(() => {
     if (view.status === "ended" || view.status === "failed") return "会话已结束，请新建会话";
@@ -914,6 +941,12 @@ export function InteractiveSessionPanel({
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
+      {offlineReadOnly ? (
+        <div className="flex items-center gap-2 border-b border-amber-300 bg-amber-50 px-5 py-2 text-xs text-amber-800">
+          <span aria-hidden>⚠️</span>
+          <span>运行时离线，当前为只读浏览（发送/打断/结束/新建已禁用），重连后自动恢复。</span>
+        </div>
+      ) : null}
       <header className="shrink-0 border-b bg-card px-5 py-4">
         <div className="flex items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-2.5">
@@ -979,7 +1012,7 @@ export function InteractiveSessionPanel({
               variant="outline"
               size="sm"
               onClick={handleNewSession}
-              disabled={view.status === "creating" || view.status === "ending"}
+              disabled={offlineReadOnly || view.status === "creating" || view.status === "ending"}
               className="h-8 gap-1 px-3 text-xs"
               title="新建会话"
             >
