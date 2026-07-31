@@ -87,3 +87,39 @@
 根因：weekly-plan 的侧边栏 menuLabel、页面 PageHeader title、前后端 Excel 导出文件名等全套沿用「项目计划」，与 ppm-project-plans（PsProjectPlan 数据）完全撞名。
 方案：把 weekly-plan 专属的 21 处「项目计划」文案统一改为「实施计划汇总」——侧边栏 menuLabel + 权限显示名（角色管理）+ 页面标题 + 前端导出默认名 + 后端导出文件名 + 相关代码注释/docstring；改后端 router docstring 后跑 gen:types 同步 openapi.json 与 frontend/daemon 两处 api-types.ts 的端点描述。严格只动 weekly-plan 专属文案，绝不碰 ppm-project-plans（PsProjectPlan）任何「项目计划」；移动端工作台 m/ppm/workbench:931 的「项目计划」入口经确认 href 指向 /ppm/project-plans，不在本次范围。
 结果：纯 weekly-plan 文件（page.tsx/weekly-plan.ts）残留「项目计划」=0；21 处「实施计划汇总」落点全为 weekly-plan 相关；ruff format/check 全过；前端 vitest menu-permissions+permission 共 60 passed（无字面断言依赖改名）；gen:types 三处类型同步。后端导出文件名改动需重建 backend 容器才生效。
+## ql-20260731-001-2290 | 2026-07-31 13:25:03 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
+
+需求：/ppm/milestone-details 查询条件右上角按钮布局对齐 /ppm/projects(个性化按钮在左,搜索/重置/展开在右)。
+根因：milestone-details 顶部按钮行现状为【重置|分隔|导出|新建里程碑|刷新】(重置在最左、个性化在右),与 projects(PpmResourceTable D-006:数据组左|分隔|基础组右)相反。
+方案：重排 milestone-details(page.tsx:611-640)按钮为【导出|新建里程碑|刷新】(数据组/个性化,左) | 竖分隔 | 【重置】(基础组,最右),对齐 projects;注释同步。本页无搜索/展开按钮(前端实时过滤 grid + 查询条件无折叠)。
+结果：1 文件改动(frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx),typecheck 绿 + milestone-details 24 测试绿,无回归。
+## ql-20260731-002-46ef | 2026-07-31 13:50:27 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
+
+需求：milestone-details 刷新按钮归基础功能组(右)+文案改搜索,对齐 projects 基础组(搜索|重置)。
+根因：上个 quick 把刷新归到了数据组(个性化,左),但刷新属于基础查询操作(同搜索/重置/展开),应在基础组(右)。
+方案：刷新按钮从数据组(分隔前)移到基础组(分隔后,重置前),文案刷新→搜索,type=primary(对齐 projects 搜索),功能保持 reload(重新拉数据+应用过滤)。数据组只剩导出/新建里程碑。
+结果：1 文件改动(milestone-details/page.tsx),typecheck 绿 + 24 测试绿,无回归。
+## ql-20260731-003-85ca | 2026-07-31 14:24:06 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/admin/roles/page.tsx
+
+需求：/admin/roles 查询条件右上角按钮布局对齐 /ppm/projects(FRONTEND_PAGE_STYLE §2 规范:数据组左|分隔|基础组右)。
+根因：/admin/roles 工具栏现状为【搜索|重置|分隔|新建角色】(基础组在左、数据组在右),与规范相反;且用 size=sm(规范 §5 禁 small,字顶边框)。
+方案：重排为【+新建角色】(数据组,左) | 竖分隔 |【搜索|重置】(基础组,右);去 size=sm 用默认 middle;新建角色/搜索 variant=default(主操作)、重置 outline(次)。shadcn Button 保持(整页一致),variant 对应 antd type 语义。规范文档(FRONTEND_PAGE_STYLE §2)已完整,本次只是应用,不改规范。
+结果：1 文件改动(admin/roles/page.tsx),typecheck 绿(admin/roles 无测试文件),无回归。
+## ql-20260731-004-13f4 | 2026-07-31 14:39:09 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/admin/roles/page.tsx
+
+需求：/admin/roles 操作列样式对齐 /ppm/projects 与 milestone-details(走 FRONTEND_PAGE_STYLE §4/§5 规范)。
+根因：admin/roles 操作列用 3 个原生 <button>(text-primary/destructive + hover:underline)+ align=right + justify-end gap-2,与规范(antd Button type=link size=small、删除 link danger、align center、fixed right、justify-center gap-1)不符;milestone-details 操作列已符合,唯独 admin/roles 不一致。
+方案：操作列 3 个原生 button → antd Button(别名 AntButton,因 shadcn Button 已占名)type=link size=small(编辑/禁用启用)、type=link danger size=small(删除);align right→center;加 fixed=right + width=180 + onCell 不透明背景(防固定列穿透);justify-end gap-2 → justify-center gap-1。
+结果：1 文件改动(admin/roles/page.tsx),typecheck 绿,操作列与 projects/milestone-details 统一。
