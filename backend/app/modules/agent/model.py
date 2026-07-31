@@ -346,6 +346,11 @@ class AgentRunLog(BaseModel, table=True):
         # 列索引，支撑 Phase3 两层筛选（tool_kind / parent_tool_use_id 维度筛日志）。
         # None 表示非工具调用（user_input 等），不受筛选影响。
         Index("ix_agent_run_logs_tool_kind", "tool_kind"),
+        # 2026-07-30-daemon-heartbeat-dedup-fix task-14：流式 partial 去重 segment_id
+        # 索引。override 信号到达时按 (run_id, segment_id) 跨 submit_messages 调用 DELETE
+        # 已 commit 的 partial 行（task-08 expunge 只覆盖单调用内 pending）。仅 partial 行
+        # 写值（complete 行 NULL），故 DELETE by segment_id 天然只命中 partial。
+        Index("ix_agent_run_logs_segment_id", "segment_id"),
     )
 
     id: uuid.UUID = Field(
@@ -401,6 +406,16 @@ class AgentRunLog(BaseModel, table=True):
     tool_kind: str | None = Field(
         default=None,
         sa_column=Column(String(32), nullable=True),
+    )
+    # 2026-07-30-daemon-heartbeat-dedup-fix task-14 / FR-02 / D-002@v1：流式 partial
+    # 去重 segment_id。daemon partial flush 的半截行带 metadata.segmentId + isPartial，
+    # 此处持久化 segment_id；complete 行不写（NULL）。override 信号
+    # （[ASSISTANT_OVERRIDE]/[THINKING_OVERRIDE]）跨 submit_messages 调用到达时，按
+    # segment_id DELETE 已落库 partial（task-08 expunge 只撤单调用内 pending，跨调用
+    # 已 commit 的 partial 删不掉——本列解决）。None = 非 partial / 旧消息，不受影响。
+    segment_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(200), nullable=True),
     )
 
 

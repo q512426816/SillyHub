@@ -10,13 +10,16 @@
  * @module policy/runtime-policy
  */
 
-import { resolveRealPath } from './path-utils.js';
+import { normalizeAllowedRoots } from '../config.js';
 
 // ── 类型 ────────────────────────────────────────────────────────────────────
 
 /** 单个 runtime 的文件系统策略（已规范化）。 */
 export interface RuntimePolicy {
-  /** 已规范化的 allowed_roots（每个经 path-utils.resolveRealPath：realpath + 大小写归一）。 */
+  /**
+   * 已归一的 allowed_roots（每个经 config.normalizeAllowedRoots：只 resolve，不 realpath，
+   * 保留原始大小写）。realpath（防 `..`/symlink/junction/UNC 绕过）由消费方判定时做（task-02）。
+   */
   allowedRoots: string[];
   /** 版本号，单调递增，用于 WS push 去重。 */
   version: number;
@@ -28,7 +31,8 @@ export interface RuntimePolicy {
  * 按 runtime_id 隔离的策略缓存。
  *
  * 内部 `Map<runtime_id, RuntimePolicy>`：
- *   - set/reload：每个 root 经 resolveRealPath 规范化后存，version 续递增；
+ *   - set/reload：root 经 config.normalizeAllowedRoots 归一（只 resolve，不 realpath）后存，
+ *     version 续递增；与 daemon.ts _syncAllowedRoots 比较侧同口径，消除口径漂移；
  *   - reloadAll：心跳全量刷新，替换整个 map（version 重置为 1，视为重建）。
  */
 export class PolicyCache {
@@ -46,7 +50,9 @@ export class PolicyCache {
   /**
    * 写入 / 更新某 runtime 的策略。
    *
-   * - 每个 root 经 path-utils.resolveRealPath 规范化后存（防 `..`/symlink/junction/UNC 绕过）；
+   * - root 经 config.normalizeAllowedRoots 归一（只 resolve + 去重保序，不 realpath，
+   *   保留原始大小写）后存；realpath（防 `..`/symlink/junction/UNC 绕过）下放到消费方
+   *   判定时做（task-02 的 isPathUnderAnyRoot）；
    * - **不补任何兜底目录**（D-007 严格按 admin 配置）；
    * - version 单调递增（新 rid 从 1，已存在则 +1）。
    *
@@ -54,7 +60,7 @@ export class PolicyCache {
    * @param roots  原始 allowed_roots（字符串数组，未规范化亦可）
    */
   set(rid: string, roots: string[]): void {
-    const allowedRoots = roots.map((r) => resolveRealPath(r));
+    const allowedRoots = normalizeAllowedRoots(roots);
     const prev = this.map.get(rid);
     this.map.set(rid, {
       allowedRoots,

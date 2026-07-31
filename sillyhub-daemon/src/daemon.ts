@@ -637,6 +637,24 @@ export class Daemon {
    */
   private readonly _interactiveSessionsByLease = new Map<string, string>();
   /**
+   * task-09（FR-02 / D-002@v1）：interactive 转发 per-run 确定性 flatSeq 计数。
+   *
+   * 为什么需要：onTurnMessage 每次转发一条 flat message，无 msg.id 时（Codex flat
+   * message / 部分 Claude 消息）dedupKeyFor 需要确定性的 `${runId}:${turnSeq}:${flatSeq}`
+   * 才能让重发命中 backend ON CONFLICT DO NOTHING 去重；退化 `${runId}:${Date.now()}`
+   * 会让重发产生新 key，去重失效（task-09 的核心问题）。
+   *
+   * 设计：
+   *   - key = runId（每个 AgentRun 全局唯一），value = 该 run 内已转发消息条数（0 起）。
+   *   - turnSeq 固定 0：interactive 单条转发不区分 turn，同一 run 内所有 message 共享
+   *     runId 维度，flatSeq 在 run 内单调递增即保证唯一。
+   *   - 确定性：同一 run 同一条消息（相同调用顺序）始终拿到相同 flatSeq，重发命中去重。
+   *   - 生命周期：跟随 session 存在（量级 = session 内 message 数，可控）；runId 全局
+   *     唯一不与其它 run 撞。不在此处加终态清理（避免扩散到 onSessionEnd 改动），task-09
+   *     范围限定 dedup_key 确定性，内存由后续 GC 任务兜底。
+   */
+  private readonly _interactiveFlatSeq = new Map<string, number>();
+  /**
    * task-06（D-003@v1 tar 模式）：interactive lease.id → spec 同步上下文。
    * _startInteractiveSession tar 模式 pull 时 set(leaseId, {workspaceId})；
    * onSessionEnd 经 sessionId→sessionManager.get→leaseId 反查本 map 取 workspaceId，
@@ -1597,12 +1615,18 @@ export class Daemon {
       }
       // task-10（FR-04 / D-005@v1）：interactive submit 走退避重试。
       // _resilience 未注入 → 回退直接调 _client（无重试，向后兼容）。
-      // dedup_key：Claude msg.id 优先（dedupKeyFor），无则 runId 兜底（interactive 单条，
-      // 无显式 seq 计数，task-16 用 runId+timestamp 确定性兜底）。
+      // dedup_key（task-09 / FR-02 / D-002@v1）：Claude msg.id 优先（dedupKeyFor 内部
+      // `if (id) return id`，不动）；无 msg.id 时走确定性 seq 分支
+      // `${runId}:0:${flatSeq}`——用 per-run 递增 _interactiveFlatSeq 计数，绝不退化
+      // `${runId}:${Date.now()}`（重发会变 key，backend ON CONFLICT 去重失效）。
+      // turnSeq 固定 0：interactive 单条转发不区分 turn，runId 维度 + flatSeq 单调递增
+      // 已保证唯一；同一条消息重发拿到相同 flatSeq → 相同 dedup_key → 命中去重。
+      const flatSeq = this._interactiveFlatSeq.get(runId) ?? 0;
+      this._interactiveFlatSeq.set(runId, flatSeq + 1);
       if (this._resilience) {
         const envelope: Envelope = {
           message: fwdMsg,
-          dedup_key: dedupKeyFor(fwdMsg, runId),
+          dedup_key: dedupKeyFor(fwdMsg, runId, 0, flatSeq),
         };
         await this._resilience.submitWithRetry(
           state.leaseId,
@@ -1929,10 +1953,18 @@ export class Daemon {
         for (const temp of SILLYSPEC_TEMP_ROOTS) union.add(temp);
         const normalized = normalizeAllowedRoots([...union]);
         const existing = this._policyCache.get(runtimeId)?.allowedRoots;
-        if (JSON.stringify(existing) !== JSON.stringify(normalized)) {
-          this._policyCache.set(runtimeId, normalized);
-          changed++;
+        // 短路（task-03，D-004@v1）：task-01 后 existing 与 normalized 均为
+        // normalizeAllowedRoots 归一字符串，同口径可直接 JSON.stringify 比较。
+        // existing undefined（cache 无该 runtime，noUncheckedIndexedAccess）→ 视为需 set，走原 set 路径，
+        // 不把 undefined 与字符串比较。相同则跳过 set + changed++，消除每心跳无谓 set。
+        if (
+          existing !== undefined &&
+          JSON.stringify(existing) === JSON.stringify(normalized)
+        ) {
+          continue;
         }
+        this._policyCache.set(runtimeId, normalized);
+        changed++;
       }
       if (changed > 0) {
         this._logger.info('allowed_roots_synced_per_runtime', {
@@ -1989,7 +2021,7 @@ export class Daemon {
    *（cli.ts 生产链路必注入 PolicyCache，task-11）。
    *
    * @param rid          目标 runtime_id
-   * @param roots        新 allowed_roots（原始字符串，规范化由 PolicyCache 负责）
+   * @param roots        新 allowed_roots（原始字符串）
    * @param version      backend 推送序列号（单调递增）
    */
   private _handlePolicyUpdate(
@@ -2007,8 +2039,12 @@ export class Daemon {
     }
     this._lastPolicyVersion.set(rid, version);
     // 严格按 backend 下发：不 expand `~`、不补 homedir（D-007，与 _syncAllowedRoots 一致）。
-    this._policyCache.set(rid, roots);
-    this._logger.info('policy_cache_set', { rid, count: roots.length, version });
+    // 口径统一（task-04，R-2）：与 register(:1022)/_syncPolicyCache(:1973)/_syncAllowedRoots
+    // 同——所有 _policyCache.set 输入均为 normalizeAllowedRoots 归一字符串（task-01 后缓存
+    // 不 realpath，realpath 由 isPathUnderAnyRoot 判定时做 task-02）。
+    const normalized = normalizeAllowedRoots(roots);
+    this._policyCache.set(rid, normalized);
+    this._logger.info('policy_cache_set', { rid, count: normalized.length, version });
   }
 
   // ── 轮询循环（daemon.py:183-215，HTTP 兜底）────────────────────────────────

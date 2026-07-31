@@ -9,7 +9,7 @@
 //   - 同 message 多个 thinking block（index 0 / 2）segmentId 各自独立
 //   - late partial（完整 message 先到，partial 后到）被丢弃（不 flush）
 //   - 退化方案：SDK 不给 message.id → segmentId 退化为 turnIndex:thinking
-//   - assistant 文本 flush 不带 thinking metadata（不误带 segmentId）
+//   - assistant 文本 flush 带 segmentId + isPartial，但**不带** thinking:true（task-12 修旧债：task-05 契约让 assistant partial 带 segmentId，旧断言已失效）
 //   - 80字符/120ms flush 阈值不变（PARTIAL_FLUSH_MS 常量回归）
 //
 // 策略：白盒直接调 SessionManager 的 _bufferPartial / _flushPartial /
@@ -342,7 +342,15 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
     expect(meta.isPartial).toBe(true);
   });
 
-  it('assistant 文本 flush 不携带 thinking/segmentId metadata', async () => {
+  // task-12 修旧债：task-05 契约变化——assistant partial flush 现在主动带
+  // segmentId + isPartial（对齐 thinking partial），让完整 message 到达时
+  // _emitOverrideSignals（task-07）能 emit [ASSISTANT_OVERRIDE] 命中并撤回本
+  // partial 行（消除 #35 双发）。旧断言「不带 segmentId/isPartial」是 task-05
+  // 落地前的契约，现已失效；本用例改为期望 assistant flush 带 segmentId +
+  // isPartial，但仍**不带 thinking:true**（B2：assistant 不是 thinking，
+  // 否则被 backend thinking override 链路误撤）。这是断言跟上契约变化，非
+  // 改测试凑过（CLAUDE.md #9）。
+  it('assistant 文本 flush 带 segmentId + isPartial，不带 thinking', async () => {
     const { sm, onTurnMessage, state } = makeManager();
     const p = priv(sm);
 
@@ -365,11 +373,12 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
       (m) => typeof m.content === 'string' && m.content.startsWith('[ASSISTANT]'),
     );
     expect(assistant, 'expected [ASSISTANT] flush').toBeDefined();
-    // assistant 文本不应带 thinking/segmentId/isPartial。
+    // task-05 契约：assistant flush 带 segmentId（main:msg-text:1）+ isPartial。
     const meta = (assistant!.metadata ?? {}) as Record<string, unknown>;
+    expect(meta.segmentId).toBe('main:msg-text:1');
+    expect(meta.isPartial).toBe(true);
+    // B2：assistant partial 绝不带 thinking:true（否则被 thinking override 误撤）。
     expect(meta.thinking).toBeUndefined();
-    expect(meta.segmentId).toBeUndefined();
-    expect(meta.isPartial).toBeUndefined();
   });
 
   it('turn 边界重置：completedSegments 在 _onResult（turn 结束）后清空', async () => {

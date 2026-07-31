@@ -437,8 +437,8 @@ describe('daemon multi-runtime registration (test_daemon_multi_runtime.py)', () 
 
     // 断言 1（HEAD 核心）：心跳 resp.allowed_roots 写入 config.allowed_roots（per-daemon 单值），
     // 含 daemonRoot + homedir 兜底（_syncAllowedRoots 展开 + normalize）。
-    // 注意：_syncAllowedRoots → normalizeAllowedRoots 用 path.resolve 规范化（非
-    // resolveRealPath 的 realpathSync，后者会小写化 Windows 盘符），故断言也用 resolve 对齐。
+    // 注意：_syncAllowedRoots → normalizeAllowedRoots 用 path.resolve 规范化（只 resolve
+    // 不 realpath，保留原始盘符大小写），故断言也用 resolve 对齐。
     expect(config.allowed_roots).toContain(resolve(daemonRoot));
     expect(config.allowed_roots).toContain(homedir());
     // 心跳确实覆盖了初始值（initialAllowedRoots 仅 [homedir]，现多了 daemonRoot）
@@ -447,9 +447,9 @@ describe('daemon multi-runtime registration (test_daemon_multi_runtime.py)', () 
     // ql-20260705-008：心跳路径现在写 PolicyCache（修复写拦截 fail-closed deny——
     // 旧实现注释承诺回填但漏写，PolicyCache 永久空致 canWrite deny，agent 自述
     // "Runtime Policy 未配置"=CAUSE_POLICY_NOT_LOADED）。两个 server runtime_id 都
-    // 有 PolicyCache 条目（PolicyEntry {allowedRoots, version}）。allowedRoots 经
-    // resolveRealPath 小写化盘符（与 config.allowed_roots 的 resolve 大写差异，见上
-    // 注释 440-441），按定义性 + 长度断言。
+    // 有 PolicyCache 条目（PolicyEntry {allowedRoots, version}）。task-01 起 set 存
+    // normalizeAllowedRoots（path.resolve，与 config.allowed_roots 同口径），故两者无
+    // 大小写差异，按定义性 + 长度断言。
     const claudePolicy = policyCache.get('srv-rt-claude');
     expect(claudePolicy).toBeDefined();
     expect(claudePolicy!.allowedRoots.length).toBeGreaterThanOrEqual(2);

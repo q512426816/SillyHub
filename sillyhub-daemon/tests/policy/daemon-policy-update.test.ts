@@ -13,9 +13,10 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { Daemon } from '../../src/daemon.js';
 import { PolicyCache } from '../../src/policy/runtime-policy.js';
-import { resolveRealPath } from '../../src/policy/path-utils.js';
 import type { DaemonConfig } from '../../src/config.js';
 import type { DetectedAgent } from '../../src/agent-detector.js';
 import type { WsClientCallbacks } from '../../src/ws-client.js';
@@ -129,10 +130,10 @@ describe('task-13: daemon onPolicyUpdate → PolicyCache', () => {
 
     const policy = policyCache.get('srv-rt-claude');
     expect(policy).toBeDefined();
-    expect(policy?.allowedRoots).toEqual([
-      resolveRealPath('/work/a'),
-      resolveRealPath('/work/b'),
-    ]);
+    // task-01 口径变更：PolicyCache.set 改存 normalizeAllowedRoots 输出（= path.resolve，
+    // 只 resolve 不 realpath，保留原始大小写），不再存 resolveRealPath（后者 realpath 会
+    // 小写化 Windows 盘符）。期望值改用 path.resolve 对齐。
+    expect(policy?.allowedRoots).toEqual([resolve('/work/a'), resolve('/work/b')]);
     // ql-20260710 预存债：register 兜底 _syncPolicyCache（daemon.ts:982，b42cd130）在
     // buildAndStart 阶段预填 1 次 → version 基线 1；onPolicyUpdate 写 1 次 → version=2。
     expect(policy?.version).toBe(2);
@@ -149,8 +150,8 @@ describe('task-13: daemon onPolicyUpdate → PolicyCache', () => {
     cbs?.onPolicyUpdate?.('srv-rt-claude', ['/work/B'], 3);
 
     const policy = policyCache.get('srv-rt-claude');
-    // 仍是 rootsA（version=5 那次的值）
-    expect(policy?.allowedRoots).toEqual([resolveRealPath('/work/A')]);
+    // 仍是 rootsA（version=5 那次的值）；task-01 口径：set 存 path.resolve（不 realpath）
+    expect(policy?.allowedRoots).toEqual([resolve('/work/A')]);
     // ql-20260710 预存债：register 预填 1 + version=5 写入 1 = version=2；
     // version=3 被去重跳过（去重逻辑正确，仅基线多 1）。
     expect(policy?.version).toBe(2);
@@ -168,8 +169,8 @@ describe('task-13: daemon onPolicyUpdate → PolicyCache', () => {
     cbs?.onPolicyUpdate?.('srv-rt-claude', ['/v3'], 3);
 
     const policy = policyCache.get('srv-rt-claude');
-    // 最新值 /v3（/v2-dup 被去重跳过）
-    expect(policy?.allowedRoots).toEqual([resolveRealPath('/v3')]);
+    // 最新值 /v3（/v2-dup 被去重跳过）；task-01 口径：set 存 path.resolve（不 realpath）
+    expect(policy?.allowedRoots).toEqual([resolve('/v3')]);
     // ql-20260710 预存债：register 预填 1 + v1/v2/v3 各写 1 = version=4；v2-dup 被去重跳过。
     expect(policy?.version).toBe(4);
   });
@@ -185,12 +186,9 @@ describe('task-13: daemon onPolicyUpdate → PolicyCache', () => {
     // claude 旧 version=1（应忽略，因 claude 已见 2）
     cbs?.onPolicyUpdate?.('srv-rt-claude', ['/claude-old'], 1);
 
-    expect(policyCache.get('srv-rt-claude')?.allowedRoots).toEqual([
-      resolveRealPath('/claude'),
-    ]);
-    expect(policyCache.get('srv-rt-codex')?.allowedRoots).toEqual([
-      resolveRealPath('/codex'),
-    ]);
+    // task-01 口径：set 存 path.resolve（不 realpath，保留原始大小写）
+    expect(policyCache.get('srv-rt-claude')?.allowedRoots).toEqual([resolve('/claude')]);
+    expect(policyCache.get('srv-rt-codex')?.allowedRoots).toEqual([resolve('/codex')]);
   });
 
   it('空 allowed_roots 合法（admin 清空策略）→ 写入空数组', async () => {
@@ -202,7 +200,10 @@ describe('task-13: daemon onPolicyUpdate → PolicyCache', () => {
 
     const policy = policyCache.get('srv-rt-claude');
     expect(policy).toBeDefined();
-    expect(policy?.allowedRoots).toEqual([]);
+    // task-01 口径：set 存 normalizeAllowedRoots 结果，空数组触发 B1 兜底回填 [homedir()]
+    // （与 runtime-policy.test.ts「空数组回填 homedir」用例同口径）。admin 清空策略
+    // 在新口径下不再写入空数组，而是回退 homedir（避免 PolicyCache 永久空致 fail-closed deny）。
+    expect(policy?.allowedRoots).toEqual([homedir()]);
   });
 
   it('_policyCache 为 null（未注入）→ no-op 不抛错', async () => {
