@@ -163,6 +163,12 @@ function RuntimeSessionDialogBody({
         : (onlineProviders[0] as InteractiveProvider | undefined) ?? "claude";
   const providers = hasOnlineProvider ? onlineProviders : [defaultProvider];
 
+  // 2026-07-31-offline-session-readonly task-02 / D-005：从实时 runtimes 重查当前 runtime
+  // 的 status 派生 runtimeOffline（非 stale runtime prop——dialogRuntime 是 page state
+  // 快照，不随 machines 轮询更新，用它会致重连后 runtimeOffline 不翻转）。
+  const liveRuntime = runtime ? runtimes.find((r) => r.id === runtime.id) : undefined;
+  const runtimeOffline = (liveRuntime?.status ?? runtime?.status) !== "online";
+
   const reloadSessions = useCallback(async () => {
     setLoading(true);
     setListError(null);
@@ -338,6 +344,7 @@ function RuntimeSessionDialogBody({
             initialTurns={selectedId ? logsToTurns(logs) : undefined}
             onSessionCreated={handleSessionCreated}
             onSessionReset={handleSessionReset}
+            offlineReadOnly={runtimeOffline}
           />
         </div>
       </div>

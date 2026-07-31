@@ -87,9 +87,11 @@ export function RuntimeCard({
   const protocol = getProtocol(runtime);
   const isDisabled = runtime.status === "disabled";
   const ActionIcon = isDisabled ? Power : Ban;
+  // 2026-07-31-offline-session-readonly task-01：离线也会话按钮可见（provider 限制保留），
+  // 离线态由 RuntimeSessionDialog/InteractiveSessionPanel 内部只读处理（runtimeOffline）。
   const canOpenSession =
-    runtime.status === "online" &&
-    (runtime.provider === "claude" || runtime.provider === "codex");
+    runtime.provider === "claude" || runtime.provider === "codex";
+  const isRuntimeOffline = runtime.status !== "online";
 
   const summary = usage?.summary;
   const inputLabel = summary ? formatTokens(summary.input_tokens) : "—";
@@ -242,9 +244,13 @@ export function RuntimeCard({
         {canOpenSession ? (
           <button
             type="button"
-            className={btnPrimary}
+            className={isRuntimeOffline ? btnGhost : btnPrimary}
             onClick={() => onOpenSession(runtime)}
-            title="打开该运行时的会话窗口"
+            title={
+              isRuntimeOffline
+                ? "运行时离线，点击只读浏览会话历史"
+                : "打开该运行时的会话窗口"
+            }
           >
             <MessageSquare className="h-3 w-3" />
             会话
