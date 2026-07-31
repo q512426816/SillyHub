@@ -105,3 +105,12 @@
 根因：上个 quick 把刷新归到了数据组(个性化,左),但刷新属于基础查询操作(同搜索/重置/展开),应在基础组(右)。
 方案：刷新按钮从数据组(分隔前)移到基础组(分隔后,重置前),文案刷新→搜索,type=primary(对齐 projects 搜索),功能保持 reload(重新拉数据+应用过滤)。数据组只剩导出/新建里程碑。
 结果：1 文件改动(milestone-details/page.tsx),typecheck 绿 + 24 测试绿,无回归。
+## ql-20260731-003-85ca | 2026-07-31 14:24:06 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/admin/roles/page.tsx
+
+需求：/admin/roles 查询条件右上角按钮布局对齐 /ppm/projects(FRONTEND_PAGE_STYLE §2 规范:数据组左|分隔|基础组右)。
+根因：/admin/roles 工具栏现状为【搜索|重置|分隔|新建角色】(基础组在左、数据组在右),与规范相反;且用 size=sm(规范 §5 禁 small,字顶边框)。
+方案：重排为【+新建角色】(数据组,左) | 竖分隔 |【搜索|重置】(基础组,右);去 size=sm 用默认 middle;新建角色/搜索 variant=default(主操作)、重置 outline(次)。shadcn Button 保持(整页一致),variant 对应 antd type 语义。规范文档(FRONTEND_PAGE_STYLE §2)已完整,本次只是应用,不改规范。
+结果：1 文件改动(admin/roles/page.tsx),typecheck 绿(admin/roles 无测试文件),无回归。

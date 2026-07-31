@@ -257,22 +257,23 @@ export default function AdminRolesPage() {
       )}
 
       <SectionCard bodyPadding="p-2">
-        {/* 顶部操作按钮行（右对齐，对齐 admin/users / project-plans） */}
+        {/* 顶部工具栏(对齐 FRONTEND_PAGE_STYLE §2 / /ppm/projects):
+            左=数据组(新建角色) | 竖分隔 | 右=基础组(搜索/重置,最右)。
+            size 用默认 middle(规范 §5 禁 small);variant:主操作 default、重置 outline。 */}
         <div className="mb-2 flex items-center justify-end gap-2">
-          <Button size="sm" onClick={() => handleSearchClick()}>
-            搜索
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => handleResetClick()}>
-            重置
-          </Button>
-          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
           <Button
-            size="sm"
             disabled={!canWrite}
             onClick={() => setDrawer({ open: true, mode: "create" })}
             title={!canWrite ? "无 role:write 权限" : undefined}
           >
             + 新建角色
+          </Button>
+          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
+          <Button onClick={() => handleSearchClick()}>
+            搜索
+          </Button>
+          <Button variant="outline" onClick={() => handleResetClick()}>
+            重置
           </Button>
         </div>
         {/* 搜索表单：grid-cols-4 垂直 Field */}
