@@ -96,3 +96,12 @@
 根因：milestone-details 顶部按钮行现状为【重置|分隔|导出|新建里程碑|刷新】(重置在最左、个性化在右),与 projects(PpmResourceTable D-006:数据组左|分隔|基础组右)相反。
 方案：重排 milestone-details(page.tsx:611-640)按钮为【导出|新建里程碑|刷新】(数据组/个性化,左) | 竖分隔 | 【重置】(基础组,最右),对齐 projects;注释同步。本页无搜索/展开按钮(前端实时过滤 grid + 查询条件无折叠)。
 结果：1 文件改动(frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx),typecheck 绿 + milestone-details 24 测试绿,无回归。
+## ql-20260731-002-46ef | 2026-07-31 13:50:27 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
+
+需求：milestone-details 刷新按钮归基础功能组(右)+文案改搜索,对齐 projects 基础组(搜索|重置)。
+根因：上个 quick 把刷新归到了数据组(个性化,左),但刷新属于基础查询操作(同搜索/重置/展开),应在基础组(右)。
+方案：刷新按钮从数据组(分隔前)移到基础组(分隔后,重置前),文案刷新→搜索,type=primary(对齐 projects 搜索),功能保持 reload(重新拉数据+应用过滤)。数据组只剩导出/新建里程碑。
+结果：1 文件改动(milestone-details/page.tsx),typecheck 绿 + 24 测试绿,无回归。
