@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 
+import { Checkbox } from "antd";
+
 import {
   MENU_PERMISSION_GROUPS,
   MENU_SECTION_LABEL,
@@ -157,51 +159,39 @@ function RightPanel({
   const isIndeterminate =
     keys.length > 0 && selectedCount > 0 && !allSelected;
 
-  const setIndeterminateRef = (el: HTMLInputElement | null) => {
-    if (el) el.indeterminate = isIndeterminate;
-  };
-
   return (
     <>
       <div className="mb-2 flex items-center justify-between">
         <span className="text-xs font-medium text-foreground">{menuLabel}</span>
-        <label
-          className={`flex items-center gap-1.5 text-[11px] ${disabled || keys.length === 0 ? "cursor-not-allowed text-muted-foreground" : "cursor-pointer text-primary"}`}
+        <Checkbox
+          checked={allSelected}
+          indeterminate={isIndeterminate}
+          disabled={disabled || keys.length === 0}
+          onChange={() => onToggleAll(keys)}
+          aria-label={`${menuLabel} 全选`}
+          className="text-[11px]"
         >
-          <input
-            type="checkbox"
-            checked={allSelected}
-            ref={setIndeterminateRef}
-            disabled={disabled || keys.length === 0}
-            onChange={() => onToggleAll(keys)}
-            aria-label={`${menuLabel} 全选`}
-            className="h-3.5 w-3.5 rounded border border-input"
-          />
           全选（{selectedCount}/{keys.length}）
-        </label>
+        </Checkbox>
       </div>
       <div className="grid gap-1.5 sm:grid-cols-2">
         {menuPermissions.map((p) => {
           const checked = selected.includes(p.key);
-          const inputId = `perm-${p.key.replace(/[^a-zA-Z0-9]/g, "-")}`;
           return (
-            <label
+            <div
               key={p.key}
-              htmlFor={inputId}
-              className={`flex cursor-pointer items-start gap-2 rounded px-2 py-1 text-[11px] transition-colors ${
+              className={`flex items-start gap-2 rounded px-2 py-1 text-[11px] transition-colors ${
                 checked
                   ? "bg-primary/10 text-foreground"
                   : "text-muted-foreground hover:bg-muted"
               } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
             >
-              <input
-                id={inputId}
-                type="checkbox"
+              <Checkbox
                 checked={checked}
                 disabled={disabled}
                 onChange={() => onToggle(p.key)}
                 aria-label={p.key}
-                className="mt-0.5 h-3 w-3 rounded border border-input"
+                className="mt-0.5"
               />
               <div className="flex flex-col">
                 <span className="font-medium text-foreground">{p.name}</span>
@@ -209,7 +199,7 @@ function RightPanel({
                   {p.key}
                 </span>
               </div>
-            </label>
+            </div>
           );
         })}
       </div>

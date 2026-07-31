@@ -132,3 +132,12 @@
 根因：该页混用 antd+shadcn+自定义,工具栏 Button/Badge/删除确认 modal Button 是 shadcn(@/components/ui/button + @/components/ui/badge),不符 §5。
 方案：删 shadcn Button/Badge import;统一 antd Button——工具栏新建/搜索 type=primary、重置 default;error 重新加载 default size=small;删除确认 modal 取消 default/确认 type=primary danger;操作列 AntButton 别名→Button(type=link/link danger size=small);shadcn Badge→antd Tag(平台级 color=blue、工作区级默认、超管/普通 color=success、禁止登录 color=error)。逻辑不变,仅组件库统一。
 结果：1 文件改动(admin/roles/page.tsx),shadcn 残留 0,typecheck 绿。
+## ql-20260731-006-e2f3 | 2026-07-31 16:37:49 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/admin/roles/page.tsx, frontend/src/components/admin-role-permission-picker.tsx
+
+需求：新建角色 Modal 内部组件全部 antd 化(用户看到 antd Modal 外壳但内部原生 input,不像 antd)。
+根因：task-01 只换了 Modal 外壳,内部 Key/名称用原生 <input>+inputCls、描述用原生 <textarea>+textareaCls、权限选择原生 checkbox + setIndeterminateRef,没换 antd 组件。
+方案：Key/名称原生 input→antd Input;描述原生 textarea→antd Input.TextArea(rows=3);权限单选原生 checkbox→antd Checkbox;全选原生 checkbox+setIndeterminateRef→antd Checkbox(indeterminate prop 支持,删 ref 手写)。逻辑不变,仅组件库统一。
+结果：2 文件改动(admin/roles page.tsx + admin-role-permission-picker.tsx),typecheck 绿 + picker 7 测试绿(antd Checkbox 不破坏现有断言)。

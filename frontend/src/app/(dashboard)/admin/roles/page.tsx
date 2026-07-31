@@ -461,11 +461,11 @@ function RoleDrawer({
       <div className="space-y-3">
         <div>
           <label className="text-[11px] text-muted-foreground">Key（唯一标识）</label>
-          <input
+          <Input
             value={key}
             onChange={(e) => setKey(e.target.value)}
             disabled={mode === "edit"}
-            className={`mt-0.5 font-mono ${inputCls}`}
+            className="mt-0.5 font-mono"
             placeholder="如 editor / viewer"
           />
           {mode === "create" && !keyValid && key && (
@@ -476,21 +476,22 @@ function RoleDrawer({
         </div>
         <div>
           <label className="text-[11px] text-muted-foreground">名称</label>
-          <input
+          <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
             disabled={!canWrite}
-            className={`mt-0.5 ${inputCls}`}
+            className="mt-0.5"
             maxLength={50}
           />
         </div>
         <div>
           <label className="text-[11px] text-muted-foreground">描述</label>
-          <textarea
+          <Input.TextArea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className={`mt-0.5 ${textareaCls}`}
+            className="mt-0.5"
             maxLength={500}
+            rows={3}
           />
         </div>
         <div>
