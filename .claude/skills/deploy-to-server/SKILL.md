@@ -81,7 +81,7 @@ ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'cd /opt/sillyhub/deploy/deploy 
   docker compose ps && \
   curl -s http://127.0.0.1:8001/api/health'
 ```
-- 4 个容器全 healthy（backend / frontend / postgres / redis）
+- 5 个容器全 healthy（backend / frontend / postgres / redis / minio）
 - health 返回 `{"status":"ok","db":"ok","redis":"ok",...}`
 
 backend 镜像变更会自动跑 `alembic upgrade head`，看 logs 确认无报错：

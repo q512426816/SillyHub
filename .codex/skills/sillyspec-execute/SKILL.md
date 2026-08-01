@@ -60,6 +60,58 @@ sillyspec worktree doctor --fix --change <变更名>
 
 execute 完成时，每个 task 必须有 `review.json` 且 verdict 通过，否则阻断完成。**例外**：task 在 `tasks/task-XX.md` frontmatter 声明 `low_risk: true`（type-only / 机械迁移等低逻辑风险）时，缺 review.json 只发 warning 不阻断。`cannot_verify` 的 task 会写入 `verify-required-evidence.json`，由 verify 阶段消费。
 
+#### task 级 review.json 契约（CLI 硬校验）
+
+- 路径：`.sillyspec/.runtime/execute-runs/<execute-run-id>/tasks/task-XX/review.json`（目录不存在需先建）。
+- `execute-run-id` 取自**第一次** `--done` prompt 输出（形如 `exec-2026-07-28-112833`），也写在 marker 文件 `.runtime/current-execute-run-id-<变更名>`。多个 run 时 gate 读最新 marker。
+- 字段（`schemaVersion:1`）：
+
+  ```json
+  {
+    "schemaVersion": 1,
+    "task": "task-01",
+    "base": "<git-base-commit-hash>",
+    "head": "<git-head-commit-hash>",
+    "changedFiles": ["src/..."],
+    "specVerdict": "pass",        // pass | fail | cannot_verify
+    "qualityVerdict": "pass",     // pass | fail | cannot_verify
+    "reviewerNotes": "...",
+    "requiredEvidence": []        // cannot_verify 时必须非空
+  }
+  ```
+
+- `base` / `head` 必须是**真实 git commit**（`git rev-parse --verify`），否则判伪造并阻断。`changedFiles` 与实际 `git diff base..head` 完全不相交也判伪造。base..head 空 commit diff 但 working-tree 有未提交改动 → 视为有效改动（warning 不阻断）。
+- 后端 router task 另需在 `.sillyspec/.runtime/contract-artifacts/<task-name>/endpoints.json` 写 API 端点清单（扫 `@router.get/post/...`）。
+
+### Stage Review Gate（execute 末尾的 acceptance review.json）
+
+execute 还有**第二道**独立的 stage 级审查：除逐 task review.json 外，整个 execute 阶段完成还需一个 stage 级 `review.json`（在 "完成确认"/acceptance 步骤产出）。CLI `Stage Review Gate` 硬校验其 schema 与 `docHash` 真实性。
+
+- 路径：`.sillyspec/.runtime/stage-reviews/execute-review-<stage-review-run-id>/review.json`（目录可能不存在需手建；run-id 由该步 `--done` prompt 输出指定）。marker 文件 `.runtime/current-stage-review-run-id-execute-<变更名>`。
+- 字段（`schemaVersion:1`，`reviewType=acceptance` —— 区别于 brainstorm/plan/propose 的 `"design"`）：
+
+  ```json
+  {
+    "schemaVersion": 1,
+    "reviewType": "acceptance",
+    "reviewedFiles": ["changes/<变更名>/design.md", "<可选追加 git diff 涉及的源码>"],
+    "docHash": "<sha256(reviewedFiles[0] 文件内容，hex)>",
+    "specVerdict": "pass",       // pass | fail | cannot_verify
+    "qualityVerdict": "pass",    // pass | fail | cannot_verify
+    "checklist": [               // 扁平数组（非按层嵌套！），逐条对照 design 章节 + FR/NFR/决策核验代码
+      { "item": "FR-01 排序", "result": "pass", "note": "..." }   // result: pass | gap | fail
+    ],
+    "requiredEvidence": [],      // cannot_verify 时必填非空
+    "reviewerNotes": "..."
+  }
+  ```
+
+- `docHash` = `sha256(主审查文档内容)`（hex）—— execute 主审查文档是 `design.md`，即 `reviewedFiles[0]`。CLI 会重算 sha256 比对，不符判伪造（fail-closed）；找不到主文档也 fail。**改 design.md 后须重算 docHash 再写**，可用 `sillyspec run execute --done` 触发的 prompt 注入版契约（`{REVIEW_JSON_CONTRACT}`）逐字改值。
+- `tier=independent` 时必须由独立 QA 子代理产出该 review.json（独立上下文，不共享实现者分析）；`tier=self`（变更 ≤3 文件）降级为当前 agent 自审。
+- 该 acceptance review 同时覆盖"代码审查"视角，后续代码审查步骤仅需轻量复审。
+
+> 运行时 CLI 会把精确 schema 表 + 完整 JSON 示例 + docHash 算法通过 `{REVIEW_JSON_CONTRACT}` 占位符注入到该步 prompt（源码 `src/stage-review.js: renderReviewJsonContract()`）。本段为常驻摘要；以运行时注入的契约为权威逐字模板。
+
 ## worktree 子命令（execute 相关）
 
 ```bash
@@ -79,6 +131,10 @@ plan → execute → verify
 ```
 
 execute 完成后（所有 Wave/task 完成 + Task Review Gate 通过），运行 `sillyspec run verify --change <变更名>` 验证。
+
+### 批量完成（一次 --done 收尾）
+
+当 `plan.md` 所有 task checkbox 已勾（人工勾或基于各 task `review.json` pass 由 CLI 自动勾）且代码客观核验通过（`checkExecuteCodeEvidence` 非"零变更"）时，任一 execute `--done` 会**一次性补完所有剩余 step** 直达阶段完成，不必逐次 +1 推进。日志会打印 `🚀 execute 批量完成：plan 全勾 + 代码核验通过，一次性补完 N 个剩余 step`。条件不满足（plan 未全勾 / 代码零变更）时仍按单步推进，要求补 review 后重跑 `--done` 直至满足。
 
 ## 铁律
 

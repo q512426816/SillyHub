@@ -48,7 +48,7 @@ sillyspec run brainstorm --done --answer "..." --output "..."    # 一步完成 
 
 某些步骤（如"对话式探索与需求澄清"）需要用户输入。两种方式：
 
-> 自动去重：若前置 step 已对同一问题（waitReason 归一化后相同，如"确认设计方案" vs "最终确认设计方案"）确认过，后续重复 wait 会自动跳过，无需再 `--wait`。
+> 自动去重：若前置 step 已对同一问题（waitReason 归一化后相同）确认过，后续重复 wait 会自动跳过，无需再 `--wait`。
 
 - **方式一（推荐）**：AI 自行与用户交互后，一步完成：
   ```bash
@@ -74,6 +74,32 @@ brainstorm 完成时按 design.md frontmatter 的 `scale` 分叉：
 - **small**（≤2 文件、单模块、无跨模块依赖）：仅生成 design.md → `sillyspec run quick --linked-changes <变更名>`
 
 > 规模由 AI 在 brainstorm 最后一步评估并写入 design.md frontmatter。判错可手动改 `scale` 后再跑相应阶段。
+
+### Stage Review Gate（brainstorm 末尾的 design review.json）
+
+brainstorm 在 `tier=independent` 规模下除 design.md 等四件套外，还需产出一个 stage 级 `review.json`，CLI `Stage Review Gate` 硬校验其 schema 与 `docHash` 真实性。
+
+- 路径：`.sillyspec/.runtime/stage-reviews/brainstorm-review-<stage-review-run-id>/review.json`（目录可能不存在需手建；run-id 由该步 `--done` prompt 输出指定）。marker 文件 `.runtime/current-stage-review-run-id-brainstorm-<变更名>`。
+- 字段（`schemaVersion:1`，`reviewType=design` —— 区别于 execute 的 `acceptance`）：
+
+  ```json
+  {
+    "schemaVersion": 1,
+    "reviewType": "design",
+    "reviewedFiles": ["changes/<变更名>/design.md"],   // [0] 为主文档
+    "docHash": "<sha256(reviewedFiles[0] 文件内容，hex)>",
+    "specVerdict": "pass",       // pass | fail | cannot_verify
+    "qualityVerdict": "pass",    // pass | fail | cannot_verify
+    "checklist": [               // 扁平数组，逐条对照 design 章节核验
+      { "item": "背景与目标", "result": "pass", "note": "..." }   // result: pass | gap | fail
+    ],
+    "requiredEvidence": [],      // cannot_verify 时必填非空
+    "reviewerNotes": "..."
+  }
+  ```
+
+- `docHash` = `sha256(主审查文档内容)`（hex）—— brainstorm 主文档是 `design.md`（即 `reviewedFiles[0]`）。CLI 重算 sha256 比对，不符判伪造（fail-closed）。改 design.md 后须重算 docHash。`tier=self`（≤3 文件）降级为当前 agent 自审，不强制独立子代理。
+- 运行时 CLI 通过 `{REVIEW_JSON_CONTRACT}` 注入精确 schema+示例，以注入版为权威逐字模板。
 
 ## 铁律
 

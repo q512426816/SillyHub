@@ -46,6 +46,32 @@ sillyspec run plan --done --answer "..." --output "..."    # 一步完成 wait+d
 
 plan 的步骤是动态的：`generate_plan`（生成分级计划）→ `review_plan`（审查计划，按规模分级：tier=self 当前 agent 自审 / tier=independent 启动独立审查子代理产出 stage review.json，避免生成+自审同一次输出的偏差）→ CLI 从 `plan.md` 解析出 task 自动插入"任务蓝图协调器"步骤（per-task）。这是正常行为，不要手动添加。
 
+### Stage Review Gate（plan 的 design review.json）
+
+`review_plan` 步骤在 `tier=independent` 时产出一个 stage 级 `review.json`，CLI `Stage Review Gate` 硬校验其 schema 与 `docHash` 真实性。
+
+- 路径：`.sillyspec/.runtime/stage-reviews/plan-review-<stage-review-run-id>/review.json`（目录可能不存在需手建；run-id 由该步 `--done` prompt 输出指定）。marker 文件 `.runtime/current-stage-review-run-id-plan-<变更名>`。
+- 字段（`schemaVersion:1`，`reviewType=plan` —— plan 阶段主审查文档是 `plan.md`；execute 阶段才是 `acceptance`）：
+
+  ```json
+  {
+    "schemaVersion": 1,
+    "reviewType": "plan",
+    "reviewedFiles": ["changes/<变更名>/plan.md"],   // [0] 为主文档
+    "docHash": "<sha256(reviewedFiles[0] 文件内容，hex)>",
+    "specVerdict": "pass",       // pass | fail | cannot_verify
+    "qualityVerdict": "pass",    // pass | fail | cannot_verify
+    "checklist": [               // 扁平数组，逐条对照 plan 章节/Wave 结构/task 完整性核验
+      { "item": "Wave 分级合理", "result": "pass", "note": "..." }   // result: pass | gap | fail
+    ],
+    "requiredEvidence": [],      // cannot_verify 时必填非空
+    "reviewerNotes": "..."
+  }
+  ```
+
+- `docHash` = `sha256(主审查文档内容)`（hex）—— plan 主文档是 `plan.md`（`reviewedFiles[0]`）。CLI 重算 sha256 比对，不符判伪造（fail-closed）。改 plan.md 后须重算 docHash。`tier=self`（≤3 文件）降级为当前 agent 自审。
+- 运行时 CLI 通过 `{REVIEW_JSON_CONTRACT}` 注入精确 schema+示例，以注入版为权威逐字模板。
+
 ### 契约门控（阻断完成）
 
 - **plan 启动前**：CLI 校验 `design.md` 是否满足 plan 契约（缺文件变更清单/风险登记/自审章节会阻断）。若失败需先 `sillyspec run brainstorm --reopen --from-step N` 修订设计。

@@ -42,6 +42,32 @@ sillyspec run propose --reopen --from-step N   # 重新打开已完成阶段修�
 
 propose 含自检步骤（按规模分级：tier=self 当前 agent 自审 / tier=independent 启动独立审查子代理产出 stage review.json），完成时校验四件套文档齐全 + 内容章节（如 proposal 的 Non-Goals、design 的文件变更清单/风险登记/自审）。缺失会阻断完成。
 
+### Stage Review Gate（propose 的 proposal review.json）
+
+propose 在 `tier=independent` 时产出一个 stage 级 `review.json`，CLI `Stage Review Gate` 硬校验其 schema 与 `docHash` 真实性。
+
+- 路径：`.sillyspec/.runtime/stage-reviews/propose-review-<stage-review-run-id>/review.json`（目录可能不存在需手建；run-id 由该步 `--done` prompt 输出指定）。marker 文件 `.runtime/current-stage-review-run-id-propose-<变更名>`。
+- 字段（`schemaVersion:1`，`reviewType=proposal` —— propose 阶段主审查文档是 `proposal.md`）：
+
+  ```json
+  {
+    "schemaVersion": 1,
+    "reviewType": "proposal",
+    "reviewedFiles": ["changes/<变更名>/proposal.md"],   // [0] 为主文档
+    "docHash": "<sha256(reviewedFiles[0] 文件内容，hex)>",
+    "specVerdict": "pass",       // pass | fail | cannot_verify
+    "qualityVerdict": "pass",    // pass | fail | cannot_verify
+    "checklist": [               // 扁平数组，逐条对照 proposal 章节/Non-Goals 核验
+      { "item": "Non-Goals 明确", "result": "pass", "note": "..." }   // result: pass | gap | fail
+    ],
+    "requiredEvidence": [],      // cannot_verify 时必填非空
+    "reviewerNotes": "..."
+  }
+  ```
+
+- `docHash` = `sha256(主审查文档内容)`（hex）—— propose 主文档是 `proposal.md`（`reviewedFiles[0]`）。CLI 重算 sha256 比对，不符判伪造（fail-closed）。改 proposal.md 后须重算 docHash。`tier=self`（≤3 文件）降级为当前 agent 自审。
+- 运行时 CLI 通过 `{REVIEW_JSON_CONTRACT}` 注入精确 schema+示例，以注入版为权威逐字模板。
+
 ## 阶段流转
 
 ```

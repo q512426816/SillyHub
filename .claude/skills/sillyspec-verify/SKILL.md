@@ -43,7 +43,7 @@ verify 是只读阶段（**禁止改代码/改 git 状态**，只检查 + 写报
 
 - **必须产出 `verify-result.md`**——不存在则阻断完成（不能跳过报告直接 `--done`）
 - **结论为 `FAIL` 则阻断完成**——不能带着 FAIL 标记 verify 完成
-- **`integration-critical` / `deployment-critical` 变更**（design/plan 含 daemon/session/lease/lifecycle 等关键词）：结论 PASS WITH NOTES 降级为 FAIL，必须有真实集成证据（Runtime Evidence section）
+- **`integration-critical` / `deployment-critical` 变更**（design/plan 含 daemon/session/lease/lifecycle 等关键词）：结论 PASS WITH NOTES 降级为 FAIL，必须有真实集成证据（Runtime Evidence section）——该证据为 Agent 自报告，CLI 仅校验其字面存在、不独立运行时核验，须真实执行过
 - `verify-required-evidence.json`（execute 写入）中每条 missing evidence → 阻断
 
 被阻断时 CLI 打印 ❌ 校验失败，不会提示"验证通过"。修复 `verify-result.md` 后重新 `--done`。
@@ -59,7 +59,7 @@ PASS / PASS WITH NOTES / FAIL      ← 必须有结论章节（标题含"结论/
 ## 探针结果
 ## 测试结果
 ## 变更风险等级
-## Runtime Evidence（integration/deployment-critical 必填）
+## Runtime Evidence（integration/deployment-critical 必填；自报告，CLI 仅字面校验、不独立核验）
 ```
 
 ## 阶段流转

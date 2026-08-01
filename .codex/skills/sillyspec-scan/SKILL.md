@@ -38,22 +38,27 @@ sillyspec run scan --reset                     # 重置阶段（从头开始）
 
 | 参数 | 说明 |
 |---|---|
-| `--deep` | 强制 deep 扫描 profile（完整流程，不按规模裁剪） |
+| `--quick` | 强制 quick profile（快速接入，仅 4 份核心文档，0 子代理） |
+| `--standard` | 强制 standard profile（压缩步骤，最多 1 子代理） |
+| `--deep` | 强制 deep profile（完整流程，不按规模裁剪） |
 | `--force-rescan` | 覆盖已有 scan 文档的保护（默认覆盖需 source_commit/updated_at 匹配） |
 
-### scanProfile（按项目规模自动裁剪）
+### scanProfile（显式选择优先，否则按规模自动裁剪）
 
-CLI 根据源码规模自动选择 profile，无需手动指定：
+可用 `--quick` / `--standard` / `--deep` **显式指定 profile**（三档互斥，优先于自动判定）。
+不带 flag 时 CLI 按源码规模自动选择：
 
 | profile | 触发条件 | 行为 |
 |---|---|---|
-| quick | ≤30 文件 且 ≤80KB 且 ≤3 项目 | 3 步，0 子代理，5 份核心文档 |
-| standard | ≤200 文件 且 ≤800KB | 压缩步骤，最多 1 子代理 |
-| deep | 大项目或 `--deep` | 完整流程 |
+| quick | `--quick` 或 ≤30 文件 且 ≤80KB 且 ≤3 项目 | 3 步，0 子代理，4 份核心文档 |
+| standard | `--standard` 或 ≤200 文件 且 ≤800KB | 压缩步骤，最多 1 子代理 |
+| deep | `--deep` 或 大项目 | 完整流程 |
+
+> **平台快速接入**：对大项目用 `sillyspec run scan --quick`（含平台参数 `--spec-root`/`--workspace-id`/`--scan-run-id`）只生成 4 份核心文档完成接入，后续 `sillyspec run scan --deep` 覆盖升级为完整 7 份。quick 文档 frontmatter 标 `scan_depth: quick`，深度扫描识别后允许覆盖。
 
 ### post-check
 
-scan 完成时 CLI 自动校验 7 份文档齐全。缺失会设状态为 `failed_post_check`，阻断进入主流程下游（brainstorm/plan 等），需修复后重跑 scan。
+scan 完成时 CLI **按 profile 校验文档齐全**：quick 模式只要求 4 份核心文档（PROJECT/ARCHITECTURE/CONVENTIONS/STRUCTURE），standard/deep 要求完整 7 份。缺失会设状态为 `failed_post_check`，阻断进入主流程下游（brainstorm/plan 等），需修复后重跑 scan。quick 模式带一条 informational warning（`quick_profile_notice`），状态落 `completed_with_warnings`，不阻断完成。
 
 ## 阶段流转
 
