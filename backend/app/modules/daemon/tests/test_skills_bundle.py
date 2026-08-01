@@ -16,10 +16,12 @@ from __future__ import annotations
 import hashlib
 import io
 import tarfile
+import uuid
 from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -194,8 +196,14 @@ async def test_404_when_skills_dir_empty(
 # ---------------------------------------------------------------------------
 
 
-def _add_custom_skill(db_session: AsyncSession, name: str, content: str) -> None:
-    """Insert a CustomSkill row synchronously-ish (commit handled by fixture)."""
+def _add_custom_skill(
+    db_session: AsyncSession, name: str, content: str, created_by: uuid.UUID
+) -> None:
+    """Insert a CustomSkill row (commit handled by caller fixture).
+
+    task-01 D-001：``CustomSkill.created_by`` NOT NULL + ON DELETE CASCADE——
+    per-user 强归属，调用方必须显式传 user_id（不再允许隐式全局共享的旧用法）。
+    """
     from app.modules.skills.model import CustomSkill
 
     db_session.add(
@@ -203,8 +211,26 @@ def _add_custom_skill(db_session: AsyncSession, name: str, content: str) -> None
             name=name,
             description=f"custom skill {name}",
             content=content,
+            created_by=created_by,
         )
     )
+
+
+@pytest.fixture()
+async def default_user_id(db_session: AsyncSession, auth_headers: dict[str, str]) -> uuid.UUID:
+    """``auth_headers`` 对应的 admin 用户 id（``auth_admin_token`` fixture 建的
+    ``admin@example.com``）。
+
+    ``_add_custom_skill`` 的 ``created_by`` 归属键——CustomSkill 已 NOT NULL
+    （task-01 D-001），造数据必须传。这里依赖 ``auth_headers`` 保证用户已落库，
+    再按 email 反查 id（``auth_admin_token`` 用随机 uuid，无法直接拿到）。
+    """
+    from app.modules.auth.model import User
+
+    row = (
+        await db_session.execute(select(User).where(User.email == "admin@example.com"))
+    ).scalar_one()
+    return row.id
 
 
 async def test_manifest_includes_custom_skills(
@@ -212,10 +238,11 @@ async def test_manifest_includes_custom_skills(
     auth_headers: dict[str, str],
     skills_dir: Path,
     db_session: AsyncSession,
+    default_user_id: uuid.UUID,
 ) -> None:
     """验收 A：manifest 含代码库 sillyspec-* + DB CustomSkill 的 <name>/SKILL.md。"""
-    _add_custom_skill(db_session, "my-custom", "# my custom skill\nbody line")
-    _add_custom_skill(db_session, "another-one", "# another\ncontent here")
+    _add_custom_skill(db_session, "my-custom", "# my custom skill\nbody line", default_user_id)
+    _add_custom_skill(db_session, "another-one", "# another\ncontent here", default_user_id)
     await db_session.commit()
 
     resp = await client.get("/api/daemon/skills/latest/manifest", headers=auth_headers)
@@ -243,9 +270,10 @@ async def test_bundle_includes_custom_skills(
     auth_headers: dict[str, str],
     skills_dir: Path,
     db_session: AsyncSession,
+    default_user_id: uuid.UUID,
 ) -> None:
     """验收 A：bundle 含 DB CustomSkill 的 <name>/SKILL.md，内容匹配。"""
-    _add_custom_skill(db_session, "bundled-skill", "## hello\nworld")
+    _add_custom_skill(db_session, "bundled-skill", "## hello\nworld", default_user_id)
     await db_session.commit()
 
     resp = await client.get("/api/daemon/skills/latest/bundle", headers=auth_headers)
@@ -272,6 +300,7 @@ async def test_version_changes_on_custom_skill_mutation(
     auth_headers: dict[str, str],
     skills_dir: Path,
     db_session: AsyncSession,
+    default_user_id: uuid.UUID,
 ) -> None:
     """验收 B：增/删/改 CustomSkill → version hash 变化。"""
     # 基线：纯代码库（DB 空）
@@ -280,7 +309,7 @@ async def test_version_changes_on_custom_skill_mutation(
     assert base_version != ""
 
     # 增 → version 变
-    _add_custom_skill(db_session, "new-skill", "# v1")
+    _add_custom_skill(db_session, "new-skill", "# v1", default_user_id)
     await db_session.commit()
     after_add = (
         await client.get("/api/daemon/skills/latest/manifest", headers=auth_headers)
@@ -347,6 +376,7 @@ async def test_custom_skill_name_no_sillyspec_prefix_collision(
     auth_headers: dict[str, str],
     skills_dir: Path,
     db_session: AsyncSession,
+    default_user_id: uuid.UUID,
 ) -> None:
     """D-002 边界：custom name 不带 sillyspec- 前缀，与代码库命名空间独立。
 
@@ -355,7 +385,7 @@ async def test_custom_skill_name_no_sillyspec_prefix_collision(
     代码库 → sillyspec-verify/<file>，二者路径形态不同不冲突）。这里只验证
     bundle 层路径形态分离（业务层 name 校验在 task-02 service）。
     """
-    _add_custom_skill(db_session, "plain-name", "# plain")
+    _add_custom_skill(db_session, "plain-name", "# plain", default_user_id)
     await db_session.commit()
 
     resp = await client.get("/api/daemon/skills/latest/manifest", headers=auth_headers)
@@ -453,3 +483,72 @@ async def test_manifest_includes_skill_descriptions(
     plain = skills["sillyspec-plain"]
     assert plain["description"] == ""
     assert plain["file_count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# task-12（2026-07-31-custom-skill-per-user）：manifest/bundle 按 user 过滤。
+# FR-06 / D-004：user A 的自定义技能进 A 的 manifest，不进 B 的；系统 sillyspec-*
+# 文件系统扫描全局共享（D-006），A/B 都能看到。越权隔离回归。
+# ---------------------------------------------------------------------------
+
+
+async def test_manifest_filters_custom_skills_per_user(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    skills_dir: Path,
+    db_session: AsyncSession,
+    default_user_id: uuid.UUID,
+) -> None:
+    """验收 D（FR-06 / D-004）：manifest 按 ``created_by`` 过滤自定义技能。
+
+    * user A（``auth_headers``，admin）建 ``skill-a``；user B（非 admin）建 ``skill-b``。
+    * A 的 manifest 含 ``skill-a``、不含 ``skill-b``；B 的 manifest 含 ``skill-b``、
+      不含 ``skill-a``（越权隔离，不再全局聚合）。
+    * 系统 sillyspec-* 在两人 manifest 中都在（D-006：文件系统扫描与 user 无关）。
+    """
+    from app.core.config import get_settings
+    from app.core.security import create_access_token, password_hasher
+    from app.modules.auth.model import User
+
+    # 建 user B（非 admin）+ token
+    settings = get_settings()
+    password_hasher.configure(settings.auth_bcrypt_rounds)
+    user_b = User(
+        id=uuid.uuid4(),
+        email="other@example.com",
+        username="other-user",
+        password_hash=password_hasher.hash("Pass123!"),
+        display_name="Other",
+        status="active",
+        is_platform_admin=False,
+    )
+    db_session.add(user_b)
+    await db_session.commit()
+    token_b, _ = create_access_token(
+        user_id=user_b.id,
+        email=user_b.email,
+        is_admin=user_b.is_platform_admin,
+        settings=settings,
+    )
+    headers_b = {"Authorization": f"Bearer {token_b}"}
+
+    # A、B 各建一个私有技能
+    _add_custom_skill(db_session, "skill-a", "# A only", default_user_id)
+    _add_custom_skill(db_session, "skill-b", "# B only", user_b.id)
+    await db_session.commit()
+
+    # A 的 manifest：见 A 不见 B；系统 sillyspec-* 都在
+    resp_a = await client.get("/api/daemon/skills/latest/manifest", headers=auth_headers)
+    assert resp_a.status_code == 200
+    paths_a = {f["path"] for f in resp_a.json()["files"]}
+    assert "skill-a/SKILL.md" in paths_a
+    assert "skill-b/SKILL.md" not in paths_a
+    assert any(p.startswith("sillyspec-verify/") for p in paths_a)
+
+    # B 的 manifest：见 B 不见 A；系统 sillyspec-* 都在
+    resp_b = await client.get("/api/daemon/skills/latest/manifest", headers=headers_b)
+    assert resp_b.status_code == 200
+    paths_b = {f["path"] for f in resp_b.json()["files"]}
+    assert "skill-b/SKILL.md" in paths_b
+    assert "skill-a/SKILL.md" not in paths_b
+    assert any(p.startswith("sillyspec-verify/") for p in paths_b)

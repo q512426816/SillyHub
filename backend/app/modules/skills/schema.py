@@ -47,7 +47,7 @@ class CustomSkillRead(BaseModel):
     name: str
     description: str
     content_preview: str = Field(..., description="content 前 120 字符，供列表展示")
-    created_by: uuid.UUID | None = None
+    created_by: uuid.UUID
     created_at: datetime
     updated_at: datetime
 

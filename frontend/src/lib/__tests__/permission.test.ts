@@ -81,10 +81,10 @@ describe("hasAnyPermission", () => {
     expect(hasAnyPermission(user, ["user:read"])).toBe(false);
   });
 
-  it("boundary: returns false when perms input is [] and user is not admin", () => {
-    // 非 admin + 空查询 perms → false（实现中显式检查 perms.length === 0）
+  it("boundary: returns true when perms input is [] and user logged-in (D-003 菜单放开)", () => {
+    // 2026-07-31-custom-skill-per-user D-003：菜单无权限要求（permissions: []）→ 任何登录用户可见
     const user = mkUser({ permissions: ["user:read"] });
-    expect(hasAnyPermission(user, [])).toBe(false);
+    expect(hasAnyPermission(user, [])).toBe(true);
   });
 });
 
@@ -122,8 +122,8 @@ describe("canSeeMenu", () => {
     expect(canSeeMenu(user, usersGroup!)).toBe(false);
   });
 
-  it("boundary: empty group.permissions yields false for non-admin and true for admin", () => {
-    // 构造一个 permissions 为空的 mock group，验证非 admin 看不到、admin 短路可见。
+  it("boundary: empty group.permissions yields true for any logged-in user (D-003 skills 菜单放开)", () => {
+    // 2026-07-31-custom-skill-per-user D-003：菜单 permissions=[] → 任何登录用户可见（skills 菜单）
     const mockGroup: MenuPermissionGroup = {
       section: "system",
       menuKey: "mock-empty",
@@ -132,15 +132,19 @@ describe("canSeeMenu", () => {
       href: "/mock",
       permissions: [],
     };
+    // 非 admin 但登录 → 可见
     expect(canSeeMenu(mkUser({ permissions: ["user:read"] }), mockGroup)).toBe(
-      false,
+      true,
     );
+    // admin → 可见（短路）
     expect(
       canSeeMenu(
         mkUser({ is_platform_admin: true, permissions: [] }),
         mockGroup,
       ),
     ).toBe(true);
+    // 未登录 → 不可见
+    expect(canSeeMenu(null, mockGroup)).toBe(false);
   });
 
   it("git-identities 配 git_identity:admin：测试管理账号（无 git_identity:admin）不可见", () => {

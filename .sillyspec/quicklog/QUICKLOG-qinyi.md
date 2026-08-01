@@ -54,3 +54,17 @@
 方案：① classifySessionLog 拆 tool→tool_use/tool_result，新增 isToolResultDenied 共享纯函数；② SessionTurnView 改 processItems 有序过程项，onLog 实时链路与 logsToTurns 历史链路同源——tool_use 推 running、tool_result 配对最近 running 设 ok/deny、孤儿 result 降级 raw 空 tool 项兜底不丢数据；③ ToolEventCard 渲染配对工具卡片（✓ 成功 / ✗ 失败·被拒 / ⏳ 执行中 状态徽章 + 默认折叠 result 太长 + parseToolRaw 命令格式 + 复制）；④ TurnDetailsList 连续同类合并——连续相邻 [THINKING] 拼成一个思考过程卡片，被工具/打断则分段保持真实顺序。
 修正（Feedback B+C，2026-07-30）：首版把一个 turn 内所有 [THINKING] 一股脑拼成单个卡片，工具穿插在思考之间时会丢顺序、内容混杂——改为按真实到达顺序入 processItems，仅连续相邻 thinking 合并、被工具打断分段；工具结果默认展开太长，改 defaultOpen=false 默认折叠；思考与工具结果改 MarkdownText 渲染（与对话气泡一致，支持 md 格式）。
 结果：daemon 目录 3 测试文件 71 测试全绿（session-log-sanitize 23 + runtime-session-helpers 7 含连续思考被工具打断保持顺序专项 + interactive-session-panel 41）；tsc --noEmit 0 错；frontend.md 变更索引已同步；已 git add（6 源文件 + frontend.md + QUICKLOG）未 commit；已部署本地 docker（镜像 grep「工具结果」「思考过程」字符串命中 + frontend healthy）。
+## ql-20260731-001-3abf | 2026-07-31 14:50:34 | 平台技能清单显示每个技能描述（manifest 增 skills 摘要字段）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/skills_bundle_service.py（新增 _parse_skill_frontmatter 解析 SKILL.md 开头 YAML frontmatter 取 name/description，无围栏 / YAML 错 / 解码错均返回空 dict 不抛；新增 _summarize_skills 按顶层目录聚合 name/description/file_count，name=目录名与 daemon 同步路径一致；build_skills_manifest 返回新增 skills 字段，不动 files）
+- backend/app/modules/daemon/tests/test_skills_bundle.py（加 4 测试：frontmatter 解析 / 聚合 / 端到端 description / 无 frontmatter 空兜底；新增 skills_dir_with_descriptions fixture）
+- frontend/src/lib/custom-skills.ts（加 PlatformSkillSummary 类型 name/description/file_count；PlatformSkillsManifest 加可选 skills 字段，端点 dict[str,Any] 未进 OpenAPI 继续手写）
+- frontend/src/app/(dashboard)/settings/skills/page.tsx（deriveSkillGroups 回退结构对齐 skill→name / fileCount→file_count；platformGroups 优先 manifest.skills 兜底 deriveSkillGroups；表格说明列渲染 g.description || 通用文案）
+- frontend/src/app/(dashboard)/settings/skills/__tests__/page.test.tsx（加 description 渲染测试：mock manifest 带 skills 断言描述显示）
+
+需求：平台技能设置页「系统自带技能」清单每个技能（如 sillyspec-archive）只显示技能名，「说明」列所有技能写死同一句通用文案「只读 · 随部署更新，AI 启动自动加载」，看不到各技能自己的描述（如 archive 是「用于归档已验证完成的变更」）。用户反馈连续两轮被误判为「自定义技能空状态」问题，实际是系统自带技能清单缺描述展示。
+根因：后端 build_skills_manifest 返回的 manifest 只有 files[{path, sha256}]（daemon 同步用），没带每个 skill 的 description；前端 PlatformSkillsManifest 类型无 description 字段，deriveSkillGroups 只从 files 聚合技能名+文件数，表格「说明」列无数据可显只能写死通用文案。数据链路断在中间——前端拿不到描述，想显示也显示不出来。
+方案：① 后端 skills_bundle_service 新增 _parse_skill_frontmatter（解析 SKILL.md 开头 YAML frontmatter 取 name+description，无围栏 / YAML 错 / 解码错均返回空 dict 不抛异常）+ _summarize_skills（按顶层目录聚合 {name, description, file_count}，name=目录名与 daemon 同步路径、前端 deriveSkillGroups 口径一致，注意目录名 sillyspec-archive ≠ frontmatter name sillyspec:archive）；build_skills_manifest 返回新增 skills 字段，不动 files（daemon 同步与 version 计算零影响）。② 前端 custom-skills.ts 加 PlatformSkillSummary 类型 + manifest 加可选 skills 字段（端点 dict[str,Any] 未进 OpenAPI 生成范围，手写对齐后端）；page.tsx platformGroups 优先用 manifest.skills（deriveSkillGroups 兜底），表格说明列渲染 g.description || 通用文案。
+结果：后端 test_skills_bundle 15 passed（含 4 新测试：frontmatter 解析 / 聚合 / 端到端 description / 无 frontmatter 空兜底）；前端 page.test 7 passed（含 description 渲染新测试）；gen:types 无 diff（manifest 端点 dict[str,Any] 不影响 OpenAPI schema）；前端 tsc --noEmit exit 0。改 5 代码文件 + 2 模块文档（backend.md / frontend.md 变更索引同步），已 git add 未 commit。未部署，建议重启 backend + 浏览器实测确认各技能描述显示。

@@ -191,8 +191,13 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(counter.ppm).toBe(14);
   });
 
-  it("每个 menu 至少 1 个 permission", () => {
+  it("每个 menu 至少 1 个 permission（skills 例外：D-003 放开对所有登录用户可见，permissions:[]）", () => {
     MENU_PERMISSION_GROUPS.forEach((g) => {
+      if (g.menuKey === "skills") {
+        // 2026-07-31-custom-skill-per-user D-003：skills 菜单对所有登录用户可见，无独立权限
+        expect(g.permissions).toEqual([]);
+        return;
+      }
       expect(g.permissions.length).toBeGreaterThanOrEqual(1);
     });
   });
@@ -207,9 +212,14 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(g!.pickerHidden).toBeFalsy();
   });
 
-  it("所有 menu 都不设 pickerHidden（ql-005 移除 git-identities 的 pickerHidden）", () => {
-    // 验证全表无 pickerHidden=true 残留
+  it("所有 menu 都不设 pickerHidden（skills 例外：D-003 无独立权限可配；ql-005 移除 git-identities 的 pickerHidden）", () => {
+    // 验证全表无 pickerHidden=true 残留（skills 例外）
     MENU_PERMISSION_GROUPS.forEach((g) => {
+      if (g.menuKey === "skills") {
+        // 2026-07-31-custom-skill-per-user D-003：skills 无独立权限（permissions:[]），pickerHidden 屏蔽空卡
+        expect(g.pickerHidden).toBe(true);
+        return;
+      }
       expect(g.pickerHidden).toBeFalsy();
     });
   });
@@ -313,7 +323,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(g!.permissions).toEqual([{ key: "llm_provider:read", name: "供应商管理" }]);
   });
 
-  it("新增 skills 菜单：agent 组 /settings/skills + settings:admin（design §7.1）", () => {
+  it("新增 skills 菜单：agent 组 /settings/skills + permissions:[] 对所有登录用户可见（2026-07-31-custom-skill-per-user D-003）", () => {
     const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "skills");
     expect(g).toBeDefined();
     expect(g!.section).toBe("agent");
@@ -321,7 +331,9 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(g!.href).toBe("/settings/skills");
     expect(g!.absolute).toBe(true);
     expect(g!.matchPattern).toBe("/settings/skills");
-    expect(g!.permissions).toEqual([{ key: "settings:admin", name: "平台设置管理" }]);
+    // D-003：skills 菜单放开，所有登录用户可见（permissions:[]），无独立权限可配（pickerHidden:true）
+    expect(g!.permissions).toEqual([]);
+    expect(g!.pickerHidden).toBe(true);
   });
 
   it("新增 mcp 菜单：agent 组 /settings/mcp + settings:admin（design §7.1）", () => {

@@ -101,6 +101,8 @@ describe("AdminRolePermissionPicker", () => {
     );
     expect(agentMenus).toHaveLength(4);
     agentMenus.forEach((g) => {
+      // pickerHidden 菜单（skills,D-003 无独立权限）picker 不渲染卡片，跳过
+      if (g.pickerHidden) return;
       expect(screen.getByText(g.menuLabel)).toBeInTheDocument();
     });
   });

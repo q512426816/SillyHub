@@ -202,8 +202,19 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     ],
   },
   {
-    // 2026-07-29-sidebar-menu-restructure 新增（D-003）：技能管理提为独立菜单，
-    // 指向平台级 /settings/skills（工作区级仍在工作区内部访问）。
+    // 2026-07-29-sidebar-menu-restructure 新增：技能管理提为独立菜单，指向平台级
+    // /settings/skills（工作区级仍在工作区内部访问）。
+    // 2026-07-31-custom-skill-per-user D-003：权限放宽——去掉 settings:admin 门槛，
+    // 改为所有登录用户可见。理由：技能是个人资产（per-user），后端 custom-skills 端点
+    // （task-03）已从 SETTINGS_ADMIN 放宽到任意登录用户，前端菜单须对齐，否则非管理员
+    // 看不到入口（前后端不一致 bug）。permissions 置空 = 不再要求任何特定权限。
+    //
+    // ⚠️ 配套依赖（超出本 task allowed_paths）：lib/permission.ts 的 canSeeMenu →
+    // hasAnyPermission 当前对空 permissions 显式 return false（permission.ts:41），
+    // 即「空 = 非管理员不可见」而非「空 = 登录即可见」。要让本菜单真正对所有登录用户
+    // 可见，须配套调整 hasAnyPermission：当 perms 为空且 user 非 null 时返回 true
+    // （登录即可见），并同步更新 permission.test.ts 中「空 perms → false」的断言。
+    // pickerHidden: true——本菜单已无独立权限可配，AdminRolePermissionPicker 不渲染卡片。
     section: "agent",
     menuKey: "skills",
     menuLabel: "技能管理",
@@ -211,7 +222,8 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/settings/skills",
     absolute: true,
     matchPattern: "/settings/skills",
-    permissions: [{ key: "settings:admin", name: "平台设置管理" }],
+    permissions: [],
+    pickerHidden: true,
   },
   {
     // 2026-07-29-sidebar-menu-restructure 新增（D-003）：MCP 管理提为独立菜单，

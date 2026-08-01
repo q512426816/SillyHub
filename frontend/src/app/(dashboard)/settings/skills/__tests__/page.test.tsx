@@ -2,17 +2,20 @@
  * 2026-07-07-skills-mcp-management-ui task-08：/settings/skills 页单测。
  * （skills-settings-p0-fixup task-04：补 useNotify mock + amber banner 断言 +
  *  placeholder 适配步骤模板。）
+ * （2026-07-31-custom-skill-per-user task-13：task-09 把 is_platform_admin 门槛移除 →
+ *  登录用户即可见 CRUD 按钮，amber banner 删除；新增按钮权限 + per-user 列表用例。）
  *
  * 依据文档:
  *   - .sillyspec/changes/skills-settings-p0-fixup/design.md（P0-3/4 + D-005）
- *   - tasks/task-03.md / task-04.md（验收）
+ *   - .sillyspec/changes/2026-07-31-custom-skill-per-user/tasks/task-09.md / task-13.md
  *
  * 覆盖:
  *   1. 平台 skills 只读列表展示 manifest（version + 文件名 + 文件数）（AC-A）
  *   2. 自定义 skills 表格展示 list 数据（AC-B）
- *   3. admin 可见「新增技能」「编辑」「删除」按钮；非 admin 只读 + amber banner（AC-D）
+ *   3. 登录用户（含非 platform_admin）可见「新增技能」「编辑」「删除」按钮（FR-07）
  *   4. 点击「新增技能」打开弹窗，填写后调 createCustomSkill（AC-B/C）
  *   5. 点击删除 → confirm 后调 deleteCustomSkill
+ *   6. per-user 列表：后端按当前 user 过滤，前端按返回值渲染（不二次筛选）
  *
  * 测试模式：照搬 runtimes/__tests__/page.test.tsx 的 QueryClientProvider + useSession mock 脚手架。
  */
@@ -220,35 +223,97 @@ describe("/settings/skills 页", () => {
     expect(within(barCells!).getByText("1")).toBeInTheDocument();
   });
 
-  it("展示自定义 skills 表格行（admin 可见 编辑/删除）", async () => {
+  it("展示自定义 skills 表格行（登录用户可见 编辑/删除/新增）", async () => {
     renderPage(<SkillsPage />);
 
     expect(await screen.findByText("自定义技能（自己加的）")).toBeInTheDocument();
     expect(await screen.findByText("my-helper")).toBeInTheDocument();
     expect(await screen.findByText("一个辅助技能")).toBeInTheDocument();
-    // admin 可见 编辑 + 删除 + 新增
+    // task-09：登录即可见（不再要求 is_platform_admin）
     expect(screen.getByText("编辑")).toBeInTheDocument();
     expect(screen.getByText("删除")).toBeInTheDocument();
     expect(screen.getByText("新增技能")).toBeInTheDocument();
   });
 
-  it("非 admin：amber 只读提示 + 无 新增/编辑/删除 按钮 + 行内只读", async () => {
+  it("非 admin 登录用户也能见 新增/编辑/删除 按钮（task-09 移除 is_platform_admin 门槛，FR-07）", async () => {
     session.user = { id: "u2", is_platform_admin: false, permissions: [] };
     renderPage(<SkillsPage />);
 
     expect(await screen.findByText("my-helper")).toBeInTheDocument();
-    // 非 admin 顶部 amber 只读 banner
+    // task-09 后 amber 只读 banner 已删除
     expect(
-      screen.getByText("仅平台管理员可编辑，当前为只读视图。"),
+      screen.queryByText("仅平台管理员可编辑，当前为只读视图。"),
+    ).not.toBeInTheDocument();
+    // 非 admin 登录用户即可见这些按钮
+    expect(await screen.findByText("新增技能")).toBeInTheDocument();
+    expect(screen.getByText("编辑")).toBeInTheDocument();
+    expect(screen.getByText("删除")).toBeInTheDocument();
+    // 行内不再有「只读」字样
+    expect(screen.queryByText("只读")).not.toBeInTheDocument();
+  });
+
+  it("非 admin 登录用户点击「新增技能」打开弹窗（FR-07）", async () => {
+    session.user = { id: "u2", is_platform_admin: false, permissions: [] };
+    renderPage(<SkillsPage />);
+
+    fireEvent.click(await screen.findByText("新增技能"));
+    expect(await screen.findByText("新增自定义技能")).toBeInTheDocument();
+  });
+
+  it("per-user 列表：渲染后端返回的当前用户技能（created_by 均为当前 user）", async () => {
+    // 后端已按当前 user 过滤（task-04），前端直接渲染返回值。
+    skillsApi.listCustomSkills.mockResolvedValue([
+      {
+        id: "s1",
+        name: "my-helper",
+        description: "一个辅助技能",
+        content_preview: "# my-helper\n\n正文预览...",
+        created_by: "u1",
+        created_at: "2026-07-07T10:00:00Z",
+        updated_at: "2026-07-07T11:00:00Z",
+      },
+      {
+        id: "s2",
+        name: "another-skill",
+        description: "另一个技能",
+        content_preview: "# another",
+        created_by: "u1",
+        created_at: "2026-07-07T10:00:00Z",
+        updated_at: "2026-07-07T12:00:00Z",
+      },
+    ]);
+    session.user = { id: "u1", is_platform_admin: false, permissions: [] };
+
+    renderPage(<SkillsPage />);
+
+    expect(await screen.findByText("my-helper")).toBeInTheDocument();
+    expect(screen.getByText("another-skill")).toBeInTheDocument();
+    expect(screen.getByText("一个辅助技能")).toBeInTheDocument();
+    expect(screen.getByText("另一个技能")).toBeInTheDocument();
+  });
+
+  it("前端不二次筛选：mock 返回他人技能数据时按后端契约渲染", async () => {
+    // 后端负责按 user 过滤；前端不做 created_by / is_platform_admin 二次筛选。
+    // 若后端返回了他人数据（不应发生），前端照样渲染，契约由后端兜底。
+    skillsApi.listCustomSkills.mockResolvedValue([
+      {
+        id: "s-other",
+        name: "other-user-skill",
+        description: "他人技能（后端已过滤，前端不再筛选）",
+        content_preview: "# other",
+        created_by: "u-other",
+        created_at: "2026-07-07T10:00:00Z",
+        updated_at: "2026-07-07T11:00:00Z",
+      },
+    ]);
+    session.user = { id: "u1", is_platform_admin: false, permissions: [] };
+
+    renderPage(<SkillsPage />);
+
+    expect(await screen.findByText("other-user-skill")).toBeInTheDocument();
+    expect(
+      screen.getByText("他人技能（后端已过滤，前端不再筛选）"),
     ).toBeInTheDocument();
-    // 非 admin 无新增按钮
-    await waitFor(() => {
-      expect(screen.queryByText("新增技能")).not.toBeInTheDocument();
-    });
-    // 行内无编辑/删除，只有「只读」字样
-    expect(screen.queryByText("编辑")).not.toBeInTheDocument();
-    expect(screen.queryByText("删除")).not.toBeInTheDocument();
-    expect(screen.getByText("只读")).toBeInTheDocument();
   });
 
   it("点击新增技能打开弹窗 → 填写 → 调 createCustomSkill", async () => {

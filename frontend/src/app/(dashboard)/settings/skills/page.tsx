@@ -28,7 +28,6 @@ import {
   useUpdateCustomSkill,
   type CustomSkillRead,
 } from "@/lib/custom-skills";
-import { useSession } from "@/stores/session";
 import { cn } from "@/lib/utils";
 
 function formatDateTime(value: string | null): string {
@@ -56,8 +55,6 @@ function deriveSkillGroups(
 }
 
 export default function SkillsSettingsPage() {
-  const isPlatformAdmin = useSession((s) => s.user?.is_platform_admin === true);
-
   const {
     skills,
     isLoading: skillsLoading,
@@ -182,13 +179,6 @@ export default function SkillsSettingsPage() {
         )}
       </div>
 
-      {/* 非管理员只读提示（P0-4，复用 MCP 页 amber banner 样式）。 */}
-      {!isPlatformAdmin && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800">
-          仅平台管理员可编辑，当前为只读视图。
-        </div>
-      )}
-
       {pageError && (
         <div className="rounded-lg border border-destructive/30 bg-red-50 px-4 py-3 text-sm text-destructive">
           {pageError}
@@ -284,12 +274,10 @@ export default function SkillsSettingsPage() {
       <SectionCard
         title="自定义技能（自己加的）"
         extra={
-          isPlatformAdmin ? (
-            <Button size="sm" onClick={() => setEditing("new")} className="gap-1">
-              <Plus className="h-3.5 w-3.5" />
-              新增技能
-            </Button>
-          ) : null
+          <Button size="sm" onClick={() => setEditing("new")} className="gap-1">
+            <Plus className="h-3.5 w-3.5" />
+            新增技能
+          </Button>
         }
         bodyPadding="p-0"
       >
@@ -304,19 +292,13 @@ export default function SkillsSettingsPage() {
             icon={<Boxes className="h-5 w-5" />}
             title="还没有自定义技能"
             description={
-              isPlatformAdmin ? (
-                <span>新增后会把这份「AI 操作说明书」分发给所有 AI 助手，重启守护进程后生效。</span>
-              ) : (
-                <span>需要平台管理员权限才能新增自定义技能。</span>
-              )
+              <span>新增后会把这份「AI 操作说明书」分发给属于你的 AI 助手，重启守护进程后生效。</span>
             }
             action={
-              isPlatformAdmin ? (
-                <Button size="sm" onClick={() => setEditing("new")} className="gap-1">
-                  <Plus className="h-3.5 w-3.5" />
-                  新增技能
-                </Button>
-              ) : undefined
+              <Button size="sm" onClick={() => setEditing("new")} className="gap-1">
+                <Plus className="h-3.5 w-3.5" />
+                新增技能
+              </Button>
             }
           />
         ) : (
@@ -347,31 +329,27 @@ export default function SkillsSettingsPage() {
                       {formatDateTime(s.updated_at)}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      {isPlatformAdmin ? (
-                        <div className="flex justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setEditing(s)}
-                            className="gap-1"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                            编辑
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                            disabled={deleteSkill.isPending}
-                            onClick={() => void handleDelete(s)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            删除
-                          </Button>
-                        </div>
-                      ) : (
-                        <span className="text-[11px] text-muted-foreground">只读</span>
-                      )}
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setEditing(s)}
+                          className="gap-1"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          编辑
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          disabled={deleteSkill.isPending}
+                          onClick={() => void handleDelete(s)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          删除
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -2394,8 +2394,8 @@ async def get_skills_manifest(
     """
     from app.modules.agent.skills_bundle_service import build_skills_manifest
 
-    del user  # 仅做认证，不使用
-    manifest = await build_skills_manifest(session=session)
+    # task-07 D-004：透传 user.id，让 manifest 按 user 维度合并代码库 sillyspec-* + 该用户私有 CustomSkill。
+    manifest = await build_skills_manifest(session=session, user_id=user.id)
     if not manifest.get("files"):
         raise HTTPException(status_code=404, detail="No skills found")
     return manifest
@@ -2413,8 +2413,8 @@ async def get_skills_bundle(
     """
     from app.modules.agent.skills_bundle_service import build_skills_bundle
 
-    del user  # 仅做认证，不使用
-    bundle = await build_skills_bundle(session=session)
+    # task-07 D-004：透传 user.id，让 bundle 按 user 维度打包代码库 sillyspec-* + 该用户私有 CustomSkill。
+    bundle = await build_skills_bundle(session=session, user_id=user.id)
     if not bundle:
         raise HTTPException(status_code=404, detail="No skills found")
     return StreamingResponse(

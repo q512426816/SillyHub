@@ -73,21 +73,41 @@ def _validate_name(name: str) -> None:
 
 
 class CustomSkillService:
-    """平台级 CustomSkill 的 CRUD 业务层。"""
+    """per-user CustomSkill 的 CRUD 业务层（D-001）。
+
+    所有查询/写入方法都带 ``user_id`` 维度：list 按 user 过滤、
+    get/update/delete 先校验归属（不符 → :class:`SkillNotFound` 404，
+    与「不存在」走同一错误码，不泄露存在性防越权枚举）、``_get_by_name``
+    在 user 范围内查重（不同用户可同名，见 model D-002@v2 联合唯一）。
+    """
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     # ── 查询 ──────────────────────────────────────────────────────────
 
-    async def list_(self) -> list[CustomSkill]:
-        """全量列表（按 created_at desc）。列表不含 content（router 层投影）。"""
-        stmt = select(CustomSkill).order_by(CustomSkill.created_at.desc())
+    async def list_(self, user_id: uuid.UUID) -> list[CustomSkill]:
+        """指定 user 的 CustomSkill 列表（按 created_at desc）。
+
+        per-user 隔离（D-001）：只返 ``created_by == user_id`` 的记录。
+        列表不含 content（router 层投影 content_preview）。
+        """
+        stmt = (
+            select(CustomSkill)
+            .where(CustomSkill.created_by == user_id)
+            .order_by(CustomSkill.created_at.desc())
+        )
         return list((await self._session.execute(stmt)).scalars().all())
 
-    async def get(self, skill_id: uuid.UUID) -> CustomSkill:
+    async def get(self, skill_id: uuid.UUID, user_id: uuid.UUID) -> CustomSkill:
+        """按 id 取记录并校验归属（D-001）。
+
+        per-user 隔离：记录不存在 **或** ``created_by != user_id`` 都抛
+        :class:`SkillNotFound`（404），与「不存在」走同一错误码，
+        不泄露存在性（防越权枚举）。
+        """
         skill = await self._session.get(CustomSkill, skill_id)
-        if skill is None:
+        if skill is None or skill.created_by != user_id:
             raise SkillNotFound(
                 f"CustomSkill {skill_id} 不存在",
                 details={"skill_id": str(skill_id)},
@@ -106,7 +126,8 @@ class CustomSkillService:
     ) -> CustomSkill:
         _validate_name(name)
         # 提前检查 unique（避免直接撞 DB IntegrityError，给出更友好的 409）。
-        existing = await self._get_by_name(name)
+        # per-user 查重（D-001 + D-002@v2）：不同用户可同名，仅本用户内同名才冲突。
+        existing = await self._get_by_name(name, created_by)
         if existing is not None:
             raise SkillNameConflict(
                 f"name 已存在：{name!r}",
@@ -135,15 +156,22 @@ class CustomSkillService:
     async def update(
         self,
         skill_id: uuid.UUID,
+        user_id: uuid.UUID,
         *,
         name: str | None = None,
         description: str | None = None,
         content: str | None = None,
     ) -> CustomSkill:
-        skill = await self.get(skill_id)
+        """部分更新（先校验归属，再改字段）。
+
+        per-user 隔离（D-001）：先 ``get(skill_id, user_id)`` 做归属校验，
+        越权 → 404（不泄露）。改 name 时 ``_get_by_name(name, user_id)``
+        做 per-user 查重（A 改成自己的 name 不应被 B 的同名挡）。
+        """
+        skill = await self.get(skill_id, user_id)
         if name is not None and name != skill.name:
             _validate_name(name)
-            existing = await self._get_by_name(name)
+            existing = await self._get_by_name(name, user_id)
             if existing is not None and existing.id != skill.id:
                 raise SkillNameConflict(
                     f"name 已存在：{name!r}",
@@ -168,15 +196,28 @@ class CustomSkillService:
         await self._session.refresh(skill)
         return skill
 
-    async def delete(self, skill_id: uuid.UUID) -> None:
-        skill = await self.get(skill_id)
+    async def delete(self, skill_id: uuid.UUID, user_id: uuid.UUID) -> None:
+        """删除（先校验归属）。
+
+        per-user 隔离（D-001）：先 ``get(skill_id, user_id)`` 做归属校验，
+        越权 → 404（不泄露）。
+        """
+        skill = await self.get(skill_id, user_id)
         await self._session.delete(skill)
         await self._session.commit()
 
     # ── helpers ───────────────────────────────────────────────────────
 
-    async def _get_by_name(self, name: str) -> CustomSkill | None:
-        stmt = select(CustomSkill).where(CustomSkill.name == name)
+    async def _get_by_name(self, name: str, user_id: uuid.UUID) -> CustomSkill | None:
+        """per-user 查重（D-001 + D-002@v2）：在 ``user_id`` 范围内按 name 查。
+
+        不同用户可同名（联合唯一约束 ``(created_by, name)``），
+        仅本用户内同名才视为冲突。
+        """
+        stmt = select(CustomSkill).where(
+            CustomSkill.name == name,
+            CustomSkill.created_by == user_id,
+        )
         return (await self._session.execute(stmt)).scalars().first()
 
     @staticmethod

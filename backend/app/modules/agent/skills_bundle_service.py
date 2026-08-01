@@ -10,6 +10,12 @@ Change 2026-07-07-skills-mcp-management-ui (task-03): merged DB ``CustomSkill``
 rows into manifest/bundle (D-001 单文件 DB). 每个 CustomSkill → ``<name>/SKILL.md``，
 content = ``CustomSkill.content``。version hash 含 DB content（编辑/增删 → version
 变 → daemon 重拉）。``session`` 参数可选传，不传时跳过 DB 合并（向后兼容旧调用）。
+
+Change 2026-07-31-custom-skill-per-user (task-06, D-004/D-006): manifest/bundle
+按 ``user_id`` 过滤 DB 自定义技能——每个用户的 AI 只加载系统 sillyspec-* + 自己
+``created_by`` 的自定义技能。``user_id`` 为 ``None`` 时不返回任何自定义技能（向后
+兼容纯代码库调用）。系统 sillyspec-* 文件系统扫描（``_collect_skill_files``）全局
+共享不变（D-006）。
 """
 
 from __future__ import annotations
@@ -18,6 +24,7 @@ import asyncio
 import hashlib
 import io
 import tarfile
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -75,17 +82,33 @@ def _build_skill_md(row: CustomSkill) -> str:
 
 async def _collect_custom_skills(
     session: "AsyncSession | None",
+    user_id: uuid.UUID | None,
 ) -> list[tuple[Path, bytes]]:
     """Merge DB ``CustomSkill`` rows into the same ``(relpath, content)`` shape.
 
     Each CustomSkill → ``<name>/SKILL.md``（D-001 单文件）。SKILL.md 内容由
     :func:`_build_skill_md` 拼装（frontmatter + body，D-001）。``name`` 排序
-    保证确定性。当 ``session`` 为 ``None`` 时跳过（向后兼容旧调用方/不依赖
-    DB 的纯代码库扫描场景）。
+    保证确定性。
+
+    Per-user 过滤（change 2026-07-31-custom-skill-per-user task-06, D-004）：
+    只返回 ``created_by == user_id`` 的自定义技能——每个用户的 AI 只加载系统
+    sillyspec-* + 自己创建的技能。``user_id`` 为 ``None`` 或 ``session`` 为
+    ``None`` 时返回空列表（向后兼容不依赖 DB 的纯代码库调用，且避免无意中把
+    全表技能泄漏给未鉴权的调用方）。
     """
-    if session is None:
+    if session is None or user_id is None:
         return []
-    rows = (await session.execute(select(CustomSkill).order_by(CustomSkill.name))).scalars().all()
+    rows = (
+        (
+            await session.execute(
+                select(CustomSkill)
+                .where(CustomSkill.created_by == user_id)
+                .order_by(CustomSkill.name)
+            )
+        )
+        .scalars()
+        .all()
+    )
     out: list[tuple[Path, bytes]] = []
     for row in rows:
         rel_path = Path(row.name) / "SKILL.md"
@@ -185,21 +208,24 @@ def _summarize_skills(files: list[tuple[Path, bytes]]) -> list[dict[str, Any]]:
 async def _gather_all_files(
     skills_dir: Path,
     session: "AsyncSession | None",
+    user_id: uuid.UUID | None = None,
 ) -> list[tuple[Path, bytes]]:
     """Combine codebase sillyspec-* files + DB custom skills (deterministic order).
 
     Both lists are individually sorted; codebase files first, then DB custom
     skills (so a codebase-only caller with ``session=None`` gets the original
-    ordering unchanged).
+    ordering unchanged). ``user_id`` 透传给 :func:`_collect_custom_skills`
+    做 per-user 过滤（D-004）。
     """
     fs_files = await asyncio.to_thread(_collect_skill_files, skills_dir)
-    db_files = await _collect_custom_skills(session)
+    db_files = await _collect_custom_skills(session, user_id)
     return fs_files + db_files
 
 
 async def build_skills_manifest(
     skills_dir: Path | None = None,
     session: "AsyncSession | None" = None,
+    user_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     """Scan ``skills_dir`` + DB ``CustomSkill`` rows and return a manifest dict.
 
@@ -218,6 +244,11 @@ async def build_skills_manifest(
     an empty manifest is returned (non-error) so the daemon side can detect
     "no skills" vs "error". ``session`` is optional — when ``None`` the DB
     custom-skills merge is skipped (backward-compatible pure-codebase behavior).
+
+    Per-user 过滤（change 2026-07-31-custom-skill-per-user task-06, D-004）：
+    ``user_id`` 透传到 :func:`_collect_custom_skills`，manifest 只含系统
+    sillyspec-* 技能 + 该 user ``created_by`` 的自定义技能。``user_id`` 为
+    ``None`` 时不含任何自定义技能（仅系统技能）。
     """
     if skills_dir is None:
         skills_dir = get_settings().skills_bundle_dir
@@ -227,7 +258,7 @@ async def build_skills_manifest(
         # expects codebase skills to exist; do not silently fall back to DB-only.
         return {"version": "", "files": [], "message": "skills directory not found"}
 
-    files = await _gather_all_files(skills_dir, session)
+    files = await _gather_all_files(skills_dir, session, user_id)
     if not files:
         return {"version": "", "files": [], "message": "no sillyspec skills found"}
 
@@ -249,6 +280,7 @@ async def build_skills_manifest(
 async def build_skills_bundle(
     skills_dir: Path | None = None,
     session: "AsyncSession | None" = None,
+    user_id: uuid.UUID | None = None,
 ) -> bytes:
     """Build a gzipped tar archive of all sillyspec-* skill files + DB custom skills.
 
@@ -256,6 +288,11 @@ async def build_skills_bundle(
     does not exist or contains no skills an empty ``b""`` is returned.
     ``session`` is optional — when ``None`` the DB custom-skills merge is
     skipped (backward-compatible pure-codebase behavior).
+
+    Per-user 过滤（change 2026-07-31-custom-skill-per-user task-06, D-004）：
+    ``user_id`` 透传到 :func:`_collect_custom_skills`，tar 内只含系统技能 +
+    该 user ``created_by`` 的自定义技能 ``<name>/SKILL.md``。``user_id`` 为
+    ``None`` 时不含任何自定义技能（仅系统技能）。
     """
     if skills_dir is None:
         skills_dir = get_settings().skills_bundle_dir
@@ -263,7 +300,7 @@ async def build_skills_bundle(
     if not skills_dir.is_dir():
         return b""
 
-    files = await _gather_all_files(skills_dir, session)
+    files = await _gather_all_files(skills_dir, session, user_id)
     if not files:
         return b""
 

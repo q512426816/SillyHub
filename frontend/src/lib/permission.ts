@@ -28,6 +28,7 @@ export function hasAdminPermission(user: SessionUser | null): boolean {
  *
  * - user 为 null → false
  * - user.is_platform_admin === true → true（短路，无视 perms）
+ * - perms 为空（菜单无权限要求）→ true（任何登录用户可见；2026-07-31-custom-skill-per-user D-003，skills 菜单放开）
  * - 否则：perms 与 user.permissions 有交集 → true
  */
 export function hasAnyPermission(
@@ -36,9 +37,10 @@ export function hasAnyPermission(
 ): boolean {
   if (!user) return false;
   if (user.is_platform_admin) return true;
+  // 菜单无权限要求（permissions: []）→ 任何登录用户可见（D-003 skills 菜单对所有登录用户开放）
+  if (perms.length === 0) return true;
   const userPerms = user.permissions ?? [];
   if (userPerms.length === 0) return false;
-  if (perms.length === 0) return false;
   const set = new Set(userPerms);
   return perms.some((p) => set.has(p));
 }

@@ -7,8 +7,9 @@
  * - 平台 sillyspec skills manifest 调 /api/daemon/skills/latest/manifest（只读）
  *
  * 类型手写（后端 schema: backend/app/modules/skills/schema.py + skills_bundle_service
- * manifest 返回结构）。task-02 端点的 schema 未进 OpenAPI 生成范围（api-keys 模式），
- * 这里手写并标注来源，待后续生成类型批次统一收敛。
+ * manifest 返回结构）。CustomSkill 端点走 api-keys 式独立 schema，未纳入 OpenAPI
+ * 生成；这里手写并标注来源，对齐后端字段（2026-07-31-custom-skill-per-user task-05
+ * 起 created_by 收窄为非空 string）。
  *
  * 设计依据：design.md §7 接口定义 + D-001（单文件 DB）。
  */
@@ -24,7 +25,8 @@ export interface CustomSkillRead {
   name: string;
   description: string;
   content_preview: string;
-  created_by: string | null;
+  /** 创建者用户 id（后端 task-05 收窄为非空 string）。 */
+  created_by: string;
   created_at: string;
   updated_at: string;
 }

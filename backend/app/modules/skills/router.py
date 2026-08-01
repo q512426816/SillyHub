@@ -1,14 +1,13 @@
-"""``/api/custom-skills`` — platform-level CustomSkill admin CRUD.
+"""``/api/custom-skills`` — per-user CustomSkill CRUD.
 
-Change: 2026-07-07-skills-mcp-management-ui (task-02)
+Change: 2026-07-31-custom-skill-per-user (task-03)
 
-权限（design §5.4 / task-04 已确认）：``SETTINGS_ADMIN``。
-design 原文写 ``MANAGE_PLATFORM``，但 :class:`Permission` 枚举无此项；
-系统 settings 子菜单专用 admin 权限为 ``SETTINGS_ADMIN``（见
-permissions.py:45 注释），MCP / Skills 同属 platform settings 子项，
-沿用 settings/router 现有的 ``SettingsAdminUser`` 零迁移风险且语义自洽。
+权限（design D-003）：任意登录用户。
+技能是个人资产，登录用户即可管理自己的技能；per-user 隔离在 service 层
+（按 ``created_by == user_id`` 过滤 / 校验归属），router 仅透传 ``user.id``。
+权限依赖复用 ``app.core.auth_deps.get_current_user``。
 
-端点契约（task-02 蓝图）:
+端点契约:
 - GET    /api/custom-skills            → list（不含 content，含 content_preview）
 - POST   /api/custom-skills            → create（201）
 - GET    /api/custom-skills/{id}       → detail（含完整 content）
@@ -24,10 +23,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth_deps import require_permission_any
+from app.core.auth_deps import get_current_user
 from app.core.db import get_session
 from app.modules.auth.model import User
-from app.modules.auth.permissions import Permission
 from app.modules.skills.schema import (
     CustomSkillCreate,
     CustomSkillDetail,
@@ -39,8 +37,8 @@ from app.modules.skills.service import CustomSkillService
 router = APIRouter(tags=["custom-skills"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
-# task-04 已确认用 SETTINGS_ADMIN（非 design 写的 MANAGE_PLATFORM）。
-SettingsAdminUser = Annotated[User, Depends(require_permission_any(Permission.SETTINGS_ADMIN))]
+# D-003: 任意登录用户即可（不再要求 SETTINGS_ADMIN）。
+CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
 def _to_read(skill) -> CustomSkillRead:
@@ -71,10 +69,10 @@ def _to_detail(skill) -> CustomSkillDetail:
 @router.get("/custom-skills", response_model=list[CustomSkillRead])
 async def list_custom_skills(
     session: SessionDep,
-    _user: SettingsAdminUser,
+    user: CurrentUser,
 ) -> list[CustomSkillRead]:
-    """列出全部平台 CustomSkill（不含 content，含 content_preview）。"""
-    skills = await CustomSkillService(session).list_()
+    """列出当前用户的 CustomSkill（不含 content，含 content_preview）。"""
+    skills = await CustomSkillService(session).list_(user.id)
     return [_to_read(s) for s in skills]
 
 
@@ -86,9 +84,9 @@ async def list_custom_skills(
 async def create_custom_skill(
     payload: CustomSkillCreate,
     session: SessionDep,
-    user: SettingsAdminUser,
+    user: CurrentUser,
 ) -> CustomSkillDetail:
-    """创建平台 CustomSkill（name 字符集/前缀/unique 校验在 service 层）。"""
+    """创建 CustomSkill（name 字符集/前缀/unique 校验在 service 层）。"""
     skill = await CustomSkillService(session).create(
         name=payload.name,
         description=payload.description,
@@ -102,10 +100,10 @@ async def create_custom_skill(
 async def get_custom_skill(
     skill_id: uuid.UUID,
     session: SessionDep,
-    _user: SettingsAdminUser,
+    user: CurrentUser,
 ) -> CustomSkillDetail:
-    """详情（含完整 content）。"""
-    skill = await CustomSkillService(session).get(skill_id)
+    """详情（含完整 content；service 校验归属，非本人 404）。"""
+    skill = await CustomSkillService(session).get(skill_id, user.id)
     return _to_detail(skill)
 
 
@@ -114,11 +112,12 @@ async def update_custom_skill(
     skill_id: uuid.UUID,
     payload: CustomSkillUpdate,
     session: SessionDep,
-    _user: SettingsAdminUser,
+    user: CurrentUser,
 ) -> CustomSkillDetail:
-    """部分更新（name/description/content 任一可选）。"""
+    """部分更新（name/description/content 任一可选；service 校验归属）。"""
     skill = await CustomSkillService(session).update(
         skill_id,
+        user.id,
         name=payload.name,
         description=payload.description,
         content=payload.content,
@@ -130,7 +129,7 @@ async def update_custom_skill(
 async def delete_custom_skill(
     skill_id: uuid.UUID,
     session: SessionDep,
-    _user: SettingsAdminUser,
+    user: CurrentUser,
 ) -> None:
-    """删除平台 CustomSkill。"""
-    await CustomSkillService(session).delete(skill_id)
+    """删除 CustomSkill（service 校验归属，非本人 404）。"""
+    await CustomSkillService(session).delete(skill_id, user.id)
