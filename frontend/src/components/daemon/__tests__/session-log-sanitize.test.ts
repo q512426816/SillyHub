@@ -160,23 +160,58 @@ describe("statusFromToolUseRaw", () => {
 });
 
 describe("extractDialogQA", () => {
-  it("解析 AskUserQuestion 问题+回答配对", () => {
+  it("解析 AskUserQuestion 问题+回答配对（无 options → options 空，answerText 兜底）", () => {
     const result = extractDialogQA({
       dialog_payload: { questions: [{ question: "用 A 还是 B?" }, { question: "几号?" }] },
       answer: { answers: [{ answer: "A" }, { answer: "3" }] },
     });
     expect(result).toEqual([
-      { question: "用 A 还是 B?", answer: "A" },
-      { question: "几号?", answer: "3" },
+      { question: "用 A 还是 B?", options: [], answerText: "A" },
+      { question: "几号?", options: [], answerText: "3" },
     ]);
   });
 
-  it("未回答（answer 缺失）→ answer=null", () => {
+  it("ql-20260802-003：提取全部 options 并标记选中项（answer===option.label）", () => {
     const result = extractDialogQA({
-      dialog_payload: { questions: [{ question: "Q" }] },
+      dialog_payload: {
+        questions: [
+          {
+            question: "写哪？",
+            options: [
+              { label: "桌面 (Recommended)", description: "桌面路径" },
+              { label: "主目录", description: "主目录路径" },
+              { label: "工作目录" },
+            ],
+          },
+        ],
+      },
+      answer: { answers: [{ answer: "桌面 (Recommended)" }] },
+    });
+    expect(result).toEqual([
+      {
+        question: "写哪？",
+        options: [
+          { label: "桌面 (Recommended)", description: "桌面路径", selected: true },
+          { label: "主目录", description: "主目录路径", selected: false },
+          { label: "工作目录", description: undefined, selected: false },
+        ],
+        answerText: "桌面 (Recommended)",
+      },
+    ]);
+  });
+
+  it("未回答（answer 缺失）→ options 全未选，answerText=null", () => {
+    const result = extractDialogQA({
+      dialog_payload: { questions: [{ question: "Q", options: [{ label: "x" }] }] },
       answer: null,
     });
-    expect(result).toEqual([{ question: "Q", answer: null }]);
+    expect(result).toEqual([
+      {
+        question: "Q",
+        options: [{ label: "x", description: undefined, selected: false }],
+        answerText: null,
+      },
+    ]);
   });
 
   it("无 questions → 空数组（调用方据此跳过渲染）", () => {
@@ -188,6 +223,6 @@ describe("extractDialogQA", () => {
       dialog_payload: { questions: [{}] },
       answer: { answers: [] },
     });
-    expect(result).toEqual([{ question: "(无问题文本)", answer: null }]);
+    expect(result).toEqual([{ question: "(无问题文本)", options: [], answerText: null }]);
   });
 });

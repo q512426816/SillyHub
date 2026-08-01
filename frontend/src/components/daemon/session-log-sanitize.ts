@@ -128,20 +128,31 @@ export function statusFromToolUseRaw(raw: string): "ok" | "deny" | "running" {
 }
 
 /**
- * ql-20260801-003：从 SessionDialogRead 解析「问题→回答」对，供交互式会话面板
- * 渲染 AskUserQuestion 历史记录（dialog_payload.questions 配 answer.answers）。
+ * ql-20260801-003 / ql-20260802-003：从 SessionDialogRead 解析「问题→可选项→选中」，
+ * 供交互式会话面板渲染 AskUserQuestion 历史记录。
  *
  * 实时 AskUserDialogCard 回答后即移除、failed/ended 会话不渲染卡片，已答/历史
  * 问答只能靠 GET /dialogs/history 恢复展示；本函数把持久化的 payload/answer
- * 归一成 {question, answer} 供只读历史区块渲染。
+ * 归一成 {question, options[], answerText} 供只读历史区块渲染。
  *
- *   - dialog_payload（AskUserQuestion 同构）：{questions:[{question,...}]}
- *   - answer：{answers:[{question,answer}]}（按顺序与 questions 对应）
- * 缺失/结构异常 → 问题兜底「(无问题文本)」、回答兜底 null（调用方据 status 显示「待答/未回答」）。
+ *   - dialog_payload（AskUserQuestion 同构）：{questions:[{question, options:[{label,description}], ...}]}
+ *   - answer：{answers:[{answer}]}（按顺序与 questions 对应，answer = 用户选中的 option.label）
+ * 缺失/结构异常 → 问题兜底「(无问题文本)」；选中判定 = answer.trim() === option.label.trim()。
+ * ql-20260802-003 修复：旧版只取 question+answer 丢了 options，导致卡片只显示用户选中的
+ * 那一项、看不到其余备选；现提取全部 options 并标记 selected。
  */
+export interface DialogOption {
+  label: string;
+  description?: string;
+  /** 是否为用户最终选中项（answer.answer 与 option.label 匹配）。 */
+  selected: boolean;
+}
+
 export interface DialogQA {
   question: string;
-  answer: string | null;
+  options: DialogOption[];
+  /** 用户作答文本（无 options 的自由作答场景兜底，或选中项 label）。null=未答。 */
+  answerText: string | null;
 }
 
 export function extractDialogQA(dialog: {
@@ -150,7 +161,10 @@ export function extractDialogQA(dialog: {
 }): DialogQA[] {
   // dialog_payload/answer 在 api-types 里是 {[key:string]:unknown}|null，此处内部断言。
   const payload = (dialog?.dialog_payload ?? null) as {
-    questions?: { question?: string }[];
+    questions?: {
+      question?: string;
+      options?: { label?: string; description?: string }[];
+    }[];
   } | null;
   const answer = (dialog?.answer ?? null) as {
     answers?: { answer?: string }[];
@@ -158,8 +172,19 @@ export function extractDialogQA(dialog: {
   const questions = payload?.questions ?? [];
   const answers = answer?.answers ?? [];
   if (questions.length === 0) return [];
-  return questions.map((q, i) => ({
-    question: q.question ?? "(无问题文本)",
-    answer: answers[i]?.answer ?? null,
-  }));
+  return questions.map((q, i) => {
+    const chosen = (answers[i]?.answer ?? "").trim();
+    const options: DialogOption[] = (q.options ?? []).map((o) => ({
+      label: o.label ?? "(无标签)",
+      description: o.description,
+      // AskUserQuestion 推荐项 label 常带 "(Recommended)" 后缀，answer 存的是完整 label，
+      // 原样比较即可；trim 仅容忍两端空白。
+      selected: chosen.length > 0 && (o.label ?? "").trim() === chosen,
+    }));
+    return {
+      question: q.question ?? "(无问题文本)",
+      options,
+      answerText: chosen.length > 0 ? chosen : null,
+    };
+  });
 }

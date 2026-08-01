@@ -666,7 +666,7 @@ describe("InteractiveSessionPanel", () => {
     expect(screen.queryByText(/提问记录/)).not.toBeInTheDocument();
   });
 
-  it("AC-10-01c 「全部」视图 AskUser 渲染为工具卡片（AskUserQuestion 工具名可见）(ql-20260802-002)", async () => {
+  it("AC-10-01c 「全部」视图 AskUser 工具卡片显全部选项（选中✓ + 未选可见）(ql-20260802-003)", async () => {
     const stream = makeStreamMock();
     sessionApi.streamSession.mockImplementation(stream.factory);
     sessionApi.getAgentSession.mockResolvedValue({
@@ -678,7 +678,15 @@ describe("InteractiveSessionPanel", () => {
       {
         id: "d1", session_id: "sess-attach", run_id: "run-old-1", request_id: "req-1",
         tool_name: "AskUserQuestion", dialog_kind: "AskUserQuestion",
-        dialog_payload: { questions: [{ question: "文件建在哪里？" }] },
+        dialog_payload: {
+          questions: [{
+            question: "文件建在哪里？",
+            options: [
+              { label: "用户桌面", description: "桌面路径" },
+              { label: "用户主目录", description: "主目录路径" },
+            ],
+          }],
+        },
         status: "answered", answer: { answers: [{ answer: "用户桌面" }] },
         created_at: "t", answered_at: "t",
       },
@@ -688,14 +696,16 @@ describe("InteractiveSessionPanel", () => {
     await waitFor(() => {
       expect(sessionApi.fetchSessionDialogHistory).toHaveBeenCalledTimes(1);
     });
-    // 默认对话视图：❓ 提问记录（无工具名）
+    // 默认对话视图：❓ 提问记录（无工具名、无选项列表，只显问题+作答）
     expect(screen.getByText(/文件建在哪里？/)).toBeInTheDocument();
     expect(screen.queryByText(/AskUserQuestion/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/用户主目录/)).not.toBeInTheDocument();
 
-    // 切「全部」：AskUser 渲染为工具卡片，工具名 AskUserQuestion 可见 + 回答
+    // 切「全部」：AskUser 工具卡片显全部选项——选中项「用户桌面」(✓) + 未选项「用户主目录」均可见
     fireEvent.click(screen.getByRole("tab", { name: "全部" }));
     await waitFor(() => expect(screen.getByText(/AskUserQuestion/)).toBeInTheDocument());
     expect(screen.getByText(/用户桌面/)).toBeInTheDocument();
+    expect(screen.getByText(/用户主目录/)).toBeInTheDocument();
   });
 
   it("AC-10-03 轮询到 active → status active + 输入启用 + 清轮询", async () => {

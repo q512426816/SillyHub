@@ -193,6 +193,9 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
     for (const entry of entries) {
       const seg = classifySessionLog(entry.content_redacted ?? "", entry.channel);
       if (!seg) continue;
+      // ql-20260802-003：保留 log 时间戳（ms），供「全部」视图把 AskUser 提问按 created_at
+      // 穿插进思考/工具时间线（真实顺序）。
+      const ts = entry.timestamp ? Date.parse(entry.timestamp) : undefined;
       const dedupKey = `${seg.kind}:${seg.text}`;
       if (seenText.has(dedupKey)) continue;
       seenText.add(dedupKey);
@@ -202,7 +205,7 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
         outputs.push(seg.text);
       } else if (seg.kind === "tool_use") {
         // status 从 tool_call JSON 的 success 取（已结束历史会话不假运行）
-        processItems.push({ kind: "tool", raw: seg.text, status: statusFromToolUseRaw(seg.text) });
+        processItems.push({ kind: "tool", raw: seg.text, status: statusFromToolUseRaw(seg.text), ts });
       } else if (seg.kind === "tool_result") {
         // 配对最近「尚无 result」的 tool 项补输出文本；status 保留 success 值，仅 running 时兜底
         let paired = false;
@@ -215,7 +218,7 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
               : it.status === "running"
                 ? "ok"
                 : it.status;
-            processItems[i] = { kind: "tool", raw: it.raw, result: seg.text, status };
+            processItems[i] = { kind: "tool", raw: it.raw, result: seg.text, status, ts: it.ts };
             paired = true;
             break;
           }
@@ -227,12 +230,13 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
             raw: "",
             result: seg.text,
             status: isToolResultDenied(seg.text) ? "deny" : "ok",
+            ts,
           });
         }
       } else {
         // thinking/stderr → 保留到达顺序
         processItems.push(
-          seg.kind === "thinking" ? { kind: "thinking", text: seg.text } : { kind: "stderr", text: seg.text },
+          seg.kind === "thinking" ? { kind: "thinking", text: seg.text, ts } : { kind: "stderr", text: seg.text, ts },
         );
       }
     }

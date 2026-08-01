@@ -87,3 +87,54 @@
 根因：AskUser 调用已持久化在 session_dialog_requests（含问题/选项/回答，实测 25 条），但前端三道关卡叠加致"用完即焚"——session-log-sanitize.ts:66 过滤所有含 AskUserQuestion 的日志（不进工具记录）、AskUserDialogCard 回答后 onPermissionResolved 立即移除、interactive-session-panel.tsx:1092 对 failed/ended 会话不渲染卡片，历史回看完全无痕。
 方案：后端新增 list_dialog_history（与 list_pending_dialogs 同结构但不过滤 status，返回 pending+answered 全部）+ GET /sessions/{id}/dialogs/history 端点；前端 daemon.ts 加 fetchSessionDialogHistory、session-log-sanitize 加 extractDialogQA 把持久化 payload/answer 归一成「问题→回答」对、interactive-session-panel 加 dialogHistory state+effect（sessionId 变化拉历史）+ 独立「提问记录」渲染区块（不受 view.status 限制，failed/ended 也能看）；gen:types 同步 openapi。
 结果：backend test_session_permissions 21 passed（含新 list_dialog_history 测试）、frontend sanitize+panel 全过（extractDialogQA 单测 + panel 41 passed，修了 mock 漏 fetchSessionDialogHistory 致 .then 崩的坑）、typecheck exit 0；待部署本地 + 阿里云。
+## ql-20260801-004-39b7 | 2026-08-01 23:54:30 | 交互式会话工具卡片状态徽章修复（Runtime Policy 拒绝正确显示✗）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-log-sanitize.ts（isToolResultDenied 收紧关键词：去 error/fail 防成功输出正文误判，保留 拒绝|denied|失败|禁止写入|not allowed）
+- frontend/src/components/daemon/interactive-session-panel.tsx（onLog 实时配对：result 拒绝优先覆盖 use 的 success——isToolResultDenied(result)→deny 覆盖 ok/running，否则 success 权威；孤儿 result 降级不再硬编码 ok）
+- frontend/src/components/daemon/runtime-session-helpers.tsx（logsToTurns 历史配对：与 onLog 对称同改 result 拒绝覆盖 + 孤儿降级）
+- frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx（新增 Runtime Policy 拒绝覆盖用例 success:true+拒绝result→deny + 孤儿拒绝→deny；更新 grep-fail 用例注释，断言 ok 不变）
+
+需求：交互式会话 Write 工具被 Runtime Policy 拒绝执行，但工具卡片状态徽章仍显示✓（成功），应显示✗（失败/被拒）。
+根因：双重叠加——①daemon task-runner.ts:1895 每个 tool_use 发的 tool_call JSON 硬编码 success:true，其语义是「该调用已被放行、进入执行」，并非「执行成功」（调用发起那一刻 daemon 还不可能知道结果）；②前端配对逻辑（interactive-session-panel.tsx:316-321 实时 / runtime-session-helpers.tsx:212-217 历史，两处对称）仅在工具还显示「执行中 ⏳」(status===running) 时才看 result 文本判 deny，一旦 success:true 把状态标成 ok，后续到达的拒绝 result 因 status 非 running 直接保留原值无法覆盖；孤儿 result（无配对 use）更直接硬编码 status:"ok"。而 Runtime Policy 拒绝只体现在 tool_result 文本（filesystem-policy.ts 固定文案「Runtime Policy 拒绝本次写入」），调用阶段 success:true 与拒绝结果矛盾时前端信了 success。这是 ql-20260730-003 把 success 设为「权威源」时埋的漏洞——它假设 success 是真实执行结果，但 daemon 恒 true。
+方案：①isToolResultDenied 收紧关键词，去掉 error/fail（成功输出正文常含这些字样会误判，如 grep 命中 "fail"、测试报告 "0 errors"），保留明确的拒绝/失败信号「拒绝|denied|失败|禁止写入|not allowed」，宁可漏判（success 兜底 ok）不可误判正文；②两处配对逻辑改为 result 拒绝**优先覆盖** use 的 success——isToolResultDenied(result) 命中则一律 deny（覆盖 ok 与 running），否则保持 success 权威（正常成功路径不变）；③孤儿 result 降级同理用 isToolResultDenied 判定，不硬编码 ok。不改 daemon——tool_use 阶段确实不知结果，success:true 表「已放行」语义没错，错在前端拿它当最终执行结果。
+结果：daemon 目录 3 测试文件 83 passed（session-log-sanitize 32 + runtime-session-helpers 10 含新增 Runtime Policy 拒绝覆盖 + 孤儿拒绝 2 用例 + interactive-session-panel 41；grep-fail 用例注释更新、断言 ok 不变零回归）；tsc --noEmit exit 0。改 4 文件，已 git add 未 commit；待部署本地 + 阿里云，建议浏览器实测确认拒绝的 Write 显示✗。
+## ql-20260802-001-22dd | 2026-08-02 00:09:03 | AskUser 提问记录跟会话顺序穿插到对应轮次（不再堆顶）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/interactive-session-panel.tsx（SessionTurnView 加 realRunId 字段；渲染层 dialogHistory.filter(run_id 匹配) 把提问穿插到对应 turn 内过程项后答复前、不受 viewMode 限制；删除原顶部「📝 提问记录」堆叠区块）
+- frontend/src/components/daemon/runtime-session-helpers.tsx（logsToTurns 按 log.run_id 分组时保留真实 run_id 到 turn.realRunId——原 map 遍历 key 被丢弃）
+- frontend/src/components/daemon/__tests__/interactive-session-panel.test.tsx（新增 AC-10-01b：mock 含 run_id 的 dialog 断言提问穿插到 turn 内、顶部「提问记录」不出现）
+- frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx（首个用例加 realRunId===run-1 断言）
+
+需求：交互式会话的「📝 提问记录」把所有 AskUser 问答一股脑堆在会话顶部，割裂了上下文——提问应跟会话顺序，出现在它对应的那一轮里（用户消息之后、agent 答复/动作之前）。
+根因：AskUserQuestion 不走 agent 日志流——daemon cli.ts:653-659 把它路由到 onUserDialog 回调，经 PERMISSION_REQUEST（带 dialog_kind/payload）推到前端，答案经 dialog_result 回喂 SDK，整个过程不产生 tool_use/tool_result 日志。ql-003 因此无法靠日志到达顺序插入 turn，改用独立顶部区块绕过展示，结果所有提问堆在 turns 列表之前。但 session_dialog_requests 表有 run_id 外键（model.py:234，FK→agent_runs 非空），SessionDialogRead 已暴露 run_id——提问其实能精确归属到产生它的那个 run（轮次）。
+方案：①SessionTurnView 加 realRunId 字段；②logsToTurns 按 log.run_id 分组时把真实 run_id（map 的 key，原 `for (const [, entries])` 被丢弃）保留到 turn.realRunId，turn.runId 仍是伪 __attach_history_N__ 作 React key 不变；③panel 渲染层在每个 turn 内 `dialogHistory.filter(d => d.run_id === (turn.realRunId ?? turn.runId))` 把匹配的提问渲染到该 turn 过程项之后、答复之前（不受 viewMode 限制——提问是重要交互，对话视图也要可见），删除顶部堆叠区块；④实时 turn 的 runId 本就是真实 run_id，realRunId 留 undefined，匹配用 `realRunId ?? runId` fallback；⑤pending 实时交互卡片（AskUserDialogCard）保留顶部不变（进行中的提问仍需用户点选交互）。
+结果：daemon 测试 session-log-sanitize 32 + runtime-session-helpers 10（含 realRunId 断言）+ interactive-session-panel 42（含 AC-10-01b 穿插用例）全绿、tsc --noEmit exit 0。改 4 文件，已 git add 未 commit；待部署本地 + 阿里云，建议浏览器实测确认提问出现在对应轮次内而非堆顶。
+## ql-20260802-002-3b75 | 2026-08-02 00:45:12 | 「全部」视图 AskUser 渲染为工具调用卡片（和 Write/Bash 一致）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/interactive-session-panel.tsx（新建 AskUserToolCard 组件：蓝底工具卡片复用 ToolEventCard 样式——🔧AskUserQuestion + ✓已答/⏳待答徽章 + 问题→回答；渲染块改 viewMode 分支：「全部」视图用 AskUserToolCard、「对话」视图保留 ❓ 提问记录）
+- frontend/src/components/daemon/__tests__/interactive-session-panel.test.tsx（新增 AC-10-01c：切「全部」视图断言工具名 AskUserQuestion 可见 + 回答可见；默认对话视图无工具名）
+
+需求：「全部」视图看不到 AskUser 工具调用记录及内容，应像 Write/Bash 一样在工具区有工具卡片。
+根因：AskUserQuestion 走 onUserDialog 对话协议(cli.ts:653-659)不走 tool_use 日志流，而「全部」视图工具卡片(ToolEventCard)靠 tool_use 日志构建，故工具区无 AskUser；session-log-sanitize.ts:66 还丢弃含 AskUserQuestion 的日志。ql-005 用❓提问记录(提问历史接口)穿插但非工具卡片样式，不在工具区。
+方案：新建 AskUserToolCard 组件(蓝底工具卡片复用 ToolEventCard 样式:🔧AskUserQuestion+✓已答/⏳待答徽章+问题→回答)；渲染层 viewMode 分支——「全部」视图用 AskUserToolCard、「对话」视图保留❓提问记录；都用 dialogHistory 按 run_id 穿插到对应 turn。pending 实时卡片不变。
+结果：daemon 3 测试文件 84 passed(panel 43 含 AC-10-01c 全部视图工具卡片断言)、typecheck exit 0；待部署本地+阿里云。
+## ql-20260802-003-98a0 | 2026-08-02 01:04:58 | AskUser 卡片显全部选项 + 思考/工具/提问按时间线连贯有序
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-log-sanitize.ts（extractDialogQA 升级：新 DialogOption+selected，提取全部 options，answer→answerText；修旧版只取 question+answer 丢 options）
+- frontend/src/components/daemon/interactive-session-panel.tsx（SessionProcessItem 加 ts；onLog 5 处填 ts；turn 渲染「全部」视图合并 processItems+dialog 按 ts 排序统一渲染=AskUser 穿插时间线；TurnDetailsList 加 askUser 分支；AskUserToolCard 重构显全部选项 选中绿底✓/未选灰○/hover 显 description；对话视图改用 answerText）
+- frontend/src/components/daemon/runtime-session-helpers.tsx（logsToTurns 5 处填 ts，供历史回看时间穿插）
+- frontend/src/components/daemon/__tests__/session-log-sanitize.test.ts（extractDialogQA 5 case：含 options/selected 提取 + 未答全未选兜底）
+- frontend/src/components/daemon/__tests__/interactive-session-panel.test.tsx（AC-10-01c 改：dialog 加 options，断言全部视图选中项+未选项均可见）
+
+需求：用户反馈交互式会话「全部」视图三处问题——①AskUser 卡片样式跟 Write/Bash 工具卡片不一样；②只显示用户选中的那一个选项、看不到其余备选；③思考过程跟工具调用要连贯有顺序。
+根因：①（选项不全）extractDialogQA 只取 question+answer，丢弃 dialog_payload.questions[].options（DB 实测每问 3-4 个 {label,description}），且 (Recommended) 是 option.label 自带不是渲染加的；②（样式割裂）AskUserToolCard 内容区（❓问题+单行→回答）与 ToolEventCard（mono 参数行+折叠结果）风格不一致；③（不连贯无序）AskUser 卡片由 dialogHistory.filter 单独渲染、固定堆在所有 processItems 之后，脱离思考/工具时间线——而 AskUser 走 onUserDialog 不进 tool_use 日志，原本无法与思考/工具共序。
+方案：①extractDialogQA 升级提取全部 options 并按 answer.answer===option.label 标记 selected，answerText 兜底自由作答；②AskUserToolCard 重构为显全部选项（选中绿底✓ / 未选灰○ / hover 显 description），问题用 mono 参数风对齐 ToolEventCard；③SessionProcessItem 加可选 ts，onLog（实时 env.timestamp）与 logsToTurns（历史 entry.timestamp）5 处填 ts，turn 渲染「全部」视图把 processItems 与该 turn 的 dialog（ts=created_at）合并按 ts 排序统一交给 TurnDetailsList 渲染——思考/工具/AskUser 同一时间线连贯有序（sort 用 Number.isFinite 守 NaN）；对话视图保留 ❓+answerText 轻量记录。
+结果：daemon 147 passed（13 files，新增 extractDialogQA options/selected 5 case + AC-10-01c 显全部选项断言）、tsc exit 0；待部署本地+阿里云。样式观感待浏览器实测。

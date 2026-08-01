@@ -74,9 +74,9 @@ import { classifySessionLog, extractDialogQA, isToolResultDenied, statusFromTool
  * - stderr：channel=stderr 的错误/告警文本
  */
 export type SessionProcessItem =
-  | { kind: "thinking"; text: string }
-  | ({ kind: "tool" } & SessionToolEvent)
-  | { kind: "stderr"; text: string };
+  | { kind: "thinking"; text: string; ts?: number }
+  | ({ kind: "tool" } & SessionToolEvent & { ts?: number })
+  | { kind: "stderr"; text: string; ts?: number };
 
 type SessionUiStatus = "idle" | "creating" | "active" | "ending" | "ended" | "failed" | "reconnecting";
 type TurnUiStatus = "pending" | "running" | "interrupting" | "completed" | "failed" | "killed";
@@ -301,6 +301,9 @@ export function InteractiveSessionPanel({
               // - reply → 答复正文（对话视图默认展示）
               const seg = classifySessionLog(env.content ?? "", env.channel);
               if (!seg) return turn;
+              // ql-20260802-003：保留 log 时间戳（ms），供「全部」视图把 AskUser 提问按
+              // created_at 穿插进思考/工具时间线（真实顺序，而非固定堆末尾）。
+              const ts = env.timestamp ? Date.parse(env.timestamp) : undefined;
               if (seg.kind === "tool_use") {
                 // status 从 tool_call JSON 的 success 字段取（权威源，避免已结束会话假运行）
                 return {
@@ -308,7 +311,7 @@ export function InteractiveSessionPanel({
                   seenLogIds: nextSeen,
                   processItems: [
                     ...(turn.processItems ?? []),
-                    { kind: "tool", raw: seg.text, status: statusFromToolUseRaw(seg.text) },
+                    { kind: "tool", raw: seg.text, status: statusFromToolUseRaw(seg.text), ts },
                   ],
                 };
               }
@@ -329,7 +332,7 @@ export function InteractiveSessionPanel({
                       : it.status === "running"
                         ? "ok"
                         : it.status;
-                    items[i] = { kind: "tool", raw: it.raw, result: seg.text, status };
+                    items[i] = { kind: "tool", raw: it.raw, result: seg.text, status, ts: it.ts };
                     paired = true;
                     break;
                   }
@@ -341,6 +344,7 @@ export function InteractiveSessionPanel({
                     raw: "",
                     result: seg.text,
                     status: isToolResultDenied(seg.text) ? "deny" : "ok",
+                    ts,
                   });
                 }
                 return { ...turn, seenLogIds: nextSeen, processItems: items };
@@ -362,8 +366,8 @@ export function InteractiveSessionPanel({
                 processItems: [
                   ...(turn.processItems ?? []),
                   seg.kind === "thinking"
-                    ? { kind: "thinking", text: seg.text }
-                    : { kind: "stderr", text: seg.text },
+                    ? { kind: "thinking", text: seg.text, ts }
+                    : { kind: "stderr", text: seg.text, ts },
                 ],
               };
             }, {});
@@ -1177,41 +1181,55 @@ export function InteractiveSessionPanel({
                     </div>
                   </div>
                 )}
-                {/* ql-20260729-005：「全部」视图追加过程项（思考/stderr + 工具配对卡片），
-                    渲染在答复气泡之前（与 agent 实际执行顺序一致）。 */}
+                {/* ql-20260802-003：「全部」视图把过程项（思考/工具/stderr）与 AskUser 提问
+                    按 timestamp/created_at 合并排序统一渲染——AskUser 不再固定堆在过程项
+                    之后，而是穿插进真实时间线（思考→工具→提问→工具→…连贯有序）。 */}
                 {viewMode === "all" &&
-                  turn.processItems &&
-                  turn.processItems.length > 0 && (
-                    <TurnDetailsList items={turn.processItems} />
-                  )}
-                {/* ql-20260802-001/002：AskUser 提问按 run_id 穿插到对应 turn（跟会话顺序，
-                    不再堆顶）。「全部」视图用工具卡片 AskUserToolCard（和 Write/Bash 一致、
-                    工具区可见），「对话」视图用轻量 ❓ 提问记录。AskUser 走 onUserDialog 不走
-                    tool_use 日志，故用 dialog 历史渲染；位置在该轮过程项之后、答复之前。 */}
-                {dialogHistory
-                  .filter((d) => d.run_id === (turn.realRunId ?? turn.runId))
-                  .map((d) => {
-                    if (viewMode === "all") {
-                      return <AskUserToolCard key={`dialog-${d.request_id}`} dialog={d} />;
-                    }
-                    const qa = extractDialogQA(d);
-                    if (qa.length === 0) return null;
-                    return (
-                      <div
-                        key={`dialog-${d.request_id}`}
-                        className="ml-9 space-y-0.5 rounded-md border border-indigo-200 bg-indigo-50/40 px-3 py-1.5 text-xs leading-5"
-                      >
-                        {qa.map((item, i) => (
-                          <div key={i} className="break-words">
-                            <span className="font-medium text-foreground">❓ {item.question}</span>
-                            <span className="ml-1 text-muted-foreground">
-                              → {item.answer ?? (d.status === "pending" ? "（待答）" : "（未回答）")}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
+                  (() => {
+                    const realRunId = turn.realRunId ?? turn.runId;
+                    const turnDialogs = dialogHistory.filter((d) => d.run_id === realRunId);
+                    if ((turn.processItems?.length ?? 0) === 0 && turnDialogs.length === 0) return null;
+                    const merged: Array<
+                      SessionProcessItem | { kind: "askUser"; dialog: SessionDialogRead; ts?: number }
+                    > = [
+                      ...(turn.processItems ?? []),
+                      ...turnDialogs.map((d) => ({
+                        kind: "askUser" as const,
+                        dialog: d,
+                        ts: d.created_at ? Date.parse(d.created_at) : undefined,
+                      })),
+                    ];
+                    merged.sort(
+                      (a, b) =>
+                        (Number.isFinite(a.ts) ? a.ts! : 0) - (Number.isFinite(b.ts) ? b.ts! : 0),
                     );
-                  })}
+                    return <TurnDetailsList items={merged} />;
+                  })()}
+                {/* ql-20260802-001/003：「对话」视图用轻量 ❓ 提问记录（只显问题+作答，
+                    穿插在对应 turn、答复之前）。AskUser 走 onUserDialog 不走 tool_use 日志，
+                    故用 dialog 历史渲染。全部视图的 AskUser 已并入上方时间线。 */}
+                {viewMode !== "all" &&
+                  dialogHistory
+                    .filter((d) => d.run_id === (turn.realRunId ?? turn.runId))
+                    .map((d) => {
+                      const qa = extractDialogQA(d);
+                      if (qa.length === 0) return null;
+                      return (
+                        <div
+                          key={`dialog-${d.request_id}`}
+                          className="ml-9 space-y-0.5 rounded-md border border-indigo-200 bg-indigo-50/40 px-3 py-1.5 text-xs leading-5"
+                        >
+                          {qa.map((item, i) => (
+                            <div key={i} className="break-words">
+                              <span className="font-medium text-foreground">❓ {item.question}</span>
+                              <span className="ml-1 text-muted-foreground">
+                                → {item.answerText ?? (d.status === "pending" ? "（待答）" : "（未回答）")}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
                 {/* agent 答复气泡（左，带助手图标）。运行中尚无答复时显示思考占位。 */}
                 {turn.output ? (
                   <div className="flex items-start gap-2.5">
@@ -1328,12 +1346,17 @@ export function InteractiveSessionPanel({
  * 分段（参考 agent 日志 mergedThinkingContent），工具卡片穿插其间保留时序；思考正文
  * 与工具结果均用 MarkdownText 渲染（与对话答复一致）。
  */
-function TurnDetailsList({ items }: { items: SessionProcessItem[] }) {
-  // 先把连续 thinking 合并成单个渲染项（被 tool/stderr 打断则分段），保留真实顺序
+function TurnDetailsList({
+  items,
+}: {
+  items: Array<SessionProcessItem | { kind: "askUser"; dialog: SessionDialogRead }>;
+}) {
+  // 先把连续 thinking 合并成单个渲染项（被 tool/stderr/askUser 打断则分段），保留真实顺序
   type RenderItem =
     | { kind: "thinking"; text: string }
     | { kind: "tool"; event: SessionToolEvent }
-    | { kind: "stderr"; text: string };
+    | { kind: "stderr"; text: string }
+    | { kind: "askUser"; dialog: SessionDialogRead };
   const grouped: RenderItem[] = [];
   for (const item of items) {
     if (item.kind === "thinking") {
@@ -1348,6 +1371,8 @@ function TurnDetailsList({ items }: { items: SessionProcessItem[] }) {
         kind: "tool",
         event: { raw: item.raw, result: item.result, status: item.status },
       });
+    } else if (item.kind === "askUser") {
+      grouped.push({ kind: "askUser", dialog: item.dialog });
     } else {
       grouped.push({ kind: "stderr", text: item.text });
     }
@@ -1372,6 +1397,9 @@ function TurnDetailsList({ items }: { items: SessionProcessItem[] }) {
         }
         if (item.kind === "tool") {
           return <ToolEventCard key={idx} event={item.event} />;
+        }
+        if (item.kind === "askUser") {
+          return <AskUserToolCard key={idx} dialog={item.dialog} />;
         }
         // stderr
         return (
@@ -1443,10 +1471,11 @@ function ToolEventCard({ event }: { event: SessionToolEvent }) {
 }
 
 /**
- * ql-20260802-002：「全部」视图把 AskUser 提问渲染成工具调用卡片（和 Write/Bash 一致），
+ * ql-20260802-002/003：「全部」视图把 AskUser 提问渲染成工具调用卡片（和 Write/Bash 一致），
  * 让 AskUser 在工具区可见。AskUser 不走 tool_use 日志（走 onUserDialog 对话协议，
  * cli.ts:653-659），故用 dialog 历史数据模拟工具卡片：工具名 AskUserQuestion +
- * ✓已答/⏳待答 徽章 + 问题（参数）→ 回答（结果）。一个 dialog 可含多问多答，卡片内逐行列出。
+ * ✓已答/⏳待答 徽章 + 问题（参数）+ 全部可选项（选中项绿底✓，未选灰○，hover 显 description）。
+ * ql-20260802-003 修复：旧版只显用户选中的那一项、看不到其余备选；现显全部 options。
  */
 function AskUserToolCard({ dialog }: { dialog: SessionDialogRead }) {
   const qa = extractDialogQA(dialog);
@@ -1464,13 +1493,37 @@ function AskUserToolCard({ dialog }: { dialog: SessionDialogRead }) {
           {badge.icon}
         </span>
       </div>
-      <div className="space-y-0.5">
+      <div className="space-y-1">
         {qa.map((item, i) => (
-          <div key={i} className="text-[10px] leading-5">
-            <div className="break-words text-foreground">❓ {item.question}</div>
-            <div className="break-words text-muted-foreground">
-              → {item.answer ?? (pending ? "（待答）" : "（未回答）")}
+          <div key={i} className="space-y-0.5">
+            <div className="break-words font-mono text-[10px] text-muted-foreground">
+              ❓ {item.question}
             </div>
+            {item.options.length > 0 ? (
+              <div className="space-y-0.5 pl-1">
+                {item.options.map((opt, j) => (
+                  <div
+                    key={j}
+                    title={opt.description}
+                    className={cn(
+                      "flex items-start gap-1 rounded px-1.5 py-0.5 text-[10px] leading-5",
+                      opt.selected
+                        ? "bg-emerald-50 font-medium text-emerald-700"
+                        : "text-muted-foreground/70",
+                    )}
+                  >
+                    <span aria-hidden className="shrink-0">
+                      {opt.selected ? "✓" : "○"}
+                    </span>
+                    <span className="min-w-0 break-words">{opt.label}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="break-words text-muted-foreground">
+                → {item.answerText ?? (pending ? "（待答）" : "（未回答）")}
+              </div>
+            )}
           </div>
         ))}
       </div>
