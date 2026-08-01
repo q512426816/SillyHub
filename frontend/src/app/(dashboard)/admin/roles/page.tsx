@@ -366,11 +366,23 @@ export default function AdminRolesPage() {
 }
 
 // ql-20260801-001：权限 key → 中文 name 映射(权限列显示中文,对齐 menu-permissions)。
-const PERMISSION_NAME_MAP: Record<string, string> = Object.fromEntries(
-  MENU_PERMISSION_GROUPS.flatMap((g) =>
-    g.permissions.map((p) => [p.key, p.name] as const),
+const PERMISSION_NAME_MAP: Record<string, string> = {
+  ...Object.fromEntries(
+    MENU_PERMISSION_GROUPS.flatMap((g) =>
+      g.permissions.map((p) => [p.key, p.name] as const),
+    ),
   ),
-);
+  // ql-20260801-002：系统/旧权限 key（不在 picker 可选范围,menu-permissions 无定义）补中文 fallback。
+  "component:admin": "组件管理",
+  "component:write": "组件编辑",
+  "daemon:borrow": "daemon 借用",
+  "platform:admin": "平台管理",
+  "platform:billing": "平台计费",
+  "ppm:plan:read": "计划查看",
+  "ppm:problem-change:read": "问题变更查看",
+  "ppm:problem:read": "问题查看",
+  "ppm:task:read": "任务查看",
+};
 
 function renderPermissionsCell(perms: string[]): React.ReactNode {
   if (perms.length === 0) return "—";
