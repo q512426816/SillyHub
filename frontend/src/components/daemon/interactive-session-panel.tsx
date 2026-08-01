@@ -1184,12 +1184,16 @@ export function InteractiveSessionPanel({
                   turn.processItems.length > 0 && (
                     <TurnDetailsList items={turn.processItems} />
                   )}
-                {/* ql-20260802-001：AskUser 提问记录按 run_id 穿插到对应 turn（跟会话顺序，
-                    不再一股脑堆顶）。不受 viewMode 限制——提问是重要交互，对话视图也要可见；
-                    渲染在该轮过程项之后、答复之前，符合 agent「思考→提问→用户答→继续」的顺序。 */}
+                {/* ql-20260802-001/002：AskUser 提问按 run_id 穿插到对应 turn（跟会话顺序，
+                    不再堆顶）。「全部」视图用工具卡片 AskUserToolCard（和 Write/Bash 一致、
+                    工具区可见），「对话」视图用轻量 ❓ 提问记录。AskUser 走 onUserDialog 不走
+                    tool_use 日志，故用 dialog 历史渲染；位置在该轮过程项之后、答复之前。 */}
                 {dialogHistory
                   .filter((d) => d.run_id === (turn.realRunId ?? turn.runId))
                   .map((d) => {
+                    if (viewMode === "all") {
+                      return <AskUserToolCard key={`dialog-${d.request_id}`} dialog={d} />;
+                    }
                     const qa = extractDialogQA(d);
                     if (qa.length === 0) return null;
                     return (
@@ -1434,6 +1438,42 @@ function ToolEventCard({ event }: { event: SessionToolEvent }) {
           </div>
         </SessionCollapsible>
       )}
+    </div>
+  );
+}
+
+/**
+ * ql-20260802-002：「全部」视图把 AskUser 提问渲染成工具调用卡片（和 Write/Bash 一致），
+ * 让 AskUser 在工具区可见。AskUser 不走 tool_use 日志（走 onUserDialog 对话协议，
+ * cli.ts:653-659），故用 dialog 历史数据模拟工具卡片：工具名 AskUserQuestion +
+ * ✓已答/⏳待答 徽章 + 问题（参数）→ 回答（结果）。一个 dialog 可含多问多答，卡片内逐行列出。
+ */
+function AskUserToolCard({ dialog }: { dialog: SessionDialogRead }) {
+  const qa = extractDialogQA(dialog);
+  if (qa.length === 0) return null;
+  const pending = dialog.status === "pending";
+  const badge = pending
+    ? { icon: "⏳", cls: "text-blue-600", title: "等待回答" }
+    : { icon: "✓", cls: "text-emerald-600", title: "已回答" };
+  return (
+    <div className="rounded border border-blue-200 bg-blue-50/40 px-2 py-1.5">
+      <div className="mb-0.5 flex items-center gap-1.5 text-[10px] text-blue-700">
+        <Wrench className="h-3 w-3 shrink-0" aria-hidden />
+        <span className="font-medium">AskUserQuestion</span>
+        <span className={cn("font-mono", badge.cls)} title={badge.title} aria-label={badge.title}>
+          {badge.icon}
+        </span>
+      </div>
+      <div className="space-y-0.5">
+        {qa.map((item, i) => (
+          <div key={i} className="text-[10px] leading-5">
+            <div className="break-words text-foreground">❓ {item.question}</div>
+            <div className="break-words text-muted-foreground">
+              → {item.answer ?? (pending ? "（待答）" : "（未回答）")}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
