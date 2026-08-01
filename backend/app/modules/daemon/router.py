@@ -1646,6 +1646,25 @@ async def list_pending_dialogs(
     return await service.list_pending_dialogs(user.id, session_id)
 
 
+@router.get(
+    "/sessions/{session_id}/dialogs/history",
+    response_model=list[SessionDialogRead],
+)
+async def list_dialog_history(
+    session_id: uuid.UUID,
+    user: TaskRunAgentUser,
+    service: PermissionServiceDep,
+) -> list[SessionDialogRead]:
+    """Return the session's full AskUserQuestion dialog history (pending + answered).
+
+    The interactive session panel uses this to render past Q&A: the live
+    AskUserDialogCard is removed once answered and never renders for
+    ended/failed sessions, so without this endpoint the history is invisible.
+    Cross-user sessions surface as 404 (ownership enforced in the service).
+    """
+    return await service.list_dialog_history(user.id, session_id)
+
+
 # ── Session list + history (task-12, FR-10 / D-005@v1) ───────────────────────
 # IMPORTANT: ``GET /sessions`` (fixed path) is registered BEFORE the
 # parameterized ``/sessions/{session_id}/...`` routes so FastAPI does not match

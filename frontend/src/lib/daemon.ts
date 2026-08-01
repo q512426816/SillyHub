@@ -4,6 +4,7 @@
 import { apiFetch, getApiBaseUrl } from "@/lib/api";
 import { useSession } from "@/stores/session";
 import type { AgentRunLogEntry } from "@/lib/agent";
+import type { components } from "@/lib/api-types";
 
 export interface OwnerRead {
   user_id: string | null;
@@ -554,6 +555,23 @@ export async function fetchPendingDialogs(
 ): Promise<SessionPermissionRequest[]> {
   return apiFetch<SessionPermissionRequest[]>(
     `/api/daemon/sessions/${encodeURIComponent(sessionId)}/dialogs`,
+  );
+}
+
+/** GET /dialogs/history 返回的问答记录（与 pending 端点同 schema，含 status/answer）。 */
+export type SessionDialogRead = components["schemas"]["SessionDialogRead"];
+
+/**
+ * GET /api/daemon/sessions/{id}/dialogs/history — 会话的 AskUserQuestion 完整问答历史
+ * (pending + answered)。交互式会话面板用来渲染历史问答：实时卡片回答后即移除
+ *（onPermissionResolved）、failed/ended 会话不渲染卡片（interactive-session-panel:1092），
+ * 已答/历史问答只能靠此 REST 恢复展示。返回 api-types 的 SessionDialogRead。
+ */
+export async function fetchSessionDialogHistory(
+  sessionId: string,
+): Promise<SessionDialogRead[]> {
+  return apiFetch<SessionDialogRead[]>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/dialogs/history`,
   );
 }
 

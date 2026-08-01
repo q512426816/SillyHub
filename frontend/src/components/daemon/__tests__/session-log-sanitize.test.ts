@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { classifySessionLog, sanitizeSessionLogContent, statusFromToolUseRaw } from "../session-log-sanitize";
+import { classifySessionLog, extractDialogQA, sanitizeSessionLogContent, statusFromToolUseRaw } from "../session-log-sanitize";
 
 describe("sanitizeSessionLogContent", () => {
   it("过滤 [SYSTEM:thinking_tokens] 技术标记", () => {
@@ -156,5 +156,38 @@ describe("statusFromToolUseRaw", () => {
   });
   it("空串 → running", () => {
     expect(statusFromToolUseRaw("")).toBe("running");
+  });
+});
+
+describe("extractDialogQA", () => {
+  it("解析 AskUserQuestion 问题+回答配对", () => {
+    const result = extractDialogQA({
+      dialog_payload: { questions: [{ question: "用 A 还是 B?" }, { question: "几号?" }] },
+      answer: { answers: [{ answer: "A" }, { answer: "3" }] },
+    });
+    expect(result).toEqual([
+      { question: "用 A 还是 B?", answer: "A" },
+      { question: "几号?", answer: "3" },
+    ]);
+  });
+
+  it("未回答（answer 缺失）→ answer=null", () => {
+    const result = extractDialogQA({
+      dialog_payload: { questions: [{ question: "Q" }] },
+      answer: null,
+    });
+    expect(result).toEqual([{ question: "Q", answer: null }]);
+  });
+
+  it("无 questions → 空数组（调用方据此跳过渲染）", () => {
+    expect(extractDialogQA({ dialog_payload: null, answer: null })).toEqual([]);
+  });
+
+  it("结构异常兜底（无问题文本 → 占位）", () => {
+    const result = extractDialogQA({
+      dialog_payload: { questions: [{}] },
+      answer: { answers: [] },
+    });
+    expect(result).toEqual([{ question: "(无问题文本)", answer: null }]);
   });
 });

@@ -120,3 +120,40 @@ export function statusFromToolUseRaw(raw: string): "ok" | "deny" | "running" {
   }
   return "running";
 }
+
+/**
+ * ql-20260801-003：从 SessionDialogRead 解析「问题→回答」对，供交互式会话面板
+ * 渲染 AskUserQuestion 历史记录（dialog_payload.questions 配 answer.answers）。
+ *
+ * 实时 AskUserDialogCard 回答后即移除、failed/ended 会话不渲染卡片，已答/历史
+ * 问答只能靠 GET /dialogs/history 恢复展示；本函数把持久化的 payload/answer
+ * 归一成 {question, answer} 供只读历史区块渲染。
+ *
+ *   - dialog_payload（AskUserQuestion 同构）：{questions:[{question,...}]}
+ *   - answer：{answers:[{question,answer}]}（按顺序与 questions 对应）
+ * 缺失/结构异常 → 问题兜底「(无问题文本)」、回答兜底 null（调用方据 status 显示「待答/未回答」）。
+ */
+export interface DialogQA {
+  question: string;
+  answer: string | null;
+}
+
+export function extractDialogQA(dialog: {
+  dialog_payload?: unknown;
+  answer?: unknown;
+}): DialogQA[] {
+  // dialog_payload/answer 在 api-types 里是 {[key:string]:unknown}|null，此处内部断言。
+  const payload = (dialog?.dialog_payload ?? null) as {
+    questions?: { question?: string }[];
+  } | null;
+  const answer = (dialog?.answer ?? null) as {
+    answers?: { answer?: string }[];
+  } | null;
+  const questions = payload?.questions ?? [];
+  const answers = answer?.answers ?? [];
+  if (questions.length === 0) return [];
+  return questions.map((q, i) => ({
+    question: q.question ?? "(无问题文本)",
+    answer: answers[i]?.answer ?? null,
+  }));
+}

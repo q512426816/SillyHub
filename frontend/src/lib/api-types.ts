@@ -3196,6 +3196,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/dialogs/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Dialog History
+         * @description Return the session's full AskUserQuestion dialog history (pending + answered).
+         *
+         *     The interactive session panel uses this to render past Q&A: the live
+         *     AskUserDialogCard is removed once answered and never renders for
+         *     ended/failed sessions, so without this endpoint the history is invisible.
+         *     Cross-user sessions surface as 404 (ownership enforced in the service).
+         */
+        get: operations["list_dialog_history_api_daemon_sessions__session_id__dialogs_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/sessions": {
         parameters: {
             query?: never;
@@ -3533,13 +3558,13 @@ export interface paths {
         };
         /**
          * List Custom Skills
-         * @description 列出全部平台 CustomSkill（不含 content，含 content_preview）。
+         * @description 列出当前用户的 CustomSkill（不含 content，含 content_preview）。
          */
         get: operations["list_custom_skills_api_custom_skills_get"];
         put?: never;
         /**
          * Create Custom Skill
-         * @description 创建平台 CustomSkill（name 字符集/前缀/unique 校验在 service 层）。
+         * @description 创建 CustomSkill（name 字符集/前缀/unique 校验在 service 层）。
          */
         post: operations["create_custom_skill_api_custom_skills_post"];
         delete?: never;
@@ -3557,18 +3582,18 @@ export interface paths {
         };
         /**
          * Get Custom Skill
-         * @description 详情（含完整 content）。
+         * @description 详情（含完整 content；service 校验归属，非本人 404）。
          */
         get: operations["get_custom_skill_api_custom_skills__skill_id__get"];
         /**
          * Update Custom Skill
-         * @description 部分更新（name/description/content 任一可选）。
+         * @description 部分更新（name/description/content 任一可选；service 校验归属）。
          */
         put: operations["update_custom_skill_api_custom_skills__skill_id__put"];
         post?: never;
         /**
          * Delete Custom Skill
-         * @description 删除平台 CustomSkill。
+         * @description 删除 CustomSkill（service 校验归属，非本人 404）。
          */
         delete: operations["delete_custom_skill_api_custom_skills__skill_id__delete"];
         options?: never;
@@ -8323,8 +8348,11 @@ export interface components {
              * @description content 前 120 字符，供列表展示
              */
             content_preview: string;
-            /** Created By */
-            created_by?: string | null;
+            /**
+             * Created By
+             * Format: uuid
+             */
+            created_by: string;
             /**
              * Created At
              * Format: date-time
@@ -8357,8 +8385,11 @@ export interface components {
              * @description content 前 120 字符，供列表展示
              */
             content_preview: string;
-            /** Created By */
-            created_by?: string | null;
+            /**
+             * Created By
+             * Format: uuid
+             */
+            created_by: string;
             /**
              * Created At
              * Format: date-time
@@ -21569,6 +21600,37 @@ export interface operations {
         };
     };
     list_pending_dialogs_api_daemon_sessions__session_id__dialogs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionDialogRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_dialog_history_api_daemon_sessions__session_id__dialogs_history_get: {
         parameters: {
             query?: never;
             header?: never;

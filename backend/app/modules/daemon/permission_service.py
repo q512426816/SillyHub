@@ -488,6 +488,36 @@ class DaemonPermissionService:
         )
         return [SessionDialogRead.from_model(r) for r in rows]
 
+    async def list_dialog_history(
+        self,
+        user_id: uuid.UUID,
+        session_id: uuid.UUID,
+    ) -> list[SessionDialogRead]:
+        """Return ALL dialog requests for a session (pending + answered).
+
+        Unlike ``list_pending_dialogs`` (page-refresh recovery, pending only),
+        this returns the full AskUserQuestion Q&A history so the interactive
+        session panel can render past questions and answers even after the live
+        card is resolved or the session has ended/failed. Ownership enforced
+        the same way (cross-user → 404, no existence leak).
+        """
+        # Read-only ownership check (same as list_pending_dialogs).
+        await self._svc._get_owned_session_for_update(session_id, user_id)
+        await self._svc._session.commit()
+
+        rows = (
+            (
+                await self._svc._session.execute(
+                    select(SessionDialogRequest)
+                    .where(SessionDialogRequest.session_id == session_id)
+                    .order_by(SessionDialogRequest.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [SessionDialogRead.from_model(r) for r in rows]
+
     # ── Workspace-level read: GET /api/workspaces/{id}/dialogs（task-02 / D-001 只读）──
 
     async def list_pending_dialogs_for_workspace(

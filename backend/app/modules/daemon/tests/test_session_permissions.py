@@ -709,3 +709,55 @@ class TestCodexPermissionParity:
         )
         # dialogs 不 arm timer（long-lived）。
         assert "codex-dlg-1" not in perm._timers
+
+    async def test_list_dialog_history_returns_pending_and_answered(
+        self, db_session, mocked_redis
+    ) -> None:
+        """ql-20260801-003：list_dialog_history 返回 pending+answered 全部（历史展示）。
+
+        ``list_pending_dialogs`` 只返回 pending（页面刷新恢复用）；历史端点需返回
+        全部，否则已答问答在卡片移除后、failed/ended 会话里都不可见。插 2 个
+        dialog，手动把 1 个标 answered，断言 history 含两者、pending 只含未答那个。
+        """
+        from sqlalchemy import update
+
+        from app.modules.daemon.model import SessionDialogRequest
+
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, run = await _create_session(db_session, uid, rt.id)
+
+        svc = DaemonService(db_session)
+        hub = MagicMock()
+        hub.send_permission_response = AsyncMock(return_value=True)
+        perm = DaemonPermissionService(svc, hub, timeout_sec=30.0)
+
+        await perm.handle_permission_request(
+            rt.id,
+            _make_dialog_payload(sess, run, request_id="hist-1", dialog_kind="AskUserQuestion"),
+        )
+        await perm.handle_permission_request(
+            rt.id,
+            _make_dialog_payload(sess, run, request_id="hist-2", dialog_kind="AskUserQuestion"),
+        )
+
+        # 手动把 hist-1 标 answered + 回填 answer（模拟已答历史，绕过 respond 全链路）。
+        await db_session.execute(
+            update(SessionDialogRequest)
+            .where(SessionDialogRequest.request_id == "hist-1")
+            .values(
+                status="answered",
+                answer={"answers": [{"question": "q", "answer": "a"}]},
+            )
+        )
+        await db_session.commit()
+
+        history = await perm.list_dialog_history(uid, sess.id)
+        assert {d.request_id for d in history} == {"hist-1", "hist-2"}
+        answered = next(d for d in history if d.request_id == "hist-1")
+        assert answered.status == "answered"
+        assert answered.answer is not None
+
+        # 对比：pending 端点只返回未答的 hist-2（刷新恢复语义不变）。
+        pending = await perm.list_pending_dialogs(uid, sess.id)
+        assert {d.request_id for d in pending} == {"hist-2"}

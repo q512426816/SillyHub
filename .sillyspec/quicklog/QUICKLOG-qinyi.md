@@ -68,3 +68,22 @@
 根因：后端 build_skills_manifest 返回的 manifest 只有 files[{path, sha256}]（daemon 同步用），没带每个 skill 的 description；前端 PlatformSkillsManifest 类型无 description 字段，deriveSkillGroups 只从 files 聚合技能名+文件数，表格「说明」列无数据可显只能写死通用文案。数据链路断在中间——前端拿不到描述，想显示也显示不出来。
 方案：① 后端 skills_bundle_service 新增 _parse_skill_frontmatter（解析 SKILL.md 开头 YAML frontmatter 取 name+description，无围栏 / YAML 错 / 解码错均返回空 dict 不抛异常）+ _summarize_skills（按顶层目录聚合 {name, description, file_count}，name=目录名与 daemon 同步路径、前端 deriveSkillGroups 口径一致，注意目录名 sillyspec-archive ≠ frontmatter name sillyspec:archive）；build_skills_manifest 返回新增 skills 字段，不动 files（daemon 同步与 version 计算零影响）。② 前端 custom-skills.ts 加 PlatformSkillSummary 类型 + manifest 加可选 skills 字段（端点 dict[str,Any] 未进 OpenAPI 生成范围，手写对齐后端）；page.tsx platformGroups 优先用 manifest.skills（deriveSkillGroups 兜底），表格说明列渲染 g.description || 通用文案。
 结果：后端 test_skills_bundle 15 passed（含 4 新测试：frontmatter 解析 / 聚合 / 端到端 description / 无 frontmatter 空兜底）；前端 page.test 7 passed（含 description 渲染新测试）；gen:types 无 diff（manifest 端点 dict[str,Any] 不影响 OpenAPI schema）；前端 tsc --noEmit exit 0。改 5 代码文件 + 2 模块文档（backend.md / frontend.md 变更索引同步），已 git add 未 commit。未部署，建议重启 backend + 浏览器实测确认各技能描述显示。
+## ql-20260801-003-baf7 | 2026-08-01 23:00:26 | 交互式会话展示 AskUser 问答历史（已答/历史回看可见）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/permission_service.py — 新增 list_dialog_history（查全 status，不过滤 pending）
+- backend/app/modules/daemon/router.py — 新增 GET /sessions/{id}/dialogs/history 端点
+- backend/app/modules/daemon/tests/test_session_permissions.py — 新增 list_dialog_history 测试（断言 pending+answered 全返回、pending 端点只返回未答）
+- backend/openapi.json — gen:types 重新 dump（345 paths 含新端点）
+- frontend/src/lib/api-types.ts — gen:types 重新生成（SessionDialogRead 复用，paths 加 history）
+- frontend/src/lib/daemon.ts — 新增 fetchSessionDialogHistory + SessionDialogRead 类型导出
+- frontend/src/components/daemon/session-log-sanitize.ts — 新增 extractDialogQA 纯函数（payload/answer → 问题回答对）
+- frontend/src/components/daemon/interactive-session-panel.tsx — 新增 dialogHistory state+effect+「提问记录」渲染区块（不受 failed/ended 限制）
+- frontend/src/components/daemon/__tests__/session-log-sanitize.test.ts — extractDialogQA 单测
+- frontend/src/components/daemon/__tests__/interactive-session-panel.test.tsx — 补 fetchSessionDialogHistory mock（beforeEach mockResolvedValue，否则 .then 崩）
+
+需求：交互式会话面板回看时看不到 AskUser 提问与回答，用户无法得知问过什么、答了什么。
+根因：AskUser 调用已持久化在 session_dialog_requests（含问题/选项/回答，实测 25 条），但前端三道关卡叠加致"用完即焚"——session-log-sanitize.ts:66 过滤所有含 AskUserQuestion 的日志（不进工具记录）、AskUserDialogCard 回答后 onPermissionResolved 立即移除、interactive-session-panel.tsx:1092 对 failed/ended 会话不渲染卡片，历史回看完全无痕。
+方案：后端新增 list_dialog_history（与 list_pending_dialogs 同结构但不过滤 status，返回 pending+answered 全部）+ GET /sessions/{id}/dialogs/history 端点；前端 daemon.ts 加 fetchSessionDialogHistory、session-log-sanitize 加 extractDialogQA 把持久化 payload/answer 归一成「问题→回答」对、interactive-session-panel 加 dialogHistory state+effect（sessionId 变化拉历史）+ 独立「提问记录」渲染区块（不受 view.status 限制，failed/ended 也能看）；gen:types 同步 openapi。
+结果：backend test_session_permissions 21 passed（含新 list_dialog_history 测试）、frontend sanitize+panel 全过（extractDialogQA 单测 + panel 41 passed，修了 mock 漏 fetchSessionDialogHistory 致 .then 崩的坑）、typecheck exit 0；待部署本地 + 阿里云。

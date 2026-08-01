@@ -35,6 +35,7 @@ const sessionApi = vi.hoisted(() => ({
   streamSession: vi.fn(),
   getAgentSession: vi.fn(),
   fetchPendingDialogs: vi.fn(),
+  fetchSessionDialogHistory: vi.fn(),
 }));
 
 // task-08（FR-08）：「用团队分析」按钮调 createMission(mode=team, session_id 绑定)
@@ -53,6 +54,7 @@ vi.mock("@/lib/daemon", async () => {
     streamSession: sessionApi.streamSession,
     getAgentSession: sessionApi.getAgentSession,
     fetchPendingDialogs: sessionApi.fetchPendingDialogs,
+    fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
   };
 });
 
@@ -160,6 +162,7 @@ describe("InteractiveSessionPanel", () => {
     vi.clearAllMocks();
     // 默认无 pending dialog（改动二：fetchPendingDialogs 独立 effect）
     sessionApi.fetchPendingDialogs.mockResolvedValue([]);
+    sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -1331,6 +1334,7 @@ describe("InteractiveSessionPanel 对话/全部视图切换（ql-20260729-005）
   beforeEach(() => {
     vi.clearAllMocks();
     sessionApi.fetchPendingDialogs.mockResolvedValue([]);
+    sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
   });
 
   it("默认对话视图：tool_call/thinking 不展示，reply 正常展示；切全部后过程项出现", async () => {

@@ -8852,6 +8852,54 @@
         }
       }
     },
+    "/api/daemon/sessions/{session_id}/dialogs/history": {
+      "get": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "List Dialog History",
+        "description": "Return the session's full AskUserQuestion dialog history (pending + answered).\n\nThe interactive session panel uses this to render past Q&A: the live\nAskUserDialogCard is removed once answered and never renders for\nended/failed sessions, so without this endpoint the history is invisible.\nCross-user sessions surface as 404 (ownership enforced in the service).",
+        "operationId": "list_dialog_history_api_daemon_sessions__session_id__dialogs_history_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SessionDialogRead"
+                  },
+                  "title": "Response List Dialog History Api Daemon Sessions  Session Id  Dialogs History Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/sessions": {
       "get": {
         "tags": [
@@ -9523,7 +9571,7 @@
           "custom-skills"
         ],
         "summary": "List Custom Skills",
-        "description": "列出全部平台 CustomSkill（不含 content，含 content_preview）。",
+        "description": "列出当前用户的 CustomSkill（不含 content，含 content_preview）。",
         "operationId": "list_custom_skills_api_custom_skills_get",
         "responses": {
           "200": {
@@ -9547,7 +9595,7 @@
           "custom-skills"
         ],
         "summary": "Create Custom Skill",
-        "description": "创建平台 CustomSkill（name 字符集/前缀/unique 校验在 service 层）。",
+        "description": "创建 CustomSkill（name 字符集/前缀/unique 校验在 service 层）。",
         "operationId": "create_custom_skill_api_custom_skills_post",
         "requestBody": {
           "content": {
@@ -9589,7 +9637,7 @@
           "custom-skills"
         ],
         "summary": "Get Custom Skill",
-        "description": "详情（含完整 content）。",
+        "description": "详情（含完整 content；service 校验归属，非本人 404）。",
         "operationId": "get_custom_skill_api_custom_skills__skill_id__get",
         "parameters": [
           {
@@ -9631,7 +9679,7 @@
           "custom-skills"
         ],
         "summary": "Update Custom Skill",
-        "description": "部分更新（name/description/content 任一可选）。",
+        "description": "部分更新（name/description/content 任一可选；service 校验归属）。",
         "operationId": "update_custom_skill_api_custom_skills__skill_id__put",
         "parameters": [
           {
@@ -9683,7 +9731,7 @@
           "custom-skills"
         ],
         "summary": "Delete Custom Skill",
-        "description": "删除平台 CustomSkill。",
+        "description": "删除 CustomSkill（service 校验归属，非本人 404）。",
         "operationId": "delete_custom_skill_api_custom_skills__skill_id__delete",
         "parameters": [
           {
@@ -26776,15 +26824,8 @@
             "description": "content 前 120 字符，供列表展示"
           },
           "created_by": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
+            "format": "uuid",
             "title": "Created By"
           },
           "created_at": {
@@ -26808,6 +26849,7 @@
           "name",
           "description",
           "content_preview",
+          "created_by",
           "created_at",
           "updated_at",
           "content"
@@ -26836,15 +26878,8 @@
             "description": "content 前 120 字符，供列表展示"
           },
           "created_by": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
+            "format": "uuid",
             "title": "Created By"
           },
           "created_at": {
@@ -26864,6 +26899,7 @@
           "name",
           "description",
           "content_preview",
+          "created_by",
           "created_at",
           "updated_at"
         ],

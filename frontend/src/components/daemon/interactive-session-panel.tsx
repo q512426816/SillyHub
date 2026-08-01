@@ -47,6 +47,7 @@ import { createMission } from "@/lib/agent";
 import {
   createSession,
   fetchPendingDialogs,
+  fetchSessionDialogHistory,
   injectSession,
   interruptSession,
   endSession,
@@ -55,13 +56,14 @@ import {
   listSessionRuns,
   PROVIDER_META,
   type InteractiveProvider,
+  type SessionDialogRead,
   type SessionPermissionRequest,
   type SessionPermissionResolved,
   type SessionStreamConnection,
   type SessionStreamEnvelope,
 } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
-import { classifySessionLog, isToolResultDenied, statusFromToolUseRaw } from "@/components/daemon/session-log-sanitize";
+import { classifySessionLog, extractDialogQA, isToolResultDenied, statusFromToolUseRaw } from "@/components/daemon/session-log-sanitize";
 
 /**
  * ql-20260730-003：一个回合内按真实到达顺序排列的过程项。
@@ -226,6 +228,9 @@ export function InteractiveSessionPanel({
   // 仅渲染 dialog_kind 存在的（AskUserDialogCard）；普通工具审批卡在本面板不展示
   //（/runtimes 页的 PermissionApprovalsPanel 负责普通 allow/deny）。
   const [pendingRequests, setPendingRequests] = useState<SessionPermissionRequest[]>([]);
+  // ql-20260801-003：AskUserQuestion 问答历史（pending+answered），独立于实时卡片——
+  // 卡片回答后即移除、failed/ended 会话不渲染卡片，历史靠 GET /dialogs/history 恢复展示。
+  const [dialogHistory, setDialogHistory] = useState<SessionDialogRead[]>([]);
   // ql-20260729-005：消息视图模式。「对话」（默认）只显用户消息 + agent 答复正文；
   // 「全部」追加 thinking/工具调用/stderr 过程项。参考 agent-log-viewer 的
   // 对话/全部二态 tab（ql-20260626-001），但不做二级筛选按钮组。
@@ -576,6 +581,26 @@ export function InteractiveSessionPanel({
       })
       .catch(() => {
         // 恢复失败不阻塞：SSE 仍会推送后续新事件
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view.sessionId]);
+
+  // ql-20260801-003：拉取会话的 AskUserQuestion 完整问答历史（pending+answered）。
+  // 实时卡片回答后即移除、failed/ended 会话不渲染卡片，历史问答只能靠此 REST 恢复。
+  // 与 pending 恢复同理：sessionId 变化时拉一次（SSE 只推实时新事件，刷新/重连不重放）。
+  useEffect(() => {
+    if (!view.sessionId) return;
+    const sessionId = view.sessionId;
+    let cancelled = false;
+    void fetchSessionDialogHistory(sessionId)
+      .then((history) => {
+        if (cancelled || !history) return;
+        setDialogHistory(history);
+      })
+      .catch(() => {
+        // 历史拉取失败不阻塞会话主流程
       });
     return () => {
       cancelled = true;
@@ -1107,6 +1132,32 @@ export function InteractiveSessionPanel({
                 />
               </ErrorBoundary>
             ))}
+          </div>
+        )}
+        {/* ql-20260801-003：AskUserQuestion 问答历史（pending+answered）。实时卡片
+            回答后即移除、failed/ended 会话不渲染卡片，故历史独立于此处只读展示，
+            不受 view.status 限制——回看任意会话都能看到问过什么、答了什么。 */}
+        {dialogHistory.length > 0 && (
+          <div className="mb-3 space-y-1.5 rounded-md border border-indigo-200 bg-indigo-50/40 px-3 py-2">
+            <p className="text-[11px] font-medium text-indigo-700">
+              📝 提问记录（{dialogHistory.length}）
+            </p>
+            {dialogHistory.map((d) => {
+              const qa = extractDialogQA(d);
+              if (qa.length === 0) return null;
+              return (
+                <div key={d.request_id} className="space-y-0.5 text-xs leading-5">
+                  {qa.map((item, i) => (
+                    <div key={i} className="break-words">
+                      <span className="font-medium text-foreground">❓ {item.question}</span>
+                      <span className="ml-1 text-muted-foreground">
+                        → {item.answer ?? (d.status === "pending" ? "（待答）" : "（未回答）")}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
           </div>
         )}
         {view.turns.length === 0 ? (
