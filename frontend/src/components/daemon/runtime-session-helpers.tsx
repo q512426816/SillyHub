@@ -180,7 +180,7 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
   }
   const turns: SessionTurnView[] = [];
   let turnIndex = 0;
-  for (const [, entries] of Array.from(map.entries())) {
+  for (const [runId, entries] of Array.from(map.entries())) {
     turnIndex += 1;
     const prompts: string[] = [];
     const outputs: string[] = [];
@@ -238,6 +238,8 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
     }
     turns.push({
       runId: `__attach_history_${turnIndex}__`,
+      // ql-20260802-001：保留真实 run_id 供 AskUser 提问历史穿插到对应 turn（跟会话顺序）
+      realRunId: runId,
       turn: turnIndex,
       prompt: prompts.join("\n"),
       // ql-20260730-004：reply 流式 delta 直接 concat（同 onLog），换行在 delta 内部。

@@ -43,6 +43,8 @@ describe("logsToTurns 对话/过程分流（ql-20260730-003 processItems 有序�
 
     expect(turns).toHaveLength(1);
     const turn = turns[0]!;
+    // ql-20260802-001：realRunId 保留真实 run_id（turn.runId 是伪 __attach_history_N__ id）
+    expect(turn.realRunId).toBe("run-1");
     expect(turn.prompt).toBe("帮我看看这个文件");
     // output 只含答复正文（reply 流式 delta 直接 concat，ql-20260730-004）
     expect(turn.output).toBe("文件内容是这样的总结一下");

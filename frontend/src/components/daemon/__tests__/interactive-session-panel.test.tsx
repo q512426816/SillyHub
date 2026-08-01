@@ -635,6 +635,37 @@ describe("InteractiveSessionPanel", () => {
     expect(input.disabled).toBe(true);
   });
 
+  it("AC-10-01b 提问记录按 run_id 穿插到对应 turn（不堆顶）(ql-20260802-001)", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.getAgentSession.mockResolvedValue({
+      id: "sess-attach", runtime_id: null, lease_id: null,
+      provider: "claude", status: "reconnecting", agent_session_id: "ag-1",
+      config: null, turn_count: 1, created_at: "t", last_active_at: null, ended_at: null,
+    });
+    // 已答提问，run_id 匹配 makeAttachTurns 的 run-old-1（realRunId 未设 → fallback runId）
+    sessionApi.fetchSessionDialogHistory.mockResolvedValue([
+      {
+        id: "d1", session_id: "sess-attach", run_id: "run-old-1", request_id: "req-1",
+        tool_name: "AskUserQuestion", dialog_kind: "AskUserQuestion",
+        dialog_payload: { questions: [{ question: "文件建在哪里？" }] },
+        status: "answered", answer: { answers: [{ answer: "用户桌面" }] },
+        created_at: "t", answered_at: "t",
+      },
+    ]);
+
+    setupPanel({ attachSessionId: "sess-attach", initialTurns: makeAttachTurns() });
+
+    await waitFor(() => {
+      expect(sessionApi.fetchSessionDialogHistory).toHaveBeenCalledTimes(1);
+    });
+    // 提问按 run_id 穿插到对应 turn 内（run-old-1 匹配），问答可见
+    expect(screen.getByText(/文件建在哪里？/)).toBeInTheDocument();
+    expect(screen.getByText(/用户桌面/)).toBeInTheDocument();
+    // 顶部「📝 提问记录」区块已删，不再一股脑堆顶
+    expect(screen.queryByText(/提问记录/)).not.toBeInTheDocument();
+  });
+
   it("AC-10-03 轮询到 active → status active + 输入启用 + 清轮询", async () => {
     vi.useFakeTimers();
     try {

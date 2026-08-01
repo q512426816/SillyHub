@@ -120,6 +120,13 @@ export interface SessionTurnView {
    * 可选：外部构造的历史 turn（logsToTurns 已填充）。
    */
   processItems?: SessionProcessItem[];
+  /**
+   * ql-20260802-001：真实 agent_run_id（attach 历史 turn 用）。logsToTurns 按 log.run_id
+   * 分组但 turn.runId 用伪 id（__attach_history_N__）作 React key；realRunId 保留真实
+   * run_id，供 AskUser 提问历史按 run_id 穿插到对应 turn（跟会话顺序，不再堆顶）。实时
+   * turn 的 runId 本就是真实 run_id，realRunId 留 undefined，渲染匹配用 realRunId ?? runId。
+   */
+  realRunId?: string;
 }
 
 interface InteractiveSessionView {
@@ -1143,32 +1150,8 @@ export function InteractiveSessionPanel({
             ))}
           </div>
         )}
-        {/* ql-20260801-003：AskUserQuestion 问答历史（pending+answered）。实时卡片
-            回答后即移除、failed/ended 会话不渲染卡片，故历史独立于此处只读展示，
-            不受 view.status 限制——回看任意会话都能看到问过什么、答了什么。 */}
-        {dialogHistory.length > 0 && (
-          <div className="mb-3 space-y-1.5 rounded-md border border-indigo-200 bg-indigo-50/40 px-3 py-2">
-            <p className="text-[11px] font-medium text-indigo-700">
-              📝 提问记录（{dialogHistory.length}）
-            </p>
-            {dialogHistory.map((d) => {
-              const qa = extractDialogQA(d);
-              if (qa.length === 0) return null;
-              return (
-                <div key={d.request_id} className="space-y-0.5 text-xs leading-5">
-                  {qa.map((item, i) => (
-                    <div key={i} className="break-words">
-                      <span className="font-medium text-foreground">❓ {item.question}</span>
-                      <span className="ml-1 text-muted-foreground">
-                        → {item.answer ?? (d.status === "pending" ? "（待答）" : "（未回答）")}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              );
-            })}
-          </div>
-        )}
+        {/* ql-20260802-001：AskUser 提问记录已改为按 run_id 穿插到对应 turn 内（跟会话
+            顺序），不再在此处堆顶展示。顶部仅保留 pending 实时交互卡片（上方 pendingRequests）。 */}
         {view.turns.length === 0 ? (
           <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center">
             <p className="text-xs font-medium text-foreground">
@@ -1201,6 +1184,30 @@ export function InteractiveSessionPanel({
                   turn.processItems.length > 0 && (
                     <TurnDetailsList items={turn.processItems} />
                   )}
+                {/* ql-20260802-001：AskUser 提问记录按 run_id 穿插到对应 turn（跟会话顺序，
+                    不再一股脑堆顶）。不受 viewMode 限制——提问是重要交互，对话视图也要可见；
+                    渲染在该轮过程项之后、答复之前，符合 agent「思考→提问→用户答→继续」的顺序。 */}
+                {dialogHistory
+                  .filter((d) => d.run_id === (turn.realRunId ?? turn.runId))
+                  .map((d) => {
+                    const qa = extractDialogQA(d);
+                    if (qa.length === 0) return null;
+                    return (
+                      <div
+                        key={`dialog-${d.request_id}`}
+                        className="ml-9 space-y-0.5 rounded-md border border-indigo-200 bg-indigo-50/40 px-3 py-1.5 text-xs leading-5"
+                      >
+                        {qa.map((item, i) => (
+                          <div key={i} className="break-words">
+                            <span className="font-medium text-foreground">❓ {item.question}</span>
+                            <span className="ml-1 text-muted-foreground">
+                              → {item.answer ?? (d.status === "pending" ? "（待答）" : "（未回答）")}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })}
                 {/* agent 答复气泡（左，带助手图标）。运行中尚无答复时显示思考占位。 */}
                 {turn.output ? (
                   <div className="flex items-start gap-2.5">
