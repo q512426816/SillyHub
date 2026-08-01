@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Input, Button, Modal, type TableProps, Tag } from "antd";
 
 import { AdminRolePermissionPicker } from "@/components/admin-role-permission-picker";
+import { MENU_PERMISSION_GROUPS } from "@/lib/menu-permissions";
 import {
   DataTable,
   PageContainer,
@@ -364,12 +365,21 @@ export default function AdminRolesPage() {
   );
 }
 
+// ql-20260801-001：权限 key → 中文 name 映射(权限列显示中文,对齐 menu-permissions)。
+const PERMISSION_NAME_MAP: Record<string, string> = Object.fromEntries(
+  MENU_PERMISSION_GROUPS.flatMap((g) =>
+    g.permissions.map((p) => [p.key, p.name] as const),
+  ),
+);
+
 function renderPermissionsCell(perms: string[]): React.ReactNode {
   if (perms.length === 0) return "—";
-  const visible = perms.slice(0, 3);
-  const extra = perms.length - visible.length;
+  const toName = (k: string) => PERMISSION_NAME_MAP[k] ?? k;
+  const allNames = perms.map(toName);
+  const visible = allNames.slice(0, 3);
+  const extra = allNames.length - visible.length;
   return (
-    <span>
+    <span title={allNames.join(", ")}>
       {visible.join(", ")}
       {extra > 0 && <span className="ml-1 text-muted-foreground">+{extra} more</span>}
     </span>

@@ -141,3 +141,12 @@
 根因：task-01 只换了 Modal 外壳,内部 Key/名称用原生 <input>+inputCls、描述用原生 <textarea>+textareaCls、权限选择原生 checkbox + setIndeterminateRef,没换 antd 组件。
 方案：Key/名称原生 input→antd Input;描述原生 textarea→antd Input.TextArea(rows=3);权限单选原生 checkbox→antd Checkbox;全选原生 checkbox+setIndeterminateRef→antd Checkbox(indeterminate prop 支持,删 ref 手写)。逻辑不变,仅组件库统一。
 结果：2 文件改动(admin/roles page.tsx + admin-role-permission-picker.tsx),typecheck 绿 + picker 7 测试绿(antd Checkbox 不破坏现有断言)。
+## ql-20260801-001-f6f1 | 2026-08-01 15:29:05 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/admin/roles/page.tsx
+
+需求：/admin/roles 权限列显示中文(现在显示英文 key 不直观)。
+根因：权限列 renderPermissionsCell(:367)直接 join 权限 key 数组(workspace:read/change:create 等英文),用户看不懂;menu-permissions 已有 {key, 中文name} 但没用上。
+方案：建 PERMISSION_NAME_MAP(从 MENU_PERMISSION_GROUPS flatMap 全部 {key:name}),权限列把 key 转中文 name 显示(找不到 name 兜底保留原 key),前 3 个中文 + '+N more',加 title 悬停显示全部中文。
+结果：1 文件改动(admin/roles page.tsx),typecheck 绿。
