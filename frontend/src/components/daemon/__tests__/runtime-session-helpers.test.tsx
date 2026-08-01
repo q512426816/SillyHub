@@ -110,8 +110,10 @@ describe("logsToTurns 对话/过程分流（ql-20260730-003 processItems 有序�
     ]);
   });
 
-  it("success:true 时 result 文本含 fail 字样仍 ok（success 权威，不靠文本猜测）", () => {
-    // 关键回归：旧实现扫 result 文本「fail」误判 ✗；现以 tool_call JSON success 为准。
+  it("success:true 时 result 文本含 fail 字样仍 ok（isToolResultDenied 收紧不匹配正文 fail）", () => {
+    // ql-20260801-004：result 拒绝现可覆盖 success（daemon success 恒 true 不可信），但
+    // isToolResultDenied 收紧关键词（去 error/fail）——grep 命中 "fail" 字样属成功输出正文，
+    // 不匹配明确拒绝信号 → 保持 ok，不误判 ✗。
     const turns = logsToTurns([
       makeLog("1", "run-1", "tool_call", '{"tool":"Grep","args":{"pattern":"fail"},"success":true}'),
       makeLog("2", "run-1", "stdout", "[TOOL_RESULT] grep 命中 3 处 fail 字样"),
@@ -123,6 +125,34 @@ describe("logsToTurns 对话/过程分流（ql-20260730-003 processItems 有序�
         result: "grep 命中 3 处 fail 字样",
         status: "ok",
       },
+    ]);
+  });
+
+  it("Runtime Policy 拒绝：success:true + result 拒绝文本 → deny 覆盖（ql-20260801-004 核心修复）", () => {
+    // daemon tool_call JSON 硬编码 success:true（表「已放行」），执行被 Runtime Policy 拦截，
+    // 拒绝作为 tool_result 返回（filesystem-policy.ts 文案「Runtime Policy 拒绝本次写入」）。
+    // result 含「拒绝」→ isToolResultDenied 命中 → 覆盖 use 的 ok → deny（✗）。
+    const turns = logsToTurns([
+      makeLog("1", "run-1", "tool_call", '{"tool":"Write","args":{"file_path":"/tmp/x"},"success":true}'),
+      makeLog("2", "run-1", "stdout", "[TOOL_RESULT] Runtime Policy 拒绝本次写入。原因：目标目录未配置为可写目录。"),
+    ]);
+    expect(turns[0]!.processItems).toEqual([
+      {
+        kind: "tool",
+        raw: '{"tool":"Write","args":{"file_path":"/tmp/x"},"success":true}',
+        result: "Runtime Policy 拒绝本次写入。原因：目标目录未配置为可写目录。",
+        status: "deny",
+      },
+    ]);
+  });
+
+  it("孤儿拒绝 result（无配对 use）→ deny（ql-20260801-004 不硬编码 ok）", () => {
+    const turns = logsToTurns([
+      makeLog("1", "run-1", "stdout", "[TOOL_RESULT] 操作失败：权限不足"),
+      makeLog("2", "run-1", "stdout", "正文"),
+    ]);
+    expect(turns[0]!.processItems).toEqual([
+      { kind: "tool", raw: "", result: "操作失败：权限不足", status: "deny" },
     ]);
   });
 

@@ -209,11 +209,11 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
         for (let i = processItems.length - 1; i >= 0; i -= 1) {
           const it = processItems[i];
           if (it && it.kind === "tool" && it.result === undefined) {
-            const status =
-              it.status === "running"
-                ? isToolResultDenied(seg.text)
-                  ? "deny"
-                  : "ok"
+            // ql-20260801-004：result 拒绝优先覆盖 use 的 success（daemon success 恒 true 不可信）
+            const status = isToolResultDenied(seg.text)
+              ? "deny"
+              : it.status === "running"
+                ? "ok"
                 : it.status;
             processItems[i] = { kind: "tool", raw: it.raw, result: seg.text, status };
             paired = true;
@@ -221,7 +221,13 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
           }
         }
         if (!paired) {
-          processItems.push({ kind: "tool", raw: "", result: seg.text, status: "ok" });
+          // ql-20260801-004：孤儿拒绝 result 也判 deny（不硬编码 ok）
+          processItems.push({
+            kind: "tool",
+            raw: "",
+            result: seg.text,
+            status: isToolResultDenied(seg.text) ? "deny" : "ok",
+          });
         }
       } else {
         // thinking/stderr → 保留到达顺序

@@ -88,13 +88,19 @@ export function classifySessionLog(
 
 /**
  * ql-20260730-003：判断 tool_result 文本是否表示工具执行失败/被拒（→ deny 状态徽章 ✗）。
+ * ql-20260801-004：收紧关键词——去掉 error/fail（成功输出正文常含这些字样会误判，如
+ *   grep 命中 "fail"、测试报告 "0 errors"），改为只匹配明确拒绝/失败信号。
  *
- * 命中「拒绝/denied/error/失败/fail」任一关键词（大小写不敏感）即判 deny。宁可宽松
- * （疑似失败也标 deny 提示用户），deny 仅影响视觉徽标不影响功能。onLog（实时）与
- * logsToTurns（attach 历史）共用此函数，避免两处正则不一致。
+ * 配对逻辑让 result 拒绝**覆盖** tool_use 的 success（daemon task-runner.ts:1895 把
+ * tool_call JSON 的 success 硬编码为 true，语义是「已放行执行」而非「执行成功」，不可作
+ * 最终结果权威；真正的 Runtime Policy 拒绝只体现在 result 文本）。故关键词必须精准，
+ * 宁可漏判（success 仍兜底 ok）不可误判成功输出正文。
+ *
+ * 命中「拒绝|denied|失败|禁止写入|not allowed」任一（大小写不敏感）即判 deny。
+ * onLog（实时）与 logsToTurns（attach 历史）共用，避免两处正则不一致。
  */
 export function isToolResultDenied(text: string): boolean {
-  return /拒绝|denied|error|失败|fail/i.test(text ?? "");
+  return /拒绝|denied|失败|禁止写入|not allowed/i.test(text ?? "");
 }
 
 /**
