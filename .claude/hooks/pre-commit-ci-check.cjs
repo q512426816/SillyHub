@@ -110,8 +110,10 @@ let hasBackend = files.some((file) => file.startsWith("backend/"));
 let hasFrontend = files.some((file) => file.startsWith("frontend/"));
 
 if (!hasBackend && !hasFrontend) {
-  hasBackend = true;
-  hasFrontend = true;
+  // 仅 docs / 配置 / 根目录文件变更：跳过全量 CI（worktree 环境下无
+  // node_modules/.venv，跑 frontend/backend 检查必然失败）。
+  log("no backend/frontend changes detected; skipping CI checks");
+  process.exit(0);
 }
 
 const failures = [];
