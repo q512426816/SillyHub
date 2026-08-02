@@ -56,7 +56,14 @@ contract-required 级别：单测覆盖 + daemon 协议不变论证为契约证�
 
 **daemon 协议不变论证**：design §3 非目标「不改 daemon-client spec 同步链路 / 不改 spec-sync reparse 整体机制」；daemon 侧 task-runner.ts 未改；proxy_create_change 签名不变（design §7），与 daemon 的 DaemonChangeWrite 队列协议（claim/complete/postSpecSync）不变。竞态消除靠 backend 占坑时序（占坑 commit 先于 daemon sync reparse），非改 daemon。
 
-**真实 daemon e2e（待 task-07 部署后）**：daemon-client 工作区创建中文标题变更返回 201 不 500 + 详情页 docs 显示 + 失败回滚无孤儿。依赖 live daemon，部署后执行（非 verify 阶段可完成）。
+**真实 daemon-client e2e（2026-08-02 实测，task-07）**：本机 docker backend（commit_sha=6bb947c8 含本变更）+ 本机 daemon（id 68c63051, status online）+ 工作区 daa5894a-8738-4ce6-94ad-0c54297206d6（design §1 背景的 bug 复现工作区）：
+- **AC-01/02**：`POST /api/workspaces/daa5894a/changes/proxy-create` 中文标题「测试变更」→ **HTTP 201（design §1 说此工作区必报 500，现已修复）**，change_key=`2026-08-02-测试变-4d976e`（中文保留），current_stage=draft
+- **AC-04**：`GET /changes/{id}/documents` → 200，8 docs（MASTER/proposal exists=True + requirements/design/plan/tasks），详情页不空
+- **AC-03/06**：daemon postSpecSync reparse 后 change current_stage **仍 draft**（owner_id 守卫保护，未被文件推断覆盖成 brainstorm），search=测试 total=1 无并发撞键残留
+- **R-05 印证**：docs doc_type 显示 MASTER/requirements（parser STANDARD_FILENAMES）vs 占坑建的 master/request，reparse 对占坑 master DELETE+INSERT 'MASTER'、request DELETE——但 docs 存在 + 无并发撞键 = 竞态消除机制（占坑+串行）正确
+- **AC-05 回滚**：单测覆盖（test_proxy_create_change_failed_rolls_back_preempt + timeout_rolls_back_preempt 显式删 docs 无孤儿），真实 e2e 未模拟 daemon failed（避免破坏在线 daemon 环境 + 60s 超时等待，单测已充分验证回滚逻辑）
+
+真实 daemon↔backend 集成验证通过（非 mock）：proxy_create_change 占坑 Change+docs 先于下发 → daemon 写盘回执 done → postSpecSync reparse 命中占坑行 update → 全链路无 500。
 
 ## 测试套件结果
 - change_writer 模块：28 passed（`cd backend && uv run pytest app/modules/change_writer -q --no-cov`）
