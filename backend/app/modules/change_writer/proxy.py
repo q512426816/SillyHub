@@ -7,10 +7,13 @@ workspace 绑定到远程 daemon 宿主，backend 无可达文件系统）：
    legacy 单值 runtime 列已删，写回始终现算）。
 2. 复用 ``markdown_builder`` + ``ChangeWriterService._ensure_frontmatter`` 构造
    MASTER/proposal/request 文本（**不重复 frontmatter 逻辑**）。
-3. 建 ``DaemonChangeWrite`` 行（status='pending'），files 用扁平 ``changes/<key>/``
+3. 占坑 ``Change`` + 全部 ``ChangeDocument`` 行（current_stage=draft）先 commit，
+   占住 changes 与 change_documents 双表唯一键（D-001@v2，消除与 reparse 并发撞键 500）。
+4. 建 ``DaemonChangeWrite`` 行（status='pending'），files 用扁平 ``changes/<key>/``
    相对路径（D-005@v1，无 ``.sillyspec`` 包裹层）。
-4. 轮询回执（周期 ≤1s），超时 60s → ``failed`` + 抛 ``ChangeWriteError``。
-5. 回执 ``ok`` → 落 ``Change`` + ``ChangeDocument`` 行（path 相对 spec_root）。
+5. 轮询回执（周期 ≤1s），超时 60s → ``failed`` + 抛 ``ChangeWriteError``。
+6. 回执 ``done`` → 占坑行已建好直接返回（不再 INSERT docs）；``failed``/超时 →
+   独立 session 回滚占坑行（D-005@v1，显式删 docs 兼容 SQLite FK 关闭）。
 
 设计来源：design §5.3 Phase 3 / §7 ``proxy_create_change`` 签名 / §7.5 生命周期
 契约表（write_change 下发/回执）/ §8 错误码 ``DAEMON_CLIENT_NO_SESSION``。
@@ -65,9 +68,14 @@ class DaemonClientNoActiveSession(AppError):
 
 
 def _build_change_key(title: str) -> str:
-    """复用 ``service.create_change`` 的 change_key 算法（date+slug+hex）。"""
+    """生成 change_key（date + slug + hex 后缀），slug 保留中文/字母/数字。
+
+    D-003@v1（2026-08-01-proxy-create-race-fix）：``\\w`` 配 ``re.UNICODE`` 保留
+    中文/字母/数字（英文小写），剔除空格/标点/Windows 文件名非法字符；纯标点兜底
+    ``untitled``。``title.lower()`` 与 worktree lease 分支一致（中文无大小写无副作用）。
+    """
     date_prefix = datetime.now(UTC).strftime("%Y-%m-%d")
-    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40] or "untitled"
+    slug = re.sub(r"[^\w]+", "-", title.lower(), flags=re.UNICODE).strip("-")[:40] or "untitled"
     return f"{date_prefix}-{slug}-{uuid.uuid4().hex[:6]}"
 
 
@@ -165,6 +173,33 @@ async def _await_change_write_receipt(
         await asyncio.sleep(PROXY_POLL_INTERVAL_SECONDS)
 
 
+async def _rollback_preempted_change(change_id: uuid.UUID) -> None:
+    """失败/超时回滚占坑 Change + docs（独立 session，不污染主 session）。
+
+    design §5 Phase 4 / D-005：DELETE 占坑 Change 行。docs 显式先删再删 Change——
+    SQLite 测试环境 ``PRAGMA foreign_keys`` 默认关闭致 ``change_documents.change_id``
+    的 ``ON DELETE CASCADE`` 不生效（backend conftest aiosqlite :memory: 未开 PRAGMA），
+    显式删 docs 保证 SQLite/PG 跨环境一致无孤儿；生产 PG 显式删 + CASCADE 双保险无副作用。
+    回滚自身失败仅 ``log.warning`` 不掩盖原错。
+    """
+    from sqlalchemy import delete
+
+    from app.core.db import get_session_factory
+
+    try:
+        async with get_session_factory()() as rs:
+            await rs.execute(delete(ChangeDocument).where(ChangeDocument.change_id == change_id))
+            await rs.execute(delete(Change).where(Change.id == change_id))
+            await rs.commit()
+        log.warning("proxy_change_preempt_rolled_back", change_id=str(change_id))
+    except Exception:
+        log.warning(
+            "proxy_change_preempt_rollback_failed",
+            change_id=str(change_id),
+            exc_info=True,
+        )
+
+
 async def proxy_create_change(
     session: AsyncSession,
     *,
@@ -232,6 +267,51 @@ async def proxy_create_change(
         now=now,
     )
 
+    # D-001@v2（2026-08-01-proxy-create-race-fix）：占坑 Change + 全部 ChangeDocument
+    # 先于 daemon_change_write 下发 commit，占住 changes.ux_changes_workspace_key 与
+    # change_documents.ux_change_docs_type_path。daemon postSpecSync 的 reparse 因此
+    # 命中占坑行走 _apply_parsed(update) 而非 _build_change(created)，消除 proxy 落库
+    # 与 reparse 双表并发撞键 500（design §5 Phase 1）。回执 done 后 proxy 路不再
+    # INSERT docs——docs 仅 reparse 单路串行写，无并发（D-006@v1）。
+    change = Change(
+        id=uuid.uuid4(),
+        workspace_id=workspace_id,
+        change_key=change_key,
+        title=title,
+        status="active",
+        location="active",
+        path=f"changes/{change_key}",
+        affected_components=[],
+        change_type=change_type,
+        owner_id=user_id,
+        current_stage="draft",
+        stages={"draft": {"status": "done", "at": now.isoformat()}},
+    )
+    session.add(change)
+    for f in files:
+        # files 项 path 形如 changes/<key>/MASTER.md；doc_type 在 _build_files 内显式
+        # 标注（master/proposal/request），占坑 docs 直接取用。
+        session.add(
+            ChangeDocument(
+                id=uuid.uuid4(),
+                change_id=change.id,
+                doc_type=f["doc_type"],
+                path=f["path"],
+                exists=True,
+                last_modified_at=now,
+            )
+        )
+    await session.commit()
+    await session.refresh(change)
+
+    log.info(
+        "proxy_change_preempted",
+        change_id=str(change.id),
+        change_key=change_key,
+        workspace_id=str(workspace_id),
+        current_stage="draft",
+    )
+
     # 下发 change-write 任务（status='pending'）。claim_token=None，daemon claim 时生成。
     change_write = DaemonChangeWrite(
         id=uuid.uuid4(),
@@ -253,9 +333,17 @@ async def proxy_create_change(
         change_key=change_key,
     )
 
-    # 等回执（轮询，超时 60s 翻 failed + 抛错）。
-    cw = await _await_change_write_receipt(session, change_write.id)
+    # 等回执（轮询，超时 60s 翻 failed + 抛错）。失败/超时回滚占坑行。
+    try:
+        cw = await _await_change_write_receipt(session, change_write.id)
+    except ChangeWriteError:
+        # _await 超时或回执消失：超时场景内部已翻 failed，回滚占坑行后重抛。
+        await _rollback_preempted_change(change.id)
+        raise
+
     if cw.status != "done":
+        # daemon 回执 failed：回滚占坑行后抛错（无孤儿）。
+        await _rollback_preempted_change(change.id)
         raise ChangeWriteError(
             "daemon 写 change 失败。",
             details={
@@ -264,40 +352,8 @@ async def proxy_create_change(
             },
         )
 
-    # 回执 ok → 落 Change + ChangeDocument 行（path 相对 spec_root，扁平 changes/<key>/）。
-    change = Change(
-        id=uuid.uuid4(),
-        workspace_id=workspace_id,
-        change_key=change_key,
-        title=title,
-        status="active",
-        location="active",
-        path=f"changes/{change_key}",
-        affected_components=[],
-        change_type=change_type,
-        owner_id=user_id,
-        current_stage="draft",
-        stages={"draft": {"status": "done", "at": now.isoformat()}},
-    )
-    session.add(change)
-
-    for f in files:
-        # files 项的 path 形如 'changes/<key>/MASTER.md'；doc_type 在 _build_files
-        # 内显式标注（与落库的 master/proposal/request 对齐）。
-        doc_type = f["doc_type"]
-        doc = ChangeDocument(
-            id=uuid.uuid4(),
-            change_id=change.id,
-            doc_type=doc_type,
-            path=f["path"],
-            exists=True,
-            last_modified_at=now,
-        )
-        session.add(doc)
-
-    await session.commit()
+    # 回执 done → Change + docs 已上方占坑建好，proxy 路不再 INSERT docs（D-006@v1）。
     await session.refresh(change)
-
     log.info(
         "proxy_change_created",
         change_id=str(change.id),

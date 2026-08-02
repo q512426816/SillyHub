@@ -447,3 +447,188 @@ async def test_service_create_change_daemon_client_offline_raises(client, db_ses
 
 # server-local create_change(lease_id) 路径零回归：由 test_router.py::test_create_change_success
 # 及其余 7 个 server-local 用例持续守护（proxy 改动未触碰 lease_id 分支）。
+
+
+# ── task-05（2026-08-01-proxy-create-race-fix）：占坑时序 + 回滚 + 中文 key ──────
+
+
+async def test_proxy_create_change_preempts_change_before_dispatch(client, db_session):
+    """AC-02：占坑 Change + docs 先于 daemon_change_write 下发 commit 存在。
+
+    D-001@v2：proxy 下发前先占坑 Change(owner_id 非空, current_stage=draft) + 全部
+    ChangeDocument，占住双表唯一键；回执 done 后 proxy 路不再 INSERT docs。
+    """
+    refs = await _setup_daemon_client_workspace(db_session, online=True)
+
+    from sqlalchemy import select
+
+    from app.modules.change.model import Change, ChangeDocument
+    from app.modules.change_writer import proxy as proxy_mod
+    from app.modules.daemon.model import DaemonChangeWrite
+
+    preempt: dict[str, int] = {}
+
+    async def fake_await(session, cw_id):
+        # 下发后、回执前：占坑 Change + docs 应已先于 daemon_change_write 落库。
+        changes = list(
+            (await session.execute(select(Change).where(Change.workspace_id == refs["ws_id"])))
+            .scalars()
+            .all()
+        )
+        docs = list(
+            (
+                await session.execute(
+                    select(ChangeDocument).where(
+                        ChangeDocument.change_id.in_([c.id for c in changes])
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        preempt["changes"] = len(changes)
+        preempt["docs"] = len(docs)
+        assert changes, "占坑 Change 应在下发后、回执前已存在"
+        assert changes[0].owner_id == refs["user_id"]
+        assert changes[0].current_stage == "draft"
+        await _simulate_daemon_complete(session, cw_id)
+        return await session.get(DaemonChangeWrite, cw_id)
+
+    with patch.object(proxy_mod, "_await_change_write_receipt", side_effect=fake_await):
+        resp = await client.post(
+            f"/api/workspaces/{refs['ws_id']}/changes/proxy-create",
+            json={
+                "title": "Preempt Before Dispatch",
+                "description": "占坑先于下发",
+                "change_type": "feature",
+            },
+            headers=_auth(refs["token"]),
+        )
+
+    assert resp.status_code == 201, resp.text
+    assert preempt["changes"] == 1
+    # master + proposal + request（有 description → 3 个 docs）
+    assert preempt["docs"] == 3
+
+
+async def test_proxy_create_change_failed_rolls_back_preempt(client, db_session):
+    """AC-05：daemon 回执 failed → 占坑 Change + docs 回滚（显式删 docs，无孤儿）。
+
+    D-005@v1 + SQLite FK 关闭细化：回滚用独立 session 显式删 docs 再删 Change，
+    不依赖 PRAGMA foreign_keys（backend conftest SQLite 默认关闭）。
+    """
+    refs = await _setup_daemon_client_workspace(db_session, online=True)
+
+    from sqlalchemy import select
+
+    from app.modules.change.model import Change, ChangeDocument
+    from app.modules.change_writer import proxy as proxy_mod
+    from app.modules.daemon.model import DaemonChangeWrite
+
+    async def fake_await(session, cw_id):
+        cw = await session.get(DaemonChangeWrite, cw_id)
+        assert cw is not None
+        cw.status = "failed"
+        cw.error = "daemon write failed"
+        session.add(cw)
+        await session.commit()
+        return cw
+
+    with patch.object(proxy_mod, "_await_change_write_receipt", side_effect=fake_await):
+        resp = await client.post(
+            f"/api/workspaces/{refs['ws_id']}/changes/proxy-create",
+            json={"title": "Will Fail", "description": "回滚占坑"},
+            headers=_auth(refs["token"]),
+        )
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "CHANGE_WRITE_ERROR"
+
+    # 占坑 Change + docs 都已回滚删除（无孤儿）。
+    changes = list(
+        (await db_session.execute(select(Change).where(Change.workspace_id == refs["ws_id"])))
+        .scalars()
+        .all()
+    )
+    assert changes == []
+    docs = list(
+        (
+            await db_session.execute(
+                select(ChangeDocument).where(ChangeDocument.change_id.in_([c.id for c in changes]))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert docs == []
+
+
+async def test_proxy_create_change_timeout_rolls_back_preempt(client, db_session):
+    """AC-05：等回执超时 → 占坑 Change + docs 回滚（无孤儿）。
+
+    复用现有 timeout 加速模式（PROXY_CHANGE_WRITE_TIMEOUT_SECONDS=0），新增占坑回滚断言。
+    """
+    refs = await _setup_daemon_client_workspace(db_session, online=True)
+
+    from sqlalchemy import select
+
+    from app.modules.change.model import Change, ChangeDocument
+    from app.modules.change_writer import proxy as proxy_mod
+
+    with (
+        patch.object(proxy_mod, "PROXY_CHANGE_WRITE_TIMEOUT_SECONDS", 0.0),
+        patch.object(proxy_mod, "PROXY_POLL_INTERVAL_SECONDS", 0.0),
+    ):
+        resp = await client.post(
+            f"/api/workspaces/{refs['ws_id']}/changes/proxy-create",
+            json={"title": "Timeout Rollback", "description": "超时回滚"},
+            headers=_auth(refs["token"]),
+        )
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "CHANGE_WRITE_ERROR"
+
+    changes = list(
+        (await db_session.execute(select(Change).where(Change.workspace_id == refs["ws_id"])))
+        .scalars()
+        .all()
+    )
+    assert changes == []
+    docs = list(
+        (
+            await db_session.execute(
+                select(ChangeDocument).where(ChangeDocument.change_id.in_([c.id for c in changes]))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert docs == []
+
+
+def test_build_change_key_preserves_chinese():
+    """AC-01：中文标题 change_key 保留中文（D-003@v1 unicode 正则）。"""
+    from app.modules.change_writer.proxy import _build_change_key
+
+    key = _build_change_key("测试")
+    assert key.startswith("20")  # YYYY-MM-DD 前缀
+    assert "测试" in key
+    # 末尾 uuid hex 后缀（6 位）
+    assert len(key.rsplit("-", 1)[-1]) == 6
+
+
+def test_build_change_key_falls_back_to_untitled_for_punctuation():
+    """AC-01：纯标点标题兜底 untitled。"""
+    from app.modules.change_writer.proxy import _build_change_key
+
+    key = _build_change_key("！！！？？？")
+    assert "untitled" in key
+
+
+def test_build_change_key_lowercases_english():
+    """AC-01：英文标题统一小写（与 worktree lease 分支一致）。"""
+    from app.modules.change_writer.proxy import _build_change_key
+
+    key = _build_change_key("My Change")
+    assert "my-change" in key
+    assert "My" not in key

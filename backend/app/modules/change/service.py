@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -1063,8 +1064,31 @@ class ChangeService:
                     stats["updated"] += 1
             else:
                 row = self._build_change(parsed, workspace_id=workspace_id)
-                self._session.add(row)
-                stats["created"] += 1
+                # D-004@v1（2026-08-01-proxy-create-race-fix）：极端并发撞
+                # ux_changes_workspace_key（占坑 commit 与 reparse created 几乎同时）
+                # 的兜底——用 savepoint 包 add+flush 即时检测唯一键冲突，撞键则回滚
+                # savepoint（不影响外层 session 已累积的改动）、重查 existing 转走
+                # _apply_parsed(update)，不抛 500。物理上几乎不可能（task-01 占坑让
+                # reparse 走 update 而非 created），belt-and-suspenders（design §5
+                # Phase 2b / R-02）。
+                try:
+                    async with self._session.begin_nested():
+                        self._session.add(row)
+                        await self._session.flush()
+                except IntegrityError:
+                    existing = await self._fetch_existing_changes(workspace_id)
+                    hit = next(
+                        (c for c in existing if c.change_key == parsed.change_key),
+                        None,
+                    )
+                    if hit is None:
+                        raise
+                    row = hit
+                    self._apply_parsed(row, parsed, workspace_id=workspace_id)
+                    existing_by_key[parsed.change_key] = row
+                    stats["updated"] += 1
+                else:
+                    stats["created"] += 1
 
             # Sync documents for this change
             _existing = existing_by_key.get(parsed.change_key, row)
@@ -1245,7 +1269,10 @@ class ChangeService:
         row.location = parsed.location
         row.path = parsed.path
         # ql-20260702-001：同步推断的 current_stage（fallback；dispatch 读 sillyspec.db 时覆盖）
-        if parsed.current_stage is not None:
+        # D-002@v1（2026-08-01-proxy-create-race-fix）：仅扫描历史行（owner_id=None）才用
+        # 文件推断覆盖；proxy/worktree-lease 创建行（owner_id 非空）stage 由 dispatch/transition
+        # 权威，不被 reparse 覆盖（design §9 显式承认 worktree lease 行为收紧）。
+        if parsed.current_stage is not None and row.owner_id is None:
             row.current_stage = parsed.current_stage
 
     # ── Review Gate methods ────────────────────────────────────────────
