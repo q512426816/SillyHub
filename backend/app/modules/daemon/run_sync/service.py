@@ -126,6 +126,9 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
         channel_name = f"agent_run:{intent.agent_run_id}"
         for log_payload in intent.published_logs:
             await redis.publish(channel_name, json.dumps(log_payload))
+        # task-01 / D-003 / FR-01：run channel 的 published_logs payload 本就含
+        # segment_id（service.py submit_messages 内 append 时已加）；session channel
+        # 见下方 session_payload 同步透传。
         summary_payload: dict = {
             "event": "messages",
             "lease_id": str(intent.lease_id),
@@ -177,6 +180,11 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
                 # session channel（interactive run 实时流），与 run channel published_logs
                 # 对齐，前端实时流工具徽标 + 第二层筛选可拿到标签。
                 "tool_kind": log_payload.get("tool_kind"),
+                # task-01 / FR-01：segment_id 透传到 session channel（interactive run
+                # 实时流）。.get() 兼容 override envelope（task-02 写 stale=True）与
+                # 历史 payload（无该 key → None，brownfield 安全）。partial 行非空，
+                # complete/其他行 None——前端据「非空」识别半截，override 行据此撤回。
+                "segment_id": log_payload.get("segment_id"),
             }
             await redis.publish(session_channel, json.dumps(session_payload))
         # ql-20260621：实时 token 透传到 session channel（onTokens）。
@@ -609,6 +617,12 @@ class RunSyncService:
                     # 透传到 SSE 实时流（run channel）。前端实时日志行渲染工具徽标 +
                     # 第二层筛选需此字段，DB 列与实时流保持一致。
                     "tool_kind": log_entry.tool_kind,
+                    # task-01 / D-003 / FR-01：segment_id 透传到 SSE 实时流（run channel）。
+                    # **必须用 log_entry.segment_id**（complete 行为 None），切勿用循环顶部
+                    # 局部变量 segment_id（它取自 metadata.segmentId，complete 行也非 None，
+                    # 会让前端误判 complete 全文为半截触发错误撤回）。partial 行非空
+                    # "main:msg_xxx:N"，complete/其他行 None。前端据「非空」识别半截。
+                    "segment_id": log_entry.segment_id,
                 }
             )
 
