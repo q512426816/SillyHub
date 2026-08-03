@@ -49,4 +49,4 @@ jobs:
           REDIS_URL: redis://localhost:6379/15
           SECRET_KEY: ci-secret-must-be-at-least-16-chars
           ENVIRONMENT: test
-        run: uv run pytest -q --cov=app --cov-fail-under=60
+        run: uv run pytest -n auto -q --cov=app --cov-fail-under=60
