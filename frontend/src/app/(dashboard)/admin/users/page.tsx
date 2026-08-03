@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Input, Select, type TableProps, Tag } from "antd";
+import { Input, Button, Select, Tooltip, type TableProps, Tag } from "antd";
 
 import { AdminUserDrawer } from "@/components/admin-user-drawer";
 import { AdminOrgTree } from "@/components/admin-org-tree";
@@ -11,7 +11,6 @@ import {
   PageHeader,
   SectionCard,
 } from "@/components/layout";
-import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import {
   createUser,
@@ -337,22 +336,25 @@ export default function AdminUsersPage() {
     {
       title: "操作",
       key: "actions",
-      align: "right",
+      align: "center",
+      width: 300,
+      fixed: "right",
+      onCell: () => ({ style: { background: "hsl(var(--card))" } }),
       render: (_v: unknown, u: UserRead) => {
         const isSelf = u.id === currentUserId;
         return (
-          <div className="flex justify-end gap-1">
+          <div className="flex justify-center gap-1">
             <Button
-              size="sm"
-              variant="outline"
+              type="link"
+              size="small"
               disabled={!canWrite}
               onClick={() => setDrawer({ open: true, mode: "edit", user: u })}
             >
               编辑
             </Button>
             <Button
-              size="sm"
-              variant="outline"
+              type="link"
+              size="small"
               disabled={!canLoginManage || (isSelf && u.login_enabled)}
               onClick={() => void handleToggleLogin(u)}
               title={
@@ -366,30 +368,31 @@ export default function AdminUsersPage() {
               {u.login_enabled ? "禁用登录" : "启用登录"}
             </Button>
             <Button
-              size="sm"
-              variant="outline"
+              type="link"
+              size="small"
               disabled={!canLoginManage}
               onClick={() => setResetTarget(u)}
             >
               重置密码
             </Button>
             <Button
-              size="sm"
-              variant="outline"
+              type="link"
+              size="small"
               onClick={() => setSessionsDrawer(u)}
             >
               会话
             </Button>
             <Button
-              size="sm"
-              variant="outline"
+              type="link"
+              size="small"
               onClick={() => setAuditDrawer(u)}
             >
               审计
             </Button>
             <Button
-              size="sm"
-              variant="destructive"
+              type="link"
+              danger
+              size="small"
               disabled={!canWrite || isSelf}
               onClick={() => setConfirmDelete(u)}
               title={isSelf ? "不能删除自己" : undefined}
@@ -421,8 +424,7 @@ export default function AdminUsersPage() {
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {error}
           <Button
-            size="sm"
-            variant="outline"
+            size="small"
             className="ml-3"
             onClick={() => void load()}
           >
@@ -448,22 +450,23 @@ export default function AdminUsersPage() {
               当前筛选：{filterLabel}
             </div>
             <SectionCard bodyPadding="p-2">
-              {/* 顶部操作按钮行（右对齐，对齐 project-plans） */}
+              {/* 顶部工具栏(对齐 FRONTEND_PAGE_STYLE §2 / /ppm/projects):
+                  左=数据组(新建用户) | 竖分隔 | 右=基础组(搜索/重置,最右)。 */}
               <div className="mb-2 flex items-center justify-end gap-2">
-                <Button size="sm" onClick={() => handleSearchClick()}>
-                  搜索
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => handleResetClick()}>
-                  重置
-                </Button>
-                <span className="mx-1 h-6 w-px bg-border" aria-hidden />
                 <Button
-                  size="sm"
+                  type="primary"
                   disabled={!canWrite}
                   onClick={() => setDrawer({ open: true, mode: "create" })}
                   title={!canWrite ? "无 user:write 权限" : undefined}
                 >
                   + 新建用户
+                </Button>
+                <span className="mx-1 h-6 w-px bg-border" aria-hidden />
+                <Button type="primary" onClick={() => handleSearchClick()}>
+                  搜索
+                </Button>
+                <Button onClick={() => handleResetClick()}>
+                  重置
                 </Button>
               </div>
               {/* 搜索表单：grid-cols-4 垂直 Field（对齐 project-plans） */}
@@ -600,8 +603,8 @@ function DeleteConfirm({
           将删除用户 <span className="font-mono">{userDisplay(user)}</span>。该操作不可恢复。
         </p>
         <div className="mt-4 flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onCancel}>取消</Button>
-          <Button variant="destructive" size="sm" onClick={onConfirm}>
+          <Button size="small" onClick={onCancel}>取消</Button>
+          <Button type="primary" danger size="small" onClick={onConfirm}>
             确认删除
           </Button>
         </div>
@@ -679,9 +682,10 @@ function ResetPasswordDialog({
           </p>
           {err && <p className="text-[11px] text-destructive">{err}</p>}
           <div className="flex justify-end gap-2">
-            <Button variant="outline" size="sm" onClick={onClose}>取消</Button>
+            <Button size="small" onClick={onClose}>取消</Button>
             <Button
-              size="sm"
+              type="primary"
+              size="small"
               disabled={busy || (useCustom && custom.length < 8)}
               onClick={() => void submit()}
             >
@@ -750,9 +754,7 @@ function SessionsDrawer({
       <div className="fixed right-0 top-0 z-50 flex h-full w-[520px] flex-col border-l bg-background shadow-xl">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <h3 className="text-sm font-medium">{userDisplay(user)} 的会话</h3>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
-            ✕
-          </button>
+          <Button type="text" size="small" onClick={onClose} className="text-muted-foreground">✕</Button>
         </div>
         <div className="flex-1 space-y-2 overflow-y-auto p-4">
           {loading ? (
@@ -782,8 +784,8 @@ function SessionsDrawer({
                     )}
                   </div>
                   <Button
-                    size="sm"
-                    variant="outline"
+                    type="link"
+                    size="small"
                     onClick={() => void handleRevoke(s.id)}
                   >
                     撤销
@@ -798,10 +800,10 @@ function SessionsDrawer({
             共 {sessions.length} 个会话
           </span>
           <div className="flex gap-2">
-            <Button size="sm" variant="destructive" onClick={() => void handleRevokeAll()}>
+            <Button type="primary" danger onClick={() => void handleRevokeAll()}>
               撤销全部
             </Button>
-            <Button size="sm" variant="outline" onClick={onClose}>关闭</Button>
+            <Button onClick={onClose}>关闭</Button>
           </div>
         </div>
       </div>
@@ -841,9 +843,7 @@ function AuditDrawer({
       <div className="fixed right-0 top-0 z-50 flex h-full w-[560px] flex-col border-l bg-background shadow-xl">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <h3 className="text-sm font-medium">{userDisplay(user)} 的审计日志（近 50 条）</h3>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
-            ✕
-          </button>
+          <Button type="text" size="small" onClick={onClose} className="text-muted-foreground">✕</Button>
         </div>
         <div className="flex-1 space-y-1 overflow-y-auto p-3">
           {loading ? (
@@ -872,7 +872,7 @@ function AuditDrawer({
           )}
         </div>
         <div className="sticky bottom-0 flex justify-end border-t bg-background px-4 py-3">
-          <Button size="sm" variant="outline" onClick={onClose}>关闭</Button>
+          <Button onClick={onClose}>关闭</Button>
         </div>
       </div>
     </>

@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Checkbox, Form, Input, Modal, Select, TreeSelect } from "antd";
+import { Alert, Button, Checkbox, Form, Input, Modal, Select, TreeSelect } from "antd";
 import type { TreeDataNode } from "antd";
-
-import { Button } from "@/components/ui/button";
 import type {
   OrganizationRead,
   RoleRead,
@@ -175,20 +173,7 @@ export function AdminUserDrawer({
       width={560}
       maskClosable={false}
       destroyOnClose
-      footer={
-        <div className="flex items-center justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onClose}>
-            取消
-          </Button>
-          <Button
-            size="sm"
-            disabled={!canWrite || !formValid || saving}
-            onClick={() => void submit()}
-          >
-            {saving ? "保存中…" : "保存"}
-          </Button>
-        </div>
-      }
+      footer={null}
     >
       <Form form={form} layout="vertical" preserve={false} className="pt-2">
         <Form.Item
@@ -308,6 +293,16 @@ export function AdminUserDrawer({
 
         {error && <p className="text-[11px] text-destructive">{error}</p>}
       </Form>
+      <div className="flex items-center justify-end gap-2 border-t pt-3">
+        <Button onClick={onClose}>取消</Button>
+        <Button
+          type="primary"
+          disabled={!canWrite || !formValid || saving}
+          onClick={() => void submit()}
+        >
+          {saving ? "保存中…" : "保存"}
+        </Button>
+      </div>
     </Modal>
   );
 }

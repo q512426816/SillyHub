@@ -137,7 +137,7 @@ describe("AdminUserDrawer", () => {
         mode="create"
       />,
     );
-    const submitBtn = screen.getByText("保存");
+    const submitBtn = screen.getByRole("button", { name: /保.*存/ });
     expect((submitBtn as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -154,7 +154,7 @@ describe("AdminUserDrawer", () => {
     fireEvent.change(screen.getByLabelText("登录名"), {
       target: { value: "bob" },
     });
-    const submitBtn = screen.getByText("保存") as HTMLButtonElement;
+    const submitBtn = screen.getByRole("button", { name: /保.*存/ }) as HTMLButtonElement;
     await waitFor(() => expect(submitBtn.disabled).toBe(false));
     fireEvent.click(submitBtn);
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
@@ -172,7 +172,7 @@ describe("AdminUserDrawer", () => {
         mode="create"
       />,
     );
-    const submitBtn = screen.getByText("保存") as HTMLButtonElement;
+    const submitBtn = screen.getByRole("button", { name: /保.*存/ }) as HTMLButtonElement;
     // username 空 → 保存禁用
     expect(submitBtn.disabled).toBe(true);
     // username < 3 位 → 保存禁用
@@ -220,7 +220,7 @@ describe("AdminUserDrawer", () => {
       target: { value: "bob" },
     });
     // email 留空
-    const submitBtn = screen.getByText("保存") as HTMLButtonElement;
+    const submitBtn = screen.getByRole("button", { name: /保.*存/ }) as HTMLButtonElement;
     await waitFor(() => expect(submitBtn.disabled).toBe(false));
     fireEvent.click(submitBtn);
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
@@ -241,7 +241,7 @@ describe("AdminUserDrawer", () => {
     fireEvent.change(screen.getByLabelText("登录名"), {
       target: { value: "bob" },
     });
-    const submitBtn = screen.getByText("保存") as HTMLButtonElement;
+    const submitBtn = screen.getByRole("button", { name: /保.*存/ }) as HTMLButtonElement;
     // ① email 留空 → 保存启用
     await waitFor(() => expect(submitBtn.disabled).toBe(false));
     // ② email 非法 → 保存禁用(formValid 实时校验)
@@ -269,7 +269,7 @@ describe("AdminUserDrawer", () => {
     fireEvent.change(screen.getByLabelText("登录名"), {
       target: { value: "alice" },
     });
-    const submitBtn = screen.getByText("保存") as HTMLButtonElement;
+    const submitBtn = screen.getByRole("button", { name: /保.*存/ }) as HTMLButtonElement;
     await waitFor(() => expect(submitBtn.disabled).toBe(false));
     fireEvent.click(submitBtn);
     await waitFor(() =>
@@ -311,7 +311,7 @@ describe("AdminUserDrawer", () => {
         canWrite={false}
       />,
     );
-    const submitBtn = screen.getByText("保存") as HTMLButtonElement;
+    const submitBtn = screen.getByRole("button", { name: /保.*存/ }) as HTMLButtonElement;
     expect(submitBtn.disabled).toBe(true);
   });
 
@@ -330,7 +330,7 @@ describe("AdminUserDrawer", () => {
     fireEvent.change(screen.getByLabelText("登录名"), {
       target: { value: "bob" },
     });
-    const submitBtn = screen.getByText("保存") as HTMLButtonElement;
+    const submitBtn = screen.getByRole("button", { name: /保.*存/ }) as HTMLButtonElement;
     await waitFor(() => expect(submitBtn.disabled).toBe(false));
     fireEvent.click(submitBtn);
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
@@ -352,7 +352,7 @@ describe("AdminUserDrawer", () => {
     fireEvent.change(screen.getByLabelText("登录名"), {
       target: { value: "bob" },
     });
-    const submitBtn = screen.getByText("保存") as HTMLButtonElement;
+    const submitBtn = screen.getByRole("button", { name: /保.*存/ }) as HTMLButtonElement;
     await waitFor(() => expect(submitBtn.disabled).toBe(false));
     fireEvent.click(submitBtn);
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
@@ -373,7 +373,7 @@ describe("AdminUserDrawer", () => {
     fireEvent.change(screen.getByLabelText("登录名"), {
       target: { value: "bob" },
     });
-    const submitBtn = screen.getByText("保存") as HTMLButtonElement;
+    const submitBtn = screen.getByRole("button", { name: /保.*存/ }) as HTMLButtonElement;
     await waitFor(() => expect(submitBtn.disabled).toBe(false));
     fireEvent.click(submitBtn);
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
@@ -402,7 +402,7 @@ describe("AdminUserDrawer", () => {
         defaultOrganizationIds={["o1"]}
       />,
     );
-    const submitBtn = screen.getByText("保存") as HTMLButtonElement;
+    const submitBtn = screen.getByRole("button", { name: /保.*存/ }) as HTMLButtonElement;
     await waitFor(() => expect(submitBtn.disabled).toBe(false));
     fireEvent.click(submitBtn);
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
