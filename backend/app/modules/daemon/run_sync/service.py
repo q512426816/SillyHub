@@ -185,6 +185,11 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
                 # 历史 payload（无该 key → None，brownfield 安全）。partial 行非空，
                 # complete/其他行 None——前端据「非空」识别半截，override 行据此撤回。
                 "segment_id": log_payload.get("segment_id"),
+                # task-02 / FR-02 / design §7.2：stale 透传到 session channel。override
+                # envelope（task-02 append）stale=True，普通 log 行无该 key → .get()
+                # 返回 None（前端 SessionStreamEnvelope.stale 默认 false，brownfield
+                # 安全）。前端据 stale=True 识别撤回令箭按 segmentId 撤回已渲染半截。
+                "stale": log_payload.get("stale"),
             }
             await redis.publish(session_channel, json.dumps(session_payload))
         # ql-20260621：实时 token 透传到 session channel（onTokens）。
@@ -439,6 +444,35 @@ class RunSyncService:
                 # segment_id DELETE 已 commit 的 partial（complete 行 segment_id=NULL 不受
                 # 影响），让 DB 只剩完整行。
                 await self._revoke_committed_partials(agent_run_id, segment_id)
+                # task-02 / FR-02 / D-003：override 撤回令箭从「截断不发」改为「publish
+                # 到 SSE 但不落库」。前端收到 stale=True 信号后按 segmentId 精确撤回已渲染
+                # 的半截，消除实时流「半截+全文」重复。INSERT 与 publish 已解耦（本方法
+                # 返回纯标量 PublishIntent，router commit 后调 publish_submitted_messages
+                # 真正 publish），故 override envelope 直接 append 到 published_logs 即复用
+                # 现成两路 publish（agent_run channel + session channel），无需 helper。
+                # envelope 不进 log_entry 构造、不 session.add → agent_run_logs 无 override
+                # 行，历史回显保持干净（保留 task-14 override 不污染历史的设计）。
+                # P2：必须补全 session_payload(:168) 直取的 4 个 key（log_id/channel/
+                # content/timestamp），否则 publish_submitted_messages KeyError。
+                published_logs.append(
+                    {
+                        "log_id": None,
+                        "channel": "stdout",
+                        "content": content,
+                        "timestamp": now.isoformat().replace("+00:00", "Z"),
+                        # task-02：被撤回的 segmentId（取循环变量 segment_id，override
+                        # 行 metadata.segmentId 即是目标 segment）。
+                        "segment_id": segment_id,
+                        "stale": True,
+                        # 归属四字段走 .get() 容错（override 行无需归属，保留 None）。
+                        "parent_tool_use_id": msg.get("parent_tool_use_id")
+                        if isinstance(msg, dict)
+                        else None,
+                        "subagent_type": msg.get("subagent_type") if isinstance(msg, dict) else None,
+                        "depth": msg.get("depth") if isinstance(msg, dict) else None,
+                        "tool_kind": msg.get("tool_kind") if isinstance(msg, dict) else None,
+                    }
+                )
                 continue
 
             # task-08 / D-002@v1：识别 [ASSISTANT_OVERRIDE] <segmentId> 信号 —— daemon
@@ -469,6 +503,27 @@ class RunSyncService:
                 # flushed_partials 查不到。按 segment_id DELETE 已 commit 的 partial，
                 # 让 DB 只剩完整行（消除 #35 累积重复）。对齐 thinking override 同款 DELETE。
                 await self._revoke_committed_partials(agent_run_id, segment_id)
+                # task-02 / FR-02 / D-003：override 撤回令箭 publish 到 SSE 但不落库（对齐
+                # 上面 [THINKING_OVERRIDE] 分支的改法）。前端据 stale=True + segment_id
+                # 撤回已渲染的 assistant 半截。envelope 直接 append published_logs 跳
+                # INSERT / log_entry 构造（INSERT 与 publish 已解耦），复用现成两路 publish。
+                # P2：补全 session_payload(:168) 直取的 4 个 key，否则 KeyError。
+                published_logs.append(
+                    {
+                        "log_id": None,
+                        "channel": "stdout",
+                        "content": content,
+                        "timestamp": now.isoformat().replace("+00:00", "Z"),
+                        "segment_id": segment_id,
+                        "stale": True,
+                        "parent_tool_use_id": msg.get("parent_tool_use_id")
+                        if isinstance(msg, dict)
+                        else None,
+                        "subagent_type": msg.get("subagent_type") if isinstance(msg, dict) else None,
+                        "depth": msg.get("depth") if isinstance(msg, dict) else None,
+                        "tool_kind": msg.get("tool_kind") if isinstance(msg, dict) else None,
+                    }
+                )
                 continue
 
             # ql-20260617-001：usage / session_id 在每条 message 顶层（daemon 透传），
