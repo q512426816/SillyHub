@@ -89,6 +89,9 @@ export interface CreateAgentRunInput {
   // workspace.default_agent (FR-02, 2026-06-14-agent-runtime-selection).
   provider?: string | null;
   model?: string | null;
+  // task-12 / 2026-08-02-agent-profile-layer：用户指定的 AgentProfile（软约束兜底）。
+  // null/省略 → 后端走 workspace.default_agent_profile_id → 平台默认 → 原路径（不阻断）。
+  agent_profile_id?: string | null;
 }
 
 export function createAgentRun(workspaceId: string, input: CreateAgentRunInput) {

@@ -385,6 +385,34 @@ export interface LeaseCtx {
    * 构造 + ``_startInteractiveSession`` 透传到 ``CreateSessionInput.stage``。
    */
   stage?: string;
+  /**
+   * task-10（C-12 / FR-10）：profile 限定的 MCP server name 子集。
+   *
+   * 来自 claim payload（context.py task-07 双写 ``mcpRefs``/``mcp_refs``，源 backend
+   * 算自 AgentProfile.mcp_refs）。interactive 路径经 execPayload 归一化透传给
+   * ``CreateSessionInput.mcpRefs``，SessionManager 据此对主 agent MCP 注入 ∩ 过滤
+   *（mergeMcpConfigs 第三层）；batch 路径经 ctx 透传给 task-runner。undefined/空 →
+   * 不过滤（行为同今天，FR-15 向后兼容）。
+   */
+  mcpRefs?: string[];
+  /**
+   * task-10（C-12 / FR-10）：profile 限定的技能子集。
+   *
+   * 来自 claim payload（context.py task-07 双写 ``skillRefs``/``skill_refs``，源
+   * AgentProfile.skill_refs）。daemon 承载透传；技能 link 按此取子集的逻辑在
+   * spawn 前处理。undefined/空 → 不过滤（全量链接，FR-15）。
+   */
+  skillRefs?: string[];
+  /**
+   * task-10（C-12 / D-013 / FR-11）：profile 收紧后的 allowed_roots。
+   *
+   * 来自 claim payload（context.py task-07 双写 ``effectiveAllowedRoots``/
+   * ``effective_allowed_roots``，backend 算自 daemon_roots ∩ overlay，服务端校验
+   * overlay⊆daemon_roots 拒超集）。非空时 interactive 写守卫 fallback 路径用此替代
+   * allowedRootsProvider（∩ 物理兜底），batch frozenAllowedRoots 采用下推值。
+   * undefined/空 → 用原 provider 值（FR-15）。
+   */
+  effectiveAllowedRoots?: string[];
 }
 
 /**

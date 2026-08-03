@@ -135,6 +135,42 @@ export interface SessionState {
    * 从 record.stage 恢复。主 agent（stage='orchestrator'）据此重新注入 MCP tool。
    */
   stage?: string;
+  /**
+   * task-10（C-12 / FR-10）：profile 限定的 MCP server name 子集。
+   *
+   * 来自 claim payload.mcpRefs（context.py task-07 透传 lease.metadata.mcp_refs，
+   * backend 算自 AgentProfile.mcp_refs）。非空时 SessionManager 对主 agent MCP 注入
+   *（mainAgentMcpConfigProvider 返回的配置表）按此 ∩ 过滤（经 mergeMcpConfigs 第三层），
+   * 只让 profile 引用的 MCP server 被 agent discover。
+   *
+   * undefined/空 → 不过滤（行为同今天，FR-15 向后兼容）。普通会话（非主 agent）无 MCP
+   * 注入，本字段无作用。仅内存态 + 持久化恢复用（snapshotPersistable 输出）。
+   */
+  mcpRefs?: string[];
+  /**
+   * task-10（C-12 / FR-10）：profile 限定的技能子集。
+   *
+   * 来自 claim payload.skillRefs（context.py task-07 透传 lease.metadata.skill_refs）。
+   * SessionManager 仅做承载 + 持久化；技能 link 按 skillRefs 取子集的逻辑在 daemon.ts
+   * linkSkillsToWorkdir（skill-manager.ts，本任务 allowed_paths 外），由 daemon 侧在
+   * spawn 前读取并收紧。undefined/空 → 不过滤（全量链接，FR-15）。
+   */
+  skillRefs?: string[];
+  /**
+   * task-10（C-12 / D-013 / FR-11）：profile 收紧后的 allowed_roots。
+   *
+   * 来自 claim payload.effectiveAllowedRoots（context.py task-07 透传
+   * lease.metadata.effective_allowed_roots，backend 算自 daemon_roots ∩ overlay，
+   * 服务端校验 overlay⊆daemon_roots 拒超集）。非空时写守卫 fallback 路径
+   *（_wrapWithWriteGuard 无 policyEngine 时）用此替代 allowedRootsProvider 值，
+   * ∩ 物理 provider 兜底（防 backend 算的 effective 含已失效路径）。
+   *
+   * undefined/空 → 用原 allowedRootsProvider 值（FR-15 向后兼容）。
+   * **注**：policyEngine 注入时（task-14 主路径），写校验走 PolicyEngine.canWrite
+   * 按 runtimeId 缓存，本字段不参与（policyEngine 路径的 overlay 收紧由 backend
+   * 下推 PolicyCache.update 做，不经 SessionManager）。
+   */
+  effectiveAllowedRoots?: string[];
 }
 
 /** CreateSessionInput（daemon._startInteractiveSession → SessionManager.create）。 */
@@ -189,6 +225,29 @@ export interface CreateSessionInput {
    * → 主 agent 注入 daemon MCP server 5 tool。普通 scan/stage/chat 不传或其他值 → 不注入。
    */
   stage?: string;
+  /**
+   * task-10（C-12 / FR-10）：profile 限定的 MCP server name 子集。
+   *
+   * daemon ``_startInteractiveSession`` 从 execPayload.mcpRefs 透传（claim payload
+   * 双写 camelCase+snake_case，daemon 归一化取 camelCase）。非空时主 agent session
+   * 的 MCP 注入按此 ∩ 过滤（mergeMcpConfigs 第三层）。undefined/空 → 不过滤（FR-15）。
+   */
+  mcpRefs?: string[];
+  /**
+   * task-10（C-12 / FR-10）：profile 限定的技能子集。
+   *
+   * daemon ``_startInteractiveSession`` 从 execPayload.skillRefs 透传。SessionManager
+   * 承载到 state（+持久化）；技能 link 收紧在 daemon.ts spawn 前处理。undefined/空 → FR-15。
+   */
+  skillRefs?: string[];
+  /**
+   * task-10（C-12 / D-013 / FR-11）：profile 收紧后的 allowed_roots。
+   *
+   * daemon ``_startInteractiveSession`` 从 execPayload.effectiveAllowedRoots 透传。
+   * 非空时写守卫 fallback 路径用此替代 allowedRootsProvider（∩ 物理兜底）。
+   * undefined/空 → 用原 provider 值（FR-15）。
+   */
+  effectiveAllowedRoots?: string[];
 }
 
 /** inject 返回值（runId 由 backend 在 inject 时已创建）。 */
@@ -418,6 +477,20 @@ export interface PersistedSessionRecord {
    * stage/chat session 不写（undefined）→ 恢复后不注入 MCP（零回归）。
    */
   stage?: string;
+  /**
+   * task-10（C-12）：profile MCP 子集（恢复后重新过滤主 agent MCP 注入用）。
+   * create 时从 ``CreateSessionInput.mcpRefs`` 写入；恢复时 ``_resolveMainAgentMcp``
+   * 据此再次 ∩ 过滤。undefined/空 → 恢复后不过滤（FR-15）。
+   */
+  mcpRefs?: string[];
+  /** task-10（C-12）：profile 技能子集（承载透传，恢复后 daemon 侧 link 用）。 */
+  skillRefs?: string[];
+  /**
+   * task-10（C-12 / D-013）：profile 收紧后的 allowed_roots（恢复后续写守卫用）。
+   * create 时从 ``CreateSessionInput.effectiveAllowedRoots`` 写入；恢复后写守卫
+   * fallback 据此替代 allowedRootsProvider。undefined/空 → 恢复后用 provider 值。
+   */
+  effectiveAllowedRoots?: string[];
 }
 
 /** sessions.json 文件结构。 */

@@ -1097,3 +1097,62 @@ interface ChangeWriteCompleteBody {
   files?: unknown;
   error?: string;
 }
+
+// ── task-08 / D-017：MCP whitelist 拉取（profile 子集层配套）─────────────────
+
+/**
+ * task-08（D-017）：从 backend 拉 MCP server 白名单（server 名列表）。
+ *
+ * 调 `GET /api/platform-settings/mcp-whitelist`（backend
+ * ``settings/router.py:215`` ``get_mcp_whitelist``，返回顶层 JSON 字符串数组）。
+ * 网络/非 200/解析失败 → 返回 null（调用方决定回落策略，对齐
+ * ``fetchPlatformMcpConfig`` 的 null 语义）。
+ *
+ * **与 fetchPlatformMcpConfig 同源**（design §9）：同 base url 拼接、同 Bearer
+ * 鉴权头、同 fetch 范式、同 null-on-failure 语义。fetchPlatformMcpConfig 定义在
+ * ``mcp-config.ts``（拉平台默认 MCP 配置对象），本函数拉白名单字符串数组——两者
+ * 配合构成 daemon 端 MCP 配置拉取全套（profile.mcp_refs 子集过滤在
+ * ``mergeMcpConfigs`` 内做）。
+ *
+ * **鉴权**：backend ``get_mcp_whitelist`` 要 ``SettingsAdminUser``。daemon 经
+ * ``token``（Bearer JWT）请求——对应 admin 用户发起的 daemon 配置场景。
+ * apiKey（X-API-Key）路径的 admin 权限校验由 backend ``get_current_principal``
+ * 处理，本函数只发 ``Authorization: Bearer``（与 fetchPlatformMcpConfig 一致）；
+ * 调用方（task-09/10）负责传对的凭证。
+ *
+ * @param serverUrl  backend 根 URL（如 'http://localhost:8000'）
+ * @param token      daemon Bearer token（与 fetchPlatformMcpConfig 同源；null 不带鉴权头）
+ * @param logger     可选日志回调（失败时 warn），签名兼容 mcp-config.ts McpConfigLogger
+ * @returns 白名单 server 名数组；fetch 失败/响应非数组 → null
+ */
+export async function fetchMcpWhitelist(
+  serverUrl: string,
+  token: string | null,
+  logger?: (
+    level: 'debug' | 'info' | 'warn' | 'error',
+    msg: string,
+    data?: Record<string, unknown>,
+  ) => void,
+): Promise<string[] | null> {
+  const url = `${serverUrl.replace(/\/$/, '')}/api/platform-settings/mcp-whitelist`;
+  try {
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const resp = await fetch(url, { headers });
+    if (!resp.ok) {
+      logger?.('warn', 'mcp_whitelist_fetch_failed', { url, status: resp.status });
+      return null;
+    }
+    // backend 返回顶层 JSON 数组（list[str]），非 { ... } 包裹。
+    const body = await parseJsonFromResponse<unknown>(resp);
+    if (Array.isArray(body)) {
+      // 防御：过滤非字符串元素（backend 契约是 list[str]，但容错）
+      return body.filter((x): x is string => typeof x === 'string');
+    }
+    logger?.('warn', 'mcp_whitelist_unexpected_shape', { url, bodyType: typeof body });
+    return null;
+  } catch (e) {
+    logger?.('warn', 'mcp_whitelist_fetch_unreachable', { url, error: String(e) });
+    return null;
+  }
+}

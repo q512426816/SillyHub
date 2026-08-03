@@ -6,7 +6,7 @@
 //   - partial flush 的 [THINKING] message 含 metadata.segmentId + metadata.isPartial=true
 //   - 完整 assistant message 到达 → emit [THINKING_OVERRIDE] <segmentId> 覆盖信号
 //   - 同一 thinking block 的 partial 与完整 message 共享同一 segmentId
-//   - 同 message 多个 thinking block（index 0 / 2）segmentId 各自独立
+//   - 同 message 的 thinking block 与 text block 按 type 区分 segmentId，override 分别 emit
 //   - late partial（完整 message 先到，partial 后到）被丢弃（不 flush）
 //   - 退化方案：SDK 不给 message.id → segmentId 退化为 turnIndex:thinking
 //   - assistant 文本 flush 带 segmentId + isPartial，但**不带** thinking:true（task-12 修旧债：task-05 契约让 assistant partial 带 segmentId，旧断言已失效）
@@ -18,10 +18,11 @@
 //
 // 2026-06-28-daemon-subagent-transcript task-03 / D-002@v1 更新：partial 改二级 Map
 // 按 parent_tool_use_id 分桶。本文件全部用例为主 agent（parent=null → 'main' 桶），
-// segmentId 契约从 `${messageId}:${index}` 变为 `main:${messageId}:${index}`（parent
-// 前缀隔离主/子 segment 空间），_partialBuffers 访问改二级 .get('main')，_flushPartial
-// 加 parentKey 参数。行为不变（partial/override/去重/late 守卫），仅 segmentId 字符串
-// 与 Map 结构跟进新契约。主/子分桶隔离见 session-manager.partial-bucket.test.ts。
+// segmentId 契约为 `main:${messageId}:${blockType}`（parent 前缀隔离主/子 segment 空间，
+// task-13修复后第 3 段用 block type thinking/text 而非 stream index），_partialBuffers
+// 访问改二级 .get('main')，_flushPartial 加 parentKey 参数。行为不变（partial/override/
+// 去重/late 守卫），仅 segmentId 字符串与 Map 结构跟进新契约。主/子分桶隔离见
+// session-manager.partial-bucket.test.ts。
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { SessionManager } from '../../src/interactive/session-manager.js';
@@ -202,9 +203,10 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
     const emitted = onTurnMessage.mock.calls[0][2] as Record<string, unknown>;
     expect(emitted.event_type).toBe('text');
     expect(emitted.content).toMatch(/^\[THINKING\] /);
-    // 关键断言：segmentId = `${messageId}:${index}`，isPartial=true。
+    // 关键断言：segmentId = `${parentKey}:${messageId}:${blockType}`，isPartial=true。
+    // task-13修复：第 3 段用 block type（thinking），不再用 stream index。
     const meta = (emitted.metadata ?? {}) as Record<string, unknown>;
-    expect(meta.segmentId).toBe('main:msg-abc:0');
+    expect(meta.segmentId).toBe('main:msg-abc:thinking');
     expect(meta.thinking).toBe(true);
     expect(meta.isPartial).toBe(true);
   });
@@ -213,7 +215,7 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
     const { sm, onTurnMessage, state } = makeManager();
     const p = priv(sm);
 
-    // 1. partial flush 一条 thinking（segmentId = msg-abc:0）。
+    // 1. partial flush 一条 thinking（segmentId = main:msg-abc:thinking）。
     p._onMessage(state, messageStart('msg-abc'));
     p._onMessage(state, blockStart(0));
     p._onMessage(state, thinkingDelta(0, 'x'.repeat(90)));
@@ -227,7 +229,7 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
     );
 
     // 完整 message 会被 _onMessage 转发给 onTurnMessage（1 条）+ override 信号（1 条）。
-    // 至少 emit 了 [THINKING_OVERRIDE] main:msg-abc:0。
+    // 至少 emit 了 [THINKING_OVERRIDE] main:msg-abc:thinking。
     const calls = onTurnMessage.mock.calls.map((c) => c[2]) as Array<
       Record<string, unknown>
     >;
@@ -237,38 +239,53 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
         m.content.startsWith('[THINKING_OVERRIDE]'),
     );
     expect(override, 'expected [THINKING_OVERRIDE] signal').toBeDefined();
-    expect(override!.content).toBe('[THINKING_OVERRIDE] main:msg-abc:0');
+    expect(override!.content).toBe('[THINKING_OVERRIDE] main:msg-abc:thinking');
     const meta = (override!.metadata ?? {}) as Record<string, unknown>;
-    expect(meta.segmentId).toBe('main:msg-abc:0');
+    expect(meta.segmentId).toBe('main:msg-abc:thinking');
     expect(meta.stale).toBe(true);
     expect(meta.thinking).toBe(true);
 
     // completedSegments 已记录。
     const buf = p._partialBuffers.get(SID).get('main');
-    expect(buf.completedSegments.has('main:msg-abc:0')).toBe(true);
+    expect(buf.completedSegments.has('main:msg-abc:thinking')).toBe(true);
   });
 
-  it('多 thinking block：segmentId 各自独立，override 分别 emit', async () => {
+  it('thinking + text block：segmentId 按 type 区分，override 分别 emit', async () => {
+    // task-13修复后 segmentId 第 3 段是 block type（thinking/text）而非 stream index。
+    // 同 type 的多 block（如两条 thinking）会共享 segmentId（精度损失，设计接受）；
+    // 但 thinking 与 text 因 type 不同 → segmentId 必不同 → override 各自独立 emit。
+    // 本用例改用 thinking + text 验证「不同 type block 互不串扰」这一新契约核心。
     const { sm, onTurnMessage, state } = makeManager();
     const p = priv(sm);
 
     p._onMessage(state, messageStart('msg-multi'));
-    // 两个 thinking block：index=0 和 index=2（中间夹 tool_use 用 index=1）。
+    // thinking block（index=0）partial flush。
     p._onMessage(state, blockStart(0));
     p._onMessage(state, thinkingDelta(0, 'x'.repeat(90)));
     await p._flushPartial(SID, 'main');
-    p._onMessage(state, blockStart(2));
-    p._onMessage(state, thinkingDelta(2, 'y'.repeat(90)));
+    // text block（index=1）partial flush。
+    p._onMessage(state, {
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        index: 1,
+        delta: { type: 'text_delta', text: 'a'.repeat(90) },
+      },
+    });
     await p._flushPartial(SID, 'main');
 
-    // 完整 message 含两个 thinking block。
-    await p._onMessage(
-      state,
-      assistantMessage('msg-multi', [
-        { index: 0, text: 'block0 全文' },
-        { index: 2, text: 'block2 全文' },
-      ]),
-    );
+    // 完整 message 含 thinking block（index=0）+ text block（index=1）。
+    await p._onMessage(state, {
+      type: 'assistant',
+      message: {
+        id: 'msg-multi',
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'block0 全文' },
+          { type: 'text', text: 'block1 全文' },
+        ],
+      },
+    });
 
     const calls = onTurnMessage.mock.calls.map((c) => c[2]) as Array<
       Record<string, unknown>
@@ -277,13 +294,16 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
       .filter(
         (m) =>
           typeof m.content === 'string' &&
-          m.content.startsWith('[THINKING_OVERRIDE]'),
+          (m.content.startsWith('[THINKING_OVERRIDE]') ||
+            m.content.startsWith('[ASSISTANT_OVERRIDE]')),
       )
       .map((m) => m.content as string)
       .sort();
+    // thinking block → [THINKING_OVERRIDE] main:msg-multi:thinking；
+    // text block    → [ASSISTANT_OVERRIDE] main:msg-multi:text。type 不同，互不串扰。
     expect(overrides).toEqual([
-      '[THINKING_OVERRIDE] main:msg-multi:0',
-      '[THINKING_OVERRIDE] main:msg-multi:2',
+      '[ASSISTANT_OVERRIDE] main:msg-multi:text',
+      '[THINKING_OVERRIDE] main:msg-multi:thinking',
     ]);
   });
 
@@ -291,7 +311,7 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
     const { sm, onTurnMessage, state } = makeManager();
     const p = priv(sm);
 
-    // 1. 先 flush 一条 partial（segmentId = msg-late:0）。
+    // 1. 先 flush 一条 partial（segmentId = main:msg-late:thinking）。
     p._onMessage(state, messageStart('msg-late'));
     p._onMessage(state, blockStart(0));
     p._onMessage(state, thinkingDelta(0, 'x'.repeat(90)));
@@ -373,9 +393,10 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
       (m) => typeof m.content === 'string' && m.content.startsWith('[ASSISTANT]'),
     );
     expect(assistant, 'expected [ASSISTANT] flush').toBeDefined();
-    // task-05 契约：assistant flush 带 segmentId（main:msg-text:1）+ isPartial。
+    // task-05 契约：assistant flush 带 segmentId（main:msg-text:text，task-13修复后第 3 段为
+    // block type）+ isPartial。
     const meta = (assistant!.metadata ?? {}) as Record<string, unknown>;
-    expect(meta.segmentId).toBe('main:msg-text:1');
+    expect(meta.segmentId).toBe('main:msg-text:text');
     expect(meta.isPartial).toBe(true);
     // B2：assistant partial 绝不带 thinking:true（否则被 thinking override 误撤）。
     expect(meta.thinking).toBeUndefined();
@@ -396,7 +417,7 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
 
     // 完整 message 后 completedSegments 非空（late partial 守卫生效）。
     const bufMid = p._partialBuffers.get(SID).get('main');
-    expect(bufMid.completedSegments.has('main:msg-reset:0')).toBe(true);
+    expect(bufMid.completedSegments.has('main:msg-reset:thinking')).toBe(true);
 
     // turn 结束（_onResult）后清空。
     await p._onResult(state, { type: 'result', subtype: 'success' });

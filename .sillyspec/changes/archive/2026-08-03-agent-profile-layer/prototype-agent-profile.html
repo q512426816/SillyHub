@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>智能体档案 AgentProfile · 设计原型（线框）</title>
+<style>
+  body { font-family: -apple-system, "Microsoft YaHei", sans-serif; background:#f5f5f5; margin:0; padding:20px; color:#222; }
+  h1 { font-size:18px; }
+  .frame { background:#fff; border:2px solid #444; border-radius:6px; margin:16px 0; padding:14px; }
+  .frame h2 { margin-top:0; border-bottom:1px dashed #888; padding-bottom:6px; font-size:15px; }
+  .wire { border:1px dashed #999; padding:8px 12px; margin:6px 0; background:#fafafa; font-size:13px; }
+  .label { font-size:11px; color:#888; text-transform:uppercase; letter-spacing:1px; }
+  .btn { display:inline-block; border:1px solid #444; padding:4px 12px; border-radius:3px; font-size:12px; background:#eee; margin-right:6px;}
+  .primary { background:#1677ff; color:#fff; border-color:#1677ff; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th,td { border:1px solid #ccc; padding:6px 8px; text-align:left; }
+  th { background:#f0f0f0; }
+  .tag { display:inline-block; background:#e6f4ff; color:#1677ff; border:1px solid #91caff; border-radius:10px; padding:1px 8px; font-size:11px; margin:1px; }
+  .note { background:#fffbe6; border:1px solid #ffe58f; padding:8px; font-size:12px; margin:8px 0;}
+  .arrow { text-align:center; color:#888; font-size:16px; margin:4px 0;}
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  textarea.wire { width:100%; height:46px; resize:none; }
+  code { background:#f0f0f0; padding:1px 4px; border-radius:3px; font-size:12px;}
+  .group { background:#f0f5ff; border-left:3px solid #1677ff; padding:6px 10px; margin:8px 0; font-size:12px; font-weight:bold; color:#1677ff;}
+</style>
+</head>
+<body>
+
+<h1>智能体档案（AgentProfile）· 设计原型（线框 v2）</h1>
+<p style="font-size:12px;color:#666;">用于确认设计方向，非最终 UI。最终页面遵循项目前端设计系统（CLAUDE.md 规则19）。v2 调整：可见范围三级 / 预置两默认 / 表单分三组。</p>
+
+<div class="frame">
+  <h2>画面① 智能体档案管理页（个人 / 工作区 / 平台 三级）</h2>
+  <div class="label">档案列表</div>
+  <table>
+    <tr><th>名称</th><th>供应商/模型</th><th>工具策略</th><th>勾选 MCP</th><th>勾选技能</th><th>可见范围</th><th>版本</th><th>操作</th></tr>
+    <tr><td>我的快速审查</td><td>claude / sonnet</td><td>只读安全</td><td><span class="tag">github</span></td><td><span class="tag">review</span></td><td><b>个人</b></td><td>v1</td><td>编辑 复制 删除</td></tr>
+    <tr><td>代码审查助手</td><td>claude / sonnet</td><td>只读安全</td><td><span class="tag">github</span></td><td><span class="tag">review</span></td><td>工作区</td><td>v3</td><td>编辑 复制 删除</td></tr>
+    <tr><td>深度重构</td><td>claude / opus</td><td>写权限</td><td><span class="tag">github</span><span class="tag">db</span></td><td><span class="tag">refactor</span></td><td>平台</td><td>v2</td><td>编辑 复制 删除</td></tr>
+    <tr style="background:#f6ffed;"><td>Claude Code 默认 <span class="tag" style="background:#f6ffed;color:#52c41a;border-color:#b7eb8f;">系统预置</span></td><td>claude / sonnet</td><td>默认</td><td>—</td><td>—</td><td>平台</td><td>v1</td><td>（只读）</td></tr>
+    <tr style="background:#f6ffed;"><td>Codex 默认 <span class="tag" style="background:#f6ffed;color:#52c41a;border-color:#b7eb8f;">系统预置</span></td><td>codex / gpt-5</td><td>默认</td><td>—</td><td>—</td><td>平台</td><td>v1</td><td>（只读）</td></tr>
+  </table>
+  <div style="margin:8px 0;"><span class="btn primary">+ 新建档案</span><span class="btn">从模板复制</span></div>
+
+  <div class="arrow">▼ 新建/编辑表单（分三组：身份 / 大脑 / 工具能力）</div>
+
+  <div class="group">① 身份</div>
+  <div class="grid2">
+    <div class="wire"><span class="label">名称</span><br><input style="width:100%" value="代码审查助手"></div>
+    <div class="wire"><span class="label">可见范围</span><br><select style="width:100%"><option>个人（仅创建者可用）</option><option>工作区（本工作区成员可用）</option><option>平台（全平台共享，需 admin）</option></select></div>
+  </div>
+
+  <div class="group">② 大脑</div>
+  <div class="grid2">
+    <div class="wire"><span class="label">供应商偏好（决定选哪台 daemon）</span><br><select><option>claude</option><option>codex</option></select></div>
+    <div class="wire"><span class="label">模型</span><br><input style="width:100%" value="claude-sonnet-4"></div>
+  </div>
+  <div class="wire"><span class="label">系统提示词（agent 人格，与 spec 任务上下文叠加）</span><br><textarea class="wire">你是资深代码审查员，只读不改，关注安全/性能/可维护性…</textarea></div>
+
+  <div class="group">③ 工具能力</div>
+  <div class="wire"><span class="label">工具策略（引用现有 ToolPolicy）</span><br><select><option>只读安全策略</option><option>默认</option><option>写权限</option></select></div>
+  <div class="wire"><span class="label">勾选 MCP（引用当前工作区 .mcp.json 的 server，不存凭证）</span><br>
+    ☑ github　☐ db　☐ search　<span style="color:#888;font-size:11px;">仅 stdio 类型，须过平台白名单</span></div>
+  <div class="wire"><span class="label">勾选技能（引用当前用户的技能池）</span><br>
+    ☑ review　☑ scan　☐ refactor</div>
+  <div class="note">⚠️ 不存任何 API Key / MCP 凭证——只存「用哪些」的引用。凭证留在用户级 LlmProvider 与 daemon 本地。</div>
+</div>
+
+<div class="frame">
+  <h2>画面② 发起任务时选择档案</h2>
+  <div class="wire"><span class="label">用哪个智能体档案跑这个任务？</span><br>
+    <select style="width:70%"><option>代码审查助手 (claude/sonnet · 只读)</option><option>我的快速审查 (个人)</option><option>深度重构 (claude/opus · 写)</option><option>—— 不指定，用工作区默认 ——</option></select>
+  </div>
+  <div class="note">兜底链：任务带档案 → 工作区默认档案 → 平台默认档案（按 <code>workspace.default_agent</code> 选 Claude Code 默认 或 Codex 默认）。绝不因没绑档案而卡住任务。</div>
+  <div class="arrow">▼ dispatch 解析（后端，用户不可见）</div>
+  <div class="wire" style="font-family:monospace;font-size:12px;">
+    run 带 profile_id？<br>
+    ├─ 是 → 加载 profile：provider 偏好 + MCP/技能引用 + system_prompt<br>
+    │        → placement 按 <code>provider ∩ 在线 daemon 能力</code> 选 daemon（provider-aware）<br>
+    │        → profile 内容快照写进 lease.metadata 透传给 daemon<br>
+    └─ 否 → 回退 workspace 默认 → 平台默认（按 provider 选预置档案，仍走原 member_runtime 路径）
+  </div>
+</div>
+
+<div class="frame">
+  <h2>配置三层取交集（安全边界）</h2>
+  <table>
+    <tr><th>层</th><th>管什么</th><th>allowed_roots（可写目录）</th></tr>
+    <tr><td>daemon（机器）</td><td>物理沙箱</td><td>上限（机器能写哪）</td></tr>
+    <tr><td>workspace（业务）</td><td>ToolPolicy 数据策略 + lease_root</td><td>业务范围</td></tr>
+    <tr><td>agent profile（人格）</td><td>能力白名单</td><td><b>只能收紧</b>（取交集最严）</td></tr>
+  </table>
+  <div class="note">生效 = daemon ∩ workspace ∩ agent，三层任一收紧都以最严为准。agent 层永不放宽。</div>
+</div>
+
+</body>
+</html>

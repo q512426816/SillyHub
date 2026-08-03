@@ -200,8 +200,17 @@ describe('PolicyEngine', () => {
   // ── 跨平台 sanity（避免空 roots 时误 allow）─────────────────────────────────
   describe('空 roots', () => {
     it('allowedRoots 为空数组时所有写均 deny', () => {
-      cache.set('rt-empty', []);
-      const d = engine.canWrite('rt-empty', resolve(ALLOWED, 'a.txt'), 'claude', 'Write');
+      // PolicyCache.set 内部调 normalizeAllowedRoots，其 B1 兜底会把空数组回填为
+      // [homedir()]（见 runtime-policy.test.ts:108 锁定）——故经真实 PolicyCache.set
+      // 永远拿不到空 roots，PolicyEngine 实际见到的总是 [homedir()]。此处要验证的
+      // 是 PolicyEngine 自身对「空 allowedRoots」的边界处理（isPathUnderAnyRoot 在
+      // 空数组上 .some 返回 false → deny），用 mock cache 直接注入 allowedRoots:[]，
+      // 绕开 PolicyCache 的归一化，真正打到 PolicyEngine 的空根分支。
+      const emptyCache = {
+        get: (_rid: string) => ({ allowedRoots: [] as string[], version: 1 }),
+      } as unknown as PolicyCache;
+      const emptyEngine = new PolicyEngine(emptyCache, sink);
+      const d = emptyEngine.canWrite('rt-empty', resolve(ALLOWED, 'a.txt'), 'claude', 'Write');
       expect(d.allowed).toBe(false);
     });
   });

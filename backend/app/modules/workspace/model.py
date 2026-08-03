@@ -94,6 +94,18 @@ class Workspace(BaseModel, table=True):
         default=None,
         sa_column=Column(String(128), nullable=True),
     )
+    # 软约束兜底：workspace 级默认档案（design §3.3，2026-08-02-agent-profile-layer）。
+    # dispatch 解析 profile 时，run 未显式指定则回退到此（再回退平台默认，design §8）。
+    # 与 default_agent provider 字符串并存，profile 优先（D-014）；档案删则 SET NULL，
+    # 回退 default_agent。nullable 全向后兼容。
+    default_agent_profile_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_profiles.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
     tech_stack: list[str] = Field(
         default_factory=list,
         sa_column=Column(JSON, nullable=False, default=list),

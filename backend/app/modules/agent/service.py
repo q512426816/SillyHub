@@ -36,6 +36,7 @@ from app.modules.workspace.model import AgentRunWorkspace, TaskWorkspace, Worksp
 from app.modules.worktree.model import WorktreeLease
 
 if TYPE_CHECKING:
+    from app.modules.agent.profile.model import AgentProfile
     from app.modules.daemon.host_fs import HostFsDelegate
 
 log = get_logger(__name__)
@@ -317,6 +318,28 @@ async def resolve_work_dir(
     return ws_root
 
 
+def _build_agent_profile_snapshot(profile: "AgentProfile") -> dict:
+    """冻结 AgentProfile 关键字段（含 version）写入
+    ``AgentRun.agent_profile_snapshot``（design §3.2 / §5）。
+
+    快照让 run 历史独立于档案后续编辑（删除 / 改名 / 调 prompt），并供
+    ``get_execution_context`` prepend ``system_prompt``（D-012@v2）零额外查询读取。
+    """
+    return {
+        "id": str(profile.id),
+        "name": profile.name,
+        "provider": profile.provider,
+        "model": profile.model,
+        "system_prompt": profile.system_prompt,
+        "mcp_refs": list(profile.mcp_refs or []),
+        "skill_refs": list(profile.skill_refs or []),
+        "allowed_roots_overlay": list(profile.allowed_roots_overlay)
+        if profile.allowed_roots_overlay
+        else None,
+        "version": int(profile.version),
+    }
+
+
 class AgentService:
     # 后台任务引用集 — 防止 asyncio.Task 被 GC 回收
     _background_tasks: set[asyncio.Task] = set()
@@ -370,6 +393,9 @@ class AgentService:
         preferred_backend: str | None = None,
         provider: str | None = None,
         model: str | None = None,
+        # task-06（2026-08-02-agent-profile-layer / §8）：run 显式指定的 AgentProfile
+        # （None → 走 §8 兜底链 workspace 默认 → 平台默认）。task-12 前端落地后透传。
+        agent_profile_id: uuid.UUID | None = None,
     ) -> AgentRun:
         """Create an AgentRun record and dispatch it to the daemon.
 
@@ -425,6 +451,20 @@ class AgentService:
         resolved_provider = provider or (workspace.default_agent if workspace else None)
         resolved_model = model or (workspace.default_model if workspace else None)
 
+        # task-06（§8）：解析 AgentProfile（软约束兜底链）。C-07：无 hint → 零查询。
+        profile = await self._resolve_dispatch_profile(
+            workspace=workspace,
+            user_id=user_id,
+            default_provider=resolved_provider,
+            run_profile_id=agent_profile_id,
+        )
+        if profile is not None and profile.provider:
+            # target_provider 优先 profile.provider（D-014）；AgentRun.provider 同步对齐
+            # 避免「记录 provider=X、实际跑 provider=Y」割裂。归一化对齐 daemon 命名。
+            from app.modules.agent.profile.service import _normalize_provider
+
+            resolved_provider = _normalize_provider(profile.provider) or resolved_provider
+
         # -- 4. Build spec bundle -------------------------------------------------
         bundle = await build_spec_bundle(
             self._session,
@@ -450,6 +490,11 @@ class AgentService:
             profile_version=bundle.profile_version,
             idempotency_key=idempotency_key,
             context_fingerprint=fingerprint,
+            # task-06：profile 绑定 + 快照（含 version + system_prompt，供 execution-context prepend）
+            agent_profile_id=(profile.id if profile is not None else None),
+            agent_profile_snapshot=(
+                _build_agent_profile_snapshot(profile) if profile is not None else None
+            ),
         )
         self._session.add(run)
         await self._session.commit()
@@ -505,8 +550,14 @@ class AgentService:
             branch=branch,
             provider=resolved_provider,
             model=resolved_model,
+            # task-06：传 profile id 让 placement 按 profile.provider 选 target_provider（D-014）。
+            agent_profile_id=(profile.id if profile is not None else None),
         )
         if lease_id_daemon:
+            # task-06：写 profile 字段进 lease.metadata（effective_allowed_roots/mcp_refs/
+            # skill_refs/profile_version，供 task-07 claim payload 透传 daemon）。
+            if profile is not None:
+                await self._apply_profile_to_lease(lease_id_daemon, profile)
             log.info(
                 "start_run_dispatched_to_daemon",
                 run_id=str(run.id),
@@ -540,6 +591,140 @@ class AgentService:
         run.output_redacted = exc.message
         run.finished_at = datetime.now(UTC)
         self._session.add(run)
+        await self._session.commit()
+
+    # ------------------------------------------------------------------
+    # AgentProfile dispatch injection（task-06 / design §4 §5 §7 §8）
+    # ------------------------------------------------------------------
+
+    async def _resolve_dispatch_profile(
+        self,
+        *,
+        workspace: Workspace | None,
+        user_id: uuid.UUID,
+        default_provider: str | None,
+        run_profile_id: uuid.UUID | None = None,
+    ) -> "AgentProfile | None":
+        """dispatch 前解析 AgentProfile（design §8 兜底链：run 显式→workspace 默认→
+        平台默认→None）。
+
+        C-07（PPM 已上线路径零回归）：**无 hint**——即 ``run_profile_id`` 与
+        ``workspace.default_agent_profile_id`` 均 None——时**不发任何 SQL**，直接返回
+        None，dispatch 走原 ``workspace.default_agent`` 路径（与今天 100% 一致）。
+        仅当存在 hint 时才加载 actor（:class:`User`）并跑
+        :meth:`AgentProfileService.resolve_profile` 全兜底链。
+
+        ``run_profile_id`` 目前三入口均未从 router/mcp_tools 透传（task-12 前端落地后
+        接入）；当前 hint 实际只来自 ``workspace.default_agent_profile_id``。
+        """
+        from app.modules.agent.profile.service import AgentProfileService
+        from app.modules.auth.model import User
+
+        if workspace is None:
+            return None
+        # C-07：无 hint → 零查询，直接 None。
+        if run_profile_id is None and workspace.default_agent_profile_id is None:
+            return None
+        actor = await self._session.get(User, user_id)
+        if actor is None:
+            return None
+        return await AgentProfileService(self._session).resolve_profile(
+            run_profile_id=run_profile_id,
+            workspace=workspace,
+            actor=actor,
+            default_provider=default_provider,
+        )
+
+    async def _apply_profile_to_lease(
+        self,
+        lease_id: uuid.UUID,
+        profile: "AgentProfile",
+    ) -> None:
+        """把 profile 字段写进 ``daemon_task_leases.metadata``（design §4 §5 / D-013）。
+
+        写入四键（task-07 ``build_claim_payload`` 读取消费，camelCase+snake_case 双写
+        由 task-07 负责）：
+
+        * ``effective_allowed_roots``：``daemon ∩ profile.allowed_roots_overlay``
+          （overlay 空则 = daemon 原值；非空且越界 → :class:`AgentProfileOverlayTooWide`
+          抛出，agent 只能收紧 D-013）。
+        * ``mcp_refs`` / ``skill_refs``：profile 引用集（daemon 端按此取子集，task-09/10）。
+        * ``profile_version``：快照版本（审计 / daemon 保鲜比对）。
+
+        daemon 沙箱来源：``lease → DaemonRuntime.allowed_roots``（2026-07-06
+        allowed-roots-per-runtime：从 instance 下沉到 runtime 的 per-runtime 沙箱）。
+        runtime.allowed_roots 为空（legacy 下沉前）→ 回退 ``DaemonInstance.allowed_roots``
+        （design §4 机器物理沙箱上限）。**走 lease.runtime_id 取 runtime**——借用 lease
+        的 runtime_id 是 lender 的 runtime，故对借用路也取到正确的 lender 沙箱。
+
+        注：lease.metadata 已由 :meth:`RunPlacementService.dispatch_to_daemon` /
+        ``prepare_scan_interactive_dispatch`` 创建时写入；此处读出 → 合并 profile 键 →
+        写回。dispatch_to_daemon 路径在返回前已唤醒 daemon，理论上存在 daemon claim
+        与本 UPDATE 的窄竞态（batch 路径）；但本地 commit 远快于 daemon claim HTTP
+        往返，实战中 claim 总能读到 profile 键。scan 路径（prepare_scan_interactive_dispatch）
+        的 wake 在调用方更后，无竞态。
+        """
+        import json as _json
+
+        from sqlalchemy import text as _sa_text
+
+        from app.modules.agent.profile.service import AgentProfileService
+        from app.modules.daemon.model import (
+            DaemonInstance,
+            DaemonRuntime,
+            DaemonTaskLease,
+        )
+
+        # 1) lease → runtime → 沙箱 allowed_roots
+        lease = await self._session.get(DaemonTaskLease, lease_id)
+        if lease is None:
+            return
+        daemon_roots: list[str] = []
+        runtime = (
+            await self._session.get(DaemonRuntime, lease.runtime_id)
+            if lease.runtime_id is not None
+            else None
+        )
+        if runtime is not None:
+            daemon_roots = list(runtime.allowed_roots or [])
+            # legacy（per-runtime 下沉前）→ 回退 instance 级沙箱。
+            if not daemon_roots and runtime.daemon_instance_id is not None:
+                daemon = await self._session.get(DaemonInstance, runtime.daemon_instance_id)
+                if daemon is not None:
+                    daemon_roots = list(daemon.allowed_roots or [])
+
+        # 2) effective = daemon ∩ overlay（D-013，服务端校验只收紧）
+        effective = AgentProfileService.compute_effective_allowed_roots(
+            daemon_roots, profile.allowed_roots_overlay
+        )
+
+        # 3) 读现有 metadata → 合并 profile 键 → 写回。
+        #    raw SQL 读列值（SQLite 返 JSON 文本 / PG 返已解 dict），统一容错。
+        meta_row = (
+            (
+                await self._session.execute(
+                    _sa_text("SELECT metadata FROM daemon_task_leases WHERE id = :id"),
+                    {"id": lease_id.hex},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        raw_meta = meta_row["metadata"] if meta_row else None
+        if isinstance(raw_meta, str):
+            meta: dict = _json.loads(raw_meta) if raw_meta else {}
+        elif isinstance(raw_meta, dict):
+            meta = dict(raw_meta)
+        else:
+            meta = {}
+        meta["effective_allowed_roots"] = effective
+        meta["mcp_refs"] = list(profile.mcp_refs or [])
+        meta["skill_refs"] = list(profile.skill_refs or [])
+        meta["profile_version"] = int(profile.version)
+        await self._session.execute(
+            _sa_text("UPDATE daemon_task_leases SET metadata = :meta WHERE id = :id"),
+            {"meta": _json.dumps(meta), "id": lease_id.hex},
+        )
         await self._session.commit()
 
     # ------------------------------------------------------------------
@@ -1032,6 +1217,8 @@ class AgentService:
         read_only: bool = True,
         provider: str | None = None,
         model: str | None = None,
+        # task-06（§8）：run 显式指定的 AgentProfile（None → §8 兜底链）。
+        agent_profile_id: uuid.UUID | None = None,
     ) -> AgentRun:
         """Create and execute an AgentRun driven by a stage transition.
 
@@ -1147,6 +1334,18 @@ class AgentService:
         resolved_provider = provider or (workspace.default_agent if workspace else None)
         resolved_model = model or (workspace.default_model if workspace else None)
 
+        # task-06（§8）：解析 AgentProfile（软约束兜底链）。C-07：无 hint → 零查询。
+        profile = await self._resolve_dispatch_profile(
+            workspace=workspace,
+            user_id=user_id,
+            default_provider=resolved_provider,
+            run_profile_id=agent_profile_id,
+        )
+        if profile is not None and profile.provider:
+            from app.modules.agent.profile.service import _normalize_provider
+
+            resolved_provider = _normalize_provider(profile.provider) or resolved_provider
+
         # -- 4. Create AgentRun record ----------------------------------------
         run = AgentRun(
             id=uuid.uuid4(),
@@ -1157,6 +1356,11 @@ class AgentService:
             provider=resolved_provider,
             model=resolved_model,
             status="pending",
+            # task-06：profile 绑定 + 快照（含 version + system_prompt，供 execution-context prepend）
+            agent_profile_id=(profile.id if profile is not None else None),
+            agent_profile_snapshot=(
+                _build_agent_profile_snapshot(profile) if profile is not None else None
+            ),
         )
         self._session.add(run)
         await self._session.commit()
@@ -1206,8 +1410,13 @@ class AgentService:
             branch=branch,
             provider=resolved_provider,
             model=resolved_model,
+            # task-06：传 profile id 让 placement 按 profile.provider 选 target_provider（D-014）。
+            agent_profile_id=(profile.id if profile is not None else None),
         )
         if lease_id_daemon:
+            # task-06：写 profile 字段进 lease.metadata（effective_allowed_roots 等，task-07 消费）。
+            if profile is not None:
+                await self._apply_profile_to_lease(lease_id_daemon, profile)
             log.info(
                 "start_stage_dispatch_dispatched_to_daemon",
                 run_id=str(run.id),
@@ -1283,6 +1492,8 @@ class AgentService:
         spec_root: str,
         provider: str | None = None,
         model: str | None = None,
+        # task-06（§8）：run 显式指定的 AgentProfile（None → §8 兜底链）。
+        agent_profile_id: uuid.UUID | None = None,
     ) -> AgentRun:
         """Create and execute a scan-mode AgentRun.
 
@@ -1398,11 +1609,24 @@ class AgentService:
         )
         resolved_provider = provider or (workspace.default_agent if workspace else None)
         resolved_model = model or (workspace.default_model if workspace else None)
+        # task-06（§8）：解析 AgentProfile（软约束兜底链）。C-07：无 hint → 零查询。
+        profile = await self._resolve_dispatch_profile(
+            workspace=workspace,
+            user_id=user_id,
+            default_provider=resolved_provider,
+            run_profile_id=agent_profile_id,
+        )
+        if profile is not None and profile.provider:
+            from app.modules.agent.profile.service import _normalize_provider
+
+            resolved_provider = _normalize_provider(profile.provider) or resolved_provider
         # scan_provider 兜底 "claude"（不是 "claude_code"——那是 agent_type，daemon 实际
         # provider 是 claude/codex/...，详见 _query_runtime_by_daemon_and_provider）。
         # AgentSession.provider NOT NULL（model.py:418），不能传 None；workspace.default_agent
         # 为 NULL（daemon-client scan-generate 新建工作区不设该列）且请求未传 provider 时，
         # 走 "claude" 这个通行默认值，否则 dispatch 永远匹配不到 daemon 触发 NoOnlineDaemonError。
+        # task-06：profile.provider 优先（上方已并入 resolved_provider），scan 路 target_provider
+        # 经此 provider 入参透传（prepare_scan_interactive_dispatch 无 agent_profile_id 参数）。
         scan_provider = resolved_provider or "claude"
 
         now = datetime.now(UTC)
@@ -1438,6 +1662,11 @@ class AgentService:
             status="pending",
             spec_strategy=spec_strategy,
             agent_session_id=session.id,
+            # task-06：profile 绑定 + 快照（含 version + system_prompt，供 execution-context prepend）
+            agent_profile_id=(profile.id if profile is not None else None),
+            agent_profile_snapshot=(
+                _build_agent_profile_snapshot(profile) if profile is not None else None
+            ),
         )
         self._session.add(run)
 
@@ -1509,6 +1738,11 @@ class AgentService:
             latest_spec_version=latest_spec_version,
             spec_strategy=spec_strategy,
         )
+
+        # -- 7b. task-06：写 profile 字段进 lease.metadata（在 wake 前，claim 必读到）---
+        # scan 路无竞态（wake 在本函数更后）；profile=None 跳过零回归。
+        if profile is not None:
+            await self._apply_profile_to_lease(dispatch.lease_id, profile)
 
         # -- 8. Wake daemon + SESSION_INJECT 首 turn（参照 create_session 收尾）---
         delivered = await placement.notify_interactive_dispatch(dispatch)

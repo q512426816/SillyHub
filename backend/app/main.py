@@ -22,6 +22,7 @@ from app.core.monitoring import (
 from app.core.redis import close_redis
 from app.core.telemetry import init_telemetry
 from app.modules.admin.router import router as admin_router
+from app.modules.agent.profile.router import router as agent_profile_router
 from app.modules.agent.router import router as agent_router
 from app.modules.auth.router import router as auth_router
 from app.modules.change import change_router
@@ -102,6 +103,19 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                     log.warning("gate.reconcile_reenqueued", **gate_result)
             except Exception:
                 log.exception("gate.reconcile_failed")
+            # 2026-08-02-agent-profile-layer task-11 / D-015：启动 idempotent
+            # 补种平台默认 AgentProfile（claude/codex）。迁移 task-01 覆盖新环境
+            # 首次 seed；本 hook 覆盖「默认档案被误删后重启」场景，按
+            # is_system_default + provider 去重补回，不覆盖用户改动。异常不阻断
+            # 启动（对齐上方 cleanup_stale_runs / gate reconcile 模式）。
+            try:
+                from app.modules.agent.profile.seed import ensure_system_default_profiles
+
+                seeded = await ensure_system_default_profiles(session)
+                if seeded:
+                    log.warning("agent.profile.system_default_reseeded", count=seeded)
+            except Exception:
+                log.exception("agent.profile.seed_failed")
         # 平台文件中心：初始化对象存储单例（minio 等 S3 兼容）。异常不阻断启动——
         # 存储后端暂不可达时文件上传在请求期报错，其余功能不受影响（D-001/D-002）。
         try:
@@ -502,6 +516,10 @@ def create_app() -> FastAPI:
     app.include_router(git_identity_router, prefix="/api")
     app.include_router(llm_provider_router, prefix="/api")
     app.include_router(agent_router, prefix="/api")
+    # 2026-08-02-agent-profile-layer task-04：AgentProfile 配置层 CRUD/copy API。
+    # workspace 级（/workspaces/{wid}/agent-profiles）+ platform 级（/agent-profiles）。
+    # router 自身不带 prefix，路径在路由内写全，外层只加 /api。
+    app.include_router(agent_profile_router, prefix="/api")
     app.include_router(daemon_router, prefix="/api")
     # 2026-07-07-skills-mcp-management-ui task-02：平台 CustomSkill admin CRUD。
     app.include_router(skills_router, prefix="/api")

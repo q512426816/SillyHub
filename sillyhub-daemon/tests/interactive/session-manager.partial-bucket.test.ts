@@ -162,20 +162,23 @@ describe('task-03 / D-002: partial 按 parent_tool_use_id 分桶隔离', () => {
     expect(sessionMap.get('tool_1').thinking).toBe('');
     expect(sessionMap.get('tool_1').timer).toBeNull();
     expect(
-      sessionMap.get('tool_1').completedSegments.has('tool_1:msg-sub:0'),
+      sessionMap.get('tool_1').completedSegments.has('tool_1:msg-sub:thinking'),
     ).toBe(true);
   });
 
-  it('segmentId 隔离：主/子同 messageId:index 不撞 id', () => {
+  it('segmentId 隔离：主/子同 messageId:type 不撞 id', () => {
     const { sm, state } = makeManager();
     const p = priv(sm);
     p._onMessage(state, messageStart(null, 'shared'));
     p._onMessage(state, messageStart('tool_1', 'shared'));
     const sessionMap = p._partialBuffers.get(SID);
-    const mainSeg = p._resolveSegmentId(state, sessionMap.get('main'), 0);
-    const subSeg = p._resolveSegmentId(state, sessionMap.get('tool_1'), 0);
-    expect(mainSeg).toBe('main:shared:0');
-    expect(subSeg).toBe('tool_1:shared:0');
+    // task-13修复：segmentId 第 3 段用 block type（thinking/text），不再用 stream index。
+    // _resolveSegmentId 第 3 参为 typeSegment（'thinking'/'text'），主/子同 type 仍因
+    // parentKey 前缀不同而不撞 id。
+    const mainSeg = p._resolveSegmentId(state, sessionMap.get('main'), 'thinking');
+    const subSeg = p._resolveSegmentId(state, sessionMap.get('tool_1'), 'thinking');
+    expect(mainSeg).toBe('main:shared:thinking');
+    expect(subSeg).toBe('tool_1:shared:thinking');
     expect(mainSeg).not.toBe(subSeg);
   });
 
@@ -199,8 +202,9 @@ describe('task-03 / D-002: partial 按 parent_tool_use_id 分桶隔离', () => {
     expect(calls[1].content).toBe('[THINKING] 子思考');
     const mainMeta = (calls[0].metadata ?? {}) as Record<string, unknown>;
     const subMeta = (calls[1].metadata ?? {}) as Record<string, unknown>;
-    expect(mainMeta.segmentId).toBe('main:msg-main:0');
-    expect(subMeta.segmentId).toBe('tool_1:msg-sub:0');
+    // task-13修复：thinking partial segmentId 第 3 段为 block type 'thinking'（非 stream index）。
+    expect(mainMeta.segmentId).toBe('main:msg-main:thinking');
+    expect(subMeta.segmentId).toBe('tool_1:msg-sub:thinking');
   });
 
   it('_destroyPartialBuffer 销毁整 session 所有桶 + timer', () => {

@@ -126,6 +126,23 @@ class AgentRun(BaseModel, table=True):
         default=None,
         sa_column=Column(String(64), nullable=True),
     )
+    # ── AgentProfile 配置层（2026-08-02-agent-profile-layer, design §3.2） ──
+    # 显式绑定的智能体档案；NULL = 走兜底链（workspace.default_agent_profile_id →
+    # 平台默认 → workspace.default_agent，design §8）。档案删则 SET NULL，run 历史保留。
+    # 与上方 profile_version/spec_strategy 共存（向后兼容，不删，design §3.2）。
+    agent_profile_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_profiles.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    # dispatch 落地时冻结的 profile 快照（含 version），让 run 历史独立于档案后续编辑。
+    agent_profile_snapshot: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
     diff_summary: str | None = Field(
         default=None,
         sa_column=Column(Text, nullable=True),

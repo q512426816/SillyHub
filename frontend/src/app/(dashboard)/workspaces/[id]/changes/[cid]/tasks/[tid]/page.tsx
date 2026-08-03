@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { AgentModelInput } from "@/components/AgentModelInput";
+import { AgentProfileSelect } from "@/components/agent-profile-select";
 import { AgentProviderSelect } from "@/components/AgentProviderSelect";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -144,6 +145,8 @@ export default function TaskDetailPage({ params }: Props) {
   // Selected agent provider for this run; null follows workspace.default_agent.
   const [runProvider, setRunProvider] = useState<string | null>(null);
   const [runModel, setRunModel] = useState<string | null>(null);
+  // task-12：选中的智能体档案 id；null = 不指定，走后端兜底链（workspace 默认 → 平台默认）。
+  const [runProfileId, setRunProfileId] = useState<string | null>(null);
   const [runtimesLoading, setRuntimesLoading] = useState(false);
 
   /* ---- Data loading ---- */
@@ -259,6 +262,8 @@ export default function TaskDetailPage({ params }: Props) {
         preferred_backend: preferredBackend,
         provider: runProvider,
         model: runModel,
+        // task-12：透传选中的 AgentProfile（null 走后端兜底链，FR-15 零回归）。
+        agent_profile_id: runProfileId,
       });
       setShowAgentForm(false);
       // Reload to pick up the new run
@@ -459,6 +464,17 @@ export default function TaskDetailPage({ params }: Props) {
                   Agent model
                 </label>
                 <AgentModelInput value={runModel} onChange={setRunModel} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] text-muted-foreground">
+                  智能体档案
+                </label>
+                <AgentProfileSelect
+                  workspaceId={workspaceId}
+                  value={runProfileId}
+                  onChange={setRunProfileId}
+                  includeDefault="不指定，用默认"
+                />
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-[11px] text-muted-foreground">

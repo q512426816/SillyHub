@@ -509,7 +509,7 @@ describe('task-12: assistant override emit [ASSISTANT_OVERRIDE] 删 partial', ()
     const p = priv(sm);
     const MID = 'msg-asst-1';
 
-    // 1. partial flush 一条 assistant text（segmentId = main:msg-asst-1:0）。
+    // 1. partial flush 一条 assistant text（segmentId = main:msg-asst-1:text，task-13修复后第 3 段为 block type）。
     p._onMessage(state, msgStart(MID));
     p._onMessage(state, textDelta(0, 'x'.repeat(90))); // >80 字符触发 flush 阈值
     await p._flushPartial(SID_OVR, 'main');
@@ -518,13 +518,13 @@ describe('task-12: assistant override emit [ASSISTANT_OVERRIDE] 删 partial', ()
       string,
       unknown
     >;
-    expect(partialMeta.segmentId).toBe('main:msg-asst-1:0');
+    expect(partialMeta.segmentId).toBe('main:msg-asst-1:text');
     expect(partialMeta.isPartial).toBe(true);
 
     // 2. 完整 assistant message 到达（含同 text block 全文）。
     await p._onMessage(state, completeAssistant(MID, '完整 assistant 回复'));
 
-    // 至少 emit 了 [ASSISTANT_OVERRIDE] main:msg-asst-1:0。
+    // 至少 emit 了 [ASSISTANT_OVERRIDE] main:msg-asst-1:text。
     const calls = onTurnMessage.mock.calls.map((c) => c[2]) as Array<
       Record<string, unknown>
     >;
@@ -534,9 +534,9 @@ describe('task-12: assistant override emit [ASSISTANT_OVERRIDE] 删 partial', ()
         m.content.startsWith('[ASSISTANT_OVERRIDE]'),
     );
     expect(override, 'expected [ASSISTANT_OVERRIDE] signal').toBeDefined();
-    expect(override!.content).toBe('[ASSISTANT_OVERRIDE] main:msg-asst-1:0');
+    expect(override!.content).toBe('[ASSISTANT_OVERRIDE] main:msg-asst-1:text');
     const meta = (override!.metadata ?? {}) as Record<string, unknown>;
-    expect(meta.segmentId).toBe('main:msg-asst-1:0');
+    expect(meta.segmentId).toBe('main:msg-asst-1:text');
     expect(meta.stale).toBe(true);
     // B2 关键断言：assistant override metadata 绝不带 thinking:true。
     expect(meta.thinking).toBeUndefined();
@@ -551,7 +551,7 @@ describe('task-12: assistant override emit [ASSISTANT_OVERRIDE] 删 partial', ()
 
     // completedSegments 已记录该 segment（兜底 late partial 守卫）。
     const buf = p._partialBuffers.get(SID_OVR).get('main');
-    expect(buf.completedSegments.has('main:msg-asst-1:0')).toBe(true);
+    expect(buf.completedSegments.has('main:msg-asst-1:text')).toBe(true);
   });
 
   it('thinking override 仍 emit [THINKING_OVERRIDE] 不串扰 assistant 信号', async () => {
@@ -604,17 +604,17 @@ describe('task-12: assistant override emit [ASSISTANT_OVERRIDE] 删 partial', ()
       .map((m) => m.content as string);
 
     // 按 kind 分流：thinking block（index=0）→ [THINKING_OVERRIDE]；
-    // text block（index=1）→ [ASSISTANT_OVERRIDE]。两者 segmentId 各自独立，
-    // 不串扰。
-    expect(thinkingOvr).toContain('[THINKING_OVERRIDE] main:msg-mix:0');
-    expect(assistantOvr).toContain('[ASSISTANT_OVERRIDE] main:msg-mix:1');
+    // text block（index=1）→ [ASSISTANT_OVERRIDE]。两者 segmentId 按 block type
+    // 区分（task-13修复：第 3 段用 type），各自独立，不串扰。
+    expect(thinkingOvr).toContain('[THINKING_OVERRIDE] main:msg-mix:thinking');
+    expect(assistantOvr).toContain('[ASSISTANT_OVERRIDE] main:msg-mix:text');
 
     // thinking override metadata 带 thinking:true；assistant override 不带。
     const thinkMeta = (calls.find(
-      (m) => m.content === '[THINKING_OVERRIDE] main:msg-mix:0',
+      (m) => m.content === '[THINKING_OVERRIDE] main:msg-mix:thinking',
     )!.metadata ?? {}) as Record<string, unknown>;
     const asstMeta = (calls.find(
-      (m) => m.content === '[ASSISTANT_OVERRIDE] main:msg-mix:1',
+      (m) => m.content === '[ASSISTANT_OVERRIDE] main:msg-mix:text',
     )!.metadata ?? {}) as Record<string, unknown>;
     expect(thinkMeta.thinking).toBe(true);
     expect(asstMeta.thinking).toBeUndefined();

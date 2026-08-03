@@ -54,6 +54,32 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/**
+ * 轮询等待 vi.fn spy 被调用（替代固定 sleep(N)）。
+ *
+ * 固定 sleep(50) 在满载 fork 池（8 fork × 多文件并发）下偶发饥饿——daemon 的
+ * WS→claim→_runLeaseStateMachine→_startInteractiveSession→sessionManager.create
+ * 异步链需多次 event loop tick，高并发下 50ms 内未跑完 → "create called 0 times"
+ * 假阴性（隔离/单文件均秒过，见 vitest.config.ts 注释）。轮询直到 spy 被调（上限
+ * 3s）消除竞态：快时 15ms 命中，满载时耐心等到链路完成，不再依赖拍脑袋的固定值。
+ *
+ * 仅用于「期望被调用」的正向断言；负向断言（not.toHaveBeenCalled）仍用 sleep
+ * 给足窗口再确认未触发。
+ */
+async function waitForSpy(
+  spy: { mock: { calls: unknown[][] } },
+  { timeout = 3000, interval = 15 }: { timeout?: number; interval?: number } = {},
+): Promise<void> {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (spy.mock.calls.length > 0) return;
+    await sleep(interval);
+  }
+  throw new Error(
+    `waitForSpy: spy 未在 ${timeout}ms 内被调用（竞态修复兜底，见 vitest.config.ts 并发说明）`,
+  );
+}
+
 interface MockClient {
   register: ReturnType<typeof vi.fn>;
   heartbeat: ReturnType<typeof vi.fn>;
@@ -327,7 +353,7 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
         rootPath: 'C:\\work',
       },
     });
-    await sleep(50);
+    await waitForSpy(sessionManager.create as unknown as { mock: { calls: unknown[][] } });
 
     expect(sessionManager.create).toHaveBeenCalledOnce();
     const createArg = (sessionManager.create as ReturnType<typeof vi.fn>).mock
@@ -447,7 +473,7 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
         rootPath: 'C:\\work',
       },
     });
-    await sleep(30);
+    await waitForSpy(sessionManager.create as unknown as { mock: { calls: unknown[][] } });
 
     expect(sessionManager.create).toHaveBeenCalledOnce();
     await daemon.stop();
@@ -532,7 +558,7 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
           agentRunId: 'run-1',
         },
       });
-      await sleep(50);
+      await waitForSpy(sessionManager.create as unknown as { mock: { calls: unknown[][] } });
 
       // cwd 已被 mkdir 创建
       expect(existsSync(wsDir)).toBe(true);
@@ -581,7 +607,7 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
         rootPath: tmpdir(),
       },
     });
-    await sleep(50);
+    await waitForSpy(sessionManager.create as unknown as { mock: { calls: unknown[][] } });
 
     expect(sessionManager.create).toHaveBeenCalledOnce();
     const createArg = (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls[0]![0];
@@ -725,4 +751,179 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
     warnSpy.mockRestore();
     await daemon.stop();
   });
+
+  // ── task-10：AgentProfile 三字段 execPayload → CreateSessionInput 透传 ──────────
+
+  it('task-10: interactive claim payload（camelCase）profile 字段 → CreateSessionInput 透传', async () => {
+    const sessionManager = createMockSessionManager();
+    const { daemon, client, wsClientMock } = buildDaemon({ sessionManager });
+    track(daemon);
+
+    await daemon.start();
+    client.claimLease.mockResolvedValueOnce({
+      claim_token: 'token-pf',
+      payload: {
+        kind: 'interactive',
+        prompt: 'hi',
+        provider: 'claude',
+        agent_session_id: 'sess-pf',
+        agent_run_id: 'run-pf',
+        root_path: 'C:\\work',
+        // task-07 双写 camelCase（优先源）
+        mcpRefs: ['mcp-a', 'mcp-b'],
+        skillRefs: ['skill-x'],
+        effectiveAllowedRoots: ['C:\\work', 'C:\\repo'],
+      },
+    });
+
+    wsClientMock._injectMessage({
+      type: MSG.TASK_AVAILABLE,
+      payload: {
+        leaseId: 'lease-pf',
+        kind: 'interactive',
+        prompt: 'hi',
+        agentSessionId: 'sess-pf',
+        agentRunId: 'run-pf',
+        rootPath: 'C:\\work',
+      },
+    });
+    await waitForSpy(sessionManager.create as unknown as { mock: { calls: unknown[][] } });
+
+    expect(sessionManager.create).toHaveBeenCalledOnce();
+    const createArg = (sessionManager.create as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    // 三字段逐字透传（camelCase 源）
+    expect(createArg.mcpRefs).toEqual(['mcp-a', 'mcp-b']);
+    expect(createArg.skillRefs).toEqual(['skill-x']);
+    expect(createArg.effectiveAllowedRoots).toEqual(['C:\\work', 'C:\\repo']);
+    await daemon.stop();
+  });
+
+  it('task-10: interactive claim payload（snake_case 兜底）profile 字段 → CreateSessionInput 透传', async () => {
+    const sessionManager = createMockSessionManager();
+    const { daemon, client, wsClientMock } = buildDaemon({ sessionManager });
+    track(daemon);
+
+    await daemon.start();
+    client.claimLease.mockResolvedValueOnce({
+      claim_token: 'token-pf2',
+      payload: {
+        kind: 'interactive',
+        prompt: 'hi',
+        provider: 'claude',
+        agent_session_id: 'sess-pf2',
+        agent_run_id: 'run-pf2',
+        root_path: 'C:\\work',
+        // 仅 snake_case（兼容 backend 旧/变体写法）
+        mcp_refs: ['mcp-s'],
+        skill_refs: ['skill-s'],
+        effective_allowed_roots: ['C:\\sandbox'],
+      },
+    });
+
+    wsClientMock._injectMessage({
+      type: MSG.TASK_AVAILABLE,
+      payload: {
+        leaseId: 'lease-pf2',
+        kind: 'interactive',
+        prompt: 'hi',
+        agentSessionId: 'sess-pf2',
+        agentRunId: 'run-pf2',
+        rootPath: 'C:\\work',
+      },
+    });
+    await waitForSpy(sessionManager.create as unknown as { mock: { calls: unknown[][] } });
+
+    expect(sessionManager.create).toHaveBeenCalledOnce();
+    const createArg = (sessionManager.create as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(createArg.mcpRefs).toEqual(['mcp-s']);
+    expect(createArg.skillRefs).toEqual(['skill-s']);
+    expect(createArg.effectiveAllowedRoots).toEqual(['C:\\sandbox']);
+    await daemon.stop();
+  });
+
+  it('task-10: interactive claim 无 profile 字段 → CreateSessionInput 三字段 undefined（FR-15 零回归）', async () => {
+    const sessionManager = createMockSessionManager();
+    const { daemon, client, wsClientMock } = buildDaemon({ sessionManager });
+    track(daemon);
+
+    await daemon.start();
+    client.claimLease.mockResolvedValueOnce({
+      claim_token: 'token-pf3',
+      payload: {
+        kind: 'interactive',
+        prompt: 'hi',
+        provider: 'claude',
+        agent_session_id: 'sess-pf3',
+        agent_run_id: 'run-pf3',
+        root_path: 'C:\\work',
+      },
+    });
+
+    wsClientMock._injectMessage({
+      type: MSG.TASK_AVAILABLE,
+      payload: {
+        leaseId: 'lease-pf3',
+        kind: 'interactive',
+        prompt: 'hi',
+        agentSessionId: 'sess-pf3',
+        agentRunId: 'run-pf3',
+        rootPath: 'C:\\work',
+      },
+    });
+    await waitForSpy(sessionManager.create as unknown as { mock: { calls: unknown[][] } });
+
+    expect(sessionManager.create).toHaveBeenCalledOnce();
+    const createArg = (sessionManager.create as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(createArg.mcpRefs).toBeUndefined();
+    expect(createArg.skillRefs).toBeUndefined();
+    expect(createArg.effectiveAllowedRoots).toBeUndefined();
+    await daemon.stop();
+  });
+
+  it('task-10: batch claim payload（camelCase）profile 字段 → ctx 透传 runLease', async () => {
+    const sessionManager = createMockSessionManager();
+    const taskRunner = createMockTaskRunner();
+    const { daemon, client, taskRunner: trRef, wsClientMock } = buildDaemon({
+      sessionManager,
+      taskRunner,
+    });
+    track(daemon);
+
+    await daemon.start();
+    client.claimLease.mockResolvedValueOnce({
+      claim_token: 'token-batch',
+      payload: {
+        kind: 'batch',
+        prompt: 'do',
+        provider: 'claude',
+        agent_run_id: 'run-batch',
+        mcpRefs: ['mcp-b1'],
+        skillRefs: ['skill-b1'],
+        effectiveAllowedRoots: ['C:\\batch'],
+      },
+    });
+
+    wsClientMock._injectMessage({
+      type: MSG.TASK_AVAILABLE,
+      payload: {
+        leaseId: 'lease-batch',
+        kind: 'batch',
+        prompt: 'do',
+        agentRunId: 'run-batch',
+      },
+    });
+    await waitForSpy(trRef.runLease as unknown as { mock: { calls: unknown[][] } });
+
+    expect(trRef.runLease).toHaveBeenCalledOnce();
+    const ctxArg = (trRef.runLease as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(ctxArg.mcpRefs).toEqual(['mcp-b1']);
+    expect(ctxArg.skillRefs).toEqual(['skill-b1']);
+    expect(ctxArg.effectiveAllowedRoots).toEqual(['C:\\batch']);
+    expect(sessionManager.create).not.toHaveBeenCalled();
+    await daemon.stop();
+  });
 });
+

@@ -18,6 +18,12 @@ import { parseJsonFromResponse } from './hub-client.js';
 // ── 类型 ─────────────────────────────────────────────────────────────────────
 
 export interface McpServerConfig {
+  /**
+   * MCP server 传输类型（D-017）。仅允许 'stdio'（防 SSE/HTTP SSRF）。
+   * 缺省视为 'stdio'（向后兼容旧配置不含 type 字段）。
+   * mergeMcpConfigs 校验：非 stdio 值抛错（安全边界，不静默跳过）。
+   */
+  type?: 'stdio';
   command: string;
   args: string[];
   env?: Record<string, string>;
@@ -146,11 +152,31 @@ export function validateMcpServers(
 // ── 合并 ──────────────────────────────────────────────────────────────────────
 
 /**
- * 合并多个 MCP 配置（D-003）：
+ * 校验 MCP server 传输类型仅 stdio（D-017：防 SSE/HTTP SSRF）。
+ * type 缺省视为 'stdio'（向后兼容旧配置不含 type 字段）。非 stdio 抛错
+ * （安全边界：配置错误或攻击注入 SSE/HTTP server 时 fail-loud，不静默跳过）。
+ */
+function assertMcpServerType(name: string, cfg: McpServerConfig): void {
+  const t = cfg.type ?? 'stdio';
+  if (t !== 'stdio') {
+    throw new Error(
+      `MCP server "${name}" has unsupported type "${t}": only "stdio" is allowed (D-017, SSRF prevention)`,
+    );
+  }
+}
+
+/**
+ * 合并多个 MCP 配置（D-003 + D-017 task-08 第三层过滤）：
  *   1. 传入顺序为优先级从低到高（如 [platform, workspace]）。
  *   2. 同名 server 以后续配置覆盖前面。
  *   3. 所有 server（含 platform 默认）均需通过白名单。
  *   4. 平台默认 server 自动加入白名单（隐式允许）。
+ *   5. task-08/D-017：McpServerConfig.type 仅允许 'stdio'（防 SSE/HTTP SSRF），非 stdio 抛错。
+ *   6. task-08/D-017：若提供 mcp_refs（profile 子集），merge 结果再 ∩ mcp_refs。
+ *
+ * **向后兼容**：旧调用 `mergeMcpConfigs(whitelist, ...configs)` 不传 mcp_refs，
+ * 等价不过滤（行为同 task-08 前）。cli.ts:709 `mergeMcpConfigs([], { mcpServers })`
+ * 不需改动。
  *
  * @param whitelist admin 配置的白名单 server 名列表。
  * @param configs   MCP 配置列表，按优先级从低到高（mergeMcpConfigs(wl, platform, workspace)）。
@@ -158,11 +184,45 @@ export function validateMcpServers(
 export function mergeMcpConfigs(
   whitelist: string[],
   ...configs: McpConfig[]
+): MergedMcpResult;
+/**
+ * task-08（D-017）：带 mcp_refs 子集过滤的合并。
+ *
+ * @param mcpRefs  profile 限定的 MCP server name 子集；空数组/undefined 则不过滤
+ *                 （向后兼容，等价于不收紧）。非空时 merge 结果 ∩ mcp_refs。
+ * @param configs  MCP 配置列表，按优先级从低到高。
+ */
+export function mergeMcpConfigs(
+  whitelist: string[],
+  mcpRefs: string[],
+  ...configs: McpConfig[]
+): MergedMcpResult;
+export function mergeMcpConfigs(
+  whitelist: string[],
+  mcpRefsOrFirstConfig?: string[] | McpConfig,
+  ...restConfigs: McpConfig[]
 ): MergedMcpResult {
-  // 步骤 1：合并所有配置（浅合并，同名 server 后者覆盖前者）
+  // 区分旧式调用 (whitelist, ...configs) 与新式调用 (whitelist, mcpRefs, ...configs)。
+  // string[]（Array.isArray）= mcp_refs；McpConfig 对象 = 旧式首个 config。
+  let mcpRefs: string[] | undefined;
+  let configs: McpConfig[];
+  if (mcpRefsOrFirstConfig === undefined) {
+    // mergeMcpConfigs(whitelist) — 无 config（等价旧 mergeMcpConfigs([])）
+    configs = [];
+  } else if (Array.isArray(mcpRefsOrFirstConfig)) {
+    // 第二参数是 string[] → mcp_refs（task-08 新式调用）
+    mcpRefs = mcpRefsOrFirstConfig;
+    configs = restConfigs;
+  } else {
+    // 第二参数是 McpConfig → 旧式调用（不传 mcp_refs，行为不变）
+    configs = [mcpRefsOrFirstConfig, ...restConfigs];
+  }
+
+  // 步骤 1：合并所有配置（浅合并，同名 server 后者覆盖前者）+ type 校验（D-017）
   const raw: Record<string, McpServerConfig> = {};
   for (const cfg of configs) {
     for (const [name, serverCfg] of Object.entries(cfg.mcpServers)) {
+      assertMcpServerType(name, serverCfg);
       raw[name] = serverCfg;
     }
   }
@@ -187,7 +247,23 @@ export function mergeMcpConfigs(
     }
   }
 
-  return { config: { mcpServers: validated }, rejected };
+  // 步骤 4（task-08/D-017）：mcp_refs 子集过滤（profile 限定，只能收紧）
+  // mcp_refs 为空/undefined → 不过滤（向后兼容）；非空 → 已过白名单结果再 ∩ mcp_refs。
+  // 设计依据 design §9：profile.mcp_refs 经 claim payload 透传，daemon 端第三层过滤。
+  let final = validated;
+  if (mcpRefs && mcpRefs.length > 0) {
+    const refsSet = new Set(mcpRefs);
+    final = {};
+    for (const [name, serverCfg] of Object.entries(validated)) {
+      if (refsSet.has(name)) {
+        final[name] = serverCfg;
+      } else {
+        rejected.push(name);
+      }
+    }
+  }
+
+  return { config: { mcpServers: final }, rejected };
 }
 
 // ── 注入 ──────────────────────────────────────────────────────────────────────

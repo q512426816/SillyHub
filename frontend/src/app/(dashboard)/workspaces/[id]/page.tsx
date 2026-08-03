@@ -357,6 +357,8 @@ export default function WorkspaceDetailPage({ params }: Props) {
           { href: `/workspaces/${workspaceId}/scan-docs`, label: "扫描文档" },
           { href: `/workspaces/${workspaceId}/runtime`, label: "运行时" },
           { href: `/workspaces/${workspaceId}/agent`, label: "智能体" },
+          // task-12 / 2026-08-02-agent-profile-layer：智能体档案管理入口。
+          { href: `/workspaces/${workspaceId}/agent-profiles`, label: "智能体档案" },
           // task-13 / FR-06：业务人员借用方案查看入口（workspace 作用域，守卫放行）。
           { href: `/workspaces/${workspaceId}/files`, label: "方案文件" },
         ].map((item) => (
