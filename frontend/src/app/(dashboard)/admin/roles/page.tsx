@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Input, Button, Modal, type TableProps, Tag } from "antd";
+import { Input, Button, Modal, Tag, Tooltip, type TableProps } from "antd";
 
 import { AdminRolePermissionPicker } from "@/components/admin-role-permission-picker";
 import { MENU_PERMISSION_GROUPS } from "@/lib/menu-permissions";
@@ -391,10 +391,12 @@ function renderPermissionsCell(perms: string[]): React.ReactNode {
   const visible = allNames.slice(0, 3);
   const extra = allNames.length - visible.length;
   return (
-    <span title={allNames.join(", ")}>
-      {visible.join(", ")}
-      {extra > 0 && <span className="ml-1 text-muted-foreground">+{extra} more</span>}
-    </span>
+    <Tooltip title={allNames.join("、")} overlayStyle={{ maxWidth: 400 }}>
+      <span>
+        {visible.join(", ")}
+        {extra > 0 && <span className="ml-1 text-muted-foreground">+{extra} more</span>}
+      </span>
+    </Tooltip>
   );
 }
 

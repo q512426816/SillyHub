@@ -159,3 +159,12 @@
 根因：ql-001 建的 PERMISSION_NAME_MAP 只覆盖 menu-permissions 的 59 个 key,但 DB 有 68 个 key,其中 9 个系统/旧权限(component:admin/write/daemon:borrow/platform:admin/billing/ppm:plan:read/problem-change:read/problem:read/task:read)不在 menu-permissions 定义 → map 兜底英文 → 混杂。
 方案：PERMISSION_NAME_MAP 补 9 个 fallback 中文(component:admin 组件管理/component:write 组件编辑/daemon:borrow daemon 借用/platform:admin 平台管理/platform:billing 平台计费/ppm:plan:read 计划查看/ppm:problem-change:read 问题变更查看/ppm:problem:read 问题查看/ppm:task:read 任务查看)。
 结果：1 文件改动(admin/roles page.tsx),typecheck 绿,权限列全中文(68 key 覆盖)。
+## ql-20260803-001-18e1 | 2026-08-03 08:33:39 | (quick 任务)
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/admin/roles/page.tsx
+
+需求：权限列悬停查看用 antd Tooltip(现在用原生 title 属性)。
+根因：ql-001 用原生 HTML title 属性做悬停提示(浏览器原生样式,非 antd,延迟长+无样式控制)。
+方案：import Tooltip from antd;renderPermissionsCell 的 <span title=...> → <Tooltip title=中文(顿号分隔) overlayStyle maxWidth=400><span>...</span></Tooltip>。antd Tooltip 统一悬停样式+可控宽度。
+结果：1 文件改动(admin/roles page.tsx),typecheck 绿。
