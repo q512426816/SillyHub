@@ -468,7 +468,9 @@ class RunSyncService:
                         "parent_tool_use_id": msg.get("parent_tool_use_id")
                         if isinstance(msg, dict)
                         else None,
-                        "subagent_type": msg.get("subagent_type") if isinstance(msg, dict) else None,
+                        "subagent_type": msg.get("subagent_type")
+                        if isinstance(msg, dict)
+                        else None,
                         "depth": msg.get("depth") if isinstance(msg, dict) else None,
                         "tool_kind": msg.get("tool_kind") if isinstance(msg, dict) else None,
                     }
@@ -519,7 +521,9 @@ class RunSyncService:
                         "parent_tool_use_id": msg.get("parent_tool_use_id")
                         if isinstance(msg, dict)
                         else None,
-                        "subagent_type": msg.get("subagent_type") if isinstance(msg, dict) else None,
+                        "subagent_type": msg.get("subagent_type")
+                        if isinstance(msg, dict)
+                        else None,
                         "depth": msg.get("depth") if isinstance(msg, dict) else None,
                         "tool_kind": msg.get("tool_kind") if isinstance(msg, dict) else None,
                     }

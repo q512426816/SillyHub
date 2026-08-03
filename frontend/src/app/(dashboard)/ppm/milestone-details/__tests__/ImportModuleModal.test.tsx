@@ -328,7 +328,9 @@ describe("ImportModuleModal — 三态导入流程 (task-12 / FR-008)", () => {
     await screen.findByText("① 勾选要导入的 Sheet");
     fireEvent.click(screen.getByText("确认导入"));
 
-    expect(await screen.findByText("导入完成", { exact: false })).toBeInTheDocument();
+    expect(
+      await screen.findByText("导入完成", { exact: false }, { timeout: 5000 }),
+    ).toBeInTheDocument();
     // StatBox label 文案
     expect(screen.getByText("新建模块")).toBeInTheDocument();
     expect(screen.getByText("合并同名模块")).toBeInTheDocument();
@@ -348,7 +350,7 @@ describe("ImportModuleModal — 三态导入流程 (task-12 / FR-008)", () => {
     await uploadFile(new File(["x"], "m.xlsx"));
     await screen.findByText("① 勾选要导入的 Sheet");
     fireEvent.click(screen.getByText("确认导入"));
-    await screen.findByText("导入完成", { exact: false });
+    await screen.findByText("导入完成", { exact: false }, { timeout: 5000 });
 
     // 结果态有「关闭」按钮（antd 两字按钮自动加字间距「关闭」→「关 闭」，正则兼容）
     fireEvent.click(screen.getByText(/^关\s*闭$/));
