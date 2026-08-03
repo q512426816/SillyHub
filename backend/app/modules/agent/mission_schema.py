@@ -23,6 +23,9 @@ class MissionCreateRequest(BaseModel):
     # 2026-07-12-team-main-agent-orchestration task-03 / D-003@v2：主 agent 配置
     # {agent_type, provider, model}。mode=team 时主 agent AgentRun 用此配置走 daemon lease。
     # nullable 兼容老调用（mode=single 零回归）。
+    # task-12 / 2026-08-02-agent-profile-layer：可选增 agent_profile_id（UUID 字符串），
+    # 主 agent run 据此绑定 AgentProfile（软约束兜底，design §8）。orchestrator
+    # _resolve_main_agent_config 解析并透传 dispatch_to_daemon。缺失/非法 → None 零回归。
     main_agent_config: dict | None = None
 
 

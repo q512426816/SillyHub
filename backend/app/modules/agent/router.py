@@ -236,6 +236,20 @@ async def get_execution_context(
 
     claude_md = render_bundle_to_claude_md(bundle)
 
+    # task-06（D-012@v2）：run 绑定 AgentProfile 且快照含 system_prompt 时，prepend 到
+    # claudeMd 顶部。直接读已加载的 ``AgentRun.agent_profile_snapshot`` JSON 列——
+    # 零额外查询（C-07：null 路径无新增 DB 查询；snapshot 缺失 / prompt 为空同样不查）。
+    # stage 分支随后会把 claude_md 重置为 ""，故 stage run 自然不携带 prompt（stage
+    # 不写 CLAUDE.md，D-007 既有约束不受影响）；task / scan（batch + interactive）两
+    # 路径都 fetch claudeMd，一次 prepend 双覆盖（design §7）。
+    # ``build_spec_bundle`` / ``render_bundle_to_claude_md`` 函数零改动（非渲染管线）。
+    _profile_snapshot = (
+        run.agent_profile_snapshot if isinstance(run.agent_profile_snapshot, dict) else None
+    )
+    _profile_system_prompt = _profile_snapshot.get("system_prompt") if _profile_snapshot else None
+    if _profile_system_prompt:
+        claude_md = f"{_profile_system_prompt}\n\n{claude_md}"
+
     # task-02（2026-07-07-daemon-skill-execution / D-001/D-005/D-007）：stage 投递重构。
     # stage 类型 run 不再把完整 stage prompt 塞进 claude_md（避免覆盖 worktree CLAUDE.md，
     # patch 基准不一致 → does not match index 冲突）。改为：
@@ -347,6 +361,10 @@ async def create_agent_run(
         preferred_backend=data.preferred_backend,
         provider=data.provider,
         model=data.model,
+        # task-12 / 2026-08-02-agent-profile-layer：透传用户指定的 AgentProfile
+        # （软约束兜底，design §8）。service.start_run → _resolve_dispatch_profile
+        # → resolve_profile(run_profile_id=...)，None 走兜底链不阻断（FR-15 零回归）。
+        agent_profile_id=data.agent_profile_id,
     )
     # If run was returned from idempotency check, return 200 instead of 201
     if data.idempotency_key and run.status not in ("pending", "running"):

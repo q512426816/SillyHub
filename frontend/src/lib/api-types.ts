@@ -2310,6 +2310,134 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/agent-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workspace Profiles
+         * @description 列出 actor 在该 workspace 可见的档案（platform 全档 + workspace 级成员可
+         *     见档 + actor 自己的 private 档）。
+         */
+        get: operations["list_workspace_profiles_api_workspaces__workspace_id__agent_profiles_get"];
+        put?: never;
+        /**
+         * Create Workspace Profile
+         * @description 在该 workspace 下新建档案。visibility 决定归属与建案权（service.create）：
+         *     workspace 级需成员（已由 WORKSPACE_WRITE 依赖保证），platform 级需 admin
+         *     （service 内判 is_platform_admin），private 任何已认证用户可建。
+         */
+        post: operations["create_workspace_profile_api_workspaces__workspace_id__agent_profiles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/agent-profiles/{profile_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workspace Profile
+         * @description 取单档。service.get 自带三级 visibility 读校验：不存在→404，不可见→403。
+         */
+        get: operations["get_workspace_profile_api_workspaces__workspace_id__agent_profiles__profile_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Workspace Profile
+         * @description 删除。系统默认档案被删后由 startup hook 补种（task-11）。service.delete
+         *     自带改权限校验。
+         */
+        delete: operations["delete_workspace_profile_api_workspaces__workspace_id__agent_profiles__profile_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Workspace Profile
+         * @description 部分更新（version +1）。仅传显式字段；改 visibility→platform 需 admin
+         *     （service 内判）。service.update 自带改权限校验（owner/成员/admin）。
+         */
+        patch: operations["update_workspace_profile_api_workspaces__workspace_id__agent_profiles__profile_id__patch"];
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/agent-profiles/{profile_id}/copy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Copy Workspace Profile
+         * @description 复制源档内容到 actor 名下新档（Non-Goals：复制替代 N:N 活引用共享）。
+         *     新档默认 private + 无 workspace；可指定 visibility/workspace（建案权经
+         *     service.create 复用）。
+         */
+        post: operations["copy_workspace_profile_api_workspaces__workspace_id__agent_profiles__profile_id__copy_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Platform Profiles
+         * @description 列出 platform 可见档案（+ actor 自己的 private 档）。任意登录用户可调
+         *     （platform 级档案全平台可见，D-009）。
+         */
+        get: operations["list_platform_profiles_api_agent_profiles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-profiles/{profile_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Platform Profile
+         * @description 平台维度取单档（仅 admin）。service.get 自带三级 visibility 读校验。
+         */
+        get: operations["get_platform_profile_api_agent_profiles__profile_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Platform Profile
+         * @description 平台维度删除（仅 admin）。系统默认档案被删后由 startup hook 补种（task-11）。
+         */
+        delete: operations["delete_platform_profile_api_agent_profiles__profile_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Platform Profile
+         * @description 平台维度更新（仅 admin，用于编辑平台预置档案）。version +1。
+         */
+        patch: operations["update_platform_profile_api_agent_profiles__profile_id__patch"];
+        trace?: never;
+    };
     "/api/daemon/runtimes/{runtime_id}/pending-change-writes": {
         parameters: {
             query?: never;
@@ -7109,6 +7237,129 @@ export interface components {
             /** Status */
             status: string;
         };
+        /**
+         * AgentProfileCopyRequest
+         * @description 复制请求。源档内容（provider/model/system_prompt/mcp/skill/overlay）原样
+         *     复制，新档 owner=actor、version=1、is_system_default=False（service.copy）。
+         *     ``name`` 省略时取「{原名}（副本）」，``visibility`` 省略时 private。
+         */
+        AgentProfileCopyRequest: {
+            /** Name */
+            name?: string | null;
+            visibility?: components["schemas"]["AgentProfileVisibility"] | null;
+        };
+        /**
+         * AgentProfileCreate
+         * @description 建档请求。``visibility`` 决定 workspace_id 归属与建案权（service.create
+         *     内校验）：private=owner 自用 / workspace=指定 ws 成员可建 / platform=仅 admin。
+         *     ``provider`` 必填（作 target_provider，D-014）。
+         */
+        AgentProfileCreate: {
+            /** Name */
+            name: string;
+            /** @default private */
+            visibility: components["schemas"]["AgentProfileVisibility"];
+            /** Provider */
+            provider: string;
+            /** Model */
+            model?: string | null;
+            /** System Prompt */
+            system_prompt?: string | null;
+            /** Tool Policy Id */
+            tool_policy_id?: string | null;
+            /** Mcp Refs */
+            mcp_refs?: string[];
+            /** Skill Refs */
+            skill_refs?: string[];
+            /** Allowed Roots Overlay */
+            allowed_roots_overlay?: string[] | null;
+        };
+        /** AgentProfileListResponse */
+        AgentProfileListResponse: {
+            /** Items */
+            items: components["schemas"]["AgentProfileRead"][];
+        };
+        /**
+         * AgentProfileRead
+         * @description 档案响应 DTO。``from_attributes`` 直接读 ORM 行（visibility 经 Pydantic
+         *     还原为 :class:`AgentProfileVisibility` 枚举，DB 存 String）。
+         */
+        AgentProfileRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Owner User Id */
+            owner_user_id: string | null;
+            /** Workspace Id */
+            workspace_id: string | null;
+            visibility: components["schemas"]["AgentProfileVisibility"];
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string | null;
+            /** System Prompt */
+            system_prompt: string | null;
+            /** Tool Policy Id */
+            tool_policy_id: string | null;
+            /** Mcp Refs */
+            mcp_refs: string[];
+            /** Skill Refs */
+            skill_refs: string[];
+            /** Allowed Roots Overlay */
+            allowed_roots_overlay: string[] | null;
+            /** Version */
+            version: number;
+            /** Is System Default */
+            is_system_default: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * AgentProfileUpdate
+         * @description 部分更新请求。全字段可选；router 用 ``exclude_unset=True`` 仅传显式提供
+         *     的字段（省略=不动，显式 null=清空）。``workspace_id`` 不经此 DTO 暴露（跨
+         *     ws 移动为 admin 专能，service 仍支持但无 API 入口，防越权）。
+         */
+        AgentProfileUpdate: {
+            /** Name */
+            name?: string | null;
+            visibility?: components["schemas"]["AgentProfileVisibility"] | null;
+            /** Provider */
+            provider?: string | null;
+            /** Model */
+            model?: string | null;
+            /** System Prompt */
+            system_prompt?: string | null;
+            /** Tool Policy Id */
+            tool_policy_id?: string | null;
+            /** Mcp Refs */
+            mcp_refs?: string[] | null;
+            /** Skill Refs */
+            skill_refs?: string[] | null;
+            /** Allowed Roots Overlay */
+            allowed_roots_overlay?: string[] | null;
+        };
+        /**
+         * AgentProfileVisibility
+         * @description 智能体档案三级可见性（D-009）。
+         *
+         *     ``StrEnum`` 成员即 ``str``：写入 DB 落 ``.value``，读出由 Pydantic 自动
+         *     还原为枚举。DB 层 String(20)，与 status 等列同风格免后续加值迁移。
+         * @enum {string}
+         */
+        AgentProfileVisibility: "private" | "workspace" | "platform";
         /** AgentRunCreate */
         AgentRunCreate: {
             /**
@@ -7136,6 +7387,8 @@ export interface components {
             provider?: string | null;
             /** Model */
             model?: string | null;
+            /** Agent Profile Id */
+            agent_profile_id?: string | null;
         };
         /**
          * AgentRunInputRequest
@@ -20300,6 +20553,321 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProgressResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workspace_profiles_api_workspaces__workspace_id__agent_profiles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentProfileListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_workspace_profile_api_workspaces__workspace_id__agent_profiles_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentProfileCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentProfileRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workspace_profile_api_workspaces__workspace_id__agent_profiles__profile_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentProfileRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_workspace_profile_api_workspaces__workspace_id__agent_profiles__profile_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_workspace_profile_api_workspaces__workspace_id__agent_profiles__profile_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentProfileUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentProfileRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    copy_workspace_profile_api_workspaces__workspace_id__agent_profiles__profile_id__copy_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentProfileCopyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentProfileRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_platform_profiles_api_agent_profiles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentProfileListResponse"];
+                };
+            };
+        };
+    };
+    get_platform_profile_api_agent_profiles__profile_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentProfileRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_platform_profile_api_agent_profiles__profile_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_platform_profile_api_agent_profiles__profile_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentProfileUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentProfileRead"];
                 };
             };
             /** @description Validation Error */

@@ -135,6 +135,28 @@ class TestTeamMissionEntry:
         assert cfg["model"] == "opus-4"
 
     @pytest.mark.asyncio
+    async def test_main_agent_config_extracts_agent_profile_id(
+        self, db_session: AsyncSession
+    ) -> None:
+        """task-12：main_agent_config.agent_profile_id 合法 UUID → 原样返回；缺失/非法 → None。"""
+        pid = uuid.uuid4()
+        cfg_ok = _resolve_main_agent_config(
+            {"agent_type": "claude_code", "agent_profile_id": str(pid)}
+        )
+        assert cfg_ok["agent_profile_id"] == pid
+
+        # 缺失 → None（不阻断兜底链）
+        cfg_missing = _resolve_main_agent_config({"provider": "claude"})
+        assert cfg_missing["agent_profile_id"] is None
+
+        # None 输入 → None
+        assert _resolve_main_agent_config(None)["agent_profile_id"] is None
+
+        # 非法字符串 → None（不抛错，走原路径零回归）
+        cfg_bad = _resolve_main_agent_config({"agent_profile_id": "not-a-uuid"})
+        assert cfg_bad["agent_profile_id"] is None
+
+    @pytest.mark.asyncio
     async def test_orchestrator_run_writes_mission_id_for_converge(
         self, db_session: AsyncSession
     ) -> None:

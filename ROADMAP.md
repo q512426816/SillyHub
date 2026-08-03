@@ -4,7 +4,7 @@
 > 维护规则：每次 `sillyspec-archive` 归档变更时同步更新「已完成里程碑」与「当前活跃」两节。
 > 详细变更规格见 `.sillyspec/changes/`（活跃）与 `.sillyspec/changes/archive/`（历史）。
 
-最近更新：2026-07-12
+最近更新：2026-08-02
 
 ---
 
@@ -44,6 +44,10 @@
 - workspace-config-card、daemon-client-spec-sync-strategy、daemon-filesystem-policy（FilesystemPolicyEngine）
 - spec-import-async-and-change-reparse、runtime-allowed-roots-config、scan-docs-tree-search
 - **2026-07-12-team-main-agent-orchestration**（v2，接管 v1 `2026-06-19-multi-agent-orchestration`）：team 主 agent 真 agent 动态编排（daemon interactive lease + MCP tool 反向调 backend）+ worker 用户预设 + 三重收敛（worker 全终态/主 agent 自主/budget 硬截断 OR）+ GLM fallback + mode=single 零回归。daemon 内置 stdio MCP server 5 tool（P0 鉴权 apiKey X-API-Key）+ backend OrchestratorService/mcp_tools 5 endpoint + frontend TeamConfigPanel/team-progress。12 commit main（c41608be~79417e53 + P1 7369903b）。遗留：AC-9 e2e 真部署验证 + task-04b per-worker worktree 拆新变更
+
+### 2026-08 · AgentProfile 配置层
+
+- **agent-profile-layer**（2026-08-02）：引入智能体档案配置层，作为现有 daemon→workspace 架构的**增强层非替代层**——不改 daemon-entity-binding、不动 WorkspaceMemberRuntime 绑定、不引入运行时实例。daemon → agent profile → workspace 三层：`agent_profiles` 表（visibility 三级 private/workspace/platform + provider/model/system_prompt/mcp_refs/skill_refs/allowed_roots_overlay/tool_policy_id 引用 + is_system_default）+ `AgentRun` 加 `agent_profile_id`/`agent_profile_snapshot` + `Workspace` 加 `default_agent_profile_id`。backend `AgentProfileService` 提供 CRUD/copy/三级 visibility 过滤/`resolve_profile` 软约束兜底（run→workspace.default→平台默认→None）/`compute_effective_allowed_roots`（daemon∩overlay，D-013 拒超集）。dispatch 三入口注入 profile 快照 + `target_provider=profile.provider ?? workspace.default_agent`（D-014 不反向选 daemon）；`get_execution_context` prepend profile.system_prompt 到 claudeMd（D-012@v2，渲染管线零改动）；`build_claim_payload` 透传 mcp_refs/skill_refs/effective_allowed_roots（camelCase+snake_case 双写）。daemon batch（task-runner）+ interactive（session-manager）双路径消费 profile：`frozenAllowedRoots`/`allowedRootsProvider` 用下推 effective 值，MCP/技能取子集；`mcp-config.ts` 加第三层过滤 + type 强制 stdio（D-017）。startup idempotent 补种两默认档案（D-015）。profile_id/snapshot 全 nullable，null 零新增查询（C-07 断言保护 PPM）。遗留：batch 路径 MCP 子集完整接线（task-09 gap）需新基础设施→独立 change。
 
 ---
 

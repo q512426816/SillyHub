@@ -78,6 +78,12 @@ async def db_engine() -> AsyncIterator[Any]:
     # Registering feature models attaches their tables to BaseModel.metadata.
     from app.modules.admin import model as _admin_model  # noqa: F401
     from app.modules.agent import model as _agent_model  # noqa: F401
+
+    # task-02（2026-08-02-agent-profile-layer）建 agent_profiles 表 + AgentRun 加
+    # agent_profile_id FK→agent_profiles.id。必须在 create_all 前注册 profile 模型，
+    # 否则 FK 解析报 NoReferencedTableError('agent_profiles')，所有创建 AgentRun 行的
+    # 测试（含 daemon lease claim payload 测试）在隔离运行时 collection-error。
+    from app.modules.agent.profile import model as _agent_profile_model  # noqa: F401
     from app.modules.auth import model as _auth_model  # noqa: F401
     from app.modules.change import model as _change_model  # noqa: F401
     from app.modules.daemon import model as _daemon_model  # noqa: F401

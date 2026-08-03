@@ -49,6 +49,9 @@ import {
   extractShellWritePaths,
   type ShellKind,
 } from '../policy/shell-paths.js';
+// task-10（C-12 / D-017）：主 agent MCP 注入按 profile.mcpRefs 子集过滤（mergeMcpConfigs
+// 第三层）。McpConfig 用于把 driver 契约的 MCP 配置表转成 mergeMcpConfigs 入参形态。
+import { mergeMcpConfigs, type McpConfig } from '../mcp-config.js';
 import type {
   CreateSessionInput,
   InjectResult,
@@ -231,6 +234,24 @@ export interface MainAgentMcpContext {
    * restore 路径从 ``PersistedSessionRecord.stage`` 归一化填入。
    */
   stage?: string;
+  /**
+   * task-10（C-12 / FR-10）：profile 限定的 MCP server name 子集。
+   *
+   * create 路径从 ``CreateSessionInput.mcpRefs``、restore 路径从
+   * ``PersistedSessionRecord.mcpRefs`` 归一化填入。非空时 ``_resolveMainAgentMcp``
+   * 对 ``mainAgentMcpConfigProvider`` 返回的配置表按此 ∩ 过滤（mergeMcpConfigs
+   * 第三层），只让 profile 引用的 MCP server 被 agent discover。undefined/空 →
+   * 不过滤（FR-15）。
+   */
+  mcpRefs?: string[];
+  /** task-10（C-12）：profile 限定的技能子集（承载，daemon 侧 link 收紧用）。 */
+  skillRefs?: string[];
+  /**
+   * task-10（C-12 / D-013）：profile 收紧后的 allowed_roots（写守卫 fallback 用）。
+   * create/restore 路径归一化填入。非空时 ``_wrapWithWriteGuard`` fallback 用此替代
+   * provider 值（∩ 物理兜底）。undefined/空 → 用 provider 值（FR-15）。
+   */
+  effectiveAllowedRoots?: string[];
 }
 
 /**
@@ -839,6 +860,13 @@ export class SessionManager {
       subagentDepth: new Map(), // task-02 / D-007@v1：子代理 depth 追踪。
       // task-06：lease stage 持久化（snapshotPersistable 输出，恢复用）。
       stage: input.stage,
+      // task-10（C-12）：profile 字段承载到 state（写守卫用 effectiveAllowedRoots；
+      // mcpRefs/skillRefs 持久化恢复用）。undefined → 不写键（FR-15 行为同今天）。
+      ...(input.mcpRefs !== undefined ? { mcpRefs: input.mcpRefs } : {}),
+      ...(input.skillRefs !== undefined ? { skillRefs: input.skillRefs } : {}),
+      ...(input.effectiveAllowedRoots !== undefined
+        ? { effectiveAllowedRoots: input.effectiveAllowedRoots }
+        : {}),
     };
     this._store.set(input.sessionId, state);
 
@@ -855,6 +883,8 @@ export class SessionManager {
       // server 5 tool）。仅 isMainAgentSession 判定为主 agent 时调 provider 取配置；
       // provider 未注入 / 返回 undefined → 不注入（普通会话零回归）。
       //谓词/provider 签名用 MainAgentMcpContext（create + restore 共用），从 input 归一化。
+      //task-10（C-12）：profile 字段（mcpRefs/skillRefs/effectiveAllowedRoots）随 ctx
+      //传入 _resolveMainAgentMcp 供 mcpRefs 过滤；effectiveAllowedRoots 写 state 供写守卫。
       const mainAgentMcp = this._resolveMainAgentMcp({
         sessionId: input.sessionId,
         leaseId: input.leaseId,
@@ -862,6 +892,9 @@ export class SessionManager {
         cwd: input.cwd,
         model: input.model,
         stage: input.stage,
+        mcpRefs: input.mcpRefs,
+        skillRefs: input.skillRefs,
+        effectiveAllowedRoots: input.effectiveAllowedRoots,
       });
       const driverOpts = this._buildDriverOptions(state, {
         exePath,
@@ -922,7 +955,43 @@ export class SessionManager {
     | Record<string, McpServerConfigForDriver>
     | undefined {
     if (this._isMainAgentSession?.(ctx) !== true) return undefined;
-    return this._mainAgentMcpConfigProvider?.(ctx);
+    const config = this._mainAgentMcpConfigProvider?.(ctx);
+    if (!config) return undefined;
+    // task-10（C-12 / FR-10 / D-017）：profile.mcpRefs 子集过滤。
+    // 非空 mcpRefs 时对 provider 返回的 MCP 配置表按此 ∩ 过滤（mergeMcpConfigs 第三层，
+    // 与 batch task-runner 同源逻辑）。cli.ts mainAgentMcpConfigProvider 产出的配置表
+    // 已含 daemon 内置 MCP server（sillyhub-daemon）；若 profile.mcpRefs 未列入该 server，
+    // 它会被剔除——这是 profile 收紧语义的正确表现（profile 只允许它声明的子集）。
+    // 空数组/undefined → 不过滤（FR-15 行为同今天，provider 原样返回）。
+    const mcpRefs = ctx.mcpRefs;
+    if (!mcpRefs || mcpRefs.length === 0) return config;
+    // 转 McpConfig 入参（补 type:'stdio' + args 默认 []，满足 mergeMcpConfigs 类型 +
+    // D-017 stdio 校验）。McpServerConfigForDriver 与 McpServerConfig 结构兼容（command/
+    // args/env 同名同义），只是 args 可选 vs 必填、type 缺省——这里归一化补齐。
+    const mcpConfigInput: McpConfig = {
+      mcpServers: Object.fromEntries(
+        Object.entries(config).map(([name, cfg]) => [
+          name,
+          {
+            type: 'stdio' as const,
+            command: cfg.command,
+            args: cfg.args ?? [],
+            ...(cfg.env ? { env: cfg.env } : {}),
+          },
+        ]),
+      ),
+    };
+    const merged = mergeMcpConfigs([], mcpRefs, mcpConfigInput);
+    // 转回 driver 契约类型（过滤后子集）。
+    const result: Record<string, McpServerConfigForDriver> = {};
+    for (const [name, cfg] of Object.entries(merged.config.mcpServers)) {
+      result[name] = {
+        command: cfg.command,
+        ...(cfg.args ? { args: cfg.args } : {}),
+        ...(cfg.env ? { env: cfg.env } : {}),
+      };
+    }
+    return Object.keys(result).length > 0 ? result : undefined;
   }
 
   /**
@@ -1116,7 +1185,24 @@ export class SessionManager {
       // fallback（policyEngine 未注入，向后兼容 / 测试）：复用与主路径相同的路径提取
       // （policy/shell-paths）+ isPathUnderAnyRoot 边界校验（迁移自 write-guard.ts，
       // task-15 删 write-guard.ts）。allowedRootsProvider 空数组 → 视为未启用放行。
-      const roots = this._allowedRootsProvider?.() ?? [];
+      //
+      // task-10（C-12 / D-013 / FR-11）：profile.effectiveAllowedRoots 存在则替代
+      // provider 值，∩ 物理 provider 兜底（防 backend 算的 effective 含已失效/越界路径；
+      // backend 服务端已校验 overlay⊆daemon_roots，这里仅防御 stale 缓存）。provider
+      // 为空（未注入）时直接信任 effective（backend 已是 daemon∩overlay 的权威交集）。
+      // effective undefined/空 → 用原 provider 值（FR-15 行为同今天）。
+      const providerRoots = this._allowedRootsProvider?.() ?? [];
+      const stateForRoots = this._store.get(sessionId);
+      const effectiveRoots = stateForRoots?.effectiveAllowedRoots;
+      let roots: string[];
+      if (effectiveRoots && effectiveRoots.length > 0) {
+        roots =
+          providerRoots.length > 0
+            ? effectiveRoots.filter((p) => isPathUnderAnyRoot(p, providerRoots))
+            : effectiveRoots;
+      } else {
+        roots = providerRoots;
+      }
       if (roots.length > 0) {
         const writePaths = this._extractWritePathsForTool(toolName, toolInput);
         const outside = writePaths.find((p) => !isPathUnderAnyRoot(p, roots));
@@ -1961,6 +2047,17 @@ export class SessionManager {
       if (state.stage) {
         rec.stage = state.stage;
       }
+      // task-10（C-12）：profile 字段持久化（恢复后重新过滤 MCP / 写守卫继续收紧）。
+      // 仅对应字段非 undefined 时写（profile=None 的 session 不写，FR-15）。
+      if (state.mcpRefs !== undefined) {
+        rec.mcpRefs = state.mcpRefs;
+      }
+      if (state.skillRefs !== undefined) {
+        rec.skillRefs = state.skillRefs;
+      }
+      if (state.effectiveAllowedRoots !== undefined) {
+        rec.effectiveAllowedRoots = state.effectiveAllowedRoots;
+      }
       out.push(rec);
     }
     return out;
@@ -2034,6 +2131,13 @@ export class SessionManager {
       subagentDepth: new Map(), // task-02 / D-007@v1：恢复后从空开始（depth 不持久化）。
       // task-06：恢复主 agent stage（重新注入 MCP tool 用）。
       stage: record.stage,
+      // task-10（C-12）：恢复 profile 字段（mcpRefs 重新过滤主 agent MCP；skillRefs
+      // 承载；effectiveAllowedRoots 写守卫继续收紧）。undefined → 不写键（FR-15）。
+      ...(record.mcpRefs !== undefined ? { mcpRefs: record.mcpRefs } : {}),
+      ...(record.skillRefs !== undefined ? { skillRefs: record.skillRefs } : {}),
+      ...(record.effectiveAllowedRoots !== undefined
+        ? { effectiveAllowedRoots: record.effectiveAllowedRoots }
+        : {}),
     };
     this._store.set(state.sessionId, state);
 
@@ -2050,6 +2154,10 @@ export class SessionManager {
         cwd: record.cwd,
         model: record.model,
         stage: record.stage,
+        // task-10（C-12）：恢复时重新按 profile.mcpRefs 过滤主 agent MCP 注入。
+        mcpRefs: record.mcpRefs,
+        skillRefs: record.skillRefs,
+        effectiveAllowedRoots: record.effectiveAllowedRoots,
       });
       const driverOpts = this._buildDriverOptions(state, {
         exePath: exe,

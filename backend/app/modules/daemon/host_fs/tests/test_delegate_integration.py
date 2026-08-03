@@ -53,14 +53,22 @@ def _selected_metadata() -> Any:
     from sqlalchemy import MetaData
 
     from app.models.base import BaseModel
+    from app.modules.agent.profile import model as _agent_profile  # noqa: F401
     from app.modules.auth import model as _auth  # noqa: F401
     from app.modules.daemon import model as _daemon  # noqa: F401
+    from app.modules.tool_gateway.tool_policy import ToolPolicy  # noqa: F401
     from app.modules.workspace import model as _ws  # noqa: F401
     from app.modules.workspace.member_runtimes import model as _wmr  # noqa: F401
 
+    # task-02（2026-08-02-agent-profile-layer）Workspace 加 default_agent_profile_id
+    # FK→agent_profiles.id；AgentProfile 又 FK→tool_policies.id / users.id / workspaces.id。
+    # 本测试自建 selected-metadata 建表，必须把 FK 闭包内的表都纳入 needed，否则
+    # create_all 报 NoReferencedTableError（同根 conftest:86 的 import 注册思路）。
     full = BaseModel.metadata
     needed = {
         "users",
+        "agent_profiles",
+        "tool_policies",
         "daemon_instances",
         "daemon_runtimes",
         "workspaces",

@@ -155,6 +155,43 @@ async def _inject_provider_config(
         payload["model"] = override_model
 
 
+# task-07 / C-13：claim payload 透传的 profile 字段（snake_case, camelCase）。
+# 来源：task-06 ``AgentService._apply_profile_to_lease`` 写入 lease.metadata（service.py:720）。
+# system_prompt 不在此列——注入走 task-06 的 claudeMd prepend（design §7 / D-012@v2），
+# 由 ``get_execution_context`` 构造响应时 prepend 到 claudeMd 顶部，不经 context.py。
+_PROFILE_PAYLOAD_FIELDS: tuple[tuple[str, str], ...] = (
+    ("mcp_refs", "mcpRefs"),
+    ("skill_refs", "skillRefs"),
+    ("effective_allowed_roots", "effectiveAllowedRoots"),
+    ("profile_version", "profileVersion"),
+)
+
+
+def _apply_profile_passthrough(lease_meta: dict, payload: dict) -> None:
+    """task-07 / C-13：从 ``lease.metadata`` 读 task-06 写入的 profile 字段，双写
+    (camelCase + snake_case) 进 claim payload。
+
+    透传四键（design §6 生命周期契约表 / §9）：
+
+    * ``mcp_refs`` / ``skill_refs``：profile 引用集，daemon 端按此取子集（task-09/10）。
+    * ``effective_allowed_roots``：``daemon ∩ profile.allowed_roots_overlay``（D-013，
+      backend 算交集下推）→ daemon ``frozenAllowedRoots`` / ``allowedRootsProvider`` 采用。
+    * ``profile_version``：快照版本（审计 / daemon 保鲜比对）。
+
+    **无键则不含**：逐键 ``in`` 守护，``lease.metadata`` 缺这些键时 payload 不加（profile=None
+    的 run 行为零变化，向后兼容）。task-06 写入时四键成组落盘，逐键守护仍保留——防御未来
+    部分写入 / 旧 lease 半迁移场景。
+
+    双写惯例对齐 daemon ``execPayload`` 归一化两端字段名（参考现有 claudeMd/claude_md、
+    specRoot/spec_root、rootPath/root_path 双写；daemon.ts:3347）。
+    """
+    for snake, camel in _PROFILE_PAYLOAD_FIELDS:
+        if snake in lease_meta:
+            value = lease_meta[snake]
+            payload[snake] = value
+            payload[camel] = value
+
+
 async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> dict:
     """Build execution context payload for a claimed lease.
 
@@ -213,6 +250,11 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
         # → 主 agent 看不到 worker dispatch tool（e2e 2026-07-12 发现）。
         if lease_meta.get("stage") is not None:
             payload["stage"] = lease_meta["stage"]
+        # task-07 / C-13：透传 profile 字段（mcp_refs/skill_refs/effective_allowed_roots/
+        # profile_version，双写 camelCase+snake_case）。置于 transport 分支之前，让 tar /
+        # shared 两路 return 都携带（system_prompt 不在此，走 task-06 claudeMd prepend）。
+        # 无键（profile=None / 旧 lease）→ payload 不含，零回归。
+        _apply_profile_passthrough(lease_meta, payload)
         # ===== task-03（2026-06-23-spec-transport-tar-sync）：transport 分支 =====
         # D-007@v1：scan/stage 走 interactive lease，tar 模式 spec 同步在 interactive 路径
         # （daemon _startInteractiveSession pull + onSessionEnd sync）。backend 侧开关点：
@@ -474,4 +516,8 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
         payload,
         agent_kind_raw=agent_run.agent_type,
     )
+    # task-07 / C-13：batch 路同 interactive 透传 profile 字段（双写 camelCase+snake_case）。
+    # lease_meta 在上方 :400 行重新绑定为 ``lease.metadata_ or {}``，与此处同一份数据；
+    # 无键（profile=None / 旧 lease）→ payload 不含，零回归。
+    _apply_profile_passthrough(lease_meta, payload)
     return payload

@@ -6509,6 +6509,480 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/agent-profiles": {
+      "get": {
+        "tags": [
+          "agent-profiles"
+        ],
+        "summary": "List Workspace Profiles",
+        "description": "列出 actor 在该 workspace 可见的档案（platform 全档 + workspace 级成员可\n见档 + actor 自己的 private 档）。",
+        "operationId": "list_workspace_profiles_api_workspaces__workspace_id__agent_profiles_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProfileListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "agent-profiles"
+        ],
+        "summary": "Create Workspace Profile",
+        "description": "在该 workspace 下新建档案。visibility 决定归属与建案权（service.create）：\nworkspace 级需成员（已由 WORKSPACE_WRITE 依赖保证），platform 级需 admin\n（service 内判 is_platform_admin），private 任何已认证用户可建。",
+        "operationId": "create_workspace_profile_api_workspaces__workspace_id__agent_profiles_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentProfileCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProfileRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/agent-profiles/{profile_id}": {
+      "get": {
+        "tags": [
+          "agent-profiles"
+        ],
+        "summary": "Get Workspace Profile",
+        "description": "取单档。service.get 自带三级 visibility 读校验：不存在→404，不可见→403。",
+        "operationId": "get_workspace_profile_api_workspaces__workspace_id__agent_profiles__profile_id__get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProfileRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "agent-profiles"
+        ],
+        "summary": "Update Workspace Profile",
+        "description": "部分更新（version +1）。仅传显式字段；改 visibility→platform 需 admin\n（service 内判）。service.update 自带改权限校验（owner/成员/admin）。",
+        "operationId": "update_workspace_profile_api_workspaces__workspace_id__agent_profiles__profile_id__patch",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentProfileUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProfileRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "agent-profiles"
+        ],
+        "summary": "Delete Workspace Profile",
+        "description": "删除。系统默认档案被删后由 startup hook 补种（task-11）。service.delete\n自带改权限校验。",
+        "operationId": "delete_workspace_profile_api_workspaces__workspace_id__agent_profiles__profile_id__delete",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/agent-profiles/{profile_id}/copy": {
+      "post": {
+        "tags": [
+          "agent-profiles"
+        ],
+        "summary": "Copy Workspace Profile",
+        "description": "复制源档内容到 actor 名下新档（Non-Goals：复制替代 N:N 活引用共享）。\n新档默认 private + 无 workspace；可指定 visibility/workspace（建案权经\nservice.create 复用）。",
+        "operationId": "copy_workspace_profile_api_workspaces__workspace_id__agent_profiles__profile_id__copy_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentProfileCopyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProfileRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-profiles": {
+      "get": {
+        "tags": [
+          "agent-profiles"
+        ],
+        "summary": "List Platform Profiles",
+        "description": "列出 platform 可见档案（+ actor 自己的 private 档）。任意登录用户可调\n（platform 级档案全平台可见，D-009）。",
+        "operationId": "list_platform_profiles_api_agent_profiles_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProfileListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-profiles/{profile_id}": {
+      "get": {
+        "tags": [
+          "agent-profiles"
+        ],
+        "summary": "Get Platform Profile",
+        "description": "平台维度取单档（仅 admin）。service.get 自带三级 visibility 读校验。",
+        "operationId": "get_platform_profile_api_agent_profiles__profile_id__get",
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProfileRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "agent-profiles"
+        ],
+        "summary": "Update Platform Profile",
+        "description": "平台维度更新（仅 admin，用于编辑平台预置档案）。version +1。",
+        "operationId": "update_platform_profile_api_agent_profiles__profile_id__patch",
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentProfileUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProfileRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "agent-profiles"
+        ],
+        "summary": "Delete Platform Profile",
+        "description": "平台维度删除（仅 admin）。系统默认档案被删后由 startup hook 补种（task-11）。",
+        "operationId": "delete_platform_profile_api_agent_profiles__profile_id__delete",
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/runtimes/{runtime_id}/pending-change-writes": {
       "get": {
         "tags": [
@@ -23687,6 +24161,417 @@
         ],
         "title": "AgentKillResponse"
       },
+      "AgentProfileCopyRequest": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "visibility": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentProfileVisibility"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "AgentProfileCopyRequest",
+        "description": "复制请求。源档内容（provider/model/system_prompt/mcp/skill/overlay）原样\n复制，新档 owner=actor、version=1、is_system_default=False（service.copy）。\n``name`` 省略时取「{原名}（副本）」，``visibility`` 省略时 private。"
+      },
+      "AgentProfileCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/AgentProfileVisibility",
+            "default": "private"
+          },
+          "provider": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Provider"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Prompt"
+          },
+          "tool_policy_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Policy Id"
+          },
+          "mcp_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mcp Refs"
+          },
+          "skill_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skill Refs"
+          },
+          "allowed_roots_overlay": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Roots Overlay"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "provider"
+        ],
+        "title": "AgentProfileCreate",
+        "description": "建档请求。``visibility`` 决定 workspace_id 归属与建案权（service.create\n内校验）：private=owner 自用 / workspace=指定 ws 成员可建 / platform=仅 admin。\n``provider`` 必填（作 target_provider，D-014）。"
+      },
+      "AgentProfileListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentProfileRead"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AgentProfileListResponse"
+      },
+      "AgentProfileRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "owner_user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner User Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/AgentProfileVisibility"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Prompt"
+          },
+          "tool_policy_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Policy Id"
+          },
+          "mcp_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mcp Refs"
+          },
+          "skill_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skill Refs"
+          },
+          "allowed_roots_overlay": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Roots Overlay"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "is_system_default": {
+            "type": "boolean",
+            "title": "Is System Default"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "owner_user_id",
+          "workspace_id",
+          "visibility",
+          "provider",
+          "model",
+          "system_prompt",
+          "tool_policy_id",
+          "mcp_refs",
+          "skill_refs",
+          "allowed_roots_overlay",
+          "version",
+          "is_system_default",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AgentProfileRead",
+        "description": "档案响应 DTO。``from_attributes`` 直接读 ORM 行（visibility 经 Pydantic\n还原为 :class:`AgentProfileVisibility` 枚举，DB 存 String）。"
+      },
+      "AgentProfileUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "visibility": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentProfileVisibility"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Prompt"
+          },
+          "tool_policy_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Policy Id"
+          },
+          "mcp_refs": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mcp Refs"
+          },
+          "skill_refs": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Refs"
+          },
+          "allowed_roots_overlay": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Roots Overlay"
+          }
+        },
+        "type": "object",
+        "title": "AgentProfileUpdate",
+        "description": "部分更新请求。全字段可选；router 用 ``exclude_unset=True`` 仅传显式提供\n的字段（省略=不动，显式 null=清空）。``workspace_id`` 不经此 DTO 暴露（跨\nws 移动为 admin 专能，service 仍支持但无 API 入口，防越权）。"
+      },
+      "AgentProfileVisibility": {
+        "type": "string",
+        "enum": [
+          "private",
+          "workspace",
+          "platform"
+        ],
+        "title": "AgentProfileVisibility",
+        "description": "智能体档案三级可见性（D-009）。\n\n``StrEnum`` 成员即 ``str``：写入 DB 落 ``.value``，读出由 Pydantic 自动\n还原为枚举。DB 层 String(20)，与 status 等列同风格免后续加值迁移。"
+      },
       "AgentRunCreate": {
         "properties": {
           "task_id": {
@@ -23763,6 +24648,18 @@
               }
             ],
             "title": "Model"
+          },
+          "agent_profile_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Profile Id"
           }
         },
         "type": "object",

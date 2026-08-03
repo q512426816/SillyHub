@@ -43,17 +43,27 @@ _DEFAULT_PROVIDER = "claude"
 
 def _resolve_main_agent_config(
     main_agent_config: dict[str, Any] | None,
-) -> dict[str, str]:
-    """从 main_agent_config 抽出 agent_type / provider / model，缺省兜底。
+) -> dict[str, Any]:
+    """从 main_agent_config 抽出 agent_type / provider / model / agent_profile_id，缺省兜底。
 
-    main_agent_config 形如 ``{agent_type, provider, model}``（D-003@v2）。任一字段
-    缺失走默认值，保证主 agent run 永远有可执行的 agent_type（NOT NULL 约束）。
+     main_agent_config 形如 ``{agent_type, provider, model, agent_profile_id}``
+    （D-003@v2 + 2026-08-02-agent-profile-layer task-12）。agent_type/provider/model
+     任一缺失走默认值，保证主 agent run 永远有可执行的 agent_type（NOT NULL 约束）。
+     agent_profile_id 缺失/非法 → None（软约束兜底，design §8）。
     """
     cfg = main_agent_config or {}
+    raw_profile_id = cfg.get("agent_profile_id")
+    resolved_profile_id: uuid.UUID | None = None
+    if raw_profile_id:
+        try:
+            resolved_profile_id = uuid.UUID(str(raw_profile_id))
+        except (ValueError, AttributeError, TypeError):
+            resolved_profile_id = None
     return {
         "agent_type": str(cfg.get("agent_type") or _DEFAULT_AGENT_TYPE),
         "provider": str(cfg.get("provider") or _DEFAULT_PROVIDER),
         "model": str(cfg.get("model")) if cfg.get("model") else "",
+        "agent_profile_id": resolved_profile_id,
     }
 
 
@@ -165,6 +175,10 @@ class OrchestratorService:
             status="pending",
             role=_ORCHESTRATOR_ROLE,
             objective=objective,
+            # task-12 / 2026-08-02-agent-profile-layer：主 agent run 绑定用户指定的
+            # AgentProfile（来自 main_agent_config.agent_profile_id，软约束兜底 §8）。
+            # None → 不绑定，dispatch 走 workspace.default_agent_profile_id 兜底链。
+            agent_profile_id=cfg["agent_profile_id"],
         )
         self._session.add(main_run)
         await self._session.commit()
@@ -185,6 +199,9 @@ class OrchestratorService:
                 prompt=render_orchestrator_prompt(mission, main_run),
                 stage=_ORCHESTRATOR_ROLE,
                 read_only=False,
+                # task-12：透传主 agent profile id（task-05 dispatch_to_daemon 已接参，
+                # 用于 target_provider 解析 + lease metadata 透传）。None 走原路径零回归。
+                agent_profile_id=cfg["agent_profile_id"],
             )
         except NoOnlineDaemonError as exc:
             main_run.error_code = "no_online_daemon"

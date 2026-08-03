@@ -3120,6 +3120,13 @@ export class Daemon {
         // SessionManager isMainAgentSession 谓词据此判定 → 注入 daemon MCP server 5 tool。
         // 普通会话 stage 未传/其他值 → 不注入（零回归）。
         stage: execPayload.stage,
+        // task-10（C-12 / FR-10/11）：AgentProfile 三字段透传 SessionManager.create。
+        // execPayload 已归一化（camelCase 优先 snake_case 兜底）；SessionManager 据
+        // mcpRefs ∩ 过滤主 agent MCP 注入，skillRefs 承载（daemon spawn 前 link 子集），
+        // effectiveAllowedRoots 写守卫 fallback 替代 provider 值。undefined → FR-15 不过滤。
+        mcpRefs: execPayload.mcpRefs,
+        skillRefs: execPayload.skillRefs,
+        effectiveAllowedRoots: execPayload.effectiveAllowedRoots,
       });
       // task-09（D-007@v2 候选 B）：借用 session 登记沙箱根，激活 SessionManager
       // 按 lease 隔离的只读 policy（写守卫只允许落沙箱内，不命中 lender runtime 缓存）。
@@ -3443,6 +3450,23 @@ export class Daemon {
         (rawExec.provider_config as LeaseCtx['provider_config'] | undefined) ??
         (rawExec.providerConfig as LeaseCtx['provider_config'] | undefined) ??
         payload.provider_config,
+      // task-10（C-12 / FR-10/11）：AgentProfile 三字段透传。context.py task-07
+      // 双写 camelCase+snake_case 到 claim payload。camelCase 优先、snake_case 兜底，
+      // 与 stage_meta/provider_config 等惯例一致。interactive 路径经 execPayload 直读
+      // → _startInteractiveSession → CreateSessionInput；batch 经 ctx 透传 task-runner。
+      // 缺省/旧 lease 无键 → undefined → SessionManager/task-runner 按不过滤/原值兜底（FR-15）。
+      mcpRefs:
+        (rawExec.mcpRefs as string[] | undefined) ??
+        (rawExec.mcp_refs as string[] | undefined) ??
+        payload.mcpRefs,
+      skillRefs:
+        (rawExec.skillRefs as string[] | undefined) ??
+        (rawExec.skill_refs as string[] | undefined) ??
+        payload.skillRefs,
+      effectiveAllowedRoots:
+        (rawExec.effectiveAllowedRoots as string[] | undefined) ??
+        (rawExec.effective_allowed_roots as string[] | undefined) ??
+        payload.effectiveAllowedRoots,
     };
 
     // task-04（D-002@v3）：kind 分流。在 fetch/startLease 之前——interactive 不走
@@ -3530,6 +3554,13 @@ export class Daemon {
       workspaceId: execPayload.workspaceId,
       latestSpecVersion: execPayload.latestSpecVersion,
       specStrategy: execPayload.specStrategy,
+      // task-10（C-12 / FR-10/11）：AgentProfile 三字段透传 batch 路径 task-runner
+      //（task-runner.ts frozenAllowedRoots 采用 effectiveAllowedRoots；mcpRefs/skillRefs
+      // 由 task-runner 在 spawn 前取子集）。claim payload 是 batch 路径唯一源（无 fetch
+      // 覆盖——execution-context 端点尚未透传 profile 字段，保持 execPayload 直读）。
+      mcpRefs: execPayload.mcpRefs,
+      skillRefs: execPayload.skillRefs,
+      effectiveAllowedRoots: execPayload.effectiveAllowedRoots,
     };
 
     const taskResult: TaskRunnerResult = await this._taskRunner!.runLease(ctx);

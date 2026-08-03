@@ -343,6 +343,12 @@ export class ClaudeSdkDriver implements InteractiveDriver {
     // SDK spawn 各 MCP server 子进程，主 agent discover 5 tool（dispatch_worker /
     // get_worker_result / list_workers / converge_mission / report_progress）。
     // 普通会话 opts.mcpServers=undefined → 不写 options.mcpServers → SDK 走默认（零回归）。
+    //
+    // task-10（C-12 / FR-10）：opts.mcpServers 已是 profile.mcpRefs 过滤后的子集——
+    // SessionManager._resolveMainAgentMcp 在调 mainAgentMcpConfigProvider 取到完整配置后，
+    // 经 mergeMcpConfigs 第三层 ∩ mcpRefs 收紧，只保留 profile 引用的 server。driver
+    // 不二次过滤（单一真相源在 SessionManager），原样透传过滤后子集给 SDK options.mcpServers。
+    // mcpRefs undefined/空 → SessionManager 不过滤 → opts.mcpServers 是全量（FR-15）。
     if (opts.mcpServers !== undefined) {
       options.mcpServers = opts.mcpServers;
     }

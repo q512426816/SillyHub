@@ -341,6 +341,11 @@ class RunPlacementService:
         # slug 兜底 mirror，name 仅作日志可读性）。
         workspace_name: str | None = None,
         workspace_slug: str | None = None,
+        # task-05（2026-08-02-agent-profile-layer / D-014）：run 绑定的 AgentProfile id。
+        # 由上层 task-06 service.py 经 design §8 兜底链解析后传入；非空时其 provider
+        # 优先作 target_provider（不改 daemon 选择顺序，binding 仍为唯一真相源）。
+        # None = 未绑 profile，**零新增查询**（C-07），走原 workspace.default_agent 路径。
+        agent_profile_id: uuid.UUID | None = None,
     ) -> uuid.UUID | None:
         """Dispatch an AgentRun to the user's daemon.
 
@@ -361,6 +366,7 @@ class RunPlacementService:
             workspace_id=workspace_id,
             user_id=user_id,
             provider=provider,
+            agent_profile_id=agent_profile_id,
         )
         if runtime is None:
             log.warning(
@@ -952,6 +958,7 @@ class RunPlacementService:
         workspace_id: uuid.UUID | None,
         user_id: uuid.UUID,
         provider: str | None,
+        agent_profile_id: uuid.UUID | None = None,
     ) -> dict | None:
         """Resolve the runtime a dispatch should target.
 
@@ -981,9 +988,14 @@ class RunPlacementService:
             raise NoOnlineDaemonError(user_id=user_id)
 
         # D-008@v1（task-06）：提前解析 target_provider，供自有解析 + 借用 helper 共用。
-        # provider 调用方解析（task-05 遗留契约）：caller override 优先，否则 workspace
-        # .default_agent。原 Step 2 逻辑前移，零回归（同样的解析顺序与 SQL）。
-        target_provider = provider
+        # task-05（2026-08-02-agent-profile-layer / D-014）：target_provider 优先级改为
+        #   profile.provider > caller provider > workspace.default_agent
+        # profile.provider 优先体现「档案决定供应商」（不改 daemon 选择顺序，binding 仍为
+        # 唯一真相源；profile.provider 仅影响 runtime 匹配 + borrow lender 选择）。
+        # agent_profile_id 由上层 task-06 经 §8 兜底链解析后传入；None 时 _resolve_profile_provider
+        # **零查询**直接返回 None（C-07：null 路径与今天 100% 一致——同样的解析顺序与 SQL）。
+        profile_provider = await self._resolve_profile_provider(agent_profile_id)
+        target_provider = profile_provider or provider
         if target_provider is None:
             target_provider = await self._resolve_workspace_default_agent(workspace_id)
 
@@ -1069,6 +1081,53 @@ class RunPlacementService:
     # ------------------------------------------------------------------
     # Daemon-entity resolution helpers (task-08 / D-004 / D-005 / D-008)
     # ------------------------------------------------------------------
+
+    async def _resolve_profile_provider(
+        self,
+        agent_profile_id: uuid.UUID | None,
+    ) -> str | None:
+        """task-05（2026-08-02-agent-profile-layer / D-014）：解析 profile.provider 作
+         target_provider（不反向选 daemon）。
+
+         ``agent_profile_id`` 由上层 task-06 service.py 经 design §8 兜底链解析后传入
+         ——visibility 已在绑定时校验，§8 兜底（workspace.default_agent_profile_id →
+         平台默认）也由 task-06 在写 AgentRun.agent_profile_id 前完成。故此处**只按 id
+         取 provider**，不重复 resolve_profile（避免重复加载 Workspace/User + 兜底查询）。
+
+         C-07（null 路径零新增查询）：``agent_profile_id is None`` 时**不发任何 SQL**，
+         直接返回 None，让调用方回退 caller provider → workspace.default_agent 原路径
+        （与今天 100% 一致）。
+
+         provider 归一化（:func:`_normalize_provider`）：profile.provider 可能是
+         ``'claude'``，而 workspace.default_agent 习惯写 ``'claude_code'``（agent_type
+         不是 provider，daemon 上永不启用，见 orchestrator.py:38）。归一后
+         ``'claude_code'`` → ``'claude'`` 对齐 daemon_runtimes.provider 规范值，使
+         runtime 匹配 + borrow lender 选择稳定命中。**只归一 profile.provider**——
+         workspace.default_agent 回退值保持原样透传，避免改 null 路径行为（C-07）。
+
+         Returns:
+             归一化后的 profile.provider，或 None（未绑 / 档案被删）。
+        """
+        # C-07：未绑 profile → 零查询，直接回退。
+        if agent_profile_id is None:
+            return None
+        from app.modules.agent.profile.service import _normalize_provider
+
+        row = (
+            (
+                await self._session.execute(
+                    text("SELECT provider FROM agent_profiles WHERE id = :id"),
+                    {"id": agent_profile_id.hex},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if row is None:
+            # 档案被删（FK ondelete=SET NULL 理论上 agent_profile_id 已同步置空，
+            # 此处防御性兜底——回退 workspace.default_agent，不阻断 dispatch）。
+            return None
+        return _normalize_provider(row["provider"])
 
     async def _resolve_workspace_default_agent(
         self,

@@ -39,6 +39,9 @@ import { GitError } from '../src/workspace.js';
 import { createFakeChild, readStdin, waitForSpawn, type FakeChild } from './helpers/fake-child.js';
 import type { AgentEvent, LeaseCtx } from '../src/types.js';
 import type { DaemonConfig } from '../src/config.js';
+import { mkdtemp, mkdir, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // ── 测试工具 ────────────────────────────────────────────────────────────────
 
@@ -1356,5 +1359,195 @@ describe('状态机 getState', () => {
     await p;
 
     expect(runner.getState('lease-state-3')).toBe('failed');
+  });
+});
+
+// ── task-09：batch 消费 profile（skill_refs 子集 + effectiveAllowedRoots）──────
+// design §9 / §4 + D-013。claim payload（context.py task-07 透传）带 profile 字段时：
+//   - effectiveAllowedRoots → frozenAllowedRoots = physical ∩ effective（收紧写权限）
+//   - skillRefs → link 全量后裁剪到子集
+// 不带则行为同今天（FR-15 向后兼容）。
+// 注：MCP 子集（mcp_refs）无 batch 注入点（batch spawn 不调 mergeMcpConfigs，
+// 仅 interactive 路径经 cli.ts mainAgentMcpConfigProvider 注入），本任务范围不覆盖。
+
+describe('task-09: batch 消费 profile.effectiveAllowedRoots（D-013 收紧写权限）', () => {
+  it('payload.effectiveAllowedRoots 存在 → buildArgs.allowedRoots = physical ∩ effective', async () => {
+    const fakeChild = createFakeChild();
+    mockSpawnReturn(fakeChild);
+    const config = makeNoRetryConfig({
+      allowed_roots: ['/ws/a', '/ws/b'],
+    } as unknown as Partial<DaemonConfig>);
+    const { runner } = setupRunner({ config });
+
+    const lease = makeLease();
+    (lease as Record<string, unknown>).effectiveAllowedRoots = ['/ws/a'];
+
+    const p = runner.runLease(lease);
+    await waitForSpawn();
+    fakeChild._emitLines(['{"type":"result","session_id":"s1"}']);
+    fakeChild._emitExit(0);
+    await p;
+
+    const buildArgs = mockAdapter.buildArgs as ReturnType<typeof vi.fn>;
+    const callOpts = buildArgs.mock.calls[0]![0] as { allowedRoots?: string[] };
+    // physical ['/ws/a','/ws/b'] ∩ effective ['/ws/a'] = ['/ws/a']（收紧）
+    expect(callOpts.allowedRoots).toEqual(['/ws/a']);
+  });
+
+  it('snake_case effective_allowed_roots 同样生效（context.py 双写兼容）', async () => {
+    const fakeChild = createFakeChild();
+    mockSpawnReturn(fakeChild);
+    const config = makeNoRetryConfig({
+      allowed_roots: ['/ws/a', '/ws/b'],
+    } as unknown as Partial<DaemonConfig>);
+    const { runner } = setupRunner({ config });
+
+    const lease = makeLease();
+    (lease as Record<string, unknown>).effective_allowed_roots = ['/ws/b'];
+
+    const p = runner.runLease(lease);
+    await waitForSpawn();
+    fakeChild._emitLines(['{"type":"result","session_id":"s1"}']);
+    fakeChild._emitExit(0);
+    await p;
+
+    const buildArgs = mockAdapter.buildArgs as ReturnType<typeof vi.fn>;
+    const callOpts = buildArgs.mock.calls[0]![0] as { allowedRoots?: string[] };
+    expect(callOpts.allowedRoots).toEqual(['/ws/b']);
+  });
+
+  it('payload 无 effectiveAllowedRoots → buildArgs.allowedRoots = 物理原值（向后兼容 FR-15）', async () => {
+    const fakeChild = createFakeChild();
+    mockSpawnReturn(fakeChild);
+    const config = makeNoRetryConfig({
+      allowed_roots: ['/ws/a', '/ws/b'],
+    } as unknown as Partial<DaemonConfig>);
+    const { runner } = setupRunner({ config });
+
+    const p = runner.runLease(makeLease());
+    await waitForSpawn();
+    fakeChild._emitLines(['{"type":"result","session_id":"s1"}']);
+    fakeChild._emitExit(0);
+    await p;
+
+    const buildArgs = mockAdapter.buildArgs as ReturnType<typeof vi.fn>;
+    const callOpts = buildArgs.mock.calls[0]![0] as { allowedRoots?: string[] };
+    // 无 effective → 原值不动（行为同 task-09 前）
+    expect(callOpts.allowedRoots).toEqual(['/ws/a', '/ws/b']);
+  });
+
+  it('effective 含物理外路径 → 被物理沙箱剔除（防御性交集防 backend 误算放宽）', async () => {
+    const fakeChild = createFakeChild();
+    mockSpawnReturn(fakeChild);
+    const config = makeNoRetryConfig({
+      allowed_roots: ['/ws/a', '/ws/b'],
+    } as unknown as Partial<DaemonConfig>);
+    const { runner } = setupRunner({ config });
+
+    const lease = makeLease();
+    // backend 误算：effective 含物理沙箱外的 '/ws/outside'
+    (lease as Record<string, unknown>).effectiveAllowedRoots = ['/ws/a', '/ws/outside'];
+
+    const p = runner.runLease(lease);
+    await waitForSpawn();
+    fakeChild._emitLines(['{"type":"result","session_id":"s1"}']);
+    fakeChild._emitExit(0);
+    await p;
+
+    const buildArgs = mockAdapter.buildArgs as ReturnType<typeof vi.fn>;
+    const callOpts = buildArgs.mock.calls[0]![0] as { allowedRoots?: string[] };
+    // '/ws/outside' 不在 physical → 被剔除，绝不放宽到物理外
+    expect(callOpts.allowedRoots).toEqual(['/ws/a']);
+  });
+});
+
+describe('task-09: batch 消费 profile.skillRefs（design §9 技能子集）', () => {
+  it('payload.skillRefs 存在 → 仅保留引用的 skill，其余从 .claude/skills/ 删除', async () => {
+    // 用真实 tmp 目录作 workDir，预建 3 个 skill 目录模拟 linkSkillsToWorkdir 产物
+    //（linkSkillsToWorkdir 被 vi.mock 成 no-op，故手动建）。
+    const tmpDir = await mkdtemp(join(tmpdir(), 'task09-skills-'));
+    const skillsDir = join(tmpDir, '.claude', 'skills');
+    await mkdir(join(skillsDir, 'skill-a'), { recursive: true });
+    await mkdir(join(skillsDir, 'skill-b'), { recursive: true });
+    await mkdir(join(skillsDir, 'skill-c'), { recursive: true });
+
+    try {
+      const fakeChild = createFakeChild();
+      mockSpawnReturn(fakeChild);
+      const workspace = makeMockWorkspace({
+        prepareWorkspace: vi.fn().mockResolvedValue(tmpDir),
+      });
+      const { runner } = setupRunner({ workspace });
+
+      const lease = makeLease({ claudeMd: '' });
+      (lease as Record<string, unknown>).skillRefs = ['skill-a'];
+
+      const p = runner.runLease(lease);
+      await waitForSpawn();
+      fakeChild._emitExit(0);
+      await p;
+
+      const remaining = await readdir(skillsDir);
+      // 只保留 skill-a（profile 子集），b/c 被裁剪
+      expect(remaining.sort()).toEqual(['skill-a']);
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  });
+
+  it('snake_case skill_refs 同样生效（context.py 双写兼容）', async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), 'task09-skills-snake-'));
+    const skillsDir = join(tmpDir, '.claude', 'skills');
+    await mkdir(join(skillsDir, 'alpha'), { recursive: true });
+    await mkdir(join(skillsDir, 'beta'), { recursive: true });
+
+    try {
+      const fakeChild = createFakeChild();
+      mockSpawnReturn(fakeChild);
+      const workspace = makeMockWorkspace({
+        prepareWorkspace: vi.fn().mockResolvedValue(tmpDir),
+      });
+      const { runner } = setupRunner({ workspace });
+
+      const lease = makeLease({ claudeMd: '' });
+      (lease as Record<string, unknown>).skill_refs = ['beta'];
+
+      const p = runner.runLease(lease);
+      await waitForSpawn();
+      fakeChild._emitExit(0);
+      await p;
+
+      const remaining = await readdir(skillsDir);
+      expect(remaining).toEqual(['beta']);
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  });
+
+  it('payload 无 skillRefs → .claude/skills/ 保持全量（向后兼容 FR-15）', async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), 'task09-skills-full-'));
+    const skillsDir = join(tmpDir, '.claude', 'skills');
+    await mkdir(join(skillsDir, 'skill-a'), { recursive: true });
+    await mkdir(join(skillsDir, 'skill-b'), { recursive: true });
+
+    try {
+      const fakeChild = createFakeChild();
+      mockSpawnReturn(fakeChild);
+      const workspace = makeMockWorkspace({
+        prepareWorkspace: vi.fn().mockResolvedValue(tmpDir),
+      });
+      const { runner } = setupRunner({ workspace });
+
+      // 不带 skillRefs → 不裁剪
+      const p = runner.runLease(makeLease({ claudeMd: '' }));
+      await waitForSpawn();
+      fakeChild._emitExit(0);
+      await p;
+
+      const remaining = await readdir(skillsDir);
+      expect(remaining.sort()).toEqual(['skill-a', 'skill-b']);
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+    }
   });
 });

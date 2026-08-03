@@ -228,3 +228,104 @@ describe('mcp-config: buildDaemonMcpServerConfig（task-05）', () => {
     expect(result.rejected).toHaveLength(0);
   });
 });
+
+// ── task-08 / D-017：mcp_refs 子集过滤 + type 校验 ──────────────────────────
+
+describe('mcp-config: mergeMcpConfigs mcp_refs 子集过滤（task-08 / D-017）', () => {
+  it('提供 mcp_refs → 仅保留交集（profile 收紧）', () => {
+    const platform: McpConfig = {
+      mcpServers: {
+        web: server('web-bin'),
+        db: server('db-bin'),
+        fs: server('fs-bin'),
+      },
+    };
+    // 三 server 都在白名单（platform 自动入白名单），但 profile.mcp_refs 只留两个
+    const result = mergeMcpConfigs([], ['web', 'db'], platform);
+    expect(Object.keys(result.config.mcpServers).sort()).toEqual(['db', 'web']);
+    // 被剔除的 fs 进 rejected
+    expect(result.rejected).toContain('fs');
+  });
+
+  it('mcp_refs 含白名单外 server → 该 server 不出现（白名单先生效）', () => {
+    const platform: McpConfig = { mcpServers: { allowed: server('a') } };
+    const ws: McpConfig = { mcpServers: { extra: server('e') } };
+    // mcp_refs 请求 extra，但 extra 非白名单 → 白名单层已剔除，mcp_refs 层不再加回
+    const result = mergeMcpConfigs(['allowed'], ['allowed', 'extra'], platform, ws);
+    expect(Object.keys(result.config.mcpServers)).toEqual(['allowed']);
+  });
+
+  it('mcp_refs 空数组 → 不过滤（向后兼容，等价不传）', () => {
+    const platform: McpConfig = {
+      mcpServers: { web: server('web-bin'), db: server('db-bin') },
+    };
+    const result = mergeMcpConfigs([], [], platform);
+    // 空 mcp_refs 不收紧 → 两 server 都保留
+    expect(Object.keys(result.config.mcpServers).sort()).toEqual(['db', 'web']);
+    expect(result.rejected).toHaveLength(0);
+  });
+
+  it('不传 mcp_refs（旧式调用）→ 行为不变（向后兼容 cli.ts:709）', () => {
+    // cli.ts:709 形态：mergeMcpConfigs([], { mcpServers: { ... } })
+    const cfg: McpConfig = { mcpServers: { daemon: server('node') } };
+    const result = mergeMcpConfigs([], cfg);
+    expect(Object.keys(result.config.mcpServers)).toEqual(['daemon']);
+    expect(result.rejected).toHaveLength(0);
+  });
+
+  it('mcp_refs 收紧 platform_default server（platform 默认也受限）', () => {
+    // design §9：(workspace ∪ 平台默认) ∩ whitelist ∩ profile.mcp_refs
+    // platform server 虽自动入白名单，仍受 mcp_refs 限制
+    const platform: McpConfig = {
+      mcpServers: { [DAEMON_MCP_SERVER_NAME]: server('node'), web: server('w') },
+    };
+    const result = mergeMcpConfigs([], [DAEMON_MCP_SERVER_NAME], platform);
+    expect(Object.keys(result.config.mcpServers)).toEqual([DAEMON_MCP_SERVER_NAME]);
+    expect(result.rejected).toContain('web');
+  });
+});
+
+describe('mcp-config: McpServerConfig type 校验（task-08 / D-017 防 SSRF）', () => {
+  it('type 缺省（stdio）→ 通过', () => {
+    const cfg: McpConfig = { mcpServers: { web: { command: 'w', args: [] } } };
+    const result = mergeMcpConfigs(['web'], cfg);
+    expect(result.config.mcpServers.web).toBeDefined();
+  });
+
+  it('type=stdio 显式 → 通过', () => {
+    const cfg: McpConfig = {
+      mcpServers: { web: { type: 'stdio', command: 'w', args: [] } },
+    };
+    const result = mergeMcpConfigs(['web'], cfg);
+    expect(result.config.mcpServers.web).toBeDefined();
+  });
+
+  it('type=sse → 抛错（防 SSRF，fail-loud 不静默跳过）', () => {
+    // 运行时 backend/config JSON 可能注入 type:'sse'/'http'，tsc 拦不住（any 来源）
+    const cfg = {
+      mcpServers: { evil: { type: 'sse', command: 'x', args: [], url: 'http://evil' } },
+    };
+    expect(() => mergeMcpConfigs(['evil'], cfg as unknown as McpConfig)).toThrow(
+      /unsupported type "sse"/,
+    );
+  });
+
+  it('type=http → 抛错', () => {
+    const cfg = {
+      mcpServers: { evil: { type: 'http', command: 'x', args: [] } },
+    };
+    expect(() => mergeMcpConfigs(['evil'], cfg as unknown as McpConfig)).toThrow(
+      /unsupported type "http"/,
+    );
+  });
+
+  it('非 stdio 抛错在 mcp_refs 过滤前（fail-fast 安全边界）', () => {
+    // 即使 mcp_refs 不含该 server，type 校验仍抛（合并阶段校验所有 server）
+    const cfg = {
+      mcpServers: { evil: { type: 'sse', command: 'x', args: [] } },
+    };
+    expect(() =>
+      mergeMcpConfigs([], ['other-server'], cfg as unknown as McpConfig),
+    ).toThrow(/unsupported type "sse"/);
+  });
+});

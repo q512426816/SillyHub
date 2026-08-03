@@ -22,6 +22,11 @@ class AgentRunCreate(BaseModel):
     # Per-run model override; when None the dispatch layer falls through to
     # workspace.default_model, then provider/CLI defaults.
     model: str | None = Field(default=None, max_length=128)
+    # task-12 / 2026-08-02-agent-profile-layer：用户指定 AgentProfile（软约束兜底，
+    # design §8）。None → service.start_run 走 workspace.default_agent_profile_id →
+    # 平台默认档案 → 无 profile 原路径（不阻断）。非空时经 _resolve_dispatch_profile
+    # 加载并快照到 AgentRun.agent_profile_snapshot + lease.metadata。
+    agent_profile_id: uuid.UUID | None = None
 
 
 class ExecutionContextResponse(BaseModel):

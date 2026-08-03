@@ -40,7 +40,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as readline from 'node:readline';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile, readdir, rm } from 'node:fs/promises';
 import { join, relative, isAbsolute, dirname } from 'node:path';
 
 import {
@@ -467,6 +467,14 @@ export class TaskRunner {
       // ——不接线则 batch 会话看不到 sillyspec/custom skills。失败仅 warn（skill 缺失不阻塞 spawn）。
       try {
         await linkSkillsToWorkdir(workDir);
+        // task-09（design §9 / D-017）：profile.skill_refs 子集过滤。claim payload
+        //（context.py task-07 透传）带 skillRefs 时，link 全量后按子集裁剪
+        // <workDir>/.claude/skills/，只保留引用的 skill 目录，其余删除（profile 只能收紧）。
+        // skillRefs 缺省/空 → 不裁剪（全量，向后兼容 FR-15）。
+        const skillRefs = pickStrList(ctx, 'skillRefs', 'skill_refs');
+        if (skillRefs) {
+          await pruneSkillsToSubset(workDir, skillRefs, leaseId);
+        }
       } catch (e) {
         console.warn('task_runner: link_skills_failed', leaseId, e);
       }
@@ -578,9 +586,22 @@ export class TaskRunner {
       //   > config.allowed_roots（未注入 policyCache 时的全局兜底，向后兼容）。
       // policyCache 未注入（旧测试）或 rid 未命中（runtime 尚未注册 / 心跳未拉到）
       // 都回退 config.allowed_roots，绝不 throw，保持旧沙箱行为。
-      const frozenAllowedRoots =
+      const physicalAllowedRoots =
         this.policyCache?.get(ctx.runtimeId)?.allowedRoots ??
         this.config?.allowed_roots;
+      // task-09（D-013）：profile.effective_allowed_roots 下推收紧。backend dispatch
+      // 时算好 effective = daemon.allowed_roots ∩ agent.overlay（agent 只能收紧），
+      // 经 claim payload（context.py task-07 透传）下发。payload 带 effective 时与
+      // 物理沙箱取交集兜底（effective 已是 daemon 子集，此处防御性 ∩ 物理上限防
+      // backend 误算放宽）；不带 → 用原值（向后兼容 FR-15）。
+      const effectiveRoots = pickStrList(
+        ctx,
+        'effectiveAllowedRoots',
+        'effective_allowed_roots',
+      );
+      const frozenAllowedRoots = effectiveRoots
+        ? intersectAllowedRoots(physicalAllowedRoots, effectiveRoots)
+        : physicalAllowedRoots;
 
       // 重试循环：spawn → stream → 判定（task-10 B3）。
       // 可重试：timeout / spawn ENOENT / OOM / segfault / killed。
@@ -2332,6 +2353,84 @@ function pickNum(
     if (typeof v === 'number' && Number.isFinite(v)) return v;
   }
   return undefined;
+}
+
+/**
+ * task-09：从 lease ctx 鸭子类型读 string[] 字段（camelCase + snake_case 兼容）。
+ *
+ * claim payload 经 context.py（task-07）透传 profile 字段（mcp_refs / skill_refs /
+ * effective_allowed_roots），types.ts LeaseCtx 未声明这些字段，用 duck-typing 读取
+ * （与 stage_meta / mode / platformConfig 等既有字段同模式）。非数组 / 空 → undefined。
+ *
+ * 纯函数，不修改入参。
+ */
+function pickStrList(
+  ctx: LeaseCtx,
+  camel: string,
+  snake: string,
+): string[] | undefined {
+  const obj = ctx as unknown as Record<string, unknown>;
+  const raw = obj[camel] ?? obj[snake];
+  if (!Array.isArray(raw)) return undefined;
+  const arr = raw.filter((v): v is string => typeof v === 'string' && v.length > 0);
+  return arr.length > 0 ? arr : undefined;
+}
+
+/**
+ * task-09（D-013）：物理沙箱 ∩ profile effective 下推值（只能收紧）。
+ *
+ * effective 已是 daemon.allowed_roots ∩ agent.overlay（backend 算好），此处再 ∩ 物理
+ * 上限是防御性兜底——backend 误算把 overlay 放宽出 daemon 范围时，交集仍不超物理。
+ * physical 缺省（无 policyCache + 无 config.allowed_roots）→ 直接用 effective（已是
+ * 可得的最严上界，无法与未知物理值取交集，保持收紧语义）。
+ *
+ * 结果 = physical 中同时出现在 effective 的路径（真交集，result ⊆ physical 且 ⊆ effective）。
+ *
+ * 纯函数，不修改入参。
+ */
+function intersectAllowedRoots(
+  physical: string[] | undefined,
+  effective: string[],
+): string[] {
+  if (!physical || physical.length === 0) return effective;
+  const effSet = new Set(effective);
+  return physical.filter((p) => effSet.has(p));
+}
+
+/**
+ * task-09（design §9）：link 全量 platform skills 后按 profile.skillRefs 子集裁剪。
+ *
+ * 删除 <workDir>/.claude/skills/ 下不在 skillRefs 中的 skill 目录（profile 只能收紧）。
+ * 隐藏项（. 开头）与非目录跳过；单条 rm 失败仅 warn（不阻塞 spawn，对齐
+ * linkSkillsToWorkdir 容错策略）。目录不存在（linkSkillsToWorkdir 未建 / 全跳过）→ 静默返回。
+ */
+async function pruneSkillsToSubset(
+  workDir: string,
+  skillRefs: string[],
+  leaseId: string,
+): Promise<void> {
+  const skillsBase = join(workDir, '.claude', 'skills');
+  let entries: import('node:fs').Dirent[];
+  try {
+    entries = await readdir(skillsBase, { withFileTypes: true });
+  } catch {
+    return; // 目录不存在（linkSkillsToWorkdir 未建 / mock no-op）→ 无可裁剪
+  }
+  const keep = new Set(skillRefs);
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith('.')) continue;
+    if (!keep.has(entry.name)) {
+      await rm(join(skillsBase, entry.name), { recursive: true, force: true }).catch(
+        (e: unknown) => {
+          console.warn('task_runner: prune_skill_failed', leaseId, {
+            skill: entry.name,
+            error: e,
+          });
+        },
+      );
+    }
+  }
 }
 
 const EMPTY_DIFF = {

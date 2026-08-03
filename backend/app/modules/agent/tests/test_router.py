@@ -405,3 +405,51 @@ async def test_create_agent_run_passes_provider(client, db_session, tmp_path):
         except Exception:  # ResponseValidationError is expected here
             pass
     assert mock_svc.start_run.call_args.kwargs["provider"] == "codex"
+
+
+async def test_create_agent_run_passes_agent_profile_id(client, db_session, tmp_path):
+    """task-12: router forwards request body ``agent_profile_id`` to ``start_run``.
+
+    Mirrors ``test_create_agent_run_passes_provider``：AgentService mocked，仅断言
+    agent_profile_id 透传到 svc.start_run（router → service → resolve_profile 链路）。
+    """
+    refs = await _setup(db_session, tmp_path)
+    profile_id = uuid.uuid4()
+    mock_svc = MagicMock()
+    mock_svc.start_run = AsyncMock(return_value=MagicMock(status="pending"))
+    mock_svc.enrich_with_workspace_ids = AsyncMock(return_value=MagicMock())
+    with patch("app.modules.agent.router.AgentService", return_value=mock_svc):
+        try:
+            await client.post(
+                f"/api/workspaces/{refs['ws_id']}/agent/runs",
+                json={
+                    "task_id": str(refs["task_id"]),
+                    "lease_id": str(refs["lease_id"]),
+                    "agent_profile_id": str(profile_id),
+                },
+                headers=_auth(refs["token"]),
+            )
+        except Exception:  # ResponseValidationError expected（mocked enrich 输出不合规）
+            pass
+    assert mock_svc.start_run.call_args.kwargs["agent_profile_id"] == profile_id
+
+
+async def test_create_agent_run_omits_agent_profile_id_when_absent(client, db_session, tmp_path):
+    """task-12: 请求体不带 agent_profile_id → start_run 收到 None（FR-15 零回归兜底）。"""
+    refs = await _setup(db_session, tmp_path)
+    mock_svc = MagicMock()
+    mock_svc.start_run = AsyncMock(return_value=MagicMock(status="pending"))
+    mock_svc.enrich_with_workspace_ids = AsyncMock(return_value=MagicMock())
+    with patch("app.modules.agent.router.AgentService", return_value=mock_svc):
+        try:
+            await client.post(
+                f"/api/workspaces/{refs['ws_id']}/agent/runs",
+                json={
+                    "task_id": str(refs["task_id"]),
+                    "lease_id": str(refs["lease_id"]),
+                },
+                headers=_auth(refs["token"]),
+            )
+        except Exception:
+            pass
+    assert mock_svc.start_run.call_args.kwargs["agent_profile_id"] is None
