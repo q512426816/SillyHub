@@ -36,16 +36,18 @@ def test_permission_group_has_seven_members() -> None:
     assert set(members) == expected
 
 
-def test_permission_count_is_65() -> None:
-    """46 历史 + 17 PPM_* 菜单/读 + daemon:borrow + llm_provider:read = 65。
+def test_permission_count_is_66() -> None:
+    """46 历史 + 17 PPM_* 菜单/读 + daemon:borrow + llm_provider:read + weekly-plan = 66。
 
     cbd258eb/1f5e6ebe 菜单 unique-key 扩容回升到 63；change
     2026-07-25-daemon-borrow-for-business task-03 / D-006@v2 再加
     ``DAEMON_BORROW``（业务人员借用开发人员 daemon 回退授权）→ 64；
     change 2026-07-29-sidebar-menu-restructure task-01 / D-002@v1 再加
-    ``LLM_PROVIDER_READ``（前端「我的供应商」菜单显隐 + 角色分配）→ 65。
+    ``LLM_PROVIDER_READ``（前端「我的供应商」菜单显隐 + 角色分配）→ 65；
+    change 2026-07-30-sidebar-menu-restructure task-06 / ql-20260730-005 再加
+    ``PPM_WEEKLY_PLAN_VIEW``（实施计划汇总独立菜单权限）→ 66。
     """
-    assert len(list(Permission)) == 65
+    assert len(list(Permission)) == 66
 
 
 @pytest.mark.parametrize(

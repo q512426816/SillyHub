@@ -45,6 +45,9 @@ def _mock_workspace() -> MagicMock:
     ws.path_source = "daemon-client"
     ws.default_agent = None
     ws.default_model = None
+    # AgentProfile（D-014/C-07）：无 hint 时 dispatch 零查询走原 fallback 路径；
+    # 不显式设 None 会得到 MagicMock → 触发 profile 加载链 → provider 变 MagicMock。
+    ws.default_agent_profile_id = None
     ws.repo_url = None
     ws.default_branch = None
     ws.name = "ws-test"
@@ -60,6 +63,14 @@ def _mock_session(workspace: MagicMock) -> MagicMock:
     s.refresh = AsyncMock()
     s.flush = AsyncMock()
     s.rollback = AsyncMock()
+    # AgentProfile 后 service 里 `await session.execute(sql).mappings().first()`
+    # 读 lease metadata（merge profile 键），mock execute 为可 await 的链式空结果
+    # （execute 是 await，mappings().first() 是同步链）。
+    s.execute = AsyncMock(
+        return_value=MagicMock(
+            mappings=MagicMock(return_value=MagicMock(first=MagicMock(return_value=None)))
+        )
+    )
     return s
 
 

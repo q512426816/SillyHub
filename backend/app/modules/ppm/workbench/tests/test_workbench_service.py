@@ -941,7 +941,8 @@ async def test_calendar_alert_red_at_end_date_for_overdue(db_session):
         content="过期任务",
     )
     svc = WorkbenchService(db_session)
-    ym = f"{start.year:04d}-{start.month:02d}"
+    # ym 用 end 所在月（断言目标是截止日 end；用 start 月跨月时会错拼 day）
+    ym = f"{end.year:04d}-{end.month:02d}"
     cal = await svc.get_calendar(user, ym)
     by_date = {d.date: d for d in cal.days}
     end_key = f"{ym}-{end.day:02d}"
@@ -989,10 +990,11 @@ async def test_calendar_alert_green_past_covered(db_session):
     )
     # work_load=1d,剩余 1 人天/3 天≈2.67h<8h → 正常(非临期)
     svc = WorkbenchService(db_session)
-    ym = f"{start.year:04d}-{start.month:02d}"
+    past_day = now - timedelta(days=2)  # 过去覆盖天
+    # ym 用 past_day 所在月（断言目标是它；用 start 月跨月时会错拼 day）
+    ym = f"{past_day.year:04d}-{past_day.month:02d}"
     cal = await svc.get_calendar(user, ym)
     by_date = {d.date: d for d in cal.days}
-    past_day = now - timedelta(days=2)  # 过去覆盖天
     past_key = f"{ym}-{past_day.day:02d}"
     assert by_date[past_key].alert_level == "green"
 
@@ -1067,11 +1069,11 @@ async def test_calendar_alert_problem_overdue_red(db_session):
     db_session.add(prob)
     await db_session.commit()
     svc = WorkbenchService(db_session)
-    start = now - timedelta(days=5)
-    ym = f"{start.year:04d}-{start.month:02d}"
+    end = now - timedelta(days=2)
+    # ym 用 end 所在月（断言目标是截止日 end；用 start 月跨月时会错拼 day）
+    ym = f"{end.year:04d}-{end.month:02d}"
     cal = await svc.get_calendar(user, ym)
     by_date = {d.date: d for d in cal.days}
-    end = now - timedelta(days=2)
     end_key = f"{ym}-{end.day:02d}"
     assert by_date[end_key].alert_level == "red"
 
