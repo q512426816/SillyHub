@@ -249,6 +249,12 @@ export function InteractiveSessionPanel({
   // 2026-07-29-model-error-visibility：已拉取过 error_detail 的 failed run_id 集合，
   // 防 SSE 重连重发 turn_completed 触发重复 listSessionRuns（同一 failed run 只拉一次）。
   const fetchedErrorRunIdsRef = useRef<Set<string>>(new Set());
+  // 2026-08-03-session-stream-partial-revoke / FR-05 / design §5 Phase2 / §7.2：
+  // partial segment 起点（reply→outputStart / thinking→itemIndex），按 segmentId 索引。
+  // 挂 useRef 不驱动渲染——撤回的渲染由 setView/upsertTurn 触发，Map 仅作 segmentId→起点
+  // 查表。收到 override 令箭时按 segmentId 截断 turn.output(slice(0, outputStart)) 或移除
+  // processItems 项。turn 边界（onTurnCompleted/clearCurrentRun）清空防跨 turn 串扰（R-02）。
+  const partialSegmentsRef = useRef<Map<string, { outputStart: number } | { itemIndex: number }>>(new Map());
 
   // 当在线 provider 变化且当前选中的不再可用，回退到默认。
   useEffect(() => {
@@ -301,6 +307,25 @@ export function InteractiveSessionPanel({
               // - reply → 答复正文（对话视图默认展示）
               const seg = classifySessionLog(env.content ?? "", env.channel);
               if (!seg) return turn;
+              // 2026-08-03-session-stream-partial-revoke / FR-05：override 撤回令箭——按
+              // segmentId 精确撤回已渲染的半截。override 是信号非日志（log_id=None，
+              // task-02 design §7.1），不写 seenLogIds、不渲染正文。Map 无该 segmentId
+              // （迟到 override / complete 已替换）静默 no-op。
+              if (seg.kind === "override" && seg.segmentId) {
+                const start = partialSegmentsRef.current.get(seg.segmentId);
+                if (!start) return turn;
+                partialSegmentsRef.current.delete(seg.segmentId);
+                if (seg.variant === "assistant" && "outputStart" in start) {
+                  return { ...turn, output: turn.output.slice(0, start.outputStart) };
+                }
+                if (seg.variant === "thinking" && "itemIndex" in start) {
+                  return {
+                    ...turn,
+                    processItems: (turn.processItems ?? []).filter((_, i) => i !== start.itemIndex),
+                  };
+                }
+                return turn;
+              }
               // ql-20260802-003：保留 log 时间戳（ms），供「全部」视图把 AskUser 提问按
               // created_at 穿插进思考/工具时间线（真实顺序，而非固定堆末尾）。
               const ts = env.timestamp ? Date.parse(env.timestamp) : undefined;
@@ -350,6 +375,13 @@ export function InteractiveSessionPanel({
                 return { ...turn, seenLogIds: nextSeen, processItems: items };
               }
               if (seg.kind === "reply") {
+                // 2026-08-03-session-stream-partial-revoke / FR-05：partial reply（带
+                // segment_id）先记半截起点（concat 前 output 长度），再 concat。收到对应
+                // override 时按此起点 slice(0, outputStart) 截断撤回。complete（segment_id
+                // 为 null/undefined）不记 Map——design §9 兼容：旧 backend 缺字段 undefined 空转。
+                if (env.segment_id) {
+                  partialSegmentsRef.current.set(env.segment_id, { outputStart: turn.output.length });
+                }
                 return {
                   ...turn,
                   seenLogIds: nextSeen,
@@ -358,6 +390,14 @@ export function InteractiveSessionPanel({
                   // 在 token 边界插 \n 会破坏 markdown 连续结构（实测 7fb9227d 确诊）。
                   output: turn.output + seg.text,
                 };
+              }
+              // 2026-08-03-session-stream-partial-revoke / FR-05：partial thinking 先记
+              // 即将 append 的项索引（concat 前 processItems 长度），收到 override 时按此
+              // itemIndex filter 移除。stderr 不记（无撤回）。
+              if (seg.kind === "thinking" && env.segment_id) {
+                partialSegmentsRef.current.set(env.segment_id, {
+                  itemIndex: (turn.processItems ?? []).length,
+                });
               }
               // thinking / stderr → 追加过程项（保留到达顺序，渲染时连续 thinking 才合并）
               return {
@@ -385,6 +425,12 @@ export function InteractiveSessionPanel({
             inputTokens: env.input_tokens ?? turn.inputTokens,
             outputTokens: env.output_tokens ?? turn.outputTokens,
           }), { clearCurrentRun: env.run_id! }));
+
+          // 2026-08-03-session-stream-partial-revoke / FR-05 / R-02：turn 边界清空 partial
+          // segment Map——防跨 turn segmentId 复用导致误撤回。在 setView 回调外层直接清 ref，
+          // 不依赖渲染时机（task-06 constraints）。clearCurrentRun 已把 currentRunId 置 null，
+          // 此 turn 的 partial 历史不再需要。
+          partialSegmentsRef.current.clear();
 
           // 2026-07-29-model-error-visibility / FR-04：turn 终态=failed 时拉取该 run 的
           // 结构化错误详情（AgentRun.error_detail，GET /sessions/{id}/runs），用

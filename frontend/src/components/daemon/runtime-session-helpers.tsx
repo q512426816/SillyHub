@@ -170,6 +170,11 @@ export function resumeDisabledTitle(session: AgentSessionRead): string {
  * 2026-07-11-unify-runtime-session-dialog / FR-04: 对每条 content_redacted 先经
  * classifySessionLog 过滤（与 sanitizeSessionLogContent 同源规则），
  * 剥离 SYSTEM/AskUserQuestion 等原始标记。
+ *
+ * 2026-08-03-session-stream-partial-revoke / FR-06 / D-003：本函数消费 AgentRunLogEntry
+ * （GET /sessions/{id}/logs 返回），其 DTO 不含 segment_id（envelope 新字段仅实时 SSE 通道
+ * 有）。历史数据本就干净——partial 已 DELETE（task-14）、override publish-only 不落库
+ * （task-02），故历史回显不加撤回逻辑，渲染分支原样保留（design §2.4 / §3 非目标）。
  */
 export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
   const map = new Map<string, AgentRunLogEntry[]>();

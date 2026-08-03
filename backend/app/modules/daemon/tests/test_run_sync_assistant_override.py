@@ -126,6 +126,66 @@ async def _seed_batch_run_for_submit(
     return lease.id, run_id, meta["claim_token"]
 
 
+async def _seed_interactive_run_for_submit(
+    db_session: AsyncSession,
+) -> tuple[uuid.UUID, uuid.UUID, str]:
+    """Build a lease + run 带 agent_session_id（interactive 形态）for submit_messages。
+
+    task-03：override publish 测试需 ``publish_submitted_messages`` 走 session channel
+    分支（``intent.agent_session_id`` 非 None 才发到 ``agent_session:{id}``）。给 run
+    设 ``agent_session_id`` 即可；lease 形态不影响 submit_messages（只验 lease+token+run）。
+    对齐 _seed_batch_run_for_submit 的最小构造（不引入 RunPlacementService，保持本文件
+    现有简洁结构；submit_messages 不读 lease.kind）。
+    """
+    import secrets
+
+    from app.modules.agent.model import AgentSession
+
+    uid = await _create_user(db_session)
+    rt = await _create_runtime(db_session, uid)
+
+    session_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    db_session.add(
+        AgentSession(
+            id=session_id,
+            user_id=uid,
+            provider="claude",
+            status="active",
+            config={},
+            turn_count=0,
+            runtime_id=rt.id,
+            created_at=datetime.now(UTC),
+            last_active_at=datetime.now(UTC),
+        )
+    )
+    db_session.add(
+        AgentRun(
+            id=run_id,
+            agent_type="claude_code",
+            provider="claude",
+            status="running",
+            spec_strategy="interactive",
+            agent_session_id=session_id,
+        )
+    )
+    lease = DaemonTaskLease(
+        id=uuid.uuid4(),
+        runtime_id=rt.id,
+        agent_run_id=run_id,
+        kind="batch",
+        status="pending",
+        lease_expires_at=None,
+        metadata_={"claim_token": secrets.token_hex(32)},
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    db_session.add(lease)
+    await db_session.commit()
+    meta = lease.metadata_ or {}
+    return lease.id, run_id, meta["claim_token"]
+
+
 async def _fetch_logs(db_session: AsyncSession, run_id: uuid.UUID) -> list[AgentRunLog]:
     return list(
         (
@@ -629,3 +689,264 @@ class TestCrossCallOverrideDeletesCommittedPartial:
         by_content = {r.content_redacted: r for r in rows}
         assert by_content["[ASSISTANT] 半截"].segment_id == partial_seg
         assert by_content["[ASSISTANT] 完整"].segment_id is None
+
+
+# ── task-03：override publish 到 SSE 不落库 + segment_id 透传 ──────────────────
+#
+# 变更 2026-08-03-session-stream-partial-revoke Wave1：task-01 给 SSE envelope 加
+# segment_id 字段（取 log_entry.segment_id，complete 行 None）；task-02 把 override
+# 信号从「continue 截断」改为「publish 到 SSE 但不落库」（append 到 published_logs，
+# 复用 publish_submitted_messages 两路 publish）。本组测试锁定这两条行为：
+#   - override envelope 出现在 published_logs（content/stale/segment_id/log_id=None）。
+#   - override 不落库（agent_run_logs 无 override 行，保留 task-14 override 不污染历史）。
+#   - session channel（agent_session:{id}）收到 override envelope（publish_submitted_messages
+#     经 mocked_redis.publish 捕获）。
+#   - segment_id 透传：partial 行 published_logs entry 非空、complete 行 None。
+
+
+def _session_log_payloads(mocked_redis: AsyncMock) -> list[dict]:
+    """从 mocked_redis.publish 调用里挑出 session channel 的 log 事件 payload。
+
+    publish_submitted_messages 对每条 log 发两类 publish：
+      1. agent_run:{run_id} channel —— 整个 published_logs entry（扁平 StreamLogEvent）。
+      2. agent_session:{session_id} channel —— session_payload（带 event/session_id/run_id）。
+    本 helper 只取 session channel（topic 以 "agent_session:" 开头）且 event=='log'
+    的 payload，解析 JSON 返回 dict 列表。
+    """
+    import json
+
+    out: list[dict] = []
+    for call in mocked_redis.publish.call_args_list:
+        args, _ = call
+        if len(args) < 2:
+            continue
+        channel, raw = args[0], args[1]
+        if not isinstance(channel, str) or not channel.startswith("agent_session:"):
+            continue
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(payload, dict) and payload.get("event") == "log":
+            out.append(payload)
+    return out
+
+
+class TestOverridePublishsToSseNotPersisted:
+    """task-02 / FR-02：override 信号 publish 到 session SSE 但不落库。"""
+
+    @pytest.mark.asyncio
+    async def test_assistant_override_envelope_in_published_logs(
+        self, db_session, mocked_redis
+    ) -> None:
+        """assistant partial + [ASSISTANT_OVERRIDE] 同 segmentId → published_logs 含
+        一条 override envelope（content 前缀正确、segment_id=被撤回 id、stale=True、
+        log_id=None、channel=stdout），且 override 信号本身不落库（agent_run_logs 无
+        override 行）。count 仍 0（不进 log_entry 构造）。
+        """
+        from app.modules.daemon.run_sync.service import publish_submitted_messages
+
+        lease_id, run_id, token = await _seed_interactive_run_for_submit(db_session)
+        svc = DaemonService(db_session)
+        messages = [
+            {
+                "event_type": "text",
+                "content": "[ASSISTANT] 半截回复",
+                "channel": "stdout",
+                "metadata": {"segmentId": SEG, "isPartial": True},
+            },
+            {
+                "event_type": "text",
+                "content": f"[ASSISTANT_OVERRIDE] {SEG}",
+                "channel": "stdout",
+                "metadata": {"segmentId": SEG, "stale": True},
+            },
+        ]
+        result = await svc.submit_messages(lease_id, token, run_id, messages)
+        # partial 被 expunge + override 不进 log_entry → count 0（task-14 行为不变）。
+        assert result == 0
+        # 但 published_logs 含 override envelope（task-02 新行为）。
+        override_entries = [
+            e for e in result.published_logs if e.get("stale") is True
+        ]
+        assert len(override_entries) == 1, "override envelope 应 append 到 published_logs"
+        env = override_entries[0]
+        assert env["content"] == f"[ASSISTANT_OVERRIDE] {SEG}"
+        assert env["segment_id"] == SEG
+        assert env["stale"] is True
+        assert env["log_id"] is None
+        assert env["channel"] == "stdout"
+        assert "timestamp" in env, "envelope 必须带 timestamp（session_payload 直取）"
+
+        # override 不落库：agent_run_logs 无任何 override 行。
+        rows = await _fetch_logs(db_session, run_id)
+        assert len(rows) == 0, "override 信号不落库，partial 已被 expunge"
+
+        # 触发 publish（router 在 commit 后调），验证 session channel 收到 override envelope。
+        await publish_submitted_messages(result.publish_intent)
+        session_logs = _session_log_payloads(mocked_redis)
+        override_session = [
+            s for s in session_logs if s.get("stale") is True
+        ]
+        assert len(override_session) == 1, "session channel 应收到 override envelope"
+        assert override_session[0]["content"] == f"[ASSISTANT_OVERRIDE] {SEG}"
+        assert override_session[0]["segment_id"] == SEG
+        assert override_session[0]["stale"] is True
+
+    @pytest.mark.asyncio
+    async def test_thinking_override_envelope_in_published_logs(
+        self, db_session, mocked_redis
+    ) -> None:
+        """对齐 thinking：thinking partial + [THINKING_OVERRIDE] 同 segmentId →
+        published_logs 含 override envelope（content [THINKING_OVERRIDE] 前缀），
+        且 session channel 收到、不落库。覆盖 :413 thinking 分支。
+        """
+        from app.modules.daemon.run_sync.service import publish_submitted_messages
+
+        lease_id, run_id, token = await _seed_interactive_run_for_submit(db_session)
+        svc = DaemonService(db_session)
+        thinking_seg = "main:msg-think:0"
+        messages = [
+            {
+                "event_type": "text",
+                "content": "[THINKING] 半截思考",
+                "channel": "stdout",
+                "metadata": {"thinking": True, "segmentId": thinking_seg, "isPartial": True},
+            },
+            {
+                "event_type": "text",
+                "content": f"[THINKING_OVERRIDE] {thinking_seg}",
+                "channel": "stdout",
+                "metadata": {"thinking": True, "segmentId": thinking_seg, "stale": True},
+            },
+        ]
+        result = await svc.submit_messages(lease_id, token, run_id, messages)
+        assert result == 0
+
+        override_entries = [
+            e for e in result.published_logs if e.get("stale") is True
+        ]
+        assert len(override_entries) == 1
+        env = override_entries[0]
+        assert env["content"] == f"[THINKING_OVERRIDE] {thinking_seg}"
+        assert env["segment_id"] == thinking_seg
+        assert env["stale"] is True
+        assert env["log_id"] is None
+
+        rows = await _fetch_logs(db_session, run_id)
+        assert len(rows) == 0, "thinking override 也不落库"
+
+        await publish_submitted_messages(result.publish_intent)
+        session_logs = _session_log_payloads(mocked_redis)
+        override_session = [s for s in session_logs if s.get("stale") is True]
+        assert len(override_session) == 1
+        assert override_session[0]["content"] == f"[THINKING_OVERRIDE] {thinking_seg}"
+
+    @pytest.mark.asyncio
+    async def test_cross_call_override_publishs_and_deletes(
+        self, db_session, mocked_redis
+    ) -> None:
+        """跨调用场景：调用 A partial 落库 → 调用 B override 信号 → 调用 B 既
+        DELETE 调用 A 的 partial（task-14 R-05 不回归），又 publish override envelope
+        到 session SSE（task-02 新行为）。验证两条机制叠加正确。
+        """
+        from app.modules.daemon.run_sync.service import publish_submitted_messages
+
+        lease_id, run_id, token = await _seed_interactive_run_for_submit(db_session)
+        svc = DaemonService(db_session)
+        # 调用 A：partial 落库 commit。
+        await svc.submit_messages(
+            lease_id, token, run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": "[ASSISTANT] 半截回复",
+                    "channel": "stdout",
+                    "metadata": {"segmentId": SEG, "isPartial": True},
+                }
+            ],
+        )
+        assert len(await _fetch_logs(db_session, run_id)) == 1
+
+        # 调用 B：override 信号（跨调用 DELETE + publish）。
+        result_b = await svc.submit_messages(
+            lease_id, token, run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": f"[ASSISTANT_OVERRIDE] {SEG}",
+                    "channel": "stdout",
+                    "metadata": {"segmentId": SEG, "stale": True},
+                }
+            ],
+        )
+        assert result_b == 0, "override 信号本身不落库"
+
+        # 调用 A 的 partial 被跨调用 DELETE。
+        rows = await _fetch_logs(db_session, run_id)
+        assert len(rows) == 0, "调用 A 落库的 partial 应被 DELETE（task-14 R-05 不回归）"
+
+        # 调用 B 的 published_logs 含 override envelope（task-02 新行为）。
+        override_entries = [
+            e for e in result_b.published_logs if e.get("stale") is True
+        ]
+        assert len(override_entries) == 1
+        assert override_entries[0]["segment_id"] == SEG
+
+        # session channel 收到 override envelope。
+        await publish_submitted_messages(result_b.publish_intent)
+        session_logs = _session_log_payloads(mocked_redis)
+        assert any(s.get("stale") is True for s in session_logs)
+
+
+class TestSegmentIdTransmittedToSse:
+    """task-01 / FR-01：segment_id 透传到 SSE envelope（partial 非空、complete None）。"""
+
+    @pytest.mark.asyncio
+    async def test_partial_complete_segment_id_in_published_logs(
+        self, db_session, mocked_redis
+    ) -> None:
+        """partial 行 published_logs entry 的 segment_id 非空（"main:msg_xxx:N" 格式），
+        complete 行 segment_id 为 None。D-003 铁律：取 log_entry.segment_id（complete
+        行 None），不用循环顶部局部变量 segment_id（complete 行也非 None 会误判）。
+        """
+        from app.modules.daemon.run_sync.service import publish_submitted_messages
+
+        lease_id, run_id, token = await _seed_interactive_run_for_submit(db_session)
+        svc = DaemonService(db_session)
+        partial_seg = "main:msg-partial:text"
+        complete_seg = "main:msg-complete:text"
+        result = await svc.submit_messages(
+            lease_id, token, run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": "[ASSISTANT] 半截",
+                    "channel": "stdout",
+                    "metadata": {"segmentId": partial_seg, "isPartial": True},
+                },
+                {
+                    "event_type": "text",
+                    "content": "[ASSISTANT] 完整",
+                    "channel": "stdout",
+                    "metadata": {"segmentId": complete_seg, "isComplete": True},
+                },
+            ],
+        )
+        # 过滤掉 override envelope（stale=True），只看真实 log 行。
+        real_entries = [e for e in result.published_logs if e.get("stale") is not True]
+        by_content = {e["content"]: e for e in real_entries}
+        assert by_content["[ASSISTANT] 半截"]["segment_id"] == partial_seg, (
+            "partial 行 segment_id 应非空（取 log_entry.segment_id）"
+        )
+        assert by_content["[ASSISTANT] 完整"]["segment_id"] is None, (
+            "complete 行 segment_id 应为 None（D-003：取 log_entry.segment_id 而非"
+            "循环顶部局部变量，否则会被误判为半截）"
+        )
+
+        # session channel 透传一致。
+        await publish_submitted_messages(result.publish_intent)
+        session_logs = _session_log_payloads(mocked_redis)
+        session_by_content = {s["content"]: s for s in session_logs}
+        assert session_by_content["[ASSISTANT] 半截"]["segment_id"] == partial_seg
+        assert session_by_content["[ASSISTANT] 完整"]["segment_id"] is None

@@ -22,6 +22,10 @@ export function sanitizeSessionLogContent(content: string, channel?: string | nu
   if (trimmed.includes("AskUserQuestion")) return "";
   if (/^\[TOOL_RESULT\]\s*User answered/.test(trimmed)) return "";
   if (/^\[(SYSTEM|RESULT)[^\]]*\]/.test(trimmed)) return "";
+  // 2026-08-03-session-stream-partial-revoke / FR-04 / R-04：override 撤回令箭前缀不
+  // 泄漏到正文（防御性：attach 历史路径万一收到 override 文本，sanitize 兜底丢弃）。
+  // 与 classifySessionLog 同源 OVERRIDE_RE，仅判命中不取捕获组。
+  if (OVERRIDE_RE.test(trimmed)) return "";
   if (channel === "stderr") return `⚠️ ${trimmed}`;
   return trimmed.replace(/^\[(ASSISTANT|THINKING|LOG:\w+|TOOL_USE|TOOL_RESULT)\]\s?/, "");
 }
@@ -50,12 +54,34 @@ export type SessionLogSegmentKind =
   | "thinking"
   | "tool_use"
   | "tool_result"
-  | "stderr";
+  | "stderr"
+  | "override";
 
 export interface SessionLogSegment {
   kind: SessionLogSegmentKind;
   text: string;
+  /**
+   * 2026-08-03-session-stream-partial-revoke / FR-04：override kind 专有——
+   * 被撤回的 partial segmentId（取自 [*_OVERRIDE] 前缀后第一段非空白 token，
+   * 形如 "main:msg_abc:1" / "tu_xyz:2"）。供 onLog 查 Map 精确撤回。
+   */
+  segmentId?: string;
+  /**
+   * override kind 专有——区分撤回的是 reply（"assistant"）还是 thinking（"thinking"），
+   * task-06 据此决定截断 turn.output 还是移除 processItems 项。
+   */
+  variant?: "assistant" | "thinking";
 }
+
+/**
+ * 2026-08-03-session-stream-partial-revoke / FR-04 / D-002@v1：override 撤回令箭前缀正则。
+ * 命中 `[ASSISTANT_OVERRIDE]` / `[THINKING_OVERRIDE]` 前缀，第 1 捕获组是 OVERRIDE 类型
+ * （决定 variant），第 2 捕获组是被撤回的 segmentId（\S+，不含空白）。
+ *
+ * classifySessionLog 用捕获组解析 segmentId + variant；sanitizeSessionLogContent 只判
+ * 命中丢弃——同一常量避免两处规则漂移（task-05 constraints）。
+ */
+const OVERRIDE_RE = /^\[(ASSISTANT_OVERRIDE|THINKING_OVERRIDE)\]\s+(\S+)/;
 
 export function classifySessionLog(
   content: string,
@@ -66,6 +92,18 @@ export function classifySessionLog(
   if (trimmed.includes("AskUserQuestion")) return null;
   if (/^\[TOOL_RESULT\]\s*User answered/.test(trimmed)) return null;
   if (/^\[(SYSTEM|RESULT)[^\]]*\]/.test(trimmed)) return null;
+  // 2026-08-03-session-stream-partial-revoke / FR-04：override 撤回令箭识别。必须在
+  // [THINKING] 分支之前——否则 [THINKING_OVERRIDE] 会被 [THINKING] 前缀正则误吞前缀、
+  // 丢了 _OVERRIDE 语义（task-05 constraints）。text 留空（override 不渲染正文）。
+  const overrideMatch = OVERRIDE_RE.exec(trimmed);
+  if (overrideMatch) {
+    return {
+      kind: "override",
+      segmentId: overrideMatch[2],
+      variant: overrideMatch[1] === "ASSISTANT_OVERRIDE" ? "assistant" : "thinking",
+      text: "",
+    };
+  }
   if (channel === "stderr") return { kind: "stderr", text: trimmed };
   if (channel === "tool_call") return { kind: "tool_use", text: trimmed };
   // ql-20260730-003 修正：stdout [TOOL_USE] 文本行与 channel=tool_call JSON 是同一工具的

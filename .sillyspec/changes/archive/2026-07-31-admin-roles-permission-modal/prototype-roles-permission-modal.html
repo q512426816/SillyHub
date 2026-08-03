@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>/admin/roles 新建弹窗 + 权限选择优化 原型对比</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background:#f5f5f5; margin:0; padding:24px; color:#222; }
+  h1 { font-size:18px; margin:0 0 6px; }
+  .sub { color:#666; font-size:13px; margin-bottom:24px; }
+  .scheme { background:#fff; border:1px solid #ddd; border-radius:8px; padding:20px; margin-bottom:24px; }
+  .scheme h2 { font-size:15px; margin:0 0 4px; }
+  .tag { display:inline-block; font-size:11px; padding:2px 8px; border-radius:10px; margin-left:8px; vertical-align:middle; }
+  .tag-rec { background:#e6f7ee; color:#1a8a4e; }
+  .tag-mid { background:#eef4ff; color:#2a5bd7; }
+  .tag-big { background:#fff1f0; color:#cf1322; }
+  .pros { font-size:12px; color:#1a8a4e; margin:8px 0; }
+  .cons { font-size:12px; color:#b07000; margin:4px 0 12px; }
+  /* Modal 线框 */
+  .modal { width:560px; border:1px solid #bbb; border-radius:6px; background:#fff; box-shadow:0 4px 16px rgba(0,0,0,.08); margin:8px 0; overflow:hidden; }
+  .modal.wide { width:760px; }
+  .modal-bar { display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border-bottom:1px solid #eee; background:#fafafa; font-size:13px; font-weight:600; }
+  .modal-body { padding:14px; }
+  .field { margin-bottom:10px; }
+  .field label { display:block; font-size:11px; color:#888; margin-bottom:3px; }
+  .inp { border:1px solid #ccc; border-radius:4px; height:30px; padding:0 8px; font-size:12px; color:#999; background:#fff; }
+  .inp-block { display:block; width:100%; box-sizing:border-box; }
+  .perm-label { font-size:11px; color:#888; margin:6px 0; }
+  /* 方案A: 折叠+搜索 */
+  .search { border:1px solid #ccc; border-radius:4px; height:28px; padding:0 8px; font-size:12px; color:#aaa; width:100%; box-sizing:border-box; margin-bottom:8px; }
+  .menu-card { border:1px solid #e3e3e3; border-radius:4px; margin-bottom:6px; }
+  .menu-head { display:flex; align-items:center; gap:8px; padding:6px 10px; font-size:12px; }
+  .menu-head .arrow { color:#999; }
+  .menu-head .ck { width:13px; height:13px; }
+  .menu-head .cnt { color:#999; font-size:11px; }
+  .menu-body { border-top:1px solid #f0f0f0; padding:8px 10px; display:grid; grid-template-columns:repeat(3,1fr); gap:6px; background:#fcfcfc; }
+  .perm-item { font-size:11px; color:#666; display:flex; align-items:center; gap:4px; }
+  .perm-item .ck { width:12px; height:12px; }
+  .perm-item.on { color:#2a5bd7; }
+  .collapsed .menu-body { display:none; }
+  /* 方案B: 左树右权 */
+  .tree-layout { display:grid; grid-template-columns:200px 1fr; border:1px solid #e3e3e3; border-radius:4px; height:260px; }
+  .tree { border-right:1px solid #eee; padding:8px; overflow:auto; font-size:12px; }
+  .tree .sec { color:#888; font-size:11px; margin:6px 0 3px; text-transform:uppercase; }
+  .tree .node { padding:3px 6px; border-radius:3px; cursor:pointer; color:#444; }
+  .tree .node.sel { background:#eef4ff; color:#2a5bd7; font-weight:600; }
+  .tree .node .n { color:#aaa; font-size:10px; margin-left:4px; }
+  .rpane { padding:10px; overflow:auto; }
+  .rpane .rh { font-size:12px; font-weight:600; margin-bottom:6px; }
+  .rpane .ck-all { font-size:11px; color:#2a5bd7; margin-bottom:6px; }
+  /* 方案C: tab */
+  .tabs { display:flex; gap:2px; border-bottom:1px solid #eee; margin-bottom:8px; }
+  .tab { padding:5px 12px; font-size:12px; color:#666; border:1px solid transparent; border-bottom:none; border-radius:4px 4px 0 0; cursor:pointer; }
+  .tab.act { background:#fff; border-color:#eee #eee #fff; color:#2a5bd7; font-weight:600; position:relative; top:1px; }
+  .legend { font-size:12px; color:#888; margin-top:12px; padding:10px; background:#fafafa; border-radius:4px; }
+  .vs-note { font-size:12px; color:#888; margin:8px 0 4px; }
+</style>
+</head>
+<body>
+  <h1>/admin/roles 新建弹窗 + 工作区权限选择优化 · 原型对比</h1>
+  <p class="sub">现状:右侧抽屉(Drawer w-560) + 38 个 menu <b>默认全展开</b> → 垂直拉得很长。本次:① 新建改<b>居中弹窗(Modal)</b> ② 权限选择三方案对比,你看完定方向。<br>下方三个方案共用 Modal 外壳(标题栏 + Key/名称/描述),仅权限区交互不同。</p>
+
+  <!-- 方案 A -->
+  <div class="scheme">
+    <h2>方案 A:默认折叠 + 搜索 <span class="tag tag-rec">推荐 · 改动最小</span></h2>
+    <p class="pros">+ menu 默认折叠(只展开有选中的),垂直长度大幅缩短;顶部搜索框按权限名/key 过滤,快速定位。</p>
+    <p class="cons">− 权限多时仍需滚动(但折叠后已可控);搜索结果跨 menu 时高亮所属。</p>
+    <div class="modal">
+      <div class="modal-bar"><span>新建角色</span><span style="color:#999">✕</span></div>
+      <div class="modal-body">
+        <div class="field"><label>Key(唯一标识)</label><div class="inp inp-block">editor</div></div>
+        <div class="field"><label>名称</label><div class="inp inp-block">编辑者</div></div>
+        <div class="field"><label>权限(12 项已选)</label></div>
+        <div class="search">🔍 搜索权限名 / key…</div>
+        <!-- 默认折叠:只展开有选中的 menu -->
+        <div class="menu-card">
+          <div class="menu-head"><span class="arrow">▶</span><input class="ck" type="checkbox"><span>工作区首页</span><span class="cnt">(0/3)</span></div>
+        </div>
+        <div class="menu-card">
+          <div class="menu-head"><span class="arrow">▼</span><input class="ck" type="checkbox" checked><span>项目成员</span><span class="cnt">(3/3)</span></div>
+          <div class="menu-body">
+            <div class="perm-item on"><input class="ck" type="checkbox" checked>查看</div>
+            <div class="perm-item on"><input class="ck" type="checkbox" checked>新增</div>
+            <div class="perm-item on"><input class="ck" type="checkbox" checked>删除</div>
+          </div>
+        </div>
+        <div class="menu-card">
+          <div class="menu-head"><span class="arrow">▶</span><input class="ck indeterminate" type="checkbox"><span>里程碑</span><span class="cnt">(2/5)</span></div>
+        </div>
+        <div class="menu-card">
+          <div class="menu-head"><span class="arrow">▶</span><input class="ck" type="checkbox"><span>知识库</span><span class="cnt">(0/4)</span></div>
+        </div>
+        <p class="vs-note">… 其余 34 个 menu 默认折叠(只一条 header 行,不再撑高)。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 方案 B -->
+  <div class="scheme">
+    <h2>方案 B:左树(section/menu)右权限面板 <span class="tag tag-big">专业 · 改面大</span></h2>
+    <p class="pros">+ 左侧树总览全部 menu(选中态一目了然),右侧只显当前 menu 权限;高度固定不拉长,类似 RBAC 穿梭框。</p>
+    <p class="cons">− 改动最大(重写 picker 布局);小屏(560 Modal)左右分栏偏挤;需点击切换 menu 看权限。</p>
+    <div class="modal wide">
+      <div class="modal-bar"><span>新建角色</span><span style="color:#999">✕</span></div>
+      <div class="modal-body">
+        <div class="field"><label>Key / 名称 / 描述</label><div class="inp inp-block" style="color:#999">editor · 编辑者 · …</div></div>
+        <div class="perm-label">权限(12 项已选)</div>
+        <div class="tree-layout">
+          <div class="tree">
+            <div class="sec">工作区</div>
+            <div class="node">工作区首页 <span class="n">0/3</span></div>
+            <div class="node sel">项目成员 <span class="n">3/3</span></div>
+            <div class="node">里程碑 <span class="n">2/5</span></div>
+            <div class="node">知识库 <span class="n">0/4</span></div>
+            <div class="node">事件 <span class="n">0/3</span></div>
+            <div class="sec">系统</div>
+            <div class="node">用户 <span class="n">0/4</span></div>
+            <div class="node">角色 <span class="n">7/7</span></div>
+            <div class="node">Daemon <span class="n">0/5</span></div>
+            <div class="sec">PPM</div>
+            <div class="node">项目 <span class="n">0/6</span></div>
+          </div>
+          <div class="rpane">
+            <div class="rh">项目成员</div>
+            <div class="ck-all">☑ 全选 (3/3)</div>
+            <div class="perm-item on"><input class="ck" type="checkbox" checked>查看 project:read</div>
+            <div class="perm-item on"><input class="ck" type="checkbox" checked>新增 project:create</div>
+            <div class="perm-item on"><input class="ck" type="checkbox" checked>删除 project:delete</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 方案 C -->
+  <div class="scheme">
+    <h2>方案 C:按 section tab 切换 <span class="tag tag-mid">简单 · 中等改动</span></h2>
+    <p class="pros">+ 顶部 section tab(工作区 / 系统 / PPM / …),一次只显一个 section 的 menu+权限;每屏内容少不拉长。</p>
+    <p class="cons">− 跨 section 选权限要来回切 tab;section 内 menu 多时仍可能长(需配合折叠);总览全局选态不如 B 直观。</p>
+    <div class="modal">
+      <div class="modal-bar"><span>新建角色</span><span style="color:#999">✕</span></div>
+      <div class="modal-body">
+        <div class="field"><label>Key / 名称 / 描述</label><div class="inp inp-block" style="color:#999">editor · 编辑者 · …</div></div>
+        <div class="perm-label">权限(12 项已选)</div>
+        <div class="tabs">
+          <div class="tab act">工作区 (5/24)</div>
+          <div class="tab">系统 (7/11)</div>
+          <div class="tab">PPM (0/18)</div>
+          <div class="tab">发布 (0/6)</div>
+        </div>
+        <div class="menu-card">
+          <div class="menu-head"><span class="arrow">▼</span><input class="ck" type="checkbox" checked><span>项目成员</span><span class="cnt">(3/3)</span></div>
+          <div class="menu-body">
+            <div class="perm-item on"><input class="ck" type="checkbox" checked>查看</div>
+            <div class="perm-item on"><input class="ck" type="checkbox" checked>新增</div>
+            <div class="perm-item on"><input class="ck" type="checkbox" checked>删除</div>
+          </div>
+        </div>
+        <div class="menu-card">
+          <div class="menu-head"><span class="arrow">▶</span><input class="ck" type="checkbox"><span>里程碑</span><span class="cnt">(2/5)</span></div>
+        </div>
+        <p class="vs-note">… 仅"工作区"section 的 8 个 menu,其余 section 切 tab 才显。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <b>对比小结</b><br>
+    · <b>A 折叠+搜索</b>:改动最小,复用现有 menu 卡片结构(只改默认折叠+加搜索),立刻解决"太长",推荐首选。<br>
+    · <b>B 左树右权</b>:体验最专业、高度固定,但重写布局、560 Modal 分栏偏挤,适合权限极多(>50 menu)的后期。<br>
+    · <b>C tab</b>:介于两者,按 section 隔离,但跨 section 操作要切 tab。<br>
+    三方案共用:新建改 <b>居中 Modal</b>(替代右侧抽屉),Key/名称/描述字段不变,保存/取消底栏不变。
+  </div>
+</body>
+</html>

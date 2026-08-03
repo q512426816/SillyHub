@@ -1,11 +1,11 @@
 {
   "name_zh": "worktree 元数据",
-  "changeName": "2026-07-27-llm-provider-fetch-models",
-  "branch": "sillyspec/2026-07-27-llm-provider-fetch-models",
+  "changeName": "2026-08-03-session-stream-partial-revoke",
+  "branch": "sillyspec/2026-08-03-session-stream-partial-revoke",
   "baseBranch": "main",
-  "baseHash": "51e63ef45665fafecc0cb0ceeb50d1995b3e14f5",
-  "worktreePath": "C:\\Users\\qinyi\\IdeaProjects\\multi-agent-platform\\.sillyspec\\.runtime\\worktrees\\2026-07-27-llm-provider-fetch-models",
+  "baseHash": "b16cb70e8b619fd27f6a854ae5420996f57fb5c8",
+  "worktreePath": "F:\\WorkNew\\SillyHub\\.sillyspec\\.runtime\\worktrees\\2026-08-03-session-stream-partial-revoke",
   "mode": "worktree",
-  "createdAt": "2026-07-27T02:14:21.485Z",
+  "createdAt": "2026-08-03T02:33:35.170Z",
   "provisioning": true
 }

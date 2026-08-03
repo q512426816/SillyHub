@@ -61,6 +61,16 @@ describe("sanitizeSessionLogContent", () => {
   it("trim 首尾空白", () => {
     expect(sanitizeSessionLogContent("  你好  ")).toBe("你好");
   });
+
+  // 2026-08-03-session-stream-partial-revoke / FR-04 / R-04：override 撤回令箭前缀
+  // 不泄漏到正文（防御性：attach 历史路径万一收到 override 文本，sanitize 兜底丢弃）。
+  it("[ASSISTANT_OVERRIDE] 前缀 → 丢弃（不泄漏撤回信号到正文）", () => {
+    expect(sanitizeSessionLogContent("[ASSISTANT_OVERRIDE] main:msg_abc:1")).toBe("");
+  });
+
+  it("[THINKING_OVERRIDE] 前缀 → 丢弃", () => {
+    expect(sanitizeSessionLogContent("[THINKING_OVERRIDE] tu_xyz:2")).toBe("");
+  });
 });
 
 /**
@@ -134,6 +144,35 @@ describe("classifySessionLog", () => {
 
   it("tool_call channel 的 SYSTEM 行仍丢弃（丢弃规则优先于 channel 分流）", () => {
     expect(classifySessionLog("[SYSTEM] noise", "tool_call")).toBeNull();
+  });
+
+  // 2026-08-03-session-stream-partial-revoke / FR-04 / D-002@v1：override 撤回令箭识别。
+  // classifySessionLog 把 [ASSISTANT_OVERRIDE]/[THINKING_OVERRIDE] 前缀识别为 kind=override，
+  // 解析 segmentId（捕获组2）+ variant（assistant/thinking），供 task-06 onLog 精确撤回。
+  it("[ASSISTANT_OVERRIDE] → override + segmentId + variant=assistant", () => {
+    expect(classifySessionLog("[ASSISTANT_OVERRIDE] main:msg_abc:1")).toEqual({
+      kind: "override",
+      segmentId: "main:msg_abc:1",
+      variant: "assistant",
+      text: "",
+    });
+  });
+
+  it("[THINKING_OVERRIDE] → override + segmentId + variant=thinking", () => {
+    expect(classifySessionLog("[THINKING_OVERRIDE] tu_xyz:2")).toEqual({
+      kind: "override",
+      segmentId: "tu_xyz:2",
+      variant: "thinking",
+      text: "",
+    });
+  });
+
+  it("[THINKING_OVERRIDE] 不被 [THINKING] 分支误吞（返回 override 而非 thinking）", () => {
+    // 关键约束：override 分支必须在 [THINKING] 之前，否则 [THINKING_OVERRIDE] 的
+    // [THINKING] 前缀正则会先命中、丢掉 _OVERRIDE 语义、错判为 thinking。
+    const result = classifySessionLog("[THINKING_OVERRIDE] seg:1");
+    expect(result?.kind).toBe("override");
+    expect(result?.kind).not.toBe("thinking");
   });
 });
 
