@@ -1529,3 +1529,239 @@ describe("InteractiveSessionPanel 对话/全部视图切换（ql-20260729-005）
     expect(screen.getByText(/历史思考内容/)).toBeInTheDocument();
   });
 });
+
+/**
+ * 2026-08-03-session-stream-partial-revoke / FR-05 / task-08：onLog 按 segmentId
+ * 撤回已渲染 partial（半截→override→complete 全文）。覆盖 AC-04/05/07。
+ */
+describe("InteractiveSessionPanel partial override 撤回（task-06/08）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sessionApi.fetchPendingDialogs.mockResolvedValue([]);
+    sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
+  });
+
+  async function startSession() {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-1", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+    setupPanel();
+    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "hi" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
+    return stream;
+  }
+
+  it("AC-05 半截 reply → override → complete 全文：最终只剩 complete（无半截残留）", async () => {
+    const stream = await startSession();
+    const conn = stream.conn;
+
+    act(() => {
+      conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-1", turn: 1 }));
+      // 半截 reply（segment_id 非空）
+      conn.handlers.route(
+        makeEnvelope("log", {
+          run_id: "run-1", channel: "stdout", content: "[ASSISTANT] 半截",
+          segment_id: "main:m:1",
+        }),
+        "L1",
+      );
+    });
+    await waitFor(() => expect(screen.getByText(/半截/)).toBeInTheDocument());
+
+    // override 到达：撤回 main:m:1 半截
+    act(() => {
+      conn.handlers.route(
+        makeEnvelope("log", {
+          run_id: "run-1", channel: "stdout",
+          content: "[ASSISTANT_OVERRIDE] main:m:1",
+          segment_id: "main:m:1", stale: true, log_id: null,
+        }),
+        null,
+      );
+    });
+    await waitFor(() =>
+      expect(screen.queryByText(/半截/)).not.toBeInTheDocument(),
+    );
+
+    // complete 全文到达（segment_id=null）→ 只剩全文
+    act(() => {
+      conn.handlers.route(
+        makeEnvelope("log", {
+          run_id: "run-1", channel: "stdout", content: "[ASSISTANT] 全文内容",
+          segment_id: null,
+        }),
+        "L2",
+      );
+    });
+    await waitFor(() => expect(screen.getByText(/全文内容/)).toBeInTheDocument());
+    expect(screen.queryByText(/半截/)).not.toBeInTheDocument();
+  });
+
+  it("AC-05 thinking 撤回：override 到达后 processItems 中该项移除（切全部不见）", async () => {
+    const stream = await startSession();
+    const conn = stream.conn;
+
+    act(() => {
+      conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-1", turn: 1 }));
+      conn.handlers.route(
+        makeEnvelope("log", {
+          run_id: "run-1", channel: null, content: "[THINKING] 半截思考",
+          segment_id: "tu:2",
+        }),
+        "L1",
+      );
+    });
+    // 切「全部」确认思考项在
+    fireEvent.click(screen.getByRole("tab", { name: "全部" }));
+    await waitFor(() => expect(screen.getByText(/半截思考/)).toBeInTheDocument());
+
+    // override 到达 → 移除
+    act(() => {
+      conn.handlers.route(
+        makeEnvelope("log", {
+          run_id: "run-1", channel: null,
+          content: "[THINKING_OVERRIDE] tu:2",
+          segment_id: "tu:2", stale: true, log_id: null,
+        }),
+        null,
+      );
+    });
+    await waitFor(() =>
+      expect(screen.queryByText(/半截思考/)).not.toBeInTheDocument(),
+    );
+  });
+
+  it("AC-05 多 segment 不串扰（thinking）：撤回 main:t:1 的思考项不影响 tu_xyz:9", async () => {
+    // 选 thinking 维度验证多 segment 隔离：thinking 是独立 processItems 项，按 itemIndex
+    // filter 移除——天然隔离不串扰（design §5.3）。reply 走 output 字符串线性拼接，
+    // 多 segment 交叠时 slice 偏移无法精确隔离（既有模型限制，留 R-03），故隔离契约用
+    // thinking 项验证更贴合 design AC-05「按 segmentId 互不串扰」原意。
+    const stream = await startSession();
+    const conn = stream.conn;
+
+    act(() => {
+      conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-1", turn: 1 }));
+      // 主 agent 半截思考
+      conn.handlers.route(
+        makeEnvelope("log", {
+          run_id: "run-1", channel: null, content: "[THINKING] 主思考",
+          segment_id: "main:t:1",
+        }),
+        "L1",
+      );
+      // 子代理半截思考（不同 segmentId 前缀）
+      conn.handlers.route(
+        makeEnvelope("log", {
+          run_id: "run-1", channel: null, content: "[THINKING] 子思考",
+          segment_id: "tu_xyz:9",
+        }),
+        "L2",
+      );
+    });
+    fireEvent.click(screen.getByRole("tab", { name: "全部" }));
+    await waitFor(() => expect(screen.getByText(/主思考/)).toBeInTheDocument());
+    expect(screen.getByText(/子思考/)).toBeInTheDocument();
+
+    // 只撤回主 agent main:t:1
+    act(() => {
+      conn.handlers.route(
+        makeEnvelope("log", {
+          run_id: "run-1", channel: null,
+          content: "[THINKING_OVERRIDE] main:t:1",
+          segment_id: "main:t:1", stale: true, log_id: null,
+        }),
+        null,
+      );
+    });
+    await waitFor(() =>
+      expect(screen.queryByText(/主思考/)).not.toBeInTheDocument(),
+    );
+    // 子代理思考仍在（按 itemIndex 隔离，不串扰）
+    expect(screen.getByText(/子思考/)).toBeInTheDocument();
+  });
+
+  it("AC-07 历史兼容：缺 segment_id/stale（旧 backend）不崩、不误撤回", async () => {
+    const stream = await startSession();
+    const conn = stream.conn;
+
+    act(() => {
+      conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-1", turn: 1 }));
+      // 旧 backend：envelope 无 segment_id/stale 字段
+      conn.handlers.route(
+        makeEnvelope("log", { run_id: "run-1", channel: "stdout", content: "普通回复" }),
+        "L1",
+      );
+    });
+    await waitFor(() => expect(screen.getByText(/普通回复/)).toBeInTheDocument());
+    // 行为同现状：内容保留，无撤回
+    expect(screen.getByText(/普通回复/)).toBeInTheDocument();
+  });
+
+  it("R-02 turn 边界清空 Map：turn_completed 后同 segmentId override 不撤回新 turn", async () => {
+    const stream = await startSession();
+    const conn = stream.conn;
+    sessionApi.injectSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-2", status: "active",
+    });
+
+    act(() => {
+      conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-1", turn: 1 }));
+      conn.handlers.route(
+        makeEnvelope("log", {
+          run_id: "run-1", channel: "stdout", content: "[ASSISTANT] turn1半截",
+          segment_id: "main:m:1",
+        }),
+        "L1",
+      );
+    });
+    await waitFor(() => expect(screen.getByText(/turn1半截/)).toBeInTheDocument());
+
+    // turn1 完成 → Map 清空
+    act(() => {
+      conn.handlers.route(
+        makeEnvelope("turn_completed", { run_id: "run-1", status: "completed" }),
+      );
+    });
+
+    // 第二 turn
+    await waitFor(() => {
+      expect((screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement)).toBeTruthy();
+    }, { timeout: 2000 });
+    const input2 = screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement;
+    fireEvent.change(input2, { target: { value: "second" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalled());
+
+    act(() => {
+      conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-2", turn: 2 }));
+      // turn2 的回复（segment_id=null，complete 全文，不记入 Map）
+      conn.handlers.route(
+        makeEnvelope("log", {
+          run_id: "run-2", channel: "stdout", content: "[ASSISTANT] turn2回复",
+          segment_id: null,
+        }),
+        "L2",
+      );
+    });
+    await waitFor(() => expect(screen.getByText(/turn2回复/)).toBeInTheDocument());
+
+    // turn1 迟到的 override（segmentId=main:m:1）到达 turn2：Map 已在 turn1 完成时清空、
+    // turn2 无 main:m:1 的 partial → Map 无此 key → no-op，不撤回 turn2 内容（R-02）。
+    act(() => {
+      conn.handlers.route(
+        makeEnvelope("log", {
+          run_id: "run-2", channel: "stdout",
+          content: "[ASSISTANT_OVERRIDE] main:m:1",
+          segment_id: "main:m:1", stale: true, log_id: null,
+        }),
+        null,
+      );
+    });
+    await waitFor(() => expect(screen.getByText(/turn2回复/)).toBeInTheDocument());
+  });
+});
