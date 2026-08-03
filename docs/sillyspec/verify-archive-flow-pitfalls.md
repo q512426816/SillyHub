@@ -7,6 +7,8 @@ status: active
 
 # verify/archive 流程坑（2026-07-30-daemon-heartbeat-dedup-fix 归档时踩到）
 
+> **进度注记（2026-08-03）**：坑 3 已修（archive step5 --change 在 archive/ 匹配放行，stage-contract.js archive 分支）；坑 4 已修（sync-module-docs 加 requiresWait，--continue 确认后回到本步由 agent 写模块卡片，ql-20260803-002-eff0）。坑 1/2/5 部分修（reopen execute / execute --done 自动补 cannot_verify 草稿 / doctor --align-execute-progress 已落地，progress repair 仍保守）。待坑 1/2/5 全清后可移 finished。
+
 ## 坑 1：plan 后加 Wave/task → execute 阶段流转卡 + 状态机不一致
 
 - **现象**：变更 execute 已 ✅，reopen 补 task-14（在 plan.md 加 Wave 2.1）后，sillyspec 把 task-14 识别为 execute 的「Wave 4 执行」step，但该 step 从未走（手动实现的 task-14）→ step pending。导致 `sillyspec run verify` 报「阶段转换不允许：(起始) → verify，verify 需要先完成 execute」。

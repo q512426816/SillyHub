@@ -39,10 +39,12 @@ export function errMessage(err: unknown, fallback?: string): string {
 export function useNotify(): {
   error: (err: unknown, fallback?: string) => void;
   success: (msg: string) => void;
+  warning: (msg: string) => void;
 } {
   const { message } = App.useApp();
   return {
     error: (err, fallback) => message.error(errMessage(err, fallback)),
     success: (msg) => message.success(msg),
+    warning: (msg) => message.warning(msg),
   };
 }

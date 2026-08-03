@@ -766,9 +766,7 @@ class TestOverridePublishsToSseNotPersisted:
         # partial 被 expunge + override 不进 log_entry → count 0（task-14 行为不变）。
         assert result == 0
         # 但 published_logs 含 override envelope（task-02 新行为）。
-        override_entries = [
-            e for e in result.published_logs if e.get("stale") is True
-        ]
+        override_entries = [e for e in result.published_logs if e.get("stale") is True]
         assert len(override_entries) == 1, "override envelope 应 append 到 published_logs"
         env = override_entries[0]
         assert env["content"] == f"[ASSISTANT_OVERRIDE] {SEG}"
@@ -785,9 +783,7 @@ class TestOverridePublishsToSseNotPersisted:
         # 触发 publish（router 在 commit 后调），验证 session channel 收到 override envelope。
         await publish_submitted_messages(result.publish_intent)
         session_logs = _session_log_payloads(mocked_redis)
-        override_session = [
-            s for s in session_logs if s.get("stale") is True
-        ]
+        override_session = [s for s in session_logs if s.get("stale") is True]
         assert len(override_session) == 1, "session channel 应收到 override envelope"
         assert override_session[0]["content"] == f"[ASSISTANT_OVERRIDE] {SEG}"
         assert override_session[0]["segment_id"] == SEG
@@ -823,9 +819,7 @@ class TestOverridePublishsToSseNotPersisted:
         result = await svc.submit_messages(lease_id, token, run_id, messages)
         assert result == 0
 
-        override_entries = [
-            e for e in result.published_logs if e.get("stale") is True
-        ]
+        override_entries = [e for e in result.published_logs if e.get("stale") is True]
         assert len(override_entries) == 1
         env = override_entries[0]
         assert env["content"] == f"[THINKING_OVERRIDE] {thinking_seg}"
@@ -843,9 +837,7 @@ class TestOverridePublishsToSseNotPersisted:
         assert override_session[0]["content"] == f"[THINKING_OVERRIDE] {thinking_seg}"
 
     @pytest.mark.asyncio
-    async def test_cross_call_override_publishs_and_deletes(
-        self, db_session, mocked_redis
-    ) -> None:
+    async def test_cross_call_override_publishs_and_deletes(self, db_session, mocked_redis) -> None:
         """跨调用场景：调用 A partial 落库 → 调用 B override 信号 → 调用 B 既
         DELETE 调用 A 的 partial（task-14 R-05 不回归），又 publish override envelope
         到 session SSE（task-02 新行为）。验证两条机制叠加正确。
@@ -856,7 +848,9 @@ class TestOverridePublishsToSseNotPersisted:
         svc = DaemonService(db_session)
         # 调用 A：partial 落库 commit。
         await svc.submit_messages(
-            lease_id, token, run_id,
+            lease_id,
+            token,
+            run_id,
             [
                 {
                     "event_type": "text",
@@ -870,7 +864,9 @@ class TestOverridePublishsToSseNotPersisted:
 
         # 调用 B：override 信号（跨调用 DELETE + publish）。
         result_b = await svc.submit_messages(
-            lease_id, token, run_id,
+            lease_id,
+            token,
+            run_id,
             [
                 {
                     "event_type": "text",
@@ -887,9 +883,7 @@ class TestOverridePublishsToSseNotPersisted:
         assert len(rows) == 0, "调用 A 落库的 partial 应被 DELETE（task-14 R-05 不回归）"
 
         # 调用 B 的 published_logs 含 override envelope（task-02 新行为）。
-        override_entries = [
-            e for e in result_b.published_logs if e.get("stale") is True
-        ]
+        override_entries = [e for e in result_b.published_logs if e.get("stale") is True]
         assert len(override_entries) == 1
         assert override_entries[0]["segment_id"] == SEG
 
@@ -917,7 +911,9 @@ class TestSegmentIdTransmittedToSse:
         partial_seg = "main:msg-partial:text"
         complete_seg = "main:msg-complete:text"
         result = await svc.submit_messages(
-            lease_id, token, run_id,
+            lease_id,
+            token,
+            run_id,
             [
                 {
                     "event_type": "text",

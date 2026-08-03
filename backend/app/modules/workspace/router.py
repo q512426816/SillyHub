@@ -121,6 +121,21 @@ async def scan_generate(
     )
 
 
+# 创建端点「复用/激活/复活」标记 → 用户可读提示（quick ql-20260803-003-cb34）。
+_CREATION_NOTICE_TEXT: dict[str, str] = {
+    "reused_active": (
+        "该路径已存在活跃工作区，本次直接复用了它（未新建；传入的 daemon 绑定不会写入，"
+        "如需绑定请进入工作区后在概览页配置）。"
+    ),
+    "activated_pending": "该路径已存在待激活工作区，本次已将其激活。",
+    "resurrected": "该路径曾存在已删除的工作区，本次已复活原记录（含 daemon 绑定）。",
+}
+
+
+def _creation_notice(notice: dict[str, str]) -> str:
+    return _CREATION_NOTICE_TEXT.get(notice.get("kind", ""), "")
+
+
 @router.post(
     "",
     response_model=WorkspaceRead,
@@ -132,8 +147,12 @@ async def create_workspace(
     user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_WRITE))],
 ) -> WorkspaceRead:
     service = WorkspaceService(session)
-    workspace = await service.create(payload, created_by=user.id)
-    return WorkspaceRead.model_validate(workspace)
+    notice: dict[str, str] = {}
+    workspace = await service.create(payload, created_by=user.id, notice=notice)
+    ws_read = WorkspaceRead.model_validate(workspace)
+    if notice:
+        ws_read.creation_notice = _creation_notice(notice)
+    return ws_read
 
 
 @router.post("/{workspace_id}/activate", response_model=WorkspaceRead)

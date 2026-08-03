@@ -1,4 +1,10 @@
 import "@testing-library/jest-dom/vitest";
+import { configure } from "@testing-library/react";
+
+// CI 满载并发（128 测试文件）下 jsdom 渲染+异步 state 更新偏慢，`findBy*`/`waitFor`
+// 默认 1s 等待在部分用例偶发超时（ImportModuleModal ④/⑤ 曾连续 flake）。
+// 全局提到 5s：合法等待更宽容，不掩盖逻辑错误（通过仍毫秒级）。
+configure({ asyncUtilTimeout: 5000 });
 
 // localStorage polyfill: vitest jsdom + Node 22 实验性 localStorage 不可用,
 // daemon/admin 等测试经 zustand persist 依赖 localStorage,补 mock。
