@@ -254,7 +254,7 @@ export function InteractiveSessionPanel({
   // 挂 useRef 不驱动渲染——撤回的渲染由 setView/upsertTurn 触发，Map 仅作 segmentId→起点
   // 查表。收到 override 令箭时按 segmentId 截断 turn.output(slice(0, outputStart)) 或移除
   // processItems 项。turn 边界（onTurnCompleted/clearCurrentRun）清空防跨 turn 串扰（R-02）。
-  const partialSegmentsRef = useRef<Map<string, { outputStart: number } | { itemIndex: number }>>(new Map());
+  const partialSegmentsRef = useRef<Map<string, { outputStart: number; length: number } | { itemIndex: number }>>(new Map());
 
   // 当在线 provider 变化且当前选中的不再可用，回退到默认。
   useEffect(() => {
@@ -316,7 +316,8 @@ export function InteractiveSessionPanel({
                 if (!start) return turn;
                 partialSegmentsRef.current.delete(seg.segmentId);
                 if (seg.variant === "assistant" && "outputStart" in start) {
-                  return { ...turn, output: turn.output.slice(0, start.outputStart) };
+                  const end = start.outputStart + (start.length ?? 0);
+                  return { ...turn, output: turn.output.slice(0, start.outputStart) + turn.output.slice(end) };
                 }
                 if (seg.variant === "thinking" && "itemIndex" in start) {
                   return {
@@ -380,7 +381,12 @@ export function InteractiveSessionPanel({
                 // override 时按此起点 slice(0, outputStart) 截断撤回。complete（segment_id
                 // 为 null/undefined）不记 Map——design §9 兼容：旧 backend 缺字段 undefined 空转。
                 if (env.segment_id) {
-                  partialSegmentsRef.current.set(env.segment_id, { outputStart: turn.output.length });
+                  const existing = partialSegmentsRef.current.get(env.segment_id);
+                    if (existing && "outputStart" in existing) {
+                      existing.length += seg.text.length;
+                    } else {
+                      partialSegmentsRef.current.set(env.segment_id, { outputStart: turn.output.length, length: seg.text.length });
+                    }
                 }
                 return {
                   ...turn,
