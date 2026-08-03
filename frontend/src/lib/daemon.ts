@@ -732,6 +732,26 @@ export interface SessionStreamEnvelope {
    */
   cache_read_tokens?: number | null;
   cache_creation_tokens?: number | null;
+  /**
+   * 2026-08-03-session-stream-partial-revoke / FR-03 / design §5 Phase2 / §7.2：
+   * 流式分片 segment_id。backend（task-01 透传 log_entry.segment_id）对 partial 半截
+   * 行下发非空（形如 "main:<msg_id>" 或 "<tool_use_id>:<seq>"），对 complete/其他行
+   * 下发 null。前端 onLog 据此识别「半截」并记录起点，收到对应 override 令箭时精确撤回。
+   *
+   * 可选（design §9 兼容策略）：未升级的旧 backend 不下发此字段，运行时为 undefined，
+   * onLog 守卫 `env.segment_id` 非空才记 Map，undefined 空转不误撤回。
+   */
+  segment_id?: string | null;
+  /**
+   * 2026-08-03-session-stream-partial-revoke / design §7.3：override 撤回令箭行
+   * （[ASSISTANT_OVERRIDE]/[THINKING_OVERRIDE] 前缀，task-02 publish-only 不落库）
+   * 此字段为 true，标识该行是撤回信号而非正文日志。
+   *
+   * 可选：同 segment_id，旧 backend 缺此字段时 undefined，onLog 不依赖它（改由
+   * classifySessionLog 识别 override 前缀 kind==="override" 触发撤回），stale 仅供
+   * 日志/调试观测，避免与正文日志混淆。
+   */
+  stale?: boolean;
 }
 
 export interface SessionStreamHandlers {
