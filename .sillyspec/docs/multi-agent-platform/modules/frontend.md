@@ -77,4 +77,6 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 - ql-20260731-001-3abf | 平台技能清单显示每个技能描述：`lib/custom-skills.ts` 加 `PlatformSkillSummary` 类型（name/description/file_count）+ `PlatformSkillsManifest` 加可选 `skills` 字段（manifest 端点返回 dict[str,Any] 未进 OpenAPI 生成范围，继续手写对齐后端）；`settings/skills/page.tsx` 的 `deriveSkillGroups` 回退结构对齐（skill→name / fileCount→file_count），`platformGroups` 优先用 `manifest.skills`（兜底 deriveSkillGroups），表格「说明」列渲染 `g.description || 通用文案`（原所有技能写死同一句废话）；`page.test.tsx` 加 description 渲染测试（mock manifest 带 skills），7 passed + tsc 0 错。
 
+- ql-20260803-003-cb34 | 添加工作区对话框对「复用已存在工作区」显式提示：`useNotify` 补 `warning` 键（antd message.warning）；`workspace-scan-dialog.tsx` 创建成功读 `ws.creation_notice` 非空即弹 warning（复用/激活/复活文案来自后端），否则 `success("工作区已创建")`，杜绝静默 201「创建成功却看不到/绑定没生效」困惑。
+
 <!-- MANUAL_NOTES_END -->

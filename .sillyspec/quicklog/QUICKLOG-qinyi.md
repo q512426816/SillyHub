@@ -138,3 +138,20 @@
 根因：①（选项不全）extractDialogQA 只取 question+answer，丢弃 dialog_payload.questions[].options（DB 实测每问 3-4 个 {label,description}），且 (Recommended) 是 option.label 自带不是渲染加的；②（样式割裂）AskUserToolCard 内容区（❓问题+单行→回答）与 ToolEventCard（mono 参数行+折叠结果）风格不一致；③（不连贯无序）AskUser 卡片由 dialogHistory.filter 单独渲染、固定堆在所有 processItems 之后，脱离思考/工具时间线——而 AskUser 走 onUserDialog 不进 tool_use 日志，原本无法与思考/工具共序。
 方案：①extractDialogQA 升级提取全部 options 并按 answer.answer===option.label 标记 selected，answerText 兜底自由作答；②AskUserToolCard 重构为显全部选项（选中绿底✓ / 未选灰○ / hover 显 description），问题用 mono 参数风对齐 ToolEventCard；③SessionProcessItem 加可选 ts，onLog（实时 env.timestamp）与 logsToTurns（历史 entry.timestamp）5 处填 ts，turn 渲染「全部」视图把 processItems 与该 turn 的 dialog（ts=created_at）合并按 ts 排序统一交给 TurnDetailsList 渲染——思考/工具/AskUser 同一时间线连贯有序（sort 用 Number.isFinite 守 NaN）；对话视图保留 ❓+answerText 轻量记录。
 结果：daemon 147 passed（13 files，新增 extractDialogQA options/selected 5 case + AC-10-01c 显全部选项断言）、tsc exit 0；待部署本地+阿里云。样式观感待浏览器实测。
+## ql-20260803-003-cb34 | 2026-08-03 14:26:25 | POST /api/workspaces 复用已存在工作区（同 root_path active/pending/软删）时必须显式提示
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/workspace/schema.py（WorkspaceRead 加可选 `creation_notice`，仅创建端点填，列表/详情恒 None）
+- backend/app/modules/workspace/service.py（`create` 加 `notice` 注入参数，默认 None 零影响；reused_active / activated_pending / resurrected 三分支填 kind）
+- backend/app/modules/workspace/router.py（`_CREATION_NOTICE_TEXT` 中文提示 + `_creation_notice` 映射，create_workspace 按 notice 回填）
+- backend/app/modules/workspace/tests/test_router.py（`test_create_duplicate_returns_existing` 补断言：新建无提示 + 复用必带「复用」文案）
+- backend/openapi.json（gen:types 同步刷新）
+- frontend/src/components/workspace-scan-dialog.tsx（创建成功读 `ws.creation_notice` 非空即 `notify.warning`，否则 success「工作区已创建」）
+- frontend/src/lib/api-types.ts（gen:types 生成含 creation_notice）
+- frontend/src/lib/errors.ts（useNotify 补 `warning` 键 → antd message.warning）
+
+需求：POST /api/workspaces 复用已存在工作区（同 root_path active/pending/软删）时必须显式提示，杜绝「创建成功却看不到 / daemon 没绑定」困惑。
+根因：service.create 对同 root_path 已存在 active 工作区直接 `return existing`（复用），pending 走激活、软删走复活，三条路都静默返回 201；router 无任何标记，前端对话框 `createWorkspace` 成功即 `onCreated()` 关闭，用户完全无感知。且复用分支不写 daemon 绑定，用户传的 daemon_id 被吞。
+方案：后端 `WorkspaceRead` 加可选 `creation_notice`；`service.create` 加 `notice` 注入参数（默认 None，不动 12 处直接调 create 的测试签名）在复用/激活/复活三分支填 `kind`；router 用 `_CREATION_NOTICE_TEXT` 转中文提示（含「daemon 绑定未写入，请进工作区后配置」）；前端对话框收到非空即弹 warning；`useNotify` 补 `warning` 键。改后跑 `pnpm gen:types` 刷新 openapi.json + api-types.ts。
+结果：后端 ruff/mypy 绿，workspace 模块 142 passed + 新增回归 2 passed；前端 tsc 全量 0 错、workspace 相关 57 passed；模块文档 backend.md / frontend.md 变更索引已同步。

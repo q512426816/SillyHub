@@ -125,6 +125,8 @@ async def test_create_duplicate_returns_existing(
         headers=auth_headers,
     )
     assert first.status_code == 201
+    # quick ql-20260803-003-cb34：新建无复用提示。
+    assert first.json().get("creation_notice") is None
     # Same root_path returns the existing workspace
     second = await client.post(
         "/api/workspaces",
@@ -133,6 +135,8 @@ async def test_create_duplicate_returns_existing(
     )
     assert second.status_code == 201
     assert second.json()["id"] == first.json()["id"]
+    # quick ql-20260803-003-cb34：复用必须带用户可读提示，不能静默返回。
+    assert "复用" in second.json().get("creation_notice", "")
 
 
 async def test_rescan_updates_last_scanned_at(

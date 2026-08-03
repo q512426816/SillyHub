@@ -212,6 +212,9 @@ class WorkspaceRead(BaseModel):
     last_scanned_at: datetime | None
     deleted_at: datetime | None
     owner: OwnerRead | None = None
+    # 仅创建端点（POST /api/workspaces）在「复用已存在工作区 / 激活 pending /
+    # 复活软删」时填写的用户可读提示；新建或列表/详情接口恒 None。
+    creation_notice: str | None = None
 
 
 class WorkspaceListResponse(BaseModel):

@@ -76,4 +76,6 @@ multi-agent-platform 的核心 API 服务，monorepo 的"大脑"。以 FastAPI �
 
 - ql-20260731-001-3abf | 平台技能清单 manifest 增 skills 摘要字段：`skills_bundle_service.py` 新增 `_parse_skill_frontmatter`（解析 SKILL.md 开头 YAML frontmatter 取 name/description，无围栏 / YAML 语法错 / 解码错均返回空 dict 不抛异常）+ `_summarize_skills`（按顶层目录聚合 name/description/file_count，name=目录名与 daemon 同步路径一致，注意目录名 `sillyspec-archive` 与 frontmatter `name: sillyspec:archive` 不同）；`build_skills_manifest` 返回新增 `skills` 字段供前端清单页展示每个技能描述（不动 `files`，daemon 同步与 version 计算零影响）。`test_skills_bundle.py` 加 4 测试（frontmatter 解析 / 聚合 / 端到端 description / 无 frontmatter 空兜底），15 passed。
 
+- ql-20260803-003-cb34 | POST /api/workspaces 复用已存在工作区时显式提示：`WorkspaceRead` 加可选 `creation_notice`（仅创建端点填，列表/详情恒 None）；`WorkspaceService.create` 加 `notice` 注入参数（默认 None 零影响）在「同 root_path 已有 active→reused_active / pending→activated_pending / 软删→resurrected」三分支填 kind；router 据此转中文提示（含 daemon 绑定未写入提醒）。`test_router.py::test_create_duplicate_returns_existing` 补回归断言（新建无提示 + 复用必带「复用」文案）。
+
 <!-- MANUAL_NOTES_END -->

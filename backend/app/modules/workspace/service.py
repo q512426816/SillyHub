@@ -125,6 +125,7 @@ class WorkspaceService:
         payload: WorkspaceCreate,
         *,
         created_by: uuid.UUID | None,
+        notice: dict[str, str] | None = None,
     ) -> Workspace:
         slug = payload.slug or slugify(payload.name)
         now = datetime.now(UTC)
@@ -134,6 +135,8 @@ class WorkspaceService:
         existing = await self._find_active_by_root_path(payload.root_path)
         if existing:
             if existing.status == "active":
+                if notice is not None:
+                    notice["kind"] = "reused_active"
                 return existing
             # Pending workspace (e.g. from a previous scan-generate): activate it.
             existing.name = payload.name
@@ -153,6 +156,8 @@ class WorkspaceService:
             # D-006@v1：commit 后清权限缓存（新增 owner 角色，perm:*/ppm-scope:* 失效）。
             await invalidate_all_permissions()
             log.info("workspace.activated_from_create", workspace_id=str(existing.id))
+            if notice is not None:
+                notice["kind"] = "activated_pending"
             return existing
 
         # task-02 AC-04b：同 root_path 的 soft-deleted workspace 存在时复活原行
@@ -185,6 +190,8 @@ class WorkspaceService:
             # D-006@v1：commit 后清权限缓存（新增 owner 角色，perm:*/ppm-scope:* 失效）。
             await invalidate_all_permissions()
             log.info("workspace.resurrected", workspace_id=str(resurrected.id))
+            if notice is not None:
+                notice["kind"] = "resurrected"
             return resurrected
 
         # ── FR-06 / D-003@v1：daemon-client 唯一路径（backend 读不到客户端 root_path）──

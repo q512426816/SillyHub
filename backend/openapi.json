@@ -49478,6 +49478,17 @@
                 "type": "null"
               }
             ]
+          },
+          "creation_notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Creation Notice"
           }
         },
         "type": "object",

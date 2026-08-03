@@ -16119,6 +16119,8 @@ export interface components {
             /** Deleted At */
             deleted_at: string | null;
             owner?: components["schemas"]["app__modules__workspace__schema__OwnerRead"] | null;
+            /** Creation Notice */
+            creation_notice?: string | null;
         };
         /** WorkspaceRoleAssignment */
         WorkspaceRoleAssignment: {

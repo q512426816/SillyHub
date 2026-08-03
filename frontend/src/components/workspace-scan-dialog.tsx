@@ -11,7 +11,7 @@ import {
   PROVIDER_META,
   type DaemonInstanceRead,
 } from "@/lib/daemon";
-import { errMessage } from "@/lib/errors";
+import { errMessage, useNotify } from "@/lib/errors";
 import {
   createWorkspace,
 } from "@/lib/workspaces";
@@ -39,6 +39,10 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
     "platform-managed" | "repo-mirrored" | "repo-native"
   >("platform-managed");
 
+  // quick ql-20260803-003-cb34：创建后如后端标记「复用/激活/复活」则提示用户，避免
+  // 静默返回 201（同 root_path 已有工作区被复用）导致「创建成功却看不到/绑定没生效」的困惑。
+  const notify = useNotify();
+
   useEffect(() => {
     void listDaemonInstances()
       .then(setInstances)
@@ -51,12 +55,18 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
     setError(null);
     setPhase("creating");
     try {
-      await createWorkspace({
+      const ws = await createWorkspace({
         name: name.trim() || normalizedRoot.split(/[\\/]/).filter(Boolean).at(-1) || normalizedRoot,
         root_path: normalizedRoot,
         daemon_id: daemonId,
         spec_strategy: specStrategy,
       });
+      // quick ql-20260803-003-cb34：复用/激活/复活时后端返回 creation_notice，必须显式提示。
+      if (ws.creation_notice) {
+        notify.warning(ws.creation_notice);
+      } else {
+        notify.success("工作区已创建");
+      }
       onCreated();
     } catch (err) {
       setError(errMessage(err, "创建失败"));
