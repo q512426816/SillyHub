@@ -18,7 +18,8 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 对外契约是浏览器渲染的页面与少量 BFF route：
 
-- **页面路由**（App Router）：根 `page.tsx`；`(auth)/login` 登录；`(dashboard)/` 下含 workspaces、runtimes、settings、admin、ppm 五大功能区，各自带 `layout.tsx`。
+- **页面路由**（App Router）：根 `page.tsx`；`(auth)/login` 登录；`(dashboard)/` 下含 workspaces、runtimes、settings、admin、ppm、**agent-profiles** 等区域，各自带 `layout.tsx`。
+- **AgentProfile 前端**（2026-08-04-agent-profile-ui-redesign）：`(dashboard)/agent-profiles` 全局卡片墙页（独立一级菜单，跨工作区聚合视图）+ ws 内页 `workspaces/[id]/agent-profiles`（复用卡片墙 + workspace 预筛）；组件 `components/agent-profile/`（agent-profile-card 角色卡 / card-grid 卡片墙 / preview 人设预览）+ 重做 `agent-profile-form`（900px 双栏左填右实时预览 + 工作区上下文选择器）+ `agent-profile-select`（选档下拉 antd Select）。
 - **BFF route handlers**：`src/app/api/` 下 daemon、daemon-chat、workspaces，承接需要服务端代理的 daemon 通信与 SSE/WS 转发。
 - **后端依赖**：所有领域数据来自 backend `/api/*`；daemon 实时会话走 WebSocket/SSE。**模型错误可见性**：run failed 时 `listSessionRuns`（`lib/daemon.ts`）取 `GET /api/daemon/sessions/{id}/runs` 的 error_detail，normalize（`agent-log/normalize.ts`）生成 error 类日志项，`RunErrorItem` 渲染原因/hint/actions（重发/切换供应商/详情）；agent 页（agent-run-panel）与 runtime 聊天窗（interactive-session-panel）两面接通。
 - **构建产物**：`next build` 产出独立 Node 服务，Docker 中以独立容器运行，端口对 backend 反代或直连。

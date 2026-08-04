@@ -11,7 +11,9 @@ import { useSession } from "@/stores/session";
 // task-05：工作区守卫白名单（平台级后台路由 + 选择器页本身）。
 // 设计依据 design §5 P2 + §9（白名单 = 现有平台级路由）。
 // task-08：加入 /account（个人中心，平台级、不依赖工作区）。
-const WORKSPACE_WHITELIST = ["/workspaces", "/admin", "/settings", "/ppm", "/runtimes", "/account"];
+// 2026-08-04-agent-profile-ui-redesign task-05 补：加入 /agent-profiles（智能体档案全局页，
+// 独立一级菜单、跨工作区聚合视图，不依赖工作区上下文——execute 时遗漏，部署实测发现被守卫重定向）。
+const WORKSPACE_WHITELIST = ["/workspaces", "/admin", "/settings", "/ppm", "/runtimes", "/account", "/agent-profiles"];
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const router = useRouter();

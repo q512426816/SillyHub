@@ -10,6 +10,7 @@ import {
   Activity,
   AlertTriangle,
   BarChart3,
+  Bot,
   Boxes,
   CalendarDays,
   ClipboardList,
@@ -94,6 +95,9 @@ const MENU_ICON_MAP: Record<string, LucideIcon> = {
   "/settings/skills": Puzzle,
   "/settings/mcp": PlugZap,
   "/settings/providers": Cloud,
+  // 2026-08-04-agent-profile-ui-redesign task-05（D-001/D-007）：智能体档案全局卡片墙
+  // 一级菜单。图标 Bot（机器人，语义=智能体人设，避开与 agent 控制台 Terminal 重复）。
+  "/agent-profiles": Bot,
   // ppm（absolute href /ppm/*）
   // 「个人工作台」作 PPM 菜单首项(task-08 / D-001@v1);图标 LayoutDashboard。
   // 注:菜单条目本身(menuKey/label/href/permissions)在 lib/menu-permissions.ts

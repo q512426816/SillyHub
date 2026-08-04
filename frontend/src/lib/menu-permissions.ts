@@ -237,6 +237,21 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     matchPattern: "/settings/mcp",
     permissions: [{ key: "settings:admin", name: "平台设置管理" }],
   },
+  {
+    // 2026-08-04-agent-profile-ui-redesign task-05 新增（D-001/D-007）：智能体档案
+    // 提为侧边栏一级菜单，点击直达全局卡片墙 /agent-profiles（跨工作区聚合视图）。
+    // permissions:[] 对齐 skills（D-003）：档案对所有登录用户可见，菜单不挂独立权限；
+    // 空 permissions 经 permission.ts:41 hasAnyPermission（user 非 null 时 return true）
+    // 判定为登录即可见。工作区详情页快捷入口（workspaces/[id]/page.tsx:361）保留不动。
+    section: "agent",
+    menuKey: "agent-profiles",
+    menuLabel: "智能体档案",
+    icon: "🤖",
+    href: "/agent-profiles",
+    absolute: true,
+    matchPattern: "/agent-profiles",
+    permissions: [],
+  },
 
   // ── config 配置中心（4 条，含新增 llm-providers；runtimes 自 system 移入，D-006）
   {

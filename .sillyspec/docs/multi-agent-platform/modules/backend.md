@@ -20,7 +20,8 @@ multi-agent-platform 的核心 API 服务，monorepo 的"大脑"。以 FastAPI �
 
 - 基础：health、auth、members、workspace、admin、settings、scan_docs
 - SillySpec 编排：change、change_writer、task、workflow、archive、spec_workspace、release、knowledge、incident
-- Agent/运行时：agent、runtime、daemon（守护进程接入）、lease（租约）、tool_gateway、policy（权限策略）。**模型错误可见性**：daemon 回传的 `InteractiveRunResultRequest.error`（ModelErrorDTO）写入 `AgentRun.error_detail` JSON 列（与 `error_code` 正交）；`GET /api/daemon/sessions/{id}/runs` 返 SessionRunRead（含 error_detail）；会话 SSE 在 failed turn 推 `run_error` 事件。三端同构 ModelErrorDTO 由 gen:types 对齐（design §7.1）。
+- Agent/运行时：agent、runtime、daemon（守护进程接入）、lease（租约）、tool_gateway、policy（权限策略）。
+- **AgentProfile 配置层**（2026-08-04-agent-profile-ui-redesign）：`agent` 模块 `profile/` 子域（agent_profiles 表 CRUD + 三级 visibility private/workspace/platform + 系统预置只读）；新增 `GET /api/agent-profiles?scope=mine` 跨工作区聚合只读端点（scope 省略=原 platform 级冻结 C8，前端选档下拉依赖），聚合视图逐档 `_can_read_async` 越权防护。**模型错误可见性**：daemon 回传的 `InteractiveRunResultRequest.error`（ModelErrorDTO）写入 `AgentRun.error_detail` JSON 列（与 `error_code` 正交）；`GET /api/daemon/sessions/{id}/runs` 返 SessionRunRead（含 error_detail）；会话 SSE 在 failed turn 推 `run_error` 事件。三端同构 ModelErrorDTO 由 gen:types 对齐（design §7.1）。
 - Git：git_identity、git_gateway、worktree
 - LLM：llm_provider（LLM 供应商配置，含 `POST /api/llm-providers/{id}/usage` 用量/余额查询）
 - PPM 子树（统一前缀 `/api/ppm`）：project、plan、task、problem、kanban

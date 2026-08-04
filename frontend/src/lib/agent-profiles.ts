@@ -33,6 +33,10 @@ export type AgentProfileCopyRequest =
   components["schemas"]["AgentProfileCopyRequest"];
 export type AgentProfileListResponse =
   components["schemas"]["AgentProfileListResponse"];
+export type AgentProfileAggregatedItem =
+  components["schemas"]["AgentProfileAggregatedItem"];
+export type AgentProfileAggregatedListResponse =
+  components["schemas"]["AgentProfileAggregatedListResponse"];
 export type ToolPolicyRead = components["schemas"]["ToolPolicyRead"];
 
 /** visibility 中文标签（UI 用）。 */
@@ -69,6 +73,8 @@ export const agentProfileQueryKeys = {
     ["agentProfiles", "workspace", workspaceId] as const,
   /** platform 级列表（选档案下拉兜底用）。 */
   platformList: ["agentProfiles", "platform"] as const,
+  /** 全局聚合列表（当前 actor 跨工作区可见全集，全局卡片墙用，scope=mine）。 */
+  mineList: ["agentProfiles", "mine"] as const,
 } as const;
 
 /* ────────────────────── 裸 fetch 函数（workspace 级） ────────────────────── */
@@ -155,6 +161,27 @@ export async function listPlatformAgentProfiles(): Promise<AgentProfileRead[]> {
   return resp.items ?? [];
 }
 
+/* ────────────────────── 裸 fetch 函数（聚合级，跨工作区只读） ────────────────────── */
+//
+// design §7.1 / D-004：GET /api/agent-profiles?scope=mine 跨工作区聚合返回 actor
+// 可见全集（个人 private + 各 ws 的 workspace 级 + platform + 系统预置），逐档
+// _can_read_async 判定（R-01 越权防护在后端 service.list_visible_all）。
+// 每条在 AgentProfileRead 全字段之外携带 workspace_id / workspace_name（归属工作区，
+// private/platform 级为 null），供全局卡片墙按工作区筛选与展示。
+// 注意：未带 scope 时该端点行为冻结为 platform 级（C8），不走此分支。
+//
+
+/**
+ * 列出当前 actor 跨工作区可见的全部档案（全局卡片墙用）。
+ * 返回 AgentProfileAggregatedItem[]（含 workspace_id / workspace_name）。
+ */
+export async function listMineAgentProfiles(): Promise<AgentProfileAggregatedItem[]> {
+  const resp = await apiFetch<AgentProfileAggregatedListResponse>(
+    `/api/agent-profiles?scope=mine`,
+  );
+  return resp.items ?? [];
+}
+
 /* ────────────────────── 附带：ToolPolicy 列表（表单引用，D-016） ────────────────────── */
 //
 // design D-016：v1 工具策略仅引用 tool_policy_id，不做能力白名单 ∩ workspace 叠加。
@@ -209,6 +236,27 @@ export function usePlatformAgentProfiles() {
     isLoading: q.isLoading,
     isError: q.isError,
     error: q.error,
+  };
+}
+
+/**
+ * 当前 actor 跨工作区可见的全部档案（全局卡片墙用）。
+ * staleTime 30s：对齐 useWorkspaceAgentProfiles（CRUD mutation 主动 invalidate，
+ * 无需高频自动刷新）。返回 refetch 供筛选切换/手动刷新场景使用。
+ */
+export function useMineAgentProfiles() {
+  const q = useQuery<AgentProfileAggregatedItem[], ApiError>({
+    queryKey: agentProfileQueryKeys.mineList,
+    queryFn: () => listMineAgentProfiles(),
+    staleTime: 30_000,
+  });
+  return {
+    profiles: q.data ?? [],
+    isLoading: q.isLoading,
+    isFetching: q.isFetching,
+    isError: q.isError,
+    error: q.error,
+    refetch: q.refetch,
   };
 }
 

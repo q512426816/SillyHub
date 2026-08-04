@@ -30,9 +30,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Path, status
+from fastapi import APIRouter, Depends, Path, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -85,6 +85,22 @@ class AgentProfileRead(BaseModel):
 
 class AgentProfileListResponse(BaseModel):
     items: list[AgentProfileRead]
+
+
+class AgentProfileAggregatedItem(AgentProfileRead):
+    """聚合视图项（design §7.1 / D-004）。继承 :class:`AgentProfileRead` 全字段，
+    额外携带 ``workspace_name``（join workspace 表，前端跨工作区筛选/卡片展示用）。
+
+    ``workspace_id`` 继承自 ``AgentProfileRead``：private/platform 级为 ``None``，
+    workspace 级填归属工作区 id；``workspace_name`` 对应归属名，同理 private/platform
+    级为 ``None``，workspace 级填归属工作区名。
+    """
+
+    workspace_name: str | None = None
+
+
+class AgentProfileAggregatedListResponse(BaseModel):
+    items: list[AgentProfileAggregatedItem]
 
 
 class AgentProfileCreate(BaseModel):
@@ -298,14 +314,47 @@ async def copy_workspace_profile(
 
 @router.get(
     "/agent-profiles",
-    response_model=AgentProfileListResponse,
+    # scope 分支返回异构响应类型（聚合 vs 原 platform 列表），无法用单一 response_model
+    # 做序列化过滤。用 response_model=None 放行，responses 声明 200 schema = 聚合类型，
+    # 确保 gen:types 把 AgentProfileAggregatedItem 注册进 OpenAPI components。
+    response_model=None,
+    responses={
+        200: {
+            "model": AgentProfileAggregatedListResponse,
+            "description": (
+                "scope=mine：返回 AgentProfileAggregatedItem[]（跨工作区聚合可见全集，含 "
+                "workspace_name）。scope 省略：返回 AgentProfileRead[]（platform 级，C8 冻结，"
+                "AgentProfileSelect 依赖）。"
+            ),
+        }
+    },
 )
 async def list_platform_profiles(
     session: SessionDep,
     user: Annotated[User, Depends(get_current_user)],
-) -> AgentProfileListResponse:
-    """列出 platform 可见档案（+ actor 自己的 private 档）。任意登录用户可调
-    （platform 级档案全平台可见，D-009）。"""
+    scope: Annotated[
+        Literal["mine"] | None,
+        Query(
+            description=("取值 mine 返回跨工作区聚合可见全集；省略走原 platform 级行为（C8）。"),
+        ),
+    ] = None,
+) -> AgentProfileListResponse | AgentProfileAggregatedListResponse:
+    """列出档案。
+
+    * ``scope=mine``：走聚合分支（:meth:`AgentProfileService.list_visible_all`），
+      跨工作区并集返回 actor 可见档案，每条带 ``workspace_name``。
+    * 省略 ``scope``：保持原 platform 级行为不变（C8，``AgentProfileSelect`` 依赖）。
+    """
+    if scope == "mine":
+        entries = await _service(session).list_visible_all(actor=user)
+        return AgentProfileAggregatedListResponse(
+            items=[
+                AgentProfileAggregatedItem.model_validate(e.profile).model_copy(
+                    update={"workspace_name": e.workspace_name}
+                )
+                for e in entries
+            ]
+        )
     profiles = await _service(session).list(actor=user, workspace=None)
     return AgentProfileListResponse(items=[AgentProfileRead.model_validate(p) for p in profiles])
 

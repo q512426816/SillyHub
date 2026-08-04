@@ -2,12 +2,11 @@
 
 /**
  * AgentProfileSelect — 智能体档案下拉选择（task-12，变更
- * 2026-08-02-agent-profile-layer）。
+ * 2026-08-02-agent-profile-layer；task-06 视觉对齐 antd Select）。
  *
- * 用于「发起任务/对话」入口选择本 run 用哪个 AgentProfile。形态对齐
- * AgentProviderSelect（受控、自取数据、native <select>、h-8 同款样式），便于在
- * 任务详情页「分配给 Agent」表单里与 AgentProviderSelect / AgentModelInput 并排
- * 摆放（prototype 画面②）。
+ * 用于「发起任务/对话」入口选择本 run 用哪个 AgentProfile。使用 antd
+ * Select（showSearch + optionFilterProp="label"），长列表可按名搜索，符合
+ * FRONTEND_PAGE_STYLE §0「UI 组件全用 antd」（design §5 P6 / §7.3、D-005@v1）。
  *
  * 行为：
  *  - 数据来自 useWorkspaceAgentProfiles（workspace 可见：private+workspace+platform）
@@ -24,6 +23,8 @@
  * 就绪，后端 schema 落地后即可在挂载点直接生效。
  */
 import { useMemo } from "react";
+import { Select } from "antd";
+import type { DefaultOptionType } from "antd/es/select";
 
 import {
   NO_PROFILE_VALUE,
@@ -32,7 +33,6 @@ import {
   useWorkspaceAgentProfiles,
   type AgentProfileRead,
 } from "@/lib/agent-profiles";
-import { cn } from "@/lib/utils";
 
 interface AgentProfileSelectProps {
   /** workspace id（拉 workspace 级可见档案用）。 */
@@ -48,8 +48,15 @@ interface AgentProfileSelectProps {
   className?: string;
 }
 
-const DEFAULT_CLS =
-  "h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none";
+/** 构造 option label：「名 (供应商/模型) · 系统预置/可见范围」。 */
+const buildOptionLabel = (p: AgentProfileRead) => {
+  const parts: string[] = [p.name];
+  // 供应商/模型提示（参考 prototype 画面②：「代码审查助手 (claude/sonnet · 只读)」）。
+  if (p.provider) parts.push(`(${p.provider}${p.model ? `/${p.model}` : ""})`);
+  if (p.is_system_default) parts.push("· 系统预置");
+  else parts.push(`· ${VISIBILITY_LABEL[p.visibility]}`);
+  return parts.join(" ");
+};
 
 export function AgentProfileSelect({
   workspaceId,
@@ -82,38 +89,35 @@ export function AgentProfileSelect({
       ? value
       : null;
 
-  const renderOption = (p: AgentProfileRead) => {
-    const parts: string[] = [p.name];
-    // 供应商/模型提示（参考 prototype 画面②：「代码审查助手 (claude/sonnet · 只读)」）。
-    if (p.provider) parts.push(`(${p.provider}${p.model ? `/${p.model}` : ""})`);
-    if (p.is_system_default) parts.push("· 系统预置");
-    else parts.push(`· ${VISIBILITY_LABEL[p.visibility]}`);
-    return (
-      <option key={p.id} value={p.id}>
-        {parts.join(" ")}
-      </option>
-    );
-  };
+  // antd Select options：兜底项（可选）+ 档案列表 + 失效项（value 指向不在列表）。
+  // label 复用 buildOptionLabel 的 parts 拼接，optionFilterProp="label" 按此过滤。
+  const options = useMemo<DefaultOptionType[]>(() => {
+    const list: DefaultOptionType[] = [];
+    if (includeDefault) {
+      list.push({ value: NO_PROFILE_VALUE, label: includeDefault });
+    }
+    for (const p of profiles) {
+      list.push({ value: p.id, label: buildOptionLabel(p) });
+    }
+    if (valueInvalid) {
+      list.push({
+        value: valueInvalid,
+        label: `（已失效）${valueInvalid.slice(0, 8)}`,
+      });
+    }
+    return list;
+  }, [includeDefault, profiles, valueInvalid]);
 
   return (
-    <select
+    <Select<string>
+      showSearch
+      optionFilterProp="label"
       value={value ?? NO_PROFILE_VALUE}
       disabled={disabled}
-      onChange={(e) => {
-        const v = e.target.value;
-        onChange(v === NO_PROFILE_VALUE ? null : v);
-      }}
-      className={cn(DEFAULT_CLS, className)}
-    >
-      {includeDefault ? (
-        <option value={NO_PROFILE_VALUE}>{includeDefault}</option>
-      ) : null}
-      {profiles.map(renderOption)}
-      {valueInvalid ? (
-        <option value={valueInvalid}>
-          （已失效）{valueInvalid.slice(0, 8)}
-        </option>
-      ) : null}
-    </select>
+      onChange={(v) => onChange(v === NO_PROFILE_VALUE ? null : v)}
+      options={options}
+      className={className}
+      style={{ width: "100%" }}
+    />
   );
 }

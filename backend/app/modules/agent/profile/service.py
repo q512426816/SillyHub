@@ -28,7 +28,7 @@ import 即可（task-04）。
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, NamedTuple
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -105,6 +105,18 @@ def _normalize_provider(provider: str | None) -> str | None:
     if lowered in ("claude_code", "claude-code"):
         return "claude"
     return lowered
+
+
+class VisibleProfile(NamedTuple):
+    """``list_visible_all`` 的返回项：可见档案 + 归属工作区名（展示用）。
+
+    跨工作区聚合视图（design §7.1）需要展示「档案属于哪个工作区」，而
+    :class:`AgentProfile` 本身只存 ``workspace_id``。本结构由 service 批量 join
+    workspace 表填名后返回，避免 router 层 N+1 查询。
+    """
+
+    profile: AgentProfile
+    workspace_name: str | None
 
 
 class AgentProfileService:
@@ -312,6 +324,52 @@ class AgentProfileService:
         stmt = select(AgentProfile).where(or_(*clauses)).order_by(col(AgentProfile.name).asc())
         rows = (await self._session.execute(stmt)).scalars().all()
         return list(rows)
+
+    async def list_visible_all(self, *, actor: User) -> list[VisibleProfile]:
+        """列出 actor 跨工作区可见的全部档案（聚合视图用，design §7.1 / D-004）。
+
+        可见集合 = actor 自己的所有 private（跨 ws，``owner_user_id=actor``）∪ actor
+        所属各工作区的 workspace 级档 ∪ 全部 platform 级档 ∪ 系统预置档。
+
+        与 :meth:`list` 的关键差异：**不拼 ws clause**，而是查全表后逐档用
+        :meth:`_can_read_async` 判定。这样能正确处理 owner-left-ws 边界（R-07）——
+        owner 离开 ws 后，其在该 ws 建的 workspace 级档对自身不再可见（与 :meth:`get`
+        一致），而 clause 拼接法会因 ``owner_user_id`` 短路误放行。
+
+        platform/系统预置档按 id 去重（防御同一物理档被多次命中）。``workspace_name``
+        批量预取（单次 ``IN`` 查询）避免 N+1。
+
+        **不读写任何密钥**（design §10 红线）；纯加法，不改现有 CRUD 契约。
+        """
+        stmt = select(AgentProfile).order_by(col(AgentProfile.name).asc())
+        rows = (await self._session.execute(stmt)).scalars().all()
+
+        seen: set[uuid.UUID] = set()
+        visible: list[AgentProfile] = []
+        for profile in rows:
+            if profile.id in seen:
+                continue
+            if await self._can_read_async(profile, actor=actor):
+                seen.add(profile.id)
+                visible.append(profile)
+
+        # 批量预取 workspace 名映射（避免逐档 N+1）
+        ws_ids: set[uuid.UUID] = {p.workspace_id for p in visible if p.workspace_id is not None}
+        name_map: dict[uuid.UUID, str] = {}
+        if ws_ids:
+            ws_stmt = select(Workspace.id, Workspace.name).where(col(Workspace.id).in_(ws_ids))
+            for wid, wname in (await self._session.execute(ws_stmt)).all():
+                name_map[wid] = wname
+
+        return [
+            VisibleProfile(
+                profile=p,
+                workspace_name=(
+                    name_map.get(p.workspace_id) if p.workspace_id is not None else None
+                ),
+            )
+            for p in visible
+        ]
 
     async def get(self, *, profile_id: uuid.UUID, actor: User) -> AgentProfile:
         """取单档。不存在 → 404；存在但不可见 → 403。"""

@@ -356,3 +356,87 @@ async def test_unauthenticated_401(client: AsyncClient):
     """未带 Bearer → 401（区别于越权 403）。"""
     resp = await client.get("/api/agent-profiles")
     assert resp.status_code == 401
+
+
+# ── scope=mine 聚合端点（task-01 / design §7.1 / D-004）──
+
+
+@pytest.mark.asyncio
+async def test_scope_mine_returns_aggregated_with_workspace_name(
+    client: AsyncClient, db_session: AsyncSession
+):
+    """scope=mine：聚合响应含 workspace_name，跨 ws 可见全集，越权档不返回（R-01）。"""
+    from app.modules.agent.profile.service import AgentProfileService
+
+    actor = await _create_user(db_session, email="actor@example.com")
+    other = await _create_user(db_session, email="other@example.com")
+    admin = await _create_user(db_session, is_platform_admin=True, email="admin-scope@example.com")
+    ws = await _create_workspace(db_session, created_by=actor.id)
+    ws.name = "聚合测试工作区"
+    db_session.add(ws)
+    await db_session.commit()
+    await _grant_workspace_permission(db_session, actor.id, ws.id, Permission.WORKSPACE_READ)
+
+    # actor 的 private 档（跨 ws 概念，owner=actor、workspace_id=None）
+    await AgentProfileService(db_session).create(
+        name="actor-priv",
+        visibility=AgentProfileVisibility.PRIVATE,
+        provider="claude",
+        actor=actor,
+    )
+    # actor 在 ws 建的 workspace 级档（actor 是成员）
+    await AgentProfileService(db_session).create(
+        name="actor-ws",
+        visibility=AgentProfileVisibility.WORKSPACE,
+        provider="claude",
+        actor=actor,
+        workspace=ws,
+    )
+    # other 的 private 档（actor 不应见到，R-01 越权）
+    await AgentProfileService(db_session).create(
+        name="other-priv",
+        visibility=AgentProfileVisibility.PRIVATE,
+        provider="claude",
+        actor=other,
+    )
+    # platform 预置档（全平台可见）
+    await AgentProfileService(db_session).create(
+        name="plat-default",
+        visibility=AgentProfileVisibility.PLATFORM,
+        provider="claude",
+        actor=admin,
+    )
+
+    resp = await client.get("/api/agent-profiles?scope=mine", headers=_headers(_token_for(actor)))
+    assert resp.status_code == 200, resp.text
+    items = {it["name"]: it for it in resp.json()["items"]}
+    assert "actor-priv" in items  # 自己 private
+    assert "actor-ws" in items  # 所属 ws 级
+    assert "plat-default" in items  # platform 预置
+    assert "other-priv" not in items  # 越权：不见 other 的 private（R-01）
+    # workspace_name 填充规则：private/platform 为 null，workspace 级填归属名
+    assert items["actor-priv"]["workspace_name"] is None
+    assert items["actor-ws"]["workspace_name"] == "聚合测试工作区"
+    assert items["actor-ws"]["workspace_id"] == str(ws.id)
+    assert items["plat-default"]["workspace_name"] is None
+
+
+@pytest.mark.asyncio
+async def test_no_scope_keeps_platform_list_behavior(client: AsyncClient, db_session: AsyncSession):
+    """未带 scope：保持原 platform 列表行为（C8 冻结），响应 items 不含 workspace_name。"""
+    admin = await _create_user(db_session, is_platform_admin=True)
+    from app.modules.agent.profile.service import AgentProfileService
+
+    await AgentProfileService(db_session).create(
+        name="平台档",
+        visibility=AgentProfileVisibility.PLATFORM,
+        provider="claude",
+        actor=admin,
+    )
+    user = await _create_user(db_session, email="plain-noscope@example.com")
+    resp = await client.get("/api/agent-profiles", headers=_headers(_token_for(user)))
+    assert resp.status_code == 200, resp.text
+    items = resp.json()["items"]
+    assert any(it["name"] == "平台档" for it in items)
+    # C8：原 AgentProfileRead 结构，不含聚合专属字段 workspace_name
+    assert all("workspace_name" not in it for it in items)

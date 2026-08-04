@@ -6836,15 +6836,46 @@
           "agent-profiles"
         ],
         "summary": "List Platform Profiles",
-        "description": "列出 platform 可见档案（+ actor 自己的 private 档）。任意登录用户可调\n（platform 级档案全平台可见，D-009）。",
+        "description": "列出档案。\n\n* ``scope=mine``：走聚合分支（:meth:`AgentProfileService.list_visible_all`），\n  跨工作区并集返回 actor 可见档案，每条带 ``workspace_name``。\n* 省略 ``scope``：保持原 platform 级行为不变（C8，``AgentProfileSelect`` 依赖）。",
         "operationId": "list_platform_profiles_api_agent_profiles_get",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "mine",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "取值 mine 返回跨工作区聚合可见全集；省略走原 platform 级行为（C8）。",
+              "title": "Scope"
+            },
+            "description": "取值 mine 返回跨工作区聚合可见全集；省略走原 platform 级行为（C8）。"
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "scope=mine：返回 AgentProfileAggregatedItem[]（跨工作区聚合可见全集，含 workspace_name）。scope 省略：返回 AgentProfileRead[]（platform 级，C8 冻结，AgentProfileSelect 依赖）。",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AgentProfileListResponse"
+                  "$ref": "#/components/schemas/AgentProfileAggregatedListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -24160,6 +24191,178 @@
           "status"
         ],
         "title": "AgentKillResponse"
+      },
+      "AgentProfileAggregatedItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "owner_user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner User Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/AgentProfileVisibility"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Prompt"
+          },
+          "tool_policy_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Policy Id"
+          },
+          "mcp_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mcp Refs"
+          },
+          "skill_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skill Refs"
+          },
+          "allowed_roots_overlay": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Roots Overlay"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "is_system_default": {
+            "type": "boolean",
+            "title": "Is System Default"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "workspace_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "owner_user_id",
+          "workspace_id",
+          "visibility",
+          "provider",
+          "model",
+          "system_prompt",
+          "tool_policy_id",
+          "mcp_refs",
+          "skill_refs",
+          "allowed_roots_overlay",
+          "version",
+          "is_system_default",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AgentProfileAggregatedItem",
+        "description": "聚合视图项（design §7.1 / D-004）。继承 :class:`AgentProfileRead` 全字段，\n额外携带 ``workspace_name``（join workspace 表，前端跨工作区筛选/卡片展示用）。\n\n``workspace_id`` 继承自 ``AgentProfileRead``：private/platform 级为 ``None``，\nworkspace 级填归属工作区 id；``workspace_name`` 对应归属名，同理 private/platform\n级为 ``None``，workspace 级填归属工作区名。"
+      },
+      "AgentProfileAggregatedListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentProfileAggregatedItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AgentProfileAggregatedListResponse"
       },
       "AgentProfileCopyRequest": {
         "properties": {

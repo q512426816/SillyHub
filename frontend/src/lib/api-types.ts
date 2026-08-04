@@ -2398,8 +2398,11 @@ export interface paths {
         };
         /**
          * List Platform Profiles
-         * @description 列出 platform 可见档案（+ actor 自己的 private 档）。任意登录用户可调
-         *     （platform 级档案全平台可见，D-009）。
+         * @description 列出档案。
+         *
+         *     * ``scope=mine``：走聚合分支（:meth:`AgentProfileService.list_visible_all`），
+         *       跨工作区并集返回 actor 可见档案，每条带 ``workspace_name``。
+         *     * 省略 ``scope``：保持原 platform 级行为不变（C8，``AgentProfileSelect`` 依赖）。
          */
         get: operations["list_platform_profiles_api_agent_profiles_get"];
         put?: never;
@@ -7236,6 +7239,64 @@ export interface components {
             id: string;
             /** Status */
             status: string;
+        };
+        /**
+         * AgentProfileAggregatedItem
+         * @description 聚合视图项（design §7.1 / D-004）。继承 :class:`AgentProfileRead` 全字段，
+         *     额外携带 ``workspace_name``（join workspace 表，前端跨工作区筛选/卡片展示用）。
+         *
+         *     ``workspace_id`` 继承自 ``AgentProfileRead``：private/platform 级为 ``None``，
+         *     workspace 级填归属工作区 id；``workspace_name`` 对应归属名，同理 private/platform
+         *     级为 ``None``，workspace 级填归属工作区名。
+         */
+        AgentProfileAggregatedItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Owner User Id */
+            owner_user_id: string | null;
+            /** Workspace Id */
+            workspace_id: string | null;
+            visibility: components["schemas"]["AgentProfileVisibility"];
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string | null;
+            /** System Prompt */
+            system_prompt: string | null;
+            /** Tool Policy Id */
+            tool_policy_id: string | null;
+            /** Mcp Refs */
+            mcp_refs: string[];
+            /** Skill Refs */
+            skill_refs: string[];
+            /** Allowed Roots Overlay */
+            allowed_roots_overlay: string[] | null;
+            /** Version */
+            version: number;
+            /** Is System Default */
+            is_system_default: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Workspace Name */
+            workspace_name?: string | null;
+        };
+        /** AgentProfileAggregatedListResponse */
+        AgentProfileAggregatedListResponse: {
+            /** Items */
+            items: components["schemas"]["AgentProfileAggregatedItem"][];
         };
         /**
          * AgentProfileCopyRequest
@@ -20770,20 +20831,32 @@ export interface operations {
     };
     list_platform_profiles_api_agent_profiles_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 取值 mine 返回跨工作区聚合可见全集；省略走原 platform 级行为（C8）。 */
+                scope?: "mine" | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description scope=mine：返回 AgentProfileAggregatedItem[]（跨工作区聚合可见全集，含 workspace_name）。scope 省略：返回 AgentProfileRead[]（platform 级，C8 冻结，AgentProfileSelect 依赖）。 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AgentProfileListResponse"];
+                    "application/json": components["schemas"]["AgentProfileAggregatedListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -13,6 +13,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from sqlalchemy import delete
 
 from app.modules.agent.profile.model import AgentProfile, AgentProfileVisibility
 from app.modules.agent.profile.service import (
@@ -375,6 +376,135 @@ class TestList:
         svc = AgentProfileService(db_session)
         names = {p.name for p in await svc.list(actor=owner)}
         assert "ws-p" not in names
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 2.5 list_visible_all 跨工作区聚合可见性（task-01 / design §7.1 / D-004）
+#    逐档 _can_read_async 判定（不拼 ws clause），覆盖 R-01 越权 + R-07 owner-left-ws。
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class TestListVisibleAll:
+    async def test_actor_does_not_see_others_private(self, db_session) -> None:
+        # R-01：actor A 不见 actor B 的 private 档
+        a = await _make_user(db_session, suffix="a")
+        b = await _make_user(db_session, suffix="b")
+        await _make_profile(db_session, owner=a, name="a-priv")
+        await _make_profile(db_session, owner=b, name="b-priv")
+        svc = AgentProfileService(db_session)
+        names = {e.profile.name for e in await svc.list_visible_all(actor=a)}
+        assert "a-priv" in names
+        assert "b-priv" not in names
+
+    async def test_non_member_does_not_see_workspace_level(self, db_session) -> None:
+        # 非成员不见该 ws 的 workspace 级档
+        owner = await _make_user(db_session, suffix="o")
+        stranger = await _make_user(db_session, suffix="s")
+        ws = await _make_workspace(db_session)
+        await _make_member(db_session, ws, owner)
+        await _make_profile(
+            db_session,
+            owner=owner,
+            name="ws-p",
+            visibility=AgentProfileVisibility.WORKSPACE,
+            workspace=ws,
+        )
+        svc = AgentProfileService(db_session)
+        names = {e.profile.name for e in await svc.list_visible_all(actor=stranger)}
+        assert "ws-p" not in names
+
+    async def test_owner_left_ws_workspace_level_matches_get_behavior(self, db_session) -> None:
+        # R-07 仲裁：design §10 R-07 措辞「owner 离开后该档对其不可见（与 get() 一致）」
+        # 内部冲突——get() 经 _can_read_async 对 WORKSPACE 级 owner 短路（service.py
+        # _can_read 的 WORKSPACE 分支 return owner_user_id==actor.id，不查成员），故 owner
+        # 离开 ws 后该档对其仍可见。本变更 list_visible_all 复用 _can_read_async（task
+        # implementation 明确「逐档 _can_read_async 判定，不拼 ws clause」），故聚合视图
+        # 行为 = get() = owner 离开后仍可见。本测试以代码事实（与 get() 一致）为准。
+        # 不改 _can_read_async：那会扩散影响 get/list/copy/resolve（2026-08-02-agent-profile-layer
+        # 已 archive 的稳定 visibility 语义），超本 task「纯加法不改现有 CRUD」约束 +
+        # allowed_paths 语义。designer 若坚持 owner 离开即不可见，需另起 change 改 _can_read_async
+        # 的 WORKSPACE 分支去掉 owner 短路，并回归全量 profile/dispatch 读路径。
+        owner = await _make_user(db_session, suffix="o")
+        ws = await _make_workspace(db_session)
+        await _make_member(db_session, ws, owner)
+        p = await _make_profile(
+            db_session,
+            owner=owner,
+            name="ws-p",
+            visibility=AgentProfileVisibility.WORKSPACE,
+            workspace=ws,
+        )
+        # owner 离开 ws：删其在 ws 的成员行
+        await db_session.execute(
+            delete(UserWorkspaceRole).where(
+                UserWorkspaceRole.user_id == owner.id,
+                UserWorkspaceRole.workspace_id == ws.id,
+            )
+        )
+        await db_session.commit()
+        svc = AgentProfileService(db_session)
+        # 聚合视图：owner 仍可见（owner 短路，与 get() 一致）
+        names = {e.profile.name for e in await svc.list_visible_all(actor=owner)}
+        assert "ws-p" in names
+        # 对照：get() 同样让 owner 可见（证明聚合视图与单档 GET 行为一致，非聚合特例）
+        assert (await svc.get(profile_id=p.id, actor=owner)).id == p.id
+
+    async def test_aggregated_set_includes_own_private_ws_level_and_platform(
+        self, db_session
+    ) -> None:
+        # 聚合集 = 自己 private + 所属 ws 级 + 平台预置
+        actor = await _make_user(db_session, suffix="a")
+        admin = await _make_user(db_session, suffix="admin", admin=True)
+        ws = await _make_workspace(db_session)
+        await _make_member(db_session, ws, actor)
+        await _make_profile(db_session, owner=actor, name="my-priv")
+        await _make_profile(
+            db_session,
+            owner=actor,
+            name="ws-p",
+            visibility=AgentProfileVisibility.WORKSPACE,
+            workspace=ws,
+        )
+        await _make_profile(
+            db_session,
+            owner=admin,
+            name="plat",
+            visibility=AgentProfileVisibility.PLATFORM,
+            is_system_default=True,
+        )
+        svc = AgentProfileService(db_session)
+        names = {e.profile.name for e in await svc.list_visible_all(actor=actor)}
+        assert {"my-priv", "ws-p", "plat"} <= names
+
+    async def test_workspace_name_filled_only_for_workspace_level(self, db_session) -> None:
+        # workspace_name：private/platform 为 None，workspace 级填归属名
+        actor = await _make_user(db_session, suffix="a")
+        admin = await _make_user(db_session, suffix="admin", admin=True)
+        ws = await _make_workspace(db_session)
+        ws.name = "我的工作区"
+        db_session.add(ws)
+        await db_session.commit()
+        await _make_member(db_session, ws, actor)
+        await _make_profile(db_session, owner=actor, name="my-priv")
+        await _make_profile(
+            db_session,
+            owner=actor,
+            name="ws-p",
+            visibility=AgentProfileVisibility.WORKSPACE,
+            workspace=ws,
+        )
+        await _make_profile(
+            db_session,
+            owner=admin,
+            name="plat",
+            visibility=AgentProfileVisibility.PLATFORM,
+            is_system_default=True,
+        )
+        svc = AgentProfileService(db_session)
+        by_name = {e.profile.name: e for e in await svc.list_visible_all(actor=actor)}
+        assert by_name["my-priv"].workspace_name is None
+        assert by_name["ws-p"].workspace_name == "我的工作区"
+        assert by_name["plat"].workspace_name is None
 
 
 class TestUpdate:
