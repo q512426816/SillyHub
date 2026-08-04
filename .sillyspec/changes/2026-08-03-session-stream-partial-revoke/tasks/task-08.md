@@ -5,6 +5,7 @@ title_zh: 前端 override 识别与撤回测试
 author: WhaleFall
 created_at: 2026-08-03 10:23:11
 priority: P0
+no_deps_verify: true
 depends_on: [task-05, task-06]
 blocks: []
 requirement_ids: [FR-04, FR-05, FR-07]

@@ -5,6 +5,7 @@ title_zh: backend override publish 测试
 author: WhaleFall
 created_at: 2026-08-03 10:23:11
 priority: P0
+no_deps_verify: true
 depends_on: [task-01, task-02]
 blocks: []
 requirement_ids: [FR-02, FR-07]

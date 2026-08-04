@@ -5,6 +5,7 @@ title_zh: 历史回看类型对齐 envelope 新字段
 author: WhaleFall
 created_at: 2026-08-03 10:23:11
 priority: P0
+no_deps_verify: true
 depends_on: [task-04]
 blocks: []
 requirement_ids: [FR-06]

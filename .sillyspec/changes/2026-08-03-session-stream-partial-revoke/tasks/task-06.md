@@ -5,6 +5,7 @@ title_zh: onLog 按 segmentId 撤回半截
 author: WhaleFall
 created_at: 2026-08-03 10:23:11
 priority: P0
+no_deps_verify: true
 depends_on: [task-04, task-05]
 blocks: [task-08]
 requirement_ids: [FR-05]

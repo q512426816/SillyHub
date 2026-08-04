@@ -5,6 +5,7 @@ title_zh: SSE envelope 透传 segment_id 字段
 author: WhaleFall
 created_at: 2026-08-03 10:23:11
 priority: P0
+no_deps_verify: true
 depends_on: []
 blocks: [task-02, task-03]
 requirement_ids: [FR-01]

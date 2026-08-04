@@ -5,6 +5,7 @@ title_zh: 日志分类识别 override 撤回令箭
 author: WhaleFall
 created_at: 2026-08-03 10:23:11
 priority: P0
+no_deps_verify: true
 depends_on: [task-04]
 blocks: [task-06, task-08]
 requirement_ids: [FR-04]
