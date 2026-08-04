@@ -66,28 +66,18 @@ export async function upsertMyBinding(
 /*   - GET   /workspaces/{ws}/shared-daemons      owner 查所有共享 daemon */
 /*   - DELETE /workspaces/{ws}/members/{uid}/shared owner 撤销某成员共享 */
 /*                                                                    */
-/*  注：OpenAPI 生成类型（api-types.ts）尚未刷新含 `shared` 字段与      */
-/*  SharedDaemonView。这里在本地补类型（intersection + 本地 view），    */
-/*  待后端 dump openapi + pnpm gen:types 后可切回生成类型。            */
+/*  OpenAPI 生成类型（api-types.ts）已含 MemberBindingView.shared 与    */
+/*  SharedDaemonView，下方直接复用生成类型（早期本地兜底已移除）。      */
 /* ------------------------------------------------------------------ */
 
 /**
- * 后端 MemberBindingView 已加 `shared` 列（model 默认 false，零回归）。
- * 生成类型暂缺该字段，这里 intersection 补齐，消费方按字段访问不报 TS 错。
+ * MemberBindingView 生成类型已含 `shared` 字段（model 默认 false，零回归）。
+ * 保留别名仅为减小消费方改动（历史代码 import 了这个名字）。
  */
-export type MemberBindingWithShared = MemberBindingView & { shared: boolean };
+export type MemberBindingWithShared = MemberBindingView;
 
-/** owner 视角下一条共享 daemon（对齐后端 SharedDaemonView）。 */
-export interface SharedDaemonView {
-  /** 出借人（开发人员）user_id。 */
-  lender_user_id: string;
-  daemon_id: string | null;
-  /** daemon 在线状态（JOIN daemon_instances），online/离线/null。 */
-  daemon_status: string | null;
-  daemon_hostname: string | null;
-  /** owner 调用恒 true（前端用于决定是否渲染撤销按钮）。 */
-  revocable: boolean;
-}
+/** owner 视角下一条共享 daemon（复用 OpenAPI 生成 SharedDaemonView）。 */
+export type SharedDaemonView = components["schemas"]["SharedDaemonView"];
 
 /**
  * lender 标记/撤销自己 binding 的 daemon 共享（FR-01 / D-003@v1）。

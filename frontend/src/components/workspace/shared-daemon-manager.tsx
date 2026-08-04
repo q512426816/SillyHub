@@ -177,7 +177,7 @@ export function SharedDaemonManager({
                           {d.daemon_hostname ?? "—"}
                         </span>
                         <span className="text-[11px] text-muted-foreground">
-                          {shortId(d.daemon_id)}
+                          {shortId(d.daemon_id ?? null)}
                         </span>
                       </div>
                     </td>

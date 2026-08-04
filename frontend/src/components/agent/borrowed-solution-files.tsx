@@ -16,10 +16,9 @@
  * 触发（FR-04）按 D-002 复用现有 agent 触发 UI（前端无感），本组件只负责"看产出"，
  * 不引入新的触发或"选 daemon"交互。
  *
- * 数据来源：fileIds 由调用方提供（后端列出 workspace 方案文件 / agent run 完成回写
- * file_id 后传入）。当前后端尚无"按 owner_type 列文件"端点（file 模块仅 upload/get/
- * meta/batch-meta/delete），live wiring 待后端补 list 端点；在此之前组件以空态兜底，
- * 不会阻塞渲染。
+ * 数据来源：fileIds 由容器层 ``BorrowedSolutionFilesPanel`` 调
+ * ``GET /api/file/list?owner_type=workspace`` 拉取后透传（后端 list 端点已就绪，
+ * 借用 daemon 产出落 File 表 owner_type=workspace、owner_id=ws_id）。
  */
 
 import { FileViewer } from "@/components/file-viewer";

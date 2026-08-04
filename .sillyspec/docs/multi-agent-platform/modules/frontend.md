@@ -79,4 +79,6 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 - ql-20260803-003-cb34 | 添加工作区对话框对「复用已存在工作区」显式提示：`useNotify` 补 `warning` 键（antd message.warning）；`workspace-scan-dialog.tsx` 创建成功读 `ws.creation_notice` 非空即弹 warning（复用/激活/复活文案来自后端），否则 `success("工作区已创建")`，杜绝静默 201「创建成功却看不到/绑定没生效」困惑。
 
+- ql-20260804-001-4a3e | borrow 前端清债（change 2026-07-25-daemon-borrow-for-business 收尾）：workspace-binding.ts 本地兜底类型 MemberBindingWithShared（intersection）与 SharedDaemonView（interface）切回 OpenAPI 生成类型——api-types.ts 已含 MemberBindingView.shared 与 SharedDaemonView，无需 gen:types，消费方 import 名不变零改动；borrowed-solution-files.tsx 删过时「后端无按 owner_type list 端点」注释（容器层 panel 已调 listFiles）；shared-daemon-manager.tsx:180 适配生成类型 optional（daemon_id ?? null 归一化匹配本地 shortId(string|null)）。tsc 0 错。
+
 <!-- MANUAL_NOTES_END -->

@@ -155,3 +155,16 @@
 根因：service.create 对同 root_path 已存在 active 工作区直接 `return existing`（复用），pending 走激活、软删走复活，三条路都静默返回 201；router 无任何标记，前端对话框 `createWorkspace` 成功即 `onCreated()` 关闭，用户完全无感知。且复用分支不写 daemon 绑定，用户传的 daemon_id 被吞。
 方案：后端 `WorkspaceRead` 加可选 `creation_notice`；`service.create` 加 `notice` 注入参数（默认 None，不动 12 处直接调 create 的测试签名）在复用/激活/复活三分支填 `kind`；router 用 `_CREATION_NOTICE_TEXT` 转中文提示（含「daemon 绑定未写入，请进工作区后配置」）；前端对话框收到非空即弹 warning；`useNotify` 补 `warning` 键。改后跑 `pnpm gen:types` 刷新 openapi.json + api-types.ts。
 结果：后端 ruff/mypy 绿，workspace 模块 142 passed + 新增回归 2 passed；前端 tsc 全量 0 错、workspace 相关 57 passed；模块文档 backend.md / frontend.md 变更索引已同步。
+## ql-20260804-001-4a3e | 2026-08-04 09:54:26 | borrow 前端清债：本地兜底类型切回 OpenAPI 生成类型 + 删过时注释
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/lib/workspace-binding.ts（MemberBindingWithShared intersection 与 SharedDaemonView interface 改为生成类型别名，消费方 import 名不变零改动；同步更新 61-72 过时注释）
+- frontend/src/components/agent/borrowed-solution-files.tsx（删 18-22 过时「后端无按 owner_type list 端点」注释，重写为现状：容器层 panel 已调 GET /api/file/list 拿 id 透传）
+- frontend/src/components/workspace/shared-daemon-manager.tsx（180 行 shortId(d.daemon_id) → shortId(d.daemon_id ?? null)，适配生成类型 daemon_id 变 optional）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引追加本 ql 条目）
+
+需求：清理 borrow 功能（change 2026-07-25-daemon-borrow-for-business 收尾）前端两处遗留小债——过时注释 + 本地兜底类型未切回生成类型。
+根因：该 change task-12 落地时后端 openapi/api-types 尚未刷新含 shared 字段与 SharedDaemonView，前端用本地 intersection + 本地 interface 兜底并留 TODO；后续 gen:types 已补齐生成类型，但本地兜底未切回、注释未更新，形成类型债与误导性注释。
+方案：① workspace-binding.ts 把 MemberBindingWithShared 与 SharedDaemonView 改为生成类型别名（消费方 import 名不变零改动）并更新过时注释；② borrowed-solution-files.tsx 重写过时注释为现状（容器层 panel 已调 listFiles）；③ shared-daemon-manager.tsx:180 适配生成类型 optional（daemon_id ?? null 归一化匹配本地 shortId(string|null)）。
+结果：确认 api-types.ts 已含 MemberBindingView.shared 与 SharedDaemonView，无需 gen:types；pnpm run typecheck（tsc --noEmit）0 error 通过；frontend 模块文档变更索引已同步。
