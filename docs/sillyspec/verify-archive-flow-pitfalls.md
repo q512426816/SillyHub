@@ -7,14 +7,14 @@ status: active
 
 # verify/archive 流程坑（2026-07-30-daemon-heartbeat-dedup-fix 归档时踩到）
 
-> **进度注记（2026-08-03）**：坑 3 已修（archive step5 --change 在 archive/ 匹配放行，stage-contract.js archive 分支）；坑 4 已修（sync-module-docs 加 requiresWait，--continue 确认后回到本步由 agent 写模块卡片，ql-20260803-002-eff0）。坑 1/2/5 部分修（reopen execute / execute --done 自动补 cannot_verify 草稿 / doctor --align-execute-progress 已落地，progress repair 仍保守）。待坑 1/2/5 全清后可移 finished。
+> **进度注记（2026-08-03）**：坑 3 已修（archive step5 --change 在 archive/ 匹配放行，stage-contract.js archive 分支）；坑 4 已修（sync-module-docs 加 requiresWait，--continue 确认后回到本步由 agent 写模块卡片，ql-20260803-002-eff0）；坑 1/5 已修（progress repair 新增 Fix e：execute completed stage 有 pending step 但 task 实际 review.json 客观产出全通过时，按实际产出自动标 completed 而非一律 manual，ql-20260803-003-8dd5）。坑 2 未修（手动补 task 缺 review.json 的官方入口仍无，手工拼 JSON 是唯一路径）。待坑 2 全清后可移 finished。
 
 ## 坑 1：plan 后加 Wave/task → execute 阶段流转卡 + 状态机不一致
 
 - **现象**：变更 execute 已 ✅，reopen 补 task-14（在 plan.md 加 Wave 2.1）后，sillyspec 把 task-14 识别为 execute 的「Wave 4 执行」step，但该 step 从未走（手动实现的 task-14）→ step pending。导致 `sillyspec run verify` 报「阶段转换不允许：(起始) → verify，verify 需要先完成 execute」。
 - **根因**：plan.md 的 Wave 结构被 execute 状态机反向解析成 step；后加的 Wave 没对应 execute run 记录 → step/stage 状态矛盾（progress check 报 "execute/Wave 4: step pending, stage completed"）。
 - **绕过**：`sillyspec run verify --change <名> --skip-approval`（execute 实际已完成，阶段转换门控是 plan 加 Wave 的副作用）。
-- **建议工具修**：execute 完成后再加 task，应走「reopen execute」正规路径（会重建 step 状态），或 plan 加 Wave 时自动同步 execute step 状态；progress repair 应能自动修「task 实际有 review.json/产出但 step pending」的情况（当前只标"需手动确认"不自动改）。
+- **建议工具修**：execute 完成后再加 task，应走「reopen execute」正规路径（会重建 step 状态），或 plan 加 Wave 时自动同步 execute step 状态；progress repair 应能自动修「task 实际有 review.json/产出但 step pending」的情况（✅ 已落地 ql-20260803-003-8dd5：progress repair Fix e 按 review.json 客观产出全通过时自动标 completed，否则回落 manual）。
 
 ## 坑 2：execute 后手动补的 task 缺 review.json → archive 客观完成度阻断
 
@@ -37,7 +37,7 @@ status: active
 ## 坑 5：状态机错位（status 辅助阶段 + plan 加 Wave 累积）
 
 - **现象**：progress check 报 5 处不一致（brainstorm 2 step stale + execute Wave4 pending）。`progress repair --apply` 对「需手动确认」项不自动改。
-- **建议工具修**：progress repair 应支持「按实际产出（review.json/文件/git）判定」自动修一致性，而非对矛盾项一律保守不动。
+- **建议工具修**：progress repair 应支持「按实际产出（review.json/文件/git）判定」自动修一致性，而非对矛盾项一律保守不动。（✅ 已落地 ql-20260803-003-8dd5：progress repair Fix e 按 review.json 客观产出全通过时自动修 execute step 脱钩，不碰非 execute 阶段。）
 
 ## 通用教训
 
