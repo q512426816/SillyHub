@@ -68,7 +68,7 @@ describe('task-06: BUILD_ID gen 注入冒烟守卫', () => {
     expect(
       BUILD_ID,
       `BUILD_ID 不应是 unknown fallback（实际: ${BUILD_ID}），说明 gen 跑在了非 git 环境`,
-    ).not.toStartWith('unknown');
+    ).not.toMatch(/^unknown/);
     expect(BUILD_ID, 'BUILD_ID 不能字面量为 "unknown"').not.toBe('unknown');
   });
 

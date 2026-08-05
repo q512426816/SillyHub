@@ -198,7 +198,7 @@ export interface RunCommandParams {
  * 取自 DaemonConfig.allowed_roots）。每方法调 assertWithinAllowedRoots 时透传。
  */
 export interface HostFsHandlerOptions {
-  allowed_roots: string[];
+  rootsProvider: () => string[];
 }
 
 // ── toRpcError（本地实现，逻辑与 file-rpc.ts:196-209 等价）─────────────────────
@@ -445,10 +445,10 @@ async function runGitRevParse(
  * 由 daemon.ts:_registerHostFsRpcHandler 包装成 RpcHandler 注册到 WsClient。
  */
 export class HostFsHandler {
-  private readonly _allowedRoots: string[];
+  private readonly _rootsProvider: () => string[];
 
   constructor(opts: HostFsHandlerOptions) {
-    this._allowedRoots = opts.allowed_roots;
+    this._rootsProvider = opts.rootsProvider;
   }
 
   // ── stat ──────────────────────────────────────────────────────────────────
@@ -460,7 +460,7 @@ export class HostFsHandler {
    * 对齐 backend stat 语义；前端/校验逻辑靠 exists 字段判定）。
    */
   async stat(path: string): Promise<StatResult> {
-    assertWithinAllowedRoots(path, this._allowedRoots);
+    assertWithinAllowedRoots(path, this._rootsProvider());
     const abs = pathResolve(path);
     try {
       const info = await lstat(abs);
@@ -489,7 +489,7 @@ export class HostFsHandler {
    * 越界抛 `forbidden`（assertWithinAllowedRoots）；不存在抛 `not_found`（toRpcError）。
    */
   async readFile(path: string): Promise<string> {
-    assertWithinAllowedRoots(path, this._allowedRoots);
+    assertWithinAllowedRoots(path, this._rootsProvider());
     const abs = pathResolve(path);
     try {
       return await readFile(abs, 'utf8');
@@ -508,7 +508,7 @@ export class HostFsHandler {
    * 分支，与 daemon.ts:_registerListDirRpcHandler 同模式）。
    */
   async listDir(path: string): Promise<ListDirResult> {
-    return listDir(path, null, '', this._allowedRoots);
+    return listDir(path, null, '', this._rootsProvider());
   }
 
   // ── git_apply（D-008 幂等契约核心）─────────────────────────────────────────
@@ -536,7 +536,7 @@ export class HostFsHandler {
     patch_data: string;
     use_3way: boolean;
   }): Promise<GitApplyResult> {
-    assertWithinAllowedRoots(params.workdir, this._allowedRoots);
+    assertWithinAllowedRoots(params.workdir, this._rootsProvider());
     const workdir = pathResolve(params.workdir);
 
     // 1. git apply --check 预检（D-008 幂等铺垫）。
@@ -615,8 +615,8 @@ export class HostFsHandler {
     branch: string;
     base_ref: string;
   }): Promise<GitWorktreeAddResult> {
-    assertWithinAllowedRoots(params.workdir, this._allowedRoots);
-    assertWithinAllowedRoots(params.sibling_path, this._allowedRoots);
+    assertWithinAllowedRoots(params.workdir, this._rootsProvider());
+    assertWithinAllowedRoots(params.sibling_path, this._rootsProvider());
     const workdir = pathResolve(params.workdir);
     const siblingPath = pathResolve(params.sibling_path);
     // base_ref 空 → 兜底 HEAD（X-001：ws.default_branch 可空）。
@@ -678,7 +678,7 @@ export class HostFsHandler {
     workdir: string;
     worker_branch: string;
   }): Promise<GitMergeResult> {
-    assertWithinAllowedRoots(params.workdir, this._allowedRoots);
+    assertWithinAllowedRoots(params.workdir, this._rootsProvider());
     const workdir = pathResolve(params.workdir);
 
     const merge = await runCmd(
@@ -767,8 +767,8 @@ export class HostFsHandler {
     workdir: string;
     sibling_path: string;
   }): Promise<GitWorktreeRemoveResult> {
-    assertWithinAllowedRoots(params.workdir, this._allowedRoots);
-    assertWithinAllowedRoots(params.sibling_path, this._allowedRoots);
+    assertWithinAllowedRoots(params.workdir, this._rootsProvider());
+    assertWithinAllowedRoots(params.sibling_path, this._rootsProvider());
     const workdir = pathResolve(params.workdir);
     const siblingPath = pathResolve(params.sibling_path);
 
@@ -797,7 +797,7 @@ export class HostFsHandler {
     root: string;
     ref?: string;
   }): Promise<GitRevParseResult> {
-    assertWithinAllowedRoots(params.root, this._allowedRoots);
+    assertWithinAllowedRoots(params.root, this._rootsProvider());
     const root = pathResolve(params.root);
     return runGitRevParse(root, params.ref && params.ref.length > 0 ? params.ref : 'HEAD');
   }
@@ -818,7 +818,7 @@ export class HostFsHandler {
     runtime_root?: string;
     scan_run_id?: string;
   }): Promise<PollutionArchiveResult> {
-    assertWithinAllowedRoots(params.source_root, this._allowedRoots);
+    assertWithinAllowedRoots(params.source_root, this._rootsProvider());
     const sourceRoot = pathResolve(params.source_root);
     // runtime_root / scan_run_id 可选：delegate.pollution_archive 只传 source_root
     // （post_scan_validator:745 调用同样只传 source_root）。空时 fallback
@@ -826,7 +826,7 @@ export class HostFsHandler {
     // server-local _local_pollution_archive 一致），不阻塞污染清理路径。
     const runtimeRoot =
       params.runtime_root && params.runtime_root.length > 0
-        ? (assertWithinAllowedRoots(params.runtime_root, this._allowedRoots),
+        ? (assertWithinAllowedRoots(params.runtime_root, this._rootsProvider()),
           pathResolve(params.runtime_root))
         : sourceRoot;
     const sourceSillyspec = join(sourceRoot, '.sillyspec');
@@ -909,7 +909,7 @@ export class HostFsHandler {
    * 对齐 backend post_scan_validator._check_local_config:433-443（json.loads + .scripts）。
    */
   async readPackageJson(params: { root: string }): Promise<ReadDictResult> {
-    assertWithinAllowedRoots(params.root, this._allowedRoots);
+    assertWithinAllowedRoots(params.root, this._rootsProvider());
     const root = pathResolve(params.root);
     const pkgPath = join(root, 'package.json');
     try {
@@ -943,7 +943,7 @@ export class HostFsHandler {
    * package.json dependencies / devDependencies），本方法用静态 `import yaml from 'js-yaml'`。
    */
   async readLocalYaml(params: { root: string }): Promise<ReadDictResult> {
-    assertWithinAllowedRoots(params.root, this._allowedRoots);
+    assertWithinAllowedRoots(params.root, this._rootsProvider());
     const root = pathResolve(params.root);
     const yamlPath = join(root, '.sillyspec', 'local.yaml');
     let content: string;
@@ -1009,7 +1009,7 @@ export class HostFsHandler {
     }
 
     // 2. cwd 穿越守卫（与现有 8 方法一致，assertWithinAllowedRoots 抛 forbidden RpcError）。
-    assertWithinAllowedRoots(params.cwd, this._allowedRoots);
+    assertWithinAllowedRoots(params.cwd, this._rootsProvider());
     const cwd = pathResolve(params.cwd);
 
     // 3. 合并 env（非空时叠加到 process.env 之上，不清空 PATH）。

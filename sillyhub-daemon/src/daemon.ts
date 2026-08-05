@@ -2281,12 +2281,31 @@ export class Daemon {
    * 每方法 handler 内 try/catch 消化异常 → RpcError 结构化返回，**绝不冒泡到
    * ws-client.ts:_dispatchRpc 之外**（design §4.1 3 + task-03 验收）。
    */
+  /**
+   * 当前生效的 allowed_roots：config.allowed_roots（daemon 本地）∪ policyCache 各 runtime
+   * roots 并集。host_fs handler 每次调 rootsProvider 现取，避免构造时快照冻结 —— platform
+   * PUT allowed_roots 推 policy_update / 心跳 _syncAllowedRoots 后，下次 RPC 立即生效。
+   */
+  private _effectiveAllowedRoots(): string[] {
+    const roots = new Set<string>(this._config.allowed_roots);
+    if (this._policyCache) {
+      const runtimeIds = [...new Set(this._registeredRuntimes.values())].filter(Boolean);
+      for (const rid of runtimeIds) {
+        const entry = this._policyCache.get(rid);
+        if (entry?.allowedRoots) {
+          for (const r of entry.allowedRoots) roots.add(r);
+        }
+      }
+    }
+    return [...roots];
+  }
+
   private _registerHostFsRpcHandler(ws: WsClientLike): void {
     if (typeof ws.registerRpcHandler !== 'function') {
       this._logger.warn('ws_no_rpc_support', { daemon_local_id: this._config.runtime_id });
       return;
     }
-    const handler = new HostFsHandler({ allowed_roots: this._config.allowed_roots });
+    const handler = new HostFsHandler({ rootsProvider: () => this._effectiveAllowedRoots() });
 
     // 九方法各注册一次（method 带 host_fs. 前缀）。handler 抛 RpcError 由 _dispatchRpc
     // 原样回填 code；抛普通 Error 映射 internal（ws-client.ts:512-519）。
