@@ -130,6 +130,10 @@ class DaemonRegisterRequest(BaseModel):
     # Optional 兼容旧 daemon（不上报则 NULL，D-008）。
     daemon_version: str | None = Field(default=None, max_length=50)
     daemon_build_id: str | None = Field(default=None, max_length=50)
+    # daemon 进程启动时间（2026-08-05-daemon-start-time D-002@v1）。
+    # daemon 启动时一次性上报，backend 写 daemon_instances.started_at。
+    # Optional 兼容旧 daemon（不上报则 NULL）。
+    started_at: datetime | None = Field(default=None)
     allowed_roots: list[str] = Field(default_factory=lambda: ["~/.sillyhub"])
     providers: list[DaemonRegisterProviderItem] = Field(min_length=1)
 
@@ -299,6 +303,9 @@ class DaemonMachineRead(BaseModel):
     version: str | None = None
     # daemon 构建 SHA，来自 daemon_instance.build_id（区别于 version 的语义版本）。
     build_id: str | None = None
+    # daemon 进程启动时间（2026-08-05-daemon-start-time D-002@v1），JOIN
+    # daemon_instances.started_at 带出。default None 兼容不 JOIN 的端点 / 旧 daemon。
+    started_at: datetime | None = None
     created_at: datetime
     owner: OwnerRead | None = None  # JOIN users（admin 全局视图带出负责人）
     runtime_count: int  # 该 instance 下 runtime 总数

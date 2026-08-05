@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
@@ -146,12 +147,14 @@ class DaemonService:
         providers: list[dict] | None = None,
         daemon_version: str | None = None,
         daemon_build_id: str | None = None,
+        started_at: datetime | None = None,
     ) -> DaemonRegisterResult:
         """Per-daemon 注册 facade（design §5.2 / D-006）。
 
         转发到 RuntimeService.register_daemon：upsert daemon_instances + 各
         daemon_runtimes + stale 清理。返回 daemon_instance_id + 各 runtime_id。
         2026-07-04-daemon-version-management：透传 daemon_version/build_id。
+        2026-08-05-daemon-start-time：透传 started_at。
         """
         return await self._rt.register_daemon(
             user_id,
@@ -164,6 +167,7 @@ class DaemonService:
             providers=providers,
             daemon_version=daemon_version,
             daemon_build_id=daemon_build_id,
+            started_at=started_at,
         )
 
     async def heartbeat_daemon(
@@ -172,6 +176,7 @@ class DaemonService:
         providers: list[dict] | None = None,
         daemon_version: str | None = None,
         daemon_build_id: str | None = None,
+        started_at: datetime | None = None,
     ) -> DaemonInstance:
         """Per-daemon 心跳 facade（design §5.4 / §9.1 / D-006）。
 
@@ -179,12 +184,14 @@ class DaemonService:
         + 各 daemon_runtimes.status。返回 DaemonInstance（HTTP 响应从中读
         daemon_instance_id / status / allowed_roots）。
         2026-07-04-daemon-version-management：透传 daemon_version/build_id。
+        2026-08-05-daemon-start-time：透传 started_at（幂等覆盖恒定值）。
         """
         return await self._rt.heartbeat_daemon(
             daemon_local_id,
             providers,
             daemon_version=daemon_version,
             daemon_build_id=daemon_build_id,
+            started_at=started_at,
         )
 
     async def get_runtime(

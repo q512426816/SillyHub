@@ -8827,6 +8827,8 @@ export interface components {
             daemon_version?: string | null;
             /** Daemon Build Id */
             daemon_build_id?: string | null;
+            /** Started At */
+            started_at?: string | null;
             /** Providers */
             providers?: components["schemas"]["DaemonHeartbeatProviderItem"][];
         };
@@ -8949,6 +8951,8 @@ export interface components {
             version?: string | null;
             /** Build Id */
             build_id?: string | null;
+            /** Started At */
+            started_at?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -9021,6 +9025,8 @@ export interface components {
             daemon_version?: string | null;
             /** Daemon Build Id */
             daemon_build_id?: string | null;
+            /** Started At */
+            started_at?: string | null;
             /** Allowed Roots */
             allowed_roots?: string[];
             /** Providers */

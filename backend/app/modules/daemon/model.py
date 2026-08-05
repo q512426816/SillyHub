@@ -93,6 +93,12 @@ class DaemonInstance(BaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    # daemon 进程启动时间（FR-02 / D-002@v1）：daemon 上报自身进程启动时刻，
+    # 用于精确计算 uptime 与诊断长时间运行漂移。旧 daemon 不上报则为 NULL。
+    started_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(

@@ -249,11 +249,15 @@ interface ClientLike {
     os?: string;
     arch?: string;
     allowedRoots?: string[];
+    /** task-01：进程启动时间（对齐 hub-client task-02 的 register 签名）。 */
+    startedAt?: number | Date | null;
     providers: { provider: string; version?: string; status?: string }[];
   }): Promise<Record<string, unknown>>;
   heartbeat(
     daemonLocalId: string,
     providers?: { provider: string; status?: string }[],
+    /** task-01：进程启动时间（对齐 hub-client task-02 的 heartbeat 第 3 参数）。 */
+    startedAt?: number | Date | null,
   ): Promise<unknown>;
   markOffline?(runtimeId: string): Promise<unknown>;
   claimLease(leaseId: string, runtimeId: string): Promise<Record<string, unknown>>;
@@ -541,6 +545,15 @@ export interface DaemonOptions {
    * 测试可注入指向 tmp 目录的实例，避免污染真实 ~/.sillyhub。
    */
   borrowWorkspaceManager?: WorkspaceManager | null;
+  /**
+   * task-01（FR-01 / D-001@v1）：daemon 进程启动时间（epoch ms）。
+   *
+   * 由 cli.ts 入口（``Date.now()``）尽早取后注入，daemon 运行期恒定不变；register /
+   * heartbeat 调 hub-client 时透传给 backend，作为 ``daemon_instances.started_at`` 的
+   * 真实来源（旧 daemon 不传 → 后端取 register 时刻，本字段把语义校正为进程启动时刻）。
+   * 默认 undefined：daemon 不上报 startedAt（hub-client 转 null，后端兜底 register 时刻）。
+   */
+  startedAt?: number;
 }
 
 /**
@@ -578,6 +591,11 @@ export class Daemon {
   private readonly _taskRunner: TaskRunnerLike | null;
   private readonly _detector: DetectorLike;
   private readonly _logger: Logger;
+  /**
+   * task-01（FR-01 / D-001@v1）：进程启动时间（epoch ms），由 cli.ts 入口注入。
+   * undefined 时不向 backend 上报（hub-client 转 null）。运行期恒定。
+   */
+  private readonly _startedAt: number | undefined;
   /**
    * task-04（D-002@v3）：交互式会话管理器。null/undefined 时 interactive lease 记 error
    * 不崩（AC-14 过渡期）。生产路径由 main.ts 在构造 daemon 时传入。
@@ -747,6 +765,8 @@ export class Daemon {
     this._client = client;
     this._taskRunner = taskRunner ?? null;
     this._detector = options?.detector ?? new AgentDetector();
+    // task-01：进程启动时间注入存储（运行期恒定）。
+    this._startedAt = options?.startedAt;
     this._wsClientFactory =
       options?.wsClientFactory ??
       ((opts) => new WsClient(opts) as unknown as WsClientLike);
@@ -1012,6 +1032,8 @@ export class Daemon {
         os: platform(),
         arch: arch(),
         allowedRoots: this._config.allowed_roots,
+        // task-01：进程启动时间上报，backend 据此写 daemon_instances.started_at。
+        startedAt: this._startedAt,
         providers,
       });
       // backend 返回 { daemon_instance_id, runtimes: [{provider, runtime_id, allowed_roots}] }
@@ -1874,7 +1896,12 @@ export class Daemon {
           status: 'online' as const,
         }));
         try {
-          const hbResp = await this._client.heartbeat(daemonLocalId, providers);
+          const hbResp = await this._client.heartbeat(
+            daemonLocalId,
+            providers,
+            // task-01：进程启动时间随心跳上报（位置参数第 3，对齐 hub-client task-02 签名）。
+            this._startedAt,
+          );
           // task-05（FR-03）→ task-07 per-daemon：成功 → 清断连计数 + 告警标记。
           this._heartbeatFailSince = null;
           this._degradedWarned = false;

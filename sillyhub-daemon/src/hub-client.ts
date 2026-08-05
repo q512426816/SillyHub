@@ -52,6 +52,9 @@ export interface RegisterBody {
   /** hub-client 内部填充，调用方无需传；后端写入 daemon_instances.version/build_id。 */
   daemon_version: string;
   daemon_build_id: string;
+  /** task-02（FR-01 / D-001@v1）：daemon 进程启动时间（ISO 8601）。hub-client 内部
+   * 填充，调用方无需传；null 兼容旧 daemon 不上报路径，后端写入 daemon_instances.started_at。 */
+  started_at: string | null;
   /** 探测到的 provider 列表，每项 {provider, version?, status?}。 */
   providers: { provider: string; version?: string; status?: string }[];
 }
@@ -98,6 +101,9 @@ export interface HeartbeatBody {
   /** daemon 自身版本（D-001/D-002，register + heartbeat 都带）。hub-client 内部填充。 */
   daemon_version: string;
   daemon_build_id: string;
+  /** task-02（FR-01 / D-001@v1）：daemon 进程启动时间（ISO 8601）。hub-client 内部
+   * 填充；null 兼容旧 daemon 不上报路径。 */
+  started_at: string | null;
   /** 各 provider 当前状态，每项 {provider, status}。 */
   providers: { provider: string; status?: string }[];
 }
@@ -328,6 +334,8 @@ export class HubClient {
     os?: string;
     arch?: string;
     allowedRoots?: string[];
+    /** task-02：daemon 进程启动时间（epoch ms / Date / 数值）；空填 null（兼容旧 daemon）。 */
+    startedAt?: number | Date | null;
     providers: { provider: string; version?: string; status?: string }[];
   }): Promise<Record<string, unknown>> {
     const body: RegisterBody = {
@@ -336,6 +344,10 @@ export class HubClient {
       hostname: params.hostname,
       daemon_version: DAEMON_VERSION,
       daemon_build_id: BUILD_ID,
+      started_at:
+        params.startedAt == null
+          ? null
+          : new Date(params.startedAt).toISOString(),
       providers: params.providers,
     };
     if (params.os) body.os = params.os;
@@ -358,11 +370,19 @@ export class HubClient {
   async heartbeat(
     daemonLocalId: string,
     providers?: { provider: string; status?: string }[],
+    /** task-02：daemon 进程启动时间（epoch ms / Date / 数值）；空填 null（兼容旧 daemon）。 */
+    startedAt?: number | Date | null,
   ): Promise<Record<string, unknown>> {
     return this._request<Record<string, unknown>>(
       'POST',
       `${REST_PREFIX}/heartbeat`,
-      { daemon_local_id: daemonLocalId, daemon_version: DAEMON_VERSION, daemon_build_id: BUILD_ID, providers: providers ?? [] } satisfies HeartbeatBody,
+      {
+        daemon_local_id: daemonLocalId,
+        daemon_version: DAEMON_VERSION,
+        daemon_build_id: BUILD_ID,
+        started_at: startedAt == null ? null : new Date(startedAt).toISOString(),
+        providers: providers ?? [],
+      } satisfies HeartbeatBody,
     );
   }
 

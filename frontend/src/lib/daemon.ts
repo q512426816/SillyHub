@@ -91,6 +91,11 @@ export interface DaemonMachineRead {
   version: string | null;
   /** daemon 构建 SHA。 */
   build_id: string | null;
+  /**
+   * daemon 进程启动时间（task-07 / FR-03，后端 task-04 新增）。
+   * 旧 daemon 未上报时为 null，前端机器头显「—」。
+   */
+  started_at: string | null;
   created_at: string;
   owner?: OwnerRead | null;
   /** 该 instance 下 runtime 总数。 */

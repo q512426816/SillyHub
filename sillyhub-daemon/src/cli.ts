@@ -423,6 +423,10 @@ interface LogsOptions {
  * @returns 退出码（0 正常退出，1 错误）
  */
 export async function startAction(opts: StartOptions): Promise<number> {
+  // task-01（FR-01 / D-001@v1）：进程入口尽早取启动时间戳（epoch ms）。
+  // 整个 daemon 生命周期内恒定；register/heartbeat 上报给 backend 作为
+  // daemon_instances.started_at 的真实来源（cli.ts 入口取，非 daemon 循环内）。
+  const processStartTime = Date.now();
   // step 0: 互斥校验（先于 config 加载，避免污染持久化文件）。
   // --token 与 --api-key 同时给 → 退出码 1，避免运行时鉴权歧义。
   if (opts.token && opts.apiKey) {
@@ -762,6 +766,8 @@ export async function startAction(opts: StartOptions): Promise<number> {
     lockManager,
     resilience,
     policyCache,
+    // task-01：进程启动时间注入（register/heartbeat 上报 started_at 用）。
+    startedAt: processStartTime,
   });
 
   // step 6: 写 PID 文件（对齐 Python __main__.py:106 `_write_pid(os.getpid())`）。

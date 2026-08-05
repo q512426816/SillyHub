@@ -123,6 +123,7 @@ async def _create_instance(
     status: str = "online",
     display_alias: str | None = None,
     last_heartbeat_at: datetime | None = None,
+    started_at: datetime | None = None,
 ) -> DaemonInstance:
     inst = DaemonInstance(
         id=uuid.uuid4(),
@@ -132,6 +133,9 @@ async def _create_instance(
         status=status,
         display_alias=display_alias,
         last_heartbeat_at=last_heartbeat_at or datetime.now(UTC),
+        # 2026-08-05-daemon-start-time task-06：仿 daemon_version 参数模式，
+        # 默认 None（旧 daemon），测试显式传值时落库。
+        started_at=started_at,
     )
     session.add(inst)
     await session.commit()
@@ -447,6 +451,51 @@ async def test_machines_zero_runtime_machine_returns_empty_runtimes(
     assert machine["runtime_count"] == 0
     assert machine["online_runtime_count"] == 0
     assert machine["runtimes"] == []
+
+
+# ── GET /machines started_at 链路（2026-08-05-daemon-start-time task-06 / FR-02）──
+
+
+@pytest.mark.asyncio
+async def test_machines_started_at_returned_when_reported(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """FR-02 / D-002@v1：daemon 上报 started_at 后 GET machines 返回非 null 等于上报值。"""
+    admin, user_a, _ = await _bootstrap(db_session)
+    started = datetime.now(UTC) - timedelta(minutes=15)
+    inst = await _create_instance(
+        db_session, user_a.id, hostname="started-host", started_at=started
+    )
+    await _create_runtime(db_session, user_a.id, daemon_instance_id=inst.id)
+
+    resp = await client.get("/api/daemon/machines", headers=_headers(_token_for(admin)))
+    assert resp.status_code == 200, resp.text
+    items = {it["hostname"]: it for it in resp.json()["items"]}
+    machine = items["started-host"]
+    # 非 null + 等于上报值（HTTP 序列化为 ISO 字符串，解析回 datetime 比较）
+    assert machine["started_at"] is not None
+    returned = datetime.fromisoformat(machine["started_at"])
+    # SQLite aiosqlite 写入 aware datetime 会丢 tz（conftest 已知行为），归一比较：
+    returned_utc = returned.replace(tzinfo=UTC) if returned.tzinfo is None else returned
+    started_utc = started.replace(tzinfo=UTC) if started.tzinfo is None else started
+    assert returned_utc == started_utc
+
+
+@pytest.mark.asyncio
+async def test_machines_started_at_null_for_legacy_daemon(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """FR-02：旧 daemon（不上报 started_at）→ GET machines 返回 None。"""
+    admin, user_a, _ = await _bootstrap(db_session)
+    # 不传 started_at（默认 None），模拟旧 daemon
+    inst = await _create_instance(db_session, user_a.id, hostname="legacy-host")
+    await _create_runtime(db_session, user_a.id, daemon_instance_id=inst.id)
+
+    resp = await client.get("/api/daemon/machines", headers=_headers(_token_for(admin)))
+    assert resp.status_code == 200, resp.text
+    items = {it["hostname"]: it for it in resp.json()["items"]}
+    machine = items["legacy-host"]
+    assert machine["started_at"] is None
 
 
 # ── PATCH /machines/{instance_id} ────────────────────────────────────────────

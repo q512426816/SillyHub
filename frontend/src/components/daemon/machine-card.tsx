@@ -168,6 +168,22 @@ export function MachineCard({
             <span className="inline-flex items-center gap-1">
               心跳 {formatRelativeTime(machine.last_heartbeat_at)}
             </span>
+            {/*
+              task-07 / FR-03：进程启动时间。非 null 复用 formatRelativeTime 做相对时间 +
+              外层 span title 显示绝对时间；null（旧 daemon 未上报）单独显「—」，
+              不复用 formatRelativeTime（其 null 默认「无心跳」语义不符）。
+            */}
+            <span
+              className="inline-flex items-center gap-1"
+              title={
+                machine.started_at
+                  ? new Date(machine.started_at).toLocaleString()
+                  : undefined
+              }
+            >
+              启动{" "}
+              {machine.started_at ? formatRelativeTime(machine.started_at) : "—"}
+            </span>
             {machine.version ? (
               <span className="inline-flex items-center gap-1">
                 daemon {machine.version}

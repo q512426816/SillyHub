@@ -28372,6 +28372,18 @@
             ],
             "title": "Daemon Build Id"
           },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
           "providers": {
             "items": {
               "$ref": "#/components/schemas/DaemonHeartbeatProviderItem"
@@ -28646,6 +28658,18 @@
             ],
             "title": "Build Id"
           },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -28808,6 +28832,18 @@
               }
             ],
             "title": "Daemon Build Id"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
           },
           "allowed_roots": {
             "items": {

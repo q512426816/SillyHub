@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -51,6 +52,20 @@ async def _seed_user(db_session: AsyncSession, *, name: str = "u") -> uuid.UUID:
 
 def _providers(*names: str) -> list[dict]:
     return [{"provider": n, "status": "online", "version": "1.0"} for n in names]
+
+
+def _assert_started_at_equal(actual: datetime | None, expected: datetime) -> None:
+    """SQLite aiosqlite 时区陷阱归一比较（conftest.py 已知行为：
+
+    SQLAlchemy ``DateTime(timezone=True)`` 列在 aiosqlite 下走 ORM 写入时
+    **丢弃 tzinfo**，aware datetime 被存成 naive。生产 PG 是 timestamptz 原生
+    保留，不受此影响。断言两边都 strip tzinfo 比较 wall-clock 时刻，
+    与 service.get_runtimes_usage 的 SQLite 分支处理一致。
+    """
+    assert actual is not None
+    a = actual.replace(tzinfo=None) if actual.tzinfo is not None else actual
+    e = expected.replace(tzinfo=None) if expected.tzinfo is not None else expected
+    assert a == e
 
 
 class TestRegisterDaemon:
@@ -326,3 +341,181 @@ class TestHeartbeatDaemon:
         )
         await db_session.refresh(rt)
         assert rt.status == "disabled"
+
+
+class TestDaemonStartedAt:
+    """started_at 上报链路（2026-08-05-daemon-start-time task-06 / FR-02 / D-002@v1）。
+
+    覆盖：
+
+    * register 传 started_at → instance.started_at 落库等于上报值（new + else 两分支）。
+    * heartbeat 传 started_at 幂等覆盖：先 register 一个值，再 heartbeat 传同值，
+      instance.started_at 不漂移；heartbeat 不传 started_at（旧 daemon）保持原值。
+    * register/heartbeat 不传 started_at（旧 daemon 兼容）→ instance.started_at 为 None。
+    """
+
+    @pytest.mark.asyncio
+    async def test_register_started_at_persisted_new_instance(
+        self, db_session: AsyncSession
+    ) -> None:
+        """register 传 started_at（首次注册，new 分支）→ instance.started_at 落库。"""
+        uid = await _seed_user(db_session)
+        svc = RuntimeService(db_session)
+        daemon_local_id = uuid.uuid4()
+        started = datetime.now(UTC) - timedelta(minutes=5)
+
+        await svc.register_daemon(
+            uid,
+            daemon_local_id=daemon_local_id,
+            server_url="http://localhost:8001",
+            hostname="host-start",
+            providers=_providers("claude"),
+            started_at=started,
+        )
+
+        instance = await db_session.get(DaemonInstance, daemon_local_id)
+        assert instance is not None
+        await db_session.refresh(instance)
+        _assert_started_at_equal(instance.started_at, started)
+
+    @pytest.mark.asyncio
+    async def test_register_started_at_persisted_on_reregister(
+        self, db_session: AsyncSession
+    ) -> None:
+        """register 传 started_at（再次注册，else 分支）→ instance.started_at 更新为新值。"""
+        uid = await _seed_user(db_session)
+        svc = RuntimeService(db_session)
+        daemon_local_id = uuid.uuid4()
+        first_started = datetime.now(UTC) - timedelta(hours=1)
+        second_started = datetime.now(UTC) - timedelta(minutes=1)
+
+        # 首次注册（new 分支）落 first_started
+        await svc.register_daemon(
+            uid,
+            daemon_local_id=daemon_local_id,
+            server_url="http://localhost:8001",
+            hostname="host",
+            providers=_providers("claude"),
+            started_at=first_started,
+        )
+        # 再次注册（else 分支）应覆盖为 second_started
+        await svc.register_daemon(
+            uid,
+            daemon_local_id=daemon_local_id,
+            server_url="http://localhost:8001",
+            hostname="host",
+            providers=_providers("claude"),
+            started_at=second_started,
+        )
+
+        instance = await db_session.get(DaemonInstance, daemon_local_id)
+        assert instance is not None
+        await db_session.refresh(instance)
+        _assert_started_at_equal(instance.started_at, second_started)
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_started_at_idempotent_same_value(
+        self, db_session: AsyncSession
+    ) -> None:
+        """heartbeat 传 started_at 幂等覆盖同值：先 register 一个值，再 heartbeat 同值，
+        instance.started_at 不漂移（恒定值，无副作用）。"""
+        uid = await _seed_user(db_session)
+        svc = RuntimeService(db_session)
+        daemon_local_id = uuid.uuid4()
+        started = datetime.now(UTC) - timedelta(minutes=10)
+
+        await svc.register_daemon(
+            uid,
+            daemon_local_id=daemon_local_id,
+            server_url="http://localhost:8001",
+            hostname="host",
+            providers=_providers("claude"),
+            started_at=started,
+        )
+
+        # heartbeat 传同值（daemon 不重启，started_at 恒定）
+        await svc.heartbeat_daemon(
+            daemon_local_id,
+            providers=[{"provider": "claude", "status": "online"}],
+            started_at=started,
+        )
+
+        instance = await db_session.get(DaemonInstance, daemon_local_id)
+        assert instance is not None
+        await db_session.refresh(instance)
+        _assert_started_at_equal(instance.started_at, started)
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_started_at_omitted_preserves_existing(
+        self, db_session: AsyncSession
+    ) -> None:
+        """heartbeat 不传 started_at（旧 daemon / heartbeat 协议未带）→ 保持 register 时的值。"""
+        uid = await _seed_user(db_session)
+        svc = RuntimeService(db_session)
+        daemon_local_id = uuid.uuid4()
+        started = datetime.now(UTC) - timedelta(minutes=10)
+
+        await svc.register_daemon(
+            uid,
+            daemon_local_id=daemon_local_id,
+            server_url="http://localhost:8001",
+            hostname="host",
+            providers=_providers("claude"),
+            started_at=started,
+        )
+
+        # heartbeat 不传 started_at（默认 None）→ 不应清掉 register 落的值
+        await svc.heartbeat_daemon(
+            daemon_local_id,
+            providers=[{"provider": "claude", "status": "online"}],
+        )
+
+        instance = await db_session.get(DaemonInstance, daemon_local_id)
+        assert instance is not None
+        await db_session.refresh(instance)
+        _assert_started_at_equal(instance.started_at, started)
+
+    @pytest.mark.asyncio
+    async def test_register_started_at_none_legacy_daemon(self, db_session: AsyncSession) -> None:
+        """旧 daemon 兼容：register 不传 started_at → instance.started_at 为 None。"""
+        uid = await _seed_user(db_session)
+        svc = RuntimeService(db_session)
+        daemon_local_id = uuid.uuid4()
+
+        await svc.register_daemon(
+            uid,
+            daemon_local_id=daemon_local_id,
+            server_url="http://localhost:8001",
+            hostname="host-legacy",
+            providers=_providers("claude"),
+            # 不传 started_at（旧 daemon）
+        )
+
+        instance = await db_session.get(DaemonInstance, daemon_local_id)
+        assert instance is not None
+        await db_session.refresh(instance)
+        assert instance.started_at is None
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_started_at_none_legacy_daemon(self, db_session: AsyncSession) -> None:
+        """旧 daemon 兼容：register + heartbeat 都不传 started_at → 全程 None。"""
+        uid = await _seed_user(db_session)
+        svc = RuntimeService(db_session)
+        daemon_local_id = uuid.uuid4()
+
+        await svc.register_daemon(
+            uid,
+            daemon_local_id=daemon_local_id,
+            server_url="http://localhost:8001",
+            hostname="host-legacy",
+            providers=_providers("claude"),
+        )
+        await svc.heartbeat_daemon(
+            daemon_local_id,
+            providers=[{"provider": "claude", "status": "online"}],
+        )
+
+        instance = await db_session.get(DaemonInstance, daemon_local_id)
+        assert instance is not None
+        await db_session.refresh(instance)
+        assert instance.started_at is None

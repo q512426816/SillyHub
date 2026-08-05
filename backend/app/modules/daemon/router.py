@@ -212,6 +212,10 @@ class DaemonHeartbeatRequest(BaseModel):
     daemon_local_id: uuid.UUID = Field(description="daemon 本地 uuid（daemon_instances.id）")
     daemon_version: str | None = Field(default=None, max_length=50)
     daemon_build_id: str | None = Field(default=None, max_length=50)
+    # daemon 进程启动时间（2026-08-05-daemon-start-time D-002@v1）。
+    # 心跳携带用于 daemon 重启后 started_at 刷新（process 重启时间变）。
+    # Optional 兼容旧 daemon（不上报则保留原值 / NULL）。
+    started_at: datetime | None = Field(default=None)
     providers: list[DaemonHeartbeatProviderItem] = Field(default_factory=list)
 
 
@@ -320,6 +324,7 @@ async def register_daemon(
         providers=[item.model_dump() for item in data.providers],
         daemon_version=data.daemon_version,
         daemon_build_id=data.daemon_build_id,
+        started_at=data.started_at,
     )
     return DaemonRegisterResponse(
         daemon_instance_id=result.daemon_instance_id,
@@ -360,6 +365,7 @@ async def daemon_heartbeat(
         providers=[item.model_dump() for item in data.providers],
         daemon_version=data.daemon_version,
         daemon_build_id=data.daemon_build_id,
+        started_at=data.started_at,
     )
     # ql-20260706-005：col 属 sqlmodel（非 sqlalchemy 顶层），误从 sqlalchemy
     # 导入会 ImportError → heartbeat 端点 500 → daemon 拿不到 per-runtime
@@ -488,6 +494,9 @@ def _build_machine_read(
         last_heartbeat_at=instance.last_heartbeat_at,
         version=instance.version,
         build_id=instance.build_id,
+        # 2026-08-05-daemon-start-time D-002@v1：进程启动时间，直接读 instance.started_at
+        # （task-03 已加该字段，timezone=True nullable）。旧 daemon / 未上报 → None。
+        started_at=instance.started_at,
         created_at=instance.created_at,
         owner=OwnerRead(
             user_id=owner.id,

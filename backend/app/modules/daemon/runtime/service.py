@@ -165,8 +165,13 @@ class RuntimeService:
         providers: list[dict] | None = None,
         daemon_version: str | None = None,
         daemon_build_id: str | None = None,
+        started_at: datetime | None = None,
     ) -> DaemonRegisterResult:
         """Per-daemon 注册（design §5.2 / D-006 / D-001）。
+
+        2026-08-05-daemon-start-time D-002@v1：started_at（daemon 进程启动时间）
+        透传并写入 instance.started_at（new + else 两分支均写，register 直接落值）。
+        可空兼容旧 daemon（不上报 → None，保持 NULL）。
 
         1. upsert daemon_instances by ``id=daemon_local_id``：复用身份，更新机器级
            字段（hostname/os/arch/allowed_roots/status=online/last_heartbeat_at）。
@@ -193,6 +198,7 @@ class RuntimeService:
                 arch=arch,
                 version=daemon_version,
                 build_id=daemon_build_id,
+                started_at=started_at,
                 allowed_roots=roots,
                 status="online",
                 last_heartbeat_at=now,
@@ -219,6 +225,7 @@ class RuntimeService:
             instance.arch = arch
             instance.version = daemon_version
             instance.build_id = daemon_build_id
+            instance.started_at = started_at
             instance.allowed_roots = roots
             instance.status = "online"
             instance.last_heartbeat_at = now
@@ -318,8 +325,13 @@ class RuntimeService:
         providers: list[dict] | None = None,
         daemon_version: str | None = None,
         daemon_build_id: str | None = None,
+        started_at: datetime | None = None,
     ) -> DaemonInstance:
         """Per-daemon 心跳（design §5.4 / §9.1 / D-006）。
+
+        2026-08-05-daemon-start-time D-002@v1：started_at 仿 daemon_version
+        非空判断幂等覆盖（daemon 进程不重启 started_at 恒定，覆盖同值无副作用；
+        daemon 重启后会先 register 重置，再 heartbeat 维持）。
 
         daemon 单条心跳合并上报 ``daemon_local_id`` + 各 provider 状态。backend：
 
@@ -350,6 +362,8 @@ class RuntimeService:
             instance.version = daemon_version
         if daemon_build_id is not None:
             instance.build_id = daemon_build_id
+        if started_at is not None:
+            instance.started_at = started_at
         if instance.status != "disabled":
             instance.status = "online"
         self._session.add(instance)

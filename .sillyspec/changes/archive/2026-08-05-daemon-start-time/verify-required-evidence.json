@@ -1,0 +1,13 @@
+{
+  "generatedAt": "2026-08-05T03:52:22.117Z",
+  "schemaVersion": 1,
+  "items": [
+    {
+      "task": "task-08",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft: 待 agent 对照 task-08 brief + diff 复核后升级为 pass/fail"
+      ]
+    }
+  ]
+}
