@@ -199,3 +199,16 @@
 根因：task-07 初版复用 formatRelativeTime 做相对时间（仿 last_heartbeat_at 鲜活），但启动时间不像心跳需相对鲜活，用户要绝对时刻。
 方案：started_at 非 null 直接 new Date(iso).toLocaleString("zh-CN",{hour12:false}) 显绝对（年月日时分秒 24h），去 title tooltip 冗余；null 仍「—」（旧 daemon 兼容）。
 结果：1 文件改动（machine-card.tsx，6 insertions 12 deletions），commit 81bcea8c，commit hook 全过（backend ruff + frontend lint/typecheck/test），rebuild frontend + recreate 部署中。
+
+## ql-20260805-002-1ab4 | 2026-08-05 20:55:50 | 修复 interactive run 终态 lost update（迟到的 submit_messages 不覆盖 close 写入的 completed）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/run_sync/service.py（submit_messages 的 pending→running 分支由 ORM 内存读改写改为 `update().where(AgentRun.status=='pending')` 原子条件 UPDATE，rowcount=0 即 DB 已被 close 推进终态则不覆盖）
+- backend/app/modules/daemon/tests/test_submit_messages_no_overwrite_terminal.py（新增：双 session 制造旧快照竞态，验证迟到的 submit 不覆盖 completed + 正常 pending→running 回归）
+- .sillyspec/docs/SillyHub/modules/daemon.md（变更索引追加 ql-20260805-002-1ab4）
+
+需求：修复 interactive run 终态并发 lost update——迟到的 submit_messages 协程用旧快照覆盖 close_interactive_run 写入的 completed，致 agent_runs 卡 running、前端一直显示「等待本轮完成」。
+根因：run_sync/service.py submit_messages 的 pending→running 分支用 ORM 内存读改写（status=='pending' 判断基于 session 旧快照），无原子条件/行锁，与 close 并发时 lost update。
+方案：line 702-711 改成 update().where(AgentRun.id==,AgentRun.status=='pending').values(running) 原子条件 UPDATE，rowcount=0 即 DB 已被 close 推进终态则不覆盖；新增 test_submit_messages_no_overwrite_terminal.py（双 session 制造旧快照竞态 + 正常路径回归）。
+结果：2 新测试 PASS；反向验证还原修复后 late_submit FAIL 证有效；close/session_status/interactive 回归 37 passed；1 个 gap-2 测试 pre-existing 失败（no such table:llm_providers,conftest 未注册,stash 验证与本次无关）。
