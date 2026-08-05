@@ -413,6 +413,22 @@ export interface LeaseCtx {
    * undefined/空 → 用原 provider 值（FR-15）。
    */
   effectiveAllowedRoots?: string[];
+  /**
+   * task-08（D-006 / D-009 / FR-05 / FR-07）：本次 lease 的 token budget 上限。
+   *
+   * 来自 claim payload（context.py task-07 双写 ``budget_tokens``/``budgetTokens``，
+   * 源 ``AgentMission.budget_tokens``）。daemon 经 execPayload 归一化读取
+   *（camel/snake 都认，同 mcpRefs / profileVersion）。
+   *
+   * 累计口径 D-009：``input_tokens + output_tokens``（**不含** cache_read /
+   * cache_creation），per AgentRun 归集（与成本归集一致）。累计 ≥ budget_tokens →
+   * 软切断（D-006：当前 turn / step 跑完不启下一个，**不**调 close / kill 杀当前）
+   * + 经现有 submitMessages / notifyRunResult 回传 ``reason='budget_exceeded'`` 事件
+   * 含 usage ``{input_tokens, output_tokens}``。
+   *
+   * undefined / 未下发 → 检查点短路（永不触发，行为零变化，FR-07 brownfield 零回归）。
+   */
+  budget_tokens?: number;
 }
 
 /**

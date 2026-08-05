@@ -7659,6 +7659,8 @@ export interface components {
             deleted_at?: string | null;
             /** Current Run Id */
             current_run_id?: string | null;
+            /** Terminating At */
+            terminating_at?: string | null;
         };
         /** ApiKeyCreateRequest */
         ApiKeyCreateRequest: {

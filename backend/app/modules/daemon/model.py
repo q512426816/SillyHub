@@ -361,6 +361,15 @@ class DaemonTaskLease(BaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    # Phase 4 轻量终态确认观测点（design §5 Phase4 / D-007 / R-05）：
+    # cancel_lease 发出取消信号后写入，daemon 回传终态后清空；为 sweeper 提供
+    # "已标 cancelled、等 daemon 回传确认" 的间隙观测窗口。**仅观测时间戳**，
+    # 不改 status 状态机取值集合（方案 C 无中间态）；写入/清理/sweeper 逻辑在
+    # task-11。默认 None，现有 lease 不受影响（§9 兼容策略）。
+    terminating_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     attempt_number: int | None = Field(
         default=1,
         sa_column=Column(Integer, nullable=True, server_default=text("1")),

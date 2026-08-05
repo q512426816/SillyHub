@@ -26,7 +26,7 @@ import {
   updateWorkspace,
   type Workspace,
 } from "@/lib/workspaces";
-import { fetchMyBinding, type MemberBindingView, type MemberBindingWithShared } from "@/lib/workspace-binding";
+import { fetchMyBinding, type MemberBindingView } from "@/lib/workspace-binding";
 import { useSession } from "@/stores/session";
 
 /* ------------------------------------------------------------------ */
@@ -334,13 +334,12 @@ export default function WorkspaceDetailPage({ params }: Props) {
 
       {/* task-12 / FR-01 / D-003@v1：lender「共享我的 daemon」开关。
           仅当当前用户已绑定 daemon（myBinding 存在）时渲染 —— 业务/管理人员无自有
-          binding，不渲染此区段。shared 字段后端已返回（model 默认 false），生成类型
-          暂缺，按 MemberBindingWithShared 取用。 */}
+          binding，不渲染此区段。shared 字段生成类型已含（model 默认 false）。 */}
       {myBinding && (
         <SectionCard title="守护进程共享">
           <SharedDaemonToggle
             workspaceId={workspaceId}
-            shared={(myBinding as MemberBindingWithShared).shared}
+            shared={myBinding?.shared}
             daemonLabel={
               boundDaemon?.display_alias ?? boundDaemon?.hostname ?? null
             }

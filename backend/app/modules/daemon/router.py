@@ -32,7 +32,7 @@ from app.core.logging import get_logger
 from app.modules.agent.schema import AgentRunLogEntry
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
-from app.modules.daemon.model import DaemonInstance, DaemonRuntime
+from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.model_error import ModelErrorDTO
 from app.modules.daemon.permission_service import (
     DaemonPermissionService,
@@ -1736,6 +1736,24 @@ async def list_sessions(
         status_filter=status,
     )
     reads = [AgentSessionRead.model_validate(item) for item in items]
+    # task-13 / FR-04 / design §5 Phase4：批量查 lease.terminating_at 注入到每个 read。
+    # 经 session.lease_id 关联 DaemonTaskLease；只查本页 lease_id 非空子集（IN 避免 N+1）。
+    # lease.terminating_at 为空 / session 无 lease → read.terminating_at 保持 None（brownfield）。
+    lease_ids = {item.lease_id for item in items if item.lease_id is not None}
+    if lease_ids:
+        term_rows = (
+            await session.execute(
+                select(DaemonTaskLease.id, DaemonTaskLease.terminating_at).where(
+                    DaemonTaskLease.id.in_(lease_ids)
+                )
+            )
+        ).all()
+        term_map: dict[uuid.UUID, datetime] = {
+            row[0]: row[1] for row in term_rows if row[1] is not None
+        }
+        for r in reads:
+            if r.lease_id and r.lease_id in term_map:
+                r.terminating_at = term_map[r.lease_id]
     # FR-08 / D-006: 复用 list_change_sessions 的首条 user_input 摘要逻辑（前 30 字）。
     # 逻辑与 change/router.py:list_change_sessions 保持同步（R-7），未来可抽共享 helper。
     if items:
@@ -1789,6 +1807,18 @@ async def get_session_detail(
     svc = DaemonService(session)
     agent_session = await svc.get_agent_session(session_id, user.id)
     read = AgentSessionRead.model_validate(agent_session)
+    # task-13 / FR-04 / design §5 Phase4：经 session.lease_id 关联查 lease.terminating_at。
+    # lease 无 / terminating_at 为空 → read.terminating_at 保持 None（brownfield 守护）。
+    if agent_session.lease_id is not None:
+        lease_row = (
+            await session.execute(
+                select(DaemonTaskLease.terminating_at).where(
+                    DaemonTaskLease.id == agent_session.lease_id
+                )
+            )
+        ).first()
+        if lease_row is not None and lease_row[0] is not None:
+            read.terminating_at = lease_row[0]
     # 查当前运行 run（attach 恢复 currentRunId，启用打断按钮；无运行 run 则 null）
     from app.modules.agent.model import AgentRun
 

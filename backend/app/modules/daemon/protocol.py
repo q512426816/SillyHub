@@ -54,6 +54,15 @@ DAEMON_MSG_SELF_UPDATE = "daemon:self_update"  # Server → Daemon, 推送 daemo
 # （收旧 version 忽略 R-07），实现 sub-second 生效；心跳响应仍带 allowed_roots 兜底。
 DAEMON_MSG_POLICY_UPDATE = "daemon:policy_update"  # Server → Daemon, D-004
 
+# change 2026-08-05-daemon-kill-channel-unify / task-04 / FR-03 / R-06:
+# batch lease 即时取消 WS push（Server → Daemon）。backend cancel_lease 对 batch
+# lease（kind != interactive）标记 cancelled 后立即 best-effort 推送，daemon 收到
+# 后调 taskRunner.cancel(leaseId) 复用现有 AbortController → _killChild 即时杀子
+# 进程，不再等心跳周期（design §5 Phase2 / §7.5）。发送失败靠现有心跳轮询兜底
+# （task-runner.ts:905 不变，design §9）。纯新增消息，旧 daemon 收到走 default 仅
+# warn（向后兼容）。双触发幂等由 taskRunner.cancel 内部保证（design §10 R-06）。
+DAEMON_MSG_LEASE_CANCEL = "daemon:lease_cancel"  # Server → Daemon, FR-03 / R-06
+
 
 # ── Message envelope ────────────────────────────────────────────────────────
 
@@ -160,6 +169,22 @@ class SessionControlPayload(BaseModel):
     """
 
     session_id: uuid.UUID
+    lease_id: uuid.UUID
+
+
+class LeaseCancelPayload(BaseModel):
+    """LEASE_CANCEL payload (Server → Daemon, FR-03 / R-06).
+
+    change 2026-08-05-daemon-kill-channel-unify / task-04 / design §5 Phase2 +
+    §7.5. backend ``cancel_lease`` 对 batch lease（``kind != interactive``）标记
+    cancelled 后经 ``ws_hub.send_to_runtime`` 即时 best-effort 推送；daemon 收到后
+    调 ``taskRunner.cancel(lease_id)`` 复用现有 ``AbortController → _killChild``
+    即时杀 batch 子进程，不再等心跳周期。``runtime_id`` 为 provider session 判别
+    字段（design §5.3 / protocol.py 末尾注释），daemon 用它把消息分派到正确的
+    task-runner；与心跳轮询双触发幂等由 ``taskRunner.cancel`` 内部保证（R-06）。
+    """
+
+    runtime_id: uuid.UUID
     lease_id: uuid.UUID
 
 

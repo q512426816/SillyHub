@@ -135,6 +135,14 @@ interface InteractiveSessionView {
   currentRunId: string | null;
   turns: SessionTurnView[];
   errorMsg: string | null;
+  /**
+   * 2026-08-05-daemon-kill-channel-unify task-13 / FR-04 / design §5 Phase4：
+   * lease.terminating_at（ISO 字符串）非空时表示 lease 处于「已标终止、等 daemon
+   * 回传确认」的观测窗口。attach 轮询时从 getAgentSession 拿到（AgentSessionRead
+   * 已暴露 terminating_at）；非空时顶部显示「终止中…」横幅而非立刻判定已停止。
+   * daemon 回传 session_ended（onSessionEnded）后清空。
+   */
+  terminatingAt: string | null;
 }
 
 const INITIAL_VIEW: InteractiveSessionView = {
@@ -143,6 +151,7 @@ const INITIAL_VIEW: InteractiveSessionView = {
   currentRunId: null,
   turns: [],
   errorMsg: null,
+  terminatingAt: null,
 };
 
 const MAX_PROMPT_LEN = 8000;
@@ -487,6 +496,8 @@ export function InteractiveSessionPanel({
             ...prev,
             status: "ended",
             currentRunId: null,
+            // task-13 / FR-04：daemon 回传 session_ended → 清终止中态（终止已确认）
+            terminatingAt: null,
           }));
           // session 结束 → 清空待答卡片（AskUserQuestion 不会再有回答机会）
           setPendingRequests([]);
@@ -541,6 +552,7 @@ export function InteractiveSessionPanel({
         currentRunId: null,
         turns: initialTurns ?? [],
         errorMsg: null,
+        terminatingAt: null,
       });
       // eslint-disable-next-line react-hooks/exhaustive-deps
       return;
@@ -557,6 +569,7 @@ export function InteractiveSessionPanel({
       currentRunId: null,
       turns: initialTurns ?? [],
       errorMsg: null,
+      terminatingAt: null,
     });
     // initialTurns 仅在 mount 时读取，避免 props 变更抖动（react-hooks/exhaustive-deps 忽略）
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -580,6 +593,12 @@ export function InteractiveSessionPanel({
       try {
         const detail = await getAgentSession(attachSessionId);
         if (cancelled) return;
+        // task-13 / FR-04：detail.terminating_at 由后端经 lease 关联注入（AgentSessionRead
+        // 已暴露）。daemon.ts 的手写 AgentSessionRead 类型暂未声明此字段，运行时已带——
+        // 用 cast 安全读取（不强制改 daemon.ts，避免越 allowed_paths）。非空表示 lease
+        // 处于终止中观测窗口，面板据此显示「终止中…」横幅。
+        const detailTermAt =
+          (detail as { terminating_at?: string | null }).terminating_at ?? null;
         if (detail.status === "active") {
           stop();
           // 恢复 currentRunId（attach 运行中会话时启用打断按钮；detail.current_run_id
@@ -589,6 +608,7 @@ export function InteractiveSessionPanel({
             status: "active",
             errorMsg: null,
             currentRunId: detail.current_run_id ?? prev.currentRunId,
+            terminatingAt: detailTermAt,
           }));
         } else if (detail.status === "failed") {
           stop();
@@ -596,12 +616,20 @@ export function InteractiveSessionPanel({
             ...prev,
             status: "failed",
             errorMsg: "会话恢复失败，可能上下文已失效",
+            terminatingAt: null,
           }));
         } else if (detail.status === "ended") {
           // 2026-07-11-unify-runtime-session-dialog: ended 会话 attach（无 SDK session id
           // 等无法 reopen 的老会话）→ 转只读 ended 态，显示 initialTurns 历史，不卡轮询。
           stop();
-          setView((prev) => ({ ...prev, status: "ended", errorMsg: null }));
+          setView((prev) => ({ ...prev, status: "ended", errorMsg: null, terminatingAt: null }));
+        } else {
+          // pending/reconnecting：terminating_at 可能已带，先更新以便尽早显示「终止中…」
+          setView((prev) =>
+            prev.terminatingAt === detailTermAt
+              ? prev
+              : { ...prev, terminatingAt: detailTermAt },
+          );
         }
         // reconnecting / ended / pending → 继续轮询（由超时兜底）
       } catch {
@@ -1042,6 +1070,20 @@ export function InteractiveSessionPanel({
         <div className="flex items-center gap-2 border-b border-amber-300 bg-amber-50 px-5 py-2 text-xs text-amber-800">
           <span aria-hidden>⚠️</span>
           <span>运行时离线，当前为只读浏览（发送/打断/结束/新建已禁用），重连后自动恢复。</span>
+        </div>
+      ) : null}
+      {/* task-13 / FR-04 / R-08 / design §5 Phase4：lease 处于 terminating 态（terminating_at
+          非空）时显示「终止中…」横幅——backend cancel_lease 已标 lease.terminating_at、
+          等 daemon 回传统态的观测窗口。避免立刻判定「已停止」给用户错误终态印象。
+          横幅在 session 终态（ended/failed）外才显示；onSessionEnded 会清空 terminatingAt。 */}
+      {view.terminatingAt && view.status !== "ended" && view.status !== "failed" ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-center gap-2 border-b border-amber-300 bg-amber-50 px-5 py-2 text-xs text-amber-800"
+        >
+          <RefreshCw className="h-3 w-3 animate-spin" aria-hidden />
+          <span>终止中…守护进程正在结束会话进程，稍候将自动更新为已停止。</span>
         </div>
       ) : null}
       <header className="shrink-0 border-b bg-card px-5 py-4">

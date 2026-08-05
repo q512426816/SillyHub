@@ -181,3 +181,31 @@
 根因：`_can_read` 对 WORKSPACE 级 owner 短路（service.py:168 返 owner_user_id==actor.id、不查成员），owner 离开 ws 后该档仍可见；list_visible_all 逐档复用 _can_read_async，故聚合视图行为与 get() 一致 = 仍可见，docstring/design 原措辞误写「不可见」，且把 clause 拼接法行为描述颠倒。聚合端点（router.py:102）实建独立 `AgentProfileAggregatedListResponse`，design §7.1 误写复用 AgentProfileListResponse。
 方案：service.py docstring 重写 R-07 段为「owner 离开后仍可见（owner 短路，与 get 一致）」并修正 clause 拼接法对比（clause 法按成员过滤，owner 离开后不放入）；design §10 R-07 同步为「仍可见」；design §7.1 Response 200 改 AgentProfileAggregatedListResponse；归档 task-01.md 两行同源表述同步；test R-07 注释更新为已勘误状态。改动全为 docstring/注释/文档，零功能变更。
 结果：uv run pytest test_profile_service.py + test_profile_router.py 62 passed（含 R-07 owner-left-ws 用例 test_owner_left_ws_workspace_level_matches_get_behavior）；无 lint/type 影响（纯注释文档改动）。
+## ql-20260805-002-6600 | 2026-08-05 13:54:11 | 工作区详情页去除冗余类型断言（MemberBindingWithShared 已成别名）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
+  - L29 移除失效的 `type MemberBindingWithShared` import（断言去除后全文件无引用）
+  - L343 `shared={(myBinding as MemberBindingWithShared).shared}` → `shared={myBinding?.shared}`
+  - L336-338 同块注释更正：「生成类型暂缺，按 MemberBindingWithShared 取用」→「生成类型已含（model 默认 false）」
+
+需求：工作区详情页 page.tsx:343 的 `(myBinding as MemberBindingWithShared)` 类型断言已成冗余，去除后改用 `myBinding?.shared`，并保证 typecheck 通过。
+根因：MemberBindingWithShared 已是 MemberBindingView 的纯别名（workspace-binding.ts:77），OpenAPI 生成类型 MemberBindingView 已含 shared 字段（api-types.ts:10378），myBinding 在 myBinding&& 守卫块内本身已是该类型，断言多余。
+方案：表达式改为 shared={myBinding?.shared}；移除随之失效的 line 29 type MemberBindingWithShared import；更正同块「生成类型暂缺，按 MemberBindingWithShared 取用」过时注释为「生成类型已含」。
+结果：pnpm run typecheck（tsc --noEmit）零错误通过。
+## ql-20260805-003-7c2d | 2026-08-05 21:30:00 | change 2026-08-05-daemon-kill-channel-unify 文档同步（task-14）：CONCERNS/INTEGRATIONS/QUICKLOG + 4 处 spec 勘误
+状态：已完成
+关联变更：2026-08-05-daemon-kill-channel-unify
+文件：
+- .sillyspec/docs/multi-agent-platform/scan/CONCERNS.md（新增「daemon kill 通道」节：标历史 P0-1/P0-2 已修 d06d9a32/9e4faf06/372e52d8 + 本次 5 项新机制 task-01/02/04+05/08/10+11）
+- .sillyspec/docs/multi-agent-platform/scan/INTEGRATIONS.md（§2.1 新增 WS 消息类型表：LEASE_CANCEL 新增行 + SESSION_INTERRUPT 收窄 + SESSION_END 扩大）
+- .sillyspec/changes/2026-08-05-daemon-kill-channel-unify/design.md（RS-1 修 §5/§12「两 provider 都赋值 state.driverHandle」→ 实为 claude=state.query / codex=state.driverHandle 按 provider 分流；RS-2 修 §5/§6/§8「api-types.ts 含 budget_tokens」→ payload 是开放 dict 透传键非命名 schema 字段，typed 字段在 daemon types.ts）
+- .sillyspec/changes/2026-08-05-daemon-kill-channel-unify/tasks/task-11.md（RS-5 注 allowed_paths 扩 scope：补 lease/service.py + session/service.py 两清空点）
+- .sillyspec/changes/2026-08-05-daemon-kill-channel-unify/tasks/task-03.md（AC-3 勘误：close() 本身不吞错，异常由 _terminateSession 调用点 try/catch 兜底 R-01）
+- .sillyspec/quicklog/QUICKLOG-qinyi.md（本条目）
+
+需求：change 2026-08-05-daemon-kill-channel-unify（daemon kill 通道统一，Waves 1-4 全部实现 + review.json 全 pass）的文档同步收尾——scan CONCERNS.md 标历史 P0 已修 + 本次新机制、protocol 双端 WS 消息表、QUICKLOG 条目，外加 4 处 spec 文档与已验证实现不一致的措辞勘误（orchestrator 扩展的 RS-1/RS-2/RS-5/AC-3）。
+根因：① scan 文档（CONCERNS/INTEGRATIONS）滞后于代码，未反映 kill 通道两层演进（历史 P0 backend→WS 信号层已修 + 本次 daemon 物理杀进程层）；② change 自身 spec 文档 4 处措辞与 task 子代理实际实现有出入——design §5/§12 称「两 provider 都赋值 state.driverHandle」（实际 claude 存 state.query，_terminateSession 按 provider 分流，task-01 review.json RS-1）、design §5/§6/§8 称「api-types.ts 含 budget_tokens 命名字段」（实际 LeaseClaimResponse.payload 是开放 dict，budget_tokens 是运行时键非命名 schema，typed 字段在 daemon types.ts task-08，task-07 review.json RS-2）、task-11 allowed_paths 漏列 lease/service.py + session/service.py 两清空点（CONTRACT_SCOPE_GAP 调度已批，task-11 review.json RS-5）、task-03 AC-3 称「close 调 query.close 且异常被 catch」（实际 close() 不吞错，异常在 _terminateSession 调用点 catch R-01，task-03 review.json RS）。
+方案：纯文档改动零代码——① CONCERNS.md 新增「daemon kill 通道（interactive/batch 终止契约）」节，分「历史 P0 已修」（引 3 commit）+「本次新机制」（5 项：Claude END 接通 SDK kill 链 / cancel_lease 改发 SESSION_END / batch LEASE_CANCEL WS / budget 软切断 / terminating_at+sweeper，每项引 task 编号 + 文件路径）；② INTEGRATIONS.md §2.1 新增双端 WS 消息类型表（13 行），LEASE_CANCEL 标新增、SESSION_INTERRUPT 标收窄、SESSION_END 标扩大；③ QUICKLOG 加本条目；④ design.md §5 Phase1+§12 修 RS-1（按 provider 分流措辞）、§5 Phase3+§6+§8 修 RS-2（开放 dict 透传键非命名字段）；⑤ task-11.md allowed_paths 补 lease/service.py + session/service.py + 注 RS-5 扩 scope 缘由；⑥ task-03.md implementation 修 AC-3（close 不吞错、调用点 catch）。所有勘误均对照 review.json + 实际源码（claude-sdk-driver.ts:397/267、session-manager.ts:950/952/2164-2167、types.ts:431、protocol.py:64、protocol.ts:162、openapi.json LeaseClaimResponse.payload additionalProperties:true）核实。
+结果：6 个文档全部更新；零代码改动、零测试运行（纯文档一致性核对，对照 review.json + 源码逐条核实措辞）。RS-1/RS-2/RS-5/AC-3 全部应用。无 BLOCKED。

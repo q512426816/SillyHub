@@ -74,6 +74,27 @@ backend 的 5 处 `TODO` 具体位置：
 - backend CI 强制覆盖率门槛 60%（`--cov-fail-under=60`），门槛偏低但已形成基线；测试函数数达 1757，回归面较广。
 - 本项目未正式上线（`.claude/CLAUDE.md`），不需要考虑版本迭代兼容，数据可清空，降低了破坏性变更的顾虑。
 
+## daemon kill 通道（interactive / batch 终止契约）
+
+> 本节由 change `2026-08-05-daemon-kill-channel-unify` 补充（task-14 文档同步）。记录 daemon 物理杀进程通道的两层演进：先修 backend→WS 信号层（历史 P0，已修），再统一 daemon 侧硬杀链（本次）。详见该 change 的 `design.md` / `decisions.md`。
+
+### 历史 P0（已修，2026-07-12~14）
+
+- ✅ **P0-1 backend cancel 信号未真发 WS**：`cancel_lease` 曾走 `_ws_cancel_stub` 占位（不发真实 WS 信号）。修于 commit `d06d9a32`（2026-07-12）——改走 `_send_interactive_cancel`，真实下发 `SESSION_INTERRUPT` / `SESSION_END`。
+- ✅ **P0-2 MissionControl.cancel 未委派 lease 取消链**：曾不进 `cancel_lease`。修于 commit `9e4faf06` / `372e52d8`（2026-07-14）——`MissionControl.cancel` 委派 `cancel_lease`，闭合 backend→WS 信号层。
+
+> 这两层只解决"backend 终止信号有没有发出"。下一层"daemon 收到信号后子进程有没有真停"仍存在 4 个缺口（design §1 隐患 1~4：Claude 不调 query.close、Codex END 不主动收口、batch kill 靠心跳轮询、budget 无运行期强制点），由本次 change 统一补齐。
+
+### 本次新机制（统一 daemon 物理杀进程，change `2026-08-05-daemon-kill-channel-unify`，未提交）
+
+- **Claude END/fail 接通 SDK kill 链（task-01，D-003 / D-004）**：`ClaudeDriverHandle` 新增 `close = () => query.close()`（`sillyhub-daemon/src/interactive/claude-sdk-driver.ts:397`），触发 SDK 内部 `stdin EOF → 2s 宽限 → SIGTERM → 5s → SIGKILL`（`sdk.mjs` close / `vB=2000`），~7s 内强杀卡死 turn 的 claude 子进程。`session-manager.ts` 新增私有 `_terminateSession(state, reason)` 统一收口 `end()` / `fail()`，按 provider 分流取 target（**claude → `state.query`、codex → `state.driverHandle`**，session-manager.ts:2164-2167），`terminateTarget?.close?.()` 包 try/catch 兜底（R-01）。`interrupt()` 不动（守"打断本轮"软语义，D-001@v2）。
+- **interactive cancel_lease 改发 SESSION_END 硬杀（task-02，D-001@v2）**：原对 interactive 发 `SESSION_INTERRUPT`（软，daemon 只 `q.interrupt()` 不杀进程，卡死 turn 仍僵尸）；改发 `SESSION_END` → 走 `_terminateSession` 硬杀链。`SESSION_INTERRUPT` 此后**仅**对应"打断本轮"按钮（interruptSession 端点）。
+- **batch cancel_lease 走 LEASE_CANCEL WS 即时通道（task-04 / task-05，FR-03 / R-06）**：新增 WS 消息 `daemon:lease_cancel`（双端 `backend/app/modules/daemon/protocol.py` `DAEMON_MSG_LEASE_CANCEL` + `sillyhub-daemon/src/protocol.ts` `MSG.LEASE_CANCEL`）。backend 标记 cancelled 后经 `ws_hub.send_to_runtime` best-effort 推送，daemon 收到调 `taskRunner.cancel(leaseId)` 复用现有 `AbortController → _killChild` 即时杀 batch 子进程，不再等心跳周期；发送失败靠现有心跳轮询兜底（task-runner.ts:905 不变）。双触发幂等由 `taskRunner.cancel` 内部保证。
+- **budget_tokens 运行期软切断检查点（task-08，D-006 / D-009）**：backend 把 `AgentMission.budget_tokens`（`backend/app/modules/agent/model.py:595`）经 claim payload 开放 dict（`LeaseClaimResponse.payload`，`additionalProperties:true`）下发（`backend/app/modules/daemon/lease/context.py` task-07 双写 `budget_tokens` / `budgetTokens`，非 OpenAPI 命名 schema 字段）；daemon `LeaseCtx.budget_tokens?: number`（`sillyhub-daemon/src/types.ts:431`）接收，执行循环累计 `input_tokens + output_tokens`（per AgentRun，不含 cache）≥ 阈值 → 设 `overBudget` → 当前 turn / step 跑完后不续（软切断，D-006，不丢当前 turn 工作）+ 经 `notifyRunResult` / `submit_lease_messages` 回传 `budget_exceeded` reason + usage。
+- **terminating_at 执行端可见性 + 30s sweeper（task-10 / task-11，D-007）**：`DaemonTaskLease.terminating_at: datetime | None`（`backend/app/modules/daemon/model.py` + Alembic migration `20260805_lease_terminating_at`）。写入点：仅 `cancel_lease`（`lease_service.py:419`）写——`end_session` 同事务即把 lease 置 `completed` 无观测窗口（XC-03），session 维度不另设字段（XC-04，cancel_lease 已同步 session.status='ended'）。清空点：daemon 回传 `complete_lease`（`lease/service.py:307`）/ `end_session` 收敛（`session/service.py:934`）时清。独立 sweeper `alert_stuck_terminating_leases`（`lease_service.py:285`，`TERMINATING_TIMEOUT_SECONDS=30`）查 `terminating_at IS NOT NULL AND terminating_at < now-30s` 告警 + 返回 lease_id 列表（不并入 `expire_overdue_leases`——后者只扫 `status='claimed'`，XC-08；不改 lease.status、不重试、不引入 outbox，D-007）。
+
+> 双端 WS 消息变化（LEASE_CANCEL 新增 / SESSION_END 扩大 / SESSION_INTERRUPT 收窄）见 `INTEGRATIONS.md` §2.1。
+
 ## 已知问题清单（按严重度分组）
 
 ### 🔴 高（阻塞 / 待 execute）

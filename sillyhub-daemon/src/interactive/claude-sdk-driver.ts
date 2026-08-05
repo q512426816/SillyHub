@@ -253,6 +253,21 @@ export interface ClaudeDriverHandle extends InteractiveDriverHandle {
   readonly provider: 'claude';
   /** 底层 SDK Query（consume for-await / interrupt 用）。 */
   readonly query: Query;
+  /**
+   * task-01（D-003 / D-004）：释放底层 Query，接通 SDK kill 链
+   *（close → stdin EOF → 2s 宽限 → SIGTERM → 5s → SIGKILL，sdk.mjs close()/`vB=2000`）。
+   *
+   * `SessionManager._terminateSession` 在 end/fail 时经可选契约 `close?.()` 调用，
+   * 止血 P0「当前 turn 卡死（如 hang 死的 bash）→ claude 不退 → consume 永久挂起 →
+   * 僵尸烧 token」。base `InteractiveDriverHandle.close` 已是可选契约（brownfield，
+   * 其他 driver 不实现也不报错）；Claude 在此具体实现为 `() => query.close()`。
+   * Windows 下 SDK 用 TerminateProcess（D-004），daemon 不自己 taskkill（守
+   * CONVENTIONS「禁止 taskkill /IM 通杀」）。
+   *
+   * 实现等价 `query.close()`（sdk.d.ts Query.close(): void）。异常由调用方
+   * `_terminateSession` 的 try/catch 兜底（R-01），本方法不吞错。
+   */
+  close: () => void;
 }
 
 /**
@@ -372,7 +387,17 @@ export class ClaudeSdkDriver implements InteractiveDriver {
     // D-009@v1：UserTurnInput → SDKUserMessage（SDK 类型隔离在 driver 内部）。
     const sdkInput = mapUserTurnInputToSdk(input);
     const query = sdkQuery({ prompt: sdkInput, options });
-    return { provider: 'claude', query };
+    // task-01（D-003 / D-004）：返回的 ClaudeDriverHandle 补 close 方法接通 SDK kill 链。
+    // SessionManager._terminateSession 经可选契约 close?.() 在 end/fail 时触发，
+    // SDK 内部走 stdin EOF → SIGTERM → SIGKILL，全平台（含 Windows TerminateProcess）
+    // 在 ~7s 内强杀卡死 turn 的 claude 子进程。daemon 不自己 taskkill（D-004）。
+    return {
+      provider: 'claude',
+      query,
+      close: () => {
+        query.close();
+      },
+    };
   }
 
   /**
