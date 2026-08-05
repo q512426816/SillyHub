@@ -1,0 +1,20 @@
+{
+  "generatedAt": "2026-08-04T04:05:52.946Z",
+  "schemaVersion": 1,
+  "items": [
+    {
+      "task": "task-10",
+      "verdict": "spec+quality",
+      "evidence": [
+        "verify 阶段（worktree apply 到主仓库后）：记当前 BUILD_ID → 改 daemon src（如 cli.ts 加注释）+ git commit → cd sillyhub-daemon && pnpm build（确认 prebuild 重生 BUILD_ID，cat src/build-id.ts 值变化）→ sillyhub-daemon stop && sillyhub-daemon start --server http://127.0.0.1:8000 --api-key <key> → curl -s -H 'X-API-Key: <key>' http://127.0.0.1:8000/api/daemon/runtimes | grep daemon_build_id 断言与 BEFORE 不同 + daemon_version 非 null"
+      ]
+    },
+    {
+      "task": "task-11",
+      "verdict": "spec+quality",
+      "evidence": [
+        "verify 阶段（worktree apply 后）：cd sillyhub-daemon && pnpm bundle → 对 build/bundle/sillyhub-daemon.js 用正则 /BUILD_ID\\s*=\\s*[\"']([^\"']+)/ 提取，断言非空且匹配 ^(?:[0-9a-f]{8}|unknown)-\\d{14}$；可选：起 backend curl /api/daemon/version 确认 latest_build_id 非 unknown"
+      ]
+    }
+  ]
+}

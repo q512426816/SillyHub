@@ -193,10 +193,15 @@ class DaemonService:
         user_id: uuid.UUID | None = None,
         *,
         is_platform_admin: bool = False,
-    ) -> DaemonRuntime | None:
+    ) -> tuple[DaemonRuntime, DaemonInstance | None] | None:
+        # task-07/08：返回类型注解同步 RuntimeService.get_runtime（tuple|None），
+        # 运行时转发不变，仅注解对齐避免下游类型漂移。
         return await self._rt.get_runtime(runtime_id, user_id, is_platform_admin=is_platform_admin)
 
-    async def list_runtimes(self, user_id: uuid.UUID) -> list[DaemonRuntime]:
+    async def list_runtimes(
+        self, user_id: uuid.UUID
+    ) -> list[tuple[DaemonRuntime, DaemonInstance | None]]:
+        # task-07/08：返回类型注解同步 RuntimeService.list_runtimes（list[tuple]）。
         return await self._rt.list_runtimes(user_id)
 
     async def list_instances(self, user_id: uuid.UUID) -> list[DaemonInstance]:
@@ -239,8 +244,11 @@ class DaemonService:
         display_alias: str | None,
         display_alias_set: bool,
         is_platform_admin: bool = False,
-    ) -> DaemonRuntime:
-        """PATCH display_alias 委托 (task-04 / D-002@v1)."""
+    ) -> tuple[DaemonRuntime, DaemonInstance | None]:
+        """PATCH display_alias 委托 (task-04 / D-002@v1).
+
+        task-07/08：返回类型注解同步 RuntimeService.update_runtime（tuple）。
+        """
         return await self._rt.update_runtime(
             runtime_id,
             actor_user_id,

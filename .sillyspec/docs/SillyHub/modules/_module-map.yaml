@@ -102,6 +102,9 @@ modules:
     paths:
       - backend/app/modules/daemon/**
       - sillyhub-daemon/src/**
+      - sillyhub-daemon/scripts/**
+      - sillyhub-daemon/tests/**
+      - sillyhub-daemon/package.json
     tags: [backend, daemon, runtime]
     aliases: [daemon-runtime, daemon-session]
     entrypoints:

@@ -17,7 +17,9 @@
     "start": "node dist/cli.js",
     "bundle": "bash scripts/build-bundle.sh",
     "gen:types": "node scripts/gen-api-types.mjs",
-    "gen:types:check": "node scripts/gen-api-types.mjs && git diff --exit-code src/api-types.ts"
+    "gen:types:check": "node scripts/gen-api-types.mjs && git diff --exit-code src/api-types.ts",
+    "prebuild": "node scripts/gen-build-id.mjs",
+    "postinstall": "node scripts/gen-build-id.mjs"
   },
   "engines": {
     "node": ">=20.0.0"
