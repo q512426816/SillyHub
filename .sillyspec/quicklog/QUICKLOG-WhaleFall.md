@@ -120,7 +120,7 @@
 文件：frontend/src/app/(dashboard)/admin/roles/page.tsx
 
 需求：/admin/roles 操作列样式对齐 /ppm/projects 与 milestone-details(走 FRONTEND_PAGE_STYLE §4/§5 规范)。
-根因：admin/roles 操作列用 3 个原生 <button>(text-primary/destructive + hover:underline)+ align=right + justify-end gap-2,与规范(antd Button type=link size=small、删除 link danger、align center、fixed right、justify-center gap-1)不符;milestone-details 操作列已符合,唯独 admin/roles 不一致。
+根因：admin/roles 操作列用 3 个原生 button(text-primary/destructive + hover:underline)+ align=right + justify-end gap-2,与规范(antd Button type=link size=small、删除 link danger、align center、fixed right、justify-center gap-1)不符;milestone-details 操作列已符合,唯独 admin/roles 不一致。
 方案：操作列 3 个原生 button → antd Button(别名 AntButton,因 shadcn Button 已占名)type=link size=small(编辑/禁用启用)、type=link danger size=small(删除);align right→center;加 fixed=right + width=180 + onCell 不透明背景(防固定列穿透);justify-end gap-2 → justify-center gap-1。
 结果：1 文件改动(admin/roles/page.tsx),typecheck 绿,操作列与 projects/milestone-details 统一。
 ## ql-20260731-005-6824 | 2026-07-31 15:44:01 | (quick 任务)
@@ -138,7 +138,7 @@
 文件：frontend/src/app/(dashboard)/admin/roles/page.tsx, frontend/src/components/admin-role-permission-picker.tsx
 
 需求：新建角色 Modal 内部组件全部 antd 化(用户看到 antd Modal 外壳但内部原生 input,不像 antd)。
-根因：task-01 只换了 Modal 外壳,内部 Key/名称用原生 <input>+inputCls、描述用原生 <textarea>+textareaCls、权限选择原生 checkbox + setIndeterminateRef,没换 antd 组件。
+根因：task-01 只换了 Modal 外壳,内部 Key/名称用原生 input+inputCls、描述用原生 textarea+textareaCls、权限选择原生 checkbox + setIndeterminateRef,没换 antd 组件。
 方案：Key/名称原生 input→antd Input;描述原生 textarea→antd Input.TextArea(rows=3);权限单选原生 checkbox→antd Checkbox;全选原生 checkbox+setIndeterminateRef→antd Checkbox(indeterminate prop 支持,删 ref 手写)。逻辑不变,仅组件库统一。
 结果：2 文件改动(admin/roles page.tsx + admin-role-permission-picker.tsx),typecheck 绿 + picker 7 测试绿(antd Checkbox 不破坏现有断言)。
 ## ql-20260801-001-f6f1 | 2026-08-01 15:29:05 | (quick 任务)
@@ -182,9 +182,20 @@
 关联变更：（无）
 文件：
 - sillyhub-daemon/src/host-fs-handler.ts — HostFsHandlerOptions `allowed_roots` 改 `rootsProvider: () => string[]`；字段 `_allowedRoots` 改 `_rootsProvider`；17 处 `assertWithinAllowedRoots(x, this._allowedRoots)` 全改 `this._rootsProvider()`（stat/read_file/list_dir/git_apply/git_worktree_add/git_merge/git_worktree_remove/git_rev_parse/read_package_json）
-- sillyhub-daemon/src/daemon.ts — `_registerHostFsRpcHandler` 构造 handler 传 `rootsProvider: () => this._effectiveAllowedRoots()`；新增 `_effectiveAllowedRoots()` 合并 `config.allowed_roots ∪ policyCache 各 runtime roots 并集`
+- sillyhub-daemon/src/daemon.ts — `_registerHostFsRpcHandler` 构造 handler 传 `rootsProvider: () => this._effective AllowedRoots()`；新增 `_effectiveAllowedRoots()` 合并 `config.allowed_roots ∪ policyCache 各 runtime roots 并集`
 
 需求：平台 scan-generate（初始化扫描）报 "root_path does not exist or is not a directory: F:/WorkNew/SillyHub"，但路径宿主机 + 容器内都实际存在。
 根因：HostFsHandler._allowedRoots 构造时 readonly 快照（daemon.ts:2289 用 config.allowed_roots，host-fs-handler.ts:448,451），平台 PUT allowed_roots 只更新 daemon PolicyCache（_handlePolicyUpdate/_syncAllowedRoots），handler 永不刷新 → host_fs.stat 路径在旧根（默认 [homedir()] = C:\Users\12532）外抛 forbidden → backend DaemonRpcRemoteError 降级 {exists:False} → 报路径不存在。task-03（2026-07-06-daemon-host-fs-delegate）以来一贯 bug，非 daemon-version 引入。
 方案：HostFsHandler 改 rootsProvider callback（每次 RPC 现取动态 allowed_roots，解决冻结），17 处用法全改 _rootsProvider()；daemon.ts 传 rootsProvider:()=>_effectiveAllowedRoots()，新增 _effectiveAllowedRoots 合并 config.allowed_roots ∪ policyCache 各 runtime roots 并集（platform PUT 热更新即时生效）。一处修复解决全部 9 个 host_fs 方法。
 结果：pnpm build tsc 编译 OK 无 error；重启 daemon 后 scan-generate 不再报 root_path does not exist（host_fs stat 通过，冻结修复），9 个 host_fs 方法一次性解决；scan 新报错变为资产保护（F:/WorkNew/SillyHub 自身是 SillySpec 管理项目，平台 scan 会删 .sillyspec，属预期保护，非 host_fs bug）。
+
+## ql-20260805-002-81bcea8 | 2026-08-05 14:07:35 | daemon 机器头启动时间改绝对显示（不要相对「几分钟前」）
+状态：已完成
+关联变更：2026-08-05-daemon-start-time（已归档；本条是其前端显示微调，非新 change）
+文件：
+- frontend/src/components/daemon/machine-card.tsx — started_at 显示由 formatRelativeTime（相对「N 分钟前」）改 new Date(iso).toLocaleString("zh-CN",{hour12:false})（绝对「2026/8/5 14:07:35」）；去 title tooltip 冗余（显示已绝对）；注释更新（相对→绝对）
+
+需求：用户反馈 /runtimes 机器头「启动」显示「几分钟前」（相对），要看准确启动时刻。
+根因：task-07 初版复用 formatRelativeTime 做相对时间（仿 last_heartbeat_at 鲜活），但启动时间不像心跳需相对鲜活，用户要绝对时刻。
+方案：started_at 非 null 直接 new Date(iso).toLocaleString("zh-CN",{hour12:false}) 显绝对（年月日时分秒 24h），去 title tooltip 冗余；null 仍「—」（旧 daemon 兼容）。
+结果：1 文件改动（machine-card.tsx，6 insertions 12 deletions），commit 81bcea8c，commit hook 全过（backend ruff + frontend lint/typecheck/test），rebuild frontend + recreate 部署中。
