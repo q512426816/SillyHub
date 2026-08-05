@@ -557,14 +557,17 @@ async def update_runtime(
     省略 display_alias = 不变；显式 null/空白 = 清空；字符串 = 更新（strip）。
     """
     svc = DaemonService(session)
-    runtime = await svc.update_runtime(
+    runtime, instance = await svc.update_runtime(
         runtime_id,
         user.id,
         display_alias=data.display_alias,
         display_alias_set="display_alias" in data.model_fields_set,
         is_platform_admin=user.is_platform_admin,
     )
-    return DaemonRuntimeRead.model_validate(runtime)
+    # task-08：service 返回 (runtime, instance) tuple，经 _runtime_read 填
+    # daemon_version/daemon_build_id（D-004@v1 / FR-01）。instance=None（迁移期
+    # daemon_instance_id IS NULL）→ 两字段 null，向后兼容旧 daemon。
+    return _runtime_read(runtime, None, instance)
 
 
 @router.put(
@@ -808,13 +811,16 @@ async def get_runtime(
 ) -> DaemonRuntimeRead:
     """Get daemon runtime info by ID."""
     svc = DaemonService(session)
-    runtime = await svc.get_runtime(runtime_id, user.id, is_platform_admin=user.is_platform_admin)
-    if runtime is None:
+    result = await svc.get_runtime(runtime_id, user.id, is_platform_admin=user.is_platform_admin)
+    if result is None:
         raise DaemonRuntimeNotFound(
             f"Daemon runtime '{runtime_id}' not found.",
             details={"runtime_id": str(runtime_id)},
         )
-    return DaemonRuntimeRead.model_validate(runtime)
+    runtime, instance = result
+    # task-08：service 返回 (runtime, instance) tuple，经 _runtime_read 填
+    # daemon_version/daemon_build_id（D-004@v1 / FR-01）。
+    return _runtime_read(runtime, None, instance)
 
 
 @router.post(
@@ -831,7 +837,15 @@ async def disable_runtime(
     runtime = await svc.disable_runtime(
         runtime_id, user.id, is_platform_admin=user.is_platform_admin
     )
-    return DaemonRuntimeRead.model_validate(runtime)
+    # task-08：service 仅返 DaemonRuntime（disable/enable/mark_offline 未在 task-07
+    # 改签名），此处回查 instance 填 daemon_version/daemon_build_id（D-004@v1 / FR-01）。
+    # instance=None（迁移期 daemon_instance_id IS NULL）→ 两字段 null，兼容旧 daemon。
+    instance = (
+        await session.get(DaemonInstance, runtime.daemon_instance_id)
+        if runtime.daemon_instance_id is not None
+        else None
+    )
+    return _runtime_read(runtime, None, instance)
 
 
 @router.post(
@@ -848,7 +862,13 @@ async def enable_runtime(
     runtime = await svc.enable_runtime(
         runtime_id, user.id, is_platform_admin=user.is_platform_admin
     )
-    return DaemonRuntimeRead.model_validate(runtime)
+    # task-08：service 仅返 DaemonRuntime，回查 instance 填版本字段（D-004@v1 / FR-01）。
+    instance = (
+        await session.get(DaemonInstance, runtime.daemon_instance_id)
+        if runtime.daemon_instance_id is not None
+        else None
+    )
+    return _runtime_read(runtime, None, instance)
 
 
 @router.delete(
@@ -882,7 +902,13 @@ async def mark_runtime_offline(
     """Mark a daemon runtime offline during graceful daemon shutdown."""
     svc = DaemonService(session)
     runtime = await svc.mark_offline(runtime_id, user.id)
-    return DaemonRuntimeRead.model_validate(runtime)
+    # task-08：service 仅返 DaemonRuntime，回查 instance 填版本字段（D-004@v1 / FR-01）。
+    instance = (
+        await session.get(DaemonInstance, runtime.daemon_instance_id)
+        if runtime.daemon_instance_id is not None
+        else None
+    )
+    return _runtime_read(runtime, None, instance)
 
 
 @router.get(
@@ -911,6 +937,8 @@ async def list_daemon_instances(
     runtimes_by_instance = await rt_svc._get_runtimes_by_instances([inst.id for inst in instances])
     reads: list[DaemonInstanceRead] = []
     for inst in instances:
+        # task-07：分组值改 list[tuple[runtime, instance]]；此处只用 runtime 字段
+        # （instance 与外层 inst 同源，不重复取），解构忽略 instance。
         provider_rows = runtimes_by_instance.get(inst.id, [])
         reads.append(
             DaemonInstanceRead(
@@ -924,7 +952,7 @@ async def list_daemon_instances(
                         status=r.status or "unknown",
                         version=r.version,
                     )
-                    for r in provider_rows
+                    for r, _instance in provider_rows
                 ],
             )
         )
@@ -943,7 +971,9 @@ async def list_runtimes(
     svc = DaemonService(session)
     await svc.cleanup_stale_runtimes()
     runtimes = await svc.list_runtimes(user.id)
-    return [DaemonRuntimeRead.model_validate(r) for r in runtimes]
+    # task-08：service 返回 list[tuple[runtime, instance]]，经 _runtime_read 填
+    # daemon_version/daemon_build_id（D-004@v1 / FR-01）。
+    return [_runtime_read(runtime, None, instance) for runtime, instance in runtimes]
 
 
 # ── Task lease lifecycle ────────────────────────────────────────────────────
@@ -1317,9 +1347,10 @@ async def list_runtime_leases(
 ) -> list[DaemonTaskLeaseRead]:
     """List all leases for a given daemon runtime."""
     svc = DaemonService(session)
-    # Verify runtime exists
-    runtime = await svc.get_runtime(runtime_id)
-    if runtime is None:
+    # Verify runtime exists（task-07 后 get_runtime 返回 tuple|None；此处仅做存在性
+    # 校验，不解构 —— runtime+lease 的 version 填充由 DaemonTaskLeaseRead 自身负责）。
+    runtime_tuple = await svc.get_runtime(runtime_id)
+    if runtime_tuple is None:
         raise DaemonRuntimeNotFound(
             f"Daemon runtime '{runtime_id}' not found.",
             details={"runtime_id": str(runtime_id)},

@@ -396,44 +396,91 @@ class RuntimeService:
         user_id: uuid.UUID | None = None,
         *,
         is_platform_admin: bool = False,
-    ) -> DaemonRuntime | None:
-        """Get a daemon runtime by ID.
+    ) -> tuple[DaemonRuntime, DaemonInstance | None] | None:
+        """Get a daemon runtime by ID, JOIN 其所属 daemon_instance。
 
-        task-04 / D-001@v1: when ``user_id`` is supplied and the caller is not
-        a platform admin, restrict to the owner — non-owners get ``None``
-        (router translates to 404, no existence leak). Platform admins see any
-        runtime. Omitting ``user_id`` keeps the legacy unconditional lookup
-        (lease/WS paths resolve runtimes independently of owner).
+        task-07（2026-08-04-daemon-version / FR-01 / D-004@v1）：照搬
+        ``list_runtimes_page``（service.py:522-536）的 JOIN 先例，
+        ``select(DaemonRuntime, DaemonInstance).outerjoin(DaemonInstance,
+        DaemonRuntime.daemon_instance_id == DaemonInstance.id)``，使上层
+        （task-08 序列化层）一次查询拿到 ``version`` / ``build_id`` 而无需二次查询。
+
+        task-04 / D-001@v1 归属语义保留：``user_id`` 非空且非 admin 时按 owner
+        过滤，非归属者得 ``None``（router 转 404，无存在性泄漏）；admin 看任意
+        runtime；省略 ``user_id`` 保持 lease/WS 路径无条件查（无 owner 约束）。
+
+        返回签名由 ``DaemonRuntime | None`` 改为
+        ``tuple[DaemonRuntime, DaemonInstance | None] | None``：找不到仍 ``None``；
+        找到则返回 ``(runtime, instance)``，迁移期 ``daemon_instance_id IS NULL``
+        的旧行 ``instance=None``（outerjoin 保留，不漏行）。调用方解构点
+        （router / WS / lease）由 task-08 同步——本任务仅改 service 层签名。
         """
-        runtime = await self._session.get(DaemonRuntime, runtime_id)
-        if runtime is None:
+        stmt = (
+            select(DaemonRuntime, DaemonInstance)
+            .outerjoin(
+                DaemonInstance,
+                DaemonRuntime.daemon_instance_id == DaemonInstance.id,
+            )
+            .where(col(DaemonRuntime.id) == runtime_id)
+        )
+        row = (await self._session.execute(stmt)).first()
+        if row is None:
             return None
+        runtime, instance = row
         if user_id is not None and not is_platform_admin and runtime.user_id != user_id:
             return None
-        return runtime
+        return runtime, instance
 
-    async def list_runtimes(self, user_id: uuid.UUID) -> list[DaemonRuntime]:
-        """List all runtimes for a given user."""
+    async def list_runtimes(
+        self, user_id: uuid.UUID
+    ) -> list[tuple[DaemonRuntime, DaemonInstance | None]]:
+        """List all runtimes for a given user, JOIN 各自所属 daemon_instance。
+
+        task-07：照搬 ``list_runtimes_page`` 的 JOIN 模式，每行返回
+        ``(runtime, instance)``；迁移期 ``daemon_instance_id IS NULL`` 的旧行
+        ``instance=None``（outerjoin 保留）。task-08 router 解构时直接取
+        ``instance.version`` / ``build_id``。
+        """
         stmt = (
-            select(DaemonRuntime)
+            select(DaemonRuntime, DaemonInstance)
+            .outerjoin(
+                DaemonInstance,
+                DaemonRuntime.daemon_instance_id == DaemonInstance.id,
+            )
             .where(col(DaemonRuntime.user_id) == user_id)
             .order_by(col(DaemonRuntime.created_at).desc())
         )
-        return list((await self._session.execute(stmt)).scalars().all())
+        rows = list((await self._session.execute(stmt)).all())
+        return [(runtime, instance) for runtime, instance in rows]
 
-    async def _get_runtimes_by_instance(self, instance_id: uuid.UUID) -> list[DaemonRuntime]:
-        """Get all DaemonRuntime rows belonging to a daemon instance."""
+    async def _get_runtimes_by_instance(
+        self, instance_id: uuid.UUID
+    ) -> list[tuple[DaemonRuntime, DaemonInstance | None]]:
+        """Get all DaemonRuntime rows belonging to a daemon instance, JOIN instance。
+
+        task-07：虽然按 instance_id 反查、instance 在该次查询里恒等于此 id 对应的行，
+        仍 JOIN 返回 tuple 以对齐其它 5 处签名一致（上层复用通用解构逻辑，不特判）。
+        """
         stmt = (
-            select(DaemonRuntime)
+            select(DaemonRuntime, DaemonInstance)
+            .outerjoin(
+                DaemonInstance,
+                DaemonRuntime.daemon_instance_id == DaemonInstance.id,
+            )
             .where(col(DaemonRuntime.daemon_instance_id) == instance_id)
             .order_by(col(DaemonRuntime.provider))
         )
-        return list((await self._session.execute(stmt)).scalars().all())
+        rows = list((await self._session.execute(stmt)).all())
+        return [(runtime, instance) for runtime, instance in rows]
 
     async def _get_runtimes_by_instances(
         self, instance_ids: list[uuid.UUID]
-    ) -> dict[uuid.UUID, list[DaemonRuntime]]:
+    ) -> dict[uuid.UUID, list[tuple[DaemonRuntime, DaemonInstance | None]]]:
         """Batch variant of :meth:`_get_runtimes_by_instance` (N+1 规避).
+
+        task-07：分组值改 ``list[tuple[runtime, instance]]``，对齐其它 5 处签名。
+        JOIN 一次性带回 instance（同一 batch 内的 runtime 可能属于不同 instance，
+        outerjoin 各自匹配），上层解构统一。
 
         B2（性能，2026-07-24 代码健壮性优化）：一次 IN 查询取多个 instance 的 runtimes
         并按 ``daemon_instance_id`` 分组，供 list_daemon_instances 等"列表 + 每行 join
@@ -442,15 +489,19 @@ class RuntimeService:
         if not instance_ids:
             return {}
         stmt = (
-            select(DaemonRuntime)
+            select(DaemonRuntime, DaemonInstance)
+            .outerjoin(
+                DaemonInstance,
+                DaemonRuntime.daemon_instance_id == DaemonInstance.id,
+            )
             .where(col(DaemonRuntime.daemon_instance_id).in_(instance_ids))
             .order_by(col(DaemonRuntime.provider))
         )
-        rows = list((await self._session.execute(stmt)).scalars().all())
-        grouped: dict[uuid.UUID, list[DaemonRuntime]] = {}
-        for rt in rows:
-            if rt.daemon_instance_id is not None:
-                grouped.setdefault(rt.daemon_instance_id, []).append(rt)
+        rows = list((await self._session.execute(stmt)).all())
+        grouped: dict[uuid.UUID, list[tuple[DaemonRuntime, DaemonInstance | None]]] = {}
+        for runtime, instance in rows:
+            if runtime.daemon_instance_id is not None:
+                grouped.setdefault(runtime.daemon_instance_id, []).append((runtime, instance))
         return grouped
 
     async def list_instances(
@@ -543,14 +594,19 @@ class RuntimeService:
         display_alias: str | None,
         display_alias_set: bool,
         is_platform_admin: bool = False,
-    ) -> DaemonRuntime:
+    ) -> tuple[DaemonRuntime, DaemonInstance | None]:
         """Update editable daemon fields (task-04 / D-002@v1).
 
         2026-07-03-daemon-entity-binding：display_alias 已上提到 daemon_instances
         （design §4.1/§4.2）。本方法经 runtime.daemon_instance_id 写到所属
         daemon_instance.display_alias。``display_alias_set`` 区分「字段省略 = 不变」
-        与显式 ``null`` = 清空；空/空白串归一为 ``None``。返回值仍为 runtime（调用方
-        读 DaemonRuntimeRead）。
+        与显式 ``null`` = 清空；空/空白串归一为 ``None``。
+
+        task-07（2026-08-04-daemon-version）：写后回读一并 JOIN instance，返回签名
+        由 ``DaemonRuntime`` 改为 ``tuple[DaemonRuntime, DaemonInstance | None]``。
+        调用方（task-08 router）可直接取 ``instance.version`` / ``build_id`` 序列化，
+        避免 PATCH 后再发一次查询。迁移期 ``daemon_instance_id IS NULL`` 的旧行
+        ``instance=None``（outerjoin 保留，不漏行）。
         """
         runtime = await self._get_owned_runtime(
             runtime_id, actor_user_id, is_platform_admin=is_platform_admin
@@ -564,7 +620,14 @@ class RuntimeService:
                 self._session.add(instance)
                 await self._session.commit()
                 await self._session.refresh(runtime)
-        return runtime
+        # 回读 instance（task-07）：写后回读一并带出 instance，使调用方（task-08
+        # router）可直接取 ``instance.version`` / ``build_id`` 序列化，避免 PATCH 后
+        # 再发一次查询。迁移期 ``daemon_instance_id IS NULL`` 的旧行返回 None。
+        read_stmt = select(DaemonInstance).where(
+            col(DaemonInstance.id) == runtime.daemon_instance_id
+        )
+        instance_row = (await self._session.execute(read_stmt)).scalars().first()
+        return runtime, instance_row
 
     async def update_allowed_roots(
         self,
