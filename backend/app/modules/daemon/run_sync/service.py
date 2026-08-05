@@ -700,15 +700,27 @@ class RunSyncService:
         if agent_run is not None:
             agent_run_status = agent_run.status
             if agent_run.status == "pending":
-                agent_run.status = "running"
-                agent_run.started_at = now
-                agent_run_status = "running"
-                self._session.add(agent_run)
-                log.info(
-                    "daemon_messages_agent_run_activated",
-                    agent_run_id=str(agent_run_id),
-                    lease_id=str(lease_id),
+                # 原子条件 UPDATE：只在 DB 当前仍为 pending 时推进 running。
+                # submit_messages 与 close_interactive_run 并发时，迟到的协程可能
+                # 持有旧快照（仍读到 pending），直接 ORM 内存写 status=running 会
+                # 覆盖 close 已 commit 的 completed 终态（lost update → run 卡
+                # running，前端一直"等待本轮完成"）。WHERE status='pending' 让已进入
+                # 终态的 run 不被覆盖；rowcount=0 即已被别处推进，跳过本协程激活。
+                activated = await self._session.execute(
+                    update(AgentRun)
+                    .where(AgentRun.id == agent_run_id, AgentRun.status == "pending")
+                    .values(status="running", started_at=now)
                 )
+                if activated.rowcount:
+                    agent_run.status = "running"
+                    agent_run.started_at = now
+                    agent_run_status = "running"
+                    self._session.add(agent_run)
+                    log.info(
+                        "daemon_messages_agent_run_activated",
+                        agent_run_id=str(agent_run_id),
+                        lease_id=str(lease_id),
+                    )
             # ql-20260616-004：实时 token 写回。仅在数值增大时覆盖（防御乱序），
             # 让前端 5s 轮询拿到中间过程的累积 token，不必等 result 事件汇总。
             if latest_input_tokens is not None and (
