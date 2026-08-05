@@ -177,3 +177,14 @@
 根因：该页混用 shadcn Button(@/components/ui/button,variant/size=sm)+ 操作列 align right + justify-end gap-1 + 工具栏顺序反(搜索重置左、新建右),与规范不符。
 方案：删 shadcn Button import,统一 antd Button——工具栏新建左 type=primary|分隔|搜索 type=primary/重置 default;操作列 align center + fixed right + justify-center gap-1 + onCell 背景 + type=link/link danger size=small;error 重新加载 / 会话审计 Drawer 关闭 / 重置密码 modal / 删除 confirm / 撤销 全换 antd Button;admin-user-drawer 底部 Button shadcn→antd(取消 default/保存 primary)。
 结果：2 文件改动(users/page.tsx + admin-user-drawer.tsx),shadcn 残留 0,typecheck 绿。
+## ql-20260805-001-6dcd | 2026-08-05 09:24:29 | 修 daemon HostFsHandler allowed_roots 冻结
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/host-fs-handler.ts — HostFsHandlerOptions `allowed_roots` 改 `rootsProvider: () => string[]`；字段 `_allowedRoots` 改 `_rootsProvider`；17 处 `assertWithinAllowedRoots(x, this._allowedRoots)` 全改 `this._rootsProvider()`（stat/read_file/list_dir/git_apply/git_worktree_add/git_merge/git_worktree_remove/git_rev_parse/read_package_json）
+- sillyhub-daemon/src/daemon.ts — `_registerHostFsRpcHandler` 构造 handler 传 `rootsProvider: () => this._effectiveAllowedRoots()`；新增 `_effectiveAllowedRoots()` 合并 `config.allowed_roots ∪ policyCache 各 runtime roots 并集`
+
+需求：平台 scan-generate（初始化扫描）报 "root_path does not exist or is not a directory: F:/WorkNew/SillyHub"，但路径宿主机 + 容器内都实际存在。
+根因：HostFsHandler._allowedRoots 构造时 readonly 快照（daemon.ts:2289 用 config.allowed_roots，host-fs-handler.ts:448,451），平台 PUT allowed_roots 只更新 daemon PolicyCache（_handlePolicyUpdate/_syncAllowedRoots），handler 永不刷新 → host_fs.stat 路径在旧根（默认 [homedir()] = C:\Users\12532）外抛 forbidden → backend DaemonRpcRemoteError 降级 {exists:False} → 报路径不存在。task-03（2026-07-06-daemon-host-fs-delegate）以来一贯 bug，非 daemon-version 引入。
+方案：HostFsHandler 改 rootsProvider callback（每次 RPC 现取动态 allowed_roots，解决冻结），17 处用法全改 _rootsProvider()；daemon.ts 传 rootsProvider:()=>_effectiveAllowedRoots()，新增 _effectiveAllowedRoots 合并 config.allowed_roots ∪ policyCache 各 runtime roots 并集（platform PUT 热更新即时生效）。一处修复解决全部 9 个 host_fs 方法。
+结果：pnpm build tsc 编译 OK 无 error；重启 daemon 后 scan-generate 不再报 root_path does not exist（host_fs stat 通过，冻结修复），9 个 host_fs 方法一次性解决；scan 新报错变为资产保护（F:/WorkNew/SillyHub 自身是 SillySpec 管理项目，平台 scan 会删 .sillyspec，属预期保护，非 host_fs bug）。
