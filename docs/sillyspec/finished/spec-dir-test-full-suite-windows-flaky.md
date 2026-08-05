@@ -1,11 +1,13 @@
 ---
 author: qinyi
 created_at: 2026-08-04 09:59:20
-status: 已缓解（retry 吸收），根因未定
+status: 已根治（HOME 隔离，2026-08-05）
 severity: P2
 ---
 
 # spec-dir.test.mjs 全量套件下 Windows 偶发进程级崩溃（flaky）
+
+> **2026-08-05 根治落地**：根因确诊为 home 的 `~/.sillyspec-platform.json` 指针被全量套件里其他平台模式测试污染（全量 npm test 末尾 `[teardown] 清理 HOME 指针污染` 即此源）——本测试默认模式（Test 5）的 CLI 子进程靠 resolveSpecDir 上溯定位，偶发读到污染指针 → drift/崩溃。修法：spec-dir.test.mjs 给所有 CLI 子进程注入隔离 `HOME`/`USERPROFILE`（指向独立 tmp），不读写真实 home 指针，从根上消除跨测试 home 污染竞态。验证：全量 npm test 连跑 3 次 exit 0、零失败、spec-dir retry 兜底未触发（根因消除）。比 --spec-dir 钉死更对症（Test 5 测默认模式不能传 --spec-dir）。
 
 ## 现象
 

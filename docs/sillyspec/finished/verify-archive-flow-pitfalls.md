@@ -2,12 +2,12 @@
 author: WhaleFall
 created_at: 2026-07-31T10:14:09
 type: sillyspec-pitfall
-status: active
+status: 已解决（5 坑全清，2026-08-05）
 ---
 
 # verify/archive 流程坑（2026-07-30-daemon-heartbeat-dedup-fix 归档时踩到）
 
-> **进度注记（2026-08-03）**：坑 3 已修（archive step5 --change 在 archive/ 匹配放行，stage-contract.js archive 分支）；坑 4 已修（sync-module-docs 加 requiresWait，--continue 确认后回到本步由 agent 写模块卡片，ql-20260803-002-eff0）；坑 1/5 已修（progress repair 新增 Fix e：execute completed stage 有 pending step 但 task 实际 review.json 客观产出全通过时，按实际产出自动标 completed 而非一律 manual，ql-20260803-003-8dd5）。坑 2 未修（手动补 task 缺 review.json 的官方入口仍无，手工拼 JSON 是唯一路径）。待坑 2 全清后可移 finished。
+> **进度注记（2026-08-05）**：5 坑全清，可移 finished。坑 3 已修（archive step5 --change 在 archive/ 匹配放行，stage-contract.js archive 分支）；坑 4 已修（sync-module-docs 加 requiresWait，--continue 确认后回到本步由 agent 写模块卡片，ql-20260803-002-eff0）；坑 1/5 已修（progress repair 新增 Fix e：execute completed stage 有 pending step 但 task 实际 review.json 客观产出全通过时，按实际产出自动标 completed 而非一律 manual，ql-20260803-003-8dd5）；**坑 2 已修（2026-08-05）**：sillyspec 新增顶层命令 `backfill-reviews --change <name>`，复用 execute --done 同源的 generateTaskReviewDrafts 草稿兜底（幂等、fail-open），据 git diff base..head + working-tree 按 task allowed_paths 归属生成 cannot_verify 草稿，agent 复核升级 pass/fail——手动补 task 缺 review.json 不再需手工拼 JSON（ql-20260805-002-1ee8，npm 3.25.9+）。
 
 ## 坑 1：plan 后加 Wave/task → execute 阶段流转卡 + 状态机不一致
 
@@ -20,7 +20,7 @@ status: active
 
 - **现象**：task-14 是 execute 完成后手动实现的（没走 execute 子代理 review gate），无 `.runtime/execute-runs/<runId>/tasks/task-14/review.json`。archive step1 客观完成度（真相源 = review.json verdict）算「13/14，task-14 缺失」→ 阻断归档。
 - **绕过**：手动补 task-14 review.json（schemaVersion/task/base/head/changedFiles/specVerdict=pass/qualityVerdict=pass/reviewerNotes/requiredEvidence=[]），base/head 用 worktree 分支该 task commit 的 base..head（`git rev-parse --short=7 <commit>^` / `<commit>`）。
-- **建议工具修**：手动补 task（ reopen execute / 直接实现）应提供「补 review.json」的官方入口（基于实际产出 + verify 结论生成 verdict），而非手工拼 JSON。
+- **建议工具修**：手动补 task（ reopen execute / 直接实现）应提供「补 review.json」的官方入口（基于实际产出 + verify 结论生成 verdict），而非手工拼 JSON。（✅ 已落地 ql-20260805-002-1ee8：sillyspec `backfill-reviews --change <name>` 顶层命令，复用 generateTaskReviewDrafts 草稿兜底，幂等生成 cannot_verify 草稿，agent 复核升级 pass/fail。）
 
 ## 坑 3：归档后 `--change <原名>` 失效 → archive step5 --done 报错
 

@@ -1,9 +1,12 @@
 ---
 author: qinyi
 created_at: 2026-08-04 16:30:00
+status: 已甄别（非 SillySpec 工具缺陷，归 multi-agent-platform 项目方处理）
 ---
 
 # 活跃坑（2026-08-04-agent-profile-ui-redesign 归档记录）
+
+> **2026-08-05 甄别**：以下 3 个坑均为 multi-agent-platform **项目自身**问题（前端 antd/jsdom 测试环境、deploy skill 文档/后端 schema、docker 部署运维），**非 SillySpec 工具缺陷**——SillySpec 作为流程控制器无法修这些。甄别归类完成，移 finished；根治归 multi-agent-platform 项目方。
 
 ## 🟡 antd v6 Form `:has` 规则 + jsdom nwsapi SyntaxError
 
