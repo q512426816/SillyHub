@@ -39,6 +39,28 @@ generator: sillyspec-scan
   - `task-runner.ts`：在 `runLease` 内并发跑 lease heartbeat 循环（`_runLeaseHeartbeatLoop`，检测 backend cancel 信号 + 续期），`finally` 停止循环避免泄漏。
 - **backend 内部桥接**：`daemon/session/service.py` 用 Redis `publish` 把会话事件转发给 SSE 客户端；`health/router.py` 探测 redis ping。
 
+### 2.1 WS 消息类型（Server ↔ Daemon，含 kill 通道）
+
+> 消息常量双端逐字对齐：backend `app/modules/daemon/protocol.py`（`DAEMON_MSG_*`）↔ daemon `sillyhub-daemon/src/protocol.ts`（`MSG.*`）。任一字符漂移即双侧契约单测红（design R-02）。下表含 change `2026-08-05-daemon-kill-channel-unify` 引入的 `LEASE_CANCEL` 及 `SESSION_END` / `SESSION_INTERRUPT` 语义调整。
+
+| 消息 | 字面量 | 方向 | 用途 |
+|---|---|---|---|
+| TASK_AVAILABLE | `daemon:task_available` | Server→Daemon | 有 lease 任务可认领 |
+| HEARTBEAT / HEARTBEAT_ACK | `daemon:heartbeat` / `daemon:heartbeat_ack` | 双向 | 保活 / 探活 |
+| REGISTER | `daemon:register` | Daemon→Server | 首连注册 runtime（agent_name + capability） |
+| LEASE_CLAIM / LEASE_START / LEASE_COMPLETE / LEASE_MESSAGES | `daemon:lease_claim` / `lease_start` / `lease_complete` / `lease_messages` | Daemon→Server | lease 生命周期 + 增量 agent 消息上报 |
+| RPC / RPC_RESULT | `daemon:rpc` / `daemon:rpc_result` | Server→Daemon / Daemon→Server | file-rpc 远程过程调用（rpc_id 关联） |
+| SESSION_INJECT | `daemon:session_inject` | Server→Daemon | 注入 prompt 跑下一 turn（payload 含 run_id / claim_token） |
+| SESSION_INTERRUPT | `daemon:session_interrupt` | Server→Daemon | **打断本轮**（turn 级软中断，session 保持 active 可续轮）。**收窄（change 2026-08-05，D-001@v2）**：此后**仅**"打断本轮"按钮（interruptSession 端点）使用；interactive `cancel_lease` 不再走此消息 |
+| SESSION_END | `daemon:session_end` | Server→Daemon | 结束会话 + 硬杀（`_terminateSession` → driver `close()`）。**扩大（change 2026-08-05，D-001@v2）**：interactive `cancel_lease`（取消/停止 run）也改发此消息走硬杀链（原发 SESSION_INTERRUPT，软，卡死 turn 仍僵尸） |
+| **LEASE_CANCEL**（新增） | `daemon:lease_cancel` | Server→Daemon | **change 2026-08-05 / FR-03 / R-06 新增**：batch lease（`kind != interactive`）即时取消。backend `cancel_lease` 标记 cancelled 后经 `ws_hub.send_to_runtime` best-effort 推送，daemon 收到调 `taskRunner.cancel(leaseId)` 复用现有 `AbortController → _killChild` 即时杀 batch 子进程（payload: `{runtime_id, lease_id}`，发送失败靠现有心跳轮询兜底） |
+| SESSION_RESUME | `daemon:session_resume` | Server→Daemon | 恢复已结束/失联的交互式会话（SDK resume） |
+| PERMISSION_REQUEST / PERMISSION_RESPONSE | `daemon:permission_request` / `daemon:permission_response` | Daemon→Server / Server→Daemon | 工具审批 / AskUser 对话往返（canUseTool + onUserDialog） |
+| POLICY_UPDATE | `daemon:policy_update` | Server→Daemon | allowed_roots 热更新（version 去重，D-004） |
+| SELF_UPDATE | `daemon:self_update` | Server→Daemon | 推送 daemon 自更新指令 |
+
+> kill 通道三层闭环（详见 change `design.md` §5）：① interactive END/fail/cancel → `SESSION_END` → `_terminateSession` → driver `close()`（Claude 接通 SDK kill 链 / Codex 经 `_close`）；② batch cancel → `LEASE_CANCEL` → 即时 `_killChild`；③ budget 超阈值 → 软切断（D-006）+ `budget_exceeded` 回传。`terminating_at` 时间戳 + 30s sweeper 提供执行端可见性（D-007，详见 `CONCERNS.md` daemon kill 通道节）。
+
 ## 3. backend ↔ 存储（PostgreSQL + Redis）
 
 - **PostgreSQL**：

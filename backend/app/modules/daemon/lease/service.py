@@ -301,6 +301,10 @@ class LeaseService:
         now = datetime.now(UTC)
         lease.status = "completed"
         lease.updated_at = now
+        # task-11 / FR-04 / D-007：daemon 回传 complete（batch ACK）→ 清 terminating_at。
+        # cancel_lease 写 terminating_at 标记"等 daemon 回传"，本处即回传收敛点，清空让
+        # sweeper（lease_service.alert_stuck_terminating_leases）不再误告警。幂等 None-set。
+        lease.terminating_at = None
         self._session.add(lease)
 
         # Update associated AgentRun

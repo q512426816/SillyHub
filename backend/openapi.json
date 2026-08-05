@@ -25624,6 +25624,18 @@
               }
             ],
             "title": "Current Run Id"
+          },
+          "terminating_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminating At"
           }
         },
         "type": "object",

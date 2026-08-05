@@ -404,6 +404,28 @@ export class SessionManager {
   private readonly _pendingInjectCount = new Map<string, number>();
 
   /**
+   * task-08（D-006 / D-009 / FR-05 / FR-07）：interactive budget 软切断状态。
+   *
+   * 不写入 SessionState（interactive/types.ts 不在本任务 allowed_paths；且 budget
+   * 是 lease 级运行期检查点配置，非 SDK 行为参数）—— 同 `_pendingInjectCount`
+   * 范式维护独立内部 Map / Set。
+   *
+   *   - ``_sessionBudgetTokens``：sessionId → 本次 lease 的 token budget 上限（来自
+   *     ``LeaseCtx.budget_tokens``，由 daemon ``_startInteractiveSession`` 经
+   *     ``create({...,budget_tokens})`` 或 ``setBudgetTokens`` 透传）。无条目 = 未配置
+   *     → 检查点短路（FR-07 零回归）。
+   *   - ``_overBudgetSessions``：累计 input+output ≥ budget 后置位，幂等防重入；
+   *     置位后 ``inject`` 拒绝新 turn（软切断 D-006：当前 turn 自然跑完，**不**调
+   *     close/kill），并经现有 ``onTurnMessage`` 回传 ``reason='budget_exceeded'``。
+   *
+   * 口径 D-009：``input_tokens + output_tokens``（**不含** cache_*）—— 复用现有
+   * PartialFlushBuffer.sessionInputTokens / sessionOutputTokens（跨 parentKey 桶求和，
+   * 含子代理）。
+   */
+  private readonly _sessionBudgetTokens = new Map<string, number>();
+  private readonly _overBudgetSessions = new Set<string>();
+
+  /**
    * ql-20260621-partial + 2026-06-28-daemon-subagent-transcript task-03 / D-002@v1：
    * 二级 Map partial 缓冲——外层 key=sessionId，内层 key=parentKey（'main'=主 agent /
    * 子代理 tool_use_id），value=PartialFlushBuffer。按 parent 分桶：子代理完整 assistant
@@ -820,7 +842,14 @@ export class SessionManager {
    * @throws {UnsupportedProviderError} provider driver 未注册
    * @throws {ClaudeExecutableNotFoundError} executable 缺失（driver.start 内抛，透传）
    */
-  async create(input: CreateSessionInput): Promise<void> {
+  async create(input: CreateSessionInput & {
+    /**
+     * task-08（D-006 / D-009）：本次 lease 的 token budget 上限（来自
+     * ``LeaseCtx.budget_tokens``，daemon ``_startInteractiveSession`` 透传）。
+     * undefined / ≤0 / 非有限数 → 检查点短路（FR-07 零回归）。
+     */
+    budget_tokens?: number;
+  }): Promise<void> {
     // D-001：先解析 driver（未注册即抛，在写 store 前，不留孤儿 state）。
     const driver = this._getDriver(input.provider);
     if (this._store.has(input.sessionId)) {
@@ -869,6 +898,10 @@ export class SessionManager {
         : {}),
     };
     this._store.set(input.sessionId, state);
+
+    // task-08（D-006 / D-009）：登记 session 级 budget_tokens（来自 LeaseCtx）。
+    // 复用 _setBudgetTokensInternal 的校验（finite / >0），非法值 → 不登记 = 短路。
+    this._setBudgetTokensInternal(input.sessionId, input.budget_tokens);
 
     // 3. driver.start（若 executable 缺失，这里抛 ClaudeExecutableNotFoundError；
     //    state 已写入 store，但 driver 协程未启动——由 onError 路径不会触发，
@@ -1713,6 +1746,121 @@ export class SessionManager {
     state.claimToken = claimToken;
   }
 
+  // ── task-08（D-006 / D-009）：interactive budget 软切断 ─────────────────────
+
+  /**
+   * task-08：设置 session 级 budget_tokens（外部显式注入，供 daemon ``_startInteractiveSession``
+   * 在 ``create({...,budget_tokens})`` 之外补登记 / 测试直接驱动）。
+   *
+   * 校验：number 且 finite 且 >0 才登记；非法 / undefined / ≤0 → 删除条目（= 检查点
+   * 短路，FR-07 零回归）。session 不存在 → 静默 no-op（与 refreshClaimToken 同策略）。
+   *
+   * D-009 口径由内部检查点负责（input+output，不含 cache）；此处只存阈值。
+   */
+  setBudgetTokens(sessionId: string, budgetTokens: number | undefined): void {
+    this._setBudgetTokensInternal(sessionId, budgetTokens);
+  }
+
+  /** task-08 内部共享：create + setBudgetTokens 复用的登记逻辑（带校验）。 */
+  private _setBudgetTokensInternal(
+    sessionId: string,
+    budgetTokens: number | undefined,
+  ): void {
+    if (!this._store.has(sessionId)) return;
+    if (
+      typeof budgetTokens !== 'number' ||
+      !Number.isFinite(budgetTokens) ||
+      budgetTokens <= 0
+    ) {
+      this._sessionBudgetTokens.delete(sessionId);
+      return;
+    }
+    this._sessionBudgetTokens.set(sessionId, budgetTokens);
+  }
+
+  /**
+   * task-08：查询某 session 是否已因 budget 超限进入软切断态。
+   * session 不存在 / 未配置 budget → false。供 daemon / 测试观测。
+   */
+  isOverBudget(sessionId: string): boolean {
+    return this._overBudgetSessions.has(sessionId);
+  }
+
+  /**
+   * task-08（D-009）：聚合 session 所有 parentKey 桶（主 agent + 各子代理）的
+   * input+output 累计 token。无桶 → 0/0。**不含** cache_*（D-009 口径）。
+   */
+  private _aggregateSessionUsage(sessionId: string): {
+    input_tokens: number;
+    output_tokens: number;
+  } {
+    const buckets = this._partialBuffers.get(sessionId);
+    if (!buckets) return { input_tokens: 0, output_tokens: 0 };
+    let inputTokens = 0;
+    let outputTokens = 0;
+    for (const buf of buckets.values()) {
+      inputTokens += buf.sessionInputTokens || 0;
+      outputTokens += buf.sessionOutputTokens || 0;
+    }
+    return { input_tokens: inputTokens, output_tokens: outputTokens };
+  }
+
+  /**
+   * task-08（D-006 / D-009）：turn 收尾后的 budget 检查点（在 ``_onResult`` 末尾调）。
+   *
+   * 软切断 D-006：累计 input+output ≥ budget → 置 ``_overBudgetSessions``（幂等）
+   * + 经现有 ``onTurnMessage`` 回传 ``reason='budget_exceeded'`` + usage。**不**调
+   * close / kill / fail —— 当前 turn 已自然 result 完成，后续 ``inject`` 由置位拦截
+   *（见 ``inject`` 头部检查）。budget_tokens 未配置 → 短路（FR-07 零回归）。
+   */
+  private _checkBudgetCutoff(state: SessionState, runId: string): void {
+    const budget = this._sessionBudgetTokens.get(state.sessionId);
+    if (budget === undefined) return; // FR-07 brownfield 短路
+    if (this._overBudgetSessions.has(state.sessionId)) return; // 幂等
+    const usage = this._aggregateSessionUsage(state.sessionId);
+    const total = usage.input_tokens + usage.output_tokens;
+    if (total >= budget) {
+      this._overBudgetSessions.add(state.sessionId);
+      // 经现有 onTurnMessage 回传 budget_exceeded 事件（fire-and-forget，对齐 _onMessage
+      // 转发策略）。msg 形态用 Codex flat message 鸭子类型（= Record<string, unknown>，
+      // daemon onTurnMessage duck-types 按顶层 event_type / usage 处理），与 batch
+      // task-runner.ts ``_emitBudgetExceeded`` 输出**同构**：
+      //   - event_type: 'system' / content: '[BUDGET_EXCEEDED] ...'
+      //   - reason: 'budget_exceeded'（backend 据此识别软切断事件）
+      //   - usage: {input_tokens, output_tokens}（D-009：仅 input+output，不含 cache）
+      //   - budget_tokens: 阈值（透传便于 backend / 前端展示）
+      const msg = {
+        event_type: 'system',
+        content: `[BUDGET_EXCEEDED] input=${usage.input_tokens} output=${usage.output_tokens} budget=${budget}`,
+        reason: 'budget_exceeded',
+        usage: {
+          input_tokens: usage.input_tokens,
+          output_tokens: usage.output_tokens,
+        },
+        budget_tokens: budget,
+      } as unknown as Parameters<
+        NonNullable<SessionManagerDeps['onTurnMessage']>
+      >[2];
+      try {
+        const ret = this.deps.onTurnMessage(state.sessionId, runId, msg);
+        // fire-and-forget（对齐 _onMessage 的 void 包装）；异常不阻塞 turn 收尾。
+        if (ret && typeof (ret as Promise<unknown>).catch === 'function') {
+          (ret as Promise<unknown>).catch((e) => {
+            console.warn(
+              '[session-manager] budget_exceeded message forward failed',
+              e,
+            );
+          });
+        }
+      } catch (e) {
+        console.warn(
+          '[session-manager] budget_exceeded message throw',
+          e,
+        );
+      }
+    }
+  }
+
   async inject(sessionId: string, prompt: string, runId: string): Promise<InjectResult> {
     const state = this._store.get(sessionId);
     if (!state) {
@@ -1720,6 +1868,14 @@ export class SessionManager {
     }
     if (state.status === 'ended' || state.status === 'failed' || state.status === 'reconnecting') {
       throw new SessionNotActiveError(sessionId, state.status);
+    }
+    // task-08（D-006 软切断）：已超 budget 的 session 拒绝新 turn。当前 turn 已由
+    // _onResult → _checkBudgetCutoff 自然 result 完成（不硬杀），后续 inject 在此拦截，
+    // 防止「累计再涨」。session 仍 active（不进 ended/failed），budget_exceeded 事件
+    // 已在 _checkBudgetCutoff 发出；此处用 SessionNotActiveError（status='ended'）
+    // 表达「不再接 inject」语义，与 ended 等价拒绝。
+    if (this._overBudgetSessions.has(sessionId)) {
+      throw new SessionNotActiveError(sessionId, 'ended');
     }
 
     // task-07 排队检测：在切换 status 前抓取「前一 turn 是否未 result」。
@@ -1931,51 +2087,101 @@ export class SessionManager {
   }
 
   /**
-   * 结束 session：close InputQueue（让 query 自然结束），status=ended，调 onSessionEnd。
+   * 结束 session：经 `_terminateSession` 统一收口（task-01 起接入 driverHandle.close
+   * 接通 SDK kill 链 + InputQueue.close + abort resolver + 清 partial buffer + 设 status）。
    * 幂等：已 ended/failed 直接返回。
    */
   async end(sessionId: string): Promise<void> {
     const state = this._store.get(sessionId);
     if (!state) return;
     if (state.status === 'ended' || state.status === 'failed') return;
-    state.status = 'ended';
-    // task-08（AC-08.7）：session 终态时 abortAll 当前 session 的 pending 审批
-    // + 移除 resolver（session 不再可 inject，resolver 无存在意义）。
-    this._abortPermissionResolver(sessionId, 'session_ended');
-    // task-09：清除借用沙箱登记（session 已终态，写守卫注册表不再需要本条）。
-    this._clearBorrowSandbox(sessionId);
-    // ql-20260621-partial：销毁 partial buffer（含 timer），防止 end 后定时器
-    // 仍 fire 推送到已结束 session。
-    this._destroyPartialBuffer(sessionId);
+    await this._terminateSession(state, 'manual');
+  }
+
+  /**
+   * 标 failed（driver onError / 不可恢复异常）：经 `_terminateSession` 统一收口。幂等。
+   */
+  async fail(sessionId: string): Promise<void> {
+    const state = this._store.get(sessionId);
+    if (!state) return;
+    if (state.status === 'ended' || state.status === 'failed') return;
+    await this._terminateSession(state, 'driver_error');
+  }
+
+  /**
+   * task-01（D-001@v2 / D-003 / D-004 / R-01）：统一 interactive session 终止收口。
+   *
+   * 收敛 end()/fail() 的既有清理步骤（**保留原始顺序**，design §12 自审唯一遗留项），
+   * 仅新增 `driverHandle.close?.()` 这一步接通 SDK kill 链（stdin EOF → 2s → SIGTERM →
+   * 5s → SIGKILL），止血 P0「当前 turn 卡死（如 hang 死的 bash）→ claude 不退 → consume
+   * 永久挂起 → 僵尸进程持续烧 token」。原 end/fail 只 inputQueue.close（stdin EOF）+
+   * q.interrupt（控制消息），均不 kill；SDK 内部已有的强制 kill 链由本次 close 触发。
+   *
+   * reason 语义（沿用原 end/fail 各自语义）：
+   *   - 'manual'       → status='ended'（用户/空闲主动结束，对应原 end()）
+   *   - 'driver_error' → status='failed'（driver onError/不可恢复异常，对应原 fail()）
+   *
+   * close 是可选契约（FR-07 brownfield，base InteractiveDriverHandle.close 已声明可选）：
+   *   - Claude：运行时 state.query 实为 ClaudeDriverHandle（task-01 已补 close → query.close()）；
+   *   - Codex ：state.driverHandle.close 经 _close（SIGTERM + 2s SIGKILL）已可达
+   *     （codex-app-server-driver.ts:531）；
+   *   - 其他/旧 driver 不实现 close → `?.()` no-op，不报错。
+   * close 异常 try/catch 包裹不阻塞 terminate（R-01；SDK 内部已有 SIGTERM→SIGKILL 升级兜底）。
+   *
+   * **interrupt() 不调本方法**（守 D-001@v2：「打断本轮」按钮保持软 q.interrupt，
+   * session 仍 active 可续轮；只有 end/fail/cancel 走硬杀终止链）。
+   */
+  private async _terminateSession(
+    state: SessionState,
+    reason: 'manual' | 'driver_error',
+  ): Promise<void> {
+    const isManual = reason === 'manual';
+
+    // 保留原 end()/fail() 步骤的原始顺序（design §12 铁律，不得丢弃任何既有步骤）：
+
+    // 1. 设终态 status（原 end→'ended' / fail→'failed'）。
+    state.status = isManual ? 'ended' : 'failed';
+
+    // 2. task-08（AC-08.7）：abort 当前 session 的 pending 审批 resolver + 移除
+    //    （session 终态，resolver 无存在意义）。
+    this._abortPermissionResolver(
+      state.sessionId,
+      isManual ? 'session_ended' : 'session_failed',
+    );
+
+    // 3. task-09：清借用沙箱登记（session 已终态，写守卫注册表不再需要本条）。
+    this._clearBorrowSandbox(state.sessionId);
+
+    // 4. ql-20260621-partial：销毁 partial buffer（含 timer），防止 end 后定时器仍
+    //    fire 推送到已结束 session。
+    this._destroyPartialBuffer(state.sessionId);
+
+    // 5. task-01 新增（D-003 / D-004 / R-01）：接通 driver kill 链。
+    //    Claude 句柄运行时存在 state.query（实为 ClaudeDriverHandle，经 task-01 已补
+    //    close）；Codex 句柄存在 state.driverHandle（_close 已存在）。按 provider 取
+    //    目标（同 _interruptInternal 的 provider 分流模式，line 1803-1805）。
+    //    可选契约 close?.()：其他/旧 driver 不实现也不报错。try/catch 不阻塞（R-01）。
+    const terminateTarget: InteractiveDriverHandle | undefined =
+      state.provider === 'claude'
+        ? (state.query as unknown as InteractiveDriverHandle | undefined)
+        : state.driverHandle;
+    try {
+      terminateTarget?.close?.();
+    } catch {
+      /* R-01: close 异常不阻塞 terminate 流程（SDK 内部已有 SIGTERM→SIGKILL 升级兜底）。 */
+    }
+
+    // 6. close InputQueue（给 stdin EOF；幂等，已 closed 不抛）。
     try {
       state.inputQueue.close();
     } catch {
       /* close 幂等，已 closed 不抛 */
     }
-    await this.deps.onSessionEnd(state.sessionId, 'ended');
-    // task-10：终态从落盘集合移除后 flush（不复活 ended session）。
-    this._scheduleFlush();
-  }
 
-  /** 标 failed（driver onError / 不可恢复异常）。幂等。 */
-  async fail(sessionId: string): Promise<void> {
-    const state = this._store.get(sessionId);
-    if (!state) return;
-    if (state.status === 'ended' || state.status === 'failed') return;
-    state.status = 'failed';
-    // task-08：failed 时同样 abortAll + 移除 resolver。
-    this._abortPermissionResolver(sessionId, 'session_failed');
-    // task-09：清除借用沙箱登记（session 已 failed，写守卫注册表不再需要本条）。
-    this._clearBorrowSandbox(sessionId);
-    // ql-20260621-partial：销毁 partial buffer（含 timer），同 end。
-    this._destroyPartialBuffer(sessionId);
-    try {
-      state.inputQueue.close();
-    } catch {
-      /* noop */
-    }
-    await this.deps.onSessionEnd(state.sessionId, 'failed');
-    // task-10：终态从落盘集合移除后 flush（不复活 failed session）。
+    // 7. 通知 backend 终态（原 end→'ended' / fail→'failed'）。
+    await this.deps.onSessionEnd(state.sessionId, isManual ? 'ended' : 'failed');
+
+    // 8. task-10：终态从落盘集合移除后 flush（不复活 ended/failed session）。
     this._scheduleFlush();
   }
 
@@ -2346,6 +2552,13 @@ export class SessionManager {
       for (const buf of turnSessionMap.values()) {
         buf.completedSegments = new Set<string>();
       }
+    }
+    // task-08（D-006 / D-009）：turn 收尾 budget 软切断检查点。在 completedSegments
+    // 重置**之后**调用（聚合 usage 不依赖 completedSegments，但放在末尾确保
+    // _onResult 主路径全部完成后才发 budget_exceeded，语义清晰）。runId 用本 turn
+    // 刚结束的（currentRunId 已清空，但 runId 局部变量仍持有）。
+    if (runId) {
+      this._checkBudgetCutoff(state, runId);
     }
   }
 
@@ -3067,5 +3280,8 @@ export class SessionManager {
       }
     }
     this._partialBuffers.delete(sessionId);
+    // task-08：清理 budget 软切断状态（session 已 end/fail，不再可能 inject）。
+    this._sessionBudgetTokens.delete(sessionId);
+    this._overBudgetSessions.delete(sessionId);
   }
 }

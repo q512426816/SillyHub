@@ -607,6 +607,44 @@ export class TaskRunner {
       // 可重试：timeout / spawn ENOENT / OOM / segfault / killed。
       // 不重试：cancelled / businessError（claude is_error）/ completed / 业务非零退出。
       // R-10：重试清空 resumeSessionId（避免 --resume 重复 side-effect）。
+      //
+      // task-08（D-006 / D-009）：budget 累计 + 软切断检查点。
+      // 口径 = input_tokens + output_tokens（**不含** cache_*），per-lease / per-AgentRun
+      // 跨 attempt 累加。budget_tokens undefined → 整段检查点短路（FR-07 零回归）。
+      // 软切断：累计 ≥ budget → 设 overBudget（**不**调 close/kill）→ 当前 attempt 自然
+      // 跑完，重试循环 by overBudget 拦截下一个 attempt（D-006：不硬杀当前 turn/step）。
+      const budgetTokens = ctx.budget_tokens;
+      const budgetEnabled =
+        typeof budgetTokens === 'number' &&
+        Number.isFinite(budgetTokens) &&
+        budgetTokens > 0;
+      // budgetState.used = 已收尾 attempt 的累计 token（跨 attempt 加总）；
+      // .over = 已触发软切断（事件只发一次，幂等）。
+      const budgetState = { used: 0, over: false };
+      /**
+       * task-08：stats 回调（每次 complete 事件触发）→ 累计 + 软切断检查。
+       * usedBeforeAttempt 是 per-attempt 闭包绑定（每次循环 const 重建），
+       * 避免同 attempt 内多次 stats 叠加（stats 本身是 attempt 内 cumulative）。
+       */
+      const checkBudgetMidStream = (
+        usedBeforeAttempt: number,
+        stats: Record<string, unknown>,
+      ): void => {
+        if (!budgetEnabled || budgetState.over) return;
+        const attemptDelta = extractBudgetUsageTokens(stats);
+        const total = usedBeforeAttempt + attemptDelta;
+        if (total >= (budgetTokens as number)) {
+          budgetState.over = true;
+          const u = pickBudgetUsageSnapshot(stats);
+          this._emitBudgetExceeded(
+            leaseId,
+            claimToken,
+            ctx.agentRunId ?? '',
+            u,
+            budgetTokens as number,
+          );
+        }
+      };
       let attempt = 0;
       let result: SpawnAttemptResult;
       let effectiveCtx = ctx;
@@ -618,6 +656,8 @@ export class TaskRunner {
             adapterWithReset.resetAccumulator();
           }
         }
+        // task-08：本 attempt 起始的累计基线（const per-attempt，闭包捕获稳定）。
+        const usedBeforeAttempt = budgetState.used;
         // args 每次重试都重新构建（重试时 effectiveCtx.resumeSessionId 已清空，buildArgs 不带 --resume）
         // ql-20260617-008：透传 prompt，ndjson 协议把 prompt 作为 args 末尾位置参数
         // task-16：allowedRoots 用 frozenAllowedRoots（D-003 冻结，不随热更新变）。
@@ -649,10 +689,33 @@ export class TaskRunner {
           },
           leaseId,
           claimToken,
+          // task-08：stats 观察回调（budget 软切断检查点，未启用时仍空跑无副作用）。
+          onStats: (stats) => checkBudgetMidStream(usedBeforeAttempt, stats),
         });
 
-        // 判定是否重试
-        const shouldRetry = isSpawnLevelFailure(result) && attempt < maxRetries;
+        // task-08：attempt 结束 → 把本 attempt 最终 usage 累加到 budgetState.used，
+        // 并再做一次阈值判定（覆盖 ndjson getUsage 兜底统计 / 未走 complete stats 的场景）。
+        if (budgetEnabled) {
+          const finalDelta = extractBudgetUsageTokens(result.stats);
+          budgetState.used = usedBeforeAttempt + finalDelta;
+          if (!budgetState.over && budgetState.used >= (budgetTokens as number)) {
+            budgetState.over = true;
+            const u = pickBudgetUsageSnapshot(result.stats);
+            this._emitBudgetExceeded(
+              leaseId,
+              claimToken,
+              ctx.agentRunId ?? '',
+              u,
+              budgetTokens as number,
+            );
+          }
+        }
+
+        // 判定是否重试 —— overBudget 时不再启新 attempt（软切断 D-006）。
+        const shouldRetry =
+          !budgetState.over &&
+          isSpawnLevelFailure(result) &&
+          attempt < maxRetries;
         if (!shouldRetry) break;
         attempt++;
         // R-10：重试清空 resumeSessionId（避免 --resume 重复 side-effect）
@@ -966,11 +1029,19 @@ export class TaskRunner {
     onSessionId: (sid: string) => void;
     leaseId: string;
     claimToken: string;
+    /**
+     * task-08（D-006 / D-009）：stats 观察回调（每条 complete 事件 metadata.stats 触发，
+     * 同步调用，**不**阻塞 readline）。runLease 用于 budget 累计 + 软切断检查点。
+     * undefined / 未传 → 无外部观察（lastStats 仍内部更新，零回归）。
+     */
+    onStats?: (stats: Record<string, unknown>) => void;
   }): Promise<SpawnAttemptResult> {
     const {
       cmdPath, args, opts, adapter, prompt, ctx, signal,
       outputParts, onSessionId, leaseId, claimToken,
     } = params;
+    // task-08：把外部 stats 观察回调解构出来（runLease 用于 budget 软切断检查点）。
+    const externalOnStats = params.onStats;
 
     // ql-20260616-003：创建终端观察日志（写文件 + 可选弹独立终端）。
     // 关键设计：observer 创建是异步的（mkdir + writeFile），但**绝不**在 spawn 之前
@@ -1262,6 +1333,12 @@ export class TaskRunner {
             observer,
             onStats: (stats: Record<string, unknown>) => {
               lastStats = stats;
+              // task-08：叠加外部 budget 观察回调（不阻塞 readline，同步调用）。
+              try {
+                externalOnStats?.(stats);
+              } catch (e) {
+                console.warn('task_runner: budget_onstats_error', leaseId, e);
+              }
             },
             prompt,
             model: ctx.model,
@@ -2012,6 +2089,65 @@ export class TaskRunner {
     return messages;
   }
 
+  // ── task-08（D-006 / D-009）：budget 软切断事件回传 ─────────────────────────
+
+  /**
+   * task-08（D-006 / D-009）：经现有 submitMessages 回传 ``budget_exceeded`` 事件。
+   *
+   * 软切断（D-006）：本调用**只发事件**，**不**调 close / kill / cancel —— 当前
+   * step / attempt 让它自然跑完（由 runLease 重试循环的 ``shouldRetry`` 判定拦截下一个
+   * attempt）。硬杀是 cancel / END 路径的职责，budget 不介入。
+   *
+   * usage 口径 D-009：仅 ``input_tokens + output_tokens``（**不含** cache_*）。
+   *
+   * 失败语义：fire-and-forget（同 _handleLine 的 submitMessages 策略），失败仅 warn
+   * 不阻塞主流程；空 claimToken / agentRunId 静默跳过（对齐 ql-004 防空 run_id 422）。
+   */
+  private _emitBudgetExceeded(
+    leaseId: string,
+    claimToken: string,
+    agentRunId: string,
+    usage: { input_tokens: number; output_tokens: number },
+    budgetTokens: number,
+  ): void {
+    if (!claimToken || !agentRunId) return;
+    const message: Record<string, unknown> = {
+      event_type: 'system',
+      content: `[BUDGET_EXCEEDED] input=${usage.input_tokens} output=${usage.output_tokens} budget=${budgetTokens}`,
+      channel: 'stdout',
+      reason: 'budget_exceeded',
+      usage: {
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+      },
+      budget_tokens: budgetTokens,
+    };
+    // 走 resilience 通道时优先 dedup；否则裸 client.submitMessages（fire-and-forget）。
+    const forward: Promise<unknown> = this.resilience
+      ? this.resilience
+          .submitWithRetry(leaseId, claimToken, agentRunId, [
+            { message, dedup_key: `budget_exceeded:${agentRunId}` },
+          ])
+          .catch((e) => {
+            console.warn(
+              'task_runner: budget_exceeded_forward_failed',
+              leaseId,
+              toCauseInfo(e),
+            );
+          })
+      : this.client
+          .submitMessages(leaseId, claimToken, agentRunId, [message])
+          .catch((e) => {
+            console.warn(
+              'task_runner: budget_exceeded_forward_failed',
+              leaseId,
+              e,
+            );
+          });
+    // 不进 pendingForwards（本调用不总在 _spawnAndStream 上下文里），fire-and-forget。
+    void forward;
+  }
+
   // ── spec bundle pull / sync push 已迁移到 ./spec-sync.ts utility（task-05 改调）──
 
   // ── 工具：截断（对齐 Python _truncate）─────────────────────────────────────
@@ -2683,6 +2819,52 @@ export function mergeAdapterUsage(
     return lastStats;
   }
   return merged;
+}
+
+// ── task-08（D-006 / D-009）：budget 累计 + 软切断检查点 ──────────────────────
+
+/**
+ * task-08（D-009）：从 stats 提取 budget 累计口径 token 数。
+ *
+ * 口径**严格** = ``input_tokens + output_tokens``（**不含** cache_read /
+ * cache_creation）。守卫：``undefined`` / ``NaN`` / 非数字均按 0，避免脏 stats
+ * 误触发软切断。0 值合法（不丢）。
+ *
+ * @param stats adapter / complete 事件的 metadata.stats（可能 undefined）
+ * @returns input_tokens + output_tokens 的有限数和
+ */
+export function extractBudgetUsageTokens(
+  stats: Record<string, unknown> | undefined,
+): number {
+  if (!stats) return 0;
+  const inp =
+    typeof stats.input_tokens === 'number' && Number.isFinite(stats.input_tokens)
+      ? stats.input_tokens
+      : 0;
+  const out =
+    typeof stats.output_tokens === 'number' && Number.isFinite(stats.output_tokens)
+      ? stats.output_tokens
+      : 0;
+  return inp + out;
+}
+
+/**
+ * task-08（D-009）：从 stats 拆出 budget 事件回传用的 usage 快照（仅 input+output，
+ * 不含 cache，对齐累计口径）。
+ */
+function pickBudgetUsageSnapshot(
+  stats: Record<string, unknown> | undefined,
+): { input_tokens: number; output_tokens: number } {
+  if (!stats) return { input_tokens: 0, output_tokens: 0 };
+  const inp =
+    typeof stats.input_tokens === 'number' && Number.isFinite(stats.input_tokens)
+      ? stats.input_tokens
+      : 0;
+  const out =
+    typeof stats.output_tokens === 'number' && Number.isFinite(stats.output_tokens)
+      ? stats.output_tokens
+      : 0;
+  return { input_tokens: inp, output_tokens: out };
 }
 
 /**

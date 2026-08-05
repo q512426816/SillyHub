@@ -17,7 +17,7 @@ from sqlmodel import col
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.modules.agent.model import AgentRun
+from app.modules.agent.model import AgentMission, AgentRun
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
 from app.modules.workspace.model import AgentRunWorkspace
 from app.modules.workspace.service import resolve_root_path_for_daemon
@@ -192,6 +192,41 @@ def _apply_profile_passthrough(lease_meta: dict, payload: dict) -> None:
             payload[camel] = value
 
 
+async def _inject_mission_budget(
+    session: AsyncSession,
+    payload: dict,
+    *,
+    mission_id: uuid.UUID | None,
+) -> None:
+    """task-07 / FR-05 / D-005@v1 / D-009：下发 ``AgentMission.budget_tokens`` 到 claim payload。
+
+    供 daemon 执行循环检查点使用（累计 input+output ≥ budget_tokens → 软切断，
+    D-006）。budget 口径（D-009）= input_tokens + output_tokens，per AgentRun 归集
+    （不含 cache_read/cache_creation）；daemon 侧累计器 + 检查点逻辑在 Wave 2 task-08
+    实现，**本任务只下发数值，不算口径**。
+
+    数据源：``AgentMission.budget_tokens``（agent/model.py:595，``int | None``，
+    nullable=True）。mission run（``AgentRun.mission_id`` 非空）→ 加载 mission → 读
+    字段；非 mission run（quick-chat / scan / init / 无 mission 的 batch）→ mission_id=None。
+
+    **None 短路**（FR-07 / design §9 brownfield）：``mission_id`` 为 None 或
+    ``mission.budget_tokens`` 为 None（用户未配置预算）→ payload **不加** ``budget_tokens``
+    键，daemon 端 ``ctx.budget_tokens`` undefined → 检查点不触发（D-006 软切断保持关闭），
+    现有 dispatch 行为零变化。逐键守护风格对齐 ``_apply_profile_passthrough``。
+
+    双写（snake_case + camelCase）：对齐 daemon ``execPayload`` 归一化两端字段名惯例
+    （参考 ``latestSpecVersion``/``latest_spec_version``、``profileVersion``/``profile_version``）。
+    """
+    if mission_id is None:
+        return
+    mission = await session.get(AgentMission, mission_id)
+    if mission is None:
+        return
+    if mission.budget_tokens is not None:
+        payload["budget_tokens"] = mission.budget_tokens
+        payload["budgetTokens"] = mission.budget_tokens
+
+
 async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> dict:
     """Build execution context payload for a claimed lease.
 
@@ -255,6 +290,29 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
         # shared 两路 return 都携带（system_prompt 不在此，走 task-06 claudeMd prepend）。
         # 无键（profile=None / 旧 lease）→ payload 不含，零回归。
         _apply_profile_passthrough(lease_meta, payload)
+        # task-07 / FR-05 / D-005@v1 / D-009：interactive 路下发 AgentMission.budget_tokens
+        # （lease_meta.run_id → AgentRun.mission_id → AgentMission.budget_tokens）。置于
+        # transport 分支之前，让 tar / shared 两路 return 都携带。budget 口径（D-009）=
+        # input+output per-run，daemon 侧累计 + 检查点在 task-08 实现。**None 短路**（§9）：
+        # quick-chat / scan / 无 mission 的 interactive run → mission_id=None → 不加键，
+        # daemon ctx.budget_tokens undefined → 检查点不触发，零回归。
+        _bt_run_raw = lease_meta.get("run_id")
+        _bt_run_uuid: uuid.UUID | None = None
+        if _bt_run_raw:
+            try:
+                _bt_run_uuid = (
+                    uuid.UUID(_bt_run_raw) if isinstance(_bt_run_raw, str) else _bt_run_raw
+                )
+            except (ValueError, AttributeError, TypeError):
+                _bt_run_uuid = None
+        _bt_mission_id: uuid.UUID | None = None
+        if _bt_run_uuid is not None:
+            _bt_mission_id = (
+                await session.execute(
+                    select(AgentRun.mission_id).where(AgentRun.id == _bt_run_uuid)
+                )
+            ).scalar()
+        await _inject_mission_budget(session, payload, mission_id=_bt_mission_id)
         # ===== task-03（2026-06-23-spec-transport-tar-sync）：transport 分支 =====
         # D-007@v1：scan/stage 走 interactive lease，tar 模式 spec 同步在 interactive 路径
         # （daemon _startInteractiveSession pull + onSessionEnd sync）。backend 侧开关点：
@@ -520,4 +578,9 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
     # lease_meta 在上方 :400 行重新绑定为 ``lease.metadata_ or {}``，与此处同一份数据；
     # 无键（profile=None / 旧 lease）→ payload 不含，零回归。
     _apply_profile_passthrough(lease_meta, payload)
+    # task-07 / FR-05 / D-005@v1 / D-009：batch 路下发 AgentMission.budget_tokens（来自
+    # 已加载的 ``agent_run.mission_id`` → AgentMission.budget_tokens）。budget 口径（D-009）
+    # = input+output per-run，daemon 侧累计 + 检查点在 task-08 实现。**None 短路**（§9）：
+    # 非 mission 的 batch run（mission_id=None）或未配置预算 → 不加键，零回归。
+    await _inject_mission_budget(session, payload, mission_id=agent_run.mission_id)
     return payload

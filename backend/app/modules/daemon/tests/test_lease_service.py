@@ -488,13 +488,16 @@ class TestCancelLease:
         assert ar.status == "completed"
 
     @pytest.mark.asyncio
-    async def test_cancel_interactive_lease_sends_session_interrupt(
+    async def test_cancel_interactive_lease_sends_session_end(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """ql-20260712-001（P0-1）：interactive lease cancel → WS 下发 SESSION_INTERRUPT。
+        """ql-20260712-001（P0-1）+ task-02（D-001@v2 / XC-01）：interactive lease
+        cancel → WS 下发 SESSION_END（不再 SESSION_INTERRUPT）。
 
-        interactive lease 不进 daemon 心跳循环，必须经 WS Hub 显式中断，否则 SDK
-        进程在 daemon 内存里继续烧 token 成僵尸（lease/AgentRun 在 DB 已 killed）。
+        interactive lease 不进 daemon 心跳循环，必须经 WS Hub 显式下发；且必须用
+        SESSION_END 让 daemon 走 ``sessionManager.end → _terminateSession`` 硬杀链
+        （SESSION_INTERRUPT 只软中止当前 turn，不杀进程，会留僵尸——SDK 进程在
+        daemon 内存里继续烧 token，lease/AgentRun 在 DB 已 killed）。
         """
         user_id = await _create_user(db_session)
         rt = await _create_runtime(db_session, user_id)
@@ -521,10 +524,10 @@ class TestCancelLease:
         svc = DaemonLeaseService(db_session)
         await svc.cancel_lease(agent_run_id)
 
-        # WS 发了 SESSION_INTERRUPT，payload 带 session/lease/runtime
+        # WS 发了 SESSION_END（task-02 / D-001@v2），payload 带 session/lease/runtime
         assert len(sent) == 1
         _daemon_id, msg_type, payload = sent[0]
-        assert msg_type == "daemon:session_interrupt"
+        assert msg_type == "daemon:session_end"
         assert payload["lease_id"] == str(lease_id)
         assert "session_id" in payload
         assert "runtime_id" in payload

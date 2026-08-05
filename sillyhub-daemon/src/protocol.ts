@@ -142,6 +142,24 @@ export const MSG = {
    * payload: `{ runtime_id?: string, version?: string }`（version 为最新版本号，仅用于日志）。
    */
   SELF_UPDATE: 'daemon:self_update',
+
+  /**
+   * Server → Daemon：batch lease 即时取消（change 2026-08-05-daemon-kill-channel-unify
+   * task-04 / FR-03 / R-06 / design §5 Phase2 + §7.5）。
+   *
+   * backend cancel_lease 对 batch lease（kind != interactive）标记 cancelled 后经
+   * ws_hub.send_to_runtime 即时 best-effort 推送。daemon 收到后调
+   * taskRunner.cancel(leaseId) 复用现有 AbortController → _killChild 即时杀 batch
+   * 子进程，不再等心跳周期。发送失败靠现有心跳轮询兜底（task-runner.ts:905 不变，
+   * design §9）。payload: LeaseCancelPayload `{ runtime_id, lease_id }`（snake_case，
+   * daemon 入口已归一化 leaseId/runtime_id，与 TASK_AVAILABLE 同风格）。
+   *
+   * 与 backend `DAEMON_MSG_LEASE_CANCEL = "daemon:lease_cancel"`（task-04 protocol.py）
+   * 逐字对齐——任一字符漂移即双侧契约单测失败（design R-02）。纯新增消息，旧 daemon
+   * 收到走 default 仅 warn（向后兼容，design §9）。双触发幂等（LEASE_CANCEL + 心跳
+   * 轮询）由 taskRunner.cancel 内部保证（design §10 R-06）。
+   */
+  LEASE_CANCEL: 'daemon:lease_cancel',
 } as const;
 
 /** WebSocket 消息类型联合（字面量），用于 DaemonMessage.type。 */

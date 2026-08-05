@@ -1765,3 +1765,52 @@ describe("InteractiveSessionPanel partial override 撤回（task-06/08）", () =
     await waitFor(() => expect(screen.getByText(/turn2回复/)).toBeInTheDocument());
   });
 });
+
+// task-13 / FR-04 / R-08 / design §5 Phase4：terminating_at 非空 → 面板显示「终止中…」横幅
+describe("InteractiveSessionPanel 终止中态显示（task-13 / FR-04）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sessionApi.fetchPendingDialogs.mockResolvedValue([]);
+    sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
+  });
+
+  it("attach 轮询返回 terminating_at 非空 + status active：显示「终止中…」横幅", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.getAgentSession.mockResolvedValue({
+      id: "sess-term", runtime_id: null, lease_id: "lease-1",
+      provider: "claude", status: "active", agent_session_id: "ag-1",
+      config: null, turn_count: 1, created_at: "t", last_active_at: null, ended_at: null,
+      current_run_id: null,
+      // task-13：lease.terminating_at 非空（cancel_lease 已标，等 daemon 回传）
+      terminating_at: "2026-08-05T10:00:00Z",
+    });
+
+    setupPanel({ attachSessionId: "sess-term", initialTurns: [] });
+
+    await waitFor(() => {
+      expect(screen.getByText(/终止中…/)).toBeInTheDocument();
+    });
+  });
+
+  it("attach 轮询返回 terminating_at 为空：不显示「终止中…」横幅（brownfield）", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.getAgentSession.mockResolvedValue({
+      id: "sess-plain", runtime_id: null, lease_id: "lease-2",
+      provider: "claude", status: "active", agent_session_id: "ag-2",
+      config: null, turn_count: 0, created_at: "t", last_active_at: null, ended_at: null,
+      current_run_id: null,
+      terminating_at: null,
+    });
+
+    setupPanel({ attachSessionId: "sess-plain", initialTurns: [] });
+
+    // 给轮询 + 渲染一拍时间
+    await waitFor(() => {
+      expect(sessionApi.getAgentSession).toHaveBeenCalled();
+    });
+    // 不要出现终止中横幅
+    expect(screen.queryByText(/终止中…/)).not.toBeInTheDocument();
+  });
+});

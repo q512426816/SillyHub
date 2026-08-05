@@ -361,6 +361,15 @@ interface TaskRunnerLike {
    * TaskRunner 未实现时 daemon 跳过 change-write 分支。
    */
   runChangeWrite?(ctx: ChangeWriteCtx): Promise<ChangeWriteResult>;
+  /**
+   * change 2026-08-05-daemon-kill-channel-unify task-04 / FR-03 / R-06：取消在跑的
+   * batch lease。daemon `_handleWsMessage` 收到 LEASE_CANCEL WS 消息时调用，复用
+   * 现有 AbortController → _killChild 即时杀子进程（design §5 Phase2）。真实
+   * TaskRunner 已实现（task-runner.ts:327，幂等——AbortController 已 aborted 则
+   * abort() no-op、_killChild 检查 child.killed）；可选仅为兼容仅含 runLease 的
+   * 测试 mock（duck-typed，daemon 调用前用 `typeof === 'function'` 探测）。
+   */
+  cancel?(leaseId: string): Promise<boolean>;
 }
 
 /** daemon 需要的 WsClient 接口子集。 */
@@ -2459,6 +2468,42 @@ export class Daemon {
         this._logger.debug('heartbeat_ack', { payload });
         break;
       }
+      // change 2026-08-05-daemon-kill-channel-unify task-04 / FR-03 / R-06：
+      // backend cancel_lease 对 batch lease 标记 cancelled 后即时 WS 推送
+      // LEASE_CANCEL（design §5 Phase2 / §7.5）。daemon 收到后非阻塞调
+      // taskRunner.cancel(leaseId) 复用现有 AbortController → _killChild 即时
+      // 杀 batch 子进程，不再等心跳周期。payload.leaseId 已在入口归一化（上方
+      // snake/camel 双写）；与心跳轮询双触发幂等由 taskRunner.cancel 内部保证
+      //（AbortController 已 aborted 则 abort() no-op、_killChild 检查 child.killed）。
+      case MSG.LEASE_CANCEL: {
+        const cancelLeaseId = payload.leaseId;
+        if (!cancelLeaseId) {
+          this._logger.warn('lease_cancel_no_lease_id', { runtime_id: payload.runtimeId });
+          return;
+        }
+        if (!this._taskRunner || typeof this._taskRunner.cancel !== 'function') {
+          this._logger.warn('lease_cancel_no_runner', { lease_id: cancelLeaseId });
+          return;
+        }
+        this._logger.info('lease_cancel_received', { lease_id: cancelLeaseId });
+        // 非阻塞分发（同 SESSION_INJECT 风格，不阻塞 WS 接收）；cancel 内部幂等，
+        // 失败仅 error 不崩（best-effort，心跳轮询兜底）。
+        void this._taskRunner
+          .cancel(cancelLeaseId)
+          .then((cancelled: boolean) => {
+            this._logger.info('lease_cancel_handled', {
+              lease_id: cancelLeaseId,
+              cancelled,
+            });
+          })
+          .catch((e: unknown) => {
+            this._logger.error('lease_cancel_failed', {
+              lease_id: cancelLeaseId,
+              error: e,
+            });
+          });
+        break;
+      }
       // task-04：交互式会话控制消息（SESSION_INJECT/INTERRUPT/END）路由到 SessionManager。
       case MSG.SESSION_INJECT:
       case MSG.SESSION_INTERRUPT:
@@ -3146,6 +3191,10 @@ export class Daemon {
         mcpRefs: execPayload.mcpRefs,
         skillRefs: execPayload.skillRefs,
         effectiveAllowedRoots: execPayload.effectiveAllowedRoots,
+        // task-08 / FR-05 / D-005/D-009（RS-4 接线）：budget_tokens 透传 SessionManager
+        // .create（session-manager 据此设 session 级检查点，累计 input+output ≥ 阈值
+        // → 软切断 D-006 + 回传 budget_exceeded）。undefined → 检查点不触发（FR-07）。
+        budget_tokens: execPayload.budget_tokens,
       });
       // task-09（D-007@v2 候选 B）：借用 session 登记沙箱根，激活 SessionManager
       // 按 lease 隔离的只读 policy（写守卫只允许落沙箱内，不命中 lender runtime 缓存）。
@@ -3486,6 +3535,14 @@ export class Daemon {
         (rawExec.effectiveAllowedRoots as string[] | undefined) ??
         (rawExec.effective_allowed_roots as string[] | undefined) ??
         payload.effectiveAllowedRoots,
+      // task-08 / FR-05 / D-005/D-009（RS-4 接线）：AgentMission.budget_tokens 透传。
+      // context.py task-07 双写 budget_tokens(snake)+budgetTokens(camel) 进 claim payload。
+      // snake 优先（与 types.ts LeaseCtx.budget_tokens 字段名一致），camel 兜底。
+      // undefined → task-runner / SessionManager 检查点短路（D-006/FR-07 零回归）。
+      budget_tokens:
+        (rawExec.budget_tokens as number | undefined) ??
+        (rawExec.budgetTokens as number | undefined) ??
+        payload.budget_tokens,
     };
 
     // task-04（D-002@v3）：kind 分流。在 fetch/startLease 之前——interactive 不走
@@ -3580,6 +3637,10 @@ export class Daemon {
       mcpRefs: execPayload.mcpRefs,
       skillRefs: execPayload.skillRefs,
       effectiveAllowedRoots: execPayload.effectiveAllowedRoots,
+      // task-08 / FR-05 / D-005/D-009（RS-4 接线）：budget_tokens 透传 batch 路径
+      // task-runner（runLease 读 ctx.budget_tokens 做累计检查点，累计 input+output ≥
+      // 阈值 → 软切断 D-006 + 回传 budget_exceeded）。undefined → 检查点不触发（FR-07）。
+      budget_tokens: execPayload.budget_tokens,
     };
 
     const taskResult: TaskRunnerResult = await this._taskRunner!.runLease(ctx);

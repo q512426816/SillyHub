@@ -35,6 +35,12 @@ class AgentSessionRead(BaseModel):
     deleted_at: datetime | None = None
     # 当前运行 run（attach 恢复 currentRunId，启用打断按钮；非 ORM 字段，router 注入）
     current_run_id: uuid.UUID | None = None
+    # 2026-08-05-daemon-kill-channel-unify task-13 / FR-04 / design §5 Phase4：
+    # lease 处于 terminating 态的时间戳（cancel_lease 写入、daemon 回传统态后清空）。
+    # 非 ORM 字段——AgentSession 本身没有该列，由 router 经 session.lease_id 关联
+    # 查 DaemonTaskLease.terminating_at 注入。默认 None 守护 brownfield（无 lease /
+    # lease.terminating_at 为空 → None），让前端据此显示「终止中…」而非立刻「已停止」。
+    terminating_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

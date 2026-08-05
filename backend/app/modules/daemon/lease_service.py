@@ -66,6 +66,10 @@ class DaemonLeaseService:
 
     LEASE_DURATION_SECONDS: int = 60  # 每次心跳续期 60 秒
 
+    # task-11 / FR-04 / D-007：cancel_lease 写 terminating_at 后等 daemon 回传的
+    # 告警阈值。超时仍非空 → sweeper 记 warning（不改 status、不重试，方案 C）。
+    TERMINATING_TIMEOUT_SECONDS: int = 30
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
@@ -276,6 +280,69 @@ class DaemonLeaseService:
         await self._session.commit()
         return expired_agent_run_ids
 
+    # ── Terminating sweeper（task-11 / FR-04 / D-007 / XC-08）──────────────
+
+    async def alert_stuck_terminating_leases(self) -> list[uuid.UUID]:
+        """独立 sweeper：告警 cancel 后超时未获 daemon 回传的 lease。
+
+        change 2026-08-05-daemon-kill-channel-unify / task-11 / design §5 Phase4 /
+        FR-04 / D-007 / XC-08：``cancel_lease`` 写 ``terminating_at`` 后，daemon 应在
+        完成 kill 后经现有 ``complete_lease``（batch lease）/ ``end_session``
+        （interactive lease，POST /sessions/{id}/end）回传终态，backend 收到即清空
+        ``terminating_at``。本方法独立查询 ``terminating_at IS NOT NULL`` 的 lease
+        （**不并入** ``expire_overdue_leases``——后者只扫 ``status='claimed'`` 的过期
+        lease，XC-08 明确分工），对 ``terminating_at`` 早于 ``now - 30s`` 仍非空的 lease
+        记 ``logger.warning`` 告警 + 返回 lease_id 列表（标记）。
+
+        D-007（方案 C）：**不修改** ``lease.status``（不加 terminating 中间态、不动
+        状态机取值集合）、**不重试**（不引入 outbox）——仅观测"backend 已标 cancelled、
+        daemon 回传未达"的可见性黑洞，让运维/前端可感知。调用方（同一 sweep tick 与
+        ``expire_overdue_leases`` 并列调用，但本查询独立）按返回列表自行决定是否做
+        further observability（如发指标），DB 状态不被本方法改变。
+
+        Returns:
+            超 ``TERMINATING_TIMEOUT_SECONDS``（30s）仍 ``terminating_at`` 非空的
+            lease_id 列表；无则空列表。
+        """
+        now = datetime.now(UTC)
+        threshold = now - DaemonLeaseService._timedelta_seconds(self.TERMINATING_TIMEOUT_SECONDS)
+
+        # 独立查询（XC-08）：仅按 terminating_at 过滤，不绑 status——cancel_lease 只在
+        # lease→cancelled 时写 terminating_at，故实际命中即 cancelled lease；即便存在
+        # 极端脏数据（非 cancelled 却带 terminating_at）也该告警，不应被 status 屏蔽。
+        stmt = select(DaemonTaskLease).where(
+            col(DaemonTaskLease.terminating_at).is_not(None),
+            col(DaemonTaskLease.terminating_at) < threshold,
+        )
+        stuck = list((await self._session.execute(stmt)).scalars().all())
+
+        if not stuck:
+            return []
+
+        stuck_ids: list[uuid.UUID] = []
+        for lease in stuck:
+            # SQLite 存 naive datetime，对比前归一到 UTC（与 claim_task 同款处理）。
+            term_at = lease.terminating_at
+            if term_at is not None:
+                if term_at.tzinfo is None:
+                    term_at = term_at.replace(tzinfo=UTC)
+                age_seconds = int((now - term_at).total_seconds())
+            else:
+                age_seconds = 0
+            log.warning(
+                "lease_terminating_stuck",
+                lease_id=str(lease.id),
+                agent_run_id=str(lease.agent_run_id) if lease.agent_run_id else None,
+                runtime_id=str(lease.runtime_id) if lease.runtime_id else None,
+                terminating_at=str(lease.terminating_at),
+                age_seconds=age_seconds,
+                threshold_seconds=self.TERMINATING_TIMEOUT_SECONDS,
+            )
+            if lease.id is not None:
+                stuck_ids.append(lease.id)
+
+        return stuck_ids
+
     # ── Cancel ─────────────────────────────────────────────────────────────
 
     async def cancel_lease(self, agent_run_id: uuid.UUID) -> None:
@@ -338,6 +405,16 @@ class DaemonLeaseService:
         prior_status = lease.status
         lease.status = "cancelled"
         lease.updated_at = now
+        # task-11 / FR-04 / D-007 / XC-03：仅 cancel_lease 写 terminating_at——
+        # cancel_lease 发出取消信号（interactive SESSION_END / batch LEASE_CANCEL）后，
+        # lease 处于"已标 cancelled、等 daemon 回传确认"的间隙，正是 terminating_at
+        # 的观测窗口。end_session 同事务即把 lease 置 completed（session/service.py
+        # end_session 无观测窗口），故 XC-03 明确 end_session 不写。daemon 完成 kill
+        # 后经现有 complete_lease（batch）/ end_session（interactive）回传时清空；
+        # alert_stuck_terminating_leases sweeper 对超 30s 未回传的告警（不改 status、
+        # 不重试，D-007 方案 C）。cancel_lease 已同步 session.status='ended'（见上），
+        # 故 session 维度不另设 terminating 字段（XC-04）。
+        lease.terminating_at = now
         self._session.add(lease)
         await self._session.commit()  # session 收口（上面 add）随 lease cancelled 一起落库
 
@@ -354,14 +431,26 @@ class DaemonLeaseService:
         # 立即标记给用户即时反馈，daemon complete_lease(cancelled) 会被 priority 守卫拦下。
         await self._mark_agent_run_killed_if_pending(agent_run_id, now)
 
-        # ql-20260712-001（审计 P0-1）：interactive lease 必须显式 WS 下发
-        # SESSION_INTERRUPT，否则 daemon 端 interactive session 不进 lease 心跳
-        # 循环（daemon.ts:3234 直接 return），SDK 进程会在 daemon 内存里继续烧
-        # token 成僵尸——lease/AgentRun 在 DB 已 killed 但 daemon 侧 query 仍在跑。
-        # batch lease 靠 daemon heartbeat 轮询感知 cancelled → SIGTERM，无需 WS。
-        # best-effort：WS 失败不阻塞 cancel（DB 已收尾，与 end_session 容错一致）。
+        # ql-20260712-001（审计 P0-1）+ task-02（D-001@v2/XC-01）：interactive
+        # lease 必须显式 WS 下发 SESSION_END（cancel 路径盲区——原发
+        # SESSION_INTERRUPT 只软中止 turn 不杀进程，daemon interrupt() 不调
+        # _terminateSession，SDK 成僵尸）。daemon 收 SESSION_END 走 end →
+        # _terminateSession → driverHandle.close?.() 硬杀链；否则 daemon 端
+        # interactive session 不进 lease 心跳循环（daemon.ts 直接 return），SDK
+        # 进程会在 daemon 内存里继续烧 token 成僵尸——lease/AgentRun 在 DB 已
+        # killed 但 daemon 侧 query 仍在跑。
+        # task-05 / FR-03 / R-06（design §5 Phase2 / §7.5 / §9）：batch lease
+        # 经 LEASE_CANCEL WS 即时推送（best-effort），daemon 收到调
+        # taskRunner.cancel(leaseId) 复用 AbortController → _killChild 即时杀子
+        # 进程，不再等心跳周期；发送失败（daemon 离线 / WS 异常）靠现有心跳
+        # 轮询兜底（task-runner.ts 心跳循环不变）。与 interactive 走 SESSION_END
+        # 分工：interactive 无心跳循环必须 WS；batch 有心跳兜底故 best-effort。
+        # best-effort：WS 失败不阻塞 cancel（DB 已收尾）。
         if lease.kind == "interactive":
             await self._send_interactive_cancel(lease)
+        else:
+            # batch（及其它非 interactive kind）走 LEASE_CANCEL 即时通道。
+            await self._send_batch_lease_cancel(lease)
         # task-04 session 收口已提前到 lease 查询后（基于 run.agent_session_id，
         # 独立于 lease，覆盖 interactive lease agent_run_id=NULL 的 lease None 场景）。
 
@@ -459,13 +548,24 @@ class DaemonLeaseService:
         return lease
 
     async def _send_interactive_cancel(self, lease: DaemonTaskLease) -> None:
-        """向 daemon 下发 SESSION_INTERRUPT 中止 interactive lease 的当前 turn。
+        """向 daemon 下发 SESSION_END 终止 interactive lease（硬杀链）。
+
+        change 2026-08-05-daemon-kill-channel-unify / task-02 / D-001@v2 / XC-01：
+        原先发 SESSION_INTERRUPT（软，只中止当前 turn）仍会留僵尸——daemon 收
+        INTERRUPT 只调 ``q.interrupt()`` 不杀进程，SDK 在 daemon 内存里继续跑。改为
+        发 SESSION_END，让 daemon 走 ``sessionManager.end → _terminateSession`` 硬杀链
+        （``driverHandle.close?.()`` 接通 SDK 内部 stdin EOF → 2s SIGTERM → 5s SIGKILL，
+        当前 turn 卡死也能在 ~7s 内强杀）。
 
         daemon interactive 路径不轮询 lease status（不像 batch 跑心跳循环），cancel
         必须经 WS Hub 显式下发，否则 SDK 进程在 daemon 内存里继续跑成僵尸——
         lease/AgentRun 在 DB 已 killed 但 daemon 侧 query 仍在执行。复用
         ``interrupt_session``（session/service.py:707-784）同款通道：runtime_id →
         daemon_instance_id（``_resolve_daemon_id_for_runtime``）→ ``send_session_control``。
+
+        注意：函数名保留 ``_send_interactive_cancel``（含义=interactive lease 的取消
+        信号），变的只是消息类型 INTERRUPT→END。SESSION_INTERRUPT 此后**仅**
+        ``interrupt_session`` 按钮端点使用（守 D-001@v2）。
 
         best-effort：任何失败只告警，不阻塞 ``cancel_lease`` 主流程（DB 收尾已完成，
         daemon 侧靠 idle expire 兜底，与 ``end_session`` 容错策略一致）。
@@ -475,7 +575,7 @@ class DaemonLeaseService:
                 return
             # lazy import：避免与 session.service / ws_hub 的顶层循环 import
             from app.modules.agent.model import AgentSession
-            from app.modules.daemon.protocol import DAEMON_MSG_SESSION_INTERRUPT
+            from app.modules.daemon.protocol import DAEMON_MSG_SESSION_END
             from app.modules.daemon.session.service import _resolve_daemon_id_for_runtime
             from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
@@ -503,9 +603,11 @@ class DaemonLeaseService:
                 return
 
             hub = get_daemon_ws_hub()
+            # task-02 / D-001@v2：发 SESSION_END（非 INTERRUPT）→ daemon end →
+            # _terminateSession → driverHandle.close?.() 硬杀子进程（~7s 内强杀）。
             delivered = await hub.send_session_control(
                 daemon_id,
-                DAEMON_MSG_SESSION_INTERRUPT,
+                DAEMON_MSG_SESSION_END,
                 {
                     "session_id": str(agent_session.id),
                     "lease_id": str(lease.id),
@@ -523,6 +625,78 @@ class DaemonLeaseService:
             # best-effort：WS 异常不影响 cancel 主流程（DB 已 killed）
             log.warning(
                 "interactive_cancel_signal_failed",
+                lease_id=str(lease.id),
+                error=str(exc),
+            )
+
+    async def _send_batch_lease_cancel(self, lease: DaemonTaskLease) -> None:
+        """向 daemon 即时下发 LEASE_CANCEL 终止 batch lease（FR-03 / R-06）。
+
+        change 2026-08-05-daemon-kill-channel-unify / task-05 / design §5 Phase2 +
+        §7.5 + §9：batch lease（``kind != interactive``）原先**仅**靠 daemon 心跳
+        轮询（``_runLeaseHeartbeatLoop`` 检测 ``status==='cancelled'`` → SIGTERM）
+        感知取消，存在一个心跳周期的延迟。本次 ``cancel_lease`` 标记 cancelled 后
+        立即经 ``ws_hub.send_to_runtime`` best-effort 推送 ``LEASE_CANCEL``，daemon
+        收到后调 ``taskRunner.cancel(leaseId)`` 复用现有 ``AbortController →
+        _killChild`` 链即时杀子进程（design §5 Phase2）。
+
+        分工（与 interactive 走 SESSION_END 互斥）：
+          - interactive：daemon 端不跑 lease 心跳循环，cancel **必须**经 WS
+            显式下发（task-02 发 SESSION_END → ``_terminateSession`` 硬杀链）；
+          - batch：daemon 端心跳循环本就会检测 cancelled，故 LEASE_CANCEL 仅作
+            即时性优化，发送失败完全可由心跳轮询兜底（design §9 兼容策略）。
+
+        幂等（R-06）：``taskRunner.cancel`` 内部 ``AbortController`` 已 aborted
+        则 no-op、``_killChild`` 检查 ``child.killed``，故 LEASE_CANCEL 与心跳
+        双触发不会重复 kill。
+
+        best-effort：``runtime_id`` 为 None、daemon 离线（``daemon_id`` 解析为
+        None）或任何 WS 异常都只告警，不抛——DB 已收尾（lease=cancelled /
+        AgentRun=killed），daemon 侧靠心跳轮询最终收敛。
+        """
+        try:
+            if lease.runtime_id is None:
+                return
+            # lazy import：避免与 session.service / ws_hub 的顶层循环 import
+            from app.modules.daemon.protocol import DAEMON_MSG_LEASE_CANCEL
+            from app.modules.daemon.session.service import _resolve_daemon_id_for_runtime
+            from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+            daemon_id = await _resolve_daemon_id_for_runtime(self._session, lease.runtime_id)
+            if daemon_id is None:
+                log.warning(
+                    "batch_lease_cancel_daemon_offline",
+                    lease_id=str(lease.id),
+                    runtime_id=str(lease.runtime_id),
+                )
+                return
+
+            # 消息约定（design §5 Phase2）：直接用 send_to_runtime，envelope =
+            # {"type": DAEMON_MSG_LEASE_CANCEL, "payload": {lease_id, runtime_id}}。
+            # daemon 侧 _handleWsMessage 归一化 payload 时 snake/camel 双写都认，
+            # snake_case 即可。字段 [lease_id, runtime_id] 来自 task-04 provides。
+            message = {
+                "type": DAEMON_MSG_LEASE_CANCEL,
+                "payload": {
+                    "lease_id": str(lease.id),
+                    "runtime_id": str(lease.runtime_id),
+                },
+            }
+
+            hub = get_daemon_ws_hub()
+            delivered = await hub.send_to_runtime(daemon_id, message)
+            log.info(
+                "batch_lease_cancel_signal_sent",
+                lease_id=str(lease.id),
+                daemon_id=str(daemon_id),
+                runtime_id=str(lease.runtime_id),
+                delivered=delivered,
+            )
+        except Exception as exc:
+            # best-effort：WS 异常不影响 cancel 主流程（DB 已 cancelled，
+            # daemon 心跳轮询会兜底）。
+            log.warning(
+                "batch_lease_cancel_signal_failed",
                 lease_id=str(lease.id),
                 error=str(exc),
             )

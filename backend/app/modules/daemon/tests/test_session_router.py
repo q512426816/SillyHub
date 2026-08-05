@@ -357,3 +357,114 @@ class TestListSessionsTitleAndSoftDelete:
         assert str(victim_id) not in ids  # 软删过滤
         kept = next(i for i in items if i["id"] == str(sid))
         assert kept["title"] == "你好，现在几点了？"  # 首条 user_input 摘要前 30 字
+
+
+# ── task-13 / FR-04 / design §5 Phase4：AgentSessionRead.terminating_at 暴露 ──
+
+
+class TestSessionTerminatingAtExposure:
+    """terminating_at 经 router 经 session.lease_id 关联 DaemonTaskLease 注入。
+
+    覆盖 list + detail 两端点的 populate 逻辑：
+    - lease.terminating_at 非空 → read.terminating_at 非空
+    - lease None / lease.terminating_at None / session 无 lease → read.terminating_at None
+    """
+
+    async def _seed_session_with_lease(
+        self,
+        db_session: AsyncSession,
+        *,
+        terminating_at: datetime | None,
+        with_lease: bool = True,
+    ) -> tuple[uuid.UUID, uuid.UUID | None]:
+        """建一个 admin 的 AgentSession，可选挂一个 interactive lease。返回 (sid, lease_id)。"""
+        from app.modules.agent.model import AgentSession
+        from app.modules.auth.model import User
+        from app.modules.daemon.model import DaemonTaskLease
+
+        admin = (
+            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
+            .scalars()
+            .first()
+        )
+        assert admin is not None
+        rt = await _create_runtime(db_session, admin.id)
+
+        lease_id: uuid.UUID | None = None
+        if with_lease:
+            lease_id = uuid.uuid4()
+            db_session.add(
+                DaemonTaskLease(
+                    id=lease_id,
+                    runtime_id=rt.id,
+                    kind="interactive",
+                    status="cancelled" if terminating_at is not None else "claimed",
+                    terminating_at=terminating_at,
+                )
+            )
+        sid = uuid.uuid4()
+        db_session.add(
+            AgentSession(
+                id=sid,
+                user_id=admin.id,
+                runtime_id=rt.id,
+                lease_id=lease_id,
+                provider="claude",
+                status="active",
+            )
+        )
+        await db_session.commit()
+        return sid, lease_id
+
+    async def test_detail_populates_terminating_at_when_lease_marked(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        sid, _ = await self._seed_session_with_lease(db_session, terminating_at=datetime.now(UTC))
+        resp = await client.get(f"/api/daemon/sessions/{sid}", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["terminating_at"] is not None
+
+    async def test_detail_terminating_at_none_when_lease_empty(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        sid, _ = await self._seed_session_with_lease(db_session, terminating_at=None)
+        resp = await client.get(f"/api/daemon/sessions/{sid}", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["terminating_at"] is None
+
+    async def test_detail_terminating_at_none_when_no_lease(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        sid, _ = await self._seed_session_with_lease(
+            db_session, terminating_at=None, with_lease=False
+        )
+        resp = await client.get(f"/api/daemon/sessions/{sid}", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["terminating_at"] is None
+
+    async def test_list_populates_terminating_at_batched(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        # 一个 lease 标了 terminating_at、另一个没标 → list 批量 populate 区分正确。
+        sid_term, _ = await self._seed_session_with_lease(
+            db_session, terminating_at=datetime.now(UTC)
+        )
+        sid_plain, _ = await self._seed_session_with_lease(db_session, terminating_at=None)
+        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        items = {i["id"]: i for i in resp.json()["items"]}
+        assert items[str(sid_term)]["terminating_at"] is not None
+        assert items[str(sid_plain)]["terminating_at"] is None
