@@ -168,3 +168,16 @@
 根因：该 change task-12 落地时后端 openapi/api-types 尚未刷新含 shared 字段与 SharedDaemonView，前端用本地 intersection + 本地 interface 兜底并留 TODO；后续 gen:types 已补齐生成类型，但本地兜底未切回、注释未更新，形成类型债与误导性注释。
 方案：① workspace-binding.ts 把 MemberBindingWithShared 与 SharedDaemonView 改为生成类型别名（消费方 import 名不变零改动）并更新过时注释；② borrowed-solution-files.tsx 重写过时注释为现状（容器层 panel 已调 listFiles）；③ shared-daemon-manager.tsx:180 适配生成类型 optional（daemon_id ?? null 归一化匹配本地 shortId(string|null)）。
 结果：确认 api-types.ts 已含 MemberBindingView.shared 与 SharedDaemonView，无需 gen:types；pnpm run typecheck（tsc --noEmit）0 error 通过；frontend 模块文档变更索引已同步。
+## ql-20260805-001-8d02 | 2026-08-05 08:32:21 | change 2026-08-04-agent-profile-ui-redesign 表述勘误：owner 离开后「仍可见」+ 聚合响应命名 AgentProfileAggregatedListResponse
+状态：已完成
+关联变更：2026-08-04-agent-profile-ui-redesign
+文件：
+- backend/app/modules/agent/profile/service.py（list_visible_all docstring 重写 R-07 段：owner 离开 ws 后 workspace 级档对 owner 仍可见——_can_read 对 owner 短路与 get 一致，并纠正原「clause 拼接法会因 owner 短路误放行」的颠倒对比）
+- backend/app/modules/agent/tests/test_profile_service.py（R-07 测试注释更新：design 原措辞「不可见」系表述错误已勘误为「仍可见」，仲裁记录与不改 _can_read_async 的边界说明保留）
+- .sillyspec/changes/archive/2026-08-04-agent-profile-ui-redesign/design.md（§10 R-07 应对「owner 离开后不可见」→「仍可见」；§7.1 Response 200 由 AgentProfileListResponse 改为实建的 AgentProfileAggregatedListResponse 并注明独立类型非复用）
+- .sillyspec/changes/archive/2026-08-04-agent-profile-ui-redesign/tasks/task-01.md（implementation 与 acceptance 两行同源「owner-left-ws 该档不可见」→「该档仍可见」）
+
+需求：change 2026-08-04-agent-profile-ui-redesign 归档前两处表述勘误（verify-result 已记录）：①service.py list_visible_all docstring + design §10 R-07 写「owner 离开后不可见」，与代码事实相悖；②design §7.1 聚合响应命名写复用 AgentProfileListResponse，实建为 AgentProfileAggregatedListResponse。
+根因：`_can_read` 对 WORKSPACE 级 owner 短路（service.py:168 返 owner_user_id==actor.id、不查成员），owner 离开 ws 后该档仍可见；list_visible_all 逐档复用 _can_read_async，故聚合视图行为与 get() 一致 = 仍可见，docstring/design 原措辞误写「不可见」，且把 clause 拼接法行为描述颠倒。聚合端点（router.py:102）实建独立 `AgentProfileAggregatedListResponse`，design §7.1 误写复用 AgentProfileListResponse。
+方案：service.py docstring 重写 R-07 段为「owner 离开后仍可见（owner 短路，与 get 一致）」并修正 clause 拼接法对比（clause 法按成员过滤，owner 离开后不放入）；design §10 R-07 同步为「仍可见」；design §7.1 Response 200 改 AgentProfileAggregatedListResponse；归档 task-01.md 两行同源表述同步；test R-07 注释更新为已勘误状态。改动全为 docstring/注释/文档，零功能变更。
+结果：uv run pytest test_profile_service.py + test_profile_router.py 62 passed（含 R-07 owner-left-ws 用例 test_owner_left_ws_workspace_level_matches_get_behavior）；无 lint/type 影响（纯注释文档改动）。

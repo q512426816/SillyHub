@@ -414,12 +414,12 @@ class TestListVisibleAll:
         assert "ws-p" not in names
 
     async def test_owner_left_ws_workspace_level_matches_get_behavior(self, db_session) -> None:
-        # R-07 仲裁：design §10 R-07 措辞「owner 离开后该档对其不可见（与 get() 一致）」
-        # 内部冲突——get() 经 _can_read_async 对 WORKSPACE 级 owner 短路（service.py
+        # R-07 边界：get() 经 _can_read_async 对 WORKSPACE 级 owner 短路（service.py
         # _can_read 的 WORKSPACE 分支 return owner_user_id==actor.id，不查成员），故 owner
         # 离开 ws 后该档对其仍可见。本变更 list_visible_all 复用 _can_read_async（task
         # implementation 明确「逐档 _can_read_async 判定，不拼 ws clause」），故聚合视图
-        # 行为 = get() = owner 离开后仍可见。本测试以代码事实（与 get() 一致）为准。
+        # 行为 = get() = owner 离开后仍可见（design §10 R-07 原措辞「不可见」系表述错误，
+        # archive 时已勘误为「仍可见」，与本测试一致）。
         # 不改 _can_read_async：那会扩散影响 get/list/copy/resolve（2026-08-02-agent-profile-layer
         # 已 archive 的稳定 visibility 语义），超本 task「纯加法不改现有 CRUD」约束 +
         # allowed_paths 语义。designer 若坚持 owner 离开即不可见，需另起 change 改 _can_read_async

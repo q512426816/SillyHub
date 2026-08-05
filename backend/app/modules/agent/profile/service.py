@@ -332,9 +332,10 @@ class AgentProfileService:
         所属各工作区的 workspace 级档 ∪ 全部 platform 级档 ∪ 系统预置档。
 
         与 :meth:`list` 的关键差异：**不拼 ws clause**，而是查全表后逐档用
-        :meth:`_can_read_async` 判定。这样能正确处理 owner-left-ws 边界（R-07）——
-        owner 离开 ws 后，其在该 ws 建的 workspace 级档对自身不再可见（与 :meth:`get`
-        一致），而 clause 拼接法会因 ``owner_user_id`` 短路误放行。
+        :meth:`_can_read_async` 判定。owner-left-ws 边界（R-07）下，WORKSPACE 级档
+        对 owner 仍可见（``_can_read`` 对 owner 短路，不查成员，与 :meth:`get`
+        一致）；而 :meth:`list` 的 ws clause 拼接法按成员过滤，owner 离开后该档
+        不在其可见集内。
 
         platform/系统预置档按 id 去重（防御同一物理档被多次命中）。``workspace_name``
         批量预取（单次 ``IN`` 查询）避免 N+1。

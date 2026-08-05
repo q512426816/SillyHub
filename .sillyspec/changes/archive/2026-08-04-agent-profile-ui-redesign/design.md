@@ -95,7 +95,8 @@ revision: v2(Design Grill P1 修正:B-1 菜单数据源/B-2 schema.py 不存在/
 ```
 GET /api/agent-profiles?scope=mine
 Auth: 当前 actor(JWT)
-Response 200: AgentProfileListResponse { items: AgentProfileAggregatedItem[] }
+Response 200: AgentProfileAggregatedListResponse { items: AgentProfileAggregatedItem[] }
+（独立聚合响应类型，非复用 AgentProfileListResponse）
 ```
 
 `AgentProfileAggregatedItem` = `AgentProfileRead` 全字段 +:
@@ -171,7 +172,7 @@ export function useMineAgentProfiles(): { profiles, isLoading, isError, error, r
 | R-04 | 档案数量大时卡片墙性能 | P2 | 档案低频小量;前端分页兜底;>100 再考虑后端分页 |
 | R-05 | 「预览人设下发效果」内容定义 | P2 | §7.4 已定义:system_prompt 原文 + 模拟 CLAUDE.md 顶部片段,纯前端只读 |
 | R-06 | gen:types 暴露无关旧测试债 | P2 | 按规则 20 惯例顺手补字段修好 |
-| R-07 | owner-who-left-ws 边界:owner 离开 ws 后,其在该 ws 建的 workspace 级档案在聚合视图的归属 | P2 | `_can_read_async` 对 WORKSPACE 级非 owner 需成员判定;owner 离开后该档对其不可见(与 `get()` 一致);plan 补单测 |
+| R-07 | owner-who-left-ws 边界:owner 离开 ws 后,其在该 ws 建的 workspace 级档案在聚合视图的归属 | P2 | `_can_read_async` 对 WORKSPACE 级非 owner 需成员判定;owner 离开后该档对其仍可见(与 `get()` 一致,owner 短路);plan 补单测 |
 
 ## 11. 决策追踪
 
