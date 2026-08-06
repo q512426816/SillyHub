@@ -40,6 +40,36 @@ if TYPE_CHECKING:
 SKILLS_GLOB = "sillyspec-*"
 """Glob pattern to match sillyspec skill directories under the bundle root."""
 
+SKILLS_MAX_CONTENT_BYTES = 1 * 1024 * 1024  # 1 MiB — read_skill_md 上限（只读语义干净，不截断）
+
+
+def read_skill_md(skill_name: str) -> str:
+    """Read a sillyspec-* skill's SKILL.md content (whitelist + fixed file, traversal-safe).
+
+    2026-08-05-skill-content-viewer task-01：供 daemon ``GET /skills/{skill_name}/content``
+    端点只读查看。安全：``skill_name`` 必须在 ``skills_bundle_dir`` 下 ``sillyspec-*``
+    目录白名单内（与 ``SKILLS_GLOB`` 同源），只读固定 ``SKILL.md``——不拼接用户传入
+    path，天然防路径穿越。
+
+    本函数保持模块「纯 stdlib」约定（不 import FastAPI）：raise 内置异常，由 router
+    层 catch 转 HTTPException（404/413）。
+
+    Raises:
+        FileNotFoundError: ``skill_name`` 非白名单 或 该目录无 SKILL.md（str(exc) 区分）。
+        ValueError: SKILL.md > ``SKILLS_MAX_CONTENT_BYTES``（只读语义，不截断）。
+    """
+    skills_dir = get_settings().skills_bundle_dir
+    valid_names = {p.name for p in skills_dir.glob(SKILLS_GLOB) if p.is_dir()}
+    if skill_name not in valid_names:
+        raise FileNotFoundError(f"skill '{skill_name}' not in sillyspec-* whitelist")
+    skill_md_path = skills_dir / skill_name / "SKILL.md"
+    if not skill_md_path.is_file():
+        raise FileNotFoundError(f"skill '{skill_name}' has no SKILL.md")
+    content = skill_md_path.read_text(encoding="utf-8")
+    if len(content.encode("utf-8")) > SKILLS_MAX_CONTENT_BYTES:
+        raise ValueError(f"skill '{skill_name}' SKILL.md exceeds 1 MiB")
+    return content
+
 
 def _collect_skill_files(skills_dir: Path) -> list[tuple[Path, bytes]]:
     """Recursively collect all regular files from ``sillyspec-*`` subdirectories.

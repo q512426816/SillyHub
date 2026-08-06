@@ -53,19 +53,47 @@ const COMPACT_CLASS = cn(
   "[&_a]:!text-primary [&_a]:!underline [&_a]:!underline-offset-2",
 );
 
+// 阅读尺寸（2026-08-05-skill-content-viewer task-04）：供抽屉长文阅读，比紧凑型
+// 更大字号 / 行距 / 标题尺寸。compact 保持原样（现有 6+ 处复用不动，向后兼容）。
+const READING_CLASS = cn(
+  "markdown-text min-w-0 break-words [overflow-wrap:anywhere]",
+  "[&_.wmde-markdown]:!bg-transparent [&_.wmde-markdown]:!p-2 [&_.wmde-markdown]:!text-foreground",
+  "[&_.wmde-markdown]:!text-sm [&_.wmde-markdown]:!leading-7",
+  "[&_.wmde-markdown_p]:!my-3 [&_.wmde-markdown_p:first-child]:!mt-0 [&_.wmde-markdown_p:last-child]:!mb-0",
+  "[&_.wmde-markdown_h1]:!my-4 [&_.wmde-markdown_h1]:!text-2xl [&_.wmde-markdown_h1]:!font-semibold",
+  "[&_.wmde-markdown_h2]:!my-3 [&_.wmde-markdown_h2]:!text-xl [&_.wmde-markdown_h2]:!font-semibold [&_.wmde-markdown_h2]:!pb-1 [&_.wmde-markdown_h2]:!border-b",
+  "[&_.wmde-markdown_h3]:!my-2.5 [&_.wmde-markdown_h3]:!text-base [&_.wmde-markdown_h3]:!font-semibold",
+  "[&_.wmde-markdown_h4]:!my-2 [&_.wmde-markdown_h4]:!text-sm [&_.wmde-markdown_h4]:!font-semibold",
+  "[&_.wmde-markdown_ul]:!my-2 [&_.wmde-markdown_ul]:!pl-5",
+  "[&_.wmde-markdown_ol]:!my-2 [&_.wmde-markdown_ol]:!pl-5",
+  "[&_.wmde-markdown_li]:!my-0.5",
+  "[&_.wmde-markdown_blockquote]:!my-3 [&_.wmde-markdown_blockquote]:!border-l-2 [&_.wmde-markdown_blockquote]:!pl-3 [&_.wmde-markdown_blockquote]:!text-muted-foreground [&_.wmde-markdown_blockquote]:!not-italic",
+  "[&_.wmde-markdown_pre]:!my-3 [&_.wmde-markdown_pre]:!overflow-x-auto [&_.wmde-markdown_pre]:!rounded-md [&_.wmde-markdown_pre]:!bg-muted/60 [&_.wmde-markdown_pre]:!p-3",
+  "[&_.wmde-markdown_pre_code]:!bg-transparent [&_.wmde-markdown_pre_code]:!p-0 [&_.wmde-markdown_pre_code]:!text-xs",
+  "[&_.wmde-markdown_code]:!font-mono [&_.wmde-markdown_code]:!text-xs",
+  "[&_a]:!text-primary [&_a]:!underline [&_a]:!underline-offset-2",
+);
+
 export interface MarkdownTextProps {
   /** Markdown 文本内容 */
   content: string;
   /** 外层容器 className */
   className?: string;
+  /**
+   * 渲染尺寸（2026-08-05-skill-content-viewer task-04）：
+   * - `compact`（默认）：紧凑型，气泡/历史/日志等小尺寸场景（现有 6+ 处复用）。
+   * - `reading`：阅读型，抽屉长文阅读，更大字号/行距。
+   */
+  size?: "compact" | "reading";
 }
 
-export function MarkdownText({ content, className }: MarkdownTextProps) {
+export function MarkdownText({ content, className, size = "compact" }: MarkdownTextProps) {
   if (!content) {
     return null;
   }
+  const base = size === "reading" ? READING_CLASS : COMPACT_CLASS;
   return (
-    <div className={cn(COMPACT_CLASS, className)}>
+    <div className={cn(base, className)}>
       <MarkdownPreview source={content} components={previewComponents} />
     </div>
   );

@@ -6,6 +6,7 @@ import {
   BookOpen,
   Boxes,
   ChevronDown,
+  Eye,
   FileCode2,
   Lightbulb,
   Pencil,
@@ -15,6 +16,7 @@ import {
 } from "lucide-react";
 
 import { CustomSkillEditDialog } from "@/components/custom-skill-edit-dialog";
+import { SkillContentDrawer } from "@/components/skill-content-drawer";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -76,6 +78,12 @@ export default function SkillsSettingsPage() {
   const notify = useNotify();
 
   const [editing, setEditing] = useState<CustomSkillRead | "new" | null>(null);
+  // 2026-08-05-skill-content-viewer task-07：只读查看抽屉状态（platform 看 SKILL.md / custom 看 content）。
+  const [viewing, setViewing] = useState<{
+    kind: "platform" | "custom";
+    skillName?: string;
+    skillId?: string;
+  } | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
   // 新手引导卡：默认展开，让不懂技能的用户先看懂（P0-4 白话化）。
   const [showGuide, setShowGuide] = useState(true);
@@ -242,10 +250,15 @@ export default function SkillsSettingsPage() {
                 {platformGroups.map((g) => (
                   <tr key={g.name} className="border-b last:border-0 hover:bg-muted/25">
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2 font-medium text-foreground">
+                      <button
+                        type="button"
+                        onClick={() => setViewing({ kind: "platform", skillName: g.name })}
+                        className="flex items-center gap-2 font-medium text-foreground hover:text-primary hover:underline"
+                      >
                         <BookOpen className="h-3.5 w-3.5 text-muted-foreground" />
                         <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{g.name}</code>
-                      </div>
+                        <Eye className="h-3 w-3 text-muted-foreground" />
+                      </button>
                     </td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
@@ -333,6 +346,15 @@ export default function SkillsSettingsPage() {
                         <Button
                           variant="ghost"
                           size="sm"
+                          onClick={() => setViewing({ kind: "custom", skillId: s.id })}
+                          className="gap-1"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          查看
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => setEditing(s)}
                           className="gap-1"
                         >
@@ -366,6 +388,14 @@ export default function SkillsSettingsPage() {
           onClose={() => setEditing(null)}
         />
       )}
+
+      <SkillContentDrawer
+        open={viewing !== null}
+        onClose={() => setViewing(null)}
+        kind={viewing?.kind ?? "platform"}
+        skillName={viewing?.skillName}
+        skillId={viewing?.skillId}
+      />
     </PageContainer>
   );
 }

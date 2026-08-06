@@ -2515,6 +2515,31 @@ async def get_skills_bundle(
     )
 
 
+# 2026-08-05-skill-content-viewer task-02：平台 skill 内容只读查看端点。
+# 白名单 + 固定 SKILL.md（read_skill_md）天然防路径穿越；权限对齐 manifest。
+# 声明在 manifest/bundle 之后（FastAPI 按声明顺序匹配；{skill_name} 不与 latest
+# 静态段冲突，但防御性在后避免未来 {skill_name} 误捕获静态段）。
+@router.get("/skills/{skill_name}/content")
+async def get_skill_content(
+    skill_name: str,
+    user: Annotated[Any, Depends(get_current_principal)],
+) -> dict[str, str]:
+    """Return a sillyspec-* skill's SKILL.md content (read-only, traversal-safe).
+
+    ``skill_name`` 必须在 sillyspec-* 白名单内；固定读 SKILL.md（不拼 path）。
+    404 = 非白名单 / SKILL.md 缺失；413 = > 1 MiB。
+    """
+    from app.modules.agent.skills_bundle_service import read_skill_md
+
+    try:
+        content = read_skill_md(skill_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    return {"skill_name": skill_name, "content": content}
+
+
 # ---------------------------------------------------------------------------
 # 2026-07-07-skills-mcp-management-ui task-05：daemon 拉 MCP 平台配置端点。
 # daemon skill-manager / mcp-config 启动时拉平台默认 mcpServers + 白名单，

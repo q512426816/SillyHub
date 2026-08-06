@@ -168,6 +168,45 @@ export function usePlatformSkillsManifest() {
   };
 }
 
+/**
+ * 平台 skill 内容（SKILL.md 全文）。2026-08-05-skill-content-viewer task-05。
+ * 端点无 response_model（raw dict），未纳入 OpenAPI 生成，手写对齐后端契约
+ * {skill_name, content}（与 CustomSkill 系列同模式，符合规则20——custom-skills.ts
+ * 是独立手写文件，不在 api-types.ts）。
+ */
+export interface PlatformSkillContent {
+  skill_name: string;
+  content: string;
+}
+
+/** 获取平台 sillyspec-* skill 的 SKILL.md 内容（只读查看）。task-05。 */
+export async function getPlatformSkillContent(
+  name: string,
+): Promise<PlatformSkillContent> {
+  return apiFetch<PlatformSkillContent>(
+    `/api/daemon/skills/${encodeURIComponent(name)}/content`,
+  );
+}
+
+/**
+ * 平台 skill 内容（按需加载，只读）。task-05。
+ * enabled 由调用方控制（skill_name 非空才查）；staleTime 5min（SKILL.md 随部署更新）。
+ */
+export function usePlatformSkillContent(name: string | null | undefined) {
+  const q = useQuery<PlatformSkillContent, ApiError>({
+    queryKey: queryKeys.customSkills.content(name ?? ""),
+    queryFn: () => getPlatformSkillContent(name as string),
+    enabled: !!name,
+    staleTime: 5 * 60_000,
+  });
+  return {
+    content: q.data ?? null,
+    isLoading: q.isLoading,
+    isError: q.isError,
+    error: q.error,
+  };
+}
+
 /** 新建自定义 skill（admin）。成功后刷新列表 + manifest（version 会变）。 */
 export function useCreateCustomSkill() {
   const qc = useQueryClient();

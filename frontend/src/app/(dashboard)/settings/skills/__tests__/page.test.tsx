@@ -80,6 +80,7 @@ const skillsApi = vi.hoisted(() => ({
   createCustomSkill: vi.fn(),
   updateCustomSkill: vi.fn(),
   deleteCustomSkill: vi.fn(),
+  getPlatformSkillContent: vi.fn(),
 }));
 
 vi.mock("@/lib/custom-skills", () => ({
@@ -89,6 +90,15 @@ vi.mock("@/lib/custom-skills", () => ({
   createCustomSkill: skillsApi.createCustomSkill,
   updateCustomSkill: skillsApi.updateCustomSkill,
   deleteCustomSkill: skillsApi.deleteCustomSkill,
+  getPlatformSkillContent: skillsApi.getPlatformSkillContent,
+  // 2026-08-05-skill-content-viewer：SkillContentDrawer 用此 hook（page 挂载 drawer），
+  // page.test 不测 drawer 交互，mock 成空内容避免影响 page 渲染。
+  usePlatformSkillContent: () => ({
+    content: null,
+    isLoading: false,
+    isError: false,
+    error: null,
+  }),
 
   useCustomSkills: () => {
     const [skills, setSkills] = React.useState<unknown[]>([]);

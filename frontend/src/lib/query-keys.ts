@@ -53,6 +53,9 @@ export const queryKeys = {
   customSkills: {
     all: ["customSkills"] as const,
     manifest: ["customSkills", "manifest"] as const,
+    // 2026-08-05-skill-content-viewer task-05：单个平台 skill 的 SKILL.md 内容缓存。
+    // 参数化（按 skill_name 区分），避免不同 skill 缓存串。
+    content: (name: string) => ["customSkills", "content", name] as const,
   },
   // 2026-07-07-skills-mcp-management-ui task-09：MCP 平台默认配置（admin GET
     // 遮蔽 env secret）+ 白名单（server 名列表）。两个独立端点，独立缓存。
