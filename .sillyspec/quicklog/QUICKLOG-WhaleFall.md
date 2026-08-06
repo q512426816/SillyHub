@@ -212,3 +212,12 @@
 根因：run_sync/service.py submit_messages 的 pending→running 分支用 ORM 内存读改写（status=='pending' 判断基于 session 旧快照），无原子条件/行锁，与 close 并发时 lost update。
 方案：line 702-711 改成 update().where(AgentRun.id==,AgentRun.status=='pending').values(running) 原子条件 UPDATE，rowcount=0 即 DB 已被 close 推进终态则不覆盖；新增 test_submit_messages_no_overwrite_terminal.py（双 session 制造旧快照竞态 + 正常路径回归）。
 结果：2 新测试 PASS；反向验证还原修复后 late_submit FAIL 证有效；close/session_status/interactive 回归 37 passed；1 个 gap-2 测试 pre-existing 失败（no such table:llm_providers,conftest 未注册,stash 验证与本次无关）。
+## ql-20260806-002-56a3 | 2026-08-06 22:34:14 | 切换供应商后运行中会话 reload 不应变 ended（实测 45723d1d/9eed466e reload 后 ended）
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/src/interactive/session-manager.ts, sillyhub-daemon/tests/interactive/session-manager-reload-provider.test.ts
+
+需求：切换供应商后运行中会话 reload 不应变 ended（实测 45723d1d/9eed466e reload 后 ended）。
+根因：reloadWithProvider 在 driver.start 新 query 之前就 close 旧 query（session-manager.ts），close 拉动旧 consume 协程退出 → session 收尾 ended。
+方案：把 close oldQuery 移到 driver.start 成功 + 替换 state.query 之后（新 query 就位再 close，旧 consume 退出是正常 query 结束非 session 收尾）；catch 失败保留未 close 的 oldQuery 可恢复。
+结果：tsc 过 + reload-provider 10 passed（AC-4 断言改：start 抛错时 close 0 次）。daemon rebuild+重启+实测待做。

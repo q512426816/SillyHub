@@ -360,8 +360,9 @@ describe('task-08 / reloadWithProvider 成功路径（FR-05 / D-002@v1）', () =
     // status 不改（reload 是软切换失败，会话本身无过错）。
     expect(stateAfter.status).toBe('active');
 
-    // 旧 query.close 仍被调了一次（reload step① 在 driver.start 抛错前已执行）。
-    expect(mock.closeSpyAt(0)).toHaveBeenCalledTimes(1);
+    // ql-20260806-002：close 已移到 driver.start 成功之后；start 抛错时 close 未调
+    //（oldQuery 未 close，回滚后旧 consume 可真正恢复，不再降级）。
+    expect(mock.closeSpyAt(0)).toHaveBeenCalledTimes(0);
   });
 
   // ── AC-5：reload 期间 inject 并发排队（不拒绝、不丢消息）──────────────────

@@ -2569,19 +2569,7 @@ export class SessionManager {
     const oldEnv = state.env;
 
     try {
-      // ── ① 优雅终止旧子进程（SDK kill 链：close → stdin EOF → SIGTERM → SIGKILL）──
-      // 与 _terminateSession 同源 close 入口（不裸调 process.kill，CONVENTIONS）；
-      // try/catch 包裹不阻塞（R-01；SDK 内部已有 SIGTERM→SIGKILL 升级兜底）。
-      try {
-        const oldHandle = oldQuery as unknown as
-          | { close?: () => void }
-          | undefined;
-        oldHandle?.close?.();
-      } catch {
-        /* R-01: close 异常不阻塞 reload（SDK 内部已有 SIGTERM→SIGKILL 升级兜底）。 */
-      }
-
-      // ── ② buildSpawnEnv 构造新 env（provider_config null 时第 0 层跳过 → 本机凭证）──
+      // ── buildSpawnEnv 构造新 env（provider_config null 时第 0 层跳过 → 本机凭证）──
       // credential 缺失（测试 / daemon 未注入）用 noopCredential：layer 2 token 读取
       // 自然跳过（get→undefined），layer 1 tool_config 渲染返回 {} ；layer 0 provider_config
       // 仍独立生效（对齐 daemon.ts:3050 同款 fallback，避免未注入 credentialManager 时
@@ -2660,6 +2648,17 @@ export class SessionManager {
       }
       state.env = newEnv;
       state.lastActiveAt = Date.now();
+
+      // ── close 旧 query（ql-20260806-002：必须在 state.query 替换为新 query 之后）──
+      // 新 query 已就位、即将由 _runConsume 订阅；此时 close 旧 query，旧 consume
+      // for-await 退出是「正常 query 结束」而非 session 收尾，不触发 session ended。
+      // 旧实现 close 在 driver.start 之前 → 新 query 未就位时旧 consume 退出 → session
+      // 收尾 ended（实测 45723d1d/9eed466e reload 后 ended）。
+      try {
+        (oldQuery as unknown as { close?: () => void } | undefined)?.close?.();
+      } catch {
+        /* R-01: close 异常不阻塞（SDK 内部已有 SIGTERM→SIGKILL 升级兜底）。 */
+      }
       // 清 pendingSwitch（幂等兜底：markPendingSwitch 空闲路径不写标记；_onResult 路径
       // 已清；此处防状态机遗漏的边界，多清一次无副作用）。
       state.pendingSwitch = undefined;
@@ -2670,10 +2669,9 @@ export class SessionManager {
       this._scheduleFlush();
     } catch (err) {
       // ── ⑦ reload 失败保留旧 query + 上报错误，不破坏会话（R-01 降级）──
-      // 旧 query 已 close（SDK 子进程已 kill），引用保留便于调试 + state 形态一致；
-      // session 不从 store 移除（状态机仍认为 active，降级但可恢复——用户可手动 end
-      // 或重试）。不清 pendingSwitch（留待 _onResult 下次触发重试，或人工介入）。
-      // status 不改（避免 active → failed 的硬降级；reload 是软切换失败，会话本身无过错）。
+      // ql-20260806-002：driver.start 失败时 oldQuery 尚未 close（close 已移到替换
+      // state.query 之后），catch 保留的 oldQuery 仍可用，会话可真正恢复（旧 consume 继续）。
+      // session 不从 store 移除、status 不改（避免 active→failed 硬降级）。
       state.query = oldQuery;
       state.env = oldEnv;
       // eslint-disable-next-line no-console
