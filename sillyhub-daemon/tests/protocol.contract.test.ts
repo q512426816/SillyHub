@@ -21,6 +21,13 @@ describe('protocol.MSG — 逐字对齐 backend/app/modules/daemon/protocol.py',
     expect(MSG.LEASE_MESSAGES).toBe('daemon:lease_messages');
   });
 
+  it('change 2026-08-06 task-06 / FR-04 / D-002@v1：PROVIDER_CONFIG_CHANGED 字面量', () => {
+    // backend task-02 DAEMON_MSG_PROVIDER_CONFIG_CHANGED = 'daemon:provider_config_changed'
+    // 任一字符漂移即失败（design R-02）。Object.values 全检已覆盖 daemon: 前缀，
+    // 此处显式断言完整字面量，便于一眼定位契约（与 LEASE_CANCEL 同款防御）。
+    expect(MSG.PROVIDER_CONFIG_CHANGED).toBe('daemon:provider_config_changed');
+  });
+
   it('全部 8 个 MSG 以 daemon: 为前缀', () => {
     for (const v of Object.values(MSG)) {
       expect(v.startsWith('daemon:')).toBe(true);

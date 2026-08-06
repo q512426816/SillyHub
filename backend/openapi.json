@@ -5053,6 +5053,7 @@
           "llm_provider"
         ],
         "summary": "Set Default Provider",
+        "description": "置本行为默认供应商（cc-switch 式「启动」）。\n\ntask-05（FR-07）：返回结构化 ``SetDefaultResult`` 三字段，供前端区分立即生效 /\n等待 turn 边界 / 凭证失败三种状态。service 层 ``set_default`` 已在 task-03 改造为\n返回 ``DefaultSwitchResult``（probe 凭证探测失败时 ``switched=False`` + ``error``\n不置位、不推送，原供应商继续服务运行中会话，D-003）。",
         "operationId": "set_default_provider_api_llm_providers__provider_id__set_default_post",
         "parameters": [
           {
@@ -5071,7 +5072,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LlmProviderRead"
+                  "$ref": "#/components/schemas/SetDefaultResult"
                 }
               }
             }
@@ -5095,7 +5096,7 @@
           "llm_provider"
         ],
         "summary": "Unset Default Provider",
-        "description": "取消默认（cc-switch 式「停止」）。\n\n对称 ``set-default``（「启动」）：取消本行默认。若取消后该用户×agent_kind 无任何\n默认供应商 → lease 不再下发 provider_config → daemon 回归本机凭证管理（D-007）。",
+        "description": "取消默认（cc-switch 式「停止」）。\n\n对称 ``set-default``（「启动」）：取消本行默认。若取消后该用户×agent_kind 无任何\n默认供应商 → lease 不再下发 provider_config → daemon 回归本机凭证管理（D-007）。\n\ntask-05（FR-07）：返回结构化 ``SetDefaultResult``（unset 不探测，恒\n``switched=True`` + ``error=None``）。",
         "operationId": "unset_default_provider_api_llm_providers__provider_id__unset_default_post",
         "parameters": [
           {
@@ -5114,7 +5115,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LlmProviderRead"
+                  "$ref": "#/components/schemas/SetDefaultResult"
                 }
               }
             }
@@ -10040,6 +10041,53 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/skills/{skill_name}/content": {
+      "get": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Get Skill Content",
+        "description": "Return a sillyspec-* skill's SKILL.md content (read-only, traversal-safe).\n\n``skill_name`` 必须在 sillyspec-* 白名单内；固定读 SKILL.md（不拼 path）。\n404 = 非白名单 / SKILL.md 缺失；413 = > 1 MiB。",
+        "operationId": "get_skill_content_api_daemon_skills__skill_name__content_get",
+        "parameters": [
+          {
+            "name": "skill_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Skill Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Get Skill Content Api Daemon Skills  Skill Name  Content Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -44258,6 +44306,36 @@
         ],
         "title": "SessionRuntimeRequest",
         "description": "Body for confirm-reconnected / mark-recovery-failed (gap-8.1)."
+      },
+      "SetDefaultResult": {
+        "properties": {
+          "switched": {
+            "type": "boolean",
+            "title": "Switched"
+          },
+          "affected_sessions": {
+            "type": "integer",
+            "title": "Affected Sessions"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "switched",
+          "affected_sessions"
+        ],
+        "title": "SetDefaultResult",
+        "description": "``POST /api/llm-providers/{id}/set-default`` 与 ``unset-default`` 统一响应。\n\ntask-05（change 2026-08-06-provider-switch-live-session / FR-07）：把 task-03\nservice 层 ``DefaultSwitchResult``（dataclass）透传给前端的响应 DTO，供前端区分\n立即生效（``switched=True`` + ``affected_sessions>0``）、等待 turn 边界\n（``switched=True`` + ``affected_sessions=0``）与凭证失败（``switched=False`` +\n``error``）三种状态，对应不同 toast 文案（task-09）。\n\n纯响应 DTO（无 ``from_attributes``）：router 显式按字段名从 ``DefaultSwitchResult``\n构造，不直接 ``model_validate`` dataclass（风格对齐 ``UsageResult``）。\n\n- ``switched``：本次 set/unset 是否成功变更 ``is_default``（set 凭证探测失败回滚\n  时为 ``False``；unset 恒为 ``True``）；\n- ``affected_sessions``：``notify_provider_switch`` 成功投递的 active interactive\n  session 计数（D-001）；无 active session 或 notify 异常时为 ``0``；\n- ``error``：set 凭证探测失败原因（仅 ``switched=False`` 时有值）；成功 / unset 为 ``None``。"
       },
       "SettingRead": {
         "properties": {

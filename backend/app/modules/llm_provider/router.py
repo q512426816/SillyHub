@@ -23,6 +23,7 @@ from app.modules.llm_provider.schema import (
     LlmProviderList,
     LlmProviderRead,
     LlmProviderUpdate,
+    SetDefaultResult,
     UsageResult,
 )
 from app.modules.llm_provider.service import LlmProviderService
@@ -141,28 +142,46 @@ async def delete_provider(
     await service.delete(_parse_id(provider_id), user.id)
 
 
-@router.post("/{provider_id}/set-default", response_model=LlmProviderRead)
+@router.post("/{provider_id}/set-default", response_model=SetDefaultResult)
 async def set_default_provider(
     provider_id: str,
     session: SessionDep,
     user: CurrentUser,
-) -> LlmProviderRead:
+) -> SetDefaultResult:
+    """置本行为默认供应商（cc-switch 式「启动」）。
+
+    task-05（FR-07）：返回结构化 ``SetDefaultResult`` 三字段，供前端区分立即生效 /
+    等待 turn 边界 / 凭证失败三种状态。service 层 ``set_default`` 已在 task-03 改造为
+    返回 ``DefaultSwitchResult``（probe 凭证探测失败时 ``switched=False`` + ``error``
+    不置位、不推送，原供应商继续服务运行中会话，D-003）。
+    """
     service = LlmProviderService(session)
-    row = await service.set_default(_parse_id(provider_id), user.id)
-    return service._to_read(row)
+    result = await service.set_default(_parse_id(provider_id), user.id)
+    return SetDefaultResult(
+        switched=result.switched,
+        affected_sessions=result.affected_sessions,
+        error=result.error,
+    )
 
 
-@router.post("/{provider_id}/unset-default", response_model=LlmProviderRead)
+@router.post("/{provider_id}/unset-default", response_model=SetDefaultResult)
 async def unset_default_provider(
     provider_id: str,
     session: SessionDep,
     user: CurrentUser,
-) -> LlmProviderRead:
+) -> SetDefaultResult:
     """取消默认（cc-switch 式「停止」）。
 
     对称 ``set-default``（「启动」）：取消本行默认。若取消后该用户×agent_kind 无任何
     默认供应商 → lease 不再下发 provider_config → daemon 回归本机凭证管理（D-007）。
+
+    task-05（FR-07）：返回结构化 ``SetDefaultResult``（unset 不探测，恒
+    ``switched=True`` + ``error=None``）。
     """
     service = LlmProviderService(session)
-    row = await service.unset_default(_parse_id(provider_id), user.id)
-    return service._to_read(row)
+    result = await service.unset_default(_parse_id(provider_id), user.id)
+    return SetDefaultResult(
+        switched=result.switched,
+        affected_sessions=result.affected_sessions,
+        error=result.error,
+    )

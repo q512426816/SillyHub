@@ -65,6 +65,15 @@ import {
   SessionNotActiveError,
   UnsupportedProviderError,
 } from './types.js';
+// task-07（provider-switch-live-session / D-002@v1）：markPendingSwitch /
+// reloadWithProvider 签名引用中性 ProviderConfig（backend set/unset_default 经 WS
+// 下发；null 表示停止→回退本机凭证）。type-only，与 spawn-env / claim payload 同源。
+import type { ProviderConfig } from '../types.js';
+// task-08（provider-switch-live-session / FR-05 / D-004@v1）：reloadWithProvider 用
+// buildSpawnEnv 构造新 env（provider_config 第 0 层；null 时跳过 + 不隔离 CLAUDE_CONFIG_DIR
+// → 回退本机凭证，spawn-env.ts:140-164 已支持）。SpawnCredentialManager 鸭子类型，
+// daemon 生产路径注入 daemon._credentialManager，测试 / 未注入时用 noopCredential fallback。
+import { buildSpawnEnv, type SpawnCredentialManager } from '../spawn-env.js';
 // task-04（FR-01 / D-005@v1）：turn 收尾把模型调用失败归类为结构化 ModelError，
 // 挂到 result.modelError 透传给 daemon 桥接 → notifyRunResult → backend error_detail。
 // 与 stream-json.ts:954 批量路径同源（近源归类，D-005 方案 C 三端标准协议）。
@@ -205,6 +214,22 @@ export interface SessionManagerOptions {
   mainAgentMcpConfigProvider?: (
     ctx: MainAgentMcpContext,
   ) => Record<string, McpServerConfigForDriver> | undefined;
+  /**
+   * task-08（provider-switch-live-session / FR-05 / D-004@v1）：本机凭证管理器
+   *（鸭子类型 ``SpawnCredentialManager``，仅用 ``get`` / ``buildEnv``）。
+   *
+   * ``reloadWithProvider`` 构造新 env 时调 ``buildSpawnEnv`` 读 credentials.json 的
+   * ANTHROPIC token（层 2）+ 渲染 tool_config 占位符（层 1）。缺省 undefined：reload
+   * 用 noopCredential（``get→undefined`` / ``buildEnv→{}``，层 2 自然跳过），平台下发
+   * 的 provider_config 第 0 层仍独立生效（对齐 daemon.ts:3050 同款 fallback，避免
+   * daemon 未注入 credentialManager 时 reload 第 0 层失效）。
+   *
+   * daemon 生产路径（cli.ts / daemon.ts）构造 SessionManager 时注入同一
+   * ``daemon._credentialManager``，让 reload 后的子进程也能读 credentials.json 的本机
+   * token（与 create 路径 parity，gap-8 凭证对齐）。本任务 allowed_paths 仅含
+   * session-manager.ts，daemon 接线留给后续任务（不影响本任务测试用 noop 即可覆盖）。
+   */
+  credentialManager?: SpawnCredentialManager | null;
 }
 
 /**
@@ -531,6 +556,12 @@ export class SessionManager {
         ctx: MainAgentMcpContext,
       ) => Record<string, McpServerConfigForDriver> | undefined)
     | undefined;
+  /**
+   * task-08（FR-05 / D-004@v1）：本机凭证管理器（reloadWithProvider 构造新 env 用）。
+   * 缺省 null：reload 用 noopCredential fallback（层 2 token 自然跳过，层 0 provider_config
+   * 仍独立生效，对齐 daemon.ts:3050）。
+   */
+  private readonly _credentialManager: SpawnCredentialManager | null;
 
   /**
    * D-001@v1（task-02）：provider driver registry。`drivers.claude` / `drivers.codex`
@@ -612,6 +643,9 @@ export class SessionManager {
     // task-06（D-007@v2 / R-01）：主 agent MCP tool 注入。未注入 = 普通会话零回归。
     this._isMainAgentSession = opts.isMainAgentSession;
     this._mainAgentMcpConfigProvider = opts.mainAgentMcpConfigProvider;
+    // task-08（FR-05 / D-004@v1）：reloadWithProvider 构造新 env 的凭证管理器。未注入
+    // → null → reload 时 fallback noopCredential（对齐 daemon.ts:3050）。
+    this._credentialManager = opts.credentialManager ?? null;
   }
 
   /** task-08：manual_approval 当前是否启用（测试 / daemon 透传用）。 */
@@ -2429,6 +2463,230 @@ export class SessionManager {
   }
 
   /**
+   * task-07（provider-switch-live-session / D-002@v1）：标记待处理的供应商热切换。
+   *
+   * backend set/unset_default → WS PROVIDER_CONFIG_CHANGED → daemon 分发调本方法：
+   *   - session 空闲（status=active 且无 currentRunId）→ 立即 fire-and-forget
+   *     ``reloadWithProvider``，**不**写 pendingSwitch 标记（无需等 turn 边界）。
+   *   - session 生成中（status=running，turn in-flight）/ reconnecting 等 → 仅覆盖写
+   *     ``state.pendingSwitch``，**严格不中断**当前 turn；turn 收尾（``_onResult``）
+   *     检测到标记后清标记并触发 reload（D-002@v1 等 turn 边界语义）。
+   *
+   * 幂等：WS 重放同一/不同切换均覆盖写 state.pendingSwitch，不累积（design R-02）。
+   * 同步返回（void）：reload 走 fire-and-forget，不阻塞 WS 分发路径。
+   *
+   * @param sessionId 目标会话
+   * @param providerConfig 新供应商配置；null 表示停止（回退本机凭证，D-004@v1）
+   * @throws {SessionNotFoundError} session 不存在
+   */
+  markPendingSwitch(sessionId: string, providerConfig: ProviderConfig | null): void {
+    const state = this._store.get(sessionId);
+    if (!state) {
+      throw new SessionNotFoundError(sessionId);
+    }
+    // 空闲：无在跑 turn（status=active 且 currentRunId 空）→ 立即 reload，不写标记。
+    if (state.status === 'active' && !state.currentRunId) {
+      void this.reloadWithProvider(sessionId, providerConfig).catch(() => {
+        // reload 失败保留旧 query 不破坏会话（design §5 Wave3 / R-01）；
+        // task-08 实现真实错误上报，本处兜底吞错防 unhandled rejection。
+      });
+      return;
+    }
+    // 生成中 / reconnecting：仅覆盖写标记，不中断当前 turn（constraints）。
+    // 覆盖写幂等（WS 重放安全，不累积）。
+    state.pendingSwitch = { providerConfig };
+  }
+
+  /**
+   * task-07（provider-switch-live-session / D-002@v1）：用新供应商凭证受控重启
+   * claude 子进程并 resume 对话历史（保留完整上下文，design G1/G2）。
+   *
+   * 真实方法体由 **task-08 实现**（参考现有 ``restoreAndReconnect``：close 旧 query
+   * → buildSpawnEnv(providerConfig) 构造新 env（null 时第 0 层跳过 → 本机凭证）→
+   * driver.start({ resume: state.agentSessionId, env, ...原 opts }) 从 jsonl 重新
+   * 加载对话历史 → 替换 state.query/state.env → 重启 consume 协程）。
+   *
+   * 步骤（design §5 Wave3 + constraints）：
+   *   ① ``handle.close?.()`` 优雅终止旧子进程（走 SDK kill 链：close → stdin EOF →
+   *      2s 宽限 → SIGTERM → 5s → SIGKILL），与 ``_terminateSession`` 同源 close 入口；
+   *      **不**调 ``_terminateSession``（那是终态收口会 onSessionEnd + 改 status + close
+   *      InputQueue），reload 仅重启子进程，session 仍 active 可续轮。**不 close
+   *      InputQueue**（复用同一队列给新 driver.start，reload 短窗口内 inject 走排队语义）。
+   *   ② ``buildSpawnEnv({ provider_config }, { credential })`` 构造新 env：
+   *      provider_config 非 null → 第 0 层 injector 产 ANTHROPIC_* env 盖过下层 +
+   *      隔离 CLAUDE_CONFIG_DIR；null → 第 0 层跳过 + 不隔离 CLAUDE_CONFIG_DIR（回退
+   *      本机 ~/.claude/settings.json，D-004@v1 停止场景对称覆盖）。credential 缺失
+   *      （未注入 / 测试）用 noopCredential（对齐 daemon.ts:3050 同款 fallback）。
+   *   ③ 校验 ``state.agentSessionId`` 必需——它是 SDK jsonl 恢复 key（首 turn system/init
+   *      写入），缺失说明首 turn 未完成 → 无可恢复 jsonl → 抛错（不启动新会话替换语义）。
+   *   ④ ``_buildDriverOptions`` 透传 cwd / canUseTool / mcpServers / permissionMode +
+   *      ``resume: state.agentSessionId`` + 新 env（原 opts 透传；model/allowedTools 不在
+   *      SessionState 仅 CreateSessionInput/PersistedSessionRecord 持有，reload 不传 → SDK
+   *      走 env 默认，reload 场景 env 已含 ANTHROPIC_DEFAULT_*_MODEL 等）。
+   *   ⑤ ``await driver.start(state.inputQueue, driverOpts)`` —— SDK spawn 新 claude 子进程
+   *      并从 ``~/.claude/projects/<encoded-cwd>/<sid>.jsonl`` 重载完整对话历史。复用
+   *      ``state.inputQueue``（reload 不 close 队列，新 query 订阅同一队列吃后续 inject）。
+   *   ⑥ 替换 ``state.query``（claude）/ ``state.driverHandle``（codex，本任务未支持）+
+   *      ``state.env``，重启 ``_runConsume`` 协程，清 ``state.pendingSwitch``（幂等兜底：
+   *      markPendingSwitch 空闲路径不写标记 / _onResult 路径已清，此处防状态机遗漏）。
+   *   ⑦ reload 失败（spawn 失败 / jsonl 缺失 / cwd 不一致）→ catch 回滚保留旧 query/env
+   *      + ``console.error`` 上报 + **重新抛**（调用方 markPendingSwitch / _onResult 的
+   *      ``.catch`` 兜底已吞错防 unhandled rejection）。**不破坏会话**（R-01 降级）：
+   *      不改 status、不从 store 移除、不清 pendingSwitch（留待重试或人工介入）。
+   *
+   * **reload 与 inject 并发**（待细化点① 收口，不引入新锁）：reload 期间 status 保持
+   * active（markPendingSwitch 空闲路径 + _onResult 收尾后触发都满足此条件），inject
+   * 走 ``state.inputQueue.push`` 不拒绝（spike S1 turn 级串行）；新 query 启动后从队列
+   * 消费后续 inject，不丢消息。若 inject 在 reload step⑤ await 期间到达，push 进队列
+   * 后由新 query 启动后立即消费（自然排队，无需 _pendingInjectCount 计数——counter 仅
+   * 在 status=running 时递增做可观察性，reload 期间 status=active 不递增但消息不丢）。
+   *
+   * @param sessionId 目标会话
+   * @param providerConfig 新供应商配置；null 表示停止（回退本机凭证，第 0 层 env 跳过）
+   * @throws {SessionNotFoundError} session 不存在
+   * @throws {Error} provider 非 claude（codex reload 未支持）/ agentSessionId 缺失 /
+   *         spawn 失败 / jsonl 缺失 / cwd 不一致（catch 回滚保留旧 query 后重新抛）
+   */
+  async reloadWithProvider(
+    sessionId: string,
+    providerConfig: ProviderConfig | null,
+  ): Promise<void> {
+    const state = this._store.get(sessionId);
+    if (!state) {
+      throw new SessionNotFoundError(sessionId);
+    }
+    // task-08：仅 claude provider 支持 reload（codex 后续独立，本期不实现）。
+    // 不抛 UnsupportedProviderError（那是 driver 注册缺失语义）；用普通 Error 上报。
+    if (state.provider !== 'claude') {
+      throw new Error(
+        `reloadWithProvider: provider ${state.provider} not yet supported (session ${sessionId})`,
+      );
+    }
+
+    // 进入时快照旧 query/env 供失败回滚（R-01）。query 是引用，旧对象本身会被 close，
+    // 但保留引用让 catch 区分「reload 失败 → 用旧引用占位，不 nil」。
+    const oldQuery = state.query;
+    const oldEnv = state.env;
+
+    try {
+      // ── ① 优雅终止旧子进程（SDK kill 链：close → stdin EOF → SIGTERM → SIGKILL）──
+      // 与 _terminateSession 同源 close 入口（不裸调 process.kill，CONVENTIONS）；
+      // try/catch 包裹不阻塞（R-01；SDK 内部已有 SIGTERM→SIGKILL 升级兜底）。
+      try {
+        const oldHandle = oldQuery as unknown as
+          | { close?: () => void }
+          | undefined;
+        oldHandle?.close?.();
+      } catch {
+        /* R-01: close 异常不阻塞 reload（SDK 内部已有 SIGTERM→SIGKILL 升级兜底）。 */
+      }
+
+      // ── ② buildSpawnEnv 构造新 env（provider_config null 时第 0 层跳过 → 本机凭证）──
+      // credential 缺失（测试 / daemon 未注入）用 noopCredential：layer 2 token 读取
+      // 自然跳过（get→undefined），layer 1 tool_config 渲染返回 {} ；layer 0 provider_config
+      // 仍独立生效（对齐 daemon.ts:3050 同款 fallback，避免未注入 credentialManager 时
+      // reload 第 0 层失效）。provider_config null/undefined 均走 layer 0 跳过路径。
+      const credential: SpawnCredentialManager = this._credentialManager ?? {
+        get: () => undefined,
+        buildEnv: () => ({}),
+      };
+      const newEnv = buildSpawnEnv(
+        { provider_config: providerConfig ?? undefined },
+        { credential },
+      );
+
+      // ── ③ 校验 resume key 必需 ──
+      // agentSessionId 来自首 turn system/init（Claude）或 thread_started（Codex），
+      // 是 SDK jsonl 恢复 key。缺失说明首 turn 未完成，无可恢复 jsonl → 拒绝 reload
+      //（避免 SDK 拿空 resume 启动全新会话替换语义——那是 end + create 流程，不是 reload）。
+      if (!state.agentSessionId) {
+        throw new Error(
+          `reloadWithProvider: missing agentSessionId (session ${sessionId} 首 turn system/init 未完成,无 jsonl 可 resume)`,
+        );
+      }
+
+      // ── ④ _buildDriverOptions 构造 driverOpts（透传 cwd / canUseTool / mcpServers / resume / env）──
+      const driver = state.driver ?? this._drivers.claude;
+      if (!driver) {
+        throw new Error(
+          `reloadWithProvider: no driver available (session ${sessionId})`,
+        );
+      }
+      const exePath =
+        state.pathToAgentExecutable ?? state.pathToClaudeCodeExecutable ?? '';
+      // 主 agent MCP 重新解析（create / restoreAndReconnect 同款路径，单一来源）。
+      // MainAgentMcpContext 字段从 state 归一化提取（model 不在 state，省略 → ctx.model
+      // undefined → 谓词/provider 自行 fallback）。
+      const mainAgentMcp = this._resolveMainAgentMcp({
+        sessionId: state.sessionId,
+        leaseId: state.leaseId,
+        provider: state.provider,
+        cwd: state.cwd,
+        ...(state.stage !== undefined ? { stage: state.stage } : {}),
+        ...(state.mcpRefs !== undefined ? { mcpRefs: state.mcpRefs } : {}),
+        ...(state.skillRefs !== undefined ? { skillRefs: state.skillRefs } : {}),
+        ...(state.effectiveAllowedRoots !== undefined
+          ? { effectiveAllowedRoots: state.effectiveAllowedRoots }
+          : {}),
+      });
+      const driverOpts = this._buildDriverOptions(state, {
+        exePath,
+        env: newEnv,
+        enableApproval: state.manualApproval ?? false,
+        effectiveAskUserOnly: state.askUserOnly ?? false,
+        resume: state.agentSessionId,
+        mcpServers: mainAgentMcp,
+      });
+
+      // ── ⑤ driver.start(state.inputQueue, driverOpts) → 新 Query ──
+      // SDK spawn 新 claude 子进程并从 ~/.claude/projects/<encoded-cwd>/<sid>.jsonl
+      // 重载完整对话历史（非内存态；jsonl 由 SDK 自动持久化）。复用 state.inputQueue
+      //（reload 不 close 队列；新 query 订阅同一队列吃后续 inject，不丢消息）。
+      // await 阻塞至 SDK 完成首 turn 前的 resume 加载；失败（spawn EINVAL / jsonl
+      // 缺失 / cwd 不一致）→ 抛进 catch。
+      const handleOrQuery = (await driver.start(
+        state.inputQueue,
+        driverOpts as unknown as Parameters<InteractiveDriver['start']>[1],
+      )) as unknown;
+
+      // ── ⑥ 替换 state.query（claude）/ state.driverHandle（codex，本期未支持）+ state.env ──
+      // claude 路径写 state.query（SDK Query）；codex 写 state.driverHandle（上方已守
+      // provider!=='claude' 抛错，此处 else 分支保留以便未来扩展）。
+      if (state.provider === 'claude') {
+        state.query =
+          handleOrQuery as import('@anthropic-ai/claude-agent-sdk').Query;
+      } else {
+        state.driverHandle = handleOrQuery as InteractiveDriverHandle;
+      }
+      state.env = newEnv;
+      state.lastActiveAt = Date.now();
+      // 清 pendingSwitch（幂等兜底：markPendingSwitch 空闲路径不写标记；_onResult 路径
+      // 已清；此处防状态机遗漏的边界，多清一次无副作用）。
+      state.pendingSwitch = undefined;
+
+      // 重启 consume 协程（void fire-and-forget；失败由 consume 内部 fail 路径收敛）。
+      void this._runConsume(state);
+      // 排队 flush（snapshotPersistable 落盘；state.env / agentSessionId 字段已替换）。
+      this._scheduleFlush();
+    } catch (err) {
+      // ── ⑦ reload 失败保留旧 query + 上报错误，不破坏会话（R-01 降级）──
+      // 旧 query 已 close（SDK 子进程已 kill），引用保留便于调试 + state 形态一致；
+      // session 不从 store 移除（状态机仍认为 active，降级但可恢复——用户可手动 end
+      // 或重试）。不清 pendingSwitch（留待 _onResult 下次触发重试，或人工介入）。
+      // status 不改（避免 active → failed 的硬降级；reload 是软切换失败，会话本身无过错）。
+      state.query = oldQuery;
+      state.env = oldEnv;
+      // eslint-disable-next-line no-console
+      console.error(
+        `[session-manager] reloadWithProvider failed (session=${sessionId}), 保留旧 query 降级`,
+        err,
+      );
+      // 重新抛：调用方（markPendingSwitch / _onResult）均 .catch 兜底吞错，不会 unhandled。
+      throw err;
+    }
+  }
+
+  /**
    * task-10：强制把当前内存 store 落盘（snapshotPersistable → persistence.save）。
    *
    * daemon stop / 测试显式 flush 用。未注入 persistence → no-op（向后兼容 task-04）。
@@ -2559,6 +2817,21 @@ export class SessionManager {
     // 刚结束的（currentRunId 已清空，但 runId 局部变量仍持有）。
     if (runId) {
       this._checkBudgetCutoff(state, runId);
+    }
+    // task-07（provider-switch-live-session / D-002@v1）：turn 边界检测 pendingSwitch。
+    // 生成中 turn 收到切换时 markPendingSwitch 仅覆盖写 state.pendingSwitch 不中断；
+    // 此处 turn 已收尾（status→active / currentRunId 清空），安全触发受控 reload。
+    // 先取后清（幂等，防 _onResult 重入或 WS 重放叠加致双 reload）；fire-and-forget
+    // reload（task-08 实现方法体：close 旧 query → 新 env → driver.start resume），
+    // .catch 兜底吞错防 unhandled rejection（reload 失败保留旧 query 不破坏会话，R-01）。
+    const pendingSwitch = state.pendingSwitch;
+    if (pendingSwitch) {
+      state.pendingSwitch = undefined;
+      void this.reloadWithProvider(state.sessionId, pendingSwitch.providerConfig).catch(
+        () => {
+          // task-08 实现真实错误上报；本处兜底吞错，不阻塞 _onResult 收尾路径。
+        },
+      );
     }
   }
 

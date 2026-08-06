@@ -112,8 +112,22 @@ export function LlmProviderSection() {
 
   const handleSetDefault = async (p: LlmProviderRead) => {
     try {
-      await setDefaultProvider(p.id);
-      notify.success(`已启动「${p.name}」（同 agent 种类仅一个生效）`);
+      const result = await setDefaultProvider(p.id);
+      // switched=false：set 凭证探测失败，后端已回滚，原供应商继续服务（D-003）
+      if (!result.switched) {
+        notify.error(
+          new Error(result.error ?? "凭证探测失败，请检查 API Key 与请求地址"),
+        );
+        return;
+      }
+      // affected_sessions>0：运行中会话需等当前回复完成后才切换（D-001 turn 边界）
+      if (result.affected_sessions > 0) {
+        notify.success(
+          `已启动「${p.name}」，${result.affected_sessions} 个运行中会话将在当前回复完成后切换`,
+        );
+      } else {
+        notify.success(`已启动「${p.name}」（立即生效）`);
+      }
       await load();
     } catch (err) {
       notify.error(err, "启动失败");
@@ -122,8 +136,20 @@ export function LlmProviderSection() {
 
   const handleUnsetDefault = async (p: LlmProviderRead) => {
     try {
-      await unsetDefaultProvider(p.id);
-      notify.success(`已停止「${p.name}」，平台不再下发，daemon 回归本机凭证`);
+      const result = await unsetDefaultProvider(p.id);
+      // unset 不探测，恒 switched=true；此处为防御
+      if (!result.switched) {
+        notify.error(new Error(result.error ?? "停止失败"));
+        return;
+      }
+      // affected_sessions>0：这些会话将回退到 daemon 本机凭证（D-007）
+      if (result.affected_sessions > 0) {
+        notify.success(
+          `已停止「${p.name}」，${result.affected_sessions} 个运行中会话将回退本机凭证`,
+        );
+      } else {
+        notify.success(`已停止「${p.name}」，平台不再下发，daemon 回归本机凭证`);
+      }
       await load();
     } catch (err) {
       notify.error(err, "停止失败");

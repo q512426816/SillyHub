@@ -53,6 +53,7 @@ import type {
   ExecutionContextPayload,
   LeaseCtx,
   LeasePayload,
+  ProviderConfig,
 } from './types.js';
 import { AgentDetector, normalizeProvider } from './agent-detector.js';
 import type { DetectedAgent } from './agent-detector.js';
@@ -2531,6 +2532,21 @@ export class Daemon {
           });
         break;
       }
+      // change 2026-08-06-provider-switch-live-session task-06 / FR-04 / D-002@v1 /
+      // design §5 Wave2：backend set/unset_default 经 WS 即时推送供应商热切换指令
+      //（best-effort，失败由心跳轮询兜底，与 LEASE_CANCEL 同模式）。daemon 收到后
+      // 非阻塞调 sessionManager.markPendingSwitch(sessionId, providerConfig)：空闲
+      // session 立即 reload；生成中 turn 仅覆盖写 pendingSwitch 不中断，turn 边界
+      // 完成切换。provider_config=null 表停止 → 透传给 markPendingSwitch（D-004@v1
+      // 回退本机凭证）。session 不存在（迟到/重放）由 markPendingSwitch 抛
+      // SessionNotFoundError，被 _routeProviderConfigChanged 的 catch 收敛 warn 丢弃。
+      case MSG.PROVIDER_CONFIG_CHANGED: {
+        // 非阻塞分发（同 SESSION_INJECT / LEASE_CANCEL 风格，不阻塞 WS 接收）。
+        void this._routeProviderConfigChanged(rawPayload).catch((e) => {
+          this._logger.error('provider_config_changed_failed', { error: e });
+        });
+        break;
+      }
       // task-04：交互式会话控制消息（SESSION_INJECT/INTERRUPT/END）路由到 SessionManager。
       case MSG.SESSION_INJECT:
       case MSG.SESSION_INTERRUPT:
@@ -2747,6 +2763,60 @@ export class Daemon {
     await this._sessionManager!.restoreAndReconnect(record);
     await this._sessionManager!.markReconnected(sessionId);
     this._logger.info('session_resume_ok', { session_id: sessionId, lease_id: leaseId });
+  }
+
+  /**
+   * task-06（provider-switch-live-session / FR-04 / D-002@v1）：路由 backend
+   * PROVIDER_CONFIG_CHANGED 到 SessionManager.markPendingSwitch。
+   *
+   * 与 SESSION_INJECT 同风格的 snake/camel 双写归一化（ql-20260616-006）：
+   * backend WS 发 ``{session_id, provider_config}``（snake_case，task-02 protocol.py），
+   * daemon 入口读两个常见大小写变体取值。
+   *
+   * 边界（task-06.md acceptance / constraints）：
+   *   - 未注入 sessionManager → warn 不崩（与 _routeSessionControl 同 AC-14 风格）；
+   *   - payload 缺 session_id → warn 丢弃（无目标 session 无法路由）；
+   *   - provider_config 为 null → 透传 null 给 markPendingSwitch（D-004@v1 停止→回退本机凭证）；
+   *   - session 不存在（迟到/WS 重放/SessionStore 已清）→ markPendingSwitch 抛
+   *     SessionNotFoundError，此处 catch 收敛为 warn（best-effort，不崩 WS 主循环）。
+   *
+   * markPendingSwitch 同步返回 void（内部 reload 走 fire-and-forget），故本方法
+   * 不 await 异步副作用——非阻塞分发契约由调用点 ``void ... .catch`` 保证。
+   */
+  private async _routeProviderConfigChanged(
+    raw: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this._sessionManager) {
+      this._logger.warn('provider_config_changed_no_manager');
+      return;
+    }
+    const sessionId =
+      (raw.session_id as string | undefined) ?? (raw.sessionId as string | undefined) ?? '';
+    if (!sessionId) {
+      this._logger.warn('provider_config_changed_no_session_id');
+      return;
+    }
+    // snake/camel 双写归一化；缺字段（undefined）→ null（停止/回退本机凭证语义）。
+    // backend set_default 带 ProviderConfig dict；unset_default 显式发 null。
+    const providerConfig =
+      ((raw.provider_config as ProviderConfig | null | undefined) ??
+        (raw.providerConfig as ProviderConfig | null | undefined)) ??
+      null;
+    this._logger.info('provider_config_changed_received', {
+      session_id: sessionId,
+      // 不打 provider_config 全量（含 api_key 明文，R-02 不入日志）；仅记有无。
+      has_provider_config: providerConfig != null,
+    });
+    try {
+      this._sessionManager.markPendingSwitch(sessionId, providerConfig);
+    } catch (e) {
+      // session 不存在（SessionNotFoundError）等——best-effort warn 丢弃，
+      // 不让单条迟到消息崩 WS 主循环（design §9 向前兼容）。
+      this._logger.warn('provider_config_changed_session_error', {
+        session_id: sessionId,
+        error: e,
+      });
+    }
   }
 
   /**
