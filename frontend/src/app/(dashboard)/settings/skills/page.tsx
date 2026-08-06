@@ -244,21 +244,17 @@ export default function SkillsSettingsPage() {
                   <th className="px-4 py-3 font-semibold">技能名</th>
                   <th className="px-4 py-3 font-semibold">文件数</th>
                   <th className="px-4 py-3 font-semibold">说明</th>
+                  <th className="px-4 py-3 text-right font-semibold">操作</th>
                 </tr>
               </thead>
               <tbody>
                 {platformGroups.map((g) => (
                   <tr key={g.name} className="border-b last:border-0 hover:bg-muted/25">
                     <td className="px-4 py-3">
-                      <button
-                        type="button"
-                        onClick={() => setViewing({ kind: "platform", skillName: g.name })}
-                        className="flex items-center gap-2 font-medium text-foreground hover:text-primary hover:underline"
-                      >
+                      <div className="flex items-center gap-2 font-medium text-foreground">
                         <BookOpen className="h-3.5 w-3.5 text-muted-foreground" />
                         <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{g.name}</code>
-                        <Eye className="h-3 w-3 text-muted-foreground" />
-                      </button>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
@@ -268,6 +264,17 @@ export default function SkillsSettingsPage() {
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">
                       {g.description || "只读 · 随部署更新，AI 启动自动加载"}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setViewing({ kind: "platform", skillName: g.name })}
+                        className="gap-1"
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        查看
+                      </Button>
                     </td>
                   </tr>
                 ))}
