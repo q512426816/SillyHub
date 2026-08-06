@@ -63,6 +63,7 @@ bash.exe.stackdump
 .claude/worktrees/
 frontend/CLAUDE.md
 .sillyspec/.runtime/worktrees/
+.worktrees/
 backups/
 img.png
 sillyhub-*-amd64.tar.gz
