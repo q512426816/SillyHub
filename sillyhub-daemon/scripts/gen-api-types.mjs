@@ -31,10 +31,57 @@ if (!existsSync(openapiJson)) {
   process.exit(1);
 }
 
+// node_modules 健康自检：openapi-typescript 的 .bin shim 必须在。
+// pnpm 半坏场景（CLAUDE.md 规则 20）：包目录 node_modules/openapi-typescript 在（符号链接），
+// 但 node_modules/.bin/openapi-typescript shim 没建 → npx --no-install 找不到命令 →
+// execSync 抛裸 Error（stdout:null/stderr:null），极易误判成「openapi-typescript 坏了」。
+// 实际只需 pnpm install --force 重建 shim（普通 pnpm install 命中缓存不修 shim）。
+function assertOpenapiTypescriptShim() {
+  const binDir = resolve(root, "node_modules", ".bin");
+  const candidates =
+    process.platform === "win32"
+      ? ["openapi-typescript.CMD", "openapi-typescript"]
+      : ["openapi-typescript"];
+  if (candidates.some((c) => existsSync(resolve(binDir, c)))) {
+    return;
+  }
+  const expected = candidates.map((c) => resolve(binDir, c)).join(" 或 ");
+  const pkgPresent = existsSync(
+    resolve(root, "node_modules", "openapi-typescript"),
+  );
+  console.error(
+    `[gen-api-types] ❌ openapi-typescript .bin shim 缺失（期望 ${expected}）。`,
+  );
+  console.error(
+    pkgPresent
+      ? "   node_modules/openapi-typescript 包目录在但 .bin shim 没建 → 典型 node_modules 半坏（CLAUDE.md 规则 20）。"
+      : "   node_modules/openapi-typescript 包也不在 → openapi-typescript 未安装。",
+  );
+  console.error(
+    "   修法：cd sillyhub-daemon && pnpm install --force（普通 pnpm install 命中缓存不修 shim，必须 --force）。",
+  );
+  console.error(
+    "   ⚠️ 不要误判成 openapi-typescript 包本身坏了——它没问题，只是 shim 没建。",
+  );
+  process.exit(1);
+}
+
+assertOpenapiTypescriptShim();
+
 console.log(`[gen-api-types] generating ${outFile} from ${openapiJson} ...`);
-execSync(`npx --no-install openapi-typescript "${openapiJson}" -o "${outFile}"`, {
-  cwd: root,
-  stdio: "inherit",
-});
+try {
+  execSync(`npx --no-install openapi-typescript "${openapiJson}" -o "${outFile}"`, {
+    cwd: root,
+    stdio: "inherit",
+  });
+} catch {
+  console.error(
+    "[gen-api-types] ❌ openapi-typescript 生成失败（见上方真实错误输出）。",
+  );
+  console.error(
+    "   若提示找不到命令：node_modules 半坏，跑 `pnpm install --force` 重建 .bin shim（CLAUDE.md 规则 20）。",
+  );
+  process.exit(1);
+}
 
 console.log(`[gen-api-types] done: ${outFile}`);

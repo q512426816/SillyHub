@@ -209,3 +209,14 @@
 根因：① scan 文档（CONCERNS/INTEGRATIONS）滞后于代码，未反映 kill 通道两层演进（历史 P0 backend→WS 信号层已修 + 本次 daemon 物理杀进程层）；② change 自身 spec 文档 4 处措辞与 task 子代理实际实现有出入——design §5/§12 称「两 provider 都赋值 state.driverHandle」（实际 claude 存 state.query，_terminateSession 按 provider 分流，task-01 review.json RS-1）、design §5/§6/§8 称「api-types.ts 含 budget_tokens 命名字段」（实际 LeaseClaimResponse.payload 是开放 dict，budget_tokens 是运行时键非命名 schema，typed 字段在 daemon types.ts task-08，task-07 review.json RS-2）、task-11 allowed_paths 漏列 lease/service.py + session/service.py 两清空点（CONTRACT_SCOPE_GAP 调度已批，task-11 review.json RS-5）、task-03 AC-3 称「close 调 query.close 且异常被 catch」（实际 close() 不吞错，异常在 _terminateSession 调用点 catch R-01，task-03 review.json RS）。
 方案：纯文档改动零代码——① CONCERNS.md 新增「daemon kill 通道（interactive/batch 终止契约）」节，分「历史 P0 已修」（引 3 commit）+「本次新机制」（5 项：Claude END 接通 SDK kill 链 / cancel_lease 改发 SESSION_END / batch LEASE_CANCEL WS / budget 软切断 / terminating_at+sweeper，每项引 task 编号 + 文件路径）；② INTEGRATIONS.md §2.1 新增双端 WS 消息类型表（13 行），LEASE_CANCEL 标新增、SESSION_INTERRUPT 标收窄、SESSION_END 标扩大；③ QUICKLOG 加本条目；④ design.md §5 Phase1+§12 修 RS-1（按 provider 分流措辞）、§5 Phase3+§6+§8 修 RS-2（开放 dict 透传键非命名字段）；⑤ task-11.md allowed_paths 补 lease/service.py + session/service.py + 注 RS-5 扩 scope 缘由；⑥ task-03.md implementation 修 AC-3（close 不吞错、调用点 catch）。所有勘误均对照 review.json + 实际源码（claude-sdk-driver.ts:397/267、session-manager.ts:950/952/2164-2167、types.ts:431、protocol.py:64、protocol.ts:162、openapi.json LeaseClaimResponse.payload additionalProperties:true）核实。
 结果：6 个文档全部更新；零代码改动、零测试运行（纯文档一致性核对，对照 review.json + 源码逐条核实措辞）。RS-1/RS-2/RS-5/AC-3 全部应用。无 BLOCKED。
+## ql-20260806-001-0da9 | 2026-08-06 08:43:56 | gen:types 在 frontend/daemon node_modules 半坏时（openapi-typescript 包在但 .bin shim 缺）…
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/scripts/gen-api-types.mjs — 加 assertOpenapiTypescriptShim()（跑 openapi-typescript 前查 node_modules/.bin/openapi-typescript，Win 查 .CMD+无后缀；缺则报期望路径 + node_modules 半坏 + pnpm install --force + 勿误判包坏，exit 1）；dump_openapi 与 openapi-typescript 两步 execSync 各包 try/catch 给明确指引。
+- sillyhub-daemon/scripts/gen-api-types.mjs — 同款 assertOpenapiTypescriptShim() + openapi-typescript execSync try/catch（该脚本无 dump 步，只消费 openapi.json）。
+
+需求：gen:types 在 frontend/daemon node_modules 半坏时（openapi-typescript 包在但 .bin shim 缺）报 stdout:null/stderr:null 裸 Error，极易误判成包坏了；要给明确可操作的报错。
+根因：两脚本用 npx --no-install openapi-typescript，shim 缺失时 npx 找不到命令，execSync 抛裸 Error 对象（其 stdout/stderr 属性在 stdio:inherit 下为 null），错误信息丢失；CLAUDE.md 规则 20 已警告此场景但脚本侧无自检。
+方案：frontend/scripts/gen-api-types.mjs + sillyhub-daemon/scripts/gen-api-types.mjs 一致加 assertOpenapiTypescriptShim()（跑前查 .bin/openapi-typescript，Win 查 .CMD+无后缀；缺则报期望路径+node_modules 半坏+pnpm install --force+勿误判包坏，exit 1）+ openapi-typescript execSync 包 try/catch 给明确指引；frontend dump_openapi 步也加 try/catch。
+结果：happy path 两脚本 gen:types 成功；受控 error-path（临时改名 shim）新报错清晰可操作 exit 1，恢复后正常；无业务/类型改动，api-types.ts CRLF 噪声已还原。
