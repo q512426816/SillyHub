@@ -1,10 +1,16 @@
 ---
 author: qinyi
 created_at: 2026-08-07
-status: 活跃坑（待 sillyspec 工具修复 / 根因待确认）
+status: 已解决（prompt 层已修，sillyspec quick ql-20260807-012-2b86，commit 6d01918）
 ---
 
 # 主仓库 git index 残留跨变更 staged 文件，commit 易串台
+
+## 解决（sillyspec quick ql-20260807-012-2b86，prompt 层）
+
+brainstorm/scan/archive/brainstorm-auto 四个 stage prompt 的 `git add .sillyspec/`（整目录）改为**精确 pathspec**：brainstorm 改 `git add {SPEC_ROOT}/changes/<change-name>/`（含 scale 与多包两分支）、scan 改 `git add {DOCS_ROOT}/ {KNOWLEDGE_ROOT}/`、archive 改 `git add .sillyspec/changes/archive/` + `git add .sillyspec/docs/<project>/modules/`——不再裹挟 changes/ 下其他活跃变更。
+
+**遗留（未改）**：`run/complete-handlers.js:145` CLI 下沉 git add 仍 add 整个 `.sillyspec/docs/`（坑4 FR-04 确定性暂存设计，改为项目级解析较繁，且 CLI 路径在 registerChange 阶段通常无并行活跃变更，残留串台概率低）——如需收敛可另行评估，已登记 sillyspec 侧注意。
 
 ## 现象
 主仓库 `git diff --cached` 出现**非本次操作显式 stage** 的文件——一整个 change 的

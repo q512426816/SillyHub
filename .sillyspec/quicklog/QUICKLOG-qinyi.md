@@ -230,3 +230,15 @@
 根因：hook 写死 `uv run mypy app`（全仓扫），与 worktree 多代理并发执行模型冲突。
 方案：mypy 改传 staged 的 backend .py 文件列表（剥 `backend/` 前缀），mypy 默认 `--follow-imports=normal` 只报命令行显式文件的错误、依赖模块分析但不报 → commit 不被他人债拖累；全仓跨文件检查降级为 log 提醒（不拦截、不自动跑，免拖慢 commit）+ CI 兜底。另加 `--diff-filter=ACMR` 排删除态免 mypy 报 "Can't get file"。
 结果：实测验证——临时 stage `backend/app/__init__.py` 喂 JSON 触发 hook，mypy 单文件扫 passed + 提醒 log 正常 + commit 放行；多文件引号在 Windows cmd 拼接正确（2 source files）；mypy 单文件扫只报显式文件行为正确。提交 49a80ea1（仅 hook 一个文件）。代价：跨文件类型错误（调用方传错类型给被改函数）单文件扫不到，靠提醒 + CI 兜底。
+
+## ql-20260807-004-e5bf | 2026-08-07 20:26:54 | opencode 供应商预设数据先备（仅前端数据模块）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/config/opencodeProviderPresets.ts（新建：8 家 opencode 供应商预设常量——Kimi/Kimi For Coding/智谱GLM/DeepSeek/MiniMax/百炼/StepFun/OpenRouter；数据逐字抄 cc-switch `opencodeProviderPresets.ts` 的 npm+base_url+models+set_cache_key，剔除全部 affiliate 参数；导出 `OPENCODE_PRESETS_BY_CATEGORY`/`OPENCODE_PRESET_BY_KEY` 供未来表单消费）
+- frontend/src/config/__tests__/opencodeProviderPresets.test.ts（新建：7 用例钉数据不变量——key 唯一/npm 白名单/base_url 无尾斜杠/URL 无 affiliate/不携带明文 apiKey/models 合法/分组索引保序）
+
+需求：参考 cc-switch 供应商数据，把 opencode 供应商预设默认加到平台；范围=先只加前端预设数据（表单/后端当前仍 claude-only）。
+根因：无，纯新增数据模块——opencode 配置形态（opencode.json 的 `provider.<名字>` 块：npm+options.baseURL+options.apiKey+models）与 claude 的 ANTHROPIC_* env 注入完全不同，不能复用 `llmProviderPresets.ts` 的 env 块结构，需独立数据文件先把供应商数据备好。
+方案：新建 `config/opencodeProviderPresets.ts`，扁平化承载 opencode `provider.<name>` 块（key/name/npm/base_url/set_cache_key/models/website_url/api_key_url/icon_color），数据逐字抄 cc-switch `opencodeProviderPresets.ts`（R-05 不臆造模型名/URL），affiliate 参数（?aff=/?ic=/?from=/invitecode/utm_/ref=/ac=）全部剔除；分类复用 cn_official/aggregator，导出分组/按键索引；`name` 同时是 opencode config 的 provider key 故保持英文名。新建同目录 `__tests__/opencodeProviderPresets.test.ts` 钉不变量防抄录手滑。
+结果：前端单测 7/7 全过，`tsc --noEmit` 0 错；frontend 模块文档变更索引已追加 ql-ID 并暂存；当前表单/后端仍 claude-only，本数据模块暂未被消费，待 opencode agent 全链路支持（backend agent_kind 放开 + daemon OpenCodeCredentialInjector + 表单预设选择器）时接入。已 git add（2 数据/测试文件 + frontend.md）未 commit。

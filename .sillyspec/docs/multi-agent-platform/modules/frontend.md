@@ -82,4 +82,6 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 - ql-20260804-001-4a3e | borrow 前端清债（change 2026-07-25-daemon-borrow-for-business 收尾）：workspace-binding.ts 本地兜底类型 MemberBindingWithShared（intersection）与 SharedDaemonView（interface）切回 OpenAPI 生成类型——api-types.ts 已含 MemberBindingView.shared 与 SharedDaemonView，无需 gen:types，消费方 import 名不变零改动；borrowed-solution-files.tsx 删过时「后端无按 owner_type list 端点」注释（容器层 panel 已调 listFiles）；shared-daemon-manager.tsx:180 适配生成类型 optional（daemon_id ?? null 归一化匹配本地 shortId(string|null)）。tsc 0 错。
 
+- ql-20260807-004-e5bf | opencode 供应商预设数据先备（仅前端数据模块，quick）：新建 `config/opencodeProviderPresets.ts`——8 家 opencode 供应商预设（Kimi/Kimi For Coding/智谱GLM/DeepSeek/MiniMax/百炼/StepFun/OpenRouter），数据逐字抄 cc-switch `opencodeProviderPresets.ts`（npm+base_url+models+set_cache_key，opencode 形态非 env），剔 affiliate 参数，导出 `OPENCODE_PRESETS_BY_CATEGORY`/`OPENCODE_PRESET_BY_KEY`；新建 `config/__tests__/opencodeProviderPresets.test.ts` 7 用例钉数据不变量。当前表单/后端仍 claude-only，本数据模块暂未被消费，待 opencode agent 全链路支持时接入。
+
 <!-- MANUAL_NOTES_END -->

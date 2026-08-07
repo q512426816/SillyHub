@@ -1,9 +1,14 @@
 ---
 author: qinyi
 created_at: 2026-08-07 17:05:01
+status: 已解决（sillyspec quick ql-20260807-012-2b86，commit 6d01918）
 ---
 
 # 坑：`sillyspec modules rebuild` 破坏性——骨架重写 + schema 升级丢手动内容
+
+## 解决（sillyspec quick ql-20260807-012-2b86）
+
+`src/modules.js` `rebuildModuleMap(cwd, { force })` 改为**默认 dry-run 不写盘 + 打印覆盖预警**（"该命令会覆盖 _module-map.yaml，清空 tags/entrypoints/main_symbols/depends_on/used_by 等手动维护字段；确认覆盖请运行：sillyspec modules rebuild --force"），`--force` 才真正覆盖；`src/index.js` rebuild 路由解析 `--force` 传 options + help 文本加 `[--force]` 说明。`src/stages/archive.js` 步骤 8 的 rebuild 提示加 --force 慎用说明（与 archive-impact 的「人工备注保护」约束冲突，仅当手动字段已并入骨架或可接受覆盖时用）。新增 `test/modules-rebuild-dryrun.test.mjs` 6 断言（dry-run 不写 / force 覆盖 / 手动字段清空）。非破坏补骨架（保留手动字段）为更大工程，本次采 dry-run 保护方案。
 
 ## 现象
 
