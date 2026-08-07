@@ -1809,7 +1809,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Set Default Provider */
+        /**
+         * Set Default Provider
+         * @description 置本行为默认供应商（cc-switch 式「启动」）。
+         *
+         *     task-05（FR-07）：返回结构化 ``SetDefaultResult`` 三字段，供前端区分立即生效 /
+         *     等待 turn 边界 / 凭证失败三种状态。service 层 ``set_default`` 已在 task-03 改造为
+         *     返回 ``DefaultSwitchResult``（probe 凭证探测失败时 ``switched=False`` + ``error``
+         *     不置位、不推送，原供应商继续服务运行中会话，D-003）。
+         */
         post: operations["set_default_provider_api_llm_providers__provider_id__set_default_post"];
         delete?: never;
         options?: never;
@@ -1832,6 +1840,9 @@ export interface paths {
          *
          *     对称 ``set-default``（「启动」）：取消本行默认。若取消后该用户×agent_kind 无任何
          *     默认供应商 → lease 不再下发 provider_config → daemon 回归本机凭证管理（D-007）。
+         *
+         *     task-05（FR-07）：返回结构化 ``SetDefaultResult``（unset 不探测，恒
+         *     ``switched=True`` + ``error=None``）。
          */
         post: operations["unset_default_provider_api_llm_providers__provider_id__unset_default_post"];
         delete?: never;
@@ -2439,6 +2450,131 @@ export interface paths {
          * @description 平台维度更新（仅 admin，用于编辑平台预置档案）。version +1。
          */
         patch: operations["update_platform_profile_api_agent_profiles__profile_id__patch"];
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/mcp-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Mcp Tokens
+         * @description 列出该 workspace 全部 token（含已吊销），新→旧。
+         *
+         *     不返明文（明文从未持久化，无法返回）；含 ``last_used_at`` / ``revoked_at`` 供管理
+         *     UI 展示使用情况与吊销状态。
+         */
+        get: operations["list_mcp_tokens_api_workspaces__workspace_id__mcp_tokens_get"];
+        put?: never;
+        /**
+         * Create Mcp Token
+         * @description 签发新 McpToken（明文 token 仅本次响应返回一次）。
+         *
+         *     DB 只存 ``sha256(明文)``（``token_hash`` 唯一索引），不存明文（R-06 / design §8.1）。
+         *     ``created_by`` 记当前操作 user（审计），token 本身无关 user 身份。
+         */
+        post: operations["create_mcp_token_api_workspaces__workspace_id__mcp_tokens_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/mcp-tokens/{token_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke Mcp Token
+         * @description 吊销（``revoked_at = now``，幂等）。
+         *
+         *     service.revoke 返 False（不存在 / 已吊销 / 跨 workspace 越权）→ 404，不泄露具体
+         *     原因（防存在性探测）。成功返 204；吊销后 ``authenticate`` 立即返 None（正缓存被
+         *     精确 DEL，无 TTL 放行窗口）。
+         */
+        delete: operations["revoke_mcp_token_api_workspaces__workspace_id__mcp_tokens__token_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/mcp-webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Mcp Webhooks
+         * @description 列出该 workspace 全部 webhook（不返 secret）。
+         */
+        get: operations["list_mcp_webhooks_api_workspaces__workspace_id__mcp_webhooks_get"];
+        put?: never;
+        /**
+         * Create Mcp Webhook
+         * @description 注册 webhook。``secret`` 加密入库（get_cipher），响应不回显 secret。
+         */
+        post: operations["create_mcp_webhook_api_workspaces__workspace_id__mcp_webhooks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/mcp-webhooks/{webhook_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Mcp Webhook
+         * @description 删除 webhook（204）。不存在 / 跨 workspace → 404（防存在性探测）。
+         */
+        delete: operations["delete_mcp_webhook_api_workspaces__workspace_id__mcp_webhooks__webhook_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/missions/{mission_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Mission Events
+         * @description SSE endpoint — 推 mission 下 worker run 状态变更（FR-08）。
+         *
+         *     连接池安全照搬 stream_agent_run_logs：存在性校验用短 session（校验完即归还
+         *     slot），事件生成器内部自建独立短 session 做逐次轮询，不在请求级 session 贯穿
+         *     整个流生命周期。
+         *
+         *     鉴权复用 ``require_permission_any(Permission.TASK_READ)``（与
+         *     stream_agent_run_logs 同款；路由在 /api 前缀天然适用，非成员 403）。
+         */
+        get: operations["stream_mission_events_api_workspaces__workspace_id__missions__mission_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/daemon/runtimes/{runtime_id}/pending-change-writes": {
@@ -3187,6 +3323,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Notify Session Ready
+         * @description Receive daemon session-ready report (task-06 / D-001@v1).
+         *
+         *     daemon ``_startInteractiveSession``（fresh create）与 ``restoreAndReconnect``
+         *     （recover）create 完成后调 ``hubClient.notifySessionReady`` → 这里。鉴权后调
+         *     :func:`get_session_readiness` 单例的 ``mark_ready``，唤醒 ``inject_session`` 中
+         *     等待 ready event 的协程（task-08），解 /model 等 inject 偶发空白。
+         *
+         *     返回 200 + JSON ``{"ok": true}``（**非 204**）：daemon hub-client ``_request``
+         *     固定 ``JSON.parse``，204 空 body 会抛 ``SyntaxError``（Reverse Sync 由 task-01
+         *     发现）。daemon 不上报 payload，故无 body 模型。
+         */
+        post: operations["notify_session_ready_api_daemon_sessions__session_id__ready_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/leases/{lease_id}": {
         parameters: {
             query?: never;
@@ -3644,6 +3809,29 @@ export interface paths {
          *     无 skills 时返回 404。
          */
         get: operations["get_skills_bundle_api_daemon_skills_latest_bundle_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/skills/{skill_name}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Skill Content
+         * @description Return a sillyspec-* skill's SKILL.md content (read-only, traversal-safe).
+         *
+         *     ``skill_name`` 必须在 sillyspec-* 白名单内；固定读 SKILL.md（不拼 path）。
+         *     404 = 非白名单 / SKILL.md 缺失；413 = > 1 MiB。
+         */
+        get: operations["get_skill_content_api_daemon_skills__skill_name__content_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -9289,6 +9477,8 @@ export interface components {
              * @default false
              */
             read_only: boolean;
+            /** Agent Profile Id */
+            agent_profile_id?: string | null;
         };
         /**
          * DocumentsSyncRequest
@@ -10338,6 +10528,126 @@ export interface components {
             mcpServers?: {
                 [key: string]: components["schemas"]["McpServerEntry"];
             };
+        };
+        /**
+         * McpTokenCreateRequest
+         * @description 签发请求。``scope`` 必须非空且取值 ∈ {read, dispatch, converge}。
+         */
+        McpTokenCreateRequest: {
+            /** Name */
+            name: string;
+            /** Scope */
+            scope: ("read" | "dispatch" | "converge")[];
+        };
+        /**
+         * McpTokenCreated
+         * @description POST 201 响应——**唯一**携带明文 token 的地方（仅此一次返回，R-06）。
+         *
+         *     不继承 ``McpTokenRead``：明文字段 ``token`` 语义独立（不可重复获取），单独建模
+         *     让"明文只出现一次"的契约在类型上显眼。字段精简到 design §7.2 要求的
+         *     ``{id, token, scope, created_at}``。
+         */
+        McpTokenCreated: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Token
+             * @description 明文 token，仅本次响应返回，此后不可恢复（请立即保存）
+             */
+            token: string;
+            /** Name */
+            name: string;
+            /** Scope */
+            scope: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** McpTokenListResponse */
+        McpTokenListResponse: {
+            /** Items */
+            items: components["schemas"]["McpTokenRead"][];
+        };
+        /**
+         * McpTokenRead
+         * @description 列表行——所有 GET 都安全返回。绝不包含明文或 ``token_hash``（R-06）。
+         */
+        McpTokenRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Scope */
+            scope: string[];
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Revoked At */
+            revoked_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * McpWebhookCreateRequest
+         * @description 注册 webhook 请求。``secret`` 明文仅本次入站，服务端加密入库、绝不回显。
+         *
+         *     ``token_id`` 指定绑定哪个 McpToken（webhook 级联随 token 删除）；``events``
+         *     非空，取值 ∈ {worker.completed, worker.failed, "*"}。
+         */
+        McpWebhookCreateRequest: {
+            /**
+             * Token Id
+             * Format: uuid
+             */
+            token_id: string;
+            /** Url */
+            url: string;
+            /** Secret */
+            secret: string;
+            /** Events */
+            events: ("worker.completed" | "worker.failed" | "*")[];
+        };
+        /** McpWebhookListResponse */
+        McpWebhookListResponse: {
+            /** Items */
+            items: components["schemas"]["McpWebhookRead"][];
+        };
+        /**
+         * McpWebhookRead
+         * @description webhook 列表/详情行——绝不包含 ``secret``（明文或密文都不回显）。
+         */
+        McpWebhookRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Token Id
+             * Format: uuid
+             */
+            token_id: string;
+            /** Url */
+            url: string;
+            /** Events */
+            events: string[];
+            /** Active */
+            active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** MeResponse */
         MeResponse: {
@@ -14058,6 +14368,33 @@ export interface components {
             runtime_id: string;
             /** Reason */
             reason?: string | null;
+        };
+        /**
+         * SetDefaultResult
+         * @description ``POST /api/llm-providers/{id}/set-default`` 与 ``unset-default`` 统一响应。
+         *
+         *     task-05（change 2026-08-06-provider-switch-live-session / FR-07）：把 task-03
+         *     service 层 ``DefaultSwitchResult``（dataclass）透传给前端的响应 DTO，供前端区分
+         *     立即生效（``switched=True`` + ``affected_sessions>0``）、等待 turn 边界
+         *     （``switched=True`` + ``affected_sessions=0``）与凭证失败（``switched=False`` +
+         *     ``error``）三种状态，对应不同 toast 文案（task-09）。
+         *
+         *     纯响应 DTO（无 ``from_attributes``）：router 显式按字段名从 ``DefaultSwitchResult``
+         *     构造，不直接 ``model_validate`` dataclass（风格对齐 ``UsageResult``）。
+         *
+         *     - ``switched``：本次 set/unset 是否成功变更 ``is_default``（set 凭证探测失败回滚
+         *       时为 ``False``；unset 恒为 ``True``）；
+         *     - ``affected_sessions``：``notify_provider_switch`` 成功投递的 active interactive
+         *       session 计数（D-001）；无 active session 或 notify 异常时为 ``0``；
+         *     - ``error``：set 凭证探测失败原因（仅 ``switched=False`` 时有值）；成功 / unset 为 ``None``。
+         */
+        SetDefaultResult: {
+            /** Switched */
+            switched: boolean;
+            /** Affected Sessions */
+            affected_sessions: number;
+            /** Error */
+            error?: string | null;
         };
         /** SettingRead */
         SettingRead: {
@@ -19789,7 +20126,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LlmProviderRead"];
+                    "application/json": components["schemas"]["SetDefaultResult"];
                 };
             };
             /** @description Validation Error */
@@ -19820,7 +20157,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LlmProviderRead"];
+                    "application/json": components["schemas"]["SetDefaultResult"];
                 };
             };
             /** @description Validation Error */
@@ -20964,6 +21301,230 @@ export interface operations {
             };
         };
     };
+    list_mcp_tokens_api_workspaces__workspace_id__mcp_tokens_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpTokenListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_mcp_token_api_workspaces__workspace_id__mcp_tokens_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpTokenCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpTokenCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_mcp_token_api_workspaces__workspace_id__mcp_tokens__token_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                token_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_mcp_webhooks_api_workspaces__workspace_id__mcp_webhooks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpWebhookListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_mcp_webhook_api_workspaces__workspace_id__mcp_webhooks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpWebhookCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpWebhookRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_mcp_webhook_api_workspaces__workspace_id__mcp_webhooks__webhook_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                webhook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_mission_events_api_workspaces__workspace_id__missions__mission_id__events_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_pending_change_writes_api_daemon_runtimes__runtime_id__pending_change_writes_get: {
         parameters: {
             query?: never;
@@ -22086,6 +22647,39 @@ export interface operations {
             };
         };
     };
+    notify_session_ready_api_daemon_sessions__session_id__ready_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_lease_api_daemon_leases__lease_id__get: {
         parameters: {
             query?: never;
@@ -22736,6 +23330,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_skill_content_api_daemon_skills__skill_name__content_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

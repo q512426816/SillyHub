@@ -684,6 +684,42 @@ export class HubClient {
     );
   }
 
+  /**
+   * 2026-08-07-inject-wait-session-ready（FR-01 / D-001@v1）：上报 interactive
+   * session ready（daemon create 完成），解除 backend inject 的 ready 等待。
+   *
+   * 端点：POST {REST_PREFIX}/sessions/{sessionId}/ready（body 空）。
+   * 鉴权：_headers() 的 X-API-Key（daemon 长期凭证，与 notifySessionEnd 同款）。
+   *
+   * 调用链：daemon `_startInteractiveSession` create 成功（fresh）+
+   * `restoreAndReconnect` create 成功（recover）→ hubClient.notifySessionReady
+   * → backend SessionReadiness.mark_ready → inject_session 的 ready wait 解除
+   *（秒级，零阻塞 inject）。调用点（task-02/03）负责确保仅在 create 成功后触发。
+   *
+   * **best-effort 失败语义**（与 notifySessionEnd/confirmReconnected 不同——后者
+   * 失败抛错由调用方处理；本方法失败仅 warn 不抛，不阻塞 daemon 主循环）：
+   * ready 上报是 inject 时序优化（A 方案），丢失只会让 backend inject 等 30s
+   * 超时 fallback 仍发 SESSION_INJECT（兼容旧 daemon，design R-02），不应让上报
+   * 失败拖垮 daemon 会话生命周期；backend 另有 recover mark_ready 双保险（R-03）。
+   * 故方法内 try 包 _request，catch 仅 console.warn（事件名蛇形 + sessionId）。
+   *
+   * @param sessionId  AgentSession.id（SessionState.sessionId）
+   */
+  async notifySessionReady(sessionId: string): Promise<void> {
+    try {
+      await this._request(
+        'POST',
+        `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/ready`,
+      );
+    } catch (e) {
+      // best-effort：ready 上报失败不抛不阻塞；backend 30s 超时 fallback 兼容（R-02）。
+      console.warn('session_ready_notify_failed', {
+        sessionId,
+        error: String(e),
+      });
+    }
+  }
+
   // ── Daemon-restart session recovery (gap-8.2 / design §11) ───────────────
   // 实现 RecoveryCoordinator（daemon.ts:261）。daemon `_recoverSessionsOnBoot`
   // 调用序：recoverSession →（reconnecting）→ restoreAndReconnect（driver resume）

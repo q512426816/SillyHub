@@ -12,6 +12,7 @@ __init__, so no module cycle).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
 import uuid
@@ -213,6 +214,99 @@ class SessionRecoveryResult:
     lease_id: uuid.UUID | None
     status: Literal["active", "ended", "failed", "reconnecting", "rejected"]
     interrupted_run_status: Literal["failed"] | None = None
+
+
+class SessionReadiness:
+    """跨请求共享的内存 session ready 状态管理器（task-05 / D-002@v1）。
+
+    daemon 在 create 完成（fresh / recover）后调 :meth:`mark_ready`；
+    ``inject_session`` 在 send SESSION_INJECT 前调 :meth:`wait` 阻塞等 ready
+    event；session end/failed 后调 :meth:`clear` 清状态。
+
+    **必须模块级单例**（gap-2 / D-002）：``SessionService`` /
+    ``DaemonService`` 在 ``router.py`` 是 per-request 实例化，若把 readiness
+    放 Service 实例字段，``mark_ready`` 与 ``wait`` 会各看各的
+    ``_ready`` / ``_events``（不同实例），事件永远等不到 set。模块级单例
+    保证跨请求共享同一份 set + event dict。
+
+    ``asyncio.Event`` 必须在 event loop 内 ``await``：所有调用方
+    （handler / inject_session / confirm_session_reconnected）均在
+    ``async def`` 内执行，loop 上下文就绪。
+    """
+
+    def __init__(self) -> None:
+        self._ready: set[uuid.UUID] = set()
+        self._events: dict[uuid.UUID, asyncio.Event] = {}
+
+    def _get_or_create_event(self, session_id: uuid.UUID) -> asyncio.Event:
+        """取或建 per-session event（懒建）。"""
+        event = self._events.get(session_id)
+        if event is None:
+            event = asyncio.Event()
+            self._events[session_id] = event
+        return event
+
+    def mark_ready(self, session_id: uuid.UUID) -> None:
+        """标记 session ready 并唤醒所有等待该 session 的 wait 协程。幂等。
+
+        重复 mark 同一 session 不报错（set.add 幂等、event.set 幂等）。
+        """
+        self._ready.add(session_id)
+        event = self._get_or_create_event(session_id)
+        event.set()
+
+    async def wait(self, session_id: uuid.UUID, timeout: float = 30) -> bool:
+        """阻塞等 session ready event。
+
+        - 已 ready（``session_id`` ∈ :attr:`_ready`）立即返 ``True``（零开销）。
+        - 未 ready → ``asyncio.wait_for`` 包 ``event.wait()``，被 mark_ready
+          唤醒后返 ``True``；超时返 ``False``（**不抛** ``TimeoutError``）。
+
+        Args:
+            session_id: AgentSession id。
+            timeout: 超时秒数，默认 30s（兼容旧 daemon 上报丢失的兜底窗口）。
+
+        Returns:
+            ``True`` = ready（被 mark 或已 ready）；``False`` = 超时。
+        """
+        # 已 ready 快速路径：不进入 wait_for，零开销。
+        if session_id in self._ready:
+            return True
+        event = self._get_or_create_event(session_id)
+        try:
+            await asyncio.wait_for(event.wait(), timeout=timeout)
+            return True
+        except TimeoutError:
+            return False
+
+    def clear(self, session_id: uuid.UUID) -> None:
+        """清除 session ready 状态（session end/failed 后调）。
+
+        用**新 ``asyncio.Event`` 替换** ``_events`` 槽位（不是简单
+        ``event.clear()``，也不是直接复用旧 event）—— 旧 event 已 ``set``，
+        若复用则 clear 后 ``wait`` 会立即返 ``True``（旧 set 残留），与设计
+        语义「clear 后须等下一次 mark_ready」不符。换新未 set 的 event，
+        下一次 ``wait`` 必须等下一次 ``mark_ready`` 才能 set 返 ``True``。
+        """
+        self._ready.discard(session_id)
+        self._events[session_id] = asyncio.Event()
+
+
+_SessionReadiness: SessionReadiness | None = None
+
+
+def get_session_readiness() -> SessionReadiness:
+    """Return (and lazily create) the process-wide SessionReadiness singleton.
+
+    模块级单例（gap-2 / D-002）：``SessionService`` / ``DaemonService`` 在
+    ``router.py`` 是 per-request 实例化，readiness 不能放实例字段（否则
+    mark/wait 各看各的 set/event 失效）。参照 ``app/core/db.py`` 的
+    ``get_session_factory()`` 范式：模块级变量 + 懒初始化访问器。
+    """
+    global _SessionReadiness
+    if _SessionReadiness is None:
+        _SessionReadiness = SessionReadiness()
+    return _SessionReadiness
 
 
 class SessionService:
@@ -580,6 +674,17 @@ class SessionService:
             await self._session.commit()
             await self._session.refresh(session)
             await self._session.refresh(run)
+
+            # task-09 / FR-04：failed 终态清理 ready 状态（commit 后事务外，
+            # best-effort；内层 try 隔离 clear 异常，不影响外层 commit/refresh
+            # 错误收敛分支）。session 无 session_id 形参，用 session.id。
+            try:
+                get_session_readiness().clear(session.id)
+            except Exception:
+                log.warning(
+                    "session_ready_clear_failed",
+                    session_id=str(session.id),
+                )
         except Exception:
             await self._session.rollback()
             log.warning(
@@ -669,6 +774,15 @@ class SessionService:
         except Exception:
             await self._session.rollback()
             raise
+
+        # task-08 / FR-03 / D-003@v1：commit AgentRun 后、send SESSION_INJECT 前阻塞等
+        # daemon session ready（确保 inject 不在 daemon create 完成前到而被静默丢弃，
+        # /model 空白根因）。已 ready 立即返 True 零开销直通；超时 30s 未 ready 不
+        # 抛错不 return，落 warn 日志后 fallback 仍执行原 send SESSION_INJECT 分支，
+        # 兼容旧 daemon 不上报 ready（D-003 / R-02）。
+        ready = await get_session_readiness().wait(session_id, timeout=30)
+        if not ready:
+            log.warning("session_ready_timeout", session_id=str(session_id))
 
         # Dispatch the new turn control message.
         from app.modules.daemon.ws_hub import get_daemon_ws_hub
@@ -856,6 +970,15 @@ class SessionService:
             # Idempotent: already ended → no-op return.
             if session.status == "ended":
                 await self._session.commit()
+                # task-09 / FR-04：ended 终态清理 ready 状态（防前次未清残留，
+                # clear 幂等多次调不报错），best-effort 不阻塞结束流程。
+                try:
+                    get_session_readiness().clear(session_id)
+                except Exception:
+                    log.warning(
+                        "session_ready_clear_failed",
+                        session_id=str(session_id),
+                    )
                 return SessionControlResult(agent_session=session, current_run_id=None)
 
             if session.lease_id is None:
@@ -936,6 +1059,17 @@ class SessionService:
 
             await self._session.commit()
             await self._session.refresh(session)
+
+            # task-09 / FR-04：ended 终态清理 ready 状态（commit 后事务外，
+            # best-effort；内层 try 隔离 clear 异常，不影响外层 commit 错误
+            # raise 分支），避免残留 event 让后续 inject 误判已结束 session 为 ready。
+            try:
+                get_session_readiness().clear(session_id)
+            except Exception:
+                log.warning(
+                    "session_ready_clear_failed",
+                    session_id=str(session_id),
+                )
         except Exception:
             await self._session.rollback()
             raise
@@ -1247,6 +1381,19 @@ class SessionService:
                 session.id,
                 {"event": "session_reconnected", "session_id": str(session.id)},
             )
+            # task-10 / FR-04：recover 主路径双保险（design Phase 4 / gap-1）。
+            # reconnecting→active 翻转 + commit + publish 成功之后调 mark_ready，
+            # 与 daemon restoreAndReconnect 上报构成双保险，防 daemon 上报丢失致
+            # inject 等 ready 超时。mark_ready 幂等（set.add + event.set），与
+            # daemon 上报互为补集非互斥。best-effort（mark 内部仅内存操作，理论
+            # 不抛；try 隔离异常防污染已 commit 成功的事务，参照 task-09 clear 风格）。
+            try:
+                get_session_readiness().mark_ready(session_id)
+            except Exception:
+                log.warning(
+                    "session_ready_mark_failed",
+                    session_id=str(session_id),
+                )
             log.info(
                 "session_reconnected_active",
                 session_id=str(session.id),
@@ -1296,6 +1443,16 @@ class SessionService:
             self._session.add(session)
             await self._session.commit()
             await self._session.refresh(session)
+
+            # task-09 / FR-04：failed 终态清理 ready 状态（commit 后事务外，
+            # best-effort；内层 try 隔离 clear 异常，不影响外层 commit 错误处理）。
+            try:
+                get_session_readiness().clear(session_id)
+            except Exception:
+                log.warning(
+                    "session_ready_clear_failed",
+                    session_id=str(session_id),
+                )
 
             await self._publish_session_event(
                 session.id,

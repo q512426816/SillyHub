@@ -14,7 +14,7 @@ created_at: 2026-08-07 14:11:27
 - create/restore 失败不上报
 
 ### FR-02: backend 接收 ready + 内存管理
-- POST `/api/daemon/sessions/{id}/ready` 端点（daemon auth，body 空，返回 204）
+- POST `/api/daemon/sessions/{id}/ready` 端点（daemon auth，body 空，返回 200 + JSON ok=true，对齐 daemon _request JSON 契约）
 - `SessionReadiness` **模块级单例**或挂 `app.state`（DaemonService/SessionService per-request 实例化，不能放实例字段）
 - `mark_ready(sessionId)`：set.add + event.set()
 - `wait(sessionId, timeout=30)`：event.wait，返回 bool（True=ready, False=超时）

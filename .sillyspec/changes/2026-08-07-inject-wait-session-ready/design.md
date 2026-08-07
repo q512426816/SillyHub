@@ -73,6 +73,7 @@ daemon create 完成后主动上报 backend session ready；backend 内存维护
 | 修改 | backend/app/modules/daemon/router.py | 新端点 POST `/api/daemon/sessions/{id}/ready`（daemon auth） |
 | 修改 | backend/app/modules/daemon/session/service.py | 加 `SessionReadiness`（mark/wait/clear）+ inject_session 等 ready + end/failed clear + recover mark_ready |
 | 修改 | backend/openapi.json | gen:types 重新 dump（新端点） |
+| 修改 | frontend/src/lib/api-types.ts | gen:types 同步前端类型（task-07 gen 副产物，CLAUDE.md 规则 20） |
 | 新增 | backend 测试 | SessionReadiness（mark/wait/clear/超时）+ inject 等 ready + POST /ready 端点 |
 | 新增 | sillyhub-daemon 测试 | notifySessionReady 上报（create 完成触发） |
 
@@ -88,7 +89,7 @@ async notifySessionReady(sessionId: string): Promise<void>
 ```python
 POST /api/daemon/sessions/{session_id}/ready
 # daemon auth（daemon api-key），body 空，调 DaemonService.mark_session_ready(session_id)
-# 返回 204 No Content
+# 返回 200 + JSON body（ok=true）—— 对齐 daemon hub-client _request 的 JSON.parse 契约（204 空 body 会使 JSON.parse 抛 SyntaxError，Reverse Sync 由 task-01 实现发现）
 ```
 
 ### backend session/service.py SessionReadiness

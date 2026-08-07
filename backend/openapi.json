@@ -9404,6 +9404,54 @@
         }
       }
     },
+    "/api/daemon/sessions/{session_id}/ready": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Notify Session Ready",
+        "description": "Receive daemon session-ready report (task-06 / D-001@v1).\n\ndaemon ``_startInteractiveSession``（fresh create）与 ``restoreAndReconnect``\n（recover）create 完成后调 ``hubClient.notifySessionReady`` → 这里。鉴权后调\n:func:`get_session_readiness` 单例的 ``mark_ready``，唤醒 ``inject_session`` 中\n等待 ready event 的协程（task-08），解 /model 等 inject 偶发空白。\n\n返回 200 + JSON ``{\"ok\": true}``（**非 204**）：daemon hub-client ``_request``\n固定 ``JSON.parse``，204 空 body 会抛 ``SyntaxError``（Reverse Sync 由 task-01\n发现）。daemon 不上报 payload，故无 body 模型。",
+        "operationId": "notify_session_ready_api_daemon_sessions__session_id__ready_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Notify Session Ready Api Daemon Sessions  Session Id  Ready Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/leases/{lease_id}": {
       "get": {
         "tags": [
