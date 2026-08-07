@@ -65,7 +65,9 @@ function gitLines(args) {
 }
 
 function changedFiles(command) {
-  const files = new Set(gitLines(["diff", "--name-only", "--cached"]));
+  // --diff-filter=ACMR：只取新增/复制/修改/重命名（新名），排除删除态——
+  // 删除的文件传给 mypy 会报 "Can't get file 'x'"，无意义且让检查假 fail。
+  const files = new Set(gitLines(["diff", "--name-only", "--cached", "--diff-filter=ACMR"]));
 
   if (blocksAllTrackedChanges(command)) {
     for (const file of gitLines(["diff", "--name-only"])) {
@@ -126,8 +128,26 @@ if (hasBackend) {
   if (!runCheck("backend: ruff format", "uv run ruff format --check .", { cwd: "backend" })) {
     failures.push("backend: ruff format");
   }
-  if (!runCheck("backend: mypy", "uv run mypy app", { cwd: "backend" })) {
-    failures.push("backend: mypy");
+  // mypy：只扫本次 staged 的 backend .py（不写死全仓 `mypy app`）。
+  // 背景：多子代理并发改同一 worktree 不同模块时，全仓 `mypy app` 会扫到他人
+  // 未提交的在途文件 / 预存 mypy 债，把彼此 commit 卡死（task-12/14 实际撞过）。
+  // mypy 传文件列表只报命令行显式文件的错误（默认 --follow-imports=normal），
+  // 依赖模块分析但不报，commit 不被他人债拖累。代价：跨文件类型错误（调用方传
+  // 错类型给被改的函数）单文件扫不到，由 log 提醒手动跑全仓 + CI 兜底。
+  const backendPyFiles = files
+    .filter((f) => f.startsWith("backend/") && f.endsWith(".py"))
+    .map((f) => f.slice("backend/".length));
+  if (backendPyFiles.length > 0) {
+    const fileList = backendPyFiles.map((f) => `"${f}"`).join(" ");
+    if (!runCheck("backend: mypy", `uv run mypy ${fileList}`, { cwd: "backend" })) {
+      failures.push("backend: mypy");
+    }
+    // 单文件扫不覆盖跨文件类型错误——提醒手动跑全仓（不拦截、不自动跑，免拖慢 commit）。
+    log(
+      "提醒: pre-commit 只 mypy 了本次 staged 的 backend .py；跨文件类型检查请手动 `cd backend && uv run mypy app`（本次不拦截）"
+    );
+  } else {
+    log("no backend .py staged; mypy skipped");
   }
 
   // 提醒式守门（2026-07-04-frontend-openapi-types, D-004@V1）：后端 schema.py
