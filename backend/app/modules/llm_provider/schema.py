@@ -161,3 +161,30 @@ class UsageResult(BaseModel):
     success: bool
     data: list[UsageData] | None = None
     error: str | None = None
+
+
+# ── set/unset_default 结构化响应（task-05 / FR-07）──────────────────────────────
+
+
+class SetDefaultResult(BaseModel):
+    """``POST /api/llm-providers/{id}/set-default`` 与 ``unset-default`` 统一响应。
+
+    task-05（change 2026-08-06-provider-switch-live-session / FR-07）：把 task-03
+    service 层 ``DefaultSwitchResult``（dataclass）透传给前端的响应 DTO，供前端区分
+    立即生效（``switched=True`` + ``affected_sessions>0``）、等待 turn 边界
+    （``switched=True`` + ``affected_sessions=0``）与凭证失败（``switched=False`` +
+    ``error``）三种状态，对应不同 toast 文案（task-09）。
+
+    纯响应 DTO（无 ``from_attributes``）：router 显式按字段名从 ``DefaultSwitchResult``
+    构造，不直接 ``model_validate`` dataclass（风格对齐 ``UsageResult``）。
+
+    - ``switched``：本次 set/unset 是否成功变更 ``is_default``（set 凭证探测失败回滚
+      时为 ``False``；unset 恒为 ``True``）；
+    - ``affected_sessions``：``notify_provider_switch`` 成功投递的 active interactive
+      session 计数（D-001）；无 active session 或 notify 异常时为 ``0``；
+    - ``error``：set 凭证探测失败原因（仅 ``switched=False`` 时有值）；成功 / unset 为 ``None``。
+    """
+
+    switched: bool
+    affected_sessions: int
+    error: str | None = None

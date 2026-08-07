@@ -63,6 +63,16 @@ DAEMON_MSG_POLICY_UPDATE = "daemon:policy_update"  # Server → Daemon, D-004
 # warn（向后兼容）。双触发幂等由 taskRunner.cancel 内部保证（design §10 R-06）。
 DAEMON_MSG_LEASE_CANCEL = "daemon:lease_cancel"  # Server → Daemon, FR-03 / R-06
 
+# change 2026-08-06-provider-switch-live-session / task-02 / FR-06 / D-005@v1:
+# 默认供应商切换即时 WS push(Server → Daemon)。用户在 /settings/providers 改默认
+# 后 backend 立即推送新 provider_config,daemon 收到后热切换 SDK session 的供应商
+# (base_url/api_key/model 等),不中断当前对话。provider_config 口径与 lease claim
+# 的 _inject_provider_config 完全一致——两路共用 ``resolve_default_provider_config``
+# helper(D-006 单一真相源),避免口径漂移。停止场景推 null(daemon 按 design §5
+# reloadWithProvider(null) 处理)。纯新增消息,旧 daemon 收到走 default 仅 warn
+# (向后兼容)。
+DAEMON_MSG_PROVIDER_CONFIG_CHANGED = "daemon:provider_config_changed"  # Server → Daemon, FR-06
+
 
 # ── Message envelope ────────────────────────────────────────────────────────
 
@@ -258,3 +268,34 @@ class PolicyUpdatePayload(BaseModel):
     runtime_id: uuid.UUID
     allowed_roots: list[str]
     version: int  # 单调递增；对齐 RuntimePolicy.version，daemon 侧去重
+
+
+# ── Provider switch hot-reload (task-02 / FR-06) ─────────────────────────────
+# change 2026-08-06-provider-switch-live-session / design §7 WS payload。
+# ProviderConfig 口径与 lease claim 的 ``payload["provider_config"]`` 完全一致
+# (8 核心字段 + settings_config,经 ``resolve_default_provider_config`` helper
+# 构造,D-006 单一真相源)。停止场景(daemon 端 reloadWithProvider(null))传 None。
+
+
+class ProviderConfigChangedPayload(BaseModel):
+    """PROVIDER_CONFIG_CHANGED payload (Server → Daemon, FR-06 / D-005@v1).
+
+    change 2026-08-06-provider-switch-live-session / task-02 / design §7 WS payload。
+    用户切换默认供应商后,backend 查询用户新默认 provider(经
+    ``resolve_default_provider_config`` helper,D-006 单一真相源),按 owning
+    daemon 聚合后经 ``ws_hub.send_session_control`` 推送。daemon 收到后调
+    ``sessionManager.markPendingSwitch(session_id, provider_config)``,待当前
+    turn 结束 → ``reloadWithProvider`` 重启 SDK session(env 换新 base_url/api_key
+    等),不中断对话。
+
+    ``provider_config=None`` 表示用户取消了默认(删除/取消默认 / 切换到无默认
+    provider 的 agent_kind),daemon 收到后按 design §5 reloadWithProvider(null)
+    处理(task-04 / task-06 定具体策略)。
+
+    ``session_id`` 为 AgentSession.id(运行中 interactive 会话标识),daemon 用它
+    定位 SessionManager 内的 SessionState——与 SESSION_INJECT/INTERRUPT/END 同
+    通道同 key(design §5.3,ws_hub.send_session_control 路由字段)。
+    """
+
+    session_id: uuid.UUID
+    provider_config: dict | None = None

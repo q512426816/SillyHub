@@ -212,3 +212,48 @@
 根因：run_sync/service.py submit_messages 的 pending→running 分支用 ORM 内存读改写（status=='pending' 判断基于 session 旧快照），无原子条件/行锁，与 close 并发时 lost update。
 方案：line 702-711 改成 update().where(AgentRun.id==,AgentRun.status=='pending').values(running) 原子条件 UPDATE，rowcount=0 即 DB 已被 close 推进终态则不覆盖；新增 test_submit_messages_no_overwrite_terminal.py（双 session 制造旧快照竞态 + 正常路径回归）。
 结果：2 新测试 PASS；反向验证还原修复后 late_submit FAIL 证有效；close/session_status/interactive 回归 37 passed；1 个 gap-2 测试 pre-existing 失败（no such table:llm_providers,conftest 未注册,stash 验证与本次无关）。
+## ql-20260806-002-56a3 | 2026-08-06 22:34:14 | 切换供应商后运行中会话 reload 不应变 ended（实测 45723d1d/9eed466e reload 后 ended）
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/src/interactive/session-manager.ts, sillyhub-daemon/tests/interactive/session-manager-reload-provider.test.ts
+
+需求：切换供应商后运行中会话 reload 不应变 ended（实测 45723d1d/9eed466e reload 后 ended）。
+根因：reloadWithProvider 在 driver.start 新 query 之前就 close 旧 query（session-manager.ts），close 拉动旧 consume 协程退出 → session 收尾 ended。
+方案：把 close oldQuery 移到 driver.start 成功 + 替换 state.query 之后（新 query 就位再 close，旧 consume 退出是正常 query 结束非 session 收尾）；catch 失败保留未 close 的 oldQuery 可恢复。
+结果：tsc 过 + reload-provider 10 passed（AC-4 断言改：start 抛错时 close 0 次）。daemon rebuild+重启+实测待做。
+## ql-20260807-001-d667 | 2026-08-07 09:05:44 | 修复切换供应商热切换 reload 后运行中会话被错误标 ended 的并发 bug
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/session-manager.ts（_runConsume 加 isAuthoritative orphan 谓词：捕获启动时 target，判 target===state.query/driverHandle，onError/catch/onResult/onMessage 入口判 orphan 静默 no-op，reload 换 query 后旧 consume 终态回调不再 fail 误杀新会话）
+- sillyhub-daemon/tests/interactive/session-manager-reload-provider.test.ts（新增 makeMockDriverWithAbortOnClose 工厂：fakeQuery.close 触发该 query 对应 consume 的 onError，模拟真实 SDK close→迭代器抛 abort 错；AC-6 回归测试断言 reload 后 status=active/onSessionEnd 未调/新 query 未误杀）
+- .sillyspec/docs/SillyHub/modules/daemon.md（变更索引加 ql-20260807-001 条目；ql-20260806-002 标注「必要前提非完整修复，真实根因见 001」）
+
+需求：修复切换供应商热切换 reload 后运行中会话被错误标 ended 的并发 bug。
+根因：reloadWithProvider close 旧 query 时 SDK 迭代器抛 abort 错（Claude Code process aborted by user）→ driver consume catch → onError 静默 fail(sessionId)；reload 后 status=active 绕过 fail 守卫（只挡 ended/failed）→ _terminateSession 把新 session 打成 failed + close 新 query + onSessionEnd（backend ended）。ql-20260806-002 的 close 后移只是必要前提未堵此洞，mock consume 永不抛错致测试漏。
+方案：_runConsume 加 isAuthoritative orphan 谓词（target===state.query），onError/catch/onResult/onMessage 入口判 orphan 静默 no-op；成立前提=c40b1319 先替换 state.query 再 close。加 AC-6 测试用 makeMockDriverWithAbortOnClose 模拟真实 close→抛错→onError。
+结果：tsc --noEmit exit0；reload-provider 11 passed（含新 AC-6）；反向验证临时禁用守卫 AC-6 FAIL 复现 status=failed 证测试有效；daemon rebuild+部署待做。
+## ql-20260807-002-cc75 | 2026-08-07 10:13:14 | 修复切换/停止供应商后 reload 运行中会话被 ended
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/input-queue.ts（新增 resetForResubscribe：reload 热切换前重置 _subscribed 订阅标记 + 清旧 _pending waiter，保留 _buffer pending inject，让新 query 能合法订阅同一队列——InputQueue 原单订阅设计第二次 [Symbol.asyncIterator] 抛 SessionQueueDoubleSubscribeError）
+- sillyhub-daemon/src/interactive/session-manager.ts（reloadWithProvider driver.start 前调 inputQueue.resetForResubscribe + buildSpawnEnv 后强制 newEnv.CLAUDE_CONFIG_DIR=daemon 隔离目录；顶部 import CLAUDE_CONFIG_DIR from config.ts）
+- .sillyspec/docs/SillyHub/modules/daemon.md（变更索引加 ql-20260807-002 真实根因条目；ql-001 orphan 守卫 + ql-006-002 close 后移标注为部分修复，ended 真正主因指向 002）
+
+需求：修复切换/停止供应商后 reload 运行中会话被 ended。
+根因：reload 复用 state.inputQueue 但 InputQueue 单订阅（_subscribed），create 时 SDK 已订阅，reload 新 query 第二次订阅抛 SessionQueueDoubleSubscribeError → SDK query abort（Operation aborted）→ onError → fail → onSessionEnd → backend end_session → session ended；停止（provider_config=null）buildSpawnEnv 不设 CLAUDE_CONFIG_DIR 回退 ~/.claude 但 jsonl 在 daemon claude-config → resume 找不到 → 启动失败 → fail。
+方案：InputQueue 加 resetForResubscribe（reload driver.start 前 reset _subscribed+清旧 _pending，保留 _buffer pending inject）+ reloadWithProvider buildSpawnEnv 后强制 CLAUDE_CONFIG_DIR=daemon 隔离目录（停止也保持 jsonl 一致）；诊断日志（end-diag）全移除。
+结果：tsc exit0；reload-provider 11 + input-queue 16 单测过；实测切换→停止→再切换四次 reload session 保持 active（DB status=active ended_at=空，daemon.log reload-diag success 无 fail）。
+## ql-20260807-003-0c1b | 2026-08-07 13:03:03 | 排查 /model 偶发空白（重新进入才显示）
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/session-manager.ts（_runConsume 的 onResult/onMessage 改 async+await，driver consume 串行等每条上报 HTTP 完成保证 message 先 result 落库/SSE——防御性修复，非 /model 主因但避免 close 先 message 后前端不渲染）
+- sillyhub-daemon/tests/interactive/session-manager-reload-provider.test.ts（AC-3a 断言更新：ql-002 停止路径强制 CLAUDE_CONFIG_DIR 后不再 undefined，旧 toBeUndefined 断言过时——ql-002 遗留测试债）
+- .sillyspec/docs/SillyHub/modules/daemon.md（变更索引加 ql-003 条目：/model 空白根因[inject 时序] + cb async 防御 + AC-3a + C 方案待完整流程）
+
+需求：排查 /model 偶发空白（重新进入才显示）。
+根因：inject 在新会话 create_session 完成前到 daemon，daemon session 不存在直接丢 inject（不重试），/model 没进 claude；backend inject 只查 DB active 不查 daemon ready。
+方案：本 quick 顺带 cb async 防御（_runConsume onResult/onMessage 改 async+await 串行保证 message 先 result）+ AC-3a 更新（ql-002 遗留测试债）；/model 真正修复 C 方案转完整流程。
+结果：tsc 0；reload-provider 11 + input-queue 16 单测过；cb async + AC-3a 落地。

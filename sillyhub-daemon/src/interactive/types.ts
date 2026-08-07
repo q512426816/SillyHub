@@ -22,6 +22,10 @@ import type {
   InteractiveDriverMessage,
   InteractiveDriverResult,
 } from './driver.js';
+// task-07（provider-switch-live-session / D-002@v1）：SessionState.pendingSwitch
+// 字段引用中性 ProviderConfig（与 claim payload 同源，backend 解密后下发；仅在
+// daemon 内存态持有，不落盘）。type-only，避免运行时循环依赖。
+import type { ProviderConfig } from '../types.js';
 
 /** session 生命周期状态。 */
 export type SessionStatus =
@@ -171,6 +175,23 @@ export interface SessionState {
    * 下推 PolicyCache.update 做，不经 SessionManager）。
    */
   effectiveAllowedRoots?: string[];
+  /**
+   * task-07（provider-switch-live-session / D-002@v1）：待处理的供应商热切换标记。
+   *
+   * 来源：backend set/unset_default → WS PROVIDER_CONFIG_CHANGED → daemon →
+   * ``SessionManager.markPendingSwitch``。生成中 turn（status=running）收到切换时
+   * 仅覆盖写本字段，**严格不中断**当前 turn；turn 收尾（``_onResult``）检测到本字段
+   * 非空 → 清标记并调 ``reloadWithProvider`` 在 turn 边界完成切换（D-002@v1 等 turn
+   * 边界语义）。空闲 session 收到切换由 markPendingSwitch 立即 reload，**不**写本字段。
+   *
+   * 结构 ``{ providerConfig }``：providerConfig 为新供应商配置；null 表示停止
+   *（回退 daemon 宿主机本机凭证，D-004@v1，第 0 层 env 跳过）。
+   *
+   * **仅内存态**：不进 snapshotPersistable 白名单（禁止落盘——daemon 重启后由
+   * lease/claim 重新注入当前默认供应商，不恢复 pendingSwitch）。覆盖写幂等
+   *（WS 重放同一/不同切换均覆盖，不累积，design R-02）。
+   */
+  pendingSwitch?: { providerConfig: ProviderConfig | null };
 }
 
 /** CreateSessionInput（daemon._startInteractiveSession → SessionManager.create）。 */

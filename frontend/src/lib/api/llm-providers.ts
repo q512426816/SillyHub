@@ -14,6 +14,7 @@
  */
 
 import { apiFetch } from "@/lib/api";
+import type { components } from "@/lib/api-types";
 
 // ── 嵌套结构 ────────────────────────────────────────────────────────────
 
@@ -105,6 +106,20 @@ export interface LlmProviderList {
   total: number;
 }
 
+/**
+ * set/unset-default 统一响应（task-09 / FR-07）。
+ *
+ * 直接引用 OpenAPI 生成类型（`pnpm gen:types` 产出，规则20 禁止手写同名）：
+ * - `switched`：本次 set/unset 是否成功变更 is_default（set 凭证探测失败回滚时为 false；
+ *   unset 恒为 true）；
+ * - `affected_sessions`：notify 成功投递的 active interactive session 计数（D-001）；
+ *   0=无运行中会话或 notify 异常 → 立即生效 / 无会话受影响；
+ * - `error`：set 凭证探测失败原因（仅 switched=false 时有值）；成功 / unset 为 null。
+ *
+ * 前端据此区分 toast：立即生效 / 等 turn 边界 / 凭证失败（task-09）。
+ */
+export type SetDefaultResult = components["schemas"]["SetDefaultResult"];
+
 // ── 表单值契约（task-11 provides: LlmProviderFormValues）─────────────────
 
 /**
@@ -168,11 +183,17 @@ export async function deleteProvider(id: string): Promise<void> {
   });
 }
 
-/** 设为默认/「启动」（同 user×agent_kind 互斥，后端事务内先清兄弟行）。 */
+/**
+ * 设为默认/「启动」（同 user×agent_kind 互斥，后端事务内先清兄弟行）。
+ *
+ * task-09：返回 `SetDefaultResult`（switched/affected_sessions/error），供调用方
+ * 区分立即生效（switched=true + sessions=0）/ 等 turn 边界（switched=true +
+ * sessions>0）/ 凭证失败（switched=false + error）三种状态，对应不同 toast。
+ */
 export async function setDefaultProvider(
   id: string,
-): Promise<LlmProviderRead> {
-  return apiFetch<LlmProviderRead>(
+): Promise<SetDefaultResult> {
+  return apiFetch<SetDefaultResult>(
     `/api/llm-providers/${encodeURIComponent(id)}/set-default`,
     { method: "POST" },
   );
@@ -182,11 +203,14 @@ export async function setDefaultProvider(
  * 取消默认/「停止」（对称 setDefaultProvider）。取消本行默认，不清兄弟。
  * 若取消后该用户×agent_kind 无任何默认 → lease 不再下发 provider_config
  * → daemon 回归本机凭证管理（design §9 D-007）。
+ *
+ * task-09：返回 `SetDefaultResult`（unset 不探测，恒 switched=true + error=null），
+ * `affected_sessions` 表示将回退本机凭证的运行中会话数。
  */
 export async function unsetDefaultProvider(
   id: string,
-): Promise<LlmProviderRead> {
-  return apiFetch<LlmProviderRead>(
+): Promise<SetDefaultResult> {
+  return apiFetch<SetDefaultResult>(
     `/api/llm-providers/${encodeURIComponent(id)}/unset-default`,
     { method: "POST" },
   );

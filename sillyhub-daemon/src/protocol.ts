@@ -12,6 +12,8 @@
  * @module protocol
  */
 
+import type { ProviderConfig } from './types.js';
+
 // ── WebSocket 消息类型 ───────────────────────────────────────────────────────
 // 值形如 `daemon:<action>`，前缀 `daemon:` 不可漏。
 
@@ -160,6 +162,28 @@ export const MSG = {
    * 轮询）由 taskRunner.cancel 内部保证（design §10 R-06）。
    */
   LEASE_CANCEL: 'daemon:lease_cancel',
+
+  /**
+   * Server → Daemon：运行中会话的供应商热切换指令（change
+   * 2026-08-06-provider-switch-live-session task-06 / FR-04 / D-002@v1 / design §5 Wave2）。
+   *
+   * backend set/unset_default 经 ws_hub.send_to_runtime 即时推送（best-effort，
+   * 失败由心跳轮询兜底，与 LEASE_CANCEL 同模式）。daemon 收到后调
+   * ``SessionManager.markPendingSwitch(sessionId, providerConfig)``：
+   *   - 空闲 session（status=active 且无在跑 turn）→ 立即 reload（task-08 实现）
+   *   - 生成中 turn → 仅覆盖写 ``state.pendingSwitch``，**严格不中断**当前 turn，
+   *     turn 收尾（_onResult）检测标记后在 turn 边界完成 reload（D-002@v1 等 turn 边界语义）
+   *
+   * payload: ``ProviderConfigChangedPayload``（snake_case，与 backend task-02
+   * ``DAEMON_MSG_PROVIDER_CONFIG_CHANGED`` 同名常量逐字对齐）。
+   * ``provider_config=null`` 表停止 → 回退 daemon 宿主机本机凭证（D-004@v1 第 0 层 env 跳过），
+   * daemon 透传 null 给 markPendingSwitch 不拦截。
+   *
+   * 纯新增消息，旧 daemon 收到走 default 仅 warn（向后兼容 design §9）。
+   * 双触发（WS 即时 + 心跳轮询兜底）幂等：markPendingSwitch 覆盖写 pendingSwitch 不累积，
+   * reloadWithProvider 内部保证幂等（design R-02 / R-06 同 LEASE_CANCEL）。
+   */
+  PROVIDER_CONFIG_CHANGED: 'daemon:provider_config_changed',
 } as const;
 
 /** WebSocket 消息类型联合（字面量），用于 DaemonMessage.type。 */
@@ -202,6 +226,25 @@ export interface SessionInjectPayload {
 export interface SessionControlPayload {
   session_id: string;
   lease_id: string;
+}
+
+/**
+ * PROVIDER_CONFIG_CHANGED payload（Server → Daemon，FR-04 / D-002@v1 / design §5 Wave2）。
+ *
+ * 触发 daemon ``SessionManager.markPendingSwitch(sessionId, providerConfig)``：
+ * 空闲 session 立即 reload；生成中 turn 仅覆盖写 ``state.pendingSwitch`` 不中断，
+ * turn 收尾受控切换（design G1/G2）。字段 snake_case 与 backend task-02
+ * ``DAEMON_MSG_PROVIDER_CONFIG_CHANGED`` payload 逐字对齐（任一字符漂移即契约单测失败）。
+ *
+ * ``provider_config=null`` 表停止（用户 unset_default）→ daemon 透传 null，
+ * reloadWithProvider 第 0 层 env 跳过 → 回退宿主机本机凭证（D-004@v1）。
+ * daemon 入口 snake/camel 双写归一化（同 SESSION_INJECT 风格，ql-20260616-006）。
+ */
+export interface ProviderConfigChangedPayload {
+  /** 目标会话 ID（agent_sessions.id，UUID 字符串）。 */
+  session_id: string;
+  /** 新供应商配置；null 表示停止（回退本机凭证，D-004@v1）。 */
+  provider_config: ProviderConfig | null;
 }
 
 /**

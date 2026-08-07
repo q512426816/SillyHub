@@ -6,7 +6,9 @@ created_at: 2026-08-05T22:52:51+08:00
 scale: large
 tier: self
 status: drafting
+risk_level: unit-sufficient
 ---
+
 
 # /settings/skills 技能内容查看器
 

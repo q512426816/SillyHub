@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.crypto import get_cipher
 from app.core.errors import PermissionDenied
 from app.modules.llm_provider.model import LlmProvider
+from app.modules.llm_provider.probe import ProviderProbeResult
 from app.modules.llm_provider.schema import LlmProviderCreate, LlmProviderUpdate
 from app.modules.llm_provider.service import LlmProviderNotFound, LlmProviderService
 
@@ -96,6 +97,40 @@ async def _seed_provider_row(
     await session.commit()
     await session.refresh(row)
     return row
+
+
+# ── task-03 probe/notify mock 夹具 ─────────────────────────────────────────────
+
+
+@pytest.fixture
+def mock_probe_notify(monkeypatch: pytest.MonkeyPatch) -> None:
+    """task-03（change 2026-08-06-provider-switch-live-session）：``set_default`` /
+    ``unset_default`` 现调用真实 ``probe_provider``（HTTP 网络）+ ``notify_provider_switch``
+    （DB JOIN ``agent_sessions`` / ``daemon_task_leases`` + WS 推送）。
+
+    现有 ``is_default`` 互斥测试只断言 DB 行状态（``is_default`` 是否正确互斥清/置），
+    与热切换副作用解耦 —— 真实网络会 timeout/fail（probe 返 ``ok=False`` → set_default
+    回滚不置位 → 互斥断言失败），且 SQLite 测试库无 ``agent_sessions`` 表（notify JOIN
+    报 ``no such table``）。本夹具 patch 源模块替换为 no-op AsyncMock，仅作用于显式声明
+    该夹具的测试（其它测试不受影响）。
+
+    patch 目标是**源模块**而非 ``service.probe_provider``：因 probe.py 顶层
+    ``from ...service import LlmProviderService`` 与 service.py 互循环，service 内
+    改用函数内 ``from ...probe import probe_provider`` lazy import（同 ``ws_hub`` /
+    ``spawn-env`` 范式）。lazy import 在调用时按属性查找源模块当前绑定 → patch
+    ``app.modules.llm_provider.probe.probe_provider`` 即生效。
+    """
+
+    async def _fake_probe(*_args: object, **_kwargs: object) -> ProviderProbeResult:
+        return ProviderProbeResult(ok=True)
+
+    async def _fake_notify(*_args: object, **_kwargs: object) -> int:
+        return 0
+
+    monkeypatch.setattr("app.modules.llm_provider.probe.probe_provider", _fake_probe)
+    monkeypatch.setattr(
+        "app.modules.daemon.lease.provider_switch.notify_provider_switch", _fake_notify
+    )
 
 
 # ── CRUD 全链路 ───────────────────────────────────────────────────────────────
@@ -383,27 +418,41 @@ class TestIsDefaultMutex:
 
     @pytest.mark.asyncio
     async def test_set_default_clears_sibling_same_agent_kind(
-        self, db_session: AsyncSession
+        self, db_session: AsyncSession, mock_probe_notify: None
     ) -> None:
-        """set_default 链：set_default(A) → set_default(B) → A 清、B 默认。"""
+        """set_default 链：set_default(A) → set_default(B) → A 清、B 默认。
+
+        task-03：set_default 现调 probe_provider + notify_provider_switch，``mock_probe_notify``
+        夹具 patch 两者避免真实网络 / WS（仅验 R-05 互斥 DB 不变量）。
+        """
         user_id = await _create_user(db_session, label="a")
         svc = LlmProviderService(db_session)
         a = await svc.create(user_id, _create_payload(name="a"))
         b = await svc.create(user_id, _create_payload(name="b"))
 
-        await svc.set_default(a.id, user_id)
+        result_a = await svc.set_default(a.id, user_id)
         await db_session.refresh(b)
         assert a.is_default is True
         assert b.is_default is False
+        # task-03：返回 DefaultSwitchResult（probe ok=True → switched=True）
+        assert result_a.switched is True
+        assert result_a.error is None
 
-        await svc.set_default(b.id, user_id)
+        result_b = await svc.set_default(b.id, user_id)
         await db_session.refresh(a)
         assert a.is_default is False  # 被 B 顶掉
         assert b.is_default is True
+        assert result_b.switched is True
 
     @pytest.mark.asyncio
-    async def test_at_most_one_default_per_user_agent_kind(self, db_session: AsyncSession) -> None:
-        """任意操作序列下，同 (user_id, agent_kind='claude') 默认数恒 ≤ 1（不变式守护）。"""
+    async def test_at_most_one_default_per_user_agent_kind(
+        self, db_session: AsyncSession, mock_probe_notify: None
+    ) -> None:
+        """任意操作序列下，同 (user_id, agent_kind='claude') 默认数恒 ≤ 1（不变式守护）。
+
+        task-03：``svc.set_default(c.id, ...)`` 调 probe + notify，``mock_probe_notify``
+        夹具 patch 两者（``update`` 路径未改造，不需 patch）。
+        """
         user_id = await _create_user(db_session, label="a")
         svc = LlmProviderService(db_session)
 
@@ -474,14 +523,23 @@ class TestIsDefaultMutex:
         assert defaults == []
 
     @pytest.mark.asyncio
-    async def test_unset_default_clears_active_to_zero(self, db_session: AsyncSession) -> None:
-        """unset_default（cc-switch「停止」）：唯一默认被取消 → 同组默认数归零（全停→本地）。"""
+    async def test_unset_default_clears_active_to_zero(
+        self, db_session: AsyncSession, mock_probe_notify: None
+    ) -> None:
+        """unset_default（cc-switch「停止」）：唯一默认被取消 → 同组默认数归零（全停→本地）。
+
+        task-03：unset_default 现调 notify_provider_switch（推 null 回退本机 D-004），
+        ``mock_probe_notify`` 夹具 patch 避免真实 DB JOIN / WS。
+        """
         user_id = await _create_user(db_session, label="a")
         svc = LlmProviderService(db_session)
         a = await svc.create(user_id, _create_payload(name="a", is_default=True))
         b = await svc.create(user_id, _create_payload(name="b"))  # default=False
 
-        await svc.unset_default(a.id, user_id)
+        result = await svc.unset_default(a.id, user_id)
+        # task-03：返回 DefaultSwitchResult（unset 不探测，恒 switched=True）
+        assert result.switched is True
+        assert result.error is None
 
         await db_session.refresh(a)
         await db_session.refresh(b)
@@ -496,18 +554,32 @@ class TestIsDefaultMutex:
         assert defaults == []  # 全停 → lease 不注入 provider_config（D-007 回归本地）
 
     @pytest.mark.asyncio
-    async def test_unset_default_idempotent_on_non_default(self, db_session: AsyncSession) -> None:
-        """对本就 False 的行 unset_default 是 no-op（幂等，不抛错）。"""
+    async def test_unset_default_idempotent_on_non_default(
+        self, db_session: AsyncSession, mock_probe_notify: None
+    ) -> None:
+        """对本就 False 的行 unset_default 是 no-op（幂等，不抛错）。
+
+        task-03 契约更新：unset_default 返回 ``DefaultSwitchResult``（switched /
+        affected_sessions / error），不再返回 ORM 行。幂等性体现为多次调用均返回
+        ``switched=True`` 且不抛错；DB 行的 ``is_default`` 仍经 ``db_session.refresh``
+        验证保持 False。
+        """
         user_id = await _create_user(db_session, label="a")
         svc = LlmProviderService(db_session)
         a = await svc.create(user_id, _create_payload(name="a"))  # default=False
 
-        row = await svc.unset_default(a.id, user_id)
+        result = await svc.unset_default(a.id, user_id)
 
-        assert row.is_default is False
-        # 再取消一次仍正常返回
-        row2 = await svc.unset_default(a.id, user_id)
-        assert row2.is_default is False
+        assert result.switched is True
+        assert result.affected_sessions == 0  # mock notify 返回 0
+        assert result.error is None
+        # 行确实仍为 False（幂等：对本就 False 的行是 no-op）
+        await db_session.refresh(a)
+        assert a.is_default is False
+        # 再取消一次仍正常返回（幂等）
+        result2 = await svc.unset_default(a.id, user_id)
+        assert result2.switched is True
+        assert result2.error is None
 
 
 # ── masked 不回明文（X-09）─────────────────────────────────────────────────
@@ -587,3 +659,273 @@ class TestMaskedNoLeak:
         fresh = await db_session.get(LlmProvider, row.id)
         assert fresh is not None
         assert len(fresh.encrypted_api_key) > 0
+
+
+# ── task-10：凭证失败回滚保留原默认（D-003 关键边界）──────────────────────────
+#
+# task-10「查漏补缺」：补 task-03 改造的关键边界——凭证探测失败时,service.set_default
+# 必须回滚（不改 is_default、不推送），**原默认（如有）继续服务运行中会话**（design G4
+# 不破坏）。task-05 router 的 ``test_probe_fail_returns_switched_false`` 只测了新建
+# provider 无原默认的分支；本组补「有原默认 A、set_default(B) 探测失败」链路,守护:
+#   - A.is_default 保持 True（不被清）;
+#   - B.is_default 保持 False（不被置位）;
+#   - notify_provider_switch 未被调（rollback 在 step1,notify 在 step3）;
+#   - DefaultSwitchResult.switched=False + error 透传。
+#
+# 同步覆盖 service ``not base_url or not api_key_plain`` 早返分支（缺凭证信号）,
+# 该分支在 task-01~09 均无测试。
+
+
+class TestSetDefaultCredentialsRollback:
+    """task-10 / D-003：凭证失败 / 缺凭证 → 回滚不改 DB、不推送、原默认保留。"""
+
+    @pytest.mark.asyncio
+    async def test_probe_fail_keeps_existing_default(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """原默认 A 存在 → set_default(B) 探测失败 → A 仍默认、B 未置位、不推送。
+
+        关键守护：set_default step2（清兄弟 + 置本行 True）在 step1 凭证探测失败时
+        绝不执行。``_clear_sibling_defaults`` 不会误清 A 的默认。
+        """
+        user_id = await _create_user(db_session, label="a")
+        svc = LlmProviderService(db_session)
+        # A 是默认（probe ok=True mock 让 A 设默认成功）。
+        a = await svc.create(
+            user_id,
+            _create_payload(
+                name="A-default",
+                api_key="sk-ant-validkey-aaaa",
+                is_default=True,
+            ),
+        )
+        # B 不是默认（待切换目标，probe 会失败）。
+        b = await svc.create(user_id, _create_payload(name="B-bad", api_key="sk-ant-willfail-bbbb"))
+        assert a.is_default is True
+        assert b.is_default is False
+
+        # mock probe 失败 + spy notify（验证未调用）。
+        async def _probe_fail(*_a: object, **_kw: object) -> ProviderProbeResult:
+            return ProviderProbeResult(ok=False, error="凭证无效：上游 401")
+
+        notify_calls: list[tuple] = []
+
+        async def _notify_spy(*args: object, **kwargs: object) -> int:
+            notify_calls.append((args, kwargs))
+            return 0
+
+        monkeypatch.setattr("app.modules.llm_provider.probe.probe_provider", _probe_fail)
+        monkeypatch.setattr(
+            "app.modules.daemon.lease.provider_switch.notify_provider_switch",
+            _notify_spy,
+        )
+
+        result = await svc.set_default(b.id, user_id)
+
+        # D-003 回滚：switched=False + error 透传。
+        assert result.switched is False
+        assert result.error == "凭证无效：上游 401"
+        assert result.affected_sessions == 0
+
+        # A 仍是默认（未被 step2 清兄弟误伤）。
+        await db_session.refresh(a)
+        await db_session.refresh(b)
+        assert a.is_default is True
+        assert b.is_default is False
+
+        # notify 未被调（rollback 在 step1,notify 在 step3）。
+        assert notify_calls == []
+
+    @pytest.mark.asyncio
+    async def test_probe_fail_does_not_clear_sibling_when_no_default(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """无原默认 → set_default(B) 探测失败 → 全组默认数仍为 0（无副作用写入）。
+
+        守护 service ``probe_result.ok=False`` 分支不会因任何边界（无原默认）误进入
+        step2 写入路径。
+        """
+        user_id = await _create_user(db_session, label="a")
+        svc = LlmProviderService(db_session)
+        a = await svc.create(user_id, _create_payload(name="A-none", api_key="sk-x-001"))
+        b = await svc.create(user_id, _create_payload(name="B-none", api_key="sk-x-002"))
+        assert a.is_default is False
+        assert b.is_default is False
+
+        async def _probe_fail(*_a: object, **_kw: object) -> ProviderProbeResult:
+            return ProviderProbeResult(ok=False, error="connect refused")
+
+        monkeypatch.setattr("app.modules.llm_provider.probe.probe_provider", _probe_fail)
+        monkeypatch.setattr(
+            "app.modules.daemon.lease.provider_switch.notify_provider_switch",
+            lambda *_a, **_kw: 0,
+        )
+
+        result = await svc.set_default(b.id, user_id)
+        assert result.switched is False
+        assert result.error == "connect refused"
+
+        # 全组默认数仍为 0（无任何写入）。
+        stmt = select(LlmProvider).where(
+            LlmProvider.user_id == user_id,
+            LlmProvider.agent_kind == "claude",
+            LlmProvider.is_default.is_(True),
+        )
+        defaults = (await db_session.execute(stmt)).scalars().all()
+        assert defaults == []
+
+    @pytest.mark.asyncio
+    async def test_missing_base_url_returns_not_switched(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """base_url=None → service 缺凭证信号分支 → switched=False + 标准缺凭证文案。
+
+        守护 service ``not base_url or not api_key_plain`` 早返分支（task-03 加入,
+        task-01~09 均未覆盖）。probe / notify 均不应被调（早返在 probe 之前）。
+        """
+        user_id = await _create_user(db_session, label="a")
+        svc = LlmProviderService(db_session)
+        # 直接插 ORM 绕过 schema（schema 允许 base_url=None,但需显式不传）。
+        cipher = get_cipher()
+        ct, key_id = cipher.encrypt("sk-needbaseurl-1234")
+        from app.modules.llm_provider.model import LlmProvider as _Provider
+
+        row = _Provider(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            name="no-base-url",
+            agent_kind="claude",
+            encrypted_api_key=ct,
+            key_id=key_id,
+            base_url=None,  # 缺 base_url
+            auth_field="ANTHROPIC_AUTH_TOKEN",
+            is_default=False,
+        )
+        db_session.add(row)
+        await db_session.commit()
+        await db_session.refresh(row)
+
+        # spy probe + notify（两者均不应被调）。
+        probe_calls: list[tuple] = []
+        notify_calls: list[tuple] = []
+
+        async def _probe_spy(*args: object, **kwargs: object) -> ProviderProbeResult:
+            probe_calls.append((args, kwargs))
+            return ProviderProbeResult(ok=True)
+
+        async def _notify_spy(*args: object, **kwargs: object) -> int:
+            notify_calls.append((args, kwargs))
+            return 0
+
+        monkeypatch.setattr("app.modules.llm_provider.probe.probe_provider", _probe_spy)
+        monkeypatch.setattr(
+            "app.modules.daemon.lease.provider_switch.notify_provider_switch",
+            _notify_spy,
+        )
+
+        result = await svc.set_default(row.id, user_id)
+
+        assert result.switched is False
+        assert result.affected_sessions == 0
+        # 标准缺凭证文案（service 层统一）。
+        assert result.error is not None
+        assert "base_url" in result.error or "API Key" in result.error
+        # 早返在 probe 之前 → probe / notify 均未调用。
+        assert probe_calls == []
+        assert notify_calls == []
+        # DB 行未被改动。
+        await db_session.refresh(row)
+        assert row.is_default is False
+
+    @pytest.mark.asyncio
+    async def test_missing_api_key_returns_not_switched(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """api_key 为空明文（cipher 加密 ""）→ 缺凭证信号 → switched=False。
+
+        守护 ``not api_key_plain`` 分支（与 base_url 同分支,独立 case 守护文案归属）。
+        """
+        user_id = await _create_user(db_session, label="a")
+        svc = LlmProviderService(db_session)
+        # 用 service.create 走真实加密（api_key=None → encrypt("")）。
+        row = await svc.create(
+            user_id,
+            _create_payload(
+                name="empty-key",
+                api_key=None,
+                base_url="https://api.anthropic.com",
+            ),
+        )
+
+        probe_calls: list[tuple] = []
+        notify_calls: list[tuple] = []
+
+        async def _probe_spy(*args: object, **kwargs: object) -> ProviderProbeResult:
+            probe_calls.append((args, kwargs))
+            return ProviderProbeResult(ok=True)
+
+        async def _notify_spy(*args: object, **kwargs: object) -> int:
+            notify_calls.append((args, kwargs))
+            return 0
+
+        monkeypatch.setattr("app.modules.llm_provider.probe.probe_provider", _probe_spy)
+        monkeypatch.setattr(
+            "app.modules.daemon.lease.provider_switch.notify_provider_switch",
+            _notify_spy,
+        )
+
+        result = await svc.set_default(row.id, user_id)
+
+        assert result.switched is False
+        assert result.affected_sessions == 0
+        assert result.error is not None
+        assert "API Key" in result.error or "base_url" in result.error
+        assert probe_calls == []
+        assert notify_calls == []
+
+    @pytest.mark.asyncio
+    async def test_set_default_success_dispatches_notify(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """对照：probe ok=True → notify 被调一次（正向链路,锁定 rollback 测试组的行为基线）。
+
+        与上面 rollback 测试对照：探测成功时 service 必经 step2 → step3,notify 必被调,
+        参数为 (session, user_id, provider_config dict)。这把「未调 notify」断言锁死
+        为「rollback 真未调」而非「mock 装错」。
+        """
+        user_id = await _create_user(db_session, label="a")
+        svc = LlmProviderService(db_session)
+        a = await svc.create(
+            user_id,
+            _create_payload(name="A-ok", api_key="sk-ant-okaykey-0011"),
+        )
+
+        async def _probe_ok(*_a: object, **_kw: object) -> ProviderProbeResult:
+            return ProviderProbeResult(ok=True)
+
+        notify_calls: list[tuple] = []
+
+        async def _notify_spy(*args: object, **kwargs: object) -> int:
+            notify_calls.append((args, kwargs))
+            return 2  # 模拟 2 条 active session 投递成功
+
+        monkeypatch.setattr("app.modules.llm_provider.probe.probe_provider", _probe_ok)
+        monkeypatch.setattr(
+            "app.modules.daemon.lease.provider_switch.notify_provider_switch",
+            _notify_spy,
+        )
+
+        result = await svc.set_default(a.id, user_id)
+
+        # 成功：switched=True,affected_sessions 透传 notify 返回值。
+        assert result.switched is True
+        assert result.affected_sessions == 2
+        assert result.error is None
+        # notify 被调一次,参数含 user_id + provider_config dict（非 None）。
+        assert len(notify_calls) == 1
+        args, _kwargs = notify_calls[0]
+        # (session, user_id, provider_config) 位置参数。
+        provider_config = args[2]
+        assert isinstance(provider_config, dict)
+        assert "api_key" in provider_config
+        assert provider_config["agent_kind"] == "claude"

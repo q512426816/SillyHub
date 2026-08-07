@@ -6,7 +6,7 @@
 schema_version: 1
 project: SillyHub
 source_commit: 6e78b29a
-generated_at: 2026-07-27 01:18:13
+generated_at: 2026-08-06 21:20:00
 generator: sillyspec-scan
 
 modules:
@@ -119,9 +119,10 @@ modules:
       - daemon.permission_service
       - daemon.session.service.DaemonSessionService
       - daemon.ws_hub.WSHub
-      - daemon.protocol
+      - daemon.protocol（含 PROVIDER_CONFIG_CHANGED WS 消息，2026-08-06-provider-switch-live-session）
+      - daemon.lease.provider_switch（notify_provider_switch 查 active session 按 daemon 分组推送，2026-08-06-provider-switch-live-session）
       - sillyhub-daemon: Daemon, RecoveryCoordinator, task-runner, hub-client, ws-client
-      - sillyhub-daemon/interactive
+      - sillyhub-daemon/interactive（session 热切换 markPendingSwitch/reloadWithProvider resume，2026-08-06-provider-switch-live-session）
     depends_on: [core, models, agent, runtime, worktree]
     used_by: [agent, workflow, frontend_components]
     needs_review: false
@@ -531,11 +532,12 @@ modules:
     tags: [backend, llm, provider]
     aliases: [llm-providers, cc-switch]
     entrypoints:
-      - APIRouter prefix=/llm-providers tags=[llm_provider]（CRUD + 启停/set-default）
+      - APIRouter prefix=/llm-providers tags=[llm_provider]（CRUD + 启停/set-default 返回 SetDefaultResult）
     main_symbols:
-      - llm_provider.service.LlmProviderService（list/get/create/update/delete）
+      - llm_provider.service.LlmProviderService（list/get/create/update/delete/set_default/unset_default 热切换+凭证探测+回滚）
+      - llm_provider.probe（probe_provider 凭证探测）
       - llm_provider.model.LlmProvider
-      - llm_provider.router
+      - llm_provider.router（set/unset-default 返回 SetDefaultResult）
     depends_on: [core, models]
     used_by: [agent, daemon]
     needs_review: false

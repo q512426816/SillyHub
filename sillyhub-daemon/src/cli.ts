@@ -729,6 +729,14 @@ export async function startAction(opts: StartOptions): Promise<number> {
         void ctx;
         return Object.keys(result).length > 0 ? result : undefined;
       },
+      // task-08（FR-05 / D-004@v1）：reloadWithProvider 构造新 env 的本机凭证管理器。
+      // 复用同一 credentialMgr（与 daemon._credentialManager 同源），让停止场景
+      //（provider_config=null）reload 后子进程仍能读 credentials.json 的 ANTHROPIC
+      // token（buildSpawnEnv 第 2 层不再 noop 跳过）。CredentialManager 直接满足
+      // SpawnCredentialManager 鸭子接口（get/buildEnv 两方法，对齐 daemon.ts:3136
+      // create 路径的 this._credentialManager ?? noopCredential）。credentialMgr 在
+      // line 536 已构造（早于 SessionManager），此处零时序问题。
+      credentialManager: credentialMgr,
     },
   );
   // gap-8（interactive 凭证 parity）：把同一 CredentialManager 传给 Daemon，让

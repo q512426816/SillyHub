@@ -35,12 +35,16 @@ import {
   listProviders,
   queryUsage,
   detectUsageProvider,
+  setDefaultProvider,
+  unsetDefaultProvider,
   type LlmProviderRead,
 } from "@/lib/api/llm-providers";
 
 const mockedList = listProviders as ReturnType<typeof vi.fn>;
 const mockedQueryUsage = queryUsage as ReturnType<typeof vi.fn>;
 const mockedDetect = detectUsageProvider as ReturnType<typeof vi.fn>;
+const mockedSetDefault = setDefaultProvider as ReturnType<typeof vi.fn>;
+const mockedUnsetDefault = unsetDefaultProvider as ReturnType<typeof vi.fn>;
 
 const baseProvider = (over: Partial<LlmProviderRead>): LlmProviderRead => ({
   id: "p-x",
@@ -86,6 +90,17 @@ describe("LlmProviderSection — 用量挂载 + 自动查（task-09 / D-006）",
       success: true,
       data: [{ plan_name: "CNY", remaining: 10, total: null, used: null, unit: "CNY" }],
     });
+    // task-09：set/unset-default 返回 SetDefaultResult，handler 读取 result.switched 等字段
+    mockedSetDefault.mockResolvedValue({
+      switched: true,
+      affected_sessions: 0,
+      error: null,
+    });
+    mockedUnsetDefault.mockResolvedValue({
+      switched: true,
+      affected_sessions: 0,
+      error: null,
+    });
   });
 
   it("进页面自动对可查供应商查一次用量，不可查的不查", async () => {
@@ -124,6 +139,72 @@ describe("LlmProviderSection — 用量挂载 + 自动查（task-09 / D-006）",
 
     expect(
       await screen.findByText("该供应商暂不支持余额查询"),
+    ).toBeInTheDocument();
+  });
+});
+
+// task-09：set/unset-default 按 SetDefaultResult 显示 toast（成功带 affected_sessions / 凭证失败带 error）
+describe("LlmProviderSection — 启动/停止结果 toast（task-09 / FR-07）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedList.mockResolvedValue([DETECTABLE]);
+    mockedDetect.mockReturnValue("balance");
+    mockedQueryUsage.mockResolvedValue({ success: true, data: [] });
+  });
+
+  it("启动成功 + affected_sessions>0 → 提示「将在当前回复完成后切换」", async () => {
+    mockedSetDefault.mockResolvedValue({
+      switched: true,
+      affected_sessions: 3,
+      error: null,
+    });
+    render(
+      <AntdProviders>
+        <LlmProviderSection />
+      </AntdProviders>,
+    );
+    const btn = await screen.findByRole("button", { name: /启动/ });
+    btn.click();
+    expect(
+      await screen.findByText(
+        /已启动「DeepSeek 测试」，3 个运行中会话将在当前回复完成后切换/,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("启动成功 + 无运行中会话 → 提示「立即生效」", async () => {
+    mockedSetDefault.mockResolvedValue({
+      switched: true,
+      affected_sessions: 0,
+      error: null,
+    });
+    render(
+      <AntdProviders>
+        <LlmProviderSection />
+      </AntdProviders>,
+    );
+    const btn = await screen.findByRole("button", { name: /启动/ });
+    btn.click();
+    expect(
+      await screen.findByText(/已启动「DeepSeek 测试」（立即生效）/),
+    ).toBeInTheDocument();
+  });
+
+  it("启动失败（switched=false）→ 显示后端 error 原因", async () => {
+    mockedSetDefault.mockResolvedValue({
+      switched: false,
+      affected_sessions: 0,
+      error: "API Key 无效：401 Unauthorized",
+    });
+    render(
+      <AntdProviders>
+        <LlmProviderSection />
+      </AntdProviders>,
+    );
+    const btn = await screen.findByRole("button", { name: /启动/ });
+    btn.click();
+    expect(
+      await screen.findByText("API Key 无效：401 Unauthorized"),
     ).toBeInTheDocument();
   });
 });

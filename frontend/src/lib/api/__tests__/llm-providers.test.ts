@@ -152,20 +152,33 @@ describe("llm-providers API — method + path", () => {
     expect(h.lastUrl()).toContain("/api/llm-providers/p-1");
   });
 
-  it("setDefaultProvider → POST /api/llm-providers/{id}/set-default（无 body）", async () => {
-    const h = mockFetch({ status: 200, body: READ });
-    await setDefaultProvider("p-1");
+  it("setDefaultProvider → POST /api/llm-providers/{id}/set-default（无 body）返回 SetDefaultResult", async () => {
+    // task-09：返回体由 LlmProviderRead 改为 SetDefaultResult（switched/affected_sessions/error）
+    const h = mockFetch({
+      status: 200,
+      body: { switched: true, affected_sessions: 2, error: null },
+    });
+    const result = await setDefaultProvider("p-1");
     expect(h.lastMethod()).toBe("POST");
     expect(h.lastUrl()).toContain("/api/llm-providers/p-1/set-default");
     expect(h.lastBody()).toBeNull();
+    expect(result.switched).toBe(true);
+    expect(result.affected_sessions).toBe(2);
+    expect(result.error).toBeNull();
   });
 
-  it("unsetDefaultProvider → POST /api/llm-providers/{id}/unset-default（无 body）", async () => {
-    const h = mockFetch({ status: 200, body: READ });
-    await unsetDefaultProvider("p-1");
+  it("unsetDefaultProvider → POST /api/llm-providers/{id}/unset-default（无 body）返回 SetDefaultResult", async () => {
+    const h = mockFetch({
+      status: 200,
+      body: { switched: true, affected_sessions: 0, error: null },
+    });
+    const result = await unsetDefaultProvider("p-1");
     expect(h.lastMethod()).toBe("POST");
     expect(h.lastUrl()).toContain("/api/llm-providers/p-1/unset-default");
     expect(h.lastBody()).toBeNull();
+    expect(result.switched).toBe(true);
+    expect(result.affected_sessions).toBe(0);
+    expect(result.error).toBeNull();
   });
 
   it("id 含特殊字符走 encodeURIComponent（不破坏路径）", async () => {

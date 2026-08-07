@@ -21,8 +21,8 @@ module_id: llm_provider
 - `GET /llm-providers/{id}` — 详情
 - `PATCH /llm-providers/{id}` — 更新（`api_key=None` 表示不动原密钥）
 - `DELETE /llm-providers/{id}` — 删除（204）
-- `POST /llm-providers/{id}/set-default` — 「启动」：置本行默认，并清同组兄弟
-- `POST /llm-providers/{id}/unset-default` — 「停止」：仅置本行 `is_default=False`，**不清兄弟**，幂等
+- `POST /llm-providers/{id}/set-default` — 「启动」：先凭证探测（probe.py `probe_provider`），通过则置本行默认+清同组兄弟+触发 `notify_provider_switch` 热切换；失败回滚不改默认。返回 `SetDefaultResult{switched,affected_sessions,error}`（2026-08-06-provider-switch-live-session）
+- `POST /llm-providers/{id}/unset-default` — 「停止」：置本行 `is_default=False`+触发 notify 推 `provider_config=null`（回退本机凭证）。返回 `SetDefaultResult`（幂等，**不清兄弟**）
 
 数据契约（`schema.py`）：
 

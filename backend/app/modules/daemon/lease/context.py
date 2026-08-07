@@ -59,6 +59,61 @@ def _normalize_lease_provider(raw: str | None) -> str | None:
     return raw
 
 
+async def resolve_default_provider_config(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    agent_kind: str,
+) -> dict | None:
+    """查用户默认 LlmProvider 并构造中性 provider_config(D-006 单一真相源)。
+
+    change 2026-08-06-provider-switch-live-session / task-02 / FR-06 / D-005@v1。
+    供 claim 路径(``_inject_provider_config``)与 set_default 即时下发(task-03/04)
+    共用,避免两处各写一份「查默认 + 解密 + 构造」逻辑。
+
+    查询口径(D-008 owner 级 + R-05 is_default 互斥):
+    ``user_id AND agent_kind AND is_default=True``,三者对齐才命中。
+
+    命中:经 ``get_cipher().decrypt`` 解密 api_key 明文,构造 9 字段中性 dict
+    (8 核心字段 + settings_config 原样透传,task-04 D-009),返回给调用方自行
+    决定如何注入 payload / WS push。未命中 → 返回 None,调用方按 D-007 不加
+    provider_config 键(claim)或不推送(set_default)。
+
+    R-02:明文 api_key 仅在返回 dict 内短暂存在,由调用方立即下发 daemon
+    spawn-env 后丢弃;不写 ORM/审计/日志。
+    """
+    from app.core.crypto import get_cipher
+    from app.modules.llm_provider.model import LlmProvider
+
+    stmt = (
+        select(LlmProvider)
+        .where(
+            LlmProvider.user_id == user_id,
+            LlmProvider.agent_kind == agent_kind,
+            LlmProvider.is_default.is_(True),
+        )
+        .limit(1)
+    )
+    provider = (await session.execute(stmt)).scalars().first()
+    if provider is None:
+        return None
+
+    # 解密 api_key 明文(daemon spawn-env 注入 AUTH_TOKEN/AUTH_API_KEY 必需)
+    api_key_plain = get_cipher().decrypt(provider.encrypted_api_key, provider.key_id)
+    return {
+        "agent_kind": provider.agent_kind,
+        "base_url": provider.base_url,
+        "api_key": api_key_plain,
+        "auth_field": provider.auth_field,
+        "model": provider.model,
+        "model_role_mappings": provider.model_role_mappings,
+        "default_fallback_model": provider.default_fallback_model,
+        "extra_env": provider.extra_env,
+        # task-04(D-009 / design §5.2):原样透传 settings_config,不解密/不加工/不判空。
+        # None(含 task-01 brownfield 老行)照传 None,daemon 侧 ?.env ?? {} 链路判空。
+        "settings_config": provider.settings_config,
+    }
+
+
 async def _inject_provider_config(
     session: AsyncSession,
     lease: DaemonTaskLease,
@@ -117,40 +172,19 @@ async def _inject_provider_config(
     if agent_kind is None:
         return  # 无 agent_kind 信号 → 不注入
 
-    # ── 查默认 provider（owner 级 + agent_kind 对齐 + is_default=True）──
-    from app.core.crypto import get_cipher
-    from app.modules.llm_provider.model import LlmProvider
-
-    stmt = (
-        select(LlmProvider)
-        .where(
-            LlmProvider.user_id == user_id,
-            LlmProvider.agent_kind == agent_kind,
-            LlmProvider.is_default.is_(True),
-        )
-        .limit(1)
-    )
-    provider = (await session.execute(stmt)).scalars().first()
-    if provider is None:
+    # ── 查默认 provider + 构造 provider_config（D-006 单一真相源 helper）──
+    # change 2026-08-06-provider-switch-live-session / task-02：抽取
+    # ``resolve_default_provider_config`` 供 claim 与 set_default 即时下发共用,
+    # 避免两处各写一份查 provider + 解密 + 构造逻辑。helper 口径与原内联逻辑
+    # 完全一致(owner 级 + agent_kind 对齐 + is_default=True,解密 api_key,
+    # 9 字段中性 dict 含 settings_config 透传),对外行为零回归。
+    provider_config = await resolve_default_provider_config(session, user_id, agent_kind)
+    if provider_config is None:
         return  # D-007：用户未配默认 provider → absent
 
-    # 解密 api_key 明文（daemon spawn-env 注入 AUTH_TOKEN/AUTH_API_KEY 必需）
-    api_key_plain = get_cipher().decrypt(provider.encrypted_api_key, provider.key_id)
-    payload["provider_config"] = {
-        "agent_kind": provider.agent_kind,
-        "base_url": provider.base_url,
-        "api_key": api_key_plain,
-        "auth_field": provider.auth_field,
-        "model": provider.model,
-        "model_role_mappings": provider.model_role_mappings,
-        "default_fallback_model": provider.default_fallback_model,
-        "extra_env": provider.extra_env,
-        # task-04（D-009 / design §5.2）：原样透传 settings_config，不解密/不加工/不判空。
-        # None（含 task-01 brownfield 老行）照传 None，daemon 侧 ?.env ?? {} 链路判空。
-        "settings_config": provider.settings_config,
-    }
+    payload["provider_config"] = provider_config
     # X-10：provider.model（design §9 优先）→ default_fallback_model 覆盖 payload[model]
-    override_model = provider.model or provider.default_fallback_model
+    override_model = provider_config["model"] or provider_config["default_fallback_model"]
     if override_model:
         payload["model"] = override_model
 

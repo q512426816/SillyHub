@@ -1809,7 +1809,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Set Default Provider */
+        /**
+         * Set Default Provider
+         * @description 置本行为默认供应商（cc-switch 式「启动」）。
+         *
+         *     task-05（FR-07）：返回结构化 ``SetDefaultResult`` 三字段，供前端区分立即生效 /
+         *     等待 turn 边界 / 凭证失败三种状态。service 层 ``set_default`` 已在 task-03 改造为
+         *     返回 ``DefaultSwitchResult``（probe 凭证探测失败时 ``switched=False`` + ``error``
+         *     不置位、不推送，原供应商继续服务运行中会话，D-003）。
+         */
         post: operations["set_default_provider_api_llm_providers__provider_id__set_default_post"];
         delete?: never;
         options?: never;
@@ -1832,6 +1840,9 @@ export interface paths {
          *
          *     对称 ``set-default``（「启动」）：取消本行默认。若取消后该用户×agent_kind 无任何
          *     默认供应商 → lease 不再下发 provider_config → daemon 回归本机凭证管理（D-007）。
+         *
+         *     task-05（FR-07）：返回结构化 ``SetDefaultResult``（unset 不探测，恒
+         *     ``switched=True`` + ``error=None``）。
          */
         post: operations["unset_default_provider_api_llm_providers__provider_id__unset_default_post"];
         delete?: never;
@@ -14329,6 +14340,33 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
+        /**
+         * SetDefaultResult
+         * @description ``POST /api/llm-providers/{id}/set-default`` 与 ``unset-default`` 统一响应。
+         *
+         *     task-05（change 2026-08-06-provider-switch-live-session / FR-07）：把 task-03
+         *     service 层 ``DefaultSwitchResult``（dataclass）透传给前端的响应 DTO，供前端区分
+         *     立即生效（``switched=True`` + ``affected_sessions>0``）、等待 turn 边界
+         *     （``switched=True`` + ``affected_sessions=0``）与凭证失败（``switched=False`` +
+         *     ``error``）三种状态，对应不同 toast 文案（task-09）。
+         *
+         *     纯响应 DTO（无 ``from_attributes``）：router 显式按字段名从 ``DefaultSwitchResult``
+         *     构造，不直接 ``model_validate`` dataclass（风格对齐 ``UsageResult``）。
+         *
+         *     - ``switched``：本次 set/unset 是否成功变更 ``is_default``（set 凭证探测失败回滚
+         *       时为 ``False``；unset 恒为 ``True``）；
+         *     - ``affected_sessions``：``notify_provider_switch`` 成功投递的 active interactive
+         *       session 计数（D-001）；无 active session 或 notify 异常时为 ``0``；
+         *     - ``error``：set 凭证探测失败原因（仅 ``switched=False`` 时有值）；成功 / unset 为 ``None``。
+         */
+        SetDefaultResult: {
+            /** Switched */
+            switched: boolean;
+            /** Affected Sessions */
+            affected_sessions: number;
+            /** Error */
+            error?: string | null;
+        };
         /** SettingRead */
         SettingRead: {
             /** Key */
@@ -20059,7 +20097,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LlmProviderRead"];
+                    "application/json": components["schemas"]["SetDefaultResult"];
                 };
             };
             /** @description Validation Error */
@@ -20090,7 +20128,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LlmProviderRead"];
+                    "application/json": components["schemas"]["SetDefaultResult"];
                 };
             };
             /** @description Validation Error */
