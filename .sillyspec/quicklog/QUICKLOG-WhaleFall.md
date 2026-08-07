@@ -221,3 +221,15 @@
 根因：reloadWithProvider 在 driver.start 新 query 之前就 close 旧 query（session-manager.ts），close 拉动旧 consume 协程退出 → session 收尾 ended。
 方案：把 close oldQuery 移到 driver.start 成功 + 替换 state.query 之后（新 query 就位再 close，旧 consume 退出是正常 query 结束非 session 收尾）；catch 失败保留未 close 的 oldQuery 可恢复。
 结果：tsc 过 + reload-provider 10 passed（AC-4 断言改：start 抛错时 close 0 次）。daemon rebuild+重启+实测待做。
+## ql-20260807-001-d667 | 2026-08-07 09:05:44 | 修复切换供应商热切换 reload 后运行中会话被错误标 ended 的并发 bug
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/session-manager.ts（_runConsume 加 isAuthoritative orphan 谓词：捕获启动时 target，判 target===state.query/driverHandle，onError/catch/onResult/onMessage 入口判 orphan 静默 no-op，reload 换 query 后旧 consume 终态回调不再 fail 误杀新会话）
+- sillyhub-daemon/tests/interactive/session-manager-reload-provider.test.ts（新增 makeMockDriverWithAbortOnClose 工厂：fakeQuery.close 触发该 query 对应 consume 的 onError，模拟真实 SDK close→迭代器抛 abort 错；AC-6 回归测试断言 reload 后 status=active/onSessionEnd 未调/新 query 未误杀）
+- .sillyspec/docs/SillyHub/modules/daemon.md（变更索引加 ql-20260807-001 条目；ql-20260806-002 标注「必要前提非完整修复，真实根因见 001」）
+
+需求：修复切换供应商热切换 reload 后运行中会话被错误标 ended 的并发 bug。
+根因：reloadWithProvider close 旧 query 时 SDK 迭代器抛 abort 错（Claude Code process aborted by user）→ driver consume catch → onError 静默 fail(sessionId)；reload 后 status=active 绕过 fail 守卫（只挡 ended/failed）→ _terminateSession 把新 session 打成 failed + close 新 query + onSessionEnd（backend ended）。ql-20260806-002 的 close 后移只是必要前提未堵此洞，mock consume 永不抛错致测试漏。
+方案：_runConsume 加 isAuthoritative orphan 谓词（target===state.query），onError/catch/onResult/onMessage 入口判 orphan 静默 no-op；成立前提=c40b1319 先替换 state.query 再 close。加 AC-6 测试用 makeMockDriverWithAbortOnClose 模拟真实 close→抛错→onError。
+结果：tsc --noEmit exit0；reload-provider 11 passed（含新 AC-6）；反向验证临时禁用守卫 AC-6 FAIL 复现 status=failed 证测试有效；daemon rebuild+部署待做。

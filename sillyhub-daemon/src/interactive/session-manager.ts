@@ -1707,14 +1707,36 @@ export class SessionManager {
     if (!target) return;
     // onResult/onMessage 内部 Claude partial buffer 节流逻辑（ql-20260621-partial）保留；
     // Codex flat message 不触发 stream_event 分支，自然走末尾 onTurnMessage 转发。
+    // ql-20260807-001 根因修复（orphan consume 守卫）：
+    // reloadWithProvider 替换 state.query 后，本协程持有的 target 变成 orphan。
+    // oldQuery.close() 让 SDK 迭代器抛 abort 错（"Claude Code process aborted by user"，
+    // sdk.mjs close→spawnAbort(Error) + process exit 设 exitError）→ driver consume
+    // catch → onError。旧实现无条件 fail(sessionId)：reload 后 status=active，fail 守卫
+    // 只挡 ended/failed → 放行 → _terminateSession 把刚 reload 的 session 打成 failed +
+    // close 掉新 query（state.query 已替换为新引用）+ onSessionEnd（backend ended）。
+    // 此谓词判定本 consume 是否仍是 session 当前活跃消费者；reload 换 query 后返回 false，
+    // 终态回调（onError/catch/onResult/onMessage）静默丢弃，不误杀新会话。
+    // 成立前提：reloadWithProvider 已保证先替换 state.query 再 close oldQuery（commit
+    // c40b1319 / ql-20260806-002），故 oldQuery.close 触发旧 consume 回调时 state.query
+    // 已指向新 query，谓词正确判 orphan。两次连续 reload 同理（中间那个 consume 变 orphan）。
+    const isAuthoritative = (): boolean => {
+      const current =
+        state.provider === 'claude' ? state.query : state.driverHandle;
+      return current === target;
+    };
+
     const onResult = (r: SDKResultMessage | InteractiveDriverResult): void => {
+      if (!isAuthoritative()) return; // orphan：reload 已换 query，旧 result 丢弃
       void this._onResult(state, r);
     };
     const onMessage = (m: SDKMessage | Record<string, unknown>): void => {
+      if (!isAuthoritative()) return; // orphan：旧 query 残留消息丢弃
       void this._onMessage(state, m as SDKMessage);
     };
     const onError = (_e: unknown): void => {
       // 边界 2：driver 异常 → fail。fail 内部幂等。
+      // orphan（reload 后旧 query.close 触发的 abort 错）静默丢弃，不 fail 新会话。
+      if (!isAuthoritative()) return;
       void this.fail(state.sessionId).then(() => undefined, () => undefined);
     };
     // 适配对象：新旧两组键并存（见方法注释）。
@@ -1733,6 +1755,8 @@ export class SessionManager {
       );
     } catch {
       // consume 自身不应抛（driver.consume 内 try/catch），防御性标 failed。
+      // orphan（reload 后旧 query.close 触发迭代器抛错）静默丢弃，不 fail 新会话。
+      if (!isAuthoritative()) return;
       void this.fail(state.sessionId).then(
         () => undefined,
         () => undefined,
@@ -2552,6 +2576,8 @@ export class SessionManager {
     providerConfig: ProviderConfig | null,
   ): Promise<void> {
     const state = this._store.get(sessionId);
+    // eslint-disable-next-line no-console
+    console.log(`[reload-diag] start session=${sessionId} found=${!!state} provider=${state?.provider} agentSessionId=${state?.agentSessionId}`);
     if (!state) {
       throw new SessionNotFoundError(sessionId);
     }
@@ -2659,6 +2685,8 @@ export class SessionManager {
       } catch {
         /* R-01: close 异常不阻塞（SDK 内部已有 SIGTERM→SIGKILL 升级兜底）。 */
       }
+      // eslint-disable-next-line no-console
+      console.log(`[reload-diag] success session=${sessionId} new query in place + oldQuery closed, restarting consume`);
       // 清 pendingSwitch（幂等兜底：markPendingSwitch 空闲路径不写标记；_onResult 路径
       // 已清；此处防状态机遗漏的边界，多清一次无副作用）。
       state.pendingSwitch = undefined;
@@ -2825,6 +2853,8 @@ export class SessionManager {
     const pendingSwitch = state.pendingSwitch;
     if (pendingSwitch) {
       state.pendingSwitch = undefined;
+      // eslint-disable-next-line no-console
+      console.log(`[reload-diag] triggered by _onResult(turn 边界) session=${state.sessionId}`);
       void this.reloadWithProvider(state.sessionId, pendingSwitch.providerConfig).catch(
         () => {
           // task-08 实现真实错误上报；本处兜底吞错，不阻塞 _onResult 收尾路径。

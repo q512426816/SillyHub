@@ -99,6 +99,75 @@ function makeMockDriver() {
   };
 }
 
+/**
+ * ql-20260807-001：模拟真实 SDK close→迭代器抛错→onError 的 mock driver。
+ *
+ * makeMockDriver 的 consume 永不抛错、close 是空 spy，复现不了真实 SDK 行为
+ *（query.close() abort 子进程 → for-await 抛 "Claude Code process aborted by user"
+ * → driver consume catch → onError，sdk.mjs close→spawnAbort(Error)）。本工厂补齐：
+ * fakeQuery.close() 取该 query 对应 consume 注册的 onError 并异步触发（微任务，
+ * 对齐真实 SDK close→process exit→迭代器 throw 的异步性）。
+ *
+ * 用于 AC-6 验证 _runConsume 的 orphan 守卫：reload 后旧 query.close 触发旧 consume
+ * onError 时，isAuthoritative 判定应阻止 fail 误杀新会话。
+ */
+function makeMockDriverWithAbortOnClose() {
+  const startCalls: { input: unknown; opts: StartOptions }[] = [];
+  const closeSpies: ReturnType<typeof vi.fn>[] = [];
+  // query 引用 → 该 query 的 consume 回调（close 时取它触发 onError）。
+  const callbacksByQuery = new Map<object, ConsumeCallbacks>();
+  let capturedCallbacks: ConsumeCallbacks | null = null;
+
+  const makeFakeQuery = (): Query => {
+    let queryRef: Query;
+    const closeSpy = vi.fn(() => {
+      // 模拟 SDK abort：for-await 抛错 → driver consume catch → cb.onError。
+      // 微任务异步触发（真实 SDK close→process exit→迭代器 throw 也是异步）。
+      const cb = callbacksByQuery.get(queryRef as object);
+      if (cb?.onError) {
+        void Promise.resolve().then(() =>
+          cb.onError!('Claude Code process aborted by user'),
+        );
+      }
+    });
+    closeSpies.push(closeSpy);
+    queryRef = {
+      interrupt: vi.fn(async () => {}),
+      close: closeSpy,
+    } as unknown as Query;
+    return queryRef;
+  };
+
+  const driver = {
+    start: vi.fn(
+      (input: AsyncIterable<SDKUserMessage>, opts: StartOptions): Query => {
+        startCalls.push({ input, opts });
+        return makeFakeQuery();
+      },
+    ),
+    consume: vi.fn(async (q: Query, cb: ConsumeCallbacks): Promise<void> => {
+      // 按 query 存回调（reload 后两个 consume 各持一份，close 时精准触发各自的）。
+      callbacksByQuery.set(q as object, cb);
+      capturedCallbacks = cb;
+    }),
+    interrupt: vi.fn(async (q: Query | null): Promise<boolean> => {
+      if (!q) return false;
+      await (q.interrupt as () => Promise<void>)();
+      return true;
+    }),
+  } as unknown as ClaudeSdkDriver;
+
+  return {
+    driver,
+    startCalls,
+    closeSpies,
+    /** 第 N 次（0-based）start 返回的 query 对应的 close spy。 */
+    closeSpyAt: (i: number) => closeSpies[i],
+    emitMessage: (m: SDKMessage) => capturedCallbacks?.onMessage?.(m),
+    emitResult: (r: SDKResultMessage) => capturedCallbacks?.onResult(r),
+  };
+}
+
 function makeDeps() {
   return {
     onTurnResult: vi.fn(
@@ -464,6 +533,49 @@ describe('task-08 / reloadWithProvider 成功路径（FR-05 / D-002@v1）', () =
 
     // consume 协程已重启（driver.consume 第二次被调，订阅 inputQueue 吃后续消息）。
     expect(mock.driver.consume).toHaveBeenCalledTimes(2);
+  });
+
+  // ── AC-6：reload 后旧 query.close 触发旧 consume onError（模拟真实 SDK abort）──
+  // ql-20260807-001 根因回归锁：真实 SDK 下 oldQuery.close() 让旧 consume 的 for-await
+  // 抛 abort 错 → driver consume catch → onError。旧 _runConsume 无条件 fail(sessionId)，
+  // reload 后 status=active 绕过 fail 守卫 → _terminateSession 把新 session+新 query 打成
+  // failed + onSessionEnd（backend ended）。orphan 守卫（isAuthoritative）修复后此路径
+  // 静默丢弃，session 保持 active。makeMockDriver 的 close 是空 spy 复现不了，故用
+  // makeMockDriverWithAbortOnClose（close 触发该 query 的 consume onError）。
+
+  it('AC-6: reload 后旧 query.close 触发旧 consume onError → orphan 守卫阻止 fail，session 仍 active + 新 query 未被误杀', async () => {
+    const mock = makeMockDriverWithAbortOnClose();
+    const deps = makeDeps();
+    const sm = new SessionManager({ driver: mock.driver, ...deps });
+
+    await sm.create({ ...BASE_INPUT });
+    mock.emitMessage(systemInitMessage('sdk-sess'));
+    await flushMicrotasks();
+    mock.emitResult(resultSuccess());
+    await flushMicrotasks();
+    // 首 turn 完成 → status=active（reload 前置）。
+
+    const oldQuery = readState(sm, BASE_INPUT.sessionId)!.query!;
+    expect(oldQuery).toBeDefined();
+
+    await sm.reloadWithProvider(BASE_INPUT.sessionId, newProviderConfig());
+
+    // ① 旧 query.close 被调一次（reload 触发，模拟 SDK abort）。
+    expect(mock.closeSpyAt(0)).toHaveBeenCalledTimes(1);
+
+    // ② 让 close 注册的 onError 微任务跑完（模拟 SDK abort→迭代器抛错→onError）。
+    await flushMicrotasks();
+
+    const state = readState(sm, BASE_INPUT.sessionId)!;
+    // ⭐ orphan 守卫生效：旧 consume 的 onError 未把 session 打成 failed/ended。
+    expect(state.status).toBe('active');
+    // ⭐ 未误报终态给 backend（onSessionEnd 一次都没调）。
+    expect(deps.onSessionEnd).not.toHaveBeenCalled();
+    // ⭐ 新 query 未被 fail 误杀（_terminateSession 会 close state.query；此处未触发）。
+    expect(mock.closeSpyAt(1)).not.toHaveBeenCalled();
+    // 新 query 已就位（state.query 已替换，≠ oldQuery）。
+    expect(state.query).toBeDefined();
+    expect(state.query).not.toBe(oldQuery);
   });
 });
 
