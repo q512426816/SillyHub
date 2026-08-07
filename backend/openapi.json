@@ -7014,6 +7014,353 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/mcp-tokens": {
+      "post": {
+        "tags": [
+          "mcp-tokens",
+          "mcp-tokens"
+        ],
+        "summary": "Create Mcp Token",
+        "description": "签发新 McpToken（明文 token 仅本次响应返回一次）。\n\nDB 只存 ``sha256(明文)``（``token_hash`` 唯一索引），不存明文（R-06 / design §8.1）。\n``created_by`` 记当前操作 user（审计），token 本身无关 user 身份。",
+        "operationId": "create_mcp_token_api_workspaces__workspace_id__mcp_tokens_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpTokenCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpTokenCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "mcp-tokens",
+          "mcp-tokens"
+        ],
+        "summary": "List Mcp Tokens",
+        "description": "列出该 workspace 全部 token（含已吊销），新→旧。\n\n不返明文（明文从未持久化，无法返回）；含 ``last_used_at`` / ``revoked_at`` 供管理\nUI 展示使用情况与吊销状态。",
+        "operationId": "list_mcp_tokens_api_workspaces__workspace_id__mcp_tokens_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpTokenListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/mcp-tokens/{token_id}": {
+      "delete": {
+        "tags": [
+          "mcp-tokens",
+          "mcp-tokens"
+        ],
+        "summary": "Revoke Mcp Token",
+        "description": "吊销（``revoked_at = now``，幂等）。\n\nservice.revoke 返 False（不存在 / 已吊销 / 跨 workspace 越权）→ 404，不泄露具体\n原因（防存在性探测）。成功返 204；吊销后 ``authenticate`` 立即返 None（正缓存被\n精确 DEL，无 TTL 放行窗口）。",
+        "operationId": "revoke_mcp_token_api_workspaces__workspace_id__mcp_tokens__token_id__delete",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "token_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Token Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/mcp-webhooks": {
+      "post": {
+        "tags": [
+          "mcp-tokens",
+          "mcp-tokens",
+          "mcp-webhooks"
+        ],
+        "summary": "Create Mcp Webhook",
+        "description": "注册 webhook。``secret`` 加密入库（get_cipher），响应不回显 secret。",
+        "operationId": "create_mcp_webhook_api_workspaces__workspace_id__mcp_webhooks_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpWebhookCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpWebhookRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "mcp-tokens",
+          "mcp-tokens",
+          "mcp-webhooks"
+        ],
+        "summary": "List Mcp Webhooks",
+        "description": "列出该 workspace 全部 webhook（不返 secret）。",
+        "operationId": "list_mcp_webhooks_api_workspaces__workspace_id__mcp_webhooks_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpWebhookListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/mcp-webhooks/{webhook_id}": {
+      "delete": {
+        "tags": [
+          "mcp-tokens",
+          "mcp-tokens",
+          "mcp-webhooks"
+        ],
+        "summary": "Delete Mcp Webhook",
+        "description": "删除 webhook（204）。不存在 / 跨 workspace → 404（防存在性探测）。",
+        "operationId": "delete_mcp_webhook_api_workspaces__workspace_id__mcp_webhooks__webhook_id__delete",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "webhook_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Webhook Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/missions/{mission_id}/events": {
+      "get": {
+        "tags": [
+          "mcp-mission-events"
+        ],
+        "summary": "Stream Mission Events",
+        "description": "SSE endpoint — 推 mission 下 worker run 状态变更（FR-08）。\n\n连接池安全照搬 stream_agent_run_logs：存在性校验用短 session（校验完即归还\nslot），事件生成器内部自建独立短 session 做逐次轮询，不在请求级 session 贯穿\n整个流生命周期。\n\n鉴权复用 ``require_permission_any(Permission.TASK_READ)``（与\nstream_agent_run_logs 同款；路由在 /api 前缀天然适用，非成员 403）。",
+        "operationId": "stream_mission_events_api_workspaces__workspace_id__missions__mission_id__events_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Mission Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/runtimes/{runtime_id}/pending-change-writes": {
       "get": {
         "tags": [
@@ -10040,6 +10387,53 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/skills/{skill_name}/content": {
+      "get": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Get Skill Content",
+        "description": "Return a sillyspec-* skill's SKILL.md content (read-only, traversal-safe).\n\n``skill_name`` 必须在 sillyspec-* 白名单内；固定读 SKILL.md（不拼 path）。\n404 = 非白名单 / SKILL.md 缺失；413 = > 1 MiB。",
+        "operationId": "get_skill_content_api_daemon_skills__skill_name__content_get",
+        "parameters": [
+          {
+            "name": "skill_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Skill Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Get Skill Content Api Daemon Skills  Skill Name  Content Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -29449,6 +29843,18 @@
             "type": "boolean",
             "title": "Read Only",
             "default": false
+          },
+          "agent_profile_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Profile Id"
           }
         },
         "type": "object",
@@ -32192,6 +32598,257 @@
         "type": "object",
         "title": "McpServersSchema",
         "description": "``PUT /api/platform-settings/mcp`` 请求体。"
+      },
+      "McpTokenCreateRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "scope": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "read",
+                "dispatch",
+                "converge"
+              ]
+            },
+            "type": "array",
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Scope"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "scope"
+        ],
+        "title": "McpTokenCreateRequest",
+        "description": "签发请求。``scope`` 必须非空且取值 ∈ {read, dispatch, converge}。"
+      },
+      "McpTokenCreated": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "token": {
+            "type": "string",
+            "title": "Token",
+            "description": "明文 token，仅本次响应返回，此后不可恢复（请立即保存）"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "scope": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scope"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "token",
+          "name",
+          "scope",
+          "created_at"
+        ],
+        "title": "McpTokenCreated",
+        "description": "POST 201 响应——**唯一**携带明文 token 的地方（仅此一次返回，R-06）。\n\n不继承 ``McpTokenRead``：明文字段 ``token`` 语义独立（不可重复获取），单独建模\n让\"明文只出现一次\"的契约在类型上显眼。字段精简到 design §7.2 要求的\n``{id, token, scope, created_at}``。"
+      },
+      "McpTokenListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/McpTokenRead"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "McpTokenListResponse"
+      },
+      "McpTokenRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "scope": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scope"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "scope",
+          "last_used_at",
+          "revoked_at",
+          "created_at"
+        ],
+        "title": "McpTokenRead",
+        "description": "列表行——所有 GET 都安全返回。绝不包含明文或 ``token_hash``（R-06）。"
+      },
+      "McpWebhookCreateRequest": {
+        "properties": {
+          "token_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Token Id"
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Url"
+          },
+          "secret": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Secret"
+          },
+          "events": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "worker.completed",
+                "worker.failed",
+                "*"
+              ]
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Events"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token_id",
+          "url",
+          "secret",
+          "events"
+        ],
+        "title": "McpWebhookCreateRequest",
+        "description": "注册 webhook 请求。``secret`` 明文仅本次入站，服务端加密入库、绝不回显。\n\n``token_id`` 指定绑定哪个 McpToken（webhook 级联随 token 删除）；``events``\n非空，取值 ∈ {worker.completed, worker.failed, \"*\"}。"
+      },
+      "McpWebhookListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/McpWebhookRead"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "McpWebhookListResponse"
+      },
+      "McpWebhookRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "token_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Token Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "events": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "token_id",
+          "url",
+          "events",
+          "active",
+          "created_at"
+        ],
+        "title": "McpWebhookRead",
+        "description": "webhook 列表/详情行——绝不包含 ``secret``（明文或密文都不回显）。"
       },
       "MeResponse": {
         "properties": {

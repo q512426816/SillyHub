@@ -35,6 +35,13 @@ from app.modules.health import health_router
 from app.modules.incident.router import router as incident_router
 from app.modules.knowledge.router import router as knowledge_router
 from app.modules.llm_provider.router import router as llm_provider_router
+from app.modules.mcp_gateway.router import router as mcp_gateway_router
+
+# 2026-08-06-public-mcp-server task-05：对外 MCP server（FastMCP streamable HTTP）。
+# 导入 mcp 实例仅为在 lifespan 里驱动其 session_manager（坑 2）；mount 装配在
+# create_app() 末尾调 mount_mcp(app)。写法严格对齐 task-04 spike-A 验证版本。
+from app.modules.mcp_gateway.server import mcp, mount_mcp
+from app.modules.mcp_gateway.sse import router as mcp_sse_router
 from app.modules.ppm.kanban.router import router as ppm_kanban_router
 from app.modules.ppm.plan.router import router as ppm_plan_router
 from app.modules.ppm.problem.router import router as ppm_problem_router
@@ -124,7 +131,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             init_storage_backend(settings)
         except Exception:
             log.exception("storage.init_failed")
-        yield
+        # 2026-08-06-public-mcp-server task-05 / spike-A 坑 2（P0）：MCP session
+        # manager 必须在 app 服务期间常驻。streamable_http_app() 返回的子 app
+        # 虽自带 lifespan=lambda app: self.session_manager.run()，但 Starlette
+        # 的 Mount 不会自动跑子 app lifespan —— 必须在父 FastAPI lifespan 里
+        # 手动 ``async with mcp.session_manager.run(): yield``，否则 streamable
+        # HTTP session 不初始化，client initialize 会挂死到 timeout。合并到现有
+        # lifespan（不覆盖上方 bootstrap / 下方 shutdown 逻辑）。
+        async with mcp.session_manager.run():
+            yield
     finally:
         log.info("app.shutdown")
         # 停止事件循环堵塞看门狗
@@ -520,6 +535,16 @@ def create_app() -> FastAPI:
     # workspace 级（/workspaces/{wid}/agent-profiles）+ platform 级（/agent-profiles）。
     # router 自身不带 prefix，路径在路由内写全，外层只加 /api。
     app.include_router(agent_profile_router, prefix="/api")
+    # 2026-08-06-public-mcp-server task-02 / G-1：对外 MCP 的 McpToken workspace 级管理
+    # API（POST/GET/DELETE /api/workspaces/{wid}/mcp-tokens）。router 自带 prefix
+    # /workspaces + tag mcp-tokens，外层加 /api 落地。鉴权 require_permission
+    # (WORKSPACE_WRITE)。token 签发/校验/吊销业务在 mcp_gateway.service.McpTokenService。
+    app.include_router(mcp_gateway_router, prefix="/api", tags=["mcp-tokens"])
+    # 2026-08-06-public-mcp-server task-13 / G-1 / FR-08：mission 级 SSE 端点
+    # （GET /api/workspaces/{wid}/missions/{mid}/events），推该 mission 下 worker run
+    # 状态变更，全终态发 done 收尾。SSE 骨架照搬 agent/router.py::stream_agent_run_logs
+    # （text/event-stream + 短 session 连接池安全）。鉴权 require_permission_any(TASK_READ)。
+    app.include_router(mcp_sse_router, prefix="/api")
     app.include_router(daemon_router, prefix="/api")
     # 2026-07-07-skills-mcp-management-ui task-02：平台 CustomSkill admin CRUD。
     app.include_router(skills_router, prefix="/api")
@@ -545,6 +570,14 @@ def create_app() -> FastAPI:
     app.include_router(settings_router, prefix="/api")
     app.include_router(admin_router, prefix="/api")
     app.include_router(spec_workspace_router, prefix="/api")
+
+    # ── MCP gateway（对外 MCP server，独立于 /api/*）──────────────────────────
+    # 2026-08-06-public-mcp-server task-05：mount /mcp（FastMCP streamable HTTP）。
+    # mount_mcp 装配三步：streamable_http_app() → add_middleware(McpAuthMiddleware)
+    # → app.mount("/mcp", mcp_app)。鉴权 middleware 挂子 app（CC-06 物理隔离），
+    # 现有 /api/* 路由零回归。端点实际是 /mcp/（尾斜杠，spike-A 坑 3）。
+    # lifespan 里的 session_manager.run() 见上方 lifespan 定义。
+    mount_mcp(app)
 
     return app
 

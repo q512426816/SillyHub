@@ -27,6 +27,11 @@ dependencies = [
   "psutil>=5.9",
   # 平台文件中心：S3 兼容对象存储异步客户端（spike-01 实测与现有异步栈无冲突）。
   "aiobotocore>=3.8,<4",
+  # 对外 MCP 服务：官方 mcp Python SDK v1 线（FastMCP + http_app ASGI mount）。
+  # spike-A（task-04）锁定 v1 线：v2.0.0(2026-07-28) 是 breaking 大改、移除 FastMCP 改用 MCPServer，
+  # 与 design D-007「FastMCP mount」+ task-05/06 写法冲突，故锁 <2 取最新 1.29.0。
+  # v1.x 仍持续收 critical bugfix/security patch（见 GitHub v1.x 分支）。
+  "mcp>=1.29,<2",
 ]
 
 [project.optional-dependencies]

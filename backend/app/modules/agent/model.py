@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Column,
     DateTime,
     Float,
@@ -285,6 +286,15 @@ class AgentRun(BaseModel, table=True):
     resumed_from_step: int | None = Field(
         default=None,
         sa_column=Column(Integer, nullable=True),
+    )
+    # ── Public MCP read_only flag (2026-08-06-public-mcp-server task-01, design §8.3 / D-005@v2) ──
+    # 第三方经对外 MCP dispatch 时是否要求 worker 只读。物制走 daemon SDK --allowedTools
+    # 单腿（backend 不强制，CC-02），本列只做审计/前端查询载体。nullable 兼容老 run 行
+    # （NULL = 非只读，design §9 brownfield 零回归）；风格对齐 gate_status / is_resume
+    # 等 nullable 兼容列。Python default=None —— 读侧把 NULL 当 False（design §8.3）。
+    read_only: bool | None = Field(
+        default=None,
+        sa_column=Column(Boolean, nullable=True),
     )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),

@@ -11,16 +11,24 @@ Artifact collection is intentionally simple in v1: a Worker's structured output
 becomes one ``summary`` Artifact. Richer parsing (patch / test_result) lands
 with the Finalizer in Wave 4/6.
 
-NOTE (D-004@v2, 2026-06-28-team-mainline-integration): ``tool_config`` is passed
-through to the lease but the daemon does NOT apply it — ``--allowedTools`` is a
-daemon-side change not done in v1. Design Grill F1 further confirmed
-``canUseTool`` human-approval is only injected for interactive sessions
-(``permission_service.py``), not batch Worker leases, so write-Worker tool-level
-approval is also unavailable in v1. **v1 工具治理 = 不强制**: read-only and write
-Workers both run under the daemon's default policy + prompt constraints; safety
-for execute write-Workers converges at the Finalizer's human-reviewed patch
-apply-back (D-006@v1), not at the tool layer. The whitelist below is retained as
-a forward-compatibility hint for when daemon ``--allowedTools`` support lands.
+NOTE (task-08, 2026-08-06-public-mcp-server, spike-B 实测修正): the earlier note
+here claimed the daemon "does NOT apply" ``tool_config`` and that v1 tool
+governance was "不强制". That is **outdated** — spike-B
+(``spikes/read_only-allowedtools-spike.md``) traced the full chain and confirmed it
+is **live end-to-end**:
+
+``worker_tool_config(read_only)`` (below) → ``dispatch_to_daemon(tool_config=...)``
+→ lease ``metadata.tool_config`` (``placement.py:408``) → daemon reads it back
+(``daemon.ts:3641`` ``execCtx.tool_config``, fetch-first) → ``stream-json.ts:333``
+maps ``allowed_tools`` to ``--allowedTools`` and ``:322`` maps ``mode`` to
+``--permission-mode``. A read-only Worker therefore really runs as
+``--permission-mode plan --allowedTools Read,Glob,Grep`` and is physically refused
+write tools (Edit/Write/Bash are not whitelisted). ``metadata.tool_config`` (tool
+governance) is a separate key from ``provider_config`` (credential rendering,
+``daemon.ts:3044``) — no ambiguity.
+
+The whitelist below is therefore NOT a forward-compatibility hint; it is the
+enforced per-Worker tool policy.
 """
 
 from __future__ import annotations

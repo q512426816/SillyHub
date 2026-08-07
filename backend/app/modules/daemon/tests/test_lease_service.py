@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from app.modules.agent.model import AgentRun, AgentSession
+from app.modules.agent.model import AgentMission, AgentRun, AgentSession
 from app.modules.daemon.lease_service import (
     DaemonLeaseService,
     LeaseConflict,
@@ -1749,3 +1749,196 @@ class TestCompleteLeaseEndSession:
 
         assert called == []  # 无 agent_session_id → 跳过
         assert result.status == "completed"
+
+
+# ── task-12 webhook 终态钩子（2026-08-06-public-mcp-server / FR-07 / CC-08） ──
+# complete_lease 末尾 worker 终态（completed/failed/killed）触发 task-11
+# WebhookDispatcher.deliver；G-3 容错（dispatcher 抛错只 warn 不冒泡、不翻转终态）。
+# 钩子在 LeaseService 内 import ``app.modules.mcp_gateway.service``（惰性），测试用
+# monkeypatch.setattr 打桩该模块的 WebhookDispatcher，拦截 deliver 调用断言参数。
+
+from app.modules.mcp_gateway import service as _mcp_gw_service
+
+
+async def _create_worker_run_with_mission(
+    db_session: AsyncSession,
+    runtime_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> tuple[uuid.UUID, uuid.UUID, str, uuid.UUID, uuid.UUID]:
+    """构造 workspace + mission + worker run + claimed lease。
+
+    返回 (lease_id, run_id, claim_token, mission_id, workspace_id)。
+    worker run 挂在 mission 下（mission_id 非空），mission 挂在 workspace 下——webhook
+    是 workspace 维度的对外通知，complete_lease 钩子据此解析 workspace_id。
+    """
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="wh-ws",
+        slug=f"wh-ws-{uuid.uuid4().hex[:8]}",
+        root_path="/tmp/wh",
+    )
+    db_session.add(ws)
+
+    mission_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    claim_token = "tok-" + uuid.uuid4().hex[:8]
+    now = datetime.now(UTC)
+
+    mission = AgentMission(
+        id=mission_id,
+        workspace_id=ws.id,
+        objective="wh mission",
+    )
+    run = AgentRun(
+        id=run_id,
+        agent_type="claude_code",
+        provider="claude",
+        status="running",
+        mission_id=mission_id,
+        role="worker",
+    )
+    lease = DaemonTaskLease(
+        id=uuid.uuid4(),
+        runtime_id=runtime_id,
+        agent_run_id=run_id,
+        status="claimed",
+        claimed_at=now,
+        metadata_={"claim_token": claim_token},
+        created_at=now,
+        updated_at=now,
+    )
+    db_session.add_all([mission, run, lease])
+    await db_session.commit()
+    return lease.id, run_id, claim_token, mission_id, ws.id
+
+
+class TestCompleteLeaseWebhook:
+    """task-12 / FR-07 / CC-08：complete_lease worker 终态触发 webhook 投递 + G-3 容错。"""
+
+    @pytest.mark.asyncio
+    async def test_worker_terminal_fires_deliver(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """worker run 进 completed 终态 → deliver 调一次，payload 含 mission/worker/status。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease_id, run_id, claim_token, mission_id, ws_id = await _create_worker_run_with_mission(
+            db_session, rt.id, user_id
+        )
+
+        calls: list[tuple] = []
+
+        class _StubDispatcher:
+            def __init__(self, session_factory):
+                self.session_factory = session_factory
+
+            async def deliver(self, workspace_id, event, payload):
+                calls.append((workspace_id, event, payload))
+                return 1
+
+        monkeypatch.setattr(_mcp_gw_service, "WebhookDispatcher", _StubDispatcher)
+
+        svc = DaemonService(db_session)
+        result = await svc.complete_lease(lease_id, claim_token, {"status": "completed"})
+
+        assert result.status == "completed"
+        assert len(calls) == 1
+        workspace_id, event, payload = calls[0]
+        assert workspace_id == ws_id
+        assert event == "worker.completed"
+        assert payload["mission_id"] == str(mission_id)
+        assert payload["worker_id"] == str(run_id)
+        assert payload["status"] == "completed"
+        assert "error_code" in payload
+
+    @pytest.mark.asyncio
+    async def test_worker_terminal_failed_event(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """worker run 进 failed 终态 → event = worker.failed。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease_id, _run_id, claim_token, _mid, _wid = await _create_worker_run_with_mission(
+            db_session, rt.id, user_id
+        )
+
+        calls: list[tuple] = []
+
+        class _StubDispatcher:
+            def __init__(self, session_factory):
+                pass
+
+            async def deliver(self, workspace_id, event, payload):
+                calls.append((workspace_id, event, payload))
+                return 0
+
+        monkeypatch.setattr(_mcp_gw_service, "WebhookDispatcher", _StubDispatcher)
+
+        svc = DaemonService(db_session)
+        await svc.complete_lease(lease_id, claim_token, {"status": "failed"})
+
+        assert len(calls) == 1
+        assert calls[0][1] == "worker.failed"
+
+    @pytest.mark.asyncio
+    async def test_dispatcher_raises_does_not_break_complete(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """G-3 容错：dispatcher 抛错只 warn，complete_lease 正常返回，终态不翻转。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease_id, run_id, claim_token, _mid, _wid = await _create_worker_run_with_mission(
+            db_session, rt.id, user_id
+        )
+
+        class _BoomDispatcher:
+            def __init__(self, session_factory):
+                pass
+
+            async def deliver(self, workspace_id, event, payload):
+                raise RuntimeError("webhook dispatch boom")
+
+        monkeypatch.setattr(_mcp_gw_service, "WebhookDispatcher", _BoomDispatcher)
+
+        svc = DaemonService(db_session)
+        result = await svc.complete_lease(lease_id, claim_token, {"status": "completed"})
+
+        # lease 终态不受影响
+        assert result.status == "completed"
+        # agent_run 终态已写定（dispatcher 抛错不翻转）
+        run = await db_session.get(AgentRun, run_id)
+        assert run is not None
+        assert run.status == "completed"
+        assert run.finished_at is not None
+
+    @pytest.mark.asyncio
+    async def test_non_mission_run_skips_webhook(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """非 mission run（mission_id=None）无对外订阅方 → 静默跳过，不调 deliver。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run_id = uuid.uuid4()
+
+        lease_svc = DaemonLeaseService(db_session)
+        lease = await lease_svc.claim_task(rt.id, agent_run_id)
+        assert isinstance(lease.metadata_, dict)
+        claim_token = lease.metadata_["claim_token"]
+
+        calls: list = []
+
+        class _StubDispatcher:
+            def __init__(self, session_factory):
+                pass
+
+            async def deliver(self, workspace_id, event, payload):
+                calls.append(1)
+                return 0
+
+        monkeypatch.setattr(_mcp_gw_service, "WebhookDispatcher", _StubDispatcher)
+
+        svc = DaemonService(db_session)
+        result = await svc.complete_lease(lease.id, claim_token, {"status": "completed"})
+
+        assert result.status == "completed"
+        assert calls == []

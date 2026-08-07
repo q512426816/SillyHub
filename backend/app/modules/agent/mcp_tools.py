@@ -32,6 +32,7 @@ from app.core.db import get_session
 from app.core.logging import get_logger
 from app.modules.agent.execution import MissionExecutionService, mark_worker_run_failed
 from app.modules.agent.model import AgentArtifact, AgentMission, AgentRun, AgentRunLog
+from app.modules.agent.service import _build_agent_profile_snapshot
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.daemon.host_fs import new_host_fs_delegate
@@ -64,6 +65,9 @@ class DispatchWorkerRequest(BaseModel):
     agent_type: str | None = None
     model: str | None = None
     read_only: bool = False
+    # task-10（change 2026-08-06-public-mcp-server）：可选绑 AgentProfile。None = 走
+    # 兜底链（老调用不传行为不变）；非空时校验可见性 + workspace 归属后冻结快照。
+    agent_profile_id: uuid.UUID | None = None
 
 
 class WorkerRunResponse(BaseModel):
@@ -150,6 +154,53 @@ async def _get_mission(
     if mission is None or mission.workspace_id != workspace_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "mission not found")
     return mission
+
+
+async def _resolve_dispatch_agent_profile(
+    session: AsyncSession,
+    mission: AgentMission,
+    profile_id: uuid.UUID | None,
+    user: User,
+):
+    """task-10：dispatch_worker 绑 AgentProfile（FR-04，design §5.2 P4 / §1.2）。
+
+    ``profile_id`` 为 None（老调用不传）→ 返 None，走兜底链零回归。非空时：
+    - 经 ``AgentProfileService.get`` 取 profile（自带三级 visibility 校验；不存在 404 /
+      不可见 403 统一转成 400——对主 agent 而言「绑不上」都是请求参数问题）。
+    - 断言可用于本 mission 的 workspace：workspace 级 profile 须
+      ``profile.workspace_id == mission.workspace_id``；private / platform 级放行。
+      不匹配返 400。
+    校验通过返回 profile，由调用方冻结快照落 run。
+    """
+    if profile_id is None:
+        return None
+
+    from app.modules.agent.profile.model import AgentProfileVisibility
+    from app.modules.agent.profile.service import (
+        AgentProfileNotFound,
+        AgentProfilePermissionDenied,
+        AgentProfileService,
+    )
+
+    svc = AgentProfileService(session)
+    try:
+        profile = await svc.get(profile_id=profile_id, actor=user)
+    except (AgentProfileNotFound, AgentProfilePermissionDenied) as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"agent_profile_id 不可用：{exc.message}",
+        ) from exc
+
+    # workspace 级 profile 须属于本 mission 的 workspace；private/platform 级放行。
+    if (
+        profile.visibility == AgentProfileVisibility.WORKSPACE.value
+        and profile.workspace_id != mission.workspace_id
+    ):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "agent_profile_id 属于其它 workspace，不能用于本 mission",
+        )
+    return profile
 
 
 # R-07（design §10）：主 agent LLM 解冲突轮次上限。超限 → mission 标 needs_manual，
@@ -314,6 +365,11 @@ async def dispatch_worker(
     """
     mission = await _get_mission(session, workspace_id, mission_id)
     role = payload.role or _DEFAULT_WORKER_ROLE
+    # task-10：可选绑 AgentProfile（FR-04）。None → profile=None 走兜底链零回归；
+    # 非空 → 校验可见性 + workspace 归属（不可用 / 跨 workspace 返 400，先于建 run）。
+    profile = await _resolve_dispatch_agent_profile(
+        session, mission, payload.agent_profile_id, user
+    )
     run = AgentRun(
         mission_id=mission.id,
         change_id=mission.change_id,
@@ -323,6 +379,15 @@ async def dispatch_worker(
         status="pending",
         role=role,
         objective=payload.objective,
+        # task-09：read_only 落 run 记录（FR-06 / D-005@v2）。列在 task-01 已建
+        # （agent_runs.read_only nullable bool），execution.py 已按 run.read_only
+        # 流转 worker_tool_config，此处补 dispatch 落列这一缺口。
+        read_only=payload.read_only,
+        # task-10：profile 绑定 + 冻结快照（含 version，复用 service 既有构造）。
+        agent_profile_id=(profile.id if profile is not None else None),
+        agent_profile_snapshot=(
+            _build_agent_profile_snapshot(profile) if profile is not None else None
+        ),
     )
     session.add(run)
     await session.commit()

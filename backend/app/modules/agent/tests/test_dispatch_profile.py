@@ -762,3 +762,154 @@ class TestStartRunProfileWiring:
         # AgentRun 无 profile 绑定
         assert run.agent_profile_id is None
         assert run.agent_profile_snapshot is None
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 6. task-10（change 2026-08-06-public-mcp-server）：MCP dispatch_worker 绑 AgentProfile
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class TestMcpDispatchWorkerBindProfile:
+    """POST dispatch_worker 传 agent_profile_id：校验 + 落 run.agent_profile_id/快照。
+
+    复用 test_mcp_tools 的「无 binding → 503」前置：run 在 dispatch_worker 调 delegate
+    前已 commit（含 profile 绑定），故直接查 DB 断言两字段；跨 workspace 的 400 在
+    建 run 前抛出（无 run 落库）。
+    """
+
+    @staticmethod
+    async def _admin_user(db_session) -> User:
+        from sqlalchemy import select
+
+        stmt = select(User).where(User.email == "admin@example.com").limit(1)
+        return (await db_session.execute(stmt)).scalars().first()
+
+    @staticmethod
+    async def _seed_mission(db_session) -> tuple[uuid.UUID, uuid.UUID]:
+        """建 workspace + mission（无 main run 即可，dispatch 不依赖）。"""
+        ws_id = uuid.uuid4()
+        db_session.add(
+            Workspace(
+                id=ws_id,
+                name=f"ws-{ws_id.hex[:8]}",
+                slug=f"ws-{ws_id.hex[:8]}",
+                root_path=f"/tmp/{ws_id.hex}",
+                status="active",
+            )
+        )
+        from app.modules.agent.model import AgentMission
+
+        mission = AgentMission(
+            workspace_id=ws_id,
+            objective="团队目标",
+            constraints={"mode": "team"},
+        )
+        db_session.add(mission)
+        await db_session.commit()
+        await db_session.refresh(mission)
+        return ws_id, mission.id
+
+    @staticmethod
+    async def _latest_run(db_session, mission_id: uuid.UUID) -> AgentRun | None:
+        from sqlalchemy import select
+
+        stmt = (
+            select(AgentRun)
+            .where(AgentRun.mission_id == mission_id)
+            .order_by(AgentRun.created_at.desc())
+        )
+        return (await db_session.execute(stmt)).scalars().first()
+
+    async def test_binds_profile_and_freezes_snapshot(
+        self, client, db_session, auth_headers
+    ) -> None:
+        """合法 agent_profile_id → run.agent_profile_id 落库 + snapshot 含 version。"""
+        from app.modules.agent.profile.model import AgentProfile
+
+        admin = await self._admin_user(db_session)
+        ws_id, mission_id = await self._seed_mission(db_session)
+        profile = AgentProfile(
+            id=uuid.uuid4(),
+            name="mcp-dispatch-p",
+            owner_user_id=admin.id,
+            visibility="private",
+            provider="claude",
+            model="claude-sonnet-4",
+            system_prompt="你是 MCP dispatch 助手。",
+            mcp_refs=[],
+            skill_refs=[],
+            version=3,
+        )
+        db_session.add(profile)
+        await db_session.commit()
+
+        resp = await client.post(
+            f"/api/workspaces/{ws_id}/missions/{mission_id}/dispatch_worker",
+            json={"objective": "做事", "agent_profile_id": str(profile.id)},
+            headers=auth_headers,
+        )
+        # 无 binding → 503 fail-loud（delegate 注入后语义），但 run 已前置 commit
+        assert resp.status_code == 503, resp.text
+
+        run = await self._latest_run(db_session, mission_id)
+        assert run is not None
+        assert run.agent_profile_id == profile.id
+        assert run.agent_profile_snapshot is not None
+        assert run.agent_profile_snapshot["version"] == 3
+        assert run.agent_profile_snapshot["system_prompt"] == "你是 MCP dispatch 助手。"
+
+    async def test_cross_workspace_profile_returns_400(
+        self, client, db_session, auth_headers
+    ) -> None:
+        """workspace 级 profile 属其它 workspace → 400，且不建 run。"""
+        from app.modules.agent.profile.model import AgentProfile
+
+        await self._admin_user(db_session)
+        ws_id, mission_id = await self._seed_mission(db_session)
+        other_ws_id = uuid.uuid4()
+        db_session.add(
+            Workspace(
+                id=other_ws_id,
+                name=f"ws-{other_ws_id.hex[:8]}",
+                slug=f"ws-{other_ws_id.hex[:8]}",
+                root_path=f"/tmp/{other_ws_id.hex}",
+                status="active",
+            )
+        )
+        profile = AgentProfile(
+            id=uuid.uuid4(),
+            name="other-ws-p",
+            owner_user_id=None,
+            workspace_id=other_ws_id,  # 属其它 workspace
+            visibility="workspace",
+            provider="claude",
+            mcp_refs=[],
+            skill_refs=[],
+            version=1,
+        )
+        db_session.add(profile)
+        await db_session.commit()
+
+        resp = await client.post(
+            f"/api/workspaces/{ws_id}/missions/{mission_id}/dispatch_worker",
+            json={"objective": "做事", "agent_profile_id": str(profile.id)},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 400, resp.text
+        # 400 在建 run 前抛出 → 无 run 落库
+        assert await self._latest_run(db_session, mission_id) is None
+
+    async def test_no_profile_id_behaves_as_before(self, client, db_session, auth_headers) -> None:
+        """不传 agent_profile_id → 走兜底链，两字段 None（零回归）。"""
+        await self._admin_user(db_session)
+        ws_id, mission_id = await self._seed_mission(db_session)
+        resp = await client.post(
+            f"/api/workspaces/{ws_id}/missions/{mission_id}/dispatch_worker",
+            json={"objective": "做事"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 503, resp.text
+        run = await self._latest_run(db_session, mission_id)
+        assert run is not None
+        assert run.agent_profile_id is None
+        assert run.agent_profile_snapshot is None

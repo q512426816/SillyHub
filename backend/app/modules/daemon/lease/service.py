@@ -627,6 +627,51 @@ class LeaseService:
                     error=str(exc),
                 )
 
+        # G-3 容错（2026-08-06-public-mcp-server task-12 / FR-07 / CC-08）：worker 终态
+        # 触发 webhook 投递（调 task-11 WebhookDispatcher.deliver）。worker run 进入
+        # completed/failed/killed 时按 mcp_webhooks 订阅异步投递（HMAC-SHA256 + 指数
+        # 退避归 task-11 dispatcher，本处只在终态锚点调一次 deliver）。workspace_id 取自
+        # mission（AgentMission.workspace_id）——对外 MCP webhook 是 workspace 维度的
+        # 第三方通知，仅 mission run 触发；非 mission run（绝大多数 batch/interactive）
+        # mission_id=None 无对应对外订阅方，静默跳过。dispatcher 抛错 / 无订阅 / DB 查询
+        # 失败不得冒泡破坏既有 lease 完成流程，投递失败不翻转 lease/agent_run 终态——
+        # 与上方 redis publish / sync_stage_status / mission converge 容错风格一致。
+        if lease.agent_run_id is not None:
+            try:
+                from app.core.db import get_session_factory
+                from app.modules.mcp_gateway.service import WebhookDispatcher
+
+                _wh_run = await self._session.get(AgentRun, lease.agent_run_id)
+                _wh_status = _wh_run.status if _wh_run is not None else None
+                _wh_mission_id = _wh_run.mission_id if _wh_run is not None else None
+                if (
+                    _wh_run is not None
+                    and _wh_mission_id is not None
+                    and _wh_status in ("completed", "failed", "killed")
+                ):
+                    from app.modules.agent.model import AgentMission
+
+                    _wh_mission = await self._session.get(AgentMission, _wh_mission_id)
+                    if _wh_mission is not None:
+                        _wh_dispatcher = WebhookDispatcher(get_session_factory())
+                        await _wh_dispatcher.deliver(
+                            _wh_mission.workspace_id,
+                            f"worker.{_wh_status}",
+                            {
+                                "mission_id": str(_wh_mission_id),
+                                "worker_id": str(lease.agent_run_id),
+                                "status": _wh_status,
+                                "error_code": _wh_run.error_code,
+                            },
+                        )
+            except Exception as exc:
+                log.warning(
+                    "complete_lease_webhook_failed",
+                    lease_id=str(lease_id),
+                    agent_run_id=str(lease.agent_run_id),
+                    error=str(exc),
+                )
+
         log.info(
             "daemon_lease_completed",
             lease_id=str(lease_id),
