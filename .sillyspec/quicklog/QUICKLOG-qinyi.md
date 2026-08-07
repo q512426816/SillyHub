@@ -220,3 +220,13 @@
 根因：两脚本用 npx --no-install openapi-typescript，shim 缺失时 npx 找不到命令，execSync 抛裸 Error 对象（其 stdout/stderr 属性在 stdio:inherit 下为 null），错误信息丢失；CLAUDE.md 规则 20 已警告此场景但脚本侧无自检。
 方案：frontend/scripts/gen-api-types.mjs + sillyhub-daemon/scripts/gen-api-types.mjs 一致加 assertOpenapiTypescriptShim()（跑前查 .bin/openapi-typescript，Win 查 .CMD+无后缀；缺则报期望路径+node_modules 半坏+pnpm install --force+勿误判包坏，exit 1）+ openapi-typescript execSync 包 try/catch 给明确指引；frontend dump_openapi 步也加 try/catch。
 结果：happy path 两脚本 gen:types 成功；受控 error-path（临时改名 shim）新报错清晰可操作 exit 1，恢复后正常；无业务/类型改动，api-types.ts CRLF 噪声已还原。
+## ql-20260807-001-f9ba | 2026-08-07 08:43:12 | pre-commit mypy 改单文件扫（staged .py）+ 全仓提醒不拦截
+状态：已完成
+关联变更：（无）
+文件：
+- `.claude/hooks/pre-commit-ci-check.cjs`（changedFiles 加 `--diff-filter=ACMR` 排删除态；mypy 块从写死 `uv run mypy app` 改成只扫 staged backend .py + log 提醒手动跑全仓）
+
+需求：多子代理并发改同一 worktree 不同模块时，pre-commit 的全仓 `mypy app` 会扫到他人未提交的在途文件 / 预存 mypy 债，把彼此 commit 卡死（public-mcp-server task-12/14 实际撞过——各自模块 mypy 全绿却因别人的在途文件被拦，形成"不能改别人文件、hook 又扫全仓"的死锁）。
+根因：hook 写死 `uv run mypy app`（全仓扫），与 worktree 多代理并发执行模型冲突。
+方案：mypy 改传 staged 的 backend .py 文件列表（剥 `backend/` 前缀），mypy 默认 `--follow-imports=normal` 只报命令行显式文件的错误、依赖模块分析但不报 → commit 不被他人债拖累；全仓跨文件检查降级为 log 提醒（不拦截、不自动跑，免拖慢 commit）+ CI 兜底。另加 `--diff-filter=ACMR` 排删除态免 mypy 报 "Can't get file"。
+结果：实测验证——临时 stage `backend/app/__init__.py` 喂 JSON 触发 hook，mypy 单文件扫 passed + 提醒 log 正常 + commit 放行；多文件引号在 Windows cmd 拼接正确（2 source files）；mypy 单文件扫只报显式文件行为正确。提交 49a80ea1（仅 hook 一个文件）。代价：跨文件类型错误（调用方传错类型给被改函数）单文件扫不到，靠提醒 + CI 兜底。
