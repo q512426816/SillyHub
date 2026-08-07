@@ -109,6 +109,25 @@ export class InputQueue<T = UserTurnInput> implements AsyncIterable<T> {
   }
 
   /**
+   * ql-20260807-002：reload 热切换供应商时重置订阅标记，让新 query 能重新订阅本队列。
+   *
+   * InputQueue 单订阅（``_subscribed``，第二次 [Symbol.asyncIterator] 抛
+   * SessionQueueDoubleSubscribeError）。create 时 SDK 已订阅（``_subscribed=true``）；
+   * reloadWithProvider 复用同一 ``state.inputQueue`` 让新 query 吃后续 inject，但新
+   * query 订阅会触发二次订阅抛错 → SDK query abort（"Operation aborted"）→ onError →
+   * fail → session ended（实测 reload 后会话 ended 的真正根因，非 close 旧 query）。
+   * 本方法在 reload driver.start 前调，重置 ``_subscribed`` 让新 query 能合法订阅。
+   *
+   * 保留 ``_buffer``（reload 期间已 push 的 pending inject 不丢）+ ``_closed``（reload
+   * 不 close 队列，保持 false）。清 ``_pending``（旧 query 的 waiter 随旧 query
+   * close/abort 废弃，新 query 订阅后建新 waiter）。
+   */
+  resetForResubscribe(): void {
+    this._subscribed = false;
+    this._pending = null;
+  }
+
+  /**
    * AsyncIterable 实现：driver `start(input: queue)` 订阅一次。
    *
    * @throws {SessionQueueDoubleSubscribeError} 第二次订阅

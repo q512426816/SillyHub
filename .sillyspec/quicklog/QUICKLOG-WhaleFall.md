@@ -233,3 +233,15 @@
 根因：reloadWithProvider close 旧 query 时 SDK 迭代器抛 abort 错（Claude Code process aborted by user）→ driver consume catch → onError 静默 fail(sessionId)；reload 后 status=active 绕过 fail 守卫（只挡 ended/failed）→ _terminateSession 把新 session 打成 failed + close 新 query + onSessionEnd（backend ended）。ql-20260806-002 的 close 后移只是必要前提未堵此洞，mock consume 永不抛错致测试漏。
 方案：_runConsume 加 isAuthoritative orphan 谓词（target===state.query），onError/catch/onResult/onMessage 入口判 orphan 静默 no-op；成立前提=c40b1319 先替换 state.query 再 close。加 AC-6 测试用 makeMockDriverWithAbortOnClose 模拟真实 close→抛错→onError。
 结果：tsc --noEmit exit0；reload-provider 11 passed（含新 AC-6）；反向验证临时禁用守卫 AC-6 FAIL 复现 status=failed 证测试有效；daemon rebuild+部署待做。
+## ql-20260807-002-cc75 | 2026-08-07 10:13:14 | 修复切换/停止供应商后 reload 运行中会话被 ended
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/input-queue.ts（新增 resetForResubscribe：reload 热切换前重置 _subscribed 订阅标记 + 清旧 _pending waiter，保留 _buffer pending inject，让新 query 能合法订阅同一队列——InputQueue 原单订阅设计第二次 [Symbol.asyncIterator] 抛 SessionQueueDoubleSubscribeError）
+- sillyhub-daemon/src/interactive/session-manager.ts（reloadWithProvider driver.start 前调 inputQueue.resetForResubscribe + buildSpawnEnv 后强制 newEnv.CLAUDE_CONFIG_DIR=daemon 隔离目录；顶部 import CLAUDE_CONFIG_DIR from config.ts）
+- .sillyspec/docs/SillyHub/modules/daemon.md（变更索引加 ql-20260807-002 真实根因条目；ql-001 orphan 守卫 + ql-006-002 close 后移标注为部分修复，ended 真正主因指向 002）
+
+需求：修复切换/停止供应商后 reload 运行中会话被 ended。
+根因：reload 复用 state.inputQueue 但 InputQueue 单订阅（_subscribed），create 时 SDK 已订阅，reload 新 query 第二次订阅抛 SessionQueueDoubleSubscribeError → SDK query abort（Operation aborted）→ onError → fail → onSessionEnd → backend end_session → session ended；停止（provider_config=null）buildSpawnEnv 不设 CLAUDE_CONFIG_DIR 回退 ~/.claude 但 jsonl 在 daemon claude-config → resume 找不到 → 启动失败 → fail。
+方案：InputQueue 加 resetForResubscribe（reload driver.start 前 reset _subscribed+清旧 _pending，保留 _buffer pending inject）+ reloadWithProvider buildSpawnEnv 后强制 CLAUDE_CONFIG_DIR=daemon 隔离目录（停止也保持 jsonl 一致）；诊断日志（end-diag）全移除。
+结果：tsc exit0；reload-provider 11 + input-queue 16 单测过；实测切换→停止→再切换四次 reload session 保持 active（DB status=active ended_at=空，daemon.log reload-diag success 无 fail）。

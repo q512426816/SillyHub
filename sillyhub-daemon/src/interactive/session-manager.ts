@@ -74,6 +74,8 @@ import type { ProviderConfig } from '../types.js';
 // → 回退本机凭证，spawn-env.ts:140-164 已支持）。SpawnCredentialManager 鸭子类型，
 // daemon 生产路径注入 daemon._credentialManager，测试 / 未注入时用 noopCredential fallback。
 import { buildSpawnEnv, type SpawnCredentialManager } from '../spawn-env.js';
+// ql-20260807-002：reload 始终用 daemon 隔离 CLAUDE_CONFIG_DIR（jsonl 在那），停止供应商也保持。
+import { CLAUDE_CONFIG_DIR } from '../config.js';
 // task-04（FR-01 / D-005@v1）：turn 收尾把模型调用失败归类为结构化 ModelError，
 // 挂到 result.modelError 透传给 daemon 桥接 → notifyRunResult → backend error_detail。
 // 与 stream-json.ts:954 批量路径同源（近源归类，D-005 方案 C 三端标准协议）。
@@ -2608,6 +2610,12 @@ export class SessionManager {
         { provider_config: providerConfig ?? undefined },
         { credential },
       );
+      // ql-20260807-002：reload 必须保持 CLAUDE_CONFIG_DIR=daemon 隔离目录。create/切换时
+      // jsonl 写在 daemon claude-config；停止（provider_config=null）buildSpawnEnv 会
+      // delete CLAUDE_CONFIG_DIR 回退 ~/.claude，致新 claude resume jsonl 找不到 → 启动
+      // 失败 → onError → fail → session ended。reload 始终用 daemon 隔离目录（jsonl 一致），
+      // 凭证靠 env token（层 2 credentials.json）+ daemon settings.json，不回退用户 ~/.claude。
+      newEnv.CLAUDE_CONFIG_DIR = CLAUDE_CONFIG_DIR;
 
       // ── ③ 校验 resume key 必需 ──
       // agentSessionId 来自首 turn system/init（Claude）或 thread_started（Codex），
@@ -2658,6 +2666,12 @@ export class SessionManager {
       //（reload 不 close 队列；新 query 订阅同一队列吃后续 inject，不丢消息）。
       // await 阻塞至 SDK 完成首 turn 前的 resume 加载；失败（spawn EINVAL / jsonl
       // 缺失 / cwd 不一致）→ 抛进 catch。
+      // ql-20260807-002：reload 复用 inputQueue，但 InputQueue 单订阅（create 时 SDK 已
+      // 订阅 _subscribed=true）。不 reset 则新 query 第二次订阅抛 SessionQueueDoubleSubscribeError
+      // → SDK query abort（onError "Operation aborted"）→ fail → session ended（实测 reload
+      // 后 ended 的真正根因，非 close 旧 query）。resetForResubscribe 重置订阅标记 + 清旧
+      // waiter，保留 buffer（pending inject 不丢），让新 query 合法订阅同一队列。
+      state.inputQueue.resetForResubscribe();
       const handleOrQuery = (await driver.start(
         state.inputQueue,
         driverOpts as unknown as Parameters<InteractiveDriver['start']>[1],
