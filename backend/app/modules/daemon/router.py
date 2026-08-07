@@ -46,7 +46,6 @@ from app.modules.daemon.protocol import (
     PermissionRequestPayload,
 )
 from app.modules.daemon.run_sync.service import publish_submitted_messages
-from app.modules.daemon.session.service import get_session_readiness
 from app.modules.daemon.schema import (
     AgentSessionListResponse,
     AgentSessionRead,
@@ -95,6 +94,7 @@ from app.modules.daemon.service import (
     DaemonService,
     DaemonSessionNotFound,
 )
+from app.modules.daemon.session.service import get_session_readiness
 
 log = get_logger(__name__)
 
