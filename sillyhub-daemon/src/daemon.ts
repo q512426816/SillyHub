@@ -3222,6 +3222,16 @@ export class Daemon {
         // .create（session-manager 据此设 session 级检查点，累计 input+output ≥ 阈值
         // → 软切断 D-006 + 回传 budget_exceeded）。undefined → 检查点不触发（FR-07）。
         budget_tokens: execPayload.budget_tokens,
+        // 2026-08-06-public-mcp-server verify 修复（read_only 物制 / G3 / D-005@v2）：
+        // worker 全走 kind=interactive（placement.py D-002@v3），原 interactive 路径在
+        // _runLeaseStateMachine 对 kind=interactive 提前 return（daemon.ts:3582）跳过 ctx
+        // 构造 → tool_config 永不达 SessionManager/ClaudeSdkDriver → read_only 失效（worker
+        // 实测 Write/Bash 全放行，spike-B 追 batch stream-json 路径漏了 interactive）。
+        // execPayload 构造把 lease tool_config 映射到 camelCase `toolConfig`（见上方
+        // 字段构造 rawExec.tool_config → toolConfig），此处读它取 allowed_tools → 透传
+        // ClaudeSdkDriver StartOptions.allowedTools（SDK 白名单，非白名单工具不可用）。
+        // read_only=[Read,Glob,Grep]，写 worker=[...+Edit,Write,Bash]。absent → SDK 默认。
+        allowedTools: (execPayload.toolConfig as { allowed_tools?: string[] } | undefined)?.allowed_tools,
       });
       // task-09（D-007@v2 候选 B）：借用 session 登记沙箱根，激活 SessionManager
       // 按 lease 隔离的只读 policy（写守卫只允许落沙箱内，不命中 lender runtime 缓存）。

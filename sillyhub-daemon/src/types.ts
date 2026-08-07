@@ -186,6 +186,23 @@ export interface DaemonMessage<T extends MsgType = MsgType> {
 export type ToolConfig = Record<string, string>;
 
 /**
+ * Worker 工具治理配置（backend ``worker_tool_config`` 下发，lease ``tool_config`` 字段）。
+ *
+ * ⚠️ 与上方 :type:`ToolConfig`（凭据 map，``Record<string, string>``）是**两个不同形态**——
+ * 这是 design R-09/CC-10 标记的 ``tool_config`` 二义性：同一 payload key ``tool_config`` 在
+ * 凭据路径（task_runner credential_config）是 string map，在 worker 治理路径是本结构。
+ * backend ``build_claim_payload``（context.py:521）对 worker lease 下发的是本治理结构
+ * （``{mode, allowed_tools, max_turns}``，snake_case）。daemon 读 ``allowed_tools`` → 透传
+ * ClaudeSdkDriver ``allowedTools``（SDK 白名单，非白名单工具不可用）实现 read_only 物制
+ * （2026-08-06-public-mcp-server verify 修复：interactive 路径原未应用，read_only 失效）。
+ */
+export interface ToolGovernanceConfig {
+  mode?: string;
+  allowed_tools?: string[];
+  max_turns?: number;
+}
+
+/**
  * task-08（D-006@v1）：平台下发的 LLM 供应商配置（中性 snake_case 结构）。
  *
  * backend `build_claim_payload` 按 lease→user 解析默认 provider 后解密 api_key，
@@ -311,6 +328,13 @@ export interface LeaseCtx {
   agentSessionId?: string;
   /** 凭据/工具配置，渲染成环境变量。 */
   toolConfig?: ToolConfig;
+  /**
+   * Worker 工具治理（backend ``worker_tool_config`` 下发，snake_case）。read_only worker
+   * 的 ``allowed_tools=[Read,Glob,Grep]`` 经此字段透传 ClaudeSdkDriver ``allowedTools``
+   * 实现物制。与 ``toolConfig``（凭据 camelCase map）区分（CC-10 二义性）。
+   * 2026-08-06-public-mcp-server verify 修复：interactive session 原不读此字段 → read_only 失效。
+   */
+  tool_config?: ToolGovernanceConfig;
   /**
    * task-08 / task-09（D-004@v1 / D-005@v1）：平台下发的 LLM 供应商配置。
    * backend `build_claim_payload` 按 lease→user 解析默认 provider 解密后下发；

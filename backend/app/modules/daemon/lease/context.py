@@ -243,6 +243,14 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
         # execPayload.kind 为 undefined → 走 batch task_runner（422）。
         "kind": lease.kind,
     }
+    # 2026-08-06-public-mcp-server verify 修复（read_only 物制 / G3 / D-005@v2）：
+    # tool_config override 必须在所有 kind 分支之前——原 override 在文件末（~line 521），
+    # 但 kind=interactive 分支（下方 tar/shared 两路）提前 return，永远到不了末尾 override，
+    # 致 interactive lease（=所有 worker，placement.py D-002@v3）claim payload 的 tool_config
+    # 恒为默认 {} → daemon 拿不到 allowed_tools → read_only worker 实测 Write/Bash 全放行。
+    # 提前到此处，interactive + batch 都能透传 lease metadata 的 tool_config（governance）。
+    if lease_meta.get("tool_config"):
+        payload["tool_config"] = lease_meta["tool_config"]
     # gap-5：interactive lease agent_run_id=NULL（D-005），不走 agent_run 提取分支，
     # 从 lease metadata 取首 turn 参数（prepare_interactive_dispatch 写入），
     # 供 daemon _startInteractiveSession 构造 SessionManager.create 输入。

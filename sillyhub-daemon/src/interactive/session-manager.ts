@@ -1167,6 +1167,26 @@ export class SessionManager {
         inner,
       );
     }
+    // 2026-08-06-public-mcp-server verify 修复（read_only 物制 layer 3 / G3 / D-005@v2）：
+    // read_only worker 的 allowed_tools=[Read,Glob,Grep] 经 create→driverOpts 传到 SDK 的
+    // allowedTools 字段，但 SDK allowedTools 非严格白名单（无 canUseTool 时 headless 默认
+    // 全批准；有写守卫时写守卫按路径放行 Write/Edit/Bash）→ read_only 实测仍能写。故在
+    // canUseTool 最外层包一道白名单拒绝：toolName 不在 allowedTools 直接 deny，先于写守卫
+    // /默认批准。absent（非 read_only worker）→ 不包，零回归。
+    if (spec.allowedTools !== undefined) {
+      const _roWhitelist = new Set(spec.allowedTools);
+      const _innerCanUse = driverOpts.canUseTool as CanUseTool | undefined;
+      const _roGate: CanUseTool = async (toolName, input, options) => {
+        if (!_roWhitelist.has(toolName)) {
+          return {
+            behavior: 'deny',
+            message: `read_only: tool '${toolName}' not in allowed_tools whitelist [${[..._roWhitelist].join(',')}]`,
+          };
+        }
+        return _innerCanUse ? _innerCanUse(toolName, input, options) : { behavior: 'allow' };
+      };
+      driverOpts.canUseTool = _roGate;
+    }
     return driverOpts;
   }
 
