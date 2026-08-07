@@ -245,3 +245,15 @@
 根因：reload 复用 state.inputQueue 但 InputQueue 单订阅（_subscribed），create 时 SDK 已订阅，reload 新 query 第二次订阅抛 SessionQueueDoubleSubscribeError → SDK query abort（Operation aborted）→ onError → fail → onSessionEnd → backend end_session → session ended；停止（provider_config=null）buildSpawnEnv 不设 CLAUDE_CONFIG_DIR 回退 ~/.claude 但 jsonl 在 daemon claude-config → resume 找不到 → 启动失败 → fail。
 方案：InputQueue 加 resetForResubscribe（reload driver.start 前 reset _subscribed+清旧 _pending，保留 _buffer pending inject）+ reloadWithProvider buildSpawnEnv 后强制 CLAUDE_CONFIG_DIR=daemon 隔离目录（停止也保持 jsonl 一致）；诊断日志（end-diag）全移除。
 结果：tsc exit0；reload-provider 11 + input-queue 16 单测过；实测切换→停止→再切换四次 reload session 保持 active（DB status=active ended_at=空，daemon.log reload-diag success 无 fail）。
+## ql-20260807-003-0c1b | 2026-08-07 13:03:03 | 排查 /model 偶发空白（重新进入才显示）
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/session-manager.ts（_runConsume 的 onResult/onMessage 改 async+await，driver consume 串行等每条上报 HTTP 完成保证 message 先 result 落库/SSE——防御性修复，非 /model 主因但避免 close 先 message 后前端不渲染）
+- sillyhub-daemon/tests/interactive/session-manager-reload-provider.test.ts（AC-3a 断言更新：ql-002 停止路径强制 CLAUDE_CONFIG_DIR 后不再 undefined，旧 toBeUndefined 断言过时——ql-002 遗留测试债）
+- .sillyspec/docs/SillyHub/modules/daemon.md（变更索引加 ql-003 条目：/model 空白根因[inject 时序] + cb async 防御 + AC-3a + C 方案待完整流程）
+
+需求：排查 /model 偶发空白（重新进入才显示）。
+根因：inject 在新会话 create_session 完成前到 daemon，daemon session 不存在直接丢 inject（不重试），/model 没进 claude；backend inject 只查 DB active 不查 daemon ready。
+方案：本 quick 顺带 cb async 防御（_runConsume onResult/onMessage 改 async+await 串行保证 message 先 result）+ AC-3a 更新（ql-002 遗留测试债）；/model 真正修复 C 方案转完整流程。
+结果：tsc 0；reload-provider 11 + input-queue 16 单测过；cb async + AC-3a 落地。

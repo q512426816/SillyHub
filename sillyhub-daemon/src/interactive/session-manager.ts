@@ -1727,13 +1727,13 @@ export class SessionManager {
       return current === target;
     };
 
-    const onResult = (r: SDKResultMessage | InteractiveDriverResult): void => {
+    const onResult = async (r: SDKResultMessage | InteractiveDriverResult): Promise<void> => {
       if (!isAuthoritative()) return; // orphan：reload 已换 query，旧 result 丢弃
-      void this._onResult(state, r);
+      await this._onResult(state, r);
     };
-    const onMessage = (m: SDKMessage | Record<string, unknown>): void => {
+    const onMessage = async (m: SDKMessage | Record<string, unknown>): Promise<void> => {
       if (!isAuthoritative()) return; // orphan：旧 query 残留消息丢弃
-      void this._onMessage(state, m as SDKMessage);
+      await this._onMessage(state, m as SDKMessage);
     };
     const onError = (_e: unknown): void => {
       // 边界 2：driver 异常 → fail。fail 内部幂等。

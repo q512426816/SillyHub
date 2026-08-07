@@ -338,7 +338,7 @@ describe('task-08 / reloadWithProvider 成功路径（FR-05 / D-002@v1）', () =
 
   // ── AC-3：provider_config=null 回退本机 + 对照组 ───────────────────────────
 
-  it('AC-3a: provider_config=null → buildSpawnEnv 第 0 层跳过 + 不隔离 CLAUDE_CONFIG_DIR', async () => {
+  it('AC-3a: provider_config=null → reload 仍保持 CLAUDE_CONFIG_DIR=daemon 隔离（jsonl 一致，ql-002）', async () => {
     const mock = makeMockDriver();
     const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
 
@@ -348,13 +348,15 @@ describe('task-08 / reloadWithProvider 成功路径（FR-05 / D-002@v1）', () =
     mock.emitResult(resultSuccess());
     await flushMicrotasks();
 
-    // 测试前确保 process.env 没有 CLAUDE_CONFIG_DIR 残留（buildSpawnEnv else 分支
-    // 会 delete；无残留则 no-op，结果一致）。本测试不依赖 process.env 状态。
     await sm.reloadWithProvider(BASE_INPUT.sessionId, null);
 
     const state = readState(sm, BASE_INPUT.sessionId)!;
-    // provider_config=null → buildSpawnEnv 不设 CLAUDE_CONFIG_DIR（回退本机 ~/.claude）。
-    expect(state.env?.CLAUDE_CONFIG_DIR).toBeUndefined();
+    // ql-20260807-002：reload（含停止 provider_config=null）强制保持 CLAUDE_CONFIG_DIR=daemon
+    // 隔离目录——create/切换 jsonl 写在 daemon claude-config，停止若回退 ~/.claude 会 resume
+    // 找不到 jsonl → 启动失败 → session ended。故停止也保持隔离目录（凭证靠 env token）。
+    expect(state.env?.CLAUDE_CONFIG_DIR).toBeDefined();
+    expect(typeof state.env?.CLAUDE_CONFIG_DIR).toBe('string');
+    expect(state.env!.CLAUDE_CONFIG_DIR!.length).toBeGreaterThan(0);
     // reload 成功（session 仍 active，未崩溃）。
     expect(state.status).toBe('active');
   });
