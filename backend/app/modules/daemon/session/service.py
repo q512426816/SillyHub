@@ -604,6 +604,13 @@ class SessionService:
         # task-06: WS Hub routes by daemon_instance_id; resolve from the
         # provider runtime_id carried on the dispatch.
         daemon_id = await _resolve_daemon_id_for_runtime(self._session, dispatch.runtime_id)
+        # 等 daemon session ready（create 完成）再发首 prompt SESSION_INJECT，避免在
+        # daemon _startInteractiveSession 完成前到被 _routeSessionControl session_not_found
+        # 丢（/model 空白根因）。同 inject_session（task-08）逻辑；超时 fallback 仍发
+        # （兼容不上报 ready 的旧 daemon）。
+        ready = await get_session_readiness().wait(session.id, timeout=30)
+        if not ready:
+            log.warning("session_ready_timeout", session_id=str(session.id))
         control_ok = False
         if daemon_id is not None:
             control_ok = await hub.send_session_control(
