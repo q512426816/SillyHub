@@ -1,6 +1,7 @@
 ---
 author: WhaleFall
 created_at: 2026-07-20T10:42:00
+source_commit: 5a00fc7e
 ---
 
 # 前端页面样式规范(以 /ppm/projects 为基准)

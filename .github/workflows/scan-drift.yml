@@ -1,0 +1,135 @@
+name: scan-drift
+
+# scan 文档漂移检测门（warn-only，D-002 方案 A）
+# 漂移时脚本 exit 0 + GitHub ::warning 文件注解 + 去重 PR 评论汇总，不阻塞 merge。
+# 设计依据：.sillyspec/changes/2026-08-06-scan-doc-drift-gate/design.md（§4 上报 / §6 yaml 骨架 / §10 R-04）
+
+on:
+  pull_request:
+    paths:
+      - ".sillyspec/docs/**"
+      - "backend/**"
+      - "frontend/**"
+      - "sillyhub-daemon/**"
+      - "scripts/scan-drift-check.py"
+      - ".github/workflows/scan-drift.yml"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write # github-script 需要写 PR 评论（issues API）
+
+jobs:
+  scan-drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout（全历史，算 commit 距离，R-04）
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run scan drift check（warn-only，漂移也 exit 0）
+        # tee：::warning 注解照常打到 stdout 让 GitHub 识别，同时落盘给评论步骤解析。
+        # 默认 shell 已带 pipefail，脚本自身异常（非 0）会正常失败 job；漂移走 exit 0。
+        run: |
+          python scripts/scan-drift-check.py 2>&1 | tee scan-drift-output.log
+
+      - name: Report drift summary on PR（去重评论，失败不阻断）
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          DRIFT_LOG_PATH: scan-drift-output.log
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- scan-drift-report -->';
+
+            // 1. 解析 scan-drift-check.py 输出里的 ::warning 行（每行 = 一条漂移告警）
+            let warningLines = [];
+            try {
+              const log = fs.readFileSync(process.env.DRIFT_LOG_PATH, 'utf8');
+              warningLines = log
+                .split('\n')
+                .filter((l) => l.startsWith('::warning'));
+            } catch (err) {
+              core.warning('读取 scan drift 日志失败：' + err.message);
+            }
+
+            // 受影响文档数 = 唯一 file= 值（::warning file=<doc>::<msg>）
+            const docs = new Set();
+            for (const line of warningLines) {
+              const m = line.match(/file=([^:]+)/);
+              if (m) docs.add(m[1]);
+            }
+            const driftCount = warningLines.length;
+
+            const { owner, repo } = context.repo;
+            const issueNumber = context.issue.number;
+
+            // 2. 找既有带标记的评论（去重）
+            const { data: comments } = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number: issueNumber,
+            });
+            const existing = comments.find(
+              (c) => c.body && c.body.includes(marker)
+            );
+
+            // 无漂移且无既有评论 → 不刷屏，直接跳过
+            if (driftCount === 0 && !existing) {
+              core.info('无漂移且无既有 scan-drift 评论，跳过。');
+              return;
+            }
+
+            // 3. 组装评论内容
+            let body;
+            if (driftCount > 0) {
+              const shown = warningLines.slice(0, 20);
+              const details = shown
+                .map((l) => '- ' + l.replace(/^::warning\s*/, ''))
+                .join('\n');
+              const more =
+                warningLines.length > 20
+                  ? `\n\n…及其它 ${warningLines.length - 20} 条`
+                  : '';
+              body =
+                `${marker}\n` +
+                `## ⚠️ scan 文档漂移\n\n` +
+                `scan 文档漂移：涉及 ${docs.size} 篇文档 / ${driftCount} 条告警，建议重跑 \`sillyspec scan\` 刷新 \`.sillyspec/docs/SillyHub/scan/*.md\` 的 \`source_commit\` 与失效文件路径。\n\n` +
+                `<details><summary>详情（最多 20 条）</summary>\n\n${details}${more}\n\n</details>`;
+            } else {
+              body =
+                `${marker}\n` +
+                `## ✅ scan 文档无漂移\n\n` +
+                `最新检查未发现 source_commit 时效或文件路径漂移。`;
+            }
+
+            // 4. create-or-update
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+              core.info('已更新既有 scan-drift 评论 #' + existing.id);
+            } else {
+              const created = await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                body,
+              });
+              core.info('已创建 scan-drift 评论 #' + created.data.id);
+            }

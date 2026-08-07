@@ -1,7 +1,7 @@
 ---
 author: qinyi
 created_at: 2026-07-27 00:35:31
-source_commit: 6e78b29a
+source_commit: 5a00fc7e
 updated_at: 2026-07-26T16:35:31Z
 generator: sillyspec-scan
 ---
@@ -35,7 +35,7 @@ SillyHub 三端各自独立测试栈,统一目标:变更后零回归才允许合
 
 - backend 全量 pytest 未并行时约 **12 分钟**,超过 SillySpec verify 默认 10 分钟 gate;必须用 `pytest -n auto` 并行压到分钟级(`pyproject.toml [tool.pytest.ini_options]` 注释 + memory)。
 - main 分支 backend 存在**预存非业务 errors**(瞬时/环境性),全量失败先排除环境与 worktree overlay 污染,而非假定回归。
-- **PPM 前端变更 verify 必踩**:SillySpec CLI 按路径子串把 `frontend/components/ppm` 或 `lib/ppm` 关联到 ppm 后端测试,405 passed 但 ~700s 超 600s 默认 timeout 阻断(非失败);解法 `SILLYSPEC_TEST_TIMEOUT_MS=900000` 后台重跑。
+- **PPM 前端变更 verify 必踩**:SillySpec CLI 按路径子串把 `frontend/src/components/ppm` 或 `frontend/src/lib/ppm` 关联到 ppm 后端测试,405 passed 但 ~700s 超 600s 默认 timeout 阻断(非失败);解法 `SILLYSPEC_TEST_TIMEOUT_MS=900000` 后台重跑。
 - **SQLite(单测) vs PostgreSQL(生产)方言差异**:`with_for_update` 在 SQLite 为 no-op(测不到并发行锁),`date_trunc` 等需方言分支;并发正确性与 PG 特性只能在生产环境验证。断言不绑死 SQL 函数名。
 - 改 FastAPI router 必跑对应 `test_router`(参数顺序 SyntaxError service 测覆盖不到,重建容器 import 才暴露);`asyncpg` Windows 装不上时用 Docker 起 Postgres、本地后端连容器。
 - SillySpec verify/archive 实测要 `local.yaml` `modules` 块(非 `module_paths`),否则 fallback 全量;`archive step5 --change` 移动后找不到致 db 分裂,改用不带 `--change` + `status=archived` 判完成。

@@ -132,6 +132,7 @@ modules:
     entrypoints:
       - .github/workflows/backend-ci.yml
       - .github/workflows/frontend-ci.yml
+      - .github/workflows/scan-drift.yml  # warn-only scan 文档 drift 检测门（2026-08-06-scan-doc-drift-gate 新增）
     main_symbols: []
     depends_on: [backend, frontend, build]
     used_by: []

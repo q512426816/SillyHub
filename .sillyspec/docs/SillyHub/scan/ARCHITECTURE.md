@@ -1,7 +1,7 @@
 ---
 author: qinyi
 created_at: 2026-07-27 00:35:31
-source_commit: 6e78b29a
+source_commit: 5a00fc7e
 updated_at: 2026-07-26T16:35:31Z
 generator: sillyspec-scan
 ---
@@ -15,7 +15,7 @@ generator: sillyspec-scan
 
 ### backend（Python 3.12 / FastAPI，`backend/pyproject.toml`）
 - Web 框架：`fastapi>=0.115` + `uvicorn[standard]`（lifespan 启停钩子在 `backend/app/main.py`）。
-- ORM / DB：`sqlmodel>=0.0.22` + `sqlalchemy[asyncio]>=2.0` + `asyncpg`（PostgreSQL 异步驱动）；迁移 `alembic>=1.13`，迁移脚本在 `backend/migrations/versions`（117 个 revision 文件，含多个 merge head）。
+- ORM / DB：`sqlmodel>=0.0.22` + `sqlalchemy[asyncio]>=2.0` + `asyncpg`（PostgreSQL 异步驱动）；迁移 `alembic>=1.13`，迁移脚本在 `backend/migrations/versions`（127 个 revision 文件，含多个 merge head）。
 - 缓存 / 实时：`redis>=5.0`（agent run 日志走 Redis pub/sub 扇出）。
 - 对象存储：`aiobotocore>=3.8,<4`（平台文件中心，S3 兼容 / MinIO）。
 - 认证：`python-jose[cryptography]` + `passlib[bcrypt]` + `pynacl`（JWT + bcrypt + 会话）。
@@ -54,7 +54,7 @@ generator: sillyspec-scan
                   读写宿主文件系统 / spec 文档 / skills
 ```
 - backend 是唯一持久化与鉴权中心；daemon 是执行边缘节点，主动连 backend 的 `/ws`（无独立 HTTP 服务），通过 WS 双向消息 + lease 轮询领取任务。
-- daemon 分发：`backend/app/modules/daemon/dist_router` 暴露公共 `install.sh` 端点（curl … | bash 安装），backend 镜像 build 时 `additional_contexts` 注入 daemon 的 `build/bundle/`。
+- daemon 分发：`backend/app/modules/daemon/dist_router.py` 暴露公共 `install.sh` 端点（curl … | bash 安装），backend 镜像 build 时 `additional_contexts` 注入 daemon 的 `build/bundle/`。
 
 ### backend 分层（`backend/app/`）
 - `core/`：基础设施（`db` 引擎/会话、`redis`、`config`/settings、`logging`/structlog、`telemetry`/OTEL、`errors` 全局异常、`auth_deps`、`audit_hooks`）。
