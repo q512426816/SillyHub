@@ -157,6 +157,12 @@ class MissionExecutionService:
         workspace_id: uuid.UUID,
         user_id: uuid.UUID,
         read_only: bool,
+        # task-02（2026-08-08-dispatch-worker-caller-worktree / 路径A，D-001@v1 /
+        # D-008@v1 / D-009@v1）：caller（SillySpec execute）提供自己的 worktree 时
+        # 三参齐传；默认 None → 走原 team 模式自建 worktree 逻辑（零回归，design §9）。
+        worktree_path: str | None = None,
+        branch: str | None = None,
+        worker_prompt: str | None = None,
     ) -> uuid.UUID | None:
         """Dispatch a pending mission Worker Run to a daemon.
 
@@ -164,17 +170,38 @@ class MissionExecutionService:
         if a per-worker worktree could not be created — design §9 兼容策略：
         worktree 创建失败标 run failed + return None，不抛，主 agent 决策补派）。
         Raises if the Run is not pending.
+
+        task-02 路径A optional params（默认 None 零回归，design §7.2）：
+        - ``worktree_path``：caller worktree 绝对路径，非空 → 跳过自建、直接作
+          daemon root_path / worker cwd。⚠️ 路径A **不写** ``run.worktree_branch``
+          （D-008 双保险：该列是 team converge finalize merge 触发字段）。
+        - ``branch``：caller worktree 分支（如 ``sillyspec/<change>``），仅作 lease
+          metadata（dispatch_to_daemon ``branch=``）记录，**不落 AgentRun 列**。
+        - ``worker_prompt``：caller 覆写 worker prompt（含"不 commit / 不越界"指令），
+          非 None → 完全替代 ``render_worker_prompt``（D-001 方案A）。
         """
         if run.status != "pending":
             raise ValueError(f"dispatch_worker requires pending Run, got {run.status!r}")
 
         ws = await self._session.get(Workspace, workspace_id)
         repo_url = ws.repo_url if ws else None
-        branch = ws.default_branch if ws else None
+        # task-02（D-009@v1）：caller（路径A）提供 branch 则用其 worktree 分支
+        # （作 lease metadata 透传 dispatch_to_daemon，对齐跨仓契约字段名）；
+        # None → 回退 workspace.default_branch（原 team 模式逻辑，零回归）。
+        # ⚠️ branch 入参只进 lease metadata，**绝不赋给 run.worktree_branch 列**
+        # （D-008 红线，下方自建分支才会写该列，路径A 不进入自建）。
+        if branch is None:
+            branch = ws.default_branch if ws else None
         # 2026-06-29：Worker lease 透传 root_path（resolve_root_path_for_daemon
         # 容器→宿主机改写），让 daemon prepareWorkspace 在项目根执行（非空 mirror）。
         # D-007@2026-07-10：resolve_root_path_for_daemon 单参（path_source 列删除）。
         root_path = resolve_root_path_for_daemon(ws.root_path) if ws and ws.root_path else None
+        # task-02（路径A / D-001@v1 / D-008@v1）：caller 提供自己的 worktree → 直接
+        # 作 daemon root_path / worker cwd（caller worktree 已是宿主路径，无需容器→
+        # 宿主改写），并短路下方 git_worktree_add 自建（condition 追加
+        # ``and not worktree_path``）。⚠️ 路径A 绝不写 run.worktree_branch（D-008，保持 None）。
+        if worktree_path:
+            root_path = worktree_path
         # provider must be a daemon-known name ("claude"); fall back when the
         # workspace hasn't configured default_agent — otherwise daemon rejects
         # with "unsupported provider: claude_code" (it falls back to agent_type).
@@ -187,7 +214,12 @@ class MissionExecutionService:
         # ``assertWithinAllowedRoots`` 拒绝，design §7 路径策略）。
         # workspace 需在 ``.gitignore`` 排除 ``.worktrees/`` 防污染（运行时产物，
         # 非 backend 代码，本变更不动 backend/.gitignore）。
-        if self._host_fs_delegate is not None and ws is not None and root_path:
+        if (
+            self._host_fs_delegate is not None
+            and ws is not None
+            and root_path
+            and not worktree_path
+        ):
             run_id_short = str(run.id)[:8]
             sibling_path = f"{root_path}/.worktrees/{run_id_short}"
             worktree_branch = f"workers/{run_id_short}"
@@ -235,6 +267,10 @@ class MissionExecutionService:
                 branch=worktree_branch,
             )
 
+        # task-02（D-001@v1 方案A）：caller 全权覆写 worker prompt（含"不 commit /
+        # 不越界 allowedPaths"指令）；不传 → 原 render_worker_prompt（含 commit 协作
+        # 约束，team 模式不变）。design §7.4 逐字。
+        prompt = worker_prompt if worker_prompt is not None else render_worker_prompt(run)
         try:
             lease_id = await self._placement.dispatch_to_daemon(
                 run.id,
@@ -242,7 +278,7 @@ class MissionExecutionService:
                 workspace_id=workspace_id,
                 provider=provider,
                 model=model,
-                prompt=render_worker_prompt(run),
+                prompt=prompt,
                 repo_url=repo_url,
                 branch=branch,
                 stage=run.role or "mission_worker",

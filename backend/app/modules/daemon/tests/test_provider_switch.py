@@ -195,12 +195,8 @@ class TestNotifyProviderSwitchMultiDaemon:
         """
         user_id = await _create_user(db_session)
         rt = await _create_runtime(db_session, user_id)
-        sess1 = await _create_interactive_session(
-            db_session, runtime_id=rt.id, user_id=user_id
-        )
-        sess2 = await _create_interactive_session(
-            db_session, runtime_id=rt.id, user_id=user_id
-        )
+        sess1 = await _create_interactive_session(db_session, runtime_id=rt.id, user_id=user_id)
+        sess2 = await _create_interactive_session(db_session, runtime_id=rt.id, user_id=user_id)
 
         hub = _patch_hub(monkeypatch)
         config = {"agent_kind": "claude", "api_key": "secret", "model": "m1"}
@@ -226,9 +222,7 @@ class TestNotifyProviderSwitchStartStop:
         """
         user_id = await _create_user(db_session)
         rt = await _create_runtime(db_session, user_id)
-        await _create_interactive_session(
-            db_session, runtime_id=rt.id, user_id=user_id
-        )
+        await _create_interactive_session(db_session, runtime_id=rt.id, user_id=user_id)
 
         hub = _patch_hub(monkeypatch)
         config: dict = {
@@ -260,9 +254,7 @@ class TestNotifyProviderSwitchStartStop:
         """
         user_id = await _create_user(db_session)
         rt = await _create_runtime(db_session, user_id)
-        await _create_interactive_session(
-            db_session, runtime_id=rt.id, user_id=user_id
-        )
+        await _create_interactive_session(db_session, runtime_id=rt.id, user_id=user_id)
 
         hub = _patch_hub(monkeypatch)
 
@@ -398,12 +390,8 @@ class TestNotifyProviderSwitchBestEffort:
         user_id = await _create_user(db_session)
         rt1 = await _create_runtime(db_session, user_id, name_suffix="off")
         rt2 = await _create_runtime(db_session, user_id, name_suffix="on")
-        await _create_interactive_session(
-            db_session, runtime_id=rt1.id, user_id=user_id
-        )
-        await _create_interactive_session(
-            db_session, runtime_id=rt2.id, user_id=user_id
-        )
+        await _create_interactive_session(db_session, runtime_id=rt1.id, user_id=user_id)
+        await _create_interactive_session(db_session, runtime_id=rt2.id, user_id=user_id)
 
         # rt1 离线（D-007 回退 daemon_id=rt1.id）
         hub = _patch_hub(monkeypatch, offline_daemon_ids={rt1.id})
@@ -433,9 +421,7 @@ class TestNotifyProviderSwitchBestEffort:
 
         user_id = await _create_user(db_session)
         rt = await _create_runtime(db_session, user_id)
-        await _create_interactive_session(
-            db_session, runtime_id=rt.id, user_id=user_id
-        )
+        await _create_interactive_session(db_session, runtime_id=rt.id, user_id=user_id)
 
         # 不抛异常,返回 0（异常路径不计数）
         result = await notify_provider_switch(db_session, user_id, None)
@@ -455,9 +441,7 @@ class TestNotifyProviderSwitchRuntimeNull:
         user_id = await _create_user(db_session)
         # 正常 session（有 runtime）
         rt = await _create_runtime(db_session, user_id, name_suffix="ok")
-        await _create_interactive_session(
-            db_session, runtime_id=rt.id, user_id=user_id
-        )
+        await _create_interactive_session(db_session, runtime_id=rt.id, user_id=user_id)
         # 无 runtime 的 session（lease.runtime_id=None + session.runtime_id=None）
         now = datetime.now(UTC)
         sess_null_id = uuid.uuid4()

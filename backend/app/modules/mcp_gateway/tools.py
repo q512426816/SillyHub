@@ -340,6 +340,12 @@ async def dispatch_worker(
     model: str | None = None,
     read_only: bool = False,
     agent_profile_id: uuid.UUID | None = None,
+    # task-04（2026-08-08-dispatch-worker-caller-worktree，链路B / 路径A）：caller
+    # （SillySpec）提供自己的 worktree 派 worker，三参默认 None 走原 team 模式自建
+    # worktree 逻辑（design §7.3 / §9 零回归）。字段名 branch 对齐跨仓契约（D-009）。
+    worktree_path: str | None = None,
+    branch: str | None = None,
+    worker_prompt: str | None = None,
     ctx: Context | None = None,
 ) -> dict:
     """派一个 worker run（需要 dispatch scope）。
@@ -355,6 +361,13 @@ async def dispatch_worker(
     （--allowedTools Read,Glob,Grep）；``agent_profile_id``（可选）绑 AgentProfile
     并冻结 snapshot（FR-04，对齐内部 endpoint，visibility + workspace 归属校验，
     不可用/跨 workspace 返 400）。``workspace_id`` 由 middleware 从 McpToken 注入。
+
+    task-04 路径A 三参（design §7.3，默认 None → team 模式字节不变）：
+    ``worktree_path`` caller 自带 worktree 绝对路径（非空 → execution 跳过
+    git_worktree_add，作 daemon root_path）；``branch`` caller worktree 分支
+    （如 ``sillyspec/<change>``，仅入 lease metadata，**不落 run.worktree_branch**
+    防 finalize 误 merge，D-008）；``worker_prompt`` 覆写 worker prompt（含
+    "不 commit / 不越界"指令，非空 → 替代 render_worker_prompt）。
     """
     auth = _auth_from_ctx(ctx)
     require_mcp_scope(auth, MCP_SCOPE_DISPATCH)
@@ -420,6 +433,11 @@ async def dispatch_worker(
                 workspace_id=auth.workspace_id,
                 user_id=await _resolve_actor_user_id(session, auth),
                 read_only=read_only,
+                # task-04 路径A 透传（design §7.3）：caller worktree 三参，默认 None
+                # → execution 走原 team 模式自建 worktree 逻辑（§9 零回归）。
+                worktree_path=worktree_path,
+                branch=branch,
+                worker_prompt=worker_prompt,
             )
         except HostFsDelegateUnavailable:
             # delegate wiring 错误（workspace 无 bound daemon）fail-loud（对齐
@@ -746,22 +764,31 @@ async def create_mission(
     main_agent_config: dict | None = None,
     budget_usd: float | None = None,
     change_id: uuid.UUID | None = None,
+    # task-04（2026-08-08-dispatch-worker-caller-worktree，链路B / 路径A）：
+    # orchestration_mode="external" → team_mission_entry 跳过 orchestrator spawn
+    # （mission 由外部 caller SillySpec 自己 dispatch_worker 调度）。默认 "team"
+    # 零回归（design §7.1 / D-007 / §9）。
+    orchestration_mode: str = "team",
     ctx: Context | None = None,
 ) -> dict:
-    """建一个 team mission（需要 dispatch scope）。
+    """建一个 team / external mission（需要 dispatch scope）。
 
-    复用 ``OrchestratorService.team_mission_entry``（mode=team，D-004 忍一个闲置主
-    agent run）：建 AgentMission + 主 agent run（role=orchestrator）+ 派 daemon lease。
-    daemon 离线 / workspace 未绑定时主 agent run 标 ``pending`` + ``error_code``，不抛
-    （mission 仍建，后续靠 reconcile 重派）。
+    复用 ``OrchestratorService.team_mission_entry``：``orchestration_mode="team"``
+    （默认，D-004 忍一个闲置主 agent run）→ 建 AgentMission + 主 agent run
+    （role=orchestrator）+ 派 daemon lease；``orchestration_mode="external"``（路径A，
+    SillySpec 外部调度）→ 跳过 orchestrator spawn，返回 ``main_run=None``，mission 由
+    caller 后续 ``dispatch_worker`` 派 worker（design §7.1 / D-007）。daemon 离线 /
+    workspace 未绑定时主 agent run 标 ``pending`` + ``error_code``，不抛（mission 仍建，
+    后续靠 reconcile 重派）。
 
     **CC-05 / G-4 决议**：McpToken 无独立 user，``created_by`` 用 ``token.created_by``
     （签发该 token 的 user，最小改动、可审计），不传 None。creator 被删（SET NULL）→
     400 明确报错（同 ``_resolve_actor_user_id`` 语义）。
 
-    返回 ``{mission_id, status, main_run_id, workers}``（design §7.1；workers 即主
-    agent run 单条，第三方据此拿到 run_id 调 get_run_logs / dispatch_worker）。
-    ``workspace_id`` 由 middleware 注入，不进 inputSchema。
+    返回 ``{mission_id, status, main_run_id, workers}``（design §7.1）。team 模式
+    ``workers`` 即主 agent run 单条，第三方据此拿到 run_id 调 get_run_logs /
+    dispatch_worker；external 模式 ``main_run_id=null`` / ``workers=[]``（无 main_run，
+    待 caller 派 worker）。``workspace_id`` 由 middleware 注入，不进 inputSchema。
     """
     auth = _auth_from_ctx(ctx)
     require_mcp_scope(auth, MCP_SCOPE_DISPATCH)
@@ -778,7 +805,22 @@ async def create_mission(
             budget_usd=budget_usd,
             worker_preset=worker_preset,
             main_agent_config=main_agent_config,
+            # task-04（design §7.1 / D-007）：透传 orchestration_mode；mode 落
+            # AgentMission.constraints 由 task-01 在 team_mission_entry 内合并落库。
+            orchestration_mode=orchestration_mode,
         )
+        # external 模式：team_mission_entry 跳过 orchestrator spawn，返回 main_run=None
+        # （design §7.1 / D-007）。external mission 无 main_run / 无 worker，由 caller
+        # （SillySpec）后续 dispatch_worker 派；响应 main_run_id=None / workers=[]。
+        # 不访问 main_run.id / role 等属性，避免 NoneType 崩。
+        if main_run is None:
+            return {
+                "mission_id": str(mission.id),
+                # 无子 run → derive_status 返 "planning"（mission.py:44）。
+                "status": derive_status([], cancelled=mission.cancelled_at is not None),
+                "main_run_id": None,
+                "workers": [],
+            }
         return {
             "mission_id": str(mission.id),
             # AgentMission 不持久化 status（派生自子 run，router._mission_to_response 同款），

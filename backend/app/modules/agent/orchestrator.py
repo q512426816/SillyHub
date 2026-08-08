@@ -138,18 +138,32 @@ class OrchestratorService:
         budget_usd: float | None,
         worker_preset: list[dict] | None,
         main_agent_config: dict[str, Any] | None,
-    ) -> tuple[AgentMission, AgentRun]:
-        """建 mission + 主 agent run + 派 daemon lease。
+        orchestration_mode: str = "team",
+    ) -> tuple[AgentMission, AgentRun | None]:
+        """建 mission；team 模式还建主 agent run + 派 daemon lease。
 
-        复用 ``MissionService.start_mission`` 的持久化模式（mission.py:98-125），
-        但不调 GLM planner，主 agent run 单条 role=orchestrator。
+        ``orchestration_mode`` 取值：
+        - ``"team"``（默认，零回归）：复用 ``MissionService.start_mission`` 的持久化
+          模式（mission.py:98-125），但不调 GLM planner，主 agent run 单条
+          role=orchestrator + 派 daemon lease，返回 ``(mission, main_run)``。
+        - ``"external"``（路径A / SillySpec 外部调度，design §7.1 D-007@v1）：只建
+          mission（constraints 落 ``{"orchestration_mode": "external"}``），**跳过**
+          主 agent run + daemon lease——caller 在自己的 worktree 用 dispatch_worker
+          自主派 worker，返回 ``(mission, None)``。不加 DB 列，constraints JSON 复用
+          （model.py:601）。
 
-        daemon 离线 / workspace 未绑定时，``dispatch_to_daemon`` 抛
+        team 模式 daemon 离线 / workspace 未绑定时，``dispatch_to_daemon`` 抛
         ``NoOnlineDaemonError``——本方法捕获并把主 agent run 标记 ``pending`` +
         ``error_code="no_online_daemon"``，不抛错（mission 仍建，后续靠 reconcile
         重派）。这与 single 模式 dispatch_worker 失败语义一致（router.py:783-784）。
+        external 模式不调 dispatch_to_daemon，不存在该异常路径。
         """
         merged = dict(constraints or {})
+        # external 模式（路径A / SillySpec 外部调度）：把 mode 落进 mission.constraints
+        # 供 converge 检测（task-03 finalizer 查 orchestration_mode=="external" 跳过
+        # finalize/cleanup）。team 模式不落——merged 与改动前字节一致（零回归）。
+        if orchestration_mode == "external":
+            merged["orchestration_mode"] = "external"
 
         mission = AgentMission(
             workspace_id=workspace_id,
@@ -164,6 +178,19 @@ class OrchestratorService:
         self._session.add(mission)
         await self._session.commit()
         await self._session.refresh(mission)
+
+        # external 模式：只建 mission，**跳过 orchestrator run + daemon lease**——
+        # caller（SillySpec execute）在自己的 worktree 用 dispatch_worker 派 worker
+        # 自主驱动，不需要 SillyHub spawn 无人驱动的僵尸 orchestrator（design §7.1
+        # D-007@v1，解 P0-2）。team 模式不进此分支，仍走原 spawn + lease 逻辑零回归。
+        if orchestration_mode == "external":
+            log.info(
+                "orchestrator_mission_external_started",
+                mission_id=str(mission.id),
+                orchestration_mode=orchestration_mode,
+                worker_preset_len=len(worker_preset) if worker_preset else 0,
+            )
+            return mission, None
 
         cfg = _resolve_main_agent_config(main_agent_config)
         main_run = AgentRun(

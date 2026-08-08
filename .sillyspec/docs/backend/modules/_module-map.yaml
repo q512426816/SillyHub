@@ -3,7 +3,7 @@ project: backend
 source_commit: 6e78b29a
 generated_at: 2026-07-27 01:18:13
 generator: sillyspec-scan
-last_change: 2026-07-27 增量更新。补登新模块 `skills`（platform 级 CustomSkill admin CRUD，router tags=[custom-skills] 挂 /api，model CustomSkill + CustomSkillService，依赖 core/models）；删除已下线模块 `archive`（目录 app/modules/archive 不存在，全后端无 modules.archive 引用）并清理 core/auth/workspace/change 的 used_by 对 archive 的引用。`file`/`llm_provider`/`storage` 三卡已于先前手动补登（见上次 last_change），本次核对无误不再重复。上一次全量 scan 说明保留：backend/app/modules 实际业务目录（admin / agent / auth / change / change_writer / daemon / file / git_gateway / git_identity / health / incident / knowledge / llm_provider / ppm / release / runtime / scan_docs / settings / skills / spec_profile / spec_workspace / storage / task / tool_gateway / workflow / workspace / worktree），旧索引漏 admin、ppm 两模块；entrypoints/main_symbols/depends_on 均以 rg 验证。
+last_change: 2026-07-27 增量更新。补登新模块 `skills`（platform 级 CustomSkill admin CRUD，router tags=[custom-skills] 挂 /api，model CustomSkill + CustomSkillService，依赖 core/models）；删除已下线模块 `archive`（目录 app/modules/archive 不存在，全后端无 modules.archive 引用）并清理 core/auth/workspace/change 的 used_by 对 archive 的引用。`file`/`llm_provider`/`storage` 三卡已于先前手动补登（见上次 last_change），本次核对无误不再重复。上一次全量 scan 说明保留：backend/app/modules 实际业务目录（admin / agent / auth / change / change_writer / daemon / file / git_gateway / git_identity / health / incident / knowledge / llm_provider / ppm / release / runtime / scan_docs / settings / skills / spec_profile / spec_workspace / storage / task / tool_gateway / workflow / workspace / worktree），旧索引漏 admin、ppm 两模块；entrypoints/main_symbols/depends_on 均以 rg 验证。2026-08-08 archive（2026-08-08-dispatch-worker-caller-worktree）补登 `mcp_gateway`（scan 漏登：对外 MCP gateway，FastMCP streamable HTTP `/mcp/` + McpToken/Webhook 管理 API + tools.py 8 个 @mcp.tool，依赖 agent service 层；新建 modules/mcp_gateway.md）。
 
 modules:
   # ── core 模块 ──────────────────────────────────────────────
@@ -365,6 +365,47 @@ modules:
       - agent
     used_by:
       - agent  # agent↔daemon 双向引用
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  mcp_gateway:
+    status: active
+    doc: modules/mcp_gateway.md
+    paths:
+      - app/modules/mcp_gateway/**
+    tags: [mcp, model-context-protocol, gateway, fastmcp, streamable-http, token, webhook, public-api, mission]
+    aliases: [mcp-gateway, public-mcp]
+    entrypoints:
+      - /api/workspaces/{workspace_id}/mcp-tokens  # McpToken 管理（workspace owner/admin，WORKSPACE_WRITE）
+      - /api/workspaces/{workspace_id}/mcp-webhooks  # McpWebhook 订阅管理
+      - /mcp/  # 对外 FastMCP streamable HTTP 端点（带尾斜杠；第三方 MCP client 接入）
+    main_symbols:
+      - mcp  # FastMCP("sillyhub-public") 实例（server.py）
+      - mount_mcp  # 装配到父 FastAPI /mcp
+      - mount_path  # "/mcp"
+      - McpAuthMiddleware  # /mcp/* 鉴权中间件（auth.py）
+      - McpAuthContext  # request.state.mcp_auth 注入
+      - McpTokenService  # token 签发/校验/吊销（service.py）
+      - McpWebhookService  # webhook 注册/分发（service.py）
+      - McpToken  # ORM（model.py）
+      - McpWebhook  # ORM（model.py）
+      - mcp_gateway_router  # tokens/webhooks 管理 router（router.py）
+      # 8 个 @mcp.tool()（tools.py，对外 MCP tool；复用 agent service 层）
+      - dispatch_worker  # scope=dispatch
+      - get_worker_result  # scope=read
+      - list_workers  # scope=read
+      - converge_mission  # scope=converge
+      - report_progress  # scope=dispatch
+      - list_agent_profiles  # scope=read
+      - create_mission  # scope=dispatch
+      - get_run_logs  # scope=read
+    depends_on:
+      - core
+      - models
+      - auth
+      - agent  # 8 tool 复用 agent service 层（MissionExecutionService/OrchestratorService/FinalizerService/AgentProfileService）
+    used_by: []
     needs_review: false
     concerns: []
     review_reasons: []

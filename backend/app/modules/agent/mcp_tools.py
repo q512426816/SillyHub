@@ -68,6 +68,13 @@ class DispatchWorkerRequest(BaseModel):
     # task-10（change 2026-08-06-public-mcp-server）：可选绑 AgentProfile。None = 走
     # 兜底链（老调用不传行为不变）；非空时校验可见性 + workspace 归属后冻结快照。
     agent_profile_id: uuid.UUID | None = None
+    # task-05（2026-08-08-dispatch-worker-caller-worktree / 路径A，链路A HTTP）：caller
+    # （SillySpec）提供自己的 worktree 派 worker，三参默认 None 走原 team 模式自建
+    # worktree 逻辑（design §7.3 / §9 零回归）。字段名 branch 对齐跨仓契约 + 链路B
+    # （mcp_gateway/tools.py）同构（D-009 / R-06 防漂移）。
+    worktree_path: str | None = None
+    branch: str | None = None
+    worker_prompt: str | None = None
 
 
 class WorkerRunResponse(BaseModel):
@@ -422,6 +429,12 @@ async def dispatch_worker(
             workspace_id=workspace_id,
             user_id=user.id,
             read_only=payload.read_only,
+            # task-05 路径A 透传（design §7.3）：caller worktree 三参，默认 None
+            # → execution 走原 team 模式自建 worktree 逻辑（§9 零回归）。字段名 branch
+            # 对齐链路B + 跨仓契约（D-009）。
+            worktree_path=payload.worktree_path,
+            branch=payload.branch,
+            worker_prompt=payload.worker_prompt,
         )
     except HostFsDelegateUnavailable:
         # delegate wiring 错误（workspace 无 bound daemon）fail-loud 503

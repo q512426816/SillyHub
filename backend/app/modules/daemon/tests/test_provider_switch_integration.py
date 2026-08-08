@@ -239,9 +239,7 @@ class TestProviderSwitchStartSwitchesActiveSession:
     ) -> None:
         user_id = await _create_user(db_session, label="start")
         rt = await _create_runtime(db_session, user_id, name_suffix="start")
-        sess_id = await _create_interactive_session(
-            db_session, runtime_id=rt.id, user_id=user_id
-        )
+        sess_id = await _create_interactive_session(db_session, runtime_id=rt.id, user_id=user_id)
 
         # 老默认（将被互斥清成 False）+ 新候选（将被置成 True）
         old_row = await _seed_provider_row(
@@ -310,9 +308,7 @@ class TestProviderSwitchStopFallsBackToLocal:
     ) -> None:
         user_id = await _create_user(db_session, label="stop")
         rt = await _create_runtime(db_session, user_id, name_suffix="stop")
-        sess_id = await _create_interactive_session(
-            db_session, runtime_id=rt.id, user_id=user_id
-        )
+        sess_id = await _create_interactive_session(db_session, runtime_id=rt.id, user_id=user_id)
 
         row = await _seed_provider_row(
             db_session,

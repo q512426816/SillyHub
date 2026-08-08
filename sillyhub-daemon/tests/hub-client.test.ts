@@ -156,6 +156,8 @@ describe('HubClient — 6 个 lease/runtime 端点 URL/method/body 契约', () =
       daemon_local_id: 'dlid-1',
       daemon_version: DAEMON_VERSION,
       daemon_build_id: BUILD_ID,
+      // started_at：daemon 未启动时 hub-client 填 null（task-02 FR-01/D-001@v1）。
+      started_at: null,
       providers: [{ provider: 'claude', status: 'online' }],
     });
   });

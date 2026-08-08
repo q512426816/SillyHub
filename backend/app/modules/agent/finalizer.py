@@ -502,6 +502,24 @@ async def converge_mission_for_completed_run(
     cancelled = mission is not None and mission.cancelled_at is not None
     status = derive_status(runs, cancelled=cancelled)
 
+    # 路径A external mode 短路（task-03 / D-003@v2 / R-01 根解层①）：external mission
+    # 由 caller（SillySpec）自己 apply 回主干，SillyHub 绝不 merge / 清 caller
+    # worktree。命中 → 跳过 finalize_execute_mission / finalize_bootstrap_mission
+    # （及连带 cleanup_mission），不触发任何 git merge / worktree remove。team mission
+    # （constraints 无 orchestration_mode 或 ="team"）默认不命中 → 下方 finalize 块走
+    # 原 merge 逻辑，字节不变（design §9 零回归）。collect_completed_artifacts 已在上
+    # 文执行（只读回灌 worker artifact，幂等无害）。双保险：即使本检测失效，路径A
+    # dispatch 不写 run.worktree_branch（task-02）→ finalize_execute_mission 查空也
+    # 跳过 merge（本文件 :266）。
+    if mission is not None and (mission.constraints or {}).get("orchestration_mode") == "external":
+        log.info(
+            "converge_external_mode_skip_finalize",
+            mission_id=str(mission_id),
+            status=status,
+            trigger_run_id=str(run_id),
+        )
+        return status
+
     if status in ("done", "degraded"):
         # R5 守卫（2026-07-25）：原子抢占 converged_at（UPDATE...WHERE IS NULL）。
         # 两个 worker 同时 complete → 两个 converge 都 derive 出 done/degraded，但只有

@@ -101,9 +101,7 @@ class TestResolveDefaultProviderConfigFound:
     """命中默认 → 返回 9 字段中性 dict（D-006 单一真相源契约）。"""
 
     @pytest.mark.asyncio
-    async def test_returns_9_field_dict_when_default_exists(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_returns_9_field_dict_when_default_exists(self, db_session: AsyncSession) -> None:
         """有默认 provider → dict 含 9 字段（agent_kind/base_url/api_key/auth_field/
         model/model_role_mappings/default_fallback_model/extra_env/settings_config）。"""
         user_id = await _create_user(db_session, label="found")
@@ -208,9 +206,7 @@ class TestResolveDefaultProviderConfigNotFound:
         assert cfg is None
 
     @pytest.mark.asyncio
-    async def test_returns_none_when_rows_but_no_default(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_returns_none_when_rows_but_no_default(self, db_session: AsyncSession) -> None:
         """用户有 provider 但 ``is_default=False``（从未 set_default）→ None。
 
         守护查询的 ``is_default.is_(True)`` 过滤条件 —— 行存在但默认标志未置位时,
@@ -242,9 +238,7 @@ class TestResolveDefaultProviderConfigAgentKindIsolation:
     """claude 默认存在,查 codex → None（agent_kind 维度不串扰）。"""
 
     @pytest.mark.asyncio
-    async def test_other_agent_kind_returns_none(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_other_agent_kind_returns_none(self, db_session: AsyncSession) -> None:
         """claude 默认存在 + codex 默认存在 → 各查各的,不互窜。
 
         schema 限制 create 只能 claude,故 codex 行经 ``_seed_provider_row`` 直插 ORM。
@@ -286,9 +280,7 @@ class TestResolveDefaultProviderConfigAgentKindIsolation:
         assert codex_cfg["base_url"] == "https://api.codex.example"
 
     @pytest.mark.asyncio
-    async def test_unknown_agent_kind_returns_none(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_unknown_agent_kind_returns_none(self, db_session: AsyncSession) -> None:
         """查不存在的 agent_kind（如 'gemini'）→ None。"""
         user_id = await _create_user(db_session, label="unknown-ak")
         svc = LlmProviderService(db_session)
@@ -315,9 +307,7 @@ class TestResolveDefaultProviderConfigOwnerIsolation:
     """A 的默认,用 B 的 user_id 查 → None（D-008 owner 级不互窜）。"""
 
     @pytest.mark.asyncio
-    async def test_other_user_default_not_resolved(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_other_user_default_not_resolved(self, db_session: AsyncSession) -> None:
         """用户 A 的 claude 默认,以用户 B 身份查 → None（owner WHERE 过滤）。"""
         user_a = await _create_user(db_session, label="ownerA")
         user_b = await _create_user(db_session, label="ownerB")
@@ -351,9 +341,7 @@ class TestResolveDefaultProviderConfigSettingsConfig:
     """settings_config 原样透传 —— None / dict 均不加工（D-009 不解密 / 不判空）。"""
 
     @pytest.mark.asyncio
-    async def test_settings_config_none_passes_through(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_settings_config_none_passes_through(self, db_session: AsyncSession) -> None:
         """task-01 brownfield 老行（settings_config 列为 NULL）→ cfg["settings_config"]=None。
 
         守护 helper 不做 ``?? {}`` 默认值兜底（daemon 侧 ``spawn-env.ts`` 自行判空,
@@ -379,9 +367,7 @@ class TestResolveDefaultProviderConfigSettingsConfig:
         assert cfg["settings_config"] is None
 
     @pytest.mark.asyncio
-    async def test_settings_config_non_none_passes_through(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_settings_config_non_none_passes_through(self, db_session: AsyncSession) -> None:
         """settings_config 非 None → dict 原样透传（不解密 / 不加工 / 不校验 schema）。"""
         user_id = await _create_user(db_session, label="sc-dict")
         settings_payload = {
@@ -417,9 +403,7 @@ class TestResolveDefaultProviderConfigReadOnly:
     """helper 纯查询：不写 / 不改 ``is_default``（read-only 守护）。"""
 
     @pytest.mark.asyncio
-    async def test_does_not_modify_is_default_flag(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_does_not_modify_is_default_flag(self, db_session: AsyncSession) -> None:
         """调 helper 后,行 ``is_default`` 不变（True 仍 True,False 仍 False）。"""
         user_id = await _create_user(db_session, label="ro")
         svc = LlmProviderService(db_session)

@@ -15,6 +15,12 @@ class MissionCreateRequest(BaseModel):
     budget_usd: float | None = None
     constraints: dict | None = None
     mode: Literal["single", "team"] | None = None
+    # task-05（2026-08-08-dispatch-worker-caller-worktree / 路径A，D-007@v1）：team 路径
+    # 子模式。``"external"`` → ``router.create_mission`` 也走 team_mission_entry（跳过 GLM
+    # planner），team_mission_entry 跳过 orchestrator spawn，caller（SillySpec）自己
+    # dispatch_worker 调度。默认 None → 按 mode 走原逻辑（team 模式 spawn 主 agent，
+    # single 模式走 planner，零回归，design §7.1 / §9）。Literal 风格沿用既有 mode 字段。
+    orchestration_mode: Literal["team", "external"] | None = None
     session_id: uuid.UUID | None = None
     # 2026-07-12-team-main-agent-orchestration task-03 / D-002@v2：用户预设 worker 列表。
     # 每条 {agent_type, model, objective, role}。mode=team 时主 agent 按列表派 worker

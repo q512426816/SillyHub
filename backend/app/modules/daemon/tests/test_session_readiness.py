@@ -349,9 +349,7 @@ class TestNotifySessionReadyEndpoint:
         fresh_readiness: SessionReadiness,
     ) -> None:
         sid = uuid.uuid4()
-        resp = await client.post(
-            f"/api/daemon/sessions/{sid}/ready", headers=auth_headers
-        )
+        resp = await client.post(f"/api/daemon/sessions/{sid}/ready", headers=auth_headers)
 
         assert resp.status_code == 200, resp.text
         assert resp.json() == {"ok": True}
@@ -429,14 +427,10 @@ class TestConfirmReconnectedMarkReady:
     ) -> None:
         uid = await _create_user(db_session)
         rt = await _create_runtime(db_session, uid)
-        session, _lease = await _make_reconnecting_session(
-            db_session, user_id=uid, runtime=rt
-        )
+        session, _lease = await _make_reconnecting_session(db_session, user_id=uid, runtime=rt)
 
         svc = DaemonService(db_session)
-        result_status = await svc.confirm_session_reconnected(
-            session.id, runtime_id=rt.id
-        )
+        result_status = await svc.confirm_session_reconnected(session.id, runtime_id=rt.id)
 
         assert result_status == "active"
         await db_session.refresh(session)
@@ -484,9 +478,7 @@ class TestConfirmReconnectedMarkReady:
         await db_session.commit()
 
         svc = DaemonService(db_session)
-        result_status = await svc.confirm_session_reconnected(
-            active_session.id, runtime_id=rt.id
-        )
+        result_status = await svc.confirm_session_reconnected(active_session.id, runtime_id=rt.id)
 
         assert result_status == "active"
         # 已 active → 不进 reconnecting 翻转分支 → 不调 mark_ready。
@@ -501,13 +493,12 @@ class TestConfirmReconnectedMarkReady:
         """runtime_id 不匹配 → rejected（ownership guard），不 mark_ready。"""
         uid = await _create_user(db_session)
         rt = await _create_runtime(db_session, uid)
-        session, _lease = await _make_reconnecting_session(
-            db_session, user_id=uid, runtime=rt
-        )
+        session, _lease = await _make_reconnecting_session(db_session, user_id=uid, runtime=rt)
 
         svc = DaemonService(db_session)
         result_status = await svc.confirm_session_reconnected(
-            session.id, runtime_id=uuid.uuid4()  # mismatched
+            session.id,
+            runtime_id=uuid.uuid4(),  # mismatched
         )
 
         assert result_status == "rejected"

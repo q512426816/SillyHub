@@ -151,6 +151,10 @@ export function createMcpServer(client: HubClient): {
   // ── dispatch_worker ──────────────────────────────────────────────────────
   // schema 对齐 backend DispatchWorkerRequest（mcp_tools.py:49）：无 worker_id
   //（worker run id 由 backend 创建后返回）。
+  // task-06（2026-08-08-dispatch-worker-caller-worktree / R-06）：路径A 字段透传
+  //—— worktree_path/branch/worker_prompt 全部 optional，不传 → undefined →
+  // hub-client 守卫不写入 body → backend None → 走原 team 模式自建 worktree 逻辑
+  //（零回归）。链路A daemon stdio 与链路B public gateway schema 同构（D-009 branch）。
   server.registerTool(
     'dispatch_worker',
     {
@@ -168,6 +172,32 @@ export function createMcpServer(client: HubClient): {
         agent_type: z.string().optional().describe('Agent type (default: claude_code)'),
         model: z.string().optional().describe('Model override'),
         read_only: z.boolean().optional().describe('Read-only worker (default: false)'),
+        // 路径A（caller-worktree / external 模式）增量可选参，对齐 backend
+        // DispatchWorkerRequest（design §7.3）。不传 → backend None → team 模式不变。
+        worktree_path: z
+          .string()
+          .optional()
+          .describe(
+            'Path-A: caller-provided worktree absolute path. When set, backend ' +
+              'skips git_worktree_add and uses it as worker root_path. ' +
+              'Unset → backend self-creates worktree (team mode, no regression).',
+          ),
+        branch: z
+          .string()
+          .optional()
+          .describe(
+            'Path-A: caller worktree branch (e.g. sillyspec/<change>). Recorded as ' +
+              'lease metadata only; path-A does NOT write run.worktree_branch. ' +
+              'Unset → team mode unchanged.',
+          ),
+        worker_prompt: z
+          .string()
+          .optional()
+          .describe(
+            'Path-A: override the worker prompt. When set, fully replaces ' +
+              'render_worker_prompt (caller injects no-commit / stay-in-allowedPaths ' +
+              'instructions). Unset → backend renders default prompt.',
+          ),
       },
     },
     async (args) => {
@@ -181,6 +211,10 @@ export function createMcpServer(client: HubClient): {
             agent_type: args.agent_type,
             model: args.model,
             read_only: args.read_only,
+            // 路径A 透传：undefined → hub-client 守卫不写入 body（零回归）。
+            worktree_path: args.worktree_path,
+            branch: args.branch,
+            worker_prompt: args.worker_prompt,
           },
         );
         return okContent(result);

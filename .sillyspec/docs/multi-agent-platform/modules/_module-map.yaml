@@ -215,3 +215,24 @@ modules:
     needs_review: false
     concerns: []
     review_reasons: []
+
+  # ── 辅助脚本 ─────────────────────────────────────────────────
+
+  scripts:
+    status: active
+    doc: modules/scripts.md
+    paths:
+      - scripts/**
+    tags: [scripts, tooling, ops, smoke-check, drift-check, migration]
+    aliases: [工具脚本]
+    entrypoints:
+      - scripts/check-dispatch-allowed-roots.mjs  # 路径A 部署期 smoke 前置硬校验（dispatch_worker allowed_roots fail-fast，2026-08-08-dispatch-worker-caller-worktree）
+      - scripts/scan-drift-check.py  # scan 文档漂移双信号检测（warn-only，CI scan-drift gate 调用，2026-08-06-scan-doc-drift-gate）
+      - scripts/test_scan_drift_check.py  # 上一脚本单测
+      - scripts/migrate_scan_docs.py  # 一次性运维：scan docs 从 workspace repo 迁到 spec_root
+    main_symbols: []
+    depends_on: []
+    used_by: [ci]  # scan-drift-check.py 被 .github/workflows/scan-drift.yml 调用
+    needs_review: false
+    concerns: []
+    review_reasons: []

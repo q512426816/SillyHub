@@ -856,12 +856,25 @@ async def create_mission(
         constraints["mode"] = payload.mode
     if getattr(payload, "session_id", None) is not None:
         constraints["session_id"] = str(payload.session_id)
+    # task-05（2026-08-08-dispatch-worker-caller-worktree / 路径A，D-007@v1）：把
+    # orchestration_mode 并入 constraints（与 mode/session_id 并入同款）。team_mission_entry
+    # （task-01）内部也会按 orchestration_mode 形参落同一键，幂等。constraints 反映 mode 供
+    # finalizer（task-03）/ 前端读取，无论哪层判定都不依赖单一来源。
+    if getattr(payload, "orchestration_mode", None) is not None:
+        constraints["orchestration_mode"] = payload.orchestration_mode
     # 2026-07-12-team-main-agent-orchestration task-03 / D-001@v2：mode=team 旁路
     # GLM CoordinatorPlanner，走主 agent OrchestratorService。主 agent = 真 agent
     # （daemon interactive lease + MCP tool），像项目经理读 worker 产出再决策。
     # mode=single / None 走原 planner 链路（零回归，下方 start_mission 不动）。
-    if constraints.get("mode") == "team":
+    # task-05（路径A）：orchestration_mode=="external" 是 team 路径子模式（SillySpec
+    # 外部调度，跳过 orchestrator spawn），也进 team_mission_entry，不落 GLM planner 单
+    # agent 链路。判定口径与链路B（mcp_gateway/tools.py）+ team_mission_entry 三入口对齐。
+    orchestration_mode = payload.orchestration_mode or "team"
+    if constraints.get("mode") == "team" or orchestration_mode == "external":
         orchestrator = OrchestratorService(session)
+        # external 模式 team_mission_entry 返回 (mission, None)——不 spawn 主 agent run。
+        # 下方用 ctrl.worker_runs 重查（source of truth），不读 _main_run，故 None 安全；
+        # MissionResponse.workers 自然为空，derive_status([]) → "planning"（design §7.1）。
         mission, _main_run = await orchestrator.team_mission_entry(
             workspace_id=workspace_id,
             objective=payload.objective,
@@ -871,6 +884,7 @@ async def create_mission(
             budget_usd=payload.budget_usd,
             worker_preset=payload.worker_preset,
             main_agent_config=payload.main_agent_config,
+            orchestration_mode=orchestration_mode,
         )
         ctrl = MissionControlService(session)
         fresh = await ctrl.worker_runs(mission.id)

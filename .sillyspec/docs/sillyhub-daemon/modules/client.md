@@ -2,7 +2,7 @@
 schema_version: 1
 doc_type: module-card
 module_id: client
-source_commit: ba87eec
+source_commit: 9656307c
 author: qinyi
 created_at: 2026-06-24T01:10:13
 ---
@@ -19,6 +19,7 @@ daemon ↔ SillyHub backend 的 REST HTTP 客户端（`hub-client.ts`）。基�
 - lease：`claimLease`、`startLease(leaseId, claimToken)`、`leaseHeartbeat`、`submitMessages`、`completeLease`、`getPendingLeases(runtimeId)`（唯一 GET）。
 - session：`notifyRunResult`、`notifySessionEnd`、`recoverSession`、`confirmReconnected`、`markRecoveryFailed`。
 - 其他：`syncStatus`、`getExecutionContext(agentRunId)`、`getSpecBundle(wsId): Buffer`、`postSpecSync`。
+- mission 派 worker：`dispatchWorker(workspaceId, missionId, { objective, ..., worktree_path?, branch?, worker_prompt? })`（2026-08-08-dispatch-worker-caller-worktree）：三参 optional 透传 backend；`undefined` 不写入 body（守卫风格）→ backend `None` → 走原 team 模式自建 worktree / `render_worker_prompt`（零回归）。链路A daemon stdio 与链路B public gateway schema 同构（D-009）。
 - `close()`：no-op（fetch 无连接池，仅 API 兼容）。
 
 ## 关键逻辑
@@ -36,6 +37,7 @@ return resp.json()
 
 ## 注意事项
 - body 字段全部 snake_case（runtime_id/claim_token/agent_run_id）对齐 backend Pydantic，改字段名会直接 422。
+- `dispatchWorker` 的字段名 `branch`（非 `worktree_branch`）是跨仓契约（D-009，对齐 backend DispatchWorkerRequest / mcp_gateway tools.py / sillyspec probe）；改字段名会打破 sillyspec path-a probe 探测缓存（`isPathASupported` 读 dispatch_worker inputSchema）。
 - 30s 超时来自 Python httpx，改超时需评估长任务接口（getSpecBundle 可能较大）。
 - `getSpecBundle` 返回 Buffer（tar 包），不走 JSON 解析路径。
 - `getExecutionContext` 按 server 端 `_user_owns_run` 做归属校验，跨 user 访问 → 403。
