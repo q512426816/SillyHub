@@ -34,6 +34,7 @@ const sessionApi = vi.hoisted(() => ({
   endSession: vi.fn(),
   streamSession: vi.fn(),
   getAgentSession: vi.fn(),
+  getAgentSessionLogs: vi.fn(),
   fetchPendingDialogs: vi.fn(),
   fetchSessionDialogHistory: vi.fn(),
 }));
@@ -53,6 +54,7 @@ vi.mock("@/lib/daemon", async () => {
     endSession: sessionApi.endSession,
     streamSession: sessionApi.streamSession,
     getAgentSession: sessionApi.getAgentSession,
+    getAgentSessionLogs: sessionApi.getAgentSessionLogs,
     fetchPendingDialogs: sessionApi.fetchPendingDialogs,
     fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
   };
@@ -163,6 +165,10 @@ describe("InteractiveSessionPanel", () => {
     // 默认无 pending dialog（改动二：fetchPendingDialogs 独立 effect）
     sessionApi.fetchPendingDialogs.mockResolvedValue([]);
     sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
+    // establishStream 的 prefetch（commit ccd5bef8：await 先于 SSE 建连）拉历史日志回灌。
+    // 默认空 []：跳过回灌直接建 SSE，与各测试验证的「SSE 建连」语义一致；不走真实
+    // fetch（jsdom 无 server 会挂起，导致 streamSession 永不调用、测试超时）。
+    sessionApi.getAgentSessionLogs.mockResolvedValue([]);
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -818,6 +824,9 @@ describe("InteractiveSessionPanel", () => {
     });
 
     const { unmount } = setupPanel({ attachSessionId: "sess-attach", initialTurns: makeAttachTurns() });
+    // establishStream 改 async（commit ccd5bef8：await prefetch 先于 SSE 建连）后，
+    // SSE 在 prefetch microtask 后才建立，需等 streamSession 调用再取 conn。
+    await waitFor(() => expect(sessionApi.streamSession).toHaveBeenCalledTimes(1));
     const conn = stream.conn;
     unmount();
     expect(conn.closeSpy).toHaveBeenCalled();
