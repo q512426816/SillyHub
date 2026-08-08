@@ -47,9 +47,14 @@ export async function GET(
   }
 
   const backendResp = await fetch(backendUrl.toString(), {
-    headers,
+    headers: { ...headers, "Accept-Encoding": "identity" },
     // 透传客户端中断
     signal: request.signal,
+    // 禁用 undici 自动解压缓冲——否则 SSE data 帧被攒在 buffer 里，
+    // 浏览器看到 200 OK 但实时事件不到（刷新后 REST 兜底才看到）。
+    // compress 是 undici 扩展属性（DOM RequestInit 无此字段），ts-expect-error 绕过。
+    // @ts-expect-error undici compress 不在标准 RequestInit 类型
+    compress: false,
   });
 
   if (!backendResp.ok || !backendResp.body) {

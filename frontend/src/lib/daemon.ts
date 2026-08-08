@@ -928,6 +928,31 @@ export function streamSession(
     // 仅通知组件（可选显示 reconnecting），不收口 session。
   };
 
+  // prefetch：先拉已持久化日志回灌，避免 SSE 订阅前 backend 已 publish 导致丢事件
+  //（daemon 首条 prompt 响应可能极快，EventSource 建连前就 publish 完）。
+  // 参照 agent-stream.ts:73-93 的 AgentRunStreamClient.connect 同款模式。
+  // fire-and-forget：不阻塞 EventSource 创建（慢 prefetch 不拖慢连接）。
+  void (async () => {
+    try {
+      const logs = await getAgentSessionLogs(sessionId);
+      for (const log of logs) {
+        dispatch({
+          data: JSON.stringify({
+            event: "log",
+            session_id: sessionId,
+            run_id: log.run_id,
+            log_id: log.id,
+            channel: log.channel,
+            content: log.content_redacted ?? "",
+            timestamp: log.timestamp,
+          }),
+        });
+      }
+    } catch {
+      // prefetch 失败不阻断 SSE（REST 兜底 / 刷新仍可回看）
+    }
+  })();
+
   return {
     close: () => es.close(),
     getLastEventId: () => lastEventId,
