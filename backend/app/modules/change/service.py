@@ -682,7 +682,7 @@ class ChangeService:
             )
 
         # Log transition to stages JSON
-        stages = change.stages or {}
+        stages = dict(change.stages or {})
         transitions_log = stages.get("transitions", [])
         transitions_log.append(
             {
@@ -843,7 +843,7 @@ class ChangeService:
         # reviewer info stored in stages JSON
 
         # Update stages JSON
-        stages = change.stages or {}
+        stages = dict(change.stages or {})
         stages["last_feedback"] = {
             "category": category,
             "text": text,
@@ -931,7 +931,7 @@ class ChangeService:
             )
         )
 
-        stages = change.stages or {}
+        stages = dict(change.stages or {})
 
         # Check 2: AC confirmed
         ac_confirmed = stages.get("ac_confirmed", False)
@@ -1324,7 +1324,7 @@ class ChangeService:
             "revise": "rerun:brainstorm",
             "unclear": "rerun:brainstorm",
         }
-        stages = change.stages or {}
+        stages = dict(change.stages or {})
         review_history = stages.get("review_history", [])
         review_history.append(
             {
@@ -1383,7 +1383,7 @@ class ChangeService:
             "back_to_propose": "rerun:brainstorm",
             "back_to_brainstorm": "rerun:brainstorm",
         }
-        stages = change.stages or {}
+        stages = dict(change.stages or {})
         review_history = stages.get("review_history", [])
         review_history.append(
             {
@@ -1454,7 +1454,7 @@ class ChangeService:
             "bug": "rerun:execute",
             "doc_mismatch": "rerun:brainstorm",
         }
-        stages = change.stages or {}
+        stages = dict(change.stages or {})
         review_history = stages.get("review_history", [])
         review_history.append(
             {
@@ -1618,7 +1618,7 @@ class ChangeService:
         change = await self.get(workspace_id, change_id)
 
         # 1. Record comment to stages.review_history
-        stages = change.stages or {}
+        stages = dict(change.stages or {})
         review_history = stages.get("review_history", [])
         review_history.append(
             {
@@ -1715,7 +1715,7 @@ class ChangeService:
         )
 
         # Record review_history + archive_confirmed flag（业务投影字段）
-        stages = change.stages or {}
+        stages = dict(change.stages or {})
         review_history = stages.get("review_history", [])
         review_history.append(
             {
