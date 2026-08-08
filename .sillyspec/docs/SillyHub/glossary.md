@@ -37,7 +37,7 @@ SillySpec 变更工作流的核心实体。对应工作区 `.sillyspec/changes/<
 由 `change_writer.markdown_builder` 按模板生成，由 `change.ChangeParser` 解析入库。文件是 source of truth。
 
 ### 变更阶段（stage / current_stage）
-变更的生命周期阶段，取值如 `draft → brainstorm → plan → execute → verify → archive → archived`（终态 `archived`/`cancelled`）。流转由 `change.transition` 触发，`workflow` 模块用 FSM 约束合法转换，`spec_guardian` 在关键转换前跑前置文档守卫。阶段切换会触发 `SillySpecStageDispatchService.auto_dispatch_next_step` 自动派发 agent 执行。
+变更的生命周期阶段，取值如 `draft → brainstorm → plan → execute → verify → archive → archived`（终态 `archived`/`cancelled`）。流转由 `change.transition` 触发，`workflow` 模块用 FSM 约束合法转换，`spec_guardian` 在关键转换前跑前置文档守卫。阶段完成后**停在待触发态**，由 MCP tool（`advance_change_stage`）或 HTTP 端点（`POST /changes/{id}/advance-stage`）**按需显式推进**派发 agent 执行（形态A，原 `auto_dispatch_next_step` 自动连轴已废弃）。
 
 ### task（任务）
 变更（Change）下的**可执行单元**，对应 `.sillyspec/changes/<change-key>/tasks/<task-key>.md`。定义写在 frontmatter。本模块只解析/落库/编排，是 spec 文档管理链路的「任务索引层」。有独立的状态机（workflow 模块）和看板视图（按 status 分组）。

@@ -1548,7 +1548,7 @@ class ChangeService:
         """Agent 完成某一阶段后，统一设置 current_stage。
 
         AD-01: 此方法只更新 DB 状态，不执行 agent dispatch。
-        dispatch 由调用方 (auto_dispatch_next_step) 根据 dispatch_target 执行。
+        形态A：dispatch 交 advance_change_stage MCP tool 显式触发。
         """
         change = await self.get(workspace_id, change_id)
         new_stage, dispatch_target = self._resolve_stage_completion(stage, result)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
@@ -13,6 +13,7 @@ from sqlmodel import col
 
 from app.core.auth_deps import require_permission
 from app.core.db import get_session
+from app.core.logging import get_logger
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
@@ -49,6 +50,7 @@ from app.modules.change.schema import (
     TransitionDispatchResponse,
     TransitionRequest,
     TransitionResponse,
+    VerifyGateResponse,
 )
 from app.modules.change.service import ChangeService
 from app.modules.daemon.schema import AgentSessionListItem, ChangeSessionAuthor
@@ -57,11 +59,59 @@ router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["change"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
+log = get_logger(__name__)
+
 
 def _get_user_role(user: User) -> str:
     if getattr(user, "is_platform_admin", False):
         return "admin"
     return "business_user"
+
+
+async def _build_transition_response(
+    service: ChangeService,
+    result: dict,
+) -> TransitionResponse:
+    """从 ``transition_with_dispatch`` 返回的 dict 组装 TransitionResponse。
+
+    task-11（design §6.3）：``/transition`` 与 ``/advance-stage`` 共用本 helper，
+    保证两端点响应组装逻辑一致（含 team_mode 的 mission_id/mode 字段透传，
+    D-004@v2）。``result`` 形如 ``{"change": Change, "agent_dispatch": dict}``。
+    """
+    # Enrich the change data for the response
+    enriched_change = await service.enrich_with_workspace_ids(result["change"])
+
+    # Build agent_dispatch: convert raw dict to TransitionDispatchResponse or None
+    agent_dispatch: TransitionDispatchResponse | None = None
+    raw_dispatch = result.get("agent_dispatch")
+    if raw_dispatch and raw_dispatch.get("dispatched") is True:
+        agent_dispatch = TransitionDispatchResponse(
+            dispatched=True,
+            agent_run_id=raw_dispatch.get("agent_run_id"),
+            stage=raw_dispatch.get("stage"),
+            reason=None,
+            mission_id=raw_dispatch.get("mission_id"),
+            mode=raw_dispatch.get("mode"),
+        )
+
+    return TransitionResponse(
+        change=enriched_change.model_dump(),
+        agent_dispatch=agent_dispatch,
+    )
+
+
+def _coerce_gate_errors(raw: Any) -> list[str]:
+    """把 gate_result / gate cmd 的 errors 字段规整为 ``list[str]``（task-11）。
+
+    ``_read_latest_gate_result`` 取的 gate_result 是落库 JSON（errors 已是
+    list[str]），``_run_gate_via_delegate`` 返回 errors 也是 list[str]；但
+    brownfield / 异常落库可能缺键或类型漂移，统一兜底：非 list 降级为空列表，
+    每条 ``str()`` 强转。不在响应层做截断（截断在落库侧 ``_truncate_gate_errors``
+    已做，响应如实返回）。
+    """
+    if not isinstance(raw, list):
+        return []
+    return [str(e) for e in raw]
 
 
 @router.get(
@@ -442,26 +492,130 @@ async def transition_change(
         worker_preset=body.worker_preset,
         main_agent_config=body.main_agent_config,
     )
-    # Enrich the change data for the response
-    enriched_change = await service.enrich_with_workspace_ids(result["change"])
+    return await _build_transition_response(service, result)
 
-    # Build agent_dispatch: convert raw dict to TransitionDispatchResponse or None
-    agent_dispatch: TransitionDispatchResponse | None = None
-    raw_dispatch = result.get("agent_dispatch")
-    if raw_dispatch and raw_dispatch.get("dispatched") is True:
-        agent_dispatch = TransitionDispatchResponse(
-            dispatched=True,
-            agent_run_id=raw_dispatch.get("agent_run_id"),
-            stage=raw_dispatch.get("stage"),
-            reason=None,
-            mission_id=raw_dispatch.get("mission_id"),
-            mode=raw_dispatch.get("mode"),
+
+@router.post(
+    "/changes/{change_id}/advance-stage",
+    response_model=TransitionResponse,
+)
+async def advance_stage(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    body: TransitionRequest,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> TransitionResponse:
+    """单步推进 change 阶层（task-11，design §6.3 / D-005）。
+
+    前端 ``handleDispatch`` 走 HTTP（非直连 MCP），与 task-07
+    ``advance_change_stage`` MCP tool 共用同一 service 方法
+    ``ChangeService.transition_with_dispatch``（team 分流：single → AgentService，
+    team → _dispatch_execute_team）。body/响应与 ``/transition`` 完全对齐——
+    ``advance-stage`` 为前端语义命名别名（D-005 选 HTTP 入口）。
+    """
+    service = ChangeService(session)
+    result = await service.transition_with_dispatch(
+        workspace_id=workspace_id,
+        change_id=change_id,
+        target_stage=body.target_stage,
+        user_role=_get_user_role(_user),
+        reason=body.reason,
+        user_id=_user.id,
+        provider=body.provider,
+        model=body.model,
+        team_mode=body.team_mode,
+        worker_preset=body.worker_preset,
+        main_agent_config=body.main_agent_config,
+    )
+    return await _build_transition_response(service, result)
+
+
+@router.post(
+    "/changes/{change_id}/run-verify-gate",
+    response_model=VerifyGateResponse,
+)
+async def run_verify_gate(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> VerifyGateResponse:
+    """gate 软调用（task-11，design §6.2/§6.3 / D-003/D-008）。
+
+    与 task-09 ``run_verify_gate`` MCP tool 对齐，**不硬阻塞、不改 change 状态**
+    （结果交调用方决策，核验纪律靠调用方）：
+
+    1. 优先读最近 completed AgentRun.gate_result（``_read_latest_gate_result``）
+       → ``source="gate_result"``。
+    2. gate_result 缺 → 经 ``_run_gate_via_delegate`` 软调 ``sillyspec gate verify``
+       （复用 task-06 RPC 骨架，不自动阻塞推进）→ ``source="gate_cmd"``。
+    3. 两者均不可用（workspace 无 code_root / RPC 异常 / daemon 离线）
+       → ``source="unavailable"``, ``exit_code=None``。
+    """
+    # 局部 import：dispatch / run_sync / workspace 依赖较重，且 dispatch 顶层
+    # import 会与 service 形成循环（service.py 内部也是函数内 import 同款模式）。
+    from app.modules.change.dispatch import (
+        _read_latest_gate_result,
+        _run_gate_via_delegate,
+    )
+    from app.modules.daemon.run_sync.service import RunSyncService
+    from app.modules.workspace.service import WorkspaceService
+
+    service = ChangeService(session)
+    # service.get 校验 workspace 归属 + change 存在（不存在抛 → 404 语义）。
+    change = await service.get(workspace_id, change_id)
+
+    # 1. 优先读最近 completed AgentRun.gate_result（design §6.2 step 1）。
+    gate_result, _gate_run_id = await _read_latest_gate_result(session, change_id)
+    if gate_result:
+        return VerifyGateResponse(
+            exit_code=gate_result.get("exit_code"),
+            errors=_coerce_gate_errors(gate_result.get("errors")),
+            source="gate_result",
         )
 
-    return TransitionResponse(
-        change=enriched_change.model_dump(),
-        agent_dispatch=agent_dispatch,
-    )
+    # 2. gate_result 缺 → 软调 sillyspec gate verify（design §6.2 step 2）。
+    try:
+        workspace = await WorkspaceService(session).get(workspace_id)
+        # 复用 RunSyncService._resolve_gate_spec_root（gate cmd 的 cwd/specBase
+        # 规范解析：platform-managed/repo-mirrored 走 SpecWorkspace.spec_root，
+        # repo-native 走 workspace.root_path）。该方法是 gate cmd 唯一权威解析器，
+        # 在此跨模块复用避免重复 ~30 行平台/仓库分流逻辑（生产级 DRY 取舍）。
+        run_sync = RunSyncService(session)
+        code_root, spec_dir = await run_sync._resolve_gate_spec_root(session, workspace, change)
+        if not code_root:
+            # workspace.root_path 缺 → gate 无 cwd 可跑，降级 unavailable
+            # （design §6.2 step 3，不抛崩端点）。
+            log.warning(
+                "run_verify_gate_code_root_missing",
+                change_id=str(change_id),
+                workspace_id=str(workspace_id),
+            )
+            return VerifyGateResponse(exit_code=None, errors=[], source="unavailable")
+
+        gate_cmd_result = await _run_gate_via_delegate(
+            session=session,
+            workspace=workspace,
+            change_name=change.change_key,
+            code_root=code_root,
+            spec_dir=spec_dir,
+        )
+        return VerifyGateResponse(
+            exit_code=gate_cmd_result.get("exit_code"),
+            errors=_coerce_gate_errors(gate_cmd_result.get("errors")),
+            source="gate_cmd",
+        )
+    except Exception as exc:
+        # RPC 异常 / daemon 离线 / ws_rpc 未接线 → unavailable（design §6.2 step 3）。
+        # gate 软调用语义要求端点不抛崩，结果交调用方决策。
+        log.warning(
+            "run_verify_gate_cmd_failed",
+            change_id=str(change_id),
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return VerifyGateResponse(exit_code=None, errors=[], source="unavailable")
 
 
 @router.post(

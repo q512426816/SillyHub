@@ -3592,6 +3592,124 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/changes/{change_id}/advance-stage": {
+      "post": {
+        "tags": [
+          "change"
+        ],
+        "summary": "Advance Stage",
+        "description": "单步推进 change 阶层（task-11，design §6.3 / D-005）。\n\n前端 ``handleDispatch`` 走 HTTP（非直连 MCP），与 task-07\n``advance_change_stage`` MCP tool 共用同一 service 方法\n``ChangeService.transition_with_dispatch``（team 分流：single → AgentService，\nteam → _dispatch_execute_team）。body/响应与 ``/transition`` 完全对齐——\n``advance-stage`` 为前端语义命名别名（D-005 选 HTTP 入口）。",
+        "operationId": "advance_stage_api_workspaces__workspace_id__changes__change_id__advance_stage_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "change_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Change Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransitionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransitionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/changes/{change_id}/run-verify-gate": {
+      "post": {
+        "tags": [
+          "change"
+        ],
+        "summary": "Run Verify Gate",
+        "description": "gate 软调用（task-11，design §6.2/§6.3 / D-003/D-008）。\n\n与 task-09 ``run_verify_gate`` MCP tool 对齐，**不硬阻塞、不改 change 状态**\n（结果交调用方决策，核验纪律靠调用方）：\n\n1. 优先读最近 completed AgentRun.gate_result（``_read_latest_gate_result``）\n   → ``source=\"gate_result\"``。\n2. gate_result 缺 → 经 ``_run_gate_via_delegate`` 软调 ``sillyspec gate verify``\n   （复用 task-06 RPC 骨架，不自动阻塞推进）→ ``source=\"gate_cmd\"``。\n3. 两者均不可用（workspace 无 code_root / RPC 异常 / daemon 离线）\n   → ``source=\"unavailable\"``, ``exit_code=None``。",
+        "operationId": "run_verify_gate_api_workspaces__workspace_id__changes__change_id__run_verify_gate_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "change_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Change Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyGateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/changes/{change_id}/feedback": {
       "post": {
         "tags": [
@@ -29904,6 +30022,39 @@
               }
             ],
             "title": "Agent Profile Id"
+          },
+          "worktree_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worktree Path"
+          },
+          "branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Branch"
+          },
+          "worker_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Prompt"
           }
         },
         "type": "object",
@@ -33154,6 +33305,21 @@
               }
             ],
             "title": "Mode"
+          },
+          "orchestration_mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "team",
+                  "external"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orchestration Mode"
           },
           "session_id": {
             "anyOf": [
@@ -48804,6 +48970,41 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VerifyGateResponse": {
+        "properties": {
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code",
+            "description": "gate exit code（0=通过 / 1=打回 / 2=异常；unavailable 时为 None）"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors",
+            "description": "gate errors 列表（已 str 强转）"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "结果来源：gate_result / gate_cmd / unavailable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "title": "VerifyGateResponse",
+        "description": "POST /changes/{id}/run-verify-gate 的返回类型（task-11，design §6.3）。\n\ngate 软调用结果，与 task-09 ``run_verify_gate`` MCP tool 对齐（design §6.2）。\n不硬阻塞、不改 change 状态（结果交调用方决策）：\n\n- ``source=\"gate_result\"``：读最近 completed AgentRun.gate_result\n  （dispatch.py:_read_latest_gate_result）。\n- ``source=\"gate_cmd\"``：gate_result 缺时经 dispatch.py:_run_gate_via_delegate\n  软调 ``sillyspec gate verify``（复用 task-06 RPC 骨架，不自动阻塞推进）。\n- ``source=\"unavailable\"``：两者均不可用，``exit_code=None`` 交调用方决策。"
       },
       "VersionResponse": {
         "properties": {

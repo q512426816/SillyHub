@@ -412,7 +412,7 @@ class LeaseService:
                 # changes.stages.last_dispatch.status（running→completed/failed）。
                 # 独立路径——不读 sillyspec.db、不调 dispatch_svc.sync_stage_status
                 # （后者归 2026-06-28-daemon-client-spec-sync-strategy，依赖 spec 同步）。
-                # 与下方 _trigger_stage_completion_callback（auto_dispatch 下一阶段）并存，
+                # 与下方 _trigger_stage_completion_callback（stage 完成留痕 + SSE，不再推进）并存，
                 # 互不替代。try/except 失败只 warn 不阻塞 lease 完成（容错风格一致）。
                 try:
                     await self._sync_stage_status_from_run(agent_run)
@@ -532,10 +532,11 @@ class LeaseService:
                 raise
 
         # A2: stage 完成回调 —— stage dispatch（AgentRun.change_id 非空）的 run
-        # 完成后，同步 sillyspec.db 状态并 auto-dispatch 下一阶段。spec sync 已在
-        # daemon _finish 之前完成（task-runner.ts:477），server spec_root 的
-        # sillyspec.db 此时为最新。失败不阻塞 lease 完成（与 reconcile_stale_runs
-        # 容错一致）。scan（change_id=None）不走此路径。
+        # 完成后，run_sync 的 _trigger_stage_completion_callback 做 stage 完成
+        # 留痕 + 发 SSE。形态A 砍 auto_dispatch：callback 不再 auto-dispatch 下一
+        # 阶段（交 advance_change_stage tool 显式触发），也不再自动同步 sillyspec.db
+        # （stage 展示状态由上方 _sync_stage_status_from_run 推导回写）。失败不阻塞
+        # lease 完成（与 reconcile_stale_runs 容错一致）。scan（change_id=None）不走此路径。
         if lease.agent_run_id is not None:
             try:
                 # D-006@v1：跨子域（run_sync，task-04）经 facade 反向委托。

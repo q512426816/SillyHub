@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from mcp.server.fastmcp import Context
 from sqlalchemy import select
@@ -888,13 +889,339 @@ async def get_run_logs(
         }
 
 
+# ── 形态A change 阶层 tool（task-07/08/09/10，design §6.1 / §6.2）─────────────
+#
+# 4 个按需触发 change 阶层的 MCP tool，全部包装 ChangeService / dispatch 现有方法
+# （design §6.1：非新方法），替代被 task-06 砍掉的 auto_dispatch 自动连轴：
+#
+# - ``advance_change_stage``（scope=dispatch）：包装 ``ChangeService.transition_with_dispatch``
+#   → ``dispatch_next_step`` 的 single/team 分流（task-07）。
+# - ``submit_stage_review``（scope=dispatch）：包装 review 四方法（service.py:1309+
+#   proposal_review/plan_review/human_test/archive_confirm，task-08）。
+# - ``run_verify_gate``（scope=read）：读 ``AgentRun.gate_result`` / 软调 sillyspec gate
+#   verify（复用 ``_run_gate_via_delegate`` RPC 骨架，task-09 / design §6.2）。
+# - ``get_change_stage``（scope=read）：只读组合 ``ChangeService.get`` + stages JSON +
+#   ``StageProjectionService.compute_pending_review``（task-10）。
+
+
+async def _change_read_dict(session: AsyncSession, change: Any) -> dict:
+    """把 Change ORM 行经 ``ChangeService.enrich_with_workspace_ids`` 投影成 ChangeRead dict。
+
+    与 router transition/review 端点同款序列化（``ChangeRead.model_validate(change)``），
+    ``mode="json"`` 确保 UUID/datetime 转 JSON-safe（FastMCP 把返回 dict 序列化成 JSON text）。
+    每次新建 ``ChangeService`` 实例很轻（仅持 session + parser），不缓存。
+    """
+    from app.modules.change.service import ChangeService
+
+    svc = ChangeService(session)
+    enriched = await svc.enrich_with_workspace_ids(change)
+    return enriched.model_dump(mode="json")
+
+
+def _shape_agent_dispatch(raw: dict | None) -> dict:
+    """规整 transition_with_dispatch / review 方法返回的 ``agent_dispatch`` 原始 dict。
+
+    原始 dict 来自 ``dispatch`` / ``dispatch_next_step`` / ``_dispatch_execute_team``，
+    字段集是 ``{dispatched, agent_run_id, stage, mission_id, mode, reason, error}`` 的
+    交集/并集（不同分流返回不同子集）。这里统一透出全字段，缺失补 None，UUID 强转 str，
+    对齐 router ``TransitionDispatchResponse`` 形态（第三方据此判断是否真派发 + 取 run_id）。
+    """
+    raw = raw or {}
+    agent_run_id = raw.get("agent_run_id")
+    mission_id = raw.get("mission_id")
+    return {
+        "dispatched": bool(raw.get("dispatched")),
+        "agent_run_id": str(agent_run_id) if agent_run_id else None,
+        "stage": raw.get("stage"),
+        "mission_id": str(mission_id) if mission_id else None,
+        "mode": raw.get("mode"),
+        "reason": raw.get("reason"),
+        "error": raw.get("error"),
+    }
+
+
+def _gate_unavailable(change_id: uuid.UUID, reason: str) -> dict:
+    """run_verify_gate 第三态（design §6.2 point 3）：读不到 gate_result 也跑不了 gate cmd。
+
+    ``exit_code=None`` 交调用方决策（不硬阻塞、不伪造 verdict）；``reason`` 记不可用根因
+    便于排查。source 固定 ``unavailable``。
+    """
+    return {
+        "change_id": str(change_id),
+        "exit_code": None,
+        "errors": [reason],
+        "source": "unavailable",
+        "run_id": None,
+    }
+
+
+def _gate_errors(raw: Any) -> list[str]:
+    """复用 dispatch._truncate_gate_errors 规整 gate errors（截断防爆量，非 list 降级空）。"""
+    from app.modules.change.dispatch import _truncate_gate_errors
+
+    return _truncate_gate_errors(raw)
+
+
+@mcp.tool()
+async def advance_change_stage(
+    change_id: uuid.UUID,
+    target_stage: str,
+    provider: str | None = None,
+    model: str | None = None,
+    team_mode: bool = False,
+    worker_preset: list[dict] | None = None,
+    main_agent_config: dict | None = None,
+    ctx: Context | None = None,
+) -> dict:
+    """按需推进 change 阶层（需要 dispatch scope）。
+
+    包装 ``ChangeService.transition_with_dispatch``（service.py:721）→ ``dispatch``
+    分流（single 走 ``AgentService.start_stage_dispatch`` / team_mode 走
+    ``_dispatch_execute_team`` 建 team mission），替代被砍掉的 auto_dispatch 自动连轴
+    （task-07 / design §6.1 / D-004）。单步显式推进到 ``target_stage``，不自动连轴。
+
+    入参对齐 HTTP ``POST /changes/{id}/transition`` 端点：``target_stage`` ∈
+    brainstorm/plan/execute/verify/archive；``team_mode=True`` 时 ``worker_preset`` /
+    ``main_agent_config`` 一并写入 ``change.stages`` 供 ``_dispatch_execute_team`` 读取
+    （建 verify/archive team mission）。``user_role`` 恒 ``admin``（对齐 review 方法内
+    部硬编码，admin bypass transition 角色门；McpToken 无独立 user 角色概念）。
+    actor=``McpToken.created_by``（同 dispatch_worker / create_mission）。
+
+    返回 ``{change, current_stage, agent_dispatch}``（change 为 ChangeRead dict，
+    agent_dispatch 形态对齐 ``TransitionDispatchResponse``）。跨 workspace 的 change_id
+    视同 not found（ChangeService.get 抛 ChangeNotFound）。
+    """
+    auth = _auth_from_ctx(ctx)
+    require_mcp_scope(auth, MCP_SCOPE_DISPATCH)
+
+    async with get_session_factory()() as session:
+        actor_user_id = await _resolve_actor_user_id(session, auth)
+        from app.modules.change.service import ChangeService
+
+        svc = ChangeService(session)
+        result = await svc.transition_with_dispatch(
+            workspace_id=auth.workspace_id,
+            change_id=change_id,
+            target_stage=target_stage,
+            user_role="admin",
+            reason="advanced via MCP advance_change_stage",
+            user_id=actor_user_id,
+            provider=provider,
+            model=model,
+            team_mode=team_mode,
+            worker_preset=worker_preset,
+            main_agent_config=main_agent_config,
+        )
+        change = result["change"]
+        return {
+            "change": await _change_read_dict(session, change),
+            "current_stage": change.current_stage,
+            "agent_dispatch": _shape_agent_dispatch(result.get("agent_dispatch")),
+        }
+
+
+@mcp.tool()
+async def submit_stage_review(
+    change_id: uuid.UUID,
+    stage: str,
+    decision: str,
+    comment: str | None = None,
+    ctx: Context | None = None,
+) -> dict:
+    """提交阶段审核（需要 dispatch scope）。
+
+    包装 review 四方法（service.py:1309+），按 ``stage`` 分发，``decision`` 通过则内部
+    调 ``transition_with_dispatch`` 推进，打回则调 ``rerun_stage`` 回退（task-08 /
+    design §6.1 / FR-04）。单步审核，不重新引入 auto_dispatch。
+
+    ``stage`` 路由 + ``decision`` 词表（对齐各 review 方法 ``target_action_map``）：
+      - ``proposal`` → ``proposal_review``，decision ∈ approve/revise/unclear
+      - ``plan`` → ``plan_review``，decision ∈ approve/replan/back_to_propose/back_to_brainstorm
+      - ``human_test`` → ``human_test``，decision 透传为 ``result`` 参数，∈ pass/bug/doc_mismatch
+      - ``archive_confirm`` → ``archive_confirm``，``decision`` 忽略（该方法无 decision 入参，
+        仅 comment + user_id；调用方传 "confirm" 占位即可）
+
+    异常 ``stage`` → 400。decision 不在词表内由 service ``target_action_map[decision]``
+    KeyError 抛出（与 HTTP 端点同行为，FastMCP 转 MCP error）。actor=``McpToken.created_by``。
+
+    返回 ``{change, agent_dispatch}``（对齐 HTTP ``ReviewResponse``）。
+    """
+    auth = _auth_from_ctx(ctx)
+    require_mcp_scope(auth, MCP_SCOPE_DISPATCH)
+
+    async with get_session_factory()() as session:
+        actor_user_id = await _resolve_actor_user_id(session, auth)
+        from app.modules.change.service import ChangeService
+
+        svc = ChangeService(session)
+        if stage == "proposal":
+            result = await svc.proposal_review(
+                auth.workspace_id, change_id, decision, comment, actor_user_id
+            )
+        elif stage == "plan":
+            result = await svc.plan_review(
+                auth.workspace_id, change_id, decision, comment, actor_user_id
+            )
+        elif stage == "human_test":
+            # human_test 第三参数 service 命名为 result（语义即 decision），透传。
+            result = await svc.human_test(
+                auth.workspace_id, change_id, decision, comment, actor_user_id
+            )
+        elif stage == "archive_confirm":
+            # archive_confirm 无 decision 入参（service.py:1694 仅 comment + user_id），
+            # decision 忽略——调用方传 "confirm" 占位。
+            result = await svc.archive_confirm(auth.workspace_id, change_id, comment, actor_user_id)
+        else:
+            raise AppError(
+                f"unsupported review stage: {stage}",
+                code="MCP_400_INVALID_REVIEW_STAGE",
+                http_status=400,
+                details={
+                    "stage": stage,
+                    "valid": ["proposal", "plan", "human_test", "archive_confirm"],
+                },
+            )
+        change = result["change"]
+        return {
+            "change": await _change_read_dict(session, change),
+            "agent_dispatch": _shape_agent_dispatch(result.get("agent_dispatch")),
+        }
+
+
+@mcp.tool()
+async def run_verify_gate(
+    change_id: uuid.UUID,
+    ctx: Context | None = None,
+) -> dict:
+    """软调用 verify gate（需要 read scope，不硬阻塞）。
+
+    三态语义（task-09 / design §6.2）：
+
+    1. **gate_result**：优先读 ``AgentRun.gate_result``（gate task :1266 已跑并存库），
+       复用 ``_read_latest_gate_result``（dispatch.py:148）取本 change 最近一条 completed
+       run 的 gate_result → ``{exit_code, errors}``。
+    2. **gate_cmd**：gate_result 缺（gate 未跑）→ 复用 ``_run_gate_via_delegate`` RPC 骨架
+       （dispatch.py:1048，含 HostFsDelegate.run_command 白名单 + 12min timeout +
+       ``_read_gate_result`` 解析）软调 ``sillyspec gate verify``，返 ``{exit_code, errors}``。
+    3. **unavailable**：change 跨 workspace / workspace.root_path 缺 / delegate 不可达 →
+       ``exit_code=None``（交调用方决策，不硬阻塞、不伪造 verdict）。
+
+    **不调** verify-result.md fallback（D-008，daemon 模式容器够不到宿主机文件）。
+    **不改 change 状态**——结果交调用方决策（R-02：核验纪律靠调用方）。``code_root`` /
+    ``spec_dir`` 经 ``RunSyncService._resolve_gate_spec_root`` 解析（与 gate task 同源，
+    DRY 复用而非重写 SpecWorkspace/SpecPathResolver 解析逻辑）。
+
+    返回 ``{change_id, exit_code, errors, source, run_id}``，source ∈
+    gate_result/gate_cmd/unavailable。``_run_gate_via_delegate`` 自身 catch RPC 异常返
+    exit_code=2（仍计为 gate_cmd，errors 含诊断）；唯有 prerequisites 解析失败才 unavailable。
+    """
+    auth = _auth_from_ctx(ctx)
+    require_mcp_scope(auth, MCP_SCOPE_READ)
+
+    async with get_session_factory()() as session:
+        from app.modules.change.dispatch import _read_latest_gate_result
+
+        # 1. 优先读已落库的 gate_result（gate task 已跑）。
+        gate_result, run_id = await _read_latest_gate_result(session, change_id)
+        if gate_result is not None:
+            return {
+                "change_id": str(change_id),
+                "exit_code": gate_result.get("exit_code"),
+                "errors": _gate_errors(gate_result.get("errors")),
+                "source": "gate_result",
+                "run_id": str(run_id) if run_id else None,
+            }
+
+        # 2. gate_result 缺 → 软调 gate cmd。先解 prerequisites（change / workspace / paths）。
+        #    change 跨 workspace 视同 not found（ChangeService.get 抛 ChangeNotFound → MCP error）。
+        from app.modules.change.service import ChangeService
+
+        change = await ChangeService(session).get(auth.workspace_id, change_id)
+        workspace = await session.get(Workspace, auth.workspace_id)
+        if workspace is None:
+            return _gate_unavailable(change_id, "workspace not found for bound token")
+        # code_root/spec_dir 解析复用 gate task 同源方法（service.py:1492，DRY）。
+        from app.modules.daemon.run_sync.service import RunSyncService
+
+        code_root, spec_dir = await RunSyncService(session)._resolve_gate_spec_root(
+            session, workspace, change
+        )
+        if not code_root:
+            return _gate_unavailable(
+                change_id, "gate code_root unresolvable (workspace.root_path missing)"
+            )
+        try:
+            from app.modules.change.dispatch import _run_gate_via_delegate
+
+            result = await _run_gate_via_delegate(
+                session,
+                workspace,
+                change.change_key,
+                code_root,
+                spec_dir,
+                stage="verify",
+            )
+        except HostFsDelegateUnavailable as exc:
+            # _run_gate_via_delegate 内部已 catch 一般 Exception 返 exit 2；此处仅兜
+            # delegate 构造期 HostFsDelegateUnavailable（workspace 无 bound daemon）。
+            return _gate_unavailable(change_id, f"host_fs delegate unavailable: {exc}")
+        return {
+            "change_id": str(change_id),
+            "exit_code": result.get("exit_code"),
+            "errors": _gate_errors(result.get("errors")),
+            "source": "gate_cmd",
+            "run_id": None,
+        }
+
+
+@mcp.tool()
+async def get_change_stage(
+    change_id: uuid.UUID,
+    ctx: Context | None = None,
+) -> dict:
+    """只读查 change 阶层视图（需要 read scope，无副作用）。
+
+    组合 ``ChangeService.get`` + ``stages`` JSON + ``StageProjectionService.compute_pending_review``
+    （task-10 / design §6.1 / D-002），替代被砍的 sillyspec.db 自动 RPC 同步（按需查）。
+    推进前显式 refresh 解 R-03（状态滞后）。
+
+    返回 ``{change_id, current_stage, stages, pending_review}``：
+      - ``stages``：``Change.stages`` JSON 原样透出（含 last_dispatch / review_history /
+        team_mode / pending_review 投影源等，调用方据此判断阶段细节）。
+      - ``pending_review``：``StageProjectionService`` 投影的等待审核类型（proposal_review /
+        plan_review / human_test / archive_confirm），无等待审核 / db 缺失时 None。
+
+    跨 workspace 的 change_id 视同 not found。纯只读，不推进、不落库。
+    """
+    auth = _auth_from_ctx(ctx)
+    require_mcp_scope(auth, MCP_SCOPE_READ)
+
+    async with get_session_factory()() as session:
+        from app.modules.change.projection import StageProjectionService
+        from app.modules.change.service import ChangeService
+
+        svc = ChangeService(session)
+        change = await svc.get(auth.workspace_id, change_id)
+        pending = await StageProjectionService(session).compute_pending_review(session, change.id)
+        return {
+            "change_id": str(change.id),
+            "current_stage": change.current_stage,
+            "stages": change.stages or {},
+            "pending_review": pending.value if pending is not None else None,
+        }
+
+
 __all__ = [
+    "advance_change_stage",
     "converge_mission",
     "create_mission",
     "dispatch_worker",
+    "get_change_stage",
     "get_run_logs",
     "get_worker_result",
     "list_agent_profiles",
     "list_workers",
     "report_progress",
+    "run_verify_gate",
+    "submit_stage_review",
 ]

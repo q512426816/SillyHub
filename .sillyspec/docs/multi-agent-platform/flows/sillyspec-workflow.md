@@ -12,11 +12,13 @@ source_commit: ba87eec
 ## 参与模块
 - **backend/change**：状态机（`StageEnum` + `TRANSITION` map，`app/modules/change/model.py`）
 - **backend/workflow**：转换权限（agent/reviewer/system）、`spec_guardian` 文档校验、审计
-- **backend/agent**：阶段转换后自动触发 AgentRun
+- **backend/agent**：各阶段 AgentRun 调度，由 change 阶层按需触发（2026-08-08-change-center-on-demand 起砍掉自动连轴）
+- **backend/daemon**：AgentRun 完成 / gate task 完成的 stage 完成留痕（6 调用点只落结果 + 发 SSE，不自动推进）
+- **backend/mcp_gateway**：4 个 change 阶层 MCP tool（advance_change_stage / submit_stage_review / run_verify_gate / get_change_stage）
 - **backend/change_writer / task**：文档写入、Wave/Task 追踪
 - **backend/knowledge / archive**：归档时知识库沉淀
-- **sillyspec (CLI)**：`brainstorm/plan/execute/verify/quick/archive` 触发与进度同步
-- **frontend**：变更详情、阶段按钮、`useSillySpec` 流程驱动
+- **sillyspec (CLI)**：`brainstorm/plan/execute/verify/quick/archive` 触发，进度按需查询（get_change_stage）
+- **frontend**：变更详情、阶段按钮、`useSillySpec` 流程驱动；阶段推进接 advance-stage / run-verify-gate HTTP 端点
 
 ## 流程摘要
 ```text
@@ -38,6 +40,14 @@ source_commit: ba87eec
 
   QUICK 旁路入口: ─► VERIFY ─► {QUICK,BLOCKED} (SillySpec 快速通道)
 ```
+
+## 按需触发（形态A，2026-08-08-change-center-on-demand）
+
+上图阶段流转箭头中的 "agent" 推进，自 2026-08-08 起改**按需显式触发**（砍掉 backend `auto_dispatch_next_step` 自动连轴，D-001）：
+- stage 完成（AgentRun 跑完 / gate task 跑完）只落结果 + 发 SSE，current_stage 停「待触发」态。
+- 由 MCP `advance_change_stage` / 前端 `POST /changes/{id}/advance-stage` 显式推进（D-005），gate 改 `run_verify_gate` 软调用不硬阻塞（D-003）。
+- 状态查询由 sillyspec.db 自动同步改 `get_change_stage` 按需查（D-002）。
+- 状态机本身（StageEnum + TRANSITION + spec_guardian）不变，仅触发方式从「自动连轴」改「按需显式」。
 
 ## 各阶段产物
 | 阶段 | 产物 | 转换触发角色 |

@@ -27,11 +27,7 @@ from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.modules.agent.model import AgentRun, AgentRunLog
 from app.modules.agent.tool_kind import classify_tool_kind
-from app.modules.change import dispatch as _change_dispatch
-from app.modules.change.dispatch import (
-    SillySpecStageDispatchService,
-    _run_gate_via_delegate,
-)
+from app.modules.change.dispatch import _run_gate_via_delegate
 from app.modules.daemon.lease.service import DaemonAgentRunNotFound
 from app.modules.daemon.model import DaemonTaskLease
 from app.modules.daemon.model_error import ModelErrorDTO
@@ -1275,9 +1271,10 @@ class RunSyncService:
         Wave 2 task-05 仅接通 close_interactive_run 的 enqueue 调用点；本方法为
         task-07 的真实逻辑：在独立 session（H1）里 cas 抢占 gate_status pending→running
         （R3 防双发）→ 跑 sillyspec gate verify（task-06 _run_gate_via_delegate →
-        task-01 HostFsDelegate.run_command）→ 存 gate_result + decided → 内联推进
-        stage（H2 sync_stage_status + auto_dispatch_next_step，用 gate_session，**不调**
-        _trigger_stage_completion_callback）→ 异常 fail-loud（failed + exit 2）。
+        task-01 HostFsDelegate.run_command）→ 存 gate_result + decided → 发
+        gate_status_changed SSE（形态A task-01：不再自动推进 stage，current_stage 不变，
+        推进交 advance_change_stage tool 读 gate_result 显式决策）→ 异常 fail-loud
+        （failed + exit 2）。
 
         四条硬约束（design §10 R5-R7）：
           - **H1**：``async with get_session_factory()() as gate_session`` 独立 session。
@@ -1286,16 +1283,16 @@ class RunSyncService:
           - **R3**：``UPDATE ... WHERE gate_status='pending'`` 原子 cas，
             ``result.rowcount == 0`` 直接 return（防 reconcile + 原任务 double-enqueue，
             R10）。生产 PG 原子可靠；SQLite 测试用真 UPDATE 验 rowcount（R9）。
-          - **H2**：``SillySpecStageDispatchService(gate_session)`` 构造让内联调用用
-            gate_session；绝不调 ``_trigger_stage_completion_callback``（它写死
-            ``self._session``，gate 任务没有它，R7）。
+          - **H2**（形态A task-01 修订）：原 H2 内联 sync_stage_status +
+            auto_dispatch_next_step 块已删（砍自动连轴，design §4.1 调用点①）；gate_session
+            仅用于 cas + 落 gate_result + 发 SSE，current_stage 不变。
           - **H4**：由 task-05 close_interactive_run 经 ``_fire_background_task`` enqueue
             （强引用 ``_background_tasks`` set 防 GC + ``add_done_callback`` 取异常防静默）。
 
         失败语义（design §7 异常分支）：任何异常 → ``gate_status='failed'`` +
         ``gate_result={'exit_code': 2, 'errors': [str(exc)], 'raw_envelope': {}}`` + commit
-        （fail-loud 不降级，不吞异常）。auto_dispatch_next_step 据 gate_result.exit_code
-        决策（0 推进 / 1 打回 / 2 卡住，design §5.4）。
+        （fail-loud 不降级，不吞异常）。形态A：gate_result 交 advance_change_stage tool
+        / 前端据 exit_code 显式决策（0 推进 / 1 打回 / 2 卡住，design §5.4）。
         """
         from app.modules.change.model import Change
         from app.modules.workspace.model import Workspace
@@ -1333,10 +1330,6 @@ class RunSyncService:
                 if change is None:
                     raise RuntimeError(f"change not found: {change_id}")
                 change_name = change.change_key
-                # H2（第六批）：RPC 前 snapshot owner_id——_run_gate_via_delegate 内
-                # release_transaction 会 commit gate_session 释放长 RPC 期间的事务，
-                # commit 后 change 对象 expire，:1192 不再能访问 change.owner_id。
-                change_owner_id = change.owner_id
                 code_root, spec_dir = await self._resolve_gate_spec_root(
                     gate_session, workspace, change
                 )
@@ -1366,36 +1359,11 @@ class RunSyncService:
                 flag_modified(run_row, "gate_result")
                 await gate_session.commit()
 
-                # H2：内联 sync_stage_status + auto_dispatch_next_step，用同一 gate_session。
-                # 构造 SillySpecStageDispatchService(gate_session) 让内部分流也用 gate_session；
-                # sync_stage_status 首参显式传 gate_session（参数列表要求 session，design §7）。
-                # **不调 _trigger_stage_completion_callback**（它写死 self._session，R7）。
-                dispatch_svc = SillySpecStageDispatchService(gate_session)
-                sync_result = await dispatch_svc.sync_stage_status(
-                    gate_session,
-                    change_id,
-                    agent_run_id,
-                )
-                # user_id：对齐 _trigger_stage_completion_callback 的回退策略
-                # （change.owner_id → 零 UUID）。H2：用 RPC 前 snapshot 的
-                # change_owner_id（change 对象已在 RPC 内 commit 后 expire）。
-                user_id = change_owner_id or uuid.UUID(int=0)
-                # auto_dispatch_next_step 经模块属性引用（``_change_dispatch.``）调用，
-                # 让单测 patch ``app.modules.change.dispatch.auto_dispatch_next_step``
-                # 生效（模块级 ``from`` 导入会固化原函数引用，patch dispatch 模块属性
-                # 不影响已绑定的本地名）。design §5.4：据 gate_result.exit_code 决策。
-                await _change_dispatch.auto_dispatch_next_step(
-                    session=gate_session,
-                    workspace_id=workspace_id,
-                    change_id=change_id,
-                    user_id=user_id,
-                    sync_result=sync_result,
-                )
-                await gate_session.commit()
-
-                # task-11 / design §5.7：gate_result 已 commit + gate_status=decided 落库后，
-                # 发 gate_status_changed SSE 通知前端更新徽标（复用 agent_run:{id} channel，
-                # 对齐 close_interactive_run 的 try/except 容错模式）。
+                # 形态A task-01（design §4.1 调用点①）：砍 auto_dispatch 自动连轴。
+                # gate 结果已落库（gate_result + gate_status=decided），current_stage
+                # 不变；推进交 advance_change_stage tool 读 gate_result 显式决策。
+                # task-11 / design §5.7：commit 后发 gate_status_changed SSE 通知前端
+                # 更新徽标（复用 agent_run:{id} channel，对齐 close 的 try/except 容错）。
                 await self._publish_gate_status_changed(run_row, gate_result)
 
                 log.info(
@@ -1481,6 +1449,46 @@ class RunSyncService:
                 gate_status=agent_run.gate_status,
             )
 
+    async def _publish_stage_status_changed(
+        self,
+        agent_run: AgentRun,
+        change_id: uuid.UUID,
+        stage: str | None,
+        status: str,
+    ) -> None:
+        """发 Redis ``stage_status_changed`` SSE 事件（形态A 按需触发，design §4.1）。
+
+        砍 auto_dispatch 自动连轴后，single stage 完成（task-02）/ team stage 推进
+        （task-03）都不再自动 dispatch 下一 stage。本事件提示前端 / agent：当前
+        stage 已落「完成待触发」态，需显式调 ``advance_change_stage`` MCP/HTTP 推进。
+
+        复用现有 ``agent_run:{id}`` channel（对齐 ``_publish_gate_status_changed``，
+        前端按 event 字段分流，不新建 channel）；Redis 抖动只 warning，不影响已
+        commit 的状态（gate_result / current_stage 已落库，SSE 漏发不回滚）。
+        """
+        try:
+            redis = get_redis()
+            await redis.publish(
+                f"agent_run:{agent_run.id}",
+                json.dumps(
+                    {
+                        "event": "stage_status_changed",
+                        "agent_run_id": str(agent_run.id),
+                        "change_id": str(change_id),
+                        "stage": stage,
+                        "status": status,
+                    },
+                    default=str,
+                ),
+            )
+        except Exception:
+            log.warning(
+                "stage_status_changed_redis_publish_failed",
+                agent_run_id=str(agent_run.id),
+                change_id=str(change_id),
+                stage=stage,
+            )
+
     async def _resolve_gate_spec_root(
         self,
         gate_session: AsyncSession,
@@ -1551,7 +1559,12 @@ class RunSyncService:
         self,
         agent_run_id: uuid.UUID,
     ) -> None:
-        """A2: stage dispatch 的 AgentRun 完成后同步 sillyspec.db 并推进下一阶段。
+        """stage dispatch 的 AgentRun 完成后同步 sillyspec.db 视图并留痕待触发。
+
+        形态A task-02（design §4.1 调用点③）：砍 single 分支的 auto_dispatch 自动
+        连轴。single stage 完成后只 ``sync_stage_status``（更新 sillyspec.db 视图）
+        + 发 ``stage_status_changed`` SSE 提示前端/agent 显式推进，current_stage 不
+        自动前进，停在「阶段完成待触发」态。
 
         task-09（2026-07-10-remove-server-local-workspace-mode）：单一 daemon-client
         后 path_source 形参已删，sync_stage_status 内部经 HostFsDelegate RPC 读
@@ -1559,12 +1572,10 @@ class RunSyncService:
 
         仅对 stage dispatch（change_id 非空、status=completed）生效；scan
         （change_id=None）由 spec sync + scan_docs.reparse 单独回流，不走这里。
-        调用范式对齐 reconcile_stale_runs（dispatch.py:466-483）。
+        team 分流（mission_id 非空 + team_mode）交 ``_handle_team_run_completion``
+        → ``_advance_team_stage``（task-03），不在本分支。
         """
-        from app.modules.change.dispatch import (
-            SillySpecStageDispatchService,
-            auto_dispatch_next_step,
-        )
+        from app.modules.change.dispatch import SillySpecStageDispatchService
         from app.modules.change.model import Change
 
         agent_run = await self._session.get(AgentRun, agent_run_id)
@@ -1612,19 +1623,20 @@ class RunSyncService:
             )
             return
 
-        # user_id：对齐 reconcile_stale_runs 的回退策略（change.owner_id → 零 UUID）。
-        user_id = change.owner_id or uuid.UUID(int=0)
-        await auto_dispatch_next_step(
-            session=self._session,
-            workspace_id=change.workspace_id,
+        # 形态A task-02（design §4.1 调用点③）：砍 auto_dispatch_next_step 自动连轴。
+        # single stage 完成后停在「阶段完成待触发」态，current_stage 不自动前进；
+        # 发 stage_status_changed SSE 提示前端/agent 显式调 advance_change_stage 推进。
+        await self._publish_stage_status_changed(
+            agent_run,
             change_id=agent_run.change_id,
-            user_id=user_id,
-            sync_result=sync_result,
+            stage=sync_result.current_stage,
+            status="completed_pending_trigger",
         )
         log.info(
             "stage_callback_done",
             agent_run_id=str(agent_run_id),
             change_id=str(agent_run.change_id),
+            stage=sync_result.current_stage,
         )
 
     async def _handle_team_run_completion(
@@ -1688,39 +1700,43 @@ class RunSyncService:
         mission: AgentMission,
         team_stage: str,
     ) -> None:
-        """team mission 收敛后推进变更 stage（缺口 B）。
+        """team mission 收敛后推进变更 stage（缺口 B / 形态A task-03，design §4.3）。
 
-        复用 single 模式的 ``auto_dispatch_next_step``：它做 reparse + 读 gate +
-        complete_stage + dispatch 下一 stage。team 模式只需把「该 stage 已完成」以
-        ``StageSyncResult(stage_completed=True)`` 喂给它——verify stage 额外把多
-        worker gate 经 ``merge_gate_results`` 合并后落主 agent run.gate_result，让
-        auto_dispatch 的 gate 三态决策（exit 0 推进 / 1 打回 / 2 卡住）生效。
+        形态A 砍 auto_dispatch 后，本方法是 team mission 收敛→change.current_stage
+        推进的**唯一桥**，不能整个删。保留两件事：
+          - ``merge_gate_results``：verify stage 合并 worker gate_results 落主 agent
+            run.gate_result（gate 决策数据源，advance_change_stage tool / review 据此
+            显式决策）。
+          - ``ChangeService.complete_stage``：推进 current_stage + 落 pending_review
+            （execute→verify / verify+passed→archive / archive→archived）。
 
-        ``auto_dispatch_next_step`` 内部对 current_stage 与 sync_result.current_stage
-        一致性有守卫（dispatch.py stage_diverged），故此处 current_stage 必须仍等于
-        team_stage（由 ``_handle_team_run_completion`` 幂等护栏保证）。
+        删除原 ``StageSyncResult`` 伪造 + ``auto_dispatch_next_step`` 自动 dispatch
+        下一 stage 的整块（design §4.1 调用点④）——下一 stage team mission 交
+        ``advance_change_stage`` MCP/HTTP tool 显式触发 ``_dispatch_execute_team``。
+        推进完成后发 ``stage_status_changed`` SSE 留痕（team stage 已推进，下一 stage
+        待显式触发）。
+
+        幂等：由 ``_handle_team_run_completion`` 的 ``current_stage == team_stage``
+        护栏保证（complete_stage 后 current_stage 已变，重复触发自然跳过）。
         """
         from app.modules.agent.control import MissionControlService
-        from app.modules.change.dispatch import (
-            StageSyncResult,
-            auto_dispatch_next_step,
-            merge_gate_results,
-        )
+        from app.modules.change.dispatch import merge_gate_results
+        from app.modules.change.service import ChangeService
 
         ctrl = MissionControlService(self._session)
         all_runs = await ctrl.worker_runs(mission.id)
         main_run = next((r for r in all_runs if r.role == "orchestrator"), None)
 
-        # verify stage：合并 worker gate_results 落主 agent run，让 gate 决策生效。
-        # execute stage 无 gate（workers 产 patch 不产 gate_result），主 run.gate_result
-        # 保持 None → auto_dispatch 非 verify + None 走声明态推进（dispatch.py:443）。
+        # verify stage：合并 worker gate_results 落主 agent run，作为 gate 决策数据源
+        # （对齐 task-07 single gate task：gate_status=decided + gate_result 落库）。
+        # execute stage 无 gate（workers 产 patch 不产 gate_result）。
+        # dict() copy 防 SQLAlchemy JSON 列原地改不标记 dirty（对齐 dispatch.py 模式）。
+        stage_result: str | None = None
         if team_stage == "verify":
             worker_runs = [r for r in all_runs if r.role != "orchestrator"]
             gate_results = [r.gate_result for r in worker_runs if isinstance(r.gate_result, dict)]
             merged = merge_gate_results(gate_results)
             if main_run is not None:
-                # dict() copy 防 SQLAlchemy JSON 列原地改不标记 dirty（对齐
-                # dispatch.py 模式）。gate_status=decided 表示已落决策（对齐 task-07）。
                 main_run.gate_result = dict(merged)
                 main_run.gate_status = "decided"
                 self._session.add(main_run)
@@ -1733,28 +1749,40 @@ class RunSyncService:
                     merged_exit=merged.get("exit_code"),
                     worker_count=merged.get("worker_count"),
                 )
+            # verify → archive 需 result="passed"（_resolve_stage_completion）。
+            # exit 0 视为 passed；非 0 不推进（stage_result 保持 None → complete_stage
+            # verify+非 passed 返回 (verify, None)），change 停在 verify，交
+            # advance_change_stage tool / review 显式决策（形态A：不自动 kickback/block）。
+            if merged.get("exit_code") == 0:
+                stage_result = "passed"
 
-        if main_run is None:
-            # 主 run 缺失（mission 损坏）：取 mission 任意 run 占位（run_id 仅审计用）。
-            # verify 缺主 run 时 gate_result 无处落 → auto_dispatch verify 强制 gate
-            # 阻断 fail-loud，暴露异常（dispatch.py:429），不静默推进。
-            main_run = all_runs[0] if all_runs else None
-
-        sync_result = StageSyncResult(
-            synced=True,
-            change_id=change.id,
-            run_id=main_run.id if main_run is not None else uuid.UUID(int=0),
-            current_stage=team_stage,
-            stage_completed=True,
-            has_pending_step=False,
-        )
-        user_id = change.owner_id or uuid.UUID(int=0)
-        await auto_dispatch_next_step(
-            session=self._session,
+        # 桥：complete_stage 推进 current_stage + 落 pending_review（design §4.3）。
+        # complete_stage 内部经 _resolve_stage_completion(stage, result) 决定 new_stage。
+        cs = ChangeService(self._session)
+        complete_result = await cs.complete_stage(
             workspace_id=change.workspace_id,
             change_id=change.id,
-            user_id=user_id,
-            sync_result=sync_result,
+            stage=team_stage,
+            result=stage_result,
+            summary=None,
+        )
+
+        # 留痕 SSE：team stage 已推进（或 verify gate 未过停留），下一 stage 待显式触发。
+        sse_run = main_run if main_run is not None else (all_runs[0] if all_runs else None)
+        if sse_run is not None:
+            await self._publish_stage_status_changed(
+                sse_run,
+                change_id=change.id,
+                stage=complete_result.change.current_stage,
+                status="completed_pending_trigger",
+            )
+        log.info(
+            "team_stage_advanced",
+            change_id=str(change.id),
+            mission_id=str(mission.id),
+            team_stage=team_stage,
+            new_stage=complete_result.change.current_stage,
+            dispatch_target=complete_result.dispatch_target,
         )
 
     async def _run_post_scan_validation(

@@ -15,7 +15,7 @@ created_at: 2026-06-24T01:16:33
 - API（prefix=/workspaces/{workspace_id}, tag=change）：变更列表/详情 `GET /changes`、`/changes/{key|id}`、文档矩阵 `/changes/{id}/documents`、文档内容 `/changes/{id}/documents/{name}`、重解析 `POST /changes/reparse`、进度更新 `POST /changes/{id}/progress`、审批 `GET/POST /changes/{id}/approval` 等。
 - `ChangeService`：`list_/get/get_by_key/get_documents/get_document_content/update_progress/transition/transition_with_dispatch/submit_feedback/check_archive_gate/reparse/sync_documents/approve/reject`，`resolve_human_gate(target_stage)` 计算人工 gate。
 - `ChangeParser`：解析 `.sillyspec/changes/` 为 `ChangeParserResult`（`ParsedChange`/`ParsedDoc`/`ParseWarning`）。`_infer_change_type`、`_infer_affected_components`（读 `_module-map.yaml` 把变更涉及的文件路径反查回模块，`_load_module_map`/`_match_paths_to_modules`）。
-- `SillySpecStageDispatchService`（dispatch.py）：阶段流转后的自动派发。`auto_dispatch_next_step`/`dispatch`/`reconcile_stale_runs`/`cleanup_orphan_dispatch_runs`/`cleanup_stale_pending_runs`/`read_verify_result`/`has_active_run`，`get_config_for_stage` 读阶段 agent 配置（`StageAgentConfig.requires_worktree`）。
+- `SillySpecStageDispatchService`（dispatch.py）：阶段流转的派发服务。`dispatch`/`dispatch_next_step`（由 `transition_with_dispatch` 显式调用，**不再自动连轴**）/`_dispatch_execute_team`/`reconcile_stale_runs`（仅清理 stale run 不推进）/`cleanup_orphan_dispatch_runs`/`cleanup_stale_pending_runs`/`get_config_for_stage` 读阶段 agent 配置（`StageAgentConfig.requires_worktree`）。`auto_dispatch_next_step` 已删（形态A 改按需触发）。
 - 依赖 change_writer（生成文档）、agent（派发执行）、workspace（解析根）。
 
 ## 关键逻辑

@@ -157,6 +157,9 @@ export function reparseChanges(workspaceId: string) {
 }
 
 // 批准
+// 退役（task-13，FR-06）：旧 approval 链路（approval_status + approve/reject）不再驱动
+// change 推进，changes 详情页已改走 submitStageReview（submit_stage_review 语义）。本方法
+// 保留供既有历史调用方 / 数据兼容，只读参考，不再由 changes 详情页调用。
 export function approveChange(workspaceId: string, changeKey: string, approvedBy: string) {
   return apiFetch<{ ok: boolean }>(
     `/api/workspaces/${workspaceId}/changes/${changeKey}/approve`,
@@ -168,6 +171,9 @@ export function approveChange(workspaceId: string, changeKey: string, approvedBy
 }
 
 // 驳回
+// 退役（task-13，FR-06）：旧 approval 链路（approval_status + approve/reject）不再驱动
+// change 推进，changes 详情页已改走 submitStageReview（submit_stage_review 语义）。本方法
+// 保留供既有历史调用方 / 数据兼容，只读参考，不再由 changes 详情页调用。
 export function rejectChange(workspaceId: string, changeKey: string, reason: string) {
   return apiFetch<{ ok: boolean }>(
     `/api/workspaces/${workspaceId}/changes/${changeKey}/reject`,
@@ -375,7 +381,83 @@ export function triggerDispatch(
   );
 }
 
+// ── Change 阶层按需触发（2026-08-08-change-center-on-demand task-12，FR-06/D-005）──
+//
+// 后端已砍 auto_dispatch 自动连轴（Wave 1），阶段完成停「完成待触发」态。
+// 前端 handleDispatch 改显式调下列 HTTP 端点按需推进，不再依赖自动连轴。
+// 注：api-types.ts 为 OpenAPI 生成，本次 allowed_paths 不含它；advance-stage /
+// run-verify-gate 端点类型在此本地内联（TransitionResponse/TransitionRequest 已存在，
+// VerifyGateResponse 为新增），不手写进 api-types.ts。
+
+/**
+ * 单步推进 change 阶层 — POST /api/workspaces/{wid}/changes/{cid}/advance-stage
+ *
+ * body/响应与 /transition 完全对齐（advance-stage 为前端语义命名别名，共用
+ * ChangeService.transition_with_dispatch，team 分流 single→AgentService /
+ * team→_dispatch_execute_team）。
+ *
+ * @param targetStage 目标阶段（brainstorm→plan→execute→verify→archive 的下一阶段）
+ * @param opts 可选 provider/model/team_mode/worker_preset/main_agent_config 覆盖
+ */
+export function advanceChangeStage(
+  workspaceId: string,
+  changeId: string,
+  targetStage: string,
+  opts?: {
+    reason?: string;
+    provider?: string | null;
+    model?: string | null;
+    teamMode?: boolean;
+    workerPreset?: TransitionRequest["worker_preset"];
+    mainAgentConfig?: TransitionRequest["main_agent_config"];
+  },
+) {
+  const body: TransitionRequest = { target_stage: targetStage };
+  if (opts?.reason !== undefined) body.reason = opts.reason;
+  if (opts?.provider) body.provider = opts.provider;
+  if (opts?.model) body.model = opts.model;
+  if (opts?.teamMode) {
+    body.team_mode = true;
+    if (opts.workerPreset && opts.workerPreset.length > 0) {
+      body.worker_preset = opts.workerPreset;
+    }
+    if (opts.mainAgentConfig) body.main_agent_config = opts.mainAgentConfig;
+  }
+  return apiFetch<TransitionResponse>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}/advance-stage`,
+    { method: "POST", json: body },
+  );
+}
+
+/** gate 软调用响应（对齐后端 VerifyGateResponse，task-11 / design §6.2/§6.3） */
+export type VerifyGateResponse = {
+  /** gate exit code（0=通过 / 1=打回 / 2=异常；unavailable 时为 null） */
+  exit_code: number | null;
+  /** gate errors 列表（已 str 强转） */
+  errors: string[];
+  /** 结果来源：gate_result / gate_cmd / unavailable */
+  source: "gate_result" | "gate_cmd" | "unavailable";
+};
+
+/**
+ * gate 软调用 — POST /api/workspaces/{wid}/changes/{cid}/run-verify-gate
+ *
+ * 不硬阻塞、不改 change 状态（结果交调用方决策）：优先读最近 completed
+ * AgentRun.gate_result（source=gate_result），缺则软调 sillyspec gate verify
+ * （source=gate_cmd），两者均不可用则 source=unavailable + exit_code=null。
+ */
+export function runVerifyGate(workspaceId: string, changeId: string) {
+  return apiFetch<VerifyGateResponse>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}/run-verify-gate`,
+    { method: "POST" },
+  );
+}
+
 // ── HumanGate & Review API ─────────────────────────────────────────────
+//
+// task-13（FR-06）：proposalReview / planReview / humanTest / archiveConfirm 四个方法
+// 是 submit_stage_review 语义的 HTTP 传输层（分别对应后端 /proposal-review、
+// /plan-review、/human-test、/archive-confirm 路由），统一经 submitStageReview 分发调用。
 
 export type HumanGate =
   | "none"
@@ -450,6 +532,57 @@ export function archiveConfirm(
   );
 }
 
+/**
+ * submit_stage_review 统一前端入口（task-13，FR-06 收敛三条并存审核链路）。
+ *
+ * 对齐 backend ``mcp_gateway.submit_stage_review`` MCP tool（design §6.1）：按 action
+ * 分发到既有 4 个 stage review HTTP 端点客户端方法（proposalReview / planReview /
+ * humanTest / archiveConfirm，后端各有 HTTP 路由，零新增端点）。changes 详情页 gate
+ * 面板审核动作一律走本方法，作为唯一审核语义；旧 approval_status + 通用 submitReview
+ * 链路已退役（approveChange / rejectChange / submitReview 标注只读，不再驱动推进）。
+ *
+ * @param action GATE_PANELS action 词表：proposal_approve / proposal_revise /
+ *   proposal_unclear / plan_approve / plan_replan / plan_back_to_propose /
+ *   plan_back_to_brainstorm / test_pass / test_bug / test_doc_mismatch / archive_confirm
+ * @param comment 审核意见（可选，archive_confirm 亦透传）
+ */
+export function submitStageReview(
+  workspaceId: string,
+  changeId: string,
+  action: string,
+  comment?: string,
+) {
+  switch (action) {
+    case "proposal_approve":
+      return proposalReview(workspaceId, changeId, "approve", comment);
+    case "proposal_revise":
+      return proposalReview(workspaceId, changeId, "revise", comment);
+    case "proposal_unclear":
+      return proposalReview(workspaceId, changeId, "unclear", comment);
+    case "plan_approve":
+      return planReview(workspaceId, changeId, "approve", comment);
+    case "plan_replan":
+      return planReview(workspaceId, changeId, "replan", comment);
+    case "plan_back_to_propose":
+      return planReview(workspaceId, changeId, "back_to_propose", comment);
+    case "plan_back_to_brainstorm":
+      return planReview(workspaceId, changeId, "back_to_brainstorm", comment);
+    case "test_pass":
+      return humanTest(workspaceId, changeId, "pass", comment);
+    case "test_bug":
+      return humanTest(workspaceId, changeId, "bug", comment);
+    case "test_doc_mismatch":
+      return humanTest(workspaceId, changeId, "doc_mismatch", comment);
+    case "archive_confirm":
+      return archiveConfirm(workspaceId, changeId, comment);
+    default:
+      // 未识别 action → 拒绝（对齐 MCP tool 的 400 语义，调用方捕获后展示）。
+      return Promise.reject(
+        new Error(`unsupported review action: ${action}`),
+      );
+  }
+}
+
 // ── Generic Review API（task-11 合并自 lib/workflow.ts，单一来源 D-006） ──
 
 /** 通用审核记录（GET/POST /reviews 端点返回结构） */
@@ -465,8 +598,10 @@ export interface ReviewEntry {
 /**
  * 提交通用审核 — POST /api/workspaces/{wid}/changes/{cid}/reviews
  *
- * verdict=approve/reject 的通用审核入口（区别于上面 proposalReview/planReview 等
- * 阶段化审核端点）。
+ * 退役（task-13，FR-06）：通用 verdict=approve/reject 审核链路不再驱动 change 推进，
+ * changes 详情页已改走 submitStageReview（submit_stage_review 语义）。注意后端 workflow
+ * router 仅有 GET /reviews（list_reviews），无 POST——本方法所打端点实际不存在（405），
+ * 仅保留供既有历史调用方 / 数据兼容，只读参考，不再由 changes 详情页调用。
  */
 export function submitReview(
   workspaceId: string,

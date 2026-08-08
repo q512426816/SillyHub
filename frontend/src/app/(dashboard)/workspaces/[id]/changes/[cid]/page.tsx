@@ -17,24 +17,21 @@ import {
 } from "@/components/layout";
 import { ApiError } from "@/lib/api";
 import {
-  approveChange,
   executeChange,
   getChange,
-  rejectChange,
   checkArchiveGate,
   getAgentStatus,
   triggerDispatch,
-  proposalReview,
-  planReview,
-  humanTest,
-  archiveConfirm,
+  submitStageReview,
   type ChangeRead,
   type ArchiveGateResponse,
   type DispatchResponse,
   listReviews,
-  submitReview,
   transitionChange,
+  advanceChangeStage,
+  runVerifyGate,
   type ReviewEntry,
+  type VerifyGateResponse,
 } from "@/lib/changes";
 import { SillySpecStepProgress, type StepInfo } from "@/components/sillyspec-step-progress";
 import { StageTeamConfig, type StageWorkerPreset } from "@/components/stage-team-config";
@@ -52,6 +49,17 @@ interface Props {
 const WORKFLOW_STAGES = [
   "brainstorm", "plan", "execute", "verify", "archive",
 ] as const;
+
+// task-12（2026-08-08-change-center-on-demand，FR-06/D-005）：主线阶段的下一阶段映射，
+// 对齐后端 TRANSITIONS（model.py:82 brainstorm→plan→execute→verify→archive 线性单出口）。
+// 砍 auto_dispatch 后阶段停「完成待触发」态，前端「推进」按钮据此算 target_stage 调
+// advance-stage 端点。archive 无下一阶段（终态），不在映射内。
+const NEXT_STAGE: Record<string, string> = {
+  brainstorm: "plan",
+  plan: "execute",
+  execute: "verify",
+  verify: "archive",
+};
 
 const WORKFLOW_STAGE_LABELS: Record<string, string> = {
   brainstorm: "需求分析",
@@ -151,10 +159,7 @@ export default function ChangeDetailPage({ params }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reviews, setReviews] = useState<ReviewEntry[]>([]);
   const [transitioning, setTransitioning] = useState(false);
-  const [reviewComment, setReviewComment] = useState("");
   const [taskBoard, setTaskBoard] = useState<TaskBoard | null>(null);
-  const [rejectionInput, setRejectionInput] = useState("");
-  const [showRejectInput, setShowRejectInput] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
@@ -180,6 +185,11 @@ export default function ChangeDetailPage({ params }: Props) {
   const [stageTeamMissionId, setStageTeamMissionId] = useState<string | null>(null);
   const [gateStatus, setGateStatus] = useState<GateStatusEvent | null>(null);
   const [gateComment, setGateComment] = useState("");
+  // task-12：advance-stage / run-verify-gate 的本地状态（按需触发，FR-06/D-005）。
+  // advancing 独立于 dispatching（transition 用 transitioning，dispatch 用 dispatching），
+  // 让「推进」按钮单独 loading；verifyGate 存最近一次 run-verify-gate 软调用结果。
+  const [advancing, setAdvancing] = useState(false);
+  const [verifyGate, setVerifyGate] = useState<VerifyGateResponse | null>(null);
 
   // ── Agent Log Stream state ──────────────────────────────────────────
   const [logsExpanded, setLogsExpanded] = useState(false);
@@ -285,49 +295,9 @@ export default function ChangeDetailPage({ params }: Props) {
     }
   };
 
-  const handleSubmitReview = async (verdict: "approve" | "reject") => {
-    setTransitioning(true);
-    setPageError(null);
-    try {
-      const review = await submitReview(workspaceId, changeId, verdict, reviewComment || undefined);
-      setReviews((prev) => [...prev, review]);
-      setReviewComment("");
-    } catch (err) {
-      setPageError(err instanceof ApiError ? err.message : "提交审查失败");
-    } finally {
-      setTransitioning(false);
-    }
-  };
-
-  const handleApprove = async () => {
-    if (!change) return;
-    setTransitioning(true);
-    setPageError(null);
-    try {
-      await approveChange(workspaceId, change.change_key, "admin");
-      setChange({ ...change, approval_status: "approved" });
-    } catch (err) {
-      setPageError(err instanceof ApiError ? err.message : "审批操作失败");
-    } finally {
-      setTransitioning(false);
-    }
-  };
-
-  const handleReject = async () => {
-    if (!change || !rejectionInput.trim()) return;
-    setTransitioning(true);
-    setPageError(null);
-    try {
-      await rejectChange(workspaceId, change.change_key, rejectionInput.trim());
-      setChange({ ...change, approval_status: "rejected", rejection_reason: rejectionInput.trim() });
-      setRejectionInput("");
-      setShowRejectInput(false);
-    } catch (err) {
-      setPageError(err instanceof ApiError ? err.message : "驳回操作失败");
-    } finally {
-      setTransitioning(false);
-    }
-  };
+  // task-13（FR-06）：旧审核链路 handler（handleSubmitReview / handleApprove /
+  // handleReject）已退役——统一收敛到 submitStageReview（gate 面板），旧
+  // approval_status 不再驱动推进，仅保留只读展示（见下方「审批状态」section）。
 
   const handleExecute = async () => {
     if (!change) return;
@@ -363,7 +333,7 @@ export default function ChangeDetailPage({ params }: Props) {
     }
   };
 
-  // ── Agent Dispatch handler ─────────────────────────────────────────
+  // ── Agent Dispatch handler（task-12 改按需触发，FR-06/D-005）─────────────
   const refreshAgentStatus = useCallback(async () => {
     setLoadingAgentStatus(true);
     try {
@@ -377,6 +347,14 @@ export default function ChangeDetailPage({ params }: Props) {
     }
   }, [workspaceId, changeId]);
 
+  // task-12：当前阶段的下一阶段（无则 null，如 archive 终态）。
+  const nextStage = change?.current_stage ? NEXT_STAGE[change.current_stage] ?? null : null;
+
+  /**
+   * 重新派发当前阶段 agent（POST /dispatch，task-12 保留）。砍 auto_dispatch 不砍
+   * 手动重派当前阶段的能力（如失败重跑当前 step）。此端点不依赖 auto_dispatch 自动
+   * 连轴——它只 dispatch 当前 stage，推进到下一 stage 由 handleAdvance 显式触发。
+   */
   const handleDispatch = async () => {
     setDispatching(true);
     setPageError(null);
@@ -385,7 +363,6 @@ export default function ChangeDetailPage({ params }: Props) {
 
       // 软失败（200 OK + dispatched:false）：dispatch_result.error 携带真实原因
       // （如 daemon-client root 校验失败 / dispatch_error）。不抛 ApiError，必须显式读。
-      // 不读则前端无任何提示（既不 success 也不 error）—— 前端 dispatch 错误不显示 bug。
       if (result.dispatch_result && !result.dispatch_result.dispatched) {
         const dr = result.dispatch_result;
         const reasonText =
@@ -393,7 +370,6 @@ export default function ChangeDetailPage({ params }: Props) {
         setPageError(
           dr.error ? `派发失败${reasonText}：${dr.error}` : `派发失败${reasonText}`,
         );
-        // 软失败时仍 refresh agent status（last_dispatch 可能更新），但不展开日志面板
         void refreshAgentStatus();
         return;
       }
@@ -406,15 +382,105 @@ export default function ChangeDetailPage({ params }: Props) {
         setTimeout(() => setSuccessMsg(null), 3000);
         // R-06：立即 setLocalRunId → panelRunId 立即指向新 run → panel 内 hook
         // useEffect（runId 变化）触发重连，不等 refreshAgentStatus。
-        // 对照原 :515-553 立即触发 SSE 连接(newRunId) 的语义。
         setLocalRunId(result.last_dispatch.run_id);
       }
-      // 异步 refresh（不阻塞 UI），完成后 localRunId 清空、activeRunId 接管
       void refreshAgentStatus();
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "触发智能体失败");
     } finally {
       setDispatching(false);
+    }
+  };
+
+  /**
+   * task-12（FR-06/D-005）：「推进」改调 change 阶层 advance-stage HTTP 端点，不再依赖
+   * 后端 auto_dispatch 自动连轴。当前阶段完成停「完成待触发」态时，点「推进」显式推进到
+   * 下一阶段并 dispatch 该阶段 agent（team 分流由后端 transition_with_dispatch 处理）。
+   */
+  const handleAdvance = async () => {
+    if (!change || !nextStage) return;
+    setDispatching(true);
+    setPageError(null);
+    try {
+      // team_mode 透传 worker_preset + main_agent_config（对齐 handleTransition，
+      // D-002/D-003@v2）。advance-stage body 与 /transition 完全对齐。
+      const mainAgentConfig = teamMode
+        ? {
+            ...(stageProvider ? { provider: stageProvider } : {}),
+            ...(stageModel ? { model: stageModel } : {}),
+          }
+        : undefined;
+      const result = await advanceChangeStage(workspaceId, changeId, nextStage, {
+        provider: stageProvider,
+        model: stageModel,
+        teamMode,
+        workerPreset: teamMode ? stageWorkers : undefined,
+        mainAgentConfig,
+      });
+
+      // 推进成功：更新 change 当前阶段 + stages。
+      const changeData = result.change;
+      setChange({
+        ...change,
+        current_stage: (changeData.current_stage as string) ?? nextStage,
+        status: changeData.status ?? change.status,
+        stages: (changeData.stages as Record<string, unknown>) ?? change.stages,
+      });
+
+      // dispatch 反馈：dispatched=true 时立即指向新 run（R-06 localRunId 兜底）。
+      if (result.agent_dispatch?.dispatched) {
+        setSuccessMsg(`🤖 已推进到「${WORKFLOW_STAGE_LABELS[nextStage] ?? nextStage}」并派发智能体`);
+        setTimeout(() => setSuccessMsg(null), 4000);
+        setLogsExpanded(true);
+        if (result.agent_dispatch.agent_run_id) {
+          setLocalRunId(result.agent_dispatch.agent_run_id);
+        }
+        if (result.agent_dispatch.mission_id) {
+          setStageTeamMissionId(result.agent_dispatch.mission_id);
+        }
+      } else if (result.agent_dispatch && !result.agent_dispatch.dispatched) {
+        // 软失败（dispatched:false）：reason 携带原因（如 active_run_exists）。
+        const reason = result.agent_dispatch.reason;
+        if (reason === "active_run_exists") {
+          setSuccessMsg("⚠️ 智能体 已在运行中，跳过重复派发");
+          setTimeout(() => setSuccessMsg(null), 3000);
+        } else {
+          setSuccessMsg(`已推进到「${WORKFLOW_STAGE_LABELS[nextStage] ?? nextStage}」`);
+          setTimeout(() => setSuccessMsg(null), 3000);
+        }
+      }
+      // 异步 refresh（不阻塞 UI），完成后 localRunId 清空、activeRunId 接管
+      void refreshAgentStatus();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        const violations = (err.details as { violations?: string[] })?.violations;
+        setPageError(violations ? violations.join("；") : err.message);
+      } else {
+        setPageError("推进失败");
+      }
+    } finally {
+      setDispatching(false);
+    }
+  };
+
+  /**
+   * task-12（D-003/D-008）：run_verify_gate 软调用。不硬阻塞、不改 change 状态，
+   * 结果交用户决策。点「运行验证门禁」时显式触发，结果落 verifyGate 供 UI 展示。
+   */
+  const handleRunVerifyGate = async () => {
+    setAdvancing(true);
+    setPageError(null);
+    try {
+      const result = await runVerifyGate(workspaceId, changeId);
+      setVerifyGate(result);
+      if (result.source === "unavailable") {
+        setSuccessMsg("验证门禁暂不可用（daemon 离线 / 无代码根），请人工核验");
+        setTimeout(() => setSuccessMsg(null), 4000);
+      }
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "运行验证门禁失败");
+    } finally {
+      setAdvancing(false);
     }
   };
 
@@ -443,6 +509,20 @@ export default function ChangeDetailPage({ params }: Props) {
       setAgentStatus(as);
     } catch { /* silent */ }
   }, [workspaceId, changeId]);
+
+  // task-12（FR-06/D-005 implementation 3）：gate_status_changed SSE 收到后刷新阶段视图。
+  // gate 决策完成（decided/failed）后阶段落「完成待触发」态，需 refresh change +
+  // agent-status 让「推进」按钮及时出现（R-06 gate_result 落库时序）。gate_status_changed
+  // SSE 复用 agent_run:{id} channel，经 AgentRunPanel.onGateStatusChanged → setGateStatus
+  // 到此处。stage_status_changed SSE 同为该 channel（backend run_sync:1471），但前端
+  // agent-stream.ts 未解析（不在本 task allowed_paths），由本 effect + run-done refresh
+  // 覆盖阶段视图刷新。
+  useEffect(() => {
+    if (!gateStatus) return;
+    if (gateStatus.gate_status === "decided" || gateStatus.gate_status === "failed") {
+      void refreshAll();
+    }
+  }, [gateStatus, refreshAll]);
 
 
   // Auto-load archive gate when entering archive stage
@@ -485,48 +565,11 @@ export default function ChangeDetailPage({ params }: Props) {
     if (transitioning) return;
     setTransitioning(true);
     try {
-      if (action === "proposal_approve") {
-        await proposalReview(workspaceId, changeId, "approve", gateComment || undefined);
-      } else if (action === "proposal_revise") {
-        await proposalReview(workspaceId, changeId, "revise", gateComment || undefined);
-      } else if (action === "proposal_unclear") {
-        await proposalReview(workspaceId, changeId, "unclear", gateComment || undefined);
-      } else if (action === "plan_approve") {
-        await planReview(workspaceId, changeId, "approve", gateComment || undefined);
-      } else if (action === "plan_replan") {
-        await planReview(workspaceId, changeId, "replan", gateComment || undefined);
-      } else if (action === "plan_back_to_propose") {
-        await planReview(workspaceId, changeId, "back_to_propose", gateComment || undefined);
-      } else if (action === "plan_back_to_brainstorm") {
-        await planReview(workspaceId, changeId, "back_to_brainstorm", gateComment || undefined);
-      } else if (action === "test_pass") {
-        await humanTest(workspaceId, changeId, "pass", gateComment || undefined);
-      } else if (action === "test_bug") {
-        await humanTest(workspaceId, changeId, "bug", gateComment || undefined);
-      } else if (action === "test_doc_mismatch") {
-        await humanTest(workspaceId, changeId, "doc_mismatch", gateComment || undefined);
-      } else if (action === "archive_confirm") {
-        await archiveConfirm(workspaceId, changeId, gateComment || undefined);
-      } else if (action === "transition_execute") {
-        // task-09：transition_execute 分支也透传 team worker_preset + main_agent_config。
-        const mainAgentConfig = teamMode
-          ? {
-              ...(stageProvider ? { provider: stageProvider } : {}),
-              ...(stageModel ? { model: stageModel } : {}),
-            }
-          : undefined;
-        await transitionChange(
-          workspaceId,
-          changeId,
-          "execute",
-          undefined,
-          stageProvider,
-          stageModel,
-          teamMode,
-          teamMode ? stageWorkers : undefined,
-          mainAgentConfig,
-        );
-      }
+      // task-13（FR-06）：审核唯一入口 submitStageReview——gate 面板 4 类 action 统一
+      // 分发到 submit_stage_review 语义（内部复用既有 proposalReview/planReview/
+      // humanTest/archiveConfirm HTTP 端点，零新增端点）。旧 approval_status + 通用
+      // submitReview 链路已退役（page.tsx 不再有第二条审核入口）。
+      await submitStageReview(workspaceId, changeId, action, gateComment || undefined);
       setGateComment("");
       const [updated, updatedAgentStatus] = await Promise.all([
         getChange(workspaceId, changeId),
@@ -671,6 +714,59 @@ export default function ChangeDetailPage({ params }: Props) {
               </Button>
             ))}
           </div>
+        </section>
+      )}
+
+      {/* ── task-12「完成待触发」推进横幅（FR-06/D-005 implementation 4，解 R-01）── */}
+      {/* 砍 auto_dispatch 后阶段完成停「完成待触发」态，需显式「推进」。显示条件：
+          主线阶段 + 无审核面板（pending_review 走各自 gate 按钮）+ 无活跃 run +
+          存在下一阶段（archive 终态不显示）。点「推进」调 advance-stage 按需推进。 */}
+      {!gatePanel && nextStage && !agentStatus?.has_active_run && (
+        <section className="rounded-md border border-primary/30 bg-primary/5 px-4 py-3 space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold">
+                当前阶段已完成，待触发下一阶段
+              </p>
+              <p className="text-xs text-muted-foreground">
+                下一阶段：{WORKFLOW_STAGE_LABELS[nextStage] ?? nextStage}（按需触发，不再自动连轴）
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {change.current_stage === "verify" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleRunVerifyGate()}
+                  disabled={advancing || dispatching}
+                >
+                  {advancing ? "核验中…" : "运行验证门禁"}
+                </Button>
+              )}
+              <Button
+                size="sm"
+                onClick={() => void handleAdvance()}
+                disabled={dispatching || advancing}
+              >
+                {dispatching ? "推进中…" : `推进到「${WORKFLOW_STAGE_LABELS[nextStage] ?? nextStage}」`}
+              </Button>
+            </div>
+          </div>
+          {/* verify gate 软调用结果（D-003/D-008）：交用户决策，不硬阻塞。 */}
+          {verifyGate && (
+            <p className="text-[11px] text-muted-foreground">
+              验证门禁：
+              {verifyGate.source === "unavailable"
+                ? "暂不可用（请人工核验）"
+                : verifyGate.exit_code === 0
+                  ? "✓ 通过"
+                  : verifyGate.exit_code === null
+                    ? "无结果"
+                    : `✗ 未通过（exit ${verifyGate.exit_code}）`}
+              {verifyGate.errors.length > 0 &&
+                ` · ${verifyGate.errors.slice(0, 3).join("；")}`}
+            </p>
+          )}
         </section>
       )}
 
@@ -883,6 +979,9 @@ export default function ChangeDetailPage({ params }: Props) {
 
       <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
         <aside className="space-y-3">
+          {/* ── 审批状态（task-13：旧 approval_status 链路退役，只读保留展示）── */}
+          {/* FR-06 收敛：旧 approval_status 不再驱动 change 推进，批准/驳回动作已移除。
+              仅保留历史状态徽标 + 驳回原因 + 审批人信息只读展示，不破坏既有数据。 */}
           {change.approval_status && change.approval_status !== "not_required" && (
             <section className="rounded-md border bg-card">
               <div className="border-b px-3 py-2">
@@ -910,42 +1009,6 @@ export default function ChangeDetailPage({ params }: Props) {
                     审批人: {change.approved_by}
                     {change.approved_at && ` · ${new Date(change.approved_at).toLocaleString()}`}
                   </p>
-                )}
-                {change.approval_status === "pending" && (
-                  <div className="space-y-2 pt-1">
-                    <div className="flex gap-2">
-                      <Button size="sm" onClick={() => void handleApprove()} disabled={transitioning}>
-                        批准
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => setShowRejectInput(!showRejectInput)}
-                        disabled={transitioning}
-                      >
-                        驳回
-                      </Button>
-                    </div>
-                    {showRejectInput && (
-                      <div className="space-y-2">
-                        <input
-                          type="text"
-                          className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-xs focus:border-ring focus:outline-none"
-                          placeholder="输入驳回原因"
-                          value={rejectionInput}
-                          onChange={(e) => setRejectionInput(e.target.value)}
-                        />
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => void handleReject()}
-                          disabled={transitioning || !rejectionInput.trim()}
-                        >
-                          确认驳回
-                        </Button>
-                      </div>
-                    )}
-                  </div>
                 )}
               </div>
             </section>
@@ -1049,36 +1112,6 @@ export default function ChangeDetailPage({ params }: Props) {
               </section>
             );
           })()}
-
-          {["proposed", "reviewed"].includes(change.status) && (
-            <section className="rounded-md border bg-card p-3">
-              <h3 className="mb-2">提交审查</h3>
-              <textarea
-                className="mb-2 w-full rounded border border-input bg-background px-2.5 py-1.5 text-xs focus:border-ring focus:outline-none"
-                rows={3}
-                placeholder="审查意见（可选）"
-                value={reviewComment}
-                onChange={(e) => setReviewComment(e.target.value)}
-              />
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  onClick={() => void handleSubmitReview("approve")}
-                  disabled={transitioning}
-                >
-                  通过
-                </Button>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={() => void handleSubmitReview("reject")}
-                  disabled={transitioning}
-                >
-                  驳回
-                </Button>
-              </div>
-            </section>
-          )}
         </aside>
       </div>
     </PageContainer>

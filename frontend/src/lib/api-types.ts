@@ -1370,6 +1370,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/changes/{change_id}/advance-stage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Advance Stage
+         * @description 单步推进 change 阶层（task-11，design §6.3 / D-005）。
+         *
+         *     前端 ``handleDispatch`` 走 HTTP（非直连 MCP），与 task-07
+         *     ``advance_change_stage`` MCP tool 共用同一 service 方法
+         *     ``ChangeService.transition_with_dispatch``（team 分流：single → AgentService，
+         *     team → _dispatch_execute_team）。body/响应与 ``/transition`` 完全对齐——
+         *     ``advance-stage`` 为前端语义命名别名（D-005 选 HTTP 入口）。
+         */
+        post: operations["advance_stage_api_workspaces__workspace_id__changes__change_id__advance_stage_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/changes/{change_id}/run-verify-gate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Verify Gate
+         * @description gate 软调用（task-11，design §6.2/§6.3 / D-003/D-008）。
+         *
+         *     与 task-09 ``run_verify_gate`` MCP tool 对齐，**不硬阻塞、不改 change 状态**
+         *     （结果交调用方决策，核验纪律靠调用方）：
+         *
+         *     1. 优先读最近 completed AgentRun.gate_result（``_read_latest_gate_result``）
+         *        → ``source="gate_result"``。
+         *     2. gate_result 缺 → 经 ``_run_gate_via_delegate`` 软调 ``sillyspec gate verify``
+         *        （复用 task-06 RPC 骨架，不自动阻塞推进）→ ``source="gate_cmd"``。
+         *     3. 两者均不可用（workspace 无 code_root / RPC 异常 / daemon 离线）
+         *        → ``source="unavailable"``, ``exit_code=None``。
+         */
+        post: operations["run_verify_gate_api_workspaces__workspace_id__changes__change_id__run_verify_gate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/changes/{change_id}/feedback": {
         parameters: {
             query?: never;
@@ -9479,6 +9535,12 @@ export interface components {
             read_only: boolean;
             /** Agent Profile Id */
             agent_profile_id?: string | null;
+            /** Worktree Path */
+            worktree_path?: string | null;
+            /** Branch */
+            branch?: string | null;
+            /** Worker Prompt */
+            worker_prompt?: string | null;
         };
         /**
          * DocumentsSyncRequest
@@ -10734,6 +10796,8 @@ export interface components {
             } | null;
             /** Mode */
             mode?: ("single" | "team") | null;
+            /** Orchestration Mode */
+            orchestration_mode?: ("team" | "external") | null;
             /** Session Id */
             session_id?: string | null;
             /** Worker Preset */
@@ -15896,6 +15960,36 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /**
+         * VerifyGateResponse
+         * @description POST /changes/{id}/run-verify-gate 的返回类型（task-11，design §6.3）。
+         *
+         *     gate 软调用结果，与 task-09 ``run_verify_gate`` MCP tool 对齐（design §6.2）。
+         *     不硬阻塞、不改 change 状态（结果交调用方决策）：
+         *
+         *     - ``source="gate_result"``：读最近 completed AgentRun.gate_result
+         *       （dispatch.py:_read_latest_gate_result）。
+         *     - ``source="gate_cmd"``：gate_result 缺时经 dispatch.py:_run_gate_via_delegate
+         *       软调 ``sillyspec gate verify``（复用 task-06 RPC 骨架，不自动阻塞推进）。
+         *     - ``source="unavailable"``：两者均不可用，``exit_code=None`` 交调用方决策。
+         */
+        VerifyGateResponse: {
+            /**
+             * Exit Code
+             * @description gate exit code（0=通过 / 1=打回 / 2=异常；unavailable 时为 None）
+             */
+            exit_code?: number | null;
+            /**
+             * Errors
+             * @description gate errors 列表（已 str 强转）
+             */
+            errors?: string[];
+            /**
+             * Source
+             * @description 结果来源：gate_result / gate_cmd / unavailable
+             */
+            source: string;
+        };
         /** VersionResponse */
         VersionResponse: {
             /** Version */
@@ -19195,6 +19289,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TransitionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    advance_stage_api_workspaces__workspace_id__changes__change_id__advance_stage_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransitionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransitionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_verify_gate_api_workspaces__workspace_id__changes__change_id__run_verify_gate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VerifyGateResponse"];
                 };
             };
             /** @description Validation Error */

@@ -48,6 +48,19 @@ created_at: 2026-06-19T19:40:00+08:00
 - 审批/dialog 仍以 `PERMISSION_REQUEST` / `PERMISSION_RESPONSE` 作 provider-neutral 通道；Codex 的 `item/tool/requestUserInput` 与 `mcpServer/elicitation/request` 复用同一通道，`dialog_kind` 分别标记 `codex_request_user_input` 与 `mcp_elicitation`（D-006@v1, D-008@v1）。
 - `ask_user_only=true` 时普通 command/file/permission 审批 allow-through，只阻塞用户输入/可归一化 MCP elicitation；`ask_user_only=false` 时普通审批走前端审批卡。MCP elicitation 复杂 schema 暂不支持（daemon 侧 fail-closed 并上报 error log）。
 
+### 形态A stage 完成留痕（2026-08-08-change-center-on-demand，D-001~008 / R-01~07）
+
+砍掉 backend `auto_dispatch_next_step` 自动连轴后，daemon 子域 6 个原调用点全部改「只落结果/留痕 + 发 SSE，stage 完成停待触发态」，不再自动推进下一阶段：
+
+- **gate task**（`run_sync/service.py::_run_gate_decision_task`，原 :1387 内联块）：删内联 `sync_stage_status` + `auto_dispatch_next_step` 块；只存 `AgentRun.gate_result` + `gate_status=decided` + 发 gate/status SSE。gate 决策数据交 `advance_change_stage` tool / review 显式读取（D-003，R-06）。
+- **complete_lease facade**（`lease/service.py:543` → `_trigger_stage_completion_callback`）：callback 行为变轻——不再 auto-dispatch 下一阶段，也不再自动同步 sillyspec.db（stage 展示状态改由 `_sync_stage_status_from_run` 推导回写）。失败不阻塞 lease 完成（容错与 reconcile 一致）。
+- **single callback**（`_trigger_stage_completion_callback` single 分支，原 :1617）：只 `sync_stage_status`（更新 `Change.stages` JSON 视图）+ 发 SSE；不 dispatch。`sync_stage_status` 内部经 HostFsDelegate RPC 读 sillyspec.db，但仅作视图同步、不驱动推进（D-002）。
+- **team advance**（`_advance_team_stage`，原 :1752）：保留 `merge_gate_results`（合并 worker gate）+ `ChangeService.complete_stage`（推进 current_stage + 落 pending_review），删 auto_dispatch。下一 stage team mission 交 `advance_change_stage` MCP/HTTP 显式触发 `_dispatch_execute_team`（D-006，R-04）。
+- **reconcile_stale_runs**（`change/dispatch.py:589`）：剥离 `:655` auto_dispatch 调用，保留 stale run 清理（释放 `has_active_run`）（D-007，R-07）。
+- **被调 `auto_dispatch_next_step`**（`change/dispatch.py:240`）：整函数删除。
+- `LeaseService._sync_stage_status_from_run`（lease/service.py:683，新增）：从 `AgentRun` 直接推导回写 `changes.stages.last_dispatch.status`，**不读 sillyspec.db、不调** `SillySpecStageDispatchService.sync_stage_status`（D-003 守护测试断言 ast 无 sqlite3/sync_stage_status 调用）。
+- `schedule_loop`（orchestrator）+ `converge_mission_for_completed_run`（lease:619）完全保留（mission finalize，与 auto_dispatch 无关）。
+
 ## 注意事项
 
 - `display_alias`：runtime 新增 nullable `display_alias VARCHAR(200)`，搜索（ilike）与卡片标题优先用它，空值回退 name/provider（2026-06-25-admin-global-daemon-workspace-management，D-002）。
@@ -63,3 +76,4 @@ created_at: 2026-06-19T19:40:00+08:00
 - 2026-06-23-codex-interactive-session | `SessionService.reopen_session` provider gate 放开 Codex（`{claude,codex}`，D-003@v1/D-007@v1），`DaemonSessionResumeUnsupported` 文案更新；`AgentSession.agent_session_id` 对 Codex 明确为 thread id；flat message 契约与 `dialog_kind`（`codex_request_user_input` / `mcp_elicitation`）通道对 Codex 生效（D-004@v1/D-006@v1/D-008@v1）；Claude 既有 reopen/permission 测试不变。
 - ql-20260625-001-b9e4 | `RuntimeService.delete_runtime`（`runtime/service.py`）删前检查未软删 workspace 绑定：`workspaces.daemon_runtime_id` FK 是 RESTRICT（`workspace/model.py:72` + migration `202607030900` 设计意图，R-06 cascade out of scope），被绑定时抛新增 `DaemonRuntimeInUse`（`HTTP_409_DAEMON_RUNTIME_IN_USE` + 中文提示 + `details.workspaces` 列表）而非让 PG IntegrityError 冒泡成 500；facade re-export 同名异常保持 import 路径；物理删除语义不变。
 - ql-20260625-002-7c3a | `delete_runtime` 补软删 workspace 引用处理：ql-001 只查未软删绑定，但 workspace 软删不清 `daemon_runtime_id`，PG FK RESTRICT 不看 `deleted_at` 仍拦截 DELETE → 500（SQLite 测试 FK 不严漏网，PG 生产暴露，dialect 差异）。修复：未软删绑定保持 `DaemonRuntimeInUse`(409)；软删引用（`deleted_at IS NOT NULL`）应用层 `UPDATE workspaces SET daemon_runtime_id=NULL` 解绑绕过 FK → 删 runtime。测试补 `ws.daemon_runtime_id is None` 断言。
+- 2026-08-08-change-center-on-demand（D-001~008 / R-01~07）| 砍 backend `auto_dispatch_next_step` 自动连轴，daemon 子域 6 原调用点（gate task / complete_lease facade / single callback / `_advance_team_stage` / reconcile / 被调函数本体）全改「只落结果 + 发 SSE，stage 完成停待触发」；`_advance_team_stage` 保留 merge_gate_results + complete_stage、删 dispatch（下一 stage team mission 交 advance_change_stage tool 显式触发，D-006）；`LeaseService` 新增 `_sync_stage_status_from_run` 独立路径不读 sillyspec.db（D-003 守护测试）；`reconcile_stale_runs` 剥离推进只清 stale（D-007）；`schedule_loop` + `converge_mission_for_completed_run` 保留不动。详见上方「形态A stage 完成留痕」节。

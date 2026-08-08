@@ -1,27 +1,26 @@
-"""task-07 测试：_run_gate_decision_task（gate 决策后台任务核心）。
+"""task-01/task-07 测试：_run_gate_decision_task（gate 决策后台任务核心，形态A）。
 
-P3 driver-gate-pilot design §5.2（_run_gate_decision_task 伪码）/ §7（接口）/
-§7.5（生命周期契约表）/ §10 R5-R7（H1/H2/H4/R3 四条硬约束）。
+2026-08-08-change-center-on-demand task-01（design §4.1 调用点① / §5.2 / §7 / §7.5 /
+§10 R5-R7）：砍 auto_dispatch 自动连轴后，``_run_gate_decision_task`` 只做
+「存 gate_result + gate_status=decided + 发 gate_status_changed SSE」，**不再内联
+sync_stage_status / auto_dispatch_next_step**（H2 修订：原内联块已删），current_stage
+不变，推进交 ``advance_change_stage`` tool 读 gate_result 显式决策。
 
-覆盖 6 个场景（对齐 TaskCard acceptance 5 条 + design §7.5）：
+覆盖场景（对齐 design §7.5 生命周期契约表 + task-01 验收）：
 
-1. cas 命中（pending→running→decided + gate_result 落库 + 内联 sync/auto_dispatch
-   被调用）。
-2. cas miss（gate_status 已被抢 / 非 pending → rowcount==0 直接 return，不跑 gate，
-   不调 sync/auto_dispatch）—— R3 防双发。
-3. 成功路径：gate_status='decided' + gate_result JSON 落库 + 内联 sync_stage_status
-   与 auto_dispatch_next_step 被调（用 gate_session），**不调**
-   _trigger_stage_completion_callback（H2 grep 证据）。
+1. cas 命中（pending→running→decided + gate_result 落库 + gate_status_changed SSE）。
+2. cas miss（gate_status 已被抢 / 非 pending → rowcount==0 直接 return，不跑 gate）—— R3 防双发。
+3. 不自动连轴：成功路径**不调** sync_stage_status / _dispatch_execute_team / dispatch /
+   _trigger_stage_completion_callback（H2 修订 grep 证据，current_stage 不变）。
 4. 异常路径：gate_status='failed' + gate_result.exit_code=2 + errors 含异常信息；
-   rollback 已执行；不调 sync/auto_dispatch（fail-loud，design §7 异常分支）。
+   rollback 已执行（fail-loud，design §7 异常分支）。
 5. H1：全程用 get_session_factory()() 独立 session，不触碰 self._session。
-6. H4：方法可被 _fire_background_task 调度（task-05 close 已接通 enqueue 调用点）。
+6. gate 完成（decided/failed）发 gate_status_changed SSE（task-11 / design §5.7）。
 
-Mock 策略：_run_gate_via_delegate / SillySpecStageDispatchService.sync_stage_status /
-auto_dispatch_next_step 全 patch 成 AsyncMock / MagicMock（不真起 daemon RPC / 不真
-读 sillyspec.db）。gate_session 由 conftest._redirect_session_factory 落到与
-db_session 同一 in-memory 引擎（autouse），所以 cas UPDATE rowcount 在 SQLite 真实
-生效（R9：生产 PG 原子可靠；SQLite 测试用真 UPDATE 验 rowcount）。
+Mock 策略：_run_gate_via_delegate 全 patch 成 AsyncMock（不真起 daemon RPC / 不真读
+sillyspec.db）。gate_session 由 conftest._redirect_session_factory 落到与 db_session
+同一 in-memory 引擎（autouse），所以 cas UPDATE rowcount 在 SQLite 真实生效（R9：
+生产 PG 原子可靠；SQLite 测试用真 UPDATE 验 rowcount）。
 """
 
 from __future__ import annotations
@@ -34,7 +33,6 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.model import AgentRun, AgentSession
-from app.modules.change.dispatch import StageSyncResult
 from app.modules.daemon.model import DaemonRuntime
 from app.modules.daemon.run_sync.service import RunSyncService
 
@@ -178,7 +176,7 @@ def _gate_exit_zero_result() -> dict:
 
 
 class TestRunGateDecisionTaskCasAndSuccess:
-    """R3 cas 命中 + 成功 decided + gate_result 落库 + 内联 sync/auto_dispatch。"""
+    """R3 cas 命中 + 成功 decided + gate_result 落库（形态A：不推进 stage）。"""
 
     @pytest.mark.asyncio
     async def test_cas_pending_to_running_then_decided_with_gate_result(
@@ -189,29 +187,12 @@ class TestRunGateDecisionTaskCasAndSuccess:
 
         svc = RunSyncService(db_session)
         gate_result = _gate_exit_zero_result()
-        sync_result = StageSyncResult(
-            synced=True,
-            change_id=change_id,
-            run_id=run_id,
-            current_stage="verify",
-            stage_completed=True,
-        )
         with (
             patch(
                 "app.modules.daemon.run_sync.service._run_gate_via_delegate",
                 new_callable=AsyncMock,
                 return_value=gate_result,
             ) as gate_mock,
-            patch(
-                "app.modules.change.dispatch.SillySpecStageDispatchService.sync_stage_status",
-                new_callable=AsyncMock,
-                return_value=sync_result,
-            ) as sync_mock,
-            patch(
-                "app.modules.change.dispatch.auto_dispatch_next_step",
-                new_callable=AsyncMock,
-                return_value={"dispatched": False, "reason": "stage_completed"},
-            ) as dispatch_mock,
         ):
             await svc._run_gate_decision_task(
                 agent_run_id=run_id,
@@ -228,9 +209,6 @@ class TestRunGateDecisionTaskCasAndSuccess:
         assert run_after.gate_result is not None
         assert run_after.gate_result["exit_code"] == 0
         assert run_after.gate_result["raw_envelope"]["ok"] is True
-        # 内联 sync + auto_dispatch 被调
-        sync_mock.assert_awaited_once()
-        dispatch_mock.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_cas_miss_when_already_running_returns_without_running_gate(
@@ -241,20 +219,10 @@ class TestRunGateDecisionTaskCasAndSuccess:
 
         svc = RunSyncService(db_session)
         gate_mock = AsyncMock(return_value=_gate_exit_zero_result())
-        sync_mock = AsyncMock()
-        dispatch_mock = AsyncMock()
         with (
             patch(
                 "app.modules.daemon.run_sync.service._run_gate_via_delegate",
                 gate_mock,
-            ),
-            patch(
-                "app.modules.change.dispatch.SillySpecStageDispatchService.sync_stage_status",
-                sync_mock,
-            ),
-            patch(
-                "app.modules.change.dispatch.auto_dispatch_next_step",
-                dispatch_mock,
             ),
         ):
             await svc._run_gate_decision_task(
@@ -264,8 +232,6 @@ class TestRunGateDecisionTaskCasAndSuccess:
             )
 
         gate_mock.assert_not_awaited()
-        sync_mock.assert_not_awaited()
-        dispatch_mock.assert_not_awaited()
         # 状态未被改动（仍 running，未翻 decided/failed）
         run_after = await db_session.get(AgentRun, run_id)
         assert run_after is not None
@@ -291,8 +257,13 @@ class TestRunGateDecisionTaskCasAndSuccess:
         gate_mock.assert_not_awaited()
 
 
-class TestRunGateDecisionTaskH2NoCallback:
-    """H2：内联 sync+auto_dispatch 用 gate_session，**不调** _trigger_stage_completion_callback。"""
+class TestRunGateDecisionTaskNoAutoAdvance:
+    """H2 修订（task-01 形态A）：gate 任务不内联 sync / 不自动连轴。
+
+    成功路径只存 gate_result + decided + 发 SSE；**不调** sync_stage_status /
+    _dispatch_execute_team / dispatch / _trigger_stage_completion_callback。
+    current_stage 不变，推进交 advance_change_stage tool 显式决策。
+    """
 
     @pytest.mark.asyncio
     async def test_does_not_call_trigger_stage_completion_callback(
@@ -303,24 +274,10 @@ class TestRunGateDecisionTaskH2NoCallback:
 
         svc = RunSyncService(db_session)
         callback_spy = AsyncMock()
-        sync_result = StageSyncResult(
-            synced=True,
-            change_id=change_id,
-            run_id=run_id,
-            stage_completed=True,
-        )
         with (
             patch(
                 "app.modules.daemon.run_sync.service._run_gate_via_delegate",
                 AsyncMock(return_value=_gate_exit_zero_result()),
-            ),
-            patch(
-                "app.modules.change.dispatch.SillySpecStageDispatchService.sync_stage_status",
-                AsyncMock(return_value=sync_result),
-            ),
-            patch(
-                "app.modules.change.dispatch.auto_dispatch_next_step",
-                AsyncMock(),
             ),
             patch.object(
                 RunSyncService,
@@ -337,20 +294,15 @@ class TestRunGateDecisionTaskH2NoCallback:
         callback_spy.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_inline_sync_uses_gate_session_not_self_session(
-        self, db_session, mocked_redis
-    ) -> None:
-        """sync_stage_status 收到的 session 是 gate_session（独立于 self._session）。"""
+    async def test_does_not_sync_or_dispatch_next_stage(self, db_session, mocked_redis) -> None:
+        """形态A：不内联 sync_stage_status、不自动 dispatch 下一 stage。
+
+        原 H2 内联 sync_stage_status + auto_dispatch_next_step 块已删（task-01）。
+        gate 结果只落库 + 发 SSE，current_stage 不变。
+        """
         run_id, workspace_id, change_id = await _seed_gate_run(db_session)
 
         svc = RunSyncService(db_session)
-        sync_result = StageSyncResult(
-            synced=True,
-            change_id=change_id,
-            run_id=run_id,
-            stage_completed=True,
-        )
-        sync_mock = AsyncMock(return_value=sync_result)
         with (
             patch(
                 "app.modules.daemon.run_sync.service._run_gate_via_delegate",
@@ -358,12 +310,16 @@ class TestRunGateDecisionTaskH2NoCallback:
             ),
             patch(
                 "app.modules.change.dispatch.SillySpecStageDispatchService.sync_stage_status",
-                sync_mock,
-            ),
+                new_callable=AsyncMock,
+            ) as sync_mock,
             patch(
-                "app.modules.change.dispatch.auto_dispatch_next_step",
-                AsyncMock(),
-            ),
+                "app.modules.change.dispatch._dispatch_execute_team",
+                new_callable=AsyncMock,
+            ) as team_dispatch_mock,
+            patch(
+                "app.modules.change.dispatch.dispatch",
+                new_callable=AsyncMock,
+            ) as dispatch_mock,
         ):
             await svc._run_gate_decision_task(
                 agent_run_id=run_id,
@@ -371,11 +327,17 @@ class TestRunGateDecisionTaskH2NoCallback:
                 change_id=change_id,
             )
 
-        sync_mock.assert_awaited_once()
-        passed_session = sync_mock.call_args.args[0]
-        # gate_session 是新开的 AsyncSession（不同于注入的 self._session=db_session）
-        assert passed_session is not db_session
-        assert isinstance(passed_session, AsyncSession)
+        # 不内联 sync / 不自动连轴
+        sync_mock.assert_not_awaited()
+        team_dispatch_mock.assert_not_awaited()
+        dispatch_mock.assert_not_awaited()
+
+        # current_stage 不变（仍 verify，未自动推进）
+        from app.modules.change.model import Change
+
+        change = await db_session.get(Change, change_id)
+        assert change is not None
+        assert change.current_stage == "verify"
 
 
 class TestRunGateDecisionTaskExceptionFailed:
@@ -395,14 +357,6 @@ class TestRunGateDecisionTaskExceptionFailed:
                 "app.modules.daemon.run_sync.service._run_gate_via_delegate",
                 AsyncMock(side_effect=boom),
             ),
-            patch(
-                "app.modules.change.dispatch.SillySpecStageDispatchService.sync_stage_status",
-                AsyncMock(),
-            ) as sync_mock,
-            patch(
-                "app.modules.change.dispatch.auto_dispatch_next_step",
-                AsyncMock(),
-            ),
         ):
             # 异常被 gate 任务内部 catch（fail-loud），不向调用方抛
             await svc._run_gate_decision_task(
@@ -411,8 +365,6 @@ class TestRunGateDecisionTaskExceptionFailed:
                 change_id=change_id,
             )
 
-        # 失败路径不调 sync/auto_dispatch
-        sync_mock.assert_not_awaited()
         run_after = await db_session.get(AgentRun, run_id)
         assert run_after is not None
         assert run_after.gate_status == "failed"
@@ -421,11 +373,9 @@ class TestRunGateDecisionTaskExceptionFailed:
         assert any("daemon WS 断开" in e for e in run_after.gate_result["errors"])
 
     @pytest.mark.asyncio
-    async def test_sync_raises_exception_sets_failed_exit_two(
-        self, db_session, mocked_redis
-    ) -> None:
-        """sync_stage_status 抛异常 → failed + exit 2（catch 覆盖内联阶段）。"""
-        run_id, workspace_id, change_id = await _seed_gate_run(db_session)
+    async def test_workspace_not_found_sets_failed_exit_two(self, db_session, mocked_redis) -> None:
+        """非 gate 异常（workspace 查不到）→ failed + exit 2（fail-loud 覆盖非 gate 阶段）。"""
+        run_id, _workspace_id, change_id = await _seed_gate_run(db_session)
 
         svc = RunSyncService(db_session)
         with (
@@ -433,24 +383,18 @@ class TestRunGateDecisionTaskExceptionFailed:
                 "app.modules.daemon.run_sync.service._run_gate_via_delegate",
                 AsyncMock(return_value=_gate_exit_zero_result()),
             ),
-            patch(
-                "app.modules.change.dispatch.SillySpecStageDispatchService.sync_stage_status",
-                AsyncMock(side_effect=RuntimeError("sillyspec.db 读失败")),
-            ),
-            patch(
-                "app.modules.change.dispatch.auto_dispatch_next_step",
-                AsyncMock(),
-            ),
         ):
+            # workspace_id 指向不存在的 workspace → gate 任务内部 catch → fail-loud
             await svc._run_gate_decision_task(
                 agent_run_id=run_id,
-                workspace_id=workspace_id,
+                workspace_id=uuid.uuid4(),
                 change_id=change_id,
             )
 
         run_after = await db_session.get(AgentRun, run_id)
         assert run_after is not None
         assert run_after.gate_status == "failed"
+        assert run_after.gate_result is not None
         assert run_after.gate_result["exit_code"] == 2
 
 
@@ -471,25 +415,11 @@ class TestRunGateDecisionTaskH1IndependentSession:
 
         real_factory = db_module.get_session_factory()
         spy = MagicMock(return_value=real_factory)
-        sync_result = StageSyncResult(
-            synced=True,
-            change_id=change_id,
-            run_id=run_id,
-            stage_completed=True,
-        )
         with (
             patch("app.modules.daemon.run_sync.service.get_session_factory", spy),
             patch(
                 "app.modules.daemon.run_sync.service._run_gate_via_delegate",
                 AsyncMock(return_value=_gate_exit_zero_result()),
-            ),
-            patch(
-                "app.modules.change.dispatch.SillySpecStageDispatchService.sync_stage_status",
-                AsyncMock(return_value=sync_result),
-            ),
-            patch(
-                "app.modules.change.dispatch.auto_dispatch_next_step",
-                AsyncMock(),
             ),
         ):
             await svc._run_gate_decision_task(
@@ -502,15 +432,13 @@ class TestRunGateDecisionTaskH1IndependentSession:
 
 
 class TestRunGateDecisionTaskGateExitOne:
-    """gate exit 1（打回）：仍 decided + gate_result.exit_code=1，内联 auto_dispatch 据此决策。"""
+    """gate exit 1（打回）：仍 decided + gate_result.exit_code=1（交显式决策）。"""
 
     @pytest.mark.asyncio
-    async def test_gate_exit_one_decided_with_errors_passed_to_auto_dispatch(
-        self, db_session, mocked_redis
-    ) -> None:
+    async def test_gate_exit_one_decided_with_errors_stored(self, db_session, mocked_redis) -> None:
         """gate ok=False（exit 1）→ decided + gate_result.exit_code=1 + errors 透传。
 
-        gate_result 已落库，auto_dispatch_next_step 读 AgentRun.gate_result 决策
+        gate_result 已落库，advance_change_stage tool / review 据此显式决策
         （exit 1 打回，design §5.4）。此处仅验 gate_result 落库正确。
         """
         run_id, workspace_id, change_id = await _seed_gate_run(db_session)
@@ -521,25 +449,10 @@ class TestRunGateDecisionTaskGateExitOne:
             "errors": ["verify-result.md 不存在"],
             "raw_envelope": {"ok": False, "errors": ["verify-result.md 不存在"]},
         }
-        sync_result = StageSyncResult(
-            synced=True,
-            change_id=change_id,
-            run_id=run_id,
-            stage_completed=True,
-        )
-        dispatch_mock = AsyncMock()
         with (
             patch(
                 "app.modules.daemon.run_sync.service._run_gate_via_delegate",
                 AsyncMock(return_value=gate_result),
-            ),
-            patch(
-                "app.modules.change.dispatch.SillySpecStageDispatchService.sync_stage_status",
-                AsyncMock(return_value=sync_result),
-            ),
-            patch(
-                "app.modules.change.dispatch.auto_dispatch_next_step",
-                dispatch_mock,
             ),
         ):
             await svc._run_gate_decision_task(
@@ -553,11 +466,10 @@ class TestRunGateDecisionTaskGateExitOne:
         assert run_after.gate_status == "decided"
         assert run_after.gate_result["exit_code"] == 1
         assert "verify-result.md 不存在" in run_after.gate_result["errors"]
-        dispatch_mock.assert_awaited_once()
 
 
 class TestRunGateDecisionTaskGateStatusChangedSse:
-    """task-11：gate 完成（decided/failed）发 Redis gate_status_changed SSE。
+    """task-01/task-11：gate 完成（decided/failed）发 Redis gate_status_changed SSE。
 
     design §5.7：gate 后台任务 27s+，close 的 SSE 只发 turn_completed，gate 完成无 SSE
     → 前端 "客观核验中" 徽标卡住。task-11 在 gate_result 落库 + gate_status 置
@@ -603,24 +515,10 @@ class TestRunGateDecisionTaskGateStatusChangedSse:
         run_id, workspace_id, change_id = await _seed_gate_run(db_session)
 
         svc = RunSyncService(db_session)
-        sync_result = StageSyncResult(
-            synced=True,
-            change_id=change_id,
-            run_id=run_id,
-            stage_completed=True,
-        )
         with (
             patch(
                 "app.modules.daemon.run_sync.service._run_gate_via_delegate",
                 AsyncMock(return_value=_gate_exit_zero_result()),
-            ),
-            patch(
-                "app.modules.change.dispatch.SillySpecStageDispatchService.sync_stage_status",
-                AsyncMock(return_value=sync_result),
-            ),
-            patch(
-                "app.modules.change.dispatch.auto_dispatch_next_step",
-                AsyncMock(),
             ),
         ):
             await svc._run_gate_decision_task(
@@ -644,14 +542,6 @@ class TestRunGateDecisionTaskGateStatusChangedSse:
             patch(
                 "app.modules.daemon.run_sync.service._run_gate_via_delegate",
                 AsyncMock(side_effect=RuntimeError("daemon WS 断开")),
-            ),
-            patch(
-                "app.modules.change.dispatch.SillySpecStageDispatchService.sync_stage_status",
-                AsyncMock(),
-            ),
-            patch(
-                "app.modules.change.dispatch.auto_dispatch_next_step",
-                AsyncMock(),
             ),
         ):
             await svc._run_gate_decision_task(
@@ -678,24 +568,10 @@ class TestRunGateDecisionTaskGateStatusChangedSse:
             "errors": [long_error],
             "raw_envelope": {"ok": False, "errors": [long_error]},
         }
-        sync_result = StageSyncResult(
-            synced=True,
-            change_id=change_id,
-            run_id=run_id,
-            stage_completed=True,
-        )
         with (
             patch(
                 "app.modules.daemon.run_sync.service._run_gate_via_delegate",
                 AsyncMock(return_value=gate_result),
-            ),
-            patch(
-                "app.modules.change.dispatch.SillySpecStageDispatchService.sync_stage_status",
-                AsyncMock(return_value=sync_result),
-            ),
-            patch(
-                "app.modules.change.dispatch.auto_dispatch_next_step",
-                AsyncMock(),
             ),
         ):
             await svc._run_gate_decision_task(
@@ -731,24 +607,10 @@ class TestRunGateDecisionTaskGateStatusChangedSse:
         run_id, workspace_id, change_id = await _seed_gate_run(db_session)
 
         svc = RunSyncService(db_session)
-        sync_result = StageSyncResult(
-            synced=True,
-            change_id=change_id,
-            run_id=run_id,
-            stage_completed=True,
-        )
         with (
             patch(
                 "app.modules.daemon.run_sync.service._run_gate_via_delegate",
                 AsyncMock(return_value=_gate_exit_zero_result()),
-            ),
-            patch(
-                "app.modules.change.dispatch.SillySpecStageDispatchService.sync_stage_status",
-                AsyncMock(return_value=sync_result),
-            ),
-            patch(
-                "app.modules.change.dispatch.auto_dispatch_next_step",
-                AsyncMock(),
             ),
         ):
             await svc._run_gate_decision_task(
@@ -781,24 +643,10 @@ class TestRunGateDecisionTaskGateStatusChangedSse:
         mocked_redis.publish = AsyncMock(side_effect=RuntimeError("redis down"))
 
         svc = RunSyncService(db_session)
-        sync_result = StageSyncResult(
-            synced=True,
-            change_id=change_id,
-            run_id=run_id,
-            stage_completed=True,
-        )
         with (
             patch(
                 "app.modules.daemon.run_sync.service._run_gate_via_delegate",
                 AsyncMock(return_value=_gate_exit_zero_result()),
-            ),
-            patch(
-                "app.modules.change.dispatch.SillySpecStageDispatchService.sync_stage_status",
-                AsyncMock(return_value=sync_result),
-            ),
-            patch(
-                "app.modules.change.dispatch.auto_dispatch_next_step",
-                AsyncMock(),
             ),
         ):
             # 不抛异常（try/except 兜底，只 warning）
@@ -821,24 +669,10 @@ class TestRunGateDecisionTaskGateStatusChangedSse:
         run_id, workspace_id, change_id = await _seed_gate_run(db_session)
 
         svc = RunSyncService(db_session)
-        sync_result = StageSyncResult(
-            synced=True,
-            change_id=change_id,
-            run_id=run_id,
-            stage_completed=True,
-        )
         with (
             patch(
                 "app.modules.daemon.run_sync.service._run_gate_via_delegate",
                 AsyncMock(return_value=_gate_exit_zero_result()),
-            ),
-            patch(
-                "app.modules.change.dispatch.SillySpecStageDispatchService.sync_stage_status",
-                AsyncMock(return_value=sync_result),
-            ),
-            patch(
-                "app.modules.change.dispatch.auto_dispatch_next_step",
-                AsyncMock(),
             ),
         ):
             await svc._run_gate_decision_task(

@@ -25,6 +25,13 @@ from app.modules.daemon.service import (
     DaemonRuntimeNotFound,
     DaemonService,
 )
+
+# build_claim_payload → _inject_provider_config 查 llm_providers 表；import 模型
+# 注册到 BaseModel.metadata 让 db_engine 建表（镜像 test_lease_context /
+# test_lease_budget_dispatch 惯例）。llm_providers 表由 migration 创建，
+# conftest create_all 不建，缺此 import 则 interactive claim payload 查询
+# OperationalError: no such table。
+from app.modules.llm_provider.model import LlmProvider  # noqa: F401
 from app.modules.workspace.model import Workspace
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

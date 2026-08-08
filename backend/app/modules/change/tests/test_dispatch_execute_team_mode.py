@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.model import AgentMission, AgentRun
 from app.modules.change.dispatch import (
+    SillySpecStageDispatchService,
     _dispatch_execute_team,
     dispatch,
     merge_gate_results,
@@ -362,7 +363,173 @@ class TestDispatchExecuteTeamUnit:
         assert "execute_team_orchestrator_failed" in result["reason"]
 
 
-# ── Case 4: merge_gate_results 策略 A 纯函数 ──────────────────────────────
+# ── Case 4: advance → dispatch_next_step team 分流建下一 stage mission ───────
+# （2026-08-08-change-center-on-demand task-16：team 推进重写闭环的另一半——
+#   advance_change_stage tool 显式触发后，dispatch_next_step team 分流
+#   → _dispatch_execute_team 建下一 stage（execute→verify / verify→archive）
+#   team mission。区别于 task-03 的 daemon 侧收敛桥：那里**不**自动建下一
+#   stage mission，这里验证显式 advance 才建。）
+
+
+class TestDispatchNextStepTeamSplit:
+    """``SillySpecStageDispatchService.dispatch_next_step`` team_mode=True 分流。
+
+    ``advance_change_stage`` MCP tool → ``transition_with_dispatch`` → dispatch
+    层。``dispatch_next_step`` 是 dispatch 层另一入口（/execute 端点路径），Step 2.5
+    对 execute/verify + team_mode=True 旁路 single，走 ``_dispatch_execute_team``。
+    锁「显式 advance 触发才建下一 stage team mission」的契约（FR-05/R-04）。
+    """
+
+    async def test_dispatch_next_step_verify_team_builds_mission(
+        self, db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """advance 到 verify + team_mode → dispatch_next_step 分流 _dispatch_execute_team 建 verify mission。"""
+        ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
+        # change 当前在 execute（team execute 已收敛推进完），显式 advance 到 verify。
+        change = await _create_test_change(
+            db_session,
+            workspace_id=ws.id,
+            current_stage="execute",
+            stages={"team_mode": True},
+        )
+
+        fake_mission = AgentMission(id=uuid.uuid4(), workspace_id=ws.id, objective="v")
+        fake_main_run = AgentRun(
+            id=uuid.uuid4(),
+            change_id=change.id,
+            agent_type="claude_code",
+            status="pending",
+            role="orchestrator",
+        )
+
+        svc = SillySpecStageDispatchService(db_session)
+        with (
+            patch(
+                "app.modules.change.dispatch._dispatch_execute_team",
+                new_callable=AsyncMock,
+                return_value={
+                    "dispatched": True,
+                    "mode": "team",
+                    "stage": "verify",
+                    "mission_id": str(fake_mission.id),
+                    "agent_run_id": str(fake_main_run.id),
+                },
+            ) as mock_team,
+            patch(
+                "app.modules.agent.service.AgentService.start_stage_dispatch",
+                new_callable=AsyncMock,
+            ) as mock_single,
+        ):
+            result = await svc.dispatch_next_step(
+                session=db_session,
+                workspace_id=ws.id,
+                change_id=change.id,
+                user_id=uuid.uuid4(),
+                target_stage="verify",
+            )
+
+        # team 分流：_dispatch_execute_team 被调（建 verify team mission），
+        # single AgentService.start_stage_dispatch 不被调（不旁路回 single）。
+        # 位置实参（session, workspace_id, change_id, user_id, target_stage）。
+        mock_team.assert_awaited_once()
+        assert mock_team.await_args.args[2] == change.id  # change_id
+        assert mock_team.await_args.args[4] == "verify"  # target_stage 透传
+        mock_single.assert_not_awaited()
+        assert result["dispatched"] is True
+        assert result["mode"] == "team"
+        assert result["stage"] == "verify"
+
+    async def test_dispatch_next_step_execute_team_builds_mission(
+        self, db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """advance 到 execute + team_mode → dispatch_next_step 分流 _dispatch_execute_team 建 execute mission。"""
+        ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
+        change = await _create_test_change(
+            db_session,
+            workspace_id=ws.id,
+            current_stage="plan",
+            stages={"team_mode": True},
+        )
+
+        svc = SillySpecStageDispatchService(db_session)
+        with (
+            patch(
+                "app.modules.change.dispatch._dispatch_execute_team",
+                new_callable=AsyncMock,
+                return_value={
+                    "dispatched": True,
+                    "mode": "team",
+                    "stage": "execute",
+                    "mission_id": str(uuid.uuid4()),
+                    "agent_run_id": str(uuid.uuid4()),
+                },
+            ) as mock_team,
+            patch(
+                "app.modules.agent.service.AgentService.start_stage_dispatch",
+                new_callable=AsyncMock,
+            ) as mock_single,
+        ):
+            result = await svc.dispatch_next_step(
+                session=db_session,
+                workspace_id=ws.id,
+                change_id=change.id,
+                user_id=uuid.uuid4(),
+                target_stage="execute",
+            )
+
+        mock_team.assert_awaited_once()
+        assert mock_team.await_args.args[4] == "execute"
+        mock_single.assert_not_awaited()
+        assert result["mode"] == "team"
+        assert result["stage"] == "execute"
+
+    async def test_dispatch_next_step_single_no_team_split(
+        self, db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """team_mode 未设 → dispatch_next_step 不分流，走 single（_dispatch_execute_team 零调用）。"""
+        ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
+        change = await _create_test_change(
+            db_session,
+            workspace_id=ws.id,
+            current_stage="plan",
+            stages={},  # 无 team_mode
+        )
+
+        mock_run = AgentRun(
+            id=uuid.uuid4(),
+            change_id=change.id,
+            agent_type="claude_code",
+            status="pending",
+        )
+
+        svc = SillySpecStageDispatchService(db_session)
+        with (
+            patch(
+                "app.modules.change.dispatch._dispatch_execute_team",
+                new_callable=AsyncMock,
+            ) as mock_team,
+            patch(
+                "app.modules.agent.service.AgentService.start_stage_dispatch",
+                new_callable=AsyncMock,
+                return_value=mock_run,
+            ) as mock_single,
+        ):
+            result = await svc.dispatch_next_step(
+                session=db_session,
+                workspace_id=ws.id,
+                change_id=change.id,
+                user_id=uuid.uuid4(),
+                target_stage="execute",
+            )
+
+        # single 零回归：走 start_stage_dispatch，team 分流函数零调用。
+        mock_team.assert_not_awaited()
+        mock_single.assert_awaited_once()
+        assert result["dispatched"] is True
+        assert result.get("mode") != "team"
+
+
+# ── Case 5: merge_gate_results 策略 A 纯函数 ──────────────────────────────
 
 
 class TestMergeGateResults:

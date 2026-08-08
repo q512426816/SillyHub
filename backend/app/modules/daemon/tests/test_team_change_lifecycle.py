@@ -1,22 +1,22 @@
-"""team→change 生命周期修复测试。
+"""team→change 生命周期测试（形态A 按需触发，2026-08-08-change-center-on-demand）。
 
 覆盖 ``_trigger_stage_completion_callback`` 的 team 分支 +
-``_handle_team_run_completion`` + ``_advance_team_stage``（run_sync/service.py）：
+``_handle_team_run_completion``（run_sync/service.py，task-03 修订）：
 
 1. **缺口 A**：team worker run 完成 → ``schedule_loop`` 被调用（后端收敛兜底接线）。
-2. **缺口 B（execute）**：mission 收敛（schedule_loop 返 "done"）→
-   ``auto_dispatch_next_step`` 被调，sync_result.current_stage="execute"、
-   stage_completed=True（桥接推进到 verify）。
-3. **缺口 B（verify）**：mission 收敛 → worker gate_results 经 ``merge_gate_results``
-   合并落主 run.gate_result（gate_status=decided）→ ``auto_dispatch_next_step`` 被调。
-4. **零回归（single）**：mission_id=None 的 single stage run 完成 → 不进 team 分支，
+2. **未收敛**：schedule_loop 返 None（仍有 worker 在跑）→ 不调 ``complete_stage``
+   桥（不推进 stage）。
+3. **零回归（single）**：mission_id=None 的 single stage run 完成 → 不进 team 分支，
    走原 ``sync_stage_status`` 路径（schedule_loop 不被调）。
-5. **幂等**：change.current_stage != team_stage → 不推进（已推进过）。
-6. **未收敛**：schedule_loop 返 None → 不调 auto_dispatch（仍有 worker 在跑）。
+4. **幂等**：change.current_stage != team_stage → 不推进（已推进过）。
 
-Mock 策略：``OrchestratorService.schedule_loop`` /
-``auto_dispatch_next_step`` / ``SillySpecStageDispatchService.sync_stage_status`` 均按
-需 patch（不起 daemon RPC / 不读 sillyspec.db）。
+收敛成功后的桥接推进（``_advance_team_stage``：merge_gate_results +
+``ChangeService.complete_stage``，不自动连轴）已由 task-16 新建
+``test_advance_team_stage.py`` 全量覆盖（execute→verify / verify+passed→archive /
+verify 非 0 停 verify），本文件不再重复（task-17 精简）。
+
+Mock 策略：``OrchestratorService.schedule_loop`` / ``SillySpecStageDispatchService
+.sync_stage_status`` 按需 patch（不起 daemon RPC / 不读 sillyspec.db）。
 """
 
 from __future__ import annotations
@@ -183,104 +183,24 @@ class TestScheduleLoopWired:
             MockOrch.return_value.schedule_loop.assert_awaited_once_with(mission.id)
 
     async def test_not_converged_skips_advance(self, db_session, _no_redis_publish):
-        """schedule_loop 返 None（仍有 worker 在跑）→ 不调 auto_dispatch。"""
+        """schedule_loop 返 None（仍有 worker 在跑）→ 不调 complete_stage 桥（不推进）。"""
+        from app.modules.change.service import ChangeService
+
         orchestrator_run, _mission, _change = await _seed_team(db_session)
 
         with (
             patch("app.modules.agent.orchestrator.OrchestratorService") as MockOrch,
-            patch(
-                "app.modules.change.dispatch.auto_dispatch_next_step",
+            patch.object(
+                ChangeService,
+                "complete_stage",
                 new_callable=AsyncMock,
-            ) as mock_ad,
+            ) as mock_complete,
         ):
             MockOrch.return_value.schedule_loop = AsyncMock(return_value=None)
             svc = RunSyncService(db_session)
             await svc._trigger_stage_completion_callback(orchestrator_run.id)
 
-            mock_ad.assert_not_called()
-
-
-# ── 缺口 B：mission 收敛 → stage 推进 ───────────────────────────────────────
-
-
-class TestAdvanceTeamStage:
-    async def test_execute_converged_calls_auto_dispatch_to_verify(
-        self, db_session, _no_redis_publish
-    ):
-        """execute mission 收敛 → auto_dispatch_next_step 收到 stage_completed=True。"""
-        orchestrator_run, _mission, _change = await _seed_team(db_session, team_stage="execute")
-
-        with (
-            patch("app.modules.agent.orchestrator.OrchestratorService") as MockOrch,
-            patch(
-                "app.modules.change.dispatch.auto_dispatch_next_step",
-                new_callable=AsyncMock,
-            ) as mock_ad,
-        ):
-            MockOrch.return_value.schedule_loop = AsyncMock(return_value="done")
-            svc = RunSyncService(db_session)
-            await svc._trigger_stage_completion_callback(orchestrator_run.id)
-
-            mock_ad.assert_awaited_once()
-            _call_kwargs = mock_ad.call_args.kwargs
-            sync_result = _call_kwargs["sync_result"]
-            assert sync_result.synced is True
-            assert sync_result.current_stage == "execute"
-            assert sync_result.stage_completed is True
-            assert sync_result.has_pending_step is False
-
-    async def test_verify_converged_merges_worker_gates(self, db_session, _no_redis_publish):
-        """verify mission 收敛 → 多 worker gate_results 合并落主 run.gate_result。"""
-        orchestrator_run, _mission, _change = await _seed_team(
-            db_session,
-            team_stage="verify",
-            worker_count=2,
-            worker_gate_results=[
-                {"exit_code": 0, "errors": []},
-                {"exit_code": 1, "errors": ["bug-x"]},
-            ],
-        )
-
-        with (
-            patch("app.modules.agent.orchestrator.OrchestratorService") as MockOrch,
-            patch(
-                "app.modules.change.dispatch.auto_dispatch_next_step",
-                new_callable=AsyncMock,
-            ) as mock_ad,
-        ):
-            MockOrch.return_value.schedule_loop = AsyncMock(return_value="done")
-            svc = RunSyncService(db_session)
-            await svc._trigger_stage_completion_callback(orchestrator_run.id)
-
-            # 主 run 已落合并 gate_result（exit 1 最严重）+ gate_status=decided。
-            await db_session.refresh(orchestrator_run)
-            assert orchestrator_run.gate_result is not None
-            assert orchestrator_run.gate_result["exit_code"] == 1
-            assert orchestrator_run.gate_status == "decided"
-            mock_ad.assert_awaited_once()
-            assert mock_ad.call_args.kwargs["sync_result"].current_stage == "verify"
-
-    async def test_verify_all_pass_exit_zero(self, db_session, _no_redis_publish):
-        """verify 全 worker exit 0 → 合并 exit 0（推进 archive 由 auto_dispatch 决策）。"""
-        orchestrator_run, _mission, _change = await _seed_team(
-            db_session,
-            team_stage="verify",
-            worker_count=2,
-            worker_gate_results=[
-                {"exit_code": 0, "errors": []},
-                {"exit_code": 0, "errors": []},
-            ],
-        )
-        with (
-            patch("app.modules.agent.orchestrator.OrchestratorService") as MockOrch,
-            patch("app.modules.change.dispatch.auto_dispatch_next_step", new_callable=AsyncMock),
-        ):
-            MockOrch.return_value.schedule_loop = AsyncMock(return_value="done")
-            svc = RunSyncService(db_session)
-            await svc._trigger_stage_completion_callback(orchestrator_run.id)
-
-            await db_session.refresh(orchestrator_run)
-            assert orchestrator_run.gate_result["exit_code"] == 0
+            mock_complete.assert_not_awaited()
 
 
 # ── 零回归：single 模式不走 team 分支 ────────────────────────────────────────

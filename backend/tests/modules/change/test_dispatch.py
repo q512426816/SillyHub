@@ -540,7 +540,6 @@ import sqlite3
 from pathlib import Path as SyncPath
 
 from app.core.spec_paths import SpecPathResolver
-from app.modules.change.dispatch import StageSyncResult
 
 
 class _LocalFakeDelegate:
@@ -1203,86 +1202,6 @@ async def test_dispatch_then_sync_no_db_stops_chain(db_session: AsyncSession) ->
     # Change.current_stage should NOT have been updated (String column persisted)
     await db_session.refresh(change)
     assert change.current_stage == "draft"
-
-
-async def test_dispatch_sync_auto_dispatch_chain(db_session: AsyncSession) -> None:
-    """dispatch → auto_dispatch_next_step：验证自动调度调用 dispatch() 并递增 chain_count。"""
-    from app.modules.change.dispatch import auto_dispatch_next_step
-
-    workspace_id = await _create_workspace(db_session)
-    user_id = uuid.uuid4()
-    change = Change(
-        id=uuid.uuid4(),
-        workspace_id=workspace_id,
-        change_key="t20-chain",
-        title="Task20 chain",
-        status="draft",
-        location="active",
-        path=".sillyspec/changes/t20-chain",
-        current_stage="brainstorm",
-        stages={},
-    )
-    db_session.add(change)
-    await db_session.commit()
-    await db_session.refresh(change)
-
-    # --- Step 1: First dispatch via SillySpecStageDispatchService ---
-    with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
-        service = SillySpecStageDispatchService(db_session)
-        d1 = await service.dispatch_next_step(
-            session=db_session,
-            workspace_id=workspace_id,
-            change_id=change.id,
-            user_id=user_id,
-            target_stage="brainstorm",
-        )
-
-    assert d1["dispatched"] is True
-    run1_id = uuid.UUID(d1["agent_run_id"])
-
-    # --- Step 2: Complete first run ---
-    run1 = await db_session.get(AgentRun, run1_id)
-    run1.status = "completed"
-    db_session.add(run1)
-    await db_session.commit()
-
-    # --- Step 3: Build sync result manually (simulates sync from sillyspec.db) ---
-    sync_result = StageSyncResult(
-        synced=True,
-        change_id=change.id,
-        run_id=run1_id,
-        current_stage="brainstorm",
-        current_step="write-proposal",
-        stage_completed=False,
-        has_pending_step=True,
-        steps_completed=["brainstorm"],
-        steps_pending=["write-proposal"],
-    )
-
-    # --- Step 4: auto_dispatch_next_step → calls standalone dispatch() ---
-    # Mock the standalone dispatch() function that auto_dispatch_next_step calls
-    with patch("app.modules.change.dispatch.dispatch", new_callable=AsyncMock) as mock_dispatch:
-        mock_dispatch.return_value = {
-            "dispatched": True,
-            "agent_run_id": str(uuid.uuid4()),
-            "stage": "brainstorm",
-        }
-
-        auto_result = await auto_dispatch_next_step(
-            session=db_session,
-            workspace_id=workspace_id,
-            change_id=change.id,
-            user_id=user_id,
-            sync_result=sync_result,
-        )
-
-    # Verify auto_dispatch_next_step returned success
-    assert auto_result["dispatched"] is True
-    assert auto_result["reason"] == "auto_dispatch"
-    # Verify the standalone dispatch() was called with correct stage
-    mock_dispatch.assert_called_once()
-    call_kwargs = mock_dispatch.call_args
-    assert call_kwargs.kwargs.get("target_stage") == "brainstorm"
 
 
 # ===================================================================

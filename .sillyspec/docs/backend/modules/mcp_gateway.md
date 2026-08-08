@@ -8,16 +8,21 @@ created_at: 2026-08-08 21:10:00
 ---
 # mcp_gateway
 ## 定位
-对外 MCP（Model Context Protocol）server 暴露层。把平台 agent 能力（dispatch_worker / converge_mission / create_mission 等）以标准 MCP tool 形式开放给第三方 MCP client（含本仓 sillyhub-daemon 内置 mcp-server 链路A 的同构对端）。两条通道：
+对外 MCP（Model Context Protocol）server 暴露层。把平台 agent 能力（dispatch_worker / converge_mission / create_mission 等）与 change 阶层按需触发（advance_change_stage / submit_stage_review / run_verify_gate / get_change_stage）以标准 MCP tool 形式开放给第三方 MCP client（含本仓 sillyhub-daemon 内置 mcp-server 链路A 的同构对端）。两条通道：
 - **管理 API**（`/api/workspaces/{wid}/mcp-tokens`、`/mcp-webhooks`）：workspace owner/admin 签发 McpToken / 注册 McpWebhook，普通 HTTP，`WORKSPACE_WRITE`。
-- **对外 MCP 端点**（`/mcp/`，带尾斜杠）：FastMCP streamable HTTP transport，第三方 client 经 `Authorization: Bearer <McpToken>` 接入，按 token scope 调 8 个 tool。
+- **对外 MCP 端点**（`/mcp/`，带尾斜杠）：FastMCP streamable HTTP transport，第三方 client 经 `Authorization: Bearer <McpToken>` 接入，按 token scope 调 12 个 tool（8 mission 层 + 4 change 阶层）。
 
-8 个 tool handler 全部直接复用 `agent` 模块 service 层（MissionExecutionService / OrchestratorService / FinalizerService / AgentProfileService），业务逻辑零重复。scan 漏登本子模块，2026-08-08 archive（2026-08-08-dispatch-worker-caller-worktree）补登。
+12 个 tool handler 全部直接复用现有 service 层零重复：8 个 mission 层复用 `agent` 模块（MissionExecutionService / OrchestratorService / FinalizerService / AgentProfileService）；4 个 change 阶层复用 `change` 模块（ChangeService.transition_with_dispatch / review 四方法 / dispatch 的 gate 读取 + `StageProjectionService.compute_pending_review`）。scan 漏登本子模块，2026-08-08 archive（2026-08-08-dispatch-worker-caller-worktree）补登；2026-08-08-change-center-on-demand 补 4 个 change 阶层 tool（D-004）。
 ## 契约摘要
 - McpToken 管理：`POST /api/workspaces/{wid}/mcp-tokens`（明文 token 仅 201 返一次，DB 只存 sha256）/ `GET .../mcp-tokens`（不返明文，含 last_used_at/revoked_at）/ `DELETE .../mcp-tokens/{id}`（吊销 204，幂等，不存在/已吊销/越权 → 404 防探测）。三端点 `WORKSPACE_WRITE`。
 - McpWebhook 管理：`POST/GET/DELETE /api/workspaces/{wid}/mcp-webhooks`，事件 ∈ {worker.completed, worker.failed, "*"}，`secret` 加密入库不回显。
 - MCP tool scope：`read` / `dispatch` / `converge` 三选多（Literal 收口），handler 入口 `require_mcp_scope` 校验，不足 → MCP error，不触达 service 层。
-- 8 个 `@mcp.tool()`（tools.py）：`dispatch_worker`(dispatch) / `get_worker_result`(read) / `list_workers`(read) / `converge_mission`(converge) / `report_progress`(dispatch) / `list_agent_profiles`(read) / `create_mission`(dispatch) / `get_run_logs`(read)。
+- 8 个 mission 层 `@mcp.tool()`（tools.py）：`dispatch_worker`(dispatch) / `get_worker_result`(read) / `list_workers`(read) / `converge_mission`(converge) / `report_progress`(dispatch) / `list_agent_profiles`(read) / `create_mission`(dispatch) / `get_run_logs`(read)。
+- 4 个 change 阶层 `@mcp.tool()`（tools.py，task-07/08/09/10，design §6.1 / D-004，形态A 按需触发替代被砍的 auto_dispatch）：
+  - `advance_change_stage`(dispatch)：包装 `ChangeService.transition_with_dispatch` → `dispatch_next_step` single/team 分流。
+  - `submit_stage_review`(dispatch)：包装 review 四方法（proposal_review/plan_review/human_test/archive_confirm），前置 `StageProjectionService.compute_pending_review` 校验。
+  - `run_verify_gate`(read)：gate 软调用三态（source=gate_result 读 `AgentRun.gate_result` / source=gate_cmd 软调 sillyspec gate verify / source=unavailable 返 exit_code=null），不硬阻塞（D-003/D-008）。
+  - `get_change_stage`(read)：只读组合 `ChangeService.get` + `stages` JSON + `StageProjectionService.compute_pending_review`，替代 sillyspec.db 自动同步（D-002）。
 - `mcp`（FastMCP("sillyhub-public")）实例在 server.py 导出，tools.py 经 `from .server import mcp` + `@mcp.tool()` 注册；import tools 的副作用在 server.py 末尾触发。
 - `mount_mcp(app)`：`mcp.streamable_http_app()` 拿子 app → `add_middleware(McpAuthMiddleware)` 挂**子 app**（与 `/api` 鉴权物理隔离，CC-06）→ `app.mount("/mcp", ...)`。
 - caller-worktree / external 透传（2026-08-08-dispatch-worker-caller-worktree，链路B）：`dispatch_worker` 加可选 `worktree_path`/`branch`/`worker_prompt`；`create_mission` 加 `orchestration_mode="team"|"external"`。
@@ -43,4 +48,5 @@ create_mission(orchestration_mode="team"|"external")  # external → team_missio
 - 与 sillyhub-daemon `mcp-server.ts`（链路A daemon stdio）schema 同构、tool 集对齐，改任一端需同步另一端 + sillyspec 探测缓存。
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
+- **2026-08-08-change-center-on-demand**（D-001~008 / R-01~07）：新增 4 个 change 阶层 tool（advance_change_stage/submit_stage_review/run_verify_gate/get_change_stage，task-07/08/09/10），替代被砍的 backend auto_dispatch 自动连轴，作统一按需触发入口（D-004）。本模块 `depends_on` 新增 `change`（4 tool 复用 ChangeService.transition_with_dispatch / review 四方法 / StageProjectionService / dispatch 的 gate 读取），与既有 `agent` 依赖并列。`run_verify_gate` 三态软调用（gate_result/gate_cmd/unavailable）不硬阻塞（D-003/D-008）；`get_change_stage` 替代 sillyspec.db 自动同步（D-002）。前端 `handleDispatch` 走对齐 HTTP 端点（advance-stage/run-verify-gate）而非直连 MCP（D-005）。
 <!-- MANUAL_NOTES_END -->

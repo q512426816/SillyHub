@@ -328,6 +328,33 @@ class TransitionResponse(BaseModel):
     )
 
 
+class VerifyGateResponse(BaseModel):
+    """POST /changes/{id}/run-verify-gate 的返回类型（task-11，design §6.3）。
+
+    gate 软调用结果，与 task-09 ``run_verify_gate`` MCP tool 对齐（design §6.2）。
+    不硬阻塞、不改 change 状态（结果交调用方决策）：
+
+    - ``source="gate_result"``：读最近 completed AgentRun.gate_result
+      （dispatch.py:_read_latest_gate_result）。
+    - ``source="gate_cmd"``：gate_result 缺时经 dispatch.py:_run_gate_via_delegate
+      软调 ``sillyspec gate verify``（复用 task-06 RPC 骨架，不自动阻塞推进）。
+    - ``source="unavailable"``：两者均不可用，``exit_code=None`` 交调用方决策。
+    """
+
+    exit_code: int | None = Field(
+        default=None,
+        description="gate exit code（0=通过 / 1=打回 / 2=异常；unavailable 时为 None）",
+    )
+    errors: list[str] = Field(
+        default_factory=list,
+        description="gate errors 列表（已 str 强转）",
+    )
+    source: str = Field(
+        ...,
+        description="结果来源：gate_result / gate_cmd / unavailable",
+    )
+
+
 # ── Review Gate DTOs ───────────────────────────────────────────────────
 
 
