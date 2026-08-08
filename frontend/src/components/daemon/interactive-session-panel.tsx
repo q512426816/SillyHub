@@ -1782,6 +1782,10 @@ interface UpsertOpts {
   setCurrentRun?: string;
   clearCurrentRun?: string;
   requireRunId?: boolean;
+  /** 绕过终态幂等检查——onLog 追加 output/工具数据时 true（turn_completed
+   * 可能因 daemon submitMessages 退避重试延迟而在 log 之前到达，导致 turn
+   * 已终态但 output 还没追加上去）。 */
+  bypassTerminal?: boolean;
 }
 
 /**
@@ -1830,7 +1834,9 @@ function upsertTurn(
     turns = prev.turns.map((t, i) => {
       if (i !== idx) return t;
       // P1-3 终态幂等：已终态的 turn 不被后续事件覆盖。
-      if (TERMINAL_TURN_STATUSES.has(t.status)) return t;
+      // 但 onLog（log 事件）例外——daemon submitMessages 退避重试可能导致
+      // turn_completed 在 log 之前到达，此时 turn 已终态但 output 还没追加。
+      if (!(opts.bypassTerminal || env.event === "log") && TERMINAL_TURN_STATUSES.has(t.status)) return t;
       return apply(t);
     });
   }

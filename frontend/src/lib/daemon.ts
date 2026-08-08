@@ -920,6 +920,7 @@ export function streamSession(
 
   // backend turn/log/permission_* 走默认 data 帧（无 event: 行）→ 必须用 onmessage 接。
   es.onmessage = (e: MessageEvent<string>) => {
+    console.log("[SSE-raw]", e.data?.slice(0, 150));
     dispatch({ data: e.data, lastEventId: e.lastEventId || undefined });
   };
 
