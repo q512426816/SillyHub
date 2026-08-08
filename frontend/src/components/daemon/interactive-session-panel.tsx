@@ -53,6 +53,7 @@ import {
   endSession,
   streamSession,
   getAgentSession,
+  getAgentSessionLogs,
   listSessionRuns,
   PROVIDER_META,
   type InteractiveProvider,
@@ -64,6 +65,7 @@ import {
 } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
 import { classifySessionLog, extractDialogQA, isToolResultDenied, statusFromToolUseRaw } from "@/components/daemon/session-log-sanitize";
+import { logsToTurns } from "@/components/daemon/runtime-session-helpers";
 
 /**
  * ql-20260730-003：一个回合内按真实到达顺序排列的过程项。
@@ -531,6 +533,27 @@ export function InteractiveSessionPanel({
         },
       },
     );
+
+    // prefetch 补漏：fire-and-forget 拉历史日志回灌（防 SSE 订阅前 daemon 已
+    // publish 导致丢事件）。走 logsToTurns（REST 历史路径，正确 turn 结构），
+    // 不走 SSE dispatch（之前走 dispatch 构造假事件破坏了 turn 结构）。
+    // 仅当当前无 turns 时回灌（不覆盖 initialTurns / SSE 已更新的 turns）。
+    void (async () => {
+      try {
+        const logs = await getAgentSessionLogs(sessionId);
+        if (logs.length === 0) return;
+        const turns = logsToTurns(logs);
+        if (turns.length === 0) return;
+        setView((prev) =>
+          prev.turns.length > 0
+            ? prev
+            : { ...prev, sessionId, turns },
+        );
+      } catch {
+        // prefetch 失败不阻断 SSE
+      }
+    })();
+
     // ql-20260623：fetchPendingDialogs 从 establishStream 解耦为独立 effect
     //（见下方 [view.sessionId] effect），避免恢复链路与建流链路绑定。
   }, []);
