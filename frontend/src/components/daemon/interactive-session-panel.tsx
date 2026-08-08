@@ -281,9 +281,25 @@ export function InteractiveSessionPanel({
   }, [view.sessionId]);
 
   // SSE 连接由 sessionId 驱动：createSession 成功后建立唯一 SSE，贯穿整个会话。
-  const establishStream = useCallback((sessionId: string) => {
+  const establishStream = useCallback(async (sessionId: string) => {
     // 防御：已有连接不重建（inject 不重建 EventSource）。
     if (streamConnRef.current) return;
+    // prefetch 先回灌历史（agent-stream.ts 模式，防 SSE 订阅前 daemon publish 丢事件）。
+    // 必须 await 先于 SSE 建连：否则 SSE 收到 turn_started 建空 turn 后 prev.turns 非空，
+    // prefetch 条件（prev.turns 空）不满足 → 不回灌 → output 空白。
+    try {
+      const logs = await getAgentSessionLogs(sessionId);
+      if (logs.length > 0) {
+        const turns = logsToTurns(logs);
+        if (turns.length > 0) {
+          setView((prev) =>
+            prev.turns.length > 0 ? prev : { ...prev, sessionId, turns },
+          );
+        }
+      }
+    } catch {
+      /* prefetch 失败不阻断 SSE */
+    }
     streamConnRef.current = streamSession(
       sessionId,
       {
@@ -533,26 +549,6 @@ export function InteractiveSessionPanel({
         },
       },
     );
-
-    // prefetch 补漏：fire-and-forget 拉历史日志回灌（防 SSE 订阅前 daemon 已
-    // publish 导致丢事件）。走 logsToTurns（REST 历史路径，正确 turn 结构），
-    // 不走 SSE dispatch（之前走 dispatch 构造假事件破坏了 turn 结构）。
-    // 仅当当前无 turns 时回灌（不覆盖 initialTurns / SSE 已更新的 turns）。
-    void (async () => {
-      try {
-        const logs = await getAgentSessionLogs(sessionId);
-        if (logs.length === 0) return;
-        const turns = logsToTurns(logs);
-        if (turns.length === 0) return;
-        setView((prev) =>
-          prev.turns.length > 0
-            ? prev
-            : { ...prev, sessionId, turns },
-        );
-      } catch {
-        // prefetch 失败不阻断 SSE
-      }
-    })();
 
     // ql-20260623：fetchPendingDialogs 从 establishStream 解耦为独立 effect
     //（见下方 [view.sessionId] effect），避免恢复链路与建流链路绑定。
