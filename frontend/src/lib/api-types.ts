@@ -3323,6 +3323,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Notify Session Ready
+         * @description Receive daemon session-ready report (task-06 / D-001@v1).
+         *
+         *     daemon ``_startInteractiveSession``（fresh create）与 ``restoreAndReconnect``
+         *     （recover）create 完成后调 ``hubClient.notifySessionReady`` → 这里。鉴权后调
+         *     :func:`get_session_readiness` 单例的 ``mark_ready``，唤醒 ``inject_session`` 中
+         *     等待 ready event 的协程（task-08），解 /model 等 inject 偶发空白。
+         *
+         *     返回 200 + JSON ``{"ok": true}``（**非 204**）：daemon hub-client ``_request``
+         *     固定 ``JSON.parse``，204 空 body 会抛 ``SyntaxError``（Reverse Sync 由 task-01
+         *     发现）。daemon 不上报 payload，故无 body 模型。
+         */
+        post: operations["notify_session_ready_api_daemon_sessions__session_id__ready_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/leases/{lease_id}": {
         parameters: {
             query?: never;
@@ -22605,6 +22634,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionRecoveryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    notify_session_ready_api_daemon_sessions__session_id__ready_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
                 };
             };
             /** @description Validation Error */

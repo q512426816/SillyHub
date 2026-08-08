@@ -321,6 +321,14 @@ interface ClientLike {
     reason: string,
   ): Promise<unknown>;
   /**
+   * task-02（design Phase 1 / FR-01）：上报 interactive session 已就绪（create 完成）。
+   * _startInteractiveSession create 成功（fresh）→ 此方法
+   * → backend SessionReadiness.mark_ready → inject_session 等 ready 解除（秒级，
+   * 修复 /model 等 inject 在 daemon create 完成前到达被丢的时序竞态）。best-effort：
+   * hub-client 实现失败 warn 不抛，调用点无需额外 try/catch。W1 已在 hub-client.ts 实现。
+   */
+  notifySessionReady(sessionId: string): Promise<void>;
+  /**
    * task-06（D-003@v1 tar 模式 pull）：GET spec bundle（tar Buffer）。
    * 与 hub-client.ts:694 实现对齐。interactive 路径经 pullSpecBundle 调用。
    */
@@ -2763,6 +2771,14 @@ export class Daemon {
     await this._sessionManager!.restoreAndReconnect(record);
     await this._sessionManager!.markReconnected(sessionId);
     this._logger.info('session_resume_ok', { session_id: sessionId, lease_id: leaseId });
+    // task-03（design Phase 1 / FR-01 / gap-1 修正）：recover 成功路径双覆盖——daemon
+    // 重启 recover 重建 session 完成（restoreAndReconnect + markReconnected 切回 active）
+    // 后上报 session ready，与 fresh create（task-02 _startInteractiveSession）双覆盖，
+    // 避免 recover 后 inject 等 ready 超时降级 fallback。best-effort：notifySessionReady
+    // 自身失败 warn 不抛（hub-client.ts 实现），调用点无需 try/catch；recover 失败
+    //（restoreAndReconnect 抛错 / markReconnected 抛错）在上层 _handleWsMessage 的 void
+    // Promise catch 收敛，不会走到本行，故仅成功路径上报。
+    await this._client.notifySessionReady(sessionId);
   }
 
   /**
@@ -3316,6 +3332,12 @@ export class Daemon {
         run_id: firstRunId,
         borrow_sandbox: borrowSandboxRoot ?? null,
       });
+      // task-02（design Phase 1 / FR-01）：create 成功后上报 session ready，让 backend
+      // inject_session 的 ready wait 解除（修复 inject 在 create 完成前到达被丢导致
+      // /model 空白的时序竞态）。best-effort：notifySessionReady 自身失败 warn 不抛
+      //（hub-client.ts 实现），调用点无需 try/catch；catch 块（create 失败）不上报，
+      // 由 backend DaemonRuntimeOffline 兜底。
+      await this._client.notifySessionReady(sessionId);
     } catch (e) {
       // create 抛错（ClaudeExecutableNotFoundError wrapper 解析失败等）：移除登记，
       // 让 WS 重放可重试；记录错误不崩。SessionManager 已标 failed（onSessionEnd）。

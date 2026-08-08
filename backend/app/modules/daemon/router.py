@@ -94,6 +94,7 @@ from app.modules.daemon.service import (
     DaemonService,
     DaemonSessionNotFound,
 )
+from app.modules.daemon.session.service import get_session_readiness
 
 log = get_logger(__name__)
 
@@ -1323,6 +1324,27 @@ async def mark_session_recovery_failed(
         reason=data.reason or "restore_failed",
     )
     return SessionRecoveryResponse(session_id=session_id, status=result_status)
+
+
+@router.post("/sessions/{session_id}/ready")
+async def notify_session_ready(
+    session_id: uuid.UUID,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> dict[str, bool]:
+    """Receive daemon session-ready report (task-06 / D-001@v1).
+
+    daemon ``_startInteractiveSession``（fresh create）与 ``restoreAndReconnect``
+    （recover）create 完成后调 ``hubClient.notifySessionReady`` → 这里。鉴权后调
+    :func:`get_session_readiness` 单例的 ``mark_ready``，唤醒 ``inject_session`` 中
+    等待 ready event 的协程（task-08），解 /model 等 inject 偶发空白。
+
+    返回 200 + JSON ``{"ok": true}``（**非 204**）：daemon hub-client ``_request``
+    固定 ``JSON.parse``，204 空 body 会抛 ``SyntaxError``（Reverse Sync 由 task-01
+    发现）。daemon 不上报 payload，故无 body 模型。
+    """
+    get_session_readiness().mark_ready(session_id)
+    log.info("daemon.session_ready_reported", session_id=str(session_id))
+    return {"ok": True}
 
 
 @router.get(

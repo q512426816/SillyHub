@@ -53,6 +53,7 @@ import {
   endSession,
   streamSession,
   getAgentSession,
+  getAgentSessionLogs,
   listSessionRuns,
   PROVIDER_META,
   type InteractiveProvider,
@@ -64,6 +65,7 @@ import {
 } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
 import { classifySessionLog, extractDialogQA, isToolResultDenied, statusFromToolUseRaw } from "@/components/daemon/session-log-sanitize";
+import { logsToTurns } from "@/components/daemon/runtime-session-helpers";
 
 /**
  * ql-20260730-003：一个回合内按真实到达顺序排列的过程项。
@@ -279,9 +281,25 @@ export function InteractiveSessionPanel({
   }, [view.sessionId]);
 
   // SSE 连接由 sessionId 驱动：createSession 成功后建立唯一 SSE，贯穿整个会话。
-  const establishStream = useCallback((sessionId: string) => {
+  const establishStream = useCallback(async (sessionId: string) => {
     // 防御：已有连接不重建（inject 不重建 EventSource）。
     if (streamConnRef.current) return;
+    // prefetch 先回灌历史（agent-stream.ts 模式，防 SSE 订阅前 daemon publish 丢事件）。
+    // 必须 await 先于 SSE 建连：否则 SSE 收到 turn_started 建空 turn 后 prev.turns 非空，
+    // prefetch 条件（prev.turns 空）不满足 → 不回灌 → output 空白。
+    try {
+      const logs = await getAgentSessionLogs(sessionId);
+      if (logs.length > 0) {
+        const turns = logsToTurns(logs);
+        if (turns.length > 0) {
+          setView((prev) =>
+            prev.turns.length > 0 ? prev : { ...prev, sessionId, turns },
+          );
+        }
+      }
+    } catch {
+      /* prefetch 失败不阻断 SSE */
+    }
     streamConnRef.current = streamSession(
       sessionId,
       {
@@ -531,6 +549,7 @@ export function InteractiveSessionPanel({
         },
       },
     );
+
     // ql-20260623：fetchPendingDialogs 从 establishStream 解耦为独立 effect
     //（见下方 [view.sessionId] effect），避免恢复链路与建流链路绑定。
   }, []);
@@ -1763,6 +1782,10 @@ interface UpsertOpts {
   setCurrentRun?: string;
   clearCurrentRun?: string;
   requireRunId?: boolean;
+  /** 绕过终态幂等检查——onLog 追加 output/工具数据时 true（turn_completed
+   * 可能因 daemon submitMessages 退避重试延迟而在 log 之前到达，导致 turn
+   * 已终态但 output 还没追加上去）。 */
+  bypassTerminal?: boolean;
 }
 
 /**
@@ -1811,7 +1834,9 @@ function upsertTurn(
     turns = prev.turns.map((t, i) => {
       if (i !== idx) return t;
       // P1-3 终态幂等：已终态的 turn 不被后续事件覆盖。
-      if (TERMINAL_TURN_STATUSES.has(t.status)) return t;
+      // 但 onLog（log 事件）例外——daemon submitMessages 退避重试可能导致
+      // turn_completed 在 log 之前到达，此时 turn 已终态但 output 还没追加。
+      if (!(opts.bypassTerminal || env.event === "log") && TERMINAL_TURN_STATUSES.has(t.status)) return t;
       return apply(t);
     });
   }
