@@ -526,9 +526,9 @@ modules:
     depends_on: [client]
     used_by: []
     needs_review: false
-    concerns: ["modules/mcp-server.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
-    notes: "daemon 内置 stdio MCP server，独立进程 node dist/mcp-server.js；team 主 agent 经此调平台工具"
+    concerns: []
+    review_reasons: []
+    notes: "daemon 内置 stdio MCP server，独立进程 node dist/mcp-server.js；team 主 agent 经此调平台工具。2026-08-08 archive（2026-08-08-dispatch-worker-caller-worktree）补建 modules/mcp-server.md（含 dispatch_worker inputSchema 路径A 三参透传，★无 createMission）"
 
   mcp-config:
     status: active

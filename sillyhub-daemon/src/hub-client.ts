@@ -1025,7 +1025,8 @@ export class HubClient {
    *
    * 端点：POST /api/workspaces/{ws}/missions/{mid}/dispatch_worker
    * body（snake_case，对齐 backend ``DispatchWorkerRequest``）：
-   *   { objective, role?, agent_type?, model?, read_only? }
+   *   { objective, role?, agent_type?, model?, read_only?,
+   *     worktree_path?, branch?, worker_prompt? }
    * 响应 201（``WorkerRunResponse``）：{ id, role, objective, status, agent_type,
    *   lease_id?, error_code? }
    *
@@ -1033,8 +1034,11 @@ export class HubClient {
    * 建 pending），主 agent 可读 status 决定重派——故 2xx 即成功，error_code
    * 透传到响应由调用方判读。
    *
-   * undefined 可选字段不写入 body（对齐 notifyRunResult 守卫风格，避免覆盖
-   * backend 默认值）。
+   * task-06（2026-08-08-dispatch-worker-caller-worktree / R-06 / D-009）：路径A
+   * 增量可选参 ``worktree_path``/``branch``/``worker_prompt`` 透传 backend。
+   * undefined 不写入 body（对齐 notifyRunResult 守卫风格）→ backend None → 走原
+   * team 模式自建 worktree / render_worker_prompt 逻辑（零回归）。链路A daemon
+   * stdio 与链路B public gateway schema 同构。
    */
   async dispatchWorker(
     workspaceId: string,
@@ -1045,6 +1049,10 @@ export class HubClient {
       agent_type?: string;
       model?: string;
       read_only?: boolean;
+      // task-06 路径A：caller-worktree / external 模式增量参（design §7.3）
+      worktree_path?: string;
+      branch?: string;
+      worker_prompt?: string;
     },
   ): Promise<Record<string, unknown>> {
     const payload: Record<string, unknown> = { objective: body.objective };
@@ -1052,6 +1060,10 @@ export class HubClient {
     if (body.agent_type !== undefined) payload.agent_type = body.agent_type;
     if (body.model !== undefined) payload.model = body.model;
     if (body.read_only !== undefined) payload.read_only = body.read_only;
+    // task-06 路径A：undefined → 不写入 body → backend None → team 模式零回归。
+    if (body.worktree_path !== undefined) payload.worktree_path = body.worktree_path;
+    if (body.branch !== undefined) payload.branch = body.branch;
+    if (body.worker_prompt !== undefined) payload.worker_prompt = body.worker_prompt;
     return this._request<Record<string, unknown>>(
       'POST',
       `/api/workspaces/${encodeURIComponent(workspaceId)}/missions/${encodeURIComponent(missionId)}/dispatch_worker`,

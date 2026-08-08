@@ -85,7 +85,7 @@ describe('HostFsHandler — git_worktree_add（task-02 WT1~WT2 + WT7，D-008 默
   beforeEach(async () => {
     root = await makeRoot();
     siblingRoot = await makeRoot();
-    handler = new HostFsHandler({ allowed_roots: [root, siblingRoot] });
+    handler = new HostFsHandler({ rootsProvider: () => [root, siblingRoot] });
   });
 
   afterEach(async () => {
@@ -201,7 +201,7 @@ describe('HostFsHandler — git_merge（task-02 WT3~WT4，冲突解析）', () =
 
   beforeEach(async () => {
     root = await makeRoot();
-    handler = new HostFsHandler({ allowed_roots: [root] });
+    handler = new HostFsHandler({ rootsProvider: () => [root] });
   });
 
   afterEach(async () => {
@@ -323,7 +323,7 @@ describe('HostFsHandler — git_worktree_remove（task-02 WT5~WT6）', () => {
   beforeEach(async () => {
     root = await makeRoot();
     siblingRoot = await makeRoot();
-    handler = new HostFsHandler({ allowed_roots: [root, siblingRoot] });
+    handler = new HostFsHandler({ rootsProvider: () => [root, siblingRoot] });
   });
 
   afterEach(async () => {

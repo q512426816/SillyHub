@@ -1,0 +1,27 @@
+{
+  "generatedAt": "2026-08-08T11:32:54.460Z",
+  "schemaVersion": 1,
+  "items": [
+    {
+      "task": "task-11",
+      "verdict": "spec+quality",
+      "evidence": [
+        "独立 sillyspec 变更：isPathASupported() 从 stub 恒 false 改为探测 tools/list dispatch_worker schema 含 worktree_path+worker_prompt（D-005）；spike-01 已确认 tools/list 探测可行"
+      ]
+    },
+    {
+      "task": "task-12",
+      "verdict": "spec+quality",
+      "evidence": [
+        "独立 sillyspec 变更：client.js createMission 加 orchestrationMode='external' 透传 + dispatchWorker branch 断言（D-009 已对齐）+ probe.js rootPath 从 daemon 拿取使 isWithinRoot 越界校验生效"
+      ]
+    },
+    {
+      "task": "task-13",
+      "verdict": "spec+quality",
+      "evidence": [
+        "独立 sillyspec 变更：更新 sillyhub-path-a-contract.md（字段名 branch + external mode + 校验清单打勾）+ 端到端 smoke（隔离临时仓 + 本地源码入口，实测 worker 终态不污染主仓 R-01）"
+      ]
+    }
+  ]
+}

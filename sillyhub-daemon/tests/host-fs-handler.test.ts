@@ -116,7 +116,7 @@ describe('HostFsHandler — stat（task-03 H1~H4）', () => {
     const r = await makeRoot();
     root = r.root;
     abs = r.abs;
-    handler = new HostFsHandler({ allowed_roots: [root] });
+    handler = new HostFsHandler({ rootsProvider: () => [root] });
   });
 
   afterEach(async () => {
@@ -164,7 +164,7 @@ describe('HostFsHandler — read_file（task-03 H5~H7）', () => {
     const r = await makeRoot();
     root = r.root;
     abs = r.abs;
-    handler = new HostFsHandler({ allowed_roots: [root] });
+    handler = new HostFsHandler({ rootsProvider: () => [root] });
   });
 
   afterEach(async () => {
@@ -207,7 +207,7 @@ describe('HostFsHandler — list_dir（task-03 H8~H9，复用 file-rpc.ts:listDi
     const r = await makeRoot();
     root = r.root;
     abs = r.abs;
-    handler = new HostFsHandler({ allowed_roots: [root] });
+    handler = new HostFsHandler({ rootsProvider: () => [root] });
   });
 
   afterEach(async () => {
@@ -242,7 +242,7 @@ describe('HostFsHandler — git_apply（task-03 H10~H14，D-008 幂等 + 三路�
   beforeEach(async () => {
     const r = await makeRoot({ withFiles: false });
     root = r.root;
-    handler = new HostFsHandler({ allowed_roots: [root] });
+    handler = new HostFsHandler({ rootsProvider: () => [root] });
   });
 
   afterEach(async () => {
@@ -361,7 +361,7 @@ describe('HostFsHandler — git_rev_parse（task-03 H15~H18）', () => {
   beforeEach(async () => {
     const r = await makeRoot({ withFiles: false });
     root = r.root;
-    handler = new HostFsHandler({ allowed_roots: [root] });
+    handler = new HostFsHandler({ rootsProvider: () => [root] });
   });
 
   afterEach(async () => {
@@ -421,7 +421,7 @@ describe('HostFsHandler — pollution_archive（task-03 H19~H23）', () => {
     root = r.root;
     abs = r.abs;
     runtimeRoot = await mkdtemp(join(tmpdir(), 'sillyhub-host-fs-rt-'));
-    handler = new HostFsHandler({ allowed_roots: [root, runtimeRoot] });
+    handler = new HostFsHandler({ rootsProvider: () => [root, runtimeRoot] });
   });
 
   afterEach(async () => {
@@ -508,7 +508,7 @@ describe('HostFsHandler — read_package_json（task-03 H24~H26）', () => {
     const r = await makeRoot({ withFiles: false });
     root = r.root;
     abs = r.abs;
-    handler = new HostFsHandler({ allowed_roots: [root] });
+    handler = new HostFsHandler({ rootsProvider: () => [root] });
   });
 
   afterEach(async () => {
@@ -551,7 +551,7 @@ describe('HostFsHandler — read_local_yaml（task-03 H27~H30，js-yaml 已显�
     const r = await makeRoot({ withFiles: false });
     root = r.root;
     abs = r.abs;
-    handler = new HostFsHandler({ allowed_roots: [root] });
+    handler = new HostFsHandler({ rootsProvider: () => [root] });
   });
 
   afterEach(async () => {
@@ -704,7 +704,7 @@ describe('HostFsHandler — run_command（task-02 RC5~RC9，execFile + 白名单
   beforeEach(async () => {
     const r = await makeRoot({ withFiles: false });
     root = r.root;
-    handler = new HostFsHandler({ allowed_roots: [root] });
+    handler = new HostFsHandler({ rootsProvider: () => [root] });
   });
 
   afterEach(async () => {
