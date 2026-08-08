@@ -191,6 +191,30 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     },
   },
   {
+    // OpenCode Go：opencode.ai 官方自营 API（cc-switch claudeProviderPresets 同名条目，
+    // 端点 https://opencode.ai/zen/go，OpenAI 兼容格式 cc-switch 标 openai_chat）。
+    // 数据逐字抄 cc-switch（R-05），affiliate（?ref=）已剔除。模型 4 槽全填 deepseek-v4-flash。
+    key: "opencode_go",
+    name: "OpenCode Go",
+    category: "aggregator",
+    base_url: "https://opencode.ai/zen/go",
+    auth_field: "ANTHROPIC_AUTH_TOKEN",
+    default_model: "deepseek-v4-flash",
+    website_url: "https://opencode.ai/go",
+    api_key_url: "https://opencode.ai/go",
+    icon_color: "#211E1E",
+    settings_config_partial: {
+      env: {
+        ANTHROPIC_BASE_URL: "https://opencode.ai/zen/go",
+        ANTHROPIC_AUTH_TOKEN: "",
+        ANTHROPIC_MODEL: "deepseek-v4-flash",
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash",
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-flash",
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-flash",
+      },
+    },
+  },
+  {
     key: "minimax",
     name: "MiniMax",
     category: "cn_official",
