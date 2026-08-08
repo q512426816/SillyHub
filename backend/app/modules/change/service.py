@@ -1564,7 +1564,11 @@ class ChangeService:
             change.location = "archive"
             change.archived_at = datetime.now(UTC)
 
-        stages = change.stages or {}
+        # dict() 浅拷贝：stages 是普通 Column(JSON) 非 MutableDict.as_mutable（model.py），
+        # 直接 ``change.stages or {}`` 取引用原地改 + 回赋同对象，SQLAlchemy set 事件见
+        # ``new is old`` 不标记 dirty → flush 不带 stages 列 → last_stage_completion 丢失。
+        # 拷贝成新对象再回赋才能被检测为变更而落库（与 transition_with_dispatch 同源范式）。
+        stages = dict(change.stages or {})
         stages["last_stage_completion"] = {
             "stage": stage,
             "result": result,

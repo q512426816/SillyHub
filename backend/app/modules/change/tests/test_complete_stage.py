@@ -194,3 +194,41 @@ class TestCompleteStagePersistence:
 
         assert result.change.current_stage == "verify"
         assert dispatched == []
+
+    async def test_complete_stage_persists_last_stage_completion_to_db(
+        self, db_session: AsyncSession
+    ) -> None:
+        """complete_stage 写入的 last_stage_completion 必须落库（stages 深拷贝回归）。
+
+        ``stages`` 是普通 ``Column(JSON)`` 非 ``MutableDict.as_mutable``（model.py），
+        ``complete_stage`` 须 ``dict(change.stages or {})`` 浅拷贝后再改 + 回赋，否则
+        SQLAlchemy 的 set 事件见 ``new is old``（同对象）不标记 dirty，flush 的 UPDATE
+        不带 stages 列 → ``last_stage_completion`` 丢失（current_stage 走独立列，正常）。
+        本用例经 ``refresh`` 真读 DB 锁此持久化契约。
+        """
+        ws, change = await _seed_change(
+            db_session, current_stage="execute", stages={"team_mode": True}
+        )
+        svc = ChangeService(db_session)
+
+        await svc.complete_stage(
+            workspace_id=ws.id,
+            change_id=change.id,
+            stage="execute",
+            result="clear",
+            summary="brainstorm done",
+        )
+
+        # refresh 真读 DB（expire_on_commit 后强制重载），抓 stages 未落库回归。
+        await db_session.refresh(change)
+        stages = change.stages or {}
+        assert "last_stage_completion" in stages, (
+            "last_stage_completion 未落库：complete_stage 的 stages 须 dict() 拷贝后再回赋"
+        )
+        completion = stages["last_stage_completion"]
+        assert completion["stage"] == "execute"
+        assert completion["result"] == "clear"
+        assert completion["summary"] == "brainstorm done"
+        assert completion["new_stage"] == "verify"
+        # 既有 stages 键保留（浅拷贝不丢 team_mode）。
+        assert stages.get("team_mode") is True
