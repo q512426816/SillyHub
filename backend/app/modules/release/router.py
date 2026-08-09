@@ -107,7 +107,7 @@ async def deploy_release(
 async def promote_release(
     release_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission(Permission.DEPLOY_STAGING))],
+    user: Annotated[User, Depends(require_permission_any(Permission.DEPLOY_STAGING))],
 ) -> ReleaseResponse:
     svc = ReleaseService(session)
     release = await svc.promote_to_staging(release_id)

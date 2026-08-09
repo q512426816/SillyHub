@@ -437,6 +437,8 @@ async def create_project_member(
     session: SessionDep,
     user: AuthUser,
 ) -> ProjectMemberResp:
+    # 支配权:仅该项目经理或超管可加成员(堵成员自提权/越权加人)。
+    await _require_project_manager(session, user, body.pm_project_id)
     s = svc.ProjectMemberService(session)
     entity = await s.create(body, operator=user.id)
     return ProjectMemberResp.model_validate(entity)
@@ -453,6 +455,9 @@ async def update_project_member(
     user: AuthUser,
 ) -> ProjectMemberResp:
     s = svc.ProjectMemberService(session)
+    # 支配权:仅成员当前所属项目的经理或超管可改(非经理不能改其他项目成员)。
+    existing = await s.get(entity_id)
+    await _require_project_manager(session, user, existing.pm_project_id)
     entity = await s.update(entity_id, body, operator=user.id)
     return ProjectMemberResp.model_validate(entity)
 
@@ -467,6 +472,9 @@ async def delete_project_member(
     user: AuthUser,
 ) -> None:
     s = svc.ProjectMemberService(session)
+    # 支配权:仅成员当前所属项目的经理或超管可删。
+    existing = await s.get(entity_id)
+    await _require_project_manager(session, user, existing.pm_project_id)
     await s.delete(entity_id)
 
 

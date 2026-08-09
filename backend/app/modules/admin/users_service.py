@@ -36,8 +36,9 @@ from app.core.security import password_hasher
 from app.modules.admin.model import Organization, UserOrganization, UserRole
 from app.modules.admin.organizations_service import _descendant_ids
 from app.modules.admin.schema import UserWorkspaceRead
-from app.modules.auth.model import Role, User, UserWorkspaceRole
+from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
 from app.modules.auth.model import Session as AuthSession
+from app.modules.auth.permissions import Permission
 from app.modules.workflow.model import AuditLog
 from app.modules.workspace.model import Workspace
 
@@ -84,6 +85,49 @@ class UserService:
             )
         )
         return result.scalar() or 0
+
+    async def _roles_carry_platform_admin(self, role_ids: list[uuid.UUID] | None) -> bool:
+        """传入角色集合中是否存在携带 platform:admin 权限的角色。
+
+        platform:admin(Permission.PLATFORM_ADMIN)是 RBAC 全权绕过权限,super_admin
+        系统角色种子即带它(migration 202605280900)。绑定这类角色 = 授予平台超管,
+        必须受支配权校验约束。
+        """
+        if not role_ids:
+            return False
+        stmt = (
+            select(RolePermission.role_id)
+            .where(RolePermission.role_id.in_(role_ids))
+            .where(RolePermission.permission == Permission.PLATFORM_ADMIN.value)
+            .limit(1)
+        )
+        return (await self.session.execute(stmt)).first() is not None
+
+    async def _assert_actor_may_grant_platform_admin(
+        self,
+        *,
+        granting_admin: bool,
+        role_ids: list[uuid.UUID] | None,
+    ) -> None:
+        """支配权:只有 is_platform_admin 的调用者才能授予平台管理员标志或携带
+        platform:admin 权限的角色。
+
+        admin 端点 router 层已用 USER_WRITE 守门,但 USER_WRITE ≠ is_platform_admin,
+        持 USER_WRITE 的非平台管理员不应越权授予超管(自提权/横向提权)。本检查是
+        service 层纵深防御:授 is_platform_admin=True 或绑定 platform:admin 角色时
+        必须确认 actor 自身 is_platform_admin,否则 PermissionDenied。
+        """
+        wants_platform = granting_admin or await self._roles_carry_platform_admin(role_ids)
+        if not wants_platform:
+            return
+        actor = await self.session.get(User, self.actor_id)
+        if actor is not None and actor.is_platform_admin:
+            return
+        raise PermissionDenied(
+            "Only platform admins may grant platform-admin privileges or bind "
+            "platform-admin roles.",
+            details={"code": "PLATFORM_ADMIN_GRANT_FORBIDDEN"},
+        )
 
     # ── CRUD ─────────────────────────────────────────────────────────────
 
@@ -170,6 +214,10 @@ class UserService:
         role_ids: list[uuid.UUID] | None = None,
     ) -> User:
         self._set_audit_context()
+        # 支配权(纵深防御):授 is_platform_admin 或绑定 platform:admin 角色前校验调用者。
+        await self._assert_actor_may_grant_platform_admin(
+            granting_admin=is_platform_admin, role_ids=role_ids
+        )
         # password 缺省 → 固定默认初始密码（管理员表单不再输入密码）
         if password is None:
             password = DEFAULT_INITIAL_PASSWORD
@@ -304,6 +352,12 @@ class UserService:
         target = await self.session.get(User, target_id)
         if target is None or target.deleted_at is not None:
             raise HTTPException(status_code=404, detail="User not found")
+
+        # 支配权(纵深防御):授 is_platform_admin 或绑定 platform:admin 角色前校验调用者。
+        # is_platform_admin=False(降级)不触发,交由下方 last-admin 保护兜底。
+        await self._assert_actor_may_grant_platform_admin(
+            granting_admin=is_platform_admin is True, role_ids=role_ids
+        )
 
         # Self-disable protection (existing).
         if status == "disabled" and self.actor_id == target_id:

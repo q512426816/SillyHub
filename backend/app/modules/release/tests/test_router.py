@@ -187,3 +187,23 @@ async def test_release_no_auth_401(client, db_session, tmp_path):
         json={"version": "v1.0.0"},
     )
     assert resp.status_code == 401
+
+
+async def test_promote_release_succeeds(client, db_session, tmp_path):
+    """promote 路由路径无 workspace_id，须用 require_permission_any（原 require_permission 恒 422）。"""
+    refs = await _setup_workspace_and_user(db_session, tmp_path)
+    create_resp = await client.post(
+        f"/api/workspaces/{refs['ws_id']}/releases",
+        json={"version": "v1.0.0"},
+        headers=_auth(refs["token"]),
+    )
+    assert create_resp.status_code == 201
+    release_id = create_resp.json()["id"]
+
+    resp = await client.post(
+        f"/api/releases/{release_id}/promote",
+        headers=_auth(refs["token"]),
+    )
+    # 修复前：恒 422（路径无 workspace_id 占位符但依赖声明必填）。修复后：200 draft→staging。
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "staging"
