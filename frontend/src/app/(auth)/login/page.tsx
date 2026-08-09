@@ -40,17 +40,24 @@ export default function LoginPage() {
   );
   const [form] = Form.useForm<LoginFormValues>();
 
-  // 读取"记住我"缓存,回填账号(及密码)+ 平台选择
+  // 读取"记住登录名"缓存,回填账号 + 平台选择；顺手清洗旧格式缓存里的明文密码(FR-04)
   useEffect(() => {
     try {
       const raw = localStorage.getItem(REMEMBER_KEY);
       if (raw) {
         const cached = JSON.parse(raw) as Partial<LoginFormValues>;
         form.setFieldsValue({
-          account: cached.account ?? "admin",
-          password: cached.password ?? "admin123",
+          account: cached.account,
           remember: true,
         });
+        // 旧版本曾把明文密码缓存进 localStorage,这里一次性改写为无密码版,
+        // 清掉浏览器里已落盘的明文(密码输入框不再回填,留空)。
+        if (cached.password !== undefined) {
+          localStorage.setItem(
+            REMEMBER_KEY,
+            JSON.stringify({ account: cached.account, remember: true }),
+          );
+        }
       }
       const savedPlatform = localStorage.getItem(PLATFORM_KEY);
       if (savedPlatform === "sillyhub" || savedPlatform === "ppm") {
@@ -68,13 +75,12 @@ export default function LoginPage() {
       // token 优先用入参(handleVerified 直传,避免 setCaptchaToken 异步导致闭包读到旧值)。
       await login(values.account, values.password, tokenOverride ?? captchaToken);
 
-      // 记住我:存账号(密码与源项目行为一致一并缓存,仅本地浏览器)
+      // 记住登录名:只缓存账号,绝不把明文密码写进 localStorage(仅本地浏览器)
       if (values.remember) {
         localStorage.setItem(
           REMEMBER_KEY,
           JSON.stringify({
             account: values.account,
-            password: values.password,
             remember: true,
           }),
         );
@@ -199,7 +205,7 @@ export default function LoginPage() {
                   name="remember"
                   valuePropName="checked"
                 >
-                  <Checkbox>记住密码</Checkbox>
+                  <Checkbox>记住登录名</Checkbox>
                 </Form.Item>
 
                 {error && (

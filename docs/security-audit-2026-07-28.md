@@ -23,7 +23,7 @@
 ## 二、最危险的攻击链(把多个发现串起来)
 
 ### 链 A:公网爆破零成本进管理员
-默认 `admin/admin123`(README 文档化)+ 登录/refresh 全栈**无限流** + 无强制改密 + 公网明文 HTTP(无 TLS) → 攻击者几无成本爆破或撞库拿到管理员,且拿到后 access token 30 分钟内不可吊销(P1-13)。
+默认管理员使用常见弱口令(README 曾文档化)+ 登录/refresh 全栈**无限流** + 无强制改密 + 公网明文 HTTP(无 TLS) → 攻击者几无成本爆破或撞库拿到管理员,且拿到后 access token 30 分钟内不可吊销(P1-13)。
 
 ### 链 B:冒充 daemon → 完整接管(最严重)
 `daemon_local_id`(一个 UUID)是 daemon 接入的唯一凭证,经 `?daemon_local_id=` 走 query string → **进 nginx access log、从不轮换**。攻击者一旦从日志/备份/共享开发机拿到任一 daemon 的 UUID:
@@ -86,7 +86,7 @@ access + refresh token 都 persist 到 `localStorage`(P2-15)→ 任一 XSS 即�
 - **证据**:`docs_url="/api/docs"`、`openapi_url="/api/openapi.json"` 无条件启用,未按 `environment` 判断。任何人可查看完整路由/schema。
 - **修复**:`environment=="prod"` 时设 `docs_url=None, redoc_url=None, openapi_url=None`。
 
-> P0-6/7/8 中登录无限流、默认 admin/admin123 无强制改密见 P1。
+> P0-6/7/8 中登录无限流、默认弱口令无强制改密见 P1。
 
 ---
 
@@ -119,7 +119,7 @@ access + refresh token 都 persist 到 `localStorage`(P2-15)→ 任一 XSS 即�
 
 ### P1-14 登录无限流 + 默认弱口令无强制改密
 - **文件**:`backend/app/main.py:139-163`(无 slowapi)、`auth/router.py:48-59`、`README.md:152`、`auth/service.py:362-411`
-- **证据**:登录接口无限流/锁定;`admin/admin123` 文档化;bootstrap 建 admin 无 `must_change_password` 标记(User 模型无此列);admin 重置默认密码 `SillyHub@123`(`admin/users_service.py:48`)的 `force_change_on_next_login` 只写审计、auth 模块零引用。
+- **证据**:登录接口无限流/锁定;README 文档化默认弱口令;bootstrap 建 admin 无 `must_change_password` 标记(User 模型无此列);admin 重置默认密码 `SillyHub@123`(`admin/users_service.py:48`)的 `force_change_on_next_login` 只写审计、auth 模块零引用。
 - **修复**:slowapi/redis 限流(5次/分/IP+username);User 加 `must_change_password` 列,login 后强制改密。
 
 ---
@@ -128,7 +128,7 @@ access + refresh token 都 persist 到 `localStorage`(P2-15)→ 任一 XSS 即�
 
 **P2**:
 - access+refresh token 双存 localStorage(`frontend/src/stores/session.ts:31-58`)→ XSS 盗长期凭证
-- 登录页明文密码入 localStorage + 默认回填 admin/admin123(`frontend/src/app/(auth)/login/page.tsx:45-74`)
+- 登录页明文密码入 localStorage + 默认回填已知弱口令(`frontend/src/app/(auth)/login/page.tsx:45-74`)
 - quick-chat run 全局 IDOR(读/杀/续接他人会话,`main.py:181-484`)
 - agent mission/execution-context 单资源 IDOR(`agent/router.py:149-156,919-927`)
 - release 部署/回滚/审批跨工作区 + list 弱授权(`release/router.py:48-128`)

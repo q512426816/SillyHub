@@ -17,7 +17,7 @@ import { ConfirmCaptcha } from "@/components/ui/confirm-captcha";
  *    → useSession.getState().setUser()，token / user 写入与桌面**完全同一个 store**，
  *    登录态与桌面互通。本页不直接订阅 useSession（login 已写回 store，守卫随之放行），
  *    故不引未用导入。
- *  - 记住密码 / 平台选择复用桌面**同一组 localStorage key**（REMEMBER_KEY / PLATFORM_KEY），
+ *  - 记住登录名 / 平台选择复用桌面**同一组 localStorage key**（REMEMBER_KEY / PLATFORM_KEY），
  *    两端回填一致。
  *  - 错误展示复用 ApiError。
  *
@@ -30,7 +30,7 @@ import { ConfirmCaptcha } from "@/components/ui/confirm-captcha";
  * /m/ 版，地址栏 URL 不变（design §5.1 / D-002@v2）。
  */
 
-/** 与桌面 (auth)/login 同一个 key：记住密码（账号+密码）缓存。 */
+/** 与桌面 (auth)/login 同一个 key：记住登录名（仅账号）缓存。 */
 const REMEMBER_KEY = "sillyhub.login.remember";
 
 interface LoginFormValues {
@@ -100,17 +100,23 @@ function MobileLoginPageInner() {
     searchParams.get("redirect") ?? searchParams.get("next"),
   );
 
-  // 回填"记住我"缓存 + 平台选择，逻辑与桌面 (auth)/login 完全一致（同一 key → 回填一致）。
+  // 回填"记住登录名"缓存 + 平台选择，逻辑与桌面 (auth)/login 完全一致（同一 key → 回填一致）。
+  // 旧版本曾把明文密码缓存进 localStorage，这里顺手改写为无密码版清掉已落盘明文（FR-04）。
   useEffect(() => {
     try {
       const raw = localStorage.getItem(REMEMBER_KEY);
       if (raw) {
         const cached = JSON.parse(raw) as Partial<LoginFormValues>;
         form.setFieldsValue({
-          account: cached.account ?? "admin",
-          password: cached.password ?? "admin123",
+          account: cached.account,
           remember: true,
         });
+        if (cached.password !== undefined) {
+          localStorage.setItem(
+            REMEMBER_KEY,
+            JSON.stringify({ account: cached.account, remember: true }),
+          );
+        }
       }
       const savedPlatform = localStorage.getItem(PLATFORM_KEY);
       if (savedPlatform === "sillyhub" || savedPlatform === "ppm") {
@@ -129,13 +135,12 @@ function MobileLoginPageInner() {
       // token 优先用入参(handleVerified 直传,避免 setCaptchaToken 异步导致闭包读到旧值)。
       await login(values.account, values.password, tokenOverride ?? captchaToken);
 
-      // 记住我:与源项目行为一致一并缓存账号+密码(仅本地浏览器)。
+      // 记住登录名:只缓存账号,绝不把明文密码写进 localStorage(仅本地浏览器)。
       if (values.remember) {
         localStorage.setItem(
           REMEMBER_KEY,
           JSON.stringify({
             account: values.account,
-            password: values.password,
             remember: true,
           }),
         );
@@ -233,7 +238,7 @@ function MobileLoginPageInner() {
 
         <Form.Item className="mb-3" name="remember" valuePropName="checked">
           {/* 触摸目标 ≥44px（R-04）：抬高整行可点区域。 */}
-          <Checkbox className="!min-h-[44px] !items-center">记住密码</Checkbox>
+          <Checkbox className="!min-h-[44px] !items-center">记住登录名</Checkbox>
         </Form.Item>
 
         {error && (

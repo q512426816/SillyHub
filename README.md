@@ -84,7 +84,7 @@ pnpm install
 pnpm dev                        # http://localhost:3000
 ```
 
-默认账号 `admin / admin123`。后端 API 文档:`http://localhost:8000/api/docs`。
+默认管理员账号按 `deploy/.env` 的 `PLATFORM_BOOTSTRAP_ADMIN_*` 配置（部署前务必设置为强口令）。后端 API 文档:`http://localhost:8000/api/docs`。
 
 ### 全栈容器化
 

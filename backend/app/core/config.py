@@ -13,10 +13,30 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from app.core.paths import resolve_spec_data_root
+
+# 常见弱口令黑名单（task-03 / FR-05 / D-002@v1）：bootstrap 管理员口令命中即拒，
+# 在配置加载期 fail-fast，连 lifespan 都不进。仅覆盖最常见占位口令，非穷举字典。
+# 与现有测试口令（Xx1!abcd / OldPass1! / NewPass1! / Admin123!@#）零碰撞。
+_WEAK_BOOTSTRAP_PASSWORDS = frozenset(
+    {
+        "admin123",
+        "admin1234",
+        "admin@123",
+        "password",
+        "password123",
+        "passwd123",
+        "12345678",
+        "123456789",
+        "1234567890",
+        "qwerty123",
+        "letmein123",
+        "welcome123",
+    }
+)
 
 
 class Settings(BaseSettings):
@@ -288,6 +308,31 @@ class Settings(BaseSettings):
                 return json.loads(stripped)
             return [item.strip() for item in stripped.split(",") if item.strip()]
         return raw
+
+    @field_validator("platform_bootstrap_admin_password")
+    @classmethod
+    def _reject_weak_bootstrap_password(cls, v: str | None, info: ValidationInfo) -> str | None:
+        """Reject weak / well-known bootstrap admin passwords at config load.
+
+        FR-05 / D-002@v1: fail-fast before lifespan boots, so a leaked default
+        like ``admin123`` never produces a runnable admin account. ``None``
+        passes (D-004: bootstrap is opt-in, missing config = no account).
+        Cross-field check against the login name is safe here because
+        ``platform_bootstrap_admin_email`` is defined before this field, so
+        ``info.data`` already holds it (verified against pydantic v2).
+        """
+        if v is None:
+            return v
+        if v in _WEAK_BOOTSTRAP_PASSWORDS:
+            raise ValueError(
+                "platform_bootstrap_admin_password 是常见弱口令，请改为强口令"
+                "（≥12 位、含大小写/数字/符号）"
+            )
+        email_raw = info.data.get("platform_bootstrap_admin_email") or ""
+        email_local = email_raw.split("@", 1)[0].lower()
+        if email_local and email_local == v.lower():
+            raise ValueError("platform_bootstrap_admin_password 不能与登录名相同")
+        return v
 
     @property
     def resolved_commit_sha(self) -> str:
