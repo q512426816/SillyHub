@@ -117,6 +117,11 @@ class IncidentService:
                     incident.resolved_by = uuid.UUID(data.resolved_by)
 
         if data.severity is not None:
+            if data.severity not in VALID_SEVERITIES:
+                raise IncidentError(
+                    f"Invalid severity: {data.severity}",
+                    details={"severity": data.severity},
+                )
             incident.severity = data.severity
         if data.description is not None:
             incident.description = data.description

@@ -335,6 +335,9 @@ class WorktreeAcquireFailed(AppError):
 
 
 def _request_id(request: Request) -> str:
+    rid = getattr(request.state, "request_id", None)
+    if rid:
+        return rid
     rid = request.headers.get("x-request-id")
     if rid:
         return rid

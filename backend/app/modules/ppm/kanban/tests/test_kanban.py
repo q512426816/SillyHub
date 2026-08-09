@@ -433,3 +433,25 @@ async def test_kanban_search_users_http(kanban_client, db_session):
     body = resp.json()
     assert len(body) == 1
     assert body[0]["username"] == "张三"
+
+
+def test_parse_date_range_returns_utc_aware():
+    """_parse_date_range 返回的 datetime 须带 tzinfo=UTC（PlanTask.end_time 是 timestamptz，
+    生产 PG 对 timestamptz 列传 naive datetime 会 InterfaceError 或时区错移；aiosqlite 抓不到）。"""
+    from datetime import UTC
+
+    from app.modules.ppm.kanban.service import _parse_date_range
+
+    start_dt, end_dt = _parse_date_range("2026-08-09", "2026-08-09")
+    assert start_dt is not None
+    assert end_dt is not None
+    assert start_dt.tzinfo == UTC
+    assert end_dt.tzinfo == UTC
+
+
+def test_parse_date_range_none_when_empty():
+    from app.modules.ppm.kanban.service import _parse_date_range
+
+    start_dt, end_dt = _parse_date_range(None, None)
+    assert start_dt is None
+    assert end_dt is None

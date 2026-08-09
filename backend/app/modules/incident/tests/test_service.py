@@ -236,3 +236,30 @@ async def test_get_postmortem_not_found(db_session):
     svc = IncidentService(db_session)
     with pytest.raises(PostmortemNotFound):
         await svc.get_postmortem(uuid.uuid4())
+
+
+async def test_update_invalid_severity(db_session):
+    """update 必须像 create 一样校验 severity（原 update 直接落库可写入非法值）。"""
+    ws_id = await _make_workspace(db_session)
+    user_id = await _make_user(db_session)
+
+    from app.modules.incident.schema import IncidentCreate, IncidentUpdate
+
+    svc = IncidentService(db_session)
+    incident = await svc.create(ws_id, user_id, IncidentCreate(title="Bad sev"))
+
+    with pytest.raises(IncidentError, match="Invalid severity"):
+        await svc.update(incident.id, IncidentUpdate(severity="extreme"))
+
+
+async def test_update_valid_severity(db_session):
+    ws_id = await _make_workspace(db_session)
+    user_id = await _make_user(db_session)
+
+    from app.modules.incident.schema import IncidentCreate, IncidentUpdate
+
+    svc = IncidentService(db_session)
+    incident = await svc.create(ws_id, user_id, IncidentCreate(title="Updatable sev"))
+
+    updated = await svc.update(incident.id, IncidentUpdate(severity="critical"))
+    assert updated.severity == "critical"

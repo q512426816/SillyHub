@@ -109,13 +109,13 @@ def _parse_date_range(
     if start_date:
         try:
             d = date.fromisoformat(start_date)
-            start_dt = datetime.combine(d, time.min)
+            start_dt = datetime.combine(d, time.min, tzinfo=UTC)
         except ValueError:
             start_dt = None
     if end_date:
         try:
             d = date.fromisoformat(end_date)
-            end_dt = datetime.combine(d, time.max)
+            end_dt = datetime.combine(d, time.max, tzinfo=UTC)
         except ValueError:
             end_dt = None
     return start_dt, end_dt

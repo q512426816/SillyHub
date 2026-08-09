@@ -29,7 +29,11 @@ def _extract_title(content: str) -> str | None:
 def _read_file_safe(path: Path) -> tuple[str, bool]:
     size = path.stat().st_size
     if size > MAX_CONTENT_BYTES:
-        return path.read_text(encoding="utf-8", errors="replace")[: MAX_CONTENT_BYTES // 4], True
+        # 超大文件只读取前 MAX_CONTENT_BYTES // 4 字节，避免整文件读入内存（OOM 防护）。
+        limit = MAX_CONTENT_BYTES // 4
+        with path.open("rb") as f:
+            raw = f.read(limit)
+        return raw.decode("utf-8", errors="replace"), True
     return path.read_text(encoding="utf-8", errors="replace"), False
 
 

@@ -66,3 +66,27 @@ def test_path_traversal_rejected(tmp_path: Path) -> None:
 
     entries = parse_md_directory(outside_dir, knowledge_dir, ".sillyspec/knowledge")
     assert entries == []
+
+
+def test_read_file_safe_small_file(tmp_path: Path) -> None:
+    from app.modules.knowledge.parser import _read_file_safe
+
+    f = tmp_path / "small.md"
+    f.write_text("# Small\nContent", encoding="utf-8")
+    content, truncated = _read_file_safe(f)
+    assert truncated is False
+    assert content == "# Small\nContent"
+
+
+def test_read_file_safe_large_file_truncates_without_full_read(tmp_path: Path) -> None:
+    """超大文件只读取前 MAX_CONTENT_BYTES // 4 字节，不整文件读入内存（OOM 防护）。"""
+    from app.modules.knowledge.parser import MAX_CONTENT_BYTES, _read_file_safe
+
+    f = tmp_path / "large.md"
+    # 纯 ASCII（1 字节 = 1 字符），超过 MAX_CONTENT_BYTES
+    f.write_bytes(b"a" * (MAX_CONTENT_BYTES + 100))
+    content, truncated = _read_file_safe(f)
+    limit = MAX_CONTENT_BYTES // 4
+    assert truncated is True
+    # 只读了前 limit 字节，而不是整文件后再切片
+    assert len(content) == limit
