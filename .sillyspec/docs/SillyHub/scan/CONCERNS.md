@@ -25,7 +25,7 @@ generator: sillyspec-scan
 - **change_writer doc_type 路径穿越写**:`change_writer/service.py:243-251`(doc_type 仅 min/max_length,未命中白名单时直接当文件名拼接)+ `schema.py:35`。`doc_type="../.."`(≤30 字符)可从 change_dir 一路 `..` 到 `/data` 任意位置 `write_text` 攻击者控制内容;content 字段无 max_length。
 - **tool_policies 执行路径完全失效**:`tool_gateway/router.py:34-36`(execute_tool 不传 policy)+ `service.py:148-149`(policy is None → default_policy 全放行);文档引用的 `_load_policy` 方法不存在。管理员配的 blocked_commands/allowed_domains/allowed_tools/max_timeout 从不生效。
 - **前端 Markdown 存储型 XSS**:`frontend/src/components/ui/markdown-text.tsx:20-34`(未配 rehype-sanitize、未限 href 协议;库 `@uiw/react-markdown-preview` 默认开 rehype-raw)。agent 输出/自定义技能/扫描仓库文档/会话日志中的任意 HTML 直接执行;配合 localStorage 的 JWT + 明文密码(见下)可接管账号。渲染点:agent-log-viewer.tsx:448、interactive-session-panel.tsx:1353/1506/1578、custom-skill-edit-dialog.tsx:265、scan-docs/page.tsx:282。
-- **登录明文密码存 localStorage + 默认 admin/admin123**:`frontend/src/app/(auth)/login/page.tsx:46-53`("记住密码"明文 setItem)+ `app/m/login/page.tsx:106,134`(移动端同);源码默认值 `admin/admin123` 写进 bundle。
+- ✅ 已修复(change 2026-08-09-security-credentials-hygiene) **登录明文密码存 localStorage + 默认 admin/admin123**:`frontend/src/app/(auth)/login/page.tsx:46-53`(原"记住密码"明文 setItem,已改为只缓存账号 + 旧缓存一次性清洗)+ `app/m/login/page.tsx:106,134`(移动端同改);源码默认值 `admin/admin123` 回填已删、文案改"记住登录名",`config.py` 加载期拒 admin123 等弱口令 fail-fast,`deploy/.env` 改强口令、README/audit/2 skill 占位化。
 
 ### 2026-08-08 多代理审计 · 资源泄漏 / 状态机
 
@@ -62,9 +62,9 @@ generator: sillyspec-scan
 - 导入上传大小校验在 `file.read()` 之后:`plan/router.py:373-374`(2GB 文件先撑爆内存再被 413 拒)。
 
 **网关 / 外部集成**
-- mcp webhook SSRF:`mcp_gateway/router.py:207`+`service.py:549-552`(url 无 scheme/私网校验,可注册内网/云元数据 `169.254.169.254` 回调)。
-- worktree clone repo_url 无 scheme 白名单:`worktree/git_runner.py:79`(`ext::` 可 backend 容器内 RCE / `file://` 读本地 / 任意 ssh SSRF)。
-- http_get SSRF 重定向不复查 + IPv6 私网绕过:`tool_gateway/service.py:537`+`tool_policy.py:302`(follow_redirects=True 不重跑校验;_check_not_private_ip 仅 AF_INET,不挡 ::1/fc00::)。
+- ✅ 已修复(change 2026-08-09-security-backend-guardrails) mcp webhook SSRF:`mcp_gateway/router.py:207`+`service.py:549-552`(原 url 无 scheme/私网校验,可注册内网/云元数据 `169.254.169.254` 回调;已加 create 注册前 + _deliver_one 投递前 `assert_public_url` 全量 SSRF 复查,拒内网/本机/云元数据/file://,投递 best-effort 防 DNS 重绑定)。
+- ✅ 已修复(change 2026-08-09-security-backend-guardrails) worktree clone repo_url 无 scheme 白名单:`worktree/git_runner.py:79`(原 `ext::` 可 backend 容器内 RCE / `file://` 读本地 / 任意 ssh SSRF;已加 clone_bare 前 `assert_safe_repo_url` 协议白名单,拒 ext::/file:///裸路径/Windows 盘符,放行 https/ssh/git/scp-like 含内网 git)。
+- ✅ 已修复(change 2026-08-09-security-backend-guardrails) http_get SSRF 重定向不复查 + IPv6 私网绕过:`tool_gateway/service.py:537`+`tool_policy.py:302`(原 follow_redirects=True 不重跑校验;_check_not_private_ip 仅 AF_INET 不挡 ::1/fc00::;已改 follow_redirects=False 手动逐跳≤3跳 + 每跳 `assert_public_url` 复查 IPv4+IPv6+重定向,缺 Location 返 Invalid redirect)。
 - git_operation_logs.args_json 明文存含 token 参数:`git_gateway/service.py:246`(redact_output 只处理 output 不处理 args,PAT 落库 + 经 API 回显)。
 - 对外 MCP dispatch_worker 的 worktree_path 无校验:`mcp_gateway/tools.py:346`+`agent/execution.py:203-204`(backend 对绝对路径零校验直接作 worker cwd;最终可利用性依赖 daemon 端 allowed_roots)。
 - askpass 脚本/gitconfig 注入:`worktree/exec_env.py:89,91,78,82`(token/git_username 未转义,Unix 双引号不防 `$(...)`、Windows cmd 不防 `&|`)。
@@ -78,7 +78,7 @@ generator: sillyspec-scan
 - JWT secret_key 最小长度仅 16:`config.py:37`(HS256 共享密钥,低熵可离线爆破/伪造,且无轮换机制)。
 
 **长尾模块**
-- incident 状态机无转换校验:`incident/service.py:99-133`(任意 status 互跳,终态可复活)。 ⚠️ 部分修复(ql-20260809-003-56db):update 的 severity 校验已补齐与 create 对称;**status 转换校验(终态可复活)仍待办**。
+- ✅ 已修复(change 2026-08-09-security-backend-guardrails) incident 状态机无转换校验:`incident/service.py:99-133`(原任意 status 互跳,终态可复活;severity 校验由 ql-20260809-003-56db 补齐;本 change 加 INCIDENT_TRANSITIONS 放宽版图 + 复用 ppm/common/fsm.assert_transition 校验非法转换返 422,resolved 仅可重开→investigating 且清 resolved_at/by,同态幂等)。 ⚠️ 部分修复(ql-20260809-003-56db):update 的 severity 校验已补齐与 create 对称;~~status 转换校验(终态可复活)仍待办~~ status 转换校验已由本 change 补齐。
 - task reparse "未解析到就全删":`task/service.py:159-161,197-200`(破坏性硬删无阈值,解析结果为空时该 change 下全部既有 task 被删)。
 - workflow spec_guardian 是死代码:`workflow/spec_guardian.py:193`(run_guard 全仓仅测试引用,G3-G7 质量/文档/组件/未解决 reject 门从未生效)。
 - /system-status 无鉴权泄漏系统指标:`health/router.py:80-126`(cpu/mem/disk 用量 + COUNT,匿名可调 + 轻 DoS)。

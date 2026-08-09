@@ -86,4 +86,6 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 - ql-20260809-003-56db | 多代理审计 8 个低风险单点修复（frontend 部分 2 处）：lib/daemon.ts 删生产 SSE onmessage 的 console.log("[SSE-raw]", ...)（泄漏前 150 字 + 性能噪声）；components/daemon/machine-card.tsx 升级按钮 disabled 加 || upgrading + title 提示「升级中…」（防双击双发自更新，props.upgrading 父组件 runtimes/page.tsx 已传）。machine-card vitest 9 passed + eslint 0 error。
 
+- change 2026-08-09-security-credentials-hygiene | 安全凭据卫生（前端部分）：桌面 `(auth)/login/page.tsx` 与移动 `m/login/page.tsx` 删 localStorage 明文密码缓存（"记住我"原 setItem 含 password，改只缓存 `{account,remember}`）+ 删 admin/admin123 默认回填（无缓存时账号密码均空）+ 旧格式缓存一次性改写清洗已落盘明文（cached.password!==undefined 时重写）+ 复选框文案"记住密码"→"记住登录名"。tsc --noEmit 零错、next lint 两登录页零新增问题。
+
 <!-- MANUAL_NOTES_END -->

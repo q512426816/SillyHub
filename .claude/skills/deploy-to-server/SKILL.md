@@ -161,7 +161,7 @@ TOKEN=$(ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'curl -fsS -H "Content-T
   -d "{\"email\":\"admin@sillyhub.local\",\"password\":\"<密码>\"}" \
   http://127.0.0.1:8001/api/auth/login' | jq -r .access_token)
 ```
-> 默认账号按 `.env` 的 `PLATFORM_BOOTSTRAP_ADMIN_*`。登录用 username 非 email（见 memory `login-by-username-not-email`，默认 admin/admin123 或 `.env` 密码）。
+> 账号按 `deploy/.env` 的 `PLATFORM_BOOTSTRAP_ADMIN_EMAIL` / `PLATFORM_BOOTSTRAP_ADMIN_PASSWORD`（部署前务必改为强口令）。登录用 username 非 email（见 memory `login-by-username-not-email`）。
 
 ## 常见坑
 

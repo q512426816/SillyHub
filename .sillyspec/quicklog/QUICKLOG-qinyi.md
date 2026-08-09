@@ -309,3 +309,13 @@
 根因：均为审计发现的既有缺陷——鉴权装饰器误用 require_permission vs require_permission_any、update 路径与 create 校验不对称、中间件已写 state 但错误处理器只读 header、大文件整读再切片、datetime.combine 缺 tzinfo、生产代码残留 console.log、按钮缺 upgrading 守卫。
 方案：后端 5 处（release router 改 require_permission_any；incident update 补 VALID_SEVERITIES 校验；errors _request_id 优先读 request.state；knowledge parser 改限量读前 MAX_CONTENT_BYTES//4 字节；kanban _parse_date_range 加 tzinfo=UTC）+ 前端 2 处（daemon.ts 删 SSE console.log；machine-card 升级按钮加 upgrading 守卫）+ daemon 1 处（session-manager 删 3 处 reload-diag 调试 log），每条配针对性测试。
 结果：后端 pytest 110 passed、前端 machine-card vitest 9 passed、daemon reload-provider vitest 11 passed；后端 ruff check+format 全过、daemon tsc 无错、前端 eslint 0 error（16 预存 warning 与本次无关）。
+
+## ql-20260809-004-298c | 2026-08-09 14:14:22 | 修复 backend 登录测试 redis 跨测试污染 flaky（全量 HTTP_423 captcha 误触发）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/conftest.py（+autouse async fixture `_reset_redis_state`，function scope：每测试 setup 重置 `redis._client=None` 强制当前 loop 重建 + `flushdb()` 清 db15 残留；teardown `aclose`+置 None 防连接池跨 loop 泄漏；redis 不可用 best-effort 跳过）
+需求：修复 backend 登录测试 order-dependent flaky（全量 HTTP_423 LOGIN_CAPTCHA_REQUIRED 误触发，单跑全过），让全量 pytest 稳定全绿。
+根因：captcha_service 把登录失败计数 INCR login:fail:{ip} 写共享 redis db15（conftest REDIS_URL），测试客户端同 IP 127.0.0.1 跨测试累计过 auth_login_fail_threshold 触发 captcha(423)；叠加 get_redis() 进程级单例连接池绑首个 loop，pytest-asyncio 每测试新 loop 致 INCR 报 Event loop is closed；conftest 完全无 redis reset。
+方案：backend/conftest.py 加 autouse async fixture _reset_redis_state（function scope），每测试 setup 重置 _client=None 强制 get_redis() 在当前 loop 重建（解跨 loop）+ flushdb() 清 db15 残留计数；teardown aclose+置 None 防连接池泄漏；redis 不可用 try/except 降级跳过。纯测试侧，零生产代码改动。
+结果：复现范围 auth+admin/users_router 修复前 7 failed→修复后 177 passed/0 failed；全量 backend 修复前 3651 passed/5 failed→修复后 3656 passed/0 failed（exit 0，1772s）。flaky 彻底消除。已暂存 backend/conftest.py。

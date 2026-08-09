@@ -371,7 +371,7 @@ PLATFORM_BOOTSTRAP_ADMIN_PASSWORD=...
 
 ```bash
 TOKEN=$(curl -fsS -H 'Content-Type: application/json' \
-  -d '{"email":"admin@sillyhub.local","password":"admin123"}' \
+  -d '{"email":"admin@sillyhub.local","password":"<上面 .env 设的 PLATFORM_BOOTSTRAP_ADMIN_PASSWORD>"}' \
   http://127.0.0.1:8001/api/auth/login | jq -r '.access_token')
 
 # root_path 示例：macOS 用 /Users/qinyi/SillyHub；Windows 用 C:/Users/qinyi/IdeaProjects/multi-agent-platform
