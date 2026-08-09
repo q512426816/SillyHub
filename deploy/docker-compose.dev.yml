@@ -52,7 +52,63 @@ services:
       timeout: 3s
       retries: 20
 
+  litellm-db:
+    # Wave2 LiteLLM 转换网关的独立 store DB（独立于项目 postgres，避 alembic_version 冲突）。
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD:-litellm}
+    volumes:
+      - litellm-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm -d litellm"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  litellm:
+    # Wave2 Anthropic↔OpenAI 转换网关（FR-05）。dev：backend 在 host，经 127.0.0.1 映射访问。
+    # config 形态 / health 端点 / 镜像 tag 以 spike-litellm-routing 实测定稿。
+    image: ghcr.io/berriai/litellm:main-stable
+    restart: always
+    depends_on:
+      litellm-db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?must set LITELLM_MASTER_KEY}
+      STORE_MODEL_IN_DB: "True"
+      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:-litellm}@litellm-db:5432/litellm
+    volumes:
+      - ./litellm-config.yaml:/app/config.yaml
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    healthcheck:
+      # litellm 镜像无 curl（端到端联调发现 healthcheck 永远 unhealthy，违 NFR-03），改 python urllib
+      # （litellm 是 python 应用，python 在 PATH）。task-08 返工 2026-08-09。
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveness')\" || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # dev：backend 容器化（主 compose multi-agent-platform_default 网络）时，litellm 须加入同网络让
+    # backend 经主机名 litellm 访问（端到端联调发现：原注释假设 backend 在 host 与实际容器化矛盾，
+    # 跨 compose 网络不通，违 FR-05，task-08 返工 2026-08-09）。litellm 同时留 default 网络连 litellm-db。
+    networks:
+      - default
+      - multi-agent-platform-default
+    ports:
+      - "127.0.0.1:${LITELLM_PORT:-4000}:4000"
+
+networks:
+  # 主 compose（multi-agent-platform）的 default 网络，backend 容器在此。litellm 加入让 backend 可达。
+  multi-agent-platform-default:
+    external: true
+    name: multi-agent-platform_default
+
 volumes:
   pgdata:
   redisdata:
   minio-data:
+  litellm-db-data:

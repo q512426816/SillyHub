@@ -145,6 +145,9 @@ class DefaultSwitchResult:
     switched: bool
     affected_sessions: int
     error: str | None = None
+    # task-09（D-003 / R-09）：openai 格式 set-default 联动 LiteLLM 注册结果（True/False）；
+    # anthropic 格式 / 凭证失败 / unset 场景为 None（router 透传 SetDefaultResult.litellm_registered）。
+    litellm_registered: bool | None = None
 
 
 class LlmProviderService:
@@ -205,6 +208,7 @@ class LlmProviderService:
             notes=data.notes,
             website_url=data.website_url,
             auth_field=data.auth_field,
+            api_format=data.api_format,
             model_role_mappings=data.model_role_mappings,
             default_fallback_model=data.default_fallback_model,
             extra_env=data.extra_env,
@@ -255,6 +259,12 @@ class LlmProviderService:
 
     async def delete(self, provider_id: uuid.UUID, user_id: uuid.UUID) -> None:
         row = await self.get(provider_id, user_id)
+        # task-09 / D-003：openai 格式联动注销 LiteLLM（delete 行前注销，best-effort 不阻塞）。
+        # anthropic 格式不经 LiteLLM 跳过。
+        if row.api_format == "openai_chat":
+            from app.modules.llm_provider import litellm_client
+
+            await litellm_client.unregister(litellm_client.litellm_model_name(row.user_id, row.id))
         await self._session.delete(row)
         await self._session.commit()
         log.info("llm_provider.deleted", provider_id=str(provider_id))
@@ -315,6 +325,7 @@ class LlmProviderService:
             api_key=api_key_plain,
             auth_field=row.auth_field,
             model=row.model,
+            api_format=row.api_format,
         )
         if not probe_result.ok:
             # D-003：凭证无效 → 不改 is_default、不推送，原供应商继续服务运行中会话。
@@ -337,9 +348,25 @@ class LlmProviderService:
         await self._session.refresh(row)
         log.info("llm_provider.set_default", provider_id=str(row.id))
 
+        # ── step 2.5: openai 格式联动注册 LiteLLM（task-09 / D-003 / R-09 best-effort）──
+        # is_default 已 commit 不可回滚；register 失败仅 litellm_registered=False（前端 toast 提示
+        # 网关注册失败），不阻塞 set 成功（design §10 R-09 已知降级态，优于静默成功）。anthropic
+        # 格式不经 LiteLLM，litellm_registered=None。明文 key 仅传 LiteLLM 请求体（R-02）。
+        litellm_registered: bool | None = None
+        if row.api_format == "openai_chat":
+            from app.modules.llm_provider import litellm_client
+
+            litellm_registered = await litellm_client.register(
+                row, user_id=row.user_id, cipher=self._cipher
+            )
+
         # ── step 3: 触发热切换推送（D-001 / D-006 单一真相源 helper）──
         affected = await self._dispatch_provider_switch(row.user_id, row.agent_kind, unset=False)
-        return DefaultSwitchResult(switched=True, affected_sessions=affected)
+        return DefaultSwitchResult(
+            switched=True,
+            affected_sessions=affected,
+            litellm_registered=litellm_registered,
+        )
 
     async def unset_default(
         self,
@@ -370,6 +397,13 @@ class LlmProviderService:
         await self._session.commit()
         await self._session.refresh(row)
         log.info("llm_provider.unset_default", provider_id=str(row.id))
+
+        # task-09 / D-003：openai 格式联动注销 LiteLLM（best-effort，不阻塞 unset）。
+        # anthropic 格式不经 LiteLLM 跳过。明文 key 不涉及（unregister 只按 model_name）。
+        if row.api_format == "openai_chat":
+            from app.modules.llm_provider import litellm_client
+
+            await litellm_client.unregister(litellm_client.litellm_model_name(row.user_id, row.id))
 
         # task-03 / D-004：触发热切换推送（provider_config=None → daemon 回退本机）。
         affected = await self._dispatch_provider_switch(row.user_id, row.agent_kind, unset=True)
@@ -493,9 +527,11 @@ class LlmProviderService:
         ``LlmProviderModelsUnsupported``；全失败→``LlmProviderModelsAllFailed``；
         超时→``LlmProviderModelsTimeout``。明文 key 永不进响应 / 日志。
         """
-        base_url, api_key_plain, auth_field = await self._resolve_fetch_credentials(user_id, data)
-        headers = self._build_auth_headers(api_key_plain, auth_field)
-        candidates = self._candidate_urls(base_url)
+        base_url, api_key_plain, auth_field, api_format = await self._resolve_fetch_credentials(
+            user_id, data
+        )
+        headers = self._build_auth_headers(api_key_plain, auth_field, api_format)
+        candidates = self._candidate_urls(base_url, api_format)
 
         last_status: int | None = None
         last_kind: str | None = None
@@ -565,12 +601,14 @@ class LlmProviderService:
         self,
         user_id: uuid.UUID,
         data: FetchModelsRequest,
-    ) -> tuple[str, str, str]:
-        """双形态凭证解析 → (base_url, api_key_plain, auth_field)。
+    ) -> tuple[str, str, str, str]:
+        """双形态凭证解析 → (base_url, api_key_plain, auth_field, api_format)。
 
-        - ``provider_id``：查行 + ``cipher.decrypt`` 取明文 key；用 row.base_url / row.auth_field。
+        - ``provider_id``：查行 + ``cipher.decrypt`` 取明文 key；用 row.base_url /
+          row.auth_field / row.api_format（编辑态格式从行读，FR-01）。
         - inline：直接取 data 字段（schema validator 已保证 base_url + api_key 同时非空）。
-          ``auth_field`` 缺省回退 ``ANTHROPIC_AUTH_TOKEN``（与 schema 默认一致）。
+          ``auth_field`` 缺省回退 ``ANTHROPIC_AUTH_TOKEN``；``api_format`` 缺省回退 ``anthropic``
+          （NFR-02 零回归，新建态未指定格式时按 anthropic 走）。
 
         明文 key 仅以局部变量存在，永不落库 / 入日志 / 入响应（NFR-02）。
         """
@@ -580,12 +618,14 @@ class LlmProviderService:
             api_key_plain: str = self._cipher.decrypt(row.encrypted_api_key, row.key_id)
             base_url: str | None = row.base_url
             auth_field: str = row.auth_field
+            api_format: str = row.api_format
         else:
             # inline 形态：schema validator 保证非 None，做类型 narrowing
             assert data.base_url is not None and data.api_key is not None
             api_key_plain = data.api_key
             base_url = data.base_url
             auth_field = data.auth_field or "ANTHROPIC_AUTH_TOKEN"
+            api_format = data.api_format or "anthropic"
 
         if not base_url:
             raise LlmProviderModelsUnsupported(
@@ -597,15 +637,23 @@ class LlmProviderService:
                 "Provider has no api_key to authenticate.",
                 details={"reason": "missing_api_key"},
             )
-        return base_url, api_key_plain, auth_field
+        return base_url, api_key_plain, auth_field, api_format
 
     @classmethod
-    def _build_auth_headers(cls, api_key: str, auth_field: str) -> dict[str, str]:
-        """按 auth_field 产鉴权头（FR-03）。
+    def _build_auth_headers(
+        cls,
+        api_key: str,
+        auth_field: str,
+        api_format: str = "anthropic",
+    ) -> dict[str, str]:
+        """按 api_format + auth_field 产鉴权头（FR-03 / D-002@v1）。
 
+        - ``openai_chat`` → 恒 ``Authorization: Bearer <key>``（忽略 auth_field，D-002@v1）；
         - ``ANTHROPIC_API_KEY`` → ``x-api-key: <key>`` + ``anthropic-version: 2023-06-01``；
         - ``ANTHROPIC_AUTH_TOKEN``（默认）→ ``Authorization: Bearer <key>``。
         """
+        if api_format == "openai_chat":
+            return {"Authorization": f"Bearer {api_key}"}
         if auth_field == "ANTHROPIC_API_KEY":
             return {
                 "x-api-key": api_key,
@@ -614,13 +662,36 @@ class LlmProviderService:
         return {"Authorization": f"Bearer {api_key}"}
 
     @classmethod
-    def _candidate_urls(cls, base_url: str) -> list[str]:
+    def _strip_openai_suffix(cls, base_url: str) -> str:
+        """剥 OpenAI 完整端点 URL 尾部 ``/chat/completions`` → 得 base（FR-02 / D-001@v1）。
+
+        兼容尾斜杠；非标准 URL（尾部无 ``/chat/completions``）原样返回（R-06 兜底，不抛错）。
+        例：``https://x/v1/chat/completions`` → ``https://x/v1``；
+        ``https://x/v1/chat/completions/`` → ``https://x/v1``；``https://x/v1`` → ``https://x/v1``。
+        """
+        base = base_url.rstrip("/")
+        if base.endswith("/chat/completions"):
+            return base[: -len("/chat/completions")]
+        return base
+
+    @classmethod
+    def _candidate_urls(cls, base_url: str, api_format: str = "anthropic") -> list[str]:
         """候选 URL 列表（顺序尝试，NFR-03 不并发防中转站限流）。
 
-        主候选 = ``base_url.rstrip('/') + '/v1/models'``。
-        若 base 尾部含 ``/anthropic`` / ``/compatibility`` / ``/api`` 子路径 → 剥离后再加一候选
-        （cc-switch 范式，对中转站 404 兜底）。
+        - ``openai_chat``：先 ``_strip_openai_suffix`` 归一完整端点 URL，再产
+          ``[base/models, base/v1/models]``（兼容 base 是否含 /v1，FR-04）；
+        - ``anthropic``：主候选 = ``base_url.rstrip('/') + '/v1/models'``；若 base 尾部含
+          ``/anthropic`` / ``/compatibility`` / ``/api`` 子路径 → 剥离后再加一候选
+          （cc-switch 范式，对中转站 404 兜底）。逐字不变（NFR-02）。
         """
+        if api_format == "openai_chat":
+            base = cls._strip_openai_suffix(base_url)
+            result = [f"{base}/models"]
+            v1_url = f"{base}/v1/models"
+            if v1_url not in result:
+                result.append(v1_url)
+            return result
+
         base = base_url.rstrip("/")
         candidates: list[str] = [f"{base}/v1/models"]
         for suffix in cls._STRIP_SUFFIXES:

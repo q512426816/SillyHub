@@ -1,0 +1,25 @@
+# LiteLLM 网关最小配置（Wave2，change 2026-08-08-llm-provider-openai-format / FR-05）。
+#
+# admin API 动态注册模式（design D-004 + spike-litellm-routing 倾向方案）：
+#   - model_list 起步为空，openai 供应商 set-default 时后端经 POST /model/new 注册
+#     model_name=usr-<uid>-<pid>（task-09 litellm_client.register）；
+#   - LiteLLM 按 model_name 路由，Anthropic /v1/messages → OpenAI 上游流式 + 工具调用
+#     转换由 LiteLLM 承担（D-012，平台代码不实现转换）。
+#
+# ⚠️ master key 不进本文件，走 env LITELLM_MASTER_KEY（R-05，docker-compose 注入）。
+#    store_model_in_db 经 env STORE_MODEL_IN_DB=True 开（admin API 注册需 DB 持久化）。
+#
+# config 形态 / 路由策略 / drop_params 以 spike-litellm-routing 实测定稿（R-01/C-02 前置门）。
+# spike 未跑前为本假设；spike 推翻（如改 virtual key / config.yaml 静态 + /reload）则本文件
+# 与 task-09 litellm_client 一并调整。
+model_list: []
+
+litellm_settings:
+  # 客户端（Claude Code）发的 anthropic-only 参数，上游 openai 不认的自动丢弃，
+  # 避免上游 400 拒收（spike 验证 tool_use↔function 转换时确认）。
+  drop_params: true
+
+router_settings:
+  # 单 model_name 单上游实例（每用户每 provider 一个 model_name），无需负载均衡，
+  # simple-shuffle 足够（spike 定稿可改）。
+  routing_strategy: simple-shuffle

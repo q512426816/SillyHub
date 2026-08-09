@@ -47,6 +47,7 @@ async def probe_provider(
     api_key: str,
     auth_field: str = "ANTHROPIC_AUTH_TOKEN",
     model: str | None = None,
+    api_format: str = "anthropic",
 ) -> ProviderProbeResult:
     """轻量请求验 key/base_url 有效性（task-01 / D-003）。
 
@@ -54,9 +55,12 @@ async def probe_provider(
     TODO(spike-01)：实测 GLM/kimi 兼容端点后确认/调整探测形态——若 /v1/models 不通，
     改为极简 messages completion 二选一（task-01 implementation 第 1 条）。
 
-    候选 URL 顺序尝试（复用 ``LlmProviderService._candidate_urls``，NFR-03 不并发防
-    中转站限流）：``base + /v1/models`` → 剥离 ``/anthropic``/``/compatibility``/``/api``
-    子路径再试。
+    候选 URL + 鉴权头按 ``api_format`` 走（task-02 / FR-03/FR-04，复用 service helper，
+    单一来源防漂移）：
+    - ``openai_chat``：``_strip_openai_suffix`` 归一后产 ``[base/models, base/v1/models]``
+      + 恒 Bearer；
+    - ``anthropic``：``base + /v1/models`` → 剥离 ``/anthropic``/``/compatibility``/``/api``
+      子路径再试 + auth_field 鉴权头。逐字不变（NFR-02）。
 
     失败归类（不抛异常）：
     - 401/403 → 立即返回鉴权失败（再试其它候选也是 401/403，无意义）；
@@ -67,16 +71,17 @@ async def probe_provider(
         base_url: 上游 base URL（含 scheme + host，可带 /anthropic 等子路径）。
         api_key: 明文 API Key（仅局部变量，永不入日志 / 返回值，R-02）。
         auth_field: 鉴权头字段（``ANTHROPIC_AUTH_TOKEN`` 默认 → Bearer；
-            ``ANTHROPIC_API_KEY`` → x-api-key + anthropic-version）。
+            ``ANTHROPIC_API_KEY`` → x-api-key + anthropic-version）。openai_chat 时忽略（D-002@v1）。
         model: 预留参数（/v1/models 探测形态不使用；spike-01 若改 completion 形态会用到）。
+        api_format: API 格式（``anthropic`` 默认 / ``openai_chat``），决定鉴权头与候选 URL。
 
     Returns:
         ``ProviderProbeResult``：``ok=True`` 凭证有效；``ok=False`` + ``error`` 失败原因。
 
     明文 api_key 仅局部变量，永不入响应 / 日志（NFR-02 / R-02，同 fetch_models）。
     """
-    headers = LlmProviderService._build_auth_headers(api_key, auth_field)
-    candidates = LlmProviderService._candidate_urls(base_url)
+    headers = LlmProviderService._build_auth_headers(api_key, auth_field, api_format)
+    candidates = LlmProviderService._candidate_urls(base_url, api_format)
     timeout = LlmProviderService._FETCH_TIMEOUT  # 10s（NFR-03，同 fetch_models）
 
     last_status: int | None = None

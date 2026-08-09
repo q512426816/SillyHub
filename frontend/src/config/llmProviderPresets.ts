@@ -32,6 +32,8 @@ export interface LlmProviderPreset {
   category: LlmProviderPresetCategory;
   base_url: string;
   auth_field: "ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY";
+  /** API 协议格式（D-001@v1）；预设显式声明，openai_chat 经 LiteLLM 网关让 Claude Code 消费。 */
+  api_format: "anthropic" | "openai_chat";
   /** 默认模型（取 cc-switch ANTHROPIC_DEFAULT_SONNET_MODEL；无则 undefined）。 */
   default_model?: string;
   website_url: string;
@@ -55,6 +57,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     category: "official",
     base_url: "https://api.anthropic.com",
     auth_field: "ANTHROPIC_AUTH_TOKEN",
+    api_format: "anthropic",
     website_url: "https://www.anthropic.com/claude-code",
     icon_color: "#D4915D",
     settings_config_partial: { env: {} },
@@ -65,6 +68,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     category: "cn_official",
     base_url: "https://api.moonshot.cn/anthropic",
     auth_field: "ANTHROPIC_AUTH_TOKEN",
+    api_format: "anthropic",
     default_model: "kimi-k2.7-code",
     website_url: "https://platform.kimi.com",
     icon_color: "#6366F1",
@@ -86,6 +90,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     category: "cn_official",
     base_url: "https://api.kimi.com/coding/",
     auth_field: "ANTHROPIC_AUTH_TOKEN",
+    api_format: "anthropic",
     default_model: "kimi-for-coding",
     website_url: "https://www.kimi.com/code/",
     usage: { type: "token_plan" },
@@ -109,6 +114,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     category: "cn_official",
     base_url: "https://open.bigmodel.cn/api/anthropic",
     auth_field: "ANTHROPIC_AUTH_TOKEN",
+    api_format: "anthropic",
     default_model: "glm-5.1",
     website_url: "https://open.bigmodel.cn",
     api_key_url: "https://www.bigmodel.cn/claude-code",
@@ -131,6 +137,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     category: "cn_official",
     base_url: "https://api.deepseek.com/anthropic",
     auth_field: "ANTHROPIC_AUTH_TOKEN",
+    api_format: "anthropic",
     default_model: "deepseek-v4-pro",
     website_url: "https://platform.deepseek.com",
     usage: { type: "balance" },
@@ -152,6 +159,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     category: "aggregator",
     base_url: "https://api.siliconflow.cn",
     auth_field: "ANTHROPIC_AUTH_TOKEN",
+    api_format: "anthropic",
     default_model: "Pro/MiniMaxAI/MiniMax-M2.7",
     website_url: "https://siliconflow.cn",
     api_key_url: "https://cloud.siliconflow.cn",
@@ -174,6 +182,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     category: "aggregator",
     base_url: "https://openrouter.ai/api",
     auth_field: "ANTHROPIC_AUTH_TOKEN",
+    api_format: "anthropic",
     default_model: "anthropic/claude-sonnet-5",
     website_url: "https://openrouter.ai",
     api_key_url: "https://openrouter.ai/keys",
@@ -199,6 +208,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     category: "aggregator",
     base_url: "https://opencode.ai/zen/go",
     auth_field: "ANTHROPIC_AUTH_TOKEN",
+    api_format: "anthropic",
     default_model: "deepseek-v4-flash",
     website_url: "https://opencode.ai/go",
     api_key_url: "https://opencode.ai/go",
@@ -215,11 +225,27 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     },
   },
   {
+    // OpenCode Zen (OpenAI 格式)：opencode.ai zen 端点的 OpenAI 兼容格式
+    // (.../v1/chat/completions + Bearer)。与 opencode_go（同供应商 anthropic 格式）区分：
+    // 本条 openai_chat，经服务器 LiteLLM 网关让 Claude Code 消费，不预填 ANTHROPIC_BASE_URL
+    // （Wave2 injector 注入 litellm 地址）。default_model 待 task-07 真实拉模型后回填，不臆造。
+    key: "opencode_zen_openai",
+    name: "OpenCode Zen (OpenAI)",
+    category: "aggregator",
+    base_url: "https://opencode.ai/zen/v1/chat/completions",
+    auth_field: "ANTHROPIC_AUTH_TOKEN",
+    api_format: "openai_chat",
+    website_url: "https://opencode.ai",
+    icon_color: "#211E1E",
+    // openai 格式不预填 settings_config（经 LiteLLM 中转，不直连上游）
+  },
+  {
     key: "minimax",
     name: "MiniMax",
     category: "cn_official",
     base_url: "https://api.minimaxi.com/anthropic",
     auth_field: "ANTHROPIC_AUTH_TOKEN",
+    api_format: "anthropic",
     default_model: "MiniMax-M2.7",
     website_url: "https://platform.minimaxi.com",
     api_key_url: "https://platform.minimaxi.com/subscribe/coding-plan",
@@ -244,6 +270,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     category: "cn_official",
     base_url: "https://dashscope.aliyuncs.com/apps/anthropic",
     auth_field: "ANTHROPIC_AUTH_TOKEN",
+    api_format: "anthropic",
     website_url: "https://bailian.console.aliyun.com",
     icon_color: "#624AFF",
     // 不标 usage：DashScope 余额查询需账号 AK/SK HMAC 签名（控制面 API），非目标（D-008）。
@@ -260,6 +287,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     category: "cn_official",
     base_url: "https://coding.dashscope.aliyuncs.com/apps/anthropic",
     auth_field: "ANTHROPIC_AUTH_TOKEN",
+    api_format: "anthropic",
     website_url: "https://bailian.console.aliyun.com",
     icon_color: "#624AFF",
     // 不标 usage：同百炼，需 AK/SK 签名，非目标（D-008）。

@@ -9731,6 +9731,8 @@ export interface components {
             api_key?: string | null;
             /** Auth Field */
             auth_field?: ("ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY") | null;
+            /** Api Format */
+            api_format?: ("anthropic" | "openai_chat") | null;
         };
         /**
          * FetchModelsResponse
@@ -10413,6 +10415,12 @@ export interface components {
              * @enum {string}
              */
             auth_field: "ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY";
+            /**
+             * Api Format
+             * @default anthropic
+             * @enum {string}
+             */
+            api_format: "anthropic" | "openai_chat";
             /** Model Role Mappings */
             model_role_mappings?: {
                 [key: string]: unknown;
@@ -10466,6 +10474,8 @@ export interface components {
             website_url: string | null;
             /** Auth Field */
             auth_field: string;
+            /** Api Format */
+            api_format: string;
             /** Model Role Mappings */
             model_role_mappings: {
                 [key: string]: unknown;
@@ -10511,6 +10521,8 @@ export interface components {
             website_url?: string | null;
             /** Auth Field */
             auth_field?: ("ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY") | null;
+            /** Api Format */
+            api_format?: ("anthropic" | "openai_chat") | null;
             /** Model Role Mappings */
             model_role_mappings?: {
                 [key: string]: unknown;
@@ -14459,6 +14471,8 @@ export interface components {
             affected_sessions: number;
             /** Error */
             error?: string | null;
+            /** Litellm Registered */
+            litellm_registered?: boolean | null;
         };
         /** SettingRead */
         SettingRead: {

@@ -349,6 +349,89 @@ describe('ClaudeCredentialInjector', () => {
     expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('glm-4.6');
     expect(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBe('1');
   });
+
+  // task-11 / change 2026-08-08-llm-provider-openai-format：openai_chat 分支（经 LiteLLM 网关）。
+  // design §7.4 daemon injector openai 分支 + §5.1 数据流 + NFR-01/D-003 不注入上游 key。
+  describe('api_format=openai_chat（经 LiteLLM 网关，task-11）', () => {
+    it('openai → env 恰 {ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_MODEL} 指向 LiteLLM', () => {
+      const env = injector.toEnv({
+        ...baseConfig,
+        api_format: 'openai_chat',
+        litellm_base_url: 'http://litellm:4000',
+        litellm_auth_token: 'sk-litellm-master',
+        litellm_model_name: 'usr-111-222',
+      });
+      expect(env).toEqual({
+        ANTHROPIC_BASE_URL: 'http://litellm:4000',
+        ANTHROPIC_AUTH_TOKEN: 'sk-litellm-master',
+        ANTHROPIC_MODEL: 'usr-111-222',
+      });
+    });
+
+    it('openai 即便含上游字段也不注入（D-003/NFR-01：c.api_key/base_url/角色映射/extra_env/settings_config 全忽略）', () => {
+      const env = injector.toEnv({
+        ...baseConfig,
+        api_format: 'openai_chat',
+        litellm_base_url: 'http://litellm:4000',
+        litellm_auth_token: 'sk-litellm-master',
+        litellm_model_name: 'usr-111-222',
+        // 上游字段存在也应被 openai 早返回忽略（openai 形态 provider_config 本就不含，防御性）
+        api_key: 'sk-openai-upstream-should-not-inject',
+        base_url: 'https://opencode.ai/zen/v1',
+        auth_field: 'ANTHROPIC_AUTH_TOKEN',
+        model_role_mappings: { sonnet: { model: 'kimi-k2' } },
+        default_fallback_model: 'glm-4.6',
+        extra_env: { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' },
+        settings_config: { env: { LEAKED: 'x' } },
+      });
+      // 恰 3 个 LiteLLM 指向的 env，无任何上游泄漏
+      expect(env).toEqual({
+        ANTHROPIC_BASE_URL: 'http://litellm:4000',
+        ANTHROPIC_AUTH_TOKEN: 'sk-litellm-master',
+        ANTHROPIC_MODEL: 'usr-111-222',
+      });
+      // 关键安全断言：上游 api_key 不进 env（D-003/NFR-01）
+      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(Object.keys(env).length).toBe(3);
+      // 不走角色映射 / extra_env / settings_config
+      expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBeUndefined();
+      expect(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBeUndefined();
+      expect(env.LEAKED).toBeUndefined();
+    });
+
+    it('openai litellm_* 全缺省 → env 为空对象（不抛）', () => {
+      const env = injector.toEnv({ ...baseConfig, api_format: 'openai_chat' });
+      expect(env).toEqual({});
+    });
+
+    it('openai 仅 litellm_model_name → 只写 ANTHROPIC_MODEL', () => {
+      const env = injector.toEnv({
+        ...baseConfig,
+        api_format: 'openai_chat',
+        litellm_model_name: 'usr-111-222',
+      });
+      expect(env).toEqual({ ANTHROPIC_MODEL: 'usr-111-222' });
+    });
+
+    it('api_format=anthropic → 走既有 6 条映射规则（零回归，与 api_format 缺省逐字一致）', () => {
+      const explicit = injector.toEnv({
+        ...baseConfig,
+        api_format: 'anthropic',
+        base_url: 'https://gw.example.com',
+        api_key: 'sk-x',
+      });
+      const omitted = injector.toEnv({
+        ...baseConfig,
+        base_url: 'https://gw.example.com',
+        api_key: 'sk-x',
+      });
+      expect(explicit).toEqual(omitted);
+      expect(explicit).toEqual({
+        ANTHROPIC_BASE_URL: 'https://gw.example.com',
+        ANTHROPIC_AUTH_TOKEN: 'sk-x',
+      });
+    });
+  });
 });
 
 describe('getInjector 注册表', () => {

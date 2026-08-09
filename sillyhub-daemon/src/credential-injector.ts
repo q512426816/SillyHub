@@ -72,6 +72,22 @@ export class ClaudeCredentialInjector implements CredentialInjector {
   toEnv(c: ProviderConfig): Record<string, string> {
     const env: Record<string, string> = {};
 
+    // task-11（change 2026-08-08-llm-provider-openai-format）：openai_chat 早返回分支。
+    // openai 形态经 LiteLLM 网关：ANTHROPIC_BASE_URL/AUTH_TOKEN/MODEL 指向 LiteLLM
+    //（base_url=litellm_base_url，auth_token=litellm_auth_token/master key，
+    //  model=litellm_model_name=usr-<uid>-<pid>），LiteLLM 据 model_name 路由命中 openai
+    // 上游（D-004 / R-03，与 backend task-09 register / task-10 context 逐字对齐）。
+    // **不注入上游 api_key**（D-003/NFR-01：openai 形态 provider_config 本就不含上游 key，
+    // 上游 key 只在 backend task-09 register 时注册 LiteLLM）；不走角色映射 / extra_env /
+    // settings_config（openai 单模型无角色分流，D-006 agent_kind 仍 claude 不新增 injector）。
+    // 缺省 / 'anthropic' 不进此分支 → 走下方既有 6 条映射规则（逐字不变 NFR-02）。
+    if (c.api_format === 'openai_chat') {
+      if (c.litellm_base_url) env.ANTHROPIC_BASE_URL = c.litellm_base_url;
+      if (c.litellm_auth_token) env.ANTHROPIC_AUTH_TOKEN = c.litellm_auth_token;
+      if (c.litellm_model_name) env.ANTHROPIC_MODEL = c.litellm_model_name;
+      return env;
+    }
+
     // 1. base_url → ANTHROPIC_BASE_URL（空串 / undefined 不写该 key）
     if (c.base_url) env.ANTHROPIC_BASE_URL = c.base_url;
 

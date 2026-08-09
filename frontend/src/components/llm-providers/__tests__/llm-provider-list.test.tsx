@@ -56,6 +56,7 @@ const baseProvider = (over: Partial<LlmProviderRead>): LlmProviderRead => ({
   notes: null,
   website_url: null,
   auth_field: "ANTHROPIC_AUTH_TOKEN",
+  api_format: "anthropic",
   model_role_mappings: null,
   default_fallback_model: null,
   extra_env: null,
@@ -205,6 +206,82 @@ describe("LlmProviderSection — 启动/停止结果 toast（task-09 / FR-07）"
     btn.click();
     expect(
       await screen.findByText("API Key 无效：401 Unauthorized"),
+    ).toBeInTheDocument();
+  });
+});
+
+// task-06 openai 徽标 + task-12 移除 FR-11 守护 + R-09 降级 toast（D-007 收口）
+describe("LlmProviderSection — openai 格式徽标 + set-default 正常流程 + R-09 降级（task-06/12）", () => {
+  const OPENAI_PROVIDER = baseProvider({
+    id: "p-openai",
+    name: "Zen OpenAI",
+    api_format: "openai_chat",
+    base_url: "https://opencode.ai/zen/v1/chat/completions",
+  });
+  const ANTHROPIC_PROVIDER = baseProvider({
+    id: "p-anthropic",
+    name: "Anthropic 官方",
+    api_format: "anthropic",
+    base_url: "https://api.anthropic.com",
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedList.mockResolvedValue([OPENAI_PROVIDER, ANTHROPIC_PROVIDER]);
+    mockedDetect.mockReturnValue(null);
+    mockedQueryUsage.mockResolvedValue({ success: true, data: [] });
+    mockedSetDefault.mockResolvedValue({
+      switched: true,
+      affected_sessions: 0,
+      error: null,
+    });
+  });
+
+  it("openai 格式行渲染 OpenAI 徽标，anthropic 行无该徽标", async () => {
+    render(
+      <AntdProviders>
+        <LlmProviderSection />
+      </AntdProviders>,
+    );
+    await screen.findByText("Zen OpenAI");
+    expect(
+      screen.getAllByTitle("OpenAI 格式（经 LiteLLM 网关消费）"),
+    ).toHaveLength(1);
+  });
+
+  it("点 openai 供应商「启动」→ setDefaultProvider 正常调用 + 成功 toast（task-12 移除 FR-11 守护）", async () => {
+    render(
+      <AntdProviders>
+        <LlmProviderSection />
+      </AntdProviders>,
+    );
+    // Zen OpenAI 排第一（mockedList 首位），其「启动」按钮为首个
+    const startBtns = await screen.findAllByRole("button", { name: /启动/ });
+    expect(startBtns.length).toBeGreaterThanOrEqual(1);
+    startBtns[0]!.click();
+    // 守护已移除（D-007 收口）：setDefaultProvider 正常调用
+    await waitFor(() => expect(mockedSetDefault).toHaveBeenCalled());
+    // 成功 toast（beforeEach mock affected_sessions=0 → 立即生效）
+    expect(await screen.findByText(/立即生效/)).toBeInTheDocument();
+  });
+
+  it("openai set-default 返 litellm_registered=false → 降级 warning toast（R-09 / task-12）", async () => {
+    mockedSetDefault.mockResolvedValueOnce({
+      switched: true,
+      affected_sessions: 0,
+      error: null,
+      litellm_registered: false,
+    });
+    render(
+      <AntdProviders>
+        <LlmProviderSection />
+      </AntdProviders>,
+    );
+    const startBtns = await screen.findAllByRole("button", { name: /启动/ });
+    startBtns[0]!.click();
+    // set 成功（switched=true）+ 网关注册失败降级提示（R-09 best-effort 不阻塞 is_default）
+    expect(
+      await screen.findByText(/网关注册失败.*Claude Code 暂不可用/),
     ).toBeInTheDocument();
   });
 });

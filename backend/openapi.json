@@ -30541,6 +30541,21 @@
               }
             ],
             "title": "Auth Field"
+          },
+          "api_format": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "anthropic",
+                  "openai_chat"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Format"
           }
         },
         "type": "object",
@@ -32254,6 +32269,15 @@
             "title": "Auth Field",
             "default": "ANTHROPIC_AUTH_TOKEN"
           },
+          "api_format": {
+            "type": "string",
+            "enum": [
+              "anthropic",
+              "openai_chat"
+            ],
+            "title": "Api Format",
+            "default": "anthropic"
+          },
           "model_role_mappings": {
             "anyOf": [
               {
@@ -32402,6 +32426,10 @@
             "type": "string",
             "title": "Auth Field"
           },
+          "api_format": {
+            "type": "string",
+            "title": "Api Format"
+          },
           "model_role_mappings": {
             "anyOf": [
               {
@@ -32486,6 +32514,7 @@
           "notes",
           "website_url",
           "auth_field",
+          "api_format",
           "model_role_mappings",
           "default_fallback_model",
           "extra_env",
@@ -32577,6 +32606,21 @@
               }
             ],
             "title": "Auth Field"
+          },
+          "api_format": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "anthropic",
+                  "openai_chat"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Format"
           },
           "model_role_mappings": {
             "anyOf": [
@@ -45141,6 +45185,17 @@
               }
             ],
             "title": "Error"
+          },
+          "litellm_registered": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Litellm Registered"
           }
         },
         "type": "object",

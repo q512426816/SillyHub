@@ -5,9 +5,10 @@
  * `apiFetch`（@/lib/api），范式对齐 `lib/api-keys.ts`。
  *
  * 类型来源：后端 `backend/app/modules/llm_provider/schema.py`（LlmProviderRead/
- * Create/Update）。OpenAPI 生成类型尚未包含本模块（gen-api-types.mjs 未重跑），
- * 故手写并对齐 schema；待生成后可切到 `components["schemas"]["LlmProvider*"]`，
- * 届时删本文件内的手写类型即可（frontend-type-migration 坑）。
+ * Create/Update）。**本模块 LlmProvider* 仍手写**：gen:types 已产出 `components["schemas"]`
+ * 下的 LlmProvider* 生成类型（含 api_format），但整体迁移到生成类型是独立的
+ * frontend-type-migration 坑，本变更（2026-08-08-llm-provider-openai-format）仅在
+ * 手写类型上补 api_format 字段（design §6 文件清单显式登记该债），不顺带整体迁移。
  *
  * 安全：api_key 明文仅出现在 POST/PATCH 请求 body，绝不落日志/本地存储；
  * Read 仅含 `api_key_masked`（后端 _to_read 算，首4...尾4 / 短键 ****）。
@@ -36,6 +37,14 @@ export type LlmProviderAuthField = "ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY";
 /** 第一版固定 claude（D-006 预留 codex/gemini/pi）。 */
 export type LlmProviderAgentKind = "claude";
 
+/**
+ * API 协议格式（2026-08-08-llm-provider-openai-format / D-001@v1）。
+ * - anthropic：现有 ANTHROPIC_* 鉴权 + /v1/models；
+ * - openai_chat：Bearer 鉴权 + /v1/chat/completions，经服务器 LiteLLM 网关让 Claude Code 消费（Wave2）。
+ * 后端按格式产鉴权头 + 候选 URL（service._build_auth_headers / _candidate_urls）。
+ */
+export type LlmProviderApiFormat = "anthropic" | "openai_chat";
+
 // ── 后端 DTO（对齐 schema.py）────────────────────────────────────────────
 
 /** GET/PATCH/POST/set-default 返回；api_key 仅 masked，明文永不暴露。 */
@@ -50,6 +59,8 @@ export interface LlmProviderRead {
   notes: string | null;
   website_url: string | null;
   auth_field: string;
+  /** API 协议格式（D-001@v1）；老行迁移回填 "anthropic"。 */
+  api_format: LlmProviderApiFormat;
   model_role_mappings: Record<string, LlmProviderRoleMapping> | null;
   default_fallback_model: string | null;
   extra_env: Record<string, string> | null;
@@ -75,6 +86,8 @@ export interface LlmProviderCreate {
   notes?: string | null;
   website_url?: string | null;
   auth_field: LlmProviderAuthField;
+  /** API 协议格式（D-001@v1）；缺省后端默认 "anthropic"。 */
+  api_format?: LlmProviderApiFormat;
   model_role_mappings?: Record<string, LlmProviderRoleMapping> | null;
   default_fallback_model?: string | null;
   extra_env?: Record<string, string> | null;
@@ -93,6 +106,8 @@ export interface LlmProviderUpdate {
   notes?: string | null;
   website_url?: string | null;
   auth_field?: LlmProviderAuthField;
+  /** API 协议格式（D-001@v1）；可选，不传=不动。 */
+  api_format?: LlmProviderApiFormat;
   model_role_mappings?: Record<string, LlmProviderRoleMapping> | null;
   default_fallback_model?: string | null;
   extra_env?: Record<string, string> | null;
@@ -131,6 +146,8 @@ export type SetDefaultResult = components["schemas"]["SetDefaultResult"];
 export interface LlmProviderFormValues {
   name: string;
   agent_kind: LlmProviderAgentKind;
+  /** API 协议格式（D-001@v1）；表单下拉产出，default "anthropic"（task-05）。 */
+  api_format: LlmProviderApiFormat;
   base_url: string;
   api_key: string;
   auth_field: LlmProviderAuthField;
@@ -226,7 +243,13 @@ export async function unsetDefaultProvider(
  */
 export type FetchProviderModelsRequest =
   | { provider_id: string }
-  | { base_url: string; api_key: string; auth_field?: LlmProviderAuthField };
+  | {
+      base_url: string;
+      api_key: string;
+      auth_field?: LlmProviderAuthField;
+      /** API 协议格式（D-001@v1）；新建态 openai_chat 走 Bearer + 剥 /chat/completions；缺省 anthropic。 */
+      api_format?: LlmProviderApiFormat;
+    };
 
 /** fetch-models 单条模型（OpenAI 兼容字段；owned_by 上游缺失则 null）。 */
 export interface FetchedProviderModel {
@@ -380,6 +403,7 @@ export function formToCreate(v: LlmProviderFormValues): LlmProviderCreate {
   return {
     name: v.name.trim(),
     agent_kind: "claude",
+    api_format: v.api_format,
     base_url: clean(v.base_url) ?? null,
     api_key: clean(v.api_key) ?? null,
     notes: clean(v.notes) ?? null,
@@ -401,6 +425,7 @@ export function formToCreate(v: LlmProviderFormValues): LlmProviderCreate {
 export function formToUpdate(v: LlmProviderFormValues): LlmProviderUpdate {
   const update: LlmProviderUpdate = {
     name: v.name.trim(),
+    api_format: v.api_format,
     base_url: clean(v.base_url) ?? null,
     notes: clean(v.notes) ?? null,
     website_url: clean(v.website_url) ?? null,

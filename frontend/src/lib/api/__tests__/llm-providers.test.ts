@@ -87,6 +87,7 @@ const FORM_VALUES: LlmProviderFormValues = {
   base_url: "https://api.moonshot.cn/anthropic",
   api_key: "sk-secret-1234",
   auth_field: "ANTHROPIC_AUTH_TOKEN",
+  api_format: "anthropic",
   notes: "公司专用",
   website_url: "https://moonshot.cn",
   model_role_mappings: {

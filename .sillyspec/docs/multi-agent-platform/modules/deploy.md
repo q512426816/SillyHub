@@ -16,14 +16,16 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
 
 ## 契约摘要
 
-- **核心产物**：`docker-compose.yml`（主编排）+ `docker-compose.dev.yml`（开发覆写，仅 postgres/redis）+ `.env`/`.env.example`（环境变量模板）。
+- **核心产物**：`docker-compose.yml`（主编排）+ `docker-compose.dev.yml`（开发覆写，postgres/redis + litellm/litellm-db）+ `.env`/`.env.example`（环境变量模板，含 `LITELLM_MASTER_KEY`/`LITELLM_DB_PASSWORD`）。
 - **服务定义**（主 compose）：
   - `postgres`（postgres:16-alpine，healthcheck pg_isready，卷 pgdata）
   - `redis`（redis:7-alpine，appendonly 持久化，healthcheck redis-cli ping，卷 redisdata）
   - `minio`（minio/minio，S3 兼容对象存储，端口 9000/9001，卷 minio-data；平台文件中心后端，`MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` 默认 minioadmin）
   - `backend`（build 自 backend/Dockerfile，env_file 加载，depends_on postgres/redis/minio(healthy)，暴露端口；environment 注入对象存储 `STORAGE_BACKEND`/`S3_ENDPOINT`(默认 `http://minio:9000`)/`S3_ACCESS_KEY`/`S3_SECRET_KEY`/`S3_BUCKET`，凭证须与 minio 服务一致）
   - `frontend`（build 自 frontend/Dockerfile，depends_on backend，env_file，端口 3000）
-  - 命名卷：pgdata、redisdata、minio-data、worktree-data、claude-data。
+  - `litellm`（ghcr.io/berriai/litellm:main-stable，OpenAI↔Anthropic 转换网关，change 2026-08-08；depends_on litellm-db(healthy)，env `LITELLM_MASTER_KEY`+`STORE_MODEL_IN_DB=True`+`DATABASE_URL`→litellm-db，healthcheck `/health/liveness`，restart=always；prod 无端口/dev `127.0.0.1:4000`；admin API 动态注册 openai 格式供应商，model_name=`usr-<uid>-<pid>` 路由，**litellm_params.model 必须 `openai/<model>` 前缀**）
+  - `litellm-db`（postgres:16-alpine，独立实例避 alembic_version 冲突，卷 litellm-db-data；持久化运行时注册的 deployment）
+  - 命名卷：pgdata、redisdata、minio-data、worktree-data、claude-data、litellm-db-data。
 - **健康检查**：postgres/redis 用原生探测；backend/frontend 容器自带 healthcheck（frontend 用 node20 内置 fetch 零依赖）。
 
 ## 关键逻辑
@@ -40,6 +42,7 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
 - 局域网访问需在 compose 端口映射与防火墙上放开，并配置 workspace 指向项目路径。
 - `.env.example` 占位密钥不可直接用于生产，SECRET_KEY/SILLYSPEC_MASTER_KEY 必须替换。
 - backend 连 minio 必须走容器服务名 `http://minio:9000`（compose backend environment 默认值已设）；`config.py` 的 `s3_endpoint` 默认 `http://localhost:9000` 仅给本机 native run 用，容器内用 localhost 连不通兄弟 minio 容器（`EndpointConnectionError` → 上传 500）。
+- **LiteLLM 网关（openai 格式供应商，change 2026-08-08）**：openai 格式供应商经 LiteLLM 做 Anthropic↔OpenAI 转换（**D-012 转换外包**，平台代码不实现转换）。端到端链路：openai 供应商 set-default → 后端 register 到 LiteLLM（model_name=`usr-<uid>-<pid>`，litellm_params.model=`openai/<model>`）→ lease 下发 openai 形态 provider_config（6 字段，**不含上游 api_key**）→ daemon 注入 `ANTHROPIC_BASE_URL`=litellm_base_url + `ANTHROPIC_AUTH_TOKEN`=litellm_master_key + `ANTHROPIC_MODEL`=`usr-<uid>-<pid>` → Claude Code 发 Anthropic `/v1/messages` → LiteLLM 按 model_name 路由转 OpenAI 打上游。上游 api_key 只注册在 LiteLLM（master key 加密），不下发 daemon（D-003/NFR-01）。`LITELLM_MASTER_KEY` 须替换占位（`.env.example` 不可直接生产用）。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
@@ -47,3 +50,4 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
 
 ## 变更索引
 - ql-20260722-012-dddb | 补 backend environment S3 配置（默认 `http://minio:9000`）+ `.env.example` 同步，修复容器内连不通 minio 致平台文件中心上传 500
+- change 2026-08-08-llm-provider-openai-format | deploy 加 litellm + litellm-db 服务（OpenAI↔Anthropic 转换网关，D-012 外包）+ `LITELLM_MASTER_KEY`/`STORE_MODEL_IN_DB` env + `.env.example` 占位 + openai 端到端链路说明

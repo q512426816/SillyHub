@@ -24,6 +24,7 @@ change task-02 抽出的 D-006「单一真相源」helper（位于 ``daemon/leas
 from __future__ import annotations
 
 import uuid
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import select
@@ -444,3 +445,149 @@ class TestResolveDefaultProviderConfigReadOnly:
         stmt = select(LlmProvider).where(LlmProvider.user_id == user_id)
         rows = (await db_session.execute(stmt)).scalars().all()
         assert rows == []
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 7. openai_chat 形态（task-10 / change 2026-08-08-llm-provider-openai-format）
+# ════════════════════════════════════════════════════════════════════════════
+
+
+async def _seed_openai_default_provider(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    model: str | None = "zen-1",
+    api_key: str = "sk-openai-upstream-never-sent",
+) -> LlmProvider:
+    """task-10：直插 openai_chat 默认 provider。
+
+    复用 ``_seed_provider_row`` 走真实 cipher 加密落盘（api_key 入 encrypted_api_key），
+    再置 ``api_format='openai_chat'`` + model，模拟 task-01 列 + task-05 表单创建的
+    openai 行（service.create schema 不接 api_format=openai，故直插 ORM）。
+    """
+    row = await _seed_provider_row(
+        session,
+        user_id,
+        agent_kind="claude",
+        is_default=True,
+        api_key=api_key,
+        name="opencode-zen-openai",
+        base_url="https://opencode.ai/zen/v1/chat/completions",
+    )
+    row.api_format = "openai_chat"
+    row.model = model
+    await session.commit()
+    await session.refresh(row)
+    return row
+
+
+class TestResolveDefaultProviderConfigOpenaiShape:
+    """task-10：openai_chat 格式 → 6 字段 provider_config（指向 LiteLLM，不含上游 key）。
+
+    D-003/NFR-01 安全增益：openai 形态不下发上游 api_key（只在 task-09 register 时注册
+    LiteLLM），claim/WS 下发的 config 只含 LiteLLM 地址 + 令牌 + model_name + model。
+    anthropic 形态 9 字段逐字不变（NFR-02，上方 TestResolveDefaultProviderConfigFound 锁死）。
+    """
+
+    @pytest.mark.asyncio
+    async def test_openai_returns_6_field_dict_excluding_upstream_keys(
+        self, db_session: AsyncSession
+    ) -> None:
+        """openai 命中 → dict 恰 6 键 {agent_kind, api_format, litellm_base_url,
+        litellm_model_name, litellm_auth_token, model}，无任何上游字段（D-003/NFR-01）。"""
+        user_id = await _create_user(db_session, label="openai-shape")
+        await _seed_openai_default_provider(db_session, user_id, model="zen-1")
+
+        cfg = await resolve_default_provider_config(db_session, user_id, "claude")
+
+        assert cfg is not None
+        assert set(cfg.keys()) == {
+            "agent_kind",
+            "api_format",
+            "litellm_base_url",
+            "litellm_model_name",
+            "litellm_auth_token",
+            "model",
+        }
+        # D-003/NFR-01：上游字段绝不出现（比 anthropic 9 字段少了全部 key-bearing 字段）。
+        for forbidden in (
+            "api_key",
+            "auth_field",
+            "base_url",
+            "model_role_mappings",
+            "default_fallback_model",
+            "extra_env",
+            "settings_config",
+        ):
+            assert forbidden not in cfg, f"openai 形态泄漏上游字段 {forbidden}"
+        # 值守护：api_format / agent_kind / model 原样。
+        assert cfg["api_format"] == "openai_chat"
+        assert cfg["agent_kind"] == "claude"
+        assert cfg["model"] == "zen-1"
+
+    @pytest.mark.asyncio
+    async def test_openai_litellm_model_name_matches_task09_convention(
+        self, db_session: AsyncSession
+    ) -> None:
+        """litellm_model_name == f"usr-{user_id}-{provider.id}"，且与 task-09
+        ``litellm_client.litellm_model_name`` 单一真相源 helper 逐字一致（R-03）。
+        命名漂移 → LiteLLM 按 model_name 路由 404 → Claude Code 报错。"""
+        user_id = await _create_user(db_session, label="openai-name")
+        provider = await _seed_openai_default_provider(db_session, user_id)
+
+        cfg = await resolve_default_provider_config(db_session, user_id, "claude")
+
+        assert cfg is not None
+        # 与 task-09 register 写入 LiteLLM 的 model_name 逐字一致（路由命中前提）。
+        from app.modules.llm_provider.litellm_client import litellm_model_name
+
+        assert cfg["litellm_model_name"] == f"usr-{user_id}-{provider.id}"
+        assert cfg["litellm_model_name"] == litellm_model_name(user_id, provider.id)
+
+    @pytest.mark.asyncio
+    async def test_openai_litellm_base_url_and_auth_token_from_settings(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """litellm_base_url / litellm_auth_token 取自 settings（task-09 登记）。
+        litellm_auth_token = settings.litellm_master_key（LiteLLM /v1/messages 接受 master
+        key 鉴权，daemon 注 ANTHROPIC_AUTH_TOKEN 打 LiteLLM，task-11）。"""
+        user_id = await _create_user(db_session, label="openai-settings")
+        await _seed_openai_default_provider(db_session, user_id)
+
+        # mock context 模块的 get_settings（顶部 import 绑定名字），隔离真 env。
+        from app.modules.daemon.lease import context as ctx_mod
+
+        fake = MagicMock()
+        fake.litellm_base_url = "http://litellm-test:4000"
+        fake.litellm_master_key = "sk-litellm-master-test"
+        monkeypatch.setattr(ctx_mod, "get_settings", lambda: fake)
+
+        cfg = await resolve_default_provider_config(db_session, user_id, "claude")
+
+        assert cfg is not None
+        assert cfg["litellm_base_url"] == "http://litellm-test:4000"
+        assert cfg["litellm_auth_token"] == "sk-litellm-master-test"
+
+    @pytest.mark.asyncio
+    async def test_openai_does_not_decrypt_upstream_api_key(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """D-003/NFR-01：openai 命中不解密上游 api_key（``get_cipher().decrypt`` 不被调）。
+        上游 key 只在 task-09 register 时传 LiteLLM 一次，claim/config 路径不触碰。"""
+        user_id = await _create_user(db_session, label="openai-nokey")
+        await _seed_openai_default_provider(
+            db_session, user_id, api_key="sk-openai-upstream-never-decrypt"
+        )
+
+        # spy：patch app.core.crypto.get_cipher 返回 stub cipher，断言其 decrypt 未被调。
+        # resolve_default_provider_config 函数内 ``from app.core.crypto import get_cipher``
+        # 取 patched 版本；openai 早返回不调 get_cipher()，anthropic 才调 → 若 openai 分支
+        # 失效误走 anthropic，decrypt 被调，断言失败暴露回归。
+        cipher_stub = MagicMock()
+        monkeypatch.setattr("app.core.crypto.get_cipher", lambda: cipher_stub)
+
+        cfg = await resolve_default_provider_config(db_session, user_id, "claude")
+
+        assert cfg is not None
+        assert "api_key" not in cfg
+        cipher_stub.decrypt.assert_not_called()

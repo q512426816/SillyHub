@@ -161,6 +161,7 @@ async def set_default_provider(
         switched=result.switched,
         affected_sessions=result.affected_sessions,
         error=result.error,
+        litellm_registered=result.litellm_registered,
     )
 
 
@@ -184,4 +185,5 @@ async def unset_default_provider(
         switched=result.switched,
         affected_sessions=result.affected_sessions,
         error=result.error,
+        litellm_registered=result.litellm_registered,
     )

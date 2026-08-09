@@ -21,6 +21,7 @@ class LlmProviderCreate(BaseModel):
     notes: str | None = None
     website_url: str | None = None
     auth_field: Literal["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"] = "ANTHROPIC_AUTH_TOKEN"
+    api_format: Literal["anthropic", "openai_chat"] = "anthropic"
     model_role_mappings: dict[str, Any] | None = None
     default_fallback_model: str | None = None
     extra_env: dict[str, Any] | None = None
@@ -36,6 +37,7 @@ class LlmProviderUpdate(BaseModel):
     notes: str | None = None
     website_url: str | None = None
     auth_field: Literal["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"] | None = None
+    api_format: Literal["anthropic", "openai_chat"] | None = None
     model_role_mappings: dict[str, Any] | None = None
     default_fallback_model: str | None = None
     extra_env: dict[str, Any] | None = None
@@ -55,6 +57,7 @@ class LlmProviderRead(BaseModel):
     notes: str | None
     website_url: str | None
     auth_field: str
+    api_format: str
     model_role_mappings: dict[str, Any] | None
     default_fallback_model: str | None
     extra_env: dict[str, Any] | None
@@ -92,6 +95,9 @@ class FetchModelsRequest(BaseModel):
     base_url: str | None = None
     api_key: str | None = None  # 仅新建态；明文永不落库（NFR-02）
     auth_field: Literal["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"] | None = None
+    # API 格式（task-02 / FR-01/FR-03）：编辑态从 provider 行读，新建态从请求体读；
+    # 缺省 anthropic（NFR-02 零回归）。openai_chat 时 service 忽略 auth_field（D-002@v1）。
+    api_format: Literal["anthropic", "openai_chat"] | None = None
 
     @model_validator(mode="after")
     def _enforce_dual_form(self) -> FetchModelsRequest:
@@ -188,3 +194,7 @@ class SetDefaultResult(BaseModel):
     switched: bool
     affected_sessions: int
     error: str | None = None
+    # task-09（D-003 / R-09）：openai 格式 set-default 联动 LiteLLM 注册结果（True/False）；
+    # anthropic 格式 / 凭证失败 / unset 场景为 None。前端据 False 提示
+    # 「网关注册失败，Claude Code 暂不可用，请重试或联系管理员」（design §10 R-09 已知降级态）。
+    litellm_registered: bool | None = None

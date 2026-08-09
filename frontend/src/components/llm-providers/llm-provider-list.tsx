@@ -128,6 +128,13 @@ export function LlmProviderSection() {
       } else {
         notify.success(`已启动「${p.name}」（立即生效）`);
       }
+      // R-09 降级（task-12 / D-007 收口）：openai 格式供应商经 LiteLLM 注册失败 → is_default 已生效
+      // 但 Claude Code 经网关不可用。后端 best-effort 不回滚 is_default，前端明示降级态供用户排查网关。
+      if (result.litellm_registered === false) {
+        notify.warning(
+          "网关注册失败（LiteLLM），该供应商的 Claude Code 暂不可用，请检查 LiteLLM 网关后重试",
+        );
+      }
       await load();
     } catch (err) {
       notify.error(err, "启动失败");
@@ -280,6 +287,11 @@ export function LlmProviderSection() {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium">{p.name}</span>
                   <Badge variant="warning">{p.agent_kind}</Badge>
+                  {p.api_format === "openai_chat" && (
+                    <Badge variant="outline" className="gap-0.5" title="OpenAI 格式（经 LiteLLM 网关消费）">
+                      OpenAI
+                    </Badge>
+                  )}
                   {detectUsageProvider(p.base_url) && (
                     <Badge variant="outline" className="gap-0.5" title="支持余额查询">
                       💰 可查用量

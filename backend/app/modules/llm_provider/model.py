@@ -76,6 +76,11 @@ class LlmProvider(BaseModel, table=True):
         max_length=64,
         sa_column=Column(String(64), nullable=False),
     )
+    api_format: str = Field(
+        default="anthropic",
+        max_length=32,
+        sa_column=Column(String(32), nullable=False, server_default="anthropic"),
+    )
     model_role_mappings: dict[str, Any] | None = Field(
         default=None,
         sa_column=Column(JSON, nullable=True),

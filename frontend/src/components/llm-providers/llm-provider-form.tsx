@@ -10,6 +10,7 @@ import {
   type FetchProviderModelsRequest,
   type LlmProviderAuthField,
   type LlmProviderAgentKind,
+  type LlmProviderApiFormat,
   type LlmProviderFormValues,
   type LlmProviderRead,
   type LlmProviderRoleMapping,
@@ -61,6 +62,12 @@ const AGENT_KIND_OPTIONS: {
 const AUTH_FIELD_OPTIONS: { value: LlmProviderAuthField; label: string }[] = [
   { value: "ANTHROPIC_AUTH_TOKEN", label: "ANTHROPIC_AUTH_TOKEN（默认，中转站常用）" },
   { value: "ANTHROPIC_API_KEY", label: "ANTHROPIC_API_KEY（官方 API key）" },
+];
+
+/** API 协议格式下拉选项（D-001@v1）。 */
+const API_FORMAT_OPTIONS: { value: LlmProviderApiFormat; label: string }[] = [
+  { value: "anthropic", label: "Anthropic（Claude API 兼容）" },
+  { value: "openai_chat", label: "OpenAI Chat（/v1/chat/completions + Bearer）" },
 ];
 
 /** 表单内部角色行状态（display/model 文本框 + one_m 勾选）。 */
@@ -127,6 +134,9 @@ export function LlmProviderForm({
   const [apiKey, setApiKey] = useState("");
   const [authField, setAuthField] = useState<LlmProviderAuthField>(
     (initial?.auth_field as LlmProviderAuthField) ?? "ANTHROPIC_AUTH_TOKEN",
+  );
+  const [apiFormat, setApiFormat] = useState<LlmProviderApiFormat>(
+    initial?.api_format ?? "anthropic",
   );
   const [defaultFallbackModel, setDefaultFallbackModel] = useState(
     initial?.default_fallback_model ?? "",
@@ -242,6 +252,7 @@ export function LlmProviderForm({
     const values: LlmProviderFormValues = {
       name,
       agent_kind: agentKind,
+      api_format: apiFormat,
       base_url: baseUrl,
       api_key: apiKey,
       auth_field: authField,
@@ -280,7 +291,7 @@ export function LlmProviderForm({
         });
         return;
       }
-      req = { base_url: url, api_key: key, auth_field: authField };
+      req = { base_url: url, api_key: key, auth_field: authField, api_format: apiFormat };
     }
     setIsFetching(true);
     setNotice({ kind: "loading", msg: "正在获取模型列表…" });
@@ -483,6 +494,7 @@ export function LlmProviderForm({
     setName(preset.name);
     setBaseUrl(preset.base_url);
     setAuthField(preset.auth_field);
+    setApiFormat(preset.api_format);
     setDefaultFallbackModel(preset.default_model ?? "");
     setWebsiteUrl(preset.website_url);
     setApiKey("");
@@ -520,6 +532,7 @@ export function LlmProviderForm({
     setWebsiteUrl("");
     setApiKey("");
     setAuthField("ANTHROPIC_AUTH_TOKEN");
+    setApiFormat("anthropic");
     setRoleRows(initRoleRows(null));
     setEnvRows(initEnvRows(null));
     setSettingsConfigJson("{}");
@@ -672,6 +685,26 @@ export function LlmProviderForm({
       </div>
 
       <div>
+        <label className={lblCls}>API 格式</label>
+        <select
+          value={apiFormat}
+          onChange={(e) => setApiFormat(e.target.value as LlmProviderApiFormat)}
+          className={`mt-0.5 ${inputCls}`}
+        >
+          {API_FORMAT_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <p className={hintCls}>
+          {apiFormat === "openai_chat"
+            ? "OpenAI 格式：Bearer 鉴权，可粘贴完整 .../v1/chat/completions 地址；经 LiteLLM 网关让 Claude Code 消费（端到端 Wave2 上线后可用）。"
+            : "Anthropic 格式：ANTHROPIC_* 鉴权，兼容 Claude API 端点（官方/中转站）。"}
+        </p>
+      </div>
+
+      <div>
         <label className={lblCls}>
           请求地址 base_url <span className="text-destructive">*</span>
         </label>
@@ -679,10 +712,10 @@ export function LlmProviderForm({
           value={baseUrl}
           onChange={(e) => setBaseUrl(e.target.value)}
           className={`mt-0.5 ${inputCls}`}
-          placeholder="https://api.anthropic.com（官方）或中转站完整地址，不要以斜杠结尾"
+          placeholder="https://api.anthropic.com 或中转站地址；OpenAI 格式可填完整 .../v1/chat/completions"
         />
         <p className={hintCls}>
-          兼容 Claude API 的服务端点。官方填 <code className="text-xs">https://api.anthropic.com</code>；中转站填中转地址。
+          Anthropic 格式填 base（如 <code className="text-xs">https://api.anthropic.com</code>）；OpenAI 格式可粘完整地址（如 <code className="text-xs">https://opencode.ai/zen/v1/chat/completions</code>），后端自动剥 /chat/completions。
         </p>
       </div>
 
@@ -704,6 +737,8 @@ export function LlmProviderForm({
         </summary>
 
         <div className="mt-3 space-y-3">
+          {apiFormat === "anthropic" && (
+          <>
           <div>
             <label className={lblCls}>认证字段</label>
             <select
@@ -851,6 +886,8 @@ export function LlmProviderForm({
               用中转站时建议填写：未明确映射的请求（含 Haiku 后台子任务）会以这个模型名发给上游，避免透传原始 Claude 模型名报错。
             </p>
           </div>
+          </>
+          )}
 
           <div>
             <label className={lblCls}>自定义环境变量（可选，高级）</label>

@@ -121,6 +121,22 @@ Claude Code 发 Anthropic /v1/messages → LiteLLM（按 model_name 路由）→
 | 新增 | backend/app/modules/llm_provider/tests/test_* | 双格式 + 完整 URL 单测 |
 | 新增（Wave2） | backend/app/modules/llm_provider/tests/test_litellm*.py | LiteLLM 注册/注销 mock 测 |
 | 新增（Wave2） | sillyhub-daemon/tests/credential-injector.test.ts | openai 分支单测 |
+| 新增 | backend/migrations/versions/202608091100_add_llm_provider_api_format.py | task-01 实际迁移文件（上文 2026xxxx 占位的精确名） |
+| 修改（Wave2） | backend/app/core/config.py | LITELLM_BASE_URL/LITELLM_MASTER_KEY settings（task-08/09） |
+| 新增（Wave2） | deploy/.env.example | LITELLM_MASTER_KEY/LITELLM_DB_PASSWORD 占位（task-08） |
+| 新增（Wave2） | deploy/litellm-config.yaml | LiteLLM 配置 model_list:[]+drop_params（task-08） |
+| 修改 | backend/openapi.json | gen:types dump（task-04/12，含 api_format+litellm_registered） |
+| 修改 | frontend/src/lib/api-types.ts | gen:types 生成（task-04/12） |
+| 新增（Wave2） | backend/app/modules/daemon/tests/test_resolve_default_provider_config.py | task-10 openai provider_config 形态单测 |
+| 新增（Wave2） | backend/tests/modules/daemon/lease/test_provider_config_payload.py | task-10 openai 注入单测 |
+| 新增 | frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx | task-07 表单 api_format 单测 |
+| 新增 | frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx | task-07 表单 fetch 单测 |
+| 修改 | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | task-07 表单单测补 api_format |
+| 修改 | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx | task-06/12 徽标+守护移除+R09 降级单测 |
+| 新增 | frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts | task-07 预设补字段单测 |
+| 修改 | frontend/src/lib/api/__tests__/llm-providers.test.ts | task-07 api 层补 api_format |
+| 修改 | .sillyspec/docs/backend/modules/llm_provider.md | task-12 模块文档同步 |
+| 修改 | .sillyspec/docs/multi-agent-platform/modules/deploy.md | task-12 部署文档同步 |
 
 ## 7. 接口定义
 

@@ -118,7 +118,7 @@ async def _create_default_provider(
         default_fallback_model=default_fallback_model,
         model_role_mappings=model_role_mappings,
         extra_env=extra_env,
-        auth_field=auth_field,  # type: ignore[arg-type]
+        auth_field=auth_field,
         is_default=is_default,
     )
     return await LlmProviderService(session).create(user_id, data)
@@ -403,3 +403,105 @@ async def test_provider_config_not_leaked_to_audit_log(db_session: AsyncSession)
         blob = row.details_json or ""
         assert plaintext not in blob, "明文 api_key 泄漏到 AuditLog.details_json（违反 R-02）"
         assert "provider_config" not in blob, "provider_config 结构泄漏到 AuditLog（违反 R-02）"
+
+
+# ---------------------------------------------------------------------------
+# task-10 / change 2026-08-08-llm-provider-openai-format：openai 形态注入（经 LiteLLM）
+# ---------------------------------------------------------------------------
+
+# openai 形态 provider_config 6 字段（task-10 provides 契约，D-003 不含上游 key）。
+_OPENAI_PROVIDER_CONFIG_FIELDS: frozenset[str] = frozenset(
+    {
+        "agent_kind",
+        "api_format",
+        "litellm_base_url",
+        "litellm_model_name",
+        "litellm_auth_token",
+        "model",
+    }
+)
+
+
+async def _seed_openai_default_provider(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    model: str | None = "zen-1",
+) -> LlmProvider:
+    """task-10：直插 openai_chat 默认 provider（service.create 不接 api_format=openai）。
+
+    真实 cipher 加密落盘 encrypted_api_key（与生产一致），再置 api_format=openai_chat +
+    model，模拟 task-01 列 + task-05 表单创建的 openai 行。
+    """
+    from app.core.crypto import get_cipher
+
+    cipher = get_cipher()
+    ct, key_id = cipher.encrypt("sk-openai-upstream-not-sent-to-daemon")
+    row = LlmProvider(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        name=f"pc-openai-{uuid.uuid4().hex[:6]}",
+        agent_kind="claude",
+        encrypted_api_key=ct,
+        key_id=key_id,
+        base_url="https://opencode.ai/zen/v1/chat/completions",
+        model=model,
+        api_format="openai_chat",
+        is_default=True,
+    )
+    session.add(row)
+    await session.commit()
+    await session.refresh(row)
+    return row
+
+
+@pytest.mark.asyncio
+async def test_interactive_openai_provider_config_injected(db_session: AsyncSession) -> None:
+    """task-10：interactive + openai 默认 provider → provider_config 6 字段（经 LiteLLM），
+    无上游 api_key；payload[model] 被 provider.model 覆盖（X-10）。"""
+    user_id = await _create_user(db_session, suffix="openai-int")
+    runtime = await _create_runtime(db_session, user_id)
+    provider = await _seed_openai_default_provider(db_session, user_id, model="zen-1")
+    lease = await _make_interactive_lease(db_session, runtime, provider="claude_code")
+
+    payload = await build_claim_payload(db_session, lease)
+
+    assert "provider_config" in payload
+    pc = payload["provider_config"]
+    assert set(pc.keys()) == _OPENAI_PROVIDER_CONFIG_FIELDS
+    assert pc["api_format"] == "openai_chat"
+    assert pc["agent_kind"] == "claude"
+    assert pc["model"] == "zen-1"
+    assert pc["litellm_model_name"] == f"usr-{user_id}-{provider.id}"
+    # D-003/NFR-01：上游 api_key / base_url 绝不下发 daemon。
+    assert "api_key" not in pc
+    assert "base_url" not in pc
+    # X-10：provider.model 覆盖 payload[model]（原 lease_meta 无 model → None 被 zen-1 覆盖）
+    assert payload["model"] == "zen-1"
+
+
+@pytest.mark.asyncio
+async def test_batch_openai_provider_config_injected(db_session: AsyncSession) -> None:
+    """task-10：batch + openai 默认 provider → provider_config 6 字段（经 LiteLLM）。
+
+    验证 _inject_provider_config override_model 用 .get() 兼容 openai 形态（dict 无
+    default_fallback_model 键不 KeyError）；payload[model] 被 provider.model 覆盖。
+    """
+    user_id = await _create_user(db_session, suffix="openai-batch")
+    runtime = await _create_runtime(db_session, user_id)
+    provider = await _seed_openai_default_provider(db_session, user_id, model="zen-1")
+    ws = await _create_workspace(db_session)
+    run = await _make_batch_run(db_session, agent_type="claude_code", model="claude-sonnet-4")
+    db_session.add(AgentRunWorkspace(agent_run_id=run.id, workspace_id=ws.id))
+    await db_session.commit()
+    lease = await _make_batch_lease(db_session, runtime, run)
+
+    payload = await build_claim_payload(db_session, lease)
+
+    assert "provider_config" in payload
+    pc = payload["provider_config"]
+    assert set(pc.keys()) == _OPENAI_PROVIDER_CONFIG_FIELDS
+    assert "api_key" not in pc
+    assert pc["litellm_model_name"] == f"usr-{user_id}-{provider.id}"
+    # X-10：provider.model(zen-1) 覆盖 agent_run.model(claude-sonnet-4)
+    assert payload["model"] == "zen-1"

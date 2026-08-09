@@ -97,6 +97,28 @@ async def resolve_default_provider_config(
     if provider is None:
         return None
 
+    # task-10（change 2026-08-08-llm-provider-openai-format）：openai_chat 格式早返回分支。
+    # openai 形态构造 6 字段 provider_config 指向 LiteLLM 网关（base_url + master key 作
+    # auth token + model_name），**不解密 / 不下发上游 api_key**（D-003/NFR-01 安全增益：
+    # 上游 key 只在 task-09 register 时注册进 LiteLLM，claim/WS 下发的 config 不含）。
+    # litellm_model_name 复用 task-09 单一真相源 helper（usr-<uid>-<pid>），命名漂移会导致
+    # LiteLLM 按 model_name 路由 404 → Claude Code 报错（R-03 跨任务契约）。
+    if provider.api_format == "openai_chat":
+        from app.modules.llm_provider.litellm_client import litellm_model_name
+
+        settings = get_settings()
+        return {
+            "agent_kind": provider.agent_kind,
+            "api_format": "openai_chat",
+            "litellm_base_url": settings.litellm_base_url,
+            "litellm_model_name": litellm_model_name(user_id, provider.id),
+            # LiteLLM /v1/messages 接受 master key 鉴权；daemon 注入 ANTHROPIC_AUTH_TOKEN
+            # 打 LiteLLM（task-11）。源同 task-09 register 用的 master key（settings.litellm_master_key）。
+            "litellm_auth_token": settings.litellm_master_key,
+            "model": provider.model,
+        }
+
+    # anthropic 分支（现有 9 字段，逐字不变，NFR-02 零回归）。
     # 解密 api_key 明文(daemon spawn-env 注入 AUTH_TOKEN/AUTH_API_KEY 必需)
     api_key_plain = get_cipher().decrypt(provider.encrypted_api_key, provider.key_id)
     return {
@@ -183,8 +205,10 @@ async def _inject_provider_config(
         return  # D-007：用户未配默认 provider → absent
 
     payload["provider_config"] = provider_config
-    # X-10：provider.model（design §9 优先）→ default_fallback_model 覆盖 payload[model]
-    override_model = provider_config["model"] or provider_config["default_fallback_model"]
+    # X-10：provider.model（design §9 优先）→ default_fallback_model 覆盖 payload[model]。
+    # task-10：openai 形态 dict 只 6 键（无 default_fallback_model），用 .get() 兼容；
+    # anthropic 形态两键都在，.get() 与原 [...] 逐字等价（NFR-02 零回归）。
+    override_model = provider_config.get("model") or provider_config.get("default_fallback_model")
     if override_model:
         payload["model"] = override_model
 

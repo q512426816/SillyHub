@@ -929,3 +929,172 @@ class TestSetDefaultCredentialsRollback:
         assert isinstance(provider_config, dict)
         assert "api_key" in provider_config
         assert provider_config["agent_kind"] == "claude"
+
+
+# ── task-09 openai 联动 LiteLLM（D-003 / R-09 best-effort / R-03 model_name）──────────
+
+
+class TestSetDefaultLitellmLinkage:
+    """openai 格式 set/unset-default + delete 联动 litellm_client（task-09 / D-003）。
+
+    mock litellm_client.register/unregister 为 spy（对齐 _probe_spy/_notify_spy 范式），
+    验证联动调用 + litellm_registered 标志 + anthropic 零回归（NFR-02）。
+    """
+
+    @pytest.mark.asyncio
+    async def test_set_default_openai_registers_litellm(
+        self,
+        db_session: AsyncSession,
+        mock_probe_notify: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """openai set-default 成功 → register 被调 + litellm_registered=True。"""
+        from app.modules.llm_provider import litellm_client
+
+        register_calls: list[tuple] = []
+
+        async def _register_spy(*args: object, **kwargs: object) -> bool:
+            register_calls.append((args, kwargs))
+            return True
+
+        monkeypatch.setattr(litellm_client, "register", _register_spy)
+
+        user_id = await _create_user(db_session, label="llm-set")
+        svc = LlmProviderService(db_session)
+        row = await svc.create(
+            user_id,
+            _create_payload(
+                name="zen-openai",
+                api_format="openai_chat",
+                base_url="https://opencode.ai/zen/v1/chat/completions",
+                model="zen-1",
+            ),
+        )
+        result = await svc.set_default(row.id, user_id)
+
+        assert result.switched is True
+        assert result.litellm_registered is True
+        assert len(register_calls) == 1
+        _args, kwargs = register_calls[0]
+        assert kwargs["user_id"] == user_id
+
+    @pytest.mark.asyncio
+    async def test_set_default_openai_register_fail_still_default(
+        self,
+        db_session: AsyncSession,
+        mock_probe_notify: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """openai register 返 False → litellm_registered=False 但 is_default 仍 True（R-09 降级）。"""
+        from app.modules.llm_provider import litellm_client
+
+        async def _register_fail(*_a: object, **_kw: object) -> bool:
+            return False
+
+        monkeypatch.setattr(litellm_client, "register", _register_fail)
+
+        user_id = await _create_user(db_session, label="llm-fail")
+        svc = LlmProviderService(db_session)
+        row = await svc.create(
+            user_id,
+            _create_payload(
+                name="zen-fail",
+                api_format="openai_chat",
+                base_url="https://opencode.ai/zen/v1/chat/completions",
+            ),
+        )
+        result = await svc.set_default(row.id, user_id)
+
+        assert result.switched is True
+        assert result.litellm_registered is False
+        await db_session.refresh(row)
+        assert row.is_default is True  # R-09：register 失败不回滚 is_default
+
+    @pytest.mark.asyncio
+    async def test_set_default_anthropic_no_litellm_register(
+        self,
+        db_session: AsyncSession,
+        mock_probe_notify: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """anthropic set-default → litellm_registered=None + register 未被调（零回归 NFR-02）。"""
+        from app.modules.llm_provider import litellm_client
+
+        register_calls: list[tuple] = []
+
+        async def _register_spy(*_a: object, **_kw: object) -> bool:
+            register_calls.append(("_", "_"))
+            return True
+
+        monkeypatch.setattr(litellm_client, "register", _register_spy)
+
+        user_id = await _create_user(db_session, label="anthropic-noop")
+        svc = LlmProviderService(db_session)
+        row = await svc.create(user_id, _create_payload(name="anthropic-provider"))
+        result = await svc.set_default(row.id, user_id)
+
+        assert result.switched is True
+        assert result.litellm_registered is None
+        assert register_calls == []
+
+    @pytest.mark.asyncio
+    async def test_unset_default_openai_unregisters_litellm(
+        self,
+        db_session: AsyncSession,
+        mock_probe_notify: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """openai unset-default → unregister(model_name=usr-<uid>-<pid>) 被调。"""
+        from app.modules.llm_provider import litellm_client
+
+        unregister_calls: list[str] = []
+
+        async def _unregister_spy(model_name: str) -> None:
+            unregister_calls.append(model_name)
+
+        monkeypatch.setattr(litellm_client, "unregister", _unregister_spy)
+
+        user_id = await _create_user(db_session, label="llm-unset")
+        svc = LlmProviderService(db_session)
+        row = await svc.create(
+            user_id,
+            _create_payload(
+                name="zen-unset",
+                api_format="openai_chat",
+                is_default=True,
+                base_url="https://opencode.ai/zen/v1/chat/completions",
+            ),
+        )
+        await svc.unset_default(row.id, user_id)
+
+        assert unregister_calls == [f"usr-{user_id}-{row.id}"]
+
+    @pytest.mark.asyncio
+    async def test_delete_openai_unregisters_litellm(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """openai delete → unregister 被调（delete 行前注销）+ 行已删。"""
+        from app.modules.llm_provider import litellm_client
+
+        unregister_calls: list[str] = []
+
+        async def _unregister_spy(model_name: str) -> None:
+            unregister_calls.append(model_name)
+
+        monkeypatch.setattr(litellm_client, "unregister", _unregister_spy)
+
+        user_id = await _create_user(db_session, label="llm-del")
+        svc = LlmProviderService(db_session)
+        row = await svc.create(
+            user_id,
+            _create_payload(
+                name="zen-del",
+                api_format="openai_chat",
+                base_url="https://opencode.ai/zen/v1/chat/completions",
+            ),
+        )
+        await svc.delete(row.id, user_id)
+
+        assert unregister_calls == [f"usr-{user_id}-{row.id}"]
+        with pytest.raises(LlmProviderNotFound):
+            await svc.get(row.id, user_id)

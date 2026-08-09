@@ -254,6 +254,30 @@ export interface ProviderConfig {
     model?: string;
     skipDangerousModePermissionPrompt?: boolean;
   };
+  /**
+   * task-11（change 2026-08-08-llm-provider-openai-format）：API 格式。
+   * 'anthropic'（缺省，直接打上游）/ 'openai_chat'（经 LiteLLM 网关转换，D-004）。
+   * 缺省 / 'anthropic' → toEnv 走既有 6 条映射规则（零回归 NFR-02）；
+   * 'openai_chat' → toEnv 早返回，ANTHROPIC_* 指向 LiteLLM（D-003 不含上游 key）。
+   */
+  api_format?: 'anthropic' | 'openai_chat';
+  /**
+   * task-11：LiteLLM 网关地址（openai 形态）→ ANTHROPIC_BASE_URL。
+   * 仅 api_format='openai_chat' 时由 backend 下发（= settings.litellm_base_url）。
+   */
+  litellm_base_url?: string;
+  /**
+   * task-11：LiteLLM 内 model_name（openai 形态）→ ANTHROPIC_MODEL。
+   * = `usr-{user_id}-{provider_id}`（R-03，与 backend task-09 register 写入 LiteLLM 的
+   * model_name 逐字一致），LiteLLM 据此路由命中 openai 上游。
+   */
+  litellm_model_name?: string;
+  /**
+   * task-11：LiteLLM 鉴权令牌（openai 形态）→ ANTHROPIC_AUTH_TOKEN。
+   * = settings.litellm_master_key（LiteLLM /v1/messages 接受 master key 鉴权）。
+   * D-003/NFR-01：上游 openai api_key 不下发 daemon，只注册在服务器 LiteLLM（task-09）。
+   */
+  litellm_auth_token?: string;
 }
 
 /**

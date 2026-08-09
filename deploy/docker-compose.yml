@@ -158,9 +158,67 @@ services:
       - "${FRONTEND_PORT:-3000}:3000"
     mem_limit: 400m
 
+  litellm-db:
+    # Wave2 LiteLLM 转换网关的独立 store DB（change 2026-08-08-llm-provider-openai-format / FR-05）。
+    # 独立于项目 postgres：LiteLLM 自带 alembic 会写自己的 alembic_version 表，与项目
+    # alembic_version 同名冲突，故必须独立 DB 实例（spike-litellm-routing 定稿假设）。
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD:-litellm}
+    volumes:
+      - litellm-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm -d litellm"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 128m
+
+  litellm:
+    # Wave2 Anthropic↔OpenAI 转换网关（FR-05 / NFR-03 / R-08）。平台代码不实现转换
+    # （D-004/D-012 外包 LiteLLM）。admin API 动态注册：openai 供应商 set-default 时后端
+    # POST /model/new 注册 model_name=usr-<uid>-<pid>（task-09），claim 时 provider_config 带
+    # litellm_model_name（task-10），daemon 注 ANTHROPIC_BASE_URL=litellm → LiteLLM 按 model_name
+    # 路由转 OpenAI 上游（task-11/12）。config 形态 / health 端点 / 镜像 tag 以
+    # spike-litellm-routing 实测定稿（当前为 admin API 模式假设）。
+    image: ghcr.io/berriai/litellm:main-stable
+    restart: always  # NFR-03/R-08：比 unless-stopped 更强，LiteLLM SPOF 宕自动拉起
+    depends_on:
+      litellm-db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # master key 走 .env 不入库不进镜像（R-05）；同时作 openai 供应商经 LiteLLM 的
+      # auth_token（LiteLLM /v1/messages 接受 master key 鉴权）。
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?must set LITELLM_MASTER_KEY}
+      STORE_MODEL_IN_DB: "True"  # admin API 动态注册需 DB 持久化（spike 定稿假设）
+      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:-litellm}@litellm-db:5432/litellm
+    volumes:
+      # admin API 模式起步空 model_list，运行时 set-default 动态注册（spike 定稿假设）。
+      - ./litellm-config.yaml:/app/config.yaml
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    healthcheck:
+      # health 端点以 spike 实测为准（LiteLLM 默认 /health/liveness）。
+      # litellm 镜像无 curl（端到端联调发现 healthcheck 永远 unhealthy，违 NFR-03），改 python urllib
+      # （litellm 是 python 应用，python 在 PATH）。task-08 返工 2026-08-09。
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveness')\" || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # 不写 ports：仅 backend 同 default network 可达 litellm:4000（R-05 网络隔离——
+    # LiteLLM 对公网 + master key 泄漏 = 所有 openai 上游 key 暴露）。
+    # backend 不 depends_on litellm：anthropic 链路不经 LiteLLM，LiteLLM 宕不能拖垮
+    # backend 启动（NFR-03 故障域隔离，仅 openai 链路受影响）。
+    mem_limit: 512m
+
 volumes:
   pgdata:
   redisdata:
+  litellm-db-data:
   worktree-data:
   claude-data:
   minio-data:

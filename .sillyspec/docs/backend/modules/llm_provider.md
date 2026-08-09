@@ -15,11 +15,11 @@ created_at: 2026-07-25 23:42:38
 - `GET /api/llm-providers/{id}` → LlmProviderRead：详情（masked）。
 - `PATCH /api/llm-providers/{id}` → LlmProviderRead：编辑（api_key 不传则不动）。
 - `DELETE /api/llm-providers/{id}` → 204。
-- `POST /api/llm-providers/{id}/set-default` → LlmProviderRead：设默认/「启动」（同 user×agent_kind 互斥，R-05）。
+- `POST /api/llm-providers/{id}/set-default` → SetDefaultResult（switched/affected_sessions/error/**litellm_registered**）：设默认/「启动」（同 user×agent_kind 互斥，R-05）；openai 格式额外经 LiteLLM 注册，失败 litellm_registered=False（R-09 best-effort，is_default 已生效不回滚）。
 - `POST /api/llm-providers/{id}/unset-default` → LlmProviderRead：取消默认/「停止」（对称 set-default；不清兄弟；全停则 lease 不注入 provider_config，daemon 回归本机，D-007）。
 - `LlmProviderService`：list_/get/create/update/delete/set_default/unset_default + 加解密 + is_default 互斥 + owner 过滤。
-- 模型：`LlmProvider`（user_id/name/agent_kind/base_url/encrypted_api_key/key_id/model/notes/website_url/auth_field/model_role_mappings/default_fallback_model/extra_env/is_default）。
-- lease 下发：`build_claim_payload` 按 `lease.runtime_id → DaemonRuntime.user_id`（主）解析用户默认 provider，解密后注入 `provider_config`（8 字段，D-005）。
+- 模型：`LlmProvider`（user_id/name/agent_kind/base_url/encrypted_api_key/key_id/model/notes/website_url/auth_field/model_role_mappings/default_fallback_model/extra_env/**api_format**（anthropic|openai_chat，default anthropic，change 2026-08-08）/is_default）。
+- lease 下发：`build_claim_payload` 按 `lease.runtime_id → DaemonRuntime.user_id`（主）解析用户默认 provider，注入 `provider_config`：anthropic 形态 8 字段（含解密 api_key，D-005）/ **openai 形态 6 字段**（api_format/litellm_base_url/litellm_model_name/litellm_auth_token/model/agent_kind，**不含上游 api_key** D-003，经 LiteLLM 网关消费，change 2026-08-08）。
 ## 关键逻辑
 ```
 create/update: CredentialCipher.encrypt(api_key) → 存 encrypted_api_key + key_id（明文不入 ORM）
@@ -35,10 +35,12 @@ lease 下发: 命中默认 provider → 解密 api_key → provider_config（D-0
 - agent_kind 抽象（D-006）：第一版只 "claude"，加 codex/gemini 只动 daemon credential-injector + 此处枚举值，表/lease 协议不变。
 - is_default 互斥：每 (user_id, agent_kind) 至多 1 条（R-05 并发由事务 + 索引保证）。
 - 未配供应商：lease 不下发 provider_config，daemon 走本机 env（D-007 零回归）。
-- 反代相关字段（User-Agent/Header/Body 覆盖/API 格式转换）明确不做（D-012 非目标）。
+- 反代相关字段（User-Agent/Header/Body 覆盖）明确不做（D-012 非目标）；**API 格式转换（Anthropic↔OpenAI）外包服务器 LiteLLM 网关**（change 2026-08-08：openai 格式供应商注册到 LiteLLM，daemon 注入指向 LiteLLM 的 ANTHROPIC_BASE_URL/AUTH_TOKEN/MODEL，平台代码不实现转换，D-012 绕过）。
+- openai 格式上游 api_key 只注册在 LiteLLM（master key 加密），**不下发 provider_config/daemon env/日志**（D-003/NFR-01，与 anthropic 形态含 api_key 区分）；register/unregister best-effort 不阻塞 is_default 变更（R-09）。
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 <!-- MANUAL_NOTES_END -->
 
 ## 变更索引
 - ql-20260726-005-a43f | 加 cc-switch 式「启动/停止」：新增 unset-default 端点 + service.unset_default（全停→lease 不注入→daemon 回归本机）+ 前端启动/停止按钮 UI。
+- change 2026-08-08-llm-provider-openai-format | 供应商管理支持完整 URL + OpenAI API 格式（经 LiteLLM 网关）：api_format 列 + 双格式鉴权头/候选 URL/完整 URL 归一 + LiteLLM 部署 + litellm_client register/unregister（model 必须 openai/<model> 前缀）+ provider_config/injector openai 分支（6 字段不含上游 key）+ SetDefaultResult.litellm_registered R-09 降级 + FR-11 守护移除。

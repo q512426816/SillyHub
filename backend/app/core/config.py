@@ -273,6 +273,26 @@ class Settings(BaseSettings):
         "text/markdown 供借用 agent run 方案落文件中心（2026-07-25-daemon-borrow-for-business D-001/FR-06）。",
     )
 
+    # ── LiteLLM gateway（Wave2，openai 格式供应商经 LiteLLM 转 Anthropic↔OpenAI / FR-05）──
+    # design D-004/D-012：平台不实现转换，外包服务器 LiteLLM。openai 供应商 set-default 时后端经
+    # admin API 注册 model_name=usr-<uid>-<pid>（task-09 litellm_client.register），claim 时
+    # provider_config 带 litellm_model_name（task-10），daemon 注 ANTHROPIC_BASE_URL=litellm（task-11）。
+    litellm_base_url: str = Field(
+        default="http://litellm:4000",
+        description=(
+            "LiteLLM admin + proxy base URL。Docker 内 backend 经服务名 litellm:4000 访问；"
+            "dev host native run 用 http://localhost:4000（dev compose 127.0.0.1 映射）。"
+        ),
+    )
+    litellm_master_key: str | None = Field(
+        default=None,
+        description=(
+            "LiteLLM master key：admin API 鉴权（register/unregister）+ openai 供应商经 LiteLLM 的 "
+            "auth_token（/v1/messages 接受 master key）。从 LITELLM_MASTER_KEY env 读，不入代码/日志/审计。"
+            "未配则 openai set-default 的 LiteLLM 注册恒失败（R-09 best-effort 降级，不阻塞 is_default）。"
+        ),
+    )
+
     @property
     def file_allowed_type_set(self) -> frozenset[str]:
         """file_allowed_types 解析为集合（去空白），供上传校验。"""
