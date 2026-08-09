@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>change 2 设计确认 · incident 状态机 + SSRF 三连</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #f5f6f8; color: #1f2329; padding: 28px; line-height: 1.6; }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: #6b7280; font-size: 13px; margin-bottom: 22px; }
+  h2 { font-size: 16px; margin: 26px 0 12px; padding-left: 9px; border-left: 4px solid #2563EB; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
+
+  /* 状态机 */
+  .states { display: flex; gap: 14px; flex-wrap: wrap; margin: 14px 0 6px; }
+  .state { flex: 1; min-width: 190px; border: 2px solid #d1d5db; border-radius: 10px; padding: 12px 14px; background: #fafafa; }
+  .state.open { border-color: #f59e0b; }
+  .state.inv  { border-color: #3b82f6; }
+  .state.mit  { border-color: #8b5cf6; }
+  .state.res  { border-color: #10b981; }
+  .state .nm { font-weight: 700; font-size: 15px; }
+  .state .en { color: #9ca3af; font-size: 12px; font-family: Consolas, monospace; }
+  .state .ds { font-size: 12px; color: #6b7280; margin-top: 4px; }
+  .badge { display:inline-block; font-size:11px; padding:1px 7px; border-radius:8px; background:#fee2e2; color:#b91c1c; margin-left:6px; vertical-align:middle; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+  th, td { border: 1px solid #e5e7eb; padding: 8px 10px; text-align: center; }
+  th { background: #f3f4f6; font-weight: 600; }
+  td.from { background: #f9fafb; font-weight: 600; text-align: left; }
+  .ok { color: #059669; font-weight: 700; }
+  .no { color: #d1d5db; }
+  .reopen { color: #b45309; font-weight: 700; }
+
+  .rule { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 10px 14px; font-size: 13px; margin: 8px 0; }
+  .rule b { color: #1d4ed8; }
+  .warn { background: #fff7ed; border-color: #fed7aa; }
+  .warn b { color: #b45309; }
+  code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-family: Consolas, monospace; font-size: 12px; }
+
+  /* SSRF 三出站 */
+  .ssrf { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 10px; }
+  .sbox { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px 14px; background: #fafafa; }
+  .sbox .t { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
+  .sbox .l { font-size: 12px; color: #4b5563; }
+  .sbox .allow { color: #059669; font-size: 12px; margin-top: 6px; }
+  .sbox .deny { color: #b91c1c; font-size: 12px; }
+  .footer { color: #9ca3af; font-size: 12px; margin-top: 24px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>change 2：后端防护加固 · 设计确认</h1>
+  <div class="sub">2026-08-09-security-backend-guardrails —— 修 5 项高危里的 2 项：incident 状态机失控 + SSRF 三连</div>
+
+  <!-- ===================== 部分 1：incident 状态机 ===================== -->
+  <h2>部分 1：incident（故障）状态机加「合法转换校验」</h2>
+  <div class="card">
+    <div class="rule"><b>现在的漏洞：</b>改状态时只做「值合法」检查，不查「能不能这么跳」。导致任意两个状态都能互跳，甚至已经<b>解决(resolved)</b>的故障能被改回<b>待处理(open)</b>还残留解决时间/解决人 —— 终态可复活，数据失真。</div>
+
+    <div class="states">
+      <div class="state open"><div class="nm">待处理</div><div class="en">open</div><div class="ds">新建故障的初始状态</div></div>
+      <div class="state inv"><div class="nm">排查中</div><div class="en">investigating</div><div class="ds">正在定位原因</div></div>
+      <div class="state mit"><div class="nm">已缓解</div><div class="en">mitigated</div><div class="ds">影响已控制住，未收尾</div></div>
+      <div class="state res"><div class="nm">已解决<span class="badge">终态</span></div><div class="en">resolved</div><div class="ds">已收尾，记解决时间/解决人</div></div>
+    </div>
+
+    <table>
+      <tr><th>从 ↓ 跳到 →</th><th>待处理 open</th><th>排查中 investigating</th><th>已缓解 mitigated</th><th>已解决 resolved</th></tr>
+      <tr><td class="from">待处理 open</td><td class="no">—</td><td class="ok">✓ 开始排查</td><td class="no">✗</td><td class="ok">✓ 误报/已知问题直接关</td></tr>
+      <tr><td class="from">排查中 investigating</td><td class="ok">✓ 退回待处理</td><td class="no">—</td><td class="ok">✓ 控制住</td><td class="ok">✓ 跳过缓解直接收</td></tr>
+      <tr><td class="from">已缓解 mitigated</td><td class="no">✗</td><td class="ok">✓ 回查</td><td class="no">—</td><td class="ok">✓ 正式收尾</td></tr>
+      <tr><td class="from">已解决 resolved</td><td class="no">✗</td><td class="reopen">↻ 仅可重开</td><td class="no">✗</td><td class="no">—</td></tr>
+    </table>
+
+    <div class="rule"><b>规则 1（终态只能重开）：</b>已解决(resolved)只允许改回排查中(investigating)重新查，不能退回待处理/已缓解。</div>
+    <div class="rule warn"><b>规则 2（重开清字段）：</b>从 resolved 重开时，自动清空 resolved_at（解决时间）和 resolved_by（解决人），避免「已解决但还挂着旧解决记录」的脏数据。</div>
+    <div class="rule"><b>规则 3（非法跳转报错）：</b>任何不在上表 ✓ 里的跳转，接口返回 <code>422</code> 并提示「当前状态 → 目标状态 不支持」+ 列出允许的目标；值本身非法（如 <code>unknown</code>）仍返回 400。</div>
+    <div class="rule"><b>规则 4（同状态幂等）：</b>把状态改成它当前就是的值（如 open→open）不校验、直接放行（不报错）。</div>
+    <div class="rule warn"><b>对现有功能的影响：</b>已逐一核对现有测试/页面，只用了 open→investigating 和 open→resolved 两种跳法，都在允许范围内 —— <b>现有功能零影响、现有测试不用改</b>。</div>
+  </div>
+
+  <!-- ===================== 部分 2：SSRF 三连 ===================== -->
+  <h2>部分 2：SSRF 三连（堵住「让后端去访问内网/本机」的三个口子）</h2>
+  <div class="card">
+    <div class="rule"><b>SSRF 是什么：</b>攻击者让后端服务器替它去请求一个地址。如果后端不校验这个地址，攻击者就能借后端的身份访问<b>内网服务</b>、<b>本机(127.0.0.1)</b>、<b>云元数据(169.254.169.254，可偷云密钥)</b>，甚至<b>读服务器本地文件</b>。本次统一建一个安全入口 <code>app/core/ssrf.py</code>，三个出站点都过它。</div>
+    <div class="ssrf">
+      <div class="sbox">
+        <div class="t">① MCP Webhook 回调</div>
+        <div class="l">注册 webhook 时 + 每次投递前，都校验回调 URL。</div>
+        <div class="deny">✗ 拒绝：127.0.0.1、169.254.169.254、10.x/192.168.x 等内网、file://</div>
+        <div class="allow">✓ 放行：公网 http/https 地址</div>
+      </div>
+      <div class="sbox">
+        <div class="t">② Worktree git clone</div>
+        <div class="l">克隆仓库前校验 repo_url 的协议（不查 IP，允许内网 git 服务器）。</div>
+        <div class="deny">✗ 拒绝：ext::（可远程执行命令）、file://（读本地文件）、裸路径</div>
+        <div class="allow">✓ 放行：https、ssh、git 协议、git@host:path 简写</div>
+      </div>
+      <div class="sbox">
+        <div class="t">③ http_get 工具</div>
+        <div class="l">发请求时逐跳校验，且每次跳转(重定向)后重新校验。</div>
+        <div class="deny">✗ 拒绝：IPv6 私网(::1/fc00::)、跳转到 127.0.0.1 等</div>
+        <div class="allow">✓ 放行：公网地址；重定向最多跟 3 跳、每跳都查</div>
+      </div>
+    </div>
+    <div class="rule" style="margin-top:12px;"><b>复用已有成果：</b>底层「解析域名→判断是否内网 IP」的代码此前做 LLM 供应商功能时已写好并测过，本次直接复用，不重复造轮子。</div>
+  </div>
+
+  <div class="footer">本页为设计确认原型 · 仅示意转换规则与防护范围 · 非最终实现 UI</div>
+</div>
+</body>
+</html>
