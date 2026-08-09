@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 import uuid
 from pathlib import Path
@@ -22,6 +21,7 @@ from app.core.errors import AppError, PermissionDenied, WorktreeLeaseNotFound
 from app.core.logging import get_logger
 from app.modules.git_gateway.model import GitOperationLog
 from app.modules.git_identity.model import GitIdentity
+from app.modules.worktree.exec_env import ExecEnvBuilder
 from app.modules.worktree.model import WorktreeLease
 
 if TYPE_CHECKING:
@@ -181,8 +181,11 @@ class GitGatewayService:
         # 4. Build command + env
         repo_dir = self._resolve_repo_dir(lease)
         cmd = ["git", operation, *args]
+        # 最小隔离环境:用 lease 的 ExecEnvBuilder.build_env_vars(HOME / GIT_CONFIG_*
+        # / GIT_ASKPASS / PATH + OS 必需非密白名单),绝不再 **os.environ,堵主密钥
+        # 泄漏;在此基础上叠加本次操作的 git 作者身份。
         env = {
-            **os.environ,
+            **ExecEnvBuilder().build_env_vars(Path(lease.path)),
             "GIT_AUTHOR_NAME": author_name,
             "GIT_AUTHOR_EMAIL": author_email,
             "GIT_COMMITTER_NAME": author_name,
@@ -333,8 +336,6 @@ class GitGatewayService:
 
     @staticmethod
     def _resolve_repo_dir(lease: WorktreeLease) -> Path:
-        from app.modules.worktree.exec_env import ExecEnvBuilder
-
         lease_root = Path(lease.path)
         repo_dir = ExecEnvBuilder().repo_dir(lease_root)
         if not repo_dir.exists():

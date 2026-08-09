@@ -401,6 +401,35 @@ async def test_git_env_defaults_without_identity(client, db_session, mock_repo_d
     assert env["GIT_AUTHOR_EMAIL"] == "agent@sillyhub.local"
 
 
+async def test_git_env_excludes_host_os_environ(client, db_session, mock_repo_dir, monkeypatch):
+    """子进程 env 用 ExecEnvBuilder.build_env_vars 最小隔离:宿主 os.environ 中的
+    主密钥/DB 密码/API key 一律不泄漏给 git 子进程(堵主密钥泄漏)。"""
+    refs = await _setup_active_lease(db_session)
+    monkeypatch.setenv("SECRET_KEY", "host-master-key-leak")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:s3cret@db/app")
+    with patch("app.modules.git_gateway.service.asyncio.create_subprocess_exec") as mock_exec:
+        proc = AsyncMock()
+        proc.communicate = AsyncMock(return_value=(b"ok\n", b""))
+        proc.returncode = 0
+        mock_exec.return_value = proc
+
+        resp = await client.post(
+            f"/api/worktrees/{refs['lease_id']}/git",
+            json={"operation": "status", "args": []},
+            headers=_auth(refs["token"]),
+        )
+    assert resp.status_code == 200
+    env = mock_exec.call_args.kwargs["env"]
+    # 宿主主密钥绝不进入子进程 env
+    assert "SECRET_KEY" not in env
+    assert "DATABASE_URL" not in env
+    assert "s3cret" not in " ".join(env.values())
+    # build_env_vars 的隔离键 + 作者身份仍在
+    assert "HOME" in env
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert env["GIT_AUTHOR_NAME"] == "SillyHub Agent"
+
+
 async def test_list_git_operations_empty(client, db_session):
     refs = await _setup_active_lease(db_session)
     resp = await client.get(

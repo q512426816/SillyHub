@@ -115,18 +115,50 @@ def test_cleanup_missing_dir(builder: ExecEnvBuilder, tmp_path: Path) -> None:
     builder.cleanup(root)
 
 
-def test_build_env_vars(builder: ExecEnvBuilder, tmp_path: Path) -> None:
+def test_build_env_vars(
+    builder: ExecEnvBuilder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
     ids = _ids()
     root = builder.lease_root(**ids)
+    # 注入一个 OS 必需非密项(白名单内)+ 一个宿主主密钥(白名单外),
+    # 验证白名单透传且主密钥绝不泄漏到隔离 env。
+    monkeypatch.setenv("SYSTEMROOT", "C:\\Windows")
+    monkeypatch.setenv("SECRET_KEY", "host-master-key-leak")
     env = builder.build_env_vars(root)
     assert env["HOME"] == str(builder.home_dir(root))
     assert env["GIT_CONFIG_GLOBAL"] == str(builder.gitconfig_path(root))
     assert env["GIT_ASKPASS"] == str(builder.askpass_path(root))
     assert env["GIT_TERMINAL_PROMPT"] == "0"
     assert "PATH" in env
-    import sys
 
     if sys.platform == "win32":
         assert env["GIT_CONFIG_SYSTEM"] == "NUL"
     else:
         assert env["GIT_CONFIG_SYSTEM"] == "/dev/null"
+
+    # OS 必需非密白名单透传(子进程跨平台可启动所需)
+    assert env["SYSTEMROOT"] == "C:\\Windows"
+    # 宿主主密钥绝不进入隔离 env
+    assert "SECRET_KEY" not in env
+    assert "host-master-key-leak" not in env.values()
+
+
+def test_build_env_vars_excludes_arbitrary_host_env(
+    builder: ExecEnvBuilder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """隔离 env 只含白名单 + lease/git 变量,宿主任意环境变量一律不带入。
+
+    回归守护:tool_gateway / git_gateway 子进程改用 build_env_vars 后,任何
+    非白名单的宿主 os.environ 项(如 DB 密码、API key)都不应出现在子进程 env。
+    """
+    ids = _ids()
+    root = builder.lease_root(**ids)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:s3cret@db/app")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-host-leak")
+    env = builder.build_env_vars(root)
+    assert "DATABASE_URL" not in env
+    assert "ANTHROPIC_API_KEY" not in env
+    assert "s3cret" not in " ".join(env.values())
+    assert "sk-host-leak" not in " ".join(env.values())

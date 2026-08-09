@@ -29,6 +29,7 @@ from app.modules.tool_gateway.tool_policy import (
     default_policy,
 )
 from app.modules.workflow.model import AuditLog
+from app.modules.worktree.exec_env import ExecEnvBuilder
 from app.modules.worktree.model import WorktreeLease
 
 log = get_logger(__name__)
@@ -142,6 +143,7 @@ class ToolGatewayService:
 
         lease, task = await self._get_lease_and_task(lease_id, user_id)
         lease_root = self._resolve_lease_root(lease)
+        isolated_env = self._build_isolated_env(lease)
         allowed_paths = task.allowed_paths if task else []
 
         # Load or use provided policy
@@ -158,7 +160,9 @@ class ToolGatewayService:
         # Apply resource limits
         limits = ToolPolicyService.apply_limits(policy, params)
 
-        result = await self._dispatch(tool_type, params, lease_root, allowed_paths, limits)
+        result = await self._dispatch(
+            tool_type, params, lease_root, allowed_paths, limits, isolated_env
+        )
 
         # Truncate output to policy limit
         output = result.get("output", "")
@@ -218,6 +222,7 @@ class ToolGatewayService:
         lease_root: Path,
         allowed_paths: list[str],
         limits: PolicyLimits | None = None,
+        env: dict[str, str] | None = None,
     ) -> dict:
         handlers: dict[str, Callable[..., Coroutine[object, object, dict]]] = {
             "file_read": self._handle_file_read,
@@ -232,7 +237,11 @@ class ToolGatewayService:
         if handler is None:
             raise ToolOperationForbidden(f"Unhandled tool type: {tool_type}")
 
-        if tool_type in ("shell_exec", "run_tests", "http_get"):
+        # shell_exec / run_tests 起子进程,透传最小隔离 env(绝不继承宿主 os.environ);
+        # http_get 用 httpx 不起子进程,无需 env。
+        if tool_type in ("shell_exec", "run_tests"):
+            return await handler(params, lease_root, env)
+        if tool_type == "http_get":
             return await handler(params, lease_root)
         return await handler(params, lease_root, allowed_paths)
 
@@ -349,6 +358,7 @@ class ToolGatewayService:
         self,
         params: dict,
         lease_root: Path,
+        env: dict[str, str] | None,
     ) -> dict:
         command = params.get("command", "")
         args = params.get("args", [])
@@ -364,6 +374,7 @@ class ToolGatewayService:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 cwd=str(lease_root),
+                env=env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
@@ -392,6 +403,7 @@ class ToolGatewayService:
         self,
         params: dict,
         lease_root: Path,
+        env: dict[str, str] | None,
     ) -> dict:
         """Execute test runner (pytest) and parse structured results."""
         runner = params.get("runner", "pytest")
@@ -414,6 +426,7 @@ class ToolGatewayService:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 cwd=str(lease_root),
+                env=env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
@@ -574,9 +587,18 @@ class ToolGatewayService:
         return lease, task
 
     @staticmethod
-    def _resolve_lease_root(lease: WorktreeLease) -> Path:
-        from app.modules.worktree.exec_env import ExecEnvBuilder
+    def _build_isolated_env(lease: WorktreeLease) -> dict[str, str]:
+        """构造子进程最小隔离环境(无宿主 os.environ 泄漏)。
 
+        复用 ExecEnvBuilder.build_env_vars(lease.path):HOME / GIT_CONFIG_* /
+        GIT_ASKPASS / PATH + OS 必需非密白名单。确保 shell_exec / run_tests 子进程
+        既拿不到宿主主密钥,又能跨平台正常启动(Win 缺 SYSTEMROOT 会导致 python
+        子进程启动失败)。
+        """
+        return ExecEnvBuilder().build_env_vars(Path(lease.path))
+
+    @staticmethod
+    def _resolve_lease_root(lease: WorktreeLease) -> Path:
         lease_root = Path(lease.path)
         repo_dir = ExecEnvBuilder().repo_dir(lease_root)
         if repo_dir.exists():

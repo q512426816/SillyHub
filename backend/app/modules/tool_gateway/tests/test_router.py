@@ -354,6 +354,61 @@ async def test_shell_exec_pat_redacted(client, db_session, tmp_path):
     assert "ghp_AbCdEf" not in resp.json()["redacted_output"]
 
 
+async def test_shell_exec_env_isolated_from_host(client, db_session, tmp_path, monkeypatch):
+    """shell_exec 子进程 env 用 ExecEnvBuilder.build_env_vars 最小隔离,宿主主密钥
+    不泄漏给 shell 子进程(堵主密钥泄漏)。"""
+    refs = await _setup_active_lease(db_session, tmp_path)
+    monkeypatch.setenv("SECRET_KEY", "host-master-key-leak")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-host-leak")
+    with patch("app.modules.tool_gateway.service.asyncio.create_subprocess_exec") as mock_exec:
+        proc = AsyncMock()
+        proc.communicate = AsyncMock(return_value=(b"ok\n", b""))
+        proc.returncode = 0
+        mock_exec.return_value = proc
+
+        resp = await client.post(
+            f"/api/worktrees/{refs['lease_id']}/tools",
+            json={"tool_type": "shell_exec", "params": {"command": "ls"}},
+            headers=_auth(refs["token"]),
+        )
+    assert resp.status_code == 200
+    env = mock_exec.call_args.kwargs["env"]
+    assert "SECRET_KEY" not in env
+    assert "ANTHROPIC_API_KEY" not in env
+    assert "host-master-key-leak" not in " ".join(env.values())
+    assert "sk-host-leak" not in " ".join(env.values())
+    # 隔离 env 必备键(build_env_vars)
+    assert "HOME" in env
+    assert "PATH" in env
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+
+
+async def test_run_tests_env_isolated_from_host(client, db_session, tmp_path, monkeypatch):
+    """run_tests 子进程(起 python -m pytest)同样用最小隔离 env,宿主主密钥不泄漏。
+
+    覆盖 Windows SYSTEMROOT 动机:python 子进程需 OS 必需非密白名单才能跨平台启动,
+    但绝不能继承宿主 os.environ 的主密钥。"""
+    refs = await _setup_active_lease(db_session, tmp_path)
+    monkeypatch.setenv("SECRET_KEY", "host-master-key-leak")
+    with patch("app.modules.tool_gateway.service.asyncio.create_subprocess_exec") as mock_exec:
+        proc = AsyncMock()
+        proc.communicate = AsyncMock(return_value=(b"1 passed\n", b""))
+        proc.returncode = 0
+        mock_exec.return_value = proc
+
+        resp = await client.post(
+            f"/api/worktrees/{refs['lease_id']}/tools",
+            json={"tool_type": "run_tests", "params": {"runner": "pytest", "path": "."}},
+            headers=_auth(refs["token"]),
+        )
+    assert resp.status_code == 200
+    env = mock_exec.call_args.kwargs["env"]
+    assert "SECRET_KEY" not in env
+    assert "host-master-key-leak" not in " ".join(env.values())
+    assert "HOME" in env
+    assert "PATH" in env
+
+
 # ── auth & lease checks ─────────────────────────────────────────────────────
 
 

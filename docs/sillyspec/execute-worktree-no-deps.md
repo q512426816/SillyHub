@@ -27,3 +27,12 @@ git worktree 只 checkout 跟踪文件，node_modules / .venv 在 .gitignore 不
 
 ## 关联
 2026-08-07-inject-wait-session-ready execute worktree 无 deps，手动 uv sync + pnpm install（frontend 1m54s）；Wave 1-2 子代理只静态 review（worktree 无 deps），Wave 3 装好 deps 后 task-10/11/12 真跑 ruff/vitest/pytest。
+
+## 补充（2026-08-09，backend venv 必须 `--all-extras`）
+`cd <worktree>/backend && uv sync` **不够**：pytest / aiobotocore 等声明在 `[project.optional-dependencies]` 的 test 组，`uv sync` 默认不装 optional 组 → worktree venv 有 90 个基础包但**缺 pytest 本身 + aiobotocore**。现象迷惑：
+- `uv run python -c "import aiobotocore"` 先报缺、手动 `uv pip install` 后能 import；
+- 但 `uv run pytest` 仍报 `ModuleNotFoundError: aiobotocore`（conftest db_engine fixture 间接 import storage/minio_backend）——因为 `uv run pytest` 走的是**系统 PATH 的 pytest**（非 venv，缺 aiobotocore），而 `uv run python -m pytest` 报 `No module named pytest`（venv 缺 pytest）。
+
+**正确绕过**：`cd <worktree>/backend && uv sync --all-extras`（装齐 optional test 组：pytest/pytest-asyncio/pytest-cov/pytest-xdist + aiobotocore）。之后 `uv run pytest` 与 `uv run python -m pytest` 都用 venv、全绿。
+
+诊断要点：pytest ERROR（非 FAIL）+ ModuleNotFound 在 conftest/db_engine 链路 → 先怀疑 worktree venv 缺 optional test 组，而非代码问题。`uv sync` 报 "Checked N packages" 但实际少装，不可信，以 `uv run python -c "import pytest"` 为准。

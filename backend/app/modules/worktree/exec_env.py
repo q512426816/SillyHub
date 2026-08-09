@@ -16,6 +16,25 @@ from app.core.logging import get_logger
 
 log = get_logger(__name__)
 
+# 跨平台子进程仍可启动所需的最小 OS 环境白名单(全部系统/运行时配置,不含任何密钥)。
+# build_env_vars 在隔离宿主 os.environ 的同时把这些非密项透传给子进程:
+# - Windows: SYSTEMROOT — Python/Win32 启动必需,缺则 python 子进程启动失败;
+#   TEMP/TMP — 临时目录;PATHEXT — 按 PATH 解析 .exe;COMSPEC — 可能起的 cmd。
+# - POSIX: TMPDIR/TEMP/TMP — 临时目录;LANG/LC_* — locale,影响 glibc/工具默认编码。
+# SECRET_KEY / DB / Redis 密码 / API key / token 等主密钥一律不在此列。
+_OS_ENV_ALLOWLIST: tuple[str, ...] = (
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "PATHEXT",
+    "COMSPEC",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_MESSAGES",
+)
+
 
 class ExecEnvBuilder:
     """Builds and tears down the isolated filesystem for a worktree lease."""
@@ -127,4 +146,10 @@ class ExecEnvBuilder:
             env["GIT_CONFIG_SYSTEM"] = "NUL"
         else:
             env["GIT_CONFIG_SYSTEM"] = "/dev/null"
+        # 透传最小 OS 必需非密白名单(见 _OS_ENV_ALLOWLIST):保证子进程跨平台可启动,
+        # 同时绝不带入宿主主密钥。仅复制 os.environ 中已存在且非空的项。
+        for key in _OS_ENV_ALLOWLIST:
+            value = os.environ.get(key)
+            if value:
+                env[key] = value
         return env
