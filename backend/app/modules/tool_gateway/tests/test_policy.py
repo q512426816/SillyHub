@@ -210,7 +210,9 @@ class TestRunTestsHandler:
         from app.modules.tool_gateway.service import ToolGatewayService
 
         svc = ToolGatewayService.__new__(ToolGatewayService)
-        result = await svc._handle_run_tests({"runner": "maven"}, tmp_path)
+        # env 参数为本次安全加固新增(子进程最小隔离);直接调 handler 传 {}(空 env,
+        # 不继承宿主 os.environ,与隔离语义一致;子进程已 mock,env 值不参与断言)。
+        result = await svc._handle_run_tests({"runner": "maven"}, tmp_path, {})
         assert result["result_code"] == 1
         assert "Unsupported runner" in result["output"]
 
@@ -225,7 +227,7 @@ class TestRunTestsHandler:
             proc.returncode = 0
             mock_exec.return_value = proc
 
-            result = await svc._handle_run_tests({"runner": "pytest", "path": "."}, tmp_path)
+            result = await svc._handle_run_tests({"runner": "pytest", "path": "."}, tmp_path, {})
         assert result["result_code"] == 0
 
 
