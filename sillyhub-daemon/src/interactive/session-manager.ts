@@ -2598,8 +2598,6 @@ export class SessionManager {
     providerConfig: ProviderConfig | null,
   ): Promise<void> {
     const state = this._store.get(sessionId);
-    // eslint-disable-next-line no-console
-    console.log(`[reload-diag] start session=${sessionId} found=${!!state} provider=${state?.provider} agentSessionId=${state?.agentSessionId}`);
     if (!state) {
       throw new SessionNotFoundError(sessionId);
     }
@@ -2719,8 +2717,6 @@ export class SessionManager {
       } catch {
         /* R-01: close 异常不阻塞（SDK 内部已有 SIGTERM→SIGKILL 升级兜底）。 */
       }
-      // eslint-disable-next-line no-console
-      console.log(`[reload-diag] success session=${sessionId} new query in place + oldQuery closed, restarting consume`);
       // 清 pendingSwitch（幂等兜底：markPendingSwitch 空闲路径不写标记；_onResult 路径
       // 已清；此处防状态机遗漏的边界，多清一次无副作用）。
       state.pendingSwitch = undefined;
@@ -2887,8 +2883,6 @@ export class SessionManager {
     const pendingSwitch = state.pendingSwitch;
     if (pendingSwitch) {
       state.pendingSwitch = undefined;
-      // eslint-disable-next-line no-console
-      console.log(`[reload-diag] triggered by _onResult(turn 边界) session=${state.sessionId}`);
       void this.reloadWithProvider(state.sessionId, pendingSwitch.providerConfig).catch(
         () => {
           // task-08 实现真实错误上报；本处兜底吞错，不阻塞 _onResult 收尾路径。

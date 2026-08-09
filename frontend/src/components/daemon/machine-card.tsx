@@ -222,12 +222,12 @@ export function MachineCard({
           <button
             type="button"
             className={btnOutlineTiny}
-            disabled={isOffline}
+            disabled={isOffline || upgrading}
             onClick={(e) => {
               e.stopPropagation();
               onUpgrade(machine);
             }}
-            title={isOffline ? "离线，无法升级" : "下发 daemon 自更新指令"}
+            title={isOffline ? "离线，无法升级" : upgrading ? "升级中…" : "下发 daemon 自更新指令"}
           >
             <RefreshCw className="h-3.5 w-3.5" />
             升级 daemon
