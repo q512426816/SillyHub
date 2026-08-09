@@ -45,6 +45,7 @@ StateMachine(current, TRANSITIONS, entity=...).transition(target)
 - task 的 `execute_plan` 用 `_assert_transition` 校验状态迁移，非法抛 `IllegalStatusTransition`
 - 202607220900_alter_ppm_fk_to_uuid 迁移把 ppm 外键从 varchar 改 uuid，若依式 map_fk 失败会产生孤儿 FK（plan_node_id NULL）
 - health.router 延迟 import ppm.plan/project model，存在跨模块弱依赖
+- **项目成员写操作经理支配权（2026-08-08 安全加固）**：`/project-member` 的 create/update/delete 复用 router 内 `_require_project_manager`（超管短路 + `manager_project_ids`）校验「调用者是该项目经理或超管」，堵成员自提权/越权改删他人成员。create 用 `body.pm_project_id`；update/delete 先 `ProjectMemberService.get(entity_id)` 取 `existing.pm_project_id` 再校验。读类（GET page/detail）仍仅认证不授权。project 子域其余写端点（项目维护/客户/干系人）暂不在本次范围
 - **模块导入（2026-07-14-milestone-module-import）**：实施阶段里程碑下 `PlanNodeModule` 加 `plan_type`（正常/临时计划，String(32) nullable，旧数据 NULL）；`importer.py` 按表头名解析 Excel（D-007，非列号，容错列位变化）；service `import_preview`/`import_commit` 两阶段无状态端点（预览后确认 D-006），`import_commit` 用 `session.add()`+末尾单次 `commit()` 原子提交（**不复用 `_Crud.create`** 其逐条 commit 破坏原子性，D-008），含同名合并/模块自动汇总(min/max/sum/首个)；router 加文件大小(10MB)/类型校验(413/415)+`plan_node_id`/`pm_project_id` 用 `uuid.UUID`(422)；责任人按姓名 ORM 全量反查 `PpmProjectMember`（不走分页），未匹配行跳过
 
 ## 人工备注
@@ -58,3 +59,4 @@ StateMachine(current, TRANSITIONS, entity=...).transition(target)
 - ql-20260722-003-f7d9 | problem-list 列表页改造（前端归属默认全部/问题类型入展开/17列重排+bug标红+责任人&处置人合并列+预估·已消耗合并列；后端 service 排序白名单加 plan_start_time 支持按计划开始时间正序；router list 回填 now_handle_user_name 历史仅存 id 处置人反查 display_name）
 - ql-20260722-004 | problem 数据范围补创建人可见(common/data_scope.problem_scope_clause 加 created_by==user.id,修"能编辑却在列表看不见自己创建的问题"矛盾)+ 详情页展示创建人/创建时间(schema ProblemListResp 加 created_by_name,router 列表批量+详情单条反查 display_name)
 - 2026-07-22-ppm-permission-by-project-member-role | PPM 权限统一到「项目成员角色」:项目计划/项目维护数据范围(data_scope.py 根)从「系统 RBAC 角色 XMJL/DEPTBOSS + PsProjectPlan.project_manager_id + 部门组织树」改为复用 common.data_scope 的 manager_project_ids(PpmProjectMember.role_name),与任务/问题同口径;DataScope 改 (is_full, manager_project_ids, creator_user_id)。项目计划编辑/删除加 can_operate_plan(超管‖创建人‖本项目经理)+ PsProjectPlanResp.can_edit/can_delete,前端 project-plans/milestone-details 编辑门改读后端标志(对齐问题清单)。行为变化:普通用户获自建可见;部门经理不再自动看本部门全部项目(需配成员角色);里程碑页经理角色成员可编辑。项目维护写操作/任务编辑不在本次范围
+- ql-20260808-001-4068 | 项目成员 create/update/delete 加经理/超管校验（复用 _require_project_manager，堵成员自提权/越权改删；create 用 body.pm_project_id，update/delete 先 get 取 pm_project_id）

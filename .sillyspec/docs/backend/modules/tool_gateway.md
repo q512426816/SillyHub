@@ -40,7 +40,11 @@ execute(workspace, user, lease_id, task_id, tool_type, params):
 - `run_tests` 支持 pytest / go_test，pytest 输出解析为结构化 JSON；`http_get` 用 httpx，最大重定向 3 次
 - 无策略关联时用 `default_policy()`（非持久化，宽松默认）
 - 策略名同 workspace 内唯一（`ux_tool_policy_workspace_name`）；V1 审批端点为 stub 返回空
+- **子进程环境隔离（2026-08-08 安全加固）**：`shell_exec`/`run_tests` 原 `create_subprocess_exec` 不传 `env=`（默认继承父进程全部 `os.environ`，宿主主密钥泄漏）。现 `execute` 经 `_build_isolated_env(lease)`（= `ExecEnvBuilder.build_env_vars(lease.path)`）构造最小隔离 env，经 `_dispatch` 透传给两个子进程 handler 的 `create_subprocess_exec(env=...)`；`http_get` 用 httpx 不起子进程不传 env
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 <!-- MANUAL_NOTES_END -->
+
+## 变更索引
+- ql-20260808-001-4068 | shell_exec/run_tests 子进程透传 build_env_vars 最小隔离 env（原默认继承全部 os.environ，堵主密钥泄漏）

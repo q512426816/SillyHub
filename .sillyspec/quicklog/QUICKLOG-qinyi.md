@@ -242,3 +242,70 @@
 根因：无，纯新增数据模块——opencode 配置形态（opencode.json 的 `provider.<名字>` 块：npm+options.baseURL+options.apiKey+models）与 claude 的 ANTHROPIC_* env 注入完全不同，不能复用 `llmProviderPresets.ts` 的 env 块结构，需独立数据文件先把供应商数据备好。
 方案：新建 `config/opencodeProviderPresets.ts`，扁平化承载 opencode `provider.<name>` 块（key/name/npm/base_url/set_cache_key/models/website_url/api_key_url/icon_color），数据逐字抄 cc-switch `opencodeProviderPresets.ts`（R-05 不臆造模型名/URL），affiliate 参数（?aff=/?ic=/?from=/invitecode/utm_/ref=/ac=）全部剔除；分类复用 cn_official/aggregator，导出分组/按键索引；`name` 同时是 opencode config 的 provider key 故保持英文名。新建同目录 `__tests__/opencodeProviderPresets.test.ts` 钉不变量防抄录手滑。
 结果：前端单测 7/7 全过，`tsc --noEmit` 0 错；frontend 模块文档变更索引已追加 ql-ID 并暂存；当前表单/后端仍 claude-only，本数据模块暂未被消费，待 opencode agent 全链路支持（backend agent_kind 放开 + daemon OpenCodeCredentialInjector + 表单预设选择器）时接入。已 git add（2 数据/测试文件 + frontend.md）未 commit。
+## ql-20260808-001-4068 | 2026-08-08 23:25:47 | 安全加固三联：gateway 子进程环境隔离 + admin 支配权校验 + PPM 成员经理校验
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/worktree/exec_env.py（build_env_vars 补 `_OS_ENV_ALLOWLIST` 非密 OS 白名单——Win: SYSTEMROOT/TEMP/TMP/PATHEXT/COMSPEC；POSIX: TMPDIR/LANG/LC_*。支撑 gateway 子进程最小隔离且跨平台可启动，Win 缺 SYSTEMROOT 会致 python 子进程启动失败；SECRET_KEY/DB 密码/API key 一律不在列）
+- backend/app/modules/git_gateway/service.py（execute 子进程 env 弃 `{**os.environ}`，改用 `ExecEnvBuilder.build_env_vars(lease.path)` + 作者身份 env；删 import os、local import 升顶层）
+- backend/app/modules/tool_gateway/service.py（execute 构造 `_build_isolated_env(lease)` 经 `_dispatch` 透传 env 给 `_handle_shell_exec`/`_handle_run_tests` 的 `create_subprocess_exec(env=...)`；http_get 不起子进程不传）
+- backend/app/modules/admin/users_service.py（新增 `_roles_carry_platform_admin` + `_assert_actor_may_grant_platform_admin`；create/update_user 授 `is_platform_admin=True` 或绑定含 `platform:admin` 的角色前校验 actor `is_platform_admin`，否则 `PermissionDenied(PLATFORM_ADMIN_GRANT_FORBIDDEN)`）
+- backend/app/modules/ppm/project/router.py（项目成员 create/update/delete 复用 `_require_project_manager`：create 用 `body.pm_project_id`；update/delete 先 `ProjectMemberService.get(entity_id)` 取 `existing.pm_project_id`）
+- backend/app/modules/worktree/tests/test_exec_env.py（build_env_vars 断言白名单透传 + 宿主主密钥不泄漏 + 任意宿主 env 排除）
+- backend/app/modules/git_gateway/tests/test_router.py（新增 test_git_env_excludes_host_os_environ：子进程 env 无 SECRET_KEY/DATABASE_URL）
+- backend/app/modules/tool_gateway/tests/test_router.py（新增 shell_exec/run_tests 隔离 env 断言）
+- backend/app/modules/tool_gateway/tests/test_policy.py（run_tests 两直调 handler 测试适配新增 env 参数传 `{}`，非弱化断言）
+- backend/tests/modules/admin/test_users_dominance.py（新建 8 用例：非平台管理员授 admin/绑 platform:admin 角色被拒、绑普通角色放行、平台管理员放行）
+- backend/tests/modules/ppm/test_project_member_manager_guard.py（新建 9 用例：非经理非超管 403 / 经理放行 / 超管放行 × create/update/delete）
+- .sillyspec/docs/backend/modules/{admin,git_gateway,tool_gateway,worktree,ppm}.md（正文注意事项 + 变更索引各追加本 ql-ID）
+- 来源说明：`.sillyspec/docs/SillyHub/scan/CONCERNS.md`（2026-08-08 多代理安全审计报告）是本次 3 条的**来源**，非本 quick 代码改动，未暂存；--done 用 `--force-baseline --allow-new` 压制其危险路径判定
+
+需求：堵三处安全洞——(1)tool_gateway/git_gateway 子进程继承宿主 os.environ 致主密钥泄漏；(2)admin users 持 USER_WRITE 的非平台管理员可越权授 is_platform_admin 或平台权限角色；(3)PPM 项目成员 create/update/delete 无经理校验可自提权。
+根因：git_gateway execute 直接 {**os.environ}、tool_gateway shell_exec/run_tests 不传 env 默认全继承（build_env_vars 已有最小隔离却唯独这两条路径漏接）；users_service create/update 无支配权校验（USER_WRITE≠is_platform_admin）；ppm 成员写端点仅认证不授权未校验项目经理。
+方案：worktree/exec_env.py build_env_vars 补非密 OS 白名单（Win SYSTEMROOT 等/POSIX locale）保证子进程跨平台可启动；git_gateway/tool_gateway 子进程改用 build_env_vars(lease.path) 最小隔离（git 叠加作者 env）弃 **os.environ；users_service 新增 _roles_carry_platform_admin+_assert_actor_may_grant_platform_admin，create/update 授 is_platform_admin=True 或绑定 platform:admin 角色前校验 actor is_platform_admin 否则 PermissionDenied；ppm/project/router 成员 create/update/delete 复用 _require_project_manager（create 用 body.pm_project_id，update/delete 先 get 取 pm_project_id）。
+结果：worktree+git_gateway+tool_gateway 172 passed；ppm 499 passed（含新守卫 9 用例，test_member_http_crud 不破）；admin 88 passed+支配权 8 用例过；唯一失败 test_update_username_change_success 429 登录限流已在干净 HEAD（git stash）复现=预存缺陷与本改动无关；ruff format/check+mypy 全过；模块文档 admin/git_gateway/tool_gateway/worktree/ppm 已同步并暂存。CONCERNS.md(2026-08-08 多代理审计报告，本 quick 任务的来源)非本 quick 代码改动，未暂存，用 --force-baseline 压制其危险路径判定。
+## ql-20260809-001-c283 | 2026-08-09 06:36:18 | 修 complete_stage 的 stages 非深拷贝（last_stage_completion 不落库）
+状态：已完成
+关联变更：2026-08-09-complete-stage-deepcopy
+文件：
+- backend/app/modules/change/service.py（complete_stage:1571 `stages = change.stages or {}` → `dict(change.stages or {})` 浅拷贝，加普通 Column(JSON) 非 MutableDict 的 set 事件同对象不标记 dirty 机理注释）
+- backend/app/modules/change/tests/test_complete_stage.py（+`test_complete_stage_persists_last_stage_completion_to_db`：complete_stage 后 refresh 真读 DB，断言 last_stage_completion 落库 + team_mode 保留，锁持久化契约）
+- .sillyspec/docs/backend/modules/change.md（人工备注 MANUAL_NOTES 追加 ql-20260809-001-c283 变更索引，含 7 处同模式外溢标注）
+
+需求：修 ChangeService.complete_stage（service.py:1571）的 stages 非深拷贝 bug——last_stage_completion 字段不落库（change-center-on-demand task-16 发现的遗留项）。
+根因：change.stages 是普通 Column(JSON) 非 MutableDict.as_mutable（model.py:155），complete_stage 用 stages = change.stages or {} 取引用、原地改 stages["last_stage_completion"]、再 change.stages = stages 回赋同对象；SQLAlchemy 标量属性 set 事件见 new is old（同对象）不标记 dirty，flush 的 UPDATE 不带 stages 列 → 该键丢失（current_stage 走独立列故正常）。
+方案：改 dict(change.stages or {}) 浅拷贝（与 transition_with_dispatch:763 同源范式），新对象回赋被检测为变更而落库。TDD：先写 test_complete_stage_persists_last_stage_completion_to_db（refresh 真读 DB 锁持久化契约）→ 跑 FAIL 实证 bug → 改 → 跑 PASS。
+结果：新测试 PASS + test_complete_stage.py 全 17 passed 无回归；ruff check/format + mypy 全过。3 文件已 git add（service.py / test_complete_stage.py / change.md 模块文档同步 ql 索引）。⚠️ 系统性外溢发现：同文件另有 7 处同模式非 copy 站点（685 transitions / 846 last_feedback / 1327,1386,1457,1621,1718 review_history；934 只读无 bug）潜在同样不落库 bug，本次按 scoped 不扩，建议另开 sweep change。
+## ql-20260809-002-4219 | 2026-08-09 06:49:05 | sweep 关闭 ql-001 的 7 处 stages 非深拷贝外溢
+状态：已完成
+关联变更：2026-08-09-stages-deepcopy-sweep
+文件：
+- backend/app/modules/change/service.py（8 处 `stages = change.stages or {}` → `dict(change.stages or {})`：transition / submit_feedback / proposal_review / plan_review / human_test / rerun_stage / archive_confirm 7 个 mutating 方法 + `check_archive_gate:934` 只读站点一并标准化消除危险 idiom）
+- backend/app/modules/change/tests/test_stages_persistence.py（新建 7 用例；`_seed` 显式置 `{"team_mode": True}` 复现「非空 stages」触发条件，refresh 真读 DB 锁各方法 stages 键 transitions/last_feedback/review_history 持久化契约）
+- .sillyspec/docs/backend/modules/change.md（人工备注追加 ql-20260809-002-4219 变更索引，关闭 ql-001 的 7 处外溢标注）
+需求：sweep 关闭 ql-20260809-001-c283 标注的 7 处同模式 stages 非深拷贝外溢（transition/submit_feedback/proposal_review/plan_review/human_test/rerun_stage/archive_confirm 的 stages 键不落库）。
+根因：同 ql-001——change.stages 普通 Column(JSON) 非 MutableDict.as_mutable，各方法 stages = change.stages or {} 取引用原地改 + 回赋同对象，set 事件见 new is old 不标记 dirty，flush 不带 stages 列。⚠️ 进阶发现：bug 仅在 change.stages 非空时触发（falsy 时 or {} 取新对象被检测→不触发），故 _create_test_change 默认 stages={} 的既有测试全漏网。
+方案：新建 test_stages_persistence.py，_seed 显式置 {team_mode: True} 复现，7 用例 refresh 真读 DB 锁各方法 stages 键持久化；replace_all 改 service.py 8 处 stages = change.stages or {} → dict(change.stages or {})（7 mutating + check_archive_gate 只读站点一并标准化）。
+结果：7 用例改前全 FAIL → 改后全 PASS；change 全模块 206 passed/2 skip 无回归；ruff check/format + mypy 全过。3 文件已 git add（service.py / test_stages_persistence.py / change.md 模块文档同步 ql 索引）。
+
+## ql-20260809-003-56db | 2026-08-09 06:56:24 | 多代理审计 8 个低风险单点修复（release 死路由 / incident 漏校验 / request_id / OOM / 时区 / SSE 日志 / 升级按钮 / 调试 log）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/release/router.py（promote 路由 require_permission→require_permission_any；路径无 workspace_id 占位符，原装饰器恒 422，改后 200 draft→staging）
+- backend/app/modules/incident/service.py（update 补 VALID_SEVERITIES 校验，与 create 对称，堵住 update 直接入库非法 severity）
+- backend/app/core/errors.py（_request_id 优先读 request.state.request_id，再回退 header、最后生成 uuid；与中间件 main.py:183 写 state 及 x-request-id 响应头/慢请求日志对齐）
+- backend/app/modules/knowledge/parser.py（_read_file_safe 超大文件改限量读前 MAX_CONTENT_BYTES//4 字节，不再整文件读入内存后切片，OOM 防护）
+- backend/app/modules/ppm/kanban/service.py（_parse_date_range 的 datetime.combine 补 tzinfo=UTC；PlanTask.end_time 是 timestamptz，生产 PG 对 naive datetime 会报错/时区错移）
+- frontend/src/lib/daemon.ts（删生产 SSE onmessage 的 console.log("[SSE-raw]", ...)，泄漏前 150 字 + 性能噪声）
+- frontend/src/components/daemon/machine-card.tsx（升级按钮 disabled 加 || upgrading + title 提示「升级中…」，防双击双发自更新）
+- sillyhub-daemon/src/interactive/session-manager.ts（删 3 处 [reload-diag] 调试 console.log 及配套 eslint-disable 注释）
+- backend/app/core/tests/test_errors.py（新建：_request_id 三分支——优先 state / 回退 header / 兜底 uuid）
+- backend/app/modules/incident/tests/test_service.py（+2：update 非法 severity 抛 IncidentError / 合法 severity 落库）
+- backend/app/modules/knowledge/tests/test_parser.py（+2：小文件不截断 / 超大文件限量读不整读）
+- backend/app/modules/ppm/kanban/tests/test_kanban.py（+2：_parse_date_range 返回 UTC-aware / 空输入返回 None）
+- backend/app/modules/release/tests/test_router.py（+1：promote 端点 200 draft→staging，回归死路由修复）
+需求：修复 CONCERNS.md「2026-08-08 多代理审计」中 8 个低风险单点问题（release promote 死路由 / incident update 漏校验 severity / errors request_id 不一致 / knowledge parser 大文件 OOM / kanban 日期缺时区 / 前端 SSE 日志泄漏 / 升级按钮可双击 / daemon 调试日志残留）。
+根因：均为审计发现的既有缺陷——鉴权装饰器误用 require_permission vs require_permission_any、update 路径与 create 校验不对称、中间件已写 state 但错误处理器只读 header、大文件整读再切片、datetime.combine 缺 tzinfo、生产代码残留 console.log、按钮缺 upgrading 守卫。
+方案：后端 5 处（release router 改 require_permission_any；incident update 补 VALID_SEVERITIES 校验；errors _request_id 优先读 request.state；knowledge parser 改限量读前 MAX_CONTENT_BYTES//4 字节；kanban _parse_date_range 加 tzinfo=UTC）+ 前端 2 处（daemon.ts 删 SSE console.log；machine-card 升级按钮加 upgrading 守卫）+ daemon 1 处（session-manager 删 3 处 reload-diag 调试 log），每条配针对性测试。
+结果：后端 pytest 110 passed、前端 machine-card vitest 9 passed、daemon reload-provider vitest 11 passed；后端 ruff check+format 全过、daemon tsc 无错、前端 eslint 0 error（16 预存 warning 与本次无关）。

@@ -173,3 +173,21 @@
 - 根因：`deploy/.env` 的 `SILLYSPEC_MASTER_KEY` 被填成人类可读标识串 `msk-sillyhub-dev-90d223fd-...`（看着像密钥，实则非十六进制）。`crypto._load_master_key()` 只对**空值**抛友好 `MasterKeyMissing`，非空但非 hex 直接走 `bytes.fromhex(hex_key)` → 裸 `ValueError` → `get_cipher()` 构造期崩溃 → 任何 `new LlmProviderService(session)` / `WorktreeService(...)` 立即 500（list 接口构造 service 时就炸，根本到不了 SQL）。
 - 修复（ql-20260729-001-b3af）：`deploy/.env` 第5行换成合法 `v1:<secrets.token_hex(32) 生成的 64位hex>`；`docker compose up -d --force-recreate backend` 重建容器重读 env。零数据风险：`llm_providers`/`git_identities` 表均空、`api_keys` 为 hash 存储不依赖 master key。
 - 通用坑：① `SILLYSPEC_MASTER_KEY` 格式必须是 `<key_id>:<64位hex>`（如 `v1:ab12...`）或裸 64 位 hex，**不能**填标识串/base64/明文密码；生成命令 `python -c "import secrets; print(f'v1:{secrets.token_hex(32)}')"`（`crypto.py:42` MasterKeyMissing 的 hint 已给）。② `deploy/.env` 被 `.gitignore`，改它不进 `git status`，靠重建容器重读 env 落地（`docker compose up -d` 检测到 backend env 变化会自动 recreate，保险用 `--force-recreate backend`）。③ `_load_master_key` 对「非空但格式非法」抛裸 ValueError 是健壮性缺陷——建议后续把 `bytes.fromhex` 包 try/except 转 `MasterKeyMissing`（带 hint），避免 500 时栈里只有裸 fromhex 难定位。
+
+## 2026-08-08 — admin 套件 login 限流 429 致偶发 FAILED（预存，测试态跨用例累计）
+
+> 来源：ql-20260808-001-4068（安全加固三联）跑 `tests/modules/admin` 时发现。
+
+- 现象：`tests/modules/admin/test_users_router.py` 全量跑时 `test_update_username_change_success`（及 `test_create_user_then_login_by_username`）偶发 `assert 429 == 200`（`HTTP_429_LOGIN_RATE_LIMITED`）；单独跑该用例 100% 过。
+- 根因：auth login 限流是**跨用例共享的测试态累计**（同 IP 127.0.0.1 的 INCR 计数在套件内不被重置）；`test_login_by_email_or_username` 单测发 5 次 `/api/auth/login`（故意测 4 次失败防枚举），把限流计数顶到阈值，后续断言「登录成功=200」的用例撞限流。conftest `_isolate_permission_timers` 只清 daemon `_permission_timers`，不含 login 限流。
+- 判定为预存非回归：`git stash` 干净 HEAD 复跑 `test_users_router.py` 同样 FAILED 且**更糟**（2 用例 429）；安全加固新增测试用 `create_access_token` 铸 token、零 `/api/auth/login` 调用，不增加登录计数。
+- 通用坑：① 套件级「偶发 429」基本是限流跨用例累计，先用「单跑该用例是否过 + git stash 干净 HEAD 是否复现」两步定位为预存再归因，别误判成新改动引入。② 修复方向（待做）：给 login 限流加测试态隔离（per-test 清零计数，或在 fixture 里 mock/抬高阈值），参照 `_isolate_permission_timers` 范式。③ 测「非登录路径」的权限/断言用 `create_access_token` 直接铸 token，绕开 login 限流，别走 `/api/auth/login`。
+
+## 2026-08-08 — quick --done 边界审计把并发会话的 .sillyspec 脏文件判危险（用 --force-baseline 但不暂存）
+
+> 来源：ql-20260808-001-4068 --done 首跑被 `.sillyspec/docs/SillyHub/scan/CONCERNS.md` 拦。
+
+- 现象：quick step3 `--done` 报「危险文件变更: CONCERNS.md」exit 1；该文件是另一流程（2026-08-08 多代理审计）写的 scan 产物，本 quick 全程未碰、未暂存。
+- 根因：`--done` 边界审计比对 step1 baseline 与当前 git status，凡 `.sillyspec/` 下非关联变更的脏文件都可能被判危险。CONCERNS.md 在 quick 启动时已是 24 个 baseline 脏文件之一（来源 change 流程）。审计说明「并发其他会话的 `.sillyspec/changes/<非关联变更>/` 放行」，但对 `docs/scan/` 这类共享路径无并发豁免。
+- 处置：确认归属（`git diff` 看是审计报告，含本 quick 的 3 个洞，是任务**来源**而非代码改动）后，重跑 `--done --force-baseline --allow-new` 仅压制危险路径判定让流程过；**绝不 `git add` 该文件**，也不删——留给那个 change/审计流程自己处理。
+- 通用坑：① 遇到 --done 危险文件拦截，先 `git diff <file>` 判归属：是本流程产物（force-baseline）还是他人/并发产物（force-baseline 但**别提交它**）。force-baseline 只解锁流程，不等于把该文件纳入本 quick 提交集。② `--allow-new` 与 `--force-baseline` 解耦：新建测试文件用前者，压制危险判定用后者，别为一个目的滥开另一个。

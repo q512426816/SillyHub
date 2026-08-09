@@ -39,7 +39,11 @@ execute(workspace, user, operation, args, lease_id?):
 - `_resolve_repo_dir` 优先用 lease.path，无 lease 时回退 workspace 根目录（容器内挂载路径）
 - 审计日志的 stdout/stderr 均为脱敏后文本，原始输出不落库；排查真实输出需看进程级日志
 - 与 git_identity（提供身份）、worktree（提供 lease）强耦合，二者任一不可用则 gateway 不可用
+- **子进程环境隔离（2026-08-08 安全加固）**：`execute` 子进程 env 不再 `{**os.environ,...}`（会把宿主 SECRET_KEY/DB 密码/API key 灌进 git 子进程，主密钥泄漏）。改用 `ExecEnvBuilder.build_env_vars(lease.path)`（HOME/GIT_CONFIG_*/GIT_ASKPASS/PATH + 非密 OS 白名单）再叠加本操作 `GIT_AUTHOR_*/GIT_COMMITTER_*` 作者身份——最小隔离，git 操作所需凭证走 lease 的 askpass/gitconfig，宿主主密钥不进子进程
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 <!-- MANUAL_NOTES_END -->
+
+## 变更索引
+- ql-20260808-001-4068 | git 子进程 env 改用 build_env_vars 最小隔离（弃 **os.environ，堵主密钥泄漏），叠加作者身份 env

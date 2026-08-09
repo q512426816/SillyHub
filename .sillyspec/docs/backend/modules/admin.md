@@ -41,7 +41,11 @@ OrganizationService: 组织树用 parent_id 自引用
 - 所有 service 写操作经 `_audit` 写 AuditLog（action 含 user./role./organization. 前缀），OrganizationService 直接写 workflow.AuditLog
 - roles_service 用 `_user_roles_model()` 延迟 import UserRole（避免循环），import 失败表示前置任务未完成
 - auth.rbac 延迟 import admin.UserRole 收集权限，settings.service/schema 也 import admin，形成 admin↔auth/settings 双向引用
+- **支配权纵深防御（2026-08-08 安全加固）**：`/api/admin/users` 写操作虽由 router 层 `USER_WRITE` 守门，但 `USER_WRITE ≠ is_platform_admin`。`UserService.create_user/update_user` 在授 `is_platform_admin=True` 或绑定含 `platform:admin`（`PLATFORM_ADMIN`，super_admin 系统角色即带它）权限的角色前，经 `_assert_actor_may_grant_platform_admin` 校验 actor 自身 `is_platform_admin`，否则 `PermissionDenied(PLATFORM_ADMIN_GRANT_FORBIDDEN)`——防持 USER_WRITE 的非平台管理员越权授予超管（自提权/横向提权）。降级（`is_platform_admin=False`）不触发，仍由 `_active_admin_count` 兜底
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 <!-- MANUAL_NOTES_END -->
+
+## 变更索引
+- ql-20260808-001-4068 | users_service 支配权校验：create/update 授 is_platform_admin 或绑定 platform:admin 角色前校验 actor is_platform_admin（堵 USER_WRITE 持有者越权授超管）

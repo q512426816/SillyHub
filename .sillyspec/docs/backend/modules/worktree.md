@@ -33,6 +33,10 @@ acquire:
 - 租约有 TTL（ttl_seconds），`gc_expired_leases` 定时回收，释放磁盘。
 - 分支命名含 user/change/task，便于追溯；同 change/task 重复 acquire 需去重。
 - 依赖 git_identity 解密凭证注入 git 命令环境，identity 吊销会使在用 lease 失效。
+- **`build_env_vars` 非密 OS 白名单（2026-08-08 安全加固）**：`build_env_vars` 原仅吐 HOME/GIT_CONFIG_*/GIT_ASKPASS/GIT_TERMINAL_PROMPT/PATH/GIT_CONFIG_SYSTEM。git_gateway/tool_gateway 子进程改用它做最小隔离后，补 `_OS_ENV_ALLOWLIST`（Win: SYSTEMROOT/TEMP/TMP/PATHEXT/COMSPEC；POSIX: TMPDIR/LANG/LC_*）透传这些**非密** OS 项——保证 python/git 子进程跨平台可启动（Win 缺 SYSTEMROOT 会致 python 启动失败），同时宿主任意 `os.environ`（SECRET_KEY/DB 密码/API key）绝不进隔离 env。
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 <!-- MANUAL_NOTES_END -->
+
+## 变更索引
+- ql-20260808-001-4068 | build_env_vars 补非密 OS 白名单（Win SYSTEMROOT 等/POSIX locale），支撑 gateway 子进程最小隔离且跨平台可启动

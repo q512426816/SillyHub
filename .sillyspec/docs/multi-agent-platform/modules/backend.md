@@ -79,4 +79,6 @@ multi-agent-platform 的核心 API 服务，monorepo 的"大脑"。以 FastAPI �
 
 - ql-20260803-003-cb34 | POST /api/workspaces 复用已存在工作区时显式提示：`WorkspaceRead` 加可选 `creation_notice`（仅创建端点填，列表/详情恒 None）；`WorkspaceService.create` 加 `notice` 注入参数（默认 None 零影响）在「同 root_path 已有 active→reused_active / pending→activated_pending / 软删→resurrected」三分支填 kind；router 据此转中文提示（含 daemon 绑定未写入提醒）。`test_router.py::test_create_duplicate_returns_existing` 补回归断言（新建无提示 + 复用必带「复用」文案）。
 
+- ql-20260809-003-56db | 多代理审计 8 个低风险单点修复（backend 部分 5 处）：release promote 死路由 require_permission→require_permission_any（路径无 workspace_id 占位符，原装饰器恒 422）；incident `update` 补 VALID_SEVERITIES 校验与 create 对称（堵 update 直接入库非法 severity）；core/errors `_request_id` 优先读 request.state.request_id 再回退 header/uuid（与 main.py 中间件 + x-request-id 响应头/慢请求日志对齐）；knowledge parser `_read_file_safe` 大文件改限量读前 MAX_CONTENT_BYTES//4 字节（OOM 防护，不整读后切片）；ppm/kanban `_parse_date_range` datetime.combine 补 tzinfo=UTC（匹配 PlanTask.end_time timestamptz）。配测试 errors×3/incident×2/knowledge×2/kanban×2/release×1，后端 pytest 110 passed + ruff 全过。
+
 <!-- MANUAL_NOTES_END -->

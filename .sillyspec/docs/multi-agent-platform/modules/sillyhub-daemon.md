@@ -55,4 +55,6 @@ created_at: 2026-06-24T01:16:42
 
 - 2026-07-25-daemon-borrow-for-business | 借用任务沙箱只读隔离（候选 B，D-007@v2）：daemon.ts 检测 lease rootPath 的 `borrow-sandbox:<slug>` marker → `_getBorrowWorkspaceManager`（lazy，`<workspace_dir>/borrow-sandboxes`，非借用部署零回归）prepareWorkspace(slug=borrow-<actor>-<run>) 作独立 cwd + `registerBorrowSandbox`；session-manager.ts 写守卫（`_judgeWriteViaPolicyEngine`）对借用 session **跳过 lender runtime 缓存**，按 sessionId 隔离只允许写沙箱 root（`isPathUnderAnyRoot`），沙箱外/UNC 路径 deny（R-02 借用继承 lender 写权限堵住）。沙箱创建失败 fail-open 退化 workspace_dir 不阻塞读源码主流程。借用产出走 submit_lease_messages 回传不落沙箱。
 
+- ql-20260809-003-56db | 多代理审计 8 个低风险单点修复（daemon 部分 1 处）：interactive/session-manager.ts 删 3 处 [reload-diag] 调试 console.log（:2602/:2723/:2891，含配套 eslint-disable no-console 注释）——生产路径残留调试日志，删后 reload 诊断逻辑（reloadProvider 机制）不变。session-manager-reload-provider vitest 11 passed + tsc 0 错。
+
 <!-- MANUAL_NOTES_END -->

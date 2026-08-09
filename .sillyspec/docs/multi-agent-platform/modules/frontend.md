@@ -84,4 +84,6 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 - ql-20260807-004-e5bf | opencode 供应商预设：初版建的 `config/opencodeProviderPresets.ts`（8 家 opencode agent 供应商数据）方向有误——cc-switch 调研确认 opencode 在 cc-switch 是 agent 模式（与 Claude Code 并列，写 ~/.config/opencode/）非供应商，平台当前也 claude-only。该数据模块及其测试已删除；改在 `config/llmProviderPresets.ts` 聚合站组加 **OpenCode Go** 预设（opencode.ai 官方 API，base_url https://opencode.ai/zen/go，模型 deepseek-v4-flash，照 cc-switch claudeProviderPresets 同名条目剔 affiliate，commit ea966414）。
 
+- ql-20260809-003-56db | 多代理审计 8 个低风险单点修复（frontend 部分 2 处）：lib/daemon.ts 删生产 SSE onmessage 的 console.log("[SSE-raw]", ...)（泄漏前 150 字 + 性能噪声）；components/daemon/machine-card.tsx 升级按钮 disabled 加 || upgrading + title 提示「升级中…」（防双击双发自更新，props.upgrading 父组件 runtimes/page.tsx 已传）。machine-card vitest 9 passed + eslint 0 error。
+
 <!-- MANUAL_NOTES_END -->
