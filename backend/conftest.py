@@ -70,6 +70,50 @@ def _reset_settings_cache() -> Iterator[None]:
     get_settings.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+async def _reset_redis_state() -> AsyncIterator[None]:
+    """每个测试前重置共享 Redis 状态，隔离登录限流计数 / captcha 累计。
+
+    根因（order-dependent flaky，单跑全过、全量红）：``captcha_service`` 把登录
+    失败计数 ``INCR login:fail:{ip}`` 写进共享 Redis db 15（见本文件 REDIS_URL），
+    测试客户端 IP 都是 127.0.0.1，故意失败的登录测试跨测试累计过
+    ``auth_login_fail_threshold`` → 后续登录全被要求 captcha（HTTP_423）。
+    叠加 ``get_redis()`` 是进程级单例，连接池绑定首个 event loop，pytest-asyncio
+    每测试新 loop 致 INCR 抛 'Event loop is closed'（即日志 rate_limit_check_failed）。
+
+    本 fixture（function scope，autouse）：每测试前重置 ``_client`` 单例（强制在
+    当前 loop 重建，绑本 loop）+ ``FLUSHDB`` 清 db 15 残留计数；redis 不可用时
+    best-effort 跳过（测试不强依赖 redis，captcha_service 限流降级放行）。
+    """
+    import app.core.redis as redis_module
+
+    # 丢弃可能绑定上一 loop 的旧单例，强制本 loop 内 get_redis() 重建。
+    if redis_module._client is not None:
+        try:
+            await redis_module._client.aclose()
+        except Exception:
+            pass
+        redis_module._client = None
+
+    # redis 可用时清整个 db 15，消除 login:fail:* / captcha:* 跨测试残留。
+    try:
+        await redis_module.get_redis().flushdb()
+    except Exception:
+        # redis 未起 / 连接失败：限流降级放行，测试不依赖 redis 状态，安全跳过。
+        pass
+
+    try:
+        yield
+    finally:
+        # 测试结束清单例，避免连接池带状态泄漏到下一个 event loop。
+        if redis_module._client is not None:
+            try:
+                await redis_module._client.aclose()
+            except Exception:
+                pass
+        redis_module._client = None
+
+
 @pytest.fixture()
 async def db_engine() -> AsyncIterator[Any]:
     """Create a fresh in-memory async SQLite engine + schema for the test."""
