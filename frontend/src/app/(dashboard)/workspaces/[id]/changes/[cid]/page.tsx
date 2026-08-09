@@ -845,7 +845,7 @@ export default function ChangeDetailPage({ params }: Props) {
 
       {/* ── SillySpec Step Progress ─────────────────────────────── */}
       <SillySpecStepProgress
-        currentStage={change.current_stage}
+        currentStage={change.current_stage ?? null}
         steps={(() => {
             const stages = change.stages as Record<string, unknown> | null;
             if (!stages || !change.current_stage) return undefined;

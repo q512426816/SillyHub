@@ -1,61 +1,42 @@
 import { apiFetch } from "./api";
+import type { components } from "./api-types";
 
-export type ChangeSummary = {
-  id: string;
-  change_key: string;
-  title: string | null;
-  status: string;
-  location: string;
-  change_type: string | null;
-  affected_components: string[];
-  owner_id: string | null;
-  current_stage: string | null;
-  created_at: string;
-  updated_at: string;
-};
+/**
+ * 变更摘要（列表项）。对齐后端 schema（components.schemas.ChangeSummary）。
+ * 注：旧手写曾含 created_at，后端从不返回（phantom，0 调用方），迁移即消除。
+ */
+export type ChangeSummary = components["schemas"]["ChangeSummary"];
 
-export type ChangeRead = ChangeSummary & {
-  path: string;
-  archived_at: string | null;
-  current_stage: string | null;
-  stages: Record<string, any> | null;
-  approval_status: string | null;
-  approved_by: string | null;
-  approved_at: string | null;
-  rejection_reason: string | null;
-  /** 当前应展示的审核面板类型（task-03/07 StageProjectionService 投影，对齐 design §5 P3 / FR-03）。
-   *  取值：proposal_review | plan_review | human_test | archive_confirm | null */
-  pending_review: string | null;
-};
+/**
+ * 变更详情。对齐后端 schema（components.schemas.ChangeRead）。
+ * pending_review：当前应展示的审核面板类型（StageProjectionService 投影）。
+ *   取值：proposal_review | plan_review | human_test | archive_confirm | null
+ */
+export type ChangeRead = components["schemas"]["ChangeRead"];
 
-export type ChangeList = {
-  items: ChangeSummary[];
-  total: number;
-};
+/** 变更列表响应。items 元素为 ChangeSummary（无 created_at）。对齐后端 schema。 */
+export type ChangeList = components["schemas"]["ChangeList"];
 
-export type ChangeWarning = {
-  code: string;
-  detail: string;
-  change_key: string | null;
-  doc_type: string | null;
-};
+/** reparse 警告项。对齐后端 schema（components.schemas.ChangeWarning）。 */
+export type ChangeWarning = components["schemas"]["ChangeWarning"];
 
-export type ChangeReparseStats = {
-  parsed: number;
-  created: number;
-  updated: number;
-  deleted: number;
-};
+/** reparse 统计。对齐后端 schema（components.schemas.ChangeReparseStats）。 */
+export type ChangeReparseStats = components["schemas"]["ChangeReparseStats"];
 
-export type ChangeReparseResponse = {
-  workspace_id: string;
-  stats: ChangeReparseStats;
-  warnings: ChangeWarning[];
-};
+/** reparse 响应。对齐后端 schema——warnings optional（后端条件返回），调用方按需 guard。 */
+export type ChangeReparseResponse = components["schemas"]["ChangeReparseResponse"];
 
 // ── Workflow Types (task-05) ────────────────────────────────────────────
 
-/** 阶段流转请求参数 */
+/**
+ * 阶段流转请求参数。
+ *
+ * shadow schema: components.schemas.TransitionRequest（D-004@v2 有据例外保留手写）。
+ * schema 的 worker_preset / main_agent_config 是 `{[key:string]:unknown}[]` loose dict，
+ * 手写是精确 `{agent_type;model;objective;role}[]` / `{agent_type?;provider?;model?}`，
+ * 调用方（advanceChangeStage opts）依赖精确结构；schema team_mode required 与前端按需
+ * `body.team_mode=true` 冲突。迁过去会降级类型安全，故保留手写。
+ */
 export type TransitionRequest = {
   /** 目标阶段，对应后端 StageEnum 值 */
   target_stage: string;
@@ -73,37 +54,27 @@ export type TransitionRequest = {
   main_agent_config?: { agent_type?: string; provider?: string; model?: string };
 };
 
-/** 反馈提交请求参数 */
-export type FeedbackRequest = {
-  /** 反馈类别: A=Bug, B=设计错误, C=信息不足, D=衍生新change */
-  category: string;
-  /** 反馈内容 */
-  text: string;
-};
+/**
+ * 反馈提交请求参数。对齐后端 schema（components.schemas.FeedbackRequest）。
+ * category: A=Bug, B=设计错误, C=信息不足, D=衍生新change。
+ * target_stage（可选）：自定义返工目标，覆盖类别默认值——后端 submit_feedback 已支持，
+ * 旧手写漏此字段（drift），迁移补回。
+ */
+export type FeedbackRequest = components["schemas"]["FeedbackRequest"];
 
-/** 归档门禁单项检查结果 */
-/** 归档门禁单项检查结果（对齐后端 ArchiveCheckItem） */
-export type ArchiveCheckItem = {
-  /** 检查项名称，固定 6 项之一：no_unresolved_feedback / ac_confirmed /
-   *  tech_verification_passed / business_review_passed /
-   *  feedback_categorized / documents_complete */
-  name: string;
-  /** 该项是否通过 */
-  passed: boolean;
-  /** 说明信息（通过时通常为空串，未通过时给出原因） */
-  detail: string;
-};
+/**
+ * 归档门禁单项检查结果。对齐后端 schema（components.schemas.ArchiveCheckItem）。
+ * name 固定 6 项之一：no_unresolved_feedback / ac_confirmed /
+ * tech_verification_passed / business_review_passed / feedback_categorized / documents_complete。
+ */
+export type ArchiveCheckItem = components["schemas"]["ArchiveCheckItem"];
 
-/** 归档门禁检查响应（对齐后端 ArchiveGateResponse） */
-export type ArchiveGateResponse = {
-  /** 是否全部通过，可执行归档 */
-  can_archive: boolean;
-  /** 全部 6 项检查结果（含通过与未通过） */
-  checks: ArchiveCheckItem[];
-};
+/** 归档门禁检查响应。对齐后端 schema（checks optional）。 */
+export type ArchiveGateResponse = components["schemas"]["ArchiveGateResponse"];
 
 /** daemon-client 代理创建变更的请求参数。
 
+无 openapi schema，前端本地契约。
 D-002@v1（2026-07-05-daemon-client-change-binding-fix）：删 ``runtime_id`` 字段——
 runtime 由后端 ``resolve_runtime_for_writeback`` 用 binding + workspace.default_agent
 现算，daemon_id 亦从 per-member binding 解析，前端无需传。 */
@@ -113,17 +84,8 @@ export type ProxyCreateChangeInput = {
   change_type?: string;
 };
 
-/** 创建变更的响应 */
-export type CreateChangeResponse = {
-  id: string;
-  workspace_id: string;
-  change_key: string;
-  title: string | null;
-  status: string;
-  path: string;
-  current_stage: string | null;
-  created_at: string;
-};
+/** 创建变更的响应。对齐后端 schema（名映射：手写 CreateChangeResponse ↔ schema ChangeCreateResponse；schema 多可选 agent_dispatch，非破坏）。 */
+export type CreateChangeResponse = components["schemas"]["ChangeCreateResponse"];
 
 export function listChanges(
   workspaceId: string,
@@ -292,23 +254,19 @@ export function checkArchiveGate(workspaceId: string, changeId: string) {
 
 // ── Agent Dispatch Types ─────────────────────────────────────────────
 
-/** Transition 专用的 agent dispatch 结果（对应后端 TransitionDispatchResponse） */
-export type TransitionDispatchResponse = {
-  /** 是否成功 dispatch 了 AgentRun */
-  dispatched: boolean;
-  /** AgentRun ID（dispatched=true 时有值） */
-  agent_run_id: string | null;
-  /** 目标 SillySpec 阶段 */
-  stage: string | null;
-  /** 未 dispatch 的原因（dispatched=false 时有值） */
-  reason: string | null;
-  /** task-09（D-004@v2）：team_mode dispatch 的 Mission ID（仅 mode=team 时有值） */
-  mission_id: string | null;
-  /** task-09：dispatch 模式（team / null=single） */
-  mode: string | null;
-};
+/**
+ * Transition 专用的 agent dispatch 结果。对齐后端 schema（components.schemas.TransitionDispatchResponse）。
+ * schema 把 agent_run_id/stage/reason/mission_id/mode 标可选（后端条件返回更准确，手写 required 过严）。
+ */
+export type TransitionDispatchResponse = components["schemas"]["TransitionDispatchResponse"];
 
-/** POST /changes/{id}/transition 的返回类型（对应后端 TransitionResponse） */
+/**
+ * POST /changes/{id}/transition（及 /advance-stage）的返回类型。
+ *
+ * shadow schema: components.schemas.TransitionResponse（D-004@v2 有据例外保留手写）。
+ * schema 的 change 是 `{[key:string]:unknown}` loose dict，手写是 `ChangeRead` 精确结构
+ * （23 处 `.change.xxx` 调用依赖）。迁过去会丢失 change 字段类型，故保留手写。
+ */
 export type TransitionResponse = {
   /** 变更数据（ChangeRead 的 dict 表示） */
   change: ChangeRead;
@@ -316,7 +274,9 @@ export type TransitionResponse = {
   agent_dispatch: TransitionDispatchResponse | null;
 };
 
-/** Agent 运行结果 */
+/**
+ * Agent 运行结果。无 openapi schema，前端本地契约（DispatchResponse.last_dispatch 精确结构）。
+ */
 export type DispatchResult = {
   status: "running" | "completed" | "failed";
   output_summary?: string | null;
@@ -333,7 +293,15 @@ export type DispatchResult = {
   } | null;
 } | null;
 
-/** Agent 状态响应 */
+/**
+ * Agent 状态响应（GET /agent-status / POST /dispatch）。
+ *
+ * shadow schema: components.schemas.DispatchResponse（D-004@v2 有据例外保留手写）。
+ * schema 的 last_dispatch / dispatch_result 是 `{[key:string]:unknown}` loose dict，
+ * 手写 last_dispatch 是精确 DispatchResult（agent-status 展示读 `.status`/`.run_id`/
+ * `.gate_status` 等调用方依赖）；schema current_stage required vs 手写 `| null`。
+ * 迁过去会丢失 dispatch 结果字段类型，故保留手写。
+ */
 export type DispatchResponse = {
   change_id: string;
   current_stage: string | null;
@@ -429,7 +397,14 @@ export function advanceChangeStage(
   );
 }
 
-/** gate 软调用响应（对齐后端 VerifyGateResponse，task-11 / design §6.2/§6.3） */
+/**
+ * gate 软调用响应（task-11 / design §6.2/§6.3）。
+ *
+ * shadow schema: components.schemas.VerifyGateResponse（D-004@v2 有据例外保留手写）。
+ * schema 的 source 是 loose `string`，手写是 `"gate_result"|"gate_cmd"|"unavailable"`
+ * 精确 union（调用方 `===` 比较依赖 exhaustiveness）；schema 的 exit_code/errors 标 optional
+ * 而手写 required（手写更严更准）。迁过去会丢失 union 收窄，故保留手写。
+ */
 export type VerifyGateResponse = {
   /** gate exit code（0=通过 / 1=打回 / 2=异常；unavailable 时为 null） */
   exit_code: number | null;

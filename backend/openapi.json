@@ -12499,16 +12499,6 @@
               "format": "uuid",
               "title": "Release Id"
             }
-          },
-          {
-            "name": "workspace_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Workspace Id"
-            }
           }
         ],
         "responses": {

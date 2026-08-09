@@ -185,7 +185,7 @@ export default function ChangesPage({ params }: Props) {
     try {
       const resp = await reparseChanges(workspaceId);
       setStats(resp.stats);
-      setWarnings(resp.warnings);
+      setWarnings(resp.warnings ?? []);
       await load();
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "重新解析失败");

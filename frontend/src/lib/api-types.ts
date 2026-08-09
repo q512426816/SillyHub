@@ -24711,7 +24711,6 @@ export interface operations {
             header?: never;
             path: {
                 release_id: string;
-                workspace_id: string;
             };
             cookie?: never;
         };
