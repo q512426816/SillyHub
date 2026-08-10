@@ -266,7 +266,9 @@ function RuntimeSessionDialogBody({
   }, [reloadSessions]);
   const handleSessionReset = useCallback(() => {
     setSelectedId(null);
-  }, []);
+    // 结束会话后刷新列表（否则左侧状态停在旧值，如 active 实际已 ended）
+    void reloadSessions();
+  }, [reloadSessions]);
 
   const handleDelete = useCallback(
     async (id: string) => {

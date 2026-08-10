@@ -989,19 +989,16 @@ export function InteractiveSessionPanel({
 
   // 新建会话
   const handleNewSession = useCallback(() => {
-    // active session 必须先 end 成功（简化：直接清空，由 end 路径负责收口；
-    // 实际生产建议先 end。本任务 ended/failed/idle 时直接新建。）
-    if (view.status === "active") {
-      void handleEnd();
-      return;
-    }
+    // 新建会话不结束当前会话：backend session 保持 active（列表仍显示进行中，
+    // 需继续可重新点击会话 attach）。仅断开当前 SSE + 重置面板到新建模式。
+    // 原实现 active 时先 handleEnd 结束当前会话，导致「点新建=误结束当前会话」。
     closeStream();
     setView(INITIAL_VIEW);
     setInput("");
     setPendingRequests([]);
     // ql-20260623（改动一）：重置回 idle 时通知父级清除 URL ?session= param
     onSessionReset?.();
-  }, [view.status, closeStream, handleEnd, onSessionReset]);
+  }, [closeStream, onSessionReset]);
 
   // ql-20260621：用户在 AskUserDialogCard 提交回答后，AskUserDialogCard 内部
   // 已 POST respondSessionPermission；这里立即移除卡片（permission_resolved

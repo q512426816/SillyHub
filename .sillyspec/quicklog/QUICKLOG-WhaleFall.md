@@ -268,3 +268,15 @@
 根因：daemon 重启 _recoverSessionsOnBoot → restoreAndReconnect 调 driver.start({resume}) 恢复 session，但 driverOpts env=undefined → ClaudeSdkDriver 回退裸 process.env（无 CLAUDE_CONFIG_DIR）→ claude 子进程用默认 ~/.claude → 找不到 daemon claude-config/projects/<cwd>/<sid>.jsonl（jsonl 由 create 时隔离 CLAUDE_CONFIG_DIR 写在此）→ resume 失败 → claude 非 0 退出 → SDK getProcessExitError exitError → driver consume onError → SessionManager.fail → onSessionEnd(failed) → backend notifySessionEnd → end_session（router 只取 reason 不取 status，service 总设 ended）→ session 显示「已结束」。证据：8/10 06:09 backend 日志 recover→reconnecting→active(43.01s)→1 秒后 daemon POST /end(44s)；4 个 provider-switch session 里只有被 recover 的 2 个(70aa/be2d)ended，未 recover 的(5cf2/989b)仍 active；SDK sdk.mjs getProcessExitError(exitCode!=0)->Error。与 ql-20260807-002 同源（reload 路径已修 CLAUDE_CONFIG_DIR，restore 路径遗漏）。
 方案：restoreAndReconnect 用 buildSpawnEnv({provider_config:undefined},{credential}) 构造 env + 显式 restoreEnv.CLAUDE_CONFIG_DIR=CLAUDE_CONFIG_DIR（对齐 reloadWithProvider:2627-2636），让 resume 的 claude 读 daemon 隔离目录的 jsonl。恢复路径无 provider_config（敏感不落盘）第 0 层自然跳过，凭证靠 process.env（与 create 同源）+ credentials.json。
 结果：tsc exit0；daemon-recovery-boot 11 + reload-provider + pending-switch 共 31 测试 passed。**真实验证完成**：构造 DB test session（agent_session_id 指向 daemon claude-config 真实 jsonl 06e286c4）+ sessions.json，重启 daemon → restoreAndReconnect resume 成功 → session_recovered recovered=1 failed=0 → DB status=**active**（修复前同场景 driver.start 因 jsonl 找不到 fail→ended；对比 8/10 06:09 真实故障 70aa/be2d recover→active→1 秒 ended）。**诊断日志已全部清理**（session-manager _runConsume onError/catch + restoreAndReconnect catch 的 [DIAG]，+ daemon.ts 3 处 a784f1fa 探针 [DIAG]）；清理后 daemon-recovery-boot 11 passed；daemon 干净版重启（pid 34900）。
+
+## ql-20260810-002-6e32 | 2026-08-10 17:09:26 | 修复 /runtimes 会话弹窗点「新建会话」误结束当前会话 + 会话列表不刷新
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-frontend/... 前端 frontend/src/components/daemon/interactive-session-panel.tsx（handleNewSession 不再 active 时先 handleEnd 结束当前会话，改为直接断开 SSE + 重置面板到新建模式，backend session 保持 active）
+- frontend/src/components/daemon/runtime-session-dialog.tsx（handleSessionReset 结束会话后追加 reloadSessions 刷新左侧列表）
+
+需求：/runtimes 会话弹窗中，选中会话后点右上角「新建会话」不应结束当前会话；点「结束会话」后左侧会话列表状态应即时刷新。
+根因：InteractiveSessionPanel 内部 handleNewSession 在 view.status==='active' 时先调 handleEnd() 结束当前会话再返回（历史简化设计），导致「点新建=误结束当前会话」；且结束后 handleSessionReset 只 setSelectedId(null) 不 reloadSessions，列表状态停在旧值（active 实际已 ended）。
+方案：① panel handleNewSession 去掉 active→handleEnd 分支，一律 closeStream+setView(INITIAL_VIEW)（新建会话仅切面板，不结束 backend session，需继续可重新 attach）；② 父级 handleSessionReset 追加 void reloadSessions() 刷新列表。
+结果：interactive-session-panel 50 + runtime-session-dialog 10 + session-list-layout 共 69 tests passed；tsc --noEmit exit0。
