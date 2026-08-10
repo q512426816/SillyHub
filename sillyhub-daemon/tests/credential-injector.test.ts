@@ -353,7 +353,7 @@ describe('ClaudeCredentialInjector', () => {
   // task-11 / change 2026-08-08-llm-provider-openai-format：openai_chat 分支（经 LiteLLM 网关）。
   // design §7.4 daemon injector openai 分支 + §5.1 数据流 + NFR-01/D-003 不注入上游 key。
   describe('api_format=openai_chat（经 LiteLLM 网关，task-11）', () => {
-    it('openai → env 恰 {ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_MODEL} 指向 LiteLLM', () => {
+    it('openai → env 指向 LiteLLM：BASE_URL/AUTH_TOKEN/MODEL + 4 档位 DEFAULT_*_MODEL 全 = litellm_model_name（gap-D）', () => {
       const env = injector.toEnv({
         ...baseConfig,
         api_format: 'openai_chat',
@@ -361,10 +361,16 @@ describe('ClaudeCredentialInjector', () => {
         litellm_auth_token: 'sk-litellm-master',
         litellm_model_name: 'usr-111-222',
       });
+      // task-11 gap-D（live claude 实测）：4 档位全映射到 litellm_model_name，否则 claude
+      // 副通道请求（haiku 标题/摘要等）在 LiteLLM 无 deployment 失败。
       expect(env).toEqual({
         ANTHROPIC_BASE_URL: 'http://litellm:4000',
         ANTHROPIC_AUTH_TOKEN: 'sk-litellm-master',
         ANTHROPIC_MODEL: 'usr-111-222',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'usr-111-222',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'usr-111-222',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'usr-111-222',
+        ANTHROPIC_DEFAULT_FABLE_MODEL: 'usr-111-222',
       });
     });
 
@@ -384,19 +390,26 @@ describe('ClaudeCredentialInjector', () => {
         extra_env: { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' },
         settings_config: { env: { LEAKED: 'x' } },
       });
-      // 恰 3 个 LiteLLM 指向的 env，无任何上游泄漏
+      // 恰 7 个 LiteLLM 指向的 env（BASE_URL/AUTH_TOKEN/MODEL + 4 档位全 = litellm_model_name，gap-D），
+      // 无任何上游字段泄漏
       expect(env).toEqual({
         ANTHROPIC_BASE_URL: 'http://litellm:4000',
         ANTHROPIC_AUTH_TOKEN: 'sk-litellm-master',
         ANTHROPIC_MODEL: 'usr-111-222',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'usr-111-222',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'usr-111-222',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'usr-111-222',
+        ANTHROPIC_DEFAULT_FABLE_MODEL: 'usr-111-222',
       });
       // 关键安全断言：上游 api_key 不进 env（D-003/NFR-01）
       expect(env.ANTHROPIC_API_KEY).toBeUndefined();
-      expect(Object.keys(env).length).toBe(3);
-      // 不走角色映射 / extra_env / settings_config
-      expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBeUndefined();
+      expect(Object.keys(env).length).toBe(7);
+      // 不走 extra_env / settings_config（上游 extra_env/settings_config.env 不注入）
       expect(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBeUndefined();
       expect(env.LEAKED).toBeUndefined();
+      // gap-D：档位映射取 litellm_model_name，**不**取上游 model_role_mappings 的 kimi-k2
+      //（openai 形态忽略 provider 的角色映射，4 档位恒 = litellm_model_name）
+      expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('usr-111-222');
     });
 
     it('openai litellm_* 全缺省 → env 为空对象（不抛）', () => {
@@ -404,13 +417,20 @@ describe('ClaudeCredentialInjector', () => {
       expect(env).toEqual({});
     });
 
-    it('openai 仅 litellm_model_name → 只写 ANTHROPIC_MODEL', () => {
+    it('openai 仅 litellm_model_name → MODEL + 4 档位全 = litellm_model_name（无 base_url/auth_token）', () => {
       const env = injector.toEnv({
         ...baseConfig,
         api_format: 'openai_chat',
         litellm_model_name: 'usr-111-222',
       });
-      expect(env).toEqual({ ANTHROPIC_MODEL: 'usr-111-222' });
+      // gap-D：model_name 非空即同时映射主模型 + 4 档位（base_url/auth_token 缺省不写）
+      expect(env).toEqual({
+        ANTHROPIC_MODEL: 'usr-111-222',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'usr-111-222',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'usr-111-222',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'usr-111-222',
+        ANTHROPIC_DEFAULT_FABLE_MODEL: 'usr-111-222',
+      });
     });
 
     it('api_format=anthropic → 走既有 6 条映射规则（零回归，与 api_format 缺省逐字一致）', () => {

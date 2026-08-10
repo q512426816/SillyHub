@@ -5,9 +5,11 @@ design D-004/D-012（平台不实现转换，外包服务器 LiteLLM）+ §5.3 +
 （best-effort 降级：register/unregister 失败不阻塞 is_default 变更）+ R-03（model_name 全局
 唯一 usr-<uid>-<pid>）+ R-02/NFR-01（上游 api_key 仅出现在 register 请求体，不入日志/响应/审计）。
 
-封装 LiteLLM admin API（spike-litellm-routing 全 4 项实测 2026-08-09：POST /model/new + master key
-鉴权确认；delete 按 model_id（非 model_name）；litellm_params.model 必须 ``openai/<model>`` 前缀（不带
-provider 字段）；流式转换实测通过；工具调用转换机制工作但 task-12 需配 use_responses_api=false）：
+封装 LiteLLM admin API（spike-litellm-routing 全 4 项实测 2026-08-09 + gap-A 二次诊断 2026-08-10：
+POST /model/new + master key 鉴权确认；delete 按 model_id（非 model_name）；litellm_params.model
+必须 ``openai/<model>`` 前缀（不带 provider 字段）；**显式 model_info.mode=chat 强制 Chat Completions**
+（litellm 1.95.0 对 openai 上游默认走 Responses API → opencode /responses 返 Responses 格式 →
+openai adapter 解析失败；mode=chat 实测 /v1/chat/completions 全场景 + /v1/messages 流式含 tools 全 ✅））：
 - ``register(provider, *, user_id, cipher)``：POST /model/new 注册 model_name=usr-<uid>-<pid>，
   best-effort（异常返回 False 不抛，R-09）。spike 实测重复注册返 200 创建多 deployment（非幂等
   400/409，功能等价——LiteLLM 按 model_name 路由同上游 simple-shuffle 轮询无害）。
@@ -81,6 +83,15 @@ async def register(
     # deployment 被 drop 不进路由表 → 所有请求 not found + 容器 unhealthy。model 缺失兜底 gpt-3.5-turbo。
     raw_model = provider.model or "gpt-3.5-turbo"
     model_value = raw_model if "/" in raw_model else f"openai/{raw_model}"
+    # gap-A 二次诊断（2026-08-10）实测定稿：litellm 1.95.0 对 openai 上游默认走 Responses API
+    # （调 opencode /responses 返 object="response" 格式），openai adapter 期望 chat completions →
+    # 解析失败 OpenAIException + 重试超时。原假设的 use_responses_api:false 字段在 1.95.0 源码中
+    # **不存在**（grep 全源码 0 命中），是无操作字段。真正生效的杠杆是显式 ``model_info.mode=chat``
+    # （POST /model/new body 顶层字段，非 litellm_params 内）：强制 Chat Completions 路径。实测矩阵
+    # （mode=chat 单 deployment）：/v1/chat/completions 流式+非流式 × 纯文本+tools 全 ✅（tools 返
+    # 标准 tool_calls）；/v1/messages **流式**纯文本+tools 全 ✅（含 tool_use block，Claude Code 路径）。
+    # 唯一遗留：litellm 1.95.0 非流式 /v1/messages 仍走 responses bridge（上游 quirk），Claude Code
+    # 默认流式不受影响。
     body = {
         "model_name": model_name,
         "litellm_params": {
@@ -88,6 +99,7 @@ async def register(
             "api_base": api_base,
             "api_key": api_key_plain,
         },
+        "model_info": {"mode": "chat"},
     }
     headers = {"Authorization": f"Bearer {settings.litellm_master_key}"}
     try:

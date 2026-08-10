@@ -73,18 +73,35 @@ export class ClaudeCredentialInjector implements CredentialInjector {
     const env: Record<string, string> = {};
 
     // task-11（change 2026-08-08-llm-provider-openai-format）：openai_chat 早返回分支。
-    // openai 形态经 LiteLLM 网关：ANTHROPIC_BASE_URL/AUTH_TOKEN/MODEL 指向 LiteLLM
-    //（base_url=litellm_base_url，auth_token=litellm_auth_token/master key，
-    //  model=litellm_model_name=usr-<uid>-<pid>），LiteLLM 据 model_name 路由命中 openai
-    // 上游（D-004 / R-03，与 backend task-09 register / task-10 context 逐字对齐）。
+    // openai 形态经 LiteLLM 网关：ANTHROPIC_BASE_URL/AUTH_TOKEN 指向 LiteLLM
+    //（base_url=litellm_base_url，auth_token=litellm_auth_token/master key），
+    // MODEL + 4 档位 DEFAULT_{HAIKU/SONNET/OPUS/FABLE}_MODEL 全指向 litellm_model_name=
+    // usr-<uid>-<pid>，LiteLLM 据 model_name 路由命中 openai 上游（D-004 / R-03，与 backend
+    // task-09 register / task-10 context 逐字对齐）。
     // **不注入上游 api_key**（D-003/NFR-01：openai 形态 provider_config 本就不含上游 key，
-    // 上游 key 只在 backend task-09 register 时注册 LiteLLM）；不走角色映射 / extra_env /
-    // settings_config（openai 单模型无角色分流，D-006 agent_kind 仍 claude 不新增 injector）。
-    // 缺省 / 'anthropic' 不进此分支 → 走下方既有 6 条映射规则（逐字不变 NFR-02）。
+    // 上游 key 只在 backend task-09 register 时注册 LiteLLM）；不走 extra_env / settings_config
+    //（openai 单模型，D-006 agent_kind 仍 claude 不新增 injector）。缺省 / 'anthropic' 不进此
+    // 分支 → 走下方既有 6 条映射规则（逐字不变 NFR-02）。
+    //
+    // task-11 gap-D（live claude 会话实测 2026-08-10）：Claude Code 除主模型（ANTHROPIC_MODEL）
+    // 外，会发 haiku/sonnet/opus/fable 档位的**副通道请求**（标题生成 / 会话摘要 / 快速工具决策等），
+    // 这些请求的 model 字段取自 ANTHROPIC_DEFAULT_{ROLE}_MODEL（缺省则是 claude 内置档位名如
+    // claude-haiku-4-5）。openai 单模型后端只有 litellm_model_name 一个 LiteLLM deployment，
+    // 若不把 4 档位也指向它，副通道请求的 model 在 LiteLLM 无 deployment → 失败（实测真起 claude
+    // 会话时报 opencode "modelCode 不存在"）。把 4 档位全映射到 litellm_model_name，确保 claude
+    // 任何档位请求都路由到同一 openai 上游（与用户个人 ~/.claude/settings.json 把 4 档位全指向
+    // glm-5.2 的成熟用法一致）。实测：补齐 4 档位后真 claude v2.1.216 经 litellm→opencode 读
+    // 文件工具调用成功返正确内容。
     if (c.api_format === 'openai_chat') {
       if (c.litellm_base_url) env.ANTHROPIC_BASE_URL = c.litellm_base_url;
       if (c.litellm_auth_token) env.ANTHROPIC_AUTH_TOKEN = c.litellm_auth_token;
-      if (c.litellm_model_name) env.ANTHROPIC_MODEL = c.litellm_model_name;
+      if (c.litellm_model_name) {
+        env.ANTHROPIC_MODEL = c.litellm_model_name;
+        // 4 档位全指向 litellm_model_name（gap-D，见上注释）
+        for (const envName of Object.values(ClaudeCredentialInjector.ROLE_ENV)) {
+          env[envName] = c.litellm_model_name;
+        }
+      }
       return env;
     }
 

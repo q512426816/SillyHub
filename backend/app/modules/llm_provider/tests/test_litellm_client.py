@@ -138,6 +138,11 @@ class TestRegister:
         # spike 第 2 项实测：model 必须 openai/<model> 前缀（不带 provider 字段，靠前缀路由）
         assert params["model"] == "openai/zen-1"
         assert "provider" not in params  # provider 字段会导致 upsert 失败 deployment 被 drop
+        # task-12 gap-A 二次诊断定稿（2026-08-10 实测）：litellm 1.95.0 对 openai 上游默认走 Responses
+        # API（调上游 /responses 返 object="response"），openai adapter 解析失败。原 use_responses_api
+        # 字段在 1.95.0 源码不存在（无操作）。真正生效的是顶层 model_info.mode=chat 强制 Chat Completions。
+        assert "use_responses_api" not in params  # 1.95.0 无此字段，不写
+        assert body["model_info"]["mode"] == "chat"
         headers = call.kwargs["headers"]
         assert headers["Authorization"] == f"Bearer {_MASTER_KEY}"
 
