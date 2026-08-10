@@ -501,8 +501,9 @@ async def execute_problem(
         time_spent=body.time_spent,
         actual_start_time=body.actual_start_time,
         actual_end_time=body.actual_end_time,
-        execute_user_id=body.execute_user_id or user.id,
+        execute_user_id=body.execute_user_id,
         file_urls=body.file_urls,
+        actor=user,
     )
     return ProblemListResp.model_validate(problem)
 

@@ -15,6 +15,8 @@ decisions.md D-001~D-006。
 
 from __future__ import annotations
 
+import types
+import uuid
 from datetime import UTC, datetime
 
 import pytest
@@ -42,6 +44,10 @@ _ACTOR = ("00000000-0000-0000-0000-000000000001", "张三")
 _DUTY_USER_ID = "00000000-0000-0000-0000-000000000002"
 _AUDIT_USER_ID = "00000000-0000-0000-0000-000000000003"
 _DEV_USER_ID = "00000000-0000-0000-0000-000000000004"
+
+# change 2026-08-09-security-ppm-ownership：execute_problem 现需 actor 关键字
+# （service 层 resolve_owner 归属校验）。非冒名面用平台管理员 stub 放行造数。
+_ADMIN = types.SimpleNamespace(id=uuid.uuid4(), is_platform_admin=True)
 
 
 # ===========================================================================
@@ -434,6 +440,7 @@ class TestStartExecute:
             action="complete",
             execute_info="已修复",
             time_spent=1.5,
+            actor=_ADMIN,
         )
         assert result.status == ProblemStatus.CLOSED.value
         assert result.real_end_time is not None
@@ -454,7 +461,11 @@ class TestStartExecute:
 
         # submit 回新建
         result = await svc.execute_problem(
-            p.id, task_execute_id=exc1.id, action="submit", time_spent=1.0
+            p.id,
+            task_execute_id=exc1.id,
+            action="submit",
+            time_spent=1.0,
+            actor=_ADMIN,
         )
         assert result.status == ProblemStatus.NEW.value
         assert float(result.time_spent or 0) == 1.0
@@ -467,7 +478,11 @@ class TestStartExecute:
 
         # complete 收口第二条
         result = await svc.execute_problem(
-            p.id, task_execute_id=exc2.id, action="complete", time_spent=0.5
+            p.id,
+            task_execute_id=exc2.id,
+            action="complete",
+            time_spent=0.5,
+            actor=_ADMIN,
         )
         assert result.status == ProblemStatus.CLOSED.value
         assert float(result.time_spent or 0) == 1.5  # 1.0 + 0.5 累加
@@ -480,7 +495,9 @@ class TestStartExecute:
         import uuid as _uuid
 
         with pytest.raises(ProblemError):
-            await svc.execute_problem(p.id, task_execute_id=_uuid.uuid4(), action="complete")
+            await svc.execute_problem(
+                p.id, task_execute_id=_uuid.uuid4(), action="complete", actor=_ADMIN
+            )
 
     async def test_execute_wrong_task_execute_id(self, db_session: AsyncSession) -> None:
         """execute 的 task_execute_id 与 problem 不匹配 → ProblemError。"""
@@ -491,7 +508,9 @@ class TestStartExecute:
         exc2 = await svc.start_problem(p2.id, execute_user_id=_duty_uuid())
         # 用 p2 的 in-flight id 去收口 p1 → 不匹配
         with pytest.raises(ProblemError):
-            await svc.execute_problem(p1.id, task_execute_id=exc2.id, action="complete")
+            await svc.execute_problem(
+                p1.id, task_execute_id=exc2.id, action="complete", actor=_ADMIN
+            )
 
     async def test_execute_cross_day_rejected(self, db_session: AsyncSession) -> None:
         """跨天 (actual_start vs actual_end 不同日) → ProblemError。"""
@@ -507,6 +526,7 @@ class TestStartExecute:
                 task_execute_id=exc.id,
                 action="complete",
                 actual_end_time=day2,
+                actor=_ADMIN,
             )
 
     async def test_execute_same_day_ok(self, db_session: AsyncSession) -> None:
@@ -524,6 +544,7 @@ class TestStartExecute:
             task_execute_id=exc.id,
             action="complete",
             actual_end_time=day1_evening,
+            actor=_ADMIN,
         )
         assert result.status == ProblemStatus.CLOSED.value
 
@@ -544,6 +565,7 @@ class TestStartExecute:
             task_execute_id=exc.id,
             action="submit",
             file_urls=["p1"],
+            actor=_ADMIN,
         )
         execs = await _problem_executes(db_session, p.id)
         assert len(execs) == 1
@@ -569,6 +591,7 @@ class TestStartExecute:
             task_execute_id=exc.id,
             action="submit",
             # 不传 file_urls → 保留原值, 不清空
+            actor=_ADMIN,
         )
         execs = await _problem_executes(db_session, p.id)
         assert len(execs) == 1

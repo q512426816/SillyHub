@@ -201,7 +201,7 @@ async def execute_plan_task(
 ) -> TaskExecuteResponse:
     """执行计划:联动生成/更新 TaskExecute + 状态机推进。"""
     svc = PlanTaskService(session)
-    exc = await svc.execute_plan(body, user.id)
+    exc = await svc.execute_plan(body, user.id, actor=user)
     return TaskExecuteResponse.model_validate(exc)
 
 
@@ -223,8 +223,9 @@ async def start_plan_task(
     svc = PlanTaskService(session)
     exc = await svc.start(
         body.plan_task_id,
-        body.execute_user_id or user.id,
+        body.execute_user_id,
         body.actual_start_time,
+        actor=user,
     )
     return TaskExecuteResponse.model_validate(exc)
 
@@ -382,7 +383,7 @@ async def create_task_execute(
     user: AuthUser,
 ) -> TaskExecuteResponse:
     svc = TaskExecuteService(session)
-    exc = await svc.create(body)
+    exc = await svc.create(body, actor=user)
     return TaskExecuteResponse.model_validate(exc)
 
 
@@ -394,7 +395,7 @@ async def update_task_execute(
     user: User = Depends(get_current_principal),
 ) -> TaskExecuteResponse:
     svc = TaskExecuteService(session)
-    exc = await svc.update(execute_id, body)
+    exc = await svc.update(execute_id, body, actor=user)
     return TaskExecuteResponse.model_validate(exc)
 
 
@@ -504,7 +505,7 @@ async def create_work_hour(
     user: AuthUser,
 ) -> WorkHourResponse:
     svc = WorkHourService(session)
-    wh = await svc.create(body)
+    wh = await svc.create(body, actor=user)
     return WorkHourResponse.model_validate(wh)
 
 
@@ -516,7 +517,7 @@ async def update_work_hour(
     user: User = Depends(get_current_principal),
 ) -> WorkHourResponse:
     svc = WorkHourService(session)
-    wh = await svc.update(work_hour_id, body)
+    wh = await svc.update(work_hour_id, body, actor=user)
     return WorkHourResponse.model_validate(wh)
 
 

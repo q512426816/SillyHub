@@ -23,6 +23,7 @@ from app.modules.ppm.common.crud import (
     count_total,
 )
 from app.modules.ppm.common.data_scope import task_scope_clause
+from app.modules.ppm.common.ownership import resolve_owner
 from app.modules.ppm.plan.model import PlanNodeModule
 from app.modules.ppm.task.model import PlanTask, TaskExecute, WorkHour
 from app.modules.ppm.task.schema import (
@@ -250,6 +251,8 @@ class PlanTaskService:
         plan_task_id: uuid.UUID,
         execute_user_id: uuid.UUID | None = None,
         actual_start_time: datetime | None = None,
+        *,
+        actor: User,
     ) -> TaskExecute:
         """启动任务(未开始→进行中): 创建一条 in-flight TaskExecute 并记录 actual_start_time。
 
@@ -274,14 +277,18 @@ class PlanTaskService:
             )
         now = datetime.now(UTC)
         start_time = actual_start_time or now
-        actor = execute_user_id or plan.user_id
+        # 归属校验（change 2026-08-09-security-ppm-ownership）：非管理员显式填他人→403；
+        # None→actor.id（复刻旧 `execute_user_id or plan.user_id` 中 router 已折叠的有效默认
+        # = 登录用户 id；plan.user_id 是死代码，用 actor.id 避免 live 漂移）。
+        resolved = resolve_owner(actor=actor, requested=execute_user_id, field="execute_user_id")
+        actor_id = resolved if resolved is not None else actor.id
         exc = TaskExecute(
             id=uuid.uuid4(),
             plan_task_id=plan.id,
-            execute_user_id=actor,
+            execute_user_id=actor_id,
             actual_start_time=start_time,
             status=STATUS_DOING,
-            current_user_id=actor,
+            current_user_id=actor_id,
         )
         self._session.add(exc)
         plan.status = "进行中"
@@ -298,7 +305,9 @@ class PlanTaskService:
         )
         return exc
 
-    async def execute_plan(self, req: ExecutePlanReq, current_user_id: uuid.UUID) -> TaskExecute:
+    async def execute_plan(
+        self, req: ExecutePlanReq, current_user_id: uuid.UUID, *, actor: User
+    ) -> TaskExecute:
         """执行计划:单事务联动生成/更新 TaskExecute 并推进状态机。
 
         状态语义 (D-002/D-003, 删 submit 改 action):
@@ -359,11 +368,14 @@ class PlanTaskService:
             exc.start_remark = req.start_remark
         if req.end_remark is not None:
             exc.end_remark = req.end_remark
-        if req.execute_user_id is not None:
-            exc.execute_user_id = req.execute_user_id
+        # 归属校验：非管理员显式填他人→403；None→保留 start 写入值（不覆盖 execute_user_id）
+        # + current_user_id 用 current_user_id 兜底（零漂移，复刻旧 `req.execute_user_id or current_user_id`）。
+        resolved_execute_user = resolve_owner(actor=actor, requested=req.execute_user_id)
+        if resolved_execute_user is not None:
+            exc.execute_user_id = resolved_execute_user
         if req.file_urls is not None:
             exc.file_urls = req.file_urls
-        exc.current_user_id = req.execute_user_id or current_user_id
+        exc.current_user_id = resolved_execute_user or current_user_id
 
         # 推进状态机: submit/complete 都收口当前 in-flight 记录为 status=90
         self._assert_transition(exc.status, STATUS_END)
@@ -407,9 +419,19 @@ class TaskExecuteService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def create(self, data: TaskExecuteCreate) -> TaskExecute:
+    async def create(self, data: TaskExecuteCreate, *, actor: User) -> TaskExecute:
         if data.status not in VALID_EXECUTE_STATUS:
             raise TaskError(f"Invalid status: {data.status}", details={"status": data.status})
+        # 归属校验：execute/check/current_user_id 三字段各过 resolve_owner（None 保留默认）。
+        data.execute_user_id = resolve_owner(
+            actor=actor, requested=data.execute_user_id, field="execute_user_id"
+        )
+        data.check_user_id = resolve_owner(
+            actor=actor, requested=data.check_user_id, field="check_user_id"
+        )
+        data.current_user_id = resolve_owner(
+            actor=actor, requested=data.current_user_id, field="current_user_id"
+        )
         exc = TaskExecute(**data.model_dump())
         self._session.add(exc)
         await self._session.commit()
@@ -422,13 +444,21 @@ class TaskExecuteService:
             raise TaskExecuteNotFound(f"TaskExecute '{exec_id}' not found.")
         return exc
 
-    async def update(self, exec_id: uuid.UUID, data: TaskExecuteUpdate) -> TaskExecute:
+    async def update(
+        self, exec_id: uuid.UUID, data: TaskExecuteUpdate, *, actor: User
+    ) -> TaskExecute:
         exc = await self.get(exec_id)
         payload = data.model_dump(exclude_unset=True)
         if "status" in payload and payload["status"] not in VALID_EXECUTE_STATUS:
             raise TaskError(
                 f"Invalid status: {payload['status']}", details={"status": payload["status"]}
             )
+        # 归属校验：仅 data 提供的三字段才校验（exclude_unset 已剔除未提供项）。
+        for _field in ("execute_user_id", "check_user_id", "current_user_id"):
+            if _field in payload:
+                payload[_field] = resolve_owner(
+                    actor=actor, requested=payload[_field], field=_field
+                )
         for key, value in payload.items():
             setattr(exc, key, value)
         exc.updated_at = datetime.now(UTC)
@@ -526,7 +556,9 @@ class WorkHourService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def create(self, data: WorkHourCreate) -> WorkHour:
+    async def create(self, data: WorkHourCreate, *, actor: User) -> WorkHour:
+        # 归属校验：user_id 必填字段，非管理员填他人→403，填自己/管理员代填→放行。
+        data.user_id = resolve_owner(actor=actor, requested=data.user_id, field="user_id")
         wh = WorkHour(**{**data.model_dump(), "work_date": _date_to_datetime(data.work_date)})
         self._session.add(wh)
         await self._session.commit()
@@ -539,11 +571,16 @@ class WorkHourService:
             raise WorkHourNotFound(f"WorkHour '{wh_id}' not found.")
         return wh
 
-    async def update(self, wh_id: uuid.UUID, data: WorkHourUpdate) -> WorkHour:
+    async def update(self, wh_id: uuid.UUID, data: WorkHourUpdate, *, actor: User) -> WorkHour:
         wh = await self.get(wh_id)
         payload = data.model_dump(exclude_unset=True)
         if "work_date" in payload and payload["work_date"] is not None:
             payload["work_date"] = _date_to_datetime(payload["work_date"])
+        # 归属校验：仅 data 提供 user_id 时校验（可选字段）。
+        if "user_id" in payload:
+            payload["user_id"] = resolve_owner(
+                actor=actor, requested=payload["user_id"], field="user_id"
+            )
         for key, value in payload.items():
             setattr(wh, key, value)
         wh.updated_at = datetime.now(UTC)

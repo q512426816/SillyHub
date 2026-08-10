@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import types
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -35,6 +36,11 @@ from app.modules.ppm.task.service import (
     WorkHourNotFound,
     WorkHourService,
 )
+
+# service 层归属校验（change 2026-08-09-security-ppm-ownership）要求 actor 参数；
+# 直调 service 的测试统一用 admin stub（resolve_owner 鸭子类型读 is_platform_admin/id，
+# admin 放行使既有随机 user_id 造数仍 OK，不改断言——规则 9）。
+_ADMIN = types.SimpleNamespace(id=uuid.uuid4(), is_platform_admin=True)
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -78,7 +84,8 @@ async def _seed_work_hour(
             hours=hours,
             type=wh_type,
             description="d",
-        )
+        ),
+        actor=_ADMIN,
     )
     return wh.id
 
@@ -118,7 +125,8 @@ async def _seed_task_execute(
             actual_start_time=base,
             actual_end_time=base + timedelta(hours=8),
             status="30",
-        )
+        ),
+        actor=_ADMIN,
     )
     return exc.id
 
@@ -243,6 +251,7 @@ async def test_execute_plan_creates_execute_and_advances_status(db_session):
         plan_id,
         execute_user_id=user_id,
         actual_start_time=datetime(2026, 6, 20, 10, tzinfo=UTC),
+        actor=_ADMIN,
     )
     assert exc.status == STATUS_DOING
     assert exc.plan_task_id == plan_id
@@ -262,6 +271,7 @@ async def test_execute_plan_creates_execute_and_advances_status(db_session):
             end_remark="完成",
         ),
         current_user_id=user_id,
+        actor=_ADMIN,
     )
     assert exc2.status == STATUS_END
     assert exc2.execute_info == "完成"
@@ -285,6 +295,7 @@ async def test_execute_plan_creates_execute_and_advances_status(db_session):
                 ),  # 同日避免跨天, 让终态保护先触发
             ),
             current_user_id=user_id,
+            actor=_ADMIN,
         )
 
 
@@ -292,7 +303,7 @@ async def test_execute_plan_delete_cascades_execute(db_session):
     user_id = uuid.uuid4()
     plan_id = await _seed_plan(db_session, user_id)
     plan_svc = PlanTaskService(db_session)
-    exc = await plan_svc.start(plan_id, execute_user_id=user_id)
+    exc = await plan_svc.start(plan_id, execute_user_id=user_id, actor=_ADMIN)
     await plan_svc.delete(plan_id)
     # 关联执行记录应被级联删除
     from sqlalchemy import select as sa_select
@@ -322,6 +333,7 @@ async def test_execute_plan_persists_file_urls_and_echoes(db_session):
         plan_id,
         execute_user_id=user_id,
         actual_start_time=datetime(2026, 6, 20, 10, tzinfo=UTC),
+        actor=_ADMIN,
     )
 
     # execute(submit) 带 file_urls: task router 直传 body, service 逐字段赋值落库
@@ -334,6 +346,7 @@ async def test_execute_plan_persists_file_urls_and_echoes(db_session):
             actual_end_time=datetime(2026, 6, 20, 17, tzinfo=UTC),
         ),
         current_user_id=user_id,
+        actor=_ADMIN,
     )
     assert exc2.file_urls == ["f1", "f2"]
     assert exc2.status == STATUS_END
@@ -369,6 +382,7 @@ async def test_execute_plan_without_file_urls_preserves_existing(db_session):
         plan_id,
         execute_user_id=user_id,
         actual_start_time=datetime(2026, 6, 20, 10, tzinfo=UTC),
+        actor=_ADMIN,
     )
 
     # 模拟记录已带附件(如前序保存写入): 直接落 file_urls=["x"]
@@ -384,7 +398,7 @@ async def test_execute_plan_without_file_urls_preserves_existing(db_session):
         actual_end_time=datetime(2026, 6, 20, 17, tzinfo=UTC),
     )
     assert req.file_urls is None  # 默认 None(非 []), is not None 守卫才有效
-    exc2 = await plan_svc.execute_plan(req, current_user_id=user_id)
+    exc2 = await plan_svc.execute_plan(req, current_user_id=user_id, actor=_ADMIN)
 
     # 原附件保留, 未被清空
     assert exc2.file_urls == ["x"]
@@ -403,7 +417,9 @@ async def test_execute_plan_without_file_urls_preserves_existing(db_session):
 
 async def test_task_execute_crud(db_session):
     svc = TaskExecuteService(db_session)
-    exc = await svc.create(TaskExecuteCreate(status=STATUS_NOT_SUBMIT, execute_info="init"))
+    exc = await svc.create(
+        TaskExecuteCreate(status=STATUS_NOT_SUBMIT, execute_info="init"), actor=_ADMIN
+    )
     assert exc.status == STATUS_NOT_SUBMIT
 
     fetched = await svc.get(exc.id)
@@ -413,7 +429,7 @@ async def test_task_execute_crud(db_session):
     from app.modules.ppm.task.service import TaskError
 
     with pytest.raises(TaskError):
-        await svc.create(TaskExecuteCreate(status="999"))
+        await svc.create(TaskExecuteCreate(status="999"), actor=_ADMIN)
 
     await svc.delete(exc.id)
     from app.modules.ppm.task.service import TaskExecuteNotFound
@@ -436,7 +452,9 @@ async def test_work_hour_crud(db_session):
     wh = await svc.get(wh_id)
     assert wh.hours == 8.0
 
-    updated = await svc.update(wh_id, WorkHourUpdate(hours=6.5, description="half day"))
+    updated = await svc.update(
+        wh_id, WorkHourUpdate(hours=6.5, description="half day"), actor=_ADMIN
+    )
     assert updated.hours == 6.5
 
     await svc.delete(wh_id)

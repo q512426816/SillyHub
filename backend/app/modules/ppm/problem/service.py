@@ -49,6 +49,7 @@ from app.modules.ppm.common.data_scope import (
     problem_scope_clause,
 )
 from app.modules.ppm.common.fsm import assert_transition
+from app.modules.ppm.common.ownership import resolve_owner
 from app.modules.ppm.plan.service import PlanService
 from app.modules.ppm.problem.fsm import (
     CHANGE_TRANSITIONS,
@@ -577,6 +578,7 @@ class ProblemService:
         actual_end_time: datetime | None = None,
         execute_user_id: uuid.UUID | None = None,
         file_urls: list[str] | None = None,
+        actor: User,
     ) -> PpmProblemList:
         """执行问题：单事务收口 in-flight TaskExecute 并推进 3 态状态机。
 
@@ -636,9 +638,15 @@ class ProblemService:
             exc.time_spent = time_spent
         if actual_start_time is not None:
             exc.actual_start_time = actual_start_time
-        if execute_user_id is not None:
-            exc.execute_user_id = execute_user_id
-            exc.current_user_id = execute_user_id
+        # 归属校验（change 2026-08-09-security-ppm-ownership）：非管理员显式填他人→403；
+        # None→actor.id（复刻旧 router `body.execute_user_id or user.id` 折叠，零漂移——
+        # 旧 router 折叠使此处 `if execute_user_id is not None` 守卫恒真，故用 else actor.id
+        # 精确复刻 omit→登录用户 id 语义；不用 if-guard，否则启动者≠执行者且 omit 时会保留
+        # 启动者 id 而非执行者 id = 漂移）。详见 design §7.2 #7 + §11 自审。
+        resolved = resolve_owner(actor=actor, requested=execute_user_id, field="execute_user_id")
+        final_execute_user = resolved if resolved is not None else actor.id
+        exc.execute_user_id = final_execute_user
+        exc.current_user_id = final_execute_user
         if file_urls is not None:
             exc.file_urls = file_urls
 
