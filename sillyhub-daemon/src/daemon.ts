@@ -1230,6 +1230,7 @@ export class Daemon {
     // backend reconnecting → driver.start({resume}) 跨进程恢复（spike D3）。
     try {
       await this._sessionManager!.restoreAndReconnect(record);
+      console.log('[DIAG] restoreAndReconnect OK', record.sessionId, 'agentSessionId=', record.agentSessionId, 'cwd=', record.cwd);
     } catch (e) {
       // restoreAndReconnect 抛错（cwd 不一致 / executable 缺失 / SDK jsonl 缺失）：
       // session 已被 SessionManager 从内存 store 移除 + onSessionEnd(failed)。
@@ -1298,6 +1299,7 @@ export class Daemon {
    * 幂等：集合 delete 重复安全；markRecoveryFailed 失败只记 warn 不抛。
    */
   async markRecoveredSessionFailed(sessionId: string): Promise<void> {
+    console.log('[DIAG] markRecoveredSessionFailed called', sessionId, 'inRecoveredSet=', this._recoveredSessionIds.has(sessionId));
     if (!this._recoveredSessionIds.has(sessionId)) return;
     this._recoveredSessionIds.delete(sessionId);
     if (!this._recoveryClient) return;
@@ -1727,6 +1729,7 @@ export class Daemon {
     sessionId: string,
     status: SessionStatus,
   ): Promise<void> {
+    console.log('[DIAG] onSessionEnd triggered', sessionId, 'status=', status);
     // status 收敛：reconnecting 等中间态不应进此路径（SessionManager 仅在 end/fail 调）。
     // 防御性：非 ended/failed 的 status 视为 ended 兜底（backend 接受 SessionStatus）。
     const mappedStatus: 'ended' | 'failed' =
