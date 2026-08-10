@@ -197,6 +197,9 @@ services:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?must set LITELLM_MASTER_KEY}
       STORE_MODEL_IN_DB: "True"  # admin API 动态注册需 DB 持久化（spike 定稿假设）
       DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:-litellm}@litellm-db:5432/litellm
+      # 不设 PYTHONUNBUFFERED 时 litellm 崩溃日志被 Python stdout 缓冲吞掉（docker logs 全空），
+      # 极难定位。强制 unbuffered，崩溃 traceback 立即 flush，OOM/迁移失败一眼可见。
+      PYTHONUNBUFFERED: "1"
     volumes:
       # admin API 模式起步空 model_list，运行时 set-default 动态注册（spike 定稿假设）。
       - ./litellm-config.yaml:/app/config.yaml
@@ -209,11 +212,17 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+      # 首启对全新 litellm-db 跑 prisma migrate deploy（142 步迁移 + engine 下载）耗时较长，
+      # 给 180s 启动宽限，避免迁移期被误判 unhealthy（迁移完一次后重启很快）。
+      start_period: 180s
     # 不写 ports：仅 backend 同 default network 可达 litellm:4000（R-05 网络隔离——
     # LiteLLM 对公网 + master key 泄漏 = 所有 openai 上游 key 暴露）。
     # backend 不 depends_on litellm：anthropic 链路不经 LiteLLM，LiteLLM 宕不能拖垮
     # backend 启动（NFR-03 故障域隔离，仅 openai 链路受影响）。
-    mem_limit: 512m
+    # 512m 不够：首启 prisma migrate deploy（下载 query/migration engine + 跑 142 步迁移）瞬时内存尖峰
+    # 超 512m → OOM kill → restart:always 循环 → 迁移永远跑不完、4000 永不监听（docker events 见 oom 事件）。
+    # 提到 1g 让一次性迁移跑完；稳态内存 ~300M，limit 只是允许尖峰。
+    mem_limit: 1g
 
 volumes:
   pgdata:
