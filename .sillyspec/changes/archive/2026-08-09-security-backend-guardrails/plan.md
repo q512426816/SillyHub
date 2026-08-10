@@ -15,17 +15,17 @@ created_at: 2026-08-09T20:49:11
 > 技术方案确定性强（复用已落地原语 + 已 Grill 证实），Spike 合并进对应 task 的验收步骤，不单列。
 
 ## Wave 1（并行，无依赖）
-- [ ] task-01: 新建 SSRF 统一入口 `app/core/ssrf.py`（assert_public_url 全量 + assert_safe_repo_url 协议白名单 + UnsafeRepoUrl 400）（覆盖：FR-07/08/10, D-003/004）
-- [ ] task-02: incident 状态机转换校验（INCIDENT_TRANSITIONS 放宽版图 + update() 插入 assert_transition + 重开清字段）（覆盖：FR-01~06, D-001/002/006）
+- [x] task-01: 新建 SSRF 统一入口 `app/core/ssrf.py`（assert_public_url 全量 + assert_safe_repo_url 协议白名单 + UnsafeRepoUrl 400）（覆盖：FR-07/08/10, D-003/004）
+- [x] task-02: incident 状态机转换校验（INCIDENT_TRANSITIONS 放宽版图 + update() 插入 assert_transition + 重开清字段）（覆盖：FR-01~06, D-001/002/006）
 
 ## Wave 2（依赖 Wave 1 的 task-01）
-- [ ] task-03: mcp webhook SSRF 双查（create 注册前 + _deliver_one 投递前 assert_public_url，best-effort catch）（覆盖：FR-08/09, D-003）
-- [ ] task-04: worktree clone 协议白名单（clone_bare 前 assert_safe_repo_url，含 Windows 盘符收紧）（覆盖：FR-07, D-004）
-- [ ] task-05: http_get 逐跳 SSRF 复查（follow_redirects=False 手动 ≤3 跳 + 每跳 assert_public_url + 缺 Location 处理）（覆盖：FR-10, D-005）
+- [x] task-03: mcp webhook SSRF 双查（create 注册前 + _deliver_one 投递前 assert_public_url，best-effort catch）（覆盖：FR-08/09, D-003）
+- [x] task-04: worktree clone 协议白名单（clone_bare 前 assert_safe_repo_url，含 Windows 盘符收紧）（覆盖：FR-07, D-004）
+- [x] task-05: http_get 逐跳 SSRF 复查（follow_redirects=False 手动 ≤3 跳 + 每跳 assert_public_url + 缺 Location 处理）（覆盖：FR-10, D-005）
 
 ## Wave 3（依赖 Wave 1+2 实现）
-- [ ] task-06: 测试 incident 转换校验（test_fsm.py：合法边全覆盖 + 非法边拒 422 + 重开清字段 + 同态幂等 + resolved→resolved 不刷时间戳）（覆盖：FR-01~06, AC-1/3/4/5）
-- [ ] task-07: 测试 SSRF 三连（test_ssrf.py / test_webhook_ssrf.py / test_repo_url_guard.py：IPv6/重定向/注册内网/协议白名单含 C:\foo）（覆盖：FR-07/08/09/10, AC-6/7/8/9）
+- [x] task-06: 测试 incident 转换校验（test_fsm.py：合法边全覆盖 + 非法边拒 422 + 重开清字段 + 同态幂等 + resolved→resolved 不刷时间戳）（覆盖：FR-01~06, AC-1/3/4/5）
+- [x] task-07: 测试 SSRF 三连（test_ssrf.py / test_webhook_ssrf.py / test_repo_url_guard.py：IPv6/重定向/注册内网/协议白名单含 C:\foo）（覆盖：FR-07/08/09/10, AC-6/7/8/9）
 
 ## Wave 4（收尾）
 - [x] task-08: 文档收尾（CONCERNS.md incident+SSRF 三连条目标 ✅ + backend.md 变更索引）（覆盖：NFR-01 文档同步）
