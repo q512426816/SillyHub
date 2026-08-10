@@ -51,7 +51,7 @@ generator: sillyspec-scan
 
 **PPM 正确性(已上线)**
 - 执行收口跨天校验可绕过:`problem/service.py:617-638`+`task/service.py:336-357`,顺序是先写 actual_end_time 用旧 actual_start_time 校验再用新 actual_start_time 覆盖 → 可落库跨天/end<start,破坏"按天求和"不变式。
-- 执行人/负责人 body 可控冒名填报:`problem/router.py:504`、`task/router.py:208-229,496-508`,工时/执行记录可记到他人名下,污染统计/绩效归因。
+- ✅ 已修复(change 2026-08-09-security-ppm-ownership) **执行人/负责人 body 可控冒名填报**:`problem/router.py:504`、`task/router.py:208-229,496-508`,工时/执行记录可记到他人名下,污染统计/绩效归因。已加 service 层归属校验原语 `resolve_owner`(`ppm/common/ownership.py`):非管理员显式填他人 execute_user_id/check_user_id/current_user_id/user_id → 403 `HTTP_403_PPM_OWNERSHIP_DENIED`,平台管理员可代填(运维纠错),未指定/自填放行;start/execute_plan/task-execute create+update/work-hour create+update/execute_problem 共 7 端点 router 透传 actor(user)做纵深防御。
 - 收口无行锁可重复收口/丢更新:`problem/service.py:568-681`+`task/service.py:301-391`(对比 start 有 with_for_update)。
 - ✅ 已修复(ql-20260809-003-56db) kanban 日期过滤 naive datetime 比 timestamptz 列:`kanban/service.py:112,118,124-131`(其余子域用 tzinfo=UTC),生产 asyncpg 可能 InterfaceError 500 或时区错移,aiosqlite 单测抓不到。
 - plan change_process 并发版本链分叉:`service.py:1109-1195`(无锁,两条并发各建 draft 指向同一 parent,任务绑定最后提交者赢)。
@@ -62,9 +62,9 @@ generator: sillyspec-scan
 - 导入上传大小校验在 `file.read()` 之后:`plan/router.py:373-374`(2GB 文件先撑爆内存再被 413 拒)。
 
 **网关 / 外部集成**
-- ✅ 已修复(change 2026-08-09-security-backend-guardrails) mcp webhook SSRF:`mcp_gateway/router.py:207`+`service.py:549-552`(原 url 无 scheme/私网校验,可注册内网/云元数据 `169.254.169.254` 回调;已加 create 注册前 + _deliver_one 投递前 `assert_public_url` 全量 SSRF 复查,拒内网/本机/云元数据/file://,投递 best-effort 防 DNS 重绑定)。
-- ✅ 已修复(change 2026-08-09-security-backend-guardrails) worktree clone repo_url 无 scheme 白名单:`worktree/git_runner.py:79`(原 `ext::` 可 backend 容器内 RCE / `file://` 读本地 / 任意 ssh SSRF;已加 clone_bare 前 `assert_safe_repo_url` 协议白名单,拒 ext::/file:///裸路径/Windows 盘符,放行 https/ssh/git/scp-like 含内网 git)。
-- ✅ 已修复(change 2026-08-09-security-backend-guardrails) http_get SSRF 重定向不复查 + IPv6 私网绕过:`tool_gateway/service.py:537`+`tool_policy.py:302`(原 follow_redirects=True 不重跑校验;_check_not_private_ip 仅 AF_INET 不挡 ::1/fc00::;已改 follow_redirects=False 手动逐跳≤3跳 + 每跳 `assert_public_url` 复查 IPv4+IPv6+重定向,缺 Location 返 Invalid redirect)。
+- 🔴 未修复 mcp webhook SSRF:`mcp_gateway/router.py:207`+`service.py:549-552`(url 无 scheme/私网校验,可注册内网/云元数据 `169.254.169.254` 回调)。⚠️ CONCERNS 此前误标「✅已修复(backend-guardrails)」,但 `assert_public_url` 代码全库不存在(git grep 空),待该 change execute 实现。
+- 🔴 未修复 worktree clone repo_url 无 scheme 白名单:`worktree/git_runner.py:79`(`ext::` 可 backend 容器内 RCE / `file://` 读本地 / 任意 ssh SSRF;现仍是裸 `clone --bare repo_url`)。⚠️ CONCERNS 此前误标「✅已修复(backend-guardrails)」,但 `assert_safe_repo_url` 代码未实现,待该 change execute。
+- ⚠️ 部分修复 http_get SSRF 重定向不复查 + IPv6 私网绕过:`tool_gateway/service.py:537`+`tool_policy.py:302`。IPv6 私网已补(`tool_policy.py _PRIVATE_NETWORKS_V6` ::1/fc00/fe80,更早提交);但重定向复查未实现(`service.py:550` 仍 `follow_redirects=True`,无逐跳 `assert_public_url` 复查)。⚠️ CONCERNS 此前整条误标「✅已修复(backend-guardrails)」,redirect 部分待该 change execute。
 - git_operation_logs.args_json 明文存含 token 参数:`git_gateway/service.py:246`(redact_output 只处理 output 不处理 args,PAT 落库 + 经 API 回显)。
 - 对外 MCP dispatch_worker 的 worktree_path 无校验:`mcp_gateway/tools.py:346`+`agent/execution.py:203-204`(backend 对绝对路径零校验直接作 worker cwd;最终可利用性依赖 daemon 端 allowed_roots)。
 - askpass 脚本/gitconfig 注入:`worktree/exec_env.py:89,91,78,82`(token/git_username 未转义,Unix 双引号不防 `$(...)`、Windows cmd 不防 `&|`)。
