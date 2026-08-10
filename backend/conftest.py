@@ -134,6 +134,11 @@ async def db_engine() -> AsyncIterator[Any]:
     from app.modules.file import model as _file_model  # noqa: F401
     from app.modules.git_identity import model as _git_identity_model  # noqa: F401
 
+    # incident 子域（incidents + postmortems）：incident.release_id FK→releases.id，
+    # 须先注册 release 模型（releases + release_approvals 表），否则 create_all 报
+    # NoReferencedTableError('releases')，incident 全部测试 collection-error（预存缺口）。
+    from app.modules.incident import model as _incident_model  # noqa: F401
+
     # ppm project 子域 4 表(maintenance/customer/member/stakeholder)。workspace.model 的
     # ppm_project_workspace 外键→ppm_project_maintenance.id,必须一并注册,否则 create_all 报
     # NoReferencedTableError(ppm_project_maintenance),连带所有 DB 测试 collection ERROR。
@@ -143,6 +148,7 @@ async def db_engine() -> AsyncIterator[Any]:
 
     # ppm 子域模型 (task-06:平台级 task 三表)
     from app.modules.ppm.task import model as _ppm_task_model  # noqa: F401
+    from app.modules.release import model as _release_model  # noqa: F401
     from app.modules.scan_docs import conflict_model as _scan_conflict_model  # noqa: F401
     from app.modules.scan_docs import model as _scan_docs_model  # noqa: F401
     from app.modules.skills import model as _skills_model  # noqa: F401

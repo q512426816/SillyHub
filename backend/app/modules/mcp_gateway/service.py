@@ -41,6 +41,7 @@ from app.core.crypto import get_cipher
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.core.redis import get_redis
+from app.core.ssrf import SsrfBlocked, UnsafeRepoUrl, assert_public_url
 from app.modules.mcp_gateway.model import McpTokenORM, McpWebhookORM
 
 log = get_logger(__name__)
@@ -419,6 +420,9 @@ class McpWebhookService:
         events: list[str],
     ) -> McpWebhookORM:
         """注册 webhook：``secret`` 明文加密后入库（``_encode_secret``），绝不存明文。"""
+        # SSRF：注册前校验回调 url（scheme 白名单 + 解析到公网，防 169.254.169.254 /
+        # 127.0.0.1 / 内网）。非法抛 UnsafeRepoUrl/SsrfBlocked（400），由全局 handler 映射。
+        await assert_public_url(url.strip())
         row = McpWebhookORM(
             id=uuid.uuid4(),
             token_id=token_id,
@@ -545,6 +549,8 @@ class WebhookDispatcher:
             if attempt > 1:
                 await asyncio.sleep(_RETRY_BACKOFF_SECONDS[attempt - 2])
             try:
+                # SSRF 每跳查：防注册后 DNS 重绑定 / 解析变更绕过（design B2）。
+                await assert_public_url(webhook.url)
                 # trust_env=False：不继承宿主代理（对齐 finalizer/delegation 出站模式）。
                 async with httpx.AsyncClient(
                     trust_env=False, timeout=_OUTBOUND_TIMEOUT_SECONDS
@@ -576,6 +582,15 @@ class WebhookDispatcher:
                     url=webhook.url,
                     attempt=attempt,
                     status_code=resp.status_code,
+                )
+                return
+            except (SsrfBlocked, UnsafeRepoUrl) as exc:
+                # SSRF 命中：不重试（重试也不会变），best-effort 放弃，不影响主流程（R-06）。
+                log.warning(
+                    "mcp_webhook.deliver_ssrf_blocked",
+                    mcp_webhook_id=str(webhook.id),
+                    url=webhook.url,
+                    error=f"{type(exc).__name__}: {exc}",
                 )
                 return
             except Exception as exc:  # 超时 / 连接错误 / 任何出站异常 → 退避重试

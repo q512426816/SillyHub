@@ -62,9 +62,9 @@ generator: sillyspec-scan
 - 导入上传大小校验在 `file.read()` 之后:`plan/router.py:373-374`(2GB 文件先撑爆内存再被 413 拒)。
 
 **网关 / 外部集成**
-- 🔴 未修复 mcp webhook SSRF:`mcp_gateway/router.py:207`+`service.py:549-552`(url 无 scheme/私网校验,可注册内网/云元数据 `169.254.169.254` 回调)。⚠️ CONCERNS 此前误标「✅已修复(backend-guardrails)」,但 `assert_public_url` 代码全库不存在(git grep 空),待该 change execute 实现。
-- 🔴 未修复 worktree clone repo_url 无 scheme 白名单:`worktree/git_runner.py:79`(`ext::` 可 backend 容器内 RCE / `file://` 读本地 / 任意 ssh SSRF;现仍是裸 `clone --bare repo_url`)。⚠️ CONCERNS 此前误标「✅已修复(backend-guardrails)」,但 `assert_safe_repo_url` 代码未实现,待该 change execute。
-- ⚠️ 部分修复 http_get SSRF 重定向不复查 + IPv6 私网绕过:`tool_gateway/service.py:537`+`tool_policy.py:302`。IPv6 私网已补(`tool_policy.py _PRIVATE_NETWORKS_V6` ::1/fc00/fe80,更早提交);但重定向复查未实现(`service.py:550` 仍 `follow_redirects=True`,无逐跳 `assert_public_url` 复查)。⚠️ CONCERNS 此前整条误标「✅已修复(backend-guardrails)」,redirect 部分待该 change execute。
+- ✅ 已修复(change 2026-08-09-security-backend-guardrails) mcp webhook SSRF:`mcp_gateway/service.py` `create()` 注册前 + `_deliver_one()` 投递前 `await assert_public_url`（scheme 白名单 + IPv4/IPv6 私网拒，每跳查防 DNS 重绑定）；非法 scheme→400(UnsafeRepoUrl)、私网/云元数据→400(SsrfBlocked)，`_deliver_one` best-effort catch 不重试不抛（R-06）。统一入口 `app/core/ssrf.py`。
+- ✅ 已修复(change 2026-08-09-security-backend-guardrails) worktree clone repo_url 协议白名单:`worktree/git_runner.py` `clone_bare` 前 `assert_safe_repo_url`（放行 https/ssh/git + scp-like 含内网 git；拒 `ext::`/`file://`/裸路径/Windows 盘符），非法→400(UnsafeRepoUrl)，校验先于 git 子进程。
+- ✅ 已修复(change 2026-08-09-security-backend-guardrails) http_get SSRF 重定向逐跳复查 + IPv6 私网:`tool_gateway/service.py` `_handle_http_get` 删 `follow_redirects=True`，改手动逐跳（≤3 跳）每跳 `await assert_public_url`（底层 `assert_public_hostname` IPv4+IPv6 私网拒 + scheme 白名单），封堵 3xx 跳私网（含云元数据）与 `::1`/`fc00::`/`fe80::`（D-005）。
 - git_operation_logs.args_json 明文存含 token 参数:`git_gateway/service.py:246`(redact_output 只处理 output 不处理 args,PAT 落库 + 经 API 回显)。
 - 对外 MCP dispatch_worker 的 worktree_path 无校验:`mcp_gateway/tools.py:346`+`agent/execution.py:203-204`(backend 对绝对路径零校验直接作 worker cwd;最终可利用性依赖 daemon 端 allowed_roots)。
 - askpass 脚本/gitconfig 注入:`worktree/exec_env.py:89,91,78,82`(token/git_username 未转义,Unix 双引号不防 `$(...)`、Windows cmd 不防 `&|`)。

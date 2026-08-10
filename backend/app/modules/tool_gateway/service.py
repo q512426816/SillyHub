@@ -19,11 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError, PermissionDenied, WorktreeLeaseNotFound
 from app.core.logging import get_logger
+from app.core.ssrf import UnsafeRepoUrl, assert_public_url
 from app.modules.git_gateway.service import redact_output
 from app.modules.task.model import Task
 from app.modules.tool_gateway.model import ToolOperationLog
 from app.modules.tool_gateway.tool_policy import (
     PolicyLimits,
+    SsrfBlocked,
     ToolPolicy,
     ToolPolicyService,
     default_policy,
@@ -48,6 +50,8 @@ TOOL_TYPES = frozenset(
 
 MAX_OUTPUT_SIZE = 64_000
 DEFAULT_TIMEOUT = 30
+# http_get 手动逐跳重定向上限（design B4 / R-04）：每跳 assert_public_url 复查，封堵重定向绕过。
+_MAX_REDIRECT_HOPS = 3
 
 SHELL_BLOCKED_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\bsudo\b", re.IGNORECASE),
@@ -525,11 +529,12 @@ class ToolGatewayService:
         params: dict,
         lease_root: Path,
     ) -> dict:
-        """Execute HTTP GET request with SSRF protection and domain whitelist.
+        """Execute HTTP GET request with per-hop SSRF protection.
 
-        SSRF protection is enforced via ToolPolicyService._check_not_private_ip
-        (called during policy check phase). This handler only does the actual
-        HTTP request after validation has passed.
+        SSRF：每跳（含重定向目标）经 ``assert_public_url`` 校验（scheme 白名单 +
+        IPv4/IPv6 私网拒），封堵重定向绕过与 IPv6 私网（design B4 / D-005）。
+        policy 阶段的 ``_check_not_private_ip``（IPv4-only）保留，本 handler 逐跳
+        复查覆盖其盲区。
         """
         import httpx
 
@@ -540,26 +545,39 @@ class ToolGatewayService:
         if not url:
             return {"result_code": 1, "output": "Missing URL."}
 
-        # Enforce HTTPS or HTTP scheme only
+        # Enforce HTTPS or HTTP scheme only（fast-path 友好消息；assert_public_url 也会拒）
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https"):
             return {"result_code": 1, "output": f"Unsupported scheme: {parsed.scheme}"}
 
         try:
-            async with httpx.AsyncClient(
-                timeout=timeout, follow_redirects=True, max_redirects=3
-            ) as client:
-                resp = await client.get(url, headers=headers)
-                body = resp.text
+            current_url = url
+            resp: httpx.Response | None = None
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+                # 手动逐跳：≤ _MAX_REDIRECT_HOPS 次重定向，每跳 assert_public_url 复查
+                # （防 3xx 跳到 169.254.169.254 / 127.0.0.1 / 内网，design B4 / R-04）。
+                for hop in range(_MAX_REDIRECT_HOPS + 1):  # +1 = 初始请求
+                    await assert_public_url(current_url)  # SSRF：scheme + IPv4/IPv6 私网
+                    resp = await client.get(current_url, headers=headers)
+                    if resp.is_redirect and hop < _MAX_REDIRECT_HOPS:
+                        location = resp.headers.get("location", "")
+                        # 相对路径用 resp.url join 成绝对 URL，下一跳再校验（R-04）。
+                        current_url = str(httpx.URL(resp.url).join(location))
+                        continue
+                    break  # 非重定向 / 达重定向上限 → 取当前响应
+            assert resp is not None  # 循环至少执行一次（range 非空）
+            body = resp.text
 
-                # Truncate output
-                if len(body) > MAX_OUTPUT_SIZE:
-                    body = body[:MAX_OUTPUT_SIZE] + f"\n... (truncated, {len(body)} total chars)"
+            # Truncate output
+            if len(body) > MAX_OUTPUT_SIZE:
+                body = body[:MAX_OUTPUT_SIZE] + f"\n... (truncated, {len(body)} total chars)"
 
-                return {
-                    "result_code": resp.status_code,
-                    "output": redact_output(body),
-                }
+            return {
+                "result_code": resp.status_code,
+                "output": redact_output(body),
+            }
+        except (SsrfBlocked, UnsafeRepoUrl) as exc:
+            return {"result_code": 1, "output": f"SSRF blocked: {exc}"}
         except httpx.TimeoutException:
             return {"result_code": -1, "output": f"HTTP request timed out after {timeout}s."}
         except httpx.RequestError as e:

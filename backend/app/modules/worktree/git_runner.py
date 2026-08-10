@@ -11,6 +11,7 @@ from pathlib import Path
 
 from app.core.errors import WorktreeAcquireFailed
 from app.core.logging import get_logger
+from app.core.ssrf import assert_safe_repo_url
 
 log = get_logger(__name__)
 
@@ -73,6 +74,9 @@ class GitRunner:
     ) -> None:
         if bare_path.exists() and (bare_path / "HEAD").exists():
             return
+        # 协议白名单：拒 ext::（remote helper RCE）/ file://（读本地文件）/ 裸路径，
+        # 放行 https/ssh/git + scp-like（含内网 git，design B3 / D-004）。非法抛 UnsafeRepoUrl(400)。
+        assert_safe_repo_url(repo_url)
         bare_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             await self._run(

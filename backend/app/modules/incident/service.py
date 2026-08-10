@@ -16,11 +16,21 @@ from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.modules.incident.model import Incident, Postmortem
 from app.modules.incident.schema import IncidentCreate, IncidentUpdate, PostmortemCreate
+from app.modules.ppm.common.fsm import assert_transition
 
 log = get_logger(__name__)
 
 VALID_STATUSES = frozenset({"open", "investigating", "mitigated", "resolved"})
 VALID_SEVERITIES = frozenset({"low", "medium", "high", "critical"})
+
+# 放宽版状态转换图（design §5 A1 / D-001）：终态 resolved 仅可重开→investigating，
+# 离开 resolved 时清解决记录（D-002）。同状态幂等（update() 内跳过校验，D-006）。
+INCIDENT_TRANSITIONS: dict[str, set[str]] = {
+    "open": {"investigating", "resolved"},  # 排查 / 误报直关
+    "investigating": {"mitigated", "open", "resolved"},  # 退回 / 控制 / 直收
+    "mitigated": {"resolved", "investigating"},  # 收尾 / 回查
+    "resolved": {"investigating"},  # 仅可重开
+}
 
 
 class IncidentError(AppError):
@@ -104,17 +114,31 @@ class IncidentService:
         incident = await self.get(incident_id)
 
         if data.status is not None:
+            # 校验顺序固定（design D-006）：值校验 400 → 同态幂等跳过 → 转换校验 422
+            # → resolved 字段维护（进设 / 离清）→ 赋值。
             if data.status not in VALID_STATUSES:
                 raise IncidentError(
                     f"Invalid status: {data.status}",
                     details={"status": data.status},
                 )
+            if data.status != incident.status:
+                # 非法转换抛 InvalidTransition（422，fsm.assert_transition 内部抛）。
+                assert_transition(
+                    incident.status,
+                    data.status,
+                    INCIDENT_TRANSITIONS,
+                    entity="incident",
+                    entity_id=incident.id,
+                )
+                if data.status == "resolved":
+                    incident.resolved_at = datetime.now(UTC)
+                    if data.resolved_by:
+                        incident.resolved_by = uuid.UUID(data.resolved_by)
+                elif incident.status == "resolved":
+                    # 离开终态 resolved（合法仅 resolved→investigating）→ 清解决记录（D-002）。
+                    incident.resolved_at = None
+                    incident.resolved_by = None
             incident.status = data.status
-
-            if data.status == "resolved":
-                incident.resolved_at = datetime.now(UTC)
-                if data.resolved_by:
-                    incident.resolved_by = uuid.UUID(data.resolved_by)
 
         if data.severity is not None:
             if data.severity not in VALID_SEVERITIES:
