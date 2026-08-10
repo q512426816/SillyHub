@@ -319,3 +319,14 @@
 根因：captcha_service 把登录失败计数 INCR login:fail:{ip} 写共享 redis db15（conftest REDIS_URL），测试客户端同 IP 127.0.0.1 跨测试累计过 auth_login_fail_threshold 触发 captcha(423)；叠加 get_redis() 进程级单例连接池绑首个 loop，pytest-asyncio 每测试新 loop 致 INCR 报 Event loop is closed；conftest 完全无 redis reset。
 方案：backend/conftest.py 加 autouse async fixture _reset_redis_state（function scope），每测试 setup 重置 _client=None 强制 get_redis() 在当前 loop 重建（解跨 loop）+ flushdb() 清 db15 残留计数；teardown aclose+置 None 防连接池泄漏；redis 不可用 try/except 降级跳过。纯测试侧，零生产代码改动。
 结果：复现范围 auth+admin/users_router 修复前 7 failed→修复后 177 passed/0 failed；全量 backend 修复前 3651 passed/5 failed→修复后 3656 passed/0 failed（exit 0，1772s）。flaky 彻底消除。已暂存 backend/conftest.py。
+
+## ql-20260810-003-3aa6 | 2026-08-10 21:21:07 | 修复 ImportModuleModal 确认导入按钮 flaky 竞态（selectedRowKeys 异步初始化改同步）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（ImportModuleModal 三处：① handleUpload 成功分支加 setSelectedRowKeys(resp.sheets.flatMap(rows).map(key))，与 setStep(2)/setPreview/setCheckedSheets 同批 setState；② 删除原 useEffect(1165-1167) 异步默认全选；③ 切 sheet Checkbox onChange 改块函数，同步 setCheckedSheets(next)+setSelectedRowKeys(新 visibleRows 全选 key)，避免 key 与行索引错位）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引追加 ql-20260810-003-3aa6）
+需求：修复前端 pnpm test 失败项 ImportModuleModal.test.tsx ④「点确认导入」全量并发跑时 importModulesCommit 调用 0 次（期望1次）flaky 挂。
+根因：page.tsx 的 selectedRowKeys 默认全选用 useEffect 异步初始化(1165-1167)，与 handleUpload 的 setStep(2)(1148) 不同渲染周期；步骤2首帧 selectedRowKeys=[] → validCount=0 → 确认按钮 disabled={validCount===0}(1465) 处于禁用，测试④ fireEvent.click 偶发点到 disabled 按钮 onClick 不触发。CPU 独占(单跑)effect 先于点击完成→过；全量并发争抢→挂。
+方案：删该 useEffect，selectedRowKeys 改在 handleUpload 成功分支(与 setStep(2) 同批 setState) + 切 sheet Checkbox onChange 同步重置(对齐新 visibleRows 全选)，消除首帧竞态。行为完全一致仅改初始化时机，属「派生 state 用 effect」反模式的修正。
+结果：单跑该文件 6 passed；全量 pnpm test 连跑 4 次(1+3)均 134 files/1346 tests passed（修复前用户全量④flaky挂、修复后4次全过=flaky根除证据）；pnpm typecheck 通过；pnpm lint 无 error（仅预存 no-unused-vars warning 与本次无关）。

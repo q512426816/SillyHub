@@ -90,4 +90,6 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 - change 2026-08-08-llm-provider-openai-format | llm-provider 表单加 API 格式下拉（openai 隐藏认证字段/角色映射 + 完整 URL 粘贴提示）；列表加格式徽标 + litellm_registered 状态；预设聚合站组加 opencode_zen_openai；api-types.ts 从后端 OpenAPI 重新生成（api_format/litellm_registered 字段同步）；Wave2 set-default openai 守护移除（FR-11 开放 set-default）。
 
+- ql-20260810-003-3aa6 | 修复 ImportModuleModal（实施阶段导入弹窗）确认导入按钮 flaky 竞态：selectedRowKeys 默认全选原用 useEffect 异步初始化（与 handleUpload 的 setStep(2) 不同渲染周期），步骤2首帧 selectedRowKeys=[] → validCount=0 → 确认按钮 disabled={validCount===0} 偶发被测试/极快点击点到 disabled 致 importModulesCommit 调 0 次（全量并发跑触发，单跑独占 CPU 不触发）。改为 handleUpload 成功分支与 setStep(2) 同批 setSelectedRowKeys + 切 sheet Checkbox onChange 同步重置，删该 useEffect。行为完全一致仅消首帧竞态，全量连跑 4 次 134/1346 全过。
+
 <!-- MANUAL_NOTES_END -->

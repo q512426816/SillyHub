@@ -1145,6 +1145,13 @@ export function ImportModuleModal({
       for (const s of resp.sheets) init[s.name] = true;
       setCheckedSheets(init);
       setPreview(resp);
+      // 默认全选所有行：与 setStep(2)/setPreview/setCheckedSheets 同批 setState，
+      // 步骤2首帧 selectedRowKeys 即就绪 → 确认按钮(disabled={validCount===0}) 不会
+      // 因 selectedRowKeys 暂空而首帧 disabled，消除「点确认太快偶发点到禁用按钮」竞态。
+      // 原用 useEffect 异步初始化(与 setStep(2) 不同渲染周期)致 flaky。
+      setSelectedRowKeys(
+        resp.sheets.flatMap((s) => s.rows).map((r, i) => `${r.sheet_name}-${i}`),
+      );
       setStep(2);
     } catch (err) {
       message.error(err instanceof Error ? err.message : "预览失败");
@@ -1161,10 +1168,10 @@ export function ImportModuleModal({
       .flatMap((s) => s.rows);
   }, [preview, checkedSheets]);
 
-  // visibleRows 变化(preview 加载/切 sheet)默认全选行
-  useEffect(() => {
-    setSelectedRowKeys(visibleRows.map((r, i) => `${r.sheet_name}-${i}`));
-  }, [visibleRows]);
+  // 默认全选 / 切 sheet 重置 selectedRowKeys 已移至事件回调同步设置
+  // (handleUpload 成功分支 + 下方 Checkbox onChange)，不再用 useEffect 异步初始化——
+  // 后者与 setStep(2) 不同渲染周期，会让确认按钮在步骤2首帧因 selectedRowKeys=[] 暂时
+  // disabled(validCount===0)，并发跑时点确认偶发落空(commit 0 次, flaky)。
 
   // 选中行(按 selectedRowKeys 过滤 visibleRows)
   const selectedRows = visibleRows.filter((r, i) =>
@@ -1415,12 +1422,21 @@ export function ImportModuleModal({
               >
                 <Checkbox
                   checked={checkedSheets[s.name] ?? true}
-                  onChange={(e) =>
-                    setCheckedSheets((prev) => ({
-                      ...prev,
-                      [s.name]: e.target.checked,
-                    }))
-                  }
+                  onChange={(e) => {
+                    const next = { ...checkedSheets, [s.name]: e.target.checked };
+                    setCheckedSheets(next);
+                    // 切 sheet 后 visibleRows 会重算，selectedRowKeys 必须同步对齐新的
+                    // visibleRows(全选新可见行)，否则 key 与行索引错位。事件内同步设置，
+                    // 与 handleUpload 一致(非 useEffect)，避免异步竞态。
+                    if (preview) {
+                      setSelectedRowKeys(
+                        preview.sheets
+                          .filter((sh) => next[sh.name])
+                          .flatMap((sh) => sh.rows)
+                          .map((r, i) => `${r.sheet_name}-${i}`),
+                      );
+                    }
+                  }}
                 >
                   <span className="text-sm">{s.name}</span>
                   <span className="ml-2 text-xs text-muted-foreground">
