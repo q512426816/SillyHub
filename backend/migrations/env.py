@@ -28,6 +28,10 @@ from app.modules.git_gateway import model as _gg_model  # noqa: F401
 from app.modules.git_identity import model as _gi_model  # noqa: F401
 from app.modules.incident import model as _incident_model  # noqa: F401
 from app.modules.llm_provider import model as _llm_model  # noqa: F401
+
+# 2026-08-10-sillyhub-platform-sync task-02：进度同步层聚合存储表登记，
+# 否则 autogenerate 会因 metadata 缺该表而误判 platform_change_progress 多余。
+from app.modules.platform_sync import model as _platform_sync_model  # noqa: F401
 from app.modules.ppm.plan import model as _ppm_plan_model  # noqa: F401
 from app.modules.ppm.problem import model as _ppm_problem_model  # noqa: F401
 from app.modules.ppm.project import model as _ppm_project_model  # noqa: F401

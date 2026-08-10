@@ -7446,6 +7446,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/changes/{name}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Progress
+         * @description GET 单 change 完整 progress JSON（契约 §6，裸六表 + 顶层 last_pushed_at）。
+         *
+         *     不存在 → 404（客户端 fetchJson 返回 null 降级不阻断，契约 §8/§10）。
+         */
+        get: operations["get_progress_api_changes__name__progress_get"];
+        put?: never;
+        /**
+         * Push Progress
+         * @description POST 上行 progress + base_ts 冲突检测（契约 §4）。
+         *
+         *     读 3 个 ``X-SillySpec-*`` header（User/Base-Ts/Pushed-At，缺失/空均 None）。
+         *     200=接受（客户端据此更新 platform_last_sync）；409=冲突（body
+         *     ``{conflict, platform_progress, last_pushed_at}``，客户端写冲突文件走 resolve）。
+         *     body 是裸 ``serializeForSync`` 六表 JSON（NG-6 透传，不强类型校验）。
+         */
+        post: operations["push_progress_api_changes__name__progress_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Changes
+         * @description GET 轻量 change 列表（契约 §5，裸数组形态 D-007）。
+         */
+        get: operations["list_changes_api_changes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -8456,6 +8507,20 @@ export interface components {
             items: components["schemas"]["ChangeSummary"][];
             /** Total */
             total: number;
+        };
+        /**
+         * ChangeListItem
+         * @description GET /changes 轻量列表项（契约 §5，裸数组形态 D-007）。
+         */
+        ChangeListItem: {
+            /** Name */
+            name: string;
+            /** Current Stage */
+            current_stage?: string | null;
+            /** Last Pushed At */
+            last_pushed_at?: string | null;
+            /** Last Pusher */
+            last_pusher?: string | null;
         };
         /**
          * ChangeNextProcessReq
@@ -31436,6 +31501,94 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_progress_api_changes__name__progress_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    push_progress_api_changes__name__progress_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_changes_api_changes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeListItem"][];
                 };
             };
         };

@@ -42,6 +42,9 @@ from app.modules.mcp_gateway.router import router as mcp_gateway_router
 # create_app() 末尾调 mount_mcp(app)。写法严格对齐 task-04 spike-A 验证版本。
 from app.modules.mcp_gateway.server import mcp, mount_mcp
 from app.modules.mcp_gateway.sse import router as mcp_sse_router
+
+# 2026-08-10-sillyhub-platform-sync task-06：SillySpec 进度同步层 3 端点。
+from app.modules.platform_sync.router import router as platform_sync_router
 from app.modules.ppm.kanban.router import router as ppm_kanban_router
 from app.modules.ppm.plan.router import router as ppm_plan_router
 from app.modules.ppm.problem.router import router as ppm_problem_router
@@ -570,6 +573,11 @@ def create_app() -> FastAPI:
     app.include_router(settings_router, prefix="/api")
     app.include_router(admin_router, prefix="/api")
     app.include_router(spec_workspace_router, prefix="/api")
+    # 2026-08-10-sillyhub-platform-sync task-06：SillySpec 进度同步层 3 端点
+    # （POST /changes/{name}/progress / GET /changes / GET /changes/{name}/progress）。
+    # router 不自带 prefix（路径写全 /changes/...），外层 /api 落地 /api/changes/...，
+    # 与 /api/workspaces/{wid}/changes/* 派发层正交（契约 D-004）。
+    app.include_router(platform_sync_router, prefix="/api", tags=["platform-sync"])
 
     # ── MCP gateway（对外 MCP server，独立于 /api/*）──────────────────────────
     # 2026-08-06-public-mcp-server task-05：mount /mcp（FastMCP streamable HTTP）。
