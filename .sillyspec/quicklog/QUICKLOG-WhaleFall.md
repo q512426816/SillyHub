@@ -279,4 +279,4 @@
 需求：/runtimes 会话弹窗中，选中会话后点右上角「新建会话」不应结束当前会话；点「结束会话」后左侧会话列表状态应即时刷新。
 根因：InteractiveSessionPanel 内部 handleNewSession 在 view.status==='active' 时先调 handleEnd() 结束当前会话再返回（历史简化设计），导致「点新建=误结束当前会话」；且结束后 handleSessionReset 只 setSelectedId(null) 不 reloadSessions，列表状态停在旧值（active 实际已 ended）。
 方案：① panel handleNewSession 去掉 active→handleEnd 分支，一律 closeStream+setView(INITIAL_VIEW)（新建会话仅切面板，不结束 backend session，需继续可重新 attach）；② 父级 handleSessionReset 追加 void reloadSessions() 刷新列表。
-结果：interactive-session-panel 50 + runtime-session-dialog 10 + session-list-layout 共 69 tests passed；tsc --noEmit exit0。
+结果：interactive-session-panel 50 + runtime-session-dialog 10 + session-list-layout 共 69 tests passed；tsc --noEmit exit0。补充：InteractiveSessionPanel.handleEnd 成功即调 onSessionReset（原实现不调，父级 handleSessionReset 的 reloadSessions 不触发致列表不刷新），runtime-session-dialog.handleSessionReset 已加 reloadSessions；interactive-session-panel.test.tsx「改动一」断言随行为变更更新（结束会话也调 onSessionReset，1→2 次）。

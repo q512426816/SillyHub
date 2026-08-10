@@ -976,6 +976,9 @@ export function InteractiveSessionPanel({
         errorMsg: null,
       }));
       void resp;
+      // 结束会话成功后通知父级刷新列表（左侧状态即时更新为「已结束」）。
+      // 原实现不调 onSessionReset，父级 handleSessionReset 的 reloadSessions 不会触发。
+      onSessionReset?.();
     } catch (err) {
       // 网络错误：不假定 ended，恢复 active，允许重试
       const apiErr = err as ApiError;
@@ -985,7 +988,7 @@ export function InteractiveSessionPanel({
         errorMsg: apiErr instanceof ApiError ? apiErr.message : "结束会话失败，请重试",
       }));
     }
-  }, [view.sessionId, view.status, closeStream]);
+  }, [view.sessionId, view.status, closeStream, onSessionReset]);
 
   // 新建会话
   const handleNewSession = useCallback(() => {

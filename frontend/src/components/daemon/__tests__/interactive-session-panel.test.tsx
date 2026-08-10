@@ -919,12 +919,13 @@ describe("InteractiveSessionPanel", () => {
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
-    // 结束会话 → ended
+    // 结束会话 → ended（handleEnd 成功即调 onSessionReset 通知父级刷新列表）
     fireEvent.click(await screen.findByTitle(/结束整个会话/));
     await waitFor(() => expect(sessionApi.endSession).toHaveBeenCalled());
+    expect(onSessionReset).toHaveBeenCalledTimes(1);
     // ended 后点新建会话 → 重置回 idle → onSessionReset
     fireEvent.click(screen.getByTitle(/新建会话/));
-    expect(onSessionReset).toHaveBeenCalledTimes(1);
+    expect(onSessionReset).toHaveBeenCalledTimes(2);
   });
 
   it("改动二：createSession 成功后独立 effect 触发 fetchPendingDialogs", async () => {
