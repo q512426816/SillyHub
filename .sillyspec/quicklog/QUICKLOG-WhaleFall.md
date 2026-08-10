@@ -257,3 +257,14 @@
 根因：inject 在新会话 create_session 完成前到 daemon，daemon session 不存在直接丢 inject（不重试），/model 没进 claude；backend inject 只查 DB active 不查 daemon ready。
 方案：本 quick 顺带 cb async 防御（_runConsume onResult/onMessage 改 async+await 串行保证 message 先 result）+ AC-3a 更新（ql-002 遗留测试债）；/model 真正修复 C 方案转完整流程。
 结果：tsc 0；reload-provider 11 + input-queue 16 单测过；cb async + AC-3a 落地。
+## ql-20260810-001-7f44 | 2026-08-10 15:54:02 | 修复重启 daemon 后 active interactive session 被错误标 ended（restoreAndReconnect resume 漏 CLAUDE_CONFIG_DIR）
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/session-manager.ts（restoreAndReconnect 的 driverOpts env 从 undefined 改为 buildSpawnEnv 构造 + 显式设 CLAUDE_CONFIG_DIR=daemon 隔离目录，与 create/reloadWithProvider 对齐；_runConsume 加 [DIAG] 诊断日志 onError/catch/clean-exit 记录 resume 失败原因，供验证）
+- sillyhub-daemon/src/daemon.ts（复用既有 [DIAG] onSessionEnd/restoreAndReconnect OK/markRecoveredSessionFailed 探针定位 resume→fail 路径，commit a784f1fa 为排查 /model 加）
+
+需求：重启 daemon 后 /runtimes 里「进行中」的会话（轮次已完成=空闲 active）变成「已结束」，重启不应变更会话状态。
+根因：daemon 重启 _recoverSessionsOnBoot → restoreAndReconnect 调 driver.start({resume}) 恢复 session，但 driverOpts env=undefined → ClaudeSdkDriver 回退裸 process.env（无 CLAUDE_CONFIG_DIR）→ claude 子进程用默认 ~/.claude → 找不到 daemon claude-config/projects/<cwd>/<sid>.jsonl（jsonl 由 create 时隔离 CLAUDE_CONFIG_DIR 写在此）→ resume 失败 → claude 非 0 退出 → SDK getProcessExitError exitError → driver consume onError → SessionManager.fail → onSessionEnd(failed) → backend notifySessionEnd → end_session（router 只取 reason 不取 status，service 总设 ended）→ session 显示「已结束」。证据：8/10 06:09 backend 日志 recover→reconnecting→active(43.01s)→1 秒后 daemon POST /end(44s)；4 个 provider-switch session 里只有被 recover 的 2 个(70aa/be2d)ended，未 recover 的(5cf2/989b)仍 active；SDK sdk.mjs getProcessExitError(exitCode!=0)->Error。与 ql-20260807-002 同源（reload 路径已修 CLAUDE_CONFIG_DIR，restore 路径遗漏）。
+方案：restoreAndReconnect 用 buildSpawnEnv({provider_config:undefined},{credential}) 构造 env + 显式 restoreEnv.CLAUDE_CONFIG_DIR=CLAUDE_CONFIG_DIR（对齐 reloadWithProvider:2627-2636），让 resume 的 claude 读 daemon 隔离目录的 jsonl。恢复路径无 provider_config（敏感不落盘）第 0 层自然跳过，凭证靠 process.env（与 create 同源）+ credentials.json。
+结果：tsc exit0；daemon-recovery-boot 11 + reload-provider + pending-switch 共 31 测试 passed（含 restoreAndReconnect 抛错 / P1-1 异步 fail 场景）；daemon build + 重启（pid 32688）已加载修复。真实验证待做：前端创建 session 跑一轮→重启 daemon→确认 session 保持 active；[DIAG] 日志保留供验证，验证后清理。

@@ -1759,6 +1759,8 @@ export class SessionManager {
       // 边界 2：driver 异常 → fail。fail 内部幂等。
       // orphan（reload 后旧 query.close 触发的 abort 错）静默丢弃，不 fail 新会话。
       if (!isAuthoritative()) return;
+      // [DIAG] 排查「重启 daemon 后 active session 变 ended」：记录 resume 后 driver error
+      console.error('[DIAG] _runConsume onError→fail', state.sessionId, 'provider=', state.provider, 'agentSid=', state.agentSessionId, 'cwd=', state.cwd, 'err=', _e instanceof Error ? `${_e.message}\n${_e.stack}` : _e);
       void this.fail(state.sessionId).then(() => undefined, () => undefined);
     };
     // 适配对象：新旧两组键并存（见方法注释）。
@@ -1775,10 +1777,13 @@ export class SessionManager {
         target as InteractiveDriverHandle,
         callbacks as unknown as InteractiveDriverCallbacks,
       );
-    } catch {
+      // [DIAG] consume 正常退出（query generator 自然结束）—— resume 已完成 session 可能走此路径
+      console.log('[DIAG] _runConsume consume exited cleanly', state.sessionId, 'provider=', state.provider, 'agentSid=', state.agentSessionId, 'status=', state.status);
+    } catch (e) {
       // consume 自身不应抛（driver.consume 内 try/catch），防御性标 failed。
       // orphan（reload 后旧 query.close 触发迭代器抛错）静默丢弃，不 fail 新会话。
       if (!isAuthoritative()) return;
+      console.error('[DIAG] _runConsume catch→fail', state.sessionId, 'err=', e instanceof Error ? `${e.message}\n${e.stack}` : e);
       void this.fail(state.sessionId).then(
         () => undefined,
         () => undefined,
@@ -2445,10 +2450,28 @@ export class SessionManager {
         skillRefs: record.skillRefs,
         effectiveAllowedRoots: record.effectiveAllowedRoots,
       });
+      // 修复「重启 daemon 后 active session 变 ended」：resume 必须用 daemon 隔离的
+      // CLAUDE_CONFIG_DIR（SDK jsonl 写在此），与 create（_startInteractiveSession
+      // buildSpawnEnv）/ reloadWithProvider 对齐。原先 env:undefined → driver 回退裸
+      // process.env（无 CLAUDE_CONFIG_DIR）→ claude 用默认 ~/.claude → 找不到 daemon
+      // claude-config/projects/<cwd>/<sid>.jsonl → resume 失败 → claude 非 0 退出
+      // → driver onError → SessionManager.fail → backend end_session（总设 ended）。
+      // 恢复路径无 provider_config（敏感不落盘），buildSpawnEnv 第 0 层自然跳过；
+      // 显式设 CLAUDE_CONFIG_DIR 保证 jsonl 一致，凭证靠 process.env（与 create 同源）
+      // + credentials.json（层 2，若有）。与 reloadWithProvider:2627-2636 同款构造。
+      const restoreCredential: SpawnCredentialManager = this._credentialManager ?? {
+        get: () => undefined,
+        buildEnv: () => ({}),
+      };
+      const restoreEnv = buildSpawnEnv(
+        { provider_config: undefined },
+        { credential: restoreCredential },
+      );
+      restoreEnv.CLAUDE_CONFIG_DIR = CLAUDE_CONFIG_DIR;
       const driverOpts = this._buildDriverOptions(state, {
         exePath: exe,
         model: record.model,
-        env: undefined,
+        env: restoreEnv,
         enableApproval: restoreManualApproval,
         effectiveAskUserOnly: restoreAskUserOnly,
         resume: record.agentSessionId, // spike D3 跨进程 resume。
