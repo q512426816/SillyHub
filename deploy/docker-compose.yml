@@ -184,7 +184,12 @@ services:
     # litellm_model_name（task-10），daemon 注 ANTHROPIC_BASE_URL=litellm → LiteLLM 按 model_name
     # 路由转 OpenAI 上游（task-11/12）。config 形态 / health 端点 / 镜像 tag 以
     # spike-litellm-routing 实测定稿（当前为 admin API 模式假设）。
-    image: ghcr.io/berriai/litellm:main-stable
+    # ⚠️ pin 到 v1.95.0，不要用滚动 tag main-stable：1.96.0 起 anthropic /v1/messages 的
+    # experimental responses adapter 不再认 model_info.mode=chat → 仍打上游 /responses → OpenAI
+    # 兼容上游（GLM/通义/Kimi/opencode 无 /responses）404。v1.95.0 是 gap-A（change
+    # 2026-08-08）mode=chat + 流式 /v1/messages 实测通过的版本（真 claude live 会话坐实）。
+    # 升级前必须重跑 gap-A 实测矩阵确认新版本 anthropic adapter 认 mode=chat。
+    image: ghcr.io/berriai/litellm:v1.95.0
     restart: always  # NFR-03/R-08：比 unless-stopped 更强，LiteLLM SPOF 宕自动拉起
     depends_on:
       litellm-db:
