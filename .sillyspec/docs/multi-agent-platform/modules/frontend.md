@@ -88,4 +88,6 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 - change 2026-08-09-security-credentials-hygiene | 安全凭据卫生（前端部分）：桌面 `(auth)/login/page.tsx` 与移动 `m/login/page.tsx` 删 localStorage 明文密码缓存（"记住我"原 setItem 含 password，改只缓存 `{account,remember}`）+ 删 admin/admin123 默认回填（无缓存时账号密码均空）+ 旧格式缓存一次性改写清洗已落盘明文（cached.password!==undefined 时重写）+ 复选框文案"记住密码"→"记住登录名"。tsc --noEmit 零错、next lint 两登录页零新增问题。
 
+- change 2026-08-08-llm-provider-openai-format | llm-provider 表单加 API 格式下拉（openai 隐藏认证字段/角色映射 + 完整 URL 粘贴提示）；列表加格式徽标 + litellm_registered 状态；预设聚合站组加 opencode_zen_openai；api-types.ts 从后端 OpenAPI 重新生成（api_format/litellm_registered 字段同步）；Wave2 set-default openai 守护移除（FR-11 开放 set-default）。
+
 <!-- MANUAL_NOTES_END -->

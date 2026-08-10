@@ -87,11 +87,12 @@ modules:
     doc: modules/deploy.md
     paths:
       - deploy/**
-    tags: [docker, docker-compose, deployment, infra, postgresql, redis]
+    tags: [docker, docker-compose, deployment, infra, postgresql, redis, litellm]
     aliases: [docker, compose, 部署]
     entrypoints:
       - deploy/docker-compose.yml
       - deploy/docker-compose.dev.yml
+      - deploy/litellm-config.yaml  # LiteLLM 网关 admin API 动态注册配置（change 2026-08-08-llm-provider-openai-format）
     main_symbols: []
     depends_on: [backend, frontend, sillyhub-daemon]
     used_by: [ci, build]

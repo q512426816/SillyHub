@@ -57,4 +57,6 @@ created_at: 2026-06-24T01:16:42
 
 - ql-20260809-003-56db | 多代理审计 8 个低风险单点修复（daemon 部分 1 处）：interactive/session-manager.ts 删 3 处 [reload-diag] 调试 console.log（:2602/:2723/:2891，含配套 eslint-disable no-console 注释）——生产路径残留调试日志，删后 reload 诊断逻辑（reloadProvider 机制）不变。session-manager-reload-provider vitest 11 passed + tsc 0 错。
 
+- change 2026-08-08-llm-provider-openai-format | ProviderConfig 加 4 optional 字段（api_format/litellm_base_url/litellm_model_name/litellm_auth_token，零回归）；credential-injector.toEnv 加 openai_chat 早返回分支（ANTHROPIC_BASE_URL/AUTH_TOKEN/MODEL 指向 LiteLLM 网关 + gap-D 4 档位 ANTHROPIC_DEFAULT_{HAIKU/SONNET/OPUS/FABLE}_MODEL 全映射 litellm_model_name 防 claude 副通道请求无 deployment 失败，不注入上游 key D-003/NFR-01）；anthropic 分支逐字不变（NFR-02 零回归，REGISTRY/getInjector 未动）。
+
 <!-- MANUAL_NOTES_END -->
