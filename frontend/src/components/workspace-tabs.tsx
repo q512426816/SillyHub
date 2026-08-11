@@ -11,6 +11,7 @@ const TABS = [
   { key: "changes", label: "变更", path: "/changes" },
   { key: "skills", label: "Skills", path: "/skills" },
   { key: "mcp", label: "MCP", path: "/mcp" },
+  { key: "mcp-tokens", label: "MCP 令牌", path: "/mcp-tokens" },
   { key: "members", label: "成员", path: "/members" },
 ] as const;
 

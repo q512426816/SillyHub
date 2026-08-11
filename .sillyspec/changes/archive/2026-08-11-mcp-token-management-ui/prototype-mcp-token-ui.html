@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>McpToken 管理 UI — 线框原型</title>
+<!--
+  author: qinyi
+  created_at: 2026-08-11 14:30:00
+  线框原型（非生产样式）：展示 /workspaces/[id]/mcp-tokens 页面布局 + 签发弹窗 + 明文仅一次的成功态。
+  生产样式在 execute 阶段按设计系统总纲实现。
+-->
+<style>
+  body { font-family: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace; background: #fafafa; color: #222; margin: 0; padding: 24px; font-size: 13px; }
+  .wrap { max-width: 920px; margin: 0 auto; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  .meta { color: #888; margin-bottom: 20px; }
+  .frame { border: 1.5px dashed #aaa; border-radius: 8px; padding: 16px; margin: 18px 0; background: #fff; position: relative; }
+  .frame .tag { position: absolute; top: -10px; left: 12px; background: #fafafa; padding: 0 6px; font-size: 11px; color: #888; }
+  .row { display: flex; gap: 10px; align-items: center; }
+  .crumb { color: #666; font-size: 12px; margin-bottom: 8px; }
+  .btn { border: 1px solid #888; border-radius: 6px; padding: 5px 12px; background: #fff; font-family: inherit; font-size: 12px; cursor: pointer; }
+  .btn.primary { background: #111; color: #fff; border-color: #111; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0; }
+  .stat { border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px; }
+  .stat .l { font-size: 11px; color: #888; }
+  .stat .v { font-size: 22px; font-weight: 600; margin-top: 2px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; background: #f0f0f0; padding: 8px 10px; font-size: 11px; color: #666; border-bottom: 1px solid #ddd; }
+  td { padding: 9px 10px; border-bottom: 1px solid #eee; }
+  .badge { display: inline-block; border: 1px solid #bbb; border-radius: 4px; padding: 1px 6px; font-size: 11px; margin-right: 3px; }
+  .ok { color: #1677ff; } .rev { color: #999; text-decoration: line-through; }
+  .danger { color: #c0392b; cursor: pointer; }
+  .overlay { background: #f4f4f4; }
+  .dialog { max-width: 440px; margin: 10px auto; border: 1.5px solid #666; border-radius: 10px; background: #fff; padding: 18px; }
+  .field { margin: 12px 0; }
+  .field label { display: block; font-size: 12px; margin-bottom: 4px; }
+  input[type=text] { width: 100%; padding: 7px; border: 1px solid #bbb; border-radius: 6px; font-family: inherit; font-size: 12px; box-sizing: border-box; }
+  .chk { margin-right: 14px; }
+  .token { background: #f6f8fa; border: 1px solid #ddd; border-radius: 6px; padding: 8px 10px; font-size: 12px; word-break: break-all; }
+  .warn { background: #fff8e1; border: 1px solid #f0d27a; border-radius: 6px; padding: 8px 10px; font-size: 11px; color: #8a6d3b; margin: 10px 0; }
+  .hint { background: #eef5ff; border: 1px solid #b6cfff; border-radius: 6px; padding: 8px 10px; font-size: 11px; color: #2c5cb8; margin: 10px 0; }
+  .note { color: #888; font-size: 11px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>McpToken 管理 UI — 线框原型</h1>
+  <div class="meta">change 2026-08-11-mcp-token-management-ui · 路由 /workspaces/[id]/mcp-tokens · 1:1 镜像 settings/api-keys 模式（workspace-scoped 版）</div>
+
+  <!-- ① 主页面 -->
+  <div class="frame">
+    <span class="tag">① 主页面 /workspaces/[id]/mcp-tokens</span>
+    <div class="crumb">← my-workspace &nbsp;/&nbsp; MCP 令牌</div>
+    <div class="row" style="justify-content: space-between;">
+      <div><div style="font-size:17px;font-weight:600;">MCP 令牌</div>
+        <div class="note">为外部客户端签发访问本工作区 MCP 端点的凭据，明文仅在签发时显示一次</div></div>
+      <div class="row"><button class="btn">↻ 刷新</button><button class="btn primary">＋ 签发 MCP 令牌</button></div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="l">全部令牌</div><div class="v">2</div></div>
+      <div class="stat"><div class="l">活跃</div><div class="v">1</div></div>
+      <div class="stat"><div class="l">已吊销</div><div class="v">1</div></div>
+    </div>
+
+    <table>
+      <thead><tr><th>名称</th><th>scope</th><th>状态</th><th>最近使用</th><th>创建时间</th><th style="text-align:right">操作</th></tr></thead>
+      <tbody>
+        <tr><td>sillyspec-dispatch<div class="note">fc3a3d54…</div></td>
+          <td><span class="badge">read</span><span class="badge">dispatch</span><span class="badge">converge</span></td>
+          <td class="ok">● 活跃</td><td>2026-08-11 14:07</td><td>2026-08-11 14:06</td>
+          <td style="text-align:right"><span class="danger">吊销</span></td></tr>
+        <tr><td>old-ci-token<div class="note">a1b2c3d4…</div></td>
+          <td><span class="badge">read</span></td>
+          <td class="rev">● 已吊销</td><td>2026-08-05 09:10</td><td>2026-07-30 18:00</td>
+          <td></td></tr>
+      </tbody>
+    </table>
+    <div class="note" style="margin-top:8px;">注：McpToken 无 expires_at（长效），故无"已过期"卡（区别于 api-keys 的 4 卡）；列表永不显示明文/前缀。</div>
+  </div>
+
+  <!-- ② 签发弹窗 -->
+  <div class="frame overlay">
+    <span class="tag">② 点"签发" → 创建弹窗 McpTokenCreateDialog</span>
+    <div class="dialog">
+      <div style="font-size:15px;font-weight:600;margin-bottom:12px;">签发 MCP 令牌</div>
+      <div class="field">
+        <label>名称（1-100 字）</label>
+        <input type="text" value="sillyspec-dispatch" />
+      </div>
+      <div class="field">
+        <label>scope（多选，至少 1 个）</label>
+        <div class="row">
+          <label class="chk"><input type="checkbox" checked> read</label>
+          <label class="chk"><input type="checkbox" checked> dispatch</label>
+          <label class="chk"><input type="checkbox"> converge</label>
+        </div>
+        <div class="note">read=查看 / dispatch=派发 worker / converge=收拢 mission。默认勾 read+dispatch（最常用）。</div>
+      </div>
+      <div class="row" style="justify-content:flex-end;gap:8px;margin-top:16px;">
+        <button class="btn">取消</button><button class="btn primary">签发</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ③ 明文仅一次 -->
+  <div class="frame overlay">
+    <span class="tag">③ 签发成功 → 明文仅展示这一次（POST 201 的 token 字段，关闭后不可再获取）</span>
+    <div class="dialog">
+      <div style="font-size:15px;font-weight:600;margin-bottom:4px;">令牌已签发 — 请立即复制保存</div>
+      <div class="token">shmcp_0KLaiiChaa4E8OxtcpdPLsqszThtoXwUNRJ8DmrZu_Q</div>
+      <div class="warn">⚠️ 明文仅此一次显示。关闭后无法再获取（后端只存 sha256）。丢失只能吊销重建。</div>
+      <div class="row" style="gap:8px;margin:10px 0;"><button class="btn primary">📋 复制令牌</button><button class="btn">我已保存，关闭</button></div>
+      <div class="hint">
+        <b>连接信息</b>（用于配置外部客户端，如 sillyspec local.yaml）：<br>
+        MCP URL: <code>http://&lt;backend&gt;:8001/mcp</code><br>
+        Header: <code>Authorization: Bearer &lt;上面的明文&gt;</code>
+      </div>
+    </div>
+  </div>
+
+  <div class="note" style="margin-top:18px;">权限：进 workspace 即经 WorkspaceBindingGuard；GET/POST/DELETE 均需 WORKSPACE_WRITE，故 viewer 不见此 tab、writer/admin 可管。Non-goals: McpWebhook UI（独立后续 change）、后端改动（端点已就绪）。</div>
+</div>
+</body>
+</html>

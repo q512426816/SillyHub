@@ -98,4 +98,6 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 - ql-20260811-004-067d | 删 change-detail-layout-rework / ql-002 遗留死代码 CollapsibleCard（collapsible-card.tsx + __tests__/collapsible-card.test.tsx 2 文件）：ql-002 把变更文件/会话调试两卡改 Dialog 入口卡后该组件已无引用（grep 复核 src/ 零外部引用）。⚠️ SillySpec quick 流程【无法删除文件】——step1 --files 声明删除目标后「超出 allowedFiles」过，但「删除文件」是独立硬规则，--force-baseline/--allow-new 均不解锁，--done 三次 BLOCKED；经用户确认改直接 git rm + commit（绕过 quick）。tsc --noEmit 0 错（无断链）+ vitest 全量 141 文件 / 1384 测试零回归（较删前 142/1387 净 -1 文件 -3 测试）。详见 docs/sillyspec/quick-done-blocks-deletion-outside-files.md。
 
+- change 2026-08-11-mcp-token-management-ui | McpToken 管理 UI（workspace 内签发/列表/吊销，纯前端零后端改动）：新增 `lib/mcp-tokens.ts`（API client 三函数 list/create/revoke，复用 api-types 现有 McpToken* 类型）+ `components/mcp-token-create-dialog.tsx`（双 phase 签发弹窗，scope 多选默认 read+dispatch，明文仅一次展示 + 复制 + 警示 + 连接信息）+ `app/(dashboard)/workspaces/[id]/mcp-tokens/page.tsx`（管理主页：PageHeader + 3 StatCard + SectionCard 表格 + EmptyState + GET 403 无权限空态 D-001@v1 + 吊销二次确认），`workspace-tabs.tsx` TABS +1「MCP 令牌」tab（紧邻「MCP」全可见）。消费既有 `POST/GET/DELETE /api/workspaces/{id}/mcp-tokens`（router.py，不新增后端）。3 测试文件 17 例 + 全量 vitest 1401/1401 + tsc 0。1:1 镜像 settings/api-keys 模式（手写 useState/apiFetch 非 react-query）。
+
 <!-- MANUAL_NOTES_END -->
