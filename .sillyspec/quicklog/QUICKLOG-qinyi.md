@@ -341,3 +341,21 @@
 根因：_patch_http_client 里 real_client=httpx.AsyncClient 变量赋值后 class _Client(real_client) 用变量作基类，mypy 不接受非 Final 变量作基类（运行时不保证是类）。
 方案：删 real_client 中间变量，class _Client(httpx.AsyncClient) 直接继承——class 定义在 monkeypatch.setattr 前求值，此时 httpx.AsyncClient 仍是原始类，_Client 仍继承原始类，注入 transport 逻辑等价。
 结果：ruff format 1 file unchanged + ruff check All passed；全量 uv run mypy app = Success no issues found in 589 source files（原 test_ssrf:71 error 消除，仅剩 4 个预存 annotation-unchecked note 非 error 不挂 CI）；pytest test_ssrf.py 18 passed 功能未破。
+
+## ql-20260811-002-a623 | 2026-08-11 13:25:25 | 修复变更详情页次线侧栏「变更文件」「会话调试」两个宽内容卡在 320px 窄栏里挤崩不可用
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/changes/detail/change-files-card.tsx（CollapsibleCard 内联折叠→入口卡+宽 Dialog 渲染 ChangeFileTree）
+- frontend/src/components/changes/detail/change-sessions-card.tsx（同上，Dialog 渲染 ChangeSessionSection）
+- frontend/src/components/changes/detail/__tests__/change-files-card.test.tsx（重写验入口卡+Dialog 惰性 mount+点打开透传 props）
+- frontend/src/components/changes/detail/__tests__/change-sessions-card.test.tsx（同上）
+需求：修复变更详情页次线侧栏「变更文件」「会话调试」两个宽内容卡在 320px 窄栏里挤崩不可用。
+根因：ChangeSessionSection 渲染 md:grid-cols 两栏（会话列表+问答面板 min-h-420px）+ ChangeFileTree 默认预览（iframe/编辑器）都是宽内容；tailwind md: 是视口断点非容器断点，桌面视口下即使塞进 320px 侧栏折叠卡里也强制两栏/预览 → 挤崩，CollapsibleCard 的 p-3 进一步压缩可用宽度。
+方案：两个卡从 CollapsibleCard 内联折叠改为侧栏紧凑入口卡（标题+说明+打开按钮）→ 点击在宽 Dialog（max-w-6xl × 85vh，flex-col + overflow-hidden）里渲染完整 ChangeFileTree / ChangeSessionSection（黑盒复用不改其内部，radix Portal 惰性 mount 关闭即卸载无空载请求）。
+结果：tsc --noEmit 0 错；vitest 全量 141 文件 1384 测试零回归；eslint 4 文件 exit 0；CollapsibleCard 现已无引用沦为死代码，删除留待后续 quick（本次 --files 未声明该文件审计拦删除）；待重建前端部署验证弹窗内文件预览+会话两栏可用。
+
+## ql-20260811-003-0408 | 2026-08-11 13:34:33 | (quick 任务)
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）
