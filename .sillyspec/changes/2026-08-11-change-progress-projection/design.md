@@ -137,6 +137,7 @@ related_contract: sillyspec 仓 docs/sillyspec/sillyhub-progress-sync-contract.m
 | 修改 | backend/app/modules/platform_sync/router.py | 收件箱 3 端点（无前缀 inline /changes）从 auth 取 workspace_id 传 service。 |
 | 修改 | backend/app/modules/platform_sync/schema.py | **新增**（Grill X5）：`PlatformSyncTokenCreated`（201 响应 DTO 含明文 token）+ `ResolveByRootPathReq`（body root_path）+ `ResolveByRootPathResp`（workspace_id+token）Pydantic 模型。 |
 | 修改 | backend/app/main.py | import workspace_router 并 `include_router` 注册（参照 :47/:580 platform_sync_router 的 prefix=/api 模式），否则新建 workspace_router 端点不可达。 |
+| 修改 | backend/conftest.py | 根 conftest `db_engine` 补 `import llm_provider model`（agent-profile-bind-llm-provider 落地后遗留的预存测试债：agent_profiles.llm_provider_id FK→llm_providers.id，根 create_all 报 NoReferencedTableError 阻断所有 db_engine 测试）。task-07 顺手补（CLAUDE.md 规则 20「gen:types 暴露预存测试债顺手补」同源思路），让 platform_sync 子模块测试可跑。 |
 | 修改 | backend/app/modules/change/service.py | `enrich_summaries`（**list**：批量 `IN` join）+ `enrich_with_workspace_ids`（**single**：`=` 匹配，Grill X7 分述）。**数据流：current_stage producer=工具 serializeForSync(latest_progress.changes[0]) → 存 platform_change_progress.latest_progress JSON → enrich join 读 → 覆盖 ChangeSummary.current_stage → consumer=前端 changes/page.tsx:250 展示**；join 不到 fallback 现有值。 |
 | 新增 | backend/app/modules/change/tests/conftest.py | 参照 `platform_sync/tests/conftest.py:20-29` 模式 import 注册 `PlatformChangeProgressORM` 表并单独 `create`（根 conftest db_engine 不含该 model 故根 create_all 不建表），供 enrich join 测试用。 |
 | 修改 | sillyspec/src/sync.js | connect 扩展：调 resolve-by-root-path 换发 shpsync_ token，replaceTopLevelSection 写入 platform 段。**跨仓**。 |
@@ -252,3 +253,4 @@ sillyspec `changes.status` 实测**仅 `active` / `archived` 两值**（sillyspe
 - ✅ decisions.md D-001~D-006 已建，design §11 引用全部当前版本决策。
 - ✅ scale=large，走四件套 + Design Grill independent（review.json 已产）。
 - ⚠️ 自审存疑：R-06 本机 500 为 execute 前置排查项（已给方向），不影响 design 成立性。
+- ✅ verify Reverse Sync：task-07 顺手补的根 `backend/conftest.py`（import llm_provider model，修 agent-profile-bind-llm-provider 遗留预存债，CLAUDE.md 规则 20 同源）补入 §6 文件清单——execute 实现合理但 design 初稿漏列，verify 据实补全。
