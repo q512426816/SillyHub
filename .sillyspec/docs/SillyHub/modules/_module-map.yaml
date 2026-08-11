@@ -118,6 +118,7 @@ modules:
       - daemon.lease_service (LeaseService)
       - daemon.permission_service
       - daemon.session.service.DaemonSessionService
+      - daemon.session.service.SessionReadiness（session ready 握手单例 mark_ready/wait/clear，inject 等 ready；2026-08-07-inject-wait-session-ready）
       - daemon.ws_hub.WSHub
       - daemon.protocol（含 PROVIDER_CONFIG_CHANGED WS 消息，2026-08-06-provider-switch-live-session）
       - daemon.lease.provider_switch（notify_provider_switch 查 active session 按 daemon 分组推送，2026-08-06-provider-switch-live-session）

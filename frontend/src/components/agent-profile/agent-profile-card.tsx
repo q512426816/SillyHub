@@ -20,6 +20,8 @@
  * 设计依据：tasks/task-03.md §implementation / design §7.2 组件签名 / §10 R-02 /
  * FRONTEND_PAGE_STYLE.md §0（antd + tailwind token，不硬编码 hex）/ §5（操作列 link）/ §7（Tag color）。
  */
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Button, Tag } from "antd";
 
 import { SectionCard } from "@/components/layout/section-card";
@@ -28,6 +30,7 @@ import {
   VISIBILITY_TAG_COLOR,
   type AgentProfileAggregatedItem,
 } from "@/lib/agent-profiles";
+import { listProviders, type LlmProviderRead } from "@/lib/api/llm-providers";
 import { cn } from "@/lib/utils";
 
 /**
@@ -82,6 +85,21 @@ export function AgentProfileCard({
   onDelete,
 }: AgentProfileCardProps) {
   const isSystem = profile.is_system_default === true;
+
+  // task-08：绑定供应商名映射（复用 form ProfilePreview 口径，design §4.5）。
+  // 用本人 /llm-providers 列表按 id 查名；命中→显名，非本人（未命中）→ 回退提示，
+  // 未绑（llm_provider_id=null）→ 不渲染。零后端 join / N+1（方案A 归属语义）。
+  const { data: llmProviders } = useQuery<LlmProviderRead[]>({
+    queryKey: ["llm-providers", "list", "agent-profile-card"],
+    queryFn: listProviders,
+    staleTime: 60_000,
+  });
+  const boundProviderName = useMemo(() => {
+    if (!profile.llm_provider_id) return null;
+    const hit = (llmProviders ?? []).find((p) => p.id === profile.llm_provider_id);
+    return hit ? hit.name : "（非本人供应商，将回退默认）";
+  }, [profile.llm_provider_id, llmProviders]);
+
   const avatarGradient =
     AVATAR_GRADIENT_BY_PROVIDER[profile.provider] ?? DEFAULT_AVATAR_GRADIENT;
 
@@ -134,6 +152,11 @@ export function AgentProfileCard({
           <div className="truncate font-mono text-[11px] text-muted-foreground">
             {modelLine(profile.provider, profile.model)}
           </div>
+          {boundProviderName ? (
+            <div className="truncate text-[10px] text-muted-foreground/80">
+              供应商：{boundProviderName}
+            </div>
+          ) : null}
         </div>
         {!isSystem && (
           <Tag

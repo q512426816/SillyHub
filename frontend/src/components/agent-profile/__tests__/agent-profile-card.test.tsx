@@ -17,9 +17,23 @@
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { cleanup, render, screen, fireEvent } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
 
 import { AgentProfileCard } from "@/components/agent-profile/agent-profile-card";
 import type { AgentProfileAggregatedItem } from "@/lib/agent-profiles";
+
+// task-08：card 现用 useQuery(listProviders) 做绑定供应商名映射；测试需 QueryClient +
+// mock listProviders（避免真 apiFetch）。默认返回空 → boundProviderName=null → 不渲染。
+vi.mock("@/lib/api/llm-providers", () => ({
+  listProviders: vi.fn().mockResolvedValue([]),
+}));
+
+/** 包 QueryClientProvider 渲染（card 用 useQuery，task-08）。 */
+function renderCard(ui: ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
 
 /** 构造最小可用 AggregatedItem（结构兼容 AgentProfileRead，多 workspace_name 可选）。 */
 function makeProfile(
@@ -52,7 +66,7 @@ afterEach(() => {
 
 describe("AgentProfileCard 渲染（task-03 / FR-08）", () => {
   it("常规档案：头像首字母 / 名称 / 可见 Tag / 供应商·模型 mono / 提示词摘要 / 能力 chip / 版本 foot", () => {
-    render(
+    renderCard(
       <AgentProfileCard
         profile={makeProfile()}
         onPreview={vi.fn()}
@@ -81,7 +95,7 @@ describe("AgentProfileCard 渲染（task-03 / FR-08）", () => {
   });
 
   it("空提示词 → 兜底「（未设置系统提示词）」", () => {
-    render(
+    renderCard(
       <AgentProfileCard
         profile={makeProfile({ system_prompt: "   " })}
         onPreview={vi.fn()}
@@ -94,7 +108,7 @@ describe("AgentProfileCard 渲染（task-03 / FR-08）", () => {
   });
 
   it("无 mcp_refs / skill_refs → 不渲染能力 chip 区", () => {
-    const { container } = render(
+    const { container } = renderCard(
       <AgentProfileCard
         profile={makeProfile({ mcp_refs: [], skill_refs: [] })}
         onPreview={vi.fn()}
@@ -112,7 +126,7 @@ describe("AgentProfileCard 渲染（task-03 / FR-08）", () => {
   });
 
   it("供应商无 model → 仅显 provider", () => {
-    render(
+    renderCard(
       <AgentProfileCard
         profile={makeProfile({ provider: "codex", model: null })}
         onPreview={vi.fn()}
@@ -125,12 +139,31 @@ describe("AgentProfileCard 渲染（task-03 / FR-08）", () => {
     // 不应出现 "codex / null" 或斜杠分隔
     expect(screen.queryByText(/codex\s*\//)).not.toBeInTheDocument();
   });
+
+  it("绑定供应商 → 卡片显示供应商名（task-08 / FR-08）", async () => {
+    const lp = await import("@/lib/api/llm-providers");
+    (lp.listProviders as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { id: "prov-1", name: "我的 Claude 凭证" },
+    ]);
+    renderCard(
+      <AgentProfileCard
+        profile={makeProfile({ llm_provider_id: "prov-1" })}
+        onPreview={vi.fn()}
+        onEdit={vi.fn()}
+        onCopy={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+    expect(
+      await screen.findByText("供应商：我的 Claude 凭证"),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("AgentProfileCard 交互（点卡片预览 / 按钮 stopPropagation）", () => {
   it("点卡片主体触发 onPreview(profile)", () => {
     const onPreview = vi.fn();
-    render(
+    renderCard(
       <AgentProfileCard
         profile={makeProfile()}
         onPreview={onPreview}
@@ -149,7 +182,7 @@ describe("AgentProfileCard 交互（点卡片预览 / 按钮 stopPropagation）"
   it("点编辑按钮触发 onEdit 且不冒泡到 onPreview", () => {
     const onPreview = vi.fn();
     const onEdit = vi.fn();
-    render(
+    renderCard(
       <AgentProfileCard
         profile={makeProfile()}
         onPreview={onPreview}
@@ -166,7 +199,7 @@ describe("AgentProfileCard 交互（点卡片预览 / 按钮 stopPropagation）"
   it("点复制按钮触发 onCopy 且不冒泡", () => {
     const onPreview = vi.fn();
     const onCopy = vi.fn();
-    render(
+    renderCard(
       <AgentProfileCard
         profile={makeProfile()}
         onPreview={onPreview}
@@ -183,7 +216,7 @@ describe("AgentProfileCard 交互（点卡片预览 / 按钮 stopPropagation）"
   it("点删除按钮触发 onDelete 且不冒泡", () => {
     const onPreview = vi.fn();
     const onDelete = vi.fn();
-    render(
+    renderCard(
       <AgentProfileCard
         profile={makeProfile()}
         onPreview={onPreview}
@@ -200,7 +233,7 @@ describe("AgentProfileCard 交互（点卡片预览 / 按钮 stopPropagation）"
 
 describe("AgentProfileCard 系统预置只读态（design §12 验收 5）", () => {
   it("is_system_default=true → 显「系统预置」Tag + 「只读」，无编辑/复制/删除按钮，无可见范围 Tag", () => {
-    render(
+    renderCard(
       <AgentProfileCard
         profile={makeProfile({
           is_system_default: true,

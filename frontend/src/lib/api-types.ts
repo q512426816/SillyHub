@@ -7565,6 +7565,8 @@ export interface components {
             system_prompt: string | null;
             /** Tool Policy Id */
             tool_policy_id: string | null;
+            /** Llm Provider Id */
+            llm_provider_id: string | null;
             /** Mcp Refs */
             mcp_refs: string[];
             /** Skill Refs */
@@ -7623,6 +7625,8 @@ export interface components {
             system_prompt?: string | null;
             /** Tool Policy Id */
             tool_policy_id?: string | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
             /** Mcp Refs */
             mcp_refs?: string[];
             /** Skill Refs */
@@ -7661,6 +7665,8 @@ export interface components {
             system_prompt: string | null;
             /** Tool Policy Id */
             tool_policy_id: string | null;
+            /** Llm Provider Id */
+            llm_provider_id: string | null;
             /** Mcp Refs */
             mcp_refs: string[];
             /** Skill Refs */
@@ -7700,6 +7706,8 @@ export interface components {
             system_prompt?: string | null;
             /** Tool Policy Id */
             tool_policy_id?: string | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
             /** Mcp Refs */
             mcp_refs?: string[] | null;
             /** Skill Refs */

@@ -721,6 +721,11 @@ class AgentService:
         meta["mcp_refs"] = list(profile.mcp_refs or [])
         meta["skill_refs"] = list(profile.skill_refs or [])
         meta["profile_version"] = int(profile.version)
+        # task-04（change 2026-08-11-agent-profile-bind-llm-provider）：绑定 LlmProvider id，
+        # 供 daemon/lease/context.py::_inject_provider_config 方案A 绑定优先判断消费。
+        meta["llm_provider_id"] = (
+            str(profile.llm_provider_id) if profile.llm_provider_id else None
+        )
         await self._session.execute(
             _sa_text("UPDATE daemon_task_leases SET metadata = :meta WHERE id = :id"),
             {"meta": _json.dumps(meta), "id": lease_id.hex},

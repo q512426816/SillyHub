@@ -43,6 +43,8 @@ aggregate_tool_failure(logs) → should_warn_tool_failure(threshold) → 告警
 - 2026-07-30-daemon-heartbeat-dedup-fix | `AgentRunLog` 加 `segment_id` 列（String 200, nullable, indexed）；流式 partial 行（半截）写 metadata.segmentId、complete 行 NULL，供 backend run_sync override 信号（`[ASSISTANT_OVERRIDE]`/`[THINKING_OVERRIDE]`）跨 submit_messages 调用 DELETE 已落库 partial（task-14）；migration `202608310900`（down_revision `202607301000`）。不入对外 API 响应（DB-only 去重字段）。
 - 2026-08-05-skill-content-viewer | `skills_bundle_service` 新增 `read_skill_md(skill_name)`：白名单（sillyspec-* glob 同源 `SKILLS_GLOB`）+ 固定读 SKILL.md（不拼 path，穿越免疫）+ 三分支异常（非白名单/缺失→FileNotFoundError、>1MiB→ValueError），供 daemon `GET /skills/{name}/content` 端点调；纯 stdlib 不引 FastAPI（router 层 catch 转 HTTPException）。
 
+- 2026-08-11-agent-profile-bind-llm-provider | AgentProfile 新增 `llm_provider_id` FK（UUID nullable `ondelete=SET NULL`）+ migration `20260811104500`（单 head，parent `20260810150000`）；AgentProfileCreate/Update/Read DTO 加字段（显式 null=解绑，exclude_unset 语义）；service create/update/clone 透传；`_apply_profile_to_lease` 写 `lease.metadata["llm_provider_id"]`。
+
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 <!-- MANUAL_NOTES_END -->

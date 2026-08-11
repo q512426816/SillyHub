@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>智能体档案·大脑区改造原型</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background:#f5f5f5; margin:0; padding:24px; color:#222; }
+  .wrap { max-width:900px; margin:0 auto; }
+  h1 { font-size:18px; }
+  h2 { font-size:14px; margin:24px 0 8px; border-left:3px solid #2563eb; padding-left:8px; }
+  .modal { background:#fff; border:1px solid #ddd; border-radius:8px; padding:20px; }
+  .grid { display:grid; grid-template-columns: 1.1fr 1fr; gap:16px; }
+  .col { border:1px dashed #ccc; padding:12px; border-radius:6px; }
+  .field { margin-bottom:12px; }
+  .label { font-size:12px; color:#666; margin-bottom:4px; }
+  .label .req { color:#d4380d; }
+  .input, .select { border:1px solid #d9d9d9; border-radius:4px; padding:6px 8px; font-size:13px; background:#fff; min-height:20px; position:relative; }
+  .select:after { content:"▾"; position:absolute; right:8px; top:6px; color:#999; }
+  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .new { background:#e6f4ff; border-color:#91caff; }
+  .badge { display:inline-block; background:#91caff; color:#003a8c; font-size:10px; padding:1px 6px; border-radius:8px; margin-left:6px; }
+  .preview { font-size:12px; }
+  .flow { background:#fff; border:1px solid #ddd; border-radius:8px; padding:16px; font-size:13px; }
+  .step { display:flex; align-items:flex-start; gap:8px; margin:8px 0; }
+  .step .n { width:22px; height:22px; border-radius:50%; background:#2563eb; color:#fff; text-align:center; line-height:22px; font-size:12px; flex-shrink:0; }
+  .note { font-size:12px; color:#888; margin-top:6px; }
+  .compare { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .compare > div { background:#fafafa; border:1px solid #eee; border-radius:6px; padding:10px; font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>智能体档案 · 「大脑」区改造原型</h1>
+<p style="font-size:13px;color:#666">用于确认设计方向，非最终视觉。改动集中在「大脑」分组。</p>
+
+<h2>① 表单「大脑」区 — 改造前后对比</h2>
+<div class="compare">
+  <div>
+    <b>改造前</b>
+    <div class="field" style="margin-top:8px"><div class="label">供应商偏好（决定选哪台 daemon）</div><div class="select">Claude Code</div></div>
+    <div class="field"><div class="label">模型</div><div class="input">claude-sonnet-4</div></div>
+    <p class="note">⚠ label 描述错误（daemon 并非由它选）</p>
+  </div>
+  <div>
+    <b>改造后</b>
+    <div class="field" style="margin-top:8px"><div class="label">智能体引擎</div><div class="select">Claude Code</div></div>
+    <div class="field new"><div class="label">供应商配置 <span class="badge">新增</span>（可选，不绑定用默认）</div><div class="select">我的官方 Anthropic</div></div>
+    <div class="field"><div class="label">模型</div><div class="input">claude-sonnet-4</div></div>
+    <p class="note">第二层联动：只列出当前引擎对应的供应商（codex 暂无）</p>
+  </div>
+</div>
+
+<h2>② 表单「大脑」区 · 完整布局（左填右预览）</h2>
+<div class="modal">
+<div class="grid">
+  <div class="col">
+    <div class="field"><div class="label"><span class="req">*</span> 名称</div><div class="input">代码审查助手</div></div>
+    <div class="field"><div class="label">可见范围</div><div class="select">个人（仅创建者）</div></div>
+    <div class="row2">
+      <div class="field"><div class="label"><span class="req">*</span> 智能体引擎</div><div class="select">Claude Code</div></div>
+      <div class="field new"><div class="label">供应商配置（可选）</div><div class="select">我的官方 Anthropic</div></div>
+    </div>
+    <div class="field"><div class="label">模型</div><div class="input">留空用供应商默认</div></div>
+    <div class="field"><div class="label">系统提示词</div><div class="input" style="min-height:40px">你是资深代码审查员…</div></div>
+    <p class="note">⚠ 档案不存任何 API Key，凭证仍留 /settings/providers</p>
+  </div>
+  <div class="col preview" style="background:#fafafa">
+    <b>实时预览（角色卡）</b><br><br>
+    <div style="font-weight:600">代码审查助手</div>
+    <div style="color:#666;font-family:monospace">Claude Code / claude-sonnet-4</div>
+    <div style="margin-top:6px"><span class="badge" style="background:#e6f4ff;color:#003a8c">供应商：我的官方 Anthropic</span></div>
+    <p class="note" style="margin-top:10px">绑定后，跑这个档案的任务就用「我的官方 Anthropic」的凭证</p>
+  </div>
+</div>
+</div>
+
+<h2>③ 凭证取用流程（任务启动时，方案A）</h2>
+<div class="flow">
+  <div class="step"><span class="n">1</span><div>档案绑了供应商？ <span style="color:#999">否 → 跳到步骤 3</span></div></div>
+  <div class="step"><span class="n">2</span><div>绑的供应商 <b>属于当前执行用户</b>？ 是 → <b style="color:#10b981">用绑的供应商</b>；否 → 忽略绑定，继续</div></div>
+  <div class="step"><span class="n">3</span><div>当前用户在 /settings 设了默认供应商？ 是 → <b>用默认</b>；否 → 继续</div></div>
+  <div class="step"><span class="n">4</span><div><b>用 daemon 机器本地配置</b>（现有行为，零回归）</div></div>
+  <p class="note">步骤 2 的"属于当前执行用户"= 方案A 安全校验：共享档案绑的供应商不对其他成员生效，自动回退，不泄露密钥。</p>
+</div>
+
+<h2>④ 边界说明</h2>
+<div class="flow" style="font-size:12px">
+• codex 类供应商本次不开放（第二层选 Codex 引擎时无选项）<br>
+• 绑定的供应商被删 → 字段自动置空 → 回退默认<br>
+• 档案不存任何 API Key（R-02 安全红线不变）<br>
+• 运行中会话热切换：本次不改，活动会话仍接收 /settings 切换推送（已知，记录不修）
+</div>
+
+</div>
+</body>
+</html>

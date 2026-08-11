@@ -16,12 +16,15 @@
  * 设计依据：tasks/task-03.md §implementation / design §7.4 / §10 R-05 / §10 红线 /
  * FRONTEND_PAGE_STYLE.md §6（antd Modal）/ §0（tailwind token）。
  */
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Modal, Tag } from "antd";
 
 import {
   VISIBILITY_LABEL,
   type AgentProfileAggregatedItem,
 } from "@/lib/agent-profiles";
+import { listProviders, type LlmProviderRead } from "@/lib/api/llm-providers";
 
 export interface AgentProfilePreviewProps {
   /** 被预览的档案；为 null 时弹窗不渲染。 */
@@ -77,6 +80,19 @@ export function AgentProfilePreview({
   open,
   onClose,
 }: AgentProfilePreviewProps) {
+  // task-08：绑定供应商名映射（design §4.5，复用 form/card 口径）。
+  // 命中→显名，非本人（未命中）→ 回退提示，未绑→不渲染。hooks 无条件调用（规则）。
+  const { data: llmProviders } = useQuery<LlmProviderRead[]>({
+    queryKey: ["llm-providers", "list", "agent-profile-preview"],
+    queryFn: listProviders,
+    staleTime: 60_000,
+  });
+  const boundProviderName = useMemo(() => {
+    if (!profile?.llm_provider_id) return null;
+    const hit = (llmProviders ?? []).find((p) => p.id === profile.llm_provider_id);
+    return hit ? hit.name : "（非本人供应商，将回退默认）";
+  }, [profile?.llm_provider_id, llmProviders]);
+
   return (
     <Modal
       open={open && profile != null}
@@ -102,6 +118,11 @@ export function AgentProfilePreview({
               {profile.provider}
               {profile.model ? ` / ${profile.model}` : ""} · v{profile.version}
             </span>
+            {boundProviderName ? (
+              <span className="text-[11px] text-muted-foreground/80">
+                供应商：{boundProviderName}
+              </span>
+            ) : null}
           </div>
 
           {/* 段 1：system_prompt 原文 */}

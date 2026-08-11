@@ -25,12 +25,15 @@ from app.core.security import create_access_token, password_hasher
 from app.modules.agent.profile.model import AgentProfileVisibility
 from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
 from app.modules.auth.permissions import Permission
+from app.modules.llm_provider.model import LlmProvider  # noqa: F401  # task-11：触发 llm_providers 表注册
 from app.modules.workspace.model import Workspace
 
 # 上方 ``from app.modules.agent.profile.model import AgentProfileVisibility`` 已
 # 触发 profile 模型加载（定义 AgentProfile(table=True)），将 agent_profiles 表注
 # 册进 BaseModel.metadata——隔离单跑本文件时 db_engine 的 create_all 即能建表，
 # 无需依赖 client fixture 的 app.main 全量 import（避开 conftest 表注册预存坑）。
+# task-11：profile 现有 llm_provider_id FK→llm_providers，单跑需 LlmProvider 模型
+# 也加载，否则 create_all 建 agent_profiles 表时该 FK 找不到目标表（NoReferencedTableError）。
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
@@ -140,6 +143,8 @@ async def test_workspace_crud_lifecycle(client: AsyncClient, db_session: AsyncSe
             "system_prompt": "你是助手",
             "mcp_refs": ["m1"],
             "skill_refs": ["s1"],
+            # task-11：显式不绑，验证 DTO 接收 llm_provider_id + Read 透出 None。
+            "llm_provider_id": None,
         },
         headers=h,
     )
@@ -151,6 +156,7 @@ async def test_workspace_crud_lifecycle(client: AsyncClient, db_session: AsyncSe
     assert created["provider"] == "claude"
     assert created["version"] == 1
     assert created["is_system_default"] is False
+    assert created["llm_provider_id"] is None  # task-11：未绑透出 None
     pid = created["id"]
 
     # list 含刚建档案
@@ -163,11 +169,12 @@ async def test_workspace_crud_lifecycle(client: AsyncClient, db_session: AsyncSe
     resp = await client.get(f"{base}/{pid}", headers=h)
     assert resp.status_code == 200, resp.text
     assert resp.json()["id"] == pid
+    assert resp.json()["llm_provider_id"] is None  # task-11：Read 字段返回
 
     # patch 更新 + version 递增
     resp = await client.patch(
         f"{base}/{pid}",
-        json={"system_prompt": "新提示", "model": "claude-opus"},
+        json={"system_prompt": "新提示", "model": "claude-opus", "llm_provider_id": None},
         headers=h,
     )
     assert resp.status_code == 200, resp.text
@@ -175,6 +182,7 @@ async def test_workspace_crud_lifecycle(client: AsyncClient, db_session: AsyncSe
     assert updated["system_prompt"] == "新提示"
     assert updated["model"] == "claude-opus"
     assert updated["version"] == 2
+    assert updated["llm_provider_id"] is None  # task-11：显式 null=解绑语义（exclude_unset）
 
     # delete → 204
     resp = await client.delete(f"{base}/{pid}", headers=h)

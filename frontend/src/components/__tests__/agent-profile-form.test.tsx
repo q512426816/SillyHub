@@ -171,7 +171,7 @@ describe("toCreateBody / toUpdateBody", () => {
     expect(created.skill_refs).toEqual([]);
   });
 
-  it("保留有效 model/system_prompt/tool_policy_id", () => {
+  it("保留有效 model/system_prompt/tool_policy_id + llm_provider_id 透传", () => {
     const created = toCreateBody({
       name: "深度重构",
       visibility: "platform",
@@ -179,16 +179,18 @@ describe("toCreateBody / toUpdateBody", () => {
       model: "gpt-5",
       system_prompt: "你是重构专家",
       tool_policy_id: "pol-1",
+      llm_provider_id: "prov-1", // task-10：绑定供应商 id 透传到 Create body
       mcp_refs: [],
       skill_refs: ["refactor"],
     });
     expect(created.model).toBe("gpt-5");
     expect(created.system_prompt).toBe("你是重构专家");
     expect(created.tool_policy_id).toBe("pol-1");
+    expect(created.llm_provider_id).toBe("prov-1"); // task-10
     expect(created.skill_refs).toEqual(["refactor"]);
   });
 
-  it("toUpdateBody 同样空串→null + refs 缺省 []", () => {
+  it("toUpdateBody 同样空串→null + refs 缺省 [] + llm_provider_id 透传/显式 null 解绑", () => {
     const updated = toUpdateBody({
       name: "x",
       visibility: "private",
@@ -196,12 +198,23 @@ describe("toCreateBody / toUpdateBody", () => {
       model: undefined,
       system_prompt: undefined,
       tool_policy_id: undefined,
+      llm_provider_id: "prov-2", // task-10：更新绑定
       mcp_refs: undefined,
       skill_refs: undefined,
     });
     expect(updated.model).toBeNull();
+    expect(updated.llm_provider_id).toBe("prov-2"); // task-10：透传
     expect(updated.mcp_refs).toEqual([]);
     expect(updated.skill_refs).toEqual([]);
+
+    // task-10：显式 null = 解绑（exclude_unset 语义，design §7/§4.6）
+    const unbound = toUpdateBody({
+      name: "x",
+      visibility: "private",
+      provider: "claude",
+      llm_provider_id: null,
+    });
+    expect(unbound.llm_provider_id).toBeNull();
   });
 });
 
@@ -372,9 +385,10 @@ describe("AgentProfileForm 双栏实时预览（D-003 / design §12 验收 4）"
     // ① 身份
     expect(screen.getByText("名称")).toBeInTheDocument();
     expect(screen.getByText("可见范围")).toBeInTheDocument();
-    // ② 大脑
+    // ② 大脑（task-07：第一层改名「智能体引擎」+ 第二层「供应商配置」联动）
+    expect(screen.getByText("智能体引擎")).toBeInTheDocument();
     expect(
-      screen.getByText("供应商偏好（决定选哪台 daemon）"),
+      screen.getByText("供应商配置（可选，不绑定用默认）"),
     ).toBeInTheDocument();
     expect(screen.getByText("模型")).toBeInTheDocument();
     expect(

@@ -57,6 +57,7 @@ import {
   usePlatformSkillsManifest,
 } from "@/lib/custom-skills";
 import { listWorkspaces, type Workspace } from "@/lib/workspaces";
+import { listProviders, type LlmProviderRead } from "@/lib/api/llm-providers";
 import { useNotify } from "@/lib/errors";
 
 interface AgentProfileFormProps {
@@ -84,6 +85,8 @@ interface ProfileFormValues {
   name: string;
   visibility: AgentProfileVisibility;
   provider: string;
+  /** 绑定的 /settings/providers 供应商 id；null=不绑定（用默认）。 */
+  llm_provider_id?: string | null;
   model?: string;
   system_prompt?: string;
   tool_policy_id?: string;
@@ -118,6 +121,7 @@ export function toCreateBody(v: ProfileFormValues): AgentProfileCreate {
     name: v.name.trim(),
     visibility: v.visibility,
     provider: v.provider,
+    llm_provider_id: v.llm_provider_id ?? null,
     model: v.model?.trim() ? v.model.trim() : null,
     system_prompt: v.system_prompt?.trim() ? v.system_prompt.trim() : null,
     tool_policy_id: v.tool_policy_id ? v.tool_policy_id : null,
@@ -132,6 +136,7 @@ export function toUpdateBody(v: ProfileFormValues): AgentProfileUpdate {
     name: v.name.trim(),
     visibility: v.visibility,
     provider: v.provider,
+    llm_provider_id: v.llm_provider_id ?? null,
     model: v.model?.trim() ? v.model.trim() : null,
     system_prompt: v.system_prompt?.trim() ? v.system_prompt.trim() : null,
     tool_policy_id: v.tool_policy_id ? v.tool_policy_id : null,
@@ -149,6 +154,7 @@ function profileToInitial(
     name: p.name,
     visibility: p.visibility,
     provider: p.provider,
+    llm_provider_id: p.llm_provider_id ?? null,
     model: p.model ?? "",
     system_prompt: p.system_prompt ?? "",
     tool_policy_id: p.tool_policy_id ?? "",
@@ -336,6 +342,8 @@ function AgentProfileModal({
   onSubmit,
 }: AgentProfileModalProps) {
   const [formInst] = Form.useForm<ProfileFormValues>();
+  // 大脑区第二层「供应商配置」联动：按第一层引擎过滤 LlmProvider.agent_kind。
+  const engineProvider = Form.useWatch("provider", formInst) ?? "claude";
 
   // Modal 由父组件条件渲染打开，每次打开新 mount，Form 干净，setFieldsValue 填初值。
   useEffect(() => {
@@ -467,20 +475,28 @@ function AgentProfileModal({
             <div className="grid grid-cols-2 gap-3">
               <Form.Item
                 name="provider"
-                label="供应商偏好（决定选哪台 daemon）"
-                rules={[{ required: true, message: "请选择供应商" }]}
+                label="智能体引擎"
+                tooltip="决定在所选机器上用哪个 agent 程序跑（Claude Code / Codex）。"
+                rules={[{ required: true, message: "请选择智能体引擎" }]}
               >
                 <Select
                   showSearch
                   optionFilterProp="label"
                   options={providerOptions}
-                  placeholder="选择供应商"
+                  placeholder="选择智能体引擎"
                 />
               </Form.Item>
               <Form.Item name="model" label="模型">
                 <Input placeholder="例如 claude-sonnet-4（留空用供应商默认）" />
               </Form.Item>
             </div>
+            <Form.Item
+              name="llm_provider_id"
+              label="供应商配置（可选，不绑定用默认）"
+              tooltip="绑定 /settings/providers 里配置的供应商，任务启动优先用它的凭证；不绑定则用你的默认供应商。codex 暂未开放。"
+            >
+              <LlmProviderSelect engineProvider={engineProvider} />
+            </Form.Item>
             <Form.Item
               name="system_prompt"
               label="系统提示词（agent 人格，与 spec 任务上下文叠加）"
@@ -599,9 +615,21 @@ function ProfilePreview({
   const visibility =
     Form.useWatch("visibility", form) ?? ("private" as AgentProfileVisibility);
   const provider = Form.useWatch("provider", form) ?? "claude";
+  const llmProviderId = Form.useWatch("llm_provider_id", form) ?? null;
   const model = Form.useWatch("model", form) ?? "";
   const systemPrompt = Form.useWatch("system_prompt", form) ?? "";
   const toolPolicyId = Form.useWatch("tool_policy_id", form) ?? "";
+  // 绑定供应商名映射（task-08）：用本人 /llm-providers 列表按 id 查名；非本人 → 提示。
+  const { data: llmProviders } = useQuery<LlmProviderRead[]>({
+    queryKey: ["llm-providers", "list", "agent-profile-form"],
+    queryFn: listProviders,
+    staleTime: 60_000,
+  });
+  const boundProviderName = useMemo(() => {
+    if (!llmProviderId) return null;
+    const hit = (llmProviders ?? []).find((p) => p.id === llmProviderId);
+    return hit ? hit.name : "（非本人供应商，将回退默认）";
+  }, [llmProviderId, llmProviders]);
   const mcpRefs = Form.useWatch("mcp_refs", form) ?? [];
   const skillRefs = Form.useWatch("skill_refs", form) ?? [];
 
@@ -635,6 +663,11 @@ function ProfilePreview({
               {provider}
               {model ? ` / ${model}` : ""}
             </div>
+            {boundProviderName ? (
+              <div className="mt-0.5 text-[10px] text-foreground/60">
+                供应商：{boundProviderName}
+              </div>
+            ) : null}
           </div>
         </div>
         {/* 系统提示词摘要 */}
@@ -706,5 +739,57 @@ function FormSectionHeader({
         </span>
       ) : null}
     </Divider>
+  );
+}
+
+/**
+ * 供应商配置下拉（大脑区第二层，task-07）：绑定 /settings/providers 的供应商，可选。
+ *
+ * 数据源 listProviders（GET /api/llm-providers，已按 owner 过滤），按第一层引擎
+ * （engineProvider）过滤 agent_kind（当前仅 claude 类）。codex 等引擎下禁用 + 提示。
+ * 编辑态：当前值不在本人列表（共享档案 owner 绑定）→ 加占位 option「无权限访问」，
+ * form value 不转 null，依赖后端 Update exclude_unset（不传=不动）避免误解绑。
+ */
+function LlmProviderSelect({
+  value,
+  onChange,
+  engineProvider,
+}: {
+  value?: string | null;
+  onChange?: (v: string | null) => void;
+  engineProvider?: string;
+}) {
+  const { data, isLoading } = useQuery<LlmProviderRead[]>({
+    queryKey: ["llm-providers", "list", "agent-profile-form"],
+    queryFn: listProviders,
+    staleTime: 60_000,
+  });
+  const providers = data ?? [];
+  const options = useMemo(() => {
+    const filtered = providers.filter((p) => p.agent_kind === engineProvider);
+    const opts = filtered.map((p) => ({ value: p.id, label: p.name }));
+    // 编辑态回显：非本人供应商（id 不在列表）→ 占位，不误解绑。
+    if (value && !opts.some((o) => o.value === value)) {
+      opts.push({ value, label: "（无权限访问该供应商，提交时不动）" });
+    }
+    return opts;
+  }, [providers, engineProvider, value]);
+  const engineUnsupported = !!engineProvider && engineProvider !== "claude";
+  return (
+    <Select
+      value={value ?? undefined}
+      onChange={(v) => onChange?.(v ?? null)}
+      options={options}
+      allowClear
+      disabled={engineUnsupported}
+      placeholder={engineUnsupported ? "该引擎暂未开放供应商配置" : "不绑定（用默认）"}
+      notFoundContent={
+        engineUnsupported
+          ? "该引擎暂未开放供应商配置"
+          : isLoading
+            ? "加载中…"
+            : "暂无可绑定供应商（先在 /settings/providers 配置）"
+      }
+    />
   );
 }

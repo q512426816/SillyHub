@@ -136,6 +136,75 @@ async def resolve_default_provider_config(
     }
 
 
+async def resolve_bound_provider_config(
+    session: AsyncSession,
+    lease_meta: dict,
+    user_id: uuid.UUID,
+    agent_kind: str,
+) -> dict | None:
+    """方案A：优先用档案绑定的 LlmProvider 构造 provider_config（D-003/D-006/D-007）。
+
+    读 ``lease_meta["llm_provider_id"]``（由 ``AgentService._apply_profile_to_lease``
+    写入），按 id 查 LlmProvider，校验：
+
+    * **归属（方案A）**：``provider.user_id == user_id``（user_id 为 daemon 登记者
+      ``runtime.user_id``）——仅当绑定 provider 属于当前执行用户时才生效，否则
+      静默回退用户默认链，不泄露他人凭证。
+    * **引擎一致**：``provider.agent_kind == agent_kind``——防止 codex 引擎档案
+      绑了 claude provider 时下发错配凭证（堵 API/DB 直写绕过前端禁用）。
+
+    通过则按 ``api_format`` 构造中性 config（anthropic 8 字段 / openai_chat 6 字段），
+    口径与 :func:`resolve_default_provider_config` 逐字一致；未绑定 / 查不到 / 归属
+    不符 / 引擎不符 → 返回 None，调用方回退用户默认（D-005，零回归）。
+
+    注：构造逻辑复制自 resolve_default_provider_config 而非提取公共 helper，避免
+    改动有测试守护的 resolve_default（回归风险）；两处口径保持一致，后续可重构提取。
+    """
+    raw = lease_meta.get("llm_provider_id")
+    if not raw:
+        return None
+    try:
+        provider_id = uuid.UUID(str(raw))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+    from app.modules.llm_provider.model import LlmProvider
+
+    provider = await session.get(LlmProvider, provider_id)
+    if provider is None:
+        return None
+    if provider.user_id != user_id or provider.agent_kind != agent_kind:
+        return None
+
+    if provider.api_format == "openai_chat":
+        from app.modules.llm_provider.litellm_client import litellm_model_name
+
+        settings = get_settings()
+        return {
+            "agent_kind": provider.agent_kind,
+            "api_format": "openai_chat",
+            "litellm_base_url": settings.litellm_base_url,
+            "litellm_model_name": litellm_model_name(provider.user_id, provider.id),
+            "litellm_auth_token": settings.litellm_master_key,
+            "model": provider.model,
+        }
+
+    from app.core.crypto import get_cipher
+
+    api_key_plain = get_cipher().decrypt(provider.encrypted_api_key, provider.key_id)
+    return {
+        "agent_kind": provider.agent_kind,
+        "base_url": provider.base_url,
+        "api_key": api_key_plain,
+        "auth_field": provider.auth_field,
+        "model": provider.model,
+        "model_role_mappings": provider.model_role_mappings,
+        "default_fallback_model": provider.default_fallback_model,
+        "extra_env": provider.extra_env,
+        "settings_config": provider.settings_config,
+    }
+
+
 async def _inject_provider_config(
     session: AsyncSession,
     lease: DaemonTaskLease,
@@ -194,7 +263,19 @@ async def _inject_provider_config(
     if agent_kind is None:
         return  # 无 agent_kind 信号 → 不注入
 
-    # ── 查默认 provider + 构造 provider_config（D-006 单一真相源 helper）──
+    # ── 优先用档案绑定的 provider（方案A，D-003/D-006/D-007）──
+    # lease_meta.llm_provider_id 由 _apply_profile_to_lease 写入。bound helper 校验
+    # 归属（仅 daemon 登记者本人绑定生效）+ agent_kind 一致，通过则用绑定 provider
+    # 的 config；否则回退用户默认链。
+    bound_config = await resolve_bound_provider_config(session, lease_meta, user_id, agent_kind)
+    if bound_config is not None:
+        payload["provider_config"] = bound_config
+        override_model = bound_config.get("model") or bound_config.get("default_fallback_model")
+        if override_model:
+            payload["model"] = override_model
+        return
+
+    # ── 未绑定 / 归属不符 / agent_kind 不符 → 回退用户默认（D-005，零回归）──
     # change 2026-08-06-provider-switch-live-session / task-02：抽取
     # ``resolve_default_provider_config`` 供 claim 与 set_default 即时下发共用,
     # 避免两处各写一份查 provider + 解密 + 构造逻辑。helper 口径与原内联逻辑
