@@ -355,7 +355,13 @@
 方案：两个卡从 CollapsibleCard 内联折叠改为侧栏紧凑入口卡（标题+说明+打开按钮）→ 点击在宽 Dialog（max-w-6xl × 85vh，flex-col + overflow-hidden）里渲染完整 ChangeFileTree / ChangeSessionSection（黑盒复用不改其内部，radix Portal 惰性 mount 关闭即卸载无空载请求）。
 结果：tsc --noEmit 0 错；vitest 全量 141 文件 1384 测试零回归；eslint 4 文件 exit 0；CollapsibleCard 现已无引用沦为死代码，删除留待后续 quick（本次 --files 未声明该文件审计拦删除）；待重建前端部署验证弹窗内文件预览+会话两栏可用。
 
-## ql-20260811-003-0408 | 2026-08-11 13:34:33 | (quick 任务)
-状态：进行中
+## ql-20260811-004-067d | 2026-08-11 13:54:40 | 删 change-detail-layout-rework 遗留死代码 CollapsibleCard（组件+测试）
+状态：已完成（⚠️ quick --done 审计拦删除无法收尾，经用户确认直接 git 提交）
 关联变更：（无）
-文件：（见实际改动）
+文件：
+- frontend/src/components/changes/detail/collapsible-card.tsx（删除：死代码，ql-002 两卡改 Dialog 后无引用）
+- frontend/src/components/changes/detail/__tests__/collapsible-card.test.tsx（删除：随组件）
+需求：删 change-detail-layout-rework / ql-002 遗留死代码 CollapsibleCard（组件 + 其测试 2 文件）。
+根因：ql-002 把变更文件/会话调试两卡改 Dialog 入口卡后，CollapsibleCard 已无引用者（grep 复核 src/ 零外部引用），纯死代码。
+方案：rm 两文件。⚠️ SillySpec quick 流程【无法删除文件】——step1 --files 显式声明删除目标后「超出 allowedFiles」检查过，但「删除文件」是独立硬规则，--force-baseline/--allow-new 均不解锁（CLI 提示误导），--done 三次 BLOCKED。经用户确认改为直接 git rm + commit 绕过 quick 删除拦截。详见 docs/sillyspec/quick-done-blocks-deletion-outside-files.md。
+结果：tsc --noEmit 0 错（无断链）；vitest 全量 141 文件 / 1384 测试零回归（较删前 142/1387 净 -1 文件 -3 测试 = 删掉的 collapsible-card.test 3 用例）。
