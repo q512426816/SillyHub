@@ -330,3 +330,14 @@
 根因：page.tsx 的 selectedRowKeys 默认全选用 useEffect 异步初始化(1165-1167)，与 handleUpload 的 setStep(2)(1148) 不同渲染周期；步骤2首帧 selectedRowKeys=[] → validCount=0 → 确认按钮 disabled={validCount===0}(1465) 处于禁用，测试④ fireEvent.click 偶发点到 disabled 按钮 onClick 不触发。CPU 独占(单跑)effect 先于点击完成→过；全量并发争抢→挂。
 方案：删该 useEffect，selectedRowKeys 改在 handleUpload 成功分支(与 setStep(2) 同批 setState) + 切 sheet Checkbox onChange 同步重置(对齐新 visibleRows 全选)，消除首帧竞态。行为完全一致仅改初始化时机，属「派生 state 用 effect」反模式的修正。
 结果：单跑该文件 6 passed；全量 pnpm test 连跑 4 次(1+3)均 134 files/1346 tests passed（修复前用户全量④flaky挂、修复后4次全过=flaky根除证据）；pnpm typecheck 通过；pnpm lint 无 error（仅预存 no-unused-vars warning 与本次无关）。
+
+## ql-20260811-001-8cb0 | 2026-08-11 08:49:15 | 修复 tool_gateway test_ssrf.py mypy CI 错误（变量作基类 Invalid base class）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/tool_gateway/tests/test_ssrf.py（_patch_http_client：删 real_client=httpx.AsyncClient 中间变量，class _Client(httpx.AsyncClient) 直接继承）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（变更索引追加 ql-20260811-001-8cb0）
+需求：修复 CI uv run mypy app 报的 tool_gateway test_ssrf.py:71 Invalid base class real_client error，让 CI mypy step 绿。
+根因：_patch_http_client 里 real_client=httpx.AsyncClient 变量赋值后 class _Client(real_client) 用变量作基类，mypy 不接受非 Final 变量作基类（运行时不保证是类）。
+方案：删 real_client 中间变量，class _Client(httpx.AsyncClient) 直接继承——class 定义在 monkeypatch.setattr 前求值，此时 httpx.AsyncClient 仍是原始类，_Client 仍继承原始类，注入 transport 逻辑等价。
+结果：ruff format 1 file unchanged + ruff check All passed；全量 uv run mypy app = Success no issues found in 589 source files（原 test_ssrf:71 error 消除，仅剩 4 个预存 annotation-unchecked note 非 error 不挂 CI）；pytest test_ssrf.py 18 passed 功能未破。

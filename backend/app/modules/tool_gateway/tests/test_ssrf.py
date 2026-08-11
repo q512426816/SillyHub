@@ -66,9 +66,11 @@ async def test_assert_public_url_allows_public_ip_literal():
 def _patch_http_client(monkeypatch: pytest.MonkeyPatch, handler) -> None:
     """把 _handle_http_get 用的 httpx.AsyncClient 注入 MockTransport（hermetic）。"""
     transport = httpx.MockTransport(handler)
-    real_client = httpx.AsyncClient
 
-    class _Client(real_client):
+    class _Client(httpx.AsyncClient):
+        # 直接继承 httpx.AsyncClient：class 定义在下方 monkeypatch.setattr 之前求值，
+        # 此时 httpx.AsyncClient 仍是原始类，_Client.__bases__=(原始 AsyncClient,)。
+        # 不用 real_client 变量中转——mypy 不接受非 Final 变量作基类（Invalid base class）。
         def __init__(self, *args, **kwargs):
             kwargs["transport"] = transport
             super().__init__(*args, **kwargs)
