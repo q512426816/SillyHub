@@ -24944,6 +24944,18 @@
             ],
             "title": "Tool Policy Id"
           },
+          "llm_provider_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Provider Id"
+          },
           "mcp_refs": {
             "items": {
               "type": "string"
@@ -25013,6 +25025,7 @@
           "model",
           "system_prompt",
           "tool_policy_id",
+          "llm_provider_id",
           "mcp_refs",
           "skill_refs",
           "allowed_roots_overlay",
@@ -25122,6 +25135,18 @@
               }
             ],
             "title": "Tool Policy Id"
+          },
+          "llm_provider_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Provider Id"
           },
           "mcp_refs": {
             "items": {
@@ -25252,6 +25277,18 @@
             ],
             "title": "Tool Policy Id"
           },
+          "llm_provider_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Provider Id"
+          },
           "mcp_refs": {
             "items": {
               "type": "string"
@@ -25310,6 +25347,7 @@
           "model",
           "system_prompt",
           "tool_policy_id",
+          "llm_provider_id",
           "mcp_refs",
           "skill_refs",
           "allowed_roots_overlay",
@@ -25393,6 +25431,18 @@
               }
             ],
             "title": "Tool Policy Id"
+          },
+          "llm_provider_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Provider Id"
           },
           "mcp_refs": {
             "anyOf": [

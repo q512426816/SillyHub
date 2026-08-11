@@ -74,6 +74,7 @@ class AgentProfileRead(BaseModel):
     model: str | None
     system_prompt: str | None
     tool_policy_id: uuid.UUID | None
+    llm_provider_id: uuid.UUID | None
     mcp_refs: list[str]
     skill_refs: list[str]
     allowed_roots_overlay: list[str] | None
@@ -114,6 +115,7 @@ class AgentProfileCreate(BaseModel):
     model: str | None = Field(default=None, max_length=128)
     system_prompt: str | None = Field(default=None)
     tool_policy_id: uuid.UUID | None = None
+    llm_provider_id: uuid.UUID | None = None
     mcp_refs: list[str] = Field(default_factory=list)
     skill_refs: list[str] = Field(default_factory=list)
     allowed_roots_overlay: list[str] | None = None
@@ -130,6 +132,7 @@ class AgentProfileUpdate(BaseModel):
     model: str | None = Field(default=None, max_length=128)
     system_prompt: str | None = None
     tool_policy_id: uuid.UUID | None = None
+    llm_provider_id: uuid.UUID | None = None
     mcp_refs: list[str] | None = None
     skill_refs: list[str] | None = None
     allowed_roots_overlay: list[str] | None = None
@@ -216,6 +219,7 @@ async def create_workspace_profile(
         model=payload.model,
         system_prompt=payload.system_prompt,
         tool_policy_id=payload.tool_policy_id,
+        llm_provider_id=payload.llm_provider_id,
         mcp_refs=payload.mcp_refs,
         skill_refs=payload.skill_refs,
         allowed_roots_overlay=payload.allowed_roots_overlay,

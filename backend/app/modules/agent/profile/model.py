@@ -99,6 +99,18 @@ class AgentProfile(BaseModel, table=True):
     )
     # 供应商偏好（claude/codex/…），作 target_provider（D-014，优先于 workspace.default_agent）。
     provider: str = Field(sa_column=Column(String(64), nullable=False))
+    # 绑定的用户级 LlmProvider（/settings/providers 配置的 claude 类凭证），可选。
+    # 任务派发时经 lease metadata 透传，claim 装配优先用绑定 provider 的凭证
+    # （方案A：仅 daemon 登记者 == provider owner 时生效，否则静默回退用户默认 D-006/D-007）。
+    # provider 删则 SET NULL（自动回退默认）。档案只存引用，不存密钥（R-02 红线）。
+    llm_provider_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("llm_providers.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
     model: str | None = Field(
         default=None,
         sa_column=Column(String(128), nullable=True),

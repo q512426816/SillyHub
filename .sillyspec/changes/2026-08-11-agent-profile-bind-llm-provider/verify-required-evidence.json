@@ -1,0 +1,13 @@
+{
+  "generatedAt": "2026-08-11T03:27:24.303Z",
+  "schemaVersion": 1,
+  "items": [
+    {
+      "task": "task-10",
+      "verdict": "spec+quality",
+      "evidence": [
+        "verify 阶段补前端 vitest（form 联动/回显/提交 body 含 llm_provider_id）"
+      ]
+    }
+  ]
+}
