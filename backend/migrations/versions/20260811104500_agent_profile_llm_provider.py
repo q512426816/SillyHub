@@ -13,6 +13,7 @@ batch_alter_table 兼容 SQLite（单测：ALTER TABLE 加 FK 需 batch 重建�
 与 PostgreSQL（生产：batch 为 no-op wrapper，直接 ALTER）。
 
 """
+
 from __future__ import annotations
 
 import sqlalchemy as sa
@@ -27,9 +28,7 @@ depends_on = None
 
 def upgrade() -> None:
     with op.batch_alter_table("agent_profiles", schema=None) as batch_op:
-        batch_op.add_column(
-            sa.Column("llm_provider_id", sa.Uuid(as_uuid=True), nullable=True)
-        )
+        batch_op.add_column(sa.Column("llm_provider_id", sa.Uuid(as_uuid=True), nullable=True))
         batch_op.create_foreign_key(
             "fk_agent_profiles_llm_provider_id_llm_providers",
             "llm_providers",

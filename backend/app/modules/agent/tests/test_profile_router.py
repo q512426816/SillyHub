@@ -25,7 +25,7 @@ from app.core.security import create_access_token, password_hasher
 from app.modules.agent.profile.model import AgentProfileVisibility
 from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
 from app.modules.auth.permissions import Permission
-from app.modules.llm_provider.model import LlmProvider  # noqa: F401  # task-11：触发 llm_providers 表注册
+from app.modules.llm_provider.model import LlmProvider  # noqa: F401
 from app.modules.workspace.model import Workspace
 
 # 上方 ``from app.modules.agent.profile.model import AgentProfileVisibility`` 已

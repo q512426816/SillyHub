@@ -88,7 +88,7 @@ def mount_mcp(app: FastAPI) -> None:
 # 装配副作用 import（task-06 协调）：import tools 触发 @mcp.tool() 注册 5 个 tool，
 # 否则生产 /mcp tools/list 看不到它们。mcp 实例在本模块第 59 行已定义，
 # tools.py 的 ``from .server import mcp`` 在此处可安全解析（无循环）。
-# noqa: F401（有意保留 import 副作用）。
+# 下方 import 仅为副作用（注册 5 个 tool），名字不被引用，故行尾标 noqa: F401。
 from app.modules.mcp_gateway import tools  # noqa: F401,E402
 
 __all__ = ["mcp", "mount_mcp", "mount_path"]
