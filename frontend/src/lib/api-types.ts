@@ -7457,7 +7457,7 @@ export interface paths {
          * Get Progress
          * @description GET 单 change 完整 progress JSON（契约 §6，裸六表 + 顶层 last_pushed_at）。
          *
-         *     不存在 → 404（客户端 fetchJson 返回 null 降级不阻断，契约 §8/§10）。
+         *     不存在/跨 workspace → 404（客户端 fetchJson 返回 null 降级不阻断，契约 §8/§10）。
          */
         get: operations["get_progress_api_changes__name__progress_get"];
         put?: never;
@@ -7469,6 +7469,9 @@ export interface paths {
          *     200=接受（客户端据此更新 platform_last_sync）；409=冲突（body
          *     ``{conflict, platform_progress, last_pushed_at}``，客户端写冲突文件走 resolve）。
          *     body 是裸 ``serializeForSync`` 六表 JSON（NG-6 透传，不强类型校验）。
+         *
+         *     workspace_id 从 require_platform_sync 派生（shpsync_ token 绑定工作区；shk_live_/JWT
+         *     过渡期 None 走全局聚合 fallback），透传 service 做收件箱隔离（task-06/07）。
          */
         post: operations["push_progress_api_changes__name__progress_post"];
         delete?: never;
@@ -7486,11 +7489,57 @@ export interface paths {
         };
         /**
          * List Changes
-         * @description GET 轻量 change 列表（契约 §5，裸数组形态 D-007）。
+         * @description GET 轻量 change 列表（契约 §5，裸数组形态 D-007，按 token 派生 workspace 过滤）。
          */
         get: operations["list_changes_api_changes_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/platform-sync-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Platform Sync Token
+         * @description 签发 workspace-scoped 同步 token（WORKSPACE_WRITE，明文仅 201 一次返回）。
+         *
+         *     ``created_by=调用者``（authenticate 已校验的 user）；库存 sha256，明文不入日志。
+         */
+        post: operations["create_platform_sync_token_api_workspaces__workspace_id__platform_sync_tokens_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/resolve-by-root-path": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve By Root Path
+         * @description connect 换发：root_path 反查 workspace + WORKSPACE_WRITE 校验 + 签发 shpsync_ token。
+         *
+         *     - 反查不到活跃 workspace（root_path 未绑/已软删）→ 404
+         *     - 反查到但调用者无 WORKSPACE_WRITE → 403（D-006@v1 安全闭环）
+         *     - 通过 → 签发 shpsync_ token（created_by=调用者，workspace_id=反查到的 wid）→ 200
+         */
+        post: operations["resolve_by_root_path_api_workspaces_resolve_by_root_path_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -11973,6 +12022,52 @@ export interface components {
             /** Kanban Order */
             kanban_order?: number | null;
         };
+        /**
+         * PlatformSyncTokenCreateRequest
+         * @description POST /workspaces/{wid}/platform-sync-tokens 签发请求（design §7）。
+         */
+        PlatformSyncTokenCreateRequest: {
+            /**
+             * Name
+             * @description 人类可读标签
+             */
+            name: string;
+        };
+        /**
+         * PlatformSyncTokenCreateResponse
+         * @description POST 签发 201 响应——**唯一**携带明文 token 的地方（仅此一次返回，R-06）。
+         *
+         *     明文字段 ``token`` 语义独立（不可重复获取），单独建模让"明文只出现一次"契约显眼。
+         */
+        PlatformSyncTokenCreateResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /**
+             * Key Prefix
+             * @description 明文 token 的可视前缀（前 12 字符），供 UI 展示
+             */
+            key_prefix: string;
+            /**
+             * Token
+             * @description 明文 token，仅本次响应返回，此后不可恢复（请立即保存）
+             */
+            token: string;
+            /** Name */
+            name: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** PostmortemCreate */
         PostmortemCreate: {
             /** Timeline */
@@ -13804,6 +13899,33 @@ export interface components {
         ResetPasswordResponse: {
             /** Plaintext Password */
             plaintext_password: string;
+        };
+        /**
+         * ResolveByRootPathRequest
+         * @description POST /workspaces/resolve-by-root-path 请求（design §7，connect 换发 body）。
+         */
+        ResolveByRootPathRequest: {
+            /**
+             * Root Path
+             * @description 本地项目根目录绝对路径
+             */
+            root_path: string;
+        };
+        /**
+         * ResolveByRootPathResponse
+         * @description POST resolve-by-root-path 200 响应（design §7）：反查到的 workspace + 换发 token。
+         */
+        ResolveByRootPathResponse: {
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /**
+             * Token
+             * @description workspace-scoped 明文 token（shpsync_ 前缀），仅本次返回
+             */
+            token: string;
         };
         /**
          * ResumeRequest
@@ -31597,6 +31719,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChangeListItem"][];
+                };
+            };
+        };
+    };
+    create_platform_sync_token_api_workspaces__workspace_id__platform_sync_tokens_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformSyncTokenCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformSyncTokenCreateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_by_root_path_api_workspaces_resolve_by_root_path_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveByRootPathRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolveByRootPathResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

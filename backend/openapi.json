@@ -24674,7 +24674,7 @@
           "platform-sync"
         ],
         "summary": "Push Progress",
-        "description": "POST 上行 progress + base_ts 冲突检测（契约 §4）。\n\n读 3 个 ``X-SillySpec-*`` header（User/Base-Ts/Pushed-At，缺失/空均 None）。\n200=接受（客户端据此更新 platform_last_sync）；409=冲突（body\n``{conflict, platform_progress, last_pushed_at}``，客户端写冲突文件走 resolve）。\nbody 是裸 ``serializeForSync`` 六表 JSON（NG-6 透传，不强类型校验）。",
+        "description": "POST 上行 progress + base_ts 冲突检测（契约 §4）。\n\n读 3 个 ``X-SillySpec-*`` header（User/Base-Ts/Pushed-At，缺失/空均 None）。\n200=接受（客户端据此更新 platform_last_sync）；409=冲突（body\n``{conflict, platform_progress, last_pushed_at}``，客户端写冲突文件走 resolve）。\nbody 是裸 ``serializeForSync`` 六表 JSON（NG-6 透传，不强类型校验）。\n\nworkspace_id 从 require_platform_sync 派生（shpsync_ token 绑定工作区；shk_live_/JWT\n过渡期 None 走全局聚合 fallback），透传 service 做收件箱隔离（task-06/07）。",
         "operationId": "push_progress_api_changes__name__progress_post",
         "parameters": [
           {
@@ -24728,7 +24728,7 @@
           "platform-sync"
         ],
         "summary": "Get Progress",
-        "description": "GET 单 change 完整 progress JSON（契约 §6，裸六表 + 顶层 last_pushed_at）。\n\n不存在 → 404（客户端 fetchJson 返回 null 降级不阻断，契约 §8/§10）。",
+        "description": "GET 单 change 完整 progress JSON（契约 §6，裸六表 + 顶层 last_pushed_at）。\n\n不存在/跨 workspace → 404（客户端 fetchJson 返回 null 降级不阻断，契约 §8/§10）。",
         "operationId": "get_progress_api_changes__name__progress_get",
         "parameters": [
           {
@@ -24772,7 +24772,7 @@
           "platform-sync"
         ],
         "summary": "List Changes",
-        "description": "GET 轻量 change 列表（契约 §5，裸数组形态 D-007）。",
+        "description": "GET 轻量 change 列表（契约 §5，裸数组形态 D-007，按 token 派生 workspace 过滤）。",
         "operationId": "list_changes_api_changes_get",
         "responses": {
           "200": {
@@ -24785,6 +24785,104 @@
                   },
                   "type": "array",
                   "title": "Response List Changes Api Changes Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/platform-sync-tokens": {
+      "post": {
+        "tags": [
+          "platform-sync-tokens",
+          "platform-sync-tokens"
+        ],
+        "summary": "Create Platform Sync Token",
+        "description": "签发 workspace-scoped 同步 token（WORKSPACE_WRITE，明文仅 201 一次返回）。\n\n``created_by=调用者``（authenticate 已校验的 user）；库存 sha256，明文不入日志。",
+        "operationId": "create_platform_sync_token_api_workspaces__workspace_id__platform_sync_tokens_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlatformSyncTokenCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformSyncTokenCreateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/resolve-by-root-path": {
+      "post": {
+        "tags": [
+          "platform-sync-tokens",
+          "platform-sync-tokens"
+        ],
+        "summary": "Resolve By Root Path",
+        "description": "connect 换发：root_path 反查 workspace + WORKSPACE_WRITE 校验 + 签发 shpsync_ token。\n\n- 反查不到活跃 workspace（root_path 未绑/已软删）→ 404\n- 反查到但调用者无 WORKSPACE_WRITE → 403（D-006@v1 安全闭环）\n- 通过 → 签发 shpsync_ token（created_by=调用者，workspace_id=反查到的 wid）→ 200",
+        "operationId": "resolve_by_root_path_api_workspaces_resolve_by_root_path_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveByRootPathRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveByRootPathResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -36849,6 +36947,67 @@
         "title": "PlanTaskUpdate",
         "description": "更新任务计划 (全字段可选,部分更新)。"
       },
+      "PlatformSyncTokenCreateRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "description": "人类可读标签"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "PlatformSyncTokenCreateRequest",
+        "description": "POST /workspaces/{wid}/platform-sync-tokens 签发请求（design §7）。"
+      },
+      "PlatformSyncTokenCreateResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
+          },
+          "key_prefix": {
+            "type": "string",
+            "title": "Key Prefix",
+            "description": "明文 token 的可视前缀（前 12 字符），供 UI 展示"
+          },
+          "token": {
+            "type": "string",
+            "title": "Token",
+            "description": "明文 token，仅本次响应返回，此后不可恢复（请立即保存）"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "workspace_id",
+          "key_prefix",
+          "token",
+          "name",
+          "created_at"
+        ],
+        "title": "PlatformSyncTokenCreateResponse",
+        "description": "POST 签发 201 响应——**唯一**携带明文 token 的地方（仅此一次返回，R-06）。\n\n明文字段 ``token`` 语义独立（不可重复获取），单独建模让\"明文只出现一次\"契约显眼。"
+      },
       "PostmortemCreate": {
         "properties": {
           "timeline": {
@@ -43714,6 +43873,43 @@
           "plaintext_password"
         ],
         "title": "ResetPasswordResponse"
+      },
+      "ResolveByRootPathRequest": {
+        "properties": {
+          "root_path": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Root Path",
+            "description": "本地项目根目录绝对路径"
+          }
+        },
+        "type": "object",
+        "required": [
+          "root_path"
+        ],
+        "title": "ResolveByRootPathRequest",
+        "description": "POST /workspaces/resolve-by-root-path 请求（design §7，connect 换发 body）。"
+      },
+      "ResolveByRootPathResponse": {
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
+          },
+          "token": {
+            "type": "string",
+            "title": "Token",
+            "description": "workspace-scoped 明文 token（shpsync_ 前缀），仅本次返回"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workspace_id",
+          "token"
+        ],
+        "title": "ResolveByRootPathResponse",
+        "description": "POST resolve-by-root-path 200 响应（design §7）：反查到的 workspace + 换发 token。"
       },
       "ResumeRequest": {
         "properties": {
