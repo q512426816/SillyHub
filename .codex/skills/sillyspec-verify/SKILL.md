@@ -44,7 +44,7 @@ verify 是只读阶段（**禁止改代码/改 git 状态**，只检查 + 写报
 - **必须产出 `verify-result.md`**——不存在则阻断完成（不能跳过报告直接 `--done`）
 - **结论为 `FAIL` 则阻断完成**——不能带着 FAIL 标记 verify 完成
 - **`integration-critical` / `deployment-critical` 变更**（design/plan 含 daemon/session/lease/lifecycle 等关键词）：结论 PASS WITH NOTES 降级为 FAIL，必须有真实集成证据（Runtime Evidence section）——该证据为 Agent 自报告，CLI 仅校验其字面存在、不独立运行时核验，须真实执行过
-- `verify-required-evidence.json`（execute 写入）中每条 missing evidence → 阻断
+- `verify-required-evidence.json`（execute 写入，schema `{items:[{task,verdict,evidence:[]}]}`）中 cannot_verify 任务未在 verify-result.md 体现 → **advisory warn（不阻断归档）**；evidence 是否真满足（satisfied/missing/partial）由 agent 在 verify-result.md 自报告，CLI 只查任务被提及、不替你语义判定。结论能否 PASS 由你诚实判定（有 missing evidence 不应 PASS）。
 
 被阻断时 CLI 打印 ❌ 校验失败，不会提示"验证通过"。修复 `verify-result.md` 后重新 `--done`。
 

@@ -376,3 +376,69 @@
 根因：service.py _apply 用非原子「先 session.get 再决定 INSERT/UPDATE」，sillyspec 客户端新建 change 首推并发双发，两请求 get 都在对方 commit 前返回 None，双走 INSERT 第二个 commit 撞唯一键 IntegrityError 未捕获穿透成 500。
 方案：_apply 改 catch IntegrityError + rollback 后重查行回退 UPDATE（SQLite 测试库/PG 生产跨方言通用，不用 ON CONFLICT 方言分支），抽 _assign 静态方法去重，updated_at 保持预存不刷新，upsert_progress 冲突检测分支不动；补确定性单元测试 test_apply_catches_integrity_error_falls_back_to_update（预插行+row=None 模拟并发窗口验证 catch+retry UPDATE）。
 结果：uv run pytest app/modules/platform_sync 16 passed + ruff check/format + mypy 9 文件 0 issue 全绿；端到端 asyncio.gather 并发测试因 SQLite 单连接 anyio ExceptionGroup 不代表生产 PG 已删，生产有效性待重建 backend 镜像后日志验证。
+
+## ql-20260811-006-0ae1 | 2026-08-11 20:40:24 | ruff check . 报 2 个 I001 import 排序错误 + 1 个无效 # noqa 指令警告
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/tests/test_profile_router.py（去行尾冗余 # task-11 注释，保留 # noqa: F401 单行）
+- backend/app/modules/daemon/tests/test_resolve_bound_provider_config.py（ruff --fix 删 import 后多余空行）
+- backend/app/modules/mcp_gateway/server.py（第91行误导性 # noqa 说明注释改写为普通注释）
+需求：ruff check . 报 2 个 I001 import 排序错误 + 1 个无效 # noqa 指令警告，需修复使 lint 通过。
+根因：test_profile_router.py 行尾冗余 # task-11 注释使 import 行超长触发 isort 折行判定；test_resolve_bound_provider_config.py import 后多一个空行；mcp_gateway/server.py:91 纯说明注释误写成 '# noqa: F401（...）'，全角括号紧贴 F401 让 ruff 把 F401（ 当成非法 code 报警告（且该行非代码行 noqa 本就无意义）。
+方案：test_profile_router 去冗余 inline 注释只留 # noqa: F401（FK 原因块注释已有）；test_resolve 用 ruff --fix 删多余空行；server.py:91 改写为普通说明注释。
+结果：ruff check . 全绿；ruff format --check 我改的 3 文件全干净；定向 pytest 两个测试文件 19 passed。
+
+## ql-20260811-007-5c03 | 2026-08-11 20:48:15 | CI 上 change-stage-header.test.tsx 2 个用例失败（expect 2026/8/11
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/changes/detail/change-stage-header.tsx（第84行 toLocaleString() 补 'zh-CN' locale 参数，对齐项目约定修复 CI en-US 环境日期格式不一致）
+需求：CI 上 change-stage-header.test.tsx 2 个用例失败（expect 2026/8/11，received 8/11/2026, 10:00:00 AM），需修复使 CI 绿。
+根因：change-stage-header.tsx:84 new Date(lastActive).toLocaleString() 未传 locale 参数，渲染依赖系统 locale——开发机 zh-CN 输出 2026/8/11 命中测试，CI en-US Linux runner 输出 8/11/2026 不命中；项目约定（settings/skills、api-keys、mcp-tokens、workspace-member-row 等十几处）一律 toLocaleString('zh-CN')，此组件漏传属 bug。
+方案：补 'zh-CN' 参数对齐项目约定，渲染确定化（Intl 规范显式 locale 覆盖系统 locale，Node 18+ full ICU 保证 CI 稳定）；测试断言不动（编码了项目预期中文格式，是组件 bug 非测试问题，规则11修逻辑不修测试）。
+结果：本地 vitest change-stage-header 7 用例全过（本地 zh-CN 无法直接复现 en-US，但 CI 错误输出本身即 en-US 复现证据，修复后显式 zh-CN 跨 locale 确定）。
+
+## ql-20260811-008-3d00 | 2026-08-11 20:51:57 | ruff format --check 报 2 个已提交文件格式不符（agent/service.py 折行 + migration 2026081110450…
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/service.py（meta['llm_provider_id'] 折行→单行（ruff format 重排））
+- backend/migrations/versions/20260811104500_agent_profile_llm_provider.py（docstring 后补空行 + add_column 折行→单行（ruff format 重排，SQL/FK 零变更））
+需求：ruff format --check 报 2 个已提交文件格式不符（agent/service.py 折行 + migration 20260811104500 docstring 后缺空行/add_column 折行），卡 lint gate，需修复。
+根因：已归档 agent-profile-bind-llm-provider change 提交时漏跑 ruff format，遗留格式债。
+方案：ruff format 直接重排两文件（service.py meta['llm_provider_id'] 折行→单行；migration docstring 后补空行 + add_column 折行→单行，SQL/FK 零变更纯格式）。
+结果：ruff check . All checks passed；ruff format --check . 813 files already formatted 零未格式化。
+
+## ql-20260811-009-3b32 | 2026-08-11 21:43:09 | (quick 任务)
+状态：进行中
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx
+
+## ql-20260811-010-2512 | 2026-08-11 21:43:54 | 批量修复前端剩余 Date 的 no-arg toLocaleString()/toLocaleDateString() 漏传 zh-CN 的潜在 locale…
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx（toLocaleString 补 zh-CN）
+- frontend/src/app/(dashboard)/workspaces/[id]/runtime/page.tsx（4 处 toLocaleString 补 zh-CN）
+- frontend/src/app/(dashboard)/workspaces/[id]/page.tsx（toLocaleString 补 zh-CN）
+- frontend/src/components/mission-console.tsx（toLocaleString 补 zh-CN）
+- frontend/src/components/llm-providers/usage-footer.tsx（d.toLocaleString 补 zh-CN）
+- frontend/src/components/sillyspec-step-progress.tsx（4 处 toLocaleString 补 zh-CN）
+- frontend/src/components/permissions/dialog-context-bar.tsx（toLocaleString 补 zh-CN）
+- frontend/src/components/workspace-card.tsx（toLocaleString 补 zh-CN）
+- frontend/src/components/workspace-config-card.tsx（toLocaleString 补 zh-CN）
+- frontend/src/app/(dashboard)/workspaces/[id]/incidents/[iid]/page.tsx（toLocaleString 补 zh-CN）
+- frontend/src/components/change-file-tree.tsx（toLocaleString 补 zh-CN）
+- frontend/src/app/(dashboard)/workspaces/[id]/audit/page.tsx（toLocaleString 补 zh-CN）
+- frontend/src/components/changes/detail/change-review-history-card.tsx（toLocaleString 补 zh-CN）
+- frontend/src/app/(dashboard)/workspaces/[id]/approvals/page.tsx（2 处 toLocaleString 补 zh-CN）
+- frontend/src/app/(dashboard)/workspaces/[id]/releases/page.tsx（toLocaleDateString 补 zh-CN）
+- frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx（toLocaleDateString 补 zh-CN）
+- frontend/src/app/(dashboard)/workspaces/[id]/incidents/page.tsx（toLocaleDateString 补 zh-CN）
+- frontend/src/app/(dashboard)/settings/git-identities/page.tsx（toLocaleDateString 补 zh-CN）
+- frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx（toLocaleDateString 补 zh-CN）
+需求：批量修复前端剩余 Date 的 no-arg toLocaleString()/toLocaleDateString() 漏传 zh-CN 的潜在 locale 债（memory frontend-locale-zh-cn-pitfall 清单），统一项目约定避免 CI en-US 与开发机 zh-CN 渲染不一致。
+根因：这些组件照搬了 change-stage-header 同类 bug（toLocaleString() 不传 locale 依赖系统 locale），虽暂无测试断言故 CI 未红，但 en-US 环境会渲染成 M/D/YYYY 而非项目约定的 YYYY/M/D，属一致性债。
+方案：14 文件 toLocaleString() 补 zh-CN（scan-docs/runtime×4/workspaces-[id]-page/mission-console/usage-footer/sillyspec-step-progress×4/workspace-card/workspace-config-card/dialog-context-bar/incidents-[iid]/change-file-tree/audit/change-review-history-card/approvals×2），5 文件 toLocaleDateString() 补 zh-CN（releases/knowledge/incidents/git-identities/changes）；Number 的 toLocaleString()（tokens 千分位 3 处）非日期故保留。
+结果：grep 零残留 Date no-arg；node_modules 健康（tsc 5.5.4）tsc --noEmit 0 错；vitest 全量 144 文件 1402 测试全过零回归。

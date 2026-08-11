@@ -62,7 +62,7 @@ sillyspec runtime list                                              # 枚举 .si
 >
 > `--cleanup-remnant` 清理 init/平台切换残留的 0 字节空 db（占位但无数据）。默认 dry-run 只报告，`--confirm` 才删。绝不删有内容的 db。
 >
-> `runtime list` 是只读枚举：列出 `.sillyspec/.runtime/` 下的 db、doctor-diagnosis.json、workflow-runs/、gate-status.json、user-inputs.md 等产物及用途。多会话/压缩后想知道「我手上有哪些证据文件」时用。加 `--json` 程序化读取。
+> `runtime list` 是只读枚举：列出 `.sillyspec/.runtime/` 下的 db、doctor-diagnosis.json、workflow-runs/、user-inputs.md 等产物及用途。多会话/压缩后想知道「我手上有哪些证据文件」时用。加 `--json` 程序化读取。
 
 ## 铁律
 

@@ -59,24 +59,19 @@ sillyspec run auto --input "<用户需求>" [--mode <模式>]
 | `--spec-dir <path>` | 指定规范目录 |
 | `--non-interactive` | CI/脚本下禁用交互 |
 
-## 阶段审核门控
+## 阶段审核门控（Stage Review Gate）
 
-**brainstorm 完成后**，评估需求复杂度（基于 design.md 的模块拆分、批量操作、多角色交互特征）：
+审核发生在 brainstorm / plan / execute 各阶段的 review 步骤，**分级由 CLI 按变更规模自动判定**（不是 agent 凭关键词或复杂度启发式判断）：
 
-| 复杂度 | 审核策略 |
-|--------|---------|
-| 简单（无拆分、无批量） | 不审核，直接进入 plan |
-| 中等（有拆分或批量） | 启动 1 个审核子代理（QA 视角）审查 design.md |
-| 复杂（拆分 + 批量/多角色） | 启动 2-3 个审核子代理多角度审查 |
+- **tier=self**（变更 ≤3 文件）：当前 agent 自审，直接产 review.json。
+- **tier=independent**（变更 >3 文件）：必须派发**独立 QA 子代理**（独立上下文，不共享实现者分析）产 review.json。
 
-多角度审核子代理分工：
-- **架构师** — 设计合理性、技术选型 trade-off、模块划分
-- **安全专家** — 安全隐患、权限设计、数据校验
-- **QA 专家** — 需求覆盖率、边界场景、验收标准
+CLI 会在 review 步骤注入：完整 JSON schema 表 + 示例 + docHash 算法 + 自动决策 checklist（AC-001 起，逐条核验公共 API / schema / 鉴权 / 文件边界 / 依赖 / 核心模块 / 兼容性 / 业务等维度）。你按**实际注入的契约与 tier 指令**执行：
 
-审核流程：暂停提示复杂度 → 用户确认 → 启动子代理读 design/requirements/tasks → 汇总问题 → 询问是否修改 → 需要则修复重审，不需要则进下一阶段。
+- checklist 全 ✅ 且方案唯一合理 → AUTO_DECIDED，推进下一阶段
+- checklist 有 ❌（影响架构/数据/接口/权限/兼容性/业务）→ 暂停，用 AskUserQuestion 让用户选择
 
-**plan 完成后**，同样评估复杂度启动审核（项目经理审拆解粒度、工程师审可行性、QA 审验收标准）。
+**不要**自行编造"简单/中等/复杂 → N 个审核子代理"规则——审核子代理数量由 tier 决定（self=0 额外子代理，independent=1 个独立 QA），不是复杂度启发式；以 CLI 实际注入的 tier 与 checklist 为准。
 
 ## 关键规则
 

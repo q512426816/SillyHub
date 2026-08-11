@@ -70,7 +70,7 @@ plan 的步骤是动态的：`generate_plan`（生成分级计划）→ `review_
   ```
 
 - `docHash` = `sha256(主审查文档内容)`（hex）—— plan 主文档是 `plan.md`（`reviewedFiles[0]`）。CLI 重算 sha256 比对，不符判伪造（fail-closed）。改 plan.md 后须重算 docHash。`tier=self`（≤3 文件）降级为当前 agent 自审。
-- 运行时 CLI 通过 `{REVIEW_JSON_CONTRACT}` 注入精确 schema+示例，以注入版为权威逐字模板。
+- 运行时 CLI 会把精确 schema 表 + 完整 JSON 示例 + docHash 算法注入到该步 prompt，以你实际收到的注入版契约为权威逐字模板。
 
 ### 契约门控（阻断完成）
 

@@ -16,15 +16,15 @@ description: 自动判断并执行下一步
 
 2. .sillyspec/changes/ 有进行中的变更？
    2a. 没有任何文件 → 提示检查 proposal 是否需要完善
-   2b. 没有 design.md → 提示补充 design
-   2c. 没有 tasks.md → 执行 /sillyspec:propose（补全规范）
+   2b. 没有 design.md → 提示补充 design（运行 /sillyspec:brainstorm 推进到设计产物步）
+   2c. 没有 tasks.md → 执行 /sillyspec:brainstorm（规范文件 proposal/requirements/tasks 由 brainstorm 末步生成）
    2d. 有 tasks.md 但没有 plan.md → 执行 /sillyspec:plan
    2e. tasks.md 有未完成项 + 有计划文件 → 执行 /sillyspec:execute
    2f. tasks.md 全完成 + 没验证 → 执行 /sillyspec:verify
    2g. 已验证通过 → 执行 /sillyspec:archive
 
 3. 有设计文档但没有对应变更？
-   → 提示运行 /sillyspec:propose <name>
+   → 提示运行 /sillyspec:brainstorm（基于设计文档建立变更并生成规范文件）
 
 4. 有 .sillyspec/docs/*/scan/ 但没有进行中的工作？
    → 提示运行 /sillyspec:brainstorm "你的想法"

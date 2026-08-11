@@ -50,16 +50,18 @@ sillyspec run brainstorm --done --answer "..." --output "..."    # 一步完成 
 
 > 自动去重：若前置 step 已对同一问题（waitReason 归一化后相同）确认过，后续重复 wait 会自动跳过，无需再 `--wait`。
 
-- **方式一（推荐）**：AI 自行与用户交互后，一步完成：
-  ```bash
-  sillyspec run brainstorm --done --change <名> --answer "用户回答" --output "需求已澄清"
-  ```
-- **方式二**：分步——先 `--wait` 记录等待，再 `--continue --answer`，最后 `--done`：
+- **方式一（推荐）**：分步——先 `--wait` 记录等待，让用户亲眼看到 CLI 打出的选项再作答，再 `--continue --answer`，最后 `--done`：
   ```bash
   sillyspec run brainstorm --wait --change <名> --reason "等待用户回答" --output "探索问题"
   sillyspec run brainstorm --continue --answer "用户回答" --change <名>
   sillyspec run brainstorm --done --change <名> --output "需求已澄清"
   ```
+- **方式二**：AI 自行与用户交互后，一步完成（仅在用户已在对话中明确给出答案、无需再走 CLI 等待展示时用）：
+  ```bash
+  sillyspec run brainstorm --done --change <名> --answer "用户回答" --output "需求已澄清"
+  ```
+
+> ⚠️ 两种方式都要求 `--answer` 是**用户真实的回答**，不是你替用户编的回答。`requiresWait` 门只校验 `--answer` 非空，挡不住「AI 伪造用户回答」——所以对方案选择/设计确认这类关键决策，优先用方式一让用户亲手作答，而不是 AI 中继一句话带过。
 
 ## 阶段流转
 
@@ -99,7 +101,7 @@ brainstorm 在 `tier=independent` 规模下除 design.md 等四件套外，还�
   ```
 
 - `docHash` = `sha256(主审查文档内容)`（hex）—— brainstorm 主文档是 `design.md`（即 `reviewedFiles[0]`）。CLI 重算 sha256 比对，不符判伪造（fail-closed）。改 design.md 后须重算 docHash。`tier=self`（≤3 文件）降级为当前 agent 自审，不强制独立子代理。
-- 运行时 CLI 通过 `{REVIEW_JSON_CONTRACT}` 注入精确 schema+示例，以注入版为权威逐字模板。
+- 运行时 CLI 会把精确 schema 表 + 完整 JSON 示例 + docHash 算法注入到该步 prompt，以你实际收到的注入版契约为权威逐字模板。
 
 ## 铁律
 
