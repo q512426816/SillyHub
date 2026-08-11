@@ -3,57 +3,46 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
-import { AgentModelInput } from "@/components/AgentModelInput";
-import { AgentRunPanel } from "@/components/agent-run-panel";
-import type { GateStatusEvent } from "@/lib/agent-stream";
+import { PageContainer, PageHeader } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { AgentProviderSelect } from "@/components/AgentProviderSelect";
-import { ChangeFileTree } from "@/components/change-file-tree";
-import { ChangeSessionSection } from "@/components/changes/change-session-section";
+import { ChangeAgentRunLog } from "@/components/changes/detail/change-agent-run-log";
+import { ChangeFilesCard } from "@/components/changes/detail/change-files-card";
 import {
-  PageContainer,
-  PageHeader,
-} from "@/components/layout";
+  ChangeReviewHistoryCard,
+  normalizeReviewHistory,
+} from "@/components/changes/detail/change-review-history-card";
+import { ChangeSessionsCard } from "@/components/changes/detail/change-sessions-card";
+import {
+  ChangeStageActions,
+} from "@/components/changes/detail/change-stage-actions";
+import {
+  ChangeStageHeader,
+  WORKFLOW_STAGE_LABELS,
+} from "@/components/changes/detail/change-stage-header";
+import { ChangeTaskBoardCard } from "@/components/changes/detail/change-task-board-card";
+import type { StepInfo } from "@/components/sillyspec-step-progress";
+import type { StageWorkerPreset } from "@/components/stage-team-config";
+import type { GateStatusEvent } from "@/lib/agent-stream";
 import { ApiError } from "@/lib/api";
 import {
-  executeChange,
-  getChange,
-  checkArchiveGate,
-  getAgentStatus,
-  triggerDispatch,
-  submitStageReview,
-  type ChangeRead,
-  type ArchiveGateResponse,
-  type DispatchResponse,
-  listReviews,
-  transitionChange,
   advanceChangeStage,
+  getAgentStatus,
+  getChange,
   runVerifyGate,
-  type ReviewEntry,
+  submitStageReview,
+  triggerDispatch,
+  type ChangeRead,
+  type DispatchResponse,
   type VerifyGateResponse,
 } from "@/lib/changes";
-import { SillySpecStepProgress, type StepInfo } from "@/components/sillyspec-step-progress";
-import { StageTeamConfig, type StageWorkerPreset } from "@/components/stage-team-config";
-import { TeamProgress } from "@/components/team-progress";
 import { getTaskBoard, type TaskBoard } from "@/lib/tasks";
 
 interface Props {
   params: { id: string; cid: string };
 }
 
-// ── Workflow Stages (主线 6 stage，对齐 design §5 Phase 4) ──────────
-// quick/blocked/archived 退化为 status 徽标（非线性节点），不进本数组。
-// 当 current_stage 为这三态时，WORKFLOW_STAGES.indexOf 返回 -1，
-// 步骤条早返回 null，由独立 STATUS_BADGE 徽标承载语义。
-const WORKFLOW_STAGES = [
-  "brainstorm", "plan", "execute", "verify", "archive",
-] as const;
-
-// task-12（2026-08-08-change-center-on-demand，FR-06/D-005）：主线阶段的下一阶段映射，
-// 对齐后端 TRANSITIONS（model.py:82 brainstorm→plan→execute→verify→archive 线性单出口）。
-// 砍 auto_dispatch 后阶段停「完成待触发」态，前端「推进」按钮据此算 target_stage 调
-// advance-stage 端点。archive 无下一阶段（终态），不在映射内。
+// task-12（2026-08-11-change-center-on-demand，FR-06/D-005）：主线阶段下一阶段映射。
+// 对齐后端 TRANSITIONS（brainstorm→plan→execute→verify→archive 线性单出口）。archive 终态无下一阶段。
 const NEXT_STAGE: Record<string, string> = {
   brainstorm: "plan",
   plan: "execute",
@@ -61,149 +50,42 @@ const NEXT_STAGE: Record<string, string> = {
   verify: "archive",
 };
 
-const WORKFLOW_STAGE_LABELS: Record<string, string> = {
-  brainstorm: "需求分析",
-  plan: "规划", execute: "执行",
-  verify: "验证", archive: "归档",
-};
-
-const WORKFLOW_STAGE_COLORS: Record<string, "success" | "outline" | "destructive" | "default" | "warning"> = {
-  brainstorm: "warning",
-  plan: "default", execute: "default",
-  verify: "warning", archive: "default",
-};
-
 // quick/blocked/archived 三态 status 徽标（非线性节点，独立呈现）
-const STATUS_BADGE: Record<string, { label: string; variant: "success" | "outline" | "destructive" | "default" | "warning" }> = {
+const STATUS_BADGE: Record<
+  string,
+  { label: string; variant: "success" | "outline" | "destructive" | "default" }
+> = {
   quick: { label: "快速修复", variant: "default" },
   blocked: { label: "已阻塞", variant: "destructive" },
   archived: { label: "已归档", variant: "success" },
 };
 
-// Gate panel config: 由 change.pending_review 投影字段驱动（对齐 task-03 PendingReview 枚举）
-// 4 个面板分别对应 proposal_review / plan_review / human_test / archive_confirm。
-const GATE_PANELS: Record<string, {
-  title: string;
-  description: string;
-  actions: { label: string; variant: "default" | "outline" | "destructive"; action: string }[];
-}> = {
-  proposal_review: {
-    title: "四件套已生成，请确认",
-    description: "智能体 已生成 proposal / requirements / design / tasks，请审阅后决定",
-    actions: [
-      { label: "确认通过", variant: "default", action: "proposal_approve" },
-      { label: "需要修改", variant: "outline", action: "proposal_revise" },
-      { label: "需求不明确", variant: "destructive", action: "proposal_unclear" },
-    ],
-  },
-  plan_review: {
-    title: "执行计划已生成，请确认",
-    description: "智能体 已生成执行计划，请审阅后决定",
-    actions: [
-      { label: "确认计划", variant: "default", action: "plan_approve" },
-      { label: "重新计划", variant: "outline", action: "plan_replan" },
-      { label: "退回文档", variant: "destructive", action: "plan_back_to_propose" },
-      { label: "退回需求", variant: "destructive", action: "plan_back_to_brainstorm" },
-    ],
-  },
-  human_test: {
-    title: "自动验证通过，请人工测试",
-    description: "智能体 已完成自动验证，请进行人工测试（发现 BUG / 文档不符即返工反馈）",
-    actions: [
-      { label: "测试通过", variant: "default", action: "test_pass" },
-      { label: "发现 BUG", variant: "destructive", action: "test_bug" },
-      { label: "文档不符", variant: "outline", action: "test_doc_mismatch" },
-    ],
-  },
-  archive_confirm: {
-    title: "归档确认",
-    description: "所有验证已通过，确认归档此变更",
-    actions: [{ label: "确认归档", variant: "default", action: "archive_confirm" }],
-  },
-};
-
-const APPROVAL_LABELS: Record<string, string> = {
-  pending: "待审批",
-  approved: "已批准",
-  rejected: "已驳回",
-  not_required: "无需审批",
-};
-
-const COMPONENT_EMOJI: Record<string, string> = {
-  frontend: "🌐",
-  web: "🌐",
-  backend: "⚙️",
-  api: "⚙️",
-  agent: "🤖",
-  parser: "🔌",
-  git: "🔀",
-  docs: "📄",
-  documentation: "📄",
-};
-
-function getComponentEmoji(name: string): string {
-  const lower = name.toLowerCase();
-  for (const [key, emoji] of Object.entries(COMPONENT_EMOJI)) {
-    if (lower.includes(key)) return emoji;
-  }
-  return "📦";
-}
-
 export default function ChangeDetailPage({ params }: Props) {
   const workspaceId = params.id;
   const changeId = params.cid;
   const [change, setChange] = useState<ChangeRead | null>(null);
-  const [loadingDoc, setLoadingDoc] = useState(false);
-  const [pageError, setPageError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [reviews, setReviews] = useState<ReviewEntry[]>([]);
+  const [pageError, setPageError] = useState<string | null>(null);
   const [transitioning, setTransitioning] = useState(false);
   const [taskBoard, setTaskBoard] = useState<TaskBoard | null>(null);
-  const [executing, setExecuting] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // ── Archive gate state (task-06) ───────────────────────────────────
-  const [archiveGate, setArchiveGate] = useState<ArchiveGateResponse | null>(null);
-  const [loadingArchiveGate, setLoadingArchiveGate] = useState(false);
-
-  // ── Agent Dispatch state ───────────────────────────────────────────
+  // ── Agent Dispatch / 推进 / 门禁 state ───────────────────────────
   const [agentStatus, setAgentStatus] = useState<DispatchResponse | null>(null);
   const [loadingAgentStatus, setLoadingAgentStatus] = useState(false);
   const [dispatching, setDispatching] = useState(false);
-  // 阶段流转 / 手动派发使用的 agent provider 覆盖（FR-02，2026-06-14-agent-runtime-selection）
   const [stageProvider, setStageProvider] = useState<string | null>(null);
   const [stageModel, setStageModel] = useState<string | null>(null);
-  // team-mode 开关（task-08，D-002/D-003）：execute/verify 流转时是否用团队执行。
-  // 默认 false（单 worker 零回归）；true 时 transition/execute 链路透传 team_mode=true。
   const [teamMode, setTeamMode] = useState(false);
-  // task-08：stage team worker 预设（mode=team 时携带，D-002@v2 用户预设）。
-  // stage 化默认（execute→impl，verify→verify）；透传给 backend 留 task-09 三入口接通。
   const [stageWorkers, setStageWorkers] = useState<StageWorkerPreset[]>([]);
-  // task-08：stage team mission 创建后的 missionId（用于 TeamProgress 展示）。
-  // task-09 接通：transition team_mode dispatch 返回 mission_id 时 set，驱动 TeamProgress。
   const [stageTeamMissionId, setStageTeamMissionId] = useState<string | null>(null);
   const [gateStatus, setGateStatus] = useState<GateStatusEvent | null>(null);
   const [gateComment, setGateComment] = useState("");
-  // task-12：advance-stage / run-verify-gate 的本地状态（按需触发，FR-06/D-005）。
-  // advancing 独立于 dispatching（transition 用 transitioning，dispatch 用 dispatching），
-  // 让「推进」按钮单独 loading；verifyGate 存最近一次 run-verify-gate 软调用结果。
   const [advancing, setAdvancing] = useState(false);
   const [verifyGate, setVerifyGate] = useState<VerifyGateResponse | null>(null);
-
-  // ── Agent Log Stream state ──────────────────────────────────────────
-  const [logsExpanded, setLogsExpanded] = useState(false);
-
-  // R-06 localRunId 兜底：dispatch 成功后立即指向新 run，不等 refresh；
-  // refreshAgentStatus 完成后清空让派生 activeRunId 接管。
+  // R-06 localRunId 兜底：dispatch 成功后立即指向新 run，不等 refresh
   const [localRunId, setLocalRunId] = useState<string | null>(null);
-
-  // Auto-expand logs when agent becomes active or has last_dispatch
-  useEffect(() => {
-    if (!logsExpanded && (agentStatus?.has_active_run || agentStatus?.last_dispatch)) {
-      setLogsExpanded(true);
-    }
-  }, [agentStatus?.has_active_run, agentStatus?.last_dispatch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const load = async () => {
@@ -211,14 +93,12 @@ export default function ChangeDetailPage({ params }: Props) {
       setPageError(null);
       setLoadError(null);
       try {
-        const [c, r, tb, as] = await Promise.all([
+        const [c, tb, as] = await Promise.all([
           getChange(workspaceId, changeId),
-          listReviews(workspaceId, changeId).catch(() => []),
           getTaskBoard(workspaceId, changeId).catch(() => null),
           getAgentStatus(workspaceId, changeId).catch(() => null),
         ]);
         setChange(c);
-        setReviews(r);
         setTaskBoard(tb);
         setAgentStatus(as);
       } catch (err) {
@@ -230,139 +110,36 @@ export default function ChangeDetailPage({ params }: Props) {
     void load();
   }, [workspaceId, changeId]);
 
-  const handleTransition = async (targetStage: string) => {
-    if (!change) return;
-    setTransitioning(true);
-    setPageError(null);
-    try {
-      // task-09：team_mode 透传 worker_preset + main_agent_config（D-002/D-003@v2）。
-      // main_agent_config 从 stage provider/model 派生（agent_type 跟随 workspace 默认，
-      // StageTeamConfig 主 agent 只读展示 provider/model）。worker_preset 仅 team 时携带。
-      const mainAgentConfig = teamMode
-        ? {
-            ...(stageProvider ? { provider: stageProvider } : {}),
-            ...(stageModel ? { model: stageModel } : {}),
-          }
-        : undefined;
-      const result = await transitionChange(
-        workspaceId,
-        changeId,
-        targetStage,
-        undefined,
-        stageProvider,
-        stageModel,
-        teamMode,
-        teamMode ? stageWorkers : undefined,
-        mainAgentConfig,
-      );
-      // Backend returns { change: {...}, agent_dispatch: {...} }
-      const changeData = result.change;
-      setChange({
-        ...change,
-        current_stage: targetStage,
-        status: changeData.status ?? change.status,
-        stages: (changeData.stages as Record<string, unknown>) ?? change.stages,
-      });
-      // Show agent dispatch feedback
-      if (result.agent_dispatch?.dispatched) {
-        setSuccessMsg(`🤖 智能体 已自动派发 (${result.agent_dispatch.stage ?? targetStage})`);
-        setTimeout(() => setSuccessMsg(null), 4000);
-        // task-09：team_mode dispatch 返回 mission_id，驱动 TeamProgress 展示。
-        if (result.agent_dispatch.mission_id) {
-          setStageTeamMissionId(result.agent_dispatch.mission_id);
-        }
-      } else if (result.agent_dispatch && !result.agent_dispatch.dispatched) {
-        const reason = result.agent_dispatch.reason;
-        if (reason === "active_run_exists") {
-          setSuccessMsg("⚠️ 智能体 已在运行中，跳过重复派发");
-          setTimeout(() => setSuccessMsg(null), 3000);
-        }
-      }
-      // Refresh agent status after transition
-      try {
-        const as = await getAgentStatus(workspaceId, changeId);
-        setAgentStatus(as);
-      } catch { /* silent */ }
-    } catch (err) {
-      if (err instanceof ApiError) {
-        const violations = (err.details as { violations?: string[] })?.violations;
-        setPageError(violations ? violations.join("；") : err.message);
-      } else {
-        setPageError("状态转移失败");
-      }
-    } finally {
-      setTransitioning(false);
-    }
-  };
-
-  // task-13（FR-06）：旧审核链路 handler（handleSubmitReview / handleApprove /
-  // handleReject）已退役——统一收敛到 submitStageReview（gate 面板），旧
-  // approval_status 不再驱动推进，仅保留只读展示（见下方「审批状态」section）。
-
-  const handleExecute = async () => {
-    if (!change) return;
-    setExecuting(true);
-    setPageError(null);
-    setSuccessMsg(null);
-    try {
-      const result = await executeChange(workspaceId, change.change_key, stageProvider, stageModel, teamMode);
-      if (result.ok) {
-        // Refresh change data after successful execution
-        const updated = await getChange(workspaceId, changeId);
-        setChange(updated);
-        setSuccessMsg("✅ 智能体执行已启动 (run_id: " + (result.run_id?.slice(0, 8) ?? "unknown") + ")");
-        setTimeout(() => setSuccessMsg(null), 5000);
-      }
-    } catch (err) {
-      setPageError(err instanceof ApiError ? err.message : "启动执行失败");
-    } finally {
-      setExecuting(false);
-    }
-  };
-
-  // ── Archive gate handler (task-06) ──────────────────────────────
-  const loadArchiveGate = async () => {
-    setLoadingArchiveGate(true);
-    try {
-      const result = await checkArchiveGate(workspaceId, changeId);
-      setArchiveGate(result);
-    } catch (err) {
-      setPageError(err instanceof ApiError ? err.message : "加载归档检查失败");
-    } finally {
-      setLoadingArchiveGate(false);
-    }
-  };
-
-  // ── Agent Dispatch handler（task-12 改按需触发，FR-06/D-005）─────────────
   const refreshAgentStatus = useCallback(async () => {
     setLoadingAgentStatus(true);
     try {
       const as = await getAgentStatus(workspaceId, changeId);
       setAgentStatus(as);
-      // R-06：refresh 完成，activeRunId 已追上 localRunId（同值），清空让派生值接管，
-      // 避免 localRunId 永久卡住导致 isRunActive=false 时 panelIsActive 仍 true。
+      // R-06：refresh 完成，activeRunId 已追上 localRunId，清空让其接管
       setLocalRunId(null);
-    } catch { /* silent */ } finally {
+    } catch {
+      /* silent */
+    } finally {
       setLoadingAgentStatus(false);
     }
   }, [workspaceId, changeId]);
 
-  // task-12：当前阶段的下一阶段（无则 null，如 archive 终态）。
-  const nextStage = change?.current_stage ? NEXT_STAGE[change.current_stage] ?? null : null;
+  const nextStage = change?.current_stage
+    ? (NEXT_STAGE[change.current_stage] ?? null)
+    : null;
 
-  /**
-   * 重新派发当前阶段 agent（POST /dispatch，task-12 保留）。砍 auto_dispatch 不砍
-   * 手动重派当前阶段的能力（如失败重跑当前 step）。此端点不依赖 auto_dispatch 自动
-   * 连轴——它只 dispatch 当前 stage，推进到下一 stage 由 handleAdvance 显式触发。
-   */
+  /** 重新派发当前阶段 agent（POST /dispatch，task-12 保留）。 */
   const handleDispatch = async () => {
     setDispatching(true);
     setPageError(null);
     try {
-      const result = await triggerDispatch(workspaceId, changeId, stageProvider, stageModel);
-
-      // 软失败（200 OK + dispatched:false）：dispatch_result.error 携带真实原因
-      // （如 daemon-client root 校验失败 / dispatch_error）。不抛 ApiError，必须显式读。
+      const result = await triggerDispatch(
+        workspaceId,
+        changeId,
+        stageProvider,
+        stageModel,
+      );
+      // 软失败（200 OK + dispatched:false）
       if (result.dispatch_result && !result.dispatch_result.dispatched) {
         const dr = result.dispatch_result;
         const reasonText =
@@ -373,15 +150,10 @@ export default function ChangeDetailPage({ params }: Props) {
         void refreshAgentStatus();
         return;
       }
-
       setAgentStatus(result);
-      setLogsExpanded(true);
-
       if (result.has_active_run && result.last_dispatch?.run_id) {
         setSuccessMsg("🤖 智能体 已触发执行");
         setTimeout(() => setSuccessMsg(null), 3000);
-        // R-06：立即 setLocalRunId → panelRunId 立即指向新 run → panel 内 hook
-        // useEffect（runId 变化）触发重连，不等 refreshAgentStatus。
         setLocalRunId(result.last_dispatch.run_id);
       }
       void refreshAgentStatus();
@@ -392,18 +164,12 @@ export default function ChangeDetailPage({ params }: Props) {
     }
   };
 
-  /**
-   * task-12（FR-06/D-005）：「推进」改调 change 阶层 advance-stage HTTP 端点，不再依赖
-   * 后端 auto_dispatch 自动连轴。当前阶段完成停「完成待触发」态时，点「推进」显式推进到
-   * 下一阶段并 dispatch 该阶段 agent（team 分流由后端 transition_with_dispatch 处理）。
-   */
+  /** task-12（FR-06/D-005）：「推进」调 advance-stage 显式推进到下一阶段并 dispatch。 */
   const handleAdvance = async () => {
     if (!change || !nextStage) return;
     setDispatching(true);
     setPageError(null);
     try {
-      // team_mode 透传 worker_preset + main_agent_config（对齐 handleTransition，
-      // D-002/D-003@v2）。advance-stage body 与 /transition 完全对齐。
       const mainAgentConfig = teamMode
         ? {
             ...(stageProvider ? { provider: stageProvider } : {}),
@@ -417,8 +183,6 @@ export default function ChangeDetailPage({ params }: Props) {
         workerPreset: teamMode ? stageWorkers : undefined,
         mainAgentConfig,
       });
-
-      // 推进成功：更新 change 当前阶段 + stages。
       const changeData = result.change;
       setChange({
         ...change,
@@ -426,12 +190,11 @@ export default function ChangeDetailPage({ params }: Props) {
         status: changeData.status ?? change.status,
         stages: (changeData.stages as Record<string, unknown>) ?? change.stages,
       });
-
-      // dispatch 反馈：dispatched=true 时立即指向新 run（R-06 localRunId 兜底）。
       if (result.agent_dispatch?.dispatched) {
-        setSuccessMsg(`🤖 已推进到「${WORKFLOW_STAGE_LABELS[nextStage] ?? nextStage}」并派发智能体`);
+        setSuccessMsg(
+          `🤖 已推进到「${WORKFLOW_STAGE_LABELS[nextStage] ?? nextStage}」并派发智能体`,
+        );
         setTimeout(() => setSuccessMsg(null), 4000);
-        setLogsExpanded(true);
         if (result.agent_dispatch.agent_run_id) {
           setLocalRunId(result.agent_dispatch.agent_run_id);
         }
@@ -439,7 +202,6 @@ export default function ChangeDetailPage({ params }: Props) {
           setStageTeamMissionId(result.agent_dispatch.mission_id);
         }
       } else if (result.agent_dispatch && !result.agent_dispatch.dispatched) {
-        // 软失败（dispatched:false）：reason 携带原因（如 active_run_exists）。
         const reason = result.agent_dispatch.reason;
         if (reason === "active_run_exists") {
           setSuccessMsg("⚠️ 智能体 已在运行中，跳过重复派发");
@@ -449,7 +211,6 @@ export default function ChangeDetailPage({ params }: Props) {
           setTimeout(() => setSuccessMsg(null), 3000);
         }
       }
-      // 异步 refresh（不阻塞 UI），完成后 localRunId 清空、activeRunId 接管
       void refreshAgentStatus();
     } catch (err) {
       if (err instanceof ApiError) {
@@ -463,10 +224,7 @@ export default function ChangeDetailPage({ params }: Props) {
     }
   };
 
-  /**
-   * task-12（D-003/D-008）：run_verify_gate 软调用。不硬阻塞、不改 change 状态，
-   * 结果交用户决策。点「运行验证门禁」时显式触发，结果落 verifyGate 供 UI 展示。
-   */
+  /** task-12（D-003/D-008）：run-verify-gate 软调用，结果交用户决策。 */
   const handleRunVerifyGate = async () => {
     setAdvancing(true);
     setPageError(null);
@@ -484,21 +242,17 @@ export default function ChangeDetailPage({ params }: Props) {
     }
   };
 
-  // ── Agent Log Stream（R-06 localRunId 兜底派生）─────────────────────
+  // ── Agent Log Stream（R-06 localRunId 兜底派生）──
   const activeRunId = agentStatus?.last_dispatch?.run_id ?? null;
   const isRunActive = agentStatus?.has_active_run ?? false;
-  // R-06：localRunId 优先（dispatch 立即值），回落到 refresh 后的 activeRunId
   const panelRunId = localRunId ?? activeRunId;
-  // R-06：localRunId 非 null = 刚 dispatch 必活跃，强制连 SSE；否则回退 isRunActive（D-001）
   const panelIsActive = localRunId !== null ? true : isRunActive;
 
-  // R-01：onDone 稳定引用 useCallback，run 结束触发 refresh（内含 setLocalRunId(null)）
   const handleChangesRunDone = useCallback(() => {
     setLocalRunId(null);
     void refreshAgentStatus();
   }, [refreshAgentStatus]);
 
-  // ── Manual refresh: agent-status + change ─────────────────────────
   const refreshAll = useCallback(async () => {
     try {
       const [c, as] = await Promise.all([
@@ -507,16 +261,12 @@ export default function ChangeDetailPage({ params }: Props) {
       ]);
       setChange(c);
       setAgentStatus(as);
-    } catch { /* silent */ }
+    } catch {
+      /* silent */
+    }
   }, [workspaceId, changeId]);
 
-  // task-12（FR-06/D-005 implementation 3）：gate_status_changed SSE 收到后刷新阶段视图。
-  // gate 决策完成（decided/failed）后阶段落「完成待触发」态，需 refresh change +
-  // agent-status 让「推进」按钮及时出现（R-06 gate_result 落库时序）。gate_status_changed
-  // SSE 复用 agent_run:{id} channel，经 AgentRunPanel.onGateStatusChanged → setGateStatus
-  // 到此处。stage_status_changed SSE 同为该 channel（backend run_sync:1471），但前端
-  // agent-stream.ts 未解析（不在本 task allowed_paths），由本 effect + run-done refresh
-  // 覆盖阶段视图刷新。
+  // gate_status_changed SSE 收到后刷新（decided/failed → 推进按钮及时出现）
   useEffect(() => {
     if (!gateStatus) return;
     if (gateStatus.gate_status === "decided" || gateStatus.gate_status === "failed") {
@@ -524,14 +274,30 @@ export default function ChangeDetailPage({ params }: Props) {
     }
   }, [gateStatus, refreshAll]);
 
-
-  // Auto-load archive gate when entering archive stage
-  useEffect(() => {
-    if (change?.current_stage === "archive" && !archiveGate && !loadingArchiveGate) {
-      void loadArchiveGate();
+  // gate 审核唯一入口 submitStageReview（task-13/FR-06）
+  const handleGateAction = async (action: string) => {
+    if (transitioning) return;
+    setTransitioning(true);
+    try {
+      await submitStageReview(
+        workspaceId,
+        changeId,
+        action,
+        gateComment || undefined,
+      );
+      setGateComment("");
+      const [updated, updatedAgentStatus] = await Promise.all([
+        getChange(workspaceId, changeId),
+        getAgentStatus(workspaceId, changeId),
+      ]);
+      setChange(updated);
+      setAgentStatus(updatedAgentStatus);
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "操作失败");
+    } finally {
+      setTransitioning(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [change?.current_stage]);
+  };
 
   if (loading) {
     return (
@@ -557,37 +323,46 @@ export default function ChangeDetailPage({ params }: Props) {
     );
   }
 
-  // pending_review 为只读投影（task-03 后端 DTO），驱动 GATE_PANELS。
-  // 无投影（null/undefined）时无审核面板。
-  const gatePanel = GATE_PANELS[change.pending_review ?? ""];
-
-  const handleGateAction = async (action: string) => {
-    if (transitioning) return;
-    setTransitioning(true);
-    try {
-      // task-13（FR-06）：审核唯一入口 submitStageReview——gate 面板 4 类 action 统一
-      // 分发到 submit_stage_review 语义（内部复用既有 proposalReview/planReview/
-      // humanTest/archiveConfirm HTTP 端点，零新增端点）。旧 approval_status + 通用
-      // submitReview 链路已退役（page.tsx 不再有第二条审核入口）。
-      await submitStageReview(workspaceId, changeId, action, gateComment || undefined);
-      setGateComment("");
-      const [updated, updatedAgentStatus] = await Promise.all([
-        getChange(workspaceId, changeId),
-        getAgentStatus(workspaceId, changeId),
-      ]);
-      setChange(updated);
-      setAgentStatus(updatedAgentStatus);
-    } catch (err) {
-      setPageError(err instanceof ApiError ? err.message : "操作失败");
-    } finally {
-      setTransitioning(false);
+  // 子步骤进度派生（从 change.stages，搬自原 page.tsx）
+  const steps: StepInfo[] | undefined = (() => {
+    const stages = change.stages as Record<string, unknown> | null;
+    if (!stages || !change.current_stage) return undefined;
+    const topLevel = stages.steps;
+    if (Array.isArray(topLevel)) return topLevel as StepInfo[];
+    const stageData = stages[change.current_stage] as
+      | Record<string, unknown>
+      | undefined;
+    if (
+      stageData?.steps &&
+      typeof stageData.steps === "object" &&
+      !Array.isArray(stageData.steps)
+    ) {
+      const s = stageData.steps as { completed?: string[]; pending?: string[] };
+      const result: StepInfo[] = [];
+      let idx = 1;
+      for (const name of s.completed ?? []) {
+        result.push({ index: idx++, name, status: "completed" });
+      }
+      for (const name of s.pending ?? []) {
+        result.push({ index: idx++, name, status: "pending" });
+      }
+      return result.length > 0 ? result : undefined;
     }
-  };
+    return undefined;
+  })();
+
+  // 审核历史派生（从 change.stages.review_history，归一化 gate/rerun 双形状）
+  const reviewHistory = normalizeReviewHistory(
+    (change.stages as Record<string, unknown> | null)?.review_history,
+  );
 
   return (
     <PageContainer className="gap-5">
       <p className="text-[11px] text-muted-foreground">
-        <Link href={`/workspaces/${workspaceId}/changes`} className="hover:underline">
+        <Link
+          href={`/workspaces/${workspaceId}/changes`}
+          className="hover:underline"
+        >
           ← 变更列表
         </Link>
       </p>
@@ -596,20 +371,15 @@ export default function ChangeDetailPage({ params }: Props) {
           <span className="flex items-center gap-2">
             <span className="truncate">{change.title ?? change.change_key}</span>
             {(() => {
-              // quick/blocked/archived 三态走 STATUS_BADGE；
-              // 主线 6 stage 走 WORKFLOW_STAGE_LABELS/COLORS；
-              // 旧值（brownfield）走 ?? "未知" 兜底不崩。
               const stage = change.current_stage ?? "draft";
               const statusBadge = STATUS_BADGE[stage];
               if (statusBadge) {
                 return (
-                  <Badge variant={statusBadge.variant}>
-                    {statusBadge.label}
-                  </Badge>
+                  <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
                 );
               }
               return (
-                <Badge variant={WORKFLOW_STAGE_COLORS[stage] ?? "outline"}>
+                <Badge variant="outline">
                   {WORKFLOW_STAGE_LABELS[stage] ?? stage ?? "未知"}
                 </Badge>
               );
@@ -618,500 +388,95 @@ export default function ChangeDetailPage({ params }: Props) {
         }
         subtitle={
           <span className="flex flex-wrap gap-x-5 gap-y-0.5">
-            <span>Key: <code className="font-mono">{change.change_key}</code></span>
+            <span>
+              Key: <code className="font-mono">{change.change_key}</code>
+            </span>
             <span>类型: {change.change_type ?? "—"}</span>
             <span>位置: {change.location}</span>
-            <span>影响: {change.affected_components.length > 0 ? change.affected_components.join(", ") : "—"}</span>
+            <span>
+              影响:{" "}
+              {change.affected_components.length > 0
+                ? change.affected_components.join(", ")
+                : "—"}
+            </span>
           </span>
         }
       />
 
-      {change.current_stage && (() => {
-        const currentIndex = WORKFLOW_STAGES.indexOf(change.current_stage as typeof WORKFLOW_STAGES[number]);
-        if (currentIndex < 0) return null;
-        const stagesObj = change.stages as Record<string, { lastActive?: string }> | null;
-        const lastActive = stagesObj?.[change.current_stage]?.lastActive ?? change.updated_at;
-        return (
-          <div className="rounded-md border bg-card px-3 py-2">
-            <div className="flex flex-wrap items-center gap-1">
-              {WORKFLOW_STAGES.map((stage, i) => {
-                const isCompleted = currentIndex > i;
-                const isCurrent = currentIndex === i;
-                return (
-                  <div key={stage} className="flex items-center">
-                    <div
-                      className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-medium ${
-                        isCurrent
-                          ? "bg-primary text-primary-foreground"
-                          : isCompleted
-                            ? "bg-emerald-500 text-white"
-                            : "bg-muted text-muted-foreground"
-                      }`}
-                    >
-                      {isCompleted ? "✓" : i + 1}
-                    </div>
-                    <span
-                      className={`ml-1 text-[11px] ${
-                        isCurrent ? "text-foreground font-medium" : "text-muted-foreground"
-                      }`}
-                    >
-                      {WORKFLOW_STAGE_LABELS[stage]}
-                    </span>
-                    {i < WORKFLOW_STAGES.length - 1 && <div className="mx-1 h-px w-3 bg-border" />}
-                  </div>
-                );
-              })}
-            </div>
-            {lastActive && (
-              <p className="mt-1.5 text-[11px] text-muted-foreground">
-                当前阶段: {new Date(lastActive).toLocaleString()}
-              </p>
-            )}
-          </div>
-        );
-      })()}
-
-      <div className="flex items-center gap-2">
-        <Link
-          href={`/workspaces/${workspaceId}/changes/${changeId}/tasks`}
-          className="inline-flex h-7 items-center rounded bg-primary px-2 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-        >
-          任务看板
-        </Link>
-        {!gatePanel && (agentStatus?.has_active_run || agentStatus?.config_enabled) && (
-          <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
-            <div className="h-2 w-2 animate-pulse rounded-full bg-primary" />
-            <span className="text-xs text-muted-foreground">
-              智能体正在执行 {WORKFLOW_STAGE_LABELS[change.current_stage ?? "draft"] ?? change.current_stage} 阶段
-            </span>
-          </div>
-        )}
-      </div>
-
-      {gatePanel && (
-        <section className="rounded-md border-2 border-primary/20 bg-primary/5 px-4 py-3 space-y-2.5">
-          <div>
-            <p className="text-sm font-semibold">{gatePanel.title}</p>
-            <p className="text-xs text-muted-foreground">{gatePanel.description}</p>
-          </div>
-          <textarea
-            className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-xs focus:border-ring focus:outline-none"
-            rows={2}
-            placeholder="审核意见（可选）"
-            value={gateComment}
-            onChange={(e) => setGateComment(e.target.value)}
-          />
-          <div className="flex flex-wrap gap-2">
-            {gatePanel.actions.map((a) => (
-              <Button
-                key={a.action}
-                variant={a.variant}
-                size="sm"
-                onClick={() => void handleGateAction(a.action)}
-                disabled={transitioning}
-              >
-                {a.label}
-              </Button>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* ── task-12「完成待触发」推进横幅（FR-06/D-005 implementation 4，解 R-01）── */}
-      {/* 砍 auto_dispatch 后阶段完成停「完成待触发」态，需显式「推进」。显示条件：
-          主线阶段 + 无审核面板（pending_review 走各自 gate 按钮）+ 无活跃 run +
-          存在下一阶段（archive 终态不显示）。点「推进」调 advance-stage 按需推进。 */}
-      {!gatePanel && nextStage && !agentStatus?.has_active_run && (
-        <section className="rounded-md border border-primary/30 bg-primary/5 px-4 py-3 space-y-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <p className="text-sm font-semibold">
-                当前阶段已完成，待触发下一阶段
-              </p>
-              <p className="text-xs text-muted-foreground">
-                下一阶段：{WORKFLOW_STAGE_LABELS[nextStage] ?? nextStage}（按需触发，不再自动连轴）
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              {change.current_stage === "verify" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleRunVerifyGate()}
-                  disabled={advancing || dispatching}
-                >
-                  {advancing ? "核验中…" : "运行验证门禁"}
-                </Button>
-              )}
-              <Button
-                size="sm"
-                onClick={() => void handleAdvance()}
-                disabled={dispatching || advancing}
-              >
-                {dispatching ? "推进中…" : `推进到「${WORKFLOW_STAGE_LABELS[nextStage] ?? nextStage}」`}
-              </Button>
-            </div>
-          </div>
-          {/* verify gate 软调用结果（D-003/D-008）：交用户决策，不硬阻塞。 */}
-          {verifyGate && (
-            <p className="text-[11px] text-muted-foreground">
-              验证门禁：
-              {verifyGate.source === "unavailable"
-                ? "暂不可用（请人工核验）"
-                : verifyGate.exit_code === 0
-                  ? "✓ 通过"
-                  : verifyGate.exit_code === null
-                    ? "无结果"
-                    : `✗ 未通过（exit ${verifyGate.exit_code}）`}
-              {verifyGate.errors.length > 0 &&
-                ` · ${verifyGate.errors.slice(0, 3).join("；")}`}
-            </p>
-          )}
-        </section>
-      )}
-
-      {/* ── Agent Provider Override（FR-02）─────────────────────── */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-muted-foreground whitespace-nowrap">
-          Agent provider（阶段流转 / 手动派发时生效）
-        </span>
-        <AgentProviderSelect
-          value={stageProvider}
-          onChange={setStageProvider}
-          includeDefault="跟随工作区默认"
-        />
-        <AgentModelInput
-          value={stageModel}
-          onChange={setStageModel}
-          className="w-[260px]"
-        />
-      </div>
-
-      {/* ── team-mode 开关（task-08，D-002）────────────────────── */}
-      {/* execute + verify stage 可配 team（v1 D-002：brainstorm/plan 不 team）。
-          渲染时机：plan 审核通过将进 execute / 已在 execute / 已在 verify / human_test 待流转。
-          紫色对齐 mission-console task-07（violet-500）。默认 false 零回归。 */}
-      {(change.pending_review === "plan_review" ||
-        change.current_stage === "execute" ||
-        change.current_stage === "verify" ||
-        change.pending_review === "human_test") && (
-        <div className="space-y-2">
-          <label className="flex items-center gap-2.5 rounded-md border border-violet-500/40 bg-violet-50 px-3 py-2 text-xs">
-            <button
-              type="button"
-              role="switch"
-              aria-checked={teamMode}
-              aria-label="用团队执行"
-              onClick={() => setTeamMode(!teamMode)}
-              className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
-                teamMode ? "bg-violet-500" : "bg-muted"
-              }`}
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                  teamMode ? "translate-x-4" : "translate-x-0.5"
-                }`}
-              />
-            </button>
-            <span className="font-medium text-violet-900">用团队{change.current_stage === "verify" ? "验证" : "执行"}</span>
-            <span className="text-muted-foreground">
-              （多 worker 并行{change.current_stage === "verify" ? "核验" : "写"}，主 agent 指挥 + 合并）
-            </span>
-          </label>
-
-          {/* team 开启时展开 stage worker 预设（task-08 / D-002@v2）。
-              stage 化：execute→impl workers，verify→verify workers。
-              具体透传给 backend 走 task-09 三入口接通。 */}
-          {teamMode && (
-            <StageTeamConfig
-              stage={change.current_stage === "verify" ? "verify" : "execute"}
-              workers={stageWorkers}
-              onWorkersChange={setStageWorkers}
-              provider={stageProvider ?? undefined}
-              model={stageModel ?? undefined}
-            />
-          )}
-        </div>
-      )}
-
-      {/* ── TeamProgress（task-08）：stage team mission 进度展示 ────── */}
-      {/* task-09 接通：transition team_mode dispatch 返回 mission_id 时展示。 */}
-      {teamMode && stageTeamMissionId && (
-        <TeamProgress
-          missionId={stageTeamMissionId}
-          workspaceId={workspaceId}
-        />
-      )}
-
-      {/* ── SillySpec Step Progress ─────────────────────────────── */}
-      <SillySpecStepProgress
+      {/* 阶段步骤条（主线宏观进度） */}
+      <ChangeStageHeader
         currentStage={change.current_stage ?? null}
-        steps={(() => {
-            const stages = change.stages as Record<string, unknown> | null;
-            if (!stages || !change.current_stage) return undefined;
-            // Try top-level steps first (legacy)
-            const topLevel = stages.steps;
-            if (Array.isArray(topLevel)) return topLevel as StepInfo[];
-            // Try nested under current stage: stages[current_stage].steps = {completed:[], pending:[]}
-            const stageData = stages[change.current_stage] as Record<string, unknown> | undefined;
-            if (stageData?.steps && typeof stageData.steps === "object" && !Array.isArray(stageData.steps)) {
-              const s = stageData.steps as { completed?: string[]; pending?: string[] };
-              const result: StepInfo[] = [];
-              let idx = 1;
-              for (const name of s.completed ?? []) {
-                result.push({ index: idx++, name, status: "completed" });
-              }
-              for (const name of s.pending ?? []) {
-                result.push({ index: idx++, name, status: "pending" });
-              }
-              return result.length > 0 ? result : undefined;
-            }
-            return undefined;
-          })()}
-        hasActiveRun={agentStatus?.has_active_run ?? false}
-        configEnabled={agentStatus?.config_enabled ?? false}
-        lastDispatchStatus={agentStatus?.last_dispatch?.status as "running" | "completed" | "failed" | null}
-        lastDispatchFinishedAt={agentStatus?.last_dispatch?.finished_at}
-        lastDispatchSummary={agentStatus?.last_dispatch?.output_summary}
-        onRefresh={() => void refreshAgentStatus()}
-        refreshing={loadingAgentStatus}
-        onDispatch={() => void handleDispatch()}
-        dispatching={dispatching}
-        stageLabels={WORKFLOW_STAGE_LABELS}
+        stages={change.stages as Record<string, unknown> | null}
+        updatedAt={change.updated_at ?? null}
       />
 
-      {/* ── Agent 执行日志（AgentRunPanel 接管 SSE + 审批 + input，FR-01/FR-04）── */}
-      {panelRunId && (
-        <div className="rounded-md border bg-card">
-          <button
-            className="flex w-full items-center justify-between border-b px-3 py-2 text-left"
-            onClick={() => setLogsExpanded(!logsExpanded)}
-          >
-              <div className="flex items-center gap-2">
-                <h2 className="text-xs font-medium">智能体执行日志</h2>
-                {/* task-12 / design §5.7：gate_status 徽标。数据源合并——SSE gate_status_changed
-                    （实时优先）回退 agentStatus.last_dispatch.gate_status（初始/刷新，gate 已
-                    decided 不再发 SSE 时兜底）。pending/running→客观核验中；decided+无 errors→
-                    已通过；decided+errors / failed→核验失败（附 errors 摘要）。 */}
-                {(() => {
-                  const gs =
-                    gateStatus?.gate_status ??
-                    agentStatus?.last_dispatch?.gate_status ??
-                    null;
-                  if (!gs) return null;
-                  const errs =
-                    gateStatus?.errors_summary ??
-                    (agentStatus?.last_dispatch?.gate_result?.errors?.length
-                      ? String(agentStatus.last_dispatch.gate_result.errors).slice(0, 500)
-                      : null);
-                  const isRunning = gs === "pending" || gs === "running";
-                  const isPassed = gs === "decided" && !errs;
-                  const isFailed = gs === "failed" || (gs === "decided" && !!errs);
-                  return (
-                    <Badge
-                      variant={isPassed ? "success" : isFailed ? "destructive" : "outline"}
-                      className={isRunning ? "animate-pulse" : ""}
-                    >
-                      {isPassed ? "✓ 已通过" : isFailed ? "✗ 核验失败" : "客观核验中…"}
-                    </Badge>
-                  );
-                })()}
-                <span className="text-[11px] text-muted-foreground">
-                  {agentStatus?.last_dispatch?.status ? ` · ${agentStatus.last_dispatch.status}` : ""}
-                </span>
-              </div>
-            <span className="text-[11px] text-muted-foreground">
-              {logsExpanded ? "▾ 收起" : "▸ 展开"}
-            </span>
-          </button>
-          {logsExpanded && (
-            <div className="p-2">
-              <AgentRunPanel
-                workspaceId={workspaceId}
-                runId={panelRunId}
-                isActive={panelIsActive}
-                title="智能体执行日志"
-                isLive={panelIsActive}
-                summary={
-                  <span className="text-[11px] text-muted-foreground">
-                    {agentStatus?.last_dispatch?.status ? ` · ${agentStatus.last_dispatch.status}` : ""}
-                  </span>
-                }
-                onDone={handleChangesRunDone}
-                onGateStatusChanged={setGateStatus}
-              />
-            </div>
-          )}
-        </div>
-      )}
-
-      {pageError && (
+      {pageError ? (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {pageError}
         </div>
-      )}
-
-      {successMsg && (
+      ) : null}
+      {successMsg ? (
         <div className="rounded border border-green-300 bg-green-50 px-3 py-2 text-xs text-green-700">
           {successMsg}
         </div>
-      )}
+      ) : null}
 
-      {/* ── 会话（变更级问答/调试，2026-07-09-change-detail-session / FR-05）── */}
-      <section className="rounded-md border bg-card">
-        <div className="flex items-center justify-between border-b px-3 py-2">
-          <h2 className="text-xs font-medium">会话</h2>
-          <span className="text-[11px] text-muted-foreground">在该变更上下文中提问 / 调试</span>
-        </div>
-        <div className="p-3">
-          <ChangeSessionSection workspaceId={workspaceId} changeId={changeId} />
-        </div>
-      </section>
+      {/* 左主右辅两栏（移动端 <lg 单列：次线堆叠在主线下方） */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        {/* 主线：当前阶段操作 + 智能体执行日志 */}
+        <main className="space-y-3">
+          <ChangeStageActions
+            change={change}
+            agentStatus={agentStatus}
+            nextStage={nextStage}
+            verifyGate={verifyGate}
+            gateComment={gateComment}
+            onGateCommentChange={setGateComment}
+            onGateAction={handleGateAction}
+            onAdvance={handleAdvance}
+            onRunVerifyGate={handleRunVerifyGate}
+            onDispatch={handleDispatch}
+            transitioning={transitioning}
+            dispatching={dispatching}
+            advancing={advancing}
+            stageProvider={stageProvider}
+            onStageProviderChange={setStageProvider}
+            stageModel={stageModel}
+            onStageModelChange={setStageModel}
+            teamMode={teamMode}
+            onTeamModeChange={setTeamMode}
+            stageWorkers={stageWorkers}
+            onStageWorkersChange={setStageWorkers}
+          />
+          <ChangeAgentRunLog
+            workspaceId={workspaceId}
+            panelRunId={panelRunId}
+            panelIsActive={panelIsActive}
+            agentStatus={agentStatus}
+            gateStatus={gateStatus}
+            currentStage={change.current_stage ?? null}
+            steps={steps}
+            teamMode={teamMode}
+            stageTeamMissionId={stageTeamMissionId}
+            onDone={handleChangesRunDone}
+            onGateStatusChanged={setGateStatus}
+            onRefresh={() => void refreshAgentStatus()}
+            refreshing={loadingAgentStatus}
+            onDispatch={() => void handleDispatch()}
+            dispatching={dispatching}
+          />
+        </main>
 
-      <section className="rounded-md border bg-card">
-        <div className="flex items-center justify-between border-b px-3 py-2">
-          <h2 className="text-xs font-medium">变更文件</h2>
-        </div>
-        <div className="p-3">
-          <ChangeFileTree workspaceId={workspaceId} changeId={changeId} />
-        </div>
-      </section>
-
-      <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
+        {/* 次线：变更文件 / 会话调试 / 审核历史 / 任务看板 */}
         <aside className="space-y-3">
-          {/* ── 审批状态（task-13：旧 approval_status 链路退役，只读保留展示）── */}
-          {/* FR-06 收敛：旧 approval_status 不再驱动 change 推进，批准/驳回动作已移除。
-              仅保留历史状态徽标 + 驳回原因 + 审批人信息只读展示，不破坏既有数据。 */}
-          {change.approval_status && change.approval_status !== "not_required" && (
-            <section className="rounded-md border bg-card">
-              <div className="border-b px-3 py-2">
-                <h2 className="text-xs font-medium">审批状态</h2>
-              </div>
-              <div className="px-3 py-2 space-y-2">
-                <div className="flex items-center gap-2">
-                  <Badge
-                    variant={
-                      change.approval_status === "approved"
-                        ? "success"
-                        : change.approval_status === "rejected"
-                          ? "destructive"
-                          : "warning"
-                    }
-                  >
-                    {APPROVAL_LABELS[change.approval_status] ?? change.approval_status}
-                  </Badge>
-                </div>
-                {change.approval_status === "rejected" && change.rejection_reason && (
-                  <p className="text-xs text-destructive">驳回原因：{change.rejection_reason}</p>
-                )}
-                {change.approval_status === "approved" && change.approved_by && (
-                  <p className="text-[11px] text-muted-foreground">
-                    审批人: {change.approved_by}
-                    {change.approved_at && ` · ${new Date(change.approved_at).toLocaleString()}`}
-                  </p>
-                )}
-              </div>
-            </section>
-          )}
-
-          <section className="rounded-md border bg-card">
-            <div className="border-b px-3 py-2">
-              <h2 className="text-xs font-medium">审查记录 ({reviews.length})</h2>
-            </div>
-            {reviews.length === 0 ? (
-              <p className="px-3 py-3 text-xs text-muted-foreground">暂无审查记录。</p>
-            ) : (
-              <div className="divide-y">
-                {reviews.map((r) => (
-                  <div key={r.id} className="px-3 py-2 text-xs">
-                    <div className="flex items-center gap-1.5">
-                      <Badge variant={r.verdict === "approve" ? "success" : "destructive"}>
-                        {r.verdict === "approve" ? "通过" : "驳回"}
-                      </Badge>
-                      <span className="text-[11px] text-muted-foreground">
-                        {new Date(r.created_at).toLocaleDateString()}
-                      </span>
-                    </div>
-                    {r.comment && (
-                      <p className="mt-1 text-muted-foreground">{r.comment}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          {change.affected_components.length > 0 && (
-            <section className="rounded-md border bg-card">
-              <div className="border-b px-3 py-2">
-                <h2 className="text-xs font-medium">影响组件</h2>
-              </div>
-              <div className="flex flex-col gap-1.5 px-3 py-2">
-                {change.affected_components.map((comp) => (
-                  <div
-                    key={comp}
-                    className="flex items-center gap-2 rounded-md bg-muted/40 px-3 py-1.5 text-xs"
-                  >
-                    <span>{getComponentEmoji(comp)}</span>
-                    <span className="font-medium">{comp}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {taskBoard && taskBoard.columns.length > 0 && (() => {
-            const total = taskBoard.columns.reduce((s, c) => s + c.count, 0);
-            const doneCol = taskBoard.columns.find((c) => c.status === "done" || c.status === "completed");
-            const doneCount = doneCol?.count ?? 0;
-            const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
-            return (
-              <section className="rounded-md border bg-card">
-                <div className="flex items-center justify-between border-b px-3 py-2">
-                  <h2 className="text-xs font-medium">任务进度</h2>
-                  <Link
-                    href={`/workspaces/${workspaceId}/changes/${changeId}/tasks`}
-                    className="text-[11px] text-primary hover:underline"
-                  >
-                    查看看板
-                  </Link>
-                </div>
-                <div className="px-3 py-2">
-                  <div className="mb-1.5 flex items-center justify-between text-[11px]">
-                    <span className="text-muted-foreground">总体进度</span>
-                    <span className="text-foreground">{doneCount} / {total} 完成</span>
-                  </div>
-                  <div className="mb-3 h-2 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-primary transition-all"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    {taskBoard.columns.map((col) => (
-                      <div key={col.status} className="flex items-center gap-2 text-[11px]">
-                        <Badge
-                          variant={
-                            col.status === "done" || col.status === "completed"
-                              ? "success"
-                              : col.status === "in_progress"
-                                ? "default"
-                                : col.status === "blocked"
-                                  ? "destructive"
-                                  : "outline"
-                          }
-                          className="min-w-[24px] justify-center"
-                        >
-                          {col.count}
-                        </Badge>
-                        <span className="text-muted-foreground">{col.status}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </section>
-            );
-          })()}
+          <ChangeFilesCard workspaceId={workspaceId} changeId={changeId} />
+          <ChangeSessionsCard workspaceId={workspaceId} changeId={changeId} />
+          <ChangeReviewHistoryCard reviewHistory={reviewHistory} />
+          <ChangeTaskBoardCard
+            workspaceId={workspaceId}
+            changeId={changeId}
+            taskBoard={taskBoard}
+          />
         </aside>
       </div>
     </PageContainer>

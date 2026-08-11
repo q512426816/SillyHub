@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>变更详情页 · 布局重做原型（左主右辅）</title>
+<style>
+  :root { --line:#c9cfd8; --fill:#f6f7f9; --ink:#1f2329; --dim:#6b7280; --accent:#2563eb; --ok:#059669; --warn:#b45309; --danger:#dc2626; }
+  * { box-sizing: border-box; }
+  body { font-family: "Microsoft YaHei", system-ui, sans-serif; background:#fff; color:var(--ink); margin:0; padding:24px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--dim); font-size:13px; margin-bottom:20px; }
+  .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--dim); margin-bottom:20px; padding:10px 14px; border:1px dashed var(--line); border-radius:8px; }
+  .tag { display:inline-block; font-size:10px; padding:0 5px; border-radius:3px; margin-left:6px; font-weight:700; vertical-align:middle; }
+  .t-new { background:#dbeafe; color:var(--accent); }
+  .t-move { background:#fef3c7; color:var(--warn); }
+  .t-keep { background:#e5e7eb; color:var(--dim); }
+  .t-del { background:#fee2e2; color:var(--danger); text-decoration:line-through; }
+  .t-merge { background:#d1fae5; color:var(--ok); }
+  /* 桌面布局 */
+  .frame { border:2px solid var(--ink); border-radius:10px; overflow:hidden; max-width:1200px; }
+  .stagebar { background:var(--fill); border-bottom:1px solid var(--line); padding:12px 16px; display:flex; align-items:center; gap:8px; font-size:12px; }
+  .stage-dot { width:20px;height:20px;border-radius:50%;background:#fff;border:2px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:10px; }
+  .stage-dot.cur { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .stage-dot.done { background:var(--ok); border-color:var(--ok); color:#fff; }
+  .stage-sep { width:20px;height:2px;background:var(--line); }
+  .stage-name { color:var(--dim); margin-right:6px; }
+  .stage-name.cur { color:var(--ink); font-weight:700; }
+  .cols { display:grid; grid-template-columns: 1fr 320px; }
+  .main { padding:16px; border-right:1px solid var(--line); min-height:420px; }
+  .side { padding:16px; background:var(--fill); }
+  .card { border:1px solid var(--line); border-radius:8px; background:#fff; margin-bottom:14px; overflow:hidden; }
+  .card-h { border-bottom:1px solid var(--line); padding:8px 12px; font-size:12px; font-weight:700; display:flex; justify-content:space-between; align-items:center; }
+  .card-h small { font-weight:400; color:var(--dim); }
+  .card-b { padding:10px 12px; font-size:12px; color:var(--dim); line-height:1.7; }
+  .oprow { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .btn { font-size:11px; padding:4px 10px; border-radius:6px; border:1px solid var(--line); background:#fff; }
+  .btn.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .btn.outline { color:var(--accent); border-color:var(--accent); }
+  .logbox { font-family:ui-monospace,monospace; font-size:11px; background:#0f172a; color:#94a3b8; border-radius:6px; padding:10px; margin-top:8px; max-height:120px; overflow:hidden; }
+  .step { display:inline-flex; align-items:center; gap:4px; font-size:11px; margin-right:10px; }
+  .sdot { width:12px;height:12px;border-radius:50%; }
+  .sdot.ok { background:var(--ok); } .sdot.run { background:var(--accent); animation:p 1s infinite alternate; } .sdot.wait { background:#d1d5db; }
+  @keyframes p { to { opacity:.4; } }
+  .anno { position:relative; }
+  .anno::before { content:attr(data-note); position:absolute; top:-8px; right:8px; font-size:9px; background:#fff; border:1px solid var(--line); color:var(--warn); padding:0 4px; border-radius:3px; }
+  .side .card-b { font-size:11.5px; }
+  .vh { color:var(--ok); } .vx { color:var(--danger); }
+  /* 移动端 */
+  .mobile { border:2px solid var(--ink); border-radius:10px; overflow:hidden; max-width:380px; margin-top:8px; }
+  .mobile .cols { display:block; }
+  .mobile .main { border-right:none; border-bottom:1px solid var(--line); min-height:auto; }
+  .collapse { display:flex; justify-content:space-between; padding:9px 12px; font-size:12px; font-weight:600; border-bottom:1px solid var(--line); background:#fff; }
+  h2.sec { font-size:14px; margin:28px 0 10px; padding-bottom:6px; border-bottom:2px solid var(--ink); }
+  .flowline { font-size:12px; color:var(--dim); line-height:2; background:var(--fill); border:1px solid var(--line); border-radius:8px; padding:12px 16px; max-width:1200px; }
+</style>
+</head>
+<body>
+
+<h1>变更详情页 · 布局重做原型</h1>
+<p class="sub">方向：左主右辅，主线只聚焦「现在该干嘛」，次线收侧栏。每个区块角标 = 它的命运。</p>
+
+<div class="legend">
+  <span><span class="tag t-new">新</span> 新建组件</span>
+  <span><span class="tag t-move">改</span> 现有逻辑搬/收敛进新组件</span>
+  <span><span class="tag t-merge">并</span> 多处合并为一</span>
+  <span><span class="tag t-keep">包</span> 包一层复用现组件</span>
+  <span><span class="tag t-del">删</span> 删除</span>
+</div>
+
+<div class="frame">
+  <!-- 顶部：阶段步骤条 -->
+  <div class="stagebar anno" data-note="宏观进度·保留">
+    <div class="stage-dot done">✓</div><span class="stage-name">需求</span><div class="stage-sep"></div>
+    <div class="stage-dot done">✓</div><span class="stage-name">规划</span><div class="stage-sep"></div>
+    <div class="stage-dot cur">3</div><span class="stage-name cur">执行</span><div class="stage-sep"></div>
+    <div class="stage-dot">4</div><span class="stage-name">验证</span><div class="stage-sep"></div>
+    <div class="stage-dot">5</div><span class="stage-name">归档</span>
+    <span style="margin-left:auto;color:var(--dim);">标题 · Key · 类型 · 位置（PageHeader）</span>
+  </div>
+
+  <div class="cols">
+    <!-- 左：主线 -->
+    <div class="main">
+      <div style="font-size:11px;color:var(--accent);font-weight:700;letter-spacing:1px;margin-bottom:8px;">主线 · 现在该干嘛</div>
+
+      <!-- 当前阶段操作区 -->
+      <div class="card anno" data-note="收口所有入口">
+        <div class="card-h">当前阶段操作 <span class="tag t-new">新</span><small>收口：推进/审核/触发/门禁/模型/团队</small></div>
+        <div class="card-b">
+          现在只呈现当前阶段真正要做的一件事，把原本散在 5+ 处的按钮收进来：
+          <div class="oprow">
+            <span class="btn primary">推进到「验证」</span>
+            <span class="btn outline">运行验证门禁</span>
+            <span class="btn outline">触发智能体</span>
+          </div>
+          <div class="oprow">
+            <span class="btn">Agent 供应商：跟随默认 ▾</span>
+            <span class="btn">模型：claude-… ▾</span>
+            <span class="btn">⚙ 用团队执行（开关）</span>
+          </div>
+          待审核时整区换成「四件套确认 / 计划确认 / 人工测试 / 归档确认」按钮组。
+        </div>
+      </div>
+
+      <!-- 智能体执行日志 -->
+      <div class="card anno" data-note="机器在干活·唯一窗口">
+        <div class="card-h">智能体执行日志 <span class="tag t-keep">包</span><small>复用 AgentRunPanel + 步骤进度</small></div>
+        <div class="card-b">
+          <div>
+            <span class="step"><span class="sdot ok"></span>装依赖</span>
+            <span class="step"><span class="sdot run"></span>写实现</span>
+            <span class="step"><span class="sdot wait"></span>跑测试</span>
+            <span style="color:var(--dim);">（子步骤进度并入日志头部，不再单独占区块）</span>
+          </div>
+          <div class="logbox">
+            [agent] 正在执行 implement …<br/>
+            [agent] 读取 frontend/src/…<br/>
+            [agent] ✓ 已写入 change-stage-actions.tsx<br/>
+            [gate] 客观核验中…
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右：次线 -->
+    <div class="side">
+      <div style="font-size:11px;color:var(--dim);font-weight:700;letter-spacing:1px;margin-bottom:8px;">次线 · 需要时再看</div>
+
+      <div class="card anno" data-note="默认折叠">
+        <div class="card-h">变更文件 <span class="tag t-keep">包</span><small>复用 ChangeFileTree</small></div>
+        <div class="card-b">改动文件树（原样保留，默认折叠省空间）</div>
+      </div>
+
+      <div class="card anno" data-note="移入次线=解重叠">
+        <div class="card-h">会话调试 <span class="tag t-move">改</span><small>主动找 AI 聊/调试</small></div>
+        <div class="card-b">点开后是完整的「历史会话列表 + 问答面板」。和主线「执行日志」彻底分开——一个是流程自动跑的流水账，一个是你主动发起的对话。</div>
+      </div>
+
+      <div class="card anno" data-note="从死表救活">
+        <div class="card-h">审核历史 <span class="tag t-new">新</span><small>读真实 review_history</small></div>
+        <div class="card-b">
+          <div><span class="vh">✓</span> 08-11 需求确认通过 —— 需求清晰，可推进</div>
+          <div><span class="vh">✓</span> 08-11 计划确认通过 —— 方案合理</div>
+          <div><span class="vx">✗</span> 08-10 需求不明确 —— 已返工 brainstorm</div>
+          <div style="margin-top:4px;color:var(--warn);">（替换原「审查记录」——那个永远空，读的是已没人写的旧表）</div>
+        </div>
+      </div>
+
+      <div class="card anno" data-note="信息更聚焦">
+        <div class="card-h">任务看板 <span class="tag t-keep">包</span><small>plan 任务完成度</small></div>
+        <div class="card-b">进度条 + 各状态计数 + 「打开看板」链接。只在有任务拆分时显示（快速修复类自动隐藏）。</div>
+      </div>
+
+      <div class="card" style="border-color:var(--danger);opacity:.55;">
+        <div class="card-h" style="color:var(--danger);">审批状态 <span class="tag t-del">删</span></div>
+        <div class="card-b">旧链路退役，信息并入上面的「审核历史」，区块删除。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2 class="sec">移动端（&lt; 1024px）：次线折叠到主线下方</h2>
+<div class="mobile">
+  <div class="stagebar"><div class="stage-dot cur">3</div><span class="stage-name cur">执行</span><span style="margin-left:auto;color:var(--dim);font-size:11px;">需求→规划→<b>执行</b>→验证→归档</span></div>
+  <div class="main" style="padding:12px;">
+    <div class="card" style="margin-bottom:8px;"><div class="card-h">当前阶段操作</div><div class="card-b">推进 / 触发 / 模型…</div></div>
+    <div class="card"><div class="card-h">智能体执行日志</div><div class="card-b">日志流…</div></div>
+  </div>
+  <div class="side" style="padding:8px;">
+    <div class="collapse">变更文件 <span>▸</span></div>
+    <div class="collapse">会话调试 <span>▸</span></div>
+    <div class="collapse">审核历史 <span>▸</span></div>
+    <div class="collapse">任务看板 <span>▸</span></div>
+  </div>
+</div>
+
+<h2 class="sec">4 类问题 → 处理落点</h2>
+<div class="flowline">
+<b>① 僵尸区块</b>：「审批状态」删；「审查记录」→ 新「审核历史」，改读 <code>change.stages.review_history</code>（后端零改动）。<br/>
+<b>② 会话/日志重叠</b>：主线只留「智能体执行日志」（流程自动跑）；「会话调试」移入次线侧栏（主动发起），视觉/定位彻底分开。<br/>
+<b>③ 进度维度爆炸</b>：阶段条(宏观·顶部) → 子步骤(并入日志头部) → 任务完成度(次线看板卡) → 团队进度(开团队时在日志区按需展开)，四处收成分层。<br/>
+<b>④ 入口分散</b>：推进/审核/触发/门禁/模型/团队全部收口进「当前阶段操作区」；删未调用的死代码 handleExecute。
+</div>
+
+</body>
+</html>
