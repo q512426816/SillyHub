@@ -243,6 +243,6 @@ function fmtNum(v: number | null | undefined): string {
 /** 重置时间（ISO8601）→ 本地可读串；解析失败原样回显。 */
 function fmtReset(extra: string): string {
   const d = new Date(extra);
-  if (!Number.isNaN(d.getTime())) return d.toLocaleString();
+  if (!Number.isNaN(d.getTime())) return d.toLocaleString("zh-CN");
   return extra;
 }

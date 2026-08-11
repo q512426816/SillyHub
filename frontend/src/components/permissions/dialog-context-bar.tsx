@@ -65,7 +65,7 @@ function formatTime(createdAt?: string): string {
   if (diffMs < 60_000) return "刚刚";
   if (diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)} 分钟前`;
   if (diffMs < 86_400_000) return `${Math.floor(diffMs / 3_600_000)} 小时前`;
-  return new Date(ts).toLocaleString();
+  return new Date(ts).toLocaleString("zh-CN");
 }
 
 export interface DialogContextBarProps {

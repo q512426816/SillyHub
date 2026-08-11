@@ -160,7 +160,7 @@ export function SillySpecStepProgress({
               <span className="font-medium">上次执行成功</span>
               {lastDispatchFinishedAt && (
                 <span className="text-[11px] text-muted-foreground">
-                  · {new Date(lastDispatchFinishedAt).toLocaleString()}
+                  · {new Date(lastDispatchFinishedAt).toLocaleString("zh-CN")}
                 </span>
               )}
             </div>
@@ -170,7 +170,7 @@ export function SillySpecStepProgress({
               <span className="font-medium">上次执行失败</span>
               {lastDispatchFinishedAt && (
                 <span className="text-[11px] text-muted-foreground">
-                  · {new Date(lastDispatchFinishedAt).toLocaleString()}
+                  · {new Date(lastDispatchFinishedAt).toLocaleString("zh-CN")}
                 </span>
               )}
             </div>
@@ -299,7 +299,7 @@ export function SillySpecStepProgress({
             <span className="font-medium">上次执行成功</span>
             {lastDispatchFinishedAt && (
               <span className="text-[11px] text-muted-foreground">
-                · {new Date(lastDispatchFinishedAt).toLocaleString()}
+                · {new Date(lastDispatchFinishedAt).toLocaleString("zh-CN")}
               </span>
             )}
           </div>
@@ -309,7 +309,7 @@ export function SillySpecStepProgress({
             <span className="font-medium">上次执行失败</span>
             {lastDispatchFinishedAt && (
               <span className="text-[11px] text-muted-foreground">
-                · {new Date(lastDispatchFinishedAt).toLocaleString()}
+                · {new Date(lastDispatchFinishedAt).toLocaleString("zh-CN")}
               </span>
             )}
           </div>

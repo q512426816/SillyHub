@@ -288,7 +288,7 @@ export default function ApprovalsPage({ params }: Props) {
                     </span>
                   </div>
                   <span className="text-[11px] text-muted-foreground">
-                    {new Date(req.created_at).toLocaleString()}
+                    {new Date(req.created_at).toLocaleString("zh-CN")}
                   </span>
                 </div>
 
@@ -383,7 +383,7 @@ export default function ApprovalsPage({ params }: Props) {
                 {history.map((entry) => (
                   <tr key={entry.id}>
                     <td className="whitespace-nowrap text-[11px] text-muted-foreground">
-                      {new Date(entry.resolved_at).toLocaleString()}
+                      {new Date(entry.resolved_at).toLocaleString("zh-CN")}
                     </td>
                     <td className="font-mono text-[11px]">
                       {entry.tool_name}

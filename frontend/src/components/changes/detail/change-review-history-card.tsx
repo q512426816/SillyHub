@@ -128,7 +128,7 @@ export function ChangeReviewHistoryCard({
                 ) : null}
                 {r.at ? (
                   <span className="text-[11px] text-muted-foreground">
-                    · {new Date(r.at).toLocaleString()}
+                    · {new Date(r.at).toLocaleString("zh-CN")}
                   </span>
                 ) : null}
               </div>

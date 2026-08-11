@@ -154,7 +154,7 @@ export default function RuntimePage({ params }: Props) {
       key: "started_at",
       render: (_v: unknown, [, stage]: [string, StageProgress]) => (
         <span className="text-[11px] text-muted-foreground">
-          {stage.started_at ? new Date(stage.started_at).toLocaleString() : "—"}
+          {stage.started_at ? new Date(stage.started_at).toLocaleString("zh-CN") : "—"}
         </span>
       ),
     },
@@ -165,7 +165,7 @@ export default function RuntimePage({ params }: Props) {
       render: (_v: unknown, [, stage]: [string, StageProgress]) => (
         <span className="text-[11px] text-muted-foreground">
           {stage.completed_at
-            ? new Date(stage.completed_at).toLocaleString()
+            ? new Date(stage.completed_at).toLocaleString("zh-CN")
             : "—"}
         </span>
       ),
@@ -245,7 +245,7 @@ export default function RuntimePage({ params }: Props) {
                     [
                       "最后活动",
                       progress.last_active
-                        ? new Date(progress.last_active).toLocaleString()
+                        ? new Date(progress.last_active).toLocaleString("zh-CN")
                         : "—",
                     ],
                   ].map(([label, value]) => (
@@ -294,7 +294,7 @@ export default function RuntimePage({ params }: Props) {
                       <span className="flex items-center gap-2 text-[11px] text-muted-foreground">
                         <span>{formatBytes(art.size_bytes)}</span>
                         {art.last_modified && (
-                          <span>{new Date(art.last_modified).toLocaleString()}</span>
+                          <span>{new Date(art.last_modified).toLocaleString("zh-CN")}</span>
                         )}
                         <span>{selectedArtifact === art.filename ? "▲" : "▼"}</span>
                       </span>

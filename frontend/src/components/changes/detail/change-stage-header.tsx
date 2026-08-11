@@ -81,7 +81,7 @@ export function ChangeStageHeader({
       </div>
       {lastActive ? (
         <p className="mt-1.5 text-[11px] text-muted-foreground">
-          当前阶段: {new Date(lastActive).toLocaleString()}
+          当前阶段: {new Date(lastActive).toLocaleString("zh-CN")}
         </p>
       ) : null}
     </div>

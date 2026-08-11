@@ -238,7 +238,7 @@ export default function AuditPage({ params }: Props) {
                   return (
                     <tr key={entry.id}>
                       <td className="whitespace-nowrap text-[11px] text-muted-foreground">
-                        {new Date(entry.timestamp).toLocaleString()}
+                        {new Date(entry.timestamp).toLocaleString("zh-CN")}
                       </td>
                       <td className="font-mono text-[11px]">{entry.action}</td>
                       <td>

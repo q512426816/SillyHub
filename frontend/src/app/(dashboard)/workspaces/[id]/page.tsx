@@ -165,7 +165,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
   }, [myBinding?.daemon_id]);
 
   const formatTs = (raw: string | null) =>
-    raw ? new Date(raw).toLocaleString() : "---";
+    raw ? new Date(raw).toLocaleString("zh-CN") : "---";
 
   if (loading) {
     return (

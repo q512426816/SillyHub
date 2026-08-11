@@ -276,7 +276,7 @@ export default function ScanDocsPage({ params }: Props) {
                 </div>
                 <p className="font-mono text-[11px] text-muted-foreground">{selectedDoc.path}</p>
                 {selectedDoc.last_modified_at && (
-                  <p className="text-[11px] text-muted-foreground">最后修改：{new Date(selectedDoc.last_modified_at).toLocaleString()}</p>
+                  <p className="text-[11px] text-muted-foreground">最后修改：{new Date(selectedDoc.last_modified_at).toLocaleString("zh-CN")}</p>
                 )}
                 {selectedDoc.content ? (
                   <div className="max-h-[60vh] overflow-auto rounded-md bg-muted/50 p-3">{selectedDoc.path.endsWith(".md") ? (<MarkdownPreview source={selectedDoc.content} />) : (<pre className="text-xs leading-relaxed whitespace-pre-wrap">{selectedDoc.content}</pre>)}</div>

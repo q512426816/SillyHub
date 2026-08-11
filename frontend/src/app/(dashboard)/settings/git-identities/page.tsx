@@ -288,7 +288,7 @@ export default function GitIdentitiesPage() {
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] text-muted-foreground">过期时间</span>
                   <span className="text-xs">
-                    {id.expires_at ? new Date(id.expires_at).toLocaleDateString() : "永不过期"}
+                    {id.expires_at ? new Date(id.expires_at).toLocaleDateString("zh-CN") : "永不过期"}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">

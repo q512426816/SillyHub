@@ -141,7 +141,7 @@ export default function KnowledgePage({ params }: Props) {
                   <span className="truncate font-mono text-[11px]">{item.filename}</span>
                   {item.last_modified_at && (
                     <span className="shrink-0 text-[10px] text-muted-foreground">
-                      {new Date(item.last_modified_at).toLocaleDateString()}
+                      {new Date(item.last_modified_at).toLocaleDateString("zh-CN")}
                     </span>
                   )}
                 </div>

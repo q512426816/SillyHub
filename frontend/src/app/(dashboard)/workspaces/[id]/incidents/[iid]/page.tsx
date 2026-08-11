@@ -162,7 +162,7 @@ export default function IncidentDetailPage({ params }: Props) {
         subtitle={
           <span className="flex flex-wrap gap-x-5 gap-y-0.5">
             <span>严重度: {SEVERITY_LABELS[incident.severity] ?? incident.severity}</span>
-            <span>创建: {new Date(incident.created_at).toLocaleString()}</span>
+            <span>创建: {new Date(incident.created_at).toLocaleString("zh-CN")}</span>
           </span>
         }
       />

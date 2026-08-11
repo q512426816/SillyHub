@@ -86,7 +86,7 @@ const IMPORT_PHASE_LABEL: Record<ImportPhase, string> = {
 /* ------------------------------------------------------------------ */
 
 function formatTs(raw: string | null): string {
-  return raw ? new Date(raw).toLocaleString() : "---";
+  return raw ? new Date(raw).toLocaleString("zh-CN") : "---";
 }
 
 function statusToVariant(

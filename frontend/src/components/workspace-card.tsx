@@ -71,7 +71,7 @@ export function WorkspaceCard({
   const [error, setError] = useState<string | null>(null);
 
   const formatTs = (raw: string | null) =>
-    raw ? new Date(raw).toLocaleString() : "—";
+    raw ? new Date(raw).toLocaleString("zh-CN") : "—";
 
   const handleRescan = async () => {
     setError(null);

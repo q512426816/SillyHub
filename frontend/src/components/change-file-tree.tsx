@@ -309,7 +309,7 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
         <div className="flex items-center gap-3">
           {lastSyncedAt && (
             <span className="text-[11px] text-muted-foreground">
-              镜像同步：{new Date(lastSyncedAt).toLocaleString()}
+              镜像同步：{new Date(lastSyncedAt).toLocaleString("zh-CN")}
             </span>
           )}
           <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[11px]" onClick={() => void refreshTree()}>

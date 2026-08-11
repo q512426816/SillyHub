@@ -278,7 +278,7 @@ export default function ChangesPage({ params }: Props) {
       align: "right",
       render: (v: string) => (
         <span className="text-[11px] text-muted-foreground">
-          {new Date(v).toLocaleDateString()}
+          {new Date(v).toLocaleDateString("zh-CN")}
         </span>
       ),
     },

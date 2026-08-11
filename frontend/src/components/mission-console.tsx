@@ -641,7 +641,7 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
                     {m.objective || "(无目标)"}
                   </span>
                   <span className="whitespace-nowrap text-xs text-gray-400">
-                    {new Date(m.created_at).toLocaleString()} · {m.workers.length}{" "}
+                    {new Date(m.created_at).toLocaleString("zh-CN")} · {m.workers.length}{" "}
                     分身
                   </span>
                 </button>
