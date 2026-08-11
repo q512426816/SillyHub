@@ -45,6 +45,10 @@ from app.modules.mcp_gateway.sse import router as mcp_sse_router
 
 # 2026-08-10-sillyhub-platform-sync task-06：SillySpec 进度同步层 3 端点。
 from app.modules.platform_sync.router import router as platform_sync_router
+
+# 2026-08-11-change-progress-projection task-07：workspace-scoped token 签发 2 端点
+# （POST /workspaces/{wid}/platform-sync-tokens / POST /workspaces/resolve-by-root-path）。
+from app.modules.platform_sync.workspace_router import router as platform_sync_workspace_router
 from app.modules.ppm.kanban.router import router as ppm_kanban_router
 from app.modules.ppm.plan.router import router as ppm_plan_router
 from app.modules.ppm.problem.router import router as ppm_problem_router
@@ -578,6 +582,11 @@ def create_app() -> FastAPI:
     # router 不自带 prefix（路径写全 /changes/...），外层 /api 落地 /api/changes/...，
     # 与 /api/workspaces/{wid}/changes/* 派发层正交（契约 D-004）。
     app.include_router(platform_sync_router, prefix="/api", tags=["platform-sync"])
+    # 2026-08-11-change-progress-projection task-07：workspace-scoped token 签发 2 端点
+    # （POST /api/workspaces/{wid}/platform-sync-tokens / POST /api/workspaces/resolve-by-root-path）。
+    # router 自带 prefix=/workspaces，外层 /api 落地 /api/workspaces/...，与无前缀
+    # changes router 分离（避免 GET /changes 尾斜杠 redirect 互相干扰）。
+    app.include_router(platform_sync_workspace_router, prefix="/api", tags=["platform-sync-tokens"])
 
     # ── MCP gateway（对外 MCP server，独立于 /api/*）──────────────────────────
     # 2026-08-06-public-mcp-server task-05：mount /mcp（FastMCP streamable HTTP）。

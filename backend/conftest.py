@@ -139,6 +139,12 @@ async def db_engine() -> AsyncIterator[Any]:
     # NoReferencedTableError('releases')，incident 全部测试 collection-error（预存缺口）。
     from app.modules.incident import model as _incident_model  # noqa: F401
 
+    # agent_profiles.llm_provider_id FK→llm_providers.id（agent-profile-bind-llm-provider
+    # 落地后根 conftest 未补 import，create_all 报 NoReferencedTableError('llm_providers')
+    # 阻断所有 db_engine 测试。2026-08-11-change-progress-projection task-07 顺手补此预存
+    # 测试债（CLAUDE.md 规则 20），让 platform_sync 子模块测试可跑。
+    from app.modules.llm_provider import model as _llm_provider_model  # noqa: F401
+
     # ppm project 子域 4 表(maintenance/customer/member/stakeholder)。workspace.model 的
     # ppm_project_workspace 外键→ppm_project_maintenance.id,必须一并注册,否则 create_all 报
     # NoReferencedTableError(ppm_project_maintenance),连带所有 DB 测试 collection ERROR。

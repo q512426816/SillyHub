@@ -2,8 +2,8 @@
 
 自包含建表（不改根 conftest）：``platform_sync`` model 未在根 conftest ``db_engine``
 的 import 列表（根 conftest 集中登记各 feature model），本 conftest 用 autouse
-fixture 单独建 ``platform_change_progress`` 表，让 platform_sync 测试自包含
-（遵守 task-07 allowed_paths，不扩散到根 conftest）。
+fixture 单独建 ``platform_change_progress`` + ``platform_sync_tokens`` 表，让
+platform_sync 测试自包含（遵守 task-07 allowed_paths，不扩散到根 conftest）。
 """
 
 from __future__ import annotations
@@ -15,18 +15,23 @@ import pytest
 
 @pytest.fixture(autouse=True)
 async def ensure_platform_sync_table(db_engine: Any) -> None:
-    """建 ``platform_change_progress`` 表。
+    """建 ``platform_change_progress`` + ``platform_sync_tokens`` 表。
 
     platform_sync model 未在根 conftest db_engine import 列表 → metadata 不含该表
-    → 根 ``create_all`` 不会建它。此处 import 注册到 metadata + 单独 create 该表。
+    → 根 ``create_all`` 不会建它。此处 import 注册到 metadata + 单独 create 两张表
+    （task-01 加 platform_sync_tokens，task-02 给 progress 表加 workspace_id 复合 PK）。
     """
     from app.models.base import BaseModel
     from app.modules.platform_sync import model as _ps_model
+    from app.modules.platform_sync import token_model as _ps_token_model
 
     async with db_engine.begin() as conn:
         await conn.run_sync(
             BaseModel.metadata.create_all,
-            tables=[_ps_model.PlatformChangeProgressORM.__table__],
+            tables=[
+                _ps_model.PlatformChangeProgressORM.__table__,
+                _ps_token_model.PlatformSyncTokenORM.__table__,
+            ],
         )
 
 

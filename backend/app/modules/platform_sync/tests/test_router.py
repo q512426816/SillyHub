@@ -289,9 +289,12 @@ async def test_apply_catches_integrity_error_falls_back_to_update(db_session):
     """ql-20260811-005-6881：_apply catch IntegrityError 确定性回退 UPDATE。
 
     并发场景的等价模拟：预插行（=并发对手已抢先 INSERT 建行）后，以 row=None
-    直接调 ``_apply``（=模拟「``upsert_progress`` 的 get 在对手 commit 前返回
-    None」的并发窗口）→ INSERT 撞 ``change_name`` 唯一键 → catch IntegrityError
-    → rollback → 重查行 → UPDATE 覆盖。断言不抛、行被覆盖成新值。
+    直接调 ``_apply``（=模拟「``upsert_progress`` 的 _find_row 在对手 commit 前返回
+    None」的并发窗口）→ INSERT 撞复合唯一约束 ``uq_..._workspace_change`` → catch
+    IntegrityError → rollback → 重查行 → UPDATE 覆盖。断言不抛、行被覆盖成新值。
+
+    用 ``workspace_id=None`` 模拟 shk_live_ 过渡路径（design §9，nullable 列 + 唯一
+    约束允许多 NULL）。
 
     说明：不做 ``asyncio.gather`` 端到端并发——SQLite 单连接 + anyio TaskGroup
     会把异常聚合成 ExceptionGroup 并以 ``sqlite3.IntegrityError`` 原始形态穿透到
@@ -299,12 +302,15 @@ async def test_apply_catches_integrity_error_falls_back_to_update(db_session):
     ``sqlalchemy.exc.IntegrityError`` 在 service 层被 catch）。生产有效性靠本用例
     （service 层 catch）+ 重建镜像后日志无 500 双重保证。
     """
+    from sqlalchemy import select
+
     from app.modules.platform_sync.model import PlatformChangeProgressORM
     from app.modules.platform_sync.service import PlatformSyncService
 
-    # 预插行 = 并发对手已抢先 INSERT 建行
+    # 预插行 = 并发对手已抢先 INSERT 建行（workspace_id=None 模拟 shk_live_ 过渡）
     db_session.add(
         PlatformChangeProgressORM(
+            workspace_id=None,
             change_name="race-x",
             latest_progress={"old": True},
             last_pushed_at=T1,
@@ -322,11 +328,19 @@ async def test_apply_catches_integrity_error_falls_back_to_update(db_session):
         "approvals": [],
     }
     svc = PlatformSyncService(db_session)
-    # row=None 模拟并发窗口（upsert_progress 的 get 在对手 commit 前返回 None）
-    await svc._apply(None, "race-x", new_body, T2, "alice")
+    # row=None 模拟并发窗口（upsert_progress 的 _find_row 在对手 commit 前返回 None）
+    await svc._apply(None, None, "race-x", new_body, T2, "alice")
 
     db_session.expire_all()
-    row = await db_session.get(PlatformChangeProgressORM, "race-x")
+    # 复合键重查（workspace_id=None + change_name）
+    row = (
+        await db_session.execute(
+            select(PlatformChangeProgressORM).where(
+                PlatformChangeProgressORM.change_name == "race-x",
+                PlatformChangeProgressORM.workspace_id.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
     assert row is not None
     assert row.latest_progress == new_body
     assert row.last_pusher == "alice"

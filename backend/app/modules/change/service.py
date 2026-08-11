@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -31,6 +31,7 @@ from app.modules.change.schema import (
     ChangeSummary,
     PendingReview,
 )
+from app.modules.platform_sync.model import PlatformChangeProgressORM
 from app.modules.workspace.model import Workspace
 from app.modules.workspace.service import WorkspaceService
 
@@ -1216,17 +1217,94 @@ class ChangeService:
     # ── M:N Enrichment ──────────────────────────────────────────────────
 
     async def enrich_with_workspace_ids(self, change: Change) -> ChangeRead:
-        """Build ChangeRead from the change row.
+        """Build ChangeRead from the change row + 实时投影 current_stage（D-002@v1）。
 
         D-005@V1（变更 2026-07-06-component-readonly-split）：M:N 投影表已废，变更只属
         单一项目组 workspace（``Change.workspace_id``），不再追加 workspace_ids。方法名保留
         以避免 router 多处调用方连锁改动。
+
+        Change 2026-08-11-change-progress-projection task-08：read-only 等值 join
+        ``platform_change_progress``（按 ``(change.workspace_id, change.change_key)`` 复合键），
+        命中且 ``latest_progress`` 解析出 ``current_stage`` 则覆盖 ChangeRead.current_stage
+        （工具上行权威值），否则保留 change 现有值（D-003 fallback）。不投 status（D-004@v2）、
+        不写 changes 表（D-002 read-only）。
         """
-        return ChangeRead.model_validate(change)
+        change_read = ChangeRead.model_validate(change)
+        projected = await self._project_current_stage([(change.workspace_id, change.change_key)])
+        stage = projected.get((change.workspace_id, change.change_key))
+        if stage is not None:
+            change_read.current_stage = stage
+        return change_read
 
     async def enrich_summaries(self, changes: list[Change]) -> list[ChangeSummary]:
-        """Build ChangeSummary list（D-005@V1 后不再查 M:N，直接 validate）。"""
-        return [ChangeSummary.model_validate(c) for c in changes]
+        """Build ChangeSummary list + 批量投影 current_stage（D-002@v1 / R-03 禁 N+1）。
+
+        D-005@V1 后不再查 M:N，直接 validate。task-08 加批量 IN join：从 changes 收集
+        ``(workspace_id, change_key)`` 对集合一次 select 查询（复合 ``tuple_.in_``），
+        构建 ``(workspace_id, change_key) → current_stage`` 映射逐条覆盖。join 不命中
+        （工具未上行 / quick-uuid8 / workspace_id 为 NULL 过渡行）fallback 现有值（D-003）。
+        """
+        if not changes:
+            return []
+        pairs = [(c.workspace_id, c.change_key) for c in changes]
+        projected = await self._project_current_stage(pairs)
+        summaries: list[ChangeSummary] = []
+        for c in changes:
+            summary = ChangeSummary.model_validate(c)
+            stage = projected.get((c.workspace_id, c.change_key))
+            if stage is not None:
+                summary.current_stage = stage
+            summaries.append(summary)
+        return summaries
+
+    async def _project_current_stage(
+        self, pairs: list[tuple[uuid.UUID, str]]
+    ) -> dict[tuple[uuid.UUID, str], str]:
+        """批量 read-only join ``platform_change_progress`` 取权威 current_stage。
+
+        一次 ``select where (workspace_id, change_name) in (pairs)``（复合 IN，R-03 禁 N+1）。
+        返回 ``(workspace_id, change_name) → current_stage`` 映射；未命中/解析失败/异常一律
+        不进映射（调用方 fallback 现有值，D-003）。latest_progress 结构异常不抛（防御性
+        isinstance）。shk_live_ 过渡期 workspace_id=NULL 行不匹配任何 change.workspace_id
+        （change.workspace_id 非 None）→ 自然 fallback。
+        """
+        if not pairs:
+            return {}
+        stmt = select(
+            PlatformChangeProgressORM.workspace_id,
+            PlatformChangeProgressORM.change_name,
+            PlatformChangeProgressORM.latest_progress,
+        ).where(
+            tuple_(
+                PlatformChangeProgressORM.workspace_id,
+                PlatformChangeProgressORM.change_name,
+            ).in_(pairs)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        mapping: dict[tuple[uuid.UUID, str], str] = {}
+        for ws_id, change_name, latest_progress in rows:
+            stage = self._extract_current_stage(latest_progress)
+            if stage is not None and ws_id is not None:
+                mapping[(ws_id, change_name)] = stage
+        return mapping
+
+    @staticmethod
+    def _extract_current_stage(latest_progress: dict | None) -> str | None:
+        """从 ``latest_progress.changes[0].current_stage`` 解析权威 stage。
+
+        裸 JSON 透传 serializeForSync 六表（NG-6 不强类型化），结构缺失/类型异常一律
+        返 None（调用方 fallback 现有值，不抛）。
+        """
+        if not isinstance(latest_progress, dict):
+            return None
+        changes = latest_progress.get("changes")
+        if not isinstance(changes, list) or not changes:
+            return None
+        first = changes[0]
+        if not isinstance(first, dict):
+            return None
+        stage = first.get("current_stage")
+        return stage if isinstance(stage, str) else None
 
     @staticmethod
     def _build_change(
