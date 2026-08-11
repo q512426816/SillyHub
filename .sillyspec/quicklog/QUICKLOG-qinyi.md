@@ -365,3 +365,14 @@
 根因：ql-002 把变更文件/会话调试两卡改 Dialog 入口卡后，CollapsibleCard 已无引用者（grep 复核 src/ 零外部引用），纯死代码。
 方案：rm 两文件。⚠️ SillySpec quick 流程【无法删除文件】——step1 --files 显式声明删除目标后「超出 allowedFiles」检查过，但「删除文件」是独立硬规则，--force-baseline/--allow-new 均不解锁（CLI 提示误导），--done 三次 BLOCKED。经用户确认改为直接 git rm + commit 绕过 quick 删除拦截。详见 docs/sillyspec/quick-done-blocks-deletion-outside-files.md。
 结果：tsc --noEmit 0 错（无断链）；vitest 全量 141 文件 / 1384 测试零回归（较删前 142/1387 净 -1 文件 -3 测试 = 删掉的 collapsible-card.test 3 用例）。
+
+## ql-20260811-005-6881 | 2026-08-11 15:21:05 | 修复 platform_sync 进度同步端点并发首推撞 platform_change_progress_pkey 唯一键导致 500 的 bug
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/platform_sync/service.py（_apply catch IntegrityError+rollback 回退 UPDATE，抽 _assign 静态方法去重）
+- backend/app/modules/platform_sync/tests/test_router.py（补确定性 catch 路径单元测试 test_apply_catches_integrity_error_falls_back_to_update）
+需求：修复 platform_sync 进度同步端点并发首推撞 platform_change_progress_pkey 唯一键导致 500 的 bug。
+根因：service.py _apply 用非原子「先 session.get 再决定 INSERT/UPDATE」，sillyspec 客户端新建 change 首推并发双发，两请求 get 都在对方 commit 前返回 None，双走 INSERT 第二个 commit 撞唯一键 IntegrityError 未捕获穿透成 500。
+方案：_apply 改 catch IntegrityError + rollback 后重查行回退 UPDATE（SQLite 测试库/PG 生产跨方言通用，不用 ON CONFLICT 方言分支），抽 _assign 静态方法去重，updated_at 保持预存不刷新，upsert_progress 冲突检测分支不动；补确定性单元测试 test_apply_catches_integrity_error_falls_back_to_update（预插行+row=None 模拟并发窗口验证 catch+retry UPDATE）。
+结果：uv run pytest app/modules/platform_sync 16 passed + ruff check/format + mypy 9 文件 0 issue 全绿；端到端 asyncio.gather 并发测试因 SQLite 单连接 anyio ExceptionGroup 不代表生产 PG 已删，生产有效性待重建 backend 镜像后日志验证。

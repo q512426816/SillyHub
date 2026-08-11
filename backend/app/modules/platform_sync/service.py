@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.platform_sync.model import PlatformChangeProgressORM
@@ -76,8 +77,20 @@ class PlatformSyncService:
         pushed_at: str | None,
         user: str | None,
     ) -> None:
-        """接受分支：upsert latest_progress + 元字段（last_pushed_at/last_pusher）。"""
-        if row is None:
+        """接受分支：upsert latest_progress + 元字段（last_pushed_at/last_pusher）。
+
+        并发自愈：sillyspec 客户端新建 change 首推会并发双发，两请求的
+        ``session.get`` 都可能在对方 commit 前返回 None，于是双双走 INSERT，
+        第二个 commit 撞 ``platform_change_progress_pkey`` 唯一键 → 500。这里
+        catch ``IntegrityError`` 回退 UPDATE（跨方言：SQLite 测试库 / PG 生产都
+        抛 IntegrityError，无需 ON CONFLICT 方言分支）。详见 ql-20260811-005-6881。
+        """
+        if row is not None:
+            self._assign(row, body, pushed_at, user)
+            await self._session.commit()
+            return
+
+        try:
             self._session.add(
                 PlatformChangeProgressORM(
                     change_name=name,
@@ -86,11 +99,28 @@ class PlatformSyncService:
                     last_pusher=user,
                 )
             )
-        else:
-            row.latest_progress = body
-            row.last_pushed_at = pushed_at
-            row.last_pusher = user
-        await self._session.commit()
+            await self._session.commit()
+        except IntegrityError:
+            # 并发对手已抢先 INSERT 建行：rollback 清失败事务，重查行改走 UPDATE。
+            await self._session.rollback()
+            existing = await self._session.get(PlatformChangeProgressORM, name)
+            if existing is None:
+                # platform_sync 无删除路径，理论不发生；重抛让上层感知而非静默丢数据。
+                raise
+            self._assign(existing, body, pushed_at, user)
+            await self._session.commit()
+
+    @staticmethod
+    def _assign(
+        row: PlatformChangeProgressORM,
+        body: dict[str, Any],
+        pushed_at: str | None,
+        user: str | None,
+    ) -> None:
+        """UPDATE 共用：覆盖 latest_progress + 元字段（updated_at 保持预存语义）。"""
+        row.latest_progress = body
+        row.last_pushed_at = pushed_at
+        row.last_pusher = user
 
     async def list_lightweight(self) -> list[dict[str, Any]]:
         """GET /changes 轻量列表（契约 §5）。

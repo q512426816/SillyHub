@@ -280,3 +280,54 @@ async def test_old_body_no_headers_accepted(client, apikey_headers):
         headers=apikey_headers,  # 仅鉴权 header，无 X-SillySpec-*
     )
     assert resp.status_code == 200
+
+
+# ── ql-20260811-005-6881 并发首推自愈（catch IntegrityError）──────────────────────
+
+
+async def test_apply_catches_integrity_error_falls_back_to_update(db_session):
+    """ql-20260811-005-6881：_apply catch IntegrityError 确定性回退 UPDATE。
+
+    并发场景的等价模拟：预插行（=并发对手已抢先 INSERT 建行）后，以 row=None
+    直接调 ``_apply``（=模拟「``upsert_progress`` 的 get 在对手 commit 前返回
+    None」的并发窗口）→ INSERT 撞 ``change_name`` 唯一键 → catch IntegrityError
+    → rollback → 重查行 → UPDATE 覆盖。断言不抛、行被覆盖成新值。
+
+    说明：不做 ``asyncio.gather`` 端到端并发——SQLite 单连接 + anyio TaskGroup
+    会把异常聚合成 ExceptionGroup 并以 ``sqlite3.IntegrityError`` 原始形态穿透到
+    ASGI 层，该路径不代表生产 PG（独立连接、异常经 SQLAlchemy 翻译成
+    ``sqlalchemy.exc.IntegrityError`` 在 service 层被 catch）。生产有效性靠本用例
+    （service 层 catch）+ 重建镜像后日志无 500 双重保证。
+    """
+    from app.modules.platform_sync.model import PlatformChangeProgressORM
+    from app.modules.platform_sync.service import PlatformSyncService
+
+    # 预插行 = 并发对手已抢先 INSERT 建行
+    db_session.add(
+        PlatformChangeProgressORM(
+            change_name="race-x",
+            latest_progress={"old": True},
+            last_pushed_at=T1,
+            last_pusher="rival",
+        )
+    )
+    await db_session.commit()
+
+    new_body = {
+        "project": {"name": "demo"},
+        "changes": [{"name": "race-x", "current_stage": "plan"}],
+        "stages": [],
+        "steps": [],
+        "batch_progress": [],
+        "approvals": [],
+    }
+    svc = PlatformSyncService(db_session)
+    # row=None 模拟并发窗口（upsert_progress 的 get 在对手 commit 前返回 None）
+    await svc._apply(None, "race-x", new_body, T2, "alice")
+
+    db_session.expire_all()
+    row = await db_session.get(PlatformChangeProgressORM, "race-x")
+    assert row is not None
+    assert row.latest_progress == new_body
+    assert row.last_pusher == "alice"
+    assert row.last_pushed_at == T2
