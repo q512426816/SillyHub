@@ -74,6 +74,7 @@ modules:
       - isProcessAlive
       - writePid
       - removePid
+      - writeLocalYaml (src/local-yaml-writer.ts，2026-08-12 init 下发 local.yaml 用)
     depends_on: [backend]
     used_by: [deploy]
     needs_review: false
