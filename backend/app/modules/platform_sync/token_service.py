@@ -75,6 +75,46 @@ class PlatformSyncTokenService:
         self._db = db
         self._settings = settings
 
+    async def get_or_issue(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        created_by: uuid.UUID,
+    ) -> tuple[PlatformSyncTokenORM, str]:
+        """获取或签发 token（按 design §5.2 §7.1）。
+
+        语义：查同维度（workspace_id + created_by）旧未吊销 token → 命中则内联吊销
+        → 签新返回 (新 row, 明文)。明文仅本次返回，调用方立即注入 payload 后丢弃，
+        不写日志不落 lease.metadata（对齐 D-001 与 §9）。
+
+        幂等性：单次调用非幂等（每次签新）；但同维度至多一条活 token，旧 token
+        被吊销后 authenticate 返 None。重复 init 重复签新可接受（前端按钮已禁
+        用 + lease claim 窗口防并发）。
+        """
+        # 1) select 旧未吊销（workspace_id + created_by + revoked_at IS NULL）
+        stmt = (
+            select(PlatformSyncTokenORM)
+            .where(col(PlatformSyncTokenORM.workspace_id) == workspace_id)
+            .where(col(PlatformSyncTokenORM.created_by) == created_by)
+            .where(col(PlatformSyncTokenORM.revoked_at).is_(None))
+        )
+        old_row = (await self._db.execute(stmt)).scalar_one_or_none()
+
+        # 2) 命中则内联吊销（UPDATE revoked_at=now），不新增 public revoke 方法
+        if old_row is not None:
+            old_row.revoked_at = _utc_now()
+            self._db.add(old_row)
+            await self._db.commit()
+            # 吊销不入日志（只记 token_id/workspace/name 不记明文，与 create 对齐）
+
+        # 3) 签新（调既有 create，复用 _generate_plaintext 与 _token_hash）
+        return await self.create(
+            workspace_id=workspace_id,
+            name="init-provisioned",
+            created_by=created_by,
+            scope=None,
+        )
+
     async def create(
         self,
         *,

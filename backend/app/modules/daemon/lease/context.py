@@ -600,6 +600,56 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
         if _init_pc is not None:
             payload["platform_config"] = _init_pc
             payload["platformConfig"] = _init_pc
+        # task-04（2026-08-12-init-provision-local-yaml）/ P0 B1 / design §5.3.1 / §7.2 / §9：
+        # claim 时现算签发 shpsync_ + shmcp_ 明文，注入 payload.platform_config.local_yaml。
+        # **P0 关键：明文绝不落 lease.metadata_**（daemon_task_leases.metadata_ 是持久化
+        # JSON 列且被 audit/service.py:74 读取）——明文只活在本函数局部变量 → payload dict
+        # → HTTP 响应体，daemon 写入用户本地 local.yaml 后即落盘到本机（design §9）。
+        # actor_user_id / ws_id 缺失或非法 → 防御降级（不签 token、不注入 local_yaml，不抛 500）。
+        _init_actor_raw = lease_meta.get("actor_user_id")
+        _init_actor: uuid.UUID | None = None
+        if _init_actor_raw:
+            try:
+                _init_actor = (
+                    uuid.UUID(_init_actor_raw)
+                    if isinstance(_init_actor_raw, str)
+                    else _init_actor_raw
+                )
+            except (ValueError, AttributeError, TypeError):
+                _init_actor = None
+        if _init_ws is not None and _init_actor is not None:
+            from app.modules.mcp_gateway.service import McpTokenService
+            from app.modules.platform_sync.token_service import PlatformSyncTokenService
+
+            _init_settings = get_settings()
+            # 两 service 构造器必传 settings（design §7.1）；get_or_issue 返回 (row, 明文)，
+            # 只取明文，row 丢弃（DB 只存 sha256，明文不可恢复——design §5.2 D-001）。
+            _, _shpsync_plain = await PlatformSyncTokenService(
+                session, settings=_init_settings
+            ).get_or_issue(workspace_id=_init_ws, created_by=_init_actor)
+            _, _shmcp_plain = await McpTokenService(session, settings=_init_settings).get_or_issue(
+                workspace_id=_init_ws, created_by=_init_actor
+            )
+            # _init_pc 透传后 platform_config/platformConfig 已双写指向同一 dict；未透传 /
+            # 非 dict 时补建空 dict（防御 malformed lease）。local_yaml 只含两 token，
+            # url 由 daemon _serverOrigin() 拼，后端不下发（D-002 / design §5.4）。
+            #
+            # **P0 别名断开（task-10 xfail 上浮的缺口）**：payload["platform_config"] 在
+            # 上方 :601 由 `_init_pc = lease_meta.get("platform_config")` 引用赋值得来，
+            # 而 lease_meta 是 `dict(lease.metadata_ or {})` 的浅拷贝——嵌套 platform_config
+            # dict 与 lease.metadata_["platform_config"] 共享同一对象。若直接在其上加
+            # local_yaml 会原地 mutate，污染内存 lease.metadata_（违背 §9 "明文绝不落
+            # lease.metadata_" 内存口径）。此处**新建 dict**（浅拷贝 server_origin/strategy
+            # 顶层键）断开引用，local_yaml 写到独立 dict，DB 持久化行本就干净（JSON 列无
+            # MutableDict 跟踪不 flush），现内存口径也守住。
+            _init_pc_src = payload.get("platform_config")
+            _init_pc_dict: dict = {**_init_pc_src} if isinstance(_init_pc_src, dict) else {}
+            payload["platform_config"] = _init_pc_dict
+            payload["platformConfig"] = _init_pc_dict
+            _init_pc_dict["local_yaml"] = {
+                "platform_token": _shpsync_plain,
+                "mcp_token": _shmcp_plain,
+            }
         _init_sv = lease_meta.get("latest_spec_version")
         if _init_sv is not None:
             payload["latest_spec_version"] = _init_sv

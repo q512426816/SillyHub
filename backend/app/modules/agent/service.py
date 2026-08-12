@@ -1886,6 +1886,22 @@ class AgentService:
         now = datetime.now(UTC)
         claim_token = secrets.token_hex(32)
 
+        # B1 抉择（design §5.3.1 / §7.2 / §9）：本函数 **不签 shpsync_/shmcp_ 明文
+        # token、不写 lease.metadata_**。明文 token 的签发移到 daemon claim 时——
+        # build_claim_payload 的 mode=='init' 分支（daemon/lease/context.py，task-04）
+        # 现场调 PlatformSyncTokenService.get_or_issue / McpTokenService.get_or_issue
+        # 拿明文，直接注入 claim payload.platform_config.local_yaml，明文只在 claim
+        # 请求内存里短暂存在。理由：daemon_task_leases.metadata_ 是 DB 持久化 JSON 列
+        # 且被审计服务读取（daemon/model.py:183 + daemon/audit/service.py:74），明文
+        # 落库会破坏"明文只出现一次"契约（对比 claim_token 落库是审计等值匹配必要
+        # 特例，本变更 token 无后置比对需求，必须更严格）。
+        #
+        # metadata.actor_user_id（非敏感 UUID 串）保留：init lease 无 agent_run，
+        # claim 时 build_claim_payload 无法从 run 上下文取 actor，需从本字段解析为
+        # created_by 调 get_or_issue 绑定 token 归属。
+        #
+        # metadata.platform_config 仍只含 server_origin + strategy 两键，不含
+        # local_yaml 或任何明文 token（task-10 防回退断言会校验此点）。
         metadata: dict = {
             "mode": "init",
             "workspace_id": str(workspace_id),

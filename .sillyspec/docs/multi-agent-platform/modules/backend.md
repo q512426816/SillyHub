@@ -49,6 +49,7 @@ multi-agent-platform 的核心 API 服务，monorepo 的"大脑"。以 FastAPI �
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
+- **2026-08-12-init-provision-local-yaml**（init 自动下发 local.yaml）：工作区 init 流程扩展——`build_claim_payload`（daemon/lease/context.py mode=='init' 分支）claim 时调 `PlatformSyncTokenService.get_or_issue` + `McpTokenService.get_or_issue`（两 service 新增方法，吊销旧+签新）签发 `shpsync_`+`shmcp_`(scope=dispatch) 明文，注入 `payload.platform_config.local_yaml`（**明文不落 lease.metadata_**，P0/D-002——daemon_task_leases.metadata_ 持久化+进审计）。daemon 收到后 writeLocalYaml 写成员本地 .sillyspec/local.yaml（platform 段覆盖/mcp 段有才留），写失败→ok:false→lease failed（D-003 严格契约）。点完初始化进度同步+MCP 接入即可用，不用手跑 connect。dispatch 阶段（start_init_dispatch）零行为改动（B1：token 在 claim 时签），仅 actor_user_id 落 metadata 供 claim 解析 created_by。
 ## 变更索引
 - ql-20260625-003-4d7a | AgentRunResponse 与 session SSE tokens/turn_completed 透出缓存读取/写入 token 字段，供前端运行日志与会话消息展示 cache 用量。
 - ql-20260626-001-4a8e | 放宽 AgentRunLog content 落库与 SSE 推送截断 5000→50000（run_sync/service.py submit_messages），避免 agent 长答复/最终总结被硬切。

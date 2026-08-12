@@ -312,3 +312,88 @@ async def test_start_init_dispatch_lease_has_correct_root_path_from_binding(
         f"Root path MUST come from member binding, got: {meta.get('root_path')}"
     )
     assert meta.get("root_path") != workspace_root
+
+
+@pytest.mark.asyncio
+async def test_start_init_dispatch_platform_config_no_local_yaml_no_tokens(
+    db_session: AsyncSession,
+) -> None:
+    """task-10 / B1 防回退：dispatch 阶段**不签 token**（签发在 claim，task-04 / D-002）。
+
+    start_init_dispatch 落盘的 lease.metadata_.platform_config 必须仅含 server_origin +
+    strategy 两键，**不含** local_yaml / platform_token / mcp_token 明文。防止 execute
+    时误回退到"dispatch 阶段就把 local_yaml / 明文 token 落进 lease.metadata_"的写法
+    （那会让明文在 dispatch→claim 之间就已落库，破坏 D-002 持久化契约）。
+
+    断言口径：DB 持久化行（``select`` 重读）+ 键名 / 明文双向查无。token 明文样本取真实
+    前缀（shpsync_ / shmcp_），即便未来回退代码用了真实签发也能拦住。
+    """
+    import json
+
+    user_id = await _create_user(db_session)
+    daemon = await _create_daemon_instance(db_session, user_id)
+    runtime = await _create_runtime(db_session, user_id, daemon.id)
+
+    workspace = Workspace(
+        id=uuid.uuid4(),
+        name="Init B1 Guard WS",
+        slug=f"init-b1-{uuid.uuid4().hex[:8]}",
+        root_path="/repos/init-b1",
+        status="active",
+    )
+    db_session.add(workspace)
+    db_session.add(
+        WorkspaceMemberRuntime(
+            workspace_id=workspace.id,
+            user_id=user_id,
+            daemon_id=daemon.id,
+            runtime_id=runtime.id,
+            root_path="/Users/test/proj",
+            path_source="daemon-client",
+        )
+    )
+    await db_session.commit()
+
+    service = AgentService(db_session)
+    result = await service.start_init_dispatch(
+        workspace_id=workspace.id,
+        actor_user_id=user_id,
+    )
+
+    lease_stmt = select(DaemonTaskLease).where(
+        DaemonTaskLease.id == uuid.UUID(result["lease_id"]),
+    )
+    lease = (await db_session.execute(lease_stmt)).scalars().first()
+    assert lease is not None
+    meta = lease.metadata_ or {}
+
+    # B1：platform_config 仅 server_origin + strategy 两键
+    platform_config = meta.get("platform_config", {})
+    assert isinstance(platform_config, dict)
+    assert set(platform_config.keys()) == {"server_origin", "strategy"}, (
+        f"B1 violation: platform_config keys drifted from {{server_origin, strategy}}: "
+        f"{set(platform_config.keys())}"
+    )
+    # B1 防回退：不含 local_yaml（claim 才注入，task-04）
+    assert "local_yaml" not in platform_config, (
+        "B1 violation: local_yaml must NOT be set at dispatch (only at claim, task-04)"
+    )
+
+    # 全 metadata_ 序列化双向查无 token 明文 / 键名（防任何嵌套层级回退落库）
+    meta_json = json.dumps(meta, sort_keys=True)
+    assert "local_yaml" not in meta_json, (
+        "B1 violation: local_yaml key leaked into dispatch lease.metadata_"
+    )
+    assert "platform_token" not in meta_json, (
+        "B1 violation: platform_token key leaked into dispatch lease.metadata_"
+    )
+    assert "mcp_token" not in meta_json, (
+        "B1 violation: mcp_token key leaked into dispatch lease.metadata_"
+    )
+    # 真实前缀明文样本查无（即便回退代码真实签发也拦住）
+    assert "shpsync_" not in meta_json, (
+        "B1 violation: shpsync_ plaintext token found in dispatch lease.metadata_"
+    )
+    assert "shmcp_" not in meta_json, (
+        "B1 violation: shmcp_ plaintext token found in dispatch lease.metadata_"
+    )

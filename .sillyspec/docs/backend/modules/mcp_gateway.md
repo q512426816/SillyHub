@@ -48,5 +48,6 @@ create_mission(orchestration_mode="team"|"external")  # external → team_missio
 - 与 sillyhub-daemon `mcp-server.ts`（链路A daemon stdio）schema 同构、tool 集对齐，改任一端需同步另一端 + sillyspec 探测缓存。
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
+- **2026-08-12-init-provision-local-yaml**（D-001/FR-08）：McpTokenService 新增 `get_or_issue(*, workspace_id, created_by)`——复用三件套 list_for_workspace（过滤 created_by 匹配+未吊销）+ revoke 吊销 + create（name='init-provisioned', **scope=['dispatch']**）签新。scope 必须 MCP_SCOPES 合法值（read/dispatch/converge），**不可用 ['workspace']**（绕过 router Literal 收口持久化废 token）。供 init claim 时 build_claim_payload 注入 payload.platform_config.local_yaml（明文不落库 D-002）。
 - **2026-08-08-change-center-on-demand**（D-001~008 / R-01~07）：新增 4 个 change 阶层 tool（advance_change_stage/submit_stage_review/run_verify_gate/get_change_stage，task-07/08/09/10），替代被砍的 backend auto_dispatch 自动连轴，作统一按需触发入口（D-004）。本模块 `depends_on` 新增 `change`（4 tool 复用 ChangeService.transition_with_dispatch / review 四方法 / StageProjectionService / dispatch 的 gate 读取），与既有 `agent` 依赖并列。`run_verify_gate` 三态软调用（gate_result/gate_cmd/unavailable）不硬阻塞（D-003/D-008）；`get_change_stage` 替代 sillyspec.db 自动同步（D-002）。前端 `handleDispatch` 走对齐 HTTP 端点（advance-stage/run-verify-gate）而非直连 MCP（D-005）。
 <!-- MANUAL_NOTES_END -->

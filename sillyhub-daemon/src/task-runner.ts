@@ -815,9 +815,10 @@ export class TaskRunner {
    *
    * lease payload 来源（backend task-06 start_init_dispatch 下发，待合并）：
    *   - workspaceId / rootPath：成员 binding 解析（task-01 per-member）；
-   *   - platformConfig{server_origin, strategy} + latest_spec_version：SpecWorkspace 字段。
-   *   serverOrigin 缺省时回落 config.server_url（与 daemon._serverOrigin 一致，避免 backend
-   *   未透传时 platform.json.server_origin 空）。
+   *   - platformConfig{server_origin, strategy} + latest_spec_version：SpecWorkspace 字段；
+   *     platformConfig.local_yaml{platform_token, mcp_token}：claim 时一次性注入（design §5.4）。
+   *   serverOrigin 用 daemon config.server_url 去尾斜杠（D-002：**不用 payload.server_origin**——
+   *   local.yaml 给本机 sillyspec 用需本机可达地址，backend 值 docker/远程部署可能不一致）。
    *
    * 终态上报（design §9 init_completed / init_failed）：
    *   - 成功 → _finish status='completed'，**stats 携带 init_synced_at + init_synced_spec_version**
@@ -853,21 +854,35 @@ export class TaskRunner {
     }
 
     // platform_config + latest_spec_version 从 lease payload 鸭子类型读取（backend task-06 透传；
-    // 字段名兼容 camelCase / snake_case）。serverOrigin 缺省回落 config.server_url。
+    // 字段名兼容 camelCase / snake_case）。
     const platformConfigRaw =
       (ctx as { platformConfig?: Record<string, unknown> }).platformConfig ??
       (ctx as { platform_config?: Record<string, unknown> }).platform_config ??
       {};
-    const serverOrigin =
-      pickStr(platformConfigRaw, 'server_origin', 'serverOrigin') ||
-      this.config?.server_url ||
-      '';
+    // D-002：serverOrigin 用 daemon config.server_url（本机可达地址）去尾斜杠，**不用 payload.server_origin**
+    //（后端 SERVER_ORIGIN 在 docker/远程部署时可能与本机可达地址不一致；local.yaml 给本机 sillyspec 用，
+    // 必须 reach 本机地址）。复用 daemon._serverOrigin() 范式（daemon.ts:2169 config.server_url.replace(/\/+$/,'')）。
+    const serverOrigin = (this.config?.server_url || '').replace(/\/+$/, '');
     const strategy =
       pickStr(platformConfigRaw, 'strategy') || ctx.specStrategy || 'platform-managed';
     const latestSpecVersion =
       pickNum(platformConfigRaw, 'latest_spec_version', 'latestSpecVersion') ??
       (ctx as { latestSpecVersion?: number }).latestSpecVersion ??
       (ctx as { latest_spec_version?: number }).latest_spec_version;
+    // local_yaml 从 platformConfig 透传给 handleInitLease 第4步 writeLocalYaml（design §5.4 / D-003）。
+    // platformConfigRaw.local_yaml={platform_token,mcp_token}（backend claim 时一次性注入，不落库）。
+    // 缺失 / 非对象 / 任一 token 空 → undefined（向后兼容旧 lease / mock，handleInitLease 据此跳过 writeLocalYaml）。
+    const localYamlRaw = platformConfigRaw.local_yaml;
+    const localYamlObj =
+      localYamlRaw && typeof localYamlRaw === 'object'
+        ? (localYamlRaw as Record<string, unknown>)
+        : null;
+    const localPlatformToken = localYamlObj ? pickStr(localYamlObj, 'platform_token') : undefined;
+    const localMcpToken = localYamlObj ? pickStr(localYamlObj, 'mcp_token') : undefined;
+    const local_yaml: HandleInitLeaseParams['local_yaml'] =
+      localPlatformToken && localMcpToken
+        ? { platform_token: localPlatformToken, mcp_token: localMcpToken }
+        : undefined;
 
     const initParams: HandleInitLeaseParams = {
       workspaceId,
@@ -875,6 +890,7 @@ export class TaskRunner {
       serverOrigin,
       strategy,
       latestSpecVersion,
+      local_yaml,
     };
 
     const result = await handleInitLease(

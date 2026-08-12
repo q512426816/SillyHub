@@ -15,8 +15,23 @@
 //
 // vitest.config.ts: globals=false → 显式 import；include=tests/**/*.test.ts。
 
-import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll, afterEach } from 'vitest';
 vi.mock('../src/skill-manager.js', () => ({ linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })) }));
+
+// task-12：local-yaml-writer 模块级 mock——默认透传真实实现（成功/url 用例真实落盘到 tmp rootPath，
+// afterEach 清理），失败用例内联 mockRejectedValueOnce 令 writeLocalYaml 抛 Error('write boom')，
+// 验证 handleInitLease 第4步 try/catch 转 ok:false（D-003 严格契约，逐步 catch 非顶层 catch）。
+// 既有用例不传 local_yaml → handleInitLease 第4步跳过 → writeLocalYaml 不被调，mock 互不影响（扩展非重写）。
+const { localYamlWriterMock } = vi.hoisted(() => ({ localYamlWriterMock: vi.fn() }));
+vi.mock('../src/local-yaml-writer.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/local-yaml-writer.js')>();
+  // 默认透传：成功/url 用例依赖真实写盘以断言落盘内容（D-002 url 来源）
+  localYamlWriterMock.mockImplementation(
+    (...args: Parameters<typeof actual.writeLocalYaml>) => actual.writeLocalYaml(...args),
+  );
+  return { ...actual, writeLocalYaml: localYamlWriterMock };
+});
+
 import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
@@ -32,6 +47,8 @@ import {
 const TEST_WS_IDS = [
   'ws-init-ok', 'ws-init-defaults', 'ws-init-404', 'ws-init-5xx', 'ws-init-postfail',
   'ws-runner-ver', 'ws-init-1',
+  // task-12：handleInitLease 第4步 writeLocalYaml 新增用例（仍经 resolveSpecDir 写 daemon 状态文件）
+  'ws-init-yaml-ok', 'ws-init-yaml-fail', 'ws-init-yaml-url',
 ];
 afterAll(async () => {
   await Promise.all(
@@ -189,6 +206,106 @@ describe('handleInitLease / daemon 状态文件 (task-07 / D-001@v1)', () => {
     } finally {
       await rm(specCacheRoot, { recursive: true, force: true });
     }
+  });
+});
+
+// ── handleInitLease 第4步 writeLocalYaml（task-12 / D-003 / D-002）──────────────
+//
+// 覆盖 design §5.4（init lease 第4步 writeLocalYaml）+ §7.3（local.yaml writer 契约）+
+// decisions.md D-003（严格契约：写盘失败=init 失败，handleInitLease 逐步 try/catch 返 ok:false，
+// 非顶层 catch 不上抛）+ D-002（url 用 task-runner 透传的 serverOrigin=config.server_url，
+// 不读 payload.platform_config.server_origin）。
+//
+// localYamlWriterMock 默认透传真实 writeLocalYaml（成功/url 用例真实落盘到 tmp rootPath，
+// afterEach 清理）；失败用例 mockRejectedValueOnce 令其抛 Error('write boom')。既有用例不传
+// local_yaml → handleInitLease 第4步跳过 → mock 不被调（扩展非重写，零回归）。
+
+describe('handleInitLease 第4步 writeLocalYaml (task-12 / D-003 / D-002)', () => {
+  let tmpRoot: string;
+
+  beforeEach(async () => {
+    // 清上一用例调用计数（mockClear 不动 factory 设的 standing passthrough 实现）
+    localYamlWriterMock.mockClear();
+    tmpRoot = await mkdtemp(join(tmpdir(), 'init-yaml-'));
+  });
+
+  afterEach(async () => {
+    await rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it('写 local.yaml 成功 → ok:true（platform url=serverOrigin + mcp url=serverOrigin/mcp 两段 token 正确）', async () => {
+    const client = makeClient();
+    const result = await handleInitLease(client as never, {
+      workspaceId: 'ws-init-yaml-ok',
+      rootPath: tmpRoot,
+      serverOrigin: 'https://hub.example.com',
+      local_yaml: { platform_token: 'shpsync_x', mcp_token: 'shmcp_y' },
+    });
+
+    // 第4步被调一次，透传 rootPath + tokens + serverOrigin
+    expect(result.ok).toBe(true);
+    expect(localYamlWriterMock).toHaveBeenCalledTimes(1);
+    expect(localYamlWriterMock).toHaveBeenCalledWith(
+      tmpRoot,
+      { platform_token: 'shpsync_x', mcp_token: 'shmcp_y' },
+      'https://hub.example.com',
+    );
+
+    // 落盘 local.yaml：platform 段 url=serverOrigin token=shpsync_x，mcp 段 url=serverOrigin+'/mcp' token=shmcp_y
+    const written = await readFile(join(tmpRoot, '.sillyspec', 'local.yaml'), 'utf-8');
+    expect(written).toContain('platform:');
+    expect(written).toContain('url: https://hub.example.com\n  token: shpsync_x');
+    expect(written).toContain('mcp:');
+    expect(written).toContain('url: https://hub.example.com/mcp\n  token: shmcp_y');
+  });
+
+  it('writeLocalYaml 抛错 → result.ok===false（D-003：第4步 try/catch 逐步返 ok:false，非顶层 catch 不上抛）', async () => {
+    const client = makeClient();
+    // 一次性令 writeLocalYaml 抛 Error('write boom')（standing passthrough 不变，仅本次用例）
+    localYamlWriterMock.mockRejectedValueOnce(new Error('write boom'));
+
+    const result = await handleInitLease(client as never, {
+      workspaceId: 'ws-init-yaml-fail',
+      rootPath: tmpRoot,
+      serverOrigin: 'https://hub.example.com',
+      local_yaml: { platform_token: 'shpsync_x', mcp_token: 'shmcp_y' },
+    });
+
+    // D-003：写盘失败 = init 整体失败，但 handleInitLease 逐步 catch 返 ok:false（不抛错）
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/local_yaml_write_failed/);
+    expect(result.error).toMatch(/write boom/);
+    // 步骤 1-3 已完成：daemonState / specDir 仍透传（证明非顶层 catch 一锅端 null）
+    expect(result.daemonState).not.toBeNull();
+    expect(result.specDir).not.toBeNull();
+    expect(localYamlWriterMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('url 用 task-runner 透传的 serverOrigin（D-002：不读 payload.platform_config.server_origin）', async () => {
+    const client = makeClient();
+    const runnerOrigin = 'https://from-runner.example.com';
+
+    const result = await handleInitLease(client as never, {
+      workspaceId: 'ws-init-yaml-url',
+      rootPath: tmpRoot,
+      serverOrigin: runnerOrigin,
+      // D-002：handleInitLease 入参仅 serverOrigin（task-runner 从 config.server_url 透传，
+      // 本机可达地址）；handleInitLease 不读 backend 下发的 platform_config.server_origin
+      //（docker/远程部署时可能与本机可达地址不一致）——url 只取 serverOrigin。
+      local_yaml: { platform_token: 'shpsync_r', mcp_token: 'shmcp_m' },
+    });
+
+    expect(result.ok).toBe(true);
+    // 透传给 writeLocalYaml 的 url 正是 task-runner 透传的 serverOrigin
+    expect(localYamlWriterMock).toHaveBeenCalledWith(
+      tmpRoot,
+      { platform_token: 'shpsync_r', mcp_token: 'shmcp_m' },
+      runnerOrigin,
+    );
+    // 落盘 platform 段 url=runnerOrigin（非 backend 的 server_origin），mcp 段 url=runnerOrigin+'/mcp'
+    const written = await readFile(join(tmpRoot, '.sillyspec', 'local.yaml'), 'utf-8');
+    expect(written).toContain('url: https://from-runner.example.com\n  token: shpsync_r');
+    expect(written).toContain('url: https://from-runner.example.com/mcp\n  token: shmcp_m');
   });
 });
 

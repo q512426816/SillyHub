@@ -14,22 +14,22 @@ created_at: 2026-08-12 10:45:00
 - [x] task-03: daemon local-yaml-writer.ts 文本级段替换工具（覆盖：FR-04, FR-05, FR-06, D-004）
 
 ## Wave 2（依赖 Wave 1 的 task-01/02）
-- [ ] task-04: build_claim_payload init 分支注入 token（覆盖：FR-01, FR-03, D-002）
-- [ ] task-05: start_init_dispatch 注释澄清 actor_user_id 落 metadata（覆盖：FR-03, D-002）
+- [x] task-04: build_claim_payload init 分支注入 token（覆盖：FR-01, FR-03, D-002）
+- [x] task-05: start_init_dispatch 注释澄清 actor_user_id 落 metadata（覆盖：FR-03, D-002）
 
 ## Wave 3（依赖 Wave 2 的 task-04 + Wave 1 的 task-03）
-- [ ] task-06: handleInitLease 增 writeLocalYaml 第 4 步（覆盖：FR-04, FR-05, FR-06, FR-07, D-003）
-- [ ] task-07: task-runner 透传 local_yaml + serverOrigin 到 handleInitLease（覆盖：FR-06）
+- [x] task-06: handleInitLease 增 writeLocalYaml 第 4 步（覆盖：FR-04, FR-05, FR-06, FR-07, D-003）
+- [x] task-07: task-runner 透传 local_yaml + serverOrigin 到 handleInitLease（覆盖：FR-06）
 
 ## Wave 4（测试全覆盖，依赖 Wave 1-3 实现）
-- [ ] task-08: platform_sync get_or_issue 测试（覆盖：FR-02）
-- [ ] task-09: mcp_gateway get_or_issue 测试（覆盖：FR-02, FR-08）
-- [ ] task-10: claim 阶段 token 注入测试 + start_init_dispatch 防回退测试（覆盖：FR-01, FR-03, D-002）
-- [ ] task-11: local-yaml-writer 单元测试（覆盖：FR-04, FR-05）
-- [ ] task-12: handleInitLease 编排测试（含失败语义）（覆盖：FR-07, D-003）
+- [x] task-08: platform_sync get_or_issue 测试（覆盖：FR-02）
+- [x] task-09: mcp_gateway get_or_issue 测试（覆盖：FR-02, FR-08）
+- [x] task-10: claim 阶段 token 注入测试 + start_init_dispatch 防回退测试（覆盖：FR-01, FR-03, D-002）
+- [x] task-11: local-yaml-writer 单元测试（覆盖：FR-04, FR-05）
+- [x] task-12: handleInitLease 编排测试（含失败语义）（覆盖：FR-07, D-003）
 
 ## Wave 5（收尾）
-- [ ] task-13: 模块文档同步 + local.yaml 段注释（覆盖：非功能-兼容性/可维护性）
+- [x] task-13: 模块文档同步 + local.yaml 段注释（覆盖：非功能-兼容性/可维护性）
 
 ## 任务总表
 

@@ -20,6 +20,7 @@ import { homedir } from 'node:os';
 import { join, relative, isAbsolute, dirname, resolve, sep as pathSep } from 'node:path';
 import { mkdir, rm, readdir, stat, lstat, readlink, symlink, cp, readFile, writeFile } from 'node:fs/promises';
 import type { HubClient } from './hub-client.js';
+import { writeLocalYaml } from './local-yaml-writer.js';
 
 // ── resolveSpecDir ────────────────────────────────────────────────────────────
 
@@ -852,6 +853,14 @@ export interface HandleInitLeaseParams {
   serverOrigin: string;
   strategy?: string;
   latestSpecVersion?: number;
+  /**
+   * init 下发的 local.yaml token 段（design §5.4 / §7.2）。
+   *
+   * task-07 task-runner 从 ctx.platformConfig.local_yaml 透传入此字段；缺失时跳过第 4 步
+   * （向后兼容无 token 的旧 lease / mock client）。url 由 params.serverOrigin 提供
+   * （task-07 从 task-runner.config.server_url 透传，不读 payload.server_origin，对齐 D-002）。
+   */
+  local_yaml?: { platform_token: string; mcp_token: string };
 }
 
 /**
@@ -875,7 +884,7 @@ export interface HandleInitLeaseResult {
 /**
  * init lease 完整处理（design §5 / §9 生命周期：config_written → bundle_pulled → local_pushed）。
  *
- * 编排 4 步（顺序严格，任一硬失败即 abort）：
+ * 编排 5 步（顺序严格，任一硬失败即 abort）：
  *   1. **writeDaemonState**：写 2 字段 daemon 状态文件到 {resolveSpecDir(workspaceId)}/.runtime/。
  *      spec_version 取 latestSpecVersion（lease 下发）兜底 0。失败 → ok=false abort
  *      （状态文件是 daemon 保鲜基线，写失败后续保鲜失效，不降级）。D-001@v1：不再写 .sillyspec-platform.json。
@@ -886,7 +895,13 @@ export interface HandleInitLeaseResult {
  *   3. **postSpecSync**：若 pull 拿到 specDir 且本地有改动 → 回灌到服务器。失败**不 abort**
  *      （R-03：sync 失败仅 warn，状态文件已写、pull 缓存已就位，init 主体成功；
  *      本地改动下次任务前会再被 pull 前回灌保护触发重试，自愈）。
- *   4. 返回结果：specVersion = 状态文件落盘的 spec_version（= latestSpecVersion 兜底 0），
+ *   4. **writeLocalYaml**（design §5.4 / D-003 严格契约）：仅当 params.local_yaml 存在
+ *      （platformConfig.local_yaml 非空）时执行——向 {rootPath}/.sillyspec/local.yaml
+ *      写 platform 段（权威覆盖）+ mcp 段（有才留）。url 用 params.serverOrigin（task-07
+ *      从 config.server_url 透传，不读 payload.server_origin，对齐 D-002）。失败 → ok=false
+ *      abort（对齐步骤 1/2 的逐步 catch 范式，不向上抛；D-003：写盘失败 = init 整体失败，
+ *      _runInitLease 据 result.ok===false 走 _finish(false) → lease 标 failed）。
+ *   5. 返回结果：specVersion = 状态文件落盘的 spec_version（= latestSpecVersion 兜底 0），
  *      供调用方 complete lease 上报 init_synced_spec_version。
  *
  * 设计取舍：
@@ -898,7 +913,7 @@ export interface HandleInitLeaseResult {
  *     batch 路径与未来 interactive 路径可直接调用。
  *
  * @param client HubClient 实例（getSpecBundle / postSpecSync）
- * @param params init lease 参数（workspaceId / rootPath / serverOrigin / strategy / latestSpecVersion）
+ * @param params init lease 参数（workspaceId / rootPath / serverOrigin / strategy / latestSpecVersion / local_yaml?）
  */
 export async function handleInitLease(
   client: HubClient,
@@ -960,7 +975,29 @@ export async function handleInitLease(
     }
   }
 
-  // 步骤 4：返回成功（specVersion = 状态文件落盘值）。
+  // 步骤 4：writeLocalYaml（design §5.4 / D-003 严格契约：写盘失败 = init 整体失败）。
+  // 仅当 params.local_yaml 存在（platformConfig.local_yaml 非空）时执行；缺失则跳过（向后
+  // 兼容无 token 的旧 lease / mock client）。url 用 params.serverOrigin（task-07 透传，
+  // 不读 payload.server_origin，对齐 D-002）。
+  if (params.local_yaml) {
+    try {
+      await writeLocalYaml(params.rootPath, params.local_yaml, params.serverOrigin);
+    } catch (e) {
+      // 写盘硬失败 abort（对齐步骤 1 writeDaemonState / 步骤 2 pullSpecBundle 的逐步 catch 范式，
+      // 不向上抛——handleInitLease 是逐步 catch 返 ok:false/true 模型，非 task-runner 顶层 catch）。
+      // _runInitLease 据 result.ok===false 走 _finish(false) → lease 标 failed（D-003）。
+      console.warn('spec_sync: init_lease_local_yaml_failed', params.workspaceId, e);
+      return {
+        ok: false,
+        specVersion,
+        error: `local_yaml_write_failed: ${(e as Error)?.message ?? String(e)}`,
+        daemonState,
+        specDir,
+      };
+    }
+  }
+
+  // 步骤 5：返回成功（specVersion = 状态文件落盘值）。
   return {
     ok: true,
     specVersion: daemonState.spec_version,

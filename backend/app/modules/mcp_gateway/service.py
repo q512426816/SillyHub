@@ -242,6 +242,45 @@ class McpTokenService:
             )
         return bool(rowcount)
 
+    async def get_or_issue(
+        self, *, workspace_id: uuid.UUID, created_by: uuid.UUID | None
+    ) -> tuple[McpTokenORM, str]:
+        """获取或签发 init 专用的 dispatch scope token（design §5.2 / §7.1 / D-001）。
+
+        复用既有三件套（list_for_workspace / revoke / create）：
+        1. 查该 workspace 所有 token，过滤 ``created_by`` 匹配且 ``revoked_at IS NULL``。
+        2. 命中则吊销旧 token（避免堆积）。
+        3. 签发新 token：``name='init-provisioned'``，``scope=['dispatch']``（execute 派
+           Wave 子代理语义，必须取 MCP_SCOPES 合法值）。
+
+        返回 ``(新 row, 明文)``——明文仅返回，不入日志（create 内已遵守 R-06）。
+
+        Args:
+            workspace_id: 工作区 ID。
+            created_by: 签发者 ID（可为 None，与 create 签名对齐）。
+
+        Returns:
+            ``(新 token row, 明文)`` 元组。
+        """
+        from app.modules.mcp_gateway.auth import MCP_SCOPE_DISPATCH
+
+        # 1) 查旧：过滤 created_by 匹配且未吊销
+        existing = [
+            row
+            for row in await self.list_for_workspace(workspace_id=workspace_id)
+            if row.created_by == created_by and row.revoked_at is None
+        ]
+        # 2) 吊销旧（命中则逐一 revoke；通常至多一条，因 get_or_issue 每次调用都吊旧签新）
+        for old in existing:
+            await self.revoke(token_id=old.id, workspace_id=workspace_id)
+        # 3) 签新：scope 必须是 MCP_SCOPES 合法值（dispatch 对齐 execute 派子代理语义）
+        return await self.create(
+            workspace_id=workspace_id,
+            created_by=created_by,
+            name="init-provisioned",
+            scope=[MCP_SCOPE_DISPATCH],
+        )
+
     # ── Authenticate ──────────────────────────────────────────────────────
 
     async def authenticate(self, plaintext: str) -> McpTokenPrincipal | None:
