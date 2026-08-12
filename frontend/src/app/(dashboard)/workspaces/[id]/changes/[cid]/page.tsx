@@ -75,8 +75,9 @@ export default function ChangeDetailPage({ params }: Props) {
   const [agentStatus, setAgentStatus] = useState<DispatchResponse | null>(null);
   const [loadingAgentStatus, setLoadingAgentStatus] = useState(false);
   const [dispatching, setDispatching] = useState(false);
-  const [stageProvider, setStageProvider] = useState<string | null>(null);
-  const [stageModel, setStageModel] = useState<string | null>(null);
+  // 2026-08-12-dispatch-bind-agent-profile：阶段操作区改选智能体档案（方案A 仅档案，
+  // 去掉手动 provider/model）。stageProfileId=null=跟随工作区默认（不选档案）。
+  const [stageProfileId, setStageProfileId] = useState<string | null>(null);
   const [teamMode, setTeamMode] = useState(false);
   const [stageWorkers, setStageWorkers] = useState<StageWorkerPreset[]>([]);
   const [stageTeamMissionId, setStageTeamMissionId] = useState<string | null>(null);
@@ -136,8 +137,9 @@ export default function ChangeDetailPage({ params }: Props) {
       const result = await triggerDispatch(
         workspaceId,
         changeId,
-        stageProvider,
-        stageModel,
+        undefined,
+        undefined,
+        stageProfileId,
       );
       // 软失败（200 OK + dispatched:false）
       if (result.dispatch_result && !result.dispatch_result.dispatched) {
@@ -170,15 +172,13 @@ export default function ChangeDetailPage({ params }: Props) {
     setDispatching(true);
     setPageError(null);
     try {
+      // 2026-08-12-dispatch-bind-agent-profile：团队模式主 agent 也选档案
+      // （mainAgentConfig.agent_profile_id 优先）。单 agent 走顶层 agentProfileId。
       const mainAgentConfig = teamMode
-        ? {
-            ...(stageProvider ? { provider: stageProvider } : {}),
-            ...(stageModel ? { model: stageModel } : {}),
-          }
+        ? { ...(stageProfileId ? { agent_profile_id: stageProfileId } : {}) }
         : undefined;
       const result = await advanceChangeStage(workspaceId, changeId, nextStage, {
-        provider: stageProvider,
-        model: stageModel,
+        agentProfileId: stageProfileId,
         teamMode,
         workerPreset: teamMode ? stageWorkers : undefined,
         mainAgentConfig,
@@ -439,10 +439,9 @@ export default function ChangeDetailPage({ params }: Props) {
             transitioning={transitioning}
             dispatching={dispatching}
             advancing={advancing}
-            stageProvider={stageProvider}
-            onStageProviderChange={setStageProvider}
-            stageModel={stageModel}
-            onStageModelChange={setStageModel}
+            workspaceId={workspaceId}
+            stageProfileId={stageProfileId}
+            onStageProfileChange={setStageProfileId}
             teamMode={teamMode}
             onTeamModeChange={setTeamMode}
             stageWorkers={stageWorkers}

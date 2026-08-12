@@ -968,6 +968,7 @@ async def advance_change_stage(
     target_stage: str,
     provider: str | None = None,
     model: str | None = None,
+    agent_profile_id: uuid.UUID | None = None,
     team_mode: bool = False,
     worker_preset: list[dict] | None = None,
     main_agent_config: dict | None = None,
@@ -986,6 +987,9 @@ async def advance_change_stage(
     （建 verify/archive team mission）。``user_role`` 恒 ``admin``（对齐 review 方法内
     部硬编码，admin bypass transition 角色门；McpToken 无独立 user 角色概念）。
     actor=``McpToken.created_by``（同 dispatch_worker / create_mission）。
+
+    ``agent_profile_id``（2026-08-12-dispatch-bind-agent-profile）：单次 dispatch 入参，
+    None=跟随工作区默认。与 HTTP 入口行为一致（R-双入口）。
 
     返回 ``{change, current_stage, agent_dispatch}``（change 为 ChangeRead dict，
     agent_dispatch 形态对齐 ``TransitionDispatchResponse``）。跨 workspace 的 change_id
@@ -1008,6 +1012,7 @@ async def advance_change_stage(
             user_id=actor_user_id,
             provider=provider,
             model=model,
+            agent_profile_id=agent_profile_id,
             team_mode=team_mode,
             worker_preset=worker_preset,
             main_agent_config=main_agent_config,

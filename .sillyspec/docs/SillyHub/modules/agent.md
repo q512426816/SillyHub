@@ -17,6 +17,7 @@ created_at: 2026-06-24T01:16:33
 - `ExecutionCoordinatorService`：幂等与断点续跑。`check_idempotency`、`compute_fingerprint`/`validate_fingerprint`（AgentSpecBundle 指纹）、`generate_resume_token`、`resume_run`、`save_checkpoint`/`load_checkpoint`、`request_approval`/`approve`。
 - `MissionService` + `MissionControlService`：mission 生命周期（多 worker），`derive_status` 聚合 worker 状态，`can_dispatch_worker` 做并发/成本预算校验，`cancel` 取消。
 - `MissionExecutionService`：单 worker 执行，`dispatch_worker`（含 read_only 工具配置）、`collect_artifact` / `collect_completed_artifacts`。
+- **worker 档案透传**（2026-08-12-dispatch-bind-agent-profile，修 GAP-6）：`dispatch_worker` 在 `run.agent_profile_id` 非 None 时补调 `_apply_profile_to_lease`（`_apply_worker_profile_to_lease` helper），把 worker 档案的 mcp/skill/凭证/allowed_roots 写进 worker lease.metadata；profile 查不到标 `worker_profile_not_found` failed 不崩 mission（design §9）。
 - 与 daemon 的协作：`start_run` 成功后通过 `DaemonWsHub` 通知 daemon 领任务；日志/事件经 daemon 上行回流。
 
 ## 关键逻辑

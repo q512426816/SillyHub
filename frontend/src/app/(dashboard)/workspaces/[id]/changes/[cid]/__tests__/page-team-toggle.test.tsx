@@ -18,6 +18,14 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { ChangeStageActions } from "@/components/changes/detail/change-stage-actions";
 import type { ChangeRead, DispatchResponse } from "@/lib/changes";
 
+// 2026-08-12-dispatch-bind-agent-profile：ChangeStageActions 内部用 AgentProfileSelect
+// （react-query hook），mock 掉避免 QueryClientProvider 依赖（聚焦 team toggle 矩阵）。
+vi.mock("@/components/agent-profile-select", () => ({
+  AgentProfileSelect: ({ value }: { value: string | null }) => (
+    <div data-testid="profile-select" data-value={value ?? ""} />
+  ),
+}));
+
 // 轻量替身：StageTeamConfig 内部依赖较重，mock 成可断言 testid + 真实文案
 // （+ 添加 Worker / Stage Worker 预设），不断言 aria 契约（那是 ChangeStageActions 自身的 switch）。
 vi.mock("@/components/stage-team-config", () => ({
@@ -67,10 +75,11 @@ function makeProps(over: Record<string, unknown> = {}) {
     transitioning: false,
     dispatching: false,
     advancing: false,
-    stageProvider: null,
-    onStageProviderChange: vi.fn(),
-    stageModel: null,
-    onStageModelChange: vi.fn(),
+    // 2026-08-12-dispatch-bind-agent-profile：ChangeStageActions Props 改选档案
+    // （去 stageProvider/stageModel，加 workspaceId/stageProfileId/onStageProfileChange）。
+    workspaceId: "ws-1",
+    stageProfileId: null,
+    onStageProfileChange: vi.fn(),
     teamMode: false,
     onTeamModeChange: vi.fn(),
     stageWorkers: [],

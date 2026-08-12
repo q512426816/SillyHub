@@ -1,7 +1,6 @@
 "use client";
 
-import { AgentModelInput } from "@/components/AgentModelInput";
-import { AgentProviderSelect } from "@/components/AgentProviderSelect";
+import { AgentProfileSelect } from "@/components/agent-profile-select";
 import {
   StageTeamConfig,
   type StageWorkerPreset,
@@ -97,11 +96,11 @@ export interface ChangeStageActionsProps {
   transitioning: boolean;
   dispatching: boolean;
   advancing: boolean;
-  // provider/model/team
-  stageProvider: string | null;
-  onStageProviderChange: (_v: string | null) => void;
-  stageModel: string | null;
-  onStageModelChange: (_v: string | null) => void;
+  // 2026-08-12-dispatch-bind-agent-profile：阶段操作区改选档案（方案A 仅档案）。
+  // workspaceId 供 AgentProfileSelect 拉档案；stageProfileId null=跟随工作区默认。
+  workspaceId: string;
+  stageProfileId: string | null;
+  onStageProfileChange: (_v: string | null) => void;
   teamMode: boolean;
   onTeamModeChange: (_v: boolean) => void;
   stageWorkers: StageWorkerPreset[];
@@ -122,10 +121,9 @@ export function ChangeStageActions({
   transitioning,
   dispatching,
   advancing,
-  stageProvider,
-  onStageProviderChange,
-  stageModel,
-  onStageModelChange,
+  workspaceId,
+  stageProfileId,
+  onStageProfileChange,
   teamMode,
   onTeamModeChange,
   stageWorkers,
@@ -230,31 +228,36 @@ export function ChangeStageActions({
         </section>
       ) : null}
 
-      {/* Agent Provider/Model 覆盖 + 触发智能体（重派当前阶段） */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="whitespace-nowrap text-xs text-muted-foreground">
-          Agent provider（阶段流转 / 手动派发时生效）
-        </span>
-        <AgentProviderSelect
-          value={stageProvider}
-          onChange={onStageProviderChange}
-          includeDefault="跟随工作区默认"
-        />
-        <AgentModelInput
-          value={stageModel}
-          onChange={onStageModelChange}
-          className="w-[260px]"
-        />
-        {configEnabled && !hasActiveRun ? (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onDispatch}
-            disabled={dispatching}
-          >
-            {dispatching ? "触发中…" : "🤖 触发智能体"}
-          </Button>
-        ) : null}
+      {/* 智能体档案选择 + 触发智能体（重派当前阶段）。
+          2026-08-12-dispatch-bind-agent-profile：原手动 provider/model 改为选档案
+          （方案A 仅档案）。推进/触发两按钮共用此选择。 */}
+      <div className="space-y-1.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="whitespace-nowrap text-xs text-muted-foreground">
+            智能体档案
+          </span>
+          <AgentProfileSelect
+            workspaceId={workspaceId}
+            value={stageProfileId}
+            onChange={onStageProfileChange}
+            includeDefault="跟随工作区默认"
+          />
+          {configEnabled && !hasActiveRun ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onDispatch}
+              disabled={dispatching}
+            >
+              {dispatching ? "触发中…" : "🤖 触发智能体"}
+            </Button>
+          ) : null}
+        </div>
+        {/* FR-08 已知 gap 提示：本次仅 provider/凭证/allowed_roots 生效，
+            system_prompt/skill/mcp 链路修复放下个变更。 */}
+        <p className="text-[11px] text-muted-foreground">
+          选档案后生效：供应商/模型/凭证/可访问根目录；系统提示/技能/MCP 下版本支持
+        </p>
       </div>
 
       {/* 团队开关 + StageTeamConfig */}
@@ -291,8 +294,8 @@ export function ChangeStageActions({
               stage={currentStage === "verify" ? "verify" : "execute"}
               workers={stageWorkers}
               onWorkersChange={onStageWorkersChange}
-              provider={stageProvider ?? undefined}
-              model={stageModel ?? undefined}
+              workspaceId={workspaceId}
+              mainProfileId={stageProfileId}
             />
           ) : null}
         </div>

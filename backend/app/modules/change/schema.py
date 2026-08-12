@@ -213,14 +213,24 @@ class TransitionRequest(BaseModel):
     model: str | None = Field(
         default=None, max_length=128, description="Optional agent model override"
     )
+    # 2026-08-12-dispatch-bind-agent-profile task-01：显式指定本次派发用的 AgentProfile。
+    # None（默认）= 跟随工作区默认（不选档案），走 _resolve_dispatch_profile 兜底链的
+    # workspace.default_agent_profile_id 分支；非 None = 本次 dispatch 用该档案的
+    # provider/model/凭证/allowed_roots（system_prompt/skill/mcp 链路下个变更修）。
+    # 作用域=单次 dispatch 入参，不持久化到 change（D-001@v1）。
+    agent_profile_id: uuid.UUID | None = Field(
+        default=None, description="指定本次派发用的 AgentProfile（可选，None=跟随默认）"
+    )
     # execute/verify 阶段是否用团队执行（D-004@v2，默认 single 零回归）
     team_mode: bool = Field(
         default=False,
         description="execute/verify 阶段是否用团队执行（D-004@v2，默认 single 零回归）",
     )
     # task-09（D-002@v2）：team_mode=True 时携带的用户预设 worker 列表。
-    # 每条 {agent_type, model, objective, role}。透传到 change.stages.team_worker_preset
-    # 供 _dispatch_execute_team → OrchestratorService.team_mission_entry 读取。nullable 零回归。
+    # 每条 {profile_id, objective, role}（2026-08-12-dispatch-bind-agent-profile：每 worker
+    # 选档案，替换原 {agent_type, model, ...} 手动字段，向后兼容旧形态）。透传到
+    # change.stages.team_worker_preset 供 _dispatch_execute_team →
+    # OrchestratorService.team_mission_entry / dispatch_worker 读取。
     worker_preset: list[dict] | None = Field(
         default=None, description="team_mode 用户预设 worker 列表（D-002@v2，可选）"
     )

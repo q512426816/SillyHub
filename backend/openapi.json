@@ -4194,6 +4194,23 @@
               ],
               "title": "Model"
             }
+          },
+          {
+            "name": "agent_profile_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agent Profile Id"
+            }
           }
         ],
         "responses": {
@@ -48828,6 +48845,19 @@
             ],
             "title": "Model",
             "description": "Optional agent model override"
+          },
+          "agent_profile_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Profile Id",
+            "description": "指定本次派发用的 AgentProfile（可选，None=跟随默认）"
           },
           "team_mode": {
             "type": "boolean",

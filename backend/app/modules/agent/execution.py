@@ -302,6 +302,14 @@ class MissionExecutionService:
                 message="runtime 在派发瞬间离线，dispatch 返回 None",
             )
             return None
+        # task-08（2026-08-12-dispatch-bind-agent-profile，修 GAP-6）：worker 绑了档案
+        # 时（run.agent_profile_id 非 None，由 MCP dispatch_worker tool 建链时写入），
+        # 补调 AgentService._apply_profile_to_lease 把档案字段（mcp_refs/skill_refs/
+        # effective_allowed_roots/profile_version/llm_provider_id）写进 worker lease.metadata，
+        # 供 daemon claim payload 消费。profile 查不到（被删/越权）→ best-effort 标 failed
+        # + return None（对齐 worktree 失败语义，不崩 mission，design §9）。
+        if run.agent_profile_id is not None:
+            await self._apply_worker_profile_to_lease(run, lease_id)
         log.info(
             "mission_worker_dispatched",
             run_id=str(run.id),
@@ -310,6 +318,57 @@ class MissionExecutionService:
             read_only=read_only,
         )
         return lease_id
+
+    async def _apply_worker_profile_to_lease(self, run: AgentRun, lease_id: uuid.UUID) -> None:
+        """worker lease 补档案字段（task-08，修 GAP-6）。
+
+        读 ``run.agent_profile_id`` 查 AgentProfile（已由 MCP dispatch_worker tool
+        建链时校验过可见性，此处仅按 id 取实体），调 ``AgentService._apply_profile_to_lease``
+        复用既有逻辑写 lease.metadata 五键。profile 查不到（档案被删）→ 标 worker run
+        failed + 不抛（best-effort，主 agent 决策补派，design §9）。
+        """
+        from app.modules.agent.profile.model import AgentProfile
+        from app.modules.agent.service import AgentService
+
+        profile = await self._session.get(AgentProfile, run.agent_profile_id)
+        if profile is None:
+            # 档案在 run 建链后被删（race）。标 failed 不崩 mission，主 agent 补派。
+            log.warning(
+                "mission_worker_profile_missing",
+                run_id=str(run.id),
+                agent_profile_id=str(run.agent_profile_id),
+            )
+            await mark_worker_run_failed(
+                self._session,
+                run,
+                error_code="worker_profile_not_found",
+                message=f"worker 档案 {run.agent_profile_id} 已不存在",
+            )
+            return
+        try:
+            agent_service = AgentService(self._session)
+            await agent_service._apply_profile_to_lease(lease_id, profile)
+            log.info(
+                "mission_worker_profile_applied",
+                run_id=str(run.id),
+                lease_id=str(lease_id),
+                profile_id=str(profile.id),
+            )
+        except Exception as exc:
+            # _apply_profile_to_lease 抛（如 overlay 越界 AgentProfileOverlayTooWide）
+            # → 标 failed + return None 由调用方决定补派。此处 best-effort log，不崩 mission。
+            log.warning(
+                "mission_worker_profile_apply_failed",
+                run_id=str(run.id),
+                lease_id=str(lease_id),
+                error=str(exc),
+            )
+            await mark_worker_run_failed(
+                self._session,
+                run,
+                error_code="worker_profile_apply_failed",
+                message=f"worker 档案写入 lease 失败：{exc}",
+            )
 
     async def collect_artifact(
         self,

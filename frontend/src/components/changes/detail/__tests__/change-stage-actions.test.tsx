@@ -9,14 +9,9 @@ import type {
 } from "@/lib/changes";
 
 // 黑盒 mock 被复用组件（只测 ChangeStageActions 自身收口与回调）
-vi.mock("@/components/AgentProviderSelect", () => ({
-  AgentProviderSelect: ({ value }: { value: string | null }) => (
-    <div data-testid="provider-select" data-value={value ?? ""} />
-  ),
-}));
-vi.mock("@/components/AgentModelInput", () => ({
-  AgentModelInput: ({ value }: { value: string | null }) => (
-    <div data-testid="model-input" data-value={value ?? ""} />
+vi.mock("@/components/agent-profile-select", () => ({
+  AgentProfileSelect: ({ value }: { value: string | null }) => (
+    <div data-testid="profile-select" data-value={value ?? ""} />
   ),
 }));
 vi.mock("@/components/stage-team-config", () => ({
@@ -50,10 +45,9 @@ function makeProps(over: Record<string, unknown> = {}) {
     transitioning: false,
     dispatching: false,
     advancing: false,
-    stageProvider: null,
-    onStageProviderChange: vi.fn(),
-    stageModel: null,
-    onStageModelChange: vi.fn(),
+    workspaceId: "ws-1",
+    stageProfileId: null,
+    onStageProfileChange: vi.fn(),
     teamMode: false,
     onTeamModeChange: vi.fn(),
     stageWorkers: [],

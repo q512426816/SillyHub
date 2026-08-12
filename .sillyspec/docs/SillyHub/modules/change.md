@@ -16,6 +16,7 @@ created_at: 2026-06-24T01:16:33
 - `ChangeService`：`list_/get/get_by_key/get_documents/get_document_content/update_progress/transition/transition_with_dispatch/submit_feedback/check_archive_gate/reparse/sync_documents/approve/reject`，`resolve_human_gate(target_stage)` 计算人工 gate。
 - `ChangeParser`：解析 `.sillyspec/changes/` 为 `ChangeParserResult`（`ParsedChange`/`ParsedDoc`/`ParseWarning`）。`_infer_change_type`、`_infer_affected_components`（读 `_module-map.yaml` 把变更涉及的文件路径反查回模块，`_load_module_map`/`_match_paths_to_modules`）。
 - `SillySpecStageDispatchService`（dispatch.py）：阶段流转的派发服务。`dispatch`/`dispatch_next_step`（由 `transition_with_dispatch` 显式调用，**不再自动连轴**）/`_dispatch_execute_team`/`reconcile_stale_runs`（仅清理 stale run 不推进）/`cleanup_orphan_dispatch_runs`/`cleanup_stale_pending_runs`/`get_config_for_stage` 读阶段 agent 配置（`StageAgentConfig.requires_worktree`）。`auto_dispatch_next_step` 已删（形态A 改按需触发）。
+- **智能体档案透传**（2026-08-12-dispatch-bind-agent-profile）：`TransitionRequest.agent_profile_id`（HTTP body / /dispatch Query）→ `transition_with_dispatch(agent_profile_id=)` → `dispatch()`/`dispatch_next_step()` → `AgentService.start_stage_dispatch(agent_profile_id=)`（形参复用，不持久化到 change，None=跟随工作区默认）。MCP `advance_change_stage` 同步加参（R-双入口）。
 - 依赖 change_writer（生成文档）、agent（派发执行）、workspace（解析根）。
 
 ## 关键逻辑
@@ -27,6 +28,9 @@ parse_workspace(sillyspec_root) → 各 change 目录 → _infer_affected_compon
 transition → resolve_human_gate 校验 → transition_with_dispatch
 → SillySpecStageDispatchService.dispatch → AgentService.start_stage_dispatch
 → dispatch 成功后 cleanup_orphan_dispatch_runs 收敛
+# 智能体档案透传（2026-08-12，可选）
+前端档案选择 → agent_profile_id → dispatch → start_stage_dispatch
+→ _resolve_dispatch_profile（run 显式→workspace 默认→None）→ _apply_profile_to_lease
 # 重解析
 reparse → 全量重扫目录 + _detect_renames + _sync_docs 同步入库
 ```

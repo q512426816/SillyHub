@@ -730,6 +730,7 @@ class ChangeService:
         user_id: uuid.UUID | None = None,
         provider: str | None = None,
         model: str | None = None,
+        agent_profile_id: uuid.UUID | None = None,
         team_mode: bool = False,
         worker_preset: list[dict] | None = None,
         main_agent_config: dict | None = None,
@@ -744,6 +745,10 @@ class ChangeService:
         dispatch_next_step Step 2.5)。``worker_preset`` / ``main_agent_config``
         一并写入 ``stages.team_worker_preset`` / ``stages.team_main_agent_config``，
         供 :func:`_dispatch_execute_team` 传给 ``OrchestratorService.team_mission_entry``。
+
+        ``agent_profile_id``（2026-08-12-dispatch-bind-agent-profile）：单次 dispatch
+        入参，透传给 :func:`dispatch` → ``start_stage_dispatch``（形参已存在），None=
+        跟随工作区默认（不选档案，D-001@v1）。
         """
         change = await self.transition(
             workspace_id=workspace_id,
@@ -789,6 +794,7 @@ class ChangeService:
                         user_id=user_id,
                         provider=provider,
                         model=model,
+                        agent_profile_id=agent_profile_id,
                     )
             except Exception as exc:
                 log.warning(

@@ -15943,6 +15943,11 @@ export interface components {
              */
             model?: string | null;
             /**
+             * Agent Profile Id
+             * @description 指定本次派发用的 AgentProfile（可选，None=跟随默认）
+             */
+            agent_profile_id?: string | null;
+            /**
              * Team Mode
              * @description execute/verify 阶段是否用团队执行（D-004@v2，默认 single 零回归）
              * @default false
@@ -19874,6 +19879,7 @@ export interface operations {
             query?: {
                 provider?: string | null;
                 model?: string | null;
+                agent_profile_id?: string | null;
             };
             header?: never;
             path: {

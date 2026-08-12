@@ -45,13 +45,30 @@ export type TransitionRequest = {
   /** 显式 agent provider（可选）；省略则后端用 workspace.default_agent */
   provider?: string | null;
   model?: string | null;
+  /** 2026-08-12-dispatch-bind-agent-profile：本次派发用的 AgentProfile id（可选，
+   * 单次 dispatch 入参不持久化，D-001@v1）。省略/None=跟随工作区默认（不选档案）。 */
+  agent_profile_id?: string | null;
   /** execute/verify 阶段是否用团队执行（task-08，D-004@v2；省略/False=单 worker 零回归） */
   team_mode?: boolean;
-  /** task-09（D-002@v2）：team_mode 用户预设 worker 列表，透传到 backend
-   *  change.stages.team_worker_preset 供主 agent OrchestratorService 读取。 */
-  worker_preset?: { agent_type: string; model: string; objective: string; role: string }[];
-  /** task-09（D-003@v2）：team_mode 主 agent 配置 {agent_type, provider, model}。 */
-  main_agent_config?: { agent_type?: string; provider?: string; model?: string };
+  /** team_mode 用户预设 worker 列表，透传到 backend change.stages.team_worker_preset。
+   * 2026-08-12-dispatch-bind-agent-profile：每 worker 选档案，结构 {profile_id, objective, role}
+   * （向后兼容旧 {agent_type, model, ...} 形态，D-002@v2）。 */
+  worker_preset?: {
+    profile_id?: string;
+    objective?: string;
+    role?: string;
+    // 向后兼容旧形态（agent_type/model 仍可传，消费方按 profile_id 优先）
+    agent_type?: string;
+    model?: string;
+  }[];
+  /** team_mode 主 agent 配置。2026-08-12-dispatch-bind-agent-profile：主 agent 选档案，
+   * agent_profile_id 优先（D-003@v2）。 */
+  main_agent_config?: {
+    agent_profile_id?: string;
+    agent_type?: string;
+    provider?: string;
+    model?: string;
+  };
 };
 
 /**
@@ -332,16 +349,21 @@ export function getAgentStatus(workspaceId: string, changeId: string) {
 
 /**
  * 手动触发 Agent Dispatch — POST /api/workspaces/{wid}/changes/{cid}/dispatch
+ *
+ * 2026-08-12-dispatch-bind-agent-profile：加 agentProfileId（Query 参数，对齐后端
+ * manual_dispatch 的 provider/model/agent_profile_id 三 Query）。
  */
 export function triggerDispatch(
   workspaceId: string,
   changeId: string,
   provider?: string | null,
   model?: string | null,
+  agentProfileId?: string | null,
 ) {
   const searchParams = new URLSearchParams();
   if (provider) searchParams.set("provider", provider);
   if (model) searchParams.set("model", model);
+  if (agentProfileId) searchParams.set("agent_profile_id", agentProfileId);
   const qs = searchParams.toString();
   return apiFetch<DispatchResponse>(
     `/api/workspaces/${workspaceId}/changes/${changeId}/dispatch${qs ? `?${qs}` : ""}`,
@@ -365,7 +387,7 @@ export function triggerDispatch(
  * team→_dispatch_execute_team）。
  *
  * @param targetStage 目标阶段（brainstorm→plan→execute→verify→archive 的下一阶段）
- * @param opts 可选 provider/model/team_mode/worker_preset/main_agent_config 覆盖
+ * @param opts 可选 agentProfileId/provider/model/team_mode/worker_preset/main_agent_config 覆盖
  */
 export function advanceChangeStage(
   workspaceId: string,
@@ -375,6 +397,7 @@ export function advanceChangeStage(
     reason?: string;
     provider?: string | null;
     model?: string | null;
+    agentProfileId?: string | null;
     teamMode?: boolean;
     workerPreset?: TransitionRequest["worker_preset"];
     mainAgentConfig?: TransitionRequest["main_agent_config"];
@@ -384,6 +407,7 @@ export function advanceChangeStage(
   if (opts?.reason !== undefined) body.reason = opts.reason;
   if (opts?.provider) body.provider = opts.provider;
   if (opts?.model) body.model = opts.model;
+  if (opts?.agentProfileId) body.agent_profile_id = opts.agentProfileId;
   if (opts?.teamMode) {
     body.team_mode = true;
     if (opts.workerPreset && opts.workerPreset.length > 0) {

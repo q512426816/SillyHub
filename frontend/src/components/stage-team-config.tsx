@@ -4,25 +4,23 @@
  * task-08（2026-07-12-team-main-agent-orchestration / FR-8）：Stage Team 配置面板。
  *
  * execute / verify stage 的 worker 预设编辑（D-002@v2 用户预设）。
- * 与 mission-console 的 TeamConfigPanel 区别：
- *   - stage 化：execute 默认 role=impl，verify 默认 role=verify
- *   - 紧凑：只配 worker 列表（agent_type / role / objective），主 agent 配置
- *     用 stage Agent Provider Override（page.tsx 已有 stageProvider/stageModel）
- *     派生为 MainAgentConfig，不再单独表单
- *   - 独立实现（不依赖 mission-console 的 TeamConfigPanel，避免 task-07 并行冲突）
  *
- * 输出（onWorkersChange）：StageWorkerPreset[] = worker_preset 雏形，
- * 透传给 backend create_mission 由 task-09 三入口接通。
+ * 2026-08-12-dispatch-bind-agent-profile：每 worker 选档案（替换原手动 agent_type/model），
+ * 主 agent 也选档案。worker 数量/增删交互不变（D-005@v1）。输出 StageWorkerPreset[]
+ * = `{profile_id, objective, role}`，透传 backend change.stages.team_worker_preset。
+ *
+ * 输出（onWorkersChange）：StageWorkerPreset[]，page.tsx 透传给 backend create_mission。
  */
 
 import { useEffect } from "react";
 
+import { AgentProfileSelect } from "@/components/agent-profile-select";
 import { Badge } from "@/components/ui/badge";
 
-/** stage 化 worker 预设（agent.ts WorkerPresetItem 的 UI 子集 + stage 派生）。 */
+/** stage 化 worker 预设（2026-08-12：每 worker 选档案，去 agent_type/model）。 */
 export interface StageWorkerPreset {
-  agent_type: string;
-  model: string;
+  /** 选中档案 id；null/undefined = 跟随工作区默认。 */
+  profile_id?: string;
   objective: string;
   role: string;
 }
@@ -48,28 +46,23 @@ const ROLE_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: "risk", label: "风险" },
 ] as const;
 
-const AGENT_TYPE_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
-  { value: "claude_code", label: "Claude Code" },
-  { value: "codex", label: "Codex" },
-  { value: "cursor", label: "Cursor" },
-] as const;
-
 export interface StageTeamConfigProps {
   stage: "execute" | "verify";
   workers: StageWorkerPreset[];
   onWorkersChange: (next: StageWorkerPreset[]) => void;
-  /** 来自 stage Agent Provider Override（page.tsx）的主 agent provider/model，
-   *  仅展示参考，本身不参与 worker 配置。 */
-  provider?: string;
-  model?: string;
+  /** workspace id（2026-08-12：每 worker / 主 agent AgentProfileSelect 拉档案用）。 */
+  workspaceId: string;
+  /** 2026-08-12：主 agent 选的档案 id（由 page stageProfileId 透传，
+   *  团队开关下方只读展示主 agent 用哪个档案；主 agent 选择器在 change-stage-actions 顶部统一）。 */
+  mainProfileId?: string | null;
 }
 
 export function StageTeamConfig({
   stage,
   workers,
   onWorkersChange,
-  provider,
-  model,
+  workspaceId,
+  mainProfileId,
 }: StageTeamConfigProps) {
   // stage 切换 / 首次挂载且 workers 为空时，塞入 stage 默认 1 个 worker（D-002 用户预设雏形）。
   // 不重复初始化（workers 非空尊重用户已有编辑）。
@@ -110,12 +103,11 @@ export function StageTeamConfig({
         </button>
       </header>
 
-      {/* 主 agent 配置只读参考（来自 stage Agent Provider Override） */}
+      {/* 主 agent 档案（来自顶部统一选择，此处只读展示） */}
       <div className="rounded border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] text-slate-600">
-        <span className="text-slate-400">主 Agent：</span>
+        <span className="text-slate-400">主 Agent 档案：</span>
         <span className="font-medium">
-          {provider || "跟随工作区默认"}
-          {model ? ` · ${model}` : ""}
+          {mainProfileId ? "已选档案" : "跟随工作区默认"}
         </span>
       </div>
 
@@ -144,23 +136,15 @@ export function StageTeamConfig({
                 删除
               </button>
             </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-2">
               <label className="flex flex-col gap-1">
-                <span className="text-[11px] text-slate-500">Agent 类型</span>
-                <select
-                  aria-label={`stage worker ${idx + 1} agent 类型`}
-                  className="h-[32px] rounded-md border border-slate-300 bg-white px-2 text-[12.5px] text-slate-800"
-                  value={w.agent_type}
-                  onChange={(e) =>
-                    updateWorker(idx, { agent_type: e.target.value })
-                  }
-                >
-                  {AGENT_TYPE_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
+                <span className="text-[11px] text-slate-500">Worker 档案</span>
+                <AgentProfileSelect
+                  workspaceId={workspaceId}
+                  value={w.profile_id ?? null}
+                  onChange={(v) => updateWorker(idx, { profile_id: v ?? undefined })}
+                  includeDefault="跟随工作区默认"
+                />
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] text-slate-500">角色</span>
@@ -176,17 +160,6 @@ export function StageTeamConfig({
                     </option>
                   ))}
                 </select>
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] text-slate-500">模型</span>
-                <input
-                  type="text"
-                  aria-label={`stage worker ${idx + 1} 模型`}
-                  placeholder="留空=跟随主 agent"
-                  className="h-[32px] rounded-md border border-slate-300 bg-white px-2 text-[12.5px] text-slate-800"
-                  value={w.model}
-                  onChange={(e) => updateWorker(idx, { model: e.target.value })}
-                />
               </label>
             </div>
             <label className="flex flex-col gap-1">
@@ -211,8 +184,7 @@ export function StageTeamConfig({
 
 function makeDefaultWorker(stage: "execute" | "verify"): StageWorkerPreset {
   return {
-    agent_type: "claude_code",
-    model: "",
+    profile_id: undefined,
     objective: STAGE_DEFAULT_OBJECTIVE[stage],
     role: STAGE_DEFAULT_ROLE[stage],
   };

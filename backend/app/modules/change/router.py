@@ -488,6 +488,7 @@ async def transition_change(
         user_id=_user.id,
         provider=body.provider,
         model=body.model,
+        agent_profile_id=body.agent_profile_id,
         team_mode=body.team_mode,
         worker_preset=body.worker_preset,
         main_agent_config=body.main_agent_config,
@@ -524,6 +525,7 @@ async def advance_stage(
         user_id=_user.id,
         provider=body.provider,
         model=body.model,
+        agent_profile_id=body.agent_profile_id,
         team_mode=body.team_mode,
         worker_preset=body.worker_preset,
         main_agent_config=body.main_agent_config,
@@ -860,6 +862,9 @@ async def manual_dispatch(
     # ql-20260618-009：max_length 与 schema.py TransitionRequest 对齐（64/128）
     provider: str | None = Query(default=None, max_length=64),
     model: str | None = Query(default=None, max_length=128),
+    # 2026-08-12-dispatch-bind-agent-profile task-04：手动派发也支持选档案
+    # （Query 风格对齐 provider/model）。None=跟随工作区默认。
+    agent_profile_id: uuid.UUID | None = Query(default=None),
 ) -> DispatchResponse:
     """Manually trigger agent dispatch for the current stage of a change."""
     from app.modules.change.dispatch import dispatch, get_config_for_stage, has_active_run
@@ -887,6 +892,7 @@ async def manual_dispatch(
         user_id=_user.id,
         provider=provider,
         model=model,
+        agent_profile_id=agent_profile_id,
     )
 
     # Refresh change to get updated stages

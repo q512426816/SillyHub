@@ -467,6 +467,7 @@ async def dispatch(
     user_id: uuid.UUID,
     provider: str | None = None,
     model: str | None = None,
+    agent_profile_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     """Dispatch an agent for the given stage transition.
 
@@ -541,6 +542,7 @@ async def dispatch(
             read_only=config.read_only,
             provider=provider,
             model=model,
+            agent_profile_id=agent_profile_id,
         )
         # Update last_dispatch with run_id and status.
         # dict() copy avoids SQLAlchemy JSON in-place mutation not persisting.
@@ -1276,6 +1278,7 @@ class SillySpecStageDispatchService:
         target_stage: str,
         provider: str | None = None,
         model: str | None = None,
+        agent_profile_id: uuid.UUID | None = None,
     ) -> dict[str, Any]:
         """Dispatch the next step for a change stage.
 
@@ -1380,6 +1383,7 @@ class SillySpecStageDispatchService:
                 read_only=config.read_only,
                 provider=provider,
                 model=model,
+                agent_profile_id=agent_profile_id,
             )
         except Exception as exc:
             log.warning("agent_start_failed", change_id=str(change_id), error=str(exc))
