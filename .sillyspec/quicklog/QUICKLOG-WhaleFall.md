@@ -290,3 +290,12 @@
 根因：execute 时只把 provider/model 换成档案选择器，没真正合并两块 UI 为统一卡片（保留两个独立 section）
 方案：重构 change-stage-actions.tsx 渲染结构，档案选择器+提示+底部按钮区（推进/验证门禁/触发）合并进单一 violet 卡片（border-violet-500/40 bg-violet-50/40），推进横幅条件逻辑内移，触发按钮也进卡片
 结果：前端 17 测试全过（change-stage-actions 9 + page-team-toggle 8），tsc 全过（exit=0），eslint 干净。仅改 1 文件。待 rebuild 前端镜像部署。
+
+## ql-20260812-006-cce7 | 2026-08-12 19:45:38 | 用户新建变更后三个问题——(1)没走 agent
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/change_writer/proxy.py, backend/app/modules/change_writer/service.py, frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx, backend/app/modules/change_writer/classifier.py, backend/app/modules/change_writer/tests/test_classifier.py
+需求：用户新建变更后三个问题——(1)没走 agent；(2)列表「类型」空；(3)列表「阶段」显示英文 draft。
+根因：(1)proxy_create_change 设计上只占坑不自动派发 agent，需用户手动推进，属设计行为非 bug；(2)前端创建页未传 change_type，后端默认 None 落 NULL；(3)后端硬编码 current_stage=draft，但 draft 非 SillySpec VALID_STAGES，前端 STAGE_LABEL 无映射回退显示英文。
+方案：后端新增 classifier.py 按 quick/prototype/feature 关键词自动推导 change_type；proxy.py+service.py 创建时 current_stage 从 draft 改 brainstorm 对齐标准流程、change_type 为 None 时自动推导；前端 changes/page.tsx STAGE_LABEL 加 draft:草稿 兜底旧数据。
+结果：classifier 9 用例逻辑验证全绿（修正 1 个测试用例期望）；3 个后端文件 ast.parse 语法编译 OK；前端 tsc --noEmit 无错误。问题(1)未改属设计行为。

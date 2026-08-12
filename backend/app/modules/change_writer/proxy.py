@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError, WorkspaceNotFound
 from app.core.logging import get_logger
 from app.modules.change.model import Change, ChangeDocument
+from app.modules.change_writer.classifier import classify_change_type
 from app.modules.change_writer.markdown_builder import build_master_md
 from app.modules.change_writer.service import ChangeWriteError, ChangeWriterService
 from app.modules.daemon.model import DaemonChangeWrite
@@ -258,6 +259,11 @@ async def proxy_create_change(
     change_key = _build_change_key(title)
     now = datetime.now(UTC)
     author = str(user_id)
+
+    # ql-20260812-006：change_type 自动推导（用户未传时根据描述关键词分类）
+    if change_type is None:
+        change_type = classify_change_type(description)
+
     files = _build_files(
         change_key=change_key,
         title=title,
@@ -273,6 +279,8 @@ async def proxy_create_change(
     # 命中占坑行走 _apply_parsed(update) 而非 _build_change(created)，消除 proxy 落库
     # 与 reparse 双表并发撞键 500（design §5 Phase 1）。回执 done 后 proxy 路不再
     # INSERT docs——docs 仅 reparse 单路串行写，无并发（D-006@v1）。
+    # ql-20260812-006：current_stage 从 draft 改 brainstorm（对齐 SillySpec 标准流程，
+    # draft 非 VALID_STAGES，前端 STAGE_LABEL 无映射会显示英文）。
     change = Change(
         id=uuid.uuid4(),
         workspace_id=workspace_id,
@@ -284,8 +292,8 @@ async def proxy_create_change(
         affected_components=[],
         change_type=change_type,
         owner_id=user_id,
-        current_stage="draft",
-        stages={"draft": {"status": "done", "at": now.isoformat()}},
+        current_stage="brainstorm",
+        stages={"brainstorm": {"status": "pending", "at": now.isoformat()}},
     )
     session.add(change)
     for f in files:
@@ -309,7 +317,7 @@ async def proxy_create_change(
         change_id=str(change.id),
         change_key=change_key,
         workspace_id=str(workspace_id),
-        current_stage="draft",
+        current_stage="brainstorm",
     )
 
     # 下发 change-write 任务（status='pending'）。claim_token=None，daemon claim 时生成。
@@ -360,6 +368,6 @@ async def proxy_create_change(
         change_key=change_key,
         workspace_id=str(workspace_id),
         runtime_id=str(runtime_id),
-        current_stage="draft",
+        current_stage="brainstorm",
     )
     return change

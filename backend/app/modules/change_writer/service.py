@@ -22,6 +22,7 @@ from app.core.errors import AppError, WorkspaceNotFound, WorktreeLeaseNotFound
 from app.core.logging import get_logger
 from app.core.spec_paths import SpecPathResolver
 from app.modules.change.model import Change, ChangeDocument
+from app.modules.change_writer.classifier import classify_change_type
 from app.modules.change_writer.markdown_builder import (
     build_master_md,
 )
@@ -117,6 +118,10 @@ class ChangeWriterService:
         slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40] or "untitled"
         change_key = f"{date_prefix}-{slug}-{uuid.uuid4().hex[:6]}"
 
+        # ql-20260812-006：change_type 自动推导（用户未传时根据描述关键词分类）
+        if change_type is None:
+            change_type = classify_change_type(description)
+
         # v4 layout: .sillyspec/changes/<change_key>/  (no intermediate change/ dir)
         resolver = SpecPathResolver(repo_dir)
         change_dir = resolver.change_dir(change_key)
@@ -147,6 +152,8 @@ class ChangeWriterService:
             (change_dir / "request.md").write_text(request_content, encoding="utf-8")
 
         # Create DB record
+        # ql-20260812-006：current_stage 从 draft 改 brainstorm（对齐 SillySpec 标准流程，
+        # draft 非 VALID_STAGES，前端 STAGE_LABEL 无映射会显示英文）。
         change = Change(
             id=uuid.uuid4(),
             workspace_id=workspace_id,
@@ -158,8 +165,8 @@ class ChangeWriterService:
             affected_components=affected_components or [],
             change_type=change_type,
             owner_id=user_id,
-            current_stage="draft",
-            stages={"draft": {"status": "done", "at": now.isoformat()}},
+            current_stage="brainstorm",
+            stages={"brainstorm": {"status": "pending", "at": now.isoformat()}},
         )
         self._session.add(change)
 
@@ -206,7 +213,7 @@ class ChangeWriterService:
             change_id=str(change.id),
             change_key=change_key,
             lease_id=str(lease_id),
-            current_stage="draft",
+            current_stage="brainstorm",
         )
         return change
 

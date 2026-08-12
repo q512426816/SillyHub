@@ -84,6 +84,7 @@ const STAGE_KIND: Record<string, StatusKind> = {
 };
 
 const STAGE_LABEL: Record<string, string> = {
+  draft: "草稿", // ql-20260812-006：兜底旧数据（新建已改 brainstorm，旧 change 仍可能 draft）
   brainstorm: "需求分析",
   plan: "规划",
   execute: "执行",
