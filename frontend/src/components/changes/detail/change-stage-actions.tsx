@@ -175,19 +175,57 @@ export function ChangeStageActions({
         </section>
       ) : null}
 
-      {/* 完成待触发 推进横幅（无审核面板 + 有下一阶段 + 无活跃 run） */}
-      {!gatePanel && nextStage && !hasActiveRun ? (
-        <section className="space-y-2 rounded-md border border-primary/30 bg-primary/5 px-4 py-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <p className="text-sm font-semibold">
-                当前阶段已完成，待触发下一阶段
-              </p>
-              <p className="text-xs text-muted-foreground">
-                下一阶段：{WORKFLOW_STAGE_LABELS[nextStage] ?? nextStage}
-                （按需触发，不再自动连轴）
-              </p>
-            </div>
+      {/* 统一阶段操作卡片（2026-08-12 ql：合并推进横幅 + 档案选择 + 触发按钮，
+          对齐 prototype-option-a 的单卡片 violet 布局）。
+          标题 + 档案选择器常驻；推进/验证门禁按钮按条件显示。 */}
+      <section className="space-y-3 rounded-md border border-violet-500/40 bg-violet-50/40 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold">阶段操作</span>
+          <span className="text-xs text-muted-foreground">
+            选档案 → 用档案配置派发；不选 → 按默认
+          </span>
+        </div>
+
+        {/* 档案选择器（常驻） */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="whitespace-nowrap text-xs text-muted-foreground">
+            智能体档案
+          </span>
+          <AgentProfileSelect
+            workspaceId={workspaceId}
+            value={stageProfileId}
+            onChange={onStageProfileChange}
+            includeDefault="跟随工作区默认"
+          />
+        </div>
+        {/* FR-08 已知 gap 提示：本次仅 provider/凭证/allowed_roots 生效，
+            system_prompt/skill/mcp 链路修复放下个变更。 */}
+        <p className="text-[11px] text-muted-foreground">
+          选档案后生效：供应商/模型/凭证/可访问根目录；系统提示/技能/MCP 下版本支持
+        </p>
+
+        {/* 底部按钮区：推进（无 gate + 有下一阶段 + 无活跃 run）/ 验证门禁（verify）/
+            触发智能体（configEnabled + 无活跃 run）共用档案选择 */}
+        {!gatePanel && nextStage && !hasActiveRun ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-violet-500/20 pt-2.5">
+            <p className="text-[11px] text-muted-foreground">
+              当前阶段已完成，待触发下一阶段
+              {verifyGate ? (
+                <>
+                  {"　验证门禁："}
+                  {verifyGate.source === "unavailable"
+                    ? "暂不可用（请人工核验）"
+                    : verifyGate.exit_code === 0
+                      ? "✓ 通过"
+                      : verifyGate.exit_code === null
+                        ? "无结果"
+                        : `✗ 未通过（exit ${verifyGate.exit_code}）`}
+                  {verifyGate.errors.length > 0
+                    ? ` · ${verifyGate.errors.slice(0, 3).join("；")}`
+                    : ""}
+                </>
+              ) : null}
+            </p>
             <div className="flex items-center gap-2">
               {currentStage === "verify" ? (
                 <Button
@@ -197,6 +235,16 @@ export function ChangeStageActions({
                   disabled={advancing || dispatching}
                 >
                   {advancing ? "核验中…" : "运行验证门禁"}
+                </Button>
+              ) : null}
+              {configEnabled ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onDispatch}
+                  disabled={dispatching}
+                >
+                  {dispatching ? "触发中…" : "🤖 触发智能体"}
                 </Button>
               ) : null}
               <Button
@@ -210,55 +258,26 @@ export function ChangeStageActions({
               </Button>
             </div>
           </div>
-          {verifyGate ? (
-            <p className="text-[11px] text-muted-foreground">
-              验证门禁：
-              {verifyGate.source === "unavailable"
-                ? "暂不可用（请人工核验）"
-                : verifyGate.exit_code === 0
-                  ? "✓ 通过"
-                  : verifyGate.exit_code === null
-                    ? "无结果"
-                    : `✗ 未通过（exit ${verifyGate.exit_code}）`}
-              {verifyGate.errors.length > 0
-                ? ` · ${verifyGate.errors.slice(0, 3).join("；")}`
-                : ""}
-            </p>
-          ) : null}
-        </section>
-      ) : null}
-
-      {/* 智能体档案选择 + 触发智能体（重派当前阶段）。
-          2026-08-12-dispatch-bind-agent-profile：原手动 provider/model 改为选档案
-          （方案A 仅档案）。推进/触发两按钮共用此选择。 */}
-      <div className="space-y-1.5">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="whitespace-nowrap text-xs text-muted-foreground">
-            智能体档案
-          </span>
-          <AgentProfileSelect
-            workspaceId={workspaceId}
-            value={stageProfileId}
-            onChange={onStageProfileChange}
-            includeDefault="跟随工作区默认"
-          />
-          {configEnabled && !hasActiveRun ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onDispatch}
-              disabled={dispatching}
-            >
-              {dispatching ? "触发中…" : "🤖 触发智能体"}
-            </Button>
-          ) : null}
-        </div>
-        {/* FR-08 已知 gap 提示：本次仅 provider/凭证/allowed_roots 生效，
-            system_prompt/skill/mcp 链路修复放下个变更。 */}
-        <p className="text-[11px] text-muted-foreground">
-          选档案后生效：供应商/模型/凭证/可访问根目录；系统提示/技能/MCP 下版本支持
-        </p>
-      </div>
+        ) : (
+          <div className="flex items-center gap-2 border-t border-violet-500/20 pt-2.5">
+            {configEnabled && !hasActiveRun ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onDispatch}
+                disabled={dispatching}
+              >
+                {dispatching ? "触发中…" : "🤖 触发智能体"}
+              </Button>
+            ) : null}
+            {hasActiveRun ? (
+              <span className="text-[11px] text-muted-foreground">
+                智能体执行中…
+              </span>
+            ) : null}
+          </div>
+        )}
+      </section>
 
       {/* 团队开关 + StageTeamConfig */}
       {teamVisible ? (

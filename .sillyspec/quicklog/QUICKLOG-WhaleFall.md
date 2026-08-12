@@ -280,3 +280,13 @@
 根因：InteractiveSessionPanel 内部 handleNewSession 在 view.status==='active' 时先调 handleEnd() 结束当前会话再返回（历史简化设计），导致「点新建=误结束当前会话」；且结束后 handleSessionReset 只 setSelectedId(null) 不 reloadSessions，列表状态停在旧值（active 实际已 ended）。
 方案：① panel handleNewSession 去掉 active→handleEnd 分支，一律 closeStream+setView(INITIAL_VIEW)（新建会话仅切面板，不结束 backend session，需继续可重新 attach）；② 父级 handleSessionReset 追加 void reloadSessions() 刷新列表。
 结果：interactive-session-panel 50 + runtime-session-dialog 10 + session-list-layout 共 69 tests passed；tsc --noEmit exit0。补充：InteractiveSessionPanel.handleEnd 成功即调 onSessionReset（原实现不调，父级 handleSessionReset 的 reloadSessions 不触发致列表不刷新），runtime-session-dialog.handleSessionReset 已加 reloadSessions；interactive-session-panel.test.tsx「改动一」断言随行为变更更新（结束会话也调 onSessionReset，1→2 次）。
+
+## ql-20260812-002-78f5 | 2026-08-12 16:19:41 | 变更详情页阶段操作区合并为推进横幅+档案选择器+触发按钮的单卡片
+状态：已完成
+关联变更：2026-08-12-dispatch-bind-agent-profile
+文件：
+- frontend/src/components/changes/detail/change-stage-actions.tsx (合并推进横幅+档案选择器+触发按钮为单 violet 卡片，对齐原型)
+需求：变更详情页阶段操作区合并为推进横幅+档案选择器+触发按钮的单卡片，对齐原型 option-a（用户反馈实现与原型不一致，两块没合并）
+根因：execute 时只把 provider/model 换成档案选择器，没真正合并两块 UI 为统一卡片（保留两个独立 section）
+方案：重构 change-stage-actions.tsx 渲染结构，档案选择器+提示+底部按钮区（推进/验证门禁/触发）合并进单一 violet 卡片（border-violet-500/40 bg-violet-50/40），推进横幅条件逻辑内移，触发按钮也进卡片
+结果：前端 17 测试全过（change-stage-actions 9 + page-team-toggle 8），tsc 全过（exit=0），eslint 干净。仅改 1 文件。待 rebuild 前端镜像部署。
