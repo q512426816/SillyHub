@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import select
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -344,3 +345,226 @@ async def test_get_nonexistent_lease(
         headers=auth_headers,
     )
     assert resp.status_code == 404
+
+
+# ── 安全/完整性异常分支补测（P0 ql-20260812-008：原 test_router 仅 happy path，
+#    service.py 的 revoked/expired identity、cross-user extend、已释放 lease、
+#    no repo_url、文件系统失败回滚分支全部零覆盖，删校验全量仍绿）──────────────
+
+
+async def _acquire(client, p: dict) -> str:
+    """复用：用 prereqs acquire 一个 lease，返回 lease_id。"""
+    resp = await client.post(
+        f"/api/workspaces/{p['ws_id']}/worktrees/acquire",
+        json={
+            "component_id": str(p["ws_id"]),
+            "change_id": str(p["change_id"]),
+            "task_id": str(p["task_id"]),
+            "git_identity_id": str(p["identity_id"]),
+            "ttl_seconds": 3600,
+        },
+        headers=_auth(p["token"]),
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+async def test_acquire_revoked_identity_returns_503(
+    client, db_session, mock_git, mock_exec_env, mock_cipher
+) -> None:
+    """安全侧：已吊销的 git identity 不可再 acquire（防泄漏凭证被吊销后继续用）。"""
+    from datetime import UTC, datetime
+
+    from app.modules.git_identity.model import GitIdentity
+
+    p = await _setup_prerequisites(db_session)
+    identity = (
+        (await db_session.execute(select(GitIdentity).where(GitIdentity.id == p["identity_id"])))
+        .scalars()
+        .first()
+    )
+    identity.revoked_at = datetime.now(UTC)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/workspaces/{p['ws_id']}/worktrees/acquire",
+        json={
+            "component_id": str(p["ws_id"]),
+            "change_id": str(p["change_id"]),
+            "task_id": str(p["task_id"]),
+            "git_identity_id": str(p["identity_id"]),
+        },
+        headers=_auth(p["token"]),
+    )
+    assert resp.status_code == 503, resp.text
+
+
+async def test_acquire_expired_identity_returns_503(
+    client, db_session, mock_git, mock_exec_env, mock_cipher
+) -> None:
+    """安全侧：过期的 git identity 不可 acquire。"""
+    from datetime import UTC, datetime, timedelta
+
+    from app.modules.git_identity.model import GitIdentity
+
+    p = await _setup_prerequisites(db_session)
+    identity = (
+        (await db_session.execute(select(GitIdentity).where(GitIdentity.id == p["identity_id"])))
+        .scalars()
+        .first()
+    )
+    identity.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/workspaces/{p['ws_id']}/worktrees/acquire",
+        json={
+            "component_id": str(p["ws_id"]),
+            "change_id": str(p["change_id"]),
+            "task_id": str(p["task_id"]),
+            "git_identity_id": str(p["identity_id"]),
+        },
+        headers=_auth(p["token"]),
+    )
+    assert resp.status_code == 503, resp.text
+
+
+async def test_acquire_no_repo_url_returns_503(
+    client, db_session, mock_git, mock_exec_env, mock_cipher
+) -> None:
+    """workspace 未配 repo_url → acquire 失败（503）。"""
+    from app.modules.workspace.model import Workspace
+
+    p = await _setup_prerequisites(db_session)
+    # 建第二个无 repo_url 的 workspace + 复用 user/identity
+    ws_no_repo = uuid.uuid4()
+    db_session.add(
+        Workspace(
+            id=ws_no_repo,
+            name="NoRepo",
+            slug=f"no-repo-{ws_no_repo.hex[:8]}",
+            root_path="/tmp/no-repo",
+            status="active",
+            component_key="backend",
+            repo_url=None,  # 关键：无 repo_url
+            default_branch="main",
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/workspaces/{ws_no_repo}/worktrees/acquire",
+        json={
+            "component_id": str(ws_no_repo),
+            "change_id": str(p["change_id"]),
+            "task_id": str(p["task_id"]),
+            "git_identity_id": str(p["identity_id"]),
+        },
+        headers=_auth(p["token"]),
+    )
+    assert resp.status_code == 503, resp.text
+
+
+async def test_cross_user_extend_returns_403(
+    client, db_session, mock_git, mock_exec_env, mock_cipher
+) -> None:
+    """安全侧：user A acquire，user B extend → 403（防越权续期他人 lease）。
+    对照 test_cross_user_release_403：原只测 release，extend 越权分支零覆盖。"""
+    from app.core.config import get_settings
+    from app.core.security import create_access_token, password_hasher
+    from app.modules.auth.model import User
+
+    p = await _setup_prerequisites(db_session)
+    lease_id = await _acquire(client, p)
+
+    settings = get_settings()
+    user_b = User(
+        id=uuid.uuid4(),
+        email="other-extend@example.com",
+        password_hash=password_hasher.hash("Pass123!"),
+        display_name="Other",
+        status="active",
+        is_platform_admin=False,
+    )
+    db_session.add(user_b)
+    await db_session.commit()
+    token_b, _ = create_access_token(
+        user_id=user_b.id, email=user_b.email, is_admin=False, settings=settings
+    )
+
+    resp = await client.post(
+        f"/api/worktrees/{lease_id}/extend",
+        json={"additional_seconds": 1800},
+        headers=_auth(token_b),
+    )
+    assert resp.status_code == 403, resp.text
+
+
+async def test_release_already_released_returns_409(
+    client, db_session, mock_git, mock_exec_env, mock_cipher
+) -> None:
+    """已释放的 lease 再 release → 409（WorktreeLeaseAlreadyReleased）。"""
+    p = await _setup_prerequisites(db_session)
+    headers = _auth(p["token"])
+    lease_id = await _acquire(client, p)
+
+    # 第一次 release 成功
+    resp = await client.post(f"/api/worktrees/{lease_id}/release", headers=headers)
+    assert resp.status_code == 200, resp.text
+
+    # 第二次 release → 409
+    resp = await client.post(f"/api/worktrees/{lease_id}/release", headers=headers)
+    assert resp.status_code == 409, resp.text
+
+
+async def test_extend_already_released_returns_409(
+    client, db_session, mock_git, mock_exec_env, mock_cipher
+) -> None:
+    """已释放的 lease extend → 409（非 locked 态不可续期）。"""
+    p = await _setup_prerequisites(db_session)
+    headers = _auth(p["token"])
+    lease_id = await _acquire(client, p)
+
+    resp = await client.post(f"/api/worktrees/{lease_id}/release", headers=headers)
+    assert resp.status_code == 200, resp.text
+
+    resp = await client.post(
+        f"/api/worktrees/{lease_id}/extend",
+        json={"additional_seconds": 1800},
+        headers=headers,
+    )
+    assert resp.status_code == 409, resp.text
+
+
+async def test_acquire_filesystem_failure_rolls_back_and_cleans(
+    client, db_session, mock_git, mock_exec_env, mock_cipher
+) -> None:
+    """git clone 失败 → rollback DB lease 行 + cleanup 半克隆目录 + 非 201。
+    守护 service.py:111 的 rollback+cleanup 链（漏 await/漏 rollback 会留僵尸 lease）。"""
+    from app.modules.worktree.model import WorktreeLease
+
+    p = await _setup_prerequisites(db_session)
+    # clone_bare 抛错，触发 except 分支 rollback + cleanup + re-raise
+    mock_git.clone_bare.side_effect = RuntimeError("git clone boom")
+
+    # clone 失败 → service rollback + cleanup + re-raise 原始异常（非 AppError，
+    # ASGITransport 重抛不经全局 handler；用 raises 捕获 + 验证副作用）。
+    with pytest.raises(RuntimeError, match="git clone boom"):
+        await client.post(
+            f"/api/workspaces/{p['ws_id']}/worktrees/acquire",
+            json={
+                "component_id": str(p["ws_id"]),
+                "change_id": str(p["change_id"]),
+                "task_id": str(p["task_id"]),
+                "git_identity_id": str(p["identity_id"]),
+                "ttl_seconds": 3600,
+            },
+            headers=_auth(p["token"]),
+        )
+
+    # rollback 生效：无持久化 lease 行
+    leases = (await db_session.execute(select(WorktreeLease))).scalars().all()
+    assert len(leases) == 0, "filesystem 失败必须 rollback，不留僵尸 lease 行"
+
+    # cleanup 被调（清理半克隆目录）
+    mock_exec_env.cleanup.assert_called()

@@ -115,7 +115,9 @@ def _stub_reparse(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_e2e_three_member_collaboration(tmp_path: Path, db_session) -> None:
+async def test_e2e_three_member_collaboration(
+    tmp_path: Path, db_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Full E2E: SC-1 ~ SC-8 in one scenario.
 
     Participants:
@@ -346,10 +348,24 @@ async def test_e2e_three_member_collaboration(tmp_path: Path, db_session) -> Non
 
     # ── Phase 7: change_writer proxy with member binding (SC-5) ──
     # proxy_create_change should use alice's member binding (not workspace.daemon_runtime_id).
-    # It may raise DaemonClientNoActiveSession if heartbeat isn't fresh — the key
-    # assertion is that it reached the member binding path without reading the
-    # deprecated workspace.daemon_runtime_id single value.
+    # It may raise DaemonClientNoActiveSession if heartbeat isn't fresh.
+    # SC-5 实质验证:proxy_create_change 必须走 member binding 路径(调
+    # resolve_runtime_for_writeback),而非读 deprecated workspace.daemon_runtime_id。
+    # 原 except: pass 是空断言——即使回归改回读 deprecated 字段,只要也抛
+    # DaemonClientNoActiveSession 测试仍绿,SC-5 等于没覆盖。这里 spy 记录
+    # resolve 调用,无论后续是否因 heartbeat 不新鲜抛异常,断言 member binding
+    # 路径被走(代理在 proxy.py:236 延迟 import,patch 模块属性即命中)。
+    import app.modules.workspace.member_runtimes.resolver as _resolver_mod
     from app.modules.change_writer.proxy import DaemonClientNoActiveSession
+
+    _resolve_calls = {"n": 0}
+    _orig_resolve = _resolver_mod.resolve_runtime_for_writeback
+
+    async def _spy_resolve(session, workspace_id, user_id):
+        _resolve_calls["n"] += 1
+        return await _orig_resolve(session, workspace_id, user_id)
+
+    monkeypatch.setattr(_resolver_mod, "resolve_runtime_for_writeback", _spy_resolve)
 
     try:
         change = await proxy_create_change(
@@ -362,9 +378,14 @@ async def test_e2e_three_member_collaboration(tmp_path: Path, db_session) -> Non
         )
         assert change.owner_id == alice.id
     except DaemonClientNoActiveSession:
-        # Acceptable in test: runtime heartbeat freshness window may have passed.
-        # The important thing is no AttributeError/crash on workspace.daemon_runtime_id.
+        # 可接受:runtime heartbeat 不新鲜。关键不是"不崩",而是确认走了
+        # member binding 路径(下方断言 resolve 被调),SC-5 才算真正被覆盖。
         pass
+
+    assert _resolve_calls["n"] >= 1, (
+        "SC-5: proxy_create_change 必须走 member binding 路径(调 "
+        "resolve_runtime_for_writeback),而非读 deprecated workspace.daemon_runtime_id"
+    )
 
     # ── Phase 8: stale calculation (SC-4) ──
     # Documents with source_synced_at far in the past should be stale.

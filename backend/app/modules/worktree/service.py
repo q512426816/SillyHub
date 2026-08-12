@@ -238,11 +238,18 @@ class WorktreeService:
                 "Git identity has been revoked.",
                 details={"identity_id": str(identity.id)},
             )
-        if identity.expires_at and identity.expires_at < datetime.now(UTC):
-            raise WorktreeAcquireFailed(
-                "Git identity has expired.",
-                details={"identity_id": str(identity.id)},
-            )
+        if identity.expires_at:
+            # SQLite 读回的 datetime 为 naive（无 tzinfo），生产 Postgres timestamptz
+            # 为 aware；统一按 UTC 解释后再比较，避免 naive/aware TypeError
+            # （测试 SQLite DB 暴露的 tz 不健壮，生产 Postgres 不触发）。
+            expires = identity.expires_at
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=UTC)
+            if expires < datetime.now(UTC):
+                raise WorktreeAcquireFailed(
+                    "Git identity has expired.",
+                    details={"identity_id": str(identity.id)},
+                )
 
     async def _get_workspace(self, workspace_id: uuid.UUID):
         from app.modules.workspace.model import Workspace

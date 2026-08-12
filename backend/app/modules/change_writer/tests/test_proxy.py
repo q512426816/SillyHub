@@ -490,7 +490,9 @@ async def test_proxy_create_change_preempts_change_before_dispatch(client, db_se
         preempt["docs"] = len(docs)
         assert changes, "占坑 Change 应在下发后、回执前已存在"
         assert changes[0].owner_id == refs["user_id"]
-        assert changes[0].current_stage == "draft"
+        assert (
+            changes[0].current_stage == "brainstorm"
+        )  # ql-20260812-006: draft→brainstorm（对齐 SillySpec 标准流程）
         await _simulate_daemon_complete(session, cw_id)
         return await session.get(DaemonChangeWrite, cw_id)
 

@@ -12,7 +12,6 @@ across successive writes) so the daemon can drop stale, reordered pushes.
 
 from __future__ import annotations
 
-import time
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -200,17 +199,29 @@ async def test_put_allowed_roots_offline_runtime_still_returns_200(
 
 @pytest.mark.asyncio
 async def test_put_allowed_roots_version_monotonic_across_writes(
-    client: AsyncClient, db_session: AsyncSession
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Two successive PUTs yield strictly increasing version numbers.
 
-    Version derives from runtime.updated_at (the row actually bumped by
-    update_allowed_roots per 2026-07-06-allowed-roots-per-runtime design §3),
-    so successive writes are monotonic.
+    Version derives from runtime.updated_at via ``_derive_policy_version``
+    (epoch millis)。原测试用 ``time.sleep(0.005)`` 推 wall-clock 分隔两次写,
+    但 Windows 时钟粒度 / CI 抖动下两次 updated_at 可能落同毫秒桶 → version
+    相等 → flaky（作者注释自承 'CI clocks may advance too slowly'）。改注入
+    可控递增 version 源:patch ``_derive_policy_version`` 返回单调递增值,
+    消除 wall-clock 依赖,仍验证「两次 PUT 各推送一次 + version 单调 + 进
+    policy_update payload」。
     """
+    import itertools
+
+    import app.modules.daemon.router as _router
+
     admin = await _create_user(db_session, is_platform_admin=True)
     await _grant_platform_permission(db_session, admin.id, Permission.RUNTIME_ADMIN)
     rt, _instance = await _create_runtime(db_session, admin.id)
+
+    # 注入可控递增 version 源（100, 101），替代 wall-clock epoch-millis 派生。
+    _versions = itertools.count(100)
+    monkeypatch.setattr(_router, "_derive_policy_version", lambda _updated_at: next(_versions))
 
     captured: list[int] = []
 
@@ -227,10 +238,6 @@ async def test_put_allowed_roots_version_monotonic_across_writes(
             json={"allowed_roots": ["/first"]},
             headers=_headers(_token_for(admin)),
         )
-        # Force a different updated_at wall-clock bucket so the epoch-millis
-        # derivation cannot collide on a sub-millisecond pair (CI clocks may
-        # advance too slowly otherwise).
-        time.sleep(0.005)
         await client.put(
             f"/api/daemon/runtimes/{rt.id}/allowed-roots",
             json={"allowed_roots": ["/second"]},
@@ -238,4 +245,4 @@ async def test_put_allowed_roots_version_monotonic_across_writes(
         )
 
     assert len(captured) == 2
-    assert captured[1] > captured[0], f"version must be monotonic: {captured}"
+    assert captured == [100, 101], f"version must be monotonic: {captured}"
