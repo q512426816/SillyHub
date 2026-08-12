@@ -41,15 +41,19 @@ def _selected_metadata() -> Any:
 
     # Import to ensure registration (order-independent; tables are idempotent).
     from app.modules.admin import model as _admin  # noqa: F401
+    from app.modules.agent.profile import model as _agent_profile  # noqa: F401
+    from app.modules.auth import model as _auth  # noqa: F401
+    from app.modules.daemon import model as _daemon  # noqa: F401
 
     # task-02（2026-08-02-agent-profile-layer）Workspace 加 default_agent_profile_id
     # FK→agent_profiles.id；AgentProfile 又 FK→tool_policies.id / users.id / workspaces.id。
     # 本 conftest 自建 selected-metadata 建表，必须把 FK 闭包内的表都纳入 needed，否则
     # to_metadata + create_all 报 NoReferencedTableError('agent_profiles')（同根
     # conftest:86 的 import 注册思路，范式同 daemon/host_fs/tests/test_delegate_integration.py）。
-    from app.modules.agent.profile import model as _agent_profile  # noqa: F401
-    from app.modules.auth import model as _auth  # noqa: F401
-    from app.modules.daemon import model as _daemon  # noqa: F401
+    # 2026-08-12 预存债修复：AgentProfile.llm_provider_id FK→llm_providers.id，
+    # 该模块此前漏 import llm_provider 且 needed 漏 llm_providers 表，单跑/部分 xdist
+    # worker 下 to_metadata + create_all 稳定抛 NoReferencedTableError('llm_providers')。
+    from app.modules.llm_provider import model as _llm_provider  # noqa: F401
     from app.modules.tool_gateway.tool_policy import ToolPolicy  # noqa: F401
     from app.modules.workspace import model as _ws  # noqa: F401
     from app.modules.workspace.member_runtimes import model as _wmr  # noqa: F401
@@ -69,6 +73,8 @@ def _selected_metadata() -> Any:
         # task-02 FK 闭包：workspaces→agent_profiles→tool_policies。
         "agent_profiles",
         "tool_policies",
+        # 2026-08-12：AgentProfile.llm_provider_id FK→llm_providers.id，须纳入。
+        "llm_providers",
     }
     meta = MetaData()
     for name in needed:

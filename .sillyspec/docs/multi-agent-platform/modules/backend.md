@@ -36,6 +36,7 @@ multi-agent-platform 的核心 API 服务，monorepo 的"大脑"。以 FastAPI �
 - **Daemon 接入**：daemon 模块与 lease 模块共同支撑本地守护进程注册、领租约、心跳、消息回传的在线交互模型。**模型错误回传**：daemon 在 turn 失败时归类出 ModelError（auth_failed/quota_exceeded[不可重试]/rate_limited[可重试]/timeout/model_not_found/network/provider_error/unknown），经 notifyRunResult → close_interactive_run 三层透传（router+facade+实体）写 AgentRun.error_detail，run→failed。
 - **迁移与建表**：Alembic（`migrations/`）+ `create_tables.py` 兜底；`core/layout_migration.py` 处理 SillySpec Native Layout 演进。
 - **测试**：`backend/tests/` + 各模块内 `tests/`；CI 要求 `--cov-fail-under=60`。
+- ql-20260812-002-7ca3 | 后端测试提速：全量 pytest 12min→4min（711s→245s，3800+ 用例零回归）。①daemon session 集成测试（test_session_service / test_interactive_lifecycle_patch / test_change_session / test_session_router / test_session_user_log）每个正常路径用例都在 `session/service.py` create/inject 硬编码 `readiness.wait(timeout=30)` 真等 30s（create+inject 串 60s），全量 slowest15 全在此、共 ~570s；新建 `app/modules/daemon/tests/conftest.py` autouse 打桩（`wait` 即时返 True、保留 mark_ready/clear，排除专测 readiness 语义的 test_session_readiness）→ 该 5 文件 570s→14.8s。②pre-existing 10 ERROR 清零：member_runtimes 单独跑/xdist 部分 worker 因 selected-metadata 缺 llm_providers 抛 NoReferencedTableError —— `member_runtimes/tests/conftest.py` 补 import llm_provider + needed 集合加 llm_providers（自洽修复，不依赖根 conftest）。
 
 ## 注意事项
 

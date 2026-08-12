@@ -30,6 +30,7 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 - **核心组件**：app-shell（外壳布局）、top-bar、workspace-tabs、mission-console（任务控制台）、agent-run-panel、agent-log-viewer、runtime-session-dialog、permission-approval-dialog、ask-user-dialog-card、health-card、server-status-card、sillyspec-step-progress、**run-error-item**（模型调用失败结构化展示：type→图标/颜色/文案/hint/actions）。
 - **数据层**：React Query 管理服务端状态，Zustand 管 UI/会话状态；daemon 聊天与权限流为长连接交互。
 - **脚本**：dev/build/start/lint/typecheck/test，CI 跑 lint+typecheck+test+build 全链路。
+- ql-20260812-002-7ca3 | vitest 配置：`environmentMatchGlobs` 把 src/lib 下 20 个纯逻辑 .test.ts（白名单）切 node 环境，省 jsdom 每文件初始化（5 个 use-*/daemon-session 用 renderHook/fake EventSource 依赖 jsdom，保留默认环境）。全量 144 文件 1402 用例零回归；墙钟 77→76s（jsdom 组件测试初始化在并行 worker 下本非瓶颈，累计 environment/collect 时间略降，墙钟收益有限）。
 
 ## 注意事项
 
