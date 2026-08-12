@@ -457,3 +457,52 @@
 根因：CLI sync.js checkApproval 在 execute 启动时 GET 此端点查审批，后端从未实现→404，fetchJson 返回 null 被误判为 {status:pending} 阻断（command.js:1071-1080）。
 方案：router.py 加端点复用 require_platform_sync 鉴权，无条件返回 ChangeApprovalResponse{status:approved, reason:no approval policy configured}（不查库不 404——change 可能尚未上行 progress，404 会让 CLI 再卡）；schema.py 加模型；test_router.py 加 3 测试；frontend gen:types 同步 openapi.json+api-types.ts；模块文档契约摘要 3→4 端点+MANUAL_NOTES。
 结果：pytest platform_sync 24 passed（原21+新3）；ruff format/check pass；mypy Success；gen:types 含新端点（openapi 364 paths）；git add 6 文件隔离 init-provision staged。
+
+## ql-20260812-002-7ca3 | 2026-08-12 15:04:24 | 后端 pytest 全量 12min 太慢 + member_runtimes 10 ERROR 阻塞
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/tests/conftest.py（新增：autouse 打桩 SessionReadiness.wait 即时返 True，daemon session 5 集成文件 570s→14.8s）
+- backend/app/modules/workspace/member_runtimes/tests/conftest.py（needed 补 llm_providers + import，10 ERROR→10 passed）
+- frontend/vitest.config.ts（environmentMatchGlobs 20 个纯逻辑 .test.ts 切 node）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（变更索引 ql-20260812-002-7ca3）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引 ql-20260812-002-7ca3）
+需求：后端 pytest 全量 12min 太慢 + member_runtimes 10 ERROR 阻塞。
+根因：daemon session 集成测试在 create/inject 硬编码 readiness.wait(timeout=30) 真等 30/60s（全量 slowest15 全在此共 ~570s）；member_runtimes selected-metadata 缺 llm_providers 表（FK 未注册，10 ERROR）。
+方案：daemon/tests/conftest.py autouse 打桩 wait 即时返 True（排除 test_session_readiness）+ member_runtimes/tests/conftest.py needed 补 llm_providers + vitest environmentMatchGlobs 纯逻辑测试切 node。
+结果：后端全量 711s→203s（12min→3.4min，~3.5x），10 ERROR 清零，3848 passed 零回归；前端 1402 passed，77→76s。
+
+## ql-20260812-003-0632 | 2026-08-12 15:50:10 | 后端 pytest 全量压到 2 分钟以内
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/tests/test_session_readiness.py（wait 打桩挪到 create_session 前，2 个 30s→~0）
+- backend/app/modules/daemon/tests/test_session_permissions.py（2 处 timeout_sec=30→0.01，2 个 30s→~0）
+- backend/app/modules/daemon/ws_hub.py（send_rpc 默认参数改 None 调用时动态读 RPC_DEFAULT_TIMEOUT）
+- backend/app/modules/daemon/tests/test_lease_service.py（2 测试 mock _trigger_stage_completion_callback）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（变更索引 ql-20260812-003-0632）
+需求：后端 pytest 全量压到 2 分钟以内。
+根因：test_session_readiness 两个测试 wait 打桩在 create_session 之后（create 内部先白等 30s）；test_session_permissions 直接 await _on_timeout 真 sleep(_timeout_sec=30.0)；ws_hub send_rpc 默认参数 import 时绑定常量旧值致 monkeypatch 无效（等满 10s）；test_lease_service 两测试 stage callback 经 HostFsDelegate RPC 无 daemon 超时。
+方案：wait 打桩（True/False）挪到 create_session 前；timeout_sec=30→0.01（仅 2 处直接 await 的）；send_rpc 默认参数改 None 调用时动态读 RPC_DEFAULT_TIMEOUT；mock _trigger_stage_completion_callback。
+结果：全量 203s→121~128s（2min 上下），3848 passed 0 errors 零回归；一次全量偶发 1 flaky（test_provider_switch，单独过+重跑全量过，与改动无关）。
+
+## ql-20260812-004-f361 | 2026-08-12 16:20:08 | 挖掉 test_lease_service 残留 3-5s 慢点
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/tests/test_lease_service.py（2 测试 mock converge_mission_for_completed_run(finalizer git_merge RPC+GLM 120s 副作用),9s→1.6s）
+需求：挖掉 test_lease_service 残留 3-5s 慢点,排查 provider_switch flaky。
+根因：TestCompleteLeaseWebhook 两个 completed run 测试（fires_deliver/dispatcher_raises）的 mission converge 副作用——converge_mission_for_completed_run 内 FinalizerService 经 new_host_fs_delegate 调 git_merge RPC（无 daemon 真等）+ _glm_merge httpx 120s timeout（worker_failed 是 failed 不走 finalize 故 0.02s）；provider_switch flaky 代码审查无共享 DB/redis 泄漏（per-worker in-memory sqlite + 随机 user_id）,并发跑 5 次未复现。
+方案：两测试 monkeypatch converge_mission_for_completed_run 为 noop（本测试只测 webhook deliver,converge 属副作用,同 _trigger_stage_completion_callback 先例）。
+结果：TestCompleteLeaseWebhook 4 测试 9s→1.6s;全量 3848 passed 0 errors 121.97s;provider_switch 未复现不改码。
+
+## ql-20260812-005-f981 | 2026-08-12 16:37:11 | 消除 test_orchestrator 34s 偶发慢点
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/tests/test_orchestrator.py（module autouse mock converge_mission_for_completed_run(返 done),34s 偶发→2.8s）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（ql-004 补 orchestrator 同根因修复）
+需求：消除 test_orchestrator 34s 偶发慢点，让全量稳定 <120s。
+根因：schedule_loop 末尾真跑 converge_mission_for_completed_run——finalizer 经 new_host_fs_delegate 调 git_merge RPC 无 daemon 真等 + GLM httpx 120s timeout，单跑 8~34s 随机（top30 34.31s）。
+方案：test_orchestrator 加 module 级 autouse fixture patch finalizer.converge_mission_for_completed_run 返 'done'（schedule_loop 函数体内 from finalizer import，patch finalizer 模块符号即命中；断言走 done 分支不变）。
+结果：13 测试稳定 2.8s（原含 34s 偶发），全量 3855 passed 0 errors 115.85s（首次 <120s，目标达成）。
