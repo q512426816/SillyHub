@@ -10,6 +10,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+# 别名：complete_lease 的 mission converge 副作用（completed run 专属）需 mock 掉，
+# 避免 finalizer git_merge RPC 无 daemon 真等 + GLM httpx 120s timeout。
+import app.modules.agent.finalizer as _finalizer_mod
 from app.modules.agent.model import AgentMission, AgentRun, AgentSession
 from app.modules.daemon.lease_service import (
     DaemonLeaseService,
@@ -1854,6 +1857,13 @@ class TestCompleteLeaseWebhook:
             return None
 
         monkeypatch.setattr(svc, "_trigger_stage_completion_callback", _noop_stage_callback)
+
+        # mission converge（completed run 专属，finalizer git_merge RPC 无 daemon
+        # 真等 + GLM httpx 120s timeout）同属副作用，mock 掉——本测试只测 webhook。
+        async def _noop_converge(session, run_id, glm_config=None):
+            return None
+
+        monkeypatch.setattr(_finalizer_mod, "converge_mission_for_completed_run", _noop_converge)
         result = await svc.complete_lease(lease_id, claim_token, {"status": "completed"})
 
         assert result.status == "completed"
@@ -1923,6 +1933,14 @@ class TestCompleteLeaseWebhook:
             return None
 
         monkeypatch.setattr(svc, "_trigger_stage_completion_callback", _noop_stage_callback)
+
+        # mission converge（completed run 专属，finalizer git_merge RPC 无 daemon
+        # 真等 + GLM httpx 120s timeout）同属副作用，mock 掉——本测试只测 dispatcher
+        # 抛错不破坏 complete。
+        async def _noop_converge(session, run_id, glm_config=None):
+            return None
+
+        monkeypatch.setattr(_finalizer_mod, "converge_mission_for_completed_run", _noop_converge)
         result = await svc.complete_lease(lease_id, claim_token, {"status": "completed"})
 
         # lease 终态不受影响
