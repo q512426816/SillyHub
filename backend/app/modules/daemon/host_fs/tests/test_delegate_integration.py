@@ -56,6 +56,7 @@ def _selected_metadata() -> Any:
     from app.modules.agent.profile import model as _agent_profile  # noqa: F401
     from app.modules.auth import model as _auth  # noqa: F401
     from app.modules.daemon import model as _daemon  # noqa: F401
+    from app.modules.llm_provider import model as _llm_provider  # noqa: F401
     from app.modules.tool_gateway.tool_policy import ToolPolicy  # noqa: F401
     from app.modules.workspace import model as _ws  # noqa: F401
     from app.modules.workspace.member_runtimes import model as _wmr  # noqa: F401
@@ -71,6 +72,7 @@ def _selected_metadata() -> Any:
         "tool_policies",
         "daemon_instances",
         "daemon_runtimes",
+        "llm_providers",
         "workspaces",
         "workspace_member_runtimes",
     }
