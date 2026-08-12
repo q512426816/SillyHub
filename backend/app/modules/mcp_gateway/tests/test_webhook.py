@@ -37,6 +37,28 @@ from app.modules.workspace.model import Workspace
 # ── helpers ────────────────────────────────────────────────────────────────
 
 
+async def _allow_public_url(*_args: object, **_kwargs: object) -> None:
+    """测试桩：模拟 assert_public_url 放行（公网域名）。
+
+    brownfield 测试债（task-03 constraints）：既有 webhook 用例的
+    ``https://hooks.example.com/cb`` 真实 DNS 不可解析 → task-03 新增的
+    create() / _deliver_one() assert_public_url 校验会抛 SsrfBlocked 击穿 ~7 用例。
+    这里 autouse mock 放行，让既有 CRUD / deliver 用例不触真实 DNS；SSRF 拒绝路径
+    留给 task-07 的 test_webhook_ssrf.py 单测。
+    """
+
+
+@pytest.fixture(autouse=True)
+def _mock_assert_public_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """autouse：本套件内 mock ``app.modules.mcp_gateway.service.assert_public_url``
+    放行所有 URL，避免真实 DNS 拖红既有 CRUD / deliver 用例。"""
+
+    monkeypatch.setattr(
+        "app.modules.mcp_gateway.service.assert_public_url",
+        _allow_public_url,
+    )
+
+
 async def _make_user(session: AsyncSession, *, admin: bool) -> tuple[User, str]:
     user = User(
         id=uuid.uuid4(),
