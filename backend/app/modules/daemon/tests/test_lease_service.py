@@ -1846,6 +1846,14 @@ class TestCompleteLeaseWebhook:
         monkeypatch.setattr(_mcp_gw_service, "WebhookDispatcher", _StubDispatcher)
 
         svc = DaemonService(db_session)
+
+        # stage 完成回调内部经 HostFsDelegate RPC 读 sillyspec.db / team
+        # schedule_loop，无 daemon 环境会等 RPC 超时（top30 本测试 3s+）。本测试
+        # 只测 webhook deliver，stage callback 属副作用，mock 掉。
+        async def _noop_stage_callback(agent_run_id):
+            return None
+
+        monkeypatch.setattr(svc, "_trigger_stage_completion_callback", _noop_stage_callback)
         result = await svc.complete_lease(lease_id, claim_token, {"status": "completed"})
 
         assert result.status == "completed"
@@ -1908,6 +1916,13 @@ class TestCompleteLeaseWebhook:
         monkeypatch.setattr(_mcp_gw_service, "WebhookDispatcher", _BoomDispatcher)
 
         svc = DaemonService(db_session)
+
+        # 同 test_worker_terminal_fires_deliver：mock stage callback 免
+        # HostFsDelegate RPC 超时（top30 本测试 6s+）。
+        async def _noop_stage_callback(agent_run_id):
+            return None
+
+        monkeypatch.setattr(svc, "_trigger_stage_completion_callback", _noop_stage_callback)
         result = await svc.complete_lease(lease_id, claim_token, {"status": "completed"})
 
         # lease 终态不受影响

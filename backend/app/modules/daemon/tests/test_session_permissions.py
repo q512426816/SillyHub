@@ -447,7 +447,10 @@ class TestPermissionTimeout:
         svc = DaemonService(db_session)
         hub = MagicMock()
         hub.send_permission_response = AsyncMock(return_value=True)
-        perm = DaemonPermissionService(svc, hub, timeout_sec=30.0)
+        # timeout 调小：本测试直接 await _on_timeout，其内部第一行
+        # asyncio.sleep(_timeout_sec)，30.0 会真等 30s（top30 慢点之一）。
+        # 0.01 仍走完整 deny + publish 路径，仅免真等。
+        perm = DaemonPermissionService(svc, hub, timeout_sec=0.01)
         await perm.handle_permission_request(rt.id, _make_request_payload(sess, run))
 
         # Fast-forward the timeout task (bypass real 5min sleep).
@@ -640,7 +643,8 @@ class TestCodexPermissionParity:
         svc = DaemonService(db_session)
         hub = MagicMock()
         hub.send_permission_response = AsyncMock(return_value=True)
-        perm = DaemonPermissionService(svc, hub, timeout_sec=30.0)
+        # 同 test_timeout_auto_denies：直接 await _on_timeout，调小免真等 30s。
+        perm = DaemonPermissionService(svc, hub, timeout_sec=0.01)
         await perm.handle_permission_request(
             rt.id, _make_request_payload(sess, run, request_id="codex-req-4")
         )

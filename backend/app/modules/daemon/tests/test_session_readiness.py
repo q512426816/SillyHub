@@ -261,13 +261,18 @@ class TestInjectWaitsForReady:
         mocked_hub: MagicMock,
         mocked_redis: AsyncMock,
         fresh_readiness: SessionReadiness,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        # create_session 内部也 await readiness.wait（session/service.py 硬编码
+        # timeout=30）；不先 patch 则 create 白等 30s。patch 即时返 True 走"已
+        # ready"快速路径，与下方 mark_ready 语义等价（ready→wait 立即 True）。
+        monkeypatch.setattr(fresh_readiness, "wait", AsyncMock(return_value=True))
         uid = await _create_user(db_session)
         await _create_runtime(db_session, uid)
         svc = DaemonService(db_session)
         created = await svc.create_session(uid, provider="claude", prompt="hello")
 
-        # 标 daemon session ready（fresh 实例）—— wait 应立即返 True，无 30s 阻塞。
+        # 标 daemon session ready（fresh 实例）—— wait 立即返 True，无 30s 阻塞。
         fresh_readiness.mark_ready(created.agent_session.id)
 
         # 首个 run 必须收敛为 terminal，inject 才不 409（DaemonSessionTurnConflict）。
@@ -300,6 +305,11 @@ class TestInjectTimeoutFallback:
         fresh_readiness: SessionReadiness,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        # 不 mark_ready + patch wait 即时返 False（避免源码硬编码 30s 真等）。
+        # patch 须在 create_session 前：create 内部也 await wait（硬编码 30s），
+        # 挪后则 create 已白等 30s（上轮 top30 两个 30s 即此）。create 走
+        # wait=False 仍正常发送 control 消息（超时 fallback），语义不变。
+        monkeypatch.setattr(fresh_readiness, "wait", AsyncMock(return_value=False))
         uid = await _create_user(db_session)
         await _create_runtime(db_session, uid)
         svc = DaemonService(db_session)
@@ -310,9 +320,6 @@ class TestInjectTimeoutFallback:
         first_run.finished_at = datetime.now(UTC)
         db_session.add(first_run)
         await db_session.commit()
-
-        # 不 mark_ready + patch wait 即时返 False（避免源码硬编码 30s 真等）。
-        monkeypatch.setattr(fresh_readiness, "wait", AsyncMock(return_value=False))
 
         # structlog 经 PrintLoggerFactory 直写 stderr，caplog 抓不到（见
         # test_terminating_at_lifecycle._patch_logger_spy 注释）；替换模块级 log

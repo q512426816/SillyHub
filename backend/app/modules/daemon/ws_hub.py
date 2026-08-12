@@ -407,7 +407,7 @@ class DaemonWsHub:
         method: str,
         params: dict[str, Any],
         *,
-        timeout: float = RPC_DEFAULT_TIMEOUT,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         """Send a daemon:rpc request and await the daemon:rpc_result reply.
 
@@ -417,7 +417,14 @@ class DaemonWsHub:
             DaemonRpcConflict: rpc_id collision (UUID4 practical impossibility).
             DaemonRpcTimeout: no reply within ``timeout`` seconds (R-01).
             DaemonRpcRemoteError: daemon returned an error dict (caller maps to HTTP).
+
+        ``timeout=None``（默认）在调用时读 ``RPC_DEFAULT_TIMEOUT``——避免默认参数
+        在 import 时绑定旧常量值。此前测试 monkeypatch ``RPC_DEFAULT_TIMEOUT``
+        无效仍等满 10s（test_ws_rpc::test_list_dir_504_timeout 默认参数捕获），
+        动态读取后 patch 即时生效。
         """
+        if timeout is None:
+            timeout = RPC_DEFAULT_TIMEOUT
         rpc_id = str(uuid.uuid4())
         loop = asyncio.get_running_loop()
         future: asyncio.Future[Any] = loop.create_future()
