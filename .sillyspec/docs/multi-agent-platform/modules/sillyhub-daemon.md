@@ -42,6 +42,7 @@ created_at: 2026-06-24T01:16:42
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
+- **ql-20260812-007-d086**（preflight 超时杀进程树）：修 Windows 上 daemon 启动卡死——preflight.ts 的 runCmd/runCmdBoolean 用 execSync+timeout，Windows 上 timeout 杀不掉 npm.cmd wrapper 的孙 node.exe（npm view sillyspec version 国内间歇慢时卡住），spawnSync 永等→daemon CPU 空转、心跳停（CPU profile 97.7% ntdll）。改为 runWithTreeKill（spawn 异步+Promise+超时杀进程树：Windows taskkill /T /F，Linux/macOS 进程组 kill），runCmd/runCmdBoolean/runSillySpecCheck/installSillySpec 改 async，runPreflight await。超时后杀整树不阻塞 daemon。测试 mock 从 execSync 改 spawn（17 passed）。
 - **2026-08-12-init-provision-local-yaml**（init 写 local.yaml）：`handleInitLease`（spec-sync.ts）新增第4步 `writeLocalYaml`——在 writeDaemonState+pullSpecBundle 之后，读 ctx.platformConfig.local_yaml（backend claim 时注入的 shpsync_+shmcp_ 明文）+ serverOrigin，调新建的 `local-yaml-writer.ts`（TS 重写 sillyspec sync.js 顶层段替换算法：findTopLevelSectionRange/replaceTopLevelSection）写成员本地 .sillyspec/local.yaml：**platform 段无条件覆盖**（url=serverOrigin+token）、**mcp 段有才留**（D-004，已存在不动）。失败 try/catch 返 ok:false→_finish(false) lease failed（D-003 严格契约，对齐 writeDaemonState 逐步 catch 模型不抛错）。task-runner `_runInitLease` 透传 local_yaml + serverOrigin（**serverOrigin=config.server_url 唯一源，不用 payload.server_origin**，D-002 本机可达地址）。ESM import 带 .js（./local-yaml-writer.js）。
 ## 变更索引
 - ql-20260626-001-4a8e | 放宽 complete 事件 result body 截断 slice(3000)→slice(50000)（task-runner.ts `_eventToMessages` complete 分支），避免 daemon 侧砍断 agent 最终总结（backend 侧 content 已同步放宽到 50000）。

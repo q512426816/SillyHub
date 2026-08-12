@@ -15,7 +15,7 @@
  *     ~/.sillyhub/daemon/bin/sillyhub-daemon.js，warn 提示需重启
  *   - 服务器不可达 / 下载失败 → 仅 warn
  *
- * 同步性：sillyspec 检查/安装用 `execSync`（启动阶段同步可控，npm install 可能
+ * 异步性：sillyspec 检查/安装用 spawn+超时杀树（runWithTreeKill，启动阶段执行，
  * 耗时数十秒，刻意阻塞以确保启动前 CLI 就绪）；daemon 自更新用 Node 20 原生
  * fetch（异步）。两者皆在 runPreflight 内 try/catch 隔离。
  *
@@ -25,7 +25,7 @@
  * @module preflight
  */
 
-import { execSync } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { mkdir, writeFile, rename } from 'node:fs/promises';
@@ -85,9 +85,9 @@ export async function runPreflight(
   config: DaemonConfig,
   logger: PreflightLogger,
 ): Promise<void> {
-  // 步骤隔离：sillyspec 检查（同步 execSync）失败不影响 daemon 自更新，反之亦然。
+  // 步骤隔离：sillyspec 检查（async spawn+超时杀树）失败不影响 daemon 自更新，反之亦然。
   try {
-    runSillySpecCheck(logger);
+    await runSillySpecCheck(logger);
   } catch (e) {
     logger('warn', 'preflight_sillyspec_unexpected', { error: fmtErr(e) });
   }
@@ -103,7 +103,7 @@ export async function runPreflight(
 /**
  * 检查本机 sillyspec 是否安装且为最新，否则执行 `npm install -g sillyspec@latest`。
  *
- * 同步实现（execSync）：启动阶段执行，npm install 可能耗时数十秒，刻意阻塞
+ * 异步实现（runWithTreeKill spawn+超时杀树）：启动阶段执行，npm install 可能耗时数十秒，刻意阻塞
  * 以保证 daemon 启动前 sillyspec CLI 可用（spec 流程依赖）。
  *
  * 分支：
@@ -114,9 +114,9 @@ export async function runPreflight(
  *
  * @param logger 日志回调
  */
-export function runSillySpecCheck(logger: PreflightLogger): void {
-  const localVersion = runCmd('sillyspec --version');
-  const latestVersion = runCmd('npm view sillyspec version');
+export async function runSillySpecCheck(logger: PreflightLogger): Promise<void> {
+  const localVersion = await runCmd('sillyspec --version');
+  const latestVersion = await runCmd('npm view sillyspec version');
 
   if (latestVersion === null) {
     // npm 不可达 / 包不存在 → 无法判断最新版，warn 不安装（不阻断启动）。
@@ -127,7 +127,7 @@ export function runSillySpecCheck(logger: PreflightLogger): void {
   if (localVersion === null) {
     // 未安装 → 安装最新版。
     logger('info', 'sillyspec_not_installed', { latest: latestVersion });
-    installSillySpec(logger);
+    await installSillySpec(logger);
     return;
   }
 
@@ -136,7 +136,7 @@ export function runSillySpecCheck(logger: PreflightLogger): void {
       local: localVersion,
       latest: latestVersion,
     });
-    installSillySpec(logger);
+    await installSillySpec(logger);
     return;
   }
 
@@ -147,8 +147,8 @@ export function runSillySpecCheck(logger: PreflightLogger): void {
  * 执行 `npm install -g sillyspec@latest` 安装/升级 sillyspec。
  * 失败仅记 warn（runCmdFailed 内部已记 cmd_failed）。
  */
-function installSillySpec(logger: PreflightLogger): void {
-  const ok = runCmdBoolean('npm install -g sillyspec@latest', logger);
+async function installSillySpec(logger: PreflightLogger): Promise<void> {
+  const ok = await runCmdBoolean('npm install -g sillyspec@latest', logger);
   if (ok) {
     logger('info', 'sillyspec_updated');
   }
@@ -343,49 +343,126 @@ async function downloadAndReplace(
   return true;
 }
 
-// ── 工具：同步执行 shell 命令 ─────────────────────────────────────────────────
+// ── 工具：异步执行 shell 命令 + 超时杀进程树 ─────────────────────────────────
 
 /**
- * 执行命令返回 stdout（trim）。失败（ENOENT / 非零退出 / 超时）返回 null。
+ * 杀整个进程树（含孙进程）。Windows 上 execSync/spawnSync 的 timeout 只 SIGTERM
+ * 直接子进程，杀不掉 .cmd wrapper（npm.cmd/claude.cmd）spawn 的孙 node.exe，
+ * 导致 daemon 卡死在 preflight（2026-08-12 CPU profile 实证：97.7% ntdll，
+ * spawnSync←execSync←runCmd←runSillySpecCheck）。taskkill /T /F 与进程组 kill
+ * 能真正杀树，超时后调用确保 daemon 不被卡住的 npm view 拖死。
  *
- * stdio: stdin/stderr 忽略，只捕获 stdout（npm/sillyspec 的版本号走 stdout；
- * npm 的 deprecation warning 走 stderr，忽略避免污染日志）。
+ * 跨平台：
+ * - Windows: `taskkill /PID <pid> /T /F`（/T 含孙进程，/F 强制）
+ * - Linux/macOS: `process.kill(-<pgid>)`（detached:true 时子进程自成进程组，
+ *   负 pid 杀整组；失败兜底递归 kill 已知子 pid）
+ */
+function killTree(child: ChildProcess): void {
+  const pid = child.pid;
+  if (typeof pid !== 'number') return;
+  try {
+    if (process.platform === 'win32') {
+      // taskkill /T 杀进程树（含 npm.cmd spawn 的孙 node.exe），/F 强制。
+      spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+    } else {
+      // 进程组 kill（spawn 时 detached:true 使子自成组长，负 pid 杀整组）。
+      try {
+        process.kill(-pid, 'SIGKILL');
+      } catch {
+        process.kill(pid, 'SIGKILL');
+      }
+    }
+  } catch {
+    // 杀树失败不抛（最坏情况是孙进程残留，已设 timeout 兜底；不阻塞 daemon）。
+  }
+}
+
+/**
+ * 异步执行命令，超时杀整树。返回 { ok, stdout }。
+ *
+ * 用 spawn（异步）+ Promise.race(timeout)：超时调 killTree（taskkill /T 或进程组
+ * kill）真正杀孙进程，避免 execSync timeout 在 Windows 上杀不掉 npm 孙进程卡死。
+ *
+ * @param cmd shell 命令字符串（经 shell 执行，兼容 npm.cmd wrapper / 管道）
+ * @param timeoutMs 超时毫秒，到期杀树 reject
+ * @param captureStdout 是否捕获 stdout（runCmd=true / runCmdBoolean=false）
+ */
+function runWithTreeKill(
+  cmd: string,
+  timeoutMs: number,
+  captureStdout: boolean,
+): Promise<{ ok: boolean; stdout: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(cmd, {
+      shell: true,
+      detached: process.platform !== 'win32',
+      windowsHide: true,
+      stdio: ['ignore', captureStdout ? 'pipe' : 'ignore', 'ignore'],
+    });
+    let stdoutChunks: Buffer[] = [];
+    let settled = false;
+    const finish = (ok: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const stdout = captureStdout
+        ? Buffer.concat(stdoutChunks).toString('utf-8')
+        : '';
+      resolve({ ok, stdout });
+    };
+
+    if (captureStdout && child.stdout) {
+      child.stdout.on('data', (c: Buffer) => stdoutChunks.push(c));
+    }
+    child.on('error', () => finish(false)); // ENOENT 等
+    child.on('close', (code) => finish(code === 0));
+
+    const timer = setTimeout(() => {
+      killTree(child);
+      finish(false);
+    }, timeoutMs);
+  });
+}
+
+/**
+ * 执行命令返回 stdout（trim）。失败（ENOENT / 非零退出 / 超时杀树）返回 null。
+ *
+ * 2026-08-12：从 execSync（timeout Win 不杀孙进程）改为 runWithTreeKill（spawn
+ * + 超时 taskkill /T 杀树），修 daemon 启动被卡住的 npm view 拖死。
+ *
+ * async：runSillySpecCheck → runPreflight 已是 async，调用方 await。
  *
  * @param cmd shell 命令字符串
  * @returns stdout（trim 后）或 null（失败）
  */
-function runCmd(cmd: string): string | null {
-  try {
-    const out = execSync(cmd, {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 30_000,
-    });
-    const trimmed = out.trim();
-    return trimmed || null;
-  } catch {
-    // 静默失败：调用方据 null 判定（未安装 / 不可达）。
-    return null;
-  }
+async function runCmd(cmd: string): Promise<string | null> {
+  const { ok, stdout } = await runWithTreeKill(cmd, 30_000, true);
+  if (!ok) return null;
+  const trimmed = stdout.trim();
+  return trimmed || null;
 }
 
 /**
  * 执行安装类命令（无 stdout 需求），成功返回 true，失败记 warn 返回 false。
  *
- * timeout 120s：npm install -g 可能下载依赖较慢，给足时间但避免无限挂起。
+ * timeout 120s：npm install -g 可能下载依赖较慢，给足时间但避免无限挂起
+ * （超时后 killTree 杀整树，不再阻塞）。
+ *
+ * 2026-08-12：execSync → runWithTreeKill（同 runCmd，修 Windows 超时杀树）。
  */
-function runCmdBoolean(cmd: string, logger: PreflightLogger): boolean {
-  try {
-    execSync(cmd, {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'ignore', 'pipe'],
-      timeout: 120_000,
-    });
-    return true;
-  } catch (e) {
-    logger('warn', 'cmd_failed', { cmd, error: fmtErr(e) });
+async function runCmdBoolean(
+  cmd: string,
+  logger: PreflightLogger,
+): Promise<boolean> {
+  const { ok } = await runWithTreeKill(cmd, 120_000, false);
+  if (!ok) {
+    logger('warn', 'cmd_failed', { cmd });
     return false;
   }
+  return true;
 }
 
 // ── 工具：版本比较 + 错误格式化 ───────────────────────────────────────────────

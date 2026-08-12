@@ -2,7 +2,7 @@
 // 2026-06-24 preflight：启动前预检测试（sillyspec 版本检查 + daemon 自更新）。
 //
 // mock 策略：
-//   - node:child_process.execSync → execMock（sillyspec 检查/安装走 execSync）
+//   - node:child_process.spawn → spawnMock（runWithTreeKill 用，sillyspec 检查/安装）
 //   - globalThis.fetch → vi.stubGlobal（latest.json / bundle 下载）
 //   - ../src/build-id.js BUILD_ID → 'abc1234'（让 runPreflight 内部走真实 daemon 更新分支，
 //     而非 dev 跳过；runDaemonSelfUpdate 接受显式 buildId 参数，不受此 mock 影响）
@@ -19,9 +19,15 @@ import { join } from 'node:path';
 
 // ── hoisted mocks ─────────────────────────────────────────────────────────────
 
-const { execMock } = vi.hoisted(() => ({ execMock: vi.fn() }));
+// mock spawn（runWithTreeKill 用）：按 cmd 返回模拟 child，emit stdout + close(code)。
+// spawnImpl(cmd) 返回 { pid, stdout: EventEmitter, emit close }；测试据 cmd 决定 stdout/exit。
+const { spawnMock } = vi.hoisted(() => ({
+  spawnMock: vi.fn(),
+}));
 
-vi.mock('node:child_process', () => ({ execSync: execMock }));
+vi.mock('node:child_process', () => ({
+  spawn: (...args: unknown[]) => spawnMock(...args),
+}));
 
 // BUILD_ID mock：非 dev，使 runPreflight（内部用全局 BUILD_ID）走 daemon 更新分支。
 vi.mock('../src/build-id.js', () => ({ BUILD_ID: 'abc1234' }));
@@ -107,9 +113,36 @@ function bundleResponse(body: string): Response {
   return new Response(body, { status: 200 });
 }
 
-/** 统计 execMock 被「含 needle 的命令」调用次数。 */
+/**
+ * 构造 spawn mock 的返回 child：{ pid, stdout, emit close }。
+ * nextTick emit 让 runWithTreeKill 的 listener 先注册（await Promise）。
+ */
+function makeSpawnChild(opts: {
+  stdout?: string;
+  code?: number;
+  error?: boolean;
+}): NodeJS.EventEmitter & { pid: number; stdout: NodeJS.EventEmitter } {
+  const { EventEmitter } = require('node:events');
+  const child = new EventEmitter() as NodeJS.EventEmitter & {
+    pid: number;
+    stdout: NodeJS.EventEmitter;
+  };
+  child.pid = 12345;
+  child.stdout = new EventEmitter();
+  process.nextTick(() => {
+    if (opts.error) {
+      child.emit('error', new Error('spawn fail'));
+      return;
+    }
+    if (opts.stdout !== undefined) child.stdout.emit('data', Buffer.from(opts.stdout));
+    child.emit('close', opts.code ?? 0);
+  });
+  return child;
+}
+
+/** 统计 spawnMock 被「含 needle 的命令」调用次数。 */
 function execCallsContaining(needle: string): number {
-  return execMock.mock.calls.filter(
+  return spawnMock.mock.calls.filter(
     (c) => typeof c[0] === 'string' && (c[0] as string).includes(needle),
   ).length;
 }
@@ -122,7 +155,7 @@ function makeTmpDir(): string {
 }
 
 beforeEach(() => {
-  execMock.mockReset();
+  spawnMock.mockReset();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -135,95 +168,102 @@ afterEach(() => {
 // ── 功能1：sillyspec 版本检查 ─────────────────────────────────────────────────
 
 describe('runSillySpecCheck', () => {
-  it('未安装（sillyspec --version 抛错）+ 最新可得 → 执行 npm install', () => {
+  // spawn mock 路由：按 cmd 返回对应 stdout/exit。失败用 code=1 或不 emit close。
+  function spawnByCmd(cmdMap: (cmd: string) => { stdout?: string; code?: number; error?: boolean }): void {
+    spawnMock.mockImplementation((cmd: string) =>
+      makeSpawnChild(cmdMap(cmd)),
+    );
+  }
+
+  it('未安装（sillyspec --version 失败）+ 最新可得 → 执行 npm install', async () => {
     const { fn, entries } = makeLogger();
-    execMock.mockImplementation((cmd: string) => {
-      if (cmd.includes('sillyspec --version')) throw new Error('not found');
-      if (cmd.includes('npm view sillyspec version')) return '3.19.2\n';
-      if (cmd.includes('npm install')) return '';
-      return '';
+    spawnByCmd((cmd) => {
+      if (cmd.includes('sillyspec --version')) return { code: 1 }; // 未安装：非零退出 → null
+      if (cmd.includes('npm view sillyspec version')) return { stdout: '3.19.2\n' };
+      if (cmd.includes('npm install')) return { stdout: '' };
+      return { stdout: '' };
     });
-    runSillySpecCheck(fn);
+    await runSillySpecCheck(fn);
     expect(execCallsContaining('npm install -g sillyspec@latest')).toBe(1);
     const msgs = entries.map((e) => e.msg);
     expect(msgs).toContain('sillyspec_not_installed');
     expect(msgs).toContain('sillyspec_updated');
   });
 
-  it('版本过旧（3.19.0 < 3.19.2）→ 执行 npm install', () => {
+  it('版本过旧（3.19.0 < 3.19.2）→ 执行 npm install', async () => {
     const { fn, entries } = makeLogger();
-    execMock.mockImplementation((cmd: string) => {
-      if (cmd.includes('sillyspec --version')) return '3.19.0\n';
-      if (cmd.includes('npm view sillyspec version')) return '3.19.2\n';
-      return '';
+    spawnByCmd((cmd) => {
+      if (cmd.includes('sillyspec --version')) return { stdout: '3.19.0\n' };
+      if (cmd.includes('npm view sillyspec version')) return { stdout: '3.19.2\n' };
+      return { stdout: '' };
     });
-    runSillySpecCheck(fn);
+    await runSillySpecCheck(fn);
     expect(execCallsContaining('npm install -g sillyspec@latest')).toBe(1);
     const msgs = entries.map((e) => e.msg);
     expect(msgs).toContain('sillyspec_outdated');
     expect(msgs).toContain('sillyspec_updated');
   });
 
-  it('已是最新（3.19.2 == 3.19.2）→ 不安装', () => {
+  it('已是最新（3.19.2 == 3.19.2）→ 不安装', async () => {
     const { fn, entries } = makeLogger();
-    execMock.mockImplementation((cmd: string) => {
-      if (cmd.includes('sillyspec --version')) return '3.19.2\n';
-      if (cmd.includes('npm view sillyspec version')) return '3.19.2\n';
-      return '';
+    spawnByCmd((cmd) => {
+      if (cmd.includes('sillyspec --version')) return { stdout: '3.19.2\n' };
+      if (cmd.includes('npm view sillyspec version')) return { stdout: '3.19.2\n' };
+      return { stdout: '' };
     });
-    runSillySpecCheck(fn);
+    await runSillySpecCheck(fn);
     expect(execCallsContaining('npm install')).toBe(0);
     expect(entries.find((e) => e.msg === 'sillyspec_up_to_date')).toBeTruthy();
   });
 
-  it('高于最新（3.20.0 > 3.19.2）→ 不安装（isOutdated=false）', () => {
+  it('高于最新（3.20.0 > 3.19.2）→ 不安装（isOutdated=false）', async () => {
     const { fn, entries } = makeLogger();
-    execMock.mockImplementation((cmd: string) => {
-      if (cmd.includes('sillyspec --version')) return '3.20.0\n';
-      if (cmd.includes('npm view sillyspec version')) return '3.19.2\n';
-      return '';
+    spawnByCmd((cmd) => {
+      if (cmd.includes('sillyspec --version')) return { stdout: '3.20.0\n' };
+      if (cmd.includes('npm view sillyspec version')) return { stdout: '3.19.2\n' };
+      return { stdout: '' };
     });
-    runSillySpecCheck(fn);
+    await runSillySpecCheck(fn);
     expect(execCallsContaining('npm install')).toBe(0);
     expect(entries.find((e) => e.msg === 'sillyspec_up_to_date')).toBeTruthy();
   });
 
-  it('npm view 不可达（抛错）→ warn 不安装', () => {
+  it('npm view 不可达（非零退出）→ warn 不安装', async () => {
     const { fn, entries } = makeLogger();
-    execMock.mockImplementation((cmd: string) => {
-      if (cmd.includes('sillyspec --version')) return '3.19.2\n';
-      if (cmd.includes('npm view sillyspec version')) throw new Error('npm down');
-      return '';
+    spawnByCmd((cmd) => {
+      if (cmd.includes('sillyspec --version')) return { stdout: '3.19.2\n' };
+      if (cmd.includes('npm view sillyspec version')) return { code: 1 }; // npm down → null
+      return { stdout: '' };
     });
-    runSillySpecCheck(fn);
+    await runSillySpecCheck(fn);
     expect(execCallsContaining('npm install')).toBe(0);
     const e = entries.find((x) => x.msg === 'sillyspec_latest_unavailable');
     expect(e).toBeTruthy();
     expect(e!.level).toBe('warn');
   });
 
-  it('npm install 失败 → 记 cmd_failed warn，不抛错、不记 sillyspec_updated', () => {
+  it('npm install 失败（非零退出）→ 记 cmd_failed warn，不抛错、不记 sillyspec_updated', async () => {
     const { fn, entries } = makeLogger();
-    execMock.mockImplementation((cmd: string) => {
-      if (cmd.includes('sillyspec --version')) return '3.19.0\n';
-      if (cmd.includes('npm view sillyspec version')) return '3.19.2\n';
-      if (cmd.includes('npm install')) throw new Error('EACCES');
-      return '';
+    spawnByCmd((cmd) => {
+      if (cmd.includes('sillyspec --version')) return { stdout: '3.19.0\n' };
+      if (cmd.includes('npm view sillyspec version')) return { stdout: '3.19.2\n' };
+      if (cmd.includes('npm install')) return { code: 1 }; // EACCES → false
+      return { stdout: '' };
     });
-    expect(() => runSillySpecCheck(fn)).not.toThrow();
+    await expect(runSillySpecCheck(fn)).resolves.toBeUndefined();
     expect(entries.find((e) => e.msg === 'cmd_failed')?.level).toBe('warn');
     expect(entries.find((e) => e.msg === 'sillyspec_updated')).toBeFalsy();
   });
 
-  it('非标准版本（无法 parseSemver）→ 字符串不等即视为旧 → 安装', () => {
+  it('非标准版本（无法 parseSemver）→ 字符串不等即视为旧 → 安装', async () => {
     const { fn, entries } = makeLogger();
-    execMock.mockImplementation((cmd: string) => {
+    spawnByCmd((cmd) => {
       // 本地 dev 标签、最新也是非标准 → 字符串不等 → isOutdated=true
-      if (cmd.includes('sillyspec --version')) return '3.19.2-rc.1\n';
-      if (cmd.includes('npm view sillyspec version')) return '3.19.2\n';
-      return '';
+      if (cmd.includes('sillyspec --version')) return { stdout: '3.19.2-rc.1\n' };
+      if (cmd.includes('npm view sillyspec version')) return { stdout: '3.19.2\n' };
+      return { stdout: '' };
     });
-    runSillySpecCheck(fn);
+    await runSillySpecCheck(fn);
     // parseSemver('3.19.2-rc.1')=[3,19,2], parseSemver('3.19.2')=[3,19,2] → 相等 → 不旧
     // 此用例验证 prerelease 被忽略后视为相等，不安装。
     expect(execCallsContaining('npm install')).toBe(0);
@@ -359,11 +399,12 @@ describe('runDaemonSelfUpdate', () => {
 describe('runPreflight 集成', () => {
   it('两步都执行且互不影响（sillyspec npm 不可达 + daemon 版本一致）', async () => {
     const { fn, entries } = makeLogger();
-    execMock.mockImplementation((cmd: string) => {
-      if (cmd.includes('sillyspec --version')) return '3.19.2\n';
-      if (cmd.includes('npm view sillyspec version')) throw new Error('down');
-      return '';
-    });
+    spawnMock.mockImplementation((cmd: string) =>
+      makeSpawnChild({
+        stdout: cmd.includes('sillyspec --version') ? '3.19.2\n' : '',
+        code: cmd.includes('npm view sillyspec version') ? 1 : 0, // npm 不可达 → null
+      }),
+    );
     vi.stubGlobal(
       'fetch',
       makeFetch({
@@ -378,9 +419,7 @@ describe('runPreflight 集成', () => {
 
   it('两步同时失败 → runPreflight 不抛，各自 warn', async () => {
     const { fn, entries } = makeLogger();
-    execMock.mockImplementation(() => {
-      throw new Error('exec down');
-    });
+    spawnMock.mockImplementation(() => makeSpawnChild({ code: 1 })); // 所有 spawn 非零退出
     vi.stubGlobal(
       'fetch',
       vi.fn(() => {
