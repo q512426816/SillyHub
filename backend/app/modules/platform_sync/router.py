@@ -26,6 +26,7 @@ from app.core.db import get_session
 from app.modules.auth.model import User
 from app.modules.platform_sync.auth import require_platform_sync
 from app.modules.platform_sync.schema import (
+    ChangeApprovalResponse,
     ChangeListItem,
     ConflictResponse,
     ProgressSyncOk,
@@ -114,3 +115,23 @@ async def get_progress(
             detail="change progress not found",
         )
     return progress
+
+
+@router.get("/changes/{name}/approval")
+async def get_approval(
+    name: str,
+    auth: Annotated[tuple[User, uuid.UUID | None], Depends(require_platform_sync)],
+) -> ChangeApprovalResponse:
+    """GET 单 change 审批状态——给 sillyspec CLI execute 审批门控用（ql-20260812-001-6eb8）。
+
+    CLI ``sync.js checkApproval`` 在 execute 启动时 GET 此端点，读 ``status``：
+    rejected/pending 阻断 execute，其他（approved）放行（command.js:1071-1080）。
+
+    **不查库、不因 change 不存在 404**：change 可能尚未上行 progress（execute 前），
+    若 404 CLI 会 fetchJson→null→误判 pending 卡死（与本端点放行初衷相悖）。当前后端
+    无审批策略 → 所有 change 默认 ``approved`` 放行。鉴权失败仍 401（require_platform_sync）。
+    """
+    return ChangeApprovalResponse(
+        status="approved",
+        reason="no approval policy configured; auto-approved",
+    )

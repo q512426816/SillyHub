@@ -15,10 +15,11 @@ SillySpec 跨仓进度同步层的后端收件箱 + workspace 隔离 + 变更中
 前置模块由 2026-08-10-sillyhub-platform-sync 建立（3 端点 + PlatformChangeProgressORM 单行）；2026-08-11-change-progress-projection 加 workspace 隔离（token 派生 + 复合唯一）+ token 签发/换发 2 新端点 + change 模块投影消费。scan 漏登本子模块，本卡 2026-08-12 补建。
 
 ## 契约摘要
-- **收件箱 3 端点**（inline `/changes`，无前缀 router.py，`require_platform_sync` 鉴权）：
+- **收件箱 4 端点**（inline `/changes`，无前缀 router.py，`require_platform_sync` 鉴权）：
   - `POST /api/changes/{name}/progress`：工具上行进度，body = serializeForSync 六表 JSON + `X-Base-Timestamp`/`X-Pushed-At`/`X-Pusher` 头；`upsert_progress` 按 `(workspace_id, change_name)` 复合键写；§4.2 base_ts 字典序冲突 → 409 ConflictResponse。
   - `GET /api/changes`：收件箱列表（`list_lightweight`，裸数组，按 workspace 隔离）。
   - `GET /api/changes/{name}/progress`：单 change 进度详情（裸 dict，反查不到 404）。
+  - `GET /api/changes/{name}/approval`：审批状态查询（给 sillyspec CLI execute 门控用），当前无审批策略 → 默认 `{status: approved}` 放行，**不查库不 404**（change 可能尚未上行 progress，404 会让 CLI fetchJson→null→误判 pending 卡死，ql-20260812-001-6eb8）。
 - **token 签发端点**（workspace_router.py，prefix `/workspaces`）：
   - `POST /api/workspaces/{workspace_id}/platform-sync-tokens`：workspace 成员签发 `shpsync_` token，`require_permission(WORKSPACE_WRITE)`（owner/developer 可签，viewer → 403）；明文 token 仅 201 返一次，DB 存 sha256。
   - `POST /api/workspaces/resolve-by-root-path`：connect 换发，body `{root_path}`，鉴权 = `shk_live_`（ApiKeyService）或 JWT；流程：反查活跃 workspace（`_find_active_by_root_path`，不到 → 404）→ 手动 `has_permission(WORKSPACE_WRITE)`（workspace_id 来自 body 反查非路径，无法用 Depends 注入 RBAC；无权限 → 403，D-006 安全闭环）→ 签发 `shpsync_`（created_by=调用者）→ 200 `{workspace_id, token}`。
@@ -62,5 +63,7 @@ sillyspec platform connect → 健康 check 后用 user 级 shk_live_ + 本地 r
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
+- **2026-08-12-init-provision-local-yaml**（D-001）：PlatformSyncTokenService 新增 `get_or_issue(*, workspace_id, created_by) -> tuple[ORM, 明文]`——内联 select 旧未吊销（ws+created_by+revoked_at IS NULL）+ UPDATE 吊销（不新增 public revoke，零回归）+ 调既有 create（name='init-provisioned', scope=None）签新。供 init claim 时 `build_claim_payload`（daemon/lease/context.py mode=='init' 分支）现算注入 payload.platform_config.local_yaml（明文不落 lease.metadata_，D-002/P0）。"复用"语义=吊销旧+签新（明文不可恢复）。守 design §5.2。
 - **2026-08-11-change-progress-projection**（D-001~006 / R-01~08）：加 workspace 隔离（D-001 token 派生，参照 McpToken 模式建 PlatformSyncTokenORM + PlatformSyncTokenService，shpsync_ 前缀）+ PlatformChangeProgressORM 加 workspace_id nullable 复合唯一 + require_platform_sync 返 (User, workspace_id|None) 三路径分流 + service upsert/list/get 全加 workspace_id（is_(None) 处理 NULL 过渡期）+ 2 新端点（platform-sync-tokens 签发 / resolve-by-root-path connect 换发含 D-006 手动 has_permission WORKSPACE_WRITE 403/404 闭环）+ change 模块 `_project_current_stage` 批量 IN join 投影 current_stage（D-002 read-only 不双写）+ fallback（D-003）+ 不投 status（D-004@v2 撤销，sillyspec status 仅 active/archived）+ connect 跨仓换发（D-005 replaceTopLevelSection 保留注释，降级 best-effort）+ 契约 §14。前置 sillyhub-platform-sync 建模块时 scan 漏登 _module-map，本次补建本卡。
+- **ql-20260812-001-6eb8**（补 approval 端点）：新增 `GET /api/changes/{name}/approval`（router.py）+ `ChangeApprovalResponse`（schema.py）。根因 sillyspec CLI execute 启动时 GET 此端点查审批门控（command.js:1071-1080），后端从未实现→404，CLI sync.js checkApproval 把 fetchJson null 误判 `{status: pending}` 卡死。方案：端点复用 `require_platform_sync` 鉴权，无条件返回 `ChangeApprovalResponse(status="approved", reason="no approval policy configured; auto-approved")`，不查库不 404；3 测试（200/401/JWT）。跨仓契约 `sillyhub-progress-sync-contract.md` 存 sillyspec 仓（本仓不持有，未同步）。sillyhub-daemon/src/api-types.ts 未同步（daemon 不消费 platform_sync 端点，无功能债，留后续）。
 <!-- MANUAL_NOTES_END -->

@@ -345,3 +345,30 @@ async def test_apply_catches_integrity_error_falls_back_to_update(db_session):
     assert row.latest_progress == new_body
     assert row.last_pusher == "alice"
     assert row.last_pushed_at == T2
+
+
+# ── ql-20260812-001-6eb8 GET /changes/{name}/approval（CLI execute 审批门控）────────
+
+
+async def test_get_approval_returns_approved(client, apikey_headers):
+    """ql-20260812-001：合法 shk_live_ 鉴权 → 200 {status: approved}，CLI execute 门控放行。
+
+    sillyspec CLI sync.js checkApproval GET 此端点，status≠pending/rejected 即放行。
+    当前无审批策略 → 默认 approved；不查库，从未上行 progress 的 change 也 approved（不 404）。
+    """
+    resp = await client.get("/api/changes/never-pushed/approval", headers=apikey_headers)
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "approved"
+
+
+async def test_get_approval_no_auth_returns_401(client):
+    """ql-20260812-001：无 Authorization → 401（require_platform_sync 守门，契约 §2）。"""
+    resp = await client.get("/api/changes/c1/approval")
+    assert resp.status_code == 401
+
+
+async def test_get_approval_jwt_auth_ok(client, auth_headers):
+    """ql-20260812-001：合法 JWT → 200（require_platform_sync JWT fallback 分支）。"""
+    resp = await client.get("/api/changes/c1/approval", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "approved"

@@ -7500,6 +7500,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/changes/{name}/approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Approval
+         * @description GET 单 change 审批状态——给 sillyspec CLI execute 审批门控用（ql-20260812-001-6eb8）。
+         *
+         *     CLI ``sync.js checkApproval`` 在 execute 启动时 GET 此端点，读 ``status``：
+         *     rejected/pending 阻断 execute，其他（approved）放行（command.js:1071-1080）。
+         *
+         *     **不查库、不因 change 不存在 404**：change 可能尚未上行 progress（execute 前），
+         *     若 404 CLI 会 fetchJson→null→误判 pending 卡死（与本端点放行初衷相悖）。当前后端
+         *     无审批策略 → 所有 change 默认 ``approved`` 放行。鉴权失败仍 401（require_platform_sync）。
+         */
+        get: operations["get_approval_api_changes__name__approval_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/platform-sync-tokens": {
         parameters: {
             query?: never;
@@ -8428,6 +8455,25 @@ export interface components {
             success: boolean;
             /** Captcha Token */
             captcha_token?: string | null;
+        };
+        /**
+         * ChangeApprovalResponse
+         * @description GET /changes/{name}/approval 响应——给 sillyspec CLI execute 审批门控用。
+         *
+         *     CLI ``sync.js checkApproval``（execute 启动时调）读 ``status``：
+         *     ``rejected``/``pending`` 阻断 execute，其他（``approved``）放行
+         *     （command.js:1071-1080）。当前后端无审批策略/数据 → 所有 change 默认 ``approved``
+         *     放行（ql-20260812-001-6eb8 修 CLI 因 404 误判 pending 卡死）。
+         */
+        ChangeApprovalResponse: {
+            /**
+             * Status
+             * @description 审批状态：approved/pending/rejected
+             * @default approved
+             */
+            status: string;
+            /** Reason */
+            reason?: string | null;
         };
         /** ChangeCreateRequest */
         ChangeCreateRequest: {
@@ -31719,6 +31765,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChangeListItem"][];
+                };
+            };
+        };
+    };
+    get_approval_api_changes__name__approval_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeApprovalResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

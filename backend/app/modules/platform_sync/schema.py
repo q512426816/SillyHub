@@ -45,6 +45,19 @@ class ProgressSyncOk(BaseModel):
     ok: bool = True
 
 
+class ChangeApprovalResponse(BaseModel):
+    """GET /changes/{name}/approval 响应——给 sillyspec CLI execute 审批门控用。
+
+    CLI ``sync.js checkApproval``（execute 启动时调）读 ``status``：
+    ``rejected``/``pending`` 阻断 execute，其他（``approved``）放行
+    （command.js:1071-1080）。当前后端无审批策略/数据 → 所有 change 默认 ``approved``
+    放行（ql-20260812-001-6eb8 修 CLI 因 404 误判 pending 卡死）。
+    """
+
+    status: str = Field(default="approved", description="审批状态：approved/pending/rejected")
+    reason: str | None = None
+
+
 # ── Change 2026-08-11-change-progress-projection task-07：workspace-scoped token 签发 ──
 
 

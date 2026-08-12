@@ -442,3 +442,18 @@
 根因：这些组件照搬了 change-stage-header 同类 bug（toLocaleString() 不传 locale 依赖系统 locale），虽暂无测试断言故 CI 未红，但 en-US 环境会渲染成 M/D/YYYY 而非项目约定的 YYYY/M/D，属一致性债。
 方案：14 文件 toLocaleString() 补 zh-CN（scan-docs/runtime×4/workspaces-[id]-page/mission-console/usage-footer/sillyspec-step-progress×4/workspace-card/workspace-config-card/dialog-context-bar/incidents-[iid]/change-file-tree/audit/change-review-history-card/approvals×2），5 文件 toLocaleDateString() 补 zh-CN（releases/knowledge/incidents/git-identities/changes）；Number 的 toLocaleString()（tokens 千分位 3 处）非日期故保留。
 结果：grep 零残留 Date no-arg；node_modules 健康（tsc 5.5.4）tsc --noEmit 0 错；vitest 全量 144 文件 1402 测试全过零回归。
+
+## ql-20260812-001-6eb8 | 2026-08-12 11:33:24 | 给 platform_sync 补 GET /api/changes/{name}/approval 端点
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/platform_sync/router.py（加 GET /changes/{name}/approval 端点(复用 require_platform_sync,返回 approved 不查库不 404)）
+- backend/app/modules/platform_sync/schema.py（加 ChangeApprovalResponse 模型）
+- backend/app/modules/platform_sync/tests/test_router.py（加 3 测试(200 approved/401 无鉴权/200 JWT)）
+- backend/openapi.json（gen:types dump 含新端点(364 paths)）
+- frontend/src/lib/api-types.ts（gen:types 生成含 /api/changes/{name}/approval）
+- .sillyspec/docs/backend/modules/platform_sync.md（契约摘要 3→4 端点+MANUAL_NOTES 加 ql-20260812-001-6eb8）
+需求：给 platform_sync 补 GET /api/changes/{name}/approval 端点，让 sillyspec CLI execute 审批门控不再因 404 卡死。
+根因：CLI sync.js checkApproval 在 execute 启动时 GET 此端点查审批，后端从未实现→404，fetchJson 返回 null 被误判为 {status:pending} 阻断（command.js:1071-1080）。
+方案：router.py 加端点复用 require_platform_sync 鉴权，无条件返回 ChangeApprovalResponse{status:approved, reason:no approval policy configured}（不查库不 404——change 可能尚未上行 progress，404 会让 CLI 再卡）；schema.py 加模型；test_router.py 加 3 测试；frontend gen:types 同步 openapi.json+api-types.ts；模块文档契约摘要 3→4 端点+MANUAL_NOTES。
+结果：pytest platform_sync 24 passed（原21+新3）；ruff format/check pass；mypy Success；gen:types 含新端点（openapi 364 paths）；git add 6 文件隔离 init-provision staged。

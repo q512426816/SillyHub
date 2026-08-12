@@ -24792,6 +24792,50 @@
         }
       }
     },
+    "/api/changes/{name}/approval": {
+      "get": {
+        "tags": [
+          "platform-sync",
+          "platform-sync"
+        ],
+        "summary": "Get Approval",
+        "description": "GET 单 change 审批状态——给 sillyspec CLI execute 审批门控用（ql-20260812-001-6eb8）。\n\nCLI ``sync.js checkApproval`` 在 execute 启动时 GET 此端点，读 ``status``：\nrejected/pending 阻断 execute，其他（approved）放行（command.js:1071-1080）。\n\n**不查库、不因 change 不存在 404**：change 可能尚未上行 progress（execute 前），\n若 404 CLI 会 fetchJson→null→误判 pending 卡死（与本端点放行初衷相悖）。当前后端\n无审批策略 → 所有 change 默认 ``approved`` 放行。鉴权失败仍 401（require_platform_sync）。",
+        "operationId": "get_approval_api_changes__name__approval_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangeApprovalResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/platform-sync-tokens": {
       "post": {
         "tags": [
@@ -27419,6 +27463,30 @@
         ],
         "title": "CaptchaVerifyResponse",
         "description": "校验通过 → 返回一次性 captcha_token,登录时回传。"
+      },
+      "ChangeApprovalResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "审批状态：approved/pending/rejected",
+            "default": "approved"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "title": "ChangeApprovalResponse",
+        "description": "GET /changes/{name}/approval 响应——给 sillyspec CLI execute 审批门控用。\n\nCLI ``sync.js checkApproval``（execute 启动时调）读 ``status``：\n``rejected``/``pending`` 阻断 execute，其他（``approved``）放行\n（command.js:1071-1080）。当前后端无审批策略/数据 → 所有 change 默认 ``approved``\n放行（ql-20260812-001-6eb8 修 CLI 因 404 误判 pending 卡死）。"
       },
       "ChangeCreateRequest": {
         "properties": {
