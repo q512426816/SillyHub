@@ -29,6 +29,31 @@ from app.modules.agent.orchestrator import (
 )
 
 
+async def _fake_converge(session, run_id, glm_config=None):
+    """Stub converge——schedule_loop 末尾的 mission 收敛副作用。
+
+    ``converge_mission_for_completed_run`` 内部构造 FinalizerService（经
+    ``new_host_fs_delegate`` 调 git_merge RPC 无 daemon 真等超时）+ GLM httpx
+    （120s timeout），本文件多个 schedule_loop 测试单跑偶发 8~34s（top30 慢点，
+    2026-08-12 ql-004 修 lease 同款根因）。本测试只测 schedule_loop 状态机，
+    converge 返回值 ``done`` 走 done 断言分支，副作用属不必要等待，统一 mock。
+    """
+    return "done"
+
+
+@pytest.fixture(autouse=True)
+def _mock_converge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """module 级 autouse：所有用例不真跑 finalizer converge（RPC/httpx 等待）。
+
+    schedule_loop 在函数体内 ``from app.modules.agent.finalizer import
+    converge_mission_for_completed_run``——访问的是 finalizer 模块属性，patch
+    finalizer 模块符号即命中。
+    """
+    import app.modules.agent.finalizer as _finalizer_mod
+
+    monkeypatch.setattr(_finalizer_mod, "converge_mission_for_completed_run", _fake_converge)
+
+
 async def _make_workspace(session: AsyncSession) -> uuid.UUID:
     """建一个真实 workspace 行（外键完整，避免依赖 SQLite 不强制 FK）。"""
     from app.modules.workspace.model import Workspace
