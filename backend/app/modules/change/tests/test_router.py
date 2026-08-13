@@ -497,3 +497,35 @@ async def test_list_response_items_contain_pending_review_field(
     # norev-* → None
     assert by_key["norev-execute"]["pending_review"] is None
     assert by_key["norev-miss"]["pending_review"] is None
+
+
+async def test_list_pending_review_only_global_total_across_pages(
+    client, db_session, auth_headers: dict[str, str]
+) -> None:
+    """gap②（ql-20260813-005）：pending_review_only + page_size 小于 pending 数时，
+    total = 全局真实 N（非本页过滤后数），分页偏移正确。
+
+    旧实现（router enrich 后 filter）SQL 先取 1 条（updated_at desc → norev-miss
+    无 pending）filter 后 total=0；新实现（service 算全局 pending 集合 SQL IN）total=2。
+    """
+    seeded = await _seed_review_workspace(db_session)
+    resp = await client.get(
+        f"/api/workspaces/{seeded['ws_id']}/changes",
+        params={"pending_review_only": "true", "page_size": "1"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    # 全局真实 N = 2（rev-plan + rev-verify），非本页 1（缺口 gap② 的回归锚点）
+    assert body["total"] == 2
+    # 本页只有 1 条（page_size=1），是 pending 里 updated_at 最新（rev-verify day1）
+    assert [i["change_key"] for i in body["items"]] == ["rev-verify"]
+    # 第二页 offset=1 → rev-plan，分页不偏移
+    resp2 = await client.get(
+        f"/api/workspaces/{seeded['ws_id']}/changes",
+        params={"pending_review_only": "true", "page_size": "1", "page": "2"},
+        headers=auth_headers,
+    )
+    assert resp2.status_code == 200
+    assert [i["change_key"] for i in resp2.json()["items"]] == ["rev-plan"]
+    assert resp2.json()["total"] == 2

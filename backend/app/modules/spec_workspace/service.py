@@ -613,7 +613,18 @@ class SpecWorkspaceService:
                 target = spec_root / rel_path
                 target.parent.mkdir(parents=True, exist_ok=True)
 
-                content = src_file.read_bytes()
+                # ql-20260813-004：staging 成员缺失（tar name 被旧打包方截断 / 解包竞态等）
+                # → 跳过 + warn，不抛 500 致整次同步失败。daemon 侧 buildLongLinkHeader +
+                # 排除 runtime(无点) 已根治超长 name，此为纵深防御兜底。
+                try:
+                    content = src_file.read_bytes()
+                except FileNotFoundError:
+                    log.warning(
+                        "spec_workspace.sync_member_missing_in_staging",
+                        workspace_id=str(workspace_id),
+                        member=m.name,
+                    )
+                    continue
                 ch = hashlib.sha256(content).hexdigest()
                 src_mtime = datetime.fromtimestamp(m.mtime, tz=UTC) if m.mtime > 0 else None
 

@@ -425,9 +425,17 @@ export async function syncSpecTreeIfNeeded(
 /**
  * 把本地 spec 目录整树打包成 tar Buffer（零依赖手工 ustar）。
  *
- * 迁自 task-runner.ts:1512-1533（_packSpecDir）。task-06（design §5.2 D-003 push 路径）：
- * **包含** `.runtime/`（含 daemon sillyspec.db 等），不再排除——daemon 侧 .runtime 需回灌到
- * backend（FR-06）。pull 路径 backend `build_bundle` 仍排除 .runtime，保持非对称（R7）。
+ * 运行时产物默认排除（ql-20260813-004，import/push 路径都生效）：
+ *   - `runtime/`（无点，顶层）：daemon scan-runs 历史日志，文件名形如
+ *     `<change名>-brainstorm-stepNN-<timestamp>.txt` 极易超 100 字节，曾触发 ustar name
+ *     截断 → 后端 `_write_spec_root` read_bytes FileNotFoundError → HTTP 500。
+ *   - `worktrees`（任意深度）：sillyspec worktree 工作区，可达 GB，非 spec 数据。
+ *
+ * D-003 push 契约保留：`.runtime/`（**有点**，含 sillyspec.db）仍回灌——守护测试
+ * spec-sync.test.ts / test_apply_sync.py 锁定的是 `.runtime`（有点），仅排除其下 worktrees
+ * 子树。import 路径额外通过 opts.excludeRuntime 排整个 `.runtime`，与 backend build_bundle 对称。
+ *
+ * name 超 100 字节时写 GNU LongLink 扩展头（buildLongLinkHeader），避免 ustar 截断。
  * 仅 regular file + directory；symlink 跳过（walkDir 不收集）。结尾追加 2×512 zero block。
  *
  * 纯目录打包，无 client 依赖（client 调用在 postSpecSync）。
@@ -436,25 +444,24 @@ export async function packSpecDir(
   specDir: string,
   opts: { excludeRuntime?: boolean; excludeNames?: string[] } = {},
 ): Promise<Buffer> {
-  // ql-20260701-002/003：import 路径(get_spec_bundle)排除非 spec 数据的顶层目录——
-  // .runtime（运行时缓存含 worktrees，可达 GB）+ excludeNames（如 changes：SillySpec 流程
-  // 档案，reparse 不读，可达十 MB + 万级文件，Windows 遍历慢，是 import 超时主因）。与
-  // backend build_bundle 排除 .runtime 对称。postSpecSync 不传此选项，保持 task-06 含
-  // .runtime 回灌(design §5.2 D-003)。
   const excludeTop = new Set<string>(opts.excludeNames ?? []);
   if (opts.excludeRuntime) excludeTop.add('.runtime');
+  // ql-20260813-004：运行时产物默认排除（见上方 docstring）。runtime(无点) 是 daemon scan-runs
+  // 日志（崩溃源），worktrees 是 sillyspec 工作区——都不该作为 spec 数据入包/回灌。
+  excludeTop.add('runtime');
+  const pruneNames = new Set(['worktrees']);
   const chunks: Buffer[] = [];
-  // 传 excludeTop 给 walkDir 剪枝（不递归进排除目录）。仅在循环里 filter 只省 tar 写入、
-  // 不省遍历——.runtime(2G worktrees)/changes(万级文件) 仍会被 stat 一遍，打包照样 16s+。
-  // ql-003。postSpecSync 不传 exclude → walkDir 不剪枝，保持含 .runtime 回灌。
-  const entries = await walkDir(specDir, excludeTop);
+  // excludeTop(顶层首段) + pruneNames(任意深度 basename) 传 walkDir 剪枝：命中目录不收集、
+  // 不递归，既省 tar 写入也省遍历（.runtime 2G worktrees / changes 万级文件 不递归进去）。
+  const entries = await walkDir(specDir, excludeTop, pruneNames);
   for (const e of entries) {
-    // task-06：.runtime 段不再排除（design §5.2 D-003 push 路径），含 sillyspec.db 回灌。
-    const header = await buildTarHeader(
-      e.relPath + (e.isDir ? '/' : ''),
-      e.isDir ? 0 : e.size,
-      e.isDir,
-    );
+    const entryName = e.relPath + (e.isDir ? '/' : '');
+    // ql-20260813-004：name 超 ustar 100 字节 → 先写 GNU LongLink 扩展头（Python tarfile
+    // r:* / GNU tar / bsdtar 均支持读取），否则 name 被 header.write 静默截断。
+    if (Buffer.byteLength(entryName, 'utf-8') > 100) {
+      chunks.push(...(await buildLongLinkHeader(entryName)));
+    }
+    const header = await buildTarHeader(entryName, e.isDir ? 0 : e.size, e.isDir);
     chunks.push(header);
     if (!e.isDir) {
       const data = await readFile(e.absPath);
@@ -536,7 +543,11 @@ interface WalkEntry {
  * 递归遍历目录，收集所有 entry（含目录本身与子目录），相对路径用 POSIX 分隔符 `/`
  *（tar 标准是 forward slash；Windows 下 join 用 `\`，但 tar entry name 必须是 `/`）。
  */
-async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[]> {
+async function walkDir(
+  root: string,
+  pruneTop?: Set<string>,
+  pruneNames?: Set<string>,
+): Promise<WalkEntry[]> {
   const out: WalkEntry[] = [];
   async function recurse(dir: string): Promise<void> {
     let names: string[];
@@ -558,6 +569,12 @@ async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[
       // .runtime/worktrees(2G) + changes(万级文件) 拖慢 import 打包。
       const topName = relToRoot.split('/')[0] ?? '';
       if (pruneTop && pruneTop.has(topName)) {
+        continue;
+      }
+      // ql-20260813-004：任意深度剪枝——按 basename 匹配，命中即不收集/不递归。用于 worktrees
+      //（sillyspec worktree 工作区，可嵌在 .runtime/worktrees 等任意层，可达 GB，非 spec 数据）。
+      // 与 pruneTop（只看路径首段）互补。
+      if (pruneNames && pruneNames.has(name)) {
         continue;
       }
       if (st.isDirectory()) {
@@ -623,6 +640,50 @@ async function buildTarHeader(name: string, size: number, isDir: boolean): Promi
   header.write(sum.toString(8).padStart(6, '0') + '\0 ', 148, 'ascii');
 
   return header;
+}
+
+/**
+ * 构造 GNU LongLink 扩展头（ql-20260813-004）。
+ *
+ * ustar name 字段仅 100 字节，超长文件名会被 `header.write(name, 0, 'utf-8')` 静默截断
+ * （曾致后端 `_write_spec_root` read_bytes FileNotFoundError → HTTP 500）。GNU 扩展：
+ * name > 100 字节时，先写一个 typeflag='L' 的 header，其 data 块是完整长名（NUL 结尾），
+ * 紧跟正常的 entry header（name 字段填占位）。读取方（Python tarfile r:* / GNU tar /
+ * bsdtar）遇 'L' 头会用其 data 覆盖下一个 entry 的 name，恢复完整路径。
+ *
+ * 返回 `[longLinkHeader, longLinkData]`（data 已按 512 对齐补零）。调用方紧接着写正常 header。
+ */
+async function buildLongLinkHeader(name: string): Promise<Buffer[]> {
+  const nameBytes = Buffer.from(name, 'utf-8');
+  // data = name + NUL 终止符，按 512 对齐补零。
+  const dataSize = nameBytes.length + 1;
+  const paddedSize = Math.ceil(dataSize / 512) * 512;
+  const header = Buffer.alloc(512, 0);
+  // GNU 惯例占位 name '././@LongLink'（≤100 字节，真正名字在 data 块）。
+  header.write('././@LongLink', 0, 'ascii');
+  header.write('0000000', 100, 'ascii'); // mode
+  header[107] = 0;
+  header.write('0000000', 108, 'ascii'); // uid
+  header[115] = 0;
+  header.write('0000000', 116, 'ascii'); // gid
+  header[123] = 0;
+  header.write(dataSize.toString(8).padStart(11, '0'), 124, 'ascii'); // size
+  header[135] = 0;
+  header.write('00000000000', 136, 'ascii'); // mtime
+  header[147] = 0;
+  header.write('        ', 148, 'ascii'); // chksum 占位（8 空格）
+  header[156] = 0x4c; // typeflag 'L' = GNU LongLink
+  // linkname (157-256) 全 0
+  header.write('ustar', 257, 'ascii'); // magic
+  header[262] = 0;
+  header.write('00', 263, 'ascii'); // version
+  // checksum：unsigned byte sum of all 512 bytes（chksum 字段视为 8 个空格 = 0x20*8）。
+  let sum = 0;
+  for (let i = 0; i < 512; i++) sum += header[i] ?? 0;
+  header.write(sum.toString(8).padStart(6, '0') + '\0 ', 148, 'ascii');
+  const data = Buffer.alloc(paddedSize, 0);
+  nameBytes.copy(data); // data[nameBytes.length] 已是 0（NUL 终止符）
+  return [header, data];
 }
 
 /**

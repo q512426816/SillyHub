@@ -16,7 +16,7 @@ spec bundle 双向同步 utility（`src/spec-sync.ts`，task-04 / D-007@v1）。
 - `PullSpecBundleOptions`（existingSpecRoot）。
 - `pullSpecBundle(client, wsId, opts): Promise<string | null>` ——拉 bundle 解包，返回 specDir 路径或 null（跳过）。
 - `postSpecSync(client, wsId, specRoot): Promise<{ok, reparsed} | null>` ——打包整树 POST 回传。
-- `packSpecDir(specDir): Promise<Buffer>` ——本地 spec 整树打 tar（排除 .runtime 段）。
+- `packSpecDir(specDir, opts?): Promise<Buffer>` ——本地 spec 整树打 tar。默认排除运行时产物 `runtime/`（无点，daemon scan-runs 日志）+ `worktrees`（任意深度）；`.runtime/`（**有点**，含 sillyspec.db）保留（D-003 push 契约）。opts 可选 `{excludeRuntime?, excludeNames?}`（import 路径加排整个 `.runtime`）。name > 100 字节时写 GNU LongLink 扩展头（`buildLongLinkHeader`，typeflag 'L'）。
 
 ## 关键逻辑
 ```
@@ -28,6 +28,8 @@ pullSpecBundle:
   rm -rf specDir（Windows EBUSY 降级忽略）→ extractTar(tarBuf, specDir)
 postSpecSync: packSpecDir → client.postSpecSync
 packSpecDir: walkDir → 逐 entry buildTarHeader(512B ustar) + 数据 + 512 对齐 → 2×512 zero 结尾
+  - 默认剪枝：顶层 `runtime/`(无点 scan-runs 日志) + 任意深度 `worktrees`（非 spec 数据）；`.runtime`(有点) 保留
+  - name > 100 字节：先写 GNU LongLink('L' 头 + 长名 data)，再写正常 header（Python tarfile r:* 原生读）
 extractTar: 512B 步进解析 ustar；路径穿越双重防护（name 含 .. / 绝对路径 / join 后 rel 不以 .. 开头则抛）
 ```
 walkDir 相对路径用 POSIX `/`（tar 标准）；symlink 跳过（不收集）。
@@ -39,6 +41,7 @@ walkDir 相对路径用 POSIX `/`（tar 标准）；symlink 跳过（不收集�
 - extractTar 仅支持 regular file（typeflag '0'/'\0'）+ directory（'5'）；symlink/hardlink 跳过 + warn。
 - buildTarHeader checksum 按 unsigned byte sum 计算（checksum 字段视为 8 个空格），写 6 位 octal + NUL + 空格。
 - 404 容错用 duck-type `isHubHttp404`（status===404），不硬依赖 hub-client.ts 导出，规避 HubHttpError 改名风险。
+- **ql-20260813-004**：push 默认排除 `runtime/`(无点)+`worktrees`，保留 `.runtime`(有点)。历史坑：曾含 `runtime/scan-runs/<uuid>/<长change名>-brainstorm-stepNN-<ts>.txt`，name 超 100 字节被 buildTarHeader 静默截断 → 后端 `_write_spec_root` read_bytes FileNotFoundError → HTTP 500（daemon 记 change_write_execute_failed）。根治=LongLink 长名 + 排除 runtime(无点) 双管齐下。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->

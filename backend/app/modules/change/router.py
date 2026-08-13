@@ -130,8 +130,9 @@ async def list_changes(
     # task-02（2026-08-13-change-center-rework / D-004 / FR-02 / FR-04）：排序白名单
     # 透传 service.list_（默认 updated_at desc，最近活动优先，R-05）。
     sort: str = Query("updated_at_desc"),
-    # task-02（FR-02 / D-002）：「待我处理」聚焦筛选。pending_review 是 enrich 后的计算
-    # 字段（非 SQL 列），无法在 list_ 的 SQL 层 WHERE，故在此 enrich 之后 Python 层 filter。
+    # task-02（FR-02 / D-002）：「待我处理」聚焦筛选。ql-20260813-005（gap②）：
+    # 透传 service.list_，由 service 算全局 pending 集合 SQL IN 分页（total=全局 N），
+    # 不再 router 层 enrich 后 Python filter（后者本页过滤致 N 偏低、分页偏移）。
     pending_review_only: bool = Query(False),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
@@ -145,16 +146,11 @@ async def list_changes(
         search=search,
         current_stage=current_stage,
         sort=sort,
+        pending_review_only=pending_review_only,
         page=page,
         page_size=page_size,
     )
     enriched = await service.enrich_summaries(items)
-    # pending_review_only：enrich 后 Python 层过滤（pending_review 非 SQL 列，无法 WHERE）。
-    # total = 过滤后数量（贴合「待我处理(N)」语义）。分页简化：SQL 先取 page_size 条再
-    # enrich/filter，过滤后可能 < page_size（design §9 未严格定分页精度，合理简化）。
-    if pending_review_only:
-        enriched = [s for s in enriched if s.pending_review is not None]
-        total = len(enriched)
     return ChangeList(items=enriched, total=total)
 
 

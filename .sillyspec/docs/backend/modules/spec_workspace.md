@@ -43,6 +43,7 @@ bootstrap(workspace_id, user_id):
 - AgentRunLog 分段写入（4000 字符/段，硬编码）防 DB 列溢出；`on_log` 回调每条立即 commit 保证 SSE 回放
 - SpecConflict 模型定义在 spec_profile 模块，本模块只提供 CRUD 端点（resolve 直接在 router 操作 session）
 - SpecValidator 检查 `.sillyspec/projects/` 目录、YAML 可解析 + 最小 schema、relations.target 引用存在
+- **ql-20260813-004**：`_write_spec_root` per-file merge 的 `read_bytes` 遇 staging 成员缺失（tar name 被旧打包方截断等）→ 跳过 + warn 不崩（纵深防御；daemon 侧 LongLink + 排除 runtime(无点) 已根治）
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->

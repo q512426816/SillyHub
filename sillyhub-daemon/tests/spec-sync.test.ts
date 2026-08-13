@@ -136,3 +136,93 @@ describe('packSpecDir (task-06 / D-003@v1 push 含 .runtime)', () => {
     expect(names.some((n) => n === 'changes' || n.startsWith('changes/'))).toBe(false);
   });
 });
+
+// ql-20260813-004：sync 回灌 HTTP 500 修复——长文件名（GNU LongLink）+ 运行时产物排除。
+describe('packSpecDir (ql-20260813-004 长文件名 + 运行时产物排除)', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'spec-sync-ql004-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // 解析手工 ustar tar，支持 GNU LongLink（typeflag 'L'）：遇 'L' 头用其 data 块覆盖下一个
+  // entry 的 name。对齐 Python tarfile r:* 的 GNU longname 读取语义。
+  function parseTarNamesLong(buf: Buffer): string[] {
+    const names: string[] = [];
+    let pendingLongName: string | null = null;
+    let offset = 0;
+    while (offset + 512 <= buf.length) {
+      const header = buf.subarray(offset, offset + 512);
+      if (header.every((b) => b === 0)) break; // 结尾 zero block
+      const typeflag = header[156];
+      const sizeOctal = header.subarray(124, 136).toString('utf-8').replace(/\0.*$/, '').trim();
+      const size = sizeOctal ? parseInt(sizeOctal, 8) : 0;
+      const dataBlocks = Math.ceil(size / 512) * 512;
+      if (typeflag === 0x4c /* 'L' GNU LongLink */) {
+        pendingLongName = buf
+          .subarray(offset + 512, offset + 512 + size)
+          .toString('utf-8')
+          .replace(/\0.*$/, '');
+      } else {
+        const rawName = header.subarray(0, 100).toString('utf-8').replace(/\0.*$/, '').trim();
+        const name = (pendingLongName ?? rawName).replace(/\/$/, '');
+        if (name) names.push(name);
+        pendingLongName = null;
+      }
+      offset += 512 + dataBlocks;
+    }
+    return names;
+  }
+
+  it('name > 100 字节 → 写 GNU LongLink，解析回完整长名（B：修 tar 截断崩溃）', async () => {
+    await mkdir(join(dir, 'changes'), { recursive: true });
+    // 构造 >100 字节相对路径，模拟 scan-runs 崩溃场景（change 名 + brainstorm-step + 时间戳）。
+    const longDir = 'a-really-long-change-name-2026-06-28-daemon-client-spec-sync-strategy';
+    const longFile = 'brainstorm-step10-20260627201119-extra-padding-suffix.md';
+    await mkdir(join(dir, 'changes', longDir), { recursive: true });
+    await writeFile(join(dir, 'changes', longDir, longFile), '# long');
+    const relName = `changes/${longDir}/${longFile}`;
+    expect(Buffer.byteLength(relName, 'utf-8')).toBeGreaterThan(100);
+
+    const tarBuf = await packSpecDir(dir);
+    const names = parseTarNamesLong(tarBuf);
+
+    // 完整长名出现在 tar（未被 100 字节静默截断）。
+    expect(names).toContain(relName);
+  });
+
+  it('默认排除 runtime/（无点，daemon scan-runs 崩溃源，W）', async () => {
+    await mkdir(join(dir, 'docs'), { recursive: true });
+    await writeFile(join(dir, 'docs', 'a.md'), 'a');
+    await mkdir(join(dir, 'runtime', 'scan-runs'), { recursive: true });
+    await writeFile(join(dir, 'runtime', 'scan-runs', 'log.txt'), 'runtime-junk');
+
+    const tarBuf = await packSpecDir(dir);
+    const names = parseTarNames(tarBuf);
+
+    // spec 数据保留，runtime/(无点) 整树排除。
+    expect(names).toContain('docs/a.md');
+    expect(names.some((n) => n === 'runtime' || n.startsWith('runtime/'))).toBe(false);
+  });
+
+  it('默认排除 worktrees（任意深度，保留 .runtime 其余内容，W + D-003）', async () => {
+    await mkdir(join(dir, 'docs'), { recursive: true });
+    await writeFile(join(dir, 'docs', 'a.md'), 'a');
+    // worktrees 嵌在 .runtime（有点）下，模拟 sillyspec worktree 位置。
+    await mkdir(join(dir, '.runtime', 'worktrees', 'wt-1'), { recursive: true });
+    await writeFile(join(dir, '.runtime', 'worktrees', 'wt-1', 'f.txt'), 'x');
+    // .runtime（有点）其他内容仍保留（D-003 push 含 .runtime）。
+    await writeFile(join(dir, '.runtime', 'sillyspec.db'), 'sqlite');
+
+    const tarBuf = await packSpecDir(dir);
+    const names = parseTarNames(tarBuf);
+
+    expect(names).toContain('docs/a.md');
+    expect(names).toContain('.runtime/sillyspec.db');
+    expect(names.some((n) => n.includes('worktrees'))).toBe(false);
+  });
+});

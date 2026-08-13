@@ -37,6 +37,23 @@ def _make_tar(entries: dict[str, bytes | str]) -> bytes:
     return buf.getvalue()
 
 
+def _make_long_name_tar(entries: dict[str, bytes | str]) -> bytes:
+    """Build a tar whose arcnames can exceed 100 bytes via GNU LongLink (ql-20260813-004 B).
+
+    Python ``tarfile`` in ``GNU_FORMAT`` emits a ``'L'`` LongLink header for names > 100
+    bytes — the same format daemon ``buildLongLinkHeader`` produces. Used to verify the
+    backend unpacks long names without the 500 that truncated names caused.
+    """
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w", format=tarfile.GNU_FORMAT) as tar:
+        for arcname, content in entries.items():
+            data = content.encode("utf-8") if isinstance(content, str) else content
+            info = tarfile.TarInfo(name=arcname)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
+
+
 async def _make_spec_ws(tmp_path: Path, db_session) -> tuple[uuid.UUID, Path]:
     """Create a spec_workspace whose spec_root points at ``tmp_path``."""
     svc = SpecWorkspaceService(db_session)
@@ -202,3 +219,50 @@ async def test_build_bundle_excludes_runtime(tmp_path, db_session):
     # Spec data present, .runtime (top-level + nested) excluded.
     assert any(m == "docs/index.md" for m in members)
     assert not any(".runtime" in m for m in members)
+
+
+@pytest.mark.asyncio
+async def test_apply_sync_long_name_via_gnu_longlink(tmp_path, db_session):
+    """A member whose name > 100 bytes (packed via GNU LongLink, same format daemon
+    ``buildLongLinkHeader`` emits) unpacks correctly instead of raising 500
+    (ql-20260813-004 B)."""
+    workspace_id, spec_root = await _make_spec_ws(tmp_path, db_session)
+    long_name = "changes/" + "a" * 90 + "/task.md"  # > 100 bytes total
+    tar_bytes = _make_long_name_tar({long_name: "# long"})
+
+    svc = SpecWorkspaceService(db_session)
+    reparsed = await svc.apply_sync(workspace_id, tar_bytes)
+
+    assert reparsed["reparsed_docs"] == 1
+    assert (spec_root / long_name).read_text(encoding="utf-8") == "# long"
+
+
+@pytest.mark.asyncio
+async def test_apply_sync_skips_member_missing_in_staging(tmp_path, db_session, monkeypatch):
+    """A tar member whose staging file is unreadable (old packer truncated name / race)
+    is skipped with a warning instead of raising 500 (ql-20260813-004 C defense-in-depth)."""
+    workspace_id, spec_root = await _make_spec_ws(tmp_path, db_session)
+    tar_bytes = _make_tar(
+        {
+            "docs/keep.md": "keep",
+            "docs/ghost.md": "ghost",  # simulate this member missing from staging
+        }
+    )
+
+    orig_read_bytes = Path.read_bytes
+
+    def fake_read_bytes(self):
+        if self.name == "ghost.md":
+            raise FileNotFoundError(2, "no such file", str(self))
+        return orig_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", fake_read_bytes)
+
+    svc = SpecWorkspaceService(db_session)
+    reparsed = await svc.apply_sync(workspace_id, tar_bytes)
+
+    # No 500; sync completes.
+    assert reparsed["reparsed_docs"] == 1
+    # keep.md landed; ghost.md skipped.
+    assert (spec_root / "docs" / "keep.md").read_text(encoding="utf-8") == "keep"
+    assert not (spec_root / "docs" / "ghost.md").exists()

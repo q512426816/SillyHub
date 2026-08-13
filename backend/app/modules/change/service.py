@@ -107,6 +107,7 @@ class ChangeService:
         search: str | None = None,
         current_stage: str | None = None,
         sort: str = "updated_at_desc",
+        pending_review_only: bool = False,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[Change], int]:
@@ -120,8 +121,22 @@ class ChangeService:
         SQLAlchemy 列表达式，**不直接拼接 SQL 字符串**（防注入）。默认
         ``updated_at_desc``（最近活动优先，取代旧 change_key asc，R-05 有意行为变化）；
         未知值 fallback 默认（不抛）。
+
+        ``pending_review_only``（ql-20260813-005 / gap②）：True 时先算全局 pending
+        change_key 集合再 SQL ``WHERE change_key IN`` 分页，``total``=全局真实 N
+        （非本页过滤后数）。pending_review 是计算字段（latest_progress + _map），
+        SQL 无法直接 WHERE，故走「复用 _map 算集合 → SQL IN」两阶段（跨库稳定，
+        不翻译 _map 到 JSON 展开语法）。
         """
         await self._workspace_service.get(workspace_id)
+
+        # 方案B（ql-20260813-005 / gap②）：先算全局 pending 集合（复用 _map），
+        # 再叠加 SQL WHERE IN。total 在 IN 过滤后计数 = 全局真实 N。
+        pending_keys: set[str] | None = None
+        if pending_review_only:
+            pending_keys = await self._resolve_pending_change_keys(workspace_id, location)
+            if not pending_keys:
+                return [], 0
 
         # Base: changes whose primary workspace matches（D-005@V1，M:N 投影表已废，
         # 一个变更只属单一项目组 workspace）。
@@ -147,6 +162,8 @@ class ChangeService:
                     col(Change.title).ilike(pattern),
                 )
             )
+        if pending_keys is not None:
+            base = base.where(col(Change.change_key).in_(pending_keys))
 
         # Count total
         count_stmt = select(func.count()).select_from(base.subquery())
@@ -1275,6 +1292,33 @@ class ChangeService:
                 summary.pending_review = StageProjectionService._map(stage, completed)
             summaries.append(summary)
         return summaries
+
+    async def _resolve_pending_change_keys(
+        self, workspace_id: uuid.UUID, location: str | None
+    ) -> set[str]:
+        """算 pending_review 非空的 change_key 集合（ql-20260813-005 / gap②）。
+
+        查 workspace（+location）全部 change_key → ``_project_current_stage`` 批量取
+        latest_progress → ``StageProjectionService._map`` 算 pending_review 非空集合。
+        复用 ``_map``（不翻译 SQL、不碰 JSON 数组展开语法），跨库稳定（PG/SQLite 均可）。
+        返回全局真实待处理集合；空集合由调用方 ``list_`` 短路 ``([], 0)``。
+        """
+        stmt = select(Change.change_key).where(col(Change.workspace_id) == workspace_id)
+        if location:
+            stmt = stmt.where(col(Change.location) == location)
+        keys = list((await self._session.execute(stmt)).scalars().all())
+        if not keys:
+            return set()
+        projected = await self._project_current_stage([(workspace_id, k) for k in keys])
+        pending: set[str] = set()
+        for k in keys:
+            info = projected.get((workspace_id, k))
+            if info is None:
+                continue
+            stage, completed = info
+            if StageProjectionService._map(stage, completed) is not None:
+                pending.add(k)
+        return pending
 
     async def _project_current_stage(
         self, pairs: list[tuple[uuid.UUID, str]]

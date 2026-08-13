@@ -59,3 +59,37 @@
 根因：xdist 默认 load 分发(按测试 round-robin)致跨文件状态污染,task/change/runtime/workspace 的 spec reparse 间歇 created=0 → fixture next() StopIteration/文件列表空;残留 task 间歇=Windows Defender 瞬时锁 copytree 新文件致首扫 parsed=0。
 方案：①pyproject addopts 加 -o dist=loadscope(按模块/类分组,消除跨模块污染,9→0~2);②task workspace_with_tasks fixture 加一次 reparse retry(锁瞬时重扫恢复,治残留 0~2)。
 结果：连续两次全量 3868 passed 0 failed 0 error 稳定,无 -n 不报错。
+
+## ql-20260813-003-f61b | 2026-08-13 11:07:12 | 修复 daemon /daemon/install.ps1 分发给 PowerShell irm 管道 iex 时中文乱码
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/dist_router.py（install.ps1 media_type 加 charset=utf-8 + 注释说明 starlette 非 text/* 不自动补 + docstring 同步）
+- backend/tests/test_daemon_dist.py（test_install_ps1 断言增强精确等于 application/x-powershell charset=utf-8 回归锚点）
+- backend/openapi.json（gen:types 同步 install.ps1 description）
+- frontend/src/lib/api-types.ts（gen:types 同步注释）
+- .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md（加 install.ps1 charset 契约约定 + 变更索引 ql-20260813-003-f61b）
+需求：修复 daemon /daemon/install.ps1 分发给 PowerShell irm 管道 iex 时中文乱码。
+根因：dist_router.py 的 install.ps1 端点 Response media_type=application/x-powershell 非 text/* ，starlette 不自动补 charset，PowerShell irm 按 latin1 解码 UTF-8 body 致脚本中文执行前损坏成 mojibake；对照 install.sh（text/x-shellscript 自动补 charset）不乱码，install.ps1 源码第36-38行已设控制台UTF8 反证问题在响应读取层非显示层。
+方案：media_type 改 application/x-powershell 显式加 charset=utf-8 + docstring 同步 + test_daemon_dist 精确断言回归锚点 + gen:types 同步 openapi/api-types + daemon 模块文档加 charset 契约约定与变更索引。
+结果：test_daemon_dist 9 passed（含新精确断言）+ daemon 模块全量 803 passed + gen:types diff 干净仅 install.ps1 description 变化。
+
+## ql-20260813-004-a004 | 2026-08-13 14:02:17 | 修 daemon 同步到服务器（kind=spec-sync 回灌）HTTP 500 崩溃
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/spec-sync.ts（buildTarHeader 支持 >100 字节 name(GNU LongLink)；packSpecDir 默认排除 runtime(无点)+worktrees，保留 .runtime）
+- sillyhub-daemon/tests/spec-sync.test.ts（新增长名 round-trip/排除 runtime/排除 worktrees 3 用例）
+- backend/app/modules/spec_workspace/service.py（_write_spec_root read_bytes 跳过缺失成员纵深防御）
+- backend/tests/modules/spec_workspace/test_apply_sync.py（新增 LongLink 长名/缺失成员跳过 2 用例）
+- .sillyspec/docs/sillyhub-daemon/modules/spec-sync.md（同步 packSpecDir 排除行为 + LongLink 契约）
+- .sillyspec/docs/backend/modules/spec_workspace.md（补 read_bytes 纵深防御备注）
+需求：修 daemon 同步到服务器（kind=spec-sync 回灌）HTTP 500 崩溃。
+根因：postSpecSync 打包 runtime/(无点, scan-runs 超长文件名) 触发手工 ustar 100 字节 name 截断 → 后端 _write_spec_root read_bytes FileNotFoundError → 500。
+方案：B 修 buildTarHeader 支持 >100 字节 name（GNU LongLink typeflag='L'）+ W packSpecDir 默认排除 runtime(无点)+worktrees(任意深度) 保留 .runtime(有点, D-003 守护) + C 后端 read_bytes 跳过缺失成员纵深防御。
+结果：daemon spec-sync.test 11 passed + tsc 通过；backend test_apply_sync 7 passed + ruff 通过；模块文档已同步。
+
+## ql-20260813-005-5f20 | 2026-08-13 14:08:14 | 修复 2026-08-13-change-center-rework verify-result gap②:pending_review_only 分页精度。现状 router 层 enrich 后 Python filter + tota…
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）
