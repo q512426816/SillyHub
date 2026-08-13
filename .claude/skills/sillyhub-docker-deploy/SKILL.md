@@ -205,6 +205,8 @@ CLAUDE_SKIP_DANGEROUS_MODE_PERMISSION_PROMPT=true
    export NEXT_PUBLIC_COMMIT_SHA="$COMMIT_SHA"
    ```
 
+   > ⚠️ **本机（Windows）重新部署建议跳过此步，不要 `export COMMIT_SHA`。** 实测（Docker 29 / Compose v5，Windows，清华 Debian trixie 镜像）：一旦 `COMMIT_SHA` 非空，backend runtime stage 的 `apt-get` 层会因 `ARG` 变化 cache-miss 重跑，撞清华 trixie 镜像抖动 → 构建 `exit 100` 失败。不导出（默认空）则 apt 层缓存命中跳过，构建稳定，代价仅是 `commit_sha=unknown`。**本地迭代优先稳定，接受 `unknown`**；确需真实 SHA 时，改为绕开 apt 层（固定离线 trixie 镜像，或分步只 COPY 代码层重建），不要直接 `export COMMIT_SHA` 触发全量重建。
+
 然后启动（同一 shell）：
 
 ```bash
@@ -320,7 +322,7 @@ curl -fsS http://127.0.0.1:8001/daemon/install.sh | bash -n && echo SYNTAX_OK
 
 - `latest.json` 应为 `{"version":"...","downloadUrl":"/daemon/latest/sillyhub-daemon.js"}`
 - `sillyhub-daemon.js` 应返回 `200` + `application/javascript`
-- `commit_sha` 为 `unknown` → 启动前未 `export COMMIT_SHA`（见「启动」节）
+- `commit_sha` 为 `unknown` → 启动前未 `export COMMIT_SHA`（见「启动」节）。**注意：本机（Windows）按上文豁免故意不传，`unknown` 是稳定性权衡的预期结果，非缺陷。**
 - 任一 `/daemon/*` 返回 `404` → daemon bundle 没构建进镜像，回「启动」节先 `pnpm bundle` 再 `--build --force-recreate` 重建 backend
 
 验证 Docker 内 Claude Code settings，输出时必须遮蔽 token：
