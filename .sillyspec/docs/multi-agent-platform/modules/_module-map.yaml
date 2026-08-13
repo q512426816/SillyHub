@@ -21,13 +21,14 @@ modules:
     aliases: [api-server, 后端, server]
     entrypoints:
       - uvicorn app.main:app (backend/app/main.py)
-      - /api/* routers (workspace / members / auth / health / qc / runtimes / sessions)
+      - /api/* routers (workspace / members / auth / health / qc / runtimes / sessions / spec-workspace / scan-docs / change / daemon / platform-sync)
     main_symbols:
       - app (FastAPI)
       - workspace_router
       - members_router
       - auth_router
       - health_router
+      - spec_workspace_router (含 sync-incremental 增量端点 + apply_ops 软删备份)
     depends_on: []
     used_by: [frontend, sillyhub-daemon, deploy, ci, build]
     needs_review: false
@@ -75,6 +76,8 @@ modules:
       - writePid
       - removePid
       - writeLocalYaml (src/local-yaml-writer.ts，2026-08-12 init 下发 local.yaml 用)
+      - postSpecSync (src/spec-sync.ts，2026-08-13 增量 diff：本地清单缓存+旧 tar 回退+conflict 抛错)
+      - postSpecSyncIncremental (src/hub-client.ts，2026-08-13 增量推送 JSON POST 客户端)
     depends_on: [backend]
     used_by: [deploy]
     needs_review: false
