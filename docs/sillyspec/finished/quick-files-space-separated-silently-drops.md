@@ -1,6 +1,8 @@
 # 活跃坑：sillyspec quick `--files` 多文件必须逗号分隔（单参数），空格分隔 CLI 只取首个
 
-> 状态：**活跃（待工具修复 / 文档补强）** · 发现于 2026-08-11 · quick `quick-c5dcc01a`（前端 locale 批量修复，19 文件）
+> 状态：**已解决**（sillyspec commit `84ab6af` fail-loud 检测，2026-08-13）· 发现于 2026-08-11 · quick `quick-c5dcc01a`（前端 locale 批量修复，19 文件）
+>
+> **修复**：`src/run/command.js` 抽 `detectSpaceSeparatedFiles` 纯函数，`--files` 值后跟连续非 flag token（空格分隔多文件）时 fail-loud 退码 2 + stderr 给逗号修正建议，杜绝静默丢弃（选项 2：检测报错而非贪婪收集，不改 VALUE_FLAGS 单值框架）。补 test/quick-files-space-separator.test.mjs 17 断言。
 
 ## 现象
 
