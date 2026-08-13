@@ -1,28 +1,26 @@
 // tests/d004-no-taskkill-source-gate.test.ts
 // task-15 验收项 (3) / decisions D-004：硬门禁 —— sillyhub-daemon/src 源码不得出现
-// 任何 ``taskkill`` 调用（含 ``taskkill /IM`` 通杀，CONVENTIONS 已知陷阱：会杀掉
-// 当前会话自身）。Windows 下进程清理一律交给 SDK ``query.close()``（win32 走
-// stdin.end → 5s 后 TerminateProcess；非 win32 走 SIGTERM → SIGKILL），daemon 不自建
-// kill 逻辑（D-003 / D-004）。
+// ``taskkill /IM`` 通杀调用（CONVENTIONS 已知陷阱：会杀掉当前会话自身）。Windows 下
+// 常规进程清理交给 SDK ``query.close()``（win32 走 stdin.end → 5s 后 TerminateProcess；
+// 非 win32 走 SIGTERM → SIGKILL），daemon 不自建 kill 逻辑（D-003 / D-004）。
+//
+// **门禁粒度（ql-20260813-006 修订）**：D-004 真禁令是「/IM image-name 通配杀」，
+// 因为它按进程名匹配会误杀当前 daemon 会话自身。``/PID`` 定点杀（含 ``/T`` 杀进程树）
+// 按 PID 精确命中、不会误伤会话——preflight.runWithTreeKill（ql-20260812-007）即用
+// ``spawn('taskkill', ['/PID', pid, '/T', '/F'])`` 修 Windows preflight 卡死，属合法定点
+// 清理。故本门禁从「可执行代码 0 次 taskkill」放宽为「可执行代码 0 次 ``/IM`` taskkill」，
+// ``/PID`` 定点调用放行（透明 surface 计数），注释中文档化提及照常不计。
 //
 // 本文件为「源码静态扫描」断言（跨平台，纯 fs 读取 + TypeScript 词法分析，无 subprocess）：
 //   1. 递归扫描 ``sillyhub-daemon/src/**/*.ts``；
 //   2. 用 TypeScript 官方 Scanner 把每个文件的注释区间（行注释 ``//`` + 块注释
-//      ``/* */`` + JSDoc）权威地标出来——TS 词法器正确区分正则字面量 / 字符串 / 注释，
-//      不会像手写 strip 那样被正则里的 ``"'`` / ``//`` 字符误导；
-//   3. 断言每个 ``taskkill`` 命中位置都落在注释区间内（即「可执行代码中 0 次 taskkill」）。
-//
-// 决策说明（task-15 约束「comment 合法提及要 surface」）：源码里允许在**注释**中
-// 出现 ``taskkill`` 字样用于文档化禁令本身（如 claude-sdk-driver.ts 的 close 注释
-// 「daemon 不自己 taskkill」「禁止 taskkill /IM 通杀」）。这些是 D-004 的现场说明，
-// 删除会丢失关键上下文。故本测试断言「所有 taskkill 命中均在注释内」而非「裸文本
-// 零命中」——既守住硬门禁（无任何可执行 taskkill 调用 / 命令字符串），又保留禁令
-// 文档。所有裸命中（含注释）在下方 ``rawHits`` 汇总打印，透明可见、可审。
+//      ``/* */`` + JSDoc）权威地标出来——TS 词法器正确区分正则字面量 / 字符串 / 注释；
+//   3. 对每个非注释 ``taskkill`` 命中，按 ``/IM`` vs ``/PID`` 分类：``/IM`` → 违规，
+//      ``/PID`` → 放行（定点），无明确 flag → 违规（无法确认定点）。
 //
 // 与 task-15 其它测试分工：
-//   - claude-sdk-driver-mcp-kill-cleanup.test.ts：mock 验证 close→query.close 钩子在
-//     mcpServers 注入场景仍接线（验收项 1/2 的 hook 证据）。
-//   - 本文件：静态守「daemon 代码无自建 taskkill」（验收项 3 的硬门禁）。
+//   - claude-sdk-driver-mcp-kill-cleanup.test.ts：mock 验证 close→query.close 钩子。
+//   - 本文件：静态守「daemon 代码无 taskkill /IM 通杀」（验收项 3 的硬门禁）。
 
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -113,6 +111,20 @@ interface Hit {
   col: number;
   text: string;
   inComment: boolean;
+  /** ql-20260813-006：定点 /PID（放行） vs 通杀 /IM（违规） vs 无 flag（违规：无法确认定点）。 */
+  kind: 'pid' | 'im' | 'unflagged';
+}
+
+/**
+ * ql-20260813-006：判定一次非注释 taskkill 命中是定点（/PID，放行）还是通杀
+ *（/IM，违规）。看命中所在行 + 后续 1 行是否含 ``/PID`` 或 ``/IM`` flag
+ *（``spawn('taskkill', ['/PID', pid, '/T', '/F'])`` 跨参数，需往后看一行兜底）。
+ */
+function classifyTaskkill(text: string, nextLine: string): 'pid' | 'im' | 'unflagged' {
+  const look = `${text}\n${nextLine}`;
+  if (/\/PID\b/i.test(look)) return 'pid';
+  if (/\/IM\b/i.test(look)) return 'im';
+  return 'unflagged';
 }
 
 /** 找出 content 里所有 ``taskkill``（大小写不敏感）命中的位置。 */
@@ -145,7 +157,7 @@ function offsetToLineCol(content: string, offset: number): { line: number; col: 
   return { line, col, text };
 }
 
-describe('task-15 / D-004 硬门禁：sillyhub-daemon/src 无 taskkill 调用', () => {
+describe('task-15 / D-004 硬门禁：sillyhub-daemon/src 无 taskkill /IM 通杀', () => {
   const tsFiles = listTsFiles(SRC_ROOT);
 
   it('扫描覆盖到 src 目录（非空，防止扫描路径漂移让门禁空转）', () => {
@@ -154,9 +166,9 @@ describe('task-15 / D-004 硬门禁：sillyhub-daemon/src 无 taskkill 调用', 
     expect(tsFiles, 'claude-sdk-driver.ts 必在扫描集').toContain(driverAbs);
   });
 
-  it('所有 taskkill 命中均落在注释区间内（可执行代码中 0 次 taskkill —— D-004 硬门禁）', () => {
+  it('非注释 taskkill 调用均为 /PID 定点（0 次 /IM 通杀 —— D-004 硬门禁，ql-20260813-006 放行 /PID）', () => {
     const allHits: Hit[] = [];
-    const codeHits: Hit[] = [];
+    const imViolations: Hit[] = []; // /IM 通杀 = 真违规
 
     for (const abs of tsFiles) {
       const rel = relative(SRC_ROOT, abs).split(sep).join('/');
@@ -166,51 +178,73 @@ describe('task-15 / D-004 硬门禁：sillyhub-daemon/src 无 taskkill 调用', 
       for (const off of offsets) {
         const lc = offsetToLineCol(content, off);
         const inComment = isInsideComment(off, commentRanges);
-        const hit: Hit = { file: rel, line: lc.line, col: lc.col, text: lc.text, inComment };
+        let kind: Hit['kind'] = 'pid';
+        if (!inComment) {
+          // 看命中行 + 下一行判 /PID vs /IM（spawn 跨参数兜底看下一行）
+          const nlStart = content.indexOf('\n', off) + 1;
+          const nlEnd = content.indexOf('\n', nlStart);
+          const nextLine = content.slice(nlStart, nlEnd === -1 ? content.length : nlEnd);
+          kind = classifyTaskkill(lc.text, nextLine);
+        }
+        const hit: Hit = { file: rel, line: lc.line, col: lc.col, text: lc.text, inComment, kind };
         allHits.push(hit);
-        if (!inComment) codeHits.push(hit);
+        // 违规 = 非注释 + (/IM 通杀 或 无 flag 无法确认定点)
+        if (!inComment && kind !== 'pid') imViolations.push(hit);
       }
     }
 
-    // 透明打印所有命中（含注释中文档化提及）—— 便于审计「保留注释」决策。
+    // 透明打印所有命中（注释中文档化提及 + /PID 定点放行 + /IM 违规）—— 便于审计。
     if (allHits.length > 0) {
       // eslint-disable-next-line no-console
       console.log(
-        `[D-004 gate] 源码 taskkill 命中 ${allHits.length} 处（均应 inComment=true）：\n` +
+        `[D-004 gate] 源码 taskkill 命中 ${allHits.length} 处（注释提及 + /PID 定点放行，/IM 应为 0）：\n` +
           allHits
-            .map((h) => `  ${h.file}:${h.line}:${h.col} inComment=${h.inComment}  ${h.text.trim()}`)
+            .map(
+              (h) =>
+                `  ${h.file}:${h.line}:${h.col} ${h.inComment ? '注释' : h.kind.toUpperCase()}  ${h.text.trim()}`,
+            )
             .join('\n'),
       );
     }
 
     expect(
-      codeHits,
-      'D-004 违规：可执行代码（非注释）中发现 taskkill——必须改为 SDK query.close()，' +
-        '禁止 taskkill /IM 通杀（CONVENTIONS 陷阱：会杀当前会话自身）。命中：\n' +
-        codeHits.map((h) => `  ${h.file}:${h.line}  ${h.text.trim()}`).join('\n'),
+      imViolations,
+      'D-004 违规：可执行代码中发现 taskkill /IM 通杀或无 flag 调用——/IM 会误杀当前会话自身，' +
+        '必须改为 /PID 定点（如 preflight.runWithTreeKill）或 SDK query.close()。命中：\n' +
+        imViolations.map((h) => `  ${h.file}:${h.line}  ${h.text.trim()}`).join('\n'),
     ).toEqual([]);
   });
 
-  it('裸命中若不为 0，则全部 inComment=true（交叉校验：未绕过「注释内」判定）', () => {
-    // 第二条独立交叉校验：把所有命中按 inComment 分桶，断言「非注释」桶为空。
-    // 与上一条等价但措辞不同，便于失败时一眼看出「是命中了真代码还是判定逻辑挂了」。
-    const buckets = { comment: 0, code: 0 };
+  it('交叉校验：非注释 taskkill 调用均为 /PID 定点（0 次 /IM/unflagged）', () => {
+    // 第二条独立交叉校验：把所有命中按 inComment + kind 分桶，断言「非注释 & 非 /PID」桶为空。
+    const buckets = { comment: 0, pid: 0, im: 0, unflagged: 0 };
     for (const abs of tsFiles) {
       const content = readFileSync(abs, 'utf8');
       const commentRanges = collectCommentRanges(content);
+      const lines = content.split('\n');
       for (const off of findTaskkillOffsets(content)) {
-        if (isInsideComment(off, commentRanges)) buckets.comment++;
-        else buckets.code++;
+        if (isInsideComment(off, commentRanges)) {
+          buckets.comment++;
+          continue;
+        }
+        const lc = offsetToLineCol(content, off);
+        const nextLine = lines[lc.line] ?? ''; // line 是 1-based，下一行 = lines[lc.line]
+        const kind = classifyTaskkill(lc.text, nextLine);
+        if (kind === 'pid') buckets.pid++;
+        else buckets[kind]++;
       }
     }
+    const violations = buckets.im + buckets.unflagged;
     expect(
-      buckets.code,
-      '非注释 taskkill 命中数应为 0（D-004）；注释中提及数 = ' + buckets.comment,
+      violations,
+      '非注释 taskkill 违规数（/IM 通杀 + 无 flag）应为 0（D-004）；/PID 定点放行 = ' +
+        buckets.pid +
+        '，注释提及 = ' +
+        buckets.comment,
     ).toBe(0);
-    // 透明记录注释提及总数（当前 = 3，全部在 claude-sdk-driver.ts 文档化禁令）。
     // eslint-disable-next-line no-console
     console.log(
-      `[D-004 gate] 分桶：注释中提及=${buckets.comment}，可执行代码中=${buckets.code}`,
+      `[D-004 gate] 分桶：注释=${buckets.comment}，/PID 定点=${buckets.pid}，/IM+无flag 违规=${violations}`,
     );
   });
 });
