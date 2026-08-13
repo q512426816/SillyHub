@@ -299,3 +299,14 @@
 根因：(1)proxy_create_change 设计上只占坑不自动派发 agent，需用户手动推进，属设计行为非 bug；(2)前端创建页未传 change_type，后端默认 None 落 NULL；(3)后端硬编码 current_stage=draft，但 draft 非 SillySpec VALID_STAGES，前端 STAGE_LABEL 无映射回退显示英文。
 方案：后端新增 classifier.py 按 quick/prototype/feature 关键词自动推导 change_type；proxy.py+service.py 创建时 current_stage 从 draft 改 brainstorm 对齐标准流程、change_type 为 None 时自动推导；前端 changes/page.tsx STAGE_LABEL 加 draft:草稿 兜底旧数据。
 结果：classifier 9 用例逻辑验证全绿（修正 1 个测试用例期望）；3 个后端文件 ast.parse 语法编译 OK；前端 tsc --noEmit 无错误。问题(1)未改属设计行为。
+
+## ql-20260813-003-6a59 | 2026-08-13 13:57:11 | stage dispatch(quick/brainstorm/plan/execute/verify)的 agent 调 AskUserQuestion 提问…
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/placement.py（raw SQL INSERT 建 agent_sessions 加 config 列(manual_approval+ask_user_only),解 permission_service 硬门控）
+- backend/app/modules/agent/tests/test_interactive_session_placement.py（加 test_dispatch_to_daemon_session_config_has_manual_approval 回归测试断言 session.config）
+需求：stage dispatch(quick/brainstorm/plan/execute/verify)的 agent 调 AskUserQuestion 提问传不到前端、agent 死等。
+根因：placement.py:491 raw SQL INSERT 建 agent_sessions 漏 config 列(只写了 lease.metadata 的 manual_approval),session.config=NULL 被 permission_service.py:320 硬门控吞掉,不建 dialog,前端收不到。
+方案：该 INSERT 加 config 列,值 {manual_approval:True, ask_user_only:True},对齐 scan(service.py:1645)；加回归测试断言 session.config(原测试只断言 lease.metadata 漏了 session.config,正是 bug 漏掉原因)。
+结果：placement+dispatch_metadata 17 passed(原16+新1),ruff+mypy 全绿；1 文件 5 行代码修复 + 1 回归测试。另改测试文件 test_interactive_session_placement.py(加回归保护,超出启动 --files 锁的 placement.py)。
