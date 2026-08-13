@@ -324,6 +324,42 @@ async def test_deliver_2xx_no_retry(
 
 
 @pytest.mark.asyncio
+async def test_deliver_4xx_abandoned_no_retry(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """4xx（对端明确拒绝）→ 放弃，只投递 1 次不重试（service.py:617 放弃分支）。
+
+    回归护栏：4xx 若被误改成走重试，会触发 5×[1+4+16+64]s ≈ 85s 退避占满 worker。
+    """
+    ws = await _make_workspace(db_session)
+    await _seed_webhook(db_session, ws.id, events=["*"])
+    attempts = {"n": 0}
+
+    class _FakeResp:
+        status_code = 404
+
+    class _FakeClient:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def post(self, url, content=None, headers=None):
+            attempts["n"] += 1
+            return _FakeResp()
+
+    monkeypatch.setattr("app.modules.mcp_gateway.service.httpx.AsyncClient", _FakeClient)
+    dispatcher = WebhookDispatcher(_session_factory(db_session))
+    wh = (await dispatcher._matching_webhooks(workspace_id=ws.id, event="e"))[0]
+    await dispatcher._deliver_one(wh, b"{}", "sig")
+    assert attempts["n"] == 1  # 4xx 放弃，不退避重试
+
+
+@pytest.mark.asyncio
 async def test_deliver_exception_retries_and_does_not_raise(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:

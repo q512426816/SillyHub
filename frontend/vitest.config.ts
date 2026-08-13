@@ -9,6 +9,13 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     css: false,
+    // P1 隔离加固：每测试自动清 mock 调用计数（clearMocks），统一隔离防止文件内 mock 调用计数
+    // 跨测试堆叠（对齐多数测试已手写 beforeEach(clearAllMocks) 的惯例）。
+    // 注：不启用 restoreMocks——本项目大量测试在 describe/beforeAll 级持久化 spy/mock 实现
+    // （workspace-access-guide / layout / interactive-session-panel 等），restoreMocks 会逐测试
+    // 还原原实现致组件渲染为空（21 用例红）。采用 restoreMocks 需先把这些 spy 下沉到 beforeEach，
+    // 属独立重构，不在本批隔离加固范围。
+    clearMocks: true,
     // 全量并行时 jsdom environment setup 累积变慢，个别组件测试（如
     // page-team-toggle）在全量下会超 5s 默认上限 → 提到 15s 治 flaky 超时
     // （不拖慢通过的测试，仅放宽上限）。

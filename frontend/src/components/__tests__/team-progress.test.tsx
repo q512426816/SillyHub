@@ -202,25 +202,34 @@ describe("TeamProgress", () => {
   });
 
   it("活跃态自动轮询；终态停止", async () => {
-    // 一直 running（活跃），用短轮询间隔（50ms）让真 timer 测试快收口
+    // 用 fake timer 推进 setInterval，消除真 timer 等 50ms×3 撞 CI event loop 抖动
+    // （50ms 轮询错过窗口撞 1s 兜底）的 flaky。对齐 workspace-config-card 的 fake timer 模式。
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "setInterval", "clearTimeout", "clearInterval"],
+    });
     missionApi.getMission.mockResolvedValue(makeMission({ status: "running" }));
+    const flushMicrotasks = () => vi.advanceTimersByTimeAsync(0);
 
-    render(<TeamProgress missionId="m-1" pollMs={50} />);
-    // 首次拉取（mount effect）
-    await waitFor(() =>
-      expect(missionApi.getMission).toHaveBeenCalledTimes(1),
-    );
+    try {
+      render(<TeamProgress missionId="m-1" pollMs={50} />);
 
-    // 真 timers 下等 50ms 触发第二次轮询
-    await waitFor(
-      () => expect(missionApi.getMission).toHaveBeenCalledTimes(2),
-      { timeout: 1000 },
-    );
-    // 再等一次（第三次）
-    await waitFor(
-      () => expect(missionApi.getMission).toHaveBeenCalledTimes(3),
-      { timeout: 1000 },
-    );
+      // 首次拉取（mount effect）：flush microtask 让 mockResolvedValue resolve
+      await flushMicrotasks();
+      await flushMicrotasks();
+      expect(missionApi.getMission).toHaveBeenCalledTimes(1);
+
+      // 快进 50ms：setInterval 触发第二次轮询（活跃态持续轮询）
+      await vi.advanceTimersByTimeAsync(50);
+      await flushMicrotasks();
+      expect(missionApi.getMission).toHaveBeenCalledTimes(2);
+
+      // 再快进 50ms：第三次轮询
+      await vi.advanceTimersByTimeAsync(50);
+      await flushMicrotasks();
+      expect(missionApi.getMission).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("终态不轮询", async () => {

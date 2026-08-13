@@ -11,7 +11,9 @@ Tests must not require a live Postgres / Redis. ``conftest`` therefore:
 from __future__ import annotations
 
 import asyncio
+import atexit
 import os
+import shutil
 import tempfile
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
@@ -27,7 +29,18 @@ os.environ.setdefault(
     "DATABASE_URL",
     "postgresql+asyncpg://platform:platform@localhost:5432/platform_test",
 )
-os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
+# P1 隔离加固：xdist 多 worker 各分独立 redis db（gw0..gw15 → db0..db15），避免各 worker
+# 的 function 级 FLUSHDB 互清共享 db15 上其它 worker 测试中途的 login:fail 计数 / captcha
+# 缓存（默认 redis 16 个 db，≤16 worker 不撞库）。非 xdist（单进程）保持 db15 向后兼容。
+_xdist_worker = os.environ.get("PYTEST_XDIST_WORKER", "")
+if _xdist_worker.startswith("gw"):
+    try:
+        _redis_db = int(_xdist_worker[2:]) % 16
+    except ValueError:
+        _redis_db = 15
+else:
+    _redis_db = 15
+os.environ.setdefault("REDIS_URL", f"redis://localhost:6379/{_redis_db}")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production-use-only")
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("SILLYSPEC_MASTER_KEY", "v1:" + "aa" * 32)
@@ -36,23 +49,31 @@ os.environ.setdefault("SILLYSPEC_MASTER_KEY", "v1:" + "aa" * 32)
 # setup 要 ~0.3s 纯哈希,全量累积是分钟级;降到 4 后该项开销可忽略。
 os.environ.setdefault("AUTH_BCRYPT_ROUNDS", "4")
 
-# Set spec_data_root to a temp directory for tests (CI may not have /data permissions)
-_test_data_root = tempfile.gettempdir()
+# P1 隔离加固：spec_data_root 指向 session 级独立子目录（按 worker/pid 唯一），进程退出时
+# atexit 清理，避免测试文件跨运行堆积在系统 temp 根（此前直接指向 gettempdir() 本身，从不清理）。
+_session_suffix = _xdist_worker if _xdist_worker else f"pid{os.getpid()}"
+_test_data_root = os.path.join(tempfile.gettempdir(), f"sillyhub-spec-test-{_session_suffix}")
+os.makedirs(_test_data_root, exist_ok=True)
 os.environ.setdefault("SPEC_DATA_ROOT", _test_data_root)
+
+
+def _cleanup_test_data_root() -> None:
+    shutil.rmtree(_test_data_root, ignore_errors=True)
+
+
+atexit.register(_cleanup_test_data_root)
 
 
 @pytest.fixture(autouse=True)
 def _reset_settings_cache() -> Iterator[None]:
     """Clear the cached Settings between tests so env-var overrides take effect."""
-    import tempfile
-
     from app.core.config import Settings, get_settings
 
     # Clear cache first
     get_settings.cache_clear()
 
-    # Create a temp directory for spec data in tests
-    test_data_root = tempfile.gettempdir()
+    # 用模块级 session 独立子目录（_test_data_root，见文件顶部），不每次重新 gettempdir()。
+    test_data_root = _test_data_root
 
     # Manually set spec_data_root in Settings to avoid permission issues in CI
     original_init = Settings.__init__
@@ -299,6 +320,67 @@ async def _isolate_permission_timers() -> AsyncIterator[None]:
         task.cancel()
     if pending:
         await asyncio.gather(*pending, return_exceptions=True)
+
+
+@pytest.fixture(autouse=True)
+async def _isolate_background_tasks() -> AsyncIterator[None]:
+    """Deterministically clear + reap fire-and-forget background task sets（P1 隔离加固）。
+
+    与 ``_isolate_permission_timers`` 同款坑：四处模块级/类级 ``set[asyncio.Task]`` 强引用集
+    （防 task 被 GC，见各 ``_fire_background_task``）会跨测试残留，task 绑定上一个 event loop，
+    在 pytest-asyncio function-scoped loop 下泄漏到下个测试触发 'Event loop is closed' 或静默
+    漏 await。每测试前 clear，测试后 cancel+await 残留 task 再 clear。
+
+    覆盖四处（同模式一并隔离，不留同款坑）：
+      - ``spec_workspace.bootstrap._BACKGROUND_BOOTSTRAP_TASKS``
+      - ``AgentService._background_tasks``（agent/service.py）
+      - ``ExecutionCoordinatorService._background_tasks``（agent/coordinator.py）
+      - ``RunSyncService._background_tasks``（daemon/run_sync/service.py）
+    """
+    from app.modules.agent.coordinator import ExecutionCoordinatorService
+    from app.modules.agent.service import AgentService
+    from app.modules.daemon.run_sync.service import RunSyncService
+    from app.modules.spec_workspace.bootstrap import _BACKGROUND_BOOTSTRAP_TASKS
+
+    task_sets = (
+        _BACKGROUND_BOOTSTRAP_TASKS,
+        AgentService._background_tasks,
+        ExecutionCoordinatorService._background_tasks,
+        RunSyncService._background_tasks,
+    )
+    for s in task_sets:
+        s.clear()
+    yield
+    # 只对真 asyncio.Task 调 cancel；部分测试（如 test_bootstrap_provider_model）往集合注入
+    # _FakeTask mock（有 add_done_callback 无 cancel），一并 clear 出集合但不尝试 cancel。
+    pending: list[asyncio.Task] = []
+    for s in task_sets:
+        pending.extend(t for t in s if isinstance(t, asyncio.Task))
+        s.clear()
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+
+@pytest.fixture(autouse=True)
+def _reset_lazy_singletons() -> Iterator[None]:
+    """Reset lazily-cached process singletons（storage backend / engine）per test（P1）。
+
+    ``get_storage_backend`` / ``get_engine`` 把首次构建的实现缓存到模块全局；测试若绕过 DI
+    （``dependency_overrides``）直调会懒加载真 Minio/Postgres 并缓存，泄漏到后续测试。当前
+    测试路径都走 dependency_overrides（不触达全局），此 reset 是防新增代码一碰就显形的护栏。
+    每测试前置 None，恢复原值（原值在测试里本就是 None）。
+    """
+    import app.core.db as db_module
+    import app.modules.storage.factory as storage_module
+
+    prev_engine, prev_backend = db_module._engine, storage_module._backend
+    db_module._engine = None
+    storage_module._backend = None
+    yield
+    db_module._engine = prev_engine
+    storage_module._backend = prev_backend
 
 
 # ---------------------------------------------------------------------------
