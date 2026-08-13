@@ -1059,12 +1059,13 @@ class RunSyncService:
                 )
 
         agent_run.finished_at = now
-        # task-05 / M2（design §5.1 / §170）：verify 等 stage dispatch（change_id
-        # 非空）成功完成时，gate_status='pending' 随终态一起 commit 落库（与
-        # status/finished_at 同一 commit，gate 任务读到一致快照）。change_id=None
-        # 的对话 turn 或 failed run 不进入 gate 流程（守门）。gate 决策由 task-07
-        # 后台任务 cas running→decided/failed 推进。
-        if agent_run.change_id is not None and agent_run.status == "completed":
+        # task-05 / M2（design §5.1 / §170）：仅 verify stage 的 completed run 设
+        # gate_status='pending'（随终态同 commit，gate 任务读到一致快照）。change_id=None
+        # 的对话 turn、failed run，以及 quick/brainstorm/plan/execute/archive 等非 verify
+        # stage 不进 gate——这些 stage 无 verify gate 产物，强行 gate verify 必然解析
+        # 失败 exit 2 误报失败（_gate_applicable 守门）。gate 决策由 task-07 后台任务
+        # cas running→decided/failed 推进。
+        if await self._gate_applicable(agent_run):
             agent_run.gate_status = "pending"
         # SDKResultSuccess 透传：usage / cost / duration（None 不覆盖 AgentRun 原值，
         # daemon 老版本不传这些字段时保持兼容）。对应 AgentRun.{total_cost_usd,
@@ -1138,15 +1139,15 @@ class RunSyncService:
             )
 
         # task-05 / design §5.1：commit 后 enqueue gate 决策后台任务并立即返回 HTTP
-        # （<30s，daemon notifyRunResult 不重试）。仅 change_id 非空 + completed 场景
-        # enqueue（gate 只核验完成的 verify turn；对话 turn/failed 不进 gate）。不 await
+        # （<30s，daemon notifyRunResult 不重试）。仅 verify stage 的 completed run
+        # enqueue（对话 turn / failed / 非 verify stage 不进 gate，_gate_applicable 守门）。不 await
         # gate 任务 —— _fire_background_task（task-03 / H4）创建 asyncio.Task 持强引用
         # 防静默 GC，enqueue 失败异常由 add_done_callback 兜底，不影响已 commit 终态行。
         # workspace_id 从 Change.workspace_id 推导（对齐 _trigger_stage_completion_callback
         # :1029 的稳定来源；AgentSession.workspace_id 亦可选，但 Change 更直接且 stage
         # run 必有 change）。task-07（Wave 3）替换 _run_gate_decision_task stub 实现真实
         # gate 决策（H1 独立 session + R3 cas + 跑 gate + 存 result + H2 内联 sync/auto_dispatch）。
-        if agent_run.change_id is not None and agent_run.status == "completed":
+        if await self._gate_applicable(agent_run):
             gate_workspace_id = await self._resolve_gate_workspace_id(agent_run)
             if gate_workspace_id is not None:
                 self._fire_background_task(
@@ -1218,6 +1219,22 @@ class RunSyncService:
         return agent_run
 
     # ── Driver Gate enqueue helpers（task-05 / design §5.1） ─────────────────
+
+    async def _gate_applicable(self, agent_run: AgentRun) -> bool:
+        """gate 仅 verify stage 的 completed run 跑（design §5.4 gate 当前仅 verify）。
+
+        change_id 非空 + completed 但 ``current_stage`` 非 verify（quick / brainstorm /
+        plan / execute / archive）的 run 不进 gate：这些 stage 无 verify gate 产物，
+        强行跑 ``sillyspec gate verify`` 必然解析失败 exit 2 误报失败（quick 独立
+        quicklog 流程、change_key 含中文等尤甚——实测见 ql-20260813-006）。落库的
+        ``change`` 经 identity map 命中（close 内已 get 过），不额外查库。
+        """
+        if agent_run.change_id is None or agent_run.status != "completed":
+            return False
+        from app.modules.change.model import Change
+
+        change = await self._session.get(Change, agent_run.change_id)
+        return change is not None and change.current_stage == "verify"
 
     async def _resolve_gate_workspace_id(self, agent_run: AgentRun) -> uuid.UUID | None:
         """推导 gate 任务所需 workspace_id（task-05）。

@@ -148,11 +148,14 @@ async def _seed_active_interactive_session(
     return dispatch.lease_id, run_id, dispatch.claim_token
 
 
-async def _attach_change(db_session: AsyncSession, run_id: uuid.UUID) -> uuid.UUID:
-    """给 run 挂 change_id（verify 等 stage dispatch 特征）并返回 (change_id, workspace_id)。
+async def _attach_change(
+    db_session: AsyncSession, run_id: uuid.UUID, *, stage: str = "verify"
+) -> uuid.UUID:
+    """给 run 挂 change_id（stage dispatch 特征）并返回 workspace_id。
 
-    Change.workspace_id 是 close_interactive_run 推导 workspace_id 的稳定来源
-    （对齐 _trigger_stage_completion_callback:1029 的策略）。
+    stage 默认 verify（gate 核验场景）；传 quick 等非 verify stage 用于验证 gate
+    跳过逻辑。Change.workspace_id 是 close_interactive_run 推导 workspace_id 的
+    稳定来源（对齐 _trigger_stage_completion_callback:1029 的策略）。
     """
     from app.modules.change.model import Change
 
@@ -165,10 +168,10 @@ async def _attach_change(db_session: AsyncSession, run_id: uuid.UUID) -> uuid.UU
         status="in-progress",
         location="active",
         path=".sillyspec/changes/gate-enqueue",
-        current_stage="verify",
+        current_stage=stage,
         stages={
             "last_dispatch": {
-                "stage": "verify",
+                "stage": stage,
                 "user_id": str(uuid.uuid4()),
                 "at": "2026-07-10T10:00:00Z",
                 "config": {},
@@ -305,6 +308,33 @@ class TestCloseInteractiveRunGateEnqueue:
         assert run.gate_status is None  # failed 不设 pending
         gate_spy.assert_not_called()
         fire_spy.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_non_verify_stage_skips_gate_even_completed(
+        self, db_session, mocked_redis
+    ) -> None:
+        """change_id 非空 + completed 但 current_stage 非 verify（quick 等）：
+        不设 gate_status、不 enqueue。gate 只核验 verify turn——非 verify stage 无
+        gate 产物，强行 gate verify 必解析失败 exit 2 误报（ql-20260813-006 根因）。"""
+        lease_id, run_id, token = await _seed_active_interactive_session(db_session)
+        # attach change 但 stage=quick（非 verify）
+        await _attach_change(db_session, run_id, stage="quick")
+
+        svc = DaemonService(db_session)
+        fire_spy = MagicMock()
+        gate_spy = AsyncMock()
+        with (
+            patch.object(RunSyncService, "_fire_background_task", fire_spy),
+            patch.object(RunSyncService, "_run_gate_decision_task", gate_spy),
+        ):
+            run = await svc.close_interactive_run(
+                lease_id, run_id, token, status="success", is_error=False
+            )
+
+        assert run.status == "completed"
+        assert run.gate_status is None  # 非 verify stage 不设 pending
+        gate_spy.assert_not_called()  # 不构造 gate coro
+        fire_spy.assert_not_called()  # 不 enqueue
 
     @pytest.mark.asyncio
     async def test_close_does_not_await_gate_task_returns_immediately(
