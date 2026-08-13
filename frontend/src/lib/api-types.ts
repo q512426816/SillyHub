@@ -93,7 +93,8 @@ export interface paths {
          *
          *     读 ``daemon-dist/install.ps1`` 模板，把 ``{{SERVER_URL}}`` 占位替换为据请求头
          *     推导出的对外地址（scheme 经 X-Forwarded-Proto 还原、host 经白名单校验），
-         *     返回 ``application/x-powershell``。镜像未打包则 404。
+         *     返回 ``application/x-powershell; charset=utf-8``（显式 charset：非 text/* 时 starlette
+         *     不自动补，缺失则 PowerShell ``irm`` 按 latin1 解码 UTF-8 body 致中文乱码）。镜像未打包则 404。
          */
         get: operations["get_install_ps1_daemon_install_ps1_get"];
         put?: never;

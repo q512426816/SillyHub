@@ -95,7 +95,7 @@
           "daemon-distribution"
         ],
         "summary": "Get Install Ps1",
-        "description": "动态生成 PowerShell 安装脚本，内嵌 server_url（方案 A，DG-01/03）。\n\n读 ``daemon-dist/install.ps1`` 模板，把 ``{{SERVER_URL}}`` 占位替换为据请求头\n推导出的对外地址（scheme 经 X-Forwarded-Proto 还原、host 经白名单校验），\n返回 ``application/x-powershell``。镜像未打包则 404。",
+        "description": "动态生成 PowerShell 安装脚本，内嵌 server_url（方案 A，DG-01/03）。\n\n读 ``daemon-dist/install.ps1`` 模板，把 ``{{SERVER_URL}}`` 占位替换为据请求头\n推导出的对外地址（scheme 经 X-Forwarded-Proto 还原、host 经白名单校验），\n返回 ``application/x-powershell; charset=utf-8``（显式 charset：非 text/* 时 starlette\n不自动补，缺失则 PowerShell ``irm`` 按 latin1 解码 UTF-8 body 致中文乱码）。镜像未打包则 404。",
         "operationId": "get_install_ps1_daemon_install_ps1_get",
         "responses": {
           "200": {

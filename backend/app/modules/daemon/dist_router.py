@@ -95,7 +95,8 @@ async def get_install_ps1(request: Request) -> Response:
 
     读 ``daemon-dist/install.ps1`` 模板，把 ``{{SERVER_URL}}`` 占位替换为据请求头
     推导出的对外地址（scheme 经 X-Forwarded-Proto 还原、host 经白名单校验），
-    返回 ``application/x-powershell``。镜像未打包则 404。
+    返回 ``application/x-powershell; charset=utf-8``（显式 charset：非 text/* 时 starlette
+    不自动补，缺失则 PowerShell ``irm`` 按 latin1 解码 UTF-8 body 致中文乱码）。镜像未打包则 404。
     """
     path = get_settings().daemon_dist_dir / "install.ps1"
     if not path.is_file():
@@ -104,7 +105,11 @@ async def get_install_ps1(request: Request) -> Response:
     body = path.read_text(encoding="utf-8").replace("{{SERVER_URL}}", server_url)
     return Response(
         content=body,
-        media_type="application/x-powershell",
+        # 显式 charset=utf-8：``application/x-powershell`` 非 text/* ，starlette 不自动补
+        # charset；缺失则 PowerShell ``irm | iex`` 按 latin1 解码 UTF-8 body，脚本中文
+        # 在执行前即损坏成 mojibake（install.ps1 源码虽已设 [Console]::OutputEncoding=UTF8，
+        # 但那是执行阶段，救不回读取阶段已坏的字符串）。
+        media_type="application/x-powershell; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="install.ps1"'},
     )
 

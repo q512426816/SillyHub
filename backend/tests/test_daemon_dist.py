@@ -88,7 +88,10 @@ async def test_bundle_404_when_missing(
 async def test_install_ps1(client: AsyncClient, daemon_dist: Path) -> None:
     resp = await client.get("/daemon/install.ps1")
     assert resp.status_code == 200
-    assert resp.headers["content-type"].startswith("application/x-powershell")
+    # charset=utf-8 必须显式：非 text/* 时 starlette 不自动补 charset，缺失则
+    # PowerShell irm 按 latin1 解码 UTF-8 body → 中文 mojibake（ql-20260813-003 回归锚点）。
+    ct = resp.headers["content-type"]
+    assert ct == "application/x-powershell; charset=utf-8", ct
     # {{SERVER_URL}} 占位已被替换为推导地址（test client 默认 host）
     assert "{{SERVER_URL}}" not in resp.text
     assert "install" in resp.text
