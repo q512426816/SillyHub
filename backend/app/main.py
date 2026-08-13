@@ -132,11 +132,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 if seeded:
                     log.warning("agent.profile.system_default_reseeded", count=seeded)
 
-                # quick-2026-08-13：补种 CC/GLM 专家角色模板（5 角色 × 2 供应商）。
-                # 按确定性 UUID 去重，不覆盖用户改动，异常不阻断启动。
-                role_seeded = await ensure_role_template_profiles(session)
+                # quick-2026-08-13：补种 CC 专家角色模板（5 角色）+ 回收已废弃 GLM 模板。
+                # 按确定性 UUID 去重补种 / 按废弃清单回收，不覆盖用户改动，异常不阻断启动。
+                role_seeded, role_pruned = await ensure_role_template_profiles(session)
                 if role_seeded:
                     log.warning("agent.profile.role_template_reseeded", count=role_seeded)
+                if role_pruned:
+                    log.warning("agent.profile.role_template_pruned", count=role_pruned)
             except Exception:
                 log.exception("agent.profile.seed_failed")
         # 平台文件中心：初始化对象存储单例（minio 等 S3 兼容）。异常不阻断启动——
