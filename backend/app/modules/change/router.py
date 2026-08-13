@@ -13,6 +13,7 @@ from sqlmodel import col
 
 from app.core.auth_deps import require_permission
 from app.core.db import get_session
+from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.auth.model import User
@@ -47,6 +48,7 @@ from app.modules.change.schema import (
     ProposalReviewRequest,
     RejectRequest,
     ReviewResponse,
+    StageProfileUpdate,
     TransitionDispatchResponse,
     TransitionRequest,
     TransitionResponse,
@@ -225,6 +227,50 @@ async def reparse_changes(
         stats=ChangeReparseStats(**stats),
         warnings=warnings,
     )
+
+
+@router.patch(
+    "/changes/{change_id}/stage-profile",
+    response_model=OkResponse,
+)
+async def update_stage_profile(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    data: StageProfileUpdate,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> OkResponse:
+    """task-03（2026-08-13-profile-system-prompt-injection）：存每阶段独立 profile_id。
+
+    写 ``change.stages[<current_stage>]["profile_id"]``（D-003 每阶段独立）。
+    profile_id=None 清除（跟随工作区默认）。
+    """
+    from sqlalchemy import select
+
+    from app.modules.change.model import Change
+
+    stmt = select(Change).where(
+        Change.workspace_id == workspace_id,
+        Change.id == change_id,
+    )
+    change = (await session.execute(stmt)).scalars().first()
+    if change is None:
+        raise AppError(f"Change '{change_id}' not found.", http_status=404)
+    if not change.current_stage:
+        raise AppError("Change has no current_stage to bind profile.", http_status=400)
+
+    # dict copy 防 SQLAlchemy JSON in-place 改不 dirty（反复踩的坑）。
+    stages = dict(change.stages or {})
+    stage_data = dict(stages.get(change.current_stage) or {})
+    if data.profile_id is None:
+        stage_data.pop("profile_id", None)
+    else:
+        stage_data["profile_id"] = data.profile_id
+    stages[change.current_stage] = stage_data
+    change.stages = stages
+    session.add(change)
+    await session.commit()
+    return OkResponse(ok=True)
 
 
 # ── File tree endpoints（2026-07-02-change-detail-file-tree-editor）──────

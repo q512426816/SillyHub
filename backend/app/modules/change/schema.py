@@ -165,6 +165,15 @@ class ProgressUpdate(BaseModel):
     lastActive: str  # noqa: N815
 
 
+class StageProfileUpdate(BaseModel):
+    """task-03（2026-08-13-profile-system-prompt-injection）：存每阶段独立 profile_id。
+
+    profile_id=None 表示清除（跟随工作区默认）。存 change.stages[<current_stage>]["profile_id"]。
+    """
+
+    profile_id: str | None = None
+
+
 class OkResponse(BaseModel):
     ok: bool = True
 
