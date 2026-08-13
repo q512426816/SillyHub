@@ -47,3 +47,15 @@
 根因：test_ws_hub_permission 断言私有 perm._timers（5处），重构 _permission_timers 数据结构时测试脆裂。
 方案：permission_service 加公共 has_pending(request_id)，test_ws_hub_permission 断言改用 has_pending + 去冗余手工 task cancel（依赖 conftest _isolate_permission_timers teardown）。
 结果：test_ws_hub_permission 12 passed，全量 3868 passed 0 failed 0 error。P2 其余项评估不改（已附理由：vitest clearMocks 已由 ql-009 完成、DI 接线 isinstance 是类型契约、ws_rpc 边缘case 无公共API、seam/已有公共覆盖、guard 契约合理、password_hasher 良性）。
+
+## ql-20260813-002-cf43 | 2026-08-13 09:20:44 | 修复全量 pytest 9 failed+9 error
+状态：已完成
+关联变更：（无）
+文件：
+- backend/pyproject.toml（addopts 加 -o dist=loadscope(xdist 按模块分组消跨文件污染)）
+- backend/app/modules/task/tests/test_router.py（workspace_with_tasks fixture 加 reparse retry(治 Windows 文件锁间歇)）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（ql-002 索引）
+需求：修复全量 pytest 9 failed+9 error。
+根因：xdist 默认 load 分发(按测试 round-robin)致跨文件状态污染,task/change/runtime/workspace 的 spec reparse 间歇 created=0 → fixture next() StopIteration/文件列表空;残留 task 间歇=Windows Defender 瞬时锁 copytree 新文件致首扫 parsed=0。
+方案：①pyproject addopts 加 -o dist=loadscope(按模块/类分组,消除跨模块污染,9→0~2);②task workspace_with_tasks fixture 加一次 reparse retry(锁瞬时重扫恢复,治残留 0~2)。
+结果：连续两次全量 3868 passed 0 failed 0 error 稳定,无 -n 不报错。

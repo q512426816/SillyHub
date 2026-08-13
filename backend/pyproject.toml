@@ -57,7 +57,12 @@ packages = ["app"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-addopts = "-ra"
+# xdist 分发用 loadscope（按模块/类分组到 worker），不用默认 load（按测试 round-robin）。
+# load 模式下跨文件测试混入同一 worker，触发间歇性 spec 文件扫描/reparse 得 0 的状态污染
+# flaky（task/change/runtime/workspace 的 fixture 单跑过、全量 load 下偶发 reparse created=0
+# → next() StopIteration / 文件列表空）。loadscope 把同模块测试整体绑到同一 worker，消除跨
+# 模块状态交叉，全量 3868 passed 0 fail 稳定（2026-08-13 ql-002 定位）。仅 -n 激活时生效。
+addopts = "-ra -o dist=loadscope"
 # Discover both the top-level integration suite and module-local unit tests.
 testpaths = ["tests", "app"]
 python_files = ["test_*.py"]

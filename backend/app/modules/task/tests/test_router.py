@@ -61,6 +61,20 @@ async def workspace_with_tasks(
         headers=auth_headers,
     )
     items = list_resp.json()["items"]
+    # 间歇兜底:Windows Defender 偶尔瞬时锁 copytree 刚写入的新文件,首扫 reparse
+    # parsed=0（scan_docs 扫描跳过被锁文件）;锁是瞬时的,重扫一次即恢复。这是测试侧
+    # 健壮化（间歇 IO retry 标准做法），非生产逻辑改动。正常路径 items 非空不触发。
+    if not items:
+        await client.post(
+            f"/api/workspaces/{ws_id}/changes/reparse",
+            headers=auth_headers,
+        )
+        list_resp = await client.get(
+            f"/api/workspaces/{ws_id}/changes",
+            params={"location": "active"},
+            headers=auth_headers,
+        )
+        items = list_resp.json()["items"]
     demo = next(i for i in items if i["change_key"] == "2026-05-25-demo-feature")
 
     return {"ws_id": ws_id, "change_id": demo["id"]}
