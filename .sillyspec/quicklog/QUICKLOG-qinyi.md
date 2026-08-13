@@ -35,3 +35,15 @@
 根因：测试基建债——①4 处 fire-and-forget 后台 task 的强引用 set 跨测试残留、绑定旧 event loop（与既有 _isolate_permission_timers 同款坑，原只补了 permission_timers）；②WebhookDispatcher 4xx 放弃分支零覆盖；③team-progress 轮询测试用真 timer 撞 CI event loop 抖动；④vitest 无 clearMocks 致文件内 mock 调用计数堆叠；⑤xdist 多 worker 共享 redis db15，各 worker function 级 FLUSHDB 互清他者 login:fail/captcha；⑥spec_data_root 指 temp 根从不清理 + 懒加载 _engine/_backend 单例无 reset（当前潜在）。依据：审查 high/medium 项 + 既有 _isolate_permission_timers 范本。
 方案：conftest 四处加固（P1-1/P1-2/P1-5/P1-6 见文件括注）+ webhook 补 4xx 放弃不重试用例（P1-3）+ team-progress 轮询改 fake timer（P1-4）+ vitest 加 clearMocks（restoreMocks 破 21 测试已撤）。P1-2 一并覆盖审查漏报的同模式 ExecutionCoordinatorService/RunSyncService 两处。模块文档 backend.md/frontend.md 变更索引补 ql-009。
 结果：后端全量 `pytest -n auto` 3868 passed/0 fail/5 skipped/5 xfail；前端全量 vitest 144 文件 1402 passed/0 fail；ruff 干净 + mypy 605 文件 no issues，前端改动文件 eslint 干净（既有 warning 在未触碰文件）；webhook 10 + team-progress 12 针对性全过。修复途中实测踩中 2 个真问题并修：conftest 初版 .values() 误用（set 非 dict）+ teardown 无脑 cancel 撞 _FakeTask，均加守卫修复。6 文件已 git add 暂存待提交。
+
+## ql-20260813-001-f9af | 2026-08-13 08:42:37 | 测试质量审查 P2 重构脆裂项评估并修值得改的
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/permission_service.py（加公共 has_pending(request_id)）
+- backend/app/modules/daemon/tests/test_ws_hub_permission.py（5处 _timers 私有改 has_pending+去冗余 cancel）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（ql-001 索引含 P2 不改理由）
+需求：测试质量审查 P2 重构脆裂项评估并修值得改的。
+根因：test_ws_hub_permission 断言私有 perm._timers（5处），重构 _permission_timers 数据结构时测试脆裂。
+方案：permission_service 加公共 has_pending(request_id)，test_ws_hub_permission 断言改用 has_pending + 去冗余手工 task cancel（依赖 conftest _isolate_permission_timers teardown）。
+结果：test_ws_hub_permission 12 passed，全量 3868 passed 0 failed 0 error。P2 其余项评估不改（已附理由：vitest clearMocks 已由 ql-009 完成、DI 接线 isinstance 是类型契约、ws_rpc 边缘case 无公共API、seam/已有公共覆盖、guard 契约合理、password_hasher 良性）。

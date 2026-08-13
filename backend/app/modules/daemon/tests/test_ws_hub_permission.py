@@ -301,14 +301,10 @@ class TestHandlePermissionDaemonIdOwnership:
                     input={"command": "ls"},
                 ),
             )
-        # Timer armed ⇒ request accepted (ownership passed).
-        assert "req-owned" in perm._timers
-        task = perm._timers["req-owned"]
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        # Timer armed ⇒ request accepted (ownership passed)。
+        # 清理靠 root conftest 的 _isolate_permission_timers autouse teardown，
+        # 不在此手工 cancel（去私有 _timers 访问，改公共 has_pending）。
+        assert perm.has_pending("req-owned")
 
     @pytest.mark.asyncio
     async def test_bound_runtime_rejects_wrong_daemon_id(self, db_session) -> None:
@@ -357,7 +353,7 @@ class TestHandlePermissionDaemonIdOwnership:
                 ),
             )
         # No timer armed ⇒ request dropped by ownership check.
-        assert "req-rej" not in perm._timers
+        assert not perm.has_pending("req-rej")
         hub.send_permission_response.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -402,17 +398,10 @@ class TestHandlePermissionDaemonIdOwnership:
                     input={"command": "ls"},
                 ),
             )
-        assert "req-fb" in perm._timers
-        task = perm._timers["req-fb"]
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        assert perm.has_pending("req-fb")
 
 
 def asyncio_imported_cancel():
     """Late import of asyncio.CancelledError to avoid a module-level import."""
-    import asyncio
 
     return asyncio.CancelledError

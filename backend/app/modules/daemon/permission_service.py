@@ -214,6 +214,15 @@ class DaemonPermissionService:
         """Delegate to module-level shared registry (not per-instance)."""
         return _permission_timers
 
+    def has_pending(self, request_id: str) -> bool:
+        """Whether a permission-response timer is currently armed for ``request_id``.
+
+        Public read access to the pending-timer registry, so callers (tests /
+        observability) need not touch the private ``_timers`` mapping——重构
+        ``_permission_timers`` 数据结构（dict→对象）时依赖本方法的测试不脆裂。
+        """
+        return request_id in _permission_timers
+
     def __init__(
         self,
         daemon_service: DaemonService,
