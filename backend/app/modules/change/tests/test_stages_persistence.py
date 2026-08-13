@@ -22,7 +22,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.change.schema import PendingReview
 from app.modules.change.service import ChangeService
-from app.modules.change.tests.test_dispatch import _create_test_change, _create_test_workspace
+from app.modules.change.tests.test_dispatch import (
+    _completed_stages,
+    _create_test_change,
+    _create_test_workspace,
+)
 
 
 def _patch_projection(pending: PendingReview | None):
@@ -44,7 +48,8 @@ async def _seed(session: AsyncSession, tmp_path: Path, *, stage: str):
     # 关键：seed 非空 stages。``stages={}`` 时 ``change.stages or {}`` 取新对象（falsy），
     # 回赋被 SQLAlchemy 检测 → bug 不触发；必须非空 dict 才能让 ``or {}`` 返回同引用、
     # 原地改 + 回赋同对象不被检测（这正是生产路径：change 持续累积 stages 键，必非空）。
-    change.stages = {"team_mode": True}
+    # 同时给当前 stage 补完成块，过 transition 前置完成度校验（_check_source_stage_completion）。
+    change.stages = {"team_mode": True, **_completed_stages(stage)}
     await session.commit()
     await session.refresh(change)
     return ws, change

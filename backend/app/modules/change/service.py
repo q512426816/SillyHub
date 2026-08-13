@@ -682,6 +682,8 @@ class ChangeService:
     ) -> Change:
         """执行状态流转。"""
         change = await self.get(workspace_id, change_id)
+        # 源阶段完成度前置校验（必须在下方 draft 重映射之前用原始 current_stage 判首次启动）。
+        self._check_source_stage_completion(change)
         current = change.current_stage
         if not current or current == "draft":
             current = "brainstorm"
@@ -1433,6 +1435,10 @@ class ChangeService:
             affected_components=parsed.affected_components,
             change_type=parsed.change_type,
             current_stage=parsed.current_stage,
+            # ql-20260813-008：新建行用文件 mtime 作 updated_at（反映真实活动而非写入时刻）。
+            # or now fallback：空目录（last_modified_at=None）显式传 None 会绕过
+            # default_factory 直接写 None 违反 NOT NULL，必须 fallback。
+            updated_at=parsed.last_modified_at or datetime.now(UTC),
             owner_id=None,
         )
 
@@ -1459,6 +1465,18 @@ class ChangeService:
         # 权威，不被 reparse 覆盖（design §9 显式承认 worktree lease 行为收紧）。
         if parsed.current_stage is not None and row.owner_id is None:
             row.current_stage = parsed.current_stage
+        # ql-20260813-008：updated_at 取较大值（文件 mtime vs 现值），不倒退——让"更新时间"
+        # 反映变更目录文件真实活动。不按 owner_id 区分（展示字段，proxy 行也该反映）；
+        # 手动操作（transition/review/dispatch 刷 now）一定 > 旧 mtime，自然保留。is not None
+        # 守卫空目录（避免 None > datetime 抛 TypeError）。两边均 tz-aware 可直接比较。
+        if parsed.last_modified_at is not None and row.updated_at is not None:
+            # SQLite 返回 naive datetime，parsed mtime 带 UTC tzinfo，直接比较抛 TypeError。
+            # 归一化：naive 视作 UTC（DB 列语义即 UTC），对齐 spec_workspace 同范式（646 行）。
+            cur = row.updated_at
+            if cur.tzinfo is None:
+                cur = cur.replace(tzinfo=UTC)
+            if parsed.last_modified_at > cur:
+                row.updated_at = parsed.last_modified_at
 
     # ── Review Gate methods ────────────────────────────────────────────
     #
@@ -1693,6 +1711,62 @@ class ChangeService:
         }
 
     # ── Stage completion ────────────────────────────────────────────────
+
+    @staticmethod
+    def _check_source_stage_completion(change: Change) -> None:
+        """推进前置校验：源阶段（current_stage）必须已完成，否则拒绝推进。
+
+        仅作用于 single 模式推进（``transition``）：手动点推进按钮（/transition、
+        /advance-stage、MCP advance_change_stage、review approve 分支）前，强制源阶段
+        用 CLI 客观进度证明"干完了"，堵住"没干活就推进"。team 模式推进走
+        ``complete_stage``（不经 ``transition``，``daemon/run_sync/service.py:1762``
+        直接调），team mission 收敛本就是强证据，不触达本函数。
+
+        判据（用户决策 b + 缺失 fail-closed + 首次放行）：
+        1. 首次启动（raw current_stage 为 draft / None / 空）→ 放行。
+        2. 源阶段不在 stages JSON（``stages.get(source)`` 非 dict）→ 拒绝（fail-closed）。
+        3. ``stages[source]["status"] == "completed"`` 且 ``steps.pending`` 为空 → 放行。
+        4. 否则 → 拒绝。
+
+        stages JSON 的源阶段结构由 single 模式 ``_sync_stage_status_daemon_client``
+        写入（dispatch.py:1767）：``{status, steps:{completed, pending}, ...}``。
+        复用 ``InvalidTransition``（errors.py，HTTP 422）带 message + details（前端读
+        ``details.reason`` 做 UI）。
+
+        Args:
+            change: 待推进的 Change（只读，不改 stages）。
+
+        Raises:
+            InvalidTransition: 源阶段未完成或缺少完成度数据。
+        """
+        raw_current = change.current_stage
+        if not raw_current or raw_current == "draft":  # 首次启动放行
+            return
+
+        stages = change.stages or {}
+        source_block = stages.get(raw_current)
+        if not isinstance(source_block, dict):  # 缺失 fail-closed
+            raise InvalidTransition(
+                f"源阶段 '{raw_current}' 未完成，无法推进（缺少完成度数据）",
+                details={"source_stage": raw_current, "reason": "missing_stage_block"},
+            )
+
+        status = source_block.get("status")
+        pending_steps = (source_block.get("steps") or {}).get("pending") or []
+
+        if status == "completed" and len(pending_steps) == 0:  # 完成 → 放行
+            return
+
+        raise InvalidTransition(  # 未完成 → 拒绝
+            f"源阶段 '{raw_current}' 未完成（status={status}, "
+            f"pending_steps={len(pending_steps)}），无法推进",
+            details={
+                "source_stage": raw_current,
+                "status": status,
+                "pending_steps_count": len(pending_steps),
+                "reason": "stage_not_completed",
+            },
+        )
 
     @staticmethod
     def _resolve_stage_completion(stage: str, result: str | None) -> tuple[str, str | None]:
