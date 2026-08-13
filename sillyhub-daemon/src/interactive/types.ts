@@ -176,6 +176,13 @@ export interface SessionState {
    */
   effectiveAllowedRoots?: string[];
   /**
+   * task-05（2026-08-13-profile-system-prompt-injection）：profile.system_prompt。
+   * create 路径从 CreateSessionInput、restore 从 PersistedSessionRecord 归一化填入。
+   * 非空时 _buildDriverOptions 设 SDK systemPrompt preset+append（保留 claude 默认 +
+   * 追加档案提示词）。undefined → 不注入（行为同今天）。
+   */
+  systemPrompt?: string;
+  /**
    * task-07（provider-switch-live-session / D-002@v1）：待处理的供应商热切换标记。
    *
    * 来源：backend set/unset_default → WS PROVIDER_CONFIG_CHANGED → daemon →
@@ -269,6 +276,8 @@ export interface CreateSessionInput {
    * undefined/空 → 用原 provider 值（FR-15）。
    */
   effectiveAllowedRoots?: string[];
+  /** task-05：profile.system_prompt（create 透传，见 SessionState 注释）。 */
+  systemPrompt?: string;
 }
 
 /** inject 返回值（runId 由 backend 在 inject 时已创建）。 */
@@ -512,6 +521,8 @@ export interface PersistedSessionRecord {
    * fallback 据此替代 allowedRootsProvider。undefined/空 → 恢复后用 provider 值。
    */
   effectiveAllowedRoots?: string[];
+  /** task-05：profile.system_prompt 落盘（resume 时重新注入 systemPrompt）。 */
+  systemPrompt?: string;
 }
 
 /** sessions.json 文件结构。 */

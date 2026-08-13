@@ -3318,6 +3318,12 @@ export class Daemon {
         // .create（session-manager 据此设 session 级检查点，累计 input+output ≥ 阈值
         // → 软切断 D-006 + 回传 budget_exceeded）。undefined → 检查点不触发（FR-07）。
         budget_tokens: execPayload.budget_tokens,
+        // task-04（2026-08-13-profile-system-prompt-injection）：profile.system_prompt
+        // 透传 SessionManager.create（backend _apply_profile_to_lease 写 lease.metadata →
+        // _PROFILE_PAYLOAD_FIELDS 双写 claim payload → execPayload.systemPrompt）。
+        // SessionManager 据此设 SDK systemPrompt preset+append（保留 claude 默认能力 +
+        // 追加档案提示词）。undefined → 不注入（行为同今天，零回归）。
+        systemPrompt: execPayload.systemPrompt,
         // 2026-08-06-public-mcp-server verify 修复（read_only 物制 / G3 / D-005@v2）：
         // worker 全走 kind=interactive（placement.py D-002@v3），原 interactive 路径在
         // _runLeaseStateMachine 对 kind=interactive 提前 return（daemon.ts:3582）跳过 ctx

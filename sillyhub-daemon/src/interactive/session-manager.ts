@@ -279,6 +279,12 @@ export interface MainAgentMcpContext {
    * provider 值（∩ 物理兜底）。undefined/空 → 用 provider 值（FR-15）。
    */
   effectiveAllowedRoots?: string[];
+  /**
+   * task-05（2026-08-13-profile-system-prompt-injection）：profile.system_prompt。
+   * create/restore 路径填入；非空时 _buildDriverOptions 设 SDK systemPrompt
+   * preset+append（保留 claude 默认能力 + 追加档案提示词）。undefined → 不注入。
+   */
+  systemPrompt?: string;
 }
 
 /**
@@ -964,6 +970,7 @@ export class SessionManager {
         mcpRefs: input.mcpRefs,
         skillRefs: input.skillRefs,
         effectiveAllowedRoots: input.effectiveAllowedRoots,
+        systemPrompt: input.systemPrompt,
       });
       const driverOpts = this._buildDriverOptions(state, {
         exePath,
@@ -973,6 +980,7 @@ export class SessionManager {
         enableApproval,
         effectiveAskUserOnly,
         mcpServers: mainAgentMcp,
+        systemPrompt: input.systemPrompt,
       });
       // task-02（D-001）：用 session 归属 driver（不再全局 this.deps.driver）。
       // 过渡期 ClaudeSdkDriver.start 同步返回 Query、InteractiveDriver.start 返回
@@ -1093,6 +1101,8 @@ export class SessionManager {
       effectiveAskUserOnly: boolean;
       resume?: string;
       mcpServers?: Record<string, McpServerConfigForDriver>;
+      /** task-05：profile.system_prompt → driverOpts.systemPrompt preset+append。 */
+      systemPrompt?: string;
     },
   ): Record<string, unknown> {
     const driverOpts: Record<string, unknown> = {
@@ -1124,6 +1134,17 @@ export class SessionManager {
     // 让主 agent discover daemon MCP server 5 tool。普通会话不传（undefined）。
     if (spec.mcpServers !== undefined) {
       driverOpts.mcpServers = spec.mcpServers;
+    }
+    // task-05（2026-08-13-profile-system-prompt-injection）：profile.system_prompt 注入。
+    // preset:claude_code + append：保留 claude 默认能力（编码/工具/use-tool）+ 追加档案
+    // 提示词（sdk.d.ts:1911-1918「Default with additions」）。仅 claude driver 消费此字段
+    // （codex 等 StartOptions 无 systemPrompt，编译期不让赋，D-005）。
+    if (spec.systemPrompt !== undefined) {
+      driverOpts.systemPrompt = {
+        type: 'preset',
+        preset: 'claude_code',
+        append: spec.systemPrompt,
+      };
     }
     // scan 真阻塞（per-session，generic-wibbling-whisper.md 改造点 C/D）：
     // enableApproval=true 时按 session 建独立 resolver + 注入远程人审 canUseTool +
@@ -2424,6 +2445,8 @@ export class SessionManager {
       ...(record.effectiveAllowedRoots !== undefined
         ? { effectiveAllowedRoots: record.effectiveAllowedRoots }
         : {}),
+      // task-05：恢复 profile.system_prompt（resume 时重新注入 systemPrompt preset+append）。
+      ...(record.systemPrompt !== undefined ? { systemPrompt: record.systemPrompt } : {}),
     };
     this._store.set(state.sessionId, state);
 
@@ -2471,6 +2494,7 @@ export class SessionManager {
         effectiveAskUserOnly: restoreAskUserOnly,
         resume: record.agentSessionId, // spike D3 跨进程 resume。
         mcpServers: mainAgentMcp,
+        systemPrompt: state.systemPrompt, // task-05：resume 重注入 systemPrompt preset+append
       });
       // task-02（D-001）：用归属 driver，按 provider 写句柄。
       const handleOrQuery = (await driver.start(
@@ -2686,6 +2710,8 @@ export class SessionManager {
         ...(state.effectiveAllowedRoots !== undefined
           ? { effectiveAllowedRoots: state.effectiveAllowedRoots }
           : {}),
+        // task-05：持久化 system_prompt，resume 时重新注入（防 daemon 重启后丢失）。
+        ...(state.systemPrompt !== undefined ? { systemPrompt: state.systemPrompt } : {}),
       });
       const driverOpts = this._buildDriverOptions(state, {
         exePath,

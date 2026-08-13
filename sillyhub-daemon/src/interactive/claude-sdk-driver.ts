@@ -212,6 +212,12 @@ export interface ClaudeStartOptions extends InteractiveDriverStartOptions {
   supportedDialogKinds?: string[];
   /** 允许工具白名单；缺省不传（D-008 不预禁工具）。 */
   allowedTools?: string[];
+  /**
+   * task-06（2026-08-13-profile-system-prompt-injection）：profile.system_prompt。
+   * SessionManager 包装成 {type:'preset',preset:'claude_code',append}（保留 claude
+   * 默认能力 + 追加档案提示词，sdk.d.ts:1911-1918）。原样透传 SDK StartOptions。
+   */
+  systemPrompt?: { type: 'preset'; preset: 'claude_code'; append?: string };
   /** env 继承；缺省 `{ ...process.env }`。 */
   env?: Record<string, string>;
 }
@@ -366,6 +372,14 @@ export class ClaudeSdkDriver implements InteractiveDriver {
     // mcpRefs undefined/空 → SessionManager 不过滤 → opts.mcpServers 是全量（FR-15）。
     if (opts.mcpServers !== undefined) {
       options.mcpServers = opts.mcpServers;
+    }
+    // task-06（2026-08-13-profile-system-prompt-injection）：profile.system_prompt 注入。
+    // SessionManager 把 systemPrompt 包装成 {type:'preset',preset:'claude_code',append}
+    // （保留 claude 默认能力 + 追加档案提示词，sdk.d.ts:1911-1918）经 driverOpts 透传。
+    // 此处原样赋 options.systemPrompt（driverOpts as unknown as 绕类型限制，与 mcpServers
+    // 同路径；SDK StartOptions.systemPrompt 原生支持此 shape）。
+    if (opts.systemPrompt !== undefined) {
+      options.systemPrompt = opts.systemPrompt;
     }
 
     // ql-20260621-partial：开启 SDK 流式 partial 消息推送。SDK 会在每个

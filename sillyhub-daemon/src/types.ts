@@ -477,6 +477,13 @@ export interface LeaseCtx {
    * undefined / 未下发 → 检查点短路（永不触发，行为零变化，FR-07 brownfield 零回归）。
    */
   budget_tokens?: number;
+  /**
+   * task-04（2026-08-13-profile-system-prompt-injection）：profile.system_prompt。
+   * 来自 claim payload（context.py task-02 双写 systemPrompt/system_prompt，源 backend
+   * _apply_profile_to_lease）。daemon 透传 SessionManager.create → SDK systemPrompt
+   * preset+append。undefined → 不注入（零回归）。
+   */
+  systemPrompt?: string;
 }
 
 /**
