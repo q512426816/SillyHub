@@ -619,6 +619,7 @@ async function computeIncrementalOps(
       path: r.oldPath,
       new_path: r.newPath,
       base_version: cached.files[r.oldPath]!.version,
+      mtime: localFiles[r.newPath]!.mtime,
     });
   }
   for (const p of cacheSet) {
@@ -632,10 +633,11 @@ async function computeIncrementalOps(
           hash: localFiles[p]!.hash,
           content: contentBufs.get(p)!.toString('base64'),
           base_version: cachedEntry.version,
+          mtime: localFiles[p]!.mtime,
         });
       }
     } else {
-      // 本地已删 → delete op（软删，服务器移备份区）
+      // 本地已删 → delete op（软删，服务器移备份区）。delete 无源文件，不带 mtime。
       ops.push({ op: 'delete', path: p, base_version: cachedEntry.version });
     }
   }
@@ -648,6 +650,7 @@ async function computeIncrementalOps(
         hash: localFiles[p]!.hash,
         content: contentBufs.get(p)!.toString('base64'),
         base_version: 0,
+        mtime: localFiles[p]!.mtime,
       });
     }
   }
@@ -722,15 +725,20 @@ export async function syncSpecTreeIfNeeded(
 /**
  * 把本地 spec 目录整树打包成 tar Buffer（零依赖手工 ustar）。
  *
- * 运行时产物默认排除（ql-20260813-004，import/push 路径都生效）：
+ * 运行时产物默认排除（ql-20260813-004 + ql-20260813-007，import/push 路径都生效）：
  *   - `runtime/`（无点，顶层）：daemon scan-runs 历史日志，文件名形如
  *     `<change名>-brainstorm-stepNN-<timestamp>.txt` 极易超 100 字节，曾触发 ustar name
  *     截断 → 后端 `_write_spec_root` read_bytes FileNotFoundError → HTTP 500。
+ *   - `.runtime/`（**有点**，顶层）：sillyspec 运行时目录——进度库 sillyspec.db（SQLite 二进制，
+ *     天然含 NUL 字节）、audit.log、gate-status.json、扫描历史、current-execute-run-id-* 等，
+ *     **无一是 spec 规范文档**。曾因 sillyspec.db 的 NUL 字节写进后端 scan_documents 文本列
+ *     触发 asyncpg `invalid byte sequence 0x00` → 整批 INSERT 回滚 HTTP 500 →「同步到服务器」
+ *     恒失败（ql-20260813-007 根治）。进度库不跨机同步，服务器侧进度以 platform_sync 投影为准。
  *   - `worktrees`（任意深度）：sillyspec worktree 工作区，可达 GB，非 spec 数据。
  *
- * D-003 push 契约保留：`.runtime/`（**有点**，含 sillyspec.db）仍回灌——守护测试
- * spec-sync.test.ts / test_apply_sync.py 锁定的是 `.runtime`（有点），仅排除其下 worktrees
- * 子树。import 路径额外通过 opts.excludeRuntime 排整个 `.runtime`，与 backend build_bundle 对称。
+ * 契约（ql-20260813-007）：`.runtime` 整树**默认排除**（与 backend `build_bundle` 的 pull 方向
+ * 任意深度排除对称，不再有 D-003@v1 的 push/pull 非对称）。`opts.excludeRuntime` 保留为冗余开关
+ * （向后兼容 daemon.ts:2301 import 路径调用，语义与默认等价）。
  *
  * name 超 100 字节时写 GNU LongLink 扩展头（buildLongLinkHeader），避免 ustar 截断。
  * 仅 regular file + directory；symlink 跳过（walkDir 不收集）。结尾追加 2×512 zero block。
@@ -742,9 +750,11 @@ export async function packSpecDir(
   opts: { excludeRuntime?: boolean; excludeNames?: string[] } = {},
 ): Promise<Buffer> {
   const excludeTop = new Set<string>(opts.excludeNames ?? []);
-  if (opts.excludeRuntime) excludeTop.add('.runtime');
-  // ql-20260813-004：运行时产物默认排除（见上方 docstring）。runtime(无点) 是 daemon scan-runs
-  // 日志（崩溃源），worktrees 是 sillyspec 工作区——都不该作为 spec 数据入包/回灌。
+  // ql-20260813-007：`.runtime`（有点）整树无条件默认排除——sillyspec 进度库(sillyspec.db)是
+  // SQLite 二进制含 NUL 字节，audit.log/扫描历史等是运行时日志，无一是 spec 数据。曾因 NUL 写进
+  // 后端 scan_documents 文本列触发 asyncpg 0x00 报错整批回滚 500。runtime(无点) 同理默认排除，
+  // worktrees 是 sillyspec 工作区可达 GB。opts.excludeRuntime 现为冗余（默认已排除），保留兼容旧调用。
+  excludeTop.add('.runtime');
   excludeTop.add('runtime');
   const pruneNames = new Set(['worktrees']);
   const chunks: Buffer[] = [];
@@ -758,7 +768,7 @@ export async function packSpecDir(
     if (Buffer.byteLength(entryName, 'utf-8') > 100) {
       chunks.push(...(await buildLongLinkHeader(entryName)));
     }
-    const header = await buildTarHeader(entryName, e.isDir ? 0 : e.size, e.isDir);
+    const header = await buildTarHeader(entryName, e.isDir ? 0 : e.size, e.isDir, e.mtimeMs);
     chunks.push(header);
     if (!e.isDir) {
       const data = await readFile(e.absPath);
@@ -906,7 +916,12 @@ async function walkDir(
  * checksum：填充其余字段后，按 unsigned byte sum 计算（checksum 字段本身视为 8 个空格），
  * 写入 6 位 octal + NUL + 空格。
  */
-async function buildTarHeader(name: string, size: number, isDir: boolean): Promise<Buffer> {
+async function buildTarHeader(
+  name: string,
+  size: number,
+  isDir: boolean,
+  mtimeMs: number = 0,
+): Promise<Buffer> {
   const header = Buffer.alloc(512, 0);
 
   // name (0-99)
@@ -923,8 +938,11 @@ async function buildTarHeader(name: string, size: number, isDir: boolean): Promi
   // size (124-135) — 11 octal digits + NUL
   header.write(size.toString(8).padStart(11, '0'), 124, 'ascii');
   header[135] = 0;
-  // mtime (136-147) — 11 octal digits + NUL（固定 0，spec 同步不需要精确时间戳）
-  header.write('00000000000', 136, 'ascii');
+  // mtime (136-147) — 11 octal digits + NUL。
+  // ql-20260813-008：保留宿主真实 mtime（秒，八进制），不再固定 0。后端 changes.updated_at
+  // 取变更目录文件 mtime max 填充，mtime=0（1970）会让"更新时间"语义失效。落盘的 tar member
+  // mtime 被后端 _write_spec_root 读取作 source_mtime，进而反映到 updated_at。
+  header.write(Math.floor(mtimeMs / 1000).toString(8).padStart(11, '0'), 136, 'ascii');
   header[147] = 0;
   // chksum (148-155) — 先填 8 个空格（计算时视为空格）
   header.write('        ', 148, 'ascii');

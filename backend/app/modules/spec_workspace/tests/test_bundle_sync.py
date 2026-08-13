@@ -179,7 +179,7 @@ class TestSync:
         assert (spec_root / "docs" / "A.md").exists()  # 保留
         assert (spec_root / "docs" / "B.md").read_text(encoding="utf-8") == "# B"
 
-    async def test_sync_receives_runtime_dir_from_tar(
+    async def test_sync_skips_runtime_dir_from_tar(
         self, db_session, client: AsyncClient, auth_headers, tmp_path
     ) -> None:
         ws = await _make_workspace(db_session)
@@ -208,10 +208,13 @@ class TestSync:
             )
 
         assert resp.status_code == 200, resp.text
-        # D-006@v2 per-file merge：tar 未包含的 .runtime/x.log 被保留；
-        # tar 内的 sillyspec.db 作为新文件落地（内容正确写入）。
-        assert (spec_root / ".runtime" / "x.log").exists()  # 保留
-        assert (spec_root / ".runtime" / "sillyspec.db").read_bytes() == b"daemon-runtime-db"
+        # ql-20260813-007：.runtime 整树不入表/不落盘（sillyspec.db 是 SQLite 二进制含 NUL，
+        # 写进 scan_documents 文本列曾触发 asyncpg 0x00 整批回滚 500）。spec 数据正常落地。
+        assert (spec_root / "docs" / "C.md").read_bytes() == b"# C"
+        # tar 内的 sillyspec.db 被跳过（未落 spec_root）。
+        assert not (spec_root / ".runtime" / "sillyspec.db").exists()
+        # spec_root 预存的 x.log 不在 merge 路径，保留。
+        assert (spec_root / ".runtime" / "x.log").exists()
 
     async def test_sync_invalid_tar_422(
         self, db_session, client: AsyncClient, auth_headers, tmp_path

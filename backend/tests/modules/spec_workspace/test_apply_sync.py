@@ -99,13 +99,15 @@ def _stub_reparse(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_apply_sync_receives_runtime_and_stamps_sync(tmp_path, db_session):
-    """apply_sync must overwrite spec_root with the tar contents, including
-    ``.runtime/`` (D-003@v1 push includes .runtime), and stamp
-    ``last_synced_at`` + ``sync_status='clean'`` (FR-07)."""
+async def test_apply_sync_skips_runtime_and_stamps_sync(tmp_path, db_session):
+    """apply_sync must overwrite spec_root with the tar's spec data, but skip
+    ``.runtime/`` members entirely (ql-20260813-007: daemon runtime artifacts like
+    sillyspec.db are not spec docs and can carry NUL bytes that crash asyncpg).
+    Still stamps ``last_synced_at`` + ``sync_status='clean'`` (FR-07)."""
     workspace_id, spec_root = await _make_spec_ws(tmp_path, db_session)
 
-    # Pre-existing backend .runtime must be overwritten, not preserved.
+    # Pre-existing backend .runtime is left untouched (daemon no longer sends .runtime;
+    # the per-file merge skips .runtime members instead of overwriting them).
     (spec_root / ".runtime").mkdir(parents=True, exist_ok=True)
     (spec_root / ".runtime" / "stale.txt").write_text("OLD", encoding="utf-8")
 
@@ -122,10 +124,10 @@ async def test_apply_sync_receives_runtime_and_stamps_sync(tmp_path, db_session)
     assert reparsed["reparsed_docs"] == 1
     # Spec tree overwritten.
     assert (spec_root / "docs" / "index.md").read_text(encoding="utf-8") == "# hello"
-    # .runtime comes from the tar (file-level merge preserves other members' docs).
-    assert (spec_root / ".runtime" / "state.json").read_text(encoding="utf-8") == '{"v":2}'
-    # stale.txt was in spec_root but not in staging tar — preserved (D-006@v2).
-    assert (spec_root / ".runtime" / "stale.txt").exists()
+    # .runtime members from the tar are skipped — never written to spec_root.
+    assert not (spec_root / ".runtime" / "state.json").exists()
+    # stale.txt (pre-existing in spec_root, not in staging merge path) is untouched.
+    assert (spec_root / ".runtime" / "stale.txt").read_text(encoding="utf-8") == "OLD"
 
     spec_ws = await svc.get(workspace_id)
     assert spec_ws.sync_status == "clean"
@@ -141,7 +143,7 @@ async def test_apply_sync_double_sync_idempotent(tmp_path, db_session):
     tar_bytes = _make_tar(
         {
             "docs/a.md": "A",
-            ".runtime/x.json": '{"a":1}',
+            "docs/b.md": "B",
         }
     )
 
@@ -155,7 +157,7 @@ async def test_apply_sync_double_sync_idempotent(tmp_path, db_session):
     assert second_ts is not None
 
     assert (spec_root / "docs" / "a.md").read_text(encoding="utf-8") == "A"
-    assert (spec_root / ".runtime" / "x.json").read_text(encoding="utf-8") == '{"a":1}'
+    assert (spec_root / "docs" / "b.md").read_text(encoding="utf-8") == "B"
     assert (await svc.get(workspace_id)).sync_status == "clean"
 
 
@@ -266,3 +268,48 @@ async def test_apply_sync_skips_member_missing_in_staging(tmp_path, db_session, 
     # keep.md landed; ghost.md skipped.
     assert (spec_root / "docs" / "keep.md").read_text(encoding="utf-8") == "keep"
     assert not (spec_root / "docs" / "ghost.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_apply_sync_skips_runtime_db_with_nul_bytes(tmp_path, db_session):
+    """A ``.runtime/sillyspec.db`` member carrying NUL bytes (SQLite binary) must
+    be skipped, not written into ``scan_documents.content`` (PG text column rejects
+    0x00 → asyncpg CharacterNotInRepertoireError → whole-batch rollback → HTTP 500).
+    Regression for ql-20260813-007: the original 「同步到服务器」恒失败 bug."""
+    from sqlalchemy import select
+
+    from app.modules.scan_docs.model import ScanDocument
+
+    workspace_id, spec_root = await _make_spec_ws(tmp_path, db_session)
+
+    # SQLite binaries are full of NUL bytes; a spec doc mixed in must still land.
+    nul_blob = b"SQLite format 3\x00\x00\x00rest-of-db\x00"
+    tar_bytes = _make_tar(
+        {
+            "docs/index.md": "# hello",
+            ".runtime/sillyspec.db": nul_blob,
+        }
+    )
+
+    svc = SpecWorkspaceService(db_session)
+    # Must not raise (no 500 from asyncpg 0x00).
+    reparsed = await svc.apply_sync(workspace_id, tar_bytes)
+
+    assert reparsed["reparsed_docs"] == 1
+    # Spec doc landed on disk; .runtime db skipped entirely.
+    assert (spec_root / "docs" / "index.md").read_text(encoding="utf-8") == "# hello"
+    assert not (spec_root / ".runtime" / "sillyspec.db").exists()
+    # No .runtime member written into scan_documents.
+    rows = (
+        (
+            await db_session.execute(
+                select(ScanDocument.path).where(
+                    ScanDocument.workspace_id == workspace_id,
+                    ScanDocument.path.like(".runtime/%"),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert rows == []

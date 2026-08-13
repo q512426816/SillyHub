@@ -617,6 +617,13 @@ class SpecWorkspaceService:
                 if not m.isfile():
                     continue
                 rel_path = m.name.replace("\\", "/")
+                # ql-20260813-007：`.runtime/`（任意深度）不入表/不落盘。daemon 运行时产物
+                # （sillyspec.db 进度库含 NUL 字节 / audit.log / 扫描历史等）无一是 spec 文档；
+                # sillyspec.db 的 NUL 写进 scan_documents 文本列曾触发 asyncpg `0x00` 整批回滚
+                # 500。此处与 build_bundle（pull 方向，service.py:520）任意深度排除对称。纵深防御：
+                # daemon packSpecDir 已默认排除 `.runtime`，此分支兜底防历史 tar / 其它打包源。
+                if any(part == ".runtime" for part in rel_path.split("/")):
+                    continue
                 src_file = staging / m.name
                 target = spec_root / rel_path
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -661,7 +668,10 @@ class SpecWorkspaceService:
                             new_source_member_id=None,
                             new_mtime=src_mtime,
                         )
-                        cur.content = content.decode("utf-8", errors="replace")
+                        # ql-20260813-007：strip NUL 字节兜底——scan_documents.content 是 PG
+                        # 文本列，asyncpg 拒绝 0x00；errors="replace" 不替换 NUL（合法 UTF-8）。
+                        # daemon packSpecDir 已排除 .runtime，此分支防其它二进制文件漏入炸整批。
+                        cur.content = content.decode("utf-8", errors="replace").replace("\x00", "")
                         cur.content_hash = ch
                         cur.source_mtime = src_mtime
                         cur.source_synced_at = now
@@ -673,7 +683,7 @@ class SpecWorkspaceService:
                         path=rel_path,
                         doc_type=rel_path.rsplit(".", 1)[-1] if "." in rel_path else "md",
                         title=rel_path.rsplit("/", 1)[-1] if "/" in rel_path else rel_path,
-                        content=content.decode("utf-8", errors="replace"),
+                        content=content.decode("utf-8", errors="replace").replace("\x00", ""),
                         content_hash=ch,
                         source_mtime=src_mtime,
                         source_synced_at=now,
@@ -819,6 +829,22 @@ class SpecWorkspaceService:
         return Path(settings.spec_data_root) / "spec-backups" / str(workspace_id)
 
     @staticmethod
+    def _apply_file_mtime(target: Path, mtime: float | None) -> None:
+        """ql-20260813-008：把 daemon 宿主真实 mtime（Unix 秒）应用到落盘文件。
+
+        落盘的镜像文件 mtime 真实，后续 change reparse 扫 mtime max 填
+        changes.updated_at 才能反映变更活动（而非同步时刻）。非法/None/缺失 → 不动
+        （保持 write_bytes 的 now）。失败静默（mtime 是展示增强，不阻断同步主流程）。
+        """
+        if mtime is None or mtime <= 0:
+            return
+        try:
+            ts = float(mtime)
+            os.utime(target, (ts, ts))
+        except (OSError, ValueError, TypeError):
+            pass
+
+    @staticmethod
     def _prune_spec_backups(backup_root: Path) -> None:
         """R-06：机会式修剪备份区早于 30 天的旧 timestamp 目录。
 
@@ -919,6 +945,9 @@ class SpecWorkspaceService:
                 target = spec_root / op.path
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(content)
+                # ql-20260813-008：应用宿主真实 mtime，让镜像文件 mtime 真实 → reparse
+                # 填的 changes.updated_at 反映变更活动（而非同步时刻）。
+                self._apply_file_mtime(target, op.mtime)
                 ch = hashlib.sha256(content).hexdigest()
                 if row is None:
                     # R-07：无行 → 视为新建，version=1
@@ -995,6 +1024,7 @@ class SpecWorkspaceService:
                     target = spec_root / op.new_path
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_bytes(content)
+                    self._apply_file_mtime(target, op.mtime)
                     ch = hashlib.sha256(content).hexdigest()
                     self._session.add(
                         SpecFileManifest(
@@ -1024,6 +1054,9 @@ class SpecWorkspaceService:
                     content = base64.b64decode(op.content)
                     new_hash = hashlib.sha256(content).hexdigest()
                     dest.write_bytes(content)
+                # ql-20260813-008：rename 后 dest 用宿主真实 mtime（move 沿用源 mtime，
+                # 此处按 op.mtime 覆盖为最新宿主态，保持与 add/update 一致）。
+                self._apply_file_mtime(dest, op.mtime)
                 await self._session.delete(row)
                 self._session.add(
                     SpecFileManifest(

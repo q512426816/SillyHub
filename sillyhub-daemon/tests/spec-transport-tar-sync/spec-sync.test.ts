@@ -188,9 +188,9 @@ describe('packSpecDir', () => {
     }
   });
 
-  it('task-06：包含 .runtime/sillyspec.db（FR-06 push 路径）+ 以 2×512 zero block 结尾', async () => {
-    // 构造 specDir：含 .runtime/sillyspec.db（task-06 起应包含）+ spec.md + sub/nested.md
-    // design §5.2 D-003：push 路径不再排除 .runtime，daemon 的 sillyspec.db 需回灌。
+  it('task-06：排除 .runtime/sillyspec.db（ql-20260813-007 push 路径整树排除）+ 以 2×512 zero block 结尾', async () => {
+    // 构造 specDir：含 .runtime/sillyspec.db（ql-20260813-007 起应排除——SQLite 二进制含 NUL
+    // 字节，写进后端 scan_documents 文本列触发 asyncpg 0x00 整批回滚 500）+ spec.md + sub/nested.md
     mkdirSync(join(scratch, '.runtime'));
     writeFileSync(join(scratch, '.runtime', 'sillyspec.db'), 'sqlite-bytes');
     writeFileSync(join(scratch, 'spec.md'), 'root-spec');
@@ -202,11 +202,11 @@ describe('packSpecDir', () => {
     expect(buf.length % 512).toBe(0);
     const tail = buf.subarray(buf.length - 1024);
     expect(tail.every((b) => b === 0)).toBe(true);
-    // 含 .runtime 段（FR-06 / G2）
+    // 不含 .runtime 段（ql-20260813-007：整树默认排除）
     const asText = buf.toString('utf-8');
-    expect(asText).toContain('.runtime');
-    expect(asText).toContain('sillyspec.db');
-    expect(asText).toContain('sqlite-bytes');
+    expect(asText).not.toContain('.runtime');
+    expect(asText).not.toContain('sillyspec.db');
+    expect(asText).not.toContain('sqlite-bytes');
     // 含 spec.md / sub/nested.md
     expect(asText).toContain('spec.md');
     expect(asText).toContain('nested.md');
