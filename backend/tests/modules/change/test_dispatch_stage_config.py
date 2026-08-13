@@ -1,22 +1,26 @@
 """Tests for STAGE_AGENT_CONFIG completeness and correctness.
 
-Validates all 5 变更流程 stages are configured with correct values.
+Validates all 可派发变更阶段 are configured with correct values。
 2026-07-02-decouple-scan-from-change-flow：scan 从变更流程移除（回归 workspace 初始化），
 仅保留 brainstorm/plan/execute/verify/archive。
+2026-08-12-quick-independent-stage：新增 quick 辅助阶段（独立流程，自己派发 quick agent），
+config 现含 6 个键（5 主线 + 1 辅助），二者并集 = 全量派发阶段。
 """
 
 from app.modules.change.dispatch import STAGE_AGENT_CONFIG
 from app.modules.change.model import StageEnum
 
 
-def test_config_has_five_entries():
-    """STAGE_AGENT_CONFIG must have exactly 5 entries (scan removed from change flow)."""
-    assert len(STAGE_AGENT_CONFIG) == 5
+def test_config_has_six_entries():
+    """STAGE_AGENT_CONFIG must have exactly 6 entries (5 主线 + quick 辅助)."""
+    assert len(STAGE_AGENT_CONFIG) == 6
 
 
 def test_config_keys_match_spec_stages():
-    """All keys must be StageEnum.XXX.value for the 6 spec stages."""
-    expected_keys = {e.value for e in StageEnum.spec_stages()}
+    """All keys must be StageEnum 主线阶段 + 辅助阶段（quick）的 value 并集."""
+    expected_keys = {e.value for e in StageEnum.spec_stages()} | {
+        e.value for e in StageEnum.spec_auxiliary_stages()
+    }
     actual_keys = set(STAGE_AGENT_CONFIG.keys())
     assert actual_keys == expected_keys
 

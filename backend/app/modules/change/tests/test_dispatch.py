@@ -49,12 +49,14 @@ class TestStageAgentConfig:
         assert config.read_only is False
 
     def test_all_expected_stages_present(self):
+        # 5 主线阶段 + quick 辅助阶段（2026-08-12-quick-independent-stage）。
         expected = {
             "brainstorm",
             "plan",
             "execute",
             "verify",
             "archive",
+            "quick",
         }
         assert set(STAGE_AGENT_CONFIG.keys()) == expected
 

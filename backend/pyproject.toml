@@ -41,6 +41,11 @@ dev = [
   "pytest-cov>=5",
   # 并行执行:20 核闲置时用 -n auto 把全量从 ~50min 压到分钟级(ql-20260723-010-32d6)。
   "pytest-xdist>=3.5",
+  # CI(GitHub Actions 2 核)低资源下 xdist + async fixture + in-memory SQLite 仍偶发竞态
+  # flaky(task/change/runtime reparse created=0 → StopIteration / 文件列表空)。本机 20 核
+  # 全量 3931 passed 复现不了,loadscope(见 addopts)已挡大部分,残余 flaky 靠 reruns 重试
+  # 兜底(与 -n 兼容)。CI 加 --reruns 2 --reruns-delay 1,本机不加(无需重试成本)。
+  "pytest-rerunfailures>=14.0",
   "ruff>=0.6",
   "mypy>=1.11",
   "types-passlib",

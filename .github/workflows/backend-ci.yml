@@ -49,4 +49,8 @@ jobs:
           REDIS_URL: redis://localhost:6379/15
           SECRET_KEY: ci-secret-must-be-at-least-16-chars
           ENVIRONMENT: test
-        run: uv run pytest -n auto -q --cov=app --cov-fail-under=60
+        # --reruns 2 --reruns-delay 1:CI 2 核低资源下 xdist + async fixture + in-memory SQLite
+        # 偶发竞态 flaky(task/change/runtime reparse created=0 → StopIteration / 文件列表空)。
+        # 本机 20 核全量 3931 passed 复现不了,loadscope 已挡大部分,残余 flaky 靠重试兜底
+        # (与 -n 兼容)。失败用例重跑最多 2 次,间隔 1s。
+        run: uv run pytest -n auto -q --cov=app --cov-fail-under=60 --reruns 2 --reruns-delay 1
