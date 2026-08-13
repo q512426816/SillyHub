@@ -489,13 +489,24 @@ class RunPlacementService:
         )
 
         # AgentSession 必须在 lease INSERT 之后（FK lease_id → daemon_task_leases.id）
+        # config.manual_approval=True 是 backend permission_service.py:320 放行
+        # PERMISSION_REQUEST（AskUserQuestion）的硬门控；缺它则 agent 提问被吞、前端
+        # 收不到、agent 死等。对齐 scan（agent/service.py:1645）/ interactive
+        # （session/service.py:488）的 config shape。ask_user_only=True 与 lease.metadata
+        # 同名键语义一致（只 AskUserQuestion 阻塞，其他工具 allow-through）。
+        stage_session_config = json.dumps(
+            {
+                "manual_approval": True,
+                "ask_user_only": True,
+            }
+        )
         await self._session.execute(
             text(
                 """
                 INSERT INTO agent_sessions
-                    (id, user_id, runtime_id, lease_id, provider, status, turn_count, created_at)
+                    (id, user_id, runtime_id, lease_id, provider, status, turn_count, config, created_at)
                 VALUES
-                    (:sid, :user_id, :runtime_id, :lease_id, :provider, 'pending', 0, :now)
+                    (:sid, :user_id, :runtime_id, :lease_id, :provider, 'pending', 0, :config, :now)
                 """
             ),
             {
@@ -504,6 +515,7 @@ class RunPlacementService:
                 "runtime_id": runtime_id.hex,
                 "lease_id": lease_id.hex,
                 "provider": provider or "claude",
+                "config": stage_session_config,
                 "now": now,
             },
         )

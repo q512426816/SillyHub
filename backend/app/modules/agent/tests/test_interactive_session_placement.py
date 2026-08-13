@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agent.model import AgentRun
+from app.modules.agent.model import AgentRun, AgentSession
 from app.modules.agent.placement import (
     NoOnlineDaemonError,
     RunPlacementService,
@@ -357,6 +357,51 @@ class TestDispatchToDaemonBindsRun:
         # 但 agent_run_id 非 NULL —— 这是 stage lease 区别于对话 lease 的关键。
         assert lease.kind == "interactive"
         assert lease.agent_run_id == run.id  # stage dispatch 绑定 FK
+
+    @pytest.mark.asyncio
+    async def test_dispatch_to_daemon_session_config_has_manual_approval(
+        self, db_session: AsyncSession
+    ) -> None:
+        """dispatch_to_daemon 建的 agent_sessions.config 必须带 manual_approval=True。
+
+        ql-20260813-003 回归：stage dispatch 的 agent 调 AskUserQuestion 时提问传不到
+        前端、死等。根因是 dispatch_to_daemon 用 raw SQL INSERT 建 agent_sessions 时漏
+        config 列（只写了 lease.metadata 的 manual_approval，没同步到 session.config），
+        被 permission_service.py:320 硬门控 `manual_approval is not True` 吞掉。本测试
+        守护 session.config 不再缺失——scan（service.py:1645）/ interactive（488）已设，
+        stage 也必须设。
+        """
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        ws_id = await _bootstrap_workspace_binding(db_session, uid, rt.id)
+        run = AgentRun(id=uuid.uuid4(), agent_type="claude_code", status="pending")
+        db_session.add(run)
+        await db_session.commit()
+
+        from unittest.mock import MagicMock
+
+        mock_hub = MagicMock()
+        mock_hub.is_connected.return_value = True
+        mock_hub.send_wakeup = AsyncMock()
+        with patch("app.modules.daemon.ws_hub.get_daemon_ws_hub", return_value=mock_hub):
+            placement = RunPlacementService(db_session)
+            await placement.dispatch_to_daemon(
+                agent_run_id=run.id,
+                user_id=uid,
+                workspace_id=ws_id,
+                provider="claude",
+                prompt="batch job",
+            )
+
+        # session 经 raw SQL INSERT 写入；run.agent_session_id 经 raw SQL UPDATE
+        # （placement.py:511-514）。ORM 对象在 expire_on_commit=False 下不自动刷新，
+        # 显式 refresh(run) 从 DB 重读 agent_session_id，再 get session 验 config。
+        await db_session.refresh(run)
+        assert run.agent_session_id is not None
+        sess = await db_session.get(AgentSession, run.agent_session_id)
+        assert sess is not None
+        assert (sess.config or {}).get("manual_approval") is True
+        assert (sess.config or {}).get("ask_user_only") is True
 
     @pytest.mark.asyncio
     async def test_expire_leases_skips_interactive_lease(self, db_session: AsyncSession) -> None:
