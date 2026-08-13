@@ -21,7 +21,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.change.model import Change
-from app.modules.change.schema import ChangeRead
+from app.modules.change.schema import ChangeRead, PendingReview
 from app.modules.change.service import ChangeService
 from app.modules.platform_sync.model import PlatformChangeProgressORM
 from app.modules.workspace.model import Workspace
@@ -70,6 +70,41 @@ def _progress_payload(stage: str) -> dict:
         "batch_progress": [],
         "approvals": [],
     }
+
+
+def _progress_with_stages(stage: str, completed_stages: set[str]) -> dict:
+    """带 stages 表行的 latest_progress（spike-01 实证：stages=顶层数组，元素字段 stage+status）。
+
+    对齐 platform_sync serializeForSync 六表 + projection._read_stage_progress_sync 的
+    ``SELECT stage FROM stages WHERE status='completed'`` 语义（D-008 task-01）。
+    """
+    return {
+        "project": {"name": "demo"},
+        "changes": [{"name": "x", "current_stage": stage, "status": "in_progress"}],
+        "stages": [{"stage": s, "status": "completed"} for s in sorted(completed_stages)],
+        "steps": [],
+        "batch_progress": [],
+        "approvals": [],
+    }
+
+
+async def _make_progress_row(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    change_name: str,
+    latest_progress: dict,
+) -> None:
+    """插入一条 platform_change_progress 行（latest_progress 镜像）。"""
+    session.add(
+        PlatformChangeProgressORM(
+            workspace_id=workspace_id,
+            change_name=change_name,
+            latest_progress=latest_progress,
+            last_pushed_at="2026-08-13T00:00:00Z",
+            last_pusher="agent",
+        )
+    )
+    await session.commit()
 
 
 @pytest.mark.asyncio
@@ -194,3 +229,239 @@ async def test_enrich_does_not_write_changes_table(db_session: AsyncSession) -> 
     # ORM 对象本身不被 enrich 改写（read-only，D-002）
     assert change.current_stage == "plan"
     assert change.status == "active"  # status 不被投影（D-004@v2）
+
+
+# ── task-01（2026-08-13-change-center-rework）：_extract_completed_stages +
+#    enrich_summaries pending_review（D-008 走 PG 镜像 + _map，不读 sillyspec.db）──
+
+
+def test_extract_completed_stages_normal() -> None:
+    """正常：stages 中 status='completed' 的 stage 名收集成集合，其余过滤。"""
+    payload = {
+        "stages": [
+            {"stage": "brainstorm", "status": "completed"},
+            {"stage": "plan", "status": "in_progress"},
+            {"stage": "execute", "status": "completed"},
+        ]
+    }
+    assert ChangeService._extract_completed_stages(payload) == {"brainstorm", "execute"}
+
+
+def test_extract_completed_stages_missing_key() -> None:
+    """缺 stages 键 → 空 set（不抛）。"""
+    assert ChangeService._extract_completed_stages({"changes": []}) == set()
+
+
+def test_extract_completed_stages_non_list() -> None:
+    """stages 非 list（None / str / dict）→ 空 set（不抛）。"""
+    assert ChangeService._extract_completed_stages({"stages": None}) == set()
+    assert ChangeService._extract_completed_stages({"stages": "brainstorm"}) == set()
+    assert ChangeService._extract_completed_stages({"stages": {"stage": "x"}}) == set()
+
+
+def test_extract_completed_stages_element_not_dict() -> None:
+    """stages 元素非 dict（None/str/int）→ 跳过不崩。"""
+    payload = {"stages": [None, "brainstorm", 123, {"stage": "plan", "status": "completed"}]}
+    assert ChangeService._extract_completed_stages(payload) == {"plan"}
+
+
+def test_extract_completed_stages_status_not_completed_filtered() -> None:
+    """status 非 'completed'（in_progress/pending/缺失）一律过滤。"""
+    payload = {
+        "stages": [
+            {"stage": "brainstorm", "status": "completed"},
+            {"stage": "plan", "status": "in_progress"},
+            {"stage": "verify", "status": "pending"},
+            {"stage": "archive"},  # 无 status 键
+        ]
+    }
+    assert ChangeService._extract_completed_stages(payload) == {"brainstorm"}
+
+
+def test_extract_completed_stages_stage_value_not_str() -> None:
+    """stage 字段值非 str（int/dict/None）→ 跳过。"""
+    payload = {
+        "stages": [
+            {"stage": 123, "status": "completed"},
+            {"stage": None, "status": "completed"},
+            {"stage": "plan", "status": "completed"},
+        ]
+    }
+    assert ChangeService._extract_completed_stages(payload) == {"plan"}
+
+
+def test_extract_completed_stages_none_payload() -> None:
+    """latest_progress=None → 空 set（不抛）。"""
+    assert ChangeService._extract_completed_stages(None) == set()
+
+
+def test_extract_completed_stages_non_dict_payload() -> None:
+    """latest_progress 非 dict（str/list/None）→ 空 set（不抛）。"""
+    assert ChangeService._extract_completed_stages("not-a-dict") == set()
+    assert ChangeService._extract_completed_stages(["a", "b"]) == set()
+
+
+@pytest.mark.asyncio
+async def test_enrich_summaries_pending_review_proposal(db_session: AsyncSession) -> None:
+    """current_stage=brainstorm + completed={brainstorm} → proposal_review（_map D-004@v2）。"""
+    ws = await _make_workspace(db_session)
+    change = await _make_change(db_session, ws.id, "pr-proposal", stage="brainstorm")
+    await _make_progress_row(
+        db_session, ws.id, "pr-proposal", _progress_with_stages("brainstorm", {"brainstorm"})
+    )
+    summaries = await ChangeService(db_session).enrich_summaries([change])
+    assert summaries[0].current_stage == "brainstorm"
+    assert summaries[0].pending_review == PendingReview.PROPOSAL_REVIEW
+
+
+@pytest.mark.asyncio
+async def test_enrich_summaries_pending_review_plan(db_session: AsyncSession) -> None:
+    """current_stage=plan + completed={plan} → plan_review。"""
+    ws = await _make_workspace(db_session)
+    change = await _make_change(db_session, ws.id, "pr-plan", stage="plan")
+    await _make_progress_row(db_session, ws.id, "pr-plan", _progress_with_stages("plan", {"plan"}))
+    summaries = await ChangeService(db_session).enrich_summaries([change])
+    assert summaries[0].pending_review == PendingReview.PLAN_REVIEW
+
+
+@pytest.mark.asyncio
+async def test_enrich_summaries_pending_review_human_test(db_session: AsyncSession) -> None:
+    """current_stage=verify + completed={verify} → human_test。"""
+    ws = await _make_workspace(db_session)
+    change = await _make_change(db_session, ws.id, "pr-verify", stage="verify")
+    await _make_progress_row(
+        db_session, ws.id, "pr-verify", _progress_with_stages("verify", {"verify"})
+    )
+    summaries = await ChangeService(db_session).enrich_summaries([change])
+    assert summaries[0].pending_review == PendingReview.HUMAN_TEST
+
+
+@pytest.mark.asyncio
+async def test_enrich_summaries_pending_review_archive_confirm(db_session: AsyncSession) -> None:
+    """current_stage=archive + completed={}（archive 未完成）→ archive_confirm。"""
+    ws = await _make_workspace(db_session)
+    change = await _make_change(db_session, ws.id, "pr-archive", stage="archive")
+    await _make_progress_row(
+        db_session, ws.id, "pr-archive", _progress_with_stages("archive", set())
+    )
+    summaries = await ChangeService(db_session).enrich_summaries([change])
+    assert summaries[0].pending_review == PendingReview.ARCHIVE_CONFIRM
+
+
+@pytest.mark.asyncio
+async def test_enrich_summaries_pending_review_none_when_execute(
+    db_session: AsyncSession,
+) -> None:
+    """current_stage=execute + completed={brainstorm,plan,execute} → None（执行中无审核门）。"""
+    ws = await _make_workspace(db_session)
+    change = await _make_change(db_session, ws.id, "pr-execute", stage="execute")
+    await _make_progress_row(
+        db_session,
+        ws.id,
+        "pr-execute",
+        _progress_with_stages("execute", {"brainstorm", "plan", "execute"}),
+    )
+    summaries = await ChangeService(db_session).enrich_summaries([change])
+    assert summaries[0].pending_review is None
+
+
+@pytest.mark.asyncio
+async def test_enrich_summaries_pending_review_none_when_no_progress_row(
+    db_session: AsyncSession,
+) -> None:
+    """无 latest_progress 行（join 不命中）→ pending_review=None（fallback，D-008 降级）。"""
+    ws = await _make_workspace(db_session)
+    change = await _make_change(db_session, ws.id, "pr-noprogress", stage="plan")
+    summaries = await ChangeService(db_session).enrich_summaries([change])
+    # current_stage 保留 change 现有值（fallback），pending_review 无镜像源 → None
+    assert summaries[0].current_stage == "plan"
+    assert summaries[0].pending_review is None
+
+
+@pytest.mark.asyncio
+async def test_enrich_summaries_pending_review_batch_mixed(db_session: AsyncSession) -> None:
+    """批量投影：多 change 各自 pending_review 独立（复用同一次 PG join，R-01）。"""
+    ws = await _make_workspace(db_session)
+    c_plan = await _make_change(db_session, ws.id, "batch-plan", stage="plan")
+    c_execute = await _make_change(db_session, ws.id, "batch-execute", stage="execute")
+    c_miss = await _make_change(db_session, ws.id, "batch-miss", stage="verify")
+    await _make_progress_row(
+        db_session, ws.id, "batch-plan", _progress_with_stages("plan", {"plan"})
+    )
+    await _make_progress_row(
+        db_session,
+        ws.id,
+        "batch-execute",
+        _progress_with_stages("execute", {"brainstorm", "plan", "execute"}),
+    )
+    summaries = await ChangeService(db_session).enrich_summaries([c_plan, c_execute, c_miss])
+    by_key = {s.change_key: s for s in summaries}
+    assert by_key["batch-plan"].pending_review == PendingReview.PLAN_REVIEW
+    assert by_key["batch-execute"].pending_review is None
+    assert by_key["batch-miss"].pending_review is None  # join 不命中 → None
+
+
+@pytest.mark.asyncio
+async def test_enrich_detail_read_pending_review_stays_none(db_session: AsyncSession) -> None:
+    """详情 READ（enrich_with_workspace_ids）不改 pending_review（NG-03 不改详情页）。
+
+    ChangeRead.pending_review 恒 None，即便 latest_progress 能算出 pending_review，
+    详情路径也只投影 current_stage（D-008 / NG-03）。
+    """
+    ws = await _make_workspace(db_session)
+    change = await _make_change(db_session, ws.id, "detail-ng03", stage="plan")
+    await _make_progress_row(
+        db_session, ws.id, "detail-ng03", _progress_with_stages("plan", {"plan"})
+    )
+    read = await ChangeService(db_session).enrich_with_workspace_ids(change)
+    assert read.current_stage == "plan"  # current_stage 仍投影
+    assert read.pending_review is None  # 详情路径 pending_review 不动（NG-03）
+
+
+# ── task-03（2026-08-13-change-center-rework）：_map 纯函数补漏分支 ──
+# task-01 经 enrich_summaries 集成路径覆盖 5 个主映射（proposal/plan/human_test/
+# archive_confirm/None-when-execute）；此处直接调 _map 静态方法（纯函数，无 DB 依赖），
+# 补 task-01 集成路径未触达的两个分支 + 一个 guard：
+# ① brainstorm completed + current_stage=plan + plan 未完成 → 仍 PROPOSAL_REVIEW
+#    （projection.py:204-207「刚切到 plan 但 plan 审核门尚未到来」窗口）
+# ② current_stage=None → None（_map 入口 guard，projection.py:185）
+# ③ archive 已 completed → None（archive_confirm 门已过落穿，projection.py:189 边界）
+
+
+def test_map_brainstorm_completed_plan_window_returns_proposal_review() -> None:
+    """brainstorm completed + current_stage=plan + plan 未完成 → PROPOSAL_REVIEW。
+
+    覆盖 projection.py:204-207「刚切到 plan 但 plan 审核门尚未到来」分支：brainstorm
+    末步刚过、stage 已切到 plan，但 plan 尚未完成时，仍属 proposal 审核窗口（不是
+    plan_review，因为 plan 还没跑完）。task-01 的 proposal 测试只覆盖
+    current_stage=brainstorm，未覆盖 stage 已推进到 plan 的边界。
+    """
+    from app.modules.change.projection import StageProjectionService
+
+    result = StageProjectionService._map("plan", {"brainstorm"})
+    assert result == PendingReview.PROPOSAL_REVIEW
+
+
+def test_map_current_stage_none_returns_none() -> None:
+    """current_stage=None → None（_map 入口 guard，projection.py:185）。
+
+    task-01 的 None 测试走「无 progress 行」集成路径（根本不调 _map）；此处直接命中
+    _map 的 None 入口 guard，保证 current_stage 缺失时绝不误报 pending_review。
+    """
+    from app.modules.change.projection import StageProjectionService
+
+    assert StageProjectionService._map(None, {"brainstorm", "plan"}) is None
+
+
+def test_map_archive_already_completed_returns_none() -> None:
+    """current_stage=archive + archive 已完成 → None（archive_confirm 门已过落穿）。
+
+    projection.py:189 要求 archive NOT in completed 才返 ARCHIVE_CONFIRM；archive 已
+    completed 说明归档门已过（change 实际归档完成），应落穿到 None，不应再提示
+    archive_confirm。task-01 的 archive_confirm 测试只覆盖 completed={}（archive 未完成）。
+    """
+    from app.modules.change.projection import StageProjectionService
+
+    assert (
+        StageProjectionService._map("archive", {"brainstorm", "plan", "verify", "archive"}) is None
+    )

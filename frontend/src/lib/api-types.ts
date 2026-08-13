@@ -8794,6 +8794,7 @@ export interface components {
             owner_id: string | null;
             /** Current Stage */
             current_stage?: string | null;
+            pending_review?: components["schemas"]["PendingReview"] | null;
             /**
              * Updated At
              * Format: date-time
@@ -19059,6 +19060,8 @@ export interface operations {
                 owner?: string | null;
                 search?: string | null;
                 current_stage?: string | null;
+                sort?: string;
+                pending_review_only?: boolean;
                 page?: number;
                 page_size?: number;
             };

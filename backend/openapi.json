@@ -2746,6 +2746,26 @@
             }
           },
           {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "updated_at_desc",
+              "title": "Sort"
+            }
+          },
+          {
+            "name": "pending_review_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Pending Review Only"
+            }
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -28353,6 +28373,16 @@
               }
             ],
             "title": "Current Stage"
+          },
+          "pending_review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PendingReview"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "updated_at": {
             "type": "string",

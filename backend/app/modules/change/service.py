@@ -106,6 +106,7 @@ class ChangeService:
         owner: str | None = None,
         search: str | None = None,
         current_stage: str | None = None,
+        sort: str = "updated_at_desc",
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[Change], int]:
@@ -114,6 +115,11 @@ class ChangeService:
         ``search`` ILIKE-matches change_key or title. Returns ``(items, total)``
         where total is the count **before** pagination (matching admin/roles 分页
         查询模式).
+
+        ``sort``（2026-08-13-change-center-rework task-02 / D-004）：白名单映射到
+        SQLAlchemy 列表达式，**不直接拼接 SQL 字符串**（防注入）。默认
+        ``updated_at_desc``（最近活动优先，取代旧 change_key asc，R-05 有意行为变化）；
+        未知值 fallback 默认（不抛）。
         """
         await self._workspace_service.get(workspace_id)
 
@@ -146,7 +152,9 @@ class ChangeService:
         count_stmt = select(func.count()).select_from(base.subquery())
         total = (await self._session.execute(count_stmt)).scalar() or 0
 
-        base = base.order_by(col(Change.change_key).asc())
+        # task-02（D-004 / R-05）：默认排序 change_key asc → updated_at desc（最近活动
+        # 优先）。sort 经白名单映射为列表达式，未知值 fallback 默认（不抛、不注入）。
+        base = base.order_by(self._resolve_order_by(sort))
         if page_size > 0:
             base = base.offset((page - 1) * page_size).limit(page_size)
 
@@ -1237,9 +1245,10 @@ class ChangeService:
         """
         change_read = ChangeRead.model_validate(change)
         projected = await self._project_current_stage([(change.workspace_id, change.change_key)])
-        stage = projected.get((change.workspace_id, change.change_key))
-        if stage is not None:
-            change_read.current_stage = stage
+        stage_info = projected.get((change.workspace_id, change.change_key))
+        if stage_info is not None:
+            # 仅投影 current_stage（NG-03：详情 READ 不改 pending_review，恒 None）。
+            change_read.current_stage = stage_info[0]
         return change_read
 
     async def enrich_summaries(self, changes: list[Change]) -> list[ChangeSummary]:
@@ -1257,15 +1266,19 @@ class ChangeService:
         summaries: list[ChangeSummary] = []
         for c in changes:
             summary = ChangeSummary.model_validate(c)
-            stage = projected.get((c.workspace_id, c.change_key))
-            if stage is not None:
+            stage_info = projected.get((c.workspace_id, c.change_key))
+            if stage_info is not None:
+                stage, completed = stage_info
                 summary.current_stage = stage
+                # task-01（D-008）：pending_review 与 current_stage 同源（latest_progress
+                # 镜像），复用 _map 纯函数（projection.py staticmethod，不读 sillyspec.db）。
+                summary.pending_review = StageProjectionService._map(stage, completed)
             summaries.append(summary)
         return summaries
 
     async def _project_current_stage(
         self, pairs: list[tuple[uuid.UUID, str]]
-    ) -> dict[tuple[uuid.UUID, str], str]:
+    ) -> dict[tuple[uuid.UUID, str], tuple[str, set[str]]]:
         """批量 read-only join ``platform_change_progress`` 取权威 current_stage。
 
         一次 ``select where (workspace_id, change_name) in (pairs)``（复合 IN，R-03 禁 N+1）。
@@ -1287,12 +1300,28 @@ class ChangeService:
             ).in_(pairs)
         )
         rows = (await self._session.execute(stmt)).all()
-        mapping: dict[tuple[uuid.UUID, str], str] = {}
+        mapping: dict[tuple[uuid.UUID, str], tuple[str, set[str]]] = {}
         for ws_id, change_name, latest_progress in rows:
             stage = self._extract_current_stage(latest_progress)
             if stage is not None and ws_id is not None:
-                mapping[(ws_id, change_name)] = stage
+                completed = self._extract_completed_stages(latest_progress)
+                mapping[(ws_id, change_name)] = (stage, completed)
         return mapping
+
+    @staticmethod
+    def _resolve_order_by(sort: str):
+        """sort 白名单 → SQLAlchemy 列表达式（task-02 / D-004，防 SQL 注入）。
+
+        **禁止直接拼接 sort 到 SQL 字符串**：仅接受白名单内的键，每个键硬编码对应
+        一个列表达式。未知值 fallback ``updated_at_desc``（默认，不抛），与 §9 兼容
+        策略一致（旧客户端 / 误传值不报错）。返回值直接喂 ``query.order_by(...)``。
+        """
+        if sort == "updated_at_asc":
+            return col(Change.updated_at).asc()
+        if sort == "change_key":
+            return col(Change.change_key).asc()
+        # 默认 + 未知值 fallback：最近活动优先（updated_at desc）。
+        return col(Change.updated_at).desc()
 
     @staticmethod
     def _extract_current_stage(latest_progress: dict | None) -> str | None:
@@ -1311,6 +1340,34 @@ class ChangeService:
             return None
         stage = first.get("current_stage")
         return stage if isinstance(stage, str) else None
+
+    @staticmethod
+    def _extract_completed_stages(latest_progress: dict | None) -> set[str]:
+        """从 ``latest_progress.stages``（顶层数组）解析 ``status='completed'`` 的 stage 集合。
+
+        task-01（D-008）：与 ``_extract_current_stage`` 同源同范式——裸 JSON 透传
+        serializeForSync 六表（NG-6 不强类型化），结构缺失/类型异常一律返空 set
+        （调用方 fallback，不抛）。spike-01 实证：``stages`` = 顶层 ``latest_progress["stages"]``
+        数组（非 ``changes[0].stages``），元素 = sillyspec.db stages 表行序列化，字段
+        ``stage``（stage 名）+ ``status``（'completed' 判定）；对齐
+        ``projection._read_stage_progress_sync`` 的 ``SELECT stage FROM stages
+        WHERE status='completed'`` 语义。
+        """
+        if not isinstance(latest_progress, dict):
+            return set()
+        stages = latest_progress.get("stages")
+        if not isinstance(stages, list):
+            return set()
+        completed: set[str] = set()
+        for item in stages:
+            if not isinstance(item, dict):
+                continue
+            if item.get("status") != "completed":
+                continue
+            stage_name = item.get("stage")
+            if isinstance(stage_name, str):
+                completed.add(stage_name)
+        return completed
 
     @staticmethod
     def _build_change(

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import shutil
+import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -268,3 +270,230 @@ async def test_list_changes_no_duplicate_items(
     ids = [i["id"] for i in body["items"]]
     assert len(ids) == len(set(ids)), "Duplicate change IDs found in list"
     assert body["total"] == len(body["items"])
+
+
+# ── task-02（2026-08-13-change-center-rework）：list 排序 + pending_review_only 筛选 ──
+# 直接经 db_session 播种 Change（可控 updated_at）+ PlatformChangeProgressORM（可控
+# pending_review），再经 client GET 端点验证。db_session 与 client 共享同一 db_engine
+# 连接池（根 conftest），提交后的行对 client 可见（agent 模块测试同款模式）。
+
+
+def _progress_with(stage: str, completed: set[str]) -> dict:
+    """带 stages 表行的 latest_progress（对齐 platform_sync serializeForSync 六表，
+    projection._read_stage_progress_sync 的 stages 表行语义；D-008 task-01 同款）。"""
+    return {
+        "project": {"name": "demo"},
+        "changes": [{"name": "x", "current_stage": stage, "status": "in_progress"}],
+        "stages": [{"stage": s, "status": "completed"} for s in sorted(completed)],
+        "steps": [],
+        "batch_progress": [],
+        "approvals": [],
+    }
+
+
+async def _seed_sortable_workspace(db_session) -> dict:
+    """建 workspace + 3 条 change（updated_at 严格递增，change_key 字母序与时间序相反）。
+
+    updated_at: alpha(1/1) < beta(1/2) < gamma(1/3)；
+    change_key 字母序: alpha < beta < gamma（与时间序相同，便于区分排序键）。
+    不挂 PlatformChangeProgressORM（pending_review=None，纯粹排序用）。
+    """
+    from app.modules.change.model import Change
+    from app.modules.workspace.model import Workspace
+
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name=f"sort-ws-{uuid.uuid4().hex[:6]}",
+        slug=f"sort-ws-{uuid.uuid4().hex[:6]}",
+        root_path=f"/tmp/sort-{uuid.uuid4().hex[:8]}",
+        status="active",
+    )
+    db_session.add(ws)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    keys_days = [("alpha-sort", 0), ("beta-sort", 1), ("gamma-sort", 2)]
+    by_key: dict[str, uuid.UUID] = {}
+    for key, day in keys_days:
+        change = Change(
+            id=uuid.uuid4(),
+            workspace_id=ws.id,
+            change_key=key,
+            title=key,
+            status="active",
+            location="active",
+            path=f"changes/{key}",
+            current_stage="execute",
+            updated_at=base + timedelta(days=day),
+        )
+        db_session.add(change)
+        by_key[key] = change.id
+    await db_session.commit()
+    return {"ws_id": ws.id, "by_key": by_key}
+
+
+async def _seed_review_workspace(db_session) -> dict:
+    """建 workspace + 4 条 change：2 条 pending_review 非空、2 条 None。
+
+    - rev-plan：progress → plan + {plan} → plan_review
+    - rev-verify：progress → verify + {verify} → human_test
+    - norev-execute：progress → execute + 全 completed → None（执行中无审核门）
+    - norev-miss：无 progress 行 → None（join 不命中 fallback）
+    updated_at 各异（避免排序影响 filter 计数断言）。
+    """
+    from app.modules.change.model import Change
+    from app.modules.platform_sync.model import PlatformChangeProgressORM
+    from app.modules.workspace.model import Workspace
+
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name=f"rev-ws-{uuid.uuid4().hex[:6]}",
+        slug=f"rev-ws-{uuid.uuid4().hex[:6]}",
+        root_path=f"/tmp/rev-{uuid.uuid4().hex[:8]}",
+        status="active",
+    )
+    db_session.add(ws)
+    base = datetime(2026, 2, 1, tzinfo=UTC)
+    specs = [
+        ("rev-plan", 0, "plan", {"plan"}, True),
+        ("rev-verify", 1, "verify", {"verify"}, True),
+        ("norev-execute", 2, "execute", {"brainstorm", "plan", "execute"}, True),
+        ("norev-miss", 3, "plan", set(), False),
+    ]
+    by_key: dict[str, uuid.UUID] = {}
+    for key, day, stage, completed, has_progress in specs:
+        change = Change(
+            id=uuid.uuid4(),
+            workspace_id=ws.id,
+            change_key=key,
+            title=key,
+            status="active",
+            location="active",
+            path=f"changes/{key}",
+            current_stage=stage,
+            updated_at=base + timedelta(days=day),
+        )
+        db_session.add(change)
+        by_key[key] = change.id
+        if has_progress:
+            db_session.add(
+                PlatformChangeProgressORM(
+                    workspace_id=ws.id,
+                    change_name=key,
+                    latest_progress=_progress_with(stage, completed),
+                    last_pushed_at="2026-08-13T00:00:00Z",
+                    last_pusher="agent",
+                )
+            )
+    await db_session.commit()
+    return {"ws_id": ws.id, "by_key": by_key}
+
+
+async def test_list_default_sort_is_updated_at_desc(
+    client, db_session, auth_headers: dict[str, str]
+) -> None:
+    """默认排序 = updated_at desc（R-05 有意行为变化，取代旧 change_key asc）。"""
+    seeded = await _seed_sortable_workspace(db_session)
+    resp = await client.get(
+        f"/api/workspaces/{seeded['ws_id']}/changes",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    keys = [i["change_key"] for i in resp.json()["items"]]
+    assert keys == ["gamma-sort", "beta-sort", "alpha-sort"]  # 最近活动优先
+
+
+async def test_list_sort_updated_at_asc(client, db_session, auth_headers: dict[str, str]) -> None:
+    """sort=updated_at_asc → 升序（最早活动优先）。"""
+    seeded = await _seed_sortable_workspace(db_session)
+    resp = await client.get(
+        f"/api/workspaces/{seeded['ws_id']}/changes",
+        params={"sort": "updated_at_asc"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    keys = [i["change_key"] for i in resp.json()["items"]]
+    assert keys == ["alpha-sort", "beta-sort", "gamma-sort"]
+
+
+async def test_list_sort_change_key(client, db_session, auth_headers: dict[str, str]) -> None:
+    """sort=change_key → 字母序（兼容旧排序）。"""
+    seeded = await _seed_sortable_workspace(db_session)
+    resp = await client.get(
+        f"/api/workspaces/{seeded['ws_id']}/changes",
+        params={"sort": "change_key"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    keys = [i["change_key"] for i in resp.json()["items"]]
+    assert keys == ["alpha-sort", "beta-sort", "gamma-sort"]
+
+
+async def test_list_sort_unknown_value_falls_back_to_default(
+    client, db_session, auth_headers: dict[str, str]
+) -> None:
+    """sort=未知值 → fallback 默认 updated_at desc（§9 不抛、不注入）。"""
+    seeded = await _seed_sortable_workspace(db_session)
+    resp = await client.get(
+        f"/api/workspaces/{seeded['ws_id']}/changes",
+        params={"sort": "DROP TABLE users;--"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200  # 不报错
+    keys = [i["change_key"] for i in resp.json()["items"]]
+    assert keys == ["gamma-sort", "beta-sort", "alpha-sort"]  # fallback desc
+
+
+async def test_list_pending_review_only_filters(
+    client, db_session, auth_headers: dict[str, str]
+) -> None:
+    """pending_review_only=true → 只返 pending_review 非空；total=过滤后数量（D-002）。"""
+    seeded = await _seed_review_workspace(db_session)
+    resp = await client.get(
+        f"/api/workspaces/{seeded['ws_id']}/changes",
+        params={"pending_review_only": "true"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    keys = {i["change_key"] for i in body["items"]}
+    assert keys == {"rev-plan", "rev-verify"}  # 只剩 pending_review 非空两条
+    assert body["total"] == 2
+    # 每条 pending_review 字段非空
+    for item in body["items"]:
+        assert item["pending_review"] is not None
+
+
+async def test_list_pending_review_only_default_false_returns_all(
+    client, db_session, auth_headers: dict[str, str]
+) -> None:
+    """pending_review_only 默认 False（兼容旧调用方）→ 返全部，total=全部。"""
+    seeded = await _seed_review_workspace(db_session)
+    resp = await client.get(
+        f"/api/workspaces/{seeded['ws_id']}/changes",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 4  # 全部 4 条
+    keys = {i["change_key"] for i in body["items"]}
+    assert keys == {"rev-plan", "rev-verify", "norev-execute", "norev-miss"}
+
+
+async def test_list_response_items_contain_pending_review_field(
+    client, db_session, auth_headers: dict[str, str]
+) -> None:
+    """ChangeSummary 响应体含 pending_review 字段（task-01 schema + task-02 透传验证）。"""
+    seeded = await _seed_review_workspace(db_session)
+    resp = await client.get(
+        f"/api/workspaces/{seeded['ws_id']}/changes",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    by_key = {i["change_key"]: i for i in items}
+    # rev-plan：plan + {plan} → plan_review（_map D-004@v2）
+    assert by_key["rev-plan"]["pending_review"] == "plan_review"
+    # rev-verify：verify + {verify} → human_test
+    assert by_key["rev-verify"]["pending_review"] == "human_test"
+    # norev-* → None
+    assert by_key["norev-execute"]["pending_review"] is None
+    assert by_key["norev-miss"]["pending_review"] is None

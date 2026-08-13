@@ -1,0 +1,194 @@
+<!--
+author: qinyi
+created_at: 2026-08-13 09:05:00
+原型：变更中心列表页重做（方案B「准」）— 线框图风格，展示重做后布局/待我处理默认视图/待审核徽标/新旧对比
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>变更中心重做 原型 — 2026-08-13-change-center-rework</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background:#f5f5f5; margin:0; padding:24px; color:#222; font-size:13px; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  h2 { font-size:14px; margin:28px 0 10px; padding-bottom:6px; border-bottom:2px solid #999; }
+  .note { color:#666; font-size:12px; margin:0 0 16px; }
+  .frame { background:#fff; border:1px solid #bbb; border-radius:6px; padding:16px; margin-bottom:8px; }
+  .hdr { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; }
+  .hdr .t { font-size:16px; font-weight:600; }
+  .hdr .sub { color:#888; font-size:12px; }
+  .btn-primary { background:#2563eb; color:#fff; border:none; padding:6px 14px; border-radius:4px; font-size:13px; cursor:pointer; }
+  .btn-ghost { background:#fff; color:#444; border:1px solid #ccc; padding:6px 12px; border-radius:4px; font-size:12px; }
+  .tabs { display:flex; gap:18px; border-bottom:1px solid #ddd; margin:12px 0; }
+  .tab { padding:8px 2px; font-size:13px; color:#666; border-bottom:2px solid transparent; cursor:pointer; }
+  .tab.active { color:#2563eb; border-bottom-color:#2563eb; font-weight:600; }
+  .tab .cnt { display:inline-block; min-width:18px; background:#eee; color:#555; border-radius:10px; padding:0 6px; font-size:11px; margin-left:4px; text-align:center; }
+  .tab.active .cnt { background:#dbeafe; color:#1d4ed8; }
+  .tab.alert .cnt { background:#fee2e2; color:#b91c1c; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th { text-align:left; color:#888; font-weight:500; padding:8px 10px; border-bottom:1px solid #eee; background:#fafafa; }
+  th .sort { color:#2563eb; }
+  td { padding:9px 10px; border-bottom:1px solid #f0f0f0; vertical-align:middle; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:500; white-space:nowrap; }
+  .b-review { background:#fef3c7; color:#92400e; }   /* 待审核 黄 */
+  .b-block  { background:#fee2e2; color:#b91c1c; }   /* 阻塞 红 */
+  .b-stage  { background:#f1f5f9; color:#475569; }   /* 阶段 灰 */
+  .mono { font-family: ui-monospace, Consolas, monospace; font-size:11px; color:#2563eb; }
+  .muted { color:#999; font-size:11px; }
+  .empty { text-align:center; padding:40px 0; color:#888; }
+  .empty .big { font-size:15px; color:#555; margin-bottom:8px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .search { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:10px 0; }
+  .field { font-size:11px; color:#888; }
+  .field input, .field select { width:100%; padding:5px 8px; border:1px solid #ddd; border-radius:4px; font-size:12px; }
+  .legend { font-size:11px; color:#666; margin-top:8px; line-height:1.7; }
+  .legend .badge { margin-right:4px; }
+  .delta { background:#fefce8; border-left:3px solid #ca8a04; padding:8px 12px; font-size:12px; color:#713f12; margin:8px 0; border-radius:0 4px 4px 0; }
+  .col-w-status { width:120px; }
+  .col-w-owner { width:90px; }
+  .col-w-stage { width:90px; }
+  .col-w-time { width:110px; text-align:right; }
+  .strike { text-decoration:line-through; color:#aaa; }
+</style>
+</head>
+<body>
+
+<h1>变更中心列表页 重做原型</h1>
+<p class="note">方案B「准」· 线框图风格（非最终视觉）· 展示布局结构 / 待我处理默认视图 / 待审核徽标 / 新旧对比</p>
+
+<!-- ========== 重做后：默认首屏 =「待我处理」 ========== -->
+<h2>① 重做后 — 进页面第一眼：「进行中」+「只看待我处理」聚焦默认勾上</h2>
+<div class="frame">
+  <div class="hdr">
+    <div>
+      <div class="t">变更中心 <span class="muted">· multi-agent-platform</span></div>
+      <div class="sub">3 个变更正在等你处理（共 20 个进行中）</div>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button class="btn-ghost">重新扫描</button>
+      <button class="btn-primary">+ 新建变更</button>
+    </div>
+  </div>
+
+  <!-- 视图切换 tab：按 location 分（进行中/已归档），D-007 -->
+  <div class="tabs">
+    <div class="tab active">进行中 <span class="cnt">20</span></div>
+    <div class="tab">已归档 <span class="cnt">8</span></div>
+  </div>
+
+  <!-- 聚焦筛选：待我处理 = 进行中的子集，默认勾上（D-007）-->
+  <div style="margin:8px 0; padding:7px 10px; background:#fef3c7; border:1px solid #fcd34d; border-radius:4px; font-size:12px;">
+    ☑ <strong>只看待我处理</strong> <span class="cnt" style="background:#fde68a;color:#92400e;">3</span>
+    <span class="muted" style="margin-left:8px;">取消勾选 → 显示全部 20 个进行中（含 AI 正在跑的）</span>
+  </div>
+
+  <!-- 查询区：grid-cols-2 不再留白 -->
+  <div class="search">
+    <div class="field">关键词 <br><input placeholder="搜索 Key / 标题 / 组件…"></div>
+    <div class="field">阶段 <br><select><option>全部阶段</option></select></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th class="col-w-status">待办状态</th>
+        <th>标题</th>
+        <th class="col-w-owner">负责人</th>
+        <th class="col-w-stage">阶段</th>
+        <th>影响组件</th>
+        <th class="col-w-time">更新时间 <span class="sort">↓</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="badge b-review">待提案审核</span></td>
+        <td><span class="mono">change-center-rework</span><br><span class="muted">变更中心列表页整体重做</span></td>
+        <td>qinyi</td>
+        <td><span class="badge b-stage">需求分析</span></td>
+        <td class="muted">frontend, change</td>
+        <td class="muted" style="text-align:right">2 分钟前</td>
+      </tr>
+      <tr>
+        <td><span class="badge b-review">待人工测试</span></td>
+        <td><span class="mono">mcp-token-ui</span><br><span class="muted">MCP Token 管理 UI</span></td>
+        <td>qinyi</td>
+        <td><span class="badge b-stage">验证</span></td>
+        <td class="muted">frontend</td>
+        <td class="muted" style="text-align:right">1 小时前</td>
+      </tr>
+      <tr>
+        <td><span class="badge b-review">待归档确认</span></td>
+        <td><span class="mono">security-fix-3</span><br><span class="muted">PPM 代填冒名防护</span></td>
+        <td>qinyi</td>
+        <td><span class="badge b-stage">归档</span></td>
+        <td class="muted">backend/ppm</td>
+        <td class="muted" style="text-align:right">昨天</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="delta">✅ 主 tab 按「死活」分（进行中/已归档）；进「进行中」默认套上「只看待我处理」聚焦——3 个等你的变更在最上面，按最近活动排序，徽标标清「待哪种审核」。取消聚焦看全部进行中。</div>
+</div>
+
+<!-- ========== 阻塞示例 ========== -->
+<h2>② 阻塞的变更一眼可见（红色徽标）</h2>
+<div class="frame">
+  <table>
+    <thead><tr><th class="col-w-status">待办状态</th><th>标题</th><th class="col-w-owner">负责人</th><th class="col-w-stage">阶段</th><th>影响组件</th><th class="col-w-time">更新时间</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><span class="badge b-block">阻塞中</span></td>
+        <td><span class="mono">daemon-kill</span><br><span class="muted">daemon kill 通道统一</span></td>
+        <td>qinyi</td>
+        <td><span class="badge b-stage">执行</span></td>
+        <td class="muted">daemon, backend</td>
+        <td class="muted" style="text-align:right">3 天前</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="legend">徽标图例：<span class="badge b-review">待提案审核 / 待计划审核 / 待人工测试 / 待归档确认</span> <span class="badge b-block">阻塞中</span> <span class="badge b-stage">阶段（需求分析/规划/执行/验证/归档）</span></div>
+</div>
+
+<!-- ========== 空状态 ========== -->
+<h2>③ 空状态：有引导，不再一句干话</h2>
+<div class="grid2">
+  <div class="frame">
+    <div class="muted" style="margin-bottom:6px;">重做后（待我处理为空）：</div>
+    <div class="empty">
+      <div class="big">🎉 暂无待你处理的变更</div>
+      <div>所有变更都在正常推进，或已全部处理完。</div>
+      <div style="margin-top:14px;"><button class="btn-primary">+ 新建变更</button>　<button class="btn-ghost">查看全部进行中</button></div>
+    </div>
+  </div>
+  <div class="frame">
+    <div class="muted" style="margin-bottom:6px;">现状（空状态）：</div>
+    <div class="empty">
+      <div class="big strike">当前没有进行中的变更。</div>
+      <div class="muted">（没有引导，用户不知道下一步干嘛）</div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== 新旧结构对比 ========== -->
+<h2>④ 整体结构：改了什么（旧 → 新）</h2>
+<div class="frame">
+  <table style="font-size:12px;">
+    <thead><tr><th style="width:200px;">位置</th><th>现状（你说"不对劲"的）</th><th>重做后</th></tr></thead>
+    <tbody>
+      <tr><td>标题区</td><td>副标题"← 组件列表"（语义怪）</td><td>workspace 名 + "N 个等你处理"计数；"+新建变更"升主按钮放右上</td></tr>
+      <tr><td>视图</td><td>只有 进行中/已归档 两个 tab，无数值</td><td>主 tab 仍 进行中/已归档（按 location）；「进行中」内加「只看待我处理」<strong>聚焦开关默认勾</strong>；tab 挂数量</td></tr>
+      <tr><td>每行状态</td><td>"状态"列(进行中/空闲) 与 "阶段"列 信息重复</td><td>删冗余"状态"列，改为「待办状态」徽标(待审核/阻塞)，阶段列保留</td></tr>
+      <tr><td>负责人</td><td>无（数据有 owner_id 没用）</td><td>新增「负责人」列</td></tr>
+      <tr><td>排序</td><td>按 change_key 字母序（无意义）</td><td>默认最近活动优先(updated_at↓)，列头可切</td></tr>
+      <tr><td>查询区</td><td>4 格网格只填 2 格，右半留白</td><td>2 格网格，无留白</td></tr>
+      <tr><td>空状态</td><td>一句干话，无引导</td><td>分场景文案 + "+新建变更"CTA</td></tr>
+      <tr><td>死代码</td><td>GATE_LABELS 定义了却永远用不上</td><td>删/重写为真正驱动的徽标映射</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<p class="note" style="margin-top:24px;">注：徽标取值对齐后端 <code>pending_review</code>（proposal_review/plan_review/human_test/archive_confirm）+ <code>status=blocked</code>。"待我处理"= 全局 pending_review 非空的变更（现有模型无 assignee）。这是线框图，最终视觉遵循项目设计系统。</p>
+
+</body>
+</html>

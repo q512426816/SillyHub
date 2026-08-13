@@ -56,6 +56,12 @@ class ChangeSummary(BaseModel):
     affected_components: list[str]
     owner_id: uuid.UUID | None
     current_stage: str | None = None
+    # D-008（2026-08-13-change-center-rework task-01）：列表项携带 pending_review。
+    # 计算字段（DTO 层），非 changes 表列（零 migration）；由 service.enrich_summaries
+    # 从 PG latest_progress 镜像解析 (current_stage, completed_stages) 经
+    # StageProjectionService._map 纯函数映射得出，与 current_stage 同源。optional
+    # default None（brownfield 安全，旧前端不读此字段不受影响）。
+    pending_review: PendingReview | None = None
     updated_at: datetime
 
 
