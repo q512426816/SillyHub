@@ -45,6 +45,7 @@ aggregate_tool_failure(logs) → should_warn_tool_failure(threshold) → 告警
 - 2026-08-05-skill-content-viewer | `skills_bundle_service` 新增 `read_skill_md(skill_name)`：白名单（sillyspec-* glob 同源 `SKILLS_GLOB`）+ 固定读 SKILL.md（不拼 path，穿越免疫）+ 三分支异常（非白名单/缺失→FileNotFoundError、>1MiB→ValueError），供 daemon `GET /skills/{name}/content` 端点调；纯 stdlib 不引 FastAPI（router 层 catch 转 HTTPException）。
 
 - 2026-08-11-agent-profile-bind-llm-provider | AgentProfile 新增 `llm_provider_id` FK（UUID nullable `ondelete=SET NULL`）+ migration `20260811104500`（单 head，parent `20260810150000`）；AgentProfileCreate/Update/Read DTO 加字段（显式 null=解绑，exclude_unset 语义）；service create/update/clone 透传；`_apply_profile_to_lease` 写 `lease.metadata["llm_provider_id"]`。
+- ql-20260813-004-f29e | `backend/app/modules/agent/profile/seed.py` 新增 `ensure_role_template_profiles`：启动时按确定性 UUID 补种 CC / GLM × 5 专家角色模板（架构师、前端、后端、项目经理、测试工程师），含完整 `system_prompt`；`backend/app/main.py` lifespan 调用；`test_profile_seed.py` 补测试。模板 `is_system_default=False`，不影响兜底链。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->

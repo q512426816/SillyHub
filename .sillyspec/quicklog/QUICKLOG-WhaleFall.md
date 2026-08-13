@@ -310,3 +310,16 @@
 根因：placement.py:491 raw SQL INSERT 建 agent_sessions 漏 config 列(只写了 lease.metadata 的 manual_approval),session.config=NULL 被 permission_service.py:320 硬门控吞掉,不建 dialog,前端收不到。
 方案：该 INSERT 加 config 列,值 {manual_approval:True, ask_user_only:True},对齐 scan(service.py:1645)；加回归测试断言 session.config(原测试只断言 lease.metadata 漏了 session.config,正是 bug 漏掉原因)。
 结果：placement+dispatch_metadata 17 passed(原16+新1),ruff+mypy 全绿；1 文件 5 行代码修复 + 1 回归测试。另改测试文件 test_interactive_session_placement.py(加回归保护,超出启动 --files 锁的 placement.py)。
+
+## ql-20260813-004-f29e | 2026-08-13 14:42:21 | 在智能体档案中为 CC（Claude Code）和 GLM（智谱）各补充 5 个专家级角色模板（架构师、前端工程师、后端工程师、项目经理、测试工程师）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/profile/seed.py（新增 ensure_role_template_profiles 与 10 个专家角色模板）
+- backend/app/main.py（lifespan 启动时调用角色模板补种）
+- backend/app/modules/agent/tests/test_profile_seed.py（新增角色模板幂等/不覆盖/补种测试）
+- .sillyspec/docs/SillyHub/modules/agent.md（变更索引追加 ql-ID）
+需求：在智能体档案中为 CC（Claude Code）和 GLM（智谱）各补充 5 个专家级角色模板（架构师、前端工程师、后端工程师、项目经理、测试工程师），并补全 system_prompt 描述。
+根因：现有平台默认档案仅含 provider/name，缺少按角色细分的专家人格与详细工作描述，无法满足按角色派发的需求。
+方案：在 backend/app/modules/agent/profile/seed.py 新增 ensure_role_template_profiles，以确定性 UUID 按 provider×role 补种 10 条 platform 级模板（is_system_default=False，不影响兜底链）；backend/app/main.py lifespan 启动时调用；更新 .sillyspec/docs/SillyHub/modules/agent.md 变更索引与 test_profile_seed.py 测试。
+结果：test_profile_seed.py 15 条全绿，profile service/router 62 条全绿；所有相关文件已 git add 待提交。

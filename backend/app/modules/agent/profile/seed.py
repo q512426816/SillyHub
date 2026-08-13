@@ -1,17 +1,24 @@
-"""启动 idempotent 补种平台默认 AgentProfile（D-015 / design §11）。
+"""启动 idempotent 补种平台默认 AgentProfile（D-015 / design §11）与角色模板。
 
 Change ``2026-08-02-agent-profile-layer`` task-11。迁移 task-01 已在新环境首次
 seed 两默认档案；本模块挂在 ``main.lifespan`` startup，负责**重启补种**——若默认
 档案被误删（或库非经迁移新建），启动时按 ``is_system_default=True`` + ``provider``
 去重补回，不覆盖用户对默认档案的改动（如改了 system_prompt / name），不产生重复行。
 
+另含 ``ensure_role_template_profiles``：按供应商 × 角色 维度补种平台级专家角色模板
+（CC / GLM × 架构师 / 前端 / 后端 / 项目经理 / 测试工程师）。模板以确定性 UUID 为身份
+键，缺失则插入、已存在则跳过，不覆盖用户编辑。
+
 铁律（对齐 plan task-11 constraints）：
-* **idempotent**——重复调用不产生重复行（按 ``is_system_default`` + ``provider`` 去重）。
-* **仅补缺失的系统默认**——不覆盖、不重置已存在默认档案的任何字段。
-* **不存密钥**（design §10 红线）——默认档案仅含 provider / name，无凭证。
+* **idempotent**——重复调用不产生重复行（系统默认按 ``is_system_default`` + ``provider``
+  去重；角色模板按确定性 ``id`` 去重）。
+* **仅补缺失**——不覆盖、不重置已存在档案的任何字段。
+* **不存密钥**（design §10 红线）——默认档案与模板均仅含人格/角色描述，无凭证。
 """
 
 from __future__ import annotations
+
+import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -64,6 +71,127 @@ async def ensure_system_default_profiles(session: AsyncSession) -> int:
                 workspace_id=None,
             )
         )
+        inserted += 1
+
+    if inserted:
+        await session.commit()
+    return inserted
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 平台专家角色模板（CC / GLM × 5 类角色）。
+#
+# 以确定性 UUID（uuid5）作为身份键，启动时按 id 去重补种；用户可基于模板复制/修改，
+# 已存在则跳过、不覆盖用户改动。visibility=platform，is_system_default=False，
+# 不影响 resolve_profile 的 provider 级兜底链（仍由 _SYSTEM_DEFAULT_PROFILES 负责）。
+# ────────────────────────────────────────────────────────────────────────────
+
+_ROLE_TEMPLATE_NAMESPACE: uuid.UUID = uuid.uuid5(
+    uuid.NAMESPACE_OID, "sillyhub.agent.role.templates"
+)
+
+_ROLE_TEMPLATE_PROVIDERS: tuple[tuple[str, str, str], ...] = (
+    # (provider_key, display_label, persona_preamble)
+    (
+        "claude",
+        "CC",
+        "你由 Claude Code 驱动，是 SillyHub 平台内的专家级智能体。擅长通过工具调用在"
+        "工作区/代码库中完成复杂工程任务，注重安全、可测试、可维护的解决方案。",
+    ),
+    (
+        "glm",
+        "GLM",
+        "你由 GLM（智谱）驱动，是 SillyHub 平台内的专家级智能体。擅长在中文工程语境"
+        "下通过工具调用完成复杂任务，注重思路清晰、输出准确、可落地执行。",
+    ),
+)
+
+_ROLE_TEMPLATE_ROLES: tuple[tuple[str, str, str], ...] = (
+    # (role_key, display_name, role_specific_prompt)
+    (
+        "architect",
+        "架构师",
+        "你是一名资深系统架构师。职责包括：梳理业务需求并转化为清晰的技术方案；"
+        "负责高层模块划分、接口契约、数据模型与核心算法选型；评估性能、安全、可扩展"
+        "性与可运维性；识别跨模块依赖与风险，给出可演进的架构决策；输出架构文档、"
+        "决策记录（ADR）与关键伪代码/接口草图。做决定时权衡多方案，优先保持简洁与"
+        "可回滚。",
+    ),
+    (
+        "frontend",
+        "前端工程师",
+        "你是一名资深前端工程师。职责包括：基于 React/Next.js/TypeScript 构建高质量"
+        "UI 组件与页面；管理状态、路由、服务端渲染与性能优化；保障可访问性（a11y）与"
+        "响应式体验；与后端 API 对接并处理错误、加载、空态等边界；编写单元测试与组件"
+        "测试；遵循项目组件库与设计系统，保持代码可维护。",
+    ),
+    (
+        "backend",
+        "后端工程师",
+        "你是一名资深后端工程师。职责包括：基于 Python/FastAPI/SQLModel 设计并实现"
+        "高可靠 API、业务逻辑与数据模型；处理并发、事务、缓存、权限与异常；编写"
+        "单元/集成测试，保障接口契约与行为稳定；关注性能、安全、可观测性与可扩展性；"
+        "与前端、daemon、LLM 网关等模块协作，确保端到端数据流正确。",
+    ),
+    (
+        "pm",
+        "项目经理",
+        "你是一名资深项目经理 / Scrum Master。职责包括：拆解需求、定义验收标准与可"
+        "交付物；制定任务优先级、里程碑与排期；识别风险、依赖与阻塞，推动沟通与决策；"
+        "协调前后端、测试、产品等角色协作；跟踪进度并确保交付质量；在变更范围蔓延时"
+        "及时提出并建议折中方案。",
+    ),
+    (
+        "qa",
+        "测试工程师",
+        "你是一名资深测试工程师 / QA。职责包括：制定测试策略与覆盖目标；设计功能、"
+        "边界、异常与回归测试用例；编写自动化测试（单元/集成/E2E），并维护测试数据"
+        "与 Mock；执行探索性测试，定位并清晰报告缺陷；推动质量门禁与 CI 集成；在交付"
+        "前给出客观的质量评估与风险说明。",
+    ),
+)
+
+
+def _build_role_template_profiles() -> list[AgentProfile]:
+    """按供应商 × 角色构造全部 10 个平台角色模板档案（含确定性 id）。"""
+    profiles: list[AgentProfile] = []
+    for provider_key, label, preamble in _ROLE_TEMPLATE_PROVIDERS:
+        for role_key, role_name, role_prompt in _ROLE_TEMPLATE_ROLES:
+            profile_id = uuid.uuid5(_ROLE_TEMPLATE_NAMESPACE, f"{provider_key}:{role_key}")
+            profiles.append(
+                AgentProfile(
+                    id=profile_id,
+                    name=f"{label} {role_name}",
+                    provider=provider_key,
+                    visibility=AgentProfileVisibility.PLATFORM,
+                    system_prompt=f"{preamble}\n\n{role_prompt}",
+                    is_system_default=False,
+                    version=1,
+                    owner_user_id=None,
+                    workspace_id=None,
+                )
+            )
+    return profiles
+
+
+async def ensure_role_template_profiles(session: AsyncSession) -> int:
+    """补种缺失的平台专家角色模板，返回本次补种数量。
+
+    模板身份由确定性 UUID 决定（uuid5(provider_key, role_key)）。已存在则跳过，
+    **不覆盖用户改动**；未落库的模板一次性插入。函数内部 ``commit``，调用方无需
+    再 commit。幂等：对已补齐的库重复调用返回 ``0`` 且无副作用。
+    """
+    desired_profiles = _build_role_template_profiles()
+    desired_ids = {p.id for p in desired_profiles}
+
+    stmt = select(AgentProfile.id).where(AgentProfile.id.in_(desired_ids))
+    existing_ids: set[uuid.UUID] = set((await session.execute(stmt)).scalars().all())
+
+    inserted = 0
+    for profile in desired_profiles:
+        if profile.id in existing_ids:
+            continue
+        session.add(profile)
         inserted += 1
 
     if inserted:
