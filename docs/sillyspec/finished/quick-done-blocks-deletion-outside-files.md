@@ -1,6 +1,8 @@
 # 活跃坑：sillyspec quick `--done` 审计硬拦【所有文件删除】，无任何 flag / `--files` 声明可解锁
 
-> 状态：**活跃（待工具修复）** · 发现于 2026-08-11 · quick `ql-20260811-002-a623` + `ql-20260811-004-067d`（change-detail-layout-rework 收尾，删 CollapsibleCard 死代码）
+> 状态：**已解决**（sillyspec commit `ac85304` 新增 `--allow-delete`，2026-08-13）· 发现于 2026-08-11 · quick `ql-20260811-002-a623` + `ql-20260811-004-067d`（change-detail-layout-rework 收尾，删 CollapsibleCard 死代码）
+>
+> **修复**：quick `--done` 新增 `--allow-delete` 显式 opt-in 解锁删除（对称 `--allow-new`，默认仍 fail-closed——删除是破坏性操作，flag 即知情）。删除审计 `allowDelete` 放行 + guard.json 持久化 + BLOCKED 提示改指向 `--allow-delete`（不再误导 `--force-baseline/--allow-new`）。删除文件仍记录到审计结果供追溯。
 
 ## 现象
 

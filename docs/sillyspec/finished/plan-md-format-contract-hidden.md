@@ -5,7 +5,9 @@ created_at: 2026-08-12T14:05:00
 
 # plan.md 格式契约隐性要求（execute 契约校验踩坑）
 
-**状态**：活跃坑，待工具修复（sillyspec CLI plan-postcheck / execute.js）
+**状态**：已解决（sillyspec commit `ac85304` 报错精度，2026-08-13）
+
+> **修复**：`validatePlanForExecute`（execute.js）新增 `diagnoseNoTaskRootCause` 诊断，无 checkbox task 时按 4 条隐性契约根因分别报错——①缺任务区（full 需 `## Wave N` / light 需 `## Tasks`）；②Wave 标题格式不对（`## W1`/`## Wave1`/`## 波次1` 不识别，须字面 `## Wave N`）；③task 用了 `### task-XX:` 标题（会打断 Wave 段）；④checkbox 不在任务区。agent 不再靠试错定位。
 
 ## 现象
 
