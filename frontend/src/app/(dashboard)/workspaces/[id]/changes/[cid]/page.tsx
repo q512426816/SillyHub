@@ -31,6 +31,7 @@ import {
   runVerifyGate,
   submitStageReview,
   triggerDispatch,
+  updateStageProfile,
   type ChangeRead,
   type DispatchResponse,
   type VerifyGateResponse,
@@ -67,6 +68,7 @@ export default function ChangeDetailPage({ params }: Props) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
   const [transitioning, setTransitioning] = useState(false);
   const [taskBoard, setTaskBoard] = useState<TaskBoard | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -78,6 +80,29 @@ export default function ChangeDetailPage({ params }: Props) {
   // 2026-08-12-dispatch-bind-agent-profile：阶段操作区改选智能体档案（方案A 仅档案，
   // 去掉手动 provider/model）。stageProfileId=null=跟随工作区默认（不选档案）。
   const [stageProfileId, setStageProfileId] = useState<string | null>(null);
+  // task-07（2026-08-13-profile-system-prompt-injection）：stageProfileId 每阶段独立持久化。
+  // change 异步加载（line 66 null → useEffect 91 setChange），用 useEffect 从
+  // change.stages[current_stage].profile_id 恢复（非 useState initializer，后者 mount 时
+  // change=null 永远求值 null）。切阶段时重读对应 stage 的 profile_id（每阶段独立 D-003）。
+  const currentStage = change?.current_stage ?? null;
+  useEffect(() => {
+    if (!change?.stages || !currentStage) return;
+    const stageData = change.stages[currentStage] as
+      | { profile_id?: string }
+      | undefined;
+    setStageProfileId(stageData?.profile_id ?? null);
+  }, [change?.stages, currentStage]);
+  const handleStageProfileChange = useCallback(
+    async (profileId: string | null) => {
+      setStageProfileId(profileId); // 乐观更新
+      try {
+        await updateStageProfile(workspaceId, changeId, profileId);
+      } catch (err) {
+        setProfileError(err instanceof ApiError ? err.message : "保存档案失败");
+      }
+    },
+    [workspaceId, changeId],
+  );
   const [teamMode, setTeamMode] = useState(false);
   const [stageWorkers, setStageWorkers] = useState<StageWorkerPreset[]>([]);
   const [stageTeamMissionId, setStageTeamMissionId] = useState<string | null>(null);
@@ -441,7 +466,7 @@ export default function ChangeDetailPage({ params }: Props) {
             advancing={advancing}
             workspaceId={workspaceId}
             stageProfileId={stageProfileId}
-            onStageProfileChange={setStageProfileId}
+            onStageProfileChange={handleStageProfileChange}
             teamMode={teamMode}
             onTeamModeChange={setTeamMode}
             stageWorkers={stageWorkers}

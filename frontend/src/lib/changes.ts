@@ -151,6 +151,23 @@ export function approveChange(workspaceId: string, changeKey: string, approvedBy
   );
 }
 
+// task-07（2026-08-13-profile-system-prompt-injection）：存每阶段独立 profile_id。
+// PATCH /changes/{cid}/stage-profile → change.stages[current_stage].profile_id。
+// profileId=null 清除（跟随工作区默认）。
+export function updateStageProfile(
+  workspaceId: string,
+  changeId: string,
+  profileId: string | null,
+) {
+  return apiFetch<{ ok: boolean }>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}/stage-profile`,
+    {
+      method: "PATCH",
+      json: { profile_id: profileId },
+    },
+  );
+}
+
 // 驳回
 // 退役（task-13，FR-06）：旧 approval 链路（approval_status + approve/reject）不再驱动
 // change 推进，changes 详情页已改走 submitStageReview（submit_stage_review 语义）。本方法
