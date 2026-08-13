@@ -286,15 +286,18 @@ async def test_old_body_no_headers_accepted(client, apikey_headers):
 
 
 async def test_apply_catches_integrity_error_falls_back_to_update(db_session):
-    """ql-20260811-005-6881：_apply catch IntegrityError 确定性回退 UPDATE。
+    """ql-20260811-005-6881 + task-04：_apply catch IntegrityError 确定性回退 UPDATE。
 
-    并发场景的等价模拟：预插行（=并发对手已抢先 INSERT 建行）后，以 row=None
-    直接调 ``_apply``（=模拟「``upsert_progress`` 的 _find_row 在对手 commit 前返回
-    None」的并发窗口）→ INSERT 撞复合唯一约束 ``uq_..._workspace_change`` → catch
-    IntegrityError → rollback → 重查行 → UPDATE 覆盖。断言不抛、行被覆盖成新值。
+    并发场景的等价模拟：建 workspace 行 + 预插行（=并发对手已抢先 INSERT 建行）后，
+    以 row=None 直接调 ``_apply``（=模拟「``upsert_progress`` 的 _find_row 在对手 commit
+    前返回 None」的并发窗口）→ INSERT 撞复合唯一约束 ``uq_..._workspace_change`` →
+    catch IntegrityError → rollback → 重查行 → UPDATE 覆盖。断言不抛、行被覆盖成新值。
 
-    用 ``workspace_id=None`` 模拟 shk_live_ 过渡路径（design §9，nullable 列 + 唯一
-    约束允许多 NULL）。
+    task-01/02/03 主键改为独立 ``id`` 后，冲突源是 ``(workspace_id, change_name)`` 复合
+    唯一（design §5 / R-03）：``workspace_id=None`` 双发不再撞唯一（SQL NULL 不参与
+    唯一性）→ 不回退、反造两行。故本用例改用**真实 workspace UUID**：预插同复合键
+    ``(ws.id, "race-x")`` 行，并发二次 INSERT 撞复合唯一 → 确定性回退 UPDATE 覆盖
+    （FR-05 / R-03，断言「回退 UPDATE 成功」而非「NULL 走 IntegrityError」）。
 
     说明：不做 ``asyncio.gather`` 端到端并发——SQLite 单连接 + anyio TaskGroup
     会把异常聚合成 ExceptionGroup 并以 ``sqlite3.IntegrityError`` 原始形态穿透到
@@ -302,22 +305,43 @@ async def test_apply_catches_integrity_error_falls_back_to_update(db_session):
     ``sqlalchemy.exc.IntegrityError`` 在 service 层被 catch）。生产有效性靠本用例
     （service 层 catch）+ 重建镜像后日志无 500 双重保证。
     """
+    import uuid
+
     from sqlalchemy import select
 
     from app.modules.platform_sync.model import PlatformChangeProgressORM
     from app.modules.platform_sync.service import PlatformSyncService
+    from app.modules.workspace.model import Workspace
 
-    # 预插行 = 并发对手已抢先 INSERT 建行（workspace_id=None 模拟 shk_live_ 过渡）
-    db_session.add(
-        PlatformChangeProgressORM(
-            workspace_id=None,
-            change_name="race-x",
-            latest_progress={"old": True},
-            last_pushed_at=T1,
-            last_pusher="rival",
-        )
+    # 建 workspace 行（workspace_id FK→workspaces，复合唯一约束参与方须为真实 UUID）
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="ws-race",
+        slug="ws-race",
+        root_path="/tmp/ws-race",
+        status="active",
     )
+    db_session.add(ws)
     await db_session.commit()
+    await db_session.refresh(ws)
+    # _apply 内部 IntegrityError → rollback 会无条件 expire 全部对象（expire_on_commit 只管
+    # commit）；先在 ws 未过期时捕获裸 uuid 局部变量，避免后面对过期属性做同步懒加载
+    # （MissingGreenlet）。
+    ws_id = ws.id
+
+    # 预插行 = 并发对手已抢先 INSERT 建行（同 workspace 复合键 (ws.id, "race-x")）
+    rival = PlatformChangeProgressORM(
+        workspace_id=ws.id,
+        change_name="race-x",
+        latest_progress={"old": True},
+        last_pushed_at=T1,
+        last_pusher="rival",
+    )
+    db_session.add(rival)
+    await db_session.commit()
+    await db_session.refresh(rival)
+    rival_id = rival.id
+    assert rival_id is not None
 
     new_body = {
         "project": {"name": "demo"},
@@ -329,15 +353,16 @@ async def test_apply_catches_integrity_error_falls_back_to_update(db_session):
     }
     svc = PlatformSyncService(db_session)
     # row=None 模拟并发窗口（upsert_progress 的 _find_row 在对手 commit 前返回 None）
-    await svc._apply(None, None, "race-x", new_body, T2, "alice")
+    await svc._apply(ws.id, None, "race-x", new_body, T2, "alice")
 
+    # expire_all 前 ws_id 已捕获（见建行处）；expire 后只访问裸 uuid 局部变量。
     db_session.expire_all()
-    # 复合键重查（workspace_id=None + change_name）
+    # 复合键重查（ws.id + change_name）
     row = (
         await db_session.execute(
             select(PlatformChangeProgressORM).where(
                 PlatformChangeProgressORM.change_name == "race-x",
-                PlatformChangeProgressORM.workspace_id.is_(None),
+                PlatformChangeProgressORM.workspace_id == ws_id,
             )
         )
     ).scalar_one_or_none()
@@ -345,6 +370,9 @@ async def test_apply_catches_integrity_error_falls_back_to_update(db_session):
     assert row.latest_progress == new_body
     assert row.last_pusher == "alice"
     assert row.last_pushed_at == T2
+    # 主键生效（task-01）：id 非 None，且回退 UPDATE 后保持对手行 id、不新造
+    assert row.id is not None
+    assert row.id == rival_id
 
 
 # ── ql-20260812-001-6eb8 GET /changes/{name}/approval（CLI execute 审批门控）────────

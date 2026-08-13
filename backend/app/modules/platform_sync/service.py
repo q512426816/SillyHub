@@ -115,6 +115,9 @@ class PlatformSyncService:
         try:
             self._session.add(
                 PlatformChangeProgressORM(
+                    # 显式 id（D-001@v1 / R-02）：model default=uuid.uuid4 会兜底，
+                    # 但显式传入语义更清晰、不依赖 default 触发时机。
+                    id=uuid.uuid4(),
                     workspace_id=workspace_id,
                     change_name=name,
                     latest_progress=body,
@@ -125,6 +128,9 @@ class PlatformSyncService:
             await self._session.commit()
         except IntegrityError:
             # 并发对手已抢先 INSERT 建行：rollback 清失败事务，重查行改走 UPDATE。
+            # 新主键（id PK，D-001@v1 / design §5）下冲突源是 (workspace_id, change_name)
+            # 复合唯一约束 uq_platform_change_progress_workspace_change（同 workspace 并发双发），
+            # 而非 change_name 单主键；跨 workspace 同名各占一行、不再撞键。
             await self._session.rollback()
             existing = await self._find_row(workspace_id, name)
             if existing is None:

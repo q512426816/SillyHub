@@ -46,6 +46,8 @@ class PlatformChangeProgressORM(BaseModel, table=True):
     不同 workspace 各占一行（D-001@v1 收件箱隔离）；workspace 删则级联删其下进度行。
     ``workspace_id`` nullable：shk_live_ 过渡期 None 行可写（design §9），投影 join 不命中
     走 fallback。
+    ``id`` 独立 UUID 主键（``default=uuid.uuid4``）：change_name 去主键后主键唯一性由 id 保证
+    （D-001@v1；change_name 全表唯一 → 同 workspace 内唯一，跨 workspace 同名各占一行）。
     """
 
     __tablename__ = "platform_change_progress"
@@ -57,6 +59,14 @@ class PlatformChangeProgressORM(BaseModel, table=True):
         ),
     )
 
+    id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            primary_key=True,
+            nullable=False,
+            default=uuid.uuid4,
+        ),
+    )
     workspace_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(
@@ -66,7 +76,7 @@ class PlatformChangeProgressORM(BaseModel, table=True):
         ),
     )
     change_name: str = Field(
-        sa_column=Column(String, primary_key=True, nullable=False),
+        sa_column=Column(String, nullable=False),
     )
     latest_progress: dict | None = Field(
         default=None,
