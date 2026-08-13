@@ -58,6 +58,17 @@ afterAll(async () => {
   );
 });
 
+// task-08（2026-08-13-platform-managed-file-sync）：postSpecSync 现读写
+// ~/.sillyhub/daemon/manifests/{ws}.json 本地清单缓存（增量 diff）。本文件不 mock
+// homedir（沿用真实 home + 测试 wsId 隔离策略），每测试前清空 manifests 目录避免
+// 跨 run 残留缓存污染首同步判定（导致 postSpecSync 0 调用）。
+beforeEach(async () => {
+  await rm(join(homedir(), '.sillyhub', 'daemon', 'manifests'), {
+    recursive: true,
+    force: true,
+  }).catch(() => {});
+});
+
 /** 构造 mock client：getSpecBundle 返回最小 tar / postSpecSync 返回 { ok, reparsed }。 */
 function makeClient(overrides: {
   getSpecBundle?: ReturnType<typeof vi.fn>;

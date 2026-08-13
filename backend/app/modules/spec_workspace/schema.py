@@ -70,3 +70,48 @@ class SpecBootstrapRunStartResponse(BaseModel):
     status: Literal["pending"]
     spec_root: str
     message: str
+
+
+# ── 增量同步 DTO（change 2026-08-13-platform-managed-file-sync / design §7）─────
+#
+# 协议：daemon 发 JSON ops（add/update/delete/rename），每文件带 base_version
+# （本地基于的服务器版本，乐观锁基准 D-001）。服务器逐 op 比对，过期收集
+# server_versions 返 conflict=True（不落盘）；正常返回 new_versions。
+
+
+class FileOp(BaseModel):
+    """One per-file operation in an incremental spec sync.
+
+    ``path`` / ``new_path`` are relative to spec_root. ``content`` is base64
+    (add/update use it); rename with unchanged content may omit both ``hash``
+    and ``content``. ``base_version`` is the file version the daemon's local
+    manifest believes the server is at (0 when unknown → R-07 hash fallback).
+    """
+
+    op: Literal["add", "update", "delete", "rename"]
+    path: str
+    new_path: str | None = Field(default=None)  # rename 用
+    hash: str | None = Field(default=None)  # SHA-256 hex
+    content: str | None = Field(default=None)  # base64，add/update 用
+    base_version: int
+
+
+class SpecIncrementalSyncRequest(BaseModel):
+    """Request body for the incremental sync endpoint (design §7)."""
+
+    ops: list[FileOp]
+
+
+class SpecIncrementalSyncResponse(BaseModel):
+    """Response body for the incremental sync endpoint (design §7).
+
+    On success ``new_versions`` maps each applied path to its new server
+    version. On a base_version conflict ``conflict=True`` and
+    ``server_versions`` carries the current server versions so the daemon can
+    surface the collision (HTTP stays 200; the daemon decides how to prompt).
+    """
+
+    ok: bool
+    new_versions: dict[str, int]  # path -> 新版本号
+    conflict: bool = False
+    server_versions: dict[str, int] | None = Field(default=None)  # 冲突时服务器当前版本

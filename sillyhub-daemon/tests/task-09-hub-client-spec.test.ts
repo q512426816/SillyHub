@@ -221,6 +221,82 @@ describe('task-09 HubClient.postSpecSync', () => {
   });
 });
 
+// ── postSpecSyncIncremental（change 2026-08-13-platform-managed-file-sync）────────
+//
+// 回归锚点（QA afb1f508 揪出）：URL 必须 /api/workspaces/{ws}/spec-workspace/sync-incremental
+// （backend spec_workspace router 挂 prefix="/api"），不能误用 REST_PREFIX(= /api/daemon)
+// 拼 → 否则真实链路恒 404 → 增量永远回退旧 tar 全量。
+
+describe('task-13 HubClient.postSpecSyncIncremental', () => {
+  it('POST /api/workspaces/{wsId}/spec-workspace/sync-incremental，JSON body，返回 {ok,new_versions,conflict,server_versions}', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockFetchResponse(
+        JSON.stringify({
+          ok: true,
+          new_versions: { 'docs/a.md': 2 },
+          conflict: false,
+          server_versions: null,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const c = new HubClient('http://hub:8000', 'tok-2');
+    const resp = await c.postSpecSyncIncremental('ws-1', [
+      { op: 'update', path: 'docs/a.md', base_version: 1 },
+    ]);
+
+    expect(resp).toEqual({
+      ok: true,
+      new_versions: { 'docs/a.md': 2 },
+      conflict: false,
+      server_versions: null,
+    });
+    // URL 必须 /api 前缀（非 /api/daemon）
+    expect(lastCall!.url).toBe(
+      'http://hub:8000/api/workspaces/ws-1/spec-workspace/sync-incremental',
+    );
+    expect(lastCall!.init.method).toBe('POST');
+    const headers = lastCall!.init.headers as Record<string, string>;
+    expect(headers['Content-Type']).toBe('application/json');
+    expect(headers.Authorization).toBe('Bearer tok-2');
+    const body = JSON.parse(String(lastCall!.init.body)) as { ops: unknown[] };
+    expect(body.ops).toEqual([{ op: 'update', path: 'docs/a.md', base_version: 1 }]);
+  });
+
+  it('conflict=true 返回体透传（不抛错，调用方据字段提示人工拍板）', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockFetchResponse(
+        JSON.stringify({
+          ok: true,
+          new_versions: {},
+          conflict: true,
+          server_versions: { 'docs/a.md': 9 },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    const c = new HubClient('http://hub:8000', 'tok-2');
+    const resp = await c.postSpecSyncIncremental('ws-1', []);
+    expect(resp.conflict).toBe(true);
+    expect(resp.server_versions).toEqual({ 'docs/a.md': 9 });
+  });
+
+  it('HTTP 非 2xx → 抛 HubHttpError', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockFetchResponse('bad payload', { status: 422 }),
+    );
+    const c = new HubClient('http://hub:8000', 'tok-2');
+    await expect(c.postSpecSyncIncremental('ws-1', [])).rejects.toMatchObject({
+      name: 'HubHttpError',
+      status: 422,
+    });
+  });
+});
+
 // 反例：HubHttpError 实例确实可被 instanceof 识别（调用方按 err.status 分支）
 describe('task-09 HubHttpError 实例化', () => {
   it('HTTP 错误抛出的是 HubHttpError 实例', async () => {

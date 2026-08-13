@@ -278,6 +278,12 @@ describe('postSpecSync', () => {
   let scratch: string;
   beforeEach(() => {
     scratch = mkdtempSync(join(tmpdir(), 'spec-sync-post-'));
+    // task-08：postSpecSync 现读写 ~/.sillyhub/daemon/manifests/{ws}.json 本地清单缓存
+    // （增量 diff），每测试清空避免跨测试同 wsId（'ws'）污染首同步判定。
+    rmSync(join(FAKE_HOME, '.sillyhub', 'daemon', 'manifests'), {
+      recursive: true,
+      force: true,
+    });
   });
   afterEach(() => {
     try {

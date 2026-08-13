@@ -3,6 +3,12 @@
 Each row represents the platform-managed spec space associated with a workspace.
 The ``workspace_id`` foreign key ties it 1:1 to ``workspaces``.
 
+Also hosts ``spec_file_manifest`` (change 2026-08-13-platform-managed-file-sync /
+D-011) — the server-authoritative per-file manifest backing the incremental
+sync protocol. It is intentionally a separate table from ``scan_documents``
+(scan_docs reparse never touches it), so file-level versions / soft-delete
+``exists`` semantics stay unambiguous.
+
 author: qinyi
 created_at: 2026-05-27
 """
@@ -13,7 +19,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text, Uuid
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, Uuid
 from sqlmodel import Field
 
 from app.models.base import BaseModel
@@ -93,6 +99,64 @@ class SpecWorkspace(BaseModel, table=True):
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+class SpecFileManifest(BaseModel, table=True):
+    """Server-authoritative per-file manifest for incremental spec sync.
+
+    Change 2026-08-13-platform-managed-file-sync / D-011: a dedicated table
+    (NOT ``scan_documents``) so the incremental protocol keeps its own
+    file-level ``version`` (optimistic-lock baseline) and soft-delete
+    ``exists`` semantics. ``scan_docs`` reparse never reads or writes this
+    table — it is written only by ``apply_ops`` (the incremental endpoint).
+
+    ``path`` is relative to the workspace ``spec_root``. ``content_hash`` is the
+    SHA-256 hex of the file content. ``version`` is bumped +1 on every applied
+    op (add/update/delete/rename); daemon sends ``base_version`` and gets a 409
+    (conflict) when the server version differs (D-001). ``exists=False`` means
+    the file was soft-deleted (moved to the spec-backups area, D-002/D-010).
+    """
+
+    __tablename__ = "spec_file_manifest"
+    __table_args__ = (
+        Index(
+            "ux_spec_manifest_ws_path",
+            "workspace_id",
+            "path",
+            unique=True,
+        ),
+        Index("ix_spec_manifest_version", "version"),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    workspace_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    path: str = Field(
+        sa_column=Column(Text, nullable=False),
+    )
+    content_hash: str = Field(
+        sa_column=Column(String(64), nullable=False),
+    )
+    version: int = Field(
+        default=1,
+        sa_column=Column(Integer, nullable=False),
+    )
+    exists: bool = Field(
+        default=True,
+        sa_column=Column(Boolean, nullable=False),
     )
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),

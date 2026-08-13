@@ -3,12 +3,29 @@
 //   - syncSpecTreeIfNeeded 的 ctx-guarded no-op / 触发 / 失败容错（D-002@v1, FR-05, R-03）
 //   - packSpecDir push 路径含 .runtime（D-003@v1 非对称契约, FR-06）
 //
+// task-08（2026-08-13-platform-managed-file-sync）：vi.mock node:os.homedir 指向
+// 每文件临时根——postSpecSync 现读写 ~/.sillyhub/daemon/manifests/{ws}.json 本地清单
+// 缓存（增量 diff，移出 specDir），不 mock homedir 会用真实 home 残留缓存污染跨 run
+// 断言（首同步/空 tar 触发语义）。
+//
 // vitest.config.ts: globals=false → 显式 import；include=tests/**/*.test.ts。
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+// ── hoisted mocks（homedir 必须在 spec-sync import 前替换）────────────────────
+const hoisted = vi.hoisted(() => ({
+  homedirMock: vi.fn((): string => '/nonexistent-spec-sync-test-home'),
+}));
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  return { ...actual, homedir: hoisted.homedirMock };
+});
+const FAKE_HOME = mkdtempSync(join(tmpdir(), 'spec-sync-test-home-'));
+hoisted.homedirMock.mockReturnValue(FAKE_HOME);
 
 import { syncSpecTreeIfNeeded, packSpecDir } from '../src/spec-sync.js';
 
@@ -37,6 +54,14 @@ function parseTarNames(buf: Buffer): string[] {
 }
 
 describe('syncSpecTreeIfNeeded (task-06 / D-002@v1)', () => {
+  beforeEach(() => {
+    // 每测试清 manifest 缓存目录（增量 diff 用），避免跨测试同 wsId 污染。
+    return rm(join(FAKE_HOME, '.sillyhub', 'daemon', 'manifests'), {
+      recursive: true,
+      force: true,
+    }).catch(() => {});
+  });
+
   it('ctx=null → no-op，不调 postSpecSync（quick-chat / shared 无 ctx）', async () => {
     const client = makeClient();
     await syncSpecTreeIfNeeded(null, client as never);
@@ -51,7 +76,7 @@ describe('syncSpecTreeIfNeeded (task-06 / D-002@v1)', () => {
 
   it('ctx 有 workspaceId → 调 postSpecSync 一次（scan 终态回灌，FR-05）', async () => {
     const client = makeClient();
-    // wsId 指向 homedir 下不存在的目录：walkDir 容错返回空 → 产空 tar → 仍触发 postSpecSync。
+    // wsId 指向 homedir 下不存在的目录：walkDir 容错返回空 → 首同步（无缓存）产空 tar → 仍触发 postSpecSync。
     await syncSpecTreeIfNeeded(
       { workspaceId: 'ws-task06-sync-trigger' },
       client as never,

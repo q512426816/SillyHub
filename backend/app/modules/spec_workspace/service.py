@@ -15,23 +15,25 @@ import base64
 import hashlib
 import io
 import json
+import os
 import shutil
 import tarfile
 import tempfile
 import uuid
 from collections.abc import AsyncIterator, Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.errors import AppError, SpecWorkspaceNotFound
 from app.core.logging import get_logger
-from app.modules.spec_workspace.model import SpecWorkspace
+from app.modules.spec_workspace.model import SpecFileManifest, SpecWorkspace
 from app.modules.spec_workspace.schema import (
+    FileOp,
     SpecWorkspaceCreate,
     SpecWorkspaceUpdate,
     SyncStatusUpdate,
@@ -42,6 +44,12 @@ log = get_logger(__name__)
 # Error code for invalid sync tar payloads (path traversal, corrupt tar, etc.).
 # Reused via AppError instances to avoid extending errors.py (task allowed_paths).
 SPEC_BUNDLE_INVALID_CODE = "HTTP_422_SPEC_BUNDLE_INVALID"
+
+# 软删备份区（change 2026-08-13-platform-managed-file-sync / R-06）：
+#   - BACKUP_TS_FORMAT：timestamped 备份子目录名（可排序、可 strptime 解析）。
+#   - SPEC_BACKUP_RETENTION_DAYS：默认保留 30 天，软删时机会式修剪早于该天数的旧目录。
+BACKUP_TS_FORMAT = "%Y%m%d%H%M%S%f"
+SPEC_BACKUP_RETENTION_DAYS = 30
 
 
 def _spec_bundle_invalid(message: str, **details: object) -> AppError:
@@ -691,6 +699,16 @@ class SpecWorkspaceService:
         spec_ws.spec_version = (spec_ws.spec_version or 0) + 1
         spec_ws.updated_at = now
         await self._session.commit()
+
+        # Q7 / R-01（change 2026-08-13-platform-managed-file-sync task-03）：旧 tar 全量
+        # 落盘后失效该 workspace 的文件级清单——整树覆盖后旧的 per-file version 无意义，
+        # 删行强制下一次增量走 R-07 兜底全量重算，避免「旧 tar push 后 version 漂移」。
+        await self._session.execute(
+            delete(SpecFileManifest).where(
+                SpecFileManifest.workspace_id == workspace_id,
+            )
+        )
+        await self._session.commit()
         return spec_ws
 
     async def apply_sync(
@@ -747,3 +765,281 @@ class SpecWorkspaceService:
             await self._session.commit()
             return 0
         return int(stats.get("parsed", 0)) if stats else 0
+
+    # ── Incremental sync（change 2026-08-13-platform-managed-file-sync）────────
+    #
+    # D-001（乐观锁）/ D-002（软删）/ D-004（文件级 version）/ D-005（rename op）/
+    # D-008（备份区）/ D-010（软删=move）/ D-011（独立 spec_file_manifest 表）：
+    # 文件级增量 ops 的唯一写者=apply_ops；scan_docs reparse 不碰此表（BL-1 解）。
+
+    @staticmethod
+    def _validate_op_path(
+        name: str,
+        spec_root: Path,
+        spec_root_resolved: Path,
+        *,
+        field: str,
+    ) -> str:
+        """containment 校验单个 op 路径（对齐旧 tar ``_extract_spec_tar_to_staging``）。
+
+        返回 POSIX 化路径。绝对路径 / 盘符 / ``..`` 逃逸 / symlink 逃逸 →
+        ``_spec_bundle_invalid`` 422（对齐 service.py:544-556 校验机制，R-09）。
+        ``.runtime`` 首段拒绝（D-006：增量范围排除 daemon 运行时产物）。
+        """
+        name = name.replace("\\", "/")
+        if name.startswith("/") or (len(name) > 1 and name[1] == ":"):
+            raise _spec_bundle_invalid(
+                "Absolute path in op is not allowed.",
+                field=field,
+                path=name,
+            )
+        if name.split("/", 1)[0] == ".runtime":
+            raise _spec_bundle_invalid(
+                "Runtime directory ops are not allowed.",
+                field=field,
+                path=name,
+            )
+        try:
+            target = (spec_root / name).resolve()
+            target.relative_to(spec_root_resolved)
+        except ValueError:
+            raise _spec_bundle_invalid(
+                "Op path escapes spec_root.",
+                field=field,
+                path=name,
+            ) from None
+        return name
+
+    def _backup_root(self, settings: Settings, workspace_id: uuid.UUID) -> Path:
+        """软删备份区根：``{settings.spec_data_root}/spec-backups/{workspace_id}``。
+
+        是 spec_root（``spec_data_root/{ws}``）的**兄弟**目录 → ``build_bundle`` 只
+        rglob spec_root 拉不到（BL-2 / D-008）。
+        """
+        return Path(settings.spec_data_root) / "spec-backups" / str(workspace_id)
+
+    @staticmethod
+    def _prune_spec_backups(backup_root: Path) -> None:
+        """R-06：机会式修剪备份区早于 30 天的旧 timestamp 目录。
+
+        只删能解析为 ``BACKUP_TS_FORMAT`` 时间戳的目录；解析失败/非目录跳过（保守
+        不误删）。软删时调用，无独立清理任务/定时器（P2 落盘决策）。
+        """
+        cutoff = datetime.now(UTC) - timedelta(days=SPEC_BACKUP_RETENTION_DAYS)
+        try:
+            names = [n for n in os.listdir(backup_root) if (backup_root / n).is_dir()]
+        except FileNotFoundError:
+            return
+        for name in names:
+            try:
+                ts = datetime.strptime(name, BACKUP_TS_FORMAT).replace(tzinfo=UTC)
+            except ValueError:
+                continue
+            if ts < cutoff:
+                try:
+                    shutil.rmtree(backup_root / name)
+                except OSError:
+                    log.warning(
+                        "spec_workspace.backup_prune_failed",
+                        backup_dir=str(backup_root / name),
+                    )
+
+    async def apply_ops(
+        self,
+        workspace_id: uuid.UUID,
+        ops: list[FileOp],
+    ) -> dict[str, object]:
+        """Apply incremental file ops to the workspace spec_root.
+
+        返回 ``{"new_versions": {path: version}, "conflict": bool,
+        "server_versions": {path: version} | None}``。
+
+        语义（design §7 / 关键落盘决策 P2 R-07）：
+        - **预校验**：所有 op 的 path/new_path 先做 containment + ``.runtime`` 校验，
+          任一越界 → 422 ``_spec_bundle_invalid``，整体不落盘（对齐 tar 先验后解）。
+        - **有清单行**：``row.version != op.base_version`` → conflict（收集
+          server_versions[path]=row.version，跳过该 op 不落盘）；匹配 → 应用。
+        - **无清单行**（首推 / 旧 tar 失效后）→ R-07 hash 兜底：add/update 视为新建
+          version=1；delete 无行 → no-op 成功（幂等）；rename 无行 → 按 add new_path 处理。
+        - add/update：content(base64) 解码写 spec_root + upsert 清单
+          （content_hash=sha256(解码内容)，version+1，exists=True）。
+        - delete：软删 move 出 spec_root 到 ``spec_data_root/spec-backups/{ws}/{ts}/{path}``
+          （D-010 move 非 copy），清单 exists=False + version+1；机会式修剪该 ws 备份区
+          早于 30 天的旧目录（R-06）。
+        - rename：``shutil.move`` 旧→新 + 清单 path 迁移（version+1，hash 相同可保留内容）。
+        冲突 op 跳过、其余照常 apply，整体返回 conflict=True；校验失败整体 422 不落盘。
+        """
+        spec_ws = await self.get(workspace_id)
+        spec_root = Path(spec_ws.spec_root)
+        spec_root.mkdir(parents=True, exist_ok=True)
+        spec_root_resolved = spec_root.resolve()
+        settings = get_settings()
+
+        # 1. 预校验全部 op 路径（containment + .runtime），任一越界 422 整体不落盘。
+        for op in ops:
+            self._validate_op_path(op.path, spec_root, spec_root_resolved, field="path")
+            if op.new_path is not None:
+                self._validate_op_path(op.new_path, spec_root, spec_root_resolved, field="new_path")
+
+        now = datetime.now(UTC)
+        new_versions: dict[str, int] = {}
+        server_versions: dict[str, int] | None = None
+        conflict = False
+
+        for op in ops:
+            # 查清单行（workspace_id+path）
+            row = (
+                (
+                    await self._session.execute(
+                        select(SpecFileManifest).where(
+                            SpecFileManifest.workspace_id == workspace_id,
+                            SpecFileManifest.path == op.path,
+                        )
+                    )
+                )
+                .scalars()
+                .first()
+            )
+
+            # base_version 乐观锁（D-001）：有行且版本不匹配 → conflict，跳过不落盘。
+            if row is not None and row.version != op.base_version:
+                conflict = True
+                if server_versions is None:
+                    server_versions = {}
+                server_versions[op.path] = row.version
+                continue
+
+            if op.op in ("add", "update"):
+                if op.content is None:
+                    raise _spec_bundle_invalid(
+                        "add/update op requires content.",
+                        path=op.path,
+                    )
+                content = base64.b64decode(op.content)
+                target = spec_root / op.path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(content)
+                ch = hashlib.sha256(content).hexdigest()
+                if row is None:
+                    # R-07：无行 → 视为新建，version=1
+                    new_row = SpecFileManifest(
+                        workspace_id=workspace_id,
+                        path=op.path,
+                        content_hash=ch,
+                        version=1,
+                        exists=True,
+                        updated_at=now,
+                    )
+                    self._session.add(new_row)
+                    new_versions[op.path] = 1
+                else:
+                    new_version = row.version + 1
+                    row.content_hash = ch
+                    row.version = new_version
+                    row.exists = True
+                    row.updated_at = now
+                    new_versions[op.path] = new_version
+
+            elif op.op == "delete":
+                # R-07：无行 → no-op 成功（幂等），不写 new_versions。
+                if row is not None:
+                    backup_root = self._backup_root(settings, workspace_id)
+                    ts = datetime.now(UTC).strftime(BACKUP_TS_FORMAT)
+                    dest = backup_root / ts / op.path
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    src = spec_root / op.path
+                    try:
+                        shutil.move(str(src), str(dest))
+                    except FileNotFoundError:
+                        # 磁盘文件已不存在（并发删/从未落盘）→ 仅推进状态，软删语义仍成立
+                        pass
+                    row.version = row.version + 1
+                    row.exists = False
+                    row.updated_at = now
+                    new_versions[op.path] = row.version
+                    self._prune_spec_backups(backup_root)
+
+            elif op.op == "rename":
+                if op.new_path is None:
+                    raise _spec_bundle_invalid(
+                        "rename op requires new_path.",
+                        path=op.path,
+                    )
+                # 目标路径已被占用 → conflict（乐观锁对目标也成立）
+                target_row = (
+                    (
+                        await self._session.execute(
+                            select(SpecFileManifest).where(
+                                SpecFileManifest.workspace_id == workspace_id,
+                                SpecFileManifest.path == op.new_path,
+                            )
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
+                if target_row is not None:
+                    conflict = True
+                    if server_versions is None:
+                        server_versions = {}
+                    server_versions[op.new_path] = target_row.version
+                    continue
+                # R-07：无旧行 → 按 add new_path 处理
+                if row is None:
+                    if op.content is None:
+                        raise _spec_bundle_invalid(
+                            "rename without source row requires content.",
+                            path=op.path,
+                        )
+                    content = base64.b64decode(op.content)
+                    target = spec_root / op.new_path
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(content)
+                    ch = hashlib.sha256(content).hexdigest()
+                    self._session.add(
+                        SpecFileManifest(
+                            workspace_id=workspace_id,
+                            path=op.new_path,
+                            content_hash=ch,
+                            version=1,
+                            exists=True,
+                            updated_at=now,
+                        )
+                    )
+                    new_versions[op.new_path] = 1
+                    continue
+                # 常规 rename：move 文件 + 清单 path 迁移（删旧行 + 插新行）
+                new_version = row.version + 1
+                new_hash = row.content_hash
+                src = spec_root / op.path
+                dest = spec_root / op.new_path
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                # rename 语义：旧路径文件**消失**（无论是否重传 content）——先 move，
+                # 若带 content 再覆写目标为新内容（避免 src 残留孤儿文件，QA 揪出）。
+                try:
+                    shutil.move(str(src), str(dest))
+                except FileNotFoundError:
+                    pass  # 源文件不存在 → 仅推进清单状态
+                if op.content is not None:
+                    content = base64.b64decode(op.content)
+                    new_hash = hashlib.sha256(content).hexdigest()
+                    dest.write_bytes(content)
+                await self._session.delete(row)
+                self._session.add(
+                    SpecFileManifest(
+                        workspace_id=workspace_id,
+                        path=op.new_path,
+                        content_hash=new_hash,
+                        version=new_version,
+                        exists=True,
+                        updated_at=now,
+                    )
+                )
+                new_versions[op.new_path] = new_version
+
+        await self._session.commit()
+        return {
+            "new_versions": new_versions,
+            "conflict": conflict,
+            "server_versions": server_versions,
+        }

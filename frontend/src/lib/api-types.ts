@@ -7381,6 +7381,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/spec-workspace/sync-incremental": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sync Spec Workspace Incremental
+         * @description Receive daemon incremental file ops and apply them to spec_root.
+         *
+         *     Change 2026-08-13-platform-managed-file-sync / design §7 / FR-02 / D-001：
+         *     文件级增量同步（add/update/delete/rename + base_version 乐观锁）。base_version
+         *     过期 → ``conflict=True`` + ``server_versions``（HTTP 保持 200，daemon 侧据字段
+         *     提示人工拍板，design §7 定义）；containment / ``.runtime`` 越界 → 422 AppError
+         *     透传（``HTTP_422_SPEC_BUNDLE_INVALID``，对齐旧 tar 端点校验机制）。
+         */
+        post: operations["sync_spec_workspace_incremental_api_workspaces__workspace_id__spec_workspace_sync_incremental_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/spec-bootstrap": {
         parameters: {
             query?: never;
@@ -9932,6 +9958,32 @@ export interface components {
             owner_type: string;
             /** Owner Id */
             owner_id?: string | null;
+        };
+        /**
+         * FileOp
+         * @description One per-file operation in an incremental spec sync.
+         *
+         *     ``path`` / ``new_path`` are relative to spec_root. ``content`` is base64
+         *     (add/update use it); rename with unchanged content may omit both ``hash``
+         *     and ``content``. ``base_version`` is the file version the daemon's local
+         *     manifest believes the server is at (0 when unknown → R-07 hash fallback).
+         */
+        FileOp: {
+            /**
+             * Op
+             * @enum {string}
+             */
+            op: "add" | "update" | "delete" | "rename";
+            /** Path */
+            path: string;
+            /** New Path */
+            new_path?: string | null;
+            /** Hash */
+            hash?: string | null;
+            /** Content */
+            content?: string | null;
+            /** Base Version */
+            base_version: number;
         };
         /**
          * FileUploadResp
@@ -14868,6 +14920,40 @@ export interface components {
             status: "open" | "approved" | "rejected" | "resolved";
             /** Details Json */
             details_json?: string | null;
+        };
+        /**
+         * SpecIncrementalSyncRequest
+         * @description Request body for the incremental sync endpoint (design §7).
+         */
+        SpecIncrementalSyncRequest: {
+            /** Ops */
+            ops: components["schemas"]["FileOp"][];
+        };
+        /**
+         * SpecIncrementalSyncResponse
+         * @description Response body for the incremental sync endpoint (design §7).
+         *
+         *     On success ``new_versions`` maps each applied path to its new server
+         *     version. On a base_version conflict ``conflict=True`` and
+         *     ``server_versions`` carries the current server versions so the daemon can
+         *     surface the collision (HTTP stays 200; the daemon decides how to prompt).
+         */
+        SpecIncrementalSyncResponse: {
+            /** Ok */
+            ok: boolean;
+            /** New Versions */
+            new_versions: {
+                [key: string]: number;
+            };
+            /**
+             * Conflict
+             * @default false
+             */
+            conflict: boolean;
+            /** Server Versions */
+            server_versions?: {
+                [key: string]: number;
+            } | null;
         };
         /**
          * SpecSyncResponse
@@ -31576,6 +31662,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SpecSyncResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_spec_workspace_incremental_api_workspaces__workspace_id__spec_workspace_sync_incremental_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpecIncrementalSyncRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecIncrementalSyncResponse"];
                 };
             };
             /** @description Validation Error */

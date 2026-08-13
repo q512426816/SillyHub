@@ -108,6 +108,31 @@ export interface HeartbeatBody {
   providers: { provider: string; status?: string }[];
 }
 
+// ── 增量 spec 同步类型（change 2026-08-13-platform-managed-file-sync / design §7）──
+//
+// 字段命名与 backend spec_workspace/schema.py 的 FileOp 逐字一致（避免 422）。
+// 端点 POST /api/workspaces/{wsId}/spec-workspace/sync-incremental 返回
+// { ok, new_versions, conflict, server_versions }（conflict=true 时 HTTP 仍 200，
+// daemon 侧据字段提示人工拍板，不抛错）。
+
+/** 单文件增量 op（对齐 backend FileOp）。content 为 base64（add/update 用）。 */
+export interface FileOp {
+  op: 'add' | 'update' | 'delete' | 'rename';
+  path: string;
+  new_path?: string | null;
+  hash?: string | null;
+  content?: string | null;
+  base_version: number;
+}
+
+/** 增量同步响应（对齐 backend SpecIncrementalSyncResponse）。 */
+export interface SpecIncrementalSyncResult {
+  ok: boolean;
+  new_versions: Record<string, number>;
+  conflict: boolean;
+  server_versions?: Record<string, number> | null;
+}
+
 // ── 错误类型 ──────────────────────────────────────────────────────────────────
 
 /**
@@ -912,6 +937,36 @@ export class HubClient {
       throw new HubHttpError(resp.status, bodyText, url, 'POST');
     }
     return await parseJsonFromResponse<{ ok: boolean; reparsed: number }>(resp);
+  }
+
+  /**
+   * 增量推送 daemon 本地 spec 文件改动到服务器（change 2026-08-13-platform-managed-file-sync）。
+   *
+   * 端点：POST /api/workspaces/{wsId}/spec-workspace/sync-incremental（task-04）。
+   * 请求：Content-Type: application/json（_request 已设），body `{ ops: FileOp[] }`，
+   * ops 字段与 backend schema.py 逐字一致（op/path/new_path/hash/content/base_version）。
+   * 响应：200 `{ ok, new_versions, conflict, server_versions }`。
+   *
+   * **冲突语义**：backend 对 base_version 过期的 op 返回 conflict=true + server_versions
+   * （HTTP 仍 200，design §7）。本方法**不抛错**，由调用方据 ``conflict`` 字段提示人工
+   * 拍板；仅 HTTP 非 2xx（422 越界 payload / 404 旧后端无此端点 / 5xx）抛 HubHttpError。
+   *
+   * @param wsId workspace id
+   * @param ops 增量 ops 列表（FileOp）
+   * @returns backend 响应 { ok, new_versions, conflict, server_versions }
+   */
+  async postSpecSyncIncremental(
+    wsId: string,
+    ops: FileOp[],
+  ): Promise<SpecIncrementalSyncResult> {
+    // ⚠️ URL 必须用 /api 前缀（与旧 postSpecSync 一致），不能用 REST_PREFIX（= /api/daemon）——
+    // backend spec_workspace router 挂在 prefix="/api"（main.py include_router），
+    // 用 REST_PREFIX 拼出的 /api/daemon/workspaces/... 恒 404 → 增量永远回退旧 tar（QA afb1f508 揪出）。
+    return this._request<SpecIncrementalSyncResult>(
+      'POST',
+      `/api/workspaces/${encodeURIComponent(wsId)}/spec-workspace/sync-incremental`,
+      { ops },
+    );
   }
 
   // -- task-11 / FR-08 / D-004@v1：daemon-client change-write 轻量回执通道 ---------

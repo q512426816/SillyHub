@@ -93,7 +93,8 @@ export interface paths {
          *
          *     读 ``daemon-dist/install.ps1`` 模板，把 ``{{SERVER_URL}}`` 占位替换为据请求头
          *     推导出的对外地址（scheme 经 X-Forwarded-Proto 还原、host 经白名单校验），
-         *     返回 ``application/x-powershell``。镜像未打包则 404。
+         *     返回 ``application/x-powershell; charset=utf-8``（显式 charset：非 text/* 时 starlette
+         *     不自动补，缺失则 PowerShell ``irm`` 按 latin1 解码 UTF-8 body 致中文乱码）。镜像未打包则 404。
          */
         get: operations["get_install_ps1_daemon_install_ps1_get"];
         put?: never;
@@ -1364,6 +1365,62 @@ export interface paths {
         put?: never;
         /** Transition Change */
         post: operations["transition_change_api_workspaces__workspace_id__changes__change_id__transition_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/changes/{change_id}/advance-stage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Advance Stage
+         * @description 单步推进 change 阶层（task-11，design §6.3 / D-005）。
+         *
+         *     前端 ``handleDispatch`` 走 HTTP（非直连 MCP），与 task-07
+         *     ``advance_change_stage`` MCP tool 共用同一 service 方法
+         *     ``ChangeService.transition_with_dispatch``（team 分流：single → AgentService，
+         *     team → _dispatch_execute_team）。body/响应与 ``/transition`` 完全对齐——
+         *     ``advance-stage`` 为前端语义命名别名（D-005 选 HTTP 入口）。
+         */
+        post: operations["advance_stage_api_workspaces__workspace_id__changes__change_id__advance_stage_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/changes/{change_id}/run-verify-gate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Verify Gate
+         * @description gate 软调用（task-11，design §6.2/§6.3 / D-003/D-008）。
+         *
+         *     与 task-09 ``run_verify_gate`` MCP tool 对齐，**不硬阻塞、不改 change 状态**
+         *     （结果交调用方决策，核验纪律靠调用方）：
+         *
+         *     1. 优先读最近 completed AgentRun.gate_result（``_read_latest_gate_result``）
+         *        → ``source="gate_result"``。
+         *     2. gate_result 缺 → 经 ``_run_gate_via_delegate`` 软调 ``sillyspec gate verify``
+         *        （复用 task-06 RPC 骨架，不自动阻塞推进）→ ``source="gate_cmd"``。
+         *     3. 两者均不可用（workspace 无 code_root / RPC 异常 / daemon 离线）
+         *        → ``source="unavailable"``, ``exit_code=None``。
+         */
+        post: operations["run_verify_gate_api_workspaces__workspace_id__changes__change_id__run_verify_gate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7324,6 +7381,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/spec-workspace/sync-incremental": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sync Spec Workspace Incremental
+         * @description Receive daemon incremental file ops and apply them to spec_root.
+         *
+         *     Change 2026-08-13-platform-managed-file-sync / design §7 / FR-02 / D-001：
+         *     文件级增量同步（add/update/delete/rename + base_version 乐观锁）。base_version
+         *     过期 → ``conflict=True`` + ``server_versions``（HTTP 保持 200，daemon 侧据字段
+         *     提示人工拍板，design §7 定义）；containment / ``.runtime`` 越界 → 422 AppError
+         *     透传（``HTTP_422_SPEC_BUNDLE_INVALID``，对齐旧 tar 端点校验机制）。
+         */
+        post: operations["sync_spec_workspace_incremental_api_workspaces__workspace_id__spec_workspace_sync_incremental_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/spec-bootstrap": {
         parameters: {
             query?: never;
@@ -7384,6 +7467,133 @@ export interface paths {
          * @description Resolve a spec conflict by setting its status and optional details.
          */
         post: operations["resolve_spec_conflict_api_workspaces__workspace_id__spec_conflicts__conflict_id__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/changes/{name}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Progress
+         * @description GET 单 change 完整 progress JSON（契约 §6，裸六表 + 顶层 last_pushed_at）。
+         *
+         *     不存在/跨 workspace → 404（客户端 fetchJson 返回 null 降级不阻断，契约 §8/§10）。
+         */
+        get: operations["get_progress_api_changes__name__progress_get"];
+        put?: never;
+        /**
+         * Push Progress
+         * @description POST 上行 progress + base_ts 冲突检测（契约 §4）。
+         *
+         *     读 3 个 ``X-SillySpec-*`` header（User/Base-Ts/Pushed-At，缺失/空均 None）。
+         *     200=接受（客户端据此更新 platform_last_sync）；409=冲突（body
+         *     ``{conflict, platform_progress, last_pushed_at}``，客户端写冲突文件走 resolve）。
+         *     body 是裸 ``serializeForSync`` 六表 JSON（NG-6 透传，不强类型校验）。
+         *
+         *     workspace_id 从 require_platform_sync 派生（shpsync_ token 绑定工作区；shk_live_/JWT
+         *     过渡期 None 走全局聚合 fallback），透传 service 做收件箱隔离（task-06/07）。
+         */
+        post: operations["push_progress_api_changes__name__progress_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Changes
+         * @description GET 轻量 change 列表（契约 §5，裸数组形态 D-007，按 token 派生 workspace 过滤）。
+         */
+        get: operations["list_changes_api_changes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/changes/{name}/approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Approval
+         * @description GET 单 change 审批状态——给 sillyspec CLI execute 审批门控用（ql-20260812-001-6eb8）。
+         *
+         *     CLI ``sync.js checkApproval`` 在 execute 启动时 GET 此端点，读 ``status``：
+         *     rejected/pending 阻断 execute，其他（approved）放行（command.js:1071-1080）。
+         *
+         *     **不查库、不因 change 不存在 404**：change 可能尚未上行 progress（execute 前），
+         *     若 404 CLI 会 fetchJson→null→误判 pending 卡死（与本端点放行初衷相悖）。当前后端
+         *     无审批策略 → 所有 change 默认 ``approved`` 放行。鉴权失败仍 401（require_platform_sync）。
+         */
+        get: operations["get_approval_api_changes__name__approval_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/platform-sync-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Platform Sync Token
+         * @description 签发 workspace-scoped 同步 token（WORKSPACE_WRITE，明文仅 201 一次返回）。
+         *
+         *     ``created_by=调用者``（authenticate 已校验的 user）；库存 sha256，明文不入日志。
+         */
+        post: operations["create_platform_sync_token_api_workspaces__workspace_id__platform_sync_tokens_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/resolve-by-root-path": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve By Root Path
+         * @description connect 换发：root_path 反查 workspace + WORKSPACE_WRITE 校验 + 签发 shpsync_ token。
+         *
+         *     - 反查不到活跃 workspace（root_path 未绑/已软删）→ 404
+         *     - 反查到但调用者无 WORKSPACE_WRITE → 403（D-006@v1 安全闭环）
+         *     - 通过 → 签发 shpsync_ token（created_by=调用者，workspace_id=反查到的 wid）→ 200
+         */
+        post: operations["resolve_by_root_path_api_workspaces_resolve_by_root_path_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7458,6 +7668,8 @@ export interface components {
             system_prompt: string | null;
             /** Tool Policy Id */
             tool_policy_id: string | null;
+            /** Llm Provider Id */
+            llm_provider_id: string | null;
             /** Mcp Refs */
             mcp_refs: string[];
             /** Skill Refs */
@@ -7516,6 +7728,8 @@ export interface components {
             system_prompt?: string | null;
             /** Tool Policy Id */
             tool_policy_id?: string | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
             /** Mcp Refs */
             mcp_refs?: string[];
             /** Skill Refs */
@@ -7554,6 +7768,8 @@ export interface components {
             system_prompt: string | null;
             /** Tool Policy Id */
             tool_policy_id: string | null;
+            /** Llm Provider Id */
+            llm_provider_id: string | null;
             /** Mcp Refs */
             mcp_refs: string[];
             /** Skill Refs */
@@ -7593,6 +7809,8 @@ export interface components {
             system_prompt?: string | null;
             /** Tool Policy Id */
             tool_policy_id?: string | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
             /** Mcp Refs */
             mcp_refs?: string[] | null;
             /** Skill Refs */
@@ -8265,6 +8483,25 @@ export interface components {
             /** Captcha Token */
             captcha_token?: string | null;
         };
+        /**
+         * ChangeApprovalResponse
+         * @description GET /changes/{name}/approval 响应——给 sillyspec CLI execute 审批门控用。
+         *
+         *     CLI ``sync.js checkApproval``（execute 启动时调）读 ``status``：
+         *     ``rejected``/``pending`` 阻断 execute，其他（``approved``）放行
+         *     （command.js:1071-1080）。当前后端无审批策略/数据 → 所有 change 默认 ``approved``
+         *     放行（ql-20260812-001-6eb8 修 CLI 因 404 误判 pending 卡死）。
+         */
+        ChangeApprovalResponse: {
+            /**
+             * Status
+             * @description 审批状态：approved/pending/rejected
+             * @default approved
+             */
+            status: string;
+            /** Reason */
+            reason?: string | null;
+        };
         /** ChangeCreateRequest */
         ChangeCreateRequest: {
             /** Title */
@@ -8400,6 +8637,20 @@ export interface components {
             items: components["schemas"]["ChangeSummary"][];
             /** Total */
             total: number;
+        };
+        /**
+         * ChangeListItem
+         * @description GET /changes 轻量列表项（契约 §5，裸数组形态 D-007）。
+         */
+        ChangeListItem: {
+            /** Name */
+            name: string;
+            /** Current Stage */
+            current_stage?: string | null;
+            /** Last Pushed At */
+            last_pushed_at?: string | null;
+            /** Last Pusher */
+            last_pusher?: string | null;
         };
         /**
          * ChangeNextProcessReq
@@ -8569,6 +8820,7 @@ export interface components {
             owner_id: string | null;
             /** Current Stage */
             current_stage?: string | null;
+            pending_review?: components["schemas"]["PendingReview"] | null;
             /**
              * Updated At
              * Format: date-time
@@ -9479,6 +9731,12 @@ export interface components {
             read_only: boolean;
             /** Agent Profile Id */
             agent_profile_id?: string | null;
+            /** Worktree Path */
+            worktree_path?: string | null;
+            /** Branch */
+            branch?: string | null;
+            /** Worker Prompt */
+            worker_prompt?: string | null;
         };
         /**
          * DocumentsSyncRequest
@@ -9669,6 +9927,8 @@ export interface components {
             api_key?: string | null;
             /** Auth Field */
             auth_field?: ("ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY") | null;
+            /** Api Format */
+            api_format?: ("anthropic" | "openai_chat") | null;
         };
         /**
          * FetchModelsResponse
@@ -9698,6 +9958,32 @@ export interface components {
             owner_type: string;
             /** Owner Id */
             owner_id?: string | null;
+        };
+        /**
+         * FileOp
+         * @description One per-file operation in an incremental spec sync.
+         *
+         *     ``path`` / ``new_path`` are relative to spec_root. ``content`` is base64
+         *     (add/update use it); rename with unchanged content may omit both ``hash``
+         *     and ``content``. ``base_version`` is the file version the daemon's local
+         *     manifest believes the server is at (0 when unknown → R-07 hash fallback).
+         */
+        FileOp: {
+            /**
+             * Op
+             * @enum {string}
+             */
+            op: "add" | "update" | "delete" | "rename";
+            /** Path */
+            path: string;
+            /** New Path */
+            new_path?: string | null;
+            /** Hash */
+            hash?: string | null;
+            /** Content */
+            content?: string | null;
+            /** Base Version */
+            base_version: number;
         };
         /**
          * FileUploadResp
@@ -10351,6 +10637,12 @@ export interface components {
              * @enum {string}
              */
             auth_field: "ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY";
+            /**
+             * Api Format
+             * @default anthropic
+             * @enum {string}
+             */
+            api_format: "anthropic" | "openai_chat";
             /** Model Role Mappings */
             model_role_mappings?: {
                 [key: string]: unknown;
@@ -10404,6 +10696,8 @@ export interface components {
             website_url: string | null;
             /** Auth Field */
             auth_field: string;
+            /** Api Format */
+            api_format: string;
             /** Model Role Mappings */
             model_role_mappings: {
                 [key: string]: unknown;
@@ -10449,6 +10743,8 @@ export interface components {
             website_url?: string | null;
             /** Auth Field */
             auth_field?: ("ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY") | null;
+            /** Api Format */
+            api_format?: ("anthropic" | "openai_chat") | null;
             /** Model Role Mappings */
             model_role_mappings?: {
                 [key: string]: unknown;
@@ -10734,6 +11030,8 @@ export interface components {
             } | null;
             /** Mode */
             mode?: ("single" | "team") | null;
+            /** Orchestration Mode */
+            orchestration_mode?: ("team" | "external") | null;
             /** Session Id */
             session_id?: string | null;
             /** Worker Preset */
@@ -11823,6 +12121,52 @@ export interface components {
             file_urls?: string[] | null;
             /** Kanban Order */
             kanban_order?: number | null;
+        };
+        /**
+         * PlatformSyncTokenCreateRequest
+         * @description POST /workspaces/{wid}/platform-sync-tokens 签发请求（design §7）。
+         */
+        PlatformSyncTokenCreateRequest: {
+            /**
+             * Name
+             * @description 人类可读标签
+             */
+            name: string;
+        };
+        /**
+         * PlatformSyncTokenCreateResponse
+         * @description POST 签发 201 响应——**唯一**携带明文 token 的地方（仅此一次返回，R-06）。
+         *
+         *     明文字段 ``token`` 语义独立（不可重复获取），单独建模让"明文只出现一次"契约显眼。
+         */
+        PlatformSyncTokenCreateResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /**
+             * Key Prefix
+             * @description 明文 token 的可视前缀（前 12 字符），供 UI 展示
+             */
+            key_prefix: string;
+            /**
+             * Token
+             * @description 明文 token，仅本次响应返回，此后不可恢复（请立即保存）
+             */
+            token: string;
+            /** Name */
+            name: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** PostmortemCreate */
         PostmortemCreate: {
@@ -13657,6 +14001,33 @@ export interface components {
             plaintext_password: string;
         };
         /**
+         * ResolveByRootPathRequest
+         * @description POST /workspaces/resolve-by-root-path 请求（design §7，connect 换发 body）。
+         */
+        ResolveByRootPathRequest: {
+            /**
+             * Root Path
+             * @description 本地项目根目录绝对路径
+             */
+            root_path: string;
+        };
+        /**
+         * ResolveByRootPathResponse
+         * @description POST resolve-by-root-path 200 响应（design §7）：反查到的 workspace + 换发 token。
+         */
+        ResolveByRootPathResponse: {
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /**
+             * Token
+             * @description workspace-scoped 明文 token（shpsync_ 前缀），仅本次返回
+             */
+            token: string;
+        };
+        /**
          * ResumeRequest
          * @description Request body for resuming an interrupted run.
          */
@@ -14395,6 +14766,8 @@ export interface components {
             affected_sessions: number;
             /** Error */
             error?: string | null;
+            /** Litellm Registered */
+            litellm_registered?: boolean | null;
         };
         /** SettingRead */
         SettingRead: {
@@ -14547,6 +14920,40 @@ export interface components {
             status: "open" | "approved" | "rejected" | "resolved";
             /** Details Json */
             details_json?: string | null;
+        };
+        /**
+         * SpecIncrementalSyncRequest
+         * @description Request body for the incremental sync endpoint (design §7).
+         */
+        SpecIncrementalSyncRequest: {
+            /** Ops */
+            ops: components["schemas"]["FileOp"][];
+        };
+        /**
+         * SpecIncrementalSyncResponse
+         * @description Response body for the incremental sync endpoint (design §7).
+         *
+         *     On success ``new_versions`` maps each applied path to its new server
+         *     version. On a base_version conflict ``conflict=True`` and
+         *     ``server_versions`` carries the current server versions so the daemon can
+         *     surface the collision (HTTP stays 200; the daemon decides how to prompt).
+         */
+        SpecIncrementalSyncResponse: {
+            /** Ok */
+            ok: boolean;
+            /** New Versions */
+            new_versions: {
+                [key: string]: number;
+            };
+            /**
+             * Conflict
+             * @default false
+             */
+            conflict: boolean;
+            /** Server Versions */
+            server_versions?: {
+                [key: string]: number;
+            } | null;
         };
         /**
          * SpecSyncResponse
@@ -15624,6 +16031,11 @@ export interface components {
              */
             model?: string | null;
             /**
+             * Agent Profile Id
+             * @description 指定本次派发用的 AgentProfile（可选，None=跟随默认）
+             */
+            agent_profile_id?: string | null;
+            /**
              * Team Mode
              * @description execute/verify 阶段是否用团队执行（D-004@v2，默认 single 零回归）
              * @default false
@@ -15895,6 +16307,36 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * VerifyGateResponse
+         * @description POST /changes/{id}/run-verify-gate 的返回类型（task-11，design §6.3）。
+         *
+         *     gate 软调用结果，与 task-09 ``run_verify_gate`` MCP tool 对齐（design §6.2）。
+         *     不硬阻塞、不改 change 状态（结果交调用方决策）：
+         *
+         *     - ``source="gate_result"``：读最近 completed AgentRun.gate_result
+         *       （dispatch.py:_read_latest_gate_result）。
+         *     - ``source="gate_cmd"``：gate_result 缺时经 dispatch.py:_run_gate_via_delegate
+         *       软调 ``sillyspec gate verify``（复用 task-06 RPC 骨架，不自动阻塞推进）。
+         *     - ``source="unavailable"``：两者均不可用，``exit_code=None`` 交调用方决策。
+         */
+        VerifyGateResponse: {
+            /**
+             * Exit Code
+             * @description gate exit code（0=通过 / 1=打回 / 2=异常；unavailable 时为 None）
+             */
+            exit_code?: number | null;
+            /**
+             * Errors
+             * @description gate errors 列表（已 str 强转）
+             */
+            errors?: string[];
+            /**
+             * Source
+             * @description 结果来源：gate_result / gate_cmd / unavailable
+             */
+            source: string;
         };
         /** VersionResponse */
         VersionResponse: {
@@ -18704,6 +19146,8 @@ export interface operations {
                 owner?: string | null;
                 search?: string | null;
                 current_stage?: string | null;
+                sort?: string;
+                pending_review_only?: boolean;
                 page?: number;
                 page_size?: number;
             };
@@ -19208,6 +19652,74 @@ export interface operations {
             };
         };
     };
+    advance_stage_api_workspaces__workspace_id__changes__change_id__advance_stage_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransitionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransitionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_verify_gate_api_workspaces__workspace_id__changes__change_id__run_verify_gate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VerifyGateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     submit_feedback_api_workspaces__workspace_id__changes__change_id__feedback_post: {
         parameters: {
             query?: never;
@@ -19457,6 +19969,7 @@ export interface operations {
             query?: {
                 provider?: string | null;
                 model?: string | null;
+                agent_profile_id?: string | null;
             };
             header?: never;
             path: {
@@ -24549,7 +25062,6 @@ export interface operations {
             header?: never;
             path: {
                 release_id: string;
-                workspace_id: string;
             };
             cookie?: never;
         };
@@ -31163,6 +31675,41 @@ export interface operations {
             };
         };
     };
+    sync_spec_workspace_incremental_api_workspaces__workspace_id__spec_workspace_sync_incremental_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpecIncrementalSyncRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecIncrementalSyncResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     bootstrap_spec_workspace_api_workspaces__workspace_id__spec_bootstrap_post: {
         parameters: {
             query?: never;
@@ -31252,6 +31799,193 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SpecConflictRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_progress_api_changes__name__progress_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    push_progress_api_changes__name__progress_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_changes_api_changes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeListItem"][];
+                };
+            };
+        };
+    };
+    get_approval_api_changes__name__approval_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeApprovalResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_platform_sync_token_api_workspaces__workspace_id__platform_sync_tokens_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformSyncTokenCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformSyncTokenCreateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_by_root_path_api_workspaces_resolve_by_root_path_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveByRootPathRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolveByRootPathResponse"];
                 };
             };
             /** @description Validation Error */

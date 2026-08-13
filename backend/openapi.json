@@ -24513,6 +24513,60 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/spec-workspace/sync-incremental": {
+      "post": {
+        "tags": [
+          "spec-workspace"
+        ],
+        "summary": "Sync Spec Workspace Incremental",
+        "description": "Receive daemon incremental file ops and apply them to spec_root.\n\nChange 2026-08-13-platform-managed-file-sync / design §7 / FR-02 / D-001：\n文件级增量同步（add/update/delete/rename + base_version 乐观锁）。base_version\n过期 → ``conflict=True`` + ``server_versions``（HTTP 保持 200，daemon 侧据字段\n提示人工拍板，design §7 定义）；containment / ``.runtime`` 越界 → 422 AppError\n透传（``HTTP_422_SPEC_BUNDLE_INVALID``，对齐旧 tar 端点校验机制）。",
+        "operationId": "sync_spec_workspace_incremental_api_workspaces__workspace_id__spec_workspace_sync_incremental_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpecIncrementalSyncRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpecIncrementalSyncResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/spec-bootstrap": {
       "post": {
         "tags": [
@@ -31060,6 +31114,69 @@
         ],
         "title": "FileMetaResp",
         "description": "文件元数据响应（task-04 provides；batch-meta 回显用）。"
+      },
+      "FileOp": {
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "add",
+              "update",
+              "delete",
+              "rename"
+            ],
+            "title": "Op"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "new_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Path"
+          },
+          "hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hash"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "base_version": {
+            "type": "integer",
+            "title": "Base Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "op",
+          "path",
+          "base_version"
+        ],
+        "title": "FileOp",
+        "description": "One per-file operation in an incremental spec sync.\n\n``path`` / ``new_path`` are relative to spec_root. ``content`` is base64\n(add/update use it); rename with unchanged content may omit both ``hash``\nand ``content``. ``base_version`` is the file version the daemon's local\nmanifest believes the server is at (0 when unknown → R-07 hash fallback)."
       },
       "FileUploadResp": {
         "properties": {
@@ -46090,6 +46207,64 @@
         ],
         "title": "SpecConflictResolve",
         "description": "Request body for resolving a spec conflict."
+      },
+      "SpecIncrementalSyncRequest": {
+        "properties": {
+          "ops": {
+            "items": {
+              "$ref": "#/components/schemas/FileOp"
+            },
+            "type": "array",
+            "title": "Ops"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ops"
+        ],
+        "title": "SpecIncrementalSyncRequest",
+        "description": "Request body for the incremental sync endpoint (design §7)."
+      },
+      "SpecIncrementalSyncResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "new_versions": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "New Versions"
+          },
+          "conflict": {
+            "type": "boolean",
+            "title": "Conflict",
+            "default": false
+          },
+          "server_versions": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Versions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "new_versions"
+        ],
+        "title": "SpecIncrementalSyncResponse",
+        "description": "Response body for the incremental sync endpoint (design §7).\n\nOn success ``new_versions`` maps each applied path to its new server\nversion. On a base_version conflict ``conflict=True`` and\n``server_versions`` carries the current server versions so the daemon can\nsurface the collision (HTTP stays 200; the daemon decides how to prompt)."
       },
       "SpecSyncResponse": {
         "properties": {

@@ -34,6 +34,8 @@ from app.modules.spec_profile.schema import (
 from app.modules.spec_workspace.bootstrap import SpecBootstrapService
 from app.modules.spec_workspace.schema import (
     SpecBootstrapRunStartResponse,
+    SpecIncrementalSyncRequest,
+    SpecIncrementalSyncResponse,
     SpecWorkspaceRead,
     SpecWorkspaceUpdate,
 )
@@ -237,6 +239,34 @@ async def sync_spec_workspace(
         ok=True,
         reparsed=result["reparsed_docs"],
         reparsed_changes=result["reparsed_changes"],
+    )
+
+
+@router.post(
+    "/spec-workspace/sync-incremental",
+    response_model=SpecIncrementalSyncResponse,
+)
+async def sync_spec_workspace_incremental(
+    workspace_id: uuid.UUID,
+    payload: SpecIncrementalSyncRequest,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+) -> SpecIncrementalSyncResponse:
+    """Receive daemon incremental file ops and apply them to spec_root.
+
+    Change 2026-08-13-platform-managed-file-sync / design §7 / FR-02 / D-001：
+    文件级增量同步（add/update/delete/rename + base_version 乐观锁）。base_version
+    过期 → ``conflict=True`` + ``server_versions``（HTTP 保持 200，daemon 侧据字段
+    提示人工拍板，design §7 定义）；containment / ``.runtime`` 越界 → 422 AppError
+    透传（``HTTP_422_SPEC_BUNDLE_INVALID``，对齐旧 tar 端点校验机制）。
+    """
+    service = SpecWorkspaceService(session)
+    result = await service.apply_ops(workspace_id, payload.ops)
+    return SpecIncrementalSyncResponse(
+        ok=True,
+        new_versions=result["new_versions"],
+        conflict=result["conflict"],
+        server_versions=result["server_versions"],
     )
 
 

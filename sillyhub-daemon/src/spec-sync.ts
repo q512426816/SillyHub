@@ -16,10 +16,12 @@
 // D-007@v1（utility 抽离）/ D-008（pull 前回灌，task-12）/ D-010（spec_version 保鲜，task-11）；
 // 蓝图 task-04.md / task-12.md / task-11.md。
 
+import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join, relative, isAbsolute, dirname, resolve, sep as pathSep } from 'node:path';
 import { mkdir, rm, readdir, stat, lstat, readlink, symlink, cp, readFile, writeFile } from 'node:fs/promises';
 import type { HubClient } from './hub-client.js';
+import type { FileOp } from './hub-client.js';
 import { writeLocalYaml } from './local-yaml-writer.js';
 
 // ── resolveSpecDir ────────────────────────────────────────────────────────────
@@ -363,16 +365,137 @@ async function ensureSpecJunction(specDir: string, target: string): Promise<bool
   return true;
 }
 
+// ── 本地清单缓存（change 2026-08-13-platform-managed-file-sync / R-03/BL-4）───────
+//
+// 增量 diff 依赖本地 per-file 清单（hash/version/mtime）。缓存必须**移出 specDir**
+// （~/.sillyhub/daemon/specs/{ws}）——否则被 pull 的 rm -rf specDir 清掉（BL-4），
+// 放 ~/.sillyhub/daemon/manifests/{ws}.json（R-03）。
+//
+// 格式：{ version: 1, files: { [path]: { hash, version, mtime } } }
+//   - hash：SHA-256 hex；version：该文件本地认为的服务器版本（base_version 用）；
+//   - mtime：上次 hash 时的文件 mtime（ms）——未变则跳过重算 hash（R-05 性能优化）。
+
+/** 本地清单缓存文件路径（移出 specDir）。 */
+export function resolveManifestCachePath(wsId: string): string {
+  return join(homedir(), '.sillyhub', 'daemon', 'manifests', `${wsId}.json`);
+}
+
+/** 单文件清单条目。 */
+interface ManifestFileEntry {
+  hash: string;
+  version: number;
+  mtime: number;
+}
+
+/** 本地清单缓存（schema version=1）。 */
+interface LocalManifest {
+  version: number;
+  files: Record<string, ManifestFileEntry>;
+}
+
+/** 读本地清单缓存；不存在/解析失败 → null（视为首同步，走旧 tar 全量）。 */
+async function readLocalManifest(wsId: string): Promise<LocalManifest | null> {
+  const p = resolveManifestCachePath(wsId);
+  let raw: string;
+  try {
+    raw = await readFile(p, 'utf-8');
+  } catch {
+    return null;
+  }
+  try {
+    const obj = JSON.parse(raw) as { version?: unknown; files?: unknown };
+    if (typeof obj.files !== 'object' || obj.files === null) return null;
+    const files: Record<string, ManifestFileEntry> = {};
+    for (const [path, v] of Object.entries(obj.files as Record<string, ManifestFileEntry>)) {
+      if (v && typeof v === 'object' && typeof v.hash === 'string') {
+        files[path] = {
+          hash: v.hash,
+          version: typeof v.version === 'number' ? v.version : 0,
+          mtime: typeof v.mtime === 'number' ? v.mtime : 0,
+        };
+      }
+    }
+    return { version: 1, files };
+  } catch {
+    return null;
+  }
+}
+
+/** 写本地清单缓存；失败仅 warn 不抛（缓存写失败不阻塞推送主流程）。 */
+async function writeLocalManifest(wsId: string, m: LocalManifest): Promise<void> {
+  try {
+    const p = resolveManifestCachePath(wsId);
+    await mkdir(dirname(p), { recursive: true });
+    await writeFile(p, JSON.stringify(m, null, 2) + '\n', 'utf-8');
+  } catch (e) {
+    console.warn('spec_sync: manifest_cache_write_failed', wsId, e);
+  }
+}
+
+/** 全量快照清单（旧 tar 落盘后/首同步用）：version=0（服务器清单已清 Q7，下次增量 R-07 重建）。 */
+async function buildFullManifest(specRoot: string): Promise<LocalManifest> {
+  const files: Record<string, ManifestFileEntry> = {};
+  const entries = await walkDir(
+    specRoot,
+    new Set(['.runtime', 'runtime']),
+    new Set(['worktrees']),
+  );
+  for (const e of entries) {
+    if (e.isDir) continue;
+    const content = await readFile(e.absPath);
+    files[e.relPath] = {
+      hash: createHash('sha256').update(content).digest('hex'),
+      version: 0,
+      mtime: Math.floor(e.mtimeMs),
+    };
+  }
+  return { version: 1, files };
+}
+
+/**
+ * 增量冲突错误（NFR-02）：base_version 过期服务器返 conflict=true，不静默覆盖。
+ *
+ * 由调用方（syncSpecTreeIfNeeded / task-runner）catch 后仅 warn 不阻塞，提示用户
+ * 人工拍板（design §7：409 由 daemon 侧据 conflict 字段提示，不自动重试）。
+ */
+export class SpecPushConflict extends Error {
+  readonly workspaceId: string;
+  readonly serverVersions: Record<string, number>;
+  constructor(workspaceId: string, serverVersions: Record<string, number>) {
+    super(
+      `spec_sync: incremental push conflict detected ws=${workspaceId} server_versions=${JSON.stringify(serverVersions)}`,
+    );
+    this.name = 'SpecPushConflict';
+    this.workspaceId = workspaceId;
+    this.serverVersions = serverVersions;
+  }
+}
+
 // ── postSpecSync ──────────────────────────────────────────────────────────────
 
 /**
- * 打包本地 spec 整树并 POST 回传 backend（一次性整树，D-004）。
+ * 推送本地 spec 改动到服务器（change 2026-08-13-platform-managed-file-sync 增量改造）。
  *
- * 封装 packSpecDir + client.postSpecSync 两步（task-runner.ts:482-486 等价逻辑抽提）。
- * 返回 backend 响应 { ok, reparsed }；client 未实现 postSpecSync 时返回 null（mock 容错）。
+ * 原为「整树 tar 全量覆盖」（D-004），现改为**文件级增量 diff**（本地 hash 与清单缓存
+ * 比对只发变化 op；首同步/回退仍走旧 tar）。签名与返回值不变（{ ok, reparsed } | null），
+ * 调用点零改动（design §7.5 薄封装原则）。
+ *
+ * 流程：
+ *   1. 读本地清单缓存 ~/.sillyhub/daemon/manifests/{ws}.json（移出 specDir，BL-4/R-03）。
+ *   2. **首同步**（无缓存）：走旧 tar `client.postSpecSync(wsId, packSpecDir(specRoot))`，
+ *      成功后写全量快照缓存（R-07：version=0，服务器清单已清）。
+ *   3. **增量路径**：walk specDir（排除 .runtime(有点)/runtime(无点)/worktrees，D-006）
+ *      逐文件 hash（mtime 未变复用缓存 hash，R-05）→ 与缓存 diff 生成 ops
+ *      （新文件 add / 内容变 update / 缓存有本地无 delete / 同 hash 异路径 rename 不重传
+ *      内容，R-02 注意 Windows 大小写）；op 带 per-file base_version（缓存 version，无 0）。
+ *   4. `client.postSpecSyncIncremental(wsId, ops)`：
+ *      - 成功 → 按 new_versions 回写缓存 version（+ 刷新 hash/mtime），返回 { ok: true, reparsed: 0 }。
+ *      - conflict=true → 抛 SpecPushConflict（调用方 catch 后 warn 不阻塞，人工拍板 NFR-02）。
+ *      - 404（旧后端无端点）/ 网络失败 / 端点错误 → **回退旧 tar** 全量，写全量快照缓存。
+ *   5. 缓存写失败 try/catch warn 不阻塞推送主流程。
  *
  * 失败语义：网络/HTTP 非 2xx / IO → 向上抛（调用方 catch 后仅 warn 不阻塞，对齐
- * task-runner.ts:488-490 与 design R-03：sync 失败不改写 agent 结果/不阻塞 session 终态）。
+ * design R-03：sync 失败不改写 agent 结果/不阻塞 session 终态）。
  *
  * @param client HubClient（batch/interactive 各自持有的实例）
  * @param wsId workspace id
@@ -384,8 +507,182 @@ export async function postSpecSync(
   specRoot: string,
 ): Promise<{ ok: boolean; reparsed: number } | null> {
   if (typeof client.postSpecSync !== 'function') return null; // mock client 未实现
-  const tarBuf = await packSpecDir(specRoot);
-  return client.postSpecSync(wsId, tarBuf);
+
+  // 1. 读本地清单缓存
+  const cached = await readLocalManifest(wsId);
+
+  // 2. 首同步（无缓存）→ 旧 tar 全量 + 写快照
+  if (cached === null) {
+    const tarBuf = await packSpecDir(specRoot);
+    const resp = await client.postSpecSync(wsId, tarBuf);
+    await writeLocalManifest(wsId, await buildFullManifest(specRoot));
+    return resp;
+  }
+
+  // 3. 增量 diff → ops
+  const { ops, localFiles } = await computeIncrementalOps(specRoot, cached);
+  if (ops.length === 0) {
+    // 无变化 → 不发请求，仅按需刷新缓存 mtime（当前缓存已是最新本地态）
+    await writeLocalManifest(wsId, buildManifestFromLocal(cached, localFiles, {}));
+    return { ok: true, reparsed: 0 };
+  }
+
+  // 4. 增量客户端缺失（mock 旧客户端）→ 回退旧 tar
+  if (typeof client.postSpecSyncIncremental !== 'function') {
+    const tarBuf = await packSpecDir(specRoot);
+    const resp = await client.postSpecSync(wsId, tarBuf);
+    await writeLocalManifest(wsId, await buildFullManifest(specRoot));
+    return resp;
+  }
+
+  try {
+    const result = await client.postSpecSyncIncremental(wsId, ops);
+    if (result.conflict) {
+      throw new SpecPushConflict(wsId, result.server_versions ?? {});
+    }
+    // 成功 → 按 new_versions 回写缓存 version
+    await writeLocalManifest(wsId, buildManifestFromLocal(cached, localFiles, result.new_versions));
+    return { ok: true, reparsed: 0 };
+  } catch (e) {
+    // conflict 不回退（人工拍板）；404/网络/端点错误 → 回退旧 tar 全量
+    if (e instanceof SpecPushConflict) throw e;
+    const tarBuf = await packSpecDir(specRoot);
+    const resp = await client.postSpecSync(wsId, tarBuf);
+    await writeLocalManifest(wsId, await buildFullManifest(specRoot));
+    return resp;
+  }
+}
+
+/**
+ * 计算增量 ops + 本地文件态（hash/mtime）。
+ *
+ * 返回 ops（add/update/delete/rename，带 base_version）+ localFiles（本次 walk 的
+ * 本地文件 hash/mtime，供成功回写缓存用）。rename 检测：缓存里有、本地没有的路径与
+ * 本地有、缓存没有的路径内容 hash 相同 → rename op（不重传内容，R-02）。
+ */
+async function computeIncrementalOps(
+  specRoot: string,
+  cached: LocalManifest,
+): Promise<{ ops: FileOp[]; localFiles: Record<string, { hash: string; mtime: number }> }> {
+  const entries = await walkDir(
+    specRoot,
+    new Set(['.runtime', 'runtime']),
+    new Set(['worktrees']),
+  );
+
+  // 第一遍：逐文件 hash（R-05：mtime 未变复用缓存 hash），保留 content buffer 供 add/update。
+  const localFiles: Record<string, { hash: string; mtime: number }> = {};
+  const contentBufs = new Map<string, Buffer>();
+  for (const e of entries) {
+    if (e.isDir) continue;
+    const mtime = Math.floor(e.mtimeMs);
+    const cachedEntry = cached.files[e.relPath];
+    if (cachedEntry && cachedEntry.mtime === mtime) {
+      localFiles[e.relPath] = { hash: cachedEntry.hash, mtime };
+    } else {
+      const content = await readFile(e.absPath);
+      contentBufs.set(e.relPath, content);
+      localFiles[e.relPath] = {
+        hash: createHash('sha256').update(content).digest('hex'),
+        mtime,
+      };
+    }
+  }
+
+  const localPaths = Object.keys(localFiles);
+  const localSet = new Set(localPaths);
+  const cacheSet = new Set(Object.keys(cached.files));
+
+  // rename 检测：旧路径（缓存有、本地无）↔ 新路径（本地有、缓存无）内容 hash 相同。
+  const renames: Array<{ oldPath: string; newPath: string }> = [];
+  const consumedNew = new Set<string>();
+  for (const oldPath of cacheSet) {
+    if (localSet.has(oldPath)) continue;
+    const cachedEntry = cached.files[oldPath]!;
+    for (const newPath of localPaths) {
+      if (cacheSet.has(newPath)) continue;
+      if (consumedNew.has(newPath)) continue;
+      if (localFiles[newPath]!.hash === cachedEntry.hash) {
+        renames.push({ oldPath, newPath });
+        consumedNew.add(newPath);
+        break;
+      }
+    }
+  }
+  const renamedOld = new Set(renames.map((r) => r.oldPath));
+  const renamedNew = new Set(renames.map((r) => r.newPath));
+
+  const ops: FileOp[] = [];
+  for (const r of renames) {
+    ops.push({
+      op: 'rename',
+      path: r.oldPath,
+      new_path: r.newPath,
+      base_version: cached.files[r.oldPath]!.version,
+    });
+  }
+  for (const p of cacheSet) {
+    if (renamedOld.has(p)) continue;
+    const cachedEntry = cached.files[p]!;
+    if (localSet.has(p)) {
+      if (cachedEntry.hash !== localFiles[p]!.hash) {
+        ops.push({
+          op: 'update',
+          path: p,
+          hash: localFiles[p]!.hash,
+          content: contentBufs.get(p)!.toString('base64'),
+          base_version: cachedEntry.version,
+        });
+      }
+    } else {
+      // 本地已删 → delete op（软删，服务器移备份区）
+      ops.push({ op: 'delete', path: p, base_version: cachedEntry.version });
+    }
+  }
+  for (const p of localPaths) {
+    if (renamedNew.has(p)) continue;
+    if (!cacheSet.has(p)) {
+      ops.push({
+        op: 'add',
+        path: p,
+        hash: localFiles[p]!.hash,
+        content: contentBufs.get(p)!.toString('base64'),
+        base_version: 0,
+      });
+    }
+  }
+
+  return { ops, localFiles };
+}
+
+/** 由本地文件态 + 缓存版本 + 服务器 new_versions 组装新缓存。 */
+function buildManifestFromLocal(
+  cached: LocalManifest,
+  localFiles: Record<string, { hash: string; mtime: number }>,
+  newVersions: Record<string, number>,
+): LocalManifest {
+  const files: Record<string, ManifestFileEntry> = {};
+  for (const [path, lf] of Object.entries(localFiles)) {
+    files[path] = {
+      hash: lf.hash,
+      version: cached.files[path]?.version ?? 0,
+      mtime: lf.mtime,
+    };
+  }
+  for (const [path, version] of Object.entries(newVersions)) {
+    if (files[path]) {
+      files[path].version = version;
+    } else {
+      // rename 的 new_path 在本地文件态里已有（hash/mtime 保留），仅补 version
+      const local = localFiles[path];
+      files[path] = {
+        hash: local?.hash ?? '',
+        version,
+        mtime: local?.mtime ?? 0,
+      };
+    }
+  }
+  return { version: 1, files };
 }
 
 // ── syncSpecTreeIfNeeded ──────────────────────────────────────────────────────
@@ -537,6 +834,8 @@ interface WalkEntry {
   relPath: string;
   isDir: boolean;
   size: number;
+  /** 文件 mtime（ms）。增量 diff R-05 优化用（mtime 未变跳过重算 hash）。 */
+  mtimeMs: number;
 }
 
 /**
@@ -578,10 +877,16 @@ async function walkDir(
         continue;
       }
       if (st.isDirectory()) {
-        out.push({ absPath: abs, relPath: relToRoot, isDir: true, size: 0 });
+        out.push({ absPath: abs, relPath: relToRoot, isDir: true, size: 0, mtimeMs: st.mtimeMs });
         await recurse(abs);
       } else if (st.isFile()) {
-        out.push({ absPath: abs, relPath: relToRoot, isDir: false, size: st.size });
+        out.push({
+          absPath: abs,
+          relPath: relToRoot,
+          isDir: false,
+          size: st.size,
+          mtimeMs: st.mtimeMs,
+        });
       }
       // symlink / 其他 → 跳过（walkDir 不收集即跳过）
     }
