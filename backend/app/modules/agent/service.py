@@ -724,6 +724,11 @@ class AgentService:
         # task-04（change 2026-08-11-agent-profile-bind-llm-provider）：绑定 LlmProvider id，
         # 供 daemon/lease/context.py::_inject_provider_config 方案A 绑定优先判断消费。
         meta["llm_provider_id"] = str(profile.llm_provider_id) if profile.llm_provider_id else None
+        # task-01（2026-08-13-profile-system-prompt-injection）：system_prompt 经
+        # lease.metadata 透传到 daemon（_PROFILE_PAYLOAD_FIELDS 加该字段 → claim payload
+        # → daemon SessionManager SDK systemPrompt preset+append）。空则不写键（行为同今天）。
+        if profile.system_prompt:
+            meta["system_prompt"] = profile.system_prompt
         await self._session.execute(
             _sa_text("UPDATE daemon_task_leases SET metadata = :meta WHERE id = :id"),
             {"meta": _json.dumps(meta), "id": lease_id.hex},

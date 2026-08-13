@@ -296,13 +296,15 @@ async def _inject_provider_config(
 
 # task-07 / C-13：claim payload 透传的 profile 字段（snake_case, camelCase）。
 # 来源：task-06 ``AgentService._apply_profile_to_lease`` 写入 lease.metadata（service.py:720）。
-# system_prompt 不在此列——注入走 task-06 的 claudeMd prepend（design §7 / D-012@v2），
-# 由 ``get_execution_context`` 构造响应时 prepend 到 claudeMd 顶部，不经 context.py。
+# task-02（2026-08-13-profile-system-prompt-injection）：system_prompt 改走 lease.metadata
+# 透传（废弃 D-012@v2 的 claudeMd prepend）→ daemon SessionManager SDK systemPrompt
+# preset+append（design §5 / D-001）。
 _PROFILE_PAYLOAD_FIELDS: tuple[tuple[str, str], ...] = (
     ("mcp_refs", "mcpRefs"),
     ("skill_refs", "skillRefs"),
     ("effective_allowed_roots", "effectiveAllowedRoots"),
     ("profile_version", "profileVersion"),
+    ("system_prompt", "systemPrompt"),
 )
 
 
