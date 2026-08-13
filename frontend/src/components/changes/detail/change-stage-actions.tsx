@@ -134,6 +134,70 @@ export function ChangeStageActions({
   const configEnabled = agentStatus?.config_enabled ?? false;
   const currentStage = change.current_stage ?? "draft";
 
+  // ql-20260812-007（2026-08-12-quick-independent-stage）：quick 独立阶段早返回。
+  // quick 是辅助阶段，跑完即完成（不归档），与主线 5 阶段平行。完成态判定（D-003）：
+  // current_stage==='quick' && change.stages.quick.status==='completed' —— 由后端
+  // sync_stage_status 从 sillyspec.db 同步写入（与主线各 stage 同源），不加 DB 字段。
+  // 不读 last_dispatch.status：它在 dispatch 时被写死 'running' 且 sync 不更新，
+  // 会致完成态永不显示。quick 分支不渲染主线 gate 面板 / 推进按钮 / 团队开关。
+  if (currentStage === "quick") {
+    const quickStage = change.stages?.quick as { status?: string } | undefined;
+    const quickDone = quickStage?.status === "completed";
+    return (
+      <section className="space-y-3 rounded-md border border-amber-500/40 bg-amber-50/40 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold">⚡ 快速修复</span>
+          <span className="text-xs text-muted-foreground">
+            快速通道，不走完整流程
+          </span>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          点击触发智能体执行快速修复（理解任务→实现→记录），跑完即完成，无需归档。
+        </p>
+
+        {/* 档案选择器（复用主线） */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="whitespace-nowrap text-xs text-muted-foreground">
+            智能体档案
+          </span>
+          <AgentProfileSelect
+            workspaceId={workspaceId}
+            value={stageProfileId}
+            onChange={onStageProfileChange}
+            includeDefault="跟随工作区默认"
+          />
+        </div>
+
+        {/* 触发智能体 / 执行中 / 完成态 */}
+        {quickDone ? (
+          <div className="border-t border-amber-500/20 pt-2.5">
+            <span className="text-xs font-medium text-emerald-700">
+              ✓ 已完成
+            </span>
+          </div>
+        ) : hasActiveRun ? (
+          <div className="border-t border-amber-500/20 pt-2.5">
+            <span className="text-[11px] text-muted-foreground">
+              智能体执行中…
+            </span>
+          </div>
+        ) : configEnabled ? (
+          <div className="border-t border-amber-500/20 pt-2.5">
+            <Button size="sm" onClick={onDispatch} disabled={dispatching}>
+              {dispatching ? "触发中…" : "🤖 触发快速修复"}
+            </Button>
+          </div>
+        ) : (
+          <div className="border-t border-amber-500/20 pt-2.5">
+            <span className="text-[11px] text-muted-foreground">
+              未配置可用的智能体
+            </span>
+          </div>
+        )}
+      </section>
+    );
+  }
+
   // 团队开关渲染条件（与现 page.tsx 一致）
   const teamVisible =
     change.pending_review === "plan_review" ||

@@ -55,6 +55,14 @@ async def create_change(
 
     # Auto-dispatch brainstorm agent (best-effort, non-blocking)
     dispatch_info = None
+    # ql-20260812-007（2026-08-12-quick-independent-stage）：quick 类型走独立阶段，
+    # 不覆盖回 brainstorm（service/proxy 已按 change_type 设好 current_stage=quick），
+    # 也不 auto-dispatch 主线 brainstorm agent（quick 自有 quick agent 配置，经
+    # POST /changes/{id}/dispatch manual_dispatch 触发）。
+    if change.change_type == "quick":
+        response = ChangeCreateResponse.model_validate(change)
+        response.agent_dispatch = None
+        return response
     try:
         from app.core.db import get_session_factory
         from app.modules.change.dispatch import dispatch

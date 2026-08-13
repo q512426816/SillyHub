@@ -264,6 +264,11 @@ async def proxy_create_change(
     if change_type is None:
         change_type = classify_change_type(description)
 
+    # ql-20260812-007（2026-08-12-quick-independent-stage）：quick 类型走独立阶段，
+    # 其余走 brainstorm（保持 ql-006 行为）。quick 是 SillySpec 辅助阶段，自己跑三步
+    # 就结束，不进主线 brainstorm→plan→execute→verify→archive。
+    initial_stage = "quick" if change_type == "quick" else "brainstorm"
+
     files = _build_files(
         change_key=change_key,
         title=title,
@@ -281,6 +286,7 @@ async def proxy_create_change(
     # INSERT docs——docs 仅 reparse 单路串行写，无并发（D-006@v1）。
     # ql-20260812-006：current_stage 从 draft 改 brainstorm（对齐 SillySpec 标准流程，
     # draft 非 VALID_STAGES，前端 STAGE_LABEL 无映射会显示英文）。
+    # ql-20260812-007：quick 类型 current_stage=quick（独立阶段）。
     change = Change(
         id=uuid.uuid4(),
         workspace_id=workspace_id,
@@ -292,8 +298,8 @@ async def proxy_create_change(
         affected_components=[],
         change_type=change_type,
         owner_id=user_id,
-        current_stage="brainstorm",
-        stages={"brainstorm": {"status": "pending", "at": now.isoformat()}},
+        current_stage=initial_stage,
+        stages={initial_stage: {"status": "pending", "at": now.isoformat()}},
     )
     session.add(change)
     for f in files:
@@ -317,7 +323,7 @@ async def proxy_create_change(
         change_id=str(change.id),
         change_key=change_key,
         workspace_id=str(workspace_id),
-        current_stage="brainstorm",
+        current_stage=initial_stage,
     )
 
     # 下发 change-write 任务（status='pending'）。claim_token=None，daemon claim 时生成。
@@ -368,6 +374,6 @@ async def proxy_create_change(
         change_key=change_key,
         workspace_id=str(workspace_id),
         runtime_id=str(runtime_id),
-        current_stage="brainstorm",
+        current_stage=initial_stage,
     )
     return change

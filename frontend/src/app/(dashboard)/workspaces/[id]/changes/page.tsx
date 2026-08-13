@@ -72,7 +72,9 @@ const TYPE_LABEL: Record<string, string> = {
 
 // 主线 6 stage（对齐工具 STAGE_ORDER：scan→brainstorm→plan→execute→verify→archive）。
 // status 投影（blocked/archived）作为业务态徽标，不再作为 stage 枚举值。
+// quick（2026-08-12-quick-independent-stage）：辅助阶段，与主线平行，warning 色突出。
 const STAGE_KIND: Record<string, StatusKind> = {
+  quick: "warning", // quick 辅助阶段
   brainstorm: "warning",
   plan: "info",
   execute: "info",
@@ -85,6 +87,7 @@ const STAGE_KIND: Record<string, StatusKind> = {
 
 const STAGE_LABEL: Record<string, string> = {
   draft: "草稿", // ql-20260812-006：兜底旧数据（新建已改 brainstorm，旧 change 仍可能 draft）
+  quick: "快速任务", // quick 辅助阶段（2026-08-12-quick-independent-stage）
   brainstorm: "需求分析",
   plan: "规划",
   execute: "执行",

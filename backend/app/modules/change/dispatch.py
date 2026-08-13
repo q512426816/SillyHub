@@ -119,6 +119,20 @@ STAGE_AGENT_CONFIG: dict[str, StageAgentConfig] = {
         read_only=False,
         description="Write module-impact analysis and move change directory to archive.",
     ),
+    # quick（2026-08-12-quick-independent-stage）：辅助阶段，独立流程。
+    # ``manual_dispatch``（router POST /changes/{id}/dispatch）是 generic 的：
+    # ``get_config_for_stage(current_stage)`` → ``dispatch(target_stage=current_stage)``，
+    # 故此处加配置后，quick 变更调 POST /dispatch 即自动派发 quick agent，无需改派发逻辑。
+    # requires_worktree=False / read_only=False：quick 三步（理解任务→实现并验证→记录）需写代码，
+    # 走 daemon-client，change 目录由 sillyspec quick 自建（与主线各 stage 一致）。
+    StageEnum.QUICK.value: StageAgentConfig(
+        enabled=True,
+        prompt_template="quick.md",  # 已存在的 quick prompt 模板
+        phase="Quick",
+        requires_worktree=False,
+        read_only=False,
+        description="Quick fix: run SillySpec quick 3 steps (understand/implement/record).",
+    ),
 }
 
 # ---------------------------------------------------------------------------

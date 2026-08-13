@@ -122,6 +122,11 @@ class ChangeWriterService:
         if change_type is None:
             change_type = classify_change_type(description)
 
+        # ql-20260812-007（2026-08-12-quick-independent-stage）：quick 类型走独立阶段，
+        # 其余走 brainstorm（保持 ql-006 行为）。quick 是 SillySpec 辅助阶段，自己跑三步
+        # 就结束，不进主线 brainstorm→plan→execute→verify→archive。
+        initial_stage = "quick" if change_type == "quick" else "brainstorm"
+
         # v4 layout: .sillyspec/changes/<change_key>/  (no intermediate change/ dir)
         resolver = SpecPathResolver(repo_dir)
         change_dir = resolver.change_dir(change_key)
@@ -154,6 +159,7 @@ class ChangeWriterService:
         # Create DB record
         # ql-20260812-006：current_stage 从 draft 改 brainstorm（对齐 SillySpec 标准流程，
         # draft 非 VALID_STAGES，前端 STAGE_LABEL 无映射会显示英文）。
+        # ql-20260812-007：quick 类型 current_stage=quick（独立阶段）。
         change = Change(
             id=uuid.uuid4(),
             workspace_id=workspace_id,
@@ -165,8 +171,8 @@ class ChangeWriterService:
             affected_components=affected_components or [],
             change_type=change_type,
             owner_id=user_id,
-            current_stage="brainstorm",
-            stages={"brainstorm": {"status": "pending", "at": now.isoformat()}},
+            current_stage=initial_stage,
+            stages={initial_stage: {"status": "pending", "at": now.isoformat()}},
         )
         self._session.add(change)
 
@@ -213,7 +219,7 @@ class ChangeWriterService:
             change_id=str(change.id),
             change_key=change_key,
             lease_id=str(lease_id),
-            current_stage="brainstorm",
+            current_stage=initial_stage,
         )
         return change
 

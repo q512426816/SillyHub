@@ -27,7 +27,13 @@ from app.models.base import BaseModel
 
 
 class StageEnum(enum.StrEnum):
-    """变更流程阶段枚举：5 主阶段（scan 已移除，回归 workspace 初始化）。"""
+    """变更流程阶段枚举：5 主阶段 + quick 辅助阶段。
+
+    quick（2026-08-12-quick-independent-stage）是 SillySpec 的独立辅助阶段
+    （``VALID_STAGES`` 含 quick，``auxiliary: true``），与主线 5 阶段平行，自己
+    跑三步就结束，**不走** brainstorm→plan→execute→verify→archive 主线，
+    故不进 :data:`TRANSITIONS`，也不进 :meth:`spec_stages`（主线上下游判定）。
+    """
 
     # ── 变更流程主阶段（scan 不在变更流程，由 workspace 初始化承载） ──
     BRAINSTORM = "brainstorm"
@@ -35,10 +41,16 @@ class StageEnum(enum.StrEnum):
     EXECUTE = "execute"
     VERIFY = "verify"
     ARCHIVE = "archive"
+    # ── 辅助阶段（独立流程，不进主线上下游判定） ──
+    QUICK = "quick"
 
     @classmethod
     def spec_stages(cls) -> list[StageEnum]:
-        """SillySpec 主阶段列表。"""
+        """SillySpec 主线 5 阶段（不含辅助 quick）。
+
+        用于 :data:`dispatch.STAGE_ORDER` 断言与上下游 cascade / 一致性判定——
+        quick 是独立流程，不参与主线判定，故排除。
+        """
         return [
             cls.BRAINSTORM,
             cls.PLAN,
@@ -46,6 +58,15 @@ class StageEnum(enum.StrEnum):
             cls.VERIFY,
             cls.ARCHIVE,
         ]
+
+    @classmethod
+    def spec_auxiliary_stages(cls) -> list[StageEnum]:
+        """SillySpec 辅助阶段（quick 等，独立流程，不进主线上下游判定）。
+
+        与 :meth:`spec_stages` 互补：主线靠 ``spec_stages``，辅助阶段（无后继
+        转换、跑完即终态）靠本方法，二者并集 = 本平台支持的 SillySpec 全量阶段。
+        """
+        return [cls.QUICK]
 
 
 class ChangeStatus(enum.StrEnum):
