@@ -1042,7 +1042,7 @@ class TestSourceStageCompletionGate:
             db_session,
             workspace_id=ws.id,
             change_key="2026-05-31-test-none",
-            current_stage=None,  # type: ignore[arg-type]
+            current_stage=None,
             stages={},
         )
 
@@ -1079,9 +1079,11 @@ class TestSourceStageCompletionGate:
                 target_stage="plan",
                 user_role="admin",
             )
-        assert exc_info.value.details["reason"] == "stage_not_completed"
-        assert exc_info.value.details["source_stage"] == "brainstorm"
-        assert exc_info.value.details["pending_steps_count"] == 2
+        assert exc_info.value.details is not None
+        details = exc_info.value.details
+        assert details["reason"] == "stage_not_completed"
+        assert details["source_stage"] == "brainstorm"
+        assert details["pending_steps_count"] == 2
 
     async def test_missing_stage_block_rejected(
         self, db_session: AsyncSession, tmp_path: Path
@@ -1104,6 +1106,7 @@ class TestSourceStageCompletionGate:
                 target_stage="plan",
                 user_role="admin",
             )
+        assert exc_info.value.details is not None
         assert exc_info.value.details["reason"] == "missing_stage_block"
 
     async def test_completed_source_stage_allows_advance(
