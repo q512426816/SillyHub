@@ -44,6 +44,12 @@ async def workspace_with_changes(
     list_resp = await client.get(f"/api/workspaces/{ws_id}/changes", headers=auth_headers)
     assert list_resp.status_code == 200
     items = list_resp.json()["items"]
+    # 间歇兜底:copytree 刚写入的新文件首扫 reparse 偶发 parsed=0（fs 时序/锁，全量低 worker
+    # 并发下更易触发）。对齐 task/test_router.py 的既定模式：items 空则重扫一次再取。
+    if not items:
+        await client.post(f"/api/workspaces/{ws_id}/changes/reparse", headers=auth_headers)
+        list_resp = await client.get(f"/api/workspaces/{ws_id}/changes", headers=auth_headers)
+        items = list_resp.json()["items"]
     assert len(items) > 0
     return {
         "ws_id": ws_id,

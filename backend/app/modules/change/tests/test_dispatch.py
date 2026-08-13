@@ -167,6 +167,41 @@ class TestHasActiveRun:
 # ── Integration tests: dispatch ───────────────────────────────────────────
 
 
+def _completed_stages(*stages: str) -> dict:
+    """构造「这些阶段均已完成」的 stages JSON（对齐 dispatch.py:1767 single 模式结构）。
+
+    供推进测试 seed 源阶段完成度——transition 前置校验 ``_check_source_stage_completion``
+    读 ``stages[source]["status"]=="completed"`` 且 ``steps.pending`` 空。
+    """
+    return {
+        stage: {
+            "status": "completed",
+            "steps": {"completed": ["step-1"], "pending": []},
+        }
+        for stage in stages
+    }
+
+
+async def _mark_source_completed(
+    session: AsyncSession, change_id: uuid.UUID | str, stage: str
+) -> None:
+    """HTTP 集成测试辅助：直接把指定 change 的 ``stage`` 标记为已完成。
+
+    HTTP 路径的 demo change 经 reparse 落库，stages 默认无完成块，会被 transition
+    前置完成度校验拦。transition 前调用本 helper 给源阶段补块（对齐 single 模式
+    ``_sync_stage_status_daemon_client`` 写入的结构）。``change_id`` 接受 str（HTTP
+    JSON 返回值）或 UUID，内部统一转 UUID 供 ORM get。
+    """
+    change = await session.get(
+        Change, uuid.UUID(change_id) if isinstance(change_id, str) else change_id
+    )
+    assert change is not None
+    stages = dict(change.stages or {})
+    stages.update(_completed_stages(stage))
+    change.stages = stages
+    await session.commit()
+
+
 async def _create_test_change(
     session: AsyncSession,
     *,
@@ -174,8 +209,19 @@ async def _create_test_change(
     change_key: str = "2026-05-31-test-dispatch",
     current_stage: str = "draft",
     path: str = "/tmp/test-change",
+    stages: dict | None = None,
 ) -> Change:
-    """Helper: create a Change row in DB."""
+    """Helper: create a Change row in DB.
+
+    ``stages=None``（默认）：若 ``current_stage`` 是主线推进阶段（brainstorm/plan/
+    execute/verify），自动 seed 该阶段完成块，使 transition 前置完成度校验放行；
+    draft / scan / 其它非主线阶段保持空 dict。
+    """
+    if stages is None:
+        if current_stage in ("brainstorm", "plan", "execute", "verify"):
+            stages = _completed_stages(current_stage)
+        else:
+            stages = {}
     change = Change(
         id=uuid.uuid4(),
         workspace_id=workspace_id,
@@ -187,7 +233,7 @@ async def _create_test_change(
         affected_components=["backend"],
         change_type="feature",
         current_stage=current_stage,
-        stages={},
+        stages=stages,
     )
     session.add(change)
     await session.commit()
@@ -509,6 +555,19 @@ async def workspace_with_changes(
         f"/api/workspaces/{ws_id}/changes/reparse",
         headers=auth_headers,
     )
+    # 间歇兜底:copytree 刚写入的新文件首扫 reparse 偶发 parsed=0（fs 时序/锁，全量低 worker
+    # 并发下更易触发），致 changes 落库为空 → _get_demo_change_id 的 next() StopIteration。
+    # 对齐 task/test_router.py 的既定模式：items 空则重扫一次。正常路径非空不触发。
+    list_resp = await client.get(
+        f"/api/workspaces/{ws_id}/changes",
+        params={"location": "active"},
+        headers=auth_headers,
+    )
+    if not list_resp.json()["items"]:
+        await client.post(
+            f"/api/workspaces/{ws_id}/changes/reparse",
+            headers=auth_headers,
+        )
 
     return {"ws_id": ws_id}
 
@@ -521,7 +580,23 @@ async def _get_demo_change_id(client, ws_id, auth_headers):
         headers=auth_headers,
     )
     items = list_resp.json()["items"]
-    demo = next(i for i in items if i["change_key"] == "2026-05-25-demo-feature")
+    # 间歇兜底:fixture 已 reparse 重试,但极端竞态下仍可能为空（对齐 task/test_router 模式）。
+    if not items:
+        await client.post(
+            f"/api/workspaces/{ws_id}/changes/reparse",
+            headers=auth_headers,
+        )
+        list_resp = await client.get(
+            f"/api/workspaces/{ws_id}/changes",
+            params={"location": "active"},
+            headers=auth_headers,
+        )
+        items = list_resp.json()["items"]
+    demo = next(
+        (i for i in items if i["change_key"] == "2026-05-25-demo-feature"),
+        None,
+    )
+    assert demo is not None, f"demo-feature change not found after reparse; items={items!r}"
     return demo["id"]
 
 
@@ -529,11 +604,17 @@ class TestTransitionAPI:
     """Test the transition API endpoint with dispatch."""
 
     async def test_transition_draft_to_brainstorm(
-        self, client, workspace_with_changes: dict, auth_headers: dict[str, str]
+        self,
+        client,
+        db_session: AsyncSession,
+        workspace_with_changes: dict,
+        auth_headers: dict[str, str],
     ):
         """POST /changes/{id}/transition with target_stage=brainstorm."""
         ws_id = workspace_with_changes["ws_id"]
         change_id = await _get_demo_change_id(client, ws_id, auth_headers)
+        # demo change 落 brainstorm（stage fallback），transition 前 seed 源阶段完成度。
+        await _mark_source_completed(db_session, change_id, "brainstorm")
 
         with patch(
             "app.modules.agent.service.AgentService.start_stage_dispatch",
@@ -561,11 +642,18 @@ class TestTransitionAPI:
         assert "agent_dispatch" in body
 
     async def test_transition_invalid_stage_returns_error(
-        self, client, workspace_with_changes: dict, auth_headers: dict[str, str]
+        self,
+        client,
+        db_session: AsyncSession,
+        workspace_with_changes: dict,
+        auth_headers: dict[str, str],
     ):
         """Transition to a disallowed stage should return error (draft → accepted)."""
         ws_id = workspace_with_changes["ws_id"]
         change_id = await _get_demo_change_id(client, ws_id, auth_headers)
+        # seed 源阶段完成度，让本用例精确测「TRANSITIONS 白名单拒绝」而非被
+        # 完成度前置校验先拦（brainstorm→archived 不在白名单，仍 422）。
+        await _mark_source_completed(db_session, change_id, "brainstorm")
 
         # Use a valid StageEnum value but one not allowed from draft
         resp = await client.post(
@@ -599,11 +687,17 @@ class TestAgentStatusAPI:
         assert "config_enabled" in body
 
     async def test_agent_status_after_transition_to_brainstorm(
-        self, client, workspace_with_changes: dict, auth_headers: dict[str, str]
+        self,
+        client,
+        db_session: AsyncSession,
+        workspace_with_changes: dict,
+        auth_headers: dict[str, str],
     ):
         """After transitioning to brainstorm, agent-status should show config_enabled."""
         ws_id = workspace_with_changes["ws_id"]
         change_id = await _get_demo_change_id(client, ws_id, auth_headers)
+        # demo 在 brainstorm，transition 到 plan 前 seed 源阶段完成度。
+        await _mark_source_completed(db_session, change_id, "brainstorm")
 
         with patch(
             "app.modules.agent.service.AgentService.start_stage_dispatch",
@@ -915,3 +1009,120 @@ class TestProposeStageFullFlow:
                 target_stage="plan",
                 user_role="business_user",
             )
+
+
+# ── Source stage completion gate（transition 前置完成度校验）──────────────────
+
+
+class TestSourceStageCompletionGate:
+    """``_check_source_stage_completion`` + transition 集成：堵「没干活就推进」。
+
+    校验源阶段（current_stage）是否真完成（stages[source].status==completed 且
+    steps.pending 空），draft/None 首次放行，缺失 fail-closed。team 路径
+    complete_stage 不经 transition，此处只测 single 路径。
+    """
+
+    async def test_first_launch_draft_allows_advance(
+        self, db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """draft / None 首次启动放行（无前置阶段要完成）。
+
+        直接测 ``_check_source_stage_completion``：draft/None 不抛。完整 transition
+        的 draft→brainstorm 在 TRANSITIONS 无此边（draft 被重映射成 brainstorm），
+        故首次推进的真实路径是「draft 等价 brainstorm → 直接推 plan」，这里只锁
+        校验函数对首次启动的放行语义。
+        """
+        from app.modules.change.service import ChangeService
+
+        ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
+        change_draft = await _create_test_change(
+            db_session, workspace_id=ws.id, current_stage="draft"
+        )
+        change_none = await _create_test_change(
+            db_session,
+            workspace_id=ws.id,
+            change_key="2026-05-31-test-none",
+            current_stage=None,  # type: ignore[arg-type]
+            stages={},
+        )
+
+        # draft / None 均不抛——首次启动无需前置阶段完成。
+        ChangeService._check_source_stage_completion(change_draft)
+        ChangeService._check_source_stage_completion(change_none)
+
+    async def test_incomplete_source_stage_rejected(
+        self, db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """源阶段未完成（status=in_progress）→ 拒绝，details.reason=stage_not_completed。"""
+        from app.core.errors import InvalidTransition
+        from app.modules.change.service import ChangeService
+
+        ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
+        # brainstorm 还在跑（in_progress + 2 个 pending step），非完成态。
+        change = await _create_test_change(
+            db_session,
+            workspace_id=ws.id,
+            current_stage="brainstorm",
+            stages={
+                "brainstorm": {
+                    "status": "in_progress",
+                    "steps": {"completed": [], "pending": ["clarify", "draft"]},
+                }
+            },
+        )
+
+        svc = ChangeService(db_session)
+        with pytest.raises(InvalidTransition) as exc_info:
+            await svc.transition(
+                workspace_id=ws.id,
+                change_id=change.id,
+                target_stage="plan",
+                user_role="admin",
+            )
+        assert exc_info.value.details["reason"] == "stage_not_completed"
+        assert exc_info.value.details["source_stage"] == "brainstorm"
+        assert exc_info.value.details["pending_steps_count"] == 2
+
+    async def test_missing_stage_block_rejected(
+        self, db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """源阶段缺完成度数据（stages 无该 stage 键）→ fail-closed 拒绝。"""
+        from app.core.errors import InvalidTransition
+        from app.modules.change.service import ChangeService
+
+        ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
+        # brainstorm 但 stages 空（没 sync_stage_status 过）——生产里 sync 失败的场景。
+        change = await _create_test_change(
+            db_session, workspace_id=ws.id, current_stage="brainstorm", stages={}
+        )
+
+        svc = ChangeService(db_session)
+        with pytest.raises(InvalidTransition) as exc_info:
+            await svc.transition(
+                workspace_id=ws.id,
+                change_id=change.id,
+                target_stage="plan",
+                user_role="admin",
+            )
+        assert exc_info.value.details["reason"] == "missing_stage_block"
+
+    async def test_completed_source_stage_allows_advance(
+        self, db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """源阶段已完成（status=completed + pending 空）→ 放行推进。"""
+        from app.modules.change.service import ChangeService
+
+        ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
+        # _create_test_change 默认给主线阶段补完成块，直接验证放行。
+        change = await _create_test_change(
+            db_session, workspace_id=ws.id, current_stage="brainstorm"
+        )
+
+        svc = ChangeService(db_session)
+        result = await svc.transition(
+            workspace_id=ws.id,
+            change_id=change.id,
+            target_stage="plan",
+            user_role="admin",
+        )
+        assert result.current_stage == "plan"
