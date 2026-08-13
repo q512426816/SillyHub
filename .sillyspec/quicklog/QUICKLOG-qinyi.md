@@ -89,7 +89,19 @@
 方案：B 修 buildTarHeader 支持 >100 字节 name（GNU LongLink typeflag='L'）+ W packSpecDir 默认排除 runtime(无点)+worktrees(任意深度) 保留 .runtime(有点, D-003 守护) + C 后端 read_bytes 跳过缺失成员纵深防御。
 结果：daemon spec-sync.test 11 passed + tsc 通过；backend test_apply_sync 7 passed + ruff 通过；模块文档已同步。
 
-## ql-20260813-005-5f20 | 2026-08-13 14:08:14 | 修复 2026-08-13-change-center-rework verify-result gap②:pending_review_only 分页精度。现状 router 层 enrich 后 Python filter + tota…
+## ql-20260813-005-5f20 | 2026-08-13 14:08:14 | 修复 2026-08-13-change-center-rework verify-result gap②——pending_review_only 分页精度
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/change/service.py（list_ 加 pending_review_only 参数：先 _resolve_pending_change_keys 批量取 latest_progress 经 _map 算 pending 集合 → SQL WHERE change_key IN 分页，total=全局真实 N；新增 _resolve_pending_change_keys 方法）
+- backend/app/modules/change/router.py（透传 pending_review_only 到 service.list_，删 router 层 enrich 后 Python filter）
+- backend/app/modules/change/tests/test_router.py（gap② 回归锚点：page_size=1 pending=2 时 total=2 非本页 1 + 分页 page1/2 偏移正确）
+需求：修复 2026-08-13-change-center-rework verify-result gap②——pending_review_only 分页精度。
+根因：pending_review 是计算字段(latest_progress+_map)非 SQL 列,旧实现 router enrich 后 Python filter + total=本页过滤后 len,待处理>page_size 时 N 偏低、分页偏移。
+方案：方案B 集合IN(用户确认,跨库稳)——service.list_ 加 pending_review_only,先 _resolve_pending_change_keys(批量取 latest_progress 经 _map 算 pending 非空集合)再 SQL WHERE change_key IN 分页,total=IN 后计数=全局真实 N;router 透传删 filter。
+结果：test_router 18 passed(+1 gap② 测试:page_size=1 pending=2 时 total=2 非本页1+分页 page1/2 正确)+全 change 242 passed(1 预存债 test_dispatch)+ruff format/check 全过+mypy 0。文件:backend/app/modules/change/service.py(+_resolve_pending_change_keys+list_ 加参数/WHERE IN)+router.py(透传删 filter)+tests/test_router.py(全局 N 分页回归锚点)。
+
+## ql-20260813-006-38fd | 2026-08-13 20:16:42 | (quick 任务)
 状态：进行中
 关联变更：（无）
 文件：（见实际改动）
