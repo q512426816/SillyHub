@@ -55,6 +55,9 @@ data/spec-storage/
 spikes/**/tmp/
 spikes/**/*.log
 
+# sillyhub-daemon 运行时 isolate 日志（v8 引擎逐次运行生成，勿入库）
+sillyhub-daemon/isolate-*.log
+
 # Local / temp
 .loop-progress.md
 prototype/
