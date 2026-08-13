@@ -115,7 +115,9 @@ export interface HeartbeatBody {
 // { ok, new_versions, conflict, server_versions }（conflict=true 时 HTTP 仍 200，
 // daemon 侧据字段提示人工拍板，不抛错）。
 
-/** 单文件增量 op（对齐 backend FileOp）。content 为 base64（add/update 用）。 */
+/** 单文件增量 op（对齐 backend FileOp）。content 为 base64（add/update 用）。
+ * mtime（ms，可选）：ql-20260813-008，宿主真实修改时间。后端落盘作 source_mtime +
+ * os.utime，让 changes.updated_at 反映真实活动而非同步时刻。旧 daemon 不传时后端 fallback now。 */
 export interface FileOp {
   op: 'add' | 'update' | 'delete' | 'rename';
   path: string;
@@ -123,6 +125,7 @@ export interface FileOp {
   hash?: string | null;
   content?: string | null;
   base_version: number;
+  mtime?: number | null;
 }
 
 /** 增量同步响应（对齐 backend SpecIncrementalSyncResponse）。 */
@@ -323,7 +326,7 @@ export class HubClient {
    * 此处不设置任何 proxy/dispatcher 字段。
    */
   private async _request<T>(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PATCH',
     path: string,
     body?: unknown,
   ): Promise<T> {
@@ -1062,6 +1065,33 @@ export class HubClient {
     );
   }
 
+  /**
+   * ql-20260813-spec-sync-visibility Wave 3 task-08：上报同步进度计数（FR-05/FR-06）。
+   *
+   * 端点：PATCH /api/daemon/change-writes/{id}/progress。backend status==claimed 校验
+   * （BL-3）+ claim_token 匹配；仅写 files_total/files_processed，不改 status（D-004
+   * 单一写者——终态仍由 completeChangeWrite 置 done/failed）。daemon spec-sync 分支
+   * 在 complete 前上报终态计数 {files_total, files_processed: files_total}。
+   */
+  async reportChangeWriteProgress(
+    changeWriteId: string,
+    claimToken: string,
+    payload: { files_total?: number; files_processed?: number },
+  ): Promise<Record<string, unknown>> {
+    const body: ChangeWriteProgressBody = { claim_token: claimToken };
+    if (payload.files_total !== undefined) {
+      body.files_total = payload.files_total;
+    }
+    if (payload.files_processed !== undefined) {
+      body.files_processed = payload.files_processed;
+    }
+    return this._request<Record<string, unknown>>(
+      'PATCH',
+      `${REST_PREFIX}/change-writes/${encodeURIComponent(changeWriteId)}/progress`,
+      body,
+    );
+  }
+
   // -- task-05 / D-007@v2：team 主 agent MCP 反向通道（daemon MCP server → backend）--
   //
   // 5 endpoint 挂在 agent router（/api 前缀，非 REST_PREFIX=/api/daemon），与
@@ -1219,6 +1249,13 @@ interface ChangeWriteCompleteBody {
   ok: boolean;
   files?: unknown;
   error?: string;
+}
+
+/** ql-20260813-spec-sync-visibility task-08：progress 上报请求体。 */
+interface ChangeWriteProgressBody {
+  claim_token: string;
+  files_total?: number;
+  files_processed?: number;
 }
 
 // ── task-08 / D-017：MCP whitelist 拉取（profile 子集层配套）─────────────────

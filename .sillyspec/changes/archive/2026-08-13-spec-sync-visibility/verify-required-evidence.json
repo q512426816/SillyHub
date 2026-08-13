@@ -1,0 +1,13 @@
+{
+  "generatedAt": "2026-08-13T15:59:03.611Z",
+  "schemaVersion": 1,
+  "items": [
+    {
+      "task": "task-10",
+      "verdict": "spec+quality",
+      "evidence": [
+        "apply 回主仓后跑 pnpm gen:types 同步 openapi.json + api-types.ts，确认 diff 仅含 progress 端点 + ChangeWriteProgressRequest schema"
+      ]
+    }
+  ]
+}

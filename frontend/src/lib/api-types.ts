@@ -2703,6 +2703,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/change-writes/{change_write_id}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Report Change Write Progress
+         * @description daemon spec-sync 执行中上报同步进度（FR-05/FR-06，ql-20260813-spec-sync-visibility）。
+         *
+         *     校验与 complete 同款（claim_token + status）：``status == claimed`` 才允许写
+         *     （BL-3：``status ∈ {pending, done, failed}`` 一律 409——progress 语义是「claim 后
+         *     执行中的进度」，pending 未认领 / 终态已完成均拒绝；防重放/篡改）。仅写传入的非 None
+         *     字段（files_total/files_processed），**不改 status/completed_at**（D-004 单一写者：
+         *     终态仍由 complete_change_write 置）。
+         */
+        patch: operations["report_change_write_progress_api_daemon_change_writes__change_write_id__progress_patch"];
+        trace?: never;
+    };
     "/api/daemon/audit/batch": {
         parameters: {
             query?: never;
@@ -8905,6 +8931,21 @@ export interface components {
             kind: string;
         };
         /**
+         * ChangeWriteProgressRequest
+         * @description PATCH .../change-writes/{id}/progress 请求体（FR-05/FR-06，ql-20260813-spec-sync-visibility）。
+         *
+         *     daemon spec-sync 执行中上报同步进度计数。D-004 单一写者：本端点写 files_total/
+         *     files_processed，complete_change_write 不碰计数列。仅更新传入的非 None 字段。
+         */
+        ChangeWriteProgressRequest: {
+            /** Claim Token */
+            claim_token: string;
+            /** Files Total */
+            files_total?: number | null;
+            /** Files Processed */
+            files_processed?: number | null;
+        };
+        /**
          * CheckpointResponse
          * @description Response body for checkpoint load.
          */
@@ -9967,6 +10008,10 @@ export interface components {
          *     (add/update use it); rename with unchanged content may omit both ``hash``
          *     and ``content``. ``base_version`` is the file version the daemon's local
          *     manifest believes the server is at (0 when unknown → R-07 hash fallback).
+         *
+         *     ``mtime``（ql-20260813-008，可选）：宿主真实修改时间（Unix 秒）。落盘时作
+         *     source_mtime + os.utime，让镜像文件 mtime 真实，进而让 changes.updated_at
+         *     反映变更活动。旧 daemon 不传 / 非法时 fallback now。
          */
         FileOp: {
             /**
@@ -9984,6 +10029,8 @@ export interface components {
             content?: string | null;
             /** Base Version */
             base_version: number;
+            /** Mtime */
+            mtime?: number | null;
         };
         /**
          * FileUploadResp
@@ -22112,6 +22159,43 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ChangeWriteCompleteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_change_write_progress_api_daemon_change_writes__change_write_id__progress_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                change_write_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeWriteProgressRequest"];
             };
         };
         responses: {

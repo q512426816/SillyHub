@@ -364,6 +364,16 @@ interface ClientLike {
     claimToken: string,
     payload: { ok: boolean; files?: unknown[]; error?: string },
   ): Promise<unknown>;
+  /**
+   * ql-20260813-spec-sync-visibility task-08：上报同步进度计数（files_total/processed）。
+   * 可选——mock client 未实现时 daemon 跳过进度上报（不影响同步主流程）。后端 PATCH
+   * /change-writes/{id}/progress（status==claimed 校验，D-004 单一写者不改 status）。
+   */
+  reportChangeWriteProgress?(
+    changeWriteId: string,
+    claimToken: string,
+    payload: { files_total?: number; files_processed?: number },
+  ): Promise<unknown>;
 }
 
 /** daemon 需要的 TaskRunner 接口子集。 */

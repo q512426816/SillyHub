@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentRunPanel } from "@/components/agent-run-panel";
 import { WorkspaceAccessGuide } from "@/components/workspace-access-guide";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, Modal, Progress, Tooltip } from "antd";
 import { SectionCard } from "@/components/layout";
 import { ApiError } from "@/lib/api";
 import {
@@ -143,6 +143,13 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
     "idle" | "syncing" | "done" | "failed"
   >("idle");
   const [syncError, setSyncError] = useState<string | null>(null);
+  // FR-05：同步完成后的文件计数（轮询 done 时从 latest.files_total 存）。
+  const [syncedFilesTotal, setSyncedFilesTotal] = useState<number | null>(null);
+  // FR-06：同步过程中的进度（轮询 pending/claimed 时从 latest.files_total/processed 存）。
+  const [syncProgress, setSyncProgress] = useState<{
+    total: number | null;
+    processed: number | null;
+  }>({ total: null, processed: null });
   const [scanning, setScanning] = useState(false);
   const [activeScanRunId, setActiveScanRunId] = useState<string | null>(null);
   const [scanStatus, setScanStatus] = useState<AgentRunStatus | null>(null);
@@ -251,6 +258,13 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
         try {
           const items = await listPendingSync(workspaceId);
           const latest = items[0];
+          // FR-06：每次轮询更新过程进度（pending/claimed 期间 daemon 上报的 files_total/processed）
+          if (latest) {
+            setSyncProgress({
+              total: latest.files_total ?? null,
+              processed: latest.files_processed ?? null,
+            });
+          }
           if (!latest) {
             setSyncStatus("done");
             if (syncPollRef.current) {
@@ -261,6 +275,8 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
           }
           if (latest.status === "done") {
             setSyncStatus("done");
+            // FR-05：存终态文件计数供 done 反馈框展示「已同步 N 个文件」。
+            setSyncedFilesTotal(latest.files_total ?? null);
             if (syncPollRef.current) {
               clearInterval(syncPollRef.current);
               syncPollRef.current = null;
@@ -268,7 +284,9 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
             onRefresh();
           } else if (latest.status === "failed") {
             setSyncStatus("failed");
-            setSyncError("同步到服务器失败");
+            // FR-01：透传后端真实失败原因（DaemonChangeWrite.error），非写死文案。
+            // latest.error 为空（如 claim 超时 gc 未写 error）时兜底通用文案。
+            setSyncError(latest.error ?? "同步到服务器失败");
             if (syncPollRef.current) {
               clearInterval(syncPollRef.current);
               syncPollRef.current = null;
@@ -311,9 +329,10 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
       return;
     }
 
-    // D-003@V2：已扫过时弹确认（componentCount > 0）
+    // D-003@V2：已扫过时弹确认（componentCount > 0）。FR-04 规范对齐：antd Modal.confirm
+    // 替代浏览器原生 window.confirm（FRONTEND_PAGE_STYLE §11）。
     if (componentCount > 0) {
-      const ok = window.confirm("该工作区已有扫描结果，是否重新扫描？");
+      const ok = await confirmRescan();
       if (!ok) return;
     }
 
@@ -334,7 +353,7 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
       setScanStatus("pending");
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        const confirmed = window.confirm("该工作区已有扫描结果，是否重新扫描？");
+        const confirmed = await confirmRescan();
         if (confirmed) {
           setScanning(false);
           await handleScan();
@@ -345,6 +364,20 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
     } finally {
       setScanning(false);
     }
+  }
+
+  /* ---- FR-04：antd Modal.confirm 二次确认（重新扫描），替代 window.confirm ---- */
+  function confirmRescan(): Promise<boolean> {
+    return new Promise((resolve) => {
+      Modal.confirm({
+        title: "重新扫描",
+        content: "该工作区已有扫描结果，是否重新扫描？",
+        okText: "重新扫描",
+        cancelText: "取消",
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      });
+    });
   }
 
   /* ---- Import handler（SSE onProgress，与 page.tsx 等价）---- */
@@ -410,73 +443,104 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
   /*  Render                                                          */
   /* ================================================================ */
 
-  // 头部操作按钮（5 按钮，与 page.tsx 598-674 行条件等价）
+  // 头部操作按钮（5 按钮，FR-02/03/04：antd Button + Tooltip 含义/disabled 原因 + loading）
+  // antd disabled Button 默认不响应 hover → 用 <Tooltip><span>包裹</span></Tooltip> 让 disabled
+  // 时也能显示原因。文案动词原形 + loading prop（FR-04，对齐 FRONTEND_PAGE_STYLE §5）。
+  const busyReason = (): string | null => {
+    if (initing) return "初始化进行中，请稍候";
+    if (scanning || activeScanRunId) return "扫描进行中，请稍候";
+    if (importing) return "导入进行中，请稍候";
+    if (syncStatus === "syncing") return "同步进行中，请稍候";
+    return null;
+  };
+
   const headActions = specWs ? (
-    <div className="flex gap-2">
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={() => void handleInit()}
-        disabled={initing || !!activeScanRunId || scanning || importing}
-      >
-        {initing ? "初始化进行中…" : "初始化"}
-      </Button>
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={() => void handleScan()}
-        disabled={
-          !isOwner || !!activeScanRunId || scanning || importing || initing
+    <div className="flex flex-wrap gap-2">
+      <Tooltip
+        title={
+          initing
+            ? "初始化进行中，请稍候"
+            : "初始化：将平台配置下发到你的本地项目目录并拉取文档缓存"
         }
-        title={!isOwner ? "仅 owner 可扫描" : undefined}
       >
-        {scanning
-          ? "派发中…"
-          : activeScanRunId
-            ? "扫描运行中…"
-            : "扫描"}
-      </Button>
+        <span>
+          <Button onClick={() => void handleInit()} loading={initing} disabled={!!busyReason()}>
+            初始化
+          </Button>
+        </span>
+      </Tooltip>
+      <Tooltip
+        title={
+          !isOwner
+            ? "仅 owner 可扫描"
+            : busyReason() ?? "扫描：把仓库的规范文档读取到平台"
+        }
+      >
+        <span>
+          <Button
+            onClick={() => void handleScan()}
+            loading={scanning}
+            disabled={!isOwner || !!busyReason()}
+          >
+            扫描
+          </Button>
+        </span>
+      </Tooltip>
       {initSyncedAt && componentCount > 0 && (
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void handleSyncManual()}
-          disabled={
-            syncStatus === "syncing" ||
-            initing ||
-            !!activeScanRunId ||
-            scanning ||
-            importing
+        <Tooltip
+          title={
+            syncStatus === "syncing"
+              ? "同步进行中，请稍候"
+              : "同步到服务器：把本地缓存的规范变更推送回服务器，供其他成员可见"
           }
         >
-          {syncStatus === "syncing"
-            ? "同步中…"
-            : syncStatus === "done"
-              ? "已同步"
-              : "同步到服务器"}
-        </Button>
+          <span>
+            <Button
+              onClick={() => void handleSyncManual()}
+              loading={syncStatus === "syncing"}
+              disabled={!!busyReason()}
+            >
+              {syncStatus === "done" ? "已同步" : "同步到服务器"}
+            </Button>
+          </span>
+        </Tooltip>
       )}
       {!specWs.repo_sillyspec_path && (
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => void handleImport()}
-          disabled={importing || initing}
+        <Tooltip
+          title={
+            importing
+              ? `${IMPORT_PHASE_LABEL[importPhase ?? "packing"]}，请稍候`
+              : "导入：从仓库 .sillyspec 导入规范文档"
+          }
         >
-          {importing
-            ? `${IMPORT_PHASE_LABEL[importPhase ?? "packing"]}…`
-            : "导入"}
-        </Button>
+          <span>
+            <Button
+              onClick={() => void handleImport()}
+              loading={importing}
+              disabled={!!busyReason()}
+            >
+              导入
+            </Button>
+          </span>
+        </Tooltip>
       )}
-      <Button
-        size="sm"
-        variant="ghost"
-        onClick={() => void handleGenerateProjects()}
-        disabled={generatingProjects || importing || initing}
-        title="根据 projects/*.yaml 生成项目组件"
+      <Tooltip
+        title={
+          generatingProjects
+            ? "生成中，请稍候"
+            : "根据 projects/*.yaml 生成项目组件"
+        }
       >
-        {generatingProjects ? "生成中…" : "生成项目"}
-      </Button>
+        <span>
+          <Button
+            onClick={() => void handleGenerateProjects()}
+            loading={generatingProjects}
+            disabled={!!busyReason()}
+          >
+            生成项目
+          </Button>
+        </span>
+      </Tooltip>
     </div>
   ) : undefined;
 
@@ -531,8 +595,6 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
       <div className="space-y-3">
         <div className="flex items-center justify-end">
           <Button
-            size="sm"
-            variant="outline"
             data-testid="config-edit-entry"
             onClick={() => setEditing((v) => !v)}
           >
@@ -690,7 +752,23 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
             </p>
           </div>
         )}
-        {initSyncedAt && !!specWs?.last_synced_at && (
+        {importing && (
+          <div className="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+            <p className="font-medium">导入进行中...</p>
+            <p className="mt-0.5 text-blue-600">
+              {IMPORT_PHASE_LABEL[importPhase ?? "packing"]}，正在从仓库读取规范文档，请稍候...
+            </p>
+          </div>
+        )}
+        {generatingProjects && (
+          <div className="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+            <p className="font-medium">生成项目组件中...</p>
+            <p className="mt-0.5 text-blue-600">
+              正在根据 projects/*.yaml 生成项目组件，请稍候...
+            </p>
+          </div>
+        )}
+        {initSyncedAt && !!specWs?.last_synced_at && !importing && !generatingProjects && (
           <div className="rounded border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
             <p className="font-medium">工作区已就绪。</p>
             <p className="mt-0.5 text-green-600">规范文档已同步，可直接使用。</p>
@@ -703,20 +781,38 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
   /* ---- 同步状态反馈（与 page.tsx 730-751 等价）---- */
   const renderSyncFeedback = (): JSX.Element | null => {
     if (syncStatus === "syncing") {
+      // FR-06：过程进度。files_total 已知（daemon onWalkComplete/ops.length 上报后）显示
+      // Progress 条 + N/M；未知（全量首同步 walkComplete 前）降级「打包中」阶段文案（BL-2）。
+      const hasTotal = syncProgress.total !== null && syncProgress.total > 0;
+      const processed = syncProgress.processed ?? 0;
+      const total = syncProgress.total ?? 0;
+      const percent = hasTotal ? Math.round((processed / total) * 100) : 0;
       return (
         <div className="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
           <p className="font-medium">同步中...</p>
-          <p className="mt-0.5 text-blue-600">
-            正在将缓存变更推送到服务器，请稍候...
-          </p>
+          {hasTotal ? (
+            <>
+              <Progress percent={percent} size="small" />
+              <p className="mt-0.5 text-blue-600">
+                正在推送文件变更 {processed}/{syncProgress.total}，请稍候...
+              </p>
+            </>
+          ) : (
+            <p className="mt-0.5 text-blue-600">正在打包本地变更，请稍候...</p>
+          )}
         </div>
       );
     }
     if (syncStatus === "done") {
+      // FR-05：终态计数展示。files_total 为 null（上报失败/降级）时退化为通用文案。
+      const countText =
+        syncedFilesTotal !== null && syncedFilesTotal > 0
+          ? `已成功推送 ${syncedFilesTotal} 个文件到服务器。`
+          : "缓存变更已成功推送到服务器。";
       return (
         <div className="rounded border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
           <p className="font-medium">已同步。</p>
-          <p className="mt-0.5 text-green-600">缓存变更已成功推送到服务器。</p>
+          <p className="mt-0.5 text-green-600">{countText}</p>
         </div>
       );
     }
@@ -776,13 +872,7 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
               <span className="text-warning">
                 上次扫描未完成（守护进程可能重启），可重新扫描。
               </span>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => void handleScan()}
-              >
-                重新扫描
-              </Button>
+              <Button onClick={() => void handleScan()}>重新扫描</Button>
             </div>
           )}
           {scanError && (

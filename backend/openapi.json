@@ -7668,6 +7668,63 @@
         }
       }
     },
+    "/api/daemon/change-writes/{change_write_id}/progress": {
+      "patch": {
+        "tags": [
+          "daemon",
+          "daemon"
+        ],
+        "summary": "Report Change Write Progress",
+        "description": "daemon spec-sync 执行中上报同步进度（FR-05/FR-06，ql-20260813-spec-sync-visibility）。\n\n校验与 complete 同款（claim_token + status）：``status == claimed`` 才允许写\n（BL-3：``status ∈ {pending, done, failed}`` 一律 409——progress 语义是「claim 后\n执行中的进度」，pending 未认领 / 终态已完成均拒绝；防重放/篡改）。仅写传入的非 None\n字段（files_total/files_processed），**不改 status/completed_at**（D-004 单一写者：\n终态仍由 complete_change_write 置）。",
+        "operationId": "report_change_write_progress_api_daemon_change_writes__change_write_id__progress_patch",
+        "parameters": [
+          {
+            "name": "change_write_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Change Write Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeWriteProgressRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Report Change Write Progress Api Daemon Change Writes  Change Write Id  Progress Patch"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/audit/batch": {
       "post": {
         "tags": [
@@ -28621,6 +28678,42 @@
         "title": "ChangeWritePendingItem",
         "description": "GET pending-change-writes 返回的单条待处理 change-write。"
       },
+      "ChangeWriteProgressRequest": {
+        "properties": {
+          "claim_token": {
+            "type": "string",
+            "title": "Claim Token"
+          },
+          "files_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files Total"
+          },
+          "files_processed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files Processed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "claim_token"
+        ],
+        "title": "ChangeWriteProgressRequest",
+        "description": "PATCH .../change-writes/{id}/progress 请求体（FR-05/FR-06，ql-20260813-spec-sync-visibility）。\n\ndaemon spec-sync 执行中上报同步进度计数。D-004 单一写者：本端点写 files_total/\nfiles_processed，complete_change_write 不碰计数列。仅更新传入的非 None 字段。"
+      },
       "CheckpointResponse": {
         "properties": {
           "version": {
@@ -31167,6 +31260,17 @@
           "base_version": {
             "type": "integer",
             "title": "Base Version"
+          },
+          "mtime": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mtime"
           }
         },
         "type": "object",
@@ -31176,7 +31280,7 @@
           "base_version"
         ],
         "title": "FileOp",
-        "description": "One per-file operation in an incremental spec sync.\n\n``path`` / ``new_path`` are relative to spec_root. ``content`` is base64\n(add/update use it); rename with unchanged content may omit both ``hash``\nand ``content``. ``base_version`` is the file version the daemon's local\nmanifest believes the server is at (0 when unknown → R-07 hash fallback)."
+        "description": "One per-file operation in an incremental spec sync.\n\n``path`` / ``new_path`` are relative to spec_root. ``content`` is base64\n(add/update use it); rename with unchanged content may omit both ``hash``\nand ``content``. ``base_version`` is the file version the daemon's local\nmanifest believes the server is at (0 when unknown → R-07 hash fallback).\n\n``mtime``（ql-20260813-008，可选）：宿主真实修改时间（Unix 秒）。落盘时作\nsource_mtime + os.utime，让镜像文件 mtime 真实，进而让 changes.updated_at\n反映变更活动。旧 daemon 不传 / 非法时 fallback now。"
       },
       "FileUploadResp": {
         "properties": {

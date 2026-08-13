@@ -446,6 +446,9 @@ class SpecWorkspaceService:
                 "error": rw.error,
                 "created_at": rw.created_at,
                 "completed_at": rw.completed_at,
+                # FR-05/FR-06（ql-20260813-spec-sync-visibility）：同步进度计数。
+                "files_total": rw.files_total,
+                "files_processed": rw.files_processed,
             }
             for rw in rows
         ]

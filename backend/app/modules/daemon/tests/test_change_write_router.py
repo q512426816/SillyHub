@@ -32,6 +32,7 @@ from app.modules.daemon.change_write_router import (
     claim_change_write,
     complete_change_write,
     get_pending_change_writes,
+    report_change_write_progress,
 )
 from app.modules.daemon.model import DaemonChangeWrite
 from app.modules.daemon.tests.test_lease_service import (
@@ -295,6 +296,117 @@ class TestComplete:
             await complete_change_write(
                 cw.id,
                 SimpleNamespace(claim_token="whatever", ok=True, files=None, error=None),
+                db_session,
+                _mock_user(),
+            )
+
+
+class TestReportChangeWriteProgress:
+    """ql-20260813-spec-sync-visibility task-11：progress 端点单测。
+
+    覆盖 BL-3（status==claimed 才允许写，pending/done/failed 一律 409）+ D-004
+    （单一写者——progress 只写 files_total/processed，不改 status/completed_at）+
+    claim_token 校验 + 部分字段写入。
+    """
+
+    @pytest.mark.asyncio
+    async def test_progress_claimed_writes_counts_no_status_change(
+        self, db_session: AsyncSession
+    ) -> None:
+        """claimed + token 匹配 → 写 files_total/processed，不改 status/completed_at（D-004）。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ws = await _create_workspace(db_session, user_id)
+        cw = await _create_change_write(
+            db_session,
+            runtime_id=rt.id,
+            workspace_id=ws.id,
+            status="claimed",
+            claim_token="tok-1",
+        )
+
+        resp = await report_change_write_progress(
+            cw.id,
+            SimpleNamespace(claim_token="tok-1", files_total=20, files_processed=8),
+            db_session,
+            _mock_user(),
+        )
+        assert resp["files_total"] == 20
+        assert resp["files_processed"] == 8
+        await db_session.refresh(cw)
+        assert cw.files_total == 20
+        assert cw.files_processed == 8
+        # D-004：progress 不改 status / completed_at（终态仍由 complete 置）
+        assert cw.status == "claimed"
+        assert cw.completed_at is None
+
+    @pytest.mark.asyncio
+    async def test_progress_partial_fields_write(self, db_session: AsyncSession) -> None:
+        """只传 files_total（files_processed=None）→ 仅写 files_total。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ws = await _create_workspace(db_session, user_id)
+        cw = await _create_change_write(
+            db_session,
+            runtime_id=rt.id,
+            workspace_id=ws.id,
+            status="claimed",
+            claim_token="tok-1",
+        )
+
+        await report_change_write_progress(
+            cw.id,
+            SimpleNamespace(claim_token="tok-1", files_total=15, files_processed=None),
+            db_session,
+            _mock_user(),
+        )
+        await db_session.refresh(cw)
+        assert cw.files_total == 15
+        assert cw.files_processed is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status", ["pending", "done", "failed"])
+    async def test_progress_non_claimed_rejected_409(
+        self, db_session: AsyncSession, status: str
+    ) -> None:
+        """BL-3：status != claimed 一律 409（pending/done/failed 全拒，防重放/篡改）。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ws = await _create_workspace(db_session, user_id)
+        cw = await _create_change_write(
+            db_session,
+            runtime_id=rt.id,
+            workspace_id=ws.id,
+            status=status,
+            claim_token="tok-1" if status != "pending" else None,
+        )
+
+        with pytest.raises(DaemonChangeWriteNotClaimed):
+            await report_change_write_progress(
+                cw.id,
+                SimpleNamespace(claim_token="tok-1", files_total=10, files_processed=5),
+                db_session,
+                _mock_user(),
+            )
+
+    @pytest.mark.asyncio
+    async def test_progress_wrong_token_rejected_409(self, db_session: AsyncSession) -> None:
+        """claimed 但 token 不匹配 → 409（DaemonChangeWriteTokenMismatch）。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ws = await _create_workspace(db_session, user_id)
+        cw = await _create_change_write(
+            db_session,
+            runtime_id=rt.id,
+            workspace_id=ws.id,
+            status="claimed",
+            claim_token="tok-1",
+        )
+
+        with pytest.raises(DaemonChangeWriteTokenMismatch):
+            await report_change_write_progress(
+                cw.id,
+                SimpleNamespace(claim_token="wrong", files_total=10, files_processed=5),
                 db_session,
                 _mock_user(),
             )

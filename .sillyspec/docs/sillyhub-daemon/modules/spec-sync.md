@@ -42,6 +42,8 @@ walkDir 相对路径用 POSIX `/`（tar 标准）；symlink 跳过（不收集�
 - buildTarHeader checksum 按 unsigned byte sum 计算（checksum 字段视为 8 个空格），写 6 位 octal + NUL + 空格。
 - 404 容错用 duck-type `isHubHttp404`（status===404），不硬依赖 hub-client.ts 导出，规避 HubHttpError 改名风险。
 - **ql-20260813-004**：push 默认排除 `runtime/`(无点)+`worktrees`，保留 `.runtime`(有点)。历史坑：曾含 `runtime/scan-runs/<uuid>/<长change名>-brainstorm-stepNN-<ts>.txt`，name 超 100 字节被 buildTarHeader 静默截断 → 后端 `_write_spec_root` read_bytes FileNotFoundError → HTTP 500（daemon 记 change_write_execute_failed）。根治=LongLink 长名 + 排除 runtime(无点) 双管齐下。
+- **ql-20260813-007（P0）**：push 默认排除 `.runtime`(有点)整树——sillyspec.db（SQLite 二进制含 NUL）写进后端 scan_documents 文本列触发 asyncpg `0x00` 整批回滚 500。`.runtime` 加 excludeTop（顶层）+ pruneNames（任意深度，对齐 build_bundle）。
+- **ql-20260813-spec-sync-visibility（P1）**：① `postSpecSync` 返回加 `filesTotal`（增量=ops.length / 全量=manifest 文件数）；② 加 `onProgress` 回调（增量 computeIncrementalOps 后 / 全量 `packSpecDir.onWalkComplete` 时上报 total+processed=0）；③ `packSpecDir` 加 `onWalkComplete(filesCount)` 钩子（BL-2：walkDir 后 tar 拼接前，全量首同步进度窗口）。供 task-runner spec-sync 分支接 `reportChangeWriteProgress` 端点（W3/W4）。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->

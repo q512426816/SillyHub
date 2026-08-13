@@ -10,6 +10,7 @@
  * 注：组件本身（task-01~06 产物）不变；测试以行为契约，断言文本/testid/role 而非实现细节。
  */
 import { cleanup, render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { ConfigProvider, Modal } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorkspaceConfigCard } from "@/components/workspace-config-card";
@@ -203,21 +204,26 @@ function renderCard(overrides: {
 }) {
   const onRefresh = overrides.onRefresh ?? vi.fn();
   const utils = render(
-    <WorkspaceConfigCard
-      workspace={overrides.workspace ?? makeWorkspace()}
-      specWs={overrides.specWs === undefined ? makeSpecWs() : overrides.specWs}
-      myBinding={
-        overrides.myBinding === undefined ? makeBinding() : overrides.myBinding
-      }
-      boundDaemon={
-        overrides.boundDaemon === undefined
-          ? makeDaemon()
-          : overrides.boundDaemon
-      }
-      isOwner={overrides.isOwner ?? true}
-      onRefresh={onRefresh}
-      componentCount={overrides.componentCount ?? 0}
-    />,
+    // FR-04：W2 改 antd Button 后，两字中文按钮默认 autoInsertSpace 在字间插空格
+    //（"扫 描"），getByRole({name:"扫描"}) 精确匹配失败。测试用 ConfigProvider 关掉
+    // autoInsertSpace 让按钮文本干净（生产环境用户不可见差异，仅 jsdom 匹配需要）。
+    <ConfigProvider button={{ autoInsertSpace: false }}>
+      <WorkspaceConfigCard
+        workspace={overrides.workspace ?? makeWorkspace()}
+        specWs={overrides.specWs === undefined ? makeSpecWs() : overrides.specWs}
+        myBinding={
+          overrides.myBinding === undefined ? makeBinding() : overrides.myBinding
+        }
+        boundDaemon={
+          overrides.boundDaemon === undefined
+            ? makeDaemon()
+            : overrides.boundDaemon
+        }
+        isOwner={overrides.isOwner ?? true}
+        onRefresh={onRefresh}
+        componentCount={overrides.componentCount ?? 0}
+      />
+    </ConfigProvider>,
   );
   return { ...utils, onRefresh };
 }
@@ -434,6 +440,28 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
     expect(bindingApi.fetchMyBinding).toHaveBeenCalled();
   });
 
+  it("同步中：轮询 pending 带 files_total/processed → 展示 Progress N/M（FR-06）", async () => {
+    const binding = makeBinding({
+      init_synced_at: "2026-06-30T02:00:00Z",
+      init_synced_spec_version: 1,
+    });
+    specApi.syncManual.mockResolvedValue({ status: "pending", task_id: "t-1" });
+    // daemon 已上报 total=20 processed=8（walkComplete/ops.length 后）
+    specApi.listPendingSync.mockResolvedValue([
+      { task_id: "t-1", status: "pending", runtime_id: "rid-1", created_at: "2026-07-01T00:00:00Z", files_total: 20, files_processed: 8 },
+    ]);
+
+    renderCard({ myBinding: binding, componentCount: 5 });
+
+    fireEvent.click(screen.getByRole("button", { name: "同步到服务器" }));
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(2000);
+    await flushMicrotasks();
+
+    // FR-06：Progress 条 + N/M 文案
+    expect(screen.getByText("正在推送文件变更 8/20，请稍候...")).toBeInTheDocument();
+  });
+
   it("同步：syncManual 返 pending → 2s 轮询 listPendingSync 直到 done → 按钮显示「已同步」", async () => {
     const onRefresh = vi.fn();
     const binding = makeBinding({
@@ -444,10 +472,10 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
     // 第一次 listPendingSync 仍 pending，第二次 done
     specApi.listPendingSync
       .mockResolvedValueOnce([
-        { id: "t-1", workspace_id: "ws-1", runtime_id: "rid-1", change_key: "k", kind: "spec-sync", status: "pending", created_at: "2026-07-01T00:00:00Z" },
+        { task_id: "t-1", status: "pending", runtime_id: "rid-1", created_at: "2026-07-01T00:00:00Z" },
       ])
       .mockResolvedValueOnce([
-        { id: "t-1", workspace_id: "ws-1", runtime_id: "rid-1", change_key: "k", kind: "spec-sync", status: "done", created_at: "2026-07-01T00:00:00Z" },
+        { task_id: "t-1", status: "done", runtime_id: "rid-1", created_at: "2026-07-01T00:00:00Z", files_total: 35, files_processed: 35 },
       ]);
 
     renderCard({ myBinding: binding, componentCount: 5, onRefresh });
@@ -468,6 +496,8 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
     expect(specApi.listPendingSync).toHaveBeenCalledTimes(2);
     expect(onRefresh).toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "已同步" })).toBeInTheDocument();
+    // FR-05：终态计数展示「已成功推送 N 个文件」
+    expect(screen.getByText("已成功推送 35 个文件到服务器。")).toBeInTheDocument();
 
     // 轮询已停止：再快进 4s 不应有第 3 次
     const callsAfter = specApi.listPendingSync.mock.calls.length;
@@ -484,7 +514,7 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
     specApi.syncManual.mockResolvedValue({ status: "pending", task_id: "t-1" });
     // listPendingSync 始终返回 pending（永不 done）
     specApi.listPendingSync.mockResolvedValue([
-      { id: "t-1", workspace_id: "ws-1", runtime_id: "rid-1", change_key: "k", kind: "spec-sync", status: "pending", created_at: "2026-07-01T00:00:00Z" },
+      { task_id: "t-1", status: "pending", runtime_id: "rid-1", created_at: "2026-07-01T00:00:00Z" },
     ]);
 
     renderCard({ myBinding: binding, componentCount: 5 });
@@ -503,18 +533,69 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
     expect(screen.getByText("仍在排队，请稍后再试")).toBeInTheDocument();
   });
 
-  it("扫描：isOwner=false 时扫描按钮 disabled + title 提示", () => {
+  it("同步失败：透传后端 latest.error（FR-01，非写死文案）", async () => {
+    const binding = makeBinding({
+      init_synced_at: "2026-06-30T02:00:00Z",
+      init_synced_spec_version: 1,
+    });
+    specApi.syncManual.mockResolvedValue({ status: "pending", task_id: "t-1" });
+    // 后端返 failed + error（如 NUL 500 / 超时原因）
+    specApi.listPendingSync.mockResolvedValue([
+      { task_id: "t-1", status: "failed", runtime_id: "rid-1", error: "invalid byte sequence 0x00", created_at: "2026-07-01T00:00:00Z" },
+    ]);
+
+    renderCard({ myBinding: binding, componentCount: 5 });
+
+    fireEvent.click(screen.getByRole("button", { name: "同步到服务器" }));
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(2000);
+    await flushMicrotasks();
+
+    // FR-01：失败框显示后端真实 error，非写死「同步到服务器失败」
+    expect(screen.getByText("同步失败。")).toBeInTheDocument();
+    expect(screen.getByText("invalid byte sequence 0x00")).toBeInTheDocument();
+  });
+
+  it("同步失败：latest.error 为空时兜底通用文案（FR-01）", async () => {
+    const binding = makeBinding({
+      init_synced_at: "2026-06-30T02:00:00Z",
+      init_synced_spec_version: 1,
+    });
+    specApi.syncManual.mockResolvedValue({ status: "pending", task_id: "t-1" });
+    // 后端返 failed 但 error 为空（如 claim 超时 gc 未写 error）
+    specApi.listPendingSync.mockResolvedValue([
+      { task_id: "t-1", status: "failed", runtime_id: "rid-1", error: null, created_at: "2026-07-01T00:00:00Z" },
+    ]);
+
+    renderCard({ myBinding: binding, componentCount: 5 });
+
+    fireEvent.click(screen.getByRole("button", { name: "同步到服务器" }));
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(2000);
+    await flushMicrotasks();
+
+    expect(screen.getByText("同步失败。")).toBeInTheDocument();
+    expect(screen.getByText("同步到服务器失败")).toBeInTheDocument();
+  });
+
+  it("扫描：isOwner=false 时扫描按钮 disabled（FR-03 原因经 Tooltip 展示）", () => {
     const ws = makeWorkspace();
     renderCard({ workspace: ws, isOwner: false });
 
+    // FR-02/03：W2 改 antd Button + Tooltip 包裹后，title 移到 Tooltip（jsdom 不渲染
+    // hover tooltip 文本），故只断言 disabled 状态（原因文案在 Tooltip 生产可见）。
     const scanBtn = screen.getByRole("button", { name: "扫描" });
     expect(scanBtn).toBeDisabled();
-    expect(scanBtn).toHaveAttribute("title", "仅 owner 可扫描");
   });
 
-  it("扫描：componentCount>0 弹 confirm（确认 false 不调用 scanGenerate）", () => {
+  it("扫描：componentCount>0 弹 Modal.confirm（确认 false 不调用 scanGenerate）", () => {
     const ws = makeWorkspace();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    // FR-04：W2 改 antd Modal.confirm（不再用 window.confirm）。spy Modal.confirm
+    // 模拟用户点「取消」（调 onCancel → resolve(false)），不触发 onOk。
+    const confirmSpy = vi.spyOn(Modal, "confirm").mockImplementation((opts) => {
+      opts.onCancel?.(undefined as never);
+      return { destroy: () => {} } as never;
+    });
     workspacesApi.scanGenerate.mockResolvedValue({
       workspace_id: "ws-1",
       agent_run_id: "run-1",
@@ -527,8 +608,11 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
     renderCard({ workspace: ws, componentCount: 3 });
 
     fireEvent.click(screen.getByRole("button", { name: "扫描" }));
-    expect(confirmSpy).toHaveBeenCalledWith("该工作区已有扫描结果，是否重新扫描？");
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "重新扫描" }),
+    );
     expect(workspacesApi.scanGenerate).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 
   it("扫描：409 冲突 + 用户确认 → 二次调用 scanGenerate", async () => {
@@ -551,7 +635,11 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
         spec_root: "",
         message: "",
       });
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    // FR-04：Modal.confirm 模拟用户点「确认」（调 onOk → resolve(true)）
+    const confirmSpy = vi.spyOn(Modal, "confirm").mockImplementation((opts) => {
+      opts.onOk?.(undefined as never);
+      return { destroy: () => {} } as never;
+    });
 
     renderCard({ workspace: ws, componentCount: 0 });
 
@@ -560,9 +648,12 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
     await flushMicrotasks();
     await flushMicrotasks();
 
-    // 第一次调用 → 抛 409 → confirm → 第二次调用
+    // 第一次调用 → 抛 409 → Modal.confirm → 第二次调用
     expect(workspacesApi.scanGenerate).toHaveBeenCalledTimes(2);
-    expect(confirmSpy).toHaveBeenCalledWith("该工作区已有扫描结果，是否重新扫描？");
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "重新扫描" }),
+    );
+    confirmSpy.mockRestore();
   });
 
   it("扫描：myBinding.daemon_id 非空 → scanGenerate 用 daemon_id 派发（ql-20260705-003 回归）", async () => {

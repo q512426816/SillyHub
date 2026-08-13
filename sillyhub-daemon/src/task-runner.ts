@@ -183,6 +183,15 @@ export interface RunnerHubClient {
     claimToken: string,
     payload: { ok: boolean; files?: unknown[]; error?: string },
   ): Promise<unknown>;
+  /**
+   * ql-20260813-spec-sync-visibility task-08：上报同步进度计数（files_total/processed）。
+   * 可选——mock client 未实现时 daemon 跳过进度上报（不影响同步主流程）。
+   */
+  reportChangeWriteProgress?(
+    changeWriteId: string,
+    claimToken: string,
+    payload: { files_total?: number; files_processed?: number },
+  ): Promise<unknown>;
 }
 
 /**
@@ -2285,13 +2294,27 @@ export class TaskRunner {
     if (kind === 'spec-sync') {
       const specDir = resolveSpecDir(workspaceId);
       let pushOk = false;
+      let filesTotal: number | undefined;
       try {
         const resp = await postSpecSync(
           this.client as unknown as Parameters<typeof postSpecSync>[0],
           workspaceId,
           specDir,
+          // task-13（FR-06）：过程进度回调 → reportChangeWriteProgress 上报到 progress 端点。
+          // 回调失败仅 warn 不阻塞同步（best-effort）。终态上报（processed=total）在下方
+          // complete 前做（task-08），本回调只报过程起点（增量 ops.length / 全量 onWalkComplete）。
+          (p) => {
+            if (typeof this.client.reportChangeWriteProgress === 'function') {
+              this.client
+                .reportChangeWriteProgress(taskId, claimToken, p)
+                .catch((e) => {
+                  console.warn('task_runner: spec_sync_progress_report_failed', taskId, e);
+                });
+            }
+          },
         );
         pushOk = resp !== null;
+        filesTotal = resp?.filesTotal;
       } catch (e) {
         // postSpecSync 抛错（网络 / 4xx/5xx）→ 回执 ok=false。
         if (typeof this.client.completeChangeWrite === 'function') {
@@ -2301,6 +2324,18 @@ export class TaskRunner {
           });
         }
         throw e;
+      }
+      // FR-05（D-004 单一写者）：complete 前上报终态计数 {files_total, files_processed:files_total}。
+      // reportChangeWriteProgress 可选（mock 未实现跳过）；失败仅 warn 不阻塞 complete（best-effort）。
+      if (filesTotal !== undefined && typeof this.client.reportChangeWriteProgress === 'function') {
+        try {
+          await this.client.reportChangeWriteProgress(taskId, claimToken, {
+            files_total: filesTotal,
+            files_processed: filesTotal,
+          });
+        } catch (e) {
+          console.warn('task_runner: spec_sync_progress_report_failed', taskId, e);
+        }
       }
       if (typeof this.client.completeChangeWrite === 'function') {
         await this.client.completeChangeWrite(taskId, claimToken, {

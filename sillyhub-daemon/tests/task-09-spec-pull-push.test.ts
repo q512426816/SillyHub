@@ -525,10 +525,11 @@ describe('task-09 push 收尾', () => {
     expect(client.postSpecSync).toHaveBeenCalledOnce();
   });
 
-  it('_packSpecDir 含 .runtime 子目录（task-06 / FR-06 push 路径，含 sillyspec.db 等）', async () => {
-    // task-06（design §5.2 D-003）：push 路径不再排除 .runtime——daemon 的 sillyspec.db 等
-    // 需回灌 backend（FR-06）。pull 路径 backend build_bundle 仍排除（非对称，R7）。
-    // 通过 pull 把"原始 tar"解出来（含 .runtime/），然后断言 push 时打包的 tar **含** .runtime。
+  it('_packSpecDir 排除 .runtime 子目录（ql-20260813-007：push 路径默认排除 .runtime 整树）', async () => {
+    // ql-20260813-007（NUL 500 根治）：push 路径 packSpecDir 默认排除 .runtime 整树
+    // （sillyspec.db SQLite 二进制含 NUL 字节，写进 backend scan_documents 文本列触发
+    // asyncpg 0x00 整批回滚 500）。pull 路径 backend build_bundle 亦排除（对称，R7）。
+    // 通过 pull 把"原始 tar"解出来（含 .runtime/），然后断言 push 时打包的 tar **不含** .runtime。
     const sourceTar = buildTar([
       { name: 'doc.md', content: 'd' },
       { name: '.runtime/', content: '', isDir: true },
@@ -552,11 +553,9 @@ describe('task-09 push 收尾', () => {
     expect(client.postSpecSync).toHaveBeenCalledOnce();
     const syncBuf = client.postSpecSync.mock.calls[0]![1] as Buffer;
     const names = parseTarEntryNames(syncBuf);
-    // task-06：含 .runtime 段（FR-06 / G2）——daemon .runtime（含 sillyspec.db）需回灌
+    // ql-20260813-007：push tar 不含任何 .runtime 段（整树排除，含子目录 sub/.runtime）
     const runtimeHits = names.filter((n) => n.split(/[\\/]/).includes('.runtime'));
-    expect(runtimeHits).toContain('.runtime');
-    expect(runtimeHits).toContain('.runtime/state.json');
-    expect(runtimeHits).toContain('sub/.runtime/cache');
+    expect(runtimeHits).toEqual([]);
     // 正常文件保留
     expect(names).toContain('doc.md');
   });

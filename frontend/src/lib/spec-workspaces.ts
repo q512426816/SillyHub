@@ -189,14 +189,20 @@ export async function syncManual(
   );
 }
 
+// PendingSyncItem 对齐后端 sync_manual_get_pending 返回字段（design FR-01 / Wave 1：
+// 修复既有 schema 漂移——旧类型 id/workspace_id/change_key/kind 与后端 task_id/error/
+// completed_at 完全脱节）。files_total/files_processed 由 Wave 3 task-09 补。
 export interface PendingSyncItem {
-  id: string;
-  workspace_id: string;
-  runtime_id: string;
-  change_key: string;
-  kind: string;
+  task_id: string;
   status: string;
+  runtime_id: string;
+  /** 失败原因（status=failed 时后端 DaemonChangeWrite.error 透传，FR-01）。 */
+  error?: string | null;
   created_at: string;
+  completed_at?: string | null;
+  /** 同步进度计数（FR-05/FR-06，D-004 单一写者=progress 端点）。 */
+  files_total?: number | null;
+  files_processed?: number | null;
 }
 
 /**

@@ -303,7 +303,9 @@ describe('postSpecSync', () => {
     const postSpy = vi.fn().mockResolvedValue({ ok: true, reparsed: 3 });
     const client = { postSpecSync: postSpy } as any;
     const r = await postSpecSync(client, 'ws', scratch);
-    expect(r).toEqual({ ok: true, reparsed: 3 });
+    // ql-20260813-spec-sync-visibility task-08：postSpecSync 返回加 filesTotal（全量
+    // 路径=manifest 文件数，此处 1 个 spec.md）。
+    expect(r).toEqual({ ok: true, reparsed: 3, filesTotal: 1 });
     expect(postSpy).toHaveBeenCalledTimes(1);
     const [wsId, tarBuf] = postSpy.mock.calls[0];
     expect(wsId).toBe('ws');

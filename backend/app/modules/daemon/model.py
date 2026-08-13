@@ -486,3 +486,14 @@ class DaemonChangeWrite(BaseModel, table=True):
         default=None,
         sa_column=Column(Text, nullable=True),
     )
+    # FR-05/FR-06（ql-20260813-spec-sync-visibility）：同步进度计数列。nullable 兼容
+    # 旧行（D-002）。D-004 单一写者——只由 PATCH /api/daemon/change-writes/{id}/progress
+    # 端点写，complete_change_write 不碰计数列。files_total=文件总数，files_processed=已处理数。
+    files_total: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )
+    files_processed: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )

@@ -119,11 +119,8 @@ describe("listPendingSync API", () => {
   it("GET /api/workspaces/{workspaceId}/spec-workspace/sync-manual/pending → items", async () => {
     const mockItems: PendingSyncItem[] = [
       {
-        id: "cw-1",
-        workspace_id: "ws-1",
+        task_id: "cw-1",
         runtime_id: "rt-1",
-        change_key: "spec-sync",
-        kind: "spec-sync",
         status: "pending",
         created_at: "2026-07-02T10:00:00Z",
       },

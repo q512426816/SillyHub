@@ -38,6 +38,7 @@ from app.modules.daemon.schema import (
     ChangeWriteClaimResponse,
     ChangeWriteCompleteRequest,
     ChangeWritePendingItem,
+    ChangeWriteProgressRequest,
 )
 
 log = get_logger(__name__)
@@ -313,3 +314,61 @@ async def complete_change_write(
         ok=data.ok,
     )
     return {"task_id": str(change_write_id), "status": cw.status}
+
+
+@router.patch(
+    "/change-writes/{change_write_id}/progress",
+    response_model=dict,
+)
+async def report_change_write_progress(
+    change_write_id: uuid.UUID,
+    data: ChangeWriteProgressRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[User, Depends(get_current_principal)],
+) -> dict:
+    """daemon spec-sync 执行中上报同步进度（FR-05/FR-06，ql-20260813-spec-sync-visibility）。
+
+    校验与 complete 同款（claim_token + status）：``status == claimed`` 才允许写
+    （BL-3：``status ∈ {pending, done, failed}`` 一律 409——progress 语义是「claim 后
+    执行中的进度」，pending 未认领 / 终态已完成均拒绝；防重放/篡改）。仅写传入的非 None
+    字段（files_total/files_processed），**不改 status/completed_at**（D-004 单一写者：
+    终态仍由 complete_change_write 置）。
+    """
+    cw = await session.get(DaemonChangeWrite, change_write_id)
+    if cw is None:
+        raise DaemonChangeWriteNotFound(
+            f"Change write '{change_write_id}' not found.",
+            details={"change_write_id": str(change_write_id)},
+        )
+    if cw.status != "claimed":
+        raise DaemonChangeWriteNotClaimed(
+            f"Change write '{change_write_id}' is not claimed (status={cw.status}).",
+            details={
+                "change_write_id": str(change_write_id),
+                "status": cw.status,
+            },
+        )
+    if not cw.claim_token or cw.claim_token != data.claim_token:
+        raise DaemonChangeWriteTokenMismatch(
+            "Invalid or missing claim_token.",
+            details={"change_write_id": str(change_write_id)},
+        )
+
+    if data.files_total is not None:
+        cw.files_total = data.files_total
+    if data.files_processed is not None:
+        cw.files_processed = data.files_processed
+    session.add(cw)
+    await session.commit()
+
+    log.info(
+        "daemon_change_write_progress",
+        change_write_id=str(change_write_id),
+        files_total=cw.files_total,
+        files_processed=cw.files_processed,
+    )
+    return {
+        "task_id": str(change_write_id),
+        "files_total": cw.files_total,
+        "files_processed": cw.files_processed,
+    }

@@ -505,7 +505,14 @@ export async function postSpecSync(
   client: HubClient,
   wsId: string,
   specRoot: string,
-): Promise<{ ok: boolean; reparsed: number } | null> {
+  /**
+   * ql-20260813-spec-sync-visibility task-12（FR-06 + BL-2）：过程进度回调。
+   * 调用点：增量 computeIncrementalOps 后（total=ops.length, processed=0）；全量
+   * packSpecDir onWalkComplete 时（total=filesCount, processed=0）。终态上报
+   * （processed=total）由 task-runner 在 complete 前做（task-08），本回调只报过程起点。
+   */
+  onProgress?: (p: { files_total?: number; files_processed?: number }) => void,
+): Promise<{ ok: boolean; reparsed: number; filesTotal?: number } | null> {
   if (typeof client.postSpecSync !== 'function') return null; // mock client 未实现
 
   // 1. 读本地清单缓存
@@ -513,26 +520,36 @@ export async function postSpecSync(
 
   // 2. 首同步（无缓存）→ 旧 tar 全量 + 写快照
   if (cached === null) {
-    const tarBuf = await packSpecDir(specRoot);
+    const tarBuf = await packSpecDir(specRoot, {
+      // BL-2：walk 完成立即上报 total（tar 还没拼，全量首同步进度窗口）
+      onWalkComplete: (filesCount) => onProgress?.({ files_total: filesCount, files_processed: 0 }),
+    });
     const resp = await client.postSpecSync(wsId, tarBuf);
-    await writeLocalManifest(wsId, await buildFullManifest(specRoot));
-    return resp;
+    const fullManifest = await buildFullManifest(specRoot);
+    await writeLocalManifest(wsId, fullManifest);
+    // filesTotal = 全量快照文件数（spec 文档数）
+    return { ...resp, filesTotal: Object.keys(fullManifest.files).length };
   }
 
   // 3. 增量 diff → ops
   const { ops, localFiles } = await computeIncrementalOps(specRoot, cached);
+  // task-12：增量路径起点上报 total=ops.length（变化文件数）
+  if (ops.length > 0) {
+    onProgress?.({ files_total: ops.length, files_processed: 0 });
+  }
   if (ops.length === 0) {
     // 无变化 → 不发请求，仅按需刷新缓存 mtime（当前缓存已是最新本地态）
     await writeLocalManifest(wsId, buildManifestFromLocal(cached, localFiles, {}));
-    return { ok: true, reparsed: 0 };
+    return { ok: true, reparsed: 0, filesTotal: 0 };
   }
 
   // 4. 增量客户端缺失（mock 旧客户端）→ 回退旧 tar
   if (typeof client.postSpecSyncIncremental !== 'function') {
     const tarBuf = await packSpecDir(specRoot);
     const resp = await client.postSpecSync(wsId, tarBuf);
-    await writeLocalManifest(wsId, await buildFullManifest(specRoot));
-    return resp;
+    const fullManifest = await buildFullManifest(specRoot);
+    await writeLocalManifest(wsId, fullManifest);
+    return { ...resp, filesTotal: Object.keys(fullManifest.files).length };
   }
 
   try {
@@ -542,14 +559,16 @@ export async function postSpecSync(
     }
     // 成功 → 按 new_versions 回写缓存 version
     await writeLocalManifest(wsId, buildManifestFromLocal(cached, localFiles, result.new_versions));
-    return { ok: true, reparsed: 0 };
+    // filesTotal = 本次增量 ops 数（变化的文件数）
+    return { ok: true, reparsed: 0, filesTotal: ops.length };
   } catch (e) {
     // conflict 不回退（人工拍板）；404/网络/端点错误 → 回退旧 tar 全量
     if (e instanceof SpecPushConflict) throw e;
     const tarBuf = await packSpecDir(specRoot);
     const resp = await client.postSpecSync(wsId, tarBuf);
-    await writeLocalManifest(wsId, await buildFullManifest(specRoot));
-    return resp;
+    const fullManifest = await buildFullManifest(specRoot);
+    await writeLocalManifest(wsId, fullManifest);
+    return { ...resp, filesTotal: Object.keys(fullManifest.files).length };
   }
 }
 
@@ -747,7 +766,14 @@ export async function syncSpecTreeIfNeeded(
  */
 export async function packSpecDir(
   specDir: string,
-  opts: { excludeRuntime?: boolean; excludeNames?: string[] } = {},
+  opts: {
+    excludeRuntime?: boolean;
+    excludeNames?: string[];
+    /** ql-20260813-spec-sync-visibility task-12（BL-2）：walkDir 收集完 entry、拼 tar 前
+     *  回调，filesCount=非目录文件数。全量首同步路径在此刻能拿到 total 上报进度
+     *  （walk 完 total 已知，tar 还没拼，有真实上报窗口）。 */
+    onWalkComplete?: (filesCount: number) => void;
+  } = {},
 ): Promise<Buffer> {
   const excludeTop = new Set<string>(opts.excludeNames ?? []);
   // ql-20260813-007：`.runtime`（有点）整树无条件默认排除——sillyspec 进度库(sillyspec.db)是
@@ -756,11 +782,17 @@ export async function packSpecDir(
   // worktrees 是 sillyspec 工作区可达 GB。opts.excludeRuntime 现为冗余（默认已排除），保留兼容旧调用。
   excludeTop.add('.runtime');
   excludeTop.add('runtime');
-  const pruneNames = new Set(['worktrees']);
+  // ql-20260813-007：.runtime 同时加 pruneNames（任意深度 basename）——防止嵌套子目录里的
+  // .runtime（如 sub/.runtime/cache）漏排。对齐 backend build_bundle 的 any(part==".runtime")。
+  const pruneNames = new Set(['worktrees', '.runtime']);
   const chunks: Buffer[] = [];
   // excludeTop(顶层首段) + pruneNames(任意深度 basename) 传 walkDir 剪枝：命中目录不收集、
   // 不递归，既省 tar 写入也省遍历（.runtime 2G worktrees / changes 万级文件 不递归进去）。
   const entries = await walkDir(specDir, excludeTop, pruneNames);
+  // BL-2（task-12）：walk 完成立即回调 total（tar 还没拼，全量路径上报窗口）。
+  if (opts.onWalkComplete) {
+    opts.onWalkComplete(entries.filter((e) => !e.isDir).length);
+  }
   for (const e of entries) {
     const entryName = e.relPath + (e.isDir ? '/' : '');
     // ql-20260813-004：name 超 ustar 100 字节 → 先写 GNU LongLink 扩展头（Python tarfile

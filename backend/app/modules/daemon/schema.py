@@ -590,3 +590,15 @@ class ChangeWriteCompleteRequest(BaseModel):
     # 回执写后的实际文件路径清单（可选，落库时回写 files）
     files: list | None = None
     error: str | None = None
+
+
+class ChangeWriteProgressRequest(BaseModel):
+    """PATCH .../change-writes/{id}/progress 请求体（FR-05/FR-06，ql-20260813-spec-sync-visibility）。
+
+    daemon spec-sync 执行中上报同步进度计数。D-004 单一写者：本端点写 files_total/
+    files_processed，complete_change_write 不碰计数列。仅更新传入的非 None 字段。
+    """
+
+    claim_token: str
+    files_total: int | None = None
+    files_processed: int | None = None
