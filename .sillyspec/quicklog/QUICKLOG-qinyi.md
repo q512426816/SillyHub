@@ -214,3 +214,13 @@
 根因：部分代码注释过时（MCP tool 数量 8/5 实际 12、adapters 目录无说明），migrations/env.py 漏登记 8 类较新模块 model 致 autogenerate 漏判。
 方案：改 mcp_gateway/server.py 三处 tool 数量注释为 12，adapters/__init__.py 补 docstring，env.py 补 8 类 model import 并 ruff isort 排序。
 结果：ruff check+format clean，8 import 加载 OK，容器内 alembic check 无 add_table（满屏 diff 为预存类型噪音与本次无关），pytest mcp_gateway+agent 605 passed 2 deselected；#9 execution.py 注释已自行修正跳过，#7 死代码删除留 quick 外 git 单独做。
+
+## ql-20260814-004-fab6 | 2026-08-14 16:05:31 | 修复 test_router_transition 4 个预存债失败（TestTransitionResponseFormat 结构测试）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/tests/modules/change/test_router_transition.py（4 个结构测试加门控 patch 放行（fixture 无 CLI 进度数据，门控由 test_dispatch.py 覆盖））
+需求：修复 test_router_transition 4 个预存债失败（TestTransitionResponseFormat 结构测试）。
+根因：fixture demo change reparse 后 stages JSON 空，_check_source_stage_completion 门控（service.py:1716）fail-closed 422 missing_stage_block，测试目标是 TransitionResponse 结构非门控，门控由 test_dispatch.py 单独覆盖，静态 fixture 无 CLI 进度数据。
+方案：4 个测试加 patch.object(ChangeService, _check_source_stage_completion, MagicMock(return_value=None)) 放行门控专注结构验证，不碰生产逻辑。
+结果：test_router_transition.py 5 passed（4 failed 全修）、change 模块 74 passed 无回归、ruff 过；全量 4 failed 债清零。

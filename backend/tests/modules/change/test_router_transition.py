@@ -12,9 +12,11 @@ from __future__ import annotations
 import shutil
 import uuid
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from app.modules.change.service import ChangeService
 
 # backend/tests/modules/change/ → parents[3] = backend/
 _FIXTURES_BASE = (
@@ -96,10 +98,17 @@ class TestTransitionResponseFormat:
             "phase": "Plan",
         }
 
-        with patch(
-            "app.modules.change.dispatch.dispatch",
-            new_callable=AsyncMock,
-            return_value=mock_dispatch_result,
+        with (
+            patch.object(
+                ChangeService,
+                "_check_source_stage_completion",
+                MagicMock(return_value=None),
+            ),
+            patch(
+                "app.modules.change.dispatch.dispatch",
+                new_callable=AsyncMock,
+                return_value=mock_dispatch_result,
+            ),
         ):
             resp = await client.post(
                 f"/api/workspaces/{ws_id}/changes/{change_id}/transition",
@@ -137,10 +146,17 @@ class TestTransitionResponseFormat:
             "reason": "no_config_for_stage",
         }
 
-        with patch(
-            "app.modules.change.dispatch.dispatch",
-            new_callable=AsyncMock,
-            return_value=mock_dispatch_result,
+        with (
+            patch.object(
+                ChangeService,
+                "_check_source_stage_completion",
+                MagicMock(return_value=None),
+            ),
+            patch(
+                "app.modules.change.dispatch.dispatch",
+                new_callable=AsyncMock,
+                return_value=mock_dispatch_result,
+            ),
         ):
             resp = await client.post(
                 f"/api/workspaces/{ws_id}/changes/{change_id}/transition",
@@ -161,9 +177,16 @@ class TestTransitionResponseFormat:
         ws_id = ws_with_changes["ws_id"]
         change_id = await _get_demo_change_id(client, ws_id, auth_headers)
 
-        with patch(
-            "app.core.db.get_session_factory",
-            side_effect=RuntimeError("DB connection failed"),
+        with (
+            patch.object(
+                ChangeService,
+                "_check_source_stage_completion",
+                MagicMock(return_value=None),
+            ),
+            patch(
+                "app.core.db.get_session_factory",
+                side_effect=RuntimeError("DB connection failed"),
+            ),
         ):
             resp = await client.post(
                 f"/api/workspaces/{ws_id}/changes/{change_id}/transition",
@@ -185,9 +208,16 @@ class TestTransitionResponseFormat:
         ws_id = ws_with_changes["ws_id"]
         change_id = await _get_demo_change_id(client, ws_id, auth_headers)
 
-        with patch(
-            "app.core.db.get_session_factory",
-            side_effect=RuntimeError("skip dispatch"),
+        with (
+            patch.object(
+                ChangeService,
+                "_check_source_stage_completion",
+                MagicMock(return_value=None),
+            ),
+            patch(
+                "app.core.db.get_session_factory",
+                side_effect=RuntimeError("skip dispatch"),
+            ),
         ):
             resp = await client.post(
                 f"/api/workspaces/{ws_id}/changes/{change_id}/transition",
