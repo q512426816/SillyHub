@@ -204,3 +204,48 @@ class TestParseWorkspace:
                 assert c.path.startswith(".sillyspec/changes/"), (
                     f"包裹布局 path 应带 .sillyspec/changes/ 前缀: {c.path}"
                 )
+
+    def test_last_modified_at_is_max_mtime_across_dir(
+        self, parser: ChangeParser, tmp_path: Path
+    ) -> None:
+        """ql-20260813-008 / ql-20260814-002：变更级 mtime = 目录所有非隐藏文件 mtime 最大值。
+
+        含子目录文件（tasks/*.md）与非标准文件（decisions.md）——这两类不进 parsed.docs，
+        但必须计入 last_modified_at（rglob→os.scandir 改造后语义不变）。用 os.utime 钉死
+        各文件 mtime，断言取到最大的那个（非标准、子目录里的）。
+        """
+        import os
+        from datetime import UTC, datetime
+
+        change_dir = tmp_path / "changes" / "mtime-demo"
+        (change_dir / "tasks").mkdir(parents=True)
+        # 标准文件（旧）
+        (change_dir / "proposal.md").write_text("# Demo", encoding="utf-8")
+        os.utime(change_dir / "proposal.md", (1_700_000_000, 1_700_000_000))
+        # 子目录非标准文件（最新——必须被算进 max）
+        (change_dir / "tasks" / "task-01.md").write_text("- [ ] t1", encoding="utf-8")
+        os.utime(change_dir / "tasks" / "task-01.md", (1_800_000_000, 1_800_000_000))
+        # 根级非标准文件（中间）
+        (change_dir / "decisions.md").write_text("# Dec", encoding="utf-8")
+        os.utime(change_dir / "decisions.md", (1_750_000_000, 1_750_000_000))
+
+        result = parser.parse_workspace(tmp_path, platform_managed=True)
+        change = next(c for c in result.changes if c.change_key == "mtime-demo")
+        assert change.last_modified_at == datetime.fromtimestamp(1_800_000_000, tz=UTC)
+
+    def test_last_modified_at_skips_hidden_and_empty_dir(
+        self, parser: ChangeParser, tmp_path: Path
+    ) -> None:
+        """ql-20260813-008 / ql-20260814-002：隐藏文件跳过 + 空目录守卫。
+
+        目录仅含 .开头隐藏文件 + 一个空子目录（无文件）→ last_modified_at is None
+        （os.scandir 改造后与 rglob 版空 default/ 行为一致，None 守卫防 max() 空 seq 报错）。
+        """
+        change_dir = tmp_path / "changes" / "empty-demo"
+        (change_dir / "default").mkdir(parents=True)  # 空子目录
+        (change_dir / ".runtime").mkdir()  # 隐藏目录，跳过
+        (change_dir / ".gitkeep").write_text("", encoding="utf-8")  # 隐藏文件，跳过
+
+        result = parser.parse_workspace(tmp_path, platform_managed=True)
+        change = next(c for c in result.changes if c.change_key == "empty-demo")
+        assert change.last_modified_at is None

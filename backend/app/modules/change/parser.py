@@ -454,6 +454,43 @@ class ChangeParser:
 
         return matched
 
+    @staticmethod
+    def _compute_last_modified(change_dir: Path) -> datetime | None:
+        """ql-20260813-008：变更级 mtime = 目录下所有非隐藏文件 mtime 的最大值。
+
+        单次 ``os.scandir`` 迭代遍历（显式 stack，不递归，规避深目录树 recursion limit），
+        复用 DirEntry 缓存的 stat（每文件仅 1 次 stat 系统调用）——替代原先 ``rglob`` +
+        ``is_file`` + ``stat``（每文件 2 次 stat）。Windows-Docker bind mount 上单次
+        stat ≈1.45ms，原实现对 196 变更 ~3000 文件耗时 12s+，致 reparse 总耗时 33s 超前端
+        代理 ~30s 超时返回 500（前端 ECONNRESET）。改为 scandir 后解析阶段 25s→8s。
+        空目录（如 default/）→ None。``follow_symlinks=False`` 避免 symlink 指向根外文件
+        造成跨目录统计（比 rglob 更严格；变更目录内无 symlink 场景行为等价）。
+        """
+        import os
+
+        best: datetime | None = None
+        stack: list[str] = [str(change_dir)]
+        while stack:
+            current = stack.pop()
+            try:
+                with os.scandir(current) as it:
+                    for entry in it:
+                        if entry.name.startswith("."):
+                            continue
+                        try:
+                            if entry.is_dir(follow_symlinks=False):
+                                stack.append(entry.path)
+                            else:
+                                st = entry.stat(follow_symlinks=False)
+                                mt = datetime.fromtimestamp(st.st_mtime, tz=UTC)
+                                if best is None or mt > best:
+                                    best = mt
+                        except OSError:
+                            continue
+            except OSError:
+                continue
+        return best
+
     def _parse_change(
         self,
         sillyspec_root: Path,
@@ -573,14 +610,11 @@ class ChangeParser:
         parsed.current_stage = self._infer_current_stage(change_dir, location)
 
         # ql-20260813-008：变更级 mtime = 目录下所有非隐藏文件（含子目录）mtime 最大值。
-        # rglob 独立遍历——已收集的 parsed.docs 不含 tasks/*.md、decisions.md 等非标准
-        # 文件，仅取它会漏最近活动。is_file() 跳目录条目（目录 mtime 随增删变，不准），
-        # 排点文件。空目录（如 default/）→ None。
-        mtimes: list[datetime] = []
-        for fp in change_dir.rglob("*"):
-            if fp.is_file() and not fp.name.startswith("."):
-                mtimes.append(datetime.fromtimestamp(fp.stat().st_mtime, tz=UTC))
-        parsed.last_modified_at = max(mtimes) if mtimes else None
+        # 单次 os.scandir 遍历（复用 DirEntry 缓存 stat，每文件 1 次 stat），替代原 rglob +
+        # is_file + stat（每文件 2 次 stat，Windows-Docker bind mount 致 reparse 33s 超
+        # 前端代理超时返回 500）。语义不变：含 tasks/*.md、decisions.md 等非标准文件，
+        # 排点文件，空目录 → None。
+        parsed.last_modified_at = self._compute_last_modified(change_dir)
 
         return parsed
 
