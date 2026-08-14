@@ -47,5 +47,6 @@ mission external 模式（R-01 三重防御，防 caller 主仓被误 merge / fi
 - spec bundle 是 agent 行为的上下文真相源，改 bundle 渲染会影响所有 run。
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
+- **2026-08-13-profile-system-prompt-injection**（已归档）：profile.system_prompt 经 SDK `systemPrompt={preset:claude_code, append}` 注入 agent（废弃 D-012@v2 claudeMd prepend）；`_apply_profile_to_lease` 写 lease.metadata.system_prompt（service.py，空不写键零回归）。stageProfileId 每阶段独立持久化 `change.stages[<stage>].profile_id` + PATCH `/changes/{id}/stage-profile`。
 - **ql-20260814-001** 平台角色模板全部下线：CC×5 移除（GLM×5 此前 ql-20260813-005 已下线）。`profile/seed.py` `_ROLE_TEMPLATE_PROVIDERS` 清空，`ensure_role_template_profiles` 不再补种、仅按 `_DEPRECATED_ROLE_TEMPLATE_IDS`（GLM+CC 共 10 确定性 UUID）回收 DB 残留。系统默认档案（Claude Code 默认 / Codex 默认，`is_system_default=True`）不受影响。
 <!-- MANUAL_NOTES_END -->
