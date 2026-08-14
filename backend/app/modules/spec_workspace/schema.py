@@ -86,6 +86,10 @@ class FileOp(BaseModel):
     (add/update use it); rename with unchanged content may omit both ``hash``
     and ``content``. ``base_version`` is the file version the daemon's local
     manifest believes the server is at (0 when unknown → R-07 hash fallback).
+
+    ``mtime``（ql-20260813-008，可选）：宿主真实修改时间（Unix 秒）。落盘时作
+    source_mtime + os.utime，让镜像文件 mtime 真实，进而让 changes.updated_at
+    反映变更活动。旧 daemon 不传 / 非法时 fallback now。
     """
 
     op: Literal["add", "update", "delete", "rename"]
@@ -94,6 +98,7 @@ class FileOp(BaseModel):
     hash: str | None = Field(default=None)  # SHA-256 hex
     content: str | None = Field(default=None)  # base64，add/update 用
     base_version: int
+    mtime: float | None = Field(default=None)  # Unix 秒，daemon 宿主真实 mtime
 
 
 class SpecIncrementalSyncRequest(BaseModel):

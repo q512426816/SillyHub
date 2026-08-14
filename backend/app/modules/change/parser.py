@@ -56,6 +56,10 @@ class ParsedChange:
     warnings: list[ParseWarning] = field(default_factory=list)
     # ql-20260702-001：从文档存在性推断（sillyspec.db 未导入时的 fallback）
     current_stage: str | None = None
+    # ql-20260813-008：变更级 mtime = 目录下所有非隐藏文件 mtime 的最大值（含
+    # tasks/*.md、decisions.md 等非标准文件）。reparse 据此填 changes.updated_at
+    # （取较大值，不倒退），让"更新时间"反映变更真实活动而非 reparse 写入时刻。
+    last_modified_at: datetime | None = None
 
 
 @dataclass
@@ -567,6 +571,16 @@ class ChangeParser:
 
         # ql-20260702-001：从文档存在性推断 current_stage（sillyspec.db 未导入时的 fallback）
         parsed.current_stage = self._infer_current_stage(change_dir, location)
+
+        # ql-20260813-008：变更级 mtime = 目录下所有非隐藏文件（含子目录）mtime 最大值。
+        # rglob 独立遍历——已收集的 parsed.docs 不含 tasks/*.md、decisions.md 等非标准
+        # 文件，仅取它会漏最近活动。is_file() 跳目录条目（目录 mtime 随增删变，不准），
+        # 排点文件。空目录（如 default/）→ None。
+        mtimes: list[datetime] = []
+        for fp in change_dir.rglob("*"):
+            if fp.is_file() and not fp.name.startswith("."):
+                mtimes.append(datetime.fromtimestamp(fp.stat().st_mtime, tz=UTC))
+        parsed.last_modified_at = max(mtimes) if mtimes else None
 
         return parsed
 

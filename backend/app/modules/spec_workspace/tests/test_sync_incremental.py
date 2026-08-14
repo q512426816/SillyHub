@@ -142,6 +142,93 @@ class TestAddUpdate:
         assert row.version == 1
         assert row.exists is True
 
+    async def test_add_with_mtime_stamps_file(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path
+    ) -> None:
+        """ql-20260813-008：add op 带 mtime → 落盘文件 mtime 真实（非写入时刻）。
+
+        后端 changes.updated_at 取变更目录文件 mtime max 填充，镜像文件 mtime 必须真实
+        （daemon buildTarHeader 旧固定 0 致该链路失效）。op.mtime（Unix 秒）经
+        _apply_file_mtime os.utime 设到 target。
+        """
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+
+        fixed_mtime = 1773624600  # 2026-03-13 09:30 UTC，区别于写入 now
+        resp = await client.post(
+            f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
+            headers=auth_headers,
+            json={
+                "ops": [
+                    _op(
+                        "add",
+                        "docs/A.md",
+                        base_version=0,
+                        content=_b64("# A"),
+                        hash="h1",
+                        mtime=fixed_mtime,
+                    )
+                ]
+            },
+        )
+        assert resp.status_code == 200, resp.text
+
+        st = (spec_root / "docs" / "A.md").stat()
+        assert abs(st.st_mtime - fixed_mtime) < 2  # mtime=op.mtime，非 now
+
+    async def test_add_mtime_flow_to_change_updated_at(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path
+    ) -> None:
+        """ql-20260813-008 全链路：add op 带 mtime → 镜像文件 mtime 真实 → reparse 后
+        changes.updated_at 取该 mtime（反映真实活动，非同步/写入时刻）。"""
+        from app.modules.change.model import Change
+        from app.modules.change.service import ChangeService
+
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+
+        fixed_mtime = 1773797400  # 2026-03-15 09:30 UTC
+        resp = await client.post(
+            f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
+            headers=auth_headers,
+            json={
+                "ops": [
+                    _op(
+                        "add",
+                        "changes/2026-03-15-demo/proposal.md",
+                        base_version=0,
+                        content=_b64("# Demo"),
+                        hash="h1",
+                        mtime=fixed_mtime,
+                    )
+                ]
+            },
+        )
+        assert resp.status_code == 200, resp.text
+
+        # reparse 扫镜像目录 mtime → 建/更新 change，updated_at 取 max(mtimes)
+        stats, _ = await ChangeService(db_session).reparse(ws.id)
+        assert stats["parsed"] >= 1
+
+        change = (
+            (
+                await db_session.execute(
+                    select(Change).where(
+                        Change.workspace_id == ws.id,
+                        Change.change_key == "2026-03-15-demo",
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        assert change is not None
+        # SQLite 返回 naive datetime，视作 UTC 比较（DB 列语义即 UTC）；用 .timestamp()
+        # 直接比会被本机时区（UTC+8）解释致 28800 偏差。
+        assert abs(change.updated_at.replace(tzinfo=UTC).timestamp() - fixed_mtime) < 2
+
     async def test_update_increments_version(
         self, db_session, client: AsyncClient, auth_headers, tmp_path
     ) -> None:
