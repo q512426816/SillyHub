@@ -39,6 +39,12 @@ from app.modules.settings.schema import (
     UserUpdateRequest,
     UserWorkspaceRead,
 )
+from app.modules.workflow.model import (
+    AUDIT_PLACEHOLDER_ID,
+    PLATFORM_SETTING_CREATE,
+    PLATFORM_SETTING_UPDATE,
+    AuditLog,
+)
 
 log = get_logger(__name__)
 router = APIRouter(tags=["settings"])
@@ -47,6 +53,35 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
 AdminUser = Annotated[User, Depends(require_platform_admin)]
 SettingsAdminUser = Annotated[User, Depends(require_permission_any(Permission.SETTINGS_ADMIN))]
+
+
+def _audit_platform_setting_write(
+    session: AsyncSession,
+    *,
+    key: str,
+    old_value: str | None,
+    new_value: str,
+    actor_id: uuid.UUID,
+) -> None:
+    """为单个 platform_setting key 的 upsert 记一条手工审计。
+
+    ``platform_settings`` PK 为 String 非 UUID，挂 hooks 也会被跳过，故在
+    router 写路径手工插入（change 2026-08-14-audit-system-completion
+    task-04 / D-004）。调用方负责在随后的 commit 中一并落库。
+    """
+    action = PLATFORM_SETTING_CREATE if old_value is None else PLATFORM_SETTING_UPDATE
+    session.add(
+        AuditLog(
+            action=action,
+            resource_type="platform_setting",
+            resource_id=AUDIT_PLACEHOLDER_ID,
+            workspace_id=None,
+            actor_id=actor_id,
+            details_json=json.dumps(
+                {"key": key, "from": old_value, "to": new_value}, ensure_ascii=False
+            ),
+        )
+    )
 
 
 def _svc(session: AsyncSession, actor_id: uuid.UUID):
@@ -89,6 +124,7 @@ async def update_settings(
     updated: list[str] = []
     for key, value in payload.settings.items():
         existing = await session.get(PlatformSetting, key)
+        old_value = existing.value if existing is not None else None
         if existing is not None:
             existing.value = value
             existing.updated_by = user.id
@@ -103,6 +139,9 @@ async def update_settings(
                     updated_at=now,
                 )
             )
+        _audit_platform_setting_write(
+            session, key=key, old_value=old_value, new_value=value, actor_id=user.id
+        )
         updated.append(key)
     await session.commit()
     return SettingsUpdateResponse(updated=updated)
@@ -172,6 +211,7 @@ async def _write_setting_json(session: AsyncSession, key: str, value, actor_id: 
     now = datetime.now(UTC)
     payload = json.dumps(value, ensure_ascii=False)
     existing = await session.get(PlatformSetting, key)
+    old_value = existing.value if existing is not None else None
     if existing is not None:
         existing.value = payload
         existing.updated_by = actor_id
@@ -186,6 +226,9 @@ async def _write_setting_json(session: AsyncSession, key: str, value, actor_id: 
                 updated_at=now,
             )
         )
+    _audit_platform_setting_write(
+        session, key=key, old_value=old_value, new_value=payload, actor_id=actor_id
+    )
     await session.commit()
 
 

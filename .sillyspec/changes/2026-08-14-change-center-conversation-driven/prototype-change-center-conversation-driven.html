@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>变更中心·会话驱动化 — 设计原型</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #f5f5f5; color: #333; padding: 24px; max-width: 1100px; margin: 0 auto; font-size: 13px; }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .sub { color: #888; font-size: 12px; margin-bottom: 20px; }
+  h2 { font-size: 14px; margin: 24px 0 8px; padding-left: 8px; border-left: 3px solid #4a7dff; }
+  .box { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 14px; }
+  .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 3px; margin-left: 6px; vertical-align: middle; }
+  .tag-new { background: #e3f0ff; color: #1a5fd0; border: 1px solid #9dc1ff; }
+  .tag-del { background: #fdeaea; color: #c0392b; border: 1px solid #f2b8b5; }
+  .tag-keep { background: #eafbea; color: #237a23; border: 1px solid #b7e3b7; }
+  .flow { display: flex; gap: 6px; align-items: stretch; flex-wrap: wrap; }
+  .flow .step { flex: 1; min-width: 150px; border: 1px dashed #9aa7c7; border-radius: 6px; padding: 8px 10px; background: #fbfcff; }
+  .flow .step b { display: block; margin-bottom: 4px; font-size: 12px; }
+  .flow .step span { color: #666; font-size: 11px; line-height: 1.5; }
+  .arrow { align-self: center; color: #9aa7c7; font-size: 16px; }
+  .tabs { display: flex; gap: 2px; border-bottom: 2px solid #e2e2e2; margin-bottom: 12px; }
+  .tabs div { padding: 6px 14px; font-size: 12px; color: #888; }
+  .tabs .active { color: #1a5fd0; border-bottom: 2px solid #1a5fd0; font-weight: 600; }
+  .grid2 { display: grid; grid-template-columns: 240px 1fr; gap: 10px; }
+  .panel { border: 1px solid #ddd; border-radius: 6px; background: #fafafa; }
+  .list-item { padding: 8px 10px; border-bottom: 1px solid #eee; font-size: 12px; }
+  .list-item.sel { background: #eef4ff; border-left: 3px solid #4a7dff; }
+  .chat { display: flex; flex-direction: column; gap: 8px; padding: 10px; min-height: 180px; }
+  .bubble { max-width: 75%; padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.55; }
+  .bubble.user { align-self: flex-end; background: #dceaff; }
+  .bubble.agent { align-self: flex-start; background: #f0f0f0; }
+  .bubble .tool { display: block; margin-top: 4px; font-family: Consolas, monospace; font-size: 11px; color: #8a6d3b; background: #fdf6e3; border: 1px solid #eee0b8; border-radius: 4px; padding: 3px 6px; }
+  .inputbar { display: flex; gap: 8px; padding: 8px; border-top: 1px solid #ddd; }
+  .inputbar input { flex: 1; border: 1px solid #ccc; border-radius: 4px; padding: 6px 8px; font-size: 12px; }
+  .btn { padding: 6px 12px; border-radius: 4px; border: 1px solid #ccc; background: #fff; font-size: 12px; cursor: default; }
+  .btn.primary { background: #1a5fd0; color: #fff; border-color: #1a5fd0; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { border: 1px solid #e5e5e5; padding: 6px 8px; text-align: left; }
+  th { background: #f7f7f7; font-weight: 600; }
+  .empty { text-align: center; padding: 26px; color: #777; }
+  .empty b { display: block; font-size: 13px; margin-bottom: 6px; color: #444; }
+  .card { border: 1px solid #ddd; border-radius: 6px; padding: 10px; background: #fff; margin-bottom: 10px; }
+  .card h3 { font-size: 12px; margin-bottom: 6px; }
+  .stagebar { display: flex; gap: 4px; margin: 6px 0; }
+  .stagebar div { flex: 1; text-align: center; font-size: 11px; padding: 4px 2px; border-radius: 4px; background: #eee; color: #888; }
+  .stagebar .done { background: #dcf5dc; color: #237a23; }
+  .stagebar .cur { background: #e3f0ff; color: #1a5fd0; font-weight: 600; }
+  .strike { text-decoration: line-through; color: #b00; background: #fdeaea; padding: 2px 6px; border-radius: 3px; font-size: 11px; margin-right: 6px; }
+  .note { background: #fffbe8; border: 1px solid #f0e0a0; border-radius: 6px; padding: 8px 10px; font-size: 11.5px; color: #7a6410; margin-top: 8px; line-height: 1.6; }
+</style>
+</head>
+<body>
+
+<h1>变更中心 · 会话驱动化 — 设计原型</h1>
+<div class="sub">change: 2026-08-14-change-center-conversation-driven · 线框风格，仅供确认设计方向 · 2026-08-14</div>
+
+<!-- ═══════════ 1. 新流程总览 ═══════════ -->
+<h2>1. 新流程总览（模型翻转：会话是第一步，平台只展示）</h2>
+<div class="box">
+  <div class="flow">
+    <div class="step"><b>① 用户发起会话</b><span>工作区「会话」页与 agent 对话，提供需求上下文。怎么走流程平台不管，本地 agent 技能引导。</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><b>② agent 建/推进变更</b><span>agent 在会话里跑本地 sillyspec 命令（claim / brainstorm / plan / execute…）。</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><b>③ daemon 增量同步</b><span>spec-sync 推文件 + <b>显式标注涉及的变更目录</b>（方案B）；旧 daemon 由后端按路径检测兜底。</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><b>④ 后端精确重扫描</b><span>apply_ops 按标注/检测触发 scoped reparse → ux_changes 自动出现/更新。</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><b>⑤ 平台展示 + 审批</b><span>变更中心看文件/进度；关键节点人工审批（只改状态，回会话继续）。</span></div>
+  </div>
+</div>
+
+<!-- ═══════════ 2. 工作区导航 ═══════════ -->
+<h2>2. 工作区导航 — 新增「会话」一级入口 <span class="tag tag-new">新增</span></h2>
+<div class="box">
+  <div class="tabs">
+    <div>概览</div><div>项目组件</div><div>变更中心</div>
+    <div class="active">会话 ★新</div>
+    <div>方案文件</div><div>智能体</div><div>扫描文档</div><div>运行时</div>
+  </div>
+  <div class="note">「会话」与「变更中心」平级。变更中心的「+ 新建变更」按钮 <span class="tag tag-del">删除</span>，新建变更页面 <span class="tag tag-del">删除</span>（表单创建链路整体下线）。</div>
+</div>
+
+<!-- ═══════════ 3. 会话页（新） ═══════════ -->
+<h2>3. 会话页（新页面 /workspaces/[id]/sessions）</h2>
+<div class="box">
+  <div class="grid2">
+    <div class="panel">
+      <div class="list-item" style="font-weight:600; background:#f0f0f0;">＋ 新会话（workspace 级，不绑变更）</div>
+      <div class="list-item sel">今天 14:02 · 帮我加个导出功能 <span style="color:#999">运行中</span></div>
+      <div class="list-item">昨天 · 修复登录超时 <span style="color:#237a23">已结束</span></div>
+      <div class="list-item">08-12 · 会话调试（变更内） <span style="color:#999">已结束</span></div>
+    </div>
+    <div class="panel">
+      <div class="chat">
+        <div class="bubble user">帮我给工作台加个数据导出功能，要能选时间范围。</div>
+        <div class="bubble agent">好的，我先分析影响范围，然后走完整流程立项。<span class="tool">sillyspec claim 2026-08-14-workbench-export → 已创建变更</span><span class="tool">sillyspec run brainstorm → 需求分析中…</span></div>
+        <div class="bubble agent">变更 <b>2026-08-14-workbench-export</b> 已立项，进度会自动同步到变更中心，你可以随时去那里看文件和阶段。</div>
+      </div>
+      <div class="inputbar">
+        <input placeholder="输入消息，Enter 发送…（追问/指导 agent）">
+        <button class="btn primary">发送</button>
+        <button class="btn">结束会话</button>
+      </div>
+    </div>
+  </div>
+  <div class="note">复用现有交互式会话面板（多轮对话 / 工具调用可见 / 中断）。新建会话只传 workspace_id，不绑具体变更 —— 会话与变更松耦合，一个会话可以产出多个变更。</div>
+</div>
+
+<!-- ═══════════ 4. 变更中心列表（改） ═══════════ -->
+<h2>4. 变更中心列表（去表单，自动出现）</h2>
+<div class="box">
+  <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+    <b style="font-size:13px;">变更中心</b>
+    <div><span class="strike">＋ 新建变更</span> <button class="btn">重新扫描</button><span class="tag tag-keep">保留（兜底）</span></div>
+  </div>
+  <table>
+    <tr><th>待办状态</th><th>标题</th><th>负责人</th><th>阶段</th><th>影响组件</th><th>更新时间</th></tr>
+    <tr><td>待提案审核</td><td>2026-08-14-workbench-export<br><span style="color:#999">工作台数据导出</span></td><td>—</td><td>需求分析</td><td>frontend</td><td>刚刚 <span class="tag tag-new">agent 会话产出，自动出现</span></td></tr>
+    <tr><td>—</td><td>2026-08-13-spec-sync-visibility</td><td>qinyi</td><td>执行</td><td>backend, daemon</td><td>2 小时前</td></tr>
+  </table>
+  <div class="empty" style="margin-top:8px; border:1px dashed #ccc; border-radius:6px;">
+    <b>空态引导（新文案）</b>
+    还没有进行中的变更。去「<b>会话</b>」跟 agent 对话，描述你的需求，agent 会自动立项并推进。<br>
+    <button class="btn primary" style="margin-top:6px;">去会话发起 →</button>
+  </div>
+</div>
+
+<!-- ═══════════ 5. 变更详情页（退化） ═══════════ -->
+<h2>5. 变更详情页（去执行控制，留人工审批）</h2>
+<div class="box">
+  <div style="font-size:13px; font-weight:600; margin-bottom:4px;">2026-08-14-workbench-export <span class="tag" style="background:#eef4ff;color:#1a5fd0;">需求分析</span></div>
+  <div class="stagebar">
+    <div class="done">需求分析 ✓</div><div class="cur">规划</div><div>执行</div><div>验证</div><div>归档</div>
+  </div>
+  <div style="margin:8px 0;">
+    <span class="strike">推进到下一阶段</span>
+    <span class="strike">重新派发</span>
+    <span class="strike">运行验证门禁</span>
+    <span class="strike">选智能体档案</span>
+    <span class="strike">团队模式</span>
+    <span class="tag tag-del">以上执行控制全部删除（交给会话里的 agent）</span>
+  </div>
+  <div class="grid2" style="grid-template-columns: 1fr 260px;">
+    <div>
+      <div class="card" style="border-color:#9dc1ff; background:#f7faff;">
+        <h3>人工审批（唯一操作）+ 会话联动 <span class="tag tag-keep">修订</span></h3>
+        <div style="font-size:12px; line-height:1.6; margin-bottom:8px;">提案已完成，等待审核。</div>
+        <input style="width:100%; border:1px solid #ccc; border-radius:4px; padding:5px 8px; font-size:12px; margin-bottom:6px;" placeholder="审批意见（可选）">
+        <div style="font-size:12px; margin-bottom:8px;">绑定会话（创建时自动绑定，不可选）：<span style="background:#f0f4ff; border:1px solid #d5e0f5; border-radius:4px; padding:3px 8px;">今天 14:02 · 帮我加个导出功能</span></div>
+        <button class="btn primary">✓ 通过并通知绑定会话</button>
+        <button class="btn" style="color:#c0392b;">✗ 打回并通知绑定会话</button>
+        <div class="note" style="margin-top:8px;">变更创建时（重扫描发现新变更）自动绑定当时 workspace 最近活跃会话（关联表 change_session_links 多对多）。通过/打回 = ① 落审批记录和阶段状态（不自动派发）② <b>自动把审批结果注入绑定会话</b>，agent 收到后直接继续推进；无绑定会话时降级提示。</div>
+      </div>
+      <div class="card"><h3>执行日志（只读展示）<span class="tag tag-keep">保留</span></h3><div style="color:#888;font-size:12px;">agent 运行日志流（在会话中执行时实时展示）</div></div>
+    </div>
+    <div>
+      <div class="card"><h3>变更文件<span class="tag tag-keep">保留</span></h3><div style="color:#888;font-size:12px;">proposal / design / tasks…</div></div>
+      <div class="card"><h3>审核历史<span class="tag tag-keep">保留</span></h3><div style="color:#888;font-size:12px;">历次审批记录</div></div>
+      <div class="card"><h3>任务看板<span class="tag tag-keep">保留</span></h3><div style="color:#888;font-size:12px;">execute 阶段任务状态</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="note" style="margin-top:16px;">
+  <b>改动边界：</b>backend（apply_ops 按标注/检测触发 scoped reparse、workspace 会话列表端点、审批不派发、删 create 端点）+ daemon（spec-sync 增量推送带变更目录标注）+ frontend（会话页、去表单、详情页退化）。sillyspec 工具本身不动。
+</div>
+
+</body>
+</html>

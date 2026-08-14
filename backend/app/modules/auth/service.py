@@ -48,7 +48,12 @@ from app.core.security import (
 from app.modules.auth.model import Session as SessionRow
 from app.modules.auth.model import User
 from app.modules.auth.schema import TokenPair
-from app.modules.workflow.model import AuditLog
+from app.modules.workflow.model import (
+    AUDIT_PLACEHOLDER_ID,
+    AUTH_LOGIN_FAILED,
+    AUTH_LOGIN_SUCCESS,
+    AuditLog,
+)
 
 log = get_logger(__name__)
 
@@ -92,6 +97,27 @@ class AuthService:
         normalized = account.strip().lower()
         user = await self._lookup_active_user_by_username(normalized)
         if user is None or not password_hasher.verify(password, user.password_hash):
+            # 登录请求无 Bearer → 无 audit_context → hooks 不触发，手工落审计
+            # （2026-08-14-audit-system-completion task-03）。actor 无认证主体 → None，
+            # resource_id 用全零占位（D-002，无 FK 约束）。审计写入失败不阻断原登录
+            # 错误（R-03）：整体 try/except 吞掉，仅记 error 日志。
+            self._db.add(
+                AuditLog(
+                    actor_id=None,
+                    action=AUTH_LOGIN_FAILED,
+                    resource_type="user",
+                    resource_id=AUDIT_PLACEHOLDER_ID,
+                    workspace_id=None,
+                    details_json=json.dumps(
+                        {"account": normalized, "ip": ip, "reason": "invalid_credentials"},
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+            try:
+                await self._db.commit()
+            except Exception:
+                log.error("login_audit_write_failed", action=AUTH_LOGIN_FAILED, account=normalized)
             # 统一中文报错，不区分「用户不存在」与「密码错」防枚举（D-001 纯 username 登录）。
             raise AuthInvalidCredentials("用户名或密码错误。")
 
@@ -100,6 +126,24 @@ class AuthService:
         # AuthInvalidCredentials — attackers cannot probe account existence
         # by comparing error codes.
         if not user.login_enabled:
+            # 禁登同样手工落审计（task-03）：此时 user 已解析，actor_id 可填真实 id。
+            self._db.add(
+                AuditLog(
+                    actor_id=user.id,
+                    action=AUTH_LOGIN_FAILED,
+                    resource_type="user",
+                    resource_id=AUDIT_PLACEHOLDER_ID,
+                    workspace_id=None,
+                    details_json=json.dumps(
+                        {"account": normalized, "ip": ip, "reason": "login_disabled"},
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+            try:
+                await self._db.commit()
+            except Exception:
+                log.error("login_audit_write_failed", action=AUTH_LOGIN_FAILED, account=normalized)
             raise AuthUserLoginDisabled(
                 "该账号的登录权限已被禁用。",
                 details={"user_id": str(user.id)},
@@ -107,6 +151,20 @@ class AuthService:
 
         pair = await self._issue_token_pair(user, user_agent=user_agent, ip=ip)
         user.last_login_at = _utc_now()
+        # 成功审计随登录同一事务落库（C-3 已核时序：add 在 commit 前）。
+        self._db.add(
+            AuditLog(
+                actor_id=user.id,
+                action=AUTH_LOGIN_SUCCESS,
+                resource_type="user",
+                resource_id=user.id,
+                workspace_id=None,
+                details_json=json.dumps(
+                    {"account": normalized, "ip": ip, "user_agent": user_agent},
+                    ensure_ascii=False,
+                ),
+            )
+        )
         await self._db.commit()
         log.info("auth.login.success", user_id=str(user.id), email=user.email)
         return user, pair

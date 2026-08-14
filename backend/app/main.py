@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
+from app.core.audit_hooks import register_audit_hooks
 from app.core.config import get_settings
 from app.core.db import dispose_engine
 from app.core.errors import register_exception_handlers
@@ -91,9 +92,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     log.info("monitoring.watchdog_started")
     try:
         # Bootstrap auth once the DB connection pool exists.
-        from app.core.db import get_session_factory
+        from app.core.db import get_engine, get_session_factory
         from app.modules.agent.service import AgentService
         from app.modules.auth.service import bootstrap_admin_and_seed_rbac
+
+        # 2026-08-14-audit-system-completion task-02（漂移点 #1 修复）：
+        # 挂载自动审计钩子——lifespan 时点所有 router 已 import，mappers 已配置，
+        # register_audit_hooks 遍历 BaseModel 子类挂 after_insert/update/delete。
+        # 幂等由内部 event.contains 保证（多次 create_app 安全）。
+        register_audit_hooks(get_engine())
 
         factory = get_session_factory()
         async with factory() as session:

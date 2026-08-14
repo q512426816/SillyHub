@@ -80,3 +80,17 @@ class AuditLog(BaseModel, table=True):
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
+
+
+# 审计 action 常量（方案 B 常量集中，D-005）：
+# service 代码禁止内联 action 字面量，统一引用此处。
+# 出处：2026-08-14-audit-system-completion（task-01）。
+# 注意：不设 DELETE 常量——settings 全仓无 delete 端点（Grill C-6）。
+AUTH_LOGIN_SUCCESS = "auth.login.success"
+AUTH_LOGIN_FAILED = "auth.login.failed"
+PLATFORM_SETTING_CREATE = "platform_setting.create"
+PLATFORM_SETTING_UPDATE = "platform_setting.update"
+
+# 全零占位 UUID（D-002/D-004 共用单一定义）：
+# AuditLog.resource_id 非空但无 FK 约束，无具体资源场景下用此占位（Grill C-5 已核）。
+AUDIT_PLACEHOLDER_ID = uuid.UUID(int=0)
