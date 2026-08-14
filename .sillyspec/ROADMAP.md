@@ -4,7 +4,7 @@
 > 维护规则：每次 `sillyspec-archive` 归档变更时同步更新「已完成里程碑」与「当前活跃」两节。
 > 详细变更规格见 `.sillyspec/changes/`（活跃）与 `.sillyspec/changes/archive/`（历史）。
 
-最近更新：2026-08-14
+最近更新：2026-08-15
 
 ---
 
@@ -53,7 +53,11 @@
 
 - **platform-managed-file-sync**（2026-08-13）：spec 文件同步从「整树 tar 全量覆盖」改「文件级增量 diff + base_version 乐观锁 + 软删备份」——方向反转（R-01，daemon 本地权威回灌 → 服务器权威清单）。后端 spec_workspace 新增独立 `spec_file_manifest` 清单表（D-011 **不复用 scan_documents**，scan_docs reparse 不碰、职责分离）+ `apply_ops`（add/update/delete/rename + per-file base_version 乐观锁 conflict=true+server_versions、软删 move 出 spec_root 到 `spec_data_root/spec-backups/{ws}/{ts}/{path}` + exists=False+version+1、containment 校验对齐 tar 端点 + .runtime 拒、R-07 无行兜底 version=1、R-06 30 天机会式修剪）+ 端点 `POST /api/workspaces/{ws}/spec-workspace/sync-incremental`（conflict 时 **HTTP 200** body 带 server_versions，端点不额外抛 409）。旧 tar `_write_spec_root` 落盘后清 spec_file_manifest 行（Q7 旧 tar 失效清单）。daemon `postSpecSync` 由整树 tar 改增量 diff（本地清单缓存 `~/.sillyhub/daemon/manifests/{ws}.json` 移出 specDir 不被 pull 清、首同步/404 回退旧 tar、rename 同 hash 不重传、conflict 抛 SpecPushConflict 人工拍板）；hub-client `postSpecSyncIncremental`（JSON POST /api 前缀，QA 揪出 P0 URL 修复 + 回归锚点）。scan_docs 零改动。backend 65 测试 + daemon 79 测试 + 真实 daemon↔backend 集成证据（200 OK+落盘+清单行）。
 
-### 2026-08-14 · profile.system_prompt 注入 + stageProfileId 持久化
+### 2026-0
+### 2026-08-14 · security-audit-remediation 多代理安全审查高危修复
+
+- **security-audit-remediation**（2026-08-14~15）：6 并行审查代理（认证/注入/密钥/DB/FS/前端 daemon）确认 5 高危 + 7 中危 + XSS + 部署弱口令，全流程修复归档（commit c0af692c，77 文件 +6035/-441，100 新测试）。高危闭合：daemon WS 升级期鉴权（X-API-Key/Bearer 4001/4003，daemon 客户端同窗传 header）；claim/pending-leases/heartbeat 归属校验（三锚点链 + compare_digest）；LiteLLM master key 不出 backend 进程（llm-proxy 透传端点 v1 路径白名单 + usr-uid-pid 归属断言，context.py 两处改 proxy 标记）；file 五端点 IDOR（uploaded_by/WORKSPACE_READ/admin 可见域）；platform_sync JWT/shk_live_ 写端点 403（仅 shpsync_）+ 读并集聚合；sync_documents relative_to + filename 白名单；quick-chat lease metadata.actor_user_id 归属链（D-005@v2）；query token 回退删除 + 前端 5 处 fetch-SSE/header 转传；markdown rehype-sanitize；compose 弱口令 :?must set + 端口绑 127.0.0.1。QA review 追加修复：llm-proxy admin API 白名单（H-1）、HUB_PROXY_BASE_URL 部署接线、无锚点存量 lease 404。verify 含真实运行时证据（容器热更 + restart，WS 401/llm-proxy 401/admin 404 实测）。遗留 P2：sanitize svg 注释对齐、litellm-db 密码、8000/3000 端口面（独立 change）；性能类发现另立 change 待立项。
+8-14 · profile.system_prompt 注入 + stageProfileId 持久化
 
 - **profile-system-prompt-injection**（2026-08-14）：补全智能体档案绑定最后一块——profile.system_prompt 经 SDK `systemPrompt={preset:claude_code, append}` 注入 agent（废弃 D-012@v2 claudeMd prepend，保留 claude 默认能力 + 追加档案提示词）；stageProfileId 每阶段独立持久化到 `change.stages[<stage>].profile_id` + 新 PATCH `/changes/{id}/stage-profile`。链路：backend `_apply_profile_to_lease` 写 lease.metadata.system_prompt → `_PROFILE_PAYLOAD_FIELDS` 加字段双写 claim payload → daemon interactive SessionManager.create 透传 → `_buildDriverOptions` 设 preset+append → claude-sdk-driver 逐字段写 SDK options（D-005 非 claude 编译期隔离）；前端 stageProfileId useEffect 从 stages 恢复 + onChange PATCH。倒推 B 模式（代码先行）7 commit main（e258b5f1~68974864 + edde56fc 半接线修复）。无 DB 迁移（stages JSON 列）。遗留：batch/--print 路径未覆盖（非目标）；resume 重连 e2e 待观察。
 

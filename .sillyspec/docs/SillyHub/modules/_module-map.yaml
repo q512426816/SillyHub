@@ -6,7 +6,7 @@
 schema_version: 1
 project: SillyHub
 source_commit: 6e78b29a
-generated_at: 2026-08-06 21:20:00
+generated_at: 2026-08-15 01:40:00
 generator: sillyspec-scan
 
 modules:
@@ -110,6 +110,8 @@ modules:
     entrypoints:
       - APIRouter prefix=/daemon (注册/心跳/session 端点)
       - APIRouter prefix=/daemon (GET/PATCH/POST /api/daemon/machines 机器级聚合读+别名+self-update，2026-07-07-daemon-machine-runtime-hierarchy)
+      - APIRouter prefix=/daemon (ANY /api/daemon/llm-proxy/{path} LLM 网关透传，security-audit-remediation)
+      - WS /api/daemon/ws（升级期鉴权，无/坏凭据 close 4001、归属不匹配 close 4003，security-audit-remediation）
       - sillyhub-daemon CLI (cli.ts: createProgram/start/stop/status/logs)
       - Daemon class (sillyhub-daemon/src/daemon.ts)
     main_symbols:
@@ -122,6 +124,8 @@ modules:
       - daemon.ws_hub.WSHub
       - daemon.protocol（含 PROVIDER_CONFIG_CHANGED WS 消息，2026-08-06-provider-switch-live-session）
       - daemon.lease.provider_switch（notify_provider_switch 查 active session 按 daemon 分组推送，2026-08-06-provider-switch-live-session）
+      - daemon.router.llm_proxy（LLM 网关透传端点，master key 不出进程，v1 路径白名单）
+      - daemon.router._authenticate_bearer_headers/_authenticate_ws_upgrade（凭据自解析 helper，4001/4003 拒绝语义由调用方落地，security-audit-remediation）
       - sillyhub-daemon: Daemon, RecoveryCoordinator, task-runner, hub-client, ws-client
       - sillyhub-daemon/interactive（session 热切换 markPendingSwitch/reloadWithProvider resume，2026-08-06-provider-switch-live-session）
     depends_on: [core, models, agent, runtime, worktree]

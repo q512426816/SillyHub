@@ -23,6 +23,8 @@ module_id: file
 
 所有端点需 JWT 登录（`get_current_user`）；大小/类型不符在 service 抛 `AppError`，由全局异常处理器映射为 413 / 415。
 
+**可见域**（security-audit-remediation 归属加固）：五端点（上传/下载/单条与批量元数据/软删）对资源做归属断言——本人上传（`uploaded_by`）或具备 `WORKSPACE_READ`/admin 权限放行，其余一律 404；list 端点按可见域过滤（非特权用户只见本人上传）。跨用户直接拿 file_id 访问不再返回内容。
+
 ## 关键逻辑
 - **存储解耦**：`FileService` 经 `Depends(get_storage_backend)` 注入 `StorageBackend` 抽象（生产 `MinioBackend`，测试用 `dependency_overrides` 换 mock，不依赖真实 MinIO，NFR-4）。file 模块只调抽象层的 `put_object` / `get_object_stream` / `delete_object`，不感知 MinIO 细节。
 - **上传流转**（`upload_file`）：校验大小/类型 → 生成 `stored_key`（格式 `YYYY/MM/{uuid}{.ext}`，扩展名经 `_safe_ext` 清洗为小写字母数字且 ≤10 字符防注入）→ `storage.put_object` 写对象 → 落 `File` 表 commit。若 commit 失败，best-effort 补偿删除已写对象（失败仅记日志、不掩盖原异常），避免孤儿对象堆积（第五批 code-quality 修复）。
@@ -36,4 +38,5 @@ module_id: file
 - **软删历史孤儿**：第五批 code-quality 之前软删只置 `deleted_at`、对象本体未删，历史已软删未删的对象需一次性清理脚本回收（账单泄漏）。
 - **本模块未正式上线**（非 PPM），允许重置开发/测试数据，不要求历史兼容；改 schema/migration 无需保数据。
 - **测试范式**：单测注入 mock `StorageBackend`，不要起真实 MinIO；断言校验/补偿/软删顺序而非具体对象存储协议。
+- **归属断言**（security-audit-remediation）：`get_stream` 签名连带变更——唯一外部调用者 PPM `export-excel` 已同步；下游新调用方须传当前用户做归属判定，勿绕过可见域直接取流。
 - **设计依据**：详见 `.sillyspec/changes/2026-07-22-platform-file-center/design.md`（D-003 校验位置 / D-006 PPM file_urls 值语义 / D-008 owner 可空 / D-009 预览安全契约）。

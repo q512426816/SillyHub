@@ -1,0 +1,104 @@
+{
+  "generatedAt": "2026-08-14T21:49:48.484Z",
+  "schemaVersion": 1,
+  "items": [
+    {
+      "task": "task-01",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft: 待 agent 对照 task-01 brief + diff 复核后升级为 pass/fail"
+      ]
+    },
+    {
+      "task": "task-02",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft: 待 agent 对照 task-02 brief + diff 复核后升级为 pass/fail"
+      ]
+    },
+    {
+      "task": "task-03",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft: 待 agent 对照 task-03 brief + diff 复核后升级为 pass/fail"
+      ]
+    },
+    {
+      "task": "task-04",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft: 待 agent 对照 task-04 brief + diff 复核后升级为 pass/fail"
+      ]
+    },
+    {
+      "task": "task-05",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft: 待 agent 对照 task-05 brief + diff 复核后升级为 pass/fail"
+      ]
+    },
+    {
+      "task": "task-06",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft: 待 agent 对照 task-06 brief + diff 复核后升级为 pass/fail"
+      ]
+    },
+    {
+      "task": "task-07",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft: 待 agent 对照 task-07 brief + diff 复核后升级为 pass/fail"
+      ]
+    },
+    {
+      "task": "task-08",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft: 待 agent 对照 task-08 brief + diff 复核后升级为 pass/fail"
+      ]
+    },
+    {
+      "task": "task-09",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft: 待 agent 对照 task-09 brief + diff 复核后升级为 pass/fail"
+      ]
+    },
+    {
+      "task": "task-10",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft: 待 agent 对照 task-10 brief + diff 复核后升级为 pass/fail"
+      ]
+    },
+    {
+      "task": "task-11",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft: 待 agent 对照 task-11 brief + diff 复核后升级为 pass/fail"
+      ]
+    },
+    {
+      "task": "task-12",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft: 待 agent 对照 task-12 brief + diff 复核后升级为 pass/fail"
+      ]
+    },
+    {
+      "task": "task-13",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft: 待 agent 对照 task-13 brief + diff 复核后升级为 pass/fail"
+      ]
+    },
+    {
+      "task": "task-14",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft: 待 agent 对照 task-14 brief + diff 复核后升级为 pass/fail"
+      ]
+    }
+  ]
+}
