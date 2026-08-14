@@ -255,7 +255,7 @@ class SessionReadiness:
         event = self._get_or_create_event(session_id)
         event.set()
 
-    async def wait(self, session_id: uuid.UUID, timeout: float = 30) -> bool:
+    async def wait(self, session_id: uuid.UUID, timeout: float = 8) -> bool:
         """阻塞等 session ready event。
 
         - 已 ready（``session_id`` ∈ :attr:`_ready`）立即返 ``True``（零开销）。
@@ -264,7 +264,10 @@ class SessionReadiness:
 
         Args:
             session_id: AgentSession id。
-            timeout: 超时秒数，默认 30s（兼容旧 daemon 上报丢失的兜底窗口）。
+            timeout: 超时秒数，默认 8s（ql-20260814-008：正常 daemon /ready
+                上报 ~1s 内到；原 30s 会让 HTTP 请求先被 Next.js 代理 ~30s
+                掐断，用户看到 500。8s 覆盖正常波动，超时仍 fallback 发
+                SESSION_INJECT，兼容旧 daemon 不上报 ready（D-003 / R-02）。
 
         Returns:
             ``True`` = ready（被 mark 或已 ready）；``False`` = 超时。
@@ -608,7 +611,7 @@ class SessionService:
         # daemon _startInteractiveSession 完成前到被 _routeSessionControl session_not_found
         # 丢（/model 空白根因）。同 inject_session（task-08）逻辑；超时 fallback 仍发
         # （兼容不上报 ready 的旧 daemon）。
-        ready = await get_session_readiness().wait(session.id, timeout=30)
+        ready = await get_session_readiness().wait(session.id, timeout=8)
         if not ready:
             log.warning("session_ready_timeout", session_id=str(session.id))
         control_ok = False
@@ -859,10 +862,11 @@ class SessionService:
 
         # task-08 / FR-03 / D-003@v1：commit AgentRun 后、send SESSION_INJECT 前阻塞等
         # daemon session ready（确保 inject 不在 daemon create 完成前到而被静默丢弃，
-        # /model 空白根因）。已 ready 立即返 True 零开销直通；超时 30s 未 ready 不
+        # /model 空白根因）。已 ready 立即返 True 零开销直通；超时 8s（ql-20260814-008，
+        # 原 30s 会先被 Next.js 代理超时掐断）未 ready 不
         # 抛错不 return，落 warn 日志后 fallback 仍执行原 send SESSION_INJECT 分支，
         # 兼容旧 daemon 不上报 ready（D-003 / R-02）。
-        ready = await get_session_readiness().wait(session_id, timeout=30)
+        ready = await get_session_readiness().wait(session_id, timeout=8)
         if not ready:
             log.warning("session_ready_timeout", session_id=str(session_id))
 

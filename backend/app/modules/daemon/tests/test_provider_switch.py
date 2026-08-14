@@ -19,7 +19,7 @@ mock 策略（不真实 WS）：
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -350,7 +350,8 @@ class TestNotifyProviderSwitchNoActive:
             status="claimed",
             kind="batch",
             claimed_at=now,
-            lease_expires_at=now.replace(minute=now.minute + 5),
+            # minute+5 的 replace 在分钟 >54 时越界（ValueError），用 timedelta 稳定 +5min
+            lease_expires_at=now + timedelta(minutes=5),
             metadata_={},
             created_at=now,
             updated_at=now,
