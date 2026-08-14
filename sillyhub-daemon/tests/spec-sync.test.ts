@@ -1,7 +1,7 @@
 // tests/spec-sync.test.ts
 // task-06 (2026-06-26-daemon-client-spec-sync-fix) daemon 侧单测：
 //   - syncSpecTreeIfNeeded 的 ctx-guarded no-op / 触发 / 失败容错（D-002@v1, FR-05, R-03）
-//   - packSpecDir push 路径含 .runtime（D-003@v1 非对称契约, FR-06）
+//   - packSpecDir push 路径排除 .runtime（ql-20260813-007：整树默认排除，NUL 500 根治）
 //
 // task-08（2026-08-13-platform-managed-file-sync）：vi.mock node:os.homedir 指向
 // 每文件临时根——postSpecSync 现读写 ~/.sillyhub/daemon/manifests/{ws}.json 本地清单
@@ -11,7 +11,7 @@
 // vitest.config.ts: globals=false → 显式 import；include=tests/**/*.test.ts。
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, utimes } from 'node:fs/promises';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -51,6 +51,27 @@ function parseTarNames(buf: Buffer): string[] {
     offset += 512 + Math.ceil(size / 512) * 512;
   }
   return names;
+}
+
+/** 解析 tar 内每个 member 的 mtime（Unix 秒）。ql-20260813-008：验证 packSpecDir
+ * 打包保留宿主真实 mtime（非固定 0），否则后端 changes.updated_at 语义失效。
+ * 注意：超长名走 GNU LongLink（typeflag 'L'），其占位名 '././@LongLink' 的 mtime
+ * 无意义，调用方按需跳过。*/
+function parseTarMtimes(buf: Buffer): Record<string, number> {
+  const mtimes: Record<string, number> = {};
+  let offset = 0;
+  while (offset + 512 <= buf.length) {
+    const header = buf.subarray(offset, offset + 512);
+    if (header.every((b) => b === 0)) break;
+    const name = header.subarray(0, 100).toString('utf-8').replace(/\0.*$/, '').trim();
+    const sizeOctal = header.subarray(124, 136).toString('utf-8').replace(/\0.*$/, '').trim();
+    const size = sizeOctal ? parseInt(sizeOctal, 8) : 0;
+    const mtimeOctal = header.subarray(136, 148).toString('utf-8').replace(/\0.*$/, '').trim();
+    const mtime = mtimeOctal ? parseInt(mtimeOctal, 8) : 0;
+    if (name && name !== '././@LongLink') mtimes[name.replace(/\/$/, '')] = mtime;
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+  return mtimes;
 }
 
 describe('syncSpecTreeIfNeeded (task-06 / D-002@v1)', () => {
@@ -106,7 +127,7 @@ describe('syncSpecTreeIfNeeded (task-06 / D-002@v1)', () => {
   });
 });
 
-describe('packSpecDir (task-06 / D-003@v1 push 含 .runtime)', () => {
+describe('packSpecDir (ql-20260813-007 .runtime 整树默认排除)', () => {
   let dir: string;
 
   beforeEach(async () => {
@@ -117,7 +138,7 @@ describe('packSpecDir (task-06 / D-003@v1 push 含 .runtime)', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it('输出 tar 含 .runtime/sillyspec.db（push 不再排除 .runtime，FR-06）', async () => {
+  it('输出 tar 不含 .runtime/sillyspec.db（push 默认排除 .runtime 整树，NUL 500 根治）', async () => {
     await mkdir(join(dir, 'docs'), { recursive: true });
     await writeFile(join(dir, 'docs', 'index.md'), '# hi');
     await mkdir(join(dir, '.runtime'), { recursive: true });
@@ -126,9 +147,10 @@ describe('packSpecDir (task-06 / D-003@v1 push 含 .runtime)', () => {
     const tarBuf = await packSpecDir(dir);
     const names = parseTarNames(tarBuf);
 
-    // spec 数据 + .runtime 都在（task-06 D-003 push 路径含 .runtime）
+    // spec 数据在，.runtime 整树（含 sillyspec.db）排除——SQLite 二进制含 NUL 字节，
+    // 写进后端 scan_documents 文本列曾触发 asyncpg 0x00 整批回滚 500（ql-20260813-007）。
     expect(names).toContain('docs/index.md');
-    expect(names).toContain('.runtime/sillyspec.db');
+    expect(names.some((n) => n === '.runtime' || n.startsWith('.runtime/'))).toBe(false);
   });
 
   it('excludeRuntime:true 排除 .runtime 整树（import/get_spec_bundle 路径，ql-20260701-002）', async () => {
@@ -234,20 +256,57 @@ describe('packSpecDir (ql-20260813-004 长文件名 + 运行时产物排除)', (
     expect(names.some((n) => n === 'runtime' || n.startsWith('runtime/'))).toBe(false);
   });
 
-  it('默认排除 worktrees（任意深度，保留 .runtime 其余内容，W + D-003）', async () => {
+  it('默认排除 .runtime 整树 + worktrees（任意深度，W + ql-20260813-007）', async () => {
     await mkdir(join(dir, 'docs'), { recursive: true });
     await writeFile(join(dir, 'docs', 'a.md'), 'a');
     // worktrees 嵌在 .runtime（有点）下，模拟 sillyspec worktree 位置。
     await mkdir(join(dir, '.runtime', 'worktrees', 'wt-1'), { recursive: true });
     await writeFile(join(dir, '.runtime', 'worktrees', 'wt-1', 'f.txt'), 'x');
-    // .runtime（有点）其他内容仍保留（D-003 push 含 .runtime）。
+    // .runtime（有点）下 sillyspec.db 等——整树排除（ql-20260813-007，NUL 500 根治）。
     await writeFile(join(dir, '.runtime', 'sillyspec.db'), 'sqlite');
 
     const tarBuf = await packSpecDir(dir);
     const names = parseTarNames(tarBuf);
 
     expect(names).toContain('docs/a.md');
-    expect(names).toContain('.runtime/sillyspec.db');
+    // .runtime 整树（含 sillyspec.db）+ worktrees 全部排除。
+    expect(names.some((n) => n === '.runtime' || n.startsWith('.runtime/'))).toBe(false);
     expect(names.some((n) => n.includes('worktrees'))).toBe(false);
+  });
+});
+
+// ql-20260813-008：packSpecDir 打包的 tar member 必须保留宿主真实 mtime。
+// 旧实现 buildTarHeader 把 mtime 固定写 0（1970）——后端 changes.updated_at 取变更目录
+// 文件 mtime max 填充会全部失效为 1970，"更新时间"列语义崩坏。本组钉死该回归。
+describe('packSpecDir (ql-20260813-008 保留真实 mtime)', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'spec-sync-mtime-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('tar member mtime 反映宿主文件真实 mtime（非固定 0）', async () => {
+    await mkdir(join(dir, 'changes', 'demo'), { recursive: true });
+    await writeFile(join(dir, 'changes', 'demo', 'proposal.md'), '# p');
+    await writeFile(join(dir, 'changes', 'demo', 'tasks.md'), '# t');
+
+    // 设固定历史 mtime（2026-03-15 ~ 09:30 UTC = 1773624600），区别于写入的 now。
+    const fixedMs = Date.UTC(2026, 2, 15, 9, 30, 0);
+    const fixedSec = Math.floor(fixedMs / 1000);
+    await utimes(join(dir, 'changes', 'demo', 'proposal.md'), fixedSec, fixedSec);
+    await utimes(join(dir, 'changes', 'demo', 'tasks.md'), fixedSec, fixedSec);
+
+    const tarBuf = await packSpecDir(dir);
+    const mtimes = parseTarMtimes(tarBuf);
+
+    // member mtime = 宿主真实 mtime（秒），不再是固定 0（1970）。
+    expect(mtimes['changes/demo/proposal.md']).toBe(fixedSec);
+    expect(mtimes['changes/demo/tasks.md']).toBe(fixedSec);
+    // 关键回归断言：不是 0（旧 bug 会让所有 mtime=1970）。
+    expect(mtimes['changes/demo/proposal.md']).toBeGreaterThan(0);
   });
 });
