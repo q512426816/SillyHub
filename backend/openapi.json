@@ -3584,7 +3584,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DocumentsSyncRequest"
+                "$ref": "#/components/schemas/app__modules__change__schema__DocumentsSyncRequest"
               }
             }
           }
@@ -24721,7 +24721,7 @@
           "platform-sync"
         ],
         "summary": "Get Approval",
-        "description": "GET 单 change 审批状态——给 sillyspec CLI execute 审批门控用（ql-20260812-001-6eb8）。\n\nCLI ``sync.js checkApproval`` 在 execute 启动时 GET 此端点，读 ``status``：\nrejected/pending 阻断 execute，其他（approved）放行（command.js:1071-1080）。\n\n**不查库、不因 change 不存在 404**：change 可能尚未上行 progress（execute 前），\n若 404 CLI 会 fetchJson→null→误判 pending 卡死（与本端点放行初衷相悖）。当前后端\n无审批策略 → 所有 change 默认 ``approved`` 放行。鉴权失败仍 401（require_platform_sync）。",
+        "description": "GET 单 change 审批状态——给 sillyspec CLI execute 审批门控用（ql-20260812-001-6eb8）。\n\nCLI ``sync.js checkApproval`` 在 execute 启动时 GET 此端点，读 ``status``：\nrejected/pending 阻断 execute，其他（approved）放行（command.js:1071-1080）。\n\n**不因 change 无审批记录 404**：change 可能尚未上行 progress（execute 前），\n若 404 CLI 会 fetchJson→null→误判 pending 卡死（与本端点放行初衷相悖）。\n2026-08-14-platform-sync-docs-approval 起改读 ``approval`` 列（D-001@v1 完整闭环）：\n无记录（行不存在 / approval NULL 含仅 documents 占位行）→ 默认 ``approved`` 放行；\n有记录 → 真实 status/reason（rejected 时 CLI execute 启动 exit(1) 硬阻断，\nrun/command.js:1113-1129 现有门控）。鉴权失败仍 401。",
         "operationId": "get_approval_api_changes__name__approval_get",
         "parameters": [
           {
@@ -24741,6 +24741,112 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ChangeApprovalResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "platform-sync",
+          "platform-sync"
+        ],
+        "summary": "Submit Approval",
+        "description": "POST 审批决定（CLI ``sync.js _submitApproval`` :944-996 预留契约，过去式 decision）。\n\nD-001@v1 完整闭环：落 approval 列（重复提交覆盖，后写赢）。``decided_by`` 取\n``require_platform_sync`` 解包的权威 ``User.username``（三路径 token 均反查真实\nUser；**不用** ``X-SillySpec-User`` header fallback——客户端可伪造，Grill UB-2）。\nrejected 记录随后被 GET approval 读到 → CLI execute 启动 exit(1) 硬阻断。",
+        "operationId": "submit_approval_api_changes__name__approval_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalSubmitRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalSubmitOk"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/changes/{name}/documents": {
+      "post": {
+        "tags": [
+          "platform-sync",
+          "platform-sync"
+        ],
+        "summary": "Push Documents",
+        "description": "POST 四件套文档全文（CLI ``sync.js syncDocuments`` :442-497 预留契约）。\n\nbody 是扁平 map（键限四件套白名单，schema 层 422）。定向 upsert ``documents``\n列（D-003@v1 单写者，不触碰 latest_progress/approval）；行不存在 INSERT 占位\n（下行端点由占位行守卫视为「无进度」）。全量替换语义（整列覆盖，与 CLI 全量推一致）。",
+        "operationId": "push_documents_api_changes__name__documents_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__modules__platform_sync__schema__DocumentsSyncRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentsSyncOk"
                 }
               }
             }
@@ -26657,6 +26763,63 @@
           "status"
         ],
         "title": "ApprovalRead"
+      },
+      "ApprovalSubmitOk": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "ok"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "rejected"
+            ],
+            "title": "Decision"
+          },
+          "change_name": {
+            "type": "string",
+            "title": "Change Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision",
+          "change_name"
+        ],
+        "title": "ApprovalSubmitOk",
+        "description": "POST approval 200 响应（CLI fetchJson 读到即成功，字段供人工核对）。"
+      },
+      "ApprovalSubmitRequest": {
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "rejected"
+            ],
+            "title": "Decision"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision"
+        ],
+        "title": "ApprovalSubmitRequest",
+        "description": "POST /changes/{name}/approval 请求。\n\ndecision 过去式（``\"approved\"``/``\"rejected\"``）——CLI ``sync.js _submitApproval``\n（:961-963）字面：rejected 分支带 reason，approved 分支**整个不含 reason 键**，\n故 reason 必须 optional（default None，Grill UB-3）。"
       },
       "ArchiveCheckItem": {
         "properties": {
@@ -30247,12 +30410,25 @@
         "title": "DispatchWorkerRequest",
         "description": "主 agent 派 worker 的请求体（D-002@v2）。\n\n字段对齐 worker_preset 单条结构（{agent_type, model, objective, role}），\n主 agent 可在 mission 启动时的 preset 之外动态补派（如发现新子任务）。"
       },
-      "DocumentsSyncRequest": {
-        "properties": {},
-        "additionalProperties": true,
+      "DocumentsSyncOk": {
+        "properties": {
+          "synced": {
+            "type": "integer",
+            "title": "Synced",
+            "description": "本次落库的文档数"
+          },
+          "change_name": {
+            "type": "string",
+            "title": "Change Name"
+          }
+        },
         "type": "object",
-        "title": "DocumentsSyncRequest",
-        "description": "Key is filename, value is file content."
+        "required": [
+          "synced",
+          "change_name"
+        ],
+        "title": "DocumentsSyncOk",
+        "description": "POST documents 200 响应（CLI 不读 body，任意 2xx 即可，synced 供人工核对）。"
       },
       "DocumentsSyncResponse": {
         "properties": {
@@ -51856,6 +52032,13 @@
         ],
         "title": "ApproveRequest"
       },
+      "app__modules__change__schema__DocumentsSyncRequest": {
+        "properties": {},
+        "additionalProperties": true,
+        "type": "object",
+        "title": "DocumentsSyncRequest",
+        "description": "Key is filename, value is file content."
+      },
       "app__modules__change__schema__ReviewResponse": {
         "properties": {
           "change": {
@@ -52000,6 +52183,14 @@
         "type": "object",
         "title": "OwnerRead",
         "description": "Nested owner DTO for platform-admin global views (task-04 / D-006@v1).\n\nPopulated by list endpoints via JOIN ``users``; detail endpoints may\nleave it ``None``."
+      },
+      "app__modules__platform_sync__schema__DocumentsSyncRequest": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "type": "object",
+        "title": "DocumentsSyncRequest",
+        "description": "POST /changes/{name}/documents 请求——**裸**扁平 map（顶层即文件名）。\n\nCLI ``sync.js syncDocuments``（:442-497）把存在的四件套文件读成扁平 map\n直接 ``JSON.stringify(documents)`` 整体 POST——顶层就是 ``{\"proposal.md\": \"全文\"}``，\n**不包 documents 键**（task-05 测试实证抓到包装偏差后修正）。RootModel 直接\n映射裸 map。键限白名单、值必须 str；空 map / 白名单外键 / 值非 str → 422。"
       },
       "app__modules__workflow__schema__ReviewResponse": {
         "properties": {

@@ -7492,13 +7492,49 @@ export interface paths {
          *     CLI ``sync.js checkApproval`` 在 execute 启动时 GET 此端点，读 ``status``：
          *     rejected/pending 阻断 execute，其他（approved）放行（command.js:1071-1080）。
          *
-         *     **不查库、不因 change 不存在 404**：change 可能尚未上行 progress（execute 前），
-         *     若 404 CLI 会 fetchJson→null→误判 pending 卡死（与本端点放行初衷相悖）。当前后端
-         *     无审批策略 → 所有 change 默认 ``approved`` 放行。鉴权失败仍 401（require_platform_sync）。
+         *     **不因 change 无审批记录 404**：change 可能尚未上行 progress（execute 前），
+         *     若 404 CLI 会 fetchJson→null→误判 pending 卡死（与本端点放行初衷相悖）。
+         *     2026-08-14-platform-sync-docs-approval 起改读 ``approval`` 列（D-001@v1 完整闭环）：
+         *     无记录（行不存在 / approval NULL 含仅 documents 占位行）→ 默认 ``approved`` 放行；
+         *     有记录 → 真实 status/reason（rejected 时 CLI execute 启动 exit(1) 硬阻断，
+         *     run/command.js:1113-1129 现有门控）。鉴权失败仍 401。
          */
         get: operations["get_approval_api_changes__name__approval_get"];
         put?: never;
-        post?: never;
+        /**
+         * Submit Approval
+         * @description POST 审批决定（CLI ``sync.js _submitApproval`` :944-996 预留契约，过去式 decision）。
+         *
+         *     D-001@v1 完整闭环：落 approval 列（重复提交覆盖，后写赢）。``decided_by`` 取
+         *     ``require_platform_sync`` 解包的权威 ``User.username``（三路径 token 均反查真实
+         *     User；**不用** ``X-SillySpec-User`` header fallback——客户端可伪造，Grill UB-2）。
+         *     rejected 记录随后被 GET approval 读到 → CLI execute 启动 exit(1) 硬阻断。
+         */
+        post: operations["submit_approval_api_changes__name__approval_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/changes/{name}/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Push Documents
+         * @description POST 四件套文档全文（CLI ``sync.js syncDocuments`` :442-497 预留契约）。
+         *
+         *     body 是扁平 map（键限四件套白名单，schema 层 422）。定向 upsert ``documents``
+         *     列（D-003@v1 单写者，不触碰 latest_progress/approval）；行不存在 INSERT 占位
+         *     （下行端点由占位行守卫视为「无进度」）。全量替换语义（整列覆盖，与 CLI 全量推一致）。
+         */
+        post: operations["push_documents_api_changes__name__documents_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8089,6 +8125,41 @@ export interface components {
         ApprovalRead: {
             /** Status */
             status: string;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * ApprovalSubmitOk
+         * @description POST approval 200 响应（CLI fetchJson 读到即成功，字段供人工核对）。
+         */
+        ApprovalSubmitOk: {
+            /**
+             * Status
+             * @default ok
+             */
+            status: string;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "approved" | "rejected";
+            /** Change Name */
+            change_name: string;
+        };
+        /**
+         * ApprovalSubmitRequest
+         * @description POST /changes/{name}/approval 请求。
+         *
+         *     decision 过去式（``"approved"``/``"rejected"``）——CLI ``sync.js _submitApproval``
+         *     （:961-963）字面：rejected 分支带 reason，approved 分支**整个不含 reason 键**，
+         *     故 reason 必须 optional（default None，Grill UB-3）。
+         */
+        ApprovalSubmitRequest: {
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "approved" | "rejected";
             /** Reason */
             reason?: string | null;
         };
@@ -9647,11 +9718,17 @@ export interface components {
             worker_prompt?: string | null;
         };
         /**
-         * DocumentsSyncRequest
-         * @description Key is filename, value is file content.
+         * DocumentsSyncOk
+         * @description POST documents 200 响应（CLI 不读 body，任意 2xx 即可，synced 供人工核对）。
          */
-        DocumentsSyncRequest: {
-            [key: string]: unknown;
+        DocumentsSyncOk: {
+            /**
+             * Synced
+             * @description 本次落库的文档数
+             */
+            synced: number;
+            /** Change Name */
+            change_name: string;
         };
         /** DocumentsSyncResponse */
         DocumentsSyncResponse: {
@@ -17153,6 +17230,13 @@ export interface components {
             /** Approved By */
             approved_by: string;
         };
+        /**
+         * DocumentsSyncRequest
+         * @description Key is filename, value is file content.
+         */
+        app__modules__change__schema__DocumentsSyncRequest: {
+            [key: string]: unknown;
+        };
         /** ReviewResponse */
         app__modules__change__schema__ReviewResponse: {
             /** Change */
@@ -17215,6 +17299,18 @@ export interface components {
             email?: string | null;
             /** Display Name */
             display_name?: string | null;
+        };
+        /**
+         * DocumentsSyncRequest
+         * @description POST /changes/{name}/documents 请求——**裸**扁平 map（顶层即文件名）。
+         *
+         *     CLI ``sync.js syncDocuments``（:442-497）把存在的四件套文件读成扁平 map
+         *     直接 ``JSON.stringify(documents)`` 整体 POST——顶层就是 ``{"proposal.md": "全文"}``，
+         *     **不包 documents 键**（task-05 测试实证抓到包装偏差后修正）。RootModel 直接
+         *     映射裸 map。键限白名单、值必须 str；空 map / 白名单外键 / 值非 str → 422。
+         */
+        app__modules__platform_sync__schema__DocumentsSyncRequest: {
+            [key: string]: string;
         };
         /** ReviewResponse */
         app__modules__workflow__schema__ReviewResponse: {
@@ -19544,7 +19640,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["DocumentsSyncRequest"];
+                "application/json": components["schemas"]["app__modules__change__schema__DocumentsSyncRequest"];
             };
         };
         responses: {
@@ -31731,6 +31827,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChangeApprovalResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_approval_api_changes__name__approval_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalSubmitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalSubmitOk"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    push_documents_api_changes__name__documents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["app__modules__platform_sync__schema__DocumentsSyncRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentsSyncOk"];
                 };
             };
             /** @description Validation Error */

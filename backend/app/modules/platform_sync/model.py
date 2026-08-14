@@ -90,6 +90,18 @@ class PlatformChangeProgressORM(BaseModel, table=True):
         default=None,
         sa_column=Column(String(255), nullable=True),
     )
+    # ── Change 2026-08-14-platform-sync-docs-approval（D-002@v1 / D-003@v1 单写者）──
+    # documents：四件套全文扁平 map（CLI syncDocuments 写，POST documents 才动）。
+    # approval：审批记录（平台写，POST approval 才动）。两列独立于 latest_progress——
+    # upsert_progress 定向列 UPDATE 不触碰，三个写入方互不覆盖。
+    documents: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+    approval: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(

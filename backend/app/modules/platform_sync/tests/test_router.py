@@ -400,3 +400,169 @@ async def test_get_approval_jwt_auth_ok(client, auth_headers):
     resp = await client.get("/api/changes/c1/approval", headers=auth_headers)
     assert resp.status_code == 200
     assert resp.json()["status"] == "approved"
+
+
+# ── Change 2026-08-14-platform-sync-docs-approval task-05：documents / approval 端点 ──
+
+DOCS: dict = {
+    "proposal.md": "# proposal 测试",
+    "design.md": "# design 测试",
+    "tasks.md": "# tasks 测试",
+}
+
+
+async def test_post_documents_ok(client, apikey_headers):
+    """POST documents 合法 body → 200 {synced, change_name}（FR-01）。"""
+    resp = await client.post("/api/changes/doc-change/documents", json=DOCS, headers=apikey_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {"synced": 3, "change_name": "doc-change"}
+
+
+async def test_post_documents_empty_map_422(client, apikey_headers):
+    """空 map → 422（schema 白名单 validator）。"""
+    resp = await client.post("/api/changes/doc-change/documents", json={}, headers=apikey_headers)
+    assert resp.status_code == 422
+
+
+async def test_post_documents_bad_key_422(client, apikey_headers):
+    """白名单外键 → 422。"""
+    resp = await client.post(
+        "/api/changes/doc-change/documents",
+        json={"evil.md": "x"},
+        headers=apikey_headers,
+    )
+    assert resp.status_code == 422
+
+
+async def test_post_documents_bad_value_422(client, apikey_headers):
+    """值非 str → 422（dict[str, str] 类型校验）。"""
+    resp = await client.post(
+        "/api/changes/doc-change/documents",
+        json={"proposal.md": 123},
+        headers=apikey_headers,
+    )
+    assert resp.status_code == 422
+
+
+async def test_post_documents_no_auth_401(client):
+    """无 Authorization → 401。"""
+    resp = await client.post("/api/changes/doc-change/documents", json=DOCS)
+    assert resp.status_code == 401
+
+
+async def test_post_approval_rejected_with_reason(client, apikey_headers):
+    """POST approval rejected + reason → 200（FR-02）；GET 读回真实状态（FR-03）。"""
+    resp = await client.post(
+        "/api/changes/ap-change/approval",
+        json={"decision": "rejected", "reason": "设计有缺口"},
+        headers=apikey_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["decision"] == "rejected"
+
+    got = await client.get("/api/changes/ap-change/approval", headers=apikey_headers)
+    assert got.status_code == 200
+    assert got.json()["status"] == "rejected"
+    assert got.json()["reason"] == "设计有缺口"
+
+
+async def test_post_approval_approved_without_reason_key(client, apikey_headers):
+    """approved 分支 body 不含 reason 键（CLI sync.js:963 字面）→ 200（Grill UB-3）。"""
+    resp = await client.post(
+        "/api/changes/ap-change/approval",
+        json={"decision": "approved"},
+        headers=apikey_headers,
+    )
+    assert resp.status_code == 200
+
+
+async def test_post_approval_bad_decision_422(client, apikey_headers):
+    """非过去式 decision（"approve"）→ 422。"""
+    resp = await client.post(
+        "/api/changes/ap-change/approval",
+        json={"decision": "approve"},
+        headers=apikey_headers,
+    )
+    assert resp.status_code == 422
+
+
+async def test_post_approval_no_auth_401(client):
+    """无 Authorization → 401。"""
+    resp = await client.post("/api/changes/ap-change/approval", json={"decision": "approved"})
+    assert resp.status_code == 401
+
+
+async def test_get_approval_no_record_default_approved(client, apikey_headers):
+    """GET 无任何记录 → 默认 approved 放行（ql-20260812-001-6eb8 兼容，FR-03）。"""
+    resp = await client.get("/api/changes/never-pushed-x/approval", headers=apikey_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "approved"
+    assert body["reason"] == "no approval record; default-approved"
+
+
+async def test_get_approval_placeholder_row_still_default(client, apikey_headers):
+    """仅 documents 的占位行（approval NULL）→ GET approval 仍默认 approved（FR-05 例外）。"""
+    await client.post("/api/changes/placeholder-c/documents", json=DOCS, headers=apikey_headers)
+    resp = await client.get("/api/changes/placeholder-c/approval", headers=apikey_headers)
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "approved"
+
+
+async def test_single_writer_progress_preserves_approval(client, apikey_headers):
+    """单写者回归：push progress 后 set_approval 再 push → approval 仍在（FR-04）。"""
+    await client.post(
+        "/api/changes/writer-c/progress",
+        json=SAMPLE_PROGRESS,
+        headers={**apikey_headers, "X-SillySpec-Pushed-At": T1},
+    )
+    await client.post(
+        "/api/changes/writer-c/approval",
+        json={"decision": "rejected", "reason": "hold"},
+        headers=apikey_headers,
+    )
+    # 二次 push progress（base_ts 推进）不冲掉 approval
+    await client.post(
+        "/api/changes/writer-c/progress",
+        json=SAMPLE_PROGRESS,
+        headers={**apikey_headers, "X-SillySpec-Pushed-At": T2},
+    )
+    got = await client.get("/api/changes/writer-c/approval", headers=apikey_headers)
+    assert got.json()["status"] == "rejected"
+
+
+async def test_single_writer_approval_preserves_progress(client, apikey_headers):
+    """单写者回归：push progress 后 upsert documents → latest_progress 仍在（FR-04）。"""
+    await client.post(
+        "/api/changes/writer2-c/progress",
+        json=SAMPLE_PROGRESS,
+        headers={**apikey_headers, "X-SillySpec-Pushed-At": T1},
+    )
+    await client.post("/api/changes/writer2-c/documents", json=DOCS, headers=apikey_headers)
+    got = await client.get("/api/changes/writer2-c/progress", headers=apikey_headers)
+    assert got.status_code == 200
+    assert got.json()["changes"] == SAMPLE_PROGRESS["changes"]
+
+
+async def test_placeholder_guard_progress_404_and_list_hidden(client, apikey_headers):
+    """占位行守卫（FR-05 / Grill UB-1）：仅 documents 建行 → GET progress 404 +
+    GET /changes 列表不出现；随后 push progress 正常 UPDATE 不撞复合唯一键。"""
+    await client.post("/api/changes/guard-c/documents", json=DOCS, headers=apikey_headers)
+    # 守卫 1：GET progress 404（不是 200 空态）
+    prog = await client.get("/api/changes/guard-c/progress", headers=apikey_headers)
+    assert prog.status_code == 404
+    # 守卫 2：列表不出现占位行
+    lst = await client.get("/api/changes", headers=apikey_headers)
+    assert all(it["name"] != "guard-c" for it in lst.json())
+    # 后续 push progress 正常 UPDATE（不撞 uq 复合唯一）
+    push = await client.post(
+        "/api/changes/guard-c/progress",
+        json=SAMPLE_PROGRESS,
+        headers={**apikey_headers, "X-SillySpec-Pushed-At": T1},
+    )
+    assert push.status_code == 200
+    prog2 = await client.get("/api/changes/guard-c/progress", headers=apikey_headers)
+    assert prog2.status_code == 200
+    # 且 documents 仍在（单写者）
+    assert prog2.json().get("changes") == SAMPLE_PROGRESS["changes"]

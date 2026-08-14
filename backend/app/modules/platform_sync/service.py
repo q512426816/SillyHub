@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -123,6 +124,7 @@ class PlatformSyncService:
                     latest_progress=body,
                     last_pushed_at=pushed_at,
                     last_pusher=user,
+                    # D-003@v1 单写者：不传 documents/approval（ORM default None）。
                 )
             )
             await self._session.commit()
@@ -146,10 +148,15 @@ class PlatformSyncService:
         pushed_at: str | None,
         user: str | None,
     ) -> None:
-        """UPDATE 共用：覆盖 latest_progress + 元字段（updated_at 保持预存语义）。"""
+        """UPDATE 共用：定向列覆盖 latest_progress + 元字段 + 刷新 updated_at。
+
+        D-003@v1 单写者（2026-08-14-platform-sync-docs-approval）：绝不触碰
+        documents/approval 列（POST documents / POST approval 各自写）。
+        """
         row.latest_progress = body
         row.last_pushed_at = pushed_at
         row.last_pusher = user
+        row.updated_at = datetime.now(UTC)
 
     async def list_lightweight(self, workspace_id: uuid.UUID | None) -> list[dict[str, Any]]:
         """GET /changes 轻量列表（契约 §5，按 workspace 过滤）。
@@ -161,11 +168,18 @@ class PlatformSyncService:
         stmt = select(PlatformChangeProgressORM).where(
             col(PlatformChangeProgressORM.workspace_id).is_(None)
             if workspace_id is None
-            else col(PlatformChangeProgressORM.workspace_id) == workspace_id
+            else col(PlatformChangeProgressORM.workspace_id) == workspace_id,
         )
         rows = (await self._session.execute(stmt)).scalars().all()
         items: list[dict[str, Any]] = []
         for row in rows:
+            # 占位行守卫（design §4.3 / Grill UB-1）：latest_progress 无值（仅
+            # documents/approval 有值）的行不出现在列表——对 CLI pullList 维持
+            # 「无进度」语义。用 Python 判断而非 SQL IS NOT NULL：SQLAlchemy JSON
+            # 列缺省在 SQLite 落 JSON 编码的 'null' 字符串（非 SQL NULL），跨方言
+            # SQL 过滤不可靠（task-05 实测抓到），ORM 读回 None 的语义判断才稳。
+            if row.latest_progress is None:
+                continue
             progress = row.latest_progress if isinstance(row.latest_progress, dict) else {}
             changes = progress.get("changes")
             first = changes[0] if isinstance(changes, list) and changes else {}
@@ -188,8 +202,106 @@ class PlatformSyncService:
         不存在/跨 workspace → None（router 层 404，对齐 main.py quick_chat 惯例）。
         """
         row = await self._find_row(workspace_id, name)
-        if row is None:
+        if row is None or row.latest_progress is None:
+            # 占位行守卫（design §4.3 / Grill UB-1）：仅 documents/approval 有值的行
+            # 视为「无进度」→ None（router 维持 404）。否则 CLI triggerPull 拉到
+            # 200 空态经 pm.import 会清空本地进度库（progress.js DELETE stages 不重建）。
             return None
         progress: dict[str, Any] = dict(row.latest_progress or {})
         progress["last_pushed_at"] = row.last_pushed_at
         return progress
+
+    # ── Change 2026-08-14-platform-sync-docs-approval task-03（D-002@v1 / D-003@v1 单写者）──
+
+    async def upsert_documents(
+        self, workspace_id: uuid.UUID | None, name: str, documents: dict[str, str]
+    ) -> int:
+        """POST /changes/{name}/documents：定向 upsert documents 列。
+
+        行有 → UPDATE 只动 documents + updated_at；行无 → INSERT 占位
+        （latest_progress NULL，下行端点由占位行守卫视为「无进度」）。
+        IntegrityError 并发自愈与 ``_apply`` 同模式。
+        """
+        row = await self._find_row(workspace_id, name)
+        if row is not None:
+            row.documents = dict(documents)
+            row.updated_at = datetime.now(UTC)
+            await self._session.commit()
+            return len(documents)
+        try:
+            self._session.add(
+                PlatformChangeProgressORM(
+                    id=uuid.uuid4(),
+                    workspace_id=workspace_id,
+                    change_name=name,
+                    documents=dict(documents),
+                )
+            )
+            await self._session.commit()
+        except IntegrityError:
+            await self._session.rollback()
+            existing = await self._find_row(workspace_id, name)
+            if existing is None:
+                raise
+            existing.documents = dict(documents)
+            existing.updated_at = datetime.now(UTC)
+            await self._session.commit()
+        return len(documents)
+
+    async def set_approval(
+        self,
+        workspace_id: uuid.UUID | None,
+        name: str,
+        decision: str,
+        reason: str | None,
+        decided_by: str,
+    ) -> dict[str, Any]:
+        """POST /changes/{name}/approval：定向写 approval 列（D-001@v1 完整闭环）。
+
+        approval JSON = ``{status, reason, decided_at, decided_by}``；重复提交覆盖
+        （后写赢）。行无 → INSERT 占位。
+        """
+        record: dict[str, Any] = {
+            "status": decision,
+            "reason": reason,
+            "decided_at": datetime.now(UTC).isoformat(),
+            "decided_by": decided_by,
+        }
+        row = await self._find_row(workspace_id, name)
+        if row is not None:
+            row.approval = record
+            row.updated_at = datetime.now(UTC)
+            await self._session.commit()
+            return record
+        try:
+            self._session.add(
+                PlatformChangeProgressORM(
+                    id=uuid.uuid4(),
+                    workspace_id=workspace_id,
+                    change_name=name,
+                    approval=record,
+                )
+            )
+            await self._session.commit()
+        except IntegrityError:
+            await self._session.rollback()
+            existing = await self._find_row(workspace_id, name)
+            if existing is None:
+                raise
+            existing.approval = record
+            existing.updated_at = datetime.now(UTC)
+            await self._session.commit()
+        return record
+
+    async def get_approval_record(
+        self, workspace_id: uuid.UUID | None, name: str
+    ) -> dict[str, Any] | None:
+        """GET /changes/{name}/approval：读 approval 列。
+
+        行不存在 / approval NULL（含仅 documents 的占位行）→ None——router 层
+        映射默认 approved 放行（ql-20260812-001-6eb8 兼容语义）。
+        """
+        row = await self._find_row(workspace_id, name)
+        if row is None:
+            return None
+        return row.approval if isinstance(row.approval, dict) else None

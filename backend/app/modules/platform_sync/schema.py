@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, RootModel, model_validator
 
 
 class ConflictResponse(BaseModel):
@@ -92,3 +92,57 @@ class ResolveByRootPathResponse(BaseModel):
 
     workspace_id: uuid.UUID
     token: str = Field(description="workspace-scoped 明文 token（shpsync_ 前缀），仅本次返回")
+
+
+# ── Change 2026-08-14-platform-sync-docs-approval task-02（D-004@v1：body 照 CLI sync.js 字面）──
+
+#: 四件套白名单（sillyspec sync.js DOCUMENT_FILES 字面）。
+DOCUMENT_FILES: frozenset[str] = frozenset(
+    {"proposal.md", "design.md", "requirements.md", "tasks.md"}
+)
+
+
+class DocumentsSyncRequest(RootModel[dict[str, str]]):
+    """POST /changes/{name}/documents 请求——**裸**扁平 map（顶层即文件名）。
+
+    CLI ``sync.js syncDocuments``（:442-497）把存在的四件套文件读成扁平 map
+    直接 ``JSON.stringify(documents)`` 整体 POST——顶层就是 ``{"proposal.md": "全文"}``，
+    **不包 documents 键**（task-05 测试实证抓到包装偏差后修正）。RootModel 直接
+    映射裸 map。键限白名单、值必须 str；空 map / 白名单外键 / 值非 str → 422。
+    """
+
+    @model_validator(mode="after")
+    def _validate_whitelist(self) -> "DocumentsSyncRequest":
+        if not self.root:
+            raise ValueError("documents 不能为空 map（至少一个四件套文件）")
+        invalid = set(self.root) - DOCUMENT_FILES
+        if invalid:
+            raise ValueError(f"documents 键不在四件套白名单内: {sorted(invalid)}")
+        return self
+
+
+class DocumentsSyncOk(BaseModel):
+    """POST documents 200 响应（CLI 不读 body，任意 2xx 即可，synced 供人工核对）。"""
+
+    synced: int = Field(description="本次落库的文档数")
+    change_name: str
+
+
+class ApprovalSubmitRequest(BaseModel):
+    """POST /changes/{name}/approval 请求。
+
+    decision 过去式（``"approved"``/``"rejected"``）——CLI ``sync.js _submitApproval``
+    （:961-963）字面：rejected 分支带 reason，approved 分支**整个不含 reason 键**，
+    故 reason 必须 optional（default None，Grill UB-3）。
+    """
+
+    decision: Literal["approved", "rejected"]
+    reason: str | None = None
+
+
+class ApprovalSubmitOk(BaseModel):
+    """POST approval 200 响应（CLI fetchJson 读到即成功，字段供人工核对）。"""
+
+    status: str = Field(default="ok")
+    decision: Literal["approved", "rejected"]
+    change_name: str
