@@ -439,7 +439,16 @@ async def bootstrap_admin_and_seed_rbac(db: AsyncSession, *, settings: Settings)
 
     # Ensure pgcrypto gen_random_uuid is present in production; migrations
     # already cover it, but tests may run with create_all.
-    admin = await db.execute(select(User).where(col(User.email) == admin_email).limit(1))
+    # 按 email OR username 双键查重（2026-08-14 quick 修复）：username 由 email 本地段派生
+    # （:452），库里已有同 username（不同 email，如历史 seed 改过 email）的 admin 时，
+    # 仅按 email 查重会漏判 → INSERT 撞 ux_users_username 唯一约束阻断启动
+    # （2026-08-14 platform-sync-docs-approval E2E 起 8002 实证）。
+    admin_username = admin_email.split("@", 1)[0]
+    admin = await db.execute(
+        select(User)
+        .where((col(User.email) == admin_email) | (col(User.username) == admin_username))
+        .limit(1)
+    )
     existing = admin.scalars().first()
     created_new = existing is None
 
@@ -449,7 +458,7 @@ async def bootstrap_admin_and_seed_rbac(db: AsyncSession, *, settings: Settings)
         existing = User(
             id=admin_id,
             email=admin_email,
-            username=admin_email.split("@", 1)[0],
+            username=admin_username,
             password_hash=password_hash,
             display_name=settings.platform_bootstrap_admin_display_name
             or admin_email.split("@", 1)[0],
