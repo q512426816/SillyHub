@@ -1171,14 +1171,64 @@ class ChangeService:
         # 不进 parsed 集合也不判删除；scope 内 key 磁盘消失也不删（留全量/手动重扫描
         # 收敛）。删除仅发生在全量 reparse（scope=None，现状语义不变）。
         if scope is None:
+            # ql-20260815-002 镜像滞后保护：CLI 最近一次上行仍报 status=active 且
+            # 行内无任何文档（= platform_sync 首推占位行，spec tar 未跟上）的 key 不删，
+            # 否则占位行「刚被进度上行建出、又被下一次全量 reparse 删掉」，变更中心
+            # 先出现后消失。保护只覆盖从未同步过文档的占位行：有文档的行仍以镜像
+            # 磁盘为权威（避免 stale progress 行让本地已删变更永生）。
+            progress_active_keys = await self._progress_reported_active_keys(workspace_id)
             for key, row in existing_by_key.items():
-                if key not in seen_keys:
-                    await self._session.delete(row)
-                    stats["deleted"] += 1
+                if key in seen_keys:
+                    continue
+                if key in progress_active_keys and not docs_by_change.get(row.id):
+                    log.info(
+                        "change.reparse_placeholder_kept",
+                        workspace_id=str(workspace_id),
+                        change_key=key,
+                    )
+                    continue
+                await self._session.delete(row)
+                stats["deleted"] += 1
 
         await self._session.commit()
         log.info("changes.reparsed", workspace_id=str(workspace_id), **stats)
         return stats, result
+
+    async def _progress_reported_active_keys(self, workspace_id: uuid.UUID) -> set[str]:
+        """ql-20260815-002：platform_change_progress 最近一次上行仍报 active 的 key 集合。
+
+        读 ``(workspace_id, change_name)`` 收件箱行的 ``latest_progress.changes[]``，
+        收 status=="active" 的 name。查询失败（表缺失等）按空集处理——best-effort，
+        不阻断删除环（回退到无保护的现状语义）。
+        """
+        try:
+            from app.modules.platform_sync.model import PlatformChangeProgressORM
+
+            rows = (
+                (
+                    await self._session.execute(
+                        select(PlatformChangeProgressORM).where(
+                            col(PlatformChangeProgressORM.workspace_id) == workspace_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        except Exception as exc:  # best-effort 守卫，任何 DB 异常降级空集
+            log.warning(
+                "change.reparse_progress_lookup_failed",
+                workspace_id=str(workspace_id),
+                error=str(exc),
+            )
+            return set()
+        keys: set[str] = set()
+        for r in rows:
+            payload = r.latest_progress if isinstance(r.latest_progress, dict) else {}
+            for c in payload.get("changes") or []:
+                if isinstance(c, dict) and c.get("name") and c.get("status") == "active":
+                    keys.add(str(c["name"]))
+        return keys
 
     async def _bind_change_to_session(
         self,

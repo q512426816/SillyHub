@@ -202,3 +202,190 @@ def test_apply_parsed_handles_naive_updated_at_from_sqlite():
     parsed = _make_parsed(last_modified_at=datetime(2026, 7, 1, tzinfo=UTC))  # aware
     ChangeService._apply_parsed(row, parsed, workspace_id=uuid.uuid4())
     assert row.updated_at == datetime(2026, 7, 1, tzinfo=UTC)
+
+
+# ── ql-20260815-002 全量 reparse 镜像滞后保护（占位行不删）───────────────────────
+
+
+async def _make_guard_ws(db_session):
+    import uuid
+
+    from app.modules.workspace.model import Workspace
+
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="guard-progress ws",
+        slug=f"gp-{uuid.uuid4().hex[:8]}",
+        root_path=f"/tmp/guard-progress-{uuid.uuid4().hex[:12]}",
+        status="active",
+        component_key="comp",
+    )
+    db_session.add(ws)
+    await db_session.commit()
+    await db_session.refresh(ws)
+    return ws
+
+
+async def _make_guard_spec_ws(db_session, ws, spec_root) -> None:
+    from app.modules.spec_workspace.model import SpecWorkspace
+
+    db_session.add(
+        SpecWorkspace(
+            workspace_id=ws.id,
+            spec_root=str(spec_root),
+            strategy="platform-managed",
+            sync_status="clean",
+        )
+    )
+    await db_session.commit()
+
+
+async def _seed_progress_row(db_session, db_engine, ws_id, change_name, status) -> None:
+    """插 platform_change_progress 行（该表不在根 conftest 注册列表，先建表）。"""
+    from app.models.base import BaseModel
+    from app.modules.platform_sync import model as _ps_model
+
+    async with db_engine.begin() as conn:
+        await conn.run_sync(
+            BaseModel.metadata.create_all,
+            tables=[_ps_model.PlatformChangeProgressORM.__table__],
+        )
+    db_session.add(
+        _ps_model.PlatformChangeProgressORM(
+            workspace_id=ws_id,
+            change_name=change_name,
+            latest_progress={
+                "project": {"name": "demo"},
+                "changes": [{"name": change_name, "status": status}],
+            },
+            last_pushed_at="2026-08-15T00:00:00.000Z",
+            last_pusher="tester",
+        )
+    )
+    await db_session.commit()
+
+
+async def _insert_placeholder_change(db_session, ws_id, key) -> None:
+    """模拟 platform_sync 首推占位建行的 ux_changes 行（无任何 change_documents）。"""
+    import uuid
+    from datetime import UTC, datetime
+
+    from app.modules.change.model import Change
+
+    db_session.add(
+        Change(
+            id=uuid.uuid4(),
+            workspace_id=ws_id,
+            change_key=key,
+            title=key,
+            status="draft",
+            location="active",
+            path=f"changes/{key}",
+            current_stage="brainstorm",
+            updated_at=datetime.now(UTC),
+        )
+    )
+    await db_session.commit()
+
+
+async def test_full_reparse_keeps_placeholder_when_progress_active(db_session, db_engine, tmp_path):
+    """ql-20260815-002：占位行（无文档）+ progress 仍报 active → 全量 reparse 不删。
+
+    镜像 tar 滞后场景：CLI 已推 progress、spec tar 未跟上，镜像无目录。
+    删除环须保住占位行，否则变更中心「先出现后消失」。
+    """
+    from sqlalchemy import select
+
+    from app.modules.change.model import Change
+    from app.modules.change.service import ChangeService
+
+    ws = await _make_guard_ws(db_session)
+    spec_root = tmp_path / "spec-root"
+    spec_root.mkdir()
+    await _make_guard_spec_ws(db_session, ws, spec_root)
+    await _insert_placeholder_change(db_session, ws.id, "2026-08-15-ghost")
+    await _seed_progress_row(db_session, db_engine, ws.id, "2026-08-15-ghost", "active")
+
+    stats, _ = await ChangeService(db_session).reparse(ws.id)  # 全量，镜像无该目录
+
+    assert stats["deleted"] == 0
+    kept = (
+        (
+            await db_session.execute(
+                select(Change).where(
+                    Change.workspace_id == ws.id,
+                    Change.change_key == "2026-08-15-ghost",
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    assert kept is not None
+
+
+async def test_full_reparse_deletes_placeholder_when_progress_not_active(
+    db_session, db_engine, tmp_path
+):
+    """ql-20260815-002：progress 不再报 active（本地已删/归档后 stale payload）→ 删除恢复。
+
+    保护只覆盖「CLI 最近一次上行仍报 active」的 key，防 stale progress 行让
+    已删变更永生。
+    """
+    from sqlalchemy import select
+
+    from app.modules.change.model import Change
+    from app.modules.change.service import ChangeService
+
+    ws = await _make_guard_ws(db_session)
+    spec_root = tmp_path / "spec-root"
+    spec_root.mkdir()
+    await _make_guard_spec_ws(db_session, ws, spec_root)
+    await _insert_placeholder_change(db_session, ws.id, "2026-08-15-stale")
+    await _seed_progress_row(db_session, db_engine, ws.id, "2026-08-15-stale", "archived")
+
+    stats, _ = await ChangeService(db_session).reparse(ws.id)
+
+    assert stats["deleted"] == 1
+    gone = (
+        (
+            await db_session.execute(
+                select(Change).where(
+                    Change.workspace_id == ws.id,
+                    Change.change_key == "2026-08-15-stale",
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    assert gone is None
+
+
+async def test_full_reparse_deletes_docked_change_despite_progress_active(
+    db_session, db_engine, tmp_path
+):
+    """ql-20260815-002：有文档的行不享受保护（磁盘权威）——镜像目录消失即删。
+
+    刻意的取舍：保护只覆盖「从未同步过文档」的占位行；曾有文档的变更以镜像
+    为准，避免 stale progress 行让真删变更永生。
+    """
+    from app.modules.change.service import ChangeService
+
+    ws = await _make_guard_ws(db_session)
+    spec_root = tmp_path / "spec-root"
+    d = spec_root / "changes" / "2026-08-15-docked"
+    d.mkdir(parents=True)
+    (d / "proposal.md").write_text("# Docked\n", encoding="utf-8")
+    await _make_guard_spec_ws(db_session, ws, spec_root)
+
+    stats, _ = await ChangeService(db_session).reparse(ws.id)  # 建行 + 文档
+    assert stats["created"] == 1
+
+    import shutil
+
+    shutil.rmtree(d)  # 镜像目录消失
+    await _seed_progress_row(db_session, db_engine, ws.id, "2026-08-15-docked", "active")
+
+    stats, _ = await ChangeService(db_session).reparse(ws.id)
+    assert stats["deleted"] == 1

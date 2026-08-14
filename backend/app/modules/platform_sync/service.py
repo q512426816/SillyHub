@@ -28,7 +28,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from app.core.logging import get_logger
 from app.modules.platform_sync.model import PlatformChangeProgressORM
+
+log = get_logger(__name__)
 
 
 @dataclass
@@ -76,6 +79,7 @@ class PlatformSyncService:
         # 分支 1：base_ts 空/缺失（None 或空串）→ 首次同步/无基准，无条件接受
         if not base_ts:
             await self._apply(workspace_id, row, name, body, pushed_at, user)
+            await self._ensure_change_row(workspace_id, name, body)
             return PlatformSyncResult(conflict=False, platform_progress=None, last_pushed_at=None)
 
         # 分支 2：stored 存在 AND stored > base_ts（字符串字典序 §7）→ 冲突
@@ -89,6 +93,7 @@ class PlatformSyncService:
 
         # 分支 3：base_ts 有效（stored None 或 stored ≤ base_ts）→ 接受
         await self._apply(workspace_id, row, name, body, pushed_at, user)
+        await self._ensure_change_row(workspace_id, name, body)
         return PlatformSyncResult(conflict=False, platform_progress=None, last_pushed_at=None)
 
     async def _apply(
@@ -140,6 +145,82 @@ class PlatformSyncService:
                 raise
             self._assign(existing, body, pushed_at, user)
             await self._session.commit()
+
+    async def _ensure_change_row(
+        self,
+        workspace_id: uuid.UUID | None,
+        name: str,
+        body: dict[str, Any],
+    ) -> None:
+        """ql-20260815-002：接受上行后确保 ux_changes 有占位行（best-effort）。
+
+        根因：进度上行只写 ``platform_change_progress``，不建 ``ux_changes`` 行，
+        而变更中心列表以 ux_changes 为主表 join 进度表——镜像 tar 同步滞后期间
+        （CLI 新建 change 后、spec 同步跟上前）新建变更在界面上完全不可见。
+        此处在接受分支补一个占位行（字段取自 payload 的 changes[] 同名条目），
+        待镜像同步 + reparse 后由真实扫描结果接管（_apply_parsed 覆盖）。
+
+        - ``workspace_id=None``（shk_live_/JWT 全局 fallback）：无法定位 workspace，
+          跳过（与进度收件箱隔离一致，service 内不猜 workspace）。
+        - 幂等：已存在同 ``(workspace_id, change_key)`` 行则直接返回。
+        - 并发兜底：savepoint 内 flush 撞 ``ux_changes_workspace_key`` 唯一约束
+          → 回滚 savepoint 静默放弃（对端已建行，语义等价）。
+        - best-effort：占位失败只记日志，不阻断进度上行主流程。
+        """
+        if workspace_id is None:
+            return
+        from app.modules.change.model import Change
+
+        existing = (
+            await self._session.execute(
+                select(Change).where(
+                    col(Change.workspace_id) == workspace_id,
+                    col(Change.change_key) == name,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return
+
+        info = next(
+            (
+                c
+                for c in (body.get("changes") or [])
+                if isinstance(c, dict) and c.get("name") == name
+            ),
+            {},
+        )
+        row = Change(
+            id=uuid.uuid4(),
+            workspace_id=workspace_id,
+            change_key=name,
+            title=info.get("title") or name,
+            status="draft",
+            location="active",
+            # platform-managed 镜像扁平布局（无 .sillyspec/ 包裹），与 parser
+            # rel_prefix 一致；镜像目录尚未同步时文件树为空，属预期占位态。
+            path=f"changes/{name}",
+            current_stage=info.get("current_stage"),
+            updated_at=datetime.now(UTC),
+        )
+        try:
+            async with self._session.begin_nested():
+                self._session.add(row)
+                await self._session.flush()
+        except IntegrityError:
+            await self._session.rollback()
+            log.info(
+                "platform_sync.placeholder_change_race_lost",
+                workspace_id=str(workspace_id),
+                change_key=name,
+            )
+            return
+        await self._session.commit()
+        log.info(
+            "platform_sync.placeholder_change_created",
+            workspace_id=str(workspace_id),
+            change_key=name,
+        )
 
     @staticmethod
     def _assign(

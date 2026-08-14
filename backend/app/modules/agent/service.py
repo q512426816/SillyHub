@@ -2176,6 +2176,9 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
         return 0
 
     now = datetime.now(UTC)
+    # ql-20260815-003：late import 防 agent ↔ daemon 循环依赖（daemon.service 引 agent 模型）。
+    from app.modules.daemon.permission_service import cancel_pending_dialogs_for_run
+
     for run in stale_runs:
         # If metadata was already written (agent actually finished but commit
         # was lost during restart), restore as completed instead of failed.
@@ -2194,6 +2197,11 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
             run.output_redacted = "Run interrupted: service restarted while agent was running."
             log.warning("stale_run_cleaned", run_id=str(run.id))
         session.add(run)
+
+        # ql-20260815-003：run 终止后其 pending AskUserQuestion 卡成孤儿（agent
+        # 已不在等待答案），置 cancelled 防用户点出 no active run 报错。completed
+        # 恢复分支同样作废——dialog 未答说明 agent 实际没走完应答链路。
+        await cancel_pending_dialogs_for_run(session, run.id)
 
     await session.commit()
     return len(stale_runs)

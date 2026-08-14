@@ -765,3 +765,199 @@ class TestCodexPermissionParity:
         # 对比：pending 端点只返回未答的 hist-2（刷新恢复语义不变）。
         pending = await perm.list_pending_dialogs(uid, sess.id)
         assert {d.request_id for d in pending} == {"hist-2"}
+
+
+# ── ql-20260815-003：run 终止后孤儿 pending dialog 作废 ─────────────────────────
+
+
+class TestOrphanDialogCancellation:
+    """run 终止（后端重启清 stale / daemon 重启 converge）后 pending dialog 作废。
+
+    根因实测：backend 容器重启把 in-flight run 标 failed（"Run interrupted:
+    service restarted..."），同期弹出的 AskUserQuestion 卡片永久停在 pending，
+    用户点卡只得到 "no active run to approve"。
+    """
+
+    @pytest.mark.asyncio
+    async def test_cancel_pending_dialogs_for_run_marks_cancelled(
+        self, db_session, mocked_redis
+    ) -> None:
+        """模块级 helper：pending 行置 cancelled；answered 行不动。"""
+        from sqlalchemy import select, update
+
+        from app.modules.daemon.model import SessionDialogRequest
+        from app.modules.daemon.permission_service import cancel_pending_dialogs_for_run
+
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, run = await _create_session(db_session, uid, rt.id)
+        svc = DaemonService(db_session)
+        hub = MagicMock()
+        hub.send_permission_response = AsyncMock(return_value=True)
+        perm = DaemonPermissionService(svc, hub, timeout_sec=30.0)
+
+        await perm.handle_permission_request(
+            rt.id, _make_dialog_payload(sess, run, request_id="cx-1")
+        )
+        await perm.handle_permission_request(
+            rt.id, _make_dialog_payload(sess, run, request_id="cx-2")
+        )
+        await db_session.execute(
+            update(SessionDialogRequest)
+            .where(SessionDialogRequest.request_id == "cx-2")
+            .values(status="answered")
+        )
+        await db_session.commit()
+
+        cancelled = await cancel_pending_dialogs_for_run(db_session, run.id)
+        await db_session.commit()
+
+        assert cancelled == 1
+        rows = {
+            r.request_id: r.status
+            for r in ((await db_session.execute(select(SessionDialogRequest))).scalars().all())
+        }
+        assert rows == {"cx-1": "cancelled", "cx-2": "answered"}
+
+    @pytest.mark.asyncio
+    async def test_cleanup_stale_runs_cancels_pending_dialogs(
+        self, db_session, mocked_redis
+    ) -> None:
+        """后端重启恢复路径：_cleanup_stale_runs_impl 把 stale run 标 failed 的
+        同时，作废其 pending dialog（no commit 依赖：函数末尾统一 commit）。"""
+        from sqlalchemy import select
+
+        from app.modules.agent.service import _cleanup_stale_runs_impl
+        from app.modules.daemon.model import SessionDialogRequest
+
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, run = await _create_session(db_session, uid, rt.id)  # run status=running
+        svc = DaemonService(db_session)
+        hub = MagicMock()
+        hub.send_permission_response = AsyncMock(return_value=True)
+        perm = DaemonPermissionService(svc, hub, timeout_sec=30.0)
+        await perm.handle_permission_request(
+            rt.id, _make_dialog_payload(sess, run, request_id="stale-1")
+        )
+
+        cleaned = await _cleanup_stale_runs_impl(db_session)
+
+        assert cleaned == 1
+        await db_session.refresh(run)
+        assert run.status == "failed"
+        row = (
+            (
+                await db_session.execute(
+                    select(SessionDialogRequest).where(SessionDialogRequest.request_id == "stale-1")
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert row.status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_converge_crashed_run_cancels_pending_dialogs(
+        self, db_session, mocked_redis
+    ) -> None:
+        """daemon 重启恢复路径：_converge_crashed_run 把 run 收敛 failed 时
+        同步作废其 pending dialog（随调用方事务一起 commit）。"""
+        from sqlalchemy import select
+
+        from app.modules.daemon.model import SessionDialogRequest
+
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, run = await _create_session(db_session, uid, rt.id)
+        svc = DaemonService(db_session)
+        hub = MagicMock()
+        hub.send_permission_response = AsyncMock(return_value=True)
+        perm = DaemonPermissionService(svc, hub, timeout_sec=30.0)
+        await perm.handle_permission_request(
+            rt.id, _make_dialog_payload(sess, run, request_id="conv-1")
+        )
+
+        result = await svc._sess._converge_crashed_run(session_id=sess.id, run_id=run.id)
+        await db_session.commit()
+
+        assert result == "failed"
+        row = (
+            (
+                await db_session.execute(
+                    select(SessionDialogRequest).where(SessionDialogRequest.request_id == "conv-1")
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert row.status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_list_pending_dialogs_hides_dialog_of_terminal_run(
+        self, db_session, mocked_redis
+    ) -> None:
+        """读侧兜底：run 已终态（cancelled 之外的漏网路径）时 pending 卡不出现在
+        session 级 pending 列表（list_dialog_history 不受影响，仍可见历史）。"""
+        from sqlalchemy import update
+
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, run = await _create_session(db_session, uid, rt.id)
+        svc = DaemonService(db_session)
+        hub = MagicMock()
+        hub.send_permission_response = AsyncMock(return_value=True)
+        perm = DaemonPermissionService(svc, hub, timeout_sec=30.0)
+        await perm.handle_permission_request(
+            rt.id, _make_dialog_payload(sess, run, request_id="term-1")
+        )
+        # 模拟未经作废路径的终止（如普通 stream 收尾）。
+        await db_session.execute(
+            update(AgentRun).where(AgentRun.id == run.id).values(status="completed")
+        )
+        await db_session.commit()
+
+        pending = await perm.list_pending_dialogs(uid, sess.id)
+        assert all(d.request_id != "term-1" for d in pending)
+        history = await perm.list_dialog_history(uid, sess.id)
+        assert any(d.request_id == "term-1" for d in history)
+
+    @pytest.mark.asyncio
+    async def test_respond_cancelled_dialog_gives_clear_404(self, db_session, mocked_redis) -> None:
+        """respond 校验顺序：终态（cancelled）dialog 行先于 current_run 检查解析——
+        点孤儿卡得到明确「was cancelled」404，而非 no active run。"""
+        from sqlalchemy import update
+
+        from app.modules.daemon.model import SessionDialogRequest
+        from app.modules.daemon.permission_service import DaemonDialogNotFound
+
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, run = await _create_session(db_session, uid, rt.id)
+        svc = DaemonService(db_session)
+        hub = MagicMock()
+        hub.send_permission_response = AsyncMock(return_value=True)
+        perm = DaemonPermissionService(svc, hub, timeout_sec=30.0)
+        await perm.handle_permission_request(
+            rt.id, _make_dialog_payload(sess, run, request_id="orphan-1")
+        )
+        # run 直接终态 + dialog 手动置 cancelled（模拟恢复路径产物）。
+        await db_session.execute(
+            update(AgentRun).where(AgentRun.id == run.id).values(status="failed")
+        )
+        await db_session.execute(
+            update(SessionDialogRequest)
+            .where(SessionDialogRequest.request_id == "orphan-1")
+            .values(status="cancelled")
+        )
+        await db_session.commit()
+
+        with pytest.raises(DaemonDialogNotFound) as exc_info:
+            await perm.respond_permission(
+                uid,
+                sess.id,
+                "orphan-1",
+                "allow",
+                dialog_result={"answers": []},
+            )
+        assert "cancelled" in str(exc_info.value)

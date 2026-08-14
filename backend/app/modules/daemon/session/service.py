@@ -1397,6 +1397,12 @@ class SessionService:
         if not run.output_redacted:
             run.output_redacted = "daemon_restarted"
         self._session.add(run)
+
+        # ql-20260815-003：run 收敛 failed 后其 pending AskUserQuestion 卡成孤儿，
+        # 置 cancelled（不自带 commit，随调用方 recover 事务一起提交）。
+        from app.modules.daemon.permission_service import cancel_pending_dialogs_for_run
+
+        await cancel_pending_dialogs_for_run(self._session, run_id)
         return "failed"
 
     async def _assert_no_other_active_run(

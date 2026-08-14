@@ -566,3 +566,156 @@ async def test_placeholder_guard_progress_404_and_list_hidden(client, apikey_hea
     assert prog2.status_code == 200
     # 且 documents 仍在（单写者）
     assert prog2.json().get("changes") == SAMPLE_PROGRESS["changes"]
+
+
+# ── ql-20260815-002 首推占位建行（变更中心可见性）───────────────────────────────
+
+
+async def _make_ws_and_shpsync(db_session):
+    """建 workspace + 签 shpsync_ token，返回 (workspace_id, Bearer headers)。
+
+    shpsync_ 是唯一携带 workspace_id 的鉴权路径（shk_live_/JWT 均为 None 全局
+    fallback），占位建行只在 workspace 明确时生效。
+    """
+    import uuid
+
+    from app.core.security import password_hasher
+    from app.modules.auth.model import User
+    from app.modules.platform_sync.token_service import PlatformSyncTokenService
+    from app.modules.workspace.model import Workspace
+
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="ws-placeholder",
+        slug=f"ws-ph-{uuid.uuid4().hex[:8]}",
+        root_path="/tmp/ws-placeholder",
+        status="active",
+    )
+    db_session.add(ws)
+    user = User(
+        id=uuid.uuid4(),
+        email=f"ph-{uuid.uuid4().hex[:6]}@example.com",
+        password_hash=password_hasher.hash("x"),
+        status="active",
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(ws)
+    from app.core.config import get_settings
+
+    _row, plaintext = await PlatformSyncTokenService(db_session, settings=get_settings()).create(
+        workspace_id=ws.id,
+        name="placeholder-test",
+        created_by=user.id,
+    )
+    return ws.id, {"Authorization": f"Bearer {plaintext}"}
+
+
+async def test_first_push_creates_placeholder_change_row(client, db_session):
+    """ql-20260815-002：shpsync_ 首推 progress → ux_changes 建占位行（变更中心可见）。
+
+    根因：progress 表行不建 ux_changes 行，镜像 tar 同步滞后期间变更中心不显示
+    新建变更。断言占位行字段来自 payload（title/current_stage）+ 布局默认值。
+    """
+    import uuid
+
+    from sqlalchemy import select
+
+    from app.modules.change.model import Change
+
+    ws_id, headers = await _make_ws_and_shpsync(db_session)
+    body = {
+        "project": {"name": "demo"},
+        "changes": [
+            {
+                "name": "2026-08-15-new-change",
+                "current_stage": "brainstorm",
+                "status": "active",
+                "title": "新变更测试",
+            }
+        ],
+        "stages": [],
+        "steps": [],
+        "batch_progress": [],
+        "approvals": [],
+    }
+    resp = await client.post(
+        "/api/changes/2026-08-15-new-change/progress",
+        json=body,
+        headers={**headers, "X-SillySpec-Pushed-At": T1},
+    )
+    assert resp.status_code == 200
+
+    row = (
+        (
+            await db_session.execute(
+                select(Change).where(
+                    Change.workspace_id == ws_id,
+                    Change.change_key == "2026-08-15-new-change",
+                )
+            )
+        )
+        .scalars()
+        .one_or_none()
+    )
+    assert row is not None, "首推后应建 ux_changes 占位行"
+    assert row.location == "active"
+    assert row.status == "draft"
+    assert row.current_stage == "brainstorm"
+    assert row.title == "新变更测试"
+    assert row.path == "changes/2026-08-15-new-change"
+    assert row.id and isinstance(row.id, uuid.UUID)
+
+
+async def test_repeat_push_keeps_single_change_row(client, db_session):
+    """ql-20260815-002：重复推送幂等——不重复建行，单行保留。"""
+    from sqlalchemy import func, select
+
+    from app.modules.change.model import Change
+
+    ws_id, headers = await _make_ws_and_shpsync(db_session)
+    pushes = (
+        {**headers, "X-SillySpec-Pushed-At": T1},  # 首推无 base_ts（无条件接受）
+        {**headers, "X-SillySpec-Base-Ts": T1, "X-SillySpec-Pushed-At": T2},
+        {**headers, "X-SillySpec-Base-Ts": T2, "X-SillySpec-Pushed-At": T3},
+    )
+    for push_headers in pushes:
+        resp = await client.post(
+            "/api/changes/repeat-c/progress",
+            json=SAMPLE_PROGRESS,
+            headers=push_headers,
+        )
+        assert resp.status_code == 200
+
+    count = (
+        await db_session.execute(
+            select(func.count())
+            .select_from(Change)
+            .where(
+                Change.workspace_id == ws_id,
+                Change.change_key == "repeat-c",
+            )
+        )
+    ).scalar()
+    assert count == 1
+
+
+async def test_global_apikey_push_does_not_create_change_row(client, db_session, apikey_headers):
+    """ql-20260815-002：shk_live_（workspace_id=None 全局 fallback）无法定位 workspace，
+    不建占位行（不猜 workspace，行为与进度收件箱隔离一致）。"""
+    from sqlalchemy import select
+
+    from app.modules.change.model import Change
+
+    resp = await client.post(
+        "/api/changes/global-c/progress",
+        json=SAMPLE_PROGRESS,
+        headers={**apikey_headers, "X-SillySpec-Pushed-At": T1},
+    )
+    assert resp.status_code == 200
+    rows = (
+        (await db_session.execute(select(Change).where(Change.change_key == "global-c")))
+        .scalars()
+        .all()
+    )
+    assert rows == []

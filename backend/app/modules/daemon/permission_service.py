@@ -28,10 +28,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.modules.agent.model import AgentRun
 from app.modules.daemon.model import SessionDialogRequest
 from app.modules.daemon.protocol import (
     PermissionRequestPayload,
@@ -48,6 +51,36 @@ if TYPE_CHECKING:
     from app.modules.daemon.ws_hub import DaemonWsHub
 
 log = get_logger(__name__)
+
+
+async def cancel_pending_dialogs_for_run(db: AsyncSession, run_id: uuid.UUID) -> int:
+    """ql-20260815-003：作废某 run 名下 pending 的 SessionDialogRequest（→cancelled）。
+
+    run 终止（后端重启清 stale run / daemon 重启 converge crashed run 等）时，
+    agent 已不在等待答案，pending 卡片成孤儿——用户点卡只得到
+    ``no active run to approve``。恢复路径收敛 run 时调本 helper 把卡片置
+    ``cancelled``（model.py 声明的生命周期终态，此前从未有写入方）。
+
+    模块级函数（非 DaemonPermissionService 方法）：调用方（agent/service 的
+    启动恢复、session/service 的会话恢复）只持有 AsyncSession，没有 permission
+    service 实例；late import 本函数可避免循环依赖。
+
+    **不自带 commit**——随调用方事务一起提交（恢复路径末尾统一 commit）。
+    返回实际置 cancelled 的行数（幂等：重复调用返回 0）。
+    """
+    result = await db.execute(
+        update(SessionDialogRequest)
+        .where(
+            SessionDialogRequest.run_id == run_id,
+            SessionDialogRequest.status == "pending",
+        )
+        .values(status="cancelled")
+    )
+    count = int(result.rowcount or 0)
+    if count:
+        log.info("orphan_dialogs_cancelled", run_id=str(run_id), count=count)
+    return count
+
 
 # D-007@v1: 5 minutes — backend main timeout. Daemon fallback is 5min + 5s
 # tolerance, so a missing/dropped backend deny still fail-closes on the daemon.
@@ -485,9 +518,15 @@ class DaemonPermissionService:
             (
                 await self._svc._session.execute(
                     select(SessionDialogRequest)
+                    # ql-20260815-003 读侧兜底：run 已终态（恢复路径之外的终止方式，
+                    # 如普通 stream 收尾/kill）的 pending 卡不出现在刷新恢复列表——
+                    # 卡片已无人等待应答，展示只会引导用户点出报错。
+                    # list_dialog_history 不带此过滤（历史展示保留全量）。
+                    .join(AgentRun, AgentRun.id == SessionDialogRequest.run_id)
                     .where(
                         SessionDialogRequest.session_id == session_id,
                         SessionDialogRequest.status == "pending",
+                        col(AgentRun.status).in_(list(ACTIVE_TURN_STATUSES)),
                     )
                     .order_by(SessionDialogRequest.created_at)
                 )
@@ -572,6 +611,9 @@ class DaemonPermissionService:
             .where(
                 AgentRunWorkspace.workspace_id == workspace_id,
                 SessionDialogRequest.status == "pending",
+                # ql-20260815-003 读侧兜底（与 session 级 list_pending_dialogs 同款）：
+                # run 已终态的孤儿 pending 卡不进审批中心列表。
+                col(AgentRun.status).in_(list(ACTIVE_TURN_STATUSES)),
             )
             .order_by(SessionDialogRequest.created_at)
         )
@@ -716,13 +758,6 @@ class DaemonPermissionService:
         # Release the row lock ASAP — WS send / SSE publish are not DB work.
         await self._svc._session.commit()
 
-        current_run = await self._svc._get_current_run(session_id)
-        if current_run is None:
-            raise DaemonSessionNotActive(
-                f"AgentSession '{session_id}' has no active run to approve.",
-                details={"session_id": str(session_id)},
-            )
-
         # ── Resolve request_id → dialog row OR plain-approval timer ────────
         # A dialog response is signalled either by the caller passing
         # ``dialog_result`` explicitly, or by a matching pending DB row. We
@@ -733,6 +768,25 @@ class DaemonPermissionService:
                 select(SessionDialogRequest).where(SessionDialogRequest.request_id == request_id)
             )
         ).scalar_one_or_none()
+        if dialog_row is not None and dialog_row.status != "pending":
+            # ql-20260815-003：终态（answered/cancelled）dialog 先于 current_run
+            # 检查返回——run 已死时点孤儿卡给用户明确的 409/404 语义，而不是
+            # 笼统的 no active run（_respond_dialog 对终态直接抛对应错误）。
+            return await self._respond_dialog(
+                session_obj=session_obj,
+                dialog_row=dialog_row,
+                decision=decision,
+                message=message,
+                dialog_result=dialog_result,
+            )
+
+        current_run = await self._svc._get_current_run(session_id)
+        if current_run is None:
+            raise DaemonSessionNotActive(
+                f"AgentSession '{session_id}' has no active run to approve.",
+                details={"session_id": str(session_id)},
+            )
+
         if dialog_row is not None:
             return await self._respond_dialog(
                 session_obj=session_obj,
