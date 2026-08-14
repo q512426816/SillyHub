@@ -2962,6 +2962,70 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/changes/{change_id}/stage-profile": {
+      "patch": {
+        "tags": [
+          "change"
+        ],
+        "summary": "Update Stage Profile",
+        "description": "task-03（2026-08-13-profile-system-prompt-injection）：存每阶段独立 profile_id。\n\n写 ``change.stages[<current_stage>][\"profile_id\"]``（D-003 每阶段独立）。\nprofile_id=None 清除（跟随工作区默认）。",
+        "operationId": "update_stage_profile_api_workspaces__workspace_id__changes__change_id__stage_profile_patch",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "change_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Change Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StageProfileUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/changes/{change_id}/files": {
       "get": {
         "tags": [
@@ -31260,17 +31324,6 @@
           "base_version": {
             "type": "integer",
             "title": "Base Version"
-          },
-          "mtime": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mtime"
           }
         },
         "type": "object",
@@ -31280,7 +31333,7 @@
           "base_version"
         ],
         "title": "FileOp",
-        "description": "One per-file operation in an incremental spec sync.\n\n``path`` / ``new_path`` are relative to spec_root. ``content`` is base64\n(add/update use it); rename with unchanged content may omit both ``hash``\nand ``content``. ``base_version`` is the file version the daemon's local\nmanifest believes the server is at (0 when unknown → R-07 hash fallback).\n\n``mtime``（ql-20260813-008，可选）：宿主真实修改时间（Unix 秒）。落盘时作\nsource_mtime + os.utime，让镜像文件 mtime 真实，进而让 changes.updated_at\n反映变更活动。旧 daemon 不传 / 非法时 fallback now。"
+        "description": "One per-file operation in an incremental spec sync.\n\n``path`` / ``new_path`` are relative to spec_root. ``content`` is base64\n(add/update use it); rename with unchanged content may omit both ``hash``\nand ``content``. ``base_version`` is the file version the daemon's local\nmanifest believes the server is at (0 when unknown → R-07 hash fallback)."
       },
       "FileUploadResp": {
         "properties": {
@@ -46516,6 +46569,24 @@
         "type": "object",
         "title": "SpecWorkspaceUpdate",
         "description": "Partial update for spec workspace fields."
+      },
+      "StageProfileUpdate": {
+        "properties": {
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Id"
+          }
+        },
+        "type": "object",
+        "title": "StageProfileUpdate",
+        "description": "task-03（2026-08-13-profile-system-prompt-injection）：存每阶段独立 profile_id。\n\nprofile_id=None 表示清除（跟随工作区默认）。存 change.stages[<current_stage>][\"profile_id\"]。"
       },
       "StageProgress": {
         "properties": {

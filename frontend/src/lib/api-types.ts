@@ -1193,6 +1193,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/changes/{change_id}/stage-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Stage Profile
+         * @description task-03（2026-08-13-profile-system-prompt-injection）：存每阶段独立 profile_id。
+         *
+         *     写 ``change.stages[<current_stage>]["profile_id"]``（D-003 每阶段独立）。
+         *     profile_id=None 清除（跟随工作区默认）。
+         */
+        patch: operations["update_stage_profile_api_workspaces__workspace_id__changes__change_id__stage_profile_patch"];
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/changes/{change_id}/files": {
         parameters: {
             query?: never;
@@ -10008,10 +10031,6 @@ export interface components {
          *     (add/update use it); rename with unchanged content may omit both ``hash``
          *     and ``content``. ``base_version`` is the file version the daemon's local
          *     manifest believes the server is at (0 when unknown → R-07 hash fallback).
-         *
-         *     ``mtime``（ql-20260813-008，可选）：宿主真实修改时间（Unix 秒）。落盘时作
-         *     source_mtime + os.utime，让镜像文件 mtime 真实，进而让 changes.updated_at
-         *     反映变更活动。旧 daemon 不传 / 非法时 fallback now。
          */
         FileOp: {
             /**
@@ -10029,8 +10048,6 @@ export interface components {
             content?: string | null;
             /** Base Version */
             base_version: number;
-            /** Mtime */
-            mtime?: number | null;
         };
         /**
          * FileUploadResp
@@ -15065,6 +15082,16 @@ export interface components {
             profile_version?: string | null;
         };
         /**
+         * StageProfileUpdate
+         * @description task-03（2026-08-13-profile-system-prompt-injection）：存每阶段独立 profile_id。
+         *
+         *     profile_id=None 表示清除（跟随工作区默认）。存 change.stages[<current_stage>]["profile_id"]。
+         */
+        StageProfileUpdate: {
+            /** Profile Id */
+            profile_id?: string | null;
+        };
+        /**
          * StageProgress
          * @description Progress for one pipeline stage.
          */
@@ -19308,6 +19335,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChangeReparseResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_stage_profile_api_workspaces__workspace_id__changes__change_id__stage_profile_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StageProfileUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
                 };
             };
             /** @description Validation Error */
