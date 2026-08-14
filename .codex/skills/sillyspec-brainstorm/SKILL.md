@@ -82,6 +82,7 @@ brainstorm 完成时按 design.md frontmatter 的 `scale` 分叉：
 brainstorm 在 `tier=independent` 规模下除 design.md 等四件套外，还需产出一个 stage 级 `review.json`，CLI `Stage Review Gate` 硬校验其 schema 与 `docHash` 真实性。
 
 - 路径：`.sillyspec/.runtime/stage-reviews/brainstorm-review-<stage-review-run-id>/review.json`（目录可能不存在需手建；run-id 由该步 `--done` prompt 输出指定）。marker 文件 `.runtime/current-stage-review-run-id-brainstorm-<变更名>`。
+- **run-id / marker 由 CLI 自动生成注入**（review step prompt 渲染时 echo 完整目录路径 + 写 marker；撞 gate 报缺 review.json 时 gate 也 echo 完整路径 + 写 marker）。直接用 CLI 给的路径写 review.json，**勿手算 run-id（必须 `review-` 前缀）、勿手写 marker**。卡住时用 `sillyspec register-stage-review --change <名> --stage brainstorm` 一步生成。
 - 字段（`schemaVersion:1`，`reviewType=design` —— 区别于 execute 的 `acceptance`）：
 
   ```json

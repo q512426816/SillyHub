@@ -51,6 +51,7 @@ plan 的步骤是动态的：`generate_plan`（生成分级计划）→ `review_
 `review_plan` 步骤在 `tier=independent` 时产出一个 stage 级 `review.json`，CLI `Stage Review Gate` 硬校验其 schema 与 `docHash` 真实性。
 
 - 路径：`.sillyspec/.runtime/stage-reviews/plan-review-<stage-review-run-id>/review.json`（目录可能不存在需手建；run-id 由该步 `--done` prompt 输出指定）。marker 文件 `.runtime/current-stage-review-run-id-plan-<变更名>`。
+- **run-id / marker 由 CLI 自动生成注入**（review step prompt 渲染时 echo 完整目录路径 + 写 marker；撞 gate 报缺 review.json 时 gate 也 echo 完整路径 + 写 marker）。直接用 CLI 给的路径写 review.json，**勿手算 run-id（必须 `review-` 前缀）、勿手写 marker**。卡住时用 `sillyspec register-stage-review --change <名> --stage plan` 一步生成。
 - 字段（`schemaVersion:1`，`reviewType=plan` —— plan 阶段主审查文档是 `plan.md`；execute 阶段才是 `acceptance`）：
 
   ```json
@@ -80,6 +81,54 @@ plan 的步骤是动态的：`generate_plan`（生成分级计划）→ `review_
 ### 生产接线路径检查
 
 plan 完成校验会检查：design 提到入口文件（cli.ts/main.ts/server.ts 等）但 task 的 allowed_paths 不含该文件 → 报 error。若确实不需要改入口，在 design.md 明示理由。
+
+## 跨仓 task 卡片协议（一个 change 改多个仓库）
+
+单个 change 的 task 可以分散到主仓 + 多个跨仓仓实现（典型场景：dogfood 自指、monorepo 多包仓、共享库 + 调用方联合改造）。**单仓 change 不需要任何跨仓配置**（所有 task 不写 `repo:` 即走原流程，零回归）。
+
+### 跨仓 task 卡片字段
+
+在 `tasks/task-NN.md` frontmatter 加：
+
+- `repo: <key>`（可选，缺省='main'=主仓 task）：task 所属仓的 key。key 必须在 `.sillyspec/local.yaml` `repos:` 段注册（`main` 隐式=主仓不用注册）。跨仓 change 缺注册 → execute 启动 fail-closed 阻断。
+- `allowed_paths`：跨仓 task 时指**相对跨仓仓根**的路径（非主仓根）。例如跨仓 task 改 `sillyspec` 仓的 `src/foo.js`，allowed_paths 写 `src/foo.js`（相对 sillyspec 仓根），不是 `../sillyspec/src/foo.js`。
+- `base_commit` / `head_commit`：**不要手写**——CLI 在 execute 派发/回收时自动落盘双锡点（锁 base/head 防 diff 漂移），plan 阶段不写。
+
+### local.yaml `repos:` 段（跨仓注册表）
+
+跨仓 change 必须在 `.sillyspec/local.yaml` 注册所有跨仓仓路径：
+
+```yaml
+repos:
+  sillyspec: C:/Users/qinyi/IdeaProjects/sillyspec
+  shared-lib: ../shared-lib
+```
+
+key = task 卡 `repo:` 引用名，value = 跨仓仓绝对路径（或相对主仓根的路径）。`main` 不用注册。
+
+### design.md 文件变更清单按仓分段
+
+跨仓 change 的 `## 文件变更清单` 段须按仓分段，段头格式 `## <repo> 仓变更`（主仓段头可省略或写 `## main 仓变更`）：
+
+```markdown
+## 文件变更清单
+
+### sillyspec 仓变更
+| 操作 | 文件路径 | 说明 |
+|---|---|---|
+| 修改 | src/task-review.js | 跨仓 task 改的文件 |
+
+### main 仓变更
+| 操作 | 文件路径 | 说明 |
+|---|---|---|
+| 修改 | src/index.js | 主仓 task 改的文件 |
+```
+
+plan 完成校验会按仓分段对账：跨仓仓路径相对跨仓仓根校验 task allowed_paths 覆盖，主仓路径相对主仓根校验。跨仓 task 与主仓 task 同名物理路径分属不同 repo 不判冲突。
+
+### Wave 划分
+
+同 Wave 内允许混合主仓 + 跨仓 task（execute 按 per-task workdir 派发，不强制同 Wave 同 repo）。共享文件的 task 仍须分到不同 Wave（同 Wave 共享文件会被强制并行，子代理互相覆盖）。
 
 ## 阶段流转
 

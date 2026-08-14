@@ -33,6 +33,18 @@ sillyspec run quick --reset                    # 重置阶段（从头开始）
 sillyspec run quick --reopen --from-step N     # 重新打开已完成阶段修订（N=序号或名称）
 ```
 
+### 已有进行中会话的恢复（sessionId）
+
+`sillyspec run quick` / `run quick --done` / `--status` **不带 `--change` 时，是启动一个新 quick 会话**（CLI 分配新 `quick-<hash>` + 新 ql-ID，QUICKLOG 追加「进行中」条目），不是恢复正在进行的旧会话。多会话并发或中断恢复时，必须带上启动时 CLI 打印的 sessionId：
+
+```bash
+sillyspec run quick --change quick-<hash>        # 恢复查看该会话当前 step prompt
+sillyspec run quick --done --change quick-<hash> --output "…"  # 完成该会话步骤
+```
+
+- 这里的 `--change quick-<hash>` 是「恢复到该 CLI 生成的 session」，与下方 `--linked-changes` 的关联业务变更语义不同：想关联真实业务变更才用 `--linked-changes`。
+- 误启动的空壳会话：`sillyspec run quick --reset --change quick-<hash>` 重置其进度；QUICKLOG 里残留的「(quick 任务)」骨架条目需手动删除，不留占位条目。
+
 ## 通用参数（所有阶段适用）
 
 | 参数 | 说明 |
@@ -49,10 +61,11 @@ sillyspec run quick --reopen --from-step N     # 重新打开已完成阶段修�
 |---|---|
 | `--linked-changes none\|a,b` | **显式关联变更（取代 `--change`，推荐）**。none=不关联，a,b=关联列表 |
 | `--files a.js,b.js` | 显式声明本次允许修改的文件（边界保护） |
-| `--file-notes "p::注 \|\| p::注"` | quick `--done` 用：QUICKLOG「文件：」行落盘为多行带括注 bullet（省事后手改文件行）。格式 `path::括注`，`\|\|` 分隔多条 |
+| `--file-notes "p::注 \|\| p::注"` | quick `--done` 用：QUICKLOG「文件：」行落盘为多行带括注 bullet（省事后手改文件行）。格式 `path::括注`，`\|\|` 分隔多条；**只随 step3 --done 同命令传**（CLI 短进程，step1/step2 传无效，不带到 step3） |
 | `--allow-new` | 允许新增文件（默认禁止，防意外创建） |
+| `--allow-delete` | 允许删除文件（默认 fail-closed，删除是破坏性操作；确认删除带此 flag 显式解锁） |
 | `--force-baseline` | 允许覆盖 baseline 受保护文件 / 压制 `.sillyspec/` 危险判定（危险，慎用） |
-| `--confirm` | ⚠️ 仅打印变更概览，**不解锁 blocked**（blocked 仍 exit 1）。真正解锁用 `--force-baseline`/`--allow-new` |
+| `--confirm` | ⚠️ 仅打印变更概览，**不解锁 blocked**（blocked 仍 exit 1）。真正解锁用 `--force-baseline`/`--allow-new`/`--allow-delete` |
 
 ## 审计与并发变更（`--done` 边界审计）
 
@@ -61,7 +74,8 @@ sillyspec run quick --reopen --from-step N     # 重新打开已完成阶段修�
 - **并发其他会话的 `.sillyspec/changes/<非关联变更>/` 不再被本 quick 拦截**。quick 自己没有 `changes/` 目录，该路径下非关联内容视为并发会话的工作，整体放行（确定性审计无法区分「并发工作」与「本 quick 偷建变更」，后者这类意图软判定留给 sillyhub）。
 - **关联变更的文件仍走审计**：reverse-sync 改自己关联变更的 `design.md` 会被拦，需 `--force-baseline` 显式确认。
 - **baseline 折叠目录前缀匹配**：step1 启动时整片 `changes/` 未跟踪会被 git 折叠成 `?? .sillyspec/changes/`（带尾斜杠 token）；审计时若该目录下文件被并发会话跟踪而展开成文件级路径，按尾斜杠 token 前缀放行其下所有文件，不误判。
-- **`--confirm` ≠ 解锁**：它只打印概览。blocked 时真正解锁的是 `--force-baseline`（压制 `.sillyspec/` 危险判定 + baseline 覆盖）/`--allow-new`（放行新增），两者在 step1 或 `--done` 传都生效。
+- **同文件并发 warn（advisory，不阻断）**：step1 启动时若你的某个 `allowedFile` 已在他者脏文件列表里（他者也改了这文件），--done 时 CLI 会比对当前内容 hash 与启动时录入的 hash——不一致（你也改了它）即判「同文件并发」并 warn：整文件 pathspec 提交会夹带他者 hunk。warn 给出分离指引（`git add -p <file>` 交互选你自己的 hunk，或 `git diff <file> > mine.patch` 编辑后 `git apply --cached mine.patch` 再 commit）。这**不阻断** --done（你可能有意整文件提交），看 warn 后自行决定是否分离。
+- **`--confirm` ≠ 解锁**：它只打印概览。blocked 时真正解锁的是 `--force-baseline`（压制 `.sillyspec/` 危险判定 + baseline 覆盖）/`--allow-new`（放行新增）/`--allow-delete`（放行删除，删除是破坏性操作默认 fail-closed，须显式 opt-in），三者可在 step1 或 `--done` 传，都生效。
 
 ## 典型用法
 
@@ -91,7 +105,7 @@ sillyspec run quick --files src/phone.ts,src/phone.test.ts
 - QUICKLOG 记录的**骨架由 CLI 接管**：启动时 CLI 自动分配 ql-ID 并在 `.sillyspec/quicklog/QUICKLOG-<user>.md` 写「进行中」条目（含关联变更 tasks.md），`--done` 时 CLI 自动翻「已完成」+ 勾选 task + 回填文件路径。ql-ID 分配/状态/task 你无需手写，只需用注入的 `<quicklog-id>` 在模块文档变更索引引用
 - **QUICKLOG 落盘已结构化（`--done` 后按需核对，多数无需手改）**：CLI 已落盘结构化条目——标题从 `--output` 的「需求：」自动提取、正文四字段自动分行、文件行用 `--file-notes` 时为多行带括注。`--done` 后只需核对：标题弱才改（禁留 `(quick 任务)` 占位）；没用 `--file-notes` 时文件行是单行、可事后补括注（参照同文件早期丰富条目）；正文 `需求：`/`根因：`/`方案：`/`结果：` 四段按需充实（禁只留一段「结果：」）。一条 quick = 一条独立 ql，不追加到旧条目
 - **收尾顺序（模块文档在 `--done` 前，QUICKLOG 在 `--done` 后，别记混）**：① 命中模块→改模块文档→`git add`；② `sillyspec run quick --done --change <id> --output "四字段" [--file-notes "..."]`（CLI 自动翻完成 + 勾 task + 落盘 QUICKLOG 标题/文件/正文）；③ 核对 QUICKLOG 标题（CLI 已从「需求：」提取，仅弱标题才改）→若改了再 `git add`
-- **最后一步 `--done --output` 必须按结构化结果模板给全四字段**（逐项一句话）：`需求：… 根因：… 方案：… 结果：…`。这是 QUICKLOG「结果：」归档的唯一来源；CLI 校验缺字段会拒绝 `--done`（exit 1），补全后重跑即可。前两个 step 的 `--output` 是中间摘要，不用此模板
+- **最后一步 `--done --output` 必须按结构化结果模板给全四字段**（逐项一句话）：`需求：… 根因：… 方案：… 结果：…`。这是 QUICKLOG「结果：」归档的唯一来源；CLI 校验缺字段会拒绝 `--done`（exit 1），补全后重跑即可。正文内避免嵌套全角冒号（如「方案：（说明 xxx）：」这样标签后紧接嵌套冒号会被拆分判定缺字段），直接让标签接正文。前两个 step 的 `--output` 是中间摘要，不用此模板
 - **禁止**在没有运行 CLI 的情况下自行决定流程
 
 ## 用户指令
