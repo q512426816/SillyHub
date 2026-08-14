@@ -204,7 +204,8 @@ class TestReviewGateAdvance:
             factory_mock.return_value.return_value.__aexit__ = AsyncMock(return_value=None)
             result = await svc.proposal_review(ws_id, change_id, "approve", "ok", uuid.uuid4())
         assert result["change"].current_stage == "plan"
-        assert result["agent_dispatch"].get("dispatched") is True
+        # task-03（D-004）：审批通过不再自动派发 → agent_dispatch 置空
+        assert result["agent_dispatch"] is None
 
     async def test_plan_review_approve_advances_to_execute(
         self, db_session: AsyncSession, tmp_path: Path
@@ -254,7 +255,8 @@ class TestReviewGateAdvance:
         with _patch_projection(PendingReview.ARCHIVE_CONFIRM)[0]:
             result = await svc.archive_confirm(ws_id, change_id, "confirmed", uuid.uuid4())
         # Hub 侧仅记录，不 dispatch、不改 current_stage
-        assert result["agent_dispatch"]["dispatched"] is False
+        # task-03（D-004）：返回 agent_dispatch 置空（null）
+        assert result["agent_dispatch"] is None
         assert result["change"].current_stage == "archive"
         stages = result["change"].stages or {}
         assert stages.get("archive_confirmed", {}).get("confirmed") is True

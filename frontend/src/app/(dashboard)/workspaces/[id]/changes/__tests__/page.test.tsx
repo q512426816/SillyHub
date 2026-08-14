@@ -5,7 +5,7 @@
  *   1. 主 tab 切换（进行中 / 已归档）+ tab 计数 pill
  *   2. 聚焦开关（D-007 核心：pendingReviewOnly 随 tab/focusMine 联动）
  *   3. 待办徽标（renderTodoBadge：blocked + 4 种 pending_review + null 占位）
- *   4. 空状态 CTA（聚焦空 / 不聚焦空 / 已归档空 三态）
+ *   4. 空状态引导（task-09 / FR-04a：聚焦空 / 不聚焦空 / 已归档空 三态；无「新建变更」入口，进行中空态引导去会话页）
  *   5. 排序切换（更新时间列头点击 desc↔asc，sort 参数随之）
  *   6. 负责人列（owner_id 前 8 位 / 空 — 占位）
  *
@@ -135,13 +135,6 @@ async function renderPage() {
   await waitFor(() =>
     expect(screen.getAllByText(/测试工作区/).length).toBeGreaterThan(0),
   );
-}
-
-/** "新建变更" 按钮在 PageHeader actions 和空态 CTA 两处同文本，用 getAll 断言存在 */
-function expectCreateChangeButton(): void {
-  expect(
-    screen.getAllByRole("button", { name: /\+\s*新\s*建\s*变\s*更/ }).length,
-  ).toBeGreaterThan(0);
 }
 
 /** 拿最近一次「主 load」调用（pageSize !== 1）的入参，用于断言 listChanges 入参 */
@@ -290,22 +283,28 @@ describe("变更中心列表页（task-06 重做行为）", () => {
     expect(screen.getByText("—")).toBeInTheDocument();
   });
 
-  // ── 4. 空状态 CTA ──────────────────────────────────────────────────────
+  // ── 4. 空状态引导（task-09 / FR-04a：去表单，引导会话页）──────────────
 
-  it("聚焦勾 + 待我处理空 → 「暂无待你处理的变更」+ 新建/查看全部 CTA", async () => {
+  it("聚焦勾 + 待我处理空 → 「暂无待你处理的变更」+ 查看全部 + 去会话引导（无新建入口）", async () => {
     // 默认 setupListChanges 返空 items，focusMine 默认 true
     await renderPage();
     expect(screen.getByText(/暂无待你处理的变更/)).toBeInTheDocument();
-    // antd Button 中文 autoLetterSpacing → 字间插空格，name 用 \s* 兼容。
-    // "新建变更" 按钮在 PageHeader actions + 空态 CTA 两处渲染，用 getAll 断言。
-    expectCreateChangeButton();
-    // "查看全部进行中" 仅空态 CTA 渲染（唯一）
+    // task-09：PageHeader actions 与空态 CTA 的「新建变更」按钮均已删除
+    expect(
+      screen.queryAllByRole("button", { name: /\+\s*新\s*建\s*变\s*更/ }).length,
+    ).toBe(0);
+    // 「查看全部进行中」保留（聚焦开关兜底，非新建入口）
     expect(
       screen.getByRole("button", { name: /查\s*看\s*全\s*部\s*进\s*行\s*中/ }),
     ).toBeInTheDocument();
+    // 去会话引导链接 → /workspaces/ws-1/sessions（FR-04a）
+    expect(screen.getByRole("link", { name: "去会话页" })).toHaveAttribute(
+      "href",
+      "/workspaces/ws-1/sessions",
+    );
   });
 
-  it("进行中空（取消聚焦）→ 「当前没有进行中的变更」+ 新建 CTA（无查看全部）", async () => {
+  it("进行中空（取消聚焦）→ 「当前没有进行中的变更」+ 去会话引导（无新建/查看全部）", async () => {
     await renderPage();
     await act(async () => {
       fireEvent.click(screen.getByRole("checkbox"));
@@ -313,11 +312,19 @@ describe("变更中心列表页（task-06 重做行为）", () => {
     await waitFor(() =>
       expect(screen.getByText(/当前没有进行中的变更/)).toBeInTheDocument(),
     );
-    expectCreateChangeButton();
+    // 无「新建变更」入口
+    expect(
+      screen.queryAllByRole("button", { name: /\+\s*新\s*建\s*变\s*更/ }).length,
+    ).toBe(0);
     // 不聚焦空态不显示「查看全部进行中」CTA
     expect(
       screen.queryAllByRole("button", { name: /查\s*看\s*全\s*部/ }).length,
     ).toBe(0);
+    // 去会话引导链接 → /workspaces/ws-1/sessions
+    expect(screen.getByRole("link", { name: "去会话页" })).toHaveAttribute(
+      "href",
+      "/workspaces/ws-1/sessions",
+    );
   });
 
   it("已归档空 → 「还没有归档的变更」", async () => {

@@ -948,11 +948,15 @@ export class HubClient {
   }
 
   /**
-   * 增量推送 daemon 本地 spec 文件改动到服务器（change 2026-08-13-platform-managed-file-sync）。
+   * 增量推送 daemon 本地 spec 文件改动到服务器（change 2026-08-13-platform-managed-file-sync；
+   * task-01 2026-08-14-change-center-conversation-driven / D-005@v1 加 change_dirs 标注）。
    *
    * 端点：POST /api/workspaces/{wsId}/spec-workspace/sync-incremental（task-04）。
-   * 请求：Content-Type: application/json（_request 已设），body `{ ops: FileOp[] }`，
-   * ops 字段与 backend schema.py 逐字一致（op/path/new_path/hash/content/base_version）。
+   * 请求：Content-Type: application/json（_request 已设），body
+   * `{ ops: FileOp[], change_dirs: string[] }`，ops 字段与 backend schema.py 逐字一致
+   * （op/path/new_path/hash/content/base_version）。change_dirs = 本次增量涉及变更目录名集合
+   * （spec-sync.ts extractChangeDirs 计算；缺省 [] 兼容旧请求，backend SpecIncrementalSyncRequest
+   * 默认 [] 不报错）。
    * 响应：200 `{ ok, new_versions, conflict, server_versions }`。
    *
    * **冲突语义**：backend 对 base_version 过期的 op 返回 conflict=true + server_versions
@@ -961,12 +965,16 @@ export class HubClient {
    *
    * @param wsId workspace id
    * @param ops 增量 ops 列表（FileOp）
+   * @param changeWriteId 可选透传 X-Change-Write-Id 头（spec-sync-visibility，向后兼容）
+   * @param changeDirs 本次涉及变更目录名列表（`changes/<name>/` 与 `changes/archive/<name>/`
+   *   前缀分组 key，去重）；缺省 []，旧 daemon 不传时 backend 前缀检测兜底
    * @returns backend 响应 { ok, new_versions, conflict, server_versions }
    */
   async postSpecSyncIncremental(
     wsId: string,
     ops: FileOp[],
     changeWriteId?: string,
+    changeDirs: string[] = [],
   ): Promise<SpecIncrementalSyncResult> {
     // ⚠️ URL 必须用 /api 前缀（与旧 postSpecSync 一致），不能用 REST_PREFIX（= /api/daemon）——
     // backend spec_workspace router 挂在 prefix="/api"（main.py include_router），
@@ -974,7 +982,7 @@ export class HubClient {
     return this._request<SpecIncrementalSyncResult>(
       'POST',
       `/api/workspaces/${encodeURIComponent(wsId)}/spec-workspace/sync-incremental`,
-      { ops },
+      { ops, change_dirs: changeDirs },
       changeWriteId ? { 'X-Change-Write-Id': changeWriteId } : undefined,
     );
   }

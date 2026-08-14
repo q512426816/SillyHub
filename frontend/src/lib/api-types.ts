@@ -2087,10 +2087,14 @@ export interface paths {
         };
         /**
          * List Workspace Agent Sessions
-         * @description scan 真阻塞（改造点 E）：workspace 维度 active AgentSession 列表。
+         * @description 工作区会话列表（2026-08-14-change-center-conversation-driven task-06 / D-002@v1）。
          *
-         *     供 approvals 审批中心页聚合 scan 歧义决策——前端拿 session_id 列表后订阅各自
-         *     SSE（permission_request），实现"在审核页看到 scan 待决策 + 反馈续 turn"。
+         *     include_ended=false（缺省）：现状——仅 active 会话最小字段 dict
+         *     （id/status/mode/provider），供 approvals 审批中心聚合 scan 歧义决策。
+         *     include_ended=true：工作区全量会话（含已结束），完整 AgentSessionListItem
+         *     （id/provider/status/turn_count/author/last_active_at/title，对齐
+         *     daemon/schema.py:71-84），排序 coalesce(last_active_at, created_at) desc。
+         *     权限/过滤保持现状（workspace 成员跨成员可见），不因 include_ended 改变。
          */
         get: operations["list_workspace_agent_sessions_api_workspaces__workspace_id__agent_sessions_get"];
         put?: never;
@@ -4139,113 +4143,6 @@ export interface paths {
         get: operations["list_git_operations_api_git_operations_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/workspaces/{workspace_id}/changes/create": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create Change */
-        post: operations["create_change_api_workspaces__workspace_id__changes_create_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/workspaces/{workspace_id}/changes/proxy-create": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Proxy Create Change
-         * @description daemon-client 变更代写入口 (design §5.3 Phase 3 / D-002@v1)。
-         *
-         *     与 server-local ``/changes/create`` 区分：
-         *     - 不传 ``lease_id`` 也不传 ``runtime_id``（D-002@v1）。
-         *     - 经 ``service.create_change`` 走 proxy 路径（lease-polling 下发
-         *       daemon_change_writes → 等回执 → 落库 Change）；runtime 由后端从 binding +
-         *       workspace.default_agent 现算。
-         *     - **不自动 dispatch brainstorm**（daemon-client change 暂不接 agent 流；agent
-         *       dispatch 由 task-12/后续接，避免与 server-local auto-dispatch 语义混淆）。
-         *
-         *     daemon 离线 / 未绑定 → 400 ``DAEMON_CLIENT_NO_SESSION``（service 层抛）。
-         */
-        post: operations["proxy_create_change_api_workspaces__workspace_id__changes_proxy_create_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/workspaces/{workspace_id}/changes/{change_id}/documents/generate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Generate Document */
-        post: operations["generate_document_api_workspaces__workspace_id__changes__change_id__documents_generate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/workspaces/{workspace_id}/changes/{change_id}/documents/batch-generate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Batch Generate Documents */
-        post: operations["batch_generate_documents_api_workspaces__workspace_id__changes__change_id__documents_batch_generate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/workspaces/{workspace_id}/changes/{change_key}/execute": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Execute Change
-         * @description Trigger change execution — dispatch via unified stage dispatch service.
-         *
-         *     task-09（D-004@v2）：``team_mode=true`` 时把 ``team_mode=True`` 写入
-         *     ``change.stages`` 触发 ``dispatch_next_step`` Step 2.5 分流到主 agent
-         *     OrchestratorService。worker_preset / main_agent_config 从 ``change.stages``
-         *     已有字段读（前端 stage toggle 经 transition 写入；execute 端点不重复接收，
-         *     避免与 transition 入口的双写冲突）。single（team_mode=false 零回归）。
-         */
-        post: operations["execute_change_api_workspaces__workspace_id__changes__change_key__execute_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7421,7 +7318,8 @@ export interface paths {
          *
          *     Body is a raw ``application/x-tar`` stream. The whole tree is overwritten
          *     (no diff/merge). ``.runtime/`` is preserved. Returns the reparse parsed
-         *     count.
+         *     count. ``X-Change-Write-Id`` 头（可选）让后端 apply 循环内逐文件回写
+         *     files_processed（逐文件级进度，D-004@V2）。
          */
         post: operations["sync_spec_workspace_api_workspaces__workspace_id__spec_workspace_sync_post"];
         delete?: never;
@@ -7448,6 +7346,10 @@ export interface paths {
          *     过期 → ``conflict=True`` + ``server_versions``（HTTP 保持 200，daemon 侧据字段
          *     提示人工拍板，design §7 定义）；containment / ``.runtime`` 越界 → 422 AppError
          *     透传（``HTTP_422_SPEC_BUNDLE_INVALID``，对齐旧 tar 端点校验机制）。
+         *     ``X-Change-Write-Id`` 头（可选）让 apply_ops 循环内逐文件回写 files_processed。
+         *     ``change_dirs``（change 2026-08-14-change-center-conversation-driven / D-005@v1）：
+         *     daemon 标注的本次涉及变更目录名集合，透传 apply_ops 落盘后触发 scoped reparse
+         *     （无标注时 apply_ops 扫 ops 路径 ``changes/`` 前缀兜底，行为等价）。
          */
         post: operations["sync_spec_workspace_incremental_api_workspaces__workspace_id__spec_workspace_sync_incremental_post"];
         delete?: never;
@@ -8219,6 +8121,11 @@ export interface components {
              * @description 归档备注（可选）
              */
             comment?: string | null;
+            /**
+             * Notify Session
+             * @default true
+             */
+            notify_session: boolean;
         };
         /**
          * ArchiveGateResponse
@@ -8368,16 +8275,6 @@ export interface components {
             limit: number;
             /** Offset */
             offset: number;
-        };
-        /** BatchGenerateRequest */
-        BatchGenerateRequest: {
-            /** Doc Types */
-            doc_types: string[];
-        };
-        /** BatchGenerateResponse */
-        BatchGenerateResponse: {
-            /** Generated */
-            generated: string[];
         };
         /**
          * BatchMetaRequest
@@ -8550,59 +8447,6 @@ export interface components {
             status: string;
             /** Reason */
             reason?: string | null;
-        };
-        /** ChangeCreateRequest */
-        ChangeCreateRequest: {
-            /** Title */
-            title: string;
-            /**
-             * Description
-             * @default
-             */
-            description: string;
-            /**
-             * Scope
-             * @default full
-             */
-            scope: string;
-            /** Change Type */
-            change_type?: string | null;
-            /** Affected Components */
-            affected_components?: string[];
-            /** Lease Id */
-            lease_id?: string | null;
-        };
-        /** ChangeCreateResponse */
-        ChangeCreateResponse: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /**
-             * Workspace Id
-             * Format: uuid
-             */
-            workspace_id: string;
-            /** Change Key */
-            change_key: string;
-            /** Title */
-            title: string | null;
-            /** Status */
-            status: string;
-            /** Current Stage */
-            current_stage: string | null;
-            /** Path */
-            path: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Agent Dispatch */
-            agent_dispatch?: {
-                [key: string]: unknown;
-            } | null;
         };
         /** ChangeDocMatrix */
         ChangeDocMatrix: {
@@ -10031,6 +9875,10 @@ export interface components {
          *     (add/update use it); rename with unchanged content may omit both ``hash``
          *     and ``content``. ``base_version`` is the file version the daemon's local
          *     manifest believes the server is at (0 when unknown → R-07 hash fallback).
+         *
+         *     ``mtime``（ql-20260813-008，可选）：宿主真实修改时间（Unix 秒）。落盘时作
+         *     source_mtime + os.utime，让镜像文件 mtime 真实，进而让 changes.updated_at
+         *     反映变更活动。旧 daemon 不传 / 非法时 fallback now。
          */
         FileOp: {
             /**
@@ -10048,6 +9896,8 @@ export interface components {
             content?: string | null;
             /** Base Version */
             base_version: number;
+            /** Mtime */
+            mtime?: number | null;
         };
         /**
          * FileUploadResp
@@ -10249,6 +10099,11 @@ export interface components {
             result: string;
             /** Comment */
             comment?: string | null;
+            /**
+             * Notify Session
+             * @default true
+             */
+            notify_session: boolean;
         };
         /**
          * ImportCommitReq
@@ -10834,24 +10689,6 @@ export interface components {
             password: string;
             /** Captcha Token */
             captcha_token?: string | null;
-        };
-        /** MarkdownGenerateRequest */
-        MarkdownGenerateRequest: {
-            /** Doc Type */
-            doc_type: string;
-            /** Content */
-            content: string;
-            /** Lease Id */
-            lease_id?: string | null;
-        };
-        /** MarkdownGenerateResponse */
-        MarkdownGenerateResponse: {
-            /** Doc Type */
-            doc_type: string;
-            /** Path */
-            path: string;
-            /** Size */
-            size: number;
         };
         /**
          * McpConfigViewResponse
@@ -11916,6 +11753,11 @@ export interface components {
             decision: string;
             /** Comment */
             comment?: string | null;
+            /**
+             * Notify Session
+             * @default true
+             */
+            notify_session: boolean;
         };
         /**
          * PlanTaskBrief
@@ -13296,25 +13138,11 @@ export interface components {
             decision: string;
             /** Comment */
             comment?: string | null;
-        };
-        /**
-         * ProxyCreateChangeRequest
-         * @description daemon-client 变更代写入参 (design §7.5 / D-002@v1)。
-         *
-         *     D-002@v1（2026-07-05-daemon-client-change-binding-fix）：删 ``runtime_id`` 字段。
-         *     runtime 由后端 ``resolve_runtime_for_writeback`` 用 binding + workspace.default_agent
-         *     现算（与派发链路共用解析）。daemon_id 亦从 per-member binding 拿，前端无需传。
-         */
-        ProxyCreateChangeRequest: {
-            /** Title */
-            title: string;
             /**
-             * Description
-             * @default
+             * Notify Session
+             * @default true
              */
-            description: string;
-            /** Change Type */
-            change_type?: string | null;
+            notify_session: boolean;
         };
         /** PsPlanNodeCreate */
         PsPlanNodeCreate: {
@@ -14988,10 +14816,17 @@ export interface components {
         /**
          * SpecIncrementalSyncRequest
          * @description Request body for the incremental sync endpoint (design §7).
+         *
+         *     ``change_dirs``（change 2026-08-14-change-center-conversation-driven / D-005@v1）：
+         *     daemon 本次增量 ops 涉及的变更目录名集合（``changes/<name>/`` 与
+         *     ``changes/archive/<name>/`` 前缀分组取 name，去重）。缺省 ``[]`` 兼容旧 daemon——
+         *     backend ``apply_ops`` 无标注时扫 ops 路径 ``changes/`` 前缀兜底（design §9）。
          */
         SpecIncrementalSyncRequest: {
             /** Ops */
             ops: components["schemas"]["FileOp"][];
+            /** Change Dirs */
+            change_dirs?: string[];
         };
         /**
          * SpecIncrementalSyncResponse
@@ -17325,6 +17160,13 @@ export interface components {
                 [key: string]: unknown;
             };
             agent_dispatch?: components["schemas"]["TransitionDispatchResponse"] | null;
+            /**
+             * Notified Session
+             * @default false
+             */
+            notified_session: boolean;
+            /** Notify Error */
+            notify_error?: string | null;
         };
         /**
          * AuditLogRead
@@ -21062,6 +20904,7 @@ export interface operations {
         parameters: {
             query?: {
                 mode?: string | null;
+                include_ended?: boolean;
             };
             header?: never;
             path: {
@@ -24416,187 +24259,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GitOperationListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_change_api_workspaces__workspace_id__changes_create_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                workspace_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ChangeCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ChangeCreateResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    proxy_create_change_api_workspaces__workspace_id__changes_proxy_create_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                workspace_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProxyCreateChangeRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ChangeCreateResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    generate_document_api_workspaces__workspace_id__changes__change_id__documents_generate_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                workspace_id: string;
-                change_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MarkdownGenerateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MarkdownGenerateResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    batch_generate_documents_api_workspaces__workspace_id__changes__change_id__documents_batch_generate_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                workspace_id: string;
-                change_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BatchGenerateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BatchGenerateResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    execute_change_api_workspaces__workspace_id__changes__change_key__execute_post: {
-        parameters: {
-            query?: {
-                provider?: string | null;
-                model?: string | null;
-                /** @description execute 团队执行（D-004@v2，默认 single 零回归） */
-                team_mode?: boolean;
-            };
-            header?: never;
-            path: {
-                workspace_id: string;
-                change_key: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
                 };
             };
             /** @description Validation Error */
@@ -31790,7 +31452,9 @@ export interface operations {
     sync_spec_workspace_api_workspaces__workspace_id__spec_workspace_sync_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Change-Write-Id"?: string | null;
+            };
             path: {
                 workspace_id: string;
             };
@@ -31825,7 +31489,9 @@ export interface operations {
     sync_spec_workspace_incremental_api_workspaces__workspace_id__spec_workspace_sync_incremental_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Change-Write-Id"?: string | null;
+            };
             path: {
                 workspace_id: string;
             };

@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Checkbox, Input, Select, type TableProps } from "antd";
 
@@ -11,7 +10,7 @@ import {
   PageHeader,
   SectionCard,
 } from "@/components/layout";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api";
 import {
@@ -21,6 +20,7 @@ import {
   type ChangeSummary,
   type ChangeWarning,
 } from "@/lib/changes";
+import { cn } from "@/lib/utils";
 import { getWorkspace, type Workspace } from "@/lib/workspaces";
 
 interface Props {
@@ -88,7 +88,6 @@ type SortDir = "updated_at_desc" | "updated_at_asc";
 
 export default function ChangesPage({ params }: Props) {
   const workspaceId = params.id;
-  const router = useRouter();
   const [tab, setTab] = useState<"active" | "archive">("active");
   // D-007：进行中视图默认套「只看待我处理」聚焦
   const [focusMine, setFocusMine] = useState(true);
@@ -356,6 +355,22 @@ export default function ChangesPage({ params }: Props) {
   };
 
   // 空状态（分场景，对齐原型 ③）
+  // task-09 / FR-04a（D-001@v1）：删「+ 新建变更」入口后，进行中空态引导去会话页
+  // （/workspaces/[id]/sessions），由 agent 在会话里自动立项并推进；「重新扫描」仍在
+  // PageHeader 作全量兜底（FR-04c）。archive 空态不引导（归档无新建语义）。
+  const sessionGuide = (
+    <div className="mt-3 flex flex-col items-center gap-1.5">
+      <span className="text-xs text-muted-foreground">
+        还没有进行中的变更。去会话跟 agent 对话，描述你的需求，agent 会自动立项并推进。
+      </span>
+      <Link
+        href={`/workspaces/${workspaceId}/sessions`}
+        className={cn(buttonVariants({ variant: "default", size: "sm" }))}
+      >
+        去会话页
+      </Link>
+    </div>
+  );
   const renderEmpty = (): ReactNode => {
     if (items.length > 0) return null;
     // 有 filter 无匹配 → 简短文案（不显示 CTA，避免误导）
@@ -375,23 +390,14 @@ export default function ChangesPage({ params }: Props) {
           <div className="text-xs text-muted-foreground">
             所有变更都在正常推进，或已全部处理完。
           </div>
-          <div className="mt-3 flex items-center gap-2">
-            <Button
-              size="sm"
-              onClick={() =>
-                router.push(`/workspaces/${workspaceId}/create-change`)
-              }
-            >
-              + 新建变更
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setFocusMine(false)}
-            >
-              查看全部进行中
-            </Button>
-          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setFocusMine(false)}
+          >
+            查看全部进行中
+          </Button>
+          {sessionGuide}
         </div>
       );
     }
@@ -401,16 +407,7 @@ export default function ChangesPage({ params }: Props) {
           <div className="text-[15px] font-medium text-foreground">
             当前没有进行中的变更
           </div>
-          <div className="mt-3">
-            <Button
-              size="sm"
-              onClick={() =>
-                router.push(`/workspaces/${workspaceId}/create-change`)
-              }
-            >
-              + 新建变更
-            </Button>
-          </div>
+          {sessionGuide}
         </div>
       );
     }
@@ -428,25 +425,15 @@ export default function ChangesPage({ params }: Props) {
         title="变更中心"
         subtitle={renderSubtitle()}
         actions={
-          <>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleReparse}
-              disabled={reparsing}
-            >
-              {reparsing ? "解析中…" : "重新扫描"}
-            </Button>
-            <Button
-              size="sm"
-              disabled={loading}
-              onClick={() =>
-                router.push(`/workspaces/${workspaceId}/create-change`)
-              }
-            >
-              + 新建变更
-            </Button>
-          </>
+          // FR-04c：删「+ 新建变更」后，「重新扫描」保留作全量兜底（含 scoped 不做删除的收敛）
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleReparse}
+            disabled={reparsing}
+          >
+            {reparsing ? "解析中…" : "重新扫描"}
+          </Button>
         }
       />
 

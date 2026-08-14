@@ -714,6 +714,12 @@ class SessionService:
         (DaemonSessionTurnConflict), creates the new AgentRun, commits, then
         dispatches a SESSION_INJECT control message. WS send failure converges
         the new run to failed but keeps the session active (boundary #13).
+
+        Ownership: enforced via ``_get_owned_session_for_update`` (``user_id``
+        must own the session). For the platform service path that must bypass
+        this user-ownership check (multi-member workspace approver ≠ session
+        creator), see :meth:`inject_session_as_service` (D-006@v2,
+        2026-08-14-change-center-conversation-driven task-04).
         """
         if not prompt or not prompt.strip():
             raise DaemonSessionNotActive(
@@ -721,9 +727,78 @@ class SessionService:
                 details={"reason": "empty_prompt"},
             )
 
-        now = datetime.now(UTC)
         try:
             session = await self._get_owned_session_for_update(session_id, user_id)
+        except AppError:
+            await self._session.rollback()
+            raise
+        except Exception:
+            await self._session.rollback()
+            raise
+        return await self._inject_into_session(session, prompt=prompt)
+
+    async def inject_session_as_service(
+        self,
+        session_id: uuid.UUID,
+        *,
+        prompt: str,
+    ) -> SessionDispatchResult:
+        """Append a turn run to an active session as the **platform service** (D-006@v2).
+
+        Service-identity sibling of :meth:`inject_session`: skips the user
+        ownership check (``_get_owned_session_for_update`` — a multi-member
+        workspace approver may NOT be the session creator, design §5 P2 /
+        Grill F-2) and locks the session by id only. Used by the change
+        approval flow to push review results into the bound session
+        (2026-08-14-change-center-conversation-driven task-04).
+
+        All other semantics are identical to :meth:`inject_session` (status /
+        lease / turn-conflict guards, SESSION_INJECT dispatch, offline
+        convergence, best-effort readiness wait). The caller is responsible
+        for the change-side best-effort degradation mapping (turn_conflict /
+        session_inactive / inject_failed, R-03).
+        """
+        if not prompt or not prompt.strip():
+            raise DaemonSessionNotActive(
+                "prompt must not be empty.",
+                details={"reason": "empty_prompt"},
+            )
+
+        try:
+            stmt = select(AgentSession).where(AgentSession.id == session_id).with_for_update()
+            session = (await self._session.execute(stmt)).scalar_one_or_none()
+            if session is None:
+                raise DaemonSessionNotFound(
+                    f"AgentSession '{session_id}' not found.",
+                    details={"session_id": str(session_id)},
+                )
+        except AppError:
+            await self._session.rollback()
+            raise
+        except Exception:
+            await self._session.rollback()
+            raise
+        return await self._inject_into_session(session, prompt=prompt)
+
+    async def _inject_into_session(
+        self,
+        session: AgentSession,
+        *,
+        prompt: str,
+    ) -> SessionDispatchResult:
+        """Shared inject-turn core (used by :meth:`inject_session` +
+        :meth:`inject_session_as_service`).
+
+        Caller MUST already hold the session row lock (FOR UPDATE) and is
+        responsible for ownership semantics — this method only implements the
+        status/lease/turn-conflict guards, the new AgentRun creation, the
+        SESSION_INJECT dispatch and the offline convergence. Extracted so the
+        user-owned and service-identity paths share one turn-injection body
+        (D-006@v2, 2026-08-14-change-center-conversation-driven task-04).
+        """
+        session_id = session.id
+        now = datetime.now(UTC)
+        try:
             if session.status != "active":
                 raise DaemonSessionNotActive(
                     f"AgentSession '{session_id}' is not active (status={session.status}).",

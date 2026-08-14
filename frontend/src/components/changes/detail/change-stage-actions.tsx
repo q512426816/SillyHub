@@ -1,150 +1,134 @@
 "use client";
 
-import { AgentProfileSelect } from "@/components/agent-profile-select";
-import {
-  StageTeamConfig,
-  type StageWorkerPreset,
-} from "@/components/stage-team-config";
-import { Button } from "@/components/ui/button";
-import type {
-  ChangeRead,
-  DispatchResponse,
-  VerifyGateResponse,
-} from "@/lib/changes";
+import { useState } from "react";
 
-import { WORKFLOW_STAGE_LABELS } from "./change-stage-header";
+import { Button } from "@/components/ui/button";
+import type { ChangeRead } from "@/lib/changes";
+import type { AgentSessionListItem } from "@/lib/daemon";
 
 /**
- * 当前阶段操作区（主线，2026-08-11-change-detail-layout-rework / FR-05 / D-004）。
+ * 审批卡（2026-08-14-change-center-conversation-driven task-10 / D-003@v1 / D-006@v2）。
  *
- * 把原 page.tsx 散落 5+ 处的智能体操作入口统一收口到一处：
- *   - gate 审核面板（pending_review 投影）
- *   - 「完成待触发」推进横幅（推进下一阶段 + 运行验证门禁）
- *   - 触发智能体（重派当前阶段）
- *   - Agent Provider/Model 覆盖
- *   - 团队开关 + StageTeamConfig
+ * 变更详情页**唯一操作区**：意见输入 + 绑定会话只读展示 + 「通过/打回并通知绑定会话」。
+ * 执行控制（推进 / 重新派发 / 验证门禁 / 选档案 / 团队配置，含 quick 分支）已全部删除——
+ * 变更由 agent 在会话里经 sillyspec 驱动，平台只做展示板 + 人工审批（D-003@v1）。
+ * quick 类变更由 agent 在会话里跑 ``sillyspec run quick`` 触发，无需平台按钮。
  *
- * 纯受控展示组件：不调任何 lib/changes API、不自带数据请求，全部 state/handler 由
- * page.tsx 经 Props 注入。GATE_PANELS 配置从 page.tsx 原样搬入（语义不变）。
+ * 审批走单端点调用（submitStageReview 透传 notify_session），注入由后端以服务身份
+ * best-effort 完成；据响应 notified_session / notify_error 展示三类降级提示
+ * （turn_conflict / session_inactive / 其它），审批记录与状态不受注入失败影响。
  *
- * team toggle 的 role="switch" + aria-label="用团队执行" 为硬 DOM 契约，
- * page-team-toggle 测试迁移依赖，严禁破坏（R-06）。
+ * 纯受控展示组件：不调任何 lib API、不自带数据请求，state/handler 由 page.tsx 注入。
  */
 
-// Gate panel config：由 change.pending_review 投影驱动（对齐 task-03 PendingReview 枚举）。
-// 4 个面板分别对应 proposal_review / plan_review / human_test / archive_confirm。
-const GATE_PANELS: Record<
+// 审批卡按钮 → action 映射（plan.md 前置钉死，对齐 lib/changes.ts submitStageReview 分发）。
+// 通过/打回各一主项；archive_confirm 无打回（仅 comment 透传）。
+const APPROVAL_PANELS: Record<
   string,
   {
     title: string;
     description: string;
-    actions: {
-      label: string;
-      variant: "default" | "outline" | "destructive";
-      action: string;
-    }[];
+    pass: { label: string; action: string };
+    reject: { label: string; action: string } | null;
   }
 > = {
   proposal_review: {
     title: "四件套已生成，请确认",
     description: "智能体 已生成 proposal / requirements / design / tasks，请审阅后决定",
-    actions: [
-      { label: "确认通过", variant: "default", action: "proposal_approve" },
-      { label: "需要修改", variant: "outline", action: "proposal_revise" },
-      { label: "需求不明确", variant: "destructive", action: "proposal_unclear" },
-    ],
+    pass: { label: "通过并通知绑定会话", action: "proposal_approve" },
+    reject: { label: "打回并通知绑定会话", action: "proposal_revise" },
   },
   plan_review: {
     title: "执行计划已生成，请确认",
     description: "智能体 已生成执行计划，请审阅后决定",
-    actions: [
-      { label: "确认计划", variant: "default", action: "plan_approve" },
-      { label: "重新计划", variant: "outline", action: "plan_replan" },
-      { label: "退回文档", variant: "destructive", action: "plan_back_to_propose" },
-      { label: "退回需求", variant: "destructive", action: "plan_back_to_brainstorm" },
-    ],
+    pass: { label: "通过并通知绑定会话", action: "plan_approve" },
+    reject: { label: "打回并通知绑定会话", action: "plan_replan" },
   },
   human_test: {
     title: "自动验证通过，请人工测试",
-    description: "智能体 已完成自动验证，请进行人工测试（发现 BUG / 文档不符即返工反馈）",
-    actions: [
-      { label: "测试通过", variant: "default", action: "test_pass" },
-      { label: "发现 BUG", variant: "destructive", action: "test_bug" },
-      { label: "文档不符", variant: "outline", action: "test_doc_mismatch" },
-    ],
+    description: "智能体 已完成自动验证，请进行人工测试（发现 BUG 即返工反馈）",
+    pass: { label: "通过并通知绑定会话", action: "test_pass" },
+    reject: { label: "打回并通知绑定会话", action: "test_bug" },
   },
   archive_confirm: {
     title: "归档确认",
     description: "所有验证已通过，确认归档此变更",
-    actions: [{ label: "确认归档", variant: "default", action: "archive_confirm" }],
+    pass: { label: "归档并通知绑定会话", action: "archive_confirm" },
+    reject: null,
   },
+};
+
+/** 会话状态中文标签（只读展示用）。 */
+const SESSION_STATUS_LABELS: Record<string, string> = {
+  pending: "等待中",
+  active: "进行中",
+  reconnecting: "重连中",
+  ended: "已结束",
+  failed: "已失败",
+};
+
+/** 审批注入结果（D-006@v2：notified_session=false 时 notify_error 语义化）。 */
+export type NotifyResult = {
+  notified_session: boolean;
+  notify_error: string | null;
 };
 
 export interface ChangeStageActionsProps {
   change: ChangeRead;
-  agentStatus: DispatchResponse | null;
-  nextStage: string | null;
-  verifyGate: VerifyGateResponse | null;
+  /** 绑定会话（change_session_links 最新；前端取工作区最近活跃会话近似展示，可空）。 */
+  boundSession: AgentSessionListItem | null;
   gateComment: string;
   onGateCommentChange: (_v: string) => void;
-  // 入口回调
+  /** 审批动作（action 词表，comment 由卡片内意见输入携带）。 */
   onGateAction: (_action: string) => void;
-  onAdvance: () => void;
-  onRunVerifyGate: () => void;
-  onDispatch: () => void;
-  // loading 态
   transitioning: boolean;
-  dispatching: boolean;
-  advancing: boolean;
-  // 2026-08-12-dispatch-bind-agent-profile：阶段操作区改选档案（方案A 仅档案）。
-  // workspaceId 供 AgentProfileSelect 拉档案；stageProfileId null=跟随工作区默认。
-  workspaceId: string;
-  stageProfileId: string | null;
-  onStageProfileChange: (_v: string | null) => void;
-  teamMode: boolean;
-  onTeamModeChange: (_v: boolean) => void;
-  stageWorkers: StageWorkerPreset[];
-  onStageWorkersChange: (_w: StageWorkerPreset[]) => void;
+  /** 最近一次审批的注入结果（用于降级提示；null=尚未审批）。 */
+  notifyResult: NotifyResult | null;
+}
+
+/** 降级提示语义化：返回 { title, copyable }；注入成功时返回 null。 */
+function degradeMessage(
+  notify: NotifyResult,
+  change: ChangeRead,
+): { title: string; copyable: string } | null {
+  if (notify.notified_session) return null;
+  const key = change.change_key ?? change.id;
+  switch (notify.notify_error) {
+    case "turn_conflict":
+      return {
+        title: "审批已生效，agent 忙，请稍后在会话中告知继续",
+        copyable: `变更 ${key} 的审批已生效，请继续推进。`,
+      };
+    case "session_inactive":
+      return {
+        title: "绑定会话已结束，审批已生效，请去会话页开启新会话",
+        copyable: `变更 ${key} 的审批已生效，请开启新会话后继续推进。`,
+      };
+    default:
+      return {
+        title: "审批已生效，但通知绑定会话失败（审批记录与状态不受影响）",
+        copyable: `变更 ${key} 的审批已生效，请继续推进。`,
+      };
+  }
 }
 
 export function ChangeStageActions({
   change,
-  agentStatus,
-  nextStage,
-  verifyGate,
+  boundSession,
   gateComment,
   onGateCommentChange,
   onGateAction,
-  onAdvance,
-  onRunVerifyGate,
-  onDispatch,
   transitioning,
-  dispatching,
-  advancing,
-  workspaceId,
-  stageProfileId,
-  onStageProfileChange,
-  teamMode,
-  onTeamModeChange,
-  stageWorkers,
-  onStageWorkersChange,
+  notifyResult,
 }: ChangeStageActionsProps) {
-  const gatePanel = GATE_PANELS[change.pending_review ?? ""];
-  const hasActiveRun = agentStatus?.has_active_run ?? false;
-  const configEnabled = agentStatus?.config_enabled ?? false;
+  const [copied, setCopied] = useState(false);
   const currentStage = change.current_stage ?? "draft";
+  const gatePanel = APPROVAL_PANELS[change.pending_review ?? ""];
 
-  // ql-20260812-007（2026-08-12-quick-independent-stage）：quick 独立阶段早返回。
-  // quick 是辅助阶段，跑完即完成（不归档），与主线 5 阶段平行。完成态判定（D-003）：
-  // current_stage==='quick' && change.stages.quick.status==='completed' —— 由后端
-  // sync_stage_status 从 sillyspec.db 同步写入（与主线各 stage 同源），不加 DB 字段。
-  // 不读 last_dispatch.status：它在 dispatch 时被写死 'running' 且 sync 不更新，
-  // 会致完成态永不显示。quick 分支不渲染主线 gate 面板 / 推进按钮 / 团队开关。
+  // quick 独立阶段（D-003）：无平台执行控制，仅只读说明。
   if (currentStage === "quick") {
-    const quickStage = change.stages?.quick as { status?: string } | undefined;
-    const quickDone = quickStage?.status === "completed";
     return (
-      <section className="space-y-3 rounded-md border border-amber-500/40 bg-amber-50/40 px-4 py-3">
+      <section className="space-y-2 rounded-md border border-amber-500/40 bg-amber-50/40 px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold">⚡ 快速修复</span>
           <span className="text-xs text-muted-foreground">
@@ -152,237 +136,119 @@ export function ChangeStageActions({
           </span>
         </div>
         <p className="text-[11px] text-muted-foreground">
-          点击触发智能体执行快速修复（理解任务→实现→记录），跑完即完成，无需归档。
+          快速修复由智能体在会话中执行（sillyspec run quick），平台无需操作；完成态经同步链路回写。
         </p>
-
-        {/* 档案选择器（复用主线） */}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="whitespace-nowrap text-xs text-muted-foreground">
-            智能体档案
-          </span>
-          <AgentProfileSelect
-            workspaceId={workspaceId}
-            value={stageProfileId}
-            onChange={onStageProfileChange}
-            includeDefault="跟随工作区默认"
-          />
-        </div>
-
-        {/* 触发智能体 / 执行中 / 完成态 */}
-        {quickDone ? (
-          <div className="border-t border-amber-500/20 pt-2.5">
-            <span className="text-xs font-medium text-emerald-700">
-              ✓ 已完成
-            </span>
-          </div>
-        ) : hasActiveRun ? (
-          <div className="border-t border-amber-500/20 pt-2.5">
-            <span className="text-[11px] text-muted-foreground">
-              智能体执行中…
-            </span>
-          </div>
-        ) : configEnabled ? (
-          <div className="border-t border-amber-500/20 pt-2.5">
-            <Button size="sm" onClick={onDispatch} disabled={dispatching}>
-              {dispatching ? "触发中…" : "🤖 触发快速修复"}
-            </Button>
-          </div>
-        ) : (
-          <div className="border-t border-amber-500/20 pt-2.5">
-            <span className="text-[11px] text-muted-foreground">
-              未配置可用的智能体
-            </span>
-          </div>
-        )}
       </section>
     );
   }
 
-  // 团队开关渲染条件（与现 page.tsx 一致）
-  const teamVisible =
-    change.pending_review === "plan_review" ||
-    currentStage === "execute" ||
-    currentStage === "verify" ||
-    change.pending_review === "human_test";
+  // 无待审阶段：无操作区（只读展示区由其它卡片承载）。
+  if (!gatePanel) {
+    return (
+      <section className="rounded-md border border-muted bg-card px-4 py-3">
+        <p className="text-xs text-muted-foreground">
+          当前无可审批事项，阶段推进由智能体在会话中驱动。
+        </p>
+      </section>
+    );
+  }
+
+  const degrade = notifyResult ? degradeMessage(notifyResult, change) : null;
+
+  const handleCopy = async () => {
+    if (!degrade || !navigator.clipboard) return;
+    try {
+      await navigator.clipboard.writeText(degrade.copyable);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard 写入被拒时静默 */
+    }
+  };
 
   return (
-    <div className="space-y-3">
-      {/* gate 审核面板 */}
-      {gatePanel ? (
-        <section className="space-y-2.5 rounded-md border-2 border-primary/20 bg-primary/5 px-4 py-3">
-          <div>
-            <p className="text-sm font-semibold">{gatePanel.title}</p>
-            <p className="text-xs text-muted-foreground">
-              {gatePanel.description}
-            </p>
-          </div>
-          <textarea
-            className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-xs focus:border-ring focus:outline-none"
-            rows={2}
-            placeholder="审核意见（可选）"
-            value={gateComment}
-            onChange={(e) => onGateCommentChange(e.target.value)}
-          />
-          <div className="flex flex-wrap gap-2">
-            {gatePanel.actions.map((a) => (
-              <Button
-                key={a.action}
-                variant={a.variant}
-                size="sm"
-                onClick={() => onGateAction(a.action)}
-                disabled={transitioning}
-              >
-                {a.label}
-              </Button>
-            ))}
-          </div>
-        </section>
-      ) : null}
+    <section className="space-y-2.5 rounded-md border-2 border-primary/20 bg-primary/5 px-4 py-3">
+      <div>
+        <p className="text-sm font-semibold">{gatePanel.title}</p>
+        <p className="text-xs text-muted-foreground">{gatePanel.description}</p>
+      </div>
 
-      {/* 统一阶段操作卡片（2026-08-12 ql：合并推进横幅 + 档案选择 + 触发按钮，
-          对齐 prototype-option-a 的单卡片 violet 布局）。
-          标题 + 档案选择器常驻；推进/验证门禁按钮按条件显示。 */}
-      <section className="space-y-3 rounded-md border border-violet-500/40 bg-violet-50/40 px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold">阶段操作</span>
-          <span className="text-xs text-muted-foreground">
-            选档案 → 用档案配置派发；不选 → 按默认
-          </span>
+      {/* 绑定会话只读展示（change_session_links 最新；前端取工作区最近活跃会话近似） */}
+      {boundSession ? (
+        <div className="rounded border bg-background px-3 py-2">
+          <p className="text-[11px] text-muted-foreground">
+            绑定会话（审批结果将通知此会话）
+          </p>
+          <p className="truncate text-xs font-medium">
+            {boundSession.title ?? `会话 ${boundSession.id.slice(0, 8)}`}
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            {boundSession.provider} ·{" "}
+            {SESSION_STATUS_LABELS[boundSession.status] ?? boundSession.status}
+            {boundSession.last_active_at
+              ? ` · 最近活跃 ${new Date(boundSession.last_active_at).toLocaleString("zh-CN")}`
+              : ""}
+          </p>
         </div>
-
-        {/* 档案选择器（常驻） */}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="whitespace-nowrap text-xs text-muted-foreground">
-            智能体档案
-          </span>
-          <AgentProfileSelect
-            workspaceId={workspaceId}
-            value={stageProfileId}
-            onChange={onStageProfileChange}
-            includeDefault="跟随工作区默认"
-          />
+      ) : (
+        <div className="rounded border border-dashed bg-background px-3 py-2">
+          <p className="text-[11px] text-muted-foreground">
+            暂无可通知的绑定会话，审批结果仅落库展示
+          </p>
         </div>
-        {/* FR-08 已知 gap 提示：本次仅 provider/凭证/allowed_roots 生效，
-            system_prompt/skill/mcp 链路修复放下个变更。 */}
-        <p className="text-[11px] text-muted-foreground">
-          选档案后生效：供应商/模型/凭证/可访问根目录；系统提示/技能/MCP 下版本支持
-        </p>
+      )}
 
-        {/* 底部按钮区：推进（无 gate + 有下一阶段 + 无活跃 run）/ 验证门禁（verify）/
-            触发智能体（configEnabled + 无活跃 run）共用档案选择 */}
-        {!gatePanel && nextStage && !hasActiveRun ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-violet-500/20 pt-2.5">
-            <p className="text-[11px] text-muted-foreground">
-              当前阶段已完成，待触发下一阶段
-              {verifyGate ? (
-                <>
-                  {"　验证门禁："}
-                  {verifyGate.source === "unavailable"
-                    ? "暂不可用（请人工核验）"
-                    : verifyGate.exit_code === 0
-                      ? "✓ 通过"
-                      : verifyGate.exit_code === null
-                        ? "无结果"
-                        : `✗ 未通过（exit ${verifyGate.exit_code}）`}
-                  {verifyGate.errors.length > 0
-                    ? ` · ${verifyGate.errors.slice(0, 3).join("；")}`
-                    : ""}
-                </>
-              ) : null}
-            </p>
-            <div className="flex items-center gap-2">
-              {currentStage === "verify" ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={onRunVerifyGate}
-                  disabled={advancing || dispatching}
-                >
-                  {advancing ? "核验中…" : "运行验证门禁"}
-                </Button>
-              ) : null}
-              {configEnabled ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={onDispatch}
-                  disabled={dispatching}
-                >
-                  {dispatching ? "触发中…" : "🤖 触发智能体"}
-                </Button>
-              ) : null}
-              <Button
-                size="sm"
-                onClick={onAdvance}
-                disabled={dispatching || advancing}
-              >
-                {dispatching
-                  ? "推进中…"
-                  : `推进到「${WORKFLOW_STAGE_LABELS[nextStage] ?? nextStage}」`}
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 border-t border-violet-500/20 pt-2.5">
-            {configEnabled && !hasActiveRun ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onDispatch}
-                disabled={dispatching}
-              >
-                {dispatching ? "触发中…" : "🤖 触发智能体"}
-              </Button>
-            ) : null}
-            {hasActiveRun ? (
-              <span className="text-[11px] text-muted-foreground">
-                智能体执行中…
-              </span>
-            ) : null}
-          </div>
-        )}
-      </section>
+      <textarea
+        className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-xs focus:border-ring focus:outline-none"
+        rows={2}
+        placeholder="审核意见（可选）"
+        value={gateComment}
+        onChange={(e) => onGateCommentChange(e.target.value)}
+      />
 
-      {/* 团队开关 + StageTeamConfig */}
-      {teamVisible ? (
-        <div className="space-y-2">
-          <label className="flex items-center gap-2.5 rounded-md border border-violet-500/40 bg-violet-50 px-3 py-2 text-xs">
-            <button
-              type="button"
-              role="switch"
-              aria-checked={teamMode}
-              aria-label="用团队执行"
-              onClick={() => onTeamModeChange(!teamMode)}
-              className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
-                teamMode ? "bg-violet-500" : "bg-muted"
-              }`}
+      {/* 通过/打回并通知绑定会话（archive_confirm 无打回） */}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          onClick={() => onGateAction(gatePanel.pass.action)}
+          disabled={transitioning}
+        >
+          {gatePanel.pass.label}
+        </Button>
+        {gatePanel.reject ? (
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => onGateAction(gatePanel.reject!.action)}
+            disabled={transitioning}
+          >
+            {gatePanel.reject.label}
+          </Button>
+        ) : null}
+      </div>
+
+      {/* 注入降级提示（三类，R-03：审批已落库，注入失败不回滚） */}
+      {degrade ? (
+        <div
+          className="space-y-1.5 rounded border border-amber-500/40 bg-amber-50/60 px-3 py-2"
+          data-testid="approval-notify-degrade"
+        >
+          <p className="text-xs font-medium text-amber-800">{degrade.title}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="min-w-0 flex-1 rounded bg-background px-2 py-1 text-[11px] text-foreground">
+              {degrade.copyable}
+            </code>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void handleCopy()}
+              disabled={copied}
             >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                  teamMode ? "translate-x-4" : "translate-x-0.5"
-                }`}
-              />
-            </button>
-            <span className="font-medium text-violet-900">
-              用团队{currentStage === "verify" ? "验证" : "执行"}
-            </span>
-            <span className="text-muted-foreground">
-              （多 worker 并行
-              {currentStage === "verify" ? "核验" : "写"}，主 agent 指挥 + 合并）
-            </span>
-          </label>
-
-          {teamMode ? (
-            <StageTeamConfig
-              stage={currentStage === "verify" ? "verify" : "execute"}
-              workers={stageWorkers}
-              onWorkersChange={onStageWorkersChange}
-              workspaceId={workspaceId}
-              mainProfileId={stageProfileId}
-            />
-          ) : null}
+              {copied ? "已复制" : "复制文案"}
+            </Button>
+          </div>
         </div>
       ) : null}
-    </div>
+    </section>
   );
 }

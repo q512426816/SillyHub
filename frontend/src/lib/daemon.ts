@@ -1032,6 +1032,26 @@ export async function listChangeSessions(
   );
 }
 
+/**
+ * GET /api/workspaces/{wid}/agent-sessions — 工作区级会话列表
+ * （2026-08-14-change-center-conversation-driven task-06 / D-002@v1）。
+ * include_ended=true 时返回含已结束会话的完整 AgentSessionListItem[]
+ * （字段对齐后端 daemon/schema.py AgentSessionListItem，排序 coalesce(last_active_at, created_at) desc）。
+ * include_ended 缺省 false 保持 active-only 最小字段行为（供 approvals 页聚合用）。
+ */
+export async function listWorkspaceAgentSessions(
+  workspaceId: string,
+  options?: { include_ended?: boolean; mode?: string },
+): Promise<AgentSessionListItem[]> {
+  const query: Record<string, string | boolean> = {};
+  if (options?.include_ended !== undefined) query.include_ended = options.include_ended;
+  if (options?.mode) query.mode = options.mode;
+  return apiFetch<AgentSessionListItem[]>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/agent-sessions`,
+    { query },
+  );
+}
+
 /** DELETE /api/daemon/sessions/{id} — 删除已结束的会话记录。 */
 export async function deleteAgentSession(sessionId: string): Promise<void> {
   await apiFetch(`/api/daemon/sessions/${encodeURIComponent(sessionId)}`, {

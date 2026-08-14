@@ -81,7 +81,7 @@ describe('pullSpecBundle D-008: push before pull (task-12)', () => {
 
     // postSpecSync 在 getSpecBundle 之前被调（回灌优先）
     expect(postSpecSync).toHaveBeenCalledTimes(1);
-    expect(postSpecSync).toHaveBeenCalledWith(wsId, expect.any(Buffer));
+    expect(postSpecSync).toHaveBeenCalledWith(wsId, expect.any(Buffer), undefined);
     expect(client.getSpecBundle).toHaveBeenCalled();
   });
 

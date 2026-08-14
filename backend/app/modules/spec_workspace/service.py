@@ -871,11 +871,16 @@ class SpecWorkspaceService:
         落盘的镜像文件 mtime 真实，后续 change reparse 扫 mtime max 填
         changes.updated_at 才能反映变更活动（而非同步时刻）。非法/None/缺失 → 不动
         （保持 write_bytes 的 now）。失败静默（mtime 是展示增强，不阻断同步主流程）。
+
+        防御（ql-008 毫秒 bug 修复）：旧 daemon 发毫秒（~1.78e12），os.utime 要秒
+        （~1.78e9）→ ts > 1e11 视为毫秒除以 1000。防 30828 年 mtime 炸 reparse。
         """
         if mtime is None or mtime <= 0:
             return
         try:
             ts = float(mtime)
+            if ts > 1e11:  # 毫秒启发式（当前 epoch 秒 ≈1.78e9，毫秒 ≈1.78e12）
+                ts /= 1000.0
             os.utime(target, (ts, ts))
         except (OSError, ValueError, TypeError):
             pass
@@ -911,6 +916,7 @@ class SpecWorkspaceService:
         workspace_id: uuid.UUID,
         ops: list[FileOp],
         change_write_id: str | None = None,
+        change_dirs: list[str] | None = None,
     ) -> dict[str, object]:
         """Apply incremental file ops to the workspace spec_root.
 
@@ -931,6 +937,13 @@ class SpecWorkspaceService:
           早于 30 天的旧目录（R-06）。
         - rename：``shutil.move`` 旧→新 + 清单 path 迁移（version+1，hash 相同可保留内容）。
         冲突 op 跳过、其余照常 apply，整体返回 conflict=True；校验失败整体 422 不落盘。
+
+        ``change_dirs``（change 2026-08-14-change-center-conversation-driven / D-005@v1）：
+        daemon 增量同步标注的本次涉及变更目录名集合。**落盘提交成功后**（事务外
+        best-effort，R-04）触发 change reparse：有标注 → scoped（非归档 name）；
+        无标注 → ops 路径 ``changes/`` 前缀检测兜底；含 ``changes/archive/`` 路径 →
+        全量 reparse。reparse 失败仅告警不阻断同步主流程；同步失败（校验 422 / 提交
+        异常）不重复触发（幂等，触发器在 commit 之后）。
         """
         spec_ws = await self.get(workspace_id)
         spec_root = Path(spec_ws.spec_root)
@@ -1111,8 +1124,116 @@ class SpecWorkspaceService:
             await self._bump_files_processed(change_write_id)
 
         await self._session.commit()
+
+        # R-04 / D-005（change 2026-08-14-change-center-conversation-driven task-02）：
+        # 落盘提交成功后，事务外 best-effort 触发 change reparse（独立 session），
+        # 使 agent 会话新建的变更自动出现在 ux_changes 列表（命门链路）。
+        # 失败仅告警不阻断同步主流程；同步失败（上文抛错）不会走到这里 → 不重复触发。
+        try:
+            await self._trigger_change_reparse(workspace_id, change_dirs or [], ops)
+        except Exception as exc:
+            log.warning(
+                "spec_workspace.reparse_trigger_failed",
+                workspace_id=str(workspace_id),
+                error=str(exc),
+            )
+
         return {
             "new_versions": new_versions,
             "conflict": conflict,
             "server_versions": server_versions,
         }
+
+    @staticmethod
+    def _compute_reparse_scope(
+        change_dirs: list[str],
+        ops: list[FileOp],
+    ) -> tuple[list[str] | None, bool]:
+        """计算 change reparse 范围 → ``(scope, archive_hit)``。
+
+        （change 2026-08-14-change-center-conversation-driven / D-005@v1）：
+        - 有标注（``change_dirs`` 非空）：取非归档 name 进 scoped 集；其中含
+          ``changes/archive/`` 前缀的 name → ``archive_hit``（并入全量重扫集）。
+        - 无标注（旧 daemon）：扫本次 ops 路径中 ``changes/`` 前缀者取 name 兜底。
+        - 任一 ops 路径含 ``changes/archive/`` 前缀 → ``archive_hit``（归档=目录跨根
+          移动，scoped 零删除语义处理不了，走全量 reparse，design §9 / R-08）。
+
+        返回语义：
+        - ``(None, True)``：全量 reparse（scope=None 含 delete）。
+        - ``(scope, False)``：scoped reparse（scope 非空，零 delete）。
+        - ``(None, False)``：无 changes 相关路径，**零触发**（R-01）。
+        """
+        names: list[str] = []
+        archive_hit = False
+
+        for cd in change_dirs:
+            norm = str(cd).replace("\\", "/")
+            if not norm:
+                continue
+            if norm.startswith("changes/archive/") or norm == "changes/archive":
+                archive_hit = True
+            elif norm.startswith("changes/"):
+                rest = norm[len("changes/") :]
+                if rest and not rest.startswith("archive/"):
+                    first = rest.split("/", 1)[0]
+                    if first:
+                        names.append(first)
+            else:
+                # 纯 name 形式（daemon task-01 传 changes/<name>/ 分组的 key）
+                names.append(norm)
+
+        for op in ops:
+            for path in (op.path, op.new_path):
+                if not path:
+                    continue
+                norm = path.replace("\\", "/")
+                if norm.startswith("changes/archive/") or norm == "changes/archive":
+                    archive_hit = True
+                elif norm.startswith("changes/"):
+                    rest = norm[len("changes/") :]
+                    if rest and not rest.startswith("archive/"):
+                        first = rest.split("/", 1)[0]
+                        if first:
+                            names.append(first)
+
+        # 去重保序
+        dedup: list[str] = []
+        for n in names:
+            if n not in dedup:
+                dedup.append(n)
+
+        if archive_hit:
+            return None, True
+        return dedup, False
+
+    async def _trigger_change_reparse(
+        self,
+        workspace_id: uuid.UUID,
+        change_dirs: list[str],
+        ops: list[FileOp],
+    ) -> None:
+        """事务外 best-effort 触发 change reparse（R-04 / D-005）。
+
+        独立 ``get_session_factory()`` 短生命周期 session（不动 apply 主事务，对齐
+        ``_bump_files_processed`` 范式）。scope 计算见 ``_compute_reparse_scope``。
+        无 changes 相关路径 → 零触发（R-01：避免增量同步频繁空转 reparse）。
+        """
+        scope, archive_hit = self._compute_reparse_scope(change_dirs, ops)
+        if not archive_hit and not scope:
+            return  # 零触发
+
+        from app.core.db import get_session_factory
+        from app.modules.change.service import ChangeService
+
+        async with get_session_factory()() as reparse_session:
+            stats, _ = await ChangeService(reparse_session).reparse(
+                workspace_id,
+                scope=None if archive_hit else scope,
+            )
+        log.info(
+            "spec_workspace.reparse_triggered",
+            workspace_id=str(workspace_id),
+            scoped=not archive_hit,
+            scope=scope,
+            stats=stats,
+        )

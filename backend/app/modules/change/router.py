@@ -733,6 +733,7 @@ async def proposal_review(
         body.decision,
         body.comment,
         _user.id,
+        notify_session=body.notify_session,
     )
     enriched = await service.enrich_with_workspace_ids(result["change"])
     raw_dispatch = result.get("agent_dispatch")
@@ -743,7 +744,12 @@ async def proposal_review(
             agent_run_id=raw_dispatch.get("agent_run_id"),
             stage=raw_dispatch.get("stage"),
         )
-    return ReviewResponse(change=enriched.model_dump(), agent_dispatch=agent_dispatch)
+    return ReviewResponse(
+        change=enriched.model_dump(),
+        agent_dispatch=agent_dispatch,
+        notified_session=result["notified_session"],
+        notify_error=result.get("notify_error"),
+    )
 
 
 @router.post(
@@ -764,6 +770,7 @@ async def plan_review(
         body.decision,
         body.comment,
         _user.id,
+        notify_session=body.notify_session,
     )
     enriched = await service.enrich_with_workspace_ids(result["change"])
     raw_dispatch = result.get("agent_dispatch")
@@ -774,7 +781,12 @@ async def plan_review(
             agent_run_id=raw_dispatch.get("agent_run_id"),
             stage=raw_dispatch.get("stage"),
         )
-    return ReviewResponse(change=enriched.model_dump(), agent_dispatch=agent_dispatch)
+    return ReviewResponse(
+        change=enriched.model_dump(),
+        agent_dispatch=agent_dispatch,
+        notified_session=result["notified_session"],
+        notify_error=result.get("notify_error"),
+    )
 
 
 @router.post(
@@ -795,6 +807,7 @@ async def human_test(
         body.result,
         body.comment,
         _user.id,
+        notify_session=body.notify_session,
     )
     enriched = await service.enrich_with_workspace_ids(result["change"])
     raw_dispatch = result.get("agent_dispatch")
@@ -805,7 +818,12 @@ async def human_test(
             agent_run_id=raw_dispatch.get("agent_run_id"),
             stage=raw_dispatch.get("stage"),
         )
-    return ReviewResponse(change=enriched.model_dump(), agent_dispatch=agent_dispatch)
+    return ReviewResponse(
+        change=enriched.model_dump(),
+        agent_dispatch=agent_dispatch,
+        notified_session=result["notified_session"],
+        notify_error=result.get("notify_error"),
+    )
 
 
 @router.post(
@@ -825,6 +843,7 @@ async def archive_confirm(
         change_id,
         body.comment,
         _user.id,
+        notify_session=body.notify_session,
     )
     enriched = await service.enrich_with_workspace_ids(result["change"])
     raw_dispatch = result.get("agent_dispatch")
@@ -835,7 +854,12 @@ async def archive_confirm(
             agent_run_id=raw_dispatch.get("agent_run_id"),
             stage=raw_dispatch.get("stage"),
         )
-    return ReviewResponse(change=enriched.model_dump(), agent_dispatch=agent_dispatch)
+    return ReviewResponse(
+        change=enriched.model_dump(),
+        agent_dispatch=agent_dispatch,
+        notified_session=result["notified_session"],
+        notify_error=result.get("notify_error"),
+    )
 
 
 # ── Agent dispatch endpoints ────────────────────────────────────────────

@@ -102,9 +102,16 @@ class FileOp(BaseModel):
 
 
 class SpecIncrementalSyncRequest(BaseModel):
-    """Request body for the incremental sync endpoint (design §7)."""
+    """Request body for the incremental sync endpoint (design §7).
+
+    ``change_dirs``（change 2026-08-14-change-center-conversation-driven / D-005@v1）：
+    daemon 本次增量 ops 涉及的变更目录名集合（``changes/<name>/`` 与
+    ``changes/archive/<name>/`` 前缀分组取 name，去重）。缺省 ``[]`` 兼容旧 daemon——
+    backend ``apply_ops`` 无标注时扫 ops 路径 ``changes/`` 前缀兜底（design §9）。
+    """
 
     ops: list[FileOp]
+    change_dirs: list[str] = Field(default_factory=list)
 
 
 class SpecIncrementalSyncResponse(BaseModel):

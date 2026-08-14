@@ -3,7 +3,7 @@ project: backend
 source_commit: 6e78b29a
 generated_at: 2026-07-27 01:18:13
 generator: sillyspec-scan
-last_change: 2026-07-27 增量更新。补登新模块 `skills`（platform 级 CustomSkill admin CRUD，router tags=[custom-skills] 挂 /api，model CustomSkill + CustomSkillService，依赖 core/models）；删除已下线模块 `archive`（目录 app/modules/archive 不存在，全后端无 modules.archive 引用）并清理 core/auth/workspace/change 的 used_by 对 archive 的引用。`file`/`llm_provider`/`storage` 三卡已于先前手动补登（见上次 last_change），本次核对无误不再重复。上一次全量 scan 说明保留：backend/app/modules 实际业务目录（admin / agent / auth / change / change_writer / daemon / file / git_gateway / git_identity / health / incident / knowledge / llm_provider / ppm / release / runtime / scan_docs / settings / skills / spec_profile / spec_workspace / storage / task / tool_gateway / workflow / workspace / worktree），旧索引漏 admin、ppm 两模块；entrypoints/main_symbols/depends_on 均以 rg 验证。2026-08-08 archive（2026-08-08-dispatch-worker-caller-worktree）补登 `mcp_gateway`（scan 漏登：对外 MCP gateway，FastMCP streamable HTTP `/mcp/` + McpToken/Webhook 管理 API + tools.py 8 个 @mcp.tool，依赖 agent service 层；新建 modules/mcp_gateway.md）。2026-08-08 archive（2026-08-08-change-center-on-demand）补登 change 卡（补 StageProjectionService + VerifyGateResponse + advance-stage/run-verify-gate 子路由 + transition_with_dispatch/review 四方法/complete_stage；SillySpecStageDispatchService 删 auto_dispatch_next_step，sync_stage_status 降为 sillyspec.db 视图同步不驱动推进，reconcile_stale_runs 剥离推进只清 stale）+ daemon 卡（补 _sync_stage_status_from_run 独立路径不读 sillyspec.db + 6 调用点改待触发，详见 daemon.md 形态A 节）+ mcp_gateway 卡（补 4 change 阶层 tool advance_change_stage/submit_stage_review/run_verify_gate/get_change_stage + depends_on change）。2026-08-12 archive（2026-08-11-change-progress-projection）补登 `platform_sync`（scan 漏登：进度同步收件箱层，3 端点 inline /changes + 2 新端点 /workspaces platform-sync-tokens/resolve-by-root-path；PlatformSyncService upsert/list/get + PlatformSyncTokenService shpsync_ 签发/authenticate 派生 workspace + require_platform_sync 三路径分流 + PlatformChangeProgressORM workspace_id 复合唯一 + PlatformSyncTokenORM 参照 McpToken；本次加 workspace 隔离 + change 模块 enrich read-only join 投影 current_stage；前置 sillyhub-platform-sync 建模块时漏登本次补）+ change 卡补 _project_current_stage/enrich_summaries/enrich_with_workspace_ids 投影符号 + 双向 used_by/depends_on（change↔platform_sync）。新建 modules/platform_sync.md。
+last_change: 2026-07-27 增量更新。补登新模块 `skills`（platform 级 CustomSkill admin CRUD，router tags=[custom-skills] 挂 /api，model CustomSkill + CustomSkillService，依赖 core/models）；删除已下线模块 `archive`（目录 app/modules/archive 不存在，全后端无 modules.archive 引用）并清理 core/auth/workspace/change 的 used_by 对 archive 的引用。`file`/`llm_provider`/`storage` 三卡已于先前手动补登（见上次 last_change），本次核对无误不再重复。上一次全量 scan 说明保留：backend/app/modules 实际业务目录（admin / agent / auth / change / change_writer / daemon / file / git_gateway / git_identity / health / incident / knowledge / llm_provider / ppm / release / runtime / scan_docs / settings / skills / spec_profile / spec_workspace / storage / task / tool_gateway / workflow / workspace / worktree），旧索引漏 admin、ppm 两模块；entrypoints/main_symbols/depends_on 均以 rg 验证。2026-08-08 archive（2026-08-08-dispatch-worker-caller-worktree）补登 `mcp_gateway`（scan 漏登：对外 MCP gateway，FastMCP streamable HTTP `/mcp/` + McpToken/Webhook 管理 API + tools.py 8 个 @mcp.tool，依赖 agent service 层；新建 modules/mcp_gateway.md）。2026-08-08 archive（2026-08-08-change-center-on-demand）补登 change 卡（补 StageProjectionService + VerifyGateResponse + advance-stage/run-verify-gate 子路由 + transition_with_dispatch/review 四方法/complete_stage；SillySpecStageDispatchService 删 auto_dispatch_next_step，sync_stage_status 降为 sillyspec.db 视图同步不驱动推进，reconcile_stale_runs 剥离推进只清 stale）+ daemon 卡（补 _sync_stage_status_from_run 独立路径不读 sillyspec.db + 6 调用点改待触发，详见 daemon.md 形态A 节）+ mcp_gateway 卡（补 4 change 阶层 tool advance_change_stage/submit_stage_review/run_verify_gate/get_change_stage + depends_on change）。2026-08-12 archive（2026-08-11-change-progress-projection）补登 `platform_sync`（scan 漏登：进度同步收件箱层，3 端点 inline /changes + 2 新端点 /workspaces platform-sync-tokens/resolve-by-root-path；PlatformSyncService upsert/list/get + PlatformSyncTokenService shpsync_ 签发/authenticate 派生 workspace + require_platform_sync 三路径分流 + PlatformChangeProgressORM workspace_id 复合唯一 + PlatformSyncTokenORM 参照 McpToken；本次加 workspace 隔离 + change 模块 enrich read-only join 投影 current_stage；前置 sillyhub-platform-sync 建模块时漏登本次补）+ change 卡补 _project_current_stage/enrich_summaries/enrich_with_workspace_ids 投影符号 + 双向 used_by/depends_on（change↔platform_sync）。新建 modules/platform_sync.md。2026-08-14 增量更新（2026-08-14-change-center-conversation-driven）：change 卡补 ChangeSessionLink（change_session_links 表，change↔session 多对多，unique(change_id, session_id)）+ ChangeService.reparse(scope)（scoped 零 delete 红线 R-08 + created 自动绑定最近活跃会话 D-007）+ review 四方法 notify_session 服务身份注入（D-006@v2）；spec_workspace 卡补 SpecWorkspaceService.apply_ops（change_dirs 标注触发 scoped reparse，D-005）；daemon 卡补 SessionService.inject_session_as_service（服务身份注入，绕过用户归属校验）；mcp_gateway 卡 submit_stage_review 契约更新（不派发 + notify_session 注入 + notified_session/notify_error）。
 
 modules:
   # ── core 模块 ──────────────────────────────────────────────
@@ -247,8 +247,10 @@ modules:
       - ChangeService.enrich_with_workspace_ids  # single = 匹配投影
       - Change
       - ChangeDocument
+      - ChangeSessionLink  # change_session_links 表（change↔session 多对多，unique(change_id, session_id)，2026-08-14-change-center-conversation-driven 新增）
       - StageEnum
       - ChangeParser
+      - ChangeService.reparse  # scope 参数——scoped 零 delete（R-08）+ created 自动绑定最近活跃会话（D-007）
       - change_router
     depends_on:
       - core
@@ -395,7 +397,7 @@ modules:
       - RuntimeService  # daemon/runtime/service.py
       - LeaseService  # daemon/lease/service.py
       - RunSyncService  # daemon/run_sync/service.py
-      - SessionService  # daemon/session/service.py
+      - SessionService  # daemon/session/service.py（2026-08-14 新增 inject_session_as_service 服务身份注入）
       - PatchService  # daemon/patch/service.py
     depends_on:
       - core
@@ -443,7 +445,7 @@ modules:
       - get_run_logs  # scope=read（mission 层）
       # 4 change 阶层 tool（形态A 按需触发，替代被砍的 auto_dispatch）
       - advance_change_stage  # scope=dispatch（change 阶层，包装 transition_with_dispatch）
-      - submit_stage_review  # scope=dispatch（change 阶层，包装 review 四方法）
+      - submit_stage_review  # scope=dispatch（change 阶层，包装 review 四方法；2026-08-14 起不派发 + notify_session 注入）
       - run_verify_gate  # scope=read（change 阶层，gate 软调用三态）
       - get_change_stage  # scope=read（change 阶层，只读组合 + StageProjectionService）
     depends_on:
@@ -803,6 +805,7 @@ modules:
       - /api/workspaces/{workspace_id}/spec-conflicts
     main_symbols:
       - SpecWorkspaceService
+      - SpecWorkspaceService.apply_ops  # 增量 ops 落盘（2026-08-14 起 change_dirs 标注触发 scoped change reparse，D-005）
       - SpecBootstrapService
       - SpecWorkspace
       - SpecValidator

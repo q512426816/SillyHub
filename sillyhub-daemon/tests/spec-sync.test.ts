@@ -106,6 +106,7 @@ describe('syncSpecTreeIfNeeded (task-06 / D-002@v1)', () => {
     expect(client.postSpecSync).toHaveBeenCalledWith(
       'ws-task06-sync-trigger',
       expect.any(Buffer),
+      undefined,
     );
   });
 

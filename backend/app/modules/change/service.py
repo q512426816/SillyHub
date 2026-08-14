@@ -8,6 +8,7 @@ content is read from the filesystem on-demand (not stored in DB).
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import uuid
 from dataclasses import dataclass
@@ -21,7 +22,14 @@ from sqlmodel import col
 
 from app.core.errors import ChangeDocNotFound, ChangeNotFound, InvalidTransition, PermissionDenied
 from app.core.logging import get_logger
-from app.modules.change.model import TRANSITIONS, Change, ChangeDocument, StageEnum
+from app.modules.agent.model import AgentSession
+from app.modules.change.model import (
+    TRANSITIONS,
+    Change,
+    ChangeDocument,
+    ChangeSessionLink,
+    StageEnum,
+)
 from app.modules.change.parser import ChangeParser, ChangeParserResult, ParsedChange
 from app.modules.change.projection import StageProjectionService
 from app.modules.change.schema import (
@@ -1026,7 +1034,23 @@ class ChangeService:
 
     # ── Reparse ───────────────────────────────────────────────────────────
 
-    async def reparse(self, workspace_id: uuid.UUID) -> tuple[dict[str, int], ChangeParserResult]:
+    async def reparse(
+        self,
+        workspace_id: uuid.UUID,
+        scope: list[str] | None = None,
+    ) -> tuple[dict[str, int], ChangeParserResult]:
+        """Reconcile ``ux_changes`` rows against the filesystem change tree.
+
+        ``scope``（change 2026-08-14-change-center-conversation-driven / D-005@v1，
+        design §5 P1）：
+        - ``None``：全量 reparse（含 delete，现状语义不变，删除磁盘消失的变更行）。
+        - ``[...]``：scoped reparse，**零 delete 红线（R-08）**——只对 scope 内 key
+          create/update；scope 外变更不进 parsed 集合也不判删除；scope 内 key 磁盘
+          确认消失也不删（留全量/手动重扫描收敛）。rename 检测同样只在全量模式下
+          进行（scoped 是部分视图，跑 rename 匹配会把范围外变更误判为 orphaned）。
+        - reparse 发现新变更（created）时按 design §8 绑定查询自动绑定该 workspace
+          最近活跃会话（change_session_links 行，best-effort 失败不阻断 reparse）。
+        """
         workspace = await self._workspace_service.get(workspace_id)
         # 平台 specRoot 有镜像数据就读（任意 strategy：platform-managed/repo-native/repo-mirrored）。
         # 旧逻辑只 platform-managed 读 spec_root，repo-native/repo-mirrored 读 root_path
@@ -1048,22 +1072,25 @@ class ChangeService:
         # task-08：工作区路径来源分流已删（FR-2）。daemon-client 同步产出扁平布局
         # （无 .sillyspec 包裹），parser 需 platform_managed=True 才能读到
         # specRoot/changes/。
-        result = self._parser.parse_workspace(sillyspec_root, platform_managed=True)
+        result = self._parser.parse_workspace(sillyspec_root, platform_managed=True, scope=scope)
         stats = {"parsed": 0, "created": 0, "updated": 0, "deleted": 0, "renamed": 0}
 
         # Fetch existing changes
         existing_changes = await self._fetch_existing_changes(workspace_id)
         existing_by_key = {c.change_key: c for c in existing_changes}
 
-        # Detect directory renames before processing
+        # Detect directory renames before processing（仅全量模式；scoped 是部分视图，
+        # 范围外变更的目录"消失"会被误判为 orphaned 而错配 rename）。
         parsed_key_set = {p.change_key for p in result.changes}
-        rename_map = self._detect_renames(existing_by_key, parsed_key_set, sillyspec_root)
+        rename_map: dict[str, Change] = {}
+        if scope is None:
+            rename_map = self._detect_renames(existing_by_key, parsed_key_set, sillyspec_root)
 
-        # Update existing_by_key for renamed entries: old_key → new_key
-        for new_key, old_row in rename_map.items():
-            old_key = old_row.change_key
-            existing_by_key.pop(old_key, None)
-            existing_by_key[new_key] = old_row
+            # Update existing_by_key for renamed entries: old_key → new_key
+            for new_key, old_row in rename_map.items():
+                old_key = old_row.change_key
+                existing_by_key.pop(old_key, None)
+                existing_by_key[new_key] = old_row
 
         # Wave B（2026-07-25）：批量预取所有 existing change 的 docs（原 _sync_docs
         # 每 change 一次 _fetch_existing_docs = N+1）。新建 change 无 existing docs（[]）。
@@ -1123,6 +1150,9 @@ class ChangeService:
                     stats["updated"] += 1
                 else:
                     stats["created"] += 1
+                    # D-007（design §5 P1 / §8）：新变更自动绑定最近活跃会话。
+                    # best-effort：绑定失败不阻断 reparse 主流程。
+                    await self._bind_change_to_session(workspace_id, row.id)
 
             # Sync documents for this change
             _existing = existing_by_key.get(parsed.change_key, row)
@@ -1136,15 +1166,69 @@ class ChangeService:
 
             # D-005@V1：M:N change_workspaces 投影已废，变更只属单一 workspace，无需 sync。
 
-        # Delete changes whose keys disappeared and were not renamed
-        for key, row in existing_by_key.items():
-            if key not in seen_keys:
-                await self._session.delete(row)
-                stats["deleted"] += 1
+        # Delete changes whose keys disappeared and were not renamed。
+        # **scoped 零删除红线（R-08）**：scope 模式跳过整个删除循环——scope 外变更
+        # 不进 parsed 集合也不判删除；scope 内 key 磁盘消失也不删（留全量/手动重扫描
+        # 收敛）。删除仅发生在全量 reparse（scope=None，现状语义不变）。
+        if scope is None:
+            for key, row in existing_by_key.items():
+                if key not in seen_keys:
+                    await self._session.delete(row)
+                    stats["deleted"] += 1
 
         await self._session.commit()
         log.info("changes.reparsed", workspace_id=str(workspace_id), **stats)
         return stats, result
+
+    async def _bind_change_to_session(
+        self,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+    ) -> None:
+        """新变更自动绑定最近活跃会话（D-007 / design §8 绑定查询）。
+
+        绑定查询语义固定（§8 SQL）：``deleted_at IS NULL``、``coalesce(last_active_at,
+        created_at) DESC``、跨成员（变更属 workspace 不属个人）、不限 status（已结束
+        会话也可绑，注入时按非 active 降级）。无会话命中不写 link。用 ORM
+        ``select(AgentSession.id)`` 表达该 SQL——UUID 列类型转换 SQLite/PG 统一
+        （raw text 绑定 uuid 在 SQLite 不可用，且 str(uuid) 带横线与 CHAR(32)
+        十六进制存储不匹配）。
+
+        best-effort：写入失败仅告警（savepoint 内，只回滚 link，不丢 change 行，
+        不阻断 reparse 主流程）。
+        """
+        try:
+            async with self._session.begin_nested():
+                stmt = (
+                    select(AgentSession.id)
+                    .where(AgentSession.workspace_id == workspace_id)
+                    .where(AgentSession.deleted_at.is_(None))
+                    .order_by(
+                        func.coalesce(
+                            AgentSession.last_active_at,
+                            AgentSession.created_at,
+                        ).desc()
+                    )
+                    .limit(1)
+                )
+                session_id = (await self._session.execute(stmt)).scalar()
+                if session_id is None:
+                    return
+                self._session.add(
+                    ChangeSessionLink(
+                        id=uuid.uuid4(),
+                        change_id=change_id,
+                        session_id=session_id,
+                    )
+                )
+                await self._session.flush()
+        except Exception as exc:
+            log.warning(
+                "change.session_bind_failed",
+                change_id=str(change_id),
+                workspace_id=str(workspace_id),
+                error=str(exc),
+            )
 
     @staticmethod
     def _detect_renames(
@@ -1483,8 +1567,150 @@ class ChangeService:
     # D-004@v2: 4 审核面板 = stage 完成事件投影（非 waiting step）。
     # 提交审核 = 先用 StageProjectionService.compute_pending_review 校验
     # 当前变更确实处于该面板（否则 InvalidTransition），再推进下一 stage
-    # （复用 transition_with_dispatch / rerun_stage），不再读写
-    # change.human_gate。
+    # （复用 transition / rerun 语义），不再读写 change.human_gate。
+    #
+    # task-03（D-004 / 2026-08-14-change-center-conversation-driven design §5 P2）：
+    # 通过/打回只落审批记录 + 阶段状态，**不再自动派发 agent**。通过类走
+    # ``transition``（不派发）+ ``_upsert_projection_progress``（投影收敛）；
+    # 打回类走 ``_record_stage_rework``（只记录回退，不派发）。``rerun_stage`` /
+    # ``transition_with_dispatch`` 仍保留供 MCP advance_change_stage /
+    # submit_stage_review 等外部显式调用方使用。
+
+    async def _record_stage_rework(
+        self,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+        stage: str,
+        *,
+        comment: str | None = None,
+        user_id: uuid.UUID | None = None,
+    ) -> Change:
+        """打回类审批：记录回退到 ``stage`` 的 rework 信息（不派发 agent，D-004 task-03）。
+
+        语义与 ``rerun_stage`` 的落库段（review_history rerun 条目 + ``last_review``
+        + audit log）保持一致，但**不派发 agent**——审批打回只落状态，agent 由
+        会话驱动继续（design §2 闭环）。``rerun_stage`` 保留原样供 MCP 等外部
+        显式调用方使用（task-08 / tools.py:submit_stage_review）。
+
+        不改 ``current_stage``：打回目标/回退语义与既有 ``rerun_stage`` 一致
+        （constraint：只删派发，不改回退目标）。
+        """
+        change = await self.get(workspace_id, change_id)
+
+        # 1. Record comment to stages.review_history（对齐 rerun_stage:1861 同段）
+        stages = dict(change.stages or {})
+        review_history = stages.get("review_history", [])
+        review_history.append(
+            {
+                "action": "rerun",
+                "stage": stage,
+                "comment": comment,
+                "at": datetime.now(UTC).isoformat(),
+            }
+        )
+        stages["review_history"] = review_history
+
+        # 2. Update stages.last_review
+        stages["last_review"] = {
+            "action": "rerun",
+            "stage": stage,
+            "comment": comment,
+            "at": datetime.now(UTC).isoformat(),
+        }
+        change.stages = stages
+        change.updated_at = datetime.now(UTC)
+        self._session.add(change)
+
+        # 3. Write audit log
+        from app.modules.workflow.model import AuditLog
+
+        audit_entry = AuditLog(
+            id=uuid.uuid4(),
+            workspace_id=workspace_id,
+            actor_id=user_id,
+            action="change.rerun_stage",
+            resource_type="change",
+            resource_id=change.id,
+            details_json=json.dumps({"stage": stage, "comment": comment}),
+        )
+        self._session.add(audit_entry)
+
+        # 4. Commit DB changes（不派发）
+        await self._session.commit()
+        return change
+
+    async def _upsert_projection_progress(self, change: Change, new_stage: str) -> None:
+        """审批推进阶段后同步 upsert ``platform_change_progress`` 使读时投影收敛（R-09）。
+
+        D-004（design §5 P2 / §7.5）：审批通过推进 ``current_stage`` 时，同步写
+        平台进度镜像（source=platform，stage=新阶段，change_name=change 的 key，
+        workspace 隔离按 ``PlatformChangeProgressORM`` 复合键），使读侧
+        ``enrich_*``（latest_progress 覆盖，:1259-1271）立即投影新阶段，消除
+        「回显旧阶段/重复审批」窗口。
+
+        latest_progress 形状对齐 platform_sync serializeForSync 六表
+        （``changes[0].current_stage`` 即读侧投影源，``_extract_current_stage``）。
+        已有行（agent 上行过）→ 深拷贝原 latest_progress 仅更新 current_stage，
+        不覆盖丢失其它结构；无行 → 构造最小六表 payload。
+
+        best-effort（constraint）：失败仅告警，不阻断审批主流程。
+        """
+        try:
+            stmt = select(PlatformChangeProgressORM).where(
+                col(PlatformChangeProgressORM.workspace_id) == change.workspace_id,
+                col(PlatformChangeProgressORM.change_name) == change.change_key,
+            )
+            row = (await self._session.execute(stmt)).scalar_one_or_none()
+
+            if row is not None and isinstance(row.latest_progress, dict):
+                payload = copy.deepcopy(row.latest_progress)
+                changes = payload.get("changes")
+                if isinstance(changes, list) and changes and isinstance(changes[0], dict):
+                    changes[0]["current_stage"] = new_stage
+                else:
+                    payload["changes"] = [
+                        {
+                            "name": change.change_key,
+                            "current_stage": new_stage,
+                            "status": "in_progress",
+                        }
+                    ]
+                row.latest_progress = payload
+                await self._session.commit()
+                return
+
+            self._session.add(
+                PlatformChangeProgressORM(
+                    id=uuid.uuid4(),
+                    workspace_id=change.workspace_id,
+                    change_name=change.change_key,
+                    latest_progress={
+                        "project": {"name": change.change_key},
+                        "changes": [
+                            {
+                                "name": change.change_key,
+                                "current_stage": new_stage,
+                                "status": "in_progress",
+                            }
+                        ],
+                        "stages": [],
+                        "steps": [],
+                        "batch_progress": [],
+                        "approvals": [],
+                    },
+                    last_pushed_at=None,
+                    last_pusher="platform",
+                )
+            )
+            await self._session.commit()
+        except Exception as exc:
+            await self._session.rollback()
+            log.warning(
+                "review_projection_upsert_failed",
+                change_id=str(change.id),
+                change_key=change.change_key,
+                error=str(exc),
+            )
 
     async def _assert_pending_review(
         self,
@@ -1509,6 +1735,129 @@ class ChangeService:
             )
         return change
 
+    @staticmethod
+    def _build_review_notify_message(
+        change_key: str,
+        stage_label: str,
+        *,
+        passed: bool,
+        decision: str,
+        comment: str | None,
+    ) -> str:
+        """组装审批注入消息（D-006@v2 / design §5 P5 固定格式）。
+
+        格式：``[平台审批] 变更 <change_key> 的 <阶段> 审批已<通过/打回（decision）>。<意见>。请继续推进。``
+        ``passed=True`` → 「通过」；``passed=False`` → 「打回（<decision>）」。comment 为
+        None 时省略意见段（不留双句号）。消息固定由后端拼，前端不拼（constraint）。
+        """
+        outcome = "通过" if passed else f"打回（{decision}）"
+        opinion = f"{comment}。" if comment else ""
+        return (
+            f"[平台审批] 变更 {change_key} 的 {stage_label} 审批已{outcome}。{opinion}请继续推进。"
+        )
+
+    async def _maybe_notify_session(
+        self,
+        workspace_id: uuid.UUID,
+        change: Change,
+        stage_label: str,
+        *,
+        passed: bool,
+        decision: str,
+        comment: str | None,
+        notify_session: bool,
+    ) -> dict[str, str | bool | None]:
+        """审批落库后按需向绑定会话注入审批消息（D-006@v2）。
+
+        ``notify_session=False``（请求显式关闭）→ 不注入，返回
+        ``{"notified_session": False, "notify_error": None}``。否则组装固定格式
+        消息并交给 :meth:`_notify_bound_session`（服务身份，best-effort 三类降级）。
+        返回 ``notified_session`` / ``notify_error`` 供审批响应透传。
+        """
+        if not notify_session:
+            return {"notified_session": False, "notify_error": None}
+        message = self._build_review_notify_message(
+            change.change_key,
+            stage_label,
+            passed=passed,
+            decision=decision,
+            comment=comment,
+        )
+        notified, notify_error = await self._notify_bound_session(workspace_id, change, message)
+        return {"notified_session": notified, "notify_error": notify_error}
+
+    async def _notify_bound_session(
+        self,
+        workspace_id: uuid.UUID,
+        change: Change,
+        message: str,
+    ) -> tuple[bool, str | None]:
+        """以服务身份向 change_session_links 最新绑定会话注入审批消息（D-006@v2）。
+
+        取该 change 最新一条 link 的 session（design §8：``created_at DESC LIMIT 1``）；
+        无绑定 → ``(False, None)``（不注入，前端按 notified_session=false 处理）。
+
+        有绑定 → 复用 ``SessionService.inject_session_as_service``（服务身份，绕过
+        ``_get_owned_session_for_update`` 用户归属校验——多成员工作区审批人可≠会话
+        创建人）。best-effort（R-03）：三类降级映射——
+          ``DaemonSessionTurnConflict`` → ``"turn_conflict"``（agent 忙）
+          ``DaemonSessionNotActive`` → ``"session_inactive"``
+          其它异常 → ``"inject_failed"``
+        注入失败**不回滚审批**（审批记录/阶段状态已落库）。
+
+        Args:
+            workspace_id: 工作区 id（仅日志）。
+            change: 已落库的 Change（取 change_key / id）。
+            message: 固定格式注入消息（后端拼，前端不拼）。
+
+        Returns:
+            ``(notified_session, notify_error)``。
+        """
+        try:
+            stmt = (
+                select(ChangeSessionLink)
+                .where(col(ChangeSessionLink.change_id) == change.id)
+                .order_by(col(ChangeSessionLink.created_at).desc())
+                .limit(1)
+            )
+            link = (await self._session.execute(stmt)).scalars().first()
+            if link is None:
+                return False, None
+        except Exception as exc:
+            log.warning(
+                "change.notify_session_lookup_failed",
+                workspace_id=str(workspace_id),
+                change_id=str(change.id),
+                error=str(exc),
+            )
+            return False, "inject_failed"
+
+        from app.modules.daemon.session.service import (
+            DaemonSessionNotActive,
+            DaemonSessionTurnConflict,
+            SessionService,
+        )
+
+        try:
+            await SessionService(self._session).inject_session_as_service(
+                link.session_id, prompt=message
+            )
+            return True, None
+        except DaemonSessionTurnConflict:
+            return False, "turn_conflict"
+        except DaemonSessionNotActive:
+            return False, "session_inactive"
+        except Exception as exc:
+            log.warning(
+                "change.notify_session_inject_failed",
+                workspace_id=str(workspace_id),
+                change_id=str(change.id),
+                change_key=change.change_key,
+                session_id=str(link.session_id),
+                error=str(exc),
+            )
+            return False, "inject_failed"
+
     async def proposal_review(
         self,
         workspace_id: uuid.UUID,
@@ -1516,6 +1865,8 @@ class ChangeService:
         decision: str,
         comment: str | None,
         user_id: uuid.UUID,
+        *,
+        notify_session: bool = True,
     ) -> dict:
         change = await self._assert_pending_review(
             workspace_id, change_id, PendingReview.PROPOSAL_REVIEW
@@ -1545,26 +1896,47 @@ class ChangeService:
         await self._session.commit()
 
         if decision == "approve":
-            # brainstorm 完成且用户确认 → 推进到 plan（dispatch plan agent）
-            return await self.transition_with_dispatch(
+            # D-004（task-03）：审批通过只推进阶段（落 current_stage + 投影收敛），
+            # 不自动派发 agent——agent 由会话驱动继续（design §2 / §5 P2）。
+            change = await self.transition(
                 workspace_id=workspace_id,
                 change_id=change_id,
                 target_stage="plan",
                 user_role="admin",
                 reason=comment or "proposal approved",
-                user_id=user_id,
             )
-        # revise / unclear → 重新跑 brainstorm agent（保持 brainstorm stage）
-        r = await self.rerun_stage(
+            await self._upsert_projection_progress(change, "plan")
+            notify = await self._maybe_notify_session(
+                workspace_id,
+                change,
+                "proposal_review",
+                passed=True,
+                decision=decision,
+                comment=comment,
+                notify_session=notify_session,
+            )
+            return {"change": change, "agent_dispatch": None, **notify}
+        # revise / unclear → 回退到 brainstorm 重跑（保持 brainstorm stage，只记录不派发）
+        r = await self._record_stage_rework(
             workspace_id=workspace_id,
             change_id=change_id,
             stage="brainstorm",
             comment=comment,
             user_id=user_id,
         )
+        notify = await self._maybe_notify_session(
+            workspace_id,
+            r,
+            "proposal_review",
+            passed=False,
+            decision=decision,
+            comment=comment,
+            notify_session=notify_session,
+        )
         return {
-            "change": r.change,
-            "agent_dispatch": r.agent_dispatch,
+            "change": r,
+            "agent_dispatch": None,
+            **notify,
         }
 
     async def plan_review(
@@ -1574,6 +1946,8 @@ class ChangeService:
         decision: str,
         comment: str | None,
         user_id: uuid.UUID,
+        *,
+        notify_session: bool = True,
     ) -> dict:
         change = await self._assert_pending_review(
             workspace_id, change_id, PendingReview.PLAN_REVIEW
@@ -1604,39 +1978,69 @@ class ChangeService:
         await self._session.commit()
 
         if decision == "approve":
-            # plan 完成且用户确认 → 推进到 execute（dispatch execute agent）
-            return await self.transition_with_dispatch(
+            # D-004（task-03）：审批通过只推进阶段，不自动派发 agent。
+            change = await self.transition(
                 workspace_id=workspace_id,
                 change_id=change_id,
                 target_stage="execute",
                 user_role="admin",
                 reason=comment or "plan approved",
-                user_id=user_id,
             )
+            await self._upsert_projection_progress(change, "execute")
+            notify = await self._maybe_notify_session(
+                workspace_id,
+                change,
+                "plan_review",
+                passed=True,
+                decision=decision,
+                comment=comment,
+                notify_session=notify_session,
+            )
+            return {"change": change, "agent_dispatch": None, **notify}
         if decision == "replan":
-            # 保持 plan stage，重新跑 plan agent
-            r = await self.rerun_stage(
+            # 保持 plan stage，重新跑 plan agent（只记录，不派发）
+            r = await self._record_stage_rework(
                 workspace_id=workspace_id,
                 change_id=change_id,
                 stage="plan",
                 comment=comment,
                 user_id=user_id,
             )
+            notify = await self._maybe_notify_session(
+                workspace_id,
+                r,
+                "plan_review",
+                passed=False,
+                decision=decision,
+                comment=comment,
+                notify_session=notify_session,
+            )
             return {
-                "change": r.change,
-                "agent_dispatch": r.agent_dispatch,
+                "change": r,
+                "agent_dispatch": None,
+                **notify,
             }
-        # back_to_propose / back_to_brainstorm → 回到 brainstorm 重跑
-        r = await self.rerun_stage(
+        # back_to_propose / back_to_brainstorm → 回到 brainstorm 重跑（只记录，不派发）
+        r = await self._record_stage_rework(
             workspace_id=workspace_id,
             change_id=change_id,
             stage="brainstorm",
             comment=comment,
             user_id=user_id,
         )
+        notify = await self._maybe_notify_session(
+            workspace_id,
+            r,
+            "plan_review",
+            passed=False,
+            decision=decision,
+            comment=comment,
+            notify_session=notify_session,
+        )
         return {
-            "change": r.change,
-            "agent_dispatch": r.agent_dispatch,
+            "change": r,
+            "agent_dispatch": None,
+            **notify,
         }
 
     async def human_test(
@@ -1646,6 +2050,8 @@ class ChangeService:
         result: str,
         comment: str | None,
         user_id: uuid.UUID,
+        *,
+        notify_session: bool = True,
     ) -> dict:
         change = await self._assert_pending_review(
             workspace_id, change_id, PendingReview.HUMAN_TEST
@@ -1675,39 +2081,69 @@ class ChangeService:
         await self._session.commit()
 
         if result == "pass":
-            # verify 完成且人工验收通过 → 推进到 archive（dispatch archive agent）
-            return await self.transition_with_dispatch(
+            # D-004（task-03）：验收通过只推进阶段，不自动派发 agent。
+            change = await self.transition(
                 workspace_id=workspace_id,
                 change_id=change_id,
                 target_stage="archive",
                 user_role="admin",
                 reason=comment or "human test passed",
-                user_id=user_id,
             )
+            await self._upsert_projection_progress(change, "archive")
+            notify = await self._maybe_notify_session(
+                workspace_id,
+                change,
+                "human_test",
+                passed=True,
+                decision=result,
+                comment=comment,
+                notify_session=notify_session,
+            )
+            return {"change": change, "agent_dispatch": None, **notify}
         if result == "bug":
-            # 回到 execute 重跑
-            r = await self.rerun_stage(
+            # 回到 execute 重跑（只记录，不派发）
+            r = await self._record_stage_rework(
                 workspace_id=workspace_id,
                 change_id=change_id,
                 stage="execute",
                 comment=comment,
                 user_id=user_id,
             )
+            notify = await self._maybe_notify_session(
+                workspace_id,
+                r,
+                "human_test",
+                passed=False,
+                decision=result,
+                comment=comment,
+                notify_session=notify_session,
+            )
             return {
-                "change": r.change,
-                "agent_dispatch": r.agent_dispatch,
+                "change": r,
+                "agent_dispatch": None,
+                **notify,
             }
-        # doc_mismatch → 回到 brainstorm 重跑
-        r = await self.rerun_stage(
+        # doc_mismatch → 回到 brainstorm 重跑（只记录，不派发）
+        r = await self._record_stage_rework(
             workspace_id=workspace_id,
             change_id=change_id,
             stage="brainstorm",
             comment=comment,
             user_id=user_id,
         )
+        notify = await self._maybe_notify_session(
+            workspace_id,
+            r,
+            "human_test",
+            passed=False,
+            decision=result,
+            comment=comment,
+            notify_session=notify_session,
+        )
         return {
-            "change": r.change,
-            "agent_dispatch": r.agent_dispatch,
+            "change": r,
+            "agent_dispatch": None,
+            **notify,
         }
 
     # ── Stage completion ────────────────────────────────────────────────
@@ -1960,6 +2396,8 @@ class ChangeService:
         change_id: uuid.UUID,
         comment: str | None,
         user_id: uuid.UUID,
+        *,
+        notify_session: bool = True,
     ) -> dict:
         """归档确认（D-004@v2 / D-007）。
 
@@ -2000,7 +2438,18 @@ class ChangeService:
 
         # Hub 侧仅记录确认状态，不 dispatch、不写 human_gate（D-007：archive
         # 的 sillyspec CLI --confirm 由 daemon agent 执行）。
+        # task-03（D-004）：返回 agent_dispatch 置空（null），与其它审批方法一致。
+        notify = await self._maybe_notify_session(
+            workspace_id,
+            change,
+            "archive_confirm",
+            passed=True,
+            decision="archive_confirm",
+            comment=comment,
+            notify_session=notify_session,
+        )
         return {
             "change": change,
-            "agent_dispatch": {"dispatched": False, "reason": "archive_confirmed_hub_side"},
+            "agent_dispatch": None,
+            **notify,
         }

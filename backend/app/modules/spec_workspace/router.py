@@ -261,9 +261,17 @@ async def sync_spec_workspace_incremental(
     提示人工拍板，design §7 定义）；containment / ``.runtime`` 越界 → 422 AppError
     透传（``HTTP_422_SPEC_BUNDLE_INVALID``，对齐旧 tar 端点校验机制）。
     ``X-Change-Write-Id`` 头（可选）让 apply_ops 循环内逐文件回写 files_processed。
+    ``change_dirs``（change 2026-08-14-change-center-conversation-driven / D-005@v1）：
+    daemon 标注的本次涉及变更目录名集合，透传 apply_ops 落盘后触发 scoped reparse
+    （无标注时 apply_ops 扫 ops 路径 ``changes/`` 前缀兜底，行为等价）。
     """
     service = SpecWorkspaceService(session)
-    result = await service.apply_ops(workspace_id, payload.ops, change_write_id=change_write_id)
+    result = await service.apply_ops(
+        workspace_id,
+        payload.ops,
+        change_write_id=change_write_id,
+        change_dirs=payload.change_dirs,
+    )
     return SpecIncrementalSyncResponse(
         ok=True,
         new_versions=result["new_versions"],

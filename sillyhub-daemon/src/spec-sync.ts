@@ -488,7 +488,10 @@ export class SpecPushConflict extends Error {
  *      逐文件 hash（mtime 未变复用缓存 hash，R-05）→ 与缓存 diff 生成 ops
  *      （新文件 add / 内容变 update / 缓存有本地无 delete / 同 hash 异路径 rename 不重传
  *      内容，R-02 注意 Windows 大小写）；op 带 per-file base_version（缓存 version，无 0）。
- *   4. `client.postSpecSyncIncremental(wsId, ops, changeWriteId)`：
+ *   4. `client.postSpecSyncIncremental(wsId, ops, changeWriteId, changeDirs)`：
+ *      - changeDirs（task-01 / D-005@v1）：从 ops 提取的本次涉及变更目录名集合
+ *        （`changes/<name>/` 与 `changes/archive/<name>/` 前缀分组 key，去重成 string[]；
+ *        best-effort 计算失败降级 []，backend 无标注路径检测兜底，不阻断同步主流程）。
  *      - 成功 → 按 new_versions 回写缓存 version（+ 刷新 hash/mtime），返回 { ok: true, reparsed: 0 }。
  *      - conflict=true → 抛 SpecPushConflict（调用方 catch 后 warn 不阻塞，人工拍板 NFR-02）。
  *      - 404（旧后端无端点）/ 网络失败 / 端点错误 → **回退旧 tar** 全量，写全量快照缓存。
@@ -555,8 +558,18 @@ export async function postSpecSync(
     return { ...resp, filesTotal: Object.keys(fullManifest.files).length };
   }
 
+  // D-005@v1（task-01）：从本次增量 ops 提取 change_dirs（`changes/<name>/` 与
+  // `changes/archive/<name>/` 前缀分组 key，去重），随请求体透传给 backend 触发 scoped
+  // reparse。best-effort：计算失败降级 []（backend 无标注路径检测兜底），不阻断同步主流程。
+  let changeDirs: string[] = [];
   try {
-    const result = await client.postSpecSyncIncremental(wsId, ops, changeWriteId);
+    changeDirs = extractChangeDirs(ops);
+  } catch (e) {
+    console.warn('spec_sync: change_dirs_extract_failed_fallback_empty', wsId, e);
+  }
+
+  try {
+    const result = await client.postSpecSyncIncremental(wsId, ops, changeWriteId, changeDirs);
     if (result.conflict) {
       throw new SpecPushConflict(wsId, result.server_versions ?? {});
     }
@@ -641,7 +654,8 @@ async function computeIncrementalOps(
       path: r.oldPath,
       new_path: r.newPath,
       base_version: cached.files[r.oldPath]!.version,
-      mtime: localFiles[r.newPath]!.mtime,
+      // ms → s：backend _apply_file_mtime 的 os.utime 要 Unix 秒（ql-008 毫秒 bug 修复）
+      mtime: Math.floor(localFiles[r.newPath]!.mtime / 1000),
     });
   }
   for (const p of cacheSet) {
@@ -655,7 +669,8 @@ async function computeIncrementalOps(
           hash: localFiles[p]!.hash,
           content: contentBufs.get(p)!.toString('base64'),
           base_version: cachedEntry.version,
-          mtime: localFiles[p]!.mtime,
+          // ms → s（os.utime 要秒）
+          mtime: Math.floor(localFiles[p]!.mtime / 1000),
         });
       }
     } else {
@@ -672,12 +687,56 @@ async function computeIncrementalOps(
         hash: localFiles[p]!.hash,
         content: contentBufs.get(p)!.toString('base64'),
         base_version: 0,
-        mtime: localFiles[p]!.mtime,
+        // ms → s（os.utime 要秒）
+        mtime: Math.floor(localFiles[p]!.mtime / 1000),
       });
     }
   }
 
   return { ops, localFiles };
+}
+
+/**
+ * 从增量 ops 提取本次涉及的变更目录名集合（change_dirs 标注，D-005@v1 / task-01）。
+ *
+ * 对每个 op 的路径（rename 含新旧路径），取 `changes/<name>/` 或 `changes/archive/<name>/`
+ * 前缀分组的 key（去掉前缀、取第一段目录名），去重成 string[]。归档路径
+ * （`changes/archive/<name>/`）同样归入该 name——backend（task-02）据 ops 判定路径是否含
+ * archive 段走全量 reparse，daemon 侧只需把 name 传上来。非 changes 前缀路径（如
+ * `.runtime/`、`docs/`、`changes` 本身）不进 change_dirs。
+ *
+ * 路径分隔符防御：walkDir 的 relPath 已是 POSIX `/`，但 manifest 缓存 / 调用方可能传入
+ * Windows `\`，统一归一化再匹配前缀。纯函数不抛错；调用方仍按 best-effort 包裹降级 []。
+ *
+ * 例：
+ *   - `changes/2026-08-14-foo/design.md`           → "2026-08-14-foo"
+ *   - `changes/archive/2026-08-13-bar/design.md`   → "2026-08-13-bar"
+ *   - `.runtime/spec-version.json` / `docs/a.md`    → 不进
+ */
+export function extractChangeDirs(ops: FileOp[]): string[] {
+  const dirs = new Set<string>();
+  for (const op of ops) {
+    collectChangeDir(dirs, op.path);
+    if (op.new_path) collectChangeDir(dirs, op.new_path);
+  }
+  return [...dirs];
+}
+
+/** 单个 op 路径 → 变更目录名（非 `changes/` 前缀不进）。 */
+function collectChangeDir(dirs: Set<string>, p: string): void {
+  // Windows `\` 与 POSIX `/` 统一为 `/`（walkDir relPath 已是 `/`，此处仅防御）。
+  const norm = p.split(/[\\/]/).join('/');
+  // 归档前缀必须先判（`changes/archive/` 以 `changes/` 开头，倒序会误取 `archive`）。
+  let rest: string;
+  if (norm.startsWith('changes/archive/')) {
+    rest = norm.slice('changes/archive/'.length);
+  } else if (norm.startsWith('changes/')) {
+    rest = norm.slice('changes/'.length);
+  } else {
+    return; // 非 changes 路径不进 change_dirs
+  }
+  const first = rest.split('/')[0];
+  if (first) dirs.add(first);
 }
 
 /** 由本地文件态 + 缓存版本 + 服务器 new_versions 组装新缓存。 */

@@ -896,8 +896,10 @@ async def get_run_logs(
 #
 # - ``advance_change_stage``（scope=dispatch）：包装 ``ChangeService.transition_with_dispatch``
 #   → ``dispatch_next_step`` 的 single/team 分流（task-07）。
-# - ``submit_stage_review``（scope=dispatch）：包装 review 四方法（service.py:1309+
-#   proposal_review/plan_review/human_test/archive_confirm，task-08）。
+# - ``submit_stage_review``（scope=dispatch）：包装 review 四方法（service.py 的
+#   proposal_review/plan_review/human_test/archive_confirm）。D-004（task-03/04）：
+#   审批只落记录+状态不派发 agent，返回 agent_dispatch 恒空；D-006@v2：notify_session
+#   透传 + notified_session/notify_error 随响应返回。
 # - ``run_verify_gate``（scope=read）：读 ``AgentRun.gate_result`` / 软调 sillyspec gate
 #   verify（复用 ``_run_gate_via_delegate`` RPC 骨架，task-09 / design §6.2）。
 # - ``get_change_stage``（scope=read）：只读组合 ``ChangeService.get`` + stages JSON +
@@ -1031,13 +1033,16 @@ async def submit_stage_review(
     stage: str,
     decision: str,
     comment: str | None = None,
+    notify_session: bool = True,
     ctx: Context | None = None,
 ) -> dict:
     """提交阶段审核（需要 dispatch scope）。
 
-    包装 review 四方法（service.py:1309+），按 ``stage`` 分发，``decision`` 通过则内部
-    调 ``transition_with_dispatch`` 推进，打回则调 ``rerun_stage`` 回退（task-08 /
-    design §6.1 / FR-04）。单步审核，不重新引入 auto_dispatch。
+    包装 review 四方法（service.py 的 proposal_review/plan_review/human_test/
+    archive_confirm），按 ``stage`` 分发。**审批只落审批记录 + 阶段状态，不派发
+    agent**（D-004，task-03/04 联动：service 通过类走 ``transition`` 不派发、打回走
+    ``_record_stage_rework``，返回 ``agent_dispatch`` 恒为 None）。单步审核，不重新
+    引入 auto_dispatch。
 
     ``stage`` 路由 + ``decision`` 词表（对齐各 review 方法 ``target_action_map``）：
       - ``proposal`` → ``proposal_review``，decision ∈ approve/revise/unclear
@@ -1046,10 +1051,18 @@ async def submit_stage_review(
       - ``archive_confirm`` → ``archive_confirm``，``decision`` 忽略（该方法无 decision 入参，
         仅 comment + user_id；调用方传 "confirm" 占位即可）
 
+    ``notify_session``（默认 True，D-006@v2）：审批落库后以服务身份向绑定会话注入
+    审批消息（change_session_links 最新一条，best-effort 三类降级）；注入失败不回滚
+    审批，结果随响应 ``notified_session`` / ``notify_error`` 返回（对齐 HTTP
+    ReviewResponse）。
+
     异常 ``stage`` → 400。decision 不在词表内由 service ``target_action_map[decision]``
     KeyError 抛出（与 HTTP 端点同行为，FastMCP 转 MCP error）。actor=``McpToken.created_by``。
 
-    返回 ``{change, agent_dispatch}``（对齐 HTTP ``ReviewResponse``）。
+    返回 ``{change, agent_dispatch, notified_session, notify_error}``（对齐 HTTP
+    ``ReviewResponse``）。``agent_dispatch`` **恒空**（``dispatched: False``、其余字段
+    None）——task-03/04 起审批不再派发 agent，保留该字段仅为契约兼容（第三方按
+    ``dispatched`` 判断不会误判真派发）。
     """
     auth = _auth_from_ctx(ctx)
     require_mcp_scope(auth, MCP_SCOPE_DISPATCH)
@@ -1061,21 +1074,42 @@ async def submit_stage_review(
         svc = ChangeService(session)
         if stage == "proposal":
             result = await svc.proposal_review(
-                auth.workspace_id, change_id, decision, comment, actor_user_id
+                auth.workspace_id,
+                change_id,
+                decision,
+                comment,
+                actor_user_id,
+                notify_session=notify_session,
             )
         elif stage == "plan":
             result = await svc.plan_review(
-                auth.workspace_id, change_id, decision, comment, actor_user_id
+                auth.workspace_id,
+                change_id,
+                decision,
+                comment,
+                actor_user_id,
+                notify_session=notify_session,
             )
         elif stage == "human_test":
             # human_test 第三参数 service 命名为 result（语义即 decision），透传。
             result = await svc.human_test(
-                auth.workspace_id, change_id, decision, comment, actor_user_id
+                auth.workspace_id,
+                change_id,
+                decision,
+                comment,
+                actor_user_id,
+                notify_session=notify_session,
             )
         elif stage == "archive_confirm":
-            # archive_confirm 无 decision 入参（service.py:1694 仅 comment + user_id），
+            # archive_confirm 无 decision 入参（service.py 仅 comment + user_id），
             # decision 忽略——调用方传 "confirm" 占位。
-            result = await svc.archive_confirm(auth.workspace_id, change_id, comment, actor_user_id)
+            result = await svc.archive_confirm(
+                auth.workspace_id,
+                change_id,
+                comment,
+                actor_user_id,
+                notify_session=notify_session,
+            )
         else:
             raise AppError(
                 f"unsupported review stage: {stage}",
@@ -1089,7 +1123,12 @@ async def submit_stage_review(
         change = result["change"]
         return {
             "change": await _change_read_dict(session, change),
-            "agent_dispatch": _shape_agent_dispatch(result.get("agent_dispatch")),
+            # D-004（task-03/04）：审批不派发 agent，service 返回 agent_dispatch 恒为
+            # None → 这里恒空（dispatched: False、其余字段 None）。保留字段仅为契约
+            # 兼容；notify 结果随审批响应透传（D-006@v2，对齐 HTTP ReviewResponse）。
+            "agent_dispatch": _shape_agent_dispatch(None),
+            "notified_session": result["notified_session"],
+            "notify_error": result.get("notify_error"),
         }
 
 

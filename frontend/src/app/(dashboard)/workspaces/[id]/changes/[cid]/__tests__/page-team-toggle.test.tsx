@@ -1,190 +1,225 @@
-// task-08（2026-08-11-change-detail-layout-rework / §9 测试迁移 / R-06 DOM 契约）：
-// team toggle 已从 page.tsx 迁入 ChangeStageActions（task-04），本测试相应重写为
-// 直接渲染 ChangeStageActions 组件——不再整页 render page.tsx，避免页面异步加载
-// 带来的 act() 警告与 3s+ 慢测试，聚焦 team toggle 可见性矩阵本身。
+// task-10（2026-08-14-change-center-conversation-driven / D-003@v1 / D-006@v2）：
+// 详情页已退化——删除全部执行控制（推进 / 重新派发 / 验证门禁 / 选档案 / 团队配置，
+// 含 quick 分支），保留只读展示区 + 人工审批卡（单端点 submitStageReview + notify_session）。
 //
-// 覆盖（design §7 ChangeStageActionsProps + R-06 硬 DOM 契约）：
-//   - execute stage：渲染 role=switch + aria-label=用团队执行
-//   - verify stage：渲染 + 可见文案「用团队验证」
-//   - plan + pending_review=plan_review：渲染（即将进 execute）
-//   - verify + pending_review=human_test：渲染（verify 流转用）
-//   - brainstorm / plan（无 pending）/ archived：不渲染
-//   - 开启 toggle 后渲染 StageTeamConfig（+ 添加 Worker / Stage Worker 预设）
+// 本测试为整页回归：渲染 [cid]/page.tsx，断言
+//   1. 只读展示区保留（文件卡/会话卡/审核历史/任务看板/执行日志）
+//   2. 无任何执行控制按钮（触发智能体 / 推进到 / 运行验证门禁 / 团队 switch）
+//   3. 审批卡「通过/打回并通知绑定会话」→ submitStageReview(action, undefined, notify_session=true)
+//   4. 三类降级提示（session_inactive / turn_conflict）随响应渲染
+//
+// 只读卡片组件全部 stub（不测其内部），ChangeStageActions 保持真实（审批卡契约）。
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { describe, it, expect, vi } from "vitest";
-import { useState } from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
-
-import { ChangeStageActions } from "@/components/changes/detail/change-stage-actions";
+import ChangeDetailPage from "@/app/(dashboard)/workspaces/[id]/changes/[cid]/page";
 import type { ChangeRead, DispatchResponse } from "@/lib/changes";
+import type { AgentSessionListItem } from "@/lib/daemon";
 
-// 2026-08-12-dispatch-bind-agent-profile：ChangeStageActions 内部用 AgentProfileSelect
-// （react-query hook），mock 掉避免 QueryClientProvider 依赖（聚焦 team toggle 矩阵）。
-vi.mock("@/components/agent-profile-select", () => ({
-  AgentProfileSelect: ({ value }: { value: string | null }) => (
-    <div data-testid="profile-select" data-value={value ?? ""} />
-  ),
+// ── mocks（hoisted，让 mock 工厂能引用同一组 vi.fn）──────────────────────
+const mocks = vi.hoisted(() => ({
+  getChange: vi.fn(),
+  getAgentStatus: vi.fn(),
+  submitStageReview: vi.fn(),
+  listWorkspaceAgentSessions: vi.fn(),
+  getTaskBoard: vi.fn(),
 }));
 
-// 轻量替身：StageTeamConfig 内部依赖较重，mock 成可断言 testid + 真实文案
-// （+ 添加 Worker / Stage Worker 预设），不断言 aria 契约（那是 ChangeStageActions 自身的 switch）。
-vi.mock("@/components/stage-team-config", () => ({
-  StageTeamConfig: () => (
-    <div data-testid="stage-team-config">
-      <p>Stage Worker 预设</p>
-      <button>+ 添加 Worker</button>
-    </div>
-  ),
+vi.mock("@/lib/changes", () => ({
+  getChange: mocks.getChange,
+  getAgentStatus: mocks.getAgentStatus,
+  submitStageReview: mocks.submitStageReview,
 }));
 
-// AgentProviderSelect / AgentModelInput：重依赖替身（本测试不关心其内部）
-vi.mock("@/components/AgentProviderSelect", () => ({
-  AgentProviderSelect: ({ value }: { value: string | null }) => (
-    <div data-testid="provider-select" data-value={value ?? ""} />
-  ),
-}));
-vi.mock("@/components/AgentModelInput", () => ({
-  AgentModelInput: ({ value }: { value: string | null }) => (
-    <div data-testid="model-input" data-value={value ?? ""} />
-  ),
+vi.mock("@/lib/daemon", () => ({
+  listWorkspaceAgentSessions: mocks.listWorkspaceAgentSessions,
 }));
 
-function makeChange(over: Partial<ChangeRead>): ChangeRead {
+vi.mock("@/lib/tasks", () => ({
+  getTaskBoard: mocks.getTaskBoard,
+}));
+
+// 只读卡片 stub：聚焦详情页退化 + 审批卡，不测这些组件内部
+vi.mock("@/components/changes/detail/change-agent-run-log", () => ({
+  ChangeAgentRunLog: () => <div data-testid="change-agent-run-log" />,
+}));
+vi.mock("@/components/changes/detail/change-files-card", () => ({
+  ChangeFilesCard: () => <div data-testid="change-files-card" />,
+}));
+vi.mock("@/components/changes/detail/change-review-history-card", () => ({
+  ChangeReviewHistoryCard: () => <div data-testid="change-review-history-card" />,
+  normalizeReviewHistory: () => [],
+}));
+vi.mock("@/components/changes/detail/change-sessions-card", () => ({
+  ChangeSessionsCard: () => <div data-testid="change-sessions-card" />,
+}));
+vi.mock("@/components/changes/detail/change-task-board-card", () => ({
+  ChangeTaskBoardCard: () => <div data-testid="change-task-board-card" />,
+}));
+
+vi.mock("next/link", () => ({
+  default: ({
+    children,
+    href,
+  }: {
+    children: React.ReactNode;
+    href: string;
+  }) => <a href={href}>{children}</a>,
+}));
+
+// ── fixtures ───────────────────────────────────────────────────────────────
+
+function makeChange(over: Partial<ChangeRead> = {}): ChangeRead {
   return {
-    current_stage: "execute",
-    pending_review: null,
+    id: "ch-1",
+    change_key: "2026-08-14-test-change",
+    title: "测试变更",
+    current_stage: "brainstorm",
+    pending_review: "proposal_review",
+    status: "in_progress",
+    location: "active",
+    change_type: null,
+    affected_components: ["frontend"],
+    updated_at: "2026-08-14T10:00:00Z",
+    stages: {},
     ...over,
   } as unknown as ChangeRead;
 }
 
-function makeProps(over: Record<string, unknown> = {}) {
+function makeSession(): AgentSessionListItem {
   return {
-    change: makeChange({}),
-    agentStatus: {
-      has_active_run: false,
-      config_enabled: true,
-    } as unknown as DispatchResponse,
-    nextStage: "verify",
-    verifyGate: null,
-    gateComment: "",
-    onGateCommentChange: vi.fn(),
-    onGateAction: vi.fn(),
-    onAdvance: vi.fn(),
-    onRunVerifyGate: vi.fn(),
-    onDispatch: vi.fn(),
-    transitioning: false,
-    dispatching: false,
-    advancing: false,
-    // 2026-08-12-dispatch-bind-agent-profile：ChangeStageActions Props 改选档案
-    // （去 stageProvider/stageModel，加 workspaceId/stageProfileId/onStageProfileChange）。
-    workspaceId: "ws-1",
-    stageProfileId: null,
-    onStageProfileChange: vi.fn(),
-    teamMode: false,
-    onTeamModeChange: vi.fn(),
-    stageWorkers: [],
-    onStageWorkersChange: vi.fn(),
-    ...over,
+    id: "sess-12345678",
+    provider: "claude",
+    status: "active",
+    turn_count: 3,
+    author: { user_id: "u1", display_name: "小明" },
+    last_active_at: "2026-08-14T09:00:00Z",
+    title: "帮我推进一下这个变更",
   };
 }
 
-describe("ChangeStageActions team toggle 可见性矩阵（task-08 迁移自 page-team-toggle）", () => {
-  it("execute stage 渲染 team toggle（role=switch + aria-label=用团队执行 + aria-checked=false）", () => {
-    render(
-      <ChangeStageActions
-        {...makeProps({ change: makeChange({ current_stage: "execute" }) })}
-      />,
-    );
-    const sw = screen.getByRole("switch", { name: "用团队执行" });
-    expect(sw).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByText(/用团队执行/)).toBeInTheDocument();
+/**
+ * 配置页面异步加载 mock。notify 控制 submitStageReview 的注入结果
+ * （默认成功注入，不触发降级）。
+ */
+function setup(opts: {
+  change?: ChangeRead;
+  notify?: { notified_session: boolean; notify_error: string | null };
+} = {}) {
+  const change = opts.change ?? makeChange();
+  mocks.getChange.mockResolvedValue(change);
+  mocks.getAgentStatus.mockResolvedValue({
+    change_id: "ch-1",
+    current_stage: change.current_stage,
+    has_active_run: false,
+    config_enabled: false,
+    last_dispatch: null,
+  } as unknown as DispatchResponse);
+  mocks.listWorkspaceAgentSessions.mockResolvedValue([makeSession()]);
+  mocks.getTaskBoard.mockResolvedValue(null);
+  mocks.submitStageReview.mockResolvedValue({
+    change,
+    agent_dispatch: null,
+    notified_session: opts.notify?.notified_session ?? true,
+    notify_error: opts.notify?.notify_error ?? null,
+  });
+}
+
+async function renderPage() {
+  render(<ChangeDetailPage params={{ id: "ws-1", cid: "ch-1" }} />);
+  await waitFor(() => expect(screen.getByText(/测试变更/)).toBeInTheDocument());
+}
+
+describe("变更详情页退化（task-10，D-003@v1）", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+    cleanup();
   });
 
-  it("verify stage 渲染 team toggle（可见文案切「用团队验证」）", () => {
-    render(
-      <ChangeStageActions
-        {...makeProps({
-          change: makeChange({ current_stage: "verify" }),
-          nextStage: "archive",
-        })}
-      />,
-    );
-    // aria-label 固定为「用团队执行」（R-06 契约），可见文案随 stage 切「验证」
-    expect(screen.getByRole("switch", { name: "用团队执行" })).toBeInTheDocument();
-    expect(screen.getByText(/用团队验证/)).toBeInTheDocument();
+  it("保留只读展示区：阶段步骤条 / 执行日志 / 文件卡 / 会话卡 / 审核历史 / 任务看板", async () => {
+    setup();
+    await renderPage();
+    expect(screen.getByTestId("change-agent-run-log")).toBeInTheDocument();
+    expect(screen.getByTestId("change-files-card")).toBeInTheDocument();
+    expect(screen.getByTestId("change-sessions-card")).toBeInTheDocument();
+    expect(screen.getByTestId("change-review-history-card")).toBeInTheDocument();
+    expect(screen.getByTestId("change-task-board-card")).toBeInTheDocument();
+    // 阶段步骤条（主线宏观进度，ChangeStageHeader 真实渲染；页头徽标同文案 → 用 getAllByText）
+    expect(screen.getAllByText("需求分析").length).toBeGreaterThan(0);
   });
 
-  it("plan + pending_review=plan_review 渲染 team toggle（即将进 execute）", () => {
-    render(
-      <ChangeStageActions
-        {...makeProps({
-          change: makeChange({ current_stage: "plan", pending_review: "plan_review" }),
-        })}
-      />,
-    );
-    expect(screen.getByRole("switch", { name: "用团队执行" })).toBeInTheDocument();
+  it("无任何执行控制按钮（触发/推进/验证门禁/团队 switch）", async () => {
+    setup();
+    await renderPage();
+    expect(screen.queryByText(/触发智能体/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/推进到/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/运行验证门禁/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   });
 
-  it("verify + pending_review=human_test 渲染 team toggle（verify 流转用）", () => {
-    render(
-      <ChangeStageActions
-        {...makeProps({
-          change: makeChange({ current_stage: "verify", pending_review: "human_test" }),
-          nextStage: "archive",
-        })}
-      />,
+  it("审批卡「通过并通知绑定会话」→ submitStageReview(action, notify_session=true)", async () => {
+    setup();
+    await renderPage();
+    expect(screen.getByText("四件套已生成，请确认")).toBeInTheDocument();
+    // 绑定会话只读展示（工作区最近活跃会话）
+    expect(screen.getByText(/帮我推进一下这个变更/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("通过并通知绑定会话"));
+    await waitFor(() =>
+      expect(mocks.submitStageReview).toHaveBeenCalledWith(
+        "ws-1",
+        "ch-1",
+        "proposal_approve",
+        undefined,
+        true,
+      ),
     );
-    expect(screen.getByRole("switch", { name: "用团队执行" })).toBeInTheDocument();
+    // 注入成功 → 成功提示
+    await waitFor(() =>
+      expect(screen.getByText(/审批已生效，已通知绑定会话/)).toBeInTheDocument(),
+    );
   });
 
-  it("brainstorm stage 不渲染 team toggle", () => {
-    render(
-      <ChangeStageActions
-        {...makeProps({ change: makeChange({ current_stage: "brainstorm" }) })}
-      />,
+  it("审批卡「打回并通知绑定会话」→ proposal_revise", async () => {
+    setup();
+    await renderPage();
+    fireEvent.click(screen.getByText("打回并通知绑定会话"));
+    await waitFor(() =>
+      expect(mocks.submitStageReview).toHaveBeenCalledWith(
+        "ws-1",
+        "ch-1",
+        "proposal_revise",
+        undefined,
+        true,
+      ),
     );
-    expect(screen.queryByRole("switch", { name: /用团队/ })).not.toBeInTheDocument();
   });
 
-  it("plan stage（无 plan_review pending）不渲染 team toggle", () => {
-    render(
-      <ChangeStageActions
-        {...makeProps({ change: makeChange({ current_stage: "plan", pending_review: null }) })}
-      />,
+  it("降级：session_inactive → 「绑定会话已结束，去会话页开启」", async () => {
+    setup({ notify: { notified_session: false, notify_error: "session_inactive" } });
+    await renderPage();
+    fireEvent.click(screen.getByText("通过并通知绑定会话"));
+    await waitFor(() =>
+      expect(
+        screen.getByText("绑定会话已结束，审批已生效，请去会话页开启新会话"),
+      ).toBeInTheDocument(),
     );
-    expect(screen.queryByRole("switch", { name: /用团队/ })).not.toBeInTheDocument();
   });
 
-  it("archived stage 不渲染 team toggle", () => {
-    render(
-      <ChangeStageActions
-        {...makeProps({ change: makeChange({ current_stage: "archive" }) })}
-      />,
+  it("降级：turn_conflict → 「agent 忙，稍后会话告知」", async () => {
+    setup({ notify: { notified_session: false, notify_error: "turn_conflict" } });
+    await renderPage();
+    fireEvent.click(screen.getByText("通过并通知绑定会话"));
+    await waitFor(() =>
+      expect(
+        screen.getByText("审批已生效，agent 忙，请稍后在会话中告知继续"),
+      ).toBeInTheDocument(),
     );
-    expect(screen.queryByRole("switch", { name: /用团队/ })).not.toBeInTheDocument();
-  });
-
-  it("开启 team toggle 后渲染 StageTeamConfig（+ 添加 Worker / Stage Worker 预设）", () => {
-    // ChangeStageActions 受控：用 Harness 包一层 useState 模拟 page 的 onTeamModeChange 接线，
-    // 点击 switch → setTeamMode(true) → StageTeamConfig 展开（与真实交互一致）
-    function Harness() {
-      const [teamMode, setTeamMode] = useState(false);
-      return (
-        <ChangeStageActions
-          {...makeProps({ change: makeChange({ current_stage: "execute" }) })}
-          teamMode={teamMode}
-          onTeamModeChange={setTeamMode}
-        />
-      );
-    }
-    render(<Harness />);
-    // 初始关闭：无 StageTeamConfig
-    expect(screen.queryByTestId("stage-team-config")).not.toBeInTheDocument();
-    // 点击开启
-    fireEvent.click(screen.getByRole("switch", { name: "用团队执行" }));
-    // 展开 StageTeamConfig
-    expect(screen.getByTestId("stage-team-config")).toBeInTheDocument();
-    expect(screen.getByText("+ 添加 Worker")).toBeInTheDocument();
-    expect(screen.getByText(/Stage Worker 预设/)).toBeInTheDocument();
   });
 });

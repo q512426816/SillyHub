@@ -101,7 +101,21 @@ review_round: 1 (Design Grill round-1: 1 P0 + 7 P1，本版据审查修订)
 | 修改 | frontend/src/lib/daemon.ts | agent-sessions 列表调用加 include_ended；injectSession 不再被审批卡直调（注入移后端） |
 | 修改 | frontend/src/lib/api-types.ts + backend/openapi.json | `pnpm gen:types` 再生成 |
 | 新增/修改 | backend spec_workspace/tests/ + change/tests/ + agent/tests/ + mcp_gateway/tests/ | §5 P6 测试清单 |
-| 修改 | .sillyspec/docs/backend/modules/{change.md,spec_workspace.md,agent.md,mcp_gateway.md,change_writer.md,_module-map.yaml} + frontend 模块文档 | 文档同步 |
+| 修改 | .sillyspec/docs/backend/modules/{change.md,spec_workspace.md,agent.md,mcp_gateway.md,change_writer.md,daemon.md,_module-map.yaml} + frontend 模块文档 | 文档同步（daemon.md 系 execute 落地补充） |
+
+### execute 落地补充清单（apply 对账用，Grill round-1 后执行期发现的必要文件）
+
+以下文件系实现过程中确认的必要接线/测试/路径修正，语义均已被上方清单行覆盖，此处单列以便 worktree apply 文件对账：
+
+| 操作 | 文件路径 | 说明 |
+|---|---|---|
+| 修改 | backend/app/modules/change/router.py | 四审批端点 notify_session 透传 + notified_session/notify_error 填响应（§7 契约的 router 侧接线，task-04 补全） |
+| 修改 | backend/app/modules/change/tests/test_review_apis.py | 审批不派发后既有断言修复（approve 不再 dispatch） |
+| 修改 | backend/app/modules/spec_workspace/router.py | sync-incremental 端点透传 change_dirs 到 apply_ops（§6 spec_workspace 行的接线，1 行） |
+| 新增 | backend/migrations/versions/20260814_add_change_session_links.py | ChangeSessionLink 建表 migration（真实路径 migrations/versions，非 alembic/versions） |
+| 删除 | backend/tests/modules/change_writer/test_router.py | 遗留测试文件，4 用例全指向已删 /execute 端点，不删全量 pytest 必红 |
+| 修改 | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx | 重写为详情页退化整页回归（无执行控制/审批卡降级） |
+| 新增 | frontend/src/components/changes/detail/__tests__/change-stage-actions.test.tsx | 审批卡组件测试（映射表/三类降级/绑定会话展示） |
 
 ## 7. 接口定义
 

@@ -5798,7 +5798,7 @@
           "agent"
         ],
         "summary": "List Workspace Agent Sessions",
-        "description": "scan 真阻塞（改造点 E）：workspace 维度 active AgentSession 列表。\n\n供 approvals 审批中心页聚合 scan 歧义决策——前端拿 session_id 列表后订阅各自\nSSE（permission_request），实现\"在审核页看到 scan 待决策 + 反馈续 turn\"。",
+        "description": "工作区会话列表（2026-08-14-change-center-conversation-driven task-06 / D-002@v1）。\n\ninclude_ended=false（缺省）：现状——仅 active 会话最小字段 dict\n（id/status/mode/provider），供 approvals 审批中心聚合 scan 歧义决策。\ninclude_ended=true：工作区全量会话（含已结束），完整 AgentSessionListItem\n（id/provider/status/turn_count/author/last_active_at/title，对齐\ndaemon/schema.py:71-84），排序 coalesce(last_active_at, created_at) desc。\n权限/过滤保持现状（workspace 成员跨成员可见），不因 include_ended 改变。",
         "operationId": "list_workspace_agent_sessions_api_workspaces__workspace_id__agent_sessions_get",
         "parameters": [
           {
@@ -5825,6 +5825,16 @@
                 }
               ],
               "title": "Mode"
+            }
+          },
+          {
+            "name": "include_ended",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Ended"
             }
           }
         ],
@@ -11347,338 +11357,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GitOperationListResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/workspaces/{workspace_id}/changes/create": {
-      "post": {
-        "tags": [
-          "change_writer"
-        ],
-        "summary": "Create Change",
-        "operationId": "create_change_api_workspaces__workspace_id__changes_create_post",
-        "parameters": [
-          {
-            "name": "workspace_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Workspace Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ChangeCreateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChangeCreateResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/workspaces/{workspace_id}/changes/proxy-create": {
-      "post": {
-        "tags": [
-          "change_writer"
-        ],
-        "summary": "Proxy Create Change",
-        "description": "daemon-client 变更代写入口 (design §5.3 Phase 3 / D-002@v1)。\n\n与 server-local ``/changes/create`` 区分：\n- 不传 ``lease_id`` 也不传 ``runtime_id``（D-002@v1）。\n- 经 ``service.create_change`` 走 proxy 路径（lease-polling 下发\n  daemon_change_writes → 等回执 → 落库 Change）；runtime 由后端从 binding +\n  workspace.default_agent 现算。\n- **不自动 dispatch brainstorm**（daemon-client change 暂不接 agent 流；agent\n  dispatch 由 task-12/后续接，避免与 server-local auto-dispatch 语义混淆）。\n\ndaemon 离线 / 未绑定 → 400 ``DAEMON_CLIENT_NO_SESSION``（service 层抛）。",
-        "operationId": "proxy_create_change_api_workspaces__workspace_id__changes_proxy_create_post",
-        "parameters": [
-          {
-            "name": "workspace_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Workspace Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProxyCreateChangeRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChangeCreateResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/workspaces/{workspace_id}/changes/{change_id}/documents/generate": {
-      "post": {
-        "tags": [
-          "change_writer"
-        ],
-        "summary": "Generate Document",
-        "operationId": "generate_document_api_workspaces__workspace_id__changes__change_id__documents_generate_post",
-        "parameters": [
-          {
-            "name": "workspace_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Workspace Id"
-            }
-          },
-          {
-            "name": "change_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Change Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MarkdownGenerateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MarkdownGenerateResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/workspaces/{workspace_id}/changes/{change_id}/documents/batch-generate": {
-      "post": {
-        "tags": [
-          "change_writer"
-        ],
-        "summary": "Batch Generate Documents",
-        "operationId": "batch_generate_documents_api_workspaces__workspace_id__changes__change_id__documents_batch_generate_post",
-        "parameters": [
-          {
-            "name": "workspace_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Workspace Id"
-            }
-          },
-          {
-            "name": "change_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Change Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BatchGenerateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BatchGenerateResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/workspaces/{workspace_id}/changes/{change_key}/execute": {
-      "post": {
-        "tags": [
-          "change_writer"
-        ],
-        "summary": "Execute Change",
-        "description": "Trigger change execution — dispatch via unified stage dispatch service.\n\ntask-09（D-004@v2）：``team_mode=true`` 时把 ``team_mode=True`` 写入\n``change.stages`` 触发 ``dispatch_next_step`` Step 2.5 分流到主 agent\nOrchestratorService。worker_preset / main_agent_config 从 ``change.stages``\n已有字段读（前端 stage toggle 经 transition 写入；execute 端点不重复接收，\n避免与 transition 入口的双写冲突）。single（team_mode=false 零回归）。",
-        "operationId": "execute_change_api_workspaces__workspace_id__changes__change_key__execute_post",
-        "parameters": [
-          {
-            "name": "workspace_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Workspace Id"
-            }
-          },
-          {
-            "name": "change_key",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Change Key"
-            }
-          },
-          {
-            "name": "provider",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Provider"
-            }
-          },
-          {
-            "name": "model",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Model"
-            }
-          },
-          {
-            "name": "team_mode",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "description": "execute 团队执行（D-004@v2，默认 single 零回归）",
-              "default": false,
-              "title": "Team Mode"
-            },
-            "description": "execute 团队执行（D-004@v2，默认 single 零回归）"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Execute Change Api Workspaces  Workspace Id  Changes  Change Key  Execute Post"
                 }
               }
             }
@@ -24584,7 +24262,7 @@
           "spec-workspace"
         ],
         "summary": "Sync Spec Workspace",
-        "description": "Receive a daemon-uploaded spec tar, overwrite the server ``spec_root``,\nand reparse scan_docs (FR-05 / D-006@v1).\n\nBody is a raw ``application/x-tar`` stream. The whole tree is overwritten\n(no diff/merge). ``.runtime/`` is preserved. Returns the reparse parsed\ncount.",
+        "description": "Receive a daemon-uploaded spec tar, overwrite the server ``spec_root``,\nand reparse scan_docs (FR-05 / D-006@v1).\n\nBody is a raw ``application/x-tar`` stream. The whole tree is overwritten\n(no diff/merge). ``.runtime/`` is preserved. Returns the reparse parsed\ncount. ``X-Change-Write-Id`` 头（可选）让后端 apply 循环内逐文件回写\nfiles_processed（逐文件级进度，D-004@V2）。",
         "operationId": "sync_spec_workspace_api_workspaces__workspace_id__spec_workspace_sync_post",
         "parameters": [
           {
@@ -24595,6 +24273,22 @@
               "type": "string",
               "format": "uuid",
               "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "X-Change-Write-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Change-Write-Id"
             }
           }
         ],
@@ -24640,7 +24334,7 @@
           "spec-workspace"
         ],
         "summary": "Sync Spec Workspace Incremental",
-        "description": "Receive daemon incremental file ops and apply them to spec_root.\n\nChange 2026-08-13-platform-managed-file-sync / design §7 / FR-02 / D-001：\n文件级增量同步（add/update/delete/rename + base_version 乐观锁）。base_version\n过期 → ``conflict=True`` + ``server_versions``（HTTP 保持 200，daemon 侧据字段\n提示人工拍板，design §7 定义）；containment / ``.runtime`` 越界 → 422 AppError\n透传（``HTTP_422_SPEC_BUNDLE_INVALID``，对齐旧 tar 端点校验机制）。",
+        "description": "Receive daemon incremental file ops and apply them to spec_root.\n\nChange 2026-08-13-platform-managed-file-sync / design §7 / FR-02 / D-001：\n文件级增量同步（add/update/delete/rename + base_version 乐观锁）。base_version\n过期 → ``conflict=True`` + ``server_versions``（HTTP 保持 200，daemon 侧据字段\n提示人工拍板，design §7 定义）；containment / ``.runtime`` 越界 → 422 AppError\n透传（``HTTP_422_SPEC_BUNDLE_INVALID``，对齐旧 tar 端点校验机制）。\n``X-Change-Write-Id`` 头（可选）让 apply_ops 循环内逐文件回写 files_processed。\n``change_dirs``（change 2026-08-14-change-center-conversation-driven / D-005@v1）：\ndaemon 标注的本次涉及变更目录名集合，透传 apply_ops 落盘后触发 scoped reparse\n（无标注时 apply_ops 扫 ops 路径 ``changes/`` 前缀兜底，行为等价）。",
         "operationId": "sync_spec_workspace_incremental_api_workspaces__workspace_id__spec_workspace_sync_incremental_post",
         "parameters": [
           {
@@ -24651,6 +24345,22 @@
               "type": "string",
               "format": "uuid",
               "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "X-Change-Write-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Change-Write-Id"
             }
           }
         ],
@@ -26987,6 +26697,11 @@
             ],
             "title": "Comment",
             "description": "归档备注（可选）"
+          },
+          "notify_session": {
+            "type": "boolean",
+            "title": "Notify Session",
+            "default": true
           }
         },
         "type": "object",
@@ -27276,39 +26991,6 @@
         ],
         "title": "AuditPageResponse",
         "description": "Paginated response for the audit query endpoint."
-      },
-      "BatchGenerateRequest": {
-        "properties": {
-          "doc_types": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "minItems": 1,
-            "title": "Doc Types"
-          }
-        },
-        "type": "object",
-        "required": [
-          "doc_types"
-        ],
-        "title": "BatchGenerateRequest"
-      },
-      "BatchGenerateResponse": {
-        "properties": {
-          "generated": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Generated"
-          }
-        },
-        "type": "object",
-        "required": [
-          "generated"
-        ],
-        "title": "BatchGenerateResponse"
       },
       "BatchMetaRequest": {
         "properties": {
@@ -27699,141 +27381,6 @@
         "type": "object",
         "title": "ChangeApprovalResponse",
         "description": "GET /changes/{name}/approval 响应——给 sillyspec CLI execute 审批门控用。\n\nCLI ``sync.js checkApproval``（execute 启动时调）读 ``status``：\n``rejected``/``pending`` 阻断 execute，其他（``approved``）放行\n（command.js:1071-1080）。当前后端无审批策略/数据 → 所有 change 默认 ``approved``\n放行（ql-20260812-001-6eb8 修 CLI 因 404 误判 pending 卡死）。"
-      },
-      "ChangeCreateRequest": {
-        "properties": {
-          "title": {
-            "type": "string",
-            "maxLength": 500,
-            "minLength": 1,
-            "title": "Title"
-          },
-          "description": {
-            "type": "string",
-            "maxLength": 5000,
-            "title": "Description",
-            "default": ""
-          },
-          "scope": {
-            "type": "string",
-            "pattern": "^(full|quick)$",
-            "title": "Scope",
-            "default": "full"
-          },
-          "change_type": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 50
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Change Type"
-          },
-          "affected_components": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Affected Components"
-          },
-          "lease_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lease Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "title"
-        ],
-        "title": "ChangeCreateRequest"
-      },
-      "ChangeCreateResponse": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Id"
-          },
-          "workspace_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Workspace Id"
-          },
-          "change_key": {
-            "type": "string",
-            "title": "Change Key"
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "current_stage": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Current Stage"
-          },
-          "path": {
-            "type": "string",
-            "title": "Path"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "agent_dispatch": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent Dispatch"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "workspace_id",
-          "change_key",
-          "title",
-          "status",
-          "current_stage",
-          "path",
-          "created_at"
-        ],
-        "title": "ChangeCreateResponse"
       },
       "ChangeDocMatrix": {
         "properties": {
@@ -31324,6 +30871,17 @@
           "base_version": {
             "type": "integer",
             "title": "Base Version"
+          },
+          "mtime": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mtime"
           }
         },
         "type": "object",
@@ -31333,7 +30891,7 @@
           "base_version"
         ],
         "title": "FileOp",
-        "description": "One per-file operation in an incremental spec sync.\n\n``path`` / ``new_path`` are relative to spec_root. ``content`` is base64\n(add/update use it); rename with unchanged content may omit both ``hash``\nand ``content``. ``base_version`` is the file version the daemon's local\nmanifest believes the server is at (0 when unknown → R-07 hash fallback)."
+        "description": "One per-file operation in an incremental spec sync.\n\n``path`` / ``new_path`` are relative to spec_root. ``content`` is base64\n(add/update use it); rename with unchanged content may omit both ``hash``\nand ``content``. ``base_version`` is the file version the daemon's local\nmanifest believes the server is at (0 when unknown → R-07 hash fallback).\n\n``mtime``（ql-20260813-008，可选）：宿主真实修改时间（Unix 秒）。落盘时作\nsource_mtime + os.utime，让镜像文件 mtime 真实，进而让 changes.updated_at\n反映变更活动。旧 daemon 不传 / 非法时 fallback now。"
       },
       "FileUploadResp": {
         "properties": {
@@ -31818,6 +31376,11 @@
               }
             ],
             "title": "Comment"
+          },
+          "notify_session": {
+            "type": "boolean",
+            "title": "Notify Session",
+            "default": true
           }
         },
         "type": "object",
@@ -33423,62 +32986,6 @@
           "password"
         ],
         "title": "LoginRequest"
-      },
-      "MarkdownGenerateRequest": {
-        "properties": {
-          "doc_type": {
-            "type": "string",
-            "maxLength": 30,
-            "minLength": 1,
-            "title": "Doc Type"
-          },
-          "content": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Content"
-          },
-          "lease_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lease Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "doc_type",
-          "content"
-        ],
-        "title": "MarkdownGenerateRequest"
-      },
-      "MarkdownGenerateResponse": {
-        "properties": {
-          "doc_type": {
-            "type": "string",
-            "title": "Doc Type"
-          },
-          "path": {
-            "type": "string",
-            "title": "Path"
-          },
-          "size": {
-            "type": "integer",
-            "title": "Size"
-          }
-        },
-        "type": "object",
-        "required": [
-          "doc_type",
-          "path",
-          "size"
-        ],
-        "title": "MarkdownGenerateResponse"
       },
       "McpConfigViewResponse": {
         "properties": {
@@ -36171,6 +35678,11 @@
               }
             ],
             "title": "Comment"
+          },
+          "notify_session": {
+            "type": "boolean",
+            "title": "Notify Session",
+            "default": true
           }
         },
         "type": "object",
@@ -41334,6 +40846,11 @@
               }
             ],
             "title": "Comment"
+          },
+          "notify_session": {
+            "type": "boolean",
+            "title": "Notify Session",
+            "default": true
           }
         },
         "type": "object",
@@ -41341,40 +40858,6 @@
           "decision"
         ],
         "title": "ProposalReviewRequest"
-      },
-      "ProxyCreateChangeRequest": {
-        "properties": {
-          "title": {
-            "type": "string",
-            "maxLength": 500,
-            "minLength": 1,
-            "title": "Title"
-          },
-          "description": {
-            "type": "string",
-            "maxLength": 5000,
-            "title": "Description",
-            "default": ""
-          },
-          "change_type": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 50
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Change Type"
-          }
-        },
-        "type": "object",
-        "required": [
-          "title"
-        ],
-        "title": "ProxyCreateChangeRequest",
-        "description": "daemon-client 变更代写入参 (design §7.5 / D-002@v1)。\n\nD-002@v1（2026-07-05-daemon-client-change-binding-fix）：删 ``runtime_id`` 字段。\nruntime 由后端 ``resolve_runtime_for_writeback`` 用 binding + workspace.default_agent\n现算（与派发链路共用解析）。daemon_id 亦从 per-member binding 拿，前端无需传。"
       },
       "PsPlanNodeCreate": {
         "properties": {
@@ -46373,6 +45856,13 @@
             },
             "type": "array",
             "title": "Ops"
+          },
+          "change_dirs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Change Dirs"
           }
         },
         "type": "object",
@@ -46380,7 +45870,7 @@
           "ops"
         ],
         "title": "SpecIncrementalSyncRequest",
-        "description": "Request body for the incremental sync endpoint (design §7)."
+        "description": "Request body for the incremental sync endpoint (design §7).\n\n``change_dirs``（change 2026-08-14-change-center-conversation-driven / D-005@v1）：\ndaemon 本次增量 ops 涉及的变更目录名集合（``changes/<name>/`` 与\n``changes/archive/<name>/`` 前缀分组取 name，去重）。缺省 ``[]`` 兼容旧 daemon——\nbackend ``apply_ops`` 无标注时扫 ops 路径 ``changes/`` 前缀兜底（design §9）。"
       },
       "SpecIncrementalSyncResponse": {
         "properties": {
@@ -52382,6 +51872,22 @@
                 "type": "null"
               }
             ]
+          },
+          "notified_session": {
+            "type": "boolean",
+            "title": "Notified Session",
+            "default": false
+          },
+          "notify_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notify Error"
           }
         },
         "type": "object",

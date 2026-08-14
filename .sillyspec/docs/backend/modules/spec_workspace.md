@@ -19,7 +19,7 @@ created_at: 2026-06-24T01:09:00
 - `PATCH .../spec-workspace` — 更新配置
 - `POST .../spec-bootstrap` — 异步 bootstrap（立即返回 agent_run_id + stream_url）
 - `GET .../spec-conflicts` — 列冲突；`POST .../spec-conflicts/{id}/resolve` — 解决冲突
-- `SpecWorkspaceService.create/get/get_by_id/update/import_from_repo/sync/update_sync_status/build_bundle/apply_sync`
+- `SpecWorkspaceService.create/get/get_by_id/update/import_from_repo/sync/update_sync_status/build_bundle/apply_sync` + `apply_ops`（增量 ops 落盘；2026-08-14 起支持 `change_dirs` 标注，落盘后事务外触发 change reparse）
 - `SpecBootstrapService.bootstrap`；`SpecValidator.validate`（目录结构/YAML schema/引用完整性）
 
 ## 关键逻辑
@@ -46,7 +46,9 @@ bootstrap(workspace_id, user_id):
 - **ql-20260813-004**：`_write_spec_root` per-file merge 的 `read_bytes` 遇 staging 成员缺失（tar name 被旧打包方截断等）→ 跳过 + warn 不崩（纵深防御；daemon 侧 LongLink + 排除 runtime(无点) 已根治）
 - **ql-20260813-007（P0）**：`_write_spec_root` 跳过 `.runtime/`（任意深度）不入 scan_documents + 两处 decode 后 `.replace('\x00','')` 兜底——根治 sillyspec.db NUL 字节触发 asyncpg 0x00 整批回滚 500。
 - **ql-20260813-spec-sync-visibility（P1）**：`sync_manual_get_pending` 返回加 `files_total/files_processed/error/completed_at`（FR-05/FR-06，前端轮询展示「已同步 N 个文件」+ syncing N/M 进度条 + 失败原因 latest.error 透传）。计数列由 daemon `report_change_write_progress` 端点写（D-004 单一写者，complete_change_write 不碰计数列）。
+- **apply_ops 触发 scoped reparse（2026-08-14-change-center-conversation-driven / D-005）**：落盘提交成功后（事务外 best-effort，R-04）据 `change_dirs` 标注触发 `ChangeService.reparse`——有标注→scoped（非归档 name）；无标注→扫 ops 路径 `changes/` 前缀兜底；含 `changes/archive/` 路径→全量 reparse（归档=目录跨根移动，scoped 零 delete 语义处理不了）；无 changes 相关路径→零触发（R-01）。reparse 失败仅告警不阻断同步主流程。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
+- **2026-08-14-change-center-conversation-driven**（D-005 / task-02）：`apply_ops` 加 `change_dirs: list[str] | None` 参数（daemon 增量同步标注本次涉及变更目录名）；落盘 commit 后事务外 `_trigger_change_reparse`（独立 session，对齐 `_bump_files_processed` 范式）→ `_compute_reparse_scope`（标注 / ops 路径兜底 / archive_hit 三态）→ `ChangeService.reparse(scope)`。`SpecIncrementalSyncRequest`（schema.py）加 `change_dirs: list[str] = []`（旧 daemon 缺省兼容）。
 <!-- MANUAL_NOTES_END -->

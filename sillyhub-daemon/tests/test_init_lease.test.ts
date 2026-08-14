@@ -107,7 +107,7 @@ describe('handleInitLease / daemon 状态文件 (task-07 / D-001@v1)', () => {
     expect(client.getSpecBundle).toHaveBeenCalledTimes(1);
     expect(client.getSpecBundle).toHaveBeenCalledWith('ws-init-ok');
     expect(client.postSpecSync).toHaveBeenCalledTimes(1);
-    expect(client.postSpecSync).toHaveBeenCalledWith('ws-init-ok', expect.any(Buffer));
+    expect(client.postSpecSync).toHaveBeenCalledWith('ws-init-ok', expect.any(Buffer), undefined);
 
     // D-001@v1：不再写 {rootPath}/.sillyspec-platform.json（rootPath 是 dummy，验证不产生该文件）
     await expect(readFile(join('/tmp/init-lease-rootpath-unused', '.sillyspec-platform.json'))).rejects.toThrow();

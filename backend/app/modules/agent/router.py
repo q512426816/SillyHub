@@ -9,8 +9,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.core.auth_deps import require_permission, require_permission_any
 from app.core.db import get_session, get_session_factory
@@ -30,7 +31,7 @@ from app.modules.agent.coordinator_schema import (
     CheckpointSaveResponse,
     ResumeRequest,
 )
-from app.modules.agent.model import AgentRun
+from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.agent.schema import (
     AgentKillResponse,
     AgentRunCreate,
@@ -48,6 +49,7 @@ from app.modules.daemon.lease.context import _inject_provider_config
 from app.modules.daemon.model import DaemonTaskLease
 from app.modules.daemon.permission_service import WorkspaceDialogRead
 from app.modules.daemon.router import PermissionServiceDep
+from app.modules.daemon.schema import AgentSessionListItem, ChangeSessionAuthor
 from app.modules.workspace.model import AgentRunWorkspace, Workspace
 from app.modules.workspace.service import resolve_root_path_for_daemon
 
@@ -549,21 +551,120 @@ async def list_workspace_agent_sessions(
     session: SessionDep,
     user: Annotated[User, Depends(require_permission(Permission.TASK_READ))],
     mode: str | None = None,
+    include_ended: bool = False,
 ) -> list[dict]:
-    """scan 真阻塞（改造点 E）：workspace 维度 active AgentSession 列表。
+    """工作区会话列表（2026-08-14-change-center-conversation-driven task-06 / D-002@v1）。
 
-    供 approvals 审批中心页聚合 scan 歧义决策——前端拿 session_id 列表后订阅各自
-    SSE（permission_request），实现"在审核页看到 scan 待决策 + 反馈续 turn"。
+    include_ended=false（缺省）：现状——仅 active 会话最小字段 dict
+    （id/status/mode/provider），供 approvals 审批中心聚合 scan 歧义决策。
+    include_ended=true：工作区全量会话（含已结束），完整 AgentSessionListItem
+    （id/provider/status/turn_count/author/last_active_at/title，对齐
+    daemon/schema.py:71-84），排序 coalesce(last_active_at, created_at) desc。
+    权限/过滤保持现状（workspace 成员跨成员可见），不因 include_ended 改变。
     """
-    svc = AgentService(session)
-    sessions = await svc.list_workspace_active_sessions(workspace_id, mode=mode)
+    if not include_ended:
+        svc = AgentService(session)
+        sessions = await svc.list_workspace_active_sessions(workspace_id, mode=mode)
+        return [
+            {
+                "id": str(s.id),
+                "status": s.status,
+                "mode": (s.config or {}).get("mode"),
+                "provider": s.provider,
+            }
+            for s in sessions
+        ]
+    items = await _build_workspace_session_items(session, workspace_id, mode=mode)
+    return [item.model_dump() for item in items]
+
+
+async def _build_workspace_session_items(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    *,
+    mode: str | None = None,
+) -> list[AgentSessionListItem]:
+    """include_ended=true 分支：工作区全量会话（含已结束）→ AgentSessionListItem。
+
+    过滤：AgentSession.workspace_id == workspace_id（工作区级会话，D-002@v1）+
+    软删过滤（FR-07：deleted_at IS NULL）；跨成员可见（D-005@v1，不按 user_id 过滤）。
+    mode 非空时按 config['mode'] 过滤（与 active-only 分支语义一致）。
+    排序 coalesce(last_active_at, created_at) desc（NULL last_active_at 回落 created_at，
+    对齐 daemon/session/service.py:1499-1515 先例）。
+    """
+    stmt = (
+        select(AgentSession)
+        .where(
+            col(AgentSession.workspace_id) == workspace_id,
+            col(AgentSession.deleted_at).is_(None),
+        )
+        .order_by(
+            func.coalesce(AgentSession.last_active_at, AgentSession.created_at).desc(),
+        )
+    )
+    sessions = list((await session.execute(stmt)).scalars().all())
+    if mode:
+        sessions = [s for s in sessions if (s.config or {}).get("mode") == mode]
+    if not sessions:
+        return []
+    return await _assemble_workspace_session_items(session, sessions)
+
+
+async def _assemble_workspace_session_items(
+    session: AsyncSession,
+    sessions: list[AgentSession],
+) -> list[AgentSessionListItem]:
+    """把 AgentSession 列表组装为 AgentSessionListItem（批量取作者名 + user_input 标题）。
+
+    标题逻辑对齐 change/router.py list_change_sessions（X-04 干净来源）：取该会话
+    最早一条 channel=user_input 的 AgentRunLog 摘要（前 30 字）。
+    """
+    session_ids = [s.id for s in sessions]
+    user_ids = {s.user_id for s in sessions}
+
+    # 批量取作者展示名（避免 N+1）。
+    users = (await session.execute(select(User).where(col(User.id).in_(user_ids)))).scalars().all()
+    user_name_map: dict[uuid.UUID, str | None] = {u.id: u.display_name for u in users}
+
+    # 批量取每个 session 的首条 user_input 标题：JOIN AgentRun 过滤
+    # agent_session_id IN (...) + AgentRunLog.channel='user_input'，按
+    # (agent_session_id, timestamp asc) 取首条。Python 侧 group + 取最早。
+    title_stmt = (
+        select(
+            AgentRun.agent_session_id.label("session_id"),
+            AgentRunLog.timestamp.label("ts"),
+            AgentRunLog.content_redacted.label("content"),
+        )
+        .join(AgentRunLog, AgentRunLog.run_id == AgentRun.id)
+        .where(
+            col(AgentRun.agent_session_id).in_(session_ids),
+            col(AgentRunLog.channel) == "user_input",
+        )
+    )
+    title_rows = (await session.execute(title_stmt)).all()
+    first_input_by_session: dict[uuid.UUID, datetime] = {}
+    content_by_session: dict[uuid.UUID, str] = {}
+    for row in title_rows:
+        sid = row.session_id
+        ts = row.ts
+        prev = first_input_by_session.get(sid)
+        if prev is None or ts < prev:
+            first_input_by_session[sid] = ts
+            content_by_session[sid] = row.content or ""
+
     return [
-        {
-            "id": str(s.id),
-            "status": s.status,
-            "mode": (s.config or {}).get("mode"),
-            "provider": s.provider,
-        }
+        AgentSessionListItem(
+            id=s.id,
+            provider=s.provider,
+            status=s.status,
+            turn_count=s.turn_count,
+            author=ChangeSessionAuthor(
+                user_id=s.user_id,
+                display_name=user_name_map.get(s.user_id),
+            ),
+            last_active_at=s.last_active_at,
+            title=(content_by_session.get(s.id, "") or "")[:30] or None,
+        )
         for s in sessions
     ]
 

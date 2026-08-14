@@ -89,21 +89,6 @@ export type ArchiveCheckItem = components["schemas"]["ArchiveCheckItem"];
 /** 归档门禁检查响应。对齐后端 schema（checks optional）。 */
 export type ArchiveGateResponse = components["schemas"]["ArchiveGateResponse"];
 
-/** daemon-client 代理创建变更的请求参数。
-
-无 openapi schema，前端本地契约。
-D-002@v1（2026-07-05-daemon-client-change-binding-fix）：删 ``runtime_id`` 字段——
-runtime 由后端 ``resolve_runtime_for_writeback`` 用 binding + workspace.default_agent
-现算，daemon_id 亦从 per-member binding 解析，前端无需传。 */
-export type ProxyCreateChangeInput = {
-  title: string;
-  description?: string;
-  change_type?: string;
-};
-
-/** 创建变更的响应。对齐后端 schema（名映射：手写 CreateChangeResponse ↔ schema ChangeCreateResponse；schema 多可选 agent_dispatch，非破坏）。 */
-export type CreateChangeResponse = components["schemas"]["ChangeCreateResponse"];
-
 export function listChanges(
   workspaceId: string,
   params?: { location?: string; status?: string; owner?: string; search?: string; currentStage?: string; sort?: string; pendingReviewOnly?: boolean; page?: number; pageSize?: number },
@@ -183,48 +168,6 @@ export function rejectChange(workspaceId: string, changeKey: string, reason: str
 }
 
 /**
- * daemon-client 代理创建变更 — POST /workspaces/{id}/changes/proxy-create
- *
- * 由绑定的在线 daemon 通过 change-write 任务代写 spec 树。
- */
-export function proxyCreateChange(
-  workspaceId: string,
-  input: ProxyCreateChangeInput,
-) {
-  return apiFetch<CreateChangeResponse>(
-    `/api/workspaces/${workspaceId}/changes/proxy-create`,
-    {
-      method: "POST",
-      json: input,
-    },
-  );
-}
-
-/**
- * 启动变更执行 — POST /workspaces/{id}/changes/{changeKey}/execute
- *
- * 后端会创建 AgentRun 并后台执行 SillySpec 流程。
- */
-export function executeChange(
-  workspaceId: string,
-  changeKey: string,
-  provider?: string | null,
-  model?: string | null,
-  teamMode?: boolean,
-) {
-  const searchParams = new URLSearchParams();
-  if (provider) searchParams.set("provider", provider);
-  if (model) searchParams.set("model", model);
-  // team-mode（task-08，D-002）：true 时附加 query，后端 execute 链路按 team 拆 Worker
-  if (teamMode) searchParams.set("team_mode", "true");
-  const qs = searchParams.toString();
-  return apiFetch<{ ok: boolean; run_id: string }>(
-    `/api/workspaces/${workspaceId}/changes/${changeKey}/execute${qs ? `?${qs}` : ""}`,
-    { method: "POST" },
-  );
-}
-
-/**
  * 阶段流转 — POST /api/workspaces/{wid}/changes/{cid}/transition
  *
  * 将 change 从当前阶段流转到 target_stage。
@@ -245,7 +188,7 @@ export function transitionChange(
   if (reason !== undefined) {
     body.reason = reason;
   }
-  // ql-20260618-009：与 executeChange/triggerDispatch 风格统一，只在真值时附加
+  // ql-20260618-009：与 triggerDispatch 风格统一，只在真值时附加
   // （后端 schema default=None，行为与 !== undefined 等价）
   if (provider) {
     body.provider = provider;
@@ -489,6 +432,14 @@ export type HumanGate =
 export type ReviewResponse = {
   change: ChangeRead;
   agent_dispatch: TransitionDispatchResponse | null;
+  /**
+   * D-006@v2（2026-08-14-change-center-conversation-driven task-04）：审批后后端
+   * 以服务身份向绑定会话注入审批消息的结果。true=已注入；false 时 notify_error
+   * 语义化（turn_conflict / session_inactive / inject_failed）。注入 best-effort，
+   * 失败不回滚审批（R-03）。
+   */
+  notified_session: boolean;
+  notify_error: string | null;
 };
 
 export function proposalReview(
@@ -496,12 +447,17 @@ export function proposalReview(
   changeId: string,
   decision: "approve" | "revise" | "unclear",
   comment?: string,
+  notifySession = true,
 ) {
   return apiFetch<ReviewResponse>(
     `/api/workspaces/${workspaceId}/changes/${changeId}/proposal-review`,
     {
       method: "POST",
-      json: { decision, comment: comment ?? null },
+      json: {
+        decision,
+        comment: comment ?? null,
+        notify_session: notifySession,
+      },
     },
   );
 }
@@ -511,12 +467,17 @@ export function planReview(
   changeId: string,
   decision: "approve" | "replan" | "back_to_propose" | "back_to_brainstorm",
   comment?: string,
+  notifySession = true,
 ) {
   return apiFetch<ReviewResponse>(
     `/api/workspaces/${workspaceId}/changes/${changeId}/plan-review`,
     {
       method: "POST",
-      json: { decision, comment: comment ?? null },
+      json: {
+        decision,
+        comment: comment ?? null,
+        notify_session: notifySession,
+      },
     },
   );
 }
@@ -526,12 +487,17 @@ export function humanTest(
   changeId: string,
   result: "pass" | "bug" | "doc_mismatch",
   comment?: string,
+  notifySession = true,
 ) {
   return apiFetch<ReviewResponse>(
     `/api/workspaces/${workspaceId}/changes/${changeId}/human-test`,
     {
       method: "POST",
-      json: { result, comment: comment ?? null },
+      json: {
+        result,
+        comment: comment ?? null,
+        notify_session: notifySession,
+      },
     },
   );
 }
@@ -540,12 +506,13 @@ export function archiveConfirm(
   workspaceId: string,
   changeId: string,
   comment?: string,
+  notifySession = true,
 ) {
   return apiFetch<ReviewResponse>(
     `/api/workspaces/${workspaceId}/changes/${changeId}/archive-confirm`,
     {
       method: "POST",
-      json: { comment: comment ?? null },
+      json: { comment: comment ?? null, notify_session: notifySession },
     },
   );
 }
@@ -555,44 +522,47 @@ export function archiveConfirm(
  *
  * 对齐 backend ``mcp_gateway.submit_stage_review`` MCP tool（design §6.1）：按 action
  * 分发到既有 4 个 stage review HTTP 端点客户端方法（proposalReview / planReview /
- * humanTest / archiveConfirm，后端各有 HTTP 路由，零新增端点）。changes 详情页 gate
- * 面板审核动作一律走本方法，作为唯一审核语义；旧 approval_status + 通用 submitReview
+ * humanTest / archiveConfirm，后端各有 HTTP 路由，零新增端点）。changes 详情页审批卡
+ * 审核动作一律走本方法，作为唯一审核语义；旧 approval_status + 通用 submitReview
  * 链路已退役（approveChange / rejectChange / submitReview 标注只读，不再驱动推进）。
  *
- * @param action GATE_PANELS action 词表：proposal_approve / proposal_revise /
+ * @param action 审批卡 action 词表：proposal_approve / proposal_revise /
  *   proposal_unclear / plan_approve / plan_replan / plan_back_to_propose /
  *   plan_back_to_brainstorm / test_pass / test_bug / test_doc_mismatch / archive_confirm
  * @param comment 审核意见（可选，archive_confirm 亦透传）
+ * @param notifySession D-006@v2（task-10）：是否通知绑定会话（透传后端 notify_session，
+ *   默认 true）。审批落库后由后端以服务身份注入绑定会话，best-effort。
  */
 export function submitStageReview(
   workspaceId: string,
   changeId: string,
   action: string,
   comment?: string,
+  notifySession = true,
 ) {
   switch (action) {
     case "proposal_approve":
-      return proposalReview(workspaceId, changeId, "approve", comment);
+      return proposalReview(workspaceId, changeId, "approve", comment, notifySession);
     case "proposal_revise":
-      return proposalReview(workspaceId, changeId, "revise", comment);
+      return proposalReview(workspaceId, changeId, "revise", comment, notifySession);
     case "proposal_unclear":
-      return proposalReview(workspaceId, changeId, "unclear", comment);
+      return proposalReview(workspaceId, changeId, "unclear", comment, notifySession);
     case "plan_approve":
-      return planReview(workspaceId, changeId, "approve", comment);
+      return planReview(workspaceId, changeId, "approve", comment, notifySession);
     case "plan_replan":
-      return planReview(workspaceId, changeId, "replan", comment);
+      return planReview(workspaceId, changeId, "replan", comment, notifySession);
     case "plan_back_to_propose":
-      return planReview(workspaceId, changeId, "back_to_propose", comment);
+      return planReview(workspaceId, changeId, "back_to_propose", comment, notifySession);
     case "plan_back_to_brainstorm":
-      return planReview(workspaceId, changeId, "back_to_brainstorm", comment);
+      return planReview(workspaceId, changeId, "back_to_brainstorm", comment, notifySession);
     case "test_pass":
-      return humanTest(workspaceId, changeId, "pass", comment);
+      return humanTest(workspaceId, changeId, "pass", comment, notifySession);
     case "test_bug":
-      return humanTest(workspaceId, changeId, "bug", comment);
+      return humanTest(workspaceId, changeId, "bug", comment, notifySession);
     case "test_doc_mismatch":
-      return humanTest(workspaceId, changeId, "doc_mismatch", comment);
+      return humanTest(workspaceId, changeId, "doc_mismatch", comment, notifySession);
     case "archive_confirm":
-      return archiveConfirm(workspaceId, changeId, comment);
+      return archiveConfirm(workspaceId, changeId, comment, notifySession);
     default:
       // 未识别 action → 拒绝（对齐 MCP tool 的 400 语义，调用方捕获后展示）。
       return Promise.reject(

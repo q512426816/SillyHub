@@ -9,6 +9,7 @@ const TABS = [
   { key: "overview", label: "概览", path: "" },
   { key: "components", label: "组件", path: "/components" },
   { key: "changes", label: "变更", path: "/changes" },
+  { key: "sessions", label: "会话", path: "/sessions" },
   { key: "skills", label: "Skills", path: "/skills" },
   { key: "mcp", label: "MCP", path: "/mcp" },
   { key: "mcp-tokens", label: "MCP 令牌", path: "/mcp-tokens" },

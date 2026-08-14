@@ -10,7 +10,9 @@
   ``{change, current_stage, agent_dispatch}``。
 - ``submit_stage_review``（scope=dispatch）：``stage`` 路由 proposal/plan/human_test/
   archive_confirm 四方法 + 异常 stage 400。``archive_confirm`` 不透传 decision
-  （service.py:1694 无 decision 入参）。
+  （service.py 无 decision 入参）。D-004（task-03/04）：审批不派发 agent，返回
+  agent_dispatch 恒空；D-006@v2：notify_session 透传 + notified_session/notify_error
+  随响应返回。
 - ``run_verify_gate``（scope=read）：三态 source=gate_result / gate_cmd / unavailable，
   均不硬阻塞（exit_code 交调用方，unavailable 时 None）。
 - ``get_change_stage``（scope=read）：返回 ``{change_id, current_stage, stages,
@@ -287,12 +289,22 @@ async def test_submit_stage_review_routes_to_service_method(
     service_method: str,
     decision: str,
 ) -> None:
-    """四分支路由：stage → 对应 review 方法，decision + comment + actor 透传。"""
+    """四分支路由：stage → 对应 review 方法，decision + comment + actor 透传。
+
+    D-004（task-03/04）：service 返回 agent_dispatch=None + notify 字段；工具恒空
+    agent_dispatch、透传 notify_session（默认 True）与 notify 结果。
+    """
     ws = await _make_workspace(db_session)
     change = _make_change(ws.id)
-    dispatch_raw = {"dispatched": False, "reason": "test"}
     mock = _patch_change_service_method(
-        monkeypatch, service_method, {"change": change, "agent_dispatch": dispatch_raw}
+        monkeypatch,
+        service_method,
+        {
+            "change": change,
+            "agent_dispatch": None,
+            "notified_session": True,
+            "notify_error": None,
+        },
     )
 
     token = await _make_token(db_session, workspace_id=ws.id, scope=[MCP_SCOPE_DISPATCH])
@@ -310,17 +322,32 @@ async def test_submit_stage_review_routes_to_service_method(
     assert args[2] == decision  # human_test 第三参 service 命名为 result，语义即 decision
     assert args[3] == "备注"
     assert args[4] == token.created_by
+    # D-006@v2：notify_session 默认 True 透传为关键字参数。
+    assert mock.await_args.kwargs["notify_session"] is True
 
     assert result["change"]["id"] == str(change.id)
-    assert result["agent_dispatch"]["dispatched"] is False
-    assert result["agent_dispatch"]["reason"] == "test"
+    # D-004：不派发 → agent_dispatch 恒空（dispatched False、其余字段 None）。
+    ad = result["agent_dispatch"]
+    assert ad["dispatched"] is False
+    assert ad["agent_run_id"] is None
+    assert ad["stage"] is None
+    assert ad["mission_id"] is None
+    assert ad["mode"] is None
+    assert ad["reason"] is None
+    assert ad["error"] is None
+    # D-006@v2：notify 结果随审批响应透传。
+    assert result["notified_session"] is True
+    assert result["notify_error"] is None
 
 
 @pytest.mark.asyncio
 async def test_submit_stage_review_archive_confirm_ignores_decision(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """archive_confirm 分支：不透传 decision（service.py:1694 无该入参），仅 comment + actor。"""
+    """archive_confirm 分支：不透传 decision（service.py 无该入参），仅 comment + actor。
+
+    D-004：agent_dispatch 恒空；D-006@v2：notify_session 透传 + notify 结果返回。
+    """
     ws = await _make_workspace(db_session)
     change = _make_change(ws.id, current_stage="archive")
     mock = _patch_change_service_method(
@@ -328,7 +355,9 @@ async def test_submit_stage_review_archive_confirm_ignores_decision(
         "archive_confirm",
         {
             "change": change,
-            "agent_dispatch": {"dispatched": False, "reason": "archive_confirmed_hub_side"},
+            "agent_dispatch": None,
+            "notified_session": True,
+            "notify_error": None,
         },
     )
 
@@ -350,7 +379,100 @@ async def test_submit_stage_review_archive_confirm_ignores_decision(
     assert args[1] == change.id
     assert args[2] == "确认归档"
     assert args[3] == token.created_by
-    assert result["agent_dispatch"]["reason"] == "archive_confirmed_hub_side"
+    assert mock.await_args.kwargs["notify_session"] is True
+    # 恒空 agent_dispatch（不派发）+ notify 结果透传。
+    assert result["agent_dispatch"]["dispatched"] is False
+    assert result["agent_dispatch"]["reason"] is None
+    assert result["notified_session"] is True
+    assert result["notify_error"] is None
+
+
+@pytest.mark.asyncio
+async def test_submit_stage_review_no_dispatch_constant_empty(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """不派发契约（D-004）：即使 service 返回旧版 dispatched dict，工具仍恒空。
+
+    审批语义（task-03/04）是权威：submit_stage_review 只落审批记录+阶段状态，不派发
+    agent。工具返回 agent_dispatch 恒为 ``dispatched: False``、其余字段 None——不把
+    service 返回的 dispatch 信息透出（防旧 service 版本误透真派发）。
+    """
+    ws = await _make_workspace(db_session)
+    change = _make_change(ws.id, current_stage="execute")
+    stale_dispatch = {
+        "dispatched": True,
+        "agent_run_id": uuid.uuid4(),
+        "stage": "execute",
+        "mode": "single",
+    }
+    mock = _patch_change_service_method(
+        monkeypatch,
+        "proposal_review",
+        {
+            "change": change,
+            "agent_dispatch": stale_dispatch,
+            "notified_session": True,
+            "notify_error": None,
+        },
+    )
+    token = await _make_token(db_session, workspace_id=ws.id, scope=[MCP_SCOPE_DISPATCH])
+    ctx = _make_ctx(_auth(token, frozenset({MCP_SCOPE_DISPATCH})))
+
+    result = await tools.submit_stage_review(
+        change_id=change.id, stage="proposal", decision="approve", comment="备注", ctx=ctx
+    )
+
+    # service 虽返回 dispatched=True（旧版契约残留），工具强制恒空。
+    assert mock.await_count == 1
+    ad = result["agent_dispatch"]
+    assert ad["dispatched"] is False
+    assert ad["agent_run_id"] is None
+    assert ad["stage"] is None
+    assert ad["mission_id"] is None
+    assert ad["mode"] is None
+    assert ad["reason"] is None
+    assert ad["error"] is None
+    assert result["notified_session"] is True
+    assert result["notify_error"] is None
+
+
+@pytest.mark.asyncio
+async def test_submit_stage_review_notify_session_pass_through(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """notify_session 透传（D-006@v2）：显式 False 按 kwargs 传 service，结果透传。
+
+    注入失败（turn_conflict 等）不回滚审批，notify_error 随审批响应返回（对齐 HTTP
+    ReviewResponse / R-03 三类降级）。
+    """
+    ws = await _make_workspace(db_session)
+    change = _make_change(ws.id, current_stage="plan")
+    mock = _patch_change_service_method(
+        monkeypatch,
+        "plan_review",
+        {
+            "change": change,
+            "agent_dispatch": None,
+            "notified_session": False,
+            "notify_error": "turn_conflict",
+        },
+    )
+    token = await _make_token(db_session, workspace_id=ws.id, scope=[MCP_SCOPE_DISPATCH])
+    ctx = _make_ctx(_auth(token, frozenset({MCP_SCOPE_DISPATCH})))
+
+    result = await tools.submit_stage_review(
+        change_id=change.id,
+        stage="plan",
+        decision="approve",
+        comment="ok",
+        notify_session=False,
+        ctx=ctx,
+    )
+
+    assert mock.await_args.kwargs["notify_session"] is False
+    assert result["agent_dispatch"]["dispatched"] is False
+    assert result["notified_session"] is False
+    assert result["notify_error"] == "turn_conflict"
 
 
 @pytest.mark.asyncio

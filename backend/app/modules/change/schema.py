@@ -386,24 +386,35 @@ class VerifyGateResponse(BaseModel):
 class ProposalReviewRequest(BaseModel):
     decision: str = Field(..., pattern=r"^(approve|revise|unclear)$")
     comment: str | None = None
+    # D-006@v2（2026-08-14-change-center-conversation-driven task-04）：审批后是否
+    # 以服务身份向绑定会话注入审批消息。默认 true（design §7 契约）；false 跳过注入。
+    notify_session: bool = True
 
 
 class PlanReviewRequest(BaseModel):
     decision: str = Field(..., pattern=r"^(approve|replan|back_to_propose|back_to_brainstorm)$")
     comment: str | None = None
+    notify_session: bool = True
 
 
 class HumanTestRequest(BaseModel):
     result: str = Field(..., pattern=r"^(pass|bug|doc_mismatch)$")
     comment: str | None = None
+    notify_session: bool = True
 
 
 class ReviewResponse(BaseModel):
     change: dict[str, Any]
     agent_dispatch: TransitionDispatchResponse | None = None
+    # D-006@v2（task-04）：注入结果随审批响应返回。notified_session=false 时
+    # notify_error 语义化（turn_conflict / session_inactive / inject_failed）。
+    # 注入 best-effort（R-03）：失败不回滚审批，仅降级提示。
+    notified_session: bool = False
+    notify_error: str | None = None
 
 
 class ArchiveConfirmRequest(BaseModel):
     """归档确认请求。"""
 
     comment: str | None = Field(default=None, description="归档备注（可选）")
+    notify_session: bool = True

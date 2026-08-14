@@ -21,35 +21,23 @@ import {
 } from "@/components/changes/detail/change-stage-header";
 import { ChangeTaskBoardCard } from "@/components/changes/detail/change-task-board-card";
 import type { StepInfo } from "@/components/sillyspec-step-progress";
-import type { StageWorkerPreset } from "@/components/stage-team-config";
-import type { GateStatusEvent } from "@/lib/agent-stream";
 import { ApiError } from "@/lib/api";
 import {
-  advanceChangeStage,
   getAgentStatus,
   getChange,
-  runVerifyGate,
   submitStageReview,
-  triggerDispatch,
-  updateStageProfile,
   type ChangeRead,
   type DispatchResponse,
-  type VerifyGateResponse,
 } from "@/lib/changes";
+import {
+  listWorkspaceAgentSessions,
+  type AgentSessionListItem,
+} from "@/lib/daemon";
 import { getTaskBoard, type TaskBoard } from "@/lib/tasks";
 
 interface Props {
   params: { id: string; cid: string };
 }
-
-// task-12（2026-08-11-change-center-on-demand，FR-06/D-005）：主线阶段下一阶段映射。
-// 对齐后端 TRANSITIONS（brainstorm→plan→execute→verify→archive 线性单出口）。archive 终态无下一阶段。
-const NEXT_STAGE: Record<string, string> = {
-  brainstorm: "plan",
-  plan: "execute",
-  execute: "verify",
-  verify: "archive",
-};
 
 // quick/blocked/archived 三态 status 徽标（非线性节点，独立呈现）
 const STATUS_BADGE: Record<
@@ -68,50 +56,24 @@ export default function ChangeDetailPage({ params }: Props) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
-  const [profileError, setProfileError] = useState<string | null>(null);
-  const [transitioning, setTransitioning] = useState(false);
-  const [taskBoard, setTaskBoard] = useState<TaskBoard | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [taskBoard, setTaskBoard] = useState<TaskBoard | null>(null);
 
-  // ── Agent Dispatch / 推进 / 门禁 state ───────────────────────────
+  // ── 执行日志流（只读展示：agent 运行状态 / SSE 日志，task-10 退化后保留）──
   const [agentStatus, setAgentStatus] = useState<DispatchResponse | null>(null);
   const [loadingAgentStatus, setLoadingAgentStatus] = useState(false);
-  const [dispatching, setDispatching] = useState(false);
-  // 2026-08-12-dispatch-bind-agent-profile：阶段操作区改选智能体档案（方案A 仅档案，
-  // 去掉手动 provider/model）。stageProfileId=null=跟随工作区默认（不选档案）。
-  const [stageProfileId, setStageProfileId] = useState<string | null>(null);
-  // task-07（2026-08-13-profile-system-prompt-injection）：stageProfileId 每阶段独立持久化。
-  // change 异步加载（line 66 null → useEffect 91 setChange），用 useEffect 从
-  // change.stages[current_stage].profile_id 恢复（非 useState initializer，后者 mount 时
-  // change=null 永远求值 null）。切阶段时重读对应 stage 的 profile_id（每阶段独立 D-003）。
-  const currentStage = change?.current_stage ?? null;
-  useEffect(() => {
-    if (!change?.stages || !currentStage) return;
-    const stageData = change.stages[currentStage] as
-      | { profile_id?: string }
-      | undefined;
-    setStageProfileId(stageData?.profile_id ?? null);
-  }, [change?.stages, currentStage]);
-  const handleStageProfileChange = useCallback(
-    async (profileId: string | null) => {
-      setStageProfileId(profileId); // 乐观更新
-      try {
-        await updateStageProfile(workspaceId, changeId, profileId);
-      } catch (err) {
-        setProfileError(err instanceof ApiError ? err.message : "保存档案失败");
-      }
-    },
-    [workspaceId, changeId],
-  );
-  const [teamMode, setTeamMode] = useState(false);
-  const [stageWorkers, setStageWorkers] = useState<StageWorkerPreset[]>([]);
-  const [stageTeamMissionId, setStageTeamMissionId] = useState<string | null>(null);
-  const [gateStatus, setGateStatus] = useState<GateStatusEvent | null>(null);
+
+  // ── 审批卡（唯一操作区）state ───────────────────────────────────────
+  const [transitioning, setTransitioning] = useState(false);
   const [gateComment, setGateComment] = useState("");
-  const [advancing, setAdvancing] = useState(false);
-  const [verifyGate, setVerifyGate] = useState<VerifyGateResponse | null>(null);
-  // R-06 localRunId 兜底：dispatch 成功后立即指向新 run，不等 refresh
-  const [localRunId, setLocalRunId] = useState<string | null>(null);
+  const [notifyResult, setNotifyResult] = useState<{
+    notified_session: boolean;
+    notify_error: string | null;
+  } | null>(null);
+  // 绑定会话（change_session_links 最新；前端取工作区最近活跃会话近似展示，D-007）
+  const [boundSession, setBoundSession] = useState<AgentSessionListItem | null>(
+    null,
+  );
 
   useEffect(() => {
     const load = async () => {
@@ -119,14 +81,19 @@ export default function ChangeDetailPage({ params }: Props) {
       setPageError(null);
       setLoadError(null);
       try {
-        const [c, tb, as] = await Promise.all([
+        const [c, tb, as, sessions] = await Promise.all([
           getChange(workspaceId, changeId),
           getTaskBoard(workspaceId, changeId).catch(() => null),
           getAgentStatus(workspaceId, changeId).catch(() => null),
+          listWorkspaceAgentSessions(workspaceId, { include_ended: true }).catch(
+            () => [],
+          ),
         ]);
         setChange(c);
         setTaskBoard(tb);
         setAgentStatus(as);
+        // §8 绑定查询语义 = 工作区最近活跃会话（coalesce(last_active_at, created_at) desc）
+        setBoundSession(sessions?.[0] ?? null);
       } catch (err) {
         setLoadError(err instanceof ApiError ? err.message : "加载变更详情失败");
       } finally {
@@ -141,8 +108,6 @@ export default function ChangeDetailPage({ params }: Props) {
     try {
       const as = await getAgentStatus(workspaceId, changeId);
       setAgentStatus(as);
-      // R-06：refresh 完成，activeRunId 已追上 localRunId，清空让其接管
-      setLocalRunId(null);
     } catch {
       /* silent */
     } finally {
@@ -150,179 +115,43 @@ export default function ChangeDetailPage({ params }: Props) {
     }
   }, [workspaceId, changeId]);
 
-  const nextStage = change?.current_stage
-    ? (NEXT_STAGE[change.current_stage] ?? null)
-    : null;
-
-  /** 重新派发当前阶段 agent（POST /dispatch，task-12 保留）。 */
-  const handleDispatch = async () => {
-    setDispatching(true);
-    setPageError(null);
-    try {
-      const result = await triggerDispatch(
-        workspaceId,
-        changeId,
-        undefined,
-        undefined,
-        stageProfileId,
-      );
-      // 软失败（200 OK + dispatched:false）
-      if (result.dispatch_result && !result.dispatch_result.dispatched) {
-        const dr = result.dispatch_result;
-        const reasonText =
-          dr.reason && dr.reason !== "dispatch_error" ? `（${dr.reason}）` : "";
-        setPageError(
-          dr.error ? `派发失败${reasonText}：${dr.error}` : `派发失败${reasonText}`,
+  // ── 审批唯一入口 submitStageReview（task-10：notify_session 透传，注入移后端 best-effort）──
+  const handleGateAction = useCallback(
+    async (action: string) => {
+      if (transitioning) return;
+      setTransitioning(true);
+      setNotifyResult(null);
+      try {
+        const result = await submitStageReview(
+          workspaceId,
+          changeId,
+          action,
+          gateComment || undefined,
+          true, // notify_session
         );
-        void refreshAgentStatus();
-        return;
-      }
-      setAgentStatus(result);
-      if (result.has_active_run && result.last_dispatch?.run_id) {
-        setSuccessMsg("🤖 智能体 已触发执行");
-        setTimeout(() => setSuccessMsg(null), 3000);
-        setLocalRunId(result.last_dispatch.run_id);
-      }
-      void refreshAgentStatus();
-    } catch (err) {
-      setPageError(err instanceof ApiError ? err.message : "触发智能体失败");
-    } finally {
-      setDispatching(false);
-    }
-  };
-
-  /** task-12（FR-06/D-005）：「推进」调 advance-stage 显式推进到下一阶段并 dispatch。 */
-  const handleAdvance = async () => {
-    if (!change || !nextStage) return;
-    setDispatching(true);
-    setPageError(null);
-    try {
-      // 2026-08-12-dispatch-bind-agent-profile：团队模式主 agent 也选档案
-      // （mainAgentConfig.agent_profile_id 优先）。单 agent 走顶层 agentProfileId。
-      const mainAgentConfig = teamMode
-        ? { ...(stageProfileId ? { agent_profile_id: stageProfileId } : {}) }
-        : undefined;
-      const result = await advanceChangeStage(workspaceId, changeId, nextStage, {
-        agentProfileId: stageProfileId,
-        teamMode,
-        workerPreset: teamMode ? stageWorkers : undefined,
-        mainAgentConfig,
-      });
-      const changeData = result.change;
-      setChange({
-        ...change,
-        current_stage: (changeData.current_stage as string) ?? nextStage,
-        status: changeData.status ?? change.status,
-        stages: (changeData.stages as Record<string, unknown>) ?? change.stages,
-      });
-      if (result.agent_dispatch?.dispatched) {
-        setSuccessMsg(
-          `🤖 已推进到「${WORKFLOW_STAGE_LABELS[nextStage] ?? nextStage}」并派发智能体`,
-        );
-        setTimeout(() => setSuccessMsg(null), 4000);
-        if (result.agent_dispatch.agent_run_id) {
-          setLocalRunId(result.agent_dispatch.agent_run_id);
-        }
-        if (result.agent_dispatch.mission_id) {
-          setStageTeamMissionId(result.agent_dispatch.mission_id);
-        }
-      } else if (result.agent_dispatch && !result.agent_dispatch.dispatched) {
-        const reason = result.agent_dispatch.reason;
-        if (reason === "active_run_exists") {
-          setSuccessMsg("⚠️ 智能体 已在运行中，跳过重复派发");
-          setTimeout(() => setSuccessMsg(null), 3000);
-        } else {
-          setSuccessMsg(`已推进到「${WORKFLOW_STAGE_LABELS[nextStage] ?? nextStage}」`);
+        setGateComment("");
+        setNotifyResult({
+          notified_session: result.notified_session,
+          notify_error: result.notify_error ?? null,
+        });
+        if (result.notified_session) {
+          setSuccessMsg("✅ 审批已生效，已通知绑定会话");
           setTimeout(() => setSuccessMsg(null), 3000);
         }
+        const [updated, updatedAgentStatus] = await Promise.all([
+          getChange(workspaceId, changeId),
+          getAgentStatus(workspaceId, changeId).catch(() => null),
+        ]);
+        setChange(updated);
+        setAgentStatus(updatedAgentStatus);
+      } catch (err) {
+        setPageError(err instanceof ApiError ? err.message : "操作失败");
+      } finally {
+        setTransitioning(false);
       }
-      void refreshAgentStatus();
-    } catch (err) {
-      if (err instanceof ApiError) {
-        const violations = (err.details as { violations?: string[] })?.violations;
-        setPageError(violations ? violations.join("；") : err.message);
-      } else {
-        setPageError("推进失败");
-      }
-    } finally {
-      setDispatching(false);
-    }
-  };
-
-  /** task-12（D-003/D-008）：run-verify-gate 软调用，结果交用户决策。 */
-  const handleRunVerifyGate = async () => {
-    setAdvancing(true);
-    setPageError(null);
-    try {
-      const result = await runVerifyGate(workspaceId, changeId);
-      setVerifyGate(result);
-      if (result.source === "unavailable") {
-        setSuccessMsg("验证门禁暂不可用（daemon 离线 / 无代码根），请人工核验");
-        setTimeout(() => setSuccessMsg(null), 4000);
-      }
-    } catch (err) {
-      setPageError(err instanceof ApiError ? err.message : "运行验证门禁失败");
-    } finally {
-      setAdvancing(false);
-    }
-  };
-
-  // ── Agent Log Stream（R-06 localRunId 兜底派生）──
-  const activeRunId = agentStatus?.last_dispatch?.run_id ?? null;
-  const isRunActive = agentStatus?.has_active_run ?? false;
-  const panelRunId = localRunId ?? activeRunId;
-  const panelIsActive = localRunId !== null ? true : isRunActive;
-
-  const handleChangesRunDone = useCallback(() => {
-    setLocalRunId(null);
-    void refreshAgentStatus();
-  }, [refreshAgentStatus]);
-
-  const refreshAll = useCallback(async () => {
-    try {
-      const [c, as] = await Promise.all([
-        getChange(workspaceId, changeId),
-        getAgentStatus(workspaceId, changeId),
-      ]);
-      setChange(c);
-      setAgentStatus(as);
-    } catch {
-      /* silent */
-    }
-  }, [workspaceId, changeId]);
-
-  // gate_status_changed SSE 收到后刷新（decided/failed → 推进按钮及时出现）
-  useEffect(() => {
-    if (!gateStatus) return;
-    if (gateStatus.gate_status === "decided" || gateStatus.gate_status === "failed") {
-      void refreshAll();
-    }
-  }, [gateStatus, refreshAll]);
-
-  // gate 审核唯一入口 submitStageReview（task-13/FR-06）
-  const handleGateAction = async (action: string) => {
-    if (transitioning) return;
-    setTransitioning(true);
-    try {
-      await submitStageReview(
-        workspaceId,
-        changeId,
-        action,
-        gateComment || undefined,
-      );
-      setGateComment("");
-      const [updated, updatedAgentStatus] = await Promise.all([
-        getChange(workspaceId, changeId),
-        getAgentStatus(workspaceId, changeId),
-      ]);
-      setChange(updated);
-      setAgentStatus(updatedAgentStatus);
-    } catch (err) {
-      setPageError(err instanceof ApiError ? err.message : "操作失败");
-    } finally {
-      setTransitioning(false);
-    }
-  };
+    },
+    [workspaceId, changeId, transitioning, gateComment],
+  );
 
   if (loading) {
     return (
@@ -380,6 +209,10 @@ export default function ChangeDetailPage({ params }: Props) {
   const reviewHistory = normalizeReviewHistory(
     (change.stages as Record<string, unknown> | null)?.review_history,
   );
+
+  // 执行日志流派生（只读：无 dispatch 后不再有 localRunId 兜底）
+  const panelRunId = agentStatus?.last_dispatch?.run_id ?? null;
+  const panelIsActive = agentStatus?.has_active_run ?? false;
 
   return (
     <PageContainer className="gap-5">
@@ -448,46 +281,33 @@ export default function ChangeDetailPage({ params }: Props) {
 
       {/* 左主右辅两栏（移动端 <lg 单列：次线堆叠在主线下方） */}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-        {/* 主线：当前阶段操作 + 智能体执行日志 */}
+        {/* 主线：审批卡 + 智能体执行日志（只读） */}
         <main className="space-y-3">
           <ChangeStageActions
             change={change}
-            agentStatus={agentStatus}
-            nextStage={nextStage}
-            verifyGate={verifyGate}
+            boundSession={boundSession}
             gateComment={gateComment}
             onGateCommentChange={setGateComment}
-            onGateAction={handleGateAction}
-            onAdvance={handleAdvance}
-            onRunVerifyGate={handleRunVerifyGate}
-            onDispatch={handleDispatch}
+            onGateAction={(action) => void handleGateAction(action)}
             transitioning={transitioning}
-            dispatching={dispatching}
-            advancing={advancing}
-            workspaceId={workspaceId}
-            stageProfileId={stageProfileId}
-            onStageProfileChange={handleStageProfileChange}
-            teamMode={teamMode}
-            onTeamModeChange={setTeamMode}
-            stageWorkers={stageWorkers}
-            onStageWorkersChange={setStageWorkers}
+            notifyResult={notifyResult}
           />
           <ChangeAgentRunLog
             workspaceId={workspaceId}
             panelRunId={panelRunId}
             panelIsActive={panelIsActive}
             agentStatus={agentStatus}
-            gateStatus={gateStatus}
+            gateStatus={null}
             currentStage={change.current_stage ?? null}
             steps={steps}
-            teamMode={teamMode}
-            stageTeamMissionId={stageTeamMissionId}
-            onDone={handleChangesRunDone}
-            onGateStatusChanged={setGateStatus}
+            teamMode={false}
+            stageTeamMissionId={null}
+            onDone={() => void refreshAgentStatus()}
+            onGateStatusChanged={() => undefined}
             onRefresh={() => void refreshAgentStatus()}
             refreshing={loadingAgentStatus}
-            onDispatch={() => void handleDispatch()}
-            dispatching={dispatching}
+            onDispatch={() => undefined}
+            dispatching={false}
           />
         </main>
 

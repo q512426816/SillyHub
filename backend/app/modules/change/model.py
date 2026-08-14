@@ -240,3 +240,47 @@ class ChangeDocument(BaseModel, table=True):
         default=None,
         sa_column=Column(Integer, nullable=True),
     )
+
+
+class ChangeSessionLink(BaseModel, table=True):
+    """变更-会话绑定（change 2026-08-14-change-center-conversation-driven / D-007）。
+
+    reparse 发现新变更（created）时自动绑定该 workspace 最近活跃会话
+    （design §8 绑定查询，跨成员、不限 status）。多对多：一会话可承载多变更、
+    一变更可绑定多会话，``unique(change_id, session_id)`` 防同对重复行。
+    审批/详情页取该 change 最新一条 link 的 session（design §8）。
+    """
+
+    __tablename__ = "change_session_links"
+    __table_args__ = (
+        Index(
+            "ux_change_session_link_pair",
+            "change_id",
+            "session_id",
+            unique=True,
+        ),
+        Index("ix_change_session_link_change", "change_id"),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    change_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("changes.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    session_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_sessions.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )

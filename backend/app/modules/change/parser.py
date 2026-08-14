@@ -72,8 +72,19 @@ class ChangeParser:
     """Parses ``.sillyspec/changes/{active|archive}/{change_key}/`` directories."""
 
     def parse_workspace(
-        self, sillyspec_root: Path, *, platform_managed: bool = False
+        self,
+        sillyspec_root: Path,
+        *,
+        platform_managed: bool = False,
+        scope: list[str] | None = None,
     ) -> ChangeParserResult:
+        """Parse change directories under ``.sillyspec/changes/``.
+
+        ``scope``（change 2026-08-14-change-center-conversation-driven / task-02）：
+        非 None 时只解析 change_key 命中该集合的目录（active/archive/legacy 三区
+        统一过滤），供 ``ChangeService.reparse(scope=[...])`` scoped 重扫使用——
+        范围外变更既不进 parsed 集合也不参与删除判定。None = 全量扫描（现状语义）。
+        """
         result = ChangeParserResult()
         resolver = SpecPathResolver(sillyspec_root, platform_managed=platform_managed)
         changes_base = resolver.changes_root()
@@ -82,6 +93,7 @@ class ChangeParser:
         # 包裹布局（repo-native/server-local，<root>/.sillyspec/ 子目录）带。change.path
         # 前缀错会让 _resolve_change_dir(spec_root/change.path) 拼出不存在路径、文件树全空。
         rel_wrap = "" if platform_managed else ".sillyspec/"
+        scope_set = set(scope) if scope is not None else None
 
         # --- 1. Scan active changes: changes/<name>/ (excluding archive/) ---
         if changes_base.is_dir():
@@ -90,6 +102,9 @@ class ChangeParser:
                     continue
                 # Skip the archive directory itself
                 if entry.name == "archive":
+                    continue
+                # scoped：只解析命中 scope 的变更目录
+                if scope_set is not None and entry.name not in scope_set:
                     continue
 
                 if not self._is_safe_path(sillyspec_root, entry, result):
@@ -109,6 +124,8 @@ class ChangeParser:
         if archive_base.is_dir():
             for entry in sorted(archive_base.iterdir()):
                 if entry.name.startswith(".") or not entry.is_dir():
+                    continue
+                if scope_set is not None and entry.name not in scope_set:
                     continue
 
                 if not self._is_safe_path(sillyspec_root, entry, result):
@@ -138,6 +155,8 @@ class ChangeParser:
             )
             for entry in sorted(legacy_base.iterdir()):
                 if entry.name.startswith(".") or not entry.is_dir():
+                    continue
+                if scope_set is not None and entry.name not in scope_set:
                     continue
 
                 if not self._is_safe_path(sillyspec_root, entry, result):
