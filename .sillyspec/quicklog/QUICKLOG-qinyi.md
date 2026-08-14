@@ -191,3 +191,14 @@
 根因：P0 提交时漏改 task-09-spec-pull-push.test.ts（只改了 spec-sync.test.ts/spec-transport 两个同款契约测试）；且 packSpecDir 只排顶层 .runtime 不排任意深度嵌套 sub/.runtime，测试构造 sub/.runtime 暴露此缺口。
 方案：测试断言反转（.runtime 整树不在 push tar 含 sub/.runtime）；packSpecDir 把 .runtime 加 pruneNames 任意深度 basename 排除（对齐 backend build_bundle any(part==.runtime)）。
 结果：task-09 16 passed + spec-sync 全套 63 passed（P0 测试零回归）。文件：sillyhub-daemon/src/spec-sync.ts(packSpecDir pruneNames 加 .runtime 任意深度)+sillyhub-daemon/tests/task-09-spec-pull-push.test.ts(:528 断言反转)。
+
+## ql-20260814-002-72c5 | 2026-08-14 09:48:41 | 修 reparse 500——ql-008 mtime 循环 stat 性能回归（rglob 双 stat → os.scandir 单遍）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/change/parser.py（新增 _compute_last_modified 静态方法：单次 os.scandir 显式 stack 迭代遍历取目录树非隐藏文件 mtime max；替换 _parse_change 末尾 ql-008 的 rglob+is_file+stat 块）
+- backend/app/modules/change/tests/test_parser.py（+2 单测：last_modified_at 取跨目录非标准文件 mtime max / 隐藏文件跳过+空目录 None 守卫）
+需求：变更中心点「重新解析」按钮返回 500（前端代理 socket hang up），后端实际跑 33s 超代理超时。
+根因：ql-20260813-008 在 parser.py 用 `rglob("*")`+`is_file()`+`stat()` 对每文件产生 2 次 stat 系统调用；该 workspace spec_root 是 Windows-Docker bind mount（`/run/desktop/mnt/host/c/data/spec-workspaces`），单次 stat≈1.45ms，196 变更 ~3000 文件堆到 12s（cProfile 实测 posix.stat 11593 次/16.9s），解析阶段 25s、加 DB 写入总 33s，超 Next.js 14.2.5 代理 ~30s 默认超时 → 前端 ECONNRESET/500（backend 那条 200 是代理放弃后 FastAPI 跑完的"幽灵 200"）。
+方案：parser.py 新增 `_compute_last_modified`——单次 `os.scandir` 迭代遍历（显式 stack 不递归，规避深目录 recursion limit），复用 DirEntry 缓存 stat（每文件仅 1 次系统调用）；`follow_symlinks=False` 比原 rglob 更严格（不跨 symlink，变更目录内无 symlink 行为等价）。mtime-max 语义 / 空目录 None / 含子目录及非标准文件（tasks/*.md、decisions.md）均不变。不删 ql-008 功能（mtime→updated_at 已上线且用户要），只优化实现。
+结果：test_parser+test_reparse_guard 27 passed（含 2 新增 mtime 单测）ruff check/format 干净；容器实测 parse_workspace 25s→14.3s、端到端 reparse 33s→13.7s（经前端代理 3001 返回 200），500 消失，ql-008 功能未回归（196 变更 updated_at 正常）。已 docker cp 到运行中 backend 容器 + restart 使修复即时生效。
