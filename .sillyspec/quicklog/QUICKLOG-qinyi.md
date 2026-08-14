@@ -101,7 +101,93 @@
 方案：方案B 集合IN(用户确认,跨库稳)——service.list_ 加 pending_review_only,先 _resolve_pending_change_keys(批量取 latest_progress 经 _map 算 pending 非空集合)再 SQL WHERE change_key IN 分页,total=IN 后计数=全局真实 N;router 透传删 filter。
 结果：test_router 18 passed(+1 gap② 测试:page_size=1 pending=2 时 total=2 非本页1+分页 page1/2 正确)+全 change 242 passed(1 预存债 test_dispatch)+ruff format/check 全过+mypy 0。文件:backend/app/modules/change/service.py(+_resolve_pending_change_keys+list_ 加参数/WHERE IN)+router.py(透传删 filter)+tests/test_router.py(全局 N 分页回归锚点)。
 
-## ql-20260813-006-38fd | 2026-08-13 20:16:42 | (quick 任务)
-状态：进行中
+## ql-20260813-006-38fd | 2026-08-13 20:16:42 | d004-no-taskkill-source-gate 门禁过严
+状态：已完成
 关联变更：（无）
-文件：（见实际改动）
+文件：
+- sillyhub-daemon/tests/d004-no-taskkill-source-gate.test.ts（加 classifyTaskkill：/PID 放行 / /IM+无flag 违规，Hit 加 kind，两条断言改用 /IM 违规判定）
+- .sillyspec/local.yaml（移除 daemon 模块测试 d004 exclude + 注释说明 ql-20260813-006 已修门禁恢复纳入）
+需求：d004-no-taskkill-source-gate 门禁过严，把 PID-targeted taskkill 也判违规，preflight.runWithTreeKill（修 Windows preflight 卡死）被误拦。
+根因：D-004 真禁令是 /IM 通杀（按进程名匹配会误杀当前会话），但门禁实现成「可执行代码 0 次 taskkill」，没区分 /PID 定点 vs /IM 通杀。
+方案：改 d004 测试分类逻辑——非注释命中按 /PID（定点，放行）/IM（通杀，违规）/无 flag（违规）分类；preflight.ts:366 的 spawn('taskkill', ['/PID',pid,'/T','/F']) 放行；移除 local.yaml daemon 模块测试的 d004 排除（恢复纳入主批）。
+结果：d004 测试 3 passed（分桶 注释=8 /PID 定点=1 违规=0），tsc 0 error，daemon 主批（含 d004 恢复）135 文件 2266 passed 0 failed。
+
+## ql-20260813-007-5fb2 | 2026-08-13 21:11:34 | 工作区配置页「同步到服务器」恒失败
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/spec-sync.ts（packSpecDir 默认排除 .runtime 整树：excludeTop.add('.runtime') 无条件 + docstring 改）
+- backend/app/modules/spec_workspace/service.py（_write_spec_root 加 .runtime 任一段跳过 continue + 两处 decode 后 .replace('\x00','') NUL strip 兜底）
+- backend/app/modules/spec_workspace/tests/test_bundle_sync.py（test_sync_receives→test_sync_skips：.runtime/sillyspec.db 不落盘断言）
+- backend/tests/modules/spec_workspace/test_apply_sync.py（:102/:135 .runtime 改跳过断言 + 新增 test_apply_sync_skips_runtime_db_with_nul_bytes NUL 回归）
+- sillyhub-daemon/tests/spec-transport-tar-sync/spec-sync.test.ts（:191 断言反转 .runtime/sillyspec.db 不在 tar）
+- 注：sillyhub-daemon/tests/spec-sync.test.ts 的 ql-007 断言与并发 ql-008(mtime) 测试在同一 hunk 耦合，本提交不含该文件，待 ql-008 落地后补 ql-007 断言
+需求：工作区配置页「同步到服务器」恒失败，前端报「同步失败。同步到服务器失败」。
+根因：后端 docker logs 实证——daemon 把本地 spec 缓存整树打包回灌，后端 apply_sync 解包后把 tar 成员无差别写进 scan_documents.content（PG 文本列）；其中 .runtime/sillyspec.db（SQLite 二进制）含 NUL 字节 0x00，asyncpg 抛 CharacterNotInRepertoireError → 整批 INSERT 44 行回滚 → HTTP 500 → daemon 标 failed → 前端显示失败。首次同步必撞（增量走 apply_ops 不碰 scan_documents，全量 apply_sync 才写表；首同步无 manifests 缓存走全量）。
+方案：两层修复，.runtime 整树双向对称排除（用户决策 sillyspec.db 不再回灌）。1) daemon spec-sync.ts packSpecDir：.runtime(有点)无条件纳入默认 excludeTop（与 runtime 无点/worktrees 并列），opts.excludeRuntime 降级为冗余兼容开关；push 路径 3 处调用自动生效，import 路径本就传 excludeRuntime:true 行为不变。2) 后端 service.py _write_spec_root per-file merge：rel_path 任一段为 .runtime 则 continue 不落盘不入表（对齐 build_bundle pull 方向任意深度排除）；两处 content.decode 后追加 .replace('\x00','') 兜底防其它二进制漏入炸整批。
+结果：后端 spec_workspace 全套 73 passed 1 skipped（skip=Windows symlink 无关）含新增 NUL 回归 test_apply_sync_skips_runtime_db_with_nul_bytes passed；daemon spec-sync 两契约文件 37/37 passed。**端到端实测通过**：重建 backend 镜像（不传 COMMIT_SHA 避缓存坑）+ pnpm build 重编 daemon dist（全局 node_modules 是 symlink 指本地 dist，无需 bundle/reinstall）+ 重启 daemon，用真实 sillyspec.db（122880 字节/56238 个 NUL）喂 apply_sync 不再 500、.runtime 被跳过不入表、spec 文档正常入库。**提交 88899f9c**（5 文件 pathspec 限定，pre-commit ruff format/check Passed；spec-sync.test.ts 因与并发 ql-008 mtime 测试同 hunk 耦合未提交，留工作区待 ql-008 落地后补）。
+
+## ql-20260813-008-9aec | 2026-08-13 21:16:06 | 修复变更列表「更新时间都一样」——mtime 全链路打通（daemon 打包保留真实 mtime + 后端 reparse 取较大值填 updated_at）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/change/parser.py（ParsedChange 加 last_modified_at + _parse_change rglob 所有文件 mtime max）
+- backend/app/modules/change/service.py（_apply_parsed 取较大值含 SQLite naive→UTC 归一化 / _build_change 显式传 updated_at=last_modified_at or now）
+- backend/app/modules/spec_workspace/schema.py（FileOp 加 mtime: float | None）
+- backend/app/modules/spec_workspace/service.py（新增 _apply_file_mtime os.utime + apply_ops add/update/rename 三处调用）
+- sillyhub-daemon/src/spec-sync.ts（buildTarHeader 保留真实 mtime / packSpecDir 传 mtimeMs / computeIncrementalOps op 带 mtime）
+- sillyhub-daemon/src/hub-client.ts（FileOp 加 mtime?: number | null）
+- backend/app/modules/change/tests/test_reparse_guard.py（修 mock + 5 新单测）
+- backend/app/modules/spec_workspace/tests/test_sync_incremental.py（新增 2 端到端测试）
+- sillyhub-daemon/tests/spec-sync.test.ts（含并发 ql-009 .runtime 排除配套 + 本 ql mtime 单测）
+- backend/openapi.json + frontend/src/lib/api-types.ts + sillyhub-daemon/src/api-types.ts（regen FileOp mtime）
+
+### 根因 + 改了什么
+变更中心列表「更新时间」列全显示同一时刻的根因有两层：
+- 表层：`changes.updated_at` 在 reparse 时被设成「写入数据库的时刻」（`default_factory=now`），43 行挤 50ms 内；update 分支 `_apply_parsed` 完全不碰 updated_at。
+- 深层（端到端实证揪出）：daemon `buildTarHeader`（spec-sync.ts）**刻意把 tar member mtime 固定写 0**（注释「spec 同步不需要精确时间戳」）→ 镜像文件 mtime 全是 1970 → 即使后端用 mtime 填 updated_at 也全失效。增量 FileOp 也不带 mtime。
+
+改动（6 文件实现 + 派生类型 + 测试）：
+- `backend/.../change/parser.py`：`ParsedChange` 加 `last_modified_at`（变更目录 rglob 所有非隐藏文件 mtime max，含 tasks/*.md/decisions.md 等非标准文件）；`_parse_change` 末尾算填。
+- `backend/.../change/service.py`：`_apply_parsed`（update 分支）取较大值 `updated_at = max(现值, last_modified_at)` 不倒退（**含 SQLite naive datetime → UTC 归一化**，真实 DB 抓的坑）；`_build_change`（create）显式 `last_modified_at or now`（空目录 fallback，避免 None 绕过 default_factory 违反 NOT NULL）。
+- `sillyhub-daemon/src/spec-sync.ts`：`buildTarHeader` 加 mtime 参数写真实八进制秒（不再固定 0）；`packSpecDir` 传 `e.mtimeMs`；`computeIncrementalOps` 的 add/update/rename op 带 mtime。
+- `sillyhub-daemon/src/hub-client.ts`：`FileOp` 加可选 `mtime?: number | null`。
+- `backend/.../spec_workspace/schema.py`：`FileOp` 加 `mtime: float | None`。
+- `backend/.../spec_workspace/service.py`：新增 `_apply_file_mtime`（os.utime 设 op.mtime）；`apply_ops` 的 add/update/rename 三处落盘点调用。旧 tar 路径 `_write_spec_root` 走 tarfile.extractall（自动用 member mtime，daemon 改后即真实）无需动。
+- 派生：`backend/openapi.json` + `frontend/src/lib/api-types.ts` + `sillyhub-daemon/src/api-types.ts` regen（FileOp 含 mtime）。
+
+### 跑了哪些测试
+- 后端 `test_reparse_guard.py` 8 passed（5 新：取较大值/不倒退/空目录守卫/proxy 行/SQLite naive datetime 边界）。
+- 后端 `test_sync_incremental.py` 新增 2 passed（apply_ops 带 mtime 落盘 + 全链路 add→reparse→change.updated_at）。
+- 后端 change + spec_workspace 全量 313 passed（2 个 test_dispatch 失败经 stash 验证为 **pre-existing ql-007 测试债，与本改动无关**：`'str' object has no attribute 'hex'` 是他者会话改的脏文件）。
+- daemon spec-sync.test.ts 12 passed（含新 mtime 单测）；typecheck 0 错。
+- 前端 tsc --noEmit 0 错。
+
+### 端到端实证
+容器内验证全链路：add op 带 mtime=固定历史秒 → apply_ops 落盘镜像文件 mtime 真实（非 now）→ reparse → `change.updated_at` 取该 mtime（diff=0）。闭环验证修复有效。注：生产 76baff71 workspace 的 updated_at 需重新部署 daemon（build+重启）+ 重新同步 + reparse 才生效，本次未动运行中 daemon 进程。
+
+### 风险/遗留
+- `task-09-spec-pull-push.test.ts` 的 `_packSpecDir 含 .runtime` 失败 = pre-existing ql-007 测试债（packSpecDir 代码已排除 .runtime 但该测试仍断言「含」，clean 文件无工作区改动），不在本 quick 范围。
+- 生产环境 daemon 需重新 build dist + 重启才让 mtime 修复生效（运行中是旧二进制）。
+- spec-sync.test.ts 含并发 ql-009 的 .runtime 排除配套测试（88899f9c 留工作区待 ql-008 补），与本 mtime 改动同文件不冲突，一并提交。
+
+## ql-20260813-011-61d0 | 2026-08-13 22:07:42 | 变更中心推进阶段加源阶段完成度前置校验（堵"没干活就推进"）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/change/service.py（ChangeService 加 `_check_source_stage_completion` staticmethod：draft/None 首次放行 / stages[source] 缺失 fail-closed 拒绝 / status==completed 且 steps.pending 空放行 / 否则拒绝带 details.reason；插 transition 686 行 draft 特判前——get 之后用原始 current_stage；复用 InvalidTransition errors.py:216 HTTP 422 带 message+details。complete_stage 不动）
+- backend/app/modules/change/tests/test_dispatch.py（加 `_completed_stages` + `_mark_source_completed`（str→UUID）helper；`_create_test_change` 加 stages 形参默认给主线阶段补完成块；3 个 HTTP 测试 transition 前补源阶段完成块；`test_transition_invalid_stage_returns_error` 补完成块让语义回归 TRANSITIONS 拒绝；新增 TestSourceStageCompletionGate 4 用例）
+- backend/app/modules/change/tests/test_stages_persistence.py（`_seed` 补完成块，保留 team_mode 测深拷贝回归）
+需求：变更中心点"推进到下一阶段"按钮时，change 直接进入下一阶段哪怕实际没干活。给 transition 加源阶段完成度前置校验，强制源阶段用 CLI 客观步骤进度证明"干完"才能推进。
+根因：transition（service.py:674）只校验 TRANSITIONS 白名单 + 角色权限，不校验源阶段是否真完成。平台后端其实已持有 CLI 细粒度步骤进度（single 模式 agent 跑完后经 _sync_stage_status_daemon_client 写入 change.stages JSON，dispatch.py:1767），但 transition 推进时根本没读它。
+方案：ChangeService 加 `_check_source_stage_completion(change)`，判据=源阶段 stages[source].status==completed 且 steps.pending 空（决策 b）；stages 缺源阶段数据 fail-closed 拒绝；draft/None 首次启动放行。插在 transition 的 get 之后、draft 特判之前（必须用原始 current_stage 判首次）。team 路径 complete_stage 不经 transition（daemon/run_sync:1762 直调），不受影响——team mission 收敛本就是强证据。verify 不额外卡 gate（沿用形态A软调用语义）。
+结果：service.py + 2 测试文件共 3 文件；change 全测 + mcp_gateway test_change_stage_tools + daemon test_advance_team_stage/test_team_change_lifecycle/test_run_sync_gate_decision_task 共 293 passed/0 fail/2 skip；team 路径零回归（证 complete_stage 不受影响）；新增 TestSourceStageCompletionGate 4 用例（首次放行 / 未完成拒绝断 details.reason=stage_not_completed+pending_count / 缺失拒绝 reason=missing_stage_block / 完成放行）；ruff format+check 全过。坑：①HTTP 测试 demo change 经 reparse 落库 stages 空，_create_test_change 默认给主线阶段补完成块覆盖 service 层测试，HTTP 层加 _mark_source_completed helper（change_id 从 HTTP JSON 来是 str 须转 UUID）；②test_transition_invalid_stage_returns_error 语义被新校验先拦（补完成块让其精确测 TRANSITIONS 拒绝）；③quick 会话 guard 失效产生 009/010 冗余骨架条目（sessionId 并发冲突，已手动清理）。
+
+## ql-20260814-001-c8b7 | 2026-08-14 01:19:35 | 修复 P0(ql-007)遗留红测试 task-09-spec-pull-push.test.ts:528
+状态：已完成
+关联变更：quick-fix-task09-runtime-test
+文件：sillyhub-daemon/src/spec-sync.ts, sillyhub-daemon/tests/task-09-spec-pull-push.test.ts
+需求：修复 P0(ql-007)遗留红测试 task-09-spec-pull-push.test.ts:528，它断言 packSpecDir 含 .runtime，但 P0 已改 packSpecDir 默认排除 .runtime，致主仓该测试恒红卡住 P1 verify。
+根因：P0 提交时漏改 task-09-spec-pull-push.test.ts（只改了 spec-sync.test.ts/spec-transport 两个同款契约测试）；且 packSpecDir 只排顶层 .runtime 不排任意深度嵌套 sub/.runtime，测试构造 sub/.runtime 暴露此缺口。
+方案：测试断言反转（.runtime 整树不在 push tar 含 sub/.runtime）；packSpecDir 把 .runtime 加 pruneNames 任意深度 basename 排除（对齐 backend build_bundle any(part==.runtime)）。
+结果：task-09 16 passed + spec-sync 全套 63 passed（P0 测试零回归）。文件：sillyhub-daemon/src/spec-sync.ts(packSpecDir pruneNames 加 .runtime 任意深度)+sillyhub-daemon/tests/task-09-spec-pull-push.test.ts(:528 断言反转)。

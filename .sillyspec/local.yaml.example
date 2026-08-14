@@ -1,0 +1,61 @@
+# SillySpec local.yaml — 脱敏示例（由 sillyspec init 生成，可提交）
+# 真实配置文件 .sillyspec/local.yaml 是 gitignored（含敏感凭据）。
+# 用法：复制本文件为 .sillyspec/local.yaml，填真实值；或直接 sillyspec platform connect 自动写凭据段。
+# 全部键与生效状态：sillyspec config schema
+
+# ── 项目类型（sillyspec local detect 自动写入，一般无需手填）──
+project:
+  type: nodejs   # nodejs | maven | gradle | make | generic
+
+# ── 构建/测试/lint 命令（detect 核验 scripts 存在性后才写；缺失键省略）──
+commands:
+  build: npm run build
+  test: npm test
+  lint: npm run lint
+  # install: npm install   # worktree 依赖安装命令
+
+# ── SillyHub MCP 客户端凭据（派发到 worker 用）──
+# agent 手填，或 sillyspec platform connect 在 mcp 段缺失时同源自动填。
+# 两键齐全才生效；缺则回退环境变量 SILLYHUB_MCP_URL / SILLYHUB_MCP_TOKEN。
+mcp:
+  url: https://your-sillyhub.example.com
+  token: <your-mcp-token>
+
+# ── SillyHub 平台同步（sillyspec platform connect 写入，含 ping 验活）──
+platform:
+  url: https://your-sillyhub.example.com
+  token: <your-platform-token>
+  user: alice                 # 推送者身份（可空，回退 git user.name / env）
+  # last_connected: 2026-08-11T00:00:00.000Z   # connect 自动写，勿手填
+
+# ── 派发调参（仅确知调优值时填，否则留默认）──
+dispatch:
+  probe_ttl_ms: 60000         # 派发探测负面缓存 TTL（默认 60000）
+  # poll_interval_ms: 15000   # ⚠ 路径A 预留·未落地，配了暂不生效
+  # worker_timeout_ms: 60000  # ⚠ 路径A 预留·未落地，配了暂不生效
+
+# ── monorepo 子模块映射（test_strategy: module 时按 git diff 命中模块收窄测试）──
+# 只支持 inline flow 形态（嵌套展开式解析不出）：
+modules:
+  frontend: { path: "frontend/", test: "cd frontend && pnpm test" }
+  backend: { path: "backend/", test: "cd backend && npm test" }
+
+# ── 测试策略：full=全量 commands.test | module=按命中模块收窄（需配 modules）──
+test_strategy: full
+
+# ── 预存失败豁免清单（变更前就失败的测试行；务必定期复核，防误豁免真实失败）──
+known_failures:
+  - tests/some-old-stable-failure
+
+# ── worktree-guard 只读命令扩展（execute worktree 隔离期内放行额外只读命令）──
+worktree-hook:
+  readonlyCommands:
+    - rg
+    - fd
+
+# ── 变更规模自动分类（sillyspec run auto 时按需求描述强制 quick/full；正则数组，i 大小写无关）──
+auto_mode:
+  force_full_patterns:
+    - 数据库|migration
+  force_quick_patterns:
+    - fix typo
