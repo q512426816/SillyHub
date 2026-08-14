@@ -31,10 +31,13 @@ class TestSafeMtime:
         assert _safe_mtime(0.0) == datetime(1970, 1, 1, tzinfo=UTC)
 
     def test_dirty_year_30828_falls_back(self):
-        # 实测脏值：year 30828 ≈ 9.8e10 秒量级（ns 值被当秒解析）
-        dirty = 9.8e10
+        # 实测脏值：year 30828 ≈ 9.1e11 秒（ns 值被当秒解析）。注意 Windows
+        # fromtimestamp 上界是 year 3000（OSError），Linux 是 year MAXYEAR
+        # （9.1e11 秒在两平台均越界抛异常——year 5103 量级的 9.8e10 只在
+        # Windows 越界，Linux 合法，勿用）。
+        dirty = 9.1e11
         with pytest.raises((ValueError, OverflowError, OSError)):
-            datetime.fromtimestamp(dirty)  # 直接转换确实越界（Win 抛 OSError）
+            datetime.fromtimestamp(dirty)  # 直接转换确实越界（两平台一致）
         assert _safe_mtime(dirty) == datetime(1970, 1, 1, tzinfo=UTC)
 
     def test_negative_falls_back(self):
@@ -81,7 +84,7 @@ class TestParseChangeDirtyMtime:
 
             @property
             def st_mtime(self):
-                return 9.8e10  # year 30828 脏值
+                return 9.1e11  # year 30828 脏值（两平台 fromtimestamp 均越界）
 
         def dirty_stat(self, *, follow_symlinks=True):
             return _DirtyStat(real_stat(self, follow_symlinks=follow_symlinks))

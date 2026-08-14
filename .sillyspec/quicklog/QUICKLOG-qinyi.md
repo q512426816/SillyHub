@@ -245,3 +245,74 @@
 根因：Docker Desktop 文件共享层偶发返回垃圾 stat 时间戳，越界 datetime 转换单文件即放大为整个 reparse 500。
 方案：新增 _safe_mtime 防御性转换（合法窗口外或转换异常一律回退 epoch 0），parser 内 5 处 st_mtime 转换点（含 _compute_last_modified）全部统一走它，附 10 个单测覆盖脏值/边界/集成。
 结果：tests/modules/change 全量 84 passed（含 10 新增）零回归，ruff check+format 过。
+
+## ql-20260814-007-df46 | 2026-08-14 23:40:17 | 会话页点他人会话全 404——列表跨成员可见（D-005@v1）但 logs/dialogs/stream 端点 owner-only
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/workspace-session-section.tsx（useSession 当前用户过滤非本人会话）
+- frontend/src/components/__tests__/workspace-session-section.test.tsx（新增 2 用例（他人剔除/缺 author 保留））
+需求：会话页点他人会话全 404——列表跨成员可见（D-005@v1）但 logs/dialogs/stream 端点 owner-only，attach 他人会话必 404。
+根因：权限设计错位，工作区会话列表展示所有人会话，而面板 attach 链路全部按属主校验，跨用户点击必然 404。
+方案：前端 workspace-session-section.tsx 按 useSession 当前用户 id 过滤 author.user_id 非本人的列表项（author 缺失防御性保留），新增组件测试 2 用例。
+结果：vitest 全量 1427 passed（含新增 2 例），tsc 0 错误，后端无改动不需 gen:types。
+
+## ql-20260814-008-87d7 | 2026-08-14 23:51:37 | 创建/追加会话等 daemon ready 超时 30s
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/session/service.py（wait 默认+两处调用 timeout 30→8，注释同步）
+- backend/app/modules/daemon/tests/test_provider_switch.py（minute+5 replace 越界改 timedelta（预存时间敏感债））
+需求：创建/追加会话等 daemon ready 超时 30s，Next.js 代理 ~30s 先掐断，用户点新建会话必见 500（后端实际 201 成功）。
+根因：SessionReadiness.wait 默认与 create_session/inject_session 两处调用都写死 timeout=30，正常 daemon /ready 上报 ~1s 内到，30s 纯属异常兜底但挡在代理超时之前。
+方案：默认值与两处调用改 timeout=8，注释同步；超时语义不变（warn 后 fallback 发 SESSION_INJECT，兼容旧 daemon）。
+结果：daemon 测试全量 707 passed，ruff format/check + mypy 干净；顺手修 test_provider_switch minute+5 越界预存债（改 timedelta）。
+
+## ql-20260815-001-f305 | 2026-08-15 00:08:48 | 请求耗时超过 10s（slow.request 事件）时异步采样 pg_stat_activity（含 wait_event、锁等待链 query）写入日志
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/core/monitoring.py（第 4 件套：>=10s 慢请求异步采样 pg_stat_activity（NullPool 独立引擎 + 30s 节流 + 5s 超时 + 异常兜底，非 PG 跳过））
+- backend/app/core/tests/test_monitoring.py（新建：9 用例覆盖触发阈值/节流/引擎/超时与失败兜底）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（变更索引追加 ql-20260815-001-f305）
+需求：请求耗时超过 10s（slow.request 事件）时异步采样 pg_stat_activity（含 wait_event、锁等待链 query）写入日志，用于 DB 阻塞应急观测。
+根因：容器重建会清掉现场日志，事后 docker exec psql 抓不到现行，需要在慢请求发生时点把 DB 快照落进持久化日志。
+方案：monitoring.py 扩展第 4 件套——slow_request_middleware 在 duration>=10s 时 _fire_db_blocking_sample 后台采样（fire-and-forget 不阻塞响应）；采样用独立 NullPool 短连接引擎（不占共享池、不挂慢查询监听防递归），查非空闲会话快照 + pg_blocking_pids 锁等待链，打 db.stat_activity_sample 日志；带 30s 节流、5s 超时、全异常兜底不上抛；SQLite 测试环境自动跳过。
+结果：新增 app/core/tests/test_monitoring.py 9 用例全过（触发阈值/节流/非 PG 跳过/超时兜底/连接失败兜底/引擎缓存/任务调度），core 相邻套件 80 passed 零回归，ruff check + format + mypy 全通过。
+
+## ql-20260815-002-c14e | 2026-08-15 00:43:24 | 修复 sillyspec CLI 首推进度后变更中心看不到新建变更的缺陷
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/platform_sync/service.py（接受分支后 _ensure_change_row 建 ux_changes 占位行）
+- backend/app/modules/change/service.py（reparse 删除环镜像滞后保护 + _progress_reported_active_keys）
+- backend/app/modules/platform_sync/tests/test_router.py（首推建行/幂等/全局 token 不建 3 测试）
+- backend/app/modules/change/tests/test_reparse_guard.py（占位保护/not-active 删/有文档删 3 测试）
+需求：修复 sillyspec CLI 首推进度后变更中心看不到新建变更的缺陷。
+根因：进度上行只写 platform_change_progress 表，而变更中心列表以 ux_changes 为主表 join 进度表；ux_changes 行只由镜像 reparse 创建，镜像 tar 同步滞后期间新变更在界面不可见（实测：sillyspec.db id=3281 推送成功但 platform_change_id=None、PG 无行、容器镜像无目录）。
+方案：① platform_sync/service.py 接受分支后调 _ensure_change_row 建 ux_changes 占位行（workspace None 跳过/幂等/savepoint 撞键静默/best-effort）；② change/service.py reparse 全量删除环加镜像滞后保护——progress 最近上行仍报 active 且无文档的占位行不删，有文档行仍按磁盘权威删除。
+结果：新增 5 测试全绿，回归 change+platform_sync 351 passed、spec_workspace 82 passed，ruff/mypy 通过，backend.md 模块文档已同步。
+
+## ql-20260815-003-0488 | 2026-08-15 00:55:34 | 修复 run 终止后 session_dialog_requests 孤儿 pending 卡片无作废机制的缺陷
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/permission_service.py（cancel_pending_dialogs_for_run helper + 两级 pending 列表活跃 run 过滤 + respond 终态前置解析）
+- backend/app/modules/agent/service.py（_cleanup_stale_runs_impl 作废 stale run 的 pending dialog）
+- backend/app/modules/daemon/session/service.py（_converge_crashed_run 作废 crashed run 的 pending dialog）
+- backend/app/modules/daemon/tests/test_session_permissions.py（helper/stale 清理/converge/读过滤/终态 respond 5 测试）
+需求：修复 run 终止后 session_dialog_requests 孤儿 pending 卡片无作废机制的缺陷。
+根因：cancelled 终态在 model.py L213-215 有生命周期声明但从未有写入方；后端重启（_cleanup_stale_runs_impl）/daemon 重启（_converge_crashed_run）收敛 run 时不动 dialog 行，卡片永久 pending，用户点卡经 respond_permission 的 current_run 前置检查报笼统 no active run（实测 run 17edafff failed + dialog bf1770d7 永久 pending）。
+方案：① permission_service 模块级 cancel_pending_dialogs_for_run（pending→cancelled，不自带 commit）；② 两条恢复路径调用它；③ 读侧兜底——session/workspace 两级 pending 列表 join AgentRun 过滤非活跃 run；④ respond_permission 把终态 dialog 解析提前到 current_run 检查前，给明确 409/404。
+结果：新增 5 测试全绿（26 passed），回归 daemon+agent 1328 passed，ruff/mypy 通过，backend.md 模块文档已同步。
+
+## ql-20260815-004-5c7d | 2026-08-15 01:03:31 | 修复 CI Linux pytest 8 failed + 12 errors（reparse parsed=0 连锁）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/tests/test_config.py（删 importlib.reload 改直取 Settings 类）
+- backend/tests/modules/change/test_parser_mtime.py（脏 mtime 改 9.1e11 真实量级）
+需求：修复 CI Linux pytest 8 failed + 12 errors（reparse parsed=0 连锁）。
+根因：test_config.py 的 importlib.reload 分裂 Settings 世界致 spec_root 落错目录 + test_parser_mtime.py 脏值量级错误 Linux 断言落空。
+方案：reload 改直取 Settings 类；脏值 9.8e10 改 9.1e11。
+结果：WSL 全量 2 worker 零 dispatch/task 失败，Windows 861 passed，ruff 过。
