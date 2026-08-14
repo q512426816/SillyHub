@@ -126,9 +126,10 @@ async def test_sync_documents_traversal_service_level_404(
     # 更浅的 ../ 形态（如 ../../evil.md）只落到 root/.sillyspec/ 内，不算穿越。
     with pytest.raises(ChangeDocNotFound):
         await svc.sync_documents(ws_id, change_key, documents=[("../../../../evil.md", "x")])
-    # 绝对路径键：Path 拼接替换整个 relative 段，resolve 后落在 root 外 → 拒绝
-    with pytest.raises(ChangeDocNotFound):
-        await svc.sync_documents(ws_id, change_key, documents=[("C:/evil-absolute.md", "x")])
+    # 曾在此断言绝对路径键（C:/x、/etc/x）→ 越界，实为平台误判：``Path / "/etc/x"``
+    # 在 POSIX 上不替换相对段（仅 ntpath 替换），绝对键在 Linux 上规约成 root 内
+    # 子路径根本不越界，DID NOT RAISE 必挂（CI Linux 偶发首现）。绝对键的入口
+    # 拦截由 schema 层白名单（HTTP 422 用例）覆盖，service 层不再重复断言。
     with pytest.raises(ChangeDocNotFound):
         await svc.sync_documents(
             ws_id, change_key, documents=[("sub/../../../../../escape.md", "x")]
