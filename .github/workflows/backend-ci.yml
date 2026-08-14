@@ -18,7 +18,9 @@ defaults:
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 15 分钟撞顶致 Pytest 跑到 99% 被取消（2026-08-15 实测 15:13 超时，测试零失败）。
+    # 全量 4000+ 用例 + 2 核 xdist + reruns 裕量放到 30 分钟。
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v6.0.2
