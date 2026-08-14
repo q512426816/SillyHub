@@ -967,19 +967,19 @@ TA  Python3.12/Node20 · PG16/Redis7/MinIO · Docker Compose 7 服务 · git wor
 
 ## 8. 已知文档漂移点
 
-落盘时以源码为准校正，列出供后续同步：
+落盘时以源码为准校正，列出供后续同步。**2026-08-14 状态更新**：9 个漂移点中 8 个已修复（#1/#2/#3 随审计体系补全 change `503655a0`；#5/#6/#8 随注释/登记清理 quick `b3c15f5b`；#7 死代码随同 quick 删除；#9 注释早已自行修正）。仅 #4（approvals stub）待澄清。
 
-| 漂移点 | 旧文档/注释措辞 | 源码事实 | 校正依据 |
+| 漂移点 | 旧文档/注释措辞 | 源码事实（当前） | 状态 / 依据 |
 |---|---|---|---|
-| 自动审计钩子未挂载 | `core/audit_hooks.py:290 register_audit_hooks` 设计为自动审计所有表变更 | production `main.py` 的 lifespan/create_app 从未调用它（全仓仅测试命中），运行态休眠；实际靠 ~20 处手工 AuditLog 插入 | `backend/app/main.py`（全文无该调用）+ `auth/service.py:190` 等 |
-| 登录不入审计表 | 审计应覆盖登录 | 登录成功/失败仅 `log.info` 结构化日志，不写 AuditLog | `auth/service.py:111,129` |
-| settings 无审计 | PlatformSetting 变更应审计 | 自动钩子未挂且未手工补，实际无 AuditLog | `settings/` 模块 |
-| approvals 是 stub | `tool_gateway` approvals 能力 | 4 端点当前为 V1 stub 返空 | `tool_gateway/router.py:42-89` |
-| MCP tool 数量注释过时 | `mcp_gateway/server.py:57` 注释称“8 个 tool” | 实际 `tools.py` 注册 12 个 `@mcp.tool()` | `mcp_gateway/tools.py` |
-| adapters 空目录 | `agent/adapters/` 应有 adapter 实现 | 仅 `__init__.py`，`base.py:129 AgentAdapter(ABC)` 无具体子类，执行全走 daemon | `agent/adapters/` + `execution.py:14-31` |
-| start_sillyspec_run 已弃用 | `agent/service.py:473` | 已 `@deprecated`（`:502`），应走 `SillySpecStageDispatchService` | `agent/service.py:473-502` |
-| env.py model 登记不全 | autogenerate 应覆盖全部表 | 显式 import 清单未含 `admin/skills/mcp_gateway/file/agent.profile/daemon.audit/workspace.member_runtimes/ppm.kanban` 等较新模块（靠运行时间接加载） | `migrations/env.py:20-60` |
-| daemon tool_config 强制 | `execution.py` 注释曾称 daemon“不强制 tool_config” | 实测推翻为 daemon 端 live 强制（`--allowedTools`/`--permission-mode`） | `execution.py:14-31` |
+| 自动审计钩子未挂载 | `core/audit_hooks.py:290 register_audit_hooks` 设计为自动审计所有表变更 | **已修复**：production `main.py` lifespan 现挂载 `register_audit_hooks(get_engine())`（77 表注册+幂等） | ✅ 2026-08-14 audit change `503655a0` |
+| 登录不入审计表 | 审计应覆盖登录 | **已修复**：login 成功/失败/禁登三分支手工 AuditLog（占位 UUID + reason） | ✅ 2026-08-14 audit change `503655a0` |
+| settings 无审计 | PlatformSetting 变更应审计 | **已修复**：settings router 两条写路径 per-key 手工审计（CREATE/UPDATE） | ✅ 2026-08-14 audit change `503655a0` |
+| approvals 是 stub | `tool_gateway` approvals 能力 | 4 端点仍为 V1 stub 返空（未动） | ⏳ 待澄清：产品意图未定（用则补实现，不用则标 deprecated） |
+| MCP tool 数量注释过时 | `mcp_gateway/server.py` 注释称“8 个 tool” | **已修复**：三处注释改 12（以 `tools.py` 实际为准） | ✅ 2026-08-14 quick `b3c15f5b` |
+| adapters 空目录 | `agent/adapters/` 应有 adapter 实现 | **已修复**：`__init__.py` 补 docstring 说明“故意空，backend 不在进程内执行 agent，执行走 daemon lease/subprocess” | ✅ 2026-08-14 quick `b3c15f5b` |
+| start_sillyspec_run 已弃用 | `agent/service.py:473` | **已删除**：deprecated 簇（start_sillyspec_run + _short_db + _run_sillyspec_background + helper）整体移除，零生产 caller | ✅ 2026-08-14 quick `b3c15f5b` |
+| env.py model 登记不全 | autogenerate 应覆盖全部表 | **已修复**：补登记 8 类较新模块 model（admin/agent.profile/daemon.audit/file/mcp_gateway/ppm.kanban/skills/workspace.member_runtimes） | ✅ 2026-08-14 quick `b3c15f5b` |
+| daemon tool_config 强制 | `execution.py` 注释曾称 daemon“不强制 tool_config” | **已修复**：注释早已自行修正为 live 强制（`--allowedTools`/`--permission-mode`） | ✅ 无需改动（spike-B 已证） |
 
 
 
