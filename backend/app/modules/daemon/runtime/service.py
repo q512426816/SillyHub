@@ -326,6 +326,8 @@ class RuntimeService:
         daemon_version: str | None = None,
         daemon_build_id: str | None = None,
         started_at: datetime | None = None,
+        *,
+        actor_user_id: uuid.UUID | None = None,
     ) -> DaemonInstance:
         """Per-daemon 心跳（design §5.4 / §9.1 / D-006）。
 
@@ -346,12 +348,35 @@ class RuntimeService:
 
         heartbeat_ack 经 WS 下发到该 daemon 连接（task-06 通路），HTTP 响应只回
         ``{daemon_instance_id, status, allowed_roots}``。
+
+        task-03（security-audit-remediation / FR-12）：``actor_user_id`` 传入时
+        校验 ``instance.user_id == actor_user_id``，不匹配抛 DaemonRuntimeNotFound
+        （404，D-001@v1 owner-only——跨用户与不存在同语义，防止用本人有效凭据
+        刷新他人 daemon 心跳保活）。可选参数兼容既有服务层直调测试；HTTP router
+        恒传 user.id。
         """
         instance = await self._session.get(DaemonInstance, daemon_local_id)
         if instance is None:
             raise DaemonRuntimeNotFound(
                 f"Daemon instance '{daemon_local_id}' not found.",
                 details={"daemon_local_id": str(daemon_local_id)},
+            )
+
+        if actor_user_id is not None and instance.user_id != actor_user_id:
+            log.warning(
+                "daemon_heartbeat_ownership_mismatch",
+                daemon_local_id=str(daemon_local_id),
+                actor_user_id=str(actor_user_id),
+            )
+            raise DaemonRuntimeNotFound(
+                f"Daemon instance '{daemon_local_id}' not found.",
+                details={"daemon_local_id": str(daemon_local_id)},
+            )
+        if actor_user_id is None:
+            # 服务层直调（内部路径/既有测试）：warn 便于审计遗漏面，行为不变。
+            log.warning(
+                "daemon_heartbeat_no_actor_check",
+                daemon_local_id=str(daemon_local_id),
             )
 
         now = datetime.now(UTC)

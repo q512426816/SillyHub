@@ -10,14 +10,20 @@ vi.mock("@/lib/change-files", () => ({
   listPendingChangeFiles: vi.fn(),
 }));
 
-// MarkdownPreview jsdom 降级（CONVENTIONS 已知坑）
+// MarkdownPreview jsdom 降级（CONVENTIONS 已知坑）；task-13 起文件预览必须挂
+// 统一 sanitize 插件，mock 捕获 rehypePlugins 供断言
+const previewCalls = vi.hoisted(() => [] as Array<{ source?: string; rehypePlugins?: unknown }>);
 vi.mock("@uiw/react-markdown-preview", () => ({
   __esModule: true,
-  default: ({ source }: { source: string }) => <div data-testid="md">{source}</div>,
+  default: (props: { source: string; rehypePlugins?: unknown }) => {
+    previewCalls.push(props);
+    return <div data-testid="md">{props.source}</div>;
+  },
 }));
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ChangeFileTree } from "@/components/change-file-tree";
+import { markdownRehypePlugins } from "@/components/ui/markdown-text";
 import {
   listChangeFiles,
   getChangeFileContent,
@@ -59,6 +65,9 @@ describe("ChangeFileTree", () => {
     // 默认预览：Markdown 渲染出现，编辑框未出现
     await waitFor(() => expect(screen.getByTestId("md")).toBeInTheDocument());
     expect(screen.queryByDisplayValue("原文")).not.toBeInTheDocument();
+    // task-13：markdown 预览必须挂统一 sanitize 插件（XSS 防线不可漏）
+    const last = previewCalls.at(-1);
+    expect(last?.rehypePlugins).toBe(markdownRehypePlugins);
     // 点编辑进入编辑模式
     fireEvent.click(screen.getByText("编辑"));
     await waitFor(() => expect(screen.getByDisplayValue("原文")).toBeInTheDocument());

@@ -80,9 +80,12 @@ async def list_files(
     """按归属/上传者列文件元数据（task-13 / FR-06）。
 
     业务人员「借用方案」查看：``owner_type=workspace&owner_id=<ws_id>`` 列该工作空间
-    借用 daemon 产出的方案文件。无参数则返回全部活跃文件（按 created_at 倒序）。
+    借用 daemon 产出的方案文件（需该 workspace 的 WORKSPACE_READ，非成员 404）。
+    无参数则返回可见域内活跃文件——本人上传 + 有 WORKSPACE_READ 的 workspace 归属
+    （platform_admin 全量），按 created_at 倒序（security-audit-remediation D-002）。
     """
     return await service.list_files(
+        user=current_user,
         owner_type=owner_type,
         owner_id=owner_id,
         uploaded_by=uploaded_by,
@@ -97,7 +100,7 @@ async def download_file(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> StreamingResponse:
     """下载/预览文件流。图片白名单 inline，其余强制 attachment（D-009）。"""
-    row, stream = await service.get_stream(file_id)
+    row, stream = await service.get_stream(file_id, user=current_user)
     disposition = "inline" if row.mime_type in _INLINE_IMAGE_TYPES else "attachment"
     # RFC 5987：filename* 承载中文名，filename 给 ASCII 回退。
     ascii_name = row.original_name.encode("ascii", "ignore").decode() or "file"
@@ -116,7 +119,7 @@ async def get_file_meta(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> FileMetaResp:
     """单条文件元数据。"""
-    row = await service.get_meta(file_id)
+    row = await service.get_meta(file_id, user=current_user)
     return FileMetaResp.model_validate(row)
 
 
@@ -127,7 +130,7 @@ async def batch_file_meta(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> list[FileMetaResp]:
     """批量文件元数据（前端回显用）。"""
-    return await service.batch_meta(payload.ids)
+    return await service.batch_meta(payload.ids, user=current_user)
 
 
 @router.delete("/{file_id}", status_code=204)
@@ -137,4 +140,4 @@ async def delete_file(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> None:
     """软删文件（置 deleted_at）。"""
-    await service.soft_delete(file_id)
+    await service.soft_delete(file_id, user=current_user)

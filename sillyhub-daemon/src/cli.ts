@@ -72,6 +72,8 @@ import { PolicyCache } from './policy/runtime-policy.js';
 import { AuditSink } from './policy/audit-sink.js';
 import type { AuditBatchSender, AuditEvent } from './policy/audit-sink.js';
 import { PolicyEngine } from './policy/filesystem-policy.js';
+// task-04（security-audit-remediation / Grill M-2）：daemon apiKey 注入 injector。
+import { setDaemonApiKey } from './credential-injector.js';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 // task-06（D-007@v2）：主 agent MCP tool 注入。buildDaemonMcpServerConfig 构造
 // daemon 内置 MCP server 配置（command=node + args=[dist/mcp-server.js] + env），
@@ -512,6 +514,13 @@ export async function startAction(opts: StartOptions): Promise<number> {
     );
     return 1;
   }
+
+  // task-04（security-audit-remediation / Grill M-2）：把 daemon 自身 apiKey 注入
+  // injector 的进程级状态——litellm_proxy 形态下（master key 不再下发）injector 据此
+  // 注 ANTHROPIC_AUTH_TOKEN，子进程 Bearer 打 hub 代理 /api/daemon/llm-proxy。
+  // 只进内存（模块级变量 → spawn env），不落日志 / 配置文件。token 模式（无 apiKey）
+  // 传 null → proxy 形态退化不写 AUTH_TOKEN 键。
+  setDaemonApiKey(config.api_key);
 
   // step 5 前置：echo 启动信息（对齐 Python __main__.py:93-94）。
   process.stdout.write(`Starting SillyHub daemon (server=${config.server_url})...\n`);

@@ -13,10 +13,12 @@
 //   - extra_env 注入 + 覆盖角色 env
 //   - getInjector 注册表（claude / 未知 / undefined / 空串）
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   ClaudeCredentialInjector,
   getInjector,
+  setDaemonApiKey,
+  _resetDaemonApiKeyForTest,
 } from '../src/credential-injector.js';
 import type { ProviderConfig } from '../src/types.js';
 
@@ -450,6 +452,77 @@ describe('ClaudeCredentialInjector', () => {
         ANTHROPIC_BASE_URL: 'https://gw.example.com',
         ANTHROPIC_AUTH_TOKEN: 'sk-x',
       });
+    });
+  });
+
+  // task-04（security-audit-remediation / Grill M-2 / D-003@v1）：litellm_proxy 代理形态。
+  // backend 不再下发 master key（litellm_auth_token 删除），AUTH_TOKEN 改注 daemon
+  // 自身 apiKey（setDaemonApiKey 进程级注入），BASE_URL 指向 hub 代理地址。
+  describe('api_format=openai_chat + litellm_proxy（hub 代理形态，task-04）', () => {
+    const proxyConfig: ProviderConfig = {
+      ...baseConfig,
+      api_format: 'openai_chat',
+      litellm_proxy: true,
+      litellm_base_url: 'http://hub:8000/api/daemon/llm-proxy',
+      litellm_model_name: 'usr-111-222',
+    };
+
+    // 每用例重置进程级 apiKey（避免用例间泄漏；beforeEach 保证顺序无关）。
+    beforeEach(() => {
+      _resetDaemonApiKeyForTest();
+    });
+    afterEach(() => {
+      _resetDaemonApiKeyForTest();
+    });
+
+    it('litellm_proxy → BASE_URL=代理地址、AUTH_TOKEN=daemon apiKey（setDaemonApiKey 注入）、MODEL+4 档位不变', () => {
+      setDaemonApiKey('shk_live_daemon_key_xyz');
+      const env = injector.toEnv({ ...proxyConfig });
+      expect(env).toEqual({
+        ANTHROPIC_BASE_URL: 'http://hub:8000/api/daemon/llm-proxy',
+        ANTHROPIC_AUTH_TOKEN: 'shk_live_daemon_key_xyz',
+        ANTHROPIC_MODEL: 'usr-111-222',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'usr-111-222',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'usr-111-222',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'usr-111-222',
+        ANTHROPIC_DEFAULT_FABLE_MODEL: 'usr-111-222',
+      });
+      // 关键安全断言：绝无 master key 残留（proxy 形态 config 本就不含）
+      expect(Object.values(env).join(' ')).not.toContain('sk-litellm-master');
+    });
+
+    it('litellm_proxy 且 apiKey 未注入 → 不写 AUTH_TOKEN 键（不写空值，回退本机凭证可诊断）', () => {
+      const env = injector.toEnv({ ...proxyConfig });
+      expect(env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+      expect(env.ANTHROPIC_BASE_URL).toBe('http://hub:8000/api/daemon/llm-proxy');
+    });
+
+    it('litellm_proxy 优先于老 litellm_auth_token（两者并存取 daemon apiKey，防御性）', () => {
+      setDaemonApiKey('shk_live_daemon_key_xyz');
+      const env = injector.toEnv({
+        ...proxyConfig,
+        litellm_auth_token: 'sk-litellm-master-legacy',
+      } as ProviderConfig);
+      expect(env.ANTHROPIC_AUTH_TOKEN).toBe('shk_live_daemon_key_xyz');
+    });
+
+    it('setDaemonApiKey(null/空串) 等价未注入（proxy 形态不写 AUTH_TOKEN）', () => {
+      setDaemonApiKey(null);
+      expect(injector.toEnv({ ...proxyConfig }).ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+      setDaemonApiKey('');
+      expect(injector.toEnv({ ...proxyConfig }).ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+    });
+
+    it('老直连形态回归：无 litellm_proxy 标记 + litellm_auth_token → 仍按原样直连（向后兼容保留）', () => {
+      const env = injector.toEnv({
+        ...baseConfig,
+        api_format: 'openai_chat',
+        litellm_base_url: 'http://litellm:4000',
+        litellm_auth_token: 'sk-litellm-master-legacy',
+        litellm_model_name: 'usr-111-222',
+      });
+      expect(env.ANTHROPIC_AUTH_TOKEN).toBe('sk-litellm-master-legacy');
+      expect(env.ANTHROPIC_BASE_URL).toBe('http://litellm:4000');
     });
   });
 });

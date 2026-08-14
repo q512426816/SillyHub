@@ -13,6 +13,14 @@ workspace 隔离（Change 2026-08-11-change-progress-projection task-06 / D-001@
 shk_live_ 过渡期 ``workspace_id=None`` → 用 ``is_(None)`` 过滤（SQL ``=`` 不匹配 NULL），
 行为与旧版全局聚合等价（R-02）。
 
+读并集聚合（security-audit-remediation task-06 / D-004@v1）：读三方法（list_lightweight
+/ get_progress / get_approval_record）加 ``allowed_workspace_ids`` 可选参数——非 None 时
+按 ``workspace_id IN (集合) OR workspace_id IS NULL`` 聚合（NULL 桶存量行并入只读兼容，
+design §3 兼容策略），替代旧全局桶读语义；为 None 时维持 shpsync_ 单 workspace 原语义
+（逐字节回归）。写三方法（upsert_progress / upsert_documents / set_approval）**无此参数**
+——写归属只能来自 shpsync_ token 派生的单一 workspace_id，单写者语义不变（D-003@v1
+documents 单写者与本变更不冲突）。
+
 后端只存客户端 ``X-SillySpec-Pushed-At`` 原值（R-04：字典序前提，不自造时间戳）。
 """
 
@@ -23,7 +31,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -51,6 +59,29 @@ class PlatformSyncService:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    @staticmethod
+    def _workspace_filter(
+        workspace_id: uuid.UUID | None,
+        allowed_workspace_ids: list[uuid.UUID] | None,
+    ) -> ColumnElement[bool]:
+        """读查询的 workspace 过滤条件（task-06 / D-004@v1 并集聚合）。
+
+        - ``allowed_workspace_ids`` 非 None（JWT/shk_live_ 读路径）→
+          ``workspace_id IN (集合) OR workspace_id IS NULL``——有 CHANGE_READ 权限的
+          workspace 并集 + NULL 桶存量行（只读兼容，design §3）。
+        - ``workspace_id`` 非 None（shpsync_ 路径）→ 精确匹配（收件箱隔离原语义）。
+        - 两者均 None → 仅 NULL 桶（旧全局聚合已关闭，收紧后的默认读域）。
+        """
+        ws_col = col(PlatformChangeProgressORM.workspace_id)
+        if allowed_workspace_ids is not None:
+            filters: list[ColumnElement[bool]] = [ws_col.is_(None)]
+            if allowed_workspace_ids:
+                filters.append(ws_col.in_(allowed_workspace_ids))
+            return or_(*filters)
+        if workspace_id is not None:
+            return ws_col == workspace_id
+        return ws_col.is_(None)
 
     async def _find_row(
         self, workspace_id: uuid.UUID | None, name: str
@@ -160,8 +191,9 @@ class PlatformSyncService:
         此处在接受分支补一个占位行（字段取自 payload 的 changes[] 同名条目），
         待镜像同步 + reparse 后由真实扫描结果接管（_apply_parsed 覆盖）。
 
-        - ``workspace_id=None``（shk_live_/JWT 全局 fallback）：无法定位 workspace，
-          跳过（与进度收件箱隔离一致，service 内不猜 workspace）。
+        - ``workspace_id=None``：无法定位 workspace，跳过（与进度收件箱隔离一致，
+          service 内不猜 workspace）。task-06（D-004@v1）后写端点仅 shpsync_ 可达
+          （workspace_id 恒非 None），此分支仅防御 service 直调场景。
         - 幂等：已存在同 ``(workspace_id, change_key)`` 行则直接返回。
         - 并发兜底：savepoint 内 flush 撞 ``ux_changes_workspace_key`` 唯一约束
           → 回滚 savepoint 静默放弃（对端已建行，语义等价）。
@@ -239,17 +271,20 @@ class PlatformSyncService:
         row.last_pusher = user
         row.updated_at = datetime.now(UTC)
 
-    async def list_lightweight(self, workspace_id: uuid.UUID | None) -> list[dict[str, Any]]:
+    async def list_lightweight(
+        self,
+        workspace_id: uuid.UUID | None,
+        allowed_workspace_ids: list[uuid.UUID] | None = None,
+    ) -> list[dict[str, Any]]:
         """GET /changes 轻量列表（契约 §5，按 workspace 过滤）。
 
         ``current_stage`` 取自裸六表 ``latest_progress.changes[0].current_stage``
         （sync.js:592 客户端按键识别）。防御性 isinstance：裸 JSON 结构可能异常。
-        ``workspace_id=None`` → shk_live_ 过渡期全局聚合（``is_(None)``）。
+        ``workspace_id=None`` + ``allowed_workspace_ids=None`` → 仅 NULL 桶（task-06
+        前是全局聚合，已关闭）；``allowed_workspace_ids`` 非 None → 并集 + NULL 桶。
         """
         stmt = select(PlatformChangeProgressORM).where(
-            col(PlatformChangeProgressORM.workspace_id).is_(None)
-            if workspace_id is None
-            else col(PlatformChangeProgressORM.workspace_id) == workspace_id,
+            self._workspace_filter(workspace_id, allowed_workspace_ids)
         )
         rows = (await self._session.execute(stmt)).scalars().all()
         items: list[dict[str, Any]] = []
@@ -276,13 +311,21 @@ class PlatformSyncService:
         return items
 
     async def get_progress(
-        self, workspace_id: uuid.UUID | None, name: str
+        self,
+        workspace_id: uuid.UUID | None,
+        name: str,
+        allowed_workspace_ids: list[uuid.UUID] | None = None,
     ) -> dict[str, Any] | None:
         """GET /changes/{name}/progress（契约 §6，复合键取行）：完整六表 + 顶层 ``last_pushed_at``。
 
         不存在/跨 workspace → None（router 层 404，对齐 main.py quick_chat 惯例）。
+        ``allowed_workspace_ids`` 非 None 时按并集 + NULL 桶取行（task-06 / D-004@v1）。
         """
-        row = await self._find_row(workspace_id, name)
+        stmt = select(PlatformChangeProgressORM).where(
+            col(PlatformChangeProgressORM.change_name) == name,
+            self._workspace_filter(workspace_id, allowed_workspace_ids),
+        )
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
         if row is None or row.latest_progress is None:
             # 占位行守卫（design §4.3 / Grill UB-1）：仅 documents/approval 有值的行
             # 视为「无进度」→ None（router 维持 404）。否则 CLI triggerPull 拉到
@@ -375,14 +418,23 @@ class PlatformSyncService:
         return record
 
     async def get_approval_record(
-        self, workspace_id: uuid.UUID | None, name: str
+        self,
+        workspace_id: uuid.UUID | None,
+        name: str,
+        allowed_workspace_ids: list[uuid.UUID] | None = None,
     ) -> dict[str, Any] | None:
         """GET /changes/{name}/approval：读 approval 列。
 
         行不存在 / approval NULL（含仅 documents 的占位行）→ None——router 层
         映射默认 approved 放行（ql-20260812-001-6eb8 兼容语义）。
+        ``allowed_workspace_ids`` 非 None 时按并集 + NULL 桶取行（task-06 / D-004@v1：
+        跨 workspace 的 change 名不可读，不可见行回落默认 approved，不泄漏 status）。
         """
-        row = await self._find_row(workspace_id, name)
+        stmt = select(PlatformChangeProgressORM).where(
+            col(PlatformChangeProgressORM.change_name) == name,
+            self._workspace_filter(workspace_id, allowed_workspace_ids),
+        )
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
         if row is None:
             return None
         return row.approval if isinstance(row.approval, dict) else None

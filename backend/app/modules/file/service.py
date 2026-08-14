@@ -15,12 +15,15 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import and_, false, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.modules.auth.model import User
+from app.modules.auth.permissions import Permission
+from app.modules.auth.rbac import allowed_workspace_ids, has_permission
 from app.modules.file.model import File
 from app.modules.file.schema import FileMetaResp, FileUploadResp
 from app.modules.storage.base import StorageBackend
@@ -115,40 +118,113 @@ class FileService:
             raise AppError("文件不存在或已删除", code="file_not_found", http_status=404)
         return row
 
-    async def get_meta(self, file_id: uuid.UUID) -> File:
-        """取单个文件元数据（router Content-Disposition 判定用）。"""
-        return await self._get_active(file_id)
+    def _not_found(self) -> AppError:
+        """无权与不存在共用语义的 404（security-audit-remediation D-001，沿 287eed60 owner-only 约定）。"""
+        return AppError("文件不存在或已删除", code="file_not_found", http_status=404)
 
-    async def get_stream(self, file_id: uuid.UUID) -> tuple[File, AsyncIterator[bytes]]:
-        """取下载流：返回 (File 元数据, 异步字节流)。"""
+    async def _can_access(self, *, user: User, row: File) -> bool:
+        """归属判定（security-audit-remediation task-05 / FR-04）：
+
+        本人上传（uploaded_by == user.id）或 platform_admin 豁免；
+        workspace 归属文件对在该 workspace 有 WORKSPACE_READ 的用户可见
+        （借用方案查看，R-04）。权限解析统一走 auth/rbac.py，不在本模块重复实现。
+        """
+        if row.uploaded_by == user.id or user.is_platform_admin:
+            return True
+        if row.owner_type == "workspace" and row.owner_id is not None:
+            return await has_permission(
+                self._session,
+                user=user,
+                permission=Permission.WORKSPACE_READ,
+                workspace_id=row.owner_id,
+            )
+        return False
+
+    async def _get_active_for(self, file_id: uuid.UUID, *, user: User) -> File:
+        """取未软删 File 并断言归属；不存在/已删/无权统一 404（D-001）。"""
         row = await self._get_active(file_id)
+        if not await self._can_access(user=user, row=row):
+            raise self._not_found()
+        return row
+
+    async def get_meta(self, file_id: uuid.UUID, *, user: User) -> File:
+        """取单个文件元数据（router Content-Disposition 判定用），归属断言后返回。"""
+        return await self._get_active_for(file_id, user=user)
+
+    async def get_stream(
+        self, file_id: uuid.UUID, *, user: User
+    ) -> tuple[File, AsyncIterator[bytes]]:
+        """取下载流（归属断言后）：返回 (File 元数据, 异步字节流)。"""
+        row = await self._get_active_for(file_id, user=user)
         return row, self._storage.get_object_stream(row.stored_key)
 
-    async def batch_meta(self, ids: list[uuid.UUID]) -> list[FileMetaResp]:
-        """批量取元数据（跳过已软删），供前端回显。"""
+    async def batch_meta(self, ids: list[uuid.UUID], *, user: User) -> list[FileMetaResp]:
+        """批量取元数据：跳过已软删 + 无权行静默剔除（对齐既有跳过软删回显语义）。"""
         if not ids:
             return []
         stmt = select(File).where(File.id.in_(ids), File.deleted_at.is_(None))
         rows = (await self._session.execute(stmt)).scalars().all()
-        return [FileMetaResp.model_validate(r) for r in rows]
+        visible: list[FileMetaResp] = []
+        for r in rows:
+            if await self._can_access(user=user, row=r):
+                visible.append(FileMetaResp.model_validate(r))
+        return visible
 
     async def list_files(
         self,
         *,
+        user: User,
         owner_type: str | None = None,
         owner_id: uuid.UUID | None = None,
         uploaded_by: uuid.UUID | None = None,
         limit: int = 100,
     ) -> list[FileMetaResp]:
-        """按归属/上传者列文件元数据（task-13 / FR-06 借用方案查看）。
+        """按归属/上传者列文件元数据（task-13 / FR-06 借用方案查看，可见域 D-002）。
 
         业务/管理人员「借用方案」查看用：后端 close_interactive_run 回调把借用产出
         落 File 表（owner_type="workspace"、owner_id=ws_id、uploaded_by=业务人员，
         design §5 Phase 5 / D-009@v1），前端按 owner_type+owner_id 列方案文件。
 
+        可见域（security-audit-remediation task-05）：非 admin 无权读全平台文件——
+        带 ``owner_id``（workspace 归属查询）先校验该 workspace 的 WORKSPACE_READ
+        成员资格，非成员 404；其余情况收敛为「本人上传 OR workspace 归属且
+        owner_id 在 ``allowed_workspace_ids(user, WORKSPACE_READ)`` 集合内」。
+        platform_admin 豁免可见全部（rbac has_permission 同款短路）。
+
         过滤掉已软删（deleted_at IS NULL）。``limit`` 上限 200 防滥用（router 层
         Query(le=200) 已约束，此处再 min 一道防御）。
         """
+        if not user.is_platform_admin:
+            if owner_id is not None:
+                # 指定 workspace 归属查询：先校验成员资格，非成员与不存在同语义 404（D-001）。
+                if not await has_permission(
+                    self._session,
+                    user=user,
+                    permission=Permission.WORKSPACE_READ,
+                    workspace_id=owner_id,
+                ):
+                    raise self._not_found()
+            else:
+                # 无 workspace 过滤：可见域 = 本人上传 OR 有 WORKSPACE_READ 的 workspace 归属。
+                allowed = await allowed_workspace_ids(
+                    self._session, user_id=user.id, permission=Permission.WORKSPACE_READ
+                )
+                domain = or_(
+                    File.uploaded_by == user.id,
+                    and_(
+                        File.owner_type == "workspace",
+                        File.owner_id.in_(allowed) if allowed else false(),
+                    ),
+                )
+                stmt = select(File).where(File.deleted_at.is_(None), domain)
+                if owner_type:
+                    stmt = stmt.where(File.owner_type == owner_type)
+                if uploaded_by is not None:
+                    stmt = stmt.where(File.uploaded_by == uploaded_by)
+                stmt = stmt.order_by(File.created_at.desc()).limit(min(max(limit, 1), 200))
+                rows = (await self._session.execute(stmt)).scalars().all()
+                return [FileMetaResp.model_validate(r) for r in rows]
+
         stmt = select(File).where(File.deleted_at.is_(None))
         if owner_type:
             stmt = stmt.where(File.owner_type == owner_type)
@@ -160,8 +236,8 @@ class FileService:
         rows = (await self._session.execute(stmt)).scalars().all()
         return [FileMetaResp.model_validate(r) for r in rows]
 
-    async def soft_delete(self, file_id: uuid.UUID) -> None:
-        """软删：置 deleted_at + 同步删存储对象本体。
+    async def soft_delete(self, file_id: uuid.UUID, *, user: User) -> None:
+        """软删（归属断言后）：置 deleted_at + 同步删存储对象本体。
 
         第五批 code-quality：原仅置 deleted_at、注释称"对象本体由后续清理流程删除"
         但该清理流程全仓不存在 → MinIO 孤儿单调增长（账单泄漏）。改同步删对象本体
@@ -169,7 +245,7 @@ class FileService:
         清理脚本)。顺序：先 commit DB 软删标记，后删 MinIO——若反序 commit 失败会留
         下指向已删对象的 active File（下载 404 损坏功能），故宁可孤儿不可损坏。
         """
-        row = await self._get_active(file_id)
+        row = await self._get_active_for(file_id, user=user)
         row.deleted_at = datetime.now(UTC)
         await self._session.commit()
         try:

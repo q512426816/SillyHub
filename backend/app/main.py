@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import __version__
 from app.core.audit_hooks import register_audit_hooks
@@ -224,7 +227,6 @@ def create_app() -> FastAPI:
     def _register_quick_chat(app: FastAPI) -> None:
         """Register the /api/daemon-chat endpoint with its own router."""
         from fastapi import APIRouter, Depends, Query
-        from sqlalchemy.ext.asyncio import AsyncSession
 
         from app.core.auth_deps import require_permission_any
         from app.core.db import get_session
@@ -232,6 +234,84 @@ def create_app() -> FastAPI:
         from app.modules.auth.permissions import Permission
 
         qc_router = APIRouter()
+
+        def _quick_chat_lease_owner(lease_metadata: object) -> str | None:
+            """task-08（security-audit-remediation D-005@v1）：从 lease metadata
+            提归属者。
+
+            raw text() SELECT 下 JSON 列的返回形态因后端而异：PostgreSQL
+            (asyncpg) 返回 dict；SQLite (aiosqlite) 返回 JSON 字符串。统一解析后
+            取 ``actor_user_id``（task-08 起由 placement.dispatch_to_daemon 写入）。
+            缺键 / 非法形态 → None（调用方按不匹配处理 → 404，存量 run 兼容
+            策略：统一 404，未上线可接受）。
+            """
+            meta = lease_metadata
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except (TypeError, ValueError):
+                    return None
+            if not isinstance(meta, dict):
+                return None
+            actor = meta.get("actor_user_id")
+            return actor if isinstance(actor, str) else None
+
+        async def _assert_quick_chat_run_owner(
+            session: AsyncSession,
+            run_id: uuid.UUID,
+            user_id: uuid.UUID,
+            *,
+            extra_cols: tuple[str, ...] = (),
+        ) -> dict:
+            """task-08（D-005@v1 / D-001@v1）：quick-chat run 归属校验 + 行读取。
+
+            归属链：``agent_runs ← daemon_task_leases.agent_run_id → lease
+            metadata.actor_user_id``。与当前 user.id 比对，run 不存在 / 无 lease
+            链 / 归属不匹配 / metadata 缺 actor_user_id 统一 404（与不存在同
+            语义，不泄存在性）。
+
+            Note: D-005 字面的 ``agent_runs.lease_id`` 锚点不可实现——该列 FK
+            指向 worktree_leases（service.py:1729 注释明确禁止写 daemon lease
+            id），故走 lease.agent_run_id 反向链（lease INSERT 即携带，无需回填
+            UPDATE）。
+
+            raw text() 绑定统一用 ``.hex``：ORM Uuid 列在 SQLite 以 CHAR(32)
+            hex 落库（PG 为 Uuid 对象），PG Uuid 列同样接受 hex 形式（对齐
+            placement.py 范式）。
+
+            Returns:
+                归属校验通过的 agent_runs 行（id/status + ``extra_cols`` 指定列）。
+                id 归一为带连字符 str（SQLite raw SELECT 返回 CHAR(32) hex，
+                PG 返回 UUID 对象，统一 str(uuid) 保持响应契约一致）。
+            """
+            from fastapi import HTTPException
+            from sqlalchemy import text as sa_text
+
+            cols = ", ".join(("r.id", "r.status", *(f"r.{c}" for c in extra_cols)))
+            row = (
+                (
+                    await session.execute(
+                        sa_text(
+                            f"SELECT {cols}, l.metadata AS lease_metadata "
+                            "FROM agent_runs r "
+                            "JOIN daemon_task_leases l ON l.agent_run_id = r.id "
+                            "WHERE r.id = :id AND r.spec_strategy = 'quick-chat'"
+                        ),
+                        {"id": run_id.hex},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if row is None or _quick_chat_lease_owner(row["lease_metadata"]) != str(user_id):
+                raise HTTPException(status_code=404, detail="Run not found")
+            out = dict(row)
+            raw_id = out["id"]
+            if isinstance(raw_id, str):
+                out["id"] = str(uuid.UUID(raw_id))
+            elif isinstance(raw_id, uuid.UUID):
+                out["id"] = str(raw_id)
+            return out
 
         @qc_router.post("/daemon-chat", status_code=201)
         async def quick_chat(
@@ -248,38 +328,68 @@ def create_app() -> FastAPI:
 
             from app.modules.agent.placement import RunPlacementService
 
-            # Resolve resume session_id from previous run
+            # Resolve resume session_id from previous run.
+            # task-08（security-audit-remediation D-005@v1/D-001@v1）：prev run
+            # 同样走归属链校验（agent_runs ← daemon_task_leases.agent_run_id →
+            # lease metadata.actor_user_id）——他人 prev_run_id 视为不存在，
+            # resume_session_id 保持 None，不泄探（返回 201 新 run，非 404，
+            # 因为 POST 本身的资源是新建 run）。
             resume_session_id = None
             if prev_run_id:
-                row = (
-                    (
-                        await session.execute(
-                            sa_text(
-                                "SELECT session_id FROM agent_runs "
-                                "WHERE id = :id AND spec_strategy = 'quick-chat'"
-                            ),
-                            {"id": prev_run_id},
+                try:
+                    prev_run_uuid = uuid.UUID(prev_run_id)
+                except (ValueError, TypeError):
+                    prev_run_uuid = None
+                if prev_run_uuid is not None:
+                    row = (
+                        (
+                            await session.execute(
+                                sa_text(
+                                    "SELECT r.session_id AS session_id, l.metadata AS lease_metadata "
+                                    "FROM agent_runs r "
+                                    "JOIN daemon_task_leases l ON l.agent_run_id = r.id "
+                                    "WHERE r.id = :id AND r.spec_strategy = 'quick-chat'"
+                                ),
+                                # raw text() 绑定统一 .hex：SQLite Uuid 列以
+                                # CHAR(32) hex 落库（PG 为 Uuid 对象，同样接受 hex）。
+                                {"id": prev_run_uuid.hex},
+                            )
                         )
+                        .mappings()
+                        .first()
                     )
-                    .mappings()
-                    .first()
-                )
-                if row and row["session_id"]:
-                    resume_session_id = row["session_id"]
+                    if (
+                        row
+                        and row["session_id"]
+                        and _quick_chat_lease_owner(row["lease_metadata"]) == str(user.id)
+                    ):
+                        resume_session_id = row["session_id"]
 
             run_id = uuid.uuid4()
             await session.execute(
                 sa_text(
-                    "INSERT INTO agent_runs (id, agent_type, provider, model, status, spec_strategy) "
-                    "VALUES (:id, :agent_type, :provider, :model, 'pending', 'quick-chat')"
+                    "INSERT INTO agent_runs "
+                    "(id, agent_type, provider, model, status, spec_strategy, "
+                    " created_at, checkpoint_version, version, "
+                    " max_retries, retry_count, attempt) "
+                    "VALUES (:id, :agent_type, :provider, :model, 'pending', 'quick-chat', "
+                    " :now, 0, 1, 3, 0, 0)"
                 ),
                 {
-                    "id": run_id,
+                    # raw text() 绑定统一 .hex：SQLite Uuid 列以 CHAR(32) hex 落库
+                    # （UUID 对象驱动层不识别），PG Uuid 列同样接受 hex 形式。
+                    # created_at / checkpoint_version / version / max_retries /
+                    # retry_count / attempt 显式携带：这些列只有 ORM Python 端
+                    # default（raw INSERT 不生效；created_at 的 server_default
+                    # now() 还是 PG 方言），task-08 补 POST 测试路径时暴露，
+                    # 取值对齐 model.py 默认值。
+                    "id": run_id.hex,
                     # ql-20260618-009：与 service.py / bootstrap.py / dispatch.py 一致，
                     # AgentRun.agent_type 永远是 adapter id（"claude_code"），具体 provider 走独立列。
                     "agent_type": "claude_code",
                     "provider": provider,
                     "model": model,
+                    "now": datetime.now(UTC),
                 },
             )
             await session.commit()
@@ -327,21 +437,30 @@ def create_app() -> FastAPI:
             session: AsyncSession = Depends(get_session),
             user: User = Depends(require_permission_any(Permission.TASK_READ)),
         ) -> dict:
-            from sqlalchemy import text as sa_text
+            import uuid as _uuid
 
-            result = await session.execute(
-                sa_text(
-                    "SELECT id, status, output_redacted, agent_type, provider, model, started_at, finished_at "
-                    "FROM agent_runs WHERE id = :id AND spec_strategy = 'quick-chat'"
+            from fastapi import HTTPException
+
+            try:
+                parsed = _uuid.UUID(run_id)
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=404, detail="Run not found") from None
+
+            # task-08（D-005@v1/D-001@v1）：归属校验（不匹配/链缺失 404）+ 一次查询取行。
+            row = await _assert_quick_chat_run_owner(
+                session,
+                parsed,
+                user.id,
+                extra_cols=(
+                    "output_redacted",
+                    "agent_type",
+                    "provider",
+                    "model",
+                    "started_at",
+                    "finished_at",
                 ),
-                {"id": run_id},
             )
-            row = result.mappings().first()
-            if row is None:
-                from fastapi import HTTPException
-
-                raise HTTPException(status_code=404, detail="Run not found")
-            return dict(row)
+            return row
 
         @qc_router.get("/daemon-chat/{run_id}/stream")
         async def stream_quick_chat(
@@ -360,8 +479,10 @@ def create_app() -> FastAPI:
             import json
             import uuid as _uuid
 
-            from fastapi import HTTPException, StreamingResponse
-            from sqlalchemy import text as sa_text
+            # StreamingResponse 在 fastapi.responses（fastapi 顶层不导出——
+            # task-08 补 stream 测试时暴露的隐性导入错误，端点此前无测试覆盖）。
+            from fastapi import HTTPException
+            from fastapi.responses import StreamingResponse
 
             from app.core.db import get_session_factory
             from app.modules.agent.service import AgentService
@@ -372,25 +493,14 @@ def create_app() -> FastAPI:
             except (ValueError, TypeError):
                 raise HTTPException(status_code=404, detail="Run not found") from None
 
-            # 校验：短 session，校验完即归还连接池 slot（不贯穿 SSE 生命周期）
+            # 校验：短 session，校验完即归还连接池 slot（不贯穿 SSE 生命周期）。
+            # task-08（D-005@v1/D-001@v1）：查询扩展为带归属判定的 JOIN——
+            # 他人 run / 归属链缺失统一 404（与不存在同语义）。
             status_val = None
             async with get_session_factory()() as session:
-                row = (
-                    (
-                        await session.execute(
-                            sa_text(
-                                "SELECT id, status FROM agent_runs "
-                                "WHERE id = :id AND spec_strategy = 'quick-chat'"
-                            ),
-                            {"id": parsed},
-                        )
-                    )
-                    .mappings()
-                    .first()
-                )
-                if row is not None:
-                    status_val = row["status"]
-            if status_val is None:
+                row = await _assert_quick_chat_run_owner(session, parsed, user.id)
+                status_val = row["status"]
+            if status_val is None:  # pragma: no cover — helper 不通过即 404，防御兜底
                 raise HTTPException(status_code=404, detail="Run not found")
 
             sse_headers = {
@@ -437,7 +547,6 @@ def create_app() -> FastAPI:
             import uuid as _uuid
 
             from fastapi import HTTPException
-            from sqlalchemy import text as sa_text
 
             from app.modules.agent.service import AgentService
 
@@ -446,21 +555,9 @@ def create_app() -> FastAPI:
             except (ValueError, TypeError):
                 raise HTTPException(status_code=404, detail="Run not found") from None
 
-            row = (
-                (
-                    await session.execute(
-                        sa_text(
-                            "SELECT id, status FROM agent_runs "
-                            "WHERE id = :id AND spec_strategy = 'quick-chat'"
-                        ),
-                        {"id": str(parsed)},
-                    )
-                )
-                .mappings()
-                .first()
-            )
-            if row is None:
-                raise HTTPException(status_code=404, detail="Run not found")
+            # task-08（D-005@v1/D-001@v1）：归属校验先于终态幂等判断——
+            # 他人 run 即使已终态也 404，不泄露 run 存在性 / 状态。
+            row = await _assert_quick_chat_run_owner(session, parsed, user.id)
 
             if row["status"] not in ("pending", "running"):
                 # 已是终态，幂等返回当前状态
@@ -488,7 +585,6 @@ def create_app() -> FastAPI:
             import uuid as _uuid
 
             from fastapi import HTTPException
-            from sqlalchemy import text as sa_text
 
             from app.modules.agent.schema import AgentRunLogEntry
             from app.modules.agent.service import AgentService
@@ -498,21 +594,8 @@ def create_app() -> FastAPI:
             except (ValueError, TypeError):
                 raise HTTPException(status_code=404, detail="Run not found") from None
 
-            row = (
-                (
-                    await session.execute(
-                        sa_text(
-                            "SELECT id FROM agent_runs "
-                            "WHERE id = :id AND spec_strategy = 'quick-chat'"
-                        ),
-                        {"id": str(parsed)},
-                    )
-                )
-                .mappings()
-                .first()
-            )
-            if row is None:
-                raise HTTPException(status_code=404, detail="Run not found")
+            # task-08（D-005@v1/D-001@v1）：归属校验（不匹配/链缺失 404）。
+            await _assert_quick_chat_run_owner(session, parsed, user.id)
 
             svc = AgentService(session)
             logs = await svc.get_run_logs(parsed)

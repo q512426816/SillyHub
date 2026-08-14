@@ -20,7 +20,7 @@
  * design §5（第 0 层注入最高优先级）/ §9（未配兜底零回归 D-007）；requirements FR-04 / FR-05。
  */
 
-import { getInjector } from './credential-injector.js';
+import { getInjector, setDaemonApiKey } from './credential-injector.js';
 import { CLAUDE_CONFIG_DIR } from './config.js';
 import type { ProviderConfig } from './types.js';
 
@@ -56,6 +56,13 @@ export interface SpawnEnvCtx {
 export interface BuildSpawnEnvOpts {
   /** 凭据管理器（读 credentials.json token + 渲染 tool_config 占位符）。 */
   credential: SpawnCredentialManager;
+  /**
+   * task-04（security-audit-remediation / Grill M-2）：daemon 自身 apiKey，
+   * litellm_proxy 形态下盖过 injector 从模块级 _daemonApiKey 取的值（调用方
+   * 显式传 config.api_key 的最短路径）。undefined → injector 用启动期
+   * setDaemonApiKey 注入的进程级值（见 credential-injector.ts）。
+   */
+  daemonApiKey?: string | null;
 }
 
 /**
@@ -141,7 +148,11 @@ export function buildSpawnEnv(
   // 平台下发的 LLM 供应商配置盖过 tool_config.env（层 1）/ token（层 2）/ process.env（层 3）。
   // 放在最后赋值保证同名 key 第 0 层生效。provider_config absent / null / agent_kind 未注册
   // → getInjector 返回 undefined，第 0 层跳过，env 与现状三层逐字一致（D-007 零回归）。
+  // task-04（security-audit-remediation）：opts.daemonApiKey 显式传值时同步到 injector
+  // 的进程级状态（litellm_proxy 形态下 injector 由此产 ANTHROPIC_AUTH_TOKEN；见
+  // credential-injector.ts setDaemonApiKey 注释）。空串不注入（永不写空 AUTH_TOKEN）。
   if (ctx.provider_config) {
+    if (opts.daemonApiKey) setDaemonApiKey(opts.daemonApiKey);
     const inj = getInjector(ctx.provider_config.agent_kind);
     if (inj) {
       Object.assign(env, inj.toEnv(ctx.provider_config));

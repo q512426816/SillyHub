@@ -45,31 +45,39 @@ async def test_get_changes_no_auth_returns_401(client):
     assert resp.status_code == 401
 
 
-async def test_post_apikey_auth_ok(client, apikey_headers):
-    """合法 shk_live_ API Key → 200（require_platform_sync APIKey 分支）。"""
+async def test_post_apikey_auth_403(client, apikey_headers):
+    """合法 shk_live_ API Key POST progress → 403（task-06 / D-004@v1 写通道关闭）。
+
+    改前：200（require_platform_sync APIKey 分支可写全局桶）。凭据有效但写通道仅
+    shpsync_ 开放 → 403（401 仍留给无/坏凭据）。"""
     resp = await client.post(
         "/api/changes/c1/progress",
         json=SAMPLE_PROGRESS,
         headers={**apikey_headers, "X-SillySpec-Pushed-At": T1},
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 403
 
 
-async def test_post_jwt_auth_ok(client, auth_headers):
-    """合法 JWT → 200（require_platform_sync JWT 回退分支）。"""
+async def test_post_jwt_auth_403(client, auth_headers):
+    """合法 JWT POST progress → 403（task-06 / D-004@v1）。
+
+    改前：200（require_platform_sync JWT 回退分支可写全局桶——安全审查高危 FR-05）。
+    """
     resp = await client.post(
         "/api/changes/c1/progress",
         json=SAMPLE_PROGRESS,
         headers={**auth_headers, "X-SillySpec-Pushed-At": T1},
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 403
 
 
 # ── §13-1 POST 读 3 个 X-SillySpec-* header ────────────────────────────────────
 
 
-async def test_post_reads_three_headers(client, apikey_headers):
+async def test_post_reads_three_headers(client, shpsync_headers):
     """§13-1：POST 带 User/Pushed-At → 存入 last_pusher/last_pushed_at（GET 列表可验）。"""
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     resp = await client.post(
         "/api/changes/c1/progress",
         json=SAMPLE_PROGRESS,
@@ -91,8 +99,10 @@ async def test_post_reads_three_headers(client, apikey_headers):
 # ── §13-2 / §13-7 base_ts 冲突算法 + 零回归 ────────────────────────────────────
 
 
-async def test_first_sync_no_base_ts_accepted(client, apikey_headers):
+async def test_first_sync_no_base_ts_accepted(client, shpsync_headers):
     """§13-7 / §4.2 分支1：无 X-SillySpec-Base-Ts（首次同步）→ 无条件接受 200。"""
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     resp = await client.post(
         "/api/changes/c2/progress",
         json=SAMPLE_PROGRESS,
@@ -101,8 +111,10 @@ async def test_first_sync_no_base_ts_accepted(client, apikey_headers):
     assert resp.status_code == 200
 
 
-async def test_conflict_stored_greater_than_base_ts_409(client, apikey_headers):
+async def test_conflict_stored_greater_than_base_ts_409(client, shpsync_headers):
     """§13-2 / §4.2 分支2：stored > base_ts（字典序）→ 409。"""
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     # 先 push（Pushed-At=T2，无 base_ts）建立 stored=T2
     first = await client.post(
         "/api/changes/c3/progress",
@@ -123,8 +135,10 @@ async def test_conflict_stored_greater_than_base_ts_409(client, apikey_headers):
     assert resp.status_code == 409
 
 
-async def test_no_conflict_stored_equal_base_ts_200(client, apikey_headers):
+async def test_no_conflict_stored_equal_base_ts_200(client, shpsync_headers):
     """§13-2 / §4.2 分支3：stored == base_ts（stored 不 > base_ts）→ 接受 200。"""
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     await client.post(
         "/api/changes/c4/progress",
         json=SAMPLE_PROGRESS,
@@ -142,8 +156,10 @@ async def test_no_conflict_stored_equal_base_ts_200(client, apikey_headers):
     assert resp.status_code == 200
 
 
-async def test_no_conflict_stored_less_than_base_ts_200(client, apikey_headers):
+async def test_no_conflict_stored_less_than_base_ts_200(client, shpsync_headers):
     """§13-2：stored < base_ts → 接受 200（base_ts 更新）。"""
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     await client.post(
         "/api/changes/c5/progress",
         json=SAMPLE_PROGRESS,
@@ -164,9 +180,11 @@ async def test_no_conflict_stored_less_than_base_ts_200(client, apikey_headers):
 # ── §13-3 / §13-8 409 body + 不 auto-merge ─────────────────────────────────────
 
 
-async def test_conflict_body_and_no_auto_merge(client, apikey_headers):
+async def test_conflict_body_and_no_auto_merge(client, shpsync_headers):
     """§13-3 / §13-8：409 body {conflict,platform_progress,last_pushed_at}，
     platform_progress 严格=平台当前 latest_progress（未合并客户端 body）。"""
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     await client.post(
         "/api/changes/c6/progress",
         json=SAMPLE_PROGRESS,
@@ -192,8 +210,10 @@ async def test_conflict_body_and_no_auto_merge(client, apikey_headers):
 # ── §13-4 GET /api/changes 轻量列表（裸数组）────────────────────────────────────
 
 
-async def test_get_changes_list_bare_array(client, apikey_headers):
+async def test_get_changes_list_bare_array(client, shpsync_headers):
     """§13-4 / §5：GET /changes 返回裸数组，每项 name/current_stage/last_pushed_at/last_pusher。"""
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     await client.post(
         "/api/changes/c7/progress",
         json=SAMPLE_PROGRESS,
@@ -216,8 +236,10 @@ async def test_get_changes_list_bare_array(client, apikey_headers):
 # ── §13-5 GET /api/changes/{name}/progress 完整 JSON ─────────────────────────────
 
 
-async def test_get_progress_full_with_last_pushed_at(client, apikey_headers):
+async def test_get_progress_full_with_last_pushed_at(client, shpsync_headers):
     """§13-5 / §6：GET 单 change 返回完整六表 + 顶层 last_pushed_at（裸形态）。"""
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     await client.post(
         "/api/changes/c8/progress",
         json=SAMPLE_PROGRESS,
@@ -240,12 +262,14 @@ async def test_get_progress_not_found_404(client, apikey_headers):
 # ── §13-6 字典序比对（ISO 8601 UTC 串 > ）────────────────────────────────────────
 
 
-async def test_lexicographic_order_drives_conflict(client, apikey_headers):
+async def test_lexicographic_order_drives_conflict(client, shpsync_headers):
     """§13-6 / §7：stored > base_ts 用字符串字典序（不转 datetime）。
 
     T2 vs T1：同为 ISO 8601 UTC，字典序 T1<T2<T3 == 时间序。验证 base_ts=T1 触发 409、
     base_ts=T3 不触发（覆盖 §4.2 比对语义，确认后端未误转 datetime）。
     """
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     await client.post(
         "/api/changes/c9/progress",
         json=SAMPLE_PROGRESS,
@@ -269,11 +293,13 @@ async def test_lexicographic_order_drives_conflict(client, apikey_headers):
 # ── §13-7 零回归（老 body 无 header）────────────────────────────────────────────
 
 
-async def test_old_body_no_headers_accepted(client, apikey_headers):
+async def test_old_body_no_headers_accepted(client, shpsync_headers):
     """§13-7 / §8：老 body（裸 JSON，无任何 X-SillySpec-* header）→ base_ts 空 → 接受 200。
 
     客户端老版不发 header，后端 base_ts 视为空 → 等同首次同步（零回归硬要求）。
     """
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     resp = await client.post(
         "/api/changes/c10/progress",
         json=SAMPLE_PROGRESS,
@@ -411,22 +437,28 @@ DOCS: dict = {
 }
 
 
-async def test_post_documents_ok(client, apikey_headers):
+async def test_post_documents_ok(client, shpsync_headers):
     """POST documents 合法 body → 200 {synced, change_name}（FR-01）。"""
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     resp = await client.post("/api/changes/doc-change/documents", json=DOCS, headers=apikey_headers)
     assert resp.status_code == 200
     body = resp.json()
     assert body == {"synced": 3, "change_name": "doc-change"}
 
 
-async def test_post_documents_empty_map_422(client, apikey_headers):
+async def test_post_documents_empty_map_422(client, shpsync_headers):
     """空 map → 422（schema 白名单 validator）。"""
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     resp = await client.post("/api/changes/doc-change/documents", json={}, headers=apikey_headers)
     assert resp.status_code == 422
 
 
-async def test_post_documents_bad_key_422(client, apikey_headers):
+async def test_post_documents_bad_key_422(client, shpsync_headers):
     """白名单外键 → 422。"""
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     resp = await client.post(
         "/api/changes/doc-change/documents",
         json={"evil.md": "x"},
@@ -435,8 +467,10 @@ async def test_post_documents_bad_key_422(client, apikey_headers):
     assert resp.status_code == 422
 
 
-async def test_post_documents_bad_value_422(client, apikey_headers):
+async def test_post_documents_bad_value_422(client, shpsync_headers):
     """值非 str → 422（dict[str, str] 类型校验）。"""
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     resp = await client.post(
         "/api/changes/doc-change/documents",
         json={"proposal.md": 123},
@@ -451,8 +485,10 @@ async def test_post_documents_no_auth_401(client):
     assert resp.status_code == 401
 
 
-async def test_post_approval_rejected_with_reason(client, apikey_headers):
+async def test_post_approval_rejected_with_reason(client, shpsync_headers):
     """POST approval rejected + reason → 200（FR-02）；GET 读回真实状态（FR-03）。"""
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     resp = await client.post(
         "/api/changes/ap-change/approval",
         json={"decision": "rejected", "reason": "设计有缺口"},
@@ -467,8 +503,10 @@ async def test_post_approval_rejected_with_reason(client, apikey_headers):
     assert got.json()["reason"] == "设计有缺口"
 
 
-async def test_post_approval_approved_without_reason_key(client, apikey_headers):
+async def test_post_approval_approved_without_reason_key(client, shpsync_headers):
     """approved 分支 body 不含 reason 键（CLI sync.js:963 字面）→ 200（Grill UB-3）。"""
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     resp = await client.post(
         "/api/changes/ap-change/approval",
         json={"decision": "approved"},
@@ -477,8 +515,10 @@ async def test_post_approval_approved_without_reason_key(client, apikey_headers)
     assert resp.status_code == 200
 
 
-async def test_post_approval_bad_decision_422(client, apikey_headers):
+async def test_post_approval_bad_decision_422(client, shpsync_headers):
     """非过去式 decision（"approve"）→ 422。"""
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     resp = await client.post(
         "/api/changes/ap-change/approval",
         json={"decision": "approve"},
@@ -502,16 +542,20 @@ async def test_get_approval_no_record_default_approved(client, apikey_headers):
     assert body["reason"] == "no approval record; default-approved"
 
 
-async def test_get_approval_placeholder_row_still_default(client, apikey_headers):
+async def test_get_approval_placeholder_row_still_default(client, shpsync_headers):
     """仅 documents 的占位行（approval NULL）→ GET approval 仍默认 approved（FR-05 例外）。"""
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     await client.post("/api/changes/placeholder-c/documents", json=DOCS, headers=apikey_headers)
     resp = await client.get("/api/changes/placeholder-c/approval", headers=apikey_headers)
     assert resp.status_code == 200
     assert resp.json()["status"] == "approved"
 
 
-async def test_single_writer_progress_preserves_approval(client, apikey_headers):
+async def test_single_writer_progress_preserves_approval(client, shpsync_headers):
     """单写者回归：push progress 后 set_approval 再 push → approval 仍在（FR-04）。"""
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     await client.post(
         "/api/changes/writer-c/progress",
         json=SAMPLE_PROGRESS,
@@ -532,8 +576,10 @@ async def test_single_writer_progress_preserves_approval(client, apikey_headers)
     assert got.json()["status"] == "rejected"
 
 
-async def test_single_writer_approval_preserves_progress(client, apikey_headers):
+async def test_single_writer_approval_preserves_progress(client, shpsync_headers):
     """单写者回归：push progress 后 upsert documents → latest_progress 仍在（FR-04）。"""
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     await client.post(
         "/api/changes/writer2-c/progress",
         json=SAMPLE_PROGRESS,
@@ -545,9 +591,11 @@ async def test_single_writer_approval_preserves_progress(client, apikey_headers)
     assert got.json()["changes"] == SAMPLE_PROGRESS["changes"]
 
 
-async def test_placeholder_guard_progress_404_and_list_hidden(client, apikey_headers):
+async def test_placeholder_guard_progress_404_and_list_hidden(client, shpsync_headers):
     """占位行守卫（FR-05 / Grill UB-1）：仅 documents 建行 → GET progress 404 +
     GET /changes 列表不出现；随后 push progress 正常 UPDATE 不撞复合唯一键。"""
+    # task-06：写端点收紧后回归用例迁移 shk_live_→shpsync_（D-004@v1）
+    _ws_id, apikey_headers = shpsync_headers
     await client.post("/api/changes/guard-c/documents", json=DOCS, headers=apikey_headers)
     # 守卫 1：GET progress 404（不是 200 空态）
     prog = await client.get("/api/changes/guard-c/progress", headers=apikey_headers)
@@ -700,9 +748,9 @@ async def test_repeat_push_keeps_single_change_row(client, db_session):
     assert count == 1
 
 
-async def test_global_apikey_push_does_not_create_change_row(client, db_session, apikey_headers):
-    """ql-20260815-002：shk_live_（workspace_id=None 全局 fallback）无法定位 workspace，
-    不建占位行（不猜 workspace，行为与进度收件箱隔离一致）。"""
+async def test_global_apikey_post_progress_403_no_change_row(client, db_session, apikey_headers):
+    """task-06 / ql-20260815-002：shk_live_ POST progress → 403（写通道关闭），
+    全局 fallback 写路径不复存在，自然不建 ux_changes 占位行。"""
     from sqlalchemy import select
 
     from app.modules.change.model import Change
@@ -712,7 +760,7 @@ async def test_global_apikey_push_does_not_create_change_row(client, db_session,
         json=SAMPLE_PROGRESS,
         headers={**apikey_headers, "X-SillySpec-Pushed-At": T1},
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 403
     rows = (
         (await db_session.execute(select(Change).where(Change.change_key == "global-c")))
         .scalars()

@@ -279,8 +279,9 @@ async def export_problems(
       ``AsyncIterator``, 不能在 sync 段 await);
     ② sync 段 (``anyio.to_thread.run_sync``):openpyxl 构造 workbook (18 列表头 +
       数据行 + 附件列对每行 images ``add_image`` 锚到该行单元格)。
-    单图取流失败 (缺失/已删/底层存储瞬时错误,含非 AppError) 跳过不阻断导出
-    (best-effort, 对齐 D-009 口径;P2 捕获面扩到 Exception)。
+    单图取流失败 (缺失/已删/越权归属/底层存储瞬时错误,含非 AppError) 跳过不阻断导出
+    (best-effort, 对齐 D-009 口径;P2 捕获面扩到 Exception)。越权归属跳过源自
+    get_stream 的 IDOR 归属断言 (security-audit-remediation task-05/D-001)。
     """
     rows = await ProblemService(session).list_problems_for_export(user=user)
     # ① async 段:逐行 file_urls → get_stream 收图 bytes
@@ -293,7 +294,7 @@ async def export_problems(
             except (ValueError, AttributeError, TypeError):
                 continue  # 非 UUID 脏值跳过
             try:
-                _meta, stream = await file_svc.get_stream(fid_uuid)
+                _meta, stream = await file_svc.get_stream(fid_uuid, user=user)
                 images.append(b"".join([chunk async for chunk in stream]))
             except Exception as exc:  # P2:扩到 Exception,MinIO get_object_stream 连接/超时不阻断
                 # 单图缺失/已删/底层存储瞬时错误均跳过,不阻断整表导出 (best-effort,

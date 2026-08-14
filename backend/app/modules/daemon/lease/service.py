@@ -142,11 +142,22 @@ class LeaseService:
         self,
         lease_id: uuid.UUID,
         runtime_id: uuid.UUID,
+        *,
+        actor_user_id: uuid.UUID | None = None,
     ) -> tuple[DaemonTaskLease, dict]:
         """Claim a pending task lease.
 
         Returns a tuple of (lease, payload) where payload contains the
         execution context built from the associated AgentRun.
+
+        task-03（security-audit-remediation / FR-02 / D-001@v1）：归属校验——
+        ``actor_user_id`` 传入时校验 lease 归属 runtime 的 ``user_id`` 等于
+        actor_user_id，不匹配抛 404（owner-only，跨用户与不存在同语义，沿
+        287eed60 sessions 端点约定）。router 层 claim 端点恒传本人 user.id；
+        可选参数仅为兼容既有服务层直调测试（省略时 warn 放行，HTTP 面已全部
+        覆盖）。interactive 预派发 lease（runtime_id NULL）按 metadata.
+        actor_user_id 锚点（task-08 补写）校验；无锚点存量行退回校验入参
+        runtime_id 的归属。
         """
         # R1（并发修复，2026-07-24 代码健壮性优化）：FOR UPDATE 锁定 lease 行直到
         # commit，杜绝两个 daemon 同时 claim 同一 lease 的 TOCTOU——都读到 pending→
@@ -162,6 +173,65 @@ class LeaseService:
             raise DaemonLeaseNotFound(
                 f"Daemon task lease '{lease_id}' not found.",
                 details={"lease_id": str(lease_id)},
+            )
+
+        # task-03（FR-02 / D-001@v1）：claim 前归属校验。锚点优先级：
+        #   1. lease.runtime_id 非空 → 该 runtime 的 user_id（所有 dispatch 路径
+        #      均写 runtime_id；借用 lease 也挂 lender runtime，daemon 持 lender
+        #      凭据 → 凭据 user 即 runtime owner，恒通过）；
+        #   2. runtime_id NULL（legacy 预派发）且 metadata.actor_user_id 非空
+        #      （task-08 补写）→ 与锚点比对；
+        #   3. 两者皆缺（存量脏行）→ 统一 404 拒绝（step-14 QA M-2：原 fallback
+        #      校验入参 runtime_id 归属，任何用户对自己的 runtime 恒通过，等于
+        #      无锚点脏行可被任意本人凭据 claim；无锚点行本就不可信，直接拒）。
+        # 不匹配统一 404（与 lease 不存在同语义，不泄露存在性）。
+        if actor_user_id is not None:
+            owner_user_id: uuid.UUID | None = None
+            if lease.runtime_id is not None:
+                lease_runtime = await self._session.get(DaemonRuntime, lease.runtime_id)
+                owner_user_id = lease_runtime.user_id if lease_runtime is not None else None
+            else:
+                anchor_raw = (lease.metadata_ or {}).get("actor_user_id")
+                anchor: uuid.UUID | None = None
+                if anchor_raw is not None:
+                    try:
+                        anchor = uuid.UUID(str(anchor_raw))
+                    except (ValueError, AttributeError):
+                        # 锚点 malformed 视为脏数据 → anchor 保持 None 走统一拒绝
+                        pass
+                if anchor is not None:
+                    owner_user_id = anchor
+                else:
+                    # 无锚点存量脏行：统一拒绝（step-14 QA M-2，D-001 owner-only
+                    # 语义——404 与不存在同形，不泄露存在性）。
+                    log.warning(
+                        "daemon_lease_claim_unanchored_rejected",
+                        lease_id=str(lease_id),
+                        runtime_id=str(runtime_id),
+                        actor_user_id=str(actor_user_id),
+                    )
+                    raise DaemonRuntimeNotFound(
+                        f"Daemon task lease '{lease_id}' not found.",
+                        details={"lease_id": str(lease_id)},
+                    )
+            if owner_user_id != actor_user_id:
+                log.warning(
+                    "daemon_lease_claim_ownership_mismatch",
+                    lease_id=str(lease_id),
+                    runtime_id=str(lease.runtime_id or runtime_id),
+                    actor_user_id=str(actor_user_id),
+                )
+                raise DaemonRuntimeNotFound(
+                    f"Daemon task lease '{lease_id}' not found.",
+                    details={"lease_id": str(lease_id)},
+                )
+        else:
+            # 可选参数省略：仅服务层直调（既有测试/内部路径）会走到这里；
+            # HTTP router 恒传 actor_user_id。warn 便于审计遗漏面。
+            log.warning(
+                "daemon_lease_claim_no_actor_check",
+                lease_id=str(lease_id),
+                runtime_id=str(runtime_id),
             )
 
         if lease.status != "pending":
@@ -991,7 +1061,13 @@ class LeaseService:
 
         metadata = lease.metadata_ or {}
         stored_token = metadata.get("claim_token")
-        if not stored_token or stored_token != claim_token:
+        # task-03（security-audit-remediation §5.6）：claim_token 比较改
+        # secrets.compare_digest（常量时间，无时序捷径）。脏数据行存的 token
+        # 可能非 str——先 isinstance 收窄（compare_digest 混合类型抛 TypeError
+        # 会 500），非 str 一律按不匹配处理（403）。
+        if not isinstance(stored_token, str) or not secrets.compare_digest(
+            stored_token, claim_token
+        ):
             raise DaemonInvalidClaimToken(
                 "Invalid or missing claim_token.",
                 details={"lease_id": str(lease_id)},

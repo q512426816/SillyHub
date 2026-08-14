@@ -5,6 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+// 复用统一 sanitize 插件（task-13 / FR-13）：文件预览内容不可信，渲染管线必须过滤
+import { markdownRehypePlugins } from "@/components/ui/markdown-text";
 import { ApiError } from "@/lib/api";
 import {
   buildChangeFileTree,
@@ -50,7 +52,7 @@ function FilePreview({ path, name, content }: { path: string; name: string; cont
   if (path.endsWith(".md")) {
     return (
       <div className="flex-1 overflow-auto rounded-md bg-muted/40 p-3 text-sm">
-        <MarkdownPreview source={content} />
+        <MarkdownPreview source={content} rehypePlugins={markdownRehypePlugins} />
       </div>
     );
   }

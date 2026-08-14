@@ -292,6 +292,19 @@ class Settings(BaseSettings):
             "未配则 openai set-default 的 LiteLLM 注册恒失败（R-09 best-effort 降级，不阻塞 is_default）。"
         ),
     )
+    # task-04（security-audit-remediation / D-003@v1）：daemon 可达的 hub 代理 origin。
+    # master key 收窄后 provider_config 不再下发明文 key，改下发 litellm_proxy 标记 +
+    # 本地址（拼 /api/daemon/llm-proxy 路径），daemon 子进程经 hub 代理打 LiteLLM。
+    # 与 litellm_base_url（backend 容器内可达地址，如 http://litellm:4000）不同维度：
+    # 本字段是 daemon（可能在宿主机/异机）可达的 hub 对外地址。默认 localhost:8000
+    # 兼顾本机 dev；部署时经 HUB_PROXY_BASE_URL env 指向实际对外地址。
+    hub_proxy_base_url: str = Field(
+        default="http://localhost:8000",
+        description=(
+            "daemon 可达的 hub backend origin（master key 收窄后 llm-proxy 透传端点地址）。"
+            "provider_config.litellm_base_url = 该值 + /api/daemon/llm-proxy。"
+        ),
+    )
 
     @property
     def file_allowed_type_set(self) -> frozenset[str]:

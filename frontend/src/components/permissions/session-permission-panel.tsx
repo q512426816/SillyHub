@@ -29,6 +29,7 @@ import {
   parseSessionPermissionEvent,
   type SessionPermissionRequest,
 } from "@/lib/daemon";
+import { fetchSse, type FetchSseConnection } from "@/lib/fetch-sse";
 import { useSession } from "@/stores/session";
 
 export interface SessionPermissionPanelProps {
@@ -105,7 +106,8 @@ export function SessionPermissionPanel({
 }: SessionPermissionPanelProps) {
   const [cards, setCards] = useState<SessionPermissionRequest[]>([]);
   const accessToken = useSession((s) => s.accessToken);
-  const sourcesRef = useRef<Map<string, EventSource>>(new Map());
+  // task-12：EventSource → fetch-sse 连接句柄（close() 语义不变）。
+  const sourcesRef = useRef<Map<string, FetchSseConnection>>(new Map());
 
   // 查询兜底（pendingFallback）变化时合并进 cards（C4：查询覆盖 SSE 占位）。
   useEffect(() => {
@@ -135,11 +137,15 @@ export function SessionPermissionPanel({
     for (const [i, sid] of sessionIds.entries()) {
       if (i >= MAX_SESSION_SSE) break;
       const url = new URL(`${base}/api/daemon/sessions/${sid}/stream`);
-      if (accessToken) url.searchParams.set("token", accessToken);
-      const es = new EventSource(url.toString());
+      // task-12：token 不再拼 URL query（访问日志明文泄漏），fetch-sse 放
+      // Authorization Bearer header。
+      const es = fetchSse(
+        url.toString(),
+        accessToken ? { token: accessToken } : {},
+      );
       sourcesRef.current.set(sid, es);
 
-      es.onmessage = (e: MessageEvent<string>) => {
+      es.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data) as unknown;
           const parsed = parseSessionPermissionEvent(data);
@@ -163,7 +169,8 @@ export function SessionPermissionPanel({
         }
       };
       es.onerror = () => {
-        // 404/401/网络中断：浏览器 EventSource 自动重连，不主动 close。
+        // 404/401/网络中断：fetch-sse 不自动重连（task-12 取舍），靠
+        // GET /workspaces/{id}/dialogs refetchInterval 兜底（task-06）。
       };
     }
 

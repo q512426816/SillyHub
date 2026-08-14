@@ -420,6 +420,12 @@ interface WsClientLike {
 type WsClientFactory = (opts: {
   serverUrl: string;
   runtimeId: string;
+  /**
+   * task-02（security-audit-remediation / FR-01）：hub API key，WS 升级期以
+   * X-API-Key 头携带（backend 校验，缺头 4001）。config.api_key 可能为 null
+   * （未配置）→ undefined 不发头。
+   */
+  apiKey?: string;
   callbacks: {
     onMessage?: (msg: DaemonMessage) => void;
     onConnected?: () => void;
@@ -2243,6 +2249,9 @@ export class Daemon {
     const ws = this._wsClientFactory({
       serverUrl,
       runtimeId: this._config.runtime_id,
+      // task-02（security-audit-remediation / FR-01）：WS 升级期带 X-API-Key
+      //（config.api_key null → undefined，不发头）。key 本身不落日志。
+      apiKey: this._config.api_key ?? undefined,
       callbacks: {
         onMessage: (msg) => {
           void this._handleWsMessage(msg);

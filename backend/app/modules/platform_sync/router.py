@@ -14,11 +14,16 @@ router **不自带 prefix**，路径在路由内写全（``/changes/...``）；m
 Change 2026-08-11-change-progress-projection task-07：3 端点从 require_platform_sync
 解包 ``(user, workspace_id)``，透传 workspace_id 给 service 做收件箱隔离（shpsync_ token
 派生工作区；shk_live_/JWT 过渡期 None 走全局聚合 fallback）。
+
+Change security-audit-remediation task-06（D-004@v1）：三个 POST 端点改用
+``require_platform_sync_write``——仅 shpsync_ token 可写（shk_live_/JWT 凭据有效也
+403，全局桶写通道关闭）；四个 GET 端点解包 ``(user, PlatformSyncAuthScope)``——
+shpsync_ 走 token 绑定 workspace（收件箱隔离不变），shk_live_/JWT 按 CHANGE_READ
+workspace 并集 + NULL 桶聚合（service ``allowed_workspace_ids`` 参数）。
 """
 
 from __future__ import annotations
 
-import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -27,7 +32,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.modules.auth.model import User
-from app.modules.platform_sync.auth import require_platform_sync
+from app.modules.platform_sync.auth import (
+    PlatformSyncAuthScope,
+    require_platform_sync,
+    require_platform_sync_write,
+)
 from app.modules.platform_sync.schema import (
     ApprovalSubmitOk,
     ApprovalSubmitRequest,
@@ -42,6 +51,22 @@ from app.modules.platform_sync.service import PlatformSyncService
 
 router = APIRouter(tags=["platform-sync"])
 
+# 读端点鉴权依赖（shpsync_ 收件箱 / JWT·shk_live_ CHANGE_READ 并集 + NULL 桶）。
+_read_auth = Annotated[tuple[User, PlatformSyncAuthScope], Depends(require_platform_sync)]
+# 写端点鉴权依赖（仅 shpsync_ 可写，D-004@v1；JWT/shk_live_ 403）。
+_write_auth = Annotated[tuple[User, PlatformSyncAuthScope], Depends(require_platform_sync_write)]
+
+
+def _read_args(scope: PlatformSyncAuthScope) -> dict[str, Any]:
+    """把读 scope 翻译成 service 读方法的 kwargs。
+
+    shpsync_（``scope.workspace_id`` 非 None）→ 传 ``workspace_id``（收件箱隔离原语义，
+    service 逐字节回归）；shk_live_/JWT → 传 ``allowed_workspace_ids``（并集 + NULL 桶）。
+    """
+    if scope.workspace_id is not None:
+        return {"workspace_id": scope.workspace_id}
+    return {"workspace_id": None, "allowed_workspace_ids": list(scope.allowed_workspace_ids_)}
+
 
 def _header(request: Request, name: str) -> str | None:
     """读 ``X-SillySpec-*`` header，缺失/空均视为 None（契约 §4.1 / D-005 零回归）。"""
@@ -55,7 +80,7 @@ async def push_progress(
     request: Request,
     body: dict[str, Any],
     session: Annotated[AsyncSession, Depends(get_session)],
-    auth: Annotated[tuple[User, uuid.UUID | None], Depends(require_platform_sync)],
+    auth: _write_auth,
 ) -> Any:
     """POST 上行 progress + base_ts 冲突检测（契约 §4）。
 
@@ -64,10 +89,11 @@ async def push_progress(
     ``{conflict, platform_progress, last_pushed_at}``，客户端写冲突文件走 resolve）。
     body 是裸 ``serializeForSync`` 六表 JSON（NG-6 透传，不强类型校验）。
 
-    workspace_id 从 require_platform_sync 派生（shpsync_ token 绑定工作区；shk_live_/JWT
-    过渡期 None 走全局聚合 fallback），透传 service 做收件箱隔离（task-06/07）。
+    workspace_id 从 require_platform_sync_write 派生（唯一写通道 shpsync_ token 绑定
+    工作区；shk_live_/JWT 一律 403，task-06 / D-004@v1）。
     """
-    _user, workspace_id = auth
+    _user, scope = auth
+    workspace_id = scope.workspace_id
     base_ts = _header(request, "X-SillySpec-Base-Ts")
     pushed_at = _header(request, "X-SillySpec-Pushed-At")
     user = _header(request, "X-SillySpec-User")
@@ -96,11 +122,15 @@ async def push_progress(
 @router.get("/changes")
 async def list_changes(
     session: Annotated[AsyncSession, Depends(get_session)],
-    auth: Annotated[tuple[User, uuid.UUID | None], Depends(require_platform_sync)],
+    auth: _read_auth,
 ) -> list[ChangeListItem]:
-    """GET 轻量 change 列表（契约 §5，裸数组形态 D-007，按 token 派生 workspace 过滤）。"""
-    _user, workspace_id = auth
-    items = await PlatformSyncService(session).list_lightweight(workspace_id=workspace_id)
+    """GET 轻量 change 列表（契约 §5，裸数组形态 D-007，按鉴权 scope 聚合）。
+
+    shpsync_ → token 绑定 workspace 收件箱；JWT/shk_live_ → CHANGE_READ workspace
+    并集 + NULL 桶（task-06 / D-004@v1，全局聚合已关闭）。
+    """
+    _user, scope = auth
+    items = await PlatformSyncService(session).list_lightweight(**_read_args(scope))
     return [ChangeListItem(**it) for it in items]
 
 
@@ -108,14 +138,15 @@ async def list_changes(
 async def get_progress(
     name: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-    auth: Annotated[tuple[User, uuid.UUID | None], Depends(require_platform_sync)],
+    auth: _read_auth,
 ) -> Any:
     """GET 单 change 完整 progress JSON（契约 §6，裸六表 + 顶层 last_pushed_at）。
 
-    不存在/跨 workspace → 404（客户端 fetchJson 返回 null 降级不阻断，契约 §8/§10）。
+    不存在/跨 workspace（无 CHANGE_READ）→ 404（客户端 fetchJson 返回 null 降级
+    不阻断，契约 §8/§10）。
     """
-    _user, workspace_id = auth
-    progress = await PlatformSyncService(session).get_progress(workspace_id, name)
+    _user, scope = auth
+    progress = await PlatformSyncService(session).get_progress(name=name, **_read_args(scope))
     if progress is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -128,7 +159,7 @@ async def get_progress(
 async def get_approval(
     name: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-    auth: Annotated[tuple[User, uuid.UUID | None], Depends(require_platform_sync)],
+    auth: _read_auth,
 ) -> ChangeApprovalResponse:
     """GET 单 change 审批状态——给 sillyspec CLI execute 审批门控用（ql-20260812-001-6eb8）。
 
@@ -141,9 +172,12 @@ async def get_approval(
     无记录（行不存在 / approval NULL 含仅 documents 占位行）→ 默认 ``approved`` 放行；
     有记录 → 真实 status/reason（rejected 时 CLI execute 启动 exit(1) 硬阻断，
     run/command.js:1113-1129 现有门控）。鉴权失败仍 401。
+
+    task-06 / D-004@v1：读 scope 聚合——跨 workspace（无 CHANGE_READ）的 change 行
+    不可见，回落默认 approved 放行（不泄漏 status/reason）。
     """
-    _user, workspace_id = auth
-    record = await PlatformSyncService(session).get_approval_record(workspace_id, name)
+    _user, scope = auth
+    record = await PlatformSyncService(session).get_approval_record(name=name, **_read_args(scope))
     if record is None:
         return ChangeApprovalResponse(
             status="approved",
@@ -163,15 +197,18 @@ async def push_documents(
     name: str,
     body: DocumentsSyncRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
-    auth: Annotated[tuple[User, uuid.UUID | None], Depends(require_platform_sync)],
+    auth: _write_auth,
 ) -> DocumentsSyncOk:
     """POST 四件套文档全文（CLI ``sync.js syncDocuments`` :442-497 预留契约）。
 
     body 是扁平 map（键限四件套白名单，schema 层 422）。定向 upsert ``documents``
     列（D-003@v1 单写者，不触碰 latest_progress/approval）；行不存在 INSERT 占位
     （下行端点由占位行守卫视为「无进度」）。全量替换语义（整列覆盖，与 CLI 全量推一致）。
+
+    仅 shpsync_ token 可写（task-06 / D-004@v1，workspace_id 由 token 派生）。
     """
-    _user, workspace_id = auth
+    _user, scope = auth
+    workspace_id = scope.workspace_id
     synced = await PlatformSyncService(session).upsert_documents(
         workspace_id=workspace_id, name=name, documents=body.root
     )
@@ -183,16 +220,18 @@ async def submit_approval(
     name: str,
     body: ApprovalSubmitRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
-    auth: Annotated[tuple[User, uuid.UUID | None], Depends(require_platform_sync)],
+    auth: _write_auth,
 ) -> ApprovalSubmitOk:
     """POST 审批决定（CLI ``sync.js _submitApproval`` :944-996 预留契约，过去式 decision）。
 
     D-001@v1 完整闭环：落 approval 列（重复提交覆盖，后写赢）。``decided_by`` 取
-    ``require_platform_sync`` 解包的权威 ``User.username``（三路径 token 均反查真实
-    User；**不用** ``X-SillySpec-User`` header fallback——客户端可伪造，Grill UB-2）。
-    rejected 记录随后被 GET approval 读到 → CLI execute 启动 exit(1) 硬阻断。
+    ``require_platform_sync_write`` 解包的权威 ``User.username``（唯一写通道 shpsync_
+    token 反查真实 User；**不用** ``X-SillySpec-User`` header fallback——客户端可伪造，
+    Grill UB-2）。rejected 记录随后被 GET approval 读到 → CLI execute 启动 exit(1)
+    硬阻断。task-06 / D-004@v1：JWT/shk_live_ 一律 403。
     """
-    user, workspace_id = auth
+    user, scope = auth
+    workspace_id = scope.workspace_id
     await PlatformSyncService(session).set_approval(
         workspace_id=workspace_id,
         name=name,

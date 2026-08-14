@@ -92,6 +92,20 @@ class ExecEnvBuilder:
     def write_gitconfig(
         self, lease_root: Path, git_username: str | None, git_email: str | None
     ) -> None:
+        """写 lease 隔离目录的 ``gitconfig``（``[user] name/email``）。
+
+        写入前防御性拒绝含换行 / 回车的 username / email（ValueError fail-fast，
+        不落盘）。这是 gitconfig 换行注入的**纵深防御**而非重复校验：schema 层
+        （GitIdentityCreate pattern，security-audit-remediation task-10）已拦
+        HTTP 入口，本层防的是绕过 schema 的路径——service 直调传入的存量旧数据
+        / 内部构造值。注入尝试必须可观测，故抛错而非静默跳过。
+        """
+        for label, value in (("git_username", git_username), ("git_email", git_email)):
+            if value is not None and ("\n" in value or "\r" in value):
+                raise ValueError(
+                    f"{label} must not contain newline characters "
+                    f"(gitconfig injection defense): {value!r}"
+                )
         lines: list[str] = []
         if git_username:
             lines.append(f"[user]\n\tname = {git_username}")

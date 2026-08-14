@@ -622,6 +622,10 @@ class ChangeService:
         change = await self.get_by_key(workspace_id, change_key)
         workspace = await self._workspace_service.get(workspace_id)
         root = Path(workspace.root_path)
+        # task-07（security-audit-remediation）：root resolve 提到循环外（每文档
+        # 重复 resolve root 纯浪费），守卫改 relative_to（对齐 read_file/write_file
+        # 范式，替换 startswith 前缀判断——前缀判断可被同前缀目录名绕过）。
+        root_resolved = root.resolve()
 
         # 第六批：批量取已存在 ChangeDocument（原逐文档 SELECT → N+1 upsert）。
         # 单请求内无并发写入，循环前一次性 IN 查询与原逐条语义等价。
@@ -652,8 +656,15 @@ class ChangeService:
             relative = f".sillyspec/changes/{change_key}/{filename}"
             full_path = root / relative
             resolved = full_path.resolve()
-            if not str(resolved).startswith(str(root.resolve())):
-                raise ChangeDocNotFound("Path traversal detected.")
+            try:
+                # 路径穿越守卫（task-07）：resolve 后必须落在 workspace root 内
+                # （覆盖 ../、绝对路径、符号链接；schema 层另有单段文件名白名单）。
+                resolved.relative_to(root_resolved)
+            except ValueError:
+                raise ChangeDocNotFound(
+                    "Path traversal detected.",
+                    details={"path": filename},
+                ) from None
             await asyncio.to_thread(self._write_text_sync, full_path, content)
             now = datetime.now(UTC)
 

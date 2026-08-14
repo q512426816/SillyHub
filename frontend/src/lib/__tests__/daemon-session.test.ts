@@ -201,68 +201,74 @@ describe("endSession", () => {
 /* ------------------------------------------------------------------ */
 
 /**
- * fake EventSource：jsdom 不实现 EventSource。
+ * task-12：streamSession 底层从 EventSource 改为 fetch-sse（token 走
+ * Authorization header），mock 体系随之从 FakeEventSource 改为
+ * fetch + ReadableStream：每次 fetch 返回一个可手动 push 的 SSE 流，
+ * 测试往流里写 ``data: {...}\n\n`` 原始帧（与 backend 输出形态一致）。
  *
- * P0-1（2026-06-18）：backend stream_session_logs 对 turn/log/permission_* 统一发
- * 默认 data 帧（无 `event:` 行），前端用 onmessage 接收。本 fake 的 emit 因此
- * 默认走 onmessage 通道（与真实 EventSource 一致），同时保留命名事件分发
- * （addEventLister）以兼容 backend `event: done`/`event: error` 命名通道。
+ * 仍保留 P0-1 语义：turn/log/permission_* 统一发默认 data 帧（无 ``event:``
+ * 行），经 onmessage 按 parsed.event 分发；done/error 走命名事件。
  */
-class FakeEventSource {
-  static lastInstance: FakeEventSource | null = null;
-  static instances: FakeEventSource[] = [];
+interface FakeSseStream {
   url: string;
-  listeners: Record<string, Array<(e: { data: string; lastEventId?: string }) => void>> = {};
-  onmessage: ((e: { data: string; lastEventId?: string }) => void) | null = null;
-  onerror: (() => void) | null = null;
-  readyState = 0;
-  closed = false;
+  init: RequestInit;
+  push: (text: string) => void;
+}
 
-  constructor(url: string) {
-    this.url = url;
-    FakeEventSource.instances.push(this);
-    FakeEventSource.lastInstance = this;
-  }
+const streams: FakeSseStream[] = [];
+let lastStream: FakeSseStream | null = null;
 
-  addEventListener(type: string, handler: (e: { data: string; lastEventId?: string }) => void) {
-    (this.listeners[type] ??= []).push(handler);
-  }
-  removeEventListener(type: string, handler: (e: { data: string }) => void) {
-    this.listeners[type] = (this.listeners[type] ?? []).filter((h) => h !== handler);
-  }
-  close() {
-    this.closed = true;
-    this.readyState = 2;
-  }
+function installSseFetchMock(): void {
+  vi.spyOn(globalThis, "fetch").mockImplementation(
+    (input: URL | RequestInfo, init?: RequestInit) => {
+      let controller!: ReadableStreamDefaultController<Uint8Array>;
+      const body = new ReadableStream<Uint8Array>({
+        start(c) {
+          controller = c;
+        },
+      });
+      const encoder = new TextEncoder();
+      const stream: FakeSseStream = {
+        url: typeof input === "string" ? input : input.toString(),
+        init: (init ?? {}) as RequestInit,
+        push: (text) => controller.enqueue(encoder.encode(text)),
+      };
+      streams.push(stream);
+      lastStream = stream;
+      return Promise.resolve(
+        new Response(body, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        }),
+      );
+    },
+  );
+}
 
-  /**
-   * 测试工具：派发事件。默认通道 = onmessage（与 backend default data: 帧一致）；
-   * type="done"/"error" 时走命名事件通道（backend `event: done`/`event: error`）。
-   */
-  emit(type: string, data: unknown, lastEventId?: string) {
-    const payload = typeof data === "string" ? data : JSON.stringify(data);
-    const evt = { data: payload, lastEventId };
-    if (type === "done" || type === "error") {
-      for (const h of this.listeners[type] ?? []) h(evt);
-    } else {
-      // default 帧 → onmessage
-      this.onmessage?.(evt);
-    }
+/** 推一条默认 data 帧（无 event: 行，对齐 backend stream_session_logs）。 */
+function emitDefault(stream: FakeSseStream, data: unknown, id?: string) {
+  const payload = typeof data === "string" ? data : JSON.stringify(data);
+  stream.push(`${id ? `id: ${id}\n` : ""}data: ${payload}\n\n`);
+}
+
+/** 微任务冲刷：等 fetch-sse reader 循环消化完已 push 的帧。 */
+async function flushSse(times = 3) {
+  for (let i = 0; i < times; i++) {
+    await new Promise((r) => setTimeout(r, 0));
   }
 }
 
 describe("streamSession", () => {
   beforeEach(() => {
-    vi.stubGlobal("EventSource", FakeEventSource);
-    FakeEventSource.instances = [];
-    FakeEventSource.lastInstance = null;
+    installSseFetchMock();
+    streams.length = 0;
+    lastStream = null;
   });
   afterEach(() => {
     vi.restoreAllMocks();
-    vi.unstubAllGlobals();
   });
 
-  it("通过 onmessage 收 default data 帧并按 parsed.event 分发 turn_started/log/turn_completed", () => {
+  it("通过 onmessage 收 default data 帧并按 parsed.event 分发 turn_started/log/turn_completed", async () => {
     const handlers: SessionStreamHandlers = {
       onTurnStarted: vi.fn(),
       onLog: vi.fn(),
@@ -271,7 +277,8 @@ describe("streamSession", () => {
       onError: vi.fn(),
     };
     const conn = streamSession("sess-1", handlers);
-    const es = FakeEventSource.lastInstance!;
+    await flushSse();
+    const es = lastStream!;
     expect(es).toBeTruthy();
 
     const ts: SessionStreamEnvelope = {
@@ -279,7 +286,8 @@ describe("streamSession", () => {
       log_id: null, timestamp: "t", channel: null, content: null, status: null,
       exit_code: null, reason: null,
     };
-    es.emit("turn_started", ts);
+    emitDefault(es, ts);
+    await flushSse();
     expect(handlers.onTurnStarted).toHaveBeenCalledTimes(1);
     expect((handlers.onTurnStarted as any).mock.calls[0][0].run_id).toBe("run-1");
 
@@ -288,24 +296,26 @@ describe("streamSession", () => {
       log_id: "log-1", timestamp: "t", channel: "stdout", content: "hello",
       status: null, exit_code: null, reason: null,
     };
-    es.emit("log", logEvt, "log-1");
+    emitDefault(es, logEvt, "log-1");
+    await flushSse();
     expect(handlers.onLog).toHaveBeenCalledTimes(1);
     const logArgs = (handlers.onLog as any).mock.calls[0];
     expect(logArgs[0].content).toBe("hello");
     expect(logArgs[1]).toBe("log-1"); // cursor = lastEventId
 
     // turn_completed 不 close
-    es.emit("turn_completed", { ...ts, event: "turn_completed", status: "completed" });
+    emitDefault(es, { ...ts, event: "turn_completed", status: "completed" });
+    await flushSse();
     expect(handlers.onTurnCompleted).toHaveBeenCalledTimes(1);
-    expect(es.closed).toBe(false);
+    expect(conn.getLastEventId()).toBe("log-1");
 
     conn.close();
   });
 
   // P0-1 防回归：backend stream_session_logs 对 turn/log 用 default data 帧（无 event: 行），
-  // 前端若误用 addEventListener 命名事件则收不到。本测试用真实 EventSource 行为模拟：
-  // 即便 backend 不发 `event:` 行（只发 `data:`），onmessage 仍能按 parsed.event 分发。
-  it("P0-1 防回归：raw `data:` 帧（无 event: 行）经 onmessage 按 parsed.event 正确分发", () => {
+  // 前端若只监听命名事件则收不到。本测试推真实 raw `data:` 帧，onmessage 仍能按
+  // parsed.event 分发。
+  it("P0-1 防回归：raw `data:` 帧（无 event: 行）经 onmessage 按 parsed.event 正确分发", async () => {
     const handlers: SessionStreamHandlers = {
       onTurnStarted: vi.fn(),
       onLog: vi.fn(),
@@ -314,35 +324,38 @@ describe("streamSession", () => {
       onError: vi.fn(),
     };
     streamSession("sess-1", handlers);
-    const es = FakeEventSource.lastInstance!;
+    await flushSse();
+    const es = lastStream!;
 
-    // 模拟 backend 真实默认 data 帧（FakeEventSource.emit 非 done/error 走 onmessage）
     // turn_started
-    es.emit("turn_started", {
+    emitDefault(es, {
       event: "turn_started", session_id: "sess-1", run_id: "run-x", turn: 1,
       log_id: null, timestamp: null, channel: null, content: null,
       status: null, exit_code: null, reason: null,
     });
+    await flushSse();
     expect(handlers.onTurnStarted).toHaveBeenCalledTimes(1);
 
     // log
-    es.emit("log", {
+    emitDefault(es, {
       event: "log", session_id: "sess-1", run_id: "run-x", turn: 1,
       log_id: "lg-1", timestamp: null, channel: "stdout", content: "hi",
       status: null, exit_code: null, reason: null,
     });
+    await flushSse();
     expect(handlers.onLog).toHaveBeenCalledTimes(1);
 
     // turn_completed
-    es.emit("turn_completed", {
+    emitDefault(es, {
       event: "turn_completed", session_id: "sess-1", run_id: "run-x",
       turn: 1, log_id: null, timestamp: null, channel: null, content: null,
       status: "completed", exit_code: 0, reason: null,
     });
+    await flushSse();
     expect(handlers.onTurnCompleted).toHaveBeenCalledTimes(1);
   });
 
-  it("session_ended 调 onSessionEnded 后 close（幂等，回调最多一次）", () => {
+  it("session_ended 调 onSessionEnded 后 close（幂等，回调最多一次）", async () => {
     const handlers: SessionStreamHandlers = {
       onTurnStarted: vi.fn(),
       onLog: vi.fn(),
@@ -351,20 +364,22 @@ describe("streamSession", () => {
       onError: vi.fn(),
     };
     const conn = streamSession("sess-1", handlers);
-    const es = FakeEventSource.lastInstance!;
+    await flushSse();
+    const es = lastStream!;
     const endEvt: SessionStreamEnvelope = {
       event: "session_ended", session_id: "sess-1", run_id: null, turn: null,
       log_id: null, timestamp: "t", channel: null, content: null, status: "ended",
       exit_code: null, reason: "user_end",
     };
-    es.emit("session_ended", endEvt);
-    es.emit("session_ended", endEvt); // 重复
+    emitDefault(es, endEvt);
+    emitDefault(es, endEvt); // 重复
+    await flushSse();
     expect(handlers.onSessionEnded).toHaveBeenCalledTimes(1);
-    expect(es.closed).toBe(true);
+    expect(conn.getLastEventId()).toBeNull();
     conn.close();
   });
 
-  it("session_id 不匹配的事件 → onError（不写 UI）", () => {
+  it("session_id 不匹配的事件 → onError（不写 UI）", async () => {
     const handlers: SessionStreamHandlers = {
       onTurnStarted: vi.fn(),
       onLog: vi.fn(),
@@ -373,17 +388,19 @@ describe("streamSession", () => {
       onError: vi.fn(),
     };
     streamSession("sess-1", handlers);
-    const es = FakeEventSource.lastInstance!;
-    es.emit("turn_started", {
+    await flushSse();
+    const es = lastStream!;
+    emitDefault(es, {
       event: "turn_started", session_id: "OTHER", run_id: "r",
       turn: null, log_id: null, timestamp: null, channel: null, content: null,
       status: null, exit_code: null, reason: null,
     });
+    await flushSse();
     expect(handlers.onTurnStarted).not.toHaveBeenCalled();
     expect(handlers.onError).toHaveBeenCalled();
   });
 
-  it("turn_started/log/turn_completed 缺 run_id → onError", () => {
+  it("turn_started/log/turn_completed 缺 run_id → onError", async () => {
     const handlers: SessionStreamHandlers = {
       onTurnStarted: vi.fn(),
       onLog: vi.fn(),
@@ -392,17 +409,19 @@ describe("streamSession", () => {
       onError: vi.fn(),
     };
     streamSession("sess-1", handlers);
-    const es = FakeEventSource.lastInstance!;
-    es.emit("log", {
+    await flushSse();
+    const es = lastStream!;
+    emitDefault(es, {
       event: "log", session_id: "sess-1", run_id: null,
       turn: null, log_id: null, timestamp: null, channel: null, content: null,
       status: null, exit_code: null, reason: null,
     });
+    await flushSse();
     expect(handlers.onLog).not.toHaveBeenCalled();
     expect(handlers.onError).toHaveBeenCalled();
   });
 
-  it("非法 JSON → onError，不泄露原始 payload", () => {
+  it("非法 JSON → onError，不泄露原始 payload", async () => {
     const handlers: SessionStreamHandlers = {
       onTurnStarted: vi.fn(),
       onLog: vi.fn(),
@@ -411,14 +430,17 @@ describe("streamSession", () => {
       onError: vi.fn(),
     };
     streamSession("sess-1", handlers);
-    const es = FakeEventSource.lastInstance!;
-    es.emit("turn_started", "{not json");
+    await flushSse();
+    const es = lastStream!;
+    // 直接推非法 JSON 单行 data 帧
+    es.push("data: {not json\n\n");
+    await flushSse();
     expect(handlers.onError).toHaveBeenCalledTimes(1);
     const msg = (handlers.onError as any).mock.calls[0][0].message as string;
     expect(msg).not.toContain("{not json");
   });
 
-  it("URL 含 token + session id 编码，cursor 可选", () => {
+  it("task-12：URL 含 session id 编码 + cursor，token 走 Authorization header 不进 URL", async () => {
     const handlers: SessionStreamHandlers = {
       onTurnStarted: vi.fn(),
       onLog: vi.fn(),
@@ -426,14 +448,21 @@ describe("streamSession", () => {
       onSessionEnded: vi.fn(),
       onError: vi.fn(),
     };
-    streamSession("sess a/b", handlers, { cursor: "log-99" });
-    const es = FakeEventSource.lastInstance!;
+    const conn = streamSession("sess a/b", handlers, { cursor: "log-99" });
+    await flushSse();
+    const es = lastStream!;
     expect(es.url).toContain("/api/daemon/sessions/sess%20a%2Fb/stream");
-    expect(es.url).toContain("token=test-token");
     expect(es.url).toContain("cursor=log-99");
+    // token 绝不能出现在 URL（访问日志明文泄漏）
+    expect(es.url).not.toContain("token=");
+    expect(es.url).not.toContain("test-token");
+    // token 在 Authorization header
+    const headers = es.init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer test-token");
+    conn.close();
   });
 
-  it("getLastEventId 反映最近一次 log 的 lastEventId", () => {
+  it("getLastEventId 反映最近一次 log 的 lastEventId", async () => {
     const handlers: SessionStreamHandlers = {
       onTurnStarted: vi.fn(),
       onLog: vi.fn(),
@@ -442,13 +471,15 @@ describe("streamSession", () => {
       onError: vi.fn(),
     };
     const conn = streamSession("sess-1", handlers);
-    const es = FakeEventSource.lastInstance!;
+    await flushSse();
+    const es = lastStream!;
     expect(conn.getLastEventId()).toBeNull();
-    es.emit("log", {
+    emitDefault(es, {
       event: "log", session_id: "sess-1", run_id: "r", turn: 1,
       log_id: "L5", timestamp: "t", channel: "stdout", content: "x",
       status: null, exit_code: null, reason: null,
     }, "L5");
+    await flushSse();
     expect(conn.getLastEventId()).toBe("L5");
     conn.close();
   });

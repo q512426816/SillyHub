@@ -159,7 +159,7 @@ async def create_workspace(
 async def activate_workspace(
     workspace_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_WRITE))],
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
 ) -> WorkspaceRead:
     service = WorkspaceService(session)
     workspace = await service.activate(workspace_id)
@@ -257,7 +257,7 @@ async def get_workspace(
 async def init_workspace(
     workspace_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_WRITE))],
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
 ) -> dict:
     """Initialize the workspace for the current user (D-002/D-009).
 
@@ -267,6 +267,10 @@ async def init_workspace(
     pulls the latest spec bundle.
 
     Returns the ``lease_id``, ``runtime_id``, and ``claim_token``.
+
+    鉴权收紧为 workspace-scoped（security-audit-remediation task-09）：非本
+    workspace 成员（即便在其它 workspace 有 workspace:write）403，不触达
+    ``start_init_dispatch`` 的 actor binding 解析。
     """
     from app.modules.agent.service import AgentService
 

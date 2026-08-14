@@ -24,7 +24,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.security import create_access_token, password_hasher
 from app.modules.agent.model import AgentMission, AgentRun
-from app.modules.auth.model import User
+from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
+from app.modules.auth.permissions import Permission
 from app.modules.mcp_gateway import sse as sse_module
 from app.modules.workspace.model import Workspace
 
@@ -165,6 +166,96 @@ async def test_events_403_for_non_member(client: AsyncClient, db_session: AsyncS
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_events_403_for_member_of_other_workspace(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """task-09（security-audit-remediation）：any 级有 TASK_READ、目标 workspace 无角色 → 403。
+
+    用户在 W2 持有带 ``task:read`` 的角色，请求 W1 的 mission events。收紧前
+    ``require_permission_any(TASK_READ)`` 跨 workspace 并集判定放行（越权读 W1
+    worker 状态）；收紧为 workspace-scoped ``require_permission(TASK_READ)`` 后
+    必须拒绝（403 权限拒绝，非 404 资源隐藏——mission 真实存在于 W1）。
+    """
+    from datetime import UTC, datetime
+
+    ws1 = await _make_workspace(db_session)
+    mission = await _make_mission(db_session, ws1.id)
+    ws2 = await _make_workspace(db_session)
+    user, token = await _make_user(db_session, admin=False)
+    # W1 有一个已终态 worker：收紧前越权用户能拿到它的状态帧（200）；收紧后 403。
+    w = _make_worker(mission.id, status="completed", exit_code=0)
+    db_session.add(w)
+
+    # W2 的角色带 task:read（合法成员），但用户对 W1 无任何角色。
+    role = Role(
+        id=uuid.uuid4(),
+        key=f"ws_member_{ws2.id.hex[:6]}",
+        name="Workspace Member",
+        description="test role",
+    )
+    db_session.add(role)
+    db_session.add(RolePermission(role_id=role.id, permission=Permission.TASK_READ.value))
+    db_session.add(
+        UserWorkspaceRole(
+            user_id=user.id,
+            workspace_id=ws2.id,
+            role_id=role.id,
+            granted_by=None,
+            granted_at=datetime.now(UTC),
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/workspaces/{ws1.id}/missions/{mission.id}/events",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403, resp.text
+
+
+@pytest.mark.asyncio
+async def test_events_200_for_workspace_member_with_task_read(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """task-09 回归：目标 workspace 成员（带 task:read 角色）仍可订阅，帧序列不变。"""
+    from datetime import UTC, datetime
+
+    ws = await _make_workspace(db_session)
+    mission = await _make_mission(db_session, ws.id)
+    user, token = await _make_user(db_session, admin=False)
+    w = _make_worker(mission.id, status="completed", exit_code=0)
+    db_session.add(w)
+
+    role = Role(
+        id=uuid.uuid4(),
+        key=f"ws_member_{ws.id.hex[:6]}",
+        name="Workspace Member",
+        description="test role",
+    )
+    db_session.add(role)
+    db_session.add(RolePermission(role_id=role.id, permission=Permission.TASK_READ.value))
+    db_session.add(
+        UserWorkspaceRole(
+            user_id=user.id,
+            workspace_id=ws.id,
+            role_id=role.id,
+            granted_by=None,
+            granted_at=datetime.now(UTC),
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/workspaces/{ws.id}/missions/{mission.id}/events",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    frames = _parse_frames(resp.text)
+    assert frames[0][0] == "worker_status"
+    assert frames[-1][0] == "done"
 
 
 @pytest.mark.asyncio

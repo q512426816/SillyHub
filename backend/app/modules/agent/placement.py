@@ -433,6 +433,13 @@ class RunPlacementService:
         # 此处补设（task-01 修正：原改 prepare_interactive_dispatch 但 stage 不走那）。
         metadata["manual_approval"] = True
         metadata["ask_user_only"] = True
+        # task-08（security-audit-remediation D-005@v1）：归属锚点——quick-chat
+        # 读/杀端点按 lease.agent_run_id → metadata.actor_user_id 链过滤非本人
+        # 访问（main.py _assert_quick_chat_run_owner）。agent_runs.lease_id 列
+        # 不可用作锚点（FK→worktree_leases，写 daemon lease id 即
+        # ForeignKeyViolation，见 service.py:1729 注释），反向链锚点 = 本
+        # lease 行的 agent_run_id 列。
+        metadata["actor_user_id"] = str(user_id)
 
         # D-008@v1（task-06 provides BorrowedLeaseFlag）：借用 lease 标记 borrowed=True
         # + lender_user_id，供 task-09 沙箱（按 lease 隔离只读 root_path）+ task-10 落 file

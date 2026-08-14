@@ -228,7 +228,10 @@ class TestResolveBoundProviderConfigDeleted:
 
 
 class TestResolveBoundProviderConfigOpenai:
-    """openai_chat 形态绑定 → 6 字段 config（D-003/NFR-01 不下发上游 key）。"""
+    """openai_chat 形态绑定 → 6 字段 config（不含上游 key / master key）。
+
+    task-04（Grill M-1 / design M-1 两个下发点之一）：litellm_auth_token 明文
+    删除，改 litellm_proxy 标记 + hub 代理地址。"""
 
     @pytest.mark.asyncio
     async def test_openai_bound_returns_6_field_config(self, db_session: AsyncSession) -> None:
@@ -250,6 +253,10 @@ class TestResolveBoundProviderConfigOpenai:
         assert cfg["model"] == "zen-1"
         # D-003/NFR-01：上游 api_key 绝不下发。
         assert "api_key" not in cfg
+        # task-04（Grill M-1）：master key 明文字段绝不下发，代理标记必在。
+        assert "litellm_auth_token" not in cfg
+        assert cfg["litellm_proxy"] is True
+        assert cfg["litellm_base_url"].endswith("/api/daemon/llm-proxy")
         # litellm_model_name 用 provider.user_id（design §4.3），与 task-09 单一真相源一致。
         from app.modules.llm_provider.litellm_client import litellm_model_name
 

@@ -5,6 +5,7 @@ import {
   type SessionPermissionRequest,
   type SessionPermissionResolved,
 } from "./daemon";
+import { fetchSse, type FetchSseConnection } from "./fetch-sse";
 import { useSession } from "@/stores/session";
 
 export type StreamStatus = "disconnected" | "connecting" | "connected" | "error";
@@ -30,7 +31,8 @@ export class AgentRunStreamClient {
   private workspaceId: string;
   private runId: string;
   private status: StreamStatus = "disconnected";
-  private es: EventSource | null = null;
+  // task-12：EventSource → fetch-sse（token 走 Authorization header，不再拼 URL query）。
+  private es: FetchSseConnection | null = null;
   private retryCount = 0;
   private maxRetries = 5;
   private backoffMs = [1000, 2000, 4000, 8000, 16000];
@@ -100,19 +102,21 @@ export class AgentRunStreamClient {
       `${base}/api/workspaces/${this.workspaceId}/agent/runs/${this.runId}/stream`,
     );
     if (this.lastLogId) url.searchParams.set("after", this.lastLogId);
-    url.searchParams.set("token", token);
+    // task-12：token 不再进 URL query（query 会进访问日志明文泄漏），改由
+    // fetch-sse 放 Authorization Bearer header。
 
-    this.es = new EventSource(url.toString());
+    this.es = fetchSse(url.toString(), { token });
 
     // ql-20260622：onopen 标记 connected —— 后端 SSE 只发 `: connected`/`: keepalive`
-    // 注释行（浏览器忽略，不触发 onmessage），agent 挂起等待 askuser 时无新 data
+    // 注释行（不触发 onmessage），agent 挂起等待 askuser 时无新 data
     // 消息，导致 status 永远停在 "connecting"，hook 的 loading 永远 true（刷新卡住）。
     // onopen 在 TCP+HTTP 连接建立后立即触发，保证 loading 及时清除。
+    // （task-12 迁移 fetch-sse：其 onopen 与 EventSource.onopen 等价时点。）
     this.es.onopen = () => {
       if (this.status === "connecting") this._setStatus("connected");
     };
 
-    this.es.onmessage = (e: MessageEvent<string>) => {
+    this.es.onmessage = (e) => {
       try {
         // ql-20260621：run SSE 已同时订阅 agent_session:{id} 频道，permission_*
         // 事件会复用该连接到达。它们没 timestamp 字段，走 _emitMessage 会被丢弃，
@@ -149,7 +153,7 @@ export class AgentRunStreamClient {
       }
     };
 
-    this.es.addEventListener("done", (e: MessageEvent<string>) => {
+    this.es.addEventListener("done", (e) => {
       let data: StreamDoneData = {};
       try {
         data = JSON.parse(e.data);

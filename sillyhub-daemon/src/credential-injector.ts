@@ -21,6 +21,33 @@
 import type { ProviderConfig } from './types.js';
 
 /**
+ * daemon 自身 apiKey（task-04 / security-audit-remediation / Grill M-2）。
+ *
+ * litellm_proxy 形态下 injector 需要把 daemon config.api_key 注成子进程的
+ * ANTHROPIC_AUTH_TOKEN（子进程 Bearer 打 hub 代理 /api/daemon/llm-proxy，backend
+ * 校验归属后注入 LiteLLM master key 转发）。injector 是纯函数（拿不到 daemon
+ * config 对象），故进程级一次注入：cli.ts 启动时（凭证校验后）调
+ * ``setDaemonApiKey(config.api_key)``。默认 null（未注入→proxy 形态不写
+ * AUTH_TOKEN 键，子进程回退本机凭证）。
+ *
+ * 不泄漏铁律（R-02）：该值仅经 toEnv 进 spawn env，绝不入日志 / 序列化。
+ */
+let _daemonApiKey: string | null = null;
+
+/**
+ * 注入 daemon 自身 apiKey（cli.ts 启动时调用一次，见 _daemonApiKey 注释）。
+ * null / 空串按未注入处理（token 模式 daemon 无 apiKey，proxy 形态退化不写 AUTH_TOKEN）。
+ */
+export function setDaemonApiKey(apiKey: string | null | undefined): void {
+  _daemonApiKey = apiKey ?? null;
+}
+
+/** 测试用：重置 _daemonApiKey（避免用例间泄漏；仅 tests 引用）。 */
+export function _resetDaemonApiKeyForTest(): void {
+  _daemonApiKey = null;
+}
+
+/**
  * provider-neutral 凭证注入器接口（D-006 抽象边界，最小化）。
  *
  * 加新 agent（codex / gemini / pi）时：新增 XxxCredentialInjector 实现本接口 +
@@ -92,9 +119,22 @@ export class ClaudeCredentialInjector implements CredentialInjector {
     // 任何档位请求都路由到同一 openai 上游（与用户个人 ~/.claude/settings.json 把 4 档位全指向
     // glm-5.2 的成熟用法一致）。实测：补齐 4 档位后真 claude v2.1.216 经 litellm→opencode 读
     // 文件工具调用成功返正确内容。
+    // task-04（security-audit-remediation / Grill M-2 / D-003@v1）：litellm_proxy
+    // 形态。backend 不再下发 master key 明文（litellm_auth_token 字段删除），改下发
+    // litellm_proxy 标记 + hub 代理地址（litellm_base_url=<hub>/api/daemon/llm-proxy）。
+    // 本注入器改注：AUTH_TOKEN = daemon 自身 apiKey（_daemonApiKey，cli 启动时
+    // setDaemonApiKey 注入），子进程 Bearer 打 hub 代理 → backend 校验 usr-uid-pid
+    // 归属后注入 master key 转发 LiteLLM（master key 不出 backend 进程）。
+    // apiKey 未注入时**不写 AUTH_TOKEN 键**（写空值会让子进程发空 Bearer 恒 401，
+    // 不写则回退本机凭证，行为可诊断）。老直连形态（litellm_auth_token 存在，
+    // 老 payload）向后兼容保留——仍按原样直连 LiteLLM。
     if (c.api_format === 'openai_chat') {
       if (c.litellm_base_url) env.ANTHROPIC_BASE_URL = c.litellm_base_url;
-      if (c.litellm_auth_token) env.ANTHROPIC_AUTH_TOKEN = c.litellm_auth_token;
+      if (c.litellm_proxy) {
+        if (_daemonApiKey) env.ANTHROPIC_AUTH_TOKEN = _daemonApiKey;
+      } else if (c.litellm_auth_token) {
+        env.ANTHROPIC_AUTH_TOKEN = c.litellm_auth_token;
+      }
       if (c.litellm_model_name) {
         env.ANTHROPIC_MODEL = c.litellm_model_name;
         // 4 档位全指向 litellm_model_name（gap-D，见上注释）

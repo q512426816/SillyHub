@@ -74,6 +74,17 @@ async def _seed_admin(db_session: AsyncSession) -> uuid.UUID:
     return user.id
 
 
+async def _issue_api_key(db_session: AsyncSession, *, user_id: uuid.UUID) -> str:
+    """task-01：WS 升级期鉴权上线后，成功路径的 websocket_connect 须带本人凭据。"""
+    from app.core.config import get_settings
+    from app.modules.auth.api_key_service import ApiKeyService
+
+    _, plaintext = await ApiKeyService(db_session, settings=get_settings()).create(
+        user_id=user_id, name=f"ws-handshake-{user_id}", expires_at=None
+    )
+    return plaintext
+
+
 def _build_app(db_session: AsyncSession) -> Any:
     from fastapi import FastAPI
 
@@ -101,10 +112,16 @@ class TestWsHandshakeDaemonLocalId:
     ) -> None:
         uid = await _seed_admin(db_session)
         inst = await _seed_daemon_instance(db_session, user_id=uid)
+        # task-01：升级期鉴权后成功路径须带本人 X-API-Key（另 3 处拒绝用例
+        # 在鉴权之前的更早阶段被拒——422 缺参 / 非 UUID / 未知 id——无需凭据）。
+        api_key = await _issue_api_key(db_session, user_id=uid)
         app = _build_app(db_session)
 
         with TestClient(app) as client:
-            with client.websocket_connect(f"/api/daemon/ws?daemon_local_id={inst.id}") as ws:
+            with client.websocket_connect(
+                f"/api/daemon/ws?daemon_local_id={inst.id}",
+                headers={"X-API-Key": api_key},
+            ) as ws:
                 # Connection accepted + registered under daemon_id.
                 assert fresh_ws_hub.is_connected(inst.id) is True
                 assert fresh_ws_hub.connected_count == 1

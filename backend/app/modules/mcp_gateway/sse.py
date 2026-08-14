@@ -32,7 +32,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
-from app.core.auth_deps import require_permission_any
+from app.core.auth_deps import require_permission
 from app.core.db import get_session_factory
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentMission, AgentRun
@@ -150,7 +150,7 @@ async def _mission_event_stream(mission_id: uuid.UUID) -> AsyncGenerator[str, No
 async def stream_mission_events(
     workspace_id: uuid.UUID,
     mission_id: uuid.UUID,
-    user: Annotated[User, Depends(require_permission_any(Permission.TASK_READ))],
+    user: Annotated[User, Depends(require_permission(Permission.TASK_READ))],
 ) -> StreamingResponse:
     """SSE endpoint — 推 mission 下 worker run 状态变更（FR-08）。
 
@@ -158,8 +158,11 @@ async def stream_mission_events(
     slot），事件生成器内部自建独立短 session 做逐次轮询，不在请求级 session 贯穿
     整个流生命周期。
 
-    鉴权复用 ``require_permission_any(Permission.TASK_READ)``（与
-    stream_agent_run_logs 同款；路由在 /api 前缀天然适用，非成员 403）。
+    鉴权收紧为 workspace-scoped ``require_permission(Permission.TASK_READ)``
+    （security-audit-remediation task-09）：checker 以路径参数 ``workspace_id``
+    为 scope，用户必须在**本** workspace 持有 task:read——此前 ``require_permission_any``
+    跨 workspace 并集判定放行了只对其它 workspace 有权限的用户（越权读 mission
+    worker 状态）。非成员 403（权限拒绝）；mission 存在性 404 逻辑独立不变。
     """
     # 存在性校验：短 session，校验完即归还连接池 slot。
     found = False

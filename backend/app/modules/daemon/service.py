@@ -177,6 +177,8 @@ class DaemonService:
         daemon_version: str | None = None,
         daemon_build_id: str | None = None,
         started_at: datetime | None = None,
+        *,
+        actor_user_id: uuid.UUID | None = None,
     ) -> DaemonInstance:
         """Per-daemon 心跳 facade（design §5.4 / §9.1 / D-006）。
 
@@ -185,6 +187,8 @@ class DaemonService:
         daemon_instance_id / status / allowed_roots）。
         2026-07-04-daemon-version-management：透传 daemon_version/build_id。
         2026-08-05-daemon-start-time：透传 started_at（幂等覆盖恒定值）。
+        task-03（security-audit-remediation / FR-12）：透传 actor_user_id 归属
+        校验（instance.user_id 不匹配 → 404，owner-only）。
         """
         return await self._rt.heartbeat_daemon(
             daemon_local_id,
@@ -192,6 +196,7 @@ class DaemonService:
             daemon_version=daemon_version,
             daemon_build_id=daemon_build_id,
             started_at=started_at,
+            actor_user_id=actor_user_id,
         )
 
     async def get_runtime(
@@ -438,8 +443,10 @@ class DaemonService:
         self,
         lease_id: uuid.UUID,
         runtime_id: uuid.UUID,
+        *,
+        actor_user_id: uuid.UUID | None = None,
     ) -> tuple[DaemonTaskLease, dict]:
-        return await self._lease.claim_lease(lease_id, runtime_id)
+        return await self._lease.claim_lease(lease_id, runtime_id, actor_user_id=actor_user_id)
 
     async def start_lease(self, lease_id: uuid.UUID, claim_token: str) -> DaemonTaskLease:
         return await self._lease.start_lease(lease_id, claim_token)

@@ -62,3 +62,45 @@ async def apikey_headers(db_session: Any) -> dict[str, str]:
         expires_at=None,
     )
     return {"Authorization": f"Bearer {plaintext}"}
+
+
+@pytest.fixture()
+async def shpsync_headers(db_session: Any) -> tuple[Any, dict[str, str]]:
+    """建 workspace + User + 签发 ``shpsync_`` token，返回 ``(workspace_id, Bearer headers)``。
+
+    task-06（security-audit-remediation，D-004@v1）：三个写端点收紧为仅 shpsync_ 可写
+    （JWT/shk_live_ 一律 403），原 ``apikey_headers`` 写路径回归用例迁移到本 fixture
+    （tasks 卡预判）。返回 workspace_id 供需要断言 workspace 归属的用例复用。
+    """
+    import uuid as _uuid
+
+    from app.core.config import get_settings
+    from app.core.security import password_hasher
+    from app.modules.auth.model import User
+    from app.modules.platform_sync.token_service import PlatformSyncTokenService
+    from app.modules.workspace.model import Workspace
+
+    ws = Workspace(
+        id=_uuid.uuid4(),
+        name=f"ws-sync-{_uuid.uuid4().hex[:8]}",
+        slug=f"ws-sync-{_uuid.uuid4().hex[:8]}",
+        root_path=f"/tmp/ws-sync-{_uuid.uuid4().hex[:8]}",
+        status="active",
+    )
+    db_session.add(ws)
+    user = User(
+        id=_uuid.uuid4(),
+        email=f"sync-{_uuid.uuid4().hex[:6]}@example.com",
+        password_hash=password_hasher.hash("x"),
+        status="active",
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(ws)
+
+    _row, plaintext = await PlatformSyncTokenService(db_session, settings=get_settings()).create(
+        workspace_id=ws.id,
+        name="sync-regression",
+        created_by=user.id,
+    )
+    return ws.id, {"Authorization": f"Bearer {plaintext}"}

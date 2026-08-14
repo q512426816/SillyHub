@@ -9,11 +9,14 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-platform}
       POSTGRES_USER: ${POSTGRES_USER:-platform}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform}
+      # D-006 弱口令 fail-fast：与 SECRET_KEY 同款 :?must set——未设置直接拒绝 compose 启动。
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?must set POSTGRES_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    # 绑 127.0.0.1：backend 走容器网络 postgres:5432，宿主端口仅本机调试用，
+    # 不对局域网/公网暴露（task-14 端口收紧；三平台 compose 短语法均支持）。
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-platform} -d ${POSTGRES_DB:-platform}"]
       interval: 5s
@@ -39,11 +42,14 @@ services:
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
+      # D-006 弱口令 fail-fast：MINIO_ROOT_USER 保留默认（非密），密码强制设置。
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?must set MINIO_ROOT_PASSWORD}
+    # 9000 API / 9001 console 宿主侧均绑 127.0.0.1：backend 走容器网络 minio:9000，
+    # 宿主端口仅供本机调试（native run / MinIO console），不对局域网/公网暴露。
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -99,7 +105,8 @@ services:
       # Prefix that rewrites host-style paths into container mount paths.
       HOST_PATH_PREFIX: ${HOST_PATH_PREFIX:-C:/Users/qinyi/IdeaProjects}
       CONTAINER_PATH_PREFIX: /host-projects
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-platform}:${POSTGRES_PASSWORD:-platform}@postgres:5432/${POSTGRES_DB:-platform}
+      # D-006：密码走 :?must set，不保留 :-platform 默认兜底（否则 fail-fast 被 DB URL 旁路）。
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-platform}:${POSTGRES_PASSWORD:?must set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-platform}
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: ${SECRET_KEY:?must set SECRET_KEY}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -111,13 +118,20 @@ services:
       # 凭证须与 minio 服务的 MINIO_ROOT_USER/MINIO_ROOT_PASSWORD 一致。
       STORAGE_BACKEND: ${STORAGE_BACKEND:-minio}
       S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
-      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+      # D-006 弱口令 fail-fast：去 minioadmin 默认，须在 .env 显式设置，
+      # 且与 minio 服务的 MINIO_ROOT_USER/MINIO_ROOT_PASSWORD 保持一致。
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?must set S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?must set S3_SECRET_KEY}
       S3_BUCKET: ${S3_BUCKET:-platform-files}
       PLATFORM_BOOTSTRAP_ADMIN_EMAIL: ${PLATFORM_BOOTSTRAP_ADMIN_EMAIL:-}
       PLATFORM_BOOTSTRAP_ADMIN_PASSWORD: ${PLATFORM_BOOTSTRAP_ADMIN_PASSWORD:-}
       PLATFORM_BOOTSTRAP_ADMIN_DISPLAY_NAME: ${PLATFORM_BOOTSTRAP_ADMIN_DISPLAY_NAME:-}
       SILLYSPEC_MASTER_KEY: ${SILLYSPEC_MASTER_KEY:?must set SILLYSPEC_MASTER_KEY}
+      # task-04（security-audit-remediation）：daemon 可达的 hub 对外地址（master key
+      # 收窄后，provider_config 下发的 litellm_base_url = 本值 + /api/daemon/llm-proxy）。
+      # 容器内默认 localhost 只对 daemon 与 backend 同机时成立；daemon 在宿主机/异机时
+      # 须在 .env 指向实际可达地址（如 http://<host>:8000）。
+      HUB_PROXY_BASE_URL: ${HUB_PROXY_BASE_URL:-http://localhost:8000}
       WORKTREE_BASE_DIR: /data/sillyspec-workspaces
       SPEC_DATA_ROOT: /data/spec-workspaces
       HOME: /app

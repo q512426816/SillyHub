@@ -3,6 +3,8 @@
 import dynamic from "next/dynamic";
 import type { ComponentProps } from "react";
 
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+
 import { cn } from "@/lib/utils";
 import "@uiw/react-markdown-preview/markdown.css";
 
@@ -21,6 +23,72 @@ const MarkdownPreview = dynamic(() => import("@uiw/react-markdown-preview"), {
   ssr: false,
   loading: () => null,
 });
+
+/**
+ * Markdown 渲染统一 sanitize schema（task-13 / FR-13 / D-006@v1）。
+ *
+ * @uiw/react-markdown-preview 默认启用 rehype-raw（markdown 内嵌 HTML 直出），
+ * agent 输出 / 扫描文档 / 变更文件预览均渲染不可信内容，构成存储型 XSS。
+ * 此 schema 基于 hast-util-sanitize 的 GitHub 风格 defaultSchema（已含表格
+ * 全家族、code.language-*、任务列表 input[type=checkbox]、href/src 协议白名单、
+ * script 剥离），仅按 @uiw 渲染管线在 sanitize 之前已注入的节点形态做最小放开：
+ *
+ * - a: target=_blank / rel=noreferrer noopener（MarkdownText 链接强制新窗），
+ *   anchor 类（标题锚点链接，rehype-slug/autolink-headings 产物）
+ * - div: copied 类 + data-code（@uiw rehype-rewrite 注入的代码块复制按钮；
+ *   其写入的是裸属性名 class/data-code，而 GFM 产驼峰 className，两者都放）
+ * - svg / path: 类名白名单（octicon/octicon-copy/octicon-check/octicon-link）、
+ *   viewBox/fill/width/height/version/d 等（复制按钮与标题锚点的内联图标，
+ *   rehype-rewrite 注入，非用户可控；svg 用户 HTML 本就不在 tagNames 放开列）
+ * - code: data-meta（fenced code 信息串，rehype-prism-plus 显示行号/复制用）
+ *
+ * 属性名混用说明：schema 键按 hast properties 逐字匹配——@uiw 注入裸名
+ * （class、data-code、aria-hidden），mdast-util-to-hast 产驼峰（className、
+ * dataCode），故同一语义两种键各配一条。sanitize 位于 @uiw 插件数组末位
+ * 之前（rehype-raw/rewrite 之后、rehype-prism 之前），所有转换后再过滤。
+ */
+export const MARKDOWN_SANITIZE_SCHEMA = {
+  ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), "svg", "path"],
+  attributes: {
+    ...defaultSchema.attributes,
+    a: [
+      ...(defaultSchema.attributes?.a ?? []),
+      ["target", "_blank"],
+      // rel 值经 space-separated 解析成数组，逐项匹配（noreferrer / noopener）
+      ["rel", "noreferrer", "noopener"],
+      ["className", "anchor"],
+      ["class", "anchor"],
+      "ariaHidden",
+    ],
+    div: [
+      ...(defaultSchema.attributes?.div ?? []),
+      ["className", "copied"],
+      ["class", "copied"],
+      ["dataCode", /^[^\n]*$/],
+      ["data-code", /^[^\n]*$/],
+    ],
+    code: [...(defaultSchema.attributes?.code ?? []), "dataMeta", ["data-meta", /^[^\n]*$/]],
+    // svg/path 仅放行 @uiw 内联图标实际用到的属性；d/fill-rule 图标路径数据
+    svg: [
+      "className",
+      "class",
+      "viewBox",
+      "version",
+      "width",
+      "height",
+      "fill",
+      "ariaHidden",
+      "aria-hidden",
+    ],
+    path: ["fillRule", "fill-rule", "d", "fill"],
+  },
+} as typeof defaultSchema;
+
+/** 三处 @uiw 引用共用的 sanitize 插件（单例，避免每次渲染重建数组） */
+export const markdownRehypePlugins = [[rehypeSanitize, MARKDOWN_SANITIZE_SCHEMA]] as unknown as ComponentProps<
+  typeof MarkdownPreview
+>["rehypePlugins"];
 
 type PreviewProps = ComponentProps<typeof MarkdownPreview>;
 
@@ -94,7 +162,11 @@ export function MarkdownText({ content, className, size = "compact" }: MarkdownT
   const base = size === "reading" ? READING_CLASS : COMPACT_CLASS;
   return (
     <div className={cn(base, className)}>
-      <MarkdownPreview source={content} components={previewComponents} />
+      <MarkdownPreview
+        source={content}
+        components={previewComponents}
+        rehypePlugins={markdownRehypePlugins}
+      />
     </div>
   );
 }

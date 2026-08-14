@@ -263,9 +263,19 @@ export interface ProviderConfig {
   api_format?: 'anthropic' | 'openai_chat';
   /**
    * task-11：LiteLLM 网关地址（openai 形态）→ ANTHROPIC_BASE_URL。
-   * 仅 api_format='openai_chat' 时由 backend 下发（= settings.litellm_base_url）。
+   * 仅 api_format='openai_chat' 时由 backend 下发；task-04（security-audit-
+   * remediation）后指向 hub 代理（<hub>/api/daemon/llm-proxy），非 backend 容器
+   * 内可达的 LiteLLM 直连地址。
    */
   litellm_base_url?: string;
+  /**
+   * task-04（security-audit-remediation / Grill M-1 / D-003@v1）：代理形态标记。
+   * true 时 backend 不再下发 litellm_auth_token（master key 明文已删除），
+   * injector 改注 ANTHROPIC_AUTH_TOKEN=daemon 自身 apiKey（setDaemonApiKey 注入）、
+   * ANTHROPIC_BASE_URL=litellm_base_url（hub 代理地址）。
+   * 老直连形态（litellm_auth_token 存在）向后兼容保留。
+   */
+  litellm_proxy?: boolean;
   /**
    * task-11：LiteLLM 内 model_name（openai 形态）→ ANTHROPIC_MODEL。
    * = `usr-{user_id}-{provider_id}`（R-03，与 backend task-09 register 写入 LiteLLM 的

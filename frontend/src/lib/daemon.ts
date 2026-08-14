@@ -5,6 +5,7 @@ import { apiFetch, getApiBaseUrl } from "@/lib/api";
 import { useSession } from "@/stores/session";
 import type { AgentRunLogEntry } from "@/lib/agent";
 import type { components } from "@/lib/api-types";
+import { fetchSse } from "@/lib/fetch-sse";
 
 export interface OwnerRead {
   user_id: string | null;
@@ -795,7 +796,8 @@ export interface SessionStreamConnection {
 /**
  * 订阅 session 级 SSE（贯穿整个会话多 turn）。
  *
- * - URL 走 Next route handler proxy（/api/daemon/sessions/{id}/stream），token 走 query。
+ * - URL 走 Next route handler proxy（/api/daemon/sessions/{id}/stream），
+ *   task-12：token 走 Authorization header（fetch-sse），不再拼 URL query。
  * - backend 对 turn_started/log/turn_completed/session_status/session_ended/permission_*
  *   统一发**默认 data 帧**（无 `event:` 行），payload 内 `event` 字段标识类型。
  *   故前端必须用 `es.onmessage` 接收并按 `parsed.event` dispatch —— 命名事件
@@ -803,7 +805,8 @@ export interface SessionStreamConnection {
  *   会导致 InteractiveSessionPanel 的 onTurnStarted/onLog/onTurnCompleted 收不到事件。
  * - 校验 session_id 匹配；turn_started/log/turn_completed 必须有 run_id。
  * - turn_completed 不 close；session_ended close + 回调幂等。
- * - onerror 不立即 close，允许浏览器携 Last-Event-ID 自动重连。
+ * - onerror 不 close（task-12 迁移 fetch-sse 后无自动重连，断流由调用方
+ *   重建连接 / 查询兜底）。
  *
  * P0-1（2026-06-18）：从 addEventListener(kind) 改为 onmessage 单通道 dispatch，
  * 与 backend stream_session_logs 的 default data: 帧对齐。done/error 仍走命名事件
@@ -820,10 +823,11 @@ export function streamSession(
   const url = new URL(
     `${base}/api/daemon/sessions/${encodeURIComponent(sessionId)}/stream`,
   );
-  if (accessToken) url.searchParams.set("token", accessToken);
+  // task-12：token 不再进 URL query（访问日志明文泄漏），cursor 业务参数保留。
   if (options?.cursor) url.searchParams.set("cursor", options.cursor);
 
-  const es = new EventSource(url.toString());
+  // task-12：EventSource → fetch-sse（token 走 Authorization Bearer header）。
+  const es = fetchSse(url.toString(), accessToken ? { token: accessToken } : {});
   let lastEventId: string | null = null;
   let sessionEndedFired = false;
 
@@ -919,13 +923,14 @@ export function streamSession(
   };
 
   // backend turn/log/permission_* 走默认 data 帧（无 event: 行）→ 必须用 onmessage 接。
-  es.onmessage = (e: MessageEvent<string>) => {
+  //（task-12 迁移 fetch-sse 后 onmessage 签名 {data, lastEventId}，与原一致。）
+  es.onmessage = (e) => {
     dispatch({ data: e.data, lastEventId: e.lastEventId || undefined });
   };
 
   es.onerror = () => {
-    // 不立即 close：浏览器会携 Last-Event-ID 自动重连。
-    // 仅通知组件（可选显示 reconnecting），不收口 session。
+    // task-12 迁移 fetch-sse 后无浏览器自动重连（helper 有意取舍）：断流时
+    // 仅通知组件（可选显示 reconnecting），由调用方重建连接 / 查询兜底。
   };
 
   return {

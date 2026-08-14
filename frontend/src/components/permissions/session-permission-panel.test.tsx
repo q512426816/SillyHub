@@ -8,8 +8,10 @@
  *     request_id 带真实来源字段→占位被覆盖回填（design §4.4 C4：查询覆盖 SSE，不反向）；
  *   - permission_resolved 按 request_id 移除卡片。
  *
- * EventSource mock：捕获每个 session 的 onmessage 句柄，测试手动 dispatch
- * MessageEvent 触发 SSE 路径（与 session-permission-panel.tsx:50 解析路径一致）。
+ * task-12：SSE 底层 EventSource → fetch-sse（token 走 Authorization header），
+ * mock 体系随之改为 fetch + ReadableStream：捕获每个 session 的 fetch
+ * 调用（url/init/可写流），测试往流里写 ``data: {...}\n\n`` 原始帧触发
+ * SSE 路径（与 session-permission-panel.tsx 解析路径一致）。
  */
 
 import { render, screen, act } from "@testing-library/react";
@@ -37,37 +39,63 @@ vi.mock("@/lib/api", () => ({
   getApiBaseUrl: () => "http://localhost",
 }));
 
-// ── EventSource mock：暴露 onmessage 供测试 dispatch ──
+// ── fetch mock（fetch-sse）：每次 SSE fetch 返回可写流，测试往里推帧 ──
 
-interface MockEventSourceInstance {
+interface MockSseStream {
   url: string;
-  onmessage: ((e: MessageEvent<string>) => void) | null;
-  onerror: (() => void) | null;
-  close: () => void;
+  init: RequestInit;
+  push: (text: string) => void;
 }
 
-const instances: MockEventSourceInstance[] = [];
+const instances: MockSseStream[] = [];
 
-class FakeEventSource {
-  url: string;
-  onmessage: ((e: MessageEvent<string>) => void) | null = null;
-  onerror: (() => void) | null = null;
-  constructor(url: string) {
-    this.url = url;
-    instances.push(this as unknown as MockEventSourceInstance);
-  }
-  close() {
-    /* no-op */
-  }
+function installSseFetchMock() {
+  vi.spyOn(globalThis, "fetch").mockImplementation(
+    (input: URL | RequestInfo, init?: RequestInit) => {
+      let controller!: ReadableStreamDefaultController<Uint8Array>;
+      const body = new ReadableStream<Uint8Array>({
+        start(c) {
+          controller = c;
+        },
+      });
+      const encoder = new TextEncoder();
+      const inst: MockSseStream = {
+        url: typeof input === "string" ? input : input.toString(),
+        init: (init ?? {}) as RequestInit,
+        push: (text) => controller.enqueue(encoder.encode(text)),
+      };
+      instances.push(inst);
+      return Promise.resolve(
+        new Response(body, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        }),
+      );
+    },
+  );
 }
 
-function dispatchMessage(inst: MockEventSourceInstance, data: unknown) {
-  const event = {
-    data: JSON.stringify(data),
-    lastEventId: "",
-  } as MessageEvent<string>;
-  act(() => {
-    inst.onmessage?.(event);
+/** 推一条默认 data 帧 + 冲刷 fetch-sse reader 微任务循环。 */
+async function dispatchMessage(inst: MockSseStream, data: unknown) {
+  inst.push(`data: ${JSON.stringify(data)}\n\n`);
+  // 等 fetch-sse 内部 async reader 循环消化帧（两次宏任务足够）。
+  await act(async () => {
+    for (let i = 0; i < 3; i++) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  });
+}
+
+/**
+ * 冲刷 render 后的微任务，等 fetch-sse 的 async IIFE 走到 fetch 调用
+ * （EventSource 是 render effect 内同步构造，fetch-sse 的 fetch 在微任务里，
+ * instances 不再同步就位——每个用例 render 后须 await 本 helper）。
+ */
+async function flushSse() {
+  await act(async () => {
+    for (let i = 0; i < 3; i++) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
   });
 }
 
@@ -97,18 +125,19 @@ function makeDialogRequest(
 describe("SessionPermissionPanel", () => {
   beforeEach(() => {
     instances.length = 0;
-    vi.stubGlobal("EventSource", FakeEventSource);
+    installSseFetchMock();
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     instances.length = 0;
   });
 
-  it("dialog_kind 非空 → 渲染 AskUserDialogCard（结构化问答）", () => {
+  it("dialog_kind 非空 → 渲染 AskUserDialogCard（结构化问答）", async () => {
     render(<SessionPermissionPanel sessionIds={["sess-1"]} />);
+    await flushSse();
     const inst = instances.find((i) => i.url.includes("/sess-1/stream"))!;
-    dispatchMessage(inst, {
+    await dispatchMessage(inst, {
       event: "permission_request",
       ...makeDialogRequest(),
     });
@@ -120,10 +149,11 @@ describe("SessionPermissionPanel", () => {
     ).toBeInTheDocument();
   });
 
-  it("dialog_kind 缺失 → 渲染 PermissionApprovalCard（allow/deny）", () => {
+  it("dialog_kind 缺失 → 渲染 PermissionApprovalCard（allow/deny）", async () => {
     render(<SessionPermissionPanel sessionIds={["sess-1"]} />);
+    await flushSse();
     const inst = instances.find((i) => i.url.includes("/sess-1/stream"))!;
-    dispatchMessage(inst, {
+    await dispatchMessage(inst, {
       event: "permission_request",
       ...makeDialogRequest({
         request_id: "req-no-dialog",
@@ -139,7 +169,7 @@ describe("SessionPermissionPanel", () => {
     expect(screen.getByText("Bash")).toBeInTheDocument();
   });
 
-  it("聚合去重：同 request_id SSE + 查询兜底合并后只一张卡", () => {
+  it("聚合去重：同 request_id SSE + 查询兜底合并后只一张卡", async () => {
     const req = makeDialogRequest();
     render(
       <SessionPermissionPanel
@@ -148,26 +178,28 @@ describe("SessionPermissionPanel", () => {
       />,
     );
     // pendingFallback 注入一次（查询路），SSE 再推同 request_id
+    await flushSse();
     const inst = instances.find((i) => i.url.includes("/sess-1/stream"));
     if (inst) {
-      dispatchMessage(inst, { event: "permission_request", ...req });
+      await dispatchMessage(inst, { event: "permission_request", ...req });
     }
     // 只渲染一张问答卡（去重）
     const submitBtns = screen.getAllByRole("button", { name: /提交回答/ });
     expect(submitBtns).toHaveLength(1);
   });
 
-  it("SSE 占位「加载中」→ 查询回填覆盖（C4：查询覆盖 SSE，不反向）", () => {
+  it("SSE 占位「加载中」→ 查询回填覆盖（C4：查询覆盖 SSE，不反向）", async () => {
     // 单组件实例：先无 pendingFallback 渲染并推 SSE 占位，再 rerender 注入查询兜底。
     // sessionIds 用稳定引用常量，避免 rerender 传新数组触发 sessionIds useEffect 清空 cards。
     const sessionIds = ["sess-1"];
     const { rerender } = render(
       <SessionPermissionPanel sessionIds={sessionIds} />,
     );
+    await flushSse();
     const inst = instances.find((i) => i.url.includes("/sess-1/stream"))!;
 
     // SSE 推入：来源字段缺省 → 占位「加载中」
-    dispatchMessage(inst, {
+    await dispatchMessage(inst, {
       event: "permission_request",
       ...makeDialogRequest({ session_type: undefined }),
     });
@@ -190,17 +222,18 @@ describe("SessionPermissionPanel", () => {
     expect(screen.getByText("扫描工作区")).toBeInTheDocument();
   });
 
-  it("permission_resolved 按 request_id 移除卡片", () => {
+  it("permission_resolved 按 request_id 移除卡片", async () => {
     render(<SessionPermissionPanel sessionIds={["sess-1"]} />);
+    await flushSse();
     const inst = instances.find((i) => i.url.includes("/sess-1/stream"))!;
 
-    dispatchMessage(inst, {
+    await dispatchMessage(inst, {
       event: "permission_request",
       ...makeDialogRequest({ request_id: "req-to-remove" }),
     });
     expect(screen.getByText("前端框架是？")).toBeInTheDocument();
 
-    dispatchMessage(inst, {
+    await dispatchMessage(inst, {
       event: "permission_resolved",
       session_id: "sess-1",
       request_id: "req-to-remove",
@@ -217,10 +250,11 @@ describe("SessionPermissionPanel", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("task-10/NFR-1：sessionIds 超 SSE 硬上限（50）时只开 50 个 EventSource", () => {
+  it("task-10/NFR-1：sessionIds 超 SSE 硬上限（50）时只开 50 个 SSE 连接", async () => {
     // 51 个 active session：超出部分不开 SSE，靠 GET /dialogs refetch 兜底。
     const sessionIds = Array.from({ length: 51 }, (_, i) => `sess-${i}`);
     render(<SessionPermissionPanel sessionIds={sessionIds} />);
+    await flushSse();
     expect(instances).toHaveLength(50);
     // 前 50 个 session 均开了 SSE
     for (let i = 0; i < 50; i++) {
@@ -232,6 +266,18 @@ describe("SessionPermissionPanel", () => {
     expect(instances.some((ins) => ins.url.includes("/sess-50/stream"))).toBe(
       false,
     );
+  });
+
+  it("task-12：SSE URL 无 token 参数，token 走 Authorization header", async () => {
+    render(<SessionPermissionPanel sessionIds={["sess-1"]} />);
+    await flushSse();
+    const inst = instances.find((i) => i.url.includes("/sess-1/stream"))!;
+    // token 绝不能出现在 URL（访问日志明文泄漏）
+    expect(inst.url).not.toContain("token=");
+    expect(inst.url).not.toContain("test-token");
+    // token 在 Authorization header
+    const headers = inst.init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer test-token");
   });
 });
 

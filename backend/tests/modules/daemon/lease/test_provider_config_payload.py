@@ -416,7 +416,7 @@ _OPENAI_PROVIDER_CONFIG_FIELDS: frozenset[str] = frozenset(
         "api_format",
         "litellm_base_url",
         "litellm_model_name",
-        "litellm_auth_token",
+        "litellm_proxy",
         "model",
     }
 )

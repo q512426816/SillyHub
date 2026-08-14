@@ -8,6 +8,11 @@ that injects identity: every protected route states what it needs.
 (``Authorization: Bearer …``) and falls back to API key
 (``X-API-Key: …``). Use it on routes that must accept long-lived daemon
 credentials in addition to browser sessions.
+
+task-12（FR-10 / D-002@v1）：凭据**只认 header**——历史上的
+``?token=`` / ``?api_key=`` query 回退已删除：query string 会被访问日志
+原样记录，接受 query 凭据等于把 JWT / API key 明文写进日志。钉死该行为的
+测试见 ``app/core/tests/test_query_token_removed.py``。
 """
 
 from __future__ import annotations
@@ -36,21 +41,29 @@ from app.modules.auth.rbac import has_permission
 
 
 def _extract_bearer(request: Request) -> str | None:
+    """Read the ``Authorization: Bearer <jwt>`` header (case-insensitive).
+
+    task-12：header-only——``?token=`` query 回退已删除（query 进访问日志明文
+    泄漏，见模块 docstring）。header 缺失即返回 None，不做任何回退。
+    """
     raw = request.headers.get("authorization") or request.headers.get("Authorization")
     if raw:
         parts = raw.split()
         if len(parts) == 2 and parts[0].lower() == "bearer":
             return parts[1].strip() or None
-    return request.query_params.get("token")
+    return None
 
 
 def _extract_api_key(request: Request) -> str | None:
-    """Read the ``X-API-Key`` header (case-insensitive). Falls back to the
-    ``api_key`` query param so daemon logs can stay header-free."""
+    """Read the ``X-API-Key`` header (case-insensitive).
+
+    task-12：header-only——``?api_key=`` query 回退已删除（query 进访问日志
+    明文泄漏，见模块 docstring）。header 缺失即返回 None，不做任何回退。
+    """
     raw = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
     if raw:
         return raw.strip() or None
-    return request.query_params.get("api_key")
+    return None
 
 
 async def get_current_user(

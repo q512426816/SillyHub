@@ -178,7 +178,7 @@ async def test_list_excludes_soft_deleted(file_client: AsyncClient, auth_headers
 async def test_list_without_filters_returns_all_active(
     file_client: AsyncClient, auth_headers: dict
 ) -> None:
-    """无过滤参数 → 返回全部活跃文件（owner_type 任意）。"""
+    """无过滤参数 + platform_admin（auth_headers fixture）→ 可见域豁免，返回全部活跃文件（D-002 admin 分支）。"""
     before = await file_client.get("/api/file/list", headers=auth_headers)
     assert before.status_code == 200
     pre_count = len(before.json())

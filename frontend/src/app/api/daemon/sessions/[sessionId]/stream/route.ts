@@ -1,13 +1,14 @@
 /**
  * task-11（FR-10 / D-006@v1）：session SSE 代理路由。
  *
- * 前端 EventSource 无法自定义 header（token 走 query）。Next route handler 作为
- * 无缓冲代理转发 backend GET /api/daemon/sessions/{id}/stream，解决跨域/鉴权，
- * 并透传 cursor / Last-Event-ID / abort。
+ * 前端 fetch-sse（task-12 前为 EventSource，无法自定义 header）经本 route
+ * handler 无缓冲代理转发 backend GET /api/daemon/sessions/{id}/stream，解决
+ * 跨域/鉴权，并透传 cursor / Last-Event-ID / abort。task-12 后前端 token 走
+ * Authorization header，本路由透传该 header 到 backend。
  *
- * P0-2（2026-06-18 安全修复）：从 query 取出 `token` 后**不透传到 backend URL**
- * （避免 token 进入 backend access log），改放 `Authorization: Bearer <token>`
- * header。backend URL 只保留 cursor / lastEventId 等业务参数。
+ * P0-2（2026-06-18 安全修复）：token 不透传到 backend URL query（会进 backend
+ * access log 明文泄漏），改放 ``Authorization: Bearer <token>`` header。
+ * backend URL 只保留 cursor / lastEventId 等业务参数。
  *
  * 与 daemon-chat/[runId]/stream/route.ts 同型（run 级 vs session 级）。
  */
@@ -33,7 +34,11 @@ export async function GET(
     `${BACKEND_URL}/api/daemon/sessions/${encodeURIComponent(sessionId)}/stream`,
   );
   // P0-2：token 不进 URL（避免泄漏到 backend access log），改放 Authorization header。
+  // task-12：前端 fetch-sse 已把 token 从 query 移到 Authorization header（不再有
+  // query token），此处改为透传入站 Authorization header；query 入参兜底保留
+  // （旧客户端兼容，浏览器→Next 段是 Next 自有路由面，非 backend 访问日志）。
   const token = sp.get("token");
+  const inboundAuth = request.headers.get("authorization");
   // 只透传业务参数（cursor / lastEventId），不透传 token。
   const forwardParams = ["cursor", "lastEventId", "Last-Event-ID"];
   for (const key of forwardParams) {
@@ -42,7 +47,9 @@ export async function GET(
   }
 
   const headers: Record<string, string> = { Accept: "text/event-stream" };
-  if (token) {
+  if (inboundAuth) {
+    headers.Authorization = inboundAuth;
+  } else if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
 

@@ -7,6 +7,8 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
+// 复用统一 sanitize 插件（task-13 / FR-13）：扫描文档内容源自 daemon 上报的仓库文件，不可信
+import { markdownRehypePlugins } from "@/components/ui/markdown-text";
 import { ApiError } from "@/lib/api";
 import "@uiw/react-markdown-preview/markdown.css";
 
@@ -279,7 +281,7 @@ export default function ScanDocsPage({ params }: Props) {
                   <p className="text-[11px] text-muted-foreground">最后修改：{new Date(selectedDoc.last_modified_at).toLocaleString("zh-CN")}</p>
                 )}
                 {selectedDoc.content ? (
-                  <div className="max-h-[60vh] overflow-auto rounded-md bg-muted/50 p-3">{selectedDoc.path.endsWith(".md") ? (<MarkdownPreview source={selectedDoc.content} />) : (<pre className="text-xs leading-relaxed whitespace-pre-wrap">{selectedDoc.content}</pre>)}</div>
+                  <div className="max-h-[60vh] overflow-auto rounded-md bg-muted/50 p-3">{selectedDoc.path.endsWith(".md") ? (<MarkdownPreview source={selectedDoc.content} rehypePlugins={markdownRehypePlugins} />) : (<pre className="text-xs leading-relaxed whitespace-pre-wrap">{selectedDoc.content}</pre>)}</div>
                 ) : (
                   <p className="text-xs text-muted-foreground">（无内容）</p>
                 )}

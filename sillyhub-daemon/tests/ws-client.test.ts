@@ -21,19 +21,23 @@ import { MSG, WS_PATH } from '../src/protocol.js';
 /**
  * 起一个本地 mock WS server，返回 { server, url, received }。
  * received 收集所有客户端发来的消息（已 JSON.parse）。
+ * reqHeaders 收集每次连接的升级请求头（task-02 断言 X-API-Key 用）。
  */
 function startMockServer(): Promise<{
   server: WebSocketServer;
   url: string;
   received: unknown[];
   conns: WebSocket[];
+  reqHeaders: Record<string, string | string[] | undefined>[];
 }> {
   return new Promise((resolve) => {
     const server = new WebSocketServer({ port: 0 });
     const received: unknown[] = [];
     const conns: WebSocket[] = [];
-    server.on('connection', (ws) => {
+    const reqHeaders: Record<string, string | string[] | undefined>[] = [];
+    server.on('connection', (ws, req) => {
       conns.push(ws);
+      reqHeaders.push(req.headers);
       ws.on('message', (raw) => {
         try {
           received.push(JSON.parse(raw.toString()));
@@ -45,7 +49,7 @@ function startMockServer(): Promise<{
     // 拿到端口后构造 url。
     server.on('listening', () => {
       const addr = server.address() as { port: number };
-      resolve({ server, url: `ws://127.0.0.1:${addr.port}`, received, conns });
+      resolve({ server, url: `ws://127.0.0.1:${addr.port}`, received, conns, reqHeaders });
     });
   });
 }
@@ -265,6 +269,55 @@ describe('WsClient — 连接生命周期', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(onPolicyUpdate).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledTimes(1);
+    c.close();
+  });
+});
+
+// task-02（security-audit-remediation / FR-01）：WS 升级期鉴权头。
+// backend 升级握手要求 X-API-Key（或 Bearer），否则 4001 拒绝——daemon 必须带头。
+describe('WsClient — X-API-Key 升级请求头（security-audit-remediation task-02）', () => {
+  let mock: Awaited<ReturnType<typeof startMockServer>>;
+  beforeEach(async () => {
+    mock = await startMockServer();
+  });
+  afterEach(async () => {
+    await new Promise<void>((r) => mock.server.close(() => r()));
+  });
+
+  it('apiKey 配置时 → 升级请求头含 X-API-Key 且值为所配 key', async () => {
+    const c = new WsClient({
+      serverUrl: mock.url.replace('ws://', 'http://'),
+      runtimeId: 'r1',
+      apiKey: 'hub-secret-key-123',
+    });
+    c.connect();
+    await vi.waitFor(() => expect(c.isConnected).toBe(true));
+    expect(mock.reqHeaders.length).toBe(1);
+    expect(mock.reqHeaders[0]?.['x-api-key']).toBe('hub-secret-key-123');
+    c.close();
+  });
+
+  it('无 apiKey → 升级请求头不含 X-API-Key（向后兼容，mock server 可连）', async () => {
+    const c = new WsClient({
+      serverUrl: mock.url.replace('ws://', 'http://'),
+      runtimeId: 'r1',
+    });
+    c.connect();
+    await vi.waitFor(() => expect(c.isConnected).toBe(true));
+    expect(mock.reqHeaders.length).toBe(1);
+    expect(mock.reqHeaders[0]?.['x-api-key']).toBeUndefined();
+    c.close();
+  });
+
+  it('apiKey 为空串 → 视为未配置，不发头（避免发空凭证被 backend 拒）', async () => {
+    const c = new WsClient({
+      serverUrl: mock.url.replace('ws://', 'http://'),
+      runtimeId: 'r1',
+      apiKey: '',
+    });
+    c.connect();
+    await vi.waitFor(() => expect(c.isConnected).toBe(true));
+    expect(mock.reqHeaders[0]?.['x-api-key']).toBeUndefined();
     c.close();
   });
 });

@@ -104,6 +104,13 @@ export interface WsClientOptions {
    * Python 版未传（_ws_loop 不带 Authorization）；本字段预留，默认 undefined → 不附加。
    */
   token?: string;
+  /**
+   * task-02（security-audit-remediation / FR-01 / D-001@v1）：hub API key。
+   * backend WS 升级握手要求 X-API-Key（或 Bearer），否则 4001 拒绝——daemon 建连
+   * 时经 `ws` 包 headers 选项携带。未配置 / 空串 → 不发头（向后兼容，mock 可连）。
+   * 仅进升级请求头，不落日志（spawn-env 不泄漏铁律）。
+   */
+  apiKey?: string;
   /** 事件回调。 */
   callbacks?: WsClientCallbacks;
 }
@@ -353,7 +360,13 @@ export class WsClient {
 
   /** 创建底层 WebSocket（抽为 protected 便于测试 stub）。 */
   protected _createSocket(url: string): WebSocket {
-    // token 通过子协议或 headers 传——v1 不传（与 Python 一致），预留扩展点。
+    // task-02（security-audit-remediation / FR-01）：apiKey 存在时经 ws 包 headers
+    // 选项带 X-API-Key（backend 升级期校验，缺头 4001）；未配置不传 headers，
+    // 保持单参建连形态的向后兼容。token 字段仍预留（Bearer 路径非 daemon 形态）。
+    const apiKey = this._opts.apiKey;
+    if (apiKey) {
+      return new WebSocket(url, { headers: { 'X-API-Key': apiKey } });
+    }
     return new WebSocket(url);
   }
 

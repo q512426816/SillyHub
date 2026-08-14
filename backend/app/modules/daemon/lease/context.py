@@ -110,11 +110,14 @@ async def resolve_default_provider_config(
         return {
             "agent_kind": provider.agent_kind,
             "api_format": "openai_chat",
-            "litellm_base_url": settings.litellm_base_url,
+            # task-04（security-audit-remediation / Grill M-1 / D-003@v1）：master key
+            # 不再下发明文（原 litellm_auth_token 字段删除）。改下发 litellm_proxy 标记 +
+            # 代理地址（settings.hub_proxy_base_url 拼本端点路径）：daemon injector 据标记
+            # 注 ANTHROPIC_BASE_URL=代理地址、ANTHROPIC_AUTH_TOKEN=daemon 自身 apiKey，
+            # 子进程 Bearer 打 hub 代理，backend 校验归属后注入 master key 转发 LiteLLM。
+            "litellm_proxy": True,
+            "litellm_base_url": f"{settings.hub_proxy_base_url.rstrip('/')}/api/daemon/llm-proxy",
             "litellm_model_name": litellm_model_name(user_id, provider.id),
-            # LiteLLM /v1/messages 接受 master key 鉴权；daemon 注入 ANTHROPIC_AUTH_TOKEN
-            # 打 LiteLLM（task-11）。源同 task-09 register 用的 master key（settings.litellm_master_key）。
-            "litellm_auth_token": settings.litellm_master_key,
             "model": provider.model,
         }
 
@@ -183,9 +186,12 @@ async def resolve_bound_provider_config(
         return {
             "agent_kind": provider.agent_kind,
             "api_format": "openai_chat",
-            "litellm_base_url": settings.litellm_base_url,
+            # task-04（Grill M-1 / D-003@v1）：与 resolve_default_provider_config
+            # 同口径——litellm_auth_token 明文删除，改 litellm_proxy 标记 + hub 代理地址
+            # （漏改此处即高危残留，design M-1 明确两个下发点）。
+            "litellm_proxy": True,
+            "litellm_base_url": f"{settings.hub_proxy_base_url.rstrip('/')}/api/daemon/llm-proxy",
             "litellm_model_name": litellm_model_name(provider.user_id, provider.id),
-            "litellm_auth_token": settings.litellm_master_key,
             "model": provider.model,
         }
 

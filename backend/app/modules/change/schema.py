@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import re
 import uuid
 from datetime import datetime
 from typing import Any
@@ -196,14 +197,37 @@ class RejectRequest(BaseModel):
 
 # ── Documents sync ─────────────────────────────────────────────────────
 
+#: 单段文件名白名单（task-07）：字母数字点下划线连字符；禁路径分隔符（/ \）。
+_FILENAME_PATTERN: re.Pattern[str] = re.compile(r"^[A-Za-z0-9._\-]+$")
+
 
 class DocumentsSyncRequest(BaseModel):
-    """Key is filename, value is file content."""
+    """Key is filename, value is file content.
+
+    security-audit-remediation task-07：``iter_documents`` 前逐键校验单段文件名
+    白名单（字母数字点下划线连字符，禁路径分隔符与全点段）。CLI 契约只推四件套
+    单段名（platform_sync 侧 DOCUMENT_FILES 已收敛），本层兜底 + service 层
+    relative_to 守卫双层防御。非法键 → 422，错误信息只含键名不回显内容。
+    """
 
     model_config = ConfigDict(extra="allow")
 
     def iter_documents(self) -> list[tuple[str, str]]:
-        """Return list of (filename, content) pairs."""
+        """Return list of (filename, content) pairs（先校验文件名白名单）."""
+        from app.core.errors import AppError
+
+        invalid = [
+            k
+            for k in (self.model_extra or {})
+            if not _FILENAME_PATTERN.match(k) or k.strip(".") == ""
+        ]
+        if invalid:
+            raise AppError(
+                "documents 含非法文件名（仅允许单段文件名）。",
+                code="invalid_document_filename",
+                http_status=422,
+                details={"invalid_filenames": sorted(invalid)},
+            )
         return [(k, v) for k, v in self.model_extra.items()] if self.model_extra else []
 
 

@@ -482,10 +482,12 @@ async def _seed_openai_default_provider(
 
 
 class TestResolveDefaultProviderConfigOpenaiShape:
-    """task-10：openai_chat 格式 → 6 字段 provider_config（指向 LiteLLM，不含上游 key）。
+    """openai_chat 格式 → 6 字段 provider_config（指向 hub 代理，不含上游 key / master key）。
 
     D-003/NFR-01 安全增益：openai 形态不下发上游 api_key（只在 task-09 register 时注册
-    LiteLLM），claim/WS 下发的 config 只含 LiteLLM 地址 + 令牌 + model_name + model。
+    LiteLLM）。task-04（security-audit-remediation / Grill M-1）进一步收窄：master key
+    明文（litellm_auth_token）也不再下发，改 litellm_proxy 标记 + hub 代理地址，daemon
+    子进程经 /api/daemon/llm-proxy 透传（master key 只活在 backend 进程内）。
     anthropic 形态 9 字段逐字不变（NFR-02，上方 TestResolveDefaultProviderConfigFound 锁死）。
     """
 
@@ -493,8 +495,8 @@ class TestResolveDefaultProviderConfigOpenaiShape:
     async def test_openai_returns_6_field_dict_excluding_upstream_keys(
         self, db_session: AsyncSession
     ) -> None:
-        """openai 命中 → dict 恰 6 键 {agent_kind, api_format, litellm_base_url,
-        litellm_model_name, litellm_auth_token, model}，无任何上游字段（D-003/NFR-01）。"""
+        """openai 命中 → dict 恰 6 键 {agent_kind, api_format, litellm_proxy,
+        litellm_base_url, litellm_model_name, model}，无任何上游字段（D-003/NFR-01）。"""
         user_id = await _create_user(db_session, label="openai-shape")
         await _seed_openai_default_provider(db_session, user_id, model="zen-1")
 
@@ -504,12 +506,13 @@ class TestResolveDefaultProviderConfigOpenaiShape:
         assert set(cfg.keys()) == {
             "agent_kind",
             "api_format",
+            "litellm_proxy",
             "litellm_base_url",
             "litellm_model_name",
-            "litellm_auth_token",
             "model",
         }
         # D-003/NFR-01：上游字段绝不出现（比 anthropic 9 字段少了全部 key-bearing 字段）。
+        # task-04：master key 明文字段（litellm_auth_token）同样绝不出现（Grill M-1）。
         for forbidden in (
             "api_key",
             "auth_field",
@@ -518,12 +521,14 @@ class TestResolveDefaultProviderConfigOpenaiShape:
             "default_fallback_model",
             "extra_env",
             "settings_config",
+            "litellm_auth_token",
         ):
             assert forbidden not in cfg, f"openai 形态泄漏上游字段 {forbidden}"
-        # 值守护：api_format / agent_kind / model 原样。
+        # 值守护：api_format / agent_kind / model / proxy 标记原样。
         assert cfg["api_format"] == "openai_chat"
         assert cfg["agent_kind"] == "claude"
         assert cfg["model"] == "zen-1"
+        assert cfg["litellm_proxy"] is True
 
     @pytest.mark.asyncio
     async def test_openai_litellm_model_name_matches_task09_convention(
@@ -545,12 +550,11 @@ class TestResolveDefaultProviderConfigOpenaiShape:
         assert cfg["litellm_model_name"] == litellm_model_name(user_id, provider.id)
 
     @pytest.mark.asyncio
-    async def test_openai_litellm_base_url_and_auth_token_from_settings(
+    async def test_openai_litellm_base_url_points_to_hub_proxy(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """litellm_base_url / litellm_auth_token 取自 settings（task-09 登记）。
-        litellm_auth_token = settings.litellm_master_key（LiteLLM /v1/messages 接受 master
-        key 鉴权，daemon 注 ANTHROPIC_AUTH_TOKEN 打 LiteLLM，task-11）。"""
+        """task-04：litellm_base_url 指向 hub 代理（settings.hub_proxy_base_url 拼端点
+        路径），而非 backend 内部可达的 litellm_base_url；master key 不再取用。"""
         user_id = await _create_user(db_session, label="openai-settings")
         await _seed_openai_default_provider(db_session, user_id)
 
@@ -558,6 +562,7 @@ class TestResolveDefaultProviderConfigOpenaiShape:
         from app.modules.daemon.lease import context as ctx_mod
 
         fake = MagicMock()
+        fake.hub_proxy_base_url = "http://hub-proxy-test:8000"
         fake.litellm_base_url = "http://litellm-test:4000"
         fake.litellm_master_key = "sk-litellm-master-test"
         monkeypatch.setattr(ctx_mod, "get_settings", lambda: fake)
@@ -565,8 +570,9 @@ class TestResolveDefaultProviderConfigOpenaiShape:
         cfg = await resolve_default_provider_config(db_session, user_id, "claude")
 
         assert cfg is not None
-        assert cfg["litellm_base_url"] == "http://litellm-test:4000"
-        assert cfg["litellm_auth_token"] == "sk-litellm-master-test"
+        assert cfg["litellm_base_url"] == "http://hub-proxy-test:8000/api/daemon/llm-proxy"
+        # task-04（Grill M-1）：config 全 dict 递归不出现 master key 明文。
+        assert "sk-litellm-master-test" not in str(cfg)
 
     @pytest.mark.asyncio
     async def test_openai_does_not_decrypt_upstream_api_key(

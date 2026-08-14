@@ -458,7 +458,7 @@ class TestExportWithImages:
         png = _png_bytes()
         fid = uuid.uuid4()
 
-        async def _fake_get_stream(self: FileService, file_id: uuid.UUID) -> Any:
+        async def _fake_get_stream(self: FileService, file_id: uuid.UUID, *, user: Any) -> Any:
             async def _gen():
                 yield png
 
@@ -500,7 +500,7 @@ class TestExportWithImages:
         png = _png_bytes()
         fid = uuid.uuid4()
 
-        async def _fake_get_stream(self: FileService, file_id: uuid.UUID) -> Any:
+        async def _fake_get_stream(self: FileService, file_id: uuid.UUID, *, user: Any) -> Any:
             async def _gen():
                 yield png
 
