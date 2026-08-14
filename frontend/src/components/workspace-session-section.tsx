@@ -29,6 +29,7 @@ import {
 import { logsToTurns } from "@/components/daemon/runtime-session-helpers";
 import { type AgentRunLogEntry } from "@/lib/agent";
 import { ApiError } from "@/lib/api";
+import { useSession } from "@/stores/session";
 import {
   getAgentSessionLogs,
   listDaemonRuntimes,
@@ -58,6 +59,7 @@ function isActiveListItem(s: AgentSessionListItem): boolean {
 }
 
 export function WorkspaceSessionSection({ workspaceId }: WorkspaceSessionSectionProps) {
+  const currentUserId = useSession((s) => s.user?.id ?? null);
   // 选中的历史会话 id；null = 新建模式（Panel 走 idle 新建空白）
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<AgentSessionListItem[]>([]);
@@ -175,13 +177,17 @@ export function WorkspaceSessionSection({ workspaceId }: WorkspaceSessionSection
   }, []);
 
   // visibleSessions: 按 last_active_at 倒序（后端不保证顺序，design 自审 C-5）
+  // 仅展示本人会话：列表跨成员可见（D-005@v1），但 logs/dialogs/stream 端点
+  // owner-only（跨用户 404），attach 他人会话必然全 404，展示只会误导点击。
   const orderedSessions = useMemo(() => {
-    return [...sessions].sort((a, b) => {
-      const ta = a.last_active_at ?? "";
-      const tb = b.last_active_at ?? "";
-      return tb.localeCompare(ta);
-    });
-  }, [sessions]);
+    return sessions
+      .filter((s) => s.author?.user_id == null || s.author.user_id === currentUserId)
+      .sort((a, b) => {
+        const ta = a.last_active_at ?? "";
+        const tb = b.last_active_at ?? "";
+        return tb.localeCompare(ta);
+      });
+  }, [sessions, currentUserId]);
 
   const entries: SessionListEntry[] = useMemo(
     () =>
