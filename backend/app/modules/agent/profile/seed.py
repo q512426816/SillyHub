@@ -5,9 +5,9 @@ seed 两默认档案；本模块挂在 ``main.lifespan`` startup，负责**重�
 档案被误删（或库非经迁移新建），启动时按 ``is_system_default=True`` + ``provider``
 去重补回，不覆盖用户对默认档案的改动（如改了 system_prompt / name），不产生重复行。
 
-另含 ``ensure_role_template_profiles``：按供应商 × 角色 维度补种平台级专家角色模板
-（CC / GLM × 架构师 / 前端 / 后端 / 项目经理 / 测试工程师）。模板以确定性 UUID 为身份
-键，缺失则插入、已存在则跳过，不覆盖用户编辑。
+另含 ``ensure_role_template_profiles``：角色模板已全部下线（CC/GLM 均移除，
+见 ql-20260814-001），现仅按 :data:`_DEPRECATED_ROLE_TEMPLATE_IDS` 回收 DB 中
+曾补种的废弃模板（GLM×5 + CC×5），不再补种。
 
 铁律（对齐 plan task-11 constraints）：
 * **idempotent**——重复调用不产生重复行（系统默认按 ``is_system_default`` + ``provider``
@@ -79,29 +79,24 @@ async def ensure_system_default_profiles(session: AsyncSession) -> int:
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# 平台专家角色模板（CC × 5 类角色）。
+# 平台专家角色模板（已全部下线）。
 #
-# 以确定性 UUID（uuid5）作为身份键，启动时按 id 去重补种；用户可基于模板复制/修改，
-# 已存在则跳过、不覆盖用户改动。visibility=platform，is_system_default=False，
-# 不影响 resolve_profile 的 provider 级兜底链（仍由 _SYSTEM_DEFAULT_PROFILES 负责）。
+# 历史曾按 供应商 × 角色 维度补种平台级专家模板（CC/GLM × 5 角色），以确定性 UUID
+# （uuid5）为身份键、visibility=platform、is_system_default=False。CC/GLM 均已从
+# _ROLE_TEMPLATE_PROVIDERS 移除（GLM 见 ql-20260813-005，CC 见 ql-20260814-001），
+# _build_role_template_profiles 现返回 []、ensure 不再补种。
 #
-# 已废弃模板（曾种、现从清单移除的供应商，如 GLM）由 _DEPRECATED_ROLE_TEMPLATE_IDS
-# 登记，ensure 启动时一并回收 DB 残留，避免孤儿模板（见 ensure_role_template_profiles）。
+# 已下线模板由 _DEPRECATED_ROLE_TEMPLATE_IDS 登记，ensure 启动时回收 DB 残留，
+# 避免孤儿模板（见 ensure_role_template_profiles）。
 # ────────────────────────────────────────────────────────────────────────────
 
 _ROLE_TEMPLATE_NAMESPACE: uuid.UUID = uuid.uuid5(
     uuid.NAMESPACE_OID, "sillyhub.agent.role.templates"
 )
 
-_ROLE_TEMPLATE_PROVIDERS: tuple[tuple[str, str, str], ...] = (
-    # (provider_key, display_label, persona_preamble)
-    (
-        "claude",
-        "CC",
-        "你由 Claude Code 驱动，是 SillyHub 平台内的专家级智能体。擅长通过工具调用在"
-        "工作区/代码库中完成复杂工程任务，注重安全、可测试、可维护的解决方案。",
-    ),
-)
+# 角色模板供应商已全部下线（CC/GLM 均移除）。保留结构空置备未来按需重启；
+# _build_role_template_profiles 当前返回 []，ensure 不再补种任何角色模板。
+_ROLE_TEMPLATE_PROVIDERS: tuple[tuple[str, str, str], ...] = ()
 
 _ROLE_TEMPLATE_ROLES: tuple[tuple[str, str, str], ...] = (
     # (role_key, display_name, role_specific_prompt)
@@ -149,17 +144,22 @@ _ROLE_TEMPLATE_ROLES: tuple[tuple[str, str, str], ...] = (
 )
 
 
-# 已废弃角色模板的确定性 id：曾由 ensure 补种、现已从 _ROLE_TEMPLATE_PROVIDERS 移除的
-# 供应商（当前为 GLM）× 全部角色。ensure 启动时按此清单回收 DB 残留——新环境无残留删 0
+# 已下线角色模板的确定性 id：曾由 ensure 补种、现已从 _ROLE_TEMPLATE_PROVIDERS 移除的
+# 供应商（GLM + CC）× 全部角色。ensure 启动时按此清单回收 DB 残留——新环境无残留删 0
 # 条；严格限定 namespace 内已知废弃 id，绝不触碰用户自建的 uuid4 档案或其复制品。
 _DEPRECATED_ROLE_TEMPLATE_IDS: frozenset[uuid.UUID] = frozenset(
-    uuid.uuid5(_ROLE_TEMPLATE_NAMESPACE, f"glm:{role_key}")
+    uuid.uuid5(_ROLE_TEMPLATE_NAMESPACE, f"{provider}:{role_key}")
+    for provider in ("glm", "claude")  # 均已下线
     for role_key, _, _ in _ROLE_TEMPLATE_ROLES
 )
 
 
 def _build_role_template_profiles() -> list[AgentProfile]:
-    """按供应商 × 角色构造全部 5 个平台角色模板档案（含确定性 id）。"""
+    """按供应商 × 角色构造平台角色模板档案（含确定性 id）。
+
+    _ROLE_TEMPLATE_PROVIDERS 已清空（CC/GLM 均下线），当前返回 ``[]``；
+    保留遍历逻辑备未来按需重启角色模板。
+    """
     profiles: list[AgentProfile] = []
     for provider_key, label, preamble in _ROLE_TEMPLATE_PROVIDERS:
         for role_key, role_name, role_prompt in _ROLE_TEMPLATE_ROLES:
@@ -181,17 +181,17 @@ def _build_role_template_profiles() -> list[AgentProfile]:
 
 
 async def ensure_role_template_profiles(session: AsyncSession) -> tuple[int, int]:
-    """补种缺失的平台专家角色模板并回收已废弃模板，返回 ``(本次补种数, 本次回收数)``。
+    """回收已废弃平台角色模板，返回 ``(本次补种数, 本次回收数)``。
 
-    补种：模板身份由确定性 UUID 决定（uuid5(provider_key, role_key)）。已存在则跳过，
-    **不覆盖用户改动**；未落库的模板一次性插入。
+    补种：_ROLE_TEMPLATE_PROVIDERS 已清空（CC/GLM 均下线），当前恒补种 0 条；
+    保留去重插入逻辑备未来按需重启。
 
     回收：删除 :data:`_DEPRECATED_ROLE_TEMPLATE_IDS` 中登记的废弃模板（曾种、现已从
-    :data:`_ROLE_TEMPLATE_PROVIDERS` 移除的供应商模板，当前为 GLM × 5 角色）。严格
-    限定确定性 id，不触碰用户自建的 uuid4 档案或其复制品；新环境无残留时回收 0 条。
+    :data:`_ROLE_TEMPLATE_PROVIDERS` 移除的供应商模板，GLM × 5 + CC × 5 共 10 条）。
+    严格限定确定性 id，不触碰用户自建的 uuid4 档案或其复制品；新环境无残留时回收 0 条。
 
-    函数内部 ``commit``，调用方无需再 commit。幂等：对已补齐且无废弃残留的库重复
-    调用返回 ``(0, 0)`` 且无副作用，适合挂在每次启动的 lifespan startup 序列上。
+    函数内部 ``commit``，调用方无需再 commit。幂等：对无废弃残留的库重复调用返回
+    ``(0, 0)`` 且无副作用，适合挂在每次启动的 lifespan startup 序列上。
     """
     desired_profiles = _build_role_template_profiles()
     desired_ids = {p.id for p in desired_profiles}
@@ -206,7 +206,7 @@ async def ensure_role_template_profiles(session: AsyncSession) -> tuple[int, int
         session.add(profile)
         inserted += 1
 
-    # 回收已废弃模板（曾种、现已从清单移除，当前为 GLM × 5 角色）。
+    # 回收已废弃模板（曾种、现已从清单移除，GLM × 5 + CC × 5 共 10 条）。
     prune_result = await session.execute(
         delete(AgentProfile).where(AgentProfile.id.in_(_DEPRECATED_ROLE_TEMPLATE_IDS))
     )
