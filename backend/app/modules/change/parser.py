@@ -24,6 +24,25 @@ STANDARD_DOC_TYPES: frozenset[str] = SpecPathResolver.STANDARD_DOC_TYPES
 STANDARD_FILENAMES: dict[str, str] = dict(SpecPathResolver.STANDARD_FILENAMES)
 
 
+# ql-20260814-006：mtime 合法窗口（epoch 秒）。Windows bind mount（Docker Desktop
+# 文件共享层）偶发返回瞬态脏 mtime——实测 stat 报 year 30828（~ns 级垃圾值被当秒
+# 解析），datetime.fromtimestamp 抛 ValueError 打断整个 reparse 500。窗口外一律
+# 回退 epoch 0（此前也观察到 mtime=0 落库为 1970-01-01，语义一致），单文件脏值
+# 不再放大为全量失败。下界取 0（mtime=0 合法但信息量为零，与回退值同）；上界取
+# datetime.max 对应 epoch 减 1 天余量，从根上规避 fromtimestamp 越界。
+_MTIME_EPOCH_MAX = datetime.max.replace(tzinfo=UTC).timestamp() - 86_400
+
+
+def _safe_mtime(mtime: float) -> datetime:
+    """把 stat().st_mtime 防御性转为 UTC datetime，脏值回退 epoch 0。"""
+    if mtime < 0 or mtime > _MTIME_EPOCH_MAX:
+        return datetime.fromtimestamp(0, tz=UTC)
+    try:
+        return datetime.fromtimestamp(mtime, tz=UTC)
+    except (ValueError, OverflowError, OSError):
+        return datetime.fromtimestamp(0, tz=UTC)
+
+
 @dataclass
 class ParsedDoc:
     doc_type: str
@@ -501,7 +520,7 @@ class ChangeParser:
                                 stack.append(entry.path)
                             else:
                                 st = entry.stat(follow_symlinks=False)
-                                mt = datetime.fromtimestamp(st.st_mtime, tz=UTC)
+                                mt = _safe_mtime(st.st_mtime)
                                 if best is None or mt > best:
                                     best = mt
                         except OSError:
@@ -547,7 +566,7 @@ class ChangeParser:
         for doc_type, filename in STANDARD_FILENAMES.items():
             filepath = change_dir / filename
             if filepath.is_file():
-                mtime = datetime.fromtimestamp(filepath.stat().st_mtime, tz=UTC)
+                mtime = _safe_mtime(filepath.stat().st_mtime)
                 parsed.docs.append(
                     ParsedDoc(
                         doc_type=doc_type,
@@ -564,7 +583,7 @@ class ChangeParser:
                     if canonical_name == filename:
                         legacy_path = change_dir / legacy_name
                         if legacy_path.is_file():
-                            mtime = datetime.fromtimestamp(legacy_path.stat().st_mtime, tz=UTC)
+                            mtime = _safe_mtime(legacy_path.stat().st_mtime)
                             parsed.docs.append(
                                 ParsedDoc(
                                     doc_type=doc_type,
@@ -602,7 +621,7 @@ class ChangeParser:
                     path=f"{rel_prefix}/{proto.name}",
                     exists=True,
                     filename=proto.name,
-                    last_modified_at=datetime.fromtimestamp(proto.stat().st_mtime, tz=UTC),
+                    last_modified_at=_safe_mtime(proto.stat().st_mtime),
                 )
             )
 
@@ -617,7 +636,7 @@ class ChangeParser:
                             path=f"{rel_prefix}/references/{ref.name}",
                             exists=True,
                             filename=ref.name,
-                            last_modified_at=datetime.fromtimestamp(ref.stat().st_mtime, tz=UTC),
+                            last_modified_at=_safe_mtime(ref.stat().st_mtime),
                         )
                     )
 

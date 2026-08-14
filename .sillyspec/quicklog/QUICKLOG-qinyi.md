@@ -233,3 +233,15 @@
 根因：service.py:442 仅按 email 查重，username 由 email 本地段派生，email 与历史 seed 不一致时漏判。
 方案：查重条件改 email OR username 双键命中即复用，附 3 新单测（同 username 复用/同 email 复用/空库新建）。
 结果：tests/modules/auth 全量 164 passed + 2 xfailed 零回归，ruff check+format 过。
+
+## ql-20260814-006-84c0 | 2026-08-14 23:22:22 | 修 reparse 500——parser.py datetime.fromtimestamp 遇 Windows bind mount 瞬态脏 mtime（实…
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/change/parser.py（_safe_mtime 防御转换+5 调用点替换）
+- backend/tests/modules/change/test_parser_mtime.py（10 单测（脏值/边界/集成））
+- .sillyspec/docs/backend/modules/change.md（注意事项补 ql-20260814-006）
+需求：修 reparse 500——parser.py datetime.fromtimestamp 遇 Windows bind mount 瞬态脏 mtime（实测 year 30828）抛 ValueError 打断全量 reparse。
+根因：Docker Desktop 文件共享层偶发返回垃圾 stat 时间戳，越界 datetime 转换单文件即放大为整个 reparse 500。
+方案：新增 _safe_mtime 防御性转换（合法窗口外或转换异常一律回退 epoch 0），parser 内 5 处 st_mtime 转换点（含 _compute_last_modified）全部统一走它，附 10 个单测覆盖脏值/边界/集成。
+结果：tests/modules/change 全量 84 passed（含 10 新增）零回归，ruff check+format 过。

@@ -57,6 +57,7 @@ review 四方法（proposal_review/plan_review/human_test/archive_confirm）:
 - **stage 完成停待触发**：AgentRun 跑完 / gate task 跑完只落结果 + 发 SSE，current_stage 不自动推进；必须 MCP `advance_change_stage` / 前端 `advanceChangeStage` 显式触发（D-001，R-01）。
 - dispatch 前的清理（`_cleanup_before_dispatch`）保证不会有陈旧 run 永久阻塞新调度。
 - reparse 含 rename 检测（`_detect_renames`），避免删重建丢历史。
+- **mtime 防御性转换（ql-20260814-006）**：parser 所有 `st_mtime → datetime` 统一走 `_safe_mtime`（合法窗口外/转换异常回退 epoch 0）。Windows bind mount（Docker Desktop 文件共享层）偶发瞬态脏 mtime（实测 stat 报 year 30828），旧实现单文件脏值即抛 ValueError 打断整个 reparse 500。
 - change↔workspace 多对多（ChangeWorkspace），跨工作区变更需注意同步。
 - `reconcile_stale_runs` 仅清 stale run（释放 `has_active_run`），**不再恢复推进**（D-007，R-07）。
 - **scoped reparse 零 delete（R-08）**：`reparse(scope=[...])` 只 create/update，删除守卫 scope 模式硬关；delete 仅全量 reparse（现状语义）。rename 检测仅全量模式（scoped 部分视图会把范围外变更误判 orphaned）。
