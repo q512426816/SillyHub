@@ -22,18 +22,19 @@
 15. 发现 SillySpec 工具缺陷或改进点，记录到项目根目录 `docs/sillyspec/`（活跃坑，待工具修复）；已处理好的（工具已修复 / 确认绕过方案 / 确认不会再踩）再移到 `docs/sillyspec/finished/`。
 16. 用户不太懂代码，尽量使用正常人员能看懂的描述。 
 17. 本项目代码可能随时在修改
-18. SillySpec 任务记录是隔离的
+18. 注释和实现不一致是万恶之源，遇到不一致的要及时修正
+19. SillySpec 任务记录是隔离的
     - **永不重置 / reset / 清零已存在的 change**。多个活跃 change 各自 `--change <名>` 隔离,不重叠。代码不重叠 = 新 `--change`,不是清旧 change。
     - quick:同一 QUICKLOG 文件按 ql-ID 条目追加,不是单槽位,不冲突。
-19. 前端样式统一参考：
+20. 前端样式统一参考：
   * `.sillyspec/changes/archive/2026-06-21-2026-06-21-frontend-style-system/prototype-frontend-style-system.html`（设计系统总纲·原型）
   * `.sillyspec/changes/archive/2026-06-21-2026-06-21-frontend-style-system/design.md`（设计系统总纲·设计决策）
   * `.sillyspec/docs/SillyHub/scan/FRONTEND_PAGE_STYLE.md`（页面级实现规范，改其它页面照这个）
-20. 前端接口类型（`frontend/src/lib/api-types.ts`）必须从后端 OpenAPI 生成（`pnpm gen:types`），禁止手写：
+21. 前端接口类型（`frontend/src/lib/api-types.ts`）必须从后端 OpenAPI 生成（`pnpm gen:types`），禁止手写：
   * 后端 schema（DTO/请求/响应）有改动时，同一 quick/change 内必须跑 `pnpm gen:types` 并提交 `api-types.ts` + `backend/openapi.json`，不让类型落后后端形成债；
   * **gen:types 前先确认前端 node_modules 健康**（`pnpm exec tsc --version` 能跑、`.bin` 有 shim）：node_modules 半坏会报一堆**假的** `CSSProperties 不存在某属性` / `Cannot find module '@ant-design/icons'`（根因是缺间接依赖 csstype 等），误判成代码问题。修复 `pnpm install --force`（普通 install 可能命中缓存不修）；
   * 若 gen:types 暴露了与本次改动**无关**的旧测试债（如 mock 缺某字段），按惯例顺手补字段修好，而不是为躲报错改回手写。
-21. **SillySpec CLI 一律在主仓库根目录跑,永不 `cd` 进 worktree**（`cd` 会让 sillyspec 把当前目录当成独立项目实例,写出与主仓库分裂的进度库 / artifact / QUICKLOG）；需要在 worktree 或子目录读代码时用绝对路径或 `git -C <path>`，不切换工作目录。
+22. **SillySpec CLI 一律在主仓库根目录跑,永不 `cd` 进 worktree**（`cd` 会让 sillyspec 把当前目录当成独立项目实例,写出与主仓库分裂的进度库 / artifact / QUICKLOG）；需要在 worktree 或子目录读代码时用绝对路径或 `git -C <path>`，不切换工作目录。
 
 
 ## 完成汇报格式

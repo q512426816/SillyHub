@@ -224,3 +224,12 @@
 根因：fixture demo change reparse 后 stages JSON 空，_check_source_stage_completion 门控（service.py:1716）fail-closed 422 missing_stage_block，测试目标是 TransitionResponse 结构非门控，门控由 test_dispatch.py 单独覆盖，静态 fixture 无 CLI 进度数据。
 方案：4 个测试加 patch.object(ChangeService, _check_source_stage_completion, MagicMock(return_value=None)) 放行门控专注结构验证，不碰生产逻辑。
 结果：test_router_transition.py 5 passed（4 failed 全修）、change 模块 74 passed 无回归、ruff 过；全量 4 failed 债清零。
+
+## ql-20260814-005-5e84 | 2026-08-14 22:52:22 | 修 bootstrap_admin_and_seed_rbac 查重缺陷（同 username 不同 email 的已有 admin 使 INSERT 撞 ux…
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/auth/service.py, backend/tests/modules/auth/test_bootstrap_username_dedup.py
+需求：修 bootstrap_admin_and_seed_rbac 查重缺陷（同 username 不同 email 的已有 admin 使 INSERT 撞 ux_users_username 唯一约束阻断启动）。
+根因：service.py:442 仅按 email 查重，username 由 email 本地段派生，email 与历史 seed 不一致时漏判。
+方案：查重条件改 email OR username 双键命中即复用，附 3 新单测（同 username 复用/同 email 复用/空库新建）。
+结果：tests/modules/auth 全量 164 passed + 2 xfailed 零回归，ruff check+format 过。
