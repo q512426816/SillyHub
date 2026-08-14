@@ -359,3 +359,15 @@
 根因：平台角色模板此前分 CC/GLM 双供应商，GLM 已于 ql-20260813-005 下线，CC×5 仍由 ensure_role_template_profiles 每次启动补种，用户要求一并移除。
 方案：mirror GLM 下线套路——seed.py 清空 _ROLE_TEMPLATE_PROVIDERS、把 CC×5 确定性 UUID 并入 _DEPRECATED_ROLE_TEMPLATE_IDS（与 GLM×5 合计 10），ensure 启动按 id 回收 DB 残留、不再补种；main.py 注释更新；test_profile_seed.py 角色模板测试改写为「0 补种 + 回收 10」；agent.md×2 加 ql-20260814-001 变更索引。
 结果：pytest test_profile_seed.py 14 passed（含 prune 回收 10 + 用户档案保留），ruff check 干净；待部署 backend 重启触发 ensure 实际回收 DB 中 5 条 CC 残留。
+
+## ql-20260814-002-cdee | 2026-08-14 10:18:29 | 全局档案页个人/平台级档案（workspace_id=null）删不掉
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/lib/agent-profiles.ts（加 deleteAgentProfile(pid) → DELETE /api/agent-profiles/{pid}）
+- frontend/src/app/(dashboard)/agent-profiles/page.tsx（useSession isPlatformAdmin + handleConfirmDelete admin 分支 + 注释）
+- frontend/src/app/(dashboard)/agent-profiles/__tests__/page.test.tsx（mock useSession + deleteAgentProfile + admin 删用例 + 非 admin 拦截用例）
+需求：全局档案页个人/平台级档案（workspace_id=null）删不掉，提示「进入归属工作区」但个人级无归属工作区=死路。
+根因：lib/agent-profiles.ts 只暴露 workspace 级 delete client（需 workspaceId），全局页对 workspace_id=null 档案拦截删除；而后端有 platform 级 /api/agent-profiles/{pid} DELETE（service.delete 按三级 visibility 鉴权）却没被前端接线。
+方案：lib 加 deleteAgentProfile(pid) → DELETE /api/agent-profiles/{pid}；page 引入 useSession isPlatformAdmin，handleConfirmDelete 对 workspace_id=null 改 admin→deleteAgentProfile、非 admin→「请联系管理员」提示；test mock useSession + 加 admin 删用例 + 原 private/platform 拦截用例改非 admin。
+结果：vitest 9 passed（+1 admin 用例）、eslint 0、tsc 0；admin（admin2）现已可从全局页删个人/平台档案。普通用户删自己的 private 档仍需后端另开 owner-gated 端点（后续）。

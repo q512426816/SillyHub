@@ -11,13 +11,14 @@
  *      → 表单内部渲染「工作区上下文」选择器，由 form 自测，此处只验 mode/workspaceId）
  *   3. 点卡片编辑按钮 → 以 edit 模式打开 form，profile 透传
  *   4. 复制 workspace 级档案 → copyWorkspaceAgentProfile(ws_id, pid, {})
- *      私人/平台级（workspace_id=null）→ 提示不支持，不发请求
- *   5. 删除确认流程：点删除 → 确认弹窗 → 确认 → deleteWorkspaceAgentProfile + invalidate mineList
+ *      私人/平台级（workspace_id=null）→ 提示不支持，不发复制请求
+ *   5. 删除确认流程：workspace 级 → deleteWorkspaceAgentProfile；
+ *      private/platform（workspace_id=null）admin → deleteAgentProfile；非 admin → 提示
  *
  * mock 策略：
  *   - AgentProfileForm mock 为纯占位组件（避免其内部复杂 hook 依赖），暴露 mode/profile
  *   - AgentProfileCardGrid 保留真实实现，mock 底层 useMineAgentProfiles 提供测试档案
- *   - copy/delete 裸 fetch 函数 mock，useNotify mock
+ *   - copy/delete 裸 fetch 函数 mock（含 deleteAgentProfile platform 级），useNotify + useSession mock
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
@@ -50,7 +51,16 @@ vi.mock("@/lib/errors", async () => {
 const fetchMock = vi.hoisted(() => ({
   copy: vi.fn(),
   del: vi.fn(),
+  delPlatform: vi.fn(),
   invalidate: vi.fn(),
+}));
+
+// session mock：控制 is_platform_admin（admin 可删 workspace_id=null 档案）
+const sessionMock = vi.hoisted(() => ({ isAdmin: false }));
+vi.mock("@/stores/session", () => ({
+  useSession: (
+    selector: (_s: { user?: { is_platform_admin?: boolean } }) => unknown,
+  ) => selector({ user: { is_platform_admin: sessionMock.isAdmin } }),
 }));
 
 // hook mock：控制 mine 数据源
@@ -68,6 +78,7 @@ vi.mock("@/lib/agent-profiles", async () => {
     ...actual,
     copyWorkspaceAgentProfile: fetchMock.copy,
     deleteWorkspaceAgentProfile: fetchMock.del,
+    deleteAgentProfile: fetchMock.delPlatform,
     useMineAgentProfiles: () => ({
       profiles: mineHook.profiles(),
       isLoading: false,
@@ -142,9 +153,11 @@ beforeEach(() => {
   notifyMock.warning.mockReset();
   fetchMock.copy.mockReset();
   fetchMock.del.mockReset();
+  fetchMock.delPlatform.mockReset();
   fetchMock.invalidate.mockReset();
   formMock.calls.mockReset();
   mineHook.profiles.mockReturnValue([]);
+  sessionMock.isAdmin = false;
 });
 
 afterEach(() => {
@@ -286,7 +299,8 @@ describe("删除档案（确认弹窗 + deleteWorkspaceAgentProfile）", () => {
     });
   });
 
-  it("private/platform 级档案点删除 → 拦截提示，不发删除请求", async () => {
+  it("非 admin 删 private/platform 级档案（workspace_id=null）→ 拦截提示，不发删除请求", async () => {
+    sessionMock.isAdmin = false;
     mineHook.profiles.mockReturnValue([
       makeProfile({ id: "p-priv", workspace_id: null, visibility: "platform" }),
     ]);
@@ -303,5 +317,38 @@ describe("删除档案（确认弹窗 + deleteWorkspaceAgentProfile）", () => {
       });
     }
     expect(fetchMock.del).not.toHaveBeenCalled();
+    expect(fetchMock.delPlatform).not.toHaveBeenCalled();
+    expect(notifyMock.warning).toHaveBeenCalledWith(
+      expect.stringContaining("请联系管理员"),
+    );
+  });
+
+  it("admin 删 private/platform 级档案（workspace_id=null）→ deleteAgentProfile(pid)", async () => {
+    sessionMock.isAdmin = true;
+    mineHook.profiles.mockReturnValue([
+      makeProfile({ id: "p-priv", workspace_id: null, visibility: "private" }),
+    ]);
+    fetchMock.delPlatform.mockResolvedValue(undefined);
+    renderPage(<AgentProfilesGlobalPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^删除$/ }));
+    });
+    const okBtn = screen.getByRole("button", { name: /确\s*认\s*删\s*除/ });
+    await act(async () => {
+      fireEvent.click(okBtn);
+    });
+
+    await waitFor(() => {
+      expect(fetchMock.delPlatform).toHaveBeenCalledWith("p-priv");
+    });
+    // 没走 workspace 级端点
+    expect(fetchMock.del).not.toHaveBeenCalled();
+    expect(notifyMock.success).toHaveBeenCalledWith(
+      expect.stringContaining("已删除"),
+    );
+    expect(fetchMock.invalidate).toHaveBeenCalledWith({
+      queryKey: ["agentProfiles", "mine"],
+    });
   });
 });

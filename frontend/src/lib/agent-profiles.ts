@@ -137,6 +137,20 @@ export async function deleteWorkspaceAgentProfile(
 }
 
 /**
+ * 删除平台/个人级档案（workspace_id=null，无归属工作区，无法走 workspace 级端点）。
+ * 调 platform 级 DELETE /api/agent-profiles/{pid}（后端 service.delete 按三级 visibility
+ * 鉴权：admin 短路删任意档；private 仅 owner；platform/系统预置仅 admin）。
+ * 全局页对 workspace_id=null 档案：admin 走此端点；非 admin 由页面保留友好提示
+ * （普通用户删自己的 private 档需后端另开 owner-gated 端点，后续）。
+ */
+export async function deleteAgentProfile(profileId: string): Promise<void> {
+  await apiFetch<void>(
+    `/api/agent-profiles/${encodeURIComponent(profileId)}`,
+    { method: "DELETE" },
+  );
+}
+
+/**
  * 复制档案（源档内容原样复制，新档 owner=actor / version=1 / 非系统预置）。
  * name 省略时后端取「{原名}（副本）」，visibility 省略时 private。
  */

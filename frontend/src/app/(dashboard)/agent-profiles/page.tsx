@@ -19,10 +19,10 @@
  *    多个工作区，无法在 mount 时固定单一 wid，故这里改用裸 fetch 函数
  *    （copyWorkspaceAgentProfile / deleteWorkspaceAgentProfile）+ 手动 invalidate
  *    agentProfileQueryKeys.mineList，确保 CRUD 后卡片墙刷新。
- *  - private/platform 级档案 workspace_id=null：lib/agent-profiles.ts 仅暴露 workspace 级
- *    copy/delete 端点（无 platform 级 copy/delete 客户端，见该文件 §platform 级注释），
- *    故这类档案在此页不支持复制/删除，提示用户进入归属工作区操作（仅 workspace 级档案
- *    可在全局页直接复制/删除；编辑仍可走表单的「参考工作区」路径）。
+ *  - private/platform 级档案 workspace_id=null：无归属工作区。删除走 platform 级 DELETE
+ *    /api/agent-profiles/{pid}（deleteAgentProfile，admin 可删任意档；非 admin 前端拦截
+ *    友好提示「请联系管理员」，普通用户删自己的 private 档需后端另开 owner-gated 端点）。
+ *    复制仍仅 workspace 级支持（platform 级无 copy 客户端）；编辑走表单的「参考工作区」路径。
  *
  * 设计依据：tasks/task-05.md §implementation / design §5 P5 / §6 / §10 R-02 /
  * FRONTEND_PAGE_STYLE.md §0（antd + tailwind token）/ §9（空值/错误展示）。
@@ -37,15 +37,20 @@ import { AgentProfileForm } from "@/components/agent-profile-form";
 import {
   agentProfileQueryKeys,
   copyWorkspaceAgentProfile,
+  deleteAgentProfile,
   deleteWorkspaceAgentProfile,
   type AgentProfileAggregatedItem,
   type AgentProfileRead,
 } from "@/lib/agent-profiles";
 import { useNotify } from "@/lib/errors";
+import { useSession } from "@/stores/session";
 
 export default function AgentProfilesGlobalPage() {
   const notify = useNotify();
   const qc = useQueryClient();
+  const isPlatformAdmin = useSession(
+    (s) => s.user?.is_platform_admin === true,
+  );
 
   const [formState, setFormState] = useState<{
     open: boolean;
@@ -87,15 +92,21 @@ export default function AgentProfilesGlobalPage() {
   const handleConfirmDelete = async () => {
     if (!confirmDelete) return;
     const target = confirmDelete;
-    // 双保险：打开弹窗前已拦截无 workspace_id 的档案，此处再校验一次。
-    if (!target.workspace_id) {
+    // 个人/平台级档案（workspace_id=null）无归属工作区：admin 走 platform 级 DELETE
+    // /api/agent-profiles/{pid}（service.delete 按三级 visibility 鉴权）；非 admin 前端
+    // 保留友好提示（普通用户删自己的 private 档需后端另开 owner-gated 端点，后续）。
+    if (!target.workspace_id && !isPlatformAdmin) {
       setConfirmDelete(null);
-      notify.warning("个人/平台级档案暂不支持在此删除，请进入归属工作区操作。");
+      notify.warning("个人/平台级档案暂不支持在此删除，请联系管理员处理。");
       return;
     }
     setDeleting(true);
     try {
-      await deleteWorkspaceAgentProfile(target.workspace_id, target.id);
+      if (target.workspace_id) {
+        await deleteWorkspaceAgentProfile(target.workspace_id, target.id);
+      } else {
+        await deleteAgentProfile(target.id);
+      }
       notify.success(`档案「${target.name}」已删除`);
       setConfirmDelete(null);
       invalidateMine();
