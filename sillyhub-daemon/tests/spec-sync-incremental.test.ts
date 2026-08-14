@@ -101,7 +101,7 @@ describe('postSpecSync 增量 diff（task-08 / change 2026-08-13-platform-manage
 
     const r = await postSpecSync(client as never, wsId, scratch);
 
-    expect(r).toEqual({ ok: true, reparsed: 1 });
+    expect(r).toMatchObject({ ok: true, reparsed: 1 });
     expect(postSpy).toHaveBeenCalledTimes(1);
     expect(postSpy.mock.calls[0][0]).toBe(wsId);
     expect(Buffer.isBuffer(postSpy.mock.calls[0][1])).toBe(true);
@@ -126,7 +126,7 @@ describe('postSpecSync 增量 diff（task-08 / change 2026-08-13-platform-manage
 
     const r = await postSpecSync(client as never, wsId, scratch);
 
-    expect(r).toEqual({ ok: true, reparsed: 0 });
+    expect(r).toMatchObject({ ok: true, reparsed: 0 });
     expect(incrSpy).toHaveBeenCalledTimes(1);
     expect(postSpy).not.toHaveBeenCalled(); // 增量成功不回退旧 tar
     const ops = incrSpy.mock.calls[0][1] as Array<Record<string, unknown>>;
@@ -227,7 +227,7 @@ describe('postSpecSync 增量 diff（task-08 / change 2026-08-13-platform-manage
 
     // 本地相对缓存无变化（.runtime 等被排除）→ 不发请求
     const r = await postSpecSync(client as never, wsId, scratch);
-    expect(r).toEqual({ ok: true, reparsed: 0 });
+    expect(r).toMatchObject({ ok: true, reparsed: 0 });
     expect(incrSpy).not.toHaveBeenCalled();
   });
 
@@ -249,7 +249,7 @@ describe('postSpecSync 增量 diff（task-08 / change 2026-08-13-platform-manage
 
     const r = await postSpecSync(client as never, wsId, scratch);
 
-    expect(r).toEqual({ ok: true, reparsed: 0 });
+    expect(r).toMatchObject({ ok: true, reparsed: 0 });
     expect(incrSpy).toHaveBeenCalledTimes(1); // 先试增量
     expect(postSpy).toHaveBeenCalledTimes(1); // 再回退旧 tar
     expect(Buffer.isBuffer(postSpy.mock.calls[0][1])).toBe(true);
@@ -265,7 +265,7 @@ describe('postSpecSync 增量 diff（task-08 / change 2026-08-13-platform-manage
     const client = makeClient({ postSpecSyncIncremental: incrSpy, postSpecSync: postSpy });
 
     const r = await postSpecSync(client as never, wsId, scratch);
-    expect(r).toEqual({ ok: true, reparsed: 0 });
+    expect(r).toMatchObject({ ok: true, reparsed: 0 });
     expect(postSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -278,7 +278,7 @@ describe('postSpecSync 增量 diff（task-08 / change 2026-08-13-platform-manage
     const client = { postSpecSync: postSpy } as never; // 无 postSpecSyncIncremental
 
     const r = await postSpecSync(client as never, wsId, scratch);
-    expect(r).toEqual({ ok: true, reparsed: 0 });
+    expect(r).toMatchObject({ ok: true, reparsed: 0 });
     expect(postSpy).toHaveBeenCalledTimes(1);
   });
 

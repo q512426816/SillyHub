@@ -24,13 +24,15 @@ from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
+from app.core.db import get_session_factory
 from app.core.errors import AppError, SpecWorkspaceNotFound
 from app.core.logging import get_logger
+from app.modules.daemon.model import DaemonChangeWrite
 from app.modules.spec_workspace.model import SpecFileManifest, SpecWorkspace
 from app.modules.spec_workspace.schema import (
     FileOp,
@@ -573,6 +575,7 @@ class SpecWorkspaceService:
         self,
         workspace_id: uuid.UUID,
         tar_bytes: bytes,
+        change_write_id: str | None = None,
     ) -> SpecWorkspace:
         """Validate + overwrite spec_root with tar (D-006 whole-tree), commit clean.
 
@@ -680,6 +683,7 @@ class SpecWorkspaceService:
                         cur.source_synced_at = now
                         cur.last_modified_at = src_mtime or now
                         shutil.move(str(src_file), str(target))
+                        await self._bump_files_processed(change_write_id)
                 else:
                     doc = ScanDocument(
                         workspace_id=workspace_id,
@@ -695,6 +699,7 @@ class SpecWorkspaceService:
                     )
                     self._session.add(doc)
                     shutil.move(str(src_file), str(target))
+                    await self._bump_files_processed(change_write_id)
         finally:
             tf.close()
             # Wave C 续：staging 整树删除移出事件循环
@@ -724,17 +729,45 @@ class SpecWorkspaceService:
         await self._session.commit()
         return spec_ws
 
+    async def _bump_files_processed(self, change_write_id: str | None) -> None:
+        """逐文件级进度（D-004@V2）：独立 session 回写 files_processed += 1。
+
+        用 ``get_session_factory()`` 开短生命周期独立 session（不动主 apply 事务），
+        UPDATE daemon_change_writes SET files_processed = files_processed + 1
+        WHERE id = change_write_id AND status = 'claimed'（守卫对齐 BL-3）。
+        best-effort：失败仅 warn 不阻塞 apply 主流程。
+        """
+        if not change_write_id:
+            return
+        try:
+            async with get_session_factory()() as progress_session:
+                await progress_session.execute(
+                    update(DaemonChangeWrite)
+                    .where(
+                        DaemonChangeWrite.id == uuid.UUID(change_write_id),
+                        DaemonChangeWrite.status == "claimed",
+                    )
+                    .values(files_processed=DaemonChangeWrite.files_processed + 1)
+                )
+                await progress_session.commit()
+        except Exception as e:
+            log.warning("spec_workspace.progress_bump_failed", error=str(e))
+
     async def apply_sync(
         self,
         workspace_id: uuid.UUID,
         tar_bytes: bytes,
+        change_write_id: str | None = None,
     ) -> dict[str, int]:
         """Overwrite spec_root with tar, then reparse docs + changes (D-003).
 
         D-006 whole-tree overwrite. D-003 docs/changes 两阶段独立 try/except（单阶段
         失败 dirty 不阻断另一阶段）。Returns ``{reparsed_docs, reparsed_changes}``。
+        ``change_write_id``（可选）让 ``_write_spec_root`` 循环内逐文件回写进度。
         """
-        spec_ws = await self._write_spec_root(workspace_id, tar_bytes)
+        spec_ws = await self._write_spec_root(
+            workspace_id, tar_bytes, change_write_id=change_write_id
+        )
         reparsed_docs = await self._reparse_phase(workspace_id, spec_ws, "scan_docs")
         reparsed_changes = await self._reparse_phase(workspace_id, spec_ws, "change")
         log.info(
@@ -877,6 +910,7 @@ class SpecWorkspaceService:
         self,
         workspace_id: uuid.UUID,
         ops: list[FileOp],
+        change_write_id: str | None = None,
     ) -> dict[str, object]:
         """Apply incremental file ops to the workspace spec_root.
 
@@ -1072,6 +1106,9 @@ class SpecWorkspaceService:
                     )
                 )
                 new_versions[op.new_path] = new_version
+
+            # D-004@V2：每个成功处理的 op 后逐文件回写 files_processed（conflict op 已 continue 跳过）。
+            await self._bump_files_processed(change_write_id)
 
         await self._session.commit()
         return {

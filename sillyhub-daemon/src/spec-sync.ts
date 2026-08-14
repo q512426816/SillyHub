@@ -488,7 +488,7 @@ export class SpecPushConflict extends Error {
  *      逐文件 hash（mtime 未变复用缓存 hash，R-05）→ 与缓存 diff 生成 ops
  *      （新文件 add / 内容变 update / 缓存有本地无 delete / 同 hash 异路径 rename 不重传
  *      内容，R-02 注意 Windows 大小写）；op 带 per-file base_version（缓存 version，无 0）。
- *   4. `client.postSpecSyncIncremental(wsId, ops)`：
+ *   4. `client.postSpecSyncIncremental(wsId, ops, changeWriteId)`：
  *      - 成功 → 按 new_versions 回写缓存 version（+ 刷新 hash/mtime），返回 { ok: true, reparsed: 0 }。
  *      - conflict=true → 抛 SpecPushConflict（调用方 catch 后 warn 不阻塞，人工拍板 NFR-02）。
  *      - 404（旧后端无端点）/ 网络失败 / 端点错误 → **回退旧 tar** 全量，写全量快照缓存。
@@ -505,6 +505,9 @@ export async function postSpecSync(
   client: HubClient,
   wsId: string,
   specRoot: string,
+  /** 逐文件进度：daemon 的 outbox task_id，透传给 backend apply 循环内回写 files_processed。
+   *  缺省（undefined）→ 不带 X-Change-Write-Id 头，后端不回写 processed（向后兼容旧 daemon）。 */
+  changeWriteId?: string,
   /**
    * ql-20260813-spec-sync-visibility task-12（FR-06 + BL-2）：过程进度回调。
    * 调用点：增量 computeIncrementalOps 后（total=ops.length, processed=0）；全量
@@ -524,7 +527,7 @@ export async function postSpecSync(
       // BL-2：walk 完成立即上报 total（tar 还没拼，全量首同步进度窗口）
       onWalkComplete: (filesCount) => onProgress?.({ files_total: filesCount, files_processed: 0 }),
     });
-    const resp = await client.postSpecSync(wsId, tarBuf);
+    const resp = await client.postSpecSync(wsId, tarBuf, changeWriteId);
     const fullManifest = await buildFullManifest(specRoot);
     await writeLocalManifest(wsId, fullManifest);
     // filesTotal = 全量快照文件数（spec 文档数）
@@ -546,14 +549,14 @@ export async function postSpecSync(
   // 4. 增量客户端缺失（mock 旧客户端）→ 回退旧 tar
   if (typeof client.postSpecSyncIncremental !== 'function') {
     const tarBuf = await packSpecDir(specRoot);
-    const resp = await client.postSpecSync(wsId, tarBuf);
+    const resp = await client.postSpecSync(wsId, tarBuf, changeWriteId);
     const fullManifest = await buildFullManifest(specRoot);
     await writeLocalManifest(wsId, fullManifest);
     return { ...resp, filesTotal: Object.keys(fullManifest.files).length };
   }
 
   try {
-    const result = await client.postSpecSyncIncremental(wsId, ops);
+    const result = await client.postSpecSyncIncremental(wsId, ops, changeWriteId);
     if (result.conflict) {
       throw new SpecPushConflict(wsId, result.server_versions ?? {});
     }
@@ -565,7 +568,7 @@ export async function postSpecSync(
     // conflict 不回退（人工拍板）；404/网络/端点错误 → 回退旧 tar 全量
     if (e instanceof SpecPushConflict) throw e;
     const tarBuf = await packSpecDir(specRoot);
-    const resp = await client.postSpecSync(wsId, tarBuf);
+    const resp = await client.postSpecSync(wsId, tarBuf, changeWriteId);
     const fullManifest = await buildFullManifest(specRoot);
     await writeLocalManifest(wsId, fullManifest);
     return { ...resp, filesTotal: Object.keys(fullManifest.files).length };

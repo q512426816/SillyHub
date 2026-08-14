@@ -329,11 +329,12 @@ export class HubClient {
     method: 'GET' | 'POST' | 'PATCH',
     path: string,
     body?: unknown,
+    extraHeaders?: Record<string, string>,
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const resp = await fetch(url, {
       method,
-      headers: this._headers(),
+      headers: { ...this._headers(), ...extraHeaders },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
       // Node 原生 fetch 默认不读 HTTP_PROXY/HTTPS_PROXY（等价 trust_env=False），
@@ -919,11 +920,15 @@ export class HubClient {
   async postSpecSync(
     wsId: string,
     tarBuf: Buffer,
+    changeWriteId?: string,
   ): Promise<{ ok: boolean; reparsed: number }> {
     const url = `${this.baseUrl}/api/workspaces/${encodeURIComponent(wsId)}/spec-workspace/sync`;
     const headers: Record<string, string> = {
       'Content-Type': 'application/x-tar',
     };
+    if (changeWriteId) {
+      headers['X-Change-Write-Id'] = changeWriteId;
+    }
     if (this.apiKey) {
       headers['X-API-Key'] = this.apiKey;
     } else if (this.token) {
@@ -961,6 +966,7 @@ export class HubClient {
   async postSpecSyncIncremental(
     wsId: string,
     ops: FileOp[],
+    changeWriteId?: string,
   ): Promise<SpecIncrementalSyncResult> {
     // ⚠️ URL 必须用 /api 前缀（与旧 postSpecSync 一致），不能用 REST_PREFIX（= /api/daemon）——
     // backend spec_workspace router 挂在 prefix="/api"（main.py include_router），
@@ -969,6 +975,7 @@ export class HubClient {
       'POST',
       `/api/workspaces/${encodeURIComponent(wsId)}/spec-workspace/sync-incremental`,
       { ops },
+      changeWriteId ? { 'X-Change-Write-Id': changeWriteId } : undefined,
     );
   }
 

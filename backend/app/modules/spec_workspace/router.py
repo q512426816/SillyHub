@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, Header, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -223,18 +223,18 @@ async def sync_spec_workspace(
     session: SessionDep,
     _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
     tar_bytes: Annotated[bytes, Body(media_type="application/x-tar")],
+    change_write_id: Annotated[str | None, Header(alias="X-Change-Write-Id")] = None,
 ) -> SpecSyncResponse:
     """Receive a daemon-uploaded spec tar, overwrite the server ``spec_root``,
     and reparse scan_docs (FR-05 / D-006@v1).
 
     Body is a raw ``application/x-tar`` stream. The whole tree is overwritten
     (no diff/merge). ``.runtime/`` is preserved. Returns the reparse parsed
-    count.
+    count. ``X-Change-Write-Id`` 头（可选）让后端 apply 循环内逐文件回写
+    files_processed（逐文件级进度，D-004@V2）。
     """
     service = SpecWorkspaceService(session)
-    # apply_sync 返回 {reparsed_docs, reparsed_changes}（D-003）；sync 端点暂时只暴露 docs
-    # 数保持 SpecSyncResponse 兼容，task-03 加 reparsed_changes 字段 + import SSE。
-    result = await service.apply_sync(workspace_id, tar_bytes)
+    result = await service.apply_sync(workspace_id, tar_bytes, change_write_id=change_write_id)
     return SpecSyncResponse(
         ok=True,
         reparsed=result["reparsed_docs"],
@@ -251,6 +251,7 @@ async def sync_spec_workspace_incremental(
     payload: SpecIncrementalSyncRequest,
     session: SessionDep,
     _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+    change_write_id: Annotated[str | None, Header(alias="X-Change-Write-Id")] = None,
 ) -> SpecIncrementalSyncResponse:
     """Receive daemon incremental file ops and apply them to spec_root.
 
@@ -259,9 +260,10 @@ async def sync_spec_workspace_incremental(
     过期 → ``conflict=True`` + ``server_versions``（HTTP 保持 200，daemon 侧据字段
     提示人工拍板，design §7 定义）；containment / ``.runtime`` 越界 → 422 AppError
     透传（``HTTP_422_SPEC_BUNDLE_INVALID``，对齐旧 tar 端点校验机制）。
+    ``X-Change-Write-Id`` 头（可选）让 apply_ops 循环内逐文件回写 files_processed。
     """
     service = SpecWorkspaceService(session)
-    result = await service.apply_ops(workspace_id, payload.ops)
+    result = await service.apply_ops(workspace_id, payload.ops, change_write_id=change_write_id)
     return SpecIncrementalSyncResponse(
         ok=True,
         new_versions=result["new_versions"],

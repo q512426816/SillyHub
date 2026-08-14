@@ -2300,13 +2300,13 @@ export class TaskRunner {
           this.client as unknown as Parameters<typeof postSpecSync>[0],
           workspaceId,
           specDir,
-          // task-13（FR-06）：过程进度回调 → reportChangeWriteProgress 上报到 progress 端点。
-          // 回调失败仅 warn 不阻塞同步（best-effort）。终态上报（processed=total）在下方
-          // complete 前做（task-08），本回调只报过程起点（增量 ops.length / 全量 onWalkComplete）。
+          // D-004@V2：taskId 透传给 backend apply 循环内回写 files_processed（逐文件级）。
+          taskId,
+          // onProgress：只报 files_total（processed 改由 backend apply 循环写，daemon 不再报）。
           (p) => {
-            if (typeof this.client.reportChangeWriteProgress === 'function') {
+            if (p.files_total !== undefined && typeof this.client.reportChangeWriteProgress === 'function') {
               this.client
-                .reportChangeWriteProgress(taskId, claimToken, p)
+                .reportChangeWriteProgress(taskId, claimToken, { files_total: p.files_total })
                 .catch((e) => {
                   console.warn('task_runner: spec_sync_progress_report_failed', taskId, e);
                 });
@@ -2325,13 +2325,11 @@ export class TaskRunner {
         }
         throw e;
       }
-      // FR-05（D-004 单一写者）：complete 前上报终态计数 {files_total, files_processed:files_total}。
-      // reportChangeWriteProgress 可选（mock 未实现跳过）；失败仅 warn 不阻塞 complete（best-effort）。
+      // D-004@V2：complete 前只报 files_total（files_processed 由 backend apply 循环写，daemon 不再报）。
       if (filesTotal !== undefined && typeof this.client.reportChangeWriteProgress === 'function') {
         try {
           await this.client.reportChangeWriteProgress(taskId, claimToken, {
             files_total: filesTotal,
-            files_processed: filesTotal,
           });
         } catch (e) {
           console.warn('task_runner: spec_sync_progress_report_failed', taskId, e);
