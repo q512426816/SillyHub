@@ -42,9 +42,14 @@ async def workspace_with_changes(
     assert list_resp.status_code == 200
     items = list_resp.json()["items"]
     assert len(items) > 0
+    # 显式取 active demo-feature，不用 items[0]：列表顺序不保证（CI 曾把归档变更
+    # 排首位），而 sync_documents 恒拼 .sillyspec/changes/{key}/（3 层），归档 key
+    # 时 ../../../../ 只落到 root/evil.md（root 内）不触发穿越守卫，用例假失败。
+    demo = next((i for i in items if i["change_key"] == "2026-05-25-demo-feature"), None)
+    assert demo is not None, f"demo-feature not found; items={[i['change_key'] for i in items]}"
     return {
         "ws_id": ws_id,
-        "change_key": items[0]["change_key"],
+        "change_key": demo["change_key"],
         "root": root,
     }
 
