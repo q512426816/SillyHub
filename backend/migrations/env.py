@@ -17,21 +17,31 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import get_settings
 from app.models.base import BaseModel
+
+# 2026-08-14 architecture-4a §8 漂移修复：补登记较新模块的 model，确保 autogenerate
+# 能扫到全部表（此前靠运行时 router/service import 链间接加载，autogenerate 会漏判
+# 这些表，新增表时可能不生成迁移）。
+from app.modules.admin import model as _admin_model  # noqa: F401
 from app.modules.agent import model as _agent_model  # noqa: F401
+from app.modules.agent.profile import model as _agent_profile_model  # noqa: F401
 
 # Eagerly import every feature module so its SQLModel tables are attached to
 # ``BaseModel.metadata`` before autogenerate runs. Add new modules here.
 from app.modules.auth import model as _auth_model  # noqa: F401
 from app.modules.change import model as _change_model  # noqa: F401
 from app.modules.daemon import model as _daemon_model  # noqa: F401
+from app.modules.daemon.audit import model as _daemon_audit_model  # noqa: F401
+from app.modules.file import model as _file_model  # noqa: F401
 from app.modules.git_gateway import model as _gg_model  # noqa: F401
 from app.modules.git_identity import model as _gi_model  # noqa: F401
 from app.modules.incident import model as _incident_model  # noqa: F401
 from app.modules.llm_provider import model as _llm_model  # noqa: F401
+from app.modules.mcp_gateway import model as _mcp_gateway_model  # noqa: F401
 
 # 2026-08-10-sillyhub-platform-sync task-02：进度同步层聚合存储表登记，
 # 否则 autogenerate 会因 metadata 缺该表而误判 platform_change_progress 多余。
 from app.modules.platform_sync import model as _platform_sync_model  # noqa: F401
+from app.modules.ppm.kanban import model as _ppm_kanban_model  # noqa: F401
 from app.modules.ppm.plan import model as _ppm_plan_model  # noqa: F401
 from app.modules.ppm.problem import model as _ppm_problem_model  # noqa: F401
 from app.modules.ppm.project import model as _ppm_project_model  # noqa: F401
@@ -40,6 +50,7 @@ from app.modules.release import model as _release_model  # noqa: F401
 from app.modules.scan_docs import conflict_model as _scan_conflict_model  # noqa: F401
 from app.modules.scan_docs import model as _scan_model  # noqa: F401
 from app.modules.settings import model as _settings_model  # noqa: F401
+from app.modules.skills import model as _skills_model  # noqa: F401
 from app.modules.spec_profile import model as _spec_profile_model  # noqa: F401
 from app.modules.spec_workspace import model as _spec_ws_model  # noqa: F401
 from app.modules.task import model as _task_model  # noqa: F401
@@ -47,6 +58,7 @@ from app.modules.tool_gateway import model as _tg_model  # noqa: F401
 from app.modules.tool_gateway import tool_policy as _tg_policy  # noqa: F401
 from app.modules.workflow import model as _workflow_model  # noqa: F401
 from app.modules.workspace import model as _workspace_model  # noqa: F401
+from app.modules.workspace.member_runtimes import model as _member_runtimes_model  # noqa: F401
 from app.modules.worktree import model as _worktree_model  # noqa: F401
 
 config = context.config

@@ -27,7 +27,7 @@ spike 锁定的 5 个坑（写法约束）：
    挂在 streamable_http_app() 返回的子 app 上（CC-06：与 ``/api`` 的
    ``get_current_principal`` 物理隔离，子 app middleware 只对 ``/mcp/*`` 生效）。
 5. **P2 mcp 实例导出**：``mcp`` 放本模块导出，task-06 ``tools.py`` 经
-   ``from .server import mcp`` + ``@mcp.tool()`` 注册 8 个 tool。
+   ``from .server import mcp`` + ``@mcp.tool()`` 注册 12 个 tool（以 tools.py 实际为准）。
 
 task-05 ``provides`` 契约 :data:`McpServerInstance`（``server`` + ``mount_path``）：
 task-06/13 消费 :data:`mcp` 注册 tool，消费 :data:`mount_path` 知道对外 URL。
@@ -54,7 +54,7 @@ mount_path: str = "/mcp"
 #:   后端点 ``/mcp/``（尾斜杠），避开 Starlette Mount 的 307 重定向。
 #:
 #: task-06 ``tools.py`` 经 ``from .server import mcp`` + ``@mcp.tool()``
-#: 在此实例上注册 8 个 tool（design §7.1）。transport 是 streamable HTTP
+#: 在此实例上注册 12 个 tool（design §7.1，以 tools.py 实际为准）。transport 是 streamable HTTP
 #:（协议版本 ``2025-11-25``，spike 实测握手）。
 mcp: FastMCP = FastMCP("sillyhub-public", streamable_http_path="/")
 
@@ -85,7 +85,7 @@ def mount_mcp(app: FastAPI) -> None:
     app.mount(mount_path, mcp_app)
 
 
-# 装配副作用 import（task-06 协调）：import tools 触发 @mcp.tool() 注册 5 个 tool，
+# 装配副作用 import（task-06 协调）：import tools 触发 @mcp.tool() 注册 12 个 tool，
 # 否则生产 /mcp tools/list 看不到它们。mcp 实例在本模块第 59 行已定义，
 # tools.py 的 ``from .server import mcp`` 在此处可安全解析（无循环）。
 # 下方 import 仅为副作用（注册 5 个 tool），名字不被引用，故行尾标 noqa: F401。

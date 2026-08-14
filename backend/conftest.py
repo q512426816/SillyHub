@@ -331,13 +331,11 @@ async def _isolate_background_tasks() -> AsyncIterator[None]:
     在 pytest-asyncio function-scoped loop 下泄漏到下个测试触发 'Event loop is closed' 或静默
     漏 await。每测试前 clear，测试后 cancel+await 残留 task 再 clear。
 
-    覆盖四处（同模式一并隔离，不留同款坑）：
+    覆盖三处（同模式一并隔离，不留同款坑）：
       - ``spec_workspace.bootstrap._BACKGROUND_BOOTSTRAP_TASKS``
       - ``AgentService._background_tasks``（agent/service.py）
-      - ``ExecutionCoordinatorService._background_tasks``（agent/coordinator.py）
       - ``RunSyncService._background_tasks``（daemon/run_sync/service.py）
     """
-    from app.modules.agent.coordinator import ExecutionCoordinatorService
     from app.modules.agent.service import AgentService
     from app.modules.daemon.run_sync.service import RunSyncService
     from app.modules.spec_workspace.bootstrap import _BACKGROUND_BOOTSTRAP_TASKS
@@ -345,7 +343,6 @@ async def _isolate_background_tasks() -> AsyncIterator[None]:
     task_sets = (
         _BACKGROUND_BOOTSTRAP_TASKS,
         AgentService._background_tasks,
-        ExecutionCoordinatorService._background_tasks,
         RunSyncService._background_tasks,
     )
     for s in task_sets:

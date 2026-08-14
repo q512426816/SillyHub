@@ -202,3 +202,15 @@
 根因：ql-20260813-008 在 parser.py 用 `rglob("*")`+`is_file()`+`stat()` 对每文件产生 2 次 stat 系统调用；该 workspace spec_root 是 Windows-Docker bind mount（`/run/desktop/mnt/host/c/data/spec-workspaces`），单次 stat≈1.45ms，196 变更 ~3000 文件堆到 12s（cProfile 实测 posix.stat 11593 次/16.9s），解析阶段 25s、加 DB 写入总 33s，超 Next.js 14.2.5 代理 ~30s 默认超时 → 前端 ECONNRESET/500（backend 那条 200 是代理放弃后 FastAPI 跑完的"幽灵 200"）。
 方案：parser.py 新增 `_compute_last_modified`——单次 `os.scandir` 迭代遍历（显式 stack 不递归，规避深目录 recursion limit），复用 DirEntry 缓存 stat（每文件仅 1 次系统调用）；`follow_symlinks=False` 比原 rglob 更严格（不跨 symlink，变更目录内无 symlink 行为等价）。mtime-max 语义 / 空目录 None / 含子目录及非标准文件（tasks/*.md、decisions.md）均不变。不删 ql-008 功能（mtime→updated_at 已上线且用户要），只优化实现。
 结果：test_parser+test_reparse_guard 27 passed（含 2 新增 mtime 单测）ruff check/format 干净；容器实测 parse_workspace 25s→14.3s、端到端 reparse 33s→13.7s（经前端代理 3001 返回 200），500 消失，ql-008 功能未回归（196 变更 updated_at 正常）。已 docker cp 到运行中 backend 容器 + restart 使修复即时生效。
+
+## ql-20260814-003-e649 | 2026-08-14 13:17:33 | 清理 docs/architecture-4a.md §8 注释类与迁移登记类漂移点
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/mcp_gateway/server.py（三处过时 tool 数量注释 8/5 改 12 以 tools.py 为准）
+- backend/app/modules/agent/adapters/__init__.py（空文件补 docstring adapters 故意空执行走 daemon lease/subprocess）
+- backend/migrations/env.py（补 8 类 model import 登记 admin agent.profile daemon.audit file mcp_gateway ppm.kanban skills workspace.member_runtimes）
+需求：清理 docs/architecture-4a.md §8 注释类与迁移登记类漂移点。
+根因：部分代码注释过时（MCP tool 数量 8/5 实际 12、adapters 目录无说明），migrations/env.py 漏登记 8 类较新模块 model 致 autogenerate 漏判。
+方案：改 mcp_gateway/server.py 三处 tool 数量注释为 12，adapters/__init__.py 补 docstring，env.py 补 8 类 model import 并 ruff isort 排序。
+结果：ruff check+format clean，8 import 加载 OK，容器内 alembic check 无 add_table（满屏 diff 为预存类型噪音与本次无关），pytest mcp_gateway+agent 605 passed 2 deselected；#9 execution.py 注释已自行修正跳过，#7 死代码删除留 quick 外 git 单独做。
