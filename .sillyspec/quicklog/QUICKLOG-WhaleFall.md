@@ -345,3 +345,17 @@
 根因：close_interactive_run 对所有 change_id 非空+completed 的 run 无差别 enqueue verify gate，quick stage run 被拉跑 sillyspec gate verify，对非 verify 变更（quick 独立 quicklog、change_key 含中文）stdout 非 JSON 解析失败 exit 2 误报核验失败，且 gate_result 仅落 agent_run 未回写 last_dispatch，刷新后徽标消失（用户感知状态没变）。
 方案：加 _gate_applicable 守门（仅 current_stage==verify+completed+change_id 非空），close_interactive_run 设 gate_status=pending(:1067) 与 enqueue(:1149) 两处共用，quick/brainstorm/plan/execute/archive 跳过；扩 test_run_sync_gate_enqueue.py 加非 verify stage 跳过 gate 用例（_attach_change stage 参数化）；止血清掉该 run 误判的 gate_status/gate_result。
 结果：pytest 32 passed（enqueue+close_interactive_run+gate_decision_task），ruff 全绿；该 run gate_status 已清 NULL 恢复正常显示。
+
+## ql-20260814-001-ec76 | 2026-08-14 09:39:17 | 删除 5 个 CC 平台级专家角色模板（CC 架构师/前端/后端/项目经理/测试工程师）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/profile/seed.py（_ROLE_TEMPLATE_PROVIDERS 清空 + _DEPRECATED_ROLE_TEMPLATE_IDS 扩 glm+claude×10）
+- backend/app/main.py（启动补种注释更新）
+- backend/app/modules/agent/tests/test_profile_seed.py（角色模板测试改写为 0 补种+回收10）
+- .sillyspec/docs/backend/modules/agent.md（ql-20260814-001 变更索引）
+- .sillyspec/docs/SillyHub/modules/agent.md（同上）
+需求：删除 5 个 CC 平台级专家角色模板（CC 架构师/前端/后端/项目经理/测试工程师）。
+根因：平台角色模板此前分 CC/GLM 双供应商，GLM 已于 ql-20260813-005 下线，CC×5 仍由 ensure_role_template_profiles 每次启动补种，用户要求一并移除。
+方案：mirror GLM 下线套路——seed.py 清空 _ROLE_TEMPLATE_PROVIDERS、把 CC×5 确定性 UUID 并入 _DEPRECATED_ROLE_TEMPLATE_IDS（与 GLM×5 合计 10），ensure 启动按 id 回收 DB 残留、不再补种；main.py 注释更新；test_profile_seed.py 角色模板测试改写为「0 补种 + 回收 10」；agent.md×2 加 ql-20260814-001 变更索引。
+结果：pytest test_profile_seed.py 14 passed（含 prune 回收 10 + 用户档案保留），ruff check 干净；待部署 backend 重启触发 ensure 实际回收 DB 中 5 条 CC 残留。

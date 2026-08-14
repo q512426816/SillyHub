@@ -132,8 +132,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 if seeded:
                     log.warning("agent.profile.system_default_reseeded", count=seeded)
 
-                # quick-2026-08-13：补种 CC 专家角色模板（5 角色）+ 回收已废弃 GLM 模板。
-                # 按确定性 UUID 去重补种 / 按废弃清单回收，不覆盖用户改动，异常不阻断启动。
+                # quick-2026-08-14 (ql-20260814-001)：角色模板已全部下线（CC/GLM 均移除），
+                # ensure 仅回收废弃残留（GLM×5 + CC×5），不再补种。异常不阻断启动。
                 role_seeded, role_pruned = await ensure_role_template_profiles(session)
                 if role_seeded:
                     log.warning("agent.profile.role_template_reseeded", count=role_seeded)

@@ -50,4 +50,5 @@ aggregate_tool_failure(logs) → should_warn_tool_failure(threshold) → 告警
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
+- **ql-20260814-001** 平台角色模板全部下线：CC×5 移除（GLM×5 此前 ql-20260813-005 已下线）。`profile/seed.py` `_ROLE_TEMPLATE_PROVIDERS` 清空，`ensure_role_template_profiles` 不再补种、仅按 `_DEPRECATED_ROLE_TEMPLATE_IDS`（GLM+CC 共 10 确定性 UUID）回收 DB 残留。系统默认档案（Claude Code 默认 / Codex 默认，`is_system_default=True`）不受影响。
 <!-- MANUAL_NOTES_END -->
