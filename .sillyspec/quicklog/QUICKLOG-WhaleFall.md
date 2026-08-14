@@ -336,3 +336,12 @@
 根因：ql-20260813-004 补种了 CC/GLM × 5 共 10 条平台模板，现需移除 GLM 方向；ensure_role_template_profiles 只补不删，仅删代码会让 DB 残留 5 条 GLM 孤儿模板、前端仍显示。
 方案：seed.py 删 _ROLE_TEMPLATE_PROVIDERS 的 glm 条目留 CC×5，新增 _DEPRECATED_ROLE_TEMPLATE_IDS（glm×5 确定性UUID）在 ensure 内 delete 回收废弃模板（幂等、新环境删0条、严格只删 namespace 内已知废弃 id 不碰用户 uuid4 档案），返回值改 (inserted,pruned)；main.py log 解构；测试 10→5 + 新增回收测试；agent.md 追加变更索引。
 结果：pytest test_profile_seed.py 16 passed（含 test_role_templates_prune_deprecated_glm 验证 5 条 GLM 被回收+用户自建档案保留），ruff check + format 干净；待部署 rebuild backend 重启触发回收。
+
+## ql-20260813-006-f3f0 | 2026-08-13 22:41:18 | 排查智能体执行日志 ef9f8b55 已执行完但前端状态没变
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/daemon/run_sync/service.py, backend/app/modules/daemon/tests/test_run_sync_gate_enqueue.py
+需求：排查智能体执行日志 ef9f8b55 已执行完但前端状态没变。
+根因：close_interactive_run 对所有 change_id 非空+completed 的 run 无差别 enqueue verify gate，quick stage run 被拉跑 sillyspec gate verify，对非 verify 变更（quick 独立 quicklog、change_key 含中文）stdout 非 JSON 解析失败 exit 2 误报核验失败，且 gate_result 仅落 agent_run 未回写 last_dispatch，刷新后徽标消失（用户感知状态没变）。
+方案：加 _gate_applicable 守门（仅 current_stage==verify+completed+change_id 非空），close_interactive_run 设 gate_status=pending(:1067) 与 enqueue(:1149) 两处共用，quick/brainstorm/plan/execute/archive 跳过；扩 test_run_sync_gate_enqueue.py 加非 verify stage 跳过 gate 用例（_attach_change stage 参数化）；止血清掉该 run 误判的 gate_status/gate_result。
+结果：pytest 32 passed（enqueue+close_interactive_run+gate_decision_task），ruff 全绿；该 run gate_status 已清 NULL 恢复正常显示。
