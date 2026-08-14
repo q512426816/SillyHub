@@ -3680,6 +3680,14 @@ export class Daemon {
         (rawExec.effectiveAllowedRoots as string[] | undefined) ??
         (rawExec.effective_allowed_roots as string[] | undefined) ??
         payload.effectiveAllowedRoots,
+      // task-04（2026-08-13-profile-system-prompt-injection）：profile.system_prompt 透传。
+      // context.py task-02 双写 systemPrompt(camel)+system_prompt(snake) 进 claim payload。
+      // camelCase 优先、snake_case 兜底（与 mcpRefs 等惯例一致）。interactive 经 execPayload
+      // 直读 → _startInteractiveSession → CreateSessionInput → SDK systemPrompt preset+append。
+      systemPrompt:
+        (rawExec.systemPrompt as string | undefined) ??
+        (rawExec.system_prompt as string | undefined) ??
+        payload.systemPrompt,
       // task-08 / FR-05 / D-005/D-009（RS-4 接线）：AgentMission.budget_tokens 透传。
       // context.py task-07 双写 budget_tokens(snake)+budgetTokens(camel) 进 claim payload。
       // snake 优先（与 types.ts LeaseCtx.budget_tokens 字段名一致），camel 兜底。
