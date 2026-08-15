@@ -200,6 +200,25 @@ class TestListWorkers:
 
 
 class TestConvergeMission:
+    @pytest.fixture(autouse=True)
+    def _isolate_glm(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """GLM 隔离（对齐 test_converge_mission_reentrant.py 同款做法）。
+
+        converge endpoint 的 ``GLMConfig.from_env`` 读 ANTHROPIC_BASE_URL /
+        ANTHROPIC_AUTH_TOKEN 环境变量——宿主 shell（如 Claude Code 网关配置）
+        设有这两项时 ``_glm_merge`` 会向真实 LLM 网关发 HTTP（实测单用例
+        +18s 且烧 token）。patch 源 module delegation 使 from_env 返 None，
+        finalize 走确定性 concat 回退，测试零网络。
+        """
+        from app.modules.agent import delegation
+
+        class _FakeGLMConfig:
+            @staticmethod
+            def from_env():
+                return None
+
+        monkeypatch.setattr(delegation, "GLMConfig", _FakeGLMConfig)
+
     @pytest.mark.asyncio
     async def test_converge_all_completed(self, client, db_session, auth_headers) -> None:
         """POST converge → 全终态（completed）→ done → converged=True。"""
