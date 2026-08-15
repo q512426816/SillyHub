@@ -667,8 +667,9 @@ class TestPlainInjectZeroRegression:
     async def test_plain_inject_message_and_run_unchanged(
         self, db_session, mocked_hub, mocked_redis
     ) -> None:
-        """不传切换参数：SESSION_INJECT 消息 snake_case 字段逐字不变，run 不带
-        配置快照字段，会话三列不动——即使会话本身持有档案/供应商。"""
+        """不传切换参数：SESSION_INJECT 消息 snake_case 字段逐字不变，会话三列不动；
+        run 带会话当前配置快照（D-008 每轮快照——ql-20260815-010 修正：此前普通轮
+        run 的配置列为 NULL，前端 whoLine 误显「未指定/本机默认」）。"""
         uid = await _create_user(db_session)
         rt = await _create_runtime(db_session, uid)
         profile_a = await _create_profile(db_session, uid, system_prompt="a")
@@ -689,11 +690,11 @@ class TestPlainInjectZeroRegression:
 
         result = await svc.inject_session(created.agent_session.id, uid, prompt="second")
 
-        # run：原有字段口径（无配置快照字段）。
+        # run：沿用会话当前配置（每轮快照，D-008；未配置会话为 NULL 如实）。
         run = result.agent_run
-        assert run.agent_profile_id is None
-        assert run.agent_profile_snapshot is None
-        assert run.llm_provider_id is None
+        assert run.agent_profile_id == profile_a.id
+        assert run.agent_profile_snapshot is not None
+        assert run.llm_provider_id == provider_a.id
         assert run.status == "pending"
 
         # 会话三列不动。

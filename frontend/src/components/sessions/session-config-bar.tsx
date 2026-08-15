@@ -247,32 +247,39 @@ export function SessionConfigBar({
     setOpenKind((prev) => (prev === kind ? null : kind));
   };
 
+  // ql-20260815-010：下拉浮层锚定各自控件——每个控件包一层 relative，
+  // ConfigDropdown 的 absolute bottom-full left-0 相对控件（此前锚到整条
+  // barRef 导致所有下拉都渲染在最左侧）。
   const ctrlButton = (
     kind: SessionConfigCtrlKind,
     icon: string,
     value: string,
     title: string,
+    dropdown?: React.ReactNode,
   ) => (
-    <button
-      type="button"
-      disabled={ctrlDisabled[kind]}
-      title={title}
-      aria-label={`配置-${labelOfCtrl(kind)} ${value}`}
-      onClick={() => toggleCtrl(kind)}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
-        ctrlDisabled[kind]
-          ? "cursor-not-allowed text-muted-foreground/60"
-          : "cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground",
-        openKind === kind && "bg-muted text-primary",
-      )}
-    >
-      <span aria-hidden>{icon}</span>
-      <span className="max-w-[160px] truncate">{value}</span>
-      <span aria-hidden className="text-muted-foreground/60">
-        ▾
-      </span>
-    </button>
+    <span className="relative inline-flex">
+      <button
+        type="button"
+        disabled={ctrlDisabled[kind]}
+        title={title}
+        aria-label={`配置-${labelOfCtrl(kind)} ${value}`}
+        onClick={() => toggleCtrl(kind)}
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
+          ctrlDisabled[kind]
+            ? "cursor-not-allowed text-muted-foreground/60"
+            : "cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground",
+          openKind === kind && "bg-muted text-primary",
+        )}
+      >
+        <span aria-hidden>{icon}</span>
+        <span className="max-w-[160px] truncate">{value}</span>
+        <span aria-hidden className="text-muted-foreground/60">
+          ▾
+        </span>
+      </button>
+      {openKind === kind && dropdown ? dropdown : null}
+    </span>
   );
 
   return (
@@ -283,12 +290,85 @@ export function SessionConfigBar({
           "🖥",
           machineName,
           "守护进程（换机器需开新会话）",
+          <ConfigDropdown
+            testId="config-dd-machine"
+            title="守护进程 · 换机器需开新会话（跨机器二期）"
+          >
+            {machines.length === 0 ? (
+              <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                暂无守护进程
+              </p>
+            ) : (
+              machines.map((m) => {
+                const isCurrent = m.id === currentMachine?.id;
+                const online = m.status === "online";
+                return (
+                  <DisplayItem
+                    key={m.id}
+                    icon={<StatusDot online={online} />}
+                    label={machineLabel(m)}
+                    current={isCurrent}
+                    sub={
+                      isCurrent
+                        ? undefined
+                        : online
+                          ? "跨机器 · 二期"
+                          : "离线"
+                    }
+                  />
+                );
+              })
+            )}
+          </ConfigDropdown>,
         )}
         {ctrlButton(
           "agent",
           engineIcon(effectiveEngine),
           agentName,
           "智能体（换引擎需开新会话）",
+          <ConfigDropdown
+            testId="config-dd-agent"
+            title="智能体 · 换引擎需开新会话（跨机器二期）"
+          >
+            {(currentMachine?.runtimes ?? []).map((r) => {
+              const isCurrent = r.id === runtimeId;
+              return (
+                <DisplayItem
+                  key={r.id}
+                  icon={<span aria-hidden>{engineIcon(r.provider)}</span>}
+                  label={runtimeLabel(r)}
+                  current={isCurrent}
+                  sub={
+                    isCurrent
+                      ? undefined
+                      : r.provider !== effectiveEngine
+                        ? "不同引擎 · 需开新会话"
+                        : "同引擎运行时"
+                  }
+                />
+              );
+            })}
+            {/* 其它机器同引擎智能体（跨机器 → 二期，D-004@v2） */}
+            {machines
+              .filter((m) => m.id !== currentMachine?.id)
+              .flatMap((m) =>
+                (m.runtimes ?? [])
+                  .filter((r) => r.provider === effectiveEngine)
+                  .map((r) => (
+                    <DisplayItem
+                      key={`${m.id}-${r.id}`}
+                      icon={<span aria-hidden>{engineIcon(r.provider)}</span>}
+                      label={runtimeLabel(r)}
+                      sub={`🖥 ${machineLabel(m)} · 跨机器 · 二期`}
+                    />
+                  )),
+              )}
+            {(currentMachine?.runtimes ?? []).length === 0 && (
+              <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                未找到当前智能体所属机器
+              </p>
+            )}
+          </ConfigDropdown>,
         )}
         {ctrlButton(
           "provider",
@@ -297,8 +377,88 @@ export function SessionConfigBar({
           providerLocked
             ? "Codex 引擎暂不支持会话级供应商"
             : "供应商（不选=本机默认配置）",
+          <ConfigDropdown
+            testId="config-dd-provider"
+            title="切换供应商 · 只影响本会话"
+          >
+            <SwitchItem
+              icon="☁"
+              label="不指定（本机默认）"
+              current={llmProviderId == null}
+              onClick={() =>
+                openPending({
+                  field: "llm_provider_id",
+                  value: SWITCH_NO_PROVIDER_VALUE,
+                  label: "不指定（本机默认）",
+                })
+              }
+            />
+            {providers.map((p) => (
+              <SwitchItem
+                key={p.id}
+                icon="☁"
+                label={p.name}
+                sub={p.model ?? undefined}
+                current={p.id === llmProviderId}
+                onClick={() =>
+                  openPending({
+                    field: "llm_provider_id",
+                    value: p.id,
+                    label: p.name,
+                  })
+                }
+              />
+            ))}
+            {providers.length === 0 && (
+              <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                暂无自定义供应商
+              </p>
+            )}
+          </ConfigDropdown>,
         )}
-        {ctrlButton("profile", "📋", profileLabel, "智能体档案")}
+        {ctrlButton(
+          "profile",
+          "📋",
+          profileLabel,
+          "智能体档案",
+          <ConfigDropdown
+            testId="config-dd-profile"
+            title="切换档案 · 只影响本会话"
+          >
+            {/* 会话内不支持取消档案（inject 契约仅非空 id 切换，task-16）：仅当前态展示。 */}
+            <DisplayItem
+              icon={<span aria-hidden>📋</span>}
+              label="不指定"
+              current={agentProfileId == null}
+              sub={agentProfileId == null ? undefined : "暂不支持会话内取消"}
+            />
+            {profiles.map((p) => (
+              <SwitchItem
+                key={p.id}
+                icon="📋"
+                // D-013：不做引擎过滤；Codex 下仅标注人格不注入（原 D-003）。
+                label={
+                  effectiveEngine === "codex"
+                    ? `${p.name}（人格暂不支持）`
+                    : p.name
+                }
+                current={p.id === agentProfileId}
+                onClick={() =>
+                  openPending({
+                    field: "agent_profile_id",
+                    value: p.id,
+                    label: p.name,
+                  })
+                }
+              />
+            ))}
+            {profiles.length === 0 && (
+              <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                暂无可选档案
+              </p>
+            )}
+          </ConfigDropdown>,
+        )}
         <span className="flex-1" />
         {running && (
           <span className="inline-flex items-center gap-1 text-[10.5px] text-warning">
@@ -307,160 +467,6 @@ export function SessionConfigBar({
         )}
       </div>
 
-      {/* ── 上弹下拉浮层（原型 .dd：bottom-full + shadow） ── */}
-      {openKind === "machine" && (
-        <ConfigDropdown
-          testId="config-dd-machine"
-          title="守护进程 · 换机器需开新会话（跨机器二期）"
-        >
-          {machines.length === 0 ? (
-            <p className="px-2 py-1.5 text-xs text-muted-foreground">
-              暂无守护进程
-            </p>
-          ) : (
-            machines.map((m) => {
-              const isCurrent = m.id === currentMachine?.id;
-              const online = m.status === "online";
-              return (
-                <DisplayItem
-                  key={m.id}
-                  icon={<StatusDot online={online} />}
-                  label={machineLabel(m)}
-                  current={isCurrent}
-                  sub={
-                    isCurrent
-                      ? undefined
-                      : online
-                        ? "跨机器 · 二期"
-                        : "离线"
-                  }
-                />
-              );
-            })
-          )}
-        </ConfigDropdown>
-      )}
-
-      {openKind === "agent" && (
-        <ConfigDropdown
-          testId="config-dd-agent"
-          title="智能体 · 换引擎需开新会话（跨机器二期）"
-        >
-          {(currentMachine?.runtimes ?? []).map((r) => {
-            const isCurrent = r.id === runtimeId;
-            return (
-              <DisplayItem
-                key={r.id}
-                icon={<span aria-hidden>{engineIcon(r.provider)}</span>}
-                label={runtimeLabel(r)}
-                current={isCurrent}
-                sub={
-                  isCurrent
-                    ? undefined
-                    : r.provider !== effectiveEngine
-                      ? "不同引擎 · 需开新会话"
-                      : "同引擎运行时"
-                }
-              />
-            );
-          })}
-          {/* 其它机器同引擎智能体（跨机器 → 二期，D-004@v2） */}
-          {machines
-            .filter((m) => m.id !== currentMachine?.id)
-            .flatMap((m) =>
-              (m.runtimes ?? [])
-                .filter((r) => r.provider === effectiveEngine)
-                .map((r) => (
-                  <DisplayItem
-                    key={`${m.id}-${r.id}`}
-                    icon={<span aria-hidden>{engineIcon(r.provider)}</span>}
-                    label={runtimeLabel(r)}
-                    sub={`🖥 ${machineLabel(m)} · 跨机器 · 二期`}
-                  />
-                )),
-            )}
-          {(currentMachine?.runtimes ?? []).length === 0 && (
-            <p className="px-2 py-1.5 text-xs text-muted-foreground">
-              未找到当前智能体所属机器
-            </p>
-          )}
-        </ConfigDropdown>
-      )}
-
-      {openKind === "provider" && (
-        <ConfigDropdown
-          testId="config-dd-provider"
-          title="切换供应商 · 只影响本会话"
-        >
-          <SwitchItem
-            icon="☁"
-            label="不指定（本机默认）"
-            current={llmProviderId == null}
-            onClick={() =>
-              openPending({
-                field: "llm_provider_id",
-                value: SWITCH_NO_PROVIDER_VALUE,
-                label: "不指定（本机默认）",
-              })
-            }
-          />
-          {providers.map((p) => (
-            <SwitchItem
-              key={p.id}
-              icon="☁"
-              label={p.name}
-              sub={p.model ?? undefined}
-              current={p.id === llmProviderId}
-              onClick={() =>
-                openPending({ field: "llm_provider_id", value: p.id, label: p.name })
-              }
-            />
-          ))}
-          {providers.length === 0 && (
-            <p className="px-2 py-1.5 text-xs text-muted-foreground">
-              暂无自定义供应商
-            </p>
-          )}
-        </ConfigDropdown>
-      )}
-
-      {openKind === "profile" && (
-        <ConfigDropdown
-          testId="config-dd-profile"
-          title="切换档案 · 只影响本会话"
-        >
-          {/* 会话内不支持取消档案（inject 契约仅非空 id 切换，task-16）：仅当前态展示。 */}
-          <DisplayItem
-            icon={<span aria-hidden>📋</span>}
-            label="不指定"
-            current={agentProfileId == null}
-            sub={agentProfileId == null ? undefined : "暂不支持会话内取消"}
-          />
-          {profiles.map((p) => (
-            <SwitchItem
-              key={p.id}
-              icon="📋"
-              // D-013：不做引擎过滤；Codex 下仅标注人格不注入（原 D-003）。
-              label={
-                effectiveEngine === "codex" ? `${p.name}（人格暂不支持）` : p.name
-              }
-              current={p.id === agentProfileId}
-              onClick={() =>
-                openPending({
-                  field: "agent_profile_id",
-                  value: p.id,
-                  label: p.name,
-                })
-              }
-            />
-          ))}
-          {profiles.length === 0 && (
-            <p className="px-2 py-1.5 text-xs text-muted-foreground">
-              暂无可选档案
-            </p>
-          )}
-        </ConfigDropdown>
-      )}
 
       {/* ── 切换确认行（切换轮提示消息，injectSession 的 prompt 载体） ── */}
       {pending && (

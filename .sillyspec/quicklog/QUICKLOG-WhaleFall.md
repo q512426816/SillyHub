@@ -380,3 +380,12 @@
 根因：new-session-form.tsx 的 runtimeLabel 优先级为 display_alias→name→provider，而 runtime.name 默认值就是机器主机名，无别名时主机名被当成智能体标签。
 方案：runtimeLabel 改为引擎名优先——复用 lib/daemon.ts 既有 PROVIDER_META（claude→Claude Code/codex→Codex/cursor→Cursor 等 12 引擎），弃用 name；用户自定义别名时显示「别名 · 引擎名」保留个性化。测试 mock 改 importOriginal 保留真常量只 mock createSession；新增回归用例（name=主机名→纯引擎名；别名→别名·引擎名；智能体区不含主机名）。
 结果：组件测试 13/13 通过（新增 1 条回归）；前端全量 151 文件/1509 用例全绿；eslint 0 告警。前端已待部署（见后续 commit+rebuild）。
+
+## ql-20260815-010-37a7 | 2026-08-15 20:25:43 | /sessions 实测三个问题——①whoLine 第二轮起显示「未指定/本机默认」（首轮正常）
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/daemon/session/service.py, backend/app/modules/daemon/tests/test_session_switch_config.py, frontend/src/app/(dashboard)/sessions/page.tsx, frontend/src/components/sessions/session-config-bar.tsx
+需求：/sessions 实测三个问题——①whoLine 第二轮起显示「未指定/本机默认」（首轮正常）；②配置条四个下拉点击后浮层都渲染在最左侧；③「未命名会话」后加会话 id 供复制。
+根因：①_inject_into_session 仅切换分支给 AgentRun 落 agent_profile_id/snapshot/llm_provider_id，普通 inject 轮全 NULL，前端 whoLine 读 run 快照如实显示未指定（违反 D-008 每轮快照）；②ConfigDropdown absolute left-0 锚定到整条 barRef（relative）而非各控件；③标题区无 id 展示。
+方案：①effective 档案/供应商解析移出 config_switch 条件（未切维度也按会话当前 id 取行），run 三字段盖章改无条件（切换轮=新值/普通轮=会话当前值/无配置=NULL）；②ctrlButton 改 span.relative.inline-flex 包装 + 四个 ConfigDropdown 内嵌为第 5 参数，锚到各控件；③标题旁 #id[:8] 按钮，clipboard.writeText 复制完整 id，✓ 已复制 2s 反馈。
+结果：后端 daemon 全量 798 passed（零回归用例按新语义更新：普通轮 run 断言携带会话当前配置）；前端全量 153 文件/1551 全绿（config-bar 17+page 8 含既有断言不破坏）；tsc 0 错、eslint 0 error、ruff 全过。待部署（commit+push+rebuild backend/frontend）。

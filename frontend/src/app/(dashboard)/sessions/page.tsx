@@ -200,6 +200,13 @@ function SessionPanel({
   const [viewMode, setViewMode] = useState<"conversation" | "all">("conversation");
   const [input, setInput] = useState("");
   const [reopening, setReopening] = useState(false);
+  // ql-20260815-010：会话 id 短码点击复制反馈（✓ 显示 2s 后还原）。
+  const [idCopied, setIdCopied] = useState(false);
+  useEffect(() => {
+    if (!idCopied) return;
+    const t = setTimeout(() => setIdCopied(false), 2000);
+    return () => clearTimeout(t);
+  }, [idCopied]);
 
   const streamRef = useRef<SessionStreamConnection | null>(null);
   // partial 段起点（reply→outputStart / thinking→itemIndex），override 撤回用。
@@ -742,12 +749,27 @@ function SessionPanel({
       className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card"
       aria-label="会话面板"
     >
-      {/* 面板头：标题 + 状态 + 视图切换 + 打断/结束（原型 .panel-head） */}
+      {/* 面板头：标题 + 会话 id 短码（点击复制，ql-20260815-010）+ 状态 + 视图切换 + 打断/结束 */}
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate text-sm font-semibold text-foreground">
             {title}
           </span>
+          {/* 会话 id 短码：点击复制完整 id（排障/引用入口）。 */}
+          <button
+            type="button"
+            aria-label="复制会话 ID"
+            title={`点击复制会话 ID：${session.id}`}
+            onClick={() => {
+              void navigator.clipboard
+                ?.writeText(session.id)
+                .then(() => setIdCopied(true))
+                .catch(() => setIdCopied(false));
+            }}
+            className="shrink-0 cursor-pointer rounded px-1 py-0.5 font-mono text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            {idCopied ? "✓ 已复制" : `#${session.id.slice(0, 8)}`}
+          </button>
           <Badge status={statusBadge.status} text={statusBadge.text} />
           {machineName && (
             <span className="hidden shrink-0 text-[11px] text-muted-foreground sm:inline">

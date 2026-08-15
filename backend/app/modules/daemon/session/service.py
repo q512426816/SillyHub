@@ -1214,24 +1214,21 @@ class SessionService:
 
             config_switch = profile_changed or provider_changed
 
-            # 切换分支：解析切换后生效（effective）档案/供应商行，用于新 run 的
-            # 轮次快照（D-008）与会话 config_snapshot 刷新。未切换维度沿用当前值
-            # 直接按 id 取行（create 时已过可见性/归属校验，不重查）。
+            # 解析本轮生效（effective）档案/供应商行：切换轮用新值、未切维度与
+            # 普通轮（不切换）沿用会话当前值——D-008 每轮 run 都要带配置快照
+            # （ql-20260815-010 修正：此前仅切换分支落快照，普通轮 run 的
+            # agent_profile_id/llm_provider_id 为 NULL → 前端 whoLine 误显
+            # 「未指定/本机默认」）。按 id 取行（create 时已过校验，不重查）。
             effective_profile = switch_profile
             effective_provider = provider_row
-            if config_switch:
-                if not profile_changed and session.agent_profile_id is not None:
-                    from app.modules.agent.profile.model import AgentProfile as _AgentProfile
+            if not profile_changed and session.agent_profile_id is not None:
+                from app.modules.agent.profile.model import AgentProfile as _AgentProfile
 
-                    effective_profile = await self._session.get(
-                        _AgentProfile, session.agent_profile_id
-                    )
-                if not provider_changed and session.llm_provider_id is not None:
-                    from app.modules.llm_provider.model import LlmProvider
+                effective_profile = await self._session.get(_AgentProfile, session.agent_profile_id)
+            if not provider_changed and session.llm_provider_id is not None:
+                from app.modules.llm_provider.model import LlmProvider
 
-                    effective_provider = await self._session.get(
-                        LlmProvider, session.llm_provider_id
-                    )
+                effective_provider = await self._session.get(LlmProvider, session.llm_provider_id)
 
             config = dict(session.config or {})
             run = AgentRun(
@@ -1243,20 +1240,17 @@ class SessionService:
                 spec_strategy="interactive",
                 agent_session_id=session.id,
             )
-            if config_switch:
-                # task-05 / D-008：切换轮新 run 带完整轮次配置快照（新档案快照 +
-                # 新供应商 id；未切换维度沿用会话当前值）。
-                from app.modules.agent.service import _build_agent_profile_snapshot
+            # task-05 / D-008（ql-20260815-010 修正为每轮落快照）：新 run 带本轮
+            # 生效配置——切换轮=新值；普通轮=会话当前值（沿用），无配置=NULL 如实。
+            from app.modules.agent.service import _build_agent_profile_snapshot
 
-                run.agent_profile_id = (
-                    effective_profile.id if effective_profile is not None else None
-                )
-                run.agent_profile_snapshot = (
-                    _build_agent_profile_snapshot(effective_profile)
-                    if effective_profile is not None
-                    else None
-                )
-                run.llm_provider_id = new_llm_provider_id
+            run.agent_profile_id = effective_profile.id if effective_profile is not None else None
+            run.agent_profile_snapshot = (
+                _build_agent_profile_snapshot(effective_profile)
+                if effective_profile is not None
+                else None
+            )
+            run.llm_provider_id = new_llm_provider_id if config_switch else session.llm_provider_id
             self._session.add(run)
 
             session.turn_count = (session.turn_count or 0) + 1
