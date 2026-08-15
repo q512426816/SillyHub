@@ -118,6 +118,82 @@ class TestListSessionRuns:
         assert completed_item["error_detail"] is None
 
     @pytest.mark.asyncio
+    async def test_returns_config_snapshot_and_usage_fields(
+        self, client, auth_headers, db_session
+    ) -> None:
+        """gap-fix（FR-07 whoLine / FR-08 历史 usage）：run 项透传轮次配置快照
+        （agent_profile_snapshot / llm_provider_id）与 usage（input/output_tokens），
+        均 nullable——未配置 / 老 run 行为 null（前端如实显示不编造）。"""
+        from app.core.crypto import get_cipher
+        from app.modules.llm_provider.model import LlmProvider
+
+        admin = await _admin_id(db_session)
+        sid = uuid.uuid4()
+        db_session.add(AgentSession(id=sid, user_id=admin, provider="claude", status="active"))
+        cipher = get_cipher()
+        ct, key_id = cipher.encrypt("sk-test-key")
+        provider = LlmProvider(
+            id=uuid.uuid4(),
+            user_id=admin,
+            name="GLM",
+            agent_kind="claude",
+            encrypted_api_key=ct,
+            key_id=key_id,
+            model="glm-4.7",
+            is_default=False,
+            api_format="anthropic",
+        )
+        snapshot = {
+            "id": str(uuid.uuid4()),
+            "name": "知识经理",
+            "provider": "claude",
+            "model": None,
+            "system_prompt": "你是知识经理。",
+            "mcp_refs": [],
+            "skill_refs": [],
+            "allowed_roots_overlay": None,
+            "version": 1,
+        }
+        configured = AgentRun(
+            id=uuid.uuid4(),
+            agent_type="claude_code",
+            status="completed",
+            agent_session_id=sid,
+            started_at=datetime.now(UTC),
+            agent_profile_snapshot=snapshot,
+            llm_provider_id=provider.id,
+            input_tokens=1234,
+            output_tokens=567,
+        )
+        plain = AgentRun(
+            id=uuid.uuid4(),
+            agent_type="claude_code",
+            status="completed",
+            agent_session_id=sid,
+            started_at=datetime.now(UTC),
+        )
+        db_session.add_all([provider, configured, plain])
+        await db_session.commit()
+
+        resp = await client.get(f"/api/daemon/sessions/{sid}/runs", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        items = {it["id"]: it for it in resp.json()}
+        assert len(items) == 2
+
+        # 配置轮：快照 + 供应商 id + usage 完整透传
+        cfg = items[str(configured.id)]
+        assert cfg["agent_profile_snapshot"] == snapshot
+        assert cfg["llm_provider_id"] == str(provider.id)
+        assert cfg["input_tokens"] == 1234
+        assert cfg["output_tokens"] == 567
+        # 未配置轮（老 run 行）：新字段全 null
+        plain_item = items[str(plain.id)]
+        assert plain_item["agent_profile_snapshot"] is None
+        assert plain_item["llm_provider_id"] is None
+        assert plain_item["input_tokens"] is None
+        assert plain_item["output_tokens"] is None
+
+    @pytest.mark.asyncio
     async def test_empty_session_returns_empty_list(self, client, auth_headers, db_session) -> None:
         """有 session 但无 run → 200 空列表（不报错）。"""
         admin = await _admin_id(db_session)

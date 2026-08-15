@@ -84,6 +84,8 @@ from app.modules.daemon.schema import (
     OwnerRead,
     RuntimeUsageListResponse,
     RuntimeUsageWindow,
+    SessionCreateRequest,
+    SessionInjectRequest,
     SessionReopenResponse,
 )
 from app.modules.daemon.service import (
@@ -1548,8 +1550,10 @@ async def list_roots(
 
 
 # ── Interactive session endpoints (task-05, FR-01/02/04/05) ─────────────────
-# DTOs live inline (per task-05 allowed_paths: schema.py is the batch DTO home
-# and must not be modified). router only does DTO mapping; all business logic
+# DTOs live inline where module-local; the shared/batch DTO home is schema.py.
+# 2026-08-14-sessions-portal task-02：SessionCreateRequest/SessionInjectRequest
+# 已迁 schema.py 具名模型（openapi 产出具名 schema 供前端生成类型）；此处仅剩
+# 响应与窄用途请求 DTO。router only does DTO mapping; all business logic
 # + SQL lives in DaemonService.*_session.
 
 # Interactive session callers need task:run_agent (same gate as quick-chat /
@@ -1581,26 +1585,12 @@ def get_permission_service(
 PermissionServiceDep = Annotated[DaemonPermissionService, Depends(get_permission_service)]
 
 
-class SessionCreateRequest(BaseModel):
-    provider: Literal["claude", "codex"]
-    prompt: str = Field(min_length=1, max_length=8000)
-    model: str | None = Field(default=None, max_length=128)
-    manual_approval: bool = False
-    ask_user_only: bool = False
-    change_id: uuid.UUID | None = None
-    workspace_id: uuid.UUID | None = None
-
-
 class SessionCreateResponse(BaseModel):
     session_id: uuid.UUID
     run_id: uuid.UUID
     lease_id: uuid.UUID
     status: str
     stream_url: str
-
-
-class SessionInjectRequest(BaseModel):
-    prompt: str = Field(min_length=1, max_length=8000)
 
 
 class SessionInjectResponse(BaseModel):
@@ -1635,6 +1625,14 @@ class SessionRunRead(BaseModel):
     为 None），供前端拉历史与当前 run 错误。``error_code``（调度层 / 系统错误）
     与 ``error_detail`` 正交共存（D-009），前端可分别用作系统错误兜底与模型错误
     渲染。DTO 内联在此避免触碰 schema.py（非本任务 allowed_path）。
+
+    gap-fix（FR-07 whoLine / FR-08 历史 usage）：追加轮次配置快照与 usage 三组
+    字段，均直映 AgentRun 既有列（查询本就 select 整实体，零查询改动）——
+      - ``agent_profile_snapshot`` / ``llm_provider_id``：D-008@v1 轮次快照，供前端
+        渲染每轮 whoLine（历史不跟随会话当前配置）；
+      - ``input_tokens`` / ``output_tokens``：daemon 关单经 close_interactive_run
+        写入（gap-3 result 透传），供前端历史回看累计 ctx usage（R-06）。
+    全部 nullable——老 run 行 / 未配置轮为 None，前端如实显示未指定/不累计。
     """
 
     id: uuid.UUID
@@ -1644,6 +1642,11 @@ class SessionRunRead(BaseModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     exit_code: int | None = None
+    # ── gap-fix：轮次配置快照（FR-07 / D-008@v1）+ usage（FR-08 / R-06）────
+    agent_profile_snapshot: dict | None = None
+    llm_provider_id: uuid.UUID | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
     model_config = {"from_attributes": True}
 
 
@@ -1745,6 +1748,9 @@ async def list_dialog_history(
 # AgentRunLogEntry DTO from agent.schema (no field-drift copy).
 
 _SessionStatusQuery = Literal["pending", "active", "reconnecting", "ended", "failed"]
+# task-06 / FR-02：引擎胶囊 tab 过滤（与 create 的 InteractiveProviderLiteral 同域，
+# Literal 校验 → 未知值 422，与 status 处理一致）。
+_SessionProviderQuery = Literal["claude", "codex"]
 
 
 @router.get(
@@ -1757,8 +1763,19 @@ async def list_sessions(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     status: _SessionStatusQuery | None = Query(default=None),
+    runtime_id: uuid.UUID | None = Query(default=None),
+    machine_id: uuid.UUID | None = Query(default=None),
+    provider: _SessionProviderQuery | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=100),
 ) -> AgentSessionListResponse:
-    """List the current user's AgentSessions (owner-scoped, stable paging)."""
+    """List the current user's AgentSessions (owner-scoped, stable paging).
+
+    task-06 / FR-02 / D-003@v1：可选过滤参数 runtime_id / machine_id（经
+    daemon_runtimes 关联）/ provider / q（标题模糊，实现为 user_input 内容
+    ilike，见 service 层 docstring）；全部可选，不传时查询与现状一致（零回归）。
+    过滤在 SQL 层完成，total 为过滤后总数（R-04 真分页），分页 limit/offset
+    作用于过滤结果。machine_id 不匹配 runtime 缺失的旧会话（无 runtime 即无机器）。
+    """
     from app.modules.agent.model import AgentRun, AgentRunLog
 
     svc = DaemonService(session)
@@ -1767,6 +1784,10 @@ async def list_sessions(
         limit=limit,
         offset=offset,
         status_filter=status,
+        runtime_id=runtime_id,
+        machine_id=machine_id,
+        provider=provider,
+        q=q,
     )
     reads = [AgentSessionRead.model_validate(item) for item in items]
     # task-13 / FR-04 / design §5 Phase4：批量查 lease.terminating_at 注入到每个 read。
@@ -1886,11 +1907,16 @@ async def create_session(
 ) -> SessionCreateResponse:
     """Create a new interactive session and dispatch its first turn (FR-01)."""
     svc = DaemonService(session)
+    # 2026-08-14-sessions-portal task-02：DTO 具名化迁 schema.py。runtime_id/
+    # agent_profile_id/llm_provider_id 仅透传 service（解析归 task-03）；model
+    # 字段已随 design §5 移除（由档案/默认派生）。
     result = await svc.create_session(
         user.id,
         provider=data.provider,
         prompt=data.prompt,
-        model=data.model,
+        runtime_id=data.runtime_id,
+        agent_profile_id=data.agent_profile_id,
+        llm_provider_id=data.llm_provider_id,
         manual_approval=data.manual_approval,
         ask_user_only=data.ask_user_only,
         change_id=data.change_id,
@@ -1919,7 +1945,15 @@ async def inject_session(
 ) -> SessionInjectResponse:
     """Append a new turn run to an active interactive session (FR-02)."""
     svc = DaemonService(session)
-    result = await svc.inject_session(session_id, user.id, prompt=data.prompt)
+    # 2026-08-14-sessions-portal task-02：agent_profile_id/llm_provider_id 仅透传
+    # （切档案/切供应商校验与 SESSION_SWITCH_CONFIG 归 task-05）。
+    result = await svc.inject_session(
+        session_id,
+        user.id,
+        prompt=data.prompt,
+        agent_profile_id=data.agent_profile_id,
+        llm_provider_id=data.llm_provider_id,
+    )
     return SessionInjectResponse(
         session_id=result.agent_session.id,
         run_id=result.agent_run.id,

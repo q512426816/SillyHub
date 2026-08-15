@@ -348,6 +348,48 @@ export function detectUsageProvider(
   return null;
 }
 
+// ── quota 查询（2026-08-14-sessions-portal task-15 / FR-08 / D-009@v1）─────
+
+/**
+ * 单个额度窗口（对齐后端 `LlmProviderQuotaWindow`，schema.py:177）。
+ * - label：窗口名（沿用智谱 tier plan_name，如「Max·5小时窗」）；
+ * - left：剩余百分比（0-100，口径同 UsageData.remaining）；
+ * - reset：重置时间 ISO8601（上游缺失则 null）。
+ */
+export interface LlmProviderQuotaWindow {
+  label: string | null;
+  left: number | null;
+  reset: string | null;
+}
+
+/** quota 非 null 载荷（design §7.1）：`{model, windows[]}`。 */
+export interface LlmProviderQuotaData {
+  model: string | null;
+  windows: LlmProviderQuotaWindow[];
+}
+
+/**
+ * `GET /api/llm-providers/{id}/quota` 响应（task-07 provides 契约）。
+ * 一期仅 GLM 返回窗口数据；非 GLM / 上游失败 / 无数据一律 `quota=null`
+ * （HTTP 200 绝不 5xx，弱依赖 R-05），前端 null 不显示胶囊。
+ */
+export interface LlmProviderQuotaResponse {
+  quota: LlmProviderQuotaData | null;
+}
+
+/**
+ * 查供应商额度（`GET /api/llm-providers/{id}/quota`，task-07 端点）。
+ * 弱依赖：后端任何降级场景都回 200 + quota=null；本函数抛错仅可能来自
+ * 网络/鉴权层，调用方（QuotaPill）catch 后静默不渲染胶囊（R-05）。
+ */
+export async function getProviderQuota(
+  providerId: string,
+): Promise<LlmProviderQuotaResponse> {
+  return apiFetch<LlmProviderQuotaResponse>(
+    `/api/llm-providers/${encodeURIComponent(providerId)}/quota`,
+  );
+}
+
 // ── 表单值 → 请求 body 映射（单一真实源，表单 + 单测共用）──────────────────
 
 /** 去前后空白；空串 → undefined。 */

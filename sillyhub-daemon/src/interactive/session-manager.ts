@@ -58,6 +58,7 @@ import type {
   PersistedSessionRecord,
   SessionManagerDeps,
   SessionState,
+  SessionSwitchConfigPayload,
 } from './types.js';
 import {
   SessionAlreadyExistsError,
@@ -937,6 +938,12 @@ export class SessionManager {
       ...(input.skillRefs !== undefined ? { skillRefs: input.skillRefs } : {}),
       ...(input.effectiveAllowedRoots !== undefined
         ? { effectiveAllowedRoots: input.effectiveAllowedRoots }
+        : {}),
+      // task-08（sessions-portal）：systemPrompt 写 state（task-05 只透传 driverOpts，
+      // state 缺字段致 snapshotPersistable 无法落盘——create 起的档案配置重启会丢，
+      // 本任务闭合 config 快照持久化链路）。
+      ...(input.systemPrompt !== undefined
+        ? { systemPrompt: input.systemPrompt }
         : {}),
     };
     this._store.set(input.sessionId, state);
@@ -2365,6 +2372,16 @@ export class SessionManager {
       if (state.effectiveAllowedRoots !== undefined) {
         rec.effectiveAllowedRoots = state.effectiveAllowedRoots;
       }
+      // task-08（2026-08-14-sessions-portal / design §5 Wave2）：会话级配置快照落盘，
+      // daemon 重启 resume 不丢配置。systemPrompt 补齐 task-05 预留的 record 字段
+      // （restoreAndReconnect 早已读 record.systemPrompt，此处补写闭合链路）；
+      // providerConfig 非 null 才写（null=本机默认=缺省语义等价，design §9 容错）。
+      if (state.systemPrompt !== undefined) {
+        rec.systemPrompt = state.systemPrompt;
+      }
+      if (state.providerConfig != null) {
+        rec.providerConfig = state.providerConfig;
+      }
       out.push(rec);
     }
     return out;
@@ -2447,6 +2464,12 @@ export class SessionManager {
         : {}),
       // task-05：恢复 profile.system_prompt（resume 时重新注入 systemPrompt preset+append）。
       ...(record.systemPrompt !== undefined ? { systemPrompt: record.systemPrompt } : {}),
+      // task-08（2026-08-14-sessions-portal）：恢复会话级供应商配置（design §5 Wave2
+      // 重启不丢配置）。旧 sessions.json 无此字段 → 缺省容错（undefined，恢复走本机
+      // 凭证链，design §9 零回归）。
+      ...(record.providerConfig !== undefined
+        ? { providerConfig: record.providerConfig }
+        : {}),
     };
     this._store.set(state.sessionId, state);
 
@@ -2474,15 +2497,17 @@ export class SessionManager {
       // process.env（无 CLAUDE_CONFIG_DIR）→ claude 用默认 ~/.claude → 找不到 daemon
       // claude-config/projects/<cwd>/<sid>.jsonl → resume 失败 → claude 非 0 退出
       // → driver onError → SessionManager.fail → backend end_session（总设 ended）。
-      // 恢复路径无 provider_config（敏感不落盘），buildSpawnEnv 第 0 层自然跳过；
-      // 显式设 CLAUDE_CONFIG_DIR 保证 jsonl 一致，凭证靠 process.env（与 create 同源）
-      // + credentials.json（层 2，若有）。与 reloadWithProvider:2627-2636 同款构造。
+      // 恢复路径 provider_config：task-08（sessions-portal）起 sessions.json 落盘会话级
+      // 供应商配置快照——重启 resume 不丢配置（design §5 Wave2）。旧 sessions.json 无
+      // 该字段（undefined）→ 第 0 层自然跳过（本机凭证链，零回归）；显式设
+      // CLAUDE_CONFIG_DIR 保证 jsonl 一致，凭证靠 process.env（与 create 同源）
+      // + credentials.json（层 2，若有）。与 _reloadSession 同款构造。
       const restoreCredential: SpawnCredentialManager = this._credentialManager ?? {
         get: () => undefined,
         buildEnv: () => ({}),
       };
       const restoreEnv = buildSpawnEnv(
-        { provider_config: undefined },
+        { provider_config: state.providerConfig ?? undefined },
         { credential: restoreCredential },
       );
       restoreEnv.CLAUDE_CONFIG_DIR = CLAUDE_CONFIG_DIR;
@@ -2643,18 +2668,191 @@ export class SessionManager {
     if (!state) {
       throw new SessionNotFoundError(sessionId);
     }
-    // task-08：仅 claude provider 支持 reload（codex 后续独立，本期不实现）。
+    // task-08：仅 claude provider 支持（既有契约零语义漂移，回归测试锁死）。
+    // codex 的配置切换走 reloadWithConfig（内核支持 codex，只切配置不注人格）。
     // 不抛 UnsupportedProviderError（那是 driver 注册缺失语义）；用普通 Error 上报。
     if (state.provider !== 'claude') {
       throw new Error(
         `reloadWithProvider: provider ${state.provider} not yet supported (session ${sessionId})`,
       );
     }
+    // 共享 reload 内核：行为与重构前内联实现逐字节等价（provider_config null/非 null
+    // env 构造、agentSessionId 守卫、resetForResubscribe、close 后置、失败回滚）。
+    await this._reloadSession(sessionId, { providerConfig });
+  }
 
-    // 进入时快照旧 query/env 供失败回滚（R-01）。query 是引用，旧对象本身会被 close，
-    // 但保留引用让 catch 区分「reload 失败 → 用旧引用占位，不 nil」。
-    const oldQuery = state.query;
+  // ── task-08（2026-08-14-sessions-portal / FR-05 / D-012@v1）：会话级配置热切换 ──
+
+  /**
+   * task-08（design §7.3 / FR-05 / D-012@v1）：标记待处理的会话级配置切换。
+   *
+   * backend inject_session（带新配置 + prompt）→ WS SESSION_SWITCH_CONFIG
+   * （daemon.ts 路由归 task-09）→ 本方法：
+   *   - session 空闲（status=active 且无 currentRunId）→ 立即 fire-and-forget
+   *     ``reloadWithConfig``，不写 pendingConfigSwitch 标记（无需等 turn 边界）。
+   *   - session 生成中（status=running，turn in-flight）/ reconnecting 等 → 仅覆盖写
+   *     ``state.pendingConfigSwitch``，严格不中断当前 turn；turn 收尾（``_onResult``）
+   *     检测到标记后清标记并触发 reload（等 turn 边界语义，对齐 markPendingSwitch）。
+   *
+   * 幂等：WS 重放同一/不同切换均覆盖写，不累积。同步返回（void）：reload 走
+   * fire-and-forget，不阻塞 WS 分发路径（task-09 daemon.ts 同款消费姿势）。
+   *
+   * @throws {SessionNotFoundError} session 不存在
+   */
+  markPendingConfigSwitch(
+    sessionId: string,
+    payload: SessionSwitchConfigPayload,
+  ): void {
+    const state = this._store.get(sessionId);
+    if (!state) {
+      throw new SessionNotFoundError(sessionId);
+    }
+    // 空闲：无在跑 turn → 立即 reload + 喂切换轮 prompt，不写标记。
+    if (state.status === 'active' && !state.currentRunId) {
+      void this.reloadWithConfig(sessionId, payload).catch(() => {
+        // reload 失败保留旧 query 不破坏会话（R-01）；吞错防 unhandled rejection。
+      });
+      return;
+    }
+    // 生成中 / reconnecting：仅覆盖写标记，不中断当前 turn。覆盖写幂等（WS 重放安全）。
+    state.pendingConfigSwitch = { payload };
+  }
+
+  /**
+   * task-08（design §7.3 / FR-05 / D-012@v1）：会话内配置热切换——关旧 query →
+   * 按 payload 重建 driverOpts（新 systemPrompt / providerConfig）→ ``driver.start
+   * ({resume})`` 从 jsonl 重载历史 → 喂入切换轮 prompt。
+   *
+   * payload 语义（design §7.2）：
+   *   - ``profile`` 非 null → 切档案：state.systemPrompt/mcpRefs/skillRefs 更新为
+   *     payload 值（systemPrompt 仅 claude 注入 preset+append；codex 只切配置不注
+   *     人格，原 D-003 / NG-02）；null → 不切档案（保留现值）。
+   *   - ``providerConfig`` 非 null → 切供应商；null → 不切（保持 state.providerConfig
+   *     现值；与 reloadWithProvider(null)=「停止回退本机」语义不同）。
+   *   - ``claimToken`` 非空 → 刷新 state.claimToken（切换轮新 token）。
+   *   - ``prompt`` 非空 → reload 成功后 push 进 inputQueue + currentRunId=runId +
+   *     status=running（对齐 inject 语义，onTurnMessage/onTurnResult 据此路由）。
+   *
+   * 失败不破坏会话（R-01）：内核回滚旧 query/env/config，session 维持原状（constraints：
+   * 切换不改会话状态机——成功路径 status 由「喂 prompt」推进到 running，属正常 turn）。
+   *
+   * @throws {SessionNotFoundError} session 不存在
+   * @throws {SessionNotActiveError} session 已 ended/failed（终态不可切）
+   * @throws {Error} agentSessionId 缺失 / spawn 失败（回滚保留旧 query 后重新抛）
+   */
+  async reloadWithConfig(
+    sessionId: string,
+    payload: SessionSwitchConfigPayload,
+  ): Promise<void> {
+    const state = this._store.get(sessionId);
+    if (!state) {
+      throw new SessionNotFoundError(sessionId);
+    }
+    if (state.status === 'ended' || state.status === 'failed') {
+      throw new SessionNotActiveError(sessionId, state.status);
+    }
+    // 切换轮 claim_token 刷新（对齐 refreshClaimToken 语义；空串不覆盖）。
+    if (payload.claimToken) {
+      state.claimToken = payload.claimToken;
+    }
+    // 计算生效配置（null = 不切 → 保持现状；profile.systemPrompt 缺省 = 切到无人格
+    // → 传 null 哨兵让内核显式清空，与 undefined=不参与区分）。
+    const nextSystemPrompt =
+      payload.profile !== null && payload.profile !== undefined
+        ? (payload.profile.systemPrompt ?? null)
+        : (state.systemPrompt ?? null);
+    const nextProviderConfig =
+      payload.providerConfig ?? state.providerConfig ?? null;
+
+    await this._reloadSession(sessionId, {
+      systemPrompt: nextSystemPrompt,
+      providerConfig: nextProviderConfig,
+    });
+
+    // reload 成功：同步 profile 承载字段（mcpRefs/skillRefs 透传；systemPrompt 已由
+    // 内核写入 state）。profile=null 不动（保留现值）。
+    if (payload.profile) {
+      state.mcpRefs = payload.profile.mcpRefs;
+      state.skillRefs = payload.profile.skillRefs;
+    }
+
+    // 喂入切换轮 prompt（内核已 resetForResubscribe + 新 query 订阅同一 inputQueue）。
+    if (payload.prompt) {
+      state.inputQueue.push({ type: 'user', text: payload.prompt });
+      state.currentRunId = payload.runId;
+      state.status = 'running';
+    }
+    state.lastActiveAt = Date.now();
+    this._scheduleFlush();
+  }
+
+  /**
+   * task-08（design §5 Wave2 / Grill C-07）：共享 reload 内核——受控重启 driver
+   * 子进程并 resume 对话历史。``reloadWithProvider``（供应商热切换）与
+   * ``reloadWithConfig``（会话级配置热切换）复用，保留三次实战修复语义：
+   * CLAUDE_CONFIG_DIR 隔离（ql-20260807-002）/ close 后置（ql-20260806-002）/
+   * resetForResubscribe（ql-20260807-001 orphan consume 守卫配套）。
+   *
+   * 步骤（沿用原 reloadWithProvider 内联实现，零语义漂移）：
+   *   ① 快照旧句柄/env/config 供失败回滚（R-01）。claude 句柄=state.query；
+   *      codex=state.driverHandle（reloadWithConfig 的 Codex 路径：只切 providerConfig，
+   *      不注人格——systemPrompt 仅 claude 消费，原 D-003 / NG-02）。
+   *   ② ``buildSpawnEnv`` 构造新 env：provider_config 非 null → 第 0 层 injector 产
+   *      ANTHROPIC_* env + 隔离 CLAUDE_CONFIG_DIR；null → 第 0 层跳过（本机凭证）。
+   *      无论 null 与否强制 ``CLAUDE_CONFIG_DIR=daemon 隔离目录``（jsonl 在那，
+   *      ql-20260807-002：停止供应商也保持，防 resume 找不到 jsonl）。
+   *   ③ 校验 ``state.agentSessionId`` 必需（SDK jsonl 恢复 key；缺失=首 turn 未完成
+   *      → 无可恢复 jsonl → 抛错，不启动全新会话替换语义）。
+   *   ④ ``_buildDriverOptions`` 透传 cwd / canUseTool / mcpServers / permissionMode +
+   *      ``resume: state.agentSessionId`` + 新 env；``opts.systemPrompt`` 提供且
+   *      provider=claude 时注入 systemPrompt preset+append（codex 忽略）。
+   *   ⑤ ``state.inputQueue.resetForResubscribe()``（InputQueue 单订阅；不 reset 则新
+   *      query 二次订阅抛 SessionQueueDoubleSubscribeError → session ended）+
+   *      ``await driver.start(state.inputQueue, driverOpts)``。
+   *   ⑥ 替换 state.query（claude）/ state.driverHandle（codex）+ state.env +
+   *      state.providerConfig +（opts.systemPrompt 提供时）state.systemPrompt →
+   *      **close 旧句柄**（必须在替换之后，ql-20260806-002）→ 清 pendingSwitch /
+   *      pendingConfigSwitch（幂等兜底）→ 重启 consume 协程 → 排队 flush。
+   *   ⑦ 失败（spawn 失败 / jsonl 缺失 / cwd 不一致）→ catch 回滚旧句柄/env/config +
+   *      ``console.error`` + 重新抛（调用方 .catch 兜底已吞错）。不破坏会话
+   *      （R-01 降级：不改 status、不从 store 移除）。
+   *
+   * @param sessionId 目标会话
+   * @param opts.providerConfig 新供应商配置。undefined → 沿用 state.providerConfig
+   *        现值（缺省 null）；null → 本机凭证（第 0 层跳过）。
+   * @param opts.systemPrompt 新人格提示词。undefined → 不参与（reloadWithProvider
+   *        既有路径，零语义漂移：不注入、不动 state）；string 且 provider=claude →
+   *        注入 preset+append 并写 state.systemPrompt；null → 显式清空（切到无人格，
+   *        不注入 + state.systemPrompt=undefined）。codex 任何值都不注入不写（原 D-003）。
+   * @throws {SessionNotFoundError} session 不存在
+   * @throws {Error} agentSessionId 缺失 / spawn 失败 / jsonl 缺失 / cwd 不一致
+   */
+  private async _reloadSession(
+    sessionId: string,
+    opts: {
+      systemPrompt?: string | null;
+      providerConfig?: ProviderConfig | null;
+    },
+  ): Promise<void> {
+    const state = this._store.get(sessionId);
+    if (!state) {
+      throw new SessionNotFoundError(sessionId);
+    }
+
+    // 生效 provider_config：undefined=沿用会话当前配置（reloadWithConfig 不切供应商
+    // 路径）；null=本机凭证（buildSpawnEnv 第 0 层跳过）。
+    const providerConfig =
+      opts.providerConfig !== undefined
+        ? opts.providerConfig
+        : (state.providerConfig ?? null);
+
+    // 进入时快照旧句柄/env/config 供失败回滚（R-01）。句柄是引用，旧对象本身会被
+    // close，但保留引用让 catch 区分「reload 失败 → 用旧引用占位，不 nil」。
+    const oldHandle =
+      state.provider === 'claude' ? state.query : state.driverHandle;
     const oldEnv = state.env;
+    const oldProviderConfig = state.providerConfig;
+    const oldSystemPrompt = state.systemPrompt;
 
     try {
       // ── buildSpawnEnv 构造新 env（provider_config null 时第 0 层跳过 → 本机凭证）──
@@ -2683,7 +2881,7 @@ export class SessionManager {
       //（避免 SDK 拿空 resume 启动全新会话替换语义——那是 end + create 流程，不是 reload）。
       if (!state.agentSessionId) {
         throw new Error(
-          `reloadWithProvider: missing agentSessionId (session ${sessionId} 首 turn system/init 未完成,无 jsonl 可 resume)`,
+          `_reloadSession: missing agentSessionId (session ${sessionId} 首 turn system/init 未完成,无 jsonl 可 resume)`,
         );
       }
 
@@ -2691,7 +2889,7 @@ export class SessionManager {
       const driver = state.driver ?? this._drivers.claude;
       if (!driver) {
         throw new Error(
-          `reloadWithProvider: no driver available (session ${sessionId})`,
+          `_reloadSession: no driver available (session ${sessionId})`,
         );
       }
       const exePath =
@@ -2710,7 +2908,6 @@ export class SessionManager {
         ...(state.effectiveAllowedRoots !== undefined
           ? { effectiveAllowedRoots: state.effectiveAllowedRoots }
           : {}),
-        // task-05：持久化 system_prompt，resume 时重新注入（防 daemon 重启后丢失）。
         ...(state.systemPrompt !== undefined ? { systemPrompt: state.systemPrompt } : {}),
       });
       const driverOpts = this._buildDriverOptions(state, {
@@ -2720,14 +2917,18 @@ export class SessionManager {
         effectiveAskUserOnly: state.askUserOnly ?? false,
         resume: state.agentSessionId,
         mcpServers: mainAgentMcp,
+        // task-08：会话级配置切换路径注入新人格（claude preset+append；codex 忽略——
+        // provider!==claude 时不传，Codex 只切配置不注人格，原 D-003 / NG-02）。
+        // undefined（reloadWithProvider 既有路径）→ 不传 → 与重构前行为逐字节一致。
+        ...(state.provider === 'claude' && typeof opts.systemPrompt === 'string'
+          ? { systemPrompt: opts.systemPrompt }
+          : {}),
       });
 
-      // ── ⑤ driver.start(state.inputQueue, driverOpts) → 新 Query ──
-      // SDK spawn 新 claude 子进程并从 ~/.claude/projects/<encoded-cwd>/<sid>.jsonl
+      // ── ⑤ driver.start(state.inputQueue, driverOpts) → 新句柄 ──
+      // SDK spawn 新子进程并从 ~/.claude/projects/<encoded-cwd>/<sid>.jsonl
       // 重载完整对话历史（非内存态；jsonl 由 SDK 自动持久化）。复用 state.inputQueue
       //（reload 不 close 队列；新 query 订阅同一队列吃后续 inject，不丢消息）。
-      // await 阻塞至 SDK 完成首 turn 前的 resume 加载；失败（spawn EINVAL / jsonl
-      // 缺失 / cwd 不一致）→ 抛进 catch。
       // ql-20260807-002：reload 复用 inputQueue，但 InputQueue 单订阅（create 时 SDK 已
       // 订阅 _subscribed=true）。不 reset 则新 query 第二次订阅抛 SessionQueueDoubleSubscribeError
       // → SDK query abort（onError "Operation aborted"）→ fail → session ended（实测 reload
@@ -2739,9 +2940,7 @@ export class SessionManager {
         driverOpts as unknown as Parameters<InteractiveDriver['start']>[1],
       )) as unknown;
 
-      // ── ⑥ 替换 state.query（claude）/ state.driverHandle（codex，本期未支持）+ state.env ──
-      // claude 路径写 state.query（SDK Query）；codex 写 state.driverHandle（上方已守
-      // provider!=='claude' 抛错，此处 else 分支保留以便未来扩展）。
+      // ── ⑥ 替换句柄（claude=query / codex=driverHandle）+ env + config 快照 ──
       if (state.provider === 'claude') {
         state.query =
           handleOrQuery as import('@anthropic-ai/claude-agent-sdk').Query;
@@ -2749,39 +2948,59 @@ export class SessionManager {
         state.driverHandle = handleOrQuery as InteractiveDriverHandle;
       }
       state.env = newEnv;
+      state.providerConfig = providerConfig;
+      // 仅 claude 写 state.systemPrompt（codex 人格不注入，原 D-003 / NG-02——payload
+      // 对 codex 本就不带人格，防御性不写避免持久化快照携带无效配置）。
+      // string → 写新值；null → 显式清空（切到无人格）；undefined → 不参与（零漂移）。
+      if (state.provider === 'claude') {
+        if (typeof opts.systemPrompt === 'string') {
+          state.systemPrompt = opts.systemPrompt;
+        } else if (opts.systemPrompt === null) {
+          state.systemPrompt = undefined;
+        }
+      }
       state.lastActiveAt = Date.now();
 
-      // ── close 旧 query（ql-20260806-002：必须在 state.query 替换为新 query 之后）──
-      // 新 query 已就位、即将由 _runConsume 订阅；此时 close 旧 query，旧 consume
+      // ── close 旧句柄（ql-20260806-002：必须在替换为新句柄之后）──
+      // 新句柄已就位、即将由 _runConsume 订阅；此时 close 旧句柄，旧 consume
       // for-await 退出是「正常 query 结束」而非 session 收尾，不触发 session ended。
       // 旧实现 close 在 driver.start 之前 → 新 query 未就位时旧 consume 退出 → session
       // 收尾 ended（实测 45723d1d/9eed466e reload 后 ended）。
       try {
-        (oldQuery as unknown as { close?: () => void } | undefined)?.close?.();
+        (oldHandle as unknown as { close?: () => void } | undefined)?.close?.();
       } catch {
         /* R-01: close 异常不阻塞（SDK 内部已有 SIGTERM→SIGKILL 升级兜底）。 */
       }
-      // 清 pendingSwitch（幂等兜底：markPendingSwitch 空闲路径不写标记；_onResult 路径
-      // 已清；此处防状态机遗漏的边界，多清一次无副作用）。
+      // 清 pendingSwitch / pendingConfigSwitch（幂等兜底：markPendingSwitch /
+      // markPendingConfigSwitch 空闲路径不写标记；_onResult 路径已清；此处防状态机
+      // 遗漏的边界，多清一次无副作用）。
       state.pendingSwitch = undefined;
+      state.pendingConfigSwitch = undefined;
 
       // 重启 consume 协程（void fire-and-forget；失败由 consume 内部 fail 路径收敛）。
       void this._runConsume(state);
-      // 排队 flush（snapshotPersistable 落盘；state.env / agentSessionId 字段已替换）。
+      // 排队 flush（snapshotPersistable 落盘；env / providerConfig / systemPrompt 已替换）。
       this._scheduleFlush();
     } catch (err) {
-      // ── ⑦ reload 失败保留旧 query + 上报错误，不破坏会话（R-01 降级）──
-      // ql-20260806-002：driver.start 失败时 oldQuery 尚未 close（close 已移到替换
-      // state.query 之后），catch 保留的 oldQuery 仍可用，会话可真正恢复（旧 consume 继续）。
+      // ── ⑦ reload 失败保留旧句柄 + 上报错误，不破坏会话（R-01 降级）──
+      // ql-20260806-002：driver.start 失败时 oldHandle 尚未 close（close 已移到替换
+      // 之后），catch 保留的 oldHandle 仍可用，会话可真正恢复（旧 consume 继续）。
       // session 不从 store 移除、status 不改（避免 active→failed 硬降级）。
-      state.query = oldQuery;
+      if (state.provider === 'claude') {
+        state.query = oldHandle as import('@anthropic-ai/claude-agent-sdk').Query | undefined;
+      } else {
+        state.driverHandle = oldHandle as InteractiveDriverHandle | undefined;
+      }
       state.env = oldEnv;
+      state.providerConfig = oldProviderConfig;
+      state.systemPrompt = oldSystemPrompt;
       // eslint-disable-next-line no-console
       console.error(
-        `[session-manager] reloadWithProvider failed (session=${sessionId}), 保留旧 query 降级`,
+        `[session-manager] _reloadSession failed (session=${sessionId}), 保留旧句柄降级`,
         err,
       );
-      // 重新抛：调用方（markPendingSwitch / _onResult）均 .catch 兜底吞错，不会 unhandled。
+      // 重新抛：调用方（markPendingSwitch / markPendingConfigSwitch / _onResult）均
+      // .catch 兜底吞错，不会 unhandled。
       throw err;
     }
   }
@@ -2932,6 +3151,24 @@ export class SessionManager {
           // task-08 实现真实错误上报；本处兜底吞错，不阻塞 _onResult 收尾路径。
         },
       );
+    }
+    // task-08（2026-08-14-sessions-portal / D-012@v1）：turn 边界检测 pendingConfigSwitch。
+    // 生成中 turn 收到 SESSION_SWITCH_CONFIG 时 markPendingConfigSwitch 仅覆盖写
+    // state.pendingConfigSwitch 不中断；此处 turn 已收尾（status→active / currentRunId
+    // 清空），安全触发受控 reload + 喂切换轮 prompt。先取后清（幂等，防 _onResult 重入
+    // 或 WS 重放叠加致双 reload）；fire-and-forget（reloadWithConfig 内部调 _reloadSession
+    // 失败回滚保留旧句柄，R-01），.catch 兜底吞错防 unhandled rejection。
+    // 与 pendingSwitch 顺序：provider 级全局切换先收敛，再消费会话级配置切换（后者
+    // reloadWithConfig 会按 state.providerConfig 现值重建 env，天然吸收前者结果）。
+    const pendingConfigSwitch = state.pendingConfigSwitch;
+    if (pendingConfigSwitch) {
+      state.pendingConfigSwitch = undefined;
+      void this.reloadWithConfig(
+        state.sessionId,
+        pendingConfigSwitch.payload,
+      ).catch(() => {
+        // reload 失败保留旧句柄不破坏会话（R-01）；吞错防 unhandled rejection。
+      });
     }
   }
 

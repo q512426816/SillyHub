@@ -29,7 +29,11 @@ from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
-from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
+from app.modules.daemon.model import (
+    DaemonInstance,
+    DaemonRuntime,
+    DaemonTaskLease,
+)
 from app.modules.daemon.protocol import (
     DAEMON_MSG_SESSION_END,
     DAEMON_MSG_SESSION_INJECT,
@@ -40,6 +44,14 @@ from app.modules.daemon.runtime.service import DaemonRuntimeOffline
 from app.modules.daemon.schema import SessionReopenResponse
 
 log = get_logger(__name__)
+
+# task-05（2026-08-14-sessions-portal / D-012@v1 / FR-05）：会话内配置热切换 WS
+# 控制消息（Server → Daemon），原子承载「切换档案/供应商 + 切换轮 prompt」。
+# 命名遵循 protocol.py 常量族 ``daemon:session_*`` 约定（与 sillyhub-daemon
+# src/protocol.ts MSG.SESSION_* 逐字对齐，daemon 侧路由归 task-09）。常量置于
+# 本模块（task-05 allowed_paths 约束：protocol.py 不在允许清单）；task-09 落
+# daemon.ts 路由时以此为契约源，如后续收敛进 protocol.py 需同步搬移。
+DAEMON_MSG_SESSION_SWITCH_CONFIG = "daemon:session_switch_config"
 
 
 ACTIVE_SESSION_STATUSES = frozenset({"pending", "active", "reconnecting"})
@@ -109,6 +121,54 @@ async def _resolve_daemon_id_for_runtime(
     return runtime.daemon_instance_id
 
 
+async def _merge_lease_metadata(
+    db_session: AsyncSession,
+    lease_id: uuid.UUID,
+    updates: dict,
+    *,
+    removals: list[str] | None = None,
+) -> None:
+    """task-03（2026-08-14-sessions-portal）：读出 lease metadata → 合并 → 写回。
+
+    与 ``AgentService._apply_profile_to_lease`` 同款 raw-SQL 读合并写容错
+    （SQLite 返 JSON 文本 / PG 返已解 dict）。**不 commit**——事务由
+    ``create_session`` 统一提交（lease INSERT 也在同一事务内，flush 后可见）。
+    会话路径专用（写 ``session_llm_provider_id`` / 档案提示词维度键）。
+
+    task-05 加 ``removals``：切换分支清空维度时需**删键**而非写值（如切回
+    本机默认要移除 ``session_llm_provider_id``，切到无提示词档案要移除
+    ``system_prompt``），纯 merge 无法表达「键消失」。
+    """
+    import json as _json
+
+    from sqlalchemy import text as _sa_text
+
+    meta_row = (
+        (
+            await db_session.execute(
+                _sa_text("SELECT metadata FROM daemon_task_leases WHERE id = :id"),
+                {"id": lease_id.hex},
+            )
+        )
+        .mappings()
+        .first()
+    )
+    raw_meta = meta_row["metadata"] if meta_row else None
+    if isinstance(raw_meta, str):
+        meta: dict = _json.loads(raw_meta) if raw_meta else {}
+    elif isinstance(raw_meta, dict):
+        meta = dict(raw_meta)
+    else:
+        meta = {}
+    for key in removals or []:
+        meta.pop(key, None)
+    meta.update(updates)
+    await db_session.execute(
+        _sa_text("UPDATE daemon_task_leases SET metadata = :meta WHERE id = :id"),
+        {"meta": _json.dumps(meta), "id": lease_id.hex},
+    )
+
+
 class DaemonSessionNotFound(AppError):
     code = "HTTP_404_DAEMON_SESSION_NOT_FOUND"
     http_status = 404
@@ -170,6 +230,48 @@ class DaemonOffline(AppError):
 
     code = "HTTP_409_DAEMON_OFFLINE"
     http_status = 409
+
+
+# ── 2026-08-14-sessions-portal task-03：create_session 配置入口校验错误 ─────────
+
+
+class DaemonSessionRuntimeNotFound(AppError):
+    """runtime_id 指向的 runtime 不存在 / 非本人所有（404，不泄露存在性）。"""
+
+    code = "HTTP_404_DAEMON_SESSION_RUNTIME_NOT_FOUND"
+    http_status = 404
+
+
+class DaemonSessionRuntimeUnavailable(AppError):
+    """钉定 runtime 离线 / 无 provider（409）。
+
+    Grill C-01（P0）：runtime_id 钉定不可满足时明确报错，**绝不静默换机**
+    （不走 first-online 选择，也不走 provider 不在线 fallback）。
+    """
+
+    code = "HTTP_409_DAEMON_SESSION_RUNTIME_UNAVAILABLE"
+    http_status = 409
+
+
+class DaemonSessionLlmProviderNotFound(AppError):
+    """llm_provider_id 不存在 / 非会话属主（404，归属按 AgentSession.user_id）。"""
+
+    code = "HTTP_404_DAEMON_SESSION_LLM_PROVIDER_NOT_FOUND"
+    http_status = 404
+
+
+class DaemonSessionLlmProviderKindMismatch(AppError):
+    """供应商 agent_kind 与会话引擎不匹配（422，FR-06 防错配）。"""
+
+    code = "HTTP_422_DAEMON_SESSION_LLM_PROVIDER_KIND_MISMATCH"
+    http_status = 422
+
+
+class DaemonSessionConfigInvalid(AppError):
+    """会话配置 id 形态非法（非 UUID）/ 属主用户缺失（422）。"""
+
+    code = "HTTP_422_DAEMON_SESSION_CONFIG_INVALID"
+    http_status = 422
 
 
 @dataclass(frozen=True, slots=True)
@@ -447,17 +549,45 @@ class SessionService:
                 redis_event=payload.get("event") if isinstance(payload, dict) else None,
             )
 
+    async def _resolve_runtime_labels(
+        self,
+        runtime_id: uuid.UUID,
+    ) -> tuple[str | None, str | None]:
+        """task-03（Grill C-12）：config_snapshot 的机器名/智能体名解析。
+
+        * ``machine_name``：runtime → DaemonInstance.display_alias（admin 别名，
+          优先）→ hostname；无 daemon_instance（迁移期）→ None。
+        * ``agent_name``：runtime.name → 回退 provider（claude/codex）。
+        """
+        runtime = await self._session.get(DaemonRuntime, runtime_id)
+        if runtime is None:
+            return None, None
+        agent_name = runtime.name or runtime.provider
+        machine_name: str | None = None
+        if runtime.daemon_instance_id is not None:
+            instance = await self._session.get(DaemonInstance, runtime.daemon_instance_id)
+            if instance is not None:
+                machine_name = instance.display_alias or instance.hostname
+        return machine_name, agent_name
+
     async def create_session(
         self,
         user_id: uuid.UUID,
         *,
-        provider: str,
+        provider: str | None,
         prompt: str,
         model: str | None = None,
         manual_approval: bool = False,
         ask_user_only: bool = False,
         change_id: uuid.UUID | None = None,
         workspace_id: uuid.UUID | None = None,
+        # 2026-08-14-sessions-portal task-02：新页面双入口 + 会话配置字段透传占位。
+        # task-03 落地解析：runtime_id（优先于 provider，钉定机器+智能体并派生
+        # provider）/ agent_profile_id（只注 system_prompt+mcp/skill，D-013）/
+        # llm_provider_id（写 lease metadata session_llm_provider_id）。
+        runtime_id: str | None = None,
+        agent_profile_id: str | None = None,
+        llm_provider_id: str | None = None,
     ) -> SessionDispatchResult:
         """Create an interactive session + first-turn run + interactive lease.
 
@@ -465,6 +595,9 @@ class SessionService:
         atomically (D-005@v1 triple), then the daemon is woken. If the wake-up
         cannot be delivered the triple is converged to failed terminal states
         and DaemonRuntimeOffline is raised so no active session lingers.
+
+        task-03 双入口：``runtime_id``（/sessions 新页面，Grill C-01 钉定）与
+        ``provider``（/runtimes 弹窗旧路径，零回归）二选一，前者优先。
         """
         if not prompt or not prompt.strip():
             raise DaemonSessionNotActive(
@@ -472,7 +605,102 @@ class SessionService:
                 details={"reason": "empty_prompt"},
             )
 
-        from app.modules.agent.placement import RunPlacementService
+        from app.modules.agent.placement import (
+            NoOnlineDaemonError,
+            RunPlacementService,
+        )
+
+        # ── task-03：runtime_id 入口解析（钉定 + 派生 provider，Grill C-01/P0）──
+        # 校验在事务开始前完成：不可满足直接 4xx，无半成品落库；placement 侧
+        # pinned 路径二次复查（竞态防线），失联同样转 4xx，绝不静默换机。
+        pinned_runtime_id: uuid.UUID | None = None
+        if runtime_id:
+            try:
+                pinned_runtime_id = uuid.UUID(runtime_id)
+            except (ValueError, AttributeError, TypeError) as exc:
+                raise DaemonSessionRuntimeNotFound(
+                    f"Invalid runtime_id '{runtime_id}'.",
+                    details={"runtime_id": runtime_id},
+                ) from exc
+            _rt = await self._session.get(DaemonRuntime, pinned_runtime_id)
+            if _rt is None or _rt.user_id != user_id:
+                raise DaemonSessionRuntimeNotFound(
+                    f"Runtime '{runtime_id}' not found.",
+                    details={"runtime_id": runtime_id},
+                )
+            if _rt.status != "online":
+                raise DaemonSessionRuntimeUnavailable(
+                    f"Runtime '{runtime_id}' is offline.",
+                    details={"runtime_id": runtime_id, "status": _rt.status},
+                )
+            if not _rt.provider:
+                raise DaemonSessionRuntimeUnavailable(
+                    f"Runtime '{runtime_id}' has no provider.",
+                    details={"runtime_id": runtime_id},
+                )
+            # 派生 provider（design §5：runtime_id 优先，覆盖入参 provider）。
+            provider = _rt.provider
+        elif not provider:
+            raise DaemonSessionNotActive(
+                "either runtime_id or provider must be provided.",
+                details={"reason": "missing_provider"},
+            )
+
+        # ── task-03：档案解析（D-013：只消费提示词维度，不做引擎过滤）──
+        # 复用 AgentProfileService.get 的读可见性校验（与 GET /agent-profiles
+        # ?scope=mine 列表同口径）：不存在 → 404；不可见 → 403。不兜底、不软回退
+        # （用户显式选择，契约字段缺失/失效必须显式报错）。
+        profile = None
+        if agent_profile_id:
+            from app.modules.agent.profile.service import AgentProfileService
+            from app.modules.auth.model import User as _User
+
+            try:
+                _profile_uuid = uuid.UUID(agent_profile_id)
+            except (ValueError, AttributeError, TypeError) as exc:
+                raise DaemonSessionConfigInvalid(
+                    f"Invalid agent_profile_id '{agent_profile_id}'.",
+                    details={"agent_profile_id": agent_profile_id},
+                ) from exc
+            _actor = await self._session.get(_User, user_id)
+            if _actor is None:
+                raise DaemonSessionConfigInvalid(
+                    "Session owner user not found.",
+                    details={"user_id": str(user_id)},
+                )
+            profile = await AgentProfileService(self._session).get(
+                profile_id=_profile_uuid, actor=_actor
+            )
+
+        # ── task-03：会话级供应商解析（归属 + agent_kind 匹配，FR-04/FR-06）──
+        llm_provider_row = None
+        if llm_provider_id:
+            from app.modules.llm_provider.model import LlmProvider
+
+            try:
+                _provider_uuid = uuid.UUID(llm_provider_id)
+            except (ValueError, AttributeError, TypeError) as exc:
+                raise DaemonSessionConfigInvalid(
+                    f"Invalid llm_provider_id '{llm_provider_id}'.",
+                    details={"llm_provider_id": llm_provider_id},
+                ) from exc
+            llm_provider_row = await self._session.get(LlmProvider, _provider_uuid)
+            if llm_provider_row is None or llm_provider_row.user_id != user_id:
+                raise DaemonSessionLlmProviderNotFound(
+                    f"LlmProvider '{llm_provider_id}' not found.",
+                    details={"llm_provider_id": llm_provider_id},
+                )
+            # agent_kind 与引擎（runtime 派生 provider，如 claude/codex）不匹配 →
+            # 422（FR-06），不静默降级。
+            if llm_provider_row.agent_kind != provider:
+                raise DaemonSessionLlmProviderKindMismatch(
+                    "LlmProvider agent_kind does not match the session engine.",
+                    details={
+                        "llm_provider_id": llm_provider_id,
+                        "agent_kind": llm_provider_row.agent_kind,
+                        "engine": provider,
+                    },
+                )
 
         # 2026-07-09-change-detail-session / D-003@v1：变更会话 cwd=workspace 本地
         # 项目根。复用 Workspace.root_path（workspace/model.py:63），未传 workspace_id
@@ -505,9 +733,15 @@ class SessionService:
                 change_id=change_id,
                 workspace_id=workspace_id,
                 cwd=cwd,
+                # task-03（FR-04/D-008）：会话配置三列（未选 = None = 现状，零回归）。
+                agent_profile_id=profile.id if profile is not None else None,
+                llm_provider_id=(llm_provider_row.id if llm_provider_row is not None else None),
             )
             self._session.add(session)
             await self._session.flush()
+
+            # task-03：首 run 带档案/供应商轮次快照（D-008）。
+            from app.modules.agent.service import _build_agent_profile_snapshot
 
             run = AgentRun(
                 id=uuid.uuid4(),
@@ -518,6 +752,11 @@ class SessionService:
                 spec_strategy="interactive",
                 agent_session_id=session.id,
                 change_id=change_id,
+                agent_profile_id=profile.id if profile is not None else None,
+                agent_profile_snapshot=(
+                    _build_agent_profile_snapshot(profile) if profile is not None else None
+                ),
+                llm_provider_id=(llm_provider_row.id if llm_provider_row is not None else None),
             )
             self._session.add(run)
             await self._session.flush()
@@ -535,18 +774,49 @@ class SessionService:
             dispatch_prompt = f"{preamble}\n\n---\n\n{prompt}" if preamble else prompt
 
             placement = RunPlacementService(self._session)
-            dispatch = await placement.prepare_interactive_dispatch(
-                agent_session_id=session.id,
-                agent_run_id=run.id,
-                user_id=user_id,
-                provider=provider,
-                prompt=dispatch_prompt,
-                model=model,
-                manual_approval=manual_approval,
-                ask_user_only=ask_user_only,
-                workspace_id=workspace_id,
-                cwd=cwd,
-            )
+            try:
+                dispatch = await placement.prepare_interactive_dispatch(
+                    agent_session_id=session.id,
+                    agent_run_id=run.id,
+                    user_id=user_id,
+                    provider=provider,
+                    prompt=dispatch_prompt,
+                    model=model,
+                    manual_approval=manual_approval,
+                    ask_user_only=ask_user_only,
+                    workspace_id=workspace_id,
+                    cwd=cwd,
+                    pinned_runtime_id=pinned_runtime_id,
+                )
+            except NoOnlineDaemonError as exc:
+                # task-03 / Grill C-01（P0）：钉定路径的竞态防线失联（校验后、
+                # placement 复查前 runtime 掉线）→ 转 4xx 明确报错，不静默换机。
+                # 旧 provider 路径保持原 NoOnlineDaemonError 透传（零回归）。
+                if pinned_runtime_id is not None:
+                    raise DaemonSessionRuntimeUnavailable(
+                        f"Runtime '{pinned_runtime_id}' is offline.",
+                        details={"runtime_id": str(pinned_runtime_id)},
+                    ) from exc
+                raise
+
+            # ── task-03：会话档案注入（D-013，非 commit 变体，同事务）──
+            # 只写 system_prompt + mcp_refs/skill_refs；不写 bound
+            # llm_provider_id / effective_allowed_roots（Grill C-06）。
+            if profile is not None:
+                from app.modules.agent.service import AgentService
+
+                await AgentService(self._session).apply_session_profile_to_lease(
+                    dispatch.lease_id, profile
+                )
+            # task-03 / FR-04 / R-02：会话级供应商写独立 metadata key（claim 端
+            # _inject_provider_config 最高优先级分支消费）；压制档案绑定，未选
+            # 不写 = 现状链（零回归）。
+            if llm_provider_row is not None:
+                await _merge_lease_metadata(
+                    self._session,
+                    dispatch.lease_id,
+                    {"session_llm_provider_id": str(llm_provider_row.id)},
+                )
 
             # Backfill the triple binding fields + activate the session.
             session.runtime_id = dispatch.runtime_id
@@ -554,6 +824,25 @@ class SessionService:
             session.status = "active"
             session.turn_count = 1
             session.last_active_at = now
+            # task-03 / Grill C-12：config_snapshot（含 machine_name/agent_name，
+            # 列表 chips 直显免二次查询）。任一新入口字段选中才写；全不选 =
+            # NULL = 现状（零回归）。machine/agent 名取实际定位的 runtime。
+            if pinned_runtime_id is not None or profile is not None or llm_provider_row is not None:
+                machine_name, agent_name = await self._resolve_runtime_labels(dispatch.runtime_id)
+                session.config_snapshot = {
+                    "profile_name": profile.name if profile is not None else None,
+                    "provider_name": (
+                        llm_provider_row.name if llm_provider_row is not None else None
+                    ),
+                    "model": (
+                        (llm_provider_row.model or llm_provider_row.default_fallback_model)
+                        if llm_provider_row is not None
+                        else None
+                    ),
+                    "engine": provider,
+                    "machine_name": machine_name,
+                    "agent_name": agent_name,
+                }
             self._session.add(session)
 
             # task-01 / FR-01 / D-005@v1：首 turn 落一条 channel="user_input" 的
@@ -710,6 +999,10 @@ class SessionService:
         user_id: uuid.UUID,
         *,
         prompt: str,
+        # 2026-08-14-sessions-portal task-02：切档案/切供应商字段透传占位（校验与
+        # SESSION_SWITCH_CONFIG 下发归 task-05；默认 None 不改既有行为）。
+        agent_profile_id: str | None = None,
+        llm_provider_id: str | None = None,
     ) -> SessionDispatchResult:
         """Append a new turn run to an active session (FR-02 / design §7.6 step 1).
 
@@ -723,6 +1016,12 @@ class SessionService:
         this user-ownership check (multi-member workspace approver ≠ session
         creator), see :meth:`inject_session_as_service` (D-006@v2,
         2026-08-14-change-center-conversation-driven task-04).
+
+        sessions-portal task-05（FR-05/FR-06 / D-012@v1）：``agent_profile_id`` /
+        ``llm_provider_id`` 与会话当前值不同 → 切换分支（校验+快照+SESSION_SWITCH_CONFIG
+        语义见 :meth:`_inject_into_session` docstring；``llm_provider_id`` 空串 =
+        "none" → 清空回本机默认）。都 None → 原有 inject 行为零回归；send 失败
+        按既有收敛（Grill C-11）。
         """
         if not prompt or not prompt.strip():
             raise DaemonSessionNotActive(
@@ -738,7 +1037,13 @@ class SessionService:
         except Exception:
             await self._session.rollback()
             raise
-        return await self._inject_into_session(session, prompt=prompt)
+        return await self._inject_into_session(
+            session,
+            prompt=prompt,
+            # sessions-portal task-05：切换参数透传共享核心（service 路径不传=零回归）。
+            agent_profile_id=agent_profile_id,
+            llm_provider_id=llm_provider_id,
+        )
 
     async def inject_session_as_service(
         self,
@@ -788,6 +1093,11 @@ class SessionService:
         session: AgentSession,
         *,
         prompt: str,
+        # sessions-portal task-05：切档案/切供应商（None=不动；llm_provider_id
+        # 空串="none" 清空回本机默认）。service 身份路径（inject_session_as_service）
+        # 不传 → 走原有 inject 行为（零回归）。
+        agent_profile_id: str | None = None,
+        llm_provider_id: str | None = None,
     ) -> SessionDispatchResult:
         """Shared inject-turn core (used by :meth:`inject_session` +
         :meth:`inject_session_as_service`).
@@ -798,6 +1108,12 @@ class SessionService:
         SESSION_INJECT dispatch and the offline convergence. Extracted so the
         user-owned and service-identity paths share one turn-injection body
         (D-006@v2, 2026-08-14-change-center-conversation-driven task-04).
+
+        sessions-portal task-05（FR-05/FR-06 / D-012@v1）：``agent_profile_id`` /
+        ``llm_provider_id`` 与会话当前值不同 → 切换分支（同事务新 AgentRun 快照 +
+        会话三列刷新 + lease metadata 同步 + SESSION_SWITCH_CONFIG 原子下发）；
+        空串 = "none" → 清空会话供应商回本机默认（写 NULL）；都 None / 等值 →
+        原有行为逐字段不变（零回归）。
         """
         session_id = session.id
         now = datetime.now(UTC)
@@ -823,6 +1139,100 @@ class SessionService:
                     },
                 )
 
+            # ── task-05：配置切换解析（FR-05/FR-06 / Grill C-05 / D-013）────────
+            # 维度语义：入参 None=不动；profile 非空且≠当前 → 切；provider 非空且
+            # ≠当前 → 切，空串（"none"）→ 清空回本机默认；与当前值相同 → 等价不动
+            # （落回原有 inject 路径，零回归）。校验失败在事务内 raise → rollback，
+            # 会话状态与列不变（R-03）。
+            profile_changed = False
+            switch_profile = None
+            if agent_profile_id:
+                try:
+                    _new_profile_uuid = uuid.UUID(agent_profile_id)
+                except (ValueError, AttributeError, TypeError) as exc:
+                    raise DaemonSessionConfigInvalid(
+                        f"Invalid agent_profile_id '{agent_profile_id}'.",
+                        details={"agent_profile_id": agent_profile_id},
+                    ) from exc
+                if _new_profile_uuid != session.agent_profile_id:
+                    from app.modules.agent.profile.service import AgentProfileService
+                    from app.modules.auth.model import User as _User
+
+                    _actor = await self._session.get(_User, session.user_id)
+                    if _actor is None:
+                        raise DaemonSessionConfigInvalid(
+                            "Session owner user not found.",
+                            details={"user_id": str(session.user_id)},
+                        )
+                    # 读可见性与 GET /agent-profiles?scope=mine 同口径（同 create）。
+                    switch_profile = await AgentProfileService(self._session).get(
+                        profile_id=_new_profile_uuid, actor=_actor
+                    )
+                    profile_changed = True
+
+            provider_changed = False
+            provider_row = None
+            new_llm_provider_id = session.llm_provider_id
+            if llm_provider_id is not None:
+                if llm_provider_id == "":
+                    # 空串 = "none" → 清空会话供应商（写 NULL 回本机默认）。已 NULL
+                    # 时等价不动（不触发切换分支）。
+                    if session.llm_provider_id is not None:
+                        provider_changed = True
+                        new_llm_provider_id = None
+                else:
+                    try:
+                        _new_provider_uuid = uuid.UUID(llm_provider_id)
+                    except (ValueError, AttributeError, TypeError) as exc:
+                        raise DaemonSessionConfigInvalid(
+                            f"Invalid llm_provider_id '{llm_provider_id}'.",
+                            details={"llm_provider_id": llm_provider_id},
+                        ) from exc
+                    if _new_provider_uuid != session.llm_provider_id:
+                        from app.modules.llm_provider.model import LlmProvider
+
+                        provider_row = await self._session.get(LlmProvider, _new_provider_uuid)
+                        # 归属按 AgentSession.user_id（Grill C-05：借用 runtime 场景
+                        # borrower 供应商不被静默拒绝），404 不泄露存在性。
+                        if provider_row is None or provider_row.user_id != session.user_id:
+                            raise DaemonSessionLlmProviderNotFound(
+                                f"LlmProvider '{llm_provider_id}' not found.",
+                                details={"llm_provider_id": llm_provider_id},
+                            )
+                        # FR-06：agent_kind 与会话引擎不匹配 → 422，不静默降级。
+                        if provider_row.agent_kind != session.provider:
+                            raise DaemonSessionLlmProviderKindMismatch(
+                                "LlmProvider agent_kind does not match the session engine.",
+                                details={
+                                    "llm_provider_id": llm_provider_id,
+                                    "agent_kind": provider_row.agent_kind,
+                                    "engine": session.provider,
+                                },
+                            )
+                        provider_changed = True
+                        new_llm_provider_id = provider_row.id
+
+            config_switch = profile_changed or provider_changed
+
+            # 切换分支：解析切换后生效（effective）档案/供应商行，用于新 run 的
+            # 轮次快照（D-008）与会话 config_snapshot 刷新。未切换维度沿用当前值
+            # 直接按 id 取行（create 时已过可见性/归属校验，不重查）。
+            effective_profile = switch_profile
+            effective_provider = provider_row
+            if config_switch:
+                if not profile_changed and session.agent_profile_id is not None:
+                    from app.modules.agent.profile.model import AgentProfile as _AgentProfile
+
+                    effective_profile = await self._session.get(
+                        _AgentProfile, session.agent_profile_id
+                    )
+                if not provider_changed and session.llm_provider_id is not None:
+                    from app.modules.llm_provider.model import LlmProvider
+
+                    effective_provider = await self._session.get(
+                        LlmProvider, session.llm_provider_id
+                    )
+
             config = dict(session.config or {})
             run = AgentRun(
                 id=uuid.uuid4(),
@@ -833,10 +1243,48 @@ class SessionService:
                 spec_strategy="interactive",
                 agent_session_id=session.id,
             )
+            if config_switch:
+                # task-05 / D-008：切换轮新 run 带完整轮次配置快照（新档案快照 +
+                # 新供应商 id；未切换维度沿用会话当前值）。
+                from app.modules.agent.service import _build_agent_profile_snapshot
+
+                run.agent_profile_id = (
+                    effective_profile.id if effective_profile is not None else None
+                )
+                run.agent_profile_snapshot = (
+                    _build_agent_profile_snapshot(effective_profile)
+                    if effective_profile is not None
+                    else None
+                )
+                run.llm_provider_id = new_llm_provider_id
             self._session.add(run)
 
             session.turn_count = (session.turn_count or 0) + 1
             session.last_active_at = now
+            if config_switch:
+                # task-05 / FR-04：会话三列刷新（快照含 machine_name/agent_name，
+                # 与 create_session 的 Grill C-12 口径一致）。
+                session.agent_profile_id = (
+                    effective_profile.id if effective_profile is not None else None
+                )
+                session.llm_provider_id = new_llm_provider_id
+                machine_name, agent_name = await self._resolve_runtime_labels(session.runtime_id)
+                session.config_snapshot = {
+                    "profile_name": (
+                        effective_profile.name if effective_profile is not None else None
+                    ),
+                    "provider_name": (
+                        effective_provider.name if effective_provider is not None else None
+                    ),
+                    "model": (
+                        (effective_provider.model or effective_provider.default_fallback_model)
+                        if effective_provider is not None
+                        else None
+                    ),
+                    "engine": session.provider,
+                    "machine_name": machine_name,
+                    "agent_name": agent_name,
+                }
             self._session.add(session)
 
             # task-01 / FR-02 / D-005@v1：后续 turn 同样落一条 channel="user_input"
@@ -849,6 +1297,67 @@ class SessionService:
                     timestamp=now,
                 )
             )
+
+            if config_switch:
+                # task-05：lease metadata 同步（同事务，保持 DB 与会话列一致——
+                # claim payload / 恢复链路重读 metadata 时不落到旧配置）。
+                # 供应商：写 session_llm_provider_id 或清空删键；档案：写提示词
+                # 维度三键（同 apply_session_profile_to_lease 口径，D-013）。
+                meta_updates: dict = {}
+                meta_removals: list[str] = []
+                if profile_changed:
+                    if switch_profile.system_prompt:
+                        meta_updates["system_prompt"] = switch_profile.system_prompt
+                    else:
+                        meta_removals.append("system_prompt")
+                    meta_updates["mcp_refs"] = list(switch_profile.mcp_refs or [])
+                    meta_updates["skill_refs"] = list(switch_profile.skill_refs or [])
+                if provider_changed:
+                    if new_llm_provider_id is not None:
+                        meta_updates["session_llm_provider_id"] = str(new_llm_provider_id)
+                    else:
+                        meta_removals.append("session_llm_provider_id")
+                await _merge_lease_metadata(
+                    self._session,
+                    session.lease_id,
+                    meta_updates,
+                    removals=meta_removals,
+                )
+
+                # providerConfig 在 commit 前构造（解密失败 → 整个切换事务回滚，
+                # 不会出现 DB 已切、消息发不出的半态）。复用 lease/context 的
+                # resolve_bound_provider_config（按会话 user_id + 引擎，与 claim
+                # payload 的 provider_config 结构逐字一致，D-006 单一真相源）。
+                if provider_row is not None:
+                    from app.modules.daemon.lease.context import (
+                        resolve_bound_provider_config,
+                    )
+
+                    provider_config_payload = await resolve_bound_provider_config(
+                        self._session,
+                        {"llm_provider_id": str(provider_row.id)},
+                        session.user_id,
+                        session.provider,
+                    )
+                    if provider_config_payload is None:
+                        # 上方已校验归属 + agent_kind，此处 None = 契约破裂（如
+                        # 解析器口径漂移），显式报错不静默降级（铁律 1）。
+                        raise DaemonSessionConfigInvalid(
+                            "Session provider config could not be resolved.",
+                            details={"llm_provider_id": str(provider_row.id)},
+                        )
+                else:
+                    provider_config_payload = None
+                profile_payload = None
+                if profile_changed:
+                    profile_payload = {
+                        "systemPrompt": switch_profile.system_prompt or "",
+                        "mcpRefs": list(switch_profile.mcp_refs or []),
+                        "skillRefs": list(switch_profile.skill_refs or []),
+                    }
+            else:
+                profile_payload = None
+                provider_config_payload = None
 
             await self._session.commit()
             await self._session.refresh(session)
@@ -889,21 +1398,41 @@ class SessionService:
         )
         control_ok = False
         if daemon_id is not None and runtime_id is not None:
-            control_ok = await hub.send_session_control(
-                daemon_id,
-                DAEMON_MSG_SESSION_INJECT,
-                {
-                    "session_id": str(session.id),
-                    "lease_id": str(session.lease_id),
-                    "run_id": str(run.id),
-                    "prompt": prompt,
-                    "claim_token": inject_claim_token,
-                    "runtime_id": str(runtime_id),  # design §5.3 provider discriminator
-                },
-            )
+            if config_switch:
+                # task-05 / D-012：切换分支下发 SESSION_SWITCH_CONFIG（原子 payload，
+                # 字段对齐 design §7.2 与 task-08 SessionSwitchConfigPayload 契约，
+                # camelCase；profile/providerConfig 为 null 表示该维度不切）。
+                control_ok = await hub.send_session_control(
+                    daemon_id,
+                    DAEMON_MSG_SESSION_SWITCH_CONFIG,
+                    {
+                        "sessionId": str(session.id),
+                        "runId": str(run.id),
+                        "claimToken": inject_claim_token,
+                        "prompt": prompt,
+                        "profile": profile_payload,
+                        "providerConfig": provider_config_payload,
+                    },
+                )
+            else:
+                control_ok = await hub.send_session_control(
+                    daemon_id,
+                    DAEMON_MSG_SESSION_INJECT,
+                    {
+                        "session_id": str(session.id),
+                        "lease_id": str(session.lease_id),
+                        "run_id": str(run.id),
+                        "prompt": prompt,
+                        "claim_token": inject_claim_token,
+                        "runtime_id": str(runtime_id),  # design §5.3 provider discriminator
+                    },
+                )
         if not control_ok:
             # New run failed to dispatch → converge it to failed but leave the
             # session active so the caller can retry (boundary #13).
+            # task-05 / Grill C-11：切换分支同款收敛——run→failed、session 保持
+            # active、可重试；会话三列保留已切换的新配置（DB 先于消息落库，
+            # 重试重发同一切换即收敛，daemon 未收到消息前不会跑切换轮）。
             try:
                 run.status = "failed"
                 run.finished_at = datetime.now(UTC)
@@ -1576,6 +2105,10 @@ class SessionService:
         limit: int,
         offset: int,
         status_filter: str | None = None,
+        runtime_id: uuid.UUID | None = None,
+        machine_id: uuid.UUID | None = None,
+        provider: str | None = None,
+        q: str | None = None,
     ) -> tuple[list[AgentSession], int]:
         """Owner-scoped list of AgentSession with stable paging.
 
@@ -1583,8 +2116,20 @@ class SessionService:
         post-filter. Stable order ``coalesce(last_active_at, created_at) DESC,
         id DESC`` so paging never skips / repeats. ``status_filter`` (when given)
         must already be validated by the router to a known literal.
+
+        task-06 / FR-02 / D-003@v1 过滤参数（全部可选，不传 = 现状查询，零回归）：
+
+        - ``runtime_id``：``AgentSession.runtime_id`` 精确匹配。
+        - ``machine_id``：经 ``daemon_runtimes.daemon_instance_id`` EXISTS 关联
+          （runtime 缺失的旧会话不匹配任何 machine）。
+        - ``provider``：``AgentSession.provider`` 精确匹配（router 层 Literal 校验）。
+        - ``q``：标题模糊搜索。title 非持久化列（router 层由首条 user_input
+          摘要派生），故按「会话存在 channel=user_input 且 content_redacted
+          ilike q 的日志」EXISTS 过滤——title 恒为某条 user_input 的前缀，
+          语义上为标题搜索的超集（无漏报）；``%``/``_``/反斜杠 按字面转义，
+          参数经 SQLAlchemy 绑定（防注入）。
         """
-        from sqlalchemy import func
+        from sqlalchemy import exists, func
 
         base_filters = [
             AgentSession.user_id == user_id,
@@ -1592,6 +2137,27 @@ class SessionService:
         ]
         if status_filter is not None:
             base_filters.append(AgentSession.status == status_filter)
+        if runtime_id is not None:
+            base_filters.append(AgentSession.runtime_id == runtime_id)
+        if machine_id is not None:
+            base_filters.append(
+                exists().where(
+                    DaemonRuntime.id == AgentSession.runtime_id,
+                    DaemonRuntime.daemon_instance_id == machine_id,
+                )
+            )
+        if provider is not None:
+            base_filters.append(AgentSession.provider == provider)
+        if q:
+            escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            base_filters.append(
+                exists().where(
+                    AgentRun.agent_session_id == AgentSession.id,
+                    AgentRunLog.run_id == AgentRun.id,
+                    AgentRunLog.channel == "user_input",
+                    AgentRunLog.content_redacted.ilike(f"%{escaped}%", escape="\\"),
+                )
+            )
 
         count_stmt = select(func.count()).select_from(AgentSession).where(*base_filters)
         total = int((await self._session.execute(count_stmt)).scalar() or 0)

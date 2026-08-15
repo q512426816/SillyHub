@@ -12,9 +12,12 @@
  *
  * **白名单**：仅写 PersistedSessionRecord（sessionId/leaseId/agentSessionId/cwd/
  * provider/currentRunId?/turnCount/lastActiveAt/model?/pathToClaudeCodeExecutable?/
- * pathToAgentExecutable?/manualApproval?/askUserOnly?）。
- * 禁止写 claim token / API key / credential / prompt 内容 / agent 输出 / Query 句柄 /
- * InputQueue（不可序列化且敏感，见 task-10 §4.1）。
+ * pathToAgentExecutable?/manualApproval?/askUserOnly?/stage?/mcpRefs?/skillRefs?/
+ * effectiveAllowedRoots?/systemPrompt?/providerConfig?）。
+ * 禁止写 claim token / credential / prompt 轮次内容 / agent 输出 / Query 句柄 /
+ * InputQueue（不可序列化或敏感）。
+ * task-08（sessions-portal）例外：record.providerConfig 含 api_key——design §5 Wave2
+ * 要求「daemon 重启 resume 不丢配置」，本文件 0600 与 credentials.json 同信任域。
  *
  * **SDK 自动持久化**：~/.claude/projects/<encoded-cwd>/<sid>.jsonl 由 SDK 写，
  * daemon 不读不写该 jsonl，resume 靠 SDK 内部加载（spike D3）。
@@ -138,6 +141,16 @@ function validateRecord(raw: unknown): PersistedSessionRecord | null {
   }
   if (typeof r.askUserOnly === 'boolean') {
     out.askUserOnly = r.askUserOnly;
+  }
+  // task-08（2026-08-14-sessions-portal / design §5 Wave2）：会话级配置快照容错透传。
+  // systemPrompt 非空字符串才写；providerConfig 仅校验 object（结构由 backend 下发，
+  // daemon 不逐字段校验——恢复失败由 restoreAndReconnect 的 driver.start try/catch 收敛）。
+  // 旧 sessions.json 无这些字段 → 缺省容错（不写 = 恢复走本机默认链，design §9）。
+  if (typeof r.systemPrompt === 'string' && r.systemPrompt) {
+    out.systemPrompt = r.systemPrompt;
+  }
+  if (r.providerConfig && typeof r.providerConfig === 'object') {
+    out.providerConfig = r.providerConfig as PersistedSessionRecord['providerConfig'];
   }
   return out;
 }

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from typing import Annotated
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,12 +22,15 @@ from app.modules.llm_provider.schema import (
     FetchModelsResponse,
     LlmProviderCreate,
     LlmProviderList,
+    LlmProviderQuotaResponse,
     LlmProviderRead,
     LlmProviderUpdate,
     SetDefaultResult,
     UsageResult,
 )
 from app.modules.llm_provider.service import LlmProviderService
+from app.modules.llm_provider.usage_handlers import query_zhipu_quota
+from app.modules.tool_gateway.tool_policy import SsrfBlocked, ToolPolicyService
 
 router = APIRouter(prefix="/llm-providers", tags=["llm_provider"])
 
@@ -107,6 +111,45 @@ async def query_provider_usage(
     """
     service = LlmProviderService(session)
     return await service.query_usage(_parse_id(provider_id), user.id)
+
+
+@router.get("/{provider_id}/quota", response_model=LlmProviderQuotaResponse)
+async def get_provider_quota(
+    provider_id: str,
+    session: SessionDep,
+    user: CurrentUser,
+) -> LlmProviderQuotaResponse:
+    """查供应商额度（一期仅 GLM，design §7.1 / FR-08 / D-009）。
+
+    弱依赖（R-05）：非 GLM 供应商（base_url 判定，复用 ``_detect_usage_provider``
+    既有方式，不加新配置）、上游失败 / 无数据 → 200 + ``{"quota": null}``，绝不抛
+    5xx；不做缓存，每次实时查（前端低频调用）。owner 校验同 get_provider（跨用户
+    404/403 不泄漏，D-008）。
+
+    GLM 数据链完全复用 usage_handlers.query_zhipu_quota → query_zhipu
+    （``_classify_zhipu_window`` / ``_parse_zhipu_tiers``），不新建上游 HTTP 调用。
+    响应无 api_key 字段（NFR-02，明文仅局部变量用于鉴权头）。
+    """
+    service = LlmProviderService(session)
+    row = await service.get(_parse_id(provider_id), user.id)
+
+    base_url = row.base_url or ""
+    api_key_plain = service._cipher.decrypt(row.encrypted_api_key, row.key_id)
+    if not base_url or not api_key_plain:
+        return LlmProviderQuotaResponse(quota=None)
+    if LlmProviderService._detect_usage_provider(base_url) != "zhipu":
+        return LlmProviderQuotaResponse(quota=None)
+
+    # SSRF 同 query_usage 范式：智谱额度端点与 base_url 同 host，查一次 host 即覆盖；
+    # 被安全策略拒绝同样降级 quota=None（弱依赖不阻塞，保持 200）。
+    host = urlparse(base_url).hostname or ""
+    try:
+        await ToolPolicyService.assert_public_hostname(host)
+    except SsrfBlocked:
+        return LlmProviderQuotaResponse(quota=None)
+
+    quota = await query_zhipu_quota(base_url, api_key_plain, model=row.model)
+    return LlmProviderQuotaResponse(quota=quota)
 
 
 @router.get("/{provider_id}", response_model=LlmProviderRead)

@@ -506,3 +506,47 @@ async def query_minimax(
                 body=f"code {status_code}: {msg}",
             )
     return _parse_minimax_tiers(body)
+
+
+# ── quota 查询（sessions-portal task-07 / FR-08 / D-009@v1）───────────────────
+
+
+def zhipu_quota_from_tiers(model: str | None, tiers: list[UsageData]) -> dict:
+    """把 :func:`query_zhipu` 多 tier 结果转成 quota 契约 dict（design §7.1）。
+
+    tier→window 映射：``plan_name``→``label``（含套餐等级前缀如「Max·5小时窗」）、
+    ``remaining``（剩余百分比 0-100）→``left``、``extra``（重置时间 ISO8601）→``reset``。
+    返回 plain dict，由 router 层 schema（``LlmProviderQuotaData``）校验输出。
+    """
+    return {
+        "model": model,
+        "windows": [
+            {"label": tier.plan_name, "left": tier.remaining, "reset": tier.extra} for tier in tiers
+        ],
+    }
+
+
+async def query_zhipu_quota(
+    base_url: str,
+    api_key: str,
+    *,
+    model: str | None = None,
+    timeout: float = 15.0,
+) -> dict | None:
+    """供应商额度实时查询（一期仅 GLM；每次直查，不缓存）。
+
+    复用 :func:`query_zhipu` 的完整数据获取 + 解析链（``_classify_zhipu_window`` /
+    ``_parse_zhipu_tiers``，``GET /api/monitor/usage/quota/limit``），不新建上游调用；
+    本函数只做「tier → quota 窗口」映射与弱依赖降级（R-05）：httpx 网络/超时异常、
+    ``UsageUpstreamError``（非 2xx / 解析失败 / 业务错）或空 tier 一律返回 ``None``
+    （端点层回 ``{"quota": null}`` HTTP 200，绝不抛 5xx）。GLM 判定（base_url 是否
+    智谱）不在本函数 —— 由 router 复用 ``_detect_usage_provider`` 既有方式先判。
+    """
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            tiers = await query_zhipu(client, base_url, api_key)
+    except Exception:  # 弱依赖：任何上游异常均降级 None，不阻塞端点
+        return None
+    if not tiers:
+        return None
+    return zhipu_quota_from_tiers(model, tiers)

@@ -102,7 +102,7 @@ const BACKEND_PERMISSION_KEYS = [
   "ppm:weekly-plan:view",
 ] as const;
 
-/** 38 个 menuKey 期望集合（原 34 条 + 2026-07-29-sidebar-menu-restructure 新增 3 条 + 2026-08-04-agent-profile-ui-redesign 新增 agent-profiles） */
+/** 39 个 menuKey 期望集合（原 34 条 + 2026-07-29-sidebar-menu-restructure 新增 3 条 + 2026-08-04-agent-profile-ui-redesign 新增 agent-profiles + 2026-08-14-sessions-portal 新增 sessions） */
 const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "workspaces",
   "components",
@@ -122,6 +122,8 @@ const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "mcp",
   // 2026-08-04-agent-profile-ui-redesign 新增（D-001/D-007，agent 组全局卡片墙一级菜单）
   "agent-profiles",
+  // 2026-08-14-sessions-portal task-10 新增（agent 组会话总入口一级菜单）
+  "sessions",
   "approvals",
   "audit",
   "incidents",
@@ -157,8 +159,8 @@ const VALID_SECTIONS: ReadonlySet<string> = new Set([
 ]);
 
 describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
-  it("MENU_PERMISSION_GROUPS 长度 === 38", () => {
-    expect(MENU_PERMISSION_GROUPS).toHaveLength(38);
+  it("MENU_PERMISSION_GROUPS 长度 === 39", () => {
+    expect(MENU_PERMISSION_GROUPS).toHaveLength(39);
   });
 
   it("所有 menuKey 互不重复，且严格等于 FR-02 预定义清单", () => {
@@ -173,7 +175,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("section 分布：workspace 8 / agent 5 / config 4 / governance 3 / system 4 / ppm 14", () => {
+  it("section 分布：workspace 8 / agent 6 / config 4 / governance 3 / system 4 / ppm 14", () => {
     const counter: Record<MenuSection, number> = {
       workspace: 0,
       agent: 0,
@@ -186,14 +188,14 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
       counter[g.section] += 1;
     });
     expect(counter.workspace).toBe(8);
-    expect(counter.agent).toBe(5);
+    expect(counter.agent).toBe(6);
     expect(counter.config).toBe(4);
     expect(counter.governance).toBe(3);
     expect(counter.system).toBe(4);
     expect(counter.ppm).toBe(14);
   });
 
-  it("每个 menu 至少 1 个 permission（skills / agent-profiles 例外：permissions:[] 对所有登录用户可见）", () => {
+  it("每个 menu 至少 1 个 permission（skills / agent-profiles / sessions 例外：permissions:[] 对所有登录用户可见）", () => {
     MENU_PERMISSION_GROUPS.forEach((g) => {
       if (g.menuKey === "skills") {
         // 2026-07-31-custom-skill-per-user D-003：skills 菜单对所有登录用户可见，无独立权限
@@ -203,6 +205,12 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
       if (g.menuKey === "agent-profiles") {
         // 2026-08-04-agent-profile-ui-redesign task-05：智能体档案菜单对所有登录用户可见
         // （对齐 skills D-003），permissions:[] 经 permission.ts:41 登录即可见
+        expect(g.permissions).toEqual([]);
+        return;
+      }
+      if (g.menuKey === "sessions") {
+        // 2026-08-14-sessions-portal task-10：智能体会话菜单对所有登录用户可见
+        // （会话列表后端已按 user_id 隔离，对齐 agent-profiles 先例）
         expect(g.permissions).toEqual([]);
         return;
       }

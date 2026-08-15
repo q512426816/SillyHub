@@ -1,0 +1,783 @@
+<!--
+author: WhaleFall
+created_at: 2026-08-14 22:50:00
+description: 智能体会话总入口 /sessions 一比一可交互原型 v2（前端模拟数据与交互，不落库）：新建会话四选项联动、发消息模拟轮次 running/idle、样式B输入框下配置控件热切换（档案/供应商可切，机器/智能体跨机跨引擎置灰）、列表筛选+虚拟滚动示意、离线只读、打断/结束
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智能体会话 · 总入口 · 可交互原型</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #eef2f7; color: #0f172a; font-size: 14px; display: flex; flex-direction: column; }
+
+  :root {
+    --primary: #2563EB; --primary-hover: #1d4ed8; --primary-bg: #eff6ff;
+    --bg: #f8fafc; --card: #ffffff; --border: #e2e8f0; --border-strong: #cbd5e1;
+    --fg: #0f172a; --fg-muted: #64748b; --fg-faint: #94a3b8;
+    --success: #16a34a; --success-bg: #f0fdf4;
+    --warning: #d97706; --error: #dc2626;
+    --radius: 8px; --radius-sm: 6px;
+  }
+
+  .appbar { height: 44px; background: #0f172a; color: #cbd5e1; display: flex; align-items: center; padding: 0 18px; gap: 14px; font-size: 13px; flex-shrink: 0; }
+  .appbar .brand { font-weight: 700; color: #fff; }
+  .appbar .navitem { padding: 3px 10px; border-radius: 6px; cursor: pointer; }
+  .appbar .navitem.on { background: rgba(255,255,255,.12); color: #fff; }
+
+  .shell { flex: 1; display: flex; min-height: 0; }
+  .sidebar { width: 56px; border-right: 1px solid var(--border); background: var(--card); display: flex; flex-direction: column; align-items: center; padding-top: 10px; gap: 6px; flex-shrink: 0; }
+  .side-ico { width: 38px; height: 38px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 17px; color: var(--fg-muted); cursor: pointer; }
+  .side-ico:hover { background: #f1f5f9; }
+  .side-ico.on { background: var(--primary-bg); color: var(--primary); }
+
+  main { flex: 1; min-width: 0; padding: 16px 20px; overflow-y: auto; }
+  .page-inner { max-width: 1500px; margin: 0 auto; height: 100%; display: flex; flex-direction: column; }
+
+  .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+  .page-header h1 { font-size: 20px; font-weight: 600; }
+  .page-header .sub { font-size: 12.5px; color: var(--fg-muted); margin-top: 3px; }
+
+  .main-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 320px minmax(0,1fr); gap: 14px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); }
+
+  /* ── 左：会话列表 ── */
+  .list-card { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .list-head { padding: 11px 13px 9px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+  .list-head h2 { font-size: 14px; }
+  .list-count { font-size: 11px; color: var(--fg-faint); }
+  .btn-new { background: var(--primary); color: #fff; border: none; border-radius: var(--radius-sm); padding: 5px 12px; font-size: 12.5px; cursor: pointer; }
+  .btn-new:hover { background: var(--primary-hover); }
+  .list-filters { padding: 9px 13px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 7px; }
+  .search-box { display: flex; align-items: center; gap: 6px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 4px 8px; background: #fff; }
+  .search-box input { border: none; outline: none; font-size: 12px; flex: 1; color: var(--fg); }
+  .search-box .icon { color: var(--fg-faint); font-size: 11px; }
+  .filter-row { display: flex; align-items: center; gap: 6px; position: relative; }
+  .mini-select { font-size: 11px; color: var(--fg-muted); background: #fff; border: 1px solid var(--border-strong); border-radius: 999px; padding: 2px 9px; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+  .mini-select b { color: var(--fg); font-weight: 500; }
+  .engine-tabs { display: inline-flex; background: #f1f5f9; border-radius: 999px; padding: 2px; margin-left: auto; }
+  .engine-tabs span { font-size: 11px; padding: 2px 10px; border-radius: 999px; color: var(--fg-muted); cursor: pointer; }
+  .engine-tabs span.on { background: var(--primary); color: #fff; }
+  .session-scroll { flex: 1; overflow-y: auto; min-height: 0; }
+  .session-item { padding: 9px 13px; border-bottom: 1px solid var(--border); cursor: pointer; border-left: 3px solid transparent; }
+  .session-item:hover { background: #f8fafc; }
+  .session-item.on { background: var(--primary-bg); border-left-color: var(--primary); }
+  .s-line1 { display: flex; align-items: center; gap: 6px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .dot.active { background: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
+  .dot.ended { background: var(--fg-faint); }
+  .dot.failed { background: var(--error); }
+  .s-title { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+  .s-time { font-size: 11px; color: var(--fg-faint); flex-shrink: 0; }
+  .s-line2 { display: flex; align-items: center; gap: 5px; margin-top: 4px; padding-left: 13px; flex-wrap: wrap; }
+  .chip { font-size: 10px; color: var(--fg-muted); background: #f1f5f9; border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+  .chip.engine-claude { color: #d97706; background: #fffbeb; }
+  .chip.engine-codex { color: #7c3aed; background: #f5f3ff; }
+  .chip.profile { color: var(--primary); background: var(--primary-bg); }
+  .chip.machine-off { color: var(--fg-faint); background: #f1f5f9; text-decoration: line-through; }
+  .list-empty { padding: 30px 14px; text-align: center; color: var(--fg-faint); font-size: 12px; }
+
+  /* ── 右：面板 ── */
+  .panel-card { display: flex; flex-direction: column; min-height: 0; overflow: hidden; position: relative; }
+  .panel-head { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .panel-head .t { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .head-btns { display: flex; gap: 8px; flex-shrink: 0; }
+  .btn-outline { background: #fff; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 4px 12px; font-size: 12px; color: var(--fg-muted); cursor: pointer; }
+  .btn-outline:hover { color: var(--fg); border-color: var(--fg-faint); }
+  .btn-outline.warn { color: var(--warning); border-color: #fcd34d; }
+  .btn-outline.danger { color: var(--error); border-color: #fca5a5; }
+  .btn-outline:disabled { opacity: .45; cursor: not-allowed; }
+
+  /* 新建表单 */
+  .new-form { flex: 1; overflow-y: auto; padding: 18px 22px; }
+  .form-section { margin-bottom: 20px; }
+  .form-label { font-size: 13px; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .req { color: var(--error); font-size: 12px; }
+  .opt-hint { font-size: 11px; color: var(--fg-faint); font-weight: 400; }
+  .machine-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+  .machine-opt { border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 10px 12px; cursor: pointer; background: #fff; }
+  .machine-opt:hover { border-color: var(--primary); }
+  .machine-opt.on { border-color: var(--primary); background: var(--primary-bg); }
+  .machine-opt.off { opacity: .55; cursor: not-allowed; background: #f8fafc; }
+  .m-line1 { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 500; flex-wrap: wrap; }
+  .m-status { width: 8px; height: 8px; border-radius: 50%; background: var(--success); flex-shrink: 0; }
+  .m-status.off { background: var(--fg-faint); }
+  .tag-default { font-size: 10px; color: var(--primary); background: #dbeafe; border-radius: 4px; padding: 1px 5px; font-weight: 600; }
+  .tag-offline { font-size: 10px; color: var(--fg-faint); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; }
+  .m-line2 { font-size: 11px; color: var(--fg-muted); margin-top: 5px; display: flex; gap: 10px; }
+  .agent-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .agent-opt { border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 8px 16px; cursor: pointer; font-size: 13px; background: #fff; display: flex; align-items: center; gap: 7px; }
+  .agent-opt:hover { border-color: var(--primary); }
+  .agent-opt.on { border-color: var(--primary); background: var(--primary-bg); color: var(--primary); font-weight: 600; }
+  .agent-opt.na { opacity: .5; cursor: not-allowed; }
+  .agent-opt .sub { font-size: 10px; color: var(--fg-faint); font-weight: 400; }
+  .select-like { border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 7px 11px; font-size: 13px; background: #fff; display: flex; align-items: center; justify-content: space-between; cursor: pointer; position: relative; }
+  .select-like:hover { border-color: var(--primary); }
+  .select-like.locked { opacity: .55; cursor: not-allowed; background: #f8fafc; }
+  .select-like .ph { color: var(--fg-muted); }
+  .select-like .caret { color: var(--fg-faint); font-size: 11px; }
+  .sel-desc { font-size: 11px; color: var(--fg-faint); margin-top: 4px; }
+  .start-bar { display: flex; gap: 10px; align-items: stretch; }
+  .prompt-input { flex: 1; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 10px 12px; font-size: 13px; color: var(--fg); min-height: 64px; outline: none; font-family: inherit; resize: vertical; }
+  .prompt-input:focus { border-color: var(--primary); }
+  .btn-primary-lg { background: var(--primary); color: #fff; border: none; border-radius: var(--radius-sm); padding: 0 22px; font-size: 14px; cursor: pointer; }
+  .btn-primary-lg:disabled { background: #93c5fd; cursor: not-allowed; }
+
+  /* 消息区 */
+  .messages { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+  .messages::-webkit-scrollbar, .session-scroll::-webkit-scrollbar, .new-form::-webkit-scrollbar { width: 6px; }
+  .messages::-webkit-scrollbar-thumb, .session-scroll::-webkit-scrollbar-thumb, .new-form::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+  .msg-user { align-self: flex-end; max-width: 78%; background: var(--primary); color: #fff; border-radius: 12px 12px 2px 12px; padding: 9px 14px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+  .msg-agent { align-self: flex-start; max-width: 86%; border: 1px solid var(--border); background: #fff; border-radius: 12px 12px 12px 2px; padding: 10px 14px; font-size: 13px; line-height: 1.7; }
+  .msg-agent .who { font-size: 11px; color: var(--fg-muted); margin-bottom: 5px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .turn-status { font-size: 10px; padding: 1px 7px; border-radius: 999px; }
+  .turn-status.done { color: var(--success); background: var(--success-bg); border: 1px solid #bbf7d0; }
+  .turn-status.running { color: var(--primary); background: var(--primary-bg); border: 1px solid #bfdbfe; animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .55; } }
+  .tool-item { font-size: 11px; color: var(--fg-muted); background: #f8fafc; border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); padding: 5px 9px; align-self: flex-start; display: flex; gap: 6px; align-items: center; }
+  .typing { align-self: flex-start; display: flex; gap: 4px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; }
+  .typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--fg-faint); animation: blink 1s infinite; }
+  .typing i:nth-child(2) { animation-delay: .2s; } .typing i:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 50% { opacity: .25; } }
+
+  /* 输入区 + 样式B 控件条 */
+  .input-zone { border-top: 1px solid var(--border); padding: 10px 14px 8px; background: var(--card); }
+  .input-box { width: 100%; border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 9px 12px; font-size: 13px; color: var(--fg); min-height: 54px; outline: none; font-family: inherit; resize: vertical; }
+  .input-box:focus { border-color: var(--primary); }
+  .input-box:disabled { background: #f8fafc; color: var(--fg-faint); cursor: not-allowed; }
+  .ccgui-bar { display: flex; align-items: center; gap: 2px; margin-top: 7px; flex-wrap: wrap; position: relative; }
+  .cc-ctrl { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--fg-muted); background: transparent; border: none; border-radius: var(--radius-sm); padding: 4px 9px; cursor: pointer; font-family: inherit; }
+  .cc-ctrl:hover { background: #f1f5f9; color: var(--fg); }
+  .cc-ctrl.on { color: var(--primary); }
+  .cc-ctrl:disabled { opacity: .5; cursor: not-allowed; }
+  .cc-lock { font-size: 10.5px; color: var(--warning); display: inline-flex; gap: 4px; align-items: center; }
+  .cc-spacer { flex: 1; }
+  .btn-send { background: var(--primary); color: #fff; border: none; border-radius: var(--radius-sm); padding: 6px 18px; font-size: 13px; cursor: pointer; }
+  .btn-send:disabled { background: #93c5fd; cursor: not-allowed; }
+
+  /* 下拉浮层 */
+  .dd { position: absolute; bottom: calc(100% + 6px); background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: 0 -8px 24px rgba(15,23,42,.12); min-width: 270px; z-index: 30; padding: 6px; }
+  .dd.right { right: 0; }
+  .dd .dd-title { font-size: 11px; color: var(--fg-faint); padding: 4px 8px 6px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+  .dd-item { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: var(--radius-sm); font-size: 12.5px; cursor: pointer; }
+  .dd-item:hover { background: #f8fafc; }
+  .dd-item.on { background: var(--primary-bg); color: var(--primary); font-weight: 600; }
+  .dd-item.na { opacity: .5; cursor: not-allowed; }
+  .dd-item .sub { font-size: 10.5px; color: var(--fg-faint); margin-left: auto; white-space: nowrap; }
+  .dd-check { color: var(--primary); font-size: 12px; margin-left: auto; }
+
+  .readonly-banner { background: #fffbeb; border-bottom: 1px solid #fcd34d; color: var(--warning); font-size: 12px; padding: 8px 16px; }
+  .ended-banner { background: #f1f5f9; border-bottom: 1px solid var(--border); color: var(--fg-muted); font-size: 12px; padding: 8px 16px; display: flex; justify-content: space-between; align-items: center; }
+  .btn-reopen { background: #fff; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 2px 10px; font-size: 11.5px; cursor: pointer; color: var(--fg); }
+
+  /* ── 上下文用量环 + 模型额度（输入框上方一行） ── */
+  .ctx-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; min-height: 28px; }
+  .ctx-ring { position: relative; width: 28px; height: 28px; cursor: pointer; flex-shrink: 0; }
+  .ctx-ring svg { transform: rotate(-90deg); display: block; }
+  .ctx-ring .pct { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 8.5px; font-weight: 700; color: var(--primary); }
+  .ctx-ring:hover svg .bar { stroke: var(--primary-hover); }
+  .quota-pill { font-size: 11px; color: var(--fg-muted); background: #f1f5f9; border-radius: 999px; padding: 3px 10px; cursor: pointer; flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+  .quota-pill:hover { background: #e2e8f0; color: var(--fg); }
+  .quota-pill b { font-weight: 600; color: var(--fg); }
+  .quota-pill .warn-low { color: var(--warning); font-weight: 600; }
+  .quota-pill .crit-low { color: var(--error); font-weight: 600; }
+  .dd.kv { min-width: 240px; }
+  .dd.kv .kv-row { display: flex; justify-content: space-between; gap: 14px; padding: 5px 9px; font-size: 12px; }
+  .dd.kv .kv-row b { font-weight: 600; }
+  .dd.kv .kv-row .muted { color: var(--fg-faint); font-size: 11px; }
+  .crit-low { color: var(--error); font-weight: 600; }
+  .warn-low { color: var(--warning); font-weight: 600; }
+
+  .toast { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); background: #0f172a; color: #fff; font-size: 12.5px; padding: 8px 18px; border-radius: 999px; z-index: 99; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+</style>
+</head>
+<body>
+
+<div class="appbar">
+  <span class="brand">SillyHub</span>
+  <span class="navitem">工作台</span>
+  <span class="navitem">智能体档案</span>
+  <span class="navitem on">智能体会话</span>
+  <span class="navitem">守护进程运行时</span>
+  <span class="navitem" style="margin-left:auto">WhaleFall</span>
+</div>
+
+<div class="shell">
+  <div class="sidebar">
+    <div class="side-ico" title="工作台">🏠</div>
+    <div class="side-ico" title="智能体档案">🤖</div>
+    <div class="side-ico on" title="智能体会话">💬</div>
+    <div class="side-ico" title="守护进程运行时">🖥</div>
+  </div>
+
+  <main>
+    <div class="page-inner">
+      <div class="page-header">
+        <div>
+          <h1>智能体会话</h1>
+          <div class="sub">全部机器、全部智能体的会话总入口；每个会话独立持有自己的配置。</div>
+        </div>
+        <button class="btn-new" style="height:32px;" onclick="enterNewSession()">＋ 新建会话</button>
+      </div>
+
+      <div class="main-grid">
+        <!-- 左：会话列表 -->
+        <div class="card list-card">
+          <div class="list-head">
+            <h2>会话</h2>
+            <span class="list-count" id="listCount"></span>
+          </div>
+          <div class="list-filters">
+            <div class="search-box"><span class="icon">🔍</span><input id="searchInput" placeholder="搜索会话标题…" oninput="renderList()"></div>
+            <div class="filter-row">
+              <span class="mini-select" id="statusSel" onclick="toggleFilterDD('status')">状态 <b id="statusLabel">全部</b> ▾</span>
+              <span class="mini-select" id="machineSel" onclick="toggleFilterDD('machine')">机器 <b id="machineLabel">全部</b> ▾</span>
+              <span class="engine-tabs" id="engineTabs">
+                <span class="on" data-e="" onclick="setEngine('')">全部</span>
+                <span data-e="claude" onclick="setEngine('claude')">Claude</span>
+                <span data-e="codex" onclick="setEngine('codex')">Codex</span>
+              </span>
+              <div class="dd" id="filterDD" style="display:none;top:calc(100% + 6px);bottom:auto;"></div>
+            </div>
+          </div>
+          <div class="session-scroll" id="sessionList"></div>
+        </div>
+
+        <!-- 右：会话面板 -->
+        <div class="card panel-card" id="panel"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+/* ══════════ 模拟数据（不落库） ══════════ */
+const machines = [
+  { id: 'm1', name: 'DESKTOP-2BN7FDC', alias: null, online: true, os: 'Windows', heartbeat: '8 秒前', agents: [
+    { id: 'm1-claude', name: 'Claude Code', engine: 'claude', online: true },
+    { id: 'm1-codex', name: 'Codex', engine: 'codex', online: true },
+    { id: 'm1-gemini', name: 'Gemini CLI', engine: 'gemini', online: true, noSession: true },
+  ]},
+  { id: 'm2', name: '阿里云-ECS', alias: null, online: true, os: 'Linux', heartbeat: '12 秒前', agents: [
+    { id: 'm2-claude', name: 'Claude Code', engine: 'claude', online: true },
+  ]},
+  { id: 'm3', name: 'MacBook-Pro', alias: null, online: false, os: 'macOS', heartbeat: '3 天前', agents: [
+    { id: 'm3-claude', name: 'Claude Code', engine: 'claude', online: true },
+  ]},
+];
+const providers = [
+  { id: 'none', name: '不指定（本机默认配置）', engine: 'claude' },
+  { id: 'kimi', name: 'Kimi 中转', sub: 'moonshot · kimi-k2', engine: 'claude' },
+  { id: 'glm', name: 'GLM 平台', sub: 'zhipu · glm-4.7', engine: 'claude',
+    quota: { model: 'glm-4.7', windows: [
+      { label: '5 小时', left: 18, reset: '今天 02:00' },
+      { label: '本周', left: 45, reset: '周一 00:00' },
+    ]} },
+];
+const profiles = [
+  { id: 'p-none', name: '不指定（无人格）', engine: null },
+  { id: 'p-km', name: '知识经理', engine: 'claude' },
+  { id: 'p-cr', name: '严肃代码审查员', engine: 'claude' },
+  { id: 'p-idea', name: '创意头脑风暴', engine: 'claude' },
+  { id: 'p-cx', name: 'Codex 默认', engine: 'codex' },
+];
+
+let sidSeq = 100;
+let sessions = [
+  { id: 's1', title: '整理这周的会议纪要并输出行动项', machineId: 'm1', engine: 'claude', agentId: 'm1-claude', providerId: 'kimi', profileId: 'p-km', status: 'active', turn: 'idle',
+    ctx: { used: 107.8, total: 1000 }, quota: null, turns: [
+      { role: 'user', text: '帮我整理这周的会议纪要，按主题归类并输出行动项' },
+      { role: 'tool', text: '🔧 Read · meetings/weekly-0811.md' },
+      { role: 'tool', text: '🔧 Read · meetings/weekly-0814.md' },
+      { role: 'agent', text: '已按主题整理完成，共 4 个主题、11 条行动项：\n一、架构（3 项）：会话配置持久化、热切换消息族、离线只读…\n二、前端（4 项）：/sessions 页面、四选择器、虚拟滚动、样式B控件条…',
+        cfg: { profileId: 'p-km', agentId: 'm1-claude', providerId: 'kimi' } },
+    ], time: '3 分钟前', turnCount: 12 },
+  { id: 's2', title: '审查 PPM 模块的分页查询性能', machineId: 'm1', engine: 'claude', agentId: 'm1-claude', providerId: 'none', profileId: 'p-cr', status: 'active', turn: 'idle',
+    ctx: { used: 243.1, total: 1000 }, quota: null, turns: [
+      { role: 'user', text: 'PPM 项目列表翻页要 3 秒，帮我看看慢在哪' },
+      { role: 'agent', text: '排查结论：列表接口没走索引，count(*) 全表扫描。建议给 project_members(project_id) 加索引并改用 keyset 分页。',
+        cfg: { profileId: 'p-cr', agentId: 'm1-claude', providerId: 'none' } },
+    ], time: '26 分钟前', turnCount: 8 },
+  { id: 's3', title: '帮我把这个函数重构成 async 的', machineId: 'm2', engine: 'codex', agentId: 'm2-claude', providerId: 'none', profileId: 'p-none', status: 'active', turn: 'running',
+    ctx: { used: 51.6, total: 1000 }, quota: null, turns: [
+      { role: 'user', text: '把 parseConfig 重构成 async，顺便加上错误处理' },
+    ], time: '1 小时前', turnCount: 3, noteRunning: true },
+  { id: 's4', title: '起草季度 OKR 草案', machineId: 'm3', engine: 'claude', agentId: 'm3-claude', providerId: 'glm', profileId: 'p-idea', status: 'active', turn: 'idle',
+    ctx: { used: 410.2, total: 1000 }, turns: [
+      { role: 'user', text: '帮我起草 Q3 的 OKR' },
+      { role: 'agent', text: '草案如下：O1 平台会话体验统一…', cfg: { profileId: 'p-idea', agentId: 'm3-claude', providerId: 'glm' } },
+    ], time: '昨天', turnCount: 21 },
+  { id: 's5', title: '批量导出工时统计报表', machineId: 'm1', engine: 'claude', agentId: 'm1-claude', providerId: 'none', profileId: 'p-none', status: 'failed', turn: 'idle',
+    ctx: { used: 88.4, total: 1000 }, turns: [
+      { role: 'user', text: '把 7 月的工时导出成 excel' },
+      { role: 'agent', text: '执行失败：导出文件超过 100MB 上限（校验失败）。', cfg: { profileId: 'p-none', agentId: 'm1-claude', providerId: 'none' } },
+    ], time: '昨天', turnCount: 5 },
+  { id: 's6', title: '分析 daemon 断线重连的日志', machineId: 'm1', engine: 'codex', agentId: 'm1-codex', providerId: 'none', profileId: 'p-none', status: 'ended', turn: 'idle',
+    ctx: { used: 332.0, total: 1000 }, turns: [
+      { role: 'user', text: 'daemon 昨晚掉线 3 次，帮我从日志找原因' },
+      { role: 'agent', text: '结论：WS 30s 无心跳被网关断开，建议心跳改为 15s。', cfg: { profileId: 'p-none', agentId: 'm1-codex', providerId: 'none' } },
+    ], time: '2 天前', turnCount: 14 },
+];
+
+/* ══════════ 全局 UI 状态 ══════════ */
+let view = 'session';            // 'session' | 'new'
+let currentSessionId = 's1';      // 右侧展示的会话
+let filter = { engine: '', status: '', machines: [], q: '' };
+let newForm = { machineId: null, agentId: null, providerId: 'none', profileId: 'p-none', prompt: '' };
+let openDD = null;                // 当前打开的下拉: {type, ...}
+
+const $ = (id) => document.getElementById(id);
+const machineOf = (s) => machines.find(m => m.id === s.machineId);
+const agentOf = (s) => machineOf(s)?.agents.find(a => a.id === s.agentId);
+const providerOf = (s) => providers.find(p => p.id === s.providerId);
+const profileOf = (s) => profiles.find(p => p.id === s.profileId);
+const esc = (t) => t.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+
+function toast(msg) {
+  const el = document.createElement('div');
+  el.className = 'toast'; el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2200);
+}
+function relTime() { return '刚刚'; }
+
+/* ══════════ 左：列表渲染 + 筛选 ══════════ */
+function renderList() {
+  filter.q = $('searchInput').value.trim();
+  const list = sessions.filter(s => {
+    if (filter.engine && s.engine !== filter.engine) return false;
+    if (filter.status === 'active' && !(s.status === 'active' || s.status === 'failed')) return false;
+    if (filter.status === 'ended' && s.status !== 'ended') return false;
+    if (filter.machines.length && !filter.machines.includes(s.machineId)) return false;
+    if (filter.q && !s.title.includes(filter.q)) return false;
+    return true;
+  });
+  const active = sessions.filter(s => s.status === 'active').length;
+  $('listCount').textContent = `共 ${sessions.length} 个 · ${active} 个活跃`;
+  $('sessionList').innerHTML = list.length ? list.map(s => {
+    const m = machineOf(s), p = profileOf(s), pr = providerOf(s);
+    const engineCls = s.engine === 'claude' ? 'engine-claude' : 'engine-codex';
+    return `<div class="session-item ${s.id === currentSessionId && view === 'session' ? 'on' : ''}" onclick="selectSession('${s.id}')">
+      <div class="s-line1"><span class="dot ${s.status}"></span><span class="s-title">${esc(s.title)}</span><span class="s-time">${s.time}</span></div>
+      <div class="s-line2">
+        <span class="chip ${m.online ? '' : 'machine-off'}">🖥 ${m.name}${m.online ? '' : '（离线）'}</span>
+        <span class="chip ${engineCls}">${s.engine === 'claude' ? 'Claude' : 'Codex'}</span>
+        ${p && p.id !== 'p-none' ? `<span class="chip profile">📋 ${p.name}</span>` : ''}
+        ${pr && pr.id !== 'none' ? `<span class="chip">☁ ${pr.name}</span>` : ''}
+        <span class="chip">${s.turnCount} 轮</span>
+      </div>
+    </div>`;
+  }).join('') : '<div class="list-empty">没有符合条件的会话</div>';
+}
+
+function setEngine(e) {
+  filter.engine = e;
+  [...$('engineTabs').children].forEach(c => c.classList.toggle('on', c.dataset.e === e));
+  renderList();
+}
+function toggleFilterDD(kind) {
+  if (openDD?.type === 'filter-' + kind) { closeDD(); return; }
+  const dd = $('filterDD');
+  let html = '';
+  if (kind === 'status') {
+    html = `<div class="dd-title">按状态筛选</div>` + [
+      { v: '', n: '全部' }, { v: 'active', n: '活跃' }, { v: 'ended', n: '已结束' },
+    ].map(o => `<div class="dd-item ${filter.status === o.v ? 'on' : ''}" onclick="setStatusFilter('${o.v}')">${o.n}${filter.status === o.v ? '<span class="dd-check">✓</span>' : ''}</div>`).join('');
+  } else {
+    html = `<div class="dd-title">按机器筛选（可多选）</div>` + machines.map(m =>
+      `<div class="dd-item" onclick="toggleMachineFilter('${m.id}')"><span class="m-status ${m.online ? '' : 'off'}" style="width:7px;height:7px;"></span>${m.name}<span class="sub">${m.online ? '在线' : '离线'}${filter.machines.includes(m.id) ? ' ✓' : ''}</span></div>`
+    ).join('');
+  }
+  dd.innerHTML = html; dd.style.display = 'block';
+  openDD = { type: 'filter-' + kind };
+}
+function setStatusFilter(v) { filter.status = v; $('statusLabel').textContent = v === 'active' ? '活跃' : v === 'ended' ? '已结束' : '全部'; closeDD(); renderList(); }
+function toggleMachineFilter(id) {
+  const i = filter.machines.indexOf(id);
+  if (i >= 0) filter.machines.splice(i, 1); else filter.machines.push(id);
+  $('machineLabel').textContent = filter.machines.length ? `已选 ${filter.machines.length} 台` : '全部';
+  toggleFilterDD('machine'); toggleFilterDD('machine'); // 重开刷新勾选
+}
+
+/* ══════════ 右：面板渲染 ══════════ */
+function selectSession(id) { currentSessionId = id; view = 'session'; closeDD(); renderPanel(); renderList(); }
+
+function enterNewSession() {
+  view = 'new'; closeDD();
+  // 默认：最近有会话的在线机器 + 其 Claude Code
+  const recent = [...sessions].sort((a, b) => b.time < a.time ? -1 : 1).find(s => machineOf(s).online);
+  newForm = { machineId: recent?.machineId ?? 'm1', agentId: null, providerId: 'none', profileId: 'p-none', prompt: '' };
+  renderPanel(); renderList();
+}
+
+function renderPanel() {
+  if (view === 'new') return renderNewForm();
+  const s = sessions.find(x => x.id === currentSessionId);
+  if (!s) { $('panel').innerHTML = '<div class="list-empty" style="margin:auto;">选择左侧会话，或新建会话</div>'; return; }
+  renderSessionPanel(s);
+}
+
+/* ── 新建会话表单 ── */
+function renderNewForm() {
+  const m = machines.find(x => x.id === newForm.machineId);
+  // 默认智能体：该机器 Claude Code（若无则首个可会话）
+  if (m && !newForm.agentId) {
+    const def = m.agents.find(a => a.engine === 'claude' && a.online && !a.noSession) || m.agents.find(a => a.online && !a.noSession);
+    newForm.agentId = def?.id ?? null;
+  }
+  const agent = m?.agents.find(a => a.id === newForm.agentId);
+  const engine = agent?.engine;
+  const providerLocked = engine && engine !== 'claude';
+  const canStart = !!(newForm.machineId && newForm.agentId && newForm.prompt.trim());
+  const prov = providers.find(p => p.id === newForm.providerId);
+  const prof = profiles.find(p => p.id === newForm.profileId);
+
+  $('panel').innerHTML = `
+  <div class="panel-head"><span class="t">新建会话</span><span class="sel-desc" style="margin:0;">配置可随时在会话内切换（当前轮完成后）</span></div>
+  <div class="new-form">
+    <div class="form-section">
+      <div class="form-label">① 守护进程 <span class="req">*</span> <span class="opt-hint">只能选择在线机器</span></div>
+      <div class="machine-grid">${machines.map(mm => `
+        <div class="machine-opt ${mm.id === newForm.machineId ? 'on' : ''} ${mm.online ? '' : 'off'}"
+             ${mm.online ? `onclick="pickMachine('${mm.id}')"` : ''}>
+          <div class="m-line1"><span class="m-status ${mm.online ? '' : 'off'}"></span>${mm.name}
+            ${mm.id === 'm1' ? '<span class="tag-default">最近使用</span>' : ''}
+            ${mm.online ? '' : '<span class="tag-offline">离线</span>'}
+          </div>
+          <div class="m-line2"><span>${mm.os} · ${mm.agents.length} 个智能体</span><span>心跳 ${mm.heartbeat}</span></div>
+        </div>`).join('')}
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-label">② 智能体 <span class="req">*</span> <span class="opt-hint">所选机器的在线智能体 · 默认 Claude Code</span></div>
+      <div class="agent-row">${(m?.agents ?? []).map(a => `
+        <div class="agent-opt ${a.id === newForm.agentId ? 'on' : ''} ${a.online && !a.noSession ? '' : 'na'}"
+             ${a.online && !a.noSession ? `onclick="pickAgent('${a.id}')"` : ''}>
+          ${a.engine === 'claude' ? '⚡' : a.engine === 'codex' ? '◎' : '✦'} ${a.name}
+          ${a.noSession ? '<span class="sub">暂不支持会话</span>' : a.engine === 'claude' ? '<span class="sub">默认</span>' : ''}
+        </div>`).join('') || '<span class="sel-desc">该机器暂无在线智能体</span>'}
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-label">③ 供应商 <span class="opt-hint">可选 · 不选则用守护进程本机的供应商配置</span></div>
+      <div class="select-like ${providerLocked ? 'locked' : ''}" ${providerLocked ? '' : `onclick="openNewDD('provider')"`}>
+        <span class="${newForm.providerId === 'none' ? 'ph' : ''}">${prov ? esc(prov.name) : '不指定（本机默认配置）'}</span><span class="caret">▾</span>
+      </div>
+      <div class="sel-desc">${providerLocked ? '平台暂只支持 Claude 的供应商，当前智能体不可选' : '选择后，本会话用所选供应商的 API 配置发起调用（仅影响本会话）'}</div>
+      <div id="newDD"></div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-label">④ 智能体档案 <span class="opt-hint">可选 · 档案 = 提示词 + 身份</span></div>
+      <div class="select-like" onclick="openNewDD('profile')">
+        <span class="${newForm.profileId === 'p-none' ? 'ph' : ''}">${prof ? esc(prof.name) : '不指定'}</span><span class="caret">▾</span>
+      </div>
+      <div class="sel-desc">选择后本会话以该档案的人格身份对话；列出你的全部档案（跨工作区）${engine === 'codex' ? '；Codex 档案暂不支持人格注入' : ''}</div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-label">消息</div>
+      <div class="start-bar">
+        <textarea class="prompt-input" id="newPrompt" placeholder="输入第一条消息…" oninput="newForm.prompt=this.value;updateStartBtn()">${esc(newForm.prompt)}</textarea>
+        <button class="btn-primary-lg" id="startBtn" ${canStart ? '' : 'disabled'} onclick="startSession()">开始会话</button>
+      </div>
+      <div class="sel-desc" style="margin-top:6px;">机器、智能体必选并输入消息后「开始会话」可点击</div>
+    </div>
+  </div>`;
+}
+
+function pickMachine(id) { newForm.machineId = id; newForm.agentId = null; newForm.profileId = 'p-none'; renderPanel(); }
+function pickAgent(id) { newForm.agentId = id; const eng = machines.find(m => m.id === newForm.machineId).agents.find(a => a.id === id).engine; if (eng !== 'claude') newForm.providerId = 'none'; renderPanel(); }
+function updateStartBtn() {
+  const btn = $('startBtn'); if (!btn) return;
+  btn.disabled = !(newForm.machineId && newForm.agentId && newForm.prompt.trim());
+}
+function openNewDD(kind) {
+  if (openDD?.type === 'new-' + kind) { closeDD(); renderPanel(); return; }
+  openDD = { type: 'new-' + kind };
+  renderPanel();
+  const host = $('newDD'); // 简化：直接在供应商区下方渲染
+  const dd = document.createElement('div');
+  dd.className = 'dd'; dd.style.position = 'relative'; dd.style.marginTop = '6px';
+  const agent = machines.find(m => m.id === newForm.machineId)?.agents.find(a => a.id === newForm.agentId);
+  const engine = agent?.engine;
+  if (kind === 'provider') {
+    dd.innerHTML = `<div class="dd-title">选择供应商（仅本会话）</div>` + providers.map(p => {
+      const na = engine !== 'claude' && p.id !== 'none';
+      return `<div class="dd-item ${newForm.providerId === p.id ? 'on' : ''} ${na ? 'na' : ''}" ${na ? '' : `onclick="newForm.providerId='${p.id}';closeDD();renderPanel()"`}>
+        ☁ ${p.name}${p.sub ? `<span class="sub">${p.sub}</span>` : ''}${newForm.providerId === p.id ? '<span class="dd-check">✓</span>' : ''}</div>`;
+    }).join('');
+  } else {
+    dd.innerHTML = `<div class="dd-title">选择档案（按引擎过滤：${engine ?? '全部'}）</div>` + profiles.map(p => {
+      const na = p.engine && engine && p.engine !== engine;
+      return `<div class="dd-item ${newForm.profileId === p.id ? 'on' : ''} ${na ? 'na' : ''}" ${na ? '' : `onclick="newForm.profileId='${p.id}';closeDD();renderPanel()"`}>
+        📋 ${p.name}${na ? '<span class="sub">不同引擎 · 不可选</span>' : ''}${newForm.profileId === p.id ? '<span class="dd-check">✓</span>' : ''}</div>`;
+    }).join('');
+  }
+  host.appendChild(dd);
+}
+
+/* ── 会话面板（样式B） ── */
+function renderSessionPanel(s) {
+  const m = machineOf(s), a = agentOf(s), p = profileOf(s), pr = providerOf(s);
+  const offline = !m.online;
+  const ended = s.status === 'ended' || s.status === 'failed';
+  const running = s.turn === 'running';
+  const canSwitch = !offline && !ended && !running;
+
+  const msgs = s.turns.map(t => {
+    if (t.role === 'user') return `<div class="msg-user">${esc(t.text)}</div>`;
+    if (t.role === 'tool') return `<div class="tool-item">${esc(t.text)}</div>`;
+    // who 行读该轮自己的配置快照（t.cfg），切换配置后旧消息保持当时信息不跟随变
+    const c = t.cfg ?? {};
+    const tp = profiles.find(x => x.id === (c.profileId ?? s.profileId));
+    const ta = (machineOf(s).agents.find(x => x.id === (c.agentId ?? s.agentId))) ?? a;
+    const tpr = providers.find(x => x.id === (c.providerId ?? s.providerId));
+    const whoParts = [];
+    if (tp && tp.id !== 'p-none') whoParts.push('📋 ' + tp.name);
+    whoParts.push((ta?.engine === 'codex' ? '◎ ' : '⚡ ') + (ta?.name ?? '—'));
+    whoParts.push('☁ ' + (tpr && tpr.id !== 'none' ? tpr.name : '本机默认'));
+    return `<div class="msg-agent"><div class="who">${whoParts.join(' · ')}
+      <span class="turn-status ${running && t === s.turns[s.turns.length - 1] ? 'running' : 'done'}">${running && t === s.turns[s.turns.length - 1] ? '本轮运行中…' : '本轮完成'}</span></div>${esc(t.text)}</div>`;
+  }).join('') + (running ? '<div class="typing"><i></i><i></i><i></i></div>' : '');
+
+  const ctrl = (kind, ico, val, title) => `
+    <button class="cc-ctrl ${canSwitch ? 'on' : ''}" ${canSwitch ? `onclick="openSwitchDD('${kind}')"` : 'disabled'} title="${title}">${ico} ${esc(val)} ▾</button>`;
+
+  // 上下文用量环 + 模型额度（输入框上方一行）：ctx 必有；quota 跟当前供应商走，供应商没有额度数据就不显示
+  const ctxPct = Math.min(100, Math.round((s.ctx?.used ?? 0) / (s.ctx?.total ?? 1) * 1000) / 10);
+  const ringLen = 2 * Math.PI * 10; // r=10
+  const ringColor = ctxPct >= 80 ? 'var(--error)' : ctxPct >= 50 ? 'var(--warning)' : 'var(--primary)';
+  const ctxRing = `
+    <div class="ctx-ring" title="上下文用量 ${ctxPct}%" onclick="openKvDD('ctx')">
+      <svg width="28" height="28">
+        <circle cx="14" cy="14" r="10" fill="none" stroke="#e2e8f0" stroke-width="3"/>
+        <circle class="bar" cx="14" cy="14" r="10" fill="none" stroke="${ringColor}" stroke-width="3" stroke-linecap="round"
+                stroke-dasharray="${(ctxPct / 100 * ringLen).toFixed(2)} ${ringLen.toFixed(2)}"/>
+      </svg>
+      <span class="pct" style="color:${ringColor}">${Math.round(ctxPct)}%</span>
+    </div>`;
+  const q = pr?.quota;
+  const qCls = (v) => v <= 20 ? 'crit-low' : v <= 50 ? 'warn-low' : '';
+  const quotaPill = q ? `
+    <span class="quota-pill" onclick="openKvDD('quota')">
+      <b>${esc(q.model)}</b>
+      ${q.windows.map(w => `· <span>${w.label}剩 <span class="${qCls(w.left)}">${w.left}%</span></span>`).join(' ')}
+      <span style="color:var(--fg-faint);font-size:10px;">⏱ ${q.windows[0].reset} 重置</span>
+    </span>` : '';
+
+  $('panel').innerHTML = `
+  <div class="panel-head">
+    <span class="t">${esc(s.title)}</span>
+    <div class="head-btns">
+      <button class="btn-outline warn" ${running && !offline && !ended ? '' : 'disabled'} onclick="interrupt()">打断本轮</button>
+      <button class="btn-outline danger" ${!offline && !ended ? '' : 'disabled'} onclick="endSession()">结束会话</button>
+    </div>
+  </div>
+  ${offline ? `<div class="readonly-banner">⚠ 会话所属机器（${esc(m.name)}）当前离线 —— 可浏览历史消息，暂不能继续对话；机器恢复在线后可继续。</div>` : ''}
+  ${ended ? `<div class="ended-banner"><span>会话已${s.status === 'failed' ? '失败' : '结束'} —— 可浏览历史消息</span><button class="btn-reopen" onclick="reopenSession()">重新开启</button></div>` : ''}
+  <div class="messages" id="msgs">${msgs || '<div class="list-empty" style="margin:auto;">暂无消息</div>'}</div>
+  <div class="input-zone">
+    <div class="ctx-bar">${ctxRing}${quotaPill}<span style="flex:1"></span>${!quotaPill && pr && pr.id !== 'none' ? '<span style="font-size:10.5px;color:var(--fg-faint);">该供应商未提供额度信息</span>' : ''}</div>
+    <textarea class="input-box" id="chatInput" placeholder="${offline ? '机器离线，输入不可用…' : ended ? '会话已结束' : running ? '当前轮次运行中…' : '继续追问…（Enter 发送 · Shift+Enter 换行）'}"
+      ${offline || ended || running ? 'disabled' : ''} onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMsg()}"></textarea>
+    <div class="ccgui-bar" id="ccbar">
+      ${ctrl('machine', '🖥', m.name, '守护进程（换机器需开新会话）')}
+      ${ctrl('agent', a?.engine === 'claude' ? '⚡' : '◎', a?.name ?? '—', '智能体（同引擎内可切）')}
+      ${ctrl('provider', '☁', pr && pr.id !== 'none' ? pr.name : '本机默认', '供应商（不选=本机默认配置）')}
+      ${ctrl('profile', '📋', p && p.id !== 'p-none' ? p.name : '未指定', '智能体档案（同引擎内可切）')}
+      <span class="cc-spacer"></span>
+      ${!canSwitch && !offline && !ended ? '<span class="cc-lock">🔒 本轮完成后解锁切换</span>' : ''}
+      <button class="btn-send" ${offline || ended || running ? 'disabled' : ''} onclick="sendMsg()">发送 ⏎</button>
+    </div>
+    <div id="switchDDHost"></div>
+  </div>`;
+  const box = $('msgs'); box.scrollTop = box.scrollHeight;
+}
+
+/* ── 配置切换下拉（样式B 控件） ── */
+function openSwitchDD(kind) {
+  closeDD();
+  const s = sessions.find(x => x.id === currentSessionId);
+  const m = machineOf(s), a = agentOf(s);
+  const dd = document.createElement('div');
+  dd.className = 'dd'; dd.id = 'switchDD';
+  let html = '';
+  if (kind === 'machine') {
+    html = `<div class="dd-title">切换守护进程 · 只影响本会话（换机器=开新会话，跨机切换二期支持）</div>` +
+      machines.map(mm => `<div class="dd-item ${mm.id === m.id ? 'on' : ''} ${mm.online ? '' : 'na'}">
+        <span class="m-status ${mm.online ? '' : 'off'}" style="width:7px;height:7px;"></span>${mm.name}
+        ${mm.id === m.id ? '<span class="dd-check">✓ 当前</span>' : `<span class="sub">${mm.online ? '跨机器 · 二期' : '离线'}</span>`}</div>`).join('');
+  } else if (kind === 'agent') {
+    const sameMachine = m.agents.filter(x => x.online && !x.noSession);
+    const others = machines.filter(mm => mm.id !== m.id && mm.online).flatMap(mm => mm.agents.filter(x => x.online && x.engine === a.engine && !x.noSession).map(x => ({ ...x, mname: mm.name })));
+    html = `<div class="dd-title">切换智能体 · 同机同引擎内（换引擎=开新会话）</div>` +
+      sameMachine.map(x => `<div class="dd-item ${x.id === a.id ? 'on' : ''} ${x.engine === a.engine ? '' : 'na'}" ${x.engine === a.engine && x.id !== a.id ? `onclick="applySwitch('agentId','${x.id}')"` : ''}>
+        ${x.engine === 'claude' ? '⚡' : '◎'} ${x.name}
+        ${x.id === a.id ? '<span class="dd-check">✓ 当前</span>' : x.engine !== a.engine ? '<span class="sub">不同引擎</span>' : ''}</div>`).join('') +
+      `<div class="dd-title" style="margin-top:6px;">其它机器的同引擎智能体（二期）</div>` +
+      others.map(x => `<div class="dd-item na">${x.engine === 'claude' ? '⚡' : '◎'} ${x.name}<span class="sub">🖥 ${x.mname} · 跨机器</span></div>`).join('');
+  } else if (kind === 'provider') {
+    html = `<div class="dd-title">切换供应商 · 只影响本会话</div>` + providers.map(p => {
+      const na = a.engine !== 'claude' && p.id !== 'none';
+      return `<div class="dd-item ${s.providerId === p.id ? 'on' : ''} ${na ? 'na' : ''}" ${na ? '' : `onclick="applySwitch('providerId','${p.id}')"`}>
+        ☁ ${p.name}${p.sub ? `<span class="sub">${p.sub}</span>` : ''}${s.providerId === p.id ? '<span class="dd-check">✓</span>' : ''}</div>`;
+    }).join('');
+  } else {
+    html = `<div class="dd-title">切换档案 · 只影响本会话（仅同引擎 ${a.engine === 'claude' ? 'Claude' : 'Codex'}）</div>` + profiles.map(p => {
+      const na = p.engine && p.engine !== a.engine;
+      return `<div class="dd-item ${s.profileId === p.id ? 'on' : ''} ${na ? 'na' : ''}" ${na ? '' : `onclick="applySwitch('profileId','${p.id}')"`}>
+        📋 ${p.name}${na ? '<span class="sub">不同引擎 · 不可选</span>' : ''}${s.profileId === p.id ? '<span class="dd-check">✓</span>' : ''}</div>`;
+    }).join('');
+  }
+  dd.innerHTML = html;
+  $('ccbar').appendChild(dd);
+  openDD = { type: 'switch' };
+}
+/* ── 上下文用量 / 模型额度 详情浮层 ── */
+function openKvDD(kind) {
+  if (openDD?.type === 'kv-' + kind) { closeDD(); renderPanel(); return; }
+  const s = sessions.find(x => x.id === currentSessionId);
+  const dd = document.createElement('div');
+  dd.className = 'dd kv';
+  let html = '';
+  if (kind === 'ctx') {
+    const pct = ((s.ctx.used / s.ctx.total) * 100).toFixed(1);
+    const usedK = s.ctx.used >= 1000 ? (s.ctx.used / 1000).toFixed(1) + 'M' : s.ctx.used.toFixed(1) + 'k';
+    const totalK = s.ctx.total >= 1000 ? (s.ctx.total / 1000).toFixed(1) + 'M' : s.ctx.total + 'k';
+    html = `<div class="dd-title">上下文窗口用量</div>
+      <div class="kv-row"><span>用量占比</span><b>${pct}%</b></div>
+      <div class="kv-row"><span>已用 / 总量</span><b>${usedK} / ${totalK}</b></div>
+      <div class="kv-row"><span class="muted">当前会话累计 token（含系统提示与历史轮次）</span></div>`;
+  } else if (providerOf(s)?.quota) {
+    const q0 = providerOf(s).quota;
+    html = `<div class="dd-title">模型剩余额度 · ${esc(q0.model)}</div>` +
+      q0.windows.map(w => `
+        <div class="kv-row"><span>${w.label} 剩余</span><b class="${w.left <= 20 ? 'crit-low' : w.left <= 50 ? 'warn-low' : ''}">${w.left}%</b></div>
+        <div class="kv-row"><span class="muted">${w.reset} 重置</span></div>`).join('');
+  }
+  dd.innerHTML = html;
+  const zone = document.querySelector('.input-zone');
+  if (zone) {
+    zone.style.position = 'relative';
+    dd.style.position = 'absolute';
+    dd.style.bottom = 'calc(100% - 34px)';
+    dd.style.left = '0';
+    dd.style.top = 'auto';
+    zone.appendChild(dd);
+  }
+  openDD = { type: 'kv-' + kind };
+}
+
+function applySwitch(field, val) {
+  const s = sessions.find(x => x.id === currentSessionId);
+  s[field] = val;
+  const names = { providerId: '供应商', profileId: '智能体档案', agentId: '智能体' };
+  const label = field === 'providerId' ? (providers.find(p => p.id === val)?.name ?? '本机默认') :
+                field === 'profileId' ? (profiles.find(p => p.id === val)?.name ?? '未指定') : '';
+  toast(`已切换${names[field]} → ${label}（下一轮生效，历史消息保留当时配置）`);
+  closeDD(); renderPanel(); renderList();
+}
+function closeDD() {
+  openDD = null;
+  document.querySelectorAll('.dd').forEach(d => d.remove());
+  $('filterDD') && ($('filterDD').style.display = 'none');
+}
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.dd') && !e.target.closest('.cc-ctrl') && !e.target.closest('.mini-select') && !e.target.closest('.select-like') && !e.target.closest('.ctx-ring') && !e.target.closest('.quota-pill')) closeDD();
+});
+
+/* ── 发消息 / 轮次模拟 ── */
+const replies = [
+  '好的，我来处理。先读取相关文件确认现状……',
+  '已完成分析：问题定位在配置注入链路的优先级，建议按方案 A 调整并补单测。',
+  '这轮我做了三件事：梳理调用链、标注改动点、列出风险项。详见上方工具过程。',
+];
+const tools = ['🔧 Read · src/config.ts', '🔧 Grep · "provider_config"', '🔧 Edit · src/session.ts'];
+
+function sendMsg() {
+  const s = sessions.find(x => x.id === currentSessionId);
+  const input = $('chatInput');
+  const text = input.value.trim();
+  if (!text || s.turn === 'running') return;
+  s.turns.push({ role: 'user', text });
+  s.turn = 'running'; s.time = relTime(); s.turnCount++;
+  // 模拟上下文用量增长（用户消息 + 回复都会占用窗口）
+  s.ctx = s.ctx ?? { used: 0, total: 1000 };
+  s.ctx.used = Math.min(s.ctx.total, s.ctx.used + 4 + Math.random() * 8);
+  input.value = '';
+  renderPanel(); renderList();
+  // 模拟执行：工具条目 → 回复 → idle
+  let step = 0;
+  const run = () => {
+    if (s.turn !== 'running') return;
+    if (step === 0 && Math.random() > .3) { s.turns.push({ role: 'tool', text: tools[step] }); renderPanel(); }
+    setTimeout(() => {
+      if (s.turn !== 'running') return;
+      s.turns.push({ role: 'agent', text: replies[Math.floor(Math.random() * replies.length)],
+        cfg: { profileId: s.profileId, agentId: s.agentId, providerId: s.providerId } });
+      s.turn = 'idle';
+      renderPanel(); renderList();
+    }, 1800);
+    step++;
+  };
+  setTimeout(run, 700);
+}
+
+function startSession() {
+  const text = newForm.prompt.trim();
+  if (!text) return;
+  const m = machines.find(x => x.id === newForm.machineId);
+  const a = m.agents.find(x => x.id === newForm.agentId);
+  const s = {
+    id: 's' + (++sidSeq), title: text.slice(0, 30), machineId: m.id, engine: a.engine, agentId: a.id,
+    providerId: newForm.providerId, profileId: newForm.profileId,
+    status: 'active', turn: 'running', turns: [{ role: 'user', text }], time: relTime(), turnCount: 1,
+    ctx: { used: 10 + Math.random() * 8, total: 1000 }, quota: null,
+  };
+  sessions.unshift(s);
+  currentSessionId = s.id; view = 'session';
+  toast('会话已创建（模拟），智能体正在回复…');
+  renderPanel(); renderList();
+  setTimeout(() => {
+    if (s.turn !== 'running') return;
+    s.turns.push({ role: 'agent', text: replies[Math.floor(Math.random() * replies.length)],
+      cfg: { profileId: s.profileId, agentId: s.agentId, providerId: s.providerId } });
+    s.turn = 'idle';
+    renderPanel(); renderList();
+  }, 2200);
+}
+
+function interrupt() {
+  const s = sessions.find(x => x.id === currentSessionId);
+  if (s.turn !== 'running') return;
+  s.turns.push({ role: 'agent', text: '（本轮已被用户打断）',
+    cfg: { profileId: s.profileId, agentId: s.agentId, providerId: s.providerId } });
+  s.turn = 'idle';
+  toast('已打断本轮');
+  renderPanel(); renderList();
+}
+function endSession() {
+  const s = sessions.find(x => x.id === currentSessionId);
+  s.status = 'ended'; s.turn = 'idle';
+  toast('会话已结束，可重新开启');
+  renderPanel(); renderList();
+}
+function reopenSession() {
+  const s = sessions.find(x => x.id === currentSessionId);
+  s.status = 'active';
+  toast('会话已重新开启');
+  renderPanel(); renderList();
+}
+
+/* ══════════ 启动 ══════════ */
+renderList();
+renderPanel();
+</script>
+</body>
+</html>

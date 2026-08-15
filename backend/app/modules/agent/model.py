@@ -144,6 +144,18 @@ class AgentRun(BaseModel, table=True):
         default=None,
         sa_column=Column(JSON, nullable=True),
     )
+    # ── 会话配置层（2026-08-14-sessions-portal task-01 / D-008@v1 轮次快照） ──
+    # 本轮 dispatch 实际生效的 llm_provider（会话级覆盖，design §5 Wave1）。
+    # 与 agent_profile_snapshot 共同构成轮次配置快照；供应商删则 SET NULL，
+    # run 历史保留。NULL = 走现状链（bound/全局默认），零回归。
+    llm_provider_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("llm_providers.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
     diff_summary: str | None = Field(
         default=None,
         sa_column=Column(Text, nullable=True),
@@ -518,6 +530,33 @@ class AgentSession(BaseModel, table=True):
     )
     provider: str = Field(
         sa_column=Column(String(30), nullable=False),
+    )
+    # ── 会话配置三列（2026-08-14-sessions-portal task-01 / FR-04 / D-008@v1） ──
+    # 会话独立持有配置（design §5 Wave1 / §8）：显式绑定的智能体档案与供应商；
+    # 均 NULL = 未选配置 = 现状行为（全局默认供应商、无人格，R-01 零回归）。
+    # 档案/供应商删则 SET NULL，会话历史保留；config_snapshot 冻结当前生效
+    # 配置摘要（profile_name/provider_name/model/engine/machine_name/agent_name），
+    # 供列表 chips 直显免二次查询（Grill C-12）。producer=backend session
+    # service（task-03/04 写入）；consumer=会话列表/详情（task-05）。
+    agent_profile_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_profiles.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    llm_provider_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("llm_providers.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    config_snapshot: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
     )
     status: str = Field(
         default="pending",

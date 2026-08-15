@@ -30,6 +30,7 @@ import {
   ListChecks,
   ListTodo,
   LogOut,
+  MessageSquare,
   type LucideIcon,
   Network,
   Package,
@@ -98,6 +99,9 @@ const MENU_ICON_MAP: Record<string, LucideIcon> = {
   // 2026-08-04-agent-profile-ui-redesign task-05（D-001/D-007）：智能体档案全局卡片墙
   // 一级菜单。图标 Bot（机器人，语义=智能体人设，避开与 agent 控制台 Terminal 重复）。
   "/agent-profiles": Bot,
+  // 2026-08-14-sessions-portal task-10：智能体会话总入口 /sessions。图标
+  // MessageSquare（对话气泡，语义=会话；避开与 config 组重复图标）。
+  "/sessions": MessageSquare,
   // ppm（absolute href /ppm/*）
   // 「个人工作台」作 PPM 菜单首项(task-08 / D-001@v1);图标 LayoutDashboard。
   // 注:菜单条目本身(menuKey/label/href/permissions)在 lib/menu-permissions.ts

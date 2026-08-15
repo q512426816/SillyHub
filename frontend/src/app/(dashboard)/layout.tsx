@@ -13,7 +13,9 @@ import { useSession } from "@/stores/session";
 // task-08：加入 /account（个人中心，平台级、不依赖工作区）。
 // 2026-08-04-agent-profile-ui-redesign task-05 补：加入 /agent-profiles（智能体档案全局页，
 // 独立一级菜单、跨工作区聚合视图，不依赖工作区上下文——execute 时遗漏，部署实测发现被守卫重定向）。
-const WORKSPACE_WHITELIST = ["/workspaces", "/admin", "/settings", "/ppm", "/runtimes", "/account", "/agent-profiles"];
+// 2026-08-14-sessions-portal task-10 补：加入 /sessions（智能体会话总入口，平台级
+// 跨工作区视图，不依赖工作区上下文）。
+const WORKSPACE_WHITELIST = ["/workspaces", "/admin", "/settings", "/ppm", "/runtimes", "/account", "/agent-profiles", "/sessions"];
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const router = useRouter();

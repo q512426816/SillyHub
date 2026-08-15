@@ -169,6 +169,41 @@ class UsageResult(BaseModel):
     error: str | None = None
 
 
+# ── quota 查询（sessions-portal task-07 / FR-08 / D-009@v1）───────────────────
+# 弱依赖（R-05）：仅 GLM 一期返回窗口数据；其余供应商 / 上游失败 / 无数据一律
+# ``quota=None``（HTTP 200），前端 null 不显示胶囊。明文 key 永不进该结构（NFR-02）。
+
+
+class LlmProviderQuotaWindow(BaseModel):
+    """单个额度窗口（5 小时窗 / 周限额）。
+
+    - ``label``：窗口名（沿用智谱 tier ``plan_name``，含套餐等级前缀如「Max·5小时窗」）；
+    - ``left``：剩余百分比（0-100，口径同 ``UsageData.remaining``）；
+    - ``reset``：重置时间 ISO8601（上游缺失则 None）。
+    """
+
+    label: str | None = None
+    left: float | None = None
+    reset: str | None = None
+
+
+class LlmProviderQuotaData(BaseModel):
+    """quota 非 null 载荷（design §7.1）：``{model, windows[]}``。"""
+
+    model: str | None = None
+    windows: list[LlmProviderQuotaWindow] = []
+
+
+class LlmProviderQuotaResponse(BaseModel):
+    """``GET /api/llm-providers/{id}/quota`` 响应。
+
+    - GLM 正常 → ``quota`` 含 ``windows``（5 小时窗 / 周限额，含剩余与重置时间）；
+    - 非 GLM / 上游失败 / 无数据 → ``quota=None``（HTTP 200，绝不 5xx，D-009）。
+    """
+
+    quota: LlmProviderQuotaData | None = None
+
+
 # ── set/unset_default 结构化响应（task-05 / FR-07）──────────────────────────────
 
 

@@ -735,6 +735,59 @@ class AgentService:
         )
         await self._session.commit()
 
+    async def apply_session_profile_to_lease(
+        self,
+        lease_id: uuid.UUID,
+        profile: "AgentProfile",
+    ) -> None:
+        """会话专用档案注入变体（2026-08-14-sessions-portal task-03 / D-013 / Grill C-06）。
+
+        与 :meth:`_apply_profile_to_lease` 的三点刻意差异（不复用原函数的原因）：
+
+        * **非 commit**：原函数尾部有 ``commit()``（batch 路径独立事务）；会话路径
+          lease 与 session/run 三元组由 ``SessionService.create_session`` 统一提交，
+          这里只 UPDATE 不 commit。
+        * **只写提示词维度**（D-013）：``system_prompt``（非空时）+ ``mcp_refs`` /
+          ``skill_refs`` 透传；**不读不写** profile 的 ``provider`` / ``model`` /
+          ``llm_provider_id``（会话供应商由独立 metadata key
+          ``session_llm_provider_id`` 承载，create_session 直接写）。
+        * **不写** ``effective_allowed_roots`` / ``profile_version``（会话路径
+          NG-03：overlay 不裁剪，仅透传）。
+
+        读合并写回的容错与原函数一致（SQLite 返 JSON 文本 / PG 返已解 dict）。
+        """
+        import json as _json
+
+        from sqlalchemy import text as _sa_text
+
+        meta_row = (
+            (
+                await self._session.execute(
+                    _sa_text("SELECT metadata FROM daemon_task_leases WHERE id = :id"),
+                    {"id": lease_id.hex},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        raw_meta = meta_row["metadata"] if meta_row else None
+        if isinstance(raw_meta, str):
+            meta: dict = _json.loads(raw_meta) if raw_meta else {}
+        elif isinstance(raw_meta, dict):
+            meta = dict(raw_meta)
+        else:
+            meta = {}
+        meta["mcp_refs"] = list(profile.mcp_refs or [])
+        meta["skill_refs"] = list(profile.skill_refs or [])
+        # 空则不写键（与 _apply_profile_to_lease 行为一致：daemon 端缺键=无人格）。
+        if profile.system_prompt:
+            meta["system_prompt"] = profile.system_prompt
+        await self._session.execute(
+            _sa_text("UPDATE daemon_task_leases SET metadata = :meta WHERE id = :id"),
+            {"meta": _json.dumps(meta), "id": lease_id.hex},
+        )
+        # 刻意不 commit：事务由 create_session 统一提交（task-03 constraints）。
+
     # ------------------------------------------------------------------
     # Kill mechanism
     # ------------------------------------------------------------------

@@ -252,6 +252,20 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     matchPattern: "/agent-profiles",
     permissions: [],
   },
+  {
+    // 2026-08-14-sessions-portal task-10 新增（design §5 Wave3 / FR-01 / FR-02）：
+    // 智能体会话总入口 /sessions（左会话列表 + 右新建/会话两态，跨机器跨智能体统一
+    // 会话视图）。permissions:[] 对齐 agent-profiles/skills：会话列表后端已按
+    // user_id 隔离，所有登录用户可见，菜单不挂独立权限（登录即可见）。
+    section: "agent",
+    menuKey: "sessions",
+    menuLabel: "智能体会话",
+    icon: "💬",
+    href: "/sessions",
+    absolute: true,
+    matchPattern: "/sessions",
+    permissions: [],
+  },
 
   // ── config 配置中心（4 条，含新增 llm-providers；runtimes 自 system 移入，D-006）
   {

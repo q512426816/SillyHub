@@ -650,6 +650,10 @@ class DaemonService:
         ask_user_only: bool = False,
         change_id: uuid.UUID | None = None,
         workspace_id: uuid.UUID | None = None,
+        # 2026-08-14-sessions-portal task-02：双入口 + 会话配置字段透传（解析归 task-03）。
+        runtime_id: str | None = None,
+        agent_profile_id: str | None = None,
+        llm_provider_id: str | None = None,
     ) -> SessionDispatchResult:
         return await self._sess.create_session(
             user_id,
@@ -660,6 +664,9 @@ class DaemonService:
             ask_user_only=ask_user_only,
             change_id=change_id,
             workspace_id=workspace_id,
+            runtime_id=runtime_id,
+            agent_profile_id=agent_profile_id,
+            llm_provider_id=llm_provider_id,
         )
 
     async def inject_session(
@@ -668,8 +675,17 @@ class DaemonService:
         user_id: uuid.UUID,
         *,
         prompt: str,
+        # 2026-08-14-sessions-portal task-02：切档案/切供应商透传（实现归 task-05）。
+        agent_profile_id: str | None = None,
+        llm_provider_id: str | None = None,
     ) -> SessionDispatchResult:
-        return await self._sess.inject_session(session_id, user_id, prompt=prompt)
+        return await self._sess.inject_session(
+            session_id,
+            user_id,
+            prompt=prompt,
+            agent_profile_id=agent_profile_id,
+            llm_provider_id=llm_provider_id,
+        )
 
     async def interrupt_session(
         self,
@@ -742,9 +758,21 @@ class DaemonService:
         limit: int,
         offset: int,
         status_filter: str | None = None,
+        runtime_id: uuid.UUID | None = None,
+        machine_id: uuid.UUID | None = None,
+        provider: str | None = None,
+        q: str | None = None,
     ) -> tuple[list[AgentSession], int]:
+        # task-06 / FR-02：过滤参数透传（全部可选，不传 = 现状，零回归）。
         return await self._sess.list_agent_sessions(
-            user_id, limit=limit, offset=offset, status_filter=status_filter
+            user_id,
+            limit=limit,
+            offset=offset,
+            status_filter=status_filter,
+            runtime_id=runtime_id,
+            machine_id=machine_id,
+            provider=provider,
+            q=q,
         )
 
     async def get_agent_session(

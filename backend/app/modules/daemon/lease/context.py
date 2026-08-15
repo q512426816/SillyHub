@@ -232,6 +232,13 @@ async def _inject_provider_config(
     查询（D-008 owner 级 + R-05 is_default 互斥）：``user_id AND agent_kind=归一化
     AND is_default=True``，三者对齐才命中。
 
+    供应商优先级（task-04 sessions-portal / FR-04 / R-02，两级）：
+      1. **会话级**：``lease_meta.session_llm_provider_id``（独立 key，与档案绑定
+         ``llm_provider_id`` 严格区分）→ 按该 id 解析（校验属主 + agent_kind），
+         解析异常降级走原链；
+      2. 全局默认链：档案绑定（bound）→ 用户默认（default），现状不变。
+    无 profile.model 派生分支（D-013）。
+
     命中：
       - ``CredentialCipher.decrypt``（task-03 service 同款，复用 ``get_cipher()``）
         明文 api_key 放入 provider_config（8 字段，task-06 provides contract）。
@@ -268,6 +275,37 @@ async def _inject_provider_config(
     agent_kind = _normalize_lease_provider(agent_kind_raw)
     if agent_kind is None:
         return  # 无 agent_kind 信号 → 不注入
+
+    # ── 会话级供应商（最高优先级，task-04 sessions-portal / FR-04 / R-02）──
+    # lease_meta.session_llm_provider_id 由会话创建链路（design §5 Wave1 第 2 步）写入，
+    # 是与档案绑定 key ``llm_provider_id`` **严格区分**的独立 key（R-02：不同 key 天然
+    # 不冲突）。两级优先级：会话选择 > 全局默认（bound/default 链）——有会话供应商时
+    # 直接用它，压制档案绑定（FR-04）；不引入 profile.model 派生分支（D-013）。
+    # 解析复用 ``resolve_bound_provider_config``（按 id 查 + 校验属主与 agent_kind +
+    # 按 api_format 构造，口径完全一致）；解析异常时降级走原链并留日志，不阻断会话创建。
+    _session_pid_raw = lease_meta.get("session_llm_provider_id")
+    if _session_pid_raw:
+        try:
+            session_config = await resolve_bound_provider_config(
+                session, {"llm_provider_id": _session_pid_raw}, user_id, agent_kind
+            )
+        except Exception:
+            log.warning(
+                "daemon_claim_session_provider_resolve_failed",
+                lease_id=str(lease.id),
+                session_llm_provider_id=str(_session_pid_raw),
+            )
+            session_config = None  # 降级走原链（bound/default），不阻断会话创建
+        if session_config is not None:
+            payload["provider_config"] = session_config
+            override_model = session_config.get("model") or session_config.get(
+                "default_fallback_model"
+            )
+            if override_model:
+                payload["model"] = override_model
+            return
+        # session_config 为 None（id 不存在 / 属主不符 / agent_kind 不符 / 格式无效）
+        # → 静默降级走下方原链（与 bound 分支同款回退语义，不抛错）。
 
     # ── 优先用档案绑定的 provider（方案A，D-003/D-006/D-007）──
     # lease_meta.llm_provider_id 由 _apply_profile_to_lease 写入。bound helper 校验

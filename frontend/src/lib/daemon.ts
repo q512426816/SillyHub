@@ -607,17 +607,21 @@ export async function listWorkspaceDialogs(
 
 export type InteractiveProvider = "claude" | "codex";
 
-export interface SessionCreateRequest {
-  provider: InteractiveProvider;
-  prompt: string;
-  model?: string | null;
+/**
+ * task-17（规则 20）：已迁 api-types 生成版 SessionCreateRequest（design §5 Wave1）。
+ * manual_approval/ask_user_only 在后端 pydantic 有 default → OpenAPI 标记为必填，
+ * 但客户端允许省略（省略即走后端默认 true），故 Omit 后放宽为可选——
+ * 字段集合/命名仍锚定生成 schema，漂移会在 gen:types 时暴露。
+ */
+export type SessionCreateRequest = Omit<
+  components["schemas"]["SessionCreateRequest"],
+  "manual_approval" | "ask_user_only"
+> & {
+  /** 省略 = 后端默认 true。 */
   manual_approval?: boolean;
+  /** 省略 = 后端默认 true。 */
   ask_user_only?: boolean;
-  /** 2026-07-09-change-detail-session：变更会话绑定（D-001）。可选，runtimes 页不传。 */
-  change_id?: string;
-  /** 工作空间绑定（冗余，便于过滤/cwd 解析，D-003）。可选。 */
-  workspace_id?: string;
-}
+};
 
 export interface SessionCreateResponse {
   session_id: string;
@@ -647,10 +651,16 @@ export async function createSession(
   input: SessionCreateRequest,
 ): Promise<SessionCreateResponse> {
   const body: Record<string, unknown> = {
-    provider: input.provider,
     prompt: input.prompt,
-    model: input.model ?? null,
   };
+  if (input.provider !== undefined) body.provider = input.provider;
+  if (input.runtime_id !== undefined) body.runtime_id = input.runtime_id;
+  if (input.agent_profile_id !== undefined) {
+    body.agent_profile_id = input.agent_profile_id;
+  }
+  if (input.llm_provider_id !== undefined) {
+    body.llm_provider_id = input.llm_provider_id;
+  }
   if (input.manual_approval !== undefined) {
     body.manual_approval = input.manual_approval;
   }
@@ -666,16 +676,36 @@ export async function createSession(
 }
 
 /**
+ * injectSession 切换参数（2026-08-14-sessions-portal task-16 / FR-02 / D-012@v1）。
+ * task-17（规则 20）：迁 api-types 生成版 SessionInjectRequest；prompt 是
+ * injectSession 的独立入参（不进 options），故 Omit 掉。
+ */
+export type SessionInjectOptions = Omit<
+  components["schemas"]["SessionInjectRequest"],
+  "prompt"
+>;
+
+/**
  * POST /api/daemon/sessions/{id}/inject — 同一 session 下创建下一 turn（新 AgentRun）。
  * 业务含义是"新一轮追问"，不是写入长驻进程 stdin。
+ * options 携带 agent_profile_id/llm_provider_id 时触发轮次配置热切换（FR-02）。
  */
 export async function injectSession(
   sessionId: string,
   prompt: string,
+  options?: SessionInjectOptions,
 ): Promise<SessionInjectResponse> {
+  const body: Record<string, unknown> = { prompt };
+  // 注意 llm_provider_id === ""（切回本机默认）必须下发，故判 undefined 而非真值。
+  if (options?.agent_profile_id !== undefined) {
+    body.agent_profile_id = options.agent_profile_id;
+  }
+  if (options?.llm_provider_id !== undefined) {
+    body.llm_provider_id = options.llm_provider_id;
+  }
   return apiFetch<SessionInjectResponse>(
     `/api/daemon/sessions/${encodeURIComponent(sessionId)}/inject`,
-    { method: "POST", json: { prompt } },
+    { method: "POST", json: body },
   );
 }
 
@@ -956,31 +986,63 @@ export type AgentSessionStatus =
   | "ended"
   | "failed";
 
-export interface AgentSessionRead {
-  id: string;
-  runtime_id: string | null;
-  lease_id: string | null;
-  provider: string;
-  status: AgentSessionStatus;
-  agent_session_id: string | null;
-  config: { manual_approval?: boolean; model?: string | null } | null;
-  turn_count: number;
-  created_at: string;
-  last_active_at: string | null;
-  ended_at: string | null;
-  /** FR-08: 首条 user_input 摘要前 30 字（router 注入，可空）。 */
-  title: string | null;
-  /** FR-05: 软删时间戳（正常列表不会返回软删项，防御性字段）。 */
-  deleted_at: string | null;
-  /** 当前运行 run（attach 恢复 currentRunId，启用打断按钮；无运行 run 则 null）。 */
-  current_run_id: string | null;
+/**
+ * 会话当前生效配置摘要（agent_sessions.config_snapshot，2026-08-14-sessions-portal
+ * task-02 / design §5 Wave1）。列表 chips 直显免二次查询（Grill C-12）。
+ *
+ * task-17（规则 20）：后端 config_snapshot 是 JSON dict（生成版只给出
+ * `{[key:string]: unknown}`），具名字段结构无法从 OpenAPI 表达，此接口是
+ * 该 JSON blob 的消费端结构声明，保留手写；其余 AgentSessionRead 字段已迁生成版。
+ */
+export interface AgentSessionConfigSnapshot {
+  profile_name?: string | null;
+  provider_name?: string | null;
+  model?: string | null;
+  engine?: string | null;
+  machine_name?: string | null;
+  agent_name?: string | null;
 }
 
-export interface AgentSessionListResponse {
+/**
+ * task-17（规则 20）：AgentSessionRead 主体迁 api-types 生成版（含本变更三新字段
+ * agent_profile_id / llm_provider_id / config_snapshot）。以下字段在后端是
+ * string/JSON dict，生成版无法表达窄化语义，Omit 后保留前端窄化：
+ * - status：后端枚举收窄为 AgentSessionStatus（调用方依赖判别联合）；
+ * - config：消费端只读 manual_approval/model 两个键；
+ * - config_snapshot：具名结构见 AgentSessionConfigSnapshot；
+ * - title：后端响应恒带该键（router 注入，缺省 null），生成版误标可选，收窄回必填。
+ */
+export type AgentSessionRead = Omit<
+  components["schemas"]["AgentSessionRead"],
+  "status" | "config" | "config_snapshot" | "title"
+> & {
+  status: AgentSessionStatus;
+  config: { manual_approval?: boolean; model?: string | null } | null;
+  config_snapshot: AgentSessionConfigSnapshot | null;
+  /** FR-08: 首条 user_input 摘要前 30 字（router 注入，缺省 null，键恒存在）。 */
+  title: string | null;
+};
+
+export type AgentSessionListResponse = Omit<
+  components["schemas"]["AgentSessionListResponse"],
+  "items"
+> & {
   items: AgentSessionRead[];
-  total: number;
-  limit: number;
-  offset: number;
+};
+
+/** GET /api/daemon/sessions 过滤参数（分页 + 2026-08-14-sessions-portal FR-02 筛选）。 */
+export interface AgentSessionListParams {
+  limit?: number;
+  offset?: number;
+  status?: AgentSessionStatus;
+  /** 按运行时（=机器+智能体组合）过滤。 */
+  runtime_id?: string;
+  /** 按机器（daemon instance）过滤（后端 join daemon_runtimes）。 */
+  machine_id?: string;
+  /** 按引擎 provider 过滤（claude/codex...）。 */
+  provider?: string;
+  /** 标题模糊搜索（title ilike）。 */
+  q?: string;
 }
 
 /**
@@ -988,16 +1050,16 @@ export interface AgentSessionListResponse {
  * 越权隔离在后端 SQL 层（user_id），前端只展示。
  */
 export async function listAgentSessions(
-  options?: {
-    limit?: number;
-    offset?: number;
-    status?: AgentSessionStatus;
-  },
+  options?: AgentSessionListParams,
 ): Promise<AgentSessionListResponse> {
   const query: Record<string, string | number> = {};
   if (options?.limit !== undefined) query.limit = options.limit;
   if (options?.offset !== undefined) query.offset = options.offset;
   if (options?.status) query.status = options.status;
+  if (options?.runtime_id) query.runtime_id = options.runtime_id;
+  if (options?.machine_id) query.machine_id = options.machine_id;
+  if (options?.provider) query.provider = options.provider;
+  if (options?.q) query.q = options.q;
   return apiFetch<AgentSessionListResponse>("/api/daemon/sessions", { query });
 }
 
@@ -1118,6 +1180,13 @@ export async function getAgentSessionLogs(
  * GET /api/daemon/sessions/{id}/runs 返回项（对齐后端 SessionRunRead，task-07 / FR-02）。
  * 每项含 ``error_detail``（模型层 ModelError 序列化值；成功/无错误为 null），
  * 供前端在 run 失败时拉取结构化错误原因（change 2026-07-29-model-error-visibility）。
+ *
+ * gap-fix（FR-07 whoLine / FR-08 历史 usage）：追加轮次配置快照与 usage 字段
+ * （对齐后端 gap-fix 扩列，均 nullable——未配置轮/老 run 行为 null）：
+ *   - agent_profile_snapshot：dispatch 冻结的档案快照（name/provider/model/
+ *     system_prompt/...），供 whoLine 取档案名；
+ *   - llm_provider_id：本轮生效供应商 id（null = 本机默认）；
+ *   - input_tokens / output_tokens：daemon 关单写入，供历史回看累计 usage。
  */
 export interface SessionRunRead {
   id: string;
@@ -1128,6 +1197,12 @@ export interface SessionRunRead {
   started_at: string | null;
   finished_at: string | null;
   exit_code: number | null;
+  /** 轮次配置快照（D-008@v1）：档案名读 snapshot.name；null = 该轮未绑定档案。 */
+  agent_profile_snapshot: { [key: string]: unknown; name?: string | null } | null;
+  /** 本轮生效供应商 id；null = 本机默认供应商。 */
+  llm_provider_id: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
 }
 
 /**

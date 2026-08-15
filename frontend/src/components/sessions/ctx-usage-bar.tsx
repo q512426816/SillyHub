@@ -1,0 +1,320 @@
+"use client";
+
+// task-15（2026-08-14-sessions-portal / FR-08 / D-009@v1 / D-014@v1）：
+// 输入框上方一行组件 = CtxUsageRing（上下文用量环）+ QuotaPill（供应商额度胶囊）。
+//
+// 依据：
+//   - tasks/task-15.md（allowed_paths 本文件 + __tests__/ctx-usage-bar.test.tsx + lib/api/llm-providers.ts）
+//   - design.md §2 FR-08、§5 Wave3 CtxUsageBar 段、§7.1、D-009/D-014、R-05/R-06
+//   - plan.md 附录 spike-01：1M 标记在 LlmProvider.model_role_mappings.<role>.one_m（boolean）
+//   - prototype-sessions-portal.html（.ctx-bar/.ctx-ring/.quota-pill 视觉基准）
+//   - FRONTEND_PAGE_STYLE.md §10/§11（颜色走 tailwind 语义 token，不硬编码 hex）
+//
+// 组件自治约定（constraints）：本组件只收 props / 只调额度接口，不做 usage 累计
+// （SSE turn usage + attach 历史 logs 累计由父层 task-10 组装时传入 usedTokens）；
+// 页面组装归 task-10。
+
+import { Popover } from "antd";
+import { useEffect, useState } from "react";
+
+import {
+  getProviderQuota,
+  type LlmProviderQuotaData,
+  type LlmProviderRoleMapping,
+} from "@/lib/api/llm-providers";
+import { formatTokenCount } from "@/lib/format-token";
+
+// ── 分母三级降级链（D-014@v1 / spike-01）──────────────────────────────────
+
+/** 供应商 role mapping 勾选 1M（one_m=true，injector 模型名后缀 [1m]）→ 1000k。 */
+export const ONE_M_CTX_WINDOW_TOKENS = 1_000_000;
+
+/** 模型默认常量表兜底（design FR-08：未派生时一律 200k）。 */
+export const DEFAULT_CTX_WINDOW_TOKENS = 200_000;
+
+/**
+ * 模型 → 上下文窗口常量表（子串匹配，键小写）。
+ * 一期仅按 design 给出的统一默认 200k；后续模型分化时在此补具体条目，
+ * 命中与否最终都被 DEFAULT_CTX_WINDOW_TOKENS 兜底。
+ */
+export const MODEL_CTX_WINDOW_TABLE: Readonly<Record<string, number>> = {
+  "glm-4": DEFAULT_CTX_WINDOW_TOKENS,
+  claude: DEFAULT_CTX_WINDOW_TOKENS,
+};
+
+/**
+ * 解析上下文窗口分母（三级降级链 D-014@v1）：
+ *   1. 供应商当前 role 的 one_m=true → 1000k（供应商配置派生）；
+ *   2. 有模型名（role mapping.model → fallbackModel）→ 常量表（命中取表值，默认 200k）；
+ *   3. 既无 one_m 也无模型名 → null（无分母，只显示累计 token）。
+ */
+export function resolveCtxWindowTokens(
+  roleMapping: LlmProviderRoleMapping | null | undefined,
+  fallbackModel: string | null | undefined,
+): number | null {
+  if (roleMapping?.one_m === true) return ONE_M_CTX_WINDOW_TOKENS;
+  const model =
+    roleMapping?.model?.trim() || fallbackModel?.trim() || "";
+  if (!model) return null;
+  const key = model.toLowerCase();
+  for (const [pattern, tokens] of Object.entries(MODEL_CTX_WINDOW_TABLE)) {
+    if (key.includes(pattern)) return tokens;
+  }
+  return DEFAULT_CTX_WINDOW_TOKENS;
+}
+
+// ── 阈值（FR-08：50% 黄 / 80% 红）────────────────────────────────────────
+
+export const CTX_WARN_THRESHOLD_PCT = 50;
+export const CTX_CRIT_THRESHOLD_PCT = 80;
+
+function ctxToneClass(pct: number): string {
+  if (pct >= CTX_CRIT_THRESHOLD_PCT) return "text-error";
+  if (pct >= CTX_WARN_THRESHOLD_PCT) return "text-warning";
+  return "text-primary";
+}
+
+// ── CtxUsageRing：上下文用量环形进度 ─────────────────────────────────────
+
+export interface CtxUsageRingProps {
+  /** 当前会话累计输入 token（SSE turn usage + attach 历史 logs，父层累计后传入）。 */
+  usedTokens: number;
+  /** 会话供应商当前 role 的映射（含 model / one_m；本机默认供应商传 null）。 */
+  roleMapping?: LlmProviderRoleMapping | null;
+  /** 供应商 default_fallback_model（role mapping 无 model 时的二级模型来源）。 */
+  fallbackModel?: string | null;
+}
+
+/** 原型 .ctx-ring：28px 环、r=10、stroke 3、rotate(-90deg) 从顶部起量。 */
+export function CtxUsageRing({
+  usedTokens,
+  roleMapping,
+  fallbackModel,
+}: CtxUsageRingProps) {
+  const windowTokens = resolveCtxWindowTokens(roleMapping, fallbackModel);
+  const pct =
+    windowTokens && windowTokens > 0
+      ? Math.min(100, (usedTokens / windowTokens) * 100)
+      : null;
+  const tone = pct == null ? "text-muted-foreground" : ctxToneClass(pct);
+
+  const R = 10;
+  const C = 2 * Math.PI * R;
+  const dash = pct == null ? 0 : (pct / 100) * C;
+
+  const content = (
+    <div style={{ width: 240 }}>
+      <div className="text-xs font-medium text-foreground">上下文窗口用量</div>
+      <div className="mt-1.5 flex flex-col gap-1 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between">
+          <span>用量占比</span>
+          <b className={`font-semibold ${tone}`}>
+            {pct == null ? "未知" : `${pct.toFixed(1)}%`}
+          </b>
+        </div>
+        <div className="flex items-center justify-between">
+          <span>已用 / 总量</span>
+          <b className="font-semibold text-foreground">
+            {formatTokenCount(usedTokens)} /{" "}
+            {windowTokens ? formatTokenCount(windowTokens) : "—"}
+          </b>
+        </div>
+        <div className="mt-1 text-[11px] leading-4 text-muted-foreground">
+          当前会话累计 token（含系统提示与历史轮次）。窗口分母口径：供应商配置
+          1M 勾选 → 1000k；否则模型默认常量 200k；均无法派生时仅显示累计。
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <Popover trigger="click" content={content} placement="topLeft">
+      <span
+        data-testid="ctx-ring"
+        title={
+          pct == null
+            ? `上下文累计 ${formatTokenCount(usedTokens)}（无窗口分母）`
+            : `上下文用量 ${Math.round(pct)}%`
+        }
+        className={`relative inline-flex h-7 w-7 shrink-0 cursor-pointer select-none items-center justify-center ${tone}`}
+        aria-label={
+          pct == null
+            ? "上下文累计 token（无分母）"
+            : `上下文用量 ${Math.round(pct)}%`
+        }
+      >
+        <svg width="28" height="28" style={{ transform: "rotate(-90deg)" }}>
+          <circle
+            cx="14"
+            cy="14"
+            r={R}
+            fill="none"
+            strokeWidth="3"
+            className="stroke-border"
+          />
+          <circle
+            cx="14"
+            cy="14"
+            r={R}
+            fill="none"
+            strokeWidth="3"
+            strokeLinecap="round"
+            stroke="currentColor"
+            strokeDasharray={`${dash.toFixed(2)} ${C.toFixed(2)}`}
+          />
+        </svg>
+        <span
+          className={`absolute inset-0 flex items-center justify-center font-bold ${
+            pct == null ? "text-[7px]" : "text-[8.5px]"
+          } ${tone}`}
+        >
+          {pct == null ? formatTokenCount(usedTokens) : `${Math.round(pct)}%`}
+        </span>
+      </span>
+    </Popover>
+  );
+}
+
+// ── QuotaPill：供应商额度胶囊（D-009@v1，弱依赖 R-05）────────────────────
+
+/** reset（ISO8601）→ 「MM-DD HH:mm」本地时间；无法解析原样返回（不编造）。 */
+export function formatQuotaResetTime(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** 剩余百分比低量变色（design task-15：≤20% 红 / ≤50% 黄）。 */
+function quotaLeftToneClass(left: number): string {
+  if (left <= 20) return "text-error font-semibold";
+  if (left <= 50) return "text-warning font-semibold";
+  return "";
+}
+
+export interface QuotaPillProps {
+  /** 当前会话供应商 id；null/undefined=本机默认 → 整体不渲染。 */
+  providerId: string | null | undefined;
+}
+
+export function QuotaPill({ providerId }: QuotaPillProps) {
+  // undefined=未取到（加载中/失败静默）；null=后端明确无额度；对象=有额度。
+  const [quota, setQuota] = useState<LlmProviderQuotaData | null | undefined>(
+    undefined,
+  );
+
+  useEffect(() => {
+    if (!providerId) {
+      setQuota(undefined);
+      return;
+    }
+    let cancelled = false;
+    // 低频调用：挂载 / 供应商变化时查一次，不加轮询（design §5 Wave3）；
+    // 失败静默降级不渲染胶囊不报错（constraints / R-05）。
+    getProviderQuota(providerId)
+      .then((resp) => {
+        if (!cancelled) setQuota(resp.quota ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setQuota(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [providerId]);
+
+  if (!providerId) return null;
+
+  if (quota == null) {
+    // 原型口径：供应商存在但无额度数据 → 灰字提示（胶囊本体不渲染）。
+    return (
+      <span
+        data-testid="quota-empty-hint"
+        className="shrink-0 text-[10.5px] text-muted-foreground"
+      >
+        该供应商未提供额度信息
+      </span>
+    );
+  }
+
+  const windows = quota.windows ?? [];
+  const firstReset = windows.find((w) => w.reset)?.reset;
+
+  const detail = (
+    <div style={{ width: 240 }}>
+      <div className="text-xs font-medium text-foreground">
+        模型剩余额度{quota.model ? ` · ${quota.model}` : ""}
+      </div>
+      <div className="mt-1.5 flex flex-col gap-1 text-xs text-muted-foreground">
+        {windows.map((w, i) => (
+          <div key={i}>
+            <div className="flex items-center justify-between">
+              <span>{w.label ?? "窗口"} 剩余</span>
+              <b
+                className={`font-semibold ${
+                  w.left == null ? "" : quotaLeftToneClass(w.left)
+                }`}
+              >
+                {w.left == null ? "—" : `${w.left}%`}
+              </b>
+            </div>
+            {w.reset ? (
+              <div className="text-[11px] text-muted-foreground">
+                {formatQuotaResetTime(w.reset)} 重置
+              </div>
+            ) : null}
+          </div>
+        ))}
+        <div className="mt-1 text-[11px] leading-4 text-muted-foreground">
+          数据来自当前供应商额度接口（一期仅 GLM：5 小时窗 / 周限额）。
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <Popover trigger="click" content={detail} placement="topLeft">
+      <span
+        data-testid="quota-pill"
+        className="inline-flex shrink-0 cursor-pointer select-none items-center gap-[5px] whitespace-nowrap rounded-full bg-muted px-2.5 py-[3px] text-[11px] text-muted-foreground hover:text-foreground"
+      >
+        {quota.model ? (
+          <b className="font-semibold text-foreground">{quota.model}</b>
+        ) : null}
+        {windows.map((w, i) =>
+          w.left == null ? null : (
+            <span key={i}>
+              · {w.label ?? "窗口"}剩{" "}
+              <span className={quotaLeftToneClass(w.left)}>{w.left}%</span>
+            </span>
+          ),
+        )}
+        {firstReset ? (
+          <span className="text-[10px] text-muted-foreground">
+            ⏱ {formatQuotaResetTime(firstReset)} 重置
+          </span>
+        ) : null}
+      </span>
+    </Popover>
+  );
+}
+
+// ── CtxUsageBar：组装（输入框上方一行，原型 .ctx-bar）────────────────────
+
+export interface CtxUsageBarProps extends CtxUsageRingProps {
+  /** 传给 QuotaPill 的当前供应商 id（null=本机默认，胶囊不渲染）。 */
+  providerId?: string | null;
+}
+
+export function CtxUsageBar({
+  providerId,
+  ...ringProps
+}: CtxUsageBarProps) {
+  return (
+    <div className="mb-1.5 flex min-h-7 items-center gap-2.5">
+      <CtxUsageRing {...ringProps} />
+      <QuotaPill providerId={providerId} />
+    </div>
+  );
+}

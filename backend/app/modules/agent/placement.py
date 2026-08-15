@@ -592,6 +592,11 @@ class RunPlacementService:
         ask_user_only: bool = False,
         workspace_id: uuid.UUID | None = None,
         cwd: str | None = None,
+        # 2026-08-14-sessions-portal task-03 / Grill C-01（P0）：runtime_id 钉定。
+        # 非空时 lease 直接定位该 runtime，跳过 _get_online_runtime 的
+        # first-online 选择与 provider 不在线 fallback（:1329），也不走
+        # workspace 借用兜底——钉定不可满足时明确抛错，绝不静默换机。
+        pinned_runtime_id: uuid.UUID | None = None,
     ) -> "RunPlacementService.InteractiveDispatch":
         """Create the long-lived interactive lease for a new session.
 
@@ -630,22 +635,44 @@ class RunPlacementService:
         # quick-chat 场景）。helper 内部复检自有（同样 None）→ DAEMON_BORROW → shared lender。
         # 无 workspace_id（普通 quick-chat 无变更上下文）不借用——借用边界 = 工作空间成员资格
         # （design §3 非目标），保持原 NoOnlineDaemonError 行为零回归。
-        runtime = await self._get_online_runtime(user_id, provider=provider)
+        #
+        # task-03（2026-08-14-sessions-portal / Grill C-01 P0）：pinned_runtime_id 命中时
+        # 走钉定路径——直接按 id + 属主 + online 复查该 runtime，跳过 first-online 选择、
+        # provider fallback 与借用兜底；不可满足（离线/不存在/非本人）→ 抛
+        # NoOnlineDaemonError（上层 create_session 捕获后转 4xx），不静默换机。
         borrowed = False
         lender_user_id: uuid.UUID | None = None
-        if runtime is None and workspace_id is not None:
-            rt, borrowed, lender_user_id = await _resolve_borrowed_or_own_runtime(
-                self._session, workspace_id, user_id, provider
-            )
-            if rt is not None:
-                runtime = rt
-        if runtime is None:
-            log.warning(
-                "interactive_dispatch_no_online_runtime",
-                agent_session_id=str(agent_session_id),
-                user_id=str(user_id),
-            )
-            raise NoOnlineDaemonError(user_id=user_id)
+        if pinned_runtime_id is not None:
+            runtime = await self._query_pinned_online_runtime(user_id, pinned_runtime_id)
+            if runtime is None:
+                log.warning(
+                    "interactive_dispatch_pinned_runtime_unavailable",
+                    agent_session_id=str(agent_session_id),
+                    user_id=str(user_id),
+                    pinned_runtime_id=str(pinned_runtime_id),
+                )
+                raise NoOnlineDaemonError(
+                    user_id=user_id,
+                    runtime_id=pinned_runtime_id,
+                    message=(
+                        f"指定的运行时（{pinned_runtime_id}）已离线或不存在，请重新选择机器/智能体"
+                    ),
+                )
+        else:
+            runtime = await self._get_online_runtime(user_id, provider=provider)
+            if runtime is None and workspace_id is not None:
+                rt, borrowed, lender_user_id = await _resolve_borrowed_or_own_runtime(
+                    self._session, workspace_id, user_id, provider
+                )
+                if rt is not None:
+                    runtime = rt
+            if runtime is None:
+                log.warning(
+                    "interactive_dispatch_no_online_runtime",
+                    agent_session_id=str(agent_session_id),
+                    user_id=str(user_id),
+                )
+                raise NoOnlineDaemonError(user_id=user_id)
 
         rid_raw = runtime["id"]
         runtime_id: uuid.UUID = uuid.UUID(rid_raw) if isinstance(rid_raw, str) else rid_raw
@@ -1352,6 +1379,33 @@ class RunPlacementService:
                 error=str(exc),
             )
             return None
+
+    async def _query_pinned_online_runtime(
+        self,
+        user_id: uuid.UUID,
+        runtime_id: uuid.UUID,
+    ) -> dict | None:
+        """task-03（2026-08-14-sessions-portal / Grill C-01 P0）：按 id 精确复查钉定 runtime。
+
+        返回该 runtime 行（dict，与 ``_get_online_runtime`` 同列集）当且仅当
+        ``id + 属主 + status='online'`` 三者同时满足；否则 None（调用方
+        ``prepare_interactive_dispatch`` 抛错，不 fallback）。与 first-online
+        路径的关键差异：无 provider fallback、无 ORDER BY 心跳择优、无借用。
+        """
+        result = await self._session.execute(
+            text(
+                """
+                SELECT id, user_id, provider, status, daemon_instance_id
+                FROM daemon_runtimes
+                WHERE id = :rid
+                  AND user_id = :uid
+                  AND status = 'online'
+                """
+            ),
+            {"rid": runtime_id.hex, "uid": user_id.hex},
+        )
+        row = result.mappings().first()
+        return dict(row) if row else None
 
     async def _query_online(
         self,

@@ -1,8 +1,12 @@
 // task-11（FR-10 / D-006@v1）：session REST 客户端单测。
+// 2026-08-14-sessions-portal task-16：createSession/injectSession 签名扩展
+//（runtime_id/agent_profile_id/llm_provider_id），model 字段移除（design §5 Wave1）。
 //
 // 覆盖：
-//   - createSession：POST /api/daemon/sessions + JSON body + provider/prompt/model；
-//   - injectSession：POST /sessions/{id}/inject + body {prompt} + 编码 session id；
+//   - createSession：POST /api/daemon/sessions + JSON body + provider/prompt +
+//     新参数序列化（runtime_id/agent_profile_id/llm_provider_id）；
+//   - injectSession：POST /sessions/{id}/inject + body {prompt}（+可选切换参数，
+//     llm_provider_id 空串 "none" 语义=切回本机默认）+ 编码 session id；
 //   - interruptSession：POST /sessions/{id}/interrupt + no body；
 //   - endSession：POST /sessions/{id}/end + no body；
 //   - ApiError 透传（404 / 409）。
@@ -46,7 +50,7 @@ function fetchCall(
 describe("createSession", () => {
   beforeEach(() => vi.restoreAllMocks());
 
-  it("POST /api/daemon/sessions，body 含 provider/prompt/model", async () => {
+  it("POST /api/daemon/sessions，body 含 provider/prompt", async () => {
     const resp: SessionCreateResponse = {
       session_id: "sess-1",
       run_id: "run-1",
@@ -59,7 +63,6 @@ describe("createSession", () => {
     const result = await createSession({
       provider: "claude",
       prompt: "hello",
-      model: "sonnet",
     });
 
     expect(result).toEqual(resp);
@@ -69,10 +72,34 @@ describe("createSession", () => {
     const body = JSON.parse(init.body as string);
     expect(body.provider).toBe("claude");
     expect(body.prompt).toBe("hello");
-    expect(body.model).toBe("sonnet");
+    // model 字段已移除（design §5 Wave1：由档案/默认派生），body 不携带。
+    expect(body).not.toHaveProperty("model");
   });
 
-  it("不带 model 时 body.model 默认 null", async () => {
+  it("新参数 runtime_id/agent_profile_id/llm_provider_id 序列化进 body（task-16）", async () => {
+    mockFetch({
+      session_id: "s",
+      run_id: "r",
+      lease_id: "l",
+      status: "active",
+      stream_url: "u",
+    });
+    await createSession({
+      prompt: "hi",
+      runtime_id: "rt-1",
+      agent_profile_id: "ap-1",
+      llm_provider_id: "lp-1",
+    });
+    const init = (vi.mocked(globalThis.fetch).mock.calls[0]![1] ?? {}) as RequestInit;
+    const body = JSON.parse(init.body as string);
+    expect(body.runtime_id).toBe("rt-1");
+    expect(body.agent_profile_id).toBe("ap-1");
+    expect(body.llm_provider_id).toBe("lp-1");
+    // runtime_id 路径（新页面）可以不带 provider。
+    expect(body).not.toHaveProperty("provider");
+  });
+
+  it("不传新参数时 body 与现状一致（/runtimes 弹窗零回归）", async () => {
     mockFetch({
       session_id: "s",
       run_id: "r",
@@ -83,7 +110,7 @@ describe("createSession", () => {
     await createSession({ provider: "codex", prompt: "hi" });
     const init = (vi.mocked(globalThis.fetch).mock.calls[0]![1] ?? {}) as RequestInit;
     const body = JSON.parse(init.body as string);
-    expect(body.model).toBeNull();
+    expect(body).toEqual({ provider: "codex", prompt: "hi" });
   });
 
   it("404 抛 ApiError（不伪造 run 终态）", async () => {
@@ -120,6 +147,39 @@ describe("injectSession", () => {
     expect(init.method).toBe("POST");
     const body = JSON.parse(init.body as string);
     expect(body).toEqual({ prompt: "next question" });
+  });
+
+  it("options 携带切换参数时序列化进 body（task-16 / FR-02）", async () => {
+    const fetchMock = mockFetch({
+      session_id: "s1",
+      run_id: "run-3",
+      status: "active",
+    });
+    await injectSession("s1", "switch please", {
+      agent_profile_id: "ap-2",
+      llm_provider_id: "lp-2",
+    });
+    const { init } = fetchCall(fetchMock);
+    const body = JSON.parse(init.body as string);
+    expect(body).toEqual({
+      prompt: "switch please",
+      agent_profile_id: "ap-2",
+      llm_provider_id: "lp-2",
+    });
+  });
+
+  it("llm_provider_id 空串（\"none\" 语义=切回本机默认）仍下发该字段", async () => {
+    mockFetch({
+      session_id: "s1",
+      run_id: "run-4",
+      status: "active",
+    });
+    await injectSession("s1", "back to local", { llm_provider_id: "" });
+    const init = (vi.mocked(globalThis.fetch).mock.calls[0]![1] ?? {}) as RequestInit;
+    const body = JSON.parse(init.body as string);
+    // 空串必须作为字段下发（backend 置 NULL），不能被真值判断吞掉。
+    expect(body).toHaveProperty("llm_provider_id", "");
+    expect(body).not.toHaveProperty("agent_profile_id");
   });
 
   it("409 turn conflict 抛 ApiError", async () => {

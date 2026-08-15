@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ── Interactive session list / read (task-12, FR-10 / D-005@v1) ──────────────
 # DTO for GET /api/daemon/sessions. Field nullability aligns with the actual
@@ -41,6 +41,14 @@ class AgentSessionRead(BaseModel):
     # 查 DaemonTaskLease.terminating_at 注入。默认 None 守护 brownfield（无 lease /
     # lease.terminating_at 为空 → None），让前端据此显示「终止中…」而非立刻「已停止」。
     terminating_at: datetime | None = None
+    # ── 会话配置三列（2026-08-14-sessions-portal task-02 / FR-04 / D-008@v1） ──
+    # 对应 AgentSession ORM 三列（task-01）：显式绑定的档案/供应商 FK + 冻结的
+    # 配置快照 JSON（profile_name/provider_name/model/engine/machine_name/
+    # agent_name，design §5 Grill C-12），供前端列表 chips 直显免二次查询。
+    # from_attributes 直接映射；默认 None 守护列缺失/未写入的旧行。
+    agent_profile_id: uuid.UUID | None = None
+    llm_provider_id: uuid.UUID | None = None
+    config_snapshot: dict | None = None
 
     model_config = {"from_attributes": True}
 
@@ -50,6 +58,62 @@ class AgentSessionListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+# ── Interactive session create / inject request DTO（2026-08-14-sessions-portal
+# task-02 / FR-01 / D-010@v1 / D-011@v1）─────────────────────────────────────
+# 从 router.py inline 定义（原 :1573/:1591）迁为具名模型，openapi 产出具名 schema
+# 供前端 pnpm gen:types（task-17）。校验语义完整继承 inline 版：prompt
+# min/max_length、provider Literal（值非空时仍只收 claude/codex）。
+
+# 交互式会话 provider 枚举（与原 router inline 版一致；Literal 校验保留）。
+InteractiveProviderLiteral = Literal["claude", "codex"]
+
+
+class SessionCreateRequest(BaseModel):
+    """POST /api/daemon/sessions 请求体（FR-01 / design §5 Wave1）。
+
+    双入口：``runtime_id``（新会话门户页，指定机器+智能体，优先）与 ``provider``
+    （/runtimes 弹窗旧路径，零回归保留）二选一，都未传 → 422。
+    ``model`` 字段已移除（design §5：由档案/默认派生，继承 D-005/D-004@v2）——
+    pydantic 默认忽略多余字段，旧前端继续上送 model 不会 422，仅不再生效。
+    ``agent_profile_id``/``llm_provider_id`` 由 service 层解析（task-03），
+    本 DTO 只透传 str（llm_provider_id 空串/"none" 语义=切回本机默认，task-05）。
+    """
+
+    prompt: str = Field(min_length=1, max_length=8000)
+    # 新页面双入口：指定 runtime（优先于 provider；解析归 task-03）。
+    runtime_id: str | None = None
+    # /runtimes 弹窗旧路径（D-002 零回归）：值非空时仍只收 claude/codex。
+    provider: InteractiveProviderLiteral | None = None
+    agent_profile_id: str | None = None
+    llm_provider_id: str | None = None
+    # 新页面默认更安全的对话模式（design §5）；现有前端弹窗均显式传 true，不受影响。
+    manual_approval: bool = True
+    ask_user_only: bool = True
+    change_id: uuid.UUID | None = None
+    workspace_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def _require_runtime_or_provider(self) -> SessionCreateRequest:
+        # design §5「与 provider 二选一，优先 runtime_id」：两者都缺 → 422，
+        # 防止 provider=None 落到 NOT NULL 的 agent_sessions.provider 列。
+        if not self.runtime_id and not self.provider:
+            raise ValueError("either runtime_id or provider must be provided")
+        return self
+
+
+class SessionInjectRequest(BaseModel):
+    """POST /api/daemon/sessions/{id}/inject 请求体（FR-02 / design §5 Wave1）。
+
+    ``agent_profile_id`` 非空且 ≠ 会话当前档案 → 切档案；``llm_provider_id``
+    非空且 ≠ 当前 → 切供应商（空串/"none" 语义=切回本机默认）。切换校验与
+    SESSION_SWITCH_CONFIG 下发归 task-05，本 DTO 只透传。
+    """
+
+    prompt: str = Field(min_length=1, max_length=8000)
+    agent_profile_id: str | None = None
+    llm_provider_id: str | None = None
 
 
 # ── Change-scoped session list (2026-07-09-change-detail-session task-09 / D-005@v1) ─

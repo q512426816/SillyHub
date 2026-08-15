@@ -27,6 +27,48 @@ import type {
 // daemon 内存态持有，不落盘）。type-only，避免运行时循环依赖。
 import type { ProviderConfig } from '../types.js';
 
+// ── task-08（2026-08-14-sessions-portal / D-012@v1）：SESSION_SWITCH_CONFIG 契约 ──
+
+/**
+ * task-08（design §7.2 / D-012@v1）：切换档案载荷（SessionSwitchConfigPayload.profile）。
+ *
+ * 档案只含提示词维度（D-013：不派生引擎/模型/供应商）；mcpRefs/skillRefs 仅透传
+ * 承载（NG-03：会话内不裁剪）。systemPrompt 对 Codex 为空（原 D-003：人格不注入）。
+ */
+export interface SessionSwitchProfilePayload {
+  /** 新人格提示词（claude → systemPrompt preset+append；codex 忽略）。 */
+  systemPrompt?: string;
+  /** profile 引用的 MCP server 子集（透传到 state.mcpRefs）。 */
+  mcpRefs?: string[];
+  /** profile 引用的技能子集（透传到 state.skillRefs）。 */
+  skillRefs?: string[];
+}
+
+/**
+ * task-08（design §7.2 / D-012@v1 / FR-05）：会话内配置热切换原子 payload。
+ *
+ * backend inject_session 带新配置 + prompt → WS SESSION_SWITCH_CONFIG 下发
+ * （daemon.ts 消息路由归 task-09，本类型只定义契约）。
+ *
+ * 语义：profile=null 表示不切档案；providerConfig=null 表示不切供应商
+ * （与 reloadWithProvider(null)=「停止回退本机」不同——切换消息里 null 恒为
+ * 「保持现状」，见 design §7.2 注释）。
+ */
+export interface SessionSwitchConfigPayload {
+  /** agent_sessions.id（目标会话）。 */
+  sessionId: string;
+  /** 切换轮新 AgentRun.id（turn result 上报用）。 */
+  runId: string;
+  /** 切换轮 claim_token（刷新 state.claimToken，对齐 refreshClaimToken 语义）。 */
+  claimToken: string;
+  /** 切换轮用户消息（reload 完成后喂入 inputQueue 触发新 turn）。 */
+  prompt: string;
+  /** 新档案；null=不切档案（保留现 systemPrompt/mcpRefs/skillRefs）。 */
+  profile: SessionSwitchProfilePayload | null;
+  /** 新供应商配置（结构同 lease claim payload 的 provider_config）；null=不切。 */
+  providerConfig: ProviderConfig | null;
+}
+
 /** session 生命周期状态。 */
 export type SessionStatus =
   | 'active' // 空闲可接 inject（无 running turn）
@@ -199,6 +241,32 @@ export interface SessionState {
    *（WS 重放同一/不同切换均覆盖，不累积，design R-02）。
    */
   pendingSwitch?: { providerConfig: ProviderConfig | null };
+  /**
+   * task-08（2026-08-14-sessions-portal / D-012@v1）：当前会话级供应商配置。
+   *
+   * 来源：SESSION_SWITCH_CONFIG 切换供应商后由 reload 内核写入（create 路径沿用
+   * claim payload 注 env 的既有链路，不经本字段）。后续 reload（如只切档案）用它
+   * 重建 env，保证「切换只影响本会话」且连续切换不回退。null = 显式回退本机默认。
+   *
+   * 持久化：snapshotPersistable 非空时写入 record.providerConfig（design §5 Wave2
+   * 「daemon 重启 resume 不丢配置」）；daemon 重启恢复经 restoreAndReconnect 重建 env。
+   * sessions.json 本机 0600（与 credentials.json 同信任域）。
+   */
+  providerConfig?: ProviderConfig | null;
+  /**
+   * task-08（2026-08-14-sessions-portal / FR-05 / D-012@v1）：待处理的会话级配置
+   * 热切换标记（等 turn 边界）。
+   *
+   * 来源：backend inject_session → WS SESSION_SWITCH_CONFIG（task-09 daemon.ts 路由）
+   * → ``markPendingConfigSwitch``。running turn 收到切换时仅覆盖写本字段，严格不
+   * 中断当前 turn；turn 收尾（``_onResult``）检测到本字段非空 → 清标记并调
+   * ``reloadWithConfig``（close 旧 query → 新配置 driverOpts → resume → 喂 prompt）。
+   * 空闲 session 收到切换由 markPendingConfigSwitch 立即执行，不写本字段。
+   *
+   * 覆盖写幂等（WS 重放安全，不累积）。仅内存态：daemon 重启由 backend 侧会话三列
+   * （agent_sessions.agent_profile_id/llm_provider_id）重新下发，不恢复本标记。
+   */
+  pendingConfigSwitch?: { payload: SessionSwitchConfigPayload };
 }
 
 /** CreateSessionInput（daemon._startInteractiveSession → SessionManager.create）。 */
@@ -445,8 +513,12 @@ export interface CancelPendingPermissionsResult {
 // agentSessionId 非空）；SDK 自动持久化 ~/.claude/projects/<encoded-cwd>/<sid>.jsonl
 //（spike D3），daemon 不读不写该 jsonl，resume 靠 SDK 内部加载。
 //
-// **白名单**：只写上列字段；禁止写 claim token / API key / credential / prompt
-// 内容 / agent 输出 / Query 句柄 / InputQueue（不可序列化且敏感）。
+// **白名单**：只写上列字段；禁止写 claim token / credential / prompt 轮次内容 /
+// agent 输出 / Query 句柄 / InputQueue（不可序列化且敏感）。
+// task-08（sessions-portal）例外：record.systemPrompt（task-05 起的人格提示词快照）
+// 与 record.providerConfig（会话级供应商配置，含 api_key）按 design §5 Wave2 落盘
+// ——「daemon 重启 resume 不丢配置」；sessions.json 本机 0600，与 credentials.json
+// 同信任域。
 
 /** sessions.json schema 版本。不支持 → quarantine（不复活半条记录）。 */
 export const SESSION_FILE_VERSION = 1 as const;
@@ -523,6 +595,18 @@ export interface PersistedSessionRecord {
   effectiveAllowedRoots?: string[];
   /** task-05：profile.system_prompt 落盘（resume 时重新注入 systemPrompt）。 */
   systemPrompt?: string;
+  /**
+   * task-08（2026-08-14-sessions-portal / design §5 Wave2）：会话级供应商配置快照。
+   *
+   * reloadWithConfig 切换供应商后落盘；restoreAndReconnect 据此重建 env（daemon
+   * 重启 resume 不丢配置）。缺省（旧 sessions.json 无此字段）→ 恢复走本机凭证链
+   * （向后兼容，design §9）。非 null 才落盘（null=本机默认=缺省语义等价）。
+   *
+   * 注：含 api_key 明文。sessions.json 是本机 0600 文件（与 credentials.json 同
+   * 信任域），且 design §5 Wave2 明确要求重启不丢配置；task-10 白名单的「禁 API
+   * key」原指不落 daemon 运行日志 / 回传 backend，本字段是恢复必需的会话配置。
+   */
+  providerConfig?: ProviderConfig;
 }
 
 /** sessions.json 文件结构。 */

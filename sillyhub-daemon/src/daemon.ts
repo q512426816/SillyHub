@@ -105,7 +105,17 @@ import type {
   PersistedSessionRecord,
   SessionStatus,
   SessionStorePersistence,
+  SessionSwitchConfigPayload,
+  SessionSwitchProfilePayload,
 } from './interactive/types.js';
+
+// ── task-09（2026-08-14-sessions-portal / FR-05 / D-012@v1）────────────────────
+// SESSION_SWITCH_CONFIG 消息类型字面量（Server → Daemon：会话内切档案/供应商 +
+// 原子承载切换轮 prompt，design §7.2）。命名沿用既有 ``daemon:<snake>`` 风格，
+// 与 backend task-05 的 DAEMON_MSG_SESSION_SWITCH_CONFIG 逐字对齐；task-05 落地
+// 后升格进 protocol.ts MSG 表（本任务 allowed_paths 只 daemon.ts + tests，
+// 暂以模块级常量收口，避免越界改 protocol.ts）。
+const SESSION_SWITCH_CONFIG_MSG = 'daemon:session_switch_config';
 
 // ── 最小日志（design G-05 零依赖，不装 winston/pino）──────────────────────────
 
@@ -2530,7 +2540,9 @@ export class Daemon {
   // ── 事件分发（daemon.py:253-267）───────────────────────────────────────────
 
   private async _handleWsMessage(msg: DaemonMessage): Promise<void> {
-    const msgType = msg.type;
+    // task-09：SESSION_SWITCH_CONFIG 常量暂在 daemon.ts 模块级（升格 protocol.ts
+    // 前不在 MsgType 联合内），msgType 显式放宽为 string 让 switch 收新 case。
+    const msgType: string = msg.type;
     // ql-20260616-006：backend WS 发 snake_case (lease_id/runtime_id/task_id)，
     // daemon 内部统一用 camelCase (LeasePayload/LeaseCtx)。在分发前做一次归一化，
     // 让 _executeTask 不再因字段名不匹配而 task_no_lease_id 丢任务。
@@ -2624,6 +2636,19 @@ export class Daemon {
         // 非阻塞分发（同 task_available 风格，不阻塞 WS 接收）。
         void this._routeSessionControl(msgType, rawPayload).catch((e) => {
           this._logger.error('session_control_failed', { type: msgType, error: e });
+        });
+        break;
+      }
+      // task-09（2026-08-14-sessions-portal / FR-05 / D-012@v1 / design §5 Wave2）：
+      // backend inject_session（带新配置 + prompt）→ WS SESSION_SWITCH_CONFIG 下发。
+      // daemon 收到后非阻塞调 sessionManager.markPendingConfigSwitch（task-08 实现）：
+      // 空闲 session 立即 reloadWithConfig 喂 prompt，生成中 turn 仅覆盖写
+      // pendingConfigSwitch 等 _onResult 边界切换——reload 细节全部委托 task-08，
+      // 本路由只做字段归一化 + 校验。
+      case SESSION_SWITCH_CONFIG_MSG: {
+        // 非阻塞分发（同 SESSION_INJECT / PROVIDER_CONFIG_CHANGED 风格）。
+        void this._routeSessionSwitchConfig(rawPayload).catch((e) => {
+          this._logger.error('session_switch_config_failed', { error: e });
         });
         break;
       }
@@ -2890,6 +2915,108 @@ export class Daemon {
       // session 不存在（SessionNotFoundError）等——best-effort warn 丢弃，
       // 不让单条迟到消息崩 WS 主循环（design §9 向前兼容）。
       this._logger.warn('provider_config_changed_session_error', {
+        session_id: sessionId,
+        error: e,
+      });
+    }
+  }
+
+  /**
+   * task-09（2026-08-14-sessions-portal / FR-05 / D-012@v1 / design §5 Wave2、§7.2）：
+   * 路由 backend SESSION_SWITCH_CONFIG 到 SessionManager.markPendingConfigSwitch
+   *（task-08 实现：空闲立即 reloadWithConfig 喂切换轮 prompt，生成中仅覆盖写
+   * pendingConfigSwitch 等 turn 边界）。
+   *
+   * 与 SESSION_INJECT 同风格的 snake/camel 双写归一化（ql-20260616-006）：
+   * backend WS 发 ``{session_id, run_id, claim_token, prompt, profile?,
+   * provider_config?}``（snake_case，task-05 下发侧），daemon 入口读两个常见
+   * 大小写变体取值。
+   *
+   * 校验口径与 SESSION_INJECT 一致（task-09.md constraints）：
+   *   - 未注入 sessionManager → warn 不崩（AC-14 风格）；
+   *   - 缺 session_id → warn 丢弃（无目标 session 无法路由）；
+   *   - session 不在 SessionStore（迟到/WS 重放/已清）→ warn 丢弃，不调
+   *     markPendingConfigSwitch（与 _routeSessionControl 的 session_not_found
+   *     先例同语义；markPendingConfigSwitch 自身抛 SessionNotFoundError 时
+   *     由下方 catch 二次兜底）；
+   *   - 缺 run_id / claim_token / prompt（切换轮三要素，design §7.2）→ warn
+   *     丢弃；profile / provider_config 缺省 → 归一为 null（不切，与
+   *     SessionSwitchConfigPayload null 语义一致，非 fallback 编造）。
+   *
+   * markPendingConfigSwitch 同步返回 void（reload 走 fire-and-forget），故本
+   * 方法不 await 异步副作用——非阻塞分发契约由调用点 ``void ... .catch`` 保证。
+   * turn result 上报沿用 state.currentRunId/claimToken（task-08 在
+   * reloadWithConfig 内写入），本路由不重复处理。
+   */
+  private async _routeSessionSwitchConfig(
+    raw: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this._sessionManager) {
+      this._logger.warn('session_switch_config_no_manager');
+      return;
+    }
+    const sessionId =
+      (raw.session_id as string | undefined) ?? (raw.sessionId as string | undefined) ?? '';
+    if (!sessionId) {
+      this._logger.warn('session_switch_config_no_session_id');
+      return;
+    }
+    // session 存在校验（属主口径与 SESSION_INJECT 一致：lease 级归属由
+    // claim_token 承载——切换轮新 token 在 reloadWithConfig 内刷新）。
+    const state = this._sessionManager.get(sessionId);
+    if (!state) {
+      this._logger.warn('session_switch_config_session_not_found', {
+        session_id: sessionId,
+      });
+      return;
+    }
+    // 切换轮三要素（design §7.2）：runId=切换轮新 AgentRun，claimToken=切换轮
+    // token，prompt=切换轮用户消息。缺一 → warn 丢弃（不 fallback 编造）。
+    const runId =
+      (raw.run_id as string | undefined) ?? (raw.runId as string | undefined) ?? '';
+    const claimToken =
+      (raw.claim_token as string | undefined) ??
+      (raw.claimToken as string | undefined) ??
+      '';
+    const prompt = (raw.prompt as string | undefined) ?? '';
+    if (!runId || !claimToken || !prompt) {
+      this._logger.warn('session_switch_config_missing_fields', {
+        session_id: sessionId,
+        run_id: runId,
+        has_claim_token: !!claimToken,
+        prompt_len: prompt.length,
+      });
+      return;
+    }
+    // profile / provider_config 可 null（=不切，design §7.2）；缺省归一 null。
+    const profile =
+      ((raw.profile as SessionSwitchProfilePayload | null | undefined) ?? null);
+    const providerConfig =
+      ((raw.provider_config as ProviderConfig | null | undefined) ??
+        (raw.providerConfig as ProviderConfig | null | undefined)) ??
+      null;
+    this._logger.info('session_switch_config_received', {
+      session_id: sessionId,
+      run_id: runId,
+      // 不打 provider_config 全量（含 api_key 明文，R-02 不入日志）；仅记有无。
+      has_profile: profile != null,
+      has_provider_config: providerConfig != null,
+    });
+    const payload: SessionSwitchConfigPayload = {
+      sessionId,
+      runId,
+      claimToken,
+      prompt,
+      profile,
+      providerConfig,
+    };
+    try {
+      this._sessionManager.markPendingConfigSwitch(sessionId, payload);
+    } catch (e) {
+      // session 不存在（SessionNotFoundError）等——best-effort warn 丢弃，
+      // 不让单条迟到消息崩 WS 主循环（design §9 向前兼容，同
+      // _routeProviderConfigChanged 收敛姿势）。
+      this._logger.warn('session_switch_config_session_error', {
         session_id: sessionId,
         error: e,
       });

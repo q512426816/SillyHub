@@ -1,0 +1,624 @@
+"use client";
+
+/**
+ * SessionConfigBar — 样式 B 会话配置控件条（2026-08-14-sessions-portal task-14）。
+ *
+ * 依据：
+ *   - tasks/task-14.md（allowed_paths / implementation / acceptance）
+ *   - design.md §2 FR-05/FR-07、§5 Wave3 SessionConfigBar 段、D-004@v2 / D-007@v1 /
+ *     D-008@v1、§7.4（switch config：inject 带新配置+prompt，session 维持 active）
+ *   - prototype-sessions-portal.html renderSessionPanel / openSwitchDD（样式 B 视觉
+ *     与交互语义：四控件行 + 上弹下拉 + 🔒 解锁提示）
+ *   - FRONTEND_PAGE_STYLE.md（antd Button/Input + tailwind 语义 token，不硬编码 hex）
+ *
+ * 行为（FR-05 / D-004@v2）：
+ *   - 四控件（机器/智能体/供应商/档案）展示会话当前配置（props 传入
+ *     agent_profile_id / llm_provider_id / config_snapshot）。
+ *   - 可切：档案、供应商——idle 点开下拉选择 → 确认行（切换轮提示消息，可编辑，
+ *     默认文案由组件生成或 props switchPrompt 传入）→ injectSession(sessionId,
+ *     prompt, 带新配置)；供应商含「不指定（本机默认）」选项 → llm_provider_id: ""
+ *     切回本机默认（task-16 契约）。
+ *   - 纯展示：机器/智能体——下拉仅展示可选项并整体置灰，跨机器标「二期」、跨引擎标
+ *     「需开新会话」（每机每引擎唯一 runtime，无同机同引擎切换目标，D-004@v2）。
+ *   - running 全置灰 + 「🔒 本轮完成后解锁切换」；ended/failed 同样不可切（无锁提示）。
+ *   - 切换 toast：下一轮生效，历史消息保留当时配置（who 行按轮快照渲染，D-008，
+ *     渲染归 turn-timeline.tsx whoLine，本组件不管消息流）。
+ *
+ * 数据源与 task-12 同：useDaemonMachines（机器/智能体展示）/ listProviders /
+ * useMineAgentProfiles。页面组装归 task-10，本组件不感知 SSE/路由。
+ */
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Button, Input, message } from "antd";
+
+import { ApiError } from "@/lib/api";
+import { useMineAgentProfiles } from "@/lib/agent-profiles";
+import { listProviders } from "@/lib/api/llm-providers";
+import { useDaemonMachines } from "@/lib/use-daemon-machines";
+import { injectSession } from "@/lib/daemon";
+import type {
+  AgentSessionConfigSnapshot,
+  DaemonMachineRead,
+  DaemonRuntimeRead,
+  SessionInjectResponse,
+} from "@/lib/daemon";
+import { cn } from "@/lib/utils";
+
+/** 供应商下拉「不指定（本机默认）」项的值（→ injectSession llm_provider_id: ""）。 */
+export const SWITCH_NO_PROVIDER_VALUE = "";
+
+/** 四控件种类（task-14 provides 契约：machineCtrl/agentCtrl/providerCtrl/profileCtrl）。 */
+export type SessionConfigCtrlKind =
+  | "machine"
+  | "agent"
+  | "provider"
+  | "profile";
+
+/** 可切换字段（inject options 的键）。 */
+export type SessionConfigSwitchField =
+  | "agent_profile_id"
+  | "llm_provider_id";
+
+/** 待确认的切换（选中下拉项后进入确认行）。 */
+interface PendingSwitch {
+  field: SessionConfigSwitchField;
+  /** 目标值（供应商「不指定」为空串 ""）。 */
+  value: string;
+  /** 目标展示名（toast / 确认行用）。 */
+  label: string;
+}
+
+export interface SessionConfigBarProps {
+  /** 目标会话 id（injectSession 用）。 */
+  sessionId: string;
+  /** 当前轮运行中 → 全部置灰 + 🔒 解锁提示（FR-05）。 */
+  running: boolean;
+  /** 会话已结束/失败 → 不可切（只读浏览，无锁提示）。 */
+  ended: boolean;
+  /** 会话当前档案 id（null=未指定）。 */
+  agentProfileId: string | null;
+  /** 会话当前供应商 id（null=本机默认）。 */
+  llmProviderId: string | null;
+  /** 会话当前生效配置摘要（agent_sessions.config_snapshot，机器/智能体展示名来源）。 */
+  configSnapshot: AgentSessionConfigSnapshot | null;
+  /** 会话 runtime id（定位当前机器，机器/智能体展示下拉用）。 */
+  runtimeId?: string | null;
+  /** 引擎（claude/codex；缺省回退 config_snapshot.engine）。engine≠claude 锁供应商（D-010）。 */
+  engine?: string | null;
+  /** 切换轮提示消息默认值（不传用组件内置按目标名生成的文案）。 */
+  switchPrompt?: string;
+  /** 切换成功回调（父层刷新会话配置）。 */
+  onSwitched?: (
+    resp: SessionInjectResponse,
+    field: SessionConfigSwitchField,
+    value: string,
+  ) => void;
+}
+
+/* ────────────────────── 纯辅助（组件外便于单测推理） ────────────────────── */
+
+/** 引擎图标（原型语义：claude ⚡ / codex ◎ / 其它 ✦）。 */
+function engineIcon(provider: string | null | undefined): string {
+  if (provider === "claude") return "⚡";
+  if (provider === "codex") return "◎";
+  return "✦";
+}
+
+/** 机器展示名（别名优先，FRONTEND_PAGE_STYLE 空值统一 —）。 */
+function machineLabel(m: DaemonMachineRead): string {
+  return m.display_alias?.trim() || m.hostname;
+}
+
+/** 智能体展示名。 */
+function runtimeLabel(r: DaemonRuntimeRead): string {
+  return r.display_alias?.trim() || r.name || r.provider || r.id;
+}
+
+/** 切换轮提示消息默认文案（按字段与目标名生成）。 */
+export function buildDefaultSwitchPrompt(p: PendingSwitch): string {
+  const what = p.field === "llm_provider_id" ? "供应商" : "智能体档案";
+  const name = p.value === SWITCH_NO_PROVIDER_VALUE ? "本机默认" : p.label;
+  return `已切换${what}为「${name}」，请继续。`;
+}
+
+/* ────────────────────── 组件 ────────────────────── */
+
+export function SessionConfigBar({
+  sessionId,
+  running,
+  ended,
+  agentProfileId,
+  llmProviderId,
+  configSnapshot,
+  runtimeId,
+  engine,
+  switchPrompt,
+  onSwitched,
+}: SessionConfigBarProps) {
+  // 数据源与 task-12 同（机器/智能体展示下拉 + 供应商/档案切换选项）。
+  const { items: machines } = useDaemonMachines({});
+  const { profiles } = useMineAgentProfiles();
+  const providersQ = useQuery({
+    queryKey: ["llmProviders", "sessions-config-bar"],
+    queryFn: listProviders,
+    staleTime: 30_000,
+  });
+  const providers = useMemo(() => providersQ.data ?? [], [providersQ.data]);
+
+  const [openKind, setOpenKind] = useState<SessionConfigCtrlKind | null>(null);
+  const [pending, setPending] = useState<PendingSwitch | null>(null);
+  const [switchMessage, setSwitchMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const barRef = useRef<HTMLDivElement>(null);
+
+  // 点击控件条外 / Esc 关闭下拉（原型 closeDD 的 document click 语义）。
+  useEffect(() => {
+    if (!openKind) return;
+    const onDown = (e: MouseEvent) => {
+      if (barRef.current && !barRef.current.contains(e.target as Node)) {
+        setOpenKind(null);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpenKind(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [openKind]);
+
+  const effectiveEngine = engine ?? configSnapshot?.engine ?? null;
+  const canSwitch = !running && !ended;
+  // D-010：Codex 引擎无会话级供应商 → 控件锁定（下拉不可开）。
+  const providerLocked = effectiveEngine != null && effectiveEngine !== "claude";
+
+  // 当前值展示（快照直显免二次解析，Grill C-12；id 兜底防列表缺行）。
+  const machineName = configSnapshot?.machine_name ?? "—";
+  const agentName = configSnapshot?.agent_name ?? "—";
+  const profileLabel = agentProfileId
+    ? profiles.find((p) => p.id === agentProfileId)?.name ??
+      configSnapshot?.profile_name ??
+      agentProfileId
+    : "未指定";
+  const providerLabel = llmProviderId
+    ? providers.find((p) => p.id === llmProviderId)?.name ??
+      configSnapshot?.provider_name ??
+      llmProviderId
+    : "本机默认";
+
+  // 当前会话所属机器（runtime_id 钉定，快照 machine_name 兜底）。
+  const currentMachine = useMemo(
+    () =>
+      machines.find((m) => m.runtimes?.some((r) => r.id === runtimeId)) ??
+      machines.find((m) => machineLabel(m) === configSnapshot?.machine_name) ??
+      null,
+    [machines, runtimeId, configSnapshot?.machine_name],
+  );
+
+  /** 下拉选项点击 → 进入确认行（注入默认提示消息）。 */
+  const openPending = (p: PendingSwitch) => {
+    setPending(p);
+    setSwitchMessage(switchPrompt ?? buildDefaultSwitchPrompt(p));
+    setOpenKind(null);
+  };
+
+  const cancelPending = () => {
+    setPending(null);
+    setSwitchMessage("");
+  };
+
+  const confirmSwitch = async () => {
+    if (!pending || submitting) return;
+    const prompt = switchMessage.trim();
+    if (!prompt) return;
+    setSubmitting(true);
+    try {
+      const resp = await injectSession(sessionId, prompt, { [pending.field]: pending.value });
+      const what = pending.field === "llm_provider_id" ? "供应商" : "档案";
+      const name =
+        pending.field === "llm_provider_id" && pending.value === SWITCH_NO_PROVIDER_VALUE
+          ? "本机默认"
+          : pending.label;
+      message.success(`已切换${what} → ${name}（下一轮生效，历史消息保留当时配置）`);
+      const done = pending;
+      setPending(null);
+      setSwitchMessage("");
+      onSwitched?.(resp, done.field, done.value);
+    } catch (err) {
+      message.error(err instanceof ApiError ? err.message : "切换失败，请重试");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const ctrlDisabled: Record<SessionConfigCtrlKind, boolean> = {
+    machine: !canSwitch,
+    agent: !canSwitch,
+    provider: !canSwitch || providerLocked,
+    profile: !canSwitch,
+  };
+
+  const toggleCtrl = (kind: SessionConfigCtrlKind) => {
+    if (ctrlDisabled[kind]) return;
+    setOpenKind((prev) => (prev === kind ? null : kind));
+  };
+
+  const ctrlButton = (
+    kind: SessionConfigCtrlKind,
+    icon: string,
+    value: string,
+    title: string,
+  ) => (
+    <button
+      type="button"
+      disabled={ctrlDisabled[kind]}
+      title={title}
+      aria-label={`配置-${labelOfCtrl(kind)} ${value}`}
+      onClick={() => toggleCtrl(kind)}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
+        ctrlDisabled[kind]
+          ? "cursor-not-allowed text-muted-foreground/60"
+          : "cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground",
+        openKind === kind && "bg-muted text-primary",
+      )}
+    >
+      <span aria-hidden>{icon}</span>
+      <span className="max-w-[160px] truncate">{value}</span>
+      <span aria-hidden className="text-muted-foreground/60">
+        ▾
+      </span>
+    </button>
+  );
+
+  return (
+    <div ref={barRef} className="relative mt-1.5" aria-label="会话配置控件条">
+      <div className="flex flex-wrap items-center gap-0.5">
+        {ctrlButton(
+          "machine",
+          "🖥",
+          machineName,
+          "守护进程（换机器需开新会话）",
+        )}
+        {ctrlButton(
+          "agent",
+          engineIcon(effectiveEngine),
+          agentName,
+          "智能体（换引擎需开新会话）",
+        )}
+        {ctrlButton(
+          "provider",
+          "☁",
+          providerLabel,
+          providerLocked
+            ? "Codex 引擎暂不支持会话级供应商"
+            : "供应商（不选=本机默认配置）",
+        )}
+        {ctrlButton("profile", "📋", profileLabel, "智能体档案")}
+        <span className="flex-1" />
+        {running && (
+          <span className="inline-flex items-center gap-1 text-[10.5px] text-warning">
+            🔒 本轮完成后解锁切换
+          </span>
+        )}
+      </div>
+
+      {/* ── 上弹下拉浮层（原型 .dd：bottom-full + shadow） ── */}
+      {openKind === "machine" && (
+        <ConfigDropdown
+          testId="config-dd-machine"
+          title="守护进程 · 换机器需开新会话（跨机器二期）"
+        >
+          {machines.length === 0 ? (
+            <p className="px-2 py-1.5 text-xs text-muted-foreground">
+              暂无守护进程
+            </p>
+          ) : (
+            machines.map((m) => {
+              const isCurrent = m.id === currentMachine?.id;
+              const online = m.status === "online";
+              return (
+                <DisplayItem
+                  key={m.id}
+                  icon={<StatusDot online={online} />}
+                  label={machineLabel(m)}
+                  current={isCurrent}
+                  sub={
+                    isCurrent
+                      ? undefined
+                      : online
+                        ? "跨机器 · 二期"
+                        : "离线"
+                  }
+                />
+              );
+            })
+          )}
+        </ConfigDropdown>
+      )}
+
+      {openKind === "agent" && (
+        <ConfigDropdown
+          testId="config-dd-agent"
+          title="智能体 · 换引擎需开新会话（跨机器二期）"
+        >
+          {(currentMachine?.runtimes ?? []).map((r) => {
+            const isCurrent = r.id === runtimeId;
+            return (
+              <DisplayItem
+                key={r.id}
+                icon={<span aria-hidden>{engineIcon(r.provider)}</span>}
+                label={runtimeLabel(r)}
+                current={isCurrent}
+                sub={
+                  isCurrent
+                    ? undefined
+                    : r.provider !== effectiveEngine
+                      ? "不同引擎 · 需开新会话"
+                      : "同引擎运行时"
+                }
+              />
+            );
+          })}
+          {/* 其它机器同引擎智能体（跨机器 → 二期，D-004@v2） */}
+          {machines
+            .filter((m) => m.id !== currentMachine?.id)
+            .flatMap((m) =>
+              (m.runtimes ?? [])
+                .filter((r) => r.provider === effectiveEngine)
+                .map((r) => (
+                  <DisplayItem
+                    key={`${m.id}-${r.id}`}
+                    icon={<span aria-hidden>{engineIcon(r.provider)}</span>}
+                    label={runtimeLabel(r)}
+                    sub={`🖥 ${machineLabel(m)} · 跨机器 · 二期`}
+                  />
+                )),
+            )}
+          {(currentMachine?.runtimes ?? []).length === 0 && (
+            <p className="px-2 py-1.5 text-xs text-muted-foreground">
+              未找到当前智能体所属机器
+            </p>
+          )}
+        </ConfigDropdown>
+      )}
+
+      {openKind === "provider" && (
+        <ConfigDropdown
+          testId="config-dd-provider"
+          title="切换供应商 · 只影响本会话"
+        >
+          <SwitchItem
+            icon="☁"
+            label="不指定（本机默认）"
+            current={llmProviderId == null}
+            onClick={() =>
+              openPending({
+                field: "llm_provider_id",
+                value: SWITCH_NO_PROVIDER_VALUE,
+                label: "不指定（本机默认）",
+              })
+            }
+          />
+          {providers.map((p) => (
+            <SwitchItem
+              key={p.id}
+              icon="☁"
+              label={p.name}
+              sub={p.model ?? undefined}
+              current={p.id === llmProviderId}
+              onClick={() =>
+                openPending({ field: "llm_provider_id", value: p.id, label: p.name })
+              }
+            />
+          ))}
+          {providers.length === 0 && (
+            <p className="px-2 py-1.5 text-xs text-muted-foreground">
+              暂无自定义供应商
+            </p>
+          )}
+        </ConfigDropdown>
+      )}
+
+      {openKind === "profile" && (
+        <ConfigDropdown
+          testId="config-dd-profile"
+          title="切换档案 · 只影响本会话"
+        >
+          {/* 会话内不支持取消档案（inject 契约仅非空 id 切换，task-16）：仅当前态展示。 */}
+          <DisplayItem
+            icon={<span aria-hidden>📋</span>}
+            label="不指定"
+            current={agentProfileId == null}
+            sub={agentProfileId == null ? undefined : "暂不支持会话内取消"}
+          />
+          {profiles.map((p) => (
+            <SwitchItem
+              key={p.id}
+              icon="📋"
+              // D-013：不做引擎过滤；Codex 下仅标注人格不注入（原 D-003）。
+              label={
+                effectiveEngine === "codex" ? `${p.name}（人格暂不支持）` : p.name
+              }
+              current={p.id === agentProfileId}
+              onClick={() =>
+                openPending({
+                  field: "agent_profile_id",
+                  value: p.id,
+                  label: p.name,
+                })
+              }
+            />
+          ))}
+          {profiles.length === 0 && (
+            <p className="px-2 py-1.5 text-xs text-muted-foreground">
+              暂无可选档案
+            </p>
+          )}
+        </ConfigDropdown>
+      )}
+
+      {/* ── 切换确认行（切换轮提示消息，injectSession 的 prompt 载体） ── */}
+      {pending && (
+        <div
+          className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-2"
+          aria-label="切换确认行"
+        >
+          <span className="shrink-0 text-xs text-muted-foreground">
+            切换{pending.field === "llm_provider_id" ? "供应商" : "档案"} →{" "}
+            <b className="font-medium text-foreground">
+              {pending.field === "llm_provider_id" &&
+              pending.value === SWITCH_NO_PROVIDER_VALUE
+                ? "本机默认"
+                : pending.label}
+            </b>
+          </span>
+          <Input
+            size="small"
+            className="min-w-[200px] flex-1"
+            aria-label="切换轮提示消息"
+            placeholder="切换轮提示消息（作为本轮 prompt 发送）"
+            value={switchMessage}
+            onChange={(e) => setSwitchMessage(e.target.value)}
+            onPressEnter={() => void confirmSwitch()}
+          />
+          <Button
+            size="small"
+            type="primary"
+            loading={submitting}
+            disabled={!switchMessage.trim()}
+            onClick={() => void confirmSwitch()}
+          >
+            确认切换
+          </Button>
+          <Button size="small" onClick={cancelPending}>
+            取消
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ────────────────────── 下拉浮层与选项（原型 .dd / .dd-item） ────────────────────── */
+
+function labelOfCtrl(kind: SessionConfigCtrlKind): string {
+  return kind === "machine"
+    ? "机器"
+    : kind === "agent"
+      ? "智能体"
+      : kind === "provider"
+        ? "供应商"
+        : "档案";
+}
+
+function ConfigDropdown({
+  testId,
+  title,
+  children,
+}: {
+  testId: string;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      data-testid={testId}
+      className="absolute bottom-full left-0 z-30 mb-1.5 min-w-[280px] rounded-md border border-border bg-card p-1.5 shadow-lg"
+    >
+      <div className="border-b border-border px-2 pb-1.5 pt-1 text-[11px] text-muted-foreground">
+        {title}
+      </div>
+      <div className="mt-1 flex flex-col gap-0.5">{children}</div>
+    </div>
+  );
+}
+
+/** 纯展示项（机器/智能体下拉，D-004@v2：无可选目标，整体置灰仅展示）。 */
+function DisplayItem({
+  icon,
+  label,
+  current,
+  sub,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  current?: boolean;
+  sub?: string;
+}) {
+  return (
+    <div
+      aria-disabled="true"
+      className={cn(
+        "flex cursor-not-allowed items-center gap-2 rounded px-2 py-1.5 text-xs",
+        current
+          ? "bg-primary/10 font-medium text-primary"
+          : "text-foreground/80",
+      )}
+    >
+      <span aria-hidden className="shrink-0">
+        {icon}
+      </span>
+      <span className="min-w-0 break-words">{label}</span>
+      {current ? (
+        <span className="ml-auto shrink-0 text-primary">✓ 当前</span>
+      ) : (
+        sub && (
+          <span className="ml-auto shrink-0 text-muted-foreground">{sub}</span>
+        )
+      )}
+    </div>
+  );
+}
+
+/** 可切换选项（供应商/档案下拉）。 */
+function SwitchItem({
+  icon,
+  label,
+  sub,
+  current,
+  onClick,
+}: {
+  icon: string;
+  label: string;
+  sub?: string;
+  current?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={`选择 ${label}`}
+      onClick={onClick}
+      className={cn(
+        "flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted",
+        current ? "bg-primary/10 font-medium text-primary" : "text-foreground",
+      )}
+    >
+      <span aria-hidden className="shrink-0">
+        {icon}
+      </span>
+      <span className="min-w-0 break-words">{label}</span>
+      {current && <span className="ml-auto shrink-0 text-primary">✓</span>}
+      {!current && sub && (
+        <span className="ml-auto shrink-0 text-muted-foreground">{sub}</span>
+      )}
+    </button>
+  );
+}
+
+function StatusDot({ online }: { online: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "h-2 w-2 shrink-0 rounded-full",
+        online ? "bg-success" : "bg-muted-foreground/50",
+      )}
+    />
+  );
+}

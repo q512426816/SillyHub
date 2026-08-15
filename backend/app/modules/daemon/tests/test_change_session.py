@@ -687,3 +687,153 @@ class TestCreateSessionChangeBinding:
         assert sess.change_id is None
         assert sess.workspace_id is None
         assert sess.cwd is None
+
+
+# ── D. DTO 具名化（2026-08-14-sessions-portal task-02 / FR-01 / D-010@v1）────
+# SessionCreateRequest/SessionInjectRequest 迁 schema.py 后的契约回归：
+# 老请求体（provider+prompt）零回归、新字段可选、双入口二选一校验、
+# AgentSessionRead 新增配置三列序列化。
+
+
+class TestSessionCreateRequestDto:
+    """task-02：具名 DTO 校验语义与双入口契约。"""
+
+    async def test_old_body_provider_prompt_only_regression_free(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        fresh_ws_hub: DaemonWsHub,
+    ) -> None:
+        """/runtimes 弹窗老请求体（provider+prompt+多余 model 字段）→ 201 零回归。
+
+        model 字段已随 design §5 移除：pydantic 默认忽略多余字段，继续上送不 422，
+        仅不再写入 config/run。manual_approval/ask_user_only 默认值按 design §5
+        调整为 True（现有前端弹窗均显式传 true，实际行为不变）。
+        """
+        admin = await _admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        ws = _connect_mock_ws(fresh_ws_hub, rt.id)
+        await fresh_ws_hub.connect(rt.id, ws)
+
+        resp = await client.post(
+            "/api/daemon/sessions",
+            json={"provider": "claude", "prompt": "老路径", "model": None},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        sess = await db_session.get(AgentSession, uuid.UUID(resp.json()["session_id"]))
+        assert sess is not None
+        assert sess.provider == "claude"
+        assert (sess.config or {}).get("manual_approval") is True
+        assert "model" not in (sess.config or {})
+
+    async def test_new_optional_fields_accepted_passthrough(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        fresh_ws_hub: DaemonWsHub,
+    ) -> None:
+        """新字段（agent_profile_id/llm_provider_id）可选，真实 id 传了不 422。
+
+        task-03 落地解析后占位语义升级：随机 id 不再静默透传（profile 不存在 →
+        404，见 test_session_create_config.py），本测试改种子真实档案 + 供应商
+        （admin 属主，agent_kind=claude 匹配 provider 老入口），验证字段被
+        接受且会话照常创建。
+        """
+        from app.core.crypto import get_cipher
+        from app.modules.agent.profile.model import AgentProfile
+        from app.modules.llm_provider.model import LlmProvider
+
+        admin = await _admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        ws = _connect_mock_ws(fresh_ws_hub, rt.id)
+        await fresh_ws_hub.connect(rt.id, ws)
+
+        profile = AgentProfile(
+            id=uuid.uuid4(),
+            name="t02-profile",
+            owner_user_id=admin.id,
+            provider="claude",
+            system_prompt="t02-prompt",
+        )
+        cipher = get_cipher()
+        ct, key_id = cipher.encrypt("sk-t02")
+        provider_row = LlmProvider(
+            id=uuid.uuid4(),
+            user_id=admin.id,
+            name="t02-provider",
+            agent_kind="claude",
+            encrypted_api_key=ct,
+            key_id=key_id,
+            model="t02-model",
+            api_format="anthropic",
+        )
+        db_session.add_all([profile, provider_row])
+        await db_session.commit()
+
+        resp = await client.post(
+            "/api/daemon/sessions",
+            json={
+                "provider": "claude",
+                "prompt": "带配置字段",
+                "agent_profile_id": str(profile.id),
+                "llm_provider_id": str(provider_row.id),
+                "manual_approval": False,
+                "ask_user_only": False,
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        sess = await db_session.get(AgentSession, uuid.UUID(resp.json()["session_id"]))
+        assert sess is not None
+        assert sess.agent_profile_id == profile.id
+        assert sess.llm_provider_id == provider_row.id
+
+    async def test_missing_both_runtime_and_provider_422(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        """design §5 双入口二选一：runtime_id 与 provider 都缺 → 422。"""
+        resp = await client.post(
+            "/api/daemon/sessions",
+            json={"prompt": "没有入口"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 422
+
+    async def test_bad_provider_value_still_422(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        """provider Literal 校验保留：非 claude/codex → 422。"""
+        resp = await client.post(
+            "/api/daemon/sessions",
+            json={"provider": "gemini", "prompt": "hi"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 422
+
+    async def test_session_read_serializes_new_config_columns(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """AgentSessionRead 新增 agent_profile_id/llm_provider_id/config_snapshot
+        三字段（task-01 ORM 列，未写入时序列化为 null）。"""
+        admin = await _admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        await _make_session(db_session, user_id=admin.id, runtime_id=rt.id, change_id=None)
+
+        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        items = resp.json()["items"]
+        assert items, "应至少有一条会话"
+        for item in items:
+            assert "agent_profile_id" in item
+            assert "llm_provider_id" in item
+            assert "config_snapshot" in item

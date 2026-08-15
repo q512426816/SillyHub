@@ -115,6 +115,26 @@ describe("listAgentSessions", () => {
     expect(url.searchParams.has("status")).toBe(false);
   });
 
+  // 2026-08-14-sessions-portal task-16 / FR-02：列表过滤参数透传 query string。
+  it("passes runtime_id/machine_id/provider/q filters into query (task-16)", async () => {
+    const h = mockFetch({
+      status: 200,
+      body: { items: [], total: 0, limit: 20, offset: 0 },
+    });
+    await listAgentSessions({
+      runtime_id: "rt-1",
+      machine_id: "inst-1",
+      provider: "claude",
+      q: "重构",
+    });
+    const url = new URL(h.lastUrl());
+    expect(url.pathname).toBe("/api/daemon/sessions");
+    expect(url.searchParams.get("runtime_id")).toBe("rt-1");
+    expect(url.searchParams.get("machine_id")).toBe("inst-1");
+    expect(url.searchParams.get("provider")).toBe("claude");
+    expect(url.searchParams.get("q")).toBe("重构");
+  });
+
   it("throws ApiError on non-2xx", async () => {
     mockFetch({
       status: 422,
