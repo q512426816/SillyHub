@@ -360,3 +360,15 @@
 根因：f-string 动态 message 守护测试静态不可判，4 文件残留英文直达前端。
 方案：16 处中文化（policy_router 3+coordinator 8+git_runner 1+ssrf clone 4），变量进 details；assert_public_url 出网校验保留英文。
 结果：700+57+101 passed 零回归，ruff+mypy 过。
+
+## ql-20260815-009-45d1 | 2026-08-15 16:27:53 | 守护测试升级收窄 f-string 盲区
+状态：已完成
+关联变更：（无）
+文件：
+- backend/tests/core/test_error_message_l10n.py（_fstring_constant_text 常量段提取+CJK 判定+3 单测+ALLOWED_ENGLISH 增 unknown_agent_profile_fields）
+- backend/app/modules/tool_gateway/policy_router.py（重名 409 f-string 中文化）
+- backend/app/modules/daemon/router.py（lease/runtime 2 处 404 f-string 中文化）
+需求：守护测试升级收窄 f-string 盲区。
+根因：AST 扫描跳过 JoinedStr 致英文夹 f-string 常量段不设防。
+方案：常量段拼接提取+CJK 断言+3 判定单测；新暴露 4 处=3 中文化+1 登记 ALLOWED_ENGLISH。
+结果：守护 83 passed，daemon+tool_gateway 925 passed，ruff+mypy 过。

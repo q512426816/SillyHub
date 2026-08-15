@@ -1374,7 +1374,7 @@ async def get_lease(
     lease = await svc.get_lease(lease_id)
     if lease is None:
         raise DaemonLeaseNotFound(
-            f"Daemon task lease '{lease_id}' not found.",
+            "任务租约不存在或已被回收。",
             details={"lease_id": str(lease_id)},
         )
     return DaemonTaskLeaseRead.model_validate(lease)
@@ -2840,7 +2840,7 @@ async def get_pending_leases(
     runtime = await session.get(DaemonRuntime, runtime_id)
     if runtime is None or runtime.user_id != user.id:
         raise DaemonRuntimeNotFound(
-            f"Daemon runtime '{runtime_id}' not found.",
+            "运行时不存在或不属于当前用户。",
             details={"runtime_id": str(runtime_id)},
         )
 

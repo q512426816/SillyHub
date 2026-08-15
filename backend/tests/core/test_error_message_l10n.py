@@ -19,9 +19,11 @@ created_at: 2026-08-15 11:04:30
 3. 渐进白名单 PENDING_L10N_FILES：待中文化的文件跳过断言；
    各 Wave 改完从中划掉，最终清空（清空后本测试守护全量用户链路）。
 4. 断言：raise SomeError("…") / HTTPException(detail="…") 的纯字面量
-   message 必须含 CJK 字符。f-string（JoinedStr）静态不可判，跳过——
-   已知局限：f-string 内嵌英文片段不会被本测试捕获，靠 code review 把关。
-   ALLOWED_ENGLISH 登记合法英文个案（如协议级字符串），起步为空。
+   message 必须含 CJK 字符。f-string（JoinedStr）取**常量段拼接**做同款
+   CJK 判定（ql-20260815-009 升级）：常量段含 CJK 判过、纯插值无常量段
+   跳过、动态插值内容不判——残余盲区仅剩「整句文案全在插值表达式里」的
+   病态写法，靠 code review 把关。
+   ALLOWED_ENGLISH 登记合法英文个案（如协议级字符串）。
 """
 
 from __future__ import annotations
@@ -97,6 +99,11 @@ ALLOWED_ENGLISH: set[str] = {
     "authentication required",
     "llm proxy upstream unavailable",
     "model ownership mismatch",
+    # ql-20260815-009（f-string 常量段扫描升级后新暴露）：agent/profile/service.py
+    # 的防御性 ValueError（unknown_agent_profile_fields:{...}），消费方是后端
+    # 开发者（防 router 拼错更新键静默丢弃），非用户链路文案；code 前缀形态
+    # 便于日志 grep，保持英文。
+    "unknown_agent_profile_fields:",
 }
 
 
@@ -125,8 +132,32 @@ def _iter_module_files() -> list[str]:
     return sorted(result)
 
 
+# 可判语言的常量段：含 CJK（中文文案，过）或含字母（可能是英文文案，进
+# CJK 断言）；纯符号/数字骨架（如 f"{code}:{msg}" 的 ":"）无文案语义跳过。
+_JUDGEABLE_RE = re.compile(r"[一-鿿A-Za-z]")
+
+
+def _fstring_constant_text(node: ast.JoinedStr) -> str | None:
+    """提取 f-string（JoinedStr）的全部常量段拼接文本。
+
+    返回 None 表示常量段无可判文案（无常量段，或常量段仅符号/数字骨架），
+    静态跳过。插值表达式（FormattedValue）的内容不参与判定（动态值可能是
+    变量名/属性链，无法断言语言）。
+    """
+    parts: list[str] = []
+    for value in node.values:
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            parts.append(value.value)
+    if not parts:
+        return None
+    text = "".join(parts)
+    if not _JUDGEABLE_RE.search(text):
+        return None
+    return text
+
+
 def _extract_message_literals(tree: ast.AST) -> list[str]:
-    """提取 raise 语句中报错 message 的纯字符串字面量。
+    """提取 raise 语句中报错 message 的文案判定输入。
 
     覆盖形态：
     - raise SomeError("…")            → 首个位置参数为 str 字面量
@@ -135,7 +166,9 @@ def _extract_message_literals(tree: ast.AST) -> list[str]:
     - raise SomeError(message="…")    → message 关键字参数
     - raise HTTPException(…, detail="…") → detail 关键字参数（首个位置参数是
       status_code 整数，天然被 str 字面量过滤排除）
-    f-string（JoinedStr）静态不可判，跳过（见模块 docstring 已知局限）。
+    - raise SomeError(f"…{x}…")       → f-string（JoinedStr）取**常量段拼接**
+      （ql-20260815-009 升级，收窄盲区）：常量段含 CJK 判过；含 3+ 连续英文
+      字母且无 CJK 判违；纯插值无常量段返回 None 跳过。动态插值内容不判。
     """
     literals: list[str] = []
     for node in ast.walk(tree):
@@ -143,23 +176,29 @@ def _extract_message_literals(tree: ast.AST) -> list[str]:
             continue
         call = node.exc
         for arg in call.args:
-            if not isinstance(arg, ast.Constant) or not isinstance(arg.value, str):
-                continue
-            # code-first 双参约定（如 AccessTokenError(code, message)）：
-            # 若首个位置参数是 snake_case 形态的机器 code（token_expired 等），
-            # 说明文案在其后的参数里——跳过 code，取下一个 str 字面量参数。
-            if arg is call.args[0] and _SNAKE_CODE_RE.match(arg.value):
-                continue
-            literals.append(arg.value)
-            break
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                # code-first 双参约定（如 AccessTokenError(code, message)）：
+                # 若首个位置参数是 snake_case 形态的机器 code（token_expired 等），
+                # 说明文案在其后的参数里——跳过 code，取下一个 str 字面量参数。
+                if arg is call.args[0] and _SNAKE_CODE_RE.match(arg.value):
+                    continue
+                literals.append(arg.value)
+                break
+            if isinstance(arg, ast.JoinedStr):
+                const_text = _fstring_constant_text(arg)
+                if const_text is not None:
+                    literals.append(const_text)
+                break
         # message / detail 关键字参数
         for kw in call.keywords:
-            if (
-                kw.arg in ("message", "detail")
-                and isinstance(kw.value, ast.Constant)
-                and isinstance(kw.value.value, str)
-            ):
+            if kw.arg not in ("message", "detail"):
+                continue
+            if isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
                 literals.append(kw.value.value)
+            elif isinstance(kw.value, ast.JoinedStr):
+                const_text = _fstring_constant_text(kw.value)
+                if const_text is not None:
+                    literals.append(const_text)
     return literals
 
 
@@ -187,3 +226,26 @@ def test_error_message_contains_cjk(rel_path: str) -> None:
     assert not offenders, (
         f"{rel_path} 存在不含中文的报错 message 字面量（需中文化或登记 ALLOWED_ENGLISH）: {offenders}"
     )
+
+
+# ── f-string 常量段提取的单测（ql-20260815-009 升级的判定逻辑自证） ──────────
+
+_FSTRING_CASES = {
+    # 中文常量段 + 插值 → 过
+    'raise E(f"运行记录不存在 {rid}")': "运行记录不存在 ",
+    # 英文常量段 + 插值 → 判违（收窄盲区的目标场景）
+    'raise E(f"Run {rid} not found.")': "Run  not found.",
+    # 纯插值无常量段 → None（跳过，不进判定输入）
+    'raise E(f"{code}:{msg}")': None,
+}
+
+
+@pytest.mark.parametrize("src,expected", _FSTRING_CASES.items())
+def test_fstring_constant_text_extraction(src: str, expected: str | None) -> None:
+    tree = ast.parse(src)
+    raise_node = tree.body[0]
+    assert isinstance(raise_node, ast.Raise)
+    assert isinstance(raise_node.exc, ast.Call)
+    joined = raise_node.exc.args[0]
+    assert isinstance(joined, ast.JoinedStr)
+    assert _fstring_constant_text(joined) == expected
