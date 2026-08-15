@@ -25,6 +25,8 @@ created_at: 2026-06-24T01:16:36
 - 跨组件协作：scan_docs.reparse 读 spec_root、daemon 通过 spec bundle 获取规范、前端 spec-workspaces.ts 客户端
 
 ## 关键逻辑
+增量同步 apply_ops 同 hash no-op 豁免（2026-08-15-init-trigger-sillyspec-init / D-008@v2）：`apply_ops` 冲突分支（`row.version != op.base_version` 乐观锁）增加同内容豁免——`op.hash` 非空且 == `row.content_hash`（sha256 不可伪造）→ 跳过落盘、不置 conflict、`new_versions[path]=row.version`（daemon manifest 对齐）。场景：第二成员 init 骨架文件（knowledge/INDEX.md 等）add(base_version=0) 对服务器已有行原必 conflict，同 hash no-op 后静默对齐。旧 daemon 不传 hash 行为不变（仍 conflict）。
+
 bootstrap 初始化（`SpecBootstrapService.bootstrap`）：
 ```
 ws = get_workspace(workspace_id); spec_ws = get_spec_workspace(workspace_id)

@@ -55,6 +55,10 @@
 
 ### 2026-0
 ### 2026-0
+### 2026-08-15 · init lease 触发 sillyspec init
+
+- **init-trigger-sillyspec-init**（2026-08-15）：工作区初始化真正执行 `sillyspec init`——daemon `handleInitLease` 编排 5→6 步（pullSpecBundle 后、postSpecSync 前插 `runSillyspecInit` 硬失败 abort，D-002@v2：pull 整删重建故 init 必须后置），spawn `sillyspec init --dir <rootPath> --spec-dir <缓存> --workspace-id --no-skills --tool <多工具>`（shell:true + 60s 超时杀树 + spawnFn 依赖注入），成员本地获得 .sillyspec-platform.json 平台指针（status active）+ CLAUDE.md/AGENTS.md 指令注入 + spec 骨架。spawn 前 3s 版本门控 `MIN_SILLYSPEC_VERSION_FOR_INIT=3.26.8`（查询/解析失败 fail-safe，错误带中文升级指引，不依赖 daemon 重启）；tools 来自 cli.ts 构造前 AgentDetector 探测映射 VALID_TOOLS（兜底 claude）。配套双侧防冲突：backend `apply_ops` 冲突分支同 hash no-op 豁免（op.hash==row.content_hash → 不 conflict + new_versions 回服务器版本，D-008@v2 治第二成员骨架 add 必冲突）；daemon `UPLOAD_EXCLUDE_TOP_BASE` 三处统一排除 projects/（防成员机器绝对路径上传 + 缓存残留 delete op 误删）。跨仓 sillyspec CLI 三项（--no-skills / --tool 逗号重复多值 / 平台模式跳过项目内清理保 local.yaml 手调段）。verify PASS 含三场景真实集成证据（首成员产物/重复 init 手调保留/第二成员零冲突）+ 门控负路径；本机 npm link 3.26.8 验证（正式发版待用户，MIN 语义为下界）。契约零变更（lease metadata/claim payload/FileOp schema）。
+
 ### 2026-08-15 · perf-remediation 性能审查高危修复
 
 - **perf-remediation**（2026-08-15）：六代理性能审查 10 项修复全流程归档（worktree b85c02f3，31 文件 +2368/-326，约 40 新测试）。核心：reparse/spec 写入链路 to_thread 事件循环解放（Wave C 范式推广）；_BatchProgressWriter 50 文件/500ms 批量回写（终态准确+COALESCE 修 NULL 不落地）+ apply_ops IN 预取（dict 镜像保同请求语义）；scan_docs 无 q 时 load_only 排除 content；api_key 认证 key_prefix 索引过滤（O(n) bcrypt→O(1)）；scandir 单遍+每文件 1 stat+_safe_mtime 推广；_load_module_map (path,mtime) 复合键缓存+platform_managed 路径修复；agent GET logs after 游标（> 取增量）+ mission console 增量合并；daemon _pollLoop lease 分支 90s 窗门控（change-write 无 WS 推送不门控）+ 落盘日志 7 天清理。流程坑：after 游标方向在 design Grill 修订时写反（<=），plan 独立审查抓出；daemon B2 测试竞态为预存缺陷（baseline 也红）顺修。遗留 P3：mission console 空 fallback 无闩锁、Windows 排序大小写差异。
