@@ -223,6 +223,15 @@ class TestStatConvergence:
         target.write_text("# 脏 mtime 文档\n", encoding="utf-8")
         dirty = 9.1e11  # 两平台 fromtimestamp 均越界（year 30828 实测量级）
         os.utime(target, (dirty, dirty))
+        on_disk = target.stat().st_mtime
+        if on_disk != dirty:
+            # Linux ext4 / macOS APFS 内核时间戳上限（公元 2446/2554 年）低于
+            # datetime 越界点（year 9999），越界值被钳制为合法 mtime 落盘——
+            # 本文件系统上无法用真实文件触发护栏，只 NTFS 可真实落脏值
+            pytest.skip(
+                f"filesystem clamps out-of-range mtime ({dirty} -> {on_disk}); "
+                "dirty-mtime fallback untestable on this platform"
+            )
         assert target.stat().st_mtime == dirty  # 前置：脏值真实落到盘上
 
         # 旧实现在 fromtimestamp 处抛 ValueError
@@ -242,7 +251,16 @@ class TestStatConvergence:
         scan_dir.mkdir(parents=True)
         target = scan_dir / "ARCHITECTURE.md"
         target.write_text("# 组件脏 mtime\n", encoding="utf-8")
-        os.utime(target, (9.1e11, 9.1e11))
+        dirty = 9.1e11
+        os.utime(target, (dirty, dirty))
+        on_disk = target.stat().st_mtime
+        if on_disk != dirty:
+            # 同 test_dirty_mtime_falls_back_to_epoch_zero：文件系统钳制越界
+            # mtime 时护栏分支不可触发
+            pytest.skip(
+                f"filesystem clamps out-of-range mtime ({dirty} -> {on_disk}); "
+                "dirty-mtime fallback untestable on this platform"
+            )
 
         result = parser.parse_component(tmp_path, "proj")
         arch = next(d for d in result.docs if d.doc_type == "ARCHITECTURE")

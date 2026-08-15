@@ -364,6 +364,15 @@ class TestListFilesSyncScandir:
         target.write_text("# Dirty", encoding="utf-8")
         dirty = 9.1e11  # 两平台 fromtimestamp 均越界（ql-20260814-006 实测量级）
         os.utime(target, (dirty, dirty))
+        on_disk = target.stat().st_mtime
+        if on_disk != dirty:
+            # Linux ext4 / macOS APFS 内核时间戳上限（公元 2446/2554 年）低于
+            # datetime 越界点（year 9999），越界值被钳制为合法 mtime 落盘——
+            # 护栏分支在本文件系统上无法用真实文件触发，只 NTFS 可真实落脏值
+            pytest.skip(
+                f"filesystem clamps out-of-range mtime ({dirty} -> {on_disk}); "
+                "dirty-mtime fallback untestable on this platform"
+            )
         assert target.stat().st_mtime == dirty
 
         with pytest.raises((ValueError, OverflowError, OSError)):
