@@ -912,7 +912,7 @@
           "workspace"
         ],
         "summary": "Init Workspace",
-        "description": "Initialize the workspace for the current user (D-002/D-009).\n\nEnsures the spec workspace container exists, then dispatches an init-mode\ninteractive lease to the member's daemon.  The daemon writes\n``.sillyspec-platform.json`` to the member's local project directory and\npulls the latest spec bundle.\n\nReturns the ``lease_id``, ``runtime_id``, and ``claim_token``.",
+        "description": "Initialize the workspace for the current user (D-002/D-009).\n\nEnsures the spec workspace container exists, then dispatches an init-mode\ninteractive lease to the member's daemon.  The daemon writes\n``.sillyspec-platform.json`` to the member's local project directory and\npulls the latest spec bundle.\n\nReturns the ``lease_id``, ``runtime_id``, and ``claim_token``.\n\n鉴权收紧为 workspace-scoped（security-audit-remediation task-09）：非本\nworkspace 成员（即便在其它 workspace 有 workspace:write）403，不触达\n``start_init_dispatch`` 的 actor binding 解析。",
         "operationId": "init_workspace_api_workspaces__workspace_id__init_post",
         "parameters": [
           {
@@ -1736,7 +1736,7 @@
           "file"
         ],
         "summary": "List Files",
-        "description": "按归属/上传者列文件元数据（task-13 / FR-06）。\n\n业务人员「借用方案」查看：``owner_type=workspace&owner_id=<ws_id>`` 列该工作空间\n借用 daemon 产出的方案文件。无参数则返回全部活跃文件（按 created_at 倒序）。",
+        "description": "按归属/上传者列文件元数据（task-13 / FR-06）。\n\n业务人员「借用方案」查看：``owner_type=workspace&owner_id=<ws_id>`` 列该工作空间\n借用 daemon 产出的方案文件（需该 workspace 的 WORKSPACE_READ，非成员 404）。\n无参数则返回可见域内活跃文件——本人上传 + 有 WORKSPACE_READ 的 workspace 归属\n（platform_admin 全量），按 created_at 倒序（security-audit-remediation D-002）。",
         "operationId": "list_files_api_file_list_get",
         "parameters": [
           {
@@ -3584,7 +3584,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DocumentsSyncRequest"
+                "$ref": "#/components/schemas/app__modules__change__schema__DocumentsSyncRequest"
               }
             }
           }
@@ -5753,6 +5753,25 @@
               "title": "Tool Kind"
             },
             "description": "逗号分隔多选工具种类，仅筛 channel=tool_call 行；不传返回全部"
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "增量游标（ISO timestamp）：只返回 timestamp 严格更新的日志条目；不传返回全量（perf-remediation task-08 / FR-10）",
+              "title": "After"
+            },
+            "description": "增量游标（ISO timestamp）：只返回 timestamp 严格更新的日志条目；不传返回全量（perf-remediation task-08 / FR-10）"
           }
         ],
         "responses": {
@@ -5841,7 +5860,7 @@
           "agent"
         ],
         "summary": "List Workspace Agent Sessions",
-        "description": "scan 真阻塞（改造点 E）：workspace 维度 active AgentSession 列表。\n\n供 approvals 审批中心页聚合 scan 歧义决策——前端拿 session_id 列表后订阅各自\nSSE（permission_request），实现\"在审核页看到 scan 待决策 + 反馈续 turn\"。",
+        "description": "工作区会话列表（2026-08-14-change-center-conversation-driven task-06 / D-002@v1）。\n\ninclude_ended=false（缺省）：现状——仅 active 会话最小字段 dict\n（id/status/mode/provider），供 approvals 审批中心聚合 scan 歧义决策。\ninclude_ended=true：工作区全量会话（含已结束），完整 AgentSessionListItem\n（id/provider/status/turn_count/author/last_active_at/title，对齐\ndaemon/schema.py:71-84），排序 coalesce(last_active_at, created_at) desc。\n权限/过滤保持现状（workspace 成员跨成员可见），不因 include_ended 改变。",
         "operationId": "list_workspace_agent_sessions_api_workspaces__workspace_id__agent_sessions_get",
         "parameters": [
           {
@@ -5868,6 +5887,16 @@
                 }
               ],
               "title": "Mode"
+            }
+          },
+          {
+            "name": "include_ended",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Ended"
             }
           }
         ],
@@ -7578,7 +7607,7 @@
           "mcp-mission-events"
         ],
         "summary": "Stream Mission Events",
-        "description": "SSE endpoint — 推 mission 下 worker run 状态变更（FR-08）。\n\n连接池安全照搬 stream_agent_run_logs：存在性校验用短 session（校验完即归还\nslot），事件生成器内部自建独立短 session 做逐次轮询，不在请求级 session 贯穿\n整个流生命周期。\n\n鉴权复用 ``require_permission_any(Permission.TASK_READ)``（与\nstream_agent_run_logs 同款；路由在 /api 前缀天然适用，非成员 403）。",
+        "description": "SSE endpoint — 推 mission 下 worker run 状态变更（FR-08）。\n\n连接池安全照搬 stream_agent_run_logs：存在性校验用短 session（校验完即归还\nslot），事件生成器内部自建独立短 session 做逐次轮询，不在请求级 session 贯穿\n整个流生命周期。\n\n鉴权收紧为 workspace-scoped ``require_permission(Permission.TASK_READ)``\n（security-audit-remediation task-09）：checker 以路径参数 ``workspace_id``\n为 scope，用户必须在**本** workspace 持有 task:read——此前 ``require_permission_any``\n跨 workspace 并集判定放行了只对其它 workspace 有权限的用户（越权读 mission\nworker 状态）。非成员 403（权限拒绝）；mission 存在性 404 逻辑独立不变。",
         "operationId": "stream_mission_events_api_workspaces__workspace_id__missions__mission_id__events_get",
         "parameters": [
           {
@@ -9169,7 +9198,7 @@
           "daemon"
         ],
         "summary": "Claim Lease",
-        "description": "Claim a pending task lease for execution.",
+        "description": "Claim a pending task lease for execution.\n\ntask-03（security-audit-remediation / FR-02 / D-001@v1）：lease 归属 runtime\n的 user 必须是当前认证 user（服务层校验），他人 → 404 与不存在同语义。",
         "operationId": "claim_lease_api_daemon_leases__lease_id__claim_post",
         "parameters": [
           {
@@ -10739,13 +10768,91 @@
         }
       }
     },
+    "/api/daemon/llm-proxy/{path}": {
+      "get": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Llm Proxy Get",
+        "operationId": "llm_proxy_get_api_daemon_llm_proxy__path__get",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Llm Proxy Post",
+        "operationId": "llm_proxy_post_api_daemon_llm_proxy__path__post",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/runtimes/{runtime_id}/pending-leases": {
       "get": {
         "tags": [
           "daemon"
         ],
         "summary": "Get Pending Leases",
-        "description": "Return all pending leases for a runtime (polled by daemon).",
+        "description": "Return all pending leases for a runtime (polled by daemon).\n\ntask-03（security-audit-remediation / FR-02 / D-001@v1）：查询前归属校验\n——runtime 的 user 必须是当前认证 user，不匹配/不存在 → 404（owner-only，\n跨用户与不存在同语义）。同时把原 raw SQL 改 ORM 查询：原 text() 直绑\nuuid.UUID 参数在 SQLite（CHAR(32) 存储）下 ProgrammingError，且无法挂\n归属校验；ORM ``col()`` 由 dialect 处理 Uuid 绑定，两库行为一致。",
         "operationId": "get_pending_leases_api_daemon_runtimes__runtime_id__pending_leases_get",
         "parameters": [
           {
@@ -11461,338 +11568,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GitOperationListResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/workspaces/{workspace_id}/changes/create": {
-      "post": {
-        "tags": [
-          "change_writer"
-        ],
-        "summary": "Create Change",
-        "operationId": "create_change_api_workspaces__workspace_id__changes_create_post",
-        "parameters": [
-          {
-            "name": "workspace_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Workspace Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ChangeCreateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChangeCreateResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/workspaces/{workspace_id}/changes/proxy-create": {
-      "post": {
-        "tags": [
-          "change_writer"
-        ],
-        "summary": "Proxy Create Change",
-        "description": "daemon-client 变更代写入口 (design §5.3 Phase 3 / D-002@v1)。\n\n与 server-local ``/changes/create`` 区分：\n- 不传 ``lease_id`` 也不传 ``runtime_id``（D-002@v1）。\n- 经 ``service.create_change`` 走 proxy 路径（lease-polling 下发\n  daemon_change_writes → 等回执 → 落库 Change）；runtime 由后端从 binding +\n  workspace.default_agent 现算。\n- **不自动 dispatch brainstorm**（daemon-client change 暂不接 agent 流；agent\n  dispatch 由 task-12/后续接，避免与 server-local auto-dispatch 语义混淆）。\n\ndaemon 离线 / 未绑定 → 400 ``DAEMON_CLIENT_NO_SESSION``（service 层抛）。",
-        "operationId": "proxy_create_change_api_workspaces__workspace_id__changes_proxy_create_post",
-        "parameters": [
-          {
-            "name": "workspace_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Workspace Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProxyCreateChangeRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChangeCreateResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/workspaces/{workspace_id}/changes/{change_id}/documents/generate": {
-      "post": {
-        "tags": [
-          "change_writer"
-        ],
-        "summary": "Generate Document",
-        "operationId": "generate_document_api_workspaces__workspace_id__changes__change_id__documents_generate_post",
-        "parameters": [
-          {
-            "name": "workspace_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Workspace Id"
-            }
-          },
-          {
-            "name": "change_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Change Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MarkdownGenerateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MarkdownGenerateResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/workspaces/{workspace_id}/changes/{change_id}/documents/batch-generate": {
-      "post": {
-        "tags": [
-          "change_writer"
-        ],
-        "summary": "Batch Generate Documents",
-        "operationId": "batch_generate_documents_api_workspaces__workspace_id__changes__change_id__documents_batch_generate_post",
-        "parameters": [
-          {
-            "name": "workspace_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Workspace Id"
-            }
-          },
-          {
-            "name": "change_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Change Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BatchGenerateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BatchGenerateResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/workspaces/{workspace_id}/changes/{change_key}/execute": {
-      "post": {
-        "tags": [
-          "change_writer"
-        ],
-        "summary": "Execute Change",
-        "description": "Trigger change execution — dispatch via unified stage dispatch service.\n\ntask-09（D-004@v2）：``team_mode=true`` 时把 ``team_mode=True`` 写入\n``change.stages`` 触发 ``dispatch_next_step`` Step 2.5 分流到主 agent\nOrchestratorService。worker_preset / main_agent_config 从 ``change.stages``\n已有字段读（前端 stage toggle 经 transition 写入；execute 端点不重复接收，\n避免与 transition 入口的双写冲突）。single（team_mode=false 零回归）。",
-        "operationId": "execute_change_api_workspaces__workspace_id__changes__change_key__execute_post",
-        "parameters": [
-          {
-            "name": "workspace_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Workspace Id"
-            }
-          },
-          {
-            "name": "change_key",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Change Key"
-            }
-          },
-          {
-            "name": "provider",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Provider"
-            }
-          },
-          {
-            "name": "model",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Model"
-            }
-          },
-          {
-            "name": "team_mode",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "description": "execute 团队执行（D-004@v2，默认 single 零回归）",
-              "default": false,
-              "title": "Team Mode"
-            },
-            "description": "execute 团队执行（D-004@v2，默认 single 零回归）"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Execute Change Api Workspaces  Workspace Id  Changes  Change Key  Execute Post"
                 }
               }
             }
@@ -19443,7 +19218,7 @@
           "ppm-problem"
         ],
         "summary": "Export Problems",
-        "description": "导出问题清单为 Excel (18 列对齐导入 + 附件嵌图片, D-003/D-006/D-011/R-07)。\n\n拆两段 (跨 async/sync 边界, D-011):\n① async 段:调 ``list_problems_for_export`` 取 18 列 + 对每行 ``file_urls`` 的\n  file_id 调 ``FileService.get_stream`` 收图 bytes 到内存 (``get_stream`` 返回\n  ``AsyncIterator``, 不能在 sync 段 await);\n② sync 段 (``anyio.to_thread.run_sync``):openpyxl 构造 workbook (18 列表头 +\n  数据行 + 附件列对每行 images ``add_image`` 锚到该行单元格)。\n单图取流失败 (缺失/已删/底层存储瞬时错误,含非 AppError) 跳过不阻断导出\n(best-effort, 对齐 D-009 口径;P2 捕获面扩到 Exception)。",
+        "description": "导出问题清单为 Excel (18 列对齐导入 + 附件嵌图片, D-003/D-006/D-011/R-07)。\n\n拆两段 (跨 async/sync 边界, D-011):\n① async 段:调 ``list_problems_for_export`` 取 18 列 + 对每行 ``file_urls`` 的\n  file_id 调 ``FileService.get_stream`` 收图 bytes 到内存 (``get_stream`` 返回\n  ``AsyncIterator``, 不能在 sync 段 await);\n② sync 段 (``anyio.to_thread.run_sync``):openpyxl 构造 workbook (18 列表头 +\n  数据行 + 附件列对每行 images ``add_image`` 锚到该行单元格)。\n单图取流失败 (缺失/已删/越权归属/底层存储瞬时错误,含非 AppError) 跳过不阻断导出\n(best-effort, 对齐 D-009 口径;P2 捕获面扩到 Exception)。越权归属跳过源自\nget_stream 的 IDOR 归属断言 (security-audit-remediation task-05/D-001)。",
         "operationId": "export_problems_api_ppm_problem_list_export_excel_get",
         "responses": {
           "200": {
@@ -24770,7 +24545,7 @@
           "spec-workspace"
         ],
         "summary": "Sync Spec Workspace Incremental",
-        "description": "Receive daemon incremental file ops and apply them to spec_root.\n\nChange 2026-08-13-platform-managed-file-sync / design §7 / FR-02 / D-001：\n文件级增量同步（add/update/delete/rename + base_version 乐观锁）。base_version\n过期 → ``conflict=True`` + ``server_versions``（HTTP 保持 200，daemon 侧据字段\n提示人工拍板，design §7 定义）；containment / ``.runtime`` 越界 → 422 AppError\n透传（``HTTP_422_SPEC_BUNDLE_INVALID``，对齐旧 tar 端点校验机制）。\n``X-Change-Write-Id`` 头（可选）让 apply_ops 循环内逐文件回写 files_processed。",
+        "description": "Receive daemon incremental file ops and apply them to spec_root.\n\nChange 2026-08-13-platform-managed-file-sync / design §7 / FR-02 / D-001：\n文件级增量同步（add/update/delete/rename + base_version 乐观锁）。base_version\n过期 → ``conflict=True`` + ``server_versions``（HTTP 保持 200，daemon 侧据字段\n提示人工拍板，design §7 定义）；containment / ``.runtime`` 越界 → 422 AppError\n透传（``HTTP_422_SPEC_BUNDLE_INVALID``，对齐旧 tar 端点校验机制）。\n``X-Change-Write-Id`` 头（可选）让 apply_ops 循环内逐文件回写 files_processed。\n``change_dirs``（change 2026-08-14-change-center-conversation-driven / D-005@v1）：\ndaemon 标注的本次涉及变更目录名集合，透传 apply_ops 落盘后触发 scoped reparse\n（无标注时 apply_ops 扫 ops 路径 ``changes/`` 前缀兜底，行为等价）。",
         "operationId": "sync_spec_workspace_incremental_api_workspaces__workspace_id__spec_workspace_sync_incremental_post",
         "parameters": [
           {
@@ -25032,7 +24807,7 @@
           "platform-sync"
         ],
         "summary": "Push Progress",
-        "description": "POST 上行 progress + base_ts 冲突检测（契约 §4）。\n\n读 3 个 ``X-SillySpec-*`` header（User/Base-Ts/Pushed-At，缺失/空均 None）。\n200=接受（客户端据此更新 platform_last_sync）；409=冲突（body\n``{conflict, platform_progress, last_pushed_at}``，客户端写冲突文件走 resolve）。\nbody 是裸 ``serializeForSync`` 六表 JSON（NG-6 透传，不强类型校验）。\n\nworkspace_id 从 require_platform_sync 派生（shpsync_ token 绑定工作区；shk_live_/JWT\n过渡期 None 走全局聚合 fallback），透传 service 做收件箱隔离（task-06/07）。",
+        "description": "POST 上行 progress + base_ts 冲突检测（契约 §4）。\n\n读 3 个 ``X-SillySpec-*`` header（User/Base-Ts/Pushed-At，缺失/空均 None）。\n200=接受（客户端据此更新 platform_last_sync）；409=冲突（body\n``{conflict, platform_progress, last_pushed_at}``，客户端写冲突文件走 resolve）。\nbody 是裸 ``serializeForSync`` 六表 JSON（NG-6 透传，不强类型校验）。\n\nworkspace_id 从 require_platform_sync_write 派生（唯一写通道 shpsync_ token 绑定\n工作区；shk_live_/JWT 一律 403，task-06 / D-004@v1）。",
         "operationId": "push_progress_api_changes__name__progress_post",
         "parameters": [
           {
@@ -25086,7 +24861,7 @@
           "platform-sync"
         ],
         "summary": "Get Progress",
-        "description": "GET 单 change 完整 progress JSON（契约 §6，裸六表 + 顶层 last_pushed_at）。\n\n不存在/跨 workspace → 404（客户端 fetchJson 返回 null 降级不阻断，契约 §8/§10）。",
+        "description": "GET 单 change 完整 progress JSON（契约 §6，裸六表 + 顶层 last_pushed_at）。\n\n不存在/跨 workspace（无 CHANGE_READ）→ 404（客户端 fetchJson 返回 null 降级\n不阻断，契约 §8/§10）。",
         "operationId": "get_progress_api_changes__name__progress_get",
         "parameters": [
           {
@@ -25130,7 +24905,7 @@
           "platform-sync"
         ],
         "summary": "List Changes",
-        "description": "GET 轻量 change 列表（契约 §5，裸数组形态 D-007，按 token 派生 workspace 过滤）。",
+        "description": "GET 轻量 change 列表（契约 §5，裸数组形态 D-007，按鉴权 scope 聚合）。\n\nshpsync_ → token 绑定 workspace 收件箱；JWT/shk_live_ → CHANGE_READ workspace\n并集 + NULL 桶（task-06 / D-004@v1，全局聚合已关闭）。",
         "operationId": "list_changes_api_changes_get",
         "responses": {
           "200": {
@@ -25157,7 +24932,7 @@
           "platform-sync"
         ],
         "summary": "Get Approval",
-        "description": "GET 单 change 审批状态——给 sillyspec CLI execute 审批门控用（ql-20260812-001-6eb8）。\n\nCLI ``sync.js checkApproval`` 在 execute 启动时 GET 此端点，读 ``status``：\nrejected/pending 阻断 execute，其他（approved）放行（command.js:1071-1080）。\n\n**不查库、不因 change 不存在 404**：change 可能尚未上行 progress（execute 前），\n若 404 CLI 会 fetchJson→null→误判 pending 卡死（与本端点放行初衷相悖）。当前后端\n无审批策略 → 所有 change 默认 ``approved`` 放行。鉴权失败仍 401（require_platform_sync）。",
+        "description": "GET 单 change 审批状态——给 sillyspec CLI execute 审批门控用（ql-20260812-001-6eb8）。\n\nCLI ``sync.js checkApproval`` 在 execute 启动时 GET 此端点，读 ``status``：\nrejected/pending 阻断 execute，其他（approved）放行（command.js:1071-1080）。\n\n**不因 change 无审批记录 404**：change 可能尚未上行 progress（execute 前），\n若 404 CLI 会 fetchJson→null→误判 pending 卡死（与本端点放行初衷相悖）。\n2026-08-14-platform-sync-docs-approval 起改读 ``approval`` 列（D-001@v1 完整闭环）：\n无记录（行不存在 / approval NULL 含仅 documents 占位行）→ 默认 ``approved`` 放行；\n有记录 → 真实 status/reason（rejected 时 CLI execute 启动 exit(1) 硬阻断，\nrun/command.js:1113-1129 现有门控）。鉴权失败仍 401。\n\ntask-06 / D-004@v1：读 scope 聚合——跨 workspace（无 CHANGE_READ）的 change 行\n不可见，回落默认 approved 放行（不泄漏 status/reason）。",
         "operationId": "get_approval_api_changes__name__approval_get",
         "parameters": [
           {
@@ -25177,6 +24952,112 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ChangeApprovalResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "platform-sync",
+          "platform-sync"
+        ],
+        "summary": "Submit Approval",
+        "description": "POST 审批决定（CLI ``sync.js _submitApproval`` :944-996 预留契约，过去式 decision）。\n\nD-001@v1 完整闭环：落 approval 列（重复提交覆盖，后写赢）。``decided_by`` 取\n``require_platform_sync_write`` 解包的权威 ``User.username``（唯一写通道 shpsync_\ntoken 反查真实 User；**不用** ``X-SillySpec-User`` header fallback——客户端可伪造，\nGrill UB-2）。rejected 记录随后被 GET approval 读到 → CLI execute 启动 exit(1)\n硬阻断。task-06 / D-004@v1：JWT/shk_live_ 一律 403。",
+        "operationId": "submit_approval_api_changes__name__approval_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalSubmitRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalSubmitOk"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/changes/{name}/documents": {
+      "post": {
+        "tags": [
+          "platform-sync",
+          "platform-sync"
+        ],
+        "summary": "Push Documents",
+        "description": "POST 四件套文档全文（CLI ``sync.js syncDocuments`` :442-497 预留契约）。\n\nbody 是扁平 map（键限四件套白名单，schema 层 422）。定向 upsert ``documents``\n列（D-003@v1 单写者，不触碰 latest_progress/approval）；行不存在 INSERT 占位\n（下行端点由占位行守卫视为「无进度」）。全量替换语义（整列覆盖，与 CLI 全量推一致）。\n\n仅 shpsync_ token 可写（task-06 / D-004@v1，workspace_id 由 token 派生）。",
+        "operationId": "push_documents_api_changes__name__documents_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__modules__platform_sync__schema__DocumentsSyncRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentsSyncOk"
                 }
               }
             }
@@ -27130,6 +27011,63 @@
         ],
         "title": "ApprovalRead"
       },
+      "ApprovalSubmitOk": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "ok"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "rejected"
+            ],
+            "title": "Decision"
+          },
+          "change_name": {
+            "type": "string",
+            "title": "Change Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision",
+          "change_name"
+        ],
+        "title": "ApprovalSubmitOk",
+        "description": "POST approval 200 响应（CLI fetchJson 读到即成功，字段供人工核对）。"
+      },
+      "ApprovalSubmitRequest": {
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "rejected"
+            ],
+            "title": "Decision"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision"
+        ],
+        "title": "ApprovalSubmitRequest",
+        "description": "POST /changes/{name}/approval 请求。\n\ndecision 过去式（``\"approved\"``/``\"rejected\"``）——CLI ``sync.js _submitApproval``\n（:961-963）字面：rejected 分支带 reason，approved 分支**整个不含 reason 键**，\n故 reason 必须 optional（default None，Grill UB-3）。"
+      },
       "ArchiveCheckItem": {
         "properties": {
           "name": {
@@ -27169,6 +27107,11 @@
             ],
             "title": "Comment",
             "description": "归档备注（可选）"
+          },
+          "notify_session": {
+            "type": "boolean",
+            "title": "Notify Session",
+            "default": true
           }
         },
         "type": "object",
@@ -27458,39 +27401,6 @@
         ],
         "title": "AuditPageResponse",
         "description": "Paginated response for the audit query endpoint."
-      },
-      "BatchGenerateRequest": {
-        "properties": {
-          "doc_types": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "minItems": 1,
-            "title": "Doc Types"
-          }
-        },
-        "type": "object",
-        "required": [
-          "doc_types"
-        ],
-        "title": "BatchGenerateRequest"
-      },
-      "BatchGenerateResponse": {
-        "properties": {
-          "generated": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Generated"
-          }
-        },
-        "type": "object",
-        "required": [
-          "generated"
-        ],
-        "title": "BatchGenerateResponse"
       },
       "BatchMetaRequest": {
         "properties": {
@@ -27881,141 +27791,6 @@
         "type": "object",
         "title": "ChangeApprovalResponse",
         "description": "GET /changes/{name}/approval 响应——给 sillyspec CLI execute 审批门控用。\n\nCLI ``sync.js checkApproval``（execute 启动时调）读 ``status``：\n``rejected``/``pending`` 阻断 execute，其他（``approved``）放行\n（command.js:1071-1080）。当前后端无审批策略/数据 → 所有 change 默认 ``approved``\n放行（ql-20260812-001-6eb8 修 CLI 因 404 误判 pending 卡死）。"
-      },
-      "ChangeCreateRequest": {
-        "properties": {
-          "title": {
-            "type": "string",
-            "maxLength": 500,
-            "minLength": 1,
-            "title": "Title"
-          },
-          "description": {
-            "type": "string",
-            "maxLength": 5000,
-            "title": "Description",
-            "default": ""
-          },
-          "scope": {
-            "type": "string",
-            "pattern": "^(full|quick)$",
-            "title": "Scope",
-            "default": "full"
-          },
-          "change_type": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 50
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Change Type"
-          },
-          "affected_components": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Affected Components"
-          },
-          "lease_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lease Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "title"
-        ],
-        "title": "ChangeCreateRequest"
-      },
-      "ChangeCreateResponse": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Id"
-          },
-          "workspace_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Workspace Id"
-          },
-          "change_key": {
-            "type": "string",
-            "title": "Change Key"
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "current_stage": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Current Stage"
-          },
-          "path": {
-            "type": "string",
-            "title": "Path"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "agent_dispatch": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent Dispatch"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "workspace_id",
-          "change_key",
-          "title",
-          "status",
-          "current_stage",
-          "path",
-          "created_at"
-        ],
-        "title": "ChangeCreateResponse"
       },
       "ChangeDocMatrix": {
         "properties": {
@@ -30882,12 +30657,25 @@
         "title": "DispatchWorkerRequest",
         "description": "主 agent 派 worker 的请求体（D-002@v2）。\n\n字段对齐 worker_preset 单条结构（{agent_type, model, objective, role}），\n主 agent 可在 mission 启动时的 preset 之外动态补派（如发现新子任务）。"
       },
-      "DocumentsSyncRequest": {
-        "properties": {},
-        "additionalProperties": true,
+      "DocumentsSyncOk": {
+        "properties": {
+          "synced": {
+            "type": "integer",
+            "title": "Synced",
+            "description": "本次落库的文档数"
+          },
+          "change_name": {
+            "type": "string",
+            "title": "Change Name"
+          }
+        },
         "type": "object",
-        "title": "DocumentsSyncRequest",
-        "description": "Key is filename, value is file content."
+        "required": [
+          "synced",
+          "change_name"
+        ],
+        "title": "DocumentsSyncOk",
+        "description": "POST documents 200 响应（CLI 不读 body，任意 2xx 即可，synced 供人工核对）。"
       },
       "DocumentsSyncResponse": {
         "properties": {
@@ -31574,7 +31362,8 @@
           "git_username": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^[\\w.\\- ]{1,64}$"
               },
               {
                 "type": "null"
@@ -31585,7 +31374,8 @@
           "git_email": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)+$"
               },
               {
                 "type": "null"
@@ -32011,6 +31801,11 @@
               }
             ],
             "title": "Comment"
+          },
+          "notify_session": {
+            "type": "boolean",
+            "title": "Notify Session",
+            "default": true
           }
         },
         "type": "object",
@@ -33699,62 +33494,6 @@
           "password"
         ],
         "title": "LoginRequest"
-      },
-      "MarkdownGenerateRequest": {
-        "properties": {
-          "doc_type": {
-            "type": "string",
-            "maxLength": 30,
-            "minLength": 1,
-            "title": "Doc Type"
-          },
-          "content": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Content"
-          },
-          "lease_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lease Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "doc_type",
-          "content"
-        ],
-        "title": "MarkdownGenerateRequest"
-      },
-      "MarkdownGenerateResponse": {
-        "properties": {
-          "doc_type": {
-            "type": "string",
-            "title": "Doc Type"
-          },
-          "path": {
-            "type": "string",
-            "title": "Path"
-          },
-          "size": {
-            "type": "integer",
-            "title": "Size"
-          }
-        },
-        "type": "object",
-        "required": [
-          "doc_type",
-          "path",
-          "size"
-        ],
-        "title": "MarkdownGenerateResponse"
       },
       "McpConfigViewResponse": {
         "properties": {
@@ -36447,6 +36186,11 @@
               }
             ],
             "title": "Comment"
+          },
+          "notify_session": {
+            "type": "boolean",
+            "title": "Notify Session",
+            "default": true
           }
         },
         "type": "object",
@@ -41610,6 +41354,11 @@
               }
             ],
             "title": "Comment"
+          },
+          "notify_session": {
+            "type": "boolean",
+            "title": "Notify Session",
+            "default": true
           }
         },
         "type": "object",
@@ -41617,40 +41366,6 @@
           "decision"
         ],
         "title": "ProposalReviewRequest"
-      },
-      "ProxyCreateChangeRequest": {
-        "properties": {
-          "title": {
-            "type": "string",
-            "maxLength": 500,
-            "minLength": 1,
-            "title": "Title"
-          },
-          "description": {
-            "type": "string",
-            "maxLength": 5000,
-            "title": "Description",
-            "default": ""
-          },
-          "change_type": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 50
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Change Type"
-          }
-        },
-        "type": "object",
-        "required": [
-          "title"
-        ],
-        "title": "ProxyCreateChangeRequest",
-        "description": "daemon-client 变更代写入参 (design §7.5 / D-002@v1)。\n\nD-002@v1（2026-07-05-daemon-client-change-binding-fix）：删 ``runtime_id`` 字段。\nruntime 由后端 ``resolve_runtime_for_writeback`` 用 binding + workspace.default_agent\n现算（与派发链路共用解析）。daemon_id 亦从 per-member binding 拿，前端无需传。"
       },
       "PsPlanNodeCreate": {
         "properties": {
@@ -46746,6 +46461,13 @@
             },
             "type": "array",
             "title": "Ops"
+          },
+          "change_dirs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Change Dirs"
           }
         },
         "type": "object",
@@ -46753,7 +46475,7 @@
           "ops"
         ],
         "title": "SpecIncrementalSyncRequest",
-        "description": "Request body for the incremental sync endpoint (design §7)."
+        "description": "Request body for the incremental sync endpoint (design §7).\n\n``change_dirs``（change 2026-08-14-change-center-conversation-driven / D-005@v1）：\ndaemon 本次增量 ops 涉及的变更目录名集合（``changes/<name>/`` 与\n``changes/archive/<name>/`` 前缀分组取 name，去重）。缺省 ``[]`` 兼容旧 daemon——\nbackend ``apply_ops`` 无标注时扫 ops 路径 ``changes/`` 前缀兜底（design §9）。"
       },
       "SpecIncrementalSyncResponse": {
         "properties": {
@@ -52739,6 +52461,13 @@
         ],
         "title": "ApproveRequest"
       },
+      "app__modules__change__schema__DocumentsSyncRequest": {
+        "properties": {},
+        "additionalProperties": true,
+        "type": "object",
+        "title": "DocumentsSyncRequest",
+        "description": "Key is filename, value is file content.\n\nsecurity-audit-remediation task-07：``iter_documents`` 前逐键校验单段文件名\n白名单（字母数字点下划线连字符，禁路径分隔符与全点段）。CLI 契约只推四件套\n单段名（platform_sync 侧 DOCUMENT_FILES 已收敛），本层兜底 + service 层\nrelative_to 守卫双层防御。非法键 → 422，错误信息只含键名不回显内容。"
+      },
       "app__modules__change__schema__ReviewResponse": {
         "properties": {
           "change": {
@@ -52755,6 +52484,22 @@
                 "type": "null"
               }
             ]
+          },
+          "notified_session": {
+            "type": "boolean",
+            "title": "Notified Session",
+            "default": false
+          },
+          "notify_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notify Error"
           }
         },
         "type": "object",
@@ -52867,6 +52612,14 @@
         "type": "object",
         "title": "OwnerRead",
         "description": "Nested owner DTO for platform-admin global views (task-04 / D-006@v1).\n\nPopulated by list endpoints via JOIN ``users``; detail endpoints may\nleave it ``None``."
+      },
+      "app__modules__platform_sync__schema__DocumentsSyncRequest": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "type": "object",
+        "title": "DocumentsSyncRequest",
+        "description": "POST /changes/{name}/documents 请求——**裸**扁平 map（顶层即文件名）。\n\nCLI ``sync.js syncDocuments``（:442-497）把存在的四件套文件读成扁平 map\n直接 ``JSON.stringify(documents)`` 整体 POST——顶层就是 ``{\"proposal.md\": \"全文\"}``，\n**不包 documents 键**（task-05 测试实证抓到包装偏差后修正）。RootModel 直接\n映射裸 map。键限白名单、值必须 str；空 map / 白名单外键 / 值非 str → 422。"
       },
       "app__modules__workflow__schema__ReviewResponse": {
         "properties": {
