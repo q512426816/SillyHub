@@ -33,6 +33,7 @@ import { listProviders } from "@/lib/api/llm-providers";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
 import {
   createSession,
+  PROVIDER_META,
   type AgentSessionRead,
   type DaemonMachineRead,
   type DaemonRuntimeRead,
@@ -69,7 +70,12 @@ function machineLabel(m: DaemonMachineRead): string {
 }
 
 function runtimeLabel(r: DaemonRuntimeRead): string {
-  return r.display_alias?.trim() || r.name || r.provider || r.id;
+  // ql-20260815-001：智能体=引擎维度（FR-01），主显引擎名（Claude Code/Codex/…）。
+  // 不用 runtime.name——它默认是机器主机名（如 DESKTOP-2BN7FDC），会把智能体显示成机器名。
+  // 用户自定义了 runtime 别名时以「别名 · 引擎名」并呈，既保留个性化又始终可辨引擎。
+  const engine = PROVIDER_META[r.provider ?? ""]?.label ?? r.provider ?? r.id;
+  const alias = r.display_alias?.trim();
+  return alias ? `${alias} · ${engine}` : engine;
 }
 
 /** ISO → "MM-DD HH:mm"；空/非法 → —（FRONTEND_PAGE_STYLE 空值统一）。 */

@@ -69,9 +69,15 @@ vi.mock("@/lib/api/llm-providers", () => ({
 }));
 
 // 组件只消费 createSession（类型导入编译期擦除），局部 mock 不加载真实 daemon.ts。
-vi.mock("@/lib/daemon", () => ({
-  createSession: (...args: unknown[]) => mocks.createSession(...args),
-}));
+vi.mock("@/lib/daemon", async (importOriginal) => {
+  // ql-20260815-001：组件新增消费 PROVIDER_META（引擎显示名），真实常量无副作用，
+  // importOriginal 保留真值只 mock createSession 网络函数。
+  const actual = await importOriginal<typeof import("@/lib/daemon")>();
+  return {
+    ...actual,
+    createSession: (...args: unknown[]) => mocks.createSession(...args),
+  };
+});
 
 // ── 固件构造 ─────────────────────────────────────────────────────────────
 
@@ -407,6 +413,47 @@ describe("NewSessionForm 智能体联动（D-010）", () => {
     const gemini = screen.getByRole("button", { name: /选择智能体 Gemini/ });
     expect(gemini).toBeDisabled();
     expect(screen.getByText("暂不支持会话")).toBeInTheDocument();
+  });
+
+  it("智能体标签显示引擎名而非机器名（name=主机名/别名场景，ql-20260815-001）", async () => {
+    setMachines({
+      items: [
+        makeMachine({
+          id: "m-a",
+          hostname: "DESKTOP-2BN7FDC",
+          runtimes: [
+            // name 默认=机器主机名（线上真实形态）——不得显示为主标签
+            makeRuntime({
+              id: "rt-hostname",
+              provider: "claude",
+              name: "DESKTOP-2BN7FDC",
+            }),
+            makeRuntime({
+              id: "rt-alias",
+              provider: "codex",
+              name: "DESKTOP-2BN7FDC",
+              display_alias: "工作机",
+            }),
+          ],
+        }),
+      ],
+    });
+    renderForm(<NewSessionForm />);
+
+    await waitFor(() => {
+      // 无别名：纯引擎名，不含主机名
+      expect(
+        screen.getByRole("button", { name: "选择智能体 Claude Code" }),
+      ).toBeInTheDocument();
+    });
+    // 有别名：别名 · 引擎名（保留个性化且引擎可辨）
+    expect(
+      screen.getByRole("button", { name: "选择智能体 工作机 · Codex" }),
+    ).toBeInTheDocument();
+    // 智能体列表区域内不出现机器主机名（机器选择区显示主机名属合法）
+    const agentList = document.querySelector('[aria-label="智能体列表"]');
+    expect(agentList).not.toBeNull();
+    expect(agentList?.textContent).not.toContain("DESKTOP-2BN7FDC");
   });
 
   it("切机器重置智能体：A 机器手选 Codex → 切 B 机器回落默认 Claude", async () => {
