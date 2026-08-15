@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { Daemon } from '../src/daemon.js';
+import { Daemon, LEASE_POLL_SKIP_MS } from '../src/daemon.js';
 import type { DaemonConfig } from '../src/config.js';
 import { MSG } from '../src/protocol.js';
 import type {
@@ -70,6 +70,8 @@ interface MockClient {
   submitMessages: ReturnType<typeof vi.fn>;
   completeLease: ReturnType<typeof vi.fn>;
   getPendingLeases: ReturnType<typeof vi.fn>;
+  /** perf-remediation task-09：change-write 轮询分支调用（此前缺失仅 catch 成 debug 噪音）。 */
+  getPendingChangeWrites: ReturnType<typeof vi.fn>;
   getExecutionContext: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
 }
@@ -113,6 +115,7 @@ function createMockClient(): MockClient {
     submitMessages: vi.fn(async () => ({})),
     completeLease: vi.fn(async () => ({})),
     getPendingLeases: vi.fn(async () => []),
+    getPendingChangeWrites: vi.fn(async () => []),
     // ql-20260617-009：默认 fetch 返回空 bundle（无 workspace 字段）。
     getExecutionContext: vi.fn(async () => ({
       agent_run_id: 'run-default',
@@ -158,6 +161,9 @@ function createMockTaskRunner(): MockTaskRunner {
 /** mock WsClient 工厂：暴露 callbacks 让测试模拟 server 推消息。 */
 function createMockWsClient() {
   let callbacks: WsClientCallbacks = {};
+  // perf-remediation task-09：门控状态（isConnected / lastMessageAt）默认
+  // 断连（connected=false）——保持既有轮询测试行为不变，测试用 _setWsGate 手动切换。
+  const gate = { connected: false, lastMessageAt: null as number | null };
   return {
     // WsClient 构造签名：new WsClient({ serverUrl, runtimeId, callbacks })
     // daemon 内部会调 wsClient.connect() / wsClient.close()
@@ -169,6 +175,18 @@ function createMockWsClient() {
       callbacks.onDisconnected?.(1000, 'test_close');
     }),
     send: vi.fn(() => true),
+    // task-09 / D-003@v1：WsClientLike 只读 getter（lease 轮询门控消费）
+    get isConnected(): boolean {
+      return gate.connected;
+    },
+    get lastMessageAt(): number | null {
+      return gate.lastMessageAt;
+    },
+    // 测试辅助：手动设置 WS 门控状态（连接 + 最后消息时间）
+    _setWsGate(connected: boolean, lastMessageAt: number | null): void {
+      gate.connected = connected;
+      gate.lastMessageAt = lastMessageAt;
+    },
     // 测试辅助：模拟 server 推消息（绕过真实 WS）
     _injectMessage(msg: { type: string; payload: unknown }): void {
       callbacks.onMessage?.(msg as never);
@@ -894,5 +912,102 @@ describe('Daemon', () => {
       const providerNames = providers.map((p) => p.provider).sort();
       expect(providerNames).toEqual(['claude', 'codex']);
     }
+  });
+
+  // ── perf-remediation task-09 / D-003@v1：_pollLoop 按通道拆分门控矩阵 ──────
+  //
+  // mock wsClient 默认 connected=false（断连），既有轮询测试（AC-02/AC-03c）行为不变；
+  // 本组用 _setWsGate 切换 isConnected / lastMessageAt 验证门控四象限：
+  //   1. 连接 + 消息新鲜（<90s）  → lease 轮询跳过（不发 HTTP）
+  //   2. 断连                      → lease 轮询照常执行
+  //   3. 连接在但消息陈旧（假活）  → lease 轮询照常执行
+  //   4. change-write 分支         → 任何 WS 状态都照常执行（无推送通道，Grill B-1）
+
+  it('task-09: WS 连接且消息新鲜（<90s）→ lease 轮询跳过，change-write 照常', async () => {
+    const client = createMockClient();
+    const { daemon, wsClientMock } = buildDaemon({ client });
+    track(daemon);
+    await daemon.start();
+    // 等 _wsLoop 建好 mock wsClient + 至少一轮 poll 过去（基线：断连状态在轮询）
+    await sleep(60);
+    const baseline = client.getPendingLeases.mock.calls.length;
+    const baselineWrites = client.getPendingChangeWrites.mock.calls.length;
+    expect(baseline).toBeGreaterThan(0); // 断连基线确实在轮询（前提校验）
+
+    // 切到健康 WS：连接 + 最后消息 1s 前
+    wsClientMock._setWsGate(true, Date.now() - 1_000);
+    await sleep(60);
+
+    // lease 轮询被跳过（调用次数不再增长）
+    expect(client.getPendingLeases.mock.calls.length).toBe(baseline);
+    // change-write 轮询照常增长（不受门控影响）
+    expect(client.getPendingChangeWrites.mock.calls.length).toBeGreaterThan(
+      baselineWrites,
+    );
+    await daemon.stop();
+  });
+
+  it('task-09: WS 断连 → lease 轮询照常执行（30s 兜底恢复）', async () => {
+    const client = createMockClient();
+    const { daemon, wsClientMock } = buildDaemon({ client });
+    track(daemon);
+    await daemon.start();
+    await sleep(60);
+    // 先切健康（验证门控生效），再断连验证恢复
+    wsClientMock._setWsGate(true, Date.now() - 1_000);
+    await sleep(40);
+    const gated = client.getPendingLeases.mock.calls.length;
+
+    // 断连（isConnected=false，lastMessageAt 保留也无所谓——门控先看连接）
+    wsClientMock._setWsGate(false, Date.now() - 1_000);
+    await sleep(60);
+    expect(client.getPendingLeases.mock.calls.length).toBeGreaterThan(gated);
+    await daemon.stop();
+  });
+
+  it('task-09: WS 连接在但消息陈旧（≥90s，假活 R-05）→ lease 轮询照常执行', async () => {
+    const client = createMockClient();
+    const { daemon, wsClientMock } = buildDaemon({ client });
+    track(daemon);
+    await daemon.start();
+    await sleep(60);
+    // 先切健康（门控生效基线）
+    wsClientMock._setWsGate(true, Date.now() - 1_000);
+    await sleep(40);
+    const gated = client.getPendingLeases.mock.calls.length;
+
+    // 假活：isConnected=true 但最后消息在 90s 前（含边界：恰好 LEASE_POLL_SKIP_MS）
+    wsClientMock._setWsGate(true, Date.now() - LEASE_POLL_SKIP_MS);
+    await sleep(60);
+    expect(client.getPendingLeases.mock.calls.length).toBeGreaterThan(gated);
+
+    // lastMessageAt=null（连接后从未收到消息）同样视为陈旧 → 照常轮询
+    wsClientMock._setWsGate(true, null);
+    await sleep(60);
+    expect(client.getPendingLeases.mock.calls.length).toBeGreaterThan(gated);
+    await daemon.stop();
+  });
+
+  it('task-09: change-write 分支任何 WS 状态都执行（无推送通道，永不门控）', async () => {
+    const client = createMockClient();
+    const { daemon, wsClientMock } = buildDaemon({ client });
+    track(daemon);
+    await daemon.start();
+    await sleep(60);
+    const before = client.getPendingChangeWrites.mock.calls.length;
+    expect(before).toBeGreaterThan(0);
+
+    // 连接 + 新鲜（lease 分支被门控的最强状态）——change-write 仍照常
+    wsClientMock._setWsGate(true, Date.now() - 1_000);
+    await sleep(60);
+    expect(client.getPendingChangeWrites.mock.calls.length).toBeGreaterThan(before);
+
+    // 假活 + 断连状态也都执行
+    wsClientMock._setWsGate(true, Date.now() - LEASE_POLL_SKIP_MS);
+    await sleep(40);
+    wsClientMock._setWsGate(false, null);
+    await sleep(40);
+    expect(client.getPendingChangeWrites.mock.calls.length).toBeGreaterThan(before);
+    await daemon.stop();
   });
 });

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import app.modules.change.parser as parser_mod
 from app.modules.change.parser import (
     STANDARD_DOC_TYPES,
     ChangeParser,
@@ -249,3 +250,130 @@ class TestParseWorkspace:
         result = parser.parse_workspace(tmp_path, platform_managed=True)
         change = next(c for c in result.changes if c.change_key == "empty-demo")
         assert change.last_modified_at is None
+
+
+def _make_map(root: Path, modules_yaml: str) -> Path:
+    """在 root/.sillyspec/docs/proj/modules/ 下写 _module-map.yaml，返回 root。"""
+    map_file = root / ".sillyspec" / "docs" / "proj" / "modules" / "_module-map.yaml"
+    map_file.parent.mkdir(parents=True, exist_ok=True)
+    map_file.write_text(modules_yaml, encoding="utf-8")
+    return root
+
+
+class TestLoadModuleMapCache:
+    """task-07（perf-remediation）：_load_module_map (path, mtime) 复合键模块级缓存。"""
+
+    @pytest.fixture(autouse=True)
+    def _clear_cache(self):
+        """每用例清空模块级缓存，测试间不串。"""
+        parser_mod._MODULE_MAP_CACHE.clear()
+        yield
+        parser_mod._MODULE_MAP_CACHE.clear()
+
+    def test_same_mtime_reuses_cache(self, tmp_path: Path, monkeypatch) -> None:
+        """同一 (path, mtime) 重复调用只读盘一次（read 计数 == 1）。"""
+        root = _make_map(
+            tmp_path,
+            "modules:\n  agent:\n    paths:\n      - backend/app/modules/agent/**\n",
+        )
+        real_read = Path.read_text
+        counter = {"n": 0}
+
+        def counting_read(self, *a, **kw):
+            if self.name == "_module-map.yaml":
+                counter["n"] += 1
+            return real_read(self, *a, **kw)
+
+        monkeypatch.setattr(Path, "read_text", counting_read)
+
+        first = ChangeParser._load_module_map(root)
+        assert counter["n"] == 1
+        assert first == {"agent": ["backend/app/modules/agent/"]}
+
+        second = ChangeParser._load_module_map(root)
+        assert counter["n"] == 1, "同 mtime 应命中缓存不重读"
+        assert second == first
+
+    def test_mtime_change_invalidates_cache(self, tmp_path: Path, monkeypatch) -> None:
+        """map 文件内容变更（mtime 变）→ 缓存键失效，读到新内容。"""
+        import os
+
+        map_file = tmp_path / ".sillyspec" / "docs" / "proj" / "modules" / "_module-map.yaml"
+        map_file.parent.mkdir(parents=True)
+        map_file.write_text(
+            "modules:\n  agent:\n    paths:\n      - backend/app/modules/agent/**\n",
+            encoding="utf-8",
+        )
+        # 钉死旧 mtime，保证后续覆盖写产生不同的 mtime（Windows mtime 粒度）
+        os.utime(map_file, (1_700_000_000, 1_700_000_000))
+
+        before = ChangeParser._load_module_map(tmp_path)
+        assert "agent" in before and "scan_docs" not in before
+
+        # 内容变更 + mtime 前进
+        map_file.write_text(
+            "modules:\n  scan_docs:\n    paths:\n      - backend/app/modules/scan_docs/**\n",
+            encoding="utf-8",
+        )
+        os.utime(map_file, (1_700_000_100, 1_700_000_100))
+
+        after = ChangeParser._load_module_map(tmp_path)
+        assert "scan_docs" in after and "agent" not in after, "mtime 变后应读到新内容"
+
+    def test_cross_workspace_no_cache_pollution(self, tmp_path: Path) -> None:
+        """两个 workspace 同名 map 文件各自独立缓存条目（复合键含 resolved path）。"""
+        import os
+
+        ws1 = _make_map(tmp_path / "ws1", "modules:\n  agent:\n    paths:\n      - a/**\n")
+        ws2 = _make_map(tmp_path / "ws2", "modules:\n  scan_docs:\n    paths:\n      - b/**\n")
+        # 同 mtime 也绝不能串（仅按 mtime 做键的缺陷就是这里）
+        for ws in (ws1, ws2):
+            map_file = ws / ".sillyspec" / "docs" / "proj" / "modules" / "_module-map.yaml"
+            os.utime(map_file, (1_700_000_000, 1_700_000_000))
+
+        r1 = ChangeParser._load_module_map(ws1)
+        r2 = ChangeParser._load_module_map(ws2)
+        assert r1 == {"agent": ["a/"]}
+        assert r2 == {"scan_docs": ["b/"]}
+        # 两个条目并存（各 hit 各的）
+        assert ChangeParser._load_module_map(ws1) == {"agent": ["a/"]}
+        assert ChangeParser._load_module_map(ws2) == {"scan_docs": ["b/"]}
+
+    def test_cached_value_immutable_contract(self, tmp_path: Path) -> None:
+        """缓存值不可变约定：调用方拿到结果原地改，不污染后续缓存命中。"""
+        root = _make_map(tmp_path, "modules:\n  agent:\n    paths:\n      - a/**\n")
+        first = ChangeParser._load_module_map(root)
+        first["agent"].append("polluted/")  # 模拟调用方误 mutate
+        again = ChangeParser._load_module_map(root)
+        assert again == {"agent": ["a/"]}, "缓存命中不应吐回被调用方污染的列表"
+
+
+class TestLoadModuleMapPlatformManaged:
+    """task-07 附带修复：platform_managed 扁平布局（root/docs）路径探测命中。"""
+
+    @pytest.fixture(autouse=True)
+    def _clear_cache(self):
+        parser_mod._MODULE_MAP_CACHE.clear()
+        yield
+        parser_mod._MODULE_MAP_CACHE.clear()
+
+    def test_flat_layout_map_found(self, tmp_path: Path) -> None:
+        """map 在 root/docs（扁平布局）下也能被找到——修复前恒 {} 的预存缺陷。"""
+        map_file = tmp_path / "docs" / "proj" / "modules" / "_module-map.yaml"
+        map_file.parent.mkdir(parents=True)
+        map_file.write_text(
+            "modules:\n  agent:\n    paths:\n      - backend/app/modules/agent/**\n",
+            encoding="utf-8",
+        )
+        result = ChangeParser._load_module_map(tmp_path)
+        assert result == {"agent": ["backend/app/modules/agent/"]}
+
+    def test_wrapped_layout_takes_priority(self, tmp_path: Path) -> None:
+        """两处都有时优先 root/.sillyspec/docs（包裹布局优先，扁平兜底）。"""
+        wrapped = _make_map(tmp_path, "modules:\n  wrapped:\n    paths:\n      - w/**\n")
+        flat_map = tmp_path / "docs" / "proj-flat" / "modules" / "_module-map.yaml"
+        flat_map.parent.mkdir(parents=True)
+        flat_map.write_text("modules:\n  flat:\n    paths:\n      - f/**\n", encoding="utf-8")
+        assert wrapped == tmp_path
+        result = ChangeParser._load_module_map(tmp_path)
+        assert "wrapped" in result and "flat" not in result

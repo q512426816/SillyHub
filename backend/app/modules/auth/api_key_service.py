@@ -224,13 +224,26 @@ class ApiKeyService:
             # user 已失效 → 清正缓存,继续 bcrypt 兜底
             await self._cache_delete(_pos_cache_key(plaintext, key_prefix))
 
-        # bcrypt 路径:O(n) 扫描未吊销 key,verify 放 to_thread 不阻塞事件循环
+        # bcrypt 路径:候选按 key_prefix 索引过滤(ix_api_keys_prefix),verify 次数从
+        # O(全部活跃 key) 降到 O(同前缀 key);prefix 用签发侧同构的
+        # _display_prefix(plaintext) 计算(上行 key_prefix 变量)。verify 放
+        # to_thread 不阻塞事件循环。
         stmt = (
             select(ApiKey)
             .where(col(ApiKey.revoked_at).is_(None))
+            .where(col(ApiKey.key_prefix) == key_prefix)
             .order_by(col(ApiKey.created_at).desc())
         )
         candidates = (await self._db.execute(stmt)).scalars().all()
+        if not candidates:
+            # 防御性回退:行 key_prefix 数据异常(历史脏行/被改写)导致 prefix 过滤
+            # 落空时,全扫一次保证不静默 401;两轮皆空才走下方负缓存路径。
+            fallback_stmt = (
+                select(ApiKey)
+                .where(col(ApiKey.revoked_at).is_(None))
+                .order_by(col(ApiKey.created_at).desc())
+            )
+            candidates = (await self._db.execute(fallback_stmt)).scalars().all()
         now = _utc_now()
         matched_but_invalid = False
         for key in candidates:

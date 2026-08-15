@@ -2262,8 +2262,20 @@ def _extract_proxy_model_name(body_bytes: bytes, path: str) -> str | None:
     return seg or None
 
 
-@router.api_route("/llm-proxy/{path:path}", methods=_LLM_PROXY_METHODS)
-async def llm_proxy(path: str, request: Request) -> StreamingResponse:
+# 拆 GET/POST 两个入口共享内部实现：api_route 多方法会让 FastAPI 为每个 method 生成
+# 同名 operation id，openapi-typescript 生成重复 TS 标识符（api-types.ts 编译炸）。
+# GET/HEAD 同读语义、POST 主通道；OPTIONS 由 Starlette CORSMiddleware 处理。
+@router.get("/llm-proxy/{path:path}", include_in_schema=True)
+async def llm_proxy_get(path: str, request: Request) -> StreamingResponse:
+    return await _llm_proxy_impl(path, request)
+
+
+@router.post("/llm-proxy/{path:path}", include_in_schema=True)
+async def llm_proxy_post(path: str, request: Request) -> StreamingResponse:
+    return await _llm_proxy_impl(path, request)
+
+
+async def _llm_proxy_impl(path: str, request: Request) -> StreamingResponse:
     """LiteLLM 透传代理（task-04 / FR-03 / D-003@v1）——master key 唯一注入点。
 
     master key 收窄（Grill M-1）后 daemon 子进程不再持有 ``litellm_master_key``

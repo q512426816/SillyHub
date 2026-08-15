@@ -445,6 +445,10 @@ export interface paths {
          *     pulls the latest spec bundle.
          *
          *     Returns the ``lease_id``, ``runtime_id``, and ``claim_token``.
+         *
+         *     鉴权收紧为 workspace-scoped（security-audit-remediation task-09）：非本
+         *     workspace 成员（即便在其它 workspace 有 workspace:write）403，不触达
+         *     ``start_init_dispatch`` 的 actor binding 解析。
          */
         post: operations["init_workspace_api_workspaces__workspace_id__init_post"];
         delete?: never;
@@ -751,7 +755,9 @@ export interface paths {
          * @description 按归属/上传者列文件元数据（task-13 / FR-06）。
          *
          *     业务人员「借用方案」查看：``owner_type=workspace&owner_id=<ws_id>`` 列该工作空间
-         *     借用 daemon 产出的方案文件。无参数则返回全部活跃文件（按 created_at 倒序）。
+         *     借用 daemon 产出的方案文件（需该 workspace 的 WORKSPACE_READ，非成员 404）。
+         *     无参数则返回可见域内活跃文件——本人上传 + 有 WORKSPACE_READ 的 workspace 归属
+         *     （platform_admin 全量），按 created_at 倒序（security-audit-remediation D-002）。
          */
         get: operations["list_files_api_file_list_get"];
         put?: never;
@@ -2649,8 +2655,11 @@ export interface paths {
          *     slot），事件生成器内部自建独立短 session 做逐次轮询，不在请求级 session 贯穿
          *     整个流生命周期。
          *
-         *     鉴权复用 ``require_permission_any(Permission.TASK_READ)``（与
-         *     stream_agent_run_logs 同款；路由在 /api 前缀天然适用，非成员 403）。
+         *     鉴权收紧为 workspace-scoped ``require_permission(Permission.TASK_READ)``
+         *     （security-audit-remediation task-09）：checker 以路径参数 ``workspace_id``
+         *     为 scope，用户必须在**本** workspace 持有 task:read——此前 ``require_permission_any``
+         *     跨 workspace 并集判定放行了只对其它 workspace 有权限的用户（越权读 mission
+         *     worker 状态）。非成员 403（权限拒绝）；mission 存在性 404 逻辑独立不变。
          */
         get: operations["stream_mission_events_api_workspaces__workspace_id__missions__mission_id__events_get"];
         put?: never;
@@ -3223,6 +3232,9 @@ export interface paths {
         /**
          * Claim Lease
          * @description Claim a pending task lease for execution.
+         *
+         *     task-03（security-audit-remediation / FR-02 / D-001@v1）：lease 归属 runtime
+         *     的 user 必须是当前认证 user（服务层校验），他人 → 404 与不存在同语义。
          */
         post: operations["claim_lease_api_daemon_leases__lease_id__claim_post"];
         delete?: never;
@@ -3860,6 +3872,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/llm-proxy/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Llm Proxy Get */
+        get: operations["llm_proxy_get_api_daemon_llm_proxy__path__get"];
+        put?: never;
+        /** Llm Proxy Post */
+        post: operations["llm_proxy_post_api_daemon_llm_proxy__path__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/runtimes/{runtime_id}/pending-leases": {
         parameters: {
             query?: never;
@@ -3870,6 +3900,12 @@ export interface paths {
         /**
          * Get Pending Leases
          * @description Return all pending leases for a runtime (polled by daemon).
+         *
+         *     task-03（security-audit-remediation / FR-02 / D-001@v1）：查询前归属校验
+         *     ——runtime 的 user 必须是当前认证 user，不匹配/不存在 → 404（owner-only，
+         *     跨用户与不存在同语义）。同时把原 raw SQL 改 ORM 查询：原 text() 直绑
+         *     uuid.UUID 参数在 SQLite（CHAR(32) 存储）下 ProgrammingError，且无法挂
+         *     归属校验；ORM ``col()`` 由 dialect 处理 Uuid 绑定，两库行为一致。
          */
         get: operations["get_pending_leases_api_daemon_runtimes__runtime_id__pending_leases_get"];
         put?: never;
@@ -5828,8 +5864,9 @@ export interface paths {
          *       ``AsyncIterator``, 不能在 sync 段 await);
          *     ② sync 段 (``anyio.to_thread.run_sync``):openpyxl 构造 workbook (18 列表头 +
          *       数据行 + 附件列对每行 images ``add_image`` 锚到该行单元格)。
-         *     单图取流失败 (缺失/已删/底层存储瞬时错误,含非 AppError) 跳过不阻断导出
-         *     (best-effort, 对齐 D-009 口径;P2 捕获面扩到 Exception)。
+         *     单图取流失败 (缺失/已删/越权归属/底层存储瞬时错误,含非 AppError) 跳过不阻断导出
+         *     (best-effort, 对齐 D-009 口径;P2 捕获面扩到 Exception)。越权归属跳过源自
+         *     get_stream 的 IDOR 归属断言 (security-audit-remediation task-05/D-001)。
          */
         get: operations["export_problems_api_ppm_problem_list_export_excel_get"];
         put?: never;
@@ -7435,7 +7472,8 @@ export interface paths {
          * Get Progress
          * @description GET 单 change 完整 progress JSON（契约 §6，裸六表 + 顶层 last_pushed_at）。
          *
-         *     不存在/跨 workspace → 404（客户端 fetchJson 返回 null 降级不阻断，契约 §8/§10）。
+         *     不存在/跨 workspace（无 CHANGE_READ）→ 404（客户端 fetchJson 返回 null 降级
+         *     不阻断，契约 §8/§10）。
          */
         get: operations["get_progress_api_changes__name__progress_get"];
         put?: never;
@@ -7448,8 +7486,8 @@ export interface paths {
          *     ``{conflict, platform_progress, last_pushed_at}``，客户端写冲突文件走 resolve）。
          *     body 是裸 ``serializeForSync`` 六表 JSON（NG-6 透传，不强类型校验）。
          *
-         *     workspace_id 从 require_platform_sync 派生（shpsync_ token 绑定工作区；shk_live_/JWT
-         *     过渡期 None 走全局聚合 fallback），透传 service 做收件箱隔离（task-06/07）。
+         *     workspace_id 从 require_platform_sync_write 派生（唯一写通道 shpsync_ token 绑定
+         *     工作区；shk_live_/JWT 一律 403，task-06 / D-004@v1）。
          */
         post: operations["push_progress_api_changes__name__progress_post"];
         delete?: never;
@@ -7467,7 +7505,10 @@ export interface paths {
         };
         /**
          * List Changes
-         * @description GET 轻量 change 列表（契约 §5，裸数组形态 D-007，按 token 派生 workspace 过滤）。
+         * @description GET 轻量 change 列表（契约 §5，裸数组形态 D-007，按鉴权 scope 聚合）。
+         *
+         *     shpsync_ → token 绑定 workspace 收件箱；JWT/shk_live_ → CHANGE_READ workspace
+         *     并集 + NULL 桶（task-06 / D-004@v1，全局聚合已关闭）。
          */
         get: operations["list_changes_api_changes_get"];
         put?: never;
@@ -7498,6 +7539,9 @@ export interface paths {
          *     无记录（行不存在 / approval NULL 含仅 documents 占位行）→ 默认 ``approved`` 放行；
          *     有记录 → 真实 status/reason（rejected 时 CLI execute 启动 exit(1) 硬阻断，
          *     run/command.js:1113-1129 现有门控）。鉴权失败仍 401。
+         *
+         *     task-06 / D-004@v1：读 scope 聚合——跨 workspace（无 CHANGE_READ）的 change 行
+         *     不可见，回落默认 approved 放行（不泄漏 status/reason）。
          */
         get: operations["get_approval_api_changes__name__approval_get"];
         put?: never;
@@ -7506,9 +7550,10 @@ export interface paths {
          * @description POST 审批决定（CLI ``sync.js _submitApproval`` :944-996 预留契约，过去式 decision）。
          *
          *     D-001@v1 完整闭环：落 approval 列（重复提交覆盖，后写赢）。``decided_by`` 取
-         *     ``require_platform_sync`` 解包的权威 ``User.username``（三路径 token 均反查真实
-         *     User；**不用** ``X-SillySpec-User`` header fallback——客户端可伪造，Grill UB-2）。
-         *     rejected 记录随后被 GET approval 读到 → CLI execute 启动 exit(1) 硬阻断。
+         *     ``require_platform_sync_write`` 解包的权威 ``User.username``（唯一写通道 shpsync_
+         *     token 反查真实 User；**不用** ``X-SillySpec-User`` header fallback——客户端可伪造，
+         *     Grill UB-2）。rejected 记录随后被 GET approval 读到 → CLI execute 启动 exit(1)
+         *     硬阻断。task-06 / D-004@v1：JWT/shk_live_ 一律 403。
          */
         post: operations["submit_approval_api_changes__name__approval_post"];
         delete?: never;
@@ -7533,6 +7578,8 @@ export interface paths {
          *     body 是扁平 map（键限四件套白名单，schema 层 422）。定向 upsert ``documents``
          *     列（D-003@v1 单写者，不触碰 latest_progress/approval）；行不存在 INSERT 占位
          *     （下行端点由占位行守卫视为「无进度」）。全量替换语义（整列覆盖，与 CLI 全量推一致）。
+         *
+         *     仅 shpsync_ token 可写（task-06 / D-004@v1，workspace_id 由 token 派生）。
          */
         post: operations["push_documents_api_changes__name__documents_post"];
         delete?: never;
@@ -17233,6 +17280,11 @@ export interface components {
         /**
          * DocumentsSyncRequest
          * @description Key is filename, value is file content.
+         *
+         *     security-audit-remediation task-07：``iter_documents`` 前逐键校验单段文件名
+         *     白名单（字母数字点下划线连字符，禁路径分隔符与全点段）。CLI 契约只推四件套
+         *     单段名（platform_sync 侧 DOCUMENT_FILES 已收敛），本层兜底 + service 层
+         *     relative_to 守卫双层防御。非法键 → 422，错误信息只含键名不回显内容。
          */
         app__modules__change__schema__DocumentsSyncRequest: {
             [key: string]: unknown;
@@ -20934,6 +20986,8 @@ export interface operations {
             query?: {
                 /** @description 逗号分隔多选工具种类，仅筛 channel=tool_call 行；不传返回全部 */
                 tool_kind?: string | null;
+                /** @description 增量游标（ISO timestamp）：只返回 timestamp 严格更新的日志条目；不传返回全量（perf-remediation task-08 / FR-10） */
+                after?: string | null;
             };
             header?: never;
             path: {
@@ -23845,6 +23899,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    llm_proxy_get_api_daemon_llm_proxy__path__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    llm_proxy_post_api_daemon_llm_proxy__path__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

@@ -785,5 +785,118 @@ class TestCompat:
         assert (spec_root / "docs" / "legacy.md").read_text(encoding="utf-8") == "# legacy"
 
 
+# ===========================================================================
+# 循环前 IN 预取等价性（perf-remediation task-03）
+# ===========================================================================
+
+
+class TestPrefetchEquivalence:
+    """task-03：apply_ops 循环前按 path ∪ new_path 一次 IN 预取 SpecFileManifest
+    成 dict（含循环内镜像维护：add 插入 / delete 删除 / rename 换 key）。
+
+    等价锚点：原 per-op SELECT 语义下，同一请求内后一个 op 能看到前一个 op
+    写入的清单行（asyncSession autoflush）。预取 + 镜像必须保持该语义——
+    否则同请求连续 op（单成员 add→update→delete）会误判无行 / 冲突。
+    """
+
+    async def test_same_request_sequential_ops_same_path(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path
+    ) -> None:
+        """单请求 add→update→delete 同一路径：后续 op 看到前序 op 的清单行。
+
+        add v1 → update(base=1) v2 → delete(base=2) v3，全部无冲突。
+        """
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+
+        resp = await client.post(
+            f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
+            headers=auth_headers,
+            json={
+                "ops": [
+                    _op("add", "docs/seq.md", base_version=0, content=_b64("v1")),
+                    _op("update", "docs/seq.md", base_version=1, content=_b64("v2")),
+                    _op("delete", "docs/seq.md", base_version=2),
+                ]
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["conflict"] is False
+        assert body["new_versions"] == {"docs/seq.md": 3}
+        assert not (spec_root / "docs" / "seq.md").exists()
+
+        row = (
+            (
+                await db_session.execute(
+                    select(SpecFileManifest).where(
+                        SpecFileManifest.workspace_id == ws.id,
+                        SpecFileManifest.path == "docs/seq.md",
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        assert row is not None
+        assert row.version == 3
+        assert row.exists is False
+        assert row.content_hash == hashlib.sha256(b"v2").hexdigest()
+
+    async def test_same_request_rename_then_touch_new_path(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path
+    ) -> None:
+        """rename 换 key 镜像：rename A→B 后同请求 delete B（base=new version）。
+
+        rename 后预取 dict 须删旧 key（A）加新 key（B），否则 delete B 误判
+        无行走 R-07 no-op（语义漂移：原 per-op SELECT 能看到新行）。
+        """
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+
+        # 先铺底 add A（独立请求，落库）
+        r0 = await client.post(
+            f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
+            headers=auth_headers,
+            json={"ops": [_op("add", "docs/old.md", base_version=0, content=_b64("x"))]},
+        )
+        assert r0.json()["new_versions"] == {"docs/old.md": 1}
+
+        resp = await client.post(
+            f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
+            headers=auth_headers,
+            json={
+                "ops": [
+                    _op("rename", "docs/old.md", base_version=1, new_path="docs/new.md"),
+                    _op("delete", "docs/new.md", base_version=2),
+                ]
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["conflict"] is False
+        assert body["new_versions"] == {"docs/new.md": 3}
+        assert not (spec_root / "docs" / "old.md").exists()
+        assert not (spec_root / "docs" / "new.md").exists()
+
+        row = (
+            (
+                await db_session.execute(
+                    select(SpecFileManifest).where(
+                        SpecFileManifest.workspace_id == ws.id,
+                        SpecFileManifest.path == "docs/new.md",
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        assert row is not None
+        assert row.exists is False
+        assert row.version == 3
+
+
 # Suppress unused-import warning for pytest (used for fixture discovery in some setups).
 pytestmark = pytest.mark.asyncio

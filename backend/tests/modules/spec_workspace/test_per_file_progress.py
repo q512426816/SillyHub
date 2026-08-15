@@ -1,17 +1,23 @@
-"""Tests for per-file progress writeback (change 2026-08-14-spec-sync-per-file-progress).
+"""Tests for progress writeback (change 2026-08-14-spec-sync-per-file-progress,
+批量化重构 perf-remediation task-03).
 
 Verifies:
-- apply_sync with change_write_id → files_processed increments per file
-- apply_ops with change_write_id → files_processed increments per op
+- apply_sync with change_write_id → files_processed 终态准确（批量回写：50 文件/
+  500ms 粒度中途回写 + finally 终态回写保证数值最终准确，design 兼容策略）
+- apply_ops with change_write_id → files_processed 终态准确（同上批量语义）
+- 批量化确实生效：写库次数远小于文件数（3 文件 1 次；60 文件 = 50 阈值 1 次
+  中途 + finally 终态 1 次），不再每文件一次 UPDATE
 - change_write_id=None → no progress writeback (backward compat)
 - status != 'claimed' → _bump is no-op (guard)
 
 author: qinyi
 created_at: 2026-08-14T03:20:00
+batch rewrite (task-03): 2026-08-15
 """
 
 from __future__ import annotations
 
+import base64
 import io
 import tarfile
 import uuid
@@ -20,7 +26,8 @@ from pathlib import Path
 import pytest
 
 from app.modules.daemon.model import DaemonChangeWrite
-from app.modules.spec_workspace.schema import SpecWorkspaceCreate
+from app.modules.spec_workspace import service as spec_ws_service
+from app.modules.spec_workspace.schema import FileOp, SpecWorkspaceCreate
 from app.modules.spec_workspace.service import SpecWorkspaceService
 
 
@@ -67,34 +74,96 @@ async def _make_claimed_change_write(db_session, workspace_id: uuid.UUID) -> uui
     return cw.id
 
 
+def _count_flushes(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Patch ``_BatchProgressWriter.flush`` with a counting wrapper.
+
+    返回单元素 list（引用语义计数器）。同时把 500ms 时间窗拉长到 1h，
+    让 flush 次数只由 50 文件批量阈值决定（确定性，不受测试机慢/快影响）。
+    """
+    monkeypatch.setattr(spec_ws_service._BatchProgressWriter, "_FLUSH_INTERVAL_S", 3600.0)
+    orig_flush = spec_ws_service._BatchProgressWriter.flush
+    counter = [0]
+
+    async def _counting_flush(self: spec_ws_service._BatchProgressWriter) -> None:
+        counter[0] += 1
+        await orig_flush(self)
+
+    monkeypatch.setattr(spec_ws_service._BatchProgressWriter, "flush", _counting_flush)
+    return counter
+
+
+async def _refresh_cw(db_session, cw_id: uuid.UUID) -> DaemonChangeWrite:
+    """读取 change_write 最新落库态（绕开 db_session identity map 的过期缓存）。"""
+    cw = await db_session.get(DaemonChangeWrite, cw_id)
+    assert cw is not None
+    await db_session.refresh(cw)
+    return cw
+
+
 @pytest.mark.asyncio
-async def test_apply_sync_increments_processed_per_file(tmp_path, db_session):
-    """apply_sync with change_write_id → _bump called once per file."""
+async def test_apply_sync_files_processed_terminal_accurate(tmp_path, db_session, monkeypatch):
+    """apply_sync 3 文件 → 终态 files_processed == 3。
+
+    批量语义（task-03，design 目标 5 授权调整原 call_count==3 断言）：3 文件
+    （< 50 阈值、时间窗禁用）→ 仅 finally 终态 1 次回写，不再每文件一次 UPDATE。
+    """
     workspace_id, _spec_root = await _make_spec_ws(db_session, tmp_path)
     cw_id = await _make_claimed_change_write(db_session, workspace_id)
 
-    tar_bytes = _make_tar(
-        {
-            "docs/a.md": "# a",
-            "docs/b.md": "# b",
-            "docs/c.md": "# c",
-        }
-    )
+    tar_bytes = _make_tar({f"docs/f{i}.md": f"# f{i}" for i in range(3)})
 
+    flush_counter = _count_flushes(monkeypatch)
     svc = SpecWorkspaceService(db_session)
-    # Spy _bump（独立 session 在测试环境可能连非测试 DB，spy 验证调用次数更稳）
-    import unittest.mock
+    await svc.apply_sync(workspace_id, tar_bytes, change_write_id=str(cw_id))
 
-    with unittest.mock.patch.object(
-        svc, "_bump_files_processed", new=unittest.mock.AsyncMock()
-    ) as bump_spy:
-        await svc.apply_sync(workspace_id, tar_bytes, change_write_id=str(cw_id))
+    cw = await _refresh_cw(db_session, cw_id)
+    # 终态准确（design 兼容策略：数值最终准确）
+    assert cw.files_processed == 3
+    # 批量回写：3 文件只 1 次（finally 终态）UPDATE，上限 = 文件数
+    assert 1 <= flush_counter[0] <= 3
 
-    # 3 个文件 → _bump 调 3 次（每个文件成功处理后一次）
-    assert bump_spy.call_count == 3
-    # 每次调用都传了正确的 change_write_id
-    for call_args in bump_spy.call_args_list:
-        assert call_args.args[0] == str(cw_id)
+
+@pytest.mark.asyncio
+async def test_apply_sync_batch_threshold_flushes_at_50(tmp_path, db_session, monkeypatch):
+    """60 文件 → 50 文件阈值触发 1 次中途回写 + finally 终态回写剩余 10。
+
+    共 2 次 UPDATE（写库次数 ≈ 文件数/50，task-03 批量化目标），终态 == 60。
+    """
+    workspace_id, _spec_root = await _make_spec_ws(db_session, tmp_path)
+    cw_id = await _make_claimed_change_write(db_session, workspace_id)
+
+    tar_bytes = _make_tar({f"docs/f{i}.md": f"# f{i}" for i in range(60)})
+
+    flush_counter = _count_flushes(monkeypatch)
+    svc = SpecWorkspaceService(db_session)
+    await svc.apply_sync(workspace_id, tar_bytes, change_write_id=str(cw_id))
+
+    cw = await _refresh_cw(db_session, cw_id)
+    assert cw.files_processed == 60
+    assert flush_counter[0] == 2
+
+
+@pytest.mark.asyncio
+async def test_apply_ops_files_processed_terminal_accurate(tmp_path, db_session):
+    """apply_ops 3 个成功 op → 终态 files_processed == 3（conflict op 不计）。"""
+    workspace_id, _spec_root = await _make_spec_ws(db_session, tmp_path)
+    cw_id = await _make_claimed_change_write(db_session, workspace_id)
+
+    ops = [
+        FileOp(
+            op="add",
+            path=f"docs/a{i}.md",
+            base_version=0,
+            content=base64.b64encode(f"# a{i}".encode()).decode("ascii"),
+        )
+        for i in range(3)
+    ]
+    svc = SpecWorkspaceService(db_session)
+    result = await svc.apply_ops(workspace_id, ops, change_write_id=str(cw_id))
+    assert result["conflict"] is False
+
+    cw = await _refresh_cw(db_session, cw_id)
+    assert cw.files_processed == 3
 
 
 @pytest.mark.asyncio
@@ -108,7 +177,7 @@ async def test_apply_sync_no_change_write_id_no_bump(tmp_path, db_session):
     svc = SpecWorkspaceService(db_session)
     await svc.apply_sync(workspace_id, tar_bytes, change_write_id=None)
 
-    cw = await db_session.get(DaemonChangeWrite, cw_id)
+    cw = await _refresh_cw(db_session, cw_id)
     assert cw.files_processed is None
 
 
@@ -125,5 +194,5 @@ async def test_bump_no_op_when_status_not_claimed(tmp_path, db_session):
     svc = SpecWorkspaceService(db_session)
     # _bump should be no-op (status != claimed)
     await svc._bump_files_processed(str(cw_id))
-    cw = await db_session.get(DaemonChangeWrite, cw_id)
+    cw = await _refresh_cw(db_session, cw_id)
     assert cw.files_processed is None

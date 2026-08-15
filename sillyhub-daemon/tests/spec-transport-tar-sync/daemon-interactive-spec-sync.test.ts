@@ -392,8 +392,13 @@ describe('task-09 B 组：daemon interactive spec-sync 接入（D-007@v1）', ()
       transport: 'shared', // 显式 shared
       workspaceId: 'ws-b2',
     });
-    await sleep(60);
-
+    // shared 模式无 pullSpecBundle await，但 create 前仍有真实 fs 步骤
+    //（mkdir cwd + linkSkillsToWorkdir 拷 21 个 skill 文件）——满载下可能 >60ms，
+    // 固定 sleep 会误判 create 未调（B2 满载 flaky 根因）。与 B1/B3/B4 一致改轮询。
+    for (let i = 0; i < 200; i++) {
+      if (vi.mocked(sessionManager.create).mock.calls.length > 0) break;
+      await sleep(5);
+    }
     expect(specSyncMocks.pullSpecBundle).not.toHaveBeenCalled();
     expect(sessionManager.create).toHaveBeenCalledTimes(1);
     await daemon.stop();

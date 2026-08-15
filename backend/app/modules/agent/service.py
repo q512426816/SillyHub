@@ -954,6 +954,7 @@ class AgentService:
         run_id: uuid.UUID,
         *,
         tool_kind: str | None = None,
+        after: datetime | None = None,
         limit: int = 5000,
     ) -> list[AgentRunLog]:
         stmt = (
@@ -971,10 +972,16 @@ class AgentService:
                     col(AgentRunLog.channel) == "tool_call",
                     col(AgentRunLog.tool_kind).in_(kinds),
                 )
+        # perf-remediation task-08 / FR-10 / D-001@v1：?after= 增量游标。语义是取
+        # 比游标**更新**的日志（timestamp 严格大于 after——after 为前端已见最早
+        # 一条 timestamp，即 desc 排序下界），命中 ix_agent_run_logs_run_timestamp。
+        # None 兼容现状全量（逐字节等价，零回归兜底）。
+        if after is not None:
+            stmt = stmt.where(col(AgentRunLog.timestamp) > after)
         # 性能优化 Wave 2 / P3-1:加 limit 防止超长 run 全量加载 TEXT 大列
         # (content_redacted)。取**最新** N 条(timestamp/id desc),再 reverse
         # 还原正序展示——日志查看关心尾部(最终结果/报错),超长 run 丢弃的是
-        # 早期而非结局。(router 暂未暴露 after 游标,N 条即上限,前端不翻页。)
+        # 早期而非结局。(router 暴露 after 游标后增量同样受限于此上限。)
         stmt = stmt.limit(limit)
         rows = list((await self._session.execute(stmt)).scalars().all())
         rows.reverse()

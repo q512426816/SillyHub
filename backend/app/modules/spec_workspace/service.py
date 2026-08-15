@@ -19,12 +19,13 @@ import os
 import shutil
 import tarfile
 import tempfile
+import time
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,6 +54,12 @@ SPEC_BUNDLE_INVALID_CODE = "HTTP_422_SPEC_BUNDLE_INVALID"
 BACKUP_TS_FORMAT = "%Y%m%d%H%M%S%f"
 SPEC_BACKUP_RETENTION_DAYS = 30
 
+# 批量进度回写（perf-remediation task-03 / D-002@v1）：内存计数 + 批量 UPDATE，
+# 消除每文件一次独立 session+commit 的回写开销。粒度 50 文件 / 500ms（先到者，
+# design 兼容策略授权），流程结束 finally 终态回写保证数值最终准确（R-02）。
+BATCH_FLUSH_FILES = 50
+BATCH_FLUSH_INTERVAL_S = 0.5
+
 
 def _spec_bundle_invalid(message: str, **details: object) -> AppError:
     """Build a 422 AppError for an invalid sync tar payload."""
@@ -62,6 +69,75 @@ def _spec_bundle_invalid(message: str, **details: object) -> AppError:
         http_status=422,
         details=details or None,
     )
+
+
+class _BatchProgressWriter:
+    """批量进度回写器（perf-remediation task-03 / D-002@v1）。
+
+    替代原「每文件一次独立 session+UPDATE+commit」的逐文件回写：调用方每处理
+    一个文件调一次 ``bump()``（仅内存计数），累计到 ``_FLUSH_FILES`` 个或距上次
+    回写超过 ``_FLUSH_INTERVAL_S``（先到者）时单次原子自增 UPDATE
+    ``files_processed = files_processed + batch``。``flush()`` 在流程结束
+    （finally）兜底调用，保证终态数值准确（R-02：批量粒度只影响中途展示，
+    不影响最终值）。
+
+    守卫与幂等语义与原逐文件回写一致：
+    - ``status == 'claimed'`` WHERE 守卫（BL-3 对齐）保留——终态回写仍只对
+      claimed 行生效，daemon 抢先 complete 后的尾批是 no-op。
+    - 原子自增（非绝对值覆盖）——并发写者（progress 端点）不会被覆盖。
+    - best-effort：失败仅 warn 不阻塞 apply 主流程（每批独立 try/except，
+      单批失败不丢后续批）。
+    - ``files_processed IS NULL`` 的行（daemon 尚未上报过计数）以 COALESCE
+      视作 0 起步（原逐文件裸 ``NULL + 1`` 永远 NULL，进度从不落地；批量终态
+      回写要求数值最终准确，此处修正该缺陷——正向变化，不改已非 NULL 行为）。
+
+    每个同步流程（``_write_spec_root`` / ``apply_ops``）各建一个实例，
+    不跨方法共享状态。
+    """
+
+    _FLUSH_FILES = BATCH_FLUSH_FILES
+    _FLUSH_INTERVAL_S = BATCH_FLUSH_INTERVAL_S
+
+    def __init__(self, change_write_id: str | None) -> None:
+        self._change_write_id = change_write_id
+        self._pending = 0
+        self._last_flush = time.monotonic()
+
+    async def bump(self) -> None:
+        """记一个文件已处理（内存计数；达到批量阈值/时间窗时回写一次）。"""
+        if not self._change_write_id:
+            return
+        self._pending += 1
+        if (
+            self._pending >= self._FLUSH_FILES
+            or time.monotonic() - self._last_flush >= self._FLUSH_INTERVAL_S
+        ):
+            await self.flush()
+
+    async def flush(self) -> None:
+        """把累计计数回写 DB（终态兜底也走这里；pending=0 时空操作）。"""
+        batch, self._pending = self._pending, 0
+        self._last_flush = time.monotonic()
+        if not self._change_write_id or batch <= 0:
+            return
+        try:
+            async with get_session_factory()() as progress_session:
+                await progress_session.execute(
+                    update(DaemonChangeWrite)
+                    .where(
+                        DaemonChangeWrite.id == uuid.UUID(self._change_write_id),
+                        DaemonChangeWrite.status == "claimed",
+                    )
+                    # COALESCE 初始化：daemon 尚未上报过计数的行 files_processed
+                    # 为 NULL，裸 NULL + batch 仍 NULL（原逐文件 +1 同样如此，进度
+                    # 永不落地）。终态回写要求「数值最终准确」→ NULL 视作 0 起步。
+                    .values(
+                        files_processed=func.coalesce(DaemonChangeWrite.files_processed, 0) + batch
+                    )
+                )
+                await progress_session.commit()
+        except Exception as e:
+            log.warning("spec_workspace.progress_bump_failed", error=str(e))
 
 
 class SpecWorkspaceService:
@@ -589,8 +665,9 @@ class SpecWorkspaceService:
         spec_root.mkdir(parents=True, exist_ok=True)
         spec_root_resolved = spec_root.resolve()
 
-        # Wave C 续：tar 校验 + 整包解包到 staging 移出事件循环（大 tar 阻塞）。
-        # per-file read_bytes / DB select / shutil.move 仍留 loop（与 DB await 交织）。
+        # Wave C 续 + task-02：tar 校验 + 整包解包到 staging、以及循环体内 per-file
+        # 纯 FS 段（read_bytes/sha256/move）均移出事件循环（asyncio.to_thread）；
+        # DB await（预取 SELECT / conflict archive / bump）留在 loop。
         tf, staging = await asyncio.to_thread(
             self._extract_spec_tar_to_staging, tar_bytes, spec_root, spec_root_resolved
         )
@@ -603,6 +680,9 @@ class SpecWorkspaceService:
 
             conflict_svc = ScanDocConflictService(self._session)
             now = datetime.now(UTC)
+            # task-03 / D-002@v1：逐文件 _bump 改批量回写器——循环内仅内存计数，
+            # 50 文件/500ms 粒度回写；finally 终态 flush 保证 files_processed 最终准确。
+            progress = _BatchProgressWriter(change_write_id)
             # 性能优化（2026-07-27）：循环前一次 IN 查询预取既有 ScanDocument，
             # 消除原逐 tar 成员 SELECT 的 N+1（活跃 spec 树数十~百文件）。
             # ux_scan_docs_workspace_path 唯一约束 + SQLAlchemy identity map 保证
@@ -632,13 +712,26 @@ class SpecWorkspaceService:
                     continue
                 src_file = staging / m.name
                 target = spec_root / rel_path
-                target.parent.mkdir(parents=True, exist_ok=True)
+
+                # task-02 / D-002：per-file 纯 FS 段（read_bytes → sha256 → mtime 计算
+                # + mkdir）抽成同步内函数整体入线程，DB 相关段（conflict archive /
+                # ScanDocument 改写 / session.add）留在事件循环。线程内只产出
+                # (content, ch, src_mtime) 回 loop 再改对象；shutil.move 同样入线程，
+                # 与 doc 行写入的相对顺序（先落盘后写行）不变。
+                def _load_member(
+                    src: Path = src_file, tgt: Path = target, tar_mtime: float = m.mtime
+                ) -> tuple[bytes, str, datetime | None]:
+                    tgt.parent.mkdir(parents=True, exist_ok=True)
+                    data = src.read_bytes()
+                    digest = hashlib.sha256(data).hexdigest()
+                    src_mtime = datetime.fromtimestamp(tar_mtime, tz=UTC) if tar_mtime > 0 else None
+                    return data, digest, src_mtime
 
                 # ql-20260813-004：staging 成员缺失（tar name 被旧打包方截断 / 解包竞态等）
                 # → 跳过 + warn，不抛 500 致整次同步失败。daemon 侧 buildLongLinkHeader +
                 # 排除 runtime(无点) 已根治超长 name，此为纵深防御兜底。
                 try:
-                    content = src_file.read_bytes()
+                    content, ch, src_mtime = await asyncio.to_thread(_load_member)
                 except FileNotFoundError:
                     log.warning(
                         "spec_workspace.sync_member_missing_in_staging",
@@ -646,8 +739,6 @@ class SpecWorkspaceService:
                         member=m.name,
                     )
                     continue
-                ch = hashlib.sha256(content).hexdigest()
-                src_mtime = datetime.fromtimestamp(m.mtime, tz=UTC) if m.mtime > 0 else None
 
                 cur = existing_by_path.get(rel_path)
 
@@ -682,8 +773,8 @@ class SpecWorkspaceService:
                         cur.source_mtime = src_mtime
                         cur.source_synced_at = now
                         cur.last_modified_at = src_mtime or now
-                        shutil.move(str(src_file), str(target))
-                        await self._bump_files_processed(change_write_id)
+                        await asyncio.to_thread(shutil.move, str(src_file), str(target))
+                        await progress.bump()
                 else:
                     doc = ScanDocument(
                         workspace_id=workspace_id,
@@ -698,9 +789,12 @@ class SpecWorkspaceService:
                         exists=True,
                     )
                     self._session.add(doc)
-                    shutil.move(str(src_file), str(target))
-                    await self._bump_files_processed(change_write_id)
+                    await asyncio.to_thread(shutil.move, str(src_file), str(target))
+                    await progress.bump()
         finally:
+            # task-03 / R-02：终态回写兜底——无论循环正常走完还是中途抛错，
+            # 已处理文件的计数都最终落库（数值最终准确，design 兼容策略）。
+            await progress.flush()
             tf.close()
             # Wave C 续：staging 整树删除移出事件循环
             await asyncio.to_thread(shutil.rmtree, staging, ignore_errors=True)
@@ -730,12 +824,14 @@ class SpecWorkspaceService:
         return spec_ws
 
     async def _bump_files_processed(self, change_write_id: str | None) -> None:
-        """逐文件级进度（D-004@V2）：独立 session 回写 files_processed += 1。
+        """单批进度回写（+1）。签名不变（design 接口定义），内部走批量回写器。
 
-        用 ``get_session_factory()`` 开短生命周期独立 session（不动主 apply 事务），
-        UPDATE daemon_change_writes SET files_processed = files_processed + 1
-        WHERE id = change_write_id AND status = 'claimed'（守卫对齐 BL-3）。
-        best-effort：失败仅 warn 不阻塞 apply 主流程。
+        task-03 / D-002@v1 后同步循环不再逐文件调本方法（改用
+        ``_BatchProgressWriter.bump()`` 内存计数 + 批量 UPDATE）；本方法保留
+        供零散单文件场景与既有测试锚点（守卫语义不变）：独立 session
+        （不动主 apply 事务）UPDATE daemon_change_writes SET
+        files_processed = files_processed + 1 WHERE id = change_write_id AND
+        status = 'claimed'（守卫对齐 BL-3）。best-effort：失败仅 warn。
         """
         if not change_write_id:
             return
@@ -763,7 +859,8 @@ class SpecWorkspaceService:
 
         D-006 whole-tree overwrite. D-003 docs/changes 两阶段独立 try/except（单阶段
         失败 dirty 不阻断另一阶段）。Returns ``{reparsed_docs, reparsed_changes}``。
-        ``change_write_id``（可选）让 ``_write_spec_root`` 循环内逐文件回写进度。
+        ``change_write_id``（可选）让 ``_write_spec_root`` 循环内回写进度
+        （task-03 起批量：50 文件/500ms 粒度，终态准确）。
         """
         spec_ws = await self._write_spec_root(
             workspace_id, tar_bytes, change_write_id=change_write_id
@@ -962,122 +1059,130 @@ class SpecWorkspaceService:
         server_versions: dict[str, int] | None = None
         conflict = False
 
+        # task-03 / D-002@v1：循环前一次 IN 预取全部 op 涉及路径（path ∪ new_path）
+        # 的清单行，消除原 per-op SELECT 的 N+1（照抄上文 _write_spec_root 的
+        # ScanDocument 预取范式）。ux_spec_manifest_ws_path 唯一约束 + SQLAlchemy
+        # identity map 保证预取对象与原 per-op SELECT 同一 Python 对象，原地改写
+        # 语义不变。循环体内 add/rename 写入的新行同步回写 dict（镜像维护）——
+        # 原语义下同请求后一个 op 经 autoflush 能看到前一个 op 的写入，镜像
+        # 保证该语义不漂移；rename 迁移路径时 dict 同步换 key。
+        prefetch_paths: set[str] = set()
         for op in ops:
-            # 查清单行（workspace_id+path）
-            row = (
-                (
-                    await self._session.execute(
-                        select(SpecFileManifest).where(
-                            SpecFileManifest.workspace_id == workspace_id,
-                            SpecFileManifest.path == op.path,
-                        )
+            prefetch_paths.add(op.path)
+            if op.new_path is not None:
+                prefetch_paths.add(op.new_path)
+        manifest_by_path: dict[str, SpecFileManifest] = {}
+        if prefetch_paths:
+            manifest_rows = (
+                await self._session.execute(
+                    select(SpecFileManifest).where(
+                        SpecFileManifest.workspace_id == workspace_id,
+                        SpecFileManifest.path.in_(prefetch_paths),
                     )
                 )
-                .scalars()
-                .first()
-            )
+            ).scalars()
+            manifest_by_path = {r.path: r for r in manifest_rows}
 
-            # base_version 乐观锁（D-001）：有行且版本不匹配 → conflict，跳过不落盘。
-            if row is not None and row.version != op.base_version:
-                conflict = True
-                if server_versions is None:
-                    server_versions = {}
-                server_versions[op.path] = row.version
-                continue
+        # task-03 / D-002@v1：逐文件回写改批量回写器（内存计数 + 50 文件/500ms
+        # 批量 UPDATE）；finally 终态 flush 保证 files_processed 最终准确。
+        progress = _BatchProgressWriter(change_write_id)
+        try:
+            for op in ops:
+                # 查清单行（workspace_id+path）——task-03 起查预取 dict（miss 即 None）
+                row = manifest_by_path.get(op.path)
 
-            if op.op in ("add", "update"):
-                if op.content is None:
-                    raise _spec_bundle_invalid(
-                        "add/update op requires content.",
-                        path=op.path,
-                    )
-                content = base64.b64decode(op.content)
-                target = spec_root / op.path
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(content)
-                # ql-20260813-008：应用宿主真实 mtime，让镜像文件 mtime 真实 → reparse
-                # 填的 changes.updated_at 反映变更活动（而非同步时刻）。
-                self._apply_file_mtime(target, op.mtime)
-                ch = hashlib.sha256(content).hexdigest()
-                if row is None:
-                    # R-07：无行 → 视为新建，version=1
-                    new_row = SpecFileManifest(
-                        workspace_id=workspace_id,
-                        path=op.path,
-                        content_hash=ch,
-                        version=1,
-                        exists=True,
-                        updated_at=now,
-                    )
-                    self._session.add(new_row)
-                    new_versions[op.path] = 1
-                else:
-                    new_version = row.version + 1
-                    row.content_hash = ch
-                    row.version = new_version
-                    row.exists = True
-                    row.updated_at = now
-                    new_versions[op.path] = new_version
-
-            elif op.op == "delete":
-                # R-07：无行 → no-op 成功（幂等），不写 new_versions。
-                if row is not None:
-                    backup_root = self._backup_root(settings, workspace_id)
-                    ts = datetime.now(UTC).strftime(BACKUP_TS_FORMAT)
-                    dest = backup_root / ts / op.path
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    src = spec_root / op.path
-                    try:
-                        shutil.move(str(src), str(dest))
-                    except FileNotFoundError:
-                        # 磁盘文件已不存在（并发删/从未落盘）→ 仅推进状态，软删语义仍成立
-                        pass
-                    row.version = row.version + 1
-                    row.exists = False
-                    row.updated_at = now
-                    new_versions[op.path] = row.version
-                    self._prune_spec_backups(backup_root)
-
-            elif op.op == "rename":
-                if op.new_path is None:
-                    raise _spec_bundle_invalid(
-                        "rename op requires new_path.",
-                        path=op.path,
-                    )
-                # 目标路径已被占用 → conflict（乐观锁对目标也成立）
-                target_row = (
-                    (
-                        await self._session.execute(
-                            select(SpecFileManifest).where(
-                                SpecFileManifest.workspace_id == workspace_id,
-                                SpecFileManifest.path == op.new_path,
-                            )
-                        )
-                    )
-                    .scalars()
-                    .first()
-                )
-                if target_row is not None:
+                # base_version 乐观锁（D-001）：有行且版本不匹配 → conflict，跳过不落盘。
+                if row is not None and row.version != op.base_version:
                     conflict = True
                     if server_versions is None:
                         server_versions = {}
-                    server_versions[op.new_path] = target_row.version
+                    server_versions[op.path] = row.version
                     continue
-                # R-07：无旧行 → 按 add new_path 处理
-                if row is None:
+
+                if op.op in ("add", "update"):
                     if op.content is None:
                         raise _spec_bundle_invalid(
-                            "rename without source row requires content.",
+                            "add/update op requires content.",
                             path=op.path,
                         )
                     content = base64.b64decode(op.content)
-                    target = spec_root / op.new_path
+                    target = spec_root / op.path
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_bytes(content)
+                    # ql-20260813-008：应用宿主真实 mtime，让镜像文件 mtime 真实 → reparse
+                    # 填的 changes.updated_at 反映变更活动（而非同步时刻）。
                     self._apply_file_mtime(target, op.mtime)
                     ch = hashlib.sha256(content).hexdigest()
-                    self._session.add(
-                        SpecFileManifest(
+                    if row is None:
+                        # R-07：无行 → 视为新建，version=1
+                        new_row = SpecFileManifest(
+                            workspace_id=workspace_id,
+                            path=op.path,
+                            content_hash=ch,
+                            version=1,
+                            exists=True,
+                            updated_at=now,
+                        )
+                        self._session.add(new_row)
+                        manifest_by_path[op.path] = new_row
+                        new_versions[op.path] = 1
+                    else:
+                        new_version = row.version + 1
+                        row.content_hash = ch
+                        row.version = new_version
+                        row.exists = True
+                        row.updated_at = now
+                        new_versions[op.path] = new_version
+
+                elif op.op == "delete":
+                    # R-07：无行 → no-op 成功（幂等），不写 new_versions。
+                    if row is not None:
+                        backup_root = self._backup_root(settings, workspace_id)
+                        ts = datetime.now(UTC).strftime(BACKUP_TS_FORMAT)
+                        dest = backup_root / ts / op.path
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        src = spec_root / op.path
+                        try:
+                            shutil.move(str(src), str(dest))
+                        except FileNotFoundError:
+                            # 磁盘文件已不存在（并发删/从未落盘）→ 仅推进状态，软删语义仍成立
+                            pass
+                        row.version = row.version + 1
+                        row.exists = False
+                        row.updated_at = now
+                        new_versions[op.path] = row.version
+                        # task-02：修剪（os.listdir + rmtree，同步 FS）移出事件循环
+                        await asyncio.to_thread(self._prune_spec_backups, backup_root)
+
+                elif op.op == "rename":
+                    if op.new_path is None:
+                        raise _spec_bundle_invalid(
+                            "rename op requires new_path.",
+                            path=op.path,
+                        )
+                    # 目标路径已被占用 → conflict（乐观锁对目标也成立）——
+                    # task-03 起查预取 dict
+                    target_row = manifest_by_path.get(op.new_path)
+                    if target_row is not None:
+                        conflict = True
+                        if server_versions is None:
+                            server_versions = {}
+                        server_versions[op.new_path] = target_row.version
+                        continue
+                    # R-07：无旧行 → 按 add new_path 处理
+                    if row is None:
+                        if op.content is None:
+                            raise _spec_bundle_invalid(
+                                "rename without source row requires content.",
+                                path=op.path,
+                            )
+                        content = base64.b64decode(op.content)
+                        target = spec_root / op.new_path
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_bytes(content)
+                        self._apply_file_mtime(target, op.mtime)
+                        ch = hashlib.sha256(content).hexdigest()
+                        added_row = SpecFileManifest(
                             workspace_id=workspace_id,
                             path=op.new_path,
                             content_hash=ch,
@@ -1085,31 +1190,31 @@ class SpecWorkspaceService:
                             exists=True,
                             updated_at=now,
                         )
-                    )
-                    new_versions[op.new_path] = 1
-                    continue
-                # 常规 rename：move 文件 + 清单 path 迁移（删旧行 + 插新行）
-                new_version = row.version + 1
-                new_hash = row.content_hash
-                src = spec_root / op.path
-                dest = spec_root / op.new_path
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                # rename 语义：旧路径文件**消失**（无论是否重传 content）——先 move，
-                # 若带 content 再覆写目标为新内容（避免 src 残留孤儿文件，QA 揪出）。
-                try:
-                    shutil.move(str(src), str(dest))
-                except FileNotFoundError:
-                    pass  # 源文件不存在 → 仅推进清单状态
-                if op.content is not None:
-                    content = base64.b64decode(op.content)
-                    new_hash = hashlib.sha256(content).hexdigest()
-                    dest.write_bytes(content)
-                # ql-20260813-008：rename 后 dest 用宿主真实 mtime（move 沿用源 mtime，
-                # 此处按 op.mtime 覆盖为最新宿主态，保持与 add/update 一致）。
-                self._apply_file_mtime(dest, op.mtime)
-                await self._session.delete(row)
-                self._session.add(
-                    SpecFileManifest(
+                        self._session.add(added_row)
+                        manifest_by_path[op.new_path] = added_row
+                        new_versions[op.new_path] = 1
+                        continue
+                    # 常规 rename：move 文件 + 清单 path 迁移（删旧行 + 插新行）
+                    new_version = row.version + 1
+                    new_hash = row.content_hash
+                    src = spec_root / op.path
+                    dest = spec_root / op.new_path
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    # rename 语义：旧路径文件**消失**（无论是否重传 content）——先 move，
+                    # 若带 content 再覆写目标为新内容（避免 src 残留孤儿文件，QA 揪出）。
+                    try:
+                        shutil.move(str(src), str(dest))
+                    except FileNotFoundError:
+                        pass  # 源文件不存在 → 仅推进清单状态
+                    if op.content is not None:
+                        content = base64.b64decode(op.content)
+                        new_hash = hashlib.sha256(content).hexdigest()
+                        dest.write_bytes(content)
+                    # ql-20260813-008：rename 后 dest 用宿主真实 mtime（move 沿用源 mtime，
+                    # 此处按 op.mtime 覆盖为最新宿主态，保持与 add/update 一致）。
+                    self._apply_file_mtime(dest, op.mtime)
+                    await self._session.delete(row)
+                    renamed_row = SpecFileManifest(
                         workspace_id=workspace_id,
                         path=op.new_path,
                         content_hash=new_hash,
@@ -1117,13 +1222,20 @@ class SpecWorkspaceService:
                         exists=True,
                         updated_at=now,
                     )
-                )
-                new_versions[op.new_path] = new_version
+                    self._session.add(renamed_row)
+                    # 镜像换 key：旧 path 删、新 path 指向新行
+                    manifest_by_path.pop(op.path, None)
+                    manifest_by_path[op.new_path] = renamed_row
+                    new_versions[op.new_path] = new_version
 
-            # D-004@V2：每个成功处理的 op 后逐文件回写 files_processed（conflict op 已 continue 跳过）。
-            await self._bump_files_processed(change_write_id)
+                # D-004@V2 + task-03：每个成功处理的 op 后记一次进度（conflict op
+                # 已 continue 跳过）——批量回写器内存计数，不再逐 op UPDATE。
+                await progress.bump()
 
-        await self._session.commit()
+            await self._session.commit()
+        finally:
+            # task-03 / R-02：终态回写兜底（含 422 中断路径——已处理计数最终准确）。
+            await progress.flush()
 
         # R-04 / D-005（change 2026-08-14-change-center-conversation-driven task-02）：
         # 落盘提交成功后，事务外 best-effort 触发 change reparse（独立 session），

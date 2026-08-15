@@ -133,6 +133,48 @@ describe('WsClient — 连接生命周期', () => {
     c.close();
   });
 
+  // ── perf-remediation task-09 / D-003@v1：lastMessageAt 只读 getter ─────────
+
+  it('task-09: lastMessageAt 初始 null，收到消息后刷新为当前时间（只读）', async () => {
+    const c = new WsClient({
+      serverUrl: mock.url.replace('ws://', 'http://'),
+      runtimeId: 'r1',
+    });
+    expect(c.lastMessageAt).toBeNull(); // 未连接未收消息
+    c.connect();
+    await vi.waitFor(() => expect(c.isConnected).toBe(true));
+    expect(c.lastMessageAt).toBeNull(); // 连接本身（open 事件）不算消息
+
+    const before = Date.now();
+    mock.conns[0]?.send(
+      JSON.stringify({ type: MSG.TASK_AVAILABLE, payload: { lease_id: 'L9' } }),
+    );
+    await vi.waitFor(() => expect(c.lastMessageAt).not.toBeNull());
+    const stamped = c.lastMessageAt as number;
+    expect(stamped).toBeGreaterThanOrEqual(before);
+    expect(stamped).toBeLessThanOrEqual(Date.now());
+
+    // 第二条消息刷新时间戳（单调不减）
+    await new Promise((r) => setTimeout(r, 5));
+    mock.conns[0]?.send(
+      JSON.stringify({ type: MSG.TASK_AVAILABLE, payload: { lease_id: 'L10' } }),
+    );
+    await vi.waitFor(() => expect(c.lastMessageAt).toBeGreaterThan(stamped));
+    c.close();
+  });
+
+  it('task-09: 非法 JSON 消息也刷新 lastMessageAt（链路活着即计入）', async () => {
+    const c = new WsClient({
+      serverUrl: mock.url.replace('ws://', 'http://'),
+      runtimeId: 'r1',
+    });
+    c.connect();
+    await vi.waitFor(() => expect(c.isConnected).toBe(true));
+    mock.conns[0]?.send('not-a-json{');
+    await vi.waitFor(() => expect(c.lastMessageAt).not.toBeNull());
+    c.close();
+  });
+
   it('收到非法 JSON → 不调 onMessage、不断连', async () => {
     const onMessage = vi.fn();
     const onError = vi.fn();

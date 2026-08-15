@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from sqlalchemy import inspect as sqlalchemy_inspect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -250,6 +251,94 @@ class TestListDocsWithQuery:
         assert total == 0  # 字面 % 不出现在任何文档，转义后不会通配匹配全部
 
 
+# ── task-04（性能）：无 q 列表查询排除 content 大列 ──────────────────────
+
+
+class TestListNoQueryLoadOnly:
+    """list_() 无 q 时 load_only 排除 content——字段等价 + content 懒加载可达。"""
+
+    async def test_no_q_fields_equivalent_to_full_row(self, db_session: AsyncSession) -> None:
+        """无 q：除 content 未加载外，全部响应字段（ScanDocSummary 全列）与全量行逐项相等。"""
+        ws = await _create_workspace(db_session)
+        member_id = uuid.uuid4()
+        synced = datetime.now(UTC)
+        mtime = datetime.now(UTC)
+        doc = ScanDocument(
+            id=uuid.uuid4(),
+            workspace_id=ws.id,
+            doc_type="ARCH",
+            path="docs/silly/scan/ARCH.md",
+            title="架构",
+            exists=True,
+            content="full content body",
+            last_modified_at=datetime.now(UTC),
+            source_member_id=member_id,
+            source_synced_at=synced,
+            source_mtime=mtime,
+            content_hash="deadbeef",
+        )
+        db_session.add(doc)
+        await db_session.commit()
+        await db_session.refresh(doc)  # 全量行（含 content）作为对照基准
+
+        svc = ScanDocsService(db_session)
+        items, total, _cc = await svc.list_(ws.id)
+        assert total == 1
+        got = items[0]
+        # ScanDocSummary 响应所需全部列逐项相等（含 title/doc_type/timestamps/来源跟踪）
+        assert got.id == doc.id
+        assert got.workspace_id == doc.workspace_id
+        assert got.doc_type == doc.doc_type
+        assert got.path == doc.path
+        assert got.title == doc.title
+        assert got.exists == doc.exists
+        assert got.last_modified_at == doc.last_modified_at
+        assert got.source_member_id == doc.source_member_id
+        assert got.source_synced_at == doc.source_synced_at
+        assert got.source_mtime == doc.source_mtime
+        assert got.content_hash == doc.content_hash
+        # summary schema 可无损构造（router 响应路径零变化）
+        assert ScanDocSummary.model_validate(got).id == doc.id
+
+    async def test_no_q_content_not_loaded(self, db_session: AsyncSession) -> None:
+        """无 q：content 列确实未加载（deferred），大列不被全量搬运。"""
+        ws = await _create_workspace(db_session)
+        await _create_scan_doc(db_session, ws.id, "ARCH", content="heavy" * 1000)
+
+        svc = ScanDocsService(db_session)
+        items, _total, _cc = await svc.list_(ws.id)
+        assert "content" in sqlalchemy_inspect(items[0]).unloaded
+
+    async def test_no_q_content_reload_via_refresh(self, db_session: AsyncSession) -> None:
+        """约束：需要 content 时在异步会话内显式 refresh 补取（sync 懒加载在
+        AsyncSession 属性访问路径不可用——MissingGreenlet；refresh 是异步安全通道）。"""
+        ws = await _create_workspace(db_session)
+        await _create_scan_doc(db_session, ws.id, "ARCH", content="lazy body")
+
+        svc = ScanDocsService(db_session)
+        items, _total, _cc = await svc.list_(ws.id)
+        await db_session.refresh(items[0], attribute_names=["content"])
+        assert items[0].content == "lazy body"
+
+    async def test_with_q_content_still_loaded(self, db_session: AsyncSession) -> None:
+        """有 q：走 SQL LIKE 现状分支，content 全量加载（行为不变锚点）。"""
+        ws = await _create_workspace(db_session)
+        await _create_scan_doc(db_session, ws.id, "ARCH", content="needle-in-content")
+
+        svc = ScanDocsService(db_session)
+        items, total, _cc = await svc.list_(ws.id, q="needle")
+        assert total == 1
+        assert "content" not in sqlalchemy_inspect(items[0]).unloaded
+        assert items[0].content == "needle-in-content"
+
+
+async def _reload_content(session: AsyncSession, doc: ScanDocument) -> str | None:
+    """task-04：无 q 列表行的 content 已 deferred（load_only），同步属性访问在
+    AsyncSession 路径不可用（MissingGreenlet），用异步 refresh 显式补取。"""
+    await session.refresh(doc, attribute_names=["content"])
+    return doc.content
+
+
 # ── get() ────────────────────────────────────────────────────────────────
 
 
@@ -328,8 +417,9 @@ class TestReparseCreatesDocs:
         arch = next((d for d in items if d.doc_type == "ARCHITECTURE"), None)
         assert arch is not None
         assert arch.exists is True
-        assert arch.content is not None
-        assert "Test Architecture" in arch.content
+        arch_content = await _reload_content(db_session, arch)
+        assert arch_content is not None
+        assert "Test Architecture" in arch_content
 
     async def test_daemon_client_reads_flat_platform_spec_root(
         self, db_session: AsyncSession, tmp_path: Path
@@ -358,8 +448,9 @@ class TestReparseCreatesDocs:
         arch = next((d for d in items if d.doc_type == "ARCHITECTURE"), None)
         assert arch is not None
         assert arch.path == "docs/silly/scan/ARCHITECTURE.md"
-        assert arch.content is not None
-        assert "Flat Architecture" in arch.content
+        arch_content = await _reload_content(db_session, arch)
+        assert arch_content is not None
+        assert "Flat Architecture" in arch_content
 
 
 class TestReparseUpdatesDocs:
@@ -394,7 +485,7 @@ class TestReparseUpdatesDocs:
 
         items, _, _cc = await svc.list_(ws.id)
         arch = next(d for d in items if d.doc_type == "ARCHITECTURE")
-        assert "V2 Architecture" in arch.content
+        assert "V2 Architecture" in (await _reload_content(db_session, arch))
 
 
 class TestReparseIdempotent:

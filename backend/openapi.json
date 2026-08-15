@@ -912,7 +912,7 @@
           "workspace"
         ],
         "summary": "Init Workspace",
-        "description": "Initialize the workspace for the current user (D-002/D-009).\n\nEnsures the spec workspace container exists, then dispatches an init-mode\ninteractive lease to the member's daemon.  The daemon writes\n``.sillyspec-platform.json`` to the member's local project directory and\npulls the latest spec bundle.\n\nReturns the ``lease_id``, ``runtime_id``, and ``claim_token``.",
+        "description": "Initialize the workspace for the current user (D-002/D-009).\n\nEnsures the spec workspace container exists, then dispatches an init-mode\ninteractive lease to the member's daemon.  The daemon writes\n``.sillyspec-platform.json`` to the member's local project directory and\npulls the latest spec bundle.\n\nReturns the ``lease_id``, ``runtime_id``, and ``claim_token``.\n\n鉴权收紧为 workspace-scoped（security-audit-remediation task-09）：非本\nworkspace 成员（即便在其它 workspace 有 workspace:write）403，不触达\n``start_init_dispatch`` 的 actor binding 解析。",
         "operationId": "init_workspace_api_workspaces__workspace_id__init_post",
         "parameters": [
           {
@@ -1736,7 +1736,7 @@
           "file"
         ],
         "summary": "List Files",
-        "description": "按归属/上传者列文件元数据（task-13 / FR-06）。\n\n业务人员「借用方案」查看：``owner_type=workspace&owner_id=<ws_id>`` 列该工作空间\n借用 daemon 产出的方案文件。无参数则返回全部活跃文件（按 created_at 倒序）。",
+        "description": "按归属/上传者列文件元数据（task-13 / FR-06）。\n\n业务人员「借用方案」查看：``owner_type=workspace&owner_id=<ws_id>`` 列该工作空间\n借用 daemon 产出的方案文件（需该 workspace 的 WORKSPACE_READ，非成员 404）。\n无参数则返回可见域内活跃文件——本人上传 + 有 WORKSPACE_READ 的 workspace 归属\n（platform_admin 全量），按 created_at 倒序（security-audit-remediation D-002）。",
         "operationId": "list_files_api_file_list_get",
         "parameters": [
           {
@@ -5710,6 +5710,25 @@
               "title": "Tool Kind"
             },
             "description": "逗号分隔多选工具种类，仅筛 channel=tool_call 行；不传返回全部"
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "增量游标（ISO timestamp）：只返回 timestamp 严格更新的日志条目；不传返回全量（perf-remediation task-08 / FR-10）",
+              "title": "After"
+            },
+            "description": "增量游标（ISO timestamp）：只返回 timestamp 严格更新的日志条目；不传返回全量（perf-remediation task-08 / FR-10）"
           }
         ],
         "responses": {
@@ -7545,7 +7564,7 @@
           "mcp-mission-events"
         ],
         "summary": "Stream Mission Events",
-        "description": "SSE endpoint — 推 mission 下 worker run 状态变更（FR-08）。\n\n连接池安全照搬 stream_agent_run_logs：存在性校验用短 session（校验完即归还\nslot），事件生成器内部自建独立短 session 做逐次轮询，不在请求级 session 贯穿\n整个流生命周期。\n\n鉴权复用 ``require_permission_any(Permission.TASK_READ)``（与\nstream_agent_run_logs 同款；路由在 /api 前缀天然适用，非成员 403）。",
+        "description": "SSE endpoint — 推 mission 下 worker run 状态变更（FR-08）。\n\n连接池安全照搬 stream_agent_run_logs：存在性校验用短 session（校验完即归还\nslot），事件生成器内部自建独立短 session 做逐次轮询，不在请求级 session 贯穿\n整个流生命周期。\n\n鉴权收紧为 workspace-scoped ``require_permission(Permission.TASK_READ)``\n（security-audit-remediation task-09）：checker 以路径参数 ``workspace_id``\n为 scope，用户必须在**本** workspace 持有 task:read——此前 ``require_permission_any``\n跨 workspace 并集判定放行了只对其它 workspace 有权限的用户（越权读 mission\nworker 状态）。非成员 403（权限拒绝）；mission 存在性 404 逻辑独立不变。",
         "operationId": "stream_mission_events_api_workspaces__workspace_id__missions__mission_id__events_get",
         "parameters": [
           {
@@ -9136,7 +9155,7 @@
           "daemon"
         ],
         "summary": "Claim Lease",
-        "description": "Claim a pending task lease for execution.",
+        "description": "Claim a pending task lease for execution.\n\ntask-03（security-audit-remediation / FR-02 / D-001@v1）：lease 归属 runtime\n的 user 必须是当前认证 user（服务层校验），他人 → 404 与不存在同语义。",
         "operationId": "claim_lease_api_daemon_leases__lease_id__claim_post",
         "parameters": [
           {
@@ -10635,13 +10654,91 @@
         }
       }
     },
+    "/api/daemon/llm-proxy/{path}": {
+      "get": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Llm Proxy Get",
+        "operationId": "llm_proxy_get_api_daemon_llm_proxy__path__get",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Llm Proxy Post",
+        "operationId": "llm_proxy_post_api_daemon_llm_proxy__path__post",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/runtimes/{runtime_id}/pending-leases": {
       "get": {
         "tags": [
           "daemon"
         ],
         "summary": "Get Pending Leases",
-        "description": "Return all pending leases for a runtime (polled by daemon).",
+        "description": "Return all pending leases for a runtime (polled by daemon).\n\ntask-03（security-audit-remediation / FR-02 / D-001@v1）：查询前归属校验\n——runtime 的 user 必须是当前认证 user，不匹配/不存在 → 404（owner-only，\n跨用户与不存在同语义）。同时把原 raw SQL 改 ORM 查询：原 text() 直绑\nuuid.UUID 参数在 SQLite（CHAR(32) 存储）下 ProgrammingError，且无法挂\n归属校验；ORM ``col()`` 由 dialect 处理 Uuid 绑定，两库行为一致。",
         "operationId": "get_pending_leases_api_daemon_runtimes__runtime_id__pending_leases_get",
         "parameters": [
           {
@@ -19007,7 +19104,7 @@
           "ppm-problem"
         ],
         "summary": "Export Problems",
-        "description": "导出问题清单为 Excel (18 列对齐导入 + 附件嵌图片, D-003/D-006/D-011/R-07)。\n\n拆两段 (跨 async/sync 边界, D-011):\n① async 段:调 ``list_problems_for_export`` 取 18 列 + 对每行 ``file_urls`` 的\n  file_id 调 ``FileService.get_stream`` 收图 bytes 到内存 (``get_stream`` 返回\n  ``AsyncIterator``, 不能在 sync 段 await);\n② sync 段 (``anyio.to_thread.run_sync``):openpyxl 构造 workbook (18 列表头 +\n  数据行 + 附件列对每行 images ``add_image`` 锚到该行单元格)。\n单图取流失败 (缺失/已删/底层存储瞬时错误,含非 AppError) 跳过不阻断导出\n(best-effort, 对齐 D-009 口径;P2 捕获面扩到 Exception)。",
+        "description": "导出问题清单为 Excel (18 列对齐导入 + 附件嵌图片, D-003/D-006/D-011/R-07)。\n\n拆两段 (跨 async/sync 边界, D-011):\n① async 段:调 ``list_problems_for_export`` 取 18 列 + 对每行 ``file_urls`` 的\n  file_id 调 ``FileService.get_stream`` 收图 bytes 到内存 (``get_stream`` 返回\n  ``AsyncIterator``, 不能在 sync 段 await);\n② sync 段 (``anyio.to_thread.run_sync``):openpyxl 构造 workbook (18 列表头 +\n  数据行 + 附件列对每行 images ``add_image`` 锚到该行单元格)。\n单图取流失败 (缺失/已删/越权归属/底层存储瞬时错误,含非 AppError) 跳过不阻断导出\n(best-effort, 对齐 D-009 口径;P2 捕获面扩到 Exception)。越权归属跳过源自\nget_stream 的 IDOR 归属断言 (security-audit-remediation task-05/D-001)。",
         "operationId": "export_problems_api_ppm_problem_list_export_excel_get",
         "responses": {
           "200": {
@@ -24596,7 +24693,7 @@
           "platform-sync"
         ],
         "summary": "Push Progress",
-        "description": "POST 上行 progress + base_ts 冲突检测（契约 §4）。\n\n读 3 个 ``X-SillySpec-*`` header（User/Base-Ts/Pushed-At，缺失/空均 None）。\n200=接受（客户端据此更新 platform_last_sync）；409=冲突（body\n``{conflict, platform_progress, last_pushed_at}``，客户端写冲突文件走 resolve）。\nbody 是裸 ``serializeForSync`` 六表 JSON（NG-6 透传，不强类型校验）。\n\nworkspace_id 从 require_platform_sync 派生（shpsync_ token 绑定工作区；shk_live_/JWT\n过渡期 None 走全局聚合 fallback），透传 service 做收件箱隔离（task-06/07）。",
+        "description": "POST 上行 progress + base_ts 冲突检测（契约 §4）。\n\n读 3 个 ``X-SillySpec-*`` header（User/Base-Ts/Pushed-At，缺失/空均 None）。\n200=接受（客户端据此更新 platform_last_sync）；409=冲突（body\n``{conflict, platform_progress, last_pushed_at}``，客户端写冲突文件走 resolve）。\nbody 是裸 ``serializeForSync`` 六表 JSON（NG-6 透传，不强类型校验）。\n\nworkspace_id 从 require_platform_sync_write 派生（唯一写通道 shpsync_ token 绑定\n工作区；shk_live_/JWT 一律 403，task-06 / D-004@v1）。",
         "operationId": "push_progress_api_changes__name__progress_post",
         "parameters": [
           {
@@ -24650,7 +24747,7 @@
           "platform-sync"
         ],
         "summary": "Get Progress",
-        "description": "GET 单 change 完整 progress JSON（契约 §6，裸六表 + 顶层 last_pushed_at）。\n\n不存在/跨 workspace → 404（客户端 fetchJson 返回 null 降级不阻断，契约 §8/§10）。",
+        "description": "GET 单 change 完整 progress JSON（契约 §6，裸六表 + 顶层 last_pushed_at）。\n\n不存在/跨 workspace（无 CHANGE_READ）→ 404（客户端 fetchJson 返回 null 降级\n不阻断，契约 §8/§10）。",
         "operationId": "get_progress_api_changes__name__progress_get",
         "parameters": [
           {
@@ -24694,7 +24791,7 @@
           "platform-sync"
         ],
         "summary": "List Changes",
-        "description": "GET 轻量 change 列表（契约 §5，裸数组形态 D-007，按 token 派生 workspace 过滤）。",
+        "description": "GET 轻量 change 列表（契约 §5，裸数组形态 D-007，按鉴权 scope 聚合）。\n\nshpsync_ → token 绑定 workspace 收件箱；JWT/shk_live_ → CHANGE_READ workspace\n并集 + NULL 桶（task-06 / D-004@v1，全局聚合已关闭）。",
         "operationId": "list_changes_api_changes_get",
         "responses": {
           "200": {
@@ -24721,7 +24818,7 @@
           "platform-sync"
         ],
         "summary": "Get Approval",
-        "description": "GET 单 change 审批状态——给 sillyspec CLI execute 审批门控用（ql-20260812-001-6eb8）。\n\nCLI ``sync.js checkApproval`` 在 execute 启动时 GET 此端点，读 ``status``：\nrejected/pending 阻断 execute，其他（approved）放行（command.js:1071-1080）。\n\n**不因 change 无审批记录 404**：change 可能尚未上行 progress（execute 前），\n若 404 CLI 会 fetchJson→null→误判 pending 卡死（与本端点放行初衷相悖）。\n2026-08-14-platform-sync-docs-approval 起改读 ``approval`` 列（D-001@v1 完整闭环）：\n无记录（行不存在 / approval NULL 含仅 documents 占位行）→ 默认 ``approved`` 放行；\n有记录 → 真实 status/reason（rejected 时 CLI execute 启动 exit(1) 硬阻断，\nrun/command.js:1113-1129 现有门控）。鉴权失败仍 401。",
+        "description": "GET 单 change 审批状态——给 sillyspec CLI execute 审批门控用（ql-20260812-001-6eb8）。\n\nCLI ``sync.js checkApproval`` 在 execute 启动时 GET 此端点，读 ``status``：\nrejected/pending 阻断 execute，其他（approved）放行（command.js:1071-1080）。\n\n**不因 change 无审批记录 404**：change 可能尚未上行 progress（execute 前），\n若 404 CLI 会 fetchJson→null→误判 pending 卡死（与本端点放行初衷相悖）。\n2026-08-14-platform-sync-docs-approval 起改读 ``approval`` 列（D-001@v1 完整闭环）：\n无记录（行不存在 / approval NULL 含仅 documents 占位行）→ 默认 ``approved`` 放行；\n有记录 → 真实 status/reason（rejected 时 CLI execute 启动 exit(1) 硬阻断，\nrun/command.js:1113-1129 现有门控）。鉴权失败仍 401。\n\ntask-06 / D-004@v1：读 scope 聚合——跨 workspace（无 CHANGE_READ）的 change 行\n不可见，回落默认 approved 放行（不泄漏 status/reason）。",
         "operationId": "get_approval_api_changes__name__approval_get",
         "parameters": [
           {
@@ -24763,7 +24860,7 @@
           "platform-sync"
         ],
         "summary": "Submit Approval",
-        "description": "POST 审批决定（CLI ``sync.js _submitApproval`` :944-996 预留契约，过去式 decision）。\n\nD-001@v1 完整闭环：落 approval 列（重复提交覆盖，后写赢）。``decided_by`` 取\n``require_platform_sync`` 解包的权威 ``User.username``（三路径 token 均反查真实\nUser；**不用** ``X-SillySpec-User`` header fallback——客户端可伪造，Grill UB-2）。\nrejected 记录随后被 GET approval 读到 → CLI execute 启动 exit(1) 硬阻断。",
+        "description": "POST 审批决定（CLI ``sync.js _submitApproval`` :944-996 预留契约，过去式 decision）。\n\nD-001@v1 完整闭环：落 approval 列（重复提交覆盖，后写赢）。``decided_by`` 取\n``require_platform_sync_write`` 解包的权威 ``User.username``（唯一写通道 shpsync_\ntoken 反查真实 User；**不用** ``X-SillySpec-User`` header fallback——客户端可伪造，\nGrill UB-2）。rejected 记录随后被 GET approval 读到 → CLI execute 启动 exit(1)\n硬阻断。task-06 / D-004@v1：JWT/shk_live_ 一律 403。",
         "operationId": "submit_approval_api_changes__name__approval_post",
         "parameters": [
           {
@@ -24817,7 +24914,7 @@
           "platform-sync"
         ],
         "summary": "Push Documents",
-        "description": "POST 四件套文档全文（CLI ``sync.js syncDocuments`` :442-497 预留契约）。\n\nbody 是扁平 map（键限四件套白名单，schema 层 422）。定向 upsert ``documents``\n列（D-003@v1 单写者，不触碰 latest_progress/approval）；行不存在 INSERT 占位\n（下行端点由占位行守卫视为「无进度」）。全量替换语义（整列覆盖，与 CLI 全量推一致）。",
+        "description": "POST 四件套文档全文（CLI ``sync.js syncDocuments`` :442-497 预留契约）。\n\nbody 是扁平 map（键限四件套白名单，schema 层 422）。定向 upsert ``documents``\n列（D-003@v1 单写者，不触碰 latest_progress/approval）；行不存在 INSERT 占位\n（下行端点由占位行守卫视为「无进度」）。全量替换语义（整列覆盖，与 CLI 全量推一致）。\n\n仅 shpsync_ token 可写（task-06 / D-004@v1，workspace_id 由 token 派生）。",
         "operationId": "push_documents_api_changes__name__documents_post",
         "parameters": [
           {
@@ -31115,7 +31212,8 @@
           "git_username": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^[\\w.\\- ]{1,64}$"
               },
               {
                 "type": "null"
@@ -31126,7 +31224,8 @@
           "git_email": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)+$"
               },
               {
                 "type": "null"
@@ -52037,7 +52136,7 @@
         "additionalProperties": true,
         "type": "object",
         "title": "DocumentsSyncRequest",
-        "description": "Key is filename, value is file content."
+        "description": "Key is filename, value is file content.\n\nsecurity-audit-remediation task-07：``iter_documents`` 前逐键校验单段文件名\n白名单（字母数字点下划线连字符，禁路径分隔符与全点段）。CLI 契约只推四件套\n单段名（platform_sync 侧 DOCUMENT_FILES 已收敛），本层兜底 + service 层\nrelative_to 守卫双层防御。非法键 → 422，错误信息只含键名不回显内容。"
       },
       "app__modules__change__schema__ReviewResponse": {
         "properties": {

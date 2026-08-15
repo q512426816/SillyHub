@@ -355,3 +355,99 @@ async def test_authenticate_degrades_when_redis_unavailable(
     monkeypatch.setattr("app.modules.auth.api_key_service.get_redis", raising)
 
     assert await svc.authenticate(plaintext=plaintext) is not None
+
+
+# ── task-05（性能）：认证候选查询按 key_prefix 索引过滤 ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_authenticate_scans_only_same_prefix_candidates(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """异 prefix 的 key 不再被 bcrypt verify:候选集收窄到同前缀。
+
+    造 3 个 key(其中 2 个同 prefix 需逐条 verify、1 个异 prefix 不进候选),
+    用匹配 key 认证,verify 调用数应只等于同 prefix 的条数。
+    """
+    user = await _make_user(db_session)
+    svc = ApiKeyService(db_session, settings=get_settings())
+    _, target = await svc.create(user_id=user.id, name="target", expires_at=None)
+    target_prefix = _display_prefix(target)
+
+    # 造两个"同 prefix"的干扰 key:直接 insert 行,key_prefix 抄 target 的
+    # (真实签发几乎不可能同前 12 字符,手工构造以钉死过滤语义),hash 为随机 bcrypt。
+    for i in range(2):
+        db_session.add(
+            ApiKey(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                name=f"decoy-same-{i}",
+                key_prefix=target_prefix,
+                key_hash=password_hasher.hash(f"decoy-{i}-{uuid.uuid4().hex}"),
+                created_at=datetime.now(UTC),
+            )
+        )
+    # 造一个异 prefix 的 key(正常签发,前 12 字符必不同)
+    _, other = await svc.create(user_id=user.id, name="other-prefix", expires_at=None)
+    assert _display_prefix(other) != target_prefix
+    await db_session.commit()
+
+    calls = _spy_bcrypt(monkeypatch)
+    assert await svc.authenticate(plaintext=target) is not None
+    # 候选 = 3 个活跃 key 中同 prefix 的 3 条(target + 2 decoy),异 prefix 的不进候选
+    assert calls["n"] == 3
+
+
+@pytest.mark.asyncio
+async def test_authenticate_different_prefix_keys_do_not_cross_verify(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """两个不同 prefix 的 key 互不误验:各自认证只 verify 自己前缀下的候选。"""
+    user = await _make_user(db_session)
+    svc = ApiKeyService(db_session, settings=get_settings())
+    _, p1 = await svc.create(user_id=user.id, name="k1", expires_at=None)
+    _, p2 = await svc.create(user_id=user.id, name="k2", expires_at=None)
+    assert _display_prefix(p1) != _display_prefix(p2)
+
+    calls = _spy_bcrypt(monkeypatch)
+    assert await svc.authenticate(plaintext=p1) is not None
+    assert await svc.authenticate(plaintext=p2) is not None
+    # 每次 authenticate 候选集只有自己 1 条(key_prefix 唯一),两次共 2 次 verify
+    assert calls["n"] == 2
+
+
+@pytest.mark.asyncio
+async def test_authenticate_falls_back_to_full_scan_on_prefix_mismatch(
+    db_session: AsyncSession,
+) -> None:
+    """回退分支:行的 key_prefix 数据异常(被改写)时仍能认证成功,无静默 401。"""
+    user = await _make_user(db_session)
+    svc = ApiKeyService(db_session, settings=get_settings())
+    row, plaintext = await svc.create(user_id=user.id, name="k", expires_at=None)
+
+    # 模拟历史脏行:key_prefix 被改成与明文前 12 字符不一致
+    row.key_prefix = "shk_live_XXX"
+    db_session.add(row)
+    await db_session.commit()
+
+    assert await svc.authenticate(plaintext=plaintext) is not None
+
+
+@pytest.mark.asyncio
+async def test_authenticate_unknown_plaintext_still_negative_caches(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """未命中等价:prefix 过滤后无候选 → 回退全扫也无匹配 → 负缓存路径不变。"""
+    user = await _make_user(db_session)
+    svc = ApiKeyService(db_session, settings=get_settings())
+    await svc.create(user_id=user.id, name="k", expires_at=None)
+
+    fake = _FakeRedis()
+    monkeypatch.setattr("app.modules.auth.api_key_service.get_redis", lambda: fake)
+
+    bogus = API_KEY_PREFIX + "definitely-not-a-real-key-0xC0FFEE"
+    assert await svc.authenticate(plaintext=bogus) is None
+    assert fake.store.get(_neg_cache_key(bogus)) == "1"

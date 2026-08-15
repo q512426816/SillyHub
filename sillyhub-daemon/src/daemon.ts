@@ -400,6 +400,16 @@ interface WsClientLike {
   connect(): void;
   close(): void;
   /**
+   * WS 是否处于 Connected（open）状态。perf-remediation task-09：lease 轮询
+   * 门控消费（isConnected + lastMessageAt 新鲜 → 跳过该轮 HTTP 兜底）。
+   */
+  readonly isConnected: boolean;
+  /**
+   * 最后一条 WS 消息到达时间（epoch ms，只读）。perf-remediation task-09 / D-003@v1：
+   * 从未收到消息为 null（门控视为陈旧 → 照常轮询）。测试 mock 可用 getter 实现。
+   */
+  readonly lastMessageAt: number | null;
+  /**
    * task-05：注册 RPC handler（D-005@v1）。鸭子类型可选——测试 mock 的 WsClient
    * 可不实现（生产路径真实 WsClient 必须实现，否则 list_dir 等方法不可用，R-5）。
    * daemon 在 _wsLoop 用 `typeof === 'function'` 探测后调用。
@@ -504,6 +514,14 @@ export interface RecoveryCoordinator {
  * ``<workspace_dir>/borrow-sandboxes/<slug>`` 真实目录。
  */
 const BORROW_SANDBOX_MARKER = 'borrow-sandbox:';
+
+// ── perf-remediation task-09 / D-003@v1：_pollLoop 按通道拆分门控常量 ─────────
+//
+// lease 轮询跳过条件：WS isConnected 且距最后一条 WS 消息 < LEASE_POLL_SKIP_MS
+//（90s，TASK_AVAILABLE 推送兜底分发；ping 30s + 任意 backend 消息均刷新 lastMessageAt）。
+// 消息陈旧 ≥ 90s（假活，R-05）或断连时恢复 30s 轮询兜底。
+// 常量导出便于测试注入时间（task-09 constraints）。
+export const LEASE_POLL_SKIP_MS = 90_000;
 
 export interface DaemonOptions {
   /** 注入自定义 AgentDetector（测试用 mock）。默认 new AgentDetector()。 */
@@ -2110,38 +2128,62 @@ export class Daemon {
 
   // ── 轮询循环（daemon.py:183-215，HTTP 兜底）────────────────────────────────
 
+  /**
+   * perf-remediation task-09 / D-003@v1：lease 通道跳过条件。
+   * WS 健康且推送新鲜（isConnected + 距最后一条消息 < LEASE_POLL_SKIP_MS）→ true
+   * （TASK_AVAILABLE 推送兜底分发，跳过本轮 lease HTTP 轮询）。断连 / 消息陈旧
+   *（假活，R-05）/ 无 WS 客户端 → false（照常轮询兜底）。
+   */
+  private _leasePollSkippable(): boolean {
+    const ws = this._wsClient;
+    if (!ws || !ws.isConnected) return false;
+    const last = ws.lastMessageAt;
+    if (last === null || last === undefined) return false;
+    return Date.now() - last < LEASE_POLL_SKIP_MS;
+  }
+
   private async _pollLoop(signal: AbortSignal): Promise<void> {
     while (this._running) {
       try {
         await abortableSleep(this._config.poll_interval * 1000, signal);
         if (!this._taskRunner) continue; // daemon.py:188-189
         const allIds = [...this._registeredRuntimes.values()];
+        // task-09 / D-003@v1：lease 通道门控——WS 健康且消息新鲜时整轮跳过 lease
+        // 轮询（推送兜底）。计算一次、整轮复用（各 rid 共享同一条 WS）。
+        const skipLeasePoll = this._leasePollSkippable();
         for (const rid of allIds) {
-          try {
-            const pending = await this._client.getPendingLeases(rid);
-            for (const task of pending) {
-              const leaseId = task.lease_id as string | undefined;
-              if (!leaseId) continue;
-              this._logger.info('poll_task', { lease_id: leaseId });
-              // poll payload 字段映射（daemon.py:199-206）：
-              // 把 server 返回的 snake_case 组装成 LeaseCtx（camelCase）
-              const payload: LeasePayload = {
-                leaseId,
-                runtimeId: rid,
-                agentRunId: (task.agent_run_id as string | undefined) ?? undefined,
-                prompt: (task.prompt as string | undefined) ?? undefined,
-                provider: (task.provider as string | undefined) ?? undefined,
-                cmdPath: (task.cmd_path as string | undefined) ?? undefined,
-              };
-              this._fire(() => this._executeTask(payload));
+          if (skipLeasePoll) {
+            this._logger.debug('poll_lease_skipped_ws_healthy', { rid });
+          } else {
+            try {
+              const pending = await this._client.getPendingLeases(rid);
+              for (const task of pending) {
+                const leaseId = task.lease_id as string | undefined;
+                if (!leaseId) continue;
+                this._logger.info('poll_task', { lease_id: leaseId });
+                // poll payload 字段映射（daemon.py:199-206）：
+                // 把 server 返回的 snake_case 组装成 LeaseCtx（camelCase）
+                const payload: LeasePayload = {
+                  leaseId,
+                  runtimeId: rid,
+                  agentRunId: (task.agent_run_id as string | undefined) ?? undefined,
+                  prompt: (task.prompt as string | undefined) ?? undefined,
+                  provider: (task.provider as string | undefined) ?? undefined,
+                  cmdPath: (task.cmd_path as string | undefined) ?? undefined,
+                };
+                this._fire(() => this._executeTask(payload));
+              }
+            } catch (e) {
+              this._logger.debug('poll_runtime_failed', { rid, error: e });
             }
-          } catch (e) {
-            this._logger.debug('poll_runtime_failed', { rid, error: e });
           }
 
           // task-11 / FR-08 / D-004@v1：change-write 轮询分支（与 lease 轮询同节奏，
           // 独立通道，**不走** _runLeaseStateMachine 的 claim→start→runLease→complete
           // lease 三段；走 claim→本地写→complete→spec 回灌轻量流，FR-10 不启 agent）。
+          // perf-remediation task-09 / Grill B-1：该分支**永不被 WS 门控跳过**——
+          // protocol 无 change-write 消息类型、change_writer 不走 ws_hub，30s 轮询
+          // 是唯一分发通道，门控会让 change 写任务失联。
           try {
             const writes =
               await this._client.getPendingChangeWrites(rid);

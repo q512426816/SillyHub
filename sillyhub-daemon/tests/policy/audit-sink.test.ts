@@ -11,10 +11,14 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, utimesSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AuditSink } from '../../src/policy/audit-sink.js';
+import {
+  AuditSink,
+  cleanupOldFailoverFiles,
+  FAILOVER_RETENTION_MS,
+} from '../../src/policy/audit-sink.js';
 import type { AuditEvent, AuditBatchSender } from '../../src/policy/audit-sink.js';
 
 // ── 测试夹具 ──────────────────────────────────────────────────────────────────
@@ -347,5 +351,35 @@ describe('AuditSink', () => {
     // 清定时器后，再 advance 长时间不应再触发新的 flush
     vi.advanceTimersByTime(10000);
     expect(sender.calls.length).toBe(1);
+  });
+
+  // ── perf-remediation task-09 / FR-12：failover jsonl 7 天启动清理 ───────────
+
+  it('task-09: cleanupOldFailoverFiles 删 7 天前 jsonl，新文件与非 jsonl 保留', () => {
+    const oldJsonl = join(sandbox, 'audit-failed.jsonl');
+    const rotatedOld = join(sandbox, 'audit-failed-20260801.jsonl');
+    const freshJsonl = join(sandbox, 'audit-failed-new.jsonl');
+    const notJsonl = join(sandbox, 'keep-me.txt');
+    writeFileSync(oldJsonl, '{}\n', 'utf-8');
+    writeFileSync(rotatedOld, '{}\n', 'utf-8');
+    writeFileSync(freshJsonl, '{}\n', 'utf-8');
+    writeFileSync(notJsonl, 'keep', 'utf-8');
+    const base = Date.now();
+    const eightDaysAgo = new Date(base - FAILOVER_RETENTION_MS - 60_000);
+    utimesSync(oldJsonl, eightDaysAgo, eightDaysAgo);
+    utimesSync(rotatedOld, eightDaysAgo, eightDaysAgo);
+
+    cleanupOldFailoverFiles({ now: base, dir: sandbox });
+
+    expect(existsSync(oldJsonl)).toBe(false);
+    expect(existsSync(rotatedOld)).toBe(false);
+    expect(existsSync(freshJsonl)).toBe(true);
+    expect(existsSync(notJsonl)).toBe(true);
+  });
+
+  it('task-09: cleanupOldFailoverFiles 目录不存在时静默不抛', () => {
+    expect(() =>
+      cleanupOldFailoverFiles({ dir: join(sandbox, 'no-such-dir') }),
+    ).not.toThrow();
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AgentLogViewer } from "@/components/agent-log-viewer";
 import { MissionSummaryCard } from "@/components/mission-summary-card";
@@ -191,6 +191,37 @@ function ArtifactCard({ artifact }: { artifact: MissionArtifact }) {
   );
 }
 
+// perf-remediation task-08 / FR-10：轮询响应为空且本地日志达到阈值时，一次全量
+// 重拉兜底（防游标失配长期丢新日志）。本地很少时维持增量即可。
+const LOG_FULL_REFETCH_THRESHOLD = 200;
+
+/**
+ * perf-remediation task-08 / FR-10 / D-001@v1：把增量响应合并进已有日志。
+ * 返回正序（timestamp/id 升序）合并结果，按 id 去重——同 timestamp 边界
+ * 重复（增量与已见重叠）由前端吸收（R-06）。新 id 优先增量内容。
+ */
+export function mergeLogsById(
+  existing: AgentRunLogEntry[],
+  incoming: AgentRunLogEntry[],
+): AgentRunLogEntry[] {
+  const byId = new Map<string, AgentRunLogEntry>();
+  for (const e of existing) byId.set(e.id, e);
+  for (const e of incoming) byId.set(e.id, e);
+  return [...byId.values()].sort(
+    (a, b) =>
+      a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id),
+  );
+}
+
+/** 取当前已见日志中最早一条的 timestamp（增量游标，desc 下界）。 */
+function earliestTimestamp(logs: AgentRunLogEntry[]): string | undefined {
+  let min: string | undefined;
+  for (const l of logs) {
+    if (min === undefined || l.timestamp < min) min = l.timestamp;
+  }
+  return min;
+}
+
 function WorkerLogPanel({
   workspaceId,
   runId,
@@ -204,16 +235,40 @@ function WorkerLogPanel({
 }) {
   const [logs, setLogs] = useState<AgentRunLogEntry[] | null>(null);
   const [loading, setLoading] = useState(true);
+  // 游标与合并读当前已见日志——refresh 用 ref 读避免依赖 logs state（否则
+  // refresh 身份随 logs 变化，useEffect 会立即重跑 refresh 造成轮询风暴）。
+  const logsRef = useRef<AgentRunLogEntry[]>([]);
+  const applyLogs = useCallback((next: AgentRunLogEntry[]) => {
+    logsRef.current = next;
+    setLogs(next);
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
-      setLogs(await getAgentRunLogs(workspaceId, runId));
+      const current = logsRef.current;
+      const after = current.length > 0 ? earliestTimestamp(current) : undefined;
+      const fetched = await getAgentRunLogs(workspaceId, runId, after);
+      if (after === undefined) {
+        // 首拉：无游标全量（现状语义）。
+        applyLogs(fetched);
+        return;
+      }
+      if (fetched.length > 0) {
+        // 增量：按 id 去重合并（同 timestamp 边界重复前端吸收，R-06）。
+        applyLogs(mergeLogsById(logsRef.current, fetched));
+        return;
+      }
+      // 游标空结果：本地已积压较多时做一次全量重拉兜底（此后恢复增量），
+      // 否则维持现状（服务端确无更新）。
+      if (current.length >= LOG_FULL_REFETCH_THRESHOLD) {
+        applyLogs(await getAgentRunLogs(workspaceId, runId));
+      }
     } catch {
-      setLogs([]);
+      setLogs((prev) => prev ?? []);
     } finally {
       setLoading(false);
     }
-  }, [workspaceId, runId]);
+  }, [workspaceId, runId, applyLogs]);
 
   useEffect(() => {
     refresh();

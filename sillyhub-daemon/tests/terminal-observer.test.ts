@@ -333,4 +333,85 @@ describe('terminal-observer', () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(logExists('noop-should-not-exist')).toBe(false);
   });
+
+  // ── perf-remediation task-09 / FR-12：runs/ 子目录 7 天启动清理 ─────────────
+
+  it('task-09: createTerminalObserver 首次调用清理 7 天前的 runs 子目录，新目录保留', async () => {
+    const { mkdirSync, utimesSync, writeFileSync } = await import('node:fs');
+    const runsDir = join(configMod.DEFAULT_CONFIG_DIR, 'runs');
+
+    // 预置 3 个目录：7 天前过期一个、恰好边界外一个、新鲜一个
+    const oldDir = join(runsDir, 'lease-old-7d-plus');
+    const freshDir = join(runsDir, 'lease-fresh');
+    const keepFileDir = join(runsDir, 'not-a-dir-marker'); // 普通 run 子目录带 terminal.log
+    mkdirSync(oldDir, { recursive: true });
+    writeFileSync(join(oldDir, 'terminal.log'), 'old');
+    mkdirSync(freshDir, { recursive: true });
+    writeFileSync(join(freshDir, 'terminal.log'), 'fresh');
+    mkdirSync(keepFileDir, { recursive: true });
+    writeFileSync(join(keepFileDir, 'terminal.log'), 'keep');
+    const now = Date.now();
+    const eightDaysAgo = new Date(now - observerMod.RUNS_RETENTION_MS - 60_000);
+    utimesSync(join(oldDir, 'terminal.log'), eightDaysAgo, eightDaysAgo);
+    // 目录 mtime 也拨旧（cleanup 按 readdir 条目 stat 目录本身）
+    utimesSync(oldDir, eightDaysAgo, eightDaysAgo);
+
+    // 触发启动清理（createTerminalObserver 首调，一次性）
+    await observerMod.createTerminalObserver({
+      leaseId: 'lease-new-current',
+      cwd: '/ws',
+      cmdPath: '/claude',
+      args: [],
+    });
+    // 清理是 fire-and-forget → 轮询等落盘（全量并发下 Windows FS 慢，放宽超时）
+    await vi.waitFor(() => expect(existsSync(oldDir)).toBe(false), {
+      timeout: 15_000,
+      interval: 50,
+    });
+
+    // 过期目录被删；新鲜目录与本轮新建目录保留
+    expect(existsSync(freshDir)).toBe(true);
+    expect(existsSync(keepFileDir)).toBe(true);
+    expect(logExists('lease-new-current')).toBe(true);
+  });
+
+  it('task-09: cleanupOldRuns 目录不存在时静默不抛；恰好 7 天边界（≥）被删', async () => {
+    const runsDir = join(configMod.DEFAULT_CONFIG_DIR, 'runs');
+    const { mkdirSync, utimesSync, writeFileSync } = await import('node:fs');
+    // 边界用例：目录 mtime 显式拨到固定时刻，now = 该时刻 + 7d + 1ms
+    //（差恰好 ≥ RETENTION → 删；避免用创建时刻近似带来的毫秒级竞态）
+    const edgeDir = join(runsDir, 'lease-edge-7d');
+    mkdirSync(edgeDir, { recursive: true });
+    writeFileSync(join(edgeDir, 'terminal.log'), 'edge');
+    const anchor = Date.now() - 1000;
+    const edgeMtime = new Date(anchor - observerMod.RUNS_RETENTION_MS - 1);
+    utimesSync(edgeDir, edgeMtime, edgeMtime);
+    await observerMod.cleanupOldRuns({
+      now: anchor,
+      runsDir,
+    });
+    expect(existsSync(edgeDir)).toBe(false);
+    // 不存在的 runs 目录 → 静默返回不抛
+    await expect(
+      observerMod.cleanupOldRuns({ runsDir: join(tmpDir, 'no-such-runs') }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('task-09: cleanupOldRuns(now 注入) 删恰好超 7 天的目录', async () => {
+    const { mkdirSync, utimesSync, writeFileSync } = await import('node:fs');
+    const runsDir = join(configMod.DEFAULT_CONFIG_DIR, 'runs');
+    const expiredDir = join(runsDir, 'lease-expired-injected');
+    const freshDir = join(runsDir, 'lease-fresh-injected');
+    mkdirSync(expiredDir, { recursive: true });
+    writeFileSync(join(expiredDir, 'terminal.log'), 'x');
+    mkdirSync(freshDir, { recursive: true });
+    writeFileSync(join(freshDir, 'terminal.log'), 'y');
+    const base = Date.now();
+    const sevenDaysAgo = new Date(base - observerMod.RUNS_RETENTION_MS);
+    utimesSync(expiredDir, sevenDaysAgo, sevenDaysAgo);
+
+    await observerMod.cleanupOldRuns({ now: base });
+    expect(existsSync(expiredDir)).toBe(false);
+    expect(existsSync(freshDir)).toBe(true);
+  });
 });

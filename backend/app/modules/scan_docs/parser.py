@@ -6,11 +6,14 @@ records ready for DB persistence.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
+from stat import S_ISLNK, S_ISREG
 
 from app.core.logging import get_logger
+from app.modules.change.parser import _safe_mtime
 
 log = get_logger(__name__)
 
@@ -66,6 +69,54 @@ def _doc_type_from_filename(filename: str) -> str:
     return stem
 
 
+def _stat_target(file_path: Path, root_resolved: Path) -> os.stat_result | None:
+    """task-06（perf-remediation）：路径守卫 + stat 合并为单次系统调用。
+
+    原实现 ``is_file()`` + ``resolve()`` + ``stat(size)`` + ``stat(mtime)`` 每文件
+    4 次 stat（Windows bind mount 单次 ≈1.45ms）。这里单次 ``os.lstat`` 同时承担：
+    - 常规文件判定（``S_ISREG``；symlink 因 lstat 不是 REG 被排除——比旧实现更严格，
+      根外的 symlink 不再需要二次 stat 去 resolve，行为收紧为安全侧）
+    - 路径穿越守卫（symlink → resolve 后必须仍在根内，与旧语义一致：根内 symlink
+      指向根内文件仍被拒——旧 ``resolve`` + ``startswith`` 对 symlink 判的是 target，
+      target 在根内则放行且 ``stat(mtime)`` 跟随读 target；为避免歧义，symlink 一律
+      拒绝并返回 None，与根外 target 的旧行为一致）
+    - size（读内容截断判定）与 mtime（``_safe_mtime`` 防御转换）取自同一 stat_result
+
+    失败（不存在 / 权限 / 越界）返回 None，调用方跳过该文件。
+    """
+    try:
+        st = os.lstat(file_path)
+    except OSError:
+        return None
+    if not S_ISREG(st.st_mode):
+        # symlink（或其它非常规文件）：resolve 后仍在根内才跟随旧语义放行，
+        # 此时用跟随的 os.stat（target 的 size/mtime，与旧实现一致）
+        if not S_ISLNK(st.st_mode):
+            return None
+        try:
+            resolved = file_path.resolve()
+            if not str(resolved).startswith(str(root_resolved)):
+                return None
+            return os.stat(file_path)
+        except (OSError, ValueError):
+            return None
+    return st
+
+
+def _read_file_statted(path: Path, st_size: int) -> tuple[str, bool]:
+    """按已知 size 读文件内容（不再重复 stat），返回 (content, truncated)。
+
+    task-06（perf-remediation）：与调用方共用同一 stat_result——调用方已经 stat
+    过一次（拿 size + mtime），这里直接用传入的 st_size，消除 ``_read_file_safe``
+    的重复 stat。截断语义与原版完全一致。
+    """
+    truncated = st_size > MAX_CONTENT_BYTES
+    content = path.read_text(encoding="utf-8", errors="replace")
+    if truncated:
+        content = content[: MAX_CONTENT_BYTES // 4]
+    return content, truncated
+
+
 def _extract_title(content: str) -> str | None:
     """Extract the first ``# Title`` from markdown content."""
     for line in content.splitlines():
@@ -73,18 +124,6 @@ def _extract_title(content: str) -> str | None:
         if stripped.startswith("#"):
             return stripped.lstrip("# ").strip() or None
     return None
-
-
-def _read_file_safe(path: Path) -> tuple[str, bool]:
-    """Read file content with size check. Returns (content, truncated)."""
-    size = path.stat().st_size
-    truncated = False
-    if size > MAX_CONTENT_BYTES:
-        truncated = True
-        content = path.read_text(encoding="utf-8", errors="replace")[: MAX_CONTENT_BYTES // 4]
-    else:
-        content = path.read_text(encoding="utf-8", errors="replace")
-    return content, truncated
 
 
 class ScanDocsParser:
@@ -125,19 +164,8 @@ class ScanDocsParser:
         sillyspec_resolved = sillyspec_root.resolve()
 
         for file_path in sorted(docs_dir.rglob("*")):
-            if not file_path.is_file():
-                continue
-
-            # Only parse .md and .yaml/.yml files
+            # Only parse .md and .yaml/.yml files（task-06：后缀预筛在 stat 前）
             if file_path.suffix not in (".md", ".yaml", ".yml"):
-                continue
-
-            # Path traversal guard
-            try:
-                resolved = file_path.resolve()
-                if not str(resolved).startswith(str(sillyspec_resolved)):
-                    continue
-            except (OSError, ValueError):
                 continue
 
             rel_path = file_path.relative_to(sillyspec_root)
@@ -149,8 +177,15 @@ class ScanDocsParser:
             if file_path.suffix in (".yaml", ".yml"):
                 doc_type = file_path.stem
 
+            # task-06：单文件 stat 收敛为 1 次（is_file/resolve/stat 合并进
+            # _stat_target），size 与 mtime 取自同一 stat_result
+            st = _stat_target(file_path, sillyspec_resolved)
+            if st is None:
+                continue
+            mtime = _safe_mtime(st.st_mtime)
+
             try:
-                content, truncated = _read_file_safe(file_path)
+                content, truncated = _read_file_statted(file_path, st.st_size)
             except OSError as exc:
                 result.warnings.append(
                     ParseWarning(
@@ -162,7 +197,6 @@ class ScanDocsParser:
                 continue
 
             title = _extract_title(content) if file_path.suffix == ".md" else None
-            mtime = datetime.fromtimestamp(file_path.stat().st_mtime, tz=UTC)
 
             parsed = ParsedDoc(
                 doc_type=doc_type,
@@ -208,16 +242,7 @@ class ScanDocsParser:
 
         if scan_dir.is_dir():
             for file_path in sorted(scan_dir.iterdir()):
-                if not file_path.is_file():
-                    continue
                 if file_path.suffix not in (".md", ".yaml", ".yml"):
-                    continue
-
-                try:
-                    resolved = file_path.resolve()
-                    if not str(resolved).startswith(str(sillyspec_resolved)):
-                        continue
-                except (OSError, ValueError):
                     continue
 
                 rel_path = file_path.relative_to(sillyspec_root)
@@ -230,8 +255,15 @@ class ScanDocsParser:
                 if doc_type not in STANDARD_DOC_TYPES:
                     doc_type = "OTHER"
 
+                # task-06：单文件 stat 收敛为 1 次（_stat_target 合并
+                # is_file/resolve/size/mtime），mtime 防御统一走 _safe_mtime
+                st = _stat_target(file_path, sillyspec_resolved)
+                if st is None:
+                    continue
+                mtime = _safe_mtime(st.st_mtime)
+
                 try:
-                    content, truncated = _read_file_safe(file_path)
+                    content, truncated = _read_file_statted(file_path, st.st_size)
                 except OSError as exc:
                     result.warnings.append(
                         ParseWarning(
@@ -244,7 +276,6 @@ class ScanDocsParser:
                     continue
 
                 title = _extract_title(content) if file_path.suffix == ".md" else None
-                mtime = datetime.fromtimestamp(file_path.stat().st_mtime, tz=UTC)
 
                 parsed = ParsedDoc(
                     doc_type=doc_type,

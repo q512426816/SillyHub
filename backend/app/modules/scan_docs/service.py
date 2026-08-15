@@ -6,6 +6,7 @@ from the DB; reparse re-reads the filesystem and reconciles rows.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import uuid
 from datetime import UTC, datetime
@@ -13,6 +14,7 @@ from pathlib import Path
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 from sqlmodel import col
 
 from app.core.errors import ScanDocNotFound
@@ -64,6 +66,27 @@ class ScanDocsService:
                     func.lower(ScanDocument.path).like(pattern, escape="\\"),
                     func.lower(ScanDocument.title).like(pattern, escape="\\"),
                     func.lower(ScanDocument.content).like(pattern, escape="\\"),
+                )
+            )
+        else:
+            # task-04（性能）：无 q 时响应 schema（ScanDocSummary）本就不含 content，
+            # load_only 排除 content 大列，列表页不再全量搬运文档正文；session 仍
+            # attach，后续访问 content 会走懒加载补取（design D-001@v1 fallback 方案）。
+            # 有 q 分支保持 SQL LIKE 现状（候选集二次取 content 严格劣于现状，不采用）。
+            stmt = stmt.options(
+                load_only(
+                    ScanDocument.id,
+                    ScanDocument.workspace_id,
+                    ScanDocument.doc_type,
+                    ScanDocument.path,
+                    ScanDocument.title,
+                    ScanDocument.exists,
+                    ScanDocument.last_modified_at,
+                    ScanDocument.source_member_id,
+                    ScanDocument.source_runtime_id,
+                    ScanDocument.source_synced_at,
+                    ScanDocument.source_mtime,
+                    ScanDocument.content_hash,
                 )
             )
         stmt = stmt.order_by(col(ScanDocument.path).asc())
@@ -169,10 +192,18 @@ class ScanDocsService:
 
         if not workspace.component_key:
             # Parent workspace — parse the entire docs tree recursively
-            result = self._parser.parse_docs_tree(sillyspec_root, platform_managed=True)
+            # task-01（性能）：parse_docs_tree 递归遍历 docs 树（同步重 FS IO）移到线程，
+            # 解析期间事件循环可服务并发请求（design D-002@v1）；parser 纯同步纯读
+            # 无共享可变状态，线程安全（design R-01）。
+            result = await asyncio.to_thread(
+                self._parser.parse_docs_tree, sillyspec_root, platform_managed=True
+            )
         else:
-            result = self._parser.parse_component(
-                sillyspec_root, workspace.component_key, platform_managed=True
+            result = await asyncio.to_thread(
+                self._parser.parse_component,
+                sillyspec_root,
+                workspace.component_key,
+                platform_managed=True,
             )
         stats["parsed"] = len([d for d in result.docs if d.exists])
 

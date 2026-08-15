@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import os
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -30,7 +31,7 @@ from app.modules.change.model import (
     ChangeSessionLink,
     StageEnum,
 )
-from app.modules.change.parser import ChangeParser, ChangeParserResult, ParsedChange
+from app.modules.change.parser import ChangeParser, ChangeParserResult, ParsedChange, _safe_mtime
 from app.modules.change.projection import StageProjectionService
 from app.modules.change.schema import (
     ArchiveCheckItem,
@@ -260,33 +261,60 @@ class ChangeService:
 
     @staticmethod
     def _list_files_sync(change_dir: Path) -> list[dict]:
-        """``list_files`` 同步遍历段（Wave C 续：移出事件循环，对齐 tool_gateway 范式）。"""
+        """``list_files`` 同步遍历段（Wave C 续：移出事件循环，对齐 tool_gateway 范式）。
+
+        task-06（perf-remediation）：``rglob`` + ``is_file`` + ``stat``（每文件 2 次
+        stat）改 ``os.scandir`` 显式栈单遍——复用 DirEntry 缓存的 stat（每文件仅 1
+        次系统调用），范式对照 change/parser.py ``_compute_last_modified``（ql-008）。
+        Windows-Docker bind mount 单次 stat ≈1.45ms，reparse 高频路径上文件树遍历
+        耗时减半。行为零变更：``rglob("*") + sorted`` 等价于「深度优先收集全部路径
+        后按 posix 字典序排序」（rglob 产出的 path 排序即 ``sorted`` 结果，条目
+        顺序不依赖遍历序）；mtime 防御统一走 ``_safe_mtime``（脏值兜底 epoch 0）。
+        """
         if not change_dir.is_dir():
             return []
+        base = str(change_dir)
         items: list[dict] = []
-        for entry in sorted(change_dir.rglob("*")):
-            if not entry.is_file():
-                continue
-            name = entry.name
-            if name.startswith("."):
-                continue
-            # 排除 __pycache__ 段
-            if "__pycache__" in entry.parts:
-                continue
+        stack: list[str] = [base]
+        while stack:
+            current = stack.pop()
             try:
-                rel = entry.relative_to(change_dir)
-            except ValueError:
+                with os.scandir(current) as it:
+                    for entry in it:
+                        try:
+                            if entry.is_dir(follow_symlinks=False):
+                                # 目录也参与排序：rglob("*") 列出目录本身，最终
+                                # 顺序由末尾整体 sorted 决定，压栈序无关
+                                stack.append(entry.path)
+                                continue
+                            if not entry.is_file(follow_symlinks=False):
+                                continue
+                        except OSError:
+                            continue
+                        name = entry.name
+                        if name.startswith("."):
+                            continue
+                        # 排除 __pycache__ 段（entry.path 含基目录前缀，直接前缀判断）
+                        if "__pycache__" in entry.path:
+                            continue
+                        rel = os.path.relpath(entry.path, base).replace(os.sep, "/")
+                        try:
+                            st = entry.stat(follow_symlinks=False)
+                        except OSError:
+                            continue
+                        items.append(
+                            {
+                                "path": rel,
+                                "name": name,
+                                "size": st.st_size,
+                                "last_modified_at": _safe_mtime(st.st_mtime),
+                                "is_text": ChangeService._is_text_file(name),
+                            }
+                        )
+            except OSError:
                 continue
-            stat = entry.stat()
-            items.append(
-                {
-                    "path": rel.as_posix(),
-                    "name": name,
-                    "size": stat.st_size,
-                    "last_modified_at": datetime.fromtimestamp(stat.st_mtime, tz=UTC),
-                    "is_text": ChangeService._is_text_file(name),
-                }
-            )
+        # 对齐原 sorted(rglob("*")) 的最终顺序：按 posix 相对路径整体排序
+        items.sort(key=lambda it: it["path"])
         return items
 
     @staticmethod
@@ -503,7 +531,10 @@ class ChangeService:
         # rel_prefix 用 change.path（已含 archive 段 + .sillyspec 包裹，与 _resolve_change_dir
         # 一致），避免重建 rel_prefix 漏掉 archive 段破坏 change.path。
         rel_prefix = change.path
-        parsed = self._parser._parse_change(
+        # task-01（性能）：_parse_change 同步读单目录文件（FS IO）移到线程（design
+        # D-002@v1），同类顺手；纯同步纯读无共享可变状态，线程安全（design R-01）。
+        parsed = await asyncio.to_thread(
+            self._parser._parse_change,
             sillyspec_root,
             change_dir,
             location=change.location or "active",
@@ -1083,7 +1114,12 @@ class ChangeService:
         # task-08：工作区路径来源分流已删（FR-2）。daemon-client 同步产出扁平布局
         # （无 .sillyspec 包裹），parser 需 platform_managed=True 才能读到
         # specRoot/changes/。
-        result = self._parser.parse_workspace(sillyspec_root, platform_managed=True, scope=scope)
+        # task-01（性能）：parse_workspace 同步遍历整棵变更树（重 FS IO）移到线程，
+        # 解析期间事件循环可继续服务并发请求（design D-002@v1）；parser 纯同步纯读
+        # 无共享可变状态，线程安全（design R-01）。返回值结构与后续 DB 写回不变。
+        result = await asyncio.to_thread(
+            self._parser.parse_workspace, sillyspec_root, platform_managed=True, scope=scope
+        )
         stats = {"parsed": 0, "created": 0, "updated": 0, "deleted": 0, "renamed": 0}
 
         # Fetch existing changes

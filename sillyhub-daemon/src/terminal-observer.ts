@@ -25,11 +25,16 @@
  * @module terminal-observer
  */
 
-import { appendFile, mkdir, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { DEFAULT_CONFIG_DIR, type DaemonConfig } from './config.js';
 import { launchTerminal } from './terminal-launcher.js';
+
+// ── perf-remediation task-09 / FR-12：启动清理常量 ─────────────────────────
+
+/** runs/ 下 leaseId 子目录保留期（7 天）。导出便于测试断言。 */
+export const RUNS_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** observer 实例接口：写完日志后由调用方持有，逐行写、最后 close。 */
 export interface TerminalObserver {
@@ -57,11 +62,60 @@ export interface CreateTerminalObserverOptions {
   config?: DaemonConfig;
 }
 
+// ── 启动清理（perf-remediation task-09 / FR-12）────────────────────────────
+
+/**
+ * 清理 runs/ 下 mtime 超过 7 天的 leaseId 子目录（fs.rm recursive）。
+ *
+ * 调用时机：createTerminalObserver 首次调用（即首个任务写日志前，等价"启动时"——
+ * daemon 空闲期没有日志写入，无需更早）执行一次（in-flight guard），此后整个进程
+ * 生命周期不再重复。全程容错：任何失败（目录不存在 / 权限 / stat 错）只吞错，
+ * 绝不 throw 影响任务链路。新建文件（mtime 新鲜）绝不误删。
+ *
+ * now 注入点：测试传固定时间戳断言边界（7 天前删 / 新文件留）。
+ */
+export async function cleanupOldRuns(opts?: {
+  now?: number;
+  runsDir?: string;
+}): Promise<void> {
+  const dir = opts?.runsDir ?? join(DEFAULT_CONFIG_DIR, 'runs');
+  let entries: Awaited<ReturnType<typeof readdir>>;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return; // runs/ 不存在（从未跑过任务）→ 无需清理
+  }
+  const now = opts?.now ?? Date.now();
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    try {
+      const s = await stat(join(dir, entry.name));
+      if (now - s.mtimeMs < RUNS_RETENTION_MS) continue; // 未过期保留
+      await rm(join(dir, entry.name), { recursive: true, force: true });
+    } catch {
+      // 单个子目录 stat/rm 失败（并发删除 / 权限）→ 跳过该目录，不影响其余
+    }
+  }
+}
+
+/** 进程内 in-flight guard：cleanupOldRuns 整个生命周期只执行一次。 */
+let cleanupStarted = false;
+
+/** 触发一次性启动清理（fire-and-forget，不 await、不抛错）。 */
+function scheduleRunsCleanupOnce(): void {
+  if (cleanupStarted) return;
+  cleanupStarted = true;
+  void cleanupOldRuns().catch(() => {
+    // 容错兜底：清理失败不影响任何任务
+  });
+}
+
 /**
  * 创建并初始化一个观察日志：
  *   1. 建 `runs/<leaseId>/` 目录
  *   2. 写 header（lease/cwd/cmd/mode）
  *   3. enabled=true 时调 launchTerminal 弹独立终端 tail 这个日志
+ *   4. （task-09）首次调用时顺带清理 7 天前的 runs/ 子目录
  *
  * 返回 TerminalObserver 实例。即使弹窗失败/写文件失败也返回可用 observer
  * （内部全部 catch），保证 task-runner 调用链不中断。
@@ -69,6 +123,9 @@ export interface CreateTerminalObserverOptions {
 export async function createTerminalObserver(
   opts: CreateTerminalObserverOptions,
 ): Promise<TerminalObserver> {
+  // task-09 / FR-12：启动清理（一次性，fire-and-forget，失败静默）。
+  scheduleRunsCleanupOnce();
+
   const mode = normalizeMode(opts.config?.terminal_observer_mode);
   const enabled = opts.config?.terminal_observer_enabled === true;
   const closeOnExit = opts.config?.terminal_observer_close_on_exit === true;

@@ -56,6 +56,7 @@ async def workspace_with_changes(
         "change_id": items[0]["id"],
         "change_key": items[0]["change_key"],
         "root": root,
+        "spec_root": str(spec_root),
     }
 
 
@@ -235,3 +236,139 @@ async def test_enqueue_edit_write_merges_same_path(
     assert tid3 != tid1
     rows = list((await db_session.execute(select(DaemonChangeWrite))).scalars().all())
     assert len(rows) == 2
+
+
+async def test_resync_change_docs_refreshes_title_and_documents(
+    client,
+    db_session,
+    workspace_with_changes: dict,
+    auth_headers: dict[str, str],
+) -> None:
+    """task-01（perf-remediation）行为保持锚点：_resync_change_docs 解析移入线程后，
+    仍刷新 change.title（proposal.md 首个 ``# `` heading）与 ChangeDocument 行。
+
+    service 级直调（绕过 write_file 的 runtime 解析——daemon-client 绑定链路
+    与本 task 无关，200 拉起成本不成比例）。db_session 与 client 同库
+    （test_enqueue_edit_write_merges_same_path 同款范式）。
+    """
+    from app.modules.change.service import ChangeService
+
+    ws_id = workspace_with_changes["ws_id"]
+    change_id = workspace_with_changes["change_id"]
+    detail = await client.get(f"/api/workspaces/{ws_id}/changes/{change_id}", headers=auth_headers)
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    # change.path 是相对 spec_root 的真实路径（active 含 changes/ 前缀，archive 含
+    # archive/ 段），用它拼 proposal.md（对齐 service._resolve_change_dir）。
+    change_rel_path = body["path"]
+    assert change_rel_path, body
+
+    # 改盘上 proposal.md 的 heading（fixture 初始标题 → 改后标题）
+    spec_root = workspace_with_changes["spec_root"]
+    proposal = Path(spec_root) / change_rel_path / "proposal.md"
+    assert proposal.is_file(), proposal
+    proposal.write_text("# 线程化后的新标题\n\n正文\n", encoding="utf-8")
+
+    svc = ChangeService(db_session)
+    await svc._resync_change_docs(uuid.UUID(ws_id), uuid.UUID(change_id))
+
+    # title 跟上 heading；documents 端点返回刷新后的 doc 矩阵（proposal 行存在）
+    detail2 = await client.get(f"/api/workspaces/{ws_id}/changes/{change_id}", headers=auth_headers)
+    assert detail2.status_code == 200, detail2.text
+    assert detail2.json()["title"] == "线程化后的新标题"
+
+    docs_resp = await client.get(
+        f"/api/workspaces/{ws_id}/changes/{change_id}/documents", headers=auth_headers
+    )
+    assert docs_resp.status_code == 200, docs_resp.text
+    doc_paths = [d["path"] for d in docs_resp.json()["documents"]]
+    assert any(p.endswith("proposal.md") for p in doc_paths)
+
+
+# ── task-06（perf-remediation）：_list_files_sync scandir 单遍 + _safe_mtime ──
+
+
+class TestListFilesSyncScandir:
+    """_list_files_sync 改 os.scandir 单遍（照 ql-008 范式）后的行为保持。"""
+
+    def _make_tree(self, base: Path) -> Path:
+        change_dir = base / "changes" / "demo"
+        (change_dir / "tasks").mkdir(parents=True)
+        (change_dir / "proposal.md").write_text("# Demo", encoding="utf-8")
+        (change_dir / "design.md").write_text("# Design", encoding="utf-8")
+        (change_dir / "tasks" / "task-01.md").write_text("- [ ] t1", encoding="utf-8")
+        # 排除项：隐藏文件、隐藏目录、__pycache__、子目录里各一个
+        (change_dir / ".hidden.md").write_text("hidden", encoding="utf-8")
+        hidden_dir = change_dir / ".runtime"
+        hidden_dir.mkdir()
+        (hidden_dir / "x.md").write_text("x", encoding="utf-8")
+        pycache = change_dir / "__pycache__"
+        pycache.mkdir()
+        (pycache / "m.pyc").write_text("", encoding="utf-8")
+        return change_dir
+
+    def test_tree_equivalence(self, tmp_path: Path) -> None:
+        """同目录树结果与 rglob 版等价：路径集合 / 排序 / 字段完整 / 排除项生效。"""
+        import os
+
+        from app.modules.change.service import ChangeService
+
+        change_dir = self._make_tree(tmp_path)
+        # 钉死 mtime 便于断言（scandir follow_symlinks=False 与 rglob（跟随）在
+        # 无 symlink 场景行为等价——树里没有 symlink）
+        for p in change_dir.rglob("*"):
+            if p.is_file():
+                os.utime(p, (1_700_000_000, 1_700_000_000))
+
+        items = ChangeService._list_files_sync(change_dir)
+
+        # 排序与 rglob+sorted 等价：posix 路径字典序。注意排除语义是**文件名**级：
+        # 隐藏目录（.runtime/）里的非隐藏文件（x.md）原实现同样包含——锚定该行为
+        assert [it["path"] for it in items] == [
+            ".runtime/x.md",
+            "design.md",
+            "proposal.md",
+            "tasks/task-01.md",
+        ]
+        # 字段完整
+        assert all(
+            {"path", "name", "size", "last_modified_at", "is_text"} == set(it) for it in items
+        )
+        # is_text / size / mtime 取值正确（mtime 来自钉死的 utime）
+        from datetime import UTC, datetime
+
+        by_path = {it["path"]: it for it in items}
+        assert by_path["design.md"]["is_text"] is True
+        assert by_path["design.md"]["size"] == 8  # "# Design"
+        assert by_path["design.md"]["last_modified_at"] == datetime.fromtimestamp(
+            1_700_000_000, tz=UTC
+        )
+        # 隐藏文件本体与 __pycache__（含子目录里的）排除
+        assert not any(it["name"].startswith(".") or "__pycache__" in it["path"] for it in items)
+
+    def test_missing_dir_returns_empty(self, tmp_path: Path) -> None:
+        from app.modules.change.service import ChangeService
+
+        assert ChangeService._list_files_sync(tmp_path / "nope") == []
+
+    def test_dirty_mtime_falls_back(self, tmp_path: Path) -> None:
+        """mtime 脏值（os.utime 造 year 30828 级真实脏 mtime）不炸，走 _safe_mtime 兜底。"""
+        import os
+        from datetime import UTC, datetime
+
+        from app.modules.change.service import ChangeService
+
+        change_dir = tmp_path / "changes" / "dirty"
+        change_dir.mkdir(parents=True)
+        target = change_dir / "proposal.md"
+        target.write_text("# Dirty", encoding="utf-8")
+        dirty = 9.1e11  # 两平台 fromtimestamp 均越界（ql-20260814-006 实测量级）
+        os.utime(target, (dirty, dirty))
+        assert target.stat().st_mtime == dirty
+
+        with pytest.raises((ValueError, OverflowError, OSError)):
+            datetime.fromtimestamp(target.stat().st_mtime, tz=UTC)  # 旧实现在此炸
+
+        items = ChangeService._list_files_sync(change_dir)
+        assert len(items) == 1
+        assert items[0]["last_modified_at"] == datetime(1970, 1, 1, tzinfo=UTC)

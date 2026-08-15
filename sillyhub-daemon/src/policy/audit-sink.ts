@@ -16,7 +16,7 @@
  * @module policy/audit-sink
  */
 
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readdirSync, rmSync, statSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -79,6 +79,60 @@ export function defaultFailoverPath(): string {
   return join(homedir(), '.sillyhub', 'daemon', 'audit-failed.jsonl');
 }
 
+// ── perf-remediation task-09 / FR-12：启动清理 ───────────────────────────────
+
+/** failover jsonl 保留期（7 天）。导出便于测试断言。 */
+export const FAILOVER_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * 清理 failover 落盘目录下 mtime 超过 7 天的 *.jsonl 文件（含主文件
+ * audit-failed.jsonl 及任何带轮转后缀的 jsonl）。
+ *
+ * 调用时机：AuditSink 构造（启动时）执行一次（in-flight guard）。全程容错：
+ * 目录不存在 / 单文件 stat/rm 失败均吞错，绝不 throw 影响构造。新文件不误删。
+ *
+ * now 注入点：测试传固定时间戳断言边界。
+ */
+export function cleanupOldFailoverFiles(opts?: {
+  now?: number;
+  dir?: string;
+}): void {
+  const dir = opts?.dir ?? dirname(defaultFailoverPath());
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return; // 目录不存在（从未落盘）→ 无需清理
+  }
+  const now = opts?.now ?? Date.now();
+  for (const name of entries) {
+    if (!name.endsWith('.jsonl')) continue;
+    const full = join(dir, name);
+    try {
+      const s = statSync(full);
+      if (!s.isFile()) continue;
+      if (now - s.mtimeMs < FAILOVER_RETENTION_MS) continue; // 未过期保留
+      rmSync(full, { force: true });
+    } catch {
+      // 单文件失败（并发写 / 权限）→ 跳过，不影响其余
+    }
+  }
+}
+
+/** 进程内 in-flight guard：cleanupOldFailoverFiles 只执行一次。 */
+let failoverCleanupStarted = false;
+
+/** 触发一次性启动清理（同步容错，失败静默）。 */
+function scheduleFailoverCleanupOnce(): void {
+  if (failoverCleanupStarted) return;
+  failoverCleanupStarted = true;
+  try {
+    cleanupOldFailoverFiles();
+  } catch {
+    // 容错兜底（cleanupOldFailoverFiles 内部已吞错，此处双保险）
+  }
+}
+
 // ── AuditSink ─────────────────────────────────────────────────────────────────
 
 /**
@@ -107,6 +161,8 @@ export class AuditSink {
     this.maxRetries = opts.maxRetries ?? 5;
     this.failoverThreshold = opts.failoverThreshold ?? 3;
     this.failoverPath = opts.failoverPath ?? defaultFailoverPath();
+    // task-09 / FR-12：启动（构造）时一次性清理 7 天前 failover jsonl（容错静默）。
+    scheduleFailoverCleanupOnce();
     this.startTimer();
   }
 

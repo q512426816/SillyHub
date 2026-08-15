@@ -183,6 +183,12 @@ export class WsClient {
   private _pingTimer: NodeJS.Timeout | null = null;
   /** 单次 ping 的 pong 超时定时器（收到 pong 清；超时则 terminate）。 */
   private _pongTimer: NodeJS.Timeout | null = null;
+  /**
+   * 最后一条 WS 消息到达时间戳（epoch ms）。perf-remediation task-09 / D-003@v1：
+   * daemon _pollLoop lease 分支据此判断推送通道新鲜度（假活检测 R-05）。
+   * 从未收到过消息为 null。
+   */
+  private _lastMessageAt: number | null = null;
 
   /**
    * task-05：已注册的 RPC method → handler 映射。
@@ -206,6 +212,16 @@ export class WsClient {
   /** WS 是否处于 Connected（open）状态。task-20 据此决定是否启动轮询兜底。 */
   get isConnected(): boolean {
     return this._state === WsState.Connected;
+  }
+
+  /**
+   * 最后一条 WS 消息到达时间（epoch ms，只读）。perf-remediation task-09 / D-003@v1：
+   * daemon _pollLoop lease 门控消费——isConnected 且距今小于 90s 时跳过 lease HTTP
+   * 轮询（TASK_AVAILABLE 推送兜底）。从未收到消息（含未连接）为 null。
+   * 只读 getter，不暴露可写状态（task-09 constraints）。
+   */
+  get lastMessageAt(): number | null {
+    return this._lastMessageAt;
   }
 
   // ── 连接生命周期 ───────────────────────────────────────────────────────────
@@ -378,6 +394,8 @@ export class WsClient {
   }
 
   private _handleMessage(data: WebSocket.RawData): void {
+    // task-09 / D-003@v1：消息入口即记时间戳（非法 JSON 也证明链路活着，一并计入）。
+    this._lastMessageAt = Date.now();
     // ws 库 message 事件 payload：Buffer / Buffer[] / ArrayBuffer。统一转 string。
     const raw =
       typeof data === 'string'

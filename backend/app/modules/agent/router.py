@@ -462,6 +462,13 @@ async def get_agent_run_logs(
         None,
         description="逗号分隔多选工具种类，仅筛 channel=tool_call 行；不传返回全部",
     ),
+    after: datetime | None = Query(
+        None,
+        description=(
+            "增量游标（ISO timestamp）：只返回 timestamp 严格更新的日志条目；"
+            "不传返回全量（perf-remediation task-08 / FR-10）"
+        ),
+    ),
 ) -> list[AgentRunLogEntry]:
     svc = AgentService(session)
     run = await svc.get_run(run_id)
@@ -470,7 +477,7 @@ async def get_agent_run_logs(
             f"Agent run '{run_id}' not found.",
             details={"run_id": str(run_id)},
         )
-    logs = await svc.get_run_logs(run_id, tool_kind=tool_kind)
+    logs = await svc.get_run_logs(run_id, tool_kind=tool_kind, after=after)
     return [AgentRunLogEntry.model_validate(e) for e in logs]
 
 

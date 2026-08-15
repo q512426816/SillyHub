@@ -9,6 +9,7 @@ All generated .md files include YAML frontmatter with ``author`` and ``created_a
 
 from __future__ import annotations
 
+import asyncio
 import re
 import uuid
 from datetime import UTC, datetime
@@ -261,8 +262,12 @@ class ChangeWriterService:
         author = str(user_id)
         content = self._ensure_frontmatter(content, author, now)
 
-        file_path.write_text(content, encoding="utf-8")
-        size = file_path.stat().st_size
+        # task-02 / D-002：写盘 + stat 移出事件循环
+        def _write_and_stat() -> int:
+            file_path.write_text(content, encoding="utf-8")
+            return file_path.stat().st_size
+
+        size = await asyncio.to_thread(_write_and_stat)
 
         # Upsert document record
         rel_path = str(file_path.relative_to(repo_dir))
@@ -346,8 +351,13 @@ class ChangeWriterService:
             # Use canonical filename from SpecPathResolver when available
             filename = SpecPathResolver.STANDARD_FILENAMES.get(doc_type, f"{doc_type}.md")
             file_path = change_dir / filename
-            file_path.write_text(content, encoding="utf-8")
-            _size = file_path.stat().st_size
+
+            # task-02 / D-002：写盘 + stat 移出事件循环
+            def _write_and_stat(fp: Path = file_path, body: str = content) -> None:
+                fp.write_text(body, encoding="utf-8")
+                fp.stat()
+
+            await asyncio.to_thread(_write_and_stat)
             rel_path = str(file_path.relative_to(repo_dir))
 
             stmt = select(ChangeDocument).where(

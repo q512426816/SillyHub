@@ -8,6 +8,7 @@ Supports legacy ``changes/change/<key>/`` layout with deprecation warnings.
 
 from __future__ import annotations
 
+import copy
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -17,6 +18,12 @@ from app.core.logging import get_logger
 from app.core.spec_paths import SpecPathResolver
 
 log = get_logger(__name__)
+
+# task-07（perf-remediation）：_load_module_map 进程级缓存——键为 (map 文件
+# resolved 绝对路径, mtime) 复合键（仅按 mtime 会跨 workspace 串结果，Grill B-3），
+# 值不可变（命中回 deepcopy 拷贝，调用方 mutate 不污染缓存）。这是 parser 唯一
+# 的模块级可变状态（design 段 4 / R-01 对「无状态」前提的明示例外）。
+_MODULE_MAP_CACHE: dict[tuple[str, float], dict[str, list[str]]] = {}
 
 # Re-export constants from SpecPathResolver for backward compatibility
 STANDARD_DOC_TYPES: frozenset[str] = SpecPathResolver.STANDARD_DOC_TYPES
@@ -406,63 +413,99 @@ class ChangeParser:
 
     @staticmethod
     def _load_module_map(sillyspec_root: Path) -> dict[str, list[str]]:
-        """加载 _module-map.yaml。
+        """加载 _module-map.yaml（task-07：进程级缓存 + platform_managed 路径探测修复）。
 
-        查找路径: .sillyspec/docs/*/modules/_module-map.yaml
+        查找路径（两处按优先级，task-07 附带修复 platform_managed 布局预存缺陷——
+        修复前只找包裹布局，扁平布局 map 路径恒空）：
+          1. ``.sillyspec/docs/*/modules/_module-map.yaml``（包裹布局，优先）
+          2. ``docs/*/modules/_module-map.yaml``（扁平布局，兜底）
         取第一个存在的文件。
+
+        缓存（design 段 4 / R-01）：模块级 dict 按 **(map 文件 resolved 绝对路径,
+        mtime)** 复合键失效——仅按 mtime 会跨 workspace 串结果（Grill B-3）。值
+        不可变（每次未命中重新解析新对象，调用方 mutate 不污染缓存；命中时也回新
+        拷贝）。幂等填充、单键赋值原子，良性竞态容忍（并发 reparse 最坏各自解析一
+        次后同键覆盖，读侧无锁）。文件删除（stat 抛错）按未命中走，探测返回 {}。
 
         Returns:
             {"agent": ["backend/app/modules/agent/"], ...}
             paths 中的 ** 通配符被去掉，尾部保留 /
         """
+        map_file = ChangeParser._find_module_map_file(sillyspec_root)
+        if map_file is None:
+            return {}
+        try:
+            map_key = (str(map_file.resolve()), map_file.stat().st_mtime)
+        except OSError:
+            # stat 抛错（删除竞态等）按未命中走，不缓存
+            return {}
+        cached = _MODULE_MAP_CACHE.get(map_key)
+        if cached is not None:
+            return copy.deepcopy(cached)
+
+        parsed = ChangeParser._parse_module_map_yaml(map_file)
+        _MODULE_MAP_CACHE[map_key] = parsed
+        # 清掉同路径旧 mtime 的条目，防缓存无界增长（reparse 生命周期内 map 文件
+        # 版本数有限，但跨大量工作区常驻进程时仍收敛为每文件至多 1 条）
+        stale = [k for k in _MODULE_MAP_CACHE if k[0] == map_key[0] and k[1] != map_key[1]]
+        for k in stale:
+            _MODULE_MAP_CACHE.pop(k, None)
+        return copy.deepcopy(parsed)
+
+    @staticmethod
+    def _find_module_map_file(sillyspec_root: Path) -> Path | None:
+        """探测 _module-map.yaml：包裹布局（.sillyspec/docs）优先，扁平（docs）兜底。"""
+        for docs_dir in (
+            sillyspec_root / ".sillyspec" / "docs",
+            sillyspec_root / "docs",
+        ):
+            if not docs_dir.is_dir():
+                continue
+            for project_dir in sorted(docs_dir.iterdir()):
+                if not project_dir.is_dir():
+                    continue
+                map_file = project_dir / "modules" / "_module-map.yaml"
+                if map_file.is_file():
+                    return map_file
+        return None
+
+    @staticmethod
+    def _parse_module_map_yaml(map_file: Path) -> dict[str, list[str]]:
+        """解析 _module-map.yaml（纯函数：不碰缓存，解析产物每次新对象）。"""
         try:
             import yaml
         except ImportError:
             return {}
 
-        docs_dir = sillyspec_root / ".sillyspec" / "docs"
-        if not docs_dir.is_dir():
+        try:
+            raw = yaml.safe_load(map_file.read_text(encoding="utf-8"))
+        except (OSError, Exception):
             return {}
 
-        # Scan project subdirectories for _module-map.yaml
-        for project_dir in sorted(docs_dir.iterdir()):
-            if not project_dir.is_dir():
+        if not isinstance(raw, dict) or "modules" not in raw:
+            return {}
+
+        result: dict[str, list[str]] = {}
+        modules = raw["modules"]
+        if not isinstance(modules, dict):
+            return {}
+
+        for mod_name, mod_data in modules.items():
+            if not isinstance(mod_data, dict) or "paths" not in mod_data:
                 continue
-            map_file = project_dir / "modules" / "_module-map.yaml"
-            if not map_file.is_file():
+            paths = mod_data["paths"]
+            if not isinstance(paths, list):
                 continue
+            # Strip ** suffix, keep trailing /
+            cleaned: list[str] = []
+            for p in paths:
+                p = p.rstrip("*")
+                if not p.endswith("/"):
+                    p += "/"
+                cleaned.append(p)
+            result[mod_name] = cleaned
 
-            try:
-                raw = yaml.safe_load(map_file.read_text(encoding="utf-8"))
-            except (OSError, Exception):
-                return {}
-
-            if not isinstance(raw, dict) or "modules" not in raw:
-                return {}
-
-            result: dict[str, list[str]] = {}
-            modules = raw["modules"]
-            if not isinstance(modules, dict):
-                return {}
-
-            for mod_name, mod_data in modules.items():
-                if not isinstance(mod_data, dict) or "paths" not in mod_data:
-                    continue
-                paths = mod_data["paths"]
-                if not isinstance(paths, list):
-                    continue
-                # Strip ** suffix, keep trailing /
-                cleaned: list[str] = []
-                for p in paths:
-                    p = p.rstrip("*")
-                    if not p.endswith("/"):
-                        p += "/"
-                    cleaned.append(p)
-                result[mod_name] = cleaned
-
-            return result
-
-        return {}
+        return result
 
     @staticmethod
     def _match_paths_to_modules(

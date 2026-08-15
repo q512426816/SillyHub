@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -157,3 +159,92 @@ class TestParseComponent:
             d for d in result.docs if d.doc_type == "OTHER" and d.filename == "custom-readme.md"
         ]
         assert len(others) == 1
+
+
+class TestStatConvergence:
+    """task-06（perf-remediation）：每文件 stat 收敛为 1 次 + _safe_mtime 推广。"""
+
+    def test_single_stat_per_file(self, parser: ScanDocsParser, tmp_path: Path) -> None:
+        """同一文件全解析过程只 stat 1 次——size 与 mtime 取自同一 stat_result。
+
+        monkeypatch os.stat 计数（Path.stat / DirEntry.stat / os.stat 全部收敛到
+        os.stat 单一底层），断言文件数 == stat 次数。旧实现（is_file + read_text
+        size + stat mtime）每文件 3-4 次，收敛后 1 次。
+        """
+        scan_dir = tmp_path / ".sillyspec" / "docs" / "proj" / "scan"
+        scan_dir.mkdir(parents=True)
+        files = ["ARCHITECTURE.md", "STRUCTURE.md", "PROJECT.md"]
+        for name in files:
+            (scan_dir / name).write_text(f"# {name}\ncontent", encoding="utf-8")
+
+        import app.modules.scan_docs.parser as parser_mod
+
+        real_stat = os.stat
+        real_lstat = os.lstat
+        targets = {str(scan_dir / name).lower() for name in files}
+        counter = {"n": 0}
+
+        def counting_stat(path, *, dir_fd=None, follow_symlinks=True):
+            # 归一化比较（Windows 大小写/分隔符容忍）
+            if str(path).lower() in targets:
+                counter["n"] += 1
+            return real_stat(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
+
+        def counting_lstat(path, *, dir_fd=None):
+            if str(path).lower() in targets:
+                counter["n"] += 1
+            return real_lstat(path, dir_fd=dir_fd)
+
+        monkeypatch_global = pytest.MonkeyPatch()
+        # 常规文件走 os.lstat（_stat_target），symlink 分支才走 os.stat——两个都计数
+        monkeypatch_global.setattr(parser_mod.os, "stat", counting_stat)
+        monkeypatch_global.setattr(parser_mod.os, "lstat", counting_lstat)
+        try:
+            result = parser.parse_docs_tree(tmp_path)
+        finally:
+            monkeypatch_global.undo()
+
+        existing = [d for d in result.docs if d.exists and d.filename in files]
+        assert len(existing) == 3
+        assert counter["n"] == 3, f"每文件应恰好 1 次 stat，实际 {counter['n']}"
+
+    def test_dirty_mtime_falls_back_to_epoch_zero(
+        self, parser: ScanDocsParser, tmp_path: Path
+    ) -> None:
+        """mtime 脏值（year 30828 级，os.utime 造真实脏文件）不炸，走 _safe_mtime 兜底 1970。
+
+        Windows bind mount 瞬态脏 mtime 实测量级 9.1e11 秒（ql-20260814-006），
+        直接 datetime.fromtimestamp 抛 ValueError 打断 reparse——统一改 _safe_mtime
+        后单文件脏值回退 epoch 0。
+        """
+        scan_dir = tmp_path / ".sillyspec" / "docs" / "proj" / "scan"
+        scan_dir.mkdir(parents=True)
+        target = scan_dir / "ARCHITECTURE.md"
+        target.write_text("# 脏 mtime 文档\n", encoding="utf-8")
+        dirty = 9.1e11  # 两平台 fromtimestamp 均越界（year 30828 实测量级）
+        os.utime(target, (dirty, dirty))
+        assert target.stat().st_mtime == dirty  # 前置：脏值真实落到盘上
+
+        # 旧实现在 fromtimestamp 处抛 ValueError
+        with pytest.raises((ValueError, OverflowError, OSError)):
+            datetime.fromtimestamp(target.stat().st_mtime, tz=UTC)
+
+        result = parser.parse_docs_tree(tmp_path)
+        arch = next(d for d in result.docs if d.filename == "ARCHITECTURE.md")
+        assert arch.exists is True
+        assert arch.last_modified_at == datetime(1970, 1, 1, tzinfo=UTC)
+
+    def test_parse_component_dirty_mtime_falls_back(
+        self, parser: ScanDocsParser, tmp_path: Path
+    ) -> None:
+        """parse_component 同样吃 _safe_mtime 兜底（:247 裸 fromtimestamp 推广点）。"""
+        scan_dir = tmp_path / ".sillyspec" / "docs" / "proj" / "scan"
+        scan_dir.mkdir(parents=True)
+        target = scan_dir / "ARCHITECTURE.md"
+        target.write_text("# 组件脏 mtime\n", encoding="utf-8")
+        os.utime(target, (9.1e11, 9.1e11))
+
+        result = parser.parse_component(tmp_path, "proj")
+        arch = next(d for d in result.docs if d.doc_type == "ARCHITECTURE")
+        assert arch.exists is True
+        assert arch.last_modified_at == datetime(1970, 1, 1, tzinfo=UTC)

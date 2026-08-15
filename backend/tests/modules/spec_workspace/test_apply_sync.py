@@ -313,3 +313,167 @@ async def test_apply_sync_skips_runtime_db_with_nul_bytes(tmp_path, db_session):
         .all()
     )
     assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_apply_sync_overwrite_newer_mtime_archives_old_and_updates_row(tmp_path, db_session):
+    """task-02 行为锚点（perf-remediation）：per-file FS 段入线程后，冲突覆盖语义
+    零变更——已有行 + 新 tar 内容 hash 不同 + tar mtime 更新 → 归档旧内容到
+    scan_doc_conflict_history、原地改写行（content/hash/mtime）、文件落盘。
+    反向（tar mtime 更旧）不覆盖、不归档。"""
+    import hashlib
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select
+
+    from app.modules.scan_docs.conflict_model import ScanDocConflictHistory
+    from app.modules.scan_docs.model import ScanDocument
+
+    workspace_id, spec_root = await _make_spec_ws(tmp_path, db_session)
+
+    # 预置既有行：旧内容 + 一天前的 source_mtime。
+    old_ts = datetime.now(UTC) - timedelta(days=1)
+    old_content = "# old world"
+    old_row = ScanDocument(
+        workspace_id=workspace_id,
+        path="docs/index.md",
+        doc_type="md",
+        title="index.md",
+        content=old_content,
+        content_hash=hashlib.sha256(old_content.encode("utf-8")).hexdigest(),
+        source_mtime=old_ts,
+        exists=True,
+    )
+    db_session.add(old_row)
+    await db_session.commit()
+
+    # 新 tar：内容不同 + mtime 更新（现在）。
+    buf = io.BytesIO()
+    new_content = "# new world"
+    data = new_content.encode("utf-8")
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        info = tarfile.TarInfo(name="docs/index.md")
+        info.size = len(data)
+        info.mtime = int(datetime.now(UTC).timestamp())
+        tar.addfile(info, io.BytesIO(data))
+    tar_bytes = buf.getvalue()
+
+    svc = SpecWorkspaceService(db_session)
+    await svc.apply_sync(workspace_id, tar_bytes)
+
+    # 文件被新内容覆盖落盘。
+    assert (spec_root / "docs" / "index.md").read_text(encoding="utf-8") == new_content
+
+    # 行被原地改写（同 workspace+path 仍只有一行），hash/mtime 更新。
+    rows = (
+        (
+            await db_session.execute(
+                select(ScanDocument).where(
+                    ScanDocument.workspace_id == workspace_id,
+                    ScanDocument.path == "docs/index.md",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    updated = rows[0]
+    assert updated.content == new_content
+    assert updated.content_hash == hashlib.sha256(data).hexdigest()
+    assert updated.source_mtime is not None and updated.source_mtime > old_ts
+
+    # 旧内容归档到冲突历史（先归档后落盘的顺序语义由行改写 + 落盘共同体现）。
+    history = (
+        (
+            await db_session.execute(
+                select(ScanDocConflictHistory).where(
+                    ScanDocConflictHistory.workspace_id == workspace_id,
+                    ScanDocConflictHistory.path == "docs/index.md",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(history) == 1
+    assert history[0].old_content == old_content
+
+
+@pytest.mark.asyncio
+async def test_apply_sync_overwrite_older_mtime_keeps_existing(tmp_path, db_session):
+    """task-02 行为锚点（续）：tar mtime 更旧 → 不覆盖（行内容/文件都不变）、
+    不归档。防止线程化改造中 mtime 比较方向漂移。"""
+    import hashlib
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select
+
+    from app.modules.scan_docs.conflict_model import ScanDocConflictHistory
+    from app.modules.scan_docs.model import ScanDocument
+
+    workspace_id, spec_root = await _make_spec_ws(tmp_path, db_session)
+
+    # 预置既有行：mtime = 现在（更新）。
+    new_ts = datetime.now(UTC)
+    cur_content = "# current"
+    db_session.add(
+        ScanDocument(
+            workspace_id=workspace_id,
+            path="docs/index.md",
+            doc_type="md",
+            title="index.md",
+            content=cur_content,
+            content_hash=hashlib.sha256(cur_content.encode("utf-8")).hexdigest(),
+            source_mtime=new_ts,
+            exists=True,
+        )
+    )
+    await db_session.commit()
+
+    # tar：内容不同但 mtime = 2 天前（更旧）。
+    buf = io.BytesIO()
+    stale_content = "# stale incoming"
+    data = stale_content.encode("utf-8")
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        info = tarfile.TarInfo(name="docs/index.md")
+        info.size = len(data)
+        info.mtime = int((datetime.now(UTC) - timedelta(days=2)).timestamp())
+        tar.addfile(info, io.BytesIO(data))
+    tar_bytes = buf.getvalue()
+
+    # 预放当前文件（既有行对应内容）。
+    (spec_root / "docs").mkdir(parents=True, exist_ok=True)
+    (spec_root / "docs" / "index.md").write_text(cur_content, encoding="utf-8")
+
+    svc = SpecWorkspaceService(db_session)
+    await svc.apply_sync(workspace_id, tar_bytes)
+
+    # 行与文件都保持既有内容。
+    row = (
+        (
+            await db_session.execute(
+                select(ScanDocument).where(
+                    ScanDocument.workspace_id == workspace_id,
+                    ScanDocument.path == "docs/index.md",
+                )
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert row.content == cur_content
+    assert (spec_root / "docs" / "index.md").read_text(encoding="utf-8") == cur_content
+
+    history = (
+        (
+            await db_session.execute(
+                select(ScanDocConflictHistory).where(
+                    ScanDocConflictHistory.workspace_id == workspace_id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert history == []
