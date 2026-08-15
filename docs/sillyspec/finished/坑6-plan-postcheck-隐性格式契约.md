@@ -5,7 +5,7 @@ created_at: 2026-08-15T15:45:00+08:00
 
 # 坑 6：plan-postcheck 隐性格式契约连环坑（issue 待报）
 
-**状态**：活跃（2026-08-15 实测，sillyspec 安装版 @nvm/v24.15.0，node_modules/sillyspec）
+**状态**：已修复（2026-08-16 sillyspec 仓 quick-2d2f108e / ql-20260815-021-9886）。逐项处置：①块列表正则缺陷——已修（`\s*` 改 `[ \t]*`，顶格/缩进/inline 通吃）；②CRLF——已修（此前 plan-postcheck 内部 LF 包装保留，另补解析器入口归一，覆盖 worktree-apply/task-review 等原生 readFileSync 调用方）；③报错不聚合——已修（executePlanPostcheck 六检查跑完聚合输出一轮全列）；④字段模板——此前已在 plan.js prompt 注入完整 TaskCard 模板；⑤⑥设计现状维持（checkbox 收容规则与 design 清单格式按文档化契约，workaround 有效）。新增回归测试 test/plan-postcheck-blocklist.test.mjs。
 
 **现象**：plan 阶段 `--done` 的 planPostcheck 报错一轮只露一个，同一批卡片迭代 7 次 `--done` 才全部通过，每次修完又冒新错。报错顺序：缺 allowed_paths → 缺 acceptance → 缺 goal/implementation/constraints/id/title_zh → design 缺文件清单章节 → plan 未引用 FR → 缺 module-impact → checkbox 不在 Wave 段。
 

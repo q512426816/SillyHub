@@ -1,7 +1,7 @@
 # 坑7：跨仓 change 的 repo: 声明必须内联 plan.md（独立 task 卡不被扫描）
 
 > 发现于 2026-08-15-init-trigger-sillyspec-init execute/verify 阶段。
-> 状态：活跃坑，待 sillyspec 工具修复。
+> 状态：已修复（2026-08-16 sillyspec 仓 quick-2d2f108e / ql-20260815-021-9886）——`getOrCreateMultiRepoContext` 聚合 declaredRepos 时经 `collectTaskCardReposFallback` 兼扫 tasks/task-NN.md 独立卡片（建议修复方案 1 落地），plan.md 只留 checkbox 行的形态不再静默退化单仓；task-review 跨仓未解析 warning 文案同步补真实排查方向。坑尾「反引号开头列表项致 js-yaml 解析失败」同批修复（parseAllowedPaths 剥成对反引号）。新增回归测试 multi-repo-context-entry.test.mjs 两场景。
 
 ## 现象
 
