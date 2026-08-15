@@ -106,7 +106,7 @@ async def get_policy(
     policy = await session.get(ToolPolicy, policy_id)
     if policy is None or policy.workspace_id != workspace_id:
         raise ToolPolicyNotFound(
-            f"ToolPolicy '{policy_id}' not found in workspace '{workspace_id}'.",
+            f"策略不存在：工作区内未找到该工具策略（policy_id={policy_id}）。",
         )
     return ToolPolicyRead.model_validate(policy)
 
@@ -125,7 +125,7 @@ async def update_policy(
     policy = await session.get(ToolPolicy, policy_id)
     if policy is None or policy.workspace_id != workspace_id:
         raise ToolPolicyNotFound(
-            f"ToolPolicy '{policy_id}' not found in workspace '{workspace_id}'.",
+            f"策略不存在：工作区内未找到该工具策略（policy_id={policy_id}）。",
         )
     update_data = data.model_dump(exclude_unset=True)
     if not update_data:
@@ -158,7 +158,7 @@ async def delete_policy(
     policy = await session.get(ToolPolicy, policy_id)
     if policy is None or policy.workspace_id != workspace_id:
         raise ToolPolicyNotFound(
-            f"ToolPolicy '{policy_id}' not found in workspace '{workspace_id}'.",
+            f"策略不存在：工作区内未找到该工具策略（policy_id={policy_id}）。",
         )
     await session.delete(policy)
     await session.commit()

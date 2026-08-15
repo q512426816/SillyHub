@@ -326,3 +326,37 @@
 根因：session/service.py 5 处离线报错直接拼 UUID 英文串被前端透传。
 方案：改中文短语+行动指引，UUID 移 details。
 结果：daemon 843 passed，ruff 过。
+
+## ql-20260815-006-d3ea | 2026-08-15 14:07:02 | 修复 3 个 CI 红用例的平台假设缺陷（test_dirty_mtime_falls_back 系列）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/change/tests/test_files_router.py（test_dirty_mtime_falls_back 前置断言改行为探测式 skip）
+- backend/app/modules/scan_docs/tests/test_parser.py（两处 utime 后加钳制探测 skip）
+需求：修复 3 个 CI 红用例的平台假设缺陷（test_dirty_mtime_falls_back 系列）。
+根因：Linux ext4/macOS APFS 内核时间戳上限（公元2446/2554年）低于 datetime 越界点（year 9999），os.utime(9.1e11) 越界值被文件系统钳制为合法 mtime 落盘，前置断言 st_mtime==dirty 必挂且 _safe_mtime 护栏在该文件系统上物理不可触发；Windows/NTFS 能落所以本机绿。
+方案：utime 后改为行为探测——stat 发现钳制则 pytest.skip（带钳制前后值+自解释原因），NTFS 照常真实跑；_safe_mtime 实现不动（tests/modules/change/test_parser_mtime.py 已有纯单元全平台覆盖）。
+结果：本机 NTFS 3 用例真实跑 PASSED，两文件全量 28 passed；CI Linux 将转为 skip。
+
+## ql-20260815-007-1a50 | 2026-08-15 14:42:24 | 消除 test_mcp_tools.py TestConvergeMission 因宿主环境变量泄漏打真实 LLM 的问题（单用例 18.7s + 烧 toke…
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/tests/test_mcp_tools.py（TestConvergeMission 加类级 autouse GLM 隔离 fixture）
+需求：消除 test_mcp_tools.py TestConvergeMission 因宿主环境变量泄漏打真实 LLM 的问题（单用例 18.7s + 烧 token）。
+根因：converge endpoint 的 GLMConfig.from_env 读 ANTHROPIC_BASE_URL/AUTH_TOKEN，本机 shell（Claude Code 网关）设着这两项，_glm_merge 向真实网关发 HTTP；同仓邻居测试均有隔离唯此文件漏了。
+方案：类级 autouse fixture _isolate_glm，monkeypatch 源 module delegation 的 GLMConfig 使 from_env 返 None（对齐 test_converge_mission_reentrant.py:107-112 既有做法），finalize 走确定性 concat 回退。
+结果：宿主 ANTHROPIC_* 仍设着的情况下全文件 9 passed，call 最慢 <0.25s（修复前单用例 18.7s），零网络零 token。
+
+## ql-20260815-008-3655 | 2026-08-15 15:34:27 | 收口 error-message-l10n verify Notes 的 4 项 f-string 漏网
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/tool_gateway/policy_router.py（3 处策略 404 中文化）
+- backend/app/modules/agent/coordinator.py（8 处运行记录族文案中文化）
+- backend/app/modules/worktree/git_runner.py（超时文案中文化）
+- backend/app/core/ssrf.py（clone 链路 4 处 UnsafeRepoUrl 中文化）
+需求：收口 error-message-l10n verify Notes 的 4 项 f-string 漏网。
+根因：f-string 动态 message 守护测试静态不可判，4 文件残留英文直达前端。
+方案：16 处中文化（policy_router 3+coordinator 8+git_runner 1+ssrf clone 4），变量进 details；assert_public_url 出网校验保留英文。
+结果：700+57+101 passed 零回归，ruff+mypy 过。

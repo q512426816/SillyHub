@@ -74,7 +74,7 @@ def assert_safe_repo_url(repo_url: str) -> None:
     """
     if repo_url.startswith("ext::"):
         raise UnsafeRepoUrl(
-            "git 'ext::' remote helper is forbidden (RCE risk).",
+            "仓库地址使用了被禁用的 ext:: 形式（存在远程命令执行风险），请更换为 https/ssh 地址。",
             details={"repo_url": repo_url},
         )
 
@@ -83,7 +83,7 @@ def assert_safe_repo_url(repo_url: str) -> None:
         if scheme in {"https", "ssh", "git"}:
             return
         raise UnsafeRepoUrl(
-            f"Unsupported git URL scheme: {scheme!r}",
+            f"不支持的仓库地址协议（{scheme}），请使用 https://、ssh:// 或 git@host:path 形式。",
             details={"repo_url": repo_url, "scheme": scheme},
         )
 
@@ -95,12 +95,12 @@ def assert_safe_repo_url(repo_url: str) -> None:
         # Windows 盘符（C:\... / C:/...）：host 段长度 1 且是字母 → 本地路径，拒。
         if len(host_part) == 1 and host_part.isalpha():
             raise UnsafeRepoUrl(
-                "Local filesystem path is not a valid git remote (file:// forbidden).",
+                "仓库地址不能是本地路径（file 形式被禁用），请使用远程仓库地址。",
                 details={"repo_url": repo_url},
             )
         return
 
     raise UnsafeRepoUrl(
-        "Bare path or unsupported git URL form (use https://, ssh://, git:// or git@host:path).",
+        "仓库地址格式不正确，请使用 https://、ssh://、git:// 或 git@host:path 形式。",
         details={"repo_url": repo_url},
     )

@@ -129,8 +129,7 @@ class ExecutionCoordinatorService:
 
         if result.rowcount != 1:
             raise OptimisticLockError(
-                f"Optimistic lock conflict for run '{run_id}'. "
-                f"Expected version {expected_version}.",
+                "运行记录已被其他操作修改（版本冲突），请刷新后重试。",
                 details={"run_id": str(run_id), "expected_version": expected_version},
             )
 
@@ -219,14 +218,14 @@ class ExecutionCoordinatorService:
             from app.core.errors import AgentRunNotFound
 
             raise AgentRunNotFound(
-                f"Run '{run_id}' not found.",
+                "运行记录不存在或已被删除。",
                 details={"run_id": str(run_id)},
             )
 
         # Only failed/killed runs can be resumed
         if run.status not in ("failed", "killed"):
             raise AgentRunNotResumable(
-                f"Run '{run_id}' is not resumable (status={run.status}).",
+                f"该运行记录当前状态不支持恢复（status={run.status}）。",
                 details={"run_id": str(run_id), "status": run.status},
             )
 
@@ -296,14 +295,13 @@ class ExecutionCoordinatorService:
             from app.core.errors import AgentRunNotFound
 
             raise AgentRunNotFound(
-                f"Run '{run_id}' not found.",
+                "运行记录不存在或已被删除。",
                 details={"run_id": str(run_id)},
             )
 
         if run.checkpoint_version != expected_version:
             raise OptimisticLockError(
-                f"Checkpoint version conflict for run '{run_id}'. "
-                f"Expected {expected_version}, actual {run.checkpoint_version}.",
+                f"检查点版本冲突（期望 {expected_version}，实际 {run.checkpoint_version}），请刷新后重试。",
                 details={
                     "run_id": str(run_id),
                     "expected_version": expected_version,
@@ -360,7 +358,7 @@ class ExecutionCoordinatorService:
             from app.core.errors import AgentRunNotFound
 
             raise AgentRunNotFound(
-                f"Run '{run_id}' not found.",
+                "运行记录不存在或已被删除。",
                 details={"run_id": str(run_id)},
             )
 
@@ -396,13 +394,13 @@ class ExecutionCoordinatorService:
             from app.core.errors import AgentRunNotFound
 
             raise AgentRunNotFound(
-                f"Run '{run_id}' not found.",
+                "运行记录不存在或已被删除。",
                 details={"run_id": str(run_id)},
             )
 
         if run.status != "pending_approval":
             raise AgentRunNotPendingApproval(
-                f"Run '{run_id}' is not pending approval (status={run.status}).",
+                f"该运行记录不在待审批状态（status={run.status}），无法执行此操作。",
                 details={"run_id": str(run_id), "status": run.status},
             )
 

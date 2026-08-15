@@ -54,7 +54,7 @@ class GitRunner:
             proc.kill()
             await proc.wait()
             raise WorktreeAcquireFailed(
-                f"git command timed out after {timeout}s",
+                f"git 命令超时（{timeout} 秒），请稍后重试。",
                 details={"args": args[:3]},
             ) from None
         if proc.returncode != 0:
