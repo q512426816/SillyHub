@@ -371,3 +371,12 @@
 根因：lib/agent-profiles.ts 只暴露 workspace 级 delete client（需 workspaceId），全局页对 workspace_id=null 档案拦截删除；而后端有 platform 级 /api/agent-profiles/{pid} DELETE（service.delete 按三级 visibility 鉴权）却没被前端接线。
 方案：lib 加 deleteAgentProfile(pid) → DELETE /api/agent-profiles/{pid}；page 引入 useSession isPlatformAdmin，handleConfirmDelete 对 workspace_id=null 改 admin→deleteAgentProfile、非 admin→「请联系管理员」提示；test mock useSession + 加 admin 删用例 + 原 private/platform 拦截用例改非 admin。
 结果：vitest 9 passed（+1 admin 用例）、eslint 0、tsc 0；admin（admin2）现已可从全局页删个人/平台档案。普通用户删自己的 private 档仍需后端另开 owner-gated 端点（后续）。
+
+## ql-20260815-001-9358 | 2026-08-15 16:45:28 | /sessions 新建会话的②智能体选择器显示成机器名（如 DESKTOP-2BN7FDC）
+状态：已完成
+关联变更：2026-08-14-sessions-portal-fix
+文件：frontend/src/components/sessions/__tests__/new-session-form.test.tsx, frontend/src/components/sessions/new-session-form.tsx
+需求：/sessions 新建会话的②智能体选择器显示成机器名（如 DESKTOP-2BN7FDC），应显示智能体引擎名（Claude Code、Codex 等）。
+根因：new-session-form.tsx 的 runtimeLabel 优先级为 display_alias→name→provider，而 runtime.name 默认值就是机器主机名，无别名时主机名被当成智能体标签。
+方案：runtimeLabel 改为引擎名优先——复用 lib/daemon.ts 既有 PROVIDER_META（claude→Claude Code/codex→Codex/cursor→Cursor 等 12 引擎），弃用 name；用户自定义别名时显示「别名 · 引擎名」保留个性化。测试 mock 改 importOriginal 保留真常量只 mock createSession；新增回归用例（name=主机名→纯引擎名；别名→别名·引擎名；智能体区不含主机名）。
+结果：组件测试 13/13 通过（新增 1 条回归）；前端全量 151 文件/1509 用例全绿；eslint 0 告警。前端已待部署（见后续 commit+rebuild）。
