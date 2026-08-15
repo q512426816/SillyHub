@@ -305,7 +305,7 @@ async def test_push_to_main_rejected(client, db_session, mock_repo_dir):
         headers=_auth(refs["token"]),
     )
     assert resp.status_code == 403
-    assert "protected" in resp.json()["message"].lower()
+    assert "受保护分支" in resp.json()["message"]
 
 
 async def test_push_to_master_rejected(client, db_session, mock_repo_dir):

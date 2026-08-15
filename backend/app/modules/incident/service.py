@@ -62,7 +62,7 @@ class IncidentService:
     ) -> Incident:
         if data.severity not in VALID_SEVERITIES:
             raise IncidentError(
-                f"Invalid severity: {data.severity}",
+                "严重级别取值非法，请检查后重试。",
                 details={"severity": data.severity},
             )
 
@@ -103,7 +103,9 @@ class IncidentService:
     async def get(self, incident_id: uuid.UUID) -> Incident:
         incident = await self._session.get(Incident, incident_id)
         if incident is None:
-            raise IncidentNotFound(f"Incident '{incident_id}' not found.")
+            raise IncidentNotFound(
+                "故障单不存在或已被删除。", details={"incident_id": str(incident_id)}
+            )
         return incident
 
     async def update(
@@ -118,7 +120,7 @@ class IncidentService:
             # → resolved 字段维护（进设 / 离清）→ 赋值。
             if data.status not in VALID_STATUSES:
                 raise IncidentError(
-                    f"Invalid status: {data.status}",
+                    "状态取值非法，请检查后重试。",
                     details={"status": data.status},
                 )
             if data.status != incident.status:
@@ -143,7 +145,7 @@ class IncidentService:
         if data.severity is not None:
             if data.severity not in VALID_SEVERITIES:
                 raise IncidentError(
-                    f"Invalid severity: {data.severity}",
+                    "严重级别取值非法，请检查后重试。",
                     details={"severity": data.severity},
                 )
             incident.severity = data.severity
@@ -170,7 +172,7 @@ class IncidentService:
         incident = await self.get(incident_id)
         if incident.status != "resolved":
             raise IncidentError(
-                "Postmortem can only be created for resolved incidents.",
+                "仅已解决（resolved）的故障单可创建复盘报告。",
                 details={"current_status": incident.status},
             )
 
@@ -178,7 +180,7 @@ class IncidentService:
             select(Postmortem).where(Postmortem.incident_id == incident_id)
         )
         if existing.scalars().first() is not None:
-            raise IncidentError("Postmortem already exists for this incident.")
+            raise IncidentError("该故障单已存在复盘报告，无需重复创建。")
 
         postmortem = Postmortem(
             id=uuid.uuid4(),
@@ -202,5 +204,7 @@ class IncidentService:
         result = await self._session.execute(stmt)
         postmortem = result.scalars().first()
         if postmortem is None:
-            raise PostmortemNotFound(f"No postmortem for incident '{incident_id}'.")
+            raise PostmortemNotFound(
+                "该故障单尚无复盘报告。", details={"incident_id": str(incident_id)}
+            )
         return postmortem

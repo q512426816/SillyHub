@@ -145,7 +145,7 @@ async def test_same_status_idempotent(db_session: AsyncSession):
 async def test_invalid_status_value_returns_400_not_422(db_session: AsyncSession):
     """非法 status 值先于转换校验（D-006 顺序）：IncidentError(400)，非 InvalidTransition。"""
     svc, inc, _ = await _make_incident(db_session)
-    with pytest.raises(IncidentError, match="Invalid status"):
+    with pytest.raises(IncidentError, match="状态取值非法"):
         await svc.update(inc.id, IncidentUpdate(status="bogus"))
 
 

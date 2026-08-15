@@ -139,7 +139,7 @@ async def update_policy(
     except IntegrityError:
         await session.rollback()
         raise ToolPolicyNameDuplicate(
-            "Policy name already exists in this workspace.",
+            "策略名称已存在，请更换后重试。",
             details={"workspace_id": str(workspace_id), "name": data.name},
         ) from None
     return ToolPolicyRead.model_validate(policy)

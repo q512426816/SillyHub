@@ -249,4 +249,4 @@ async def revoke_api_key(
         user_id=user.id,
     )
     if not updated:
-        raise ApiKeyNotFound("API key not found or already revoked.")
+        raise ApiKeyNotFound("API 密钥不存在或已被吊销。")

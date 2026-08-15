@@ -200,7 +200,7 @@ class ChangeService:
 
         if change is None:
             raise ChangeNotFound(
-                f"Change '{change_key}' not found.",
+                "变更不存在，请检查 change_key 是否正确或先创建该变更。",
                 details={
                     "workspace_id": str(workspace_id),
                     "change_key": change_key,
@@ -220,7 +220,7 @@ class ChangeService:
 
         if change is None:
             raise ChangeNotFound(
-                f"Change '{change_id}' not found.",
+                "变更不存在，请检查变更 ID 是否正确或刷新变更列表。",
                 details={
                     "workspace_id": str(workspace_id),
                     "change_id": str(change_id),
@@ -365,7 +365,7 @@ class ChangeService:
             full_path.relative_to(change_dir)
         except ValueError:
             raise ChangeDocNotFound(
-                "Path traversal detected.",
+                "非法路径：不允许访问变更目录之外的文件。",
                 details={"path": rel_path},
             ) from None
 
@@ -391,7 +391,7 @@ class ChangeService:
         """
         if len(content.encode("utf-8")) > MAX_CONTENT_BYTES:
             raise ChangeDocNotFound(
-                "File content exceeds size limit.",
+                "文件内容超过大小限制（1MB），请精简内容后重试。",
                 details={"path": rel_path, "limit": MAX_CONTENT_BYTES},
             )
         change = await self.get(workspace_id, change_id)
@@ -402,7 +402,7 @@ class ChangeService:
             full_path.relative_to(change_dir)
         except ValueError:
             raise ChangeDocNotFound(
-                "Path traversal detected.",
+                "非法路径：不允许访问变更目录之外的文件。",
                 details={"path": rel_path},
             ) from None
 
@@ -693,7 +693,7 @@ class ChangeService:
                 resolved.relative_to(root_resolved)
             except ValueError:
                 raise ChangeDocNotFound(
-                    "Path traversal detected.",
+                    "非法文件名：不允许写入变更目录之外的路径。",
                     details={"path": filename},
                 ) from None
             await asyncio.to_thread(self._write_text_sync, full_path, content)

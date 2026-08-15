@@ -20,11 +20,11 @@ class TestValidatePath:
         assert target == (tmp_path / "src/main.py").resolve()
 
     def test_path_traversal_blocked(self, tmp_path: Path) -> None:
-        with pytest.raises(ToolPathForbidden, match="escapes"):
+        with pytest.raises(ToolPathForbidden, match="租约边界"):
             validate_path(tmp_path, "../../etc/passwd", [])
 
     def test_absolute_path_traversal_blocked(self, tmp_path: Path) -> None:
-        with pytest.raises(ToolPathForbidden, match="escapes"):
+        with pytest.raises(ToolPathForbidden, match="租约边界"):
             validate_path(tmp_path, "/etc/passwd", [])
 
     def test_allowed_paths_match(self, tmp_path: Path) -> None:
@@ -37,7 +37,7 @@ class TestValidatePath:
         validate_path(tmp_path, "src", ["src"])
 
     def test_allowed_paths_no_match(self, tmp_path: Path) -> None:
-        with pytest.raises(ToolPathForbidden, match="allowed_paths"):
+        with pytest.raises(ToolPathForbidden, match="授权的访问范围"):
             validate_path(tmp_path, "tests/test_foo.py", ["src/"])
 
     def test_empty_allowed_paths_allows_all(self, tmp_path: Path) -> None:
@@ -50,31 +50,31 @@ class TestValidatePath:
 
 class TestShellValidation:
     def test_sudo_blocked(self) -> None:
-        with pytest.raises(ToolOperationForbidden, match="Blocked"):
+        with pytest.raises(ToolOperationForbidden, match="安全策略禁止的模式"):
             validate_shell_command("sudo", ["rm", "-rf", "/"])
 
     def test_rm_rf_root_blocked(self) -> None:
-        with pytest.raises(ToolOperationForbidden, match="Blocked"):
+        with pytest.raises(ToolOperationForbidden, match="安全策略禁止的模式"):
             validate_shell_command("rm", ["-rf", "/"])
 
     def test_mkfs_blocked(self) -> None:
-        with pytest.raises(ToolOperationForbidden, match="Blocked"):
+        with pytest.raises(ToolOperationForbidden, match="安全策略禁止的模式"):
             validate_shell_command("mkfs", ["/dev/sda1"])
 
     def test_dd_blocked(self) -> None:
-        with pytest.raises(ToolOperationForbidden, match="Blocked"):
+        with pytest.raises(ToolOperationForbidden, match="安全策略禁止的模式"):
             validate_shell_command("dd", ["if=/dev/zero", "of=/dev/sda"])
 
     def test_shutdown_blocked(self) -> None:
-        with pytest.raises(ToolOperationForbidden, match="Blocked"):
+        with pytest.raises(ToolOperationForbidden, match="安全策略禁止的模式"):
             validate_shell_command("shutdown", ["-h", "now"])
 
     def test_nc_blocked(self) -> None:
-        with pytest.raises(ToolOperationForbidden, match="Blocked"):
+        with pytest.raises(ToolOperationForbidden, match="安全策略禁止的模式"):
             validate_shell_command("nc", ["-l", "4444"])
 
     def test_crontab_blocked(self) -> None:
-        with pytest.raises(ToolOperationForbidden, match="Blocked"):
+        with pytest.raises(ToolOperationForbidden, match="安全策略禁止的模式"):
             validate_shell_command("crontab", ["-e"])
 
     def test_safe_command_passes(self) -> None:

@@ -646,7 +646,7 @@ async def _require_project_manager(
     if project_id in await manager_project_ids(session, user):
         return
     raise PermissionDenied(
-        "Project manager permission required to manage workspace links.",
+        "仅项目经理可管理工作区关联。",
         details={"project_id": str(project_id)},
     )
 
@@ -692,7 +692,7 @@ async def link_workspace(
             return brief
     # 防御:bind 已提交成功,list 必含目标,理论不可达。
     raise AppError(
-        "Link created but could not be read back.",
+        "关联已创建但读取失败，请刷新页面查看。",
         code="internal_error",
         http_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
     )

@@ -162,7 +162,7 @@ async def _load_workspace(session: AsyncSession, workspace_id: uuid.UUID) -> Wor
     ws = await session.get(Workspace, workspace_id)
     if ws is None:
         raise WorkspaceNotFound(
-            "Workspace not found.",
+            "指定的工作区不存在，请刷新后重试。",
             details={"workspace_id": str(workspace_id)},
         )
     return ws

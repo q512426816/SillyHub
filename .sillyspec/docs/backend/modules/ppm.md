@@ -35,6 +35,7 @@ StateMachine(current, TRANSITIONS, entity=...).transition(target)
 ```
 
 ## 注意事项
+- **用户可见错误文案中文（2026-08-15-error-message-l10n）**：本模块面向前端用户的 raise message 已全部中文化（中文短语+行动指引，技术 ID 在 details）；守护测试 tests/core/test_error_message_l10n.py 强制新文案含 CJK。
 - 5 子域 router 自身不带 prefix，由 `app.main` 统一 `include_router(..., prefix="/api/ppm")` 挂载
 - common/fsm.py 是通用 `StateMachine[S]`（泛型），各子域定义自己的 TRANSITIONS（如 problem、plan-node-detail）
 - common/crud.py 的 `PageReq`/`Page[T]`/`apply_sort`/`apply_pagination` 是全 ppm 分页排序统一入口；列表默认 page_size=20

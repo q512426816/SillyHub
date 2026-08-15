@@ -179,7 +179,7 @@ class _Crud[T]:
     async def get(self, item_id: uuid.UUID) -> T:
         obj = await self._session.get(self._model, item_id)
         if obj is None:
-            raise ProblemNotFound(f"{self._model.__name__} '{item_id}' 不存在")
+            raise ProblemNotFound("记录不存在或已被删除。", details={"id": str(item_id)})
         return obj
 
     async def create(self, data: dict[str, Any]) -> T:
@@ -604,7 +604,7 @@ class ProblemService:
         exc = await self._session.get(TaskExecute, task_execute_id)
         if exc is None:
             raise ProblemError(
-                f"TaskExecute '{task_execute_id}' 不存在",
+                "任务执行记录不存在或已被删除。",
                 details={"task_execute_id": str(task_execute_id)},
             )
         if exc.problem_task_id != problem.id:
@@ -693,7 +693,7 @@ class ProblemService:
         """校验 TaskExecute 状态迁移合法性 (终态 END 不可再迁移)。"""
         if current == STATUS_END:
             raise ProblemError(
-                f"TaskExecute 已收口 (status={current})，不可重复执行",
+                "该执行记录已收口，不可重复执行。",
                 details={"current": current},
             )
 

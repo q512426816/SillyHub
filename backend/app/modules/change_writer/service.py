@@ -77,7 +77,7 @@ class ChangeWriterService:
         ws_for_gate = await self._session.get(Workspace, workspace_id)
         if ws_for_gate is None or ws_for_gate.deleted_at is not None:
             raise WorkspaceNotFound(
-                "Workspace not found.",
+                "工作区不存在，请刷新后重试。",
                 details={"workspace_id": str(workspace_id)},
             )
         if ws_for_gate.last_scanned_at is None:
@@ -93,7 +93,7 @@ class ChangeWriterService:
             lease = await self._get_active_lease(lease_id, user_id)
             if lease.workspace_id != workspace_id:
                 raise ChangeWriteError(
-                    "Lease does not belong to this workspace.",
+                    "工作区租约不匹配，请确认在正确的工作区下操作。",
                     details={"lease_id": str(lease_id), "workspace_id": str(workspace_id)},
                 )
             repo_dir = ExecEnvBuilder().repo_dir(Path(lease.path))
@@ -238,7 +238,7 @@ class ChangeWriterService:
         lease = await self._get_active_lease(lease_id, user_id)
         if lease.workspace_id != workspace_id:
             raise ChangeWriteError(
-                "Lease does not belong to this workspace.",
+                "工作区租约不匹配，请确认在正确的工作区下操作。",
                 details={"lease_id": str(lease_id)},
             )
 
@@ -249,7 +249,7 @@ class ChangeWriterService:
         change_dir = repo_dir / change.path
         if not change_dir.is_dir():
             raise ChangeWriteError(
-                "Change directory does not exist in worktree.",
+                "变更目录在工作区中不存在，请先创建变更或重新同步。",
                 details={"path": str(change_dir)},
             )
 
@@ -325,7 +325,7 @@ class ChangeWriterService:
             workspace = await self._session.get(Workspace, workspace_id)
             if workspace is None or workspace.deleted_at is not None:
                 raise WorkspaceNotFound(
-                    "Workspace not found.",
+                    "工作区不存在，请刷新后重试。",
                     details={"workspace_id": str(workspace_id)},
                 )
             repo_dir = self._repo_dir_for_workspace(workspace)
@@ -333,7 +333,7 @@ class ChangeWriterService:
         change_dir = repo_dir / change.path
         if not change_dir.is_dir():
             raise ChangeWriteError(
-                "Change directory does not exist.",
+                "变更目录不存在，请先创建变更或重新同步。",
                 details={"path": str(change_dir)},
             )
 
@@ -426,17 +426,17 @@ class ChangeWriterService:
         lease = (await self._session.execute(stmt)).scalars().first()
         if lease is None:
             raise WorktreeLeaseNotFound(
-                f"Worktree lease '{lease_id}' not found.",
+                "工作区租约不存在或已失效，请重新获取后再操作。",
                 details={"lease_id": str(lease_id)},
             )
         if lease.user_id != user_id:
             raise WorktreeLeaseNotFound(
-                "Not your worktree lease.",
+                "无权操作他人的工作区租约。",
                 details={"lease_id": str(lease_id)},
             )
         if lease.status != "locked":
             raise ChangeWriteError(
-                "Lease is not active.",
+                "租约不在锁定状态，无法执行该操作，请重新获取租约。",
                 details={"lease_id": str(lease_id), "status": lease.status},
             )
         return lease
@@ -453,7 +453,7 @@ class ChangeWriterService:
         change = (await self._session.execute(stmt)).scalars().first()
         if change is None:
             raise ChangeWriteError(
-                f"Change '{change_id}' not found.",
+                "变更不存在，请刷新变更列表后重试。",
                 details={"change_id": str(change_id)},
             )
         return change

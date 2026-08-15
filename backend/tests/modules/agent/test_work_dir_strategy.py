@@ -234,7 +234,7 @@ async def test_resolve_work_dir_delegate_stat_not_exists_raises():
             workspace=workspace,
         )
 
-    assert "Workspace root does not exist" in str(exc_info.value)
+    assert "工作区根目录不存在" in str(exc_info.value)
     assert exc_info.value.details == {"workspace_root": "/host/path/disconnected"}
 
 

@@ -370,7 +370,7 @@ async def resolve_spec_conflict(
     conflict = await session.get(SpecConflict, conflict_id)
     if conflict is None or conflict.workspace_id != workspace_id:
         raise SpecConflictNotFound(
-            "Spec conflict not found for the given workspace.",
+            "未找到该工作区的 spec 冲突记录。",
             details={
                 "workspace_id": str(workspace_id),
                 "conflict_id": str(conflict_id),

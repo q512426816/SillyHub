@@ -88,7 +88,7 @@ class SpecBootstrapService:
         workspace = await self._session.get(Workspace, workspace_id)
         if workspace is None:
             raise SpecWorkspaceNotFound(
-                "Workspace not found.",
+                "未找到该工作区对应的 spec 工作区。",
                 details={"workspace_id": str(workspace_id)},
             )
 
@@ -191,7 +191,7 @@ class SpecBootstrapService:
         result = (await self._session.execute(stmt)).scalars().first()
         if result is None:
             raise SpecWorkspaceNotFound(
-                "Spec workspace not found for the given workspace.",
+                "未找到该工作区对应的 spec 工作区。",
                 details={"workspace_id": str(workspace_id)},
             )
         return result
@@ -230,15 +230,15 @@ class SpecBootstrapService:
         workspace = await self._session.get(Workspace, workspace_id)
         if workspace is None:
             raise SpecWorkspaceNotFound(
-                "Workspace not found.",
+                "未找到该工作区对应的 spec 工作区。",
                 details={"workspace_id": str(workspace_id)},
             )
 
         cfg = GLMConfig.from_env()
         if cfg is None:
             raise SpecWorkspaceNotFound(
-                "GLM endpoint not configured (ANTHROPIC_BASE_URL/AUTH_TOKEN) — "
-                "team-mode bootstrap requires the Coordinator.",
+                "团队模式启动失败：未配置协调者模型端点"
+                "（ANTHROPIC_BASE_URL/AUTH_TOKEN），请先完成配置。",
                 details={"workspace_id": str(workspace_id), "mode": mode},
             )
 
@@ -259,7 +259,7 @@ class SpecBootstrapService:
             )
         except DelegationError as exc:
             raise SpecWorkspaceNotFound(
-                f"team bootstrap 规划失败: {exc}",
+                "团队模式启动失败：任务规划出错，请稍后重试。",
                 details={"workspace_id": str(workspace_id), "error": str(exc)},
             ) from exc
 
@@ -683,13 +683,13 @@ async def _run_preflight(workspace, code_root: str, delegate) -> str | None:
     """
     root_stat = await delegate.stat(workspace, code_root)
     if not root_stat.get("exists"):
-        return f"source_root does not exist: {code_root}"
+        return f"启动失败：代码根目录不存在，请检查工作区配置（{code_root}）"
     if not root_stat.get("is_dir"):
-        return f"source_root is not a directory: {code_root}"
+        return f"启动失败：代码根目录不是目录，请检查工作区配置（{code_root}）"
     entries = await delegate.list_dir(workspace, code_root)
     meaningful = [e for e in entries if e not in _PLATFORM_ENTRIES]
     if not meaningful:
-        return f"source_root is empty (no files besides platform-managed dirs): {code_root}"
+        return f"启动失败：代码根目录为空（仅含平台管理目录），请确认已拉取项目代码（{code_root}）"
 
     # 项目签名探测：根目录直接命中，或一级子目录命中（嵌套项目结构）。
     async def _has_signature(dir_abs: str) -> bool:
@@ -714,9 +714,9 @@ async def _run_preflight(workspace, code_root: str, delegate) -> str | None:
         if not nested_hit:
             names = ", ".join(entries[:10])
             return (
-                f"source_root has no recognizable project signature "
-                f"(checked: {', '.join(_PROJECT_SIGNATURES[:7])}). "
-                f"Found: {names}"
+                f"启动失败：代码根目录未能识别出项目结构"
+                f"（探测特征：{', '.join(_PROJECT_SIGNATURES[:7])}），"
+                f"请确认目录内容。实际发现：{names}"
             )
         return None
 

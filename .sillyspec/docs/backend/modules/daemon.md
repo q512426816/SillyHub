@@ -62,6 +62,7 @@ created_at: 2026-06-19T19:40:00+08:00
 - `schedule_loop`（orchestrator）+ `converge_mission_for_completed_run`（lease:619）完全保留（mission finalize，与 auto_dispatch 无关）。
 
 ## 注意事项
+- **用户可见错误文案中文（2026-08-15-error-message-l10n）**：本模块面向前端用户的 raise message 已全部中文化（中文短语+行动指引，技术 ID 在 details）；守护测试 tests/core/test_error_message_l10n.py 强制新文案含 CJK。
 
 - **用户可见错误文案中文（ql-20260815-005）**：`session/service.py` 的 `DaemonRuntimeOffline`/`DaemonOffline`（创建/注入/打断/恢复会话 5 处）message 一律面向用户的中文短语（「执行代理当前不在线…」+ 行动指引），runtime/session/run 的 UUID 移入 `details`（前端 `runtime-session-dialog` 原样透传 `err.message`，英文技术串对用户无意义）。
 - `display_alias`：runtime 新增 nullable `display_alias VARCHAR(200)`，搜索（ilike）与卡片标题优先用它，空值回退 name/provider（2026-06-25-admin-global-daemon-workspace-management，D-002）。

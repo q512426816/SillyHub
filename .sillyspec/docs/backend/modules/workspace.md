@@ -30,6 +30,7 @@ scan_generate:
 rescan: 复用 scanner，差异更新
 ```
 ## 注意事项
+- **用户可见错误文案中文（2026-08-15-error-message-l10n）**：本模块面向前端用户的 raise message 已全部中文化（中文短语+行动指引，技术 ID 在 details）；守护测试 tests/core/test_error_message_l10n.py 强制新文案含 CJK。
 - 路径安全：`_guard_path` 拦截越界/不可读路径；daemon-client 路径有专门 `_rewrite_path`。
 - 软删除：`soft_delete` 仅置标记，`_resurrect_soft_deleted` 在相同 root_path 重建时复活记录。
 - slug 唯一性靠 `_ensure_unique_slug` 追加后缀，非 DB 唯一约束兜底。

@@ -274,7 +274,7 @@ class RoleService:
     async def get(self, role_id: uuid.UUID) -> RoleRead:
         role = await self._session.get(Role, role_id)
         if role is None:
-            raise RoleNotFound(f"Role {role_id} not found.")
+            raise RoleNotFound("角色不存在或已被删除。", details={"role_id": str(role_id)})
         return await _to_read(self._session, role)
 
     async def create(self, payload: RoleCreateRequest) -> RoleRead:
@@ -284,7 +284,10 @@ class RoleService:
             .first()
         )
         if existing is not None:
-            raise RoleKeyDuplicate(f"Role key '{payload.key}' already exists.")
+            raise RoleKeyDuplicate(
+                f"角色标识 {payload.key} 已被占用，请更换后重试。",
+                details={"key": payload.key},
+            )
 
         role = Role(
             key=payload.key,
@@ -311,10 +314,10 @@ class RoleService:
     async def update(self, role_id: uuid.UUID, payload: RoleUpdateRequest) -> RoleRead:
         role = await self._session.get(Role, role_id)
         if role is None:
-            raise RoleNotFound(f"Role {role_id} not found.")
+            raise RoleNotFound("角色不存在或已被删除。", details={"role_id": str(role_id)})
         if role.is_system:
             raise RoleSystemProtected(
-                "System roles cannot be modified.",
+                "系统内置角色不可修改。",
                 details={"role_key": role.key},
             )
 
@@ -344,10 +347,10 @@ class RoleService:
     async def disable(self, role_id: uuid.UUID) -> RoleRead:
         role = await self._session.get(Role, role_id)
         if role is None:
-            raise RoleNotFound(f"Role {role_id} not found.")
+            raise RoleNotFound("角色不存在或已被删除。", details={"role_id": str(role_id)})
         if role.is_system:
             raise RoleSystemProtected(
-                "System roles cannot be disabled.",
+                "系统内置角色不可停用。",
                 details={"role_key": role.key},
             )
         role.is_active = False
@@ -361,7 +364,7 @@ class RoleService:
     async def enable(self, role_id: uuid.UUID) -> RoleRead:
         role = await self._session.get(Role, role_id)
         if role is None:
-            raise RoleNotFound(f"Role {role_id} not found.")
+            raise RoleNotFound("角色不存在或已被删除。", details={"role_id": str(role_id)})
         role.is_active = True
         self._session.add(role)
         self._audit(action="role.enabled", role=role)
@@ -373,10 +376,10 @@ class RoleService:
     async def delete(self, role_id: uuid.UUID) -> None:
         role = await self._session.get(Role, role_id)
         if role is None:
-            raise RoleNotFound(f"Role {role_id} not found.")
+            raise RoleNotFound("角色不存在或已被删除。", details={"role_id": str(role_id)})
         if role.is_system:
             raise RoleSystemProtected(
-                "System roles cannot be deleted.",
+                "系统内置角色不可删除。",
                 details={"role_key": role.key},
             )
         user_count = await _count_users(self._session, role.id)
@@ -403,7 +406,7 @@ class RoleService:
         """
         role = await self._session.get(Role, role_id)
         if role is None:
-            raise RoleNotFound(f"Role {role_id} not found.")
+            raise RoleNotFound("角色不存在或已被删除。", details={"role_id": str(role_id)})
 
         items: list[RoleUserRead] = []
 

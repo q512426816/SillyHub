@@ -30,6 +30,7 @@ _to_read: decrypt → X-09 masked（首4...尾4 / <8位**** / 空None）→ LlmP
 lease 下发: 命中默认 provider → 解密 api_key → provider_config（D-007 未配则 absent，daemon 走本机 env 兜底）
 ```
 ## 注意事项
+- **用户可见错误文案中文（2026-08-15-error-message-l10n）**：本模块面向前端用户的 raise message 已全部中文化（中文短语+行动指引，技术 ID 在 details）；守护测试 tests/core/test_error_message_l10n.py 强制新文案含 CJK。
 - 凭证必须经 `CredentialCipher` 加密，明文绝不入库/出库；`SILLYSPEC_MASTER_KEY` 丢失则历史凭证不可解（同 git_identity，crypto.py:37-44 use-time 503）。
 - api_key 全链路脱敏：API 仅返回 masked，provider_config 严禁落 submitMessages/complete_lease/AuditLog/日志（R-02，audit_hooks 只读 ORM 列故捕获不到明文，R-04）。
 - agent_kind 抽象（D-006）：第一版只 "claude"，加 codex/gemini 只动 daemon credential-injector + 此处枚举值，表/lease 协议不变。

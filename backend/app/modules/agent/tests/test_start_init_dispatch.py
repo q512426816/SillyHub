@@ -260,7 +260,7 @@ async def test_start_init_dispatch_raises_when_no_runtime(
             actor_user_id=user_id,
         )
 
-    assert "no daemon configured" in str(exc_info.value).lower()
+    assert "尚未绑定守护进程" in str(exc_info.value)
 
 
 @pytest.mark.asyncio

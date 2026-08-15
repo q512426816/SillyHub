@@ -102,7 +102,7 @@ class WorkflowService:
         change = (await self._session.execute(stmt)).scalars().first()
         if change is None:
             raise ChangeNotFound(
-                f"Change '{change_id}' not found.",
+                "变更不存在，请刷新变更列表后重试。",
                 details={"change_id": str(change_id)},
             )
         return change
@@ -119,7 +119,7 @@ class WorkflowService:
         task = (await self._session.execute(stmt)).scalars().first()
         if task is None:
             raise TaskNotFound(
-                f"Task '{task_id}' not found.",
+                "任务不存在，请刷新任务列表后重试。",
                 details={"task_id": str(task_id)},
             )
         return task

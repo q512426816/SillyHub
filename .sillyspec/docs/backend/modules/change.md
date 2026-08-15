@@ -53,6 +53,7 @@ review 四方法（proposal_review/plan_review/human_test/archive_confirm）:
     turn_conflict/session_inactive/inject_failed 随响应 notified_session/notify_error 返回）
 ```
 ## 注意事项
+- **用户可见错误文案中文（2026-08-15-error-message-l10n）**：本模块面向前端用户的 raise message 已全部中文化（中文短语+行动指引，技术 ID 在 details）；守护测试 tests/core/test_error_message_l10n.py 强制新文案含 CJK。
 - 阶段流转有状态机（StageEnum + HumanGate），transition / advance-stage 前需过人工门禁（proposal/plan review，校验 `StageProjectionService.compute_pending_review`）。
 - **stage 完成停待触发**：AgentRun 跑完 / gate task 跑完只落结果 + 发 SSE，current_stage 不自动推进；必须 MCP `advance_change_stage` / 前端 `advanceChangeStage` 显式触发（D-001，R-01）。
 - dispatch 前的清理（`_cleanup_before_dispatch`）保证不会有陈旧 run 永久阻塞新调度。

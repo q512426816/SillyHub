@@ -203,7 +203,7 @@ class _Crud[T]:
     async def get(self, item_id: uuid.UUID) -> T:
         obj = await self._session.get(self._model, item_id)
         if obj is None:
-            raise PlanNotFound(f"{self._model.__name__} '{item_id}' 不存在")
+            raise PlanNotFound("记录不存在或已被删除。", details={"id": str(item_id)})
         return obj
 
     async def create(self, data: dict[str, Any]) -> T:
@@ -377,7 +377,7 @@ class PlanService:
         )
         if belongs is None:
             raise PlanError(
-                f"module_id '{module_id}' 不属于模板 '{plan_node_id}'",
+                "所选模块不属于该模板，请刷新后重新选择。",
                 details={"module_id": str(module_id), "plan_node_id": str(plan_node_id)},
             )
 
@@ -659,7 +659,7 @@ class PlanService:
         )
         row = (await self._session.execute(stmt)).first()
         if row is None:
-            raise PlanNotFound(f"PsProjectPlan '{item_id}' 不存在")
+            raise PlanNotFound("项目计划不存在或已被删除。", details={"plan_id": str(item_id)})
         plan_obj, real_project_name = row
         # 用真名覆盖冗余字段,使 router 的 model_validate 取到真名 (task-02)。
         plan_obj.project_name = real_project_name

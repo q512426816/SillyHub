@@ -53,21 +53,21 @@ async def bind(
     project = await session.get(PpmProjectMaintenance, ppm_project_id)
     if project is None:
         raise AppError(
-            "PPM project does not exist.",
+            "PPM 项目不存在，请刷新后重试。",
             code="HTTP_404_PPM_PROJECT_NOT_FOUND",
             http_status=status.HTTP_404_NOT_FOUND,
         )
     workspace = await _get_active_workspace(session, workspace_id)
     if workspace is None:
         raise AppError(
-            "Workspace does not exist or has been deleted.",
+            "工作区不存在或已被删除。",
             code="HTTP_404_WORKSPACE_NOT_FOUND",
             http_status=status.HTTP_404_NOT_FOUND,
         )
     existing = await session.get(PpmProjectWorkspace, (ppm_project_id, workspace_id))
     if existing is not None:
         raise AppError(
-            "PPM project and workspace are already linked.",
+            "该 PPM 项目与工作区已处于关联状态，请勿重复绑定。",
             code="HTTP_409_PPM_PROJECT_LINK_DUPLICATE",
             http_status=status.HTTP_409_CONFLICT,
         )

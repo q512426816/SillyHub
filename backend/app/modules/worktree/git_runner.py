@@ -86,7 +86,7 @@ class GitRunner:
             )
         except GitCommandError as exc:
             raise WorktreeAcquireFailed(
-                "Failed to clone bare repository.",
+                "代码仓库克隆失败，请检查仓库地址与网络后重试。",
                 details={"stderr": exc.stderr[:500]},
             ) from exc
 
@@ -126,7 +126,7 @@ class GitRunner:
                 except GitCommandError:
                     pass
             raise WorktreeAcquireFailed(
-                "Failed to create worktree.",
+                "创建代码工作区失败，请重试。",
                 details={"stderr": exc.stderr[:500]},
             ) from exc
 

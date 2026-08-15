@@ -61,13 +61,13 @@ def read_skill_md(skill_name: str) -> str:
     skills_dir = get_settings().skills_bundle_dir
     valid_names = {p.name for p in skills_dir.glob(SKILLS_GLOB) if p.is_dir()}
     if skill_name not in valid_names:
-        raise FileNotFoundError(f"skill '{skill_name}' not in sillyspec-* whitelist")
+        raise FileNotFoundError(f"技能不存在：'{skill_name}' 不在平台技能列表内")
     skill_md_path = skills_dir / skill_name / "SKILL.md"
     if not skill_md_path.is_file():
-        raise FileNotFoundError(f"skill '{skill_name}' has no SKILL.md")
+        raise FileNotFoundError(f"技能不完整：'{skill_name}' 缺少 SKILL.md 文件")
     content = skill_md_path.read_text(encoding="utf-8")
     if len(content.encode("utf-8")) > SKILLS_MAX_CONTENT_BYTES:
-        raise ValueError(f"skill '{skill_name}' SKILL.md exceeds 1 MiB")
+        raise ValueError(f"技能内容过大：'{skill_name}' 的 SKILL.md 超过 1 MiB 上限")
     return content
 
 
@@ -286,11 +286,15 @@ async def build_skills_manifest(
     if not skills_dir.is_dir():
         # Directory missing is an error state regardless of DB content — daemon
         # expects codebase skills to exist; do not silently fall back to DB-only.
-        return {"version": "", "files": [], "message": "skills directory not found"}
+        return {
+            "version": "",
+            "files": [],
+            "message": "未找到技能目录，请检查平台 skills_bundle_dir 配置",
+        }
 
     files = await _gather_all_files(skills_dir, session, user_id)
     if not files:
-        return {"version": "", "files": [], "message": "no sillyspec skills found"}
+        return {"version": "", "files": [], "message": "未找到任何 sillyspec 技能"}
 
     file_entries: list[dict[str, str]] = []
     for rel_path, content in files:

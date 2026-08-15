@@ -149,7 +149,7 @@ async def _await_change_write_receipt(
         if cw is None:
             # 行不应消失（FK + 无级联删除路径），防御性抛错。
             raise ChangeWriteError(
-                "Change write record disappeared.",
+                "变更写入任务记录丢失，请重新创建变更。",
                 details={"change_write_id": str(change_write_id)},
             )
         # SessionFactory uses expire_on_commit=False. daemon complete runs in a
@@ -222,7 +222,7 @@ async def proxy_create_change(
     workspace = await session.get(Workspace, workspace_id)
     if workspace is None or workspace.deleted_at is not None:
         raise WorkspaceNotFound(
-            "Workspace not found.",
+            "工作区不存在，请刷新后重试。",
             details={"workspace_id": str(workspace_id)},
         )
 

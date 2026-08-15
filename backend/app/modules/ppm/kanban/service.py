@@ -433,7 +433,7 @@ class PpdKanbanService:
         """
         task = await self._session.get(PlanTask, req.task_id)
         if task is None:
-            raise TaskNotFound(f"PlanTask '{req.task_id}' not found.")
+            raise TaskNotFound("任务不存在或已被删除。", details={"task_id": str(req.task_id)})
 
         # 取新负责人姓名 (优先 project_member 冗余名)
         new_name = await self._lookup_user_name(req.assignee_id)
@@ -498,7 +498,7 @@ class PpdKanbanService:
         """更新 task 非空字段。"""
         task = await self._session.get(PlanTask, task_id)
         if task is None:
-            raise TaskNotFound(f"PlanTask '{task_id}' not found.")
+            raise TaskNotFound("任务不存在或已被删除。", details={"task_id": str(task_id)})
         if req.content is not None:
             task.content = req.content
         if req.status is not None:
@@ -518,7 +518,7 @@ class PpdKanbanService:
         """删除 task,级联删其 comment + subtask。"""
         task = await self._session.get(PlanTask, task_id)
         if task is None:
-            raise TaskNotFound(f"PlanTask '{task_id}' not found.")
+            raise TaskNotFound("任务不存在或已被删除。", details={"task_id": str(task_id)})
         # 级联清理评论 / 子任务(按 task_id 查)
         comments = await self._session.execute(
             select(PpmKanbanComment).where(PpmKanbanComment.task_id == task_id)
@@ -584,7 +584,10 @@ class PpdKanbanService:
         """翻转子任务 done;subtask 不存在 / task_id 不匹配 → 404。"""
         subtask = await self._session.get(PpmKanbanSubtask, subtask_id)
         if subtask is None or subtask.task_id != task_id:
-            raise TaskNotFound(f"PpmKanbanSubtask '{subtask_id}' not found under task '{task_id}'.")
+            raise TaskNotFound(
+                "子任务不存在或不属于该任务，请刷新后重试。",
+                details={"subtask_id": str(subtask_id), "task_id": str(task_id)},
+            )
         subtask.done = not subtask.done
         await self._session.commit()
         await self._session.refresh(subtask)
@@ -599,7 +602,7 @@ class PpdKanbanService:
         """校验 PlanTask 存在,否则 404。"""
         task = await self._session.get(PlanTask, task_id)
         if task is None:
-            raise TaskNotFound(f"PlanTask '{task_id}' not found.")
+            raise TaskNotFound("任务不存在或已被删除。", details={"task_id": str(task_id)})
 
     async def _next_kanban_order(self, user_id: uuid.UUID) -> int:
         """取该 user 列尾 kanban_order + 1 (无任务返回 0)。"""

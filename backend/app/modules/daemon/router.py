@@ -691,7 +691,7 @@ async def trigger_daemon_self_update(
         from app.modules.daemon.runtime.service import DaemonRuntimeOffline
 
         raise DaemonRuntimeOffline(
-            "Runtime is offline or WS send failed.",
+            "目标 runtime 当前离线或消息下发失败，请确认守护进程在线后重试。",
             details={"runtime_id": str(runtime_id)},
         )
     return {"sent": True, "latest_version": latest}
@@ -811,7 +811,7 @@ async def trigger_machine_self_update(
         from app.modules.daemon.runtime.service import DaemonRuntimeOffline
 
         raise DaemonRuntimeOffline(
-            "Machine is offline or WS send failed.",
+            "目标机器当前离线或消息下发失败，请确认守护进程在线后重试。",
             details={"daemon_instance_id": str(instance_id)},
         )
     return {"sent": True, "latest_version": latest}
@@ -831,7 +831,7 @@ async def get_runtime(
     result = await svc.get_runtime(runtime_id, user.id, is_platform_admin=user.is_platform_admin)
     if result is None:
         raise DaemonRuntimeNotFound(
-            f"Daemon runtime '{runtime_id}' not found.",
+            "指定的 runtime 不存在或无权访问。",
             details={"runtime_id": str(runtime_id)},
         )
     runtime, instance = result
@@ -1394,7 +1394,7 @@ async def list_runtime_leases(
     runtime_tuple = await svc.get_runtime(runtime_id)
     if runtime_tuple is None:
         raise DaemonRuntimeNotFound(
-            f"Daemon runtime '{runtime_id}' not found.",
+            "指定的 runtime 不存在或无权访问。",
             details={"runtime_id": str(runtime_id)},
         )
     leases = await svc.list_leases(runtime_id)
@@ -1434,7 +1434,7 @@ async def list_dir(
         result = await hub.send_rpc(daemon_id, "list_dir", {"path": data.path})
     except DaemonRuntimeOffline as exc:
         raise DaemonRpcGatewayError(
-            f"daemon runtime '{runtime_id}' offline.",
+            "守护进程当前离线，无法浏览目录；请确认守护进程在线后重试。",
             details={
                 "runtime_id": str(runtime_id),
                 "path": data.path,
@@ -1443,7 +1443,7 @@ async def list_dir(
         ) from exc
     except DaemonRpcTimeout as exc:
         raise DaemonRpcGatewayError(
-            "daemon list_dir rpc timed out.",
+            "目录浏览请求超时，请稍后重试。",
             details={
                 "runtime_id": str(runtime_id),
                 "path": data.path,
@@ -1455,7 +1455,7 @@ async def list_dir(
         # daemon business error — map forbidden → 403 (FR-04), others → 502.
         if exc.code == "forbidden":
             raise DaemonRpcForbiddenError(
-                "daemon refused list_dir: path outside allowed_roots.",
+                "守护进程拒绝浏览该目录：路径不在允许的访问范围内。",
                 details={
                     "runtime_id": str(runtime_id),
                     "path": data.path,
@@ -1464,7 +1464,7 @@ async def list_dir(
                 },
             ) from exc
         raise DaemonRpcRemoteGatewayError(
-            f"daemon list_dir failed: {exc.code}.",
+            "守护进程执行目录浏览失败，请稍后重试。",
             details={
                 "runtime_id": str(runtime_id),
                 "path": data.path,
@@ -1508,7 +1508,7 @@ async def list_roots(
         result = await hub.send_rpc(daemon_id, "list_roots", {})
     except DaemonRuntimeOffline as exc:
         raise DaemonRpcGatewayError(
-            f"daemon runtime '{runtime_id}' offline.",
+            "守护进程当前离线，无法读取磁盘根目录；请确认守护进程在线后重试。",
             details={
                 "runtime_id": str(runtime_id),
                 "reason": "offline_or_send_failed",
@@ -1516,7 +1516,7 @@ async def list_roots(
         ) from exc
     except DaemonRpcTimeout as exc:
         raise DaemonRpcGatewayError(
-            "daemon list_roots rpc timed out.",
+            "读取磁盘根目录请求超时，请稍后重试。",
             details={
                 "runtime_id": str(runtime_id),
                 "rpc_id": exc.details.get("rpc_id") if exc.details else None,
@@ -1527,7 +1527,7 @@ async def list_roots(
         # daemon business error — map forbidden → 403 (FR-04), others → 502.
         if exc.code == "forbidden":
             raise DaemonRpcForbiddenError(
-                "daemon refused list_roots.",
+                "守护进程拒绝读取磁盘根目录。",
                 details={
                     "runtime_id": str(runtime_id),
                     "daemon_code": exc.code,
@@ -1535,7 +1535,7 @@ async def list_roots(
                 },
             ) from exc
         raise DaemonRpcRemoteGatewayError(
-            f"daemon list_roots failed: {exc.code}.",
+            "守护进程读取磁盘根目录失败，请稍后重试。",
             details={
                 "runtime_id": str(runtime_id),
                 "daemon_code": exc.code,
@@ -2133,7 +2133,7 @@ async def stream_session_logs(
             )
     if owned is None:
         raise DaemonSessionNotFound(
-            f"AgentSession '{session_id}' not found.",
+            "指定的会话不存在或无权访问。",
             details={"session_id": str(session_id)},
         )
 
@@ -2869,7 +2869,7 @@ async def get_skills_manifest(
     # task-07 D-004：透传 user.id，让 manifest 按 user 维度合并代码库 sillyspec-* + 该用户私有 CustomSkill。
     manifest = await build_skills_manifest(session=session, user_id=user.id)
     if not manifest.get("files"):
-        raise HTTPException(status_code=404, detail="No skills found")
+        raise HTTPException(status_code=404, detail="当前没有任何可用的技能包。")
     return manifest
 
 
@@ -2888,7 +2888,7 @@ async def get_skills_bundle(
     # task-07 D-004：透传 user.id，让 bundle 按 user 维度打包代码库 sillyspec-* + 该用户私有 CustomSkill。
     bundle = await build_skills_bundle(session=session, user_id=user.id)
     if not bundle:
-        raise HTTPException(status_code=404, detail="No skills found")
+        raise HTTPException(status_code=404, detail="当前没有任何可用的技能包。")
     return StreamingResponse(
         io.BytesIO(bundle),
         media_type="application/gzip",

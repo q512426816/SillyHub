@@ -182,7 +182,7 @@ async def revoke_mcp_token(
     revoked = await svc.revoke(token_id=token_id, workspace_id=workspace_id)
     if not revoked:
         raise McpTokenNotFound(
-            "MCP token not found or already revoked.",
+            "MCP 令牌不存在或已被吊销。",
             details={
                 "mcp_token_id": str(token_id),
                 "workspace_id": str(workspace_id),
@@ -286,7 +286,7 @@ async def delete_mcp_webhook(
     deleted = await svc.delete(webhook_id=webhook_id, workspace_id=workspace_id)
     if not deleted:
         raise McpWebhookNotFound(
-            "MCP webhook not found.",
+            "Webhook 不存在或已被删除。",
             details={
                 "mcp_webhook_id": str(webhook_id),
                 "workspace_id": str(workspace_id),

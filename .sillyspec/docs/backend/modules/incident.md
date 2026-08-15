@@ -38,6 +38,7 @@ create_postmortem(incident_id, ...):
 ```
 
 ## 注意事项
+- **用户可见错误文案中文（2026-08-15-error-message-l10n）**：本模块面向前端用户的 raise message 已全部中文化（中文短语+行动指引，技术 ID 在 details）；守护测试 tests/core/test_error_message_l10n.py 强制新文案含 CJK。
 - 事件状态机为白名单校验而非强制 FSM，理论上 open 可直跳 resolved（`open→investigating→mitigated→resolved`）
 - severity 限定 `low/medium/high/critical`；resolved 时自动写 `resolved_at` + `resolved_by`
 - Postmortem 与 incident 为 1:1（`incident_id` 唯一索引），仅 resolved 状态可创建

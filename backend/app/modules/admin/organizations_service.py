@@ -205,7 +205,7 @@ class OrganizationService:
     async def get_organization(self, org_id: uuid.UUID) -> OrganizationDetail:
         org = await self._session.get(Organization, org_id)
         if org is None:
-            raise OrganizationNotFound(f"Organization {org_id} not found.")
+            raise OrganizationNotFound("组织不存在或已被删除。", details={"org_id": str(org_id)})
 
         base = await _to_read(self._session, org)
 
@@ -231,7 +231,8 @@ class OrganizationService:
             parent = await self._session.get(Organization, payload.parent_id)
             if parent is None:
                 raise OrganizationParentNotFound(
-                    f"Parent organization {payload.parent_id} not found."
+                    "上级组织不存在或已被删除，请刷新后重试。",
+                    details={"parent_id": str(payload.parent_id)},
                 )
 
         existing = (
@@ -244,7 +245,10 @@ class OrganizationService:
             .first()
         )
         if existing is not None:
-            raise OrganizationCodeDuplicate(f"Organization code '{payload.code}' already exists.")
+            raise OrganizationCodeDuplicate(
+                f"组织编码 {payload.code} 已被占用，请更换后重试。",
+                details={"code": payload.code},
+            )
 
         org = Organization(
             name=payload.name,
@@ -269,7 +273,7 @@ class OrganizationService:
     ) -> OrganizationRead:
         org = await self._session.get(Organization, org_id)
         if org is None:
-            raise OrganizationNotFound(f"Organization {org_id} not found.")
+            raise OrganizationNotFound("组织不存在或已被删除。", details={"org_id": str(org_id)})
 
         if payload.parent_id is not None:
             if payload.parent_id == org_id:
@@ -277,7 +281,7 @@ class OrganizationService:
                 from app.core.errors import InvalidTransition
 
                 raise InvalidTransition(
-                    "Organization cannot be its own parent.",
+                    "组织不能作为自己的上级，请选择其他上级组织。",
                     details={"org_id": str(org_id)},
                 )
             descendants = await _descendant_ids(self._session, org_id)
@@ -285,13 +289,14 @@ class OrganizationService:
                 from app.core.errors import InvalidTransition
 
                 raise InvalidTransition(
-                    "Organization cannot be reparented under its own descendant.",
+                    "不能把组织挂到自己的子组织下，请选择其他上级组织。",
                     details={"org_id": str(org_id), "parent_id": str(payload.parent_id)},
                 )
             parent = await self._session.get(Organization, payload.parent_id)
             if parent is None:
                 raise OrganizationParentNotFound(
-                    f"Parent organization {payload.parent_id} not found."
+                    "上级组织不存在或已被删除，请刷新后重试。",
+                    details={"parent_id": str(payload.parent_id)},
                 )
             org.parent_id = payload.parent_id
 
@@ -310,7 +315,8 @@ class OrganizationService:
             )
             if clash is not None:
                 raise OrganizationCodeDuplicate(
-                    f"Organization code '{payload.code}' already exists."
+                    f"组织编码 {payload.code} 已被占用，请更换后重试。",
+                    details={"code": payload.code},
                 )
             org.code = payload.code
 
@@ -330,7 +336,7 @@ class OrganizationService:
     async def disable_organization(self, org_id: uuid.UUID) -> OrganizationRead:
         org = await self._session.get(Organization, org_id)
         if org is None:
-            raise OrganizationNotFound(f"Organization {org_id} not found.")
+            raise OrganizationNotFound("组织不存在或已被删除。", details={"org_id": str(org_id)})
         org.status = "disabled"
         self._session.add(org)
         self._audit(action="organization.disabled", org=org)
@@ -341,7 +347,7 @@ class OrganizationService:
     async def enable_organization(self, org_id: uuid.UUID) -> OrganizationRead:
         org = await self._session.get(Organization, org_id)
         if org is None:
-            raise OrganizationNotFound(f"Organization {org_id} not found.")
+            raise OrganizationNotFound("组织不存在或已被删除。", details={"org_id": str(org_id)})
         org.status = "active"
         self._session.add(org)
         self._audit(action="organization.enabled", org=org)
@@ -352,7 +358,7 @@ class OrganizationService:
     async def delete_organization(self, org_id: uuid.UUID) -> None:
         org = await self._session.get(Organization, org_id)
         if org is None:
-            raise OrganizationNotFound(f"Organization {org_id} not found.")
+            raise OrganizationNotFound("组织不存在或已被删除。", details={"org_id": str(org_id)})
 
         members, children = await _counts(self._session, org_id)
         if children > 0:

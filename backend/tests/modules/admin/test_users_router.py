@@ -603,13 +603,8 @@ async def test_update_username_conflict_409(client: AsyncClient, auth_headers, d
         headers=auth_headers,
     )
     assert resp.status_code == 409
-    # detail.code 透出依赖 task-03/05 把 HTTPException(detail={...}).code
-    # 正确序列化到响应 envelope;现状降级成 "http_409" → 记 xfail 待 task-03/05 修。
-    if resp.json().get("code") == "http_409":
-        pytest.xfail(
-            "task-03/05 缺陷:409 HTTPException.detail.code 未透出,"
-            "降级为 http_409(USERNAME_ALREADY_TAKEN 未暴露)"
-        )
+    # l10n task-03 已修：HTTPException(detail={dict}) 改 AppError 实例级 code，
+    # envelope.code 现透出 HTTP_409_USERNAME_ALREADY_TAKEN。
     assert resp.json()["code"].endswith("USERNAME_ALREADY_TAKEN")
 
 
@@ -689,10 +684,7 @@ async def test_update_email_conflict_409(client: AsyncClient, auth_headers, db_s
         headers=auth_headers,
     )
     assert resp.status_code == 409
-    if resp.json().get("code") == "http_409":
-        pytest.xfail(
-            "task-03/05 缺陷:409 HTTPException.detail.code 未透出(EMAIL_ALREADY_TAKEN 未暴露)"
-        )
+    # l10n task-03 已修：envelope.code 现透出 HTTP_409_EMAIL_ALREADY_TAKEN。
     assert resp.json()["code"].endswith("EMAIL_ALREADY_TAKEN")
 
 

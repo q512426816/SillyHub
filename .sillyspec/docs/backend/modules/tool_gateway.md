@@ -33,6 +33,7 @@ execute(workspace, user, lease_id, task_id, tool_type, params):
 ```
 
 ## 注意事项
+- **用户可见错误文案中文（2026-08-15-error-message-l10n）**：本模块面向前端用户的 raise message 已全部中文化（中文短语+行动指引，技术 ID 在 details）；守护测试 tests/core/test_error_message_l10n.py 强制新文案含 CJK。
 - 策略引擎为无状态静态方法，策略对象由调用方传入，便于测试
 - 路径沙箱 `validate_path` 强制 target 在 lease_root 内；shell 黑名单正则拦 sudo/rm -rf/mkfs/dd
 - SSRF 防护始终启用：即使 `allowed_domains` 为空也检查私有 IP（防 DNS rebinding）

@@ -231,7 +231,7 @@ class AuthService:
         """
         user = await self._db.get(User, user_id)
         if user is None or user.deleted_at is not None:
-            raise AuthUserInactive("User not found.")
+            raise AuthUserInactive("账号不存在。")
         if not password_hasher.verify(old_password, user.password_hash):
             raise PasswordIncorrect("旧密码错误。")
 
@@ -334,10 +334,10 @@ class AuthService:
             if not await asyncio.to_thread(
                 verify_refresh_token, refresh_token, session.refresh_token_hash
             ):
-                raise AuthTokenInvalid("Refresh token is not recognised.")
+                raise AuthTokenInvalid("登录状态异常，请重新登录。")
             user = await self._db.get(User, session.user_id)
             if user is None or user.deleted_at is not None or user.status != "active":
-                raise AuthUserInactive("User account is no longer active.")
+                raise AuthUserInactive("该账号已被停用，请联系管理员。")
             # R2（并发安全修复，2026-07-24）：锁定匹配的 session 行直到 commit，杜绝两个并发
             # refresh 持同一 token 都读到"存活"→都签发新对、复用检测永不触发。锁后复查
             # revoked_at：若锁期间已被并发 refresh rotate，落入下方 revoked 检测（grace 续期
@@ -357,7 +357,7 @@ class AuthService:
         if revoked is not None:
             user = await self._db.get(User, revoked.user_id)
             if user is None or user.deleted_at is not None or user.status != "active":
-                raise AuthUserInactive("User account is no longer active.")
+                raise AuthUserInactive("该账号已被停用，请联系管理员。")
             # grace 判定:rotated_at 存在且在窗口内 → 宽限续期,不吊销其它 session。
             # rotated_at is None(非 rotate 吊销,如 logout/admin 吊销)短路到重放分支。
             # grace=0 时 timedelta(seconds=0),elapsed < 0s 恒 False,退化为旧行为。
@@ -370,11 +370,11 @@ class AuthService:
             # 超 grace 或非 rotate 吊销 → 重放攻击,吊销该用户全部 session。
             await self.revoke_all_user_sessions(user_id=revoked.user_id)
             raise AuthRefreshReused(
-                "Refresh token has already been used; all sessions revoked.",
+                "登录凭证已被使用过（可能存在安全风险），所有会话已注销，请重新登录。",
                 details={"user_id": str(revoked.user_id)},
             )
 
-        raise AuthTokenInvalid("Refresh token is not recognised.")
+        raise AuthTokenInvalid("登录状态异常，请重新登录。")
 
     async def _find_revoked_session(
         self, refresh_token: str, target_hmac: str

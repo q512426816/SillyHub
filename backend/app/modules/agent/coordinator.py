@@ -233,7 +233,7 @@ class ExecutionCoordinatorService:
         # Validate token
         if run.resume_token != resume_token:
             raise InvalidTokenError(
-                "Invalid resume token.",
+                "恢复令牌无效，请重新发起恢复。",
                 details={"run_id": str(run_id)},
             )
 
@@ -244,7 +244,7 @@ class ExecutionCoordinatorService:
             and run.context_fingerprint != context_fingerprint
         ):
             raise FingerprintMismatchError(
-                "Context fingerprint mismatch — spec has changed since last run.",
+                "上下文指纹不一致，规格文档在上次运行后已变更。",
                 details={
                     "run_id": str(run_id),
                     "expected": run.context_fingerprint,
@@ -408,7 +408,7 @@ class ExecutionCoordinatorService:
 
         if run.approval_token is None or run.approval_token != token:
             raise InvalidTokenError(
-                "Invalid or expired approval token.",
+                "审批令牌无效或已过期，请重新发起审批。",
                 details={"run_id": str(run_id)},
             )
 

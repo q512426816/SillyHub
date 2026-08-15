@@ -209,7 +209,7 @@ class AgentRunInputRequest(BaseModel):
     def _content_not_blank(cls, value: str) -> str:
         content = value.strip()
         if not content:
-            raise ValueError("content must not be blank")
+            raise ValueError("内容不能为空。")
         return content
 
 

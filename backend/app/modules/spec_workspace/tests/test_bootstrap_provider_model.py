@@ -306,13 +306,13 @@ def _dc_workspace():
 
 @pytest.mark.asyncio
 async def test_preflight_daemon_client_missing_dir() -> None:
-    """daemon-client + delegate stat 返不存在 → 错误串含 'does not exist'。"""
+    """daemon-client + delegate stat 返不存在 → 错误串含 '代码根目录不存在'。"""
     delegate = _PreflightFakeDelegate(stat_map={}, dir_map={})
     err = await bootstrap_module.preflight_workspace_code_root(
         _dc_workspace(), "/client/missing", delegate
     )
     assert err is not None
-    assert "does not exist" in err
+    assert "代码根目录不存在" in err
 
 
 @pytest.mark.asyncio
@@ -325,12 +325,12 @@ async def test_preflight_daemon_client_empty_dir() -> None:
     )
     err = await bootstrap_module.preflight_workspace_code_root(_dc_workspace(), root, delegate)
     assert err is not None
-    assert "is empty" in err
+    assert "代码根目录为空" in err
 
 
 @pytest.mark.asyncio
 async def test_preflight_daemon_client_no_signature() -> None:
-    """daemon-client + 目录非空但无项目签名 → 错误串含 'no recognizable project signature'。"""
+    """daemon-client + 目录非空但无项目签名 → 错误串含 '未能识别出项目结构'。"""
     root = "/client/nosig"
     delegate = _PreflightFakeDelegate(
         stat_map={root: {"exists": True, "is_dir": True, "size": 0}},
@@ -338,7 +338,7 @@ async def test_preflight_daemon_client_no_signature() -> None:
     )
     err = await bootstrap_module.preflight_workspace_code_root(_dc_workspace(), root, delegate)
     assert err is not None
-    assert "no recognizable project signature" in err
+    assert "未能识别出项目结构" in err
 
 
 @pytest.mark.asyncio

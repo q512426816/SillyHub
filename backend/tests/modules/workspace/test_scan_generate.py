@@ -41,7 +41,7 @@ async def test_scan_generate_path_not_found(client: AsyncClient, auth_headers):
         "app.modules.workspace.service.WorkspaceService.scan_generate",
         new_callable=AsyncMock,
         side_effect=WorkspacePathNotFound(
-            "The given root_path does not exist.",
+            "工作区路径不存在，请检查路径是否正确。",
             details={"root_path": "/nonexistent"},
         ),
     ):

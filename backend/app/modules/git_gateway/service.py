@@ -117,14 +117,14 @@ def validate_operation(operation: str, args: list[str]) -> None:
     """Raise GitOperationForbidden if the operation is disallowed."""
     if operation not in ALLOWED_OPERATIONS:
         raise GitOperationForbidden(
-            f"Operation '{operation}' is not allowed.",
+            "该 git 操作不在白名单内，已拒绝执行。",
             details={"operation": operation},
         )
     combined = f"{operation} {' '.join(args)}"
     for pat in BLOCKED_PATTERNS:
         if pat.search(combined):
             raise GitOperationForbidden(
-                f"Blocked pattern in command: {combined[:200]}",
+                "命令包含被安全策略禁止的模式，已拦截。",
                 details={"operation": operation, "args": args},
             )
 
@@ -135,12 +135,12 @@ def validate_operation(operation: str, args: list[str]) -> None:
         for arg in args:
             if arg in protected:
                 raise GitOperationForbidden(
-                    f"Push to protected branch '{arg}' is forbidden.",
-                    details={"operation": operation, "args": args},
+                    "受保护分支，禁止此操作。",
+                    details={"operation": operation, "args": args, "branch": arg},
                 )
             if arg == "-f":
                 raise GitOperationForbidden(
-                    "Blocked pattern in command: push -f",
+                    "命令包含被安全策略禁止的模式，已拦截。",
                     details={"operation": operation, "args": args},
                 )
 
@@ -149,7 +149,7 @@ def validate_operation(operation: str, args: list[str]) -> None:
         for pat in SHELL_INJECTION_PATTERNS:
             if pat.search(arg):
                 raise GitOperationForbidden(
-                    "Shell injection pattern detected in argument.",
+                    "该操作已被安全策略拦截：疑似命令注入。",
                     details={"operation": operation, "args": args},
                 )
 
@@ -214,8 +214,8 @@ class GitGatewayService:
                 proc.kill()
                 await proc.wait()
                 raise GitOperationFailed(
-                    f"Git operation timed out after {GIT_TIMEOUT}s.",
-                    details={"operation": operation},
+                    f"git 操作超时（{GIT_TIMEOUT}s），请稍后重试。",
+                    details={"operation": operation, "timeout_seconds": GIT_TIMEOUT},
                 ) from None
 
             raw_output = stdout.decode(errors="replace") if stdout else ""
@@ -322,14 +322,14 @@ class GitGatewayService:
         lease = (await self._session.execute(stmt)).scalars().first()
         if lease is None:
             raise WorktreeLeaseNotFound(
-                f"Worktree lease '{lease_id}' not found.",
+                "工作区租约不存在或已失效，请重新获取后再操作。",
                 details={"lease_id": str(lease_id)},
             )
         if lease.user_id != user_id:
-            raise PermissionDenied("Not your worktree lease.")
+            raise PermissionDenied("无权操作他人的工作区租约。")
         if lease.status != "locked":
             raise WorktreeLeaseNotFound(
-                "Lease is not active.",
+                "工作区租约已不在锁定状态，请重新获取租约。",
                 details={"lease_id": str(lease_id), "status": lease.status},
             )
         return lease
@@ -340,7 +340,7 @@ class GitGatewayService:
         repo_dir = ExecEnvBuilder().repo_dir(lease_root)
         if not repo_dir.exists():
             raise GitOperationFailed(
-                "Worktree directory does not exist.",
+                "工作区目录不存在，请检查租约路径。",
                 details={"path": str(repo_dir)},
             )
         return repo_dir

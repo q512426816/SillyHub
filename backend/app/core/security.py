@@ -140,12 +140,12 @@ def decode_access_token(token: str, *, settings: Settings) -> TokenPayload:
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
     except jwt.ExpiredSignatureError as exc:
-        raise AccessTokenError("token_expired", "Access token has expired.") from exc
+        raise AccessTokenError("token_expired", "登录凭证已过期，请重新登录。") from exc
     except JWTError as exc:
-        raise AccessTokenError("token_invalid", "Access token is invalid.") from exc
+        raise AccessTokenError("token_invalid", "登录凭证无效，请重新登录。") from exc
 
     if payload.get("typ") != ACCESS_TOKEN_TYPE:
-        raise AccessTokenError("token_wrong_type", "Token is not an access token.")
+        raise AccessTokenError("token_wrong_type", "登录凭证无效，请重新登录。")
 
     try:
         return TokenPayload(
@@ -158,7 +158,7 @@ def decode_access_token(token: str, *, settings: Settings) -> TokenPayload:
             typ=payload["typ"],
         )
     except (KeyError, ValueError, TypeError) as exc:
-        raise AccessTokenError("token_malformed", "Access token is malformed.") from exc
+        raise AccessTokenError("token_malformed", "登录凭证格式有误，请重新登录。") from exc
 
 
 # ── Refresh tokens ──────────────────────────────────────────────────────────
@@ -186,10 +186,10 @@ def parse_refresh_token(token: str) -> tuple[str, str]:
     401 to the client (D-006).
     """
     if "." not in token:
-        raise AuthTokenInvalid("Refresh token format is invalid.")
+        raise AuthTokenInvalid("登录状态异常，请重新登录。")
     token_id, secret = token.split(".", 1)
     if not token_id or not secret:
-        raise AuthTokenInvalid("Refresh token format is invalid.")
+        raise AuthTokenInvalid("登录状态异常，请重新登录。")
     return token_id, secret
 
 

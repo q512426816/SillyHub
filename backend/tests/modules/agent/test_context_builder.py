@@ -484,14 +484,14 @@ def test_run_preflight_nonexistent_dir():
     """source_root 不存在时 preflight 失败。"""
     result = _run_preflight_local(Path("/nonexistent/path"))
     assert result is not None
-    assert "does not exist" in result
+    assert "代码根目录不存在" in result
 
 
 def test_run_preflight_empty_dir(tmp_path):
     """source_root 为空时 preflight 失败。"""
     result = _run_preflight_local(tmp_path)
     assert result is not None
-    assert "empty" in result
+    assert "代码根目录为空" in result
 
 
 def test_run_preflight_no_project_signature(tmp_path):
@@ -499,7 +499,7 @@ def test_run_preflight_no_project_signature(tmp_path):
     (tmp_path / "random.txt").write_text("hello")
     result = _run_preflight_local(tmp_path)
     assert result is not None
-    assert "no recognizable project signature" in result
+    assert "未能识别出项目结构" in result
 
 
 def test_run_preflight_has_package_json(tmp_path):
@@ -522,7 +522,7 @@ def test_run_preflight_platform_only_files_pass(tmp_path):
     (tmp_path / "worktree").mkdir()
     result = _run_preflight_local(tmp_path)
     assert result is not None
-    assert "empty" in result
+    assert "代码根目录为空" in result
 
 
 def test_run_preflight_code_in_subdirectory(tmp_path):

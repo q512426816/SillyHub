@@ -1324,7 +1324,10 @@ class SillySpecStageDispatchService:
         # Step 2: Check Change exists
         change = await session.get(Change, change_id)
         if change is None:
-            raise ChangeNotFound(f"Change '{change_id}' not found.")
+            raise ChangeNotFound(
+                "变更不存在，无法派发，请刷新变更列表后重试。",
+                details={"change_id": str(change_id)},
+            )
 
         # Step 2.5（task-09 D-004@v2）：execute/verify team 分流。team_mode=True 时
         # 旁路 single AgentRun 路径，走主 agent OrchestratorService（与 dispatch()
@@ -1511,7 +1514,10 @@ class SillySpecStageDispatchService:
         # Step 1: Load Change
         change = await session.get(Change, change_id)
         if change is None:
-            raise ChangeNotFound(f"Change '{change_id}' not found.")
+            raise ChangeNotFound(
+                "变更不存在，无法同步阶段状态，请刷新变更列表。",
+                details={"change_id": str(change_id)},
+            )
 
         # task-08：工作区路径来源分流已删（FR-2），唯一路径走 daemon-client RPC。
         return await self._sync_stage_status_daemon_client(session, change, change_id, run_id)

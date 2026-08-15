@@ -75,7 +75,7 @@ async def get_current_user(
     token = _extract_bearer(request)
     if not token:
         raise AuthTokenMissing(
-            "Bearer token is required.",
+            "登录状态已失效，请重新登录。",
             details={"hint": "Send 'Authorization: Bearer <access_token>'."},
         )
     try:
@@ -87,7 +87,7 @@ async def get_current_user(
 
     user = await session.get(User, payload.sub)
     if user is None or user.deleted_at is not None or user.status != "active":
-        raise AuthUserInactive("User account is no longer active.")
+        raise AuthUserInactive("该账号已被停用，请联系管理员。")
     if not getattr(user, "login_enabled", True):
         raise AuthUserLoginDisabled(
             "该账号的登录权限已被禁用。",
@@ -109,7 +109,7 @@ def require_permission(permission: Permission):
         )
         if not ok:
             raise PermissionDenied(
-                f"User lacks {permission.value} on this workspace.",
+                "无权执行此操作。",
                 details={
                     "permission": permission.value,
                     "workspace_id": str(workspace_id),
@@ -130,7 +130,7 @@ def require_permission_any(permission: Permission):
         ok = await has_permission(session, user=user, permission=permission, workspace_id=None)
         if not ok:
             raise PermissionDenied(
-                f"User lacks {permission.value} on any workspace.",
+                "无权执行此操作。",
                 details={"permission": permission.value},
             )
         return user
@@ -144,7 +144,7 @@ async def require_platform_admin(
     """Require the current user to be a platform admin."""
     if not user.is_platform_admin:
         raise PermissionDenied(
-            "Platform admin required.",
+            "该操作需要平台管理员权限，请联系管理员。",
             details={"user_id": str(user.id)},
         )
     return user
@@ -172,7 +172,7 @@ async def get_current_principal(
     plaintext = _extract_api_key(request)
     if not plaintext:
         raise AuthTokenMissing(
-            "Bearer token or API key is required.",
+            "登录状态已失效，请重新登录。",
             details={
                 "hint": "Send 'Authorization: Bearer <access_token>' or 'X-API-Key: <api_key>'."
             },
@@ -180,5 +180,5 @@ async def get_current_principal(
 
     user = await ApiKeyService(session, settings=settings).authenticate(plaintext=plaintext)
     if user is None:
-        raise AuthTokenInvalid("API key is invalid, expired, or revoked.")
+        raise AuthTokenInvalid("API 密钥无效、已过期或已被吊销，请检查后重试。")
     return user

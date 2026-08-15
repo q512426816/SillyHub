@@ -106,7 +106,7 @@ class TaskService:
 
         if task is None:
             raise TaskNotFound(
-                f"Task '{task_id}' not found.",
+                "任务不存在，请检查任务 ID 是否正确或刷新任务列表。",
                 details={
                     "workspace_id": str(workspace_id),
                     "task_id": str(task_id),

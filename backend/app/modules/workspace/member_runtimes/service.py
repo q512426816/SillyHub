@@ -52,7 +52,7 @@ async def upsert_my_binding(
         daemon = await session.get(DaemonInstance, daemon_id)
         if daemon is None or daemon.user_id != user_id:
             raise AppError(
-                "Daemon instance does not belong to you.",
+                "该守护进程不属于当前用户，无法使用。",
                 code="daemon_not_owned",
                 http_status=403,
             )

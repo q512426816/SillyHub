@@ -63,14 +63,14 @@ def check_deploy_window(policy: dict | None) -> None:
     now = datetime.now(UTC)
     if now.weekday() not in window.get("days", DEFAULT_DEPLOY_WINDOW["days"]):
         raise ReleaseNotAllowed(
-            "Deploy not allowed: outside allowed days.",
+            "当前不在允许发布的日期内，请在策略允许的工作日重试。",
             details={"weekday": now.weekday(), "allowed_days": window["days"]},
         )
     start = window.get("start_hour", DEFAULT_DEPLOY_WINDOW["start_hour"])
     end = window.get("end_hour", DEFAULT_DEPLOY_WINDOW["end_hour"])
     if not (start <= now.hour < end):
         raise ReleaseNotAllowed(
-            "Deploy not allowed: outside deploy hours.",
+            "当前不在允许发布的时间段内，请在发布窗口内重试。",
             details={"current_hour": now.hour, "window": f"{start}-{end}"},
         )
 
@@ -89,7 +89,7 @@ class ReleaseService:
     ) -> Release:
         if data.target_environment not in VALID_ENVIRONMENTS:
             raise ReleaseError(
-                f"Invalid target_environment: {data.target_environment}",
+                "目标环境取值非法，请检查后重试。",
                 details={"target_environment": data.target_environment},
             )
 
@@ -128,7 +128,9 @@ class ReleaseService:
     async def get(self, release_id: uuid.UUID) -> Release:
         release = await self._session.get(Release, release_id)
         if release is None:
-            raise ReleaseNotFound(f"Release '{release_id}' not found.")
+            raise ReleaseNotFound(
+                "发布单不存在或已被删除。", details={"release_id": str(release_id)}
+            )
         return release
 
     async def approve(
@@ -141,10 +143,10 @@ class ReleaseService:
         release = await self.get(release_id)
 
         if verdict not in ("approve", "reject"):
-            raise ReleaseError("Verdict must be 'approve' or 'reject'.")
+            raise ReleaseError("审批结论只能是同意（approve）或拒绝（reject）。")
 
         if release.creator_id == approver_id:
-            raise ReleaseNotAllowed("Creator cannot approve their own release.")
+            raise ReleaseNotAllowed("创建人不能审批自己提交的发布单。")
 
         existing = await self._session.execute(
             select(ReleaseApproval).where(
@@ -153,7 +155,7 @@ class ReleaseService:
             )
         )
         if existing.scalars().first() is not None:
-            raise ReleaseError("Already voted on this release.")
+            raise ReleaseError("您已在该发布单投过票，无需重复审批。")
 
         approval = ReleaseApproval(
             id=uuid.uuid4(),
@@ -190,7 +192,7 @@ class ReleaseService:
         release = await self.get(release_id)
         if release.status != "draft":
             raise ReleaseError(
-                f"Cannot promote to staging from status '{release.status}'.",
+                "当前状态不能进入预发布，请检查发布单状态。",
                 details={"current_status": release.status},
             )
         release.status = "staging"
@@ -209,7 +211,7 @@ class ReleaseService:
 
         if release.status not in ("staging", "approved"):
             raise ReleaseError(
-                f"Cannot deploy from status '{release.status}'.",
+                "当前状态不能发布，请检查发布单状态。",
                 details={"current_status": release.status},
             )
 
@@ -235,7 +237,7 @@ class ReleaseService:
         release = await self.get(release_id)
         if release.status != "deployed":
             raise ReleaseError(
-                "Only deployed releases can be rolled back.",
+                "仅已发布的发布单可回滚。",
                 details={"current_status": release.status},
             )
         release.status = "rolled_back"
@@ -283,6 +285,6 @@ class ReleaseService:
 
         if count < min_approvals:
             raise ReleaseNotAllowed(
-                f"Production release requires {min_approvals} approvals, got {count}.",
+                f"生产发布需要至少 {min_approvals} 人审批通过，当前只有 {count} 人。",
                 details={"required": min_approvals, "current": count},
             )

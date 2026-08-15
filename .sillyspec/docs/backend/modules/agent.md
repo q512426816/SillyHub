@@ -42,6 +42,7 @@ mission external 模式（R-01 三重防御，防 caller 主仓被误 merge / fi
   ② converge_mission_for_completed_run: 检测 external → 跳过 finalize_execute_mission + cleanup_mission（不 merge / 不清 caller worktree）
   ③ 路径A 不写 worktree_branch（即便误进 finalize 也无 branch 可 merge）
 ## 注意事项
+- **用户可见错误文案中文（2026-08-15-error-message-l10n）**：本模块面向前端用户的 raise message 已全部中文化（中文短语+行动指引，技术 ID 在 details）；守护测试 tests/core/test_error_message_l10n.py 强制新文案含 CJK。
 - agent↔daemon 双向引用：agent 选 daemon 运行时，daemon 完成后回调 agent。
 - 工具失败监控（`should_warn_tool_failure`）有阈值，超阈值告警但不直接终止。
 - kill/resume/approve 有状态前置（AgentRunNotResumable / NotPendingApproval），改状态机需同步。

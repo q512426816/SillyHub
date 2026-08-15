@@ -24,12 +24,13 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
+from fastapi import status as http_status
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from app.core.errors import PermissionDenied
+from app.core.errors import AppError, PermissionDenied
 from app.core.logging import get_logger
 from app.core.permission_cache import invalidate_all_permissions
 from app.core.security import password_hasher
@@ -124,8 +125,7 @@ class UserService:
         if actor is not None and actor.is_platform_admin:
             return
         raise PermissionDenied(
-            "Only platform admins may grant platform-admin privileges or bind "
-            "platform-admin roles.",
+            "仅平台管理员可授予平台管理员权限或绑定平台管理员角色。",
             details={"code": "PLATFORM_ADMIN_GRANT_FORBIDDEN"},
         )
 
@@ -198,7 +198,7 @@ class UserService:
     async def get_user(self, target_id: uuid.UUID) -> User:
         target = await self.session.get(User, target_id)
         if target is None or target.deleted_at is not None:
-            raise HTTPException(status_code=404, detail="User not found")
+            raise HTTPException(status_code=404, detail="用户不存在或已被删除。")
         return target
 
     async def create_user(
@@ -331,9 +331,15 @@ class UserService:
             stmt = stmt.where(User.id != exclude_id)
         hit = await self.session.execute(stmt.limit(1))
         if hit.scalars().first() is not None:
-            raise HTTPException(
-                status_code=409,
-                detail={"code": "USERNAME_ALREADY_TAKEN", "username": username},
+            # 预存缺陷修复（l10n task-03）：原 HTTPException(detail={dict}) 会被
+            # 全局 handler str() 成 Python repr；改用 AppError 实例级 code 覆盖
+            # （errors.py 文档化机制），code=HTTP_409_USERNAME_ALREADY_TAKEN、
+            # 409 语义不变，技术标识移 details。
+            raise AppError(
+                f"用户名 {username} 已被占用，请更换后重试。",
+                code="HTTP_409_USERNAME_ALREADY_TAKEN",
+                http_status=http_status.HTTP_409_CONFLICT,
+                details={"username": username},
             )
 
     async def update_user(
@@ -351,7 +357,7 @@ class UserService:
     ) -> User:
         target = await self.session.get(User, target_id)
         if target is None or target.deleted_at is not None:
-            raise HTTPException(status_code=404, detail="User not found")
+            raise HTTPException(status_code=404, detail="用户不存在或已被删除。")
 
         # 支配权(纵深防御):授 is_platform_admin 或绑定 platform:admin 角色前校验调用者。
         # is_platform_admin=False(降级)不触发,交由下方 last-admin 保护兜底。
@@ -362,7 +368,7 @@ class UserService:
         # Self-disable protection (existing).
         if status == "disabled" and self.actor_id == target_id:
             raise PermissionDenied(
-                "Cannot disable yourself.",
+                "不能停用你自己。",
                 details={"target_id": str(target_id), "code": "USER_SELF_DISABLE_FORBIDDEN"},
             )
 
@@ -375,7 +381,7 @@ class UserService:
             count = await self._active_admin_count()
             if count <= 1:
                 raise PermissionDenied(
-                    "Cannot remove the last platform admin.",
+                    "不能移除最后一个平台管理员，请先指定其他管理员。",
                     details={
                         "active_admins": count,
                         "code": "USER_LAST_ADMIN_PROTECTED",
@@ -407,9 +413,11 @@ class UserService:
                         .limit(1)
                     )
                     if hit.scalars().first() is not None:
-                        raise HTTPException(
-                            status_code=409,
-                            detail={"code": "EMAIL_ALREADY_TAKEN"},
+                        # 同 _assert_username_available：dict detail 缺陷修复，改 AppError。
+                        raise AppError(
+                            "该邮箱已被其他用户使用，请更换后重试。",
+                            code="HTTP_409_EMAIL_ALREADY_TAKEN",
+                            http_status=http_status.HTTP_409_CONFLICT,
                         )
                     target.email = normalized_email
                 else:
@@ -468,7 +476,7 @@ class UserService:
     async def delete_user(self, target_id: uuid.UUID) -> None:
         if self.actor_id == target_id:
             raise PermissionDenied(
-                "Cannot delete yourself.",
+                "不能删除你自己。",
                 details={"target_id": str(target_id), "code": "USER_SELF_DELETE_FORBIDDEN"},
             )
 
@@ -516,13 +524,11 @@ class UserService:
         )
         missing = set(organization_ids) - set(rows)
         if missing:
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "code": "VALIDATION_ERROR",
-                    "missing_ids": [str(m) for m in missing],
-                    "kind": "organization",
-                },
+            raise AppError(
+                "所选组织不存在或已被删除，请刷新后重试。",
+                code="HTTP_422_VALIDATION_ERROR",
+                http_status=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                details={"missing_ids": [str(m) for m in missing], "kind": "organization"},
             )
 
     async def _validate_roles(self, role_ids: list[uuid.UUID]) -> None:
@@ -535,13 +541,11 @@ class UserService:
         )
         missing = set(role_ids) - set(rows)
         if missing:
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "code": "VALIDATION_ERROR",
-                    "missing_ids": [str(m) for m in missing],
-                    "kind": "role",
-                },
+            raise AppError(
+                "所选角色不存在或已被删除，请刷新后重试。",
+                code="HTTP_422_VALIDATION_ERROR",
+                http_status=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                details={"missing_ids": [str(m) for m in missing], "kind": "role"},
             )
 
     async def _rewrite_organizations(
@@ -569,7 +573,7 @@ class UserService:
     async def disable_login(self, target_id: uuid.UUID) -> User:
         if self.actor_id == target_id:
             raise PermissionDenied(
-                "Cannot disable your own login.",
+                "不能停用自己的登录权限。",
                 details={
                     "target_id": str(target_id),
                     "code": "USER_SELF_DISABLE_LOGIN_FORBIDDEN",
@@ -578,14 +582,14 @@ class UserService:
 
         target = await self.session.get(User, target_id)
         if target is None or target.deleted_at is not None:
-            raise HTTPException(status_code=404, detail="User not found")
+            raise HTTPException(status_code=404, detail="用户不存在或已被删除。")
 
         # Last-admin protection
         if target.is_platform_admin and target.login_enabled:
             count = await self._active_admin_count()
             if count <= 1:
                 raise PermissionDenied(
-                    "Cannot disable login for the last platform admin.",
+                    "不能停用最后一个平台管理员的登录权限，请先指定其他管理员。",
                     details={
                         "active_admins": count,
                         "code": "USER_LAST_ADMIN_PROTECTED",
@@ -619,7 +623,7 @@ class UserService:
     async def enable_login(self, target_id: uuid.UUID) -> User:
         target = await self.session.get(User, target_id)
         if target is None or target.deleted_at is not None:
-            raise HTTPException(status_code=404, detail="User not found")
+            raise HTTPException(status_code=404, detail="用户不存在或已被删除。")
 
         self._set_audit_context()
         target.login_enabled = True
@@ -660,7 +664,7 @@ class UserService:
             or auth_session.user_id != target_id
             or auth_session.revoked_at is not None
         ):
-            raise HTTPException(status_code=404, detail="Session not found")
+            raise HTTPException(status_code=404, detail="会话不存在或已被吊销。")
 
         self._set_audit_context()
         auth_session.revoked_at = datetime.now(UTC)
@@ -773,7 +777,7 @@ class UserService:
     ) -> str:
         target = await self.session.get(User, target_id)
         if target is None or target.deleted_at is not None:
-            raise HTTPException(status_code=404, detail="User not found")
+            raise HTTPException(status_code=404, detail="用户不存在或已被删除。")
 
         # 不显式传密码 → 统一用模块默认初始密码（与 create_user 一致），管理员
         # 无需记忆/转交随机串；用户用默认密码登录后可自行修改（change-password）。

@@ -34,6 +34,7 @@ deploy(release_id):
 ```
 
 ## 注意事项
+- **用户可见错误文案中文（2026-08-15-error-message-l10n）**：本模块面向前端用户的 raise message 已全部中文化（中文短语+行动指引，技术 ID 在 details）；守护测试 tests/core/test_error_message_l10n.py 强制新文案含 CJK。
 - `check_deploy_window(policy)` 读策略允许的 days/start_hour/end_hour，窗口外直接 `ReleaseNotAllowed`；时区为 UTC
 - 审批达阈值（`min_approvers`，默认 2）时 `approve()` 自动把状态置为 approved，无需额外调用
 - `Release.status` 建了 `(workspace_id, status)` 联合索引 `ix_releases_workspace_status`，按状态过滤走索引

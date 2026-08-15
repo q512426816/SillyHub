@@ -211,7 +211,7 @@ class AgentProfileService:
     async def _assert_can_modify(self, profile: AgentProfile, *, actor: User) -> None:
         if not await self._can_modify(profile, actor=actor):
             raise AgentProfilePermissionDenied(
-                "No permission to modify this agent profile.",
+                "当前用户无权修改该 agent 档案。",
                 details={"profile_id": str(profile.id)},
             )
 
@@ -257,17 +257,17 @@ class AgentProfileService:
         if visibility == AgentProfileVisibility.PLATFORM:
             if not actor.is_platform_admin:
                 raise AgentProfilePermissionDenied(
-                    "Only a platform admin can create platform-visible agent profiles.",
+                    "仅平台管理员可以创建平台级可见的 agent 档案。",
                 )
             ws_id: uuid.UUID | None = None
         elif visibility == AgentProfileVisibility.WORKSPACE:
             if workspace is None:
                 raise AgentProfilePermissionDenied(
-                    "Workspace-scoped agent profile requires a workspace.",
+                    "创建工作区级档案时必须指定所属工作区。",
                 )
             if not await self._is_workspace_member(user_id=actor.id, workspace_id=workspace.id):
                 raise AgentProfilePermissionDenied(
-                    "Only a workspace member can create workspace-scoped agent profiles.",
+                    "仅工作区成员可以创建工作区级 agent 档案。",
                     details={"workspace_id": str(workspace.id)},
                 )
             ws_id = workspace.id
@@ -380,12 +380,12 @@ class AgentProfileService:
         profile = await self._session.get(AgentProfile, profile_id)
         if profile is None:
             raise AgentProfileNotFound(
-                "Agent profile not found.",
+                "指定的 agent 档案不存在或已被删除。",
                 details={"profile_id": str(profile_id)},
             )
         if not await self._can_read_async(profile, actor=actor):
             raise AgentProfilePermissionDenied(
-                "No permission to read this agent profile.",
+                "当前用户无权查看该 agent 档案。",
                 details={"profile_id": str(profile_id)},
             )
         return profile
@@ -414,7 +414,7 @@ class AgentProfileService:
         target_visibility = fields.get("visibility")
         if target_visibility is AgentProfileVisibility.PLATFORM and not actor.is_platform_admin:
             raise AgentProfilePermissionDenied(
-                "Only a platform admin can change visibility to platform.",
+                "仅平台管理员可以将档案可见范围改为平台级。",
                 details={"profile_id": str(profile_id)},
             )
         # 跨 workspace 移动同样要求 admin（防成员把档案挪到自己 ws 外）。
@@ -425,7 +425,7 @@ class AgentProfileService:
             and not actor.is_platform_admin
         ):
             raise AgentProfilePermissionDenied(
-                "Only a platform admin can move an agent profile across workspaces.",
+                "仅平台管理员可以在工作区之间移动 agent 档案。",
                 details={"profile_id": str(profile_id)},
             )
 
@@ -560,8 +560,8 @@ class AgentProfileService:
         extra = sorted(overlay_set - daemon_set)
         if extra:
             raise AgentProfileOverlayTooWide(
-                "agent profile allowed_roots_overlay exceeds daemon allowed_roots "
-                "(agent can only narrow, not widen).",
+                "档案目录白名单超出了守护进程允许的访问范围（agent 只能收紧"
+                "不能放宽），请移除越界路径后重试。",
                 extra_roots=extra,
             )
         # overlay ⊆ daemon 已证；交集按 daemon 顺序保留（= overlay 的有序投影）。

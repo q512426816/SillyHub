@@ -420,7 +420,7 @@ class WorkspaceService:
         workspace = await self._session.get(Workspace, workspace_id)
         if workspace is None or workspace.deleted_at is not None:
             raise WorkspaceNotFound(
-                "Workspace not found.",
+                "工作区不存在或已被删除。",
                 details={"workspace_id": str(workspace_id)},
             )
         return workspace
@@ -440,7 +440,7 @@ class WorkspaceService:
             scan_path = spec_ws.spec_root
         except Exception:
             raise WorkspaceNotSillyspec(
-                "workspace has no platform spec to rescan.",
+                "该工作区还没有可重扫的平台 spec，请先完成扫描或同步。",
                 details={"workspace_id": str(workspace.id)},
             ) from None
 
@@ -469,7 +469,7 @@ class WorkspaceService:
         # Only the owner (created_by) may delete a workspace.
         # If created_by is None (legacy data), skip the check.
         if workspace.created_by is not None and deleted_by != workspace.created_by:
-            raise WorkspacePermissionDenied("Only the workspace owner can delete this workspace.")
+            raise WorkspacePermissionDenied("只有工作区所有者才能删除该工作区。")
 
         # 第五批 code-quality：取消该 workspace 下所有在跑 AgentRun（防软删后 daemon
         # 继续 burn token / 向已删实体回写）。复用 P0-2 链路（cancel_lease 内部含
@@ -541,7 +541,7 @@ class WorkspaceService:
                 existing = (await self._session.execute(slug_stmt)).scalars().first()
                 if existing is not None:
                     raise WorkspaceSlugDuplicate(
-                        "Another workspace already uses this slug.",
+                        "该 slug 已被其他工作区使用，请更换后重试。",
                         details={"slug": new_slug},
                     )
 
@@ -603,7 +603,10 @@ class WorkspaceService:
             Path(spec_root) / ".sillyspec" / "docs" / ws.name / "modules" / "_module-map.yaml"
         )
         if not module_map_path.is_file():
-            raise WorkspaceNotSillyspec(f"No _module-map.yaml found at {module_map_path}")
+            raise WorkspaceNotSillyspec(
+                "未找到模块清单文件 _module-map.yaml，请先完成扫描。",
+                details={"path": str(module_map_path)},
+            )
 
         with module_map_path.open("r", encoding="utf-8") as f:
             module_map = yaml.safe_load(f)
@@ -796,7 +799,7 @@ class WorkspaceService:
         daemon = await self._session.get(DaemonInstance, daemon_id)
         if daemon is None or daemon.user_id != user_id:
             raise AppError(
-                "Daemon instance does not belong to you.",
+                "该守护进程不属于当前用户，无法使用。",
                 code="daemon_not_owned",
                 http_status=403,
             )
@@ -1062,17 +1065,17 @@ class WorkspaceService:
         try:
             if not path.exists():
                 raise WorkspacePathNotFound(
-                    "The given root_path does not exist.",
+                    "工作区路径不存在，请检查路径是否正确。",
                     details={"root_path": str(path)},
                 )
             if not path.is_dir():
                 raise WorkspacePathNotDir(
-                    "The given root_path is not a directory.",
+                    "工作区路径不是一个目录，请提供目录路径。",
                     details={"root_path": str(path)},
                 )
         except PermissionError as exc:
             raise WorkspacePermissionDenied(
-                "Permission denied while inspecting root_path.",
+                "无权访问该工作区路径，请检查目录权限。",
                 details={"root_path": str(path), "error": str(exc)},
             ) from exc
 
@@ -1087,16 +1090,16 @@ class WorkspaceService:
         msg = str(exc.orig or exc).lower()
         if "uq_workspaces_root_path" in msg or "root_path" in msg:
             raise WorkspacePathDuplicate(
-                "Another workspace is already registered for this root_path.",
+                "该路径已绑定其他工作区，请勿重复添加。",
                 details={"root_path": root_path},
             ) from exc
         if "uq_workspaces_slug" in msg or "slug" in msg:
             raise WorkspaceSlugDuplicate(
-                "Another workspace already uses this slug.",
+                "该 slug 已被其他工作区使用，请更换后重试。",
                 details={"slug": slug},
             ) from exc
         # Fallback: re-raise as duplicate path which is the most common case.
         raise WorkspacePathDuplicate(
-            "Workspace uniqueness constraint violated.",
+            "工作区唯一性约束冲突，请检查路径或 slug 是否重复。",
             details={"root_path": root_path, "slug": slug},
         ) from exc

@@ -120,4 +120,4 @@ async def test_start_scan_dispatch_daemon_client_rpc_failure_raises(
                 spec_root="/data/spec-workspaces/demo",
             )
 
-    assert "root_path does not exist or is not a directory" in str(exc_info.value)
+    assert "项目根目录不存在或不是文件夹" in str(exc_info.value)

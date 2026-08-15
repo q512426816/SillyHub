@@ -57,7 +57,7 @@ class WorktreeService:
         workspace_obj = await self._get_workspace(workspace_id)
         if not workspace_obj.repo_url:
             raise WorktreeAcquireFailed(
-                "Workspace has no repo_url configured.",
+                "工作区未配置代码仓库地址，请先在工作区设置中填写仓库地址。",
                 details={"workspace_id": str(workspace_id)},
             )
 
@@ -133,10 +133,10 @@ class WorktreeService:
     ) -> WorktreeLease:
         lease = await self._get_lease(lease_id)
         if lease.user_id != user_id and not is_admin:
-            raise PermissionDenied("Not your worktree lease.")
+            raise PermissionDenied("无权操作他人的工作区租约。")
         if lease.status != "locked":
             raise WorktreeLeaseAlreadyReleased(
-                "Lease is not in locked state.",
+                "租约已不在锁定状态，无法释放。",
                 details={"status": lease.status},
             )
 
@@ -170,7 +170,7 @@ class WorktreeService:
     ) -> WorktreeLease:
         lease = await self._get_lease(lease_id)
         if lease.user_id != user_id and not is_admin:
-            raise PermissionDenied("Not your worktree lease.")
+            raise PermissionDenied("无权操作他人的工作区租约。")
         return lease
 
     async def list_(
@@ -195,10 +195,10 @@ class WorktreeService:
     ) -> WorktreeLease:
         lease = await self._get_lease(lease_id)
         if lease.user_id != user_id:
-            raise PermissionDenied("Not your worktree lease.")
+            raise PermissionDenied("无权操作他人的工作区租约。")
         if lease.status != "locked":
             raise WorktreeLeaseAlreadyReleased(
-                "Cannot extend a non-locked lease.",
+                "租约已不在锁定状态，无法续期，请重新获取租约。",
                 details={"status": lease.status},
             )
         lease.expires_at = lease.expires_at + timedelta(seconds=additional_seconds)
@@ -214,7 +214,7 @@ class WorktreeService:
         row = (await self._session.execute(stmt)).scalars().first()
         if row is None:
             raise WorktreeLeaseNotFound(
-                f"Worktree lease '{lease_id}' not found.",
+                "工作区租约不存在或已失效，请重新获取后再操作。",
                 details={"lease_id": str(lease_id)},
             )
         return row
@@ -224,18 +224,18 @@ class WorktreeService:
         row = (await self._session.execute(stmt)).scalars().first()
         if row is None:
             raise WorktreeLeaseNotFound(
-                f"Git identity '{identity_id}' not found.",
+                "Git 身份不存在，请先在个人设置中添加 Git 身份。",
                 details={"identity_id": str(identity_id)},
             )
         if row.user_id != user_id:
-            raise PermissionDenied("Not your git identity.")
+            raise PermissionDenied("无权使用他人的 Git 身份。")
         return row
 
     @staticmethod
     def _assert_identity_usable(identity: GitIdentity) -> None:
         if identity.revoked_at is not None:
             raise WorktreeAcquireFailed(
-                "Git identity has been revoked.",
+                "该 Git 身份已被吊销，请换用其它 Git 身份或重新添加。",
                 details={"identity_id": str(identity.id)},
             )
         if identity.expires_at:
@@ -247,7 +247,7 @@ class WorktreeService:
                 expires = expires.replace(tzinfo=UTC)
             if expires < datetime.now(UTC):
                 raise WorktreeAcquireFailed(
-                    "Git identity has expired.",
+                    "该 Git 身份已过期，请换用其它 Git 身份或重新添加。",
                     details={"identity_id": str(identity.id)},
                 )
 
@@ -258,7 +258,7 @@ class WorktreeService:
         row = (await self._session.execute(stmt)).scalars().first()
         if row is None:
             raise WorktreeLeaseNotFound(
-                f"Workspace '{workspace_id}' not found.",
+                "工作区不存在，请刷新后重试。",
                 details={"workspace_id": str(workspace_id)},
             )
         return row

@@ -34,6 +34,7 @@ execute(workspace, user, operation, args, lease_id?):
 ```
 
 ## 注意事项
+- **用户可见错误文案中文（2026-08-15-error-message-l10n）**：本模块面向前端用户的 raise message 已全部中文化（中文短语+行动指引，技术 ID 在 details）；守护测试 tests/core/test_error_message_l10n.py 强制新文案含 CJK。
 - 命令白名单在 `validate_operation` 硬编码，新增 git 子命令需同步放行，否则被 `GitOperationForbidden` 拦
 - `_resolve_git_identity` 失败（用户未绑 identity）直接禁执行；身份缺失是常见 403 来源
 - `_resolve_repo_dir` 优先用 lease.path，无 lease 时回退 workspace 根目录（容器内挂载路径）

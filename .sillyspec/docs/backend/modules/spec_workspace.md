@@ -36,6 +36,7 @@ bootstrap(workspace_id, user_id):
 ```
 
 ## 注意事项
+- **用户可见错误文案中文（2026-08-15-error-message-l10n）**：本模块面向前端用户的 raise message 已全部中文化（中文短语+行动指引，技术 ID 在 details）；守护测试 tests/core/test_error_message_l10n.py 强制新文案含 CJK。
 - workspace 与 SpecWorkspace 为 1:1（workspace_id 唯一索引）
 - 三种 strategy：`platform-managed` / `repo-mirrored` / `repo-native`；runtime 模块据此定位 `.runtime/` 目录
 - sync_status：`clean` / `dirty` / `conflicted`；import/sync 当前是 stub，只把状态置 clean + 更新时间

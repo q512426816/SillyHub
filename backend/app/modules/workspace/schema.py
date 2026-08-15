@@ -130,8 +130,7 @@ class WorkspaceCreate(BaseModel):
             return None
         if not _SLUG_RE.match(v):
             raise ValueError(
-                "slug must be lower-case alphanumeric with hyphens, "
-                "starting and ending with an alphanumeric character (1-100 chars)"
+                "slug 只能使用小写字母、数字和连字符，且以字母或数字开头和结尾（1-100 字符）。"
             )
         return v
 
@@ -170,8 +169,7 @@ class WorkspaceUpdate(BaseModel):
             return None
         if not _SLUG_RE.match(v):
             raise ValueError(
-                "slug must be lower-case alphanumeric with hyphens, "
-                "starting and ending with an alphanumeric character (1-100 chars)"
+                "slug 只能使用小写字母、数字和连字符，且以字母或数字开头和结尾（1-100 字符）。"
             )
         return v
 

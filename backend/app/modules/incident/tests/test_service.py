@@ -73,7 +73,7 @@ async def test_create_incident_invalid_severity(db_session):
     from app.modules.incident.schema import IncidentCreate
 
     svc = IncidentService(db_session)
-    with pytest.raises(IncidentError, match="Invalid severity"):
+    with pytest.raises(IncidentError, match="严重级别取值非法"):
         await svc.create(
             ws_id,
             user_id,
@@ -170,7 +170,7 @@ async def test_update_invalid_status(db_session):
     svc = IncidentService(db_session)
     incident = await svc.create(ws_id, user_id, IncidentCreate(title="Bad status"))
 
-    with pytest.raises(IncidentError, match="Invalid status"):
+    with pytest.raises(IncidentError, match="状态取值非法"):
         await svc.update(incident.id, IncidentUpdate(status="unknown"))
 
 
@@ -208,7 +208,7 @@ async def test_create_postmortem_not_resolved(db_session):
     svc = IncidentService(db_session)
     incident = await svc.create(ws_id, user_id, IncidentCreate(title="Open"))
 
-    with pytest.raises(IncidentError, match="only be created for resolved"):
+    with pytest.raises(IncidentError, match="仅已解决"):
         await svc.create_postmortem(
             incident.id,
             user_id,
@@ -228,7 +228,7 @@ async def test_create_postmortem_duplicate(db_session):
 
     await svc.create_postmortem(incident.id, user_id, PostmortemCreate(timeline="T"))
 
-    with pytest.raises(IncidentError, match="already exists"):
+    with pytest.raises(IncidentError, match="已存在复盘报告"):
         await svc.create_postmortem(incident.id, user_id, PostmortemCreate(timeline="T2"))
 
 
@@ -248,7 +248,7 @@ async def test_update_invalid_severity(db_session):
     svc = IncidentService(db_session)
     incident = await svc.create(ws_id, user_id, IncidentCreate(title="Bad sev"))
 
-    with pytest.raises(IncidentError, match="Invalid severity"):
+    with pytest.raises(IncidentError, match="严重级别取值非法"):
         await svc.update(incident.id, IncidentUpdate(severity="extreme"))
 
 

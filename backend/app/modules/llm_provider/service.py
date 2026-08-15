@@ -181,11 +181,11 @@ class LlmProviderService:
         row = (await self._session.execute(stmt)).scalars().first()
         if row is None:
             raise LlmProviderNotFound(
-                f"LLM provider '{provider_id}' not found.",
+                "模型供应商不存在，请刷新后重试。",
                 details={"provider_id": str(provider_id)},
             )
         if row.user_id != user_id:
-            raise PermissionDenied("Not your LLM provider.")
+            raise PermissionDenied("无权操作他人的模型供应商配置。")
         return row
 
     async def create(
@@ -546,7 +546,7 @@ class LlmProviderService:
                 await ToolPolicyService.assert_public_hostname(host)
             except SsrfBlocked as exc:
                 raise LlmProviderSsrfBlocked(
-                    "Upstream URL blocked by SSRF policy.",
+                    "上游地址被安全策略拦截（SSRF 防护），请检查供应商地址。",
                     details={"url": url, "host": host, **(exc.details or {})},
                 ) from exc
             try:
@@ -554,7 +554,7 @@ class LlmProviderService:
                     resp = await client.get(url, headers=headers)
             except httpx.TimeoutException as exc:
                 raise LlmProviderModelsTimeout(
-                    "Upstream /v1/models request timed out.",
+                    "拉取模型列表超时，请稍后重试。",
                     details={"url": url, "timeout_seconds": self._FETCH_TIMEOUT},
                 ) from exc
             except httpx.HTTPError as exc:
@@ -567,7 +567,7 @@ class LlmProviderService:
             if resp.status_code in (401, 403):
                 # 凭证被上游拒 → 立即终止（再试其它 URL 也是 401/403，无意义）
                 raise LlmProviderAuthFailed(
-                    "Upstream /v1/models rejected credentials.",
+                    "上游拒绝了当前凭证，请检查 API Key 是否正确。",
                     details={"status": resp.status_code, "url": url},
                 )
             if resp.status_code == 200:
@@ -581,14 +581,14 @@ class LlmProviderService:
         # 全候选耗尽：按最后一次失败类型分类
         if last_status in (404, 405):
             raise LlmProviderModelsUnsupported(
-                "Upstream does not expose /v1/models.",
+                "该供应商不支持拉取模型列表。",
                 details={
                     "last_status": last_status,
                     "tried_urls": candidates,
                 },
             )
         raise LlmProviderModelsAllFailed(
-            "All candidate /v1/models endpoints failed.",
+            "尝试全部候选地址后仍未拉到模型列表，请稍后重试。",
             details={
                 "last_status": last_status,
                 "last_kind": last_kind,
@@ -629,12 +629,12 @@ class LlmProviderService:
 
         if not base_url:
             raise LlmProviderModelsUnsupported(
-                "Provider has no base_url to fetch models from.",
+                "该供应商未配置接口地址，无法拉取模型列表。",
                 details={"reason": "missing_base_url"},
             )
         if not api_key_plain:
             raise LlmProviderAuthFailed(
-                "Provider has no api_key to authenticate.",
+                "该供应商未配置 API Key，无法完成鉴权。",
                 details={"reason": "missing_api_key"},
             )
         return base_url, api_key_plain, auth_field, api_format
@@ -716,13 +716,13 @@ class LlmProviderService:
             body = resp.json()
         except ValueError as exc:
             raise LlmProviderModelsAllFailed(
-                "Upstream /v1/models returned non-JSON body.",
+                "上游返回了无法解析的响应内容，请稍后重试。",
                 details={"url": url, "parse_error": str(exc)},
             ) from exc
         data = body.get("data") if isinstance(body, dict) else None
         if not isinstance(data, list):
             raise LlmProviderModelsAllFailed(
-                "Upstream /v1/models response missing 'data' list.",
+                "上游响应缺少模型列表字段，请稍后重试。",
                 details={"url": url},
             )
         models: list[FetchModelsItem] = []

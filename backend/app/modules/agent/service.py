@@ -296,7 +296,7 @@ async def resolve_work_dir(
         stat_result = await delegate.stat(workspace, workspace_root)
         if not stat_result.get("exists"):
             raise AgentRunError(
-                f"Workspace root does not exist: {workspace_root}",
+                "工作区根目录不存在，请检查工作区路径配置后重试。",
                 details={"workspace_root": workspace_root},
             )
 
@@ -423,7 +423,7 @@ class AgentService:
         task = await self._session.get(Task, task_id)
         if task is None or task.workspace_id != workspace_id:
             raise TaskNotFound(
-                f"Task '{task_id}' not found.",
+                "指定的任务不存在或不在当前工作区内，请刷新后重试。",
                 details={"task_id": str(task_id)},
             )
 
@@ -431,12 +431,12 @@ class AgentService:
         lease = await self._session.get(WorktreeLease, lease_id)
         if lease is None:
             raise WorktreeLeaseNotFound(
-                f"Lease '{lease_id}' not found.",
+                "指定的工作树租约不存在，请重新获取后再试。",
                 details={"lease_id": str(lease_id)},
             )
         if lease.status != "locked":
             raise AgentRunError(
-                "Lease is not active.",
+                "工作树租约当前不可用，可能已被释放或过期，请重新获取。",
                 details={"lease_id": str(lease_id), "status": lease.status},
             )
 
@@ -768,7 +768,7 @@ class AgentService:
         run = await self._session.get(AgentRun, run_id)
         if run is None:
             raise AgentRunNotFound(
-                f"Run '{run_id}' not found.",
+                "指定的执行记录不存在，可能已被删除。",
                 details={"run_id": str(run_id)},
             )
 
@@ -813,13 +813,17 @@ class AgentService:
         stripped = content.strip()
         if not stripped:
             raise AgentRunError(
-                "Input content must not be empty.",
+                "输入内容不能为空，请填写后再提交。",
                 details={"run_id": str(run_id)},
             )
         if len(stripped) > MAX_USER_INPUT_CHARS:
             raise AgentRunError(
-                f"Input content exceeds {MAX_USER_INPUT_CHARS} characters.",
-                details={"run_id": str(run_id), "length": len(stripped)},
+                "输入内容超过长度上限，请精简后重试。",
+                details={
+                    "run_id": str(run_id),
+                    "length": len(stripped),
+                    "max_chars": MAX_USER_INPUT_CHARS,
+                },
             )
 
         arw_stmt = select(AgentRunWorkspace).where(
@@ -829,19 +833,19 @@ class AgentService:
         arw = (await self._session.execute(arw_stmt)).scalars().first()
         if arw is None:
             raise AgentRunNotFound(
-                f"Run '{run_id}' not found.",
-                details={"run_id": str(run_id)},
+                "指定的执行记录不存在或不属于当前工作区。",
+                details={"run_id": str(run_id), "workspace_id": str(workspace_id)},
             )
 
         run = await self._session.get(AgentRun, run_id)
         if run is None:
             raise AgentRunNotFound(
-                f"Run '{run_id}' not found.",
+                "指定的执行记录不存在，可能已被删除。",
                 details={"run_id": str(run_id)},
             )
         if run.status not in ("pending", "running"):
             raise AgentRunNotRunning(
-                f"Run '{run_id}' is not running (status={run.status}).",
+                "执行已结束，无法继续提交输入。",
                 details={"run_id": str(run_id), "status": run.status},
             )
 
@@ -1249,7 +1253,7 @@ class AgentService:
         change = await self._session.get(Change, change_id)
         if change is None:
             raise AgentRunError(
-                f"Change '{change_id}' not found.",
+                "指定的变更不存在，请刷新变更列表后重试。",
                 details={"change_id": str(change_id)},
             )
 
@@ -1339,7 +1343,7 @@ class AgentService:
         prompt = load_prompt_template(prompt_template, prompt_context)
         if not prompt:
             raise AgentRunError(
-                f"Prompt template '{prompt_template}' not found or empty.",
+                "阶段提示词模板缺失或内容为空，请联系管理员检查平台配置。",
                 details={"template": prompt_template},
             )
 
@@ -1569,7 +1573,7 @@ class AgentService:
         root_stat = await delegate.stat(workspace, root_path)
         if not root_stat.get("exists") or not root_stat.get("is_dir"):
             raise AgentRunError(
-                f"root_path does not exist or is not a directory: {root_path}",
+                "项目根目录不存在或不是文件夹，请检查路径后重试。",
                 details={"root_path": root_path},
             )
 
@@ -1848,7 +1852,7 @@ class AgentService:
 
         if daemon_id is None:
             raise AgentRunError(
-                "Member has no daemon configured; cannot dispatch init lease.",
+                "当前成员尚未绑定守护进程，无法下发初始化任务；请先完成守护进程绑定。",
                 details={
                     "workspace_id": str(workspace_id),
                     "user_id": str(actor_user_id),
@@ -2009,7 +2013,7 @@ class AgentService:
         workspace = (await self._session.execute(ws_stmt)).scalars().first()
         if workspace is None:
             raise AgentRunError(
-                f"Workspace '{workspace_id}' not found.",
+                "指定的工作区不存在，请刷新后重试。",
                 details={"workspace_id": str(workspace_id)},
             )
         return workspace.root_path
@@ -2026,7 +2030,7 @@ class AgentService:
         workspace = (await self._session.execute(ws_stmt)).scalars().first()
         if workspace is None:
             raise AgentRunError(
-                f"Workspace '{workspace_id}' not found.",
+                "指定的工作区不存在，请刷新后重试。",
                 details={"workspace_id": str(workspace_id)},
             )
         return workspace

@@ -157,7 +157,7 @@ async def test_creator_cannot_approve(db_session):
     svc = ReleaseService(db_session)
     release = await svc.create(ws_id, user_id, ReleaseCreate(version="v1.0.0"))
 
-    with pytest.raises(ReleaseNotAllowed, match="Creator cannot"):
+    with pytest.raises(ReleaseNotAllowed, match="创建人不能审批"):
         await svc.approve(release.id, user_id, "approve")
 
 
@@ -172,7 +172,7 @@ async def test_double_approve_blocked(db_session):
     release = await svc.create(ws_id, creator_id, ReleaseCreate(version="v1.0.0"))
 
     await svc.approve(release.id, approver_id, "approve")
-    with pytest.raises(ReleaseError, match="Already voted"):
+    with pytest.raises(ReleaseError, match="已在该发布单投过票"):
         await svc.approve(release.id, approver_id, "approve")
 
 
@@ -233,7 +233,7 @@ async def test_deploy_production_requires_approvals(db_session):
     release.status = "staging"
     await db_session.commit()
 
-    with pytest.raises(ReleaseNotAllowed, match="requires 2 approvals"):
+    with pytest.raises(ReleaseNotAllowed, match="需要至少 2 人审批"):
         await svc.deploy(release.id)
 
 
@@ -271,7 +271,7 @@ async def test_rollback_only_from_deployed(db_session):
         ReleaseCreate(version="v1.0.0"),
     )
 
-    with pytest.raises(ReleaseError, match="Only deployed"):
+    with pytest.raises(ReleaseError, match="仅已发布的发布单可回滚"):
         await svc.rollback(release.id)
 
 
@@ -291,5 +291,5 @@ def test_check_deploy_window_outside_days():
         # Remove today to force failure
         days_without_today = [d for d in all_days if d != now.weekday()]
         policy = {"deploy_window": {"days": days_without_today, "start_hour": 0, "end_hour": 24}}
-        with pytest.raises(ReleaseNotAllowed, match="outside allowed days"):
+        with pytest.raises(ReleaseNotAllowed, match="不在允许发布的日期"):
             check_deploy_window(policy)

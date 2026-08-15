@@ -24,6 +24,7 @@ created_at: 2026-06-24T01:08:51
 - 审计写入：SQLAlchemy flush 后触发 hook → 收集变更字段 → 从 connection 拿 actor 上下文 → `_write_audit_log`。
 - 凭证加解密：`get_cipher` 缓存单例，主密钥缺失抛 `MasterKeyMissing`；密钥版本不匹配抛 `CipherKeyMismatch`。
 ## 注意事项
+- **用户可见错误文案中文（2026-08-15-error-message-l10n）**：本模块面向前端用户的 raise message 已全部中文化（中文短语+行动指引，技术 ID 在 details）；守护测试 tests/core/test_error_message_l10n.py 强制新文案含 CJK。
 - 无全局鉴权中间件，新路由必须显式声明 `Depends(require_permission(...))`，否则即公开端点。
 - `get_session` 既是 DB 会话也是审计上下文注入点，事务内修改受审计表会自动落 AuditLog。
 - 改 Settings 字段属破坏性变更，依赖方众多。

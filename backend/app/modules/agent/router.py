@@ -78,7 +78,7 @@ def _determine_run_type(agent_run: AgentRun, lease_meta: dict) -> str:
         return "scan"
     if agent_run.task_id is not None:
         return "task"
-    msg = "cannot determine run type for execution-context"
+    msg = "无法判定执行类型：缺少阶段标记与任务关联，请重新发起执行。"
     raise ValueError(msg)
 
 
@@ -169,7 +169,7 @@ async def get_execution_context(
     run = await svc.get_run(run_id)
     if run is None:
         raise AgentRunNotFound(
-            f"Agent run '{run_id}' not found.",
+            "指定的执行记录不存在，可能已被删除。",
             details={"run_id": str(run_id)},
         )
 
@@ -179,7 +179,7 @@ async def get_execution_context(
     if not await _user_owns_run(session, user.id, run_id, is_platform_admin=user.is_platform_admin):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="run not owned by current user",
+            detail="当前用户无权访问该执行记录。",
         )
 
     # -- 恢复 lease.metadata 临时参数（task-03 持久化）-----------------------
@@ -389,7 +389,7 @@ async def get_agent_run(
     run = await svc.get_run(run_id)
     if run is None:
         raise AgentRunNotFound(
-            f"Agent run '{run_id}' not found.",
+            "指定的执行记录不存在，可能已被删除。",
             details={"run_id": str(run_id)},
         )
     return await svc.enrich_with_workspace_ids(run)
@@ -410,12 +410,12 @@ async def kill_agent_run(
     run = await svc.get_run(run_id)
     if run is None:
         raise AgentRunNotFound(
-            f"Agent run '{run_id}' not found.",
+            "指定的执行记录不存在，可能已被删除。",
             details={"run_id": str(run_id)},
         )
     if run.status not in ("pending", "running"):
         raise AgentRunNotRunning(
-            f"Agent run '{run_id}' is not running (current status: {run.status}).",
+            "执行已结束或尚未开始，无法执行终止操作。",
             details={"run_id": str(run_id), "status": run.status},
         )
     await svc.kill_run(run_id)
@@ -474,7 +474,7 @@ async def get_agent_run_logs(
     run = await svc.get_run(run_id)
     if run is None:
         raise AgentRunNotFound(
-            f"Agent run '{run_id}' not found.",
+            "指定的执行记录不存在，可能已被删除。",
             details={"run_id": str(run_id)},
         )
     logs = await svc.get_run_logs(run_id, tool_kind=tool_kind, after=after)
@@ -515,7 +515,7 @@ async def stream_agent_run_logs(
             run_exit_code = run.exit_code
     if not found:
         raise AgentRunNotFound(
-            f"Agent run '{run_id}' not found.",
+            "指定的执行记录不存在，可能已被删除。",
             details={"run_id": str(run_id)},
         )
     if run_status not in ("pending", "running"):
@@ -772,7 +772,7 @@ async def get_agent_run_checkpoint(
     run_obj = await session.get(AgentRun, run_id)
     if run_obj is None:
         raise AgentRunNotFound(
-            f"Agent run '{run_id}' not found.",
+            "指定的执行记录不存在，可能已被删除。",
             details={"run_id": str(run_id)},
         )
     data = await coordinator.load_checkpoint(run_id)
@@ -799,7 +799,7 @@ async def save_agent_run_checkpoint(
     run_obj = await session.get(AgentRun, run_id)
     if run_obj is None:
         raise AgentRunNotFound(
-            f"Agent run '{run_id}' not found.",
+            "指定的执行记录不存在，可能已被删除。",
             details={"run_id": str(run_id)},
         )
     new_version = await coordinator.save_checkpoint(
@@ -1003,7 +1003,7 @@ async def create_mission(
     if cfg is None:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            "GLM endpoint not configured (ANTHROPIC_BASE_URL/AUTH_TOKEN)",
+            "GLM 服务端点未配置（ANTHROPIC_BASE_URL/AUTH_TOKEN），请联系管理员。",
         )
     planner = CoordinatorPlanner(cfg)
     mission, runs = await MissionService(session).start_mission(
@@ -1064,7 +1064,7 @@ async def get_mission(
 ) -> MissionResponse:
     mission = await session.get(AgentMission, mission_id)
     if mission is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "mission not found")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "指定的任务组不存在。")
     # NOTE: collect_completed_artifacts is NOT called on every GET — it provoked
     # connection-pool exhaustion under polling (each GET ran extra queries).
     # Artifact 回灌 is triggered explicitly (cancel) / via complete_lease hook (todo).
@@ -1083,7 +1083,7 @@ async def cancel_mission(
 ) -> MissionResponse:
     mission = await session.get(AgentMission, mission_id)
     if mission is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "mission not found")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "指定的任务组不存在。")
     ctrl = MissionControlService(session)
     await ctrl.cancel(mission)
     runs = await ctrl.worker_runs(mission.id)

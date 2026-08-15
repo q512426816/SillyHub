@@ -41,7 +41,8 @@ class FSM:
         if not self.can_transition(current, target):
             allowed = self.allowed_transitions(current)
             raise TransitionError(
-                f"Cannot transition {self.name} from '{current}' to '{target}'.",
+                f"不允许将 {self.name} 从「{current}」流转到「{target}」，"
+                f"可流转目标：{'、'.join(sorted(allowed)) or '无'}。",
                 details={
                     "fsm": self.name,
                     "current": current,

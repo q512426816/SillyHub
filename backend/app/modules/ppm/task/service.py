@@ -133,7 +133,7 @@ class PlanTaskService:
         """按 ID 取单条;不存在抛 :class:`PlanTaskNotFound`。"""
         plan = await self._session.get(PlanTask, plan_id)
         if plan is None:
-            raise PlanTaskNotFound(f"PlanTask '{plan_id}' not found.")
+            raise PlanTaskNotFound("任务不存在或已被删除。", details={"plan_task_id": str(plan_id)})
         return plan
 
     async def update(self, plan_id: uuid.UUID, data: PlanTaskUpdate) -> PlanTask:
@@ -331,7 +331,10 @@ class PlanTaskService:
         # task_execute_id 必填(start 端点创建的 in-flight 记录)
         exc = await self._session.get(TaskExecute, req.task_execute_id)
         if exc is None:
-            raise TaskExecuteNotFound(f"TaskExecute '{req.task_execute_id}' not found.")
+            raise TaskExecuteNotFound(
+                "任务执行记录不存在或已被删除。",
+                details={"task_execute_id": str(req.task_execute_id)},
+            )
         if exc.plan_task_id != plan.id:
             raise TaskError(
                 "task_execute_id 与 plan_task_id 不匹配",
@@ -408,7 +411,7 @@ class PlanTaskService:
         # 终态 90 不可再迁移
         if current == STATUS_END:
             raise IllegalStatusTransition(
-                f"Task already ended (status={current}), cannot transition to {target}.",
+                "任务已结束，不能再变更状态。请刷新后查看最新状态。",
                 details={"current": current, "target": target},
             )
 
@@ -421,7 +424,7 @@ class TaskExecuteService:
 
     async def create(self, data: TaskExecuteCreate, *, actor: User) -> TaskExecute:
         if data.status not in VALID_EXECUTE_STATUS:
-            raise TaskError(f"Invalid status: {data.status}", details={"status": data.status})
+            raise TaskError("状态取值非法，请检查后重试。", details={"status": data.status})
         # 归属校验：execute/check/current_user_id 三字段各过 resolve_owner（None 保留默认）。
         data.execute_user_id = resolve_owner(
             actor=actor, requested=data.execute_user_id, field="execute_user_id"
@@ -441,7 +444,9 @@ class TaskExecuteService:
     async def get(self, exec_id: uuid.UUID) -> TaskExecute:
         exc = await self._session.get(TaskExecute, exec_id)
         if exc is None:
-            raise TaskExecuteNotFound(f"TaskExecute '{exec_id}' not found.")
+            raise TaskExecuteNotFound(
+                "任务执行记录不存在或已被删除。", details={"task_execute_id": str(exec_id)}
+            )
         return exc
 
     async def update(
@@ -450,9 +455,7 @@ class TaskExecuteService:
         exc = await self.get(exec_id)
         payload = data.model_dump(exclude_unset=True)
         if "status" in payload and payload["status"] not in VALID_EXECUTE_STATUS:
-            raise TaskError(
-                f"Invalid status: {payload['status']}", details={"status": payload["status"]}
-            )
+            raise TaskError("状态取值非法，请检查后重试。", details={"status": payload["status"]})
         # 归属校验：仅 data 提供的三字段才校验（exclude_unset 已剔除未提供项）。
         for _field in ("execute_user_id", "check_user_id", "current_user_id"):
             if _field in payload:
@@ -568,7 +571,9 @@ class WorkHourService:
     async def get(self, wh_id: uuid.UUID) -> WorkHour:
         wh = await self._session.get(WorkHour, wh_id)
         if wh is None:
-            raise WorkHourNotFound(f"WorkHour '{wh_id}' not found.")
+            raise WorkHourNotFound(
+                "工时记录不存在或已被删除。", details={"work_hour_id": str(wh_id)}
+            )
         return wh
 
     async def update(self, wh_id: uuid.UUID, data: WorkHourUpdate, *, actor: User) -> WorkHour:

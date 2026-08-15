@@ -113,7 +113,7 @@ class ScanDocsService:
                 doc = None
         if doc is None:
             raise ScanDocNotFound(
-                "Scan doc not found.",
+                "扫描文档不存在，请先扫描工作区或刷新文档列表。",
                 details={
                     "workspace_id": str(workspace_id),
                     "doc_id_or_type": str(doc_id_or_type),

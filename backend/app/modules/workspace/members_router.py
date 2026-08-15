@@ -85,13 +85,13 @@ def _translate_service_error(
     if isinstance(exc, ValueError):
         if str(exc) == "invalid_role_key":
             return AppError(
-                "Role key is not in the workspace whitelist.",
+                "该角色不在工作区可分配的角色范围内。",
                 code="invalid_role_key",
                 http_status=status.HTTP_400_BAD_REQUEST,
             )
         if str(exc) == "cannot_remove_last_owner":
             return AppError(
-                "Cannot remove the last workspace owner.",
+                "不能移除工作区的最后一名所有者，请先转移所有权。",
                 code="cannot_remove_last_owner",
                 http_status=status.HTTP_400_BAD_REQUEST,
             )
@@ -103,15 +103,15 @@ def _translate_service_error(
                 else "HTTP_404_USER_NOT_FOUND"
             )
             message = (
-                "User is not a member of this workspace."
+                "该用户不是本工作区的成员。"
                 if mutating_existing_member
-                else "Target user does not exist or is not active."
+                else "目标用户不存在或已被停用。"
             )
             return AppError(message, code=code, http_status=status.HTTP_404_NOT_FOUND)
         if str(exc) == "role_not_seeded":
             # Defensive — a whitelisted role must be seeded by migration.
             return AppError(
-                "Workspace role is not seeded in the database.",
+                "工作区角色未初始化，请联系管理员。",
                 code="internal_error",
                 http_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
@@ -139,7 +139,7 @@ async def _row_to_view(
         # Defensive — refresh() guarantees both rows exist post-commit.
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": "internal_error", "message": "Inconsistent member row."},
+            detail="成员数据不一致，请刷新后重试。",
         )
     return WorkspaceMemberView(
         user_id=row.user_id,

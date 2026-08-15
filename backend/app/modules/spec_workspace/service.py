@@ -212,7 +212,7 @@ class SpecWorkspaceService:
         result = (await self._session.execute(stmt)).scalars().first()
         if result is None:
             raise SpecWorkspaceNotFound(
-                "Spec workspace not found for the given workspace.",
+                "未找到该工作区对应的 spec 工作区。",
                 details={"workspace_id": str(workspace_id)},
             )
         return result
@@ -302,7 +302,7 @@ class SpecWorkspaceService:
 
         if not ws_root_path:
             raise AppError(
-                "Workspace has no root_path; cannot import .sillyspec.",
+                "导入失败：该工作区未配置代码根目录（root_path），请先在工作区设置中配置后再导入。",
                 code="SPEC_IMPORT_NO_ROOT_PATH",
                 http_status=400,
             )
@@ -310,7 +310,7 @@ class SpecWorkspaceService:
             # daemon_id 必须由调用方经 binding 解析传入（router 层 MemberBindingResolver）；
             # 无 binding → 路由层已抛 DaemonClientNoActiveSession，此处兜底防御。
             raise AppError(
-                "No daemon_id resolved for workspace; cannot import .sillyspec.",
+                "导入失败：未能解析该工作区绑定的 daemon，请确认 daemon 绑定后重试。",
                 code="SPEC_IMPORT_NO_DAEMON_ID",
                 http_status=400,
             )
@@ -351,12 +351,20 @@ class SpecWorkspaceService:
         spec_ws = await self.get(workspace_id)
         ws_root_path = root_path or ""
         if not ws_root_path:
-            yield _evt("error", code="SPEC_IMPORT_NO_ROOT_PATH", message="no root_path")
+            yield _evt(
+                "error",
+                code="SPEC_IMPORT_NO_ROOT_PATH",
+                message="导入失败：未配置代码根目录（root_path），请先在工作区设置中配置",
+            )
             return
         if daemon_id is None:
             # daemon_id 必须由调用方经 binding 解析传入（router 层 MemberBindingResolver）；
             # 无 binding → 路由层已抛 DaemonClientNoActiveSession，此处兜底防御。
-            yield _evt("error", code="SPEC_IMPORT_NO_DAEMON_ID", message="no daemon_id")
+            yield _evt(
+                "error",
+                code="SPEC_IMPORT_NO_DAEMON_ID",
+                message="导入失败：未解析到 daemon，请确认 daemon 绑定后重试",
+            )
             return
 
         yield _evt("packing", phase="packing")
@@ -467,23 +475,24 @@ class SpecWorkspaceService:
         except DaemonRpcRemoteError as exc:
             if exc.code == "forbidden":
                 raise DaemonRpcForbiddenError(
-                    f"Daemon get_spec_bundle forbidden: {exc.message}",
+                    f"同步失败：daemon 拒绝访问代码目录，请检查 daemon 权限后重试（get_spec_bundle: {exc.message}）",
                     details={"daemon_id": str(ws_daemon_id), "daemon_code": exc.code},
                 ) from exc
             raise DaemonRpcRemoteGatewayError(
-                f"Daemon get_spec_bundle failed: {exc.message}",
+                f"同步失败：daemon 打包 spec 目录出错，请确认 daemon 在线后重试（get_spec_bundle: {exc.message}）",
                 details={"daemon_id": str(ws_daemon_id), "daemon_code": exc.code},
             ) from exc
         except Exception as exc:
             raise AppError(
-                f"Daemon RPC get_spec_bundle failed: {exc}",
+                "同步失败：与 daemon 的通信中断，请确认 daemon 在线后重试。",
                 code="SPEC_IMPORT_RPC_FAILED",
                 http_status=502,
+                details={"reason": str(exc)},
             ) from exc
         tar_b64 = result.get("tar_base64", "") if isinstance(result, dict) else ""
         if not tar_b64:
             raise AppError(
-                "Daemon returned empty spec bundle.",
+                "导入失败：daemon 返回的 spec 包为空，请确认代码根目录下存在 .sillyspec 后重试。",
                 code="SPEC_IMPORT_EMPTY_BUNDLE",
                 http_status=422,
             )
@@ -625,14 +634,16 @@ class SpecWorkspaceService:
         try:
             tf = tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*")  # noqa: SIM115
         except tarfile.TarError as e:
-            raise _spec_bundle_invalid("Invalid tar payload.", reason=str(e)) from e
+            raise _spec_bundle_invalid(
+                "同步包无效：tar 数据损坏或格式不对，请重新打包上传。", reason=str(e)
+            ) from e
 
         staging = Path(tempfile.mkdtemp(prefix="spec-sync-"))
         for m in tf.getmembers():
             name = m.name.replace("\\", "/")
             if name.startswith("/") or (len(name) > 1 and name[1] == ":"):
                 raise _spec_bundle_invalid(
-                    "Absolute path in tar is not allowed.",
+                    "同步包无效：不允许使用绝对路径的成员。",
                     member=m.name,
                 )
             target = (spec_root / name).resolve()
@@ -640,7 +651,7 @@ class SpecWorkspaceService:
                 target.relative_to(spec_root_resolved)
             except ValueError:
                 raise _spec_bundle_invalid(
-                    "Tar member escapes spec_root.",
+                    "同步包无效：包含越界路径的成员，已拒绝落盘。",
                     member=m.name,
                 ) from None
 
@@ -932,13 +943,13 @@ class SpecWorkspaceService:
         name = name.replace("\\", "/")
         if name.startswith("/") or (len(name) > 1 and name[1] == ":"):
             raise _spec_bundle_invalid(
-                "Absolute path in op is not allowed.",
+                "同步包无效：不允许使用绝对路径。",
                 field=field,
                 path=name,
             )
         if name.split("/", 1)[0] == ".runtime":
             raise _spec_bundle_invalid(
-                "Runtime directory ops are not allowed.",
+                "同步包无效：不允许操作 .runtime 目录。",
                 field=field,
                 path=name,
             )
@@ -947,7 +958,7 @@ class SpecWorkspaceService:
             target.relative_to(spec_root_resolved)
         except ValueError:
             raise _spec_bundle_invalid(
-                "Op path escapes spec_root.",
+                "同步包无效：路径越界，已拒绝落盘。",
                 field=field,
                 path=name,
             ) from None
@@ -1102,7 +1113,7 @@ class SpecWorkspaceService:
                 if op.op in ("add", "update"):
                     if op.content is None:
                         raise _spec_bundle_invalid(
-                            "add/update op requires content.",
+                            "同步包无效：新增/更新操作缺少文件内容。",
                             path=op.path,
                         )
                     content = base64.b64decode(op.content)
@@ -1157,7 +1168,7 @@ class SpecWorkspaceService:
                 elif op.op == "rename":
                     if op.new_path is None:
                         raise _spec_bundle_invalid(
-                            "rename op requires new_path.",
+                            "同步包无效：重命名操作缺少目标路径。",
                             path=op.path,
                         )
                     # 目标路径已被占用 → conflict（乐观锁对目标也成立）——
@@ -1173,7 +1184,7 @@ class SpecWorkspaceService:
                     if row is None:
                         if op.content is None:
                             raise _spec_bundle_invalid(
-                                "rename without source row requires content.",
+                                "同步包无效：源文件缺失的重命名操作必须携带文件内容。",
                                 path=op.path,
                             )
                         content = base64.b64decode(op.content)

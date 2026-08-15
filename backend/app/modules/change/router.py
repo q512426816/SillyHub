@@ -255,9 +255,16 @@ async def update_stage_profile(
     )
     change = (await session.execute(stmt)).scalars().first()
     if change is None:
-        raise AppError(f"Change '{change_id}' not found.", http_status=404)
+        raise AppError(
+            "变更不存在，无法绑定阶段档案。",
+            http_status=404,
+            details={"change_id": str(change_id)},
+        )
     if not change.current_stage:
-        raise AppError("Change has no current_stage to bind profile.", http_status=400)
+        raise AppError(
+            "变更尚未进入任何阶段，无法绑定阶段档案。",
+            http_status=400,
+        )
 
     # dict copy 防 SQLAlchemy JSON in-place 改不 dirty（反复踩的坑）。
     stages = dict(change.stages or {})

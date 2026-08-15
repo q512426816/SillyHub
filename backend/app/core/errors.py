@@ -250,7 +250,7 @@ class RoleInUse(AppError):
 
     def __init__(
         self,
-        message: str = "Role is in use by one or more users.",
+        message: str = "该角色仍被用户使用，无法删除。请先移除使用该角色的用户。",
         *,
         user_count: int = 0,
     ) -> None:
@@ -278,7 +278,7 @@ class OrganizationInUse(AppError):
 
     def __init__(
         self,
-        message: str = "Organization still has members.",
+        message: str = "该组织仍有成员，无法删除。请先移除组织成员。",
         *,
         member_count: int = 0,
     ) -> None:
@@ -291,7 +291,7 @@ class OrganizationHasChildren(AppError):
 
     def __init__(
         self,
-        message: str = "Organization still has child organizations.",
+        message: str = "该组织下仍有子组织，无法删除。请先删除或移出子组织。",
         *,
         children_count: int = 0,
     ) -> None:
@@ -407,7 +407,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content=_error_payload(
                 code="validation_error",
-                message="Request validation failed.",
+                message="请求参数校验失败，请检查输入格式。",
                 request_id=rid,
                 details={"errors": sanitised},
             ),
@@ -421,7 +421,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=_error_payload(
                 code="internal_error",
-                message="Internal server error.",
+                message="服务器内部错误，请稍后重试；若持续出现请联系管理员。",
                 request_id=rid,
             ),
         )

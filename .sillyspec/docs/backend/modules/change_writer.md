@@ -29,6 +29,7 @@ create_change(workspace_id, user_id, title, lease_id?):
 ```
 
 ## 注意事项
+- **用户可见错误文案中文（2026-08-15-error-message-l10n）**：本模块面向前端用户的 raise message 已全部中文化（中文短语+行动指引，技术 ID 在 details）；守护测试 tests/core/test_error_message_l10n.py 强制新文案含 CJK。
 - `change_key` = 日期 + slug + 6 位随机 hex，避免重名；slug 取标题小写化后非字母数字转 `-`
 - `_ensure_frontmatter` 保证每篇 md 带 `author` + `created_at` YAML frontmatter；已有 `---` 开头则不覆盖
 - 优先写入 lease worktree，无 lease 时落 workspace 根（容器内路径），两条路径分支不可混用

@@ -68,7 +68,7 @@ async def _assert_workspace_exists(session: AsyncSession, *, workspace_id: uuid.
     found = (await session.execute(stmt)).scalars().first()
     if found is None:
         raise WorkspaceNotFound(
-            "Workspace not found.",
+            "工作区不存在或已被删除。",
             details={"workspace_id": str(workspace_id)},
         )
 

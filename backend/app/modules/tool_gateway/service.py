@@ -94,7 +94,7 @@ def validate_path(
         target.relative_to(root)
     except ValueError:
         raise ToolPathForbidden(
-            f"Path escapes lease boundary: {requested_path}",
+            "路径越出工作区租约边界，已拒绝访问。",
             details={"path": requested_path},
         ) from None
 
@@ -107,7 +107,7 @@ def validate_path(
         )
         if not matched:
             raise ToolPathForbidden(
-                f"Path not in allowed_paths: {requested_path}",
+                "路径不在任务授权的访问范围内，已拒绝访问。",
                 details={"path": requested_path, "allowed_paths": allowed_paths},
             )
 
@@ -120,7 +120,7 @@ def validate_shell_command(command: str, args: list[str]) -> None:
     for pat in SHELL_BLOCKED_PATTERNS:
         if pat.search(combined):
             raise ToolOperationForbidden(
-                f"Blocked pattern in command: {combined[:200]}",
+                "命令包含被安全策略禁止的模式，已拦截。",
                 details={"command": command, "args": args},
             )
 
@@ -141,7 +141,7 @@ class ToolGatewayService:
     ) -> ToolOperationLog:
         if tool_type not in TOOL_TYPES:
             raise ToolOperationForbidden(
-                f"Unknown tool type: {tool_type}",
+                "未知的工具类型，请检查请求参数。",
                 details={"tool_type": tool_type, "available": sorted(TOOL_TYPES)},
             )
 
@@ -239,7 +239,10 @@ class ToolGatewayService:
         }
         handler = handlers.get(tool_type)
         if handler is None:
-            raise ToolOperationForbidden(f"Unhandled tool type: {tool_type}")
+            raise ToolOperationForbidden(
+                "不支持的工具类型，请检查请求参数。",
+                details={"tool_type": tool_type},
+            )
 
         # shell_exec / run_tests 起子进程,透传最小隔离 env(绝不继承宿主 os.environ);
         # http_get 用 httpx 不起子进程,无需 env。
@@ -591,14 +594,14 @@ class ToolGatewayService:
         lease = await self._session.get(WorktreeLease, lease_id)
         if lease is None:
             raise WorktreeLeaseNotFound(
-                f"Worktree lease '{lease_id}' not found.",
+                "工作区租约不存在或已失效，请重新获取后再操作。",
                 details={"lease_id": str(lease_id)},
             )
         if lease.user_id != user_id:
-            raise PermissionDenied("Not your worktree lease.")
+            raise PermissionDenied("无权操作他人的工作区租约。")
         if lease.status != "locked":
             raise WorktreeLeaseNotFound(
-                "Lease is not active.",
+                "工作区租约已不在锁定状态，请重新获取租约。",
                 details={"lease_id": str(lease_id), "status": lease.status},
             )
         task = await self._session.get(Task, lease.task_id) if lease.task_id else None

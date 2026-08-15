@@ -62,7 +62,7 @@ class KnowledgeService:
         from app.core.errors import WorkspaceNotFound
 
         raise WorkspaceNotFound(
-            f"Knowledge file '{filename}' not found.",
+            "知识库文件不存在，请刷新文件列表后重试。",
             details={"workspace_id": str(workspace_id), "filename": filename},
         )
 
@@ -84,7 +84,7 @@ class KnowledgeService:
         from app.core.errors import WorkspaceNotFound
 
         raise WorkspaceNotFound(
-            f"Quicklog file '{filename}' not found.",
+            "快速日志文件不存在，请刷新文件列表后重试。",
             details={"workspace_id": str(workspace_id), "filename": filename},
         )
 

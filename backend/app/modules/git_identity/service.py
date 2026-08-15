@@ -66,11 +66,11 @@ class GitIdentityService:
         row = (await self._session.execute(stmt)).scalars().first()
         if row is None:
             raise IdentityNotFound(
-                f"Git identity '{identity_id}' not found.",
+                "Git 身份不存在，请先在个人设置中添加 Git 身份。",
                 details={"identity_id": str(identity_id)},
             )
         if row.user_id != user_id:
-            raise PermissionDenied("Not your git identity.")
+            raise PermissionDenied("无权操作他人的 Git 身份。")
         return row
 
     async def create(
@@ -100,7 +100,7 @@ class GitIdentityService:
     async def revoke(self, identity_id: uuid.UUID, user_id: uuid.UUID) -> GitIdentity:
         row = await self.get(identity_id, user_id)
         if row.revoked_at is not None:
-            raise IdentityRevoked("Identity already revoked.")
+            raise IdentityRevoked("该 Git 身份已被吊销，无法重复吊销。")
         row.revoked_at = datetime.now(UTC)
         await self._session.commit()
         await self._session.refresh(row)
@@ -134,11 +134,11 @@ class GitIdentityService:
     def _assert_usable(row: GitIdentity) -> None:
         if row.revoked_at is not None:
             raise IdentityRevoked(
-                "Identity has been revoked.",
+                "该 Git 身份已吊销，请换用其它身份。",
                 details={"identity_id": str(row.id)},
             )
         if row.expires_at and row.expires_at < datetime.now(UTC):
             raise IdentityExpired(
-                "Identity has expired.",
+                "该 Git 身份已过期，请重新添加。",
                 details={"identity_id": str(row.id), "expires_at": str(row.expires_at)},
             )

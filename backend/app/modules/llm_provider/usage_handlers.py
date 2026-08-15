@@ -131,7 +131,7 @@ async def _get_json(
     resp = await client.get(url, headers=headers)
     if not (200 <= resp.status_code < 300):
         raise UsageUpstreamError(
-            f"upstream HTTP {resp.status_code}",
+            f"上游返回 HTTP {resp.status_code}，用量查询失败",
             status_code=resp.status_code,
             body=resp.text,
         )
@@ -139,7 +139,7 @@ async def _get_json(
         return resp.json()
     except ValueError as exc:
         raise UsageUpstreamError(
-            f"failed to parse response: {exc}",
+            "上游响应无法解析为 JSON。",
             status_code=None,
             body=resp.text,
         ) from exc
@@ -162,7 +162,7 @@ async def query_deepseek(
     headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
     body = await _get_json(client, url, headers)
     if not isinstance(body, dict):
-        raise UsageUpstreamError("deepseek: response is not an object", status_code=None)
+        raise UsageUpstreamError("DeepSeek 上游响应格式异常，无法解析。", status_code=None)
 
     is_available = body.get("is_available")
     is_available = is_available if isinstance(is_available, bool) else True
@@ -205,12 +205,12 @@ async def query_siliconflow(
     headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
     body = await _get_json(client, url, headers)
     if not isinstance(body, dict):
-        raise UsageUpstreamError("siliconflow: response is not an object", status_code=None)
+        raise UsageUpstreamError("硅基流动上游响应格式异常，无法解析。", status_code=None)
 
     data = body.get("data")
     if not isinstance(data, dict):
         raise UsageUpstreamError(
-            "siliconflow: missing 'data' field",
+            "硅基流动上游响应缺少数据字段，无法解析。",
             status_code=None,
         )
     total_balance = _parse_float(data.get("totalBalance")) or 0.0
@@ -242,7 +242,7 @@ async def query_openrouter(
     headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
     body = await _get_json(client, url, headers)
     if not isinstance(body, dict):
-        raise UsageUpstreamError("openrouter: response is not an object", status_code=None)
+        raise UsageUpstreamError("OpenRouter 上游响应格式异常，无法解析。", status_code=None)
 
     raw_data = body.get("data")
     data = raw_data if isinstance(raw_data, dict) else body
@@ -282,7 +282,7 @@ async def query_kimi(
     headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
     body = await _get_json(client, url, headers)
     if not isinstance(body, dict):
-        raise UsageUpstreamError("kimi: response is not an object", status_code=None)
+        raise UsageUpstreamError("Kimi 上游响应格式异常，无法解析。", status_code=None)
 
     tiers: list[UsageData] = []
 
@@ -406,16 +406,20 @@ async def query_zhipu(
     }
     body = await _get_json(client, url, headers)
     if not isinstance(body, dict):
-        raise UsageUpstreamError("zhipu: response is not an object", status_code=None)
+        raise UsageUpstreamError("智谱上游响应格式异常，无法解析。", status_code=None)
 
     if body.get("success") is False:
         msg = body.get("msg")
         msg = msg if isinstance(msg, str) else "unknown error"
-        raise UsageUpstreamError(f"zhipu business error: {msg}", status_code=None)
+        raise UsageUpstreamError(
+            "智谱上游返回业务错误，用量查询失败。",
+            status_code=None,
+            body=msg,
+        )
 
     data = body.get("data")
     if not isinstance(data, dict):
-        raise UsageUpstreamError("zhipu: missing 'data' field", status_code=None)
+        raise UsageUpstreamError("智谱上游响应缺少数据字段，无法解析。", status_code=None)
 
     level = data.get("level")
     level = level if isinstance(level, str) and level else None
@@ -488,7 +492,7 @@ async def query_minimax(
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     body = await _get_json(client, url, headers)
     if not isinstance(body, dict):
-        raise UsageUpstreamError("minimax: response is not an object", status_code=None)
+        raise UsageUpstreamError("MiniMax 上游响应格式异常，无法解析。", status_code=None)
 
     base_resp = body.get("base_resp")
     if isinstance(base_resp, dict):
@@ -497,7 +501,8 @@ async def query_minimax(
             msg = base_resp.get("status_msg")
             msg = msg if isinstance(msg, str) else "unknown error"
             raise UsageUpstreamError(
-                f"minimax business error (code {status_code}): {msg}",
+                "MiniMax 上游返回业务错误，用量查询失败。",
                 status_code=None,
+                body=f"code {status_code}: {msg}",
             )
     return _parse_minimax_tiers(body)

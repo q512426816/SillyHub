@@ -51,7 +51,7 @@ async def test_get_skill_content_non_whitelist_404(
 
     resp = await client.get("/api/daemon/skills/notspec-foo/content", headers=auth_headers)
     assert resp.status_code == 404
-    assert "not in sillyspec-* whitelist" in resp.json()["message"]
+    assert "不在平台技能列表内" in resp.json()["message"]
 
 
 async def test_get_skill_content_missing_skill_md_404(
@@ -63,7 +63,7 @@ async def test_get_skill_content_missing_skill_md_404(
 
     resp = await client.get("/api/daemon/skills/sillyspec-empty/content", headers=auth_headers)
     assert resp.status_code == 404
-    assert "has no SKILL.md" in resp.json()["message"]
+    assert "缺少 SKILL.md" in resp.json()["message"]
 
 
 async def test_get_skill_content_too_large_413(client, auth_headers, tmp_path, monkeypatch) -> None:
@@ -73,7 +73,7 @@ async def test_get_skill_content_too_large_413(client, auth_headers, tmp_path, m
 
     resp = await client.get("/api/daemon/skills/sillyspec-big/content", headers=auth_headers)
     assert resp.status_code == 413
-    assert "exceeds 1 MiB" in resp.json()["message"]
+    assert "超过 1 MiB 上限" in resp.json()["message"]
 
 
 async def test_get_skill_content_traversal_immune(

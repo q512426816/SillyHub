@@ -304,7 +304,9 @@ def create_app() -> FastAPI:
                 .first()
             )
             if row is None or _quick_chat_lease_owner(row["lease_metadata"]) != str(user_id):
-                raise HTTPException(status_code=404, detail="Run not found")
+                raise HTTPException(
+                    status_code=404, detail="运行记录不存在或已被删除，请刷新后重试。"
+                )
             out = dict(row)
             raw_id = out["id"]
             if isinstance(raw_id, str):
@@ -444,7 +446,9 @@ def create_app() -> FastAPI:
             try:
                 parsed = _uuid.UUID(run_id)
             except (ValueError, TypeError):
-                raise HTTPException(status_code=404, detail="Run not found") from None
+                raise HTTPException(
+                    status_code=404, detail="运行记录不存在或已被删除，请刷新后重试。"
+                ) from None
 
             # task-08（D-005@v1/D-001@v1）：归属校验（不匹配/链缺失 404）+ 一次查询取行。
             row = await _assert_quick_chat_run_owner(
@@ -491,7 +495,9 @@ def create_app() -> FastAPI:
             try:
                 parsed = _uuid.UUID(run_id)
             except (ValueError, TypeError):
-                raise HTTPException(status_code=404, detail="Run not found") from None
+                raise HTTPException(
+                    status_code=404, detail="运行记录不存在或已被删除，请刷新后重试。"
+                ) from None
 
             # 校验：短 session，校验完即归还连接池 slot（不贯穿 SSE 生命周期）。
             # task-08（D-005@v1/D-001@v1）：查询扩展为带归属判定的 JOIN——
@@ -501,7 +507,9 @@ def create_app() -> FastAPI:
                 row = await _assert_quick_chat_run_owner(session, parsed, user.id)
                 status_val = row["status"]
             if status_val is None:  # pragma: no cover — helper 不通过即 404，防御兜底
-                raise HTTPException(status_code=404, detail="Run not found")
+                raise HTTPException(
+                    status_code=404, detail="运行记录不存在或已被删除，请刷新后重试。"
+                )
 
             sse_headers = {
                 "Cache-Control": "no-cache, no-transform",
@@ -553,7 +561,9 @@ def create_app() -> FastAPI:
             try:
                 parsed = _uuid.UUID(run_id)
             except (ValueError, TypeError):
-                raise HTTPException(status_code=404, detail="Run not found") from None
+                raise HTTPException(
+                    status_code=404, detail="运行记录不存在或已被删除，请刷新后重试。"
+                ) from None
 
             # task-08（D-005@v1/D-001@v1）：归属校验先于终态幂等判断——
             # 他人 run 即使已终态也 404，不泄露 run 存在性 / 状态。
@@ -592,7 +602,9 @@ def create_app() -> FastAPI:
             try:
                 parsed = _uuid.UUID(run_id)
             except (ValueError, TypeError):
-                raise HTTPException(status_code=404, detail="Run not found") from None
+                raise HTTPException(
+                    status_code=404, detail="运行记录不存在或已被删除，请刷新后重试。"
+                ) from None
 
             # task-08（D-005@v1/D-001@v1）：归属校验（不匹配/链缺失 404）。
             await _assert_quick_chat_run_owner(session, parsed, user.id)
