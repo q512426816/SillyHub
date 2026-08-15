@@ -17,6 +17,7 @@
 // 蓝图 task-04.md / task-12.md / task-11.md。
 
 import { createHash } from 'node:crypto';
+import { spawn as cpSpawn, type ChildProcess } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, relative, isAbsolute, dirname, resolve, sep as pathSep } from 'node:path';
 import { mkdir, rm, readdir, stat, lstat, readlink, symlink, cp, readFile, writeFile } from 'node:fs/promises';
@@ -432,14 +433,31 @@ async function writeLocalManifest(wsId: string, m: LocalManifest): Promise<void>
   }
 }
 
+// ── 上传链路统一排除（2026-08-15-init-trigger-sillyspec-init / task-07 / FR-06 / D-008@v2）──
+//
+// projects/ 目录（projects/<name>.yaml 含成员机器绝对路径等本地环境信息）从 daemon 全部
+// 三条上传链路排除：computeIncrementalOps 增量 walk（diff 用）、buildFullManifest 全量
+// 快照（首同步/回退 tar 后写缓存用）、packSpecDir 回退 tar 打包。三处必须共用本常量
+//（N-01 复核收口：只改增量会引入「缓存有 projects 行 + walk 无 → delete op 误删服务器行」）。
+// pull 路径（extractTar 解包）**不**排除——服务器已有（历史遗留）projects 行 pull 仍落地本地无妨。
+const UPLOAD_EXCLUDE_TOP_BASE = new Set(['.runtime', 'runtime', 'projects']);
+const UPLOAD_PRUNE_NAMES_BASE = new Set(['worktrees']);
+
+/** relPath 是否命中上传排除（对齐 walkDir 剪枝口径：pruneTop 看首段 / pruneNames 看任意段 basename）。
+ *  computeIncrementalOps 对缓存残留行（旧状态曾上传、现在 walk 已排除的路径）跳过 diff 用，
+ *  防生成 delete op 误删服务器行（task-07 acceptance 第 4 条）。 */
+function isUploadExcludedPath(relPath: string): boolean {
+  const segs = relPath.split('/');
+  if (UPLOAD_EXCLUDE_TOP_BASE.has(segs[0] ?? '')) return true;
+  return segs.some((s) => UPLOAD_PRUNE_NAMES_BASE.has(s));
+}
+
 /** 全量快照清单（旧 tar 落盘后/首同步用）：version=0（服务器清单已清 Q7，下次增量 R-07 重建）。 */
 async function buildFullManifest(specRoot: string): Promise<LocalManifest> {
   const files: Record<string, ManifestFileEntry> = {};
-  const entries = await walkDir(
-    specRoot,
-    new Set(['.runtime', 'runtime']),
-    new Set(['worktrees']),
-  );
+  // 三处排除统一（task-07）：UPLOAD_EXCLUDE_TOP_BASE / UPLOAD_PRUNE_NAMES_BASE
+  //（与 computeIncrementalOps / packSpecDir 共用常量，勿各自内联——防再漂移）。
+  const entries = await walkDir(specRoot, UPLOAD_EXCLUDE_TOP_BASE, UPLOAD_PRUNE_NAMES_BASE);
   for (const e of entries) {
     if (e.isDir) continue;
     const content = await readFile(e.absPath);
@@ -484,8 +502,8 @@ export class SpecPushConflict extends Error {
  *   1. 读本地清单缓存 ~/.sillyhub/daemon/manifests/{ws}.json（移出 specDir，BL-4/R-03）。
  *   2. **首同步**（无缓存）：走旧 tar `client.postSpecSync(wsId, packSpecDir(specRoot))`，
  *      成功后写全量快照缓存（R-07：version=0，服务器清单已清）。
- *   3. **增量路径**：walk specDir（排除 .runtime(有点)/runtime(无点)/worktrees，D-006）
- *      逐文件 hash（mtime 未变复用缓存 hash，R-05）→ 与缓存 diff 生成 ops
+ *   3. **增量路径**：walk specDir（排除 .runtime(有点)/runtime(无点)/worktrees/projects，
+ *      D-006 + task-07）逐文件 hash（mtime 未变复用缓存 hash，R-05）→ 与缓存 diff 生成 ops
  *      （新文件 add / 内容变 update / 缓存有本地无 delete / 同 hash 异路径 rename 不重传
  *      内容，R-02 注意 Windows 大小写）；op 带 per-file base_version（缓存 version，无 0）。
  *   4. `client.postSpecSyncIncremental(wsId, ops, changeWriteId, changeDirs)`：
@@ -599,11 +617,9 @@ async function computeIncrementalOps(
   specRoot: string,
   cached: LocalManifest,
 ): Promise<{ ops: FileOp[]; localFiles: Record<string, { hash: string; mtime: number }> }> {
-  const entries = await walkDir(
-    specRoot,
-    new Set(['.runtime', 'runtime']),
-    new Set(['worktrees']),
-  );
+  // 三处排除统一（task-07）：UPLOAD_EXCLUDE_TOP_BASE / UPLOAD_PRUNE_NAMES_BASE
+  //（与 buildFullManifest / packSpecDir 共用常量，勿各自内联——防再漂移）。
+  const entries = await walkDir(specRoot, UPLOAD_EXCLUDE_TOP_BASE, UPLOAD_PRUNE_NAMES_BASE);
 
   // 第一遍：逐文件 hash（R-05：mtime 未变复用缓存 hash），保留 content buffer 供 add/update。
   const localFiles: Record<string, { hash: string; mtime: number }> = {};
@@ -626,7 +642,12 @@ async function computeIncrementalOps(
 
   const localPaths = Object.keys(localFiles);
   const localSet = new Set(localPaths);
-  const cacheSet = new Set(Object.keys(cached.files));
+  // task-07（关键边界）：缓存残留的排除路径行（旧状态曾上传的 projects/ 等文件）不参与
+  // diff——不剔除会因「缓存有、本地无」生成 delete/rename op 误删服务器行。剔除后该行
+  // 自然从回写缓存（buildManifestFromLocal 只装 localFiles）中消失，下次 diff 不再出现。
+  const cacheSet = new Set(
+    Object.keys(cached.files).filter((p) => !isUploadExcludedPath(p)),
+  );
 
   // rename 检测：旧路径（缓存有、本地无）↔ 新路径（本地有、缓存无）内容 hash 相同。
   const renames: Array<{ oldPath: string; newPath: string }> = [];
@@ -816,6 +837,9 @@ export async function syncSpecTreeIfNeeded(
  *     触发 asyncpg `invalid byte sequence 0x00` → 整批 INSERT 回滚 HTTP 500 →「同步到服务器」
  *     恒失败（ql-20260813-007 根治）。进度库不跨机同步，服务器侧进度以 platform_sync 投影为准。
  *   - `worktrees`（任意深度）：sillyspec worktree 工作区，可达 GB，非 spec 数据。
+ *   - `projects`（顶层）：projects/<name>.yaml 含成员机器绝对路径等本地环境信息，
+ *     非平台可同步的 spec 数据（task-07 / FR-06 / D-008@v2——三链路统一排除，常量
+ *     UPLOAD_EXCLUDE_TOP_BASE）。
  *
  * 契约（ql-20260813-007）：`.runtime` 整树**默认排除**（与 backend `build_bundle` 的 pull 方向
  * 任意深度排除对称，不再有 D-003@v1 的 push/pull 非对称）。`opts.excludeRuntime` 保留为冗余开关
@@ -837,16 +861,16 @@ export async function packSpecDir(
     onWalkComplete?: (filesCount: number) => void;
   } = {},
 ): Promise<Buffer> {
-  const excludeTop = new Set<string>(opts.excludeNames ?? []);
-  // ql-20260813-007：`.runtime`（有点）整树无条件默认排除——sillyspec 进度库(sillyspec.db)是
-  // SQLite 二进制含 NUL 字节，audit.log/扫描历史等是运行时日志，无一是 spec 数据。曾因 NUL 写进
-  // 后端 scan_documents 文本列触发 asyncpg 0x00 报错整批回滚 500。runtime(无点) 同理默认排除，
-  // worktrees 是 sillyspec 工作区可达 GB。opts.excludeRuntime 现为冗余（默认已排除），保留兼容旧调用。
-  excludeTop.add('.runtime');
-  excludeTop.add('runtime');
+  // 三处排除统一（task-07 / FR-06 / D-008@v2）：base 用共享常量
+  // UPLOAD_EXCLUDE_TOP_BASE（含 projects——成员机器绝对路径不上传）/
+  // UPLOAD_PRUNE_NAMES_BASE，与 computeIncrementalOps / buildFullManifest 共用，勿漂移。
+  const excludeTop = new Set<string>([
+    ...(opts.excludeNames ?? []),
+    ...UPLOAD_EXCLUDE_TOP_BASE,
+  ]);
   // ql-20260813-007：.runtime 同时加 pruneNames（任意深度 basename）——防止嵌套子目录里的
   // .runtime（如 sub/.runtime/cache）漏排。对齐 backend build_bundle 的 any(part==".runtime")。
-  const pruneNames = new Set(['worktrees', '.runtime']);
+  const pruneNames = new Set([...UPLOAD_PRUNE_NAMES_BASE, '.runtime']);
   const chunks: Buffer[] = [];
   // excludeTop(顶层首段) + pruneNames(任意深度 basename) 传 walkDir 剪枝：命中目录不收集、
   // 不递归，既省 tar 写入也省遍历（.runtime 2G worktrees / changes 万级文件 不递归进去）。
@@ -1244,6 +1268,220 @@ export async function bumpLocalSpecVersion(
   }
 }
 
+// ── runSillyspecInit（2026-08-15-init-trigger-sillyspec-init / task-04 / D-006）──
+//
+// init lease 编排里的 `sillyspec init` 子进程执行器（D-001@v1 方案A：daemon spawn CLI，
+// 单一真相源，不 import sillyspec 内部模块）。
+//
+// 两步：
+//   步骤 0：版本门控（D-009）——spawn 'sillyspec --version'（shell:true，3s 超时），semver
+//     低于 MIN_SILLYSPEC_VERSION_FOR_INIT → ok:false + sillyspec_init_cli_too_old（老 CLI
+//     静默忽略 --no-skills/--tool 多值且 exit 0，preflight 仅启动跑一次不自愈，故每次
+//     init 前独立门控；用户升级 CLI 后无需重启 daemon）。
+//   步骤 1：spawn `sillyspec init --dir <rootPath> --spec-dir <specCacheRoot>
+//     --workspace-id <wsId> --no-skills --tool <tools>`（60s 超时，D-006）。
+//
+// 超时杀树范式对齐 preflight.ts runWithTreeKill（私有未导出，此处自实现，不跨模块 import）：
+// Windows taskkill /PID /T /F（npm.cmd wrapper 孙进程）/ POSIX detached:true 进程组 kill(-pid)。
+//
+// 覆盖：design.md §2（daemon 侧编排）/ §6（与 preflight 衔接）；decisions.md D-001@v1 /
+// D-004@v1（--no-skills）/ D-006@v1（60s 超时）/ D-009@v1（版本门控）。
+
+/**
+ * init 所需 sillyspec CLI 最低版本（D-009 门控比对值）。
+ *
+ * 3.26.8：含 --no-skills 开关 + --tool 多值 + 平台模式跳过项目内清理段
+ * （task-01/02/03 三项，本机 npm link 验证版）。正式 npm 发版后若版本号更高，
+ * 本常量保持 3.26.8 即可（门控语义是"不低于最低要求"，无需跟随最新版）。
+ */
+export const MIN_SILLYSPEC_VERSION_FOR_INIT = '3.26.8';
+
+/** 版本门控 spawn 超时（ms）。--version 是纯本地命令，3s 充裕。 */
+const VERSION_CHECK_TIMEOUT_MS = 3_000;
+
+/** sillyspec init spawn 超时（ms，D-006：init 纯本地 fs+SQLite 无网络，60s 充裕）。 */
+const INIT_SPAWN_TIMEOUT_MS = 60_000;
+
+/** error 信息里 stdout/stderr 收集的截断上限（便于排查又不刷屏）。 */
+const INIT_OUTPUT_TRUNCATE = 2_000;
+
+/** spawn 实现的最小接口（依赖注入：默认 node:child_process.spawn，测试注入 mock）。 */
+export type SpawnFn = typeof cpSpawn;
+
+/** runSillyspecInit 参数。 */
+export interface RunSillyspecInitParams {
+  /** 成员本地项目根（--dir）。 */
+  rootPath: string;
+  /** daemon spec 缓存根 = resolveSpecDir(wsId)（--spec-dir，外部规范目录）。 */
+  specCacheRoot: string;
+  /** 工作区 id（--workspace-id，平台模式信号 → CLI 落平台指针）。 */
+  wsId: string;
+  /** 目标 agent 工具列表（--tool 逗号连接；空数组/缺省兜底 ['claude']，D-005@v1）。 */
+  tools?: string[];
+}
+
+/** runSillyspecInit 结果。 */
+export interface RunSillyspecInitResult {
+  ok: boolean;
+  /** 失败原因。前缀：sillyspec_init_cli_too_old（版本门控）/ sillyspec_init_failed（退出码非 0 / 超时 / spawn 失败）。 */
+  error?: string;
+}
+
+/**
+ * 解析 'x.y.z' semver 为数字三元组。
+ *
+ * 容忍 'v' 前缀与尾缀（'v3.26.7' / '3.30.0-beta'——尾缀忽略，只比主段）；空段补 0
+ * （'3.30' ≙ [3,30,0]）。任一主段非整数 → null（解析失败，门控 fail-safe 按不过处理）。
+ * 纯函数，export 供单测直接覆盖。
+ */
+export function parseSemver(raw: string): [number, number, number] | null {
+  const m = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/.exec(raw.trim());
+  if (!m) return null;
+  const seg = [m[1], m[2], m[3]].map((s) => (s === undefined ? 0 : Number.parseInt(s, 10)));
+  if (seg.some((n) => !Number.isFinite(n))) return null;
+  return [seg[0]!, seg[1]!, seg[2]!];
+}
+
+/** 两版本比较：a < b → -1 / a > b → 1 / 相等 → 0。任一解析失败 → null（门控 fail-safe）。 */
+function compareSemver(a: string, b: string): number | null {
+  const av = parseSemver(a);
+  const bv = parseSemver(b);
+  if (av === null || bv === null) return null;
+  for (let i = 0; i < 3; i++) {
+    if (av[i]! < bv[i]!) return -1;
+    if (av[i]! > bv[i]!) return 1;
+  }
+  return 0;
+}
+
+/** 杀整个进程树（范式对齐 preflight.ts:360 killTree，自实现不跨模块 import）。 */
+function killInitTree(child: ChildProcess, spawnFn: SpawnFn): void {
+  const pid = child.pid;
+  if (typeof pid !== 'number') return;
+  try {
+    if (process.platform === 'win32') {
+      // taskkill /T 杀树（含 npm.cmd spawn 的孙 node.exe），/F 强制。
+      spawnFn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+    } else {
+      // 进程组 kill（spawn 时 detached:true 使子自成组长，负 pid 杀整组）；失败兜底单杀。
+      try {
+        process.kill(-pid, 'SIGKILL');
+      } catch {
+        process.kill(pid, 'SIGKILL');
+      }
+    }
+  } catch {
+    // 杀树失败不抛（最坏孙进程残留；不阻塞 daemon）。
+  }
+}
+
+/**
+ * spawn 命令 + 超时杀树，收集 stdout/stderr（范式对齐 preflight.ts:393 runWithTreeKill，
+ * 差异：额外捕获 stderr 进输出，供 error 信息排查）。
+ *
+ * 返回：exit 0 → { ok:true, output }；非 0 / 超时（timedOut=true）/ spawn error →
+ * { ok:false, output, timedOut }。
+ */
+function runInitCmd(
+  cmd: string,
+  timeoutMs: number,
+  spawnFn: SpawnFn,
+): Promise<{ ok: boolean; output: string; timedOut: boolean }> {
+  return new Promise((resolve) => {
+    const child = spawnFn(cmd, {
+      shell: true, // X-06：bare name（sillyspec）在 Windows 必 ENOENT，shell 解析 .cmd wrapper
+      detached: process.platform !== 'win32', // POSIX 进程组 kill 前置条件
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const outChunks: Buffer[] = [];
+    let settled = false;
+    const finish = (ok: boolean, timedOut: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({
+        ok,
+        output: Buffer.concat(outChunks).toString('utf-8'),
+        timedOut,
+      });
+    };
+    if (child.stdout) child.stdout.on('data', (c: Buffer) => outChunks.push(c));
+    if (child.stderr) child.stderr.on('data', (c: Buffer) => outChunks.push(c));
+    child.on('error', () => finish(false, false)); // ENOENT 等 spawn 失败
+    child.on('close', (code) => finish(code === 0, false));
+    const timer = setTimeout(() => {
+      killInitTree(child, spawnFn);
+      finish(false, true);
+    }, timeoutMs);
+  });
+}
+
+/**
+ * 执行 `sillyspec init`（平台模式参数，task-04 / design §2）。
+ *
+ * 步骤 0 版本门控（D-009）：`sillyspec --version`（shell:true，3s）< MIN_SILLYSPEC_VERSION_FOR_INIT
+ * → ok:false + sillyspec_init_cli_too_old + 中文升级指引（重启 daemon 或 npm install -g
+ * sillyspec@latest——升级 CLI 后无需重启 daemon，下次 init 门控即通过）。门控查询失败
+ * （spawn 失败 / 超时 / 版本解析失败）同样 fail-safe 按门控不过（ok:false，cli_too_old 前缀），
+ * 不冒险对一个版本未知的 CLI 发 --no-skills/--tool 多值（老 CLI 静默忽略且 exit 0，
+ * 会产出错误骨架假成功）。
+ *
+ * 步骤 1 init spawn（60s 超时杀树，D-006）：
+ *   sillyspec init --dir <rootPath> --spec-dir <specCacheRoot> --workspace-id <wsId>
+ *                   --no-skills --tool <tools.join(',')>
+ *   - 退出码 0 → ok:true
+ *   - 非 0 / 超时 / spawn 失败 → ok:false + sillyspec_init_failed（stdout/stderr 截断收集进 error）
+ *   - tools 空数组/缺省 → 兜底 ['claude']（D-005@v1）
+ *
+ * 纯编排函数：spawn 经 spawnFn 注入（默认 node:child_process.spawn），供单测 mock。
+ *
+ * @param params rootPath/specCacheRoot/wsId 必填；tools 可选
+ * @param spawnFn 可选 spawn 实现（测试注入）；缺省 node:child_process.spawn
+ */
+export async function runSillyspecInit(
+  params: RunSillyspecInitParams,
+  spawnFn: SpawnFn = cpSpawn,
+): Promise<RunSillyspecInitResult> {
+  // ── 步骤 0：版本门控（D-009）───────────────────────────────────────────────
+  // 查询失败 / 解析失败 → cmp=null → 走同一 fail-fast 分支（门控不过保守处理）。
+  const ver = await runInitCmd('sillyspec --version', VERSION_CHECK_TIMEOUT_MS, spawnFn);
+  const cmp = ver.ok ? compareSemver(ver.output.trim(), MIN_SILLYSPEC_VERSION_FOR_INIT) : null;
+  if (cmp === null || cmp < 0) {
+    const detected = ver.ok ? ver.output.trim().split(/\r?\n/)[0] ?? '' : '(版本查询失败)';
+    return {
+      ok: false,
+      error: `sillyspec_init_cli_too_old: 本机 sillyspec 版本过低（探测到 ${detected || '未知'}，需 ≥ ${MIN_SILLYSPEC_VERSION_FOR_INIT}），未执行 init。请升级后重试：重启 daemon（preflight 自动升级）或手动执行 npm install -g sillyspec@latest；升级 CLI 后无需重启 daemon，下次 init 自动通过。`,
+    };
+  }
+
+  // ── 步骤 1：spawn init（60s 超时杀树，D-006）───────────────────────────────
+  const tools = params.tools && params.tools.length > 0 ? params.tools : ['claude']; // D-005 兜底
+  // 路径值带双引号（Windows 项目路径常含空格，shell:true 下裸拼会被拆参）；wsId/tools
+  // 是无空格 id（resolveSpecDir 已拒路径分隔符），不需要引号。
+  const cmd = [
+    'sillyspec init',
+    `--dir "${params.rootPath}"`,
+    `--spec-dir "${params.specCacheRoot}"`,
+    `--workspace-id ${params.wsId}`,
+    '--no-skills', // D-004：skills 只走 skill-manager 单渠道
+    `--tool ${tools.join(',')}`,
+  ].join(' ');
+  const init = await runInitCmd(cmd, INIT_SPAWN_TIMEOUT_MS, spawnFn);
+  if (init.ok) return { ok: true };
+  const detail = init.output.trim().slice(0, INIT_OUTPUT_TRUNCATE);
+  const reason = init.timedOut
+    ? `超时（>${Math.round(INIT_SPAWN_TIMEOUT_MS / 1000)}s 已终止进程树）`
+    : `退出码非 0`;
+  return {
+    ok: false,
+    error: `sillyspec_init_failed: ${reason}${detail ? `；输出：${detail}` : ''}`,
+  };
+}
+
 // ── daemon 状态文件 + init lease 编排（D-001@v1 / task-01~05）──────────────────
 //
 // D-001@v1：daemon 退出 .sillyspec-platform.json 写入（交 sillyspec 工具独占），
@@ -1334,11 +1572,23 @@ export interface HandleInitLeaseParams {
   /**
    * init 下发的 local.yaml token 段（design §5.4 / §7.2）。
    *
-   * task-07 task-runner 从 ctx.platformConfig.local_yaml 透传入此字段；缺失时跳过第 4 步
+   * task-07 task-runner 从 ctx.platformConfig.local_yaml 透传入此字段；缺失时跳过第 5 步
    * （向后兼容无 token 的旧 lease / mock client）。url 由 params.serverOrigin 提供
    * （task-07 从 task-runner.config.server_url 透传，不读 payload.server_origin，对齐 D-002）。
    */
   local_yaml?: { platform_token: string; mcp_token: string };
+  /**
+   * init 目标工具列表（task-05 / D-005@v1 / D-007@v1）：cli.ts 构造 TaskRunner 前
+   * AgentDetector 探测结果映射 sillyspec VALID_TOOLS 同名交集后的子集，经 TaskRunner
+   * detectedAgents 透传至此。缺省 / 空数组 → runSillyspecInit 内兜底 ['claude']。
+   */
+  tools?: string[];
+  /**
+   * spawn 实现（runSillyspecInit 依赖注入，task-04）：缺省 node:child_process.spawn；
+   * 测试注入 mock 使 init 步骤恒成功/失败（test_init_lease.test.ts 既有全局 spawn mock
+   * 返 null 会击穿本步骤，X-14）。
+   */
+  spawnFn?: SpawnFn;
 }
 
 /**
@@ -1360,9 +1610,9 @@ export interface HandleInitLeaseResult {
 }
 
 /**
- * init lease 完整处理（design §5 / §9 生命周期：config_written → bundle_pulled → local_pushed）。
+ * init lease 完整处理（design §2 / §5 / §9 生命周期：config_written → bundle_pulled → init_run → local_pushed）。
  *
- * 编排 5 步（顺序严格，任一硬失败即 abort）：
+ * 编排 6 步（顺序严格，硬失败步骤即 abort；rev2 时序 D-002@v2：init 后置于 pull）：
  *   1. **writeDaemonState**：写 2 字段 daemon 状态文件到 {resolveSpecDir(workspaceId)}/.runtime/。
  *      spec_version 取 latestSpecVersion（lease 下发）兜底 0。失败 → ok=false abort
  *      （状态文件是 daemon 保鲜基线，写失败后续保鲜失效，不降级）。D-001@v1：不再写 .sillyspec-platform.json。
@@ -1370,16 +1620,23 @@ export interface HandleInitLeaseResult {
  *      内部含 task-12 pull 前回灌保护（hasUnsyncedLocalChanges）+ task-11 三分支 strategy。
  *      失败 → ok=false abort（pull 失败客户端无缓存可用，init 无意义）。404 容错在
  *      pullSpecBundle 内部已处理（首次 scan backend 无 bundle → mkdir 空目录，不算失败）。
- *   3. **postSpecSync**：若 pull 拿到 specDir 且本地有改动 → 回灌到服务器。失败**不 abort**
- *      （R-03：sync 失败仅 warn，状态文件已写、pull 缓存已就位，init 主体成功；
- *      本地改动下次任务前会再被 pull 前回灌保护触发重试，自愈）。
- *   4. **writeLocalYaml**（design §5.4 / D-003 严格契约）：仅当 params.local_yaml 存在
+ *      整删重建语义保留（bundle 为权威内容）——init 骨架必须后置于 pull，否则被 rm -rf
+ *      物理删除（D-002@v2）。
+ *   3. **runSillyspecInit**（task-04 产物，硬失败 abort，D-003@v1）：spawn
+ *      `sillyspec init --dir rootPath --spec-dir specCacheRoot --workspace-id wsId
+ *      --no-skills --tool tools`（60s 超时杀树 + 版本门控 D-009）。失败 → ok=false abort
+ *      且 postSpecSync/writeLocalYaml 不执行（init 产物是 init lease 核心目的而非锦上添花）。
+ *   4. **postSpecSync**：若 pull 拿到 specDir 且本地有改动 → 回灌到服务器（init 新增骨架
+ *      经增量 diff add op 回传，D-008@v2 同 hash no-op）。失败**不 abort**（R-03：sync
+ *      失败仅 warn，状态文件已写、pull 缓存已就位，init 主体成功；本地改动下次任务前会
+ *      再被 pull 前回灌保护触发重试，自愈）。
+ *   5. **writeLocalYaml**（design §5.4 / D-003 严格契约）：仅当 params.local_yaml 存在
  *      （platformConfig.local_yaml 非空）时执行——向 {rootPath}/.sillyspec/local.yaml
  *      写 platform 段（权威覆盖）+ mcp 段（有才留）。url 用 params.serverOrigin（task-07
  *      从 config.server_url 透传，不读 payload.server_origin，对齐 D-002）。失败 → ok=false
  *      abort（对齐步骤 1/2 的逐步 catch 范式，不向上抛；D-003：写盘失败 = init 整体失败，
  *      _runInitLease 据 result.ok===false 走 _finish(false) → lease 标 failed）。
- *   5. 返回结果：specVersion = 状态文件落盘的 spec_version（= latestSpecVersion 兜底 0），
+ *   6. 返回结果：specVersion = 状态文件落盘的 spec_version（= latestSpecVersion 兜底 0），
  *      供调用方 complete lease 上报 init_synced_spec_version。
  *
  * 设计取舍：
@@ -1391,7 +1648,8 @@ export interface HandleInitLeaseResult {
  *     batch 路径与未来 interactive 路径可直接调用。
  *
  * @param client HubClient 实例（getSpecBundle / postSpecSync）
- * @param params init lease 参数（workspaceId / rootPath / serverOrigin / strategy / latestSpecVersion / local_yaml?）
+ * @param params init lease 参数（workspaceId / rootPath / serverOrigin / strategy /
+ *   latestSpecVersion / local_yaml? / tools? / spawnFn?）
  */
 export async function handleInitLease(
   client: HubClient,
@@ -1439,7 +1697,45 @@ export async function handleInitLease(
     };
   }
 
-  // 步骤 3：postSpecSync（软失败，R-03 不 abort）。仅 specDir 非空（pull 成功 / 404 空目录）
+  // 步骤 3：runSillyspecInit（硬失败 abort，D-003@v1 / D-002@v2 rev2 时序：pull 后 post 前）。
+  // pull 整删重建后 init 在幸存的 specCacheRoot 上重建 .runtime/（sillyspec.db 等）+ 项目根
+  // 骨架/平台指针；失败 → 不执行 postSpecSync/writeLocalYaml（init 产物是核心目的）。
+  // runSillyspecInit 自身按契约不抛（全失败路径返 ok:false），try/catch 是对齐步骤 1/2 的
+  // 防御性兜底（如测试环境 spawn mock 返 null 的 TypeError），异常同样转硬失败不向上抛。
+  let initResult: RunSillyspecInitResult;
+  try {
+    initResult = await runSillyspecInit(
+      {
+        rootPath: params.rootPath,
+        specCacheRoot,
+        wsId: params.workspaceId,
+        tools: params.tools,
+      },
+      params.spawnFn,
+    );
+  } catch (e) {
+    initResult = {
+      ok: false,
+      error: `sillyspec_init_failed: ${(e as Error)?.message ?? String(e)}`,
+    };
+  }
+  console.info(
+    'spec_sync: init_lease_sillyspec_init',
+    params.workspaceId,
+    initResult.ok ? 'ok' : 'failed',
+  );
+  if (!initResult.ok) {
+    return {
+      ok: false,
+      specVersion,
+      // 前缀透传（sillyspec_init_cli_too_old / sillyspec_init_failed），error 值域新增两前缀。
+      error: initResult.error ?? 'sillyspec_init_failed: unknown',
+      daemonState,
+      specDir,
+    };
+  }
+
+  // 步骤 4：postSpecSync（软失败，R-03 不 abort）。仅 specDir 非空（pull 成功 / 404 空目录）
   // 时尝试回灌本地改动到服务器。client 未实现 postSpecSync → postSpecSync 返回 null 跳过。
   if (specDir) {
     try {
@@ -1453,7 +1749,7 @@ export async function handleInitLease(
     }
   }
 
-  // 步骤 4：writeLocalYaml（design §5.4 / D-003 严格契约：写盘失败 = init 整体失败）。
+  // 步骤 5：writeLocalYaml（design §5.4 / D-003 严格契约：写盘失败 = init 整体失败）。
   // 仅当 params.local_yaml 存在（platformConfig.local_yaml 非空）时执行；缺失则跳过（向后
   // 兼容无 token 的旧 lease / mock client）。url 用 params.serverOrigin（task-07 透传，
   // 不读 payload.server_origin，对齐 D-002）。
@@ -1475,7 +1771,7 @@ export async function handleInitLease(
     }
   }
 
-  // 步骤 5：返回成功（specVersion = 状态文件落盘值）。
+  // 步骤 6：返回成功（specVersion = 状态文件落盘值）。
   return {
     ok: true,
     specVersion: daemonState.spec_version,

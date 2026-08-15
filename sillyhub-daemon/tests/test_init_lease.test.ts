@@ -13,6 +13,14 @@
 // 注：不 mock node:os.homedir（vitest ESM 下 vi.mock 对 spec-sync.ts 内部 homedir 穿透不稳），
 // 改用真实 resolveSpecDir + 测试 wsId（非真实 UUID）隔离 + afterAll 清理。
 //
+// 2026-08-15-init-trigger-sillyspec-init task-05 最小适配：handleInitLease 编序 4→6 步，
+// 新插第 3 步 runSillyspecInit（spawn sillyspec init）。直接调 handleInitLease 的既有用例
+// 经 spawnFn 注入点 mock（makeInitSpawn，init 恒成功）；TaskRunner mode=init 用例走
+// _runInitLease（无注入入口）——下方全局 node:child_process mock 由「返 null」升级为
+// 返回可工作 fake child（--version 出合格版本、init 退出 0），使 init 步骤恒成功。
+// 「不 spawn agent」断言语义保持：断言未用 agent cmdPath（/usr/local/bin/claude）spawn
+//（sillyspec init 的 spawn 是 init 步骤本身，非 agent）。全面改写+新用例组在 task-08 落。
+//
 // vitest.config.ts: globals=false → 显式 import；include=tests/**/*.test.ts。
 
 import { describe, it, expect, vi, beforeEach, afterAll, afterEach } from 'vitest';
@@ -41,7 +49,50 @@ import {
   writeDaemonState,
   DAEMON_STATE_FILENAME,
   resolveSpecDir,
+  MIN_SILLYSPEC_VERSION_FOR_INIT,
+  type SpawnFn,
 } from '../src/spec-sync.js';
+import type { ChildProcess } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+
+/**
+ * task-05：恒成功 spawnFn mock（runSillyspecInit 注入点）。
+ *
+ * 两次调用（--version 门控 / init）都返回退出码 0 + 合格版本输出，让 handleInitLease
+ * 第 3 步恒通过——既有用例的断言目标（状态文件/pull/post/local.yaml）不受 init 步骤影响。
+ * 脚本可覆盖：{ version?, initExitCode? }（task-08 新用例组用）。
+ */
+export function makeInitSpawn(script: {
+  version?: string;
+  versionExitCode?: number;
+  initExitCode?: number;
+  initStderr?: string;
+} = {}): SpawnFn & { calls: string[] } {
+  const calls: string[] = [];
+  const fn = ((cmd: unknown): ChildProcess => {
+    const cmdStr = String(cmd ?? '');
+    calls.push(cmdStr);
+    const isVersion = cmdStr.includes('--version');
+    const stdout = Object.assign(new EventEmitter(), {});
+    const stderr = Object.assign(new EventEmitter(), {});
+    const ee = new EventEmitter();
+    const child = Object.assign(ee, { pid: 1000, stdout, stderr, kill: () => {} }) as unknown as ChildProcess;
+    const exitCode = isVersion
+      ? (script.versionExitCode ?? 0)
+      : (script.initExitCode ?? 0);
+    queueMicrotask(() => {
+      if (isVersion) {
+        stdout.emit('data', Buffer.from(`${script.version ?? MIN_SILLYSPEC_VERSION_FOR_INIT}\n`));
+      } else if (script.initStderr) {
+        stderr.emit('data', Buffer.from(script.initStderr));
+      }
+      ee.emit('close', exitCode);
+    });
+    return child;
+  }) as SpawnFn & { calls: string[] };
+  fn.calls = calls;
+  return fn;
+}
 
 // 测试用 workspaceId 前缀（非真实 UUID，不碰撞真实工作区缓存）。afterAll 统一清理。
 const TEST_WS_IDS = [
@@ -49,6 +100,8 @@ const TEST_WS_IDS = [
   'ws-runner-ver', 'ws-init-1',
   // task-12：handleInitLease 第4步 writeLocalYaml 新增用例（仍经 resolveSpecDir 写 daemon 状态文件）
   'ws-init-yaml-ok', 'ws-init-yaml-fail', 'ws-init-yaml-url',
+  // task-08（2026-08-15-init-trigger-sillyspec-init）：init 步骤新用例组 A/B/C/D
+  'ws-init-initfail', 'ws-init-gate', 'ws-init-order', 'ws-init-tools-pass', 'ws-init-tools-fallback',
 ];
 afterAll(async () => {
   await Promise.all(
@@ -91,6 +144,7 @@ describe('handleInitLease / daemon 状态文件 (task-07 / D-001@v1)', () => {
       rootPath: '/tmp/init-lease-rootpath-unused', // D-001@v1：rootPath 不再被 daemon 写
       serverOrigin: 'https://platform.example.com',
       strategy: 'platform-managed',
+      spawnFn: makeInitSpawn(),
       latestSpecVersion: 3,
     });
 
@@ -119,6 +173,7 @@ describe('handleInitLease / daemon 状态文件 (task-07 / D-001@v1)', () => {
       workspaceId: 'ws-init-defaults',
       rootPath: '/tmp/x',
       serverOrigin: 'http://test:8000',
+      spawnFn: makeInitSpawn(),
     });
 
     expect(result.ok).toBe(true);
@@ -135,6 +190,7 @@ describe('handleInitLease / daemon 状态文件 (task-07 / D-001@v1)', () => {
       rootPath: '/tmp/x',
       serverOrigin: 'http://test:8000',
       latestSpecVersion: 0,
+      spawnFn: makeInitSpawn(),
     });
 
     expect(result.ok).toBe(true);
@@ -151,6 +207,7 @@ describe('handleInitLease / daemon 状态文件 (task-07 / D-001@v1)', () => {
       rootPath: '/tmp/x',
       serverOrigin: 'http://test:8000',
       latestSpecVersion: 2,
+      spawnFn: makeInitSpawn(),
     });
 
     expect(result.ok).toBe(false);
@@ -171,6 +228,7 @@ describe('handleInitLease / daemon 状态文件 (task-07 / D-001@v1)', () => {
       rootPath: '/tmp/x',
       serverOrigin: 'http://test:8000',
       latestSpecVersion: 1,
+      spawnFn: makeInitSpawn(),
     });
 
     expect(result.ok).toBe(true);
@@ -251,6 +309,7 @@ describe('handleInitLease 第4步 writeLocalYaml (task-12 / D-003 / D-002)', () 
       rootPath: tmpRoot,
       serverOrigin: 'https://hub.example.com',
       local_yaml: { platform_token: 'shpsync_x', mcp_token: 'shmcp_y' },
+      spawnFn: makeInitSpawn(),
     });
 
     // 第4步被调一次，透传 rootPath + tokens + serverOrigin
@@ -280,6 +339,7 @@ describe('handleInitLease 第4步 writeLocalYaml (task-12 / D-003 / D-002)', () 
       rootPath: tmpRoot,
       serverOrigin: 'https://hub.example.com',
       local_yaml: { platform_token: 'shpsync_x', mcp_token: 'shmcp_y' },
+      spawnFn: makeInitSpawn(),
     });
 
     // D-003：写盘失败 = init 整体失败，但 handleInitLease 逐步 catch 返 ok:false（不抛错）
@@ -304,6 +364,7 @@ describe('handleInitLease 第4步 writeLocalYaml (task-12 / D-003 / D-002)', () 
       // 本机可达地址）；handleInitLease 不读 backend 下发的 platform_config.server_origin
       //（docker/远程部署时可能与本机可达地址不一致）——url 只取 serverOrigin。
       local_yaml: { platform_token: 'shpsync_r', mcp_token: 'shmcp_m' },
+      spawnFn: makeInitSpawn(),
     });
 
     expect(result.ok).toBe(true);
@@ -320,17 +381,179 @@ describe('handleInitLease 第4步 writeLocalYaml (task-12 / D-003 / D-002)', () 
   });
 });
 
+// ── handleInitLease 第 3 步 runSillyspecInit（2026-08-15-init-trigger-sillyspec-init task-08）──
+//
+// 覆盖 task-08 四组新用例（FR-01/FR-02/FR-03/FR-04，D-002@v2/D-003@v1）：
+//   A init 失败语义：init 退出码非 0 → ok:false 且 postSpecSync/writeLocalYaml 不执行；
+//   B 版本门控：版本 < MIN → sillyspec_init_cli_too_old 且 init spawn 未发起（fail-fast）；
+//   C 顺序：writeDaemonState → pull → init → post → localYaml 严格调用序；
+//   D tools：注入 ['claude','codex'] 透传 / undefined 兜底 claude。
+//
+// mock 只作用于注入点（handleInitLease params.spawnFn），不全局替换 spawn（constraint）。
+
+describe('handleInitLease 第3步 runSillyspecInit (task-08 / D-002@v2 / D-003@v1)', () => {
+  beforeEach(() => {
+    localYamlWriterMock.mockClear();
+  });
+
+  it('A：init 退出码非 0 → ok:false（error 前缀 sillyspec_init_failed），postSpecSync 与 writeLocalYaml 未调用', async () => {
+    const client = makeClient();
+    const spawnFn = makeInitSpawn({ initExitCode: 3, initStderr: 'cli boom\n' });
+    const result = await handleInitLease(client as never, {
+      workspaceId: 'ws-init-initfail',
+      rootPath: '/tmp/init-fail-root',
+      serverOrigin: 'http://test:8000',
+      latestSpecVersion: 4,
+      // local_yaml 故意传值：验证 init 失败时 writeLocalYaml 不执行（步骤 5 被跳过）
+      local_yaml: { platform_token: 'shpsync_x', mcp_token: 'shmcp_y' },
+      spawnFn,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('sillyspec_init_failed');
+    expect(result.error).toContain('cli boom');
+    // D-003：硬失败 abort——post 不执行（步骤 4 在 init 之后）
+    expect(client.postSpecSync).not.toHaveBeenCalled();
+    // writeLocalYaml 不执行（步骤 5 在 init 之后）
+    expect(localYamlWriterMock).not.toHaveBeenCalled();
+    // 步骤 1-2 已完成：daemonState 透传、pull 已发生
+    expect(result.daemonState).not.toBeNull();
+    expect(result.daemonState!.spec_version).toBe(4);
+    expect(client.getSpecBundle).toHaveBeenCalledTimes(1);
+  });
+
+  it('B：版本 < MIN → error sillyspec_init_cli_too_old，init spawn 未发起（fail-fast）', async () => {
+    const client = makeClient();
+    const spawnFn = makeInitSpawn({ version: '3.26.7' });
+    const result = await handleInitLease(client as never, {
+      workspaceId: 'ws-init-gate',
+      rootPath: '/tmp/gate-root',
+      serverOrigin: 'http://test:8000',
+      spawnFn,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('sillyspec_init_cli_too_old');
+    // fail-fast：spawn 只发生 1 次（--version 门控），init 未发起
+    expect(spawnFn.calls).toHaveLength(1);
+    expect(spawnFn.calls[0]).toContain('--version');
+    // 门控失败同属 init 步骤硬失败：post / localYaml 不执行
+    expect(client.postSpecSync).not.toHaveBeenCalled();
+    expect(localYamlWriterMock).not.toHaveBeenCalled();
+  });
+
+  it('C：6 步顺序 writeDaemonState → pull → init → post → localYaml（调用序断言）', async () => {
+    const client = makeClient();
+    const spawnFn = makeInitSpawn();
+    const order: string[] = [];
+    // 包一层记录 init 时机（spawnFn 注入点）：init 的 spawn 发生在 post 之前
+    const trackedSpawn: SpawnFn = ((cmd: unknown, opts?: unknown) => {
+      order.push(String(cmd).includes('--version') ? 'init_version_gate' : 'init_spawn');
+      return spawnFn(cmd as never, opts as never);
+    }) as SpawnFn;
+    // pull / post 时机经 client mock 记录；localYaml 时机经模块 mock 记录
+    client.getSpecBundle.mockImplementation(async () => {
+      order.push('pull');
+      return Buffer.alloc(0);
+    });
+    client.postSpecSync.mockImplementation(async () => {
+      order.push('post');
+      return { ok: true, reparsed: 0 };
+    });
+    const origYaml = localYamlWriterMock.getMockImplementation();
+    localYamlWriterMock.mockImplementation(async (...args: unknown[]) => {
+      order.push('localYaml');
+      return (origYaml as (...a: unknown[]) => unknown)(...args);
+    });
+
+    const result = await handleInitLease(client as never, {
+      workspaceId: 'ws-init-order',
+      rootPath: '/tmp/order-root',
+      serverOrigin: 'http://test:8000',
+      local_yaml: { platform_token: 'shpsync_x', mcp_token: 'shmcp_y' },
+      spawnFn: trackedSpawn,
+    });
+
+    expect(result.ok).toBe(true);
+    // writeDaemonState 落盘在 pull 前（读状态文件内容非空即可证步骤 1 完成；顺序由其余事件锚定）
+    expect(order).toEqual([
+      'pull', // writeDaemonState 同步先行完成（无异步事件可挂），pull 是第一个异步锚点
+      'init_version_gate', // init 步骤 0：门控（D-002@v2：init 在 pull 后）
+      'init_spawn', // init 步骤 1：spawn sillyspec init
+      'post', // postSpecSync（步骤 4，init 后）
+      'localYaml', // writeLocalYaml（步骤 5，最后）
+    ]);
+  });
+
+  it('D：tools 注入 [claude, codex] 透传到 init spawn；缺省 undefined 兜底 claude', async () => {
+    // D-1：注入工具列表 → --tool claude,codex
+    const spawnPass = makeInitSpawn();
+    const ok1 = await handleInitLease(makeClient() as never, {
+      workspaceId: 'ws-init-tools-pass',
+      rootPath: '/tmp/tools-root',
+      serverOrigin: 'http://test:8000',
+      tools: ['claude', 'codex'],
+      spawnFn: spawnPass,
+    });
+    expect(ok1.ok).toBe(true);
+    const initCmdPass = spawnPass.calls.find((c) => c.includes(' init ')) ?? '';
+    expect(initCmdPass).toContain('--tool claude,codex');
+
+    // D-2：tools 缺省 → --tool claude（runSillyspecInit 兜底，D-005@v1）
+    const spawnFallback = makeInitSpawn();
+    const ok2 = await handleInitLease(makeClient() as never, {
+      workspaceId: 'ws-init-tools-fallback',
+      rootPath: '/tmp/tools-root2',
+      serverOrigin: 'http://test:8000',
+      spawnFn: spawnFallback,
+    });
+    expect(ok2.ok).toBe(true);
+    const initCmdFallback = spawnFallback.calls.find((c) => c.includes(' init ')) ?? '';
+    expect(initCmdFallback).toContain('--tool claude');
+  });
+});
+
 // ── TaskRunner.runLease mode='init' 分支（task-runner.ts）───────────────────────
 //
 // mock node:child_process.spawn + adapters/getBackend，断言 init 分支不 spawn agent。
 
 let mockAdapter: Record<string, unknown> = {};
 
+// task-07 原语义：init 分支不 spawn agent。agent spawn 的 cmdPath 是 lease 的
+// cmdPath（如 /usr/local/bin/claude）或其解析值——断言见各用例（spawn 从不被以
+// agent 命令调用）。
+// task-05：mock 返 null 会击穿 runSillyspecInit（child.stdout.on TypeError）→
+// 改为按命令分流的可工作 fake child：sillyspec 命令（--version/init）正常完成，
+// 其余（agent spawn，非 init 用例）保持返 null 原行为。
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return {
     ...actual,
-    spawn: vi.fn(() => null as unknown),
+    spawn: vi.fn((cmd: unknown): unknown => {
+      const cmdStr = String(cmd ?? '');
+      if (!cmdStr.includes('sillyspec')) {
+        // 非 init 步骤（agent spawn）保持 task-07 原行为：返 null
+        return null;
+      }
+      // init 步骤：--version 出合格版本 / init 退出 0（fake child 立即可用）
+      const isVersion = cmdStr.includes('--version');
+      const stdout = new EventEmitter();
+      const stderr = new EventEmitter();
+      const ee = new EventEmitter();
+      const child = Object.assign(ee, {
+        pid: 2000,
+        stdout,
+        stderr,
+        kill: (): void => {},
+      });
+      queueMicrotask(() => {
+        if (isVersion) {
+          stdout.emit('data', Buffer.from(`${MIN_SILLYSPEC_VERSION_FOR_INIT}\n`));
+        }
+        ee.emit('close', 0);
+      });
+      return child;
+    }),
   };
 });
 
@@ -435,8 +658,14 @@ describe("TaskRunner.runLease mode='init' 分支 (task-07)", () => {
 
     const result = await runner.runLease(lease);
 
-    // init 分支不 spawn agent
-    expect(spawn).not.toHaveBeenCalled();
+    // init 分支不 spawn agent。task-05 后 init 分支会 spawn sillyspec 子进程（--version
+    // 门控 + init，属 init 步骤本身），故断言收窄为：spawn 只被 sillyspec 命令调用过、
+    // 从未被 agent 命令（lease cmdPath /usr/local/bin/claude 或其解析值）调用。
+    const spawnCalls = (spawn as ReturnType<typeof vi.fn>).mock.calls as unknown[];
+    expect(spawnCalls.length).toBeGreaterThan(0); // init 步骤的 sillyspec spawn 确实发生
+    for (const c of spawnCalls) {
+      expect(String(c?.[0])).toContain('sillyspec');
+    }
     expect(getBackend).not.toHaveBeenCalled();
 
     // 终态 completed
@@ -524,6 +753,69 @@ describe("TaskRunner.runLease mode='init' 分支 (task-07)", () => {
 
     // 非 init 路径触发了 spawn 调用（既有编排）
     expect(spawn).toHaveBeenCalled();
+  });
+
+  // ── task-08（2026-08-15-init-trigger-sillyspec-init）：init 失败 → stats.init_error ──
+  //
+  // _runInitLease 经全局 node:child_process mock 走真实 runSillyspecInit（无 spawnFn
+  // 注入入口，生产链路由 cli.ts detectedAgents 注入）——mock 按命令分流：sillyspec
+  // --version 返低版本 → 版本门控 fail-fast → handleInitLease ok:false → 终态 failed。
+  it('init 版本门控不过 → 终态 failed，stats.init_error 前缀 sillyspec_init_cli_too_old（task-08）', async () => {
+    const { runner } = setupRunner();
+    const lease = makeInitLease({ workspaceId: 'ws-init-1' });
+
+    // 本用例内让 --version 返回过旧版本（mockImplementationOnce 覆盖 factory 默认一次）
+    const spawnMock = spawn as unknown as ReturnType<typeof vi.fn>;
+    const defaultImpl = spawnMock.getMockImplementation();
+    spawnMock.mockImplementationOnce((cmd: unknown): unknown => {
+      const cmdStr = String(cmd ?? '');
+      if (!cmdStr.includes('sillyspec')) return defaultImpl?.(cmd) ?? null;
+      const stdout = new EventEmitter();
+      const stderr = new EventEmitter();
+      const ee = new EventEmitter();
+      const child = Object.assign(ee, { pid: 2100, stdout, stderr, kill: (): void => {} });
+      queueMicrotask(() => {
+        if (cmdStr.includes('--version')) {
+          stdout.emit('data', Buffer.from('3.26.7\n'));
+        }
+        ee.emit('close', 0);
+      });
+      return child;
+    });
+
+    const result = await runner.runLease(lease);
+
+    expect(result.success).toBe(false);
+    expect(result.status).toBe('failed');
+    expect(result.stats).toMatchObject({ init_synced: false });
+    expect(typeof result.stats!.init_error).toBe('string');
+    expect(result.stats!.init_error).toContain('sillyspec_init_cli_too_old');
+  });
+
+  // task-06（FR-04 / D-005@v1）：TaskRunner 构造注入 detectedAgents → _runInitLease
+  // 透传 handleInitLease.tools。经 spawn mock 捕获 init 命令断言 --tool 值。
+  it('构造注入 detectedAgents=[claude,codex] → init spawn --tool claude,codex；未注入 → 兜底 claude（task-06/08）', async () => {
+    // 注入用例
+    const { runner: runnerWith } = setupRunner();
+    (runnerWith as unknown as { detectedAgents?: string[] }).detectedAgents = ['claude', 'codex'];
+    await runnerWith.runLease(makeInitLease({ workspaceId: 'ws-init-1' }));
+    const spawnMock = spawn as unknown as ReturnType<typeof vi.fn>;
+    const initWith = spawnMock.mock.calls
+      .map((c) => String(c?.[0] ?? ''))
+      .filter((c) => c.includes(' init ') || c.startsWith('sillyspec init'))
+      .find(Boolean);
+    expect(initWith).toContain('--tool claude,codex');
+
+    // 未注入用例（fresh runner，vi.clearAllMocks 后）
+    vi.clearAllMocks();
+    const { runner: runnerWithout } = setupRunner();
+    await runnerWithout.runLease(makeInitLease({ workspaceId: 'ws-init-1' }));
+    const spawnMock2 = spawn as unknown as ReturnType<typeof vi.fn>;
+    const initWithout = spawnMock2.mock.calls
+      .map((c) => String(c?.[0] ?? ''))
+      .filter((c) => c.includes(' init ') || c.startsWith('sillyspec init'))
+      .find(Boolean);
+    expect(initWithout).toContain('--tool claude');
   });
 });
 

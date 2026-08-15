@@ -1034,7 +1034,10 @@ class SpecWorkspaceService:
         语义（design §7 / 关键落盘决策 P2 R-07）：
         - **预校验**：所有 op 的 path/new_path 先做 containment + ``.runtime`` 校验，
           任一越界 → 422 ``_spec_bundle_invalid``，整体不落盘（对齐 tar 先验后解）。
-        - **有清单行**：``row.version != op.base_version`` → conflict（收集
+        - **有清单行**：``row.version != op.base_version`` → 先查同内容豁免
+          （D-008@v2）：``op.hash`` 非空且 == ``row.content_hash`` → 同内容
+          no-op（跳过落盘、不置 conflict、``new_versions[path]=row.version``，
+          daemon manifest 对齐）；否则 conflict（收集
           server_versions[path]=row.version，跳过该 op 不落盘）；匹配 → 应用。
         - **无清单行**（首推 / 旧 tar 失效后）→ R-07 hash 兜底：add/update 视为新建
           version=1；delete 无行 → no-op 成功（幂等）；rename 无行 → 按 add new_path 处理。
@@ -1103,7 +1106,16 @@ class SpecWorkspaceService:
                 row = manifest_by_path.get(op.path)
 
                 # base_version 乐观锁（D-001）：有行且版本不匹配 → conflict，跳过不落盘。
+                # D-008@v2 同内容豁免（FR-05）：init 第二成员推 add(base_version=0)
+                # 骨架文件时服务器已有同名行（第一成员 init 建过），内容相同则
+                # op.hash == row.content_hash（sha256 不可伪造，R-07）→ 视为 no-op：
+                # 不落盘、不置 conflict，new_versions 回服务器版本（daemon 据此对齐
+                # 本地 manifest 缓存）。op.hash 缺失（旧 daemon 契约）或与
+                # content_hash 不符 → 维持 conflict。
                 if row is not None and row.version != op.base_version:
+                    if op.hash is not None and op.hash == row.content_hash:
+                        new_versions[op.path] = row.version
+                        continue
                     conflict = True
                     if server_versions is None:
                         server_versions = {}

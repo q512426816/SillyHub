@@ -327,6 +327,101 @@ describe('postSpecSync 增量 diff（task-08 / change 2026-08-13-platform-manage
   });
 });
 
+// ── task-07（2026-08-15-init-trigger-sillyspec-init / FR-06 / D-008@v2）─────────
+// projects/ 三链路排除：projects/<name>.yaml 含成员机器绝对路径，不上传。
+// 三处（computeIncrementalOps walk / buildFullManifest 全量快照 / packSpecDir tar）
+// 必须统一排除——只改增量会引入「缓存有 projects 行 + walk 无 → delete op 误删服务器行」。
+describe('projects/ 三链路排除（task-07 / FR-06 / D-008@v2）', () => {
+  let home: string;
+  let scratch: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'spec-sync-incr-home-'));
+    scratch = mkdtempSync(join(tmpdir(), 'spec-sync-incr-scratch-'));
+    scratchDir = scratch;
+    hoisted.homedirMock.mockReturnValue(home);
+  });
+
+  afterEach(() => {
+    hoisted.homedirMock.mockReset();
+    rmSync(home, { recursive: true, force: true });
+    rmSync(scratch, { recursive: true, force: true });
+  });
+
+  it('链路1：增量 walk 排除 projects → ops 不含 projects 的 add/update/delete', async () => {
+    const wsId = 'ws-projects-incr';
+    await seedCache(wsId, { 'docs/keep.md': { hash: sha256('keep'), version: 3, mtime: 1 } });
+    write('docs/keep.md', 'keep'); // 未变
+    write('docs/new.md', 'new'); // 真实变化（add op 应发）
+    write('projects/member-1.yaml', 'root: C:\\absolute\\local\\path'); // 本地环境文件
+
+    const incrSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      new_versions: { 'docs/new.md': 1 },
+      conflict: false,
+      server_versions: null,
+    });
+    const client = makeClient({ postSpecSyncIncremental: incrSpy });
+
+    await postSpecSync(client as never, wsId, scratch);
+
+    expect(incrSpy).toHaveBeenCalledTimes(1);
+    const ops = incrSpy.mock.calls[0][1] as Array<Record<string, unknown>>;
+    expect(ops).toHaveLength(1); // 仅 docs/new.md 的 add，projects 不进 ops
+    expect(ops[0]).toMatchObject({ op: 'add', path: 'docs/new.md' });
+    expect(ops.some((o) => String(o.path).startsWith('projects/'))).toBe(false);
+  });
+
+  it('链路2：全量快照（首同步）排除 projects → tar 不含 + 清单缓存不含', async () => {
+    const wsId = 'ws-projects-full';
+    write('docs/a.md', '# A');
+    write('projects/member-1.yaml', 'root: C:\\absolute\\local\\path');
+
+    const postSpy = vi.fn().mockResolvedValue({ ok: true, reparsed: 0 });
+    const client = makeClient({ postSpecSync: postSpy });
+
+    await postSpecSync(client as never, wsId, scratch);
+
+    // 首同步走旧 tar：tar entry 名不含 projects/
+    expect(postSpy).toHaveBeenCalledTimes(1);
+    const tarBuf = postSpy.mock.calls[0][1] as Buffer;
+    expect(tarBuf.toString('latin1').includes('projects/')).toBe(false);
+    // 全量快照缓存（buildFullManifest 产物）也不含 projects 行
+    const cached = readFileSync(resolveManifestCachePath(wsId), 'utf-8');
+    expect(cached.includes('projects/')).toBe(false);
+    expect(cached.includes('docs/a.md')).toBe(true);
+  });
+
+  it('关键边界：全量缓存残留 projects 行（旧状态）→ 增量不生 delete op 误删服务器行', async () => {
+    const wsId = 'ws-projects-stale';
+    // 模拟旧状态：缓存曾含 projects 行（历史上传过），本地 projects/ 现被 walk 排除。
+    await seedCache(wsId, {
+      'docs/a.md': { hash: sha256('a'), version: 1, mtime: 1 },
+      'projects/old.yaml': { hash: sha256('old'), version: 7, mtime: 1 },
+    });
+    write('docs/a.md', 'a');
+
+    const incrSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      new_versions: {},
+      conflict: false,
+      server_versions: null,
+    });
+    const postSpy = vi.fn();
+    const client = makeClient({ postSpecSyncIncremental: incrSpy, postSpecSync: postSpy });
+
+    const r = await postSpecSync(client as never, wsId, scratch);
+
+    // 排除行不参与 diff → 无 ops → 不发增量请求，也不回退旧 tar
+    expect(r).toMatchObject({ ok: true, reparsed: 0 });
+    expect(incrSpy).not.toHaveBeenCalled();
+    expect(postSpy).not.toHaveBeenCalled();
+    // 回写后的缓存自然剔除残留行（下次 diff 不再出现）
+    const cached = readFileSync(resolveManifestCachePath(wsId), 'utf-8');
+    expect(cached.includes('projects/')).toBe(false);
+  });
+});
+
 /** 构造 HubHttpError 形状错误（status 属性够 duck-type 判 404/5xx）。 */
 function fakeHttpErr(status: number, message = 'boom'): { status: number; message: string } {
   return { status, message };

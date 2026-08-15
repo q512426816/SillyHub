@@ -55,8 +55,10 @@ import {
 import { HubClient } from './hub-client.js';
 import { WorkspaceManager } from './workspace.js';
 import { CredentialManager } from './credential.js';
-import { TaskRunner } from './task-runner.js';
+import { TaskRunner, mapDetectedToSillyspecTools } from './task-runner.js';
 import { Daemon } from './daemon.js';
+// task-06（FR-04/D-007@v1）：构造 TaskRunner 前独立探测 agent CLI（映射 sillyspec --tool）。
+import { AgentDetector } from './agent-detector.js';
 // 2026-06-24-daemon-network-resilience task-13/15：网络层重试编排注入。
 import { ResilienceService } from './resilience/service.js';
 import type { ResilienceLogger } from './resilience/service.js';
@@ -766,6 +768,27 @@ export async function startAction(opts: StartOptions): Promise<number> {
   // 与 Daemon 共享同一 PolicyCache/PolicyEngine 实例（由心跳 _syncAllowedRoots + WS POLICY_UPDATE 维护）。
   // **task-14**：policyCache/auditSink/policyEngine 装配已上移到 SessionManager 之前
   // （policyEngine 引用注入 SessionManager），此处直接复用，避免重复构造。
+  // task-06（2026-08-15-init-trigger-sillyspec-init / FR-04 / D-005@v1 / D-007@v1）：
+  // 构造 TaskRunner 前独立探测本机已装 agent → 映射 sillyspec VALID_TOOLS 同名交集 →
+  // 注入 detectedAgents，init lease 的 sillyspec init --tool 据此下发。
+  // 复核 N-03：Daemon.start() 的 detectAgents 晚于 TaskRunner 构造，故此处独立跑一次
+  // 探测（AgentDetector 无状态可重复实例化；约 12 个 --version 子进程，秒级）。
+  // 探测失败 / 空 → 注入 undefined（runSillyspecInit 兜底 ['claude']），绝不阻塞 daemon 启动。
+  let detectedAgents: string[] | undefined;
+  try {
+    const detected = await new AgentDetector().detectAgents();
+    const mapped = mapDetectedToSillyspecTools(
+      detected.filter((a) => a.status === 'available').map((a) => a.provider),
+    );
+    detectedAgents = mapped.length > 0 ? mapped : undefined;
+    console.info(
+      'cli: init_tools_detected',
+      detectedAgents ?? '(fallback claude in runSillyspecInit)',
+    );
+  } catch (e) {
+    // 探测异常不阻塞启动（R-04：兜底 ['claude']，映射表集中一处）
+    console.warn('cli: init_tools_detect_failed_fallback', e);
+  }
   const taskRunner = new TaskRunner(
     client,
     workspaceMgr,
@@ -774,6 +797,7 @@ export async function startAction(opts: StartOptions): Promise<number> {
     resilience,
     policyCache,
     policyEngine,
+    detectedAgents,
   );
   daemon = new Daemon(config, client, taskRunner, {
     sessionManager,

@@ -183,6 +183,22 @@ describe('packSpecDir (ql-20260813-007 .runtime 整树默认排除)', () => {
     expect(names).toContain('docs/a.md');
     expect(names.some((n) => n === 'changes' || n.startsWith('changes/'))).toBe(false);
   });
+
+  // 链路3（task-07 / FR-06 / D-008@v2）：回退 tar 打包默认排除 projects/——
+  // projects/<name>.yaml 含成员机器绝对路径，不上传（三链路统一，常量 UPLOAD_EXCLUDE_TOP_BASE）。
+  it('默认排除 projects/（task-07：成员机器绝对路径不上传）', async () => {
+    await mkdir(join(dir, 'docs'), { recursive: true });
+    await writeFile(join(dir, 'docs', 'a.md'), 'a');
+    await mkdir(join(dir, 'projects'), { recursive: true });
+    await writeFile(join(dir, 'projects', 'member-1.yaml'), 'root: /home/user/local/project');
+
+    const tarBuf = await packSpecDir(dir);
+    const names = parseTarNames(tarBuf);
+
+    // spec 数据保留，projects 整树排除（相对路径机器绝对路径不进 tar）
+    expect(names).toContain('docs/a.md');
+    expect(names.some((n) => n === 'projects' || n.startsWith('projects/'))).toBe(false);
+  });
 });
 
 // ql-20260813-004：sync 回灌 HTTP 500 修复——长文件名（GNU LongLink）+ 运行时产物排除。

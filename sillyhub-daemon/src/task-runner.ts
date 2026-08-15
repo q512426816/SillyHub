@@ -234,6 +234,31 @@ export interface RunnerCredentialManager {
 // ── TaskRunner ───────────────────────────────────────────────────────────────
 
 /**
+ * sillyspec `--tool` 的合法值集（sillyspec CLI VALID_TOOLS，design §2 D-005@v1）。
+ * 与 daemon agent-detector 12 provider 中的 6 个同名：claude/cursor/openclaw/codex/
+ * gemini/opencode。集中一处便于扩展（CLI 新增工具时同步此表）。
+ */
+export const SILLYSPEC_VALID_TOOLS: ReadonlySet<string> = new Set([
+  'claude',
+  'cursor',
+  'openclaw',
+  'codex',
+  'gemini',
+  'opencode',
+]);
+
+/**
+ * agent-detector 探测结果 → sillyspec --tool 工具列表（task-06 / D-005@v1）。
+ *
+ * agent 名 → VALID_TOOLS **同名交集**过滤（12 provider 里 6 个同名，其余如 copilot/
+ * hermes/pi/kimi/kiro/antigravity 非 sillyspec 工具名，剔除）。探测失败调用方传
+ * undefined 即可（runSillyspecInit 兜底 ['claude']），本函数只做纯映射不兜底。
+ */
+export function mapDetectedToSillyspecTools(detected: readonly string[]): string[] {
+  return detected.filter((name) => SILLYSPEC_VALID_TOOLS.has(name));
+}
+
+/**
  * 任务编排器：执行一个 lease，把 agent 输出流式 submit 到 server，
  * 收集 git diff，产出 TaskResult。
  *
@@ -293,6 +318,14 @@ export class TaskRunner {
      * cli.ts 生产链路必注入（与 Daemon 共享同一 PolicyEngine 实例）。
      */
     private readonly policyEngine?: PolicyEngine | null,
+    /**
+     * 2026-08-15-init-trigger-sillyspec-init task-06（FR-04 / D-005@v1 / D-007@v1）：
+     * cli.ts 构造前 AgentDetector 探测并映射 sillyspec VALID_TOOLS 后的本机工具列表
+     *（claude/cursor/openclaw/codex/gemini/opencode 同名交集子集）。
+     * _runInitLease 透传给 handleInitLease.tools；未注入 / 空 → undefined →
+     * runSillyspecInit 兜底 ['claude']。探测失败不阻塞 daemon 启动（cli.ts 侧 catch）。
+     */
+    private readonly detectedAgents?: string[] | null,
   ) {}
 
   // ── 追踪与取消 ────────────────────────────────────────────────────────────
@@ -900,6 +933,12 @@ export class TaskRunner {
       strategy,
       latestSpecVersion,
       local_yaml,
+      // task-06（FR-04 / D-005@v1 / D-007@v1）：cli.ts 注入的 detectedAgents 透传给
+      // runSillyspecInit --tool；未注入 / 空 → undefined（runSillyspecInit 内兜底 ['claude']）。
+      tools:
+        this.detectedAgents && this.detectedAgents.length > 0
+          ? this.detectedAgents
+          : undefined,
     };
 
     const result = await handleInitLease(
