@@ -28320,6 +28320,30 @@
               }
             ],
             "title": "Archived At"
+          },
+          "step_progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepProgressSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/StepTimelineEntry"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Steps"
           }
         },
         "type": "object",
@@ -28510,6 +28534,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/PendingReview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "step_progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepProgressSummary"
               },
               {
                 "type": "null"
@@ -46818,6 +46852,126 @@
         ],
         "title": "StartReq",
         "description": "启动任务请求(未开始→进行中,创建 in-flight TaskExecute 记 actual_start_time)。\n\nD-002: 多次填报每次\"启动\"产生一条 TaskExecute。返回的 id 用于 execute 的 task_execute_id。\nactual_start_time 可选(跨天拆分补填时传指定日期,默认 now)。"
+      },
+      "StepProgressSummary": {
+        "properties": {
+          "step_total": {
+            "type": "integer",
+            "title": "Step Total"
+          },
+          "steps_completed": {
+            "type": "integer",
+            "title": "Steps Completed"
+          },
+          "current_step_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step Name"
+          },
+          "current_step_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step Status"
+          },
+          "current_step_desc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step Desc"
+          }
+        },
+        "type": "object",
+        "required": [
+          "step_total",
+          "steps_completed",
+          "current_step_name",
+          "current_step_status",
+          "current_step_desc"
+        ],
+        "title": "StepProgressSummary",
+        "description": "step 级进度摘要（计算投影，非 changes 表列，零 migration）。\n\n数据源=platform_change_progress.latest_progress 的 steps[]（CLI 六表\n上行已落库，D-002@v1 零上报改动）；由 service._extract_step_progress\n跨全部 stage 提取，enrich_summaries / enrich_with_workspace_ids 填充。\nsteps 缺失 / 空数组 / 结构异常时不赋值（None），前端降级现有\ncurrent_stage 展示（D-003@v1）。列表接口只带本摘要（~200B/行）。"
+      },
+      "StepTimelineEntry": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "output": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "ordering": {
+            "type": "integer",
+            "title": "Ordering"
+          },
+          "wait_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wait Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "stage",
+          "status",
+          "output",
+          "completed_at",
+          "ordering",
+          "wait_reason"
+        ],
+        "title": "StepTimelineEntry",
+        "description": "step 级时间线明细项（计算投影，非表列）。\n\n数据源同 StepProgressSummary（latest_progress steps[]，service\n_extract_step_progress 填充，enrich_with_workspace_ids 挂到\nChangeRead.steps）。明细随 ChangeRead 形状出现在所有返回 ChangeRead\n的端点（详情 + transition/review 复用，additive 无害）。"
       },
       "SubmitDetailReq": {
         "properties": {

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>变更 step 级进度展示原型</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #f5f5f5; padding: 24px; color: #1f1f1f; }
+  h2 { font-size: 15px; margin: 18px 0 10px; color: #555; }
+  .card { background: #fff; border-radius: 10px; padding: 18px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  /* ── 列表页徽章 ── */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 8px 10px; color: #888; font-weight: 500; border-bottom: 1px solid #eee; }
+  td { padding: 10px; border-bottom: 1px solid #f5f5f5; }
+  .stage-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 12px; font-size: 12px; background: #eef4ff; color: #2563eb; }
+  .stage-badge.done { background: #f0fdf4; color: #16a34a; }
+  .step-sub { font-size: 11px; color: #888; margin-top: 3px; display: flex; align-items: center; gap: 5px; }
+  .mini-track { width: 64px; height: 4px; border-radius: 2px; background: #e5e7eb; overflow: hidden; }
+  .mini-track > i { display: block; height: 100%; background: #2563eb; }
+  .spinner { width: 10px; height: 10px; border: 2px solid #dbeafe; border-top-color: #2563eb; border-radius: 50%; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .wait-chip { font-size: 11px; background: #fef9c3; color: #a16207; padding: 1px 7px; border-radius: 8px; }
+  /* ── 详情页时间线 ── */
+  .timeline { position: relative; padding-left: 26px; }
+  .timeline::before { content: ""; position: absolute; left: 8px; top: 6px; bottom: 6px; width: 2px; background: #e5e7eb; }
+  .tl-item { position: relative; padding: 8px 0 14px; }
+  .tl-dot { position: absolute; left: -25px; top: 10px; width: 12px; height: 12px; border-radius: 50%; background: #d1d5db; border: 2px solid #fff; box-shadow: 0 0 0 1px #d1d5db; }
+  .tl-item.done .tl-dot { background: #16a34a; box-shadow: 0 0 0 1px #16a34a; }
+  .tl-item.active .tl-dot { background: #2563eb; box-shadow: 0 0 0 1px #2563eb; animation: pulse 1.6s ease infinite; }
+  .tl-item.wait .tl-dot { background: #eab308; box-shadow: 0 0 0 1px #eab308; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 5px rgba(37,99,235,.15); } }
+  .tl-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .tl-time { color: #999; font-size: 11px; margin-left: auto; }
+  .tl-out { font-size: 12px; color: #666; margin-top: 4px; line-height: 1.5; max-width: 560px; }
+  .stage-group { font-size: 12px; color: #999; margin: 14px 0 4px; display: flex; align-items: center; gap: 6px; }
+  .stage-group b { color: #555; }
+  /* ── 不乱跳演示 ── */
+  .note { font-size: 12px; color: #16a34a; background: #f0fdf4; padding: 8px 12px; border-radius: 8px; margin-top: 10px; }
+  .demo-bar { margin-top: 12px; display: flex; gap: 8px; align-items: center; font-size: 12px; color: #666; }
+  button { padding: 5px 12px; border: 1px solid #d1d5db; background: #fff; border-radius: 7px; cursor: pointer; font-size: 12px; }
+  button:hover { background: #f9fafb; }
+  #tick { color: #2563eb; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h2>① 变更中心列表页 —— 阶段徽章升级为 step 级</h2>
+<div class="card">
+  <table>
+    <tr><th>变更</th><th>阶段进度（原：只有 stage 文本 → 新：step 级）</th><th>最近活动</th></tr>
+    <tr>
+      <td>change-step-visibility</td>
+      <td>
+        <span class="stage-badge">🧠 brainstorm</span>
+        <div class="step-sub"><span class="spinner"></span><span class="mini-track"><i style="width:25%"></i></span> step 2/8 · 加载项目上下文</div>
+      </td>
+      <td>刚刚</td>
+    </tr>
+    <tr>
+      <td>init-trigger-sillyspec-init</td>
+      <td>
+        <span class="stage-badge">📐 plan</span>
+        <div class="step-sub"><span class="wait-chip">等待用户决策</span><span class="mini-track"><i style="width:60%"></i></span> step 3/5 · 设计确认</div>
+      </td>
+      <td>2 分钟前</td>
+    </tr>
+    <tr>
+      <td>error-message-l10n（已归档）</td>
+      <td>
+        <span class="stage-badge done">📦 archived · 8/8 步全部完成</span>
+      </td>
+      <td>3 小时前</td>
+    </tr>
+    <tr>
+      <td>quick-1af0ac52（quick 任务）</td>
+      <td>
+        <span class="stage-badge">⚡ quick</span>
+        <div class="step-sub"><span class="spinner"></span><span class="mini-track"><i style="width:67%"></i></span> step 2/3 · 实现并验证</div>
+      </td>
+      <td>5 分钟前</td>
+    </tr>
+  </table>
+  <div class="note">✓ 每 30 秒静默刷新；行按 change_key 稳定 diff，只更新徽章内文本——滚动位置、hover、选中态全部保留（页面不乱跳）</div>
+</div>
+
+<h2>② 变更详情页 —— 完整步骤时间线（每 10 秒刷新）</h2>
+<div class="card">
+  <div class="timeline" id="tl">
+    <div class="stage-group">✅ <b>scan 代码扫描</b>（已完成）</div>
+    <div class="tl-item done"><span class="tl-dot"></span>
+      <div class="tl-head">进度确认 <span class="tl-time">23:43:24</span></div>
+      <div class="tl-out">progress show 正常，模块上下文命中 sillyspec</div>
+    </div>
+    <div class="tl-item done"><span class="tl-dot"></span>
+      <div class="tl-head">加载项目上下文 <span class="tl-time">23:44:08</span></div>
+      <div class="tl-out">关键发现：CLI 六表 JSON 已含 steps[] 数据，读侧仅投影 current_stage——纯展示层缺口，不必改上报链路</div>
+    </div>
+    <div class="tl-item active"><span class="tl-dot"></span>
+      <div class="tl-head">对话式探索与需求澄清 <span class="tl-time">进行中</span></div>
+      <div class="tl-out">等待 1 项用户决策：step 级进度的实时刷新机制选哪种…</div>
+    </div>
+    <div class="tl-item"><span class="tl-dot"></span><div class="tl-head" style="color:#999">提出 2-3 种方案</div></div>
+    <div class="tl-item"><span class="tl-dot"></span><div class="tl-head" style="color:#999">分段展示设计</div></div>
+    <div class="tl-item"><span class="tl-dot"></span><div class="tl-head" style="color:#999">写设计文档并自审</div></div>
+    <div class="stage-group" style="color:#bbb">⬜ 后续：实现计划 → 波次执行 → 验证确认 → 归档</div>
+  </div>
+  <div class="note">✓ 已完成步显示 output 一句话摘要（取 CLI 上报的 --output）；等待决策步黄色高亮 + 等待原因；未来步灰色收起。刷新只更新变化的节点，时间线高度稳定不跳动</div>
+</div>
+
+<h2>③ 实时刷新演示（点击模拟一次 step 完成）</h2>
+<div class="card">
+  <div class="demo-bar">
+    <button onclick="advance()">模拟：当前 step 完成 → 下一步</button>
+    <span id="tick">当前：step 3/8 对话式探索（进行中）</span>
+  </div>
+  <div class="note" id="poll-note">刷新策略：列表 30s / 详情 10s；内容 hash 比对，无变化则完全跳过 re-render；变更进入终态（archived/failed）后停止轮询</div>
+</div>
+
+<script>
+let cur = 3, total = 8;
+const names = ["进度确认","加载项目上下文","对话式探索与需求澄清","提出 2-3 种方案","分段展示设计","写设计文档并自审","Design Grill 交叉审查","生成规范文件"];
+const tl = document.getElementById('tl');
+function advance() {
+  if (cur >= total) { document.getElementById('tick').textContent = "全部完成 ✓（轮询自动停止）"; return; }
+  // 找到 active 项改为 done，下一项变 active —— 只改这两个节点，其余 DOM 不动（演示"不乱跳"）
+  const items = tl.querySelectorAll('.tl-item');
+  const active = items[cur - 1];
+  if (active) {
+    active.classList.remove('active'); active.classList.add('done');
+    active.querySelector('.tl-time').textContent = new Date().toTimeString().slice(0,8);
+    active.querySelector('.tl-out')?.remove();
+    const out = document.createElement('div'); out.className = 'tl-out';
+    out.textContent = names[cur-1] + "：完成（摘要来自 CLI --output）";
+    active.appendChild(out);
+  }
+  const next = items[cur];
+  if (next) { next.classList.add('active'); next.querySelector('.tl-head').style.color=''; const t=document.createElement('span');t.className='tl-time';t.textContent='进行中';next.querySelector('.tl-head').appendChild(t);}
+  cur++;
+  document.getElementById('tick').textContent = `当前：step ${Math.min(cur,total)}/${total} ${names[Math.min(cur-1,total-1)]}（进行中）`;
+}
+</script>
+</body>
+</html>

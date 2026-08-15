@@ -8795,6 +8795,9 @@ export interface components {
             updated_at: string;
             /** Archived At */
             archived_at: string | null;
+            step_progress?: components["schemas"]["StepProgressSummary"] | null;
+            /** Steps */
+            steps?: components["schemas"]["StepTimelineEntry"][] | null;
         };
         /**
          * ChangeRejectProcessReq
@@ -8875,6 +8878,7 @@ export interface components {
             /** Current Stage */
             current_stage?: string | null;
             pending_review?: components["schemas"]["PendingReview"] | null;
+            step_progress?: components["schemas"]["StepProgressSummary"] | null;
             /**
              * Updated At
              * Format: date-time
@@ -15225,6 +15229,53 @@ export interface components {
             execute_user_id?: string | null;
             /** Actual Start Time */
             actual_start_time?: string | null;
+        };
+        /**
+         * StepProgressSummary
+         * @description step 级进度摘要（计算投影，非 changes 表列，零 migration）。
+         *
+         *     数据源=platform_change_progress.latest_progress 的 steps[]（CLI 六表
+         *     上行已落库，D-002@v1 零上报改动）；由 service._extract_step_progress
+         *     跨全部 stage 提取，enrich_summaries / enrich_with_workspace_ids 填充。
+         *     steps 缺失 / 空数组 / 结构异常时不赋值（None），前端降级现有
+         *     current_stage 展示（D-003@v1）。列表接口只带本摘要（~200B/行）。
+         */
+        StepProgressSummary: {
+            /** Step Total */
+            step_total: number;
+            /** Steps Completed */
+            steps_completed: number;
+            /** Current Step Name */
+            current_step_name: string | null;
+            /** Current Step Status */
+            current_step_status: string | null;
+            /** Current Step Desc */
+            current_step_desc: string | null;
+        };
+        /**
+         * StepTimelineEntry
+         * @description step 级时间线明细项（计算投影，非表列）。
+         *
+         *     数据源同 StepProgressSummary（latest_progress steps[]，service
+         *     _extract_step_progress 填充，enrich_with_workspace_ids 挂到
+         *     ChangeRead.steps）。明细随 ChangeRead 形状出现在所有返回 ChangeRead
+         *     的端点（详情 + transition/review 复用，additive 无害）。
+         */
+        StepTimelineEntry: {
+            /** Name */
+            name: string;
+            /** Stage */
+            stage: string;
+            /** Status */
+            status: string;
+            /** Output */
+            output: string | null;
+            /** Completed At */
+            completed_at: string | null;
+            /** Ordering */
+            ordering: number;
+            /** Wait Reason */
+            wait_reason: string | null;
         };
         /**
          * SubmitDetailReq

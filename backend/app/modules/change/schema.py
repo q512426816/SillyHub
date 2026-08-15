@@ -20,6 +20,44 @@ class PendingReview(enum.StrEnum):
     ARCHIVE_CONFIRM = "archive_confirm"
 
 
+# ── Step progress DTOs（2026-08-15-change-step-visibility task-02，design §7）──
+
+
+class StepProgressSummary(BaseModel):
+    """step 级进度摘要（计算投影，非 changes 表列，零 migration）。
+
+    数据源=platform_change_progress.latest_progress 的 steps[]（CLI 六表
+    上行已落库，D-002@v1 零上报改动）；由 service._extract_step_progress
+    跨全部 stage 提取，enrich_summaries / enrich_with_workspace_ids 填充。
+    steps 缺失 / 空数组 / 结构异常时不赋值（None），前端降级现有
+    current_stage 展示（D-003@v1）。列表接口只带本摘要（~200B/行）。
+    """
+
+    step_total: int  # 全 stage 步骤总数
+    steps_completed: int  # 已完成数
+    current_step_name: str | None  # 第一个非 completed 步名（全完成→None）
+    current_step_status: str | None  # "active" | "waiting" | None(全完成)
+    current_step_desc: str | None  # 当前步 output 截断（无→None）
+
+
+class StepTimelineEntry(BaseModel):
+    """step 级时间线明细项（计算投影，非表列）。
+
+    数据源同 StepProgressSummary（latest_progress steps[]，service
+    _extract_step_progress 填充，enrich_with_workspace_ids 挂到
+    ChangeRead.steps）。明细随 ChangeRead 形状出现在所有返回 ChangeRead
+    的端点（详情 + transition/review 复用，additive 无害）。
+    """
+
+    name: str
+    stage: str
+    status: str  # CLI 原值透传（7 值枚举：completed/pending/in-progress/failed/blocked/waiting/stale，前端白名单色映射）
+    output: str | None  # 截断 200 字
+    completed_at: str | None  # 归一化 ISO 8601 UTC（解析失败保留原串）
+    ordering: int
+    wait_reason: str | None
+
+
 class ChangeRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -43,6 +81,13 @@ class ChangeRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
+    # 2026-08-15-change-step-visibility task-02（design §7）：step 级进度
+    # 计算投影（DTO 层），非 changes 表列（零 migration）；由 service
+    # enrich_with_workspace_ids 从 PG latest_progress steps[] 提取填充
+    # （steps 缺失→None，前端降级现有展示，D-003@v1）。optional default
+    # None（brownfield 安全，旧客户端不读不受影响）。
+    step_progress: StepProgressSummary | None = None
+    steps: list[StepTimelineEntry] | None = None
 
 
 class ChangeSummary(BaseModel):
@@ -63,6 +108,12 @@ class ChangeSummary(BaseModel):
     # StageProjectionService._map 纯函数映射得出，与 current_stage 同源。optional
     # default None（brownfield 安全，旧前端不读此字段不受影响）。
     pending_review: PendingReview | None = None
+    # 2026-08-15-change-step-visibility task-02（design §7）：列表项携带 step 级
+    # 进度摘要。计算字段（DTO 层），非 changes 表列（零 migration）；由
+    # service.enrich_summaries 从 latest_progress steps[] 提取填充（steps 缺失→
+    # None，前端降级现有展示，D-003@v1）。只带摘要（~200B/行），不带 steps 明细
+    # （明细随 ChangeRead.steps）。optional default None（brownfield 安全）。
+    step_progress: StepProgressSummary | None = None
     updated_at: datetime
 
 

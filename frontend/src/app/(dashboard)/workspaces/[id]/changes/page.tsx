@@ -1,7 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import {
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { Checkbox, Input, Select, type TableProps } from "antd";
 
 import {
@@ -11,11 +16,13 @@ import {
   SectionCard,
 } from "@/components/layout";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { ChangeStepBadge } from "@/components/changes/change-step-badge";
 import { ApiError } from "@/lib/api";
 import {
   listChanges,
   reparseChanges,
+  type ChangeList,
   type ChangeReparseStats,
   type ChangeSummary,
   type ChangeWarning,
@@ -52,28 +59,6 @@ const PENDING_REVIEW_LABEL: Record<string, string> = {
   archive_confirm: "待归档确认",
 };
 
-// 主线 stage 标签（对齐工具 STAGE_ORDER：scan→brainstorm→plan→execute→verify→archive）。
-// quick（2026-08-12-quick-independent-stage）：辅助阶段，warning 色突出。
-const STAGE_KIND: Record<string, StatusKind> = {
-  quick: "warning",
-  brainstorm: "warning",
-  plan: "info",
-  execute: "info",
-  verify: "success",
-  archive: "neutral",
-};
-
-const STAGE_LABEL: Record<string, string> = {
-  draft: "草稿", // 兜底旧数据（新建已改 brainstorm，旧 change 仍可能 draft）
-  scan: "扫描",
-  quick: "快速任务",
-  brainstorm: "需求分析",
-  plan: "规划",
-  execute: "执行",
-  verify: "验证",
-  archive: "归档",
-};
-
 const STAGE_OPTIONS = [
   { value: "", label: "全部阶段" },
   { value: "brainstorm", label: "需求分析" },
@@ -86,8 +71,42 @@ const STAGE_OPTIONS = [
 // 排序方向（task-06 / D-004）：默认最近活动优先。
 type SortDir = "updated_at_desc" | "updated_at_asc";
 
+// ── 智能轮询纯函数（task-06 / design §5 Phase 2.4 / Grill #2，导出供测试）──────
+//
+// 终态可测试定义：status === "archived" || location === "archive"（changes 表仅
+// active/archived 两值，无 failed——失败语义在 steps 层由 7 值枚举承载）。
+
+/** 单条变更终态判定（design §5 Phase 2.4）。 */
+export function isTerminalChange(
+  c: Pick<ChangeSummary, "status" | "location">,
+): boolean {
+  return c.status === "archived" || c.location === "archive";
+}
+
+/** 当前页存在任一非终态变更（停轮判定：全终态 → false；数据未到也不轮）。 */
+export function hasActiveChanges(
+  data: ChangesPageData | undefined,
+): boolean {
+  if (!data) return false;
+  return data.items.some((c) => !isTerminalChange(c));
+}
+
+/** 列表轮询间隔（D-001@v1）：非终态存在 → 30s；全终态 / 无数据 → false 停轮。 */
+export const CHANGES_POLL_INTERVAL_MS = 30_000;
+
+/** refetchInterval 决策函数（导出供单测两分支：非终态 30000 / 全终态 false）。 */
+export function changesRefetchInterval(
+  data: ChangesPageData | undefined,
+): number | false {
+  return hasActiveChanges(data) ? CHANGES_POLL_INTERVAL_MS : false;
+}
+
+/** 主 load 响应：变更分页 + 并发拉取的 workspace（原 Promise.all 装配，R-07 保持）。 */
+type ChangesPageData = ChangeList & { workspace: Workspace };
+
 export default function ChangesPage({ params }: Props) {
   const workspaceId = params.id;
+  const queryClient = useQueryClient();
   const [tab, setTab] = useState<"active" | "archive">("active");
   // D-007：进行中视图默认套「只看待我处理」聚焦
   const [focusMine, setFocusMine] = useState(true);
@@ -95,92 +114,103 @@ export default function ChangesPage({ params }: Props) {
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState("");
   const [sortDir, setSortDir] = useState<SortDir>("updated_at_desc");
-  const [items, setItems] = useState<ChangeSummary[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [reparsing, setReparsing] = useState(false);
+  // reparse 错误横幅（主 load 错误改由 query 派生，见 listError）
   const [pageError, setPageError] = useState<string | null>(null);
   const [stats, setStats] = useState<ChangeReparseStats | null>(null);
   const [warnings, setWarnings] = useState<ChangeWarning[]>([]);
-  const [workspace, setWorkspace] = useState<Workspace | null>(null);
-  // tab 计数（进行中=不聚焦的总数 M；已归档=archive total），用于 tab 挂数量 + 副标题 M。
-  // 单独 effect 拉（pageSize=1 只为拿 total），不随 filter/聚焦变化——避免聚焦时 tab 计数
-  // 被污染成 N。首次渲染无值时 tab 不显示计数，请求完成后回填。
-  const [tabTotals, setTabTotals] = useState<{
-    active?: number;
-    archive?: number;
-  }>({});
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setPageError(null);
-    try {
-      // task-11 / 2026-07-10-remove-server-local-workspace-mode：平台统一
-      // daemon-client 语义，前端不再校验 daemon 在线状态。
+  // 主 load（task-06 / D-004@v1：裸 useEffect+useState 改 useQuery）。
+  // queryKey = workspaceId + 全部请求参数（tab/search/stageFilter/sortDir/
+  // pendingReviewOnly/page/pageSize），任一变化即新查询自动重取——请求参数与
+  // 改造前逐项一致（R-07）。queryFn 保持原 Promise.all（listChanges 全参 +
+  // getWorkspace，task-11 / 2026-07-10-remove-server-local-workspace-mode：平台
+  // 统一 daemon-client 语义，前端不再校验 daemon 在线状态）。
+  const changesQuery = useQuery({
+    queryKey: [
+      "changes",
+      workspaceId,
+      {
+        location: tab,
+        search,
+        currentStage: stageFilter,
+        sort: sortDir,
+        // D-007：进行中 + 聚焦 → 只看待我处理（pending_review 非空）
+        pendingReviewOnly: tab === "active" && focusMine,
+        page,
+        pageSize,
+      },
+    ],
+    queryFn: async (): Promise<ChangesPageData> => {
       const [resp, ws] = await Promise.all([
         listChanges(workspaceId, {
           location: tab,
           search: search || undefined,
           currentStage: stageFilter || undefined,
           sort: sortDir,
-          // D-007：进行中 + 聚焦 → 只看待我处理（pending_review 非空）
           pendingReviewOnly: tab === "active" && focusMine,
           page,
           pageSize,
         }),
         getWorkspace(workspaceId),
       ]);
-      setItems(resp.items);
-      setTotal(resp.total);
-      setWorkspace(ws);
-    } catch (err) {
-      setPageError(err instanceof ApiError ? err.message : "加载变更列表失败");
-    } finally {
-      setLoading(false);
-    }
-  }, [
-    workspaceId,
-    tab,
-    search,
-    stageFilter,
-    sortDir,
-    focusMine,
-    page,
-    pageSize,
-  ]);
+      return { ...resp, workspace: ws };
+    },
+    // 分页/筛选切 key 时保留上一页数据渲染（改造前 items 不清空、不闪空表）
+    placeholderData: keepPreviousData,
+    // 智能轮询（D-001@v1）：当前页存在非终态变更 30s 刷新，全终态停轮；
+    // refetchIntervalInBackground 默认 false = 页面不可见暂停；structuralSharing
+    // 默认开——响应内容不变时引用相等，DataTable rowKey="id" 行不重渲染（R-04 不乱跳）。
+    refetchInterval: (query) => changesRefetchInterval(query.state.data),
+  });
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const items = changesQuery.data?.items ?? [];
+  const total = changesQuery.data?.total ?? 0;
+  const workspace = changesQuery.data?.workspace ?? null;
+  // loading = 挂起态（首载/切 key 无数据可显时转圈）；后台轮询与同参 refetch
+  // 不闪 loading（antd spinner 会造成整表重渲染抖动，与 R-04 不乱跳目标相悖）
+  const loading = changesQuery.isPending;
+  // 主 load 错误语义保持（R-07）：ApiError 取 err.message，否则「加载变更列表失败」
+  const listError = changesQuery.isError
+    ? changesQuery.error instanceof ApiError
+      ? changesQuery.error.message
+      : "加载变更列表失败"
+    : null;
 
-  // 单独 effect：拉两个 tab 的总数（不带 filter、不聚焦），用于 tab 挂数量 + 副标题 M。
-  // 与主 load 解耦：filter/聚焦变化不重发，tab 计数稳定不被污染。
+  // tab 计数（进行中=不聚焦的总数 M；已归档=archive total），用于 tab 挂数量 + 副标题 M。
+  // 独立 useQuery（key 不含 filter/聚焦）：filter/聚焦变化不重发，tab 计数稳定不被
+  // 污染；不轮询、失败静默（非关键，与原 effect 的 catch 行为一致）。首次无值时
+  // tab 不显示计数，请求完成后回填。
+  const tabTotalsQuery = useQuery({
+    queryKey: ["changesTabTotals", workspaceId],
+    queryFn: async (): Promise<{ active: number; archive: number }> => {
+      const [a, b] = await Promise.all([
+        listChanges(workspaceId, { location: "active", pageSize: 1 }),
+        listChanges(workspaceId, { location: "archive", pageSize: 1 }),
+      ]);
+      return { active: a.total, archive: b.total };
+    },
+    retry: false,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+  });
+  const tabTotals: { active?: number; archive?: number } =
+    tabTotalsQuery.data ?? {};
+
+  // 旧 load() 每次执行先清错误横幅：新数据到达时收敛 reparse 错误横幅（语义对齐）。
   useEffect(() => {
-    let cancelled = false;
-    void Promise.all([
-      listChanges(workspaceId, { location: "active", pageSize: 1 }),
-      listChanges(workspaceId, { location: "archive", pageSize: 1 }),
-    ])
-      .then(([a, b]) => {
-        if (!cancelled) {
-          setTabTotals({ active: a.total, archive: b.total });
-        }
-      })
-      .catch(() => {
-        // tab 计数非关键，静默
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId]);
+    setPageError(null);
+  }, [changesQuery.dataUpdatedAt]);
 
   const handleSearchClick = () => {
     const noChange = searchInput === search && page === 1;
     setSearch(searchInput);
     setPage(1);
-    if (noChange) void load();
+    // 参数未变（queryKey 不变，react-query 不会自动重取）→ 手动 refetch，保持
+    // 旧「同参重查」行为
+    if (noChange) void changesQuery.refetch();
   };
 
   const handleResetClick = () => {
@@ -210,7 +240,11 @@ export default function ChangesPage({ params }: Props) {
       const resp = await reparseChanges(workspaceId);
       setStats(resp.stats);
       setWarnings(resp.warnings ?? []);
-      await load();
+      // 旧 load() 只刷主列表（tabTotals 不随 reparse 刷新）：失效主列表 key 前缀
+      // ["changes", workspaceId]（不含 changesTabTotals），等价替换且 await 语义一致
+      await queryClient.invalidateQueries({
+        queryKey: ["changes", workspaceId],
+      });
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "重新解析失败");
     } finally {
@@ -283,15 +317,16 @@ export default function ChangesPage({ params }: Props) {
     {
       title: "阶段",
       key: "stage",
-      width: 90,
-      render: (_v: unknown, c: ChangeSummary) => {
-        const stage = c.current_stage ?? "scan";
-        return (
-          <StatusBadge kind={STAGE_KIND[stage] ?? "neutral"}>
-            {STAGE_LABEL[stage] ?? stage}
-          </StatusBadge>
-        );
-      },
+      // task-06 / FR-03：换 ChangeStepBadge（stage 主行 + step 摘要副行）。
+      // step_progress 缺省传 null 由组件内部降级只渲染 stage 主行（D-003@v1，
+      // 视觉与现状一致）；宽度 90→150 容纳「step x/y · 当前步名」副行。
+      width: 150,
+      render: (_v: unknown, c: ChangeSummary) => (
+        <ChangeStepBadge
+          stage={c.current_stage ?? "scan"}
+          stepProgress={c.step_progress ?? null}
+        />
+      ),
     },
     {
       title: "影响组件",
@@ -336,7 +371,7 @@ export default function ChangesPage({ params }: Props) {
   ];
 
   // 副标题（task-06）：workspace 名 + 计数。
-  // 聚焦时 N=total（当前待我处理），M=tabTotals.active（进行中总数，单独 effect 拉）。
+  // 聚焦时 N=total（当前待我处理），M=tabTotals.active（进行中总数，单独 useQuery 拉）。
   const renderSubtitle = (): ReactNode => {
     const wsName = workspace?.name ?? "—";
     if (tab === "archive") {
@@ -437,9 +472,9 @@ export default function ChangesPage({ params }: Props) {
         }
       />
 
-      {pageError && (
+      {(listError ?? pageError) && (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
-          {pageError}
+          {listError ?? pageError}
         </div>
       )}
 
@@ -464,7 +499,7 @@ export default function ChangesPage({ params }: Props) {
         </SectionCard>
       )}
 
-      {/* 主 tab：进行中 / 已归档（按 location，D-007），挂数量（tabTotals 单独 effect 拉） */}
+      {/* 主 tab：进行中 / 已归档（按 location，D-007），挂数量（tabTotals 独立 useQuery 拉） */}
       <div className="flex items-center gap-1">
         {TABS.map((t) => {
           const cnt = t.key === "active" ? tabTotals.active : tabTotals.archive;

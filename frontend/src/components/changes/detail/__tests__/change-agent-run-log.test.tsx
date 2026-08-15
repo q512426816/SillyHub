@@ -4,14 +4,10 @@ import { vi } from "vitest";
 import { ChangeAgentRunLog } from "@/components/changes/detail/change-agent-run-log";
 import type { DispatchResponse } from "@/lib/changes";
 
-// 捕获 SillySpecStepProgress 收到的 props（验 FR-05b：onDispatch 不传）
-const stepCapture = vi.hoisted(() => ({ props: null as Record<string, unknown> | null }));
-vi.mock("@/components/sillyspec-step-progress", () => ({
-  SillySpecStepProgress: (props: Record<string, unknown>) => {
-    stepCapture.props = props;
-    return <div data-testid="step-progress" />;
-  },
-}));
+// 2026-08-15-change-step-visibility task-05：原 vi.mock 旧步骤进度组件模块
+// 捕获 props 验 onDispatch 不传——旧组件已删
+// （D-005@v1），子步骤进度内联为本文件私有 AgentStepProgress，改验「不渲染
+// 任何触发按钮」（FR-05b 操作入口统一归 ChangeStageActions 的落点表现）。
 vi.mock("@/components/agent-run-panel", () => ({
   AgentRunPanel: ({ runId }: { runId: string | null }) => (
     <div data-testid="agent-run-panel" data-run={runId ?? ""} />
@@ -49,14 +45,14 @@ function makeProps(over: Record<string, unknown> = {}) {
 }
 
 describe("ChangeAgentRunLog", () => {
-  it("渲染子步骤进度，且不传 onDispatch/dispatching（FR-05b 消除双入口）", () => {
+  it("渲染子步骤进度区，且不渲染任何触发按钮（FR-05b 消除双入口）", () => {
     render(<ChangeAgentRunLog {...makeProps()} />);
-    expect(screen.getByTestId("step-progress")).toBeInTheDocument();
-    expect(stepCapture.props).toBeTruthy();
-    expect(stepCapture.props!.onDispatch).toBeUndefined();
-    expect(stepCapture.props!.dispatching).toBeUndefined();
-    // 刷新回调保留
-    expect(stepCapture.props!.onRefresh).toBeDefined();
+    expect(screen.getByText("🤖 智能体运行状态")).toBeInTheDocument();
+    // 无步骤数据时为降级分支；无论哪条分支都不应出现触发/执行按钮文案
+    expect(screen.queryByText(/触发智能体/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/执行下一步/)).not.toBeInTheDocument();
+    // 刷新回调保留（↻ 刷新按钮）
+    expect(screen.getByText("↻ 刷新")).toBeInTheDocument();
   });
 
   it("panelRunId 非空时渲染日志面板，默认折叠，点击展开见 AgentRunPanel", () => {

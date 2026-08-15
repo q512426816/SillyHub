@@ -24,6 +24,7 @@ from sqlmodel import col
 from app.core.errors import ChangeDocNotFound, ChangeNotFound, InvalidTransition, PermissionDenied
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentSession
+from app.modules.change.dispatch import STAGE_ORDER
 from app.modules.change.model import (
     TRANSITIONS,
     Change,
@@ -39,6 +40,8 @@ from app.modules.change.schema import (
     ChangeRead,
     ChangeSummary,
     PendingReview,
+    StepProgressSummary,
+    StepTimelineEntry,
 )
 from app.modules.platform_sync.model import PlatformChangeProgressORM
 from app.modules.workspace.model import Workspace
@@ -1442,6 +1445,11 @@ class ChangeService:
         命中且 ``latest_progress`` 解析出 ``current_stage`` 则覆盖 ChangeRead.current_stage
         （工具上行权威值），否则保留 change 现有值（D-003 fallback）。不投 status（D-004@v2）、
         不写 changes 表（D-002 read-only）。
+
+        2026-08-15-change-step-visibility task-01（design §5 Phase 1.3 / Grill #11）：同一次
+        join 命中时额外提取 steps → ``read.step_progress``（摘要）+ ``read.steps``（明细）；
+        steps 缺失/异常不赋值（None，前端降级，D-003@v1）。transition/review 响应复用本方法
+        同样带 steps（ChangeRead 形状 additive 无害）。
         """
         change_read = ChangeRead.model_validate(change)
         projected = await self._project_current_stage([(change.workspace_id, change.change_key)])
@@ -1449,6 +1457,9 @@ class ChangeService:
         if stage_info is not None:
             # 仅投影 current_stage（NG-03：详情 READ 不改 pending_review，恒 None）。
             change_read.current_stage = stage_info[0]
+            summary, timeline = self._extract_step_progress(stage_info[2])
+            change_read.step_progress = summary
+            change_read.steps = timeline
         return change_read
 
     async def enrich_summaries(self, changes: list[Change]) -> list[ChangeSummary]:
@@ -1468,11 +1479,15 @@ class ChangeService:
             summary = ChangeSummary.model_validate(c)
             stage_info = projected.get((c.workspace_id, c.change_key))
             if stage_info is not None:
-                stage, completed = stage_info
+                stage, completed, latest_progress = stage_info
                 summary.current_stage = stage
                 # task-01（D-008）：pending_review 与 current_stage 同源（latest_progress
                 # 镜像），复用 _map 纯函数（projection.py staticmethod，不读 sillyspec.db）。
                 summary.pending_review = StageProjectionService._map(stage, completed)
+                # 2026-08-15-change-step-visibility task-01：列表只带 step 摘要
+                # （~200B/行，R-02），明细随 ChangeRead.steps（enrich_with_workspace_ids）。
+                step_summary, _ = self._extract_step_progress(latest_progress)
+                summary.step_progress = step_summary
             summaries.append(summary)
         return summaries
 
@@ -1498,21 +1513,27 @@ class ChangeService:
             info = projected.get((workspace_id, k))
             if info is None:
                 continue
-            stage, completed = info
+            # 2026-08-15-change-step-visibility task-01（Grill P0-1）：_project_current_stage
+            # 扩三元组（stage, completed, latest_progress），本函数不消费 steps（行为不变，
+            # 守护测试 test_resolve_pending_change_keys_* 防回归），第三元丢弃。
+            stage, completed, _ = info
             if StageProjectionService._map(stage, completed) is not None:
                 pending.add(k)
         return pending
 
     async def _project_current_stage(
         self, pairs: list[tuple[uuid.UUID, str]]
-    ) -> dict[tuple[uuid.UUID, str], tuple[str, set[str]]]:
+    ) -> dict[tuple[uuid.UUID, str], tuple[str, set[str], dict | None]]:
         """批量 read-only join ``platform_change_progress`` 取权威 current_stage。
 
         一次 ``select where (workspace_id, change_name) in (pairs)``（复合 IN，R-03 禁 N+1）。
-        返回 ``(workspace_id, change_name) → current_stage`` 映射；未命中/解析失败/异常一律
-        不进映射（调用方 fallback 现有值，D-003）。latest_progress 结构异常不抛（防御性
-        isinstance）。shk_live_ 过渡期 workspace_id=NULL 行不匹配任何 change.workspace_id
-        （change.workspace_id 非 None）→ 自然 fallback。
+        返回 ``(workspace_id, change_name) → (current_stage, completed_stages,
+        latest_progress)`` 三元组映射（2026-08-15-change-step-visibility task-01 /
+        D-002@v1：latest_progress 数据本来就在 SELECT 结果里，透传给调用方做 step 提取，
+        零新增查询）；未命中/解析失败/异常一律不进映射（调用方 fallback 现有值，D-003）。
+        latest_progress 结构异常不抛（防御性 isinstance）。shk_live_ 过渡期
+        workspace_id=NULL 行不匹配任何 change.workspace_id（change.workspace_id 非
+        None）→ 自然 fallback。
         """
         if not pairs:
             return {}
@@ -1527,12 +1548,12 @@ class ChangeService:
             ).in_(pairs)
         )
         rows = (await self._session.execute(stmt)).all()
-        mapping: dict[tuple[uuid.UUID, str], tuple[str, set[str]]] = {}
+        mapping: dict[tuple[uuid.UUID, str], tuple[str, set[str], dict | None]] = {}
         for ws_id, change_name, latest_progress in rows:
             stage = self._extract_current_stage(latest_progress)
             if stage is not None and ws_id is not None:
                 completed = self._extract_completed_stages(latest_progress)
-                mapping[(ws_id, change_name)] = (stage, completed)
+                mapping[(ws_id, change_name)] = (stage, completed, latest_progress)
         return mapping
 
     @staticmethod
@@ -1595,6 +1616,106 @@ class ChangeService:
             if isinstance(stage_name, str):
                 completed.add(stage_name)
         return completed
+
+    # step 级进度提取辅助（2026-08-15-change-step-visibility task-01，design §5 Phase 1.2）
+
+    _OUTPUT_TRUNCATE_LEN: int = 200  # output 摘要截断（R-02 控列表/明细体积）
+    _CLI_DT_FORMAT: str = "%Y/%m/%d %H:%M:%S"  # CLI 本地时区习惯格式（design §5 Phase 1.2）
+
+    @staticmethod
+    def _stage_group_order(stage: str) -> tuple[int, str]:
+        """stage 分组排序键：STAGE_ORDER 序号，quick 及未知 stage 追加在已知序之后。
+
+        Grill #14：未知 stage（含 quick）与已知序并列时按 stage 名稳定排序
+        （index=len(STAGE_ORDER) 同值，tuple 第二元兜底，结果跨平台稳定）。
+        """
+        try:
+            return (STAGE_ORDER.index(stage), stage)
+        except ValueError:
+            return (len(STAGE_ORDER), stage)
+
+    @staticmethod
+    def _normalize_completed_at(value: object) -> str | None:
+        """completed_at 归一化（Grill #18）：``2026/8/15 23:44:08`` 本地时区 → ISO 8601 UTC。
+
+        值非 str / 解析失败（含时区语义不明）→ 原样保留（str 原串 / None），不抛。
+        """
+        if not isinstance(value, str):
+            return None
+        try:
+            local_dt = datetime.strptime(value, ChangeService._CLI_DT_FORMAT)
+        except ValueError:
+            return value
+        return local_dt.astimezone().astimezone(UTC).isoformat()
+
+    @staticmethod
+    def _extract_step_progress(
+        latest_progress: dict | None,
+    ) -> tuple[StepProgressSummary | None, list[StepTimelineEntry] | None]:
+        """从 ``latest_progress.steps``（顶层数组）提取 step 级摘要 + 时间线明细。
+
+        数据源=CLI ``serializeForSync`` 六表 steps 表行（元素字段 stage/name/status/
+        output/completed_at/ordering/wait_reason，spike-01 实证为顶层数组，非嵌套在
+        changes[0] 下）。防御 isinstance 逐层判型（对齐 ``_extract_current_stage`` 范式，
+        R-01）：latest_progress 非 dict / steps 缺失 / 空数组 / 无一有效元素 →
+        ``(None, None)`` 不抛（调用方不赋值，前端降级现有展示，D-003@v1）。
+
+        排序（Grill #14）：stage 分组按 ``dispatch.STAGE_ORDER`` 定序，quick 及未知
+        stage 追加在已知序之后（按 stage 名稳定排序），组内按 ordering（缺失按 0）。
+        """
+        if not isinstance(latest_progress, dict):
+            return None, None
+        steps = latest_progress.get("steps")
+        if not isinstance(steps, list):
+            return None, None
+
+        truncate = ChangeService._OUTPUT_TRUNCATE_LEN
+        timeline: list[StepTimelineEntry] = []
+        for item in steps:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            stage = item.get("stage")
+            status = item.get("status")
+            if not (isinstance(name, str) and name and isinstance(stage, str) and stage):
+                continue  # 身份字段缺失/类型异常 → 丢弃该行（无法挂进时间线）
+            if not isinstance(status, str) or not status:
+                continue  # status 是时间线核心字段（七值色映射），缺失即整行不可用
+            ordering = item.get("ordering")
+            if not isinstance(ordering, int) or isinstance(ordering, bool):
+                ordering = 0  # 缺失/类型异常按 0（CLI 表列 NOT NULL DEFAULT 0，兜底防御）
+            output = item.get("output")
+            output = output[:truncate] if isinstance(output, str) else None
+            wait_reason = item.get("wait_reason")
+            if not isinstance(wait_reason, str):
+                wait_reason = None
+            timeline.append(
+                StepTimelineEntry(
+                    name=name,
+                    stage=stage,
+                    status=status,  # CLI 原值透传（7 值枚举，前端白名单色映射）
+                    output=output,
+                    completed_at=ChangeService._normalize_completed_at(item.get("completed_at")),
+                    ordering=ordering,
+                    wait_reason=wait_reason,
+                )
+            )
+        if not timeline:
+            return None, None
+        timeline.sort(key=lambda e: (ChangeService._stage_group_order(e.stage), e.ordering))
+
+        # 摘要（排序后）：当前步=第一个非 completed 步；wait_reason 非空→waiting 否则 active。
+        current = next((e for e in timeline if e.status != "completed"), None)
+        summary = StepProgressSummary(
+            step_total=len(timeline),
+            steps_completed=sum(1 for e in timeline if e.status == "completed"),
+            current_step_name=current.name if current is not None else None,
+            current_step_status=(
+                ("waiting" if current.wait_reason else "active") if current is not None else None
+            ),
+            current_step_desc=(current.output if current is not None else None),
+        )
+        return summary, timeline
 
     @staticmethod
     def _build_change(

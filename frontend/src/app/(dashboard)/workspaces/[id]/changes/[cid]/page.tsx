@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { PageContainer, PageHeader } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
@@ -12,15 +13,13 @@ import {
   normalizeReviewHistory,
 } from "@/components/changes/detail/change-review-history-card";
 import { ChangeSessionsCard } from "@/components/changes/detail/change-sessions-card";
-import {
-  ChangeStageActions,
-} from "@/components/changes/detail/change-stage-actions";
+import { ChangeStageActions } from "@/components/changes/detail/change-stage-actions";
 import {
   ChangeStageHeader,
   WORKFLOW_STAGE_LABELS,
 } from "@/components/changes/detail/change-stage-header";
+import { ChangeStepTimeline } from "@/components/changes/detail/change-step-timeline";
 import { ChangeTaskBoardCard } from "@/components/changes/detail/change-task-board-card";
-import type { StepInfo } from "@/components/sillyspec-step-progress";
 import { ApiError } from "@/lib/api";
 import {
   getAgentStatus,
@@ -39,6 +38,25 @@ interface Props {
   params: { id: string; cid: string };
 }
 
+/** 变更详情查询 key（task-07 / D-004@v1：react-query 缓存定位与审批后失效重取） */
+const CHANGE_QUERY_KEY = (workspaceId: string, changeId: string) =>
+  ["change", workspaceId, changeId] as const;
+
+/** 非终态轮询间隔（design §5 Phase 2.3：详情页 10s） */
+const DETAIL_REFETCH_MS = 10_000;
+
+/**
+ * 变更终态判定（design §5 Phase 2.4 可测试定义）：status 为 archived 或
+ * location 为 archive 即终态——changes 表仅 active/archived 两值，无 failed
+ * （失败语义在 steps 层由 7 值枚举承载）。data 未就绪按非终态处理（继续拉取）。
+ */
+export function isTerminalChange(
+  change: Pick<ChangeRead, "status" | "location"> | null | undefined,
+): boolean {
+  if (!change) return false;
+  return change.status === "archived" || change.location === "archive";
+}
+
 // quick/blocked/archived 三态 status 徽标（非线性节点，独立呈现）
 const STATUS_BADGE: Record<
   string,
@@ -52,9 +70,30 @@ const STATUS_BADGE: Record<
 export default function ChangeDetailPage({ params }: Props) {
   const workspaceId = params.id;
   const changeId = params.cid;
-  const [change, setChange] = useState<ChangeRead | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  // ── 变更详情（task-07 / D-004@v1：react-query 智能轮询替换原裸 useEffect）──
+  // 非终态 10s 周期刷新、终态停轮（isTerminalChange）；refetchIntervalInBackground
+  // 默认 false = 页面不可见暂停；structuralSharing 默认开启 = 内容未变跳过
+  // re-render（不乱跳），queryFn 保持原 getChange 请求参数。
+  const changeQuery = useQuery({
+    queryKey: CHANGE_QUERY_KEY(workspaceId, changeId),
+    queryFn: () => getChange(workspaceId, changeId),
+    refetchInterval: (query) =>
+      isTerminalChange(query.state.data) ? false : DETAIL_REFETCH_MS,
+  });
+  const change = changeQuery.data ?? null;
+  const changeError = changeQuery.error;
+  // loading / loadError 语义对齐原裸 load：仅初次加载（尚无数据）进入加载屏 /
+  // 错误屏；轮询或审批后刷新失败不打断已渲染内容（react-query 按策略自动重试）。
+  const loading = changeQuery.isPending;
+  const loadError =
+    changeQuery.isError && !changeQuery.data
+      ? changeError instanceof ApiError
+        ? changeError.message
+        : "加载变更详情失败"
+      : null;
+
   const [pageError, setPageError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [taskBoard, setTaskBoard] = useState<TaskBoard | null>(null);
@@ -75,32 +114,28 @@ export default function ChangeDetailPage({ params }: Props) {
     null,
   );
 
+  // ── 辅助数据（任务看板 / agent 状态 / 绑定会话近似）：一次性加载，不随详情轮询 ──
   useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      setPageError(null);
-      setLoadError(null);
-      try {
-        const [c, tb, as, sessions] = await Promise.all([
-          getChange(workspaceId, changeId),
-          getTaskBoard(workspaceId, changeId).catch(() => null),
-          getAgentStatus(workspaceId, changeId).catch(() => null),
-          listWorkspaceAgentSessions(workspaceId, { include_ended: true }).catch(
-            () => [],
-          ),
-        ]);
-        setChange(c);
-        setTaskBoard(tb);
-        setAgentStatus(as);
-        // §8 绑定查询语义 = 工作区最近活跃会话（coalesce(last_active_at, created_at) desc）
-        setBoundSession(sessions?.[0] ?? null);
-      } catch (err) {
-        setLoadError(err instanceof ApiError ? err.message : "加载变更详情失败");
-      } finally {
-        setLoading(false);
-      }
+    let cancelled = false;
+    setPageError(null);
+    const loadSide = async () => {
+      const [tb, as, sessions] = await Promise.all([
+        getTaskBoard(workspaceId, changeId).catch(() => null),
+        getAgentStatus(workspaceId, changeId).catch(() => null),
+        listWorkspaceAgentSessions(workspaceId, { include_ended: true }).catch(
+          () => [],
+        ),
+      ]);
+      if (cancelled) return;
+      setTaskBoard(tb);
+      setAgentStatus(as);
+      // §8 绑定查询语义 = 工作区最近活跃会话（coalesce(last_active_at, created_at) desc）
+      setBoundSession(sessions?.[0] ?? null);
     };
-    void load();
+    void loadSide();
+    return () => {
+      cancelled = true;
+    };
   }, [workspaceId, changeId]);
 
   const refreshAgentStatus = useCallback(async () => {
@@ -138,11 +173,15 @@ export default function ChangeDetailPage({ params }: Props) {
           setSuccessMsg("✅ 审批已生效，已通知绑定会话");
           setTimeout(() => setSuccessMsg(null), 3000);
         }
-        const [updated, updatedAgentStatus] = await Promise.all([
-          getChange(workspaceId, changeId),
+        // 审批后刷新（task-07）：变更详情改 query 失效重取，agent 状态保持原拉取
+        const [, updatedAgentStatus] = await Promise.all([
+          queryClient
+            .invalidateQueries({
+              queryKey: CHANGE_QUERY_KEY(workspaceId, changeId),
+            })
+            .catch(() => undefined),
           getAgentStatus(workspaceId, changeId).catch(() => null),
         ]);
-        setChange(updated);
         setAgentStatus(updatedAgentStatus);
       } catch (err) {
         setPageError(err instanceof ApiError ? err.message : "操作失败");
@@ -150,7 +189,7 @@ export default function ChangeDetailPage({ params }: Props) {
         setTransitioning(false);
       }
     },
-    [workspaceId, changeId, transitioning, gateComment],
+    [workspaceId, changeId, transitioning, gateComment, queryClient],
   );
 
   if (loading) {
@@ -176,34 +215,6 @@ export default function ChangeDetailPage({ params }: Props) {
       </PageContainer>
     );
   }
-
-  // 子步骤进度派生（从 change.stages，搬自原 page.tsx）
-  const steps: StepInfo[] | undefined = (() => {
-    const stages = change.stages as Record<string, unknown> | null;
-    if (!stages || !change.current_stage) return undefined;
-    const topLevel = stages.steps;
-    if (Array.isArray(topLevel)) return topLevel as StepInfo[];
-    const stageData = stages[change.current_stage] as
-      | Record<string, unknown>
-      | undefined;
-    if (
-      stageData?.steps &&
-      typeof stageData.steps === "object" &&
-      !Array.isArray(stageData.steps)
-    ) {
-      const s = stageData.steps as { completed?: string[]; pending?: string[] };
-      const result: StepInfo[] = [];
-      let idx = 1;
-      for (const name of s.completed ?? []) {
-        result.push({ index: idx++, name, status: "completed" });
-      }
-      for (const name of s.pending ?? []) {
-        result.push({ index: idx++, name, status: "pending" });
-      }
-      return result.length > 0 ? result : undefined;
-    }
-    return undefined;
-  })();
 
   // 审核历史派生（从 change.stages.review_history，归一化 gate/rerun 双形状）
   const reviewHistory = normalizeReviewHistory(
@@ -281,7 +292,7 @@ export default function ChangeDetailPage({ params }: Props) {
 
       {/* 左主右辅两栏（移动端 <lg 单列：次线堆叠在主线下方） */}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-        {/* 主线：审批卡 + 智能体执行日志（只读） */}
+        {/* 主线：审批卡 + 步骤时间线 + 智能体执行日志（只读） */}
         <main className="space-y-3">
           <ChangeStageActions
             change={change}
@@ -292,6 +303,24 @@ export default function ChangeDetailPage({ params }: Props) {
             transitioning={transitioning}
             notifyResult={notifyResult}
           />
+
+          {/* 步骤时间线（task-07 / D-005@v1：数据源 latest_progress.steps，替换旧
+              SillySpecStepProgress 的 change.stages 派生挂载；steps 缺失降级不渲染，
+              组件内自空态兜底，D-003） */}
+          {change.steps && change.steps.length > 0 ? (
+            <section
+              data-testid="change-step-timeline-card"
+              className="rounded-md border bg-card"
+            >
+              <div className="flex items-center justify-between border-b px-3 py-2">
+                <h2 className="text-xs font-medium">📋 步骤时间线</h2>
+              </div>
+              <div className="px-3 py-2.5">
+                <ChangeStepTimeline steps={change.steps} />
+              </div>
+            </section>
+          ) : null}
+
           <ChangeAgentRunLog
             workspaceId={workspaceId}
             panelRunId={panelRunId}
@@ -299,7 +328,9 @@ export default function ChangeDetailPage({ params }: Props) {
             agentStatus={agentStatus}
             gateStatus={null}
             currentStage={change.current_stage ?? null}
-            steps={steps}
+            // steps 链路已随旧 SillySpecStepProgress 挂载退役（task-07，
+            // step 明细统一走上方 ChangeStepTimeline）
+            steps={undefined}
             teamMode={false}
             stageTeamMissionId={null}
             onDone={() => void refreshAgentStatus()}
