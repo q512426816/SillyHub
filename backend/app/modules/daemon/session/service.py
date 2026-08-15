@@ -589,8 +589,8 @@ class SessionService:
                 error="interactive dispatch wake-up failed (daemon offline)",
             )
             raise DaemonRuntimeOffline(
-                f"daemon runtime '{dispatch.runtime_id}' is offline; "
-                f"interactive session '{session.id}' could not start.",
+                "执行代理当前不在线，会话无法启动。请确认本机 daemon 进程已运行"
+                "（任务栏/终端 sillyhub-daemon），重启后重试；若刚重启请等几秒再试。",
                 details={
                     "runtime_id": str(dispatch.runtime_id),
                     "session_id": str(session.id),
@@ -920,7 +920,7 @@ class SessionService:
                     run_id=str(run.id),
                 )
             raise DaemonRuntimeOffline(
-                f"daemon runtime '{session.runtime_id}' is offline; turn could not be dispatched.",
+                "执行代理当前不在线，本轮消息未能发送。请确认 daemon 已运行后重试。",
                 details={
                     "runtime_id": str(session.runtime_id),
                     "session_id": str(session.id),
@@ -989,7 +989,7 @@ class SessionService:
         )
         if daemon_id is None or runtime_id is None:
             raise DaemonRuntimeOffline(
-                f"daemon runtime '{runtime_id}' is offline; interrupt could not be delivered.",
+                "执行代理当前不在线，无法打断本轮。请稍后重试或等待本轮结束。",
                 details={
                     "session_id": str(session_id),
                     "runtime_id": str(runtime_id) if runtime_id else None,
@@ -1006,8 +1006,7 @@ class SessionService:
         )
         if not control_ok:
             raise DaemonRuntimeOffline(
-                f"daemon runtime '{session.runtime_id}' is offline; "
-                f"interrupt could not be delivered.",
+                "执行代理当前不在线，无法打断本轮。请稍后重试或等待本轮结束。",
                 details={
                     "runtime_id": str(session.runtime_id),
                     "session_id": str(session.id),
@@ -1703,8 +1702,7 @@ class SessionService:
             target_daemon_id = await _resolve_daemon_id_for_runtime(self._session, runtime_id)
             if target_daemon_id is None or not hub.is_connected(target_daemon_id):
                 raise DaemonOffline(
-                    f"Target runtime '{runtime_id}' is offline; reopen needs a "
-                    f"live daemon to run the SDK resume.",
+                    "执行代理当前不在线，无法恢复会话。请先启动 daemon 再重新打开。",
                     details={
                         "session_id": str(session_id),
                         "runtime_id": str(runtime_id),

@@ -63,6 +63,7 @@ created_at: 2026-06-19T19:40:00+08:00
 
 ## 注意事项
 
+- **用户可见错误文案中文（ql-20260815-005）**：`session/service.py` 的 `DaemonRuntimeOffline`/`DaemonOffline`（创建/注入/打断/恢复会话 5 处）message 一律面向用户的中文短语（「执行代理当前不在线…」+ 行动指引），runtime/session/run 的 UUID 移入 `details`（前端 `runtime-session-dialog` 原样透传 `err.message`，英文技术串对用户无意义）。
 - `display_alias`：runtime 新增 nullable `display_alias VARCHAR(200)`，搜索（ilike）与卡片标题优先用它，空值回退 name/provider（2026-06-25-admin-global-daemon-workspace-management，D-002）。
 - 路由顺序：`/runtimes/page`、`/runtimes/usage` 等固定路径必须声明在 `/runtimes/{runtime_id}` 前，否则 FastAPI 把 `page` 当 UUID 解析返回 422（D-005）。
 - 跨 owner 管理：`get/disable/enable/delete/update` 接收 `is_platform_admin`，平台管理员可操作任意 owner 的 runtime，普通账号仍受 owner 限制（D-001）。

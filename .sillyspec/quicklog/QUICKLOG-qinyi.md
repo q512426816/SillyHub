@@ -316,3 +316,13 @@
 根因：test_config.py 的 importlib.reload 分裂 Settings 世界致 spec_root 落错目录 + test_parser_mtime.py 脏值量级错误 Linux 断言落空。
 方案：reload 改直取 Settings 类；脏值 9.8e10 改 9.1e11。
 结果：WSL 全量 2 worker 零 dispatch/task 失败，Windows 861 passed，ruff 过。
+
+## ql-20260815-005-ef98 | 2026-08-15 09:20:00 | 交互式会话报错文案人性化
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/session/service.py（5 处离线报错文案中文化+UUID 移 details）
+需求：交互式会话报错文案人性化。
+根因：session/service.py 5 处离线报错直接拼 UUID 英文串被前端透传。
+方案：改中文短语+行动指引，UUID 移 details。
+结果：daemon 843 passed，ruff 过。
