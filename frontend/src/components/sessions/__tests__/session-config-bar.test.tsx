@@ -54,9 +54,15 @@ vi.mock("@/lib/api/llm-providers", () => ({
 }));
 
 // 组件运行时只消费 injectSession（类型导入编译期擦除），局部 mock 不加载真实 daemon.ts。
-vi.mock("@/lib/daemon", () => ({
-  injectSession: (...args: unknown[]) => mocks.injectSession(...args),
-}));
+// ql-20260815-011：组件新增消费 PROVIDER_META（引擎显示名），importOriginal
+// 保留真常量只 mock injectSession 网络函数。
+vi.mock("@/lib/daemon", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/daemon")>();
+  return {
+    ...actual,
+    injectSession: (...args: unknown[]) => mocks.injectSession(...args),
+  };
+});
 
 // antd message 静态方法局部 mock（Button/Input 走真实实现）。
 vi.mock("antd", async (importOriginal) => {

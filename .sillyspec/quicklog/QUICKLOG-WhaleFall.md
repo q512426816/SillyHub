@@ -389,3 +389,12 @@
 根因：①_inject_into_session 仅切换分支给 AgentRun 落 agent_profile_id/snapshot/llm_provider_id，普通 inject 轮全 NULL，前端 whoLine 读 run 快照如实显示未指定（违反 D-008 每轮快照）；②ConfigDropdown absolute left-0 锚定到整条 barRef（relative）而非各控件；③标题区无 id 展示。
 方案：①effective 档案/供应商解析移出 config_switch 条件（未切维度也按会话当前 id 取行），run 三字段盖章改无条件（切换轮=新值/普通轮=会话当前值/无配置=NULL）；②ctrlButton 改 span.relative.inline-flex 包装 + 四个 ConfigDropdown 内嵌为第 5 参数，锚到各控件；③标题旁 #id[:8] 按钮，clipboard.writeText 复制完整 id，✓ 已复制 2s 反馈。
 结果：后端 daemon 全量 798 passed（零回归用例按新语义更新：普通轮 run 断言携带会话当前配置）；前端全量 153 文件/1551 全绿（config-bar 17+page 8 含既有断言不破坏）；tsc 0 错、eslint 0 error、ruff 全过。待部署（commit+push+rebuild backend/frontend）。
+
+## ql-20260815-011-2d94 | 2026-08-15 21:26:52 | ①会话面板配置条的智能体控件与下拉仍显示 DESKTOP-2BN7FDC（ql-001 只修了新建表单没修到 config-bar）
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/sessions/page.tsx, frontend/src/components/sessions/__tests__/session-config-bar.test.tsx, frontend/src/components/sessions/session-config-bar.tsx
+需求：①会话面板配置条的智能体控件与下拉仍显示 DESKTOP-2BN7FDC（ql-001 只修了新建表单没修到 config-bar），且长主机名把下拉框撑得难看；②「未命名会话」占位文字不显示，复制 id 的 ✓ 反馈改成 Message 提示。
+根因：①session-config-bar.tsx 有独立 runtimeLabel（仍 name 优先=主机名），且控件当前值 agentName 读 config_snapshot.agent_name——后端快照存的 runtime.name 本来就默认是主机名；②page.tsx 标题 || '未命名会话' 占位渲染，复制反馈用 setState 交换按钮文字。
+方案：①runtimeLabel 改 PROVIDER_META 引擎名优先（别名=别名·引擎名），agentName 改引擎显示名（快照 agent_name 降为引擎缺失时兜底）——标签变短下拉恢复正常观感；②title 空时不渲染 span，复制成功 message.success('已复制会话 ID')/失败 message.error，删除 idCopied 状态与 2s 定时器；测试 mock 改 importOriginal 保留 PROVIDER_META 真常量。
+结果：config-bar 17 用例+page 8 用例全过，前端全量 153 文件/1551 全绿，tsc 0 错，eslint 0 error。待 commit+push+rebuild frontend 部署。

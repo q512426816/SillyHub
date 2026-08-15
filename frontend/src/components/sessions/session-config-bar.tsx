@@ -35,7 +35,7 @@ import { ApiError } from "@/lib/api";
 import { useMineAgentProfiles } from "@/lib/agent-profiles";
 import { listProviders } from "@/lib/api/llm-providers";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
-import { injectSession } from "@/lib/daemon";
+import { injectSession, PROVIDER_META } from "@/lib/daemon";
 import type {
   AgentSessionConfigSnapshot,
   DaemonMachineRead,
@@ -109,9 +109,11 @@ function machineLabel(m: DaemonMachineRead): string {
   return m.display_alias?.trim() || m.hostname;
 }
 
-/** 智能体展示名。 */
+/** 智能体展示名——引擎名优先（ql-20260815-011：name 默认=主机名不得作主标签）。 */
 function runtimeLabel(r: DaemonRuntimeRead): string {
-  return r.display_alias?.trim() || r.name || r.provider || r.id;
+  const engine = PROVIDER_META[r.provider ?? ""]?.label ?? r.provider ?? r.id;
+  const alias = r.display_alias?.trim();
+  return alias ? `${alias} · ${engine}` : engine;
 }
 
 /** 切换轮提示消息默认文案（按字段与目标名生成）。 */
@@ -178,7 +180,12 @@ export function SessionConfigBar({
 
   // 当前值展示（快照直显免二次解析，Grill C-12；id 兜底防列表缺行）。
   const machineName = configSnapshot?.machine_name ?? "—";
-  const agentName = configSnapshot?.agent_name ?? "—";
+  // ql-20260815-011：智能体=引擎维度（FR-01）——引擎名优先（后端快照
+  // agent_name 存的 runtime.name 默认=主机名，仅作引擎缺失时的兜底）。
+  const agentName =
+    PROVIDER_META[effectiveEngine ?? ""]?.label ??
+    configSnapshot?.agent_name ??
+    "—";
   const profileLabel = agentProfileId
     ? profiles.find((p) => p.id === agentProfileId)?.name ??
       configSnapshot?.profile_name ??
