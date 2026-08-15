@@ -76,11 +76,14 @@ export default function ChangeDetailPage({ params }: Props) {
   // 非终态 10s 周期刷新、终态停轮（isTerminalChange）；refetchIntervalInBackground
   // 默认 false = 页面不可见暂停；structuralSharing 默认开启 = 内容未变跳过
   // re-render（不乱跳），queryFn 保持原 getChange 请求参数。
+  // ql-20260816-001：请求已出错且无数据（变更被删/硬 404）→ 停轮，防无限空轮。
   const changeQuery = useQuery({
     queryKey: CHANGE_QUERY_KEY(workspaceId, changeId),
     queryFn: () => getChange(workspaceId, changeId),
-    refetchInterval: (query) =>
-      isTerminalChange(query.state.data) ? false : DETAIL_REFETCH_MS,
+    refetchInterval: (query) => {
+      if (query.state.error && !query.state.data) return false;
+      return isTerminalChange(query.state.data) ? false : DETAIL_REFETCH_MS;
+    },
   });
   const change = changeQuery.data ?? null;
   const changeError = changeQuery.error;
@@ -327,10 +330,9 @@ export default function ChangeDetailPage({ params }: Props) {
             panelIsActive={panelIsActive}
             agentStatus={agentStatus}
             gateStatus={null}
-            currentStage={change.current_stage ?? null}
-            // steps 链路已随旧 SillySpecStepProgress 挂载退役（task-07，
-            // step 明细统一走上方 ChangeStepTimeline）
-            steps={undefined}
+            // steps/currentStage 链路已随旧 SillySpecStepProgress 挂载退役
+            // （task-07，step 明细统一走上方 ChangeStepTimeline；prop 已删
+            // ql-20260816-001）
             teamMode={false}
             stageTeamMissionId={null}
             onDone={() => void refreshAgentStatus()}

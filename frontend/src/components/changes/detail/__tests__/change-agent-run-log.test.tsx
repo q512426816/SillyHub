@@ -30,8 +30,6 @@ function makeProps(over: Record<string, unknown> = {}) {
       last_dispatch: { status: "completed", gate_status: null },
     } as unknown as DispatchResponse,
     gateStatus: null,
-    currentStage: "execute",
-    steps: undefined,
     teamMode: false,
     stageTeamMissionId: null,
     onDone: vi.fn(),

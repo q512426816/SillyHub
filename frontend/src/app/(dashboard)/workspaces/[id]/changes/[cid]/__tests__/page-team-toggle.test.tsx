@@ -25,6 +25,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "@/lib/api";
 import ChangeDetailPage, {
   isTerminalChange,
 } from "@/app/(dashboard)/workspaces/[id]/changes/[cid]/page";
@@ -323,5 +324,39 @@ describe("详情页步骤时间线挂载（task-07，D-005@v1）", () => {
     // 数据未就绪（useQuery 首拉）按非终态处理
     expect(isTerminalChange(null)).toBe(false);
     expect(isTerminalChange(undefined)).toBe(false);
+  });
+
+  it("详情查询 error 且无数据（变更被删/404）→ 停轮不无限轮询（ql-20260816-001）", async () => {
+    // getChange 首次 404（ApiError）且后续若被轮询会返回成功数据（可区分）；
+    // refetchInterval 内联判定 error&&!data → false，等过原 10s 间隔后仍只调一次。
+    mocks.getChange.mockRejectedValueOnce(
+      new ApiError(404, {
+        code: "HTTP_404_CHANGE_NOT_FOUND",
+        message: "变更不存在",
+        request_id: null,
+        details: null,
+      }),
+    );
+    mocks.getChange.mockResolvedValueOnce(makeChange());
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, gcTime: 0 },
+        mutations: { retry: false },
+      },
+    });
+    const { unmount } = render(
+      <QueryClientProvider client={client}>
+        <ChangeDetailPage params={{ id: "ws-1", cid: "ch-1" }} />
+      </QueryClientProvider>,
+    );
+    try {
+      await waitFor(() => {
+        expect(screen.getByText("变更不存在")).toBeInTheDocument();
+      });
+      await new Promise((r) => setTimeout(r, 12_000));
+      expect(mocks.getChange).toHaveBeenCalledTimes(1);
+    } finally {
+      unmount();
+    }
   });
 });
