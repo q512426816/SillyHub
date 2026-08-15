@@ -227,6 +227,8 @@ class TestSwitchSuccess:
         # 新 run 带新快照（D-008：档案快照 + 供应商 id）。
         run = result.agent_run
         assert run.agent_profile_id == profile_b.id
+        assert run.agent_profile_snapshot is not None
+        assert run.agent_profile_snapshot is not None
         assert run.agent_profile_snapshot["system_prompt"] == "You are a ninja."
         assert run.agent_profile_snapshot["name"] == "忍者"
         assert run.llm_provider_id == provider_b.id
@@ -238,6 +240,8 @@ class TestSwitchSuccess:
         assert s.turn_count == 2
         assert s.agent_profile_id == profile_b.id
         assert s.llm_provider_id == provider_b.id
+        assert s.config_snapshot is not None
+        assert s.config_snapshot is not None
         assert s.config_snapshot["profile_name"] == "忍者"
         assert s.config_snapshot["provider_name"] == "GLM2"
         assert s.config_snapshot["model"] == "glm-5"
@@ -350,6 +354,7 @@ class TestSwitchSuccess:
         run = result.agent_run
         assert run.llm_provider_id == provider_b.id
         assert run.agent_profile_id == profile_a.id  # 未切维度沿用当前值
+        assert run.agent_profile_snapshot is not None
         assert run.agent_profile_snapshot["system_prompt"] == "a"
 
         payload = mocked_hub.send_session_control.await_args.args[2]
@@ -391,6 +396,7 @@ class TestClearProvider:
         assert result.agent_run.llm_provider_id is None
         await db_session.refresh(created.agent_session)
         assert created.agent_session.llm_provider_id is None
+        assert created.agent_session.config_snapshot is not None
         assert created.agent_session.config_snapshot["provider_name"] is None
         assert created.agent_session.config_snapshot["model"] is None
 

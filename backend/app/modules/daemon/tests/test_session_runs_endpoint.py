@@ -143,7 +143,7 @@ class TestListSessionRuns:
             is_default=False,
             api_format="anthropic",
         )
-        snapshot = {
+        snapshot: dict = {
             "id": str(uuid.uuid4()),
             "name": "知识经理",
             "provider": "claude",

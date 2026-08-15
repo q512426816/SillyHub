@@ -380,9 +380,13 @@ class TestProfileInjection:
         s, run = result.agent_session, result.agent_run
         assert s.agent_profile_id == profile.id
         assert run.agent_profile_id == profile.id
+        assert run.agent_profile_snapshot is not None
+        assert run.agent_profile_snapshot is not None
         assert run.agent_profile_snapshot["system_prompt"] == "You are a pirate."
         assert run.agent_profile_snapshot["name"] == "海盗人格"
         # 快照 chips 字段。
+        assert s.config_snapshot is not None
+        assert s.config_snapshot is not None
         assert s.config_snapshot["profile_name"] == "海盗人格"
 
     @pytest.mark.asyncio
@@ -481,6 +485,7 @@ class TestSessionLlmProvider:
         s, run = result.agent_session, result.agent_run
         assert s.llm_provider_id == provider_row.id
         assert run.llm_provider_id == provider_row.id
+        assert s.config_snapshot is not None
         assert s.config_snapshot["provider_name"] == "GLM"
         assert s.config_snapshot["model"] == "glm-4.7"
 
@@ -571,6 +576,7 @@ class TestConfigSnapshot:
         result = await svc.create_session(uid, provider=None, prompt="hi", runtime_id=str(rt.id))
 
         snap = result.agent_session.config_snapshot
+        assert snap is not None
         assert snap["machine_name"] == "host-b"
         # runtime.name 为空 → agent_name 回退 provider。
         assert snap["agent_name"] == "claude"
