@@ -24807,7 +24807,7 @@
           "platform-sync"
         ],
         "summary": "Push Progress",
-        "description": "POST 上行 progress + base_ts 冲突检测（契约 §4）。\n\n读 3 个 ``X-SillySpec-*`` header（User/Base-Ts/Pushed-At，缺失/空均 None）。\n200=接受（客户端据此更新 platform_last_sync）；409=冲突（body\n``{conflict, platform_progress, last_pushed_at}``，客户端写冲突文件走 resolve）。\nbody 是裸 ``serializeForSync`` 六表 JSON（NG-6 透传，不强类型校验）。\n\nworkspace_id 从 require_platform_sync_write 派生（唯一写通道 shpsync_ token 绑定\n工作区；shk_live_/JWT 一律 403，task-06 / D-004@v1）。",
+        "description": "POST 上行 progress + base_ts 冲突检测（契约 §4）。\n\n读 3 个 ``X-SillySpec-*`` header（User/Base-Ts/Pushed-At，缺失/空均 None）。\n200=接受（客户端据此更新 platform_last_sync）；409=冲突（body\n``{conflict, platform_progress, last_pushed_at}``，客户端写冲突文件走 resolve）。\nbody 是裸 ``serializeForSync`` 六表 JSON（NG-6 透传，不强类型校验）。\n\nworkspace_id 从 require_platform_sync_write 派生（唯一写通道 shpsync_ token 绑定\n工作区；shk_live_/JWT 一律 403，task-06 / D-004@v1）。\n\nChange 2026-08-16-change-owner-from-token task-02（D-001@v1）：鉴权 tuple 的真实\nUser id 以 ``user_id`` 透传 service——接受分支把 ux_changes.owner_id 对齐 token\n签发人；三个 ``X-SillySpec-*`` header 读取与 ``last_pusher`` 语义逐字不动（§9）。",
         "operationId": "push_progress_api_changes__name__progress_post",
         "parameters": [
           {
@@ -28344,6 +28344,17 @@
               }
             ],
             "title": "Steps"
+          },
+          "owner_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Name"
           }
         },
         "type": "object",
@@ -28549,6 +28560,17 @@
                 "type": "null"
               }
             ]
+          },
+          "owner_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Name"
           },
           "updated_at": {
             "type": "string",
@@ -46958,6 +46980,22 @@
               }
             ],
             "title": "Wait Reason"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "default": "step"
+          },
+          "event_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Type"
           }
         },
         "type": "object",

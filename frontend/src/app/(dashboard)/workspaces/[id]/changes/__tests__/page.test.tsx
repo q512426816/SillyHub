@@ -386,13 +386,30 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     );
   });
 
-  // ── 6. 负责人列 ────────────────────────────────────────────────────────
+  // ── 6. 负责人列（task-05 / FR-04 三态：owner_name 优先 / UUID 前 8 位 / —）──
 
-  it("owner_id 有值 → 显示前 8 位短标识", async () => {
+  it("owner_name 有值 → 优先显示用户名（2026-08-16-change-owner-from-token task-05）", async () => {
     setupListChanges({
       items: [
         makeChange({
           owner_id: "abcdef1234567890abcd",
+          owner_name: "qinyi",
+          pending_review: "proposal_review",
+        }),
+      ],
+    });
+    await renderAndWait();
+    // 用户名优先（owner_id 存在也不走 UUID 短标识）
+    expect(screen.getByText("qinyi")).toBeInTheDocument();
+    expect(screen.queryByText("abcdef12")).not.toBeInTheDocument();
+  });
+
+  it("owner_name 空 + owner_id 有值 → 降级 UUID 前 8 位短标识（mono）", async () => {
+    setupListChanges({
+      items: [
+        makeChange({
+          owner_id: "abcdef1234567890abcd",
+          owner_name: null,
           pending_review: "proposal_review",
         }),
       ],
@@ -401,9 +418,11 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     expect(screen.getByText("abcdef12")).toBeInTheDocument();
   });
 
-  it("owner_id 为空 → 占位 —（pending_review 设值避免徽标双源 —）", async () => {
+  it("owner_name / owner_id 双空 → 占位 —（pending_review 设值避免徽标双源 —）", async () => {
     setupListChanges({
-      items: [makeChange({ owner_id: null, pending_review: "proposal_review" })],
+      items: [
+        makeChange({ owner_id: null, owner_name: null, pending_review: "proposal_review" }),
+      ],
     });
     await renderAndWait();
     expect(screen.getByText("—")).toBeInTheDocument();

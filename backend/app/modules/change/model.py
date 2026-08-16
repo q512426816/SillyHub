@@ -20,6 +20,7 @@ from sqlalchemy import (
     String,
     Text,
     Uuid,
+    text,
 )
 from sqlmodel import Field
 
@@ -283,4 +284,63 @@ class ChangeSessionLink(BaseModel, table=True):
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+class ChangeEventORM(BaseModel, table=True):
+    """变更通用事件表（change 2026-08-16-change-owner-from-token / D-002@v1）。
+
+    通用 ``event_type`` + ``detail`` JSON 扩展模型，首个消费方是 owner_change
+    责任人变更留痕（design §5 Phase 1 / §7）：``_sync_change_owner`` 在
+    owner_id 现值 != token 用户时写一条 ``event_type='owner_change'``、
+    ``detail={from_user_id, to_user_id}`` 的行，供详情页时间线合成展示。
+
+    - ``workspace_id`` FK→workspaces(id) CASCADE（隔离，对齐 platform_change_progress
+      复合键语义）；``change_id`` FK→changes(id) CASCADE。
+    - ``created_by`` 语义引用触发者（=token 用户），无外键——仅留痕可读性，
+      不因用户删除受阻（design §7 "无外键仅语义引用"）。
+    - ``detail`` 落地用 :class:`sqlalchemy.JSON` 非 postgresql.JSONB（SQLite 测试
+      兼容，先例 20260810150000 Grill X-009；语义即 §7 JSONB 透传 dict）。
+    - 幂等不靠唯一约束（owner_id 现值复查天然拦截，task-02 口径）：无任何
+      unique 约束，追加型事件流按 ``created_at`` 时间序消费。
+    """
+
+    __tablename__ = "change_events"
+    __table_args__ = (
+        # 时间线合成查询：按 change 取事件流按 created_at 序（design §5 Phase 2.2）
+        Index("ix_change_events_change_created", "change_id", "created_at"),
+        Index("ix_change_events_workspace", "workspace_id"),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    workspace_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    change_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("changes.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    event_type: str = Field(sa_column=Column(String(50), nullable=False))
+    detail: dict = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False, default=dict),
+    )
+    # 触发者 = push_progress token 用户（design §7）；无 FK 仅语义引用
+    created_by: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(Uuid(as_uuid=True), nullable=True),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False, server_default=text("now()")),
     )

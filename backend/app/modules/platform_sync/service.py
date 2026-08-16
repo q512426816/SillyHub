@@ -103,14 +103,22 @@ class PlatformSyncService:
         base_ts: str | None,
         pushed_at: str | None,
         user: str | None,
+        user_id: uuid.UUID | None = None,
     ) -> PlatformSyncResult:
-        """契约 §4.2 base_ts 乐观锁冲突检测 + 接受 upsert（workspace 隔离）。"""
+        """契约 §4.2 base_ts 乐观锁冲突检测 + 接受 upsert（workspace 隔离）。
+
+        ``user_id``（2026-08-16-change-owner-from-token task-02 / D-001@v1）：token
+        签发人真实 User id（router 从鉴权 tuple 派生透传）。接受分支在进度 + 占位行
+        落定后用其对齐 ``ux_changes.owner_id``（best-effort，失败不阻断）；冲突分支
+        不触碰 owner——被拒绝的上行不得改责任人。None 防御（service 直调场景）。
+        """
         row = await self._find_row(workspace_id, name)
 
         # 分支 1：base_ts 空/缺失（None 或空串）→ 首次同步/无基准，无条件接受
         if not base_ts:
             await self._apply(workspace_id, row, name, body, pushed_at, user)
             await self._ensure_change_row(workspace_id, name, body)
+            await self._sync_change_owner(workspace_id, name, user_id)
             return PlatformSyncResult(conflict=False, platform_progress=None, last_pushed_at=None)
 
         # 分支 2：stored 存在 AND stored > base_ts（字符串字典序 §7）→ 冲突
@@ -125,6 +133,7 @@ class PlatformSyncService:
         # 分支 3：base_ts 有效（stored None 或 stored ≤ base_ts）→ 接受
         await self._apply(workspace_id, row, name, body, pushed_at, user)
         await self._ensure_change_row(workspace_id, name, body)
+        await self._sync_change_owner(workspace_id, name, user_id)
         return PlatformSyncResult(conflict=False, platform_progress=None, last_pushed_at=None)
 
     async def _apply(
@@ -253,6 +262,77 @@ class PlatformSyncService:
             workspace_id=str(workspace_id),
             change_key=name,
         )
+
+    async def _sync_change_owner(
+        self,
+        workspace_id: uuid.UUID | None,
+        name: str,
+        user_id: uuid.UUID | None,
+    ) -> None:
+        """接受分支把 ``ux_changes.owner_id`` 对齐 token 签发人（best-effort）。
+
+        2026-08-16-change-owner-from-token task-02 / D-001@v1（design §5 Phase 1.2，
+        含 Grill P1-2 事务边界修正）：责任人的最可靠来源是进度上行 token 的签发人，
+        每次接受的上行以最新为准 diff 更新 owner。``_apply`` 与 ``_ensure_change_row``
+        各自内部 commit（独立已提交单元，不强求同事务），本方法只在其后调用。
+
+        - savepoint 原子（``_ensure_change_row`` :239-249 范式同构）：内部 SELECT
+          重查 Change 行拿 id——``_ensure_change_row`` race-lost 路径不返回行对象，
+          绝不依赖上游传行；重查无行（理论不发生，占位已兜底）直接 return。
+        - 三分支：``owner_id is None`` → 仅 UPDATE 首填（占位行首填非"变化"，不记
+          事件）；``owner_id != user_id`` → UPDATE + INSERT 一条 ``owner_change``
+          事件（``detail={from_user_id, to_user_id}`` 逐字，task-04 读侧消费契约）；
+          相同 → 幂等零写（owner_id 现值判据天然拦截同值重试与 A→B→A 重复段，R-01）。
+        - best-effort：savepoint 内任一步失败仅回滚 + log.warning 不阻断上行——
+          ``_apply`` 已 commit 的进度行/占位行永不被 owner 失败吞掉。
+        - 幂等口径 = owner_id 现值复查，无唯一约束（R-01：短期并发重复可接受）。
+        """
+        if workspace_id is None or user_id is None:
+            return
+        from app.modules.change.model import Change, ChangeEventORM
+
+        try:
+            async with self._session.begin_nested():
+                row = (
+                    await self._session.execute(
+                        select(Change).where(
+                            col(Change.workspace_id) == workspace_id,
+                            col(Change.change_key) == name,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if row is None:
+                    return
+                if row.owner_id is None:
+                    # 占位行首填：只 UPDATE owner（非"变化"语义，不记事件）。
+                    row.owner_id = user_id
+                elif row.owner_id != user_id:
+                    old_owner = row.owner_id
+                    row.owner_id = user_id
+                    self._session.add(
+                        ChangeEventORM(
+                            id=uuid.uuid4(),
+                            workspace_id=workspace_id,
+                            change_id=row.id,
+                            event_type="owner_change",
+                            detail={
+                                "from_user_id": str(old_owner),
+                                "to_user_id": str(user_id),
+                            },
+                            created_by=user_id,
+                        )
+                    )
+                    await self._session.flush()
+                # 相同 → 幂等零写，savepoint 空提交（无 DML）。
+        except Exception:
+            await self._session.rollback()
+            log.warning(
+                "platform_sync.change_owner_sync_failed",
+                workspace_id=str(workspace_id),
+                change_key=name,
+            )
+            return
+        await self._session.commit()
 
     @staticmethod
     def _assign(

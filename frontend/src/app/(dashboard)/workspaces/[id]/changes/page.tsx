@@ -267,18 +267,23 @@ export default function ChangesPage({ params }: Props) {
     return <span className="text-xs text-muted-foreground">—</span>;
   };
 
-  // 负责人列渲染（task-06）：ChangeSummary 有 owner_id(UUID) 无 owner_name（零 migration，
-  // design §6 文件清单未新增字段）。务实处理：空→"—"；有值→前 8 位短标识（mono 字体）。
-  // 勿为此加后端字段——列表行不阻断业务，短标识已足够区分；详情页可显示完整信息。
+  // 负责人列渲染（task-05 / FR-04，2026-08-16-change-owner-from-token）：owner_name
+  // = 后端 enrich 批量 join users 填充（display_name 优先 username fallback，
+  // design §5 Phase 2.1，task-04 落地）。三态：owner_name 非空 → 用户名（可读，
+  // 小字号）；owner_name 空且 owner_id 有值 → UUID 前 8 位短标识降级（mono，
+  // enrich 未覆盖的兜底路径）；双空 → "—"（从未上行过 owner 的存量变更）。
   const renderOwner = (c: ChangeSummary): ReactNode => {
-    if (!c.owner_id) {
-      return <span className="text-xs text-muted-foreground">—</span>;
+    if (c.owner_name) {
+      return <span className="text-xs text-foreground">{c.owner_name}</span>;
     }
-    return (
-      <span className="font-mono text-[11px] text-primary">
-        {c.owner_id.slice(0, 8)}
-      </span>
-    );
+    if (c.owner_id) {
+      return (
+        <span className="font-mono text-[11px] text-primary">
+          {c.owner_id.slice(0, 8)}
+        </span>
+      );
+    }
+    return <span className="text-xs text-muted-foreground">—</span>;
   };
 
   const columns: TableProps<ChangeSummary>["columns"] = [

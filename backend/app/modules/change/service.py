@@ -24,11 +24,13 @@ from sqlmodel import col
 from app.core.errors import ChangeDocNotFound, ChangeNotFound, InvalidTransition, PermissionDenied
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentSession
+from app.modules.auth.model import User
 from app.modules.change.dispatch import STAGE_ORDER
 from app.modules.change.model import (
     TRANSITIONS,
     Change,
     ChangeDocument,
+    ChangeEventORM,
     ChangeSessionLink,
     StageEnum,
 )
@@ -1450,16 +1452,39 @@ class ChangeService:
         join 命中时额外提取 steps → ``read.step_progress``（摘要）+ ``read.steps``（明细）；
         steps 缺失/异常不赋值（None，前端降级，D-003@v1）。transition/review 响应复用本方法
         同样带 steps（ChangeRead 形状 additive 无害）。
+
+        2026-08-16-change-owner-from-token task-04（design §5 Phase 2.1/2.2/2.4）：①
+        ``owner_name`` 批量填充（``_resolve_user_names`` 一次 IN 查 users，display_name
+        优先 username fallback，R-03）；②时间线合成 owner_change 事件条目（
+        ``_fetch_owner_events`` 一次 IN + ``_merge_event_entries``，events 查询只挂
+        本详情路径，列表零成本）；③Phase 2.4 明细 output 全量透传（截断挪列表摘要
+        current_step_desc，D-004@v1）。
         """
         change_read = ChangeRead.model_validate(change)
         projected = await self._project_current_stage([(change.workspace_id, change.change_key)])
         stage_info = projected.get((change.workspace_id, change.change_key))
+        timeline: list[StepTimelineEntry] | None = None
+        events: list[ChangeEventORM] = []
         if stage_info is not None:
             # 仅投影 current_stage（NG-03：详情 READ 不改 pending_review，恒 None）。
             change_read.current_stage = stage_info[0]
             summary, timeline = self._extract_step_progress(stage_info[2])
             change_read.step_progress = summary
-            change_read.steps = timeline
+            if timeline is not None:
+                # 时间线合成：events 一次 IN 只挂 steps 可挂载分支（stage_info 未命中
+                # / steps None 时事件无处挂载不查，零成本）。
+                events = await self._fetch_owner_events([change.id])
+        # users 一次 IN：owner + 事件 A/B 合并（R-06；无事件时仅 owner，恒 ≤1 次）。
+        user_ids = {change.owner_id} if change.owner_id is not None else set()
+        for ev in events:
+            user_ids.update(self._owner_event_user_ids(ev))
+        names = await self._resolve_user_names(user_ids)
+        if change.owner_id is not None:
+            change_read.owner_name = names.get(change.owner_id)
+        if timeline is not None and stage_info is not None:
+            change_read.steps = self._merge_event_entries(
+                timeline, events, stage_info[2], stage_info[0], names
+            )
         return change_read
 
     async def enrich_summaries(self, changes: list[Change]) -> list[ChangeSummary]:
@@ -1469,14 +1494,23 @@ class ChangeService:
         ``(workspace_id, change_key)`` 对集合一次 select 查询（复合 ``tuple_.in_``），
         构建 ``(workspace_id, change_key) → current_stage`` 映射逐条覆盖。join 不命中
         （工具未上行 / quick-uuid8 / workspace_id 为 NULL 过渡行）fallback 现有值（D-003）。
+
+        2026-08-16-change-owner-from-token task-04（design §5 Phase 2.1）：owner_name
+        批量填充——owner_id 集合一次 IN 查 users（``_resolve_user_names``，与
+        ``_project_current_stage`` 同款批量模式）。列表路径**零** events 查询
+        （时间线合成只挂 enrich_with_workspace_ids 详情路径，R-03 锚定测试防回归）。
         """
         if not changes:
             return []
         pairs = [(c.workspace_id, c.change_key) for c in changes]
         projected = await self._project_current_stage(pairs)
+        owner_ids = {c.owner_id for c in changes if c.owner_id is not None}
+        names = await self._resolve_user_names(owner_ids)
         summaries: list[ChangeSummary] = []
         for c in changes:
             summary = ChangeSummary.model_validate(c)
+            if c.owner_id is not None:
+                summary.owner_name = names.get(c.owner_id)
             stage_info = projected.get((c.workspace_id, c.change_key))
             if stage_info is not None:
                 stage, completed, latest_progress = stage_info
@@ -1486,10 +1520,262 @@ class ChangeService:
                 summary.pending_review = StageProjectionService._map(stage, completed)
                 # 2026-08-15-change-step-visibility task-01：列表只带 step 摘要
                 # （~200B/行，R-02），明细随 ChangeRead.steps（enrich_with_workspace_ids）。
+                # Phase 2.4（D-004@v1）：明细 output 已全量透传，摘要 current_step_desc
+                # 赋值处截 200（列表性能契约不动，两层分离）。
                 step_summary, _ = self._extract_step_progress(latest_progress)
                 summary.step_progress = step_summary
             summaries.append(summary)
         return summaries
+
+    # ── owner_name 批量投影 + 时间线事件合成（2026-08-16-change-owner-from-token
+    #    task-04，design §5 Phase 2.1/2.2/2.4；R-03/R-06 两次批量 IN 禁 N+1）──
+
+    async def _resolve_user_names(self, user_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """一次 IN 查 users → ``{user_id → display_name or username}``（R-03 禁 N+1）。
+
+        display_name 优先 username fallback；两均 None / 查不到的用户不进映射
+        （owner_name 调用方按 None 降级；事件 A/B 落 UUID 前 8 位占位）。
+        空集合 → 空 dict 零查询。
+        """
+        if not user_ids:
+            return {}
+        stmt = select(User.id, User.display_name, User.username).where(col(User.id).in_(user_ids))
+        rows = (await self._session.execute(stmt)).all()
+        return {
+            uid: name
+            for uid, display_name, username in rows
+            if (name := display_name or username) is not None
+        }
+
+    async def _fetch_owner_events(self, change_ids: list[uuid.UUID]) -> list[ChangeEventORM]:
+        """一次 IN 查 ``change_events``（仅 owner_change 类型，详情路径专用）。
+
+        ``order_by(created_at, id)``：时间序 + 同刻按 id 稳定序（R-02 近似对齐的
+        确定性基线）。best-effort：查询异常（表缺失等理论不发生——根 conftest 已
+        注册模型）log.warning 返空，不阻断 steps 返回（D-003 降级语义）。
+        """
+        if not change_ids:
+            return []
+        try:
+            stmt = (
+                select(ChangeEventORM)
+                .where(
+                    col(ChangeEventORM.change_id).in_(change_ids),
+                    col(ChangeEventORM.event_type) == "owner_change",
+                )
+                .order_by(col(ChangeEventORM.created_at), col(ChangeEventORM.id))
+            )
+            return list((await self._session.execute(stmt)).scalars().all())
+        except Exception:
+            log.warning("change.owner_events_fetch_failed", change_ids=[str(c) for c in change_ids])
+            return []
+
+    @staticmethod
+    def _owner_event_user_ids(event: ChangeEventORM) -> set[uuid.UUID]:
+        """从 owner_change 事件 detail 提取 from/to 用户 id（脏数据容忍）。
+
+        task-02 写入侧 detail 落 str UUID（``str(old_owner)``）；兼容 uuid.UUID
+        实例（防御）。缺失/非 UUID 值跳过（R-01 范式，不抛）。
+        """
+        ids: set[uuid.UUID] = set()
+        detail = event.detail
+        if not isinstance(detail, dict):
+            return ids
+        for key in ("from_user_id", "to_user_id"):
+            value = detail.get(key)
+            if isinstance(value, uuid.UUID):
+                ids.add(value)
+            elif isinstance(value, str):
+                try:
+                    ids.add(uuid.UUID(value))
+                except ValueError:
+                    continue
+        return ids
+
+    @staticmethod
+    def _merge_event_entries(
+        timeline: list[StepTimelineEntry] | None,
+        events: list[ChangeEventORM],
+        latest_progress: dict | None,
+        current_stage: str,
+        names: dict[uuid.UUID, str],
+    ) -> list[StepTimelineEntry] | None:
+        """时间线合成：owner_change 事件转条目按时间序插入 steps，统一重编 ordering。
+
+        Grill P1-1 / D-003@v1（design §5 Phase 2.2）：
+
+        - steps 为 None 时事件无处挂载 → 不合成（时间线整体 None，降级语义）；
+          无事件 → 原样返回（纯 steps 路径零变化）。
+        - 事件条目：kind="event"、event_type="owner_change"、name="责任人变更"、
+          output="A → B"（用户名；查不到 → UUID 前 8 位占位，对齐前端降级）、
+          status 固定 "completed"、completed_at=事件 created_at ISO、wait_reason=None。
+        - stage 近似归属（R-02）：latest_progress 顶层数组 stages[].started_at 经
+          ``_normalize_completed_at`` 归一化后与事件时刻比较，落「最近一个
+          started_at ≤ 事件时刻」的 stage；无可解析/早于全部 → current_stage。
+        - 插入位置：组内最后一条「可解析 completed_at ≤ 事件时刻」的 step 紧后
+          （不可解析/None 视为最晚——进行中/待办天然晚于历史事件）；组内全无
+          ≤ 者 → 插组首；事件 stage 无对应步骤组 → 按阶段组序插入（不 append
+          尾部，保组连续性，前端按连续同 stage 归组）；同刻多事件按 created_at
+          再按 id 稳定序（入参已排序，逐条插入天然保序）。
+        - 插入后不重排（占位 ordering=0 若参与排序会把事件抛到组首，破坏插入
+          位）：入参 timeline 本身已按 (stage_group, ordering) 排好，正确位置的
+          插入保持有序；混合序列按最终列表位置统一重编 ordering=0..n-1（全局
+          顺序号），前端 ``${stage}-${ordering}`` key 唯一（Grill P1-1）。全部
+          事件 detail 非法被跳过时零插入 → 原样返回（纯 steps 路径零变化）。
+        """
+        if timeline is None:
+            return None
+        if not events:
+            return timeline
+        stage_starts = ChangeService._extract_stage_starts(latest_progress)
+        merged = list(timeline)
+        inserted = 0
+        for event in events:
+            entry, event_dt = ChangeService._event_to_entry(
+                event, names, current_stage, stage_starts
+            )
+            if entry is None or event_dt is None:
+                continue
+            ChangeService._insert_event_entry(merged, entry, event_dt)
+            inserted += 1
+        if inserted == 0:
+            return timeline
+        for i, entry in enumerate(merged):
+            entry.ordering = i
+        return merged
+
+    @staticmethod
+    def _event_to_entry(
+        event: ChangeEventORM,
+        names: dict[uuid.UUID, str],
+        current_stage: str,
+        stage_starts: list[tuple[datetime, str]],
+    ) -> tuple[StepTimelineEntry | None, datetime | None]:
+        """owner_change 事件 → StepTimelineEntry + 事件时刻（detail 非法 → (None, None)）。
+
+        detail 的 from/to 缺失或非 UUID → 跳过该事件不抛（R-01 范式）。stage 归属
+        用「最近一个 started_at ≤ 事件时刻」（R-02 近似）。
+        """
+        detail = event.detail
+        if not isinstance(detail, dict):
+            return None, None
+        parsed: dict[str, tuple[uuid.UUID, str]] = {}
+        for key in ("from_user_id", "to_user_id"):
+            value = detail.get(key)
+            uid = value if isinstance(value, uuid.UUID) else None
+            if uid is None and isinstance(value, str):
+                try:
+                    uid = uuid.UUID(value)
+                except ValueError:
+                    uid = None
+            if uid is None:
+                return None, None  # 身份字段缺失/非法 → 整条事件不可用（R-01）
+            parsed[key] = (uid, names.get(uid, str(uid)[:8]))
+        event_dt = event.created_at
+        if event_dt.tzinfo is None:
+            event_dt = event_dt.replace(tzinfo=UTC)  # DB 列语义即 UTC（SQLite naive 容错）
+        stage = current_stage
+        for started_at, stage_name in stage_starts:
+            if started_at <= event_dt:
+                stage = stage_name  # 有序列表，落最近一个 started_at ≤ 事件时刻
+        from_name = parsed["from_user_id"][1]
+        to_name = parsed["to_user_id"][1]
+        return (
+            StepTimelineEntry(
+                name="责任人变更",
+                stage=stage,
+                status="completed",
+                output=f"{from_name} → {to_name}",
+                completed_at=event_dt.isoformat(),
+                ordering=0,  # 临时占位，插入后统一重编（Grill P1-1）
+                wait_reason=None,
+                kind="event",
+                event_type="owner_change",
+            ),
+            event_dt,
+        )
+
+    @staticmethod
+    def _extract_stage_starts(latest_progress: dict | None) -> list[tuple[datetime, str]]:
+        """latest_progress 顶层数组 stages[].started_at → [(started_at, stage)] 升序。
+
+        CLI 六表上行含 started_at（progress.js:453 实证，同 CLI 本地时区格式
+        ``%Y/%m/%d %H:%M:%S``），经 ``_normalize_completed_at`` 归一化到 UTC。
+        无法解析（非 str / 非法串保留原串不抛）的行跳过；结果按时间升序
+        （重名 stage 理论不出现，出现时后写覆盖无影响——近似语义）。
+        """
+        if not isinstance(latest_progress, dict):
+            return []
+        stages = latest_progress.get("stages")
+        if not isinstance(stages, list):
+            return []
+        pairs: list[tuple[datetime, str]] = []
+        for item in stages:
+            if not isinstance(item, dict):
+                continue
+            stage_name = item.get("stage")
+            if not isinstance(stage_name, str) or not stage_name:
+                continue
+            normalized = ChangeService._normalize_completed_at(item.get("started_at"))
+            if not isinstance(normalized, str):
+                continue
+            try:
+                pairs.append((datetime.fromisoformat(normalized), stage_name))
+            except ValueError:
+                continue
+        pairs.sort(key=lambda p: p[0])
+        return pairs
+
+    @staticmethod
+    def _parse_iso_or_none(value: str | None) -> datetime | None:
+        """ISO 串 → datetime；非 ISO（归一化失败保留的原串）/None → None（视为最晚）。"""
+        if value is None:
+            return None
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _insert_event_entry(
+        timeline: list[StepTimelineEntry], entry: StepTimelineEntry, event_dt: datetime
+    ) -> None:
+        """把事件条目插入同 stage 组内：最后一条「可解析 completed_at ≤ 事件时刻」紧后。
+
+        组内全无可解析 ≤ 者（含空组）→ 插组首；步骤 completed_at 不可解析/None
+        视为最晚（进行中/待办天然晚于历史事件，不被历史事件插到身后）；事件
+        stage 在 timeline 无对应组 → 按阶段组序插入（``_stage_group_order``，保
+        前端连续同 stage 归组，不 append 尾部）。占位 ordering=0 仅标记身份，
+        插入位由本函数决定，最终重编由调用方统一执行。
+        """
+        group = ChangeService._stage_group_order(entry.stage)
+        insert_at = len(timeline)
+        found_group = False
+        for i in range(len(timeline) - 1, -1, -1):
+            step = timeline[i]
+            if step.stage != entry.stage:
+                continue
+            found_group = True
+            step_dt = ChangeService._parse_iso_or_none(step.completed_at)
+            if step_dt is None or step_dt > event_dt:
+                continue
+            insert_at = i + 1
+            break
+        if found_group:
+            if insert_at == len(timeline):
+                # 逆扫到组首仍无 ≤ 者（全为 > / 不可解析）→ 插组首。
+                for i, step in enumerate(timeline):
+                    if step.stage == entry.stage:
+                        insert_at = i
+                        break
+        else:
+            # 无同 stage 组 → 按阶段组序插入（首个组序 > 事件组序的元素前）。
+            insert_at = len(timeline)
+            for i, step in enumerate(timeline):
+                if ChangeService._stage_group_order(step.stage) > group:
+                    insert_at = i
+                    break
+        timeline.insert(insert_at, entry)
 
     async def _resolve_pending_change_keys(
         self, workspace_id: uuid.UUID, location: str | None
@@ -1619,7 +1905,7 @@ class ChangeService:
 
     # step 级进度提取辅助（2026-08-15-change-step-visibility task-01，design §5 Phase 1.2）
 
-    _OUTPUT_TRUNCATE_LEN: int = 200  # output 摘要截断（R-02 控列表/明细体积）
+    _OUTPUT_TRUNCATE_LEN: int = 200  # 列表摘要专用（current_step_desc；~200B/行契约。Phase 2.4/D-004@v1：明细 output 全量透传不截断）
     _CLI_DT_FORMAT: str = "%Y/%m/%d %H:%M:%S"  # CLI 本地时区习惯格式（design §5 Phase 1.2）
 
     @staticmethod
@@ -1662,6 +1948,9 @@ class ChangeService:
 
         排序（Grill #14）：stage 分组按 ``dispatch.STAGE_ORDER`` 定序，quick 及未知
         stage 追加在已知序之后（按 stage 名稳定排序），组内按 ordering（缺失按 0）。
+
+        Phase 2.4（2026-08-16-change-owner-from-token task-04 / D-004@v1）：明细
+        output **全量透传**（截断已挪列表摘要 current_step_desc 赋值处，两层分离）。
         """
         if not isinstance(latest_progress, dict):
             return None, None
@@ -1669,7 +1958,6 @@ class ChangeService:
         if not isinstance(steps, list):
             return None, None
 
-        truncate = ChangeService._OUTPUT_TRUNCATE_LEN
         timeline: list[StepTimelineEntry] = []
         for item in steps:
             if not isinstance(item, dict):
@@ -1684,8 +1972,8 @@ class ChangeService:
             ordering = item.get("ordering")
             if not isinstance(ordering, int) or isinstance(ordering, bool):
                 ordering = 0  # 缺失/类型异常按 0（CLI 表列 NOT NULL DEFAULT 0，兜底防御）
-            output = item.get("output")
-            output = output[:truncate] if isinstance(output, str) else None
+            # Phase 2.4：output 全量透传（str 原样，非 str → None）
+            output = item.get("output") if isinstance(item.get("output"), str) else None
             wait_reason = item.get("wait_reason")
             if not isinstance(wait_reason, str):
                 wait_reason = None
@@ -1713,7 +2001,11 @@ class ChangeService:
             current_step_status=(
                 ("waiting" if current.wait_reason else "active") if current is not None else None
             ),
-            current_step_desc=(current.output if current is not None else None),
+            current_step_desc=(
+                current.output[: ChangeService._OUTPUT_TRUNCATE_LEN]
+                if current is not None and current.output is not None
+                else None
+            ),  # 列表摘要专用截断（Phase 2.4 两层分离：明细 output 已全量，~200B/行契约不动）
         )
         return summary, timeline
 

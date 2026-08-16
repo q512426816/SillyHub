@@ -91,6 +91,10 @@ async def push_progress(
 
     workspace_id 从 require_platform_sync_write 派生（唯一写通道 shpsync_ token 绑定
     工作区；shk_live_/JWT 一律 403，task-06 / D-004@v1）。
+
+    Change 2026-08-16-change-owner-from-token task-02（D-001@v1）：鉴权 tuple 的真实
+    User id 以 ``user_id`` 透传 service——接受分支把 ux_changes.owner_id 对齐 token
+    签发人；三个 ``X-SillySpec-*`` header 读取与 ``last_pusher`` 语义逐字不动（§9）。
     """
     _user, scope = auth
     workspace_id = scope.workspace_id
@@ -104,6 +108,8 @@ async def push_progress(
         base_ts=base_ts,
         pushed_at=pushed_at,
         user=user,
+        # owner 对齐用真实 User（auth 已派生，改前丢弃）；header user 只喂 last_pusher。
+        user_id=_user.id,
     )
     if result.conflict:
         # 409 必须返回正确状态码 + 契约 §4.4 body（客户端 fetchJsonWithStatus 读

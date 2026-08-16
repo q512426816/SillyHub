@@ -14,7 +14,13 @@ import type { components } from "@/lib/api-types";
  *     ordering——entries 顺序即展示顺序，本组件不再排序（design §5 Phase 2.2）；
  *   - completed_at 已归一 ISO 8601 UTC，前端直接展示字符串，不做 new Date()
  *     解析（规避 Safari 日期坑，归一化责任在后端，Grill #18）；
- *   - output 后端已截断 200 字，前端再叠 line-clamp + word-break（R-05）。
+ *   - output 全量透传（2026-08-16-change-owner-from-token D-004@v1 修订
+ *     step-visibility R-02：截断仅保留列表摘要层），前端自然换行 + max-h
+ *     滚动兜底（R-07 超长不撑爆布局）；
+ *   - kind 标条目类别（D-003@v1）：缺省/undefined/"step" 走 step 渲染（旧
+ *     数据兼容 design §9）；"event" 为 owner_change 等履历事件条目（后端按
+ *     时间序合成进序列并统一重编 ordering，key 唯一性由此保证，本组件不改
+ *     key 机制）。
  */
 export type StepTimelineEntry = components["schemas"]["StepTimelineEntry"];
 
@@ -65,6 +71,64 @@ interface TimelineItemProps {
 }
 
 /**
+ * 履历事件条目（kind="event"，2026-08-16-change-owner-from-token D-003@v1）：
+ * 👤 emoji 替代状态色点 + 紫色 chip，样式对齐原型 prototype-owner-events.html
+ * .tl-item.owner-event / .owner-chip（bg #faf5ff≈purple-50 / 字 #7c3aed≈violet-600 /
+ * 边 #e9d5ff≈purple-200 / 箭头 #a78bfa≈violet-400 加粗）。output（"A → B"）进
+ * chip，底部不再重复渲染 <p>；completed_at 沿用 step 分支同款 time 元素。
+ */
+function OwnerEventItem({ entry, itemKey }: TimelineItemProps) {
+  // output 形如 "admin → qinyi"（后端按时间序合成，task-04）；按首个 → 拆开
+  // 渲染箭头样式；无箭头（未来事件类型兜底）整串渲染。
+  const arrowIdx = entry.output?.indexOf("→") ?? -1;
+  const names =
+    entry.output && arrowIdx !== -1
+      ? {
+          from: entry.output.slice(0, arrowIdx).trim(),
+          to: entry.output.slice(arrowIdx + 1).trim(),
+        }
+      : null;
+  return (
+    <div className="relative pt-2 pb-3.5" data-key={itemKey} data-kind="event">
+      {/* 事件点：👤 emoji 替代状态色点（原型 .tl-dot::before content:"👤"，
+          定位同 step dot 位，无 data-status 色映射） */}
+      <span
+        aria-hidden
+        className="absolute -left-[28px] top-[7px] text-[13px] leading-none"
+      >
+        👤
+      </span>
+      <div className="flex flex-wrap items-center gap-2 text-[13px] leading-snug">
+        <span className="min-w-0 break-words text-foreground">{entry.name}</span>
+        {entry.output ? (
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-purple-200 bg-purple-50 px-2 py-px text-xs text-violet-600">
+            <span aria-hidden>👤</span>
+            {names ? (
+              <>
+                {names.from}{" "}
+                <span className="font-bold text-violet-400">→</span>{" "}
+                {names.to}
+              </>
+            ) : (
+              entry.output
+            )}
+          </span>
+        ) : null}
+        {entry.completed_at ? (
+          <time
+            dateTime={entry.completed_at}
+            title={entry.completed_at}
+            className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground"
+          >
+            {entry.completed_at}
+          </time>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
  * 单条时间线节点。React.memo + react-query structuralSharing（引用相等跳过
  * re-render）实现 entry 级 diff：轮询刷新时仅状态变化的节点重渲染，未变化
  * 节点引用相等直接跳过，不整列重挂（R-04「不乱跳」）。
@@ -73,6 +137,11 @@ const TimelineItem = memo(function TimelineItem({
   entry,
   itemKey,
 }: TimelineItemProps) {
+  // kind="event" 走事件专属渲染；缺省/undefined/"step" 走既有 step 渲染
+  //（旧数据 kind 缺省兼容，design §9；step 分支 DOM 除 D-004 clamp 移除外零增改）。
+  if (entry.kind === "event") {
+    return <OwnerEventItem entry={entry} itemKey={itemKey} />;
+  }
   const label = STATUS_LABEL[entry.status];
   return (
     <div className="relative pt-2 pb-3.5" data-key={itemKey}>
@@ -105,11 +174,9 @@ const TimelineItem = memo(function TimelineItem({
           等待原因：{entry.wait_reason}
         </p>
       ) : null}
+      {/* output 全量透传（D-004@v1）：无 clamp 自然换行 + max-h 滚动兜底（R-07） */}
       {entry.output ? (
-        <p
-          title={entry.output}
-          className="mt-1 line-clamp-2 max-w-[560px] break-words text-xs leading-relaxed text-muted-foreground"
-        >
+        <p className="mt-1 max-h-48 max-w-[560px] overflow-y-auto break-words text-xs leading-relaxed text-muted-foreground">
           {entry.output}
         </p>
       ) : null}

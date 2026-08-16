@@ -7523,6 +7523,10 @@ export interface paths {
          *
          *     workspace_id 从 require_platform_sync_write 派生（唯一写通道 shpsync_ token 绑定
          *     工作区；shk_live_/JWT 一律 403，task-06 / D-004@v1）。
+         *
+         *     Change 2026-08-16-change-owner-from-token task-02（D-001@v1）：鉴权 tuple 的真实
+         *     User id 以 ``user_id`` 透传 service——接受分支把 ux_changes.owner_id 对齐 token
+         *     签发人；三个 ``X-SillySpec-*`` header 读取与 ``last_pusher`` 语义逐字不动（§9）。
          */
         post: operations["push_progress_api_changes__name__progress_post"];
         delete?: never;
@@ -8798,6 +8802,8 @@ export interface components {
             step_progress?: components["schemas"]["StepProgressSummary"] | null;
             /** Steps */
             steps?: components["schemas"]["StepTimelineEntry"][] | null;
+            /** Owner Name */
+            owner_name?: string | null;
         };
         /**
          * ChangeRejectProcessReq
@@ -8879,6 +8885,8 @@ export interface components {
             current_stage?: string | null;
             pending_review?: components["schemas"]["PendingReview"] | null;
             step_progress?: components["schemas"]["StepProgressSummary"] | null;
+            /** Owner Name */
+            owner_name?: string | null;
             /**
              * Updated At
              * Format: date-time
@@ -15276,6 +15284,13 @@ export interface components {
             ordering: number;
             /** Wait Reason */
             wait_reason: string | null;
+            /**
+             * Kind
+             * @default step
+             */
+            kind: string;
+            /** Event Type */
+            event_type?: string | null;
         };
         /**
          * SubmitDetailReq

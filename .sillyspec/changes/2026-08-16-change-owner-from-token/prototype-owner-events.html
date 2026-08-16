@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>责任人变化履历合成原型</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif; background:#f5f5f5; padding:24px; color:#1f1f1f; }
+  h2 { font-size:15px; margin:18px 0 10px; color:#555; }
+  .card { background:#fff; border-radius:10px; padding:18px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+  .timeline { position:relative; padding-left:26px; }
+  .timeline::before { content:""; position:absolute; left:8px; top:6px; bottom:6px; width:2px; background:#e5e7eb; }
+  .tl-item { position:relative; padding:8px 0 14px; }
+  .tl-dot { position:absolute; left:-25px; top:10px; width:12px; height:12px; border-radius:50%; border:2px solid #fff; }
+  .tl-item.done .tl-dot { background:#16a34a; box-shadow:0 0 0 1px #16a34a; }
+  .tl-item.active .tl-dot { background:#2563eb; box-shadow:0 0 0 1px #2563eb; animation:pulse 1.6s ease infinite; }
+  .tl-item.owner-event .tl-dot { background:transparent; box-shadow:none; }
+  .tl-item.owner-event .tl-dot::before { content:"👤"; font-size:13px; position:absolute; left:-3px; top:-3px; }
+  @keyframes pulse { 50% { box-shadow:0 0 0 5px rgba(37,99,235,.15); } }
+  .tl-head { display:flex; align-items:center; gap:8px; font-size:13px; }
+  .tl-time { color:#999; font-size:11px; margin-left:auto; }
+  .tl-out { font-size:12px; color:#666; margin-top:4px; }
+  .owner-chip { display:inline-flex; align-items:center; gap:4px; padding:1px 8px; border-radius:8px; font-size:12px; background:#faf5ff; color:#7c3aed; border:1px solid #e9d5ff; }
+  .arrow { color:#a78bfa; font-weight:600; }
+  .stage-group { font-size:12px; color:#999; margin:14px 0 4px; }
+  .list-row { display:flex; justify-content:space-between; padding:10px; border-bottom:1px solid #f0f0f0; font-size:13px; }
+  .note { font-size:12px; color:#16a34a; background:#f0fdf4; padding:8px 12px; border-radius:8px; margin-top:10px; }
+</style>
+</head>
+<body>
+<h2>① 变更中心列表 —— 责任人显示用户名（原：UUID 前 8 位）</h2>
+<div class="card">
+  <div class="list-row"><span>2026-08-16-change-owner-from-token</span><span class="owner-chip">👤 qinyi</span></div>
+  <div class="list-row"><span>error-message-l10n（已归档）</span><span class="owner-chip">👤 admin</span></div>
+  <div class="list-row"><span>老变更（未上行 owner）</span><span style="color:#999">—</span></div>
+  <div class="note">✓ owner_id 来自最近一次进度上行的 token 签发人；Join users 表显示 username/display_name；从未上行过的变更保持「—」</div>
+</div>
+
+<h2>② 详情页时间线 —— 责任人变化事件与步骤混合呈现（按时间序合成）</h2>
+<div class="card">
+  <div class="timeline">
+    <div class="stage-group">🧠 brainstorm（已完成）</div>
+    <div class="tl-item done"><span class="tl-dot"></span>
+      <div class="tl-head">进度确认 <span class="tl-time">23:43:24</span></div>
+    </div>
+    <div class="tl-item owner-event"><span class="tl-dot"></span>
+      <div class="tl-head">责任人变更 <span class="owner-chip">👤 admin <span class="arrow">→</span> qinyi</span></div>
+      <div class="tl-out">进度上行检测到 token 身份变化，owner 已更新为最新（qinyi）</div>
+      <div class="tl-time" style="margin-top:2px">2026-08-16 07:20</div>
+    </div>
+    <div class="tl-item done"><span class="tl-dot"></span>
+      <div class="tl-head">加载项目上下文 <span class="tl-time">23:44:08</span></div>
+    </div>
+    <div class="stage-group">📐 plan（进行中）</div>
+    <div class="tl-item active"><span class="tl-dot"></span>
+      <div class="tl-head">复杂度分类与上下文加载</div>
+    </div>
+  </div>
+  <div class="note">✓ 事件条目按发生时间插入对应位置（completed_at 与步骤时间对齐）；紫色👤样式与步骤点区分；后续新事件类型（审批/阶段推进/归档…）同一机制追加 event_type 即可</div>
+</div>
+</body>
+</html>

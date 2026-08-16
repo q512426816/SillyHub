@@ -6,9 +6,13 @@
 - completed_at 归一化：``2026/8/15 23:44:08`` → ISO 8601 UTC；解析失败保留原串（Grill #18）。
 - 明细 status 七值透传 CLI 原值（model.py StepStatus：completed/pending/in-progress/
   failed/blocked/waiting/stale）。
-- output 截断 200 字。
+- output 两层分离（2026-08-16-change-owner-from-token task-04 / D-004@v1）：明细全量
+  透传；列表摘要 current_step_desc 仍截 200（~200B/行契约）。
 - enrich_summaries / enrich_with_workspace_ids 填充 step_progress / steps（集成）。
 - _resolve_pending_change_keys 三元组解包适配后行为不变守护（Grill P0-1）。
+- owner_name 两路径批量填充 + 查询次数锚定（task-04 / R-03/R-06 禁 N+1）。
+- 时间线合成 owner_change 事件条目（task-04 / D-003@v1）：字段转换 / detail 非法跳过 /
+  stage 近似归属 / 混合重编 ordering key 唯一。
 
 fixture 范式参照 test_enrich_projection.py（conftest 注册 platform_change_progress 表）。
 """
@@ -17,6 +21,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from sqlalchemy import select
@@ -24,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.modules.change.dispatch import STAGE_ORDER
-from app.modules.change.model import Change
+from app.modules.change.model import Change, ChangeEventORM
 from app.modules.change.schema import (
     ChangeRead,
     ChangeSummary,
@@ -241,19 +246,33 @@ def test_normalize_completed_at_unit() -> None:
     assert datetime.fromisoformat(iso).tzinfo == UTC  # 回读即 UTC aware
 
 
-def test_extract_output_truncated_to_200_chars() -> None:
-    """output 截断 200 字：恰好 200 保留、201 截为 200、非 str → None。"""
+def test_extract_output_two_layer_truncation_split() -> None:
+    """Phase 2.4 两层分离（D-004@v1 有意行为变更，非修测试凑绿）：
+
+    明细 output 全量透传（500 字原样）；列表摘要 current_step_desc 仍截 200
+    （~200B/行契约不动）。非 str → None；摘要无当前步（全完成）→ None。
+    """
     long_output = "x" * 500
     steps = [
         _step("execute", "t1", status="completed", ordering=1, output=long_output),
-        _step("execute", "t2", status="completed", ordering=2, output="y" * 200),
-        _step("execute", "t3", status="completed", ordering=3, output=123),
+        _step("execute", "t2", status="in-progress", ordering=2, output="y" * 250),
+        _step("execute", "t3", status="pending", ordering=3, output=123),
     ]
-    _, timeline = ChangeService._extract_step_progress(_payload("execute", steps))
+    summary, timeline = ChangeService._extract_step_progress(_payload("execute", steps))
     assert timeline is not None
-    assert timeline[0].output == "x" * 200
-    assert timeline[1].output == "y" * 200
-    assert timeline[2].output is None
+    # 明细全量透传（截断已移除）
+    assert timeline[0].output == "x" * 500
+    assert timeline[1].output == "y" * 250
+    assert timeline[2].output is None  # 非 str → None
+    # 摘要层截断保留：当前步 = t2（第一个非 completed），250 → 200
+    assert summary is not None
+    assert summary.current_step_desc == "y" * 200
+
+    # 全完成 → 无当前步 → 摘要 desc None（None 保持 None，不截不抛）
+    done = [_step("plan", "p1", status="completed", ordering=1, output=long_output)]
+    summary_done, _ = ChangeService._extract_step_progress(_payload("archive", done))
+    assert summary_done is not None
+    assert summary_done.current_step_desc is None
 
 
 def test_extract_ordering_missing_or_invalid_defaults_zero() -> None:
@@ -559,7 +578,7 @@ def test_stage_group_order_matches_design() -> None:
 
 
 def test_extract_summary_fields_shape() -> None:
-    """摘要五字段形状守护（StepProgressSummary contract，对齐 design §7）。"""
+    """摘要五字段 + 明细九字段形状守护（task-03 加 kind/event_type，对齐 design §7）。"""
     assert set(StepProgressSummary.model_fields) == {
         "step_total",
         "steps_completed",
@@ -575,4 +594,493 @@ def test_extract_summary_fields_shape() -> None:
         "completed_at",
         "ordering",
         "wait_reason",
+        "kind",
+        "event_type",
     }
+
+
+# ── owner_name 批量投影 + 时间线事件合成（2026-08-16-change-owner-from-token
+#    task-04，design §5 Phase 2.1/2.2/2.4；R-03/R-06 两次批量 IN 禁 N+1）──
+
+
+async def _make_user(
+    db_session: AsyncSession,
+    *,
+    display_name: str | None = None,
+    username: str | None = None,
+) -> Any:
+    """建 User 行（password_hash NOT NULL 兜底占位值，非真实登录用途）。"""
+    from app.modules.auth.model import User
+
+    tag = uuid.uuid4().hex[:8]
+    user = User(
+        id=uuid.uuid4(),
+        email=f"sp-user-{tag}@example.com",
+        username=username or f"sp-user-{tag}",
+        password_hash="not-a-real-hash",
+        display_name=display_name,
+        status="active",
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+    return user
+
+
+async def _set_owner(db_session: AsyncSession, change: Change, owner_id: uuid.UUID) -> Change:
+    change.owner_id = owner_id
+    db_session.add(change)
+    await db_session.commit()
+    return change
+
+
+async def _make_owner_event(
+    db_session: AsyncSession,
+    ws_id: uuid.UUID,
+    change_id: uuid.UUID,
+    from_id: uuid.UUID,
+    to_id: uuid.UUID,
+    created_at: datetime,
+) -> ChangeEventORM:
+    """写一条 owner_change 事件行（detail 落 str UUID，对齐 task-02 写入侧口径）。"""
+    event = ChangeEventORM(
+        id=uuid.uuid4(),
+        workspace_id=ws_id,
+        change_id=change_id,
+        event_type="owner_change",
+        detail={"from_user_id": str(from_id), "to_user_id": str(to_id)},
+        created_by=to_id,
+        created_at=created_at,
+    )
+    db_session.add(event)
+    await db_session.commit()
+    return event
+
+
+def _make_event_obj(
+    from_id: uuid.UUID, to_id: uuid.UUID, created_at: datetime, detail: Any = None
+) -> ChangeEventORM:
+    """纯内存事件对象（不落库，纯函数单测用）。"""
+    if detail is None:
+        detail = {"from_user_id": str(from_id), "to_user_id": str(to_id)}
+    return ChangeEventORM(
+        id=uuid.uuid4(),
+        workspace_id=uuid.uuid4(),
+        change_id=uuid.uuid4(),
+        event_type="owner_change",
+        detail=detail,
+        created_by=to_id,
+        created_at=created_at,
+    )
+
+
+# ── ① owner_name 两路径填充 ───────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_owner_name_display_name_preferred_username_fallback(
+    db_session: AsyncSession,
+) -> None:
+    """两路径 owner_name：display_name 优先；缺 display 用 username；owner_id None → None。"""
+    ws = await _make_workspace(db_session)
+    u_display = await _make_user(db_session, display_name="展示名A")
+    u_username = await _make_user(db_session, display_name=None)
+    c1 = await _make_change(db_session, ws.id, "own-1")
+    c2 = await _make_change(db_session, ws.id, "own-2")
+    c3 = await _make_change(db_session, ws.id, "own-3")
+    await _set_owner(db_session, c1, u_display.id)
+    await _set_owner(db_session, c2, u_username.id)
+    # c3 owner_id=None（默认）→ owner_name None（前端降级）
+
+    # 详情路径
+    read = await ChangeService(db_session).enrich_with_workspace_ids(c1)
+    read2 = await ChangeService(db_session).enrich_with_workspace_ids(c2)
+    read3 = await ChangeService(db_session).enrich_with_workspace_ids(c3)
+    assert read.owner_name == "展示名A"  # display_name 优先
+    assert read2.owner_name == u_username.username  # username fallback
+    assert read3.owner_name is None  # owner_id None → None
+
+    # 列表路径（一次批量 IN 覆盖多 change）
+    summaries = await ChangeService(db_session).enrich_summaries([c1, c2, c3])
+    by_key = {s.change_key: s for s in summaries}
+    assert by_key["own-1"].owner_name == "展示名A"
+    assert by_key["own-2"].owner_name == u_username.username
+    assert by_key["own-3"].owner_name is None
+
+
+@pytest.mark.asyncio
+async def test_owner_name_missing_user_degrades_to_none(db_session: AsyncSession) -> None:
+    """owner_id 脏引用（用户已删/查不到）→ owner_name None（不进映射，不抛）。"""
+    ws = await _make_workspace(db_session)
+    ghost_id = uuid.uuid4()
+    change = await _make_change(db_session, ws.id, "own-ghost")
+    await _set_owner(db_session, change, ghost_id)
+
+    read = await ChangeService(db_session).enrich_with_workspace_ids(change)
+    assert read.owner_name is None
+    (summary,) = await ChangeService(db_session).enrich_summaries([change])
+    assert summary.owner_name is None
+
+
+# ── ② 事件条目转换（纯函数） ──────────────────────────────────────────
+
+
+def test_event_to_entry_field_mapping() -> None:
+    """owner_change → StepTimelineEntry 逐字段：kind/event_type/name/output/status/时间。"""
+    uid_a, uid_b = uuid.uuid4(), uuid.uuid4()
+    event_dt = datetime(2026, 8, 16, 6, 30, 0, tzinfo=UTC)
+    event = _make_event_obj(uid_a, uid_b, event_dt)
+    names = {uid_a: "甲", uid_b: "乙"}
+    entry, returned_dt = ChangeService._event_to_entry(event, names, "plan", [])
+    assert entry is not None and returned_dt == event_dt
+    assert entry.kind == "event"
+    assert entry.event_type == "owner_change"
+    assert entry.name == "责任人变更"
+    assert entry.output == "甲 → 乙"
+    assert entry.status == "completed"
+    assert entry.completed_at == event_dt.isoformat()
+    assert entry.wait_reason is None
+
+    # 用户查不到（已删/脏引用）→ UUID 前 8 位占位（对齐前端降级），不抛
+    entry2, _ = ChangeService._event_to_entry(event, {}, "plan", [])
+    assert entry2 is not None
+    assert entry2.output == f"{str(uid_a)[:8]} → {str(uid_b)[:8]}"
+
+
+def test_event_to_entry_illegal_detail_skipped() -> None:
+    """detail 非法（缺 from/to、非 UUID 串、detail 非 dict）→ (None, None) 不抛（R-01）。"""
+    event_dt = datetime(2026, 8, 16, 6, 30, 0, tzinfo=UTC)
+    uid = uuid.uuid4()
+    for bad_detail in (
+        {"to_user_id": str(uid)},  # 缺 from
+        {"from_user_id": str(uid)},  # 缺 to
+        {"from_user_id": "not-a-uuid", "to_user_id": str(uid)},  # 非法 UUID
+        "not-a-dict",  # detail 非 dict
+    ):
+        event = _make_event_obj(uid, uid, event_dt, detail=bad_detail)
+        assert ChangeService._event_to_entry(event, {}, "plan", []) == (None, None)
+
+
+def test_event_stage_attribution_started_at_vs_fallback() -> None:
+    """stage 近似归属两分支：started_at 命中最近已开始 stage / 无法判定 fallback current_stage。
+
+    事件时刻从归一化后的 stage started_at 派生（本地时区无关，跨环境稳定）。
+    """
+    uid = uuid.uuid4()
+    names = {uid: "甲"}
+
+    # 分支 1：stages[].started_at 可解析（CLI 本地格式，经 _normalize_completed_at
+    # 归一化）→ 落最近一个 started_at ≤ 事件时刻的 stage（plan 已开始，execute 未）
+    latest_progress = _payload(
+        "execute",
+        [],
+        completed_stages=[
+            {"stage": "brainstorm", "status": "completed", "started_at": "2026/8/16 09:00:00"},
+            {"stage": "plan", "status": "completed", "started_at": "2026/8/16 10:00:00"},
+            {"stage": "execute", "status": "in-progress", "started_at": "2026/8/16 18:00:00"},
+        ],
+    )
+    starts = ChangeService._extract_stage_starts(latest_progress)
+    assert len(starts) == 3
+    event_dt = starts[1][0] + (starts[2][0] - starts[1][0]) / 2  # plan 与 execute 之间
+    event = _make_event_obj(uid, uid, event_dt)
+    entry, _ = ChangeService._event_to_entry(event, names, "execute", starts)
+    assert entry is not None
+    assert entry.stage == "plan"
+
+    # 分支 2：无可解析 started_at（空）→ fallback 投影 current_stage
+    entry_fb, _ = ChangeService._event_to_entry(event, names, "verify", [])
+    assert entry_fb is not None
+    assert entry_fb.stage == "verify"
+
+    # 分支 2b：事件早于全部 started_at → 仍 fallback current_stage
+    early_dt = starts[0][0] - timedelta(hours=1)
+    early_event = _make_event_obj(uid, uid, early_dt)
+    entry_early, _ = ChangeService._event_to_entry(early_event, names, "brainstorm", starts)
+    assert entry_early is not None
+    assert entry_early.stage == "brainstorm"
+
+
+def test_extract_stage_starts_defensive() -> None:
+    """_extract_stage_starts 防御判型：非 dict / stages 非 list / started_at 缺失或非法 → 跳过。"""
+    assert ChangeService._extract_stage_starts(None) == []
+    assert ChangeService._extract_stage_starts("x") == []
+    assert ChangeService._extract_stage_starts({"stages": "x"}) == []
+    # started_at 非法串（保留原串 → fromisoformat 失败）/ 非 str → 跳过
+    assert ChangeService._extract_stage_starts({"stages": [{"stage": "plan"}]}) == []
+    assert (
+        ChangeService._extract_stage_starts(
+            {"stages": [{"stage": "plan", "started_at": "15/8/2026"}]}
+        )
+        == []
+    )
+    # 合法：本地格式归一化后可回读 datetime（本地时区动态，只断言可解析 + stage 名）
+    starts = ChangeService._extract_stage_starts(
+        {"stages": [{"stage": "plan", "started_at": "2026/8/16 10:00:00"}]}
+    )
+    assert len(starts) == 1
+    assert starts[0][1] == "plan"
+    assert isinstance(starts[0][0], datetime)
+
+
+# ── ③ 混合排序 / 重编 ordering（纯函数） ──────────────────────────────
+
+
+def _local_dt(cli_str: str) -> datetime:
+    """CLI 本地格式串 → UTC datetime（经 _normalize_completed_at 同款往返，跨时区环境稳）。"""
+    normalized = ChangeService._normalize_completed_at(cli_str)
+    assert isinstance(normalized, str)
+    return datetime.fromisoformat(normalized)
+
+
+def test_merge_event_entries_insert_position_and_renumber() -> None:
+    """事件按时间序插组内正确位 + 混合重编 ordering 0..n-1 + key 集合无重复（Grill P1-1）。"""
+    uid_a, uid_b = uuid.uuid4(), uuid.uuid4()
+    names = {uid_a: "甲", uid_b: "乙"}
+    # 时间线：plan 3 步（10:00 完 / 11:00 完 / 进行中无 completed_at）
+    steps = [
+        _step("plan", "p1", status="completed", ordering=1, completed_at="2026/8/16 10:00:00"),
+        _step("plan", "p2", status="completed", ordering=2, completed_at="2026/8/16 11:00:00"),
+        _step("plan", "p3", status="in-progress", ordering=3),
+    ]
+    _, timeline = ChangeService._extract_step_progress(_payload("plan", steps))
+    assert timeline is not None
+    # 事件在 10:00 与 11:00 之间 → 插在 p1 后、p2 前
+    ev1 = _make_event_obj(uid_a, uid_b, _local_dt("2026/8/16 10:30:00"))
+    # 事件 12:00 → 晚于组内全部可解析 completed_at；p3（None 视为最晚）天然晚于
+    # 历史事件 → 事件落在 p2 后、p3 前（最后一条可解析 ≤ 者紧后）
+    ev2 = _make_event_obj(uid_b, uid_a, _local_dt("2026/8/16 12:00:00"))
+    merged = ChangeService._merge_event_entries(
+        timeline, [ev1, ev2], _payload("plan", steps), "plan", names
+    )
+    assert merged is not None
+    assert [e.name for e in merged] == ["p1", "责任人变更", "p2", "责任人变更", "p3"]
+    assert [e.kind for e in merged] == ["step", "event", "step", "event", "step"]
+    # 统一重编 0..n-1
+    assert [e.ordering for e in merged] == [0, 1, 2, 3, 4]
+    # 前端 key `${stage}-${ordering}` 集合无重复（Grill P1-1）
+    keys = [f"{e.stage}-{e.ordering}" for e in merged]
+    assert len(keys) == len(set(keys))
+    # 明细 output = "A → B"（用户名 join）
+    events_in = [e for e in merged if e.kind == "event"]
+    assert events_in[0].output == "甲 → 乙"
+    assert events_in[1].output == "乙 → 甲"
+
+
+def test_merge_event_entries_none_timeline_or_no_events() -> None:
+    """steps None → 不合成整体 None；无事件 / 全部非法 → 原样返回（纯 steps 零变化）。"""
+    uid = uuid.uuid4()
+    names = {uid: "甲"}
+    assert ChangeService._merge_event_entries(None, [], {}, "plan", names) is None
+    assert (
+        ChangeService._merge_event_entries(
+            None, [_make_event_obj(uid, uid, datetime.now(UTC))], {}, "plan", names
+        )
+        is None
+    )
+
+    steps = [
+        _step("plan", "p1", status="completed", ordering=1, completed_at="2026/8/16 10:00:00"),
+        _step("plan", "p2", status="pending", ordering=2),
+    ]
+    _, timeline = ChangeService._extract_step_progress(_payload("plan", steps))
+    assert timeline is not None
+    # 无事件 → 原对象原样返回
+    assert ChangeService._merge_event_entries(timeline, [], {}, "plan", names) is timeline
+    # 全部事件非法（detail 缺 to）→ 零插入原样返回（ordering 不重编）
+    bad = _make_event_obj(uid, uid, datetime.now(UTC), detail={"from_user_id": str(uid)})
+    assert ChangeService._merge_event_entries(timeline, [bad], {}, "plan", names) is timeline
+
+
+def test_merge_event_entries_group_head_insert_and_stage_group_order() -> None:
+    """组内全无 ≤ 者 → 插组首；事件 stage 无对应组 → 按阶段组序插入（不 append 尾）。"""
+    uid = uuid.uuid4()
+    names = {uid: "甲"}
+    # plan 组步骤全部晚于事件（不可解析 None 视最晚；可解析 11:00 > 事件 10:30 本地）
+    steps = [
+        _step(
+            "brainstorm", "b1", status="completed", ordering=1, completed_at="2026/8/16 09:00:00"
+        ),
+        _step("plan", "p1", status="completed", ordering=1, completed_at="2026/8/16 11:00:00"),
+        _step("plan", "p2", status="in-progress", ordering=2),
+    ]
+    _, timeline = ChangeService._extract_step_progress(_payload("plan", steps))
+    assert timeline is not None
+    ev = _make_event_obj(uid, uid, _local_dt("2026/8/16 10:30:00"))
+    merged = ChangeService._merge_event_entries(
+        timeline, [ev], _payload("plan", steps), "plan", names
+    )
+    assert merged is not None
+    # plan 组内无可解析 ≤ 者（11:00 > 10:30；p2 None 视最晚）→ 插 plan 组首
+    assert [e.name for e in merged] == ["b1", "责任人变更", "p1", "p2"]
+    assert merged[1].stage == "plan"
+
+    # 事件归到 verify（无 verify 组）→ 按阶段组序插入；本时间线无更后组 → 落最后
+    steps2 = [_step("plan", "p1", status="in-progress", ordering=1)]
+    _, timeline2 = ChangeService._extract_step_progress(_payload("verify", steps2))
+    assert timeline2 is not None
+    merged2 = ChangeService._merge_event_entries(
+        timeline2, [ev], _payload("verify", steps2), "verify", names
+    )
+    assert merged2 is not None
+    assert [e.name for e in merged2] == ["p1", "责任人变更"]
+    assert merged2[1].stage == "verify"
+
+
+# ── ④ 时间线合成集成（DB，详情路径） ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_enrich_detail_synthesizes_owner_events(db_session: AsyncSession) -> None:
+    """详情路径集成：steps + events → 混合时间线（事件条目 + 重编 ordering + key 唯一）。"""
+    ws = await _make_workspace(db_session)
+    u1 = await _make_user(db_session, display_name="甲")
+    u2 = await _make_user(db_session, display_name="乙")
+    change = await _make_change(db_session, ws.id, "own-tl")
+    await _set_owner(db_session, change, u2.id)
+    await _make_progress_row(db_session, ws.id, "own-tl", _full_steps_payload("plan"))
+    # 事件 12:30（CLI 本地时刻，在「拆任务」12:00 完成后、「写 plan.md」进行中前）
+    event_dt = _local_dt("2026/8/15 12:30:00")
+    await _make_owner_event(db_session, ws.id, change.id, u1.id, u2.id, event_dt)
+
+    read = await ChangeService(db_session).enrich_with_workspace_ids(change)
+    assert read.owner_name == "乙"
+    assert read.steps is not None
+    kinds = [e.kind for e in read.steps]
+    assert kinds.count("event") == 1
+    event_entry = next(e for e in read.steps if e.kind == "event")
+    assert event_entry.event_type == "owner_change"
+    assert event_entry.name == "责任人变更"
+    assert event_entry.output == "甲 → 乙"
+    assert event_entry.stage == "plan"
+    assert event_entry.status == "completed"
+    assert event_entry.completed_at == event_dt.isoformat()
+    assert event_entry.wait_reason is None
+    # 位置：拆任务（12:00 完成）后、写 plan.md 前；重编 ordering 0..n-1
+    names_order = [e.name for e in read.steps]
+    assert names_order == ["调研", "产出方案", "拆任务", "责任人变更", "写 plan.md"]
+    assert [e.ordering for e in read.steps] == [0, 1, 2, 3, 4]
+    keys = [f"{e.stage}-{e.ordering}" for e in read.steps]
+    assert len(keys) == len(set(keys))
+
+
+@pytest.mark.asyncio
+async def test_enrich_detail_steps_none_events_not_synthesized(db_session: AsyncSession) -> None:
+    """steps None（有事件但无 steps 可挂载）→ 时间线整体 None（D-003 降级语义）。"""
+    ws = await _make_workspace(db_session)
+    u1 = await _make_user(db_session, display_name="甲")
+    u2 = await _make_user(db_session, display_name="乙")
+    change = await _make_change(db_session, ws.id, "own-tl-none")
+    await _set_owner(db_session, change, u2.id)
+    await _make_progress_row(db_session, ws.id, "own-tl-none", _payload("execute", steps=[]))
+    await _make_owner_event(
+        db_session, ws.id, change.id, u1.id, u2.id, _local_dt("2026/8/15 12:30:00")
+    )
+
+    read = await ChangeService(db_session).enrich_with_workspace_ids(change)
+    assert read.owner_name == "乙"  # owner_name 与时间线合成解耦
+    assert read.step_progress is None
+    assert read.steps is None
+
+
+@pytest.mark.asyncio
+async def test_enrich_detail_owner_name_two_names_users_in_merged(db_session: AsyncSession) -> None:
+    """事件 A/B 用户名与 owner_name 共用一次 users IN（R-06）：owner 是第三方也一次查齐。"""
+    ws = await _make_workspace(db_session)
+    u1 = await _make_user(db_session, display_name="甲")
+    u2 = await _make_user(db_session, display_name="乙")
+    u3 = await _make_user(db_session, display_name="丙")
+    change = await _make_change(db_session, ws.id, "own-merge")
+    await _set_owner(db_session, change, u3.id)
+    await _make_progress_row(db_session, ws.id, "own-merge", _full_steps_payload("plan"))
+    await _make_owner_event(
+        db_session, ws.id, change.id, u1.id, u2.id, _local_dt("2026/8/15 12:30:00")
+    )
+
+    read = await ChangeService(db_session).enrich_with_workspace_ids(change)
+    assert read.owner_name == "丙"  # owner 独立于事件 A/B
+    assert read.steps is not None
+    event_entry = next(e for e in read.steps if e.kind == "event")
+    assert event_entry.output == "甲 → 乙"
+
+
+# ── ⑥ 查询次数锚定（R-03/R-06 防 N+1 回归） ──────────────────────────
+
+
+class _ExecuteCounter:
+    """monkeypatch 计数 session.execute，按语句包含的表名归类（users/events/其它）。"""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.counts = {"users": 0, "change_events": 0}
+        self._real = session.execute
+
+    async def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        stmt = args[0] if args else kwargs.get("statement")
+        sql = str(stmt)
+        if "FROM users" in sql or "users.id IN" in sql:
+            self.counts["users"] += 1
+        if "change_events" in sql:
+            self.counts["change_events"] += 1
+        return await self._real(*args, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_query_counts_list_users_once_events_zero(db_session: AsyncSession) -> None:
+    """列表路径：N change 一次批量 → users IN 恒 1 次 + events 0 次（零成本）。"""
+    ws = await _make_workspace(db_session)
+    u1 = await _make_user(db_session, display_name="甲")
+    u2 = await _make_user(db_session, display_name="乙")
+    changes = []
+    for i in range(3):
+        c = await _make_change(db_session, ws.id, f"qc-list-{i}")
+        await _set_owner(db_session, c, u1.id if i % 2 == 0 else u2.id)
+        await _make_progress_row(db_session, ws.id, f"qc-list-{i}", _full_steps_payload("plan"))
+        # 列表路径即使有事件也不该查 events
+        await _make_owner_event(
+            db_session, ws.id, c.id, u1.id, u2.id, _local_dt("2026/8/15 12:30:00")
+        )
+        changes.append(c)
+
+    counter = _ExecuteCounter(db_session)
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(db_session, "execute", counter)
+    try:
+        summaries = await ChangeService(db_session).enrich_summaries(changes)
+    finally:
+        monkey.undo()
+    assert len(summaries) == 3
+    assert all(s.owner_name is not None for s in summaries)
+    assert counter.counts["users"] == 1  # R-03：N change 恒 1 次
+    assert counter.counts["change_events"] == 0  # 列表零 events 查询
+
+
+@pytest.mark.asyncio
+async def test_query_counts_detail_users_once_events_once(db_session: AsyncSession) -> None:
+    """详情路径（含事件合成）：users IN 1 次（owner+A/B 合并 R-06）+ events IN 1 次。"""
+    ws = await _make_workspace(db_session)
+    u1 = await _make_user(db_session, display_name="甲")
+    u2 = await _make_user(db_session, display_name="乙")
+    u3 = await _make_user(db_session, display_name="丙")
+    change = await _make_change(db_session, ws.id, "qc-detail")
+    await _set_owner(db_session, change, u3.id)
+    await _make_progress_row(db_session, ws.id, "qc-detail", _full_steps_payload("plan"))
+    # 两条事件（A→B、B→C）+ owner 是第三方：users id 集合 = owner ∪ 事件 A/B
+    await _make_owner_event(
+        db_session, ws.id, change.id, u1.id, u2.id, _local_dt("2026/8/15 12:10:00")
+    )
+    await _make_owner_event(
+        db_session, ws.id, change.id, u2.id, u3.id, _local_dt("2026/8/15 12:20:00")
+    )
+
+    counter = _ExecuteCounter(db_session)
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(db_session, "execute", counter)
+    try:
+        read = await ChangeService(db_session).enrich_with_workspace_ids(change)
+    finally:
+        monkey.undo()
+    assert read.owner_name == "丙"
+    assert read.steps is not None
+    assert sum(1 for e in read.steps if e.kind == "event") == 2
+    assert counter.counts["users"] == 1  # R-06：owner+事件 A/B 一次查齐
+    assert counter.counts["change_events"] == 1  # events 一次 IN

@@ -7,11 +7,14 @@ import {
 } from "@/components/changes/detail/change-step-timeline";
 
 /**
- * ChangeStepTimeline 组件测试（2026-08-15-change-step-visibility task-05 / FR-02）。
+ * ChangeStepTimeline 组件测试（2026-08-15-change-step-visibility task-05 / FR-02；
+ * 2026-08-16-change-owner-from-token task-05 / FR-03 / FR-05 增补）。
  *
  * 覆盖：七值状态色映射（含未知值灰兜底）/ stage 分组组头 / completed 时间与
- * output 摘要 / waiting 显示 wait_reason / steps null 空态 / 分组顺序遵循后端
- * entries 顺序（组件不再排序）/ entry key 稳定（stage-ordering）。
+ * output 全量展示（D-004@v1 不截断，原 line-clamp 断言翻转）/ waiting 显示
+ * wait_reason / steps null 空态 / 分组顺序遵循后端 entries 顺序（组件不再排序）/
+ * entry key 稳定（stage-ordering）/ kind=event 事件条目专属渲染（👤 + 紫色
+ * chip）/ 事件与 steps 混合排序 / 纯 steps（kind 缺省）零变化回归。
  */
 
 function entry(
@@ -23,6 +26,9 @@ function entry(
     completed_at: null,
     ordering: 0,
     wait_reason: null,
+    // 2026-08-16-change-owner-from-token task-03：api-types 重生成后 kind 为必填
+    // （带 default 的字段生成器按响应必含处理），mock 补缺省值（CLAUDE.md 规则 21）。
+    kind: "step",
     ...over,
   };
 }
@@ -119,7 +125,7 @@ describe("ChangeStepTimeline", () => {
     expect(second).toHaveAttribute("data-stage", "brainstorm");
   });
 
-  it("completed 步显示 ISO completed_at 与 output 摘要（line-clamp + word-break）", () => {
+  it("completed 步显示 ISO completed_at 与 output 全量（D-004@v1 不截断：无 clamp + break-words + max-h 滚动兜底）", () => {
     render(
       <ChangeStepTimeline
         steps={[
@@ -138,8 +144,12 @@ describe("ChangeStepTimeline", () => {
     expect(time).toBeInTheDocument();
     expect(time).toHaveAttribute("datetime", "2026-08-15T15:44:08+00:00");
     const output = screen.getByText(/CLI 六表 JSON 已含 steps\[\] 数据/);
-    expect(output.className).toContain("line-clamp-2");
+    // D-004@v1 明确修订截断行为（明细不截断）——原「clamp 存在」断言按新行为翻转：
+    // 无 line-clamp 自然换行 + max-h 容器滚动兜底（R-07）。
+    expect(output.className).not.toContain("line-clamp");
     expect(output.className).toContain("break-words");
+    expect(output.className).toContain("max-h");
+    expect(output.className).toContain("overflow-y-auto");
   });
 
   it("waiting 步显示 wait_reason 与状态文案", () => {
@@ -189,5 +199,135 @@ describe("ChangeStepTimeline", () => {
     expect(keysAfter).toEqual(["execute-1", "execute-2", "execute-3"]);
     // 变化步内容更新：完成时间出现
     expect(screen.getByText("2026-08-15T16:00:00+00:00")).toBeInTheDocument();
+  });
+});
+
+// ── 事件条目（kind="event"，2026-08-16-change-owner-from-token D-003@v1）─────
+
+/** 旧数据兼容构造：抹掉 kind 字段（runtime undefined，模拟 kind 缺省的存量数据） */
+function legacyEntry(
+  over: Partial<StepTimelineEntry> & Pick<StepTimelineEntry, "name" | "stage">,
+): StepTimelineEntry {
+  const { kind: _omit, ...rest } = entry(over);
+  return rest as StepTimelineEntry;
+}
+
+describe("ChangeStepTimeline 事件条目（kind=event）", () => {
+  it("kind=event → 专属渲染：data-kind 锚点 + 👤 + 紫色 chip（A → B）+ 无 data-status 色点", () => {
+    const { container } = render(
+      <ChangeStepTimeline
+        steps={[
+          entry({
+            name: "责任人变更",
+            stage: "brainstorm",
+            kind: "event",
+            event_type: "owner_change",
+            status: "completed",
+            ordering: 2,
+            completed_at: "2026-08-16T07:20:00+00:00",
+            output: "admin → qinyi",
+          }),
+        ]}
+      />,
+    );
+    const eventNode = container.querySelector('[data-kind="event"]');
+    expect(eventNode).not.toBeNull();
+    // name + output（A → B）+ 👤 emoji（dot 位与 chip 内各一）
+    expect(eventNode?.textContent).toContain("责任人变更");
+    expect(eventNode?.textContent).toContain("admin");
+    expect(eventNode?.textContent).toContain("→");
+    expect(eventNode?.textContent).toContain("qinyi");
+    expect(eventNode?.textContent).toContain("👤");
+    // 事件条目无 data-status 色点（dot 被 emoji 替代，原型 .tl-item.owner-event）
+    expect(eventNode?.querySelector("[data-status]")).toBeNull();
+    // 紫色 chip 样式对齐原型 .owner-chip（#faf5ff/#7c3aed/#e9d5ff）
+    const chip = eventNode?.querySelector(".rounded-lg");
+    expect(chip).not.toBeNull();
+    expect(chip?.className).toContain("bg-purple-50");
+    expect(chip?.className).toContain("text-violet-600");
+    expect(chip?.className).toContain("border-purple-200");
+    // 箭头 violet 加粗（原型 .arrow #a78bfa）
+    expect(chip?.querySelector(".font-bold")?.className).toContain(
+      "text-violet-400",
+    );
+    // completed_at 沿用 time 元素渲染（事件 status=completed，design §5 Phase 2.2）
+    expect(screen.getByText("2026-08-16T07:20:00+00:00")).toHaveAttribute(
+      "datetime",
+      "2026-08-16T07:20:00+00:00",
+    );
+    // output 已进 chip，底部不再重复渲染 <p>
+    expect(eventNode?.querySelector("p")).toBeNull();
+  });
+
+  it("混合排序：同 stage 事件与 steps 交错 → DOM 序遵循 entries 顺序且 data-key 无重复", () => {
+    const { container } = render(
+      <ChangeStepTimeline
+        steps={[
+          // 后端已对混合序列统一重编 ordering（design §5 Phase 2.2 Grill P1-1），
+          // 事件 key 唯一性由重编保证，前端不改 key 机制。
+          entry({ name: "进度确认", stage: "brainstorm", status: "completed", ordering: 0, completed_at: "2026-08-16T07:19:00+00:00" }),
+          entry({ name: "责任人变更", stage: "brainstorm", kind: "event", event_type: "owner_change", status: "completed", ordering: 1, completed_at: "2026-08-16T07:20:00+00:00", output: "admin → qinyi" }),
+          entry({ name: "加载项目上下文", stage: "brainstorm", status: "completed", ordering: 2, completed_at: "2026-08-16T07:21:00+00:00" }),
+        ]}
+      />,
+    );
+    const keys = Array.from(
+      container.querySelectorAll("[data-key]"),
+    ).map((n) => n.getAttribute("data-key"));
+    // DOM 序 = entries 序（组件不排序）；key 无重复
+    expect(keys).toEqual(["brainstorm-0", "brainstorm-1", "brainstorm-2"]);
+    expect(new Set(keys).size).toBe(keys.length);
+    // 事件夹在两个 step 之间（第 2 个条目是事件）
+    const nodes = container.querySelectorAll("[data-key]");
+    expect(nodes[0]).not.toHaveAttribute("data-kind", "event");
+    expect(nodes[1]).toHaveAttribute("data-kind", "event");
+    expect(nodes[2]).not.toHaveAttribute("data-kind", "event");
+  });
+
+  it("纯 steps 回归：kind 缺省（旧数据）全部走 step 分支，容器内无 data-kind=event", () => {
+    const { container } = render(
+      <ChangeStepTimeline
+        steps={[
+          legacyEntry({ name: "旧步一", stage: "brainstorm", status: "completed", ordering: 1, completed_at: "2026-08-15T15:44:08+00:00" }),
+          legacyEntry({ name: "旧步二", stage: "brainstorm", status: "in-progress", ordering: 2 }),
+          legacyEntry({ name: "旧步三", stage: "plan", status: "waiting", ordering: 1, wait_reason: "等用户" }),
+        ]}
+      />,
+    );
+    // 无事件条目
+    expect(container.querySelector('[data-kind="event"]')).toBeNull();
+    // step 渲染照常：色点 + waiting 原因
+    expect(container.querySelector('[data-status="completed"]')).not.toBeNull();
+    expect(container.querySelector('[data-status="in-progress"]')).not.toBeNull();
+    expect(screen.getByText(/等待原因：等用户/)).toBeInTheDocument();
+    // 同 stage 的组头计数照常（brainstorm 1/2 + plan 0/1）
+    expect(screen.getByText("1/2 步完成")).toBeInTheDocument();
+    expect(screen.getByText("0/1 步完成")).toBeInTheDocument();
+  });
+
+  it("长文本不 clamp：超长 output 自然换行 + max-h 滚动兜底（D-004@v1 / R-07）", () => {
+    const longOutput = `超长输出。${"明细全量透传内容 ".repeat(120)}`;
+    const { container } = render(
+      <ChangeStepTimeline
+        steps={[
+          entry({
+            name: "执行步骤",
+            stage: "execute",
+            status: "completed",
+            ordering: 1,
+            completed_at: "2026-08-16T08:00:00+00:00",
+            output: longOutput,
+          }),
+        ]}
+      />,
+    );
+    const output = container.querySelector("p");
+    expect(output).not.toBeNull();
+    // D-004@v1：明细不截断——无 line-clamp，break-words 自然换行，max-h 容器滚动兜底
+    expect(output?.className).not.toContain("line-clamp");
+    expect(output?.className).toContain("break-words");
+    expect(output?.className).toContain("max-h");
+    expect(output?.className).toContain("overflow-y-auto");
+    expect(output?.textContent).toBe(longOutput);
   });
 });

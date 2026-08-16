@@ -37,7 +37,9 @@ class StepProgressSummary(BaseModel):
     steps_completed: int  # 已完成数
     current_step_name: str | None  # 第一个非 completed 步名（全完成→None）
     current_step_status: str | None  # "active" | "waiting" | None(全完成)
-    current_step_desc: str | None  # 当前步 output 截断（无→None）
+    current_step_desc: (
+        str | None
+    )  # 当前步 output 截断 200（列表摘要专用；明细全量，Phase 2.4 两层分离）
 
 
 class StepTimelineEntry(BaseModel):
@@ -52,10 +54,17 @@ class StepTimelineEntry(BaseModel):
     name: str
     stage: str
     status: str  # CLI 原值透传（7 值枚举：completed/pending/in-progress/failed/blocked/waiting/stale，前端白名单色映射）
-    output: str | None  # 截断 200 字
+    output: str | None  # 全量透传（Phase 2.4 / D-004@v1：截断仅列表摘要 current_step_desc）
     completed_at: str | None  # 归一化 ISO 8601 UTC（解析失败保留原串）
     ordering: int
     wait_reason: str | None
+    # 2026-08-16-change-owner-from-token task-03（design §7）：条目类型区分
+    # （计算投影语义）。kind 默认 "step"——旧数据/旧组件不读新字段渲染不变
+    # （§9 兼容策略）；"event" 由 task-04 时间线合成 owner_change 事件条目时
+    # 置位。event_type 首类值 'owner_change'，后续事件类型零 schema 变更接入
+    # （D-002@v1 扩展点）。全 optional 零 breaking。
+    kind: str = "step"  # "step" | "event"
+    event_type: str | None = None
 
 
 class ChangeRead(BaseModel):
@@ -88,6 +97,12 @@ class ChangeRead(BaseModel):
     # None（brownfield 安全，旧客户端不读不受影响）。
     step_progress: StepProgressSummary | None = None
     steps: list[StepTimelineEntry] | None = None
+    # 2026-08-16-change-owner-from-token task-03（design §7）：owner_id 的用户
+    # 可读投影（计算字段，DTO 层），非 changes 表列（零 migration）；由 service
+    # enrich 批量 join users 填充（display_name 优先 username fallback，R-06
+    # 与事件 A/B 名字共用一次 IN 查询）。填充逻辑是 task-04 领地，本处仅落契约。
+    # optional default None（brownfield 安全，旧客户端不读不受影响，§9）。
+    owner_name: str | None = None
 
 
 class ChangeSummary(BaseModel):
@@ -114,6 +129,12 @@ class ChangeSummary(BaseModel):
     # None，前端降级现有展示，D-003@v1）。只带摘要（~200B/行），不带 steps 明细
     # （明细随 ChangeRead.steps）。optional default None（brownfield 安全）。
     step_progress: StepProgressSummary | None = None
+    # 2026-08-16-change-owner-from-token task-03（design §7）：owner_id 的用户
+    # 可读投影（计算字段，DTO 层），非 changes 表列（零 migration）；由 service
+    # enrich_summaries 批量 join users 填充（display_name 优先 username
+    # fallback，R-06 与事件 A/B 名字共用一次 IN 查询）。填充逻辑是 task-04
+    # 领地，本处仅落契约。optional default None（brownfield 安全，§9）。
+    owner_name: str | None = None
     updated_at: datetime
 
 
