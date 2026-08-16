@@ -27,7 +27,7 @@ import type { SessionState } from '../src/interactive/types.js';
 import type { WorkspaceManager } from '../src/workspace.js';
 
 const mockConfig: DaemonConfig = {
-  server_url: 'http://test:8000',
+  server_url: 'http://127.0.0.1:8000',
   token: 'test-token',
   runtime_id: 'runtime-uuid-123',
   profile: 'default',
@@ -51,6 +51,16 @@ function mockAgent(provider: string, path: string): DetectedAgent {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** 轮询等谓词成立（ql-20260816-003：代替固定 sleep——满载下异步链可能 >80ms，
+ *  固定 sleep 会在正断言处误判未调；轮询与 B 组 B1/B2/B3/B4 一致）。 */
+async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await sleep(5);
+  }
 }
 
 function createMockClient() {
@@ -230,7 +240,7 @@ describe('task-09 daemon 借用沙箱检测（_startInteractiveSession）', () =
         rootPath: `borrow-sandbox:${slug}`,
       },
     });
-    await sleep(80);
+    await waitFor(() => (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls.length > 0);
 
     // 1. create 被调用，cwd = 沙箱目录（不是 marker 字符串）。
     expect(sessionManager.create).toHaveBeenCalledOnce();
@@ -286,7 +296,7 @@ describe('task-09 daemon 借用沙箱检测（_startInteractiveSession）', () =
         rootPath: wsDir,
       },
     });
-    await sleep(80);
+    await waitFor(() => (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls.length > 0);
 
     expect(sessionManager.create).toHaveBeenCalledOnce();
     const createArg = (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls[0]![0];
@@ -338,7 +348,8 @@ describe('task-09 daemon 借用沙箱检测（_startInteractiveSession）', () =
         rootPath: 'borrow-sandbox:borrow-x-y',
       },
     });
-    await sleep(80);
+    // 流程是 prepareWorkspace → create：等 create（链末端）即保证 prepareWorkspace 已发生。
+    await waitFor(() => (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls.length > 0);
 
     // 注入实例的 prepareWorkspace 被调用，slug 提取正确（去掉 marker 前缀）。
     expect(borrowWsManager.prepareWorkspace).toHaveBeenCalledWith('borrow-x-y');

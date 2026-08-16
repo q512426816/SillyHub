@@ -55,7 +55,7 @@ function buildClient(callbacks: {
 }): { client: WsClient; emitMessage: (data: Buffer) => void; emitOpen: () => void } {
   const stub = createStubSocket();
   const client = new WsClient({
-    serverUrl: 'http://test:8000',
+    serverUrl: 'http://127.0.0.1:8000',
     runtimeId: 'rt-1',
     callbacks,
   });

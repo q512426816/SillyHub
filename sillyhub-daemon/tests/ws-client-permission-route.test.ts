@@ -21,7 +21,7 @@ import type { PermissionResolver } from '../src/interactive/permission-resolver.
 import { MSG } from '../src/protocol.js';
 
 const mockConfig: DaemonConfig = {
-  server_url: 'http://test:8000',
+  server_url: 'http://127.0.0.1:8000',
   token: 'test-token',
   runtime_id: 'runtime-uuid-123',
   profile: 'default',

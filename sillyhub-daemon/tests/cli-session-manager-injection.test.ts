@@ -138,7 +138,7 @@ vi.mock('../src/config.js', async (importOriginal) => {
   return {
     ...orig,
     loadConfig: vi.fn(async () => ({
-      server_url: 'http://test:8000',
+      server_url: 'http://127.0.0.1:8000',
       token: 'test-token',
       api_key: null,
       runtime_id: 'runtime-uuid',

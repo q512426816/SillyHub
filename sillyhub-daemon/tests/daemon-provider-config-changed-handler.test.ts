@@ -30,7 +30,7 @@ import type { SessionManager } from '../src/interactive/session-manager.js';
 // ── 共用 mock 基础设施（风格对齐 daemon-lease-cancel-handler.test.ts）──────────
 
 const mockConfig: DaemonConfig = {
-  server_url: 'http://test:8000',
+  server_url: 'http://127.0.0.1:8000',
   token: 'test-token',
   runtime_id: 'runtime-uuid-123',
   profile: 'default',

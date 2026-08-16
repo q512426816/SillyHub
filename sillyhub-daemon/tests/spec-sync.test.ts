@@ -27,7 +27,12 @@ vi.mock('node:os', async (importOriginal) => {
 const FAKE_HOME = mkdtempSync(join(tmpdir(), 'spec-sync-test-home-'));
 hoisted.homedirMock.mockReturnValue(FAKE_HOME);
 
-import { syncSpecTreeIfNeeded, packSpecDir } from '../src/spec-sync.js';
+import {
+  syncSpecTreeIfNeeded,
+  packSpecDir,
+  postSpecSync,
+  hasUnsyncedLocalChanges,
+} from '../src/spec-sync.js';
 
 /** 构造最小 mock client（仅 postSpecSync），用 `as never` 绕过 HubClient 完整类型。 */
 function makeClient(overrides: { postSpecSync?: ReturnType<typeof vi.fn> } = {}) {
@@ -325,5 +330,60 @@ describe('packSpecDir (ql-20260813-008 保留真实 mtime)', () => {
     expect(mtimes['changes/demo/tasks.md']).toBe(fixedSec);
     // 关键回归断言：不是 0（旧 bug 会让所有 mtime=1970）。
     expect(mtimes['changes/demo/proposal.md']).toBeGreaterThan(0);
+  });
+});
+
+// ── pending_push 标记（ql-20260816-003）────────────────────────────────────────
+// hasUnsyncedLocalChanges 信号 1 曾只读不写（死代码）；postSpecSync 包装器实装：
+// 失败写 / 成功清。守护 D-008 pull-before-push 在 daemon 中断/服务端终止时仍能
+// 保护本地改动不被 pull 覆盖。
+
+describe('postSpecSync pending_push 标记 (ql-20260816-003)', () => {
+  let specRoot: string;
+  const WS = 'ws-pending-push';
+
+  beforeEach(async () => {
+    specRoot = await mkdtemp(join(tmpdir(), 'pending-push-spec-'));
+    await mkdir(join(specRoot, 'changes', 'demo'), { recursive: true });
+    await writeFile(join(specRoot, 'changes', 'demo', 'proposal.md'), '# p');
+    // 清 manifest 缓存，避免跨测试同 wsId 污染（首同步路径依赖无缓存）。
+    await rm(join(FAKE_HOME, '.sillyhub', 'daemon', 'manifests'), { recursive: true, force: true });
+  });
+
+  afterEach(async () => {
+    await rm(specRoot, { recursive: true, force: true }).catch(() => undefined);
+    await rm(join(FAKE_HOME, '.sillyhub', 'daemon', 'manifests'), { recursive: true, force: true }).catch(() => undefined);
+  });
+
+  it('push 失败（网络/服务端 5xx）→ 写 .runtime/pending_push → hasUnsyncedLocalChanges 判 true', async () => {
+    const client = makeClient({ postSpecSync: vi.fn().mockRejectedValue(new Error('HTTP 503 server unavailable')) });
+    await expect(postSpecSync(client as never, WS, specRoot)).rejects.toThrow(/503/);
+
+    const markerPath = join(specRoot, '.runtime', 'pending_push');
+    const marker = await import('node:fs/promises').then((m) => m.stat(markerPath).then(() => true).catch(() => false));
+    expect(marker).toBe(true);
+    // 信号 1 命中 → pull-before-push 会先回灌本地改动
+    expect(await hasUnsyncedLocalChanges(specRoot)).toBe(true);
+  });
+
+  it('push 成功 → 清除已有 pending_push 标记', async () => {
+    // 预置标记（模拟上次失败残留）
+    const markerPath = join(specRoot, '.runtime', 'pending_push');
+    await mkdir(join(specRoot, '.runtime'), { recursive: true });
+    await writeFile(markerPath, new Date().toISOString(), 'utf-8');
+    expect(await hasUnsyncedLocalChanges(specRoot)).toBe(true);
+
+    await postSpecSync(makeClient() as never, WS, specRoot);
+    const still = await import('node:fs/promises').then((m) => m.stat(markerPath).then(() => true).catch(() => false));
+    expect(still).toBe(false);
+
+    // 补写 daemon 状态文件（synced_at = 未来，模拟 pull 保鲜后）：无 pending_push 且
+    // 本地 mtime 不新于 synced_at → 判定无未回灌（本地与服务器一致）。
+    await writeFile(
+      join(specRoot, '.runtime', 'spec-version.json'),
+      JSON.stringify({ spec_version: 1, synced_at: new Date(Date.now() + 3600_000).toISOString() }, null, 2),
+      'utf-8',
+    );
+    expect(await hasUnsyncedLocalChanges(specRoot)).toBe(false);
   });
 });

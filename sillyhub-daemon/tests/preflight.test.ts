@@ -63,7 +63,7 @@ function makeLogger(): {
   return { fn, entries };
 }
 
-function makeConfig(serverUrl = 'http://test:8000'): DaemonConfig {
+function makeConfig(serverUrl = 'http://127.0.0.1:8000'): DaemonConfig {
   return {
     server_url: serverUrl,
     token: 'tok',
@@ -387,9 +387,9 @@ describe('runDaemonSelfUpdate', () => {
       }),
     );
     vi.stubGlobal('fetch', spy);
-    await runDaemonSelfUpdate('abc1234', makeConfig('http://test:8000///'), fn);
+    await runDaemonSelfUpdate('abc1234', makeConfig('http://127.0.0.1:8000///'), fn);
     expect(String(spy.mock.calls[0]![0])).toBe(
-      'http://test:8000/daemon/latest.json',
+      'http://127.0.0.1:8000/daemon/latest.json',
     );
   });
 });

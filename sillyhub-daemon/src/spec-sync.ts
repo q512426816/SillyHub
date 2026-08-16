@@ -522,7 +522,7 @@ export class SpecPushConflict extends Error {
  * @param wsId workspace id
  * @param specRoot 本地 spec 目录（pullSpecBundle/packSpecDir 返回的路径）
  */
-export async function postSpecSync(
+async function postSpecSyncImpl(
   client: HubClient,
   wsId: string,
   specRoot: string,
@@ -603,6 +603,71 @@ export async function postSpecSync(
     const fullManifest = await buildFullManifest(specRoot);
     await writeLocalManifest(wsId, fullManifest);
     return { ...resp, filesTotal: Object.keys(fullManifest.files).length };
+  }
+}
+
+/**
+ * pending_push 标记（ql-20260816-003）：postSpecSync 失败的防御兜底（hasUnsyncedLocalChanges 信号 1）。
+ *
+ * 曾只读不写（死代码）：hasUnsyncedLocalChanges 检查 ``specDir/.runtime/pending_push`` 但
+ * 全仓无写入点。本包装器实装设计意图——push 失败（网络/服务端终止/daemon 中断）写标记，
+ * 成功清除。作用：mtime 信号（信号 2）依赖 fs 时间戳比对（时钟偏移 / 粗粒度 fs 可能漏判），
+ * 标记是显式「本地有未回灌改动」声明，pull-before-push（D-008）据其保证中断场景下本地改动
+ * 不被 pull 覆盖，且下次同步自动重推。
+ *
+ * 语义：
+ *   - 成功（result 非 null）→ 清除标记（本地已与服务器一致）。
+ *   - 失败（抛错）→ 写标记（best-effort，失败仅 warn）。
+ *   - conflict（SpecPushConflict）→ 不动标记（需人工拍板，非传输失败，自动重推会再冲突）。
+ *   - mock client（postSpecSync 非函数）→ 返回 null，不动标记。
+ * 标记写/清均 best-effort：IO 失败不阻断同步主流程（对齐 R-03）。
+ *
+ * @param client HubClient（batch/interactive 各自持有的实例）
+ * @param wsId workspace id
+ * @param specRoot 本地 spec 目录（pullSpecBundle/packSpecDir 返回的路径）
+ * @param changeWriteId 透传（见 impl）
+ * @param onProgress 透传（见 impl）
+ */
+export async function postSpecSync(
+  client: HubClient,
+  wsId: string,
+  specRoot: string,
+  changeWriteId?: string,
+  onProgress?: (p: { files_total?: number; files_processed?: number }) => void,
+): Promise<{ ok: boolean; reparsed: number; filesTotal?: number } | null> {
+  try {
+    const result = await postSpecSyncImpl(client, wsId, specRoot, changeWriteId, onProgress);
+    // 真实 push 成功（result 非 null）→ 清除 pending_push（本地已与服务器一致）。
+    if (result !== null) {
+      await rmPendingPushMarker(specRoot);
+    }
+    return result;
+  } catch (e) {
+    // 传输失败（网络 / 服务端不可用 / 5xx）→ 写标记；conflict 除外（人工拍板，见上方语义）。
+    if (!(e instanceof SpecPushConflict)) {
+      await writePendingPushMarker(specRoot);
+    }
+    throw e;
+  }
+}
+
+/** 写 pending_push 标记（specDir/.runtime/pending_push，best-effort）。 */
+async function writePendingPushMarker(specRoot: string): Promise<void> {
+  try {
+    const p = join(specRoot, '.runtime', 'pending_push');
+    await mkdir(dirname(p), { recursive: true });
+    await writeFile(p, `${new Date().toISOString()}\n`, 'utf-8');
+  } catch (e) {
+    console.warn('spec_sync: pending_push_marker_write_failed', specRoot, e);
+  }
+}
+
+/** 清 pending_push 标记（best-effort）。 */
+async function rmPendingPushMarker(specRoot: string): Promise<void> {
+  try {
+    await rm(join(specRoot, '.runtime', 'pending_push'), { force: true });
+  } catch (e) {
+    console.warn('spec_sync: pending_push_marker_rm_failed', specRoot, e);
   }
 }
 

@@ -48,3 +48,5 @@ walkDir 相对路径用 POSIX `/`（tar 标准）；symlink 跳过（不收集�
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 <!-- MANUAL_NOTES_END -->
+- ql-20260816-003 | `postSpecSync` 包装器实装 `pending_push` 标记（`hasUnsyncedLocalChanges` 信号 1，曾只读不写=死代码）：push 失败（网络/服务端终止/5xx）写 `specDir/.runtime/pending_push`，成功清除，`SpecPushConflict` 不动（人工拍板非传输失败）。作用：mtime 信号（信号 2）依赖 fs 时间戳比对（时钟偏移/粗粒度 fs 可能漏判），标记是显式「本地有未回灌改动」声明，pull-before-push（D-008）据其保证 daemon 中断/服务端终止时本地改动不被 pull 覆盖且下次同步自动重推。写/清均 best-effort（失败仅 warn，对齐 R-03）。impl 改名 `postSpecSyncImpl`（模块私有），公开签名不变。
+- ql-20260816-003（测试基建）| ① 19 个 daemon 测试文件 `server_url` 从 `http://test:8000` 改 `http://127.0.0.1:8000`——"test" 主机 DNS 解析 2.3s/次 × daemon.start 2 次版本/技能清单 fetch ≈ 4.6s/测试，满载 hook 超时致全量 flaky（2276 passed 1~3 failed）；IP 字面量 3ms 连接拒绝，全量 2377 passed 0 failed、时长 226s→73s。② B 组 B1 + borrow-sandbox 3 处固定 `sleep()` 改轮询 `waitFor`（满载异步链 >sleep 误判未调），B1 另加 try/finally 兜底 resolve pull 防 daemon.stop 挂死。

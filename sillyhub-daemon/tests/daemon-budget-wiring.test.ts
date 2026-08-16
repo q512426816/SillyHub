@@ -25,7 +25,7 @@ import type { SessionState } from '../src/interactive/types.js';
 // ── fixture（对齐 daemon-kind-dispatch.test.ts）─────────────────────────────────
 
 const mockConfig: DaemonConfig = {
-  server_url: 'http://test:8000',
+  server_url: 'http://127.0.0.1:8000',
   token: 'test-token',
   runtime_id: 'runtime-uuid-budget',
   profile: 'default',

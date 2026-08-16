@@ -59,7 +59,7 @@ await import('../../src/spec-sync.js');
 // ── fixture（对齐 daemon-kind-dispatch.test.ts 的 mock 模式）─────────────────
 
 const mockConfig: DaemonConfig = {
-  server_url: 'http://test:8000',
+  server_url: 'http://127.0.0.1:8000',
   token: 'test-token',
   runtime_id: 'runtime-uuid-123',
   profile: 'default',
@@ -349,32 +349,43 @@ describe('task-09 B 组：daemon interactive spec-sync 接入（D-007@v1）', ()
     });
     specSyncMocks.pullSpecBundle.mockReturnValueOnce(pullPromise);
 
-    driveInteractiveStart(wsClientMock, client, {
-      leaseId: 'lease-b1',
-      sessionId: 'sess-b1',
-      transport: 'tar',
-      workspaceId: 'ws-b1',
-    });
+    try {
+      driveInteractiveStart(wsClientMock, client, {
+        leaseId: 'lease-b1',
+        sessionId: 'sess-b1',
+        transport: 'tar',
+        workspaceId: 'ws-b1',
+      });
 
-    // 等待 ws 消息进入 _executeTask（claimLease resolve 后）。
-    // 给 claimLease + 归一化链一点时间，但 pullPromise 未 resolve。
-    await sleep(60);
+      // 轮询等 pullSpecBundle 被调（ql-20260816-003：代替原固定 sleep(60)——满载下
+      // claimLease+归一化链可能 >60ms，固定 sleep 会误判 0 次调用）。daemon 流程是
+      // 「调 pull → await pullPromise → create」：pull 一旦被调且其 promise 未 resolve，
+      // 单线程 JS 下 create 必然尚未执行，时序断言无竞态（与 B2/B3/B4 轮询一致）。
+      for (let i = 0; i < 400; i++) {
+        if (specSyncMocks.pullSpecBundle.mock.calls.length > 0) break;
+        await sleep(5);
+      }
 
-    // 时序断言（R-07）：pull await 未完成 → create 不应被调
-    expect(specSyncMocks.pullSpecBundle).toHaveBeenCalledTimes(1);
-    expect(specSyncMocks.pullSpecBundle).toHaveBeenCalledWith(expect.anything(), 'ws-b1', expect.anything());
-    expect(sessionManager.create).not.toHaveBeenCalled();
+      // 时序断言（R-07）：pull await 未完成 → create 不应被调
+      expect(specSyncMocks.pullSpecBundle).toHaveBeenCalledTimes(1);
+      expect(specSyncMocks.pullSpecBundle).toHaveBeenCalledWith(expect.anything(), 'ws-b1', expect.anything());
+      expect(sessionManager.create).not.toHaveBeenCalled();
 
-    // resolve pull → daemon 继续 await → 调 create
-    pullResolve('/fake/spec/dir');
-    // 轮询等 create 被调（microtask + setTimeout 混合）
-    for (let i = 0; i < 200; i++) {
-      if (vi.mocked(sessionManager.create).mock.calls.length > 0) break;
-      await sleep(5);
+      // resolve pull → daemon 继续 await → 调 create
+      pullResolve('/fake/spec/dir');
+      // 轮询等 create 被调（microtask + setTimeout 混合）
+      for (let i = 0; i < 200; i++) {
+        if (vi.mocked(sessionManager.create).mock.calls.length > 0) break;
+        await sleep(5);
+      }
+      expect(sessionManager.create).toHaveBeenCalledTimes(1);
+      const createArg = vi.mocked(sessionManager.create).mock.calls[0]![0] as Record<string, unknown>;
+      expect(createArg.sessionId).toBe('sess-b1');
+    } finally {
+      // 防御（ql-20260816-003）：断言失败也先 resolve pull——否则 daemon 永远卡在
+      // await pullPromise 上，后续 afterEach 的 daemon.stop() 挂死 → vitest Hook timeout。
+      pullResolve?.('/fake/spec/dir');
     }
-    expect(sessionManager.create).toHaveBeenCalledTimes(1);
-    const createArg = vi.mocked(sessionManager.create).mock.calls[0]![0] as Record<string, unknown>;
-    expect(createArg.sessionId).toBe('sess-b1');
 
     await daemon.stop();
   });

@@ -172,7 +172,7 @@ describe('handleInitLease / daemon 状态文件 (task-07 / D-001@v1)', () => {
     const result = await handleInitLease(client as never, {
       workspaceId: 'ws-init-defaults',
       rootPath: '/tmp/x',
-      serverOrigin: 'http://test:8000',
+      serverOrigin: 'http://127.0.0.1:8000',
       spawnFn: makeInitSpawn(),
     });
 
@@ -188,7 +188,7 @@ describe('handleInitLease / daemon 状态文件 (task-07 / D-001@v1)', () => {
     const result = await handleInitLease(client as never, {
       workspaceId: 'ws-init-404',
       rootPath: '/tmp/x',
-      serverOrigin: 'http://test:8000',
+      serverOrigin: 'http://127.0.0.1:8000',
       latestSpecVersion: 0,
       spawnFn: makeInitSpawn(),
     });
@@ -205,7 +205,7 @@ describe('handleInitLease / daemon 状态文件 (task-07 / D-001@v1)', () => {
     const result = await handleInitLease(client as never, {
       workspaceId: 'ws-init-5xx',
       rootPath: '/tmp/x',
-      serverOrigin: 'http://test:8000',
+      serverOrigin: 'http://127.0.0.1:8000',
       latestSpecVersion: 2,
       spawnFn: makeInitSpawn(),
     });
@@ -226,7 +226,7 @@ describe('handleInitLease / daemon 状态文件 (task-07 / D-001@v1)', () => {
     const result = await handleInitLease(client as never, {
       workspaceId: 'ws-init-postfail',
       rootPath: '/tmp/x',
-      serverOrigin: 'http://test:8000',
+      serverOrigin: 'http://127.0.0.1:8000',
       latestSpecVersion: 1,
       spawnFn: makeInitSpawn(),
     });
@@ -402,7 +402,7 @@ describe('handleInitLease 第3步 runSillyspecInit (task-08 / D-002@v2 / D-003@v
     const result = await handleInitLease(client as never, {
       workspaceId: 'ws-init-initfail',
       rootPath: '/tmp/init-fail-root',
-      serverOrigin: 'http://test:8000',
+      serverOrigin: 'http://127.0.0.1:8000',
       latestSpecVersion: 4,
       // local_yaml 故意传值：验证 init 失败时 writeLocalYaml 不执行（步骤 5 被跳过）
       local_yaml: { platform_token: 'shpsync_x', mcp_token: 'shmcp_y' },
@@ -428,7 +428,7 @@ describe('handleInitLease 第3步 runSillyspecInit (task-08 / D-002@v2 / D-003@v
     const result = await handleInitLease(client as never, {
       workspaceId: 'ws-init-gate',
       rootPath: '/tmp/gate-root',
-      serverOrigin: 'http://test:8000',
+      serverOrigin: 'http://127.0.0.1:8000',
       spawnFn,
     });
 
@@ -469,7 +469,7 @@ describe('handleInitLease 第3步 runSillyspecInit (task-08 / D-002@v2 / D-003@v
     const result = await handleInitLease(client as never, {
       workspaceId: 'ws-init-order',
       rootPath: '/tmp/order-root',
-      serverOrigin: 'http://test:8000',
+      serverOrigin: 'http://127.0.0.1:8000',
       local_yaml: { platform_token: 'shpsync_x', mcp_token: 'shmcp_y' },
       spawnFn: trackedSpawn,
     });
@@ -491,7 +491,7 @@ describe('handleInitLease 第3步 runSillyspecInit (task-08 / D-002@v2 / D-003@v
     const ok1 = await handleInitLease(makeClient() as never, {
       workspaceId: 'ws-init-tools-pass',
       rootPath: '/tmp/tools-root',
-      serverOrigin: 'http://test:8000',
+      serverOrigin: 'http://127.0.0.1:8000',
       tools: ['claude', 'codex'],
       spawnFn: spawnPass,
     });
@@ -504,7 +504,7 @@ describe('handleInitLease 第3步 runSillyspecInit (task-08 / D-002@v2 / D-003@v
     const ok2 = await handleInitLease(makeClient() as never, {
       workspaceId: 'ws-init-tools-fallback',
       rootPath: '/tmp/tools-root2',
-      serverOrigin: 'http://test:8000',
+      serverOrigin: 'http://127.0.0.1:8000',
       spawnFn: spawnFallback,
     });
     expect(ok2.ok).toBe(true);

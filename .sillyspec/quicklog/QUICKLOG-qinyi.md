@@ -403,3 +403,17 @@
 根因：postSpecSync/postSpecSyncIncremental 共用 DEFAULT_TIMEOUT_MS=30s 而全量 apply 实测 93s 必超时假失败；spec-sync 按钮打包 daemon 本地旧缓存（8/15 快照无新 change）；进一步暴露 claim GC 60s 中途回收长 apply。
 方案：hub-client 两同步方法超时独立放宽 300s（SPEC_SYNC_TIMEOUT_MS + _request timeoutMs 参数）；backend sync_manual files[0] 透传 binding.root_path，daemon claim 映射保留 root_path，task-runner spec-sync 分支命中则打包主仓 .sillyspec（缺失降级缓存）；_BatchProgressWriter.flush 与 progress 端点刷新 claimed_at 续期 + GC spec-sync 600s 长窗。
 结果：daemon rebuild 重启，两次真实 spec-sync 全链路验证——全量 200 OK 93s 落盘 217 change、增量 done，镜像与主仓逐文件一致，list_files 15 文件；backend 19+29 测试过、daemon 90 测试过（B1 预存债与本次无关）。
+
+## ql-20260816-003-7e05 | 2026-08-16 15:40:18 | 修 daemon 全量测试预存失败 B1 + daemon/服务端中断场景健壮性
+状态：已完成
+关联变更：2026-08-16-change-owner-from-token
+文件：
+- sillyhub-daemon/src/spec-sync.ts（postSpecSync 包装器实装 pending_push 标记：失败写/成功清/conflict 不动，impl 改名 postSpecSyncImpl 模块私有）
+- sillyhub-daemon/tests/spec-transport-tar-sync/daemon-interactive-spec-sync.test.ts（B1 固定 sleep→轮询等 pullSpecBundle + try/finally 兜底 resolve，防 stop 挂死）
+- sillyhub-daemon/tests/daemon-borrow-sandbox.test.ts（3 处固定 sleep(80)→waitFor 轮询，同款 flaky）
+- sillyhub-daemon/tests/spec-sync.test.ts（pending_push 标记 2 守护测试）
+- 其余 17 个测试文件（server_url http://test:8000→http://127.0.0.1:8000，DNS 2.3s/次致全量 hook 超时根治）
+需求：修 daemon 全量测试预存失败 B1 + daemon/服务端中断场景健壮性。
+根因：B1 固定 sleep(60) 满载误判 + pullPromise 永不 resolve 致 stop 挂死；pending_push 标记只读不写=死代码；19 测试文件 test:8000 DNS 2.3s×2 fetch 致全量 hook 超时。
+方案：B1 改轮询+finally 兜底；postSpecSync 包装器实装 pending_push 失败写/成功清/conflict 不动；server_url 统一改 127.0.0.1；borrow-sandbox 3 处固定 sleep 改 waitFor。
+结果：daemon 全量 141 文件 2377 passed 0 failed，时长 226s→73s，tsc 0 错，dist rebuild，pending_push 保证中断场景本地改动不被 pull 覆盖。
