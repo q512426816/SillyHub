@@ -429,3 +429,12 @@
 根因：GC 超时回收置 failed 使 daemon 被杀/服务端终止后的任务永久丢失需手动重触。
 方案：回收改回灌 pending 自动重试（清 claim 态，下轮轮询重 claim 重做，幂等安全，永久错误仍 failed 不重试）。
 结果：change_write_router 20 passed、daemon 模块 800 passed、真实 DB 验证回灌 pending 且进入 pending 查询，backend 已 rebuild 部署。
+
+## ql-20260816-005-5b06 | 2026-08-16 17:14:25 | 变更文件树空态区分真没文件与镜像未同步
+状态：已完成
+关联变更：2026-08-16-change-owner-from-token
+文件：frontend/src/components/__tests__/change-file-tree.test.tsx, frontend/src/components/change-file-tree.tsx
+需求：变更文件树空态区分真没文件与镜像未同步。
+根因：新建 change 进度走 CLI 直推立即可见而文件镜像走 daemon 同步滞后，空树只显示暂无文件让用户误以为丢失。
+方案：空态补一行同步指引文案到工作区配置卡。
+结果：change-file-tree 7 passed（含新空态指引断言）+ card 2 passed + tsc 0。

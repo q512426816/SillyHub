@@ -337,7 +337,15 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
           {loading ? (
             <p className="px-2 py-4 text-center text-xs text-muted-foreground">加载中…</p>
           ) : tree.length === 0 ? (
-            <p className="px-2 py-4 text-center text-xs text-muted-foreground">暂无文件</p>
+            <div className="px-2 py-4 text-center text-xs text-muted-foreground">
+              <p>暂无文件</p>
+              {/* ql-20260816-005：新建 change 进度走 CLI 直推（立即可见）而文件镜像走
+                  daemon 同步（滞后），空树期间用户误以为文件丢失——补行动指引。 */}
+              <p className="mt-1 text-[11px] leading-relaxed opacity-80">
+                若刚创建变更，文件可能尚未同步到平台镜像：可到工作区页的配置卡点
+                「同步到服务器」，完成后刷新查看
+              </p>
+            </div>
           ) : (
             <TreeView
               nodes={tree}

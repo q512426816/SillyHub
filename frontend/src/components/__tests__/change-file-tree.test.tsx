@@ -129,4 +129,13 @@ describe("ChangeFileTree", () => {
     fireEvent.click(screen.getByText("预览"));
     await waitFor(() => expect(screen.getByTestId("md")).toHaveTextContent("改后"));
   });
+
+  // ql-20260816-005：空树不是终点——新建 change 文件镜像滞后期间给同步指引
+  it("文件清单为空时显示暂无文件 + 镜像未同步指引", async () => {
+    mockedListChangeFiles.mockResolvedValue({ change_id: "c1", items: [] });
+    render(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    await waitFor(() => expect(screen.getByText("暂无文件")).toBeInTheDocument());
+    expect(screen.getByText(/尚未同步到平台镜像/)).toBeInTheDocument();
+    expect(screen.getByText(/同步到服务器/)).toBeInTheDocument();
+  });
 });
