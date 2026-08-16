@@ -417,7 +417,7 @@ class TestReportChangeWriteProgress:
 class TestGcExpiredChangeWrites:
     @pytest.mark.asyncio
     async def test_gc_times_out_claimed_over_60s(self, db_session: AsyncSession) -> None:
-        """claimed_at 早于 now-60s 的行被置 failed（NFR-03）。"""
+        """claimed_at 早于 now-60s 的行被回灌 pending（ql-20260816-004 自动重试），非 failed。"""
         user_id = await _create_user(db_session)
         rt = await _create_runtime(db_session, user_id)
         ws = await _create_workspace(db_session, user_id)
@@ -446,9 +446,36 @@ class TestGcExpiredChangeWrites:
 
         await db_session.refresh(cw_stale)
         await db_session.refresh(cw_fresh)
-        assert cw_stale.status == "failed"
-        assert cw_stale.error == "claim timeout"
+        # 回灌 pending 供下轮重 claim；清空 claim 态（token/claimed_at/error）。
+        assert cw_stale.status == "pending"
+        assert cw_stale.claim_token is None
+        assert cw_stale.claimed_at is None
+        assert cw_stale.error is None
         assert cw_fresh.status == "claimed"  # 未超时，保持
+
+    @pytest.mark.asyncio
+    async def test_gc_reclaimed_row_is_reclaimable(self, db_session: AsyncSession) -> None:
+        """回灌 pending 的行可再次 claim（daemon 重启后自动重做，ql-20260816-004）。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ws = await _create_workspace(db_session, user_id)
+        stale = datetime.now(UTC) - timedelta(seconds=90)
+        cw = await _create_change_write(
+            db_session,
+            runtime_id=rt.id,
+            workspace_id=ws.id,
+            status="claimed",
+            claim_token="old-token",
+            claimed_at=stale,
+        )
+        await _gc_expired_change_writes(db_session)
+
+        resp = await claim_change_write(cw.id, db_session, _mock_user())
+        assert resp.task_id == cw.id
+        assert resp.claim_token != "old-token"  # 新 claim 生成新 token
+        await db_session.refresh(cw)
+        assert cw.status == "claimed"
+        assert cw.claim_token == resp.claim_token
 
     @pytest.mark.asyncio
     async def test_gc_no_claimed_rows_is_noop(self, db_session: AsyncSession) -> None:
@@ -499,11 +526,12 @@ class TestGcExpiredChangeWrites:
         await db_session.refresh(cw_spec)
         await db_session.refresh(cw_create)
         assert cw_spec.status == "claimed"  # spec-sync 长窗内保留
-        assert cw_create.status == "failed"
+        assert cw_create.status == "pending"  # 回灌 pending 供重试（ql-20260816-004）
 
     @pytest.mark.asyncio
     async def test_pending_endpoint_triggers_gc(self, db_session: AsyncSession) -> None:
-        """pending 端点顺带 gc：超时 claimed 行被清，且不影响返回的 pending 集。"""
+        """pending 端点顺带 gc：超时 claimed 行回灌 pending（ql-20260816-004），
+        且回灌行被同一请求返回供 daemon 立即重 claim。"""
         user_id = await _create_user(db_session)
         rt = await _create_runtime(db_session, user_id)
         ws = await _create_workspace(db_session, user_id)
@@ -515,6 +543,8 @@ class TestGcExpiredChangeWrites:
             status="claimed",
             claim_token="t1",
             claimed_at=stale,
+            # 显式早于 cw_pending，保证回灌后 pending 查询的顺序确定
+            created_at=datetime.now(UTC) - timedelta(seconds=5),
         )
         cw_pending = await _create_change_write(
             db_session,
@@ -525,9 +555,10 @@ class TestGcExpiredChangeWrites:
         )
 
         items = await get_pending_change_writes(rt.id, db_session, _mock_user())
-        assert [i.change_key for i in items] == ["pending-one"]
+        # 回灌行（默认 key 2026-06-26-x，created_at 更早）排在 pending-one 前
+        assert [i.change_key for i in items] == ["2026-06-26-x", "pending-one"]
 
         await db_session.refresh(cw_stale)
-        assert cw_stale.status == "failed"
+        assert cw_stale.status == "pending"
         await db_session.refresh(cw_pending)
         assert cw_pending.status == "pending"

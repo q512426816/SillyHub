@@ -92,10 +92,18 @@ def _is_sqlite(session: AsyncSession) -> bool:
 
 
 async def _gc_expired_change_writes(session: AsyncSession) -> int:
-    """NFR-03：把 claimed 超时（claimed_at < now-60s）的行置 failed。
+    """NFR-03：把 claimed 超时（claimed_at < now-60s）的行回灌 pending（自动重试）。
 
-    复用 lease ``gc_expired_leases`` 的批处理语义（单事务扫一遍 + 状态翻转），
-    由 pending 端点顺带触发，避免新增后台 sweep 调度（task-09 约束：不扩调度）。
+    ql-20260816-004：**超时回收语义从「置 failed」改为「回灌 pending」**——daemon
+    中断（进程被杀/网络波动）或服务端终止（重启/不可用）时，claim 后未 complete 的
+    行被回收后由下轮轮询自动重 claim 重做（create/edit 覆盖写、spec-sync content-hash
+    合并均幂等）。未完成的 claim 意味着执行方已不可达，回灌 pending 不会造成双写：
+    存活的 daemon 靠进度上报刷新 claimed_at（ql-20260816-002）不会被误回收。
+
+    任务自然终止：daemon 成功 complete（ok=true/false）→ done/failed 不再回灌；仅
+    真正「claim 后无回执」（执行方死/失联）才回灌，无死循环。复用 lease
+    ``gc_expired_leases`` 的批处理语义（单事务扫一遍 + 状态翻转），由 pending 端点
+    顺带触发，避免新增后台 sweep 调度（task-09 约束：不扩调度）。
 
     Returns: 被回收的行数（仅日志用，断言不绑死）。
     """
@@ -123,14 +131,16 @@ async def _gc_expired_change_writes(session: AsyncSession) -> int:
     rows = (await session.execute(stmt)).scalars().all()
     if not rows:
         return 0
-    now = datetime.now(UTC)
     for cw in rows:
-        cw.status = "failed"
-        cw.error = "claim timeout"
-        cw.completed_at = now
+        # 回灌 pending 自动重试（ql-20260816-004）：清空 claim 态，下轮轮询重 claim。
+        cw.status = "pending"
+        cw.claim_token = None
+        cw.claimed_at = None
+        cw.completed_at = None
+        cw.error = None
         session.add(cw)
     await session.commit()
-    log.info("change_write_gc_expired", count=len(rows))
+    log.info("change_write_gc_reclaimed_for_retry", count=len(rows))
     return len(rows)
 
 

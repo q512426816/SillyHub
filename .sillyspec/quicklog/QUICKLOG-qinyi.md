@@ -417,3 +417,15 @@
 根因：B1 固定 sleep(60) 满载误判 + pullPromise 永不 resolve 致 stop 挂死；pending_push 标记只读不写=死代码；19 测试文件 test:8000 DNS 2.3s×2 fetch 致全量 hook 超时。
 方案：B1 改轮询+finally 兜底；postSpecSync 包装器实装 pending_push 失败写/成功清/conflict 不动；server_url 统一改 127.0.0.1；borrow-sandbox 3 处固定 sleep 改 waitFor。
 结果：daemon 全量 141 文件 2377 passed 0 failed，时长 226s→73s，tsc 0 错，dist rebuild，pending_push 保证中断场景本地改动不被 pull 覆盖。
+
+## ql-20260816-004-5427 | 2026-08-16 16:33:45 | daemon/服务端中断极端场景下 change-write 可恢复性
+状态：已完成
+关联变更：2026-08-16-change-owner-from-token
+文件：
+- backend/app/modules/daemon/change_write_router.py（_gc_expired_change_writes 超时回收改回灌 pending，清 claim 态，日志事件改 reclaimed_for_retry）
+- backend/app/modules/daemon/tests/test_change_write_router.py（GC 回灌断言 + 新增回灌可重 claim + pending 端点返回回灌行）
+- .sillyspec/docs/backend/modules/daemon.md（变更记录 ql-20260816-004）
+需求：daemon/服务端中断极端场景下 change-write 可恢复性。
+根因：GC 超时回收置 failed 使 daemon 被杀/服务端终止后的任务永久丢失需手动重触。
+方案：回收改回灌 pending 自动重试（清 claim 态，下轮轮询重 claim 重做，幂等安全，永久错误仍 failed 不重试）。
+结果：change_write_router 20 passed、daemon 模块 800 passed、真实 DB 验证回灌 pending 且进入 pending 查询，backend 已 rebuild 部署。
