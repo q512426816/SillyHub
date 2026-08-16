@@ -40,7 +40,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as readline from 'node:readline';
-import { mkdir, writeFile, readdir, rm } from 'node:fs/promises';
+import { mkdir, writeFile, readdir, rm, stat } from 'node:fs/promises';
 import { join, relative, isAbsolute, dirname } from 'node:path';
 
 import {
@@ -2331,7 +2331,26 @@ export class TaskRunner {
     // packSpecDir）→ HTTP POST .../sync → backend apply_sync 落盘 + reparse。
     // 失败抛错（调用方 _executeChangeWrite 回执 ok=false），成功后 complete 回执 ok=true。
     if (kind === 'spec-sync') {
-      const specDir = resolveSpecDir(workspaceId);
+      // ql-20260816-002：backend files[0] 透传 root_path（宿主仓库根）时，打包
+      // <root_path>/.sillyspec 而非 daemon 本地缓存——platform-managed 策略下缓存
+      // 是旧 pull 快照，永远推不出新 change（与 get_spec_bundle RPC 同源口径）。
+      // 未透传（旧 backend）保持旧行为打包缓存目录，向后兼容。
+      const metaFile = files[0] as { workspace_id?: string; root_path?: string } | undefined;
+      const repoRoot = metaFile?.root_path;
+      let specDir = resolveSpecDir(workspaceId);
+      if (repoRoot) {
+        const repoSpec = join(repoRoot, '.sillyspec');
+        try {
+          const st = await stat(repoSpec);
+          if (st.isDirectory()) {
+            specDir = repoSpec;
+          } else {
+            console.warn('task_runner: spec_sync_repo_spec_not_dir_fallback_cache', repoSpec);
+          }
+        } catch {
+          console.warn('task_runner: spec_sync_repo_spec_missing_fallback_cache', repoSpec);
+        }
+      }
       let pushOk = false;
       let filesTotal: number | undefined;
       try {
@@ -2447,6 +2466,11 @@ export class TaskRunner {
 export interface ChangeWriteFile {
   path: string;
   content: string;
+  /**
+   * ql-20260816-002：kind=spec-sync 时 backend 透传的宿主仓库根（元信息，非待写文件）。
+   * task-runner 据 presence 分流打包 <root_path>/.sillyspec；create/edit 恒无此字段。
+   */
+  root_path?: string;
 }
 
 /**

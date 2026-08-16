@@ -178,4 +178,55 @@ describe('task-13 runChangeWrite kind=spec-sync', () => {
     const f = await readFile(join(tmpRoot, 'changes', '2026-07-02-demo', 'proposal.md'), 'utf-8');
     expect(f).toBe('# hi\n');
   });
+
+  // ql-20260816-002：backend files[0] 透传 root_path → spec-sync 改打包主仓 .sillyspec
+  //（platform-managed 缓存是旧 pull 快照，推不出新 change）。目录存在性分流 + 降级守卫。
+  it('spec-sync: files[0].root_path present → packs <root>/.sillyspec instead of daemon cache', async () => {
+    const client = makeMockClient();
+    const runner = makeRunner(client);
+    // 造一个真实存在的主仓 .sillyspec 目录（join(repoRoot, '.sillyspec') 是目录才分流）
+    const repoRoot = await mkdtemp(join(tmpdir(), 'repo-'));
+    const repoSpec = join(repoRoot, '.sillyspec');
+    await import('node:fs/promises').then((m) => m.mkdir(repoSpec, { recursive: true }));
+    const ctx = makeCtx({
+      kind: 'spec-sync',
+      files: [{ path: '', content: '', root_path: repoRoot }],
+    });
+
+    try {
+      await runner.runChangeWrite(ctx);
+      const callArgs = hoisted.postSpecSyncSpy.mock.calls[0];
+      expect(callArgs?.[2]).toBe(repoSpec); // 打包主仓而非缓存 tmpRoot
+      expect(client.completeChangeWrite).toHaveBeenCalledWith('cw-spec-1', 'tok-abc', {
+        ok: true,
+        files: [],
+      });
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true }).catch(() => undefined);
+    }
+  });
+
+  it('spec-sync: root_path set but .sillyspec missing → falls back to daemon cache dir', async () => {
+    const client = makeMockClient();
+    const runner = makeRunner(client);
+    const ghostRoot = join(tmpRoot, 'no-such-repo'); // 不创建，stat 必失败
+    const ctx = makeCtx({
+      kind: 'spec-sync',
+      files: [{ path: '', content: '', root_path: ghostRoot }],
+    });
+
+    await runner.runChangeWrite(ctx);
+    const callArgs = hoisted.postSpecSyncSpy.mock.calls[0];
+    expect(callArgs?.[2]).toBe(tmpRoot); // 降级回缓存目录（resolveSpecDir mock 返回）
+  });
+
+  it('spec-sync: no root_path (legacy backend) → keeps packing daemon cache dir', async () => {
+    const client = makeMockClient();
+    const runner = makeRunner(client);
+    const ctx = makeCtx({ kind: 'spec-sync' }); // files[0] 无 root_path
+
+    await runner.runChangeWrite(ctx);
+    const callArgs = hoisted.postSpecSyncSpy.mock.calls[0];
+    expect(callArgs?.[2]).toBe(tmpRoot);
+  });
 });

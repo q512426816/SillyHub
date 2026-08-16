@@ -53,3 +53,4 @@ bootstrap(workspace_id, user_id):
 <!-- MANUAL_NOTES_START -->
 - **2026-08-14-change-center-conversation-driven**（D-005 / task-02）：`apply_ops` 加 `change_dirs: list[str] | None` 参数（daemon 增量同步标注本次涉及变更目录名）；落盘 commit 后事务外 `_trigger_change_reparse`（独立 session，对齐 `_bump_files_processed` 范式）→ `_compute_reparse_scope`（标注 / ops 路径兜底 / archive_hit 三态）→ `ChangeService.reparse(scope)`。`SpecIncrementalSyncRequest`（schema.py）加 `change_dirs: list[str] = []`（旧 daemon 缺省兼容）。
 <!-- MANUAL_NOTES_END -->
+- **ql-20260816-002**：`_BatchProgressWriter.flush`（`_write_spec_root` / `apply_ops` 共用）写 files_processed 时同步 `claimed_at=func.now()`——进度批量回写给 claim 续期，全量 spec-sync apply 90s+ 不再被 backend GC 60s 中途回收。正向变化：活跃同步的 claimed 行因进度写入保持新鲜，GC 只清真正卡死的行。

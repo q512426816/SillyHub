@@ -53,3 +53,4 @@ runLease(ctx):
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 <!-- MANUAL_NOTES_END -->
+- ql-20260816-002：`runChangeWrite` 的 `kind=spec-sync` 分支读 `files[0].root_path`（backend 透传宿主仓库根）——命中且 `<root>/.sillyspec` 存在则打包主仓整树（与 get_spec_bundle RPC 同源，platform-managed 下 daemon 缓存是旧 pull 快照推不出新 change）；目录缺失/未透传（旧 backend）降级回 `resolveSpecDir` 缓存目录，向后兼容。`ChangeWriteFile` 加可选 `root_path` 字段（daemon.ts claim 映射保留元信息）。守护测试 3 个（分流/降级/兼容）。

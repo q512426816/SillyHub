@@ -214,6 +214,16 @@ export function extractCause(err: unknown): CauseInfo {
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
+ * spec 同步上传专用超时 300 秒（ql-20260816-002）。
+ *
+ * 全量 tar（315+ 文件 / 29MB）backend apply_sync 写盘+reparse 实测 69s，
+ * 30s 必假失败（daemon AbortSignal 中止→任务标 failed，服务端实际 200 成功）；
+ * 增量 payload 含 base64 文件内容同样偏大。DEFAULT_TIMEOUT_MS 保持 30s
+ * 不动（对齐 Python 语义），仅同步上传两方法单独放宽。
+ */
+const SPEC_SYNC_TIMEOUT_MS = 300_000;
+
+/**
  * JSON.parse 的 BOM-safe 包装。
  *
  * Node 原生 fetch 的 resp.json() 底层调 JSON.parse，但 JSON.parse 不跳过
@@ -330,13 +340,14 @@ export class HubClient {
     path: string,
     body?: unknown,
     extraHeaders?: Record<string, string>,
+    timeoutMs: number = DEFAULT_TIMEOUT_MS,
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const resp = await fetch(url, {
       method,
       headers: { ...this._headers(), ...extraHeaders },
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
       // Node 原生 fetch 默认不读 HTTP_PROXY/HTTPS_PROXY（等价 trust_env=False），
       // 显式不设置 dispatcher 即可。
     });
@@ -938,7 +949,8 @@ export class HubClient {
       method: 'POST',
       headers,
       body: tarBuf,
-      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+      // tar 上传单独放宽（ql-20260816-002）：backend 全量 apply 实测 69s > 30s 默认超时
+      signal: AbortSignal.timeout(SPEC_SYNC_TIMEOUT_MS),
     });
     if (!resp.ok) {
       const bodyText = await resp.text();
@@ -979,11 +991,13 @@ export class HubClient {
     // ⚠️ URL 必须用 /api 前缀（与旧 postSpecSync 一致），不能用 REST_PREFIX（= /api/daemon）——
     // backend spec_workspace router 挂在 prefix="/api"（main.py include_router），
     // 用 REST_PREFIX 拼出的 /api/daemon/workspaces/... 恒 404 → 增量永远回退旧 tar（QA afb1f508 揪出）。
+    // 超时单独放宽（ql-20260816-002）：ops 含 base64 文件内容，payload 大时 30s 不够。
     return this._request<SpecIncrementalSyncResult>(
       'POST',
       `/api/workspaces/${encodeURIComponent(wsId)}/spec-workspace/sync-incremental`,
       { ops, change_dirs: changeDirs },
       changeWriteId ? { 'X-Change-Write-Id': changeWriteId } : undefined,
+      SPEC_SYNC_TIMEOUT_MS,
     );
   }
 

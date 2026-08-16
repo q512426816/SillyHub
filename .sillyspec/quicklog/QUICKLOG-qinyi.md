@@ -372,3 +372,34 @@
 根因：AST 扫描跳过 JoinedStr 致英文夹 f-string 常量段不设防。
 方案：常量段拼接提取+CJK 断言+3 判定单测；新暴露 4 处=3 中文化+1 登记 ALLOWED_ENGLISH。
 结果：守护 83 passed，daemon+tool_gateway 925 passed，ruff+mypy 过。
+
+## ql-20260816-001-e6ca | 2026-08-16 06:43:07 | 修 step-visibility verify 两条 P2 遗留（详情页 404 空轮 + ChangeAgentRunLog steps 死代码）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx（refetchInterval 加 404 停轮分支 + 删 currentStage 透传）
+- frontend/src/components/changes/detail/change-agent-run-log.tsx（删死 prop 链与步骤条死分支（约 -180 行））
+- frontend/src/components/changes/detail/__tests__/change-agent-run-log.test.tsx（makeProps 删 steps/currentStage）
+- frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx（新增 404 停轮用例）
+需求：修 step-visibility verify 两条 P2 遗留（详情页 404 空轮 + ChangeAgentRunLog steps 死代码）。
+根因：isTerminalChange(null)=false 致 404 无限轮询；steps prop 恒 undefined 致整块渲染分支死代码。
+方案：refetchInterval 加 error&&!data 停轮分支+新测试锚定（12s 窗口 queryFn 单次）；删 steps/currentStage/lastDispatchSummary 死 prop 链约 -180 行收敛简化视图。
+结果：vitest 全量 1583 passed + tsc 0 + lint 本变更文件 0 警告。
+
+## ql-20260816-002-402b | 2026-08-16 14:41:19 | daemon spec 同步链路修复——tar 上传 30s 假失败 + platform-managed 下手动同步推不出新 change
+状态：已完成
+关联变更：2026-08-16-change-owner-from-token
+文件：
+- sillyhub-daemon/src/hub-client.ts（SPEC_SYNC_TIMEOUT_MS=300s 独立超时，tar/增量共用）
+- sillyhub-daemon/src/task-runner.ts（spec-sync 分支读 files[0].root_path 打包主仓 .sillyspec + 目录缺失降级 daemon 缓存）
+- sillyhub-daemon/src/daemon.ts（claim 回执 files 映射保留 root_path 元信息）
+- backend/app/modules/spec_workspace/router.py（sync_manual files[0] 透传 binding.root_path）
+- backend/app/modules/spec_workspace/service.py（_BatchProgressWriter.flush 刷新 claimed_at 续期）
+- backend/app/modules/daemon/change_write_router.py（progress 端点续期 + GC spec-sync 600s 长窗）
+- backend/app/modules/daemon/tests/test_change_write_router.py（GC 长窗守护测试 test_gc_spec_sync_uses_longer_window）
+- sillyhub-daemon/tests/task-13-spec-sync.test.ts（root_path 分流/降级/兼容三守护）
+- 模块文档 4 份（daemon.md / spec_workspace.md / client.md / task-runner.md 变更记录）
+需求：daemon spec 同步链路修复——tar 上传 30s 假失败 + platform-managed 下手动同步推不出新 change。
+根因：postSpecSync/postSpecSyncIncremental 共用 DEFAULT_TIMEOUT_MS=30s 而全量 apply 实测 93s 必超时假失败；spec-sync 按钮打包 daemon 本地旧缓存（8/15 快照无新 change）；进一步暴露 claim GC 60s 中途回收长 apply。
+方案：hub-client 两同步方法超时独立放宽 300s（SPEC_SYNC_TIMEOUT_MS + _request timeoutMs 参数）；backend sync_manual files[0] 透传 binding.root_path，daemon claim 映射保留 root_path，task-runner spec-sync 分支命中则打包主仓 .sillyspec（缺失降级缓存）；_BatchProgressWriter.flush 与 progress 端点刷新 claimed_at 续期 + GC spec-sync 600s 长窗。
+结果：daemon rebuild 重启，两次真实 spec-sync 全链路验证——全量 200 OK 93s 落盘 217 change、增量 done，镜像与主仓逐文件一致，list_files 15 文件；backend 19+29 测试过、daemon 90 测试过（B1 预存债与本次无关）。

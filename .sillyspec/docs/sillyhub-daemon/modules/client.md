@@ -47,3 +47,4 @@ return resp.json()
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 <!-- MANUAL_NOTES_END -->
+- ql-20260816-002：`postSpecSync`（tar 上传）与 `postSpecSyncIncremental`（增量 ops 含 base64 内容）超时独立放宽到 300s——新增 `SPEC_SYNC_TIMEOUT_MS=300_000` 常量；`_request` 加可选 `timeoutMs` 参数（默认仍 `DEFAULT_TIMEOUT_MS=30s`，对齐 Python）。根因：全量 tar apply 实测 69~93s > 30s，30s 必 AbortSignal 假失败（服务端实际 200 成功）。

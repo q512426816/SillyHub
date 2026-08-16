@@ -24,6 +24,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import and_, or_
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -47,6 +48,10 @@ router = APIRouter(tags=["daemon"])
 
 # NFR-03：claimed 行超时阈值（秒），超时由 gc 置 failed。
 CHANGE_WRITE_CLAIM_TIMEOUT_SECONDS = 60
+# ql-20260816-002：kind=spec-sync（「同步到服务器」整树回灌）执行可达 90s+，
+# 放宽到 600s 作防御兜底——进度上报本身已刷新 claimed_at（活跃同步不超时），
+# 此阈值只兜底「上报中断但任务仍活着」的极端窗口。
+SPEC_SYNC_CLAIM_TIMEOUT_SECONDS = 600
 
 
 # ── Domain errors (task-09；对齐 lease 风格，独立本包定义) ──────────────────
@@ -95,11 +100,25 @@ async def _gc_expired_change_writes(session: AsyncSession) -> int:
     Returns: 被回收的行数（仅日志用，断言不绑死）。
     """
     cutoff = datetime.now(UTC) - timedelta(seconds=CHANGE_WRITE_CLAIM_TIMEOUT_SECONDS)
+    spec_sync_cutoff = datetime.now(UTC) - timedelta(seconds=SPEC_SYNC_CLAIM_TIMEOUT_SECONDS)
     stmt = (
         select(DaemonChangeWrite)
         .where(DaemonChangeWrite.status == "claimed")
         .where(DaemonChangeWrite.claimed_at.is_not(None))
-        .where(DaemonChangeWrite.claimed_at < cutoff)
+        .where(
+            or_(
+                # spec-sync（整树回灌）独立长窗（ql-20260816-002）
+                and_(
+                    DaemonChangeWrite.kind == "spec-sync",
+                    DaemonChangeWrite.claimed_at < spec_sync_cutoff,
+                ),
+                # 其余（create/edit 等）保持 60s；kind 缺省视为非 spec-sync
+                and_(
+                    or_(DaemonChangeWrite.kind.is_(None), DaemonChangeWrite.kind != "spec-sync"),
+                    DaemonChangeWrite.claimed_at < cutoff,
+                ),
+            )
+        )
     )
     rows = (await session.execute(stmt)).scalars().all()
     if not rows:
@@ -358,6 +377,10 @@ async def report_change_write_progress(
         cw.files_total = data.files_total
     if data.files_processed is not None:
         cw.files_processed = data.files_processed
+    # ql-20260816-002：进度上报即 claim 续期（NFR-03）。spec-sync 全量 apply 90s+，
+    # 若 GC 按 60s 回收 claimed 行会误杀执行中任务；daemon 侧 progress 上报 / backend
+    # apply 循环内批量回写都刷新 claimed_at，活跃同步永不超时。
+    cw.claimed_at = datetime.now(UTC)
     session.add(cw)
     await session.commit()
 

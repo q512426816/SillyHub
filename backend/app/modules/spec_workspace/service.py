@@ -131,8 +131,12 @@ class _BatchProgressWriter:
                     # COALESCE 初始化：daemon 尚未上报过计数的行 files_processed
                     # 为 NULL，裸 NULL + batch 仍 NULL（原逐文件 +1 同样如此，进度
                     # 永不落地）。终态回写要求「数值最终准确」→ NULL 视作 0 起步。
+                    # ql-20260816-002：同步置 claimed_at=now 给 claim 续期——全量
+                    # spec-sync apply 可达 90s+，后端 GC 60s 会中途回收 claimed 行，
+                    # 进度批量回写恰好是「活跃」心跳，防误杀（NFR-03 语义对齐 lease）。
                     .values(
-                        files_processed=func.coalesce(DaemonChangeWrite.files_processed, 0) + batch
+                        files_processed=func.coalesce(DaemonChangeWrite.files_processed, 0) + batch,
+                        claimed_at=func.now(),
                     )
                 )
                 await progress_session.commit()

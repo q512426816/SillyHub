@@ -170,8 +170,11 @@ async def sync_manual_spec_workspace(
     rid_raw = resolved["id"]
     runtime_id: uuid.UUID = uuid.UUID(rid_raw) if isinstance(rid_raw, str) else rid_raw
 
-    # files 携带 workspace_id 元信息（daemon task-runner 据 kind=spec-sync 分流，
-    # 不写 changes/<key>/ 而是调 postSpecSync 整树回灌）。
+    # files 携带 workspace_id + root_path 元信息（daemon task-runner 据 kind=spec-sync 分流，
+    # 不写 changes/<key>/ 而是调 postSpecSync 整树回灌）。root_path（ql-20260816-002）：
+    # platform-managed 策略下 daemon 本地缓存是旧 pull 快照，打包缓存推不出新 change；
+    # 透传宿主仓库根让 daemon 改打包 <root_path>/.sillyspec（与 get_spec_bundle RPC 同源）。
+    # 绑定根在成员宿主机上（daemon 可达），与 root_path 语义一致。
     from app.modules.daemon.model import DaemonChangeWrite
 
     cw = DaemonChangeWrite(
@@ -180,7 +183,12 @@ async def sync_manual_spec_workspace(
         runtime_id=runtime_id,
         change_key="spec-sync",
         kind="spec-sync",
-        files=[{"workspace_id": str(workspace_id)}],
+        files=[
+            {
+                "workspace_id": str(workspace_id),
+                "root_path": binding.root_path,
+            }
+        ],
         status="pending",
     )
     session.add(cw)

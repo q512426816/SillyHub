@@ -65,6 +65,7 @@ async def _create_change_write(
     claim_token: str | None = None,
     claimed_at: datetime | None = None,
     created_at: datetime | None = None,
+    kind: str = "create",
 ) -> DaemonChangeWrite:
     cw = DaemonChangeWrite(
         id=uuid.uuid4(),
@@ -76,6 +77,7 @@ async def _create_change_write(
         claim_token=claim_token,
         claimed_at=claimed_at,
         created_at=created_at or datetime.now(UTC),
+        kind=kind,
     )
     session.add(cw)
     await session.commit()
@@ -458,6 +460,46 @@ class TestGcExpiredChangeWrites:
         )
         count = await _gc_expired_change_writes(db_session)
         assert count == 0
+
+    @pytest.mark.asyncio
+    async def test_gc_spec_sync_uses_longer_window(self, db_session: AsyncSession) -> None:
+        """ql-20260816-002：kind=spec-sync 用 600s 长窗；普通 create 仍 60s。
+
+        90s 旧的 spec-sync claimed 行不被回收（长 apply 途中），同年龄的 create
+        行被回收（回归守卫）。
+        """
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ws = await _create_workspace(db_session, user_id)
+        stale90 = datetime.now(UTC) - timedelta(seconds=90)
+        cw_spec = await _create_change_write(
+            db_session,
+            runtime_id=rt.id,
+            workspace_id=ws.id,
+            change_key="spec-sync",
+            status="claimed",
+            claim_token="t1",
+            claimed_at=stale90,
+            kind="spec-sync",
+        )
+        cw_create = await _create_change_write(
+            db_session,
+            runtime_id=rt.id,
+            workspace_id=ws.id,
+            change_key="2026-06-26-other",
+            status="claimed",
+            claim_token="t2",
+            claimed_at=stale90,
+            kind="create",
+        )
+
+        count = await _gc_expired_change_writes(db_session)
+        assert count == 1  # 只有 create 行被回收
+
+        await db_session.refresh(cw_spec)
+        await db_session.refresh(cw_create)
+        assert cw_spec.status == "claimed"  # spec-sync 长窗内保留
+        assert cw_create.status == "failed"
 
     @pytest.mark.asyncio
     async def test_pending_endpoint_triggers_gc(self, db_session: AsyncSession) -> None:

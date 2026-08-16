@@ -12,4 +12,4 @@ created_at: 2026-08-16 07:52:00
 - [x] task-04: 读侧投影——enrich 批量 join users 填 owner_name + 时间线合成事件（重编 ordering/stage 近似）+ 测试
 - [x] task-05: 前端——owner 列用户名 + 时间线事件样式 + 明细不截断（line-clamp 移除）+ 测试（含长文本用例）
 - [x] task-06: 全量回归——pytest + vitest + tsc + 双用户上行冒烟
-- [ ] ql-20260816-002-402b 提案书（Proposal）
+- [x] ql-20260816-002-402b 提案书（Proposal）

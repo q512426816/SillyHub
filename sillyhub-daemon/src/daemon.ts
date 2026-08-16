@@ -3644,10 +3644,16 @@ export class Daemon {
       }
 
       // 2. files 取 claim 回执（task-09 ChangeWriteClaimResponse 带 files，对齐 pending）。
+      // ql-20260816-002：保留元字段（kind=spec-sync 时 backend 透传 workspace_id/root_path
+      // 供 task-runner 分流打包主仓 .sillyspec），path/content 缺省空串兼容 create/edit。
       const rawFiles = (claimResp.files ?? item.files ?? []) as unknown[];
       const files: ChangeWriteFile[] = rawFiles.map((f) => {
-        const obj = f as { path?: string; content?: string };
-        return { path: String(obj.path ?? ''), content: String(obj.content ?? '') };
+        const obj = (f ?? {}) as { path?: string; content?: string; root_path?: string };
+        return {
+          path: String(obj.path ?? ''),
+          content: String(obj.content ?? ''),
+          ...(obj.root_path !== undefined ? { root_path: obj.root_path } : {}),
+        };
       });
 
       // 3. 本地写 + complete 回执 + sync（task-runner 轻量分支，不启 agent）。
