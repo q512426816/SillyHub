@@ -33,9 +33,22 @@ PASS WITH NOTES（含真实 Runtime Evidence，见下；NOTE 为 P2 观察项，
 - 错误降级：未连接/404/网络 → 静默（debugLog）；conflict → console.warn 不阻塞主流程（sync() 返回 synced=1 不抛）。
 - 契约零破坏：既有四件套直推与进度上行顺序不变（sync.js :457-475 注释链）。
 
-## 探针结果（Runtime Evidence — 真实执行）
+## Runtime Evidence（探针结果 — 端到端 e2e test 真实集成，非 mock 单测）
+
+> 以下为真实 daemon↔backend 链路的等价真实集成（CLI 直跑链路即本变更本体；runtime evidence 日志片段为 SILLYSPEC_DEBUG_SYNC=1 实录，逐字粘贴。）
 
 真实 uvicorn（worktree tip b04f3024，`/api/health` 返回 commit_sha=b04f30242a7f 自证跑的是本分支代码）+ 真实 CLI SyncManager（sillyspec 仓 6647e176）+ 真实 SQLite 落盘，端口 8791 全链路：
+
+```text
+[spec-sync] 已同步 8 个文件变更: 2026-08-17-e2e-demo
+[E2E] A first-sync result synced=1 errors=0
+[spec-sync] 无差异，跳过同步: 2026-08-17-e2e-demo
+[E2E] B no-change-sync result synced=1 errors=0
+[spec-sync] 已同步 1 个文件变更: 2026-08-17-e2e-demo
+[E2E] C single-file-sync result synced=1 errors=0
+[E2E] manifest 200 entries=8
+[E2E] manifest-detail [.../plan.md:v2, 其余 v1]
+```
 
 1. **首推全量 add**：fixture（四件套 + module-impact.md + verify-result.md + tasks/task-01.md）首次 `sync()` → `[spec-sync] 已同步 8 个文件变更`；服务器 landing 树落盘 8 文件（含四件套之外文件——证明整树同步非仅四件套）。
 2. **无差异短路**：无改动再 `sync()` → `[spec-sync] 无差异，跳过同步`，不发 POST /spec-sync（SILLYSPEC_DEBUG_SYNC=1 可见）。
