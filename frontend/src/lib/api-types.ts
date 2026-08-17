@@ -7598,6 +7598,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/changes/-/spec-manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Spec Manifest
+         * @description GET 服务器 spec 文件权威清单（CLI 直跑增量同步锚点，design §5.2/§7）。
+         *
+         *     CLI ``spec-sync.js`` 以此清单为锚 diff 本地 ``.sillyspec/``，算出增量 ops 后
+         *     POST ``/changes/-/spec-sync``（D-004@v1：CLI 无本地缓存，服务器清单即基线）。
+         *
+         *     读清单也收紧为写权限（``require_platform_sync_write``，仅 shpsync_ token，
+         *     JWT/shk_live_ 403）——清单是增量写协议的一部分，避免非同步方探测文件布局。
+         *     workspace_id 从 shpsync_ token 派生；无 workspace 归属 → 403 fail-closed
+         *     （对齐 quicklog-entries 范式）。
+         */
+        get: operations["get_spec_manifest_api_changes___spec_manifest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/changes/-/spec-sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Push Spec Sync
+         * @description POST 增量 spec 文件 ops（CLI 直跑增量同步，design §5.2/§7）。
+         *
+         *     CLI ``spec-sync.js`` 以 spec-manifest 为锚 diff 本地 ``.sillyspec/`` 后把
+         *     FileOp[] 整体一次 POST（空 ops 已在 CLI 短路不发请求，到达即有差异）。透传
+         *     ``apply_spec_ops`` → ``SpecWorkspaceService.apply_ops``（单事务：成功全部落盘 /
+         *     失败全部回滚）。conflict 不改 HTTP 状态（恒 200）：``conflict=true`` +
+         *     ``server_versions`` 由 CLI console.warn 提示人工拍板、不阻塞（design §5.4/§5.5）；
+         *     路径越界 422 由 apply_ops 的 AppError 透传（对齐 daemon 增量端点）。
+         *
+         *     鉴权同 spec-manifest（``require_platform_sync_write``，仅 shpsync_ token，
+         *     design §5.2——shpsync_ 此前只开放 progress/documents/approval 三写端点，本次
+         *     起同 token 复用）；workspace_id 从 token 派生，无归属 → 403 fail-closed。
+         */
+        post: operations["push_spec_sync_api_changes___spec_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/changes/{name}/approval": {
         parameters: {
             query?: never;
@@ -15356,19 +15415,57 @@ export interface components {
             } | null;
         };
         /**
-         * SpecSyncResponse
-         * @description Response DTO for the spec sync endpoint (FR-05 / D-003).
+         * SpecManifestFileEntry
+         * @description GET /changes/-/spec-manifest 单文件清单项（design §7）。
+         *
+         *     对齐 ``spec_file_manifest`` 行三字段：``hash``=内容 SHA-256 hex（CLI 与本地
+         *     walk 结果 diff）、``version``=文件级版本（增量 op 的乐观锁基线）、``exists``=
+         *     服务器侧软删标志（false → CLI 下发 delete 对齐）。
          */
-        SpecSyncResponse: {
-            /** Ok */
-            ok: boolean;
-            /** Reparsed */
-            reparsed: number;
+        SpecManifestFileEntry: {
             /**
-             * Reparsed Changes
-             * @default 0
+             * Hash
+             * @description 文件内容 SHA-256 hex
              */
-            reparsed_changes: number;
+            hash: string;
+            /**
+             * Version
+             * @description 文件级版本号（apply_ops 每次成功 op +1）
+             */
+            version: number;
+            /**
+             * Exists
+             * @description false=服务器侧已软删（spec-backups 区）
+             */
+            exists: boolean;
+        };
+        /**
+         * SpecManifestResponse
+         * @description GET /changes/-/spec-manifest 200 响应：服务器权威清单全量 map（design §5.2/§7）。
+         *
+         *     CLI ``spec-sync.js`` 以此为锚 diff 本地 ``.sillyspec/`` 算增量 ops
+         *     （D-004@v1 CLI 无本地缓存，清单即基线）。无清单行（旧 tar 全量同步后失效 /
+         *     全新 workspace）→ 空 ``files``，CLI 走 R-07 兜底全量重算。
+         */
+        SpecManifestResponse: {
+            /** Files */
+            files?: {
+                [key: string]: components["schemas"]["SpecManifestFileEntry"];
+            };
+        };
+        /**
+         * SpecSyncRequest
+         * @description POST /changes/-/spec-sync 请求（design §7，复用 spec_workspace FileOp）。
+         *
+         *     ``ops`` 即 CLI ``spec-sync.js`` 以 spec-manifest 为锚 diff 出的增量操作数组
+         *     （add/update/delete/rename，每文件带 ``base_version`` 乐观锁基准）。与 daemon
+         *     用的 ``SpecIncrementalSyncRequest`` 同构但**不含 ``change_dirs``**——CLI 直跑
+         *     场景由 ``apply_ops`` 扫 ops 路径 ``changes/`` 前缀兜底触发 reparse（行为等价，
+         *     design §5.2）。
+         */
+        SpecSyncRequest: {
+            /** Ops */
+            ops: components["schemas"]["FileOp"][];
         };
         /** SpecWorkspaceRead */
         SpecWorkspaceRead: {
@@ -17794,6 +17891,46 @@ export interface components {
          */
         app__modules__platform_sync__schema__DocumentsSyncRequest: {
             [key: string]: string;
+        };
+        /**
+         * SpecSyncResponse
+         * @description POST /changes/-/spec-sync 响应（design §7，对齐 SpecIncrementalSyncResponse 语义）。
+         *
+         *     conflict 恒伴随 200（不改 HTTP 状态码）：``conflict=True`` 时
+         *     ``server_versions`` 携带服务器当前版本，CLI 侧 console.warn 提示人工拍板、
+         *     不阻塞（design §5.4/§5.5）。
+         */
+        app__modules__platform_sync__schema__SpecSyncResponse: {
+            /** Ok */
+            ok: boolean;
+            /** New Versions */
+            new_versions: {
+                [key: string]: number;
+            };
+            /**
+             * Conflict
+             * @default false
+             */
+            conflict: boolean;
+            /** Server Versions */
+            server_versions?: {
+                [key: string]: number;
+            } | null;
+        };
+        /**
+         * SpecSyncResponse
+         * @description Response DTO for the spec sync endpoint (FR-05 / D-003).
+         */
+        app__modules__spec_workspace__router__SpecSyncResponse: {
+            /** Ok */
+            ok: boolean;
+            /** Reparsed */
+            reparsed: number;
+            /**
+             * Reparsed Changes
+             * @default 0
+             */
+            reparsed_changes: number;
         };
         /** ReviewResponse */
         app__modules__workflow__schema__ReviewResponse: {
@@ -32221,7 +32358,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SpecSyncResponse"];
+                    "application/json": components["schemas"]["app__modules__spec_workspace__router__SpecSyncResponse"];
                 };
             };
             /** @description Validation Error */
@@ -32458,6 +32595,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChangeListItem"][];
+                };
+            };
+        };
+    };
+    get_spec_manifest_api_changes___spec_manifest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecManifestResponse"];
+                };
+            };
+        };
+    };
+    push_spec_sync_api_changes___spec_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpecSyncRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["app__modules__platform_sync__schema__SpecSyncResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
