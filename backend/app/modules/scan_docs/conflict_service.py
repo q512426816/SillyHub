@@ -45,12 +45,18 @@ class ScanDocConflictService:
         old_mtime: datetime | None,
         new_source_member_id: uuid.UUID | None,
         new_mtime: datetime | None,
-    ) -> None:
+        add_to_session: bool = True,
+    ) -> ScanDocConflictHistory:
         """Archive one overwritten version. Does NOT commit.
 
         The archive row deliberately stores source ids as plain columns (no FK)
         so that deleting a user or runtime never cascades to loss of conflict
         history — these are audit records.
+
+        ``add_to_session=False``（ql-20260817-005）：只构造返回不入 session——供
+        调用方在长 FS 循环外批量 ``session.add``。背景：SQLAlchemy 2.0 的
+        ``add()`` 会 autobegin 立即打开事务，若在循环内 add，事务会横跨后续
+        全部 FS 段，撞 PG idle_in_transaction_session_timeout 被杀连接。
         """
         conflict = ScanDocConflictHistory(
             workspace_id=workspace_id,
@@ -62,7 +68,9 @@ class ScanDocConflictService:
             new_source_member_id=new_source_member_id,
             new_mtime=new_mtime,
         )
-        self._session.add(conflict)
+        if add_to_session:
+            self._session.add(conflict)
+        return conflict
 
     async def list_history(
         self,

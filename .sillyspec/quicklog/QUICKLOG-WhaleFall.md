@@ -434,3 +434,17 @@
 根因：答复时间数据源（run.finished_at）已在 runs 快照里，但 TurnTimeline 未渲染。
 方案：SessionTurnView 加可选 replyAt；答复气泡右下角显示完成时间（formatTurnTime：今天 HH:mm、跨天 MM-DD HH:mm；运行中/旧数据 null 不渲染零回归）；page 注入 replyAt=finished_at??started_at；补 displayTurns 的 session?.user_id 依赖。
 结果：page 9 用例过（新增答复时间断言），前端全量 157 文件/1610 全绿，tsc 0 错，eslint 0 error。待 commit+push+rebuild frontend。
+
+## ql-20260817-005-97da | 2026-08-17 11:51:09 | 修复 spec-workspace/sync 恒 500（长 FS 段在事务内被 PG idle-in-transaction 杀连接）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/spec_workspace/service.py（_write_spec_root 两处 + apply_ops 一处事务释放点：get()/prefetch 后 commit；循环改 collect-then-apply——新行/冲突行/待删行收集 pending，循环后统一 add/delete + 最终 commit）
+- backend/app/modules/scan_docs/conflict_service.py（archive_conflict 新增 add_to_session 参数：默认行为不变，False 时只构造返回，供调用方循环外批量 add）
+- backend/tests/modules/spec_workspace/test_apply_sync.py（新增 2 个结构测试：extract/move/_apply_file_mtime 采样点断言 in_transaction()==False，锚定 FS 段零事务）
+- .sillyspec/docs/SillyHub/modules/spec_workspace.md（关键逻辑新增「同步落盘的事务纪律」条目；清理 3 处过时的 sync stub 描述）
+
+需求：spec-workspace/sync 恒 500（request_id a302bc5e），daemon 重试反复失败（02:42/02:49/03:05 三次撞同一死法）。
+根因：后端给所有连接自设 PG idle_in_transaction_session_timeout=120s（db.py 防泄漏兜底），而 _write_spec_root 从 get()/prefetch SELECT 起持有事务，期间 tar 解包 + 3560 文件逐个 read/sha256/move（spec_root 是 Windows bind mount，FS 段实测 2.5min+）主连接零 SQL → PG 杀空闲事务连接 → 循环结束 commit 撞死连接报 asyncpg InterfaceError 500。且 SQLAlchemy 2.0 的 session.add 会 autobegin，循环内首个 add 即重开事务——单纯加释放点不够。apply_ops（增量 init 推全套骨架文件）同模式同暴露。
+方案：按项目既有模式（db.py:40-45 注释 + delegate.py:706 先例）长 FS 段前 commit 释放事务；循环内禁止 add/delete（会 autobegin），改 pending 列表收集、循环后统一入 session + 最终 commit（全部写仍单事务，原子性不变）；archive_conflict 加 add_to_session=False 支持。
+结果：spec_workspace+scan_docs 回归 162 passed 1 skipped（Windows symlink 平台跳过）+ change reparse 18 passed，ruff+mypy 全过；两个新结构测试修前红（采样事务态 True）、修后绿；语义锚点（冲突归档/mtime 覆盖方向/双 sync 幂等/长名/tar 越界）全保持。

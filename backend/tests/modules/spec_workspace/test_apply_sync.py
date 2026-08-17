@@ -401,6 +401,103 @@ async def test_apply_sync_overwrite_newer_mtime_archives_old_and_updates_row(tmp
 
 
 @pytest.mark.asyncio
+async def test_apply_sync_fs_sections_run_outside_transaction(tmp_path, db_session, monkeypatch):
+    """ql-20260817-005：_write_spec_root 的长 FS 段（tar 解包 staging / 逐文件
+    read+sha256+move 循环）不得在打开的 DB 事务内执行。
+
+    生产实例（2026-08-17，request_id a302bc5e）：spec_root 是 Windows bind mount，
+    3560 文件全量同步的 FS 段跑 2.5min+，期间主连接零 SQL（冲突归档只
+    session.add、进度回写走独立 session），PG idle_in_transaction_session_timeout
+    （db.py 后端自设 120s）杀空闲事务连接，最终 commit 撞死连接 → sync 恒 500。
+    锚定结构属性：FS 段采样点 ``in_transaction()`` 必须全 False；DB 写仍集中在
+    最终 commit（原子性不变），同步语义（落盘 + clean）不受影响。"""
+    import shutil as shutil_module
+
+    workspace_id, spec_root = await _make_spec_ws(tmp_path, db_session)
+
+    txn_states: list[tuple[str, bool]] = []
+
+    # 采样点①：tar 解包（to_thread 里的纯 FS 长段，get() 之后、prefetch SELECT 之前）。
+    orig_extract = SpecWorkspaceService._extract_spec_tar_to_staging
+
+    def probe_extract(tar_bytes, spec_root_arg, spec_root_resolved_arg):
+        txn_states.append(("extract", db_session.in_transaction()))
+        return orig_extract(tar_bytes, spec_root_arg, spec_root_resolved_arg)
+
+    monkeypatch.setattr(
+        SpecWorkspaceService, "_extract_spec_tar_to_staging", staticmethod(probe_extract)
+    )
+
+    # 采样点②：逐文件循环里的 shutil.move（每变更文件一次；to_thread 线程内调用）。
+    orig_move = shutil_module.move
+
+    def probe_move(src, dst):
+        txn_states.append(("move", db_session.in_transaction()))
+        return orig_move(src, dst)
+
+    monkeypatch.setattr(shutil_module, "move", probe_move)
+
+    tar_bytes = _make_tar({"docs/index.md": "# hello"})
+    svc = SpecWorkspaceService(db_session)
+    reparsed = await svc.apply_sync(workspace_id, tar_bytes)
+
+    # 语义不变：同步照常完成（落盘 + clean + reparse 计数）。
+    assert reparsed["reparsed_docs"] == 1
+    assert (spec_root / "docs" / "index.md").read_text(encoding="utf-8") == "# hello"
+    assert (await svc.get(workspace_id)).sync_status == "clean"
+
+    # 结构属性：两个采样点都触发过，且全部在事务外。
+    fired = {name for name, _ in txn_states}
+    assert fired == {"extract", "move"}
+    busy = [name for name, in_txn in txn_states if in_txn]
+    assert not busy, f"FS 段仍在事务内（会被 idle-in-transaction 超时杀连接）: {busy}"
+
+
+@pytest.mark.asyncio
+async def test_apply_ops_fs_loop_runs_outside_transaction(tmp_path, db_session, monkeypatch):
+    """ql-20260817-005（续）：apply_ops（增量 ops）同模式——预取 SELECT 后循环内
+    纯 FS 写入 + session.add/delete（commit 前不发 SQL）直到最终 commit，init 大批量
+    ops（首成员推全套骨架文件）同样会撞 idle-in-transaction 超时。锚定
+    ``_apply_file_mtime``（每 add/update 必经）采样事务态必须 False，落盘语义不变。"""
+    import base64
+
+    from app.modules.spec_workspace.schema import FileOp
+
+    workspace_id, spec_root = await _make_spec_ws(tmp_path, db_session)
+
+    txn_states: list[bool] = []
+    orig_apply_mtime = SpecWorkspaceService._apply_file_mtime
+
+    def probe_mtime(path, mtime):
+        txn_states.append(db_session.in_transaction())
+        return orig_apply_mtime(path, mtime)
+
+    monkeypatch.setattr(SpecWorkspaceService, "_apply_file_mtime", staticmethod(probe_mtime))
+
+    ops = [
+        FileOp(
+            op="add",
+            path=f"docs/f{i}.md",
+            base_version=0,
+            content=base64.b64encode(f"# f{i}".encode()).decode("ascii"),
+        )
+        for i in range(3)
+    ]
+    svc = SpecWorkspaceService(db_session)
+    result = await svc.apply_ops(workspace_id, ops)
+
+    # 语义不变：全部落盘 + 版本从 1 起。
+    assert result["conflict"] is False
+    assert result["new_versions"] == {f"docs/f{i}.md": 1 for i in range(3)}
+    for i in range(3):
+        assert (spec_root / "docs" / f"f{i}.md").read_text(encoding="utf-8") == f"# f{i}"
+
+    # 结构属性：循环内采样点全部在事务外。
+    assert txn_states, "probe must have fired"
+    assert not any(txn_states), "ops 循环仍在事务内（同 _write_spec_root 的 120s 暴露）"
+
+
+@pytest.mark.asyncio
 async def test_apply_sync_overwrite_older_mtime_keeps_existing(tmp_path, db_session):
     """task-02 行为锚点（续）：tar mtime 更旧 → 不覆盖（行内容/文件都不变）、
     不归档。防止线程化改造中 mtime 比较方向漂移。"""

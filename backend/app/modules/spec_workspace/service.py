@@ -676,6 +676,14 @@ class SpecWorkspaceService:
         spec_ws（sync_status=clean，尚未 reparse）。
         """
         spec_ws = await self.get(workspace_id)
+        # ql-20260817-005：事务释放点①——get() 的 SELECT 打开事务后，紧跟的「tar
+        # 解包到 staging」是纯 FS 长段（大 spec 树秒级），期间主连接零 SQL，PG
+        # idle_in_transaction_session_timeout（db.py 后端自设 120s）会杀空闲事务
+        # 连接，最终 commit 撞死连接 → sync 恒 500（2026-08-17 生产实例：3560 文件
+        # bind mount 同步 FS 段 2.5min）。对齐 delegate.py release_transaction 模式：
+        # 长 FS 段前 commit 释放事务。此处无未落盘写，commit 仅释放读事务；
+        # expire_on_commit=False（db.py）保证对象仍 attached 可用。
+        await self._session.commit()
         spec_root = Path(spec_ws.spec_root)
         spec_root.mkdir(parents=True, exist_ok=True)
         spec_root_resolved = spec_root.resolve()
@@ -695,6 +703,14 @@ class SpecWorkspaceService:
 
             conflict_svc = ScanDocConflictService(self._session)
             now = datetime.now(UTC)
+            # ql-20260817-005：循环内禁止 session.add / session.delete——SQLAlchemy 2.0
+            # 的 add/delete 会 autobegin 立即打开事务，事务横跨后续全部 FS 段会撞
+            # idle-in-transaction 超时（见下②）。新 doc / 冲突行改为构造后收集到
+            # pending 列表，循环结束统一 add + 最终 commit（一个短事务）。
+            pending_new_docs: list[ScanDocument] = []
+            from app.modules.scan_docs.conflict_model import ScanDocConflictHistory
+
+            pending_conflicts: list[ScanDocConflictHistory] = []
             # task-03 / D-002@v1：逐文件 _bump 改批量回写器——循环内仅内存计数，
             # 50 文件/500ms 粒度回写；finally 终态 flush 保证 files_processed 最终准确。
             progress = _BatchProgressWriter(change_write_id)
@@ -714,6 +730,13 @@ class SpecWorkspaceService:
                     )
                 ).scalars()
                 existing_by_path = {d.path: d for d in existing_rows}
+            # ql-20260817-005：事务释放点②——下方逐文件循环（read/sha256/move 全
+            # FS；冲突行/新 doc 收集进 pending 不 add；既有行改写是纯属性赋值；
+            # 进度回写走独立 session）主连接零 SQL、零事务。若循环内 add/delete
+            # 会 autobegin 重开事务横跨全部 FS 段，同①被 idle-in-transaction 超时
+            # 杀连接。此 commit 释放 prefetch 的读事务；全部写集中在循环后的
+            # 最终 commit——写原子性不变，语义零变更。
+            await self._session.commit()
             for m in tf.getmembers():
                 if not m.isfile():
                     continue
@@ -770,15 +793,20 @@ class SpecWorkspaceService:
                         inc_raw = inc_raw.replace(tzinfo=UTC)
                     inc_mtime = inc_raw or datetime.min.replace(tzinfo=UTC)
                     if inc_mtime > cur_mtime:
-                        await conflict_svc.archive_conflict(
-                            workspace_id,
-                            rel_path,
-                            old_content=cur.content,
-                            old_source_member_id=cur.source_member_id,
-                            old_source_runtime_id=cur.source_runtime_id,
-                            old_mtime=cur.source_mtime,
-                            new_source_member_id=None,
-                            new_mtime=src_mtime,
+                        # ql-20260817-005：add_to_session=False——构造冲突行收集到
+                        # pending，循环外统一 add（循环内 add 会 autobegin 开事务）。
+                        pending_conflicts.append(
+                            await conflict_svc.archive_conflict(
+                                workspace_id,
+                                rel_path,
+                                old_content=cur.content,
+                                old_source_member_id=cur.source_member_id,
+                                old_source_runtime_id=cur.source_runtime_id,
+                                old_mtime=cur.source_mtime,
+                                new_source_member_id=None,
+                                new_mtime=src_mtime,
+                                add_to_session=False,
+                            )
                         )
                         # ql-20260813-007：strip NUL 字节兜底——scan_documents.content 是 PG
                         # 文本列，asyncpg 拒绝 0x00；errors="replace" 不替换 NUL（合法 UTF-8）。
@@ -803,7 +831,8 @@ class SpecWorkspaceService:
                         source_member_id=None,
                         exists=True,
                     )
-                    self._session.add(doc)
+                    # ql-20260817-005：收集，循环外统一 add（见 pending_new_docs 注释）。
+                    pending_new_docs.append(doc)
                     await asyncio.to_thread(shutil.move, str(src_file), str(target))
                     await progress.bump()
         finally:
@@ -813,6 +842,14 @@ class SpecWorkspaceService:
             tf.close()
             # Wave C 续：staging 整树删除移出事件循环
             await asyncio.to_thread(shutil.rmtree, staging, ignore_errors=True)
+
+        # ql-20260817-005：循环外统一入 session（add 的 autobegin 事务在此刻才
+        # 打开，紧接最终 commit，事务窗口毫秒级）+ 属性改写（既有行 / spec_ws）
+        # 一并在最终 commit 落库——全部写仍是单事务，原子性与原实现一致。
+        for conflict in pending_conflicts:
+            self._session.add(conflict)
+        for doc in pending_new_docs:
+            self._session.add(doc)
 
         now = datetime.now(UTC)
         spec_ws.sync_status = "clean"
@@ -1100,6 +1137,15 @@ class SpecWorkspaceService:
                 )
             ).scalars()
             manifest_by_path = {r.path: r for r in manifest_rows}
+        # ql-20260817-005：事务释放点——ops 循环（write_bytes/move 全 FS）主连接
+        # 需保持零事务：SQLAlchemy 2.0 的 add/delete 会 autobegin 立即开事务，
+        # 横跨后续全部 FS 段会撞 idle-in-transaction 超时（同 _write_spec_root②，
+        # init 首成员推全套骨架文件到 bind mount 即触发）。此处 commit 释放
+        # prefetch 读事务；循环内新行/删除改为收集 pending，循环后统一入
+        # session + 最终 commit——写仍单事务，原子性不变。
+        await self._session.commit()
+        pending_adds: list[SpecFileManifest] = []
+        pending_deletes: list[SpecFileManifest] = []
 
         # task-03 / D-002@v1：逐文件回写改批量回写器（内存计数 + 50 文件/500ms
         # 批量 UPDATE）；finally 终态 flush 保证 files_processed 最终准确。
@@ -1150,7 +1196,8 @@ class SpecWorkspaceService:
                             exists=True,
                             updated_at=now,
                         )
-                        self._session.add(new_row)
+                        # ql-20260817-005：收集，循环外统一 add（见上方释放点注释）。
+                        pending_adds.append(new_row)
                         manifest_by_path[op.path] = new_row
                         new_versions[op.path] = 1
                     else:
@@ -1217,7 +1264,7 @@ class SpecWorkspaceService:
                             exists=True,
                             updated_at=now,
                         )
-                        self._session.add(added_row)
+                        pending_adds.append(added_row)  # ql-20260817-005：循环外统一 add
                         manifest_by_path[op.new_path] = added_row
                         new_versions[op.new_path] = 1
                         continue
@@ -1240,7 +1287,8 @@ class SpecWorkspaceService:
                     # ql-20260813-008：rename 后 dest 用宿主真实 mtime（move 沿用源 mtime，
                     # 此处按 op.mtime 覆盖为最新宿主态，保持与 add/update 一致）。
                     self._apply_file_mtime(dest, op.mtime)
-                    await self._session.delete(row)
+                    # ql-20260817-005：delete 同样会 autobegin——收集循环外统一删。
+                    pending_deletes.append(row)
                     renamed_row = SpecFileManifest(
                         workspace_id=workspace_id,
                         path=op.new_path,
@@ -1249,7 +1297,7 @@ class SpecWorkspaceService:
                         exists=True,
                         updated_at=now,
                     )
-                    self._session.add(renamed_row)
+                    pending_adds.append(renamed_row)
                     # 镜像换 key：旧 path 删、新 path 指向新行
                     manifest_by_path.pop(op.path, None)
                     manifest_by_path[op.new_path] = renamed_row
@@ -1259,6 +1307,12 @@ class SpecWorkspaceService:
                 # 已 continue 跳过）——批量回写器内存计数，不再逐 op UPDATE。
                 await progress.bump()
 
+            # ql-20260817-005：循环外统一入 session（add/delete 的 autobegin 事务
+            # 此刻才打开，紧接 commit，事务窗口毫秒级）——全部写仍是单事务。
+            for stale in pending_deletes:
+                await self._session.delete(stale)
+            for new_row in pending_adds:
+                self._session.add(new_row)
             await self._session.commit()
         finally:
             # task-03 / R-02：终态回写兜底（含 422 中断路径——已处理计数最终准确）。

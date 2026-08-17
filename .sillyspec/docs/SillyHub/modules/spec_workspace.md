@@ -25,6 +25,8 @@ created_at: 2026-06-24T01:16:36
 - 跨组件协作：scan_docs.reparse 读 spec_root、daemon 通过 spec bundle 获取规范、前端 spec-workspaces.ts 客户端
 
 ## 关键逻辑
+同步落盘的事务纪律（ql-20260817-005）：`_write_spec_root`（全量 tar）与 `apply_ops`（增量 ops）的 FS 段（解包 staging / 逐文件 read+sha256+move / ops 写盘）**必须在事务外执行**——后端连接自设 PG `idle_in_transaction_session_timeout=120s`（db.py 防泄漏兜底），FS 段（spec_root 为 Windows bind mount，3560 文件级同步可达 2.5min+）期间连接零 SQL 会被 PG 杀连接，最终 commit 撞死连接报 500。实现：get()/prefetch SELECT 后各 commit 一次释放读事务；循环内**禁止 `session.add`/`session.delete`**（SQLAlchemy 2.0 两者会 autobegin 立即开事务）——新行/冲突行/待删行收集进 pending 列表，循环后统一入 session + 最终 commit（全部写仍单事务，原子性不变）。`archive_conflict` 相应新增 `add_to_session=False`（只构造返回，调用方批量 add）。
+
 增量同步 apply_ops 同 hash no-op 豁免（2026-08-15-init-trigger-sillyspec-init / D-008@v2）：`apply_ops` 冲突分支（`row.version != op.base_version` 乐观锁）增加同内容豁免——`op.hash` 非空且 == `row.content_hash`（sha256 不可伪造）→ 跳过落盘、不置 conflict、`new_versions[path]=row.version`（daemon manifest 对齐）。场景：第二成员 init 骨架文件（knowledge/INDEX.md 等）add(base_version=0) 对服务器已有行原必 conflict，同 hash no-op 后静默对齐。旧 daemon 不传 hash 行为不变（仍 conflict）。
 
 bootstrap 初始化（`SpecBootstrapService.bootstrap`）：
@@ -35,7 +37,7 @@ if report.errors: 写 SpecConflict + sync_status=dirty; return
 run = _execute_bootstrap_agent_run(ws, spec_ws, user)  # 调 agent 填默认文件
 记录 AgentRun/AgentRunLog/AuditLog → 返回 {ok, run_id, ...}
 ```
-- `import_from_repo` / `sync` 当前为 stub：只更新 sync_status=clean + last_synced_at，不做实际文件搬运
+- `sync`（apply_sync / `_write_spec_root`）为 daemon tar 全量落盘 + reparse 两阶段（早已非 stub）；`import_from_repo` 走 SSE 流式（packing → applying → reparsing）
 - `build_bundle` 用流式 generator（`_stream`）打包 spec 目录供下载，避免大目录占内存
 - `preflight_workspace_code_root` 在 bootstrap 前预检代码根，`_run_preflight` 返回告警字符串
 - `_execute_bootstrap_agent_run` 调 agent 填默认 spec 文件，全程记录 AgentRun/AgentRunLog
@@ -53,7 +55,6 @@ run = _execute_bootstrap_agent_run(ws, spec_ws, user)  # 调 agent 填默认文�
 ## 注意事项
 - bootstrap 异步且调 agent，耗时长，前端走 SSE 看日志（复用 AgentLogViewer）
 - `SpecValidator` 是纯同步文件系统检查，可脱离 DB 独立使用/测试
-- import/sync 是 stub，真正双向同步逻辑待后续 wave，改动勿当已实现
 - 冲突解决后不自动重验，需再次 bootstrap
 - sync_status 状态机（clean/dirty/conflicted）跟踪同步健康度
 - 验证失败不阻断流程，记录 SpecConflict + sync_status=dirty 允许后续手动解决
@@ -62,12 +63,11 @@ run = _execute_bootstrap_agent_run(ws, spec_ws, user)  # 调 agent 填默认文�
 - workspace_id 与 SpecWorkspace 是 1:1，创建工作区时由 `_ensure_spec_workspace` 自动连带建
 - `_ensure_spec_workspace_from_platform` 为平台托管工作区初始化默认 spec 空间
 - `update_sync_status` 单独更新同步状态，供 import/sync/bootstrap 复用
-- `apply_sync` 应用同步结果到 SpecWorkspace 行（stub 实现）
+- `apply_sync`（daemon tar 全量）应用同步结果：整树落盘 spec_root + 更新 SpecWorkspace 行 + 两阶段 reparse
 - `get_by_id` 按 spec_workspace_id 直查（区别于按 workspace_id 的 get）
 - bootstrap 的 run_log 落盘路径由 `_write_run_log` 管理，便于失败排查
 - bundle 流式响应需前端按 blob 接收，大目录不占服务端内存
 - SpecValidator 的 ValidationReport.errors/warnings 区分严重度
-- import_from_repo/sync 的 stub 实现只改状态不搬文件，勿当已实现
 - strategy 决定 spec 文件物理位置与同步方向，创建后不宜频繁切换
 - bootstrap 失败的 AgentRun 经 _write_run_log 落盘，便于排查
 - spec-conflicts 端点读 SpecConflict 表（由 spec_profile 写入）
