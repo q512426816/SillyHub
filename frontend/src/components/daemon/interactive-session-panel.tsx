@@ -1246,7 +1246,11 @@ function upsertTurn(
     // log/turn_started 缺 run_id 已在 streamSession 拦截，这里兜底不写
     return prev;
   }
-  const idx = prev.turns.findIndex((t) => t.runId === runId);
+  // ql-20260817-007：同 /sessions 页——attach 历史 turn（伪 runId + realRunId）
+  // 与 SSE 事件按两者匹配合并，防同 run 双 turn。
+  const idx = prev.turns.findIndex(
+    (t) => t.runId === runId || t.realRunId === runId,
+  );
   let turns: SessionTurnView[];
   if (idx === -1) {
     // unknown run：先建无 prompt turn

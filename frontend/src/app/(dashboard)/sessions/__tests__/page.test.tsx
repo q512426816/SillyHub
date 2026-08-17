@@ -585,17 +585,15 @@ describe("SessionPanel attach 历史 whoLine + usage 注入（gap-fix）", () =>
       await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
     );
 
-    // 属主 → 「我」；他人 → 用户名；都带时间（今天=HH:mm，跨天=MM-DD HH:mm）
+    // ql-20260817-007：用户侧=[时间][气泡][头像首字]，agent 侧=[头像][气泡][时间]。
+    await screen.findByText("属主发言"); // 等 attach 历史回灌
     const timePat = "(?:\\d{2}:\\d{2}|\\d{2}-\\d{2} \\d{2}:\\d{2})";
+    // 发送者头像（首字）：属主 WhaleFall→W、他人 张三→张
     await waitFor(() => {
-      expect(
-        screen.getByText(new RegExp(`^我 · ${timePat}$`)),
-      ).toBeInTheDocument();
+      expect(screen.getByLabelText("发送者 我")).toHaveTextContent("W");
     });
-    expect(
-      screen.getByText(new RegExp(`^张三 · ${timePat}$`)),
-    ).toBeInTheDocument();
-    // ql-20260817-004：agent 答复气泡右下显示完成时间（两轮答复=两个裸时间元素）。
-    expect(screen.getAllByText(new RegExp(`^${timePat}$`))).toHaveLength(2);
+    expect(screen.getByLabelText("发送者 张三")).toHaveTextContent("张");
+    // 裸时间元素：用户侧 2 + agent 答复侧 2
+    expect(screen.getAllByText(new RegExp(`^${timePat}$`))).toHaveLength(4);
   });
 });

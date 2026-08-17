@@ -953,7 +953,12 @@ function upsertTurn(
 ): TurnState {
   const runId = env.run_id;
   if (!runId) return prev;
-  const idx = prev.turns.findIndex((t) => t.runId === runId);
+  // ql-20260817-007：attach 历史 turn 的 key 是伪 id（__attach_history_N__），
+  // 真实 id 在 realRunId——SSE 事件按两者匹配，命中即合并到既有 turn，
+  // 否则同一 run 会渲染出第二个「正在思考…」空块（新建会话输入后复现）。
+  const idx = prev.turns.findIndex(
+    (t) => t.runId === runId || t.realRunId === runId,
+  );
   let turns: SessionTurnView[];
   if (idx === -1) {
     const newTurn: SessionTurnView = {

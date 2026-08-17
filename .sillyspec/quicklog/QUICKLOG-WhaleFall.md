@@ -457,3 +457,12 @@
 根因：①ConfigDropdown 只有 min-w 无 w-max/nowrap，inline-flex 包装内收缩宽度导致窄列换行；②下拉包含「其它机器同引擎（跨机器二期）」段（D-004@v2 旧语义）。
 方案：①ConfigDropdown 加 w-max+whitespace-nowrap；②智能体下拉重写：仅当前机器 runtimes——当前=✓当前、其它在线引擎可点（引擎不支持会话内热切，点击 message 引导到新建会话选择）、离线引擎 aria-disabled+「离线」标注；标题改「当前机器引擎（换引擎需开新会话）」；DisplayItem 扩展 disabled/onClick 支持可点态。
 结果：config-bar 17 用例全过（跨机器断言按新语义更新），前端全量 157 文件/1610 全绿，tsc 0 错，eslint 0 error。待 commit+push+rebuild frontend。
+
+## ql-20260817-007-e9ee | 2026-08-17 14:25:45 | ①新建会话发送后多出一个空「正在思考」块
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+需求：①新建会话发送后多出一个空「正在思考」块；②用户消息与 agent 对称（头像首字+时间在气泡左侧）。
+根因：①upsertTurn 只按 runId 匹配，attach 历史 turn 用伪 id（真实 id 在 realRunId），SSE 匹配不上→同 run 双 turn；②用户气泡样式与 agent 不对称。
+方案：①page+弹窗两处 upsertTurn 匹配 runId||realRunId 合并；②用户气泡改 [时间][气泡][头像首字]（同顶栏 AvatarFallback 模式，title 全名，无 sender 不渲染零回归）。
+结果：page 9 用例过，全量 157 文件/1610 全绿（含弹窗回归），tsc/eslint 0。待 commit+push+rebuild frontend。

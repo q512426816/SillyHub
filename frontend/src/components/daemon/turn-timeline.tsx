@@ -236,19 +236,28 @@ export function TurnTimeline({
         <div className="space-y-5">
           {turns.map((turn) => (
             <div key={turn.runId} className="space-y-2.5">
-              {/* 用户消息气泡（右）。attach 中途接入的 unknown-run turn 无 prompt，不渲染。 */}
+              {/* 用户消息气泡（右）。attach 中途接入的 unknown-run turn 无 prompt，不渲染。
+                  ql-20260817-007：与 agent 答复对称——[时间][气泡][发送者头像]；
+                  头像无图时用用户名首字（同顶栏用户菜单 AvatarFallback 模式）。 */}
               {turn.prompt && (
-                <div className="flex flex-col items-end gap-0.5">
-                  {/* ql-20260817-003：发送者 + 时间（可选，缺省不渲染零回归）。 */}
-                  {turn.sender && (
-                    <span className="px-1 text-[10.5px] text-muted-foreground">
-                      {turn.sender.me ? "我" : turn.sender.name}
-                      {turn.sender.at ? ` · ${formatTurnTime(turn.sender.at)}` : ""}
+                <div className="flex items-end justify-end gap-1.5">
+                  {turn.sender?.at && (
+                    <span className="shrink-0 pb-1 text-[10.5px] text-muted-foreground">
+                      {formatTurnTime(turn.sender.at)}
                     </span>
                   )}
                   <div className="max-w-[82%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-sm">
                     <div className="whitespace-pre-wrap break-words">{turn.prompt}</div>
                   </div>
+                  {turn.sender && (
+                    <span
+                      title={turn.sender.me ? `我（${turn.sender.name}）` : turn.sender.name}
+                      aria-label={`发送者 ${turn.sender.me ? "我" : turn.sender.name}`}
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-muted text-xs font-medium text-muted-foreground"
+                    >
+                      {(turn.sender.name.trim()[0] ?? "?").toUpperCase()}
+                    </span>
+                  )}
                 </div>
               )}
               {/* ql-20260802-003：「全部」视图把过程项（思考/工具/stderr）与 AskUser 提问
