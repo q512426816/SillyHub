@@ -169,6 +169,55 @@ describe('TestStatus (test_cli.py)', () => {
     expect(output).toContain('Server URL:');
     expect(output).toContain('http://localhost:8000');
   });
+
+  // ql-20260818-001：running 时按 runtime lock 反查实际 server 的 per-server
+  // 配置展示（pid 用测试进程自身，isProcessAlive 恒真，无需伪造活进程）。
+  it('status_running_shows_lock_server_config: 运行中 daemon 展示 lock 反查的实际配置', async () => {
+    await cli.writePid(process.pid);
+    const daemonDir = join(tmpDir, '.sillyhub', 'daemon');
+    mkdirSync(join(daemonDir, 'locks'), { recursive: true });
+    writeFileSync(
+      join(daemonDir, 'locks', 'runtime-status-test.lock'),
+      JSON.stringify({
+        pid: process.pid,
+        hostname: 'test-host',
+        provider: 'claude',
+        server_hash: 'd412c05c',
+        started_at: '2026-08-18T00:00:00.000Z',
+        updated_at: '2026-08-18T00:00:00.000Z',
+        version: '0.1.0',
+      }),
+    );
+    writeFileSync(
+      join(daemonDir, 'config-d412c05c.json'),
+      JSON.stringify({ server_url: 'http://127.0.0.1:8001', runtime_id: 'rt-live-8001' }),
+    );
+
+    const code = await cli.statusAction();
+    const output = out.writes.join('');
+    expect(code).toBe(0);
+    expect(output).toContain('running');
+    expect(output).toContain('rt-live-8001');
+    expect(output).toContain('http://127.0.0.1:8001');
+  });
+
+  // ql-20260818-001：lock 指向的 per-server config 不存在 → 回退 DEFAULT 配置
+  //（beforeEach mock 的 loadConfigFn 返回 makeConfig 默认 8000），不报错不 unknown。
+  it('status_running_lock_without_config_falls_back: lock 对应 config 缺失回退 DEFAULT', async () => {
+    await cli.writePid(process.pid);
+    const daemonDir = join(tmpDir, '.sillyhub', 'daemon');
+    mkdirSync(join(daemonDir, 'locks'), { recursive: true });
+    writeFileSync(
+      join(daemonDir, 'locks', 'runtime-status-test.lock'),
+      JSON.stringify({ pid: process.pid, server_hash: 'deadbeef' }),
+    );
+
+    const code = await cli.statusAction();
+    const output = out.writes.join('');
+    expect(code).toBe(0);
+    expect(output).toContain('running');
+    expect(output).toContain('http://localhost:8000');
+  });
 });
 
 // ── TestStop（对齐 Python class TestStop）──────────────────────────────────────

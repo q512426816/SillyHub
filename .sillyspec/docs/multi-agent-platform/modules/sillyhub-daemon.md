@@ -16,7 +16,7 @@ created_at: 2026-06-24T01:16:42
 
 ## 契约摘要
 
-- **CLI 入口**：`src/cli.ts` 的 `createProgram()` 用 commander 暴露子命令——start（startAction）、stop（stopAction）、status（statusAction）、logs（logsAction）等；进程管理经 PID 文件（getPidFile/readPid/writePid/removePid/isProcessAlive）与日志文件（getLogFile）。
+- **CLI 入口**：`src/cli.ts` 的 `createProgram()` 用 commander 暴露子命令——start（startAction）、stop（stopAction）、status（statusAction）、logs（logsAction）等；进程管理经 PID 文件（getPidFile/readPid/writePid/removePid/isProcessAlive）与日志文件（getLogFile）。status 展示的 Runtime ID/Server URL：running 时经 `resolveRunningDaemonConfig(pid)` 从 runtime lock 反查实际 server 的 per-server 配置（ql-20260818-001），否则读 DEFAULT server 配置。
 - **与 backend 通信**：`src/hub-client.ts` 的 `HubClient` 实现 daemon 注册（RegisterBody）、领租约（ClaimLease/StartLease）、心跳（Heartbeat/LeaseHeartbeat）、提交消息（SubmitMessages）、完成租约（CompleteLease）；认证 `HubClientAuth`，错误类型 `HubHttpError`。**模型错误回传**：`notifyRunResult` payload 携带可选 `error`（ModelError，is_error turn 失败时），backend 写入 AgentRun.error_detail（向后兼容，旧 daemon 不传则 None）。
 - **消息协议**：`src/protocol.ts` 定义 WS 消息集合 `MSG` 与 payload（SessionInject、SessionControl、PermissionRequest/Response 等）。
 - **Agent 接入**：`src/adapters/`（json-rpc/jsonl/ndjson/stream-json/text/protocol-adapter）适配多种 Agent 输出流；`src/interactive/`（claude-sdk-driver、session-manager、session-store-persistence、permission-resolver、input-queue）支撑交互式会话。

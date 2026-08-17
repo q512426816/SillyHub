@@ -438,3 +438,33 @@
 根因：新建 change 进度走 CLI 直推立即可见而文件镜像走 daemon 同步滞后，空树只显示暂无文件让用户误以为丢失。
 方案：空态补一行同步指引文案到工作区配置卡。
 结果：change-file-tree 7 passed（含新空态指引断言）+ card 2 passed + tsc 0。
+
+## ql-20260817-001-66e4 | 2026-08-17 00:10:52 | CLI 本地直跑时文档自动同步平台
+状态：已完成
+关联变更：2026-08-16-auto-sync-from-repo
+文件：
+- sillyspec:src/sync.js（sync 成功路径追加 syncDocuments（best-effort））
+- sillyspec:test/platform-sync-auto-docs.test.mjs（新测试三断言）
+需求：CLI 本地直跑时文档自动同步平台。
+根因：sync() 只推进度不推文档（sync.js:32 注释明写 run 流程不自动推），syncDocuments 仅手动命令调用。
+方案：sync() 成功路径追加 this.syncDocuments（try/catch best-effort 失败 debugLog 不阻断进度；四件套全缺失内部已跳过不调端点）。
+结果：sillyspec 仓 f976466（sync.js +12 行 + 新测试 128 行 3 断言），既有 sync 套件零回归（push-header/schema/conflict/dirty 全 0）。
+
+## ql-20260818-001-125d | 2026-08-18 00:55:13 | 修复 sillyhub-daemon status 命令展示缺陷——status 固定展示 DEFAULT server(localhost:8000) 的 p…
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/cli.ts（新增 resolveRunningDaemonConfig+statusAction running 反查改造）
+- sillyhub-daemon/tests/cli.test.ts（新增 2 用例：lock 反查展示/config 缺失回退）
+- .sillyspec/docs/sillyhub-daemon/modules/cli.md（status 契约+注意事项 ql-20260818-001）
+- .sillyspec/docs/sillyhub-daemon/modules/_module-map.yaml（main_symbols 加 resolveRunningDaemonConfig）
+- .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md（CLI 入口契约补 status 展示行为）
+需求：修复 sillyhub-daemon status 命令展示缺陷——status 固定展示 DEFAULT server(localhost:8000) 的 per-server 配置，用 --server 8001 启动的运行中 daemon 被错显为 8000/错误 Runtime ID。
+根因：statusAction(cli.ts) 固定 loadConfigFn(DEFAULT_CONFIG.server_url) 读 8000 那份 config-0121783a.json，与运行进程实际用的 per-server 配置无关。
+方案：新增 resolveRunningDaemonConfig(pid)——扫 locks/runtime-*.lock 按 pid 匹配取 server_hash，读 config-<hash>.json 取真实 runtime_id/server_url；statusAction 改为 running 时优先反查、失败或非 running 回退原 DEFAULT 逻辑，输出五字段格式不变。
+结果：cli.test.ts 新增 2 用例（lock 反查展示真实配置/config 缺失回退 DEFAULT），16 passed+8 skipped、tsc 0 错；实机 node dist/cli.js status 正确显示运行中 daemon 68c63051+http://127.0.0.1:8001；3 处模块文档已同步。
+
+## ql-20260818-002-3915 | 2026-08-18 01:01:47 | (quick 任务)
+状态：进行中
+关联变更：（无）
+文件：backend/app/modules/spec_workspace/service.py, backend/app/modules/spec_workspace/tests/test_sync_incremental.py

@@ -24,7 +24,7 @@ modules:
     tags: [cli, entrypoint]
     aliases: [__main__]
     entrypoints: [createProgram, startAction, stopAction, statusAction, logsAction]
-    main_symbols: [getPidFile, getLogFile, readPid, writePid, removePid, isProcessAlive, loadConfigFn, saveConfigFn, createProgram, startAction, stopAction, statusAction, logsAction]
+    main_symbols: [getPidFile, getLogFile, readPid, writePid, removePid, isProcessAlive, loadConfigFn, saveConfigFn, resolveRunningDaemonConfig, createProgram, startAction, stopAction, statusAction, logsAction]
     depends_on: [config, daemon-version]
     used_by: []
     needs_review: false

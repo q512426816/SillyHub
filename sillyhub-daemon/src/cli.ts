@@ -40,7 +40,7 @@
 
 import { Command } from 'commander';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
-import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm, readdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { hostname } from 'node:os';
 
@@ -906,6 +906,54 @@ export function stopAction(): number {
 // ── statusAction（对齐 Python status() __main__.py:158-177）──────────────────
 
 /**
+ * 从 runtime lock 反查运行中 daemon 实际连接的 server 配置。
+ *
+ * 背景（ql-20260818-001）：`start --server <url>` 可连任意后端（per-server 配置
+ * `config-<hash>.json`），而 status 此前固定展示 DEFAULT server（localhost:8000）
+ * 那份配置，Runtime ID / Server URL 与运行进程实际不符。
+ *
+ * 路径：扫 `<DEFAULT_CONFIG_DIR>/locks/` 下 `runtime-*.lock`（per-provider，内容含
+ * pid + server_hash）→ 按 pid 匹配运行进程 → 读 `config-<server_hash>.json` 取
+ * runtime_id / server_url。lock 的 server_hash 与 per-server 文件名同源（均为
+ * server_url 的 sha256 前 8 位），故直接拼文件名，不重复计算。
+ *
+ * 仅展示用途：任何一步失败（目录/文件缺失、JSON 损坏、pid 无匹配、字段类型
+ * 异常）返回 null，由调用方回退 DEFAULT 配置，不影响 State/PID 判定。
+ *
+ * 导出为普通函数遵循本模块惯例（cli.ts:21 `loadConfigFn` 同理），便于测试 spy。
+ *
+ * @param pid 运行中 daemon 的进程 ID（来自 daemon.pid 文件）。
+ */
+export async function resolveRunningDaemonConfig(
+  pid: number,
+): Promise<{ runtime_id: string; server_url: string } | null> {
+  try {
+    const locksDir = join(DEFAULT_CONFIG_DIR, 'locks');
+    for (const name of await readdir(locksDir)) {
+      if (!name.endsWith('.lock')) continue;
+      let lock: unknown;
+      try {
+        lock = JSON.parse(await readFile(join(locksDir, name), 'utf-8'));
+      } catch {
+        continue; // 单个 lock 文件损坏 → 跳过继续扫，不让一个坏文件拖垮反查
+      }
+      const record = lock as { pid?: unknown; server_hash?: unknown };
+      if (record.pid !== pid || typeof record.server_hash !== 'string') continue;
+      const config = JSON.parse(
+        await readFile(join(DEFAULT_CONFIG_DIR, `config-${record.server_hash}.json`), 'utf-8'),
+      ) as { runtime_id?: unknown; server_url?: unknown };
+      if (typeof config.runtime_id === 'string' && typeof config.server_url === 'string') {
+        return { runtime_id: config.runtime_id, server_url: config.server_url };
+      }
+      return null; // config 存在但字段缺失 → 回退 DEFAULT
+    }
+  } catch {
+    // locks 目录不存在 / 读取异常 → 回退 DEFAULT
+  }
+  return null;
+}
+
+/**
  * status 子命令业务逻辑。导出便于 task-22 直接调用。
  *
  * 输出格式严格对齐 Python __main__.py:173-177（task-22 逐字断言）：
@@ -923,19 +971,27 @@ export function stopAction(): number {
 export async function statusAction(): Promise<number> {
   // 2026-07-03-daemon-entity-binding task-04：status 无 server 参数，读默认
   // per-server 文件（DEFAULT_CONFIG.server_url = http://localhost:8000）。
-  // 若连过其他后端，该文件可能不存在 → 显示 unknown（不影响 PID/State 判断）。
+  // 2026-08-18 ql-20260818-001：running 时优先按 pid 从 runtime lock 反查
+  // 实际 server 的 per-server 配置（DEFAULT 文件与 --server 启动的进程无关）；
+  // 反查失败或非 running 时保持旧行为读 DEFAULT。
+  const pid = readPid();
+  const running = pid !== null && isProcessAlive(pid);
   let config: { runtime_id: string; server_url: string } | null = null;
-  try {
-    config = await loadConfigFn(DEFAULT_CONFIG.server_url);
-  } catch {
-    // 配置加载失败（文件损坏/不存在等）→ 用占位值，不中断 status 输出
-    config = { runtime_id: '(unknown)', server_url: '(unknown)' };
+  if (running && pid !== null) {
+    config = await resolveRunningDaemonConfig(pid);
+  }
+  if (config === null) {
+    try {
+      config = await loadConfigFn(DEFAULT_CONFIG.server_url);
+    } catch {
+      // 配置加载失败（文件损坏/不存在等）→ 用占位值，不中断 status 输出
+      config = { runtime_id: '(unknown)', server_url: '(unknown)' };
+    }
   }
 
-  const pid = readPid();
   let state: string;
   let pidInfo: string;
-  if (pid !== null && isProcessAlive(pid)) {
+  if (running) {
     state = 'running';
     pidInfo = String(pid);
   } else if (pid !== null) {

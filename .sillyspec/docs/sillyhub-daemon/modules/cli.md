@@ -15,7 +15,7 @@ sillyhub-daemon 的 commander 命令行入口（`#!/usr/bin/env node`）。解�
 - 子命令（语义）：
   - `start`：可选 `--server/--token/--api-key/--workspace-dir/--poll-interval/--heartbeat-interval/--max-concurrent/--log-level/--open-terminal/--terminal-mode/--terminal-close-on-exit/--terminal-command/--force`，构建 Daemon 后阻塞运行。`--force`（ql-006）强制回收 stale/corrupt runtime lock（不强杀活跃 daemon 进程）。
   - `stop`：读 PID 文件并向进程发 SIGTERM，按存活与否返回退出码 1/0。
-  - `status`：读 PID 文件并校验进程存活，打印 State/PID/Runtime ID/Server URL/Config dir。
+  - `status`：读 PID 文件并校验进程存活，打印 State/PID/Runtime ID/Server URL/Config dir。running 时经 `resolveRunningDaemonConfig(pid)` 从 runtime lock（`locks/runtime-*.lock` 含 pid+server_hash）反查实际 server 的 per-server 配置展示（ql-20260818-001，`--server` 启动的进程不再错显 DEFAULT 8000 那份）；反查失败或非 running 回退读 DEFAULT server 的 per-server 配置。
   - `logs --tail <n>`：读日志文件尾部 N 行（默认 50）。
 - 可测试性注入点（均封装为函数供 `vi.spyOn`）：`getPidFile()`、`getLogFile()`、`loadConfigFn(path)`、`saveConfigFn`。
 - PID/日志路径：`~/.sillyhub/daemon/daemon.pid`、`~/.sillyhub/daemon/daemon.log`。
@@ -48,6 +48,7 @@ stopAction(): pid=readPid() → 不存活 return 1 → process.kill(pid) → ret
 - TaskRunner 真实构造是 3 位置参数 + config（非 options 对象），与蓝图旧假设不同。
 - start 失败时错误消息输出到 stderr。
 - ql-006：start 注入 RuntimeLockManager（runtime-lock.ts）强制单实例；同机同 provider 已有活跃 daemon 时 daemon.start 抛 LockHeldError → startAction catch 退出 1（防共享 backend runtime_id 致 ownership 双通过+WS 重连风暴）。`--force` 仅回收 stale/corrupt lock，不强杀活跃进程。
+- ql-20260818-001：status 展示配置改为 running 时按 pid 扫 runtime lock 反查实际 server 的 per-server 配置（`resolveRunningDaemonConfig`）；`--server <url>` 启动的进程此前错显 DEFAULT(8000) 那份。输出格式五字段不变（task-22 逐字断言仍绿）。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
