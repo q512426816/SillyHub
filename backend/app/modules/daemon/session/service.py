@@ -1337,14 +1337,19 @@ class SessionService:
                 # 不会出现 DB 已切、消息发不出的半态）。复用 lease/context 的
                 # resolve_bound_provider_config（按会话 user_id + 引擎，与 claim
                 # payload 的 provider_config 结构逐字一致，D-006 单一真相源）。
-                if provider_row is not None:
+                # ql-20260817-008：构造条件用 effective_provider（含未切维度的
+                # 当前行）而非 provider_row（仅切供应商时非空）——切档案轮若
+                # 不带 providerConfig，daemon reload 重建 driver 时供应商 env
+                # 缺失，会回落机器默认网关（实测 Kimi 会话切档案后流量跑到
+                # GLM）。会话供应商 NULL（本机默认）才发 null。
+                if effective_provider is not None:
                     from app.modules.daemon.lease.context import (
                         resolve_bound_provider_config,
                     )
 
                     provider_config_payload = await resolve_bound_provider_config(
                         self._session,
-                        {"llm_provider_id": str(provider_row.id)},
+                        {"llm_provider_id": str(effective_provider.id)},
                         session.user_id,
                         session.provider,
                     )
@@ -1353,7 +1358,7 @@ class SessionService:
                         # 解析器口径漂移），显式报错不静默降级（铁律 1）。
                         raise DaemonSessionConfigInvalid(
                             "Session provider config could not be resolved.",
-                            details={"llm_provider_id": str(provider_row.id)},
+                            details={"llm_provider_id": str(effective_provider.id)},
                         )
                 else:
                     provider_config_payload = None

@@ -280,7 +280,8 @@ class TestSwitchSuccess:
     async def test_switch_profile_only_provider_config_null(
         self, db_session, mocked_hub, mocked_redis
     ) -> None:
-        """只切档案：providerConfig=null，run 供应商快照沿用会话当前值。"""
+        """只切档案：providerConfig 携带会话当前供应商（ql-20260817-008——此前
+        发 null 致 daemon reload 丢供应商 env 回落机器默认网关），run 快照沿用。"""
         uid = await _create_user(db_session)
         rt = await _create_runtime(db_session, uid)
         profile_a = await _create_profile(db_session, uid, system_prompt="a")
@@ -318,7 +319,9 @@ class TestSwitchSuccess:
         assert mocked_hub.send_session_control.await_args.args[1] == (
             DAEMON_MSG_SESSION_SWITCH_CONFIG
         )
-        assert payload["providerConfig"] is None
+        # ql-20260817-008：切档案轮必须带上会话当前供应商配置（防 reload 丢 env）。
+        assert payload["providerConfig"] is not None
+        assert payload["providerConfig"]["base_url"] == provider_a.base_url
         assert payload["profile"]["systemPrompt"] == "b"
 
     @pytest.mark.asyncio

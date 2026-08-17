@@ -466,3 +466,12 @@
 根因：①upsertTurn 只按 runId 匹配，attach 历史 turn 用伪 id（真实 id 在 realRunId），SSE 匹配不上→同 run 双 turn；②用户气泡样式与 agent 不对称。
 方案：①page+弹窗两处 upsertTurn 匹配 runId||realRunId 合并；②用户气泡改 [时间][气泡][头像首字]（同顶栏 AvatarFallback 模式，title 全名，无 sender 不渲染零回归）。
 结果：page 9 用例过，全量 157 文件/1610 全绿（含弹窗回归），tsc/eslint 0。待 commit+push+rebuild frontend。
+
+## ql-20260817-008-9043 | 2026-08-17 15:10:24 | 会话 3693ae25 选 Kimi 供应商
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+需求：会话 3693ae25 选 Kimi 供应商，切档案后实际流量跑 GLM（bigmodel.cn）。
+根因：SESSION_SWITCH_CONFIG 的 providerConfig 构造条件误用 provider_row（仅切供应商时非空）→ 切档案轮发 null → daemon reload 重建 driver 丢供应商 env 回落机器默认网关。DB 全是 Kimi 仅运行态 env 丢（daemon 日志 has_provider_config=false 实证）。
+方案：构造条件改 effective_provider（含未切维度当前行）——会话有供应商必带 providerConfig；NULL（本机默认）才发 null。切档案用例断言更新为携带当前供应商 base_url。
+结果：切换测试 12 过，daemon 模块全量 800 passed，ruff 过。待部署。
