@@ -595,5 +595,7 @@ describe("SessionPanel attach 历史 whoLine + usage 注入（gap-fix）", () =>
     expect(
       screen.getByText(new RegExp(`^张三 · ${timePat}$`)),
     ).toBeInTheDocument();
+    // ql-20260817-004：agent 答复气泡右下显示完成时间（两轮答复=两个裸时间元素）。
+    expect(screen.getAllByText(new RegExp(`^${timePat}$`))).toHaveLength(2);
   });
 });

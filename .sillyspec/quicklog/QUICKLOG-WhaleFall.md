@@ -425,3 +425,12 @@
 根因：数据模型 run/log 都无发送者字段（会话单 owner），时间线无从显示。
 方案：后端 AgentRun 加 user_id（FK users SET NULL，迁移 20260817090000），create=创建者/inject=实际注入者/service 代写=会话属主；runs 查询 left join users 暴露 user_id+sender_name；AgentSessionRead 暴露 user_id（前端判「我」）；前端 SessionTurnView 加可选 sender，TurnTimeline 用户气泡上方渲染「我/用户名 · 时间」（今天 HH:mm、跨天 MM-DD HH:mm），page 从 runs 快照注入（旧 run 无发送者=NULL 不显示零回归）。
 结果：后端 daemon 全量 800 passed；前端全量 155 文件/1590 全绿（新增发送者渲染用例）；tsc/eslint/ruff 0；gen:types 同步。待 commit+push+rebuild backend/frontend 部署（含迁移）。
+
+## ql-20260817-004-487e | 2026-08-17 11:05:49 | agent 答复消息也要显示时间（上轮只给用户消息加了发送者+时间）
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+需求：agent 答复消息也要显示时间（上轮只给用户消息加了发送者+时间）。
+根因：答复时间数据源（run.finished_at）已在 runs 快照里，但 TurnTimeline 未渲染。
+方案：SessionTurnView 加可选 replyAt；答复气泡右下角显示完成时间（formatTurnTime：今天 HH:mm、跨天 MM-DD HH:mm；运行中/旧数据 null 不渲染零回归）；page 注入 replyAt=finished_at??started_at；补 displayTurns 的 session?.user_id 依赖。
+结果：page 9 用例过（新增答复时间断言），前端全量 157 文件/1610 全绿，tsc 0 错，eslint 0 error。待 commit+push+rebuild frontend。

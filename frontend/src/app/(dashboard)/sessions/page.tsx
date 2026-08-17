@@ -501,9 +501,11 @@ function SessionPanel({
         },
         inputTokens: t.inputTokens ?? meta.input_tokens ?? null,
         outputTokens: t.outputTokens ?? meta.output_tokens ?? null,
+        // ql-20260817-004：答复完成时间（finished_at 优先；运行中/旧数据 null 不显示）。
+        replyAt: t.replyAt ?? meta.finished_at ?? meta.started_at ?? null,
       };
     });
-  }, [turnState.turns, runsMeta, providers, agentDisplayName]);
+  }, [turnState.turns, runsMeta, providers, agentDisplayName, session?.user_id]);
 
   // CtxUsageBar：累计 usage（实时 turn input_tokens 求和 + 历史轮回填，R-06 前端累计）
   // + 分母派生（会话供应商 role mapping one_m → fallback model，D-014）。

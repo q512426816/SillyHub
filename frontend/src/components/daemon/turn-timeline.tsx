@@ -129,6 +129,11 @@ export interface SessionTurnView {
     /** 轮次开始时间 ISO（无则前端不显示时间）。 */
     at: string | null;
   };
+  /**
+   * ql-20260817-004：该轮 agent 答复完成时间 ISO（run.finished_at，运行中/
+   * 旧数据为 undefined/null → 不显示）。答复气泡右下角显示，与用户消息时间对齐。
+   */
+  replyAt?: string | null;
 }
 
 /** 消息视图模式（ql-20260729-005）：对话=只显用户消息+答复正文；全部=追加过程项。 */
@@ -316,8 +321,16 @@ export function TurnTimeline({
                   <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-muted text-muted-foreground">
                     <Bot className="h-3.5 w-3.5" aria-hidden />
                   </span>
-                  <div className="max-w-[82%] rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
-                    <MarkdownText content={turn.output} />
+                  <div className="flex items-end gap-1.5">
+                    <div className="max-w-[82%] rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
+                      <MarkdownText content={turn.output} />
+                    </div>
+                    {/* ql-20260817-004：答复完成时间（run.finished_at，缺省不渲染）。 */}
+                    {turn.replyAt && (
+                      <span className="shrink-0 pb-1 text-[10.5px] text-muted-foreground">
+                        {formatTurnTime(turn.replyAt)}
+                      </span>
+                    )}
                   </div>
                 </div>
               ) : (
