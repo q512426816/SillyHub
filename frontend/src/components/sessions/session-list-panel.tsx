@@ -420,26 +420,48 @@ function SessionRow({
           {formatRelativeTime(session.last_active_at ?? session.created_at)}
         </span>
       </div>
-      {/* 第二行：chips（机器/引擎/档案/供应商/轮数，单行截断保证固定行高） */}
-      <div className="flex items-center gap-1 overflow-hidden pl-3 whitespace-nowrap">
+      {/* 第二行：chips（机器/引擎/档案/供应商/轮数，单行截断保证固定行高）。
+          ql-20260817-001：310px 列宽下五 Tag 拥挤——Tag 紧凑化（px-1 py-0
+          text-[10px]）+ 长名（机器/档案/供应商）max-w+truncate + 轮数 shrink-0
+          恒可见；信息密度让位可读性，截断项 hover 有 title 全名。 */}
+      <div className="flex items-center gap-0.5 overflow-hidden pl-2.5 whitespace-nowrap">
         {machineName && (
-          <Tag className={machineOffline ? "m-0 line-through opacity-60" : "m-0"}>
+          <Tag
+            title={machineOffline ? `${machineName}（离线）` : machineName}
+            className={`m-0 max-w-[104px] truncate rounded-sm px-1 py-0 text-[10px] leading-4 ${
+              machineOffline ? "line-through opacity-60" : ""
+            }`}
+          >
             🖥 {machineName}
             {machineOffline ? "（离线）" : ""}
           </Tag>
         )}
-        <Tag className="m-0" color={engineValue === "codex" ? "purple" : "gold"}>
+        <Tag
+          className="m-0 shrink-0 rounded-sm px-1 py-0 text-[10px] leading-4"
+          color={engineValue === "codex" ? "purple" : "gold"}
+        >
           {engineLabel(engineValue)}
         </Tag>
         {snapshot?.profile_name && (
-          <Tag className="m-0" color="blue">
+          <Tag
+            title={snapshot.profile_name}
+            className="m-0 max-w-[110px] truncate rounded-sm px-1 py-0 text-[10px] leading-4"
+            color="blue"
+          >
             📋 {snapshot.profile_name}
           </Tag>
         )}
         {snapshot?.provider_name && (
-          <Tag className="m-0">☁ {snapshot.provider_name}</Tag>
+          <Tag
+            title={snapshot.provider_name}
+            className="m-0 max-w-[104px] truncate rounded-sm px-1 py-0 text-[10px] leading-4"
+          >
+            ☁ {snapshot.provider_name}
+          </Tag>
         )}
-        <Tag className="m-0">{session.turn_count} 轮</Tag>
+        <Tag className="m-0 shrink-0 rounded-sm px-1 py-0 text-[10px] leading-4">
+          {session.turn_count} 轮
+        </Tag>
       </div>
     </div>
   );
