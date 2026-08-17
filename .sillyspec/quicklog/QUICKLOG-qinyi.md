@@ -464,7 +464,15 @@
 方案：新增 resolveRunningDaemonConfig(pid)——扫 locks/runtime-*.lock 按 pid 匹配取 server_hash，读 config-<hash>.json 取真实 runtime_id/server_url；statusAction 改为 running 时优先反查、失败或非 running 回退原 DEFAULT 逻辑，输出五字段格式不变。
 结果：cli.test.ts 新增 2 用例（lock 反查展示真实配置/config 缺失回退 DEFAULT），16 passed+8 skipped、tsc 0 错；实机 node dist/cli.js status 正确显示运行中 daemon 68c63051+http://127.0.0.1:8001；3 处模块文档已同步。
 
-## ql-20260818-002-3915 | 2026-08-18 01:01:47 | (quick 任务)
-状态：进行中
+## ql-20260818-002-3915 | 2026-08-18 01:01:47 | local.yaml 服务器侧三处过滤——token 不落 landing 树不随 bundle 跨机分发（spec-file-incremental-sync P2 遗留）
+状态：已完成
 关联变更：（无）
-文件：backend/app/modules/spec_workspace/service.py, backend/app/modules/spec_workspace/tests/test_sync_incremental.py
+文件：
+- backend/app/modules/spec_workspace/service.py（SERVER_EXCLUDED_FILENAMES 常量 + apply_ops/tar 解包/build_bundle 三处过滤点）
+- backend/app/modules/spec_workspace/tests/test_sync_incremental.py（TestLocalYamlExcluded 5 用例）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（platform_sync 条目追加过滤说明）
+- 跨仓 sillyspec：src/spec-sync.js（walk 排除 local.yaml）+ test/platform-spec-sync-incremental.test.mjs（+2 断言），其主干 commit 1927721
+需求：local.yaml（含 shpsync_/shmcp_ token 的机器本地连接配置）随 spec 树同步落服务器 landing 树，且 build_bundle 会把 token 原样分发到其他成员机器（spec-file-incremental-sync 验证期发现的 P2）。
+根因：daemon/CLI 上传排除清单只排 .runtime/runtime/projects（目录）+ worktrees（剪枝），local.yaml 是文件未被覆盖；服务器侧无任何消费方（dispatch 读 local.yaml 走 daemon RPC 在成员机本地读，不读 landing 树）。
+方案：backend spec_workspace 服务器侧三处统一过滤（apply_ops 拒 add/update/rename-to 静默丢弃 + delete 放行清存量行 / tar 解包跳过该成员 / bundle 导出跳过）+ CLI spec-sync.js walk 排除（双侧对齐）；daemon 生产端不动（服务器过滤覆盖任意版本生产者）。
+结果：backend 187 passed + 1 skip（Windows symlink 预存）、sillyspec 218 files 0 failures、ruff/mypy 全过；main 0791971b + sillyspec 1927721。遗留：daemon spec-sync.ts 生产端排除（省 token 字节上行，非必需）待 daemon 下次迭代顺手加。备注：--done 边界审计拦的 5 个 scan 文档（SillyHub/scan 4 改 + _env-detect 新增）是并行 scan-into-session 会话的工作区改动非本 quick 所为，--force-baseline 仅解锁关闭未触碰彼方文件。
