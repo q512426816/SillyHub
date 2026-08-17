@@ -28,6 +28,8 @@ class AgentSessionRead(BaseModel):
     last_active_at: datetime | None
     ended_at: datetime | None
     change_id: uuid.UUID | None
+    # ql-20260817-003：会话属主（前端消息时间线据此判断「我」；列表本就 user 隔离）。
+    user_id: uuid.UUID | None = None
     workspace_id: uuid.UUID | None
     # 2026-07-11-unify-runtime-session-dialog / FR-08: 首条 user_input 摘要前 30 字，
     # 由 router 层注入（非 ORM 字段）；FR-05 deleted_at 软删时间戳（ORM 直接映射）。

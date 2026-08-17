@@ -19,6 +19,20 @@ import { Bot, Wrench } from "lucide-react";
 import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
 import { RunErrorItem } from "@/components/agent-log/run-error-item";
 import type { ErrorLogItem } from "@/components/agent-log/normalize";
+
+/** ql-20260817-003：轮次发送时间格式化（今天只显 HH:mm，跨天带 MM-DD HH:mm）。 */
+function formatTurnTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  const hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  return sameDay ? hm : `${p(d.getMonth() + 1)}-${p(d.getDate())} ${hm}`;
+}
 import { ErrorBoundary } from "@/components/error-boundary";
 import { MarkdownText } from "@/components/ui/markdown-text";
 import type { SessionDialogRead, SessionPermissionRequest } from "@/lib/daemon";
@@ -101,6 +115,19 @@ export interface SessionTurnView {
     agentName: string;
     /** 供应商名；null=该轮用本机默认供应商。 */
     providerName: string | null;
+  };
+  /**
+   * ql-20260817-003：轮次发送者（共享守护进程场景多用户同会话）。父层从
+   * runs 快照（run.user_id + sender_name）注入。可选：不传（/runtimes 弹窗
+   * 旧组装 / 旧 run 无发送者数据）→ 用户气泡不显示发送行（零回归）。
+   */
+  sender?: {
+    /** 发送者显示名（后端 users.display_name）。 */
+    name: string;
+    /** true=会话属主（当前用户视角显示「我」）。 */
+    me?: boolean;
+    /** 轮次开始时间 ISO（无则前端不显示时间）。 */
+    at: string | null;
   };
 }
 
@@ -206,7 +233,14 @@ export function TurnTimeline({
             <div key={turn.runId} className="space-y-2.5">
               {/* 用户消息气泡（右）。attach 中途接入的 unknown-run turn 无 prompt，不渲染。 */}
               {turn.prompt && (
-                <div className="flex justify-end">
+                <div className="flex flex-col items-end gap-0.5">
+                  {/* ql-20260817-003：发送者 + 时间（可选，缺省不渲染零回归）。 */}
+                  {turn.sender && (
+                    <span className="px-1 text-[10.5px] text-muted-foreground">
+                      {turn.sender.me ? "我" : turn.sender.name}
+                      {turn.sender.at ? ` · ${formatTurnTime(turn.sender.at)}` : ""}
+                    </span>
+                  )}
                   <div className="max-w-[82%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-sm">
                     <div className="whitespace-pre-wrap break-words">{turn.prompt}</div>
                   </div>

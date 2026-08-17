@@ -1642,6 +1642,10 @@ class SessionRunRead(BaseModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     exit_code: int | None = None
+    # ── ql-20260817-003：轮次发送者（守护进程共享场景多用户同会话发言）──
+    # 由 runs 查询 left join users 填充；旧 run 行 NULL → 前端不显示发送行（零回归）。
+    user_id: uuid.UUID | None = None
+    sender_name: str | None = None
     # ── gap-fix：轮次配置快照（FR-07 / D-008@v1）+ usage（FR-08 / R-06）────
     agent_profile_snapshot: dict | None = None
     llm_provider_id: uuid.UUID | None = None
@@ -2196,22 +2200,23 @@ async def list_session_runs(
     与 get_session_detail 的 run 查询同款。
     """
     from app.modules.agent.model import AgentRun
+    from app.modules.auth.model import User as AuthUser
 
     svc = DaemonService(session)
     # 归属 / 存在性校验（404 on missing / cross-user / soft-deleted）。
     await svc.get_agent_session(session_id, user.id)
-    runs = (
-        (
-            await session.execute(
-                select(AgentRun)
-                .where(AgentRun.agent_session_id == session_id)
-                .order_by(AgentRun.started_at.desc())
-            )
+    rows = (
+        await session.execute(
+            select(AgentRun, AuthUser.display_name)
+            .join(AuthUser, AuthUser.id == AgentRun.user_id, isouter=True)
+            .where(AgentRun.agent_session_id == session_id)
+            .order_by(AgentRun.started_at.desc())
         )
-        .scalars()
-        .all()
-    )
-    return [SessionRunRead.model_validate(r) for r in runs]
+    ).all()
+    return [
+        SessionRunRead.model_validate(run).model_copy(update={"sender_name": display_name})
+        for run, display_name in rows
+    ]
 
 
 @router.get(

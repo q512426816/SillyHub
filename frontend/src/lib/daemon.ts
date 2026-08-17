@@ -1203,6 +1203,9 @@ export interface SessionRunRead {
   llm_provider_id: string | null;
   input_tokens: number | null;
   output_tokens: number | null;
+  /** ql-20260817-003：轮次发送者（旧 run 行为 null → 前端不显示发送行）。 */
+  user_id: string | null;
+  sender_name: string | null;
 }
 
 /**

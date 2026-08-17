@@ -696,6 +696,8 @@ class TestPlainInjectZeroRegression:
         assert run.agent_profile_snapshot is not None
         assert run.llm_provider_id == provider_a.id
         assert run.status == "pending"
+        # ql-20260817-003：轮次发送者=本轮注入者。
+        assert run.user_id == uid
 
         # 会话三列不动。
         await db_session.refresh(created.agent_session)

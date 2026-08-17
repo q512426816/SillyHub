@@ -8197,6 +8197,8 @@ export interface components {
             ended_at: string | null;
             /** Change Id */
             change_id: string | null;
+            /** User Id */
+            user_id?: string | null;
             /** Workspace Id */
             workspace_id: string | null;
             /** Title */
@@ -15103,6 +15105,10 @@ export interface components {
             finished_at?: string | null;
             /** Exit Code */
             exit_code?: number | null;
+            /** User Id */
+            user_id?: string | null;
+            /** Sender Name */
+            sender_name?: string | null;
             /** Agent Profile Snapshot */
             agent_profile_snapshot?: {
                 [key: string]: unknown;

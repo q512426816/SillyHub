@@ -197,6 +197,8 @@ function makeSession(
     status: "active",
     agent_session_id: "sdk-1",
     config: null,
+    // ql-20260817-003：会话属主（发送者「我」判断）。
+    user_id: "u-owner",
     config_snapshot: {
       profile_name: "知识经理",
       provider_name: null,
@@ -554,5 +556,44 @@ describe("SessionPanel attach 历史 whoLine + usage 注入（gap-fix）", () =>
       expect(screen.getByText("提问内容")).toBeTruthy();
     });
     expect(screen.queryByLabelText("轮次配置快照")).toBeNull();
+  });
+
+  it("用户消息气泡显示发送者+时间（ql-20260817-003：会话属主=我 / 他人=用户名）", async () => {
+    mocks.getAgentSessionLogs.mockResolvedValue([
+      makeHistoryLog("log-7", "r-1", "user_input", "属主发言"),
+      makeHistoryLog("log-8", "r-1", "stdout", "答复。"),
+      makeHistoryLog("log-9", "r-2", "user_input", "他人发言"),
+      makeHistoryLog("log-10", "r-2", "stdout", "答复2。"),
+    ]);
+    mocks.listSessionRuns.mockResolvedValue([
+      makeRunItem({
+        id: "r-1",
+        user_id: "u-owner",
+        sender_name: "WhaleFall",
+        started_at: "2026-08-15T08:00:00Z",
+      }),
+      makeRunItem({
+        id: "r-2",
+        user_id: "u-other",
+        sender_name: "张三",
+        started_at: "2026-08-15T09:00:00Z",
+      }),
+    ]);
+
+    renderPage();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
+    );
+
+    // 属主 → 「我」；他人 → 用户名；都带时间（今天=HH:mm，跨天=MM-DD HH:mm）
+    const timePat = "(?:\\d{2}:\\d{2}|\\d{2}-\\d{2} \\d{2}:\\d{2})";
+    await waitFor(() => {
+      expect(
+        screen.getByText(new RegExp(`^我 · ${timePat}$`)),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText(new RegExp(`^张三 · ${timePat}$`)),
+    ).toBeInTheDocument();
   });
 });

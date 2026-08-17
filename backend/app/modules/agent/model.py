@@ -156,6 +156,18 @@ class AgentRun(BaseModel, table=True):
             nullable=True,
         ),
     )
+    # ── 轮次发送者（ql-20260817-003：守护进程可共享，同一会话可能多用户发言） ──
+    # 记录本轮 turn 的发起者（create=会话创建者；inject=实际注入者；service 路径
+    # =会话属主）。前端消息时间线据此显示「用户名 · 时间」；用户删则 SET NULL
+    # （历史保留）。旧 run 行 NULL=历史无发送者数据，前端不显示发送行（零回归）。
+    user_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
     diff_summary: str | None = Field(
         default=None,
         sa_column=Column(Text, nullable=True),

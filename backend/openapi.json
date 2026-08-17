@@ -26922,6 +26922,18 @@
             ],
             "title": "Change Id"
           },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
           "workspace_id": {
             "anyOf": [
               {
@@ -46657,6 +46669,29 @@
               }
             ],
             "title": "Exit Code"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "sender_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender Name"
           },
           "agent_profile_snapshot": {
             "anyOf": [

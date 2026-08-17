@@ -752,6 +752,8 @@ class SessionService:
                 spec_strategy="interactive",
                 agent_session_id=session.id,
                 change_id=change_id,
+                # ql-20260817-003：首轮发送者=会话创建者。
+                user_id=user_id,
                 agent_profile_id=profile.id if profile is not None else None,
                 agent_profile_snapshot=(
                     _build_agent_profile_snapshot(profile) if profile is not None else None
@@ -1040,6 +1042,8 @@ class SessionService:
         return await self._inject_into_session(
             session,
             prompt=prompt,
+            # ql-20260817-003：轮次发送者=实际注入者。
+            run_sender_user_id=user_id,
             # sessions-portal task-05：切换参数透传共享核心（service 路径不传=零回归）。
             agent_profile_id=agent_profile_id,
             llm_provider_id=llm_provider_id,
@@ -1086,13 +1090,21 @@ class SessionService:
         except Exception:
             await self._session.rollback()
             raise
-        return await self._inject_into_session(session, prompt=prompt)
+        return await self._inject_into_session(
+            session,
+            prompt=prompt,
+            # ql-20260817-003：service 身份代写轮——发送者记会话属主。
+            run_sender_user_id=session.user_id,
+        )
 
     async def _inject_into_session(
         self,
         session: AgentSession,
         *,
         prompt: str,
+        # ql-20260817-003：轮次发送者（run.user_id）——inject_session 传实际注入
+        # 的 user_id，inject_session_as_service（平台审批代写）传会话属主。
+        run_sender_user_id: uuid.UUID | None = None,
         # sessions-portal task-05：切档案/切供应商（None=不动；llm_provider_id
         # 空串="none" 清空回本机默认）。service 身份路径（inject_session_as_service）
         # 不传 → 走原有 inject 行为（零回归）。
@@ -1239,6 +1251,9 @@ class SessionService:
                 status="pending",
                 spec_strategy="interactive",
                 agent_session_id=session.id,
+                # ql-20260817-003：轮次发送者=本轮注入者（_inject_into_session 的
+                # 调用方注入：inject_session=实际 user；service 路径=会话属主）。
+                user_id=run_sender_user_id,
             )
             # task-05 / D-008（ql-20260815-010 修正为每轮落快照）：新 run 带本轮
             # 生效配置——切换轮=新值；普通轮=会话当前值（沿用），无配置=NULL 如实。

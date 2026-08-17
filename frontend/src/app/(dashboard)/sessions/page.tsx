@@ -479,6 +479,16 @@ function SessionPanel({
       if (!meta) return t;
       return {
         ...t,
+        // ql-20260817-003：轮次发送者（run.user_id + sender_name；旧 run NULL 不显示）。
+        sender:
+          t.sender ?? (meta.user_id && meta.sender_name
+            ? {
+                name: meta.sender_name,
+                // 会话属主 = 当前用户时显示「我」；其它用户显示真实名（共享守护进程场景）。
+                me: meta.user_id === session?.user_id,
+                at: meta.started_at ?? null,
+              }
+            : undefined),
         whoLine: t.whoLine ?? {
           // 快照缺 name / 无快照 = 该轮未指定档案 → null（TurnTimeline 显「未指定」）
           profileName: meta.agent_profile_snapshot?.name ?? null,

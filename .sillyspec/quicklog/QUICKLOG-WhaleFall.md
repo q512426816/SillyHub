@@ -416,3 +416,12 @@
 根因：第二行 flex 单行 nowrap + 固定行高 64px，只能靠截断塞下，长名全被省略号吞掉。
 方案：chips 容器改 flex-wrap 自动换行（至多 3 行）；虚拟行高 64→96px 容纳；Tag 保留紧凑样式，长名 max-w 放宽（机器 120/档案 150/供应商 130）+truncate+title 悬停全名，防单个长名独占整行；引擎/轮数 shrink-0。
 结果：list-panel 13 用例全过，tsc 0 错，eslint 0。待部署。
+
+## ql-20260817-003-8799 | 2026-08-17 10:07:33 | 会话消息里用户发送的消息要显示用户名（守护进程可共享
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+需求：会话消息里用户发送的消息要显示用户名（守护进程可共享，可能多用户同会话发言）+ 每则消息显示发送时间。
+根因：数据模型 run/log 都无发送者字段（会话单 owner），时间线无从显示。
+方案：后端 AgentRun 加 user_id（FK users SET NULL，迁移 20260817090000），create=创建者/inject=实际注入者/service 代写=会话属主；runs 查询 left join users 暴露 user_id+sender_name；AgentSessionRead 暴露 user_id（前端判「我」）；前端 SessionTurnView 加可选 sender，TurnTimeline 用户气泡上方渲染「我/用户名 · 时间」（今天 HH:mm、跨天 MM-DD HH:mm），page 从 runs 快照注入（旧 run 无发送者=NULL 不显示零回归）。
+结果：后端 daemon 全量 800 passed；前端全量 155 文件/1590 全绿（新增发送者渲染用例）；tsc/eslint/ruff 0；gen:types 同步。待 commit+push+rebuild backend/frontend 部署（含迁移）。
