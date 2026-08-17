@@ -1,4 +1,4 @@
-<!-- SillySpec v3.26.1 — 由 sillyspec init 生成，可自由编辑；重跑 init 同版本不更新 -->
+<!-- SillySpec v3.26.9 — 由 sillyspec init 生成，可自由编辑；重跑 init 同版本不更新 -->
 # Claude Code 指引
 
 ## 项目说明
@@ -13,7 +13,7 @@
 6. **判规模选档**：≤3 文件、范围明确走 `quick`；多阶段 / 架构级走完整流程。
 7. **代码先行不补流程（倒推 B 模式）**：代码若已先写好，**不回头补 brainstorm/plan 装样子**——用 `quick --done` 收尾 + 补 quicklog 条目，把已落盘改动如实登记进进度库。
 8. **实证核验再 `--done`**：`quick --done` 前，触及 `src`/`test` 的改动先 `npm test` + `npm run lint`；纯 doc/配置改动可跳过（lint 不扫 docs/，空转无信息），以落盘文件与测试结果为准，不信口头"已完成"。
-9. **中途停下用 `sillyspec status` / `sillyspec resume` 存进度**，不直接 commit 半成品。
+9. **中途停下不靠额外命令存进度**——进度已由上一次 `--done` 自动落盘；恢复时用 `sillyspec progress show` 查看进度，再用 `sillyspec run <stage>` 续跑，不直接 commit 半成品。
 10. **实现完成后对照文档验收**（design.md / 模块文档），并检查是否影响已有测试。
 11. **非测试逻辑本身有误时，禁止改测试来"通过"**——修逻辑，不修测试。
 12. **hook 拦截提交时禁止跳过**（`.husky/pre-push`），修复问题后再提交。

@@ -80,7 +80,7 @@ sillyspec knowledge inspect --id "generated/worktree-baseline-conflict"
     "zone": "manual",
     "path": "knowledge/patterns.md",
     "meta": {
-      "author": "qinyi",
+      "author": "<git-user>",
       "created_at": "2026-06-19T12:40:00+08:00",
       "updated_at": "2026-06-24T10:00:00+08:00"
     },

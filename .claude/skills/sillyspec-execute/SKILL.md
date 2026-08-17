@@ -33,8 +33,7 @@ sillyspec run execute --reopen --from-step N   # 重新打开已完成阶段修�
 | `--change <名>` | 指定变更名（多活跃变更必填，单变更可省略自动检测） |
 | `--spec-dir <path>` | 指定规范目录（默认 `<项目>/.sillyspec`） |
 | `--non-interactive` | CI/脚本下禁用交互式 prompt |
-| `--skip-approval` | 跳过审批/校验门控（需明确意图） |
-| `--json` | 输出 JSON（程序化读取） |
+| `--skip-approval` | 跳过阶段转换/审批检查（不能跳产物校验 gate——review.json/文档产物硬校验仍在） |
 
 ## execute 特有：Worktree 隔离
 
@@ -55,6 +54,14 @@ sillyspec worktree doctor --fix --change <变更名>
 ```
 
 `linked / installed / n/a` 放行；`missing / stale / failed / unknown` 阻断。Wave 内所有 task 声明 `no_deps_verify: true` 时可 opt-out。
+
+### 符号影响面报告（「加载上下文」步硬门）
+
+execute 前缀步「加载上下文」的 `--done` 会硬校验符号影响面报告：
+
+- 路径：`{SPEC_ROOT}/changes/<变更名>/symbol-impact.md`（步骤 prompt 中会输出具体路径）。
+- 要求：plan.md 中**每个 task-XX 都要有一行结论**——涉及签名级变更（构造函数参数/接口/DTO/方法签名增删改）就列变更类型 + 受影响调用点 + 是否在任务范围内；无签名级变更也要显式写「无签名级变更」。
+- 文件缺失或未覆盖全部 task → `--done` 被阻断（进度不推进），补全后重跑即可。
 
 ### Task Review Gate
 
@@ -109,6 +116,7 @@ execute 还有**第二道**独立的 stage 级审查：除逐 task review.json �
 
 - `docHash` = `sha256(主审查文档内容)`（hex）—— execute 主审查文档是 `design.md`，即 `reviewedFiles[0]`。CLI 会重算 sha256 比对，不符判伪造（fail-closed）；找不到主文档也 fail。**改 design.md 后须重算 docHash 再写**，可用 `sillyspec run execute --done` 触发的 prompt 注入版契约（运行时注入的 schema 表 + JSON 示例 + docHash 算法）逐字改值。
 - `tier=independent` 时必须由独立 QA 子代理产出该 review.json（独立上下文，不共享实现者分析）；`tier=self`（变更 ≤3 文件）降级为当前 agent 自审。
+- **审查范围分级**（tier=independent 时省重复消耗）：Task Review Gate 已产出 review.json 且 specVerdict/qualityVerdict 双 pass 的 task，QA 子代理只抽查（读 1-2 个核心 diff 文件抽验 reviewerNotes 与实际改动相符）；fail/cannot_verify/缺失的 task 全量重审。三项始终必查：跨 task 交界、design.md 整体对照、组装行为（全量测试/构建/启动）——task review 只看单 task diff，覆盖不到这三项。
 - 该 acceptance review 同时覆盖"代码审查"视角，后续代码审查步骤仅需轻量复审。
 
 > 运行时 CLI 会把精确 schema 表 + 完整 JSON 示例 + docHash 算法注入到该步 prompt。本段为常驻摘要；以你实际收到的注入版契约为权威逐字模板。
@@ -129,8 +137,8 @@ execute 还有**第二道**独立的 stage 级审查：除逐 task review.json �
 - **local.yaml `repos:` 段**：在 `.sillyspec/local.yaml` 注册跨仓仓路径（`main` 不用注册，隐式=当前项目）：
   ```yaml
   repos:
-    sillyspec: C:/Users/qinyi/IdeaProjects/sillyspec
     shared-lib: ../shared-lib
+    tool-repo: C:/path/to/your/tool-repo
   ```
   task 卡 `repo:` 引用的 key 必须在此注册，否则 execute 启动 fail-closed 阻断（跨仓 apply 走错仓=数据所有权事故，配置错误不降级）。
 - **跨仓 task 的 `allowed_paths`**：指**相对跨仓仓根**的路径（非主仓根）。

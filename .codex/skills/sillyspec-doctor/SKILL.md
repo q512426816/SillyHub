@@ -63,6 +63,8 @@ sillyspec runtime list                                              # 枚举 .si
 > `--cleanup-remnant` 清理 init/平台切换残留的 0 字节空 db（占位但无数据）。默认 dry-run 只报告，`--confirm` 才删。绝不删有内容的 db。
 >
 > `runtime list` 是只读枚举：列出 `.sillyspec/.runtime/` 下的 db、doctor-diagnosis.json、workflow-runs/、user-inputs.md 等产物及用途。多会话/压缩后想知道「我手上有哪些证据文件」时用。加 `--json` 程序化读取。
+>
+> `doctor --json` 的 pointer_health 维度含 `pointer_missing_but_managed` 信号：项目根存在平台接管声明（`.sillyspec-platform-managed`）但恢复指针缺失——此状态下裸调命令会 fail-closed 拒绝静默落本地。恢复路径见信号文案：重跑平台 scan 重建指针 / `sillyspec platform disconnect` 彻底脱离 / 显式 `--spec-dir` 临时指定。
 
 ## 铁律
 

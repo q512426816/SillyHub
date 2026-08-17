@@ -35,7 +35,6 @@ sillyspec run status --status                  # 查看阶段状态
 |---|---|
 | `--change <名>` | 指定变更名（多变更时查看指定变更详情） |
 | `--spec-dir <path>` | 指定规范目录（默认 `<项目>/.sillyspec`） |
-| `--json` | 输出 JSON（程序化读取） |
 
 ## 配套的只读查询命令（不经 run）
 

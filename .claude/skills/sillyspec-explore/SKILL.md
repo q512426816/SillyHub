@@ -30,7 +30,6 @@ sillyspec run explore --status                     # 查看阶段状态
 |---|---|
 | `--change <名>` | 指定变更名（多活跃变更时） |
 | `--spec-dir <path>` | 指定规范目录（默认 `<项目>/.sillyspec`） |
-| `--json` | 输出 JSON（程序化读取） |
 
 ## 这是什么模式
 

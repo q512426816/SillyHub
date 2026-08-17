@@ -41,8 +41,7 @@ sillyspec run brainstorm --done --answer "..." --output "..."    # 一步完成 
 | `--spec-dir <path>` | 指定规范目录（默认 `<项目>/.sillyspec`） |
 | `--non-interactive` | CI/脚本下禁用交互式 prompt |
 | `--interactive` | 强制交互（即便 stdin 非 TTY） |
-| `--skip-approval` | 跳过审批/校验门控（需明确意图） |
-| `--json` | 输出 JSON（程序化读取） |
+| `--skip-approval` | 跳过阶段转换/审批检查（不能跳产物校验 gate——review.json/文档产物硬校验仍在） |
 
 ## brainstorm 特有：requiresWait 步骤
 

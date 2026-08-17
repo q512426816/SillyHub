@@ -76,3 +76,5 @@ sillyhub-daemon/.sillyhub/
 # Test artefacts (alembic migration smoke test 产物, 勿提交)
 backend/test_alembic.db
 backend/*.db-journal
+.sillyspec-platform-managed
+.sillyspec-platform-cleaned
