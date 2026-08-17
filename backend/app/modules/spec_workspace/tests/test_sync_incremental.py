@@ -900,3 +900,164 @@ class TestPrefetchEquivalence:
 
 # Suppress unused-import warning for pytest (used for fixture discovery in some setups).
 pytestmark = pytest.mark.asyncio
+
+
+# ===========================================================================
+# ql-20260818-002：local.yaml 服务器侧三处过滤（token 不落 landing 树 / 不跨机分发）
+# ===========================================================================
+
+
+class TestLocalYamlExcluded:
+    async def test_add_local_yaml_filtered_silently(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path
+    ) -> None:
+        """过滤点①：add local.yaml 静默丢弃——200 但不落盘、无清单行、不置 conflict。"""
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+
+        resp = await client.post(
+            f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
+            headers=auth_headers,
+            json={"ops": [_op("add", "local.yaml", base_version=0, content=_b64("token: x"))]},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["new_versions"] == {}
+        assert body["conflict"] is False
+        assert not (spec_root / "local.yaml").exists()
+        rows = (
+            (
+                await db_session.execute(
+                    select(SpecFileManifest).where(SpecFileManifest.workspace_id == ws.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert rows == []
+
+    async def test_rename_to_local_yaml_filtered(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path
+    ) -> None:
+        """过滤点①：rename new_path=local.yaml 丢弃（写入目标是排除名）。"""
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+        # 先正常落一个源文件
+        await client.post(
+            f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
+            headers=auth_headers,
+            json={"ops": [_op("add", "docs/A.md", base_version=0, content=_b64("# A"))]},
+        )
+
+        resp = await client.post(
+            f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
+            headers=auth_headers,
+            json={"ops": [_op("rename", "docs/A.md", base_version=1, new_path="local.yaml")]},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["new_versions"] == {}
+        # 源文件不动（rename 整个被丢弃）
+        assert (spec_root / "docs" / "A.md").read_text(encoding="utf-8") == "# A"
+        assert not (spec_root / "local.yaml").exists()
+
+    async def test_delete_local_yaml_cleans_stale_row(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path
+    ) -> None:
+        """delete 放行：清存量 landing 树历史 local.yaml 行（软删入备份区）。"""
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+        # 造存量：真实文件 + 清单行（模拟旧版本生产者已上传过）
+        (spec_root).mkdir(parents=True, exist_ok=True)
+        (spec_root / "local.yaml").write_text("token: stale", encoding="utf-8")
+        db_session.add(
+            SpecFileManifest(
+                id=uuid.uuid4(),
+                workspace_id=ws.id,
+                path="local.yaml",
+                content_hash=hashlib.sha256(b"token: stale").hexdigest(),
+                version=1,
+                exists=True,
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.post(
+            f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
+            headers=auth_headers,
+            json={"ops": [_op("delete", "local.yaml", base_version=1)]},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["new_versions"] == {"local.yaml": 2}
+        assert not (spec_root / "local.yaml").exists()
+        row = (
+            (
+                await db_session.execute(
+                    select(SpecFileManifest).where(
+                        SpecFileManifest.workspace_id == ws.id,
+                        SpecFileManifest.path == "local.yaml",
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert row.exists is False
+        assert row.version == 2
+
+    async def test_tar_ingest_skips_local_yaml_member(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path
+    ) -> None:
+        """过滤点②：整包 tar 含 local.yaml 成员不落盘（整包覆盖语义下即从服务器树移除）。"""
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+
+        tar_bytes = _build_tar({"docs": None, "docs/T.md": b"# T", "local.yaml": b"token: x"})
+        with (
+            patch(
+                "app.modules.scan_docs.service.ScanDocsService.reparse",
+                new=AsyncMock(
+                    return_value=({"parsed": 0, "created": 0, "updated": 0, "deleted": 0}, None)
+                ),
+            ),
+            patch(
+                "app.modules.change.service.ChangeService.reparse",
+                new=AsyncMock(
+                    return_value=({"parsed": 0, "created": 0, "updated": 0, "deleted": 0}, None)
+                ),
+            ),
+        ):
+            resp = await client.post(
+                f"/api/workspaces/{ws.id}/spec-workspace/sync",
+                headers={**auth_headers, "Content-Type": "application/x-tar"},
+                content=tar_bytes,
+            )
+        assert resp.status_code == 200, resp.text
+        assert (spec_root / "docs" / "T.md").read_text(encoding="utf-8") == "# T"
+        assert not (spec_root / "local.yaml").exists()
+
+    async def test_build_bundle_excludes_local_yaml(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path
+    ) -> None:
+        """过滤点③：bundle 导出跳过 local.yaml（landing 树存量文件也不出服务器）。"""
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+        spec_root.mkdir(parents=True, exist_ok=True)
+        (spec_root / "docs").mkdir()
+        (spec_root / "docs" / "T.md").write_text("# T", encoding="utf-8")
+        # 存量残留（历史版本生产者上传过的 local.yaml 还在树上）
+        (spec_root / "local.yaml").write_text("token: stale", encoding="utf-8")
+
+        resp = await client.get(
+            f"/api/workspaces/{ws.id}/spec-workspace/bundle", headers=auth_headers
+        )
+        assert resp.status_code == 200, resp.text
+        with tarfile.open(fileobj=io.BytesIO(resp.content), mode="r:*") as tf:
+            names = {m.name for m in tf.getmembers()}
+        assert "docs/T.md" in names
+        assert "local.yaml" not in names

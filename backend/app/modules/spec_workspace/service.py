@@ -23,7 +23,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -59,6 +59,27 @@ SPEC_BACKUP_RETENTION_DAYS = 30
 # design 兼容策略授权），流程结束 finally 终态回写保证数值最终准确（R-02）。
 BATCH_FLUSH_FILES = 50
 BATCH_FLUSH_INTERVAL_S = 0.5
+
+# ql-20260818-002：local.yaml（机器本地连接配置，platform/mcp 段含 shpsync_/shmcp_
+# token）不是平台管理的 spec 内容——落服务器 landing 树会被 build_bundle 原样分发到
+# 其他成员机器（token 跨机泄漏）。服务器侧三处统一过滤（apply_ops ① /
+# _extract_spec_tar_to_staging ② / build_bundle ③），按文件名任意深度命中，覆盖
+# 任意生产者版本（旧 daemon 整包 tar / CLI 增量 ops / 未来新端点）；delete 放行
+# 用于清存量 landing 树的历史 local.yaml 行（软删入备份区，不入浏览树/导出包）。
+# 生产端（CLI spec-sync.js / daemon）同步排除属优化非必需，daemon 侧留遗留。
+SERVER_EXCLUDED_FILENAMES = frozenset({"local.yaml"})
+
+
+def _is_server_excluded_write(op: "FileOp") -> bool:
+    """op 是否为被排除文件名的**写入**（add/update 看 path / rename 看 new_path）。
+
+    delete 不算写入——放行以清理存量行；rename FROM 被排除名（path 命中）等效移走
+    旧文件，同样放行。
+    """
+    if op.op == "delete":
+        return False
+    target = op.new_path if op.op == "rename" else op.path
+    return PurePosixPath(target).name in SERVER_EXCLUDED_FILENAMES
 
 
 def _spec_bundle_invalid(message: str, **details: object) -> AppError:
@@ -637,6 +658,10 @@ class SpecWorkspaceService:
                     # Exclude .runtime/ at any depth.
                     if any(part == ".runtime" for part in rel.parts):
                         continue
+                    # ql-20260818-002 过滤点③：local.yaml 不随 bundle 下发（token
+                    # 不跨机分发）；landing 树存量文件即使残留也不出服务器。
+                    if path.name in SERVER_EXCLUDED_FILENAMES:
+                        continue
                     tar.add(path, arcname=str(rel), recursive=False)
             buf.seek(0)
             while True:
@@ -667,6 +692,7 @@ class SpecWorkspaceService:
             ) from e
 
         staging = Path(tempfile.mkdtemp(prefix="spec-sync-"))
+        members: list[tarfile.TarInfo] = []
         for m in tf.getmembers():
             name = m.name.replace("\\", "/")
             if name.startswith("/") or (len(name) > 1 and name[1] == ":"):
@@ -682,8 +708,13 @@ class SpecWorkspaceService:
                     "同步包无效：包含越界路径的成员，已拒绝落盘。",
                     member=m.name,
                 ) from None
+            # ql-20260818-002 过滤点②：local.yaml 成员不落 staging（整包覆盖语义下
+            # 即从服务器树移除）；越界校验仍全量跑（坏成员照旧 422 拒整体）。
+            if PurePosixPath(name).name in SERVER_EXCLUDED_FILENAMES:
+                continue
+            members.append(m)
 
-        tf.extractall(staging, filter="fully_trusted")
+        tf.extractall(staging, members=members, filter="fully_trusted")
         return tf, staging
 
     async def _write_spec_root(
@@ -1132,6 +1163,11 @@ class SpecWorkspaceService:
             self._validate_op_path(op.path, spec_root, spec_root_resolved, field="path")
             if op.new_path is not None:
                 self._validate_op_path(op.new_path, spec_root, spec_root_resolved, field="new_path")
+
+        # ql-20260818-002 过滤点①：local.yaml 写 op 静默丢弃（不落盘 / 不进
+        # new_versions / 不置 conflict，生产者据此幂等重推也无副作用）；delete
+        # 放行清存量行。过滤在预校验后：路径合法性照验，仅拒内容落盘。
+        ops = [op for op in ops if not _is_server_excluded_write(op)]
 
         now = datetime.now(UTC)
         new_versions: dict[str, int] = {}
