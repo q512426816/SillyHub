@@ -398,3 +398,12 @@
 根因：①session-config-bar.tsx 有独立 runtimeLabel（仍 name 优先=主机名），且控件当前值 agentName 读 config_snapshot.agent_name——后端快照存的 runtime.name 本来就默认是主机名；②page.tsx 标题 || '未命名会话' 占位渲染，复制反馈用 setState 交换按钮文字。
 方案：①runtimeLabel 改 PROVIDER_META 引擎名优先（别名=别名·引擎名），agentName 改引擎显示名（快照 agent_name 降为引擎缺失时兜底）——标签变短下拉恢复正常观感；②title 空时不渲染 span，复制成功 message.success('已复制会话 ID')/失败 message.error，删除 idCopied 状态与 2s 定时器；测试 mock 改 importOriginal 保留 PROVIDER_META 真常量。
 结果：config-bar 17 用例+page 8 用例全过，前端全量 153 文件/1551 全绿，tsc 0 错，eslint 0 error。待 commit+push+rebuild frontend 部署。
+
+## ql-20260817-001-1ce1 | 2026-08-17 08:52:49 | 310px 列宽下第二行五个 Tag（机器+引擎+档案+供应商+轮数）太挤
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/sessions/session-list-panel.tsx
+需求：310px 列宽下第二行五个 Tag（机器+引擎+档案+供应商+轮数）太挤，机器主机名长把整行撑爆。
+根因：chips 全部默认 Tag 样式（默认 padding/字号 12px）无宽度约束，机器/档案/供应商名长短不可控。
+方案：Tag 紧凑化（rounded-sm px-1 py-0 text-[10px] leading-4）；机器/档案/供应商长名 max-w（104/110/104px）+truncate + title 悬停全名；引擎与轮数 shrink-0 恒可见；行 gap 1→0.5、pl-3→pl-2.5。虚拟行高 64px 不变（虚拟滚动约束）。
+结果：list-panel 13 用例全过（含 chips 断言），前端全量 155 文件/1589 全绿，tsc 0 错、eslint 0。待部署。
