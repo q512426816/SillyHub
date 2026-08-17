@@ -1,49 +1,54 @@
 ---
 author: qinyi
-created_at: 2026-07-27 00:35:31
-source_commit: 5a00fc7e
-updated_at: 2026-07-26T16:35:31Z
+created_at: 2026-08-18 01:06:26
+source_commit: 744e3de4
+updated_at: 2026-08-17T17:06:26Z
 generator: sillyspec-scan
 ---
 
-# 测试(Testing)
+# 测试（Testing）
 
-SillyHub 三端各自独立测试栈,统一目标:变更后零回归才允许合入主干。所有静态检查(ruff / mypy / 两端 tsc)要求全绿,作为"零静态债务"基线。产品根 `package.json` 的 `test` 仅为占位(默认 `echo && exit 1`),所有测试在 3 个子项目内运行,或经根 `Makefile` 聚合。
+SillyHub 三端（backend / frontend / sillyhub-daemon）各自独立测试栈，根 `Makefile` 聚合统一入口：`make test` = backend-test + frontend-test + daemon-test；`make lint` = backend-lint（ruff check + format check + mypy）+ frontend-lint + daemon-typecheck。仓库根当前无 `package.json`，测试全部在子项目内运行。
 
 ## 测试栈
 
-| 端 | 框架 | 配置入口 | 关键依赖 |
+| 端 | 框架 | 配置入口 | 要点 |
 |---|---|---|---|
-| backend | pytest | `backend/pyproject.toml [tool.pytest.ini_options]`(`testpaths=["tests","app"]`,`asyncio_mode=auto`) | pytest-asyncio / pytest-xdist(`-n auto` 并行) / pytest-cov / aiosqlite(单测 DB) |
-| frontend | vitest 2.0 + jsdom | `frontend/package.json` scripts.`test`="vitest run" | @testing-library/react / @testing-library/jest-dom / openapi-typescript(类型生成) |
-| daemon | vitest(node 环境) | `sillyhub-daemon/vitest.config.ts` + `vitest.spikes.config.ts` | forks 池(`maxForks: 8`) / 30s testTimeout |
+| backend | pytest | `backend/pyproject.toml [tool.pytest.ini_options]` | `asyncio_mode=auto`；`testpaths=["tests","app"]` 同时发现集成套件与模块内单测；`addopts="-ra -o dist=loadscope"`（xdist 按模块分组绑 worker，消除跨模块状态交叉 flaky） |
+| frontend | vitest 2.0 + jsdom | `frontend/vitest.config.ts` + `package.json` scripts | `clearMocks` 自动清调用计数；`testTimeout=15000` 治全量并行超时；纯逻辑测试经 `environmentMatchGlobs` 白名单切 node 环境省 jsdom 启动 |
+| daemon | vitest（node 环境） | `sillyhub-daemon/vitest.config.ts` | forks 池 `maxForks: 8`（I/O 密集用例限并行防磁盘争用）；`testTimeout=30000`；`test` script 带 `--passWithNoTests` |
 
-## 测试规模(实测,source_commit 6e78b29a)
+测试依赖（`backend/pyproject.toml [project.optional-dependencies].dev`）：pytest-asyncio / pytest-xdist（`-n auto` 并行，全量从约 50 分钟压到分钟级）/ pytest-cov / pytest-rerunfailures（CI flaky 重试兜底）/ aiosqlite（单测 DB）。frontend dev 依赖 @testing-library/react + @testing-library/jest-dom + jsdom（`frontend/package.json`）。
 
-- **backend**:68 个集成测试(`backend/tests/test_*.py`)+ 193 个模块内单测(`backend/app/modules/*/tests/test_*.py`)= **261 个测试文件**,另配 10 个 `conftest.py` fixture。基线 **2955 passed / 10 skipped / 5 xfailed**(`docs/code-quality-hardening-2026-07-24.md` §0)。
-- **frontend**:**115 个测试文件**(`frontend/src/**/*.test.ts(x)`)。基线 **1059 passed / 29 todo / 1 file skipped**。
-- **daemon**:**117 个测试文件**(`sillyhub-daemon/tests/**/*.test.ts`,分布 interactive 28 / policy 7 / adapters 7 / resilience 4 / spec-transport-tar-sync 3 等);探索性 spike 代码另走 `vitest.spikes.config.ts`(`include=['spikes/**/*.test.ts']`),**不进 CI 主套件**。基线 **1951 passed / 1~2 flaky 超时**。
+## 测试规模（Glob 实测，source_commit 744e3de4）
+
+- **backend**：`backend/tests/` 下 75 个 `test_*.py`（另 11 个 `__init__.py`）+ `backend/app/**/tests/` 模块内 284 个 `test_*.py`，合计约 359 个测试文件；conftest.py 共 13 个（根 `backend/conftest.py` + ppm 各子域 / file / mcp_gateway / change / daemon / workspace.member_runtimes / platform_sync 共 12 个模块级 fixture）。CI 注释口径：全量 4000+ 用例（`.github/workflows/backend-ci.yml` 超时注释，2026-08-15）。
+- **frontend**：157 个 `frontend/src/**/*.test.ts(x)`，覆盖页面（`app/`）、组件（`components/`）、lib 钩子与纯函数（`lib/__tests__/`）、store、middleware。
+- **daemon**：141 个 `sillyhub-daemon/tests/**/*.test.ts`（interactive 会话与驱动、policy、adapters、resilience、task-runner、spec 同步等）；spikes 探索性测试另走 `vitest.spikes.config.ts`（`include=['spikes/**/*.test.ts']`，串行 forks ≤2），不进 CI 主套件。
+
+## 守护测试
+
+- **错误文案中文化守护**：`backend/tests/core/test_error_message_l10n.py`——AST 扫描 `app/modules/` 下 `*router*.py` / `*service*.py` 及用户链路 core 文件的 raise / HTTPException detail，纯字面量与 f-string 常量段须含 CJK；机器对机器链路（daemon 内部 RPC、mcp_gateway 协议端点、platform_sync、storage）走排除清单，`PENDING_L10N_FILES` 渐进白名单逐步清空（依据 `.sillyspec/changes/archive/2026-08-15-error-message-l10n/design.md` §5.4）。
+- **审计挂载守护**：`backend/tests/core/test_audit_hooks_effective.py`（audit_hooks 全表挂载 + 手工审计点有效，依据 `2026-08-14-audit-system-completion` 归档 change）。
+- **类型漂移守护**：frontend 与 daemon 各有 `gen:types` / `gen:types:check` script（两端 `package.json`）——openapi-typescript 生成后 `git diff --exit-code`，前端 `src/lib/api-types.ts` / daemon `src/api-types.ts` 与后端 OpenAPI 漂移即红；daemon 侧同样纳入 CI。
+
+## CI（.github/workflows/，共 3 个）
+
+- **backend-ci.yml**：push / PR（paths `backend/**`）+ workflow_dispatch；步骤 = ruff check → ruff format --check → mypy app → `pytest -n auto -q --cov=app --cov-fail-under=60 --reruns 2 --reruns-delay 1`（PostgreSQL + Redis 服务容器，ENVIRONMENT=test）；job 超时 30 分钟（注释：全量 4000+ 用例 + 2 核 xdist + reruns 裕量，此前 15 分钟撞顶致 99% 被取消）。
+- **frontend-ci.yml**：push / PR（paths `frontend/**`）+ workflow_dispatch；lint + build + test 一体 job，超时 15 分钟，pnpm 9.6.0 + Node 20。
+- **scan-drift.yml**：PR + push main + workflow_dispatch；scan 文档 `source_commit` 漂移检测门，warn-only（`::warning` 文件注解 + 去重 PR 评论，不阻塞 merge）。
 
 ## 覆盖与门禁
 
-- backend 覆盖率目标 **≥ 60%**(`README.md` 开发指南 + `.sillyspec/.runtime/local.yaml` `backend_test` 带 `--cov-fail-under=60`);ruff + mypy 全绿是零容忍静态基线(`pyproject.toml [tool.mypy]` strict=false 但 `warn_unused_ignores=true`)。
-- frontend `pnpm gen:types:check`(`package.json` scripts)= 生成 `api-types.ts` 后 `git diff --exit-code`,守护前端类型与后端 OpenAPI 不漂移;tsc `--noEmit` + ESLint 必过。
-- daemon tsc 全绿;spec-sync(task-09)与 lease.kind 分流(D-002)为已知脆弱区,单文件/隔离均 <100ms,满载并行下偶发 30s 超时,重跑即过(`vitest.config.ts` 注释)。
-- SillySpec `test_strategy=module`:每个变更在 verify 阶段按受影响模块触发对应测试,而非全量跑。
+- backend 覆盖率门 `--cov-fail-under=60` 同时落在根 `Makefile backend-test` 与 `backend-ci.yml`；ruff + mypy 全绿是静态基线（`[tool.mypy]` strict=false 但 `warn_unused_ignores=true`）。
+- frontend 与 daemon 的 `typecheck`（tsc --noEmit）纳入 `make lint` 聚合。
+- E2E：backend 有 `backend/tests/e2e/test_three_member_collaboration.py`（三成员协作端到端）；前端 devDeps 声明 `@playwright/test ^1.60` 与 `puppeteer ^24.43` 两套浏览器自动化依赖，但仓库内无 playwright 配置文件（Glob 无命中）——浏览器 E2E 套件实际未配置。
 
-## 已知测试坑(动手前必读)
+## 常用命令与已知坑
 
-- backend 全量 pytest 未并行时约 **12 分钟**,超过 SillySpec verify 默认 10 分钟 gate;必须用 `pytest -n auto` 并行压到分钟级(`pyproject.toml [tool.pytest.ini_options]` 注释 + memory)。
-- main 分支 backend 存在**预存非业务 errors**(瞬时/环境性),全量失败先排除环境与 worktree overlay 污染,而非假定回归。
-- **PPM 前端变更 verify 必踩**:SillySpec CLI 按路径子串把 `frontend/src/components/ppm` 或 `frontend/src/lib/ppm` 关联到 ppm 后端测试,405 passed 但 ~700s 超 600s 默认 timeout 阻断(非失败);解法 `SILLYSPEC_TEST_TIMEOUT_MS=900000` 后台重跑。
-- **SQLite(单测) vs PostgreSQL(生产)方言差异**:`with_for_update` 在 SQLite 为 no-op(测不到并发行锁),`date_trunc` 等需方言分支;并发正确性与 PG 特性只能在生产环境验证。断言不绑死 SQL 函数名。
-- 改 FastAPI router 必跑对应 `test_router`(参数顺序 SyntaxError service 测覆盖不到,重建容器 import 才暴露);`asyncpg` Windows 装不上时用 Docker 起 Postgres、本地后端连容器。
-- SillySpec verify/archive 实测要 `local.yaml` `modules` 块(非 `module_paths`),否则 fallback 全量;`archive step5 --change` 移动后找不到致 db 分裂,改用不带 `--change` + `status=archived` 判完成。
-
-## 常用命令
-
-- 后端:`make backend-test`(或 `cd backend && uv run pytest -n auto`)
-- 前端:`make frontend-test`(或 `cd frontend && pnpm test`)
-- daemon:`cd sillyhub-daemon && pnpm test`(spike 单独:`pnpm vitest run --config vitest.spikes.config.ts`)
-- 全量:`make test`(后端 + 前端) / `make lint`(后端 ruff+mypy + 前端 ESLint)
-- backend 测试须用 `backend/.venv/Scripts/python.exe`(非全局/项目根 .venv,全局缺 aiobotocore)
+- 后端：`make backend-test`（= `cd backend && uv run pytest -q --cov=app --cov-fail-under=60`）；全量未并行时约 50 分钟量级，`-n auto`（xdist）压到分钟级（`pyproject.toml` dev 注释）。
+- 前端：`make frontend-test`（= `cd frontend && pnpm test`，vitest run）。
+- daemon：`make daemon-test`（= `cd sillyhub-daemon && pnpm test`）；spike 单独跑：`pnpm vitest run --config vitest.spikes.config.ts`。
+- CI（2 核）低资源下 xdist + async fixture + in-memory SQLite 偶发竞态 flaky（reparse created=0 → StopIteration / 文件列表空），loadscope 已挡大部分、残余靠 `--reruns 2 --reruns-delay 1` 兜底；本机 20 核全量绿复现不了（`pyproject.toml` 与 `backend-ci.yml` 注释）——CI 红而本机同命令绿时先怀疑环境而非回归。
+- frontend `testTimeout` 提到 15s、daemon 提到 30s：均为全量并行下 jsdom 启动累积 / 磁盘争用引发的 flaky 超时治理（两端 vitest 配置文件内注释说明），不影响单跑用例速度。
+- backend 测试经 `uv run` 使用 `backend/.venv`；daemon CI 主套件不含 spikes 目录。
