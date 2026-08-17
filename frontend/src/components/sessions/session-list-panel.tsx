@@ -61,8 +61,8 @@ const STATUS_OPTIONS = [
 
 /** 后端真分页页大小（R-04）。 */
 const PAGE_SIZE = 50;
-/** 虚拟行固定高（两行紧凑条目，D-006；chips 单行截断保证不超）。 */
-const ROW_HEIGHT = 64;
+/** 虚拟行固定高（ql-20260817-002：标题行 + chips 换行至多 3 行，96px 容纳）。 */
+const ROW_HEIGHT = 96;
 /** 视口外预渲染行数（jsdom 无量测时也保证有可断言的条目）。 */
 const OVERSCAN = 6;
 
@@ -420,15 +420,14 @@ function SessionRow({
           {formatRelativeTime(session.last_active_at ?? session.created_at)}
         </span>
       </div>
-      {/* 第二行：chips（机器/引擎/档案/供应商/轮数，单行截断保证固定行高）。
-          ql-20260817-001：310px 列宽下五 Tag 拥挤——Tag 紧凑化（px-1 py-0
-          text-[10px]）+ 长名（机器/档案/供应商）max-w+truncate + 轮数 shrink-0
-          恒可见；信息密度让位可读性，截断项 hover 有 title 全名。 */}
-      <div className="flex items-center gap-0.5 overflow-hidden pl-2.5 whitespace-nowrap">
+      {/* 第二行：chips（机器/引擎/档案/供应商/轮数）——ql-20260817-002 改
+          flex-wrap 自动换行 2-3 行（单行压挤更看不清）；Tag 紧凑样式保留、
+          长名 max-w+truncate 防单个长名占整行，截断悬停有 title 全名。 */}
+      <div className="flex flex-wrap items-center gap-0.5 pl-2.5">
         {machineName && (
           <Tag
             title={machineOffline ? `${machineName}（离线）` : machineName}
-            className={`m-0 max-w-[104px] truncate rounded-sm px-1 py-0 text-[10px] leading-4 ${
+            className={`m-0 max-w-[120px] truncate rounded-sm px-1 py-0 text-[10px] leading-4 ${
               machineOffline ? "line-through opacity-60" : ""
             }`}
           >
@@ -445,7 +444,7 @@ function SessionRow({
         {snapshot?.profile_name && (
           <Tag
             title={snapshot.profile_name}
-            className="m-0 max-w-[110px] truncate rounded-sm px-1 py-0 text-[10px] leading-4"
+            className="m-0 max-w-[150px] truncate rounded-sm px-1 py-0 text-[10px] leading-4"
             color="blue"
           >
             📋 {snapshot.profile_name}
@@ -454,7 +453,7 @@ function SessionRow({
         {snapshot?.provider_name && (
           <Tag
             title={snapshot.provider_name}
-            className="m-0 max-w-[104px] truncate rounded-sm px-1 py-0 text-[10px] leading-4"
+            className="m-0 max-w-[130px] truncate rounded-sm px-1 py-0 text-[10px] leading-4"
           >
             ☁ {snapshot.provider_name}
           </Tag>
