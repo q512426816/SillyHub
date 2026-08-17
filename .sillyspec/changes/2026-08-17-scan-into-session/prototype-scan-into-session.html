@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>原型 — 扫描统一到会话（scan-into-session）</title>
+<style>
+  :root { --primary:#2563eb; --border:#e2e8f0; --muted:#64748b; --bg:#f8fafc; --card:#fff; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:"Segoe UI","Microsoft YaHei",sans-serif; background:var(--bg); color:#0f172a; padding:24px; }
+  h1 { font-size:18px; margin-bottom:4px; }
+  .sub { color:var(--muted); font-size:12px; margin-bottom:20px; }
+  .flow { display:flex; gap:12px; align-items:stretch; flex-wrap:wrap; }
+  .step { flex:1; min-width:300px; background:var(--card); border:1px solid var(--border); border-radius:8px; padding:14px; }
+  .step h2 { font-size:13px; color:var(--primary); margin-bottom:10px; border-bottom:1px dashed var(--border); padding-bottom:6px; }
+  .badge { display:inline-block; font-size:10px; padding:1px 6px; border-radius:999px; vertical-align:middle; }
+  .b-scan { background:#dbeafe; color:#1d4ed8; }
+  .b-chat { background:#f1f5f9; color:var(--muted); }
+  .b-remove { background:#fee2e2; color:#b91c1c; }
+  .btn { display:inline-block; font-size:12px; padding:4px 10px; border-radius:6px; border:1px solid var(--border); background:#fff; cursor:pointer; }
+  .btn-primary { background:var(--primary); color:#fff; border-color:var(--primary); }
+  .btn-sm { font-size:11px; padding:2px 8px; }
+  .row { display:flex; gap:8px; align-items:center; margin:6px 0; }
+  .row .lbl { width:96px; font-size:11px; color:var(--muted); flex-shrink:0; }
+  .list { border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+  .li { display:flex; gap:8px; align-items:center; padding:7px 10px; font-size:12px; border-bottom:1px solid #f1f5f9; background:#fff; }
+  .li:last-child { border-bottom:none; }
+  .li.active { background:#eff6ff; outline:1px solid var(--primary); }
+  .dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+  .dot.green { background:#22c55e; }
+  .dot.amber { background:#f59e0b; }
+  .dot.gray { background:#cbd5e1; }
+  .title { flex:1; }
+  .panel { border:1px solid var(--border); border-radius:6px; min-height:170px; background:#fff; display:flex; flex-direction:column; }
+  .panel-head { padding:8px 10px; font-size:11px; color:var(--muted); border-bottom:1px solid #f1f5f9; display:flex; gap:8px; align-items:center; }
+  .panel-body { padding:10px; font-size:12px; flex:1; }
+  .msg { border-radius:6px; padding:7px 10px; margin-bottom:7px; font-size:12px; }
+  .msg.user { background:#eff6ff; border:1px solid #bfdbfe; }
+  .msg.assistant { background:#f8fafc; border:1px solid var(--border); }
+  .msg .who { font-size:10px; color:var(--muted); margin-bottom:2px; }
+  .msg .sys { font-family:Consolas,monospace; font-size:10px; color:#334155; background:#f1f5f9; border-radius:4px; padding:1px 5px; }
+  .note { margin-top:10px; font-size:11px; color:var(--muted); border-top:1px dashed var(--border); padding-top:8px; }
+  .ok { color:#16a34a; }
+  .del { text-decoration:line-through; color:#94a3b8; }
+  .arrow { align-self:center; font-size:20px; color:#94a3b8; }
+</style>
+</head>
+<body>
+  <h1>扫描统一到会话（scan-into-session）— 交互流程原型</h1>
+  <div class="sub">方案 A：scan = 工作区级会话 · 配置卡触发 → 进入会话页操作 · 智能体控制台移除</div>
+
+  <div class="flow">
+    <!-- Step 1: 配置卡 -->
+    <div class="step">
+      <h2>① 工作区配置卡（保留，行为改）</h2>
+      <div class="row"><span class="lbl">状态</span><span>平台托管 · 已扫描（组件 4 个）</span></div>
+      <div class="row"><span class="lbl">操作</span>
+        <button class="btn btn-primary btn-sm">扫描</button>
+        <button class="btn btn-sm">重新扫描</button>
+      </div>
+      <div class="note">
+        <b>变化：</b>点击扫描 → 确认后不再内嵌显示运行面板，而是
+        <b>跳转会话页并自动 attach 新建的 scan 会话</b>。
+      </div>
+    </div>
+
+    <div class="arrow">→</div>
+
+    <!-- Step 2: 会话页 -->
+    <div class="step">
+      <h2>② 会话页（新增深链 attach + 扫描徽标）</h2>
+      <div class="row" style="margin-bottom:8px">
+        <span class="lbl">会话列表</span>
+      </div>
+      <div class="list">
+        <div class="li active">
+          <span class="dot green"></span>
+          <span class="title">工作区扫描：multi-agent-platform</span>
+          <span class="badge b-scan">扫描</span>
+          <span>进行中</span>
+        </div>
+        <div class="li">
+          <span class="dot gray"></span>
+          <span class="title">关于扫描结果的讨论</span>
+          <span class="badge b-chat">对话</span>
+          <span>已结束</span>
+        </div>
+        <div class="li">
+          <span class="dot gray"></span>
+          <span class="title">审批 API 方案</span>
+          <span class="badge b-chat">对话</span>
+          <span>已结束</span>
+        </div>
+      </div>
+      <div class="note">
+        <b>变化：</b>① 扫描会话出现在工作区列表（<span class="badge b-scan">扫描</span> 徽标，
+        来自 config.mode=scan）；② 支持 <code>?session=&lt;id&gt;</code> 深链自动 attach；
+        ③ 扫描完成后可 reopen 继续对话。
+      </div>
+    </div>
+
+    <div class="arrow">→</div>
+
+    <!-- Step 3: 会话面板 -->
+    <div class="step">
+      <h2>③ 会话面板（复用现有 InteractiveSessionPanel）</h2>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="badge b-scan">扫描</span>
+          <span>工作区扫描：multi-agent-platform</span>
+          <span style="margin-left:auto">
+            <button class="btn btn-sm btn-primary">中断</button>
+            <button class="btn btn-sm">结束</button>
+          </span>
+        </div>
+        <div class="panel-body">
+          <div class="msg user">
+            <div class="who">系统注入（首 turn）</div>
+            <span class="sys">sillyspec scan --standard（bundle.step_prompt）</span>
+          </div>
+          <div class="msg assistant">
+            <div class="who">Agent</div>
+            正在扫描项目结构，解析 .sillyspec 文档与 projects/*.yaml…
+          </div>
+          <div class="msg assistant">
+            <div class="who">Agent → 人工审批</div>
+            <span class="sys">AskUserQuestion：发现 2 个未登记的变更，是否纳入扫描结果？</span>
+          </div>
+        </div>
+      </div>
+      <div class="note">
+        复用会话面板既有能力：SSE 实时日志、AskUserQuestion 真阻塞审批
+        （approvals 页已聚合 scan 决策）、中断/结束、reopen 继续对话 —— 零新增机制。
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:20px; background:var(--card); border:1px solid var(--border); border-radius:8px; padding:14px">
+    <h2 style="font-size:13px; color:var(--primary); margin-bottom:8px">④ 智能体控制台 — 移除</h2>
+    <div class="row"><span class="lbl">菜单</span><span class="del">工作区 / 智能体</span> → <span class="ok">删除（会话页承接扫描）</span></div>
+    <div class="row"><span class="lbl">运行视图</span><span>任务 run → 任务详情页（已有列表+日志）；阶段 run → 变更详情页执行日志（已有）</span></div>
+    <div class="note">工作区级不再有跨 run 聚合页；会话页是唯一的 agent 交互入口（与变更中心一致）。</div>
+  </div>
+</body>
+</html>
