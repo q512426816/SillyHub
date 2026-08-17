@@ -475,3 +475,12 @@
 根因：SESSION_SWITCH_CONFIG 的 providerConfig 构造条件误用 provider_row（仅切供应商时非空）→ 切档案轮发 null → daemon reload 重建 driver 丢供应商 env 回落机器默认网关。DB 全是 Kimi 仅运行态 env 丢（daemon 日志 has_provider_config=false 实证）。
 方案：构造条件改 effective_provider（含未切维度当前行）——会话有供应商必带 providerConfig；NULL（本机默认）才发 null。切档案用例断言更新为携带当前供应商 base_url。
 结果：切换测试 12 过，daemon 模块全量 800 passed，ruff 过。待部署。
+
+## ql-20260817-009-f029 | 2026-08-17 16:00:40 | 切档案/切供应商去掉确认行与提示消息输入
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+需求：切档案/切供应商去掉确认行与提示消息输入，点选即切换。
+根因：两步确认流程（点选项→编辑 prompt→确认）多余。
+方案：删确认行 UI 与 pending 状态；点选项直接 injectSession（默认文案或 switchPrompt 覆盖）；保留防连点/toast/错误提示。
+结果：17 用例过（4 个改写），全量 157 文件/1610 全绿，tsc/eslint 0。待 commit+push+rebuild frontend。

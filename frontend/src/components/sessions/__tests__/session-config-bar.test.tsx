@@ -332,27 +332,22 @@ describe("SessionConfigBar 机器/智能体纯展示（D-004@v2）", () => {
 // ── 4. 供应商切换（含「不指定」空串语义，task-16 契约） ───────────────────
 
 describe("SessionConfigBar 切换供应商", () => {
-  it("idle 选择供应商 → 确认行（默认 prompt 可编辑）→ injectSession 参数正确 + 成功 toast", async () => {
+  it("idle 选择供应商 → 点选即切换（默认 prompt）→ injectSession 参数正确 + 成功 toast", async () => {
     renderBar({ llmProviderId: "prov-kimi" });
     openCtrl("配置-供应商");
-    // 供应商选项经 react-query 异步到达 → findBy 等待
+    // 供应商选项经 react-query 异步到达 → findBy 等待；点选即执行（无确认行）
     fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
 
-    // 确认行出现，默认 prompt 按目标名生成
-    const input = screen.getByLabelText("切换轮提示消息") as HTMLInputElement;
-    expect(input.value).toBe(buildDefaultSwitchPrompt({
-      field: "llm_provider_id",
-      value: "prov-glm",
-      label: "GLM 平台",
-    }));
-    // prompt 可编辑（组件提供输入）
-    fireEvent.change(input, { target: { value: "换 GLM 继续分析" } });
-    fireEvent.click(screen.getByRole("button", { name: "确认切换" }));
-
     await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
-    expect(mocks.injectSession).toHaveBeenCalledWith("sess-1", "换 GLM 继续分析", {
-      llm_provider_id: "prov-glm",
-    });
+    expect(mocks.injectSession).toHaveBeenCalledWith(
+      "sess-1",
+      buildDefaultSwitchPrompt({
+        field: "llm_provider_id",
+        value: "prov-glm",
+        label: "GLM 平台",
+      }),
+      { llm_provider_id: "prov-glm" },
+    );
     await waitFor(() =>
       expect(mocks.messageSuccess).toHaveBeenCalledWith(
         expect.stringContaining("下一轮生效"),
@@ -366,7 +361,6 @@ describe("SessionConfigBar 切换供应商", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "选择 不指定（本机默认）" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "确认切换" }));
     await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
     expect(mocks.injectSession).toHaveBeenCalledWith(
       "sess-1",
@@ -397,26 +391,23 @@ describe("SessionConfigBar 切换供应商", () => {
     ).toBe(false);
   });
 
-  it("切换失败 → message.error，确认行保留可重试", async () => {
+  it("切换失败 → message.error（点选即切换无确认行，可再点重试）", async () => {
     mocks.injectSession.mockRejectedValueOnce(new Error("daemon 离线"));
     renderBar();
     openCtrl("配置-供应商");
     fireEvent.click(await screen.findByRole("button", { name: "选择 Kimi 中转" }));
-    fireEvent.click(screen.getByRole("button", { name: "确认切换" }));
     await waitFor(() => expect(mocks.messageError).toHaveBeenCalled());
-    expect(screen.getByLabelText("切换确认行")).toBeInTheDocument();
   });
 });
 
 // ── 5. 档案切换 ──────────────────────────────────────────────────────────
 
 describe("SessionConfigBar 切换档案", () => {
-  it("idle 选择档案 → injectSession 带 agent_profile_id + toast + onSwitched 回调", async () => {
+  it("idle 选择档案 → 点选即切换（默认 prompt）→ injectSession 带 agent_profile_id + toast + onSwitched 回调", async () => {
     const onSwitched = vi.fn();
     renderBar({ onSwitched });
     openCtrl("配置-档案");
     fireEvent.click(screen.getByRole("button", { name: "选择 严肃代码审查员" }));
-    fireEvent.click(screen.getByRole("button", { name: "确认切换" }));
 
     await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
     expect(mocks.injectSession).toHaveBeenCalledWith(
@@ -429,10 +420,6 @@ describe("SessionConfigBar 切换档案", () => {
       INJECT_RESPONSE,
       "agent_profile_id",
       "prof-2",
-    );
-    // 成功后确认行收起
-    await waitFor(() =>
-      expect(screen.queryByLabelText("切换确认行")).not.toBeInTheDocument(),
     );
   });
 

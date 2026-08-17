@@ -14,10 +14,10 @@
  * 行为（FR-05 / D-004@v2）：
  *   - 四控件（机器/智能体/供应商/档案）展示会话当前配置（props 传入
  *     agent_profile_id / llm_provider_id / config_snapshot）。
- *   - 可切：档案、供应商——idle 点开下拉选择 → 确认行（切换轮提示消息，可编辑，
- *     默认文案由组件生成或 props switchPrompt 传入）→ injectSession(sessionId,
- *     prompt, 带新配置)；供应商含「不指定（本机默认）」选项 → llm_provider_id: ""
- *     切回本机默认（task-16 契约）。
+ *   - 可切：档案、供应商——idle 点开下拉点选即切换（ql-20260817-009：去掉确认
+ *     行/输入提示消息步骤；prompt 用默认文案或 props switchPrompt 覆盖）→
+ *     injectSession(sessionId, prompt, 带新配置)；供应商含「不指定（本机默认）」
+ *     选项 → llm_provider_id: "" 切回本机默认（task-16 契约）。
  *   - 纯展示：机器/智能体——下拉仅展示可选项并整体置灰，跨机器标「二期」、跨引擎标
  *     「需开新会话」（每机每引擎唯一 runtime，无同机同引擎切换目标，D-004@v2）。
  *   - running 全置灰 + 「🔒 本轮完成后解锁切换」；ended/failed 同样不可切（无锁提示）。
@@ -29,7 +29,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Button, Input, message } from "antd";
+import { message } from "antd";
 
 import { ApiError } from "@/lib/api";
 import { useMineAgentProfiles } from "@/lib/agent-profiles";
@@ -59,12 +59,12 @@ export type SessionConfigSwitchField =
   | "agent_profile_id"
   | "llm_provider_id";
 
-/** 待确认的切换（选中下拉项后进入确认行）。 */
+/** 切换目标（选中下拉项直接执行，ql-20260817-009 去掉确认行）。 */
 interface PendingSwitch {
   field: SessionConfigSwitchField;
   /** 目标值（供应商「不指定」为空串 ""）。 */
   value: string;
-  /** 目标展示名（toast / 确认行用）。 */
+  /** 目标展示名（toast / 默认提示语用）。 */
   label: string;
 }
 
@@ -148,8 +148,6 @@ export function SessionConfigBar({
   const providers = useMemo(() => providersQ.data ?? [], [providersQ.data]);
 
   const [openKind, setOpenKind] = useState<SessionConfigCtrlKind | null>(null);
-  const [pending, setPending] = useState<PendingSwitch | null>(null);
-  const [switchMessage, setSwitchMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const barRef = useRef<HTMLDivElement>(null);
@@ -206,35 +204,23 @@ export function SessionConfigBar({
     [machines, runtimeId, configSnapshot?.machine_name],
   );
 
-  /** 下拉选项点击 → 进入确认行（注入默认提示消息）。 */
-  const openPending = (p: PendingSwitch) => {
-    setPending(p);
-    setSwitchMessage(switchPrompt ?? buildDefaultSwitchPrompt(p));
-    setOpenKind(null);
-  };
-
-  const cancelPending = () => {
-    setPending(null);
-    setSwitchMessage("");
-  };
-
-  const confirmSwitch = async () => {
-    if (!pending || submitting) return;
-    const prompt = switchMessage.trim();
+  /** ql-20260817-009：下拉选项点击 → 直接切换（去掉确认行/输入提示消息步骤）。
+   * prompt 用默认文案（switchPrompt 覆盖），inject 契约要求非空 prompt 作切换轮载体。 */
+  const executeSwitch = async (p: PendingSwitch) => {
+    if (submitting) return;
+    const prompt = (switchPrompt ?? buildDefaultSwitchPrompt(p)).trim();
     if (!prompt) return;
     setSubmitting(true);
+    setOpenKind(null);
     try {
-      const resp = await injectSession(sessionId, prompt, { [pending.field]: pending.value });
-      const what = pending.field === "llm_provider_id" ? "供应商" : "档案";
+      const resp = await injectSession(sessionId, prompt, { [p.field]: p.value });
+      const what = p.field === "llm_provider_id" ? "供应商" : "档案";
       const name =
-        pending.field === "llm_provider_id" && pending.value === SWITCH_NO_PROVIDER_VALUE
+        p.field === "llm_provider_id" && p.value === SWITCH_NO_PROVIDER_VALUE
           ? "本机默认"
-          : pending.label;
+          : p.label;
       message.success(`已切换${what} → ${name}（下一轮生效，历史消息保留当时配置）`);
-      const done = pending;
-      setPending(null);
-      setSwitchMessage("");
-      onSwitched?.(resp, done.field, done.value);
+      onSwitched?.(resp, p.field, p.value);
     } catch (err) {
       message.error(err instanceof ApiError ? err.message : "切换失败，请重试");
     } finally {
@@ -393,7 +379,7 @@ export function SessionConfigBar({
               label="不指定（本机默认）"
               current={llmProviderId == null}
               onClick={() =>
-                openPending({
+                executeSwitch({
                   field: "llm_provider_id",
                   value: SWITCH_NO_PROVIDER_VALUE,
                   label: "不指定（本机默认）",
@@ -408,7 +394,7 @@ export function SessionConfigBar({
                 sub={p.model ?? undefined}
                 current={p.id === llmProviderId}
                 onClick={() =>
-                  openPending({
+                  executeSwitch({
                     field: "llm_provider_id",
                     value: p.id,
                     label: p.name,
@@ -451,7 +437,7 @@ export function SessionConfigBar({
                 }
                 current={p.id === agentProfileId}
                 onClick={() =>
-                  openPending({
+                  executeSwitch({
                     field: "agent_profile_id",
                     value: p.id,
                     label: p.name,
@@ -473,46 +459,6 @@ export function SessionConfigBar({
           </span>
         )}
       </div>
-
-
-      {/* ── 切换确认行（切换轮提示消息，injectSession 的 prompt 载体） ── */}
-      {pending && (
-        <div
-          className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-2"
-          aria-label="切换确认行"
-        >
-          <span className="shrink-0 text-xs text-muted-foreground">
-            切换{pending.field === "llm_provider_id" ? "供应商" : "档案"} →{" "}
-            <b className="font-medium text-foreground">
-              {pending.field === "llm_provider_id" &&
-              pending.value === SWITCH_NO_PROVIDER_VALUE
-                ? "本机默认"
-                : pending.label}
-            </b>
-          </span>
-          <Input
-            size="small"
-            className="min-w-[200px] flex-1"
-            aria-label="切换轮提示消息"
-            placeholder="切换轮提示消息（作为本轮 prompt 发送）"
-            value={switchMessage}
-            onChange={(e) => setSwitchMessage(e.target.value)}
-            onPressEnter={() => void confirmSwitch()}
-          />
-          <Button
-            size="small"
-            type="primary"
-            loading={submitting}
-            disabled={!switchMessage.trim()}
-            onClick={() => void confirmSwitch()}
-          >
-            确认切换
-          </Button>
-          <Button size="small" onClick={cancelPending}>
-            取消
-          </Button>
-        </div>
-      )}
     </div>
   );
 }
