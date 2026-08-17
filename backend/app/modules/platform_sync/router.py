@@ -46,6 +46,8 @@ from app.modules.platform_sync.schema import (
     DocumentsSyncOk,
     DocumentsSyncRequest,
     ProgressSyncOk,
+    QuicklogEntryPushRequest,
+    QuicklogPushOk,
 )
 from app.modules.platform_sync.service import PlatformSyncService
 
@@ -246,3 +248,30 @@ async def submit_approval(
         decided_by=user.username,
     )
     return ApprovalSubmitOk(decision=body.decision, change_name=name)
+
+
+@router.post("/quicklog-entries", response_model=QuicklogPushOk)
+async def push_quicklog_entry(
+    body: QuicklogEntryPushRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    auth: _write_auth,
+) -> Any:
+    """POST quicklog 条目推送（design §5.2 / FR-03 / D-003 双链路推送落点）。
+
+    CLI quicklog.js 两触发点（allocate/complete）best-effort POST；语义恒 200 成功体
+    （幂等 upsert，同 ``ql_id`` 整条覆盖 D-004，无 base_ts 乐观锁）。失败由 CLI 静默
+    兜底（文件解析链路），平台端无重试语义。
+
+    workspace_id 从 require_platform_sync_write 派生（仅 shpsync_ 可写，G6/D-004@v1）；
+    body 不含也不接受 workspace 字段（extra=ignore 宽松）。payload 裸存原文（D-005）。
+    """
+    _user, scope = auth
+    if scope.workspace_id is None:
+        # 防御：require_platform_sync_write 的 shpsync_ 通道恒派生 workspace；到达此
+        # 分支即凭据形态异常，403 关闭写通道（fail-closed，对齐 task-06 收紧语义）。
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="缺少工作区归属")
+    await PlatformSyncService(session).upsert_quicklog_entry(
+        workspace_id=scope.workspace_id,
+        payload=body.model_dump(exclude_none=False),
+    )
+    return QuicklogPushOk(ql_id=body.ql_id)

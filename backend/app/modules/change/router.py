@@ -18,6 +18,7 @@ from app.core.logging import get_logger
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
+from app.modules.change.quicklog_service import QuicklogQueryService
 from app.modules.change.schema import (
     ApprovalRead,
     ApproveRequest,
@@ -46,6 +47,10 @@ from app.modules.change.schema import (
     PlanReviewRequest,
     ProgressUpdate,
     ProposalReviewRequest,
+    QuicklogEntryList,
+    QuicklogEntryListItem,
+    QuicklogEntryRead,
+    QuicklogFileItem,
     RejectRequest,
     ReviewResponse,
     StageProfileUpdate,
@@ -56,6 +61,7 @@ from app.modules.change.schema import (
 )
 from app.modules.change.service import ChangeService
 from app.modules.daemon.schema import AgentSessionListItem, ChangeSessionAuthor
+from app.modules.workspace.service import WorkspaceService
 
 router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["change"])
 
@@ -1021,4 +1027,92 @@ async def manual_dispatch(
         config_enabled=True,
         last_dispatch=last_dispatch,
         dispatch_result=dispatch_result,
+    )
+
+
+@router.get(
+    "/quicklog-entries",
+    response_model=QuicklogEntryList,
+)
+async def list_quicklog_entries(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+    # FR-04：search 全文（标题+四段）+ status/author 筛选 + include_placeholder
+    # （默认隐藏空壳，D-007）+ linked_change（FR-07 反向区块数据面）。
+    search: str | None = Query(None),
+    status: str | None = Query(None),
+    author: str | None = Query(None),
+    linked_change: str | None = Query(None),
+    include_placeholder: bool = Query(False),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+) -> QuicklogEntryList:
+    """GET 快速修复列表（FR-04：双源合并 → 派生 → 筛选 → 分页）。"""
+    workspace = await WorkspaceService(session).get(workspace_id)
+    result = await QuicklogQueryService(session).list_entries(
+        workspace,
+        search=search,
+        status=status,
+        author=author,
+        linked_change=linked_change,
+        include_placeholder=include_placeholder,
+        page=page,
+        page_size=page_size,
+    )
+    items = [
+        QuicklogEntryListItem(
+            ql_id=e.ql_id,
+            timestamp=e.timestamp,
+            title=e.title,
+            status=e.status,
+            status_note=e.status_note,
+            placeholder=e.placeholder,
+            author_raw=e.author_raw,
+            author_name=e.author_name,
+            linked_changes=list(e.linked_changes),
+            files=[QuicklogFileItem(path=p, note=n) for p, n in e.files],
+            affected_modules=result.modules_by_ql.get(e.ql_id, []),
+            source=e.source,
+        )
+        for e in result.items
+    ]
+    return QuicklogEntryList(items=items, total=result.total)
+
+
+@router.get(
+    "/quicklog-entries/{ql_id}",
+    response_model=QuicklogEntryRead,
+)
+async def get_quicklog_entry(
+    workspace_id: uuid.UUID,
+    ql_id: str,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+) -> QuicklogEntryRead:
+    """GET 快速修复单条详情（FR-06：四段正文 + raw_block；404 未命中）。"""
+    workspace = await WorkspaceService(session).get(workspace_id)
+    e = await QuicklogQueryService(session).get_entry(workspace, ql_id)
+    if e is None:
+        raise AppError(
+            "快速修复条目不存在",
+            http_status=404,
+            details={"ql_id": ql_id},
+        )
+    return QuicklogEntryRead(
+        ql_id=e.ql_id,
+        timestamp=e.timestamp,
+        title=e.title,
+        status=e.status,
+        status_note=e.status_note,
+        placeholder=e.placeholder,
+        author_raw=e.author_raw,
+        author_name=e.author_name,
+        linked_changes=list(e.linked_changes),
+        files=[QuicklogFileItem(path=p, note=n) for p, n in e.files],
+        affected_modules=[],
+        source=e.source,
+        body_sections=dict(e.body_sections or {}),
+        raw_block=e.raw_block,
+        truncated=e.truncated,
     )

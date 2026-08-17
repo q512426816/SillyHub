@@ -110,3 +110,66 @@ class PlatformChangeProgressORM(BaseModel, table=True):
             server_default=text("now()"),
         ),
     )
+
+
+class QuicklogEntryORM(BaseModel, table=True):
+    """CLI 推送的 quicklog 条目原文（design §5.1 / D-003 双链路推送落点）。
+
+    ``payload`` 裸存 CLI 推送的结构化 JSON（QuicklogEntryDTO，含 ql_id/timestamp/
+    title/status/linked_changes/files/body_sections 等）；派生字段（author enrich、
+    影响模块 module-map 推导、stale 判定）在查询时计算，**不入库**（D-005：避免
+    「已暂存」语义固化、stale 阈值演进要刷数据）。
+
+    ``(workspace_id, ql_id)`` 复合唯一约束支撑幂等 upsert（D-004）：同一 quick 会话
+    的 CLI 重跑 ``--done`` 整条覆盖，不产生重复行。
+    ``workspace_id`` 只由 shpsync_ token 派生（auth.py G6/D-004@v1 通道），payload 不含
+    也不接受 workspace 字段——此处必填，无 shk_live_ 过渡期 NULL 场景。
+    """
+
+    __tablename__ = "quicklog_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "ql_id",
+            name="uq_quicklog_entries_workspace_ql",
+        ),
+    )
+
+    id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            primary_key=True,
+            nullable=False,
+            default=uuid.uuid4,
+        ),
+    )
+    workspace_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    ql_id: str = Field(
+        sa_column=Column(String(128), nullable=False),
+    )
+    payload: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
+    )

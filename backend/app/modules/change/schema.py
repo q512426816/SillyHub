@@ -514,3 +514,40 @@ class ArchiveConfirmRequest(BaseModel):
 
     comment: str | None = Field(default=None, description="归档备注（可选）")
     notify_session: bool = True
+
+
+class QuicklogFileItem(BaseModel):
+    """quicklog 条目文件行（path + 可选括注，design §5.1）。"""
+
+    path: str
+    note: str | None = None
+
+
+class QuicklogEntryListItem(BaseModel):
+    """快速修复列表行（FR-04；body/raw 不带——详情走 QuicklogEntryRead）。"""
+
+    ql_id: str
+    timestamp: datetime | None = None
+    title: str
+    status: str  # completed | in_progress | partial_done | stale（派生后 4 态）
+    status_note: str | None = None
+    placeholder: bool = False
+    author_raw: str
+    author_name: str | None = None
+    linked_changes: list[str] = []
+    files: list[QuicklogFileItem] = []
+    affected_modules: list[str] = []
+    source: str = "file"  # pushed | file
+
+
+class QuicklogEntryList(BaseModel):
+    items: list[QuicklogEntryListItem]
+    total: int
+
+
+class QuicklogEntryRead(QuicklogEntryListItem):
+    """快速修复详情（FR-06：四段正文 + raw_block 原文切换）。"""
+
+    body_sections: dict[str, str] = {}
+    raw_block: str | None = None
+    truncated: bool = False

@@ -44,12 +44,21 @@ const mocks = vi.hoisted(() => ({
   reparseChanges: vi.fn(),
   getWorkspace: vi.fn(),
   routerPush: vi.fn(),
+  listQuicklogEntries: vi.fn(),
+  searchParams: new URLSearchParams(),
 }));
 
 vi.mock("@/lib/changes", () => ({
   listChanges: mocks.listChanges,
   reparseChanges: mocks.reparseChanges,
 }));
+
+vi.mock("@/lib/quicklog", async () => {
+  // 部分 mock：QuicklogTable 还引用同模块的 quicklogPollInterval（真实实现）
+  const actual =
+    await vi.importActual<typeof import("@/lib/quicklog")>("@/lib/quicklog");
+  return { ...actual, listQuicklogEntries: mocks.listQuicklogEntries };
+});
 
 vi.mock("@/lib/workspaces", async () => {
   const actual =
@@ -59,6 +68,8 @@ vi.mock("@/lib/workspaces", async () => {
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mocks.routerPush }),
+  // task-10：列表页支持 ?tab=quicklog 初始 tab；searchParams 可按用例覆写
+  useSearchParams: () => mocks.searchParams,
 }));
 
 vi.mock("next/link", () => ({
@@ -136,6 +147,10 @@ function setupListChanges(
       total: total ?? items.length,
     });
   });
+  // task-08：tab 计数并发拉的 quicklog total（默认 0）
+  mocks.listQuicklogEntries.mockImplementation(() =>
+    Promise.resolve({ items: [], total: 0 }),
+  );
 }
 
 /** 包 QueryClientProvider 渲染（page 用 useQuery，task-06 改造）。 */
@@ -204,6 +219,71 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     );
     // 聚焦开关仅进行中 tab 显示（archive 隐藏）
     expect(screen.queryByText(/只看待我处理/)).not.toBeInTheDocument();
+  });
+
+  // ── task-08（D-001/FR-05）：快速修复第三 tab ─────────────────────────
+
+  it("点快速修复 tab → 渲染 QuicklogTable，变更查询区/阶段筛选隐藏，主 load 不发", async () => {
+    await renderAndWait();
+    // quicklog 计数 mock 默认 0 → tab 按钮存在
+    const quicklogTab = screen.getByRole("button", { name: /快速修复/ });
+    await act(async () => {
+      fireEvent.click(quicklogTab);
+    });
+    // QuicklogTable 渲染（其内部查询占位出现）
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText("搜索标题 / 正文全文…")).toBeInTheDocument(),
+    );
+    // 变更中心查询区（阶段筛选）在 quicklog tab 隐藏
+    expect(screen.queryByText("全部阶段")).toBeNull();
+    // 主 load 在 quicklog tab 不再发新请求（enabled: tab !== "quicklog"）
+    const mainCallsBefore = mocks.listChanges.mock.calls.filter(
+      ([, q]: any[]) => q?.pageSize !== 1,
+    ).length;
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /进行中/ }));
+    });
+    const mainCallsAfter = mocks.listChanges.mock.calls.filter(
+      ([, q]: any[]) => q?.pageSize !== 1,
+    ).length;
+    expect(mainCallsAfter).toBeGreaterThan(mainCallsBefore); // 切回 active 恢复发
+  });
+
+  it("快速修复 tab 计数 pill 显示（listQuicklogEntries total）", async () => {
+    setupListChanges();
+    mocks.listQuicklogEntries.mockImplementation(() =>
+      Promise.resolve({ items: [], total: 7 }),
+    );
+    await renderAndWait();
+    await waitFor(() =>
+      expect(screen.getByText("7")).toBeInTheDocument(),
+    );
+  });
+
+  it("?search= 初始搜索词生效（quicklog 关联变更列跳转消费端，QA P2 修复）", async () => {
+    setupListChanges();
+    mocks.searchParams = new URLSearchParams(
+      "search=2026-08-16-change-center-quick-tab",
+    );
+    try {
+      await renderAndWait();
+      // 主 load 带初始搜索词
+      await waitFor(() =>
+        expect(
+          mocks.listChanges.mock.calls.some(
+            ([, q]: any[]) =>
+              q?.search === "2026-08-16-change-center-quick-tab",
+          ),
+        ).toBe(true),
+      );
+      // 搜索框回显
+      expect(
+        (screen.getByPlaceholderText("搜索 Key / 标题 / 组件…") as HTMLInputElement)
+          .value,
+      ).toBe("2026-08-16-change-center-quick-tab");
+    } finally {
+      mocks.searchParams = new URLSearchParams();
+    }
   });
 
   it("tab 计数 pill 显示（tabTotals 独立 query 拉，不被聚焦污染）", async () => {

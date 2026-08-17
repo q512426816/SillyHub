@@ -146,3 +146,34 @@ class ApprovalSubmitOk(BaseModel):
     status: str = Field(default="ok")
     decision: Literal["approved", "rejected"]
     change_name: str
+
+
+class QuicklogEntryPushRequest(BaseModel):
+    """POST /quicklog-entries 请求（CLI quicklog.js 推送，design §5.2 / FR-02）。
+
+    payload=条目结构化 JSON（QuicklogEntryDTO，snake_case 字段对齐 CLI 落盘形态）。
+    **不含也不接受 workspace 字段**——workspace 一律由 shpsync_ token 派生
+    （auth.py G6/D-004@v1 通道），body 出现 workspace 键会被 extra 忽略（model_config
+    forbid 会 422，取 ignore 保证宽松——CLI 字段演进不破推送）。
+    ql_id 必填（幂等 upsert 复合键之一）；其余字段宽松（best-effort 推送语义）。
+    """
+
+    model_config = {"extra": "ignore"}
+
+    ql_id: str = Field(min_length=1, max_length=128)
+    timestamp: str | None = None
+    title: str | None = None
+    status: str | None = None
+    status_note: str | None = None
+    author_raw: str | None = None
+    linked_changes: list[str] = Field(default_factory=list)
+    files: list[dict[str, Any]] = Field(default_factory=list)
+    body_sections: dict[str, str] = Field(default_factory=dict)
+    raw_block: str | None = None
+
+
+class QuicklogPushOk(BaseModel):
+    """POST /quicklog-entries 200 响应（CLI best-effort，任意 2xx 即可）。"""
+
+    status: str = Field(default="ok")
+    ql_id: str

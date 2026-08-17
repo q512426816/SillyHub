@@ -20,6 +20,7 @@ import {
 } from "@/components/changes/detail/change-stage-header";
 import { ChangeStepTimeline } from "@/components/changes/detail/change-step-timeline";
 import { ChangeTaskBoardCard } from "@/components/changes/detail/change-task-board-card";
+import { QuicklogLinkedCard } from "@/components/changes/detail/quicklog-linked-card";
 import { ApiError } from "@/lib/api";
 import {
   getAgentStatus,
@@ -344,9 +345,13 @@ export default function ChangeDetailPage({ params }: Props) {
           />
         </main>
 
-        {/* 次线：变更文件 / 会话调试 / 审核历史 / 任务看板 */}
+        {/* 次线：变更文件 / 会话调试 / 审核历史 / 任务看板 / 关联快速任务 */}
         <aside className="space-y-3">
           <ChangeFilesCard workspaceId={workspaceId} changeId={changeId} />
+          <QuicklogLinkedCard
+            workspaceId={workspaceId}
+            changeKey={change.change_key}
+          />
           <ChangeSessionsCard workspaceId={workspaceId} changeId={changeId} />
           <ChangeReviewHistoryCard reviewHistory={reviewHistory} />
           <ChangeTaskBoardCard

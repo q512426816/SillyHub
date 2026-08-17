@@ -1598,6 +1598,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/quicklog-entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Quicklog Entries
+         * @description GET 快速修复列表（FR-04：双源合并 → 派生 → 筛选 → 分页）。
+         */
+        get: operations["list_quicklog_entries_api_workspaces__workspace_id__quicklog_entries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/quicklog-entries/{ql_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Quicklog Entry
+         * @description GET 快速修复单条详情（FR-06：四段正文 + raw_block；404 未命中）。
+         */
+        get: operations["get_quicklog_entry_api_workspaces__workspace_id__quicklog_entries__ql_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/scan-docs": {
         parameters: {
             query?: never;
@@ -7621,6 +7661,33 @@ export interface paths {
          *     仅 shpsync_ token 可写（task-06 / D-004@v1，workspace_id 由 token 派生）。
          */
         post: operations["push_documents_api_changes__name__documents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/quicklog-entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Push Quicklog Entry
+         * @description POST quicklog 条目推送（design §5.2 / FR-03 / D-003 双链路推送落点）。
+         *
+         *     CLI quicklog.js 两触发点（allocate/complete）best-effort POST；语义恒 200 成功体
+         *     （幂等 upsert，同 ``ql_id`` 整条覆盖 D-004，无 base_ts 乐观锁）。失败由 CLI 静默
+         *     兜底（文件解析链路），平台端无重试语义。
+         *
+         *     workspace_id 从 require_platform_sync_write 派生（仅 shpsync_ 可写，G6/D-004@v1）；
+         *     body 不含也不接受 workspace 字段（extra=ignore 宽松）。payload 裸存原文（D-005）。
+         */
+        post: operations["push_quicklog_entry_api_quicklog_entries_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -13981,12 +14048,182 @@ export interface components {
             /** Last Modified At */
             last_modified_at?: string | null;
         };
+        /** QuicklogEntryList */
+        QuicklogEntryList: {
+            /** Items */
+            items: components["schemas"]["QuicklogEntryListItem"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * QuicklogEntryListItem
+         * @description 快速修复列表行（FR-04；body/raw 不带——详情走 QuicklogEntryRead）。
+         */
+        QuicklogEntryListItem: {
+            /** Ql Id */
+            ql_id: string;
+            /** Timestamp */
+            timestamp?: string | null;
+            /** Title */
+            title: string;
+            /** Status */
+            status: string;
+            /** Status Note */
+            status_note?: string | null;
+            /**
+             * Placeholder
+             * @default false
+             */
+            placeholder: boolean;
+            /** Author Raw */
+            author_raw: string;
+            /** Author Name */
+            author_name?: string | null;
+            /**
+             * Linked Changes
+             * @default []
+             */
+            linked_changes: string[];
+            /**
+             * Files
+             * @default []
+             */
+            files: components["schemas"]["QuicklogFileItem"][];
+            /**
+             * Affected Modules
+             * @default []
+             */
+            affected_modules: string[];
+            /**
+             * Source
+             * @default file
+             */
+            source: string;
+        };
+        /**
+         * QuicklogEntryPushRequest
+         * @description POST /quicklog-entries 请求（CLI quicklog.js 推送，design §5.2 / FR-02）。
+         *
+         *     payload=条目结构化 JSON（QuicklogEntryDTO，snake_case 字段对齐 CLI 落盘形态）。
+         *     **不含也不接受 workspace 字段**——workspace 一律由 shpsync_ token 派生
+         *     （auth.py G6/D-004@v1 通道），body 出现 workspace 键会被 extra 忽略（model_config
+         *     forbid 会 422，取 ignore 保证宽松——CLI 字段演进不破推送）。
+         *     ql_id 必填（幂等 upsert 复合键之一）；其余字段宽松（best-effort 推送语义）。
+         */
+        QuicklogEntryPushRequest: {
+            /** Ql Id */
+            ql_id: string;
+            /** Timestamp */
+            timestamp?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Status Note */
+            status_note?: string | null;
+            /** Author Raw */
+            author_raw?: string | null;
+            /** Linked Changes */
+            linked_changes?: string[];
+            /** Files */
+            files?: {
+                [key: string]: unknown;
+            }[];
+            /** Body Sections */
+            body_sections?: {
+                [key: string]: string;
+            };
+            /** Raw Block */
+            raw_block?: string | null;
+        };
+        /**
+         * QuicklogEntryRead
+         * @description 快速修复详情（FR-06：四段正文 + raw_block 原文切换）。
+         */
+        QuicklogEntryRead: {
+            /** Ql Id */
+            ql_id: string;
+            /** Timestamp */
+            timestamp?: string | null;
+            /** Title */
+            title: string;
+            /** Status */
+            status: string;
+            /** Status Note */
+            status_note?: string | null;
+            /**
+             * Placeholder
+             * @default false
+             */
+            placeholder: boolean;
+            /** Author Raw */
+            author_raw: string;
+            /** Author Name */
+            author_name?: string | null;
+            /**
+             * Linked Changes
+             * @default []
+             */
+            linked_changes: string[];
+            /**
+             * Files
+             * @default []
+             */
+            files: components["schemas"]["QuicklogFileItem"][];
+            /**
+             * Affected Modules
+             * @default []
+             */
+            affected_modules: string[];
+            /**
+             * Source
+             * @default file
+             */
+            source: string;
+            /**
+             * Body Sections
+             * @default {}
+             */
+            body_sections: {
+                [key: string]: string;
+            };
+            /** Raw Block */
+            raw_block?: string | null;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+        };
+        /**
+         * QuicklogFileItem
+         * @description quicklog 条目文件行（path + 可选括注，design §5.1）。
+         */
+        QuicklogFileItem: {
+            /** Path */
+            path: string;
+            /** Note */
+            note?: string | null;
+        };
         /** QuicklogList */
         QuicklogList: {
             /** Items */
             items: components["schemas"]["QuicklogEntry"][];
             /** Total */
             total: number;
+        };
+        /**
+         * QuicklogPushOk
+         * @description POST /quicklog-entries 200 响应（CLI best-effort，任意 2xx 即可）。
+         */
+        QuicklogPushOk: {
+            /**
+             * Status
+             * @default ok
+             */
+            status: string;
+            /** Ql Id */
+            ql_id: string;
         };
         /** RefreshRequest */
         RefreshRequest: {
@@ -20275,6 +20512,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DispatchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_quicklog_entries_api_workspaces__workspace_id__quicklog_entries_get: {
+        parameters: {
+            query?: {
+                search?: string | null;
+                status?: string | null;
+                author?: string | null;
+                linked_change?: string | null;
+                include_placeholder?: boolean;
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuicklogEntryList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_quicklog_entry_api_workspaces__workspace_id__quicklog_entries__ql_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                ql_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuicklogEntryRead"];
                 };
             };
             /** @description Validation Error */
@@ -32236,6 +32544,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DocumentsSyncOk"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    push_quicklog_entry_api_quicklog_entries_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuicklogEntryPushRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuicklogPushOk"];
                 };
             };
             /** @description Validation Error */

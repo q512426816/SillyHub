@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => ({
   submitStageReview: vi.fn(),
   listWorkspaceAgentSessions: vi.fn(),
   getTaskBoard: vi.fn(),
+  listQuicklogEntries: vi.fn(),
 }));
 
 vi.mock("@/lib/changes", () => ({
@@ -53,6 +54,11 @@ vi.mock("@/lib/daemon", () => ({
 
 vi.mock("@/lib/tasks", () => ({
   getTaskBoard: mocks.getTaskBoard,
+}));
+
+// task-10（FR-07）：关联快速任务卡 mock（默认空列表——卡片渲染「暂无关联快速任务」）
+vi.mock("@/lib/quicklog", () => ({
+  listQuicklogEntries: mocks.listQuicklogEntries,
 }));
 
 // 只读卡片 stub：聚焦详情页退化 + 审批卡，不测这些组件内部
@@ -165,6 +171,8 @@ function setup(opts: {
   } as unknown as DispatchResponse);
   mocks.listWorkspaceAgentSessions.mockResolvedValue([makeSession()]);
   mocks.getTaskBoard.mockResolvedValue(null);
+  // task-10：关联快速任务默认空
+  mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
   mocks.submitStageReview.mockResolvedValue({
     change,
     agent_dispatch: null,
@@ -206,6 +214,56 @@ describe("变更详情页退化（task-10，D-003@v1）", () => {
     expect(screen.getByTestId("change-task-board-card")).toBeInTheDocument();
     // 阶段步骤条（主线宏观进度，ChangeStageHeader 真实渲染；页头徽标同文案 → 用 getAllByText）
     expect(screen.getAllByText("需求分析").length).toBeGreaterThan(0);
+  });
+
+  // ── task-10（FR-07）：关联的快速任务反向区块 ─────────────────────────
+
+  it("关联快速任务区块：命中条目列出 + linked_change 参数 + 点击跳快速修复 tab", async () => {
+    setup();
+    mocks.listQuicklogEntries.mockResolvedValue({
+      items: [
+        {
+          ql_id: "ql-20260817-001",
+          timestamp: "2026-08-17T01:30:00Z",
+          title: "修侧栏宽度塌陷",
+          status: "completed",
+          status_note: null,
+          placeholder: false,
+          author_raw: "qinyi",
+          author_name: "秦毅",
+          linked_changes: [],
+          files: [],
+          affected_modules: [],
+          source: "file",
+        },
+      ],
+      total: 1,
+    });
+    await renderPage();
+
+    const card = await screen.findByTestId("quicklog-linked-card");
+    expect(card).toBeInTheDocument();
+    expect(screen.getByText("修侧栏宽度塌陷")).toBeInTheDocument();
+    // linked_change 用 change_key 筛选
+    await waitFor(() =>
+      expect(mocks.listQuicklogEntries).toHaveBeenCalledWith("ws-1", {
+        linked_change: "2026-08-14-test-change",
+        page_size: 20,
+      }),
+    );
+    // 点击跳变更中心快速修复 tab
+    const link = screen.getByText("修侧栏宽度塌陷").closest("a");
+    expect(link?.getAttribute("href")).toBe(
+      "/workspaces/ws-1/changes?tab=quicklog",
+    );
+  });
+
+  it("关联快速任务区块：无关联时空态文案", async () => {
+    setup();
+    await renderPage();
+    expect(
+      await screen.findByText("暂无关联快速任务"),
+    ).toBeInTheDocument();
   });
 
   it("无任何执行控制按钮（触发/推进/验证门禁/团队 switch）", async () => {

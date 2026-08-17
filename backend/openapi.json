@@ -4321,6 +4321,200 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/quicklog-entries": {
+      "get": {
+        "tags": [
+          "change"
+        ],
+        "summary": "List Quicklog Entries",
+        "description": "GET 快速修复列表（FR-04：双源合并 → 派生 → 筛选 → 分页）。",
+        "operationId": "list_quicklog_entries_api_workspaces__workspace_id__quicklog_entries_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "author",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Author"
+            }
+          },
+          {
+            "name": "linked_change",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Linked Change"
+            }
+          },
+          {
+            "name": "include_placeholder",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Placeholder"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuicklogEntryList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/quicklog-entries/{ql_id}": {
+      "get": {
+        "tags": [
+          "change"
+        ],
+        "summary": "Get Quicklog Entry",
+        "description": "GET 快速修复单条详情（FR-06：四段正文 + raw_block；404 未命中）。",
+        "operationId": "get_quicklog_entry_api_workspaces__workspace_id__quicklog_entries__ql_id__get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "ql_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ql Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuicklogEntryRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/scan-docs": {
       "get": {
         "tags": [
@@ -25075,6 +25269,49 @@
         }
       }
     },
+    "/api/quicklog-entries": {
+      "post": {
+        "tags": [
+          "platform-sync",
+          "platform-sync"
+        ],
+        "summary": "Push Quicklog Entry",
+        "description": "POST quicklog 条目推送（design §5.2 / FR-03 / D-003 双链路推送落点）。\n\nCLI quicklog.js 两触发点（allocate/complete）best-effort POST；语义恒 200 成功体\n（幂等 upsert，同 ``ql_id`` 整条覆盖 D-004，无 base_ts 乐观锁）。失败由 CLI 静默\n兜底（文件解析链路），平台端无重试语义。\n\nworkspace_id 从 require_platform_sync_write 派生（仅 shpsync_ 可写，G6/D-004@v1）；\nbody 不含也不接受 workspace 字段（extra=ignore 宽松）。payload 裸存原文（D-005）。",
+        "operationId": "push_quicklog_entry_api_quicklog_entries_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuicklogEntryPushRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuicklogPushOk"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/platform-sync-tokens": {
       "post": {
         "tags": [
@@ -44003,6 +44240,374 @@
         "title": "QuicklogEntry",
         "description": "A single quicklog file entry."
       },
+      "QuicklogEntryList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/QuicklogEntryListItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "QuicklogEntryList"
+      },
+      "QuicklogEntryListItem": {
+        "properties": {
+          "ql_id": {
+            "type": "string",
+            "title": "Ql Id"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "status_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Note"
+          },
+          "placeholder": {
+            "type": "boolean",
+            "title": "Placeholder",
+            "default": false
+          },
+          "author_raw": {
+            "type": "string",
+            "title": "Author Raw"
+          },
+          "author_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Name"
+          },
+          "linked_changes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Linked Changes",
+            "default": []
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/QuicklogFileItem"
+            },
+            "type": "array",
+            "title": "Files",
+            "default": []
+          },
+          "affected_modules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Affected Modules",
+            "default": []
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "default": "file"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ql_id",
+          "title",
+          "status",
+          "author_raw"
+        ],
+        "title": "QuicklogEntryListItem",
+        "description": "快速修复列表行（FR-04；body/raw 不带——详情走 QuicklogEntryRead）。"
+      },
+      "QuicklogEntryPushRequest": {
+        "properties": {
+          "ql_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Ql Id"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "status_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Note"
+          },
+          "author_raw": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Raw"
+          },
+          "linked_changes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Linked Changes"
+          },
+          "files": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Files"
+          },
+          "body_sections": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Body Sections"
+          },
+          "raw_block": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Block"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ql_id"
+        ],
+        "title": "QuicklogEntryPushRequest",
+        "description": "POST /quicklog-entries 请求（CLI quicklog.js 推送，design §5.2 / FR-02）。\n\npayload=条目结构化 JSON（QuicklogEntryDTO，snake_case 字段对齐 CLI 落盘形态）。\n**不含也不接受 workspace 字段**——workspace 一律由 shpsync_ token 派生\n（auth.py G6/D-004@v1 通道），body 出现 workspace 键会被 extra 忽略（model_config\nforbid 会 422，取 ignore 保证宽松——CLI 字段演进不破推送）。\nql_id 必填（幂等 upsert 复合键之一）；其余字段宽松（best-effort 推送语义）。"
+      },
+      "QuicklogEntryRead": {
+        "properties": {
+          "ql_id": {
+            "type": "string",
+            "title": "Ql Id"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "status_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Note"
+          },
+          "placeholder": {
+            "type": "boolean",
+            "title": "Placeholder",
+            "default": false
+          },
+          "author_raw": {
+            "type": "string",
+            "title": "Author Raw"
+          },
+          "author_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Name"
+          },
+          "linked_changes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Linked Changes",
+            "default": []
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/QuicklogFileItem"
+            },
+            "type": "array",
+            "title": "Files",
+            "default": []
+          },
+          "affected_modules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Affected Modules",
+            "default": []
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "default": "file"
+          },
+          "body_sections": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Body Sections",
+            "default": {}
+          },
+          "raw_block": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Block"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "ql_id",
+          "title",
+          "status",
+          "author_raw"
+        ],
+        "title": "QuicklogEntryRead",
+        "description": "快速修复详情（FR-06：四段正文 + raw_block 原文切换）。"
+      },
+      "QuicklogFileItem": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "QuicklogFileItem",
+        "description": "quicklog 条目文件行（path + 可选括注，design §5.1）。"
+      },
       "QuicklogList": {
         "properties": {
           "items": {
@@ -44023,6 +44628,25 @@
           "total"
         ],
         "title": "QuicklogList"
+      },
+      "QuicklogPushOk": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "ok"
+          },
+          "ql_id": {
+            "type": "string",
+            "title": "Ql Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ql_id"
+        ],
+        "title": "QuicklogPushOk",
+        "description": "POST /quicklog-entries 200 响应（CLI best-effort，任意 2xx 即可）。"
       },
       "RefreshRequest": {
         "properties": {

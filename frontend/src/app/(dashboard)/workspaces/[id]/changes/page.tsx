@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   keepPreviousData,
@@ -18,7 +19,10 @@ import {
 import { Button, buttonVariants } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ChangeStepBadge } from "@/components/changes/change-step-badge";
+import { QuicklogDrawer } from "@/components/changes/quicklog-drawer";
+import { QuicklogTable } from "@/components/changes/quicklog-table";
 import { ApiError } from "@/lib/api";
+import { listQuicklogEntries, type QuicklogEntryListItem } from "@/lib/quicklog";
 import {
   listChanges,
   reparseChanges,
@@ -47,7 +51,10 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 const TABS = [
   { key: "active", label: "进行中" },
   { key: "archive", label: "已归档" },
+  { key: "quicklog", label: "快速修复" },
 ] as const;
+
+type ChangesTab = "active" | "archive" | "quicklog";
 
 // task-06 / design §7：待办徽标映射（替代死代码 GATE_LABELS）。
 // 数据源 = ChangeSummary.pending_review（PG 镜像 _map 投影，task-03）+ status=blocked。
@@ -107,16 +114,26 @@ type ChangesPageData = ChangeList & { workspace: Workspace };
 export default function ChangesPage({ params }: Props) {
   const workspaceId = params.id;
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<"active" | "archive">("active");
+  // task-10（FR-07）：支持 ?tab=quicklog 初始 tab（变更详情页「关联的快速任务」跳转入口）；
+  // ?search= 初始搜索词（quicklog 关联变更列跳转消费端，QA P2 修复）
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get("tab");
+  const initialSearch = searchParams.get("search") ?? "";
+  const [tab, setTab] = useState<ChangesTab>(
+    initialTab === "quicklog" || initialTab === "archive" ? initialTab : "active",
+  );
+  const [searchInput, setSearchInput] = useState(initialSearch);
+  const [search, setSearch] = useState(initialSearch);
   // D-007：进行中视图默认套「只看待我处理」聚焦
   const [focusMine, setFocusMine] = useState(true);
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState("");
   const [sortDir, setSortDir] = useState<SortDir>("updated_at_desc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [reparsing, setReparsing] = useState(false);
+  // task-09（D-006）：quicklog 行点击打开详情抽屉
+  const [quicklogSelected, setQuicklogSelected] =
+    useState<QuicklogEntryListItem | null>(null);
   // reparse 错误横幅（主 load 错误改由 query 派生，见 listError）
   const [pageError, setPageError] = useState<string | null>(null);
   const [stats, setStats] = useState<ChangeReparseStats | null>(null);
@@ -158,6 +175,8 @@ export default function ChangesPage({ params }: Props) {
       ]);
       return { ...resp, workspace: ws };
     },
+    // task-08（D-001）：quicklog tab 不发变更列表请求（QuicklogTable 自带独立查询）
+    enabled: tab !== "quicklog",
     // 分页/筛选切 key 时保留上一页数据渲染（改造前 items 不清空、不闪空表）
     placeholderData: keepPreviousData,
     // 智能轮询（D-001@v1）：当前页存在非终态变更 30s 刷新，全终态停轮；
@@ -185,18 +204,24 @@ export default function ChangesPage({ params }: Props) {
   // tab 不显示计数，请求完成后回填。
   const tabTotalsQuery = useQuery({
     queryKey: ["changesTabTotals", workspaceId],
-    queryFn: async (): Promise<{ active: number; archive: number }> => {
-      const [a, b] = await Promise.all([
+    queryFn: async (): Promise<{
+      active: number;
+      archive: number;
+      quicklog: number;
+    }> => {
+      // task-08（D-001）：第三 tab 计数=快速修复条目数（placeholder 默认隐藏口径）
+      const [a, b, q] = await Promise.all([
         listChanges(workspaceId, { location: "active", pageSize: 1 }),
         listChanges(workspaceId, { location: "archive", pageSize: 1 }),
+        listQuicklogEntries(workspaceId, { page_size: 1 }),
       ]);
-      return { active: a.total, archive: b.total };
+      return { active: a.total, archive: b.total, quicklog: q.total };
     },
     retry: false,
     refetchInterval: false,
     refetchOnWindowFocus: false,
   });
-  const tabTotals: { active?: number; archive?: number } =
+  const tabTotals: { active?: number; archive?: number; quicklog?: number } =
     tabTotalsQuery.data ?? {};
 
   // 旧 load() 每次执行先清错误横幅：新数据到达时收敛 reparse 错误横幅（语义对齐）。
@@ -220,7 +245,7 @@ export default function ChangesPage({ params }: Props) {
     setPage(1);
   };
 
-  const handleTabChange = (newTab: "active" | "archive") => {
+  const handleTabChange = (newTab: ChangesTab) => {
     if (newTab === tab) return;
     setTab(newTab);
     setPage(1);
@@ -379,6 +404,12 @@ export default function ChangesPage({ params }: Props) {
   // 聚焦时 N=total（当前待我处理），M=tabTotals.active（进行中总数，单独 useQuery 拉）。
   const renderSubtitle = (): ReactNode => {
     const wsName = workspace?.name ?? "—";
+    if (tab === "quicklog") {
+      const n = tabTotals.quicklog;
+      return n !== undefined
+        ? `${wsName} · ${n} 条快速修复记录`
+        : `${wsName} · 快速修复记录`;
+    }
     if (tab === "archive") {
       return `${wsName} · 已归档变更`;
     }
@@ -507,11 +538,16 @@ export default function ChangesPage({ params }: Props) {
       {/* 主 tab：进行中 / 已归档（按 location，D-007），挂数量（tabTotals 独立 useQuery 拉） */}
       <div className="flex items-center gap-1">
         {TABS.map((t) => {
-          const cnt = t.key === "active" ? tabTotals.active : tabTotals.archive;
+          const cnt =
+            t.key === "active"
+              ? tabTotals.active
+              : t.key === "archive"
+                ? tabTotals.archive
+                : tabTotals.quicklog;
           return (
             <button
               key={t.key}
-              onClick={() => handleTabChange(t.key as "active" | "archive")}
+              onClick={() => handleTabChange(t.key as ChangesTab)}
               className={`border-b-2 pb-1.5 text-xs font-medium transition-colors ${
                 tab === t.key
                   ? "border-primary text-primary"
@@ -528,6 +564,23 @@ export default function ChangesPage({ params }: Props) {
           );
         })}
       </div>
+
+      {/* task-08（D-001/FR-05）：快速修复 tab——独立查询区（无阶段/聚焦概念）+ QuicklogTable */}
+      {tab === "quicklog" && (
+        <SectionCard bodyPadding="p-2">
+          <QuicklogTable
+            workspaceId={workspaceId}
+            onSelect={setQuicklogSelected}
+          />
+        </SectionCard>
+      )}
+
+      {/* task-09（FR-06/D-006）：quicklog 条目详情抽屉 */}
+      <QuicklogDrawer
+        entry={quicklogSelected}
+        workspaceId={workspaceId}
+        onClose={() => setQuicklogSelected(null)}
+      />
 
       {/* 聚焦开关（D-007）：仅进行中视图显示，默认勾上。黄色高亮框对齐原型聚焦框。 */}
       {tab === "active" && (
@@ -550,6 +603,7 @@ export default function ChangesPage({ params }: Props) {
         </div>
       )}
 
+      {tab !== "quicklog" && (
       <SectionCard bodyPadding="p-2">
         {/* 工具栏：搜索 + 重置（右对齐，对齐 FRONTEND_PAGE_STYLE §2） */}
         <div className="mb-2 flex items-center justify-end gap-2">
@@ -586,7 +640,9 @@ export default function ChangesPage({ params }: Props) {
           </Field>
         </div>
       </SectionCard>
+      )}
 
+      {tab !== "quicklog" && (
       <DataTable<ChangeSummary>
         rowKey="id"
         columns={columns}
@@ -610,6 +666,7 @@ export default function ChangesPage({ params }: Props) {
         // 空态走自定义 ReactNode（分场景 + CTA），透传给 antd Table locale.emptyText
         locale={{ emptyText: renderEmpty() }}
       />
+      )}
     </PageContainer>
   );
 }

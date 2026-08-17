@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.core.logging import get_logger
-from app.modules.platform_sync.model import PlatformChangeProgressORM
+from app.modules.platform_sync.model import PlatformChangeProgressORM, QuicklogEntryORM
 
 log = get_logger(__name__)
 
@@ -518,3 +518,40 @@ class PlatformSyncService:
         if row is None:
             return None
         return row.approval if isinstance(row.approval, dict) else None
+
+    async def upsert_quicklog_entry(
+        self,
+        workspace_id: uuid.UUID,
+        payload: dict[str, Any],
+    ) -> QuicklogEntryORM:
+        """POST /quicklog-entries：幂等 upsert（design §5.2 / D-004）。
+
+        ``(workspace_id, ql_id)`` 存在→整条覆盖（CLI 重跑 ``--done`` 幂等）；不存在→
+        插入。**不做 base_ts 乐观锁**——quicklog 条目是单写者（同一 quick 会话的 CLI）
+        整条覆盖，无变更 progress 那种双向编辑冲突面（D-004）。
+
+        ``payload`` 裸存推送原文（D-005：派生字段查询时算，不入库）；
+        ``workspace_id`` 由 router 从 require_platform_sync_write 派生注入（唯一通道）。
+        """
+        ql_id = str(payload.get("ql_id", ""))
+        stmt = select(QuicklogEntryORM).where(
+            col(QuicklogEntryORM.workspace_id) == workspace_id,
+            col(QuicklogEntryORM.ql_id) == ql_id,
+        )
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
+        now = datetime.now(UTC)
+        if row is None:
+            row = QuicklogEntryORM(
+                workspace_id=workspace_id,
+                ql_id=ql_id,
+                payload=payload,
+                created_at=now,
+                updated_at=now,
+            )
+            self._session.add(row)
+        else:
+            row.payload = payload
+            row.updated_at = now
+        await self._session.commit()
+        await self._session.refresh(row)
+        return row
