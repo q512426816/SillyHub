@@ -204,12 +204,12 @@ export function SessionConfigBar({
     [machines, runtimeId, configSnapshot?.machine_name],
   );
 
-  /** ql-20260817-009：下拉选项点击 → 直接切换（去掉确认行/输入提示消息步骤）。
-   * prompt 用默认文案（switchPrompt 覆盖），inject 契约要求非空 prompt 作切换轮载体。 */
+  /** ql-20260817-010：点选即**静默**切换——prompt 发空串（后端静默切换契约：
+   * 有切换字段允许空 prompt；daemon 收到空 prompt 只 reload 配置不喂消息，
+   * 切换轮无用户消息/模型回应）。switchPrompt 传入时仍作为切换轮消息发出。 */
   const executeSwitch = async (p: PendingSwitch) => {
     if (submitting) return;
-    const prompt = (switchPrompt ?? buildDefaultSwitchPrompt(p)).trim();
-    if (!prompt) return;
+    const prompt = (switchPrompt ?? "").trim();
     setSubmitting(true);
     setOpenKind(null);
     try {

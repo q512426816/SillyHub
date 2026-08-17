@@ -111,11 +111,21 @@ class SessionInjectRequest(BaseModel):
     ``agent_profile_id`` 非空且 ≠ 会话当前档案 → 切档案；``llm_provider_id``
     非空且 ≠ 当前 → 切供应商（空串/"none" 语义=切回本机默认）。切换校验与
     SESSION_SWITCH_CONFIG 下发归 task-05，本 DTO 只透传。
+
+    ql-20260817-010：**静默切换**——携带切换字段时 prompt 可为空串（切换轮
+    不产生用户消息与模型回应，daemon 只 reload 配置）；纯追问（无切换字段）
+    仍要求非空 prompt。
     """
 
-    prompt: str = Field(min_length=1, max_length=8000)
+    prompt: str = Field(default="", max_length=8000)
     agent_profile_id: str | None = None
     llm_provider_id: str | None = None
+
+    @model_validator(mode="after")
+    def _require_prompt_or_switch(self) -> "SessionInjectRequest":
+        if not self.prompt.strip() and not self.agent_profile_id and self.llm_provider_id is None:
+            raise ValueError("prompt is required when no config switch is requested")
+        return self
 
 
 # ── Change-scoped session list (2026-07-09-change-detail-session task-09 / D-005@v1) ─

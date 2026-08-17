@@ -1025,11 +1025,16 @@ class SessionService:
         "none" → 清空回本机默认）。都 None → 原有 inject 行为零回归；send 失败
         按既有收敛（Grill C-11）。
         """
+        # ql-20260817-010：静默切换——携带切换字段时允许空 prompt（切换轮无用户
+        # 消息/模型回应，daemon 只 reload 配置）；纯追问仍要求非空（DTO 已 422，
+        # 服务层兜底防绕过）。
         if not prompt or not prompt.strip():
-            raise DaemonSessionNotActive(
-                "prompt must not be empty.",
-                details={"reason": "empty_prompt"},
-            )
+            if not agent_profile_id and llm_provider_id is None:
+                raise DaemonSessionNotActive(
+                    "prompt must not be empty.",
+                    details={"reason": "empty_prompt"},
+                )
+            prompt = ""
 
         try:
             session = await self._get_owned_session_for_update(session_id, user_id)
@@ -1372,6 +1377,13 @@ class SessionService:
             else:
                 profile_payload = None
                 provider_config_payload = None
+
+            # ql-20260817-010：静默切换——空 prompt 的切换轮无 LLM turn，run 直接
+            # 落终态 completed（纯配置变更记录，无 user_input 日志 → 时间线不渲染）；
+            # daemon 收到空 prompt 只 reload 配置不喂消息（reloadWithConfig 既有守卫）。
+            if config_switch and not prompt.strip():
+                run.status = "completed"
+                run.finished_at = datetime.now(UTC)
 
             await self._session.commit()
             await self._session.refresh(session)

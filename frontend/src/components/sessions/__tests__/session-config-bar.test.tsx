@@ -23,7 +23,6 @@ import type * as React from "react";
 
 import {
   SessionConfigBar,
-  buildDefaultSwitchPrompt,
   SWITCH_NO_PROVIDER_VALUE,
 } from "@/components/sessions/session-config-bar";
 import { TurnTimeline, type SessionTurnView } from "@/components/daemon/turn-timeline";
@@ -332,22 +331,17 @@ describe("SessionConfigBar 机器/智能体纯展示（D-004@v2）", () => {
 // ── 4. 供应商切换（含「不指定」空串语义，task-16 契约） ───────────────────
 
 describe("SessionConfigBar 切换供应商", () => {
-  it("idle 选择供应商 → 点选即切换（默认 prompt）→ injectSession 参数正确 + 成功 toast", async () => {
+  it("idle 选择供应商 → 点选即静默切换（空 prompt）→ injectSession 参数正确 + 成功 toast", async () => {
     renderBar({ llmProviderId: "prov-kimi" });
     openCtrl("配置-供应商");
     // 供应商选项经 react-query 异步到达 → findBy 等待；点选即执行（无确认行）
     fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
 
     await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
-    expect(mocks.injectSession).toHaveBeenCalledWith(
-      "sess-1",
-      buildDefaultSwitchPrompt({
-        field: "llm_provider_id",
-        value: "prov-glm",
-        label: "GLM 平台",
-      }),
-      { llm_provider_id: "prov-glm" },
-    );
+    // ql-20260817-010：静默切换——prompt 空串（daemon 只 reload 不喂消息）
+    expect(mocks.injectSession).toHaveBeenCalledWith("sess-1", "", {
+      llm_provider_id: "prov-glm",
+    });
     await waitFor(() =>
       expect(mocks.messageSuccess).toHaveBeenCalledWith(
         expect.stringContaining("下一轮生效"),
@@ -412,7 +406,7 @@ describe("SessionConfigBar 切换档案", () => {
     await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
     expect(mocks.injectSession).toHaveBeenCalledWith(
       "sess-1",
-      expect.stringContaining("严肃代码审查员"),
+      "",
       { agent_profile_id: "prof-2" },
     );
     await waitFor(() => expect(onSwitched).toHaveBeenCalledTimes(1));

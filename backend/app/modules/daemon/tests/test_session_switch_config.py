@@ -40,6 +40,7 @@ from app.modules.daemon.session.service import (
     DAEMON_MSG_SESSION_SWITCH_CONFIG,
     DaemonSessionLlmProviderKindMismatch,
     DaemonSessionLlmProviderNotFound,
+    DaemonSessionNotActive,
 )
 from app.modules.llm_provider.model import LlmProvider
 
@@ -413,6 +414,63 @@ class TestClearProvider:
         assert msg_type == DAEMON_MSG_SESSION_SWITCH_CONFIG
         assert payload["providerConfig"] is None
         assert payload["profile"] is None
+
+    @pytest.mark.asyncio
+    async def test_silent_switch_empty_prompt(self, db_session, mocked_hub, mocked_redis) -> None:
+        """ql-20260817-010 静默切换：空 prompt 切档案——run 直接落 completed（无
+        LLM turn）、SESSION_SWITCH_CONFIG 的 prompt 为空串（daemon 只 reload 不喂
+        消息）、配置切换照常生效。"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        profile_a = await _create_profile(db_session, uid, system_prompt="a")
+        profile_b = await _create_profile(db_session, uid, name="新人格", system_prompt="b")
+
+        svc = DaemonService(db_session)
+        created = await svc.create_session(
+            uid,
+            provider=None,
+            prompt="first",
+            runtime_id=str(rt.id),
+            agent_profile_id=str(profile_a.id),
+        )
+        await _finish_first_turn(db_session, created)
+        mocked_hub.send_session_control.reset_mock()
+
+        result = await svc.inject_session(
+            created.agent_session.id, uid, prompt="", agent_profile_id=str(profile_b.id)
+        )
+
+        # 静默切换轮：无 LLM turn，run 直接终态 completed。
+        assert result.agent_run.status == "completed"
+        assert result.agent_run.finished_at is not None
+        # 配置切换照常生效。
+        assert result.agent_run.agent_profile_id == profile_b.id
+        await db_session.refresh(created.agent_session)
+        assert created.agent_session.agent_profile_id == profile_b.id
+        # 消息：prompt 空串 + 档案载荷；daemon 侧 reloadWithConfig 对空 prompt 不喂消息。
+        msg_type, payload = (
+            mocked_hub.send_session_control.await_args.args[1],
+            mocked_hub.send_session_control.await_args.args[2],
+        )
+        assert msg_type == DAEMON_MSG_SESSION_SWITCH_CONFIG
+        assert payload["prompt"] == ""
+        assert payload["profile"]["systemPrompt"] == "b"
+
+    @pytest.mark.asyncio
+    async def test_empty_prompt_without_switch_fields_rejected(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """ql-20260817-010：纯追问空 prompt 仍拒绝（服务层兜底，DTO 层已 422）。"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        svc = DaemonService(db_session)
+        created = await svc.create_session(
+            uid, provider=None, prompt="first", runtime_id=str(rt.id)
+        )
+        await _finish_first_turn(db_session, created)
+
+        with pytest.raises(DaemonSessionNotActive):
+            await svc.inject_session(created.agent_session.id, uid, prompt="")
 
     @pytest.mark.asyncio
     async def test_empty_string_when_already_none_is_plain_inject(

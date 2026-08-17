@@ -484,3 +484,12 @@
 根因：两步确认流程（点选项→编辑 prompt→确认）多余。
 方案：删确认行 UI 与 pending 状态；点选项直接 injectSession（默认文案或 switchPrompt 覆盖）；保留防连点/toast/错误提示。
 结果：17 用例过（4 个改写），全量 157 文件/1610 全绿，tsc/eslint 0。待 commit+push+rebuild frontend。
+
+## ql-20260817-010-a6ed | 2026-08-17 16:35:42 | 切换档案/供应商不再自动发消息、不产生模型回应
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+需求：切换档案/供应商不再自动发消息、不产生模型回应。
+根因：inject 契约要求非空 prompt，前端自动填默认文案发出。
+方案：静默切换三端——后端切换字段在场允许空 prompt（validator+服务层兜底）；空 prompt 切换轮 run 直接 completed（无 LLM turn）；daemon 既有 if(payload.prompt) 守卫空则只 reload；前端发空串（switchPrompt 传入仍可带话切换）。
+结果：切换 14 用例过（新增 2），daemon 全量 802，前端全量 1610，tsc/ruff 0。待部署 backend+frontend。
