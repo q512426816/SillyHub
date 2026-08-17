@@ -448,3 +448,12 @@
 根因：后端给所有连接自设 PG idle_in_transaction_session_timeout=120s（db.py 防泄漏兜底），而 _write_spec_root 从 get()/prefetch SELECT 起持有事务，期间 tar 解包 + 3560 文件逐个 read/sha256/move（spec_root 是 Windows bind mount，FS 段实测 2.5min+）主连接零 SQL → PG 杀空闲事务连接 → 循环结束 commit 撞死连接报 asyncpg InterfaceError 500。且 SQLAlchemy 2.0 的 session.add 会 autobegin，循环内首个 add 即重开事务——单纯加释放点不够。apply_ops（增量 init 推全套骨架文件）同模式同暴露。
 方案：按项目既有模式（db.py:40-45 注释 + delegate.py:706 先例）长 FS 段前 commit 释放事务；循环内禁止 add/delete（会 autobegin），改 pending 列表收集、循环后统一入 session + 最终 commit（全部写仍单事务，原子性不变）；archive_conflict 加 add_to_session=False 支持。
 结果：spec_workspace+scan_docs 回归 162 passed 1 skipped（Windows symlink 平台跳过）+ change reparse 18 passed，ruff+mypy 全过；两个新结构测试修前红（采样事务态 True）、修后绿；语义锚点（冲突归档/mtime 覆盖方向/双 sync 幂等/长名/tar 越界）全保持。
+
+## ql-20260817-006-db1d | 2026-08-17 13:43:56 | ①智能体下拉里 Claude Code 被挤压成竖排
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/sessions/__tests__/session-config-bar.test.tsx, frontend/src/components/sessions/session-config-bar.tsx
+需求：①智能体下拉里 Claude Code 被挤压成竖排；②下拉只列当前机器的引擎（在线可操作、离线置灰标注），不要所有机器的引擎。
+根因：①ConfigDropdown 只有 min-w 无 w-max/nowrap，inline-flex 包装内收缩宽度导致窄列换行；②下拉包含「其它机器同引擎（跨机器二期）」段（D-004@v2 旧语义）。
+方案：①ConfigDropdown 加 w-max+whitespace-nowrap；②智能体下拉重写：仅当前机器 runtimes——当前=✓当前、其它在线引擎可点（引擎不支持会话内热切，点击 message 引导到新建会话选择）、离线引擎 aria-disabled+「离线」标注；标题改「当前机器引擎（换引擎需开新会话）」；DisplayItem 扩展 disabled/onClick 支持可点态。
+结果：config-bar 17 用例全过（跨机器断言按新语义更新），前端全量 157 文件/1610 全绿，tsc 0 错，eslint 0 error。待 commit+push+rebuild frontend。

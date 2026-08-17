@@ -314,14 +314,17 @@ describe("SessionConfigBar 机器/智能体纯展示（D-004@v2）", () => {
     expect(screen.queryByLabelText("切换确认行")).not.toBeInTheDocument();
   });
 
-  it("智能体下拉：同机跨引擎标「需开新会话」、其它机器同引擎标「跨机器 · 二期」", () => {
+  it("智能体下拉：只列当前机器引擎——其它在线引擎可点引导开新会话、离线置灰、不列其它机器", () => {
     renderBar();
     openCtrl("配置-智能体");
     expect(screen.getByTestId("config-dd-agent")).toBeInTheDocument();
-    expect(
-      screen.getByText("不同引擎 · 需开新会话"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("🖥 machine-2 · 跨机器 · 二期")).toBeInTheDocument();
+    // 同机其它引擎（Codex，在线）→ 可点，标注「换引擎需开新会话」
+    const codex = screen.getByRole("button", { name: /Codex/ });
+    expect(codex).toBeInTheDocument();
+    expect(screen.getByText("换引擎需开新会话")).toBeInTheDocument();
+    // 其它机器（machine-2）的引擎不出现在下拉里
+    expect(screen.queryByText("跨机器 · 二期")).not.toBeInTheDocument();
+    expect(screen.queryByText(/machine-2/)).not.toBeInTheDocument();
     expect(screen.queryByLabelText("切换确认行")).not.toBeInTheDocument();
   });
 });

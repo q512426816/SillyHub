@@ -335,10 +335,14 @@ export function SessionConfigBar({
           "智能体（换引擎需开新会话）",
           <ConfigDropdown
             testId="config-dd-agent"
-            title="智能体 · 换引擎需开新会话（跨机器二期）"
+            title="智能体 · 当前机器引擎（换引擎需开新会话）"
           >
+            {/* ql-20260817-006：只列当前机器的引擎（不列其它机器）——当前=✓；
+                其它在线引擎可点（引擎不支持会话内热切 → 点击引导开新会话）；
+                离线引擎置灰标注。 */}
             {(currentMachine?.runtimes ?? []).map((r) => {
               const isCurrent = r.id === runtimeId;
+              const online = r.status === "online";
               return (
                 <DisplayItem
                   key={r.id}
@@ -348,28 +352,24 @@ export function SessionConfigBar({
                   sub={
                     isCurrent
                       ? undefined
-                      : r.provider !== effectiveEngine
-                        ? "不同引擎 · 需开新会话"
-                        : "同引擎运行时"
+                      : online
+                        ? "换引擎需开新会话"
+                        : "离线"
+                  }
+                  disabled={!online}
+                  onClick={
+                    isCurrent || !online
+                      ? undefined
+                      : () => {
+                          setOpenKind(null);
+                          message.info(
+                            `当前会话不支持切换引擎，请在「新建会话」中选择 ${runtimeLabel(r)}`,
+                          );
+                        }
                   }
                 />
               );
             })}
-            {/* 其它机器同引擎智能体（跨机器 → 二期，D-004@v2） */}
-            {machines
-              .filter((m) => m.id !== currentMachine?.id)
-              .flatMap((m) =>
-                (m.runtimes ?? [])
-                  .filter((r) => r.provider === effectiveEngine)
-                  .map((r) => (
-                    <DisplayItem
-                      key={`${m.id}-${r.id}`}
-                      icon={<span aria-hidden>{engineIcon(r.provider)}</span>}
-                      label={runtimeLabel(r)}
-                      sub={`🖥 ${machineLabel(m)} · 跨机器 · 二期`}
-                    />
-                  )),
-              )}
             {(currentMachine?.runtimes ?? []).length === 0 && (
               <p className="px-2 py-1.5 text-xs text-muted-foreground">
                 未找到当前智能体所属机器
@@ -541,7 +541,7 @@ function ConfigDropdown({
   return (
     <div
       data-testid={testId}
-      className="absolute bottom-full left-0 z-30 mb-1.5 min-w-[280px] rounded-md border border-border bg-card p-1.5 shadow-lg"
+      className="absolute bottom-full left-0 z-30 mb-1.5 w-max min-w-[280px] whitespace-nowrap rounded-md border border-border bg-card p-1.5 shadow-lg"
     >
       <div className="border-b border-border px-2 pb-1.5 pt-1 text-[11px] text-muted-foreground">
         {title}
@@ -557,20 +557,32 @@ function DisplayItem({
   label,
   current,
   sub,
+  disabled = true,
+  onClick,
 }: {
   icon: React.ReactNode;
   label: string;
   current?: boolean;
   sub?: string;
+  /** ql-20260817-006：默认展示态置灰；传 false + onClick 变可点（在线引擎引导开新会话）。 */
+  disabled?: boolean;
+  onClick?: () => void;
 }) {
+  const clickable = !disabled && onClick != null && !current;
   return (
     <div
-      aria-disabled="true"
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      aria-disabled={clickable ? undefined : "true"}
+      onClick={clickable ? onClick : undefined}
       className={cn(
-        "flex cursor-not-allowed items-center gap-2 rounded px-2 py-1.5 text-xs",
+        "flex items-center gap-2 rounded px-2 py-1.5 text-xs",
+        clickable && "cursor-pointer hover:bg-muted",
+        !clickable && "cursor-not-allowed",
         current
           ? "bg-primary/10 font-medium text-primary"
           : "text-foreground/80",
+        disabled && !current && "opacity-60",
       )}
     >
       <span aria-hidden className="shrink-0">
