@@ -221,6 +221,30 @@ class SpecWorkspaceService:
             )
         return result
 
+    async def get_manifest(self, workspace_id: uuid.UUID) -> dict[str, dict[str, str | int | bool]]:
+        """读服务器权威 per-file 清单（Change 2026-08-17-spec-file-incremental-sync task-01，design §5.3）。
+
+        查询该 workspace 的 ``SpecFileManifest`` 全部行（**含 ``exists=False`` 的软删
+        行**——CLI diff 据此识别服务器侧已删文件并下发 delete 对齐），返回
+        ``{path: {"hash": content_hash, "version": version, "exists": exists}}``。
+        按 path 排序保证响应确定性（便于 CLI diff / 人工核对）。纯读方法，不触碰
+        清单行——唯一写者仍是 ``apply_ops``（D-011 单写者语义不变）。
+        """
+        stmt = (
+            select(SpecFileManifest)
+            .where(SpecFileManifest.workspace_id == workspace_id)
+            .order_by(SpecFileManifest.path)
+        )
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return {
+            row.path: {
+                "hash": row.content_hash,
+                "version": row.version,
+                "exists": row.exists,
+            }
+            for row in rows
+        }
+
     async def ensure_spec_workspace(self, workspace_id: uuid.UUID) -> SpecWorkspace:
         """Ensure a SpecWorkspace exists for the given workspace_id (D-009).
 

@@ -17,6 +17,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, RootModel, model_validator
 
+from app.modules.spec_workspace.schema import FileOp
+
 
 class ConflictResponse(BaseModel):
     """POST progress 409 冲突响应（契约 §4.4）。
@@ -177,3 +179,60 @@ class QuicklogPushOk(BaseModel):
 
     status: str = Field(default="ok")
     ql_id: str
+
+
+# ── Change 2026-08-17-spec-file-incremental-sync task-01（design §7）──
+
+
+class SpecManifestFileEntry(BaseModel):
+    """GET /changes/-/spec-manifest 单文件清单项（design §7）。
+
+    对齐 ``spec_file_manifest`` 行三字段：``hash``=内容 SHA-256 hex（CLI 与本地
+    walk 结果 diff）、``version``=文件级版本（增量 op 的乐观锁基线）、``exists``=
+    服务器侧软删标志（false → CLI 下发 delete 对齐）。
+    """
+
+    hash: str = Field(description="文件内容 SHA-256 hex")
+    version: int = Field(description="文件级版本号（apply_ops 每次成功 op +1）")
+    exists: bool = Field(description="false=服务器侧已软删（spec-backups 区）")
+
+
+class SpecManifestResponse(BaseModel):
+    """GET /changes/-/spec-manifest 200 响应：服务器权威清单全量 map（design §5.2/§7）。
+
+    CLI ``spec-sync.js`` 以此为锚 diff 本地 ``.sillyspec/`` 算增量 ops
+    （D-004@v1 CLI 无本地缓存，清单即基线）。无清单行（旧 tar 全量同步后失效 /
+    全新 workspace）→ 空 ``files``，CLI 走 R-07 兜底全量重算。
+    """
+
+    files: dict[str, SpecManifestFileEntry] = Field(default_factory=dict)
+
+
+# ── Change 2026-08-17-spec-file-incremental-sync task-02（design §5.2/§7）──
+
+
+class SpecSyncRequest(BaseModel):
+    """POST /changes/-/spec-sync 请求（design §7，复用 spec_workspace FileOp）。
+
+    ``ops`` 即 CLI ``spec-sync.js`` 以 spec-manifest 为锚 diff 出的增量操作数组
+    （add/update/delete/rename，每文件带 ``base_version`` 乐观锁基准）。与 daemon
+    用的 ``SpecIncrementalSyncRequest`` 同构但**不含 ``change_dirs``**——CLI 直跑
+    场景由 ``apply_ops`` 扫 ops 路径 ``changes/`` 前缀兜底触发 reparse（行为等价，
+    design §5.2）。
+    """
+
+    ops: list[FileOp]
+
+
+class SpecSyncResponse(BaseModel):
+    """POST /changes/-/spec-sync 响应（design §7，对齐 SpecIncrementalSyncResponse 语义）。
+
+    conflict 恒伴随 200（不改 HTTP 状态码）：``conflict=True`` 时
+    ``server_versions`` 携带服务器当前版本，CLI 侧 console.warn 提示人工拍板、
+    不阻塞（design §5.4/§5.5）。
+    """
+
+    ok: bool
+    new_versions: dict[str, int]
+    conflict: bool = False
+    server_versions: dict[str, int] | None = None

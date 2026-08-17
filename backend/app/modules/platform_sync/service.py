@@ -29,7 +29,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import ColumnElement, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -38,6 +38,10 @@ from sqlmodel import col
 
 from app.core.logging import get_logger
 from app.modules.platform_sync.model import PlatformChangeProgressORM, QuicklogEntryORM
+
+if TYPE_CHECKING:
+    # 类型标注专用（``from __future__ import annotations`` 惰性求值），运行时零导入。
+    from app.modules.spec_workspace.schema import FileOp
 
 log = get_logger(__name__)
 
@@ -555,3 +559,36 @@ class PlatformSyncService:
         await self._session.commit()
         await self._session.refresh(row)
         return row
+
+    # ── Change 2026-08-17-spec-file-incremental-sync task-01（design §5.2/§5.3）──
+
+    async def get_spec_manifest(
+        self, workspace_id: uuid.UUID
+    ) -> dict[str, dict[str, str | int | bool]]:
+        """GET /changes/-/spec-manifest：透调 ``SpecWorkspaceService.get_manifest``。
+
+        workspace 级鉴权与归属校验在 router 层完成（``require_platform_sync_write``
+        从 shpsync_ token 派生 workspace_id 后才进来）；本层不重复校验，直接实例化
+        ``SpecWorkspaceService``（共享同一 session）读服务器权威清单全量行
+        （含 ``exists=False`` 软删行，design §5.3）。
+        """
+        from app.modules.spec_workspace.service import SpecWorkspaceService
+
+        return await SpecWorkspaceService(self._session).get_manifest(workspace_id)
+
+    async def apply_spec_ops(self, workspace_id: uuid.UUID, ops: list[FileOp]) -> dict[str, object]:
+        """POST /changes/-/spec-sync：透调 ``SpecWorkspaceService.apply_ops``（design §5.2/§7）。
+
+        workspace 级鉴权与归属校验在 router 层完成（同 ``get_spec_manifest`` 范式，
+        ``require_platform_sync_write`` 从 shpsync_ token 派生 workspace_id 后才进来）；
+        ``apply_ops`` 本身不校验权限（design §5.2 权限说明），本层不重复校验，共享
+        同一 session 直接调用。
+
+        ``apply_ops`` 内部自带单事务（全部 ops 一次 commit：成功全部落盘 / 失败全部
+        回滚，design §5.2 事务说明），返回 ``{"new_versions": ..., "conflict": ...,
+        "server_versions": ...}``。``change_dirs`` 不传——CLI 直跑场景由 apply_ops
+        无标注时扫 ops 路径 ``changes/`` 前缀兜底触发 reparse（行为等价，design §5.2）。
+        """
+        from app.modules.spec_workspace.service import SpecWorkspaceService
+
+        return await SpecWorkspaceService(self._session).apply_ops(workspace_id, ops)

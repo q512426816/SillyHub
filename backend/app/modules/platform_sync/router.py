@@ -2,6 +2,8 @@
 
 - POST /changes/{name}/progress：上行 progress + §4.2 base_ts 冲突检测（200/409）
 - GET /changes：轻量列表（裸数组，按 token 派生 workspace 过滤）
+- GET /changes/-/spec-manifest：服务器 spec 文件权威清单（2026-08-17-spec-file-incremental-sync task-01，design §5.2/§7）
+- POST /changes/-/spec-sync：CLI 直跑增量 spec 文件 ops（2026-08-17-spec-file-incremental-sync task-02，design §5.2/§7）
 - GET /changes/{name}/progress：完整 JSON（裸六表 + 顶层 last_pushed_at，404）
 - POST /changes/{name}/documents：四件套全文同步（2026-08-14-platform-sync-docs-approval，D-004@v1）
 - POST /changes/{name}/approval：审批决定提交（同上，D-001@v1 完整闭环）
@@ -48,6 +50,9 @@ from app.modules.platform_sync.schema import (
     ProgressSyncOk,
     QuicklogEntryPushRequest,
     QuicklogPushOk,
+    SpecManifestResponse,
+    SpecSyncRequest,
+    SpecSyncResponse,
 )
 from app.modules.platform_sync.service import PlatformSyncService
 
@@ -140,6 +145,70 @@ async def list_changes(
     _user, scope = auth
     items = await PlatformSyncService(session).list_lightweight(**_read_args(scope))
     return [ChangeListItem(**it) for it in items]
+
+
+# Change 2026-08-17-spec-file-incremental-sync task-01/task-02（design §5.2/§7）：
+# 固定片段端点用 ``-`` 占位段，且必须注册在 ``/changes/{name}/...`` 路由之前
+# （FastAPI 按注册顺序匹配），避免 ``{name}`` 贪婪匹配冲突。
+
+
+@router.get("/changes/-/spec-manifest", response_model=SpecManifestResponse)
+async def get_spec_manifest(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    auth: _write_auth,
+) -> SpecManifestResponse:
+    """GET 服务器 spec 文件权威清单（CLI 直跑增量同步锚点，design §5.2/§7）。
+
+    CLI ``spec-sync.js`` 以此清单为锚 diff 本地 ``.sillyspec/``，算出增量 ops 后
+    POST ``/changes/-/spec-sync``（D-004@v1：CLI 无本地缓存，服务器清单即基线）。
+
+    读清单也收紧为写权限（``require_platform_sync_write``，仅 shpsync_ token，
+    JWT/shk_live_ 403）——清单是增量写协议的一部分，避免非同步方探测文件布局。
+    workspace_id 从 shpsync_ token 派生；无 workspace 归属 → 403 fail-closed
+    （对齐 quicklog-entries 范式）。
+    """
+    _user, scope = auth
+    if scope.workspace_id is None:
+        # 防御：require_platform_sync_write 的 shpsync_ 通道恒派生 workspace；到达此
+        # 分支即凭据形态异常，403 关闭通道（fail-closed）。
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="缺少工作区归属")
+    files = await PlatformSyncService(session).get_spec_manifest(scope.workspace_id)
+    return SpecManifestResponse(files=files)
+
+
+@router.post("/changes/-/spec-sync", response_model=SpecSyncResponse)
+async def push_spec_sync(
+    body: SpecSyncRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    auth: _write_auth,
+) -> SpecSyncResponse:
+    """POST 增量 spec 文件 ops（CLI 直跑增量同步，design §5.2/§7）。
+
+    CLI ``spec-sync.js`` 以 spec-manifest 为锚 diff 本地 ``.sillyspec/`` 后把
+    FileOp[] 整体一次 POST（空 ops 已在 CLI 短路不发请求，到达即有差异）。透传
+    ``apply_spec_ops`` → ``SpecWorkspaceService.apply_ops``（单事务：成功全部落盘 /
+    失败全部回滚）。conflict 不改 HTTP 状态（恒 200）：``conflict=true`` +
+    ``server_versions`` 由 CLI console.warn 提示人工拍板、不阻塞（design §5.4/§5.5）；
+    路径越界 422 由 apply_ops 的 AppError 透传（对齐 daemon 增量端点）。
+
+    鉴权同 spec-manifest（``require_platform_sync_write``，仅 shpsync_ token，
+    design §5.2——shpsync_ 此前只开放 progress/documents/approval 三写端点，本次
+    起同 token 复用）；workspace_id 从 token 派生，无归属 → 403 fail-closed。
+    """
+    _user, scope = auth
+    if scope.workspace_id is None:
+        # 防御：require_platform_sync_write 的 shpsync_ 通道恒派生 workspace；到达此
+        # 分支即凭据形态异常，403 关闭写通道（fail-closed，对齐 task-01 范式）。
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="缺少工作区归属")
+    result = await PlatformSyncService(session).apply_spec_ops(
+        workspace_id=scope.workspace_id, ops=body.ops
+    )
+    return SpecSyncResponse(
+        ok=True,
+        new_versions=result["new_versions"],
+        conflict=result["conflict"],
+        server_versions=result["server_versions"],
+    )
 
 
 @router.get("/changes/{name}/progress")

@@ -25,6 +25,7 @@ multi-agent-platform 采用的文档驱动变更管理规范体系，落地在�
 
 - **状态源**：变更进度存在 `sillyspec.db`（历史曾用 progress.json，已迁移），current_stage + stages + 步骤级进度驱动流程推进；`local.yaml` 的 test_strategy/module_paths 约束 scan 与 verify 行为。
 - **技能编排**：一组 sillyspec-* 技能（init/brainstorm/propose/plan/execute/verify/archive/quick/scan/auto/continue/resume/commit/status/state/doctor/workspace/export/explore）对应流程各阶段，用户经 `sillyspec run <skill>` 或直接调用技能进入。
+- **CLI 直跑平台同步**：`sync()` 成功路径三层上行——进度六表 POST `/api/changes/{name}/progress`（base_ts 乐观锁）→ 四件套文档直推 documents（2026-08-16-auto-sync-from-repo）→ 整树增量 `syncSpecTree()`（2026-08-17-spec-file-incremental-sync，`src/spec-sync.js`）：GET 服务器清单为锚 walk/hash/diff 生成 add/update/delete/rename ops（base_version 乐观锁、rename 按同 hash 配对），POST `/api/changes/-/spec-sync`；无差异短路不发请求，未连接/404/网络失败静默降级（SILLYSPEC_DEBUG_SYNC 可查），conflict 只 warn 不阻塞主流程；排除口径与 daemon 一致（`.runtime`/`runtime`/`projects` 顶层排除 + `worktrees` 剪枝）。
 - **归档蒸馏**：verify 通过后 archive 阶段做模块影响分析（archive-impact.yaml）、生成 module-impact、蒸馏知识到 `knowledge/`、同步 `_module-map.yaml`，再把变更目录移入 archive。
 - **模块卡片保护**：模块卡片的 `<!-- MANUAL_NOTES_START/END -->` 区域在 doc-syncer 同步时被跳过，用户手写内容不被覆盖。
 
