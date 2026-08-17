@@ -407,3 +407,12 @@
 根因：chips 全部默认 Tag 样式（默认 padding/字号 12px）无宽度约束，机器/档案/供应商名长短不可控。
 方案：Tag 紧凑化（rounded-sm px-1 py-0 text-[10px] leading-4）；机器/档案/供应商长名 max-w（104/110/104px）+truncate + title 悬停全名；引擎与轮数 shrink-0 恒可见；行 gap 1→0.5、pl-3→pl-2.5。虚拟行高 64px 不变（虚拟滚动约束）。
 结果：list-panel 13 用例全过（含 chips 断言），前端全量 155 文件/1589 全绿，tsc 0 错、eslint 0。待部署。
+
+## ql-20260817-002-b8d0 | 2026-08-17 09:37:00 | chips 单行截断压挤导致更难看清
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/sessions/session-list-panel.tsx
+需求：chips 单行截断压挤导致更难看清，要求改为可换行分 2-3 行。
+根因：第二行 flex 单行 nowrap + 固定行高 64px，只能靠截断塞下，长名全被省略号吞掉。
+方案：chips 容器改 flex-wrap 自动换行（至多 3 行）；虚拟行高 64→96px 容纳；Tag 保留紧凑样式，长名 max-w 放宽（机器 120/档案 150/供应商 130）+truncate+title 悬停全名，防单个长名独占整行；引擎/轮数 shrink-0。
+结果：list-panel 13 用例全过，tsc 0 错，eslint 0。待部署。
