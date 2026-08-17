@@ -4,7 +4,7 @@
 > 维护规则：每次 `sillyspec-archive` 归档变更时同步更新「已完成里程碑」与「当前活跃」两节。
 > 详细变更规格见 `.sillyspec/changes/`（活跃）与 `.sillyspec/changes/archive/`（历史）。
 
-最近更新：2026-08-15
+最近更新：2026-08-17
 
 ---
 
@@ -55,6 +55,10 @@
 
 ### 2026-0
 ### 2026-0
+### 2026-08-17 · 变更中心「快速修复」tab（quick 操作平台展示位）
+
+- **change-center-quick-tab**（2026-08-17）：补齐 SillySpec quick 操作在平台的展示位。双链路：① CLI 端 `quicklog.js` allocate/complete 后 best-effort POST `POST /api/quicklog-entries`（shpsync_ 鉴权、workspace 从 token 派生、5s 超时、无配置静默跳过）；② 平台端解析 `spec_root/quicklog/` 文件 fallback。新增 `quicklog_entries` 表（UNIQUE(workspace_id, ql_id) 幂等 upsert），新增 `backend/change/quicklog_parser.py`（CRLF/全半角冒号/4 状态形态/多状态行取最后/5 分隔符/bullet 括注/白名单/mtime 缓存）与 `quicklog_service.py`（双源合并 PG 优先、stale 24h 派生、author enrich、模块推导、全文搜索），变更中心第三 tab「快速修复」（筛选/轮询/空态）、抽屉详情（四段正文/原始 md 切换）、详情页反向「关联的快速任务」区块。跨仓 sillyspec CLI 六项推送测试。verify PASS WITH NOTES（3 条观察项：历史 ql_id 撞号/GBK 乱码头行/实机冒烟留部署）。
+
 ### 2026-08-15 · init lease 触发 sillyspec init
 
 - **init-trigger-sillyspec-init**（2026-08-15）：工作区初始化真正执行 `sillyspec init`——daemon `handleInitLease` 编排 5→6 步（pullSpecBundle 后、postSpecSync 前插 `runSillyspecInit` 硬失败 abort，D-002@v2：pull 整删重建故 init 必须后置），spawn `sillyspec init --dir <rootPath> --spec-dir <缓存> --workspace-id --no-skills --tool <多工具>`（shell:true + 60s 超时杀树 + spawnFn 依赖注入），成员本地获得 .sillyspec-platform.json 平台指针（status active）+ CLAUDE.md/AGENTS.md 指令注入 + spec 骨架。spawn 前 3s 版本门控 `MIN_SILLYSPEC_VERSION_FOR_INIT=3.26.8`（查询/解析失败 fail-safe，错误带中文升级指引，不依赖 daemon 重启）；tools 来自 cli.ts 构造前 AgentDetector 探测映射 VALID_TOOLS（兜底 claude）。配套双侧防冲突：backend `apply_ops` 冲突分支同 hash no-op 豁免（op.hash==row.content_hash → 不 conflict + new_versions 回服务器版本，D-008@v2 治第二成员骨架 add 必冲突）；daemon `UPLOAD_EXCLUDE_TOP_BASE` 三处统一排除 projects/（防成员机器绝对路径上传 + 缓存残留 delete op 误删）。跨仓 sillyspec CLI 三项（--no-skills / --tool 逗号重复多值 / 平台模式跳过项目内清理保 local.yaml 手调段）。verify PASS 含三场景真实集成证据（首成员产物/重复 init 手调保留/第二成员零冲突）+ 门控负路径；本机 npm link 3.26.8 验证（正式发版待用户，MIN 语义为下界）。契约零变更（lease metadata/claim payload/FileOp schema）。
