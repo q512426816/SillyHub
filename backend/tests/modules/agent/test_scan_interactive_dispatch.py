@@ -150,7 +150,9 @@ async def test_start_scan_dispatch_uses_interactive_session(monkeypatch):
         if c.args and isinstance(c.args[0], AgentSession)
     ]
     assert len(added_sessions) == 1
-    cfg = added_sessions[0].config
+    session = added_sessions[0]
+    assert session.workspace_id is not None
+    cfg = session.config
     assert cfg["manual_approval"] is True
     assert cfg["ask_user_only"] is True
     assert cfg["mode"] == "scan"

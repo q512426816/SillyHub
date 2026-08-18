@@ -159,6 +159,7 @@ class AgentSessionListItem(BaseModel):
     provider: str
     status: str
     turn_count: int
+    mode: str | None = None
     author: ChangeSessionAuthor
     last_active_at: datetime | None
     title: str | None

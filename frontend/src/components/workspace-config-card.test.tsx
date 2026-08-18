@@ -19,6 +19,12 @@ import type { SpecWorkspace } from "@/lib/spec-workspaces";
 import type { Workspace } from "@/lib/workspaces";
 import type { MemberBindingView } from "@/lib/workspace-binding";
 
+// ── next/navigation mock（handleScan 用 router.push 跳转会话页）────────────
+const routerPush = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: routerPush, replace: vi.fn(), back: vi.fn() }),
+}));
+
 // ── next/link mock（AccessGuide 内部用 Link，避免 jsdom 警告）──────────────────
 vi.mock("next/link", () => ({
   default: ({ children, href }: { children: React.ReactNode; href: string }) => (
@@ -356,6 +362,7 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    routerPush.mockReset();
     cleanup();
   });
 
@@ -599,6 +606,7 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
     workspacesApi.scanGenerate.mockResolvedValue({
       workspace_id: "ws-1",
       agent_run_id: "run-1",
+      session_id: "sess-1",
       stream_url: "",
       status: "pending",
       spec_root: "",
@@ -630,6 +638,7 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
       .mockResolvedValueOnce({
         workspace_id: "ws-1",
         agent_run_id: "run-1",
+        session_id: "sess-2",
         stream_url: "",
         status: "pending",
         spec_root: "",
@@ -653,6 +662,10 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
     expect(confirmSpy).toHaveBeenCalledWith(
       expect.objectContaining({ title: "重新扫描" }),
     );
+    // 第二次成功 → router.push 跳转含 session 参数
+    expect(routerPush).toHaveBeenCalledWith(
+      "/workspaces/ws-1/sessions?session=sess-2",
+    );
     confirmSpy.mockRestore();
   });
 
@@ -665,6 +678,7 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
     workspacesApi.scanGenerate.mockResolvedValue({
       workspace_id: "ws-1",
       agent_run_id: "run-1",
+      session_id: "sess-3",
       stream_url: "",
       status: "pending",
       spec_root: "",
@@ -681,6 +695,56 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
     const callArgs = workspacesApi.scanGenerate.mock.calls[0];
     expect(callArgs?.[0]).toBe("C:/proj/multi-agent-platform"); // root_path
     expect(callArgs?.[4]).toBe("binding-daemon-1"); // daemonId 取自 myBinding.daemon_id（新签名第 5 参）
+    // handleScan 成功后 router.push 跳转含 session 参数
+    expect(routerPush).toHaveBeenCalledWith(
+      "/workspaces/ws-1/sessions?session=sess-3",
+    );
+  });
+
+  it("扫描成功：router.push 跳转会话页（session_id 存在时带 ?session= 参数）", async () => {
+    const ws = makeWorkspace();
+    const binding = makeBinding({ daemon_id: "daemon-1" });
+    workspacesApi.scanGenerate.mockResolvedValue({
+      workspace_id: "ws-1",
+      agent_run_id: "run-1",
+      session_id: "sess-push-1",
+      stream_url: "",
+      status: "pending",
+      spec_root: "",
+      message: "",
+    });
+
+    renderCard({ workspace: ws, myBinding: binding, componentCount: 0 });
+
+    fireEvent.click(screen.getByRole("button", { name: "扫描" }));
+    await flushMicrotasks();
+
+    expect(workspacesApi.scanGenerate).toHaveBeenCalledTimes(1);
+    expect(routerPush).toHaveBeenCalledWith(
+      "/workspaces/ws-1/sessions?session=sess-push-1",
+    );
+  });
+
+  it("扫描成功：session_id 为空时 router.push 不带 ?session= 参数", async () => {
+    const ws = makeWorkspace();
+    const binding = makeBinding({ daemon_id: "daemon-1" });
+    workspacesApi.scanGenerate.mockResolvedValue({
+      workspace_id: "ws-1",
+      agent_run_id: "run-1",
+      session_id: null,
+      stream_url: "",
+      status: "pending",
+      spec_root: "",
+      message: "",
+    });
+
+    renderCard({ workspace: ws, myBinding: binding, componentCount: 0 });
+
+    fireEvent.click(screen.getByRole("button", { name: "扫描" }));
+    await flushMicrotasks();
+
+    expect(workspacesApi.scanGenerate).toHaveBeenCalledTimes(1);
+    expect(routerPush).toHaveBeenCalledWith("/workspaces/ws-1/sessions");
   });
 
   it("扫描：myBinding.daemon_id=null → 不调 scanGenerate + 显示未绑定提示（不再静默 return）", () => {

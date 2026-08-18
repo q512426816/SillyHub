@@ -9,6 +9,10 @@ import { WorkspaceSessionSection } from "@/components/workspace-session-section"
 import { useSession } from "@/stores/session";
 import type { AgentSessionListItem } from "@/lib/daemon";
 
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 const mocks = vi.hoisted(() => ({
   listWorkspaceAgentSessions: vi.fn(),
   listDaemonRuntimes: vi.fn(),
@@ -33,12 +37,14 @@ function sessionOf(
   userId: string | null,
   title: string,
   lastActiveHour: string,
+  mode?: string,
 ): AgentSessionListItem {
   return {
     id,
     provider: "claude",
     status: "active",
     turn_count: 1,
+    mode: mode ?? null,
     author: userId === null ? null : { user_id: userId, display_name: "作者" },
     last_active_at: `2026-08-14T${lastActiveHour}:00:00Z`,
     title,
@@ -96,5 +102,37 @@ describe("WorkspaceSessionSection 仅展示本人会话（ql-20260814-007）", (
     await waitFor(() => {
       expect(screen.getByText("缺作者会话")).toBeInTheDocument();
     });
+  });
+
+  it("mode=scan 的会话渲染「扫描」Badge", async () => {
+    setCurrentUser(ME);
+    mocks.listWorkspaceAgentSessions.mockResolvedValue([
+      sessionOf("s-scan", ME, "扫描会话", "10", "scan"),
+      sessionOf("s-chat", ME, "对话会话", "09"),
+    ]);
+    mocks.listDaemonRuntimes.mockResolvedValue([]);
+
+    render(<WorkspaceSessionSection workspaceId="ws-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("扫描会话")).toBeInTheDocument();
+    });
+    expect(screen.getByText("扫描")).toBeInTheDocument();
+  });
+
+  it("mode=chat 或无 mode 的会话不渲染「扫描」Badge", async () => {
+    setCurrentUser(ME);
+    mocks.listWorkspaceAgentSessions.mockResolvedValue([
+      sessionOf("s-chat", ME, "对话会话", "10", "chat"),
+      sessionOf("s-none", ME, "普通会话", "09"),
+    ]);
+    mocks.listDaemonRuntimes.mockResolvedValue([]);
+
+    render(<WorkspaceSessionSection workspaceId="ws-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("对话会话")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("扫描")).not.toBeInTheDocument();
   });
 });

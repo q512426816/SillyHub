@@ -547,6 +547,47 @@ class TestListChangeSessions:
         assert resp.status_code == 200
         assert resp.json() == []
 
+    async def test_mode_from_session_config(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """AgentSessionListItem.mode 取自 AgentSession.config['mode']（D-005@v1 组装）。"""
+        admin = (
+            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
+            .scalars()
+            .first()
+        )
+        assert admin is not None
+        rt = await _make_runtime(db_session, admin.id)
+        ws = await _make_workspace(db_session, root_path=f"/tmp/ws-{uuid.uuid4()}")
+        change = await _make_change(db_session, workspace_id=ws.id)
+
+        # 会话 A：config 含 mode="plan"
+        sess_a = await _make_session(
+            db_session, user_id=admin.id, runtime_id=rt.id, change_id=change.id
+        )
+        sess_a.config = {"mode": "plan", "manual_approval": True}
+        db_session.add(sess_a)
+        await db_session.commit()
+
+        # 会话 B：config 无 mode（mode 应为 None）
+        sess_b = await _make_session(
+            db_session, user_id=admin.id, runtime_id=rt.id, change_id=change.id
+        )
+
+        resp = await client.get(
+            f"/api/workspaces/{ws.id}/changes/{change.id}/sessions",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        items = resp.json()
+        item_a = next(i for i in items if i["id"] == str(sess_a.id))
+        item_b = next(i for i in items if i["id"] == str(sess_b.id))
+        assert item_a["mode"] == "plan"
+        assert item_b["mode"] is None
+
 
 # ── C. POST /api/daemon/sessions 绑定 + 前导注入 ─────────────────────────────
 

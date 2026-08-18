@@ -22,6 +22,8 @@ export interface SessionListEntry {
   title: string | null;
   /** 状态徽标文本（active/pending/reconnecting/ended/failed），active 类显示 success。 */
   statusBadge: string;
+  /** 会话类型：scan = 扫描会话，chat = 普通对话；不传则零回归。 */
+  kind?: "scan" | "chat";
   /** 次要行（调用方拼，如「提供方 · N 轮」或「作者 · 提供方」）。 */
   secondaryText: string;
   /** ISO 时间戳，渲染为 MM-DD HH:mm；null 不渲染时间行。 */
@@ -147,9 +149,14 @@ export function SessionListLayout({
                       <span className="truncate text-xs font-medium text-foreground">
                         {s.title?.trim() || shortId(s.id)}
                       </span>
-                      <Badge variant={active ? "success" : "outline"} className="shrink-0 text-[10px]">
-                        {statusLabel(s.statusBadge)}
-                      </Badge>
+                      <span className="flex shrink-0 items-center gap-1">
+                        {s.kind === "scan" && (
+                          <Badge variant="warning" className="text-[10px]">扫描</Badge>
+                        )}
+                        <Badge variant={active ? "success" : "outline"} className="text-[10px]">
+                          {statusLabel(s.statusBadge)}
+                        </Badge>
+                      </span>
                     </span>
                     {s.secondaryText && (
                       <span className="truncate text-[11px] text-muted-foreground">

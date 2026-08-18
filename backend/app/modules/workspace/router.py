@@ -106,7 +106,7 @@ async def scan_generate(
     service = WorkspaceService(session)
     # daemon-client 唯一入口（2026-07-10-remove-server-local-workspace-mode）：
     # daemon_id 透传作为稳定绑定键，scan-generate 内部建 member binding 行。
-    workspace_id, agent_run_id = await service.scan_generate(
+    workspace_id, agent_run_id, session_id = await service.scan_generate(
         root_path=payload.root_path,
         user_id=user.id,
         agent_service=agent_service,
@@ -118,6 +118,7 @@ async def scan_generate(
     return ScanGenerateResponse(
         workspace_id=workspace_id,
         agent_run_id=agent_run_id,
+        session_id=session_id,
     )
 
 

@@ -1081,6 +1081,7 @@ export interface AgentSessionListItem {
   provider: string;
   status: string;
   turn_count: number;
+  mode: string | null;
   author: ChangeSessionAuthor;
   last_active_at: string | null;
   title: string | null;

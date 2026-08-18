@@ -2,6 +2,7 @@
 author: qinyi
 created_at: 2026-08-17 13:45:33
 scale: large
+risk_level: unit-sufficient
 ---
 
 # 设计文档（Design）— 扫描统一到会话（scan-into-session）
@@ -93,10 +94,19 @@ scale: large
 | 修改 | frontend/src/app/(dashboard)/workspaces/[id]/components/page.tsx | NAV_ITEMS 删除「智能体」入口（防死链） |
 | 修改 | frontend/src/lib/menu-permissions.ts | 删除「智能体控制台」菜单组（menuKey=agent） |
 | 修改 | frontend/src/lib/daemon.ts | AgentSessionListItem 类型补 mode（手写 interface，手改对齐） |
-| 删除 | frontend/src/lib/use-agent-runs.ts + lib/__tests__/use-agent-runs.test.tsx | 仅 agent 页使用 |
-| 测试 | backend/app/modules/workspace/tests/*、agent/tests/*、change/tests/* | 新增/适配 session_id、workspace_id、mode（两组装点）断言 |
-| 测试 | frontend/src/components/workspace-config-card.test.tsx、workspaces/[id]/page.test.tsx、__tests__/workspace-session-section.test.tsx | 跳转断言 + 深链测试 + mode 徽标 |
-| 测试 | frontend/src/lib/__tests__/menu-permissions.test.ts、__tests__/permission.test.ts | agent 菜单断言清理 |
+| 删除 | frontend/src/lib/use-agent-runs.ts | 仅 agent 页使用 |
+| 删除 | frontend/src/lib/__tests__/use-agent-runs.test.tsx | 仅 agent 页使用 |
+| 测试 | backend/app/modules/workspace/tests/test_daemon_client_scan.py | 解包三元组并补 session_id 断言 |
+| 测试 | backend/app/modules/workspace/tests/test_scan_provider.py | 解包三元组并补 session_id 断言 |
+| 测试 | backend/app/modules/agent/tests/test_agent_sessions_include_ended.py | 补 mode 组装点断言 |
+| 测试 | backend/app/modules/daemon/tests/test_change_session.py | 补 mode 组装点断言 |
+| 测试 | backend/tests/modules/agent/test_scan_interactive_dispatch.py | 补 workspace_id 断言 |
+| 测试 | frontend/src/components/workspace-config-card.test.tsx | 跳转断言 |
+| 测试 | frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx | 扫描 mock 补 session_id 与跳转断言 |
+| 测试 | frontend/src/components/__tests__/workspace-session-section.test.tsx | 深链测试与 mode 徽标 |
+| 测试 | frontend/src/lib/__tests__/menu-permissions.test.ts | agent 菜单断言清理 |
+| 测试 | frontend/src/lib/__tests__/permission.test.ts | agent 菜单断言清理 |
+| 测试 | frontend/src/components/agent/__tests__/borrow-trigger-contract.test.ts | scanGenerate 触发入口契约保留 |
 
 ## 7. 生命周期契约
 

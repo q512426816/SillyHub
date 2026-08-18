@@ -93,7 +93,7 @@ async def test_scan_generate_dispatches_scan(db_session) -> None:
     agent_run.id = uuid.uuid4()
     agent_service.start_scan_dispatch = AsyncMock(return_value=agent_run)
 
-    ws_id, run_id = await service.scan_generate(
+    ws_id, run_id, session_id = await service.scan_generate(
         root_path="/remote/client/proj",
         user_id=user_id,
         agent_service=agent_service,
@@ -106,6 +106,7 @@ async def test_scan_generate_dispatches_scan(db_session) -> None:
     assert call_kwargs["root_path"] == "/remote/client/proj"
     assert call_kwargs["user_id"] == user_id
     assert run_id == agent_run.id
+    assert session_id == agent_run.agent_session_id
 
     ws = await service.get(ws_id)
     assert ws.status == "pending"
@@ -352,7 +353,7 @@ async def test_scan_generate_with_daemon_id_writes_member_binding(db_session) ->
     agent_run.id = uuid.uuid4()
     agent_service.start_scan_dispatch = AsyncMock(return_value=agent_run)
 
-    ws_id, run_id = await service.scan_generate(
+    ws_id, run_id, session_id = await service.scan_generate(
         root_path="/remote/scan/proj",
         user_id=user_id,
         agent_service=agent_service,
@@ -362,6 +363,7 @@ async def test_scan_generate_with_daemon_id_writes_member_binding(db_session) ->
     # 派了 scan
     agent_service.start_scan_dispatch.assert_awaited_once()
     assert run_id == agent_run.id
+    assert session_id == agent_run.agent_session_id
 
     # workspace pending + 成员绑定行带 daemon_id（dispatch 经此解析 daemon）
     ws = await service.get(ws_id)

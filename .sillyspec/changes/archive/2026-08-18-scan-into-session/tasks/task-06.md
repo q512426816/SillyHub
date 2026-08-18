@@ -15,8 +15,8 @@ allowed_paths:
 provides: []
 expects_from:
   task-04:
-    - contract: AgentSessionListItem
-      needs: [id]
+    - contract: ScanGenerateResponse
+      needs: [session_id]
 goal: >
   会话页挂载时读取 URL 查询参数 session 实现深链 attach（覆盖 FR-04 与 D-002@v1）。
   竞态处理按 design R1：深链参数可能早于列表加载到达，未命中时不得静默 no-op，直接 getAgentSessionLogs + setActiveSessionId（不依赖列表就绪）；?session 变化时同步更新选中状态。

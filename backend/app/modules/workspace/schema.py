@@ -82,6 +82,7 @@ class ScanGenerateResponse(BaseModel):
 
     workspace_id: uuid.UUID
     agent_run_id: uuid.UUID
+    session_id: uuid.UUID | None = None
 
 
 class WorkspaceCreate(BaseModel):

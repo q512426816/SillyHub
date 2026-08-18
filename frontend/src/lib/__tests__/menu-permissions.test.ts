@@ -114,7 +114,6 @@ const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "releases",
   "git-identities",
   "api-keys",
-  "agent",
   "missions",
   // 2026-07-29-sidebar-menu-restructure 新增（D-002/D-003）
   "llm-providers",
@@ -159,8 +158,8 @@ const VALID_SECTIONS: ReadonlySet<string> = new Set([
 ]);
 
 describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
-  it("MENU_PERMISSION_GROUPS 长度 === 39", () => {
-    expect(MENU_PERMISSION_GROUPS).toHaveLength(39);
+  it("MENU_PERMISSION_GROUPS 长度 === 38", () => {
+    expect(MENU_PERMISSION_GROUPS).toHaveLength(38);
   });
 
   it("所有 menuKey 互不重复，且严格等于 FR-02 预定义清单", () => {
@@ -175,7 +174,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("section 分布：workspace 8 / agent 6 / config 4 / governance 3 / system 4 / ppm 14", () => {
+  it("section 分布：workspace 8 / agent 5 / config 4 / governance 3 / system 4 / ppm 14", () => {
     const counter: Record<MenuSection, number> = {
       workspace: 0,
       agent: 0,
@@ -188,7 +187,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
       counter[g.section] += 1;
     });
     expect(counter.workspace).toBe(8);
-    expect(counter.agent).toBe(6);
+    expect(counter.agent).toBe(5);
     expect(counter.config).toBe(4);
     expect(counter.governance).toBe(3);
     expect(counter.system).toBe(4);
@@ -374,30 +373,6 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     // 对齐 skills（D-003）：菜单对所有登录用户可见，无独立权限可配。
     // 空 permissions 经 permission.ts:41（user 非 null → return true）判定登录即可见。
     expect(g!.permissions).toEqual([]);
-  });
-
-  it("agent 菜单应有 13 个 permissions (task 5 + code 4 + tool 4)", () => {
-    const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "agent");
-    expect(g).toBeDefined();
-    expect(g!.permissions.length).toBe(13);
-    const keys = g!.permissions.map((p) => p.key).sort();
-    expect(keys).toEqual(
-      [
-        "task:read",
-        "task:create",
-        "task:assign",
-        "task:run_agent",
-        "task:cancel",
-        "code:read",
-        "code:write",
-        "code:review",
-        "code:merge",
-        "tool:shell_exec",
-        "tool:network",
-        "tool:database",
-        "tool:secret:read",
-      ].sort(),
-    );
   });
 });
 

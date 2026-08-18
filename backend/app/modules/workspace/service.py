@@ -686,7 +686,7 @@ class WorkspaceService:
         model: str | None = None,
         spec_strategy: str = "platform-managed",
         daemon_id: uuid.UUID | None = None,
-    ) -> tuple[uuid.UUID, uuid.UUID]:
+    ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID | None]:
         """创建 pending workspace + 派 scan lease 给绑定 daemon（daemon-client 唯一入口）。
 
         FR-06 / D-003@v1：backend 读不到客户端 root_path，跳过 _guard_path 本地校验；
@@ -758,7 +758,7 @@ class WorkspaceService:
 
         existing_run = await self._find_active_scan_run(workspace.id)
         if existing_run is not None:
-            return (workspace.id, existing_run.id)
+            return (workspace.id, existing_run.id, existing_run.agent_session_id)
 
         from app.modules.spec_workspace.service import SpecWorkspaceService
 
@@ -786,7 +786,7 @@ class WorkspaceService:
         # 清 perm:*/ppm-scope:*。existing_run 早返回分支未写角色（workspace 已存在），免失效。
         if workspace_created:
             await invalidate_all_permissions()
-        return (workspace.id, agent_run.id)
+        return (workspace.id, agent_run.id, agent_run.agent_session_id)
 
     async def _guard_daemon_owned_by_user(self, daemon_id: uuid.UUID, user_id: uuid.UUID) -> None:
         """守护进程归属校验（task-10/11 补遗，D-004 / FR）。

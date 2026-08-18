@@ -164,31 +164,6 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
       { key: "deploy:rollback", name: "回滚" },
     ],
   },
-
-  // ── agent 智能体（4 条，含新增 skills/mcp）────────────────────
-  {
-    section: "agent",
-    menuKey: "agent",
-    menuLabel: "智能体控制台",
-    icon: "\u{1F916}",
-    href: "agent",
-    matchPattern: "/agent",
-    permissions: [
-      { key: "task:read", name: "任务查看" },
-      { key: "task:create", name: "任务创建" },
-      { key: "task:assign", name: "任务分配" },
-      { key: "task:run_agent", name: "任务执行" },
-      { key: "task:cancel", name: "任务取消" },
-      { key: "code:read", name: "代码查看" },
-      { key: "code:write", name: "代码编辑" },
-      { key: "code:review", name: "代码审查" },
-      { key: "code:merge", name: "代码合并" },
-      { key: "tool:shell_exec", name: "Shell 工具" },
-      { key: "tool:network", name: "网络工具" },
-      { key: "tool:database", name: "数据库工具" },
-      { key: "tool:secret:read", name: "密钥读取" },
-    ],
-  },
   {
     section: "agent",
     menuKey: "missions",

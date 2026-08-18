@@ -380,6 +380,7 @@ async def list_change_sessions(
             provider=s.provider,
             status=s.status,
             turn_count=s.turn_count,
+            mode=(s.config or {}).get("mode"),
             author=ChangeSessionAuthor(
                 user_id=s.user_id, display_name=user_name_map.get(s.user_id)
             ),

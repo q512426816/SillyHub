@@ -52,6 +52,7 @@ function makeSession(over: Partial<AgentSessionListItem> = {}): AgentSessionList
     provider: "claude",
     status: "active",
     turn_count: 3,
+    mode: null,
     author: { user_id: "u1", display_name: "小明" },
     last_active_at: "2026-08-14T09:00:00Z",
     title: "帮我推进一下这个变更",

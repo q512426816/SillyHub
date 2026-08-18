@@ -1,16 +1,13 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { AgentRunPanel } from "@/components/agent-run-panel";
 import { WorkspaceAccessGuide } from "@/components/workspace-access-guide";
 import { Badge } from "@/components/ui/badge";
 import { Button, Modal, Progress, Tooltip } from "antd";
 import { SectionCard } from "@/components/layout";
 import { ApiError } from "@/lib/api";
-import {
-  type AgentRunStatus,
-} from "@/lib/agent";
 import { PROVIDER_META, type DaemonInstanceRead } from "@/lib/daemon";
 import {
   generateProjects,
@@ -89,22 +86,6 @@ function formatTs(raw: string | null): string {
   return raw ? new Date(raw).toLocaleString("zh-CN") : "---";
 }
 
-function statusToVariant(
-  status: AgentRunStatus | null,
-): "success" | "warning" | "destructive" | "outline" {
-  switch (status) {
-    case "completed":
-      return "success";
-    case "running":
-      return "warning";
-    case "failed":
-    case "killed":
-      return "destructive";
-    default:
-      return "outline";
-  }
-}
-
 /** 守护进程本地缓存 ~ 三平台解释（design §5.5 / D-004@V1）。 */
 const CACHE_ROOT_TOOLTIP =
   "守护进程在你电脑上缓存这个工作区文档的位置。`~` = 你的用户主目录（Windows: C:\\Users\\<你>；macOS/Linux: /home/<你>）";
@@ -151,9 +132,6 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
     processed: number | null;
   }>({ total: null, processed: null });
   const [scanning, setScanning] = useState(false);
-  const [activeScanRunId, setActiveScanRunId] = useState<string | null>(null);
-  const [scanStatus, setScanStatus] = useState<AgentRunStatus | null>(null);
-  const [scanError, setScanError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importPhase, setImportPhase] = useState<ImportPhase | null>(null);
   const [generatingProjects, setGeneratingProjects] = useState(false);
@@ -165,6 +143,8 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
   // 防卸载后 setTimeout 触发 setState + 闭包泄漏；init 对齐 sync 的 R-06）。
   const initDeadlineRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncDeadlineRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const router = useRouter();
 
   /* ---- 绑定初始化状态徽标随 prop 同步 ---- */
   useEffect(() => {
@@ -338,9 +318,6 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
 
     setScanning(true);
     setLocalError(null);
-    setActiveScanRunId(null);
-    setScanStatus(null);
-    setScanError(null);
     try {
       const result = await scanGenerate(
         workspace.root_path,
@@ -349,8 +326,11 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
         specWs?.strategy,
         daemonId,
       );
-      setActiveScanRunId(result.agent_run_id);
-      setScanStatus("pending");
+      const sessionId = result.session_id;
+      const target = sessionId
+        ? `/workspaces/${workspace.id}/sessions?session=${sessionId}`
+        : `/workspaces/${workspace.id}/sessions`;
+      router.push(target);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         const confirmed = await confirmRescan();
@@ -421,24 +401,6 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
     }
   }
 
-  /* ---- Scan panel callbacks（task-14 / D-006@v1）---- */
-  const handleScanRunDone = useCallback(
-    (status: string) => {
-      setScanStatus(status as AgentRunStatus);
-      onRefresh();
-    },
-    [onRefresh],
-  );
-
-  const closeScanPanel = useCallback(() => {
-    setActiveScanRunId(null);
-    setScanStatus(null);
-    setScanError(null);
-  }, []);
-
-  const scanInterrupted =
-    scanStatus === "failed" || scanStatus === "killed";
-
   /* ================================================================ */
   /*  Render                                                          */
   /* ================================================================ */
@@ -448,7 +410,7 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
   // 时也能显示原因。文案动词原形 + loading prop（FR-04，对齐 FRONTEND_PAGE_STYLE §5）。
   const busyReason = (): string | null => {
     if (initing) return "初始化进行中，请稍候";
-    if (scanning || activeScanRunId) return "扫描进行中，请稍候";
+    if (scanning) return "扫描进行中，请稍候";
     if (importing) return "导入进行中，请稍候";
     if (syncStatus === "syncing") return "同步进行中，请稍候";
     return null;
@@ -846,40 +808,6 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
         {renderGuidance()}
         {renderSyncFeedback()}
       </div>
-
-      {/* 扫描运行面板（task-14 / D-006@v1） */}
-      {activeScanRunId && (
-        <div className="mb-3">
-          <AgentRunPanel
-            workspaceId={workspaceId}
-            runId={activeScanRunId}
-            isActive={scanStatus === "running" || scanStatus === "pending"}
-            title="扫描运行"
-            emptyText="等待日志输出..."
-            isLive={scanStatus === "running" || scanStatus === "pending"}
-            summary={
-              <Badge
-                variant={scanInterrupted ? "warning" : statusToVariant(scanStatus)}
-              >
-                {scanInterrupted ? "未完成" : (scanStatus ?? "等待中")}
-              </Badge>
-            }
-            onClose={closeScanPanel}
-            onDone={handleScanRunDone}
-          />
-          {scanInterrupted && (
-            <div className="mt-2 flex items-center justify-between gap-2 rounded border border-warning/30 bg-warning/5 px-3 py-2 text-xs">
-              <span className="text-warning">
-                上次扫描未完成（守护进程可能重启），可重新扫描。
-              </span>
-              <Button onClick={() => void handleScan()}>重新扫描</Button>
-            </div>
-          )}
-          {scanError && (
-            <p className="mt-2 text-xs text-destructive">{scanError}</p>
-          )}
-        </div>
-      )}
 
       {/* 「我的接入」组（per-member，task-02/04/05） */}
       <div className="mb-4">

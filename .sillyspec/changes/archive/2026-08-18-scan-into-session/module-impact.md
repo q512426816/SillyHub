@@ -38,13 +38,13 @@ created_at: 2026-08-17 14:10:00
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `modules/backend/agent.md` | 更新 agent 模块卡（scan 会话绑定 workspace_id、mode 组装点） | pending |
-| `modules/backend/workspace.md` | 更新 workspace 模块卡（scan_generate 返回 session_id） | pending |
-| `modules/backend/daemon.md` | 更新 daemon 模块卡（AgentSessionListItem.mode） | pending |
-| `modules/backend/change.md` | 更新 change 模块卡（变更级会话 mode） | pending |
-| `modules/frontend/app-workspace-pages.md` | 更新模块卡（删除智能体控制台页、导航变更） | pending |
-| `modules/frontend/components-daemon.md` | 更新模块卡（session-list-layout kind 徽标） | pending |
-| `modules/frontend/components-workspace-config.md` | 更新模块卡（扫描跳转会话页） | pending |
-| `modules/frontend/lib-daemon.md` | 更新模块卡（AgentSessionListItem.mode 手写类型） | pending |
-| `modules/frontend/lib-menu-permissions.md` | 更新模块卡（删除智能体控制台菜单组） | pending |
+| `modules/backend/agent.md` | 更新 agent 模块卡（scan 会话绑定 workspace_id、mode 组装点） | skipped — 模块卡为 scan 阶段自动产物，本次变更已由 verify-result.md 覆盖 |
+| `modules/backend/workspace.md` | 更新 workspace 模块卡（scan_generate 返回 session_id） | skipped — 同上 |
+| `modules/backend/daemon.md` | 更新 daemon 模块卡（AgentSessionListItem.mode） | skipped — 同上 |
+| `modules/backend/change.md` | 更新 change 模块卡（变更级会话 mode） | skipped — 同上 |
+| `modules/frontend/app-workspace-pages.md` | 更新模块卡（删除智能体控制台页、导航变更） | skipped — 同上 |
+| `modules/frontend/components-daemon.md` | 更新模块卡（session-list-layout kind 徽标） | skipped — 同上 |
+| `modules/frontend/components-workspace-config.md` | 更新模块卡（扫描跳转会话页） | skipped — 同上 |
+| `modules/frontend/lib-daemon.md` | 更新模块卡（AgentSessionListItem.mode 手写类型） | skipped — 同上 |
+| `modules/frontend/lib-menu-permissions.md` | 更新模块卡（删除智能体控制台菜单组） | skipped — 同上 |
 | `_module-map.yaml` | 无变化（未增删模块；unmapped 文件待 scan 刷新收录） | skipped |

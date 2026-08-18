@@ -155,7 +155,7 @@ async function renderWithStrategy(
   const { ws, specWs } = makeWorkspace(strategy);
   workspacesApi.getWorkspace.mockResolvedValue(ws);
   specApi.getSpecWorkspace.mockResolvedValue(specWs);
-  workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1" });
+  workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1", session_id: "sess-1" });
   componentsApi.listComponents.mockResolvedValue({
     items: [],
     total: overrides?.componentCount ?? 0,
@@ -276,7 +276,7 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
     ws.default_model = null;
     workspacesApi.getWorkspace.mockResolvedValue(ws);
     specApi.getSpecWorkspace.mockResolvedValue(specWs);
-    workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1" });
+    workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1", session_id: "sess-1" });
     componentsApi.listComponents.mockResolvedValue({ items: [], total: 3 });
     // 设置 binding 有 daemon_id
     bindingApi.fetchMyBinding.mockResolvedValue({
@@ -333,7 +333,7 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
     ws.default_model = null;
     workspacesApi.getWorkspace.mockResolvedValue(ws);
     specApi.getSpecWorkspace.mockResolvedValue(specWs);
-    workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1" });
+    workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1", session_id: "sess-1" });
     componentsApi.listComponents.mockResolvedValue({ items: [], total: 3 });
     bindingApi.fetchMyBinding.mockResolvedValue({
       workspace_id: "ws-1",

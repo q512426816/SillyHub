@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { useSearchParams } from "next/navigation";
 import {
   InteractiveSessionPanel,
   type SessionTurnView,
@@ -60,6 +61,7 @@ function isActiveListItem(s: AgentSessionListItem): boolean {
 
 export function WorkspaceSessionSection({ workspaceId }: WorkspaceSessionSectionProps) {
   const currentUserId = useSession((s) => s.user?.id ?? null);
+  const searchParams = useSearchParams();
   // 选中的历史会话 id；null = 新建模式（Panel 走 idle 新建空白）
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<AgentSessionListItem[]>([]);
@@ -89,6 +91,27 @@ export function WorkspaceSessionSection({ workspaceId }: WorkspaceSessionSection
   useEffect(() => {
     void reloadSessions();
   }, [reloadSessions]);
+
+  // 深链 attach：URL ?session= 参数到达时直接加载（不依赖列表异步加载）
+  useEffect(() => {
+    const deepSessionId = searchParams.get("session");
+    if (!deepSessionId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const fetched = await getAgentSessionLogs(deepSessionId);
+        if (!cancelled) {
+          setTurns(logsToTurns(fetched));
+          setActiveSessionId(deepSessionId);
+        }
+      } catch {
+        // 深链 session 不存在或无权访问：静默忽略，用户留在新建模式
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -195,6 +218,7 @@ export function WorkspaceSessionSection({ workspaceId }: WorkspaceSessionSection
         id: s.id,
         title: s.title,
         statusBadge: s.status,
+        kind: s.mode === "scan" ? "scan" : undefined,
         secondaryText: `${s.author?.display_name ?? "未知成员"} · ${getProviderLabel(s.provider)}`,
         lastActiveAt: s.last_active_at,
       })),

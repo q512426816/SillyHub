@@ -30,7 +30,6 @@ const NAV_ITEMS = [
   { href: "releases", label: "发布" },
   { href: "approvals", label: "审批中心" },
   { href: "audit", label: "审计日志" },
-  { href: "agent", label: "智能体" },
   { href: "incidents", label: "事件" },
   { href: "/settings", label: "设置", absolute: true },
 ] as const;

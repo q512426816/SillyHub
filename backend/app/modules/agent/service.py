@@ -1709,6 +1709,7 @@ class AgentService:
         session = AgentSession(
             id=uuid.uuid4(),
             user_id=user_id,
+            workspace_id=workspace_id,
             provider=scan_provider,
             status="pending",
             config={

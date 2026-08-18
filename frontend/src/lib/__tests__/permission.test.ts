@@ -240,13 +240,13 @@ describe("visibleMenusBySection", () => {
     ]);
   });
 
-  it("FR-06 #4: with ['task:read'] on 'agent' includes agent", () => {
+  it("FR-06 #4: with ['task:read'] on 'agent' includes missions（task:read 在 runtime 菜单保留，agent 节仍有 missions 等菜单）", () => {
     // Given user.permissions = ["task:read"]
     // When visibleMenusBySection(user, "agent")
-    // Then 至少包含 agent（不锁死其它菜单）
+    // Then 至少包含 missions（不锁死其它菜单）
     const user = mkUser({ permissions: ["task:read"] });
     const result = visibleMenusBySection(user, "agent");
-    expect(result.some((g) => g.menuKey === "agent")).toBe(true);
+    expect(result.some((g) => g.menuKey === "missions")).toBe(true);
   });
 
   it("FR-06 #5: with ['change:read'] on 'workspace' includes changes", () => {
