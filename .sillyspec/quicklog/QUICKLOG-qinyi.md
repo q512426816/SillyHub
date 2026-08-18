@@ -57,3 +57,15 @@
 根因：Dialog(85vh)→section→grid→右列整条链无 min-h-0/flex 限高约束，flex-1 overflow-auto 失效，超长内容被 Dialog 的 overflow-hidden 直接裁切；横向 flex 子项缺 min-w-0 被宽内容撑开，且源码 pre 用 whitespace-pre-wrap 软折行。
 方案：change-file-tree.tsx——section 加 flex min-h-0 flex-1 flex-col、grid 加 min-h-0 flex-1 overflow-hidden + lg:grid-rows-[minmax(0,1fr)]、文件树列 lg 下满高滚动、右列改 flex flex-col、FilePreview 三分支统一 min-w-0（pre 改 whitespace-pre 不折行靠横向滚动看全、iframe 改 h-full+min-h-[60vh]）、文件路径 span 加 truncate；change-files-card.tsx——Dialog 内容容器加 flex flex-col 打通限高链 + 注释同步。
 结果：针对性 vitest 2 文件 9 用例全过；pnpm lint 仅 stores/kanban.ts 预存 warning（与本改动无关）；模块文档 frontend.md 已同步条目并 git add。
+
+## ql-20260818-009-c287 | 2026-08-18 13:25:18 | 修 spec-sync 增量同步超时（事件循环被阻塞 + 无谓全量 reparse）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/spec_workspace/service.py（FS 段抽 helper 入 to_thread + archive_hit 收窄 delete/rename）
+- backend/app/modules/spec_workspace/tests/test_incremental_reparse_trigger.py（归档用例翻新 scoped 断言 + 新增 rename/delete 入归档全量用例）
+- .sillyspec/docs/backend/modules/spec_workspace.md（关键逻辑与人工备注同步 ql-20260818-009）
+需求：修 spec-sync 增量同步超时（事件循环被阻塞 + 无谓全量 reparse）。
+根因：① apply_ops 的 write_bytes/mkdir/utime/move 在事件循环上同步执行，Windows bind mount 连写卡死循环数十秒，被卡请求的连接撞 120s idle-in-transaction 超时（db.py:40 ql-20260728-008 前科）；② _compute_reparse_scope 对任何 archive 路径 op 都置 archive_hit 全量重扫（parsed 225），daemon 陈旧缓存重推归档文件即误触发。
+方案：① 抽 _write_op_file/_move_op_file 同步 helper 五处 FS 段整体入 asyncio.to_thread；② archive_hit 仅在 delete/rename op 命中 archive 路径置位（真归档=跨根移动恒发 rename），add/update 走 scoped name，change_dirs 归档前缀剥前缀进 scoped；③ reparse 移出请求路径评估结论 defer——scoped <1s 全量 ~2s 且罕见，后台化复杂度不抵收益。
+结果：spec_workspace 97 passed + change 386 passed（各含预存 skip），ruff format/check 与 mypy 全绿；残余风险为归档同时改内容时 rename 退化为 delete+add 的陈旧行残留，留待下次全量重扫收敛（与 scoped 零删除红线同哲学）。

@@ -1090,6 +1090,28 @@ class SpecWorkspaceService:
             pass
 
     @staticmethod
+    def _write_op_file(target: Path, content: bytes, mtime: float | None) -> None:
+        """同步落盘一个 op 文件（mkdir + write_bytes + utime），整体入线程用。
+
+        ql-20260818-009：apply_ops 的 FS 段（mkdir/write_bytes/os.utime）原先在
+        事件循环上同步执行——Windows bind mount 上单文件写可达数十 ms，N 文件
+        连写把循环卡死数十秒（2026-08-18 03:01Z spec-sync 93s/82s 超 CLI 30s
+        超时根因①）。本 helper 供 ``asyncio.to_thread`` 整体调度，语义与原
+        三连调用逐条等价。
+        """
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+        # ql-20260813-008：应用宿主真实 mtime，让镜像文件 mtime 真实 → reparse
+        # 填的 changes.updated_at 反映变更活动（而非同步时刻）。
+        SpecWorkspaceService._apply_file_mtime(target, mtime)
+
+    @staticmethod
+    def _move_op_file(src: Path, dest: Path) -> None:
+        """同步移动文件（delete 软删备份 / rename 共用），整体入线程用（ql-20260818-009）。"""
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dest))
+
+    @staticmethod
     def _prune_spec_backups(backup_root: Path) -> None:
         """R-06：机会式修剪备份区早于 30 天的旧 timestamp 目录。
 
@@ -1148,13 +1170,16 @@ class SpecWorkspaceService:
         ``change_dirs``（change 2026-08-14-change-center-conversation-driven / D-005@v1）：
         daemon 增量同步标注的本次涉及变更目录名集合。**落盘提交成功后**（事务外
         best-effort，R-04）触发 change reparse：有标注 → scoped（非归档 name）；
-        无标注 → ops 路径 ``changes/`` 前缀检测兜底；含 ``changes/archive/`` 路径 →
-        全量 reparse。reparse 失败仅告警不阻断同步主流程；同步失败（校验 422 / 提交
-        异常）不重复触发（幂等，触发器在 commit 之后）。
+        无标注 → ops 路径 ``changes/`` 前缀检测兜底；**仅 archive 路径的 op 为
+        delete/rename（目录跨根移动）→ 全量 reparse**，纯 add/update archive
+        文件走 scoped（ql-20260818-009 收窄）。reparse 失败仅告警不阻断同步
+        主流程；同步失败（校验 422 / 提交异常）不重复触发（幂等，触发器在
+        commit 之后）。
         """
         spec_ws = await self.get(workspace_id)
         spec_root = Path(spec_ws.spec_root)
-        spec_root.mkdir(parents=True, exist_ok=True)
+        # ql-20260818-009：mkdir 同为阻塞 FS 调用，入线程（bind mount 上 stat 慢）
+        await asyncio.to_thread(spec_root.mkdir, parents=True, exist_ok=True)
         spec_root_resolved = spec_root.resolve()
         settings = get_settings()
 
@@ -1240,11 +1265,8 @@ class SpecWorkspaceService:
                         )
                     content = base64.b64decode(op.content)
                     target = spec_root / op.path
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    target.write_bytes(content)
-                    # ql-20260813-008：应用宿主真实 mtime，让镜像文件 mtime 真实 → reparse
-                    # 填的 changes.updated_at 反映变更活动（而非同步时刻）。
-                    self._apply_file_mtime(target, op.mtime)
+                    # ql-20260818-009：mkdir+write+utime 整体入线程（根因①，见 _write_op_file）
+                    await asyncio.to_thread(self._write_op_file, target, content, op.mtime)
                     ch = hashlib.sha256(content).hexdigest()
                     if row is None:
                         # R-07：无行 → 视为新建，version=1
@@ -1274,10 +1296,10 @@ class SpecWorkspaceService:
                         backup_root = self._backup_root(settings, workspace_id)
                         ts = datetime.now(UTC).strftime(BACKUP_TS_FORMAT)
                         dest = backup_root / ts / op.path
-                        dest.parent.mkdir(parents=True, exist_ok=True)
                         src = spec_root / op.path
                         try:
-                            shutil.move(str(src), str(dest))
+                            # ql-20260818-009：mkdir+move 整体入线程（根因①，见 _move_op_file）
+                            await asyncio.to_thread(self._move_op_file, src, dest)
                         except FileNotFoundError:
                             # 磁盘文件已不存在（并发删/从未落盘）→ 仅推进状态，软删语义仍成立
                             pass
@@ -1312,9 +1334,7 @@ class SpecWorkspaceService:
                             )
                         content = base64.b64decode(op.content)
                         target = spec_root / op.new_path
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        target.write_bytes(content)
-                        self._apply_file_mtime(target, op.mtime)
+                        await asyncio.to_thread(self._write_op_file, target, content, op.mtime)
                         ch = hashlib.sha256(content).hexdigest()
                         added_row = SpecFileManifest(
                             workspace_id=workspace_id,
@@ -1333,20 +1353,22 @@ class SpecWorkspaceService:
                     new_hash = row.content_hash
                     src = spec_root / op.path
                     dest = spec_root / op.new_path
-                    dest.parent.mkdir(parents=True, exist_ok=True)
                     # rename 语义：旧路径文件**消失**（无论是否重传 content）——先 move，
                     # 若带 content 再覆写目标为新内容（避免 src 残留孤儿文件，QA 揪出）。
                     try:
-                        shutil.move(str(src), str(dest))
+                        # ql-20260818-009：mkdir+move 整体入线程（根因①，见 _move_op_file）
+                        await asyncio.to_thread(self._move_op_file, src, dest)
                     except FileNotFoundError:
                         pass  # 源文件不存在 → 仅推进清单状态
                     if op.content is not None:
                         content = base64.b64decode(op.content)
                         new_hash = hashlib.sha256(content).hexdigest()
-                        dest.write_bytes(content)
-                    # ql-20260813-008：rename 后 dest 用宿主真实 mtime（move 沿用源 mtime，
-                    # 此处按 op.mtime 覆盖为最新宿主态，保持与 add/update 一致）。
-                    self._apply_file_mtime(dest, op.mtime)
+                        # ql-20260818-009：覆写 + mtime 整体入线程（含 utime）
+                        await asyncio.to_thread(self._write_op_file, dest, content, op.mtime)
+                    else:
+                        # ql-20260813-008：rename 后 dest 用宿主真实 mtime（move 沿用源 mtime，
+                        # 此处按 op.mtime 覆盖为最新宿主态，保持与 add/update 一致）。
+                        await asyncio.to_thread(self._apply_file_mtime, dest, op.mtime)
                     # ql-20260817-005：delete 同样会 autobegin——收集循环外统一删。
                     pending_deletes.append(row)
                     renamed_row = SpecFileManifest(
@@ -1404,18 +1426,37 @@ class SpecWorkspaceService:
     ) -> tuple[list[str] | None, bool]:
         """计算 change reparse 范围 → ``(scope, archive_hit)``。
 
-        （change 2026-08-14-change-center-conversation-driven / D-005@v1）：
-        - 有标注（``change_dirs`` 非空）：取非归档 name 进 scoped 集；其中含
-          ``changes/archive/`` 前缀的 name → ``archive_hit``（并入全量重扫集）。
+        （change 2026-08-14-change-center-conversation-driven / D-005@v1；
+        ql-20260818-009 收窄 archive_hit）：
+        - 有标注（``change_dirs`` 非空）：取非归档 name 进 scoped 集；归档前缀
+          （``changes/archive/<name>``）剥前缀取 name 同样进 scoped——标注不带
+          op 类型，是否需要全量由下方 ops 扫描裁决。
         - 无标注（旧 daemon）：扫本次 ops 路径中 ``changes/`` 前缀者取 name 兜底。
-        - 任一 ops 路径含 ``changes/archive/`` 前缀 → ``archive_hit``（归档=目录跨根
-          移动，scoped 零删除语义处理不了，走全量 reparse，design §9 / R-08）。
+        - **archive_hit 仅在 archive 路径的 op 是 delete/rename 时置位**
+          （ql-20260818-009）：归档=目录跨根移动，只有 delete/rename 会改变磁盘
+          变更树形状（scoped 零删除语义处理不了 → 全量 reparse，design §9 /
+          R-08）；纯 add/update archive 文件（daemon 陈旧缓存重推已归档文件）
+          不改树形状 → 走 scoped（parser 三区按 name 统一匹配，archive 区条目
+          同样 create/update），不再触发全量重扫（2026-08-18 03:01Z spec-sync
+          93s/82s 超 CLI 30s 超时根因②）。daemon 侧归档移动 hash 不变 → 恒发
+          rename op（spec-sync.js rename 检测），真归档仍走全量；残余风险仅
+          「归档同时改内容 → rename 退化为 delete+add」的陈旧行残留，留待下次
+          全量/手动重扫收敛（与 scoped 零删除红线同哲学）。
 
         返回语义：
         - ``(None, True)``：全量 reparse（scope=None 含 delete）。
         - ``(scope, False)``：scoped reparse（scope 非空，零 delete）。
         - ``(None, False)``：无 changes 相关路径，**零触发**（R-01）。
         """
+
+        def _archive_name(norm: str) -> str | None:
+            """``changes/archive/<name>/…`` → name；恰为 ``changes/archive`` → ""；非归档 → None。"""
+            if norm.startswith("changes/archive/"):
+                return norm[len("changes/archive/") :].split("/", 1)[0]
+            if norm == "changes/archive":
+                return ""
+            return None
+
         names: list[str] = []
         archive_hit = False
 
@@ -1423,11 +1464,15 @@ class SpecWorkspaceService:
             norm = str(cd).replace("\\", "/")
             if not norm:
                 continue
-            if norm.startswith("changes/archive/") or norm == "changes/archive":
-                archive_hit = True
-            elif norm.startswith("changes/"):
+            seg = _archive_name(norm)
+            if seg is not None:
+                # 归档前缀标注：剥前缀取 name 进 scoped（是否全量由 ops 扫描裁决）
+                if seg:
+                    names.append(seg)
+                continue
+            if norm.startswith("changes/"):
                 rest = norm[len("changes/") :]
-                if rest and not rest.startswith("archive/"):
+                if rest:
                     first = rest.split("/", 1)[0]
                     if first:
                         names.append(first)
@@ -1436,15 +1481,24 @@ class SpecWorkspaceService:
                 names.append(norm)
 
         for op in ops:
+            # ql-20260818-009：仅 delete/rename（改变磁盘变更树形状）命中 archive
+            # 路径才要求全量；add/update 一律 scoped。
+            tree_shape_op = op.op in ("delete", "rename")
             for path in (op.path, op.new_path):
                 if not path:
                     continue
                 norm = path.replace("\\", "/")
-                if norm.startswith("changes/archive/") or norm == "changes/archive":
-                    archive_hit = True
-                elif norm.startswith("changes/"):
+                seg = _archive_name(norm)
+                if seg is not None:
+                    if not seg or tree_shape_op:
+                        # 无名字段（恰为 changes/archive 根，理论不可达）或跨根移动 → 全量
+                        archive_hit = True
+                    else:
+                        names.append(seg)
+                    continue
+                if norm.startswith("changes/"):
                     rest = norm[len("changes/") :]
-                    if rest and not rest.startswith("archive/"):
+                    if rest:
                         first = rest.split("/", 1)[0]
                         if first:
                             names.append(first)

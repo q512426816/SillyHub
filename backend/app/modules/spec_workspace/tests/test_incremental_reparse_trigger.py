@@ -6,7 +6,8 @@ reparse，使 agent 会话新建的变更自动出现在 ``ux_changes`` 列表�
 
 - 有 ``change_dirs`` 标注 → scoped reparse（scope=非归档 name）
 - 无标注（旧 daemon）→ ops 路径 ``changes/`` 前缀检测兜底
-- 含 ``changes/archive/`` 路径（ops 或 change_dirs）→ 全量 reparse（scope=None）
+- **archive 路径的 op 为 delete/rename（目录跨根移动）→ 全量 reparse（scope=None）**
+- 纯 add/update archive 文件 → scoped（归档 name；ql-20260818-009 收窄，不再全量）
 - 非 changes 路径 → 零触发（R-01）
 - reparse 失败仅告警，不阻断同步主流程（R-04）
 - scoped 触发下范围外变更零删除（端到端，配合 change 模块 scoped 零删除守卫）
@@ -243,15 +244,15 @@ class TestFallbackPathDetection:
 
 
 # ===========================================================================
-# 归档路径 → 全量 reparse（scope=None）
+# 归档路径分流（ql-20260818-009 收窄）：delete/rename → 全量；纯 add/update → scoped
 # ===========================================================================
 
 
-class TestArchiveTriggersFull:
-    async def test_archive_op_path_triggers_full_reparse(
+class TestArchivePathScoping:
+    async def test_archive_add_op_goes_scoped(
         self, db_session, client: AsyncClient, auth_headers, tmp_path, monkeypatch
     ) -> None:
-        """ops 含 ``changes/archive/`` 路径 → 全量 reparse（scope=None）。"""
+        """ql-20260818-009：纯 add 于 ``changes/archive/`` → scoped（归档 name），不再全量。"""
         ws = await _make_workspace(db_session)
         spec_root = tmp_path / "spec-root"
         await _make_spec_workspace(db_session, ws, spec_root)
@@ -277,12 +278,76 @@ class TestArchiveTriggersFull:
         )
         assert resp.status_code == 200, resp.text
         mock.assert_awaited_once()
-        assert mock.await_args.kwargs.get("scope") is None
+        # scoped：scope 为归档 name 列表，非 None（全量）
+        assert mock.await_args.kwargs.get("scope") == ["2026-08-13-old"]
 
-    async def test_archive_change_dirs_entry_triggers_full_reparse(
+    async def test_archive_rename_op_triggers_full_reparse(
         self, db_session, client: AsyncClient, auth_headers, tmp_path, monkeypatch
     ) -> None:
-        """change_dirs 含 ``changes/archive/<name>`` 前缀 → 全量 reparse（scope=None）。"""
+        """rename 跨根移动入 ``changes/archive/``（真归档形态）→ 全量 reparse（scope=None）。"""
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+
+        mock = AsyncMock(
+            return_value=({"parsed": 0, "created": 0, "updated": 0, "deleted": 0}, None)
+        )
+        monkeypatch.setattr("app.modules.change.service.ChangeService.reparse", mock)
+
+        resp = await client.post(
+            f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
+            headers=auth_headers,
+            json={
+                "ops": [
+                    {
+                        "op": "rename",
+                        "path": "changes/2026-08-13-old/proposal.md",
+                        "new_path": "changes/archive/2026-08-13-old/proposal.md",
+                        "base_version": 0,
+                        "content": _b64("# Old"),
+                    }
+                ]
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        mock.assert_awaited_once()
+        assert mock.await_args.kwargs.get("scope") is None
+
+    async def test_archive_delete_op_triggers_full_reparse(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path, monkeypatch
+    ) -> None:
+        """delete 于 ``changes/archive/``（归档区变更树形状变化）→ 全量 reparse（scope=None）。"""
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+
+        mock = AsyncMock(
+            return_value=({"parsed": 0, "created": 0, "updated": 0, "deleted": 0}, None)
+        )
+        monkeypatch.setattr("app.modules.change.service.ChangeService.reparse", mock)
+
+        resp = await client.post(
+            f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
+            headers=auth_headers,
+            json={
+                "ops": [
+                    _op(
+                        "delete",
+                        "changes/archive/2026-08-13-old/proposal.md",
+                        base_version=0,
+                    )
+                ]
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        mock.assert_awaited_once()
+        assert mock.await_args.kwargs.get("scope") is None
+
+    async def test_archive_change_dirs_entry_goes_scoped(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path, monkeypatch
+    ) -> None:
+        """ql-20260818-009：change_dirs 含 ``changes/archive/<name>`` 前缀 → 剥前缀进
+        scoped（标注不带 op 类型，是否全量由 ops 裁决），不再强制全量。"""
         ws = await _make_workspace(db_session)
         spec_root = tmp_path / "spec-root"
         await _make_spec_workspace(db_session, ws, spec_root)
@@ -309,12 +374,12 @@ class TestArchiveTriggersFull:
         )
         assert resp.status_code == 200, resp.text
         mock.assert_awaited_once()
-        assert mock.await_args.kwargs.get("scope") is None
+        assert mock.await_args.kwargs.get("scope") == ["2026-08-13-old", "2026-08-14-live"]
 
     async def test_archive_full_reparse_still_deletes(
         self, db_session, client: AsyncClient, auth_headers, tmp_path
     ) -> None:
-        """归档触发全量 reparse → 磁盘消失的变更被删（删除仅全量/手动，R-08 语义）。"""
+        """rename 入归档触发全量 reparse → 磁盘消失的变更被删（删除仅全量/手动，R-08 语义）。"""
         ws = await _make_workspace(db_session)
         spec_root = tmp_path / "spec-root"
         await _make_spec_workspace(db_session, ws, spec_root)
@@ -326,19 +391,20 @@ class TestArchiveTriggersFull:
         assert stats["created"] == 1
         assert await _fetch_change(db_session, ws.id, "2026-08-14-gone") is not None
 
-        # 磁盘删除 + 归档路径 ops 触发全量 → 变更行被删
+        # 磁盘删除 + rename 入归档 ops 触发全量 → 变更行被删
         shutil.rmtree(spec_root / "changes" / "2026-08-14-gone")
         resp = await client.post(
             f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental",
             headers=auth_headers,
             json={
                 "ops": [
-                    _op(
-                        "add",
-                        "changes/archive/2026-08-13-old/proposal.md",
-                        base_version=0,
-                        content=_b64("# Old"),
-                    )
+                    {
+                        "op": "rename",
+                        "path": "changes/2026-08-14-gone/proposal.md",
+                        "new_path": "changes/archive/2026-08-13-old/proposal.md",
+                        "base_version": 0,
+                        "content": _b64("# Old"),
+                    }
                 ]
             },
         )
@@ -416,33 +482,62 @@ class TestComputeReparseScope:
         assert archive_hit is False
         assert scope == ["2026-08-14-bar"]
 
-    async def test_archive_op_path_full(self) -> None:
-        """ops 含 changes/archive/ 路径 → 全量（scope=None）。"""
+    async def test_archive_add_op_scoped(self) -> None:
+        """ql-20260818-009：纯 add 于 changes/archive/ → scoped（归档 name）。"""
         from app.modules.spec_workspace.service import SpecWorkspaceService
 
         scope, archive_hit = SpecWorkspaceService._compute_reparse_scope(
             [],
             [FileOp(op="add", path="changes/archive/2026-08-13-old/design.md", base_version=0)],
         )
+        assert archive_hit is False
+        assert scope == ["2026-08-13-old"]
+
+    async def test_archive_rename_op_full(self) -> None:
+        """rename 跨根移动入 changes/archive/ → 全量（scope=None）。"""
+        from app.modules.spec_workspace.service import SpecWorkspaceService
+
+        scope, archive_hit = SpecWorkspaceService._compute_reparse_scope(
+            [],
+            [
+                FileOp(
+                    op="rename",
+                    path="changes/2026-08-13-old/design.md",
+                    new_path="changes/archive/2026-08-13-old/design.md",
+                    base_version=0,
+                )
+            ],
+        )
         assert archive_hit is True
         assert scope is None
 
-    async def test_archive_change_dirs_entry_full(self) -> None:
-        """change_dirs 含 changes/archive/ 前缀 name → 全量。"""
+    async def test_archive_delete_op_full(self) -> None:
+        """delete 于 changes/archive/ → 全量（scope=None）。"""
+        from app.modules.spec_workspace.service import SpecWorkspaceService
+
+        scope, archive_hit = SpecWorkspaceService._compute_reparse_scope(
+            [],
+            [FileOp(op="delete", path="changes/archive/2026-08-13-old/design.md", base_version=0)],
+        )
+        assert archive_hit is True
+        assert scope is None
+
+    async def test_archive_change_dirs_entry_scoped(self) -> None:
+        """ql-20260818-009：change_dirs 含 changes/archive/ 前缀 name → 剥前缀进 scoped。"""
         from app.modules.spec_workspace.service import SpecWorkspaceService
 
         scope, archive_hit = SpecWorkspaceService._compute_reparse_scope(
             ["changes/archive/2026-08-13-old"], []
         )
-        assert archive_hit is True
-        assert scope is None
+        assert archive_hit is False
+        assert scope == ["2026-08-13-old"]
 
     async def test_archive_dir_exact_full(self) -> None:
-        """路径恰为 changes/archive（无尾斜杠）也判定为全量。"""
+        """路径恰为 changes/archive（无尾斜杠）仍判定为全量（保守：整根不可名化）。"""
         from app.modules.spec_workspace.service import SpecWorkspaceService
 
         scope, archive_hit = SpecWorkspaceService._compute_reparse_scope(
-            [], [FileOp(op="add", path="changes/archive", base_version=0)]
+            [], [FileOp(op="delete", path="changes/archive", base_version=0)]
         )
         assert archive_hit is True
         assert scope is None

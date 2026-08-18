@@ -52,8 +52,12 @@ apply_ops(workspace_id, ops, change_write_id, change_dirs):
     base_version 不匹配 → 同内容豁免(hash 相同 no-op) 否则记冲突跳过
     无清单行 → add 起 version=1 / delete 幂等 no-op / rename 按 add
   delete = 软删 move 到 spec-backups/{ws}/{ts}/（机会式修剪 30 天前）
+  FS 段（mkdir/write_bytes/utime/move）抽 _write_op_file/_move_op_file 整体入
+    asyncio.to_thread（ql-20260818-009：bind mount 连写卡事件循环 93s/82s 根因①）
   commit 成功后事务外 best-effort 触发 change reparse
-    （change_dirs 标注→scoped；无标注→changes/ 前缀兜底；archive→全量）
+    （change_dirs 标注→scoped；无标注→changes/ 前缀兜底；
+     仅 delete/rename 命中 archive 路径→全量，纯 add/update archive→scoped name，
+     ql-20260818-009 收窄，daemon 陈旧缓存重推归档文件不再全量重扫）
 ```
 
 ## 关键逻辑补充
@@ -89,4 +93,5 @@ apply_ops(workspace_id, ops, change_write_id, change_dirs):
 
 <!-- MANUAL_NOTES_START -->
 - **2026-08-14-change-center-conversation-driven**（D-005 / task-02）：`apply_ops` 加 `change_dirs: list[str] | None` 参数（daemon 增量同步标注本次涉及变更目录名）；落盘 commit 后事务外 `_trigger_change_reparse`（独立 session，对齐 `_bump_files_processed` 范式）→ `_compute_reparse_scope`（标注 / ops 路径兜底 / archive_hit 三态）→ `ChangeService.reparse(scope)`。`SpecIncrementalSyncRequest`（schema.py）加 `change_dirs: list[str] = []`（旧 daemon 缺省兼容）。
+- **ql-20260818-009**（spec-sync 超时修复）：① `apply_ops` 全部阻塞 FS 段（mkdir/write_bytes/os.utime/shutil.move）抽 `_write_op_file`/`_move_op_file` 同步 helper 整体入 `asyncio.to_thread`——Windows bind mount 上 N 文件连写把事件循环卡死数十秒（2026-08-18 03:01Z spec-sync 93s/82s 超 CLI 30s 超时根因①，同窗 5 次 idle-in-transaction FATAL 即被卡死的连接撞 120s 超时）；② `_compute_reparse_scope` 收窄 archive_hit——仅 delete/rename op 命中 `changes/archive/` 才全量（真归档=目录跨根移动，hash 不变恒发 rename），纯 add/update archive 文件走 scoped name（parser 三区按 name 统一匹配），daemon 陈旧缓存重推归档文件不再触发 parsed 225 全量重扫（根因②）；③ reparse 移出请求路径评估结论 defer：scoped <1s、全量 ~2s（scandir 修复后）且罕见，后台化/去抖的排序与错误面复杂度不抵收益。残余：归档同时改内容 → rename 退化 delete+add 的陈旧行残留，留待下次全量/手动重扫收敛（与 scoped 零删除红线同哲学）。
 <!-- MANUAL_NOTES_END -->
