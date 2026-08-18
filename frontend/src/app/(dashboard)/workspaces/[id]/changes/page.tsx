@@ -124,8 +124,8 @@ export default function ChangesPage({ params }: Props) {
   );
   const [searchInput, setSearchInput] = useState(initialSearch);
   const [search, setSearch] = useState(initialSearch);
-  // D-007：进行中视图默认套「只看待我处理」聚焦
-  const [focusMine, setFocusMine] = useState(true);
+  // ql-20260818-004：「只看待我处理」下放为查询条件（仅进行中视图），默认不勾选
+  const [focusMine, setFocusMine] = useState(false);
   const [stageFilter, setStageFilter] = useState("");
   const [sortDir, setSortDir] = useState<SortDir>("updated_at_desc");
   const [page, setPage] = useState(1);
@@ -242,6 +242,8 @@ export default function ChangesPage({ params }: Props) {
     setSearchInput("");
     setSearch("");
     setStageFilter("");
+    // ql-20260818-004：聚焦下放查询条件后，重置一并回默认（不勾选）
+    setFocusMine(false);
     setPage(1);
   };
 
@@ -582,27 +584,6 @@ export default function ChangesPage({ params }: Props) {
         onClose={() => setQuicklogSelected(null)}
       />
 
-      {/* 聚焦开关（D-007）：仅进行中视图显示，默认勾上。黄色高亮框对齐原型聚焦框。 */}
-      {tab === "active" && (
-        <div className="flex items-center gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs">
-          <Checkbox
-            checked={focusMine}
-            onChange={(e) => {
-              setFocusMine(e.target.checked);
-              setPage(1);
-            }}
-          >
-            <span className="font-medium text-foreground">只看待我处理</span>
-            <span className="ml-1 inline-block min-w-[18px] rounded-full bg-amber-200 px-1.5 text-[11px] font-medium text-amber-800">
-              {total}
-            </span>
-          </Checkbox>
-          <span className="text-muted-foreground">
-            取消勾选 → 显示全部进行中（含 AI 正在跑的）
-          </span>
-        </div>
-      )}
-
       {tab !== "quicklog" && (
       <SectionCard bodyPadding="p-2">
         {/* 工具栏：搜索 + 重置（右对齐，对齐 FRONTEND_PAGE_STYLE §2） */}
@@ -614,8 +595,14 @@ export default function ChangesPage({ params }: Props) {
             重置
           </Button>
         </div>
-        {/* 查询区：grid-cols-2 消留白（task-06，原 grid-cols-4 右半空） */}
-        <div className="grid w-full grid-cols-2 gap-3">
+        {/* 查询区：进行中 3 格（关键词/阶段/待我处理聚焦）、归档 2 格，消留白
+            （task-06 原 grid-cols-4 右半空；ql-20260818-004 聚焦下放第三格） */}
+        <div
+          className={cn(
+            "grid w-full gap-3",
+            tab === "active" ? "grid-cols-3" : "grid-cols-2",
+          )}
+        >
           <Field label="关键词">
             <Input
               value={searchInput}
@@ -638,6 +625,21 @@ export default function ChangesPage({ params }: Props) {
               ))}
             </Select>
           </Field>
+          {/* 聚焦筛选（D-007 → ql-20260818-004 下放查询区）：仅进行中视图，
+              默认不勾选；items-end 与左侧 Input/Select 控件底对齐 */}
+          {tab === "active" && (
+            <div className="flex w-full items-end pb-1.5">
+              <Checkbox
+                checked={focusMine}
+                onChange={(e) => {
+                  setFocusMine(e.target.checked);
+                  setPage(1);
+                }}
+              >
+                只看待我处理
+              </Checkbox>
+            </div>
+          )}
         </div>
       </SectionCard>
       )}

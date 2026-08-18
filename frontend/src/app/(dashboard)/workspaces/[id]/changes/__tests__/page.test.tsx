@@ -298,17 +298,33 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
 
   // ── 2. 聚焦开关（D-007 核心）──────────────────────────────────────────
 
-  it("默认 focusMine=true → listChanges 主 load 收到 pendingReviewOnly:true", async () => {
+  it("默认不勾选聚焦（ql-20260818-004）→ pendingReviewOnly 不为 true", async () => {
     await renderAndWait();
-    expect(lastMainLoadParams()?.pendingReviewOnly).toBe(true);
+    expect(lastMainLoadParams()?.pendingReviewOnly).not.toBe(true);
   });
 
-  it("取消聚焦 → listChanges 主 load pendingReviewOnly 不再为 true", async () => {
+  it("勾选聚焦 → listChanges 主 load 收到 pendingReviewOnly:true", async () => {
     await renderAndWait();
-    expect(lastMainLoadParams()?.pendingReviewOnly).toBe(true);
+    expect(lastMainLoadParams()?.pendingReviewOnly).not.toBe(true);
 
     await act(async () => {
       fireEvent.click(screen.getByRole("checkbox"));
+    });
+    await waitFor(() =>
+      expect(lastMainLoadParams()?.pendingReviewOnly).toBe(true),
+    );
+  });
+
+  it("勾选聚焦后点重置 → 回默认不勾选（pendingReviewOnly 不为 true）", async () => {
+    await renderAndWait();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("checkbox"));
+    });
+    await waitFor(() =>
+      expect(lastMainLoadParams()?.pendingReviewOnly).toBe(true),
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /重\s*置/ }));
     });
     await waitFor(() =>
       expect(lastMainLoadParams()?.pendingReviewOnly).not.toBe(true),
@@ -393,9 +409,12 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
 
   // ── 4. 空状态引导（task-09 / FR-04a：去表单，引导会话页）──────────────
 
-  it("聚焦勾 + 待我处理空 → 「暂无待你处理的变更」+ 查看全部 + 去会话引导（无新建入口）", async () => {
-    // 默认 setupListChanges 返空 items，focusMine 默认 true
+  it("勾选聚焦 + 待我处理空 → 「暂无待你处理的变更」+ 查看全部 + 去会话引导（无新建入口）", async () => {
+    // 默认 setupListChanges 返空 items；默认不聚焦（ql-20260818-004），先勾上
     await renderAndWait();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("checkbox"));
+    });
     await waitFor(() =>
       expect(screen.getByText(/暂无待你处理的变更/)).toBeInTheDocument(),
     );
@@ -414,11 +433,9 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     );
   });
 
-  it("进行中空（取消聚焦）→ 「当前没有进行中的变更」+ 去会话引导（无新建/查看全部）", async () => {
+  it("进行中空（默认不聚焦）→ 「当前没有进行中的变更」+ 去会话引导（无新建/查看全部）", async () => {
+    // 默认不勾选聚焦（ql-20260818-004）→ 空态即「当前没有进行中的变更」
     await renderAndWait();
-    await act(async () => {
-      fireEvent.click(screen.getByRole("checkbox"));
-    });
     await waitFor(() =>
       expect(screen.getByText(/当前没有进行中的变更/)).toBeInTheDocument(),
     );
