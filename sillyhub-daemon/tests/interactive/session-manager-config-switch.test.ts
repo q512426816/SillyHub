@@ -524,14 +524,15 @@ describe('task-08 / reloadWithConfig（FR-05 / D-012@v1，claude）', () => {
       providerConfig: null,
     });
 
-    // Assert（ql-20260818-004 新语义：清空=preset-only 无人格 + fork 使其生效——
-    // 旧「不传选项靠 resume 保留旧 jsonl 人格」无法实现取消）。
+    // Assert（ql-20260818-009 新语义：取消=中和指令+fork——
+    // 纯 preset-only 不够（fork 历史里人格角色延续，实测复现）。
     expect(mock.startCalls[1].opts['systemPrompt']).toEqual({
       type: 'preset',
       preset: 'claude_code',
+      append: expect.stringContaining('用户已取消'),
     });
     expect(mock.startCalls[1].opts['forkSession']).toBe(true);
-    expect(readState(sm, BASE_INPUT.sessionId)!.systemPrompt).toBeUndefined();
+    expect(readState(sm, BASE_INPUT.sessionId)!.systemPrompt).toContain('用户已取消');
   });
 
   it('CFG-4: driver.start 抛错 → 回滚 query/env/systemPrompt/providerConfig + 不喂 prompt', async () => {

@@ -1245,6 +1245,13 @@ class SessionService:
                     details={"reason": "empty_prompt"},
                 )
 
+            # ql-20260818-009：取消档案（switch_profile=None）时对话历史里有深度角色
+            # 扮演轮，仅靠 system prompt 中和（append）压不住惯性（模型跟随上下文）。
+            # 以简短用户消息形式显式告知「角色已取消」最有效——模型在用户指令优先级
+            # 最高，能可靠中止扮演。不产生人格、不写角色设定。
+            if config_switch and switch_profile is None and not prompt.strip():
+                prompt = "智能体档案已取消，无需继续扮演该角色。"
+
             # 解析本轮生效（effective）档案/供应商行：切换轮用新值、未切维度与
             # 普通轮（不切换）沿用会话当前值——D-008 每轮 run 都要带配置快照
             # （ql-20260815-010 修正：此前仅切换分支落快照，普通轮 run 的
