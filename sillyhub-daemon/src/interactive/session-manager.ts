@@ -1152,6 +1152,14 @@ export class SessionManager {
         preset: 'claude_code',
         append: spec.systemPrompt,
       };
+      // ql-20260818-002：SDK 的 systemPrompt 选项在 **resume** 时被 CLI 忽略
+      // （会话 jsonl 固化创建时的 system prompt；实测 reload 后人格不生效）。
+      // SDK 官方机制：forkSession=true 让 resume fork 出新会话 ID，新 system
+      // prompt 对 fork 生效且历史完整复制。仅 resume+带人格时 fork；首次
+      // create（无 resume）systemPrompt 选项原生生效，不 fork。
+      if (spec.resume) {
+        driverOpts.forkSession = true;
+      }
     }
     // scan 真阻塞（per-session，generic-wibbling-whisper.md 改造点 C/D）：
     // enableApproval=true 时按 session 建独立 resolver + 注入远程人审 canUseTool +
@@ -2709,8 +2717,15 @@ export class SessionManager {
     }
     // 空闲：无在跑 turn → 立即 reload + 喂切换轮 prompt，不写标记。
     if (state.status === 'active' && !state.currentRunId) {
-      void this.reloadWithConfig(sessionId, payload).catch(() => {
-        // reload 失败保留旧 query 不破坏会话（R-01）；吞错防 unhandled rejection。
+      void this.reloadWithConfig(sessionId, payload).catch((err) => {
+        // reload 失败保留旧 query 不破坏会话（R-01）。
+        // ql-20260818-002：静默吞错曾致「切换 toast 成功但实际没生效」无从排查
+        // ——必须留 error 日志（真实 log 在 daemon 层，此处 console 兜底同款惯例）。
+        console.error(
+          '[session-manager] idle config switch reload failed',
+          sessionId,
+          err,
+        );
       });
       return;
     }
@@ -2763,6 +2778,13 @@ export class SessionManager {
         : (state.systemPrompt ?? null);
     const nextProviderConfig =
       payload.providerConfig ?? state.providerConfig ?? null;
+
+    // ql-20260818-002：带人格的 reload 走 forkSession（resume 时 systemPrompt
+    // 选项被 CLI 忽略，fork 新会话才生效）——置位 forkedInitPending 让新
+    // session_id 能经 system/init 更新 state（否则持久化旧 id 下次 resume 回旧会话）。
+    if (typeof nextSystemPrompt === 'string') {
+      state.forkedInitPending = true;
+    }
 
     await this._reloadSession(sessionId, {
       systemPrompt: nextSystemPrompt,
@@ -3166,8 +3188,13 @@ export class SessionManager {
       void this.reloadWithConfig(
         state.sessionId,
         pendingConfigSwitch.payload,
-      ).catch(() => {
-        // reload 失败保留旧句柄不破坏会话（R-01）；吞错防 unhandled rejection。
+      ).catch((err) => {
+        // reload 失败保留旧句柄不破坏会话（R-01）。
+        console.error(
+          '[session-manager] turn-boundary config switch reload failed',
+          state.sessionId,
+          err,
+        );
       });
     }
   }
@@ -3229,8 +3256,16 @@ export class SessionManager {
       // 不依赖单一 ===undefined。
       const isSubagentInit =
         (msg as { parent_tool_use_id?: string | null }).parent_tool_use_id != null;
-      if (sid && !isSubagentInit && state.agentSessionId === undefined) {
+      // ql-20260818-002：forked reload 的 init 带新 session_id——允许覆盖
+      // （forkedInitPending 由 reloadWithConfig 置位、此处消费清除）。
+      if (
+        sid &&
+        !isSubagentInit &&
+        (state.agentSessionId === undefined ||
+          (state.forkedInitPending === true && sid !== state.agentSessionId))
+      ) {
         state.agentSessionId = sid;
+        state.forkedInitPending = false;
         // task-10：首 turn system/init 拿到 agentSessionId 后才可恢复 → 排队 flush。
         this._scheduleFlush();
       }

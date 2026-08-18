@@ -1231,6 +1231,15 @@ class SessionService:
 
             config_switch = profile_changed or provider_changed
 
+            # ql-20260818-002：切换字段与当前值**等值**（不构成切换）+ 空 prompt →
+            # 拒绝——否则落普通 inject 路径发空 prompt SESSION_INJECT（daemon 拒收
+            # 消息），run 永久卡 pending 堵死会话（TURN_CONFLICT）。
+            if not config_switch and not prompt.strip():
+                raise DaemonSessionNotActive(
+                    "prompt must not be empty.",
+                    details={"reason": "empty_prompt"},
+                )
+
             # 解析本轮生效（effective）档案/供应商行：切换轮用新值、未切维度与
             # 普通轮（不切换）沿用会话当前值——D-008 每轮 run 都要带配置快照
             # （ql-20260815-010 修正：此前仅切换分支落快照，普通轮 run 的
