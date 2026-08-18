@@ -61,8 +61,16 @@ import { extractCause } from './hub-client.js';
 // task-04（FR-01 / D-005@v1）：onTurnResult 桥接把模型层 ModelError 注入
 // notifyRunResult payload.error（与 backend ModelErrorDTO 三端同构）。
 import type { ModelError } from './model-error/types.js';
-import { WsClient } from './ws-client.js';
-import { listDir } from './file-rpc.js';
+import { WsClient, RpcError } from './ws-client.js';
+// 2026-08-18-workspace-file-browser task-03：explorer_* 只读浏览三函数 + 默认上限
+// （design §7.1；函数实现归 task-01 file-rpc.ts，daemon.ts 只注册 RPC handler）。
+import {
+  listDir,
+  explorerListDir,
+  explorerReadFile,
+  explorerSearch,
+  EXPLORER_DEFAULT_MAX_RESULTS,
+} from './file-rpc.js';
 import { listRoots } from './roots-rpc.js';
 // task-03（2026-07-06-daemon-host-fs-delegate）：host_fs.* WS handler 业务层。
 // backend 经 HostFsDelegate + ws_rpc 调本 handler 在宿主执行 stat/git_apply/...（FR-02）。
@@ -2324,6 +2332,10 @@ export class Daemon {
     // backend complete_lease 收尾（apply_patch/post_scan/stage_callback）经 HostFsDelegate +
     // ws_rpc 调本 handler 在宿主执行（FR-02）。方法名带 host_fs. 前缀与 design §7 method 字段对齐。
     this._registerHostFsRpcHandler(ws);
+    // task-03（2026-08-18-workspace-file-browser）：注册 explorer_* 三方法只读浏览
+    // RPC（工作区文件浏览器，design §7.1）。roots 每次 RPC 现取 _effectiveAllowedRoots()，
+    // **不**照抄裸 list_dir 的空 roots 跳校验写法（design §5 关键安全设计 1 警示条）。
+    this._registerExplorerRpcHandler(ws);
 
     try {
       ws.connect();
@@ -2524,6 +2536,67 @@ export class Daemon {
           ? (params.env as Record<string, string>)
           : null;
       return handler.runCommand({ command, args, cwd, timeout, env });
+    });
+  }
+
+  /**
+   * task-03（2026-08-18-workspace-file-browser / FR-01 FR-05 FR-06 / D-002@v1）：
+   * 注册 explorer_* 三方法只读浏览 RPC handler（design §7.1；函数实现归 task-01
+   * file-rpc.ts，此处只做方法名注册 + params 归一）。
+   *
+   * backend explorer service 经 ws_rpc 转发工作区浏览请求：explorer_list_dir /
+   * explorer_read_file / explorer_search。path/root 由 backend 按成员绑定 root_path
+   * 透传；realpath 落点 + allowed_roots 双重校验（主防线，design §5 关键安全设计 1 /
+   * R-01）全在 file-rpc.explorer* 内做，本层不重复。
+   *
+   * ⚠️ roots 每次 RPC 现取 ``this._effectiveAllowedRoots()``（host_fs rootsProvider
+   * 同模式，daemon.ts:2405 附近；policy_update 推送 / _syncAllowedRoots 后下次调用
+   * 立即生效）。**不得**照抄 _registerListDirRpcHandler 的空 roots 跳校验写法
+   * （ql-20260706-006 豁免仅限裸 list_dir，design §5 警示条）。
+   *
+   * params 归一（对齐既有 handler 写法）：path/root/query 非字符串或缺省 → 归一为
+   * 空串，由 explorer* 的入口断言拒 `forbidden`（"path/root/query is empty"）；
+   * encoding 仅接受 'utf8'（缺省）| 'base64'，其它值显式拒 `forbidden`（不静默
+   * 回退，防 backend 拼错被误当文本解码往返损坏）；max_results 缺省 100
+   * （EXPLORER_DEFAULT_MAX_RESULTS），显式传入的非法值原样透传由 explorerSearch
+   * 统一拒 `forbidden`（不静默钳制）。handler 不额外 try/catch：explorer* 抛
+   * RpcError 由 ws-client._dispatchRpc 原样回填 code（普通 Error 映射 internal），
+   * 不冒泡到 _dispatchRpc 之外（host_fs.* 同约定）。
+   */
+  private _registerExplorerRpcHandler(ws: WsClientLike): void {
+    if (typeof ws.registerRpcHandler !== 'function') {
+      this._logger.warn('ws_no_rpc_support', { daemon_local_id: this._config.runtime_id });
+      return;
+    }
+    ws.registerRpcHandler('explorer_list_dir', async (params) => {
+      const path = typeof params.path === 'string' ? params.path : '';
+      const root = typeof params.root === 'string' ? params.root : '';
+      return explorerListDir(path, root, this._effectiveAllowedRoots());
+    });
+    ws.registerRpcHandler('explorer_read_file', async (params) => {
+      const path = typeof params.path === 'string' ? params.path : '';
+      const root = typeof params.root === 'string' ? params.root : '';
+      let encoding: 'utf8' | 'base64' = 'utf8';
+      if (params.encoding === 'base64') {
+        encoding = 'base64';
+      } else if (params.encoding !== undefined && params.encoding !== 'utf8') {
+        throw new RpcError(
+          'forbidden',
+          `invalid encoding: ${String(params.encoding)}`,
+        );
+      }
+      return explorerReadFile(path, root, this._effectiveAllowedRoots(), encoding);
+    });
+    ws.registerRpcHandler('explorer_search', async (params) => {
+      const root = typeof params.root === 'string' ? params.root : '';
+      const query = typeof params.query === 'string' ? params.query : '';
+      // 缺省 100（design §7.1）；显式传入的非法值（非正整数）原样透传由 explorerSearch
+      // 统一拒 forbidden——不静默钳制，backend 端拼错应显式暴露而非悄悄改语义。
+      const maxResults =
+        params.max_results === undefined || params.max_results === null
+          ? EXPLORER_DEFAULT_MAX_RESULTS
+          : (params.max_results as number);
+      return explorerSearch(root, query, this._effectiveAllowedRoots(), maxResults);
     });
   }
 

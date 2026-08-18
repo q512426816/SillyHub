@@ -2311,6 +2311,228 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/explorer/tree": {
+      "get": {
+        "tags": [
+          "explorer"
+        ],
+        "summary": "Get Explorer Tree",
+        "description": "列目录（懒加载逐层；design §7.2 GET /tree，RPC 超时 30s）。",
+        "operationId": "get_explorer_tree_api_workspaces__workspace_id__explorer_tree_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "相对工作区根的目录路径，空 = 根",
+              "default": "",
+              "title": "Path"
+            },
+            "description": "相对工作区根的目录路径，空 = 根"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExplorerTreeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/explorer/file": {
+      "get": {
+        "tags": [
+          "explorer"
+        ],
+        "summary": "Get Explorer File",
+        "description": "读文件预览（encoding=utf8；design §7.2 GET /file，RPC 超时 30s）。",
+        "operationId": "get_explorer_file_api_workspaces__workspace_id__explorer_file_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "相对工作区根的文件路径",
+              "title": "Path"
+            },
+            "description": "相对工作区根的文件路径"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExplorerFileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/explorer/download": {
+      "get": {
+        "tags": [
+          "explorer"
+        ],
+        "summary": "Download Explorer File",
+        "description": "下载文件（encoding=base64 强制；design §7.2 GET /download，RPC 超时 60s）。",
+        "operationId": "download_explorer_file_api_workspaces__workspace_id__explorer_download_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "相对工作区根的文件路径",
+              "title": "Path"
+            },
+            "description": "相对工作区根的文件路径"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/explorer/search": {
+      "get": {
+        "tags": [
+          "explorer"
+        ],
+        "summary": "Search Explorer",
+        "description": "按文件名全树搜索（design §7.2 GET /search，RPC 超时 60s；空关键词 422）。",
+        "operationId": "search_explorer_api_workspaces__workspace_id__explorer_search_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "文件名/目录名关键词（大小写不敏感子串）",
+              "title": "Q"
+            },
+            "description": "文件名/目录名关键词（大小写不敏感子串）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExplorerSearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/login": {
       "post": {
         "tags": [
@@ -31416,6 +31638,145 @@
         ],
         "title": "ExecutionContextResponse",
         "description": "daemon 执行所需的完整上下文（GET /agent-runs/{run_id}/execution-context）。\n\n对应 ``2026-06-14-unified-agent-execution`` task-02 / design §Phase 2。\n``claude_md`` 由 ``render_bundle_to_claude_md`` 实时渲染（不入 lease.metadata），\n其余字段从活跃 lease.metadata 恢复（task-03 持久化）。"
+      },
+      "ExplorerEntry": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "dir",
+              "file"
+            ],
+            "title": "Type"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "mtime": {
+            "type": "string",
+            "title": "Mtime"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "type",
+          "size",
+          "mtime"
+        ],
+        "title": "ExplorerEntry",
+        "description": "目录项（``explorer_list_dir`` result.entries 元素）。"
+      },
+      "ExplorerFileResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "mtime": {
+            "type": "string",
+            "title": "Mtime"
+          },
+          "binary": {
+            "type": "boolean",
+            "title": "Binary"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "size",
+          "mtime",
+          "binary",
+          "truncated",
+          "content"
+        ],
+        "title": "ExplorerFileResponse",
+        "description": "GET /api/workspaces/{wid}/explorer/file 响应（encoding=utf8）。\n\n``binary=true`` 时 content 为 daemon 兜底的 base64（utf8 解码失败不报错，\ndesign §7.1）；``truncated=true`` 表示超 10MB 上限先截断再传输。"
+      },
+      "ExplorerSearchMatch": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "dir",
+              "file"
+            ],
+            "title": "Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "name",
+          "type"
+        ],
+        "title": "ExplorerSearchMatch",
+        "description": "搜索命中项（``explorer_search`` result.matches 元素，path 相对 root）。"
+      },
+      "ExplorerSearchResponse": {
+        "properties": {
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/ExplorerSearchMatch"
+            },
+            "type": "array",
+            "title": "Matches"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "matches",
+          "truncated"
+        ],
+        "title": "ExplorerSearchResponse",
+        "description": "GET /api/workspaces/{wid}/explorer/search 响应（按文件名全树搜索）。"
+      },
+      "ExplorerTreeResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/ExplorerEntry"
+            },
+            "type": "array",
+            "title": "Entries"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entries"
+        ],
+        "title": "ExplorerTreeResponse",
+        "description": "GET /api/workspaces/{wid}/explorer/tree 响应（懒加载逐层，空 path = 根）。"
       },
       "FeedbackRequest": {
         "properties": {

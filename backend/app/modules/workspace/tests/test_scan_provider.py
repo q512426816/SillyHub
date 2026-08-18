@@ -67,7 +67,7 @@ class TestScanGenerateProviderPropagation:
         agent_service = self._build_agent_service()
 
         with self._patch_spec_workspace(tmp_path):
-            _, agent_run_id = await service.scan_generate(
+            _, agent_run_id, _session_id = await service.scan_generate(
                 root_path=str(tmp_path),
                 user_id=uuid.uuid4(),
                 agent_service=agent_service,

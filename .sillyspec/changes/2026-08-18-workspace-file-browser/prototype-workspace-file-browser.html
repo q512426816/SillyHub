@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>工作区文件浏览器 — 设计原型（线框）</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: "Microsoft YaHei", monospace; }
+  body { background: #f5f5f5; padding: 24px; color: #333; }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .note { color: #888; font-size: 12px; margin-bottom: 16px; }
+  .window { background: #fff; border: 2px solid #333; border-radius: 8px; overflow: hidden; max-width: 1100px; margin: 0 auto 24px; }
+  .tabbar { display: flex; gap: 0; border-bottom: 2px solid #333; background: #fafafa; }
+  .tab { padding: 10px 18px; font-size: 13px; border-right: 1px solid #ddd; color: #888; }
+  .tab.active { background: #fff; color: #1677ff; font-weight: bold; border-bottom: 2px solid #1677ff; margin-bottom: -2px; }
+  .toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #ddd; background: #fcfcfc; font-size: 12px; }
+  .crumb { background: #eef4ff; border: 1px solid #bcd4ff; border-radius: 4px; padding: 2px 8px; color: #1677ff; }
+  .btn { border: 1px solid #999; border-radius: 4px; padding: 2px 10px; background: #fff; cursor: pointer; font-size: 12px; }
+  .search { margin-left: auto; border: 1px solid #ccc; border-radius: 4px; padding: 3px 8px; width: 180px; color: #aaa; }
+  .main { display: flex; height: 420px; }
+  .tree { width: 300px; border-right: 1px solid #ddd; padding: 10px; font-size: 13px; overflow: auto; background: #fdfdfd; }
+  .tree .row { padding: 3px 6px; border-radius: 4px; white-space: nowrap; cursor: pointer; }
+  .tree .row:hover { background: #f0f5ff; }
+  .tree .row.sel { background: #dbeafe; color: #1677ff; }
+  .tree .dim { color: #bbb; }
+  .indent1 { padding-left: 22px !important; }
+  .indent2 { padding-left: 40px !important; }
+  .preview { flex: 1; display: flex; flex-direction: column; }
+  .phead { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid #eee; font-size: 12px; color: #666; }
+  .pbody { flex: 1; padding: 14px; font-size: 12.5px; line-height: 1.7; overflow: auto; background: #fff; }
+  .code { font-family: Consolas, monospace; }
+  .kw { color: #c41d7f; } .str { color: #237804; } .cm { color: #999; } .fn { color: #1677ff; }
+  .state { max-width: 1100px; margin: 0 auto 24px; background: #fff; border: 1px dashed #999; border-radius: 8px; padding: 16px; font-size: 13px; }
+  .state h2 { font-size: 14px; margin-bottom: 8px; }
+  .flow { background: #fff; border: 2px solid #333; border-radius: 8px; max-width: 1100px; margin: 0 auto; padding: 16px; font-family: Consolas, monospace; font-size: 12px; white-space: pre; overflow-x: auto; }
+</style>
+</head>
+<body>
+<h1>工作区文件浏览器 — 线框原型</h1>
+<div class="note">只读 · 左树右预览 · 数据经本机 daemon 实时转发 · 线框示意非最终视觉</div>
+
+<div class="window">
+  <div class="tabbar">
+    <div class="tab">概览</div><div class="tab">组件</div><div class="tab">变更</div><div class="tab">会话</div>
+    <div class="tab active">📁 文件</div><div class="tab">Skills</div><div class="tab">MCP</div><div class="tab">成员</div>
+  </div>
+  <div class="toolbar">
+    <span class="crumb">工作区根</span> › <span class="crumb">backend</span> › <span class="crumb">app</span>
+    <button class="btn">⟳ 刷新</button>
+    <div class="search">🔍 全局搜索文件名…</div>
+  </div>
+  <div class="main">
+    <div class="tree">
+      <div class="row">▾ 📂 backend</div>
+      <div class="row indent1">▾ 📂 app</div>
+      <div class="row indent2">▸ 📂 modules</div>
+      <div class="row indent2">▸ 📂 core</div>
+      <div class="row sel indent2">📄 main.py <span class="dim">4.2 KB</span></div>
+      <div class="row indent1">▸ 📂 tests</div>
+      <div class="row indent1">📄 pyproject.toml</div>
+      <div class="row">▸ 📂 frontend</div>
+      <div class="row">▸ 📂 sillyhub-daemon</div>
+      <div class="row">▸ 📂 node_modules</div>
+      <div class="row">▸ 📂 .git</div>
+      <div class="row">📄 README.md</div>
+      <div class="row">📄 Makefile</div>
+    </div>
+    <div class="preview">
+      <div class="phead">
+        📄 backend/app/main.py <span class="dim">4.2 KB · Python · 修改于 2026-08-15</span>
+        <span style="margin-left:auto"></span>
+        <button class="btn">⬇ 下载</button>
+      </div>
+      <div class="pbody code">
+<span class="cm">"""SillyHub backend entrypoint."""</span><br>
+<span class="kw">from</span> fastapi <span class="kw">import</span> FastAPI<br>
+<span class="kw">from</span> app.core.config <span class="kw">import</span> get_settings<br>
+<br>
+app = <span class="fn">FastAPI</span>(title=<span class="str">"SillyHub"</span>)<br>
+<span class="cm"># 代码高亮：react-syntax-highlighter (Prism)</span><br>
+<span class="cm"># Markdown 文件 → @uiw 渲染；图片 → 内联显示；二进制 → 元信息+下载</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="state">
+  <h2>降级/异常态（同一页面内的提示区域）</h2>
+  ① daemon 离线 → 🟠「本机守护进程离线，无法浏览工作区文件。请启动 daemon 后刷新。」<br>
+  ② 未绑定 → ⚪「当前账号未绑定本机工作区，请先到「成员」页完成绑定。」<br>
+  ③ daemon 版本过低 → 🟡「本机 daemon 版本过旧，不支持文件浏览，请升级 daemon。」<br>
+  ④ 大文件/二进制 → 预览区显示元信息卡片（大小/类型/修改时间）+ 下载按钮，不渲染内容。
+</div>
+
+<div class="flow">数据链路：
+浏览器 ──JWT──► backend GET /api/workspaces/{id}/explorer/tree|file|download
+                    │ ① 鉴权 WORKSPACE_READ  ② 查当前用户绑定(workspace_id,user_id)→daemon_id+root_path
+                    │ ③ 相对路径 containment 预检（按 root 形态分发 Win/POSIX 语义）
+                    ▼ WS RPC（tree/file 30s，search/download 60s）
+                daemon  explorer_list_dir / explorer_read_file / explorer_search
+                    │ ④ 主防线：realpath 落点必须在 root 内 + allowed_roots 双校验
+                    │ ⑤ 搜索时跳过 node_modules/.git/dist…（目录树全量展示不排除）
+                    ▼
+                宿主机工作区磁盘（只读 readdir/read，≤10MB 截断）</div>
+</body>
+</html>

@@ -2,7 +2,9 @@
 // task-05: list_dir RPC handler（daemon 端 file-rpc.ts）。
 // 覆盖：穿越防护（D-002）、readdir+stat、错误映射、符号链接归类、权限降级。
 // 用例编号 T1~T13 对齐 task-05.md §7.1。
-// 不读文件内容（design §3 非目标）—— 本测只验证目录列举语义。
+// 2026-08-18-workspace-file-browser（task-01）：新增 explorer 三函数核心语义用例；
+// 「不读文件内容」旧契约已被该变更 design §1/§7.1 显式推翻——读能力仅经
+// explorerReadFile 暴露，listDir 仍不读内容（末尾守卫 describe 已同步改写）。
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, rm, mkdir, writeFile, symlink, chmod } from 'node:fs/promises';
@@ -11,6 +13,12 @@ import { join, resolve, sep } from 'node:path';
 import {
   listDir,
   assertWithinAllowedRoots,
+  explorerListDir,
+  explorerReadFile,
+  explorerSearch,
+  EXPLORER_MAX_READ_BYTES,
+  EXPLORER_EXCLUDED_NAMES,
+  EXPLORER_DEFAULT_MAX_RESULTS,
   type DirEntry,
 } from '../src/file-rpc';
 import { RpcError } from '../src/ws-client';
@@ -52,6 +60,18 @@ async function makeRoot(opts?: {
 /** 判断能否在当前进程创建/读取无权限目录（POSIX 可，Windows skip）。 */
 function canChmod(): boolean {
   return !IS_WIN && typeof process.getuid === 'function' && process.getuid() !== 0;
+}
+
+/** 断言 promise 以指定 code 的 RpcError reject（explorer 用例共用）。 */
+async function expectRpcError(p: Promise<unknown>, code: string): Promise<void> {
+  try {
+    await p;
+  } catch (e) {
+    expect(e).toBeInstanceOf(RpcError);
+    expect((e as RpcError).code).toBe(code);
+    return;
+  }
+  throw new Error(`expected RpcError(${code}) but promise resolved`);
 }
 
 describe('assertWithinAllowedRoots — D-002 穿越防护（task-05 T2/T3/T4/T11/T12）', () => {
@@ -416,26 +436,251 @@ describe('listDir — PolicyEngine 接入（task-18 / D-008）', () => {
   });
 });
 
-// 确认 file-rpc 模块不引入文件读取 API（design §3 非目标守住）
-describe('file-rpc 非目标守卫（design §3）', () => {
-  it('import 行只含 readdir/stat/lstat，无 readFile/createReadStream', async () => {
-    // 用 readFileSync 读源文件（避免动态 import readFile 自身被误判），
-    // 只检查「from 'node:fs/promises'」这一行 import 的具名导出。
+// ── explorer 系列（2026-08-18-workspace-file-browser task-01 / design §5 §7.1）──
+// 此处为任务内核心语义冒烟；全量矩阵（含更多逃逸形态/编码组合）在 task-03 的
+// file-rpc-explorer.test.ts。
+describe('explorer 系列 — 双重校验与核心语义（task-01）', () => {
+  let root: string;
+  let abs: (rel: string) => string;
+
+  beforeEach(async () => {
+    const r = await makeRoot(); // a/ c/ 目录 + b.txt
+    root = r.root;
+    abs = r.abs;
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('explorerListDir：entries 含 size/mtime(ISO 串)，dir 优先 + 字母序，键精确对齐契约', async () => {
+    const res = await explorerListDir(root, root, [root]);
+    expect(res.entries.map((e) => e.name)).toEqual(['a', 'c', 'b.txt']);
+    const b = res.entries.find((e) => e.name === 'b.txt');
+    expect(b).toBeDefined();
+    expect(b!.type).toBe('file');
+    expect(b!.size).toBe(5); // 'hello'
+    expect(b!.mtime).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+    for (const e of res.entries) {
+      expect(Object.keys(e).sort()).toEqual(['mtime', 'name', 'size', 'type']);
+    }
+  });
+
+  it('explorerListDir：非目录 → not_found；不存在 → not_found', async () => {
+    await expectRpcError(explorerListDir(abs('b.txt'), root, [root]), 'not_found');
+    await expectRpcError(explorerListDir(abs('no-such'), root, [root]), 'not_found');
+  });
+
+  it('双重校验第 1 层：path 直接在 root 外（绝对路径穿越）→ forbidden', async () => {
+    const evil = IS_WIN ? 'C:\\Windows' : '/etc';
+    await expectRpcError(explorerListDir(evil, root, [root]), 'forbidden');
+    await expectRpcError(explorerReadFile(evil, root, [root]), 'forbidden');
+  });
+
+  it('双重校验第 2 层：path 在 root 内但 root 不在 allowed_roots → forbidden', async () => {
+    const other = await mkdtemp(join(tmpdir(), 'sillyhub-explorer-other-'));
+    try {
+      await expectRpcError(explorerListDir(abs('a'), root, [other]), 'forbidden');
+      await expectRpcError(explorerReadFile(abs('b.txt'), root, [other]), 'forbidden');
+      await expectRpcError(explorerSearch(root, 'a', [other]), 'forbidden');
+    } finally {
+      await rm(other, { recursive: true, force: true });
+    }
+  });
+
+  it('realpath 逃逸：工作区内链接指向 root 外 → forbidden（dir 用 junction，Win 免管理员）', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'sillyhub-explorer-out-'));
+    try {
+      await writeFile(join(outside, 'secret.txt'), 'x');
+      try {
+        await symlink(outside, abs('escape-dir'), IS_WIN ? 'junction' : 'dir');
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === 'EPERM') return; // 无 symlink 权限环境跳过
+        throw e;
+      }
+      await expectRpcError(
+        explorerListDir(abs('escape-dir'), root, [root]),
+        'forbidden',
+      );
+      await expectRpcError(
+        explorerReadFile(join(abs('escape-dir'), 'secret.txt'), root, [root]),
+        'forbidden',
+      );
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  }, 10_000);
+
+  it('root 本身是 symlink/junction 不误拒（realpath 双方解析 + roots 条目归一）', async () => {
+    const real = await mkdtemp(join(tmpdir(), 'sillyhub-explorer-real-'));
+    try {
+      await writeFile(join(real, 'in-root.txt'), 'hi');
+      const link = join(tmpdir(), `sillyhub-explorer-link-${Date.now()}`);
+      try {
+        await symlink(real, link, IS_WIN ? 'junction' : 'dir');
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === 'EPERM') return;
+        throw e;
+      }
+      try {
+        // path 用真实路径、root 用链接形态：realpath 后相等 → 放行
+        const res = await explorerListDir(real, link, [link]);
+        expect(res.entries.map((e) => e.name)).toContain('in-root.txt');
+        // 两者都用链接形态：realpath 解析到同一落点 → 放行
+        const res2 = await explorerListDir(link, link, [link]);
+        expect(res2.entries.length).toBeGreaterThan(0);
+      } finally {
+        await rm(link, { recursive: true, force: true }); // 只删链接本体不删 real
+      }
+    } finally {
+      await rm(real, { recursive: true, force: true });
+    }
+  }, 10_000);
+
+  it('explorerReadFile：utf8 文本 → 原文 + binary=false；键精确对齐契约', async () => {
+    await writeFile(abs('note.md'), '你好, explorer');
+    const res = await explorerReadFile(abs('note.md'), root, [root]);
+    expect(Object.keys(res).sort()).toEqual([
+      'binary',
+      'content',
+      'mtime',
+      'name',
+      'size',
+      'truncated',
+    ]);
+    expect(res.name).toBe('note.md');
+    expect(res.content).toBe('你好, explorer');
+    expect(res.binary).toBe(false);
+    expect(res.truncated).toBe(false);
+    expect(res.size).toBe(Buffer.byteLength('你好, explorer'));
+    expect(res.mtime).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('explorerReadFile：NUL 字节 → binary=true + base64 兜底（不报错）', async () => {
+    const raw = Buffer.from([0x00, 0x01, 0x02, 0x03]);
+    await writeFile(abs('bin.dat'), raw);
+    const res = await explorerReadFile(abs('bin.dat'), root, [root]);
+    expect(res.binary).toBe(true);
+    expect(res.content).toBe(raw.toString('base64'));
+  });
+
+  it('explorerReadFile：encoding=base64 强制 base64（文本文件也走 base64，download 链路）', async () => {
+    await writeFile(abs('plain.txt'), 'hello');
+    const res = await explorerReadFile(abs('plain.txt'), root, [root], 'base64');
+    expect(res.binary).toBe(false);
+    expect(res.content).toBe(Buffer.from('hello').toString('base64'));
+  });
+
+  it('explorerReadFile：超 10MB → truncated=true 且 content 恰为前 10MB（截断先于传输）', async () => {
+    const buf = Buffer.alloc(EXPLORER_MAX_READ_BYTES + 5, 0x61); // 'a'
+    await writeFile(abs('big.txt'), buf);
+    const res = await explorerReadFile(abs('big.txt'), root, [root]);
+    expect(res.truncated).toBe(true);
+    expect(res.size).toBe(EXPLORER_MAX_READ_BYTES + 5);
+    expect(Buffer.byteLength(res.content, 'utf8')).toBe(EXPLORER_MAX_READ_BYTES);
+    expect(res.binary).toBe(false);
+  }, 20_000);
+
+  it('explorerReadFile：截断误切多字节字符 → 不误判 binary、content 裁到有效边界无 U+FFFD', async () => {
+    // 前 10MB-1 字节 'a'，随后 2 字节 é(0xC3 0xA9) 跨截断边界：窗口尾部只剩孤立的 0xC3。
+    const buf = Buffer.alloc(EXPLORER_MAX_READ_BYTES + 1, 0x61);
+    buf[EXPLORER_MAX_READ_BYTES - 1] = 0xc3;
+    buf[EXPLORER_MAX_READ_BYTES] = 0xa9;
+    await writeFile(abs('cut.txt'), buf);
+    const res = await explorerReadFile(abs('cut.txt'), root, [root]);
+    expect(res.truncated).toBe(true);
+    expect(res.binary).toBe(false); // 截断误切不得误判二进制
+    expect(res.content).toBe('a'.repeat(EXPLORER_MAX_READ_BYTES - 1));
+    expect(res.content.includes('�')).toBe(false); // 不得产生替换符乱码
+  }, 20_000);
+
+  it('explorerReadFile：目录 → not_found', async () => {
+    await expectRpcError(explorerReadFile(abs('a'), root, [root]), 'not_found');
+  });
+
+  it('explorerSearch：大小写不敏感子串匹配 + 相对路径 POSIX 风格 + 目录也命中', async () => {
+    await mkdir(abs('src'));
+    await writeFile(abs('src/Alpha.ts'), 'x');
+    await writeFile(abs('src/readme-alpha.md'), 'x');
+    await writeFile(abs('zz-unrelated.txt'), 'x');
+    await mkdir(abs('AlphaDocs'));
+    const res = await explorerSearch(root, 'ALPHA', [root]);
+    expect(Object.keys(res).sort()).toEqual(['matches', 'truncated']);
+    const paths = res.matches.map((m) => m.path);
+    expect(paths).toContain('src/Alpha.ts');
+    expect(paths).toContain('src/readme-alpha.md');
+    expect(paths).toContain('AlphaDocs');
+    expect(res.matches.find((m) => m.path === 'AlphaDocs')!.type).toBe('dir');
+    expect(paths).not.toContain('zz-unrelated.txt');
+    // 相对路径统一 POSIX 分隔（Windows 也不出反斜杠）
+    expect(res.matches.every((m) => !m.path.includes('\\'))).toBe(true);
+    expect(res.truncated).toBe(false);
+    for (const m of res.matches) {
+      expect(Object.keys(m).sort()).toEqual(['name', 'path', 'type']);
+    }
+  });
+
+  it('explorerSearch：跳过 node_modules/.git 等噪声目录（EXPLORER_EXCLUDED_NAMES）', async () => {
+    await mkdir(abs('node_modules/pkg'), { recursive: true });
+    await writeFile(abs('node_modules/pkg/alpha-needle.js'), 'x');
+    await writeFile(abs('alpha-keep.ts'), 'x');
+    const res = await explorerSearch(root, 'alpha', [root]);
+    expect(res.matches.map((m) => m.path)).toEqual(['alpha-keep.ts']);
+  });
+
+  it('explorerSearch：达 maxResults 上限 → 截到上限 + truncated=true 收敛', async () => {
+    for (let i = 0; i < 3; i++) {
+      await writeFile(abs(`needle-${i}.txt`), 'x');
+    }
+    const res = await explorerSearch(root, 'needle', [root], 2);
+    expect(res.matches.length).toBe(2);
+    expect(res.truncated).toBe(true);
+  });
+
+  it('explorerSearch：空 query → forbidden；root 不存在 → not_found', async () => {
+    await expectRpcError(explorerSearch(root, '', [root]), 'forbidden');
+    await expectRpcError(
+      explorerSearch(join(root, 'no-such'), 'x', [root]),
+      'not_found',
+    );
+  });
+});
+
+// ── 读能力守卫（契约更新版）──────────────────────────────────────────────────
+// 2026-08-18-workspace-file-browser（task-01）：本变更 design §1/§7.1 显式引入
+// 文件内容读取，推翻 2026-06 旧变更「file-rpc 不读文件内容（readFile）」的非目标。
+// 旧守卫「import 行不得含 readFile」基于已过时契约，同步改写为新契约守卫：
+// listDir 仍不读文件内容，读能力仅经 explorerReadFile 暴露。
+describe('file-rpc 读能力守卫（契约更新：2026-08-18-workspace-file-browser design §1/§7.1）', () => {
+  it('listDir 函数体不引用 readFile/createReadStream——列举通道仍不读文件内容', async () => {
+    // 用 readFileSync 读源文件（避免动态 import readFile 自身被误判）。
     const { readFileSync } = await import('node:fs');
-    const src = readFileSync(
-      resolve(process.cwd(), 'src/file-rpc.ts'),
-      'utf-8',
-    );
-    // 抽取 fs/promises 的 import 行
-    const importMatch = src.match(
-      /import\s+\{([^}]+)\}\s+from\s+['"]node:fs\/promises['"]/,
-    );
-    expect(importMatch, 'src/file-rpc.ts must import from node:fs/promises').not.toBeNull();
-    const imported = importMatch![1];
-    expect(imported).toMatch(/\breaddir\b/);
-    expect(imported).toMatch(/\bstat\b|\blstat\b/);
-    // 关键守卫：不允许 readFile / createReadStream（design §3 非目标：不读文件内容）
-    expect(imported).not.toMatch(/\breadFile\b/);
-    expect(imported).not.toMatch(/createReadStream/);
+    const src = readFileSync(resolve(process.cwd(), 'src/file-rpc.ts'), 'utf-8');
+    const start = src.indexOf('export async function listDir');
+    expect(start).toBeGreaterThanOrEqual(0);
+    // listDir 源文本 = 声明处到下一个顶层 export（explorer 常量/函数）之间，
+    // 其间只含 listDir 与私有 toRpcError——均不得引用读内容 API。
+    const nextExport = src.indexOf('\nexport ', start + 1);
+    const body = src.slice(start, nextExport === -1 ? undefined : nextExport);
+    expect(body).toMatch(/\breaddir\b/); // 列举语义仍在
+    expect(body).not.toMatch(/\breadFile\b/);
+    expect(body).not.toMatch(/createReadStream/);
+  });
+
+  it('读能力仅经 explorerReadFile 暴露——三个 explorer 函数与常量契约存在', () => {
+    expect(typeof explorerListDir).toBe('function');
+    expect(typeof explorerReadFile).toBe('function');
+    expect(typeof explorerSearch).toBe('function');
+    // 签名形状：前三参数均为安全关键三元组 (path|root, root, roots)；
+    // encoding / maxResults 为带默认值的可选尾参（Function.length 不计入）。
+    expect(explorerListDir).toHaveLength(3);
+    expect(explorerReadFile).toHaveLength(3);
+    expect(explorerSearch).toHaveLength(3);
+    // 常量契约（D-004@v1 10MB / design §7.1 上限默认 100 / 噪声排除表）。
+    // ESM 静态 import 本身守卫「未导出即链接失败」；此处再校验运行时值。
+    expect(EXPLORER_MAX_READ_BYTES).toBe(10 * 1024 * 1024);
+    expect(EXPLORER_EXCLUDED_NAMES.has('node_modules')).toBe(true);
+    expect(EXPLORER_EXCLUDED_NAMES.has('.git')).toBe(true);
+    expect(EXPLORER_DEFAULT_MAX_RESULTS).toBe(100);
   });
 });

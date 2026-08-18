@@ -948,6 +948,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/explorer/tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Explorer Tree
+         * @description 列目录（懒加载逐层；design §7.2 GET /tree，RPC 超时 30s）。
+         */
+        get: operations["get_explorer_tree_api_workspaces__workspace_id__explorer_tree_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/explorer/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Explorer File
+         * @description 读文件预览（encoding=utf8；design §7.2 GET /file，RPC 超时 30s）。
+         */
+        get: operations["get_explorer_file_api_workspaces__workspace_id__explorer_file_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/explorer/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Explorer File
+         * @description 下载文件（encoding=base64 强制；design §7.2 GET /download，RPC 超时 60s）。
+         */
+        get: operations["download_explorer_file_api_workspaces__workspace_id__explorer_download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/explorer/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Explorer
+         * @description 按文件名全树搜索（design §7.2 GET /search，RPC 超时 60s；空关键词 422）。
+         */
+        get: operations["search_explorer_api_workspaces__workspace_id__explorer_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/login": {
         parameters: {
             query?: never;
@@ -8205,6 +8285,8 @@ export interface components {
             status: string;
             /** Turn Count */
             turn_count: number;
+            /** Mode */
+            mode?: string | null;
             author: components["schemas"]["ChangeSessionAuthor"];
             /** Last Active At */
             last_active_at: string | null;
@@ -10090,6 +10172,77 @@ export interface components {
             provider_config?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /**
+         * ExplorerEntry
+         * @description 目录项（``explorer_list_dir`` result.entries 元素）。
+         */
+        ExplorerEntry: {
+            /** Name */
+            name: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "dir" | "file";
+            /** Size */
+            size: number;
+            /** Mtime */
+            mtime: string;
+        };
+        /**
+         * ExplorerFileResponse
+         * @description GET /api/workspaces/{wid}/explorer/file 响应（encoding=utf8）。
+         *
+         *     ``binary=true`` 时 content 为 daemon 兜底的 base64（utf8 解码失败不报错，
+         *     design §7.1）；``truncated=true`` 表示超 10MB 上限先截断再传输。
+         */
+        ExplorerFileResponse: {
+            /** Name */
+            name: string;
+            /** Size */
+            size: number;
+            /** Mtime */
+            mtime: string;
+            /** Binary */
+            binary: boolean;
+            /** Truncated */
+            truncated: boolean;
+            /** Content */
+            content: string;
+        };
+        /**
+         * ExplorerSearchMatch
+         * @description 搜索命中项（``explorer_search`` result.matches 元素，path 相对 root）。
+         */
+        ExplorerSearchMatch: {
+            /** Path */
+            path: string;
+            /** Name */
+            name: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "dir" | "file";
+        };
+        /**
+         * ExplorerSearchResponse
+         * @description GET /api/workspaces/{wid}/explorer/search 响应（按文件名全树搜索）。
+         */
+        ExplorerSearchResponse: {
+            /** Matches */
+            matches: components["schemas"]["ExplorerSearchMatch"][];
+            /** Truncated */
+            truncated: boolean;
+        };
+        /**
+         * ExplorerTreeResponse
+         * @description GET /api/workspaces/{wid}/explorer/tree 响应（懒加载逐层，空 path = 根）。
+         */
+        ExplorerTreeResponse: {
+            /** Entries */
+            entries: components["schemas"]["ExplorerEntry"][];
         };
         /**
          * FeedbackRequest
@@ -14893,6 +15046,11 @@ export interface components {
              * Format: uuid
              */
             agent_run_id: string;
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id?: string | null;
         };
         /** ScanRequest */
         ScanRequest: {
@@ -19485,6 +19643,142 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemberBindingView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_explorer_tree_api_workspaces__workspace_id__explorer_tree_get: {
+        parameters: {
+            query?: {
+                /** @description 相对工作区根的目录路径，空 = 根 */
+                path?: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExplorerTreeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_explorer_file_api_workspaces__workspace_id__explorer_file_get: {
+        parameters: {
+            query: {
+                /** @description 相对工作区根的文件路径 */
+                path: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExplorerFileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_explorer_file_api_workspaces__workspace_id__explorer_download_get: {
+        parameters: {
+            query: {
+                /** @description 相对工作区根的文件路径 */
+                path: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_explorer_api_workspaces__workspace_id__explorer_search_get: {
+        parameters: {
+            query: {
+                /** @description 文件名/目录名关键词（大小写不敏感子串） */
+                q: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExplorerSearchResponse"];
                 };
             };
             /** @description Validation Error */

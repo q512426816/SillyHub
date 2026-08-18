@@ -33,6 +33,7 @@ from app.modules.change import change_router
 from app.modules.change_writer.router import router as change_writer_router
 from app.modules.daemon.dist_router import router as daemon_dist_router
 from app.modules.daemon.router import router as daemon_router
+from app.modules.explorer.router import router as explorer_router
 from app.modules.git_gateway.router import router as git_gateway_router
 from app.modules.git_identity import git_identity_router
 from app.modules.health import health_router
@@ -644,6 +645,13 @@ def create_app() -> FastAPI:
 
     app.include_router(file_router, prefix="/api/file")
     app.include_router(member_runtimes_router, prefix="/api", tags=["workspace-member-runtimes"])
+    # 工作区文件浏览器（change ``2026-08-18-workspace-file-browser``）：只读浏览
+    # 当前用户自己绑定的工作区副本（explorer_* 三 RPC 转发，四 GET 端点）。
+    # sibling include 仿 members_router——router 自带
+    # ``/workspaces/{workspace_id}/explorer`` prefix 与 ``explorer`` tag，外层
+    # 只加 ``/api``；嵌套 include 会双计 prefix 并抛
+    # ``ValueError: Duplicated param name 'workspace_id'``。
+    app.include_router(explorer_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
     app.include_router(change_router, prefix="/api")
     app.include_router(scan_docs_router, prefix="/api")
