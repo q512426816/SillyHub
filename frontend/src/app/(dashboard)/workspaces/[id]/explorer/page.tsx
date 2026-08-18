@@ -4,7 +4,9 @@
  * task-08：工作区文件浏览页（/workspaces/[id]/explorer）。
  *
  * 装配 FileExplorer + FilePreview 成左树右预览的 VSCode 式布局：
- * - 左侧固定宽栏（w-72）展示可滚动文件树
+ * - 页面高度锚定视口（h-[calc(100vh-56px)]，TopBar h-14），树与预览区内部滚动，
+ *   页面本体不随内容整体滚动（ql-20260818-010-f551）
+ * - 左侧固定宽栏（w-60）展示可滚动文件树（支持横向滚动看长文件名）
  * - 右侧 flex 预览区展示选中文件内容
  * - 页面持有 selectedPath 状态，联动两侧组件
  * - 首屏 tree 请求失败按 ApiError.status 分发三降级中文卡：
@@ -158,8 +160,10 @@ export default function WorkspaceExplorerPage() {
     setExplorerKey((k) => k + 1);
   }, [queryClient, workspaceId, selectedPath]);
 
+  // 视口高度锚定（TopBar h-14=56px，sessions 页同款先例）：页面本体不滚动，
+  // 树与预览区各自内部滚动；overflow-hidden 兜住 min-h-screen 布局链外的溢出。
   return (
-    <PageContainer size="full" className="gap-3">
+    <PageContainer size="full" className="h-[calc(100vh-56px)] gap-3 overflow-hidden">
       <PageHeader
         title="文件浏览"
         subtitle="浏览本机守护进程转发的工作区文件"
@@ -169,10 +173,13 @@ export default function WorkspaceExplorerPage() {
 
       {!hasBlockingError && (
         <>
-          <div className="flex flex-wrap items-center gap-3 border-b border-border pb-2">
-            <FileBreadcrumb path={selectedPath} />
+          <div className="flex flex-none flex-wrap items-center gap-3 border-b border-border pb-2">
+            <div className="min-w-0 flex-1">
+              <FileBreadcrumb path={selectedPath} />
+            </div>
             <Button
               size="small"
+              className="flex-none"
               icon={<RefreshCw className="h-3.5 w-3.5" />}
               onClick={handleRefresh}
             >
@@ -181,7 +188,7 @@ export default function WorkspaceExplorerPage() {
           </div>
 
           <div className="flex min-h-0 flex-1 gap-3 overflow-hidden">
-            <div className="w-72 min-w-0 shrink-0 overflow-hidden rounded-md border">
+            <div className="w-60 min-w-0 shrink-0 overflow-hidden rounded-md border">
               <FileExplorer
                 key={explorerKey}
                 workspaceId={workspaceId}

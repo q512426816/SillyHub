@@ -14,6 +14,8 @@
  *   受控 expandedKeys 程序化更新不会触发 rc-tree loadData，故必须手动逐层拉取。
  * - 错误降级：单节点展开失败置空 children + 红条提示不崩溃（空目录与失败可区分）；
  *   根加载失败红条带「重试」。
+ * - 滚动语义（ql-20260818-010-f551）：节点名不截断（whitespace-nowrap），行宽超出
+ *   容器时靠外层 overflow-auto 横向滚动；缩进 16px/层；树区域在页面视口锚定下内部滚动。
  *
  * 树图标沿用 remote-folder-picker 先例用 lucide（task-06 蓝图「目录文件分用 lucide 图标」）。
  * 视觉遵循 FRONTEND_PAGE_STYLE.md（antd 业务组件 + tailwind 布局/颜色变量、中文文案）。
@@ -95,12 +97,15 @@ function sortEntries(entries: ExplorerEntry[]): ExplorerEntry[] {
   });
 }
 
-/** 条目标题：名称 + 文件大小缩写（灰字）。 */
+/** 条目标题：名称 + 文件大小缩写（灰字）。名称不截断（whitespace-nowrap），
+ *  行宽超出容器时靠外层 overflow-auto 横向滚动看全名（ql-20260818-010-f551）。 */
 function renderTitle(entry: ExplorerEntry) {
   const size = entry.type === "file" ? formatSize(entry.size) : "";
   return (
     <span className="inline-flex items-baseline gap-1">
-      <span className="truncate">{entry.name}</span>
+      <span className="whitespace-nowrap" title={entry.name}>
+        {entry.name}
+      </span>
       {size ? <span className="text-[11px] text-muted-foreground">{size}</span> : null}
     </span>
   );
@@ -388,7 +393,9 @@ export function FileExplorer({ workspaceId, onSelectFile }: FileExplorerProps) {
                         ) : (
                           <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                         )}
-                        <span className="truncate font-mono text-xs">{match.path}</span>
+                        <span className="whitespace-nowrap font-mono text-xs" title={match.path}>
+                          {match.path}
+                        </span>
                       </button>
                     </li>
                   ))}
@@ -399,7 +406,10 @@ export function FileExplorer({ workspaceId, onSelectFile }: FileExplorerProps) {
         </div>
       ) : null}
 
-      {/* 文件树：根加载中 / 空态 / 树 */}
+      {/* 文件树：根加载中 / 空态 / 树。
+          缩进收 16px/层（antd v6 Tree 已无 indentSize prop，token 默认 controlHeightSM=24px，
+          在 w-60 栏内层级深时太占地，用任意选择器覆盖 indent-unit 宽度）；
+          节点行不换行，宽于容器时整体横向滚动。 */}
       {rootLoading ? (
         <div className="flex flex-1 items-center justify-center py-8">
           <Spin />
@@ -407,7 +417,7 @@ export function FileExplorer({ workspaceId, onSelectFile }: FileExplorerProps) {
       ) : treeData.length === 0 ? (
         <div className="flex-1 py-8 text-center text-xs text-muted-foreground">工作区没有文件。</div>
       ) : (
-        <div className="min-h-0 flex-1 overflow-auto rounded border">
+        <div className="min-h-0 flex-1 overflow-auto rounded border [&_.ant-tree-indent-unit]:w-4">
           <Tree
             treeData={treeData}
             loadData={onLoadData}

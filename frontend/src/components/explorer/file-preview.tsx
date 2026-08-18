@@ -12,6 +12,9 @@
  *   打包膨胀/SSR 报错；按需注册语言，未识别扩展名退化纯文本 pre）
  * - ``truncated=true``（超 10MB 截断，D-004）→ 预览区顶部黄条提示引导下载看全量
  *
+ * 滚动语义（ql-20260818-010-f551）：内容区在页面视口锚定下内部滚动；纯文本与代码
+ * 分支统一不软折行 + 横向滚动；图片 max-h-full 自适应预览区高度。
+ *
  * 头部展示文件名/大小/修改时间 + 下载按钮（全类型可用，loading 态防重复点击）；
  * 下载走 ``downloadExplorerFile``（fetch Blob → a download → revoke，R-06）。
  *
@@ -196,14 +199,15 @@ function ImagePreview({
       </div>
     );
   }
-  // objectURL 无法走 next/image（非静态资源且需鉴权），此处必须原生 img
+  // objectURL 无法走 next/image（非静态资源且需鉴权），此处必须原生 img。
+  // max-h-full 自适应预览区可视高度（旧 540px 魔法数在小屏溢出，ql-20260818-010-f551）。
   return (
-    <div className="flex items-center justify-center py-4">
+    <div className="flex h-full min-h-0 items-center justify-center overflow-auto p-4">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={src}
         alt={name}
-        className="max-h-[540px] max-w-full rounded-md border border-border object-contain"
+        className="max-h-full max-w-full rounded-md border border-border object-contain"
       />
     </div>
   );
@@ -317,8 +321,10 @@ export function FilePreview({ workspaceId, filePath }: FilePreviewProps) {
       </SyntaxHighlighter>
     );
   } else {
+    // 纯文本与代码高亮分支统一「不软折行 + 横向滚动」语义（ql-20260818-010-f551），
+    // 避免长行代码被 wrap 折得难读；容器 overflow-auto 提供横向滚动。
     body = (
-      <pre className="overflow-auto rounded-md bg-muted/40 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
+      <pre className="overflow-auto rounded-md bg-muted/40 p-3 font-mono text-xs leading-relaxed whitespace-pre">
         {data.content}
       </pre>
     );

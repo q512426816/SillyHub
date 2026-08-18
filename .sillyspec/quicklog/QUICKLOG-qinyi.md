@@ -70,3 +70,15 @@
 方案：① 抽 _write_op_file/_move_op_file 同步 helper 五处 FS 段整体入 asyncio.to_thread；② archive_hit 仅在 delete/rename op 命中 archive 路径置位（真归档=跨根移动恒发 rename），add/update 走 scoped name，change_dirs 归档前缀剥前缀进 scoped；③ reparse 移出请求路径评估结论 defer——scoped <1s 全量 ~2s 且罕见，后台化复杂度不抵收益。
 结果：spec_workspace 97 passed + change 386 passed（各含预存 skip），ruff format/check 与 mypy 全绿；残余风险为归档同时改内容时 rename 退化为 delete+add 的陈旧行残留，留待下次全量重扫收敛（与 scoped 零删除红线同哲学）。
 
+
+## ql-20260818-010-f551 | 2026-08-18 22:42:28 | 工作区文件浏览页布局优化——树支持左右滑动、内容区固定高度内部滚动、预览细节优化
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/workspaces/[id]/explorer/page.tsx（PageContainer 锚定视口高度+overflow-hidden+左栏收窄 w-60+面包屑防换行）
+- frontend/src/components/explorer/file-explorer.tsx（节点 nowrap 横向滚动+缩进 16px+搜索结果 nowrap）
+- frontend/src/components/explorer/file-preview.tsx（纯文本不软折行+图片 max-h-full 自适应）
+需求：工作区文件浏览页布局优化——树支持左右滑动、内容区固定高度内部滚动、预览细节优化。
+根因：AppShell 根容器 min-h-screen 高度被内容撑开，页面内 flex-1/overflow-hidden 链条无视口高度锚点全部落空导致整页滚动；树节点标题 truncate 截断长文件名且行宽锁死容器宽导致永不出现横向滚动条。
+方案：page.tsx 给 PageContainer 锚定 h-[calc(100vh-56px)]（TopBar h-14，sessions 页先例）+overflow-hidden，左栏收窄 w-60；file-explorer 节点改 whitespace-nowrap 靠容器 overflow-auto 横向滚动，缩进用任意选择器收 16px/层（antd v6 Tree 已无 indentSize prop），搜索结果同步 nowrap；file-preview 纯文本 pre 统一 whitespace-pre 横向滚动（与代码高亮分支一致），图片 max-h-[540px] 改 max-h-full 自适应容器。
+结果：vitest explorer 相关 3 文件 36 用例全过，tsc --noEmit 0 错，eslint 三文件仅 1 条预存警告（HEAD 基线同位存在，非本次引入）。
