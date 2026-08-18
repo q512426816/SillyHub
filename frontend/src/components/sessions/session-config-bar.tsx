@@ -418,12 +418,18 @@ export function SessionConfigBar({
             testId="config-dd-profile"
             title="切换档案 · 只影响本会话"
           >
-            {/* 会话内不支持取消档案（inject 契约仅非空 id 切换，task-16）：仅当前态展示。 */}
-            <DisplayItem
-              icon={<span aria-hidden>📋</span>}
-              label="不指定"
+            {/* ql-20260818-004：取消档案与供应商「不指定」对称——空串语义回无人格。 */}
+            <SwitchItem
+              icon="📋"
+              label="不指定（无人格）"
               current={agentProfileId == null}
-              sub={agentProfileId == null ? undefined : "暂不支持会话内取消"}
+              onClick={() =>
+                executeSwitch({
+                  field: "agent_profile_id",
+                  value: "",
+                  label: "不指定",
+                })
+              }
             />
             {profiles.map((p) => (
               <SwitchItem

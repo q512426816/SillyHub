@@ -371,6 +371,70 @@ class TestSwitchSuccess:
 # ════════════════════════════════════════════════════════════════════════════
 
 
+class TestClearProfile:
+    @pytest.mark.asyncio
+    async def test_empty_string_clears_profile_to_null(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """ql-20260818-004：agent_profile_id="" → 取消档案——会话列/新 run NULL、
+        快照 profile_name=None、lease metadata 提示词三键删除、消息 profile 空
+        载荷（systemPrompt 空串=daemon 归一 null 哨兵切到无人格）。"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        profile_a = await _create_profile(db_session, uid, system_prompt="a", mcp_refs=["m"])
+
+        svc = DaemonService(db_session)
+        created = await svc.create_session(
+            uid,
+            provider=None,
+            prompt="first",
+            runtime_id=str(rt.id),
+            agent_profile_id=str(profile_a.id),
+        )
+        await _finish_first_turn(db_session, created)
+        mocked_hub.send_session_control.reset_mock()
+
+        result = await svc.inject_session(
+            created.agent_session.id, uid, prompt="", agent_profile_id=""
+        )
+
+        assert result.agent_run.agent_profile_id is None
+        assert result.agent_run.agent_profile_snapshot is None
+        await db_session.refresh(created.agent_session)
+        assert created.agent_session.agent_profile_id is None
+        assert created.agent_session.config_snapshot is not None
+        assert created.agent_session.config_snapshot["profile_name"] is None
+
+        lease = await db_session.get(DaemonTaskLease, created.agent_session.lease_id)
+        meta = dict(lease.metadata_)
+        assert "system_prompt" not in meta
+        assert "mcp_refs" not in meta
+        assert "skill_refs" not in meta
+
+        msg_type, payload = (
+            mocked_hub.send_session_control.await_args.args[1],
+            mocked_hub.send_session_control.await_args.args[2],
+        )
+        assert msg_type == DAEMON_MSG_SESSION_SWITCH_CONFIG
+        assert payload["profile"] == {"systemPrompt": "", "mcpRefs": [], "skillRefs": []}
+
+    @pytest.mark.asyncio
+    async def test_empty_string_when_already_none_no_switch(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """已无档案时空串=等值不动 → 空 prompt 无切换 → 409 拒绝（防 run 卡死）。"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        svc = DaemonService(db_session)
+        created = await svc.create_session(
+            uid, provider=None, prompt="first", runtime_id=str(rt.id)
+        )
+        await _finish_first_turn(db_session, created)
+
+        with pytest.raises(DaemonSessionNotActive):
+            await svc.inject_session(created.agent_session.id, uid, prompt="", agent_profile_id="")
+
+
 class TestClearProvider:
     @pytest.mark.asyncio
     async def test_empty_string_clears_provider_to_null(
