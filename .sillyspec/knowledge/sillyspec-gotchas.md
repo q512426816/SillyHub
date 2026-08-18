@@ -68,3 +68,9 @@ created_at: 2026-07-05 02:00:00
 - plan step 4 postcheck 的 `resolveChangeDir` 读空 `progress.json` → 回退 `sort().reverse()` 取字典序最大目录（`workspace-*` 排在 `2026-*` 前），校验了别人的变更卡住当前 plan。
 - workaround：写 `progress.json` `{"currentChange":"<变更名>"}` + task 放 `tasks/` 子目录。
 - 完整根因+workaround 见 `docs/sillyspec/finished/plan-postcheck-multi-change-bug.md`。
+
+## reopen --from-step N 后 --done 会把后续未执行步骤回填 completed
+
+- 现象（2026-08-18 实测两轮）：变更中间步骤需要重做时用 reopen `--from-step N` 重开，之后（只重跑了部分步骤就）跑 `--done` 收尾，CLI 会把 N 之后**尚未重新执行/未验证的步骤也一并回填 completed**——progress 显示全绿，但进度与真实产出不符。
+- 规避：reopen 后把受影响及后续步骤逐一真实重跑再 `--done`；`--done` 前用 `sillyspec progress show` 逐条对照步骤状态与落盘产物，对不上的步骤不要靠 `--done` 推进。
+- 本条为踩坑时点记录（2026-08-18），工具修复后应更新或删除。

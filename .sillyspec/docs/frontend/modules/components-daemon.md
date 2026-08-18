@@ -2,42 +2,91 @@
 schema_version: 1
 doc_type: module-card
 module_id: components-daemon
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:02:00
+created_at: 2026-08-18 01:45:00
 ---
-# components-daemon
+
+# Daemon 运行时交互组件（components-daemon）
 
 ## 定位
-Daemon 运行时会话交互组件（`components/daemon/*.tsx`），承载"选 runtime → 建会话 → 实时聊天 / 历史回看 / 续聊"的完整交互。核心是 `RuntimeSessionDialog`（弹窗外壳 + 会话列表 + 右侧详情区），内部按会话状态分流到 Interactive / Quick / History 三种 section，SSE 实时流由 `useAgentRunStream` 接管。供 RuntimesPage 与工作区 runtime 页使用。
+Daemon 运行时 / 机器 / 会话交互组件（`components/daemon/`，12 源文件 + 十余套测试）。三块职责：
+① 运行时管理页展示（machine-card 手风琴机器卡 + runtime-card 运行时卡 + helpers 格式化件）；
+② 会话交互（runtime-session-dialog 统一弹窗、interactive-session-panel 组装层、
+turn-timeline 消息流、session-input-bar 输入区、session-list-layout 公共列表）；
+③ 辅助件（remote-folder-picker 远程目录浏览器、session-log-sanitize 日志清洗、
+runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog 起 runtimes
+弹窗与变更会话（ChangeSessionSection）共用同一套组件，杜绝两套样式分叉。
 
 ## 契约摘要
-- `RuntimeSessionDialog`（`runtime-session-dialog.tsx`）：props `{ runtime, open, onClose, initialSessionId? }`；外壳组件，渲染 `RuntimeSessionDialogBody`；`key={runtime.id}` 由调用方传以强制重 mount 清旧态。
-- `RuntimeSessionDialogBody`：内部实现，拉会话列表 → 按 `initialSessionId`/活跃态选中会话 → 根据 `isActiveSession` 切 Interactive（attach SSE + 轮询）或 History（只读 + 可续聊）。
-- `InteractiveSessionPanel`（`interactive-session-panel.tsx`）：props 见 `InteractiveSessionPanelProps`，活跃会话的实时交互面板。
-- `InteractiveSessionChatSection`（helpers）：交互式聊天区，预填历史 turn、连 SSE、提交 input。
-- `QuickChatSessionSection`（helpers）：quick-chat（一次性问答）区。
-- `SessionHistoryView`（helpers）：已结束/失败会话的历史回看，内部按 `canResumeSession` 决定续聊按钮可用性。
-- `SessionsSidebar`（helpers）：左侧会话列表，按 `isActiveSession` 高亮。
-- 辅助：`shortId(id)` 截短 ID；`isActiveSession(s)`（状态 ∈ `ACTIVE_SESSION_VIEW_STATUSES`）；`canResumeSession(session)`；`resumeDisabledTitle(session)`；`logsToTurns(logs)` 把历史日志按 run_id 分组转 `SessionTurnView[]` 预填 attach 面板；`ACTIVE_SESSION_VIEW_STATUSES` 活跃状态集合。
-- 类型：`SessionTurnView`。
+- `RuntimeSessionDialog`（`runtime-session-dialog.tsx`）：统一会话弹窗。
+  - props：`{ runtime, open, onClose, initialSessionId?, ... }`；由 page 单一
+    dialogRuntime state 驱动，key 重 mount 重置内部状态；URL `?session=` 恢复点经
+    initialSessionId 传入，首次加载优先 attach。
+  - 二态化：selected（任意状态）→ attach 续聊；idle → 新建空白。已删
+    SessionHistoryView 只读回看分支。
+  - ended/failed 会话点开：先 `reopenSession` 转 reconnecting/active 再 attach
+    （F-1/C-3：panel attach 轮询仅识别 active/failed，ended 直接 attach 卡超时）。
+- `InteractiveSessionPanel`（`interactive-session-panel.tsx`）：会话状态机 + 提交逻辑
+  组装层（2026-08-14-sessions-portal 后消息流/输入区抽为 TurnTimeline / SessionInputBar
+  共享子组件，对外 props 零回归）。
+  - 会话生命周期：首条消息 `createSession` → 追问 `injectSession`（同 session 下一
+    turn/新 run）→ `interruptSession` 只收敛 currentRun → `endSession` 结束。
+  - 单条 `streamSession` SSE 贯穿会话，envelope 含 run_id 区分 turn；turn 级串行
+    （currentRun 运行中禁发，D-002@v3）。
+- `TurnTimeline`（`turn-timeline.tsx`）：消息流渲染。类型 `SessionTurnView` /
+  `SessionUiStatus`（idle/creating/active/ending/ended/failed/reconnecting 7 态）/
+  `TurnUiStatus`（pending/running/interrupting/completed/failed/killed 6 态）/
+  `SessionViewMode`（conversation|all）；复用 agent-log 的 renderers。
+- `SessionInputBar`（`session-input-bar.tsx`）：输入区。
+- `SessionListLayout`（`session-list-layout.tsx`）：公共会话列表（runtimes 弹窗与
+  ChangeSessionSection 共用）；调用方 fetch 后 map 成 `SessionListEntry`
+  （id/title/statusBadge/secondaryText/lastActiveAt）传入；`onDelete` 可选
+  （runtimes 传删除按钮、变更会话不传）；title 空回退 shortId。
+- `MachineCard`（`machine-card.tsx`）：受控手风琴机器卡（expanded 由 page 持有）；
+  usageByRuntime 由 page 注入（不在卡内拉用量）；展开体内嵌 RuntimeCard 网格；
+  内联 `ACTIVE_SESSION_STATUSES`（与 helpers 集合等值，因 allowed_paths 不能 import）。
+- `RuntimeCard`（`runtime-card.tsx`）+ `runtime-card-helpers.tsx`：运行时卡与视觉/格式
+  工具——`PROVIDER_TONES`（provider 色调三件套 dot/badge/panel）、`getStatusMeta`、
+  `getProviderLabel`、`ProviderBadge`、`AgentsList`、`VersionCell`、`RuntimeMeta`、
+  `UsageStat`、`buildSparkSeries`、`formatRelativeTime/formatTokens/formatCost/formatCache`、
+  `getCapabilityChips/getProtocol/getDisplayVersion`。
+- `RemoteFolderPicker`（`remote-folder-picker.tsx`）：远程目录浏览器。基于 daemon
+  `list_roots` + `list_dir` RPC；antd Tree loadData 懒加载（只显 dir 子项）+ 地址栏
+  手输路径「跳转」（先探 listDir 校验，失败红条 + 禁确认）；受控
+  open/onClose/onPick，树状态组件自管。
+- `session-log-sanitize.ts`：`sanitizeSessionLogContent` / `classifySessionLog` /
+  `isToolResultDenied` / `statusFromToolUseRaw`（→ ok|deny|running）/
+  `extractDialogQA`（问答卡数据提取，DialogQA/DialogOption）。
+- `runtime-session-helpers.tsx`：`shortId`（8+4 截短）/ `isActiveSession`
+  （`ACTIVE_SESSION_VIEW_STATUSES` = active/pending/reconnecting）/ `canResumeSession` /
+  `resumeDisabledTitle` / `logsToTurns`（历史日志按 run_id 分组转 SessionTurnView[]
+  预填 attach 面板）/ `InteractiveSessionChatSection` / `SessionHistoryView`
+  （遗留导出，dialog 重构后已不再用）。
 
 ## 关键逻辑
-- 会话分流（伪代码）：
+- 会话二态分流：
   ```
-  const active = restored ?? ordered.find(isActiveSession)
-  if (isActiveSession(session)) → InteractiveSessionChatSection（连 SSE + 轮询到 active）
-  else → SessionHistoryView（只读；canResumeSession 决定续聊按钮）
+  if (selected) → reopen(ended/failed) + attach：logsToTurns(logs) 预填 initialTurns
+  else          → idle 新建：createSession(首条消息) → injectSession(后续追问)
   ```
-- 历史预填：拉 logs → `logsToTurns(logs)` → 作为 `initialTurns` 传 attach 面板，再切 attach 建 SSE。
-- 续聊：History 区点续聊 → 走 attach 新会话流程（把历史 turn 带过去）。
+- turn 不变量：currentRunId 只指向 pending/running/interrupting turn，收到同 run 的
+  turn_completed 后清空；SSE 重连重复 boundary 按 run_id 幂等更新已有项不新增。
 
 ## 注意事项
-- `RuntimeSessionDialog` 必须由调用方绑 `key={runtime.id}`，否则切换 runtime 时旧会话/SSE 状态残留。
-- 活跃判定完全依赖 `isActiveSession`（基于 status 集合），新增会话状态要同步更新 `ACTIVE_SESSION_VIEW_STATUSES`。
-- attach 流程涉及 SSE 连接 + 轮询到 active 的竞态，改动需跑 `daemon/__tests__`（已有 runtime-session-dialog.test.tsx）。
-- `logsToTurns` 按 run_id 分组，跨 run 的日志会被拆成多个 turn，渲染时用 `shortId(runId)` 标识。
+- `isActiveSession` 判定完全依赖状态集合——新增会话状态须同步
+  `ACTIVE_SESSION_VIEW_STATUSES`；MachineCard 内联等值集合两处同步。
+- attach 流程涉及 SSE 连接 + 轮询到 active 的竞态，改动必须跑 `daemon/__tests__`
+  （interactive-session-panel×3 / runtime-session-dialog×3 / turn-timeline-session-input-bar /
+  session-list-layout / runtime-card×2 / machine-card / remote-folder-picker /
+  runtime-session-helpers / session-log-sanitize 等）。
+- 会话日志渲染前须经 session-log-sanitize 清洗分类，勿绕过直写渲染逻辑。
+- `runtime-session-helpers.tsx` 顶层 import 链含 next/navigation，测试须 mock
+  （runtime-session-helpers.test.tsx 头注释为证）。
+- SUPPORTED_SESSION_PROVIDERS = ["claude","codex"] 在 dialog 与 ChangeSessionSection
+  两处内联，扩展 provider 两处同步。
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
+
 <!-- MANUAL_NOTES_END -->

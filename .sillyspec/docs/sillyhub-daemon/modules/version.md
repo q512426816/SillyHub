@@ -2,49 +2,41 @@
 schema_version: 1
 doc_type: module-card
 module_id: version
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:10:13
+created_at: 2026-08-18 01:45:00
 ---
-# version
+
+# 版本号解析与校验（version）
 
 ## 定位
-semver 解析与最低版本校验的纯函数工具（Python `version.py` 1:1 迁移）。为 agent-detector 提供「解析 agent CLI 版本字符串 + 判断是否达最低要求」能力：探测到 provider 二进制后执行 `<bin> --version` 取 stdout，经 parseSemver 提取三元组，再用 checkMinVersion 与 MIN_VERSIONS 比较。零依赖（G-05，不引 semver 库）。
+semver 解析与最低版本校验的纯函数工具（`src/version.ts`，Python `version.py` 1:1 Node 迁移）。为 agent-detector（解析 `<bin> --version` 输出）与 preflight（sillyspec CLI 版本门控）提供「提取三元组 + 比最低线」能力。零依赖（G-05，不引 semver 库，手写 RegExp + 数值比较）。
 
 ## 契约摘要
 - `SemVerTuple`：`readonly [major, minor, patch]`。
-- `MIN_VERSIONS`：`{ claude:[2,0,0], codex:[0,100,0], copilot:[1,0,0] }`（仅 3 provider 有门槛）。
-- `parseSemver(raw?): SemVerTuple | null`：从任意字符串提取第一个 semver 三元组。
-- `formatSemver(tuple): string`：格式化为 "major.minor.patch"。
-- `checkMinVersion(provider, version): string | null`：低于最低版本返回警告文本，否则 null。
+- `MIN_VERSIONS`：`{ claude:[2,0,0], codex:[0,100,0], copilot:[1,0,0] }`——仅 3 个 provider 有门槛，其余无 entry 即无要求；新增版本限制在此加。
+- `parseSemver(raw?): SemVerTuple | null`——从任意字符串提取第一个 semver 三元组；null/空串/未匹配返回 null。
+- `formatSemver(tuple): string`——"major.minor.patch"；入参假定合法，不防御。
+- `checkMinVersion(provider, version): string | null`——低于最低线返回英文警告文本，否则 null。
 
 ## 关键逻辑
 ```
-// 模块级正则（避免每次编译）
-SEMVER_RE = /(\d+)\.(\d+)\.(\d+)/
-
-parseSemver(raw):
-  if !raw → null
-  m = SEMVER_RE.exec(raw)          // search 语义，非锚定，可处理前缀
-  if !m → null
-  return [Number(m[1]), Number(m[2]), Number(m[3])]
-
-checkMinVersion(provider, version):   // 三段短路（顺序对齐 Python）
-  minVer = MIN_VERSIONS[provider]      // 1) 无 entry → null（无要求）
-  if minVer === undefined → return null
-  parsed = parseSemver(version)        // 2) 无法解析 → null（不叠加噪声）
-  if parsed === null → return null
-  if parsed < minVer → return `${provider} version ${version} is below minimum required version ${formatSemver(minVer)}`
-  return null                          // 3) 达标
+SEMVER_RE = /(\d+)\.(\d+)\.(\d+)/   // 模块级常量，等价 Python re.search（无锚定）
+parseSemver: raw 空→null；exec 取首匹配→[Number×3]；未匹配→null
+checkMinVersion 三段短路:
+  MIN_VERSIONS 无 entry → null（无要求）
+  parseSemver 失败      → null（无法比较，不叠加噪声）
+  compareTuple(parsed, minVer) < 0 → `${provider} version ${version} is below minimum required version ${formatSemver(minVer)}`
 ```
 
 ## 注意事项
-- SEMVER_RE 不匹配 prerelease 后缀（如 `0.118.0-rc.1` → `(0,118,0)`），这是 Python 版既定行为，Node 严格保持一致。
-- search 语义（非 match）：可处理前导文本，如 "Claude Code 2.1.5" → [2,1,5]、"v2.0.0" → [2,0,0]。
+- search 语义（非锚定）：可处理前导文本，"Claude Code 2.1.5" → [2,1,5]、"v2.0.0" → [2,0,0]。
+- 正则不含 prerelease 捕获：`0.118.0-rc.1` 解析为 (0,118,0)，后缀被忽略——Python 版既定行为，Node 严格保持，勿"顺手修"。
 - 警告文本中的 version 用**原始字符串**（非 formatSemver 后），保留用户传入形态便于排查；文本格式与 Python f-string 逐字对齐。
-- MIN_VERSIONS 仅 3 provider 有门槛，其余 provider 无 entry 直接返回 null（无要求）；新增 provider 版本限制需在此添加。
-- 被 agent-detector 使用，也经 src/index.ts 重导出。
+- `compareTuple` 是内部函数不导出（字典序逐元素比较，对齐 Python tuple 比较语义）。
+- 与 daemon-version（DAEMON_VERSION 常量）是两个模块：本模块只做 semver 纯函数，不含 daemon 自身版本号。
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
+
 <!-- MANUAL_NOTES_END -->

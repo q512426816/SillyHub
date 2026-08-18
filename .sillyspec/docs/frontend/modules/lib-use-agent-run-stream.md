@@ -2,42 +2,59 @@
 schema_version: 1
 doc_type: module-card
 module_id: lib-use-agent-run-stream
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:01:57+08:00
+created_at: 2026-08-18 01:45:00
 ---
-# lib-use-agent-run-stream
+
+# 智能体运行流 hook（lib-use-agent-run-stream）
 
 ## 定位
-Agent Run SSE 客户端的 React 封装 hook（`frontend/src/lib/use-agent-run-stream.ts`，约 343 行）。统一收口运行日志、连接状态、权限审批卡片、用户输入控件的订阅与状态管理，替代各页面内联的 `connectBootstrapStream` 逻辑。是 daemon 面板与 agent 页面消费实时运行数据的标准入口。
+
+`AgentRunStreamClient`（lib-agent-stream）的 React 封装 hook：统一收口 agent run
+的 SSE 订阅、日志追加、权限审批卡片、pending_input 用户输入控件与 gate 实时态。
+替代各页面内联的 `connectBootstrapStream` 逻辑，是 daemon 面板与 agent 页消费
+实时运行数据的标准入口。设计依据：
+`.sillyspec/changes/2026-06-22-unify-agent-run-sse-hook/design.md` §7.1。
 
 ## 契约摘要
-- `useAgentRunStream(workspaceId, runId, isActive, onDone?): UseAgentRunStreamResult` — 主 hook。
-- `UseAgentRunStreamOptions`：`workspaceId` / `runId`（null 则不连）/ `isActive`（false 仅预取历史不连 SSE）/ `onDone(status)`。
-- `UseAgentRunStreamResult`：`logs`、`status`(AgentRunStatus|null)、`streaming`、`loading`、`error`、`perms`(权限请求列表)、`dismissPerm(requestId)`、`input`(AgentRunInputStream)、`clear()`。
-- `AgentRunInputStream`：`values` / `submitting` / `errors` / `replied`（按 logId 索引）+ `set(logId, value)` / `submit(logId)`，用 useMemo 稳定引用。
+
+- `useAgentRunStream(workspaceId, runId, { isActive, onDone? })`：
+  - `runId=null` → 不连接，保留上次 logs（无 enabled 选项，runId 即开关）。
+  - `isActive=false` → 只 prefetch 历史（`getAgentRunLogs`），不建 EventSource（D-001）。
+  - `isActive=true` → `client.connect(accessToken)`，底层先 prefetch 再建 SSE。
+- 返回 `{ logs; status; streaming; loading; error; perms; gateStatus;
+  dismissPerm; input; clear }`；`input` 为 `AgentRunInputStream`
+  `{ values; submitting; errors; replied; set; submit }`。
+- `onDone(status)` 在 done 事件触发，随后 hook 主动 disconnect。
 
 ## 关键逻辑
+
 ```
-useEffect([workspaceId, runId, isActive]):
-  if !runId: return no-op          # Guard 1
-  if !accessToken: setError; return  # Guard 2
-  cancelled = false; client = new AgentRunStreamClient(ws, runId)
-  注册 onStatusChange/onMessage(按 log_id 去重追加)/onPermissionRequest(按 request_id 去重)
-       /onPermissionResolved(dismissPerm)/onDone(白名单校验 status + setStreaming(false) + disconnect)
-  FR-07: getAgentRun → agent_session_id → fetchPendingDialogs → 合并 perms（恢复未答 dialog）
-  if !isActive: getAgentRunLogs 预取历史 → setLogs; return   # D-001 不连 SSE
-  client.connect(token)
-  cleanup: cancelled=true; client.disconnect()
+effect: runId guard → token guard（缺失 setError 不连）
+  → new AgentRunStreamClient → 注册 5 回调
+  → FR-07: getAgentRun → agent_session_id → fetchPendingDialogs 恢复未答 dialog
+  → isActive ? connect : 仅 getAgentRunLogs
+cleanup: cancelled=true + disconnect（cancelled flag 防卸载后写 state）
 ```
 
 ## 注意事项
-- `isActive=false` 时（D-001）只预取历史日志不建 EventSource，但 FR-07 的 dialog 恢复仍执行（askuser pending 的 run 可能因轮询延迟误判为 inactive，仍需展示审批卡片让用户作答）。
-- dialog 恢复必须用 `agent_session_id`（AgentSession 表 id），非 `session_id`（daemon 内部 id），否则 `fetchPendingDialogs` 查不到。
-- done 事件的 status 是裸 string，按 `AGENT_RUN_STATUSES` 白名单校验后再入库，防后端脏值污染（P3.2）；`setStreaming(false)` 显式置位不依赖 disconnect 间接链路（P2.2）。
-- `cancelled` flag 防 StrictMode 双调用与卸载后异步写 state；`input` 用 useMemo 稳定引用避免子组件 memo 失效（P2.3）。
-- 权限决策 API 由审批卡片自调（D-003），`dismissPerm` 仅本地移除 perms 列表。
+
+- **done 事件 status 白名单**（pending/running/completed/failed/killed）过滤后端
+  脏值再入库（P3.2）；done 时显式 `setStreaming(false)`，不依赖 disconnect 链路。
+- `dismissPerm` 仅本地移除 perms；审批决策 API 由权限卡片自调（D-003），
+  `permission_resolved` SSE 事件与卡片 onResolved 双路收敛到同一 dismiss。
+- dialog 恢复用的是 `agent_session_id`（AgentSession 表 id），**不是** daemon 内部
+  session_id——查错表恢复不出卡片；且无论 isActive 与否都执行（askuser pending 的
+  run 可能 isActive=false，走 REST 不依赖 SSE）。
+- 实时 log 带子代理归属透传（parent_tool_use_id/subagent_type/depth，历史与主
+  agent 为 null），viewer 据此渲染徽标+缩进。
+- `input` 用 useMemo 稳定引用，避免 AgentRunPanel 每帧拿新对象失效 memo；
+  切 runId 时调用方应手动 `clear()`。
+- 消费方：components-daemon（RuntimeSessionDialog 等）+ workspace agent 页；
+  单测 `lib/__tests__/use-agent-run-stream.test.ts`。
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
+
 <!-- MANUAL_NOTES_END -->

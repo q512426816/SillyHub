@@ -71,3 +71,24 @@ backend 业务模块（`app/modules/<域>/`）除 `model.py` 单数命名外，�
 - **service 在请求处理函数内实例化、注入 session**（非模块级单例）：router 里 `async def handler(session: SessionDep, ...): svc = IncidentService(session); ...`。保证异步会话隔离，别在模块级 `svc = XService(...)`。
 - **数据模型必须继承 `app.models/base.py` 的 `BaseModel`**（`class BaseModel(SQLModel): pass`，文件注释明示 "Inherit from this — not SQLModel"），写成 `class Foo(BaseModel, table=True)`。绕过它直接继承 `SQLModel` 会脱离共享 metadata 对象（Alembic autogenerate 扫的是 `BaseModel` 的 metadata），导致迁移漏表。
 - **领域错误继承 `app/core/errors.py` 的 `AppError`**（带类属性 `code` / `http_status`，可经 `__init__` 实例级覆盖），子类**按事件命名**（`IncidentNotFound` / `LlmProviderNotFound` / `PlanNotFound`），**不带 `Error` 后缀**——这正是 ruff `N818` 被显式关闭的原因。全局异常处理器按 `AppError` → HTTP 映射，业务 service 抛 `AppError` 子类而非裸 `HTTPException`。
+
+## 前端 SSE 消费统一 fetch-sse：token 走 Authorization header，禁用 EventSource
+
+frontend 所有 SSE / 流式消费统一走 `frontend/src/lib/fetch-sse.ts`（fetch + ReadableStream 实现的 EventSource 替代品），**禁止新代码用浏览器原生 EventSource**：
+
+- **动机（安全）**：EventSource 无法自定义请求头，token 只能拼 URL query，会被访问日志明文记录；fetch-sse 把 token 放 Authorization header（backend auth_deps 已 header-only，不认 query token）。
+- 接口形状贴齐 EventSource（onopen/onmessage/onerror/addEventListener/readyState/close），从 EventSource 迁移只改构造方式。
+- **SSE 一律走 fetch-sse + Next route handler 透传**（`frontend/src/app/api/**/stream/route.ts`）；页面直连后端流式端点会被 Next 代理缓冲，route handler 是唯一合法流式出口，且 handler 自带鉴权。
+- 新增流式功能（agent-run 流 / daemon 会话 / 导入进度等）复用 fetch-sse，勿再新写裸 EventSource 或散写 fetch+ReadableStream 解析。样板：`frontend/src/lib/agent-stream.ts`、`frontend/src/lib/daemon.ts`。
+
+## Tailwind md: 是视口断点非容器断点：侧栏内嵌组件禁用响应式前缀
+
+Tailwind 的 `md:` / `lg:` 等前缀按**浏览器视口**宽度生效，与组件所在容器的实际宽度无关：
+
+- 桌面视口下，即使组件被塞进 320px 侧栏/折叠卡，`md:grid-cols-2` 仍强制两栏把内容挤崩。已两次踩坑（change-detail-layout-rework + ql-20260811-002：侧栏折叠卡内嵌 md: 两栏文件树/会话区挤崩，最终改宽 Dialog 承载）。
+- 规范：**容器内布局决策不用视口断点前缀**；侧栏里的宽内容改用宽 Dialog（radix Portal 脱离侧栏容器，max-w 可放开）承载，参照 `frontend/src/components/changes/detail/` 的做法。
+- 该认知已固化进代码注释与测试标题（`frontend/src/components/changes/detail/change-sessions-card.tsx:20`、`__tests__/quicklog-drawer.test.tsx:81`），review 时把侧栏内嵌组件里的 `md:` 前缀当坏味道拦。
+
+## 模块卡片 H1 用中文名（module-id）
+
+平台（SillyHub）文档列表按 markdown 首个 H1 提取 title 展示（backend scan_docs parser._extract_title）。模块卡片 H1 必须写「# 中文短名（module-id）」全角括号格式（如 `# 变更中心（change）`），不能只写英文 module-id——否则平台文档列表显示一墙英文代号不可读。scan 文档/flows/术语表同理用中文标题。墓碑卡中文名带「已删除」标记。2026-08-18 ql-20260818-003 补齐 200 张卡片时确立。

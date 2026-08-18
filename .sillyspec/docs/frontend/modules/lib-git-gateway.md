@@ -2,38 +2,34 @@
 schema_version: 1
 doc_type: module-card
 module_id: lib-git-gateway
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:02:25
+created_at: 2026-08-18 01:45:00
 ---
-# lib-git-gateway
+
+# Git 操作网关·已删除（lib-git-gateway）
 
 ## 定位
-worktree 租约域的"Git 操作代理网关"前端客户端。在已获取的 worktree 租约内执行受控 git 命令（如 status/add/commit/push 等），由后端在隔离工作树中代为执行并返回脱敏输出。对应 `/api/worktrees/{leaseId}/git`。
+**墓碑卡（tombstone）**：本模块的源文件已删除，卡片仅记录删除事实与语义去向，供排查与索引清理用。
+
+- 删除事件：commit `cbde5217`（2026-07-24，「chore: 清理全仓死代码(backend/frontend/daemon)」），`frontend/src/lib/git-gateway.ts`（23 行）作为整文件死代码删除；同批删除的还有 frontend 的 `worktree.ts` / `tool-gateway.ts` 两个无人调用的 lib。
+- 删除前形态：单函数 `executeGitOperation(leaseId, input)`，POST `/api/worktrees/{leaseId}/git`——在已获取的 worktree 租约内执行受控 git 命令，返回 `result_code` 与脱敏输出 `redacted_output`。
+- 删除依据：全仓无页面/组件/模块引用（used_by 为空，frontend/src 全量 grep `executeGitOperation|git-gateway` 零命中）；删除时 backend 2940 passed / frontend vitest 全过，纯删除无行为/API 变更。
 
 ## 契约摘要
-| 函数 | 语义 | HTTP |
-|---|---|---|
-| `executeGitOperation(leaseId, input)` | 在指定租约内执行一条 git 命令 | POST `/api/worktrees/{leaseId}/git` |
-
-类型：
-- `GitOperationRequest`：`{ operation: string; args?: string[] }`。
-- `GitOperationResponse`：`{ id; operation; result_code; redacted_output; timestamp }`。
+当前为空模块：无源文件、无导出、无调用方。`_module-map.yaml` 仍将其列为 active 属**死条目**，status/paths 待下次 scan 清理。
 
 ## 关键逻辑
-```
-入参 operation 为 git 子命令名（如 "status"），args 为参数数组
-后端执行后返回 result_code 与 redacted_output（已脱敏，过滤密钥/敏感路径）
-```
+（已删除，无逻辑可记。）
 
 ## 注意事项
-- 必须先通过 `lib-worktree` 拿到有效 `leaseId`，本模块不创建租约。
-- 输出字段名是 `redacted_output`，后端已做敏感信息脱敏，前端直接展示即可。
-- `result_code` 为 0 通常表示成功，非 0 为 git 命令失败码。
-- 该网关与 `lib-tool-gateway` 结构对称（同样挂在 worktree 租约下）。
-- `_module-map` 标注 used_by 为空，目前无页面直接调用，多为 Agent 后端内部链路使用。
-- 仅依赖 `lib-api`。
+- **语义去向：纯删除、无后继**。前端不存在任何「在 worktree 租约内执行 git 命令」的入口；git 相关的活代码只有 `lib/git-identities.ts`（身份凭据管理，独立端点 `/api/git/*`，后端 schema 在 `backend/app/modules/git`，与租约域无关）。
+- 同批删除的 `worktree.ts` / `tool-gateway.ts` 至今未恢复（2026-08-18 glob 仍不存在）；`_module-map.yaml` 对 lib-worktree / lib-tool-gateway / 本模块三者的 active 标记均为死条目，待 scan 清理。
+- 后端 `/api/worktrees/{leaseId}/git` 端点当前是否存在未核实；若要恢复「受控 git 操作网关」能力应按新需求重新立项，不要按旧卡描述 resurrect 本文件。
+- 排查 `/api/worktrees/{leaseId}/git` 调用链时：前端侧已断开，勿在本模块找调用点。
+- git log 快速定位：`git log --diff-filter=D -- frontend/src/lib/git-gateway.ts` 唯一命中 `cbde5217`。
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
+
 <!-- MANUAL_NOTES_END -->

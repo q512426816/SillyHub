@@ -2,44 +2,38 @@
 schema_version: 1
 doc_type: module-card
 module_id: lib-worktree
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:02:25
+created_at: 2026-08-18 01:45:00
 ---
-# lib-worktree
+
+# worktree 租约·已删除（lib-worktree）
 
 ## 定位
-Git worktree（工作树）租约管理的前端 API 客户端。worktree 是 Agent 运行时的隔离工作副本，通过租约（lease）机制串起"申请—使用—续期—释放"的生命周期，避免并发冲突。是 `lib-git-gateway`/`lib-tool-gateway` 的前置依赖。
+**墓碑卡（死条目）**。`frontend/src/lib/worktree.ts`（60 行的 worktree 租约前端客户端：acquireWorktree / listWorktrees / getWorktree / releaseWorktree / extendWorktree）已于 2026-07-24 commit cbde5217「chore: 清理全仓死代码(backend/frontend/daemon)」整文件删除——同批删除的还有 backend worktree service、前端 lib/tool-gateway.ts 与 lib/git-gateway.ts。删除原因：前端零调用方（used_by 为空），worktree 生命周期由 Agent 后端链路内部管理。_module-map.yaml 中 lib-worktree 仍标 `status: active` 属于扫描残留，下次 scan 应剔除。
 
 ## 契约摘要
-| 函数 | 语义 | HTTP |
-|---|---|---|
-| `acquireWorktree(workspaceId, input)` | 申请一个 worktree 租约 | POST `/api/workspaces/{ws}/worktrees/acquire` |
-| `listWorktrees(workspaceId)` | 列出工作空间的租约 | GET `/api/workspaces/{ws}/worktrees` |
-| `getWorktree(leaseId)` | 取单个租约详情 | GET `/api/worktrees/{leaseId}` |
-| `releaseWorktree(leaseId)` | 释放租约 | POST `/api/worktrees/{leaseId}/release` |
-| `extendWorktree(leaseId, input)` | 延长租约有效期 | POST `/api/worktrees/{leaseId}/extend` |
-
-类型：
-- `WorktreeAcquireRequest`：`component_id?/change_id?/task_id?/git_identity_id?/ttl_seconds?`（用于绑定租约归属与存活时长）。
-- `WorktreeLeaseRead`：`id/workspace_id/component_id/change_id/task_id/user_id/run_id/git_identity_id/path/branch_name/status/locked_at/released_at/expires_at`。
-- `WorktreeLeaseList`：`{ items; total }`。
-- `WorktreeExtendRequest`：`{ additional_seconds }`。
+无。源文件不存在，全部导出符号（acquireWorktree / listWorktrees / getWorktree / releaseWorktree / extendWorktree / WorktreeAcquireRequest / WorktreeLeaseRead 等）在 frontend/src 零命中。
 
 ## 关键逻辑
 ```
-acquire 时通过 component_id/change_id/task_id 绑定上下文，后端据此选分支/路径
-租约有 expires_at，到期前需 extend 续期，否则后端自动回收
-release 显式释放，置 released_at 并改 status
+（无实现代码）
+残留痕迹：api-types.ts 仍含后端 worktree 端点的生成类型
+  /api/workspaces/{ws}/worktrees/acquire、/api/worktrees/{lease_id}(/release|/extend)
+——后端端点仍在 OpenAPI 中，前端无任何调用方
 ```
 
 ## 注意事项
-- 两套 URL 前缀：acquire/list 带 workspaceId（`/api/workspaces/{ws}/worktrees`），get/release/extend 只用 leaseId（`/api/worktrees/{leaseId}`）。
-- `branch_name`/`path` 由后端生成，前端只读。
-- `run_id` 关联触发该租约的 Agent 运行；`git_identity_id` 关联提交身份。
-- `_module-map` 标注 used_by 为空，主要为 Agent 后端链路使用。
-- 仅依赖 `lib-api`。
+- 引用本模块前先看此卡：不存在可 import 的代码，直接 import `@/lib/worktree` 会编译失败。
+- api-types.ts 里的 worktree operations 类型是 gen:types 从后端 OpenAPI 生成的**被动产物**，不代表前端有客户端；不要据此误判模块存活。
+- 若未来需要前端管理 worktree 租约（如租约可视化/手动释放），应重写客户端并复活本卡，而非引用死符号。
+- 同批死亡的 lib-tool-gateway / lib-git-gateway（`git cat-file -e` 同样不存在于 HEAD），其卡片由其它代理负责，此处仅记录事实供交叉核对。
+- 复核命令（Windows Git Bash）：
+  - 存在性：`git cat-file -e HEAD:frontend/src/lib/worktree.ts` → 失败即确认死亡。
+  - 死亡记录：`git show cbde5217 --stat | grep worktree` → `frontend/src/lib/worktree.ts | 60 -`（2026-07-24）。
+  - 前端零调用：grep `acquireWorktree|listWorktrees|releaseWorktree|extendWorktree` 在 frontend/src 仅 api-types.ts（生成类型）命中。
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
+
 <!-- MANUAL_NOTES_END -->

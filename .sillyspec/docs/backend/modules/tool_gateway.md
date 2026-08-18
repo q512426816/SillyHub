@@ -2,50 +2,73 @@
 schema_version: 1
 doc_type: module-card
 module_id: tool_gateway
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:09:00
+created_at: 2026-08-18 01:45:00
 ---
-# tool_gateway
+
+# 工具调用网关（tool_gateway）
 
 ## 定位
-工具操作网关，为 agent 在 worktree lease 内执行工具调用提供统一校验/执行/审计入口。两层架构：`ToolGatewayService`（执行）+ `ToolPolicyService`（无状态策略）。支持 7 类工具（file_read/write/list/search、shell_exec、run_tests、http_get），每次操作双写审计（ToolOperationLog + workflow.AuditLog）。
+
+agent 在 worktree lease 内执行工具调用的统一校验/执行/审计网关。三层：`ToolGatewayService`
+（执行编排）、`ToolPolicyService`（无状态策略校验 + SSRF 原语）、policy CRUD（ToolPolicy
+表管理）。审批流为 V1 stub。`assert_public_hostname` 被 core/ssrf.py 复用为全仓 SSRF
+原语（llm_provider 等经它做外联校验）。
 
 ## 契约摘要
-- `POST /api/workspaces/{workspace_id}/tools`（或 `/worktrees/{lease_id}/tools`）— 执行工具操作
-- `GET .../approvals/pending` / `GET .../approvals/history` — 审批列表（V1 stub，返回空）
-- `POST .../approvals/{req_id}/approve` / `reject` — 审批（V1 stub）
-- 策略 CRUD（policy_router）：`POST/GET/PATCH/DELETE /api/workspaces/{ws_id}/tool-policies[/{pid}]`
-- `ToolGatewayService.execute/_dispatch/_handle_file_*/_handle_shell_exec/_handle_run_tests/_handle_http_get`
-- `ToolPolicyService.check/apply_limits`；`validate_path/validate_shell_command` 沙箱校验
+
+- `POST /api/worktrees/{lease_id}/tools` —— 执行工具（7 类：file_read / file_write /
+  file_list / file_search / shell_exec / run_tests / http_get）
+- `GET .../workspaces/{wid}/approvals/pending` / `history` —— **stub 返回空数组**
+- `POST .../approvals/{request_id}/approve` / `reject` —— **stub no-op**，直接返回
+  假状态（完整审批流 pending V2）
+- policy CRUD（policy_router.py）：`/api/workspaces/{wid}/tool-policies[/{pid}]`，
+  WORKSPACE_ADMIN 权限；表 `tool_policies`（(workspace_id, name) 唯一；allowed_tools /
+  blocked_commands / allowed_paths / allowed_domains JSON；max_timeout / max_output_size）
+- 每次执行双写：`ToolOperationLog`（业务日志）+ workflow `AuditLog`（action=
+  `tool:{type}`）
+- `SsrfBlocked`（AppError）—— 私网/解析失败时抛
 
 ## 关键逻辑
+
 ```
-execute(workspace, user, lease_id, task_id, tool_type, params):
-  lease, task = _get_lease_and_task(lease_id, task_id)
-  policy = load_policy(workspace)
-  ToolPolicyService.check(policy, tool_type, params)     # 白名单/黑名单/SSRF
-  limits = ToolPolicyService.apply_limits(policy, tool_type)
-  result = _dispatch(tool_type, params, lease, limits)   # 路由到 handler
-  insert ToolOperationLog(...)                            # 操作日志
-  insert AuditLog(...)                                    # 审计（双写）
-  commit; return result
+execute(lease_id, user, tool_type, params):
+  lease 存在 + 属本人 + status=="locked"（否则 404/403）
+  policy = default_policy()        # 现状：router 不传 → 恒默认宽松策略
+  await asyncio.to_thread(check)   # SSRF 的 DNS 解析移线程池，不阻塞事件循环
+  limits = apply_limits(policy); result = _dispatch(...)  # 路由到 7 个 handler
+  输出超限截断 → 双写 op_log + AuditLog → commit
 ```
+
+## 关键逻辑补充
+
+- policy check 四连：tool 白名单 → shell 命令黑名单（`SHELL_BLOCKED_PATTERNS` 正则拦
+  sudo / rm -rf / mkfs / dd / nc / shutdown 等）→ 域名白名单 → SSRF 私网检查
+  （`_PRIVATE_NETWORKS` 网段字面量 + `assert_public_hostname` DNS 解析复核，防
+  域名指向内网）
+- http_get 手动逐跳重定向 ≤3 跳（`_MAX_REDIRECT_HOPS`），每跳 `assert_public_url`
+  复查，封堵重定向绕过
+- 子进程隔离（ql-20260808-001）：shell_exec / run_tests 经
+  `ExecEnvBuilder.build_env_vars` 构造最小 env（HOME/GIT_* + OS 非密白名单），绝不
+  继承宿主 os.environ；http_get 用 httpx 不起子进程
+- file 类 handler 走 `validate_path` 强制 target 落在 lease_root 内（沙箱越界 403）
+- run_tests 支持 pytest / go_test，输出解析为结构化 JSON
 
 ## 注意事项
-- **用户可见错误文案中文（2026-08-15-error-message-l10n）**：本模块面向前端用户的 raise message 已全部中文化（中文短语+行动指引，技术 ID 在 details）；守护测试 tests/core/test_error_message_l10n.py 强制新文案含 CJK。
-- 策略引擎为无状态静态方法，策略对象由调用方传入，便于测试
-- 路径沙箱 `validate_path` 强制 target 在 lease_root 内；shell 黑名单正则拦 sudo/rm -rf/mkfs/dd
-- SSRF 防护始终启用：即使 `allowed_domains` 为空也检查私有 IP（防 DNS rebinding）
-- `MAX_OUTPUT_SIZE = 64_000`，超长输出截断；shell 超时硬上限 120s（`asyncio.wait_for`）
-- `run_tests` 支持 pytest / go_test，pytest 输出解析为结构化 JSON；`http_get` 用 httpx，最大重定向 3 次
-- 无策略关联时用 `default_policy()`（非持久化，宽松默认）
-- 策略名同 workspace 内唯一（`ux_tool_policy_workspace_name`）；V1 审批端点为 stub 返回空
-- **子进程环境隔离（2026-08-08 安全加固）**：`shell_exec`/`run_tests` 原 `create_subprocess_exec` 不传 `env=`（默认继承父进程全部 `os.environ`，宿主主密钥泄漏）。现 `execute` 经 `_build_isolated_env(lease)`（= `ExecEnvBuilder.build_env_vars(lease.path)`）构造最小隔离 env，经 `_dispatch` 透传给两个子进程 handler 的 `create_subprocess_exec(env=...)`；`http_get` 用 httpx 不起子进程不传 env
+
+- **策略未接线（如实认知）**：execute 端点不加载 workspace 的 ToolPolicy 行，恒用
+  `default_policy()`（非持久化宽松默认）——policy CRUD 建的行目前不参与执行路径，
+  接线是待办；接线时应改为按 workspace/agent 加载持久化策略
+- **审批是 stub**：pending/history 恒空、approve/reject 无副作用，前端不要把假状态当
+  真审批结果
+- 错误文案已中文化（error-message-l10n），守护测试强制新 raise 含 CJK
+- `MAX_OUTPUT_SIZE = 64_000` 截断；`DEFAULT_TIMEOUT = 30s`
+- ToolPolicyService 是纯静态方法集（无 DB 状态），策略对象由调用方传入，测试友好
+- core/ssrf.py → `assert_public_hostname` 的依赖方向是 core 依赖本模块（历史原语所
+  在地），动签名须同步 ssrf.py 与 llm_provider 探活
 
 ## 人工备注
-<!-- MANUAL_NOTES_START -->
-<!-- MANUAL_NOTES_END -->
 
-## 变更索引
-- ql-20260808-001-4068 | shell_exec/run_tests 子进程透传 build_env_vars 最小隔离 env（原默认继承全部 os.environ，堵主密钥泄漏）
+<!-- MANUAL_NOTES_START -->
+
+<!-- MANUAL_NOTES_END -->

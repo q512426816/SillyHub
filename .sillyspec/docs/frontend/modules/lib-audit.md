@@ -2,39 +2,33 @@
 schema_version: 1
 doc_type: module-card
 module_id: lib-audit
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:02:25
+created_at: 2026-08-18 01:45:00
 ---
-# lib-audit
+
+# 工作区审计客户端（lib-audit）
 
 ## 定位
-工作空间级"审计日志"前端只读 API 客户端。仅暴露一个查询入口，供审计页展示工作空间内的操作流水。对应后端 `/api/workspaces/{id}/audit`（注意：是 workspace 域，非全局 `/api/audit`）。
+工作空间级审计日志前端只读 API 客户端（`frontend/src/lib/audit.ts`，21 行）。单一只读查询入口，供 `/workspaces/[id]/audit` 页展示操作流水。注意是 workspace 域（`/api/workspaces/{id}/audit`），非全局审计（全局另有 `lib-admin.listUserAudit` 与 `lib-daemon-audit` 策略审计）。
 
 ## 契约摘要
-| 函数 | 语义 | HTTP |
-|---|---|---|
-| `listAuditLogs(workspaceId, params?)` | 分页/过滤查询审计日志 | GET `/api/workspaces/{ws}/audit[?resource_type=&limit=]` |
-
-参数 `params`：可选 `resource_type`（按资源类型过滤）、`limit`（条数上限）。返回 `AuditLogEntry[]`。
-
-`AuditLogEntry` 接口字段由后端决定（resource_type/action/actor/timestamp 等审计通用字段，具体见后端）。
+- `listAuditLogs(workspaceId, params?)` → GET `/api/workspaces/{ws}/audit[?resource_type=&limit=]`，返回 `AuditLogEntry[]`。
+  - `params.resource_type?` — 按资源类型过滤（取值与后端枚举对齐：workspace/change/task/release 等）。
+  - `params.limit?` — 条数上限，未传由后端默认值控制。
+- `AuditLogEntry = components["schemas"]["AuditLogEntry"]` — 直接复用 OpenAPI 生成类型。
 
 ## 关键逻辑
 ```
-用 URLSearchParams 拼 query：
-  有 resource_type → set("resource_type", v)
-  有 limit        → set("limit", String(v))
-qs 非空才追加 ?，避免产生空 query
+用 URLSearchParams 拼 query：有值才 set；qs 非空才追加 ?，避免空 query
 ```
 
 ## 注意事项
-- 该模块极简，单一只读端点，无写入/更新。
-- `resource_type` 取值与后端枚举对齐（如 workspace/change/task/release 等），UI 文案映射见 `lib-utils` 的 `AUDIT_RESOURCE_TYPE_LABELS`。
-- `limit` 未传时由后端默认值控制。
-- 必须传 workspaceId，不支持全局审计（全局审计另有 admin 模块）。
-- 仅依赖 `lib-api`。
+- `details_json` 后端是 JSON **字符串**（Text 列），生成类型为 `string | null`——曾手写误标 `Record<string, unknown> | null` 导致前端二次序列化，迁移生成类型时已修正；UI 若要结构化展示需自行 `JSON.parse` 并容错。
+- 极简模块：单一端点、无写入、无缓存，仅依赖 `lib-api`。
+- 必须传 workspaceId，不支持全局查询。
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
+
 <!-- MANUAL_NOTES_END -->

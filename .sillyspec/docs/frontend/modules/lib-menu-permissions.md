@@ -2,46 +2,53 @@
 schema_version: 1
 doc_type: module-card
 module_id: lib-menu-permissions
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:02:04
+created_at: 2026-08-18 01:45:00
 ---
-# lib-menu-permissions
+
+# 菜单权限数据源（lib-menu-permissions）
 
 ## 定位
-菜单与权限的声明式数据源（静态常量）。集中定义平台侧边栏/导航的菜单分组、每个菜单命中需要的后端权限 key、所属 section 与展示顺序，作为 `lib-permission` 判定可见性、`app-layouts` 渲染菜单、`components-permissions` 角色权限选择器的唯一真相来源。无运行时逻辑，纯数据导出。
+菜单按权限驱动显隐的**单一声明式数据源**（`frontend/src/lib/menu-permissions.ts`，静态常量，无运行时逻辑）。定义侧边栏菜单分组（section → 菜单项）、每项可见所需的后端权限 key、路由与高亮匹配，作为 `lib-permission` 判定、app-shell 渲染、AdminRolePermissionPicker 配置的唯一真相来源。sidebar-menu-restructure 变更后为 6 section 新结构（约 29 个菜单项）。
 
 ## 契约摘要
-- `MENU_PERMISSION_GROUPS: MenuPermissionGroup[]` — 全部菜单分组（约 20 项），每项含 `section` / `label` / `href` / `permissions: PermissionItem[]`（每项 `{key, name}`）。任一权限命中即菜单可见。
-- `MENU_SECTION_ORDER: MenuSection[]` — section 渲染顺序（overview / management / admin / system / ppm 等）。
-- `MENU_SECTION_LABEL: Record<MenuSection, string>` — section 中文展示名。
-- 类型：`PermissionItem`（`key` 必须命中后端 Permission 枚举）、`MenuPermissionGroup`（含可选 `hiddenInPicker` 等控制 AdminRolePermissionPicker 是否渲染该卡片，`canSeeMenu` 仍按 permissions 判断）。
+- `MENU_PERMISSION_GROUPS: MenuPermissionGroup[]` — 全部菜单项，每项字段：
+  - `section`（六值之一）/ `menuKey`（唯一 key，关联 nav 折叠与 picker）/ `menuLabel`（中文）/ `href` + `absolute`（relative 时拼 workspace 前缀）/ `matchPattern?`（active 高亮，沿用 NavItem 语义）/ `icon`（emoji，**无渲染消费者**，历史遗留）/ `permissions: PermissionItem[]`（任一命中即可见；**空数组 = 登录即可见**）。
+  - `pickerHidden?` — 与其他菜单共享权限时 Picker 不渲染该卡片（canSeeMenu 仍判断）。
+  - `navHidden?` — 二级页面不在侧边栏渲染（路由仍可达、active 匹配保留），如 ppm 项目成员/里程碑明细。
+- `MENU_SECTION_ORDER` — 渲染顺序：workspace → agent → config → governance → ppm → system。
+- `MENU_SECTION_LABEL` — section 中文标题（工作区/智能体/配置中心/协作治理/系统管理/项目管理）。
+- 类型 `PermissionItem`（key/name/description?）：key 必须命中后端 Permission 枚举（`backend/app/modules/auth/permissions.py`）。
 
-覆盖的 section 与典型菜单：overview（工作区/组件/拓扑/变更/扫描文档/运行时/知识/发布）、management（Git 身份/API 密钥/Agent/Missions/审批/审计/事件）、admin（用户/组织/角色）、system（运行时管理/平台设置）、ppm（项目/客户/… 对接 `ppm:*` 权限）。
+各 section 构成：
+- **workspace**（8 项）：工作区首页（/workspaces，absolute）、组件、拓扑、变更中心、扫描文档、运行时、知识&日志、发布。
+  - 子菜单均有独立 read 权限（component:read / topology:read / scan-docs:read / knowledge:read 等），不共用 workspace:read。
+- **agent**（6 项）：智能体控制台、Agent 团队（missions）、技能管理、MCP 管理、智能体档案、智能体会话。
+  - 技能管理 / 智能体档案 / 智能体会话为 `permissions: []`（登录即可见）——分别来自 custom-skill-per-user D-003、agent-profile-ui-redesign、sessions-portal 变更。
+  - 技能管理另带 pickerHidden（无独立权限可配）；MCP 管理要求 settings:admin。
+- **config**（4 项）：我的供应商（llm_provider:read，sidebar-menu-restructure 新增）、API 密钥（api_key:admin）、Git 身份（git_identity:admin）、守护进程运行时（runtime:admin，自 system 移入，D-006）。
+- **governance**（3 项）：审批中心（task:approve / change:approve）、审计中心（platform:audit:read）、事件（incident:read）。
+- **system**（4 项）：用户、组织、角色（/admin/*）、设置（settings:admin）。
+- **ppm**（14 项）：全部 absolute 指向 /ppm/*，每菜单独立专属 key（ppm:workbench:view / ppm:project:read / ppm:kanban:view / ppm:weekly-plan:view 等）。
+  - 项目成员、里程碑明细带 navHidden（二级页面，由父页跳转进入）。
+  - 菜单权限为前端可见性语义；后端 plan 域仅认证不授权（get_current_principal + DataScope）。
 
 ## 关键逻辑
 ```
-// 单条声明样例
-{
-  section: "admin",
-  label: "用户管理",
-  href: "/admin/users",
-  permissions: [
-    { key: "user:read", name: "用户查看" },
-    { key: "user:write", name: "用户编辑" },
-    { key: "user:login:manage", name: "登录权限管理" },
-  ],
-}
-// 消费方：lib-permission.canSeeMenu(user, group)
-//        → 任一 permissions[].key 命中 user.permissions 即可见
+声明样例（登录即可见型）:
+{ section: "agent", menuKey: "skills", href: "/settings/skills", absolute: true,
+  permissions: [], pickerHidden: true }
+→ canSeeMenu 经 hasAnyPermission(空 perms, user 非 null) = true
 ```
 
 ## 注意事项
-- `PermissionItem.key` 必须严格对齐后端 `Permission` 枚举（`backend/app/modules/auth/permissions.py`，约 46 个值）；写错 key 会导致该菜单永远不可见。
-- 部分管理类菜单（Git 身份/API 密钥/运行时管理/平台设置）要求单一 admin 权限（`git_identity:admin` / `api_key:admin` / `runtime:admin` / `settings:admin`），平台超管自动通过。
-- 改菜单结构（新增/移 section、调 href）需同步检查：`lib-permission` 判定、`app-layouts` 渲染、相关页面路由是否存在。
-- PPM section 的 `ppm:*` 权限由后端 task 产出，命中即整组可见，前端不做子菜单细粒度控制。
+- `icon` 字段经排查（sidebar-menu-restructure task-04）在 app-shell/picker/permission 均无消费者，新增菜单可填占位 emoji。
+- 写错权限 key = 该菜单永远不可见；改菜单结构需同步 `lib-permission` 判定、app-shell 渲染（MENU_ICON_MAP 按 href）、页面路由三处。
+- 空权限菜单（skills/agent-profiles/sessions）语义依赖 `lib-permission.hasAnyPermission` 的「空 = 登录即可见」分支，两文件耦合改动须一起评审。
+- 管理类菜单多为单一 admin 权限（api_key:admin / git_identity:admin / runtime:admin / settings:admin），平台超管自动通过。
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
+
 <!-- MANUAL_NOTES_END -->

@@ -2,49 +2,50 @@
 schema_version: 1
 doc_type: module-card
 module_id: client
-source_commit: 9656307c
 author: qinyi
-created_at: 2026-06-24T01:10:13
+created_at: 2026-08-18 01:45:00
 ---
-# client
+
+# 平台 REST 瘦客户端（client）
 
 ## 定位
-daemon ↔ SillyHub backend 的 REST HTTP 客户端（`hub-client.ts`）。基于 Node 20 原生 fetch（零 HTTP 库依赖），覆盖 runtime 生命周期（register/heartbeat/markOffline）、lease 生命周期（claim/start/leaseHeartbeat/submitMessages/complete）、WS 断线兜底（getPendingLeases）、spec 同步（getSpecBundle/postSpecSync）、session 恢复（recoverSession/confirmReconnected/markRecoveryFailed）、执行上下文拉取（getExecutionContext）。WebSocket 不在此类（归 ws-client）。1:1 迁移自 Python `client.py`。
+daemon ↔ SillyHub backend 的 REST 瘦客户端（hub-client.ts）。Node 20 原生 fetch（零 HTTP 库依赖），每次请求独立调用（无连接池）、不缓存 lease 状态、不内置重试（失败即抛，重试归 ResilienceService）。WebSocket 通信不在此类（归 ws-client）。daemon 几乎所有模块对 backend 的 HTTP 面都经它。
 
 ## 契约摘要
-- `HubClient(serverUrl, authOrToken?)`：构造器去尾斜杠、存鉴权信息。
-- `HubClientAuth`：`{ type: 'bearer'|'api-key', token }` 或裸 token 字符串。
-- `HubHttpError`：包装非 2xx 响应（status + body）。
-- runtime：`register(params)`、`heartbeat(runtimeId)`、`markOffline(runtimeId)`。
-- lease：`claimLease`、`startLease(leaseId, claimToken)`、`leaseHeartbeat`、`submitMessages`、`completeLease`、`getPendingLeases(runtimeId)`（唯一 GET）。
-- session：`notifyRunResult`、`notifySessionEnd`、`recoverSession`、`confirmReconnected`、`markRecoveryFailed`。
-- 其他：`syncStatus`、`getExecutionContext(agentRunId)`、`getSpecBundle(wsId): Buffer`、`postSpecSync`。
-- mission 派 worker：`dispatchWorker(workspaceId, missionId, { objective, ..., worktree_path?, branch?, worker_prompt? })`（2026-08-08-dispatch-worker-caller-worktree）：三参 optional 透传 backend；`undefined` 不写入 body（守卫风格）→ backend `None` → 走原 team 模式自建 worktree / `render_worker_prompt`（零回归）。链路A daemon stdio 与链路B public gateway schema 同构（D-009）。
-- `close()`：no-op（fetch 无连接池，仅 API 兼容）。
+- `HubClient(serverUrl, authOrToken?)`：serverUrl 去尾斜杠；authOrToken 为旧式裸 token 字符串或 `{ token?, apiKey? }`。`close()` 为 no-op（仅 API 兼容）。
+- 鉴权 `_headers()`：apiKey 优先（X-API-Key，长期凭证）> token（Authorization: Bearer，浏览器短期 JWT）；都缺不带鉴权头。
+- `HubHttpError(status, bodyText, url, method)`：非 2xx 时抛出；网络错误/超时**不包装**，透传 fetch 原始 TypeError/DOMException（调用方需区分超时 vs 业务错误）。
+- 方法面（按业务域）：
+  - runtime 生命周期：`register`（daemon_local_id + 机器字段 + providers + version/build_id，内部自动填 DAEMON_VERSION/BUILD_ID/started_at）、`heartbeat`、`markOffline`。
+  - lease 生命周期：`claimLease` / `startLease` / `leaseHeartbeat` / `submitMessages`（message 顶层可带 dedup_key 幂等）/ `completeLease` / `getPendingLeases`（唯一 GET，WS 断线兜底）。
+  - interactive：`notifyRunResult`（可带 ModelError）/ `notifySessionEnd` / `notifySessionReady` / `recoverSession` / `confirmReconnected` / `markRecoveryFailed`（后三者靠实例内 sessionId→runtimeId 映射补 runtime_id）。
+  - spec 同步：`syncStatus` / `getSpecBundle`（tar 二进制，单独 fetch + arrayBuffer）/ `postSpecSync`（二进制上传）/ `postSpecSyncIncremental`（FileOp[] 增量，返回 SpecIncrementalSyncResult：conflict=true 时 HTTP 仍 200，由 daemon 侧提示人工拍板）。
+  - change write：`getPendingChangeWrites` / `claimChangeWrite` / `completeChangeWrite` / `reportChangeWriteProgress`。
+  - 团队 MCP：`dispatchWorker` / `getWorkerResult` / `listWorkers` / `convergeMission` / `reportProgress`。
+  - 其他：`getExecutionContext`（按 run 拉执行上下文）。
+- 模块级导出：`fetchMcpWhitelist(serverUrl, token)`（拉平台 MCP 白名单，失败返 null 不抛）、`extractCause(err)`（压平 undici cause 链）、`parseJsonFromResponse`（BOM-safe JSON 解析）。
 
 ## 关键逻辑
-```
-// 所有请求统一前缀 REST_PREFIX、统一 30s 超时、统一鉴权头
-headers = this._authHeaders()              // Bearer 或 X-API-Key，或无
-resp = await fetch(`${base}${REST_PREFIX}/...`, {
-  method, headers, body: JSON.stringify(payload),
-  signal: AbortSignal.timeout(30_000),
-})
-if (!resp.ok) throw new HubHttpError(resp.status, body)
-return resp.json()
-// trust_env=False 等价：Node fetch 默认不读 HTTP_PROXY
+```text
+_request(method, path, body?, timeoutMs?):
+  resp = fetch(`${baseUrl}${REST_PREFIX}${path}`, { method,
+          headers: _headers(), body: JSON.stringify(body),
+          signal: AbortSignal.timeout(timeoutMs ?? 30_000) })
+  !resp.ok → 读全文抛 HubHttpError；ok → parseJsonFromResponse
+  # trust_env=False 等价：Node fetch 默认不读 HTTP_PROXY，无需配置
+# getSpecBundle/postSpecSync/postSpecSyncIncremental 单独放宽 timeoutMs = 300_000
 ```
 
 ## 注意事项
-- body 字段全部 snake_case（runtime_id/claim_token/agent_run_id）对齐 backend Pydantic，改字段名会直接 422。
-- `dispatchWorker` 的字段名 `branch`（非 `worktree_branch`）是跨仓契约（D-009，对齐 backend DispatchWorkerRequest / mcp_gateway tools.py / sillyspec probe）；改字段名会打破 sillyspec path-a probe 探测缓存（`isPathASupported` 读 dispatch_worker inputSchema）。
-- 30s 超时来自 Python httpx，改超时需评估长任务接口（getSpecBundle 可能较大）。
-- `getSpecBundle` 返回 Buffer（tar 包），不走 JSON 解析路径。
-- `getExecutionContext` 按 server 端 `_user_owns_run` 做归属校验，跨 user 访问 → 403。
-- close() 无实际作用但保留（cli/daemon 调用链期望显式释放），勿删。
-- fetch 默认不读系统代理，与 Python `trust_env=False` 天然等价，无需额外配置。
+- body 字段全部 snake_case 对齐 backend Pydantic（runtime_id / claim_token / agent_run_id 等），改字段名直接 422。
+- 超时双轨：默认 30s（对齐 Python httpx）；spec 同步上传三方法 300s（全量 tar apply 实测 69s+，30s 必 AbortSignal 假失败——服务端实际成功而 daemon 标 failed）。
+- 二进制方法（getSpecBundle 收 / postSpecSync 发）不走 `_request`（它 JSON.stringify body），各自单独 fetch。
+- `FileOp.content` 为 base64；`mtime`（ms）可携带宿主真实修改时间，backend 落 source_mtime。
+- getExecutionContext 按服务端归属校验，跨 user 访问 403。
+- recoverSession 系列的 runtime_id 补齐依赖 daemon 活着期间的内存映射（重启即重建），confirm/markFailed 调用后映射条目删除（一次性）。
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
-<!-- MANUAL_NOTES_END -->
 - ql-20260816-002：`postSpecSync`（tar 上传）与 `postSpecSyncIncremental`（增量 ops 含 base64 内容）超时独立放宽到 300s——新增 `SPEC_SYNC_TIMEOUT_MS=300_000` 常量；`_request` 加可选 `timeoutMs` 参数（默认仍 `DEFAULT_TIMEOUT_MS=30s`，对齐 Python）。根因：全量 tar apply 实测 69~93s > 30s，30s 必 AbortSignal 假失败（服务端实际 200 成功）。
+<!-- MANUAL_NOTES_END -->

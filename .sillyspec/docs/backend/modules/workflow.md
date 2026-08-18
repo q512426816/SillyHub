@@ -2,49 +2,69 @@
 schema_version: 1
 doc_type: module-card
 module_id: workflow
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:09:00
+created_at: 2026-08-18 01:45:00
 ---
-# workflow
+
+# 任务流转与审计（workflow）
 
 ## 定位
-变更（change）与任务（task）的状态机门禁中枢。负责流转合法性校验（FSM）、spec guardian 质量门（文档齐全/组件存在/无未决驳回）、以及全程审计（ChangeReview + AuditLog）。是变更从 draft→merged 全生命周期的唯一推进通道。
+
+任务 FSM 流转 + 变更评审读取 + 平台审计日志底座。含两块表基础设施：`ChangeReview`
+（评审裁决）与 `AuditLog`（append-only 审计，全仓手工审计 + ORM hooks 双写管道的落
+点）。`spec_guardian` 是变更阶段前置门禁规则的实现，**当前无生产调用方**。
 
 ## 契约摘要
-- `POST /api/workspaces/{workspace_id}/workflow/changes/{id}/transition` — 流转 change 到 target 状态
-- `POST .../workflow/changes/{id}/review` — 提交评审意见（approve/reject/changes_requested）
-- `GET .../workflow/changes/{id}/reviews` — 列评审记录
-- `GET .../workflow/changes/{id}/audit-logs` — 列审计日志
-- `POST .../workflow/tasks/{id}/transition` — 流转 task
-- `WorkflowService.transition_change/transition_task/submit_review/list_reviews/list_audit_logs`
-- `run_guard(session, change, target)` → `list[str]`（违规清单，空则放行）
-- `FSM`（fsm.py）通用状态机；`CHANGE_TRANSITIONS`/`TASK_TRANSITIONS` 定义迁移图
+
+- `POST /api/workspaces/{wid}/tasks/{task_id}/transition` —— 任务状态流转（body 带
+  target；FSM 校验 + 审计）
+- `GET /api/workspaces/{wid}/changes/{cid}/reviews` —— 评审记录列表（按时间升序）
+- `GET /api/workspaces/{wid}/audit` —— 审计日志（resource_type 过滤 + 倒序 limit，
+  默认 100）
+- `WorkflowService`：transition_task / list_reviews / list_audit_logs
+- `FSM`（fsm.py）：邻接表通用状态机（can_transition / validate_transition，非法流转
+  抛 `TransitionError` 409，文案中文化）；`TASK_TRANSITIONS` 定义
+  draft→ready→in_progress→review→done，in_progress↔blocked，ready/in_progress/blocked
+  →cancelled，done/cancelled 终态
+- 表 `change_reviews`：change_id + reviewer_id FK CASCADE、verdict（approve/reject）、
+  comment
+- 表 `audit_logs`：workspace_id / actor_id 可空（删时 SET NULL）、action（≤100）、
+  resource_type / resource_id（非空**无 FK**）、details_json、timestamp
 
 ## 关键逻辑
+
 ```
-transition_change(workspace, change_id, user, target):
-  change = _get_change(...)
-  cur = StageEnum(change.current_stage or 'draft')
-  tgt = StageEnum(target)
-  if not can_transition(cur, tgt): raise InvalidTransition
-  violations = await run_guard(session, change, target)   # guardian 检查文档/组件/驳回
-  if violations: raise InvalidTransition(violations)
-  change.status = change.current_stage = target
-  change.human_gate = resolve_human_gate(target)
-  _record_audit(action='change.transition', from=prev, to=target)
-  commit; return change, prev
+transition_task(workspace_id, task_id, user, target):
+  task = _get_task(...)            # workspace 归属校验
+  TaskFSM.validate_transition(task.status, target)   # 违规 → 409
+  task.status = target; _record_audit("task.transition", {from, to})
+  commit; return (task, previous)
 ```
+
+- spec_guardian（spec_guardian.py）：`_GUARD_RULES` 按 `(current, target)` 元组注册
+  变更阶段前置检查——draft→proposed 需 master 文档、proposed→reviewed 需 proposal、
+  reviewed→approved 需全部现有文档词数 ≥100（G4）、approved→in_progress 需 plan 文档
+  + 无未决 reject（G7）；`run_guard` 查表执行，未注册的流转返回空
+- AuditLog 是全仓审计底座：core `register_audit_hooks` 挂 ORM hooks 自动写 UUID PK
+  表；非 UUID PK / 特殊路径（settings、auth 登录等）走手工插行。action 常量集中定义
+  在本模块 model（`AUTH_LOGIN_*` / `PLATFORM_SETTING_*`，D-005，service 层禁内联字面
+  量）；`AUDIT_PLACEHOLDER_ID`（全零 UUID）供无具体资源场景
 
 ## 注意事项
-- 状态源以 `change.current_stage` 为准（非 `status`），流转同时更新二者保持一致；`status` 为兼容字段
-- guardian 规则在 `spec_guardian._GUARD_RULES` 按 `(from, to)` 元组注册，新增门禁加一条 entry
-- `ChangeFSM` 已废弃（`__getattr__` 抛 DeprecationWarning），新代码用 `StageEnum + TRANSITIONS`
-- 每次流转必写 AuditLog（action=`change.transition`/`task.transition`），admin.organizations_service 也写本表
-- `human_gate` 由 `resolve_human_gate(target)` 推导，决定该阶段是否需人工评审
-- Spec Guardian 仅对 change 生效，task 流转无 guardian 检查
-- reject 评审会自动尝试转入 rejected 状态（若 FSM 允许），任何有审批权者可单方面 reject
+
+- **spec_guardian 无生产调用方**：`run_guard` 仅被本模块测试引用；变更阶段实际推进
+  由 change 模块（形态A 按需触发）+ platform_sync 进度同步控制——guardian 规则若要
+  生效需在 change 流转路径显式接线
+- change 的阶段流转已不经过本模块（旧 transition_change 链路已不存在），本模块对外
+  仅剩任务流转 + 两个读端点 + 审计底座
+- AuditLog 的 resource_id 无 FK 且非空：无实体场景必须用 AUDIT_PLACEHOLDER_ID，勿造
+  随机 UUID
+- 审计 action 新增须先在 model 加常量再引用（守护测试拦内联字面量）
+- ChangeReview 目前只有写入方在 change/审批链路，本模块仅提供读；verdict 取值
+  approve/reject
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
+
 <!-- MANUAL_NOTES_END -->

@@ -2,98 +2,79 @@
 schema_version: 1
 doc_type: module-card
 module_id: frontend_app
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:16:36
+created_at: 2026-08-18 01:45:00
 ---
-# frontend_app
+
+# 前端页面路由层（frontend_app）
 
 ## 定位
-SillyHub 前端的 Next.js 14 App Router 页面路由层。定义所有页面与布局结构，用 RSC + Client Component 混合模式。是产品功能的「页面骨架」：按路由组 `(auth)` / `(dashboard)` 组织，dashboard 下承载 workspaces / settings / runtimes / admin / ppm 五大产品域页面，每页组合 frontend_lib 取数 + frontend_components 渲染。
-
-产品视角：这是用户接触 SillyHub 的入口。登录后进入 dashboard，左侧导航按产品域分组（主平台 vs ppm 隔离），主区渲染对应页面。workspaces 是核心（详情页聚合 spec/变更/任务/agent/审批/审计），runtimes 管理 daemon 会话，settings/admin 是运维台，ppm 是独立项目管理系统。布局层做认证守卫，未登录跳登录页。
+SillyHub 前端的 Next.js App Router 页面路由层（frontend/src/app/** + middleware.ts）。只做「路由骨架 + 布局守卫 + SSE 透传」，业务取数下沉 frontend_lib、可复用 UI 下沉 frontend_components。产品视角是用户入口：登录 → dashboard，桌面与移动（/m/）双形态，服务端按 UA 自动分流。
 
 ## 契约摘要
-- 路由组：
-  - `(auth)/login` 登录页（无认证守卫）
-  - `(dashboard)/{workspaces,settings,runtimes,admin,ppm}` 五大产品域
-  - `api/` Next.js route handler（agent 日志 SSE / quick-chat SSE 透传，60s 回退 GET 兜底）
-- workspaces 子路由：列表 / `[id]` 详情 / scan-docs / components / topology / changes / create-change / changes/`[cid]` / tasks / `[tid]` / agent / approvals / audit / runtime / incidents / knowledge / releases
-- 布局：`layout.tsx`（RootLayout，Server Component，lang=zh-CN + 全局 CSS + AntdProviders + metadata）→ `(dashboard)/layout.tsx`（Client Component，认证守卫 + AppShell）
-- 页面动态路由：`[id]` / `[cid]` / `[tid]` / `[iid]`
-- 依赖：`frontend_components`（AppShell 等）、`frontend_lib`（取数）、`frontend_stores`（useSession）
-- 跨组件协作：每页组合 lib 取数 + components 渲染；runtimes 卡片管理 daemon 会话；runtimes 可写目录「浏览」用 `RemoteFolderPicker`（list_roots+list_dir 懒加载目录树，替代旧 browseFolder 系统弹窗，2026-07-09-remote-folder-picker）；ppm 作为独立入口 redirect 到 /ppm/projects
+- 根级装配：`layout.tsx`（RootLayout，lang=zh-CN + suppressHydrationWarning + 全局 CSS + AntdProviders + AppProviders）、`error.tsx` / `global-error.tsx` / `loading.tsx`、首页 `page.tsx`。
+- 桌面路由组：
+  - `(auth)/login` — 登录页（无 dashboard 守卫）
+  - `(dashboard)/workspaces` — 工作区列表（选择器页）+ `[id]` 详情
+  - `(dashboard)/runtimes` — daemon 运行时管理（列表 + `[id]` 详情/审计）
+  - `(dashboard)/sessions` — 智能体会话总入口（平台级跨工作区，两栏布局）
+  - `(dashboard)/agent-profiles` — 智能体档案全局页（跨工作区聚合，独立一级菜单）
+  - `(dashboard)/settings` / `admin` / `account` / `ppm` — 设置 / 管理台 / 个人中心 / 独立项目管理系统（/ppm redirect 到 /ppm/projects）
+- `workspaces/[id]/` 嵌套布局（含 layout.tsx + error.tsx），子路由按域分组：
+  - 执行与产物：`agent`（agent 控制台）、`missions`、`runtime`（阶段进度/产出物）、`sessions`
+  - 变更域：`changes`（列表+详情）、`approvals`、`audit`
+  - spec 域：`components`、`scan-docs`、`knowledge`、`skills`
+  - 平台配置：`agent-profiles`、`members`、`mcp`、`mcp-tokens`、`files`、`incidents`、`releases`
+- 移动端 `m/`：`login` / `account` / `workspaces`（列表）
+  - `ppm/{workbench, project-plans, milestone-details, task-plans, problem-list}` — ppm 移动五页。
+- `app/api/` 三个 SSE 透传 route handler（防 Next.js 代理缓冲）：
+  - `api/daemon/sessions/[sessionId]/stream` — 交互会话事件流
+  - `api/daemon-chat/[runId]/stream` — quick-chat 流
+  - `api/workspaces/[workspaceId]/agent/runs/[runId]/stream` — workspace 维度 agent run 日志流
+- `middleware.ts`：移动设备分流——轻量 UA 正则判「手机」，服务端 rewrite 到 /m/（地址栏 URL 不变、无首屏 FOUC）。
 
 ## 关键逻辑
-认证守卫（`(dashboard)/layout.tsx`）：
+`(dashboard)/layout.tsx` 三层客户端守卫：
 ```
-const { hydrated, accessToken } = useSession()
-if (!hydrated) return null              // 等 persist rehydrate 避免闪烁
-if (!accessToken) router.replace("/login")
-return <AppShell>{children}</AppShell>
+1. 登录守卫: !hydrated → return null（等 persist rehydrate）；
+   !accessToken → replace("/login")
+2. fetchMe() best-effort（失败静默，交由后续 API 调用处理）
+3. 工作区守卫（CB-3 顺序不能反）:
+   先判 /^\/workspaces\/[^/]+/（有 wsId 一律放行）
+   → 再判 WORKSPACE_WHITELIST 前缀（/workspaces /admin /settings
+     /ppm /runtimes /account /agent-profiles /sessions，精确或带 / 前缀）
+   → 其余依赖工作区但无 wsId → replace("/workspaces")
 ```
-- 页面内调 `lib/*` 取数 → 组合 components 渲染
-- ppm 与主平台菜单隔离：AppShell 按 `usePathname()` 过滤 section
-- 列表页统一模式：PageContainer size=full + PageHeader + SectionCard + grid-cols-4 查询条件 + antd Table（bordered/scroll y calc(100vh-430px)/showTotal/showSizeChanger）+ 服务端分页 + searchNonce 兜底搜索
-- 导出 Excel 走 lib downloadExcel（含 401 自动刷新）
-
-### 页面模式约定
-dashboard 页面遵循统一模式：
-- 容器：PageContainer size=full + PageHeader + SectionCard(bodyPadding=p-2)
-- 查询：grid-cols-4 垂直 Field，选择型 onChange 即查、文本型回车提交，searchNonce 兜底
-- 表格：antd Table bordered + scroll y calc(100vh-430px) + showTotal + showSizeChanger，服务端分页
-- 按钮：顶部右对齐 ui Button（搜索 primary/重置 outline/分隔/导出 outline/新建 primary）
-- 操作列：width 具体数字或 max-content + whitespace-nowrap + fixed=right
+middleware 移动分流（纯函数，不读 cookie）：
+```
+UA 空/异常 → false（默认桌面）→ 先排平板（明文 ipad / Android 无 Mobile）
+→ 再匹手机（iphone / android+mobile / windows phone / blackberry）
+仅 /ppm/*、/workspaces/*、/login 命中 rewrite；matcher 天然排除 /api、/_next、静态资源
+```
+sessions 页（会话总入口）数据流：
+```
+左栏 SessionListPanel（筛选+虚拟滚动+紧凑两行条目）
+右两态: 未选 = NewSessionForm（四选择器）；选中 = TurnTimeline
+  + SessionInputBar + CtxUsageBar + SessionConfigBar
+历史 turn = 预取 getAgentSessionLogs → logsToTurns（防 SSE 订阅前丢事件）
+实时 turn = streamSession 单条 SSE（turn_started/log/turn_completed/tokens/
+  session_ended/permission_*）；发送 = injectSession
+whoLine: attach 时并发拉 listSessionRuns，按 realRunId??runId 匹配注入
+  profileName/providerName/agentName（llm_provider_id null = 本机默认）
+```
 
 ## 注意事项
-- `(dashboard)/layout.tsx` 在 `hydrated===false` 返回 null，等待 Zustand persist rehydrate
-- 根布局用 `suppressHydrationWarning` 避免暗色模式 class 水合警告
-- ppm 作为独立入口，`/ppm/page.tsx` redirect 到 `/ppm/projects`
-- SSE 流式接口（agent 日志 / quick-chat）经 `api/` route handler 透传后端避免缓冲
-- metadata title 为 "Multi-Agent Platform"
-- ppm 列表页统一默认查 20 条，page_size 上限 200 对齐后端
-- 查询条件文本输入型走 commitSearch/回车，选择型 onChange 即查（searchNonce 同帧合并）
-- 前端样式系统统一：Design Token 主色 #2563EB + antd ConfigProvider + shadcn 视觉组件 + 共享布局
-- runtimes 快速对话改用 SSE 流式（EventSource 订阅）
-- runtimes 页 daemon 安装命令（CopyDaemonCommand 的 `sillyhub-daemon start --server` + InstallDaemonBlock 的 `curl install.sh`）server-url 用 `window.location.origin`，前端 `next.config.mjs` rewrite 代理 `/api/*` 与 `/daemon/*` 到 backend，daemon 全程连前端地址（ql-20260713-002：旧逻辑硬编码 `:3001→:8001` 端口替换，部署端口不匹配时命令里的 server-url 错、`/daemon/*` 又没代理 → 前端 404）
-- antd DatePicker 字段 store 存 string、控件需 dayjs：Form.Item 必须有 name + getValueProps（string→dayjs value）+ normalize（dayjs→string store），无 name 时 Form 不接管、setFieldValue 不触发重渲染 → 选择不回显；InputNumber 返回 number，提交后端 str 字段必须运行时 String() 转换（TS `as string` 只是断言不转换值）——ql-20260713-005 修 ppm 里程碑明细/模块表单这两类问题
-- 跨多层子组件的列表刷新（主组件 reload 只刷自己 fetch 的数据，深层子表各自 reload 主组件触达不到）：主组件加 refreshTick state，提交成功 +1，子表加 key={`${id}-${refreshTick}`}，tick 变→子表重 mount→reload；副作用是子表展开/滚动状态丢失，但提交后刷新可接受——ql-20260713-006 里程碑明细提交刷新明细列表用此模式
-- workspaces/[id] 详情页含上一次 Bootstrap 运行结果摘要
-- 变更详情页文档实时刷新 + Gate 面板突出显示
-- agent 控制台日志区无 max-width 限制撑满主区
-- 页面动态路由 [id]/[cid]/[tid]/[iid] 经 useWorkspaceId 等 hook 取参
-- api/ route handler 透传 SSE，60s 回退 GET 兜底防连接断开
-- workspaces/[id] 含 Bootstrap 日志区（复用 AgentLogViewer 深色样式）
-- 变更列表 human_gate 状态列 + draft 兜底 + 类型颜色映射 + 影响组件标签
-- 用户/角色管理表格用 antd Table（columns + showSizeChanger + pageSizeOptions）
-- work-hour-statistics 聚合表+明细表 pagination 默认 20 条
-- plan-nodes 模板树形展开 pagination=false，无查询条件
-- milestone-details 主表 scroll 去 y 仅留 x，避免展开子表被切割
-- 页面统一 Design Token 主色 #2563EB，Inter 字体
-- RootLayout 设 lang=zh-CN + suppressHydrationWarning
-- DashboardLayout 用 useSession 做 SSR 安全的客户端守卫
-- api/ route handler 透传后端 SSE，避免 Next.js 缓冲
-- ppm/problem-list/problem-changes/task-plans 等列表页统一服务端分页模式
-- runtimes 页卡片含移除/会话按钮 + 运行环境信息
-- 登录页与主平台同色系（主色 #2563EB）
-- 页面取数在 Client Component 内 useEffect 或事件回调触发
-- antd Table 服务端分页 onChange 重查并回到对应页
-- 查询按钮点击即使条件未变也触发查询（searchNonce 兜底）
-- kanban 看板主体改为时间轴甘特图(自研 KanbanGantt/KanbanActualGantt + kanban-gantt-helpers 纯函数+14单测),纵轴人员多行泳道(贪心)+横轴日期+任务条形绝对定位(start→deadline/actual_start→end)+今天竖线/周末高亮,只读+点击详情,计划/实际两 tab;删除旧 KanbanMatrix/KanbanActualMatrix/kanban-actual-cell
-- kanban 外壳对齐 project-plans:PageContainer size=full h-full(px-6 py-6 边距)+PageHeader+SectionCard p-2(查询区);KanbanSearchBar 改 grid-cols-4 垂直 Field + 顶部按钮右对齐
-- scan-docs 文档树 SectionCard 内 TreeView 外层包 max-h-[calc(100vh-220px)] overflow-auto，文档多时内部滚动不撑长页面（偏移=TopBar h-14 + PageContainer py-6 + PageHeader + gap-4 + SectionCard header，对齐 admin/users 表格 calc(100vh-Npx) 思路但偏移更小）
+- 工作区守卫顺序不能反：`/workspaces/xxx` 若先被 `/workspaces` 白名单前缀吞掉会重定向循环（代码注释明确 CB-3）。
+- 新增平台级路由必须同步 `WORKSPACE_WHITELIST`——/agent-profiles、/sessions 都是事后补的（部署实测被守卫踢回选择器才发现）。
+- 平板（iPad/Android Tablet）一律走桌面；iPadOS 13+ 伪装 Macintosh 的 UA 无法可靠识别，只按明文 ipad 排除。
+- SSE route handler 是唯一合法流式出口，页面直连后端会被 Next 代理缓冲；三个 stream handler 均带鉴权（token 走 header，fetch-sse 实现）。
+- URL 是工作区上下文真相源：`[id]` 页经 hooks 取参，不依赖 store 持久值（store 仅缓存）。
+- 页面样式遵循 FRONTEND_PAGE_STYLE.md：PageContainer size=full + PageHeader + antd Table 服务端分页（bordered / scroll y calc(100vh-Npx) / showTotal / showSizeChanger）+ 查询区 grid-cols-4。
+- 移动页与桌面页是两套路由（m/ 镜像子集），新增桌面页若需移动形态要同步建 m/ 页 + middleware 白名单确认覆盖。
+- (dashboard)/layout 在 hydrated===false / 无 token 时 return null，避免守卫闪烁。
 
 ## 人工备注
-<!-- MANUAL_NOTES_START -->
-<!-- MANUAL_NOTES_END -->
 
-## 变更索引
-- ql-20260706-001-7b2e | runtimes/[id]/audit 审计页决策列(ALLOW/DENY)回显中文「放行/拒绝」(红绿 Tag)+ 原因列多行中文 reason 加 whitespace-pre-line 正常换行(原 span 把 daemon buildDenyReason 的 \n 多行长文压成一行)
-- ql-20260713-002-4c8a | runtimes 页 daemon 安装命令 server-url 改用 window.location.origin（去掉 :3001→:8001 硬编码端口替换）+ next.config rewrite 加 /daemon/:path* 代理到 backend，修复前端 3000 访问 /daemon/install.sh 404（部署端口不匹配 + /daemon 未代理双根因）
-- ql-20260713-005-c4a1 | ppm 里程碑明细 + 模块表单 plan_workload 提交转 String（后端 str，InputNumber 返回 number；原 `as string` 是 TS 断言不转换）+ 时间 DatePicker Form.Item 加 name/getValueProps/normalize 修复选择不回显（无 name 时 Form 不接管）
-- ql-20260713-006-2f8b | 里程碑明细新建 Drawer 加「提交」按钮（create/update + savePlanNodeDetailProcess 推进 draft→review）+ 提交/保存成功刷新明细列表（detailTick 子表 key 联动重 mount）
-- ql-20260713-007-a93e | 修 ql-006 遗留：footer「提交」按钮收窄到 create（edit 用 PlanDetailActions 提交审核，不再重复）+ handleSubmit 流程动作成功后 reload+setDetailTick 刷新
-- ql-20260713-008-3d7c | 新建明细空表单提交校验（task_theme/审核人/审批人 required）+ onAddDetail 清 detail 修复审核人回显上次编辑明细 UUID（setDrawer 部分更新 detail 残留）
-- ql-20260713-009-6e1a | 全局关闭里程碑明细审批流程：去审核/审批人字段 + PlanDetailActions（列表行+footer）+ 提交审核按钮 + submit autoSubmit；明细 create 后保持 draft，不走 review/approve（后端状态机保留，前端不触发审批流转）
-- ql-20260713-010-5b2d | 里程碑明细新建恢复「提交」按钮：提交=创建为正式(done，不走审核)，保存=草稿(draft)。backend schema Create 加 status 字段（create 走 ORM 直接建，传 status=done 绕过 fsm）+ frontend type + footer + submit autoSubmit 传 done
-- 2026-07-14-ppm-projects-style-redesign | globals.css 主题色 token 统一（--primary/--ring 蓝 221 83% 53%、--background 饱和度 20%→40%、--radius 0.375rem→0.5rem）
+<!-- MANUAL_NOTES_START -->
+
+<!-- MANUAL_NOTES_END -->

@@ -1,13 +1,12 @@
-# 模块映射（自动生成，可手动修改）
 # author: qinyi
-# 由 sillyspec-scan 全量扫描源码后覆盖生成
-# 用于 archive 阶段识别变更影响的模块
-
-schema_version: 1
+# created_at: 2026-08-18 01:25:00
+schema_version: 2
 project: SillyHub
-source_commit: 6e78b29a
-generated_at: 2026-08-15 10:25:00
+source_commit: 744e3de4
+generated_at: 2026-08-18 01:25:00
 generator: sillyspec-scan
+# 模块映射（自动生成，可手动修改）。粒度沿用 6e78b29a 基线（backend 特性模块 + frontend 分层 + daemon 双端合并）。
+# depends_on 由 backend/app 内 "from app.modules.<x>" / "from app.core" import 扫描核实；used_by 为其反向 + 前端 lib API 客户端对应。
 
 modules:
   # === Backend 核心基础设施 ===
@@ -20,18 +19,23 @@ modules:
     aliases: [infra, core-config]
     entrypoints: []
     main_symbols:
-      - core.config (Settings)
-      - core.db (get_session)
+      - core.config (Settings / get_settings)
+      - core.db (get_session / dispose_engine)
       - core.security (JWT/密码哈希)
-      - core.auth_deps (认证依赖)
-      - core.errors (AppError)
-      - core.audit_hooks
-      - core.crypto
+      - core.auth_deps (认证依赖 / require_permission)
+      - core.errors (AppError / register_exception_handlers)
+      - core.audit_hooks (register_audit_hooks)
+      - core.crypto (get_cipher)
       - core.redis
       - core.telemetry
+      - core.logging (configure_logging / get_logger)
+      - core.monitoring
+      - core.ssrf (SsrfBlocked / UnsafeRepoUrl / assert_public_url，security-backend-guardrails)
+      - core.permission_cache
+      - core.paths
       - core.spec_paths
     depends_on: []
-    used_by: [models, auth, agent, daemon, runtime, workflow, workspace, change, task, ppm, 全部业务模块]
+    used_by: [全部 backend 模块]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -45,9 +49,9 @@ modules:
     aliases: [base-models]
     entrypoints: []
     main_symbols:
-      - models.base (TimestampModel 基类)
-    depends_on: [core]
-    used_by: [agent, daemon, change, git_gateway, git_identity, incident, knowledge, release, settings, spec_workspace, task, tool_gateway, workspace, worktree, ppm, file, llm_provider, skills]
+      - models.base.BaseModel（应用基类；各特性模块 ORM 表定义在各 modules/<feature>/model.py 并继承它，Alembic 扫描共享 metadata）
+    depends_on: []
+    used_by: [agent, auth, change, git_gateway, git_identity, incident, release, scan_docs, settings, spec_profile, spec_workspace, task, tool_gateway, workflow, workspace, worktree, ppm, file, llm_provider, skills, admin, platform_sync, mcp_gateway, daemon]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -62,15 +66,19 @@ modules:
     aliases: [agent-run]
     entrypoints:
       - API tag=agent (POST /api/agent/runs, quick-chat, kill 等)
+      - APIRouter tags=agent-profiles (/api，profile.router，agent-profile 配置层)
     main_symbols:
       - agent.service.AgentService
       - agent.coordinator.ExecutionCoordinatorService
       - agent.execution.MissionExecutionService
       - agent.mission.MissionService
       - agent.control.MissionControlService
-      - agent.router
-    depends_on: [core, models, daemon, runtime, workspace, task, change, tool_gateway]
-    used_by: [daemon, workflow, frontend_components]
+      - agent.orchestrator / delegation / placement / borrow_resolver / context_builder / post_scan_validator
+      - agent.profile.AgentProfileService（AgentProfile 配置增强层，agent-profile-layer-decision）
+      - agent.skills_bundle_service / mcp_tools / adapters
+      - agent.router / agent.profile.router
+    depends_on: [core, models, auth, change, daemon, git_gateway, git_identity, llm_provider, mcp_gateway, skills, spec_profile, spec_workspace, storage, task, workspace, worktree]
+    used_by: [change, spec_workspace, workspace, mcp_gateway, daemon, frontend_app, frontend_components]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -86,12 +94,13 @@ modules:
       - APIRouter prefix=/auth (POST /api/auth/login, refresh, me)
       - APIRouter prefix=/auth (api-key 管理)
     main_symbols:
-      - auth.service (AuthService)
-      - auth.api_key_service (ApiKeyService)
+      - auth.service.AuthService
+      - auth.api_key_service.ApiKeyService
       - auth.permissions (Permission, PermissionGroup)
-      - auth.rbac
-    depends_on: [core, models]
-    used_by: [全部受保护端点, admin, workspace-members]
+      - auth.model.User
+      - auth.router
+    depends_on: [core, models, workflow]
+    used_by: [全部受保护端点与业务模块（backend 内除 storage/health/change_writer 外均 import）, frontend_app]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -108,33 +117,34 @@ modules:
     tags: [backend, daemon, runtime]
     aliases: [daemon-runtime, daemon-session]
     entrypoints:
-      - APIRouter prefix=/daemon (注册/心跳/session 端点)
-      - APIRouter prefix=/daemon (GET/PATCH/POST /api/daemon/machines 机器级聚合读+别名+self-update，2026-07-07-daemon-machine-runtime-hierarchy)
-      - APIRouter prefix=/daemon (ANY /api/daemon/llm-proxy/{path} LLM 网关透传，security-audit-remediation)
-      - WS /api/daemon/ws（升级期鉴权，无/坏凭据 close 4001、归属不匹配 close 4003，security-audit-remediation）
-      - sillyhub-daemon CLI (cli.ts: createProgram/start/stop/status/logs)
-      - Daemon class (sillyhub-daemon/src/daemon.ts)
+      - APIRouter prefix=/daemon (注册/心跳/session 端点，GET/PATCH /api/daemon/machines 机器级聚合读+别名)
+      - APIRouter prefix=/daemon tag=daemon-distribution (dist_router；无 /api 前缀无鉴权，/daemon/install.sh、/daemon/latest.json、/daemon/latest/sillyhub-daemon.js 单文件分发)
+      - APIRouter prefix=/daemon (ANY /api/daemon/llm-proxy/{path} LLM 网关透传，master key 不出进程，v1 路径白名单)
+      - WS /api/daemon/ws（升级期鉴权，无/坏凭据 close 4001、归属不匹配 close 4003）
+      - sillyhub-daemon CLI (src/cli.ts)
+      - sillyhub-daemon/src/daemon.ts (Daemon class)
     main_symbols:
       - daemon.service.DaemonService
-      - daemon.runtime.service.RuntimeService.list_machines/update_machine_alias/_get_owned_instance (机器级聚合读+写，2026-07-07-daemon-machine-runtime-hierarchy)
-      - daemon.lease_service (LeaseService)
+      - daemon.runtime.service.RuntimeService (list_machines / update_machine_alias)
+      - daemon.lease.service.LeaseService
+      - daemon.lease.provider_switch.notify_provider_switch（供应商热切换推送，DAEMON_MSG_PROVIDER_CONFIG_CHANGED）
+      - daemon.lease.context（lease 下发 litellm_proxy 标记+hub 代理地址，明文 token 不下发）
       - daemon.permission_service
-      - daemon.session.service.DaemonSessionService
-      - daemon.session.service.SessionReadiness（session ready 握手单例 mark_ready/wait/clear，inject 等 ready；2026-08-07-inject-wait-session-ready）
-      - daemon.ws_hub.WSHub
-      - daemon.protocol（含 PROVIDER_CONFIG_CHANGED WS 消息，2026-08-06-provider-switch-live-session）
-      - daemon.lease.provider_switch（notify_provider_switch 查 active session 按 daemon 分组推送，2026-08-06-provider-switch-live-session）
-      - daemon.router.llm_proxy（LLM 网关透传端点，master key 不出进程，v1 路径白名单）
-      - daemon.router._authenticate_bearer_headers/_authenticate_ws_upgrade（凭据自解析 helper，4001/4003 拒绝语义由调用方落地，security-audit-remediation）
-      - sillyhub-daemon: Daemon, RecoveryCoordinator, task-runner, hub-client, ws-client
-      - sillyhub-daemon/interactive（session 热切换 markPendingSwitch/reloadWithProvider resume，2026-08-06-provider-switch-live-session）
-    depends_on: [core, models, agent, runtime, worktree]
-    used_by: [agent, workflow, frontend_components]
+      - daemon.session.service.DaemonSessionService / SessionReadiness（mark_ready/wait/clear 握手单例）
+      - daemon.ws_hub.DaemonWsHub（get_daemon_ws_hub）
+      - daemon.protocol（WS 消息协议常量）
+      - daemon.router.llm_proxy / _authenticate_bearer_headers / _authenticate_ws_upgrade
+      - daemon.dist_router / change_write_router / host_fs / patch / reaper / run_sync / audit / model_error
+      - sillyhub-daemon: Daemon, task-runner, hub-client, ws-client, spec-sync.ts（spec manifest/apply_ops 增量同步）
+      - sillyhub-daemon/src/resilience.ResilienceService（Envelope/Outbox 重试提交，替代原 RecoveryCoordinator）
+      - sillyhub-daemon/src/interactive（claude-sdk-driver / codex-app-server-driver / session-manager / input-queue / permission-resolver，交互会话热切换）
+      - sillyhub-daemon/src/adapters（json-rpc / stream-json / ndjson / pi-json / text 协议适配）
+      - sillyhub-daemon/src/policy（filesystem-policy / runtime-policy / audit-sink）+ credential-injector / file-rpc / roots-rpc / host-fs-handler / mcp-server.ts
+    depends_on: [core, models, agent, auth, change, admin, git_gateway, llm_provider, mcp_gateway, platform_sync, settings, workspace]
+    used_by: [agent, change, change_writer, spec_workspace, workspace, mcp_gateway, frontend_app, frontend_components]
     needs_review: false
-    concerns: [交互式会话生命周期(2026-06-23-codex-interactive-session)]
+    concerns: []
     review_reasons: []
-
-  # archive 模块已于 decouple-scan 变更移除(目录 backend/app/modules/archive 已不存在)
 
   change:
     status: active
@@ -146,12 +156,14 @@ modules:
     entrypoints:
       - APIRouter prefix=/workspaces/{workspace_id} tag=change (变更 CRUD/解析/文档矩阵)
     main_symbols:
-      - change.service (ChangeService)
+      - change.service.ChangeService (含 CompleteStageResult / RerunStageResult)
       - change.parser (变更目录解析)
-      - change.dispatch
+      - change.projection（current_stage 进度投影，change-progress-projection / change-center-conversation-driven）
+      - change.quicklog_parser / quicklog_service
+      - change.dispatch（按需派发，auto_dispatch 已砍，change-center-on-demand）
       - change.router
-    depends_on: [core, models, workspace, change_writer]
-    used_by: [workflow, archive, change_writer, task]
+    depends_on: [core, agent, auth, daemon, knowledge, models, platform_sync, spec_workspace, workspace]
+    used_by: [agent, scan_docs, spec_workspace, task, tool_gateway, workflow, workspace, mcp_gateway, daemon, frontend_app]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -169,8 +181,8 @@ modules:
       - change_writer.service.ChangeWriterService
       - change_writer.markdown_builder
       - change_writer.router
-    depends_on: [core, models, change, workspace]
-    used_by: [change, workflow]
+    depends_on: [core, change, daemon, workspace, worktree]
+    used_by: []
     needs_review: false
     concerns: []
     review_reasons: []
@@ -185,11 +197,11 @@ modules:
     entrypoints:
       - API tag=git_gateway (POST /api/.../git 操作/日志)
     main_symbols:
-      - git_gateway.service (GitGatewayService)
+      - git_gateway.service.GitGatewayService
       - git_gateway.model.GitOperationLog
       - git_gateway.router
-    depends_on: [core, models, workspace, git_identity]
-    used_by: [worktree, agent]
+    depends_on: [core, auth, git_identity, models, worktree]
+    used_by: [agent, tool_gateway, daemon, frontend_app]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -209,8 +221,8 @@ modules:
       - git_identity.providers.base.GitProvider
       - git_identity.providers.github.GitHubProvider
       - git_identity.router
-    depends_on: [core, models, workspace]
-    used_by: [git_gateway, worktree]
+    depends_on: [core, auth, models]
+    used_by: [agent, git_gateway, worktree, frontend_app]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -228,7 +240,7 @@ modules:
       - health.router
       - health.schema
     depends_on: [core]
-    used_by: [frontend_app, daemon]
+    used_by: [frontend_app, daemon]  # HTTP 探活消费
     needs_review: false
     concerns: []
     review_reasons: []
@@ -246,8 +258,8 @@ modules:
       - incident.service.IncidentService
       - incident.model.Incident/Postmortem
       - incident.router
-    depends_on: [core, models]
-    used_by: [frontend_app]
+    depends_on: [core, auth, models, ppm, workspace]
+    used_by: [workspace, frontend_app]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -265,8 +277,8 @@ modules:
       - knowledge.service.KnowledgeService
       - knowledge.parser.KnowledgeParser
       - knowledge.router
-    depends_on: [core, models, workspace]
-    used_by: [archive, frontend_app]
+    depends_on: [core, auth, spec_workspace, workspace]
+    used_by: [change, frontend_app]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -284,8 +296,8 @@ modules:
       - release.service.ReleaseService
       - release.model.Release/ReleaseApproval
       - release.router
-    depends_on: [core, models, workspace]
-    used_by: [frontend_app, workflow]
+    depends_on: [core, auth, models, workspace]
+    used_by: [workspace, frontend_app]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -302,8 +314,8 @@ modules:
     main_symbols:
       - runtime.service.RuntimeService
       - runtime.router
-    depends_on: [core, models, workspace]
-    used_by: [daemon, agent, workflow, frontend_components]
+    depends_on: [core, auth, spec_workspace, workspace]
+    used_by: [frontend_app, frontend_components]  # lib/runtime.ts
     needs_review: false
     concerns: []
     review_reasons: []
@@ -318,11 +330,11 @@ modules:
     entrypoints:
       - APIRouter prefix=/workspaces/{workspace_id} tag=scan-docs (扫描文档 CRUD/重解析)
     main_symbols:
-      - scan_docs.service.ScanDocService
+      - scan_docs.service.ScanDocsService
       - scan_docs.parser (ParsedDoc/ParseWarning)
       - scan_docs.router
-    depends_on: [core, models, workspace]
-    used_by: [workspace, frontend_app]
+    depends_on: [core, auth, change, models, spec_workspace, workspace]
+    used_by: [frontend_app]  # lib/scan-docs.ts / scan-docs-tree.ts
     needs_review: false
     concerns: []
     review_reasons: []
@@ -335,13 +347,12 @@ modules:
     tags: [backend, settings, config]
     aliases: [platform-setting]
     entrypoints:
-      - API tag=settings (平台设置 CRUD/批量更新)
+      - APIRouter tags=settings (平台设置 CRUD，逻辑内联 router)
     main_symbols:
-      - settings.service.SettingsService
-      - settings.model.PlatformSetting
-      - settings.router
-    depends_on: [core, models]
-    used_by: [frontend_app]
+      - settings.model.PlatformSetting（存储复用 D-003）
+      - settings.router（CRUD 内联；service.py 仅向后兼容 re-export admin.users_service.UserService）
+    depends_on: [core, admin, auth, models, workflow]
+    used_by: [workspace, daemon, frontend_app]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -358,8 +369,9 @@ modules:
       - spec_profile.policy
       - spec_profile.provider
       - spec_profile.model
+      - spec_profile.schema
     depends_on: [core, models]
-    used_by: [spec_workspace]
+    used_by: [agent, spec_workspace]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -372,15 +384,15 @@ modules:
     tags: [backend, spec, workspace]
     aliases: [spec-sync]
     entrypoints:
-      - APIRouter tag=spec-workspace (获取/下载 bundle/import/sync/bootstrap/conflict)
+      - APIRouter tag=spec-workspace (获取/下载 bundle/import/sync/bootstrap/conflict；sync-incremental 增量端点 + apply_ops 软删备份 + 同 hash no-op 豁免)
     main_symbols:
       - spec_workspace.service.SpecWorkspaceService
       - spec_workspace.bootstrap
       - spec_workspace.validator
       - spec_workspace.model.SpecWorkspace
       - spec_workspace.router
-    depends_on: [core, models, workspace, spec_profile]
-    used_by: [frontend_app, daemon]
+    depends_on: [core, agent, auth, change, daemon, models, spec_profile, workflow, workspace]
+    used_by: [agent, change, knowledge, platform_sync, runtime, scan_docs, workspace, frontend_app]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -398,8 +410,8 @@ modules:
       - task.service.TaskService
       - task.parser (TaskParseWarning)
       - task.router
-    depends_on: [core, models, workspace, change]
-    used_by: [workflow, change, frontend_app]
+    depends_on: [core, auth, change, models, workspace]
+    used_by: [agent, tool_gateway, workspace, workflow, frontend_app]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -420,8 +432,8 @@ modules:
       - tool_gateway.model.ToolOperationLog
       - tool_gateway.policy_router
       - tool_gateway.router
-    depends_on: [core, models, workspace]
-    used_by: [agent, daemon]
+    depends_on: [core, auth, git_gateway, models, task, workflow, worktree]
+    used_by: [agent, llm_provider, mcp_gateway, frontend_app]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -438,10 +450,10 @@ modules:
     main_symbols:
       - workflow.service
       - workflow.fsm.FSM/TransitionError
-      - workflow.spec_guardian
+      - workflow.spec_guardian (check_change_ready_for_proposed / check_change_ready_for_reviewed)
       - workflow.router
-    depends_on: [core, models, change, task, release]
-    used_by: [frontend_app, change]
+    depends_on: [core, auth, change, models, task, workspace]
+    used_by: [auth, admin, settings, spec_workspace, tool_gateway, frontend_app]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -456,15 +468,19 @@ modules:
     entrypoints:
       - APIRouter prefix=/workspaces tag=workspace (scan/create/list/relations/topology)
       - members_router (workspace 成员管理)
+      - link_router tag=workspace-ppm-links (/api，PPM 项目绑定)
+      - member_runtimes.router (成员运行时视图)
     main_symbols:
       - workspace.service
-      - workspace.scanner
+      - workspace.scanner（reparse 单遍 scandir，windows-docker-bind-mount-stat-cliff）
       - workspace.topology
       - workspace.members_service
-      - workspace.relation_service
+      - workspace.link_service / link_router（PPM 项目链接）
+      - workspace.member_runtimes
+      - workspace.component_catalog_service / skills_view_service / parser
       - workspace.router
-    depends_on: [core, models, scan_docs, auth]
-    used_by: [change, task, knowledge, scan_docs, runtime, spec_workspace, worktree, agent, daemon, git_gateway, git_identity]
+    depends_on: [core, agent, auth, change, daemon, incident, models, ppm, release, settings, spec_workspace, task]
+    used_by: [agent, change, change_writer, admin, file, incident, knowledge, mcp_gateway, platform_sync, ppm, release, runtime, scan_docs, spec_workspace, task, tool_gateway, daemon, frontend_app]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -485,13 +501,12 @@ modules:
       - worktree.exec_env.ExecEnvBuilder
       - worktree.model.WorktreeLease
       - worktree.router
-    depends_on: [core, models, workspace, git_gateway, git_identity]
-    used_by: [agent, daemon]
+    depends_on: [core, auth, git_identity, models]
+    used_by: [agent, change_writer, git_gateway, tool_gateway]
     needs_review: false
     concerns: []
     review_reasons: []
 
-  # === Backend 新增模块（2026-07-27 重扫发现） ===
   storage:
     status: active
     doc: modules/storage.md
@@ -505,7 +520,7 @@ modules:
       - storage.factory（后端工厂）
       - storage.minio_backend.MinioBackend（S3/MinIO 实现，平台文件中心）
     depends_on: [core]
-    used_by: [file]
+    used_by: [agent, file, ppm]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -518,13 +533,13 @@ modules:
     tags: [backend, file, upload]
     aliases: [file-center, files]
     entrypoints:
-      - APIRouter tags=[file]（上传/下载/元数据/批量元数据）
+      - APIRouter tags=[file]  # 上传/下载/元数据/批量元数据
     main_symbols:
       - file.service.FileService（upload_file/get_meta/get_stream/batch_meta）
       - file.model.File
       - file.router
-    depends_on: [core, models, storage]
-    used_by: [agent, daemon, frontend_app]
+    depends_on: [core, auth, models, storage, workspace]
+    used_by: [ppm, frontend_app, frontend_components]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -537,14 +552,14 @@ modules:
     tags: [backend, llm, provider]
     aliases: [llm-providers, cc-switch]
     entrypoints:
-      - APIRouter prefix=/llm-providers tags=[llm_provider]（CRUD + 启停/set-default 返回 SetDefaultResult）
+      - APIRouter prefix=/llm-providers tags=[llm_provider]  # CRUD + 启停/set-default 返回 SetDefaultResult
     main_symbols:
       - llm_provider.service.LlmProviderService（list/get/create/update/delete/set_default/unset_default 热切换+凭证探测+回滚）
       - llm_provider.probe（probe_provider 凭证探测）
       - llm_provider.model.LlmProvider
       - llm_provider.router（set/unset-default 返回 SetDefaultResult）
-    depends_on: [core, models]
-    used_by: [agent, daemon]
+    depends_on: [core, auth, models, tool_gateway]
+    used_by: [agent, daemon, frontend_app]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -557,13 +572,13 @@ modules:
     tags: [backend, skill, custom-skills]
     aliases: [custom-skills]
     entrypoints:
-      - APIRouter tags=[custom-skills]（自定义技能 CRUD）
+      - APIRouter tags=[custom-skills]  # 自定义技能 CRUD
     main_symbols:
       - skills.service.CustomSkillService（list/get/create/update/delete）
       - skills.model.CustomSkill
       - skills.router
-    depends_on: [core, models]
-    used_by: [agent, daemon]
+    depends_on: [core, auth, models]
+    used_by: [agent, frontend_app]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -575,24 +590,28 @@ modules:
       - backend/app/modules/ppm/**
       - frontend/src/lib/ppm/**
       - frontend/src/app/(dashboard)/ppm/**
+      - frontend/src/app/m/ppm/**
+      - frontend/src/components/ppm/**
       - frontend/src/components/ppm-*.tsx
     tags: [backend, frontend, ppm, project-management]
-    aliases: [ppm-project, ppm-plan, ppm-task, ppm-problem, ppm-kanban]
+    aliases: [ppm-project, ppm-plan, ppm-task, ppm-problem, ppm-kanban, ppm-workbench]
     entrypoints:
       - APIRouter tag=ppm-project prefix=/api/ppm (项目管理)
       - APIRouter tag=ppm-plan prefix=/api/ppm (计划节点/三联表)
       - APIRouter tag=ppm-task prefix=/api/ppm (任务执行)
       - APIRouter tag=ppm-problem prefix=/api/ppm (问题/变更流4节点)
       - APIRouter tag=ppm-kanban prefix=/api/ppm (看板+评论+子任务)
+      - APIRouter tag=ppm-workbench prefix=/api/ppm (工作台聚合)
     main_symbols:
       - ppm.project.service / router / model
       - ppm.plan.service / fsm / router / model
       - ppm.task.service / router / model
       - ppm.problem.service / fsm / router / model
       - ppm.kanban.service / router / model
-      - ppm.common (crud/export/fsm/uuid_type)
-    depends_on: [core, models, auth]
-    used_by: [frontend_app, frontend_components]
+      - ppm.workbench.service / router（工作台聚合）
+      - ppm.common (crud/export/fsm/uuid_type) + ppm.data_scope
+    depends_on: [core, admin, auth, file, models, storage, workspace]
+    used_by: [incident, workspace, frontend_app, frontend_components]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -611,12 +630,61 @@ modules:
       - APIRouter prefix=/admin tag=admin (用户/角色/组织管理)
     main_symbols:
       - admin.router
-      - admin.users_service
-      - admin.roles_service
+      - admin.users_service.UserService（settings.service 向后兼容 re-export 指向它）
+      - admin.roles_service.RoleService
       - admin.organizations_service.OrganizationService
       - admin.model
-    depends_on: [core, models, auth]
-    used_by: [frontend_app, frontend_components]
+    depends_on: [core, auth, models, workflow, workspace]
+    used_by: [settings, ppm, frontend_app, frontend_components]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # === Backend 新增模块（2026-08-18 重扫发现） ===
+  platform_sync:
+    status: active
+    doc: modules/platform_sync.md
+    paths:
+      - backend/app/modules/platform_sync/**
+    tags: [backend, spec, sync, integration]
+    aliases: [progress-sync, spec-sync-endpoints]
+    entrypoints:
+      - APIRouter tags=[platform-sync] prefix=/api（POST /changes/{name}/progress、GET /changes、GET /changes、GET /changes/{name}/progress、GET /changes/{name}/approval、POST /changes/{name}/documents、POST /changes/{name}/approval、POST /quicklog-entries）
+      - "APIRouter tags=[platform-sync]（GET /changes/-/spec-manifest、POST /changes/-/spec-sync，spec 文件增量同步，spec-file-incremental-sync）"
+      - "APIRouter prefix=/workspaces tags=[platform-sync-tokens]（shpsync_ token 签发/吊销，workspace_router）"
+    main_symbols:
+      - platform_sync.service.PlatformSyncService（upsert_progress / list_lightweight / get_progress / upsert_documents / set_approval / upsert_quicklog_entry / get_spec_manifest / apply_spec_ops）
+      - platform_sync.token_service.PlatformSyncTokenService（shpsync_ token 生命周期）
+      - platform_sync.model.PlatformChangeProgressORM / QuicklogEntryORM
+      - platform_sync.auth（shpsync_ 双鉴权）
+      - platform_sync.router / workspace_router
+    depends_on: [core, auth, models, spec_workspace, workspace]
+    used_by: [change, daemon（sillyhub-daemon spec-sync.ts 上报）, SillySpec CLI platform 同步客户端（外部）]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  mcp_gateway:
+    status: active
+    doc: modules/mcp_gateway.md
+    paths:
+      - backend/app/modules/mcp_gateway/**
+    tags: [backend, mcp, token, sse]
+    aliases: [mcp-token, mcp-server]
+    entrypoints:
+      - FastMCP("sillyhub-public")（server.py，streamable_http_path=/，main.py create_app 末尾 mount_mcp(app) 挂载）
+      - "APIRouter prefix=/workspaces tags=[mcp-tokens]（McpToken 签发/列表/吊销 + McpWebhook CRUD）"
+      - "APIRouter tags=[mcp-mission-events]（sse.py，任务事件 SSE 流）"
+    main_symbols:
+      - mcp_gateway.service.McpTokenService / McpTokenPrincipal
+      - mcp_gateway.service.McpWebhookService / WebhookDispatcher
+      - mcp_gateway.auth.McpAuthContext / McpAuthMiddleware
+      - mcp_gateway.model.McpTokenORM / McpWebhookORM
+      - mcp_gateway.server.mcp / mount_mcp
+      - mcp_gateway.tools（MCP 工具注册）
+      - mcp_gateway.sse / router
+    depends_on: [core, agent, auth, change, daemon, models, tool_gateway, workspace]
+    used_by: [agent, daemon, frontend_app]  # lib/mcp-tokens.ts
     needs_review: false
     concerns: []
     review_reasons: []
@@ -627,14 +695,18 @@ modules:
     doc: modules/frontend_app.md
     paths:
       - frontend/src/app/**
+      - frontend/src/middleware.ts
     tags: [frontend, nextjs, app-router]
     aliases: [nextjs-pages]
     entrypoints:
-      - Next.js App Router (layout.tsx/page.tsx)
-      - 路由组: (auth)/login, (dashboard)/{admin,ppm,runtimes,settings,workspaces}, api/
+      - Next.js App Router (layout.tsx/page.tsx, error.tsx/global-error.tsx, middleware.ts)
+      - 路由组 (auth)/login, (dashboard)/{account,admin,agent-profiles,ppm,runtimes,sessions,settings,workspaces}
+      - app/api/{daemon,daemon-chat,workspaces}（Next.js route handlers）
+      - app/m/{login,account,ppm,workspaces}（移动端路由组）
     main_symbols:
       - app/layout.tsx (RootLayout)
       - app/(dashboard)/* 页面组件
+      - app/m/*（移动端页面）
     depends_on: [frontend_components, frontend_lib, frontend_stores]
     used_by: []
     needs_review: false
@@ -650,15 +722,11 @@ modules:
     aliases: [ui-components]
     entrypoints: []
     main_symbols:
-      - components/app-shell.tsx
-      - components/top-bar.tsx
+      - components/app-shell.tsx / top-bar.tsx / antd-providers.tsx
+      - components/agent / agent-log / agent-profile / changes / charts / daemon / layout / llm-providers / mobile / permissions / ppm / sessions / ui / workspace 目录
       - components/agent-run-panel / mission-console / agent-log-viewer
-      - components/daemon/* (含 machine-card/runtime-card 机器级两级手风琴视图，2026-07-07-daemon-machine-runtime-hierarchy)
-      - components/workspace-* / ppm-*
-      - components/permission-approval-dialog
-      - components/antd-providers.tsx
-      - components/ui/*
-      - components/charts/*
+      - components/workspace-* / ppm-* / mcp-token-create-dialog / file-upload / file-viewer
+      - components/permission-approval-card / error-boundary
     depends_on: [frontend_lib, frontend_stores]
     used_by: [frontend_app]
     needs_review: false
@@ -674,11 +742,11 @@ modules:
     aliases: [api-client]
     entrypoints: []
     main_symbols:
-      - lib/api.ts (fetch 封装)
-      - lib/{agent,auth,daemon,runtime,changes,workflow,tasks,workspaces,ppm/*,...}.ts
-      - lib/agent-stream / use-agent-run-stream
-      - lib/use-daemon-machines (useDaemonMachines hook 机器级列表+会话 15s 轮询，2026-07-07-daemon-machine-runtime-hierarchy)
-      - lib/format-token / status-labels / utils
+      - lib/api.ts (fetch 封装) / lib/fetch-sse / lib/errors / lib/token-refresh
+      - lib/api-types.ts（OpenAPI 生成，pnpm gen:types，禁手写）
+      - lib/api/（llm-providers 等拆分客户端）+ lib/{agent,auth,daemon,runtime,changes,tasks,workspaces,ppm/*,admin,incidents,knowledge,releases,settings,scan-docs(-tree),spec-workspaces,git-identities,file/,custom-skills,mcp-tokens,mcp-settings,agent-profiles,quicklog,audit,daemon-audit,approvals,api-keys,health,menu-permissions}.ts
+      - lib/agent-stream / use-agent-run-stream / use-agent-runs / use-daemon-machines（机器级列表+会话 15s 轮询）
+      - lib/query-client / query-keys / providers.tsx / format-token / status-labels
     depends_on: []
     used_by: [frontend_app, frontend_components, frontend_stores]
     needs_review: false
@@ -696,6 +764,7 @@ modules:
     main_symbols:
       - stores/session.ts
       - stores/kanban.ts
+      - stores/workspace.ts (useWorkspaceStore)
     depends_on: [frontend_lib]
     used_by: [frontend_app, frontend_components]
     needs_review: false

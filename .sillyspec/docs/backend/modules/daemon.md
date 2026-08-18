@@ -3,83 +3,115 @@ schema_version: 1
 doc_type: module-card
 module_id: daemon
 author: qinyi
-created_at: 2026-06-19T19:40:00+08:00
+created_at: 2026-08-18 01:45:00
 ---
 
-# daemon
+# 守护进程中枢（daemon）
 
 ## 定位
-
-管理本地 Daemon 运行时、任务租约、交互式 AgentSession，以及 daemon 与平台之间的 WebSocket/RPC 协议。
+本地 daemon 运行时的平台侧中枢：daemon 注册/心跳/版本分发、WebSocket 命令枢纽（ws_hub）、
+任务租约（lease）、交互式 AgentSession 全生命周期、change-write 任务队列（claim 通道）、
+host_fs RPC 代理、审计批量上行、LLM proxy 转发。`DaemonService`（service.py）为薄 facade
+（~50 个 async 方法保留历史签名、router 零感知），实际拆在 runtime / lease / run_sync /
+session / patch / audit / host_fs 子包；另有独立活 service：`lease_service.py`
+`DaemonLeaseService`（claim 语义，`cancel_lease` 被 agent 模块跨模块调用）与
+`permission_service.py` `DaemonPermissionService`（审批/dialog 解析）。
 
 ## 契约摘要
-
-- `DaemonService`（facade）：现为薄 facade，保留全部历史方法签名不变，内部委托 5 个子域 service（2026-06-22-daemon-service-split 拆分）。
-  - `runtime/service.py` → `RuntimeService`：runtime 注册/心跳/启停/清理（含 RPC 异常族 DaemonRpc*）。
-  - `lease/service.py` → `LeaseService`：lease 创建/认领/启动/续约/完成/过期/回滚（承接原 `DaemonService.lease_*`）；`lease/context.py` → `build_claim_payload` 模块级函数。
-  - `run_sync/service.py` → `RunSyncService`：AgentRun 状态同步 / 交互式 run 关闭 / 消息提交 / post-scan 校验。
-  - `session/service.py` → `SessionService`：AgentSession 创建/注入/中断/结束/恢复/重连/查询（最大子域，含 recover_*/confirm/mark 三方法供 fix-interactive-daemon-lifecycle W4 接通；2026-08-14 新增 `inject_session_as_service` 服务身份注入，供审批联动）。
-  - `patch/service.py` → `PatchService`：worktree diff 应用。
-- `DaemonLeaseService`（`lease_service.py`）：独立活 service，`cancel_lease` 被 agent 模块跨模块调用（`agent/service.py:545`），原位保留，与本次 `LeaseService` 分管 lease 不同操作（D-003）。
-- 异常类/状态常量已迁入对应子包定义，facade `service.py` 集中 re-export，`from app.modules.daemon.service import XxxError` 路径不变（FR-05）。
-- `GET /api/daemon/runtimes`：读取当前用户可见的运行时（兼容旧调用，仍返回数组）。
-- `GET /api/daemon/runtimes/page`：平台管理员分页查询全部 owner 的 runtime（`q/type/status/user_id/limit/offset`），普通账号仅查自己；固定路径必须声明在 `/runtimes/{runtime_id}` 前（D-005），返回 `{items,total,limit,offset}`。
-- `PATCH /api/daemon/runtimes/{id}`：更新 `display_alias`（省略=不变、null/空白=清空、非空字符串=更新）；`get/disable/enable/delete/update` 接收 `is_platform_admin` 实现跨 owner 管理（D-001）。
-  - 以上三项来自 2026-06-25-admin-global-daemon-workspace-management。
-- `DELETE /api/daemon/runtimes/{id}`：物理删除 runtime 及其 lease/session（FK CASCADE）；被未软删 workspace 绑定时返回 409（`DaemonRuntimeInUse`，需先解绑），越权/不存在统一 404。
-- `GET /api/daemon/sessions`：按用户隔离并分页读取交互式会话。
-- `DELETE /api/daemon/sessions/{id}`：仅删除当前用户的终态会话；活动会话返回 409，越权与不存在统一返回 404。
+- 注册与运行时：`GET /api/daemon/version`（camelCase 契约，install.sh/前端消费）、
+  `POST /register`、`POST /heartbeat`、`GET /runtimes`（当前用户可见）、
+  `GET /runtimes/page`（管理员分页全 owner，q/type/status/user_id/limit/offset）、
+  `PATCH /runtimes/{id}`（display_alias）、`DELETE /runtimes/{id}`（绑定时 409）、
+  `/runtimes/{id}/disable|enable|offline|self-update`、`/runtimes/{id}/leases`、
+  `/runtimes/{id}/list-dir|list-roots`（host_fs 代理）、`/runtimes/usage`、
+  `/machines`、`/instances`、`/runtimes/{id}/pending-leases`。
+- WS 枢纽：`WS /api/daemon/ws` → `DaemonWsHub`：connect（新连接逐出旧 ws）、
+  send_to_runtime / broadcast / notify_task_available / send_wakeup（唤醒去重滑窗）、
+  send_heartbeat_ack / send_session_control / send_permission_response /
+  send_self_update / send_policy_update、send_rpc（rpc_id→future 关联，
+  disconnect 时取消全部 pending 让调用方快速失败）、is_connected / connected_* 查询。
+- lease：`POST /leases/{id}/claim|start|heartbeat|messages|complete|sync`、
+  `POST /leases/{id}/runs/{run_id}/result`、`DELETE /leases/{id}`；
+  `LeaseService`（lease/service.py）含 provider_switch 通知
+  （lease/provider_switch.py，llm_provider 消费）与
+  `_sync_stage_status_from_run`（从 AgentRun 推导回写 stages 视图，不读 sillyspec.db）。
+  独立 `DaemonLeaseService`：claim_task（claim_token 生成）/ heartbeat_lease /
+  expire_overdue_leases / alert_stuck_terminating_leases / cancel_lease /
+  validate_claim_token；异常族 LeaseConflict / LeaseNotFound / LeaseTokenMismatch /
+  LeaseNotClaimable。
+- 会话：`POST|GET /sessions`、`DELETE /{id}`（终态才可删）、
+  `/{id}/inject|reopen|interrupt|end`、`/{id}/recover|confirm-reconnected|
+  mark-recovery-failed|ready`、`GET /{id}/stream`（SSE）、`/{id}/runs`、`/{id}/logs`、
+  `GET|POST /{id}/dialogs`（+history）、`POST /{id}/permissions/{rid}/response`；
+  `SessionService` 含 `inject_session_as_service`（服务身份注入，跳过用户归属校验，
+  供 change 审批联动）。
+- change-write 队列（change_write_router.py）：`GET /runtimes/{id}/pending-change-writes`、
+  `POST /change-writes/{id}/claim`（daemon 认领，生成 claim_token）、
+  `POST /change-writes/{id}/complete`（done/failed 回执）、
+  `PATCH /change-writes/{id}/progress`（BL-3：仅 status=claimed 可写；
+  D-004 单一写者——只写 files_total/files_processed 不改状态；写计数同步刷新
+  claimed_at 作活跃心跳）。
+- 版本分发（dist_router.py，无 /api 前缀）：`/daemon/install.sh`、`/daemon/install.ps1`、
+  `/daemon/latest.json`、`/daemon/latest/sillyhub-daemon.js`、
+  `/daemon/latest/mcp-server.js`。
+- 审计子域（audit/）：`POST /api/daemon/audit/batch`（daemon 批量审计上行）+ 查询端点。
+- 其它：`GET|POST /llm-proxy/{path:path}`（daemon 侧 LLM 网关转发）、
+  `GET /skills/latest/manifest`（skills bundle 分发，agent 模块消费）。
+- host_fs：delegate.py + ws_rpc.py——经 WS RPC 读客户端文件系统
+  （list_dir、sillyspec.db 读等；runtime/service.py 的 DaemonRpc* 异常族：
+  Timeout/Conflict/GatewayError/ForbiddenError/RemoteGatewayError/RemoteError）。
+- 模型：daemon_instances（build_id/版本）、daemon_runtimes（display_alias、
+  allowed_roots、owner）、daemon_task_leases、daemon_change_writes
+  （files_total/files_processed 计数列）、session_dialog_requests。
 
 ## 关键逻辑
+```
+ws_hub RPC: send_rpc(rpc_id 注册 future, 10s 超时) → daemon 处理 →
+  DAEMON_MSG_RPC_RESULT 按 rpc_id resolve; 断连取消全部 pending
 
-- 会话状态 `pending/active/reconnecting` 视为活动态，必须先结束再删除。
-- 删除会话前显式清空关联 `AgentRun.agent_session_id`，保留 AgentRun 与 AgentRunLog 作为运行历史。
-- 所有会话查询和写入都以 `AgentSession.user_id` 在数据库层隔离。
+change-write claim 生命周期: daemon 轮询 pending → claim(生成 token) →
+  执行(progress 刷计数+claimed_at 心跳) → complete(ok/err)
+GC(_gc_expired_change_writes): claimed 超时——kind=spec-sync 600s 长窗
+  (SPEC_SYNC_CLAIM_TIMEOUT_SECONDS)其余 60s; 超时行清 claim 态回灌 pending
+  供下轮重做(create/edit 覆盖写、spec-sync content-hash 合并均幂等);
+  complete(ok=false) 永久错误仍 failed 不重试(无死循环)
 
-### 交互式会话 provider 语义（D-003@v1, D-007@v1）
-
-- `SessionService.reopen_session()` 的 provider gate 从 `session.provider != "claude"` 扩为 `session.provider not in {"claude", "codex"}`；非支持 provider 仍抛 `DaemonSessionResumeUnsupported`，文案改为 "only claude/codex interactive sessions can be resumed"（D-003@v1, D-007@v1）。
-- `AgentSession.agent_session_id` 语义按 provider 区分：Claude 保存 Claude SDK session id，Codex 保存 Codex thread id（D-007@v1）。reopen/reconnect 的 lease metadata 补齐 `session_id` / `agent_session_id` / `provider` / `claim_token`。
-- `create_session()` / `inject_session()` / `interrupt_session()` / `end_session()` 按 `AgentSession` / `AgentRun` / interactive lease 建模，不需要 provider 专属表；`AgentSession.provider` 已存在，数据库无需新增列。
-
-### Flat message 与 dialog_kind 通道（D-004@v1, D-006@v1, D-008@v1）
-
-- `RunSyncService.submit_messages()` 接收 Codex driver 上报的 flat message（`event_type` + `content` + `metadata` + `session_id`），与 Claude SDK raw message 展开走同一落库路径；Codex driver 不把 app-server schema 泄漏到 backend（D-004@v1）。
-- 审批/dialog 仍以 `PERMISSION_REQUEST` / `PERMISSION_RESPONSE` 作 provider-neutral 通道；Codex 的 `item/tool/requestUserInput` 与 `mcpServer/elicitation/request` 复用同一通道，`dialog_kind` 分别标记 `codex_request_user_input` 与 `mcp_elicitation`（D-006@v1, D-008@v1）。
-- `ask_user_only=true` 时普通 command/file/permission 审批 allow-through，只阻塞用户输入/可归一化 MCP elicitation；`ask_user_only=false` 时普通审批走前端审批卡。MCP elicitation 复杂 schema 暂不支持（daemon 侧 fail-closed 并上报 error log）。
-
-### 形态A stage 完成留痕（2026-08-08-change-center-on-demand，D-001~008 / R-01~07）
-
-砍掉 backend `auto_dispatch_next_step` 自动连轴后，daemon 子域 6 个原调用点全部改「只落结果/留痕 + 发 SSE，stage 完成停待触发态」，不再自动推进下一阶段：
-
-- **gate task**（`run_sync/service.py::_run_gate_decision_task`，原 :1387 内联块）：删内联 `sync_stage_status` + `auto_dispatch_next_step` 块；只存 `AgentRun.gate_result` + `gate_status=decided` + 发 gate/status SSE。gate 决策数据交 `advance_change_stage` tool / review 显式读取（D-003，R-06）。
-- **complete_lease facade**（`lease/service.py:543` → `_trigger_stage_completion_callback`）：callback 行为变轻——不再 auto-dispatch 下一阶段，也不再自动同步 sillyspec.db（stage 展示状态改由 `_sync_stage_status_from_run` 推导回写）。失败不阻塞 lease 完成（容错与 reconcile 一致）。
-- **single callback**（`_trigger_stage_completion_callback` single 分支，原 :1617）：只 `sync_stage_status`（更新 `Change.stages` JSON 视图）+ 发 SSE；不 dispatch。`sync_stage_status` 内部经 HostFsDelegate RPC 读 sillyspec.db，但仅作视图同步、不驱动推进（D-002）。
-- **team advance**（`_advance_team_stage`，原 :1752）：保留 `merge_gate_results`（合并 worker gate）+ `ChangeService.complete_stage`（推进 current_stage + 落 pending_review），删 auto_dispatch。下一 stage team mission 交 `advance_change_stage` MCP/HTTP 显式触发 `_dispatch_execute_team`（D-006，R-04）。
-- **reconcile_stale_runs**（`change/dispatch.py:589`）：剥离 `:655` auto_dispatch 调用，保留 stale run 清理（释放 `has_active_run`）（D-007，R-07）。
-- **被调 `auto_dispatch_next_step`**（`change/dispatch.py:240`）：整函数删除。
-- `LeaseService._sync_stage_status_from_run`（lease/service.py:683，新增）：从 `AgentRun` 直接推导回写 `changes.stages.last_dispatch.status`，**不读 sillyspec.db、不调** `SillySpecStageDispatchService.sync_stage_status`（D-003 守护测试断言 ast 无 sqlite3/sync_stage_status 调用）。
-- `schedule_loop`（orchestrator）+ `converge_mission_for_completed_run`（lease:619）完全保留（mission finalize，与 auto_dispatch 无关）。
+stage 完成(形态A 留痕): gate task 只落 gate_result + gate_status=decided
+  + 发 SSE; complete_lease 回调变轻(不 auto-dispatch 不自动同步 sillyspec.db);
+  team 保留 merge_gate_results + complete_stage; 推进交 change 模块显式 advance
+```
 
 ## 注意事项
-- **用户可见错误文案中文（2026-08-15-error-message-l10n）**：本模块面向前端用户的 raise message 已全部中文化（中文短语+行动指引，技术 ID 在 details）；守护测试 tests/core/test_error_message_l10n.py 强制新文案含 CJK。
+- 用户可见错误文案中文：session/service.py 的 DaemonRuntimeOffline/DaemonOffline
+  （创建/注入/打断/恢复 5 处）为中文短语 + 行动指引，UUID 移 `details`
+  （前端 runtime-session-dialog 原样透传 message）。
+- 路由顺序：`/runtimes/page`、`/runtimes/usage` 等固定路径必须声明在
+  `/runtimes/{runtime_id}` 前，否则 FastAPI 把 `page` 当 UUID 解析 422。
+- 跨 owner 管理：runtime get/disable/enable/delete/update 接收 `is_platform_admin`；
+  `DELETE runtime` 遇未软删 workspace 绑定抛 `DaemonRuntimeInUse`(409，
+  details 带占用列表)；软删引用先应用层解绑再删
+  （PG FK RESTRICT 不看 deleted_at 的 dialect 差异坑，SQLite 测试漏网 PG 生产暴露）。
+- 会话活动态 = pending/active/reconnecting；删终态会话前显式清空
+  `AgentRun.agent_session_id` 保留运行历史；查询/写入按 `AgentSession.user_id`
+  库层隔离。
+- reopen provider gate：`{"claude","codex"}` 可恢复，其余抛
+  DaemonSessionResumeUnsupported；`agent_session_id` 对 Claude 是 SDK session id、
+  对 Codex 是 thread id。
+- flat message（Codex driver 上报 event_type+content+metadata）与 Claude SDK raw
+  message 同一落库路径；审批/dialog 走 PERMISSION_REQUEST/RESPONSE provider-neutral
+  通道，`dialog_kind` 标记 codex_request_user_input / mcp_elicitation；
+  ask_user_only=true 只阻塞用户输入/可归一化 elicitation，复杂 schema fail-closed
+  上报 error log。
+- 子 service 间调用经 facade 引用注入 + `__init__` lazy import 避免模块级循环；
+  异常类定义在子包、facade re-export 保持
+  `from app.modules.daemon.service import XxxError` 路径不变。
+- `/daemon/version` 与 dist 端点是 install.sh/install.ps1 对外契约
+  （camelCase noqa N815），改动即破坏远程安装。
+- change_writer 的 `proxy_create_change` 经本模块 change-write 队列代写变更
+  （占坑/回滚语义见 change_writer 卡片）；GC 回灌语义保证 daemon 中断不丢任务。
 
-- **用户可见错误文案中文（ql-20260815-005）**：`session/service.py` 的 `DaemonRuntimeOffline`/`DaemonOffline`（创建/注入/打断/恢复会话 5 处）message 一律面向用户的中文短语（「执行代理当前不在线…」+ 行动指引），runtime/session/run 的 UUID 移入 `details`（前端 `runtime-session-dialog` 原样透传 `err.message`，英文技术串对用户无意义）。
-- `display_alias`：runtime 新增 nullable `display_alias VARCHAR(200)`，搜索（ilike）与卡片标题优先用它，空值回退 name/provider（2026-06-25-admin-global-daemon-workspace-management，D-002）。
-- 路由顺序：`/runtimes/page`、`/runtimes/usage` 等固定路径必须声明在 `/runtimes/{runtime_id}` 前，否则 FastAPI 把 `page` 当 UUID 解析返回 422（D-005）。
-- 跨 owner 管理：`get/disable/enable/delete/update` 接收 `is_platform_admin`，平台管理员可操作任意 owner 的 runtime，普通账号仍受 owner 限制（D-001）。
-- owner 展示：列表 owner 由 LEFT JOIN users 填充（OwnerRead 嵌套 DTO，D-006），详情端点 owner 可为 None。
+## 人工备注
 
-## 变更记录
+<!-- MANUAL_NOTES_START -->
 
-- 2026-06-19-runtimes-layout：增加终态会话安全删除能力及所有权、状态冲突和运行历史保留测试。
-- 2026-06-22-daemon-service-split：将 `DaemonService` 巨石（~3500 行/51 方法）按生命周期拆为 `runtime/lease/run_sync/session/patch` 5 子域子包，`DaemonService` 退化为 facade（方法签名不变、`router.py` 零改动、行为不变）；异常类按子域迁入子包 + facade re-export 保持 import 路径兼容；`DaemonLeaseService` 原位不动（D-003）。跨子域调用经 facade 引用注入（D-006），子 service import 经 `__init__` 内 lazy import 避免 module-level 循环（D-005）。
-- ql-20260623-001-85ac | 修复 ruff N815：`DaemonVersionResponse` 的 `minRequired`/`downloadUrl` camelCase 字段（对外公开端点 GET /api/daemon/version 的 JSON 契约，router.py:72-75 注释，install.sh/前端消费）加 `# noqa: N815` 行内豁免，不改 snake_case（改了会破坏 install.sh/前端）；验证 `cd backend && uv run ruff check .` 通过。
-- 2026-06-23-codex-interactive-session | `SessionService.reopen_session` provider gate 放开 Codex（`{claude,codex}`，D-003@v1/D-007@v1），`DaemonSessionResumeUnsupported` 文案更新；`AgentSession.agent_session_id` 对 Codex 明确为 thread id；flat message 契约与 `dialog_kind`（`codex_request_user_input` / `mcp_elicitation`）通道对 Codex 生效（D-004@v1/D-006@v1/D-008@v1）；Claude 既有 reopen/permission 测试不变。
-- ql-20260625-001-b9e4 | `RuntimeService.delete_runtime`（`runtime/service.py`）删前检查未软删 workspace 绑定：`workspaces.daemon_runtime_id` FK 是 RESTRICT（`workspace/model.py:72` + migration `202607030900` 设计意图，R-06 cascade out of scope），被绑定时抛新增 `DaemonRuntimeInUse`（`HTTP_409_DAEMON_RUNTIME_IN_USE` + 中文提示 + `details.workspaces` 列表）而非让 PG IntegrityError 冒泡成 500；facade re-export 同名异常保持 import 路径；物理删除语义不变。
-- ql-20260625-002-7c3a | `delete_runtime` 补软删 workspace 引用处理：ql-001 只查未软删绑定，但 workspace 软删不清 `daemon_runtime_id`，PG FK RESTRICT 不看 `deleted_at` 仍拦截 DELETE → 500（SQLite 测试 FK 不严漏网，PG 生产暴露，dialect 差异）。修复：未软删绑定保持 `DaemonRuntimeInUse`(409)；软删引用（`deleted_at IS NOT NULL`）应用层 `UPDATE workspaces SET daemon_runtime_id=NULL` 解绑绕过 FK → 删 runtime。测试补 `ws.daemon_runtime_id is None` 断言。
-- 2026-08-08-change-center-on-demand（D-001~008 / R-01~07）| 砍 backend `auto_dispatch_next_step` 自动连轴，daemon 子域 6 原调用点（gate task / complete_lease facade / single callback / `_advance_team_stage` / reconcile / 被调函数本体）全改「只落结果 + 发 SSE，stage 完成停待触发」；`_advance_team_stage` 保留 merge_gate_results + complete_stage、删 dispatch（下一 stage team mission 交 advance_change_stage tool 显式触发，D-006）；`LeaseService` 新增 `_sync_stage_status_from_run` 独立路径不读 sillyspec.db（D-003 守护测试）；`reconcile_stale_runs` 剥离推进只清 stale（D-007）；`schedule_loop` + `converge_mission_for_completed_run` 保留不动。详见上方「形态A stage 完成留痕」节。
-- 2026-08-13-spec-sync-visibility（P1）| `DaemonChangeWrite` 加 `files_total/files_processed` 列（nullable，迁移 20260813173000）；`change_write_router` 新增 `PATCH /api/daemon/change-writes/{id}/progress` 端点（`ChangeWriteProgressRequest`，BL-3：status==claimed 才允许写，pending/done/failed 一律 409；D-004 单一写者——仅写 files_total/processed 不改 status/completed_at，complete_change_write 不碰计数列）。daemon spec-sync 分支 complete 前上报终态计数 + 过程 onProgress 回调（FR-05/FR-06）。
-- 2026-08-14-change-center-conversation-driven（D-006@v2 / task-04）| `SessionService` 新增 `inject_session_as_service(session_id, prompt)`（session/service.py:740）：`inject_session` 的服务身份姊妹方法——跳过 `_get_owned_session_for_update` 用户归属校验（多成员工作区审批人可≠会话创建人），仅按 id 锁行；其余语义（status/lease/turn-conflict 守卫、SESSION_INJECT dispatch、offline 收敛、best-effort readiness wait）与 `inject_session` 一致，公共核心抽到 `_inject_into_session`。供 change 审批流程向绑定会话注入审批消息（change 模块 `_maybe_notify_session` / `_notify_bound_session` 调用，turn_conflict/session_inactive/inject_failed 三类降级映射在 change 侧）。daemon spec-sync 增量推送 `postSpecSyncIncremental` 加 `change_dirs` 标注（spec-sync.ts `extractChangeDirs`/`collectChangeDir`，`changes/<name>/` 与 `changes/archive/<name>/` 前缀分组 key，best-effort 失败降级 []）——该改动在 sillyhub-daemon 侧，backend 侧消费见 spec_workspace 模块。
-- ql-20260816-002 | change-write claim 续期 + spec-sync 长窗：`_BatchProgressWriter.flush`（spec_workspace/service.py）与 `PATCH .../progress` 端点（change_write_router.py）写计数时同步刷新 `claimed_at=now`（进度上报即活跃心跳，长 apply 不被 GC 误杀）；`_gc_expired_change_writes` 对 `kind=spec-sync` 用 600s 长窗（`SPEC_SYNC_CLAIM_TIMEOUT_SECONDS`），其余保持 60s。根因：全量 spec-sync apply 实测 93s > 60s，GC 中途回收 claimed 行致任务假 failed（sync 实际成功）。守护测试 `test_gc_spec_sync_uses_longer_window`。
-- ql-20260816-004 | change-write GC 回收语义「置 failed → 回灌 pending」：`_gc_expired_change_writes` 对 claimed 超时行清空 claim 态（status=pending/claim_token/claimed_at/completed_at/error 全清）回灌 pending，下轮 daemon 轮询自动重 claim 重做（create/edit 覆盖写、spec-sync content-hash 合并均幂等）。根治 daemon 中断（进程被杀/网络波动）/服务端终止（重启/不可用）时 change-write 任务丢在 failed 需手动重触的问题；存活 daemon 靠进度上报刷新 claimed_at（ql-20260816-002）不被误回收，complete(ok=false) 的永久错误仍 failed 不重试（无死循环）。日志事件 `change_write_gc_expired` → `change_write_gc_reclaimed_for_retry`。守护测试：GC 回灌断言 + 回灌可重 claim + pending 端点顺带 gc 返回回灌行。
+<!-- MANUAL_NOTES_END -->

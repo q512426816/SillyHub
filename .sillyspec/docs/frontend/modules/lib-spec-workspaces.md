@@ -2,49 +2,60 @@
 schema_version: 1
 doc_type: module-card
 module_id: lib-spec-workspaces
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:02:25
+created_at: 2026-08-18 01:45:00
 ---
-# lib-spec-workspaces
+
+# spec 工作区客户端（lib-spec-workspaces）
 
 ## 定位
-SillySpec 工作空间配置与同步的前端 API 客户端。管理一个工作空间的 spec 存储策略（platform-managed/repo-mirrored/repo-native）、配置读写、同步触发、引导初始化，以及 spec 文件冲突的查阅与解决。是 SillySpec 文档驱动链路的前端入口。
+
+spec workspace（工作区的 spec 根/同步策略）API 客户端：查询 spec_ws 状态、
+SSE 流式导入、生成项目、init 派发、手动同步与 pending 查询。是「从仓库导入 /
+同步到服务器」两条手动链路的前端入口。
 
 ## 契约摘要
-| 函数 | 语义 | HTTP |
-|---|---|---|
-| `getSpecWorkspace(workspaceId)` | 取 spec 工作空间配置 | GET `/api/workspaces/{ws}/spec-workspace` |
-| `updateSpecWorkspace(workspaceId, input)` | 更新配置（strategy/repo_sillyspec_path/profile_version） | PATCH `/api/workspaces/{ws}/spec-workspace` |
-| `importSpecWorkspace(workspaceId)` | 导入已有 spec（从仓库/镜像） | POST `/api/workspaces/{ws}/spec-workspace/import` |
-| `bootstrapSpecWorkspace(workspaceId)` | 引导初始化（触发 AgentRun） | POST `/api/workspaces/{ws}/spec-bootstrap` |
-| `generateProjects(workspaceId)` | 生成项目结构（返回 AgentRun） | POST `/api/workspaces/{ws}/generate-projects` |
-| `listSpecConflicts(workspaceId, params?)` | 列出 spec 冲突 | GET `/api/workspaces/{ws}/spec-conflicts` |
-| `resolveSpecConflict(workspaceId, conflictId, input)` | 解决单个冲突 | POST `/api/workspaces/{ws}/spec-conflicts/{cid}/resolve` |
 
-类型：
-- `SpecStrategy`：`"platform-managed" | "repo-mirrored" | "repo-native"`。
-- `SyncStatus`：`"clean" | "dirty" | "conflicted"`。
-- `SpecWorkspace`：`id/workspace_id/spec_root/strategy/repo_sillyspec_path/profile_version/sync_status/last_synced_at`。
-- `BootstrapResult`/`GenerateProjectsResult`：含 `agent_run_id` + `stream_url`（异步任务句柄）。
-- `SpecConflictStatus`：`open/approved/rejected/resolved`；`SpecConflictRead`/`SpecConflictResolveInput`。
+- `getSpecWorkspace(workspaceId)` — `GET /api/workspaces/{wid}/spec-workspace`，
+  返回 `SpecWorkspace { spec_root; strategy; sync_status; ... }`。
+- `importSpecWorkspace(workspaceId, { onProgress })` — `POST .../spec-workspace/import`，
+  返回 `text/event-stream`；阶段 `packing / packed / applying / reparsing_docs /
+  reparsing_changes / done / error`，经 `onProgress(phase, data)` 回调上抛。
+- `generateProjects(workspaceId)` — `POST .../generate-projects`，返回生成文件数 +
+  reparse 统计 + 子项目列表。
+- `initDispatch(workspaceId)` — `POST .../init`，向当前成员 daemon 派发 init 模式
+  交互 lease（daemon 写 `.sillyspec-platform.json` 并拉取 spec bundle）。
+- `syncManual(workspaceId)` — `POST .../spec-workspace/sync-manual`，建 kind=spec-sync
+  的 DaemonChangeWrite outbox 行，返回 `{ status: "pending", task_id }`。
+- `listPendingSync(workspaceId)` — `GET .../sync-manual/pending`，按 created_at desc
+  返回 `PendingSyncItem[]`（含 error / files_total / files_processed 进度字段）。
+- 枚举：`SpecStrategy = platform-managed | repo-mirrored | repo-native`；
+  `SyncStatus = pending | clean | dirty | conflicted`。
 
 ## 关键逻辑
+
 ```
-bootstrap / generate-projects 返回 AgentRun 句柄，前端需配合
-  lib-agent-stream 订阅流式进度
-spec 整树同步由 daemon 自动回传（POST /spec-workspace/sync 上传 tar，
-  daemon 专用，前端不直接调用）；sync_status 变 conflicted 时，
-  走 listSpecConflicts → resolveSpecConflict 逐条处理
+importSpecWorkspace:
+  原生 fetch + resp.body.getReader() 手解 SSE（apiFetch 会 JSON.parse，不复用）
+  buffer 按 "\n\n" 切事件块；event:/data: 行解析；":" 开头 keepalive 跳过
+  非 2xx / error 事件 → throw ApiError；done → resolve
 ```
 
 ## 注意事项
-- 依赖 `lib-api` 与 `lib-agent`（使用 `AgentRunStatus` 等类型）。
-- `strategy` 决定 spec 文件存储位置：平台托管 / 仓库镜像 / 仓库原生，切换策略可能引发冲突。
-- bootstrap/generate 为长任务，不要同步等待，必须用返回的 run_id 走流式订阅。
-- 冲突解决是逐条进行，`resolveSpecConflict` 需传 conflictId 与决策 input。
-- `_module-map` 标注 used_by 为空，目前无页面直接消费（多为 Agent 内部链路或后台触发）。
+
+- **符号演进**：早期版本的 `syncSpecWorkspace` / `bootstrapSpecWorkspace` /
+  `updateSpecWorkspace` / `listSpecConflicts` / `resolveSpecConflict` 已不存在，
+  现行为 `syncManual` / `listPendingSync` / `initDispatch` 等——引用旧名会直接编译错。
+- `PendingSyncItem` 字段对齐后端 `sync_manual_get_pending`（旧类型 id/change_key/kind
+  曾与后端完全脱节，是修过的 schema 漂移点）；files_total/files_processed 的单一写者
+  是 progress 端点（D-004）。
+- import 走 SSE 是为了突破同步 POST 的超时（D-001）；调用方 done 后须自行刷新
+  spec_ws 状态 + 变更中心列表。
+- 消费方：`workspaces/[id]/page.tsx`、`workspaces/[id]/agent/page.tsx`、
+  `components/workspace-config-card.tsx`。
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
+
 <!-- MANUAL_NOTES_END -->

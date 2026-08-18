@@ -2,62 +2,48 @@
 schema_version: 1
 doc_type: module-card
 module_id: ppm
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:09:00
+created_at: 2026-08-18 01:45:00
 ---
-# ppm
+
+# 项目管理业务域（ppm）
 
 ## 定位
-项目管理域（对齐源 ppdmq-module-ppm），5 个子域 router 由 app.main 统一挂载到 `/api/ppm`：project（项目/客户/成员/干系人）、plan（计划节点/明细/模块 + ps 执行表）、task（计划任务/执行/工时）、problem（问题列表 + 流转）、kanban（看板卡片/评论/子任务）。共享 common 子包（CRUD 分页/FSM/导出/UUID 类型）。
+**已上线的业务域**（全仓唯一正式上线模块，改动要求最高历史兼容与回归保障）：项目管理六子域——项目维护、项目计划、任务执行与工时、问题清单与变更、协作看板、个人工作台。六个 router 自身不带 prefix，由 main.py 统一挂 `/api/ppm`。表结构沿用既有 PPM 系统（Ps*/Ppm* 前缀），非 SillySpec 侧新设计。
 
 ## 契约摘要
-- `/api/ppm/project-maintenance*` — 项目维保 CRUD + 分页 + 导出 excel；`/customer-maintenance*` 同构；项目成员/干系人子资源
-- `/api/ppm/plan-node*` — 计划节点 CRUD；`/plan-node-detail-tpl*` 明细模板；`/plan-node-module*` 模块；`/plan-node/{id}/modules/import-preview|import-commit` 实施阶段模块 Excel 导入（两级：模块+明细，2026-07-14-milestone-module-import）；`/ps-project-plan*` / `/ps-plan-node*` ps 执行表
-- `/api/ppm/task-plan/*` — 计划任务 CRUD + execute 流转 + 导出；`/personal-task-plan/*` 个人视角
-- `/api/ppm/problem-list*` — 问题 CRUD + `/next` `/reject` 流转 + 按日期范围查 + 导出
-- `/api/ppm/kanban/*` — 用户列 / 任务卡片 / assign / reorder / search / 评论 / 子任务
-- Service：ProjectMaintenance/CustomerMaintenance/ProjectMember/ProjectStakeholder/Plan/PlanTask/TaskExecute/WorkHour/Problem/PpdKanban 等
+- **project**：项目维护（PpmProjectMaintenance + 成员 PpmProjectMember + 干系人 PpmProjectStakeholder）与客户维护（PpmCustomerMaintenance），维护 CRUD + `export-excel`；项目维度还持有 workspace↔PPM 项目绑定的对称端点（workspace 侧 `/api/workspaces/{id}/ppm-projects` 在 workspace 模块 link_router）。
+- **plan**：计划节点三级（PlanNode / PlanNodeDetail / PlanNodeModule，detail 有自身 FSM 白名单）+ 项目计划（PsProjectPlan / PsPlanNode / PsPlanNodeDetail / PsPlanNodeDetailProcess），put/delete/get + `project-plan` 分页 + importer + export-excel。
+- **task**：任务计划 PlanTask（`task-plan/update|get|delete|page|execute|export-excel`；`personal-task-plan/page|list-by-date-range` 按人过滤）、任务执行 TaskExecute（`task-execute/update|get|delete|page|list-by-date-range`，execute 更新带归属校验）、工时 WorkHour（`work-hour/update` 等）。
+- **problem**：问题清单 PpmProblemList（status 3 态中文，对齐 PlanTask；审批流节点 `ProblemNode` 10-40）+ 问题变更 PpmProblemChange（审批流状态：审核中/已完成/已作废；`{item_id}/next` 推进、`{item_id}/reject` 作废；bug 类型跳部门经理节点）+ 流程任务/日志表 + `import-template` / importer / export。
+- **kanban**：`/kanban/users|tasks|workload-grid|search/users`、任务 CRUD（`POST|PUT|DELETE /kanban/task`）、`assign`、`reorder`、评论（PpmKanbanComment）、子任务（PpmKanbanSubtask + toggle）。
+- **workbench**：`profile`（支持 `target_user_id` 切换查看）/ `summary` / `calendar` / `todos` / `switchable-users`（经理‖超管可切换，D-005@v1；超管列全部 active 用户）。
+- 公共能力（common/）：crud / export（excel）/ upload / fsm / ownership / uuid_type；`data_scope.py` 供 plan/project 注入 where 过滤。
 
 ## 关键逻辑
 ```
-# common/crud.py 提供通用分页排序：
-apply_pagination(stmt, req)   # req.offset = (page-1)*page_size
-apply_sort(stmt, order_by, order, allowed)
-count_total(session, stmt) → Page[T].build(items, total, req)
-
-# common/fsm.py 通用状态机：
-StateMachine(current, TRANSITIONS, entity=...).transition(target)
-# 各子域自定义 TRANSITIONS（如 plan/fsm.PlanNodeDetailStatus、problem fsm）
-
-# 列表统一默认查 20 条（PageReq 默认 page_size=20）
-# 计划任务执行：execute_plan 校验 IllegalStatusTransition
+DataScope 三档（common/data_scope.py）:
+  超管（is_platform_admin ‖ super_admin 角色）→ is_full=True 看全部
+  经理（项目成员角色含 部门经理/项目经理/开发经理/业务经理 任一）→ manager_project_ids 集合
+  其余 → 仅凭 created_by 可见自己创建的
+resolve_owner（common/ownership.py，代填冒名防护）:
+  非管理员显式把归属字段（execute_user_id/check_user_id/current_user_id/user_id）
+  填成非自己 → 403 PpmOwnershipDenied; admin 可代填; None 不校验; 自填报放行
+  校验在 service 层（纵深防御），router 透传登录 User
+FSM（common/fsm.py）: TransitionMap 白名单 + assert_transition/can_transition,
+  非法迁移抛 InvalidTransition（422）; problem/plan 各自定义 TRANSITIONS
 ```
 
 ## 注意事项
-- **用户可见错误文案中文（2026-08-15-error-message-l10n）**：本模块面向前端用户的 raise message 已全部中文化（中文短语+行动指引，技术 ID 在 details）；守护测试 tests/core/test_error_message_l10n.py 强制新文案含 CJK。
-- 5 子域 router 自身不带 prefix，由 `app.main` 统一 `include_router(..., prefix="/api/ppm")` 挂载
-- common/fsm.py 是通用 `StateMachine[S]`（泛型），各子域定义自己的 TRANSITIONS（如 problem、plan-node-detail）
-- common/crud.py 的 `PageReq`/`Page[T]`/`apply_sort`/`apply_pagination` 是全 ppm 分页排序统一入口；列表默认 page_size=20
-- common/export.py 提供 excel 导出（openpyxl），5 子域（project/plan/task/problem/kanban）均有 `/export-excel` 端点
-- ⚠ **export-excel 路由顺序坑（已复现 3 次：problem ql-020、project、plan ql-20260714-001）**：FastAPI 按注册顺序匹配，字面量路径 `/xxx/export-excel` 必须声明在 `/xxx/{item_id}` **之前**，否则 `export-excel` 被 `{item_id}` 当 UUID 解析返回 422。新增导出端点务必前置注册 + 加路由顺序回归测试（参照 `ppm/project/tests/test_router.py`、`ppm/plan/tests/test_router.py`）
-- 导出文件名统一用 `common/export.py::timestamped_filename(label)` 生成「中文标签_YYYYMMDD_HHMMSS.xlsx」（ql-20260714-002）；各子域导出端点直接传中文 label（如 `timestamped_filename("里程碑明细")`），勿内联 f-string 重复造轮子
-- plan 子域有"模板表（PlanNodeDetailTpl/Module）"与"ps 执行表（PsProjectPlan/PsPlanNode/...）"两套，前者定义后者实例化
-- task 的 `execute_plan` 用 `_assert_transition` 校验状态迁移，非法抛 `IllegalStatusTransition`
-- 202607220900_alter_ppm_fk_to_uuid 迁移把 ppm 外键从 varchar 改 uuid，若依式 map_fk 失败会产生孤儿 FK（plan_node_id NULL）
-- health.router 延迟 import ppm.plan/project model，存在跨模块弱依赖
-- **项目成员写操作经理支配权（2026-08-08 安全加固）**：`/project-member` 的 create/update/delete 复用 router 内 `_require_project_manager`（超管短路 + `manager_project_ids`）校验「调用者是该项目经理或超管」，堵成员自提权/越权改删他人成员。create 用 `body.pm_project_id`；update/delete 先 `ProjectMemberService.get(entity_id)` 取 `existing.pm_project_id` 再校验。读类（GET page/detail）仍仅认证不授权。project 子域其余写端点（项目维护/客户/干系人）暂不在本次范围
-- **模块导入（2026-07-14-milestone-module-import）**：实施阶段里程碑下 `PlanNodeModule` 加 `plan_type`（正常/临时计划，String(32) nullable，旧数据 NULL）；`importer.py` 按表头名解析 Excel（D-007，非列号，容错列位变化）；service `import_preview`/`import_commit` 两阶段无状态端点（预览后确认 D-006），`import_commit` 用 `session.add()`+末尾单次 `commit()` 原子提交（**不复用 `_Crud.create`** 其逐条 commit 破坏原子性，D-008），含同名合并/模块自动汇总(min/max/sum/首个)；router 加文件大小(10MB)/类型校验(413/415)+`plan_node_id`/`pm_project_id` 用 `uuid.UUID`(422)；责任人按姓名 ORM 全量反查 `PpmProjectMember`（不走分页），未匹配行跳过
+- **数据范围单一可信源 = PpmProjectMember.role_name**（2026-07-22 权限统一）：经理判定不再用系统 RBAC 角色 / `PsProjectPlan.project_manager_id` / 部门组织树——改权限口径必须对齐这条，不引入平行判定，否则任务计划/问题清单/项目计划三处口径分裂。
+- `common/fsm.assert_transition` 被 **incident 模块跨域复用**；改 helper 签名/错误类型波及 incident 的 422 语义。
+- health 的 system-status 直接 count 本域 PlanTask / PpmProjectMaintenance / PsPlanNode（users/projects/tasks/milestones 四指标之三）。
+- 导出（export-excel）与导入（import-template / importer）列结构是前端契约，改字段先双侧核对模板。
+- 上线模块回归底线：本域全量 pytest（500 级用例）+ mypy（pre-commit 实际跑 mypy 不只 ruff，AppError.details 为 dict|None，断言索引前须 narrow）。
+- `concerns: large-domain`：单模块承载 20+ 张表，新功能优先考虑独立子域目录而非往现有 service 堆方法。
 
 ## 人工备注
-<!-- MANUAL_NOTES_START -->
-<!-- MANUAL_NOTES_END -->
 
-## 变更索引
-- ql-20260714-001-8c02 | plan 子域 export-excel 路由顺序修复（前置 {item_id}）+ 回归测试
-- ql-20260714-002-1036 | ppm 导出文件名统一「中文+日期时间」timestamped_filename（common helper，5 端点共用）
-- 2026-07-14-milestone-module-import | 里程碑明细·实施阶段 模块导入（plan_type 字段+migration；Excel 两级导入：importer 按表头名/import_preview 责任人反查/import_commit D-008 单事务原子/router 两端点/前端三态弹窗 + 单测&集成测试）
-- ql-20260722-003-f7d9 | problem-list 列表页改造（前端归属默认全部/问题类型入展开/17列重排+bug标红+责任人&处置人合并列+预估·已消耗合并列；后端 service 排序白名单加 plan_start_time 支持按计划开始时间正序；router list 回填 now_handle_user_name 历史仅存 id 处置人反查 display_name）
-- ql-20260722-004 | problem 数据范围补创建人可见(common/data_scope.problem_scope_clause 加 created_by==user.id,修"能编辑却在列表看不见自己创建的问题"矛盾)+ 详情页展示创建人/创建时间(schema ProblemListResp 加 created_by_name,router 列表批量+详情单条反查 display_name)
-- 2026-07-22-ppm-permission-by-project-member-role | PPM 权限统一到「项目成员角色」:项目计划/项目维护数据范围(data_scope.py 根)从「系统 RBAC 角色 XMJL/DEPTBOSS + PsProjectPlan.project_manager_id + 部门组织树」改为复用 common.data_scope 的 manager_project_ids(PpmProjectMember.role_name),与任务/问题同口径;DataScope 改 (is_full, manager_project_ids, creator_user_id)。项目计划编辑/删除加 can_operate_plan(超管‖创建人‖本项目经理)+ PsProjectPlanResp.can_edit/can_delete,前端 project-plans/milestone-details 编辑门改读后端标志(对齐问题清单)。行为变化:普通用户获自建可见;部门经理不再自动看本部门全部项目(需配成员角色);里程碑页经理角色成员可编辑。项目维护写操作/任务编辑不在本次范围
-- ql-20260808-001-4068 | 项目成员 create/update/delete 加经理/超管校验（复用 _require_project_manager，堵成员自提权/越权改删；create 用 body.pm_project_id，update/delete 先 get 取 pm_project_id）
+<!-- MANUAL_NOTES_START -->
+
+<!-- MANUAL_NOTES_END -->

@@ -2,38 +2,50 @@
 schema_version: 1
 doc_type: module-card
 module_id: components-charts
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:02:00
+created_at: 2026-08-18 01:45:00
 ---
-# components-charts
+
+# ECharts 图表组件（components-charts）
 
 ## 定位
-PPM 可视化图表组件（`components/charts/*.tsx`），基于 `echarts-for-react` 封装，用于工时统计、项目计划成本等场景的柱状图/饼图。为规避 echarts SSR 问题，`index.tsx` 用 `next/dynamic` 动态导入（仅客户端渲染），页面层只 import 动态包装后的具名导出。
+ECharts 图表组件（`components/charts/`，3 图 + 1 桶文件），基于 `echarts-for-react` 封装。
+两张 PPM 工时图（柱状/饼图）+ 一张 daemon 运行时用量 sparkline 折线图。ECharts 依赖
+window/DOM，Next.js App Router 下必须 ssr:false——`index.tsx` 桶统一用 `next/dynamic`
+动态包装并带 Loading 占位，页面只从桶 import 动态版，无需各自再 dynamic。
 
 ## 契约摘要
-- `WorkHourBarChart`（`WorkHourBarChart.tsx`）：工时柱状图，props `WorkHourBarChartProps`（含 rows、color 等）；内部 `useMemo(() => toBarSeries(rows, color))` 生成 option。
-- `WorkHourPieChart`（`WorkHourPieChart.tsx`）：工时饼图，props 含 rows、totalHours；`useMemo` 算 option。
-- `ProjectPlanCostBarChart`（`ProjectPlanCostBarChart.tsx`）：项目计划成本柱状图，props `ProjectPlanCostBarChartProps`（含 plans）；`useMemo(() => toCostSeries(plans))`。
-- 三者底层都渲染 `<ReactECharts option={option} ... />`。
-- `index.tsx`：`export const WorkHourBarChart = dynamic(() => import(...), { ssr:false })` 等，对外暴露动态版。
+- `WorkHourBarChart`（`WorkHourBarChart.tsx`）：PPM 工时柱状图；props
+  `WorkHourBarChartProps`（rows、color 等）。
+- `WorkHourPieChart`（`WorkHourPieChart.tsx`）：工时饼图；props 含 rows、totalHours。
+- `RuntimeUsageLineChart`（`RuntimeUsageLineChart.tsx`）：运行时用量双线 sparkline
+  （输入/输出 token 趋势）。
+  - props：`{ points: RuntimeUsagePoint[], height? = 120 }`（卡片内矮图，低于工时图的 320）。
+  - 纯展示：不 react-query，数据由父组件注入；空数据渲染占位卡不画 ECharts。
+  - 只画 input/output 双线；cache/费用不画（FR-04，卡片侧用数字展示）。
+  - `RuntimeUsagePoint` 当前内联定义（6 字段：ts/input_tokens/output_tokens/
+    cache_read_tokens/cache_creation_tokens/total_cost_usd，组件只消费前三个）——
+    文件头留有迁移到 lib/daemon.ts 的类型迁移备忘。
+- `index.tsx`（桶）：三个 `dynamic(() => import(...), { ssr:false, loading })`
+  具名导出 + 各 Props 类型静态 re-export；loading 为 h-64 pulse 骨架块。
 
 ## 关键逻辑
-- 统一模式：
+- 各图统一模式：
   ```
-  export function XxxChart(props) {
-    const option = useMemo(() => toXxxSeries(...), [deps])
-    return <ReactECharts option={option} notMerge lazyUpdate />
-  }
+  const option = useMemo(() => toXxxSeries(data), [deps])
+  return <ReactECharts option={option} notMerge lazyUpdate />
   ```
-- 动态导出隔离 SSR：`dynamic(import, { ssr: false })`，避免 echarts 在服务端访问 window。
 
 ## 注意事项
-- 页面务必 import `@/components/charts`（动态版），直接 import 具体文件会带 SSR 报错。
-- option 用 `useMemo` 依赖 rows/plans，数据引用变化才重算；传新数组每次都换 identity 会触发重渲染。
-- echarts-for-react 透传 echarts 实例，改主题/注册地图等需在客户端 effect 内操作。
-- 图表数据转换函数（toBarSeries/toPieSeries/toCostSeries）是各文件内的私有逻辑，跨图复用需提炼。
+- 页面必须 `import { XxxChart } from "@/components/charts"`（动态版）；直接 import
+  具体文件会在 SSR 报 `window is not defined`。
+- 旧 `ProjectPlanCostBarChart` 已删除，勿再引用（module-map 基线已剔除）。
+- 配色经 `CHART_COLORS`（lib/ppm/aggregations）取统一色源，勿在图内硬编码 hex。
+- option 依赖 rows/points 引用 identity，传每次新建的数组字面量会触发重算/重渲染。
+- 图表数据转换函数（toBarSeries 等）是各文件私有逻辑，跨图复用需先提炼。
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
+
 <!-- MANUAL_NOTES_END -->

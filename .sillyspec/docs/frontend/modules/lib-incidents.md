@@ -2,43 +2,43 @@
 schema_version: 1
 doc_type: module-card
 module_id: lib-incidents
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:02:25
+created_at: 2026-08-18 01:45:00
 ---
-# lib-incidents
+
+# 事故管理客户端（lib-incidents）
 
 ## 定位
-工作空间级"事故（Incident）"管理的前端 API 客户端。封装事故的增改查与事后总结（Postmortem）读写，对应后端 `/api/workspaces/{id}/incidents` 与 `/api/incidents/{id}` 两组端点。事故用于记录 release 引发或运行中的线上问题，并关联复盘文档。
+工作空间级「事故（Incident）」管理的浏览器侧 API 客户端。封装事故增改查与事后复盘（Postmortem）读写，两组端点：workspace 域 `/api/workspaces/{id}/incidents`（列表/新建）与全局事故域 `/api/incidents/{id}`（详情/更新/复盘）。消费方为工作区 incidents 列表页与详情页。
 
 ## 契约摘要
-对外全部为 `apiFetch` 封装的异步函数，返回强类型对象；调用方无需关心鉴权头与 JSON 序列化。
-
 | 函数 | 语义 | HTTP |
 |---|---|---|
-| `listIncidents(workspaceId, status?)` | 列出工作空间事故，可按 `IncidentStatus` 过滤 | GET `/api/workspaces/{ws}/incidents[?status=]` |
-| `createIncident(workspaceId, input)` | 新建事故（标题必填，可带 severity/description/affected_components/release_id） | POST `/api/workspaces/{ws}/incidents` |
-| `getIncident(incidentId)` | 取单个事故详情 | GET `/api/incidents/{id}` |
-| `updateIncident(incidentId, input)` | 更新事故字段（状态/严重度/根因/解决方案等） | PATCH `/api/incidents/{id}` |
-| `createPostmortem(incidentId, input)` | 为事故创建/覆盖复盘文档 | POST `/api/incidents/{id}/postmortem` |
-| `getPostmortem(incidentId)` | 读取复盘文档 | GET `/api/incidents/{id}/postmortem` |
+| `listIncidents(workspaceId, status?)` | 列出工作空间事故，可按状态过滤 | GET `/api/workspaces/{ws}/incidents[?status=]` |
+| `createIncident(workspaceId, input)` | 新建事故（仅 title 必填） | POST `/api/workspaces/{ws}/incidents` |
+| `getIncident(incidentId)` | 取单个事故 | GET `/api/incidents/{id}` |
+| `updateIncident(incidentId, input)` | 部分字段更新（PATCH） | PATCH `/api/incidents/{id}` |
+| `createPostmortem(incidentId, input)` | 为事故创建复盘 | POST `/api/incidents/{id}/postmortem` |
+| `getPostmortem(incidentId)` | 读取复盘 | GET `/api/incidents/{id}/postmortem` |
 
-核心类型：`IncidentSeverity`（low/medium/high/critical）、`IncidentStatus`（open/investigating/mitigated/resolved）、`Incident`、`Postmortem`。
+类型（本模块手写 interface，未迁 api-types）：`IncidentSeverity`（low/medium/high/critical）、`IncidentStatus`（open/investigating/mitigated/resolved）、`Incident`、`Postmortem`、`CreateIncidentInput` / `UpdateIncidentInput` / `CreatePostmortemInput`。
 
 ## 关键逻辑
 ```
-listIncidents: 拼 query string，仅当传 status 才附加 ?status=
-updateIncident: PATCH 部分字段，后端按字段更新
-postmortem 端点走 /api/incidents/{id}（非 workspace 域），注意 URL 前缀差异
+listIncidents: 仅当传 status 才拼 ?status=（encodeURIComponent）
+updateIncident: CreateIncidentInput/UpdateIncidentInput 全可选字段直传 json，后端按字段更新
+状态流转语义在 backend：open → investigating → mitigated → resolved（前端只发目标值）
 ```
 
 ## 注意事项
-- `createIncident` 入参 `CreateIncidentInput` 仅 `title` 必填，其余可选；`affected_components` 为组件 id 数组。
-- `updateIncident`/`getIncident` 用事故全局 id（`/api/incidents/{id}`），不带 workspaceId。
-- `Postmortem.action_items` 为字符串数组；`timeline/impact/root_cause_analysis` 均可空。
-- 事故可关联回滚/部署的 `release_id`（可选）。
-- 仅依赖 `lib-api`，无前端状态缓存，调用方自行管理列表刷新。
+- URL 前缀差异：列表/新建带 workspaceId，其余四函数走 `/api/incidents/{id}` 全局事故域，不带 workspace。
+- `Incident.affected_components` 是字符串数组（组件标识）；可关联回滚/部署来源 `release_id`（可空）。
+- `Postmortem.action_items` 为字符串数组；`timeline/impact/root_cause_analysis/lessons_learned` 均可空。
+- resolve 语义靠 `updateIncident` 传 status/resolution/resolved_by，resolved_at 由后端置位。
+- 类型为手写 interface：后端 schema 若变化不会在 gen:types 时自动暴露，属已知债务；改动事故端点时须对照后端 incident schema 手工核对。
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
+
 <!-- MANUAL_NOTES_END -->

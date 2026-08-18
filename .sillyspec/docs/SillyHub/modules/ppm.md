@@ -2,185 +2,81 @@
 schema_version: 1
 doc_type: module-card
 module_id: ppm
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:16:36
+created_at: 2026-08-18 01:45:00
 ---
-# ppm
+
+# 项目与问题管理（ppm）
 
 ## 定位
-平台级「项目与问题管理」业务域（不绑 workspace），从 dept_project_back/ppdmq-module-ppm 全量复刻。跨 backend（FastAPI）+ frontend（Next.js/antd）三组件：后端 5 子域提供 REST，前端 ppm 路由组 + lib/ppm 客户端 + ppm-* 组件提供完整 UI。覆盖项目→计划→任务→问题→看板全链路。
+平台级「项目与问题管理」业务域（不绑 workspace），从 dept_project_back 全量复刻，**已上线**。跨前后端：
+- 后端 6 子域（project / plan / task / problem / kanban / workbench）提供 REST
+- 前端桌面 ppm 路由组 + 移动端 m/ppm + lib/ppm 客户端 + ppm-* 组件提供完整 UI
 
-产品视角：ppm 是 SillyHub 内嵌的独立项目管理子系统，与 spec 工作流并行。它把传统研发管理（项目立项→计划里程碑→任务工时→问题跟踪→看板协作）搬进平台，前端作为独立入口（/ppm）与主平台菜单完全隔离。看板的「人员×日期矩阵」布局是其特色，工时统计与图表联动。它复用平台的 auth/audit/settings 基础设施，但业务自成体系。
+覆盖项目→计划→里程碑→任务→问题→看板全链路，复用平台 auth/audit/file 基础设施但业务自成体系，与 spec 工作流并行。
 
 ## 契约摘要
-- 后端路由：`prefix=/api/ppm`，5 子域 router：`ppm-project`（项目/客户/成员/干系人）/ `ppm-plan`（模板+ps 计划/里程碑/三联表）/ `ppm-task`（任务计划/执行/工时）/ `ppm-problem`（问题清单+变更流4节点）/ `ppm-kanban`（看板+评论+子任务），约 102 路由
-- 前端：`(dashboard)/ppm/*` 页面（projects/project-plans/plan-nodes/milestone-details/task-plans/task-execute/work-hours/work-hour-statistics/problem-list/problem-changes/kanban/project-members/customers/project-stakeholders）+ `lib/ppm/*` 客户端（project/plan/task/problem/kanban/aggregations/export/format/status-label/workday/types）+ `components/ppm-*.tsx`（dict-select/file-urls/members-table/plan-detail/plan-form/resource-table/status-actions/sub-table/text/user-select）
-- common：`crud.Page[T]` 分页泛型 + `PageReq`/`apply_pagination`/`apply_sort`/`count_total` / `export` openpyxl 导出 / `fsm.StateMachine` 状态机基类（`can_transition`/`next_states`/`assert_transition`）/ `uuid_type`
-- 权限：`require_permission_any(PPM_*)`，24 个 PPM_PROJECT_*/CUSTOMER_*/PLAN_*/PROBLEM_*/TASK_*/WORKHOUR_*/KANBAN_* 权限点
-- 数据：约 21 表；2 套状态机（问题 4 节点审批流 ProblemStatus + 里程碑 PlanNodeDetailStatus draft→review→approve→done + 变更 ProblemChangeStatus 版本链）
-- 跨组件协作：后端复用 auth(User/Org/Role)/audit_logs/settings；前端 kanban-store 缓存筛选；导出经 lib/ppm/export.ts
+- 后端路由（统一挂 `/api/ppm` 前缀，子域靠 path 区分，约 135 端点）：
+  - project（27 端点，tag=ppm-project）：项目维护 / 客户 / 干系人 / 成员（member-summary 聚合）/ 导入导出
+  - plan（43，ppm-plan）：计划节点模板（PlanNode+明细）/ 项目计划 / 里程碑（PsPlanNode）/ 模块 / 明细（PsPlanNodeDetail）/ Excel 导入导出
+  - task（25，ppm-task）：任务计划（PlanTask）/ 执行（TaskExecute）/ 工时
+  - problem（22，ppm-problem）：问题清单 + 问题变更流（4 节点审批）/ 批量导入
+  - kanban（13，ppm-kanban）：看板任务 / 评论 / 子任务 / reorder
+  - workbench（5，ppm-workbench）：工作台聚合 profile / summary / calendar / todos（支持切换查看目标用户）
+- 数据范围（`data_scope.py`，2026-07-22 权限统一）：
+  - 单一可信源 = 项目成员角色：`PpmProjectMember.role_name` 逗号拆分后**精确匹配** 部门经理/项目经理/开发经理/业务经理
+  - 超管（is_platform_admin 或 super_admin 角色）→ 看全部
+  - 经理 → 看名下全部项目；其余 → 仅凭 created_by 可见自己创建的
+  - 功能权限（require_permission_any PPM_*）管「能不能进接口」，DataScope 管「能看哪些数据」，二者正交
+- 归属防冒名（`common/ownership.resolve_owner`，security-ppm-ownership）：
+  - task 的 execute_user_id / check_user_id / current_user_id / user_id 等代填字段统一过 resolve_owner
+  - 非超管且 requested 非本人 → 拒绝（PPM 代填冒名防护原语）
+- common 基础设施（`ppm/common/`）：
+  - `crud.Page[T]` 泛型分页 + PageReq / apply_pagination / apply_sort / count_total
+  - `export`：openpyxl 导出，平铺与 `grouped_report_to_workbook` 子母表分组两种布局
+  - `fsm.StateMachine[S]` 泛型状态机（can_transition / next_states / assert_transition）
+  - `data_scope`（manager_project_ids / is_super_admin）
+  - `ownership`（resolve_owner）
+  - `upload`：.xlsx 上传校验（单文件 10MiB 上限，PpmUploadError，413/415）
+  - `uuid_type`：统一 UUID 类型处理
+- 前端：
+  - `lib/ppm/` 16 文件：project/plan/task/problem/kanban/workbench/weekly-plan 客户端 + types/format/status-label/workday/aggregations/export/execute-time
+  - 桌面 `(dashboard)/ppm/*` 15+ 页面：projects / project-plans / plan-nodes / milestone-details / task-plans / task-execute / work-hours / work-hour-statistics / weekly-plan / problem-list / kanban / project-members / customers / project-stakeholders / workbench
+  - 移动端 `m/ppm/*` 5 页面：workbench / task-plans / project-plans / problem-list / milestone-details
+  - `components/ppm-*` 11 个业务组件（表格/表单/选择器/状态操作等）
+- 状态机（2 套 + 变更链）：
+  - 问题审批流：申请 → 开发经理 → 项目经理 → [部门经理] → 验证 → 关闭；bug 类型跳过部门经理；`compute_next_node` / `is_audit_node` 计算推进
+  - 里程碑明细：draft → review → approve → done（编辑直提 draft→done 免审核路径）
+  - 里程碑变更走 `parent_id` 版本链（旧版 archived、新版 draft），不走状态迁移
 
 ## 关键逻辑
-问题审批流（`problem.fsm`）：
 ```
-申请 → 开发经理 → 项目经理 → [部门经理] → 验证 → 关闭
-bug 类型跳过部门经理；按项目角色查 project_member 找下一处理人
-缺失则挂起 ProblemPendingAssignment
+问题审批: 按项目角色查 project_member 找下一处理人 → 缺失挂起 ProblemPendingAssignment
+明细↔任务联动（同事务强一致）:
+  明细 done → 自动建 PlanTask 挂执行人名下（_ensure_task_for_detail 等 helper）
+  编辑 → 同步任务字段
+  删除 → 级联：非[已完成]任务连任务+TaskExecute 一起删，[已完成]仅解关联保留
+  删模块 → 级联删该模块下全部明细（逐条套任务级联规则）+ 模块本身
+模板初始化:
+  新建项目计划按全部 PlanNode 模板批量建里程碑（有模块→空里程碑 / 无模块→复制明细 draft）
+  新建里程碑选模板阶段同样复制明细（template_plan_node_id 追溯来源）
+看板: 人员×日期矩阵，任务按 start_time~deadline 跨天连续落 cell（限 366 天）
+导出: grouped 子母表（里程碑/模块跨列合并标题行 + 明细行），状态英→中映射
 ```
-里程碑变更走 `parent_id` 版本链（旧版 archived、新版 draft），不走状态迁移。
-明细-任务联动：里程碑明细（PsPlanNodeDetail）变 done 时自动建一条 PlanTask 挂执行人名下（plan/service.py 6 helper `_ensure_task_for_detail` 等 + 5 触发点 create_detail/_transition/import_commit/update+delete_detail/change_process，强一致同事务）；编辑同步任务字段、变更迁移（版本链）；**删除级联（ql-20260722-006-3aca）**：删明细时关联任务非[已完成]连任务+其 TaskExecute 一起删、[已完成]仅解关联保留；删模块（三级含模块子表）级联删该模块下全部明细（逐条套任务级联规则）+ 模块；明细列表「执行状态」列 = 关联任务 PlanTask.status 实时查派生（不落库）；导入一行多责任人拆分（全匹配→每人一条，任一未匹配→整行标红）。
-看板 matrix（`kanban-grouping`）：人员×日期矩阵，任务按 start_time~deadline 跨天连续落 cell（限 366 天）。
-导出：openpyxl 生成 xlsx，文件名时间戳格式 `{中文名}_YYYYMMDD_HHmmss.xlsx`。
-看板 service `_derive_priority`/`_derive_progress` 从状态派生优先级与进度；`_parse_hours`/`_parse_date_range` 解析工时与日期。
-问题审批 `compute_next_node`/`is_audit_node` 计算下一审批节点与是否审批节点。
-任务 service `list_by_user_and_date_range` 支持按人+日期范围查（看板数据源）。
-
-### common 基础设施
-- `crud.Page[T]`：泛型分页响应（items + total + total_pages），`PageReq`（page/page_size/order_by/order）+ `apply_pagination`/`apply_sort`/`count_total` 查询助手
-- `export`：openpyxl 生成 xlsx，列定义 + 文件名时间戳，StreamingResponse 返回
-- `fsm.StateMachine[S]`：泛型状态机（can_transition/next_states/assert_transition/transition），TransitionMap 支持 set/list/dict 多形态
-- `uuid_type`：统一 UUID 类型处理
-
-### 前端分层
-- `lib/ppm/`：API 客户端（project/plan/task/problem/kanban）+ 工具（format/format-token/status-label/workday）+ 类型 types + 聚合 aggregations + 导出 export + 看板分组 kanban-grouping
-- `components/ppm-*`：业务组件（表格/表单/选择器/状态操作）
-- `(dashboard)/ppm/*`：页面，统一 PageContainer+PageHeader+SectionCard+antd Table 风格，服务端分页
 
 ## 注意事项
-- 平台级，**无 workspace_id**；多租户 tenant_id 已丢弃
-- 通知走 audit_logs（**无独立站内信**），附件用 `file_urls` JSON（**无上传服务**）
-- silly 动态表单已弃（状态机替代）
-- 后端改完必 curl 实测端点（曾因未 import UTC 致 API 500，看板空）
-- FastAPI 路由按注册顺序匹配：字面量路径（export-excel）必须排在 `{item_id}` 参数路由之前，否则 422
-- 导出 Excel 前端需解析 Content-Disposition RFC 5987 filename* 取服务端文件名
-- 列表页统一默认查 20 条，page_size 上限 200（后端 Query ge=1 le=200），前端调用需夹到 200
-- PpmUserSelect res=user 已选值回填：已选 user_id 不在已加载 options（分页只取部分）时，按 id 批量调 listUsers({ids}) 查真实姓名补 label，避免编辑成员"姓名"字段回退显示 id（依赖后端 list_users ids 参数）
-- 问题审批按项目角色查 project_member 找下一处理人，缺失则挂起 ProblemPendingAssignment
-- 工时统计支持 stat-by-user（柱图）/stat-by-project（饼图）双维度
-- 看板 reorder 持久化 kanban_order；DateNav 仅控展示列不参与任务拉取过滤（对齐源无日期过滤）
-- bug 类型问题跳过部门经理审批节点
-- 后端 service 改完必须 curl 实测端点 + grep 确认 import 在当前文件（曾 _derive_priority 用未 import 的 UTC 致 500）
-- 列表页查询条件变化不自动查，走 searchNonce 兜底（React 18 batch 保证 setState+setSearchNonce 同帧合并触发 1 次重查）
-- 选择型查询条件 onChange 即查，文本型（Input/RangePicker）走回车/按钮提交
-- 导出按钮对齐：搜索 primary + 重置 outline + 分隔 + 导出 outline + 新建 primary
-- PpmResourceTable 新建/编辑表单用 antd Modal（PpmResourceModal，destroyOnClose + footer 自定义取消/保存按钮），操作栏按钮全 antd Button（编辑/成员管理 type=link、删除 type=link danger、新增/搜索 type=primary、导出/重置/展开/重新加载 default，size=small）；2026-07-20 由 Drawer 改 Modal（ql-20260720-001）
-- 操作列 fixed=right + whitespace-nowrap，width 用具体数字（max-content 在 fixed+scroll.x 下不可靠）
-- 表格 scroll y 用 calc(100vh-430px) 按视窗自适应，Table.Summary fixed=bottom 吸底
-- FastAPI 路由按注册顺序匹配，export-excel 字面量必须排在 {item_id} 前
-- downloadExcel 需解析 Content-Disposition RFC 5987 filename* 取服务端文件名
-- 前端 downloadExcel 需自己复刻 401 自动刷新（apiFetch 不覆盖裸 fetch）
-- 列表页查询条件 grid-cols-4，可展开/收起（默认 4 个 Field）
-- DateNav 仅控看板展示列，不参与任务拉取过滤（对齐源无日期过滤）
-- 看板 reorder 持久化 kanban_order 字段
-- 任务卡片 TaskCardVO 含 start_time 供跨天展示
-- 工时 _parse_hours 解析 "1.5h"/"90m" 等多种格式
-- 导出列定义在 export.py 各 _COLUMNS 常量
-- plan fsm 的 PlanNodeDetailStatus 含 archived 终态
-- problem fsm 的 ProblemStatus 含挂起/关闭等扩展态
-- project_member.role_name 是多角色逗号拼接存储（D-009@v1，源 multiple-value-type="join"，如"开发经理,项目经理,前端开发人员"）；ProjectMemberService.page 按 role_name 过滤用 ilike 模糊匹配，避免精确匹配漏掉多角色拼接成员（曾致 /ppm/project-plans 编辑/新建项目经理下拉「无数据」）
-- ppm/project-maintenance/simple-list 只返回 {id, project_name}，不含 company_name；项目计划表单选项目后带公司名需另调 getProject(id)（ppm-project-plan-form.onProjectChange：Promise.all 查 getProject + listProjectMembers，公司名回填 + 唯一项目经理自动带入）
-- /ppm/project-members 为两级 expandable 表：一级项目行调 GET /project-maintenance/member-summary 聚合真分页（owner_name 推算 + member_count + 6 维筛选），展开行复用 PpmProjectMembersTable 的 embedded 紧凑模式（去 SectionCard 外壳 + 去 calc(100vh-430px) 的 vh scroll，避免视口滚动框嵌套 G1；onChanged 回调刷新 member_count）
-- 负责人列由 member_summary 推算：role_name ilike '%项目经理%' 取 created_at 最早者 user_name，无则 None（显「—」），不落库；派生列 owner_name/member_count 不进排序白名单（仅 updated_at/created_at/project_name/project_code 可排序，D-005）
+- 平台级无 workspace_id；通知走 audit_logs（无独立站内信），问题附件用 file_urls JSON（无独立上传服务）
+- `role_name` 是多角色逗号拼接存储，按角色过滤用 ilike 模糊匹配（精确匹配会漏多角色成员）
+- 项目计划列表/详情/导出的项目名 outerjoin 项目表实时取真名（单一可信源），冗余列 project_name 仅创建兜底用
+- FastAPI 路由按注册顺序匹配：字面量路径（如 export-excel）必须排在 `{item_id}` 参数路由前，否则 422
+- 列表默认 20 条、page_size 上限 200（后端 Query ge=1 le=200）；排序走白名单防注入，order_by 为空时回退 created_at desc
+- 导出文件名 `{中文名}_YYYYMMDD_HHmmss.xlsx`
+- 前端 downloadExcel 需解析 Content-Disposition RFC 5987 filename* 取服务端文件名，且需自己复刻 401 刷新（裸 fetch 不走 apiFetch）
+- 导入规则：一行多责任人全匹配拆 N 条、任一未匹配整行标红不拆；空责任人放行（draft 后补）；导入序号按当前层级最大纯数字 no 递增
+- PPM 已上线：涉其表结构/接口的破坏性变更需按已上线标准评估，不适用「未上线可清数据」豁免
 
 ## 人工备注
-<!-- MANUAL_NOTES_START -->
-<!-- MANUAL_NOTES_END -->
 
-## 变更索引
-- ql-20260624-010-xxxx | 修复项目计划编辑/新建项目经理下拉多角色成员显示无数据（role_name ilike 模糊匹配）
-- ql-20260624-011-b8f2 | 项目计划选中项目后带出公司名 + 唯一项目经理自动带入（onProjectChange async 查 getProject+listProjectMembers）
-- ql-20260714-007-b2e7 | 修复「新建里程碑」选计划开始/完成时间崩溃（DatePicker 受控写法 value/onChange 与 Form.Item name 冲突→rc-picker isValid 报错），对齐明细表单 getValueProps+normalize
-- 2026-07-14-ppm-projects-style-redesign | /ppm/projects 样式规范化（状态 StatusBadge/类型 Tag/antd Drawer+Modal maskClosable=false/toast 语义化/搜索按钮分组）+ task-08 推广 10 个 ppm 页面操作列统一（居中+ghost+危险红）+ 去硬编码色（bg-blue-500/bg-amber-500/emerald-300）
-- ql-20260714-009-c3d1 | /ppm/projects 项目类型/状态列显示 code「1 2」修复：PROJECT_TYPE/STATUS_OPTIONS value 改源字典 code 1/2/3（原 research/ongoing 与 DB 实际 code 不匹配，PpmResourceTable select find 回退显示原始 code）
-- ql-20260714-010-a4f2 | PpmResourceDrawer 抽屉表单控件原生→antd 统一：Form.useForm + Form.Item rules + Input/Select/DatePicker/InputNumber/Input.TextArea（date/datetime getValueProps/normalize dayjs↔ISO），补 ppm-projects-style-redesign task-02 漏改的表单层
-- ql-20260715-010-bb2c | /ppm/project-members 编辑成员"姓名"显示 id 修复：PpmUserSelect res=user 已选 user_id 不在前 20 条时按 id 批量查真实姓名回填 label（后端 list_users 加 ids 参数配合）
-- ql-20260715-011-b118 | /ppm/project-members 一级表"更新时间"列格式化：render `String(v).slice(0,19)`（原始 ISO/UTC，带 T）→ `fmtDateTime`（`YYYY-MM-DD HH:mm` 本地时区，空值 —）
-- ql-20260715-012-5110 | /ppm/projects「成员管理」改为跳转 /ppm/project-members（URL 带 project_name）：project-members page 读 param 传 initialProjectName，GroupTable 初始填搜索 project_name + 首次加载自动展开匹配项目子表（autoExpandedRef 仅一次）；删 projects 抽屉入口（ProjectMembersDrawer）
-- ql-20260715-013-9bc5 | 项目成员子表（PpmProjectMembersTable）改服务端分页：load 由 listProjectMembers（全量+本地 rows.slice）→ pageProjectMembers 传 page/page_size，rows=当前页、total 来自接口；pageSize 变更走接口刷新（onChange 回第 1 页防越界）
-- 2026-07-15-project-members-rebuild | /ppm/project-members 重构为项目→成员两级可展开表：后端新增 GET /project-maintenance/member-summary 聚合接口（owner_name 负责人推算 role 含项目经理取 created_at 最早 + member_count + 6 维 EXISTS 筛选 + 排序白名单）+ 成员接口 LEFT JOIN users 补账号列 username；前端两级 expandable 表（展开行复用 PpmProjectMembersTable embedded 紧凑模式 + onChanged 刷新成员数）+ 页头全局/项目内两种新增入口；/ppm/projects 成员管理抽屉改跳转 project-members（ql-012）+ 成员子表服务端分页（ql-013）。归档总览（实现散于 ql-007/010~013）。
-- ql-20260715-014-7e3a | 导入模块多责任人拆分：service._to_preview_row→_to_preview_rows（一行多责任人全匹配→拆N条各一责任人 duty_user_id + work_load 各=原值；任一未匹配→整行1条标红 valid=false 不拆；空责任人→1条标红）+ import_preview 改 flatMap；联动建任务自动跟随
-- ql-20260715-010-a3b7 | PPM 工作台：默认首页 /ppm/projects→/ppm/workbench + 快捷入口加「任务计划」按钮（/ppm/task-plans）+ 我的待办新增「问题变更审批」分支（workbench/service.py _derive_todos 查 PpmProblemChange status="1"审核中且 now_handle_user 含我 → source=problem_change，前端 todo-list-panel goTodo 跳 /ppm/problem-changes；问题清单维持现状，不含任务计划/里程碑明细）
-- ql-20260716-001-7f3a | /ppm/projects 新建项目后创建人(create_name)列为空修复：create_name 是系统字段(design 约定不进表单)，后端 ProjectMaintenanceService.create 新增 operator_name 参数，data.create_name 为空时回退用 user.display_name 自动填充；router create_project_maintenance 传 user.display_name；补 service 单测三断言
-- ql-20260716-002-4c8e | /ppm/projects 项目维护列表默认排序改为创建时间降序(最新在前)：apply_sort 当 order_by 为空时不排序致顺序不确定，service.page 在 req.order_by 为空时回退 created_at(白名单已含)，复用 req.order 默认 desc；前端显式 order_by 仍优先(兼容列头排序)，仅改后端一处
-- ql-20260716-004-6d21 | 里程碑明细·明细列表(DetailLevelTable)加「执行人」列：明细有 execute_user_id 但列表未显示(无 execute_user_name 字段),columns 加执行人列用 PpmUserSelect disabled 显示(同模块责任人列模式 res=projectMember),DetailLevelProps 加 projectId + 两处调用(532/947)透传 + moduleExpandRender deps 补;仅改前端单文件,不动后端/通用组件
-- ql-20260716-006-9c4f | /ppm/project-plans 新建项目计划后「项目名称」列显示 id 修复：DB 实测新建 project_name=None(前端表单无 project_name 字段致提交空 + 后端不兜底),列表 v??p.id 回退显示 id;后端 create_ps_project_plan 兜底 project_name 为空时按 project_id 查 PpmProjectMaintenance.project_name 填充(单一可信源,显式传不覆盖/project_id 无效保持 None);仅改后端 service+单测
-- 2026-07-16-plan-node-module-restructure | /ppm/plan-nodes 计划节点模板模块结构改造：PlanNode+has_module（记录字段,新建必填+编辑可改 v3）+PlanNodeDetail+module_id（防御性归属校验:非null跨模板违例400,v2简化）+migration 20260716;前端 plan-nodes 展开统一只显示模板明细一个子表（v2 取消三层/模块子表）+NodeFormDrawer antd Form（Switch 可改）+列表按编号正序（v4）。归档总览（v1三层→v2降记录→v3可编辑→v4排序,实现散于 design§13/tasks v2v3 章节）
-- 2026-07-17-project-plan-init-from-template | /ppm/project-plans 新建项目计划按模板批量初始化里程碑：create_ps_project_plan 同事务按所有 PlanNode 模板建 PsPlanNode（has_module=无复制明细 draft / 有模块空里程碑,no int→str）；create_module 复制模板明细到新模块（draft）；PsPlanNode+template_plan_node_id（追溯模板）+has_module（冗余,模块层判断）；milestone-details 模块层条件 overall_stage→has_module；migration 20260717
-- ql-20260717-001-f1a2 | 里程碑明细编辑提交直接完成(无审核流程)+建任务计划：_FORWARD_NEXT[DRAFT]=DONE(draft save→done 跳过审核)+fsm DRAFT 白名单加 DONE+_transition DONE 分支记完成人(approve_user)。修复编辑明细提交后状态"审核中"应"完成"+没建任务计划(两 bug 同源:review 状态不触发 _ensure_task_for_detail)
-- ql-20260717-003-94b4 | 里程碑明细·明细列表(DetailLevelTable)加「任务描述」列：明细已有 task_description 字段(表单 page.tsx:2313 + types PsPlanNodeDetail),列表缺该列;columns「任务主题」后加任务描述列(dataIndex=task_description,width=220,ellipsis=true 防长文本撑高行);page.tsx 3 处「任务主题」列用后跟列区分唯一定位(仅 DetailLevelTable 后跟「角色」,master/preview 分别跟「责任人」「工作量」);纯前端单文件,不动后端/接口/types
-- ql-20260717-004-01b2 | 项目改名后项目计划列表项目名不更新：ps_project_plan.project_name 是冗余快照(创建从项目表复制 ql-20260716-006)改名不同步→计划列表/详情/导出/任务联动(_resolve_project_context 取 PsProjectPlan.project_name)全显旧名;写时同步——ProjectMaintenanceService.update 检测 project_name 变更时同事务 update(PsProjectPlan).where(project_id==entity_id).values(project_name,updated_at) 刷新所有关联计划,单一写入点所有读点自动跟上(import plan.model 无循环);波折:① text SQL WHERE 绕过 UuidCoercing 致 UPDATE 0 行→改 update() statement 走 model 类型适配;② project/tests/conftest 加 plan model 注册建 sqlite ppm_ps_project_plan 表;③ expire_on_commit=False 测试用 select column 直查 DB 验实际值
-- ql-20260720-001-c4a1 | PpmResourceTable 编辑/新建抽屉改 antd Modal（<Drawer>→<Modal>，PpmResourceDrawer→PpmResourceModal，onClose→onCancel，保存按钮加 loading={saving}）+ 操作栏 shadcn Button 全量改 antd Button（编辑 type=link、删除 type=link danger、新增/搜索 type=primary、导出/重置/展开/重新加载 default，size=small）；影响项目/客户/成员/干系人 4 页新建+编辑；projects/page.tsx 成员管理按钮同步 antd
-- ql-20260720-002-8d3e | /ppm/projects 查询区按钮 size=small→默认 middle(修字体顶边框)：查询区 5 按钮(导出/新增/搜索/重置/展开)+Modal footer 2(取消/保存)+错误条重新加载 1(均有边框/实心)改默认 32px；操作列 link(编辑/删除)保持 small；DataTable size 不动
-- ql-20260720-003-2f1a | table 序号「#」列居中对齐：PpmResourceTable 序号列 coldef 加 align=center(表头「#」+数字单元格同居中)，影响所有 ppm 表
-- ql-20260720-004-b05c | 修 striped 表固定列横向滚动穿透：序号列(fixed left)+操作列(fixed right)coldef 加 onCell background=hsl(var(--card))(不透明，与 SectionCard 卡片底一致)覆盖 striped 透明背景；中间非固定列保留斑马纹
-- ql-20260720-006-a7e3 | 里程碑明细已完成(done)操作列加「变更」按钮：新增 changeInfo 抽屉模式(开立信息可编辑,footer 仅「提交」无「保存」),提交调 updatePsPlanNodeDetail→后端 _sync_task_fields 同步任务计划字段(content/workload/time/user/module),不改明细 status/不生成新版本/不改任务 status(FR-03/D-007);DetailLevelTable done 加按钮(readOnly 禁用)+baseEditable/submitText/title 配套;纯前端单文件
-- ql-20260720-007-b9d2 | 任务计划同步明细 task_description：PlanTask 加 task_description(Text)列+migration+plan/service 三处(_ensure 命中/新建+_sync)同步 task_description+schema 暴露(task update exclude_unset 不误清)+前端 PlanTask 类型加字段+task-plans 加「任务描述」列；明细提交建任务/编辑同步都带任务描述
-- ql-20260720-008-c4e1 | 任务计划详情补任务内容/任务描述：列表「详情」Modal 任务信息 grid + 执行弹窗 TaskDetail grid 开头各加任务内容(整行 col-span-2)+任务描述(整行,空不显示);PlanTask 类型已有两字段(ql-007),纯前端展示
-- ql-20260720-009-d5f2 | /ppm/project-plans 操作列去「详情」按钮(与项目名称点击打开详情重复);detail Modal 保留(项目名点击仍入口)
-- ql-20260720-010-e3a1 | /ppm/project-members + /ppm/milestone-details 侧边栏菜单隐藏(二级页面)：MenuPermissionGroup 加 navHidden 字段+两菜单项设 true+app-shell 渲染 filter;路由/权限/active 保留,经跳转(/ppm/projects 成员管理、/ppm/project-plans 里程碑)仍可进入
-- ql-20260720-011-f1b8 | 里程碑明细详情抽屉去掉「审批信息」块：DetailDrawer 删审批信息 FormSection(approve_user_id/是否驳回/审批意见)+approveEditable 定义;审核信息块保留;approve 模式 submit 默认值保留不破坏;当前 draft→done 无审核流程 approve 模式不触达
-- ql-20260720-013-c7e9 | /ppm/project-plans 按页面样式规范调整：Button shadcn→antd(工具栏 导出/重置/展开 default、新建/搜索 primary;操作列 里程碑/编辑 type=link、删除 type=link danger;重新加载 default)+ 删除原生 confirm()→App.useApp().modal.confirm(okButtonProps danger)+ toast 成功色 emerald 硬编码→success token;page.tsx 已对齐(自定义左树+右表布局,PageContainer/SectionCard/DataTable/grid Field)
-- ql-20260720-014-b3d5 | /ppm/project-plans 新建/编辑表单 PpmProjectPlanForm Drawer→Modal：Drawer→Modal(width=920 保留、onClose→onCancel、footer 取消 default+确定 primary、补 maskClosable=false)+ Button shadcn→antd;组件名/props 不变 page.tsx 零改,17 字段表单逻辑不动
-- ql-20260721-001-7e3a | /ppm/project-plans 项目计划表单去掉「完成状态」(status) 字段：ppm-project-plan-form.tsx 清理 status 7 处引用(注释/FormValues/edit 回填/create setFieldsValue/initialValues/payload/Form.Item+Row2 双列改单字段独占行)，表单不再显示或编辑；后端 schema.status 默认 draft 保留不动；详情 statusLabel「状态」展示未改
-- ql-20260721-002-b4c2 | /ppm/milestone-details 按页面样式规范调整(第一批)：shadcn Button→antd(28处;操作列 ghost→link small、删除加 danger、工具栏 outline→default、新建→primary、footer 保存→primary+loading 去掉"提交中…"文案)+3处原生 confirm→Modal.confirm(静态,与 message 一致)+硬编码色→token(emerald→success、blue→primary、amber/red→destructive、slate→border/muted-foreground;bg-red-50 错误语境保留合规)；eslint 0 error tsc 0 error；3个 Drawer→Modal 留第二批
-- ql-20260721-003-c8d1 | /ppm/milestone-details 按页面样式规范调整(第二批)：3个 Drawer→Modal(模块 extra 按钮→footer、明细 extra 状态Tag→title 内联 footer 保留、里程碑 footer 保留)；统一 onClose→onCancel、补 maskClosable={false}、删 Drawer import、</Drawer>→</Modal>；eslint 0 error tsc 0 error milestone-details 24测试通过
-- ql-20260721-004-a3f2 | /ppm/milestone-details 主表操作列加宽：width 280→340(+新建明细/编辑里程碑/删除里程碑 3 按钮避免挤换行)
-- ql-20260721-005-5d8e | /ppm/milestone-details 明细子表加计划开始/结束时间列：DetailLevelTable「计划工时」列后新增「计划开始」「计划结束」两列(fmtDate 回显 plan_begin_time/plan_complete_time)
-- ql-20260721-006-c7a1 | /ppm/plan-nodes 按页面样式规范调整：shadcn Button→antd(7处;操作列 link small/删除 danger、新建 primary、重新加载 default、明细/Drawer footer 保存 primary+loading)+1 confirm→Modal.confirm+1 Drawer→Modal(NodeFormDrawer footer 保留)+硬编码色→token(emerald→success、amber→destructive);eslint 0 error tsc 0 error
-- ql-20260721-007-9d2e | 修复 /ppm/milestone-details 新建/编辑里程碑 plan-node-ps POST/PUT 422：MasterDrawer 的 plan_workload 是 InputNumber(number) 直接发,后端 str 收 number 422(Pydantic v2 不 coerce number→str);改 String() 转换(对齐明细表单);日期字段 normalize 非 422 源
-- ql-20260722-001-a7f3 | /ppm/project-plans 项目计划列表默认排序改为创建时间降序(最新在前)：apply_sort 当 order_by 为空时不排序致顺序不确定，plan/service.list_ps_project_plans 在 req.order_by 为空时回退 created_at(allowed_sort 已含)，复用 req.order 默认 desc；前端显式 order_by 仍优先(兼容列头排序)；仅改后端 service + 2 单测(默认 desc 顺序/显式 order_by 不被覆盖)
-- ql-20260722-002-b9e4 | /ppm/projects 项目维护「公司名称」改文案为「客户名称」：projects/page.tsx:55 字段 label 改(列头/表单/搜索框经 PpmResourceTable 自动跟随) + project/router.py:218 项目维护导出 ColumnDef header 改；字段名 company_name 不动(保数据兼容)；客户维护(/ppm/customers) router.py:393 未动
-- ql-20260722-003-c4d8 | /ppm/problem-list 验证人(audit_user_id)清空/修改不生效：ProblemListUpdate(schema.py)缺 audit_user_id 字段，前端 edit 发的 audit_user_id(含清空 null)被 Pydantic extra=ignore 静默丢弃；Update 补 audit_user_id: uuid.UUID|None=None(对齐 ProblemListBase/ORM)；新增 problem/tests/test_schema.py 3 测试
-- ql-20260722-004-e5a2 | /ppm/project-plans 新建弹窗限高：PpmProjectPlanForm 的 Modal 加 styles.body={maxHeight:'70vh',minHeight:'300px',overflowY:'auto'}(antd v6)，17 字段表单超高时内部滚动不撑屏、短内容有下限
-- 2026-07-22-plan-project-name-join | /ppm/project-plans 项目计划「项目名称」改 outerjoin 项目表取真名(单一可信源)：list/get/export 不再读 PsProjectPlan 冗余列、改 outerjoin ppm_project_maintenance 取 project_name 并覆盖；筛选 req.project_name / 排序 order_by=project_name 基于 join 字段；删 project/service.py 项目改名→同步刷新 PsProjectPlan.project_name 逻辑(join 实时一致,根因治理冗余字段易写坏,替代 ql-20260717-004 的写时同步)；保留冗余列不删 schema(免迁移)；create 兜底不动。W1 join 改造(commit 3f288705)+ W2 单测 task-06/07/08(6 条,commit 4c1dcf1a)+ 修复 W1 改坏的 4 现有测试 + project 改名测试改契；48 passed/366 ppm passed/ruff&mypy 0 error；curl 实测 AC-1/2/3/4 全过
-- 2026-07-21-ppm-update-null | ppm update 清空字段修复：plan/problem `_Crud.update` + plan `update_detail` 去 `if v is not None` 改直接 setattr(配合路由 exclude_unset：未传=不动、null=清空)；补 plan(TestUpdateClearVsKeep/TestUpdateDetailClearsField) + problem(test_problem_flow.py 清空单测) 测试；change_process/agent 不改(版本链/有意设计)；task update 仅修注释。verify plan+problem 172 passed
-- ql-20260722-006-3aca | 里程碑明细删除级联+模块级联+执行状态列：delete_detail 改为非[已完成]任务连任务+TaskExecute 删、[已完成]保留解关联(替原_unlink_task)；delete_module 级联删该模块下全部明细(逐条套任务级联)+模块(单事务,治原 module 删后 module_id 悬空脏数据)；明细列表新增「执行状态」派生列(关联 PlanTask.status 实时批量查不入库)+PsPlanNodeDetailResp 加 task_execute_status 字段。ppm 全量 374 passed/ruff&mypy 0 error/前端 typecheck+lint 0 error/milestone 24 passed。关键决策:删模块连带删其下明细(子表归属模块语义)
-- ql-20260722-007-d15b | /ppm/milestone-details 三级(实施阶段)编辑明细提交后第三层折叠修复：根因=detailTick 递增改 expandRender 子表 key 致 ModuleLevelTable 整体 remount,其内部 antd 非受控 expandedRowKeys 复位→模块行折叠、明细列表消失(两级非模块场景无内层展开不折,仅三级出问题)。修复=去掉子表 key 里的 detailTick(改 key=node.id 稳定不 remount)改下传 refreshTick prop,ModuleLevelTable 透传、DetailLevelTable 加 refreshTick 到 reload useEffect deps 原地刷新。模块展开态因不 remount 保留→不折叠,明细数据照常刷新。仅前端单文件,0 error/24 passed
-- ql-20260722-008-82dc | /ppm/milestone-details 明细子表任务描述列固定 250px + 操作列固定列：DetailLevelTable 任务描述列 width 220→250(保留 ellipsis);操作列加 fixed:'right' + onCell 不透明 hsl(var(--muted)) 背景(固定列+斑马纹防横向滚动穿透,本表容器 bg-muted/20 故用 muted 而非 card 贴表面)。表格已 scroll x:max-content 固定列生效。仅前端单文件,typecheck/lint 0 error/milestone 24 passed
-- ql-20260722-009-fb5f | /ppm/milestone-details 明细子表表格样式对齐 /ppm/projects + 修复固定列/列宽不生效：根因=上轮(ql-008)只给任务描述/操作列设宽,其余列无固定宽→表格不横向溢出→不滚动→fixed:right 的 sticky 无处钉、width 也无感;斑马纹用手动 bg-muted/40 rowClassName(旧法)与 projects 的 ppm-striped-table CSS 模式不一致。修复=①全列加固定宽(明细阶段140/任务主题160/任务描述250/角色100/计划工时90/计划开始120/计划结束120/执行人160/执行状态100/状态100/操作280=1620px 强制溢出→固定列钉、列宽生效);②斑马纹改 ppm-striped-table CSS 模式(包裹 div+style 注入 nth-child even muted/0.4 + rowClassName ()=>'' 对齐 PpmResourceTable);③操作列 onCell 背景 muted→card;④去掉 overflow-visible(恢复 overflow-hidden,内部 scroll 不被裁)。仅前端单文件,typecheck/lint 0 error/milestone 24 passed
-- ql-20260722-010-9d8c | /ppm/milestone-details 明细子表弃用 antd 固定列改全宽自适应(ql-009 仍不生效的定性追修)：根因=antd fixed 列在三级嵌套(主表/模块表都 scroll.x)展开表内不可靠——sticky 相对最近 overflow 祖先(父表 body)计算致固定列失效;scroll.x=max-content 在嵌套下不按内容宽建布局,连任务描述 250 列宽也不生效(三次调宽/scroll 均无效=结构性问题非配置)。方案=弃用 antd fixed,明细表改全宽自适应(去 scroll.x),表格填满容器、操作列(末列)自然落右缘、任务描述 250 严格生效,绕开嵌套固定列限制;回退 ql-009 加给明细阶段/任务主题/角色/计划工时/状态 的刚性宽度改弹性(auto 自适应);斑马纹 ppm-striped-table 保留。仅前端单文件,typecheck/lint 0 error/milestone 24 passed
-- ql-20260722-011-8c3f | /ppm/milestone-details 明细子表操作列固定(子母表已生效后照搬同法)：子母表(主表/模块表,PpmSubTable)操作列 fixed 已生效,用户要求子表(明细 DetailLevelTable)也固定。方案=照搬已生效主表改法:①明细操作列加 fixed:right + onCell card;②auto 列加固定宽(明细阶段140/任务主题160/角色100/计划工时90/状态100,总1620px 强制溢出→sticky 有处钉);③去 overflow-visible(对齐主表/PpmResourceTable)。保留 scroll x max-content + 手动斑马纹。与主表/模块表完全一致。仅前端单文件,typecheck/lint 0 error/milestone 24 passed
-- ql-20260723-001-7a2d | /ppm/milestone-details 明细子表【任务描述】列长内容撑宽修复：scroll.x=max-content 下 antd 按内容算列宽,任务描述虽有 width:250+ellipsis:true 仍被长文本撑开、ellipsis 失效(列自适应很宽)。修法=任务描述 render 由直出文本改为受限宽度 truncate 容器(div className=truncate + style maxWidth:220 + title 悬浮全文),强制截断在 250 内、不受 max-content 影响。仅前端单文件,typecheck/lint 0 error/milestone 24 passed
-- ql-20260723-002-6f33 | /ppm/milestone-details 明细子表【任务描述】列改换行不截断：用户不要截断(truncate),要换行显示全文。修法=去列 ellipsis:true(它强制单行截断),render 由 truncate 改为固定宽度换行容器(whitespace-normal + break-words + maxWidth:220),长文本自动换行多行、列宽仍固定~250、全文可见。仅前端单文件,typecheck/lint 0 error/milestone 24 passed
-- ql-20260723-003-8b94 | /ppm/milestone-details 三级导入模块弹窗上传步加模板下载：模板拷到 frontend/public/templates/dev-plan-template.xlsx(Next.js 静态服务,根路径无 basePath);ImportModuleModal 上传步(step===1)Upload.Dragger 下方加'下载导入模板' antd Button,onClick 临时 anchor(href=/templates/dev-plan-template.xlsx + download=项目详细开发计划模板.xlsx 中文名)触发下载;Dragger+按钮 Fragment 包裹。typecheck/lint 0 error/milestone 24 passed
-- ql-20260723-004-c388 | /ppm/milestone-details 新建里程碑弹窗总体阶段改下拉选+输入(AutoComplete)：PsPlanNodeDrawer 总体阶段原纯 Input 无计划节点模板提示,改 antd AutoComplete。导入 AutoComplete+listPlanNodes(+PlanNode type);加 stageOptions state+useEffect(open 时 listPlanNodes page_size=200 取 overall_stage 去重作下拉 options);总体阶段 Input→AutoComplete(options=stageOptions, filterOption 模糊过滤, allowClear)。可下拉选模板阶段,也可手输非模板值(submit 本就纯文本,不匹配即不匹配)。typecheck/lint 0 error/milestone 24 passed
-- ql-20260723-005-fec1 | /ppm/milestone-details 新建里程碑选模板阶段时复制模板明细(同新建项目计划逻辑)：create_ps_plan_node 原只 _Crud.create 建空里程碑,改单事务——按 overall_stage 匹配 PlanNode 模板,命中则记 template_plan_node_id/has_module + has_module=false 复用 _copy_template_details_to_node 复制明细(draft,与 _init_milestones_from_template 一致);不匹配则空里程碑。has_module=true 则只记归属(明细等建模块时复制)。新增 2 单测(匹配复制/不匹配不复制)。ruff/mypy 0 error;plan 套件 139 passed/22 errors(22 全是本地 venv 缺 aiobotocore 的预存环境问题非本次逻辑,CI/生产有该依赖可跑)
-- ql-20260723-006-2c41 | /ppm/milestone-details 导出改为只导当前项目计划的明细：原 list_plan_node_details_for_export 无过滤导全量项目、exportMilestoneDetails 不传 planId。改:①service 加 plan_id 参数,join PsPlanNode 过滤 ps_project_plan_id==plan_id;②router export_plan_node_details 加 plan_id Query 透传;③前端 plan.ts exportMilestoneDetails(planId) downloadExcel 传 {plan_id};④page.tsx handleExport 传 planId。新增 1 单测验证按 plan_id 过滤。ruff(format+check)/mypy 0 error、前端 typecheck/lint 0 error/milestone 24 passed;后端 db 单测本地 aiobotocore 缺失跑不了(CI 跑)
-- ql-20260723-007-bd13 | /ppm/milestone-details 导出改子母表(分组合并)布局：里程碑→模块→明细层级导出。common/export 加 grouped_report_to_workbook(第1行列头+分组:里程碑/模块跨列合并标题行+明细行);service 加 build_milestone_export_sections(plan_id) 构建分组树(责任人姓名批量反查、has_module 按模块分子标题、未分模块明细单列组);router export 端点改用分组构建 _MILESTONE_DETAIL_GROUP_COLUMNS(去 overall_stage 列,标题行已含)。新增 grouped 构建纯测试(openpyxl 读回校验合并/列头/明细)+service 分组数据测试。ruff(format+check)/mypy 0 error;plan+export 套件 172 passed 0 errors;前端无改动(ql-006 已传 planId)
-- ql-20260723-008-a96e | /ppm/milestone-details 导出子母表三补：①列头放每个里程碑层级内(grouped_report_to_workbook 去顶部列头,改每 section title 后自带列头,块自包含);②列定义补全所有信息列(加任务描述/执行人/执行状态,_MILESTONE_DETAIL_GROUP_COLUMNS);③状态英→中(service 加 DETAIL_STATUS_CN draft→草稿 等)。build_milestone_export_sections 改批量取全计划明细、批量反查执行人名+执行状态(PlanTask)、状态映射中文。更新 grouped 纯测试(per-section 列头)+router parametrize(plan-node-detail header 校验改 None,空表仅验 200)。ruff/mypy 0 error;plan+export 套件 172 passed 0 errors
-- ql-20260723-009-8b75 | /ppm/milestone-details 三层(里程碑/模块/明细)按序号数值排序 + 模块新增序号字段：①迁移 202607231200 + model + schema 给 PlanNodeModule 加 no 字段(nullable,历史 NULL 排最后);②前端 types/模块表单(ModuleFormDrawer)加序号输入 + 模块表加序号列;③service 加 _no_sort_key(纯数值优先、非数字居中、空最后),三层 list(list_ps_plan_nodes_by_plan/list_modules_by_node/list_details_by_node)+ 导出明细批量取改 Python 数值排序(修原字符串排序 1/10/2 错序);④导出模块标题带序号。ruff/mypy 0 error、前端 typecheck/lint 0 error/milestone 24 passed、plan+export 套件 173 passed 0 errors、迁移链 202607222330→202607231200 head 正常
-- ql-20260723-010-0f89 | /ppm/plan-nodes 模板明细子表加序号列 + 拖动排序(序号按拖动顺序自动更新)：PpmSubTable 加 dragSort 可选 prop(默认关,不影响其它用法),启用时前置序号列(显示 index+1)+ onRow HTML5 原生拖拽,drop 后重排并按新顺序重算每行 no(=index+1);plan-nodes DetailDraftRow 加 no(load/newRow),PpmSubTable 启用 dragSort,handleSave 更新/创建体含 no、toUpdate 检测 no 变化(拖动改顺序也持久化)。纯前端(后端 no 字段+数值排序 ql-009 已就绪)。typecheck/lint 0 error/plan-nodes+milestone 24 passed
-- ql-20260723-011-737b | ppm 序号列统一居中对齐：除 ppm-sub-table dragSort 序号(ql-010 已 center)外,其余 6 处序号列默认左对齐。统一加 align:center——milestone-details 主表/模块序号、ppm-project-plan-detail 序号、problem-list/task-plans/workbench 的 rowno 序号。纯样式,typecheck/lint 0 error/milestone+plan-nodes 测试通过
-- ql-20260723-012-eb04 | /ppm/plan-nodes 主表「编号」(no)列补居中(ql-011 漏改)：plan-nodes 主表序号列标题为「编号」(非「序号」),上轮 grep title:序号 漏掉,未居中。该列加 align:center。纯样式,typecheck/lint 0 error
-- ql-20260723-013-9c4d | /ppm/plan-nodes 模板明细子表序号居中(自定义 cell 丢 align 根因修复)：PpmSubTable EditableSubTable 自定义 components.body.cell 渲染 <td> 时丢 ...rest,致 antd 列 align 样式失效(序号 align:center 不生效,表头居中数字左对齐)。修法:cell 解构自定义 props(colDef/record/handleFieldChange/rowKey)后 spread antd td props 回 <td> 恢复 align(根因,子表所有列 align 恢复)+ 序号 render 包 text-center 双保险。typecheck/lint 0 error/milestone 24 passed
-- ql-20260723-014-bd20 | /ppm/plan-nodes 拖拽手柄列 + 拖拽保存顺序：用户反馈拖拽看不出可拖、保存不生效。核实 save 逻辑已在(ql-010 toUpdate 检测 no 变化+更新体含 no),真因是整行 draggable 与可编辑 Input 冲突致拖不动→无重排→无可保存。修法:PpmSubTable dragSort 加最左拖拽手柄列(HolderOutlined 图标,onCell 仅手柄 draggable+onDragStart 记 index),onRow 去 draggable 仅留 onDragOver/onDrop 作 drop 目标。手柄拖动→重排→no 重算→保存持久化(已有)。typecheck/lint 0 error/milestone 24 passed
-- ql-20260724-001-db48 | /ppm/weekly-plan 项目计划列表「项目名称」列表头加 Excel 式排序+多选筛选：列加 sorter(升/降/第三次点击取消)+filters(多选,filterSearch 下拉内可搜,选项从 rawData 动态去重 localeCompare 排序)。受控状态 columnFilters/columnSorter,过滤+排序在 processedData useMemo 外部完成(不依赖 antd 内部 onFilter——virtual 虚拟列表 + 分组行 colSpan=19 独占行组合下外部计算更稳),分组行序号随之重算;Table onChange 统一回写筛选/排序状态。先落地项目名称列看效果,后续可推广其它列。tsc --noEmit 0 error(修 sorter[0] possibly undefined 用 ?? {} 兜底)。仅前端单文件 page.tsx
-- ql-20260723-015-14d9 | /ppm/plan-nodes 拖动后保存按钮不可用修复：DetailsSubTable 的 isDirty(控制保存按钮 disabled)只比 DETAIL_COLUMNS 字段、没比 no,纯拖动(只改顺序/no、没改字段)时 isDirty=false→保存按钮 disabled。修法:isDirty 循环加 (o.no??null)!==(r.no??null) 检测(与 toUpdate 的 no 检测对齐)。typecheck/lint 0 error
-- ql-20260724-002-b4c2 | /ppm/weekly-plan 项目计划列表「任务主题」列表头加 Excel 式排序+多选筛选：复用 ql-001 的 columnFilters/columnSorter 受控机制 + processedData 外部计算模式,新增 taskThemeFilters(rawData 去重 task_theme)+ processedData 加 task_theme 多选过滤/排序分支(升/降/第三次点击取消);task_theme 列加 sorter/filters/filterSearch(filteredValue 受控)。多列筛选 AND 叠加、单列排序(同时刻一列)。tsc --noEmit 0 error。仅前端单文件 page.tsx
-- ql-20260724-003-63c6 | /ppm/weekly-plan 全列表头加 Excel 式排序+筛选(配置驱动重构 14 列)+QUICKLOG 改回丰富格式：前两轮每列单独写过滤/排序代码,推广到 14 列冗长难维护。改配置驱动——SORTABLE_FIELDS(key+kind text/number/date)统一管 14 列,fieldFiltersMap 一次生成所有字段下拉选项,processedData 通用循环过滤(AND叠加)+排序(空值固定排最后不受升降序影响),sortableColProps(key) 生成列属性(排序+多选筛选 filterSearch 受控)。project_name/task_theme 由显式配置改 spread,新增计划类型/任务分类/平台/任务描述/工作量/周次/责任人/开始结束日期/状态/实际开始完成时间 12 列加 spread,占位列(延期原因/执行说明/评估说明/备注 无数据源)不加。另:QUICKLOG 001/002/003 改回丰富格式(CLI 简版不符用户要求)。tsc --noEmit 0 error(修 fieldText as unknown as Record)。改 page.tsx + QUICKLOG + ppm.md
-- ql-20260725-001-5075 | /ppm/weekly-plan 加宽列表列(加筛选图标后表头偏挤)：上轮 ql-003 给 14 列加 sortableColProps(表头排序箭头+筛选漏斗约40px),原列宽未预留图标空间致挤。14 个有筛选的列 width 各 +20~40px(项目名称160/计划类型110/任务分类110/平台130/任务主题120/任务描述200/工作量100/周次80/责任人100/开始结束日期120/状态90/实际开始完成120),序号50不变。纯 width 数字调整无逻辑变更。仅改 page.tsx
-- ql-20260725-002-384e | /ppm/weekly-plan 修复排序后项目分组标题行重复穿插：ql-003 的排序对 processedData 整列排,打散 project_name 连续聚集,displayData「项目名变化即插分组行」致同一项目多个错位分组标题(图示重复8次)。修法:processedData 排序保持项目聚集——提取 valueCmp(空值固定排最后);排 project_name 整列排序(同项目连续);排其它列先按 project_name 聚集(Map 记筛选后首次出现顺序作组顺序)+组内按字段排。任何排序下同项目连续,分组行不穿插。tsc --noEmit 0 error。仅改 page.tsx
-- ql-20260725-003-3060 | /ppm/weekly-plan 加「排序时不分组(全表平铺)」开关：上轮 ql-002 修复让排序强制保持分组(组内排),用户要可选全表平铺。加 flattenMode 开关(默认关):processedData 排序 flattenMode||project_name 整列排否则组内排;displayData flattenMode 时不插分组行(平铺连续序号);工具栏左侧加 antd Switch+label「排序时不分组(全表平铺)」,右侧保留导出/搜索/重置。开启=整列排序+无分组标题行,关闭=组内排+分组(现状)。tsc --noEmit 0 error。仅改 page.tsx
-- ql-20260726-001-9c4b | /ppm/weekly-plan 表头筛选改 Excel 级联联动：fieldFiltersMap 原基于全量 rawData 算每列去重,不随筛选联动,所有列下拉恒显示全部。改:每列选项基于'排除本列、应用其它列筛选后的数据'去重(内层循环遇本列 key continue 跳过),依赖加 columnFilters。效果:已筛的列再点开仍显示全部(排除本列=无其它筛选=全量),其余列只显示已筛数据的对应值(收窄)。processedData 全列 AND 筛选不变。tsc --noEmit 0 error。仅改 page.tsx
-- ql-20260727-001-c380 | /ppm/weekly-plan 日期列筛选下拉选项格式化：fieldText 原对所有字段返回 String(原始值),日期列下拉显示 ISO(2026-07-24T...) 与列 render fmtDate 不一致。改:fieldText 对 SORTABLE_FIELDS 里 kind==='date' 字段用 fmtDate(v,'') 格式化(空/非法→'' 过滤,有效→YYYY-MM-DD)。一处改动同时让筛选选项(按天去重)/筛选匹配/日期排序都按天一致。tsc --noEmit 0 error。仅改 page.tsx fieldText
-- ql-20260727-002-5bb2 | /ppm/weekly-plan 日期范围查询条件占两格改一格：搜索区 grid-cols-4 + 日期范围 col-span-2 跨两格。改 grid-cols-4→grid-cols-3(项目名称/状态/日期范围 三项均分各1格)+去 col-span-2。RangePicker width:100% 1/3宽自适应。纯 className 无类型影响。仅改 page.tsx 搜索区
-- ql-20260727-003-b62a | /ppm/weekly-plan 搜索区改回一行四列：上轮 ql-002 误把 grid-cols-4 改成 grid-cols-3(三项均分),用户反馈"查询条件一行是四个"。改回 grid-cols-3→grid-cols-4,三个条件(项目名称/状态/日期范围)各占1格第4格留白(用户 AskUserQuestion 确认留空)。日期范围保持上轮去 col-span-2。纯 className。仅改 page.tsx 1 处
-- ql-20260727-004-862e | /ppm/milestone-details 明细新建/编辑加序号输入+列表加序号列：里程碑明细(PsPlanNodeDetail)后端 no 字段(model)/schema Create-Update/查询排序(_no_sort_key 数值升序 NULL 最后)/前端类型(PsPlanNodeDetail.no + Create/Update.no)早已就绪,仅缺前端录入入口致全 NULL 排不出效果。补:桌面 page.tsx 内联 DetailDrawer 开立信息块加序号 Input(initialValues+baseBody 透传 no,首行 grid-cols-2→3)+DetailLevelTable 首位列加序号列(对齐主表/模块表 no 列);移动 components/ppm/milestone/detail-drawer.tsx 同步加序号 Input。后端零改。tsc --noEmit 0 error;vitest milestone-details 桌面+移动 3 文件 29 测试全过
-- ql-20260727-005-e6d2 | /ppm/milestone-details 导出加序号+要求列(成果列原已存在)：里程碑明细导出用 grouped_report_to_workbook(router _MILESTONE_DETAIL_GROUP_COLUMNS 定列+service _detail_dict 定行)。成果列 achievement 原已存在(router:666+service:1353),缺序号 no 与要求 requirements。改:service _detail_dict 加 no+requirements 两字段;router 列定义首位加序号列(field=no width=8)、成果列前加要求列(field=requirements width=30),成果列不动,顺更注释。前端 exportMilestoneDetails 仅下载无需改。venv pytest test_export+test_service 62 passed;ruff All checks passed。改 service.py + router.py
-- ql-20260727-006-adc4 | /ppm/milestone-details 导出列顺序对齐新建弹窗(状态置序号后/执行状态置执行人后)：上轮 ql-005 加了序号+要求列但列序乱(要求/成果/状态堆在末尾,与新建明细弹窗顺序不一致)。按用户新顺序重排 router _MILESTONE_DETAIL_GROUP_COLUMNS 13 列:序号/状态/明细阶段/任务主题/任务描述/要求/角色/成果/计划工作量/计划开始/计划完成/执行人/执行状态——对齐新建明细弹窗开立信息块顺序,且状态紧随序号、执行状态紧随执行人。纯列顺序调整,_detail_dict 不用改(grouped_report_to_workbook 按 columns 顺序取值)。ruff All checks passed;pytest test_export+test_service 62 passed。仅改 router.py
-- ql-20260728-001-652a | ppm 全模块弹窗限高对齐 ql-20260722-004(新建项目计划参考)：14 文件 17 处弹窗统一 styles.body={maxHeight:'70vh',minHeight:'300px',overflowY:'auto'}——milestone-details×4(导入模块/模块表单/计划详情/里程碑表单)、plan-nodes 模板表单、kanban 实际工作详情、work-hours 工时表单、problem-list 问题抽屉、task-detail-modal、problem-detail-modal、import-problem-modal、detail-drawer、ps-plan-node-drawer、import-module-modal、module-form-drawer、kanban-task-detail-drawer(antd Drawer 用 styles.body);task-plans TaskDrawer 是手写 div 浮层用等效 Tailwind max-h-[70vh] min-h-[300px] overflow-y-auto。跳过 work-hours:483 删除确认短弹窗(套 min-h300 空荡违背参考初衷)+kanban-task-detail-drawer:115 open=false 空壳占位。tsc --noEmit 0 error
-- ql-20260728-002-718e | /ppm/project-plans 编辑/新建项目计划弹窗合同金额等 InputNumber 不占满修复：12 个 InputNumber(合同金额/利润率/利润金额/预算金额·人天/实际·剩余人天/总成本/人力/剩余成本/成本调剂/调剂人天)原 style={{width:'100%'}} 在 antd v6 下未作用于 root 宽度致不占满,改 className='w-full'(作用于 root,项目内 ppm-resource-table.tsx:859 已验证写法)。DatePicker 3 处 style width:100% 保留(占满正常,未误伤)。功能不变。tsc --noEmit 0 error
-- ql-20260728-003-6cb3 | 修正 ql-002 InputNumber 占满修复(ql-002 className 误判无效):SSR renderToStaticMarkup 验证真根因——antd v6 addonBefore/addonAfter 已 deprecated,自动用外层 .ant-space-compact 包裹 addon+InputNumber,style/className 应用到内部 .ant-input-number 而非外层 compact,compact inline-flex 无宽度基准致塌缩不占满;无 addon 的 InputNumber(成本调剂)正常占满。改:12 个 InputNumber 的 className=w-full(ql-002 引入)改回 style={{width:'100%'}},11 个 addon 改 prefix/suffix(addonBefore ¥×6→prefix、addonAfter %×1→suffix、addonAfter 人/天×4→suffix),SSR 验证 prefix/suffix 不触发 compact、style 在 root 占满,视觉不变(单位仍显示框内左右)。addon 残留 0;tsc --noEmit 0 error
-- ql-20260728-004-8ca4 | /ppm/problem-list 弹窗表单两列布局重排+InputNumber 占满：_forms.tsx 19 个 Form.Item 原垂直堆叠(一行一个)致弹窗过长,Form 加 className='grid grid-cols-2 gap-x-3' 两列布局,短字段(项目/模块/问题描述/功能名称/类型/紧急/发现人/日期/工作类型/责任人/处置人/工作量/计划开始/完成/验证人)默认占1格 grid auto-flow 两两排列,长字段(问题答复 TextArea/问题附件 FileUpload/备注 TextArea)+按钮区加 col-span-2 独占整行,处置人(仅 isEdit)条件渲染自动补位不留空,19 行→约 11 行。预计工作量 InputNumber addonAfter='人/天'→suffix(对齐 ql-003 antd v6 addon 修复,style width:100% 保留)。addon 残留 0;tsc --noEmit 0 error
-- ql-20260728-005-a050 | /ppm/problem-list 弹窗宽度对齐项目计划弹窗(680→920)：_problem-drawer.tsx Modal width 680→920,对齐 ppm-project-plan-form.tsx(width=920);ql-004 两列布局在 920 宽度下每格约 440px 更宽敞合理。纯 antd Modal width 数字 prop 改动,无类型影响
-- ql-20260728-006-7764 | /ppm/problem-list 弹窗按钮移到 Modal footer 固定底部：参考 project-plans(footer 按钮固定底部不随内容滚动),_forms.tsx 按钮原在 Form 内容区(随 body overflowY 滚动,不固定)。_forms 用 forwardRef 暴露 {submit}(useImperativeHandle)+删 Form 内按钮区;_problem-drawer.tsx 加 formRef+Modal 自定义 footer(取消 onClose/保存 formRef.submit,无 loading 对齐 project-plans)+ProblemCreateForm ref,去掉 footer={null}。tsc --noEmit 0 error
-- ql-20260728-007-14cc | /ppm/project-plans 取消项目名称点击弹抽屉+相同项目唯一:①project-plans/page.tsx 项目名称列 button onClick setDetail→纯文本 v??—,清理 dead detail(import PpmProjectPlanDetail/DetailState interface/detail state/组件 共 5 处);②plan/service.py create_ps_project_plan 开头加 project_id 查重(select PsProjectPlan.id where project_id,已存在 raise PlanError 400 '该项目已有项目计划'),前端无需改(createProjectPlan catch ApiError 自动提示)。tsc 0 error;后端 ruff+py_compile All checks passed
-- ql-20260728-008-c7b0 | /ppm/milestone-details 导入校验放宽+预览多选固定列:①导入校验——后端 plan/service.py _to_preview_rows 空责任人 valid=False→True(必填放宽,允许导入 draft,责任人留空可后补);责任人填了未匹配 valid=False 保持(不可导入);桌面 page.tsx+移动 import-module-modal.tsx 状态列去 duty_matched 橙(空责任人不再误标红/橙,只看 valid 红绿)、rowClassName 只看 !valid。②预览多选——桌面+移动 Table 加 rowSelection(行级 checkbox fixed:left,useEffect[visibleRows] 默认全选),handleCommit 按 selectedRowKeys 过滤选中行按 sheet_name 重组 sheets 只传选中行,validCount/invalidCount 基于选中行;后端 import_commit 不改(前端传选中行,后端照常按 valid 过滤)。tsc 0 error;后端 ruff format+check All checks passed
-- ql-20260728-009-ad9d | /ppm/milestone-details 导入数据默认序号(当前层级最大 no 往后加):后端 plan/service.py import_commit——加 _max_numeric_no helper(查最大纯数字 no,非数字/None 忽略);开头算模块序号起点(plan_node 下 PlanNodeModule max no),新建模块 module_no_next+1 赋 no(merged 模块复用既有序号不赋);每模块算明细序号起点(module 下 PsPlanNodeDetail max no),导入明细递增赋 no(new 模块明细从 1 起,merged 从该模块 max no+1 起)。只改后端 import_commit(前端导入预览无 no 展示需求)。ruff format+check+py_compile OK
-- ql-20260728-010-15a2 | /ppm/weekly-plan 工作量列右击表头聚合(求和/平均值多选)+总结栏:page.tsx 工作量列 title 改 Dropdown(trigger=contextMenu menu selectable multiple 求和/平均值,weeklyAgg state 受控);workloadAgg useMemo 基于 processedData 实际数据行 Number(work_load) 过滤 finite 求和/平均 round 2 位;Table 加 summary(weeklyAgg 非空时 Fixed 底部,前7列 colSpan=7 '合计',工作量列显示求和/平均值两行)。tsc --noEmit 0 error
-- ql-20260728-011-ee1f | /ppm/weekly-plan 工作量列右击菜单穿透排序修复(ql-010 bug):工作量列 sortableColProps 含 sorter:true,列头 th 响应 click 排序,与右击 Dropdown 聚合菜单冲突(点击/右击穿透触发排序)。改:工作量列加 sorter:false 覆盖(保留 filters 过滤,关闭排序),列头只右击聚合菜单不再排序。tsc --noEmit 0 error
-- ql-20260728-012-b7b3 | /ppm/weekly-plan 工作量列排序+右击菜单共存(撤销 ql-011 的 sorter:false):恢复 sortableColProps 的 sorter;title 的 span 加 onClick stopPropagation——左击 title 文字不触发 th 排序(避免误触),antd 排序图标区(th 内 title 旁)仍可左击排序;右击 title 由 Dropdown contextMenu 弹聚合菜单。共存:左击排序图标排序+右击 title 弹菜单。tsc --noEmit 0 error
-- ql-20260728-013-769f | /ppm/weekly-plan 工作量列排序+右击菜单彻底解耦(ql-012 未解决菜单项 click 触发排序):title 改回纯文本(恢复 sorter 左击 th 排序);onHeaderCell 注入 onContextMenu(preventDefault+stopPropagation+记录 clientX/Y);Table 外加受控 Dropdown(open=true,onOpenChange 关闭清坐标,getPopupContainer=body,trigger 是 fixed 定位锚点 pointerEvents:none)。菜单与 th 完全 DOM 解耦(菜单在 body,菜单项 click 不冒泡 th),span onClick stopPropagation(左击 title 不触发 th 排序,左击排序图标仍排序)。tsc --noEmit 0 error
-- ql-20260728-014-48cc | /ppm/weekly-plan 工作量列右击菜单弹不出修复(ql-013 受控锚点方案 antd Dropdown 不弹):撤回 ql-013 的 onHeaderCell contextmenu+受控 fixed 锚点 Dropdown+aggMenu state;回到 Dropdown contextMenu trigger 包 title span(antd 原生右击正常弹),关键补 getPopupContainer=()=>document.body(菜单挂 body 脱离 th,菜单项 click 不冒泡 th 排序——ql-012 漏的关键点)+span onClick stopPropagation(左击 title 不触发 th 排序,左击排序图标仍排序)。tsc --noEmit 0 error
-- ql-20260728-015-6774 | /ppm/weekly-plan 工作量列右击菜单改原生自定义(antd Dropdown 菜单项 click 仍触发排序,ql-014 getPopupContainer=body 未解决):彻底放弃 antd Dropdown——title 改纯文本恢复 sorter;onHeaderCell 注入 onContextMenu(preventDefault+记录坐标);Table 外自定义 fixed div 菜单(遮罩 inset-0 点外部关闭+菜单 div 在右击坐标,菜单项 onClick toggleAgg+菜单 div onClick stopPropagation)。原生 DOM 菜单不经 antd Portal/事件,菜单项 click 不可能触发 th 排序;删 Dropdown/Checkbox unused import。tsc --noEmit 0 error
+<!-- MANUAL_NOTES_START -->
+
+<!-- MANUAL_NOTES_END -->

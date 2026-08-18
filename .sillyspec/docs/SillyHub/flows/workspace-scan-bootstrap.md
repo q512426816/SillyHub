@@ -1,64 +1,78 @@
 ---
 author: qinyi
 created_at: 2026-06-24T01:47:08
-source_commit: ba87eec
+source_commit: 744e3de4
+updated_at: 2026-08-17T17:06:26Z
 ---
 
 # Workspace 扫描与引导流程
 
 ## 目标
-从本地路径或平台托管目录扫描 `.sillyspec` 骨架，注册 workspace，生成模块/项目文档，并通过 daemon 执行 bootstrap AgentRun 完成初始化扫描。
+从本地路径或 daemon 宿主目录探测 SillySpec 骨架并注册 workspace，解析模块/项目文档入库，经 daemon 执行 bootstrap AgentRun 完成首扫，或经 init 派发在成员机器上初始化一个 SillySpec 项目并写入本机配置。
 
 ## 参与模块
-- **backend/workspace**：扫描/创建/重扫/重解析/拓扑（`workspace.service` / `scanner` / `topology` / `relation_service`）
-- **backend/spec_workspace**：spec bundle 同步、bootstrap（`SpecWorkspaceService` / `SpecBootstrapService`）
-- **backend/scan_docs**：扫描文档解析（`ScanDocService` / `ParsedDoc`）
-- **backend/agent.context_builder**：`build_scan_bundle` 拼装扫描指令 prompt
-- **daemon**：spec bundle pull（session 开始）+ postSpecSync（session 结束）
-- **frontend**：workspace 列表/扫描向导（`lib/workspaces.ts` 的 scan/scanGenerate/rescan/reparse）
+- workspace：scan 预览扫描 / scan-generate（daemon client RPC 源，`_guard_daemon_owned_by_user` 归属校验 + `_find_active_scan_run` 防并发）/ create（软删复活 + `_ensure_spec_workspace` 连带建 spec 空间）/ rescan / init 派发入口 / 组件目录从 projects/*.yaml 只读派生
+- spec_workspace：bootstrap（mode: single / team / auto）、bundle 流式打包、import 从仓库导入（SSE + daemon RPC 打包容主 .sillyspec）、SpecPathResolver 双模式解析 spec 目录
+- scan_docs：docs 树解析落库（ScanDocument 只读索引层，reparse 对账 + 软删）
+- change：changes/ 解析入库（两阶段 reparse 的另一半）
+- agent：start_scan_dispatch / start_init_dispatch、context_builder 拼装扫描 prompt、post_scan_validator 扫描后校验
+- daemon：spec bundle pull / RPC 打包容主 .sillyspec（不受 30s 代理超时限制）、handleInitLease 编排（写 .sillyspec-platform.json + spawn sillyspec init + writeLocalYaml 写 .sillyspec/local.yaml）
+- mcp_gateway：init claim 时 get_or_issue 签发 shmcp_（scope=dispatch）供 local.yaml mcp 派发段
+- platform_sync：shpsync_ token 签发（进度回传通道）
+- knowledge：知识条目解析
+- frontend_app / frontend_lib：workspace 列表/扫描向导（lib/workspaces 的 scan/scanGenerate/rescan）
 
 ## 流程摘要
 
 ```text
-(frontend)  输入 rootPath → POST /api/workspaces/scan
-     │
-(backend)   Scanner.scan(root)：检测 .sillyspec 骨架 + 计数顶层条目
-     │        └─ 浅扫：不深度解析，只判存在
+=== 扫描与建区 ===
+(前端)      输入 rootPath → POST /api/workspaces/scan
+(backend)   WorkspaceScanner.scan：扁平根判定（projects/ 或 changes/ 任一存在
+     │      即 SillySpec 工作区，D-005 platform-managed 无 .sillyspec 包裹）
+     │      + 结构标志 + 计数 + parser 产出 parsed_workspaces/警告
      ▼
-(frontend)  scanGenerate → POST /scan-generate  或  create → POST /workspaces
-     │
+(前端)      scan-generate（daemon client 源）或 POST /workspaces 创建
 (backend)   WorkspaceService.create：
-     │        ├─ 写 platform 存储（platform-managed 时落 spec_root）
-     │        ├─ _ensure_spec_workspace（建 SpecWorkspace 行）
-     │        └─ 生成 _module-map.yaml → generate-projects（按 prefix 分组写 projects/*.yaml）
+     ├─ 同 root_path 软删行可复活（partial unique index WHERE deleted_at IS NULL）
+     ├─ _ensure_creator_as_owner（RBAC 种子）
+     └─ _ensure_spec_workspace 连带建 1:1 spec 空间（platform-managed 默认）
      ▼
-(backend)   reparse：scan_docs/task/change/knowledge 各 parser 全量解析入库
-     │
-(backend)   SpecBootstrapService.bootstrap(workspace_id, user_id)：
-     │        ├─ 建 bootstrap AgentRun + 写 spec_bootstrap.start 审计
-     │        └─ _execute_bootstrap_agent_run：
-     │             · build_scan_bundle → step_prompt
-     │             · 派发到用户 daemon（daemon-only）
-     │             · 无在线 daemon → spec_bootstrap_no_online_daemon 审计
+(backend)   两阶段 reparse：scan_docs（docs 树→ScanDocument）
+            + change（changes/→Change）入库对账；组件目录从 projects/*.yaml 只读派生
      ▼
-(daemon)    pullSpecBundle（session 开始）→ 执行 scan prompt
-     │        → postSpecSync 回写扫描产出
+=== bootstrap 首扫（可选）===
+(前端)      POST /spec-bootstrap（mode: single / team / auto）
+(backend)   SpecBootstrapService.bootstrap（audit spec_bootstrap.start）：
+     ├─ single：建 AgentRun 交互执行（尊重 workspace default_agent，缺省回退 claude）
+     ├─ team/auto：Coordinator 拆并行只读 Worker（arch/style/test/integration/risk）
+     │    + Finalizer 合并 Artifacts
+     └─ 异步后台跑，前端走 SSE/log 事件（_publish_log_event / _publish_done_event）
+(daemon)    pullSpecBundle → agent 执行扫描 prompt → postSpecSync 回写产出 → reparse 入库
      ▼
-(backend)   bootstrap 完成后再 reparse，前端展示模块拓扑（topology）
+=== init 派发（成员机器初始化）===
+(前端)      POST /workspaces/{id}/init（workspace 成员权限）
+(backend)   AgentService.start_init_dispatch → init lease（payload 含 platformConfig
+            与 local_yaml：shpsync_/shmcp_ token 注入）
+(daemon)    _runInitLease（不 spawn agent）：
+     ├─ 写 .sillyspec-platform.json + .runtime/spec-version.json
+     ├─ pull 文档（404 容错）
+     ├─ spawn `sillyspec init --dir <root> --spec-dir <缓存根> --workspace-id <id>`（60s 超时）
+     └─ writeLocalYaml 写 .sillyspec/local.yaml（platform 同步段 + mcp 派发段）
+     ▼
+=== 持续同步 ===
+(daemon)    会话/spec-sync 增量推送（见 spec-incremental-sync 流程）
+(backend)   apply_ops 落盘 → scoped/全量 reparse 对齐 DB
 ```
 
 ## 失败回滚
 
 | 失败点 | 处理 |
 |--------|------|
-| 路径无 .sillyspec | scan 返回 has_sillyspec=false，提示走 scan-generate |
-| daemon 离线 | bootstrap 审计记 no_online_daemon，AgentRun 等待 |
-| bundle 下载失败 | daemon pullSpecBundle 抛错，session failed |
-| 模块映射缺失 | generate-projects 跳过，留空项目列表 |
-| 旧路径残留 | scanner 兼容 legacy `changes/change/` 布局 + deprecation 警告 |
-
-## 关键术语
-- **Scanner**：浅扫 `.sillyspec` 骨架存在性的探测器
-- **spec_root_map**：容器→宿主机路径映射（"from:to"，容忍 Windows 盘符）
-- **platform-managed**：spec_root 由平台存储托管（vs 用户本地路径）
-- **SpecBootstrapService**：建 bootstrap AgentRun 派发 daemon 完成首扫
+| 路径无 SillySpec 骨架 | scan 判非工作区；走 init 派发从零新建 |
+| daemon 归属不符 | scan-generate 403（_guard_daemon_owned_by_user） |
+| 并发重复扫描 | _find_active_scan_run 拦截 |
+| bundle 拉取失败 | daemon 侧抛错（pull 404 容错，缓存目录后续由 sillyspec 自建），可重试 |
+| bootstrap agent 失败 | `_write_run_log` 落盘日志排查；SSE done 事件带失败态 |
+| sillyspec init 失败/超时 | ok:false + sillyspec_init_failed（stdout/stderr 截断收集），60s 超时杀树 |
+| validator 校验失败 | 不阻断流程，记 SpecConflict + sync_status=dirty 待手动 resolve（resolve 后不自动重验） |
+| daemon 本地缓存过旧推不出新 change | sync-manual 透传宿主 root_path 让 daemon 改打宿主 .sillyspec；或走「从仓库导入」RPC（SSE 不受 30s 代理超时限制） |

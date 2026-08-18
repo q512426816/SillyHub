@@ -2,55 +2,62 @@
 schema_version: 1
 doc_type: module-card
 module_id: lib-changes
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:01:57+08:00
+created_at: 2026-08-18 01:45:00
 ---
-# lib-changes
+
+# 变更 API 客户端（lib-changes）
 
 ## 定位
-变更（Change）领域 API 客户端（`frontend/src/lib/changes.ts`，约 478 行）。前端最大的 lib 模块，覆盖 SillySpec 变更从创建、执行、阶段流转、人工审批到归档门禁的完整生命周期。是变更/任务看板/审批等页面的核心数据层。
+变更（Change）领域 API 客户端（`frontend/src/lib/changes.ts`，611 行），前端最大 lib 模块。覆盖 SillySpec 变更的阶段流转、按需派发、gate 软调用、人工评审与归档门禁。
+
+会话驱动化翻转（2026-08-14-change-center-conversation-driven）后符号大换血：旧 `createChange` / `executeChange` / `submitFeedback` / `getChangeApproval` / `updateChangeProgress` / `getChangeDocuments` 系列已删——创建入口并入变更列表/会话流程、文档读写移交 `lib-change-files`；当前主力符号是 `advanceChangeStage` / `runVerifyGate` / `submitStageReview` / `updateStageProfile` 等。
 
 ## 契约摘要
-- CRUD：`listChanges(workspaceId, query?)`、`getChange(workspaceId, changeId)`、`createChange(workspaceId, input)`。
-- 文档：`getChangeDocuments`（文档矩阵）、`getChangeDocumentContent`（单文档正文）、`reparseChanges`。
-- 审批：`getChangeApproval`、`approveChange(workspaceId, changeKey, approvedBy)`、`rejectChange(workspaceId, changeKey, reason)`。
-- 进度/执行：`updateChangeProgress`、`executeChange(workspaceId, changeKey, provider?)`（创建 AgentRun 后台执行）。
-- 流转：`transitionChange(workspaceId, changeId, targetStage, reason?, provider?, model?)` → `TransitionResponse`（含 change + agent_dispatch）。
-- 按需推进（2026-08-08-change-center-on-demand 起取代自动连轴）：`advanceChangeStage(workspaceId, changeId, targetStage, opts?)` → `POST /changes/{cid}/advance-stage`（handleDispatch 走此入口，body/响应与 /transition 对齐，共用 transition_with_dispatch）；`runVerifyGate(workspaceId, changeId)` → `POST /changes/{cid}/run-verify-gate` 返回 `VerifyGateResponse{exit_code, errors, source}`（gate 软调用，不硬阻塞）。
-- 反馈：`submitFeedback(workspaceId, changeId, category, text)`（触发后端自动返工决策）。
-- 归档门禁：`checkArchiveGate(workspaceId, changeId)` → `ArchiveGateResponse`。
-- Agent 调度：`getAgentStatus`、`triggerDispatch(...)`。
-- 人工审批 4 节点：`proposalReview` / `planReview` / `humanTest` / `archiveConfirm`（分别对应后端 4 个 review 端点，作 submit_stage_review 语义的 HTTP 传输层）。
-- 审核统一入口：`submitStageReview(workspaceId, changeId, action, comment?)` — 按 action 词表（proposal_approve / plan_replan / test_pass / archive_confirm 等）分发到上述 4 方法；changes 详情页 gate 面板审核一律走本方法（D-006 / FR-06）。旧 `submitReview` + `approval_status` 链路退役只读，不再驱动推进。
+- 查询/重扫：
+  - `listChanges(ws, params?)` — 过滤 location / status / owner / search / current_stage / sort / pending_review_only / page / page_size。
+  - `getChange(ws, cid)` → `ChangeRead`（含 `pending_review` 投影字段，驱动详情页审核面板类型）。
+  - `reparseChanges(ws)` — POST `.../changes/reparse`。
+- 流转/推进：
+  - `transitionChange(ws, cid, targetStage, reason?, provider?, model?, teamMode?, workerPreset?, mainAgentConfig?)` → `TransitionResponse`。
+  - `advanceChangeStage(ws, cid, targetStage, opts?)` — POST `.../advance-stage`，body/响应与 /transition 完全对齐（共用后端 transition_with_dispatch），**按需推进主入口**。
+  - `updateStageProfile(ws, cid, profileId|null)` — PATCH `.../stage-profile`，存每阶段独立 AgentProfile（null=清除跟随工作区默认）。
+- 派发/状态：
+  - `getAgentStatus(ws, cid)` → `DispatchResponse`（`last_dispatch` 含 `gate_status`/`gate_result`；手动 dispatch 软失败在 `dispatch_result{dispatched, reason, error}`）。
+  - `triggerDispatch(ws, cid, provider?, model?, agentProfileId?)` — 三参数走 Query（对齐后端 manual_dispatch）。
+  - `runVerifyGate(ws, cid)` → `VerifyGateResponse{exit_code, errors, source}`，source 为 `gate_result | gate_cmd | unavailable`（gate 软调用，不硬阻塞、不改 change 状态）。
+  - `checkArchiveGate(ws, cid)` → `ArchiveGateResponse`（6 项检查，name 固定枚举）。
+- 人工评审（submit_stage_review 的 HTTP 传输层，均带 `notifySession=true` 默认）：
+  - `proposalReview`（decision: approve/revise/unclear）、`planReview`（approve/replan/back_to_propose/back_to_brainstorm）、`humanTest`（pass/bug/doc_mismatch）、`archiveConfirm`。
+  - 统一入口 `submitStageReview(ws, cid, action, comment?, notifySession?)` — 按 11 个 action 词表分发到上述四方法；未识别 action `Promise.reject`（对齐 MCP tool 400 语义）。
+  - 返回 `ReviewResponse{change, agent_dispatch, notified_session, notify_error}`。
+- 退役只读：`approveChange` / `rejectChange`（旧 approval_status 链路，保留数据兼容）、`submitReview`（所打 POST /reviews 端点后端不存在，405）；存活：`listReviews`（GET /reviews）。
+- 类型双轨：
+  - OpenAPI 索引：ChangeSummary / ChangeRead / ChangeList / ChangeWarning / ChangeReparseStats / ChangeReparseResponse / FeedbackRequest / ArchiveCheckItem / ArchiveGateResponse / TransitionDispatchResponse。
+  - **有据保留手写 shadow schema**（D-004@v2，源码注释载明理由）：`TransitionRequest`（worker_preset 精确结构 + team_mode 可选）、`TransitionResponse`（change 为精确 ChangeRead 非 loose dict）、`DispatchResult`/`DispatchResponse`（last_dispatch 精确字段）、`VerifyGateResponse`（source 精确 union）。
+  - 另有 `HumanGate`（7 态 union）、`ReviewEntry`。
 
 ## 关键逻辑
 ```
-transitionChange(ws, cid, targetStage, reason?, provider?, model?):
-  POST /api/workspaces/{ws}/changes/{cid}/transition { target_stage, reason, provider, model }
-  → { change: {...}, agent_dispatch: { dispatched, agent_run_id, ... } }
-advanceChangeStage(ws, cid, targetStage, opts?):  # 形态A 按需推进（handleDispatch 走此）
-  POST .../advance-stage { target_stage, reason?, provider?, model?, team_mode?, ... }
-  → TransitionResponse（与 /transition 对齐，共用 transition_with_dispatch）
-runVerifyGate(ws, cid):  # gate 软调用三态，不硬阻塞
-  POST .../run-verify-gate → { exit_code, errors, source: gate_result|gate_cmd|unavailable }
-executeChange(ws, changeKey, provider?):
-  POST .../execute { provider }  # provider 覆盖 workspace 默认 agent
-submitStageReview(ws, cid, action, comment?):  # 统一审核入口，按 action 分发
-  → proposalReview/planReview/humanTest/archiveConfirm（4 节点 HTTP 传输层）
-checkArchiveGate: GET → 归档前校验所有 gate item 是否通过
+advanceChangeStage(ws, cid, targetStage, opts?):
+  body = { target_stage }; 真值才附加 reason/provider/model/agent_profile_id
+  teamMode → + team_mode:true + worker_preset + main_agent_config
+  POST .../advance-stage → TransitionResponse
+submitStageReview(ws, cid, action, comment?, notifySession?):
+  switch(action) → proposalReview/planReview/humanTest/archiveConfirm
+  default → Promise.reject(unsupported review action)
 ```
 
 ## 注意事项
-- 接口数量多（20+），后端 schema 变更需同步本模块类型；`ChangeSummary` / `ChangeRead` 字段较密集，新增字段注意区分必填与可选。
-- `transitionChange` / `executeChange` / `triggerDispatch` 的 `provider?` 参数用于覆盖工作区 `default_agent`，传则用、不传走默认。
-- `HumanGate` 类型定义了 7 种人工门禁状态，是流转 UI 渲染门禁提示的依据。
-- 人工审批 4 接口分别对应 SillySpec 的 proposal/plan/human-test/archive 四个评审节点，verdict 为 approve/reject。
-- `submitFeedback` 后端会据 category 自动决定返工目标阶段，前端无需手动算 target_stage。
-- **形态A 按需触发**（2026-08-08-change-center-on-demand）：后端砍 auto_dispatch 自动连轴，stage 完成停「待触发」态；`handleDispatch`/`handleAdvance` 改显式调 `advanceChangeStage`（advance-stage HTTP）推进，不再依赖自动连轴。`runVerifyGate` 作 gate 软调用（结果交调用方决策，不硬阻塞）。
-- 审核链路收敛：详情页 gate 面板审核动作统一走 `submitStageReview`（D-006 / FR-06）；旧 `submitReview`（POST /reviews 端点实际不存在，405）+ `approval_status` 通用 verdict 链路退役只读，`approveChange`/`rejectChange`/`submitReview` 仅保留供历史调用方兼容，不再驱动推进。
+- `ReviewResponse.notified_session/notify_error` 是 D-006@v2 审批注入结果：审批落库后后端以服务身份向绑定会话注入审批消息，best-effort、失败不回滚审批（R-03）；`notify_error` 语义化（turn_conflict / session_inactive / inject_failed），UI 应展示。
+- 手动 dispatch 软失败不抛 ApiError（200 OK + `dispatched:false`），必须读 `DispatchResponse.dispatch_result` 显示失败原因，handleDispatch 的 catch 拿不到。
+- `transitionChange` / `advanceChangeStage` 的可选参数只在真值时附加（与后端 schema default=None 行为等价）；`worker_preset` 每项支持新形态 `{profile_id, objective, role}`（档案优先）与旧 `{agent_type, model}` 向后兼容（D-002@v2）。
+- 后端 schema 变更时：优先改后端 + `pnpm gen:types` 走 OpenAPI 索引；5 个手写 shadow schema 迁移前先核对源码注释载明的调用方依赖（如 23 处 `.change.xxx` 精确字段访问、source union 的 `===` exhaustiveness）。
+- `FeedbackRequest` 类型保留但已无 `submitFeedback` 函数（会话驱动化后反馈走会话消息）。
+- `HumanGate` 7 态（none / need_requirement_input / need_proposal_review / need_plan_review / need_human_test / need_archive_confirm / blocked）是流转 UI 渲染门禁提示的依据。
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
 - **2026-08-08-change-center-on-demand**（D-001~008 / R-01~07）：后端砍 auto_dispatch 自动连轴，前端 `handleDispatch`/`handleAdvance` 改显式调按需推进。新增 `advanceChangeStage`（POST /advance-stage）、`runVerifyGate`（POST /run-verify-gate）+ `VerifyGateResponse` 类型（本地内联，api-types.ts 由 OpenAPI 生成不在本卡 allowed_paths）。新增 `submitStageReview` 统一审核入口分发到 proposal/plan/humanTest/archiveConfirm 四方法（D-006/FR-06）；旧 `submitReview` + `approval_status` 链路退役标注只读。`transitionChange`/`executeChange`/`triggerDispatch` 既有方法不变（后端 transition_with_dispatch 行为变按需，前端调用形态不变）。
 <!-- MANUAL_NOTES_END -->

@@ -1,64 +1,83 @@
 ---
 author: qinyi
 created_at: 2026-06-24T01:47:08
-source_commit: ba87eec
+source_commit: 744e3de4
+updated_at: 2026-08-17T17:06:26Z
 ---
 
 # SillySpec 变更生命周期流程
 
 ## 目标
-驱动一个变更（change）从 scan → brainstorm → propose → plan → execute → verify → archive 的完整工作流，含人工审批关卡。
+驱动一个变更（change）从创建到归档的完整工作流。已会话驱动化 + 形态A 按需派发：新建变更走会话（无平台表单）、阶段推进以 CLI/daemon 上报的进度为权威（读时投影）、平台只在人工触发点显式派发 agent，无自动连轴。
 
 ## 参与模块
-- **backend/change**：变更目录解析与 CRUD（`change.service` / `parser` / `router`）
-- **backend/change.model**：`StageEnum` + `ChangeStatus`（need_* 等待态）+ `TRANSITIONS`
-- **backend/workflow**：FSM 迁移与审计（`workflow.service` / `fsm.FSM` / `spec_guardian` / `router`）
-- **backend/change_writer**：proposal/design/tasks/plan 的 markdown 生成（`ChangeWriterService`）
-- **backend/task**：变更下任务解析与看板（`task.service` / `parser`）
-- **backend/runtime**：阶段进度/用户输入/产出物（`runtime.service`）
-- **backend/archive**：归档与知识沉淀（`ArchiveService`）
-- **frontend**：变更详情页/看板/runtime 进度/审批按钮
+- change：变更域核心——目录解析入库（parser + `_module-map.yaml` 模块反查）、文档矩阵、transition / advance_stage / complete_stage / rerun_stage、四类人工审核面板（proposal_review / plan_review / human_test / archive_confirm）、check_archive_gate 归档门槛、dispatch 按需派发、projection 进度投影、quicklog 视图、ChangeSessionLink 会话绑定
+- workflow：TaskFSM 任务流转 + ChangeReview / AuditLog 模型与查询（Change 状态机已内聚 change 模块，spec_guardian 现无生产调用方）
+- change_writer：变更目录与 markdown 模板构造 + daemon 代写路径（HTTP 表单入口已下线，能力保留）
+- task：`tasks/*.md` frontmatter 解析落库与看板（文件是 source of truth，状态经 workflow.transition_task 流转）
+- runtime：`.runtime/` 只读读取器（sillyspec.db `mode=ro` 直读）
+- platform_sync：CLI/daemon 回传进度/文档/审批/quicklog 落库（platform_change_progress），shpsync_ 鉴权
+- spec_workspace：spec 文件增量落盘（apply_ops）与落盘后 reparse 触发
+- agent：阶段派发执行（见 agent-run 流程）
+- daemon：daemon 侧执行 + run_verify_gate（host_fs delegate 跑 `sillyspec gate verify`）+ 变更文件读写通道
+- mcp_gateway：advance_change_stage / submit_stage_review / run_verify_gate / get_change_stage 四个对外 MCP 工具入口
+- frontend_app / frontend_components：变更中心列表/详情 + 独立会话页（会话驱动）
 
 ## 流程摘要
 
 ```text
-(frontend)  scan 完成后创建变更 → POST /changes  或  brainstorm 启动
-     │
-(backend)   ChangeService 创建 changes 行（stage=brainstorm, status=draft）
-     │        目录 .sillyspec/changes/<change_key>/{proposal,design,tasks,plan}.md
+=== 创建（会话驱动）===
+(用户)      变更中心已无新建表单 → 在会话中由 agent 创建变更
+(daemon)    agent 在宿主 .sillyspec/changes/<key>/ 落四件套
+     │      （平台侧需远端建目录时走 daemon 代写队列，见 daemon-change-write 流程）
      ▼
-(back/fe)   stage 流转由 workflow.transition_change 驱动：
-            brainstorm → propose → plan → execute → verify → archive
-     │        每次迁移：spec_guardian 校验产出物存在 + 写 audit_logs
+(daemon)    spec-sync 增量推送 → platform_sync spec-sync → spec_workspace.apply_ops 落盘
      ▼
-(backend)   等待态切换（ChangeStatus）：
-            need_requirement_input / need_proposal_review
-            need_plan_review / need_human_test / need_archive_confirm
-     │        前端弹卡 → 用户答复 → runtime.user-inputs 落库 → 自动迁移
+(backend)   落盘后触发 change reparse（scoped；含 archive 路径转全量）
+     │      parser 解析入库，_infer_affected_components 把涉及文件反查模块 id
      ▼
-(backend)   execute 阶段：task.parser 解析 tasks.md → 任务行
-     │        派发 agent run（见 agent-run 流程）逐任务执行
+=== 进度同步与投影（current_stage 双轨）===
+(CLI/daemon) SillySpec CLI 每阶段推进 → POST /api/changes/{name}/progress
+     │      （shpsync_ token，base_ts 乐观锁，冲突返回平台侧 latest_progress 不改数据）
+(backend)   platform_sync.upsert_progress 落 platform_change_progress
+(backend)   变更中心读时 _project_current_stage 批量 join 投影
+     │      → 权威 current_stage/completed_stages/latest_progress 覆盖落库值
+     │      （CLI daemon 模式不主动推时，落库值与投影值短暂不一致是刻意设计，非 bug）
      ▼
-(backend)   verify：对照 design.md + 模块文档验收（spec_guardian）
+=== 人工审核门（四类面板）===
+(backend)   StageProjectionService 只读 sillyspec.db 的 stage 完成事件
+     │      → 投影为 proposal_review / plan_review / human_test / archive_confirm 之一
+(用户)      变更中心或绑定会话内放行 / 打回（打回走 _record_stage_rework）
+     │      审批注入服务身份；阶段/审核事件经 _notify_bound_session 回推绑定会话
      ▼
-(backend)   archive：ArchiveService 归档 + distill-knowledge（沉淀到 knowledge 模块）
-            目录 changes/<key>/ → changes/archive/<key>/，stage=archived
+=== 按需派发（形态A：auto_dispatch 已砍）===
+(用户/外部) advance_stage（HTTP，可带 agent_profile_id）或 MCP advance_change_stage
+(backend)   transition_with_dispatch → dispatch_next_step 显式派发
+     │      ├─ execute → _dispatch_execute_team 多 worker 并行（GLM 兜底 mission 可选）
+     │      ├─ verify → run_verify_gate：daemon 侧跑 sillyspec gate verify
+     │      └─ 派发前 has_active_run + cleanup_before_dispatch（同 change 不并发多 run）
+(daemon)    agent 执行 → lease complete 回调
+     → _trigger_stage_completion_callback / _advance_team_stage 推阶段
+     ▼
+=== 归档 ===
+(用户)      check_archive_gate 门槛校验 → archive_confirm 面板放行
+(daemon)    会话内 agent 执行 sillyspec archive：changes/<key>/ → changes/archive/<key>/
+(daemon)    spec-sync 推送归档变更 → apply_ops（archive 路径触发全量 reparse）
+(backend)   归档变更转归档视图；task/scan_docs 索引对齐文件状态
 ```
 
-quick 变更（`StageEnum.QUICK`）走精简路径：跳过 brainstorm/plan，直接 execute + verify。
+quick 变更走独立 quick 阶段（不进 brainstorm→plan→execute→verify→archive 主线）；gate 判定仅 verify 阶段适用（`_gate_applicable`，勿扩大到任意 change run）；quicklog 条目经 platform_sync 上行与本地解析合并展示。
 
 ## 失败回滚
 
 | 失败点 | 处理 |
 |--------|------|
-| 缺产出物（如 plan.md） | spec_guardian 拒迁移，返回缺哪些文件 |
-| 非法迁移（跳阶段） | FSM TransitionError，409 |
-| 自动修复超限 | status=blocked，需人工介入后人工迁移 |
-| 执行阶段任务失败 | 任务状态 failed，变更停留 execute，不自动归档 |
-| 归档冲突 | archive 拒覆盖，需用户确认 |
-
-## 关键术语
-- **StageEnum**：scan/brainstorm/propose/plan/execute/verify/archive/quick
-- **ChangeStatus**：draft + need_* 等待态 + blocked
-- **TRANSITIONS**：合法阶段迁移邻接表（`change.model`）
-- **spec_guardian**：迁移前产出物存在性/一致性校验器
+| 非法迁移（跳阶段） | FSM can_transition 校验，409 |
+| 需写盘但未获 worktree lease | start_stage_dispatch 拒绝派发 |
+| 同 change 并发派发 | has_active_run + cleanup_before_dispatch 保证单 run |
+| verify gate 失败 | kickback 记录失败原因，停 verify 不自动归档 |
+| 进度上行冲突（base_ts 过期） | platform_sync 返回平台侧 latest_progress，CLI 呈现冲突，不改任何数据 |
+| daemon 离线 | 变更文件写路径不可用（host_fs 下发）；阶段停留，不自动推进 |
+| execute worker 失败 | mission derive_status 聚合 worker 状态；单 worker 失败不崩 mission |
+| 卡死 run | reconcile_stale_runs 只清理不推进；cleanup_stale_pending_runs 收口 |
+| 投影读取失败 | 静默降级返回 None，调用侧不补抛异常（D-002 绝不写 CLI 的库） |

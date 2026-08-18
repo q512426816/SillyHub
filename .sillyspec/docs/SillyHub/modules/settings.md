@@ -2,80 +2,52 @@
 schema_version: 1
 doc_type: module-card
 module_id: settings
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:16:36
+created_at: 2026-08-18 01:45:00
 ---
-# settings
+
+# 平台配置中心（settings）
 
 ## 定位
-平台级「键值配置中心」+ 用户/会话运维聚合入口。管理 `platform_settings` 表（key/value/updated_by/updated_at），承载平台全局开关与参数；同时 router 复用承载用户 CRUD、会话吊销、密码重置等运维端点。是后台管理员对「平台配置」与「账号管理」两类操作的统一 REST 入口。
-
-产品视角：平台设置是「不改代码即可调全局行为」的运维杠杆（如默认分页、功能开关）。用户/会话管理是 admin 面板的核心数据源，管理员在此创建账号、重置密码、强制下线。该模块与 admin 模块在用户管理上同源（共用 UserService），是历史聚合，新功能宜分流至 admin。
+平台级「键值配置中心」+ 用户/会话运维聚合入口 + 平台 MCP 默认配置载体。管理 `platform_settings` 表（key/value 键值）；router 同时复用承载用户 CRUD、会话吊销、密码重置等运维端点（转发 admin 模块的 UserService）。是「平台配置」「账号管理」「MCP 接入配置」三类操作的统一 REST 入口，历史聚合形态，新功能宜分流。
 
 ## 契约摘要
-- 路由：`API tag=settings`（挂根下，无独立 prefix）
-  - 平台设置：`GET /settings` 批量读（`SettingsBulkRead`）、`PUT /settings` 批量更新（`SettingsUpdateResponse`，含 updated/created/skipped 计数）
-  - 用户：`GET /users` 列表（搜索/筛选/分页）、`POST /users` 创建、`PATCH /users/{id}` 更新、`DELETE /users/{id}` 软删
-  - 会话：`GET /users/{id}/sessions` 活跃会话列表、`DELETE /users/{id}/sessions/{sid}` 撤销单个、`POST /users/{id}/sessions/revoke-all` 全撤
-  - 审计：`GET /users/{id}/audit` 用户审计日志、`GET /users/{id}/workspaces` 所属工作区+角色
-  - 密码：`POST /users/{id}/reset-password`（后端生成随机密码返回明文）
-- 数据模型：`PlatformSetting`（key 主键、value 字符串、updated_by 审计、updated_at）
-- Schema：`SettingRead` / `SettingsBulkRead` / `SettingsUpdateRequest|Response` / `UserCreateRequest|UpdateRequest|Read|ListResponse` / `UserSessionRead` / `RevokeAllResponse` / `ResetPasswordRequest|Response`
-- 依赖：`core`、`models`；`SettingsService` 当前为向后兼容的空壳 re-export，真正逻辑内联 router
-- `_enrich`：把 `User` 补全为 `UserRead`（带角色/组织关联）
-- 跨组件协作：前端 `lib/settings.ts` 客户端 + `(dashboard)/settings` 页面 + admin 用户抽屉
-- 权限：管理操作需平台管理员权限，所有端点需认证
+- 平台设置（`SETTINGS_ADMIN` 权限，tag=settings）：
+  - `GET /settings` 批量读全部键值（`SettingsBulkRead`）
+  - `PUT /settings` 批量更新（upsert 语义，返回 updated/created/skipped 计数）
+- 平台 MCP 配置（`SETTINGS_ADMIN`）：
+  - `GET /platform-settings/mcp`：读平台默认 `mcpServers` 配置，env 内 secret 键（按 key 名标记词判定）遮蔽为占位值
+  - `PUT /platform-settings/mcp`：写配置，**接收原值存储不脱敏**，返回遮蔽视图
+  - `GET|PUT /platform-settings/mcp-whitelist`：MCP server 白名单（server 名列表；PUT 请求体为顶层 JSON 数组）
+- 用户/会话管理（`require_platform_admin`，转发 `admin.users_service.UserService`）：
+  - `GET|POST /users` 列表（搜索/筛选/分页/排序）与创建；`PATCH|DELETE /users/{id}` 更新与软删
+  - `GET /users/{id}/sessions`、`DELETE .../sessions/{sid}`、`POST .../sessions/revoke-all`
+  - `GET /users/{id}/audit` 用户审计日志、`GET /users/{id}/workspaces` 所属工作区+角色
+  - `POST /users/{id}/reset-password` 重置密码（不传则后端生成随机强密码，明文返回一次）
+- 数据：`PlatformSetting`（`key` String(100) 主键、value 字符串、updated_by、updated_at）；结构化值（如 MCP 配置）由调用方 JSON 序列化后整串存 value
+- `service.py` 仅向后兼容 re-export `UserService`，无真实逻辑；settings/MCP 端点逻辑内联 router
 
 ## 关键逻辑
-平台设置批量更新：
 ```
-existing = {row.key: row for row in query(PlatformSetting)}
-for item in payload.settings:
-    row = existing.get(item.key)
-    if row: row.value = item.value        # update
-    else: add(PlatformSetting(key, value)) # create
-    row.updated_by = actor_id
-commit → {updated, created, skipped}
+读 JSON 配置: _read_setting_json(key, default)
+  → session.get(PlatformSetting, key) → json.loads（缺失/坏 JSON → default）
+写 JSON 配置: _write_setting_json(key, value, actor)
+  → upsert 行（value=json.dumps）+ 手工审计一条 + commit
+用户端点: _svc(session, actor_id) → UserService
+  （lazy import 防 settings↔admin 循环引用）
+_enrich(user) → 复用 admin.router._user_with_relations 补角色/组织关联
 ```
-用户管理与 `admin.users_service.UserService` 同源；会话吊销清理 `AuthSession`；密码重置后端生成随机密码返回明文。
-- 用户更新含自保护（不能改自己状态）+ 最后管理员保护（`_active_admin_count` 防止删光管理员）
-- 用户删除为软删除，同步撤销所有活跃会话 `_revoke_sessions`
-- `_set_audit_context` 设置审计上下文 actor，所有写操作自动记录
-
-### 用户列表与查询
-`UserService.list_users` 支持多维查询：
-- 搜索关键字（跨 username/email/display_name ilike）
-- 状态过滤（enabled/disabled）
-- 角色/组织过滤
-- 分页（page/page_size）+ 排序（order_by/order）
-- 返回 `UserListResponse` 含 items + total，前端 antd Table 服务端分页
 
 ## 注意事项
-- 该 router 同时承担「平台设置」与「用户/会话管理」两类职责，是历史聚合；新功能宜走 admin 独立 router
-- `SettingsService` 是空壳 re-export，真正逻辑内联在 router，改动勿误删
-- 用户管理端点与 admin 模块实质同源（共用 UserService），避免两处规则发散
-- 平台设置 value 统一存字符串，结构化值由调用方自行序列化
-- 密码重置返回明文是因暂无邮件服务，管理员需人工告知；前端一键生成+展示+复制
-- 用户列表支持搜索/筛选/分页/排序，参数较多，改动注意 Query 一致性
-- 会话撤销会强制用户重新登录，操作需谨慎确认
-- 平台设置的批量更新是 upsert 语义，已存在则更新、不存在则创建
-- 用户创建 `_resolve_username` 在未提供用户名时由 email 派生
-- 用户更新支持改组织/角色关联（`_rewrite_organizations`/`_rewrite_roles` 全量重写）
-- enable/disable_login 切换登录可用性，disable 不删数据
-- 会话列表 `list_sessions` 返回 AuthSession 行，revoke 按 session_id 精确撤销
-- reset-password 不传 new_password 时后端生成随机强密码
-- 审计日志 list_user_audit 按用户聚合，供管理员追溯操作历史
-- list_users 的 order_by/order 经 SortOrder.normalize 规范化，防注入
-- 用户创建后默认 enabled，disable_login 可临时封禁
-- revoke-all 撤销目标用户全部会话，强制重登
-- PlatformSetting 的 key 命名宜用点分命名空间（如 ppm.default_page_size）
-- 批量更新跳过 null value 的项（skipped 计数）
-- 前端 settings 页 + admin 用户抽屉共用 lib/settings.ts 客户端
-- list_users 支持 include_disabled 控制是否含禁用用户
-- 密码重置的随机密码满足复杂度要求
-- PlatformSetting.updated_by 记最后修改者 user_id
+- `platform_settings` 主键是 String 非 UUID，core 审计钩子会跳过它，故 router 写路径**手工插 AuditLog**（`PLATFORM_SETTING_CREATE/UPDATE`，resource_id 用占位符；2026-08-14-audit-system-completion D-004）
+- 用户管理与 admin 模块实质同源（同一 UserService），规则改动勿两处分叉；新用户域功能宜直接进 admin router
+- MCP 配置 PUT 存原值（含明文 secret）、GET 才遮蔽——前端编辑回显时注意别把遮蔽占位值当原值写回
+- 密码重置返回明文是因为暂无邮件服务，管理员需人工转达
+- 平台设置 value 统一存字符串，key 用点分命名空间（如 `ppm.xxx`）；MCP 配置用模块内专用 key 常量
+- 会话吊销/全撤会强制用户重新登录，属敏感运维操作
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
+
 <!-- MANUAL_NOTES_END -->

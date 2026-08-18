@@ -2,79 +2,75 @@
 schema_version: 1
 doc_type: module-card
 module_id: worktree
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:16:36
+created_at: 2026-08-18 01:45:00
 ---
-# worktree
+
+# 隔离工作树租赁管理（worktree）
 
 ## 定位
-为 agent 执行提供隔离 Git 工作树（worktree）的租赁管理。每个 lease 对应一个独立目录，agent 在其中安全执行代码操作，完成后释放。负责 bare repo 管理、git worktree add/remove、执行环境构建（.gitconfig + askpass 凭据注入）、lease 过期回收。是 agent 执行隔离性的物理基础。
-
-产品视角：这是「多 agent 并发改同一仓库不互相踩」的底座。每次 agent 执行前 acquire 一个独立 worktree（从 bare repo 检出分支），拿到独立目录 + 注入好的 git 凭据环境，执行完 release 回收。tool_gateway 的所有操作都被限制在 lease 目录内。lease 过期 GC 防止崩溃泄漏。它让 SillyHub 的并发执行安全且资源可控。
+为 agent 执行提供隔离 Git 工作树（worktree）的租赁管理：
+bare repo + `git worktree` 检出独立目录，构建执行环境（.gitconfig + askpass 凭据注入），
+lease 生命周期（acquire/release/extend）。
+是「多 agent 并发改同一仓库互不踩」的物理隔离底座，
+tool_gateway 的所有文件操作都被限制在 lease 根目录内。
 
 ## 契约摘要
-- 路由：
-  - `APIRouter prefix=/workspaces/{workspace_id} tag=worktree`：`POST /worktrees` acquire（`WorktreeAcquireRequest`→`WorktreeLeaseRead`）、`GET /worktrees` 列表（`WorktreeLeaseList`）
-  - `lease_router tag=worktree`：`GET /worktrees/{lease_id}` 详情、`POST /worktrees/{lease_id}/release`、`POST /worktrees/{lease_id}/extend`（`WorktreeExtendRequest`）
-- 数据：`WorktreeLease`（workspace_id/component_id/change_id/task_id/user_id/run_id/git_identity_id/path 唯一/branch_name/status/locked_at/released_at/expires_at）
-- 子组件：`GitRunner`（clone_bare/worktree_add/worktree_remove）、`ExecEnvBuilder`（目录/gitconfig/askpass/env vars）
-- 错误：`GitCommandError`（cmd/returncode/stderr）
-- 依赖：`core`（crypto CredentialCipher 解密 token）、`models`、`workspace`、`git_gateway`、`git_identity`；被 `agent`/`daemon`/`tool_gateway` 通过 lease_id 使用
-- 跨组件协作：agent 执行前 acquire lease → tool_gateway 操作绑定 lease 根目录 → 完成后 release
+- 路由（两个 router，URL 语义分离）：
+  - workspace 嵌套 `prefix=/workspaces/{workspace_id}`：
+    `POST /worktrees` acquire（`WorktreeAcquireRequest`→`WorktreeLeaseRead`）、
+    `GET /worktrees` 列表（`WorktreeLeaseList`）
+  - 全局 `lease_router tag=worktree`：
+    `GET /worktrees/{lease_id}` 详情、
+    `POST /worktrees/{lease_id}/release`、
+    `POST /worktrees/{lease_id}/extend`（`WorktreeExtendRequest`）
+- 数据 `WorktreeLease`（worktree_leases 表）：
+  workspace_id / component_id / change_id / task_id / user_id / run_id / git_identity_id、
+  path（unique，同目录不会双 lease）、branch_name、
+  status（仅 locked / released 两值，默认 locked）、
+  locked_at / released_at / expires_at；
+  索引 `ix_worktree_active(task_id,status)`、`ix_worktree_expires(status,expires_at)`
+- 子组件：
+  - `GitRunner`：clone_bare / worktree_add / worktree_remove，
+    `asyncio.create_subprocess_exec` 跑 git（依赖 git 在 PATH），
+    失败抛 `GitCommandError(cmd, returncode, stderr)`
+  - `ExecEnvBuilder`：统一规划 lease_root / repo_dir / bare_repo_path /
+    gitconfig / askpass 路径；build_env_vars 注入 HOME / GIT_ASKPASS 等子进程环境
+- 前置条件：workspace 必须配置 repo_url 才能 acquire；
+  凭据经 `core.crypto.CredentialCipher` 解密注入，明文 token 不落库
 
 ## 关键逻辑
-acquire 主链路（`WorktreeService.acquire`）：
+acquire（`WorktreeService.acquire`）：
 ```
-identity = _get_identity(identity_id); _assert_identity_usable(identity)
-GitRunner.clone_bare(remote, bare_path)           # 建 bare repo
-GitRunner.worktree_add(bare_path, branch, path)   # 检出分支
-ExecEnvBuilder.create_directories(lease_root)
-ExecEnvBuilder.write_gitconfig(lease_root, identity)
-ExecEnvBuilder.write_askpass(lease_root, token)   # token 解密后写临时脚本
-INSERT WorktreeLease(status=locked) → 返回 lease_id + path + branch
+identity 可用性校验 → workspace.repo_url 必填（缺则 400）
+branch = users/<git_username|user>/changes/<change>/tasks/<task>
+先 INSERT lease(status=locked)                  # DB 记录先行，便于追溯
+clone_bare → worktree_add → 建目录 → gitconfig → write_askpass(解密 token)
+失败：rollback + cleanup（rmtree 移线程池）重抛；成功：commit
 ```
-- release：`ExecEnvBuilder.cleanup`（shred_askpass 覆写删 token）→ `worktree_remove` → 标记 released
-- `gc_expired_leases` 回收过期未释放 lease（需外部定时调度）
-- `build_env_vars` 注入 HOME / GIT_ASKPASS 等环境变量供 agent 子进程
-- `_assert_identity_usable` 校验 git identity 凭据有效未过期
-- `bare_repo_path` / `repo_dir` / `home_dir` / `gitconfig_path` / `askpass_path` 由 ExecEnvBuilder 统一规划路径
-- `write_askpass` 写临时脚本承载 token，`shred_askpass` 用后安全清理
-
-### GitRunner 命令执行
-`GitRunner` 用 asyncio 子进程跑 git：
-- `_run` 通用 git 命令执行，失败抛 `GitCommandError`（cmd/returncode/stderr）
-- `clone_bare(remote, path)`：克隆 bare repo 作为 worktree 源
-- `worktree_add(bare, branch, path)`：从 bare repo 检出指定分支到独立目录
-- `worktree_remove(path)`：释放时移除 worktree
-- 所有命令在 ExecEnvBuilder 构建的环境（HOME/GIT_ASKPASS）下执行
+- `GitRunner.clone_bare` 在拉起 git 子进程**之前**调 `core.ssrf.assert_safe_repo_url`：
+  放行 https / ssh / git 协议 + scp-like 语法（含内网 git，design B3/D-004），
+  非法抛 `UnsafeRepoUrl(400)`，不触子进程
+- release：owner 本人或 admin（否则 PermissionDenied）→
+  worktree_remove（best-effort，失败仅告警不阻断）→
+  `shred_askpass`（覆写+删除 token 脚本）→ cleanup（线程池）→ status=released
+- extend：owner 且当前 locked，`expires_at += additional_seconds`；
+  get_lease / list_ 同样做 owner/admin 可见性校验
 
 ## 注意事项
-- `GitRunner` 用 `asyncio.create_subprocess_exec` 跑 git，依赖 git 在 PATH
-- `shred_askpass` 覆写+删除清理 token，非加密级安全
-- `gc_expired_leases` 不自带调度，需 cron/background task 定时调，否则过期 lease 占目录
-- path 字段 unique，同目录不会有两个 lease
-- status 仅 locked/released，默认 locked
-- token 经 `core.crypto.CredentialCipher` 解密后注入，不明文落库
-- extend 用于长任务续期，避免执行中被 gc 回收
-- bare repo + git worktree 实现执行隔离，每 agent 独立目录互不干扰
-- 两个 router 分离：workspace 嵌套（acquire/list）vs 全局 lease（release/extend），URL 语义清晰
-- `_get_lease`/`_get_identity`/`_get_workspace` 取关联实体并校验
-- `_path_or_none` 容错处理可选路径字段
-- acquire 的 branch_name 由调用方指定或自动生成
-- expires_at 默认设未来某时刻，extend 续期
-- released_at 释放时戳，gc 据此+expires_at 判断可回收
-- ExecEnvBuilder.create_directories 建 lease_root/repo/home 等目录
-- build_env_vars 返回 dict 供 agent 子进程注入
-- lease 与 change/task/run 关联，便于追溯哪次执行占用
-- GitRunner._run 捕获 stdout/stderr/returncode，失败组装 GitCommandError
-- clone_bare 只在 bare repo 不存在时执行，已存在则复用
-- worktree_add 的 branch 不存在时从默认分支创建
-- ExecEnvBuilder.lease_root 由 workspace_id+component_id+随机派生
-- extend 的时长由 WorktreeExtendRequest 指定，累加到 expires_at
-- gc_expired_leases 返回回收数，供调度日志记录
-- acquire 是幂等的：同 run_id 重复 acquire 返回已有 lease
+- **当前代码库没有 WorktreeLease 过期回收调用方**：
+  旧 `gc_expired_leases` 已不在 service 中；expires_at 与 `ix_worktree_expires`
+  索引仍在但无人清扫。daemon.lease 的过期批处理（handle_expired_leases_batch）
+  是 daemon 任务租约域，不覆盖本表——泄漏只能靠显式 release 兜
+- token 生命周期：acquire 时解密写临时 askpass 脚本，release 时 shred 覆写删除；
+  acquire 失败分支的 cleanup 能兜住建环境半途的崩溃，release 未被调则目录与脚本滞留
+- cleanup / rmtree 一律走 `asyncio.to_thread`（同步 FS 阻塞事件循环的性能修复，勿改回）
+- acquire 非幂等：同参数重复 acquire 每次生成新 run_id / 新 lease 行
+- lease 与 change/task/run 关联字段便于追溯哪次执行占用；component_id 当前与 workspace 同值占位
+- Windows 兼容：git 子进程与路径处理需保持跨平台（PATH、路径分隔符）
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
+
 <!-- MANUAL_NOTES_END -->

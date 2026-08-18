@@ -6,7 +6,7 @@ source_commit: 9656307c
 author: qinyi
 created_at: 2026-08-08 21:10:00
 ---
-# scripts
+# 运维校验脚本（scripts）
 ## 定位
 仓库根 `scripts/` 顶层运维 / 校验脚本集合。跨子项目（backend / sillyhub-daemon / scan 文档体系）的一次性运维、CI 漂移检测、部署期 smoke 前置校验。脚本各自独立、可直接 `python scripts/x.py` 或 `node scripts/x.mjs` 运行，跨平台（Windows/Linux/macOS，CLAUDE.md 规则 13）。历史上未被 _module-map 覆盖（scan 遗留），2026-08-08 archive（2026-08-08-dispatch-worker-caller-worktree）补登顶层 `scripts` 模块。
 ## 契约摘要

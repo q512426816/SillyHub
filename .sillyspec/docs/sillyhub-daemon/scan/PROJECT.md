@@ -1,58 +1,52 @@
 ---
 author: qinyi
-created_at: 2026-07-27 00:35:31
-source_commit: 6e78b29a
-updated_at: 2026-07-26T16:35:31Z
+created_at: 2026-08-18 01:06:26
+source_commit: 744e3de4
+updated_at: 2026-08-17T17:06:26Z
 generator: sillyspec-scan
 ---
 
-# 项目(Project)
+# 项目（Project）
 
 ## 项目简介
 
-**sillyhub-daemon** 是 SillyHub 平台的**本地任务执行守护进程**。它从平台 backend 拉取任务,在本机调用本地代理(Claude Code / Codex / Copilot 等)执行,再把日志、子代理活动、产物(patch / 文件)和 token 用量回传给 backend。
+**sillyhub-daemon** 是 SillyHub 平台的执行侧守护进程（Node.js CLI）。它通过 HTTP + WebSocket 连接平台 backend，认领平台派发的任务（lease claim / 交互式会话两类调度），在本机调用本地代理（Claude Code / Codex / Copilot 等，启动时探测 12 个 agent CLI）驱动 SillySpec 流程执行，把日志、子代理活动、产物（patch / 文件）和 token 用量回传 backend，并管理本地终端观察、MCP server 与运行配置。（依据 README.md 首节 + `src/cli.ts` / `src/hub-client.ts` / `src/task-runner.ts` 模块头注释核实。）
 
-- **形态**:常驻后台进程,靠 SIGINT/SIGTERM 退出。PID 写入 `~/.sillyhub/daemon/daemon.pid`,日志写入 `~/.sillyhub/daemon/daemon.log`,配置写入 `~/.sillyhub/daemon/config.json`,workspace 基目录在 `~/.sillyhub/daemon/workspaces/`(`~/.sillyhub/daemon/` 在所有平台上展开为 `$HOME/.sillyhub/daemon`)。
-- **入口**:`src/cli.ts`(commander 子命令:`start` / `stop` / `status` / `logs`),`pnpm build` 产出 `dist/cli.js`,经 `npm link` 全局暴露 `sillyhub-daemon` 命令。
-- **历史**:当前实现是 **Node.js / TypeScript**(task-21 从 Python 3.12 + httpx + websockets + Click 整体重写),旧 `sillyhub_daemon/` Python 包目录是历史残留,不再使用(README 安装小节要求 `pip uninstall` 清理旧 entry point)。
-- **接入方式**:登录平台 → `/runtimes` 页面 → 点"复制命令",得到一条带 `--server` + `--token` 的启动命令贴到本机终端运行。
-- **核心职责**:
-  1. HTTP 轮询 backend 拉任务(`hub-client.ts`,Node 20 原生 fetch)+ WebSocket 心跳维持在线(`ws-client.ts`,基于 `ws`),双通道收 `task_available` / `SESSION_INJECT/INTERRUPT/END` / `PERMISSION_RESPONSE` 等控制消息。
-  2. lease/batch 任务执行 + 交互式会话(interactive)两类调度(`task-runner.ts` / `interactive/session-manager.ts`)。
-  3. 多 provider 适配:启动时探测 12 个本机 agent CLI(claude/codex/copilot/opencode/openclaw/hermes/gemini/pi/cursor/kimi/kiro/antigravity)+ 6 种协议适配器(`agent-detector.ts` / `adapters/`)。
-  4. 凭证注入、workspace 管理、spec 同步(tar 打包 pull/push)、MCP server、文件系统权限策略、网络韧性 outbox、可选终端观察(`--open-terminal`)。
-- **跨平台**:兼容 Windows / Linux / macOS(CLAUDE.md 规则 13);Windows 下 `daemon-start.bat` 需 CRLF,`rmtreeWindowsSafe` 有意同步设计(规避 Node v26 `fs.promises.rm` 在 vitest 的 rimraf callback 竞态)。
+- **形态**：常驻后台进程（`sillyhub-daemon start`），SIGINT/SIGTERM 退出；PID 写 `~/.sillyhub/daemon/daemon.pid`，日志写 `daemon.log`，配置写 `config.json`，workspace 基目录在 `~/.sillyhub/daemon/workspaces/`。
+- **命令清单**（`src/cli.ts` commander 子命令，L327-372 共 4 个）：`start`（选项 `--server` / `--token` / `--api-key` / `--workspace-dir` / `--poll-interval` / `--heartbeat-interval` / `--max-concurrent` / `--log-level` / `--open-terminal` / `--terminal-mode`）/ `stop` / `status` / `logs`。
+- **历史**：当前实现为 Node.js / TypeScript（task-21 从 Python 3.12 整体重写）；README 安装小节要求先 `pip uninstall` 清理旧 Python entry point 残留。
+- **跨平台**：兼容 Windows / Linux / macOS；路径统一 node:path（grep 无反斜杠拼接，见 CONCERNS）。
 
 ## 技术栈
 
 | 维度 | 选型 | 备注 |
 | --- | --- | --- |
-| 运行时 | Node.js ≥ 20 | `engines.node`,ESM(`"type": "module"`) |
-| 语言 | TypeScript 5.5.4 | `strict` + `noUncheckedIndexedAccess` + `NodeNext` + `verbatimModuleSyntax` |
-| 包管理 | pnpm 9.6.0 | `packageManager` 钉死;无 pnpm 可降级 npm |
-| CLI 框架 | commander ^12.1.0 | 子命令分发 |
-| HTTP | Node 20 原生 fetch | 零额外 HTTP 库;默认不读代理环境变量 |
-| WebSocket | ws ^8.18.0 | 平台心跳 / session control 下行 |
-| Schema 校验 | zod ^4.4.3 | zod v4(API 与 v3 不兼容) |
-| YAML | js-yaml ^4.1.0 | 配置 / spec 文件 |
-| Claude SDK | @anthropic-ai/claude-agent-sdk 0.3.181 | 钉死,8 条 pnpm overrides 收口平台包子包 |
-| MCP | @modelcontextprotocol/sdk ^1.29.0 | daemon 内置 MCP server |
-| 打包 | @vercel/ncc ^0.44.0 | 单文件 bundle `dist/cli.js`(self-update 用) |
-| 构建 | tsc 5.5.4 | `rootDir=src` / `outDir=dist` |
-| 类型生成 | openapi-typescript ^7.13.0 | 从 backend OpenAPI 生成 `src/api-types.ts`(`pnpm gen:types`) |
-| 测试 | vitest ^2.0.0 | 两套 config(主 + spikes),详见 TESTING.md |
+| 语言 | TypeScript 5.5.4 | strict + noUncheckedIndexedAccess + NodeNext + verbatimModuleSyntax |
+| 运行时 | Node.js ≥ 20（ESM） | `engines.node`；原生 fetch / AbortSignal.timeout |
+| 包管理 | pnpm 9.6.0 | `packageManager` 钉死；无 pnpm 可降级 npm |
+| CLI 框架 | commander ^12.1.0 | 4 个子命令分发 |
+| HTTP | Node 20 原生 fetch | 零额外 HTTP 库；默认不读代理环境变量 |
+| WebSocket | ws ^8.18.0 | 心跳 + session control 下行（`ws-client.ts`） |
+| Schema 校验 | zod ^4.4.3 | 仅 `mcp-server.ts` 消费 |
+| Agent SDK | @anthropic-ai/claude-agent-sdk 0.3.181 | 钉死 + 8 条 pnpm overrides 收口平台包子包 |
+| MCP | @modelcontextprotocol/sdk ^1.29.0 | `mcp-server.ts` 内置 MCP server（StdioServerTransport） |
+| YAML | js-yaml ^4.1.0 | 配置 / local.yaml 写入 |
+| 测试 | vitest ^2.0.0 | 主 + spikes 两套 config，详见 TESTING.md |
+| 构建/打包 | tsc（build）/ @vercel/ncc ^0.44.0（bundle） | `dist/` 常规构建；bundle 出单文件 `dist/cli.js` 供 self-update |
+| 类型生成 | openapi-typescript ^7.13.0 | 从 backend/openapi.json 生成 `src/api-types.ts` |
 
-**关键脚本**:`pnpm dev`(tsc --watch)/ `pnpm build` / `pnpm typecheck` / `pnpm test` / `pnpm bundle` / `pnpm gen:types`。
+## 源码组织（src/）
 
-## 源码组织(src/)
+- **顶层**：`cli.ts`（入口）→ `daemon.ts`（主循环，4047 行）；平台通信 `hub-client.ts`（REST）+ `ws-client.ts`（WS）；执行 `task-runner.ts`（batch lease，3156 行）；支撑模块 `spec-sync.ts`（spec bundle tar pull/push + 增量同步 + sillyspec init 拉起）、`local-yaml-writer.ts`、`workspace.ts`、`credential.ts` + `credential-injector.ts`、`agent-detector.ts`、`skill-manager.ts`、`mcp-server.ts` + `mcp-config.ts`、`file-rpc.ts` + `roots-rpc.ts` + `host-fs-handler.ts`、`permission-rules.ts`、`preflight.ts`、`runtime-lock.ts`、`terminal-launcher.ts` + `terminal-observer.ts`、`claude-settings.ts`、`spawn-env.ts`、`config.ts`、`version.ts`/`build-id.ts`/`daemon-version.ts`/`cursor-version.ts`、`api-types.ts`（生成产物）。
+- **`adapters/`**：6 协议适配器（stream-json / json-rpc / jsonl / ndjson / pi-json / text）+ `protocol-adapter.ts` 工厂。
+- **`interactive/`**：交互式会话（`session-manager.ts` 3897 行 / `claude-sdk-driver.ts` / `codex-app-server-driver.ts` / `driver.ts` / `session-store-persistence.ts` / `permission-resolver.ts` / `input-queue.ts`）。
+- **`resilience/`**：网络韧性 outbox（`service.ts` / `outbox.ts` / `error-classify.ts`）。
+- **`policy/`**：文件系统权限策略（`filesystem-policy.ts` / `runtime-policy.ts` / `path-utils.ts` / `shell-paths.ts` / `audit-sink.ts`）。
+- **`model-error/`**：模型错误分类。
 
-- **顶层**:`cli.ts`(入口)、`daemon.ts`(主循环)、`hub-client.ts` + `ws-client.ts`(平台通信)、`task-runner.ts`(batch lease 执行)、`workspace.ts`、`credential.ts` + `credential-injector.ts`、`agent-detector.ts`、`config.ts` / `version.ts` / `build-id.ts` / `daemon-version.ts` / `cursor-version.ts`、`spec-sync.ts`、`skill-manager.ts`、`mcp-server.ts` + `mcp-config.ts`、`file-rpc.ts` + `roots-rpc.ts`、`preflight.ts`、`runtime-lock.ts`、`protocol.ts`、`types.ts`、`tool-kind.ts`、`permission-rules.ts`、`spawn-env.ts`、`terminal-launcher.ts` + `terminal-observer.ts`、`cmd-shim.ts`、`host-fs-handler.ts`。
-- **`adapters/`**:6 协议适配器(stream-json / json-rpc / jsonl / ndjson / pi-json / text)+ `protocol-adapter.ts` 工厂 + `index.ts`。
-- **`interactive/`**:交互式会话(`driver.ts` / `claude-sdk-driver.ts` / `codex-app-server-driver.ts` / `session-manager.ts` / `session-store-persistence.ts` / `permission-resolver.ts` / `input-queue.ts` / `types.ts`)。
-- **`resilience/`**:网络韧性(`service.ts` outbox 调度 + `error-classify.ts` + `outbox.ts`)。
-- **`policy/`**:文件系统权限策略(`filesystem-policy.ts` / `runtime-policy.ts` / `path-utils.ts` / `shell-paths.ts` / `audit-sink.ts`)。
+## 与平台（backend）的边界
 
-## 在 monorepo 中的位置
-
-- 子项目根:`sillyhub-daemon/`(仓库根下,非 `multi-agent-platform/` 子目录)。
-- 关系:`connects_to` backend(HTTP + WebSocket),由 backend 下发任务、回收状态;本机任务执行端(agent runner + 会话管控 + lease 生命周期上报 + agent CLI 探测)。
+- **契约**：daemon 对 backend 的全部 HTTP 端点类型来自 `src/api-types.ts`（openapi-typescript 从 `backend/openapi.json` 生成，`pnpm gen:types:check` 守门），与前端共享同一 OpenAPI 单一契约源，禁止手写。
+- **通道**：`hub-client.ts` 走 REST（register / heartbeat / claim / lease 心跳 / submitMessages / complete / spec bundle post 等，Node 20 原生 fetch，timeout=30s）；`ws-client.ts` 走 WS 心跳收 `SESSION_INJECT/INTERRUPT/END`、`PERMISSION_RESPONSE` 等下行控制；WS 断线时 HTTP 轮询 `getPendingLeases` 兜底。
+- **spec 同步**：`spec-sync.ts` 负责 `.sillyspec` 目录 tar 打包 pull/push（含 Tar Slip 防护）与增量同步，并拉起 `sillyspec init`；init claim 时由平台签发的 workspace 级 `shpsync_` token 契约也体现在 api-types.ts（platform_sync 端点）中。
+- **位置**：子项目根 `sillyhub-daemon/`，monorepo 仓库根下；`connects_to` backend，是平台的任务执行端（agent runner + 会话管控 + lease 生命周期上报 + agent CLI 探测）。

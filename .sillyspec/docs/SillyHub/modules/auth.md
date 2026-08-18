@@ -2,50 +2,67 @@
 schema_version: 1
 doc_type: module-card
 module_id: auth
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:16:33
+created_at: 2026-08-18 01:45:00
 ---
-# auth
+
+# 认证与权限管理（auth）
 
 ## 定位
-后端「鉴权」功能域：负责用户登录、JWT/refresh token 签发与校验、API Key 管理、RBAC 权限（平台级 + 工作空间级）。通过 `core.auth_deps` 的 FastAPI 依赖项把权限校验注入到所有受保护端点；启动时 seed 管理员账号与 RBAC 种子数据。
+后端鉴权功能域：用户登录（限流 + 滑块验证码防爆破）、JWT/refresh token 签发轮换与吊销、自助改密、API Key 生命周期、RBAC 权限模型（平台级 + 工作空间级两层）、启动时 seed 管理员与 RBAC 种子。
+权限校验的 FastAPI 装配在 core.auth_deps，权限判定的数据聚合在本模块 rbac。
+
+不负责：用户/角色/组织的运维管理（admin）、端点级权限声明（各业务模块用 core.auth_deps）。
 
 ## 契约摘要
-- API（prefix=/auth）：`POST /api/auth/login`、`/refresh`、`/me`，以及 API Key 管理（创建/列出/吊销）。
-- `AuthService`：`login(username, password)` → 纯 username 查询 + 密码校验 + 签发 token 对（email 不再作登录账号，D-001）；`refresh(refresh_token)` → 消费并换新；`logout_session_by_refresh` / `revoke_all_user_sessions` 会话吊销；`_issue_token_pair` 内部签发。
-- `ApiKeyService`：`create`（生成明文 + 哈希存储，仅创建时返回明文）、`list_for_user`、`revoke`、`authenticate(plaintext)`（按前缀定位 + 哈希比对 + `_mark_used`）。P0 性能优化（2026-06-27）：`authenticate` 加 Redis 正/负缓存——正缓存 `auth:apikey:{key_prefix}:{sha256}` 存 user_id（命中后仍查 DB 实时校验 active/未删除，绝不放行已失效用户），负缓存 `auth:apikey:neg:{sha256}` 防无效 key 探测穿透；bcrypt `verify_refresh_token` 放 `asyncio.to_thread` 不阻塞事件循环；`revoke` 按 `key_prefix` SCAN 清正缓存（否则被吊销 key 在 TTL 内仍可用）；缓存层 try/except 降级，redis 不可用回退原 bcrypt 路径。`_mark_used` 写 `last_used_at` 受 `settings.auth_api_key_last_used_throttle_seconds`（默认 60s）节流：窗口内重复认证跳过 UPDATE，避免每请求写同一行导致行锁串行化雪崩（ql-20260627-001-a3f2）。
-- `Permission(StrEnum)` / `PermissionGroup`：枚举全部权限点，按 `group()` 归入 AUDIT/WORKSPACE/PLATFORM/ADMIN/CHANGE/AGENT/PPM 等组。
-- `rbac`：`collect_permissions*`（all / platform / everywhere）、`has_permission`、`list_user_workspace_roles`、`allowed_workspace_ids`，按工作空间范围聚合权限。
-- 启动 seed：`bootstrap_admin_and_seed_rbac`（建管理员 + 种 RBAC）、`seed_platform_admin_role`。
+- **API（prefix=/auth）**：
+  - `POST /login`（TokenPair）；`GET /captcha/confirm` + `POST /captcha/verify`（登录前无鉴权）；`POST /refresh`；`POST /logout`（204）；`POST /change-password`（204）；`GET /me`（用户信息 + 工作空间角色分配）。
+  - API Key：创建（明文仅创建时一次性返回）/列表/吊销。
+- **登录防爆破**（CaptchaService，状态全在 Redis、服务本身无状态）：
+  - 同 IP 60s 窗口限流，超阈拒绝并提示稍后再试。
+  - 累计失败达阈值后强制滑块验证：未过验证码再错返回 423 `need_captcha`（前端据此弹「我不是机器人」）。
+  - 已过验证码后的密码错如实返回 401（避免「验证→又让验证」死循环，token 一次性已消费）；爆破防护不降——每次试密码仍须先过验证码且受 IP 限流约束。
+  - 登录成功清失败计数；captcha_id 与 captcha_token 均一次性；Redis 故障降级放行不阻断登录可用性。
+- **AuthService**：
+  - `login(account, password)`——account 字段名保留但语义是纯登录名 username（strip+lower 唯一查询，email 不再作登录账号）；失败响应统一 AuthInvalidCredentials 不泄露账号存在性。
+  - `refresh` 消费旧 token 轮换签新（`_consume_refresh_token` + `_mark_session_rotated`，带 grace 窗口防并发刷新竞态）。
+  - `logout_session_by_refresh / revoke_all_user_sessions` 会话吊销；`_mark_session_revoked` 撤销标记。
+  - `change_password`：verify 旧密 → hash 新密 → 撤销其他会话 → 审计 → 末尾统一 commit（事务原子）。
+- **ApiKeyService**：
+  - 明文只存哈希；`authenticate`：负缓存拒无效 key 探测 → 正缓存 user_id → 回 DB 实时校验用户 active（绝不放行已失效用户）→ bcrypt 放 `asyncio.to_thread` 不阻塞事件循环。
+  - `revoke` 按 key_prefix SCAN 清正缓存（否则被吊销 key 在 TTL 内仍可用）；`last_used_at` 写入受节流（默认 60s，0=每次写）避免行锁串行化雪崩。
+  - 缓存层 try/except 降级，Redis 不可用回退 bcrypt 路径。
+- **权限模型**：`Permission(StrEnum)` 全部权限点 + `PermissionGroup` 分组（AUDIT/WORKSPACE/PLATFORM/ADMIN/CHANGE/AGENT/PPM 等）；rbac 提供 `collect_permissions*`（平台级 / 全部 / everywhere 任意工作空间聚合）、`has_permission`、`list_user_workspace_roles`、`allowed_workspace_ids`；读侧接 core.permission_cache（Redis + 熔断）。
+- **启动 seed**：`bootstrap_admin_and_seed_rbac`（管理员账号三元组来自 Settings 的 platform_bootstrap_admin_* + RBAC 种子）与 `seed_platform_admin_role`。
+- **数据**：User / Session / Role / RolePermission / ApiKey / UserWorkspaceRole（均继承 BaseModel）。
 
 ## 关键逻辑
 ```
-# 登录签发
-login → _lookup_active_user_by_username → 密码 verify → _issue_token_pair(access+refresh)  # 纯 username 查询(D-001),email 分支已移除
-# 权限校验（端点）
-require_permission(p) → get_current_user → rbac.has_permission(user, p, ws?)
-# 工作空间作用域
-allowed_workspace_ids(user) → collect_permissions_everywhere 聚合所有 ws 角色
-# API Key 认证（与 JWT 并列）
-_extract_api_key → ApiKeyService.authenticate(明文) → User
+# 登录
+check_rate_limit(ip) → assert_captcha_if_needed(失败达阈值) → AuthService.login(纯 username)
+  → 失败: record_login_failure → 达阈值且未过验证码 → 423 need_captcha；已过验证码 → 401 如实
+  → 成功: _issue_token_pair(access+refresh) + clear_login_failures
+
+# refresh 轮换
+_consume_refresh_token(校验+作废旧 token) → _issue_token_pair → _mark_session_rotated
+
+# API Key 认证（与 JWT 并列通道）
+_extract_api_key → authenticate: 负缓存拒 → 正缓存 user_id → DB 实时校验 active → bcrypt to_thread
+
+# 权限
+require_permission(p) → rbac.has_permission(user, p, ws?) ← core.permission_cache（Redis+熔断降级）
 ```
 
 ## 注意事项
-- refresh token 哈希存储，`_consume_refresh_token` 校验后即作废旧 token 并签新（轮换），`_mark_session_revoked` 标记会话撤销。
-- API Key 明文仅在创建时一次性返回，数据库只存哈希；`authenticate` 失败不应泄露「用户存在与否」差异。
-- 权限分平台级与工作空间级两层，`collect_permissions_everywhere` 用于判断「任意 ws 内是否拥有某权限」。
-- RBAC 种子与管理员账号在应用启动时注入，调整权限点需同步更新 seed 与前端权限矩阵。
-- 登录仅认 username（D-001 纯登录名），email 不再作为登录账号识别；User.email 可空，非空仍全局唯一（D-003）。
-- access token 的 `email` 字段可选（`TokenPayload.email: str | None`）：username-only 账号 `User.email` 为 NULL 时 token 携带 `email=null`，签发/解码均不报错；decode 后无人消费 email（`get_current_user` / db audit 只读 `sub`），仅作识别用途。
-
-## 变更索引
-- ql-20260627-001-a3f2 | API key 认证 last_used_at 时间节流（默认 60s），消除每请求 UPDATE 同一行致行锁串行化的生产性能雪崩。
-- 2026-06-27-p0-perf-optimization | `ApiKeyService.authenticate` 加 Redis 正/负缓存 + bcrypt 放 `asyncio.to_thread` 异步化（生产根因：cost12 同步阻塞单事件循环）+ `revoke` 按 key_prefix 清缓存；缓存降级保证 redis 不可用仍可认证。配置 `auth_api_key_cache_ttl`/`auth_api_key_negative_cache_ttl`。
-- 2026-07-15-change-password | 用户自助修改密码：`AuthService.change_password`（verify 旧密码→hash 新密码→execute-only 撤销其他会话→审计 `user.password_change`→末尾统一 commit，事务原子）+ `POST /api/auth/change-password`(204) + `ChangePasswordRequest` schema。闭环默认密码方案 SillyHub@123。
-- ql-20260715-009-5a20 | email=NULL 用户登录 500 修复（TokenPayload.email 强制 str→str|None，create_access_token email 参数同步；username-only 账号 email 为空时签发 JWT 不再崩；加 email=None 登录回归测试）
-- ql-20260726-003-7a2e | backend 迁移 202607251600 datetime aware/naive 致启动崩溃修复：seed business_member role 时 now=datetime.now(UTC)（aware）插 roles 表 naive 列（TIMESTAMP WITHOUT TIME ZONE）被 asyncpg 拒（can't subtract offset-naive and offset-aware）→ backend restart 循环、整站 API 500。改 now=datetime.now(UTC).replace(tzinfo=None)（naive，对齐 202605280900 的 utcnow 范式）。重建 backend 后 healthy、迁移跑通。
+- 种子写入时间必须用 naive UTC（`datetime.now(UTC).replace(tzinfo=None)`）对齐 TIMESTAMP WITHOUT TIME ZONE 列——aware 时间会致 asyncpg 拒写、backend 启动循环崩溃（历史事故）。
+- 调整权限点需同步四处：Permission 枚举、RBAC seed、前端权限矩阵、core.permission_cache 失效策略。
+- refresh token 轮换后旧 token 立即失效；`TokenPayload.email` 可空（username-only 账号签发不崩），仅作识别用途。
+- API key 缓存/节流配置在 Settings（`auth_api_key_cache_ttl` / `auth_api_key_negative_cache_ttl` / `auth_api_key_last_used_throttle_seconds`），0=禁用对应机制。
+- 登录限流/验证码 Redis 故障降级放行是刻意取舍（可用性优先），勿改成硬失败。
+- bootstrap admin 邮箱查重在历史验证中暴露过预存缺陷，新增启动 seed 逻辑注意幂等（重启不重复建号）。
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
+
 <!-- MANUAL_NOTES_END -->

@@ -2,54 +2,96 @@
 schema_version: 1
 doc_type: module-card
 module_id: agent
-source_commit: 9656307c
 author: qinyi
-created_at: 2026-06-24T01:08:51
+created_at: 2026-08-18 01:45:00
 ---
-# agent
+
+# 智能体执行引擎（agent）
+
 ## 定位
-AI Agent（Claude Code / GLM 等）执行编排。负责 agent run 生命周期、执行上下文（spec bundle）构建、mission（多 agent 委派）调度，以及与 daemon（运行时租约）协作落地执行。是平台核心执行引擎。
+平台核心执行引擎：AI Agent（Claude Code / Codex / GLM 等）运行编排。负责 AgentRun 生命周期、
+执行上下文（spec bundle → CLAUDE.md）构建、交互式 AgentSession、mission（多 agent 团队委派）
+调度，以及 `profile/` AgentProfile 三层配置层（daemon→agent→workspace）。派发落地经
+RunPlacementService 选 daemon 运行时 + lease，与 daemon 模块双向协作（agent 下发 / daemon
+完成回调 run_sync）。
+
 ## 契约摘要
-- `POST /api/workspaces/{wid}/agent-runs` → 创建 run；`GET /{wid}/agent-runs` / `/sessions`：列表。
-- `GET /api/workspaces/{wid}/agent-sessions?include_ended=`（2026-08-14 扩展）：缺省 false = 现状 active-only 最小字段 dict；`include_ended=true` = 工作区全量会话（含已结束，软删过滤）完整 `AgentSessionListItem`（id/provider/status/turn_count/author/last_active_at/title，对齐 daemon/schema.py:71-84），排序 coalesce(last_active_at, created_at) desc，跨成员可见。
-- `GET /api/agent-runs/{run_id}/execution-context` → ExecutionContextResponse：组装供 agent 使用的上下文。
-- `GET /api/agent-runs/{run_id}` / `/logs` / `/logs/stream`：详情/日志/SSE 流。
-- `POST /{run_id}/kill` / `/input` / `/resume` / `/approve`：控制；`GET /{run_id}/checkpoint`。
-- `AgentService`：start_run/kill_run/submit_run_input/get_run/list_runs/stream_run_logs(_session_logs)/cleanup_stale_runs/start_stage_dispatch/start_scan_dispatch。
-- `ExecutionCoordinatorService`（coordinator.py）：乐观锁 + 指纹校验 + token 校验的协调器。
-- `RunPlacementService`（placement.py）：选执行后端（daemon），无在线 daemon 抛 `NoOnlineDaemonError`。
-- `MissionService` / `MissionControlService` / `MissionExecutionService`：mission 多步委派执行。
-- `dispatch_worker`（execution.py / mcp_tools.py / router.py，2026-08-08-dispatch-worker-caller-worktree）：可选参 `worktree_path`/`branch`/`worker_prompt`（caller-worktree / 路径A）；`worktree_path` 非空 → 跳过 `git_worktree_add` 并作 daemon `root_path`，且**不写 `run.worktree_branch`**（D-008，防 finalize 误 merge caller 主仓）；`worker_prompt` 非 None → 覆写 `render_worker_prompt`。
-- `create_mission`（router.py / mission_schema.py）：`orchestration_mode: Literal["team","external"]|None=None`；并入 `constraints`，team 门控放行 external 进 `team_mission_entry` 但跳过 orchestrator run/lease spawn（D-007 / R-02）。
-- `build_spec_bundle` / `render_bundle_to_claude_md`（spec_bundle/context_builder）：生成 CLAUDE.md 等 spec 包。
-- 模型：AgentRun / AgentRunLog / AgentSession / AgentMission / AgentRunDependency / AgentArtifact。
+- run 面：`POST /{wid}/agent/runs`（创建）+ 子路由
+  `GET /agent/runs/{run_id}`（详情）、`/kill`（统一 kill 通道）、`/input`、
+  `/logs`、`/stream`（SSE）、`/resume`、`/approve`、`GET|POST /checkpoint`；
+  `GET /api/agent-runs/{run_id}/execution-context`（组装执行上下文）；
+  `GET /{wid}/tasks/{task_id}/agent/runs`（任务维度）。
+- 会话面：`GET /{wid}/agent-sessions?include_ended=`（false=active-only 最小字段，
+  审批中心聚合用；true=全量含已结束完整 `AgentSessionListItem`，批量取作者展示名 +
+  首条 user_input 截 30 字标题防 N+1，coalesce(last_active_at, created_at) desc，
+  跨成员可见）；`GET|POST /{wid}/dialogs`；mission 面 `GET|POST /{wid}/missions`、
+  `GET /missions/{mid}`、`POST /missions/{mid}/cancel`。
+- 服务层：
+  - `AgentService`（service.py）：start_run / kill_run / submit_run_input /
+    resume / approve / start_stage_dispatch（change 阶段派发入口）/
+    start_scan_dispatch / cleanup_stale_runs / stream_run_logs(_session_logs)。
+  - `ExecutionCoordinatorService`（coordinator.py）：乐观锁 + 指纹校验 + token 校验。
+  - `RunPlacementService`（placement.py）：选 daemon 后端，无在线抛
+    `NoOnlineDaemonError`；含 borrow 解析（borrow_resolver.py，业务人员借用 daemon，
+    落 daemon_borrow_audit 审计）。
+  - mission：`MissionService`（start_mission 等）/ `MissionControlService` /
+    `MissionExecutionService` / `orchestrator.py`（schedule_loop 编排）；
+    `orchestration_mode: team|external`——external 放行进 team_mission_entry 但跳过
+    orchestrator run / lease spawn。
+  - `dispatch_worker`（execution.py / mcp_tools.py / router.py）：可选参
+    `worktree_path` / `branch` / `worker_prompt`（caller-worktree 路径）。
+  - profile 子包（profile/）：`AgentProfileService`——create / list / get / update /
+    delete / copy / resolve_profile / list_visible_all；可见性 = 工作区成员可读 +
+    属主可改 + 系统默认档案（is_system_default）不受删；`seed.py` 启动期补种系统默认
+    （Claude Code 默认 / Codex 默认；平台角色模板已全部下线，仅按确定性 UUID 回收残留）。
+  - 委派规划：`delegation.py`——`CoordinatorPlanner.plan` + `GLMConfig.from_env`
+    （LLM 委派路由，route/parse_delegations；测试须 monkeypatch from_env 防打真 LLM）。
+  - 支撑件：`context_builder.py`（build_spec_bundle / render_bundle_to_claude_md）、
+    `finalizer.py`（run/mission 收尾 merge 与清理）、`post_scan_validator.py`
+    （post-scan 校验）、`diff_collector.py`（产出物 diff）、
+    `skills_bundle_service.py`（sillyspec skills 打包，daemon 分发源）、`control.py`。
+- 模型：agent_runs（~45 字段：spec_strategy/provider/usage/gate_result/worktree_branch
+  等）、agent_run_logs（tool_kind/subagent/dedup_key）、agent_sessions、agent_missions、
+  agent_run_dependencies、agent_artifacts、daemon_borrow_audit。
+
 ## 关键逻辑
 ```
 start_run:
-  placement = RunPlacementService 选 daemon（无在线→NoOnlineDaemonError）
-  _try_acquire_lease 占用 worktree/daemon lease
-  build_spec_bundle + render CLAUDE.md
+  placement 选 daemon(无在线→NoOnlineDaemonError)
+  _try_acquire_lease 占 worktree/daemon lease
+  build_spec_bundle + render CLAUDE.md + 应用 profile(system_prompt 经 SDK
+    systemPrompt={preset:claude_code, append} 注入, 写 lease.metadata)
   ExecutionCoordinatorService 启动 → 落 AgentRun
-  后台 task 监控 tool failure（monitor_session_tool_failures）
-```
-dispatch_worker caller-worktree（路径A，2026-08-08-dispatch-worker-caller-worktree）:
-  worktree_path 非空 → 短路 git_worktree_add + 作 daemon root_path
-  路径A 不写 run.worktree_branch（D-008，防 finalize 误 merge caller 主仓）
-  worker_prompt 非 None → 覆写 render_worker_prompt（caller 注入 no-commit / 不越界）
+  后台监控 tool failure(should_warn_tool_failure 阈值告警不终止)
 
-mission external 模式（R-01 三重防御，防 caller 主仓被误 merge / finalize）:
-  ① team_mission_entry: constraints.orchestration_mode=="external" → 跳过 orchestrator run + lease spawn
-  ② converge_mission_for_completed_run: 检测 external → 跳过 finalize_execute_mission + cleanup_mission（不 merge / 不清 caller worktree）
-  ③ 路径A 不写 worktree_branch（即便误进 finalize 也无 branch 可 merge）
+dispatch_worker caller-worktree(路径A):
+  worktree_path 非空 → 跳过 git_worktree_add, 作 daemon root_path,
+  且不写 run.worktree_branch(防 finalize 误 merge caller 主仓)
+  worker_prompt 非 None → 覆写 render_worker_prompt(caller 注入约束)
+
+mission external 三重防御: ①入口跳过 orchestrator/lease spawn
+  ②converge 检测 external 跳过 finalize/cleanup(不 merge/不清 worktree)
+  ③路径A 不写 worktree_branch(误进 finalize 也无 branch 可 merge)
+```
+
 ## 注意事项
-- **用户可见错误文案中文（2026-08-15-error-message-l10n）**：本模块面向前端用户的 raise message 已全部中文化（中文短语+行动指引，技术 ID 在 details）；守护测试 tests/core/test_error_message_l10n.py 强制新文案含 CJK。
-- agent↔daemon 双向引用：agent 选 daemon 运行时，daemon 完成后回调 agent。
-- 工具失败监控（`should_warn_tool_failure`）有阈值，超阈值告警但不直接终止。
-- kill/resume/approve 有状态前置（AgentRunNotResumable / NotPendingApproval），改状态机需同步。
-- spec bundle 是 agent 行为的上下文真相源，改 bundle 渲染会影响所有 run。
+- agent↔daemon 双向引用：agent 选 runtime 并下发 lease，daemon 完成后回调 agent
+  （run_sync 同步结果）；kill 走统一通道（daemon-kill-channel 后），`AgentKillResponse`
+  为唯一契约。
+- kill/resume/approve 有状态前置（AgentRunNotResumable / NotPendingApproval 等），
+  改状态机需同步守护测试（test_kill_and_state_mapping.py 等）。
+- spec bundle 是 agent 行为上下文的真相源，改 bundle 渲染影响所有 run；
+  profile.system_prompt 注入写 lease.metadata.system_prompt（空不写键零回归）。
+- stageProfileId 每阶段独立持久化 `change.stages[<stage>].profile_id`
+  （PATCH 端点在 change 模块）。
+- mission external 三重防御链（入口/converge/无 branch）任一改动都需回归
+  `test_mission_external_mode.py`；路径A 不写 worktree_branch 是 D-008 定案。
+- delegation 走真实 LLM（GLMConfig.from_env），测试必须 monkeypatch 防烧 token
+  （本机 shell 网关变量会泄进 pytest）。
+- 用户可见错误文案中文（error-message-l10n）；守护测试防回退。
+
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
-- **2026-08-13-profile-system-prompt-injection**（已归档）：profile.system_prompt 经 SDK `systemPrompt={preset:claude_code, append}` 注入 agent（废弃 D-012@v2 claudeMd prepend）；`_apply_profile_to_lease` 写 lease.metadata.system_prompt（service.py，空不写键零回归）。stageProfileId 每阶段独立持久化 `change.stages[<stage>].profile_id` + PATCH `/changes/{id}/stage-profile`。
-- **ql-20260814-001** 平台角色模板全部下线：CC×5 移除（GLM×5 此前 ql-20260813-005 已下线）。`profile/seed.py` `_ROLE_TEMPLATE_PROVIDERS` 清空，`ensure_role_template_profiles` 不再补种、仅按 `_DEPRECATED_ROLE_TEMPLATE_IDS`（GLM+CC 共 10 确定性 UUID）回收 DB 残留。系统默认档案（Claude Code 默认 / Codex 默认，`is_system_default=True`）不受影响。
-- **2026-08-14-change-center-conversation-driven**（D-002@v1 / task-06）：`GET /{wid}/agent-sessions` 加 `include_ended: bool = False` 参数——false 保持 active-only 最小字段（审批中心聚合用）；true 返回全量 `AgentSessionListItem`（含已结束，`_build_workspace_session_items` + `_assemble_workspace_session_items`：批量取作者展示名 + 首条 user_input 标题前 30 字，防 N+1）。不新增双端点。
+
 <!-- MANUAL_NOTES_END -->

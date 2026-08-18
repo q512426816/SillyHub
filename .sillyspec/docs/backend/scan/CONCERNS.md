@@ -1,59 +1,53 @@
 ---
 author: qinyi
-created_at: 2026-07-27 00:35:31
-source_commit: 6e78b29a
-updated_at: 2026-07-26T16:35:31Z
+created_at: 2026-08-18 01:06:26
+source_commit: 744e3de4
+updated_at: 2026-08-17T17:06:26Z
 generator: sillyspec-scan
 ---
 
-# 关注点(Concerns)
+# 关注点（Concerns）
 
-> 仅列已核实真实问题，每条标注来源（审计文档 / 代码文件:行 / 记忆索引 / code-quality 文档）。颜色按严重度：🔴 正确性/阻塞、🟡 半成品/数据质量、🟢 已就绪可盘活/低风险。
+> 仅列本轮 Grep/Read 逐条核实过的问题，每条附代码位置。🔴 正确性/阻塞、🟡 半成品/防护面窄/锁版债、🟢 低风险维护项。
 
 ## 代码质量
 
-### 🔴 正确性 bug（界面骗人级，审计 P0）
+### 🔴 正确性 / 阻塞
 
-- **interactive kill 是假停（僵尸）** — `backend/app/modules/daemon/lease_service.py:340` 的 `_ws_cancel_stub` 只打一行日志、什么都不发；lease 置 cancelled + AgentRun 置 killed 后，daemon 里的 claude/codex 进程继续跑到自然结束 / idle expire，仍在烧 token。来源：`docs/agent-platform-deep-audit-2026-07-12.md` §2 发现 1。
-- **MissionControl.cancel 造僵尸** — `backend/app/modules/agent/control.py:83-99` cancel mission 时只改 AgentRun.status，不调 `cancel_lease`，daemon 不被通知，worker 继续跑（与上面同病）。来源：同审计 §2 发现 4 / §3 P0-2。
-- **scan 文档全量结构性过期** — 停在 `source_commit ba87eec`（即本扫描的前一版），与当前主分支漂移；sillyspec.db changes 表为空（进度跟踪失效）。来源：审计 §5.5 已知技术债。
+- 无新增（上一轮列的 interactive kill 假停、MissionControl cancel 造僵尸已随 daemon-kill-channel 变更修复关闭；本轮扫描未发现同级新问题）。
 
-### 🟡 半成品 / 数据质量（审计 P1-P2 + code-quality DEFER）
+### 🟡 半成品 / 防护面窄
 
-- **预算只挡新派发、不杀在跑的** — `backend/app/modules/agent/control.py:76-80` `can_dispatch_worker` 是 pre-dispatch 门，已派出的 worker 不再检查；`budget_tokens` 字段全代码无任何强制点；默认 `budget_usd=4.0` 硬编码（`spec_workspace/bootstrap.py:257`、`change/dispatch.py:943`）。来源：审计 §2 发现 4 / §3 P2-1。
-- **写代码 team mission 断链** — `finalize_execute_mission`（`agent/finalizer.py:167-186`）是 Wave 4 占位、全代码无调用点；`collect_completed_artifacts` 未把 daemon 上报的 patch 存成 `AgentArtifact(kind="patch")`；硬阻塞 C：`execution.py:104-130` 给每个 worker 传同一个 `root_path`（v1 共享 worktree，并行写互相覆盖 + patch 基线漂移，D-006 延后）。来源：审计 §2 发现 3 / §3 P2-2。
-- **daemon-client spec 同步断裂** — scan/runtime 页空根因：session 不 end → `postSpecSync` 不触发 + `.sillyspec` 包裹错位 + daemon 无 HTTP 只能 lease 轮询；修复变更待 plan。来源：记忆索引 `daemon-client-spec-sync-broken.md`。
-- **PPM 父表删除不级联（软关联）** — PPM FK 为软关联无约束（migration `202607220900`），删父行不会 FK 违约 500，而是留孤儿子行（`ppm/task/service.py:437` 注释明示）；4 父表（plan/problem/task/project）子表需逐表确认 + 显式级联。来源：`docs/code-quality-hardening-2026-07-24.md` §8 G1-G3 DEFER。
-- **PPM 全域缺乐观锁** — 需 version 列 migration（多表）+ update WHERE version + 前端并发 409 协调；复用 `agent/coordinator.update_with_optimistic_lock` 范式，走专项 brainstorm。来源：同上 §8。
-- **缓存 token 聚合不一致（A6）** — daemon 端 `sillyhub-daemon/src/adapters/stream-json.ts` L461 `+=` / L549 `=` / L706 `+=` 语义微妙（message_start 累加每 call 增量 vs message_delta 累计覆盖），盲目改破坏计费（SAFE=N），需真实数据 diff 验证；backend 聚合消费侧需对齐。来源：code-quality §3/§7 A6 DEFER + 记忆 `claude-cache-token-semantics`。
-- **残余 N+1 查询** — `ppm/problem/import_commit._build_module_maps`（每项目 4 表 JOIN）、`ppm/plan/import_commit` 两段循环（per-user kanban 计数器）；低频手动 Excel 导入，N 小，DEFER。来源：code-quality §7 Wave B DEFER。
-- **file 存储一致性收尾债** — upload 补偿 / soft_delete reaper / import_commit 原子化（platform-file-center 收尾）。来源：code-quality §7 §8。
-- **mypy 实质偏弱** — `[tool.mypy]` `strict=false` + `disable_error_code` 关闭 9 类（`attr-defined/union-attr/assignment/arg-type/valid-type/operator/call-overload/call-arg` 等），`ignore_missing_imports=true`；新增代码类型错误基本不被拦截。来源：`backend/pyproject.toml`。
+- **CI flaky 债未根治** — `backend/pyproject.toml` dev 依赖注释 + `backend-ci.yml:54-57`：2 核下 xdist + async fixture + in-memory SQLite 偶发竞态（task/change/runtime reparse created=0 → StopIteration / 文件列表空），本机 20 核 3931 passed 复现不了；loadscope + `--reruns 2` 只是兜底。
+- **spec 同步 tar 解包 `filter="fully_trusted"`** — `app/modules/spec_workspace/service.py:717`。安全性全靠手工预校验（绝对路径拒绝 L698、resolve+relative_to 越界拒绝 L703-710、成员白名单 + `SERVER_EXCLUDED_FILENAMES` 过滤 L713），tarfile 内建 data 过滤（symlink/特殊文件）被显式关闭；预校验只查路径字符串，符号链接成员的间接越界路径未覆盖。
+- **release 审批 reject 不阻断** — `app/modules/release/service.py:169-170` 仅 verdict=="approve" 时查阈值；`_check_approval_threshold`（L253-268）与 `_require_approvals`（L274-281）计数只数 approve，reject 仅落记录（L160-167）。先被甲 reject、再被乙丙 approve 仍可达 min_approvers 置 approved，生产发布门语义存疑。
+- **spec_profile 骨架未收尾** — `policy.py:61`（stage 冲突检测）、`policy.py:97`（document 冲突检测）、`provider.py:75`（follow-up）三处 TODO 本轮 grep 确认仍在。
+- **spec_guardian 死代码** — `app/modules/workflow/spec_guardian.py:193` `run_guard` 全 app 范围仅 `tests/test_spec_guardian.py` 调用，无任何生产调用点。
+- **mypy 实质偏弱** — `pyproject.toml [tool.mypy]`：`strict=false` + `disable_error_code` 关闭 9 类（attr-defined/union-attr/assignment/arg-type/valid-type/operator/call-overload/call-arg 等）+ `ignore_missing_imports=true`，新代码类型错误基本不被拦截。
+- **llm_provider 探测形态未实测收口** — `app/modules/llm_provider/probe.py:55/99`：spike-01 遗留，GLM/kimi 兼容端点 GET /v1/models 是否可用待实测后调整。
 
-### 🟢 已就绪可盘活 / 低风险维护项
+### 🟢 低风险维护项
 
-- **WS Hub 早已完整就绪** — `backend/app/modules/daemon/ws_hub.py:42` `DaemonWsHub.send_session_control`（含 SESSION_INTERRUPT/END/INJECT/RESUME）现成可用，`_ws_cancel_stub` 的 "Wave 2 实现" 注释为陈旧误导；修上面 P0-1 不需要补 Hub。来源：审计 §2 发现 2。
-- **只读 team mission 链路完整可用** — 只差入口（`spec_workspace/router.py:273` 透传 `mode` 参数 + 前端按钮），即可用上 agent 团队做并行分析。来源：审计 §3 P1-1。
-- **断点续跑后端全通、前端无按钮** — `coordinator.py:236-311` `resume_run` + interactive SESSION_RESUME 已就绪（claude/codex），缺前端入口。来源：审计 §3 P1-2。
-- **deprecated 代码保留（有意）** — `agent/coordinator.py:484/575` `start_sillyspec_run` deprecated（仍可调，发 `deprecated_method_called` 事件）；`ppm/problem` 的 problem_change 模块 D-005 deprecated 但保留（`ppm/problem/fsm.py:11`、`router.py:11`）；`workspace/member_runtimes/model.py:7` 部分列 deprecated 只读；`workflow/fsm.py` ChangeFSM deprecated（用 StageEnum+TRANSITIONS 替代）。非 bug，按迁移节奏保留。
-- **真实 TODO（3 处，spec_profile 模块）** — `spec_profile/policy.py:61`（stage 冲突检测）、`spec_profile/policy.py:97`（document 冲突检测）、`spec_profile/provider.py:75`（follow-up task）。来源：grep `TODO` `backend/app`。
+- **OpenTelemetry 仍是 stub** — `app/core/telemetry.py:21`：配置 `OTEL_ENDPOINT` 才 init 且仅打 `status="stub"` 日志，无真实 exporter，生产链路追踪落空。
+- **Redis 测试半隔离** — `backend/conftest.py:94-135`：用真实 redis db15 `FLUSHDB` 而非 fake/in-memory 替身；redis 不可用时 best-effort 跳过（限流分支静默降级放行），本机无 redis 的全量绿不等于覆盖限流路径。
+- **上轮 deprecated 保留清单已过时** — `@deprecated` / `deprecated_method_called` 标记本轮 grep 已无匹配（多数随重构清理），旧 scan 文档相关条目应视为历史。
 
 ## 依赖风险
 
 ### 🔴 阻塞 / 易踩
 
-- **alembic migration 多 head 分叉** — `backend/migrations/versions/` 共 117 个 migration 文件；并行变更易撞 revision/down 分叉致多 head → 启动 crash-loop。SQLite 单测抓不到（PG 才暴露），需用官方 `alembic heads` 核实单头，新 migration 接真实 head + 唯一 id。来源：记忆索引 `migration-chain-fragmentation-pattern.md`。
-- **worktree migration 污染部署** — 未合并 worktree 的 migration 若 apply 到本地 PG，切 main 部署会断链 crash-loop；修复需 `down -v` 重置（勿 stamp）。来源：记忆索引 `worktree-migration-pollutes-deploy.md`。
+- **alembic migration 多 head 分叉** — `backend/migrations/versions/` 已 144 个 .py（上轮扫 117，增长来自并行 change）。并行变更撞 revision/down_revision 即多 head → 启动 crash-loop，SQLite 单测抓不到（PG 才暴露）；新 migration 须接真实 head + 唯一 id（fix-platform-progress-pk change 踩过 down_revision 收敛单 head）。
 
-### 🟡 方言 / 环境
+### 🟡 锁版 / 方言 / 环境
 
-- **单测 SQLite vs 生产 PostgreSQL 方言差异** — `date_trunc` 等需方言分支；asyncpg 在 Windows 装不上（README §常见问题），本地连容器 PG；aiosqlite 存本地 naive 时间比较要转本地。来源：记忆索引 `backend-test-sqlite-vs-pg.md`、`README.md`。
-- **daemon-client spec_root cwd 风险** — daemon-client 平台模式 daemon 跑 gate 的 spec_root 若是 specDir（只有 spec 文档，无 backend/frontend 代码），`cd backend` 会找不到目录；待 sillyspec gate 发版后真实联调确认。来源：`.sillyspec/local.yaml` 坑 3。
-- **后端 venv 路径不可达** — 全局/项目根 `.venv` 缺 aiobotocore，pytest 必须用 `backend/.venv/Scripts/python.exe`；git bash 绝对路径 `.venv` 有时不可达。来源：记忆索引 `backend-venv-test-env.md`。
-- **生产密钥管理走 env 无 KMS** — `SECRET_KEY`、`SILLYSPEC_MASTER_KEY`、`PLATFORM_BOOTSTRAP_ADMIN_PASSWORD` 全部 env/`.env`，无 KMS/Vault 集成，容器编排需自行保证密钥注入与轮转。来源：`app/core/config.py`。
-- **OpenTelemetry 仍是 stub** — `app/core/telemetry.py` 仅 `log.info("telemetry.init", status="stub")`，未真正接入 exporter；生产链路追踪会落空。来源：旧 scan + 代码注释。
+- **mcp>=1.29,<2 锁版** — `pyproject.toml` L30-34 注释：mcp SDK v2.0.0（2026-07-28）breaking 移除 FastMCP 改 MCPServer，与 mcp_gateway 的 FastMCP ASGI mount 写法冲突，锁 <2；升级需重构 mcp_gateway，v1 线依赖上游 v1.x 分支收 bugfix/security patch。
+- **aiobotocore>=3.8,<4 锁版** — `pyproject.toml` L29：v4 未评估，升级前需重过 spike 验证与现有异步栈兼容性。
+- **python-jose[cryptography]>=3.3 + passlib[bcrypt]>=1.7** — 两个约束下限均为多年未发大版本的库（JWT/bcrypt 生态有更活跃替代），无 CVE 排查记录、未排期评估（本轮未做外部 CVE 核实）。
+- **测试 SQLite vs 生产 PostgreSQL 方言差异** — `date_trunc` 等需方言分支；asyncpg Windows 装不上（README 常见问题），本地连容器 PG。
+- **Python >=3.12 硬要求** — `requires-python = ">=3.12"`；CI 用 `uv python install 3.12`，部署镜像同版本线，低版本环境直接不兼容。
 
-### 🟢 已缓解
+### 🟢 已缓解 / 可控
 
-- **backend 全量 ~12min 超 gate 10min timeout** — sillyspec 3.24+ 已支持 `SILLYSPEC_TEST_TIMEOUT_MS` 环境变量配置（`local.yaml` 坑 2 已解）。
-- **预存非业务模块 errors 阻塞 verify** — `local.yaml` 已用 `test_strategy: module` 子模块粒度（ppm/llm_provider/frontend/daemon 各自独立 test）规避，未命中不跑。
+- **CI 15 分钟超时已放宽 30 分钟** — `backend-ci.yml:21-23`（2026-08-15 实测撞顶 99% 被取消后调整，注释在案）。
+- **CI flaky 有双兜底** — loadscope（pyproject addopts）+ `--reruns 2`，代价仅重试时长。
+- **redis 竞态已有 fixture** — `_reset_redis_state` 重建单例绑当前 loop + FLUSHDB（`conftest.py:94`），order-dependent 登录限流 flaky 已解。

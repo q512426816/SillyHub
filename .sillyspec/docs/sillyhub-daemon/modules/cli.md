@@ -2,54 +2,50 @@
 schema_version: 1
 doc_type: module-card
 module_id: cli
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:10:13
+created_at: 2026-08-18 01:45:00
 ---
-# cli
+
+# 命令行入口（cli）
 
 ## 定位
-sillyhub-daemon 的 commander 命令行入口（`#!/usr/bin/env node`）。解析 4 个子命令（start/stop/status/logs）、组装 Daemon 运行所需依赖、管理 PID/日志文件生命周期。1:1 迁移自 Python `__main__.py`（click → commander）。是全局安装后 `sillyhub-daemon start` 的实际入口。
+sillyhub-daemon 的 commander 命令行入口（`#!/usr/bin/env node`，click → commander 迁移）。4 个子命令 start / stop / status / logs；start 负责组装 Daemon 全量依赖（client / workspace / credential / task-runner / session-manager / policy / resilience / runtime-lock / mcp-config 合并）并管理 PID 与日志文件生命周期。全局安装后 `sillyhub-daemon start` 的实际入口。
 
 ## 契约摘要
-- 子命令（语义）：
-  - `start`：可选 `--server/--token/--api-key/--workspace-dir/--poll-interval/--heartbeat-interval/--max-concurrent/--log-level/--open-terminal/--terminal-mode/--terminal-close-on-exit/--terminal-command/--force`，构建 Daemon 后阻塞运行。`--force`（ql-006）强制回收 stale/corrupt runtime lock（不强杀活跃 daemon 进程）。
-  - `stop`：读 PID 文件并向进程发 SIGTERM，按存活与否返回退出码 1/0。
-  - `status`：读 PID 文件并校验进程存活，打印 State/PID/Runtime ID/Server URL/Config dir。running 时经 `resolveRunningDaemonConfig(pid)` 从 runtime lock（`locks/runtime-*.lock` 含 pid+server_hash）反查实际 server 的 per-server 配置展示（ql-20260818-001，`--server` 启动的进程不再错显 DEFAULT 8000 那份）；反查失败或非 running 回退读 DEFAULT server 的 per-server 配置。
-  - `logs --tail <n>`：读日志文件尾部 N 行（默认 50）。
-- 可测试性注入点（均封装为函数供 `vi.spyOn`）：`getPidFile()`、`getLogFile()`、`loadConfigFn(path)`、`saveConfigFn`。
-- PID/日志路径：`~/.sillyhub/daemon/daemon.pid`、`~/.sillyhub/daemon/daemon.log`。
-- 进程管理：`readPid/writePid/removePid/isProcessAlive`。
-- `createProgram()` 返回 commander Program。
+- `start`：选项 `--server` / `--token` / `--api-key`（互斥，先于 config 加载校验）/ `--workspace-dir` / `--poll-interval` / `--heartbeat-interval` / `--max-concurrent` / `--log-level` / `--open-terminal` / `--terminal-mode` / `--terminal-close-on-exit` / `--terminal-command` / `--force`。
+- `stop`：读 PID → 发 SIGTERM；`status`：打印 State/PID/Runtime ID/Server URL/Config dir 五字段；`logs --tail <n>`：读日志尾部 N 行（默认 50）。
+- 可测试性注入点（封装为函数供 vi.spyOn）：`getPidFile()`（~/.sillyhub/daemon/daemon.pid）、`getLogFile()`（daemon.log）、`loadConfigFn(server_url)`、`saveConfigFn(config, server_url)`。
+- 进程管理：`readPid` / `writePid` / `removePid` / `isProcessAlive`。
+- `resolveRunningDaemonConfig(pid)`：扫 locks/runtime-*.lock（含 pid + server_hash）按 pid 反查运行中进程实际连接的 per-server 配置（ql-20260818-001）。
+- `createProgram()` 返回 commander Program；main 顶层 `process.on('unhandledRejection'/'uncaughtException')` → logFatal 吞异常保活（结构化 FATAL 日志，绝不 process.exit）。
 
 ## 关键逻辑
-```
+```text
 startAction(opts):
-  config = { ...loadConfigFn(DEFAULT_CONFIG_PATH), ...optsOverrides }
-  saveConfigFn(config)
-  client    = new HubClient(server_url, api_key ?? token)
-  workspace = new WorkspaceManager(workspaces/)
-  credential= new CredentialManager()
-  runner    = new TaskRunner(client, workspace, credential, config)
-  session   = new SessionManager(...)            # interactive 会话
-  lockMgr   = new RuntimeLockManager({ hostname, serverOrigin: server_url, pid, version, force })  # ql-006
-  daemon    = new Daemon({ client, workspace, runner, sessionManager, lockManager: lockMgr, config, ... })
-  writePid(process.pid)
-  await daemon.start()           # acquire lock + register + 三循环 + WS
-  finally: removePid()           # 与 Python finally:_remove_pid() 一致
+  serverUrl = opts.server ?? DEFAULT_CONFIG.server_url   # 不带 --server 静默用 8000 定位 per-server 文件
+  config = { ...loadConfigFn(serverUrl), ...CLI 覆盖 }（token↔api_key 互斥互清）
+  saveConfigFn(config, config.server_url)                # 落盘到 per-server config-<hash>.json
+  token/api_key 均缺 → stderr + return 1；setDaemonApiKey(api_key)（进程级，不落盘）
+  组装：HubClient / WorkspaceManager / CredentialManager / FileOutbox(load 恢复 pending)
+        / ResilienceService / PolicyEngine(+PolicyCache+AuditSink) / SessionManager
+        （闭包延迟绑定 daemon 桥）/ TaskRunner / RuntimeLockManager(--force) / Daemon
+  writePid(pid) → daemon.start()（acquire lock + register + 三循环 + WS）→ finally removePid()
 
-stopAction(): pid=readPid() → 不存活 return 1 → process.kill(pid) → return 0
+stopAction: pid 缺/进程死 → 清 stale PID + return 1；process.kill(pid, SIGTERM) → 0
+statusAction: running 时 resolveRunningDaemonConfig(pid) 反查实际 server 配置，
+             失败/非 running 回退读 DEFAULT server 的 per-server 文件，恒 return 0
 ```
 
 ## 注意事项
-- 信号 handler 划分：Daemon 内部已注册 SIGINT/SIGTERM 调 `daemon.stop()` 并自注销，CLI 层**不重复注册**，避免双重 stop。
-- `--token`（短期 Bearer，15min）与 `--api-key`（长期 X-API-Key）互斥；api_key 优先作 `HubClientAuth`。
-- 退出码与 Python 逐字对齐（status/stop 的 0/1），cli.test.ts 有逐字断言，改动需同步。
-- TaskRunner 真实构造是 3 位置参数 + config（非 options 对象），与蓝图旧假设不同。
-- start 失败时错误消息输出到 stderr。
-- ql-006：start 注入 RuntimeLockManager（runtime-lock.ts）强制单实例；同机同 provider 已有活跃 daemon 时 daemon.start 抛 LockHeldError → startAction catch 退出 1（防共享 backend runtime_id 致 ownership 双通过+WS 重连风暴）。`--force` 仅回收 stale/corrupt lock，不强杀活跃进程。
-- ql-20260818-001：status 展示配置改为 running 时按 pid 扫 runtime lock 反查实际 server 的 per-server 配置（`resolveRunningDaemonConfig`）；`--server <url>` 启动的进程此前错显 DEFAULT(8000) 那份。输出格式五字段不变（task-22 逐字断言仍绿）。
+- **per-server 配置坑**：start 不带 `--server` 时静默用 DEFAULT server_url（http://localhost:8000）定位配置文件——本地连 8001 的 daemon 必须显式带 `--server`，否则身份（runtime_id）落在 8000 那份配置上。status 此前固定展示 DEFAULT 那份（`--server` 启动的进程错显 8000），ql-20260818-001 已改为 running 时按 pid 从 runtime lock 反查；输出五字段格式不变（cli.test.ts 逐字断言，含字段后空格数）。
+- 信号职责划分：Daemon 内部已注册 SIGINT/SIGTERM 调 daemon.stop() 并自注销，CLI 层不重复注册；PID 清理在 start 的 finally。
+- RuntimeLockManager（`--force`）：同机同 provider 已有活跃 daemon 时 start 抛 LockHeldError 退 1；--force 仅回收 stale/corrupt lock，不强杀活跃进程。
+- TaskRunner 构造是位置参数（含 config、resilience、policyCache 等），非 options 对象；TaskRunner 创建必须在 PolicyCache 之后（共享实例）。
+- interactive 组装顺序：先 new SessionManager（deps 闭包引用 daemon）再 new Daemon，靠 `let daemon` 闭包延迟绑定解决循环引用。
+- 三循环 fire-and-forget 的未捕获 rejection 由顶层 handler 吞掉保活——排查「daemon 静默不退」时先 grep `[FATAL ...]`。
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
+
 <!-- MANUAL_NOTES_END -->

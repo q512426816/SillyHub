@@ -2,74 +2,57 @@
 schema_version: 1
 doc_type: module-card
 module_id: platform_sync
-source_commit: ce0ae202
 author: qinyi
-created_at: 2026-08-12T09:45:00+08:00
+created_at: 2026-08-18 01:45:00
 ---
-# platform_sync
+
+# 跨仓同步通道（platform_sync）
+
 ## 定位
-SillySpec 跨仓进度同步层的后端收件箱 + workspace 隔离 + 变更中心投影数据源。承接 sillyspec 工具（`platform sync`）上行的六表进度 JSON（`serializeForSync()` 投影，含权威 `current_stage`），按 workspace 隔离存储，供 `change` 模块 enrich 实时 read-only join 投影 `current_stage` 到变更中心展示。不碰派发层（与 `/api/workspaces/{wid}/changes/*` stage 流转正交，契约 D-004）。
-
-三段链路定位：① 工具→收件箱（sillyspec 仓 serializeForSync+push）② 收件箱存储+下行（**本模块**）③ 收件箱→变更中心展示（本模块被 change 模块 join 消费，2026-08-11-change-progress-projection 补全）。
-
-前置模块由 2026-08-10-sillyhub-platform-sync 建立（3 端点 + PlatformChangeProgressORM 单行）；2026-08-11-change-progress-projection 加 workspace 隔离（token 派生 + 复合唯一）+ token 签发/换发 2 新端点 + change 模块投影消费。scan 漏登本子模块，本卡 2026-08-12 补建。
+SillySpec CLI 直跑时的跨仓上行通道（进度 / 文档 / 审批 / quicklog / spec 文件增量同步），workspace 隔离。凭证与 mcp_gateway 的 McpToken 同构：`shpsync_` 前缀长期 token（明文 = 前缀 + 32 随机字节，库存 sha256、前缀 O(1) 分流）签发时派生 (user, workspace_id)，是写通道唯一开放形态。change 模块读时经 `latest_progress` 投影 current_stage（read-only join，不双写）。
 
 ## 契约摘要
-- **收件箱 4 端点**（inline `/changes`，无前缀 router.py，`require_platform_sync` 鉴权）：
-  - `POST /api/changes/{name}/progress`：工具上行进度，body = serializeForSync 六表 JSON + `X-Base-Timestamp`/`X-Pushed-At`/`X-Pusher` 头；`upsert_progress` 按 `(workspace_id, change_name)` 复合键写；§4.2 base_ts 字典序冲突 → 409 ConflictResponse。
-  - `GET /api/changes`：收件箱列表（`list_lightweight`，裸数组，按 workspace 隔离）。
-  - `GET /api/changes/{name}/progress`：单 change 进度详情（裸 dict，反查不到 404）。
-  - `GET /api/changes/{name}/approval`：审批状态查询（给 sillyspec CLI execute 门控用）。2026-08-14-platform-sync-docs-approval 起改读 `approval` 列：无记录（行不存在/NULL 含占位行）→ 默认 `{status: approved}` 放行不 404（ql-20260812-001-6eb8 兼容语义）；有记录 → 真实 status/reason（rejected 时 CLI execute 启动 exit(1) 硬阻断）。
-  - `POST /api/changes/{name}/documents`：四件套全文同步（CLI syncDocuments，body=**裸**扁平 map 键限白名单 422），定向 upsert `documents` 列；行无 INSERT 占位。
-  - `POST /api/changes/{name}/approval`：审批决定提交（CLI approve/reject，body 过去式 decision + reason optional），定向写 `approval` 列 `{status,reason,decided_at,decided_by=权威 User.username}`（禁 X-SillySpec-User header fallback——可伪造）；重复提交后写赢。
-- **token 签发端点**（workspace_router.py，prefix `/workspaces`）：
-  - `POST /api/workspaces/{workspace_id}/platform-sync-tokens`：workspace 成员签发 `shpsync_` token，`require_permission(WORKSPACE_WRITE)`（owner/developer 可签，viewer → 403）；明文 token 仅 201 返一次，DB 存 sha256。
-  - `POST /api/workspaces/resolve-by-root-path`：connect 换发，body `{root_path}`，鉴权 = `shk_live_`（ApiKeyService）或 JWT；流程：反查活跃 workspace（`_find_active_by_root_path`，不到 → 404）→ 手动 `has_permission(WORKSPACE_WRITE)`（workspace_id 来自 body 反查非路径，无法用 Depends 注入 RBAC；无权限 → 403，D-006 安全闭环）→ 签发 `shpsync_`（created_by=调用者）→ 200 `{workspace_id, token}`。
-- **鉴权**：`require_platform_sync` 返 `tuple[User, workspace_id|None]`，三路径分流：`shpsync_` → PlatformSyncTokenService.authenticate 派生 (user=created_by, workspace_id)；`shk_live_` → ApiKeyService（过渡期 workspace_id=None）；JWT → fallback。workspace_id 唯一取自 `platform_sync_tokens.workspace_id`（token 派生），绝不信任 body。
-- **契约**：`sillyspec/docs/sillyspec/sillyhub-progress-sync-contract.md`（跨仓，存 sillyspec 仓）§3 body 不含 workspace_id（走 token 派生），§14 workspace 隔离（本次补）。
+- 进度（`platform_sync_router`，无 prefix，路径内写全 `/changes/...`，main 挂 `/api`）：
+  - `POST /api/changes/{name}/progress`（写）：CLI 上行进度，body 裸六表 JSON，`X-Base-Ts` 乐观锁基准，`pushed_at` / `user` 元信息。
+  - `GET /api/changes`（读）：收件箱轻列表（`list_lightweight`，占位行 Python 层过滤）。
+  - `GET /api/changes/{name}/progress`（读）：完整 progress JSON；不存在/跨 workspace → 404（客户端 fetchJson null 降级不阻断）。
+- spec 文件增量同步（spec-file-incremental-sync，均写权限 `require_platform_sync_write`）：
+  - `GET /api/changes/-/spec-manifest` → `SpecManifestResponse`：服务器权威清单（`SpecManifestFileEntry`：path / hash(SHA-256 hex) / version / exists，含软删行）。
+  - `POST /api/changes/-/spec-sync` → `SpecSyncResponse`：CLI diff 出的 `FileOp[]`（add/update/delete/rename，每文件带 `base_version`）一次 POST，透传 `SpecWorkspaceService.apply_ops` 单事务；conflict 不改状态码（恒 200，`conflict=true` + `server_versions` 交 CLI 提示人工拍板）。
+- 审批与文档：`GET|POST /api/changes/{name}/approval`（读门控 + 写闭环，reject 后 CLI execute 真正阻断）；`POST /api/changes/{name}/documents`（`DocumentsSyncRequest` 为 RootModel 裸扁平 map，顶层即文件名）。
+- `POST /api/quicklog-entries`（写）：quicklog 条目上行（`QuicklogEntryORM` / `QuicklogEntryPushRequest`）。
+- workspace 面（`platform_sync_workspace_router`，prefix=/workspaces）：`/api/workspaces/{workspace_id}/platform-sync-tokens` 签发；`POST /api/workspaces/resolve-by-root-path` connect 换发（含手动 `has_permission(WORKSPACE_WRITE)` 403/404 闭环）。
 
 ## 关键逻辑
 ```
-# 工具上行（push）：
-sillyspec sync → POST /api/changes/{name}/progress
-  Authorization: Bearer shpsync_... → require_platform_sync
-    → PlatformSyncTokenService.authenticate（hash 查表）派生 (user, workspace_id)
-  → PlatformSyncService.upsert_progress(workspace_id, name, body, ...)
-    → _find_row（workspace_id=None 用 col.is_(None)，SQL = 不匹配 NULL）
-    → 按 (workspace_id, change_name) 复合键 upsert
-
-# 变更中心投影（read-only join，change 模块消费，D-002）：
-ChangeService.enrich_summaries(changes)  # list
-  → _project_current_stage([(change.workspace_id, change.change_key), ...])
-    → select workspace_id, change_name, latest_progress
-        where (workspace_id, change_name) in (pairs)   # 复合 IN，禁 N+1（R-03）
-    → 取 latest_progress.changes[0].current_stage 覆盖 ChangeSummary.current_stage
-    → join 不命中 / 解析失败 / workspace_id NULL → 不进映射 → fallback 现有值（D-003）
-# 不投 status（D-004@v2，sillyspec status 仅 active/archived，archived 由 current_stage==archive 派生）
-# 不双写 changes 表（避免双写一致性 + agent 流程也写 changes.current_stage 冲突）
-
-# connect 换发（跨仓 sillyspec sync.js）：
-sillyspec platform connect → 健康 check 后用 user 级 shk_live_ + 本地 root_path
-  → POST /api/workspaces/resolve-by-root-path → 200 {workspace_id, token: shpsync_...}
-  → replaceTopLevelSection 文本级写 local.yaml platform 段（保留注释/CRLF/其他段字节级）
-  → 404/403/断网降级沿用原 token 不阻断（best-effort）
+require_platform_sync 三路径分流（Bearer）:
+  shpsync_ → PlatformSyncTokenService.authenticate → (User, workspace_id)   [写+读]
+  shk_live_（ApiKey）→ 只读;  其它 → get_current_user（JWT）→ 读并集
+  写端点一律 require_platform_sync_write: 仅 shpsync_, 其余 403
+upsert_progress（契约 §4.2 base_ts 乐观锁）:
+  base_ts 空/缺失 → 无条件接受（首次同步/无基准）
+  stored = row.last_pushed_at; stored > base_ts（ISO 8601 UTC 字符串字典序比较, 不转 datetime）
+    → conflict（回 platform_progress + last_pushed_at, 不落盘）
+  否则 → _apply 落 progress JSON + _ensure_change_row 占位行 + _sync_change_owner
+spec-sync: row.version != op.base_version → conflict=true（另有同内容豁免 D-008@v2）
 ```
 
 ## 注意事项
-- **单写者纪律（2026-08-14-platform-sync-docs-approval D-003@v1）**：三写入方定向列互不覆盖——push progress 只 SET latest_progress/元字段/updated_at（绝不碰 documents/approval）；POST documents 只 SET documents；POST approval 只 SET approval。model 两 JSON nullable 列（migration 20260814220000）。
-- **占位行守卫（Grill UB-1）**：仅 documents/approval 有值的行（latest_progress NULL）——`get_progress` 返回 None（router 维持 404，防 CLI triggerPull 空态 import 清本地库）+ `list_lightweight` 过滤。**list 过滤必须 Python 层判断非 SQL IS NOT NULL**：SQLAlchemy JSON 列缺省在 SQLite 落 JSON 编码 'null' 字符串（非 SQL NULL），SQL 过滤跨方言不可靠（task-05 实测抓到）。
-- **id UUID 主键 + workspace_id nullable + (workspace_id, change_name) 复合唯一（非复合 PK）**：SQL PK 列不允许 NULL，故不用 `(workspace_id, change_name)` 复合 PK；以独立 `id` UUID 主键（`default=uuid.uuid4`）替代原 `change_name` 全局唯一主键（2026-08-13-fix-platform-progress-pk，跨 workspace 同名 / NULL 过渡行不再撞主键），`change_name` 降普通列，保留 `UniqueConstraint(workspace_id, change_name)`（PG 对 NULL 不参与唯一性）。投影 join 时 change.workspace_id 非 None，NULL 过渡行自然不匹配 → fallback。
-- **`is_(None)` vs `=`**：service `_find_row`/`list_lightweight` 对 workspace_id=None 必须用 `col.is_(None)`，SQL `=` 不匹配 NULL 会导致过渡期全局行查不到。
-- **D-006 安全闭环**：resolve-by-root-path 用 shk_live_（user 级不绑 workspace）+ root_path，若无权限校验，任意持有者可猜 root_path 为他人 workspace 签 token 绕过隔离。手动 `has_permission(WORKSPACE_WRITE)`（非 require_permission——workspace_id 是 body 反查出来的不在路径）闭环。
-- **三前缀独立互不复用**：`shpsync_`（本服务）/ `shk_live_`（ApiKeyService）/ `shmcp_`（McpToken）。connect 的 mcp 段同源坑（NG-4：sync.js 把 platform token 复用进 mcp 段，但真 McpToken 是 shmcp_）本变更不顺带修，留单独 change。
-- **投影 read-only**：change 模块 enrich 只 select 不写，覆盖发生在返回的 DTO 层（model_validate 独立对象），不 mutate 传入的 Change ORM、不写库（D-002）。
-- 根 `backend/conftest.py` db_engine 需 `import llm_provider model`（agent_profiles.llm_provider_id FK→llm_providers，否则 create_all 报 NoReferencedTableError 阻断所有 db_engine 测试，task-07 顺手补的预存债）。
+- **两套乐观锁语义别混**：progress 上行是 `base_ts` ISO 字符串字典序；spec 文件 ops 是整数 `base_version` 版本比较（逻辑在 spec_workspace.apply_ops，本模块只透传）。
+- `platform_change_progress` 主键形态（fix-platform-progress-pk 后）：独立 `id` UUID 主键 + `(workspace_id, change_name)` 复合唯一；`workspace_id` 为 NULL 的历史过渡行用 `is_(None)` 匹配。documents/approval 是同表定向 JSON 列（单写者），migration 20260814220000 加列零回填。
+- router 刻意**不自带 prefix**：为避开 FastAPI 对 `GET /changes` 的 redirect；`{name}` 动态路由与 `/-/spec-manifest` 字面路由共存依赖声明顺序，加新端点放对位置。
+- `DocumentsSyncRequest` 必须保持 RootModel 裸 map（CLI `JSON.stringify(documents)` 顶层即文件名）；列表占位行过滤在 Python 层做（SQLite JSON 列 `'null'` 字符串坑，SQL IS NOT NULL 不可靠）。
+- shpsync_ 明文只在签发响应出现一次；`get_or_issue` 的「复用」= 吊销旧 + 签新（明文不可恢复），供 init claim 注入 local.yaml（明文不落 lease.metadata）。
+- `_sync_change_owner` 用 token 签发人真实 User id 对齐 `ux_changes.owner_id`（best-effort 失败不阻断）；**冲突分支不触碰 owner**——被拒上行不得改责任人。
+- spec-manifest 读清单也收紧为写权限（清单是增量写协议一部分，防探测文件布局）；`scope.workspace_id is None` 一律 403 fail-closed。
+- 消费链是 CLI（写）+ change 投影（读），前端不直接调写端点；改响应字段前先对 sillyspec 仓 sync.js 契约，别单侧改。
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
-- **2026-08-14-platform-sync-docs-approval**（D-001~004@v1）：补 CLI 预留两契约端点（POST documents 404 / POST approval 405 均为 sync.js:959 TBD-hub-api 未对齐）+ GET approval 改读库完整闭环（reject 后 CLI execute 真正阻断）。表加 documents/approval 两 JSON 列（migration 20260814220000 batch_alter_table 零回填）；service 三方法定向列单写者；46 测试（32 旧零回归 + 14 新含单写者/占位行守卫）；CLI E2E 三连验证（sync-docs 4 文档/approve/reject+GET 回读 rejected）；gen:types openapi 363 paths。两实现修正：DocumentsSyncRequest 用 RootModel 裸扁平 map（CLI JSON.stringify(documents) 顶层即文件名）；list 占位行过滤用 Python 层（SQLite JSON 'null' 字符串坑）。
+- **2026-08-14-platform-sync-docs-approval**（D-001~004@v1）：补 CLI 预留两契约端点（POST documents 404 / POST approval 405 均为 sillyspec 仓 sync.js 的 959 行（跨仓引用，时点 2026-08-14）TBD-hub-api 未对齐）+ GET approval 改读库完整闭环（reject 后 CLI execute 真正阻断）。表加 documents/approval 两 JSON 列（migration 20260814220000 batch_alter_table 零回填）；service 三方法定向列单写者；46 测试（32 旧零回归 + 14 新含单写者/占位行守卫）；CLI E2E 三连验证（sync-docs 4 文档/approve/reject+GET 回读 rejected）；gen:types openapi 363 paths。两实现修正：DocumentsSyncRequest 用 RootModel 裸扁平 map（CLI JSON.stringify(documents) 顶层即文件名）；list 占位行过滤用 Python 层（SQLite JSON 'null' 字符串坑）。
 - **2026-08-12-init-provision-local-yaml**（D-001）：PlatformSyncTokenService 新增 `get_or_issue(*, workspace_id, created_by) -> tuple[ORM, 明文]`——内联 select 旧未吊销（ws+created_by+revoked_at IS NULL）+ UPDATE 吊销（不新增 public revoke，零回归）+ 调既有 create（name='init-provisioned', scope=None）签新。供 init claim 时 `build_claim_payload`（daemon/lease/context.py mode=='init' 分支）现算注入 payload.platform_config.local_yaml（明文不落 lease.metadata_，D-002/P0）。"复用"语义=吊销旧+签新（明文不可恢复）。守 design §5.2。
 - **2026-08-11-change-progress-projection**（D-001~006 / R-01~08）：加 workspace 隔离（D-001 token 派生，参照 McpToken 模式建 PlatformSyncTokenORM + PlatformSyncTokenService，shpsync_ 前缀）+ PlatformChangeProgressORM 加 workspace_id nullable 复合唯一 + require_platform_sync 返 (User, workspace_id|None) 三路径分流 + service upsert/list/get 全加 workspace_id（is_(None) 处理 NULL 过渡期）+ 2 新端点（platform-sync-tokens 签发 / resolve-by-root-path connect 换发含 D-006 手动 has_permission WORKSPACE_WRITE 403/404 闭环）+ change 模块 `_project_current_stage` 批量 IN join 投影 current_stage（D-002 read-only 不双写）+ fallback（D-003）+ 不投 status（D-004@v2 撤销，sillyspec status 仅 active/archived）+ connect 跨仓换发（D-005 replaceTopLevelSection 保留注释，降级 best-effort）+ 契约 §14。前置 sillyhub-platform-sync 建模块时 scan 漏登 _module-map，本次补建本卡。
-- **ql-20260812-001-6eb8**（补 approval 端点）：新增 `GET /api/changes/{name}/approval`（router.py）+ `ChangeApprovalResponse`（schema.py）。根因 sillyspec CLI execute 启动时 GET 此端点查审批门控（command.js:1071-1080），后端从未实现→404，CLI sync.js checkApproval 把 fetchJson null 误判 `{status: pending}` 卡死。方案：端点复用 `require_platform_sync` 鉴权，无条件返回 `ChangeApprovalResponse(status="approved", reason="no approval policy configured; auto-approved")`，不查库不 404；3 测试（200/401/JWT）。跨仓契约 `sillyhub-progress-sync-contract.md` 存 sillyspec 仓（本仓不持有，未同步）。sillyhub-daemon/src/api-types.ts 未同步（daemon 不消费 platform_sync 端点，无功能债，留后续）。
+- **ql-20260812-001-6eb8**（补 approval 端点）：新增 `GET /api/changes/{name}/approval`（router.py）+ `ChangeApprovalResponse`（schema.py）。根因 sillyspec CLI execute 启动时 GET 此端点查审批门控（sillyspec 仓 command.js 的 1071-1080 行，跨仓引用时点 2026-08-12），后端从未实现→404，CLI sync.js checkApproval 把 fetchJson null 误判 `{status: pending}` 卡死。方案：端点复用 `require_platform_sync` 鉴权，无条件返回 `ChangeApprovalResponse(status="approved", reason="no approval policy configured; auto-approved")`，不查库不 404；3 测试（200/401/JWT）。跨仓契约 `sillyhub-progress-sync-contract.md` 存 sillyspec 仓（本仓不持有，未同步）。sillyhub-daemon/src/api-types.ts 未同步（daemon 不消费 platform_sync 端点，无功能债，留后续）。
 - **2026-08-13-fix-platform-progress-pk**（D-001~005）：`platform_change_progress` 主键缺陷修复——`change_name` 全局唯一单主键 → 独立 `id` UUID 主键（`default=uuid.uuid4`）+ `change_name` 去主键降普通列 + 保留 `(workspace_id, change_name)` 复合唯一。修跨 workspace 同名 500 与 NULL 历史行挡道两个缺陷（`_find_row` 复合键 / `_project_current_stage` join / upsert 回退逻辑全不变）；migration `batch_alter_table` 回填现有行 id；service `upsert_progress` INSERT 加 `id=uuid.uuid4()`。零 API 变更（端点/schema/body 不变，D-004，无 gen:types）。
 <!-- MANUAL_NOTES_END -->

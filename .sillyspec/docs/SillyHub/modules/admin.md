@@ -2,92 +2,67 @@
 schema_version: 1
 doc_type: module-card
 module_id: admin
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:16:36
+created_at: 2026-08-18 01:45:00
 ---
-# admin
+
+# 平台用户与角色管理（admin）
 
 ## 定位
-平台「用户/角色/组织」RBAC 管理中心。跨 backend（FastAPI）+ frontend（Next.js admin-* 组件 + lib/admin.ts）三组件，提供角色 CRUD 与启停、组织树管理、用户管理（与 settings 模块 UserService 同源）的完整后台。是平台权限模型的运维入口，承载 admin 面板所有交互。
+平台「用户 / 角色 / 组织」RBAC 管理中心，backend（`/admin` 路由）+ frontend（`(dashboard)/admin/*` 页面、admin-* 组件、lib/admin.ts）双组件。
+这是平台管理员的运维控制台：定义角色（绑权限点）、搭建组织树、管理用户账号与会话。
 
-产品视角：这是平台管理员的「控制台」。在这里定义角色（绑权限点）、搭建组织树、管理用户账号与归属。权限模型由 auth 模块定义（Permission/PermissionGroup/Role），admin 做可视化运维。用户管理与 settings 同源，是历史聚合的另一半。前端 admin 面板含组织树、角色权限选择器、用户抽屉三大交互组件。
+不负责：权限校验执行（auth.rbac / core.auth_deps）、业务工作区的成员与角色分配（workspace members）。
+权限模型本身（Permission/Role 枚举与表）归 auth 模块，admin 只做可视化运维；用户管理与 settings 模块共用同一 UserService（settings 侧仅为向后兼容 re-export）。
 
 ## 契约摘要
-- 后端路由：`APIRouter prefix=/admin tag=admin`
-  - 角色：`GET/POST /roles`（`RoleRead`/`RoleCreateRequest`）、`GET/PATCH/DELETE /roles/{id}`（`RoleUpdateRequest`）、`POST /roles/{id}/disable|enable`、`GET /roles/{id}/users`（`RoleUserListResponse`）
-  - 组织：`GET/POST /organizations`（`OrganizationRead`/`OrganizationCreateRequest`）、`GET/PATCH/DELETE /organizations/{id}`（`OrganizationDetail`/`OrganizationUpdateRequest`）、`POST /organizations/{id}/disable|enable`
-  - 用户：复用 `UserService`（与 settings 同源）；`UserCreateRequest`(username 必填 min3 / email Optional / password 可选：缺省走默认初始密码 `SillyHub@123`)、`UserUpdateRequest`(增 username/email 全 Optional 可编辑)、`UserRead`(email Optional)
-- 数据：`Organization`（树形 parent_id 自引用）、`UserOrganization`（M2N）、`UserRole`（M2N）、`Role`
-- 服务：`RoleService`（业务规则+审计）、`OrganizationService`（子树聚合）、`UserService`（自保护+最后管理员保护）
-- 前端：`(dashboard)/admin/*` 页面 + `admin-organization-tree.tsx`（组织树）/ `admin-role-permission-picker.tsx`（权限选择）/ `admin-user-drawer.tsx`（用户抽屉）+ `lib/admin.ts`
-- 依赖：`core`、`models`、`auth`（Permission/PermissionGroup/Role）；权限点 `require_permission`（管理员级）
-- 跨组件协作：auth 模块提供权限模型，admin 做运维；settings 共用 UserService；前端 admin 面板全交互
+- **角色管理**：
+  - 列表（搜索/分页）/详情/创建/更新（含 permissions 列表）。
+  - disable/enable 软停停用——disable 不断 user_role 关联（保留历史）但不生效，enable 恢复。
+  - delete 硬删——删前 `_count_users` 校验无用户关联。
+  - 角色下用户列表；RoleRead 带 permissions + user_count。
+- **组织管理**：
+  - 树形 CRUD（parent_id 自引用）；disable/enable 软停用（不级联禁用户）；delete 需无子孙且子树无成员。
+  - OrganizationDetail 带用户数/子孙数统计（`_counts`）。
+- **用户管理**（UserService，与 settings 同源）：
+  - 列表（搜索/分页 + `?ids=` 批量精确查——供前端回填已选用户真实姓名）/详情/创建/更新/删除。
+  - username 为登录主账号：必填、可编辑、唯一（`_resolve_username`/`_assert_username_available` 排除自身，冲突 409）；email 可空、非空全局唯一。
+  - 新建用户密码可选：缺省落模块常量 `DEFAULT_INITIAL_PASSWORD`（`SillyHub@123`），显式传仍按 min_length=8 校验；admin/settings 两入口共用 schema 行为一致；前端抽屉不渲染密码框、展示默认密码提示。
+  - 重置密码：不传新密码时同样落默认密码（非随机）；保留「自定义密码」；审计 details 记 `used_default_password`（值=是否用默认）。
+  - disable/enable 登录（is_active 翻转，伴随 `_revoke_sessions` 吊销会话防已禁用账号持 token 继续操作）。
+  - 会话列表 / 吊销单个 / 吊销全部；用户审计日志列表；用户工作区视图（含组织成员关系）。
+- **审计**：RoleService/OrganizationService/UserService 统一写审计行；AuditLog 模型来自 workflow 模块（admin 对 workflow 的唯一依赖）。
+- **前端交互**：组织树（受控 expandedKeys 全展开，defaultExpandAll 对异步 treeData 不可靠）、角色权限选择器（按 PermissionGroup 分组）、用户弹窗（antd Modal + Form，组织 TreeSelect / 角色 Select multiple）；列表分页默认 20/页，多选 size 匹配后端 le=100。
 
 ## 关键逻辑
-组织树与角色管理：
 ```
-OrganizationService._descendant_ids(root_id)   # 递归取子孙组织 id 集
-_counts(org_id) → (user_count, descendant_count)
-RoleService: create/update/disable/enable/delete
-  disable 不断关联（保留历史），delete 才解绑
-  _count_users(role_id) 防 0 用户角色误判
-UserService: 自保护（不能删自己）+ 最后管理员保护（_active_admin_count）
-```
-- 组织树通过 parent_id 自引用，`_descendant_ids` 做子树聚合统计
-- 角色启停用 disable/enable 软状态，删除前校验用户数（`_count_users`）
-- 用户组织/角色关联用 `_rewrite_organizations` / `_rewrite_roles` 全量重写
-- `_to_read` / `_to_read(org)` 把 ORM 补全为响应 DTO（带用户数/子孙数）
-- RoleService.`_audit` / OrganizationService.`_audit` 统一记录审计
-- `_validate_organizations` / `_validate_roles` 校验关联实体存在性
+# 组织树聚合
+_descendant_ids(root_id) 递归取子孙 id 集 → _counts(org_id)=(user_count, descendant_count)
+_subtree_member_count 删除前校验子树成员；非空拒删
 
-### 角色与权限
-- RoleService.create/update 接 `RoleCreateRequest`/`RoleUpdateRequest`，含 permissions 列表
-- 角色权限经 `admin-role-permission-picker` 前端组件选择，映射到 auth.Permission/PermissionGroup
-- disable_role 软停用，保留 user_role 关联但不生效；enable 恢复
-- delete_role 硬删前 `_count_users` 校验无用户关联
-- list_roles 支持搜索/分页，返回 RoleRead（含 permissions + user_count）
+# 角色生命周期
+disable 软停用（关联保留不生效）→ enable 恢复；delete 硬删前 _count_users 校验
+
+# 用户保护（三条硬约束）
+自保护：不能禁用/删除自己
+最后管理员保护：_active_admin_count 防删光活跃管理员锁死系统
+平台管理员授予守卫：_assert_actor_may_grant_platform_admin（普通管理员不能授予 platform_admin 权限）
+
+# 关联全量重写
+update 用户时 _rewrite_organizations / _rewrite_roles 整体替换关联行（配 _validate_* 存在性校验）
+```
 
 ## 注意事项
-- `_user_roles_model()` 做了延迟 import 容错（task-05 标记），import 失败提示 task 未完成
-- 用户管理与 settings 模块共用 `UserService`，两处规则需保持一致勿发散
-- username 为登录主账号（必填、可编辑，D-001/D-004），create/update 经 `_resolve_username` 做唯一校验（排除自身），冲突抛 409；email 可空，非空全局唯一（D-003）
-- 组织删除需校验子孙与用户数，非空不允许直接删
-- 角色 disable 是软状态，权限校验需考虑 disabled 角色不生效
-- admin 为 needs_review 模块，文档与实现需重点对照
-- 前端用户抽屉组织/角色多选 size 需匹配后端 le=100，用 allSettled 容错
-- 角色/组织管理加分页（默认 20/页），pageSizeOptions [10,20,50,100]
-- list_users 支持 ids 批量查（`?ids=a&ids=b`，`list[uuid.UUID]` Query → service `User.id.in_(ids)`，按 id 精确过滤绕过 q/分页）；前端 PpmUserSelect 已选 user_id 不在当前页时按 id 回填真实姓名，避免"姓名"字段显示 id
-- 组织树前端用 expandedKeys 受控全展开（defaultExpandAll 异步 treeData 不可靠）
-- 自保护：用户不能禁用/删除自己；最后管理员保护：不能删光活跃管理员
-- OrganizationService `_descendant_ids` 递归取子树，删除前校验非空
-- `_counts` 返回 (user_count, descendant_count) 供组织详情展示
-- 组织 create/update 接 OrganizationCreate/UpdateRequest，含 parent_id 建树
-- list_organizations 支持树形展开，前端 organization-tree 受控 expandedKeys
-- UserService `_active_admin_count` 防删光最后活跃管理员锁死系统
-- admin router 与 settings router 用户端点职责重叠，改动需双向同步
-- RoleService 硬删前 `_count_users` 校验无用户关联
-- list_roles 返回 RoleRead 含 permissions + user_count
-- 组织 disable 软停用，enable 恢复，delete 才硬删（需无子孙无用户）
-- _descendant_ids 用递归 CTE 或遍历取子树 id 集
-- UserService.disable_login 设 user.is_active=false，enable 反之
-- list_organizations 树形返回，前端按 parent_id 组装树
-- 角色权限经 PermissionGroup 分组，picker 按组展示
-- 前端用户抽屉组织/角色多选用 antd Select mode=multiple
-- admin router 的 /admin/users 与 settings /users 职责重叠，历史遗留
-- OrganizationService 禁用组织不级联禁用户
-- 角色权限变更对已登录用户需刷新会话才生效
-- list_role_users 查角色下用户，供角色详情展示
-- 新建用户默认密码：`UserCreateRequest.password` 可选（`str | None`，显式传仍按 min_length=8 校验），缺省时 `UserService.create_user` 落库为模块常量 `DEFAULT_INITIAL_PASSWORD`（`SillyHub@123`）；admin / settings 两入口共用同一 schema，行为一致；前端 admin-user-drawer create 模式不再渲染密码输入框，改展示默认密码提示
-- 重置密码默认密码：管理员「重置密码」不传新密码时，`UserService.reset_password` 落库为模块常量 `DEFAULT_INITIAL_PASSWORD`（`SillyHub@123`，与新建用户一致），不再随机生成；前端 ResetPasswordDialog 重置成功后直接关闭弹窗 + toast 提示（默认场景展示固定默认密码 SillyHub@123）；保留「自定义密码」勾选（显式传 `new_password` 仍按 `min_length=8` 校验）；审计 details 字段 `auto_generated` → `used_default_password`（值 = `new_password is None`）
-
-## 变更索引
-- ql-20260715-002-9c5b | /admin/users 新建用户去掉密码输入框，改后端固定默认初始密码 SillyHub@123（schema.password 改可选 + service 缺省兜底，admin/settings 两入口一致；前端抽屉去密码框加蓝色默认密码提示 + 测试随需求调整）
-- ql-20260715-008-66c5 | /admin/users 重置密码默认改用默认密码 SillyHub@123（非随机）+ 重置成功后关闭弹窗（后端 reset_password 默认 DEFAULT_INITIAL_PASSWORD 删 _generate_password；前端 ResetPasswordDialog 成功 onClose 关闭弹窗）
-- ql-20260715-010-bb2c | /admin/users list_users 加 ids 批量查（?ids=a&ids=b 按 user_id 精确过滤绕过分页）；前端 PpmUserSelect 已选值不在当前页时按 id 回填真实姓名，修复 /ppm/project-members 编辑成员姓名显示 id
-- ql-20260717-005-b551 | /admin/users 新建/编辑用户抽屉→antd Modal 弹窗 + 全 antd 表单：自实现 fixed Drawer→Modal；原生 input→Form.Item+Input（登录名 required/min3 + 邮箱 email 格式 + 显示名）；超管/登录 checkbox→antd Checkbox；组织 checkbox 平铺→TreeSelect 多选（buildOrgTreeData 用 OrganizationRead.parent_id 构树）；角色 checkbox 平铺→Select multiple；Form.useWatch 实时校验驱动保存按钮 disabled（保留原空字段禁用行为）；setup.ts 加 matchMedia polyfill（antd Modal/TreeSelect 在 jsdom 需要）；测试 17 用例适配 antd（组织 checkbox toggle→提交 body 验证预填/未选）；组件名/props 不变，零改 page.tsx
-- ql-20260717-006-ec0f | /admin/users 用户列表加「组织」列：columns 在显示名列后、角色列前加组织列，仿角色列 Tag 列表渲染 u.organizations（空显 —）；UserRead.organizations 已有（同 u.roles 源），零改后端/接口/types
+- 用户管理规则与 settings 模块同源（同一 UserService）：改行为只改一处、两入口自动一致；admin 与 settings 的用户端点职责重叠是历史遗留，改路由需双向确认。
+- 软停用语义：角色 disable 后其权限不再生效但关联保留；组织 disable 不级联禁用户；角色/组织变更对已登录用户需刷新会话才生效。
+- 默认初始密码 `SillyHub@123` 是模块常量，改动需同步前端提示文案、重置密码流程与安全基线。
+- `_user_roles_model()` 延迟 import 容错（roles_service），import 失败提示 task 未完成，勿改成顶层 import。
+- 用户删除/禁用必须伴随会话吊销（`_revoke_sessions`），勿在新增的用户状态端点里漏掉。
+- 审计 details 字段命名已从 `auto_generated` 改为 `used_default_password`，消费审计数据的报表需注意。
+- 前端组织树/多选的交互约束见契约摘要前端段，改动组件时勿破坏 size/le=100 对齐。
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
+
 <!-- MANUAL_NOTES_END -->

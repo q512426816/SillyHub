@@ -2,38 +2,45 @@
 schema_version: 1
 doc_type: module-card
 module_id: lib-tasks
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:01:57+08:00
+created_at: 2026-08-18 01:45:00
 ---
-# lib-tasks
+
+# 任务读侧客户端（lib-tasks）
 
 ## 定位
-任务（Task）领域 API 客户端（`frontend/src/lib/tasks.ts`，约 100 行）。封装 SillySpec 变更下任务的列表、详情、看板视图与重解析。任务隶属于 change，通过 changeId 过滤。供任务看板与任务详情页消费。
+
+workspace 任务（task card）读侧 API 客户端：任务详情、看板视图、重解析三个端点。
+写侧的 task 状态流转在 lib-workflow（`transitionTask`），不在本模块。
 
 ## 契约摘要
-- `listTasks(workspaceId, params?): Promise<TaskList>` — 列任务，params 支持 changeId / taskId 过滤。
-- `getTask(workspaceId, taskId): Promise<TaskRead>` — 取单个任务（含 allowed_paths / path / content）。
-- `getTaskBoard(workspaceId, changeId): Promise<TaskBoard>` — 取某 change 的看板（按 status 分列）。
-- `reparseTasks(workspaceId, changeId): Promise<TaskReparseStats>` — 重解析任务。
-- 类型：`TaskSummary`（task_key/title/status/phase/priority/owner_key/estimated_hours/affected_components/depends_on/blocks）、`TaskRead`（含 allowed_paths 与正文）、`TaskList`、`TaskBoardColumn`（status/count/items）、`TaskBoard`。
+
+- `getTask(workspaceId, taskId)` — `GET /api/workspaces/{wid}/tasks/{tid}` → `TaskRead`。
+- `getTaskBoard(workspaceId, changeId)` —
+  `GET /api/workspaces/{wid}/changes/{cid}/tasks/board` → `TaskBoard`（列=状态）。
+- `reparseTasks(workspaceId, changeId)` —
+  `POST .../changes/{cid}/tasks/reparse` → `TaskReparseResponse`。
+- 类型 `TaskSummary` / `TaskRead` / `TaskList` / `TaskBoardColumn` / `TaskBoard` /
+  `TaskParseWarning` / `TaskReparseStats` / `TaskReparseResponse` 全部从 OpenAPI
+  生成的 `@/lib/api-types` 取（后端 `backend/app/modules/task/schema.py`）。
 
 ## 关键逻辑
+
 ```
-listTasks(ws, { changeId?, taskId? }):
-  GET /api/workspaces/{ws}/tasks?change_id=&task_id= → { items: TaskSummary[], total }
-getTask(ws, taskId): GET /api/workspaces/{ws}/tasks/{taskId} → TaskRead
-getTaskBoard(ws, changeId): GET /api/workspaces/{ws}/changes/{changeId}/tasks/board → { columns: [{ status, count, items }] }
-reparseTasks(ws, changeId): POST → TaskReparseStats
+三个薄封装: apiFetch(<REST path>, reparse 加 method: POST)
+类型 = components["schemas"][...] 直引，无手写类型
 ```
 
 ## 注意事项
-- 任务始终隶属于某个 change，看板与重解析接口都需 changeId；listTasks 的 changeId 为可选用于跨 change 查询。
-- `depends_on` / `blocks` 表达任务间依赖关系，看板渲染与执行顺序调度依赖此信息。
-- `TaskRead.allowed_paths` 限定该任务可改动的文件范围，是 agent 执行时的路径白名单。
-- 看板按 `status` 分列，每列含 count 与 items；status 取值与 SillySpec 任务状态机一致（如 todo/doing/done 等）。
-- `affected_components` 列出任务影响的组件 key，用于跨组件影响面分析。
+
+- 生成的 `TaskSummary` / `TaskRead` 比旧手写多 `workspace_ids: string[]`（超集，
+  读侧消费者忽略即可）；`TaskParseWarning.task_key` 在 schema 中为可选。
+- 旧卡的 `listTasks(workspaceId, params?)` 已不存在——列表需求统一走
+  `getTaskBoard`（按 change 分组），别按旧卡引用。
+- 消费方为 workspace 页面域（任务看板页 / 任务详情页）。
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
+
 <!-- MANUAL_NOTES_END -->

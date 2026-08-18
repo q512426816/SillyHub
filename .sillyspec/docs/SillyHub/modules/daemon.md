@@ -2,73 +2,83 @@
 schema_version: 1
 doc_type: module-card
 module_id: daemon
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:16:33
+created_at: 2026-08-18 01:45:00
 ---
-# daemon
+
+# 本地执行与交互（daemon）
 
 ## 定位
-跨组件「本地执行交互」功能域，由 backend daemon 模块（注册/心跳/租约/会话/WebSocket Hub）与 sillyhub-daemon（Node ESM 进程，承载 claude-agent-sdk 实际执行）共同构成。backend 是调度与状态权威，daemon 进程是执行体，两者经 WebSocket + REST 双向通信，支持批处理 lease 与交互式会话两种执行模式。
+跨组件「本地执行与交互」功能域 = backend daemon 模块（注册/心跳/租约/会话/WS Hub/文件与代理通道，调度与状态权威）+ sillyhub-daemon（Node ESM 进程，claude-agent-sdk / codex app-server 的实际执行体）。
+backend 与 daemon 经 WebSocket + REST 双向通信，支持三种执行形态：批处理 lease（无状态任务）、交互式 session（有状态长对话）、host_fs/patch 文件通道（平台远程读写 daemon 宿主文件）。另承载 daemon 单文件分发（dist_router）与 LLM 网关透传（llm-proxy，master key 不出 hub 进程）。
 
-## 契约摘要
-- backend API（prefix=/daemon）：runtime 注册 `POST /daemon/runtimes`、心跳 `/heartbeat`、租约 lifecycle（claim/start/complete/messages）、交互式 session 端点（`/sessions`、`/sessions/{id}/inject|interrupt|end|reopen|recover|confirm-reconnected|mark-recovery-failed|ready`、`/sessions/{id}/permissions/{rid}/response`、`/sessions/{id}/dialogs`、`/sessions/{id}/stream` SSE、`/sessions/{id}/logs`）；LLM 网关透传端点 `ANY /daemon/llm-proxy/{path}`（security-audit-remediation，daemon 侧 openai_chat 供应商改经 hub 代理调用，master key 不再下发到 daemon 进程，v1 路径白名单）。
-- backend service：`DaemonService`（runtime/lease 生命周期、`submit_messages`、`close_interactive_run`、`sync_agent_run_status`、`cleanup_stale_runtimes`）；`DaemonLeaseService`（claim_task/heartbeat_lease/expire_overdue_leases/cancel_lease，claim_token 鉴权）；`SessionService`（交互式会话 create_session/inject_session/interrupt_session/end_session/recover_session_after_daemon_restart）；`SessionReadiness`（模块级单例 mark_ready/wait/clear，inject_session 发 SESSION_INJECT 前阻塞等 ready 超时 30s fallback，end/failed clear，confirm_session_reconnected mark_ready recover 双保险；2026-08-07-inject-wait-session-ready）。
-- `DaemonWsHub`：维护 runtime→WebSocket 映射，提供 `notify_task_available`、`send_session_control`、`send_permission_response`、`send_rpc`（带 rpc_id 关联的 RPC，如 list_dir、list_roots）、`broadcast`。
-- 协议（`protocol.py` 双端对应）：`daemon:task_available / heartbeat / heartbeat_ack / lease_claim / lease_start / lease_complete / lease_messages / rpc / rpc_result / session_inject / session_interrupt / session_end / session_resume / permission_request / permission_response`。Node 端 `MSG`/`LEASE_STATE`/`WS_PATH='/api/daemon/ws'`/`REST_PREFIX='/api/daemon'` 与之对齐；WS 连接鉴权经 HTTP header（`X-API-Key`），query token 回退已移除（security-audit-remediation）。
-- Node daemon 进程：`cli.ts`（start/stop/status/logs，PID 文件管理，信号由 Daemon 内部 handler 处理）；`Daemon` 类（detectAgents→register→三循环：lease 领取、ws 心跳、会话控制）；`TaskRunner`（批处理 lease 执行，renderAgentEvent/resolveTimeout/resolveMaxRetries/isSpawnLevelFailure）；`interactive/`（claude-sdk-driver、session-manager、input-queue、permission-resolver、session-store-persistence、write-guard）；`HubClient`（REST）、`WsClient`（WS + RPC）、`RecoveryCoordinator`（重启后会话收敛）。
+## 契约摘要（backend 侧）
+- **runtime / lease**：
+  - RuntimeService：注册/心跳/实例列表/机器级聚合读（machines 含别名、版本、构建号、启动时间、用量视图，规避 N+1）/别名更新/离线标记/禁用启用删除/失联清理/自更新指令下发（复用 WS self_update 消息，仅改路由键）。
+  - DaemonLeaseService：claim（claim_token 鉴权 compare_digest）/heartbeat/过期回收（expire_overdue_leases + stuck_terminating 告警）/cancel（区分 interactive 会话取消与 batch lease 取消两路下发）。
+- **claim payload 组装**（lease/context）：
+  - provider 配置四级解析：run 绑定 profile 的 `llm_provider_id`（归属校验 user_id==runtime.user_id + agent_kind 一致）→ 平台默认供应商 → 本机不注入。
+  - openai_chat 类供应商不下发 master key，改发 `litellm_proxy` 标记 + hub 代理地址（daemon injector 转 ANTHROPIC_BASE_URL 指向 hub，子进程 Bearer 打 hub 代理）。
+  - profile 透传（mcp/skills/凭证/allowed_roots）；mission 预算注入。
+  - 供应商热切换：默认供应商变更 → 按 daemon 分组推 `DAEMON_MSG_PROVIDER_CONFIG_CHANGED`，daemon 在 turn 边界 reload（close 旧 query + resume agentSessionId 保留历史），停止推 null 回退本机凭证。
+- **session**：
+  - create/inject/interrupt/end/reopen/recover/confirm-reconnected/mark-recovery-failed/ready 上报 + SSE stream + logs。
+  - `SessionReadiness` 模块级单例（mark_ready/wait/clear）：daemon create/recover 完成后 POST /ready 上报，backend 发 SESSION_INJECT 前 await wait(30s)，超时 fallback 仍发兼容旧 daemon——防 inject 早到 daemon 丢消息。
+  - permission_service：权限请求落 dialog 行、pending/history/workspace 级聚合、响应下发、超时收敛。
+- **run_sync**：
+  - `submit_messages`：daemon 上行消息落库；partial/complete 用 segmentId 跨调用去重（`_revoke_committed_partials` 撤已提交半截）；pending→running 用原子条件 UPDATE 防迟到的 submit 覆盖终态（lost update）。
+  - `sync_agent_run_status`、`close_interactive_run`（gate 任务仅 verify 阶段适用 `_gate_applicable`，勿扩大）。
+  - `_trigger_stage_completion_callback`：lease 完结回调驱动 change stage 收口；`_advance_team_stage`：execute 团队 mission 全 worker 收敛后推阶段；`_handle_team_run_completion`。
+  - gate/stage 状态变化事件发布（`_publish_gate_status_changed` / `_publish_stage_status_changed`）。
+- **文件通道**：host_fs（delegate + WS RPC，平台对 daemon 宿主文件的读写原语，rpc_id 关联）；patch（apply_patch_to_worktree 经 host_fs delegate 打补丁）；change_write 代写队列端点（claim/complete，change_writer proxy 的对端）。
+- **WsHub**：runtime→WebSocket 映射与 stale 驱逐；notify_task_available / send_wakeup / heartbeat_ack / session_control / permission_response / self_update / policy_update / send_rpc（rpc_id 关联 + 超时取消 + 全量 cancel）。
+- **llm-proxy**：`ANY /api/daemon/llm-proxy/{path}`——hub 进程持 master key 代理转发 LiteLLM；v1 路径白名单；校验 daemon apiKey 归属后注入 master key；模型归属校验失败拒绝。
+- **WS 升级期鉴权**：无/坏凭据 close 4001，解析 user 与 DaemonInstance.user_id 归属不匹配 close 4003；query token 回退已删，未升级旧 daemon 一律 4001。
+- **dist_router**：`/daemon/install.sh`、`latest.json`、单文件 JS——无 /api 前缀无鉴权的安装分发通道。
+- **audit / model_error**：daemon 操作审计查询子域；模型报错 DTO 归一。
+- facade `service.py` 集中 re-export 各子包（runtime→lease→patch→session 顺序）异常/常量，全部 import 路径兼容。
+
+## 契约摘要（sillyhub-daemon Node 侧）
+- **CLI**（cli.ts，commander）：start/stop/status/logs 四子命令；PID/日志文件在 `~/.sillyhub/daemon/`；start 必带 `--server`（不带会静默连 8000 兜底）；信号 handler 在 Daemon 内部注册，CLI 层不重复（防双重 stop）。
+- **Daemon 类**（daemon.ts）：detectAgents → register → 三循环（lease 领取含 `_leasePollSkippable` 节流 / WS 心跳 / 会话控制）；心跳回包 `_syncAllowedRoots`（JSON 相同短路防风暴）+ policy cache 同步；borrow workspace 管理器；turn result/message 回调（async 串行上报保证 message 先于 result 落库）；session end 上报；recover/confirmReconnected。
+- **interactive/**：claude-sdk-driver + codex-app-server-driver 双驱动；session-manager（allowed_roots 写白名单 write-guard——显式写 + Bash 间接写重定向/cp/mv/tee 等都限根内、markPendingSwitch 热切换、reload 孤儿 consume 守卫 isAuthoritative）；input-queue（单订阅，reload 前 resetForResubscribe 保 pending inject）；permission-resolver；会话 jsonl 持久化（CLAUDE_CONFIG_DIR 指向 daemon 隔离目录保证 resume 可达）。
+- **adapters/**：json-rpc / stream-json / ndjson / pi-json / text 多协议输出适配。
+- **policy/**：filesystem-policy / runtime-policy（PolicyCache realpath 归一统一口径）/ audit-sink / path-utils（盘符根/Unix 根边界敏感前缀比较，root 已含尾 sep 勿再补）。
+- **resilience/**：ResilienceService——submitWithRetry 流式消息退避重试（上限约 8s）用尽入 FileOutbox；retryTerminal 终态轻量重试；心跳健康信号触发 drainOutbox 补发（补发前校验 lease 有效/session 未终态，遇 422 claim_token 失效丢弃）。
+- **spec-sync.ts**：spec 树双向同步——拉取 bundle（tar 解包）+ 推送增量（本地 manifest 与 hub spec-manifest 对比算 FileOp ops，hub 404 首推全量）；junction 挂载、pending-push 标记、`SpecPushConflict` 与 push-before-pull 防护。
+- **其它**：credential-injector（litellm_proxy 标记→ANTHROPIC_BASE_URL 指向 hub 代理）、ws-client（连接带 X-API-Key header）、mcp-server.ts、local-yaml-writer（init 下发 local.yaml 写盘）、model-error 分类、skill-manager、roots-rpc（磁盘根列举）、host-fs-handler、build-id 自动注入。
 
 ## 关键逻辑
 ```
-# 批处理 lease 生命周期（claim_token 鉴权）
-DaemonService.create_lease → daemon 领取 → DaemonLeaseService.claim_task(claim_token)
-→ TaskRunner 执行 agent → lease_complete → _trigger_stage_completion_callback(agent_run)
-# 交互式会话（codex/claude）
-SessionService.create_session → DaemonWsHub.send_session_control
-→ Node interactive/session-manager 调 claude-agent-sdk → inject/interrupt/end 上行
-→ session ready 握手：daemon create 完成(fresh _startInteractiveSession/recover restoreAndReconnect) → POST /sessions/{id}/ready 上报 → SessionReadiness.mark_ready；inject_session 发 SESSION_INJECT 前 await wait(30s)（超时 fallback 仍发兼容旧 daemon + warn），end/failed → clear，confirm_session_reconnected → mark_ready recover 双保险（2026-08-07-inject-wait-session-ready）
-→ recover_session_after_daemon_restart 在 daemon 重启后收敛 crashed run
-# WebSocket RPC（如目录列表）
-backend send_rpc(rpc_id) → daemon 执行 → rpc_result(rpc_id) → resolve_rpc
+# 批处理 lease
+create_lease(build_claim_payload 组装 provider/profile 注入) → daemon 领取 claim_task(claim_token)
+→ TaskRunner 执行 agent → lease_complete → run_sync 回调 _trigger_stage_completion_callback / _advance_team_stage
+
+# 交互会话
+create_session → daemon _startInteractiveSession → POST /ready → SessionReadiness.mark_ready
+→ inject_session: await wait(30s) → SESSION_INJECT → 消息经 submit_messages 上行(segmentId 去重)
+→ 重启恢复: recover + restoreAndReconnect → confirm-reconnected(reconnecting→active + mark_ready 双保险)
+
+# WS RPC（文件原语）
+backend send_rpc(rpc_id, list_dir/list_roots/读写) → daemon host-fs-handler 执行 → rpc_result(rpc_id) → resolve_rpc
+
+# 网络韧性
+submitWithRetry(退避) → 用尽 → FileOutbox 暂存 → 心跳健康 → drainOutbox(校验 lease/session 后补发)
 ```
 
 ## 注意事项
-- lease 与 session 是两套执行模型：lease 为无状态批处理（task_id 关联），session 为有状态长交互（有 current_run、turn 冲突 `DaemonSessionTurnConflict`）。
-- claim_token 是 lease/session 操作的鉴权凭证，daemon 持有；token 不匹配抛 `LeaseTokenMismatch`。
-- daemon 重启后会话收敛是关键不变量：`recover_session_after_daemon_restart` + Node 端 `RecoveryCoordinator` + `confirm-reconnected`/`mark-recovery-failed` 端点配合，避免会话悬挂。
-- `/sessions/{id}/end` 端点的 daemon 身份用 runtime 归属校验（非 lease），曾有 404 修复记录，改动需注意归属判定路径。
-- 当前活跃变更 `2026-06-23-codex-interactive-session` 在重构交互式会话生命周期，本卡片描述的 session 端点集合会随之演进。
-- allowed_roots 写白名单：interactive 会话经 session-manager 的 canUseTool 包装器注入 write-guard（`isWriteWithinAllowedRoots`），把显式写（Write/Edit/MultiEdit）与 Bash 间接写（重定向 `>`/`>>`、cp/mv/install、tee、mkdir、touch）限制在 daemon config.allowed_roots 内，读自由；batch（lease）模式走 `--settings` permission 注入。`isPathUnderAnyRoot` 做边界敏感前缀比较时，盘符根（`D:\`）与 Unix 根（`/`）经 pathResolve 后已含尾部 sep，前缀不可再补 sep，否则产生双反斜杠/双斜杠前缀误判越界（ql-20260702-007）。
-- runtime 端点 daemon_version/daemon_build_id 可见：daemon 在 register/heartbeat 上报（hub-client.ts），backend 存 daemon_instances.version/build_id；6 个 runtime 读端点（list/read/update/disable/enable/offline）经 router `_runtime_read` JOIN daemon_instances 填充（service `list_runtimes` 等返回 (runtime, instance) tuple；2026-08-04-daemon-version 前这 6 端点漏 JOIN 致 DTO 恒 null，仅 machines 端点正常）。
-- daemon 进程启动时间 started_at 可见：daemon cli.ts 入口取 processStartTime（Date.now）经 Daemon._startedAt 在 register/heartbeat 上报（hub-client.ts body started_at ISO 8601），backend daemon_instances.started_at（Alembic migration 20260805110000 nullable）经三层透传 router endpoint → facade DaemonService → runtime RuntimeService 写（register new/else 两分支 + heartbeat 幂等覆盖恒定值），machines 端点 DaemonMachineRead.started_at 经 instance JOIN 返回（runtime 级 _runtime_read / DaemonRuntimeRead 不加，YAGNI）；旧 daemon 不上报则 NULL，前端 machine-card 显「—」。
-- daemon 构建号 BUILD_ID：由 sillyhub-daemon/scripts/gen-build-id.mjs 每次 build/bundle 注入（`<git short sha>-<yyyymmddhhmmss>`，写 src/build-id.ts **无 `: string` 注解** —— backend 正则 `_compute_daemon_version` `BUILD_ID\s*=\s*["']` 的 `\s*` 不吃冒号，带注解会断 self-update；build-id.ts 移出版控，prebuild+postinstall 自动生成）。
-- **WS 升级期鉴权**（security-audit-remediation）：`/api/daemon/ws` 在 accept 前校验凭据（header 承载），无凭据/坏凭据 close `4001`、解析 user 与 `DaemonInstance.user_id` 归属不匹配 close `4003`；query token 回退已移除，未升级旧 daemon 一律 4001。凭据自解析 helper（`_authenticate_bearer_headers` / `_authenticate_ws_upgrade`）只做凭据→User 解析，4001/4003 拒绝语义由各调用方（WS 端点、llm-proxy）落地。
-- **llm-proxy 透传**（security-audit-remediation）：`ANY /daemon/llm-proxy/{path}` 由 hub 进程持 master key 代理转发 LLM 网关请求（openai_chat 供应商经 LiteLLM），master key 不出进程；v1 对上游路径做白名单，模型归属校验失败拒绝。改白名单/转发行为须同步 daemon 侧 `litellm_proxy` 注入约定。
+- lease 与 session 是两套执行模型：lease 无状态批处理（task_id 关联），session 有状态长交互（current_run、turn 冲突错误）；interactive lease 永不过期是不变量。
+- daemon 重启后会话收敛是关键不变量：backend recover + Node 端恢复 + confirm-reconnected/mark-recovery-failed 三方配合，勿单侧改动握手顺序。
+- llm-proxy 白名单/转发行为与 daemon 侧 credential-injector 的注入约定是双侧契约；master key 永不出 hub 进程。
+- WS 升级期鉴权 4001/4003 语义由各调用方（WS 端点、llm-proxy）落地，共用凭据解析 helper 只做凭据→User。
+- segmentId 去重约定（partial 行带 metadata.segmentId、complete 行 NULL）是双侧消息结构契约；pending→running 原子条件 UPDATE 防终态覆盖，勿改回 ORM 内存读改写。
+- gate 仅 verify 阶段适用（`_gate_applicable`），勿恢复对任意 change run 跑 gate 的旧行为（曾致 quick 变更误报核验失败）。
+- Node 侧 PolicyCache realpath 归一 + allowed_roots JSON 短路是心跳不卡死的关键；盘符根/Unix 根前缀比较勿再补尾部 sep（历史误 deny 事故）。
+- spec-sync 推拉有顺序约束；daemon 侧 manifest 缓存过旧会推不出新 change（已知运维坑），从仓库导入 RPC 不受 30s 代理超时限制。
+- BUILD_ID 注入格式（build-id.ts 无 `: string` 注解）被 backend `_compute_daemon_version` 正则依赖，改格式断 self-update。
 
 ## 人工备注
-<!-- MANUAL_NOTES_START -->
-<!-- MANUAL_NOTES_END -->
 
-## 变更索引
-- ql-20260702-007-f1a8 | 修复 isPathUnderAnyRoot 盘符根/Unix 根路径前缀比较（root 已含尾 sep 不再补，消除配 D 盘做 allowed_root 仍误 deny）
-- ql-20260703-001-7e3a | session-manager Bash tool 跨 shell 提取遗漏修复（合并 bash+powershell+cmd 三提取取并集，PowerShell Set-Content 经 Bash tool 绕过 PolicyEngine 的真机 bug）
-- ql-20260703-002-c2d4 | runtimeIdProvider 用 config.runtime_id（非注册 runtime）致 PolicyCache 永久 miss，配 allowed_roots 后 interactive session 仍 deny（改 daemon.resolveRuntimeId(provider)）
-- ql-20260703-003-f9d7 | 审计页免 wid 路由——后端加 GET /daemon/runtimes/{rid}/policy-audit + 前端 usePolicyAuditByRuntime（前端审计页不再要求 ?wid）
-- ql-20260706-003-8a3f | runtimes 页可写目录配置不回显修复（daemon-entity-binding 上提 allowed_roots 到 daemon_instances 后，router._runtime_read instance 分支只填 daemon_version/build_id 漏填 allowed_roots + PUT /allowed-roots 端点 model_validate 不传 instance；统一 _runtime_read 填充 instance.allowed_roots + PUT 复用 _runtime_read）
-- 2026-07-07-daemon-machine-runtime-hierarchy | /runtimes 页改 Machine→Runtime 两级手风琴（前端 page 重构）；后端新增 GET/PATCH/POST /api/daemon/machines 机器级聚合读 + 别名 + self-update（runtime/service.list_machines/update_machine_alias/_get_owned_instance，N+1 规避 runtimes_by_instance，self-update 复用既有 daemon:self_update WS 消息仅改路由键 instance_id，0 改表 0 破坏既有契约 §14 生命周期豁免）
-- 2026-07-09-remote-folder-picker | 远程目录浏览器：daemon 新增 `list_roots` RPC（磁盘根列举 Win 盘符/Unix `/`，src/roots-rpc.ts）+ 删 `browse_folder` handler（PowerShell Shell.BrowseForFolder）；backend 加 `POST /runtimes/{id}/list-roots` 代理 + 删 browse-folder 端点；前端 `RemoteFolderPicker` 自治组件复用（listRoots+listDir 懒加载+手输校验+错误降级）
-- 2026-07-30-daemon-heartbeat-dedup-fix | 两 bug：(1) 卡死——`PolicyCache.set` 去 `resolveRealPath` 统一归一口径（runtime-policy.ts）+ `isPathUnderAnyRoot` 判定时 realpath 下沉（path-utils.ts，B1 sandbox 安全）+ `_syncAllowedRoots` 短路（daemon.ts，JSON.stringify 相同 return）+ 全 set/判定点口径统一，消除每心跳 changed=1→set→realpath/stat 风暴致事件循环冻死（>2min online）。(2) 回复重复——daemon `_emitOverrideSignals` 扩 emit `[ASSISTANT_OVERRIDE] <segmentId>`（对齐 thinking，metadata 严禁 thinking:true，B2）+ segmentId 第 3 段用 block type（非 stream index）修复 partial/complete 对齐；backend run_sync `_revoke_committed_partials`（task-14）跨 submit_messages 调用 select+session.delete 已 commit partial（task-08 expunge 只撤单调用 pending 不够，partial 与 override 分两次调用到达）。verify 实跑：会话回复无半截+全文双发（#35 消除）。
-- 2026-07-31-offline-session-readonly | /runtimes 离线只读浏览会话：runtime-card `canOpenSession` 去 online 与运算（离线会话按钮仍渲染）；runtime-session-dialog 从实时 `runtimes` 重查派生 runtimeOffline 透传 panel（D-005，非 stale runtime prop，重连生效）；interactive-session-panel 加 `offlineReadOnly` prop + 顶部离线横幅 + 4 操作（新建/发送/打断/结束）disabled + attach 离线不建 SSE 直接 initialTurns 只读（active 保持，重连恢复）。后端 0 改（API DB 查询离线可用）、page.tsx 0 改（URL 恢复已支持离线 matched）、change-session-section prop 隔离（D-003）。
-- 2026-08-04-daemon-version | daemon 版本可见（6 runtime 端点 _runtime_read JOIN daemon_instances 填 daemon_version/build_id，service list_runtimes 等返回 (runtime, instance) tuple；facade daemon/service.py + list-leases/instances 调用点同步）+ 构建号每次 build 自动注入（gen-build-id.mjs git-sha+ts 无注解格式兼容 backend 正则，build-id.ts 移出版控 prebuild/postinstall 生成，dev/prod 同源，build-bundle.sh 改调 gen）；不改 daemon 上报/前端/语义版本/生命周期。
-- 2026-08-05-daemon-start-time | daemon 进程启动时间字段 started_at（cli.ts 入口取 processStartTime → Daemon._startedAt → hub-client register/heartbeat 上报 ISO → daemon_instances.started_at migration 20260805110000 + 三层透传 router→facade DaemonService→runtime RuntimeService 写 → machines DaemonMachineRead JOIN 返回 → 前端 machine-card 显示相对/绝对/null「—」）；不改 daemon 生命周期/daemon_runtimes 表/DaemonRuntimeRead（YAGNI）；execute 符号影响面检查补 facade service.py（三层透传链 plan 漏标），task-01 同步 daemon.ts ClientLike 鸭子接口（task-02 改 hub-client 签名下游）。
-- ql-20260805-002-1ab4 | 修复 interactive run 终态 lost update：run_sync/service.py `submit_messages` 的 pending→running 分支由 ORM 内存读改写改为原子条件 UPDATE（`update().where(AgentRun.status == "pending")`，rowcount=0 即 DB 已被 close 推进到终态则不覆盖），消除迟到的 submit 协程用旧快照冲掉 `close_interactive_run` 写入的 completed（run 卡 running / 前端「等待本轮完成」）；附 `test_submit_messages_no_overwrite_terminal.py` 双 session 竞态测试 + 正常路径回归。
-- 2026-08-05-skill-content-viewer | /settings/skills 内容查看器：新增 `GET /api/daemon/skills/{skill_name}/content` 只读端点（白名单 sillyspec-* + 固定 SKILL.md 防穿越，权限 `get_current_principal`，>1MiB 413，缺失 404 区分；声明在 manifest/bundle 之后；`read_skill_md` 在 agent.skills_bundle_service）。不改 daemon lifecycle/session/lease/WS/心跳/状态机。
-- 2026-08-06-provider-switch-live-session | 运行中会话热切换供应商：默认供应商变更（set/unset_default）→凭证探测（probe.py）→查 active session（status IN active,reconnecting）按 daemon 分组→WS 推送 `PROVIDER_CONFIG_CHANGED`（ws_hub.send_session_control）→daemon `_routeProviderConfigChanged`→`sessionManager.markPendingSwitch`（空闲立即/生成中等 `_onResult` turn 边界）→`reloadWithProvider`（close 旧 query + 新 env `driver.start resume agentSessionId` 保留对话历史）；停止推 null 回退本机凭证；cli.ts credentialManager 接线（停止读 credentials.json）；0 改表/lease 生命周期（不重 claim，interactive lease 永不过期不变）。
-- ql-20260806-002 | reloadWithProvider close 顺序修复：close oldQuery 从 driver.start 前移到替换 state.query 之后（旧实现 close 在 start 前，close 拉动旧 consume 退出致 session 收尾 ended；实测 reload 后会话 ended）。⚠️ 此为必要前提非完整修复——close 后旧 consume 仍抛 abort 错触发 fail 误杀新会话，真实根因 + 完整修复见 ql-20260807-002（ql-001 orphan 守卫是对的部分修复但非 ended 主因）。
-- ql-20260807-001 | reload orphan consume 守卫（ql-20260806-002 真实根因修复）：reloadWithProvider close 旧 query 触发旧 consume 协程的 SDK 迭代器抛 abort 错（sdk.mjs close→spawnAbort(Error)→process exit 设 exitError "Claude Code process aborted by user"）→ driver consume catch → onError 静默 fail(sessionId)；reload 后 status=active 绕过 fail 守卫（只挡 ended/failed）→ _terminateSession 把刚 reload 的新 session 打成 failed + close 掉新 query（state.query 已替换）+ onSessionEnd（backend ended，daemon 日志 reload-diag success 后无 error 因 onError/fail 静默）。修复：_runConsume 加 isAuthoritative 谓词（target===state.query/driverHandle）判 orphan，onError/catch/onResult/onMessage 入口静默 no-op；成立前提即 c40b1319 先替换 state.query 再 close。AC-6 用 makeMockDriverWithAbortOnClose（close 触发该 query 的 consume onError）模拟真实 SDK 抛错锁回归，反向验证禁用守卫复现 status=failed。⚠️ ql-002 实测此修复后 reload 仍 ended——orphan 守卫修的旧 consume 误 fail 确实存在，但 ended 真正主因是 InputQueue 单订阅（见 ql-002）；守卫作防御性修复保留。
-- ql-20260807-002 | reload ended 真正根因修复（InputQueue 单订阅 + CLAUDE_CONFIG_DIR 停止）：经多轮诊断日志（end-diag）+ 决定性测试（禁用 close oldQuery 仍 ended）定位真正根因：①reload 复用 state.inputQueue 但 InputQueue 单订阅（_subscribed），create 时 SDK 已订阅，reload 新 query 第二次 [Symbol.asyncIterator] 抛 SessionQueueDoubleSubscribeError → SDK query abort（"Operation aborted"）→ onError authoritative=true → fail → onSessionEnd → backend end_session 下发 SESSION_END → session ended；②停止（provider_config=null）buildSpawnEnv 不设 CLAUDE_CONFIG_DIR 回退 ~/.claude，但 jsonl 在 daemon claude-config（create/切换时写）→ 新 claude resume 找不到 → 启动失败 → fail。修复：InputQueue 加 resetForResubscribe（reloadWithProvider driver.start 前 reset _subscribed+清旧 _pending，保留 _buffer pending inject）+ reloadWithProvider buildSpawnEnv 后强制 newEnv.CLAUDE_CONFIG_DIR=daemon 隔离目录（停止也保持 jsonl 一致，凭证靠 env token 层 2 + daemon settings.json）。诊断日志（end-diag daemon+backend）全移除。实测切换→停止→再切换四次 reload session 保持 active（DB status=active ended_at=空）。
-- ql-20260807-003 | /model 等 slash command 偶发空白排查 + cb async 防御：排查「会话输入 /model 偶发空白轮次，重新进入才显示」。经 model-diag 诊断定位根因：**inject（SESSION_INJECT）在新会话 create_session 完成前到 daemon**——backend create_session commit DB active 后立即 wake daemon（lease 领取，fire 不等 create）+ send SESSION_INJECT（WS fire），daemon _routeSessionControl session 不存在直接 return 丢 inject（不重试不反馈）→ /model 没进 claude → 空白。backend inject_session 只查 DB status=='active'（不查 daemon ready），无法拦。本 quick 顺带：①cb async 防御——_runConsume 的 onResult/onMessage 改 async+await（driver consume 串行等每条上报 HTTP 完成），保证 message 先于 result 落库/SSE（避免 close 先 message 后前端不渲染，非 /model 主因但防御性保留）；②AC-3a 更新——ql-002 CLAUDE_CONFIG_DIR 强制后停止路径不再 undefined，AC-3a 断言过时（ql-002 遗留测试债）。/model 真正修复（C 方案 backend 等 daemon create 完成）转完整流程（daemon 新增 session ready 上报 + backend inject 等待）。
-- 2026-08-07-inject-wait-session-ready | /model 等 inject 偶发空白根因修复（C 方案，ql-20260807-003 转完整流程）：daemon create 完成（fresh _startInteractiveSession @3343 + recover restoreAndReconnect @2784）双路径 HTTP POST /sessions/{id}/ready 上报（best-effort，hub-client.notifySessionReady，失败 warn 不阻塞主循环）→ backend 内存 SessionReadiness 模块级单例（ready set + per-session asyncio.Event，mark_ready/wait/clear）→ inject_session 发 SESSION_INJECT 前 await wait(30s)，超时 fallback 仍发兼容旧 daemon + warn；end_session/failed → clear；confirm_session_reconnected（reconnecting→active 翻转）→ mark_ready recover 主路径双保险。POST /ready 返回 200+JSON（对齐 daemon hub-client _request 的 JSON.parse 契约，204 空 body 会 SyntaxError）。无 DB migration。22 单测（backend 16 SessionReadiness mark/wait/clear/超时/并发+inject 直通+fallback+POST /ready 200/401+confirm 翻转/幂等/rejected，daemon 6 fresh/recover/best-effort/失败不上报）全绿 + /model 端到端实测正常。
-- 2026-08-11-agent-profile-bind-llm-provider | 凭证注入四级判断：`_inject_provider_config` 优先 `resolve_bound_provider_config`（读 `lease_meta.llm_provider_id`→按 id 查 LlmProvider→归属校验 `provider.user_id==runtime.user_id` + agent_kind 一致 + anthropic/openai_chat 双分支构造）→ 回退 `resolve_default_provider_config` → D-007 本机不注入。新增 `test_resolve_bound_provider_config` 6 测试类。不碰 lease/session/agent_run 状态机（design §8 生命周期豁免）。
-- ql-20260813-006-f3f0 | gate 仅 verify stage 跑：close_interactive_run 原对所有 change_id 非空+completed run 无差别设 gate_status=pending+enqueue gate 任务，致 quick stage run 被拉跑 `sillyspec gate verify`，对非 verify 变更（quick 独立 quicklog/change_key 含中文）stdout 非 JSON 解析失败 exit 2 误报「核验失败」，刷新后 last_dispatch 无 gate 字段徽标消失（用户感知「状态没变」）。加 `_gate_applicable`（current_stage==verify+completed+change_id 非空）守门，设 pending(:1067) 与 enqueue(:1149) 共用；扩 test_run_sync_gate_enqueue.py 加非 verify stage 跳过 gate 用例（_attach_change stage 参数化）。
-- security-audit-remediation | 高危安全修复（daemon 侧）：WS 升级期鉴权（4001/4003，删 query token 回退）；claim/pending-leases/heartbeat 端点归属校验 + claim_token 改 compare_digest；lease/context openai_chat 分支停发 master key 改 `litellm_proxy` 标记 + 新增 `ANY /daemon/llm-proxy/{path}` hub 透传端点（master key 不出进程，v1 路径白名单）；Node 端 ws-client 连接改传 `X-API-Key` header、credential-injector 把 litellm_proxy 标记转 `ANTHROPIC_BASE_URL` 指向 hub 代理。
+<!-- MANUAL_NOTES_START -->
+
+<!-- MANUAL_NOTES_END -->

@@ -2,51 +2,71 @@
 schema_version: 1
 doc_type: module-card
 module_id: admin
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:09:00
+created_at: 2026-08-18 01:45:00
 ---
-# admin
+
+# 用户与组织管理（admin）
 
 ## 定位
-平台级用户/角色/组织管理中枢（区别于 workspace 级 RBAC）。提供用户全生命周期（创建/改/删/禁登/重置密码/会话撤销/审计查询）、角色 CRUD + 启停、组织树（自引用 parent_id）管理。所有写操作落 AuditLog。是 settings 模块用户管理的实质实现层。
+平台级用户/角色/组织管理中枢（区别于 workspace 级 RBAC）。用户全生命周期（创建/改/删/
+禁登/重置密码/会话撤销/审计查询）、角色 CRUD + 启停、组织树管理。所有写操作落 AuditLog。
+是 settings 模块「用户管理」面的实质实现层；auth.rbac 延迟反向引用本模块的 UserRole
+收集平台级权限（admin↔auth/settings 双向引用）。
 
 ## 契约摘要
-- `/api/admin/users` — GET 列表 / POST 创建 / PATCH 更新 / DELETE 删除
-- `/api/admin/users/{id}` — GET 详情；`.../sessions` GET 列 / DELETE 撤销单会话 / `.../sessions/revoke-all` POST 撤销全部
-- `/api/admin/users/{id}/audit` GET 审计；`.../workspaces` GET 工作区；`.../reset-password` POST
-- `/api/admin/users/{id}/disable-login` / `enable-login` POST
-- `/api/admin/roles` — GET 列表 / POST 创建 / PATCH 更新 / DELETE 删除 / `.../disable` / `.../enable` POST / `.../users` GET
-- `/api/admin/organizations` — GET 列表 / POST 创建 / PATCH 更新 / DELETE 删除 / `.../disable` / `.../enable` POST
-- Service：`UserService` / `RoleService` / `OrganizationService`（均持 session + actor_id）
+- 用户：`GET|POST /api/admin/users`、`PATCH|DELETE /users/{id}`；
+  `/users/{id}/sessions` GET、`DELETE .../sessions/{sid}`、
+  `POST .../sessions/revoke-all`；`/users/{id}/audit`（审计查询）、
+  `.../workspaces`（所属工作区）、`.../reset-password`、`.../disable-login`、
+  `.../enable-login`。
+- 角色：`GET|POST /api/admin/roles`、`PATCH|DELETE /roles/{id}`、
+  `POST /roles/{id}/disable|enable`、`GET /roles/{id}/users`。
+- 组织：`GET|POST /api/admin/organizations`、`PATCH|DELETE /organizations/{id}`、
+  `POST /organizations/{id}/disable|enable`。
+- 服务（均持 session + actor_id，写前 `_set_audit_context`）：
+  - `UserService`（users_service.py）：list_users / get_user / create_user /
+    update_user / delete_user / disable_login / enable_login / reset_password /
+    list_sessions / revoke_session / revoke_all_sessions / list_audit_logs /
+    list_workspaces；用户名可用性校验（`_assert_username_available`）与
+    组织/角色重写（`_rewrite_organizations` / `_rewrite_roles`）。
+  - `RoleService`（roles_service.py）：list / get / create / update / disable /
+    enable / delete / list_users——权限闸在 router 层，类内只管业务规则；
+    `_perms_by_roles` / `_count_users_by_roles` 供列表展示。
+  - `OrganizationService`（organizations_service.py）：list / get / create /
+    update / disable / enable / delete；`_descendant_ids` 递归收集子树、
+    `_counts`(user_count, child_count) 与 `_subtree_member_count` 级联统计。
+- 模型：organizations（parent_id 自引用树 + `ix_organizations_parent_id`）、
+  user_organizations、user_roles（UserRole 平台级用户-角色 M2M）。
 
 ## 关键逻辑
 ```
-UserService.delete_user(target_id):
-  if target 是最后一个 active admin: raise（_active_admin_count 防自锁）
-  _revoke_sessions(target_id)          # 清会话
-  soft-delete User（deleted_at + status）
-  AuditLog("user.delete"); commit
-
-OrganizationService: 组织树用 parent_id 自引用
-  _descendant_ids(root) 递归收集子节点；禁用/删除级联到子树
-  _counts(org) 返回 (user_count, child_count)
+UserService.delete_user(id):
+  最后一个 active admin → 拒(_active_admin_count 防自锁)
+  _revoke_sessions(id) → soft-delete User(deleted_at+status) → 审计落库
+授平台管理权前: _assert_actor_may_grant_platform_admin
+  ——授 is_platform_admin=True 或绑定含 platform:admin 权限的角色前,
+    校验 actor 自身 is_platform_admin, 否则 PermissionDenied
+组织树: parent_id 自引用; 禁用/删除级联到子树(_descendant_ids 展开);
+  Organization.status 受 check 约束 IN ('active','disabled')
 ```
 
 ## 注意事项
-- **用户可见错误文案中文（2026-08-15-error-message-l10n）**：本模块面向前端用户的 raise message 已全部中文化（中文短语+行动指引，技术 ID 在 details）；守护测试 tests/core/test_error_message_l10n.py 强制新文案含 CJK。
-- UserRole / UserOrganization 是平台级 M2M（非 workspace 级），与 auth 模块的 UserWorkspaceRole 区分
-- `_active_admin_count` 防止删除/禁用最后一个平台管理员导致系统锁死
-- 组织为层级树（parent_id 自引用，有 `ix_organizations_parent_id`），禁用/删除需级联子树（`_descendant_ids`）
-- Organization.status 受 check 约束 `status IN ('active','disabled')`
-- 所有 service 写操作经 `_audit` 写 AuditLog（action 含 user./role./organization. 前缀），OrganizationService 直接写 workflow.AuditLog
-- roles_service 用 `_user_roles_model()` 延迟 import UserRole（避免循环），import 失败表示前置任务未完成
-- auth.rbac 延迟 import admin.UserRole 收集权限，settings.service/schema 也 import admin，形成 admin↔auth/settings 双向引用
-- **支配权纵深防御（2026-08-08 安全加固）**：`/api/admin/users` 写操作虽由 router 层 `USER_WRITE` 守门，但 `USER_WRITE ≠ is_platform_admin`。`UserService.create_user/update_user` 在授 `is_platform_admin=True` 或绑定含 `platform:admin`（`PLATFORM_ADMIN`，super_admin 系统角色即带它）权限的角色前，经 `_assert_actor_may_grant_platform_admin` 校验 actor 自身 `is_platform_admin`，否则 `PermissionDenied(PLATFORM_ADMIN_GRANT_FORBIDDEN)`——防持 USER_WRITE 的非平台管理员越权授予超管（自提权/横向提权）。降级（`is_platform_admin=False`）不触发，仍由 `_active_admin_count` 兜底
+- 用户可见错误文案中文（error-message-l10n），技术 ID 在 `details`。
+- 支配权纵深防御：router 层 `USER_WRITE` ≠ 平台管理员；`create_user`/`update_user`
+  在授予 `is_platform_admin=True` 或绑定含 `platform:admin`（PLATFORM_ADMIN，
+  super_admin 系统角色自带）权限的角色前必须过 `_assert_actor_may_grant_platform_admin`，
+  防持 USER_WRITE 的非管理员自提权/横向提权；降级不触发，仍由 `_active_admin_count` 兜底。
+- UserRole / UserOrganization 是平台级 M2M，与 auth 的 UserWorkspaceRole（workspace 级）
+  严格区分，勿混用。
+- 全部 service 写操作经 `_audit` 写 AuditLog（action 前缀 user./role./organization.），
+  OrganizationService 直接写 workflow.AuditLog。
+- `roles_service` 用延迟 import 取 UserRole（避免与 auth 循环引用），import 失败表示
+  前置任务未完成。
+- 改 admin 表结构需三处联测（auth.rbac 权限收集 / settings 用户管理面 / 本模块）。
 
 ## 人工备注
-<!-- MANUAL_NOTES_START -->
-<!-- MANUAL_NOTES_END -->
 
-## 变更索引
-- ql-20260808-001-4068 | users_service 支配权校验：create/update 授 is_platform_admin 或绑定 platform:admin 角色前校验 actor is_platform_admin（堵 USER_WRITE 持有者越权授超管）
+<!-- MANUAL_NOTES_START -->
+
+<!-- MANUAL_NOTES_END -->

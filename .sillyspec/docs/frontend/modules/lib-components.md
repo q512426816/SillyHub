@@ -2,41 +2,39 @@
 schema_version: 1
 doc_type: module-card
 module_id: lib-components
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:01:57+08:00
+created_at: 2026-08-18 01:45:00
 ---
-# lib-components
+
+# 组件清单薄封装（lib-components）
 
 ## 定位
-组件（Component）API 兼容层（`frontend/src/lib/components.ts`，约 217 行）。后端重构后"组件"即子工作空间（`component_key !== null` 的 Workspace），本模块把旧的组件 API 调用重映射到当前 workspace 端点，让尚未完全迁移的页面继续可用。属过渡层。
+组件清单 API 的薄封装（变更 2026-07-06-component-readonly-split，D-001@V1）。组件数据已改为从 `projects/*.yaml` 只读派生（后端 `GET /workspaces/{id}/components`），不再是可写的 workspace 行；本模块只做转发，真正的客户端与类型定义都在 `@/lib/workspaces`——`Component` 类型与 `getWorkspaceComponents` 留在原处，避免循环依赖、保持单一真相。消费方为工作区详情页（`workspaces/[id]/page.tsx` 的组件区块）。
 
 ## 契约摘要
-- `listComponents(workspaceId): Promise<{ items: Component[]; total }>` — 列出某工作空间下的子工作空间（组件）。
-- `getComponent(workspaceId, componentId): Promise<Component>` — 取单个组件（直接按 componentId 查 workspace）。
-- `reparseComponents(workspaceId): Promise<ReparseResponse>` — 重扫并重建组件列表。
-- `getTopology(workspaceId?): Promise<TopologyResponse>` — 全局拓扑（workspaceId 参数仅用于回填响应字段，实际不过滤）。
-- 类型：`Component`（从 Workspace 映射，含 tech_stack/build_command/test_command 等）、`Relation`、`ReparseStats`/`ReparseResponse`、`TopologyNode/Edge/Response`。
+- `listComponents(workspaceId: string): Promise<{ items: Component[]; total: number }>`
+  - 列出项目组的一级子项目组件（只读，来自 projects/*.yaml）。
+  - 实现即 `return getWorkspaceComponents(workspaceId)`，无任何本地加工。
+- `export type { Component }` — 从 `@/lib/workspaces` 再导出，调用方不必感知真实归属。
+- 无其它导出。**不存在** `getComponent` / `reparseComponents` / `getTopology` 等函数（源文件全量仅 21 行，出现即属索引符号漂移）。
 
 ## 关键逻辑
+整个模块无独立逻辑，等价于：
 ```
-listComponents(workspaceId):
-  [ws, resp] = Promise.all([ GET /api/workspaces/{id}, GET /api/workspaces ])
-  prefix = ws.root_path + "/"
-  items = resp.items.filter(w => w.root_path.startsWith(prefix) && w.id !== ws.id)
-          .map(w => workspaceToComponent(w, workspaceId))  # 路径前缀判定父子关系
-getComponent(_, componentId): GET /api/workspaces/{componentId} → workspaceToComponent
-reparseComponents(workspaceId): POST .../rescan → 再 listComponents 填充返回（stats 全 0 占位）
-getTopology(_): GET /api/workspaces/topology → 映射 nodes/edges 到旧 TopologyResponse 形状
+import { getWorkspaceComponents, type Component } from "@/lib/workspaces"
+listComponents(id) = getWorkspaceComponents(id)
 ```
 
 ## 注意事项
-- 过渡层：新代码应直接用 `lib-workspaces` 接口，本模块未来可能移除；类型与 `lib-workspaces` 有重叠。
-- 父子组件判定靠 `root_path` 前缀匹配（`父路径 + "/"`），而非显式 parent_id 字段，依赖路径命名约定。
-- `reparseComponents` 返回的 stats 全为 0 占位（后端 rescan 不返回细粒度统计），真实组件列表靠再次 listComponents 填充。
-- `getTopology` 的 `workspaceId` 参数仅回填响应字段、不参与过滤，拓扑始终是全局的。
-- `Component.status` 可能为 `"path_missing"` 等非 active 值，UI 需兼容。
+- 本文件唯一的 import 是 `@/lib/workspaces`——连 `apiFetch` 都不直接用；这也是它「别名层」定位的直接证据。
+- 旧版（2026-06 卡）描述的「兼容层：root_path 前缀判定父子 + reparse/getTopology 重映射」已全部不存在；按旧卡找逻辑会扑空。
+- 改组件相关接口先看 `@/lib/workspaces`，本文件只是别名层；在此文件加逻辑会破坏「单一真相」约定。
+- 组件是只读派生数据：前端无组件 CRUD；数据刷新依赖 workspace reparse（lib-workspaces 域），不经本模块。
+- 若组件域将来需要 hooks、分页或筛选，应评估让调用方直接 import `@/lib/workspaces`，而非继续扩本文件。
+- `Component` 的字段（tech_stack/build_command 等）以 `@/lib/workspaces` 中的定义为准，本卡不复制。
 
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
+
 <!-- MANUAL_NOTES_END -->

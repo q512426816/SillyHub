@@ -6,7 +6,7 @@ source_commit: ba87eec
 author: qinyi
 created_at: 2026-06-24T01:16:42
 ---
-# frontend
+# 前端控制台（frontend）
 
 ## 定位
 

@@ -1,124 +1,92 @@
 ---
+schema_version: 1
+doc_type: module-card
+module_id: frontend_components
 author: qinyi
-created_at: 2026-06-01T12:00:00
+created_at: 2026-08-18 01:45:00
 ---
 
-# frontend_components
-> 最后更新：2026-06-23
-> 最近变更：ql-20260720-012-f2a8（/ppm/project-members 成员子表按页面样式规范调整：Button antd 化 + Badge→Tag + MemberFormDrawer→Modal）
-> 模块路径：frontend/src/components/**
+# 前端可复用组件层（frontend_components）
 
-## 职责
+## 定位
+SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局外壳（AppShell/TopBar/AntdProviders）、业务域组件（交互会话、变更详情、工作区管理、供应商表单、agent 控制台）、移动端组件族（mobile/）与 shadcn 风格基础件（ui/）。组件自治取数（内部调 @/lib/*），被 frontend_app 页面组装；自身依赖 frontend_lib 与 frontend_stores。
 
-Frontend Components 模块包含所有可复用的 UI 组件，包括业务组件（工作区卡片、扫描对话框、步骤进度条等）和基础 UI 组件（Button、Input、Badge）。
+## 契约摘要
+- 全局骨架：
+  - `app-shell.tsx` — 侧栏按 SECTION_ORDER 渲染分组；菜单隔离（/ppm/* 只渲染 ppm section，其它路径只渲染非 ppm section）；条目经 `visibleMenusBySection(user, section)` 权限过滤；本文件仅管图标映射（MENU_ICON_MAP），菜单条目数据来自 menu-permissions。
+  - `top-bar.tsx` — 顶栏（平台切换 / 菜单 section 隔离与 AppShell 一致）
+  - `antd-providers.tsx` — ConfigProvider（zhCN locale + token + Table 主题，dayjs zh-cn 双保险）
+  - `error-boundary.tsx` / `logout-confirm-dialog.tsx`
+- 会话域（daemon/ + sessions/，两处共享子组件）：
+  - `interactive-session-panel.tsx` — /runtimes 弹窗内交互会话主面板
+  - `runtime-session-dialog.tsx` + `runtime-session-helpers.tsx`（logsToTurns / reply 流式 delta 直接 concat 不加 \n）/ `runtime-card-helpers.tsx`
+  - `turn-timeline.tsx` / `session-input-bar.tsx` — /sessions 总入口复用
+  - `machine-card.tsx` / `runtime-card.tsx` — 机器级与实例级卡片
+  - `remote-folder-picker.tsx` — daemon list_roots/list_dir 懒加载目录树（自治：初始化根 / Tree loadData / 手输跳转校验 / 错误降级红条）
+  - `session-list-layout.tsx` / `session-log-sanitize.ts` / `daemon-required-notice.tsx`
+- sessions/（总入口配套）：
+  - `session-list-panel` — 筛选 + 虚拟滚动 + 紧凑两行条目
+  - `new-session-form` — 新会话四选择器（runtime / profile / 供应商 / 会话名）
+  - `session-config-bar` — 运行中切换档案/供应商（点选即切换）
+  - `ctx-usage-bar` — 上下文用量前端累计
+- 变更域（changes/）：
+  - `detail/` 子目录 — 变更详情展示组件族（文档矩阵 / Gate 面板 / 会话区等）
+  - `change-session-section` / `change-step-badge` — 变更会话区与阶段徽标
+  - `quicklog-drawer` / `quicklog-table` — quicklog 条目查看
+- 工作区域：
+  - 入口件：`workspace-card` / `workspace-scan-dialog` / `workspace-switcher` / `workspace-tabs`
+  - 绑定与成员：`workspace-binding-dialog` / `workspace-binding-guard` / `workspace-member-row` / `workspace-member-add-dialog`
+  - 配置与路径：`workspace-config-card` / `workspace-path-picker` / `workspace-path-fields` / `workspace-daemon-switcher` / `workspace-access-guide` / `workspace-session-section`
+  - workspace/ 目录：`LinkWorkspaceDialog` / `LinkedProjectsSection`（PPM 项目链接）、`shared-daemon-manager` / `shared-daemon-toggle`（共享 daemon 管理与成员视图）
+- 供应商域（llm-providers/）：
+  - `llm-provider-form` — CRUD 表单（agent_kind / auth_field / api_format / 模型角色映射编辑）
+  - `llm-provider-list` — 启停（set/unset-default）与列表
+  - `model-input-with-fetch` — 拉上游 /v1/models 填充模型下拉
+  - `usage-footer` — 余额/配额/用量两态展示（瞬时错误保上次值）
+- agent 域：
+  - `agent-run-panel.tsx` — agent 控制台（日志区无 max-width 撑满主区）
+  - `agent-log-viewer.tsx` + agent-log/（normalize.ts 归一化 / tool-renderers.tsx 工具渲染器 / types.ts 共享类型）
+  - `agent/` — borrowed-solution-files 借用方案文件面板
+  - `mission-console.tsx` / `mission-summary-card.tsx` — 任务执行控制台与摘要
+  - `AgentModelInput` / `AgentProviderSelect` — 模型与供应商选择
+- 交互问答：`ask-user-dialog-card` — codex request_user_input / 可归一化 MCP elicitation 的 question/options 问答（每问下方常驻手动输入框；复杂 schema daemon 侧 fail-closed）。
+- 移动端（mobile/）：`mobile-app-shell` / `mobile-top-bar` / `mobile-tab-bar`（底部导航）、`mobile-card-list`（卡片列表替代表格）、`mobile-filter-drawer` / `mobile-detail-sheet` / `milestone-sheet`（筛选/详情抽屉）、`mobile-batch-bar` / `mobile-action-menu` / `mobile-export-button`（批量/操作/导出）。
+- 基础件（ui/，shadcn 模式）：button / input / badge / card / dialog / dropdown-menu / avatar / empty-state / json-editor / markdown-text / status-badge / confirm-captcha。
+- 其余独立件：
+  - 审批与权限：`permission-approval-card`
+  - 文件中心：`file-upload` / `file-viewer` / `file-image`
+  - 令牌：`mcp-token-create-dialog` / `api-key-create-dialog`
+  - 技能：`custom-skill-edit-dialog` / `skill-content-drawer`
+  - admin-*（用户抽屉 / 组织树 / 角色权限选择器）、ppm-*（资源表格 / 子表 / 状态动作 / 字典选择等）
+  - `stage-team-config` / `team-progress`（阶段团队配置与进度）、charts/（图表）
 
-## 当前设计
-
-### 组件清单
-
-| 文件 | 导出 | 类型 | 说明 |
-|------|------|------|------|
-| `app-shell.tsx` | `AppShell` | Client Component | 应用外壳 — 侧边栏导航 + 主内容区；按 `usePathname()` 过滤 section 实现 ppm 与主平台菜单完全隔离（`/ppm/*` 下仅渲染 ppm section，其它路径仅渲染非 ppm section） |
-| `workspace-card.tsx` | `WorkspaceCard` | Client Component | 工作区卡片 — 展示工作区信息 + 操作按钮 |
-| `workspace-scan-dialog.tsx` | `WorkspaceScanDialog` | Client Component | 扫描对话框 — 输入路径并创建工作区 |
-| `component-detail-drawer.tsx` | `ComponentDetailDrawer` | Client Component | 组件详情抽屉 — 侧滑展示组件信息 |
-| `health-card.tsx` | `HealthCard` | Client Component | 健康检查卡片 — 展示后端健康状态 |
-| `sillyspec-step-progress.tsx` | `SillySpecStepProgress` | Client Component | 步骤进度条 — 展示 SillySpec 工作流进度 |
-| `agent-log-viewer.tsx` | `AgentLogViewer`, `AgentLogRow`, `parseToolCallContent`, `parseScanCheckOutput` | Client Component | Agent 日志查看器 — 深色终端风格，支持 Bash tool 结构化渲染、扫描自检摘要卡片、pending_input 内联回复 |
-| `agent-log/types.ts` | `ToolCallEntry`, `ScanCheckResult`, `AgentLogInputControls`, `ProcessedLog` | Type definitions | Agent 日志共享类型定义 |
-| `agent-log/normalize.ts` | `normalizeLogs`, `parseToolCallContent`, `parseScanCheckOutput`, `isPendingReplied`, `isThinkingContent` | Pure functions | 日志事件归一化（去重 TOOL_USE、合并 TOOL_RESULT、识别 Thinking） |
-| `agent-log/tool-renderers.tsx` | `ToolCallPreview`, `WriteToolPreview`, `AgentToolPreview`, `BashToolPreview`, `SearchToolPreview`, `ReadToolPreview`, `EditToolPreview` | Client Components | 工具调用专属渲染器（Write/Agent/Bash/Grep/Glob/Read/Edit） |
-| `daemon/runtime-session-dialog.tsx` + `daemon/runtime-session-helpers.tsx` | `RuntimeSessionDialog`, `InteractiveSessionChatSection`, `QuickChatSessionSection` | Client Components | /runtimes 会话弹窗；Claude Code 与 Codex 均走 interactive AgentSession（`createSession`/`injectSession`/`reopenSession`），Codex 不再分流到 quick-chat（D-005@v1） |
-| `daemon/remote-folder-picker.tsx` | `RemoteFolderPicker` | Client Component | 远程目录浏览器 — 基于 daemon `list_roots`+`list_dir` 的懒加载目录树（替代旧 browseFolder 系统弹窗，远程 daemon 时 Web 用户看不到原生弹窗）；props `{runtimeId,open,onClose,onPick,title?,confirmText?}`，自治（listRoots 初始化根+Tree loadData 懒加载 listDir+手输跳转校验+错误降级红条）；2026-07-09-remote-folder-picker |
-| `ui/button.tsx` | `Button` | Client Component (forwardRef) | 基础按钮 — 支持变体和尺寸 |
-| `ui/input.tsx` | `Input` | Client Component (forwardRef) | 基础输入框 |
-| `ui/badge.tsx` | `Badge` | Client Component | 徽章标签 — 支持多种变体 |
-| `antd-providers.tsx` | `AntdProviders` | Client Component | antd ConfigProvider 包裹（zhCN locale + token + Table 主题），与 AntdRegistry 配合使用 |
-
-### 组件层级关系
-
+## 关键逻辑
+菜单隔离（app-shell）：
 ```
-AppShell
-  ├── 侧边栏导航（workspace 列表、settings 链接）
-  └── children（页面内容）
-
-WorkspaceCard（被 workspaces 列表页使用）
-WorkspaceScanDialog（被 workspaces 列表页使用）
-ComponentDetailDrawer（被 components 页使用）
-HealthCard（被首页或工作区详情页使用）
-SillySpecStepProgress（被 changes 详情页使用）
-AgentLogViewer（被 agent 控制台页、workspace 详情页共用）
+inPpm = pathname 以 /ppm 开头
+SECTION_ORDER.filter(section => inPpm ? section==="ppm" : section!=="ppm")
+→ ppm 与主平台菜单互不可见
+→ 每组内 visibleMenusBySection(user, section) 按用户权限过滤条目
 ```
-
-## 对外接口
-
-| 组件 | Props | 说明 |
-|------|-------|------|
-| `AppShell` | `{ children: ReactNode }` | 应用壳，包裹 dashboard 内容 |
-| `WorkspaceCard` | `{ workspace, onChanged }` | 工作区卡片 |
-| `WorkspaceScanDialog` | `{ onCreated, onCancel }` | 扫描对话框 |
-| `ComponentDetailDrawer` | Props 待确认 | 组件详情侧滑 |
-| `HealthCard` | 无 props | 健康状态展示 |
-| `SillySpecStepProgress` | Props 包含 steps/current 等 | 工作流进度 |
-| `AgentLogViewer` | `{ title, runId, logs, loading, emptyText, maxHeightClass?, compact?, variant?, isLive?, containerRef?, summary?, actions?, inputControls? }` | Agent 运行日志查看器（panel/embedded 两种布局） |
-| `RuntimeSessionDialog` | `{ runtime, open, onClose, runtimes, initialSessionId? }` | /runtimes runtime 会话弹窗；按 provider 走 interactive 主路径（`InteractiveSessionChatSection`），Codex 不再分流到 `QuickChatSessionSection`（D-005@v1）；`canReopenSession()` 支持 `provider==="codex"`（D-007@v1） |
-| `QuickChatSessionSection` | `{ provider: "codex" }` | 全局能力保留，**不再作为 /runtimes Codex interactive 主路径入口**（D-005@v1）；使用 `quickChat` / `streamQuickChat` / `getQuickChatResult` |
-| `AskUserDialogCard` | `{ ...questions/options payload }` | 零分支复用 Codex driver 归一化后的 payload（`codex_request_user_input` / 可归一化 `mcp_elicitation` 归一化为 question/options，D-008@v1, D-010@v1）；MCP elicitation 复杂 schema 暂不支持（daemon 侧 fail-closed） |
-| `Button` | ButtonProps (variant, size, etc.) | 基础按钮 |
-| `Input` | InputProps | 基础输入框 |
-| `Badge` | BadgeProps (variant) | 徽章 |
-| `AntdProviders` | `{ children: ReactNode }` | antd ConfigProvider 包裹（在 layout.tsx 根部使用） |
-
-## 关键数据流
-
+交互会话渲染（/sessions 页与 /runtimes 弹窗共享范式）：
 ```
-页面组件
-  → 导入业务组件 (WorkspaceCard, WorkspaceScanDialog 等)
-  → 业务组件内部调用 @/lib/* 获取/提交数据
-  → 基础 UI 组件 (Button, Input, Badge) 由业务组件组合使用
+历史 turn = getAgentSessionLogs → logsToTurns（SSE attach 前预取防丢事件）
+实时 turn = streamSession SSE → TurnTimeline 渲染（reply 片段直接 concat）
+发送 = injectSession；CtxUsageBar 按实时 turn input_tokens 前端求和
 ```
-
-## 设计决策
-
-| 决策 | 原因 |
-|------|------|
-| UI 组件放在 `ui/` 子目录 | 与 shadcn/ui 约定一致，方便扩展 |
-| Button/Input 使用 forwardRef | 允许父组件直接操作 DOM |
-| 所有业务组件标记 "use client" | 使用 hooks 和事件处理 |
-| 组件粒度按功能拆分 | 每个文件一个组件，职责清晰 |
-
-## 依赖关系
-
-- **内部依赖**：`@/lib/*`（API 调用）, `@/stores/session`（部分组件需要认证信息）
-- **外部依赖**：React 18, Tailwind CSS（样式）, Lucide React（图标，推测）, clsx + tailwind-merge（通过 `@/lib/utils`）
 
 ## 注意事项
+- AppShell / TopBar / antd-providers 是全局组件，改动影响所有 dashboard 页面；菜单条目缺失是 menu-permissions 数据问题，app-shell 只管图标映射。
+- interactive-session-panel 与 sessions 页共享 TurnTimeline / SessionInputBar / 事件处理语义：改会话渲染需两处回归（/runtimes 弹窗零回归是 sessions-portal 的硬约束）。
+- reply 流式 delta 拼接不加 \n（delta 内部已保留换行），加了会破坏 markdown 连续渲染。
+- ui/ 基础件遵循 shadcn 约定（CLI 添加为主，不手改生成物）；业务组件一律 "use client"。
+- agent-log 归一化（去重 TOOL_USE / 合并 TOOL_RESULT / 识别 thinking）是纯函数，与渲染器分离便于单测；stdout [TOOL_USE]/[TOOL_RESULT] 文本事件也走同一解析。
+- remote-folder-picker 是远程目录选择唯一入口（替代旧 browseFolder 系统弹窗——Web 用户看不到 daemon 宿主机原生弹窗）。
+- 样式遵循 FRONTEND_PAGE_STYLE.md：按钮 antd 化、Badge→Tag、Drawer→Modal 等规范已在 ppm 系落地，新组件照此。
+- 组件自治取数，但跨页/跨组件共享状态一律走 frontend_stores 或 react-query，不引入组件级全局变量。
 
-- UI 组件 (`ui/*`) 遵循 shadcn/ui 模式，应通过 CLI 添加而非手动编辑
-- `AppShell` 是全局组件，修改会影响所有 dashboard 页面
-- 组件数量较少（9 个），随着功能增长需及时拆分
+## 人工备注
 
-## 变更索引
+<!-- MANUAL_NOTES_START -->
 
-| 日期 | 变更 | 摘要 |
-|------|------|------|
-| 2026-06-09 | ql-20260609-005-d2f7 | 提取共享 AgentLogViewer 组件，Agent 控制台和 Bootstrap 页面共用 |
-| 2026-06-09 | ql-20260609-006-e3a1 | AgentLogViewer 内置自动滚动到底部 |
-| 2026-06-09 | ql-20260609-013-a3f7 | 日志事件归一化 + 6 种工具专属渲染器（agent-log 子目录拆分） |
-| 2026-06-09 | ql-20260609-014-c3d8 | stdout [TOOL_USE] 文本事件解析为工具卡片 |
-| 2026-06-09 | ql-20260609-015-d4e9 | stdout [TOOL_RESULT] 归一化 + ToolResultCard + WorkflowSpecResultCard |
-| 2026-06-17 | ql-20260617-003-3757 | 新增 Pagination 通用分页组件（上一页/下一页 + 共X条·第N/M页），用户/角色管理共用 |
-| 2026-06-17 | ql-20260617-004-02d5 | 引入 antd 6.4，新增 AntdProviders（ConfigProvider + zhCN locale + Table token），删除 ui/pagination.tsx 由 antd Table 内置分页替代 |
-| 2026-06-24 | ql-20260624-001-a3b7 | ppm-resource-table.tsx:199 局部 `const DEFAULT_PAGE_SIZE = 10` → `= 20`(修复 projects/customers/project-stakeholders 三页实际查 10 条的根因:该常量与 shared.tsx 的 DEFAULT_PAGE_SIZE=20 重名但不同源,PpmResourceTable useState 用的是自己局部的 10)。三页 + 所有 PpmResourceTable 消费方默认变 20。ql-026 核实结论"三页已 20"系误判(未发现局部常量) |
-| 2026-06-23 | ql-20260623-025-e6f9 | ppm-project-members-table.tsx pageSize useState(10)→20(对齐 ppm 所有列表页默认 20 条);work-hour-statistics 聚合+明细表 pageSize 50→20 见 frontend_app |
-| 2026-06-23 | ql-20260623-019-3a8c | PpmSubTable 移除 expandable.columnTitle='展开'（默认 expand 列无表头文字，与其他列表头高度一致）；ppm-status-actions.tsx PlanDetailActions + ProblemActions 在 buttons.length===0 时兜底从 `<span>—</span>` 改为 null，避免 done/archived 状态明细行操作列出现破折号（详情按钮仍在，只去掉多余 —） |
-| 2026-06-21 | ql-20260621-003-menu-isolation | AppShell 侧边栏按路径隔离菜单：`/ppm/*` 仅渲染 ppm section，其它路径仅渲染非 ppm section（overview/management/admin/system），ppm 与主平台菜单互不可见 |
-| 2026-06-21 | ql-20260621-013-b2e5 | AskUserDialogCard 改常驻手动输入框：每问选项下方常驻输入框（填写即以此作答，覆盖选项），移除"选 Other 才出框"的两步操作 |
-| 2026-06-21 | ql-20260621-004-c4a1 | AntdProviders 全局补 dayjs locale zh-cn：antd v5 DatePicker 日历表头星期/月份/边界取自 dayjs 全局 locale，仅 ConfigProvider locale={zhCN} 不够（只管 antd 自有文案），需 dayjs.locale('zh-cn') 双保险，否则日历显示英文星期 |
-| 2026-06-23 | codex-runtime-conversation-fix | /runtimes Codex 会话从 Claude interactive SessionManager 分流到 quick-chat SSE，避免触发 daemon UnsupportedProviderError；Claude Code 会话保持 interactive 路径（**临时降级，已被 2026-06-23-codex-interactive-session 覆盖**） |
-| 2026-06-23 | 2026-06-23-codex-interactive-session | /runtimes Codex 改回 interactive panel（`InteractiveSessionChatSection`），`QuickChatSessionSection` 降级为非 /runtimes Codex 主路径（全局能力保留，D-005@v1）；`canReopenSession` 支持 Codex（D-007@v1）；`AskUserDialogCard` 支持 Codex `request_user_input` / 可归一化 MCP elicitation 归一化 payload（D-008@v1/D-010@v1） |
-| 2026-07-20 | ql-20260720-005-e91c | StatusBadge 内部渲染由自写 tailwind 圆角药丸改 antd Badge(status+text),删 KIND_STYLES/SIZE_STYLES/DOT_SIZE_STYLES 色表;StatusKind→antd status 映射;API 不变,17 处调用点自动生效,外观从「圆角药丸+浅背景」变「小圆点+文字」 |
-| 2026-07-20 | ql-20260720-006-3a7d | /ppm/project-members 按页面样式规范调整：group-table.tsx Button shadcn→antd(重新加载/添加项目成员/搜索/重置/展开 5 处,去 size=sm 用默认 middle)+ 搜索区 6 Field 外层 flex w-full flex-col gap-1 + label→span text-xs leading-4 text-muted-foreground;page.tsx 已对齐(PageContainer/PageHeader)。暂不动 MemberFormDrawer→Modal(跨文件) |
-| 2026-07-20 | ql-20260720-012-f2a8 | /ppm/project-members 成员子表(展开后)按页面样式规范调整：ppm-project-members-table.tsx Button shadcn→antd(操作列编辑/删除 type=link size=small、新增 primary、重新加载 default、Modal footer)+ 承担角色 shadcn Badge→antd Tag(默认灰)+ MemberFormDrawer→MemberFormModal(Drawer→Modal,onClose→onCancel,footer 保存加 loading)+ 表单 label text-[11px]→span text-xs leading-4;group-table.tsx 调用点同步改名 |
-| 2026-07-30 | ql-20260730-004-9f0a | 会话回复格式修复：interactive-session-panel.tsx onLog reply 分支(:323) + runtime-session-helpers.tsx logsToTurns(:237) 的 reply 拼接由 \n 分隔改直接 concat——reply 流式 delta 是同一段流式输出的连续片段(换行保留在各 delta 内部)，去掉 \n 让 agent 原始 markdown 连续完整渲染，修复标题/列表与正文粘一行没格式重点(实测会话 7fb9227d 确诊)。不碰 thinking/tool/processItems 与 daemon |
-| 2026-08-11 | 2026-08-11-agent-profile-bind-llm-provider | agent-profile-form 第一层 label 改「智能体引擎」+ 第二层「供应商配置」联动下拉（按 agent_kind 过滤、codex 禁用提示、编辑态未知 id 占位不转 null）；agent-profile-card / agent-profile-preview 接入绑定供应商名展示（id→name 映射 + 非本人「（非本人供应商，将回退默认）」）；card.test 补绑定展示 it |
+<!-- MANUAL_NOTES_END -->

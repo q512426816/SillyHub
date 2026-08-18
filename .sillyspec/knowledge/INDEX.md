@@ -8,6 +8,7 @@
 <!-- 示例：跨域|CORS|preflight → cors.md -->
 
 ## Conventions
+- 模块卡片|标题|title|H1|中文|平台解析|文档列表 → [模块卡片 H1 用中文名（module-id）](conventions.md#模块卡片-h1-用中文名module-id)
 
 - sillyspec|文档驱动|流程|验收 → [SillySpec 文档驱动开发流程](conventions.md#sillyspec-文档驱动开发流程)
 - 构建|测试|lint|命令|pytest|ruff|pnpm|uv → [子项目构建/测试/lint 命令](conventions.md#子项目构建--测试--lint-命令)
@@ -17,6 +18,8 @@
 - backend|model.py|ruff|line-length|esm|.js → [backend Python 工程约定](conventions.md#backend-python-工程约定modelpy-单数--ruff-配置)
 - daemon|esm|import|.js|扩展名|node → [daemon ESM import 必须 .js](conventions.md#daemon-esm-import-必须带-js-扩展名)
 - basemodel|apperror|异常命名|分层|schema.py|service|请求内实例化|sqlmodel基类 → [backend 模块分层与基类/异常约定](conventions.md#backend-模块分层与基类异常约定routerserviceschema--basemodel--apperror)
+- sse|fetch-sse|eventsource|流式|ReadableStream|authorization → [前端 SSE 消费统一 fetch-sse：token 走 Authorization header，禁用 EventSource](conventions.md#前端-sse-消费统一-fetch-ssetoken-走-authorization-header禁用-eventsource)
+- tailwind|md:|断点|视口|容器断点|侧栏|grid-cols → [Tailwind md: 是视口断点非容器断点：侧栏内嵌组件禁用响应式前缀](conventions.md#tailwind-md-是视口断点非容器断点侧栏内嵌组件禁用响应式前缀)
 
 ## Patterns
 
@@ -26,6 +29,10 @@
 - agentrun|lease|编排|sessionmanager|执行链路 → [AgentRun + DaemonTaskLease 编排流程](patterns.md#agentrun--daemontasklease-编排流程)
 - daemon|adapters|协议|stream-json|json-rpc|ndjson|多provider → [daemon adapters/ 多协议抽象](patterns.md#daemon-adapters-多协议抽象stream-json--json-rpc--jsonl--ndjson--text)
 - storage|minio|对象存储|存储后端|文件中心|aiobotocore|s3 → [平台文件中心：对象存储抽象](patterns.md#平台文件中心对象存储抽象storagebackend--factory--miniobackend)
+- 鉴权|token|shk_live_|shpsync_|shmcp_|mcp_token|写通道|403 → [四轨鉴权 token 分轨：JWT / shk_live_ / shpsync_ / shmcp_](patterns.md#四轨鉴权-token-分轨jwt--shk_live_--shpsync_--shmcp_)
+- base_ts|base_version|乐观锁|字典序|冲突|进度上行 → [platform_sync 两套乐观锁语义：base_ts 字典序与 base_version 整数版本](patterns.md#platform_sync-两套乐观锁语义base_ts-字典序与-base_version-整数版本)
+- spec|增量同步|manifest|fileop|spec-sync|spec-manifest|软删 → [Spec 文件增量同步协议：manifest 比对 + FileOp 上行 + apply_ops 单写者](patterns.md#spec-文件增量同步协议manifest-比对--fileop-上行--apply_ops-单写者)
+- change_write|代写|占坑|claim|daemon_change_writes|回灌|sync-manual → [Daemon 代写队列：占坑 commit + lease-polling claim + GC 回灌](patterns.md#daemon-代写队列占坑-commit--lease-polling-claim--gc-回灌)
 
 ## Known Issues
 
@@ -42,6 +49,13 @@
 - audit|audit_hooks|审计|auditlog|测试|生产 → [audit_hooks 只在测试 lifespan 注册](known-issues.md#-audit_hooks-只在测试-lifespan-注册生产审计要业务代码显式写-auditlog)
 - docker|postgres|pg|端口|映射|alembic|连不上 → [全 Docker 部署本地 PG 容器端口未映射 host](known-issues.md#-全-docker-部署本地-pg-容器端口未映射-hostrun-alembicpytest-连不上)
 - export-excel|路由顺序|422|uuid|路径参数|item_id|fastapi|ppm|导出|字面量 → [ppm export-excel 路由必须前置 item_id](known-issues.md#-ppm-导出-export-excel-路由必须前置于-item_id-路由)
+- alembic|migration|多head|revision|crash|并行 → [alembic 并行变更撞 revision 多 head：启动 crash-loop](known-issues.md#-alembic-并行变更撞-revision-多-head启动-crash-loop)
+- gen:types|api-types|漂移|e2e|playwright|puppeteer|闸门 → [前端测试闸门缺口：gen:types:check 未进 CI，E2E 零落地](known-issues.md#-前端测试闸门缺口gentypescheck-未进-cie2e-零落地)
+- mcp|fastmcp|锁版|1.29|mcp_gateway|升级 → [mcp Python SDK 锁死 v1 线：v2 移除 FastMCP 与平台 mount 冲突](known-issues.md#-mcp-python-sdk-锁死-v1-线v2-移除-fastmcp-与平台-mount-冲突)
+- bind mount|stat|性能|reparse|scandir|幽灵200|windows → [Windows Docker bind mount stat 性能断崖：spec_root fs 重循环必炸](known-issues.md#-windows-docker-bind-mount-stat-性能断崖spec_root-fs-重循环必炸)
+- worktree|gc|expires_at|租约|回收|泄漏 → [worktree 过期租约无自动 GC：expires_at 与索引闲置](known-issues.md#-worktree-过期租约无自动-gcexpires_at-与索引闲置)
+- spec_guardian|tool_gateway|死代码|run_guard|守护门 → [spec_guardian 死代码与 tool_gateway 注释失配：守护门从未在生产生效](known-issues.md#-spec_guardian-死代码与-tool_gateway-注释失配守护门从未在生产生效)
+- god 文件|daemon.ts|session-manager|task-runner|大文件 → [daemon 三个 3000+ 行 god 文件（daemon.ts 4047 / session-manager.ts 3897 / task-runner.ts 3156）](known-issues.md#-daemon-三个-3000-行-god-文件daemonts-4047--session-managerts-3897--task-runnerts-3156)
 
 ## SillySpec Gotchas
 
@@ -54,6 +68,7 @@
 - sillyspec|plan|execute|contract|task 编号|wave|校验 → [plan→execute contract task 编号递增](sillyspec-gotchas.md#planexecute-contracttask-编号须严格按拓扑-wave-递增)
 - sillyspec|execute|exec-run|review.json|残留|复用 → [exec-run ID 复用 review.json 残留](sillyspec-gotchas.md#execute-的-exec-run-id-可能复用旧目录reviewjson-残留需先-read-再覆盖)
 - sillyspec|plan|postcheck|多变更|resolvechangedir|空 progress → [plan postcheck 多变更校验错](sillyspec-gotchas.md#plan-postcheck-多变更环境校验错变更progressjson-空--sort-reverse)
+- sillyspec|reopen|from-step|done|回填|completed|重开 → [reopen --from-step N 后 --done 会把后续未执行步骤回填 completed](sillyspec-gotchas.md#reopen---from-step-n-后---done-会把后续未执行步骤回填-completed)
 
 ## Testing Gotchas
 

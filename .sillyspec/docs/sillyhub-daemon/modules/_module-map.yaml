@@ -1,31 +1,31 @@
-schema_version: 1
+# author: qinyi
+# created_at: 2026-08-18 01:25:00
+schema_version: 2
 project: sillyhub-daemon
-source_commit: 6e78b29a
-generated_at: 2026-07-27 01:18:13
+source_commit: 744e3de4
+generated_at: 2026-08-18 01:25:00
 generator: sillyspec-scan
 
-# 增量更新（2026-07-27, commit 6e78b29a）：补登 15 个此前漏登源码文件——
-# host-fs-handler / resilience / policy / permission-rules / tool-kind /
-# roots-rpc / mcp-server / mcp-config / skill-manager / credential-injector /
-# runtime-lock / build-id / preflight / api-types / adapter-pi-json；
-# interactive 模块补 driver.ts + codex-app-server-driver.ts（CodexAppServerDriver）。
-#
-# 全量重扫（2026-06-24）：修正旧 map 误写的 backends/ → 实际目录 adapters/；
-# 新增 7 个此前漏登的源码文件：daemon-version / spec-sync / cursor-version /
-# file-rpc / cmd-shim / terminal-launcher / terminal-observer。
-# agent-detector 实测 12 种 provider：claude/codex/copilot/opencode/openclaw/
-# hermes/gemini/pi/cursor/kimi/kiro/antigravity。
+# 全量重扫（2026-08-18, 基线 6e78b29a/43 模块 → 本版 46 模块）：
+# - 新增 3 模块：claude-settings / local-yaml-writer / model-error；
+# - 剔除 0（6e78b29a 基线模块路径全部仍存在，module-id 原样保留）；
+# - depends_on/used_by 按 src 实测 import 链重写（含子目录 ../ 引用，
+#   修正旧版漏计：如 stream-json→permission-rules、session-manager→mcp-config/policy）；
+# - spec-sync 扩容为「增量同步 + init lease + 版本缓存」三层；
+# - mcp-server 5 工具名实测核实；agent-detector 实测 12 provider。
+# 注：744e3de4 与写盘时 HEAD 9b7762d3 之间 sillyhub-daemon/src 零差异
+# （其后提交均为 docs/chore），src 事实对两个 commit 等价。
 
 modules:
   cli:
     status: active
     doc: modules/cli.md
     paths: ["sillyhub-daemon/src/cli.ts"]
-    tags: [cli, entrypoint]
+    tags: [cli, entrypoint, commander, 命令行, 入口]
     aliases: [__main__]
-    entrypoints: [createProgram, startAction, stopAction, statusAction, logsAction]
-    main_symbols: [getPidFile, getLogFile, readPid, writePid, removePid, isProcessAlive, loadConfigFn, saveConfigFn, resolveRunningDaemonConfig, createProgram, startAction, stopAction, statusAction, logsAction]
-    depends_on: [config, daemon-version]
+    entrypoints: ["start", "stop", "status", "logs"]
+    main_symbols: [createProgram, startAction, stopAction, statusAction, logsAction, getPidFile, getLogFile, resolveRunningDaemonConfig]
+    depends_on: [config, client, credential, credential-injector, workspace, agent-detector, task-runner, daemon, interactive, daemon-version, mcp-config, policy, resilience, runtime-lock]
     used_by: []
     needs_review: false
     concerns: []
@@ -35,12 +35,12 @@ modules:
     status: active
     doc: modules/config.md
     paths: ["sillyhub-daemon/src/config.ts"]
-    tags: [config, infra]
+    tags: [config, infra, 配置]
     aliases: []
-    entrypoints: []
-    main_symbols: [DaemonConfig, DEFAULT_CONFIG, DEFAULT_CONFIG_DIR, DEFAULT_CONFIG_PATH, loadConfig]
+    entrypoints: [loadConfig]
+    main_symbols: [DaemonConfig, DEFAULT_CONFIG, DEFAULT_CONFIG_PATH, loadConfig, saveConfig, normalizeAllowedRoots, configPathForServer, serverHash]
     depends_on: []
-    used_by: [cli, daemon, terminal-observer]
+    used_by: [cli, daemon, task-runner, spawn-env, interactive, policy, terminal-observer, preflight, claude-settings]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -49,54 +49,61 @@ modules:
     status: active
     doc: modules/protocol.md
     paths: ["sillyhub-daemon/src/protocol.ts"]
-    tags: [protocol, constants]
+    tags: [protocol, constants, 消息协议, 常量]
     aliases: []
-    entrypoints: []
-    main_symbols: [MSG, MsgType, LEASE_STATE, LeaseState, WS_PATH, REST_PREFIX]
-    depends_on: []
-    used_by: [daemon, ws-client]
+    entrypoints:
+      - "MsgType×19: TASK_AVAILABLE/HEARTBEAT/REGISTER/HEARTBEAT_ACK/LEASE_CLAIM/LEASE_START/LEASE_COMPLETE/LEASE_MESSAGES/RPC/RPC_RESULT/SESSION_INJECT/SESSION_INTERRUPT/SESSION_END/SESSION_RESUME/PERMISSION_REQUEST/PERMISSION_RESPONSE/SELF_UPDATE/LEASE_CANCEL/PROVIDER_CONFIG_CHANGED"
+      - "LeaseState: PENDING/RUNNING/COMPLETED/FAILED/CANCELLED"
+      - "WS_PATH=/api/daemon/ws"
+      - "REST_PREFIX=/api/daemon"
+    main_symbols: [MSG, MsgType, LEASE_STATE, LeaseState, WS_PATH, REST_PREFIX, SessionControlPayload, PermissionRequestPayload]
+    depends_on: [types]
+    used_by: [types, client, daemon, ws-client, interactive]
     needs_review: false
     concerns: []
     review_reasons: []
+    notes: "与 types.ts 互相 import（protocol↔types 循环引用，实测存在）"
 
   client:
     status: active
     doc: modules/client.md
     paths: ["sillyhub-daemon/src/hub-client.ts"]
-    tags: [http, api-client]
+    tags: [http, api-client, 平台接口, 同步]
     aliases: [hub-client]
     entrypoints: []
-    main_symbols: [HubClient, HubHttpError, HubClientAuth, RegisterBody, ClaimLeaseBody, StartLeaseBody, LeaseHeartbeatBody, SubmitMessagesBody, CompleteLeaseBody, HeartbeatBody]
-    depends_on: []
-    used_by: [cli, daemon, task-runner, spec-sync, interactive]
+    main_symbols: [HubClient, HubHttpError, HubClientAuth, SpecIncrementalSyncResult, fetchMcpWhitelist, RegisterBody, SubmitMessagesBody, CompleteLeaseBody]
+    depends_on: [protocol, types, daemon-version, build-id, daemon, model-error]
+    used_by: [cli, daemon, spec-sync, mcp-server, mcp-config, skill-manager, preflight, resilience]
     needs_review: false
     concerns: []
     review_reasons: []
+    notes: "SpecIncrementalSyncResult 为 spec 增量同步（2026-08-17 spec-file-incremental-sync）新增面；daemon.js 为 type-only import"
 
   credential:
     status: active
     doc: modules/credential.md
     paths: ["sillyhub-daemon/src/credential.ts"]
-    tags: [security, credential]
+    tags: [security, credential, 凭据]
     aliases: [credential-manager]
     entrypoints: []
     main_symbols: [CredentialManager, DEFAULT_CREDENTIALS_PATH]
     depends_on: []
-    used_by: [cli, spawn-env, task-runner, interactive]
+    used_by: [cli]
     needs_review: false
     concerns: []
     review_reasons: []
+    notes: "仅 cli 直接 import；spawn-env/task-runner 经 RunnerCredentialManager/SpawnCredentialManager 接口注入，不再直接依赖"
 
   spawn-env:
     status: active
     doc: modules/spawn-env.md
     paths: ["sillyhub-daemon/src/spawn-env.ts"]
-    tags: [security, env, spawn, credential]
+    tags: [security, env, spawn, credential, 环境变量, 凭据注入]
     aliases: [spawn-env-builder]
     entrypoints: []
-    main_symbols: [buildSpawnEnv, redactEnv, ANTHROPIC_API_KEY_FIELD, CLAUDE_OAUTH_TOKEN_FIELD, SpawnCredentialManager, SpawnEnvCtx, BuildSpawnEnvOpts]
-    depends_on: [credential]
-    used_by: [task-runner]
+    main_symbols: [buildSpawnEnv, redactEnv, redactProviderConfig, SpawnCredentialManager, SpawnEnvCtx, ANTHROPIC_API_KEY_FIELD, CLAUDE_OAUTH_TOKEN_FIELD]
+    depends_on: [config, credential-injector, types]
+    used_by: [daemon, task-runner, interactive]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -105,12 +112,12 @@ modules:
     status: active
     doc: modules/workspace.md
     paths: ["sillyhub-daemon/src/workspace.ts"]
-    tags: [workspace, git]
+    tags: [workspace, git, 工作区]
     aliases: [workspace-manager]
     entrypoints: []
-    main_symbols: [WorkspaceManager, GitError, WorkspaceResult, parseShortstat]
+    main_symbols: [WorkspaceManager, GitError, WorkspaceResult, parseShortstat, MAX_PATCH_CHARS]
     depends_on: []
-    used_by: [cli, task-runner]
+    used_by: [cli, daemon]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -119,12 +126,12 @@ modules:
     status: active
     doc: modules/version.md
     paths: ["sillyhub-daemon/src/version.ts"]
-    tags: [version, utility]
+    tags: [version, utility, 版本]
     aliases: []
     entrypoints: []
-    main_symbols: [SemVerTuple, MIN_VERSIONS, parseSemver, formatSemver, checkMinVersion]
+    main_symbols: [parseSemver, formatSemver, checkMinVersion, MIN_VERSIONS, SemVerTuple]
     depends_on: []
-    used_by: [agent-detector]
+    used_by: [agent-detector, preflight]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -133,12 +140,12 @@ modules:
     status: active
     doc: modules/agent-detector.md
     paths: ["sillyhub-daemon/src/agent-detector.ts"]
-    tags: [detection, agent]
+    tags: [detection, agent, 探测]
     aliases: [detector]
     entrypoints: []
-    main_symbols: [AgentProtocol, AgentProviderSpec, DetectedAgent, PROVIDER_SPECS, ProviderName, AgentDetector]
+    main_symbols: [AgentDetector, PROVIDER_SPECS, ProviderName, DetectedAgent, AgentProviderSpec, AgentProtocol, normalizeProvider]
     depends_on: [version, cursor-version]
-    used_by: [daemon, task-runner]
+    used_by: [cli, daemon]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -148,41 +155,42 @@ modules:
     status: active
     doc: modules/task-runner.md
     paths: ["sillyhub-daemon/src/task-runner.ts"]
-    tags: [task, execution]
+    tags: [task, execution, 租约执行, 任务]
     aliases: [runner]
     entrypoints: []
-    main_symbols: [TaskStatus, LeaseCtx, RunnerHubClient, RunnerWorkspaceManager, RunnerCredentialManager, TaskRunner, TaskRunnerResult, resolveTimeout, resolveMaxRetries, isSpawnLevelFailure, renderAgentEvent, renderTaskBoundary, echoTaskBoundary]
-    depends_on: [adapters, client, credential, spawn-env, workspace, spec-sync, cmd-shim, terminal-observer]
+    main_symbols: [TaskRunner, TaskRunnerResult, TaskStatus, SILLYSPEC_VALID_TOOLS, mapDetectedToSillyspecTools, mergeAdapterUsage, validateChangeWritePath, renderAgentEvent]
+    depends_on: [adapters, adapter-json-rpc, spawn-env, claude-settings, cmd-shim, skill-manager, config, resilience, policy, spec-sync, terminal-observer, tool-kind, types]
     used_by: [cli, daemon]
     needs_review: false
     concerns: []
     review_reasons: []
+    notes: "client/credential/workspace 改经 RunnerHubClient/RunnerCredentialManager/RunnerWorkspaceManager 接口注入，不再直接 import（与 6e78b29a 基线差异）"
 
   daemon:
     status: active
     doc: modules/daemon.md
     paths: ["sillyhub-daemon/src/daemon.ts"]
-    tags: [daemon, websocket, core]
+    tags: [daemon, websocket, core, 守护进程, 租约轮询]
     aliases: []
     entrypoints: []
-    main_symbols: [Daemon, DaemonOptions, RecoveryCoordinator, InteractiveCredentialManager, SessionRecoverStatus, translateSpecRoot]
-    depends_on: [agent-detector, client, config, protocol, ws-client, spec-sync, file-rpc, adapters, interactive]
-    used_by: [cli]
+    main_symbols: [Daemon, DaemonOptions, RecoveryCoordinator, SessionRecoverStatus, translateSpecRoot, InteractiveCredentialManager, RuntimeLockLike, LEASE_POLL_SKIP_MS]
+    depends_on: [config, protocol, types, agent-detector, client, model-error, ws-client, file-rpc, roots-rpc, host-fs-handler, spawn-env, claude-settings, preflight, skill-manager, build-id, resilience, policy, workspace, interactive, spec-sync, task-runner]
+    used_by: [cli, client]
     needs_review: false
     concerns: []
     review_reasons: []
 
-  # ---- adapters（协议适配层；旧 map 误写 backends/，实际目录为 adapters/）----
+  # ---- adapters（协议适配层；目录 adapters/）----
   adapters:
     status: active
     doc: modules/adapters.md
     paths: ["sillyhub-daemon/src/adapters/index.ts", "sillyhub-daemon/src/adapters/protocol-adapter.ts"]
-    tags: [backend, abstraction, factory, adapter]
+    tags: [adapter, factory, 协议适配]
     aliases: [backends, agent-backend, protocol-adapter]
     entrypoints: [getBackend]
-    main_symbols: [ProtocolAdapter, AgentEvent, AgentEventType, getBackend, PROTOCOL_PROVIDERS]
+    main_symbols: [getBackend, getProtocol, ProtocolAdapter, BackendExecResult, ProtocolType, PROTOCOL_PROVIDERS]
     depends_on: [types]
-    used_by: [task-runner, daemon, adapter-stream-json, adapter-json-rpc, adapter-jsonl, adapter-ndjson, adapter-text]
+    used_by: [task-runner, interactive, adapter-stream-json, adapter-json-rpc, adapter-jsonl, adapter-ndjson, adapter-text, adapter-pi-json]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -191,40 +199,42 @@ modules:
     status: active
     doc: modules/adapter-stream-json.md
     paths: ["sillyhub-daemon/src/adapters/stream-json.ts"]
-    tags: [backend, protocol, stream-json, adapter]
+    tags: [adapter, protocol, stream-json, 协议适配]
     aliases: [backend-stream-json, stream-json-adapter]
     entrypoints: []
-    main_symbols: [StreamJsonAdapter]
-    depends_on: [adapters]
-    used_by: []
+    main_symbols: [StreamJsonAdapter, StreamJsonProvider]
+    depends_on: [adapters, types, permission-rules, model-error]
+    used_by: [adapters]
     needs_review: false
     concerns: []
     review_reasons: []
+    notes: "provider: claude/gemini/cursor；接 model-error/classifier 做失败归类"
 
   adapter-json-rpc:
     status: active
     doc: modules/adapter-json-rpc.md
     paths: ["sillyhub-daemon/src/adapters/json-rpc.ts"]
-    tags: [backend, protocol, json-rpc, adapter]
+    tags: [adapter, protocol, json-rpc, 协议适配]
     aliases: [backend-json-rpc, json-rpc-adapter]
     entrypoints: []
-    main_symbols: [JsonRpcAdapter]
-    depends_on: [adapters, daemon-version]
-    used_by: []
+    main_symbols: [JsonRpcAdapter, JsonRpcProvider]
+    depends_on: [adapters, types, daemon-version, policy]
+    used_by: [adapters, task-runner, interactive]
     needs_review: false
     concerns: []
     review_reasons: []
+    notes: "provider: codex/hermes/kimi/kiro"
 
   adapter-jsonl:
     status: active
     doc: modules/adapter-jsonl.md
     paths: ["sillyhub-daemon/src/adapters/jsonl.ts"]
-    tags: [backend, protocol, jsonl, adapter]
+    tags: [adapter, protocol, jsonl, 协议适配]
     aliases: [backend-jsonl, jsonl-adapter]
     entrypoints: []
     main_symbols: [JsonlAdapter]
-    depends_on: [adapters]
-    used_by: []
+    depends_on: [adapters, types]
+    used_by: [adapters]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -233,26 +243,41 @@ modules:
     status: active
     doc: modules/adapter-ndjson.md
     paths: ["sillyhub-daemon/src/adapters/ndjson.ts"]
-    tags: [backend, protocol, ndjson, adapter]
+    tags: [adapter, protocol, ndjson, 协议适配]
     aliases: [backend-ndjson, ndjson-adapter]
     entrypoints: []
-    main_symbols: [NdjsonAdapter]
-    depends_on: [adapters]
-    used_by: []
+    main_symbols: [NdjsonAdapter, NdjsonProvider, NdjsonUsage]
+    depends_on: [adapters, types]
+    used_by: [adapters]
     needs_review: false
     concerns: []
     review_reasons: []
+    notes: "provider: opencode/openclaw"
 
   adapter-text:
     status: active
     doc: modules/adapter-text.md
     paths: ["sillyhub-daemon/src/adapters/text.ts"]
-    tags: [backend, protocol, text, adapter]
+    tags: [adapter, protocol, text, 协议适配]
     aliases: [backend-text, text-adapter]
     entrypoints: []
     main_symbols: [TextAdapter]
-    depends_on: [adapters]
-    used_by: []
+    depends_on: [adapters, types]
+    used_by: [adapters]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  adapter-pi-json:
+    status: active
+    doc: modules/adapter-pi-json.md
+    paths: ["sillyhub-daemon/src/adapters/pi-json.ts"]
+    tags: [adapter, protocol, pi, 协议适配]
+    aliases: [backend-pi-json, pi-json-adapter]
+    entrypoints: []
+    main_symbols: [PiJsonAdapter, PiJsonProvider, PiJsonUsage]
+    depends_on: [adapters, types]
+    used_by: [adapters]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -261,7 +286,7 @@ modules:
     status: active
     doc: modules/index.md
     paths: ["sillyhub-daemon/src/index.ts"]
-    tags: [entrypoint, re-export]
+    tags: [entrypoint, placeholder, 占位]
     aliases: []
     entrypoints: []
     main_symbols: []
@@ -270,17 +295,18 @@ modules:
     needs_review: false
     concerns: []
     review_reasons: []
+    notes: "占位入口，仅 export {} 防 TS18003；无聚合导出"
 
   types:
     status: active
     doc: modules/types.md
     paths: ["sillyhub-daemon/src/types.ts"]
-    tags: [types, ir, core]
+    tags: [types, ir, core, 类型]
     aliases: []
     entrypoints: []
-    main_symbols: [AgentEvent, AgentEventType, TaskResult, BackendTaskResult, TaskState, DaemonMessage, LeasePayload]
-    depends_on: []
-    used_by: [adapters, task-runner, daemon, client]
+    main_symbols: [DaemonMessage, AgentEvent, AgentEventType, TaskResult, BackendTaskResult, TaskState, LeaseCtx, ProviderConfig]
+    depends_on: [protocol]
+    used_by: [protocol, client, ws-client, daemon, task-runner, spawn-env, credential-injector, claude-settings, adapters, interactive]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -289,12 +315,12 @@ modules:
     status: active
     doc: modules/ws-client.md
     paths: ["sillyhub-daemon/src/ws-client.ts"]
-    tags: [websocket, transport, core]
+    tags: [websocket, transport, core, 连接, 心跳]
     aliases: []
-    entrypoints: []
-    main_symbols: [WsClient, WsState, WsClientCallbacks, WsClientOptions, RpcError, RECONNECT_INTERVAL_MS, CONNECT_TIMEOUT_MS, CLOSE_TIMEOUT_MS]
-    depends_on: [protocol]
-    used_by: [daemon, file-rpc, interactive]
+    entrypoints: [WsClient, "承载 MsgType 全集（19 种，定义见 protocol.entrypoints）"]
+    main_symbols: [WsClient, WsState, RpcError, RpcHandler, WsClientCallbacks, WsClientOptions, WS_PING_INTERVAL_MS, WS_PONG_TIMEOUT_MS]
+    depends_on: [protocol, types]
+    used_by: [daemon, file-rpc, host-fs-handler]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -311,44 +337,45 @@ modules:
       - "sillyhub-daemon/src/interactive/permission-resolver.ts"
       - "sillyhub-daemon/src/interactive/session-store-persistence.ts"
       - "sillyhub-daemon/src/interactive/types.ts"
-    tags: [interactive, session, claude-sdk, codex, agent-driver, permission, persistence]
+    tags: [interactive, session, claude-sdk, codex, agent-driver, permission, persistence, 会话]
     aliases: [interactive-session, session-manager, claude-sdk-driver, codex-app-server-driver]
     entrypoints: [SessionManager, ClaudeSdkDriver, CodexAppServerDriver]
-    main_symbols: [SessionManager, ClaudeSdkDriver, CodexAppServerDriver, CodexExecutableNotFoundError, InteractiveDriver, InteractiveDriverHandle, InteractiveDriverStartOptions, InteractiveDriverCallbacks, InteractiveProvider, InteractiveDriverMessage, InteractiveDriverResult, UserTurnInput, CodexSessionPermissionHooks, normalizeCodexRequestUserInput, denormalizeCodexRequestUserInputAnswers, normalizeMcpElicitation, resolveClaudeExecutable, InputQueue, SessionQueueClosedError, PermissionResolver, PERMISSION_FALLBACK_TIMEOUT_MS, JsonSessionPersistence, SessionPersistenceError, SessionState, SessionStatus, CreateSessionInput, InjectResult, SessionManagerDeps, SessionNotFoundError, UnsupportedProviderError]
-    depends_on: [client, ws-client, credential, config, protocol, cmd-shim]
-    used_by: [daemon, cli]
+    main_symbols: [SessionManager, ClaudeSdkDriver, CodexAppServerDriver, InteractiveDriver, InputQueue, PermissionResolver, JsonSessionPersistence, SessionState]
+    depends_on: [config, protocol, types, adapters, adapter-json-rpc, cmd-shim, mcp-config, model-error, policy, spawn-env]
+    used_by: [cli, daemon]
     needs_review: false
     concerns: []
     review_reasons: []
+    notes: "session-manager 实测还 import mcp-config/policy(path-utils+filesystem-policy+shell-paths)/model-error/spawn-env（旧版未计）；interactive/types.ts 独立于 src/types.ts"
 
-  # ---- 本次新增（此前漏登的源码文件）----
   daemon-version:
     status: active
     doc: modules/daemon-version.md
     paths: ["sillyhub-daemon/src/daemon-version.ts"]
-    tags: [version, metadata, package]
+    tags: [version, metadata, package, 版本]
     aliases: []
     entrypoints: []
     main_symbols: [DAEMON_VERSION, DAEMON_NAME]
     depends_on: []
-    used_by: [cli, adapter-json-rpc]
+    used_by: [cli, client, adapter-json-rpc]
     needs_review: false
-    concerns: ["modules/daemon-version.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+    concerns: []
+    review_reasons: []
 
   spec-sync:
     status: active
     doc: modules/spec-sync.md
     paths: ["sillyhub-daemon/src/spec-sync.ts"]
-    tags: [spec, sync, fs, bundle]
+    tags: [spec, sync, fs, bundle, 增量同步, init, 同步]
     aliases: [spec-bundle]
     entrypoints: []
-    main_symbols: [resolveSpecDir, PullSpecBundleOptions, pullSpecBundle, postSpecSync, packSpecDir]
-    depends_on: [client]
-    used_by: [task-runner, daemon]
+    main_symbols: [pullSpecBundle, postSpecSync, syncSpecTreeIfNeeded, handleInitLease, runSillyspecInit, hasUnsyncedLocalChanges, SpecPushConflict, packSpecDir]
+    depends_on: [client, local-yaml-writer]
+    used_by: [daemon, task-runner]
     needs_review: false
-    concerns: ["modules/spec-sync.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+    concerns: []
+    review_reasons: []
+    notes: "较 6e78b29a 大幅扩容：spec 树增量同步（manifest/冲突检测 SpecPushConflict/本地未同步检测）+ init lease 执行（runSillyspecInit，MIN_SILLYSPEC_VERSION_FOR_INIT=3.26.8）+ 版本缓存（.runtime/spec-version.json）"
 
   cursor-version:
     status: active
@@ -361,80 +388,79 @@ modules:
     depends_on: []
     used_by: [agent-detector, cmd-shim]
     needs_review: false
-    concerns: ["modules/cursor-version.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+    concerns: []
+    review_reasons: []
 
   file-rpc:
     status: active
     doc: modules/file-rpc.md
     paths: ["sillyhub-daemon/src/file-rpc.ts"]
-    tags: [fs, rpc, security, sandbox]
+    tags: [fs, rpc, security, sandbox, 文件]
     aliases: [file-listing]
     entrypoints: []
-    main_symbols: [DirEntry, ListDirResult, assertWithinAllowedRoots, listDir]
-    depends_on: [ws-client]
-    used_by: [daemon]
+    main_symbols: [listDir, assertWithinAllowedRoots, DirEntry, ListDirResult]
+    depends_on: [ws-client, policy]
+    used_by: [daemon, host-fs-handler]
     needs_review: false
-    concerns: ["modules/file-rpc.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+    concerns: []
+    review_reasons: []
 
   cmd-shim:
     status: active
     doc: modules/cmd-shim.md
     paths: ["sillyhub-daemon/src/cmd-shim.ts"]
-    tags: [windows, shim, cross-platform]
+    tags: [windows, shim, cross-platform, 跨平台]
     aliases: [windows-cmd-shim]
     entrypoints: []
     main_symbols: [resolveWindowsCmdShim]
     depends_on: [cursor-version]
     used_by: [task-runner, interactive]
     needs_review: false
-    concerns: ["modules/cmd-shim.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+    concerns: []
+    review_reasons: []
 
   terminal-launcher:
     status: active
     doc: modules/terminal-launcher.md
     paths: ["sillyhub-daemon/src/terminal-launcher.ts"]
-    tags: [terminal, spawn, observability]
+    tags: [terminal, spawn, observability, 终端]
     aliases: []
     entrypoints: []
-    main_symbols: [LaunchTerminalOptions, launchTerminal]
+    main_symbols: [launchTerminal, LaunchTerminalOptions]
     depends_on: []
     used_by: [terminal-observer]
     needs_review: false
-    concerns: ["modules/terminal-launcher.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+    concerns: []
+    review_reasons: []
 
   terminal-observer:
     status: active
     doc: modules/terminal-observer.md
     paths: ["sillyhub-daemon/src/terminal-observer.ts"]
-    tags: [terminal, observer, logging, observability]
+    tags: [terminal, observer, logging, observability, 终端观测]
     aliases: []
     entrypoints: []
-    main_symbols: [TerminalObserver, CreateTerminalObserverOptions, NOOP_TERMINAL_OBSERVER]
+    main_symbols: [TerminalObserver, createTerminalObserver, NOOP_TERMINAL_OBSERVER, CreateTerminalObserverOptions]
     depends_on: [config, terminal-launcher]
     used_by: [task-runner]
     needs_review: false
-    concerns: ["modules/terminal-observer.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+    concerns: []
+    review_reasons: []
 
-  # ---- 2026-07-27 增量补登（源码已存在但此前漏登）----
   host-fs-handler:
     status: active
     doc: modules/host-fs-handler.md
     paths: ["sillyhub-daemon/src/host-fs-handler.ts"]
-    tags: [fs, host-fs, delegate, worktree, git, sandbox]
+    tags: [fs, host-fs, delegate, worktree, git, sandbox, 宿主文件系统]
     aliases: [host-fs-delegate]
     entrypoints: []
-    main_symbols: [HostFsHandler, HostFsHandlerOptions, isGateCommand, StatResult, GitApplyResult, MergeConflict, GitWorktreeAddResult, GitMergeResult, GitWorktreeRemoveResult, GitRevParseResult, PollutionArchiveResult, ReadDictResult, RunCommandResult, RunCommandParams]
-    depends_on: []
+    main_symbols: [HostFsHandler, isGateCommand, HostFsHandlerOptions, GitApplyResult, GitWorktreeAddResult]
+    depends_on: [ws-client, file-rpc]
     used_by: [daemon]
     needs_review: false
-    concerns: ["modules/host-fs-handler.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
-    notes: "宿主文件系统代理 + worktree 隔离（GitWorktreeAdd/Remove/Merge）；daemon 经此操作宿主仓库"
+    concerns: []
+    review_reasons: []
+    notes: "宿主文件系统代理 + worktree 隔离（GitWorktreeAdd/Remove/Merge）；daemon 经此操作宿主仓库；实测 import file-rpc（旧版未计）"
 
   resilience:
     status: active
@@ -443,16 +469,16 @@ modules:
       - "sillyhub-daemon/src/resilience/service.ts"
       - "sillyhub-daemon/src/resilience/outbox.ts"
       - "sillyhub-daemon/src/resilience/error-classify.ts"
-    tags: [resilience, outbox, retry, usage, billing, dedup]
+    tags: [resilience, outbox, retry, usage, billing, dedup, 重试, 断线恢复]
     aliases: [outbox, error-classify, resilience-service]
     entrypoints: []
-    main_symbols: [ResilienceService, RetryConfig, DrainValidityChecker, ResilienceLogger, SubmitClient, Envelope, OutboxEntry, Outbox, OutboxConfig, OutboxLogger, FileOutbox, CauseInfo, isRetryable, toCauseInfo, dedupKeyFor]
+    main_symbols: [ResilienceService, FileOutbox, Outbox, isRetryable, toCauseInfo, dedupKeyFor, Envelope]
     depends_on: [client]
     used_by: [cli, daemon, task-runner]
     needs_review: false
-    concerns: ["modules/resilience.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
-    notes: "daemon→backend usage/cost 走 ResilienceService(notifyRunResult+mergeAdapterUsage) 非 submitMessages 直传；FileOutbox 防 WS 断线丢消息"
+    concerns: []
+    review_reasons: []
+    notes: "daemon→backend usage/cost 走 ResilienceService(notifyRunResult+mergeAdapterUsage) 非 submitMessages 直传；FileOutbox 防 WS 断线丢消息；error-classify/service 实测 import hub-client（旧版 depends_on=[] 已修正）"
 
   policy:
     status: active
@@ -463,43 +489,44 @@ modules:
       - "sillyhub-daemon/src/policy/path-utils.ts"
       - "sillyhub-daemon/src/policy/shell-paths.ts"
       - "sillyhub-daemon/src/policy/audit-sink.ts"
-    tags: [policy, security, fs-guard, sandbox, audit]
+    tags: [policy, security, fs-guard, sandbox, audit, 安全策略, 审计]
     aliases: [filesystem-policy]
     entrypoints: []
-    main_symbols: [PolicyEngine, PolicyDecision, PolicyCache, RuntimePolicy, UNC_REJECTED, normalizePath, resolveRealPath, isPathUnderAnyRoot, ShellKind, extractBashWritePaths, extractPowerShellWritePaths, extractCmdWritePaths, extractShellWritePaths, AuditSink, AuditEvent, AuditBatchSender, AuditSinkOptions, nullSender, defaultFailoverPath]
-    depends_on: []
-    used_by: [cli, daemon, task-runner, file-rpc]
+    main_symbols: [PolicyEngine, RuntimePolicy, PolicyCache, normalizePath, isPathUnderAnyRoot, extractShellWritePaths, AuditSink, AuditEvent]
+    depends_on: [config]
+    used_by: [cli, daemon, task-runner, file-rpc, interactive]
     needs_review: false
-    concerns: ["modules/policy.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+    concerns: []
+    review_reasons: []
+    notes: "runtime-policy 实测 import config（旧版 depends_on=[] 已修正）；interactive(session-manager) 也消费 path-utils/shell-paths（旧版未计）"
 
   permission-rules:
     status: active
     doc: modules/permission-rules.md
     paths: ["sillyhub-daemon/src/permission-rules.ts"]
-    tags: [security, permission, claude-settings]
+    tags: [security, permission, claude-settings, 权限规则]
     aliases: []
     entrypoints: []
     main_symbols: [buildWritePermissionRules, buildCcSettingsJson]
     depends_on: []
     used_by: [adapter-stream-json]
     needs_review: false
-    concerns: ["modules/permission-rules.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+    concerns: []
+    review_reasons: []
 
   tool-kind:
     status: active
     doc: modules/tool-kind.md
     paths: ["sillyhub-daemon/src/tool-kind.ts"]
-    tags: [classification, tool, observability]
+    tags: [classification, tool, observability, 工具分类]
     aliases: []
     entrypoints: []
-    main_symbols: [TOOL_KIND_VALUES, ToolKind, classifyToolKind]
+    main_symbols: [classifyToolKind, ToolKind, TOOL_KIND_VALUES]
     depends_on: []
     used_by: [task-runner]
     needs_review: false
-    concerns: ["modules/tool-kind.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+    concerns: []
+    review_reasons: []
 
   roots-rpc:
     status: active
@@ -508,138 +535,174 @@ modules:
     tags: [fs, rpc, roots, mcp]
     aliases: []
     entrypoints: []
-    main_symbols: [ListRootsResult, listRoots]
+    main_symbols: [listRoots, ListRootsResult]
     depends_on: []
     used_by: [daemon]
     needs_review: false
-    concerns: ["modules/roots-rpc.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+    concerns: []
+    review_reasons: []
 
   mcp-server:
     status: active
     doc: modules/mcp-server.md
     paths: ["sillyhub-daemon/src/mcp-server.ts"]
-    tags: [mcp, server, stdio, entrypoint, team]
+    tags: [mcp, server, stdio, entrypoint, team, 团队]
     aliases: []
-    entrypoints: [runMcpServer, createMcpServer]
-    main_symbols: [DAEMON_MCP_SERVER_NAME, createMcpServer, runMcpServer]
+    entrypoints: [dispatch_worker, get_worker_result, list_workers, converge_mission, report_progress]
+    main_symbols: [createMcpServer, runMcpServer, DAEMON_MCP_SERVER_NAME]
     depends_on: [client]
     used_by: []
     needs_review: false
     concerns: []
     review_reasons: []
-    notes: "daemon 内置 stdio MCP server，独立进程 node dist/mcp-server.js；team 主 agent 经此调平台工具。2026-08-08 archive（2026-08-08-dispatch-worker-caller-worktree）补建 modules/mcp-server.md（含 dispatch_worker inputSchema 路径A 三参透传，★无 createMission）"
+    notes: "daemon 内置 stdio MCP server，独立进程 node dist/mcp-server.js；5 工具名 2026-08-18 实测核实（registerTool×5：dispatch_worker/get_worker_result/list_workers/converge_mission/report_progress）"
 
   mcp-config:
     status: active
     doc: modules/mcp-config.md
     paths: ["sillyhub-daemon/src/mcp-config.ts"]
-    tags: [mcp, config, merge]
+    tags: [mcp, config, merge, 配置合并]
     aliases: []
     entrypoints: []
-    main_symbols: [McpServerConfig, McpConfig, MergedMcpResult, McpConfigLogger, loadPlatformMcpConfig, fetchPlatformMcpConfig, loadPlatformMcpConfigFromBackend, validateMcpServers, mergeMcpConfigs, hasAnyMcpServers, DAEMON_MCP_SERVER_NAME, buildDaemonMcpServerConfig]
+    main_symbols: [loadPlatformMcpConfig, fetchPlatformMcpConfig, mergeMcpConfigs, validateMcpServers, hasAnyMcpServers, buildDaemonMcpServerConfig, DAEMON_MCP_SERVER_NAME, MergedMcpResult]
     depends_on: [client]
-    used_by: [cli]
+    used_by: [cli, interactive]
     needs_review: false
-    concerns: ["modules/mcp-config.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+    concerns: []
+    review_reasons: []
 
   skill-manager:
     status: active
     doc: modules/skill-manager.md
     paths: ["sillyhub-daemon/src/skill-manager.ts"]
-    tags: [skill, bundle, sync]
+    tags: [skill, bundle, sync, 技能同步]
     aliases: []
     entrypoints: []
-    main_symbols: [SkillsManifest, SkillAuth, SkillManagerLogger, getLocalSkillsVersion, fetchRemoteManifest, fetchSkillsBundle, checkSha256, extractSkillsBundle, syncSkills, syncWorkspaceSkills, pathExists, linkSkillsToWorkdir]
+    main_symbols: [syncSkills, syncWorkspaceSkills, fetchRemoteManifest, fetchSkillsBundle, checkSha256, extractSkillsBundle, linkSkillsToWorkdir, SkillsManifest]
     depends_on: [client]
     used_by: [daemon, task-runner]
     needs_review: false
-    concerns: ["modules/skill-manager.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+    concerns: []
+    review_reasons: []
 
   credential-injector:
     status: active
     doc: modules/credential-injector.md
     paths: ["sillyhub-daemon/src/credential-injector.ts"]
-    tags: [security, credential, claude, oauth]
+    tags: [security, credential, claude, oauth, 凭据注入]
     aliases: []
     entrypoints: []
-    main_symbols: [CredentialInjector, ClaudeCredentialInjector, getInjector]
-    depends_on: [credential]
-    used_by: [spawn-env]
+    main_symbols: [ClaudeCredentialInjector, getInjector, CredentialInjector, setDaemonApiKey]
+    depends_on: [types]
+    used_by: [cli, spawn-env]
     needs_review: false
-    concerns: ["modules/credential-injector.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+    concerns: []
+    review_reasons: []
 
   runtime-lock:
     status: active
     doc: modules/runtime-lock.md
     paths: ["sillyhub-daemon/src/runtime-lock.ts"]
-    tags: [lock, concurrency, cross-platform]
+    tags: [lock, concurrency, cross-platform, 并发锁]
     aliases: []
     entrypoints: []
-    main_symbols: [LOCKS_DIR, LockIdentity, LockFileData, LockHeldError, computeLockKey, computeServerHash, lockFilePath, isPidAlive, AcquireOptions, acquireLock, releaseLockByKey, RuntimeLockManagerOptions, RuntimeLockManager]
+    main_symbols: [RuntimeLockManager, acquireLock, releaseLockByKey, LockHeldError, computeLockKey]
     depends_on: []
     used_by: [cli]
     needs_review: false
-    concerns: ["modules/runtime-lock.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+    concerns: []
+    review_reasons: []
 
   build-id:
     status: active
     doc: modules/build-id.md
     paths: ["sillyhub-daemon/src/build-id.ts"]
-    tags: [metadata, build, version]
+    tags: [metadata, build, version, 构建]
     aliases: []
     entrypoints: []
     main_symbols: [BUILD_ID]
     depends_on: []
     used_by: [client, daemon, preflight]
     needs_review: false
-    concerns: ["modules/build-id.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+    concerns: []
+    review_reasons: []
+    notes: "BUILD_ID=\"7d0bfa03-20260818010001\"（内嵌主仓 commit 7d0bfa03 + 时间戳）"
 
   preflight:
     status: active
     doc: modules/preflight.md
     paths: ["sillyhub-daemon/src/preflight.ts"]
-    tags: [preflight, self-update, check]
+    tags: [preflight, self-update, check, 自更新, 预检]
     aliases: []
     entrypoints: []
-    main_symbols: [PreflightLogger, runPreflight, runSillySpecCheck, runDaemonSelfUpdate]
-    depends_on: [build-id, daemon-version]
+    main_symbols: [runPreflight, runSillySpecCheck, runDaemonSelfUpdate, PreflightLogger]
+    depends_on: [config, client, build-id, version]
     used_by: [daemon]
     needs_review: false
-    concerns: ["modules/preflight.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+    concerns: []
+    review_reasons: []
     notes: "runDaemonSelfUpdate 实现 daemon 自更新（按 backend manifest 对齐 bundle）"
 
   api-types:
     status: active
     doc: modules/api-types.md
     paths: ["sillyhub-daemon/src/api-types.ts"]
-    tags: [types, generated, openapi]
+    tags: [types, generated, openapi, 生成产物]
     aliases: []
     entrypoints: []
-    main_symbols: [paths, webhooks, components, operations]
+    main_symbols: [paths, components, operations, webhooks]
     depends_on: []
     used_by: []
     needs_review: false
-    concerns: ["modules/api-types.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
-    notes: "openapi-typescript 自动生成（≈13k 行），勿手改；与后端 OpenAPI 契约对齐"
+    concerns: []
+    review_reasons: []
+    notes: "openapi-typescript 自动生成（≈13k 行），勿手改；与后端 OpenAPI 契约对齐；src 内无人 import（类型面供外部/测试用）"
 
-  adapter-pi-json:
+  # ---- 2026-08-18 新增（6e78b29a 基线后引入的源码文件）----
+  claude-settings:
     status: active
-    doc: modules/adapter-pi-json.md
-    paths: ["sillyhub-daemon/src/adapters/pi-json.ts"]
-    tags: [backend, protocol, pi, adapter]
-    aliases: [backend-pi-json, pi-json-adapter]
-    entrypoints: []
-    main_symbols: [PiJsonAdapter, PiJsonProvider, PiJsonUsage]
-    depends_on: [adapters]
-    used_by: []
+    doc: modules/claude-settings.md
+    paths: ["sillyhub-daemon/src/claude-settings.ts"]
+    tags: [claude, settings, config, 写盘, 配置]
+    aliases: []
+    entrypoints: [applyClaudeSettings]
+    main_symbols: [applyClaudeSettings]
+    depends_on: [config, types]
+    used_by: [daemon, task-runner]
     needs_review: false
-    concerns: ["modules/adapter-pi-json.md 尚未创建"]
-    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+    concerns: []
+    review_reasons: []
+    notes: "写 $CLAUDE_CONFIG_DIR/settings.json：白名单枚举顶层键（attribution/enabledPlugins/model/skipDangerousModePermissionPrompt），不写 env、不写 api_key（env 归 credential-injector.toEnv，D-007/D-009）；provider_config/settings_config 缺失时不写不抛"
+
+  local-yaml-writer:
+    status: active
+    doc: modules/local-yaml-writer.md
+    paths: ["sillyhub-daemon/src/local-yaml-writer.ts"]
+    tags: [yaml, config, local-yaml, 文本替换, 写盘]
+    aliases: []
+    entrypoints: [writeLocalYaml]
+    main_symbols: [writeLocalYaml, replaceTopLevelSection, findTopLevelSectionRange]
+    depends_on: []
+    used_by: [spec-sync]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+    notes: "文本级 YAML 顶层段替换（复制 sillyspec 仓 sync.js 算法 TS 重写，init-provision-local-yaml change 产物）；writeLocalYaml(rootPath, local, serverOrigin) 只改 platform/mcp 段保留注释"
+
+  model-error:
+    status: active
+    doc: modules/model-error.md
+    paths:
+      - "sillyhub-daemon/src/model-error/classifier.ts"
+      - "sillyhub-daemon/src/model-error/types.ts"
+      - "sillyhub-daemon/src/model-error/index.ts"
+    tags: [model, error, classification, 模型错误, 错误归类]
+    aliases: [model-error-classifier]
+    entrypoints: [classifyModelError]
+    main_symbols: [classifyModelError, ModelError, ModelErrorType, ClassifyModelInput]
+    depends_on: []
+    used_by: [client, daemon, adapter-stream-json, interactive]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+    notes: "claude 模型调用错误归类 8 类（auth_failed/quota_exceeded/rate_limited/timeout/model_not_found/network/provider_error/unknown）；429 区分 quota（不可重试）与 rate_limited（可重试，D-006）；types.ts 与 backend model_error.py ModelErrorDTO 三端同构"

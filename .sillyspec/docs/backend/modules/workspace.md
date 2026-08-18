@@ -2,43 +2,85 @@
 schema_version: 1
 doc_type: module-card
 module_id: workspace
-source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-24T01:08:51
+created_at: 2026-08-18 01:45:00
 ---
-# workspace
+
+# 工作区中枢（workspace）
+
 ## 定位
-工作区（项目/代码仓库）的注册、扫描、拓扑、关系（relation）与软删除管理。是变更/任务/agent 等模块的挂载根，workspace_id 作为这些实体的归属键。
+
+工作区（项目组）域中枢：注册/扫描/创建、成员与 per-member daemon 绑定、PPM 项目绑
+定、只读组件目录与技能视图。workspace_id 是 change/task/agent_run 等实体的归属键。
+**关系层已砍**（2026-07-06-component-readonly-split）：workspace_relations 表 +
+WorkspaceRelation 模型全删，拓扑退化为纯项目组节点视图。
+
 ## 契约摘要
-- `POST /api/workspaces/scan` → ScanResponse：扫描本地目录，返回解析结果（不下库）。
-- `POST /api/workspaces/scan-generate` → ScanGenerateResponse：扫描 + 落库建 workspace（含 daemon-client 子流）。
-- `POST /api/workspaces` → WorkspaceRead：直接创建。
-- `POST /api/workspaces/{id}/activate`：激活；`POST /{id}/rescan`：重扫；`POST /{id}/reparse`：重解析文档；`POST /{id}/generate-projects`：生成子项目。
-- `GET /api/workspaces` / `GET /{id}` / `PATCH /{id}` / `DELETE /{id}`：CRUD（删除走软删）。
-- `GET /api/workspaces/topology`：全局拓扑；`GET/POST/DELETE /{id}/relations`：workspace 间关系。
-- `WorkspaceService`：scan/create/list_/get/rescan/soft_delete/update/generate_projects/reparse/activate/scan_generate(_daemon_client)。
-- `RelationService`（relation_service.py）：关系 CRUD（自环/重复校验）。
-- `members_router.py` / `members_service.py`：工作区成员（RBAC 角色绑定）。
-- 模型：Workspace / WorkspaceRelation / ChangeWorkspace / TaskWorkspace / AgentRunWorkspace（多对多关联表）。
+
+主路由（router.py，prefix=/workspaces）：
+- `POST /scan`（dry-run 不下库）/ `POST /scan-generate`（扫描+落库+daemon 派发子流）
+- `POST /`（直接创建）/ `GET /`（列表，q/type/status/user_id/limit/offset；user_id 过
+  滤仅平台管理员生效，普通账号走 allowed_workspace_ids 边界）/ `GET|PATCH|DELETE
+  /{id}`（DELETE 软删）/ `POST /{id}/activate` / `POST /{id}/rescan`
+- `POST /{id}/init` / `POST /{id}/generate-projects`
+- `GET /topology`（退化：仅项目组节点，edges 恒 []）/ `GET /my-bindings`
+- `GET /{id}/components`（只读组件目录）/ `GET /{id}/skills` / `GET /{id}/mcp-config`
+
+成员子域（members_router + members_service）：`GET|POST /{id}/members`、
+`GET /members/search`、`PATCH|DELETE /{id}/members/{uid}`、
+`POST /{id}/members/{uid}/transfer-ownership`
+
+member_runtimes 子域：`GET|PUT /{id}/my-binding`（per-member 绑定行）、
+`GET /{id}/members/bindings`、`PUT /{id}/my-binding/shared` +
+`GET /{id}/shared-daemons` + `DELETE /{id}/members/{uid}/shared`（共享 daemon 借用）
+
+link 子域（link_router）：`GET|POST /{id}/ppm-projects`、
+`DELETE /{id}/ppm-projects/{ppm_project_id}`（workspace↔PPM 项目绑定）
+
+表：`workspaces`（root_path / slug 活跃唯一——partial unique index 限
+deleted_at IS NULL，软删行保路径可复活复用；display_alias 展示别名；组件元数据字段
+保留自 ADR-07 吸收）+ M:N 关联 `task_workspaces` / `ppm_project_workspace` /
+`agent_run_workspaces` + member_runtimes 的 `WorkspaceMemberRuntime`
+
 ## 关键逻辑
+
 ```
-scan_generate:
-  scanner.scan(root_path) → ParsedWorkspace
-  create(): slug 去重 + 路径校验(_guard_path) → INSERT Workspace
-  _ensure_spec_workspace(): 同步建 spec_workspace
-  返回 workspace + scan 结果
-rescan: 复用 scanner，差异更新
+scan_generate: scanner 浅扫 → create（slug 唯一兜底/软删复活/建 owner 成员行/
+               upsert_my_binding）→ daemon 派发扫描
+resolve_runtime_for_writeback(ws, user):     # 写回链路 runtime 解析
+  binding = MemberBindingResolver(ws, user)  # 无行 → 借用兜底 → 仍无 → 400
+  runtime = 按 binding.daemon_id + ws.default_agent 现算（不偷 fallback）
 ```
+
+- WorkspaceScanner：浅扫描（.sillyspec 骨架 + 顶层目录计数，不开单文件，预算 <200ms）
+- WorkspaceService 创建链：`_ensure_creator_as_owner`（建 owner 成员行）、
+  `_resurrect_soft_deleted`（同 root_path 复活软删行）、`_ensure_spec_workspace`
+  （copytree .sillyspec 到平台 `spec_data_root/{ws}`，ignore .runtime，to_thread；
+  platform-managed 已存在则仅 reparse changes；daemon-client 唯一模式无本地回退）
+- MemberBindingResolver：`(workspace_id, user_id)` 复合 PK 查绑定行，miss 抛
+  MemberBindingNotFound(409)；`resolve_runtime_for_writeback` 供写回/同步派发用
+  （binding→daemon_id+default_agent 现算；无 binding 走 borrow_resolver 借用兜底；
+  失败统一抛 DaemonClientNoActiveSession，reason=not_bound/daemon_offline/
+  default_agent_unset/provider_unavailable）
+- scan_generate 的 daemon 子流：`_guard_daemon_owned_by_user` 早校验防劫持（见人工备注）
+- ComponentCatalogService：组件=项目组 `projects/*.yaml` 派生的只读元数据，不再是
+  workspaces 行；SkillsViewService：backend 容器**直读** spec_root 的 skills/
+  .mcp.json 视图（不经 HostFsDelegate RPC——daemon 宿主无该容器路径）
+
 ## 注意事项
-- **用户可见错误文案中文（2026-08-15-error-message-l10n）**：本模块面向前端用户的 raise message 已全部中文化（中文短语+行动指引，技术 ID 在 details）；守护测试 tests/core/test_error_message_l10n.py 强制新文案含 CJK。
-- 路径安全：`_guard_path` 拦截越界/不可读路径；daemon-client 路径有专门 `_rewrite_path`。
-- 软删除：`soft_delete` 仅置标记，`_resurrect_soft_deleted` 在相同 root_path 重建时复活记录。
-- slug 唯一性靠 `_ensure_unique_slug` 追加后缀，非 DB 唯一约束兜底。
-- change/task/agent 的 workspace 关联通过 *_workspace 关联表，删除 workspace 需考虑级联。
-- `display_alias`：workspace 新增 nullable `display_alias VARCHAR(200)`，标题优先展示、空值回退 name/slug（2026-06-25-admin-global-daemon-workspace-management，D-002）。
-- 列表筛选分页：`GET /api/workspaces` 支持 `q/type/status/user_id/limit/offset`；`user_id` 仅平台管理员生效（按 created_by 过滤），普通账号仍走 `allowed_workspace_ids` 权限边界（D-001/D-003）。
-- owner 展示：列表 owner 由 created_by JOIN users 填充（OwnerRead 嵌套 DTO，D-006），详情可为 None。
+
+- **拓扑/关系**：Topology* schema 保留仅为维持 GET /topology 响应契约，edges 恒空；
+  不要在此加关系逻辑
+- workspace 删除是软删（deleted_at 置位），root_path/slug 唯一性只对活跃行生效
+- 绑定稳定键是 daemon_id（daemon-entity-binding 后）；daemon_runtime_id 仅 legacy
+  兼容
+- SkillsViewService 直读容器路径是刻意的（记忆 runtime-read-broken-daemon-client），
+  勿改回 RPC
+- 错误文案已中文化（error-message-l10n），守护测试强制
+- list_with_owner 由 created_by JOIN users 填 owner 展示（OwnerRead），详情可 None
+
 ## 人工备注
+
 <!-- MANUAL_NOTES_START -->
 - scan-generate daemon-client 子流绑定键（ql-20260705-003）：daemon-entity-binding 后稳定绑定键是 `daemon_id`（守护进程实体），`daemon_runtime_id` 退化为 legacy 兼容。`ScanGenerateRequest` 接受 `daemon_id` 或 `daemon_runtime_id` 至少一个（daemon_id 优先）；`scan_generate_daemon_client` 给 daemon_id 时早校验 `_guard_daemon_owned_by_user` 防劫持，新建 workspace 时 `upsert_my_binding` 建 per-member 绑定行（与 create 流程对齐），使 `start_scan_dispatch` 经 MemberBindingResolver 解析到 daemon。前端 scanGenerate 加 `daemonId` 参，调用点（agent/page、workspace-config-card）一律传 `myBinding.daemon_id`。
 <!-- MANUAL_NOTES_END -->
