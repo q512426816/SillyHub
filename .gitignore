@@ -16,6 +16,7 @@ out/
 .sillyspec/local.yaml
 .sillyspec/knowledge/generated/
 .sillyspec-platform.json
+.sillyspec/docs-check-baseline
 
 # Python
 __pycache__/
