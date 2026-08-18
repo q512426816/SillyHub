@@ -14140,6 +14140,8 @@ export interface components {
             author_raw: string;
             /** Author Name */
             author_name?: string | null;
+            /** Owner Name */
+            owner_name?: string | null;
             /**
              * Linked Changes
              * @default []
@@ -14221,6 +14223,8 @@ export interface components {
             author_raw: string;
             /** Author Name */
             author_name?: string | null;
+            /** Owner Name */
+            owner_name?: string | null;
             /**
              * Linked Changes
              * @default []
@@ -15044,9 +15048,16 @@ export interface components {
          *     ``agent_profile_id`` 非空且 ≠ 会话当前档案 → 切档案；``llm_provider_id``
          *     非空且 ≠ 当前 → 切供应商（空串/"none" 语义=切回本机默认）。切换校验与
          *     SESSION_SWITCH_CONFIG 下发归 task-05，本 DTO 只透传。
+         *
+         *     ql-20260817-010：**静默切换**——携带切换字段时 prompt 可为空串（切换轮
+         *     不产生用户消息与模型回应，daemon 只 reload 配置）；纯追问（无切换字段）
+         *     仍要求非空 prompt。
          */
         SessionInjectRequest: {
-            /** Prompt */
+            /**
+             * Prompt
+             * @default
+             */
             prompt: string;
             /** Agent Profile Id */
             agent_profile_id?: string | null;

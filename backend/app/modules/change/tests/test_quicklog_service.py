@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.auth.model import User
+from app.modules.change.model import Change
 from app.modules.change.quicklog_service import (
     QuicklogQueryService,
     derive_stale,
@@ -186,6 +187,90 @@ async def test_author_enrich_hit_and_fallback(db_session: AsyncSession, tmp_path
     by_author = {e.author_raw: e for e in result.items}
     assert by_author["qinyi"].author_name == "秦毅"
     assert by_author["WhaleFall"].author_name == "WhaleFall"  # 未命中回退原始名
+
+
+@pytest.mark.asyncio
+async def test_linked_change_owner_primary_author_fallback(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """ql-20260818-006：负责人优先取关联变更 owner（owner_id→users 按 ID，与变更
+    列表同源）；关联行无 owner / 无关联 / 用户已删 → owner_name None 回退 author 链。"""
+    ws_id, ws = await _setup(db_session, tmp_path)
+    owner = User(
+        email="owner@example.com",
+        username="owner-login",
+        password_hash="x",
+        display_name="王负责人",
+        status="active",
+    )
+    db_session.add(owner)
+    await db_session.commit()
+    db_session.add(
+        Change(
+            workspace_id=ws_id,
+            change_key="2026-08-16-owned-change",
+            status="in_progress",
+            location="active",
+            path="changes/2026-08-16-owned-change",
+            owner_id=owner.id,
+        )
+    )
+    db_session.add(
+        Change(
+            workspace_id=ws_id,
+            change_key="2026-08-17-orphan-change",
+            status="in_progress",
+            location="active",
+            path="changes/2026-08-17-orphan-change",
+            owner_id=None,
+        )
+    )
+    await db_session.commit()
+    _write_file(
+        tmp_path,
+        "QUICKLOG-qinyi.md",
+        f"## ql-20260817-080-uuuu | {_ts(3)} | 关联有主\n状态：已完成\n"
+        "关联变更：2026-08-16-owned-change\n"
+        f"## ql-20260817-081-vvvv | {_ts(2)} | 关联无主\n状态：已完成\n"
+        "关联变更：2026-08-17-orphan-change\n"
+        f"## ql-20260817-082-wwww | {_ts(1)} | 无关联\n状态：已完成\n",
+    )
+    svc = QuicklogQueryService(db_session)
+    r = await svc.list_entries(ws, now=_now())
+    by_id = {e.ql_id: e for e in r.items}
+    # 关联变更 owner 解析命中 → owner_name = display_name（优先展示源）
+    assert by_id["ql-20260817-080-uuuu"].owner_name == "王负责人"
+    # owner 优先不影响 author 链本身（author_raw=qinyi 无 users 命中 → 原始名）
+    assert by_id["ql-20260817-080-uuuu"].author_name == "qinyi"
+    # 关联行 owner_id=None / 无关联 → owner_name None（前端回退 author 链兜底）
+    assert by_id["ql-20260817-081-vvvv"].owner_name is None
+    assert by_id["ql-20260817-082-wwww"].owner_name is None
+    # author 筛选匹配展示口径（含 owner_name）
+    r2 = await svc.list_entries(ws, author="王负责人", now=_now())
+    assert r2.total == 1
+    assert r2.items[0].ql_id == "ql-20260817-080-uuuu"
+
+
+@pytest.mark.asyncio
+async def test_output_timestamp_naive_wallclock(db_session: AsyncSession, tmp_path: Path) -> None:
+    """ql-20260818-007：下发 naive 墙钟（不带 Z）——CLI 本地时间串直接透传，前端
+    new Date 按本地解析不再 +8h 双重偏移；stale 内部运算仍走 aware（不受影响）。"""
+    _ws_id, ws = await _setup(db_session, tmp_path)
+    _write_file(
+        tmp_path,
+        "QUICKLOG-qinyi.md",
+        f"## ql-20260817-090-xxxx | {_ts(2)} | 时间条目\n状态：已完成\n",
+    )
+    svc = QuicklogQueryService(db_session)
+    r = await svc.list_entries(ws, now=_now())
+    ts = r.items[0].timestamp
+    assert ts is not None
+    assert ts.tzinfo is None  # 下发前已剥时区
+    assert ts == datetime.strptime(_ts(2), "%Y-%m-%d %H:%M:%S")  # 墙钟原样
+    detail = await svc.get_entry(ws, "ql-20260817-090-xxxx", now=_now())
+    assert detail is not None
+    assert detail.timestamp is not None
+    assert detail.timestamp.tzinfo is None  # 详情同样剥
 
 
 @pytest.mark.asyncio

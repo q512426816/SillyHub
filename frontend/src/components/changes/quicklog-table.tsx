@@ -95,10 +95,12 @@ export function QuicklogTable({ workspaceId, onSelect }: QuicklogTableProps) {
       : "加载快速修复列表失败"
     : null;
 
+  // 负责人候选（ql-20260818-006）：展示口径 = owner_name（关联变更 owner，与
+  // 进行中/已归档同源）优先 → author_name → author_raw；下拉去重同口径
   const authors = Array.from(
     new Set(
       items
-        .map((it) => it.author_name || it.author_raw)
+        .map((it) => it.owner_name || it.author_name || it.author_raw)
         .filter((a): a is string => Boolean(a)),
     ),
   );
@@ -144,9 +146,11 @@ export function QuicklogTable({ workspaceId, onSelect }: QuicklogTableProps) {
       title: "负责人",
       key: "author",
       width: 90,
+      // ql-20260818-006：关联变更 owner（owner_name，与进行中/已归档列表同源）
+      // 优先；无关联/未解析 → 回退既有 author 链兜底
       render: (_v: unknown, e: QuicklogEntryListItem) => (
         <span className="text-xs text-foreground">
-          {e.author_name || e.author_raw || "—"}
+          {e.owner_name || e.author_name || e.author_raw || "—"}
         </span>
       ),
     },

@@ -96,7 +96,10 @@ export function QuicklogDrawer({
               )}
             </div>
             <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-muted-foreground">
-              <span>负责人：{entry.author_name || entry.author_raw || "—"}</span>
+              {/* ql-20260818-006：关联变更 owner 优先（与变更列表同源），author 链兜底 */}
+              <span>
+                负责人：{entry.owner_name || entry.author_name || entry.author_raw || "—"}
+              </span>
               <span>
                 时间：
                 {entry.timestamp

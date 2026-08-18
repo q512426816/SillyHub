@@ -534,6 +534,9 @@ class QuicklogEntryListItem(BaseModel):
     placeholder: bool = False
     author_raw: str
     author_name: str | None = None
+    # ql-20260818-006：关联变更 owner 解析名（与进行中/已归档列表 owner 同源，
+    # owner_id → users display_name 优先）；None 时前端回退 author_name/author_raw。
+    owner_name: str | None = None
     linked_changes: list[str] = []
     files: list[QuicklogFileItem] = []
     affected_modules: list[str] = []

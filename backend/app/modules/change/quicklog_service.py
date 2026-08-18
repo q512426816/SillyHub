@@ -8,6 +8,10 @@
 - ``stale``：in_progress 且 now-timestamp>24h（阈值可注入；时钟偏差误报可接受 R-03）。
 - ``author_name``：批量 IN 查 users（display_name 优先 username fallback，查不到回退
   author_raw；失败不抛，R-03 禁 N+1 对齐 ``_resolve_user_names``）。
+- ``owner_name``：关联变更 owner 优先（ql-20260818-006，对齐变更列表 owner 来源）——
+  linked_changes → changes.owner_id → users 按 ID 解析 display_name 优先；与进行中/
+  已归档列表同源同口径（token 上行的权威身份链）。无关联变更 / 关联行无 owner /
+  用户已删时回退既有 author 链（author_name/author_raw，前端兜底展示）。
 - ``affected_modules``：文件路径集合 → change/parser.py module-map 前缀匹配口径
   （spec docs 现状覆盖度低时输出空列表，前端展示「—」，R-06）。
 
@@ -26,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.modules.auth.model import User
+from app.modules.change.model import Change
 from app.modules.change.parser import ChangeParser
 from app.modules.change.quicklog_parser import (
     QuicklogFileEntry,
@@ -48,6 +53,7 @@ class QuicklogMergedEntry:
     placeholder: bool
     author_raw: str
     author_name: str | None = None  # enrich 派生
+    owner_name: str | None = None  # 关联变更 owner 派生（ql-20260818-006 优先展示）
     linked_changes: tuple[str, ...] = ()
     files: tuple[tuple[str, str | None], ...] = ()  # (path, note)
     body_sections: dict[str, str] | None = None  # 详情用；列表可不带
@@ -74,6 +80,18 @@ def _norm_utc(ts: datetime | None) -> datetime | None:
     if ts is not None and ts.tzinfo is None:
         return ts.replace(tzinfo=UTC)
     return ts
+
+
+def _to_wallclock(ts: datetime | None) -> datetime | None:
+    """输出边界剥时区（ql-20260818-007）：下发 naive 墙钟。
+
+    CLI 落盘/推送的时间串是**本地墙钟**（无时区），``_norm_utc`` 打上的 UTC 标签
+    只服务于 stale 内部 aware 运算。若带 Z 下发，前端 ``toLocaleString`` 会再按
+    浏览器本地时区换算——中国用户看到 +8h 双重偏移。剥掉标签后 JS ``new Date``
+    按**本地**解析 naive 串，展示与 CLI 落盘墙钟一致（个人平台：查看者与 CLI
+    同时区是常态；跨时区查看者按自己墙钟理解，可接受）。
+    """
+    return ts.replace(tzinfo=None) if ts is not None else None
 
 
 def _from_pushed_payload(payload: dict[str, Any]) -> QuicklogMergedEntry:
@@ -171,6 +189,60 @@ async def _enrich_authors(
     ]
 
 
+async def _enrich_linked_change_owners(
+    session: AsyncSession, workspace: Any, entries: list[QuicklogMergedEntry]
+) -> list[QuicklogMergedEntry]:
+    """linked_changes → changes.owner_id → users 按 ID 解析（ql-20260818-006）。
+
+    负责人来源对齐变更列表（进行中/已归档）口径：owner_id 是 token 上行的权威
+    身份，users 解析 display_name 优先 username fallback（同 change service
+    ``_resolve_user_names``）。条目按 linked_changes 顺序取第一个能解析出名字的
+    owner；无关联 / 关联行无 owner / 用户已删 → owner_name 保持 None（前端回退
+    既有 author 链兜底）。两次 IN 查询禁 N+1；任何异常吞掉不 enrich（对齐
+    ``_enrich_authors`` fail-soft）。
+    """
+    keys = {k for e in entries for k in e.linked_changes}
+    if not keys:
+        return entries
+    key_to_owner: dict[str, Any] = {}
+    names_by_id: dict[Any, str] = {}
+    try:
+        rows = (
+            await session.execute(
+                select(Change.change_key, Change.owner_id).where(
+                    col(Change.workspace_id) == workspace.id,
+                    col(Change.change_key).in_(keys),
+                )
+            )
+        ).all()
+        key_to_owner = {key: owner for key, owner in rows if owner is not None}
+        owner_ids = set(key_to_owner.values())
+        if owner_ids:
+            user_rows = (
+                await session.execute(
+                    select(User.id, User.display_name, User.username).where(
+                        col(User.id).in_(owner_ids)
+                    )
+                )
+            ).all()
+            names_by_id = {
+                uid: display_name or username or "" for uid, display_name, username in user_rows
+            }
+    except Exception:
+        return entries
+
+    def _owner_of(e: QuicklogMergedEntry) -> str | None:
+        for key in e.linked_changes:
+            owner = key_to_owner.get(key)
+            if owner is not None:
+                name = names_by_id.get(owner)
+                if name:
+                    return name
+        return None
+
+    return [QuicklogMergedEntry(**{**e.__dict__, "owner_name": _owner_of(e)}) for e in entries]
+
+
 @dataclass(frozen=True)
 class QuicklogQueryResult:
     """list_entries 输出：条目（含派生字段）+ 总数（分页前）。"""
@@ -246,11 +318,12 @@ class QuicklogQueryService:
         now = now or datetime.now(UTC)
         entries = derive_stale(entries, now)
         entries = await _enrich_authors(self._session, entries)
+        entries = await _enrich_linked_change_owners(self._session, workspace, entries)
 
         sillyspec_root = await _spec_content_root(self._session, workspace)
         modules_by_ql = self._modules_by_ql(entries, sillyspec_root)
 
-        # 筛选
+        # 筛选（author 匹配含 owner_name——与前端展示口径一致，ql-20260818-006）
         filtered: list[QuicklogMergedEntry] = []
         needle = (search or "").strip().lower()
         for e in entries:
@@ -258,7 +331,11 @@ class QuicklogQueryService:
                 continue
             if status and e.status != status:
                 continue
-            if author and author not in (e.author_raw, e.author_name or ""):
+            if author and author not in (
+                e.owner_name,
+                e.author_raw,
+                e.author_name or "",
+            ):
                 continue
             if linked_change and linked_change not in e.linked_changes:
                 continue
@@ -272,8 +349,16 @@ class QuicklogQueryService:
 
         total = len(filtered)
         start = (page - 1) * page_size
+        # 输出边界剥时区（ql-20260818-007）：timestamp 下发 naive 墙钟防 +8h 双重偏移
         page_items = [
-            QuicklogMergedEntry(**{**e.__dict__, "body_sections": None, "raw_block": None})
+            QuicklogMergedEntry(
+                **{
+                    **e.__dict__,
+                    "timestamp": _to_wallclock(e.timestamp),
+                    "body_sections": None,
+                    "raw_block": None,
+                }
+            )
             for e in filtered[start : start + page_size]
         ]
         return QuicklogQueryResult(items=page_items, total=total, modules_by_ql=modules_by_ql)
@@ -286,9 +371,13 @@ class QuicklogQueryService:
         now = now or datetime.now(UTC)
         entries = derive_stale(entries, now)
         entries = await _enrich_authors(self._session, entries)
+        entries = await _enrich_linked_change_owners(self._session, workspace, entries)
         for e in entries:
             if e.ql_id == ql_id:
-                return e
+                # 同 list_entries：详情输出也剥时区（ql-20260818-007）
+                return QuicklogMergedEntry(
+                    **{**e.__dict__, "timestamp": _to_wallclock(e.timestamp)}
+                )
         return None
 
     @staticmethod

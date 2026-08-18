@@ -40,6 +40,7 @@ function makeEntry(overrides: Partial<QuicklogEntryListItem> = {}): QuicklogEntr
     placeholder: false,
     author_raw: "qinyi",
     author_name: "秦毅",
+    owner_name: null,
     linked_changes: [],
     files: [],
     affected_modules: [],
@@ -89,6 +90,33 @@ describe("QuicklogTable", () => {
     expect(screen.getAllByText("qinyi").length).toBe(1); // b 行 author_name=null 回退
     // 模块空列表降级「—」（R-06）
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  });
+
+  it("负责人列 owner_name 优先，None 回退 author 链兜底（ql-20260818-006）", async () => {
+    mocks.listQuicklogEntries.mockResolvedValue({
+      items: [
+        // 关联变更 owner 解析命中 → 优先显示（author_name 不再展示）
+        makeEntry({ ql_id: "o1", owner_name: "王负责人", author_name: "秦毅" }),
+      ],
+      total: 1,
+    });
+    renderTable();
+    expect(await screen.findByText("王负责人")).toBeTruthy();
+    expect(screen.queryByText("秦毅")).toBeNull(); // o1 不再显示 author_name
+  });
+
+  it("owner None 回退链：author_name → author_raw（兜底顺序）", async () => {
+    mocks.listQuicklogEntries.mockResolvedValue({
+      items: [
+        makeEntry({ ql_id: "f1", owner_name: null }),
+        makeEntry({ ql_id: "f2", owner_name: null, author_name: null }),
+      ],
+      total: 2,
+    });
+    renderTable();
+    // f1 author_name=秦毅；f2 回退 author_raw=qinyi
+    expect(await screen.findByText("秦毅")).toBeTruthy();
+    expect(screen.getByText("qinyi")).toBeTruthy();
   });
 
   it("列表默认不带 include_placeholder（空壳默认隐藏 D-007）", async () => {

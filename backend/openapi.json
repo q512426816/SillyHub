@@ -44396,6 +44396,17 @@
             ],
             "title": "Author Name"
           },
+          "owner_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Name"
+          },
           "linked_changes": {
             "items": {
               "type": "string"
@@ -44596,6 +44607,17 @@
               }
             ],
             "title": "Author Name"
+          },
+          "owner_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Name"
           },
           "linked_changes": {
             "items": {
@@ -46502,8 +46524,8 @@
           "prompt": {
             "type": "string",
             "maxLength": 8000,
-            "minLength": 1,
-            "title": "Prompt"
+            "title": "Prompt",
+            "default": ""
           },
           "agent_profile_id": {
             "anyOf": [
@@ -46529,11 +46551,8 @@
           }
         },
         "type": "object",
-        "required": [
-          "prompt"
-        ],
         "title": "SessionInjectRequest",
-        "description": "POST /api/daemon/sessions/{id}/inject 请求体（FR-02 / design §5 Wave1）。\n\n``agent_profile_id`` 非空且 ≠ 会话当前档案 → 切档案；``llm_provider_id``\n非空且 ≠ 当前 → 切供应商（空串/\"none\" 语义=切回本机默认）。切换校验与\nSESSION_SWITCH_CONFIG 下发归 task-05，本 DTO 只透传。"
+        "description": "POST /api/daemon/sessions/{id}/inject 请求体（FR-02 / design §5 Wave1）。\n\n``agent_profile_id`` 非空且 ≠ 会话当前档案 → 切档案；``llm_provider_id``\n非空且 ≠ 当前 → 切供应商（空串/\"none\" 语义=切回本机默认）。切换校验与\nSESSION_SWITCH_CONFIG 下发归 task-05，本 DTO 只透传。\n\nql-20260817-010：**静默切换**——携带切换字段时 prompt 可为空串（切换轮\n不产生用户消息与模型回应，daemon 只 reload 配置）；纯追问（无切换字段）\n仍要求非空 prompt。"
       },
       "SessionInjectResponse": {
         "properties": {
