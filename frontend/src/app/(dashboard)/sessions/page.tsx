@@ -544,8 +544,15 @@ function SessionPanel({
     }
     // ql-20260818-011-b：按时间戳排序（孤儿 turn 不追加在末尾，与实时 turn 按时间
     // 线正确穿插——重进后 logsToTurns 已是时间序，不排序会导致切换标记堆在底部）。
-    const ts = (t: SessionTurnView) =>
-      Date.parse(t.replyAt ?? t.sender?.at ?? "") || 0;
+    // ql-20260818-011-d：运行中轮次无 replyAt（空→0）会跑到最前面——视为「最新」
+    // 用 Infinity 排末尾；有 replyAt/sender.at 的按实际时间穿插。
+    const ts = (t: SessionTurnView) => {
+      const raw = t.replyAt ?? t.sender?.at ?? "";
+      const parsed = raw ? Date.parse(raw) : NaN;
+      if (Number.isFinite(parsed)) return parsed;
+      // 无时间戳：completed 孤儿 turn 排前面（0），运行中/待答排最后（Infinity）。
+      return t.status === "completed" ? 0 : Infinity;
+    };
     return [...enriched, ...orphanTurns].sort((a, b) => ts(a) - ts(b));
   }, [turnState.turns, runsMeta, providers, agentDisplayName, session?.user_id]);
 
