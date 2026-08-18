@@ -235,7 +235,20 @@ export function TurnTimeline({
       ) : (
         <div className="space-y-5">
           {turns.map((turn) => (
-            <div key={turn.runId} className="space-y-2.5">
+            // ql-20260818-011：静默切换轮（无 prompt/output，有 whoLine，已
+            // 完成）→ 渲染为紧凑一行配置变更标记，不占轮次气泡。
+            !turn.prompt && !turn.output && !!turn.whoLine && turn.status === 'completed' ? (
+              <div
+                key={turn.runId}
+                className="flex items-center gap-1.5 text-[11px] text-muted-foreground opacity-70"
+              >
+                <span>⚙</span>
+                {turn.replyAt && <span>{formatTurnTime(turn.replyAt)}</span>}
+                <span>· 📋 {turn.whoLine!.profileName ?? '未指定'}</span>
+                <span>· {turn.whoLine!.agentName}</span>
+                <span>· ☁ {turn.whoLine!.providerName ?? '本机默认'}</span>
+              </div>
+            ) : <div key={turn.runId} className="space-y-2.5">
               {/* 用户消息气泡（右）。attach 中途接入的 unknown-run turn 无 prompt，不渲染。
                   ql-20260817-007：与 agent 答复对称——[时间][气泡][发送者头像]；
                   头像无图时用用户名首字（同顶栏用户菜单 AvatarFallback 模式）。 */}

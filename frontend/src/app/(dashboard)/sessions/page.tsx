@@ -916,9 +916,13 @@ function SessionPanel({
             runtimeId={session.runtime_id ?? null}
             engine={session.provider ?? null}
             onSwitched={() => {
-              // 切换成功 → 刷新会话详情（三列快照）+ 左侧列表 chips。
+              // 切换成功 → 刷新会话详情（三列快照）+ 左侧列表 chips + runsMeta
+              // （立即显示新 whoLine，不等重进页面）。
               void qc.invalidateQueries({ queryKey: ["agentSessionDetail", sessionId] });
               onSessionListRefresh?.();
+              void listSessionRuns(sessionId)
+                .then((runs) => setRunsMeta(new Map(runs.map((r) => [r.id, r]))))
+                .catch(() => {});
             }}
           />
         </div>
