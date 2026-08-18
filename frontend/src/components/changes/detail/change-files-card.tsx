@@ -19,8 +19,9 @@ import {
  * 原版把 ChangeFileTree（含默认预览 iframe/编辑器，ql-20260709-004）整包塞进 320px 折叠卡，
  * 预览挤崩看不了。改为：侧栏紧凑入口卡（标题+说明+「打开」按钮），点击在宽 Dialog
  * （max-w-6xl × 85vh）里渲染完整 ChangeFileTree——给文件树+预览足够横向空间。
- * 黑盒复用 ChangeFileTree 不改其内部。Dialog 内容仅 open 时 mount（radix Portal 惰性），
- * 关闭即卸载，无空载请求。
+ * ql-20260818-008：Dialog 内容区改 flex 容器，配合 ChangeFileTree 内部 min-h-0/flex-1
+ * 限高链，让文件树与预览区在 Dialog 内各自滚动（超长不再被裁切）。
+ * Dialog 内容仅 open 时 mount（radix Portal 惰性），关闭即卸载，无空载请求。
  */
 export interface ChangeFilesCardProps {
   workspaceId: string;
@@ -50,7 +51,7 @@ export function ChangeFilesCard({ workspaceId, changeId }: ChangeFilesCardProps)
               改动文件树与内容预览
             </DialogDescription>
           </DialogHeader>
-          <div className="min-h-0 flex-1 overflow-hidden p-3">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
             <ChangeFileTree workspaceId={workspaceId} changeId={changeId} />
           </div>
         </DialogContent>

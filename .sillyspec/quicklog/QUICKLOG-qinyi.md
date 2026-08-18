@@ -46,3 +46,14 @@
 根因：CLI 落盘/推送的时间串是本地墙钟（无时区），后端 _norm_utc 为 stale 内部运算打上 UTC 标签后原样下发（带 Z），前端 new Date().toLocaleString 再按浏览器本地时区（UTC+8）换算 → 显示 = 实际 +8h 双重偏移。
 方案：quicklog_service 新增 _to_wallclock 输出边界函数，list_entries 分页输出与 get_entry 详情返回均剥 tzinfo 下发 naive 墙钟；浏览器对 naive ISO 串按本地解析，展示与 CLI 落盘墙钟一致；stale 内部 aware 运算链路不动。
 结果：test_quicklog_service+router 19 passed，新增 test_output_timestamp_naive_wallclock 断言列表与详情 tzinfo 均为 None 且墙钟原样；ruff format/check+mypy 干净；纯时间戳序列化格式变化无 openapi schema 变更，无需 gen:types。
+
+## ql-20260818-008-ec6d | 2026-08-18 09:37:41 | 变更详情页「变更文件」Dialog 的文件预览区
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/change-file-tree.tsx（补 flex 限高链（section/grid/右列）+ FilePreview min-w-0 + pre 改 whitespace-pre 横向滚动 + 路径 truncate）
+- frontend/src/components/changes/detail/change-files-card.tsx（Dialog 内容容器加 flex flex-col 打通限高链 + 注释同步）
+需求：变更详情页「变更文件」Dialog 的文件预览区，垂直超长无滚动条（超出被裁）、水平超宽无横向滚动，希望预览区宽度固定。
+根因：Dialog(85vh)→section→grid→右列整条链无 min-h-0/flex 限高约束，flex-1 overflow-auto 失效，超长内容被 Dialog 的 overflow-hidden 直接裁切；横向 flex 子项缺 min-w-0 被宽内容撑开，且源码 pre 用 whitespace-pre-wrap 软折行。
+方案：change-file-tree.tsx——section 加 flex min-h-0 flex-1 flex-col、grid 加 min-h-0 flex-1 overflow-hidden + lg:grid-rows-[minmax(0,1fr)]、文件树列 lg 下满高滚动、右列改 flex flex-col、FilePreview 三分支统一 min-w-0（pre 改 whitespace-pre 不折行靠横向滚动看全、iframe 改 h-full+min-h-[60vh]）、文件路径 span 加 truncate；change-files-card.tsx——Dialog 内容容器加 flex flex-col 打通限高链 + 注释同步。
+结果：针对性 vitest 2 文件 9 用例全过；pnpm lint 仅 stores/kanban.ts 预存 warning（与本改动无关）；模块文档 frontend.md 已同步条目并 git add。

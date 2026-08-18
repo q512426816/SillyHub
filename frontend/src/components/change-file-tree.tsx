@@ -47,32 +47,34 @@ function isPreviewableHtml(path: string): boolean {
   return lower.endsWith(".html") || lower.endsWith(".htm");
 }
 
-// 内容区「预览」模式渲染：按文件类型分别渲染（.md→Markdown / .html→iframe / 其他纯文本→只读源码）
+// 内容区「预览」模式渲染：按文件类型分别渲染（.md→Markdown / .html→iframe / 其他纯文本→只读源码）。
+// ql-20260818-008：三个分支统一 min-w-0（防宽内容把 flex 链撑破，超宽出横向滚动条），
+// 源码预览改 whitespace-pre 不软折行——长行靠横向滚动看全，预览区宽度固定。
 function FilePreview({ path, name, content }: { path: string; name: string; content: string }) {
   if (path.endsWith(".md")) {
     return (
-      <div className="flex-1 overflow-auto rounded-md bg-muted/40 p-3 text-sm">
+      <div className="min-w-0 flex-1 overflow-auto rounded-md bg-muted/40 p-3 text-sm">
         <MarkdownPreview source={content} rehypePlugins={markdownRehypePlugins} />
       </div>
     );
   }
   if (isPreviewableHtml(path)) {
     return (
-      <div className="flex-1 overflow-hidden rounded-md border border-border bg-white">
+      <div className="min-w-0 flex-1 overflow-hidden rounded-md border border-border bg-white">
         <iframe
           title={`${name} 渲染预览`}
           srcDoc={content}
           // sandbox 不设 allow-same-origin：iframe 被当作唯一源，
           // 脚本可跑（交互原型可见）但无法访问父页面 cookie/storage/DOM，安全隔离。
           sandbox="allow-scripts allow-popups"
-          className="h-[60vh] w-full border-0 bg-white"
+          className="h-full min-h-[60vh] w-full border-0 bg-white"
         />
       </div>
     );
   }
-  // 其他纯文本：只读源码预览（点「编辑」才可改）
+  // 其他纯文本：只读源码预览（点「编辑」才可改）。whitespace-pre：不折行，超宽横向滚动
   return (
-    <pre className="flex-1 overflow-auto rounded-md border border-input bg-background p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
+    <pre className="min-w-0 flex-1 overflow-auto rounded-md border border-input bg-background p-3 font-mono text-xs leading-relaxed whitespace-pre">
       {content || "（空文件）"}
     </pre>
   );
@@ -305,7 +307,7 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
   };
 
   return (
-    <section className="rounded-md border bg-card">
+    <section className="flex min-h-0 flex-1 flex-col rounded-md border bg-card">
       <div className="flex items-center justify-between border-b px-3 py-2">
         <h2 className="text-xs font-medium">变更文件</h2>
         <div className="flex items-center gap-3">
@@ -332,8 +334,10 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-3 p-3 lg:grid-cols-[280px_1fr]">
-        <div className="max-h-[60vh] overflow-auto rounded-md border bg-background p-1">
+      {/* ql-20260818-008：min-h-0+flex-1 限高链——Dialog 场景下 grid 填满剩余高度，
+          行高 minmax(0,1fr) 防内容撑开，文件树/预览区各自滚动；非限高场景自然堆叠。 */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden p-3 lg:grid-cols-[280px_1fr] lg:grid-rows-[minmax(0,1fr)]">
+        <div className="max-h-[60vh] overflow-auto rounded-md border bg-background p-1 lg:max-h-full">
           {loading ? (
             <p className="px-2 py-4 text-center text-xs text-muted-foreground">加载中…</p>
           ) : tree.length === 0 ? (
@@ -356,7 +360,7 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
           )}
         </div>
 
-        <div className="min-h-[40vh]">
+        <div className="flex min-h-[40vh] flex-col">
           {!selected ? (
             <p className="py-8 text-center text-xs text-muted-foreground">点击左侧文件查看内容</p>
           ) : !selected.is_text ? (
@@ -368,7 +372,7 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
           ) : (
             <div className="flex h-full flex-col gap-2">
               <div className="flex items-center justify-between gap-2">
-                <span className="font-mono text-[11px] text-muted-foreground">{selected.path}</span>
+                <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">{selected.path}</span>
                 <div className="flex items-center gap-2">
                   {saveStatus !== "idle" && (
                     <span className={`text-[11px] ${statusLabel[saveStatus].color}`}>
