@@ -218,6 +218,12 @@ export interface ClaudeStartOptions extends InteractiveDriverStartOptions {
    * 默认能力 + 追加档案提示词，sdk.d.ts:1911-1918）。原样透传 SDK StartOptions。
    */
   systemPrompt?: { type: 'preset'; preset: 'claude_code'; append?: string };
+  /**
+   * ql-20260818-002：resume 时 fork 出新会话 ID（SDK StartOptions.forkSession）
+   * ——resume 场景 SDK 的 systemPrompt 选项被 CLI 忽略（jsonl 固化原 system
+   * prompt），fork 后新 system prompt 生效且历史完整复制。人格热切换用。
+   */
+  forkSession?: boolean;
   /** env 继承；缺省 `{ ...process.env }`。 */
   env?: Record<string, string>;
 }
@@ -380,6 +386,11 @@ export class ClaudeSdkDriver implements InteractiveDriver {
     // 同路径；SDK StartOptions.systemPrompt 原生支持此 shape）。
     if (opts.systemPrompt !== undefined) {
       options.systemPrompt = opts.systemPrompt;
+    }
+
+    // ql-20260818-002：resume+人格切换 → fork 新会话（system prompt 对 fork 生效）。
+    if (opts.forkSession === true) {
+      options.forkSession = true;
     }
 
     // ql-20260621-partial：开启 SDK 流式 partial 消息推送。SDK 会在每个

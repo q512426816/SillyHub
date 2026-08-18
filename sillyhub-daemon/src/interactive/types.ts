@@ -96,6 +96,13 @@ export interface SessionState {
   /** SDK 返回的 session_id（首 turn system/init 写入；resume 用，spike D3）。Wave1/2 内存态。 */
   agentSessionId?: string;
   /**
+   * ql-20260818-002：人格热切换 reload 用 forkSession=true 起 fork 会话——fork 的
+   * system/init 携带**新** session_id，须更新 state.agentSessionId（否则持久化旧
+   * id，下次 resume 回到无新人格的旧会话）。该标记在 reload 前置位、init 消费后
+   * 清除。仅内存态（不持久化：重启恢复即终态收敛）。
+   */
+  forkedInitPending?: boolean;
+  /**
    * 2026-06-28-daemon-subagent-transcript task-02 / D-007@v1：子代理深度追踪。
    * key = tool_use block id（即子代理消息的 parent_tool_use_id），value = 该子代理
    * 的 depth（主 agent = 0，子 = 父 + 1）。主 agent 发 tool_use 时预登记
