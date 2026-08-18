@@ -542,7 +542,11 @@ function SessionPanel({
         replyAt: meta.finished_at ?? meta.started_at ?? null,
       });
     }
-    return [...enriched, ...orphanTurns];
+    // ql-20260818-011-b：按时间戳排序（孤儿 turn 不追加在末尾，与实时 turn 按时间
+    // 线正确穿插——重进后 logsToTurns 已是时间序，不排序会导致切换标记堆在底部）。
+    const ts = (t: SessionTurnView) =>
+      Date.parse(t.replyAt ?? t.sender?.at ?? "") || 0;
+    return [...enriched, ...orphanTurns].sort((a, b) => ts(a) - ts(b));
   }, [turnState.turns, runsMeta, providers, agentDisplayName, session?.user_id]);
 
   // CtxUsageBar：累计 usage（实时 turn input_tokens 求和 + 历史轮回填，R-06 前端累计）
