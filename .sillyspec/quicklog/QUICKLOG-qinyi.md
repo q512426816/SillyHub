@@ -69,3 +69,4 @@
 根因：① apply_ops 的 write_bytes/mkdir/utime/move 在事件循环上同步执行，Windows bind mount 连写卡死循环数十秒，被卡请求的连接撞 120s idle-in-transaction 超时（db.py:40 ql-20260728-008 前科）；② _compute_reparse_scope 对任何 archive 路径 op 都置 archive_hit 全量重扫（parsed 225），daemon 陈旧缓存重推归档文件即误触发。
 方案：① 抽 _write_op_file/_move_op_file 同步 helper 五处 FS 段整体入 asyncio.to_thread；② archive_hit 仅在 delete/rename op 命中 archive 路径置位（真归档=跨根移动恒发 rename），add/update 走 scoped name，change_dirs 归档前缀剥前缀进 scoped；③ reparse 移出请求路径评估结论 defer——scoped <1s 全量 ~2s 且罕见，后台化复杂度不抵收益。
 结果：spec_workspace 97 passed + change 386 passed（各含预存 skip），ruff format/check 与 mypy 全绿；残余风险为归档同时改内容时 rename 退化为 delete+add 的陈旧行残留，留待下次全量重扫收敛（与 scoped 零删除红线同哲学）。
+
