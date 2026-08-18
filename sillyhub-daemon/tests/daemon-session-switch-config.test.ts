@@ -8,7 +8,7 @@
 // 系列测试（task-08）。覆盖：
 //   - snake_case / camelCase payload 归一化后构造 SessionSwitchConfigPayload 透传
 //   - profile=null / provider_config=null（不切语义，design §7.2）透传 null
-//   - 缺 run_id / claim_token / prompt（切换轮三要素）→ warn 丢弃不调
+//   - 缺 run_id / claim_token → warn 丢弃不调；prompt 空串=静默切换正常路由（ql-20260817-011）
 //   - 缺 session_id → warn 丢弃不调
 //   - session 不在 SessionStore（迟到/重放）→ warn 丢弃不调（口径同 SESSION_INJECT）
 //   - markPendingConfigSwitch 抛 SessionNotFoundError → best-effort warn 不崩
@@ -302,7 +302,7 @@ describe('task-09 / FR-05 / D-012@v1: daemon SESSION_SWITCH_CONFIG WS handler �
     expect(sm.markPendingConfigSwitch).not.toHaveBeenCalled();
   });
 
-  it('缺 prompt → warn 丢弃，markPendingConfigSwitch 不被调', async () => {
+  it('空 prompt（静默切换）→ 正常路由，markPendingConfigSwitch 被调（ql-20260817-011）', async () => {
     const sm = createMockSessionManager(makeState(SESSION_ID, LEASE_ID));
     const { daemon } = buildDaemon(sm);
     daemons.push(daemon);
@@ -313,13 +313,18 @@ describe('task-09 / FR-05 / D-012@v1: daemon SESSION_SWITCH_CONFIG WS handler �
         session_id: SESSION_ID,
         run_id: RUN_ID,
         claim_token: CLAIM_TOKEN,
+        prompt: '',
         profile: null,
         provider_config: null,
       },
     });
     await flushMicro();
 
-    expect(sm.markPendingConfigSwitch).not.toHaveBeenCalled();
+    // 静默切换：prompt 空串不再当「三要素缺失」丢弃——reloadWithConfig 对空
+    // prompt 只 reload 配置不喂消息（此前 DB 切了 daemon 丢弃消息不 reload）。
+    expect(sm.markPendingConfigSwitch).toHaveBeenCalledTimes(1);
+    const arg = sm.markPendingConfigSwitch.mock.calls[0]?.[1];
+    expect(arg.prompt).toBe('');
   });
 
   it('缺 session_id → warn 丢弃，markPendingConfigSwitch 不被调', async () => {

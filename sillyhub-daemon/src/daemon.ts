@@ -2978,8 +2978,10 @@ export class Daemon {
       (raw.claim_token as string | undefined) ??
       (raw.claimToken as string | undefined) ??
       '';
+    // ql-20260817-011：prompt 允许空串（静默切换——只 reload 配置不喂消息，
+    // reloadWithConfig 既有 if (payload.prompt) 守卫处理）；必填仅 runId/claimToken。
     const prompt = (raw.prompt as string | undefined) ?? '';
-    if (!runId || !claimToken || !prompt) {
+    if (!runId || !claimToken) {
       this._logger.warn('session_switch_config_missing_fields', {
         session_id: sessionId,
         run_id: runId,

@@ -493,3 +493,12 @@
 根因：inject 契约要求非空 prompt，前端自动填默认文案发出。
 方案：静默切换三端——后端切换字段在场允许空 prompt（validator+服务层兜底）；空 prompt 切换轮 run 直接 completed（无 LLM turn）；daemon 既有 if(payload.prompt) 守卫空则只 reload；前端发空串（switchPrompt 传入仍可带话切换）。
 结果：切换 14 用例过（新增 2），daemon 全量 802，前端全量 1610，tsc/ruff 0。待部署 backend+frontend。
+
+## ql-20260818-001-fc28 | 2026-08-18 08:38:30 | 切换供应商/档案 toast 成功但实际没生效（会话 259635ca）
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+需求：切换供应商/档案 toast 成功但实际没生效（会话 259635ca）。
+根因：静默切换发空 prompt，daemon 路由三要素校验仍要求 prompt 非空→消息被丢弃（日志实证），DB 切了 daemon 没 reload。
+方案：daemon.ts 必填改 runId/claimToken；空 prompt 正常路由（reloadWithConfig 既有守卫只 reload）。测试改写+新增静默路由断言。
+结果：switch-config 11/11 过，daemon 全量 2376+1 既有基线失败（无关），tsc 过。待重启 daemon。
