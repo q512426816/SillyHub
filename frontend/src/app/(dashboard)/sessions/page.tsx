@@ -125,6 +125,14 @@ export default function SessionsPortalPage() {
         <SessionListPanel
           selectedSessionId={selectedSessionId}
           onSelect={(s) => setSelectedSessionId(s.id)}
+          onDeleteSessions={async (ids) => {
+            // ql-20260818-012：逐条调 deleteAgentSession（后端软删），完成后
+            // invalidate 列表 + 清除选中态（若选中被删的会话）。
+            const { deleteAgentSession } = await import("@/lib/daemon");
+            await Promise.allSettled(ids.map((id) => deleteAgentSession(id)));
+            void qc.invalidateQueries({ queryKey: ["agentSessions"] });
+            if (ids.includes(selectedSessionId ?? "")) setSelectedSessionId(null);
+          }}
         />
         {selectedSessionId ? (
           <SessionPanel
