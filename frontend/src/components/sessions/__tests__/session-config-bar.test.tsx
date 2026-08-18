@@ -417,11 +417,17 @@ describe("SessionConfigBar 切换档案", () => {
     );
   });
 
-  it("「不指定」项为纯展示（inject 契约仅非空 id 切换，不支持会话内取消）", () => {
+  it("「不指定」→ agent_profile_id 空串取消档案回无人格（ql-20260818-004）", async () => {
     renderBar({ agentProfileId: "prof-1" });
     openCtrl("配置-档案");
-    expect(screen.getByText("暂不支持会话内取消")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "选择 不指定" })).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "选择 不指定（无人格）" }),
+    );
+    await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
+    // 空串语义："" 必须下发（取消档案），undefined=不切换
+    const call = mocks.injectSession.mock.calls.at(0);
+    expect(call?.[1]).toBe("");
+    expect(call?.[2]?.agent_profile_id).toBe("");
   });
 
   it("Codex 引擎下档案选项标注「人格暂不支持」（D-013 不做引擎过滤）", () => {

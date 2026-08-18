@@ -524,8 +524,13 @@ describe('task-08 / reloadWithConfig（FR-05 / D-012@v1，claude）', () => {
       providerConfig: null,
     });
 
-    // Assert
-    expect(mock.startCalls[1].opts['systemPrompt']).toBeUndefined();
+    // Assert（ql-20260818-004 新语义：清空=preset-only 无人格 + fork 使其生效——
+    // 旧「不传选项靠 resume 保留旧 jsonl 人格」无法实现取消）。
+    expect(mock.startCalls[1].opts['systemPrompt']).toEqual({
+      type: 'preset',
+      preset: 'claude_code',
+    });
+    expect(mock.startCalls[1].opts['forkSession']).toBe(true);
     expect(readState(sm, BASE_INPUT.sessionId)!.systemPrompt).toBeUndefined();
   });
 

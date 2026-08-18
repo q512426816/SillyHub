@@ -1029,7 +1029,7 @@ class SessionService:
         # 消息/模型回应，daemon 只 reload 配置）；纯追问仍要求非空（DTO 已 422，
         # 服务层兜底防绕过）。
         if not prompt or not prompt.strip():
-            if not agent_profile_id and llm_provider_id is None:
+            if agent_profile_id is None and llm_provider_id is None:
                 raise DaemonSessionNotActive(
                     "prompt must not be empty.",
                     details={"reason": "empty_prompt"},
@@ -1163,7 +1163,12 @@ class SessionService:
             # 会话状态与列不变（R-03）。
             profile_changed = False
             switch_profile = None
-            if agent_profile_id:
+            if agent_profile_id == "":
+                # ql-20260818-004：空串 = "none" → 取消档案（写 NULL 回无人格），
+                # 与 llm_provider_id 空串语义对称。已 NULL 时等价不动。
+                if session.agent_profile_id is not None:
+                    profile_changed = True
+            elif agent_profile_id:
                 try:
                     _new_profile_uuid = uuid.UUID(agent_profile_id)
                 except (ValueError, AttributeError, TypeError) as exc:
@@ -1329,12 +1334,17 @@ class SessionService:
                 meta_updates: dict = {}
                 meta_removals: list[str] = []
                 if profile_changed:
-                    if switch_profile.system_prompt:
-                        meta_updates["system_prompt"] = switch_profile.system_prompt
+                    # ql-20260818-004：取消档案（switch_profile=None）→ 提示词维度
+                    # 三键全删（回无人格）；切换 → 写新值。
+                    if switch_profile is None:
+                        meta_removals.extend(["system_prompt", "mcp_refs", "skill_refs"])
                     else:
-                        meta_removals.append("system_prompt")
-                    meta_updates["mcp_refs"] = list(switch_profile.mcp_refs or [])
-                    meta_updates["skill_refs"] = list(switch_profile.skill_refs or [])
+                        if switch_profile.system_prompt:
+                            meta_updates["system_prompt"] = switch_profile.system_prompt
+                        else:
+                            meta_removals.append("system_prompt")
+                        meta_updates["mcp_refs"] = list(switch_profile.mcp_refs or [])
+                        meta_updates["skill_refs"] = list(switch_profile.skill_refs or [])
                 if provider_changed:
                     if new_llm_provider_id is not None:
                         meta_updates["session_llm_provider_id"] = str(new_llm_provider_id)
@@ -1378,10 +1388,18 @@ class SessionService:
                     provider_config_payload = None
                 profile_payload = None
                 if profile_changed:
+                    # ql-20260818-004：取消档案 → 空载荷（systemPrompt 空串=daemon 侧
+                    # 归一为 null 哨兵「切到无人格」，mcp/skill 清空）。
                     profile_payload = {
-                        "systemPrompt": switch_profile.system_prompt or "",
-                        "mcpRefs": list(switch_profile.mcp_refs or []),
-                        "skillRefs": list(switch_profile.skill_refs or []),
+                        "systemPrompt": switch_profile.system_prompt or ""
+                        if switch_profile is not None
+                        else "",
+                        "mcpRefs": list(switch_profile.mcp_refs or [])
+                        if switch_profile is not None
+                        else [],
+                        "skillRefs": list(switch_profile.skill_refs or [])
+                        if switch_profile is not None
+                        else [],
                     }
             else:
                 profile_payload = None

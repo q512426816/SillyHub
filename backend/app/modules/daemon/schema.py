@@ -123,7 +123,11 @@ class SessionInjectRequest(BaseModel):
 
     @model_validator(mode="after")
     def _require_prompt_or_switch(self) -> "SessionInjectRequest":
-        if not self.prompt.strip() and not self.agent_profile_id and self.llm_provider_id is None:
+        if (
+            not self.prompt.strip()
+            and self.agent_profile_id is None
+            and self.llm_provider_id is None
+        ):
             raise ValueError("prompt is required when no config switch is requested")
         return self
 

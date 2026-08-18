@@ -1108,8 +1108,11 @@ export class SessionManager {
       effectiveAskUserOnly: boolean;
       resume?: string;
       mcpServers?: Record<string, McpServerConfigForDriver>;
-      /** task-05：profile.system_prompt → driverOpts.systemPrompt preset+append。 */
-      systemPrompt?: string;
+      /** task-05：profile.system_prompt → driverOpts.systemPrompt preset+append。
+       * ql-20260818-004：null=取消档案（preset-only 无人格）。 */
+      systemPrompt?: string | null;
+      /** ql-20260818-002/004：档案维度切换（含取消）→ fork 新会话使人格生效。 */
+      forkSession?: boolean;
     },
   ): Record<string, unknown> {
     const driverOpts: Record<string, unknown> = {
@@ -1150,14 +1153,15 @@ export class SessionManager {
       driverOpts.systemPrompt = {
         type: 'preset',
         preset: 'claude_code',
-        append: spec.systemPrompt,
+        // ql-20260818-004：null=取消档案 → preset-only（claude 默认人格，无追加）。
+        append: spec.systemPrompt ?? undefined,
       };
-      // ql-20260818-002：SDK 的 systemPrompt 选项在 **resume** 时被 CLI 忽略
-      // （会话 jsonl 固化创建时的 system prompt；实测 reload 后人格不生效）。
-      // SDK 官方机制：forkSession=true 让 resume fork 出新会话 ID，新 system
-      // prompt 对 fork 生效且历史完整复制。仅 resume+带人格时 fork；首次
-      // create（无 resume）systemPrompt 选项原生生效，不 fork。
-      if (spec.resume) {
+      // ql-20260818-002/004：SDK 的 systemPrompt 选项在 **resume** 时被 CLI 忽略
+      // （会话 jsonl 固化创建时的 system prompt）——SDK 官方机制 forkSession=true
+      // 让 resume fork 出新会话 ID，新 system prompt 对 fork 生效且历史完整复制。
+      // 由 reloadWithConfig 显式决策（仅档案维度被切时 fork；provider-only 切换
+      // 人格已在 jsonl 固化，resume 自然保留，fork 只会白白换 session id）。
+      if (spec.forkSession === true) {
         driverOpts.forkSession = true;
       }
     }
@@ -2770,25 +2774,30 @@ export class SessionManager {
     if (payload.claimToken) {
       state.claimToken = payload.claimToken;
     }
-    // 计算生效配置（null = 不切 → 保持现状；profile.systemPrompt 缺省 = 切到无人格
-    // → 传 null 哨兵让内核显式清空，与 undefined=不参与区分）。
+    // 计算生效配置（null = 切到无人格（内核清空）；undefined = 不参与保持现状）。
+    // ql-20260818-004：取消档案 → backend 发空串 systemPrompt，归一为 null 哨兵。
     const nextSystemPrompt =
       payload.profile !== null && payload.profile !== undefined
-        ? (payload.profile.systemPrompt ?? null)
+        ? ((payload.profile.systemPrompt ?? '').trim()
+            ? payload.profile.systemPrompt
+            : null)
         : (state.systemPrompt ?? null);
     const nextProviderConfig =
       payload.providerConfig ?? state.providerConfig ?? null;
 
-    // ql-20260818-002：带人格的 reload 走 forkSession（resume 时 systemPrompt
-    // 选项被 CLI 忽略，fork 新会话才生效）——置位 forkedInitPending 让新
-    // session_id 能经 system/init 更新 state（否则持久化旧 id 下次 resume 回旧会话）。
-    if (typeof nextSystemPrompt === 'string') {
+    // ql-20260818-002/004：切档案（含取消）的 reload 走 forkSession（resume 时
+    // systemPrompt 选项被 CLI 忽略，fork 新会话才生效）——置位 forkedInitPending
+    // 让新 session_id 能经 system/init 更新 state（否则持久化旧 id 下次 resume
+    // 回旧会话）。provider-only 切换不 fork（人格已在 jsonl 固化，resume 自然保留）。
+    const profileSwitched = payload.profile != null;
+    if (profileSwitched) {
       state.forkedInitPending = true;
     }
 
     await this._reloadSession(sessionId, {
       systemPrompt: nextSystemPrompt,
       providerConfig: nextProviderConfig,
+      forkSession: profileSwitched,
     });
 
     // reload 成功：同步 profile 承载字段（mcpRefs/skillRefs 透传；systemPrompt 已由
@@ -2854,6 +2863,8 @@ export class SessionManager {
     opts: {
       systemPrompt?: string | null;
       providerConfig?: ProviderConfig | null;
+      /** ql-20260818-002/004：档案维度切换（含取消）→ fork 新会话使人格生效。 */
+      forkSession?: boolean;
     },
   ): Promise<void> {
     const state = this._store.get(sessionId);
@@ -2942,9 +2953,12 @@ export class SessionManager {
         // task-08：会话级配置切换路径注入新人格（claude preset+append；codex 忽略——
         // provider!==claude 时不传，Codex 只切配置不注人格，原 D-003 / NG-02）。
         // undefined（reloadWithProvider 既有路径）→ 不传 → 与重构前行为逐字节一致。
-        ...(state.provider === 'claude' && typeof opts.systemPrompt === 'string'
+        // ql-20260818-004：null（取消档案）也传——preset-only 即无人格。
+        ...(state.provider === 'claude' && opts.systemPrompt !== undefined
           ? { systemPrompt: opts.systemPrompt }
           : {}),
+        // ql-20260818-002/004：档案维度切换 → fork（resume 下人格仅对 fork 生效）。
+        ...(opts.forkSession === true ? { forkSession: true } : {}),
       });
 
       // ── ⑤ driver.start(state.inputQueue, driverOpts) → 新句柄 ──
