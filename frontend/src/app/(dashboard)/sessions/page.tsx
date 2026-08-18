@@ -474,7 +474,7 @@ function SessionPanel({
   // run 快照缺失（拉取失败 / 占位 turn）原样返回——whoLine 不渲染（零回归）。
   const displayTurns = useMemo(() => {
     if (runsMeta.size === 0) return turnState.turns;
-    return turnState.turns.map((t) => {
+    const enriched = turnState.turns.map((t) => {
       const meta = runsMeta.get(t.realRunId ?? t.runId);
       if (!meta) return t;
       return {
@@ -505,6 +505,48 @@ function SessionPanel({
         replyAt: t.replyAt ?? meta.finished_at ?? meta.started_at ?? null,
       };
     });
+    // ql-20260818-011：runsMeta 中的静默切换 run 无 SSE 事件→不在 turnState.turns
+    // 中→displayTurns 迭代忽略→重进才可见。补建孤儿 turn（无 prompt/output，
+    // 有 whoLine，已完成后台 run），让它们实时出现。
+    const knownRunIds = new Set(turnState.turns.map((t) => t.realRunId ?? t.runId));
+    const orphanTurns: SessionTurnView[] = [];
+    for (const [runId, meta] of runsMeta) {
+      if (knownRunIds.has(runId)) continue;
+      if (meta.status !== 'completed') continue;
+      orphanTurns.push({
+        runId,
+        turn: null,
+        prompt: '',
+        output: '',
+        status: 'completed',
+        seenLogIds: new Set(),
+        inputTokens: meta.input_tokens ?? null,
+        outputTokens: meta.output_tokens ?? null,
+        errorDetail: null,
+        processItems: [],
+        realRunId: runId,
+        whoLine: {
+          profileName: meta.agent_profile_snapshot?.name ?? null,
+          agentName: agentDisplayName,
+          providerName: meta.llm_provider_id
+            ? (providers.find((p) => p.id === meta.llm_provider_id)?.name ?? null)
+            : null,
+        },
+        sender: meta.user_id && meta.sender_name
+          ? {
+              name: meta.sender_name,
+              me: meta.user_id === session?.user_id,
+              at: meta.started_at ?? null,
+            }
+          : undefined,
+        replyAt: meta.finished_at ?? meta.started_at ?? null,
+      });
+    }
+    // ql-20260818-011-b：按时间戳排序（孤儿 turn 不追加在末尾，与实时 turn 按时间
+    // 线正确穿插——重进后 logsToTurns 已是时间序，不排序会导致切换标记堆在底部）。
+    const ts = (t: SessionTurnView) =>
+      Date.parse(t.replyAt ?? t.sender?.at ?? "") || 0;
+    return [...enriched, ...orphanTurns].sort((a, b) => ts(a) - ts(b));
   }, [turnState.turns, runsMeta, providers, agentDisplayName, session?.user_id]);
 
   // CtxUsageBar：累计 usage（实时 turn input_tokens 求和 + 历史轮回填，R-06 前端累计）
@@ -916,9 +958,13 @@ function SessionPanel({
             runtimeId={session.runtime_id ?? null}
             engine={session.provider ?? null}
             onSwitched={() => {
-              // 切换成功 → 刷新会话详情（三列快照）+ 左侧列表 chips。
+              // 切换成功 → 刷新会话详情（三列快照）+ 左侧列表 chips + runsMeta
+              // （立即显示新 whoLine，不等重进页面）。
               void qc.invalidateQueries({ queryKey: ["agentSessionDetail", sessionId] });
               onSessionListRefresh?.();
+              void listSessionRuns(sessionId)
+                .then((runs) => setRunsMeta(new Map(runs.map((r) => [r.id, r]))))
+                .catch(() => {});
             }}
           />
         </div>

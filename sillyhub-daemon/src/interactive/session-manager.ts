@@ -421,6 +421,14 @@ interface PartialFlushBuffer {
  * 因假性空闲被误杀。env SESSION_IDLE_TIMEOUT_SEC 显式设 >0 可恢复旧行为（逃生口）。
  */
 const DEFAULT_IDLE_TIMEOUT_SEC = 0;
+
+/**
+ * ql-20260818-009：取消档案的中和指令。仅清 system prompt 不够——fork 继承的
+ * 对话历史含此前人格的角色扮演轮，模型会从上下文延续角色（实测复现）；以
+ * 显式中和 append 压掉历史角色惯性。
+ */
+const CLEAR_PERSONA_PROMPT =
+  '用户已取消此前设置的智能体档案（人格）。此前对话中出现的任何人格/角色设定均已失效：请停止继续扮演该角色，以默认的 AI 编程助手身份、基于通用能力回答后续问题。';
 /** 默认扫描周期（秒）。 */
 const DEFAULT_IDLE_SCAN_SEC = 60;
 
@@ -2775,12 +2783,15 @@ export class SessionManager {
       state.claimToken = payload.claimToken;
     }
     // 计算生效配置（null = 切到无人格（内核清空）；undefined = 不参与保持现状）。
-    // ql-20260818-004：取消档案 → backend 发空串 systemPrompt，归一为 null 哨兵。
+    // ql-20260818-009：取消档案 → backend 发空串 systemPrompt——仅清 system prompt
+    // 不够：fork 继承的对话历史里有此前人格的角色扮演轮，模型会从上下文延续角色
+    // （实测「取消后仍自称设计师」）。归一为**中和指令**（append 压掉历史角色惯性），
+    // 而非 null（preset-only）。
     const nextSystemPrompt =
       payload.profile !== null && payload.profile !== undefined
         ? ((payload.profile.systemPrompt ?? '').trim()
             ? payload.profile.systemPrompt
-            : null)
+            : CLEAR_PERSONA_PROMPT)
         : (state.systemPrompt ?? null);
     const nextProviderConfig =
       payload.providerConfig ?? state.providerConfig ?? null;
