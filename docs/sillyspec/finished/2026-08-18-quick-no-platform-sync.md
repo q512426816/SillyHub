@@ -46,15 +46,17 @@ quick 会话按设计**没有** `.sillyspec/changes/<changeName>/` 目录（chan
 - **spec 树增量（syncSpecTree）**：以服务器清单为锚做全树 diff，与变更目录无关，
   QUICKLOG/模块文档正是靠它上行 → **这段被误伤，是真正要接上的**。
 
-## 期望修复（待 sillyspec 仓实现）
+## 修复记录（sillyspec 仓 22d80aa，ql-20260818-011-9ae6）
 
-quick 收尾（或 triggerSync 通用路径）识别 `quick-<hex8>` 会话：跳过 progress/docs，
-直接 `syncSpecTree(join(cwd, '.sillyspec'), platform, changeName)`（沿用 8s 总超时
-熔断与 best-effort 语义，失败不影响 --done 返回）。更通用的做法：sync() 对
-「变更不存在」降级为仅推 spec 树，但需防真实变更名拼写错误的噪音混入。
+- **修复提交**：`22d80aa fix(quick): quick 会话补平台 spec 树同步`
+- **涉及文件**：
+  - `src/run/shared.js`：`triggerSync()` 识别 `quick-<hex8>` 模式；变更目录不存在时不再静默 return，降级调用 `syncSpecTreeOnly(changeName, cwd)`。真实变更名拼写错误仍保持静默（不引入噪音）。
+  - `src/sync.js`：新增导出 `syncSpecTreeOnly(changeName, cwd)`，跳过 progress 和四件套文档，只走 spec 树增量同步。
+  - `test/platform-sync-quick-session-spectree.test.mjs`：4 组验收——已连接平台推 spec 树、未连接平台静默、真实变更目录走原路径不变、拼写错误保持静默。
+  - `docs/sillyspec/platform-interface-map.md`：同步重锚 `triggerSync:425`、熔断范围 `420-432`。
+- **升级主仓 CLI**：全局安装从本地 sillyspec 仓库重新安装（`npm install -g C:/Users/qinyi/IdeaProjects/sillyspec`）→ `sillyspec --version` 升到 >=3.26.11（含本次修复）。
 
-## 绕过方案（当前）
+## 绕过方案（历史，已修复）
 
-quick 完成后手动触发一次全树同步：起一个活跃完整变更跑任意 `--done`，或
-`sillyspec platform sync`（若可用）。短期最简单：接受滞后，等下一个完整变更
---done 顺带收敛。
+~~quick 完成后手动触发一次全树同步：起一个活跃完整变更跑任意 `--done`，或
+`sillyspec platform sync`（若可用）。~~ 修复后 quick `--done` 自动触发 `[spec-sync]`。
