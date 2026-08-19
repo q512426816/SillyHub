@@ -61,30 +61,6 @@ vi.mock("@/lib/workspace-binding", async (importOriginal) => {
 });
 
 // ── mock WorkspaceBindingDialog（task-06），只验 open/workspaceId 透传 ──
-let lastDialogProps: { workspaceId: string; open: boolean } | null = null;
-vi.mock("@/components/workspace-binding-dialog", () => ({
-  WorkspaceBindingDialog: (props: {
-    workspaceId: string;
-    open: boolean;
-    onBound: (b: unknown) => void;
-    onClose: () => void;
-  }) => {
-    lastDialogProps = { workspaceId: props.workspaceId, open: props.open };
-    return props.open ? (
-      <div data-testid="binding-dialog-stub">
-        <button
-          type="button"
-          data-testid="dialog-confirm-bound"
-          onClick={() =>
-            props.onBound({ workspace_id: props.workspaceId, daemon_id: "d-x" })
-          }
-        >
-          模拟绑定成功
-        </button>
-      </div>
-    ) : null;
-  },
-}));
 
 // ── mock next/navigation（switchWorkspace 内部用 router.push） ──
 const mockPush = vi.fn();
@@ -204,7 +180,6 @@ beforeEach(() => {
   // ql-20260726-004：canBorrowSharedDaemon 的 mockReturnValue(true) 不被 clearAllMocks
   // 重置，显式还原默认 false，防 borrow 测试的实现泄漏到后续测试。
   vi.mocked(canBorrowSharedDaemon).mockReturnValue(false);
-  lastDialogProps = null;
 });
 
 /** 打开下拉菜单（Radix Trigger 监听 keydown Enter/Space open，pointer/click 在
@@ -367,7 +342,6 @@ describe("WorkspaceSwitcher", () => {
 
     // 门禁后移：未绑定也直接切换，不弹绑定弹窗
     expect(mockSwitchWorkspace).toHaveBeenCalledWith("ws-c");
-    expect(lastDialogProps).toBeNull();
   });
 
   it("门禁后移：canBorrow 判定已从入口移除，任意成员未绑定项也直接切换（不再依赖 daemon:borrow）", async () => {
@@ -397,7 +371,6 @@ describe("WorkspaceSwitcher", () => {
     await clickItem("数据看板");
 
     expect(mockSwitchWorkspace).toHaveBeenCalledWith("ws-c");
-    expect(lastDialogProps).toBeNull();
     // canBorrow 判定已从入口移除，不应被调用
     expect(canBorrowSharedDaemon).not.toHaveBeenCalled();
   });

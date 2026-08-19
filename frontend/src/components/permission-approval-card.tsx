@@ -69,16 +69,20 @@ export function PermissionApprovalCard({
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
-  // 倒计时：每秒更新一次（仅 UI 提示，backend 5min 超时是真相源）。
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-
   const createdAt = useMemo(() => Date.now(), []);
   const elapsed = now - createdAt;
   const remaining = PERMISSION_WINDOW_MS - elapsed;
   const expired = remaining <= 0;
+
+  // 倒计时：每秒更新一次（仅 UI 提示，backend 5min 超时是真相源）。
+  // FE-9（2026-08-20 审计）：终态（已过期/提交中）停表——本卡常被日志页/权限面板
+  // 列表化渲染，多卡同屏时每卡一个永不停的 1s timer 会造成每秒 N 次重渲染。
+  const countdownStopped = expired || submitting !== null;
+  useEffect(() => {
+    if (countdownStopped) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [countdownStopped]);
 
   const summary = useMemo(
     () => summarizeInput(request.input ?? {}),

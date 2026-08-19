@@ -27,7 +27,7 @@ import { cn } from "@/lib/utils";
  * 列表页改造为工作区选择器后，每张卡片需展示 daemon 在线状态徽标
  * （绿守护在线 / 红守护离线 / 黄未绑定），并支持整卡点击分流：
  *   - 已绑定 → 父级 router.push('/workspaces/{id}')
- *   - 未绑定 → 父级弹 WorkspaceBindingDialog（task-06）
+ *   - 未绑定 → 父级走 daemon-client 统一绑定流程（原 WorkspaceBindingDialog 已随重构删除）
  * 分流由父级（page.tsx）依据 statusMap 判定后传 `onActivate` 回调；
  * 本组件不直接路由，保持纯展示 + 事件上抛。
  *

@@ -164,3 +164,12 @@
 根因：shell:true 参数零转义注入；get_spec_bundle 无守卫；词法校验不解析 junction；SIGKILL 留孤儿孙进程；env 可劫持 PATH；凭证无 0600；toRpcError 双实现；detector exec 拼引号；占位/结题残留
 方案：shell 元字符硬失败+model 白名单；补 assertWithinAllowedRoots；收敛 isPathUnderAnyRoot(realpath)；taskkill /T /F 杀树；剔除受保护 env 键；chmod 0600；toRpcError 单实现；cmd-shim+execFile；删 src/index.ts+spikes/06
 结果：tsc 0 错；vitest 2447 passed 全绿
+
+## ql-20260820-004-dbc3 | 2026-08-20 03:34:52 | docs/platform-audit-2026-08-20.md 批次D前端（FE-2/3/4/5/8/9）
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+需求：docs/platform-audit-2026-08-20.md 批次D前端（FE-2/3/4/5/8/9）
+根因：无（测试同步+死代码清理+小改）
+方案：__setBindingMap 改hoisted状态；placeholder三元；删stage-team-config/workspace-binding-dialog/use-agent-runs及stub断言；审批卡终态停表；formatter去any
+结果：tsc 0错、vitest 1695 passed、lint 0 error

@@ -63,7 +63,7 @@ vi.mock("antd", async (importOriginal) => {
         }}
         data-testid={`select-${id}`}
       >
-        {placeholder && <option value="">{String(placeholder)}</option>}
+        {placeholder ? <option value="">{String(placeholder)}</option> : null}
         {(options as Array<{ value: string; label: string }> | undefined)?.map((o) => (
           <option key={o.value} value={o.value}>{o.label}</option>
         ))}

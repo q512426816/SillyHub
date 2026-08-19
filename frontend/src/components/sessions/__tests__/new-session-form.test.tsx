@@ -44,11 +44,14 @@ import type {
   DaemonMachineRead,
   DaemonRuntimeRead,
 } from "@/lib/daemon";
-import { __setBindingMap } from "@/components/sessions/workspace-session-picker";
 
 // ── hoisted mock 状态 ─────────────────────────────────────────────────────
 
 const mocks = vi.hoisted(() => ({
+  // FE-2：真实组件已删 __setBindingMap 测试后门，mock 工厂内的绑定映射改由
+  // hoisted 状态承载，测试经 mocks.__setBindingMap 调整。
+  __bindingMap: {} as Record<string, string | null>,
+  __setBindingMap: (m: Record<string, string | null>) => Object.assign(mocks.__bindingMap, m),
   machinesHook: vi.fn(),
   profilesHook: vi.fn(),
   listProviders: vi.fn(),
@@ -92,9 +95,8 @@ vi.mock("@/lib/workspace-binding", () => ({
 
 vi.mock("@/components/sessions/workspace-session-picker", () => {
   // 模拟绑定映射：workspace-id → daemon-id（测试中可按需调整）
-  const bindingMap: Record<string, string | null> = {};
+  const bindingMap = mocks.__bindingMap;
   return {
-    __setBindingMap: (m: Record<string, string | null>) => Object.assign(bindingMap, m),
     WorkspaceSessionPicker: ({ value, onChange, disabled }: { value: string | null; onChange: (wsId: string | null, boundMachineId: string | null) => void; disabled?: boolean }) => (
       <select
         data-testid="workspace-picker"
@@ -855,7 +857,7 @@ describe("NewSessionForm 工作区选择器联动", () => {
     mocks.fetchMyBindings.mockResolvedValue([
       { workspace_id: "ws-1", daemon_id: "m-b" },
     ]);
-    __setBindingMap({ "mock-ws-1": "m-b" });
+    mocks.__setBindingMap({ "mock-ws-1": "m-b" });
     setMachines({ items: [machineA, machineB] });
 
     renderForm(<NewSessionForm />);
@@ -924,7 +926,7 @@ describe("NewSessionForm 工作区选择器联动", () => {
     mocks.fetchMyBindings.mockResolvedValue([
       { workspace_id: "ws-1", daemon_id: "m-b" },
     ]);
-    __setBindingMap({ "mock-ws-1": "m-b" });
+    mocks.__setBindingMap({ "mock-ws-1": "m-b" });
     setMachines({ items: [machineA, machineB] });
 
     renderForm(<NewSessionForm />);

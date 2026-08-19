@@ -116,8 +116,12 @@ export function toPieSeries(
   return {
     tooltip: {
       trigger: "item",
-      formatter: (p: any) =>
-        `${p.name}: ${toNumber(p.value).toFixed(1)}h (${p.percent ?? 0}%)`,
+      // FE-8：echarts formatter 回调参数是库内联合类型，收 unknown 后窄化，
+      // 替掉全仓唯一的显式 any（非测试代码）。
+      formatter: (p: unknown) => {
+        const o = p as { name?: string; value?: unknown; percent?: number };
+        return `${o.name ?? ""}: ${toNumber(o.value).toFixed(1)}h (${o.percent ?? 0}%)`;
+      },
     },
     legend: {
       type: "scroll",

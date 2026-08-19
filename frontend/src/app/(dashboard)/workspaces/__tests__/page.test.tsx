@@ -65,33 +65,6 @@ vi.mock("@/components/workspace-card", () => ({
   },
 }));
 
-// ── WorkspaceBindingDialog stub（CB-1 未绑定点击弹窗，task-06 产物）─────────
-const bindingDialogMock = vi.hoisted(() => ({ lastOpen: false }));
-vi.mock("@/components/workspace-binding-dialog", () => ({
-  WorkspaceBindingDialog: (props: {
-    workspaceId: string;
-    open: boolean;
-    onBound: (b: unknown) => void;
-    onClose: () => void;
-  }) => {
-    bindingDialogMock.lastOpen = props.open;
-    return props.open ? (
-      <div data-testid="binding-dialog" data-workspace={props.workspaceId}>
-        <button data-testid="binding-close" onClick={() => props.onClose()}>
-          关闭
-        </button>
-        <button
-          data-testid="binding-bound"
-          onClick={() => {
-            props.onBound({ workspace_id: props.workspaceId, daemon_id: "d-1" });
-          }}
-        >
-          模拟绑定成功
-        </button>
-      </div>
-    ) : null;
-  },
-}));
 
 // ── WorkspaceScanDialog stub（page 用 {showDialog && <Dialog/>} 控制挂载；
 //    被渲染即代表 open=true，stub 据此断言「创建按钮点击 → page 挂载弹窗」）─────
@@ -217,7 +190,6 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   cardMock.lastProps = null;
-  bindingDialogMock.lastOpen = false;
   vi.restoreAllMocks();
 });
 
