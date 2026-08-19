@@ -32,7 +32,7 @@ import {
   type InfiniteData,
 } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Badge, Button, Input, Segmented, Select, Spin, Tag } from "antd";
+import { Badge, Button, Input, Modal, Segmented, Select, Spin, Tag } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import { Trash2 } from "lucide-react";
 import { ApiError } from "@/lib/api";
@@ -209,24 +209,43 @@ export function SessionListPanel({
   const total = sessionsQuery.data?.pages.at(-1)?.total ?? 0;
 
   // ql-20260818-012：删除处理（单条/批量共用 onDeleteSessions 回调）。
-  const handleSingleDelete = async (id: string) => {
+  // ql-20260818-013：加二次确认（Modal.confirm）。
+  const handleSingleDelete = (id: string, title: string) => {
     if (!onDeleteSessions || deleting) return;
-    setDeleting(true);
-    try {
-      await onDeleteSessions([id]);
-    } finally {
-      setDeleting(false);
-    }
+    Modal.confirm({
+      title: "删除会话",
+      content: `确定要删除「${title}」吗？删除后将从列表中移除。`,
+      okText: "删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        setDeleting(true);
+        try {
+          await onDeleteSessions([id]);
+        } finally {
+          setDeleting(false);
+        }
+      },
+    });
   };
-  const handleBatchDelete = async () => {
+  const handleBatchDelete = () => {
     if (!onDeleteSessions || deleting || checkedIds.size === 0) return;
-    setDeleting(true);
-    try {
-      await onDeleteSessions([...checkedIds]);
-      setCheckedIds(new Set());
-    } finally {
-      setDeleting(false);
-    }
+    Modal.confirm({
+      title: "批量删除会话",
+      content: `确定要删除选中的 ${checkedIds.size} 个会话吗？删除后将从列表中移除。`,
+      okText: `删除 ${checkedIds.size} 个`,
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        setDeleting(true);
+        try {
+          await onDeleteSessions([...checkedIds]);
+          setCheckedIds(new Set());
+        } finally {
+          setDeleting(false);
+        }
+      },
+    });
   };
   const toggleChecked = (id: string) => {
     setCheckedIds((prev) => {
@@ -332,7 +351,7 @@ export function SessionListPanel({
               size="small"
               disabled={checkedIds.size === 0 || deleting}
               loading={deleting}
-              onClick={() => void handleBatchDelete()}
+              onClick={handleBatchDelete}
             >
               删除选中（{checkedIds.size}）
             </Button>
@@ -405,7 +424,7 @@ export function SessionListPanel({
                   batchMode={batchMode}
                   checked={checkedIds.has(session.id)}
                   onToggleCheck={() => toggleChecked(session.id)}
-                  onDelete={onDeleteSessions ? () => void handleSingleDelete(session.id) : undefined}
+                  onDelete={onDeleteSessions ? () => handleSingleDelete(session.id, title) : undefined}
                 />,
               ];
             })}
