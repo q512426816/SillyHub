@@ -13,7 +13,7 @@ import json
 import os
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import func, or_, select, tuple_
@@ -52,6 +52,13 @@ from app.modules.workspace.service import WorkspaceService
 log = get_logger(__name__)
 
 MAX_CONTENT_BYTES = 1_000_000  # 1 MB
+
+# 2026-08-19-spec-mirror-tombstone-sync FR-03：占位行保护时效窗。progress 上行
+# 超过该天数仍无文档的占位行不再被保护，全量 reparse 正常删除其 changes 行。
+# 7 天 = CLI 一个 change 完整周期（brainstorm→archive 跨多日）的裕量：活跃变更
+# 必然在窗内有 progress 上行；CLI 长期空闲暂停后恢复时 change 行若已被删，
+# _ensure_change_row 的 upsert 语义会重建占位行，不丢数据。
+PLACEHOLDER_PROTECT_WINDOW_DAYS = 7
 
 
 @dataclass
@@ -1252,6 +1259,12 @@ class ChangeService:
         读 ``(workspace_id, change_name)`` 收件箱行的 ``latest_progress.changes[]``，
         收 status=="active" 的 name。查询失败（表缺失等）按空集处理——best-effort，
         不阻断删除环（回退到无保护的现状语义）。
+
+        2026-08-19-spec-mirror-tombstone-sync FR-03：保护加 7 天时效窗——
+        ``updated_at`` 早于 ``now - PLACEHOLDER_PROTECT_WINDOW_DAYS`` 的行不计入
+        保护集（时效字段用服务端 tz-aware 审计列 updated_at，非 String(64) 的
+        last_pushed_at——后者是客户端原值 / 乐观锁基准，非时效源）。测试残留的
+        一次性上行占位行不再永久滞留「进行中」。
         """
         try:
             from app.modules.platform_sync.model import PlatformChangeProgressORM
@@ -1274,8 +1287,15 @@ class ChangeService:
                 error=str(exc),
             )
             return set()
+        cutoff = datetime.now(UTC) - timedelta(days=PLACEHOLDER_PROTECT_WINDOW_DAYS)
         keys: set[str] = set()
         for r in rows:
+            updated = r.updated_at
+            if updated is not None:
+                if updated.tzinfo is None:  # naive（SQLite 测试路径）归一化 UTC
+                    updated = updated.replace(tzinfo=UTC)
+                if updated < cutoff:
+                    continue
             payload = r.latest_progress if isinstance(r.latest_progress, dict) else {}
             for c in payload.get("changes") or []:
                 if isinstance(c, dict) and c.get("name") and c.get("status") == "active":

@@ -1,0 +1,59 @@
+{
+  "verdict": "needs_fix",
+  "checked": [
+    {
+      "item": "plan 引用的函数/行号与实际代码一致（无编造）",
+      "status": "pass",
+      "note": "_write_spec_root 定义于 service.py:720；全表 DELETE SpecFileManifest 确在 922-930 行；import_from_repo_sse done 事件确在 478-483；_prune_spec_backups 为 staticmethod @1115，签名 (backup_root: Path) -> None，可复用；backup_root 由 _backup_root(settings, workspace_id)（1064-1069 行，{spec_data_root}/spec-backups/{ws}）派生，plan 传 backup_root 参数可行。change/service.py _progress_reported_active_keys @1249，返回 set[str]。"
+    },
+    {
+      "item": "task 拆分覆盖 FR-01~FR-04",
+      "status": "pass",
+      "note": "FR-01/FR-02→task-01/02，FR-04 双护栏→task-01 护栏①② + task-05 用例，FR-03→task-04。Non-Goals 未违反：不动 apply_ops/daemon/CLI/前端，task-06 明确 gen:types 不适用。"
+    },
+    {
+      "item": "task-01 landed_paths 收集点（循环入口先加入）正确性",
+      "status": "fail",
+      "note": "计划写「循环入口处对每个 isfile 成员先加入，后续分支只消费不移除」，但 merge 循环（795-892 行）存在两个 continue 分支在入口加入后会污染落盘集：(a) staging 成员缺失 FileNotFoundError continue（826-834 行）——该文件实际未落盘，若入口已加入则磁盘同名旧文件会被误判为 stale 而错删；(b) local.yaml——tar 成员仍在 tf.getmembers() 中（staging 解包层 713 行只是不 extract），走的就是 FileNotFoundError 分支，若入口加入 landed_paths，则镜像存量 local.yaml 永远不会被对账删除，与 task-05 的「local.yaml 整包覆盖后消失」用例直接矛盾。修法：收集点移到 FileNotFoundError 守卫之后（即 _load_member 成功、且 .runtime 过滤之后）再加集合，skip 分支（cur.content_hash == ch continue）此时已在集合中，语义正确。"
+    },
+    {
+      "item": "task-02 与 task-01 的数据传递一致性",
+      "status": "fail",
+      "note": "task-01 规定 _converge_stale_files 返回 (converged_files, converged_dirs) 两个计数，但 task-02 步骤 2 需要「对账删除的文件的 converged 集（rel_path 列表）」来写 manifest 墓碑。计数无法支撑墓碑写入。修法：返回值改为 (converged_paths: list[str], converged_dirs: int) 或同时返回计数与集合。"
+    },
+    {
+      "item": "manifest 对齐时序与 design 一致性",
+      "status": "pass",
+      "note": "design §4.1 时序为「对账删除 → manifest 对齐 → bump + commit」，plan task-02 改在最终 commit 之后独立短事务（沿用现有 922-930 wipe 的位置），与 design 字面时序不同但功能等价（apply_ops 的清单写入也是独立段）。可接受，建议执行时在注释里说明与 design 的偏差。另注意：merge 循环内 (rel_path→ch) dict 需在 task-01 一并落，task-02 已提及，可行。"
+    },
+    {
+      "item": "task-03 返回值透传可行性",
+      "status": "pass",
+      "note": "_write_spec_root 现返回 SpecWorkspace（931 行），SSE 452 行取 write_task.result() 后用于 reparse。透传 converge 统计需改返回值为 tuple 或挂日志/事件即可；SSE done 事件（478-483）加字段为加法不破坏前端。低风险，但执行时注意 apply_sync（959 行起）与 import_from_repo 非sse 入口的调用点都要适配。"
+    },
+    {
+      "item": "task-04 时效字段与过滤方式可行性",
+      "status": "pass",
+      "note": "PlatformChangeProgressORM.updated_at 为 tz-aware DateTime（platform_sync/model.py:105），naive 归一化处理正确（SQLite 返回 naive）。注意：active keys 来自每行 latest_progress.changes[] JSON，按行 updated_at 过滤会整行摘除其全部 active name——这正是 design §4.3 的「最近一次上行」语义，一致。"
+    },
+    {
+      "item": "测试计划可落地（fixture 支撑）",
+      "status": "pass",
+      "note": "spec_workspace/tests/ 已有 test_sync_manual.py 展示 _make_workspace/_make_spec_workspace + db_session 模式（可构造 spec_root 指向 tmp_path、手工造幽灵文件后打 tar 走 _write_spec_root）；change/tests/ 有 conftest.py + db_session fixture，test_reparse_guard.py 现为 MagicMock 风格但占位时效用例需真实 PlatformChangeProgressORM 行（db_session 可建），可行。无越界依赖。"
+    },
+    {
+      "item": "顺序/依赖合理",
+      "status": "pass",
+      "note": "Wave1 task-01→02→03 同文件顺序实现、Wave2 task-04 独立、task-05 依赖 01/02/04、task-06 收尾，合理。"
+    },
+    {
+      "item": "风险点覆盖",
+      "status": "pass",
+      "note": "坏包双护栏、误删可恢复（备份区 30 天）、大树 FS 慢（to_thread）均已覆盖。补充小风险：对账 walk 需排除 spec_root 下 staging？staging 在 finally 已 rmtree 且不在 spec_root 内（_extract_spec_tar_to_staging 建于 spec_root 外，749-751 行），无冲突。"
+    }
+  ],
+  "fixes_needed": [
+    "task-01 步骤 1：landed_paths 收集点从「循环入口」改为「FileNotFoundError 守卫之后、.runtime 过滤之后」（即 _load_member 成功后再加入），否则 local.yaml 与 staging 缺失成员会污染落盘集，导致镜像存量 local.yaml 永不删除（与 task-05 用例矛盾）及极端情况下误删磁盘同名文件。",
+    "task-01/task-02 返回值口径统一：_converge_stale_files 需返回被删除文件的 rel_path 集合（供 manifest 墓碑），而非仅 (files, dirs) 两个计数。"
+  ]
+}

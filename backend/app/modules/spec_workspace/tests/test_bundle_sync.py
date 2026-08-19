@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import AsyncClient
 
+from app.core.config import get_settings
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.workspace.model import Workspace
 
@@ -174,10 +175,15 @@ class TestSync:
         # （reparsed=docs 向后兼容 + reparsed_changes；test spec_root 无 changes → 0）。
         assert body == {"ok": True, "reparsed": 1, "reparsed_changes": 0}
 
-        # D-006@v2 per-file merge：tar 未包含的旧文件被保留（保护其他成员的
-        # 独占文档），tar 内的同路径/新文件正常落地。
-        assert (spec_root / "docs" / "A.md").exists()  # 保留
+        # 2026-08-19-spec-mirror-tombstone-sync FR-01：tar 是整树权威快照——镜像里
+        # tar 未包含的 A.md 被对账删除（软删 move 到备份区），幽灵文件不再残留；
+        # tar 内的新文件正常落地。
+        assert not (spec_root / "docs" / "A.md").exists()
         assert (spec_root / "docs" / "B.md").read_text(encoding="utf-8") == "# B"
+        backup_root = Path(get_settings().spec_data_root) / "spec-backups" / str(ws.id)
+        backed = list(backup_root.rglob("docs/A.md"))
+        assert len(backed) == 1, f"expected converged backup file, found {backed}"
+        assert backed[0].read_text(encoding="utf-8") == "old"
 
     async def test_sync_skips_runtime_dir_from_tar(
         self, db_session, client: AsyncClient, auth_headers, tmp_path

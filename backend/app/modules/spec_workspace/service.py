@@ -25,7 +25,7 @@ from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -449,7 +449,7 @@ class SpecWorkspaceService:
             if done:
                 break
             yield ": keepalive\n\n"
-        spec_ws = write_task.result()
+        spec_ws, converged_files, converged_dirs = write_task.result()
 
         yield _evt("reparsing_docs", phase="reparsing_docs")
         reparse_docs_task = asyncio.ensure_future(
@@ -480,6 +480,8 @@ class SpecWorkspaceService:
             phase="done",
             spec_workspace_id=str(spec_ws.id),
             sync_status=spec_ws.sync_status,
+            converged_files=converged_files,
+            converged_dirs=converged_dirs,
         )
 
     # ── import helpers（task-11：分流内聚，import_from_repo 与 _sse 共用）─────
@@ -722,13 +724,15 @@ class SpecWorkspaceService:
         workspace_id: uuid.UUID,
         tar_bytes: bytes,
         change_write_id: str | None = None,
-    ) -> SpecWorkspace:
+    ) -> tuple[SpecWorkspace, int, int]:
         """Validate + overwrite spec_root with tar (D-006 whole-tree), commit clean.
 
         D-001（2026-07-01-spec-import-async-and-change-reparse）：从 apply_sync 提取，
         供 apply_sync（sync 端点）与 import_from_repo_sse（import SSE）共用——SSE 需在
         写盘 / reparse_docs / reparse_changes 之间分阶段 yield 事件。Returns refreshed
-        spec_ws（sync_status=clean，尚未 reparse）。
+        spec_ws（sync_status=clean，尚未 reparse）+ 对账统计
+        ``(converged_files, converged_dirs)``（2026-08-19-spec-mirror-tombstone-sync
+        task-03：供 SSE done 事件与结构化日志消费）。
         """
         spec_ws = await self.get(workspace_id)
         # ql-20260817-005：事务释放点①——get() 的 SELECT 打开事务后，紧跟的「tar
@@ -766,6 +770,13 @@ class SpecWorkspaceService:
             from app.modules.scan_docs.conflict_model import ScanDocConflictHistory
 
             pending_conflicts: list[ScanDocConflictHistory] = []
+            # 2026-08-19-spec-mirror-tombstone-sync task-01：实际落盘集（rel_path →
+            # 内容 hash）。收集点在 _load_member 成功之后——local.yaml（staging 解包
+            # 层不 extract）与 staging 缺失成员走 FileNotFoundError continue，不会进
+            # 集合；同内容 skip 分支的文件磁盘已有且内容一致，同样属于落盘集。该
+            # 集合是对账删除（_converge_stale_files）与 manifest 逐行对齐的基准。
+            landed_paths: set[str] = set()
+            landed_hashes: dict[str, str] = {}
             # task-03 / D-002@v1：逐文件 _bump 改批量回写器——循环内仅内存计数，
             # 50 文件/500ms 粒度回写；finally 终态 flush 保证 files_processed 最终准确。
             progress = _BatchProgressWriter(change_write_id)
@@ -832,6 +843,8 @@ class SpecWorkspaceService:
                         member=m.name,
                     )
                     continue
+                landed_paths.add(rel_path)
+                landed_hashes[rel_path] = ch
 
                 cur = existing_by_path.get(rel_path)
 
@@ -898,6 +911,24 @@ class SpecWorkspaceService:
             # Wave C 续：staging 整树删除移出事件循环
             await asyncio.to_thread(shutil.rmtree, staging, ignore_errors=True)
 
+        # 2026-08-19-spec-mirror-tombstone-sync task-01：对账删除——镜像里不在
+        # 落盘集的文件软删 move 到备份区、清理空目录（FR-01）。tar 是整树权威快照
+        # （§1.2 语义论证：全表 wipe 早已宣告整树语义，per-file 保留策略无法区分
+        # 「他人独有文档」与「改名/删除产生的幽灵残留」）。整体入线程（对齐
+        # ql-20260818-009 范式：rglob/move/rmdir 全 FS 段）；发生在 reparse 之前
+        # → 幽灵目录消失后 reparse 删除环自然清掉对应 changes 行（design §4.4）。
+        settings = get_settings()
+        backup_root = self._backup_root(settings, workspace_id)
+        converged_paths, converged_dirs = await asyncio.to_thread(
+            self._converge_stale_files, spec_root, landed_paths, backup_root
+        )
+        log.info(
+            "spec_workspace.converged",
+            workspace_id=str(workspace_id),
+            converged_files=len(converged_paths),
+            converged_dirs=converged_dirs,
+        )
+
         # ql-20260817-005：循环外统一入 session（add 的 autobegin 事务在此刻才
         # 打开，紧接最终 commit，事务窗口毫秒级）+ 属性改写（既有行 / spec_ws）
         # 一并在最终 commit 落库——全部写仍是单事务，原子性与原实现一致。
@@ -919,16 +950,52 @@ class SpecWorkspaceService:
         spec_ws.updated_at = now
         await self._session.commit()
 
-        # Q7 / R-01（change 2026-08-13-platform-managed-file-sync task-03）：旧 tar 全量
-        # 落盘后失效该 workspace 的文件级清单——整树覆盖后旧的 per-file version 无意义，
-        # 删行强制下一次增量走 R-07 兜底全量重算，避免「旧 tar push 后 version 漂移」。
-        await self._session.execute(
-            delete(SpecFileManifest).where(
-                SpecFileManifest.workspace_id == workspace_id,
+        # 2026-08-19-spec-mirror-tombstone-sync task-02：manifest 逐行对齐（墓碑
+        # 替代全表 wipe）。原 Q7/R-01 全表 DELETE 的意图「整树覆盖后旧 per-file
+        # version 无意义、强制下一次增量对齐」在逐行对齐下语义等价——落盘文件
+        # version 全体 +1（daemon 缓存必落后 → 拉新 manifest 对齐），被对账删除的
+        # 文件置 exists=False 墓碑（保留乐观锁谱系：daemon 缓存持旧 version 上行
+        # 命中墓碑行不再判 conflict 死锁，对齐 ql-20260819-004 软删行复活语义）。
+        # 位置沿用原 wipe 点（最终 commit 后的独立短事务），与 design §4.1 时序
+        # 字面不同但功能等价。
+        manifest_rows = (
+            (
+                await self._session.execute(
+                    select(SpecFileManifest).where(
+                        SpecFileManifest.workspace_id == workspace_id,
+                    )
+                )
             )
+            .scalars()
+            .all()
         )
+        manifest_by_path = {r.path: r for r in manifest_rows}
+        for rel, ch in landed_hashes.items():
+            row = manifest_by_path.get(rel)
+            if row is None:
+                self._session.add(
+                    SpecFileManifest(
+                        workspace_id=workspace_id,
+                        path=rel,
+                        content_hash=ch,
+                        version=1,
+                        exists=True,
+                        updated_at=now,
+                    )
+                )
+            else:
+                row.content_hash = ch
+                row.version = row.version + 1
+                row.exists = True
+                row.updated_at = now
+        for rel in converged_paths:
+            row = manifest_by_path.get(rel)
+            if row is not None:
+                row.exists = False
+                row.version = row.version + 1
+                row.updated_at = now
         await self._session.commit()
-        return spec_ws
+        return spec_ws, len(converged_paths), converged_dirs
 
     async def _bump_files_processed(self, change_write_id: str | None) -> None:
         """单批进度回写（+1）。签名不变（design 接口定义），内部走批量回写器。
@@ -969,7 +1036,7 @@ class SpecWorkspaceService:
         ``change_write_id``（可选）让 ``_write_spec_root`` 循环内回写进度
         （task-03 起批量：50 文件/500ms 粒度，终态准确）。
         """
-        spec_ws = await self._write_spec_root(
+        spec_ws, converged_files, converged_dirs = await self._write_spec_root(
             workspace_id, tar_bytes, change_write_id=change_write_id
         )
         reparsed_docs = await self._reparse_phase(workspace_id, spec_ws, "scan_docs")
@@ -979,6 +1046,8 @@ class SpecWorkspaceService:
             workspace_id=str(workspace_id),
             reparsed_docs=reparsed_docs,
             reparsed_changes=reparsed_changes,
+            converged_files=converged_files,
+            converged_dirs=converged_dirs,
         )
         return {"reparsed_docs": reparsed_docs, "reparsed_changes": reparsed_changes}
 
@@ -1110,6 +1179,79 @@ class SpecWorkspaceService:
         """同步移动文件（delete 软删备份 / rename 共用），整体入线程用（ql-20260818-009）。"""
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), str(dest))
+
+    @staticmethod
+    def _converge_stale_files(
+        spec_root: Path,
+        landed_paths: set[str],
+        backup_root: Path,
+    ) -> tuple[set[str], int]:
+        """2026-08-19-spec-mirror-tombstone-sync FR-01/FR-04：全量同步对账删除。
+
+        镜像 spec_root 与 tar 落盘集对账：不在落盘集的文件视为改名/删除/归档产生
+        的幽灵残留，软删 move 到 ``backup_root/{收敛批时间戳}/<rel>``（与增量路径
+        apply_ops 的 delete 语义同构：备份区 + 后续 manifest 墓碑）。删除后自底向
+        上清理空目录（幽灵变更目录整目录消失），并机会式修剪备份区（复用
+        ``_prune_spec_backups``）。
+
+        双护栏（坏包保护，FR-04）：
+        - 落盘集为空 → 跳过对账（空 tar 异常，维持镜像现状不删任何东西）；
+        - 磁盘文件数 > 2 × max(落盘集大小, 200) → 中止 + warn（防坏 tar / 半截包
+          清空镜像；本仓实测正常比例 ≈1.005，阈值 2 足够宽松，200 起步防小树误伤）。
+
+        全同步 FS 段（rglob/move/rmdir），调用方需整体入 ``asyncio.to_thread``。
+        返回 ``(converged_rel_paths, converged_dirs)``——路径集合供 manifest 墓碑
+        对齐（task-02），目录数供 SSE done 事件 / 日志（task-03）。
+        """
+        if not landed_paths:
+            log.warning(
+                "spec_workspace.converge_skipped_empty_landing",
+                spec_root=str(spec_root),
+            )
+            return set(), 0
+        disk_rels: list[str] = []
+        for p in spec_root.rglob("*"):
+            # .runtime/（任意深度）是 daemon 运行时产物，永不参与对账（与 merge
+            # 循环的排除对称——异构/历史 tar 解进 staging 的 .runtime 已被落盘集
+            # 基准天然排除，此处防的是磁盘侧独立存在的 .runtime 残留）。
+            if ".runtime" in p.relative_to(spec_root).parts:
+                continue
+            if p.is_file():
+                disk_rels.append(p.relative_to(spec_root).as_posix())
+        if len(disk_rels) > 2 * max(len(landed_paths), 200):
+            log.warning(
+                "spec_workspace.converge_aborted_ratio",
+                spec_root=str(spec_root),
+                disk_files=len(disk_rels),
+                landed_files=len(landed_paths),
+            )
+            return set(), 0
+        stale_rels = [rel for rel in disk_rels if rel not in landed_paths]
+        if not stale_rels:
+            return set(), 0
+        converged: set[str] = set()
+        ts = datetime.now(UTC).strftime(BACKUP_TS_FORMAT)
+        for rel in stale_rels:
+            src = spec_root / rel
+            dest = backup_root / ts / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dest))
+            converged.add(rel)
+        # 自底向上清理空目录：目录已空且非 spec_root 本身 → rmdir。os.listdir 实时
+        # 探空（topdown=False 的 dirnames 快照不含刚被 rmdir 的子目录状态）。
+        converged_dirs = 0
+        for dirpath, _dirnames, _filenames in os.walk(spec_root, topdown=False):
+            dir_path = Path(dirpath)
+            if dir_path == spec_root:
+                continue
+            try:
+                if not os.listdir(dirpath):
+                    os.rmdir(dirpath)
+                    converged_dirs += 1
+            except OSError:
+                continue
+        SpecWorkspaceService._prune_spec_backups(backup_root)
+        return converged, converged_dirs
 
     @staticmethod
     def _prune_spec_backups(backup_root: Path) -> None:

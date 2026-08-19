@@ -573,12 +573,13 @@ class TestPathValidation:
 
 
 # ===========================================================================
-# 旧 tar 失效 manifest（Q7 / R-01）
+# 旧 tar 对齐 manifest（Q7/R-01 → 2026-08-19-spec-mirror-tombstone-sync task-02
+# 逐行墓碑对齐替代全表 wipe）
 # ===========================================================================
 
 
 class TestOldTarInvalidates:
-    async def test_old_tar_clears_manifest_and_next_incremental_rebuilds(
+    async def test_old_tar_tombstones_manifest_and_next_incremental_rebuilds(
         self, db_session, client: AsyncClient, auth_headers, tmp_path
     ) -> None:
         ws = await _make_workspace(db_session)
@@ -624,17 +625,27 @@ class TestOldTarInvalidates:
             )
         assert resp.status_code == 200, resp.text
 
-        # Q7：旧 tar 落盘后该 ws 清单全清空
-        rows = (
-            (
-                await db_session.execute(
-                    select(SpecFileManifest).where(SpecFileManifest.workspace_id == ws.id)
+        # task-02：旧 tar 落盘后清单不再全表 wipe——tar 未包含的 docs/A.md 被对账
+        # 删除（磁盘 move 到备份区）且行置 exists=False 墓碑（version 2，保留乐观
+        # 锁谱系）；tar 命中的 docs/T.md 逐行对齐为 version=1。
+        rows = {
+            r.path: r
+            for r in (
+                (
+                    await db_session.execute(
+                        select(SpecFileManifest).where(SpecFileManifest.workspace_id == ws.id)
+                    )
                 )
+                .scalars()
+                .all()
             )
-            .scalars()
-            .all()
-        )
-        assert rows == []
+        }
+        assert set(rows) == {"docs/A.md", "docs/T.md"}, set(rows)
+        assert rows["docs/A.md"].exists is False
+        assert rows["docs/A.md"].version == 2
+        assert rows["docs/T.md"].exists is True
+        assert rows["docs/T.md"].version == 1
+        assert not (spec_root / "docs" / "A.md").exists()
 
         # 下一次增量 add → R-07 兜底重建 version=1
         resp2 = await client.post(

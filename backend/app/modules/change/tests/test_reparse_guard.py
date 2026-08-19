@@ -240,7 +240,9 @@ async def _make_guard_spec_ws(db_session, ws, spec_root) -> None:
     await db_session.commit()
 
 
-async def _seed_progress_row(db_session, db_engine, ws_id, change_name, status) -> None:
+async def _seed_progress_row(
+    db_session, db_engine, ws_id, change_name, status, *, updated_at=None
+) -> None:
     """插 platform_change_progress 行（该表不在根 conftest 注册列表，先建表）。"""
     from app.models.base import BaseModel
     from app.modules.platform_sync import model as _ps_model
@@ -260,6 +262,7 @@ async def _seed_progress_row(db_session, db_engine, ws_id, change_name, status) 
             },
             last_pushed_at="2026-08-15T00:00:00.000Z",
             last_pusher="tester",
+            **({"updated_at": updated_at} if updated_at is not None else {}),
         )
     )
     await db_session.commit()
@@ -389,3 +392,93 @@ async def test_full_reparse_deletes_docked_change_despite_progress_active(
 
     stats, _ = await ChangeService(db_session).reparse(ws.id)
     assert stats["deleted"] == 1
+
+
+# ===========================================================================
+# 2026-08-19-spec-mirror-tombstone-sync FR-03：占位行保护 7 天时效窗
+# ===========================================================================
+
+
+async def test_placeholder_protected_within_7_days(db_session, db_engine, tmp_path):
+    """FR-03：progress 上行距今 6 天（窗内）→ 占位行仍受保护。"""
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from app.modules.change.model import Change
+    from app.modules.change.service import ChangeService
+
+    ws = await _make_guard_ws(db_session)
+    spec_root = tmp_path / "spec-root"
+    spec_root.mkdir()
+    await _make_guard_spec_ws(db_session, ws, spec_root)
+    await _insert_placeholder_change(db_session, ws.id, "2026-08-19-window")
+    await _seed_progress_row(
+        db_session,
+        db_engine,
+        ws.id,
+        "2026-08-19-window",
+        "active",
+        updated_at=datetime.now(UTC) - timedelta(days=6),
+    )
+
+    stats, _ = await ChangeService(db_session).reparse(ws.id)
+
+    assert stats["deleted"] == 0
+    kept = (
+        (
+            await db_session.execute(
+                select(Change).where(
+                    Change.workspace_id == ws.id,
+                    Change.change_key == "2026-08-19-window",
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    assert kept is not None
+
+
+async def test_placeholder_unprotected_after_7_days(db_session, db_engine, tmp_path):
+    """FR-03：progress 上行距今 8 天（窗外）→ 占位行不再受保护，reparse 删除。
+
+    一次性上行后停滞的测试残留行不再永久滞留「进行中」（生产实例 6 条根因）。
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from app.modules.change.model import Change
+    from app.modules.change.service import ChangeService
+
+    ws = await _make_guard_ws(db_session)
+    spec_root = tmp_path / "spec-root"
+    spec_root.mkdir()
+    await _make_guard_spec_ws(db_session, ws, spec_root)
+    await _insert_placeholder_change(db_session, ws.id, "2026-08-19-stale-window")
+    await _seed_progress_row(
+        db_session,
+        db_engine,
+        ws.id,
+        "2026-08-19-stale-window",
+        "active",
+        updated_at=datetime.now(UTC) - timedelta(days=8),
+    )
+
+    stats, _ = await ChangeService(db_session).reparse(ws.id)
+
+    assert stats["deleted"] == 1
+    gone = (
+        (
+            await db_session.execute(
+                select(Change).where(
+                    Change.workspace_id == ws.id,
+                    Change.change_key == "2026-08-19-stale-window",
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    assert gone is None
