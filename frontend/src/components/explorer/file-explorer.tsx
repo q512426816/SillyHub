@@ -6,6 +6,8 @@
  * - 懒加载（FR-01）：根节点 = 「工作区根」（相对路径 ""），首层挂载即拉；展开目录节点时
  *   loadData 调 ``fetchTree(workspaceId, relPath)`` 只取当前层（file-rpc 逐层语义，禁递归预取，
  *   design 非目标约束）。目录 isLeaf=false、文件 isLeaf=true，key = 相对工作区根的 POSIX 路径。
+ * - 目录双击展开/收起（expandAction=doubleClick）：单击仍只选中，双击目录行切换展开/收起，
+ *   走同一受控 onExpand + loadData 懒加载链路（叶子与 Ctrl/Shift 修饰键由 rc-tree 忽略）。
  * - 文件点击：``onSelectFile(relPath)`` 回调给页面装配（task-08）驱动右栏预览。
  * - 搜索（FR-04 / D-005@v1）：防抖 300ms 或回车提交后调 ``fetchSearch``；结果面板列出相对路径；
  *   truncated=true 提示「结果超过 100 条，仅显示前 100」。
@@ -421,6 +423,7 @@ export function FileExplorer({ workspaceId, onSelectFile }: FileExplorerProps) {
           <Tree
             treeData={treeData}
             loadData={onLoadData}
+            expandAction="doubleClick"
             expandedKeys={expandedKeys}
             onExpand={onExpand}
             selectedKeys={selectedKeys}
