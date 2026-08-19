@@ -22,7 +22,7 @@
  * @module config
  */
 
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, chmod } from 'node:fs/promises';
 import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
@@ -579,8 +579,16 @@ export async function saveConfig(
   config: DaemonConfig,
   path: string = DEFAULT_CONFIG_PATH,
 ): Promise<void> {
-  // step 1: 递归建父目录（嵌套不存在的 a/b/c/ 也能自动创建）。
+  // step 1: 递归建父目录（嵌套不存在的 a/b/c 也能自动创建）。
   await mkdir(dirname(path), { recursive: true });
   // step 2: 写 JSON（indent=2，UTF-8）。
   await writeFile(path, JSON.stringify(config, null, 2), 'utf-8');
+  // step 3（DA-7，2026-08-20 审计）：config.json 含 api_key/bearer token 等长期凭证，
+  // 对齐 credential.ts 的 0600 收紧（Windows NTFS 无 0600 语义，chmod 抛 EPERM 是
+  // 预期行为，降级为警告不中断）。
+  try {
+    await chmod(path, 0o600);
+  } catch (e) {
+    console.warn(`config_chmod_failed path=${path} err=${(e as Error).message}`);
+  }
 }

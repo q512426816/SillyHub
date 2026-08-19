@@ -56,6 +56,7 @@ import { RpcError } from './ws-client.js';
 import {
   assertWithinAllowedRoots,
   listDir,
+  toRpcError,
   type ListDirResult,
 } from './file-rpc.js';
 
@@ -215,22 +216,10 @@ export interface HostFsHandlerOptions {
  *   - EACCES / EPERM   → `internal`（message 统一 "permission denied"，不泄漏详情）
  *   - 其他              → `internal`（原 message 透传，便于排查）
  *
- * `where` 前缀（如 `'stat.lstat'`）便于日志定位（与 file-rpc.ts 风格一致）。
+ * `where` 前缀（如 `'stat.lstat'`）便于日志定位。
+ * DA-13（2026-08-20 审计）：本地复制实现删除，直接复用 file-rpc.ts 的导出
+ * （原注释自述「复制一份等价映射…字符级对齐」——任何一侧改动即漂移）。
  */
-function toRpcError(e: unknown, where: string): RpcError {
-  const code =
-    typeof e === 'object' && e !== null && 'code' in e
-      ? (e as { code: string }).code
-      : '';
-  if (code === 'ENOENT' || code === 'ENOTDIR') {
-    return new RpcError('not_found', `${where}: not found`);
-  }
-  if (code === 'EACCES' || code === 'EPERM') {
-    return new RpcError('internal', `${where}: permission denied`);
-  }
-  const msg = e instanceof Error ? e.message : String(e);
-  return new RpcError('internal', `${where}: ${msg}`);
-}
 
 // ── run_command 命令白名单（task-02 / R3 / AC-8）─────────────────────────────
 //
@@ -1013,9 +1002,18 @@ export class HostFsHandler {
     const cwd = pathResolve(params.cwd);
 
     // 3. 合并 env（非空时叠加到 process.env 之上，不清空 PATH）。
+    //    DA-6（2026-08-20 审计）：PATH/PATHEXT/SystemRoot/ComSpec 等进程解析关键变量
+    //    不允许调用方覆盖——否则 backend 传 env:{PATH:'C:\\tmp'} 即可把白名单命令
+    //    `sillyspec` 解析到任意可执行文件，白名单形同虚设。
+    const PROTECTED_ENV_KEYS = new Set(['PATH', 'PATHEXT', 'SystemRoot', 'ComSpec', 'windir']);
+    const filteredEnv = params.env
+      ? Object.fromEntries(
+          Object.entries(params.env).filter(([k]) => !PROTECTED_ENV_KEYS.has(k)),
+        )
+      : undefined;
     const env =
-      params.env && Object.keys(params.env).length > 0
-        ? { ...process.env, ...params.env }
+      filteredEnv && Object.keys(filteredEnv).length > 0
+        ? { ...process.env, ...filteredEnv }
         : process.env;
 
     // 4. execFile（非 shell，timeout 透传）。不复用 runCmd：runCmd 把超时混入 ok:false 无法

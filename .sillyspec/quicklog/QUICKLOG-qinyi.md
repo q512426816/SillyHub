@@ -155,3 +155,12 @@
 根因：tar fully_trusted符号链接逃逸；XFF取最左段可伪造绕过限流；PPM子域写接口仅认证不授权；默认口令硬编码；事件循环同步IO；导出走分页截断；模板路径依赖CWD；基线债=scan_generate改三元返回后测试未跟+workspace type必填后4文件漏补+daemon会话管理员404
 方案：tar改filter=data并拒绝链接成员；XFF取最右段；里程碑/明细上溯计划can_operate断言+模板CRDD平台管理员门控；初始口令secrets随机一次性下发+复杂度校验复用弱口令黑名单；CD去引号；stderr套redact_output；非dev关docs端点；prod拒minioadmin；导出改list_for_export(5000)；模板锚定__file__；knowledge/change_writer移线程池；gate孤儿in_批量；excel builder收敛公共模块；删create_tables.py+seed_workbench_demo.py；基线债按新契约修测试
 结果：ruff format/check过、mypy 657文件0错、后端全量pytest由19 failed/20 errors清零（4619+新增通过）；新增初始口令随机化+PPM越权403共3个安全回归测试
+
+## ql-20260820-003-6de8 | 2026-08-20 03:23:01 | 批次C修 daemon 安全/健壮/死代码（DA-1/2/4/5/6/7/11/12/13/15）
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/spikes/06-mcp-server/README.md, sillyhub-daemon/spikes/06-mcp-server/server.ts, sillyhub-daemon/spikes/06-mcp-server/spike.test.ts, sillyhub-daemon/src/.gitkeep, sillyhub-daemon/src/adapters/stream-json.ts, sillyhub-daemon/src/agent-detector.ts, sillyhub-daemon/src/config.ts, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/src/file-rpc.ts, sillyhub-daemon/src/host-fs-handler.ts, sillyhub-daemon/src/index.ts, sillyhub-daemon/src/task-runner.ts, sillyhub-daemon/tests/.gitkeep
+需求：批次C修 daemon 安全/健壮/死代码（DA-1/2/4/5/6/7/11/12/13/15）
+根因：shell:true 参数零转义注入；get_spec_bundle 无守卫；词法校验不解析 junction；SIGKILL 留孤儿孙进程；env 可劫持 PATH；凭证无 0600；toRpcError 双实现；detector exec 拼引号；占位/结题残留
+方案：shell 元字符硬失败+model 白名单；补 assertWithinAllowedRoots；收敛 isPathUnderAnyRoot(realpath)；taskkill /T /F 杀树；剔除受保护 env 键；chmod 0600；toRpcError 单实现；cmd-shim+execFile；删 src/index.ts+spikes/06
+结果：tsc 0 错；vitest 2447 passed 全绿

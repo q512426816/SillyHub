@@ -70,6 +70,7 @@ import {
   explorerReadFile,
   explorerSearch,
   EXPLORER_DEFAULT_MAX_RESULTS,
+  assertWithinAllowedRoots,
 } from './file-rpc.js';
 import { listRoots } from './roots-rpc.js';
 // task-03（2026-07-06-daemon-host-fs-delegate）：host_fs.* WS handler 业务层。
@@ -2383,6 +2384,10 @@ export class Daemon {
     ws.registerRpcHandler('get_spec_bundle', async (params) => {
       const rootPath = typeof params.root_path === 'string' ? params.root_path : '';
       if (!rootPath) throw new Error('root_path required for get_spec_bundle');
+      // DA-2（2026-08-20 审计）：补 allowed_roots 守卫——原实现只判非空即打包，
+      // 恶意/失陷 backend 可读宿主任意路径的 .sillyspec 整树外传；同文件其余
+      // host_fs handler 均有此校验，此处对齐（含 symlink/junction realpath 判定）。
+      assertWithinAllowedRoots(rootPath, this._effectiveAllowedRoots());
       const specDir = join(rootPath, '.sillyspec');
       const { packSpecDir } = await import('./spec-sync.js');
       // ql-20260701-002：排除 .runtime（运行时缓存含 worktrees 2.1G，非 spec 数据）。

@@ -299,6 +299,11 @@ export class StreamJsonAdapter implements ProtocolAdapter {
         '--trust',
       ];
       if (model) {
+        // DA-1（2026-08-20 审计）：model 来自 backend 下发 payload，CLI 语义是
+        // 标识符（厂商/代号），字符集外的值按配置错误拒绝，防经命令行注入。
+        if (!/^[A-Za-z0-9._:\/-]+$/.test(model)) {
+          throw new Error(`model 含非法字符，拒绝拼入命令行: ${model.slice(0, 40)}`);
+        }
         args.push('--model', model);
       }
       if (opts?.resumeSessionId) {

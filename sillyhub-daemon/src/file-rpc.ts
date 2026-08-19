@@ -39,6 +39,7 @@ import { readdir, stat, lstat, realpath, open } from 'node:fs/promises';
 import { resolve as pathResolve, sep, basename } from 'node:path';
 import type { Dirent } from 'node:fs';
 import { RpcError } from './ws-client.js';
+import { isPathUnderAnyRoot } from './policy/path-utils.js';
 import type { PolicyEngine } from './policy/filesystem-policy.js';
 
 // ── 类型定义（与 backend schema / 前端类型三端对齐）──────────────────────────
@@ -89,24 +90,17 @@ export function assertWithinAllowedRoots(
     // task-02 loadConfig 保证默认 [homedir()]，此处兜底防御（R-3 配置错误时直接拒）。
     throw new RpcError('forbidden', 'no allowed_roots configured');
   }
-  const resolved = pathResolve(path);
-  // Windows 平台判定：sep==='\\'（Node 在 win32 设置）；额外兜底盘符前缀形态。
-  const isWin = sep === '\\' || /^[A-Za-z]:[\\/]/.test(resolved);
-  /** 大小写归一比较（仅 Windows；POSIX 大小写敏感不归一，R-3）。 */
-  const eq = (a: string, b: string): boolean =>
-    isWin ? a.toLowerCase() === b.toLowerCase() : a === b;
-  /** 边界敏感「在 root 之下」判定。 */
-  const under = (root: string): boolean => {
-    const r = pathResolve(root);
-    if (eq(resolved, r)) return true;
-    // 必须以 `root + sep` 开头：避免 /home/user 匹配 /home/user-evil。
-    return isWin
-      ? resolved.toLowerCase().startsWith(r.toLowerCase() + sep)
-      : resolved.startsWith(r + sep);
-  };
-  if (!allowed_roots.some(under)) {
-    throw new RpcError('forbidden', `path outside allowed_roots: ${resolved}`);
+  // DA-4（2026-08-20 审计）：原实现只做词法 pathResolve，allowed root 内一个指向
+  // System32 的 junction/symlink 即可越界。改复用 policy/path-utils.isPathUnderAnyRoot
+  // （内部 resolveRealPath：realpath + 盘符归一 + UNC 拒绝），与 PolicyEngine/explorer
+  // 两套防线同一强度；先按原样判一次再按 resolve 后判，兼容相对路径调用方。
+  if (isPathUnderAnyRoot(path, allowed_roots)) {
+    return;
   }
+  if (isPathUnderAnyRoot(pathResolve(path), allowed_roots)) {
+    return;
+  }
+  throw new RpcError('forbidden', `path outside allowed_roots: ${pathResolve(path)}`);
 }
 
 // ── listDir（readdir + stat + 排序）──────────────────────────────────────────
@@ -205,7 +199,7 @@ export async function listDir(
  *
  * `where` 前缀（如 `'listDir.lstat'`）便于日志定位。
  */
-function toRpcError(e: unknown, where: string): RpcError {
+export function toRpcError(e: unknown, where: string): RpcError {
   const code =
     typeof e === 'object' && e !== null && 'code' in e
       ? (e as { code: string }).code

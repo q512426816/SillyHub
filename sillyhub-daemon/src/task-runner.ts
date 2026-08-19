@@ -1184,6 +1184,22 @@ export class TaskRunner {
       // .bat / .ps1 / 无扩展名 sh wrapper 仍走 shell（cmd-shim 解析仅覆盖 .cmd）
       useShell = true;
     }
+    // DA-1（2026-08-20 审计 P0）：shell:true 下 Node 不转义任何参数，直接拼接命令行。
+    // cursor provider 把用户完整 prompt、backend 下发的 model 作位置参数传入——
+    // 含 & | < > ^ % " 或空白的参数在 cmd.exe 下即命令注入/参数错切。shell 路径
+    // 只保留给「干净参数」的兜底，命中危险字符一律硬失败并给出修复指引，把
+    // 静默注入变成响亮的配置错误。
+    if (useShell) {
+      const RISKY = /[&|<>^%"\s]/;
+      const riskyArg = spawnArgs.find((a) => typeof a === 'string' && RISKY.test(a));
+      if (riskyArg !== undefined) {
+        throw new Error(
+          `拒绝以 shell 模式运行「${cmdPath}」：参数含 shell 元字符（注入/错切风险，DA-1）。` +
+            `请把 agent 包装器换成可被 cmd-shim 解析的 .cmd，或直接指向 .exe；` +
+            `问题参数前 40 字符: ${String(riskyArg).slice(0, 40)}`,
+        );
+      }
+    }
 
     const child = spawn(spawnCmdPath, spawnArgs, {
       cwd: opts.cwd,
@@ -2234,7 +2250,19 @@ export class TaskRunner {
   private _killChild(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'): void {
     try {
       if (!child.killed) {
-        child.kill(signal);
+        // DA-5（2026-08-20 审计）：shell:true 路径下直接 child 是 cmd.exe 包装层，
+        // 只杀它会让 agent 孙进程变孤儿继续跑。SIGKILL 升级时 Windows 改杀进程树
+        // （taskkill /PID /T /F，范式对齐 runtime-handler.ts:96-115 / D-004 禁 /IM）；
+        // SIGTERM 仍走优雅信号让 agent 自行收尾。
+        if (signal === 'SIGKILL' && process.platform === 'win32' && child.pid) {
+          spawn(
+            'taskkill',
+            ['/PID', String(child.pid), '/T', '/F'],
+            { windowsHide: true, stdio: 'ignore' },
+          );
+        } else {
+          child.kill(signal);
+        }
       }
     } catch {
       /* 子进程已退出 */

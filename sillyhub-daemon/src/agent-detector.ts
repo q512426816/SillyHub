@@ -25,10 +25,11 @@
  * @see design.md §6（agent-detector.ts 文件清单）/ FR-07（12 provider 探测）
  */
 
-import { execFile, exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkMinVersion } from './version.js';
+import { resolveWindowsCmdShim } from './cmd-shim.js';
 import { resolveCursorVersionEntry } from './cursor-version.js';
 
 // ---------------------------------------------------------------------------
@@ -358,10 +359,28 @@ export class AgentDetector {
       const isWindowsCmdWrapper =
         process.platform === 'win32' && /\.(cmd|bat)$/i.test(binPath);
       if (isWindowsCmdWrapper) {
-        // Windows .cmd/.bat 包装器必须走 shell（对应 Python subprocess.list2cmdline
-        // + create_subprocess_shell 分支，agent_detector.py:248-256）。
-        const escaped = `"${binPath}" --version`;
-        exec(escaped, { timeout: 10_000, windowsHide: true }, onResult);
+        // DA-15（2026-08-20 审计）：原 exec(`"${binPath}" --version`) 拼命令行——
+        // 路径含 & ^ " 等字符即错切/注入（binPath 源自 PATH 搜索与配置，仓里已踩过
+        // 同类坑）。改走 cmd-shim 解析出真实 exe 后 spawn 直调（.cmd 覆盖），
+        // .bat 解析失败退 cmd.exe /d /s /c 显式参数传递（不经 shell 字符串拼接）。
+        const resolved = resolveWindowsCmdShim(binPath);
+        if (resolved) {
+          execFile(
+            resolved.exe,
+            [...resolved.prependArgs, '--version'],
+            { timeout: 10_000, windowsHide: true },
+            onResult,
+          );
+        } else {
+          // .bat/.cmd 解析失败：显式经 cmd.exe 传参（execFile 按 argv 规则引号
+          // 包裹每个参数，不再手工拼 shell 字符串）。
+          execFile(
+            'cmd.exe',
+            ['/d', '/s', '/c', binPath, '--version'],
+            { timeout: 10_000, windowsHide: true },
+            onResult,
+          );
+        }
       } else {
         execFile(
           binPath,
