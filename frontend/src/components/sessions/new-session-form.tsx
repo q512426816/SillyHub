@@ -39,6 +39,7 @@ import {
   type DaemonRuntimeRead,
   type SessionCreateResponse,
 } from "@/lib/daemon";
+import { WorkspaceSessionPicker } from "./workspace-session-picker";
 
 /** 默认机器记住上次选择（D-005 第一级回退）的 localStorage key。 */
 export const NEW_SESSION_MACHINE_LS_KEY = "sillyhub.sessions.new.machineId";
@@ -51,6 +52,7 @@ export const NO_PROVIDER_VALUE = "";
 
 /** task-12 provides 契约：表单当前四选择器 + 消息值（随 onCreated 回调透出）。 */
 export interface NewSessionFormValues {
+  workspaceId: string | null;
   machineId: string | null;
   agentId: string | null;
   providerId: string;
@@ -157,6 +159,7 @@ export function NewSessionForm({ onCreated }: NewSessionFormProps) {
   const [providerId, setProviderId] = useState<string>(NO_PROVIDER_VALUE);
   const [profileId, setProfileId] = useState<string>(NO_PROFILE_VALUE);
   const [prompt, setPrompt] = useState("");
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -208,6 +211,15 @@ export function NewSessionForm({ onCreated }: NewSessionFormProps) {
     setAgentId(null); // D-010：切机器重置智能体选择（落回新机器默认 Claude）
   };
 
+  const handleWsChange = (wsId: string | null, boundMachineId: string | null) => {
+    setWorkspaceId(wsId);
+    if (boundMachineId && machines.some((m) => m.id === boundMachineId && m.status === "online")) {
+      setMachineId(boundMachineId);
+      setAgentId(null);
+    }
+    // 否则机器选择不动
+  };
+
   const handleStart = async () => {
     if (!canStart || !agentRuntime || submitting) return;
     setSubmitting(true);
@@ -222,12 +234,14 @@ export function NewSessionForm({ onCreated }: NewSessionFormProps) {
           ? { llm_provider_id: effectiveProviderId }
           : {}),
         ...(profileId ? { agent_profile_id: profileId } : {}),
+        ...(workspaceId ? { workspace_id: workspaceId } : {}),
       });
       // D-005：记住本次机器选择（下次打开表单的默认第一级）。
       if (typeof window !== "undefined" && machineId) {
         window.localStorage.setItem(NEW_SESSION_MACHINE_LS_KEY, machineId);
       }
       onCreated?.(resp, {
+        workspaceId,
         machineId,
         agentId: agentRuntime.id,
         providerId: effectiveProviderId,
@@ -251,6 +265,27 @@ export function NewSessionForm({ onCreated }: NewSessionFormProps) {
           配置可随时在会话内切换（当前轮完成后）
         </span>
       </div>
+
+      {/* ⓪ 工作区（可选） */}
+      <section className="flex flex-col gap-2">
+        <div className="flex items-baseline gap-2">
+          <span className="text-sm font-medium text-foreground">⓪ 工作区</span>
+          <span className="text-xs text-muted-foreground">
+            可选 · 选中后会话将在工作区项目目录中运行
+          </span>
+        </div>
+        <WorkspaceSessionPicker
+          value={workspaceId}
+          onChange={handleWsChange}
+          machines={machines}
+          disabled={submitting}
+        />
+        {workspaceId && (
+          <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-700">
+            ✓ 会话将在该项目目录中运行，自动加载其规范文档
+          </div>
+        )}
+      </section>
 
       {/* ① 守护进程（必选，仅在线） */}
       <section className="flex flex-col gap-2">
@@ -423,7 +458,7 @@ export function NewSessionForm({ onCreated }: NewSessionFormProps) {
         />
         <div className="flex items-center justify-end gap-3">
           <span className="text-xs text-muted-foreground">
-            机器、智能体必选并输入消息后「开始会话」可点击
+            机器、智能体必选并输入消息后「开始会话」可点击{workspaceId ? " · 已选择工作区" : ""}
           </span>
           <Button
             type="primary"

@@ -44,6 +44,7 @@ import type {
   DaemonMachineRead,
   DaemonRuntimeRead,
 } from "@/lib/daemon";
+import { __setBindingMap } from "@/components/sessions/workspace-session-picker";
 
 // ── hoisted mock 状态 ─────────────────────────────────────────────────────
 
@@ -53,6 +54,8 @@ const mocks = vi.hoisted(() => ({
   listProviders: vi.fn(),
   createSession: vi.fn(),
   machinesRefetch: vi.fn(),
+  listWorkspaces: vi.fn(),
+  fetchMyBindings: vi.fn(),
 }));
 
 vi.mock("@/lib/use-daemon-machines", () => ({
@@ -76,6 +79,37 @@ vi.mock("@/lib/daemon", async (importOriginal) => {
   return {
     ...actual,
     createSession: (...args: unknown[]) => mocks.createSession(...args),
+  };
+});
+
+vi.mock("@/lib/workspaces", () => ({
+  listWorkspaces: (...args: unknown[]) => mocks.listWorkspaces(...args),
+}));
+
+vi.mock("@/lib/workspace-binding", () => ({
+  fetchMyBindings: (...args: unknown[]) => mocks.fetchMyBindings(...args),
+}));
+
+vi.mock("@/components/sessions/workspace-session-picker", () => {
+  // 模拟绑定映射：workspace-id → daemon-id（测试中可按需调整）
+  const bindingMap: Record<string, string | null> = {};
+  return {
+    __setBindingMap: (m: Record<string, string | null>) => Object.assign(bindingMap, m),
+    WorkspaceSessionPicker: ({ value, onChange, disabled }: { value: string | null; onChange: (wsId: string | null, boundMachineId: string | null) => void; disabled?: boolean }) => (
+      <select
+        data-testid="workspace-picker"
+        value={value ?? ""}
+        disabled={disabled}
+        onChange={(e) => {
+          const v = e.target.value || null;
+          const bound = v ? (bindingMap[v] ?? null) : null;
+          onChange(v, bound);
+        }}
+      >
+        <option value="">不使用工作区（默认）</option>
+        <option value="mock-ws-1">Mock Workspace</option>
+      </select>
+    ),
   };
 });
 
@@ -233,6 +267,14 @@ async function chooseAntdOption(selectId: string, optionText: string) {
   });
 }
 
+/** 选工作区：mock 的 workspace-picker 是原生 <select>，直接 change。 */
+async function pickWorkspace(optionValue: string) {
+  const sel = document.querySelector('[data-testid="workspace-picker"]') as HTMLSelectElement;
+  if (!sel) throw new Error("workspace-picker not found");
+  fireEvent.change(sel, { target: { value: optionValue } });
+  await act(async () => { await Promise.resolve(); });
+}
+
 /** 当前选中态智能体（aria-pressed=true 的芯片）。 */
 function pressedAgent(): HTMLElement | null {
   return document.querySelector('[aria-label^="选择智能体"][aria-pressed="true"]');
@@ -265,6 +307,8 @@ beforeEach(() => {
   mocks.listProviders.mockReset().mockResolvedValue([]);
   mocks.createSession.mockReset().mockResolvedValue(RESPONSE);
   mocks.machinesRefetch.mockReset();
+  mocks.listWorkspaces.mockReset().mockResolvedValue({ items: [], total: 0 });
+  mocks.fetchMyBindings.mockReset().mockResolvedValue([]);
   window.localStorage.clear();
 });
 
@@ -649,6 +693,7 @@ describe("NewSessionForm 开始会话提交", () => {
       providerId: "prov-1",
       profileId: "prof-1",
       prompt: "帮我审查这段代码",
+      workspaceId: null,
     });
     // D-005：成功后记住机器选择
     expect(window.localStorage.getItem(NEW_SESSION_MACHINE_LS_KEY)).toBe("m-1");
@@ -762,5 +807,220 @@ describe("NewSessionForm 必选缺失禁用按钮", () => {
         screen.getAllByRole("button", { name: /开始会话/ })[1],
       ).toBeDisabled(),
     );
+  });
+});
+
+// ── 7. 工作区选择器联动 ─────────────────────────────────────────────────
+
+describe("NewSessionForm 工作区选择器联动", () => {
+  it("⓪ 工作区标签存在（不与 ①②③④ 冲突）", async () => {
+    mocks.listWorkspaces.mockResolvedValue({
+      items: [{ id: "ws-1", name: "前端项目", slug: "fe", status: "active", type: "backend" }],
+      total: 1,
+    });
+    mocks.fetchMyBindings.mockResolvedValue([]);
+    setMachines({
+      items: [
+        makeMachine({
+          id: "m-1",
+          hostname: "machine-1",
+          runtimes: [makeRuntime({ id: "rt-claude", name: "Claude Code" })],
+        }),
+      ],
+    });
+    renderForm(<NewSessionForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/⓪ 工作区/)).toBeInTheDocument();
+      expect(screen.getByText(/① 守护进程/)).toBeInTheDocument();
+    });
+  });
+
+  it("选工作区且绑定机器在线 → 机器自动切换到绑定机器", async () => {
+    const machineA = makeMachine({
+      id: "m-a",
+      hostname: "machine-a",
+      runtimes: [makeRuntime({ id: "rt-a-claude", provider: "claude", name: "Claude Code" })],
+    });
+    const machineB = makeMachine({
+      id: "m-b",
+      hostname: "machine-b",
+      runtimes: [makeRuntime({ id: "rt-b-claude", provider: "claude", name: "Claude Code" })],
+    });
+    mocks.listWorkspaces.mockResolvedValue({
+      items: [{ id: "ws-1", name: "前端项目", slug: "fe", status: "active", type: "backend" }],
+      total: 1,
+    });
+    // ws-1 绑定到 m-b
+    mocks.fetchMyBindings.mockResolvedValue([
+      { workspace_id: "ws-1", daemon_id: "m-b" },
+    ]);
+    __setBindingMap({ "mock-ws-1": "m-b" });
+    setMachines({ items: [machineA, machineB] });
+
+    renderForm(<NewSessionForm />);
+
+    // 初始默认选 m-a（心跳较新或首项）
+    await waitFor(() => {
+      expect(pressedMachine()?.getAttribute("aria-label")).toBe(
+        "选择机器 machine-a",
+      );
+    });
+
+    // 选工作区 ws-1 → 机器自动切到 m-b
+    await pickWorkspace("mock-ws-1");
+    await waitFor(() => {
+      expect(pressedMachine()?.getAttribute("aria-label")).toBe(
+        "选择机器 machine-b",
+      );
+    });
+  });
+
+  it("选工作区无绑定 → 机器不动", async () => {
+    const machineA = makeMachine({
+      id: "m-a",
+      hostname: "machine-a",
+      runtimes: [makeRuntime({ id: "rt-a-claude", provider: "claude", name: "Claude Code" })],
+    });
+    mocks.listWorkspaces.mockResolvedValue({
+      items: [{ id: "ws-1", name: "前端项目", slug: "fe", status: "active", type: "backend" }],
+      total: 1,
+    });
+    mocks.fetchMyBindings.mockResolvedValue([]);
+    setMachines({ items: [machineA] });
+
+    renderForm(<NewSessionForm />);
+
+    await waitFor(() => {
+      expect(pressedMachine()?.getAttribute("aria-label")).toBe(
+        "选择机器 machine-a",
+      );
+    });
+
+    // 选工作区 ws-1 但无绑定 → 机器不变
+    await pickWorkspace("mock-ws-1");
+    await waitFor(() => {
+      expect(pressedMachine()?.getAttribute("aria-label")).toBe(
+        "选择机器 machine-a",
+      );
+    });
+  });
+
+  it("改回「不使用工作区」→ 仅清 workspaceId 不动机器", async () => {
+    const machineA = makeMachine({
+      id: "m-a",
+      hostname: "machine-a",
+      runtimes: [makeRuntime({ id: "rt-a-claude", provider: "claude", name: "Claude Code" })],
+    });
+    const machineB = makeMachine({
+      id: "m-b",
+      hostname: "machine-b",
+      runtimes: [makeRuntime({ id: "rt-b-claude", provider: "claude", name: "Claude Code" })],
+    });
+    mocks.listWorkspaces.mockResolvedValue({
+      items: [{ id: "ws-1", name: "前端项目", slug: "fe", status: "active", type: "backend" }],
+      total: 1,
+    });
+    mocks.fetchMyBindings.mockResolvedValue([
+      { workspace_id: "ws-1", daemon_id: "m-b" },
+    ]);
+    __setBindingMap({ "mock-ws-1": "m-b" });
+    setMachines({ items: [machineA, machineB] });
+
+    renderForm(<NewSessionForm />);
+
+    // 选工作区 → 机器切到 m-b
+    await waitFor(() => {
+      expect(pressedMachine()?.getAttribute("aria-label")).toBe(
+        "选择机器 machine-a",
+      );
+    });
+    await pickWorkspace("mock-ws-1");
+    await waitFor(() => {
+      expect(pressedMachine()?.getAttribute("aria-label")).toBe(
+        "选择机器 machine-b",
+      );
+    });
+
+    // 改回「不使用工作区」→ 机器仍在 m-b（仅清 workspaceId）
+    await pickWorkspace("");
+    await waitFor(() => {
+      expect(pressedMachine()?.getAttribute("aria-label")).toBe(
+        "选择机器 machine-b",
+      );
+    });
+  });
+
+  it("提交含 workspace_id：选中工作区后 createSession 请求体含 workspace_id", async () => {
+    mocks.listWorkspaces.mockResolvedValue({
+      items: [{ id: "ws-1", name: "前端项目", slug: "fe", status: "active", type: "backend" }],
+      total: 1,
+    });
+    mocks.fetchMyBindings.mockResolvedValue([]);
+    setMachines({
+      items: [
+        makeMachine({
+          id: "m-1",
+          hostname: "machine-1",
+          runtimes: [makeRuntime({ id: "rt-claude", name: "Claude Code" })],
+        }),
+      ],
+    });
+    renderForm(<NewSessionForm />);
+
+    await waitFor(() => {
+      expect(pressedAgent()?.getAttribute("aria-label")).toBe(
+        "选择智能体 Claude Code",
+      );
+    });
+
+    // 选工作区
+    await pickWorkspace("mock-ws-1");
+    await waitFor(() => {
+      expect(screen.getByText(/会话将在该项目目录中运行/)).toBeInTheDocument();
+    });
+
+    // 输入消息并提交
+    inputPrompt("测试工作区");
+    fireEvent.click(screen.getByRole("button", { name: /开始会话/ }));
+    await waitFor(() => expect(mocks.createSession).toHaveBeenCalledTimes(1));
+
+    const callArgs = mocks.createSession.mock.calls[0]![0]!;
+    expect(callArgs.workspace_id).toBe("mock-ws-1");
+    expect(callArgs.runtime_id).toBe("rt-claude");
+    expect(callArgs.prompt).toBe("测试工作区");
+  });
+
+  it("不选工作区零回归：不选时请求体不含 workspace_id 字段", async () => {
+    mocks.listWorkspaces.mockResolvedValue({
+      items: [{ id: "ws-1", name: "前端项目", slug: "fe", status: "active", type: "backend" }],
+      total: 1,
+    });
+    mocks.fetchMyBindings.mockResolvedValue([]);
+    setMachines({
+      items: [
+        makeMachine({
+          id: "m-1",
+          hostname: "machine-1",
+          runtimes: [makeRuntime({ id: "rt-claude", name: "Claude Code" })],
+        }),
+      ],
+    });
+    renderForm(<NewSessionForm />);
+
+    await waitFor(() => {
+      expect(pressedAgent()?.getAttribute("aria-label")).toBe(
+        "选择智能体 Claude Code",
+      );
+    });
+
+    // 不选工作区，直接提交
+    inputPrompt("普通会话");
+    fireEvent.click(screen.getByRole("button", { name: /开始会话/ }));
+    await waitFor(() => expect(mocks.createSession).toHaveBeenCalledTimes(1));
+
+    const callArgs = mocks.createSession.mock.calls[0]![0]!;
+    expect(callArgs).not.toHaveProperty("workspace_id");
+    expect(callArgs.runtime_id).toBe("rt-claude");
   });
 });
