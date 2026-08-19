@@ -1,0 +1,808 @@
+<!-- author: qinyi -->
+<!-- created_at: 2026-08-19T10:00:00 -->
+<!-- updated_at: 2026-08-19T11:30:00 高保真重做：对齐真实前端技术栈（antd token + tailwind 间距 + 壳组件视觉） -->
+<!-- prototype: 跨工作区团队执行 + 项目维度会话 · UI/流程原型
+  依据：design.md §3.1 线框 / §7.3 前端；FRONTEND_PAGE_STYLE.md（页面骨架四件套规范）
+  视觉对齐真实代码：
+    app-shell.tsx / top-bar.tsx / menu-permissions.ts（导航壳：260px 侧栏 + h-14 顶栏）
+    mission-console.tsx / mission-summary-card.tsx（MissionConsole 复用组件）
+    workspace-types.ts（8 值类型词表徽标配色）/ antd-providers.tsx + app/globals.css（主题 token）
+  execute 对照：① 列表页整壳 ② 创建 Modal（Scope 多选 + Anchor 单选）③ 详情态（worker 目标工作区徽标）④ 派发/收敛链路 ⑤ 状态与边界 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>跨工作区团队执行 · 项目维度 Mission 原型</title>
+<style>
+  /* ── token 对齐 frontend/src/styles/tokens.ts + app/globals.css(light) + antd-providers ── */
+  :root{
+    --bg:#f8fafc;--card:#fff;--border:#e2e8f0;--fg:#1d2530;--mfg:#6b7687;
+    --primary:#2563EB;--primary-h:#4381f0;--primary-bg:#eff6ff;--primary-fg:#1d4ed8;
+    --success:#10b981;--warning:#f59e0b;--error:#ef4444;
+    --r:4px;--r-md:8px;--r-lg:12px;--r-xl:16px;
+    --antd-border:#d9d9d9;--antd-split:#f0f0f0;
+    --slate-400:#94a3b8;--slate-500:#64748b;--slate-600:#475569;--slate-700:#334155;--slate-800:#1e293b;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    --sh-sm:0 1px 2px 0 rgb(16 24 40/.05);--sh-md:0 4px 6px -1px rgb(16 24 40/.07),0 2px 4px -2px rgb(16 24 40/.05);
+    --sh-modal:0 6px 16px rgb(0 0 0/.08),0 3px 6px rgb(0 0 0/.05),0 9px 28px 8px rgb(0 0 0/.05);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:14px;line-height:1.5715}
+  .wrap{max-width:1380px;margin:0 auto;padding:24px}
+  .label{font-size:12px;font-weight:600;color:var(--mfg);letter-spacing:.05em;margin:36px 0 10px;display:flex;align-items:center;gap:8px}
+  .label .n{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;border-radius:50%;background:var(--primary);color:#fff;font-size:11px}
+  .label .tip{font-weight:400;color:var(--slate-400);letter-spacing:0}
+  .foot{margin-top:28px;padding:14px 0;text-align:center;color:var(--slate-400);font-size:12px;border-top:1px solid var(--border)}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  /* ── 壳：app-shell.tsx（260px 侧栏）+ top-bar.tsx（h-14 顶栏） ── */
+  .shell{display:flex;min-height:860px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--sh-sm)}
+  .sb{width:260px;flex-shrink:0;background:var(--card);border-right:1px solid var(--border);display:flex;flex-direction:column}
+  .sb-brand{display:flex;align-items:center;gap:8px;padding:16px 20px;border-bottom:1px solid var(--border)}
+  .sb-logo{display:flex;align-items:center;gap:6px;font-weight:800;font-size:16px;letter-spacing:.02em;color:var(--slate-800)}
+  .sb-logo i{width:26px;height:26px;border-radius:6px;background:linear-gradient(135deg,#2563eb,#06b6d4);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-style:normal;font-size:13px;font-weight:800}
+  .sb-plat{background:var(--primary-bg);color:var(--primary-fg);font-size:12px;font-weight:500;border-radius:4px;padding:2px 8px}
+  .sb-nav{flex:1;overflow-y:auto;padding:8px 12px 16px}
+  .sb-group{padding:18px 8px 4px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--mfg)}
+  .sb-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;font-size:14px;color:var(--slate-600);cursor:pointer;position:relative}
+  .sb-item svg{width:18px;height:18px;flex-shrink:0}
+  .sb-item:hover{background:var(--bg);color:var(--slate-800)}
+  .sb-item.active{background:var(--primary-bg);color:var(--primary);font-weight:500}
+  .sb-item.active::before{content:"";position:absolute;left:-12px;top:50%;transform:translateY(-50%);height:20px;width:3px;border-radius:0 2px 2px 0;background:var(--primary)}
+  .sb-note{margin-top:auto;padding:8px 16px;font-size:11px;color:var(--slate-400)}
+  .sb-user{display:flex;align-items:center;justify-content:space-between;border-top:1px solid var(--border);padding:12px 16px}
+  .sb-user .name{font-size:12px;color:var(--mfg)}
+  .sb-user .out{font-size:12px;color:var(--mfg);cursor:pointer}
+  .sb-user .out:hover{color:var(--slate-700)}
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .tb{height:56px;flex-shrink:0;background:var(--card);border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:16px;padding:0 16px;box-shadow:var(--sh-sm)}
+  .ws-sw{display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:13px;color:var(--slate-700);background:var(--card);cursor:pointer;flex-shrink:0}
+  .ws-sw .dot{width:6px;height:6px;border-radius:50%;background:var(--success)}
+  .ws-sw svg{width:14px;height:14px;color:var(--slate-400)}
+  .crumb{flex:1;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--slate-500);min-width:0}
+  .crumb .sep{width:14px;height:14px;color:var(--slate-400);flex-shrink:0}
+  .crumb b{color:var(--slate-800);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tb-search{position:relative}
+  .tb-search svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--slate-400);pointer-events:none}
+  .tb-search input{width:240px;background:#f1f5f9;border:1px solid transparent;border-radius:6px;padding:6px 12px 6px 34px;font-size:14px;color:var(--slate-700);font-family:var(--font)}
+  .tb-search input::placeholder{color:var(--slate-400)}
+  .tb-bell{position:relative;width:36px;height:36px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--slate-500);cursor:pointer}
+  .tb-bell:hover{background:#f1f5f9;color:var(--slate-700)}
+  .tb-bell svg{width:20px;height:20px}
+  .tb-bell::after{content:"";position:absolute;right:8px;top:8px;width:6px;height:6px;border-radius:50%;background:#ef4444}
+  .tb-user{display:flex;align-items:center;gap:8px;padding:4px;border-radius:6px;cursor:pointer}
+  .tb-user:hover{background:#f1f5f9}
+  .avatar{width:32px;height:32px;border-radius:50%;background:#2563eb;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:500;flex-shrink:0}
+  .tb-user .un{font-size:14px;color:var(--slate-700)}
+
+  /* ── 页面骨架：PageContainer(px-6 py-6 gap-4) + PageHeader + SectionCard ── */
+  .content{padding:24px;display:flex;flex-direction:column;gap:16px}
+  .ph{display:flex;align-items:center;justify-content:space-between}
+  .ph h1{font-size:24px;font-weight:600;letter-spacing:-.025em}
+  .ph .sub{font-size:12px;color:var(--mfg);margin-top:2px}
+  .ph-actions{display:flex;gap:8px}
+  .scard{background:var(--card);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-sm)}
+  .scard-p2{padding:8px}
+
+  /* ── antd Button（primary/default/link，controlHeight 32，radius 8） ── */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 15px;border-radius:8px;font-size:14px;cursor:pointer;border:1px solid var(--antd-border);background:var(--card);color:rgba(0,0,0,.88);font-family:var(--font);transition:all .2s;white-space:nowrap}
+  .btn:hover{border-color:var(--primary);color:var(--primary)}
+  .btn-primary{background:var(--primary);border-color:var(--primary);color:#fff;box-shadow:0 2px 0 rgb(5 113 220/.08)}
+  .btn-primary:hover{background:var(--primary-h);border-color:var(--primary-h);color:#fff}
+  .btn:disabled{cursor:not-allowed;border-color:var(--antd-border);color:rgba(0,0,0,.25);background:#f5f5f5;box-shadow:none}
+  .btn-sm{height:24px;padding:0 7px;font-size:12px}
+  .link{border:none;background:none;color:var(--primary);padding:0 4px;font-size:12px;cursor:pointer;font-family:var(--font);height:auto}
+  .link:hover{color:var(--primary-h)}
+  .link.danger{color:#dc2626}
+  .link.danger:hover{color:#ef4444}
+  /* shadcn outline（MissionConsole 返回/取消任务用） */
+  .btn-out{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--fg);font-size:14px;cursor:pointer;font-family:var(--font)}
+  .btn-out.sm{height:28px;padding:0 10px;font-size:13px}
+  .btn-out:hover{background:var(--bg)}
+
+  /* ── 工具栏 + 搜索区（FRONTEND_PAGE_STYLE §2/§3） ── */
+  .toolbar{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-bottom:8px}
+  .toolbar .vsep{width:1px;height:24px;background:var(--border);margin:0 4px}
+  .sform{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:8px}
+  .sfield{display:flex;flex-direction:column;gap:4px}
+  .sfield .fl{font-size:12px;line-height:16px;color:var(--mfg)}
+  .input,.select{width:100%;height:32px;border:1px solid var(--antd-border);border-radius:8px;padding:4px 12px;font-size:14px;color:rgba(0,0,0,.88);background:var(--card);font-family:var(--font)}
+  .input::placeholder{color:rgba(0,0,0,.25)}
+  .input:focus,.select:focus,.textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 2px rgb(37 99 235/.1)}
+  .select{appearance:none;background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="%2394a3b8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>');background-repeat:no-repeat;background-position:right 11px center;padding-right:30px;cursor:pointer}
+  .textarea{width:100%;border:1px solid var(--antd-border);border-radius:8px;padding:5px 12px;font-size:14px;color:rgba(0,0,0,.88);font-family:var(--font);min-height:74px;resize:vertical}
+
+  /* ── antd Table（DataTable size=small bordered；Table token: headerBg #f1f5f9） ── */
+  table.antbl{width:100%;border-collapse:collapse}
+  .antbl th{background:#f1f5f9;color:#475569;font-weight:600;font-size:14px;text-align:left;padding:8px 12px;border:1px solid var(--border);white-space:nowrap}
+  .antbl td{padding:8px 12px;border:1px solid var(--border);font-size:14px;color:rgba(0,0,0,.88);background:var(--card);vertical-align:middle}
+  .antbl tbody tr:nth-child(even) td{background:#fbfcfe}
+  .antbl tbody tr:hover td{background:var(--bg)}
+  .antbl .c{text-align:center}
+  .antbl .num{width:56px;text-align:center;color:var(--mfg)}
+  .antbl .ops{text-align:center;white-space:nowrap}
+  .cell-main{font-weight:500;color:var(--slate-900)}
+  .cell-sub{font-size:12px;color:var(--slate-400);margin-top:1px}
+  .empty{color:var(--mfg);font-size:12px}
+  .pager{display:flex;align-items:center;justify-content:space-between;padding:10px 4px 4px;font-size:13px;color:var(--mfg)}
+  .pgr{display:flex;gap:6px;align-items:center}
+  .pg{min-width:32px;height:32px;border-radius:8px;border:1px solid var(--antd-border);background:var(--card);font-size:14px;color:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .pg.on{background:var(--primary);border-color:var(--primary);color:#fff}
+
+  /* ── 状态/分类标签 ── */
+  /* StatusBadge（antd Badge dot） */
+  .st{display:inline-flex;align-items:center;gap:8px;font-size:14px;color:rgba(0,0,0,.88);white-space:nowrap}
+  .st .d{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+  .st.info .d{background:#2563eb;box-shadow:0 0 0 0 rgb(37 99 235/.25);animation:pulse 2s infinite}
+  .st.success .d{background:#10b981}
+  .st.warning .d{background:#f59e0b}
+  .st.error .d{background:#ef4444}
+  .st.neutral .d{background:#d9d9d9}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgb(37 99 235/.3)}70%{box-shadow:0 0 0 5px rgb(37 99 235/0)}100%{box-shadow:0 0 0 0 rgb(37 99 235/0)}}
+  /* MissionConsole 状态 pill（bg-*-100 text-*-700） */
+  .pill{display:inline-flex;align-items:center;border-radius:9999px;padding:2px 8px;font-size:12px;font-weight:500;white-space:nowrap}
+  .pill-blue{background:#dbeafe;color:#1d4ed8}
+  .pill-green{background:#dcfce7;color:#15803d}
+  .pill-gray{background:#f3f4f6;color:#374151}
+  .pill-yellow{background:#fef9c3;color:#854d0e}
+  .pill-red{background:#fee2e2;color:#b91c1c}
+  .pill-zinc{background:#e5e7eb;color:#6b7280}
+  /* shadcn Badge outline（分身角色/计数） */
+  .bdg-o{display:inline-flex;align-items:center;border:1px solid var(--border);border-radius:9999px;padding:1px 8px;font-size:12px;color:var(--slate-700);background:var(--card);white-space:nowrap}
+  .bdg-o.vio{border-color:#c4b5fd;color:#6d28d9}
+  /* 工作区类型徽标（workspace-types.ts 8 值词表：border-200 bg-50 text-700） */
+  .wt{display:inline-flex;align-items:center;border-radius:4px;border:1px solid;padding:2px 6px;font-size:12px;line-height:1.2;white-space:nowrap}
+  .wt-frontend-code{border-color:#bae6fd;background:#f0f9ff;color:#0369a1}
+  .wt-backend-code{border-color:#99f6e4;background:#f0fdfa;color:#0f766e}
+  .wt-fullstack{border-color:#ddd6fe;background:#f5f3ff;color:#6d28d9}
+  .wt-business-doc{border-color:#fde68a;background:#fffbeb;color:#b45309}
+  .wt-submodule{border-color:#c7d2fe;background:#eef2ff;color:#4338ca}
+  .wt-deploy-ops{border-color:#fed7aa;background:#fff7ed;color:#c2410c}
+  .wt-design-asset{border-color:#f5d0fe;background:#fdf4ff;color:#a21caf}
+  .wt-other{border-color:#e4e4e7;background:#fafafa;color:#3f3f46}
+  /* 在线状态（antd Badge 缩微） */
+  .onst{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:rgba(0,0,0,.65);white-space:nowrap}
+  .onst .d{width:6px;height:6px;border-radius:50%}
+  .onst.on .d{background:var(--success)}
+  .onst.off .d{background:#d9d9d9}
+
+  /* ── Modal（antd：radius 12，header/footer 带 split 线） ── */
+  .modal-stage{background:transparent;border:1px dashed var(--border);border-radius:var(--r-lg);padding:16px;display:flex;justify-content:center;align-items:flex-start}
+  .modal{width:760px;max-width:100%;background:var(--card);border-radius:var(--r-lg);box-shadow:var(--sh-modal);display:flex;flex-direction:column}
+  .modal-h{padding:16px 24px;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+  .modal-h h2{font-size:16px;font-weight:600}
+  .modal-x{width:22px;height:22px;display:flex;align-items:center;justify-content:center;color:rgba(0,0,0,.45);cursor:pointer;border-radius:4px}
+  .modal-x:hover{background:rgba(0,0,0,.06);color:rgba(0,0,0,.88)}
+  .modal-b{padding:20px 24px;overflow:auto;max-height:66vh}
+  .modal-f{padding:12px 24px;border-top:1px solid #f0f0f0;display:flex;justify-content:flex-end;gap:8px}
+  .f-item{margin-bottom:18px}
+  .f-item>label{display:block;font-size:14px;color:rgba(0,0,0,.88);margin-bottom:8px}
+  .f-item>label .req{color:#ff4d4f;margin-right:4px;font-family:SimSun,sans-serif}
+  .hint{font-size:12px;color:var(--mfg);margin-top:6px;line-height:1.6}
+  .hint code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;background:#f1f5f9;border-radius:3px;padding:1px 4px;color:var(--slate-600)}
+
+  /* Scope 工作区卡片（多选） */
+  .ws-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+  .ws-card{position:relative;border:1px solid var(--border);border-radius:8px;padding:12px;cursor:pointer;transition:all .15s;background:var(--card)}
+  .ws-card:hover{border-color:#93c5fd}
+  .ws-card.sel{border-color:var(--primary);background:var(--primary-bg);box-shadow:var(--sh-sm)}
+  .ws-card.off-ws:hover{border-color:#fca5a5}
+  .ws-head{display:flex;align-items:center;gap:8px;margin-bottom:4px;padding-right:26px}
+  .ws-name{font-weight:500;font-size:14px;color:var(--slate-800)}
+  .ws-desc{font-size:12px;color:var(--slate-500);line-height:1.5}
+  .ws-meta{display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap}
+  .ws-meta .mach{font-size:12px;color:var(--slate-400)}
+  .ws-card .chk{position:absolute;top:10px;right:10px;width:16px;height:16px;border-radius:50%;border:1px solid var(--antd-border);display:flex;align-items:center;justify-content:center;background:var(--card)}
+  .ws-card.sel .chk{background:var(--primary);border-color:var(--primary)}
+  .ws-card .chk svg{width:10px;height:10px;color:#fff;opacity:0}
+  .ws-card.sel .chk svg{opacity:1}
+
+  /* Anchor 单选 */
+  .anc-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .anc-opt{display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:8px;padding:7px 12px;cursor:pointer;background:var(--card);transition:all .15s}
+  .anc-opt:hover{border-color:#93c5fd}
+  .anc-opt.sel{border-color:var(--primary);background:var(--primary-bg)}
+  .anc-opt .radio{width:14px;height:14px;border-radius:50%;border:1px solid var(--antd-border);display:flex;align-items:center;justify-content:center;background:var(--card)}
+  .anc-opt.sel .radio{border-color:var(--primary)}
+  .anc-opt.sel .radio::after{content:"";width:8px;height:8px;border-radius:50%;background:var(--primary)}
+  .anc-opt .nm{font-weight:500;font-size:13px;color:var(--slate-800)}
+  .anc-def{font-size:11px;color:var(--primary-fg);background:var(--primary-bg);border-radius:3px;padding:1px 6px}
+
+  /* 高级面板（TeamConfigPanel：violet 边框底） */
+  details.adv{border:1px solid var(--border);border-radius:6px;background:var(--card);padding:8px 12px}
+  details.adv>summary{cursor:pointer;font-size:14px;font-weight:500;color:var(--slate-600);list-style:none}
+  details.adv>summary::-webkit-details-marker{display:none}
+  details.adv>summary::before{content:"▸ ";color:var(--slate-400)}
+  details.adv[open]>summary::before{content:"▾ "}
+  .tcp{margin-top:10px;border:1px solid #ddd6fe;background:rgba(245,243,255,.4);border-radius:6px;padding:14px;display:flex;flex-direction:column;gap:14px}
+  .tcp-t{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#6d28d9;display:flex;align-items:center;gap:6px}
+  .tcp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .tcp-f{display:flex;flex-direction:column;gap:4px}
+  .tcp-f .fl{font-size:11px;font-weight:500;color:var(--slate-600)}
+  .tcp-f .input,.tcp-f .select{height:34px;font-size:13px}
+  .tcp-empty{border:1px dashed var(--border);border-radius:6px;background:var(--card);padding:12px;text-align:center;font-size:12px;color:var(--slate-400)}
+
+  /* ── ③ 详情态（MissionConsole 展示复刻 + 目标工作区徽标） ── */
+  .console{display:flex;flex-direction:column;gap:12px}
+  .sum-card{border:1px solid #e2e8f0;border-radius:var(--r-lg);background:var(--card);padding:16px;display:flex;flex-direction:column;gap:12px}
+  .sum-line{display:flex;flex-wrap:wrap;align-items:center;gap:16px}
+  .sum-line .sep-txt{font-size:14px;color:#4b5563}
+  .sum-line .sep-txt b{color:#1f2937;font-weight:600}
+  .sum-line .g{color:#15803d}.sum-line .r{color:#dc2626}
+  .ai{border:1px solid #c7d2fe;background:#eef2ff;border-radius:6px;padding:12px}
+  .ai-t{font-size:11px;font-weight:700;letter-spacing:.05em;color:#4f46e5;margin-bottom:4px}
+  .proj-strip{display:flex;flex-wrap:wrap;align-items:center;gap:8px;border:1px dashed var(--border);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--slate-500);background:#fbfcfe}
+  .proj-strip .k{color:var(--slate-400)}
+  .coord{border:1px solid #e5e7eb;background:#f9fafb;border-radius:6px;padding:12px;font-size:14px}
+  .coord-h{display:flex;align-items:center;gap:8px;font-weight:500}
+  .coord-sub{font-size:12px;color:#4b5563;margin-top:4px}
+  .coord-sub .lab{color:#9ca3af}
+  .roles{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;align-items:center}
+  .roles .lab{font-size:12px;color:#9ca3af}
+  .sec-t{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--slate-500);margin-bottom:6px}
+  .orch-box{border:1px solid #ddd6fe;background:rgba(245,243,255,.4);border-radius:6px;padding:8px}
+  .wrow{border:1px solid #e5e7eb;border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:6px;background:var(--card)}
+  .wrow-h{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+  .wrow-h .stx{font-size:14px}
+  .wrow-h .tws{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--slate-400)}
+  .logbtn{margin-left:auto;border:1px solid #d9d9d9;border-radius:4px;padding:2px 8px;font-size:12px;color:#2563eb;background:var(--card);cursor:pointer;font-family:var(--font)}
+  .logbtn:hover{background:var(--primary-bg)}
+  .obj-t{font-size:12px;color:#4b5563}
+  .obj-t button{background:none;border:none;color:#6b7280;cursor:pointer;font-size:12px;padding:0;font-family:var(--font)}
+  .obj-t button:hover{color:#374151}
+  .err-note{font-size:12px;color:#dc2626;background:#fef2f2;border:1px solid #fecaca;border-radius:4px;padding:4px 8px}
+  .wlist{display:flex;flex-direction:column;gap:8px}
+  .conv-note{border:1px dashed #fde68a;background:rgba(255,251,235,.6);border-radius:6px;padding:8px 12px;font-size:12px;color:#92400e}
+
+  /* ── ④ 流程图 ── */
+  .diagram{background:var(--card);border:1px solid var(--border);border-radius:var(--r-lg);padding:20px;box-shadow:var(--sh-sm)}
+  .flow{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:center}
+  .box{border:1px solid var(--border);border-radius:8px;padding:10px 14px;background:var(--bg);min-width:130px;text-align:center}
+  .box.primary{background:var(--primary-bg);border-color:#bfdbfe}
+  .box.accent{background:#f0fdfa;border-color:#99f6e4}
+  .box.warn{background:#fffbeb;border-color:#fde68a}
+  .box-t{font-weight:600;font-size:13px;color:var(--slate-800)}
+  .box-s{font-size:11px;color:var(--slate-500);margin-top:2px}
+  .arrow{display:flex;flex-direction:column;align-items:center;gap:2px;color:var(--slate-400);font-size:11px;text-align:center}
+  .arrow svg{width:22px;height:14px}
+  .arrow .al{color:var(--slate-500);white-space:nowrap}
+  .legend{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px solid var(--border);font-size:12px;color:var(--slate-500)}
+  .legend .li{display:inline-flex;align-items:center;gap:5px}
+
+  /* ── ⑤ 说明表 ── */
+  .note-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-sm);padding:16px 20px}
+  .note-list{margin:12px 0 0;padding-left:18px;font-size:12.5px;color:var(--slate-600);display:flex;flex-direction:column;gap:6px;line-height:1.7}
+  .note-list code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;background:#f1f5f9;border-radius:3px;padding:1px 4px;color:var(--slate-600)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="label"><span class="n">①</span>项目维度 Mission 列表页 · <span class="mono">/projects/{id}/missions</span><span class="tip">整壳对齐 app-shell + top-bar；页面骨架对齐 PageContainer / PageHeader / SectionCard / DataTable</span></div>
+  <div class="shell">
+    <aside class="sb">
+      <div class="sb-brand">
+        <span class="sb-logo"><i>S</i>SILLYHUB</span>
+        <span class="sb-plat">SillyHub</span>
+      </div>
+      <nav class="sb-nav">
+        <div class="sb-group">工作区</div>
+        <a class="sb-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          工作区首页
+        </a>
+        <a class="sb-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+          变更中心
+        </a>
+        <a class="sb-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          运行时
+        </a>
+        <div class="sb-group">智能体</div>
+        <a class="sb-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+          Agent 团队
+        </a>
+        <a class="sb-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          智能体会话
+        </a>
+        <div class="sb-group">配置中心</div>
+        <a class="sb-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>
+          API 密钥
+        </a>
+        <div class="sb-group">协作治理</div>
+        <a class="sb-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1 1 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+          审计中心
+        </a>
+      </nav>
+      <div class="sb-note">…（菜单按权限渲染，此处省略部分条目）</div>
+      <div class="sb-user"><span class="name">秦工</span><span class="out">退出</span></div>
+    </aside>
+
+    <div class="main">
+      <header class="tb">
+        <div class="ws-sw"><span class="dot"></span>multi-agent-platform<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></div>
+        <nav class="crumb">
+          <span>项目</span>
+          <svg class="sep" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          <span>智能客服系统 V2</span>
+          <svg class="sep" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          <b>团队 Mission</b>
+        </nav>
+        <div class="tb-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="search" placeholder="搜索..." aria-label="全局搜索">
+        </div>
+        <div class="tb-bell"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></div>
+        <div class="tb-user"><div class="avatar">秦</div><span class="un">秦工</span></div>
+      </header>
+
+      <div class="content">
+        <div class="ph">
+          <div>
+            <h1>团队 Mission</h1>
+            <p class="sub">在项目维度发起跨工作区团队会话，主 agent 按任务性质把工作派到对应工作区 / 机器</p>
+          </div>
+          <div class="ph-actions">
+            <button class="btn" onclick="location.reload()">刷新</button>
+            <button class="btn btn-primary" onclick="scrollToSec('sec-modal')">+ 新建 Mission</button>
+          </div>
+        </div>
+
+        <div class="scard scard-p2">
+          <div class="toolbar">
+            <button class="btn btn-primary">搜索</button>
+            <button class="btn">重置</button>
+          </div>
+          <div class="sform">
+            <div class="sfield"><span class="fl">状态</span>
+              <select class="select"><option>全部</option><option>规划中</option><option>运行中</option><option>部分完成</option><option>已完成</option></select>
+            </div>
+            <div class="sfield"><span class="fl">关键词</span>
+              <input class="input" type="text" placeholder="Mission 目标（回车搜索）">
+            </div>
+            <div class="sfield"><span class="fl">Anchor 工作区</span>
+              <select class="select"><option>全部</option><option>backend-ws</option><option>frontend-ws</option><option>ops-ws</option></select>
+            </div>
+            <div class="sfield"><span class="fl">跨工作区</span>
+              <select class="select"><option>全部</option><option>仅跨工作区</option><option>单工作区</option></select>
+            </div>
+          </div>
+
+          <table class="antbl">
+            <thead>
+              <tr>
+                <th class="num">#</th>
+                <th>Mission 目标</th>
+                <th>状态</th>
+                <th>Anchor 工作区</th>
+                <th>Scope</th>
+                <th>进度</th>
+                <th>创建时间</th>
+                <th class="c" style="width:120px">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="num">1</td>
+                <td><div class="cell-main">实现用户登录页 + 后端鉴权接口</div><div class="cell-sub mono">#m-7c4f9a2e</div></td>
+                <td><span class="st info"><span class="d"></span>运行中</span></td>
+                <td><span class="wt wt-backend-code">后端代码</span> <span class="empty">backend-ws</span></td>
+                <td><span class="wt wt-frontend-code">前端代码</span> <span class="wt wt-backend-code">后端代码</span></td>
+                <td><span style="color:#2563eb;font-weight:500">1/4</span> <span class="empty">分身</span><div class="cell-sub" style="color:#dc2626">1 失败（目标区离线）</div></td>
+                <td>2026-08-19 09:30</td>
+                <td class="ops"><button class="link" onclick="scrollToSec('sec-detail')">详情</button><button class="link danger">终止</button></td>
+              </tr>
+              <tr>
+                <td class="num">2</td>
+                <td><div class="cell-main">统一项目中台错误码与日志格式</div><div class="cell-sub mono">#m-9a8b2c1d</div></td>
+                <td><span class="st warning"><span class="d"></span>部分完成</span></td>
+                <td><span class="wt wt-backend-code">后端代码</span> <span class="empty">backend-ws</span></td>
+                <td><span class="wt wt-backend-code">后端代码</span></td>
+                <td><span style="color:#854d0e;font-weight:500">2/3</span> <span class="empty">分身</span><div class="cell-sub" style="color:#854d0e">1 冲突需手动</div></td>
+                <td>2026-08-18 16:12</td>
+                <td class="ops"><button class="link" onclick="scrollToSec('sec-detail')">详情</button><span class="empty">—</span></td>
+              </tr>
+              <tr>
+                <td class="num">3</td>
+                <td><div class="cell-main">迁移订单模块数据库脚本</div><div class="cell-sub mono">#m-3d5e7f1a</div></td>
+                <td><span class="st success"><span class="d"></span>已完成</span></td>
+                <td><span class="wt wt-deploy-ops">部署运维</span> <span class="empty">ops-ws</span></td>
+                <td><span class="wt wt-deploy-ops">部署运维</span></td>
+                <td><span style="color:#15803d;font-weight:500">3/3</span> <span class="empty">分身</span></td>
+                <td>2026-08-17 11:05</td>
+                <td class="ops"><button class="link">详情</button><span class="empty">—</span></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="pager">
+            <span>共 3 条</span>
+            <div class="pgr"><button class="pg">‹</button><button class="pg on">1</button><button class="pg">›</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="label" id="sec-modal"><span class="n">②</span>新建 Mission 弹窗（antd Modal · Form vertical）<span class="tip">Scope 多选 / Anchor 单选可点击交互；提交按钮随校验态置灰</span></div>
+  <div class="modal-stage">
+    <div class="modal">
+      <div class="modal-h">
+        <h2>新建项目维度 Mission</h2>
+        <span class="modal-x"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
+      </div>
+      <div class="modal-b">
+        <div class="f-item">
+          <label><span class="req">*</span>Mission 目标</label>
+          <textarea class="textarea" id="objInput" placeholder="描述你要 AI 团队做什么…&#10;例：实现登录页与后端鉴权接口——前端任务派前端工作区（机器 A），后端任务派后端工作区（机器 B）"></textarea>
+          <p class="hint">只写目标就行。派几个分身、派到哪个工作区，由主控按任务性质自动决定（<code>dispatch_worker</code> 带 <code>target_workspace_id</code>）。</p>
+        </div>
+
+        <div class="f-item">
+          <label><span class="req">*</span>派发范围 Scope · 本次会话涉及的工作区 <span id="selCount" style="font-weight:400;color:#6b7687">（已选 2 个）</span></label>
+          <div class="ws-grid" id="wsGrid">
+            <div class="ws-card sel" data-ws="frontend-ws" data-type="frontend-code">
+              <div class="ws-head"><span class="ws-name">frontend-ws</span><span class="wt wt-frontend-code">前端代码</span></div>
+              <div class="ws-desc">智能客服系统 V2 前端工作区，Next.js + antd + tailwind</div>
+              <div class="ws-meta">
+                <span class="onst on"><span class="d"></span>在线</span>
+                <span class="mach">机器 A · daemon-4a2c</span>
+              </div>
+              <span class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
+            </div>
+            <div class="ws-card sel" data-ws="backend-ws" data-type="backend-code">
+              <div class="ws-head"><span class="ws-name">backend-ws</span><span class="wt wt-backend-code">后端代码</span></div>
+              <div class="ws-desc">FastAPI 后端服务工作区，用户与鉴权服务</div>
+              <div class="ws-meta">
+                <span class="onst on"><span class="d"></span>在线</span>
+                <span class="mach">机器 B · daemon-9e8f</span>
+              </div>
+              <span class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
+            </div>
+            <div class="ws-card off-ws" data-ws="docs-ws" data-type="business-doc">
+              <div class="ws-head"><span class="ws-name">docs-ws</span><span class="wt wt-business-doc">业务文档</span></div>
+              <div class="ws-desc">产品需求与技术写作工作区</div>
+              <div class="ws-meta">
+                <span class="onst off"><span class="d"></span>离线</span>
+                <span class="mach">机器 C · 无在线 daemon</span>
+              </div>
+              <span class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
+            </div>
+            <div class="ws-card" data-ws="ops-ws" data-type="deploy-ops">
+              <div class="ws-head"><span class="ws-name">ops-ws</span><span class="wt wt-deploy-ops">部署运维</span></div>
+              <div class="ws-desc">部署脚本与 Docker Compose 运维工作区</div>
+              <div class="ws-meta">
+                <span class="onst on"><span class="d"></span>在线</span>
+                <span class="mach">机器 D · daemon-1b3d</span>
+              </div>
+              <span class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
+            </div>
+          </div>
+          <p class="hint">候选 = 项目关联的工作区（服务端校验 <code>scope ⊆ ppm_project_workspace(project_id)</code>，越界 422）。Scope 创建后冻结快照；离线工作区仍可勾选，但派发到它会 worker 失败（<code>no_binding_for_workspace</code>），不崩 Mission。</p>
+        </div>
+
+        <div class="f-item">
+          <label><span class="req">*</span>主工作区 Anchor · 主 agent 运行位置</label>
+          <div class="anc-row" id="ancRow"></div>
+          <p class="hint">默认取 scope 内 <code>type=backend-code</code> 优先，否则第一个。Anchor 决定 MCP URL <code>/workspaces/{anchor}/missions/{id}/...</code> 与主 agent 落地机器；必须在 Scope 内。</p>
+        </div>
+
+        <div class="f-item">
+          <label>费用上限（USD，可选）</label>
+          <input class="input" type="number" min="0" step="0.5" placeholder="留空 = 不限" style="width:180px">
+        </div>
+
+        <div class="f-item" style="margin-bottom:0">
+          <details class="adv">
+            <summary>高级：手动配分身（默认不用动，想精细控制再展开）</summary>
+            <div class="tcp">
+              <div>
+                <div class="tcp-t"><span>🧠</span>主控配置</div>
+                <p class="hint" style="margin:4px 0 8px">不填走默认（Claude Code · claude · claude-sonnet-4-6）。主控读分身产出后再决策。</p>
+                <div class="tcp-grid">
+                  <div class="tcp-f"><span class="fl">AI 类型</span><select class="select"><option>Claude Code</option><option>Codex</option><option>Cursor</option></select></div>
+                  <div class="tcp-f"><span class="fl">厂家</span><select class="select"><option>Claude（Anthropic）</option><option>GLM（智谱）</option><option>GPT（OpenAI）</option><option>DeepSeek</option></select></div>
+                  <div class="tcp-f"><span class="fl">模型</span><input class="input" value="claude-sonnet-4-6"></div>
+                </div>
+              </div>
+              <div>
+                <div style="display:flex;align-items:center;justify-content:space-between">
+                  <div class="tcp-t"><span>👥</span>分身列表（0）</div>
+                  <button class="btn btn-sm" style="border-color:#c4b5fd;color:#6d28d9">+ 添加分身</button>
+                </div>
+                <div class="tcp-empty" style="margin-top:8px">留空 = 主控自动拆。跨工作区 Mission 中，主控按任务性质给每个分身选目标工作区派发。</div>
+              </div>
+            </div>
+          </details>
+        </div>
+      </div>
+      <div class="modal-f">
+        <button class="btn">取消</button>
+        <button class="btn btn-primary" id="createBtn" onclick="scrollToSec('sec-detail')">确认创建</button>
+      </div>
+    </div>
+  </div>
+  <div class="label" id="sec-detail"><span class="n">③</span>Mission 详情态（复用 MissionConsole 展示）<span class="tip">worker 行新增「目标工作区」徽标列（design §7.3）——execute 实现的核心对照</span></div>
+  <div class="shell" style="min-height:auto">
+    <div class="main">
+      <header class="tb">
+        <div class="ws-sw"><span class="dot"></span>multi-agent-platform<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></div>
+        <nav class="crumb"><span>项目</span><svg class="sep" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg><span>智能客服系统 V2</span><svg class="sep" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg><b>团队 Mission</b></nav>
+        <div style="flex:1"></div>
+      </header>
+      <div class="content">
+        <div class="console">
+
+          <div><button class="btn-out sm">← 返回新建</button></div>
+
+          <!-- MissionSummaryCard 复用（mission-summary-card.tsx） -->
+          <div class="sum-card">
+            <div class="sum-line">
+              <span class="pill pill-blue">运行中</span>
+              <span class="sep-txt"><b>4</b> 个分身 · 成功 <b class="g">1</b> / 失败 <b class="r">1</b></span>
+              <span class="sep-txt" style="color:#6b7280">花费 <b style="color:#1f2937">$2.1843</b> / 预算 $10.00</span>
+            </div>
+            <div class="ai">
+              <div class="ai-t">🤖 AI 最终结论</div>
+              <div style="font-size:14px;color:#374151">进行中，暂无最终结论</div>
+            </div>
+          </div>
+
+          <!-- 项目维度信息条（MissionResponse 扩展：project_id / scope_workspace_ids） -->
+          <div class="proj-strip">
+            <span><span class="k">项目</span> 智能客服系统 V2</span>
+            <span><span class="k">Anchor</span> <span class="wt wt-backend-code">后端代码</span> backend-ws · 机器 B</span>
+            <span style="display:inline-flex;align-items:center;gap:6px"><span class="k">Scope（冻结快照）</span> <span class="wt wt-frontend-code">前端代码</span><span class="wt wt-backend-code">后端代码</span></span>
+            <span class="mono" style="margin-left:auto;color:#94a3b8">#m-7c4f9a2e</span>
+          </div>
+
+          <p style="font-size:14px;color:#374151">实现用户登录页 + 后端鉴权接口——前端任务派前端工作区（机器 A），后端任务派后端工作区（机器 B），文档变更同步到业务文档工作区。</p>
+
+          <!-- CoordinatorPanel 复用（mission-console.tsx） -->
+          <div class="coord">
+            <div class="coord-h">🧠 主控 <span class="bdg-o">已拆解为 4 个分身</span></div>
+            <p class="coord-sub"><span class="lab">任务理解：</span>登录页归 frontend-ws（sky 型工作区），鉴权接口与 token 校验归 backend-ws；接口契约先对齐再各自实现。</p>
+            <div class="roles">
+              <span class="lab">分工：</span>
+              <span class="bdg-o">实现 ×2</span><span class="bdg-o">测试</span><span class="bdg-o">验证</span>
+            </div>
+          </div>
+
+          <!-- 主控（target = anchor，维持 borrow 兜底，B-04） -->
+          <div class="orch-box">
+            <div class="sec-t" style="color:#6d28d9">🧠 主控</div>
+            <div class="wlist">
+              <div class="wrow">
+                <div class="wrow-h">
+                  <span class="bdg-o vio">主控</span>
+                  <span class="stx" style="color:#1d4ed8">运行中</span>
+                  <span class="tws"><span class="wt wt-backend-code">后端代码</span>backend-ws · 机器 B（anchor）</span>
+                  <button class="logbtn">收起日志</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 分身列表：worker 行「目标工作区」徽标（本次新增列） -->
+          <div>
+            <div class="sec-t">👥 分身（4）</div>
+            <div class="wlist">
+              <div class="wrow">
+                <div class="wrow-h">
+                  <span class="bdg-o">实现</span>
+                  <span class="stx" style="color:#15803d">已完成</span>
+                  <span class="tws"><span class="wt wt-frontend-code">前端代码</span>frontend-ws · 机器 A</span>
+                  <button class="logbtn">查看日志</button>
+                </div>
+                <div class="obj-t"><button>▸ 分工目标（点开看完整）</button></div>
+              </div>
+              <div class="wrow">
+                <div class="wrow-h">
+                  <span class="bdg-o">实现</span>
+                  <span class="stx" style="color:#1d4ed8">运行中</span>
+                  <span class="tws"><span class="wt wt-backend-code">后端代码</span>backend-ws · 机器 B</span>
+                  <button class="logbtn">查看日志</button>
+                </div>
+                <div class="obj-t"><button>▸ 分工目标（点开看完整）</button></div>
+              </div>
+              <div class="wrow">
+                <div class="wrow-h">
+                  <span class="bdg-o">测试</span>
+                  <span class="stx" style="color:#4b5563">排队中</span>
+                  <span class="tws"><span class="wt wt-backend-code">后端代码</span>backend-ws · 机器 B</span>
+                  <button class="logbtn">查看日志</button>
+                </div>
+                <div class="obj-t"><button>▸ 分工目标（点开看完整）</button></div>
+              </div>
+              <div class="wrow" style="border-color:#fecaca">
+                <div class="wrow-h">
+                  <span class="bdg-o">验证</span>
+                  <span class="stx" style="color:#dc2626">失败</span>
+                  <span class="tws"><span class="wt wt-business-doc">业务文档</span>docs-ws · 机器 C</span>
+                  <button class="logbtn">查看日志</button>
+                </div>
+                <div class="err-note">派发失败：<span class="mono">error_code=no_binding_for_workspace</span> —— 目标工作区无在线 binding（机器 C daemon 离线）。Mission 不受影响，主控可跳过或改派。</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="conv-note">⇄ 收敛预告：converge 按 <span class="mono">target_workspace_id</span> 分组 —— 机器 A / frontend-ws 与机器 B / backend-ws 各自 merge，A 仓冲突不挡 B 仓合并；worktree 副本清理同样按工作区分组发 RPC（D-011）。</div>
+
+          <div><button class="btn-out sm">取消任务</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="label"><span class="n">④</span>跨工作区派发与收敛链路<span class="tip">design §4.2 派发路由 / §4.3 分组收敛</span></div>
+  <div class="diagram">
+    <div class="flow">
+      <div class="box primary"><div class="box-t">项目经理</div><div class="box-s">项目页圈选 scope + anchor</div></div>
+      <div class="arrow"><svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="0" y1="6" x2="19" y2="6"/><polyline points="14 1 20 6 14 11"/></svg><span class="al">scope ⊆ 项目校验<br>anchor ∈ scope</span></div>
+      <div class="box primary"><div class="box-t">POST /projects/{pid}/missions</div><div class="box-s">project_id + scope JSON 快照</div></div>
+      <div class="arrow"><svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="0" y1="6" x2="19" y2="6"/><polyline points="14 1 20 6 14 11"/></svg><span class="al">anchor 派发<br>（borrow 兜底，B-04）</span></div>
+      <div class="box accent"><div class="box-t">主 Agent（Orchestrator）</div><div class="box-s">跑在 anchor 机器 B</div></div>
+    </div>
+    <div style="height:1px;background:var(--border);margin:20px 0"></div>
+    <div class="flow">
+      <div class="box accent"><div class="box-t">dispatch_worker</div><div class="box-s">target_workspace_id=frontend-ws</div></div>
+      <div class="arrow"><svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="0" y1="6" x2="19" y2="6"/><polyline points="14 1 20 6 14 11"/></svg><span class="al">代表 binding 解析<br>owner → 任意在线</span></div>
+      <div class="box warn"><div class="box-t">Worker · frontend-ws</div><div class="box-s">机器 A</div><div class="box-s mono" style="font-size:10px;color:#92400e">.worktrees/&lt;run8&gt;/ 落 A 机</div></div>
+      <div class="arrow" style="min-width:60px"><svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="0" y1="6" x2="19" y2="6"/><polyline points="14 1 20 6 14 11"/></svg></div>
+      <div class="box warn"><div class="box-t">Worker · backend-ws</div><div class="box-s">机器 B</div><div class="box-s mono" style="font-size:10px;color:#92400e">.worktrees/&lt;run8&gt;/ 落 B 机</div></div>
+    </div>
+    <div style="height:1px;background:var(--border);margin:20px 0"></div>
+    <div class="flow">
+      <div class="box accent"><div class="box-t">converge</div><div class="box-s">按 target_workspace 分组</div></div>
+      <div class="arrow"><svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="0" y1="6" x2="19" y2="6"/><polyline points="14 1 20 6 14 11"/></svg><span class="al">git_merge RPC<br>（HostFsDelegate 按 ws 路由）</span></div>
+      <div class="box warn"><div class="box-t">frontend-ws 收敛</div><div class="box-s">A 机独立 merge · 冲突不挡 B</div></div>
+      <div class="arrow" style="min-width:60px"><svg viewBox="0 0 24 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="0" y1="6" x2="19" y2="6"/><polyline points="14 1 20 6 14 11"/></svg></div>
+      <div class="box warn"><div class="box-t">backend-ws 收敛</div><div class="box-s">B 机独立 merge · 冲突不挡 A</div></div>
+    </div>
+    <div class="legend">
+      <span class="li"><span class="st info" style="font-size:12px"><span class="d"></span></span>平台/项目层</span>
+      <span class="li"><span class="st success" style="font-size:12px"><span class="d"></span></span>主 agent / orchestrator</span>
+      <span class="li"><span class="st warning" style="font-size:12px"><span class="d"></span></span>worker / 目标工作区</span>
+      <span class="li" style="margin-left:auto;color:#94a3b8">工作区类型词表（8 值，徽标复用 workspace-role-type 组件）：</span>
+      <span class="li"><span class="wt wt-frontend-code">前端代码</span></span>
+      <span class="li"><span class="wt wt-backend-code">后端代码</span></span>
+      <span class="li"><span class="wt wt-fullstack">全栈代码</span></span>
+      <span class="li"><span class="wt wt-business-doc">业务文档</span></span>
+      <span class="li"><span class="wt wt-submodule">子模块</span></span>
+      <span class="li"><span class="wt wt-deploy-ops">部署运维</span></span>
+      <span class="li"><span class="wt wt-design-asset">设计资产</span></span>
+      <span class="li"><span class="wt wt-other">其他</span></span>
+    </div>
+  </div>
+
+  <div class="label"><span class="n">⑤</span>关键状态与实现备注</div>
+  <div class="note-card">
+    <table class="antbl">
+      <thead><tr><th style="width:130px">场景</th><th>用户可见结果</th><th>技术处理（design 对照）</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="pill pill-blue">scope 越界</span></td>
+          <td>创建表单提示：「scope 只能选自本项目关联的工作区」</td>
+          <td>服务端 422；校验 scope ⊆ ppm_project_workspace(project_id)（§7.1）</td>
+        </tr>
+        <tr>
+          <td><span class="pill pill-blue">target 越界</span></td>
+          <td>主 agent 调 dispatch_worker 返回 400</td>
+          <td><span class="mono" style="font-size:12px">mission_target_out_of_scope</span> 硬校验（§7.2 / R-02）</td>
+        </tr>
+        <tr>
+          <td><span class="pill pill-yellow">目标区离线</span></td>
+          <td>详情页该分身红字「失败」，Mission 继续跑（见 ③ 第 4 行分身）</td>
+          <td>worker failed + <span class="mono" style="font-size:12px">no_binding_for_workspace</span>；代表 binding 解析不到在线实例（§4.2 / R-04）</td>
+        </tr>
+        <tr>
+          <td><span class="pill pill-green">A 冲突 B 正常</span></td>
+          <td>详情/收敛按工作区分组展示 needs_manual / completed</td>
+          <td>finalizer 按 target_workspace_id 分组 merge + cleanup（§4.3 / D-011）</td>
+        </tr>
+        <tr>
+          <td><span class="pill pill-zinc">单 ws mission</span></td>
+          <td>行为与现状完全一致（零回归）</td>
+          <td>scope 缺省 = [anchor]；payload 新参可选；borrow 链不动（§2 / B-04）</td>
+        </tr>
+      </tbody>
+    </table>
+    <ul class="note-list">
+      <li><b>实现备注 1（面包屑）</b>：真实 <code>top-bar.tsx</code> 的 <code>buildBreadcrumbs</code> 对 <code>/projects/{id}/missions</code> 会把 id 段原样显示——execute 时需补 <code>SEGMENT_LABEL</code>（missions → 团队 Mission）并用项目名替换 id 段（或页面级面包屑），本原型按理想态呈现。</li>
+      <li><b>实现备注 2（复用点）</b>：列表/详情复用 <code>MissionConsole</code>（props 扩展 project 维度），分身行新增「目标工作区」徽标列走 <code>MissionWorkerRunResponse.target_workspace_id / target_workspace_name</code>；类型徽标统一 <code>workspace-types.ts</code> 的 <code>workspaceTypeBadge()</code>，禁止组件内硬编码配色。</li>
+      <li><b>实现备注 3（表单）</b>：新页面骨架按 FRONTEND_PAGE_STYLE 四件套（PageContainer full / PageHeader / SectionCard p-2 / DataTable small·bordered·striped），搜索区 grid-cols-4、空值统一 <code>—</code>。</li>
+    </ul>
+  </div>
+  <div class="foot">
+    跨工作区团队执行 · 项目维度会话 · 原型 · 变更 2026-08-19-cross-workspace-team-mission · 浏览器直接预览
+  </div>
+</div>
+<script>
+  // 原型交互：Scope 多选 → Anchor 候选联动（backend-code 优先默认）→ 创建按钮校验态。
+  // 仅演示用；真实实现走 React 受控表单（antd Form rules）。
+  var TYPE_LABEL = {
+    "frontend-code": "前端代码", "backend-code": "后端代码", "fullstack": "全栈代码",
+    "business-doc": "业务文档", "submodule": "子模块", "deploy-ops": "部署运维",
+    "design-asset": "设计资产", "other": "其他"
+  };
+  var selected = { "frontend-ws": true, "backend-ws": true };
+  var anchor = "backend-ws";
+
+  var grid = document.getElementById("wsGrid");
+  var ancRow = document.getElementById("ancRow");
+  var objInput = document.getElementById("objInput");
+  var createBtn = document.getElementById("createBtn");
+  var selCount = document.getElementById("selCount");
+
+  function wsList() {
+    return Array.prototype.map.call(grid.querySelectorAll(".ws-card"), function (c) {
+      return { ws: c.dataset.ws, type: c.dataset.type, el: c };
+    });
+  }
+
+  function renderAnchor() {
+    ancRow.innerHTML = "";
+    var sel = wsList().filter(function (w) { return selected[w.ws]; });
+    if (sel.length === 0) {
+      ancRow.innerHTML = '<span class="hint" style="margin:0">先勾选 Scope，Anchor 从已选工作区中产生。</span>';
+      return;
+    }
+    sel.forEach(function (w) {
+      var opt = document.createElement("div");
+      opt.className = "anc-opt" + (anchor === w.ws ? " sel" : "");
+      opt.innerHTML = '<span class="radio"></span><span class="wt wt-' + w.type + '">' + (TYPE_LABEL[w.type] || w.type) +
+        "</span><span class=\"nm\">" + w.ws + "</span>" +
+        (w.type === "backend-code" ? '<span class="anc-def">默认 · backend 优先</span>' : "");
+      opt.onclick = function () { anchor = w.ws; renderAnchor(); sync(); };
+      ancRow.appendChild(opt);
+    });
+  }
+
+  function sync() {
+    var names = Object.keys(selected).filter(function (k) { return selected[k]; });
+    selCount.textContent = "（已选 " + names.length + " 个）";
+    var ok = names.length > 0 && names.indexOf(anchor) >= 0 && objInput.value.trim().length > 0;
+    createBtn.disabled = !ok;
+    createBtn.title = ok ? "" : "需填 Mission 目标 + 至少勾选 1 个 Scope 工作区";
+  }
+
+  grid.querySelectorAll(".ws-card").forEach(function (card) {
+    card.addEventListener("click", function (e) {
+      if (e.target.closest(".logbtn")) return;
+      var ws = card.dataset.ws;
+      selected[ws] = !selected[ws];
+      card.classList.toggle("sel", !!selected[ws]);
+      var names = Object.keys(selected).filter(function (k) { return selected[k]; });
+      if (selected[ws]) {
+        // 新勾选且当前 anchor 失效 → backend-code 优先，否则第一个
+        if (names.indexOf(anchor) < 0) {
+          var pick = names.filter(function (n) {
+            var c = grid.querySelector('[data-ws="' + n + '"]');
+            return c && c.dataset.type === "backend-code";
+          })[0] || names[0];
+          anchor = pick;
+        }
+      } else if (names.indexOf(anchor) < 0) {
+        anchor = names.filter(function (n) {
+          var c = grid.querySelector('[data-ws="' + n + '"]');
+          return c && c.dataset.type === "backend-code";
+        })[0] || names[0] || null;
+      }
+      renderAnchor();
+      sync();
+    });
+  });
+
+  objInput.addEventListener("input", sync);
+  renderAnchor();
+  sync();
+
+  function scrollToSec(id) {
+    var el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+</script>
+</body>
+</html>

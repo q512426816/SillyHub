@@ -45,3 +45,13 @@ created_at: 2026-08-19 10:35:00
 - **测试**：新增 `test_integration_cross_workspace.py`、`test_mcp_tools_cross_workspace.py`、`missions-page.test.tsx`；agent 模块 586 passed / 1 预存债；frontend vitest 1684 passed；mypy 0 issues
 
 > execute/verify 阶段根据实际代码落点回填上表状态；未实际影响的模块可改为 skipped。
+
+## 未匹配文件
+
+以下 git diff 文件不在上述模块矩阵中（属本次 commit 裹挟的预存改动，非跨 ws 功能范围）：
+
+| 文件 | 说明 |
+|------|------|
+| `frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx` | 预存改动裹挟，非本 change 功能 |
+| `frontend/src/components/explorer/file-explorer.tsx` | 预存改动裹挟，非本 change 功能 |
+| `frontend/src/components/explorer/__tests__/file-explorer.test.tsx` | 预存改动裹挟，非本 change 功能 |

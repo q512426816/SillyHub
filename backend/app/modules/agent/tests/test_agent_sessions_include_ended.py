@@ -28,6 +28,7 @@ EXPECTED_ITEM_FIELDS = {
     "id",
     "provider",
     "status",
+    "mode",
     "turn_count",
     "author",
     "last_active_at",

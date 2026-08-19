@@ -42,6 +42,7 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
+- **2026-08-19-cross-workspace-team-mission**（跨工作区团队执行 + 项目维度会话）：新增项目维度会话入口 `app/(dashboard)/projects/[id]/missions/page.tsx`；扩展 `components/mission-console.tsx` 支持 `projectMode`（scope 多选、anchor 单选、目标工作区徽标列、调用 `createProjectMission`/`listProjectMissions`）；`lib/agent.ts` 新增 `createProjectMission` / `listProjectMissions`（类型从 `api-types.ts` MissionResponse/MissionCreateRequest 导入）；`lib/api-types.ts` 随 backend OpenAPI 重新生成。 vitest 全量 1684 passed，tsc exit 0。
 
 ## 变更索引
 - ql-20260624-003-a7f1 | 优化 /runtimes 会话弹窗布局样式：扩大 RuntimeSessionDialog 工作区，改造会话列表为左侧栏，统一交互式会话与历史回看面板高度和输入栏间距。
@@ -106,4 +107,5 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 - change 2026-08-16-change-owner-from-token | 变更中心责任人用户名+履历事件样式+明细不截断：列表 owner 列三态（owner_name 优先/UUID 前 8 位/—）；ChangeStepTimeline 支持 kind=event 条目（👤 emoji dot+紫色 chip 对齐原型色板，data-kind 锚点，step 分支零变化）；Phase 2.4 明细 line-clamp-2 移除改自然换行 break-words+max-h 滚动兜底（列表摘要截断保留）。测试 timeline 12+page 26（含长文本不 clamp 用例）。
 - change 2026-08-16-change-center-quick-tab | 变更中心第三 tab「快速修复」：page.tsx TABS +quicklog（tabTotalsQuery 三并发拉计数 pill，changesQuery enabled: tab!=="quicklog" 隔离主 load，useSearchParams 支持 ?tab=quicklog|archive 初始 tab）；新 quicklog-table.tsx（筛选关键词回车/状态/负责人/显示空壳占位 + 6 列：4 态徽标/标题双行 ql_id+pushed ● 点/负责人 enrich/影响模块/关联变更 Link/时间 zh-CN + quicklogPollInterval 纯函数 in_progress|stale→30s 全终态停轮 + 空态分场景）+ quicklog-drawer.tsx（Drawer 详情：四段正文固定序+文件全角括注+关联变更链接+原始 md Switch 切换 raw_block 直出+降级占位+错误态列表项元信息不依赖详情）+ detail/quicklog-linked-card.tsx（变更详情页反向「关联的快速任务」区块：linked_change 筛选拉取，点击跳 ?tab=quicklog，失败静默隐藏）；lib/quicklog.ts API client（gen:types 契约）。测试 table 11+drawer 4+列表页 2 新用例+详情页 2 新用例，全量 1608 passed+tsc 0。
 - ql-20260818-008-ec6d | 变更文件 Dialog 预览滚动修复（用户反馈「太长没滚动条、太宽不能左右滚动」）：根因是 Dialog(85vh)→section→grid→右列整条链无 min-h-0/flex 限高，flex-1 overflow-auto 失效，超长内容被 Dialog 的 overflow-hidden 直接裁切；横向 flex 子项缺 min-w-0 被宽内容撑开 + 源码 pre 用 whitespace-pre-wrap 软折行。改 change-file-tree.tsx（section 加 flex min-h-0 flex-1 flex-col；grid 加 min-h-0 flex-1 overflow-hidden + lg:grid-rows-[minmax(0,1fr)]；文件树列 lg 满高；右列改 flex flex-col；FilePreview 三分支统一 min-w-0、pre 改 whitespace-pre 不折行横向滚动、iframe h-full；路径 span 加 truncate）+ change-files-card.tsx（Dialog 内容容器加 flex flex-col + 注释同步）。针对性 vitest 9 用例过 + lint 仅预存 warning。
+- ql-20260819-001-4d85 | explorer 文件树目录双击展开/收起：file-explorer.tsx 的 antd Tree 加 expandAction="doubleClick"（antd 6.4.4 透传 rc-tree 同名 prop），双击目录行切换展开/收起，与 switcher 箭头共用受控 onExpand + loadData 懒加载链路；单击仍只选中、叶子与 Ctrl/Shift 修饰键由 rc-tree 忽略。测试补双击展开/收起/叶子不触发 3 用例，17/17 passed + lint PASS + tsc 0。
 <!-- MANUAL_NOTES_END -->
