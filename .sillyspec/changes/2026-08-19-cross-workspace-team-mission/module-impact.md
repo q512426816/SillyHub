@@ -29,7 +29,7 @@ created_at: 2026-08-19 10:35:00
 | 目标 | 操作 | 状态 |
 |------|------|------|
 | `modules/backend.md` | 更新 backend 模块卡（agent 子域跨 ws 改造、新端点、双 MCP 对齐、target 落列语义修正） | **completed** |
-| `modules/frontend.md` | 更新 frontend 模块卡（新增 projects/[id]/missions 页面、MissionConsole projectMode 扩展、项目 mission API client） | **completed** |
+| `modules/frontend.md` | 更新 frontend 模块卡（新增 projects/[id]/missions 页面、MissionConsole projectMode 扩展、项目 mission API client） | **completed-note-pending** |
 | `modules/sillyhub-daemon.md` | 更新 sillyhub-daemon 模块卡（mcp-server.ts schema 透传、hub-client 可选参透传） | **completed** |
 | `_module-map.yaml` | 无变化（未增删模块） | skipped |
 
