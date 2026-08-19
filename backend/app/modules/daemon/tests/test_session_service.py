@@ -35,6 +35,7 @@ from app.modules.daemon.service import (
     DaemonSessionResumeUnsupported,
     DaemonSessionTurnConflict,
 )
+from app.modules.daemon.session.service import DaemonSessionWorkspaceNotFound
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -191,6 +192,121 @@ class TestCreateSession:
         leases = (await db_session.execute(select(DaemonTaskLease))).scalars().all()
         assert len(leases) == 1
         assert leases[0].status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_create_session_with_valid_workspace_id(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """FR-05/D-001@v1：有 WORKSPACE_READ 权限的用户传 workspace_id → 创建成功"""
+        from app.modules.workspace.model import Workspace
+
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+
+        ws = Workspace(
+            id=uuid.uuid4(),
+            name="test-ws",
+            slug="test-ws",
+            root_path="/tmp/test-ws",
+            created_by=uid,
+        )
+        db_session.add(ws)
+        await db_session.flush()
+
+        with patch(
+            "app.modules.daemon.session.service.allowed_workspace_ids",
+            new_callable=AsyncMock,
+            return_value={ws.id},
+        ):
+            svc = DaemonService(db_session)
+            result = await svc.create_session(
+                uid,
+                provider="claude",
+                prompt="test",
+                runtime_id=str(rt.id),
+                workspace_id=str(ws.id),
+            )
+
+        assert result.agent_session is not None
+        session = await db_session.get(AgentSession, result.agent_session.id)
+        assert session is not None
+        assert session.workspace_id == ws.id
+
+    @pytest.mark.asyncio
+    async def test_create_session_workspace_not_in_allowed(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """FR-05/D-001@v1：无权限用户传 workspace_id → 404"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+
+        fake_ws_id = uuid.uuid4()
+
+        with patch(
+            "app.modules.daemon.session.service.allowed_workspace_ids",
+            new_callable=AsyncMock,
+            return_value=set(),
+        ):
+            svc = DaemonService(db_session)
+            with pytest.raises(DaemonSessionWorkspaceNotFound):
+                await svc.create_session(
+                    uid,
+                    provider="claude",
+                    prompt="test",
+                    runtime_id=str(rt.id),
+                    workspace_id=str(fake_ws_id),
+                )
+
+    @pytest.mark.asyncio
+    async def test_create_session_workspace_not_found(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """FR-05：workspace_id 指向不存在的工作区 → 404（同语义不泄露存在性）"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+
+        fake_ws_id = uuid.uuid4()
+
+        with patch(
+            "app.modules.daemon.session.service.allowed_workspace_ids",
+            new_callable=AsyncMock,
+            return_value=set(),
+        ):
+            svc = DaemonService(db_session)
+            with pytest.raises(DaemonSessionWorkspaceNotFound):
+                await svc.create_session(
+                    uid,
+                    provider="claude",
+                    prompt="test",
+                    runtime_id=str(rt.id),
+                    workspace_id=str(fake_ws_id),
+                )
+
+    @pytest.mark.asyncio
+    async def test_create_session_no_workspace_zero_regression(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """FR-04：不传 workspace_id → allowed_workspace_ids 未被调用，session.workspace_id=None"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+
+        with patch(
+            "app.modules.daemon.session.service.allowed_workspace_ids",
+            new_callable=AsyncMock,
+        ) as mock_allowed:
+            svc = DaemonService(db_session)
+            result = await svc.create_session(
+                uid,
+                provider="claude",
+                prompt="test",
+                runtime_id=str(rt.id),
+                # 不传 workspace_id
+            )
+
+        mock_allowed.assert_not_called()
+        session = await db_session.get(AgentSession, result.agent_session.id)
+        assert session is not None
+        assert session.workspace_id is None
 
 
 # ── inject_session ───────────────────────────────────────────────────────────

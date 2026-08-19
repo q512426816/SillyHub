@@ -43,6 +43,10 @@ from app.modules.daemon.protocol import (
 from app.modules.daemon.runtime.service import DaemonRuntimeOffline
 from app.modules.daemon.schema import SessionReopenResponse
 
+# D-001@v1：create_session workspace 归属校验（口径与前端 listWorkspaces 一致）。
+from app.modules.auth.rbac import allowed_workspace_ids
+from app.modules.auth.permissions import Permission
+
 log = get_logger(__name__)
 
 # task-05（2026-08-14-sessions-portal / D-012@v1 / FR-05）：会话内配置热切换 WS
@@ -239,6 +243,13 @@ class DaemonSessionRuntimeNotFound(AppError):
     """runtime_id 指向的 runtime 不存在 / 非本人所有（404，不泄露存在性）。"""
 
     code = "HTTP_404_DAEMON_SESSION_RUNTIME_NOT_FOUND"
+    http_status = 404
+
+
+class DaemonSessionWorkspaceNotFound(AppError):
+    """workspace_id 指向的工作区不存在 / 调用者无 WORKSPACE_READ 权限（404，不泄露存在性）。"""
+
+    code = "HTTP_404_DAEMON_SESSION_WORKSPACE_NOT_FOUND"
     http_status = 404
 
 
@@ -707,6 +718,16 @@ class SessionService:
         # 时 cwd=None 走原逻辑（边界 E4，零回归）。
         cwd: str | None = None
         if workspace_id is not None:
+            # D-001@v1：workspace 归属校验，口径与前端 listWorkspaces 一致。
+            # 无权限与工作区不存在同语义（404），不泄露存在性。
+            _allowed = await allowed_workspace_ids(
+                self._session, user_id=user_id, permission=Permission.WORKSPACE_READ
+            )
+            if workspace_id not in _allowed:
+                raise DaemonSessionWorkspaceNotFound(
+                    f"Workspace '{workspace_id}' not found or you have no access.",
+                    details={"workspace_id": str(workspace_id)},
+                )
             from app.modules.workspace.model import Workspace
 
             _ws = await self._session.get(Workspace, workspace_id)
